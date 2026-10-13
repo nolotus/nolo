@@ -283,4 +283,10 @@ export const dialogPageStyles = stylex.create({
       ":hover": "0 4px 10px -2px var(--primaryGhost)",
     },
   },
+  backgroundWakeHint: {
+    padding: "var(--space-2) var(--space-3)",
+    fontSize: "var(--fontSize-sm)",
+    color: "var(--textSecondary)",
+    textAlign: "center",
+  },
 });

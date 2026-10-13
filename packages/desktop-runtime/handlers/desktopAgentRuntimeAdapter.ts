@@ -889,6 +889,15 @@ export function createDesktopAgentRuntimeAdapter(args: {
   return {
     host: "desktop",
     capabilities: [...new Set([...facts.capabilities, ...(args.capabilities ?? [])])],
+    /**
+     * 已接线的凭据保管库。
+     *
+     * localLoop 用 adapter.credentialBroker 做输入隔离（明文 → `$nolo_cred:`
+     * 引用）与执行边界解包。此前只有 provider 解析那条路拿 broker，这个字段一
+     * 直是空的，隔离路径因此恒不激活——用户粘贴的密钥只会被正则脱敏成不可用的
+     * `[REDACTED:…]` 标记，而不是模型能安全消费的引用。
+     */
+    credentialBroker: createDesktopHostCredentialBroker(),
     loadAgentConfig: (agentRef) => loadDesktopAgentRuntimeAgentConfig({
       actions: args.actions,
       agentRef,

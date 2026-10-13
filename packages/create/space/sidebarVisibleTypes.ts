@@ -1,4 +1,5 @@
 import type { SpaceContent } from "app/types";
+import { extractCustomId } from "core/prefix";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 
 export type SidebarVisibleType =
@@ -187,6 +188,46 @@ export const withExclusiveSidebarVisibleType = (
   return [type];
 };
 
+export type ChildDialogCheckableItem = {
+  id?: string;
+  contentKey?: string;
+  parentDialogId?: string | null;
+};
+
+export const resolveDialogItemId = (
+  item?: ChildDialogCheckableItem | null
+): string => {
+  if (!item) return "";
+  if (typeof item.id === "string" && item.id.trim()) {
+    return item.id.trim();
+  }
+  if (typeof item.contentKey === "string" && item.contentKey.trim()) {
+    const raw = item.contentKey.trim();
+    return raw.startsWith("dialog-") ? extractCustomId(raw) : raw;
+  }
+  return "";
+};
+
+/**
+ * 判定一个 SpaceContent 是否为子对话项。
+ * 必须满足：
+ * 1. parentDialogId 非空
+ * 2. parentDialogId !== 自身记录 id（防 CLI 等历史脏数据自引用把普通对话误当成子对话隐藏/折叠）
+ */
+export function isChildDialogItem(
+  item?: (Partial<SpaceContent> & { id?: string }) | null
+): boolean {
+  if (!item) return false;
+  const parentId =
+    typeof item.parentDialogId === "string" ? item.parentDialogId.trim() : "";
+  if (!parentId) return false;
+  const selfId = resolveDialogItemId(item);
+  if (selfId && parentId === selfId) {
+    return false;
+  }
+  return true;
+}
+
 export const matchesSidebarVisibleType = (
   item: SpaceContent,
   type: SidebarVisibleType
@@ -216,7 +257,8 @@ export const matchesSidebarVisibleType = (
       !item.parentAutomationKey &&
       // 子对话（由 startAgentRun 派发的后台子任务）默认折叠到父对话下，
       // 不在平铺列表里单独显示；通过父行的折叠展开机制访问。
-      !item.parentDialogId
+      // 自引用记录（parentDialogId === 自身 id）按普通对话平铺显示。
+      !isChildDialogItem(item)
     );
   }
   if (type === "file") {

@@ -126,7 +126,6 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
               contentKey={item.contentKey}
               type={item.type}
               title={item.title || t("unnamed")}
-              fileCategory={item.fileCategory ?? null}
               categoryId={item.categoryId ?? undefined}
               spaceIdOverride={itemSpaceId}
               sourceServerOrigin={item.serverOrigin}
@@ -159,6 +158,18 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
               onSelectItem={isSelectionMode ? onToggleSelectKey : undefined}
               editSignal={editSignal?.key === item.contentKey ? editSignal.nonce : undefined}
               pinned={blockId === "favorites" ? false : Boolean(item.pinned)}
+              pinAction={{
+                pinned: Boolean(item.pinned),
+                onToggle: () =>
+                  (dispatch as any)(
+                    (updateContentPinned as any)({
+                      spaceId: itemSpaceId,
+                      contentKey: item.contentKey,
+                      pinned: !item.pinned,
+                      sourceServerOrigin: item.serverOrigin,
+                    })
+                  ),
+              }}
             />
           );
         })}
@@ -183,18 +194,7 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
             showDownloadAction={
               activeItem.type === "file" || activeItem.type === "image"
             }
-            pinAction={{
-              pinned: Boolean(activeItem.pinned),
-              onToggle: () =>
-                (dispatch as any)(
-                  (updateContentPinned as any)({
-                    spaceId: activeItemSpaceId,
-                    contentKey: activeItem.contentKey,
-                    pinned: !activeItem.pinned,
-                    sourceServerOrigin: activeItem.serverOrigin,
-                  })
-                ),
-            }}
+            fileCategory={activeItem.fileCategory ?? null}
             menuAnchorEl={menuAnchorEl}
             onEditTitle={() => {
               setEditSignal({ key: activeItem.contentKey, nonce: Date.now() });

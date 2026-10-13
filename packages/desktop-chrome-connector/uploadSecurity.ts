@@ -3,9 +3,11 @@ import {
   DEFAULT_MAX_FILES,
   UploadSecurityError,
   createUploadSecurityError,
+  ensureDefaultUploadRoot,
   formatUploadAuditLog,
   logUploadAudit,
-  parseAllowedRoots,
+  resolveDefaultUploadRoot,
+  resolveUploadRoots,
   validateUploadFiles,
 } from "./uploadSecurity.mjs";
 
@@ -14,9 +16,11 @@ export {
   DEFAULT_MAX_FILES,
   UploadSecurityError,
   createUploadSecurityError,
+  ensureDefaultUploadRoot,
   formatUploadAuditLog,
   logUploadAudit,
-  parseAllowedRoots,
+  resolveDefaultUploadRoot,
+  resolveUploadRoots,
   validateUploadFiles,
 };
 

@@ -22,6 +22,17 @@ export const askChoicePanelStyles = stylex.create({
       borderRadius: 12,
     },
   },
+  wrapInline: {
+    maxWidth: "100%",
+    marginTop: 4,
+    marginBottom: 4,
+    marginLeft: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: 0,
+    backgroundColor: "transparent",
+    boxShadow: "none",
+  },
   deleteButton: {
     position: "absolute",
     top: 8,

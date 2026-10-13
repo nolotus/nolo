@@ -220,7 +220,7 @@ export function formatStreamTruncatedReasoningTail(
 
 /**
  * 截断类 fallback 成因 → reasoning 尾部日志。server loop 与 CLI localLoop 的
- * fallback 分支统一经此取尾部，保证两侧落盘机制一致；非截断成因返回 null。
+ * fallback 分支统一经此取尾部，保证两侧落盘机制一致；其它成因返回 null。
  */
 export function resolveTruncatedReasoningTailLog(
   reason: EmptyAssistantFallbackReason | undefined,

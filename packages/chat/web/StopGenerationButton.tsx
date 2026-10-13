@@ -1,28 +1,21 @@
 import * as stylex from "@stylexjs/stylex";
 import { messageInputStyles } from "./messageInputStyles";
 import "./chatStylexEscapeHatch.css";
-import React, { memo, useCallback } from "react";
+import React, { memo } from "react";
 import { LuSquare } from "react-icons/lu";
-import { useAppDispatch } from "app/store";
-import {
-  abortAllMessages,
-  useActiveControllers,
-} from "chat/dialog/dialogSlice";
+import { useActiveControllers } from "chat/dialog/dialogSlice";
+import { useStopCurrentForegroundTurn } from "./useStopCurrentForegroundTurn";
 
 const StopGenerationButtonComponent: React.FC = () => {
-  const dispatch = useAppDispatch();
   const activeControllers = useActiveControllers();
   const isGenerating = Object.keys(activeControllers).length > 0;
-
-  const handleStop = useCallback(() => {
-    dispatch(abortAllMessages());
-  }, [dispatch]);
+  const stopCurrentForegroundTurn = useStopCurrentForegroundTurn();
 
   if (!isGenerating) return null;
 
   return (
     <button
-      onClick={handleStop}
+      onClick={stopCurrentForegroundTurn}
       type="button"
       {...stylex.props(messageInputStyles.stopGenerationBtn)}
     >

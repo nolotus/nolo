@@ -27,6 +27,10 @@ import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
 import {
+  projectToolExecutionLocation,
+  type ToolExecutionLocation,
+} from "agent-runtime/ownerOriginExecution";
+import {
   buildFallbackActivity,
   extractToolCallArgs,
   formatReadFileArgsLineRange,
@@ -117,6 +121,14 @@ export interface ToolCallPresentation {
   /** Extra structured facts (diff added/removed) when the message really carries them. */
   meta?: ToolCallMeta;
   mode: ToolCallMode;
+  /**
+   * Server-projected actual tool execution location (F1), already passed through
+   * `projectToolExecutionLocation`. `{status:"unknown"}` whenever the server did
+   * not attach `metadata.executionLocation` (old server) or the field failed
+   * allowlist validation — the renderer must show "未知"/unknown, never guess or
+   * leave blank. Distinct from the dialog's *intended* runtimeBinding.target.
+   */
+  executionLocation: ToolExecutionLocation;
   /** Ordinary rows expand inline; card/handoff/interactive modes do not. */
   expandable: boolean;
 
@@ -180,7 +192,6 @@ const TOOL_VERBS: Record<string, string> = {
   releasePreview: "释放预览",
   captureVisualState: "截图检查",
   appDeploy: "部署应用",
-  setTodoList: "更新计划",
   // Not ordinary rows, but the model classifies them without leaking raw names.
   ask_user: "提问",
   runStreamingAgent: "转交",
@@ -240,7 +251,6 @@ const ARTIFACT_MODE_TOOLS = new Set([
   "ziweiChart",
   "read_x_post",
   "createTable",
-  "setTodoList",
 ]);
 
 const INTERACTIVE_MODE_TOOLS = new Set(["ask_user"]);
@@ -595,6 +605,7 @@ export function toolCallKey(message: ToolCallMessageInput | undefined | null): s
 
 export function resolveToolCallMode(toolName: string | undefined): ToolCallMode {
   const normalized = normalizeToolNameKey(toolName);
+  if (normalized === "show_interaction") return "artifact";
   if (INTERACTIVE_MODE_TOOLS.has(normalized)) return "interactive";
   if (HANDOFF_MODE_TOOLS.has(normalized)) return "handoff";
   if (ARTIFACT_MODE_TOOLS.has(normalized)) return "artifact";
@@ -632,6 +643,13 @@ export function buildToolCallPresentation(
       : undefined;
   const meta = buildToolCallMeta(contentRecord);
   const mode = resolveToolCallMode(toolName);
+  // F1: server attaches the actual execution host under metadata.executionLocation.
+  // Pass it through the allowlist projector — a missing/foreign/partial field
+  // (old server, hand-built payload) degrades to {status:"unknown"}, and the row
+  // renders "未知" rather than guessing or dropping the line.
+  const executionLocation = projectToolExecutionLocation(
+    isRecord(message?.metadata) ? message.metadata.executionLocation : undefined,
+  );
   const label =
     activity?.title ||
     resolveToolDisplayName(toolName || undefined, translate);
@@ -652,6 +670,7 @@ export function buildToolCallPresentation(
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(meta ? { meta } : {}),
     mode,
+    executionLocation,
     expandable: mode === "row",
     // Compat aliases.
     label,
@@ -713,4 +732,52 @@ export function formatToolGroupStatusSummary(
     );
   }
   return parts.join(" · ");
+}
+
+/**
+ * Human line for one tool call's ACTUAL execution host (F1). The contract
+ * input is the already-projected `ToolExecutionLocation`, but the row mounts
+ * presentations from outside this module (tests, partial stubs, older cached
+ * payloads), so a missing/malformed `executionLocation` reaches here at
+ * runtime. Re-project through the same allowlist projector instead of
+ * dereferencing `location.status` directly: undefined / null / non-object /
+ * partial shapes all degrade to `{status:"unknown"}` → the localized "未知"
+ * fallback — never a TypeError, never blank, never an invented host.
+ *
+ * Shape (zh fallback): `在 {deviceName}({deviceId}) · {workspace.root} 执行`
+ * i18n keys (chat locale may override):
+ * - toolExecLocation.line    "在 {{device}} · {{root}} 执行"
+ * - toolExecLocation.unknown "执行位置未知"
+ */
+export function formatToolExecutionLocationLine(
+  location: ToolExecutionLocation,
+  translate?: ToolCallTranslate
+): string {
+  // Resolve a translation, but treat an echoed-back key (or empty) as a miss:
+  // minimal t() test doubles return the raw key, and a miss must never render
+  // "toolExecLocation.unknown" to the user — fall back to the zh default.
+  const resolve = (key: string, fallback: string): string => {
+    if (!translate) return fallback;
+    try {
+      const value = translate(key, fallback);
+      return typeof value === "string" && value.trim() && value !== key
+        ? value
+        : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  // Undefined / null / non-record / partial shapes → { status: "unknown" }.
+  const projected = projectToolExecutionLocation(location);
+  if (projected.status === "unknown") {
+    return resolve("toolExecLocation.unknown", "执行位置未知");
+  }
+  const device = `${projected.deviceName}(${projected.deviceId})`;
+  const template = resolve(
+    "toolExecLocation.line",
+    "在 {{device}} · {{root}} 执行"
+  );
+  return template
+    .replace("{{device}}", device)
+    .replace("{{root}}", projected.workspace.root);
 }

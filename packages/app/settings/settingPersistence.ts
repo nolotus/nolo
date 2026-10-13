@@ -195,6 +195,7 @@ export const stripRegisterBackedFieldsFromSettingsWrite = (
   changes: Partial<SettingState>,
 ): Partial<SettingState> => {
   return omitKeys(changes, [
+    "autoApproveCredits",
     "defaultSpaceId",
     "userAuthorityRegistry",
     ...LOCAL_APPEARANCE_KEY_NAMES,
@@ -214,6 +215,7 @@ export const sanitizeStoredSettingsRecord = (
 
   const record = settingsRecord as Record<string, unknown>;
   const sanitizedSettings = omitKeys(record, [
+    "autoApproveCredits",
     "defaultSpaceId",
     "schemaVersion",
     ...LOCAL_APPEARANCE_KEY_NAMES,
@@ -248,6 +250,10 @@ export const hydrateStoredSettings = ({
   const userAuthorityRegistryIsEmpty = Object.keys(userAuthorityRegistry).length === 0;
   const hydratedSettings = {
     ...baseSettings,
+    // 服务端独占字段：只读回显（缺失时沿用初始值 0，非法值按 0）
+    ...(hasOwn(record, "autoApproveCredits")
+      ? { autoApproveCredits: typeof record.autoApproveCredits === "number" && Number.isFinite(record.autoApproveCredits) && record.autoApproveCredits >= 0 ? record.autoApproveCredits : 0 }
+      : {}),
     ...(userAuthorityRegistryIsEmpty ? {} : { userAuthorityRegistry }),
     defaultAgentId: resolvedDefaultAgentId,
   };

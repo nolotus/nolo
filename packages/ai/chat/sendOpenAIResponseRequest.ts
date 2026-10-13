@@ -461,6 +461,7 @@ export const sendOpenAIResponseRequest = async ({
         const toolMessage: Message = {
           id: runningToolMessageId,
           dbKey: runningToolDbKey,
+          dialogId,
           role: "tool",
           content: selfHealContent,
           toolCallId: callId,

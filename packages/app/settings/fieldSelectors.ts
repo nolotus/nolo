@@ -18,6 +18,7 @@ import {
   normalizeAgentUpdateFieldList,
 } from "ai/policy/selfUpdateFields";
 import { parsePositiveFiniteNumberOrFallback } from "core/positiveFiniteNumberOrFallback";
+import { MEDIA_ALLOWANCE_MAX } from "./mediaAllowanceClient";
 
 import {
   normalizePolicyLevelSetting,
@@ -42,6 +43,17 @@ export const selectMaxCost = (state: RootState): number =>
 
 export const selectMaxExecutionTime = (state: RootState): number =>
   state.settings.maxExecutionTime;
+
+/**
+ * 媒体自动执行额度（积分）。服务端独占字段：本地值来自 settings hydrate，
+ * 写入只能走 /api/user-settings/media-allowance（见 mediaAllowanceClient）。
+ * 非法值按 0（=每次都问）显示，越界的历史值按上限显示（与服务端读取口径一致）。
+ */
+export const selectAutoApproveCredits = (state: RootState): number => {
+  const value = state.settings.autoApproveCredits;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return 0;
+  return Math.min(value, MEDIA_ALLOWANCE_MAX);
+};
 
 export const selectIsDark = (state: RootState): boolean =>
   state.settings.isDark;
