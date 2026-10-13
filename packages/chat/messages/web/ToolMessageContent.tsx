@@ -35,7 +35,8 @@ import CreateAgentToolCard from "./CreateAgentToolCard";
 import PrepareAgentDraftToolCard from "./PrepareAgentDraftToolCard";
 import UpdateAgentToolCard from "./UpdateAgentToolCard";
 import AppDeployCard from "./AppDeployCard";
-import TodoCard from "./TodoCard";
+import MediaJobToolCard from "./MediaJobToolCard";
+import MediaStepCard from "./MediaStepCard";
 import ApplyLineEditsPreviewViewer from "./ApplyLineEditsPreviewViewer";
 import { DiffViewer } from "./DiffViewer";
 import { ToolProps, guessLanguageFromPath } from "./ToolMessageTypes";
@@ -1615,6 +1616,8 @@ function extractLoadSkillBody(content: string): string {
 
 /* --- Renderer Registry --- */
 
+// 内部注册表，不对外导出：外部（含测试）统一走下面的 `toolRenderers` 别名，
+// 避免同一对象出现两个公开导出面。
 const RENDERERS: Record<string, React.FC<ToolProps>> = {
   createPage: ({ rawData, t, openPreview, navigateToPage }) => {
     const title =
@@ -1763,6 +1766,11 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
   openAIGptImageEdit: (props) => <GeminiGallery {...props} />,
   remotionRenderVideo: (props) => <RemotionVideoCard {...props} />,
   ziweiChart: (props) => <ZiweiChartCard {...props} />,
+  mediaJobTool: (props) => <MediaJobToolCard {...props} />,
+  transcribe: (props) => <MediaStepCard toolName="transcribe" {...props} />,
+  translate: (props) => <MediaStepCard toolName="translate" {...props} />,
+  exportDocument: (props) => <MediaStepCard toolName="exportDocument" {...props} />,
+  readArtifact: (props) => <MediaStepCard toolName="readArtifact" {...props} />,
   read_x_post: (props) => <ReadXPostCard {...props} />,
   read_xhs_profile: (props) => <ReadXhsProfileCard {...props} />,
   deleteSpaces: (props) => <DeleteSpacesCard {...props} />,
@@ -1853,8 +1861,9 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
   execShell: (props) => <ExecShellViewer {...props} />,
   fetchWebpage: (props) => <FetchViewer {...props} />,
   fetch_webpage: (props) => <FetchViewer {...props} />,
-  setTodoList: (props) => <TodoCard {...props} />,
 };
+
+export const toolRenderers = RENDERERS;
 
 type ToolName = keyof typeof RENDERERS;
 
@@ -1886,15 +1895,12 @@ const LazyJsonDump: React.FC<{ data: unknown }> = ({ data }) => {
 };
 
 const ToolMessageContent: React.FC<ToolMessageContentProps> = (props) => {
-  const conversationTodoEnabled = props.conversationTodoEnabled !== false;
   const Component = props.toolName ? RENDERERS[props.toolName] : null;
   // Only normalize once; skip JSON.stringify when a specialized renderer exists.
   const normalizedRawData = useMemo(
     () => parseToolRawData(props.rawData),
     [props.rawData]
   );
-
-  if (props.toolName === "setTodoList" && !conversationTodoEnabled) return null;
 
   return (
     <div  {...withLiteralClass("t-content-root", contentStyles.contentRoot)}>

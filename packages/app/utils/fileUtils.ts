@@ -185,21 +185,33 @@ export const isImageFile = (value: unknown): value is File =>
 export const filterImageFiles = (values: Iterable<unknown>): File[] =>
   Array.from(values).filter(isImageFile);
 
-/**
- * 按是否为图片拆分文件数组:
- * - 第 0 个数组是图片
- * - 第 1 个数组是非图片
- */
-export function splitFiles(files: File[]): [File[], File[]] {
-    return files.reduce(
-        (acc, file) => {
-            const index = isImageFile(file) ? 0 : 1;
-            acc[index].push(file);
-            return acc;
-        },
-        [[], []] as [File[], File[]]
-    );
+/** Split attachments into image, audio/video media, and document lanes. */
+export function splitFiles(files: File[]): [File[], File[], File[]] {
+  return files.reduce(
+    (acc, file) => {
+      if (isImageFile(file)) acc[0].push(file)
+      else if (isMediaFile(file)) acc[1].push(file)
+      else acc[2].push(file)
+      return acc
+    },
+    [[], [], []] as [File[], File[], File[]],
+  )
 }
+
+const MEDIA_EXTENSION_RE = /\.(aac|avi|flac|m4a|m4v|mkv|mov|mp3|mp4|mpeg|mpg|ogg|wav|weba|webm)$/i
+
+export const isMediaFile = (file: File): boolean =>
+  file.type.toLowerCase().startsWith("audio/") ||
+  file.type.toLowerCase().startsWith("video/") ||
+  MEDIA_EXTENSION_RE.test(file.name.trim())
+
+export const isMediaMimeType = (value: unknown): value is string =>
+  typeof value === "string" && /^(audio|video)\//i.test(value)
+
+export const MAX_MEDIA_FILE_SIZE = 120 * 1024 * 1024
+
+export const isMediaFileWithinLimit = (file: File): boolean =>
+  file.size <= MAX_MEDIA_FILE_SIZE
 
 /**
  * 从 DataTransfer 中安全提取文件列表

@@ -13,7 +13,8 @@ export const getNoloKey = (
     | "ollama-cloud"
     | "runinfra"
     | "baseten"
-    | "mimo",
+    | "mimo"
+    | "cloudflare",
   env: Record<string, string | undefined> = process.env
 ) => {
   switch (provider) {
@@ -56,7 +57,7 @@ export const getNoloKey = (
     // （platformProviderEndpoints.ts），key 侧现在与之对齐：宁可没有 key，
     // 也不要一把打不开正确的门、却能被送出去的钥匙。
     case "cloudflare":
-      return process.env.CLOUDFLARE_API_TOKEN;
+      return env.CLOUDFLARE_API_TOKEN;
     case "gmi":
       return process.env.GMI_API_KEY;
 

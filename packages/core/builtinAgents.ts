@@ -39,7 +39,25 @@ export const BUILTIN_PLATFORM_AGENT_KEYS = builtinPlatformEntries().map(
   (e) => publicAgentKey(e.id),
 );
 
-const BUILTIN_PLATFORM_AGENT_KEY_SET = new Set<string>(BUILTIN_PLATFORM_AGENT_KEYS);
+// Catalog ids are ULID-like and contain no hyphens; exact final-segment matching keeps key prefixes irrelevant.
+const BUILTIN_PLATFORM_AGENT_ID_SET = new Set(
+  builtinPlatformEntries().map((e) => e.id),
+);
+if (builtinPlatformEntries().some((e) => e.id.includes("-"))) {
+  throw new Error("builtin platform agent ids must not contain hyphens");
+}
+
+/** Platform identity is determined by the catalog id, not the key's owner/prefix form. */
+export const parseBuiltinPlatformAgentId = (
+  key: string | undefined | null,
+): string | null => {
+  if (typeof key !== "string") return null;
+  if (key !== key.slice(key.lastIndexOf("-") + 1) && !key.startsWith("agent-")) {
+    return null;
+  }
+  const id = key.slice(key.lastIndexOf("-") + 1);
+  return BUILTIN_PLATFORM_AGENT_ID_SET.has(id) ? id : null;
+};
 
 /**
  * Public quick-chat / image tier agents（来自 catalog 的 public 组）。
@@ -66,16 +84,12 @@ export const PUBLIC_NANO_BANANA_2_LITE_AGENT_KEY = publicAgentKey(PUBLIC_NANO_BA
  * Quick-chat 档位 agent：执行真相在代码里（agent-runtime/builtinPlatformAgentConfigs），
  * 对应的 agent-pub-* 记录按设计可以不存在（runtime fallback 合成配置）。
  *
- * 刻意不含内置 nolo：它有路由人格 prompt，记录缺失时宁可 404 也不降级成裸模型
- * （见 agentLookup.test.ts 的 "does not extend the code-owned fallback to
- * prompt-bearing builtin agents"）。
- *
- * 已知缺口：nolo 现在是各端默认档，于是「没有 seed 记录的环境」（自建 server、
- * 全新 dev LevelDB）里首页发消息会拿到 404，而默认档指向广场档时不会——这条
- * 路径此前有兜底。要不要为默认档破例（能用但没人格 vs 明确失败）是产品取舍，
- * 未决，不在此单方面改。
+ * 内置 nolo 纳入平台兜底：作为各端默认入口，未 seed 数据库的环境（自建 server、
+ * 全新 dev LevelDB）下直接合成代码级配置，保证可用性，绝不报 404 挂掉对话；
+ * 线上或已有 seed 记录的环境依然以数据库/远端记录为准。
  */
 export const PLATFORM_TIER_AGENT_KEYS = [
+  BUILTIN_NOLO_AGENT_KEY,
   PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY,
   PUBLIC_KIMI_K26_IMAGE_AGENT_KEY,
 ] as const;
@@ -107,6 +121,7 @@ export const isSystemBuiltinTrustedAgentKey = (
 ): boolean =>
   typeof key === "string" && SYSTEM_BUILTIN_TRUSTED_AGENT_KEY_SET.has(key);
 
+/** Compatibility name: key form is immaterial; the final catalog id defines identity. */
 export const isBuiltinPlatformAgentKey = (key: string | undefined | null): boolean =>
-  typeof key === "string" && BUILTIN_PLATFORM_AGENT_KEY_SET.has(key);
+  parseBuiltinPlatformAgentId(key) !== null;
 

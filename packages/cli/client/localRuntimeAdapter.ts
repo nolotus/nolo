@@ -4,6 +4,7 @@ import type {
   AgentRuntimeSaveTurnInput,
 } from "../agentRuntimeLocal";
 import { resolveLocalProvider } from "./providerResolution/resolveLocalProvider";
+import type { ProviderResolutionContext } from "./providerResolution/providerResolutionContext";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -224,6 +225,16 @@ import {
 } from "../agentRuntimeLocal";
 import { fetchAntigravityCloudCodeCompletion } from "../../agent-runtime/antigravityCloudCodeProvider";
 import { isAntigravityOAuthAgent } from "../../agent-runtime/antigravityOAuth";
+import { isOAuthApiKeyRef } from "../../agent-runtime/serverProxyPolicy";
+import {
+  OWNER_ORIGIN_EXECUTION_VERSION,
+  projectToolExecutionLocation,
+  type OwnerOriginExecution,
+} from "../../agent-runtime/ownerOriginExecution";
+import {
+  extractShellCommandPreview,
+  requiresShellSessionGrant,
+} from "./originShellGrant";
 import {
   accumulateGeminiChunks,
   buildGeminiGenerateContentRequest,
@@ -268,7 +279,8 @@ import {
 } from "./localDialogRecords";
 import { buildLocalAgentLookupKeys } from "./localAgentRecords";
 import { createCliHybridRecordStore } from "./hybridRecordStore";
-import { executeLocalToolWithPolicy } from "./localToolPolicy";
+import { executeLocalToolWithPolicy, resolveLocalToolPolicy } from "./localToolPolicy";
+import { normalizeLocalToolName } from "../../agent-runtime/localToolPolicy";
 import { getAgentRuntimeToolParametersIndex } from "../agentRuntimeLocal";
 import { inferCaptureIntent } from "../../ai/policy/runtimePolicy";
 import {
@@ -505,9 +517,48 @@ export async function recordLocalAvailabilityForAgent(args: {
   return effectiveNextAvailableAt;
 }
 
+/**
+ * 会话级自动压缩摘要 fallback。
+ *
+ * 自动上下文压缩（localLoop → createTurnCompactionController）的主通道是 agent
+ * 自己的 provider；它慢/失败时过去只报一次 failure 然后等下一轮（实测反复 60s
+ * 超时且无进展）。这里把**已有的**平台摘要通道（CLI 入口用
+ * createTuiSummaryLlmCaller 建的实例）以会话级单例形式交给本地 adapter，
+ * 由 localLoop 读走并作为「最多一次」的 fallback。
+ *
+ * 放模块级而不是 deps：deps 类型在 localRuntimeDiagnostics（本次改动范围外），
+ * 且一个 CLI 进程只有一条平台摘要通道，会话级单例正是需要的语义。未注入
+ * （desktop、未登录、headless）→ adapter 不带该字段 → 不 fallback，行为与今天
+ * 完全一致。
+ */
+let cliAutoCompactionSummaryFallback:
+  | ((content: string) => Promise<string | null>)
+  | undefined;
+
+/** CLI 入口在启动 TUI 时注入平台摘要 caller（与 /compact 复用同一条通道）。 */
+export function setCliAutoCompactionSummaryFallback(
+  caller: ((content: string) => Promise<string | null>) | undefined,
+): void {
+  cliAutoCompactionSummaryFallback = caller;
+}
+
+/** 当前会话注入的摘要 fallback（未注入 → undefined）。 */
+export function getCliAutoCompactionSummaryFallback():
+  | ((content: string) => Promise<string | null>)
+  | undefined {
+  return cliAutoCompactionSummaryFallback;
+}
+
 export function createCliLocalRuntimeAdapter(
   deps: CliLocalRuntimeAdapterDeps,
 ): AgentRuntimeHostAdapter & {
+  /**
+   * 自动上下文压缩的摘要 fallback（CLI 专有，非 AgentRuntimeHostAdapter 接口
+   * 成员）。localLoop 在主通道超时/失败时最多调用一次；形状与 CLI 的
+   * SummaryLlmCaller 一致。未注入 → undefined（见
+   * setCliAutoCompactionSummaryFallback）。
+   */
+  compactionSummaryFallback?: (content: string) => Promise<string | null>;
   /**
    * 启动期 429 冷却兜底落盘入口（CLI 本地 adapter 专有，非
    * AgentRuntimeHostAdapter 接口成员）。agentRun.ts 在 classifyLocalRunError
@@ -574,37 +625,59 @@ export function createCliLocalRuntimeAdapter(
     }
   };
   let activeAgentToolNames: string[] = [];
+  /**
+   * owner-required 会话上下文（块 D）：resolveProviderBase 判定本机用户 ≠
+   * credential owner 时写入（agentName/ownerUserId/deviceId/deviceName）。
+   * executeTool 在 shellGrant 确认请求里原样引用——同一份 owner 身份不在
+   * 两条路径上重复推导（rawRecord 读取规则只此一处）。
+   */
+  let ownerAgentContext:
+    | {
+        agentName: string;
+        agentKey: string;
+        ownerUserId: string;
+        deviceId: string;
+        deviceName?: string;
+      }
+    | undefined;
   const workspaceRoot = deps.cwd ?? process.cwd();
   let runtimeToolExecutionLimits: ReturnType<
     typeof resolveLocalWorkspaceExecutorOptionsFromPolicy
   > = {};
-  let localToolExecutors: Record<
-    string,
-    (
-      call: any,
-    ) => Promise<{ content: string; metadata?: Record<string, unknown> }>
-  > = buildLocalToolExecutors({
-    workspaceRoot,
-    env: deps.env,
-    fetchImpl,
-    ...(deps.chromeConnectorClient
-      ? { chromeConnectorClient: deps.chromeConnectorClient }
-      : {}),
-    localToolExecutors: deps.localToolExecutors,
-    readXPost: deps.readXPost,
-    readXhsProfile: deps.readXhsProfile,
-    cliEntrypoint: CLI_ENTRYPOINT,
-    resolveAgentCredentialGroup,
-    ...(deps.confirmDestructiveAction
-      ? { confirmDestructiveAction: deps.confirmDestructiveAction }
-      : {}),
-    ...(deps.requestUserChoice
-      ? { requestUserChoice: deps.requestUserChoice }
-      : {}),
-    ...(deps.pastedTextStore
-      ? { pastedTextStore: deps.pastedTextStore }
-      : {}),
-    ...runtimeToolExecutionLimits,
+  // Executor closures belong to this adapter; only prepared metadata is shared.
+  const buildCurrentToolExecutors = (agentKey?: string | null) =>
+    buildLocalToolExecutors({
+      workspaceRoot,
+      env: deps.env,
+      fetchImpl,
+      ...(deps.chromeConnectorClient
+        ? { chromeConnectorClient: deps.chromeConnectorClient }
+        : {}),
+      localToolExecutors: deps.localToolExecutors,
+      readXPost: deps.readXPost,
+      readXhsProfile: deps.readXhsProfile,
+      cliEntrypoint: CLI_ENTRYPOINT,
+      resolveAgentCredentialGroup,
+      ...(deps.confirmDestructiveAction
+        ? { confirmDestructiveAction: deps.confirmDestructiveAction }
+        : {}),
+      ...(deps.requestUserChoice
+        ? { requestUserChoice: deps.requestUserChoice }
+        : {}),
+      ...(deps.pastedTextStore
+        ? { pastedTextStore: deps.pastedTextStore }
+        : {}),
+      agentKey,
+      ...runtimeToolExecutionLimits,
+    });
+  let localToolExecutors = buildCurrentToolExecutors();
+
+  // 凭据保管库：同一个实例既供 provider 解析密钥，也暴露给 localLoop 做输入隔离
+  // 与执行边界解包（adapter.credentialBroker）。此前只有 provider 那条路建 broker，
+  // adapter 上没有这个字段 → 隔离路径恒不激活，用户粘贴的密钥只会被正则脱敏成
+  // 不可用的 [REDACTED:…] 标记，而不是模型能安全消费的引用。
+  const credentialBroker = createFileCredentialBroker({
+    migration: { enableLegacyMigration: true },
   });
 
   const adapterBase = {
@@ -615,6 +688,7 @@ export function createCliLocalRuntimeAdapter(
       "leveldb-persistence",
       "local-tools",
     ],
+    credentialBroker,
     loadAgentConfig: async (agentRef) => {
       // Read the global skill settings before checking the prepared-runtime cache.
       // Otherwise a setting change would keep reusing the old tool surface.
@@ -640,16 +714,15 @@ export function createCliLocalRuntimeAdapter(
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
       });
-      // Paste executors close over the current TUI store. A prepared runtime
-      // cache hit would otherwise reuse an executor bound to an older paste
-      // store, so paste-aware runs are intentionally per-turn.
+      // Paste availability changes the prepared tool surface, so paste-aware
+      // runs remain isolated from the shared metadata cache.
       const cached = deps.pastedTextStore
         ? undefined
         : preparedAgentRuntimeCache.get(cacheKey);
       if (cached) {
         activeAgentToolNames = cached.activeAgentToolNames;
         runtimeToolExecutionLimits = cached.runtimeToolExecutionLimits;
-        localToolExecutors = cached.localToolExecutors;
+        localToolExecutors = buildCurrentToolExecutors(cached.agentConfig.key);
         return cached.agentConfig;
       }
 
@@ -696,30 +769,7 @@ export function createCliLocalRuntimeAdapter(
         resolveLocalWorkspaceExecutorOptionsFromPolicy(
           resolveCurrentRunRuntimeToolPolicy(agentConfig),
         );
-      localToolExecutors = buildLocalToolExecutors({
-        workspaceRoot,
-        env: deps.env,
-        fetchImpl,
-        ...(deps.chromeConnectorClient
-          ? { chromeConnectorClient: deps.chromeConnectorClient }
-          : {}),
-        localToolExecutors: deps.localToolExecutors,
-        readXPost: deps.readXPost,
-        readXhsProfile: deps.readXhsProfile,
-        cliEntrypoint: CLI_ENTRYPOINT,
-        resolveAgentCredentialGroup,
-        ...(deps.confirmDestructiveAction
-          ? { confirmDestructiveAction: deps.confirmDestructiveAction }
-          : {}),
-        ...(deps.requestUserChoice
-          ? { requestUserChoice: deps.requestUserChoice }
-          : {}),
-        ...(deps.pastedTextStore
-          ? { pastedTextStore: deps.pastedTextStore }
-          : {}),
-        agentKey: agentConfig?.key,
-        ...runtimeToolExecutionLimits,
-      });
+      localToolExecutors = buildCurrentToolExecutors(agentConfig?.key);
       // Report the post-filter tool list so runtime guidance describes what the
       // model can actually call. The CLI drops declared names it has no
       // executor for (read/createDoc/...), and prompt blocks keyed off the
@@ -745,7 +795,6 @@ export function createCliLocalRuntimeAdapter(
           agentConfig: exposedAgentConfig,
           activeAgentToolNames,
           runtimeToolExecutionLimits,
-          localToolExecutors,
         });
       }
       return exposedAgentConfig;
@@ -801,16 +850,176 @@ export function createCliLocalRuntimeAdapter(
           apiKeyRefResolver: createOAuthApiKeyRefResolver({
             migration: { enableLegacyMigration: true },
           }),
-          credentialBroker: createFileCredentialBroker({
-            migration: { enableLegacyMigration: true },
-          }),
+          credentialBroker,
           loopbackRequest,
         }),
       }),
     resolveProviderBase: async (agentConfig) => {
+      const nowMs = now();
+      const serverUrl = asOptionalTrimmedString(deps.env.NOLO_SERVER) ?? "https://us.nolo.chat";
+      const authToken = asOptionalTrimmedString(deps.env.AUTH_TOKEN);
+      // owner-required 派发契约：分享者 OAuth agent（本机用户 ≠ credential
+      // owner）走服务端 owner-required 代理，模型烧 owner 订阅、工具留在本机。
+      // 构造条件与 agentRun.resolveOAuthChannelOwnerSkip 同源（apiKeyRef 是
+      // OAuth 引用 / antigravity OAuth agent，且 rawRecord.userId ≠ 本机 userId）。
+      // 不满足任一条件即 undefined → 所有既有 transport 逐字不变。
+      //
+      // 判定必须在**任何本机 credential availability 读/写之前**完成：分享者
+      // agent 的 apiKeyRef（如 "claude"）与发起者自己的 agent 共用同一 credential
+      // key，若先做冷却门控，发起者该凭据的冷却会阻断 owner dispatch（owner
+      // 订阅健康也被拦），probe 还会写发起者 lastProbeAt 污染本机状态。
+      let ownerOriginExecution: OwnerOriginExecution | undefined;
+      {
+        const rawRecord =
+          (agentConfig as { rawRecord?: Record<string, unknown> }).rawRecord ?? {};
+        const ownerUserId =
+          asOptionalTrimmedString(rawRecord.userId) ??
+          asOptionalTrimmedString(rawRecord.ownerUserId);
+        const apiKeyRef =
+          typeof agentConfig.apiKeyRef === "string" ? agentConfig.apiKeyRef : undefined;
+        const isOAuthChannel =
+          Boolean(apiKeyRef && isOAuthApiKeyRef(apiKeyRef)) ||
+          isAntigravityOAuthAgent(agentConfig);
+        if (ownerUserId && ownerUserId !== userId && isOAuthChannel) {
+          try {
+            const { detectMachineInfo } = await import(
+              "connector-experimental/machineInfo"
+            );
+            const machine = await detectMachineInfo({ probeLaunchable: false });
+            const machineId = asOptionalTrimmedString(machine?.machineId);
+            if (!machineId) {
+              // 当前设备不可用 → 明确失败，不静默转其他机器/服务端工作区。
+              throw Object.assign(
+                new Error(
+                  "owner-required route unavailable: cannot resolve this device's machineId; " +
+                    "the origin host must be the device that runs local tools",
+                ),
+                { code: "origin_unavailable" },
+              );
+            }
+            ownerAgentContext = {
+              agentName:
+                asOptionalTrimmedString(
+                  (agentConfig as { name?: unknown }).name,
+                ) ?? agentConfig.key,
+              agentKey: agentConfig.key,
+              ownerUserId,
+              deviceId: machineId,
+              ...(asOptionalTrimmedString((machine as { name?: unknown }).name)
+                ? {
+                    deviceName: asOptionalTrimmedString(
+                      (machine as { name?: unknown }).name,
+                    )!,
+                  }
+                : {}),
+            };
+            ownerOriginExecution = {
+              version: OWNER_ORIGIN_EXECUTION_VERSION,
+              controller: "origin_local",
+              origin: {
+                machineId,
+                identitySource: "machine",
+                // 会话身份：优先取 TUI 显式注入的 originSession.sessionId（跨轮
+                // 稳定、与 dialogId 生命周期一致）；非 TUI 调用方回退
+                // parentDialogId → ephemeral id。workspaceId 同理优先取
+                // originSession.workspaceId，缺省仍由 workspaceRoot 派生。
+                sessionId:
+                  deps.originSession?.sessionId ??
+                  deps.parentDialogId ??
+                  `session-${createId()}`,
+                workspaceId:
+                  deps.originSession?.workspaceId ?? `ws-${workspaceRoot}`,
+                workspaceRoot,
+                cwd: workspaceRoot,
+              },
+              modelRoute: {
+                kind: "server_agent_oauth",
+                agentKey: agentConfig.key,
+                credentialPolicy: "owner_required",
+              },
+            };
+            // 运行位置展示（块 D）：把本机 origin 按共享契约投影成
+            // ToolExecutionLocation 并回调给宿主（TUI 渲染「工具在
+            // <deviceName>(<deviceId>) · <workspaceRoot> 执行 · ready」）。
+            // 宿主缺省时不投影不回调——旧调用方无感知。
+            if (deps.onToolExecutionLocation) {
+              try {
+                deps.onToolExecutionLocation(
+                  projectToolExecutionLocation({
+                    status: "ready",
+                    // 本机是发起设备、工具留在本机跑——对应 machine-connector 契约。
+                    hostType: "machine-connector",
+                    deviceId: machineId,
+                    deviceName: ownerAgentContext.deviceName ?? machineId,
+                    workspace: {
+                      id:
+                        deps.originSession?.workspaceId ??
+                        `ws-${workspaceRoot}`,
+                      root: workspaceRoot,
+                      cwd: workspaceRoot,
+                    },
+                  }),
+                );
+              } catch {
+                // 展示回调失败不影响派发；宿主拿到 unknown 也该继续跑。
+              }
+            }
+          } catch (error) {
+            if (
+              error &&
+              typeof error === "object" &&
+              (error as { code?: unknown }).code === "origin_unavailable"
+            ) {
+              throw error;
+            }
+            // detectMachineInfo 抛错视同不可用。
+            throw Object.assign(
+              new Error(
+                `owner-required route unavailable: ${toErrorMessage(error)}; ` +
+                  "the origin host must be the device that runs local tools",
+              ),
+              { code: "origin_unavailable" },
+            );
+          }
+        }
+      }
+
+      /**
+       * owner-required 时后续 real dispatch 不调用：任何调用都说明 owner
+       * transport 被绕过（链上更早的 transport 读发起者凭据），抛错哨兵
+       * 而不是写发起者本机可用性状态。
+       */
+      const ownerRouteLeakGuard = (what: string): never => {
+        throw new Error(
+          `owner-required dispatch attempted local credential ${what}; ` +
+            "caller credentials must never serve or be mutated by an owner-routed request",
+        );
+      };
+      /**
+       * 把一次上游响应的可用性结论落到本地 agent 记录（429 冷却 / 恢复）。
+       * 决策用共享纯函数，本地只负责 IO；每条 transport 分支都必须调用它，
+       * 否则限流 agent 会继续被 listAgents 列出、继续被选中、继续撞 429。
+       * owner-required 时装成抛错哨兵：本机记录与发起者冷却挂钩，绝不能被
+       * 分享调用污染。
+       */
+      let recordLocalAvailability: (status: number, body?: unknown) => Promise<void> =
+        async () => ownerRouteLeakGuard("availability write");
+      /**
+       * owner-required 时装抛错哨兵；旧模式在门控后由真实实现覆盖。
+       * 哨兵防回归：owner transport 不应读取它们（fail-closed 已在
+       * resolveLocalProvider 拦截），若未来有新路径绕过契约检查，这里兜底。
+       */
+      let apiKeyRefResolver: ProviderResolutionContext["apiKeyRefResolver"] = (
+        (() => ownerRouteLeakGuard("apiKeyRefResolver read")) as unknown as ProviderResolutionContext["apiKeyRefResolver"]
+      );
+      // credentialBroker 直接用外层实例：owner transport 不调用它；若未来出现
+      // 绕开 resolveLocalProvider 契约检查的新路径，外层单例仍正确。
+
+      if (!ownerOriginExecution) {
       // 冷却检查放在派发点：loadAgentConfig 只负责加载配置，不应因冷却失败
       // （冷却 ≠ 配置错误，listAgents/预览等读配置路径不能被误伤）。
-      const nowMs = now();
+      // owner-required 路径已在上文短路，不读/写本机 credential availability——
+      // 发起者的冷却/probe 状态与 owner 订阅无关，不能被分享调用消耗或污染。
       const credentialKeyForGate = resolveCredentialKeyWithFallback(
         agentConfig as unknown as Record<string, unknown>,
       );
@@ -831,12 +1040,7 @@ export function createCliLocalRuntimeAdapter(
               credentialCooldownAt,
             )
           : agentLevelNextAvailableAt;
-      /**
-       * 把一次上游响应的可用性结论落到本地 agent 记录（429 冷却 / 恢复）。
-       * 决策用共享纯函数，本地只负责 IO；每条 transport 分支都必须调用它，
-       * 否则限流 agent 会继续被 listAgents 列出、继续被选中、继续撞 429。
-       */
-      const recordLocalAvailability = (status: number, body?: unknown): Promise<void> =>
+      recordLocalAvailability = (status: number, body?: unknown): Promise<void> =>
         recordLocalAvailabilityForAgent({
           deps,
           agentConfig,
@@ -890,14 +1094,10 @@ export function createCliLocalRuntimeAdapter(
       const legacyCredentialMigration = {
         enableLegacyMigration: true,
       } as const;
-      const apiKeyRefResolver = createOAuthApiKeyRefResolver({
+      apiKeyRefResolver = createOAuthApiKeyRefResolver({
         migration: legacyCredentialMigration,
       });
-      const credentialBroker = createFileCredentialBroker({
-        migration: legacyCredentialMigration,
-      });
-      const serverUrl = asOptionalTrimmedString(deps.env.NOLO_SERVER) ?? "https://us.nolo.chat";
-      const authToken = asOptionalTrimmedString(deps.env.AUTH_TOKEN);
+      } // end if (!ownerOriginExecution) —— 本机 credential 门控/resolver 仅旧模式需要
       const syncFetcher = authToken
         ? async (ref: string) => {
             try {
@@ -946,6 +1146,7 @@ export function createCliLocalRuntimeAdapter(
         serverUrl,
         authToken,
         syncFetcher,
+        ...(ownerOriginExecution ? { ownerOriginExecution } : {}),
       });
     },
     executeTool: async (call, opts) => {
@@ -993,6 +1194,79 @@ export function createCliLocalRuntimeAdapter(
         budgets: localToolBudgets,
         usage: localToolUsage,
       });
+      // 分享 OAuth agent 的 shell 会话授权（块 D）：首次命令执行类工具调用
+      // 前必须显式确认。判定顺序：先跑与 executeLocalToolWithPolicy 同源的
+      // 上限判定（run-scoped surface + policy），被拒即抛——read-only 与
+      // policy shell-disabled 是 deny ceiling，会话允许绝不能覆盖；上限
+      // 通过后强制走会话授权。ownerAgentContext 缺省（非 owner-required 场景）
+      // → 整段跳过，旧行为逐字不变。撤销后 isGranted() 翻回 false，下一次
+      // shell 调用立即重新弹确认（同步状态，无传播延迟）。
+      if (
+        ownerAgentContext &&
+        requiresShellSessionGrant(call.name)
+      ) {
+        // 上限预检：与下方 executeLocalToolWithPolicy 的 runToolNames 断言 +
+        // resolveLocalToolPolicy 同规则。read-only surface（runToolNames 不含
+        // 该工具）或 policy shell-disabled（agent 未声明 + restricted 未放行）
+        // 都在这里先拒——会话 grant 永远不是绕过上限的通道。
+        const surfaceDenied =
+          !activeAgentToolNames
+            .map(normalizeLocalToolName)
+            .includes(normalizeLocalToolName(call.name)) ||
+          !resolveLocalToolPolicy({
+            env: deps.env,
+            agentToolNames: activeAgentToolNames,
+            toolName: call.name,
+          }).allowed;
+        if (surfaceDenied) {
+          throw new Error(
+            `${call.name} is outside the run tool surface / policy for shared agent ` +
+              `"${ownerAgentContext.agentName}" — session shell grant cannot ` +
+              "override run-scoped or policy ceilings.",
+          );
+        }
+        // 默认拒绝：headless / 非 TUI 调用方没有确认通道（未注入 shellGrant）
+        // 时绝不能 fail-open 放行——共享 OAuth agent 的 shell 在本机可读写该
+        // 用户能访问的全部资源，不能因为「模型跑在别人的订阅上」就静默执行。
+        // 缺省确认通道 = 拒绝，不是默认放行。
+        if (!deps.shellGrant) {
+          throw Object.assign(
+            new Error(
+              `Shell execution declined: shared agent "${ownerAgentContext.agentName}" ` +
+                "requires explicit per-session approval before running commands " +
+                `on this device (${ownerAgentContext.deviceId}), but no confirmation ` +
+                "channel is available.",
+            ),
+            { code: "origin_authorization_required" },
+          );
+        }
+        if (!deps.shellGrant.isGranted()) {
+          const granted = await deps.shellGrant.requestGrant({
+            agentName: ownerAgentContext.agentName,
+            agentKey: ownerAgentContext.agentKey,
+            ownerUserId: ownerAgentContext.ownerUserId,
+            deviceId: ownerAgentContext.deviceId,
+            ...(ownerAgentContext.deviceName
+              ? { deviceName: ownerAgentContext.deviceName }
+              : {}),
+            workspaceRoot,
+            toolName: call.name,
+            ...(extractShellCommandPreview(call.arguments)
+              ? { command: extractShellCommandPreview(call.arguments) }
+              : {}),
+          });
+          if (!granted) {
+            throw Object.assign(
+              new Error(
+                `Shell execution declined: shared agent "${ownerAgentContext.agentName}" ` +
+                  "requires explicit per-session approval before running commands " +
+                  `on this device (${ownerAgentContext.deviceId}).`,
+              ),
+              { code: "origin_authorization_required" },
+            );
+          }
+        }
+      }
       const result = await executeLocalToolWithPolicy({
         env: deps.env,
         agentToolNames: activeAgentToolNames,
@@ -1049,6 +1323,11 @@ export function createCliLocalRuntimeAdapter(
   // pre-admission zero-cost attempts protected by abort/sawToolEvent guards.
   return {
     ...adapterBase,
+    // 会话级摘要 fallback（未注入 → undefined）：getter 而非快照值，因为 adapter
+    // 可能被 prepared-runtime 缓存复用，而注入发生在 CLI 启动早期。
+    get compactionSummaryFallback() {
+      return cliAutoCompactionSummaryFallback;
+    },
     resolveProvider: async (agentConfig: AgentRuntimeAgentConfig) => {
       const provider = (await adapterBase.resolveProviderBase(
         agentConfig,

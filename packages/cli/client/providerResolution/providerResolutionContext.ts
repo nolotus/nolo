@@ -10,6 +10,7 @@
  * 参数里，不要往这里堆。
  */
 import type { AgentRuntimeAgentConfig, AgentRuntimeProvider } from "../../../agent-runtime";
+import type { OwnerOriginExecution } from "../../../agent-runtime/ownerOriginExecution";
 import type { CliFetchImpl } from "../../cliFetch";
 import { createFileCredentialBroker } from "../../../agent-runtime/fileCredentialBroker";
 import { createOAuthApiKeyRefResolver } from "../../oauth/apiKeyRefResolver";
@@ -51,6 +52,16 @@ export interface ProviderResolutionContext {
   authToken: string | undefined;
   /** 从 server 拉取同步凭证；无 AUTH_TOKEN 时为 undefined。 */
   syncFetcher: ((ref: string) => Promise<string | null>) | undefined;
+  /**
+   * owner_required 派发契约（分享者 OAuth agent：模型走服务端 owner-required
+   * 代理、工具留在发起机本地）。由 adapter 在「本机非 credential owner」时
+   * 构造并透传；缺省 = 旧 auto 行为，所有既有 transport 逐字不变。
+   *
+   * 该值由 origin（发起机）自报的机器/会话/工作区身份 + 服务端权威解析的
+   * agentKey 组成。它不携带凭证、不声明 ownerUserId/provider/model——这些由
+   * 服务端 admission 从 store 权威解析，客户端永不在 body 里声称。
+   */
+  ownerOriginExecution?: OwnerOriginExecution;
 }
 
 /**

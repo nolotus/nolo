@@ -47,7 +47,9 @@ import AgentPublishDialog, {
 } from "./AgentPublishDialog";
 import AgentMemoryTab from "./AgentMemoryTab";
 import AgentGrantPanel from "./AgentGrantPanel";
+import type { AgentQuota } from "ai/agent/quotaSnapshot";
 import { OAuthStatusBox } from "./OAuthStatusBox";
+import AgentQuotaPanel from "./AgentQuotaPanel";
 import { resolveAgentEditIdentity } from "../hooks/useAgentFormValidation";
 
 // UI Components & Icons
@@ -1781,6 +1783,17 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                       authToken={currentToken}
                     />
                   </section>
+                ) : null}
+                {/* 额度面板不设前端白名单：服务端探测支持谁就显示谁；拿不到窗口时
+                    AgentQuotaPanel 自身不渲染。 */}
+                {canEdit && currentToken && server ? (
+                  <AgentQuotaPanel
+                    key={currentKey}
+                    agentKey={currentKey}
+                    serverOrigin={String(server).replace(/\/+$/, "")}
+                    authToken={currentToken}
+                    initialQuota={(item as { quota?: AgentQuota }).quota}
+                  />
                 ) : null}
                 {/* Ability proof and developer specs */}
                 <section {...stylex.props(styles.section, styles.sectionAbilityProof)}>
