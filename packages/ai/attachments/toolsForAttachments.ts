@@ -108,6 +108,7 @@ export const isLegacyMediaJobText = (part: unknown): boolean => {
 const MEDIA_ATOMIC_TOOLS = [
   "transcribe",
   "translate",
+  "writeTranslations",
   "exportDocument",
   "readArtifact",
 ] as const;

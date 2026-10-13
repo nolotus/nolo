@@ -239,6 +239,10 @@ import { transcribeSchema, transcribeFunc } from "./transcribeTool";
 import { translateSchema, translateFunc } from "./translateTool";
 import { exportDocumentSchema, exportDocumentFunc } from "./exportDocumentTool";
 import { readArtifactSchema, readArtifactFunc } from "./readArtifactTool";
+import {
+  writeTranslationsSchema,
+  writeTranslationsFunc,
+} from "./writeTranslationsTool";
 
 // ✅ Google Search Scraper (Apify)
 import {
@@ -1983,6 +1987,18 @@ const baseToolDefinitions: ToolDefinition[] = [
       category: "媒体处理",
     },
     behavior: "data",
+    uiGroup: "general",
+  },
+  {
+    id: "writeTranslations",
+    schema: writeTranslationsSchema,
+    executor: writeTranslationsFunc,
+    description: {
+      name: "writeTranslations",
+      description: "把模型自己翻译好的分段译文分批写回媒体任务。",
+      category: "媒体处理",
+    },
+    behavior: "action",
     uiGroup: "general",
   },
   {

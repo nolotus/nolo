@@ -78,6 +78,9 @@ export const HIGH_RISK_MUTATION_TOOL_NAMES = [
   "addTableRows",
   "updateTableRow",
   "deleteTableRow",
+  // 媒体任务译文写回：改写 job 的 translate 产物（服务端零计费、无外部副作用），
+  // 但仍是「写」，只读 run 不该拿到写回能力；契约测试按名字关键字钉住这份分类。
+  "writeTranslations",
   // 编排副作用：startAgentRun 会另起一次 run（子 run 的只读与否由调用方参数决定），
   // controlAgentRun 能追加指令/停止它；只读 run 不应拿到这两个（review A-1）。
   "startAgentRun",
