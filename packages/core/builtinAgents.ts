@@ -66,12 +66,16 @@ export const PUBLIC_NANO_BANANA_2_LITE_AGENT_KEY = publicAgentKey(PUBLIC_NANO_BA
  * Quick-chat 档位 agent：执行真相在代码里（agent-runtime/builtinPlatformAgentConfigs），
  * 对应的 agent-pub-* 记录按设计可以不存在（runtime fallback 合成配置）。
  *
- * 内置 nolo 纳入平台兜底：作为各端默认入口，未 seed 数据库的环境（自建 server、
- * 全新 dev LevelDB）下直接合成代码级配置，保证可用性，绝不报 404 挂掉对话；
- * 线上或已有 seed 记录的环境依然以数据库/远端记录为准。
+ * 刻意不含内置 nolo：它有路由人格 prompt，记录缺失时宁可 404 也不降级成裸模型
+ * （见 agentLookup.test.ts 的 "does not extend the code-owned fallback to
+ * prompt-bearing builtin agents"）。
+ *
+ * 已知缺口：nolo 现在是各端默认档，于是「没有 seed 记录的环境」（自建 server、
+ * 全新 dev LevelDB）里首页发消息会拿到 404，而默认档指向广场档时不会——这条
+ * 路径此前有兜底。要不要为默认档破例（能用但没人格 vs 明确失败）是产品取舍，
+ * 未决，不在此单方面改。
  */
 export const PLATFORM_TIER_AGENT_KEYS = [
-  BUILTIN_NOLO_AGENT_KEY,
   PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY,
   PUBLIC_KIMI_K26_IMAGE_AGENT_KEY,
 ] as const;

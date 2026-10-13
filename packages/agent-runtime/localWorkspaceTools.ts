@@ -1029,32 +1029,11 @@ async function resolveRuntimeOwnedSpillPath(targetPath: string): Promise<string 
   }
 }
 
-/**
- * Expand a leading `~` / `~/` prefix to the current user's home directory.
- */
+/** Expand a leading `~` / `~/` prefix to the current user's home directory. */
 function expandHomePath(requestedPath: string): string {
   if (requestedPath === "~") return homedir();
   if (requestedPath.startsWith("~/")) return resolve(homedir(), requestedPath.slice(2));
   return requestedPath;
-}
-
-/**
- * Single source of truth for "requested path → absolute path".
- *
- * The executors open `resolve(workspaceRoot, expandHomePath(requestedPath))`.
- * Every caller that must know which file an executor will actually touch
- * (machine-side path preflight / pure-delete guard, and tests) MUST go through
- * this helper instead of its own `resolve(workspaceRoot, request)`: a bare
- * resolve checks `<ws>/~/x` while the executor reads `<home>/x`, so the two
- * diverge exactly when the request carries a `~` prefix — the guard then
- * inspects (and clears) a path nobody will ever open, and the file that IS
- * opened escapes every check.
- */
-export function resolveRequestedWorkspacePath(
-  workspaceRoot: string,
-  requestedPath: string
-): string {
-  return resolve(resolve(workspaceRoot), expandHomePath(requestedPath));
 }
 
 export async function resolveLocalWorkspaceToolPath(args: {
@@ -1065,7 +1044,7 @@ export async function resolveLocalWorkspaceToolPath(args: {
   allowRuntimeOwnedSpill?: boolean;
 }) {
   const workspaceRoot = resolve(args.workspaceRoot);
-  const targetPath = resolveRequestedWorkspacePath(workspaceRoot, args.requestedPath);
+  const targetPath = resolve(workspaceRoot, expandHomePath(args.requestedPath));
   const insideWorkspace = isPathInsideWorkspace({ workspaceRoot, targetPath });
   const trustedSpillPath = !insideWorkspace && args.allowRuntimeOwnedSpill === true
     ? await resolveRuntimeOwnedSpillPath(targetPath)

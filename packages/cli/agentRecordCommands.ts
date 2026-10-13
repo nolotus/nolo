@@ -1,5 +1,3 @@
-import type { AgentQuota } from "ai/agent/quotaSnapshot";
-import { refreshSubscriptionQuotas } from "./subscriptionQuotaRefresh";
 import { resolveCliAgentKeyInput } from "./agentAliases";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import {
@@ -12,7 +10,6 @@ import {
   writeAgentRecord,
 } from "./agentRecordHelpers";
 import { parseUserIdFromAuthToken, resolveAuthToken } from "./cliEnvHelpers";
-import { readCredentialAvailability } from "agent-runtime/credentialAvailability";
 import { clearCliLocalRuntimePreparedAgentCache } from "./client/localRuntimeAdapter";
 import { toErrorMessage } from "core/errorMessage";
 
@@ -67,38 +64,8 @@ export async function runAgentReadCommand(
     if (!result) {
       throw new Error(`agent not found: ${agentKey}`);
     }
-    // 额度按需刷新：只探测被读的这一个、且带订阅凭据（apiKeyRef）的 agent；
-    // 普通 agent 不付这次往返。失败静默，沿用记录里的快照。
-    const rawRecord = result.record as { quota?: AgentQuota; apiKeyRef?: unknown } | null;
-    const recordQuota = rawRecord?.quota;
-    const hasSubscriptionCredential =
-      typeof rawRecord?.apiKeyRef === "string" && rawRecord.apiKeyRef.trim() !== "";
-    const fresh = hasSubscriptionCredential
-      ? await refreshSubscriptionQuotas({
-          entries: [{ key: result.agentKey, ...(recordQuota ? { quota: recordQuota } : {}) }],
-          onlyKeys: [result.agentKey],
-          env,
-          cliArgs: args,
-          fetchImpl,
-        })
-      : {};
-    const quota = fresh[result.agentKey] ?? recordQuota;
-    const rawRecordObj = result.record as Record<string, unknown> | null;
-    const credAvail = await readCredentialAvailability(env).catch(() => ({} as Record<string, number>));
-    const credGroup = typeof rawRecordObj?.apiKeyRef === "string" ? rawRecordObj.apiKeyRef : undefined;
-    const credDeadline = credGroup ? credAvail[credGroup] : undefined;
-    const recordDeadline = typeof rawRecordObj?.nextAvailableAt === "number" ? rawRecordObj.nextAvailableAt : undefined;
-    const effectiveNextAvailableAt = Math.max(recordDeadline ?? 0, credDeadline ?? 0) || undefined;
-    const isRateLimited = typeof effectiveNextAvailableAt === "number" && effectiveNextAvailableAt > Date.now();
-
     output.write(JSON.stringify({
       ...normalizeAgentRecordForOutput(result.agentKey, authToken, result.record),
-      ...(isRateLimited ? {
-        rateLimited: true,
-        cooldownRemainingSeconds: Math.ceil((effectiveNextAvailableAt - Date.now()) / 1000),
-        nextAvailableAt: new Date(effectiveNextAvailableAt).toISOString(),
-      } : {}),
-      ...(quota ? { quota } : {}),
       source: result.source,
     }, null, 2));
     output.write("\n");

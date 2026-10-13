@@ -33,8 +33,6 @@ nolo run "review this repository"
 nolo update
 ```
 
-如果 `npm install -g nolo-cli` 时出现 `install-scripts` / `allow-scripts` 相关警告，对本包无需处理：native 依赖已随包自带，不需要安装期构建。若 `nolo` 真正装不上或跑不起来，请运行 `nolo doctor` 查看诊断。
-
 在 TUI 内部运行：
 
 ```text

@@ -54,7 +54,7 @@ function hasActivitySignal(message: any): boolean {
  * 新增此类工具时：先在 ToolMessageItem 加独立分支，再把名字加进这个 Set，
  * 不需要动 ToolMessageContent / ToolMessageGroup。
  */
-const INTERACTIVE_TOOL_NAMES = new Set<string>(["ask_user", "runStreamingAgent", "show_interaction"]);
+const INTERACTIVE_TOOL_NAMES = new Set<string>(["ask_user", "runStreamingAgent"]);
 
 function isInteractiveToolMessage(message: any): boolean {
   if (message?.role !== "tool") return false;

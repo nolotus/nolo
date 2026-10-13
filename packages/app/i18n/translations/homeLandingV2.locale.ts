@@ -4,9 +4,6 @@ import { Language } from "../types";
 // docs/product-positioning.md §3.1 ("能说 / 不能说"). No competitor names.
 // Relay steps replay a real cross-machine run; keep numbers faithful.
 
-// 英文文案里的 U+00A0 是刻意的（避免 "start over" / "to make" 这类词组被拆行）；
-// CJK 文案一律不用 NBSP——NBSP 夹在中文之间会留约 4.6px 可见缝隙，改由 CSS
-// text-wrap: pretty 治行尾孤字（见 HomeLanding.css 的 .hl-pillar p / .hl-compare-card li）。
 const en = {
   homeLandingV2: {
     hero: {
@@ -21,8 +18,6 @@ const en = {
     relay: {
       label: "A real handoff",
       done: "Review passed",
-      replay: "Replay",
-      viewRun: "View this run",
       note: "Replayed from a real run: one sentence in, three agents handing off across two computers.",
       steps: [
         { role: "Plan", model: "GPT", machine: "Mac", seconds: "9.7s" },
@@ -34,9 +29,9 @@ const en = {
       title: "Three things that make it a team",
       items: [
         {
-          title: "A companion that\u00a0stays",
+          title: "A companion that stays",
           body: "Each agent keeps its name, role, model and memory, and gets to know you better the more you work together. Call it next week and it is still the same one.",
-          example: "Tell it once to answer in English and lead with the conclusion, and it already does so in a brand-new conversation. Switch models and you don't start over.",
+          example: "Tell it once to answer in English and lead with the conclusion, and it already does so in a brand-new conversation. Switch models and you don't start over.",
         },
         {
           title: "It hands off by itself",
@@ -56,8 +51,8 @@ const en = {
       title: "You already juggle several AIs by hand. Nolo makes them one team.",
       lead: "What you do across tabs today becomes one conversation with agents you define.",
       handLabel: "Juggling AI windows yourself",
-      handItems: ["Copy context between tabs by\u00a0hand", "Paste output into another model to check it", "Start over when a subscription hits its limit", "Conclusions scattered across chat\u00a0logs"],
-      noloItems: ["Agents keep their role, prompt, model and memory", "An independent agent reviews the\u00a0work", "Switch agents mid-conversation; history carries over", "Conclusions land in pages and\u00a0docs"],
+      handItems: ["Copy context between tabs by hand", "Paste output into another model to check it", "Start over when a subscription hits its limit", "Conclusions scattered across chat logs"],
+      noloItems: ["Agents keep their role, prompt, model and memory", "An independent agent reviews the work", "Switch agents mid-conversation; history carries over", "Conclusions land in pages and docs"],
     },
     faq: {
       title: "Questions people ask",
@@ -80,31 +75,13 @@ const en = {
         },
       ],
     },
-    whyNow: {
-      title: "Why now",
-      lead: "Three things are already true for many people who use AI every day.",
-      items: [
-        {
-          title: "More than one AI, already paid for",
-          body: "Many people already pay for several AI subscriptions or keys, each good at something different. What's missing is a way to make them work together.",
-        },
-        {
-          title: "Agents can finish real work",
-          body: "An agent can now take a whole piece of work from plan to checked result on its own. Handing off between agents is the next step.",
-        },
-        {
-          title: "Your work lives on several devices",
-          body: "A laptop, a desktop, a server, a phone. The work should run where your files and tools already are.",
-        },
-      ],
-    },
     closing: {
       label: "Closing",
       lead: "AI can research, build, compare, check, and move in parallel.",
-      lines: ["Why you do it.", "What good looks like.", "What you truly want to make."],
+      lines: ["Why you do it.", "What good looks like.", "What you truly want to make."],
       end: "That stays with you.",
       trust: ["Open-source client", "Releases match public source", "Your subscriptions or BYOK"],
-      source: "View source",
+      source: "View source",
     },
   },
 };
@@ -123,8 +100,6 @@ const zhCN = {
     relay: {
       label: "一次真实的接力",
       done: "审查通过",
-      replay: "重播",
-      viewRun: "查看这次运行",
       note: "这是一次真实运行的回放：你说一句话，三个 Agent 在两台电脑上接力完成。",
       steps: [
         { role: "规划", model: "GPT", machine: "Mac", seconds: "9.7 秒" },
@@ -182,24 +157,6 @@ const zhCN = {
         },
       ],
     },
-    whyNow: {
-      title: "为什么是现在",
-      lead: "下面三件事，在很多天天用 AI 的人身上已经同时发生。",
-      items: [
-        {
-          title: "订阅已经不止一家",
-          body: "很多人同时付着好几家 AI 的订阅或 Key，各有所长。缺的是让它们一起干活的方式。",
-        },
-        {
-          title: "Agent 已能独立干完一段活",
-          body: "从规划、动手到自查，一个 Agent 已经能自己完成一整段工作。下一步是让它们彼此接力。",
-        },
-        {
-          title: "你不只有一台设备",
-          body: "笔记本、台式机、服务器、手机。活应该在你的文件和工具所在的那台机器上跑。",
-        },
-      ],
-    },
     closing: {
       label: "结语",
       lead: "AI 可以研究、执行、比较、检查和并行推进。",
@@ -225,8 +182,6 @@ const zhHant = {
     relay: {
       label: "一次真實的接力",
       done: "審查通過",
-      replay: "重播",
-      viewRun: "查看這次運行",
       note: "這是一次真實運行的回放：你說一句話，三個 Agent 在兩台電腦上接力完成。",
       steps: [
         { role: "規劃", model: "GPT", machine: "Mac", seconds: "9.7 秒" },
@@ -284,24 +239,6 @@ const zhHant = {
         },
       ],
     },
-    whyNow: {
-      title: "為什麼是現在",
-      lead: "下面三件事，在很多天天用 AI 的人身上已經同時發生。",
-      items: [
-        {
-          title: "訂閱已經不只一家",
-          body: "很多人同時付著好幾家 AI 的訂閱或 Key，各有所長。缺的是讓它們一起幹活的方式。",
-        },
-        {
-          title: "Agent 已能獨立幹完一段活",
-          body: "從規劃、動手到自查，一個 Agent 已經能自己完成一整段工作。下一步是讓它們彼此接力。",
-        },
-        {
-          title: "你不只有一台裝置",
-          body: "筆電、桌機、伺服器、手機。活應該在你的檔案和工具所在的那台機器上跑。",
-        },
-      ],
-    },
     closing: {
       label: "結語",
       lead: "AI 可以研究、執行、比較、檢查和並行推進。",
@@ -327,8 +264,6 @@ const ja = {
     relay: {
       label: "実際のタスク引き継ぎ",
       done: "レビュー通過",
-      replay: "もう一度再生",
-      viewRun: "この実行を見る",
       note: "実際の実行記録より：一言指示するだけで、3 つの Agent が 2 台のコンピューターにまたがって連携・完結します。",
       steps: [
         { role: "計画", model: "GPT", machine: "Mac", seconds: "9.7 秒" },
@@ -386,24 +321,6 @@ const ja = {
         },
       ],
     },
-    whyNow: {
-      title: "なぜ今なのか",
-      lead: "毎日 AI を使う多くの人にとって、次の三つはすでに当たり前になっています。",
-      items: [
-        {
-          title: "AI の契約はひとつではない",
-          body: "複数の AI のサブスクリプションや API キーを持ち、得意なことで使い分けている人は少なくありません。足りないのは、それらを一緒に働かせる仕組みです。",
-        },
-        {
-          title: "Agent はひとまとまりの仕事をこなせる",
-          body: "計画から実装、自己チェックまで、一つの Agent が自分で仕事をやり切れるようになりました。次は、Agent 同士で引き継ぐことです。",
-        },
-        {
-          title: "デバイスは一台ではない",
-          body: "ノート PC、デスクトップ、サーバー、スマートフォン。仕事は、ファイルとツールがあるそのマシンで動くべきです。",
-        },
-      ],
-    },
     closing: {
       label: "おわりに",
       lead: "AI は調査、実装、比較、検証、そして並行しての進行を担えます。",
@@ -429,8 +346,6 @@ const ko = {
     relay: {
       label: "실제 바통 터치",
       done: "검토 통과",
-      replay: "다시 재생",
-      viewRun: "이 실행 보기",
       note: "실제 실행 리플레이: 문장 하나로 시작해 세 Agent가 두 대의 컴퓨터를 넘나들며 이어받아 완수했습니다.",
       steps: [
         { role: "기획", model: "GPT", machine: "Mac", seconds: "9.7초" },
@@ -485,24 +400,6 @@ const ko = {
         {
           question: "내 대화와 데이터는 어디에 남나요?",
           answer: "Agent가 본인의 컴퓨터에서 실행될 때 파일과 명령은 해당 기기에 그대로 남습니다. 클라이언트는 오픈소스이므로 어떤 작업을 수행하고 무엇을 전송하는지 직접 투명하게 확인할 수 있습니다.",
-        },
-      ],
-    },
-    whyNow: {
-      title: "왜 지금인가",
-      lead: "매일 AI를 쓰는 많은 사람에게 다음 세 가지는 이미 현실입니다.",
-      items: [
-        {
-          title: "AI 구독은 이미 하나가 아닙니다",
-          body: "여러 AI 구독이나 API 키를 함께 쓰며 잘하는 일에 따라 나눠 쓰는 사람이 많습니다. 부족한 것은 이들을 함께 일하게 하는 방법입니다.",
-        },
-        {
-          title: "Agent는 한 덩어리의 일을 끝낼 수 있습니다",
-          body: "계획부터 구현, 자체 점검까지 Agent 하나가 스스로 일을 끝낼 수 있게 되었습니다. 다음 단계는 Agent끼리 일을 이어받는 것입니다.",
-        },
-        {
-          title: "기기는 한 대가 아닙니다",
-          body: "노트북, 데스크톱, 서버, 휴대폰. 일은 파일과 도구가 있는 바로 그 기기에서 돌아가야 합니다.",
         },
       ],
     },
