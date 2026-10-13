@@ -200,26 +200,6 @@ export const resolveOwnerOAuthProxyTransport: ProviderResolver = async (ctx) => 
               : undefined,
           },
         );
-        // Fail-closed：缺 ack / 版本不符 / requestId 错位都视为服务端未走
-        // owner-only 路径（旧 server、proxy role、或扩展被吞）。此时绝不能
-        // 回落到本机凭据，也不能按 200 静默成功。
-        const ack = verifyOwnerRouteAck(res.headers, requestId);
-        if (!ack.ok) {
-          const raw = await res.text().catch(() => "");
-          const code = ack.code;
-          logLocalRuntimeDiagnostic("provider.request.result", {
-            agentKey: agentConfig.key,
-            transport: "owner-oauth-proxy",
-            status: res.status,
-            ok: false,
-            ackCode: code,
-            responseBytes: raw.length,
-          });
-          throw new Error(
-            `owner-required route not acknowledged (${code}); ` +
-              `server must emit ${OWNER_ROUTE_VERSION_HEADER_NAME}=${OWNER_ORIGIN_EXECUTION_VERSION} and echo the request id`,
-          );
-        }
         if (!res.ok) {
           const raw = await res.text().catch(() => "");
           const data = parsePlatformChatCompletionData(raw);
@@ -236,6 +216,26 @@ export const resolveOwnerOAuthProxyTransport: ProviderResolver = async (ctx) => 
             `owner-required proxy failed: HTTP ${res.status} ${JSON.stringify(data)}` +
               (rawPreview ? ` raw="${rawPreview}"` : "") +
               (gatewayHeaders ? ` headers=[${gatewayHeaders}]` : ""),
+          );
+        }
+        // Fail-closed：仅对 2xx 成功响应验证 ack 头。缺 ack / 版本不符 /
+        // requestId 错位都视为服务端未走 owner-only 路径（旧 server、proxy role、
+        // 或扩展被吞）。此时绝不能回落到本机凭据，也不能按 200 静默成功。
+        const ack = verifyOwnerRouteAck(res.headers, requestId);
+        if (!ack.ok) {
+          const raw = await res.text().catch(() => "");
+          const code = ack.code;
+          logLocalRuntimeDiagnostic("provider.request.result", {
+            agentKey: agentConfig.key,
+            transport: "owner-oauth-proxy",
+            status: res.status,
+            ok: false,
+            ackCode: code,
+            responseBytes: raw.length,
+          });
+          throw new Error(
+            `owner-required route not acknowledged (${code}); ` +
+              `server must emit ${OWNER_ROUTE_VERSION_HEADER_NAME}=${OWNER_ORIGIN_EXECUTION_VERSION} and echo the request id`,
           );
         }
         const contentType = res.headers.get("content-type") ?? "";

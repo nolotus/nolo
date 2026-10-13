@@ -102,8 +102,11 @@ export type MediaJobDepth = "outline" | "translate" | "full";
 /**
  * 显式 STT 供应商的**公共**枚举（API/JSON 层取值）：`nolo` = 自部署端点
  * （服务端内部 id 为 `local`，返回值与计费 id 仍用内部值），其余与各商业端点同名。
+ * 后两项用**真实名字**（厂商 + 模型）：`elevenlabs-scribe-v2`（内部 id `scribe`）、
+ * `cloudflare-whisper`（内部 id `cloudflare`）。服务端也接受内部短名作兼容别名，但落库/回传一律是这里的取值。
  * 显式给出时必须走 STT 兜底链并使用该供应商（兜底链门控关闭也一样）；
- * 未指定（undefined）时维持既有门控/直连行为。
+ * 未指定（undefined）时由服务端按「用户偏好 → 系统默认策略」解析（见 mediaJobs/sttModels），
+ * 两者都无可用模型时维持既有门控/直连行为。
  */
 export type SttProviderSelection =
   | "nolo"
@@ -111,7 +114,18 @@ export type SttProviderSelection =
   | "groq"
   | "together"
   | "grok"
-  | "deepgram";
+  | "deepgram"
+  | "elevenlabs-scribe-v2"
+  | "cloudflare-whisper";
+
+/**
+ * 本次生效的 STT 供应商是**怎么定下来的**（只作解释/审计，不影响转写行为）：
+ * - explicit   = 用户在本次请求里显式指定（必须被尊重，跑不通就明确失败）；
+ * - preference = 服务端读到该用户最近一次显式选择的偏好；
+ * - default    = 服务端默认策略（见 mediaJobs/sttModels.DEFAULT_STT_MODEL_PRIORITY）。
+ * 旧 job 无此字段 = 该值不是这套解析写进去的（历史行为），不要反推成 explicit。
+ */
+export type SttModelSource = "explicit" | "preference" | "default";
 
 export interface MediaScope {
   fromSec: number;
@@ -201,6 +215,8 @@ export interface MediaJob {
   /**
    * 显式 STT 供应商（见 SttProviderSelection）。给出时 transcribe 必须走兜底链并用该供应商；
    * null / 未知值在运行期被拒绝，绝不静默回落旧直连路径。
+   * 未显式指定的 job 上，本字段也会被服务端写进「解析出来的模型真实名字」（用户偏好或系统默认策略，
+   * 见 mediaJobs/sttModels），来源记在 sttModelSource；两者都无可用模型时本字段保持缺省。
    */
   sttProvider?: SttProviderSelection;
   /**
@@ -208,6 +224,11 @@ export interface MediaJob {
    * 单个 sttProvider 保持兼容（等价于长度 1 的数组）。
    */
   sttProviders?: SttProviderSelection[];
+  /**
+   * 当前 sttProvider/sttProviders 是**怎么定下来的**（explicit / preference / default，见 SttModelSource）。
+   * 由服务端与选择本身同批写入；旧 job 无此字段 = 历史写入，不能反推成 explicit。
+   */
+  sttModelSource?: SttModelSource;
   status: MediaJobStatus;
   stage?: MediaJobStage;
   progress: { done: number; total: number };

@@ -81,6 +81,7 @@ import { prepareTools } from "ai/tools/prepareTools";
 import { inferCaptureIntent } from "ai/policy/runtimePolicy";
 import { parseNoloWorkspaceToolArguments } from "agent-runtime/noloWorkspaceTools";
 import { INTERACTION_REQUIRED_TOOL_NAMES } from "agent-runtime/agentRunIsolation";
+import { RUN_TITLE_MAX, normalizeRunTitle } from "ai/tools/agent/runTitle";
 
 /**
  * Memory overlay is a per-turn enhancement, so it gets a much tighter budget
@@ -388,6 +389,7 @@ function buildDesktopStartAgentRunToolExecutor(args: {
         ? (currentAgentKey || rawAgentKey)
         : rawAgentKey;
     const task = asTrimmedString(parsed.task);
+    const runTitle = normalizeRunTitle(parsed.title);
 
     if (!agentKey) {
       return {
@@ -398,6 +400,12 @@ function buildDesktopStartAgentRunToolExecutor(args: {
     if (!task) {
       return {
         content: JSON.stringify({ error: "startAgentRun: task is required" }),
+        metadata: { serverPlatformTool: true, startAgentRun: true },
+      };
+    }
+    if (!runTitle) {
+      return {
+        content: JSON.stringify({ error: `startAgentRun: a non-empty one-line title (≤${RUN_TITLE_MAX} characters) is required` }),
         metadata: { serverPlatformTool: true, startAgentRun: true },
       };
     }
@@ -429,6 +437,7 @@ function buildDesktopStartAgentRunToolExecutor(args: {
       presentationIntent,
       ...(parentThreadId ? { parentThreadId } : {}),
       ...(rootThreadId ? { rootThreadId } : {}),
+      runTitle,
       ...(args.runtimeContext?.subjectRefs ? { subjectRefs: args.runtimeContext.subjectRefs } : {}),
       // Transitive deny ceiling: blockedToolNames must flow downward so a child
       // cannot restore tools banned in the current execution chain (TASK-SPEC E2).

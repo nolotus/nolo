@@ -612,15 +612,17 @@ function isMissingLocalAgentConfigError(error: unknown, agentRef: string) {
  * layer nolo error (which always returns a JSON `{error:{message,code}}`).
  */
 const PROVIDER_HTTP_FAILED_RE =
-  /(.+?) provider failed:\s*HTTP\s+(\d+)\b/i;
+  /(.+?)(?:\s+provider|\s+proxy) failed:\s*HTTP\s+(\d+)\b/i;
 
 /**
  * Platform transports (nolo server proxying the request) are identified by the
- * label containing `platform provider failed`. Everything else is a local
- * transport. `desktop platform provider failed` is the desktop-adapter flavor
- * of the same platform hop and is intentionally covered by this substring.
+ * label containing `platform provider failed` or `owner-required proxy failed`.
+ * Everything else is a local transport. `desktop platform provider failed` is
+ * the desktop-adapter flavor of the same platform hop and is intentionally
+ * covered by this substring.
  */
-const PLATFORM_TRANSPORT_RE = /\bplatform provider failed\b/i;
+const PLATFORM_TRANSPORT_RE =
+  /\b(?:platform provider failed|owner-required proxy failed)\b/i;
 
 type ProviderTransport = "local" | "platform";
 
@@ -1236,6 +1238,12 @@ export function describeLocalRunFailure(
 
   const cls = classifyLocalRunError(message);
   if (cls.kind === "generic") {
+    if (/owner-required route not acknowledged/i.test(message)) {
+      return (
+        `${RUN_UNAVAILABLE_PREFIX} (${message}). ${NO_FALLBACK} ` +
+        `The server returned a successful response but did not acknowledge the owner route. Check server version or proxy configuration, ${SERVER_FALLBACK_HINT}.\n`
+      );
+    }
     // Socket/network deaths mid-stream are upstream transport failures —
     // telling the user to "fix the local credential/config" points the
     // investigation in the wrong direction (this exact wording misled a real

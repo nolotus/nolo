@@ -18,6 +18,7 @@ import { extractCustomId } from "core/prefix";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { selectIdentityToken } from "identity/selectors";
+import { normalizeMediaConfirmExecutionRevision } from "ai/lecture/mediaToolConfirm";
 
 // ─────────────────────────────────────────────
 // 基础提取：从 Redux state 中获取服务器配置
@@ -175,10 +176,22 @@ export class ToolApiError extends Error {
   code?: string;
   details?: unknown;
   upperCredits?: number;
+  /**
+   * 服务端在本次 409 里下发的执行代次（扁平 error.executionRevision，旧形状兼容
+   * error.details.executionRevision）。只转述服务端本次的值，绝不另行 GET 补齐。
+   * 真值判据复用 normalizeMediaConfirmExecutionRevision（缺失/非法一律缺席，不造值）。
+   */
+  executionRevision?: number;
 
   constructor(
     message: string,
-    options?: { status?: number; code?: string; details?: unknown; upperCredits?: number },
+    options?: {
+      status?: number;
+      code?: string;
+      details?: unknown;
+      upperCredits?: number;
+      executionRevision?: unknown;
+    },
   ) {
     super(message);
     this.name = "ToolApiError";
@@ -186,6 +199,9 @@ export class ToolApiError extends Error {
     this.code = options?.code;
     this.details = options?.details;
     this.upperCredits = options?.upperCredits;
+    this.executionRevision = normalizeMediaConfirmExecutionRevision(
+      options?.executionRevision,
+    );
   }
 }
 
@@ -264,6 +280,7 @@ export async function callToolApi<T = any>(
     let errorCode: string | undefined;
     let errorDetails: unknown;
     let upperCredits: number | undefined;
+    let errorExecutionRevision: unknown;
     try {
       const errorData = JSON.parse(responseText) as Record<string, any>;
       const err = errorData?.error;
@@ -274,6 +291,10 @@ export async function callToolApi<T = any>(
         if (typeof err.upperCredits === "number") {
           upperCredits = err.upperCredits;
         }
+        // 扁平字段优先，兼容旧服务端把代次放在 details 里的形状；归一化（真值判据）
+        // 统一在 ToolApiError 构造里做，这里不复制判据。
+        errorExecutionRevision =
+          err.executionRevision ?? (err.details as any)?.executionRevision;
       }
     } catch {
       errorCode = looksLikeHtmlResponse(responseText, contentType)
@@ -295,6 +316,7 @@ export async function callToolApi<T = any>(
       code: errorCode,
       details: errorDetails,
       upperCredits,
+      executionRevision: errorExecutionRevision,
     });
   }
 

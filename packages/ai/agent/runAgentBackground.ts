@@ -70,6 +70,8 @@ export interface RunAgentBackgroundArgs {
      * tools. Omit to keep the legacy interactive behavior.
      */
     runKind?: "interactive" | "subtask";
+    /** Short caller-supplied title for persisted background run presentation. */
+    runTitle?: string;
     /** Read-only run: strip mutation tools (same constraint as CLI `--read-only`). */
     readOnly?: boolean;
     /**
@@ -309,6 +311,7 @@ export const runAgentBackground = createAsyncThunk<
                     ...(ephemeral ? { ephemeral: true } : {}),
                     ...(runKind ? { runKind } : {}),
                     runtimeContext: {
+                        ...(args.runTitle ? { runTitle: args.runTitle } : {}),
                         surface: "web",
                         host: "browser",
                         runtime: "react",

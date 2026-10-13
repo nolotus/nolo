@@ -75,7 +75,6 @@
     "sharp": "^0.35.1",
     "slate": "^0.112.0",
     "slate-history": "^0.113.1",
-    "slate-hyperscript": "^0.100.0",
     "slate-react": "^0.112.1",
     "three": "^0.181.2",
     "tweetnacl": "^1.0.3",
@@ -135,9 +134,7 @@
     "react-native-maps": "^1.8.3",
     "react-native-pager-view": "^7.0.0",
     "react-native-reanimated": "4.6.0-nightly-20260811-248dee712",
-    "react-native-tab-view": "^3.5.2",
     "react-test-renderer": "19.2.3",
-    "twrnc": "^3.6.7",
     "typescript": "^7.0.2"
   },
   "packageManager": "yarn@3.6.4"

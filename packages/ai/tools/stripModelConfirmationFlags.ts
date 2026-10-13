@@ -33,32 +33,45 @@ const MODEL_DIALOG_BINDING_STRIPPED_TOOLS = new Set([
 ]);
 
 /**
- * Model-entry sanitizer: confirmation flags for every tool, plus `dialogId` for tools
- * that bind dialogs from trusted context only. Apply to the model's first-time input;
+ * Trusted-only input keys stripped for EVERY tool: `confirmationToken` is the one-time
+ * "owner approved this run" credential, and `expectedExecutionRevision` is the execution
+ * generation it is exchanged for. Both are injected only by the trusted UI confirmation
+ * path (executeToolRun's inputOverride), so any model-supplied value must be removed.
+ * Keep them in one filter so the ordering never matters; new tools are protected by default.
+ */
+const TRUSTED_ONLY_MODEL_INPUT_KEYS = new Set(["confirmationToken", "expectedExecutionRevision"]);
+
+/**
+ * Model-entry sanitizer: trusted-only keys (see above) for every tool, plus `dialogId` for
+ * tools that bind dialogs from trusted context only. Apply to the model's first-time input;
  * UI-side inputOverride (executeToolRun) is applied later and is not affected.
  */
 export function stripModelToolArgs<T>(canonicalToolName: string, value: T): T {
   const base = stripModelConfirmationFlags(value);
   if (!base || typeof base !== "object" || Array.isArray(base)) return base;
 
-  // `confirmationToken` 是「owner 当次确认」的一次性凭证，只能由受信任的 UI 确认路径
-  // （executeToolRun 的 inputOverride）注入：模型给出的任何 token 都必须剥掉，因此对
+  // `confirmationToken`/`expectedExecutionRevision` 只能由受信任的 UI 确认路径
+  // （executeToolRun 的 inputOverride）注入：模型给出的任何取值都必须剥掉，因此对
   // 所有工具生效而不只限于下面的集合（新增工具自动受保护，不会漏加）。
-  const withoutToken = Object.fromEntries(
+  const withoutTrustedOnlyKeys = Object.fromEntries(
     Object.entries(base as Record<string, unknown>).filter(
-      ([key]) => key !== "confirmationToken"
+      ([key]) => !TRUSTED_ONLY_MODEL_INPUT_KEYS.has(key)
     )
   ) as T;
 
   if (!MODEL_DIALOG_BINDING_STRIPPED_TOOLS.has(canonicalToolName)) {
-    return withoutToken;
+    return withoutTrustedOnlyKeys;
   }
-  if (!withoutToken || typeof withoutToken !== "object" || Array.isArray(withoutToken)) {
-    return withoutToken;
+  if (
+    !withoutTrustedOnlyKeys ||
+    typeof withoutTrustedOnlyKeys !== "object" ||
+    Array.isArray(withoutTrustedOnlyKeys)
+  ) {
+    return withoutTrustedOnlyKeys;
   }
 
   return Object.fromEntries(
-    Object.entries(withoutToken as Record<string, unknown>).filter(
+    Object.entries(withoutTrustedOnlyKeys as Record<string, unknown>).filter(
       ([key]) => key !== "dialogId" && key !== "autoApproveCredits"
     )
   ) as T;

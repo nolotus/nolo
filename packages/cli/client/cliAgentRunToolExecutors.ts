@@ -347,8 +347,10 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? (deps.currentAgentKey ?? rawAgentKey)
         : rawAgentKey;
     const task = typeof args.task === "string" ? args.task.trim() : "";
+    const runTitle = normalizeRunTitle(args.title);
     if (!agentKey) throw new Error(t("agentRunTool.missingAgentKey"));
     if (!task) throw new Error(t("agentRunTool.missingTask"));
+    if (!runTitle) throw new Error(`startAgentRun 需要非空的一行标题（≤60 字）`);
     const nowMs = resolveNowMs(deps);
 
     const effectiveAllowCredentialConcurrency =
@@ -419,7 +421,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
               .map((c: string) => c.trim())
           : undefined;
 
-    const runTitle = normalizeRunTitle(args.title);
     const { runId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
       {
         rawArgs,

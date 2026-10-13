@@ -15,6 +15,10 @@
  *   「请调用 ask_user」这类把 prompt 当控制机制的说法。
  * - 待确认结果绝不携带 wakeRegistered，绝不与 status:"running"|"done" 同现
  *   （只有真正执行了才会有后台唤醒）。
+ * - executionRevision 是「本次未授权判定发生在哪一代执行」的机器字段：服务端在锁内捕获、
+ *   随 409 下发，客户端只能转述、不得另行 GET 补齐（补来的代次可能已是另一代执行，
+ *   会把过期结果错绑到新代次上）。字段缺失表示「代次未知」（旧服务端 / 旧卡），
+ *   前端据此不得走新授权流程，而不是猜一个值。summary 永远不承载该字段。
  */
 
 export const MEDIA_TOOL_CONFIRM_STATUS = "requires_confirmation" as const;
@@ -36,8 +40,22 @@ export type MediaToolConfirmation = {
   /** translate 的目标语言：待确认卡片据此显示/确认要译成的语言；transcribe 不带。 */
   targetLang?: string;
   upperCredits?: number;
+  /**
+   * 「未授权」判定发生时 job 的执行代次（服务端锁内捕获）。前端把它作为后续
+   * authorize/step 的 expectedExecutionRevision 绑定；字段缺失 = 代次未知 = 不得授权新流程。
+   * 预算超额（budget_overrun）不是首次授权，不带本字段。
+   */
+  executionRevision?: number;
   summary: string;
 };
+
+/**
+ * 代次合法值域：有限非负整数（缺失、负数、小数、NaN/Infinity、字符串一律视为「无代次」）。
+ * 单一规范化入口：两端工具都不得自行判断，避免一端收下 "3"、另一端丢弃。
+ */
+export function normalizeMediaConfirmExecutionRevision(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
 
 const STEP_LABELS: Record<MediaToolConfirmStep, string> = {
   transcribe: "转写",
@@ -61,9 +79,16 @@ export function buildMediaToolConfirmation(args: {
   step: MediaToolConfirmStep;
   targetLang?: string;
   upperCredits?: number;
+  executionRevision?: number;
 }): MediaToolConfirmation {
   const label = STEP_LABELS[args.step];
   const credits = formatMediaConfirmCredits(args.upperCredits);
+  // 只有「未授权」这一路才是首次授权握手：budget_overrun 是追加预算，即使调用方误传代次也不携带
+  // （否则会把「首次授权」的绑定字段装到预算超额卡上）。非法/缺失代次一律整体缺席，不写 undefined。
+  const executionRevision =
+    args.reason === "unauthorized"
+      ? normalizeMediaConfirmExecutionRevision(args.executionRevision)
+      : undefined;
   const summary =
     args.reason === "budget_overrun"
       ? `${label}预算超额，需要你本人确认追加预算（还需 ${credits} 积分）后才能继续。请在界面上确认授权，或调整额度设置后重试。`
@@ -77,6 +102,7 @@ export function buildMediaToolConfirmation(args: {
     step: args.step,
     ...(args.step === "translate" && args.targetLang ? { targetLang: args.targetLang } : {}),
     upperCredits: args.upperCredits,
+    ...(executionRevision !== undefined ? { executionRevision } : {}),
     summary,
   };
 }

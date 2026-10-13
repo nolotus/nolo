@@ -4,6 +4,54 @@ import type {
   MediaQuote,
   MediaScope,
 } from "ai/lecture/types";
+import { normalizeMediaConfirmExecutionRevision } from "ai/lecture/mediaToolConfirm";
+import { MEDIA_TARGET_LANG_CODES } from "ai/lecture/mediaTargetLangs";
+
+export { normalizeMediaConfirmExecutionRevision };
+
+/**
+ * 客户端可选的翻译目标语言码白名单。
+ * 真值源 = `ai/lecture/mediaTargetLangs`（与服务端 `TARGET_LANGUAGES` 同一清单；2026-10-13 由两份清单收敛而来，
+ * 此前两侧各自维护、新增语言会漂移）。这里引用共享清单本身而不是本地复制一份。
+ */
+export const SUPPORTED_MEDIA_TARGET_LANGS = MEDIA_TARGET_LANG_CODES;
+
+export type SupportedMediaTargetLang = (typeof SUPPORTED_MEDIA_TARGET_LANGS)[number];
+
+export function normalizeMediaTargetLang(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const code = raw.trim().toLowerCase();
+  return (SUPPORTED_MEDIA_TARGET_LANGS as readonly string[]).includes(code) ? code : null;
+}
+
+export type MediaStepReadinessState = "ready" | "done" | "busy" | "stale" | "blocked";
+
+export interface MediaStepReadiness {
+  jobId: string;
+  step: "transcribe" | "translate";
+  targetLang?: string;
+  executionRevision: number;
+  state: MediaStepReadinessState;
+  upperCredits?: number;
+}
+
+export const getMediaStepReadiness = (
+  id: string,
+  params: {
+    step: "transcribe" | "translate";
+    targetLang?: string;
+    expectedExecutionRevision: number;
+  },
+) => {
+  const query = new URLSearchParams({
+    step: params.step,
+    expectedExecutionRevision: String(params.expectedExecutionRevision),
+  });
+  if (params.targetLang) {
+    query.set("targetLang", params.targetLang);
+  }
+  return mediaJobRequest<MediaStepReadiness>(`/${id}/step-readiness?${query.toString()}`);
+};
 
 const API = "/api/media-jobs";
 
@@ -157,14 +205,27 @@ const STEP_STAGE_KEYS: Record<"transcribe" | "translate", string[]> = {
 };
 
 export function deriveMediaStepPhase(
-  job: Pick<MediaJob, "status" | "stageArtifacts" | "execution" | "error"> | null | undefined,
+  job: Pick<MediaJob, "status" | "stageArtifacts" | "execution" | "error" | "targetLang"> | null | undefined,
   step: "transcribe" | "translate",
+  requestedTargetLang?: string,
 ): MediaStepPhase {
   if (!job) return "unknown";
   const stages = STEP_STAGE_KEYS[step];
   const artifacts = (job.stageArtifacts ?? {}) as Record<string, unknown>;
   const stepDone = stages.every((s) => Boolean(artifacts[s]));
-  if (stepDone) return "done";
+  if (stepDone) {
+    if (step === "translate" && requestedTargetLang) {
+      const normRequested = normalizeMediaTargetLang(requestedTargetLang);
+      const normJobLang = normalizeMediaTargetLang(job.targetLang);
+      if (normRequested && normJobLang && normRequested !== normJobLang) {
+        // 请求语言与已完成语言不一致：非当前语言的完成，不能判为 done，继续往下检查 execution
+      } else {
+        return "done";
+      }
+    } else {
+      return "done";
+    }
+  }
   const owns = job.execution?.mode === "step" && job.execution.step === step;
   if (job.status === "running" && owns) return "running";
   if (job.status === "awaiting_confirmation" && owns) return "awaiting";
@@ -202,7 +263,13 @@ export function deriveStepUpperCredits(
 
 export const mediaJobStep = (
   id: string,
-  payload: { step: "transcribe" | "translate"; targetLang?: string; confirmationToken?: string },
+  payload: {
+    step: "transcribe" | "translate";
+    targetLang?: string;
+    confirmationToken?: string;
+    expectedExecutionRevision?: number;
+    sttProvider?: string;
+  },
 ) =>
   mediaJobRequest<{ stepResult: MediaStepOutcome; jobId: string }>(`/${id}/step`, {
     method: "POST",
@@ -242,7 +309,12 @@ export const authorizeMediaJob = (
 
 export const authorizeMediaStep = (
   id: string,
-  payload: { step: "transcribe" | "translate"; targetLang?: string },
+  payload: {
+    step: "transcribe" | "translate";
+    targetLang?: string;
+    sttProvider?: string;
+    expectedExecutionRevision?: number;
+  },
   autoApproveCredits?: number,
 ) =>
   authorizeMediaJob(id, "step", payload, autoApproveCredits);

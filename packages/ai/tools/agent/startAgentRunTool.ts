@@ -120,9 +120,8 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             title: {
                 type: "string",
                 description:
-                    `可选。这次子任务的短标题（≤${RUN_TITLE_MAX} 字，一行，如「复审额度 diff」「Opus 本地拉取设计」）。` +
-                    "本地 TUI 的运行区用它标识这个 run（服务端 Web 路径只在返回值里回显，不持久化）。同一个 agent 并发多个 run 时名字完全相同、" +
-                    "brief 开头又常是同样的套话，强烈建议填写；不填则不显示标题，不会自动从任务正文生成。",
+                    `必填。这次子任务的短标题（≤${RUN_TITLE_MAX} 字，一行，如「复审额度 diff」「Opus 本地拉取设计」）。` +
+                    "会展示并随运行记录持久化，用于区分并发 run；不得为空或仅含空白。",
             },
             // 刻意不向模型暴露 ephemeral：AI 不需要知道这个选项，不提供即默认持久化。
             // 非持久化 run 在失败/stall/输出被截断时不会留下任何可找回的结论，而
@@ -192,7 +191,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 description: "可选。父对话 id，用于建立父子对话归属关系。默认从运行时当前激活对话获取。",
             },
         },
-        required: ["task"],
+        required: ["task", "title"],
     },
     };
 }
@@ -253,6 +252,9 @@ export async function startAgentRunFunc(
     _context?: { parentMessageId?: string; signal?: AbortSignal; toolRunId?: string }
 ): Promise<{ rawData: any; displayData: string; metadata?: Record<string, unknown> }> {
     const { agentKey, task, input, agentName, batchId, wait } = args;
+    if (typeof task !== "string" || !task.trim()) throw new Error("startAgentRun 缺少 task");
+    const title = normalizeRunTitle(args.title);
+    if (!title) throw new Error(`startAgentRun 需要非空的一行标题（≤${RUN_TITLE_MAX} 字）`);
     const resultMode = args.resultMode ?? "full";
     const { dispatch } = thunkApi;
 
@@ -326,6 +328,7 @@ export async function startAgentRunFunc(
                 // undefined 会误入同步等待分支。
                 waitForCompletion: wait === true,
                 runKind: "subtask",
+                runTitle: title,
                 ...(args.readOnly === true ? { readOnly: true } : {}),
                 ...(parentDialogId ? { parentDialogId } : {}),
             })
@@ -366,7 +369,6 @@ export async function startAgentRunFunc(
         // rawData carries only real identity fields; the display fallback chain
         // lives in resolveRunLabel so a key never masquerades as a name.
         const resolvedName = agentName?.trim() || bgResult.agentName || bgResult.name;
-        const title = normalizeRunTitle(args.title);
         // The label is the NAME layer only — the title rides its own row on
         // the card, so letting it win here would leave the identity row empty
         // (and the same holds for any machine-side use of the same function).

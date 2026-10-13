@@ -18,6 +18,7 @@ import {
 } from "ai/tools/toolRunStore";
 import {
   getMediaJob,
+  getMediaStepReadiness,
   mediaJobStep,
   authorizeMediaStep,
   roundUpToFriendlyCredits,
@@ -25,6 +26,9 @@ import {
   deriveMediaStepPhase,
   deriveStepUpperCredits,
   exportMediaJob,
+  normalizeMediaTargetLang,
+  normalizeMediaConfirmExecutionRevision,
+  type MediaStepReadinessState,
 } from "chat/web/mediaJobs";
 import type { MediaStepOutcome, TranscriptSegment } from "chat/web/mediaJobs";
 import type { MediaJob } from "ai/lecture/types";
@@ -87,9 +91,13 @@ const POLL_MS = 3000;
 const isStepKey = (k: string): k is "transcribe" | "translate" => k === "transcribe" || k === "translate";
 
 /** 服务端单步真值 → 卡片阶段。unknown 不映射为任何状态（由调用方保持等待/不确认）。 */
-function derivePhase(stepKey: string, job: MediaJob | null | undefined): StepPhase | null {
+function derivePhase(
+  stepKey: string,
+  job: MediaJob | null | undefined,
+  requestedTargetLang?: string,
+): StepPhase | null {
   if (!isStepKey(stepKey)) return null;
-  const p = deriveMediaStepPhase(job, stepKey);
+  const p = deriveMediaStepPhase(job, stepKey, requestedTargetLang);
   if (p === "unknown") return null;
   return p === "awaiting" ? "awaiting" : p;
 }
@@ -225,6 +233,52 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
   const isRunning = phase === "running";
   const isDone = phase === "done";
 
+  // 翻译确认安全判定与字段预检
+  const isTranslateStep = stepKey === "translate";
+  const isUnauthorizedConfirm =
+    data.reason === "unauthorized" || innerData.reason === "unauthorized";
+  const isTranslateConfirmation = isTranslateStep && isUnauthorizedConfirm;
+
+  const rawConfirmJobId = data.jobId || innerData.jobId;
+  const rawConfirmTargetLang = data.targetLang ?? innerData.targetLang;
+  const normConfirmLang = normalizeMediaTargetLang(rawConfirmTargetLang);
+  const normArgLang = toolArgs?.targetLang !== undefined ? normalizeMediaTargetLang(toolArgs.targetLang) : undefined;
+  const targetRevision = normalizeMediaConfirmExecutionRevision(
+    data.executionRevision ?? innerData.executionRevision,
+  );
+  const cardUpperCredits = data.upperCredits ?? innerData.upperCredits;
+  const hasValidCardUpper =
+    typeof cardUpperCredits === "number" && Number.isFinite(cardUpperCredits) && cardUpperCredits >= 0;
+
+  // 目标翻译typed确认结果job/step/lang/revision与toolArgs一致性预检
+  let preCheckError: { type: "conflict" | "missing_revision" | "invalid_quote"; message: string } | null = null;
+  if (isTranslateConfirmation) {
+    if (!rawConfirmJobId) {
+      preCheckError = { type: "conflict", message: "缺少任务 ID，无法授权，请重新发起" };
+    } else if (toolArgs?.jobId && toolArgs.jobId !== rawConfirmJobId) {
+      preCheckError = { type: "conflict", message: "任务 ID 与确认结果冲突，无法授权，请重新发起" };
+    } else if (toolArgs?.step && toolArgs.step !== "translate") {
+      preCheckError = { type: "conflict", message: "步骤类型与确认结果冲突，无法授权，请重新发起" };
+    } else if (!normConfirmLang) {
+      preCheckError = { type: "conflict", message: "目标语言缺失或不受支持，无法授权，请重新发起" };
+    } else if (toolArgs?.targetLang !== undefined && normArgLang === null) {
+      preCheckError = { type: "conflict", message: "工具目标语言不受支持，无法授权，请重新发起" };
+    } else if (normArgLang !== undefined && normArgLang !== normConfirmLang) {
+      preCheckError = { type: "conflict", message: "目标语言与确认结果冲突，无法授权，请重新发起" };
+    } else if (targetRevision === undefined) {
+      preCheckError = { type: "missing_revision", message: "待确认结果已过期，请重新发起" };
+    } else if (!hasValidCardUpper) {
+      preCheckError = { type: "invalid_quote", message: "缺少授权金额（upperCredits），无法授权，请重新发起" };
+    }
+  }
+
+  const [translateReadiness, setTranslateReadiness] = useState<{
+    checked: boolean;
+    state: MediaStepReadinessState | "conflict" | "missing_revision" | "invalid_quote" | "error" | null;
+    upperCredits?: number;
+    error?: string;
+  }>({ checked: false, state: null });
+
   // 按 POST step 的真实 MediaStepResult（server pipeline.ts）映射本卡状态。
   const applyStepOutcome = (outcome: MediaStepOutcome | undefined) => {
     if (!outcome) {
@@ -329,6 +383,127 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
 
   const productSummary = getProductSummary();
 
+  // 翻译步骤专用 readiness 查询与失效控制
+  useEffect(() => {
+    if (!isTranslateConfirmation) return;
+
+    if (preCheckError) {
+      setTranslateReadiness({
+        checked: true,
+        state: preCheckError.type,
+        error: preCheckError.message,
+      });
+      setRemote({ phase: "awaiting" });
+      return;
+    }
+
+    let cancelled = false;
+    const currentGen = ++genRef.current;
+
+    getMediaStepReadiness(rawConfirmJobId!, {
+      step: "translate",
+      targetLang: normConfirmLang!,
+      expectedExecutionRevision: targetRevision!,
+    })
+      .then((res) => {
+        if (cancelled || !mountedRef.current || currentGen !== genRef.current) return;
+        // 严格核对响应字段：jobId/step/targetLang，不能值优先级掩盖冲突
+        if (
+          res.jobId !== rawConfirmJobId ||
+          res.step !== "translate" ||
+          normalizeMediaTargetLang(res.targetLang) !== normConfirmLang
+        ) {
+          setTranslateReadiness({
+            checked: true,
+            state: "conflict",
+            error: "服务端核对信息不一致，无法授权，请重新发起",
+          });
+          setRemote({ phase: "awaiting" });
+          return;
+        }
+
+        if (res.state === "stale" || res.executionRevision !== targetRevision) {
+          // 代次不符 → stale，过期提示，禁授权
+          setTranslateReadiness({
+            checked: true,
+            state: "stale",
+            error: "待确认结果已过期，任务代次已变更，请重新发起",
+          });
+          setRemote({ phase: "awaiting" });
+          return;
+        }
+
+        if (res.state === "ready") {
+          // 金额核对：必须有限非负，且与本卡报价匹配，不历史 quote fallback
+          const readyUpper = res.upperCredits;
+          const isValidUpper = typeof readyUpper === "number" && Number.isFinite(readyUpper) && readyUpper >= 0;
+          const matchesCard =
+            isValidUpper && typeof cardUpperCredits === "number" && Math.abs(readyUpper - cardUpperCredits) < 1e-4;
+          if (!isValidUpper || !matchesCard) {
+            setTranslateReadiness({
+              checked: true,
+              state: "invalid_quote",
+              error: "授权金额与当前任务报价不一致（或已失效），无法授权，请重新发起",
+            });
+            setRemote({ phase: "awaiting" });
+            return;
+          }
+          setTranslateReadiness({
+            checked: true,
+            state: "ready",
+            upperCredits: readyUpper,
+          });
+          setRemote({ phase: "awaiting" });
+          return;
+        }
+
+        if (res.state === "done") {
+          // 同语言已完整覆盖 → done，不确认、不重放
+          setTranslateReadiness({ checked: true, state: "done" });
+          setRemote({ phase: "done" });
+          return;
+        }
+
+        if (res.state === "busy") {
+          setTranslateReadiness({ checked: true, state: "busy", error: "任务正在执行中，请稍候" });
+          setRemote({ phase: "running" });
+          return;
+        }
+
+        if (res.state === "blocked") {
+          setTranslateReadiness({
+            checked: true,
+            state: "blocked",
+            error: "任务当前状态不可授权执行翻译，请重新发起或检查转写产物",
+          });
+          setRemote({ phase: "awaiting" });
+          return;
+        }
+      })
+      .catch((err: any) => {
+        if (cancelled || !mountedRef.current || currentGen !== genRef.current) return;
+        setTranslateReadiness({
+          checked: true,
+          state: "error",
+          error: `核对步骤就绪状态失败：${err?.message || "网络错误"}，无法授权`,
+        });
+        setRemote({ phase: "awaiting" });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    rawConfirmJobId,
+    stepKey,
+    normConfirmLang,
+    targetRevision,
+    isTranslateConfirmation,
+    cardUpperCredits,
+    preCheckError?.type,
+    preCheckError?.message,
+  ]);
+
   // 只读核对：读取服务端真值，绝不授权、不执行、不改变收费状态。失败可见，并可由用户只读重试。
   const verifyStepState = (onSettled?: () => void) => {
     if (!jobId) return;
@@ -341,7 +516,7 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
           return;
         }
         setJob(res.job);
-        const p = derivePhase(stepKey, res.job);
+        const p = derivePhase(stepKey, res.job, normConfirmLang ?? undefined);
         if (p) setRemote({ phase: p });
         else setRemote({ phase: "idle", error: "无法判定本步状态，可点击重新核对" });
         onSettled?.();
@@ -356,9 +531,10 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
   // 挂载时读一次服务端真值（含旧 requires_confirmation 卡）：已完成则呈现完成，不触发授权或重跑。
   useEffect(() => {
     if (!jobId) return;
+    if (isTranslateConfirmation) return;
     verifyStepState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId, stepKey]);
+  }, [jobId, stepKey, isTranslateConfirmation]);
 
   // 仅服务端真实执行中（running）才轮询；离开 running 或卸载即清理定时器，过期响应丢弃。
   useEffect(() => {
@@ -374,7 +550,7 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
             return;
           }
           setJob(res.job);
-          const p = derivePhase(stepKey, res.job);
+          const p = derivePhase(stepKey, res.job, normConfirmLang ?? undefined);
           if (p && p !== "running") setRemote({ phase: p });
         })
         .catch((err: any) => {
@@ -451,6 +627,67 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
       setError("缺少任务 ID");
       return;
     }
+
+    const actionStep = (data.step || stepKey) as "transcribe" | "translate";
+    const explicitTargetLang: string | undefined =
+      actionStep === "translate"
+        ? (normConfirmLang ?? normalizeMediaTargetLang(data.targetLang ?? toolArgs?.targetLang)) ?? undefined
+        : undefined;
+
+    // 针对 translate 步骤的首次 unauthorized typed 确认：点击前复核 readiness，不能回落 job.targetLang
+    // budget_overrun 为追加预算，不走首次授权 readiness/revision 检查
+    if (isTranslateConfirmation) {
+      if (!explicitTargetLang) {
+        setError("缺少有效目标语言，无法授权");
+        return;
+      }
+      if (targetRevision === undefined) {
+        setError("待确认结果缺少执行代次，无法授权，请重新发起");
+        return;
+      }
+
+      try {
+        const recheck = await getMediaStepReadiness(targetId, {
+          step: "translate",
+          targetLang: explicitTargetLang,
+          expectedExecutionRevision: targetRevision,
+        });
+
+        if (
+          recheck.jobId !== targetId ||
+          recheck.step !== "translate" ||
+          normalizeMediaTargetLang(recheck.targetLang) !== explicitTargetLang ||
+          recheck.executionRevision !== targetRevision ||
+          recheck.state !== "ready"
+        ) {
+          setError("步骤就绪状态已变更，无法执行授权，请重新发起");
+          return;
+        }
+
+        const readyUpper = recheck.upperCredits;
+        const isValidUpper = typeof readyUpper === "number" && Number.isFinite(readyUpper) && readyUpper >= 0;
+        const matchesCard =
+          isValidUpper && typeof cardUpperCredits === "number" && Math.abs(readyUpper - cardUpperCredits) < 1e-4;
+        if (!isValidUpper || !matchesCard) {
+          setError("授权金额与当前任务报价不一致，无法执行授权，请重新发起");
+          return;
+        }
+      } catch (checkErr: any) {
+        setError(`复核就绪状态失败：${checkErr?.message || "网络错误"}，请稍后重试`);
+        return;
+      }
+    }
+
+    const checkUpper =
+      actionStep === "translate"
+        ? (translateReadiness.state === "ready" ? translateReadiness.upperCredits ?? cardUpperCredits : cardUpperCredits)
+        : (data.upperCredits ?? innerData.upperCredits ?? (actionStep ? deriveStepUpperCredits(job, actionStep) : null));
+    const checkValid = typeof checkUpper === "number" && Number.isFinite(checkUpper) && checkUpper >= 0;
+    if (!checkValid) {
+      setError("缺少授权金额，无法授权，请重新发起或刷新查看");
+      return;
+    }
+
     const gen = ++genRef.current;
     const isLatest = () => mountedRef.current && gen === genRef.current;
     setStarting(true);
@@ -458,24 +695,27 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
 
     // 单步 STT 供应商：唯一来源是模型 args（tool-run 重放时 run.input 由同一 args 派生，仅作兜底）。
     // 仅 transcribe 透传；未指定则两处都不带键 —— 授权与执行的 selection 必须字节一致，否则服务端票据核销 409。
-    const actionStep = (data.step || stepKey) as "transcribe" | "translate";
     const run = toolRunId ? getToolRunById(toolRunId) : undefined;
     const rawSttProvider: unknown = toolArgs?.sttProvider ?? run?.input?.sttProvider;
     const sttProviderArg =
       actionStep === "transcribe" && typeof rawSttProvider === "string" ? { sttProvider: rawSttProvider } : {};
 
+    const authPayload: {
+      step: "transcribe" | "translate";
+      targetLang?: string;
+      sttProvider?: string;
+      expectedExecutionRevision?: number;
+    } = {
+      step: actionStep,
+      ...(actionStep === "translate" && explicitTargetLang ? { targetLang: explicitTargetLang } : {}),
+      ...(targetRevision !== undefined ? { expectedExecutionRevision: targetRevision } : {}),
+      ...sttProviderArg,
+    };
+
     // 授权阶段失败：尚未发起执行，状态保持 awaiting，明确可重试，不会产生扣费。
     let authorization: Awaited<ReturnType<typeof authorizeMediaStep>>;
     try {
-      authorization = await authorizeMediaStep(
-        targetId,
-        {
-          step: actionStep,
-          targetLang: data.targetLang ?? toolArgs?.targetLang,
-          ...sttProviderArg,
-        },
-        autoApproveCredits,
-      );
+      authorization = await authorizeMediaStep(targetId, authPayload, autoApproveCredits);
     } catch (err: any) {
       if (isLatest()) setError(`授权失败，可重试：${err?.message || "请稍后重试"}`);
       if (isLatest()) setStarting(false);
@@ -493,7 +733,13 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
           executeToolRun({
             id: run.id,
             // 重放原参数：provider 与授权 payload 同一取值，未指定时不加键。
-            inputOverride: { ...run.input, ...sttProviderArg, confirmationToken: authorization.confirmationToken },
+            inputOverride: {
+              ...run.input,
+              ...sttProviderArg,
+              ...(actionStep === "translate" && explicitTargetLang ? { targetLang: explicitTargetLang } : {}),
+              ...(targetRevision !== undefined ? { expectedExecutionRevision: targetRevision } : {}),
+              confirmationToken: authorization.confirmationToken,
+            },
           }),
         ).unwrap();
       } else {
@@ -501,7 +747,8 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
         try {
           res = await mediaJobStep(targetId, {
             step: actionStep,
-            targetLang: data.targetLang ?? toolArgs?.targetLang,
+            ...(actionStep === "translate" && explicitTargetLang ? { targetLang: explicitTargetLang } : {}),
+            ...(targetRevision !== undefined ? { expectedExecutionRevision: targetRevision } : {}),
             ...sttProviderArg,
             confirmationToken: authorization.confirmationToken,
           });
@@ -511,7 +758,7 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
           if (!isLatest()) return;
           if (verify?.job) {
             setJob(verify.job);
-            const p = derivePhase(stepKey, verify.job);
+            const p = derivePhase(stepKey, verify.job, explicitTargetLang);
             if (p) {
               setRemote({ phase: p });
               if (p === "awaiting") setError(`执行请求未确认，服务端仍待确认，可重试：${execErr?.message || ""}`);
@@ -530,7 +777,7 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
         const latest = await getMediaJob(targetId).catch(() => null);
         if (isLatest() && latest?.job) {
           setJob(latest.job);
-          const p = derivePhase(stepKey, latest.job);
+          const p = derivePhase(stepKey, latest.job, explicitTargetLang);
           // 真值无法判定时保持 idle（核对中），绝不编造 running/done。
           if (p) setRemote({ phase: p });
           else setRemote({ phase: "idle", error: "无法核对步骤状态，请刷新后查看" });
@@ -550,23 +797,44 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
     const confirmStepKey: "transcribe" | "translate" | null = isStepKey(data.step || stepKey)
       ? ((data.step || stepKey) as "transcribe" | "translate")
       : null;
-    // 金额真值优先级：工具结果 > 服务端报价（quoted 卡无工具金额时的唯一真值）> 不可授权。
+    // 金额真值优先级：
+    // - translate 步骤必须来自卡片本次报价（经 readiness 校验），不历史 quote fallback；
+    // - transcribe 步骤沿用既有优先级：工具结果 > 服务端报价 > 不可授权。
     const rawUpper =
-      data.upperCredits ?? innerData.upperCredits ?? (confirmStepKey ? deriveStepUpperCredits(job, confirmStepKey) : null);
+      confirmStepKey === "translate"
+        ? (translateReadiness.state === "ready" ? translateReadiness.upperCredits ?? cardUpperCredits : cardUpperCredits)
+        : (data.upperCredits ?? innerData.upperCredits ?? (confirmStepKey ? deriveStepUpperCredits(job, confirmStepKey) : null));
     const hasValidAmount = typeof rawUpper === "number" && Number.isFinite(rawUpper) && rawUpper >= 0;
     const creditsLabel = hasValidAmount ? `${rawUpper} 积分` : "—";
     // 文件名/时长同样只取真值（工具结果或 GET job），缺失就不显示该段，不编造。
     const awaitingFileName = job?.fileName ?? data.fileName ?? innerData.fileName ?? null;
     // 金额为 0（或非法）时不给出免问阈值：roundUp(0)=1 会渲染成「0 积分」配「≤1 不用问」的错位。
     const autoApproveN = hasValidAmount && rawUpper > 0 ? roundUpToFriendlyCredits(rawUpper) : null;
-    const confirmDisabled = starting || !hasValidAmount || !jobId;
-    // 不可授权原因必须明确可见：金额只取工具结果或服务端报价（quoted 卡的真值），
-    // 两者都缺才判为不可授权 —— 不猜、不编造上限。
+
+    const canConfirm =
+      confirmStepKey === "translate"
+        ? (isTranslateConfirmation ? translateReadiness.state === "ready" : true) && hasValidAmount && Boolean(jobId)
+        : hasValidAmount && Boolean(jobId);
+
+    // 不可授权原因必须明确可见：
     const blockReason = !jobId
       ? "缺少任务 ID，无法授权，请刷新或重新发起"
-      : !hasValidAmount
-        ? "缺少授权金额（upperCredits），无法授权，请重新发起或刷新查看"
-        : null;
+      : confirmStepKey === "translate" && translateReadiness.error
+        ? translateReadiness.error
+        : preCheckError
+          ? preCheckError.message
+          : !hasValidAmount
+            ? "缺少授权金额（upperCredits），无法授权，请重新发起或刷新查看"
+            : null;
+
+    const confirmDisabled = starting || !canConfirm || Boolean(blockReason);
+
+    // 仅当翻译确认且 readiness 明确未就绪时，完全隐藏授权按钮（提示过期/冲突/阻断等原因）；
+    // 其余待确认状态（如转写、预算超额、缺少金额）保留两个按钮结构但严格置为 disabled，不可点击授权。
+    const hideConfirmButtons =
+      confirmStepKey === "translate" &&
+      isTranslateConfirmation &&
+      translateReadiness.state !== "ready";
 
     return (
       <div
@@ -628,63 +896,67 @@ export const MediaStepCard: React.FC<MediaStepCardProps> = (props) => {
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <button
-            type="button"
-            data-testid="media-job-confirm-step"
-            disabled={confirmDisabled}
-            onClick={() => void handleConfirmAction()}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "6px 14px",
-              fontSize: "13px",
-              fontWeight: 600,
-              color: "#ffffff",
-              backgroundColor: "var(--primary, #2563eb)",
-              border: "none",
-              borderRadius: "6px",
-              cursor: confirmDisabled ? "not-allowed" : "pointer",
-              opacity: confirmDisabled && !starting ? 0.6 : 1,
-            }}
-          >
-            {starting ? "执行中…" : `开始${stepLabel}`}
-          </button>
+        {!hideConfirmButtons && (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                data-testid="media-job-confirm-step"
+                disabled={confirmDisabled}
+                onClick={() => void handleConfirmAction()}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "6px 14px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "#ffffff",
+                  backgroundColor: "var(--primary, #2563eb)",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: confirmDisabled ? "not-allowed" : "pointer",
+                  opacity: confirmDisabled && !starting ? 0.6 : 1,
+                }}
+              >
+                {starting ? "执行中…" : `开始${stepLabel}`}
+              </button>
 
-          <button
-            type="button"
-            data-testid="media-job-auto-approve-step"
-            disabled={confirmDisabled || autoApproveN === null}
-            onClick={() => autoApproveN !== null && void handleConfirmAction(autoApproveN)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "6px 14px",
-              fontSize: "13px",
-              fontWeight: 500,
-              color: "var(--text, #111827)",
-              backgroundColor: "var(--surface, #ffffff)",
-              border: "1px solid var(--border, #d1d5db)",
-              borderRadius: "6px",
-              cursor: confirmDisabled || autoApproveN === null ? "not-allowed" : "pointer",
-              opacity: confirmDisabled || autoApproveN === null ? 0.6 : 1,
-            }}
-          >
-            {starting
-              ? "执行中…"
-              : autoApproveN !== null
-                ? `以后 ≤${autoApproveN} 不用问`
-                : hasValidAmount
-                  ? "额度为 0，不可免问"
-                  : "额度未知，不可免问"}
-          </button>
-        </div>
+              <button
+                type="button"
+                data-testid="media-job-auto-approve-step"
+                disabled={confirmDisabled || autoApproveN === null}
+                onClick={() => autoApproveN !== null && void handleConfirmAction(autoApproveN)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "6px 14px",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "var(--text, #111827)",
+                  backgroundColor: "var(--surface, #ffffff)",
+                  border: "1px solid var(--border, #d1d5db)",
+                  borderRadius: "6px",
+                  cursor: confirmDisabled || autoApproveN === null ? "not-allowed" : "pointer",
+                  opacity: confirmDisabled || autoApproveN === null ? 0.6 : 1,
+                }}
+              >
+                {starting
+                  ? "执行中…"
+                  : autoApproveN !== null
+                    ? `以后 ≤${autoApproveN} 不用问`
+                    : hasValidAmount
+                      ? "额度为 0，不可免问"
+                      : "额度未知，不可免问"}
+              </button>
+            </div>
 
-        <div style={{ marginTop: 8, fontSize: "11px", color: "var(--textMuted, #6b7280)" }}>
-          免问额度对以后所有媒体任务生效，可在设置页「媒体额度」中关闭或调整
-        </div>
+            <div style={{ marginTop: 8, fontSize: "11px", color: "var(--textMuted, #6b7280)" }}>
+              免问额度对以后所有媒体任务生效，可在设置页「媒体额度」中关闭或调整
+            </div>
+          </>
+        )}
 
         {error && (
           <div role="alert" style={{ marginTop: 8, fontSize: "12px", color: "var(--danger, #ef4444)" }}>

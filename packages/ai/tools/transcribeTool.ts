@@ -1,5 +1,8 @@
 import { callToolApi } from "./toolApiClient";
-import { buildMediaToolConfirmation } from "ai/lecture/mediaToolConfirm";
+import {
+  buildMediaToolConfirmation,
+  normalizeMediaConfirmExecutionRevision,
+} from "ai/lecture/mediaToolConfirm";
 
 export const transcribeSchema = {
   name: "transcribe",
@@ -47,14 +50,20 @@ export type TranscribeToolInput = {
   toSec?: number;
   sourceLang?: string;
   sttProvider?: string;
+  /**
+   * 内部字段，**不开放给模型**（不在 transcribeSchema.parameters 里）：只由受信任的
+   * UI 确认路径（executeToolRun 的 inputOverride）注入，模型入口由 stripModelToolArgs 剥掉。
+   */
   confirmationToken?: string;
+  /** 同 confirmationToken：执行时与 /authorize 同值透传，供服务端锁内绑定校验（0 是合法代次）。 */
+  expectedExecutionRevision?: number;
 };
 
 export async function transcribeFunc(
   input: TranscribeToolInput,
   thunkApi: any,
 ): Promise<any> {
-  const { action = "transcribe", fileId, jobId, fromSec, toSec, sourceLang, sttProvider, confirmationToken } = input ?? {};
+  const { action = "transcribe", fileId, jobId, fromSec, toSec, sourceLang, sttProvider, confirmationToken, expectedExecutionRevision } = input ?? {};
   if (action === "status" && !jobId) throw new Error("status 模式必须提供已有 jobId");
   if (action === "status" && (fileId || fromSec !== undefined || toSec !== undefined || sourceLang)) throw new Error("status 模式仅接受 jobId");
   let resolvedJobId = jobId;
@@ -90,12 +99,17 @@ export async function transcribeFunc(
     if (!resolvedJobId) throw new Error("创建媒体任务失败：服务端未返回 jobId");
   }
 
+  // 代次：与 translateTool / 共享 normalizer 同一判据（有限非负整数，0 有效）。
+  // 非法/缺失一律整体缺席、绝不回落成 0；缺席时票据 binding 不等 → 服务端拒绝核销（fail-closed）。
+  const revision = normalizeMediaConfirmExecutionRevision(expectedExecutionRevision);
   const stepBody: Record<string, unknown> = {
     step: "transcribe",
     waitMs: 60_000,
     // 仅显式指定时透传；未指定保持服务端既有默认行为（不静默选供应商、不改全局默认）。
     ...(typeof sttProvider === "string" ? { sttProvider } : {}),
+    // 授权票据与声明的执行代次：只能由受信任的 UI 确认路径注入，执行时原样带上（绝不进 summary/日志）。
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(revision !== undefined ? { expectedExecutionRevision: revision } : {}),
   };
 
   let data: any;
@@ -109,11 +123,14 @@ export async function transcribeFunc(
   } catch (err: any) {
     if (err?.status === 409 && err?.code === "CONFIRMATION_REQUIRED") {
       const upperCredits = err?.upperCredits ?? (err?.details as any)?.upperCredits;
+      // 与 translateTool 同款、同字段：只转述服务端 409 锁内捕获的代次，不额外 GET 补齐。
+      const executionRevision = err?.executionRevision ?? (err?.details as any)?.executionRevision;
       return buildMediaToolConfirmation({
         reason: "unauthorized",
         jobId: resolvedJobId,
         step: "transcribe",
         upperCredits,
+        executionRevision,
       });
     }
     throw err;

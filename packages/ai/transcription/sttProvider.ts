@@ -5,7 +5,9 @@ import { formatSRT } from "./srt";
 
 export type SttResult = {
   text: string; words: Word[]; durationSec: number; language?: string;
-  provider: "grok" | "deepgram"; model: "grok-voice-transcribe-2.0" | "nova-3"; vadRetried?: boolean;
+  provider: "grok" | "deepgram" | "scribe" | "cloudflare";
+  model: "grok-voice-transcribe-2.0" | "nova-3" | "scribe_v2" | "@cf/openai/whisper";
+  vadRetried?: boolean;
 };
 
 export async function transcribeWithGrok(opts: {
@@ -109,6 +111,152 @@ export async function transcribeWithDeepgram(opts: {
     provider: "deepgram",
     model: "nova-3",
   };
+}
+
+/** 读取错误响应体并抹掉密钥：抛出的错误信息绝不携带 apiKey / apiToken。 */
+async function readRedactedErrorBody(response: Response, secret: string): Promise<string> {
+  let errorText = "";
+  try {
+    errorText = (await response.text()).slice(0, 1000);
+  } catch {
+    // 读取失败就用空字符串，绝不让原始异常逃逸出去
+  }
+  if (secret && secret.length >= 3) errorText = errorText.split(secret).join("***");
+  return errorText;
+}
+
+/**
+ * Scribe 的 `language_code` 只接受 ISO 639-1/639-3 短码；把 `zh-CN` 这类区域变体归一化到基础码，
+ * 认不出的格式一律**不发送**该字段（让服务端自动识别），而不是抛一个必被拒的参数。
+ */
+export function mapScribeLanguage(language?: string): string | undefined {
+  if (!language) return undefined;
+  const base = language.trim().toLowerCase().split(/[-_]/)[0];
+  if (!base) return undefined;
+  const iso639_2To1: Record<string, string> = {
+    cmn: "zh", zho: "zh", chi: "zh", yue: "zh", rus: "ru", eng: "en", jpn: "ja", kor: "ko",
+    spa: "es", fra: "fr", deu: "de", ita: "it", por: "pt", ukr: "uk", ara: "ar", hin: "hi",
+  };
+  const mapped = iso639_2To1[base] ?? base;
+  return /^[a-z]{2,3}$/.test(mapped) ? mapped : undefined;
+}
+
+/**
+ * Scribe v2 原生 `/v1/speech-to-text`（xi-api-key 鉴权 + multipart/form-data）。
+ * 端点与字段名取自 ElevenLabs 官方 API 参考：`model_id` / `language_code` / `timestamps_granularity` / `tag_audio_events`。
+ */
+export async function transcribeWithScribe(opts: {
+  apiKey: string; filePath: string; mimeType: string; language?: string;
+  fetchImpl?: (input: URL | RequestInfo, init?: BunFetchRequestInit | RequestInit) => Promise<Response>;
+}): Promise<SttResult> {
+  const data = await readFile(opts.filePath);
+  const languageCode = mapScribeLanguage(opts.language);
+  const form = new FormData();
+  form.append("model_id", "scribe_v2");
+  if (languageCode) form.append("language_code", languageCode);
+  form.append("timestamps_granularity", "word");
+  form.append("tag_audio_events", "false");
+  form.append("file", new Blob([new Uint8Array(data)], { type: opts.mimeType }), opts.filePath.split(/[\\/]/).pop() || "audio");
+
+  const response = await (opts.fetchImpl ?? fetch)("https://api.elevenlabs.io/v1/speech-to-text", {
+    method: "POST",
+    headers: { "xi-api-key": opts.apiKey },
+    body: form,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Scribe STT HTTP ${response.status}: ${await readRedactedErrorBody(response, opts.apiKey)}`);
+  }
+
+  const result: any = await response.json();
+  const text = String(result?.text ?? "");
+  if (!text.trim()) throw new Error("Scribe STT returned empty transcript");
+
+  // 官方响应 words[].start / words[].end 单位已是秒（float），直接映射无需换算；
+  // timestamps_granularity="word" 下响应可能夹带 spacing / audio_event 条目，只保留 type="word" 的词。
+  const rawWords = Array.isArray(result?.words) ? result.words : [];
+  const words: Word[] = rawWords
+    .filter((w: any) => w?.type === undefined || w.type === "word")
+    .map((w: any) => ({ word: String(w?.text ?? w?.word ?? "").trim(), start: Number(w?.start) || 0, end: Number(w?.end) || 0 }))
+    .filter((w: Word) => w.word.length > 0);
+
+  const languageFromResponse = typeof result?.language_code === "string" && result.language_code.trim() ? result.language_code : undefined;
+  return {
+    text,
+    words,
+    durationSec: Number(result?.audio_duration_secs) || 0,
+    language: languageFromResponse ?? languageCode,
+    provider: "scribe",
+    model: "scribe_v2",
+  };
+}
+
+/**
+ * Cloudflare Workers AI 原生 `@cf/openai/whisper`（Bearer 鉴权 + 原始音频 bytes）。
+ * 端点形状与响应信封（`{ success, result }`）与仓内既有 `cfWhisperHandler.ts` 保持一致。
+ * 词级时间戳缺失时按「段级 → 整段」逐级 fallback，保证 SRT 生成链路始终有可用时间轴。
+ */
+export async function transcribeWithCloudflare(opts: {
+  apiToken: string; accountId: string; filePath: string; mimeType: string; language?: string;
+  fetchImpl?: (input: URL | RequestInfo, init?: BunFetchRequestInit | RequestInit) => Promise<Response>;
+}): Promise<SttResult> {
+  const data = await readFile(opts.filePath);
+  const url = `https://api.cloudflare.com/client/v4/accounts/${opts.accountId}/ai/run/@cf/openai/whisper`;
+
+  const response = await (opts.fetchImpl ?? fetch)(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${opts.apiToken}`,
+      "Content-Type": opts.mimeType,
+    },
+    body: data,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Cloudflare Whisper HTTP ${response.status}: ${await readRedactedErrorBody(response, opts.apiToken)}`);
+  }
+
+  const payload: any = await response.json();
+  if (payload?.success === false) {
+    const detail = JSON.stringify(payload?.errors ?? []).slice(0, 1000);
+    throw new Error(`Cloudflare Whisper failed: ${redactSecret(detail, opts.apiToken)}`);
+  }
+
+  const result: any = payload?.result ?? payload;
+  const text = String(result?.text ?? "");
+  if (!text.trim()) throw new Error("Cloudflare Whisper returned empty transcript");
+
+  // words[] 的时间戳单位已是秒（与仓内 cfWhisperHandler 的计费推算一致）
+  const rawWords = Array.isArray(result?.words) ? result.words : [];
+  const rawSegments = Array.isArray(result?.segments) ? result.segments : [];
+  let words: Word[] = rawWords.map((w: any) => ({
+    word: String(w?.word ?? w?.text ?? "").trim(), start: Number(w?.start) || 0, end: Number(w?.end) || 0,
+  })).filter((w: Word) => w.word.length > 0);
+  if (!words.length) {
+    words = rawSegments.map((s: any) => ({
+      word: String(s?.text ?? "").trim(), start: Number(s?.start) || 0, end: Number(s?.end) || 0,
+    })).filter((w: Word) => w.word.length > 0);
+  }
+
+  const lastEnd = words.length ? words[words.length - 1].end : 0;
+  const durationSec = Number(result?.duration) || lastEnd || 0;
+  // 无任何时间戳对齐（既无 words 也无 segments）时退化成整段一个词，保持时间轴可用
+  if (!words.length) words = [{ word: text.trim(), start: 0, end: durationSec }];
+
+  return {
+    text,
+    words,
+    durationSec,
+    language: typeof result?.language === "string" ? result.language : (typeof opts.language === "string" ? opts.language : undefined),
+    provider: "cloudflare",
+    model: "@cf/openai/whisper",
+  };
+}
+
+/** 把密钥从任意诊断文本里抹掉（错误信息绝不泄露 token）。 */
+function redactSecret(text: string, secret: string): string {
+  if (!secret || secret.length < 3) return text;
+  return text.split(secret).join("***");
 }
 
 const CJK_RE = /[\u3400-\u9fff]/u;
