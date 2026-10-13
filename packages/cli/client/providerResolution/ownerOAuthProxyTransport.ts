@@ -51,6 +51,33 @@ import type { ProviderResolver } from "./providerResolutionContext";
 const OWNER_PROXY_ENDPOINT_FALLBACK =
   "https://owner-required.invalid/v1/chat/completions";
 
+/**
+ * owner-required 请求体禁止携带的字段——与服务端 admission 的 OVERRIDES
+ * 黑名单逐字对应（packages/server/ownerRequiredModelAdmission.ts）。命中任何
+ * 一个，admission 直接 400 owner_origin_invalid：model/provider/凭据类字段
+ * 一律由服务端按 agent 记录与 owner OAuth 解析，客户端不得在 body 声称。
+ * 这是 fail-closed 的防路由篡改边界，不是可协商的兼容项。
+ *
+ * 防漂移要求：两侧列表（本常量 / 服务端 OVERRIDES / 测试断言清单）任一方
+ * 增删字段时必须同步另外两方，并跑两侧一致性核对——只改一侧会让客户端在
+ * 真实链路上再次 400，而现有测试不会自动发现分叉。
+ */
+const OWNER_PROXY_BODY_FORBIDDEN_KEYS = [
+  "KEY",
+  "apiKey",
+  "url",
+  "provider",
+  "providerName",
+  "apiSource",
+  "apiKeyHeader",
+  "apiKeyRef",
+  "model",
+  "ownerUserId",
+  "credentialUserId",
+  "agentHydratedKey",
+  "credentialPolicy",
+] as const;
+
 export const resolveOwnerOAuthProxyTransport: ProviderResolver = async (ctx) => {
   const {
     agentConfig,
@@ -112,10 +139,15 @@ export const resolveOwnerOAuthProxyTransport: ProviderResolver = async (ctx) => 
         requestId,
         ...(options?.dialogId ? { dialogId: options.dialogId } : {}),
       });
-      // 把 owner-required 扩展注入顶层 body；服务端 admission 认这个字段，
-      // 其余 wire body（messages/model/stream）与 platform-proxy 完全一致。
+      // 把 owner-required 扩展注入顶层 body。注意与 platform-proxy 的差别：
+      // 其余 wire 字段只许保留 messages/tools/stream 等中性字段——override
+      // 类字段（model/provider/凭据…）必须剥掉，否则服务端 admission 的
+      // OVERRIDES 黑名单会以 400 owner_origin_invalid 拒绝（fail-closed）。
       const body = JSON.parse(request.init.body as string) as Record<string, unknown>;
       body.ownerOriginExecution = ownerOriginExecution;
+      for (const key of OWNER_PROXY_BODY_FORBIDDEN_KEYS) {
+        delete body[key];
+      }
       const init: RequestInit = {
         ...request.init,
         body: JSON.stringify(body),
