@@ -236,16 +236,51 @@ export function resolvePlatformHostedCredentialProvider(
 }
 
 /**
+ * 服务端**确实实现了上游 adapter** 的平台托管 wire 白名单（显式枚举，新增 wire
+ * 必须在此登记）。
+ *
+ * 分流表里出现一条 wire ≠ 这条线能跑：adapter 没落地时构建请求就是静默错路由。
+ * 因此逐条登记，未登记（含将来新加的协议）一律 false —— fail closed：
+ * - "chat.completions"：resolvePlatformChatCompletionsEndpoint + 通用 chat 体；
+ * - "responses"：resolvePlatformResponsesEndpoint + Responses 体；
+ * - "anthropic.messages"：Cloudflare Claude Messages —— 请求体与 SSE 转换已在
+ *   服务端两条路径落地：chatProxyRouting（buildCloudflareClaudeMessagesBody +
+ *   CLOUDFLARE_CLAUDE_RESPONSE_ADAPTER，缺账号/凭据由 chatHandler 显式 400）与
+ *   agentRun/loopUpstream 的 CF Claude 分支。端点仍是账号作用域模板，只由服务端
+ *   解析；客户端 chat 选择器对这条线保持 undefined（绝不把 Messages 模板当
+ *   chat.completions 端点下发）。
+ */
+const IMPLEMENTED_PLATFORM_HOSTED_WIRES: readonly string[] = [
+  "chat.completions",
+  "responses",
+  "anthropic.messages",
+];
+
+/**
  * 平台托管请求能不能落到一个真实上游。
  *
  * 端点与凭据必须同源：`getNoloKey("nolo")` 已经不再兜底发 key，所以「解析不出
  * 端点」等价于「这个 model 没有上游」。调用方据此显式报错，而不是让请求带着
  * 客户端传来的 url 和一把不相干的 key 出门。
+ *
+ * 表内路由的判据是 wire 白名单（IMPLEMENTED_PLATFORM_HOSTED_WIRES）：账号作用域
+ * 端点（CF Messages）由服务端解析，客户端解析器照样返回 undefined，但这条线确实
+ * 有上游 adapter，所以这里如实为 true 并交由服务端闸门报精确原因。
  */
 export function hasPlatformHostedUpstreamRoute(
   provider: string,
   model?: string | null,
 ): boolean {
+  const key = asTrimmedLowercaseString(provider);
+  if (!key) return false;
+  const aliased = PLATFORM_PROVIDER_ENDPOINT_ALIASES[key] ?? key;
+  if (aliased === "nolo") {
+    const route = resolvePlatformHostedRouting(model);
+    if (route) {
+      return IMPLEMENTED_PLATFORM_HOSTED_WIRES.includes(route.wire);
+    }
+  }
+  // 表外记录（legacy DeepSeek 默认档、provider 级已知端点）保持原解析路径。
   return Boolean(
     resolvePlatformChatCompletionsEndpoint(provider, model) ??
       (isOpenAiResponsesModel({ provider, model: model ?? undefined })
