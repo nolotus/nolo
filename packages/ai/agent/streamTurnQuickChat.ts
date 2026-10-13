@@ -7,7 +7,6 @@
 // 非 quick-chat 路径（quickChatPerfStartedAt 为 undefined）直接走原始逻辑。
 
 import { isResponseAPIModel } from "ai/llm/isResponseAPIModel";
-import { projectUserPartForModel } from "ai/attachments/projectUserPart";
 import { createDialogMessageKeyAndId } from "database/keys";
 import { messageStreamEnd } from "chat/messages/messageSlice";
 import { buildDynamicContexts, buildStaticContexts } from "./streamAgentChatTurnUtils";
@@ -172,7 +171,15 @@ export const finalizeQuickChatAgentTurnFailure = async (
 export const normalizeAgentRunUserInput = (userInput: string | any[]) => {
     if (typeof userInput === "string") return userInput;
     if (!Array.isArray(userInput)) return "";
-    return userInput.flatMap((part) => projectUserPartForModel(part));
+    return userInput.filter((part) => {
+        if (!part || typeof part !== "object") return false;
+        if (part.type === "text") return typeof part.text === "string";
+        return (
+            part.type === "image_url"
+            && typeof part.image_url?.url === "string"
+            && !!part.image_url.url.trim()
+        );
+    });
 };
 
 export const isSimpleTextInput = (userInput: string | any[]) => {

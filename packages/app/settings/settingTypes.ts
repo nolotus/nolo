@@ -21,7 +21,6 @@ export interface SettingState {
   preferredAnimationSet: number;
   maxExecutionTime: number;
   maxCost: number;
-  autoApproveCredits: number;
 
   themeName: keyof typeof THEME_COLORS;
   themeMode: "system" | "light" | "dark";

@@ -10,7 +10,6 @@ import {
   formatFields,
   type AppCommandDeps,
 } from "./appCommandShared";
-import { t } from "./tui/i18n";
 
 function printAppListUsage() {
   process.stdout.write(`Usage:
@@ -43,12 +42,12 @@ export async function runAppListCommand(args: string[], deps: AppCommandDeps): P
 
     outputResult(data, hasFlag(args, "--json"), () => {
       if (workers.length === 0) {
-        process.stdout.write(t("app.noApps"));
+        process.stdout.write("没有应用\n");
         return;
       }
-      process.stdout.write(t("app.listTitle", String(workers.length)));
+      process.stdout.write(`应用列表 (${workers.length})\n\n`);
       for (const app of workers) {
-        process.stdout.write(`  ${app.userFriendlyName ?? t("app.unnamed")}\n`);
+        process.stdout.write(`  ${app.userFriendlyName ?? "(unnamed)"}\n`);
         const fields: Array<[string, unknown]> = [
           ["appId", app.appId],
           ["appKey", app.appKey],

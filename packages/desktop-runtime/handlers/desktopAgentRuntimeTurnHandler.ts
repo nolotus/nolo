@@ -279,11 +279,6 @@ export async function handleDesktopAgentRuntimeTurnPost(
             onToolEvent: (event) => {
               enqueueEvent({ type: "tool", event });
             },
-            onToolExecutionLocation: (location) => {
-              // F2：本机实际执行位置（已收敛的 ToolExecutionLocation），
-              // 先于任何 tool 事件到达客户端；unknown 也如实下发，不补猜。
-              enqueueEvent({ type: "execution_location", location });
-            },
             onReasoningDelta: (chunk) => {
               // 与 agentRun SSE 约定对齐（见 cli/client/agentRun.ts:1155 消费方式）：
               // 单独的 thinking 事件承载 reasoning 增量，不和文本 delta 混在一起，

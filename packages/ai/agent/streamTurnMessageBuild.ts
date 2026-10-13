@@ -135,11 +135,7 @@ export const toolMessageWillPersist = (toolMsg: unknown): boolean => {
 
 export const shouldUseDesktopLocalRuntime = (
     agentConfig: Partial<Agent> | null | undefined,
-    explicitTarget?: { kind: "server" | "machine"; machineId?: string },
 ) => {
-    // Defense in depth: an explicit machine selection must never execute locally,
-    // even if the caller's remote routing is later rearranged.
-    if (explicitTarget?.kind === "machine") return false;
     if (!getIsDesktopApp()) return false;
     return agentConfig?.apiSource !== "cli";
 };

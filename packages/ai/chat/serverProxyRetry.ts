@@ -1,4 +1,3 @@
-import { classifyGenerationError } from "./parseApiError";
 import { isAbortError } from "core/abortError";
 import { waitForAbortableDelay } from "core/abortableDelay";
 import {
@@ -21,7 +20,6 @@ const readRetryableResponseBody = async (response: Response) => {
     return (await response.clone().json()) as {
       reason?: unknown;
       retryAfterMs?: unknown;
-      error?: unknown;
     };
   } catch {
     return null;
@@ -66,17 +64,10 @@ export const performServerProxyFetchWithRetry = async ({
   signal,
   logPrefix = "[fetchWithServerProxy]",
   onRetry,
-  retryNetworkErrors = true,
 }: {
   execute: () => Promise<Response>;
   signal?: AbortSignal;
   logPrefix?: string;
-  /**
-   * false = a network error is thrown instead of re-issuing the request.
-   * Needed for non-idempotent submissions whose first attempt may already have
-   * reached the server (e.g. keepalive foreground turn admission).
-   */
-  retryNetworkErrors?: boolean;
   /** 每次决定重试前回调，供 UI 展示「自动重试 N/M · 剩余 Xs」。 */
   onRetry?: (info: {
     attempt: number;
@@ -91,7 +82,7 @@ export const performServerProxyFetchWithRetry = async ({
     try {
       const response = await execute();
       const responseBody =
-        isGatewayHttpStatus(response.status)
+        response.status === 503
           ? await readRetryableResponseBody(response)
           : null;
       const isCoreDraining =
@@ -99,9 +90,7 @@ export const performServerProxyFetchWithRetry = async ({
       const maxStatusRetries = isCoreDraining
         ? MAX_SERVER_DRAIN_STATUS_RETRIES
         : MAX_STATUS_RETRIES;
-      const classified = classifyGenerationError(responseBody, response.status);
       if (
-        classified.category === "transient" &&
         statusRetries < maxStatusRetries &&
         isGatewayHttpStatus(response.status)
       ) {
@@ -129,7 +118,6 @@ export const performServerProxyFetchWithRetry = async ({
       return response;
     } catch (error: any) {
       if (
-        retryNetworkErrors &&
         networkRetries < MAX_SERVER_PROXY_RETRIES &&
         isRetryableServerProxyFetchError(error)
       ) {

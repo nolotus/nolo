@@ -6,9 +6,6 @@ import { selectCurrentServer } from "app/settings/settingSlice";
 import { useAppSelector } from "app/store";
 import { isAbortError } from "core/abortError";
 import { Dialog } from "render/web/ui/modal/Dialog";
-import { projectToolExecutionLocation } from "agent-runtime/ownerOriginExecution";
-import { formatToolExecutionLocationLine } from "chat/messages/web/toolCallPresentation";
-import { createToolNameTranslator } from "chat/messages/web/toolDisplayName";
 import {
   buildDialogReadUrl,
   formatChildRunEvidenceLine,
@@ -156,13 +153,6 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
     dialogStatus ?? thread.status,
     statusLabels,
   );
-  // F1: actual run execution location. runtimeEvidence.executionLocation is
-  // optional (old servers omit it); the projector degrades to {status:"unknown"}
-  // so the line always renders "执行位置未知" rather than guessing or crashing.
-  const executionLocationLine = formatToolExecutionLocationLine(
-    projectToolExecutionLocation(thread.runtimeEvidence?.executionLocation),
-    createToolNameTranslator(t as (key: string, options?: unknown) => string),
-  );
 
   return (
     <Dialog
@@ -189,16 +179,6 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
 
       <div {...stylex.props(croStyles.modalEvidence)} role="status">
         {evidenceLine}
-      </div>
-
-      {/* F1: actual execution host of this run (server-projected). Renders
-          "执行位置未知" on old servers — never blank, never guessed. Distinct
-          from the dialog's intended runtimeBinding.target. */}
-      <div
-        data-hook="child-run-detail-exec-location"
-        {...stylex.props(croStyles.modalEvidence, croStyles.execLocation)}
-      >
-        {executionLocationLine}
       </div>
 
       {loadState === "loading" ? (

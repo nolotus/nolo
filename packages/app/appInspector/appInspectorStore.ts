@@ -9,11 +9,6 @@ export interface AppSelectedNode {
   noloLoc?: string;
 }
 
-export type PreviewTarget =
-  | { kind: "dev"; spaceId?: string; url: string; title?: string }
-  | { kind: "artifact"; title?: string; html: string; ref?: string }
-  | { kind: "url"; url: string; title?: string };
-
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -24,25 +19,6 @@ let selectedNode: AppSelectedNode | null = null;
 let previewOpen = false;
 /** 出菜区 iframe 当前加载的 URL；null = 面板自己起本地预览服务（旧行为）。 */
 let previewUrl: string | null = null;
-/** 当前分栏工作台的目标载荷（区分开发工程、单文件制品与外部网页）。 */
-let previewTarget: PreviewTarget | null = null;
-
-export function isLocalDevUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname;
-    return (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "0.0.0.0" ||
-      host === "::1" ||
-      host === "[::1]" ||
-      (typeof window !== "undefined" && parsed.origin === window.location.origin)
-    );
-  } catch {
-    return false;
-  }
-}
 
 const notify = (): void => {
   for (const listener of listeners) {
@@ -86,40 +62,13 @@ export function setPreviewOpen(next: boolean): void {
 
 export function setPreviewUrl(next: string | null): void {
   previewUrl = next;
-  if (next) {
-    previewTarget = isLocalDevUrl(next)
-      ? { kind: "dev", url: next }
-      : { kind: "url", url: next };
-  } else {
-    previewTarget = null;
-  }
   bump();
 }
 
 export function setPreview(open: boolean, url?: string | null): void {
   previewOpen = open;
-  if (url !== undefined) {
-    previewUrl = url;
-    if (url) {
-      previewTarget = isLocalDevUrl(url)
-        ? { kind: "dev", url }
-        : { kind: "url", url };
-    } else {
-      previewTarget = null;
-    }
-  }
+  if (url !== undefined) previewUrl = url;
   if (!open) inspecting = false;
-  bump();
-}
-
-export function openPreviewTarget(target: PreviewTarget): void {
-  previewOpen = true;
-  previewTarget = target;
-  if (target.kind === "dev" || target.kind === "url") {
-    previewUrl = target.url;
-  } else {
-    previewUrl = null;
-  }
   bump();
 }
 
@@ -129,10 +78,6 @@ export function getPreviewOpen(): boolean {
 
 export function getPreviewUrl(): string | null {
   return previewUrl;
-}
-
-export function getPreviewTarget(): PreviewTarget | null {
-  return previewTarget;
 }
 
 export function getInspecting(): boolean {
@@ -178,17 +123,11 @@ export function useLocalPreviewUrl(): string | null {
   return getPreviewUrl();
 }
 
-export function useLocalPreviewTarget(): PreviewTarget | null {
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  return getPreviewTarget();
-}
-
 export function resetAppInspectorStoreForTests(): void {
   inspecting = false;
   appKey = null;
   selectedNode = null;
   previewOpen = false;
   previewUrl = null;
-  previewTarget = null;
   bump();
 }

@@ -27,9 +27,6 @@ import { asTrimmedString } from "core/trimmedString";
 import { useNavigate } from "app/routing";
 import { toast } from "app/utils/toast"
 import { read } from "database/dbSlice";
-// 只复用 accept 常量：占位 composer 的系统文件选择器必须与 runtime 的
-// FileUploadButton 允许同一批类型，列表在此单点维护，不复制。
-import { DEFAULT_ACCEPT } from "chat/web/FileUploadButton";
 import QuickChatModeSelector from "./QuickChatModeSelector";
 import {
   resolveQuickChatLaunchSpecialist,
@@ -42,7 +39,6 @@ import { shouldDeferEnterForIme } from "app/utils/ime";
 import * as stylex from "@stylexjs/stylex";
 import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
 import "chat/web/chatStylexEscapeHatch.css";
-import "render/layout/noloSerifFont.css";
 import "./QuickChat.css";
 
 // 动态 import 必须包一层可重试加载器：React.lazy 会把第一个 rejected promise
@@ -439,23 +435,6 @@ const QuickChat: React.FC<QuickChatProps> = ({
     setRuntimeActive(true);
   }, []);
 
-  // 占位 composer 选中的文件：在 runtime 挂载前一次性托管，挂载后经既有
-  // handleQuickChatFileSelection 处理，避免「先点一次激活、再点一次才弹选择器」。
-  const [pendingShellFiles, setPendingShellFiles] = useState<File[] | null>(
-    null
-  );
-
-  const handleShellFilesSelected = useCallback((files: File[]) => {
-    if (!files.length) return;
-    setPendingShellFiles(files);
-    void preloadQuickChatRuntimeDependencies();
-    setRuntimeActive(true);
-  }, []);
-
-  const handlePendingShellFilesConsumed = useCallback(() => {
-    setPendingShellFiles(null);
-  }, []);
-
   const handleShellChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     void preloadQuickChatRuntimeDependencies();
     setDraft(event.target.value);
@@ -565,8 +544,6 @@ const QuickChat: React.FC<QuickChatProps> = ({
               spaceId={spaceId}
               autoSend={autoSend}
               isEmptyState={isEmptyState}
-              pendingShellFiles={pendingShellFiles}
-              onPendingShellFilesConsumed={handlePendingShellFilesConsumed}
               onPersonalizationClick={isCompact ? undefined : startPersonalization}
               quickChatMode={quickChatMode}
               onModeChange={handleModeChange}
@@ -592,7 +569,6 @@ const QuickChat: React.FC<QuickChatProps> = ({
         surface={surface}
         isEmptyState={isEmptyState}
         onActivate={activateRuntime}
-        onFilesSelected={handleShellFilesSelected}
         onChange={handleShellChange}
         onKeyDown={handleShellKeyDown}
         quickChatMode={quickChatMode}
@@ -610,11 +586,6 @@ interface QuickChatShellProps {
   surface?: QuickChatSurface;
   isEmptyState?: boolean;
   onActivate?: () => void;
-  /**
-   * 占位态选中文件后的回调。传入即渲染一个同步打开的系统文件选择器
-   * （必须在用户手势内 click 真实 input，懒加载 runtime 后再程序化 click 已太晚）。
-   */
-  onFilesSelected?: (files: File[]) => void;
   onChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   quickChatMode: QuickChatMode;
@@ -628,7 +599,6 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
   surface = "default",
   isEmptyState = false,
   onActivate,
-  onFilesSelected,
   onChange,
   onKeyDown,
   quickChatMode,
@@ -637,23 +607,6 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
   const vtStyle = viewTransitionStyle(QUICK_CHAT_COMPOSER_VT_NAME, {
     enabled: surface === "home-primary",
   });
-  const placeholderFileInputRef = useRef<HTMLInputElement | null>(null);
-
-  // 占位上传按钮：整个手势内同步触发真实 <input type=file>.click()，
-  // 不依赖 runtime 异步挂载后的程序化 click。
-  const handlePlaceholderUploadClick = useCallback(() => {
-    placeholderFileInputRef.current?.click();
-  }, []);
-
-  const handlePlaceholderFileChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(event.target.files ?? []);
-      // 复位，以便重复选同一个文件也能触发 onChange（与 FileUploadButton 一致）。
-      event.target.value = "";
-      if (files.length) onFilesSelected?.(files);
-    },
-    [onFilesSelected]
-  );
   // stylex.props() returns { className } which would clobber the handwritten
   // "quick-chat-box" hook class if spread after it; merge explicitly instead.
   const cardStyleProps = stylex.props(chatInputCardStyles.card);
@@ -682,23 +635,12 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
             <button
               type="button"
               className="upload-button"
-              data-testid="quick-chat-shell-upload"
-              onClick={handlePlaceholderUploadClick}
+              onFocus={onActivate}
+              onClick={onActivate}
               aria-label="Upload"
             >
               <LuPaperclip size={18} aria-hidden="true" />
             </button>
-            {onFilesSelected && (
-              <input
-                ref={placeholderFileInputRef}
-                type="file"
-                hidden
-                accept={DEFAULT_ACCEPT}
-                multiple
-                data-testid="quick-chat-shell-upload-input"
-                onChange={handlePlaceholderFileChange}
-              />
-            )}
 
             <QuickChatModeSelector mode={quickChatMode} onModeChange={onModeChange} surface={surface} />
           </div>

@@ -10,7 +10,7 @@
 
 import type { Message } from "../../chat/messages/types";
 import { estimateTokenCount } from "./tokenUtils";
-import { serializeMessageContent } from "core/chat/messageContentSerialize";
+import { serializeMessageContent } from "../../chat/messages/messageContent";
 import { ConversationLoad, planContextUsage } from "ai/context/retention";
 import { resolveCompressionTriggerRatio } from "./toolOutputCap";
 
