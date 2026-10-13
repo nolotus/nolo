@@ -9,7 +9,6 @@
 import { renderHistory, type TurnHistory } from "./tuiHistory";
 import type { TuiSelectionState } from "./tuiSelection";
 import type { FixedInputController } from "./tuiRawInput";
-import type { TuiImageRenderer } from "./tuiImageRenderer";
 
 /**
  * 渲染集群的宿主依赖。`fixedInput` / `buffer` / `cursorPos` 在
@@ -26,8 +25,6 @@ export interface TuiRenderHost {
   readonly buffer: string;
   readonly cursorPos: number;
   readonly getReservedRows?: () => number;
-  /** 可选图片视口渲染器；缺省时完全不触碰图片路径。 */
-  readonly imageRenderer?: TuiImageRenderer;
 }
 
 /**
@@ -59,10 +56,7 @@ export function createTuiRender(host: TuiRenderHost) {
   };
 
   const paintSyncedFrame = () => {
-    if (host.fixedInput.isPaused()) {
-      host.imageRenderer?.suspend();
-      return;
-    }
+    if (host.fixedInput.isPaused()) return;
     // Begin terminal sync update + hide cursor. Terminals without 2026
     // support silently ignore the sequence; cursor hide is a universal
     // fallback that still reduces visible flicker.
@@ -89,24 +83,17 @@ export function createTuiRender(host: TuiRenderHost) {
     }, RENDER_THROTTLE_MS);
   };
 
-  const renderHistoryCore = (withImages: boolean) => {
+  const renderHistoryCore = () => {
     if (syncingLayout) return;
     syncingLayout = true;
     try {
       const reservedRows = host.getReservedRows?.() ?? 0;
-      const imageRenderer = host.imageRenderer;
       renderHistory(
         output,
         history,
         host.fixedInput.getInputLines(),
         selectionState,
         reservedRows,
-        imageRenderer && withImages
-          ? {
-              onVisibleImages: (images, viewport) =>
-                imageRenderer.frame(images, viewport),
-            }
-          : undefined,
       );
     } finally {
       syncingLayout = false;
@@ -117,24 +104,17 @@ export function createTuiRender(host: TuiRenderHost) {
     // A dialog (picker / confirm) owns the screen while paused. Repainting the
     // transcript underneath it erases the frame — mid-turn confirms streamed
     // tokens over the prompt, so it flashed and vanished while still holding
-    // the keyboard, and the turn looked hung. Images are hidden for the same
-    // reason and come back on the next unpaused frame.
-    if (host.fixedInput.isPaused()) {
-      host.imageRenderer?.suspend();
-      return;
-    }
-    host.imageRenderer?.resume();
-    renderHistoryCore(true);
+    // the keyboard, and the turn looked hung.
+    if (host.fixedInput.isPaused()) return;
+    renderHistoryCore();
   };
 
   /**
    * Explicit authorized underlay repaint while a modal dialog is active
    * (paused). Reads current reserved rows and re-renders history under the dialog.
-   * Images stay hidden: the dialog must not be covered by a kitty placement.
    */
   const renderHistoryUnderDialog = () => {
-    host.imageRenderer?.suspend();
-    renderHistoryCore(false);
+    renderHistoryCore();
   };
 
   return {

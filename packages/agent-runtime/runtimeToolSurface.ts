@@ -52,52 +52,6 @@ export type ToolSurfaceConstraints = {
   blockedToolNames?: readonly string[] | null;
 };
 
-/**
- * 具有潜在系统破坏性或写入副作用的高风险工具。
- * 用于只读审计（Reviewer）、规划（Planner）、探测（Probe）等子任务的最小权限收敛。
- */
-export const HIGH_RISK_MUTATION_TOOL_NAMES = [
-  "writeFile",
-  "editFile",
-  "deleteDialogs",
-  "deleteMemory",
-  "taskStop",
-  // 能力包（loadSkill 授予）里的写/删/部署/记忆写入/进程启动类工具：
-  // 只读 run 的授予通道会过同一份 blockedToolNames，名单缺项即可被绕过。
-  // 契约测试（runtimeToolSurface.test.ts）按名字关键字钉住 CAPABILITY_PACKS 的分类。
-  "applyEdit",
-  "applyLineEdits",
-  "launchProcess",
-  "rememberMemory",
-  "appFileWrite",
-  "appFileReplace",
-  "appDeploy",
-  "appDelete",
-  "createTable",
-  "addTableRow",
-  "addTableRows",
-  "updateTableRow",
-  "deleteTableRow",
-  // 编排副作用：startAgentRun 会另起一次 run（子 run 的只读与否由调用方参数决定），
-  // controlAgentRun 能追加指令/停止它；只读 run 不应拿到这两个（review A-1）。
-  "startAgentRun",
-  "controlAgentRun",
-] as const;
-
-/**
- * 生成只读安全约束：自动剔除所有高危修改/写操作和删除操作工具。
- */
-export function resolveReadOnlyToolConstraints(
-  additionalBlockedTools?: readonly string[],
-): ToolSurfaceConstraints {
-  return {
-    blockedToolNames: [
-      ...HIGH_RISK_MUTATION_TOOL_NAMES,
-      ...(additionalBlockedTools ?? []),
-    ],
-  };
-}
-
 /** Apply only run-scoped narrowing; runtime policy and hard isolation are upstream. */
 export function applyToolSurfaceConstraints<T extends RuntimeToolSurfaceNames>(
   surface: T,

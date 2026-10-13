@@ -426,7 +426,6 @@ export { createDevinProvider } from "./devin/devinProvider";
 export { readDevinUpstreamFailure, type DevinUpstreamFailure } from "./devin/devinProvider";
 export { isDevinOAuthAgent } from "./devinOAuth";
 
-
 // Protocol-only RunGrant API. Runtime enforcement is intentionally not wired here.
 export { normalizeAgentRunGrant } from "./runGrant";
 export type {

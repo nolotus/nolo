@@ -5,7 +5,6 @@ import {
   renderTokenStatus,
   type TurnTokenUsage,
 } from "../client/tokenUsage";
-import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { resolveCatalogPlatformAgents } from "./agentCatalog";
 import { renderDialogTitle } from "./dialogFrame";
 import { dailyWelcomeTip, t } from "./i18n";
@@ -17,6 +16,7 @@ import {
   surfaceBackgroundSequence,
   resolveTuiBrightnessSignal,
 } from "./theme";
+import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import type { TuiState } from "./sessionTypes";
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
@@ -76,10 +76,7 @@ export function resolveStatusLineCredits(
 
 // ─── Status line ────────────────────────────────────────────────────────────
 
-export function renderStatusLine(
-  state: TuiState,
-  maxWidth?: number,
-) {
+export function renderStatusLine(state: TuiState, maxWidth?: number) {
   const colorEnabled = resolveCliColorEnabled();
   // OMP-style chips: soft fg colors + " · " separators. No solid powerline
   // backgrounds — those break box layout when the line is long.
@@ -146,21 +143,19 @@ export function renderStatusLine(
   parts.push(tokenSegment);
   if (creditsSegment) parts.push(creditsSegment);
 
-  // 后台进程计数 `⚙ N procs`：只数 processRegistry 里仍在 running 的后台任务
-  // （agent-run 归运行区）。非必保字段：窄屏时最先被裁掉（见下方降级循环）。
-  const runningProcCount = getProcessRegistry()
-    .listBackground()
-    .filter((p) => p.status === "running").length;
-  const procsSegment =
-    runningProcCount > 0
-      ? themeText(`⚙ ${runningProcCount} procs`, "info", colorEnabled)
-      : "";
-  if (procsSegment) parts.push(procsSegment);
+  // In-flight work chip: local background tasks plus active (non-terminal)
+  // agent runs from the local run registry (throttled). This is a REQUIRED
+  // status-line field — the queue badge (optional chrome) must never squeeze
+  // it out at any width; the dock renders the per-run breakdown separately.
+  const runningTaskCount = getProcessRegistry().listBackground().filter(p => p.status === "running").length;
+  if (runningTaskCount > 0) {
+    parts.push(themeText(`⚙ ${runningTaskCount} running`, "info", colorEnabled));
+  }
 
   // 终态通知 chip：还有几条后台任务终态没被下一个 turn 消费。通知一旦注入
   // turn 上下文即清空，chip 归零——它只是「agent 即将知晓」的待办指示，不是
-  // 常驻统计（终态详情在通知行和 /procs 里）。必保字段，不参与宽度降级。
-  // 注：processRegistry 的 taskId 与运行区的 runId 语义不同，无需互相去重。
+  // 常驻统计（终态详情在通知行和 /procs 里）。与 running chip 同 token：
+  // 必保字段，不参与宽度降级。
   const pendingProcessCount = state.pendingProcessNotices?.length ?? 0;
   if (pendingProcessCount > 0) {
     parts.push(themeText(`⚙ ${pendingProcessCount} finished`, "info", colorEnabled));
@@ -177,12 +172,11 @@ export function renderStatusLine(
   if (maxWidth && maxWidth > 0) {
     const widthOf = (segments: string[]) => displayWidth(stripAnsi(segments.join(" · "))) + 2;
     // 可让路段的丢弃顺序（挤宽度时从先到后）：
-    //   ⚙ procs（最先）→
     //   cwd（终端标题/上下文已有）→ agent 名（默认档可省）→ context chip →
     //   积分 chip（最后才丢——用户盯的就是它，且它是「花了多少钱」的唯一
     //   可见口径）。
-    // git 脏 / ⏵ auto 是必保状态，任何宽度都不让。
-    for (const optional of [procsSegment, cwdSegment, agentSegment, tokenSegment, creditsSegment]) {
+    // git 脏 / ⚙ running / ⏵ auto 是必保状态，任何宽度都不让。
+    for (const optional of [cwdSegment, agentSegment, tokenSegment, creditsSegment]) {
       if (!optional) continue;
       if (widthOf(visibleParts) <= maxWidth) break;
       visibleParts = visibleParts.filter((part) => part !== optional);
@@ -201,15 +195,19 @@ export function renderStatusLine(
     }
     if (widthOf(visibleParts) > maxWidth) {
       // Emergency projection for genuinely narrow terminals. These glyphs
-      // preserve the actionable facts without their explanatory words;
+      // preserve the three actionable facts without their explanatory words;
       // lower-priority identity/cwd/context and queued previews are already
       // gone by this point. Joined with single spaces, not the " · " chips:
       // each " · " costs 3 columns and would push the line past ultra-narrow
       // budgets, letting terminal end-clipping eat the trailing (required)
-      // dirty/auto fields first.
+      // dirty/running fields first.
       const emergency: string[] = [];
       if (state.autoConfirm === true) {
         emergency.push(themeText("⏵", "warning", colorEnabled));
+      }
+      const runningTotal = runningTaskCount;
+      if (runningTotal > 0) {
+        emergency.push(themeText(`⚙${runningTotal}`, "info", colorEnabled));
       }
       if (state.gitStatus) {
         const { modified, untracked } = state.gitStatus;
@@ -245,6 +243,31 @@ export function renderStatusLine(
   // \x1b[49m resets background only, so callers can keep appending
   // foreground-colored text (the "· Esc to stop" hint) after the chip closes.
   return `${surface} ${body} \x1b[49m`;
+}
+
+/**
+ * Compose the composer status line plus the optional queued-input badge under
+ * one width budget.
+ *
+ * Required state (auto-confirm / running / dirty) owns the budget. The queue
+ * badge is optional chrome: its width is reserved from the degradation budget
+ * only while the degraded status can still fit beside it, and when the badge
+ * alone would overflow `maxWidth` it is dropped entirely — terminal
+ * end-clipping must never be the thing that hides auto-confirm, running or
+ * dirty.
+ */
+export function composeStatusLineWithQueue(
+  state: TuiState,
+  queueSuffix: string,
+  maxWidth?: number
+): string {
+  const hasBudget = typeof maxWidth === "number" && maxWidth > 0;
+  const queueWidth = queueSuffix ? visibleWidth(queueSuffix) : 0;
+  const budget = hasBudget ? Math.max(1, maxWidth! - queueWidth) : undefined;
+  const base = renderStatusLine(state, budget);
+  if (!queueSuffix) return base;
+  if (!hasBudget) return base + queueSuffix;
+  return visibleWidth(base) + queueWidth <= maxWidth! ? base + queueSuffix : base;
 }
 
 // ─── Welcome & prompt ───────────────────────────────────────────────────────
@@ -384,15 +407,9 @@ export function renderWelcome(
       )
     : null;
 
-  // Unauthenticated users see a short block naming the three working paths
-  // (local Codex / own subscription / platform login). The flag was resolved
-  // once from real auth sources at session start — this pure renderer never
-  // re-probes credentials, so resize repaints stay consistent.
-  const authGuidanceLine = state.showAuthGuidance ? t("welcomeAuthGuidance") : null;
-
   const body = sceneArt
-    ? [sceneArt, versionLine, ...(updateLine ? [updateLine] : []), ...(authGuidanceLine ? [authGuidanceLine] : []), dailyWelcomeTip(), ""]
-    : [versionLine, ...(updateLine ? [updateLine] : []), ...(authGuidanceLine ? [authGuidanceLine] : []), dailyWelcomeTip(), ""];
+    ? [sceneArt, versionLine, ...(updateLine ? [updateLine] : []), dailyWelcomeTip(), ""]
+    : [versionLine, ...(updateLine ? [updateLine] : []), dailyWelcomeTip(), ""];
   return body.join("\n");
 }
 
