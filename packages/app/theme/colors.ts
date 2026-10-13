@@ -606,24 +606,24 @@ export const nature = {
     warning: "#8A6320", // --hl-sand 压暗（paper 4.89:1）
     info: "#1A5FA4",
     error: "#B3361F", // --hl-danger 压暗（paper 5.48:1，surface-sub 4.98:1）
-    background:          "#FAF8F4", // --hl-paper
-    backgroundSecondary: "#F3F0EA", // --hl-surface-sub
-    backgroundTertiary:  "#EBE7DF",
-    backgroundGhost:     "rgba(250,248,244,0.94)",
-    backgroundHover:     "#EBE7DF",
-    backgroundSelected:  "#E4DFD5",
-    backgroundElevated:  "#FFFEFB", // --hl-surface
+    background:          "#F7F3EC", // --hl-paper
+    backgroundSecondary: "#EFE8DC", // --hl-surface-sub
+    backgroundTertiary:  "#E8E0D1",
+    backgroundGhost:     "rgba(247,243,236,0.94)",
+    backgroundHover:     "#E8E0D1",
+    backgroundSelected:  "#E3D9C8",
+    backgroundElevated:  "#FFFDF8", // --hl-surface
     text:                "#1F2733", // --hl-ink
     textSecondary:       "#5B6472", // --hl-muted
     textTertiary:        "#5F6773", // paper 5.17:1 / surface-sub 4.69:1（侧栏 11px 分组标题落在 surface-sub 上，需过 AA）
     textQuaternary:      "#8A8F96",
-    textLight:           "#E0DFDD",
+    textLight:           "#DDDBD6",
     placeholder:         "#5F6773",
-    border:              "#E0DFDD", // --hl-line：ink 12% on paper
-    borderHover:         "#CACAC9", // ink 22% on paper
-    borderLight:         "#EBE9E7", // ink 7% on paper
-    messageBackground:   "#F3F0EA",
-    codeBackground:      "#FFFEFB",
+    border:              "#DDDBD6", // --hl-line：ink 12% on paper
+    borderHover:         "#C7C6C3", // ink 22% on paper
+    borderLight:         "#E8E5DF", // ink 7% on paper
+    messageBackground:   "#EFE8DC",
+    codeBackground:      "#FFFDF8",
     shadowLight:         "rgba(120,90,60,0.06)", // --hl-shadow 调性
     shadowMedium:        "rgba(120,90,60,0.10)",
     shadowHeavy:         "rgba(120,90,60,0.16)",

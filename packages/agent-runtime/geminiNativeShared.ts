@@ -366,65 +366,6 @@ function sanitizeGeminiSchemaNode(
   }
 }
 
-/** 记录 sanitize 后节点的原始 enum 取值（合并 oneOf 同名属性时需要原值而非已降级的输出）。 */
-type EnumMeta = { values: unknown[]; baseDescription?: string };
-const enumMetaByNode = new WeakMap<object, EnumMeta>();
-
-function enumMetaOf(node: unknown): EnumMeta | undefined {
-  return node && typeof node === "object"
-    ? enumMetaByNode.get(node)
-    : undefined;
-}
-
-/** 原始 enum 取值：enum 优先，否则 const 转出的单值数组。 */
-function rawEnumValues(src: Record<string, unknown>): unknown[] | undefined {
-  if (Array.isArray(src.enum) && src.enum.length > 0) return src.enum;
-  if ("const" in src && src.const !== undefined) return [src.const];
-  return undefined;
-}
-
-/**
- * Gemini function_declarations 的 enum 只接受字符串，非字符串会 400。
- * - 全字符串：原样保留；
- * - 全 number/boolean：丢弃 enum，把取值追加到 description 末尾（模型仍可见约束）；
- * - 混合：统一转成字符串。
- */
-function geminiEnumFields(
-  values: unknown[],
-  baseDescription: string | undefined,
-): { enum?: string[]; description?: string } {
-  if (values.every((v) => typeof v === "string")) {
-    // 去重（保持顺序）：oneOf/anyOf 同名属性合并后可能带入重复字面量
-    return {
-      enum: [...new Set(values as string[])],
-      description: baseDescription,
-    };
-  }
-  if (values.every((v) => typeof v === "number" || typeof v === "boolean")) {
-    const allowed = [...new Set(values.map((v) => String(v)))].join(", ");
-    const note = `(allowed: ${allowed})`;
-    return {
-      description: baseDescription ? `${baseDescription} ${note}` : note,
-    };
-  }
-  const asStrings = values.map((v) =>
-    typeof v === "string"
-      ? v
-      : v !== null && typeof v === "object"
-        ? JSON.stringify(v)
-        : String(v),
-  );
-  return { enum: [...new Set(asStrings)], description: baseDescription };
-}
-
-function applyGeminiEnum(
-  out: Record<string, unknown>,
-  fields: { enum?: string[]; description?: string },
-): void {
-  if (fields.enum) out.enum = fields.enum;
-  if (fields.description !== undefined) out.description = fields.description;
-}
-
 function sanitizeGeminiSchemaNodeInner(
   src: Record<string, unknown>,
   out: Record<string, unknown>,
@@ -443,14 +384,11 @@ function sanitizeGeminiSchemaNodeInner(
   if (typeof src.description === "string") out.description = src.description;
   if (typeof src.minimum === "number") out.minimum = src.minimum;
   if (typeof src.maximum === "number") out.maximum = src.maximum;
+  if (Array.isArray(src.enum) && src.enum.length > 0) out.enum = src.enum;
   if (src.nullable === true) out.nullable = true;
-  // enum / const（Gemini 无 const）→ 仅字符串 enum，非字符串见 geminiEnumFields
-  const enumValues = rawEnumValues(src);
-  if (enumValues) {
-    const baseDescription =
-      typeof src.description === "string" ? src.description : undefined;
-    enumMetaByNode.set(out, { values: enumValues, baseDescription });
-    applyGeminiEnum(out, geminiEnumFields(enumValues, baseDescription));
+  // const → enum（Gemini 无 const）
+  if ("const" in src && src.const !== undefined && !out.enum) {
+    out.enum = [src.const as unknown];
   }
 
   // oneOf/anyOf → 各分支 properties 并集 + required 交集（宽松归并）
@@ -467,21 +405,13 @@ function sanitizeGeminiSchemaNodeInner(
       for (const [key, value] of Object.entries(branchProperties)) {
         const previous = mergedProperties[key];
         // 同名属性：enum 收并集（典型：各分支用 const 区分变体），其余后者覆盖
-        const prevMeta = enumMetaOf(previous);
-        const nextMeta = enumMetaOf(value);
-        if (prevMeta && nextMeta) {
-          // 同一规则：原始取值取并集后重新规范化（非字符串取值 → description 标注）
-          const values = [...prevMeta.values, ...nextMeta.values];
-          const baseDescription =
-            nextMeta.baseDescription ?? prevMeta.baseDescription;
-          const node: Record<string, unknown> = {
+        const prevEnum = (previous as { enum?: unknown[] })?.enum;
+        const nextEnum = (value as { enum?: unknown[] })?.enum;
+        if (prevEnum && nextEnum) {
+          mergedProperties[key] = {
             ...(value as Record<string, unknown>),
+            enum: [...new Set([...prevEnum, ...nextEnum])],
           };
-          delete node.enum;
-          delete node.description;
-          applyGeminiEnum(node, geminiEnumFields(values, baseDescription));
-          enumMetaByNode.set(node, { values, baseDescription });
-          mergedProperties[key] = node;
         } else {
           mergedProperties[key] = value;
         }

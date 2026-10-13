@@ -44,8 +44,6 @@ import {
   projectDialogReadForAgent,
 } from "../agent-runtime/dialogReadProjection";
 
-import { loadLocalRunChildDialogIds } from "./tui/localRunChildDialogIds";
-
 const logger = createClientLogger("cli:dialog");
 
 type ReadSource = "http" | "local-db-fallback";
@@ -66,7 +64,6 @@ export type ListedDialog = {
   createdAt: string | number | null;
   spaceId: string | null;
   triggerType: string | null;
-  parentDialogId: string | null;
   primaryAgentKey: string | null;
   cybots: string[];
 };
@@ -289,7 +286,6 @@ export function normalizeDialogRecord(record: any, fallbackDbKey?: string): List
           : null,
     spaceId: typeof record?.spaceId === "string" && record.spaceId.trim() ? record.spaceId : null,
     triggerType: typeof record?.triggerType === "string" ? record.triggerType : null,
-    parentDialogId: asOptionalTrimmedString(record?.parentDialogId) ?? null,
     primaryAgentKey:
       typeof record?.primaryAgentKey === "string" && record.primaryAgentKey.trim()
         ? record.primaryAgentKey
@@ -319,68 +315,16 @@ export function isScheduledDialog(record: ListedDialog) {
   );
 }
 
-/**
- * 服务端 run 创建的会话（子对话的一类）。依据 saveDialog 的 triggerType 写入：
- * `callerType === "localhost" ? "localhost" : runtimeAutomationKey ? "automation_run" : "api"`。
- * 因此 api / localhost 都表示该会话由服务端 run 创建；用户自己开的对话是 none / cli-local，不命中。
- * 注意：app 端创建的 run 子对话没有 triggerType，本判据识别不到（已知残留限制）。
- */
-export function isRunSpawnedDialog(record: ListedDialog) {
-  return record.triggerType === "api" || record.triggerType === "localhost";
-}
-
-/**
- * 子对话判据（依据记录上的 parentDialogId 字段）：parentDialogId 非空且不等于自身 id 才算子对话。
- * 自引用（parentDialogId === id）是历史脏数据，视为非子对话。
- * 无父引用的历史子对话（如 app 端创建的字段最少的那类）识别不到，需配合 isRunSpawnedDialog 与本机 run 记录兜底。
- */
-export function isChildDialogByField(record: ListedDialog) {
-  return Boolean(record.parentDialogId) && record.parentDialogId !== record.id;
-}
-
-/**
- * 子对话（不含 scheduled）：run 派发产生的会话，三者并集——
- * ① triggerType=api/localhost；② 本机 run 记录命中的 dialogId；③ parentDialogId 字段判据。
- */
-export function isChildDialog(record: ListedDialog, localChildIds: ReadonlySet<string>) {
-  return isRunSpawnedDialog(record) || localChildIds.has(record.id) || isChildDialogByField(record);
-}
-
-export type DialogListVisibilityOptions = {
-  /** 放行 scheduled 自动化 run 对话。 */
-  includeScheduled?: boolean;
-  /** 放行子对话（isChildDialog 命中的全部类别）。 */
-  includeChild?: boolean;
-};
-
-/**
- * `/history` picker 与 `nolo dialog list` 共用的「默认隐藏」判据（唯一实现，两端不得各自复刻）。
- * 默认隐藏 = isScheduledDialog ∪ isChildDialog。两个开关各自只放行自己那一类、互不影响：
- * includeScheduled 只放行 scheduled；includeChild 只放行子对话。picker 不传开关，即全部隐藏。
- */
-export function isHiddenFromDialogList(
-  record: ListedDialog,
-  localChildIds: ReadonlySet<string>,
-  options: DialogListVisibilityOptions = {},
-) {
-  if (!options.includeScheduled && isScheduledDialog(record)) return true;
-  if (!options.includeChild && isChildDialog(record, localChildIds)) return true;
-  return false;
-}
-
 function printListUsage(output: { write(chunk: string): unknown }) {
   output.write(`Usage:
-  nolo dialog list [--space <spaceId|spaceUrl>] [--limit ${DEFAULT_DIALOG_LIST_LIMIT}] [--offset <n>] [--all] [--json] [--jsonl] [--ids-only] [--include-scheduled] [--include-child]
+  nolo dialog list [--space <spaceId|spaceUrl>] [--limit ${DEFAULT_DIALOG_LIST_LIMIT}] [--offset <n>] [--all] [--json] [--jsonl] [--ids-only]
 
 Options:
   --space <space>       List current user's dialogs attached to one space.
   --limit <n>           Maximum dialogs to return. Default: ${DEFAULT_DIALOG_LIST_LIMIT}. Use 0 or --all for full dump.
   --offset <n>          Skip first n dialogs after sort/filter (paging).
   --all                 Full dump (same as --limit 0). Prefer --jsonl for large results.
-  --include-scheduled   Include scheduled automation run dialogs (hidden by default). Independent of --include-child.
-  --include-child       Include child run dialogs (hidden by default): triggerType api/localhost, dialogs in the
-                        local run record set, or with a parentDialogId pointing to another dialog.
-                        Independent of --include-scheduled.
+  --include-scheduled   Include scheduled automation run dialogs.
   --json                Print machine-readable JSON object.
   --jsonl               Stream one dialog JSON object per line (lowest memory).
   --ids-only            Print only dialog ids.
@@ -1960,10 +1904,7 @@ export async function runDialogQueryCommand(
 
 export async function runDialogListCommand(
   args: string[],
-  deps: AgentCommandDeps & {
-    /** 本机 run 子对话 id 集合；缺省读取真实 ~/.nolo/runs（测试应注入）。 */
-    localChildDialogIds?: ReadonlySet<string>;
-  } = {}
+  deps: AgentCommandDeps = {}
 ) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
@@ -1993,10 +1934,7 @@ export async function runDialogListCommand(
     : Math.max(1, resultLimit.limit ?? DEFAULT_DIALOG_LIST_LIMIT);
   const offset = readOffset(args);
   const spaceInput = readOption(args, "--space") ?? readOption(args, "--space-id");
-  // 两个开关独立：--include-scheduled 只放行 scheduled，--include-child 只放行子对话。
   const includeScheduled = hasFlag(args, "--include-scheduled");
-  const includeChild = hasFlag(args, "--include-child");
-  const localChildIds = deps.localChildDialogIds ?? loadLocalRunChildDialogIds({ env });
 
   try {
     let source: "user-data" | "space" = "user-data";
@@ -2034,10 +1972,7 @@ export async function runDialogListCommand(
       records
         .map((record) => normalizeDialogRecord(record))
         .filter((dialog): dialog is ListedDialog => dialog != null)
-        .filter(
-          (dialog) =>
-            !isHiddenFromDialogList(dialog, localChildIds, { includeScheduled, includeChild }),
-        )
+        .filter((dialog) => includeScheduled || !isScheduledDialog(dialog))
     );
     const window = resultLimit.unlimited
       ? sorted.slice(offset, offset + UNBOUNDED_DIALOG_CAP)

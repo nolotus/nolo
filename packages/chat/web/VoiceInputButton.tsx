@@ -15,7 +15,7 @@ import { asTrimmedString } from "core/trimmedString";
 const VAD_SILENCE_THRESHOLD = 0.012; // RMS 能量阈值
 const VAD_SILENCE_DURATION = 1500;   // 连续静音 ms 后自动停止
 const VAD_MIN_RECORDING = 800;       // 最短录音时间 ms，防止误触
-const TRANSCRIPTION_ENDPOINTS = ["/api/cf-speech-to-text", "/api/stt"] as const;
+const TRANSCRIPTION_ENDPOINTS = ["/api/cf-speech-to-text", "/api/whisper-turbo"] as const;
 const RETRYABLE_CF_TRANSCRIPTION_ERROR_CODES = new Set([
   "CF_FREE_BUDGET_EXCEEDED",
   "CF_NOT_CONFIGURED",

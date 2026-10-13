@@ -9,7 +9,6 @@ import {
   outputResult,
   type AppCommandDeps,
 } from "./appCommandShared";
-import { t } from "./tui/i18n";
 
 function printAppDeleteUsage() {
   process.stdout.write(`Usage:
@@ -38,13 +37,13 @@ export async function runAppDeleteCommand(args: string[], deps: AppCommandDeps):
 
   if (!name && !appId) {
     printAppDeleteUsage();
-    process.stderr.write(t("app.errorNameOrAppId"));
+    process.stderr.write("\n错误: 必须提供 --name 或 --app-id\n");
     return 1;
   }
 
   if (!skipConfirm) {
     const target = name ? `name="${name}"` : `appId="${appId}"`;
-    process.stdout.write(t("app.deleteConfirm", target));
+    process.stdout.write(`即将删除应用 (${target})，此操作不可撤销。确认？[y/N] `);
     const answer = await new Promise<string>((resolve) => {
       let data = "";
       process.stdin.setEncoding("utf-8");
@@ -54,7 +53,7 @@ export async function runAppDeleteCommand(args: string[], deps: AppCommandDeps):
       });
     });
     if (answer !== "y" && answer !== "yes") {
-      process.stdout.write(t("app.deleteCancelled"));
+      process.stdout.write("已取消\n");
       return 0;
     }
   }
@@ -66,7 +65,7 @@ export async function runAppDeleteCommand(args: string[], deps: AppCommandDeps):
 
     outputResult(data, shouldOutputJson, () => {
       const target = name ? `name="${name}"` : `appId="${appId}"`;
-      process.stdout.write(t("app.deleteDone", target));
+      process.stdout.write(`已删除应用 (${target})\n`);
     });
     return 0;
   } catch (error) {

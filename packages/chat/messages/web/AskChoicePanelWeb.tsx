@@ -70,7 +70,6 @@ interface AskChoicePanelWebProps {
    * The panel awaits this Promise: persist 失败时绝不发送，面板保持 active 可重试。
    */
   onResolve?: (resolution: AskChoiceResolution) => void | Promise<void>;
-  variant?: "default" | "inline";
 }
 
 const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
@@ -81,7 +80,6 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
   onDelete,
   messageId,
   onResolve,
-  variant = "default",
 }) => {
   const dispatch = useAppDispatch();
   // 面板保持 store 无关：dbKey/messageId 由宿主 onResolve 闭包使用。
@@ -296,7 +294,7 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
   };
 
   return (
-    <div {...stylex.props(styles.wrap, variant === "inline" && styles.wrapInline)}>
+    <div {...stylex.props(styles.wrap)}>
       {onDelete && (
         <button
           type="button"

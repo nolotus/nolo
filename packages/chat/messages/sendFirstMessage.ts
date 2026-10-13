@@ -8,13 +8,11 @@ import { waitForFileReady, compressImageFile } from "app/utils/imageUtils";
 import { readFileAsDataURL } from "app/utils/fileReaders";
 import type { RootState } from "app/store";
 import { buildMessageFileContentUrl, isLocalFileContentUrl } from "./fileUrl";
-import type { PendingAttachmentMessagePart } from "./pendingAttachmentParts";
 
 type MessagePart =
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string } }
-    | { type: string; name: string; pageKey?: string; dialogKey?: string; id?: string }
-    | { type: "attachment"; v: 1; source: { kind: "remote-file"; fileKey: string }; name: string; mimeType: string; size: number };
+    | { type: string; name: string; pageKey: string; dialogKey?: string };
 
 export interface SendFirstMessageParams {
     dialogKey?: string;
@@ -24,7 +22,7 @@ export interface SendFirstMessageParams {
     docFiles?: File[];
     runtimeOptions?: AgentRuntimeOptions;
     targetAgentKey?: string;
-    extraParts?: PendingAttachmentMessagePart[];
+    extraParts?: MessagePart[];
     quickChatPerfStartedAt?: number;
 }
 

@@ -217,13 +217,7 @@ function buildOrchestrationOpenAiTools(args: {
   });
 }
 
-const CLI_DEFAULT_TOOLS = [
-  "exa_search",
-  "fetchWebpage",
-  "ask_user",
-  // 非阻塞展示型交互（与 ask_user 的阻塞提问区分）
-  "show_interaction",
-] as const;
+const CLI_DEFAULT_TOOLS = ["exa_search", "fetchWebpage", "ask_user"] as const;
 
 function addDefaultCliCoreTools(
   toolNames: string[],
