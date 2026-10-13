@@ -19,7 +19,6 @@ import { DataType } from "create/types";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { remove, write, patch, selectById as selectDbRecordById } from "database/dbSlice";
 import { createDialogMessageKeyAndId } from "database/keys";
-import { inferMessageDialogIdFromDbKey } from "./messageDialogIdentity";
 import type { CompletionFinishReason, Message } from "./types";
 import { buildEditedMessageContent } from "./messageEditContent";
 import { planDeleteMessageCascade } from "./messageDeleteCascade";
@@ -71,7 +70,6 @@ import {
   getCanonicalHandoffTransientId,
   getHasStreamingMessage,
   getMessageSession,
-  getStreamingMessageId,
   markMessageSessionAbort,
   markMessageStreamActivity,
   patchMessageSession,
@@ -245,7 +243,14 @@ const getMessageDialogState = (
   return createEmptyMessageDialogState();
 };
 
-const inferDialogIdFromDbKey = inferMessageDialogIdFromDbKey;
+const inferDialogIdFromDbKey = (dbKey?: string): string | null => {
+  if (!dbKey) return null;
+  const parts = dbKey.split("-");
+  if (parts.length >= 4 && parts[0] === DataType.DIALOG && parts[2] === "msg") {
+    return parts[1];
+  }
+  return null;
+};
 
 const inferDialogIdFromMessage = (
   message: Partial<Message> & { dialogId?: string }
@@ -358,11 +363,6 @@ export const messageSlice = createSliceWithThunks({
         const { dialogId, ...message } = action.payload;
         const resolvedDialogId =
           dialogId ?? inferDialogIdFromMessage(action.payload);
-        // Streaming is an execution write, not a foreground UI action.
-        // Never allow an unscoped producer to borrow the active dialog.
-        if (!resolvedDialogId) {
-          throw new Error("messageStreaming requires an explicit dialogId or a valid message dbKey");
-        }
         const dialogState = ensureMessageDialogState(state, resolvedDialogId);
         const existing = dialogState.msgs.entities[message.id];
         upsertOneMessage(
@@ -441,9 +441,6 @@ export const messageSlice = createSliceWithThunks({
           payload.dialogId ?? findDialogIdByMessageId(state, payload.id);
         const dialogState = ensureMessageDialogState(state, dialogId);
         removeOneMessage(dialogState, payload.id);
-        if (dialogId && getStreamingMessageId(dialogId) === payload.id) {
-          setStreamingMessageId(dialogId, null);
-        }
       }
     ),
 
@@ -484,12 +481,10 @@ export const messageSlice = createSliceWithThunks({
     ),
 
     addToolMessage: create.reducer<Message & { dialogId?: string }>((state, action) => {
-      const dialogId = inferDialogIdFromMessage(action.payload);
-      // A tool result belongs to its run's dialog, never the foreground UI.
-      if (!dialogId) {
-        throw new Error("addToolMessage requires an explicit dialogId or a valid message dbKey");
-      }
-      const dialogState = ensureMessageDialogState(state, dialogId);
+      const dialogState = ensureMessageDialogState(
+        state,
+        inferDialogIdFromMessage(action.payload)
+      );
       addOneMessage(dialogState, action.payload);
     }),
 

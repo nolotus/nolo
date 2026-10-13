@@ -63,15 +63,10 @@ export function canonicalizeChromeConnectorToolNames(toolNames?: string[]): Chro
   return out;
 }
 
-/**
- * Optional per-call browser routing: `"chrome"` or `"firefox"` picks which native host serves the
- * action (each listens on its own port). Omit to use the default endpoint.
- */
+/** Reserved for future multi-provider targeting; accepted and ignored. */
 export const CONNECTOR_TARGET_PROPERTY = {
   type: "string",
-  enum: ["chrome", "firefox"],
-  description:
-    "Which browser's connector serves this call: \"chrome\" or \"firefox\". Omit for the default endpoint.",
+  description: "Reserved and ignored for now; future multi-provider targeting.",
 };
 
 export const CHROME_CONNECTOR_READ_TOOL_NAMES = [
@@ -157,7 +152,7 @@ export const chromeCloseTabFunctionSchema = baseSchema(
 
 export const chromeReadPageFunctionSchema = baseSchema(
   "browser_read_page",
-  "Read a compact view of a browser tab: visible text (hard cap 6000 chars) plus short-lived elementRefs (hard cap 35) and a pageRevision. Reuse those refs for browser_click_element and browser_type instead of guessing selectors; use region to focus a big page. When the element list exceeds one page, continue by passing the returned nextOffset as offset. Does not read cookies or profile databases.",
+  "Read a compact view of a browser tab: visible text (hard cap 6000 chars) plus short-lived elementRefs (hard cap 35) and a pageRevision. Reuse those refs for browser_click_element and browser_type instead of guessing selectors; use region to focus a big page. Does not read cookies or profile databases.",
   {
     tabId,
     region: {
@@ -172,15 +167,6 @@ export const chromeReadPageFunctionSchema = baseSchema(
       type: "string",
       enum: ["compact", "full"],
       description: "compact (default) returns budgeted text; full raises the budget and adds capped HTML.",
-    },
-    offset: {
-      type: "integer",
-      minimum: 0,
-      description: "Optional element offset for paging. When an element list exceeds one page, continue by passing the returned nextOffset as offset.",
-    },
-    viewportOnly: {
-      type: "boolean",
-      description: "Optional. When true, only elements intersecting the current viewport are listed.",
     },
   },
   ["tabId"],

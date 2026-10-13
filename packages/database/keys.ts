@@ -354,10 +354,8 @@ export const oauthCredentialUserRange = (userId: string) => ({
 /* ---- User ---- */
 // TODO(keys): 目前 user 相关 key 没有统一的前缀（如 "user-settings-"），
 //             将来如果需要按实体类型/租户范围扫描，可以考虑加前缀做一次轻量重构。
-/** user settings key 后缀：`${userId}-settings`（与 createKey 分隔符一致） */
-export const USER_SETTINGS_KEY_SUFFIX = `${SEPARATOR}settings`;
 export const createUserKey = {
-  settings: (userId: string) => `${userId}${USER_SETTINGS_KEY_SUFFIX}`,
+  settings: (userId: string) => createKey(userId, "settings"),
   profile: (userId: string) => createKey(userId, "profile"),
 };
 

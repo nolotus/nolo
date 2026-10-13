@@ -528,33 +528,6 @@ if (desktopCwdOverride) {
     }
 }
 
-/**
- * 桌面启动时的 native host 自动安装（幂等）。这是 Firefox 用户免 CLI 的唯一入口：端点默认只装
- * Chrome，设置里的开关已随 DesktopRuntime 移除，此前只有 CLI/脚本能装 Firefox。
- * 失败不致命——只记日志，不能让桌面端起不来；根探测由 runtime 负责（打包后 import.meta.url
- * 指向 bundle 目录，不能拿来当 connector 根）。
- */
-async function installNativeHostAtStartup(): Promise<void> {
-  try {
-    const { ensureNativeHostForDetectedBrowsers } = await import("desktop-runtime/entry");
-    const ensured = ensureNativeHostForDetectedBrowsers({ env: process.env });
-    const ready = ensured.installs.map((install) => install.browser).join(", ") || "none detected";
-    if (ensured.skipped) {
-      console.log(`[desktop] native host auto-install skipped: ${ensured.reason}`);
-    } else if (ensured.errors.length > 0) {
-      console.warn(
-        `[desktop] native host ready for ${ready}; failed for ${ensured.errors
-          .map((failure) => `${failure.browser} (${failure.message})`)
-          .join(", ")}`,
-      );
-    } else {
-      console.log(`[desktop] native host ready for: ${ready}`);
-    }
-  } catch (error) {
-    console.warn("[desktop] native host auto-install failed", error);
-  }
-}
-
 if (process.env.NOLO_DESKTOP_SERVER_CHILD === "1") {
   // 父进程死亡（含被 TerminateProcess）时控制管道 EOF——立即自我了断，
   // 否则孤儿化的 server 子进程会一直占着安装目录镜像锁，更新 helper 干等。
@@ -564,7 +537,6 @@ if (process.env.NOLO_DESKTOP_SERVER_CHILD === "1") {
   });
   const { bootstrapServer } = await import("desktop-runtime/entry");
   await bootstrapServer();
-  await installNativeHostAtStartup();
   await new Promise(() => {});
 }
 
@@ -1111,7 +1083,6 @@ if (process.platform === "win32" && !isDev) {
 } else {
   const { bootstrapServer, shutdownServer } = await import("desktop-runtime/entry");
   await bootstrapServer();
-  await installNativeHostAtStartup();
   shutdownEmbeddedServer = shutdownServer;
 }
 

@@ -331,24 +331,13 @@ function pageOperation(payload) {
     return document.querySelector(region);
   }
 
-  function inViewport(element) {
-    const rect = element.getBoundingClientRect();
-    return rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight;
-  }
-
   function candidates(region) {
     const root = regionRoot(region);
     if (!root) return null;
     const nodes = Array.prototype.slice.call(root.querySelectorAll(INTERACTIVE_SELECTOR));
-    // A region that is itself interactive (e.g. a link or button) is a candidate, listed first.
-    const rootIsCandidate = root !== document.body && root !== document.documentElement
-      && typeof root.matches === "function" && root.matches(INTERACTIVE_SELECTOR);
-    const pool = rootIsCandidate ? [root].concat(nodes) : nodes;
     const visible = [];
-    for (let index = 0; index < pool.length && visible.length < MAX_CANDIDATES; index += 1) {
-      const node = pool[index];
-      if (!isVisible(node)) continue;
-      visible.push(node);
+    for (let index = 0; index < nodes.length && visible.length < MAX_CANDIDATES; index += 1) {
+      if (isVisible(nodes[index])) visible.push(nodes[index]);
     }
     return { root, list: visible };
   }
@@ -533,18 +522,14 @@ function pageOperation(payload) {
         region,
       };
     }
-    const described = found.list.map(describe);
-    const elements = payload.viewportOnly === true
-      ? described.filter((_, index) => inViewport(found.list[index]))
-      : described;
     return {
       ok: true,
       url: String(location.href),
       title: String(document.title || ""),
       text: textOf(found.root),
       html: payload.includeHtml ? String(found.root.outerHTML || "").slice(0, 40000) : null,
-      elements,
-      elementCount: elements.length,
+      elements: found.list.map(describe),
+      elementCount: found.list.length,
       signature: signatureOf(found),
     };
   }
@@ -1335,19 +1320,13 @@ async function handleAction(action, payload = {}) {
     case "read_page": {
       const region = String(payload.region || payload.selector || "");
       const raw = await executeInTab(payload.tabId, pageOperation, [
-        {
-          op: "read",
-          region,
-          includeHtml: payload.detail === "full",
-          viewportOnly: payload.viewportOnly === true,
-        },
+        { op: "read", region, includeHtml: payload.detail === "full" },
       ]);
       const observation = buildCompactObservation(raw, {
         region,
         detail: payload.detail,
         maxChars: payload.maxChars,
         maxElements: payload.maxElements,
-        offset: payload.offset,
       });
       if (!observation.ok) return observation;
       refRegistry.remember({

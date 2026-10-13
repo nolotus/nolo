@@ -11,7 +11,7 @@ const SUPPORT_EMAIL = "s@nolotus.com";
  * 站点页脚：承载法务文件入口（Waffo 进件合规要求）。
  * 只在 shouldRenderSiteFooter 命中的内容型路由渲染，见 siteFooterRoutes.ts。
  *
- * 视觉风格：安静版（暖底 #f6ece0、细顶边、法务链接 + 邮箱 + 版权）。
+ * 视觉风格：安静版（暖底 #f3e3d0、细顶边、法务链接 + 邮箱 + 版权）。
  */
 const SiteFooter: React.FC = () => {
   const { t } = useTranslation();
