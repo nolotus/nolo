@@ -77,18 +77,6 @@ export type InternalTurnEvent =
 export type TurnRequest = {
   event: InternalTurnEvent;
   text: string;
-  /**
-   * 随消息排队的本地图片路径（已解析、入队时确认可读）。只存路径不存 dataURL：
-   * 排队期间文件可能变化，也避免大 base64 常驻队列；由 drain 方在 turn 开始时
-   * 再读取。可选字段，Web/RN 消费者无感。
-   */
-  imagePaths?: string[];
-  /**
-   * 随消息排队的可读音视频路径（与 imagePaths 同语义：存路径不存内容，
-   * drain 方在 turn 开始前做 ffmpeg 预处理 + 转写，transcript 文本并入
-   * 发给模型的消息体）。可选字段，不涉及的消费者无感。
-   */
-  mediaPaths?: string[];
 };
 
 /**

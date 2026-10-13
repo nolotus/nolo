@@ -67,7 +67,7 @@ export const homeStyles = stylex.create({
   },
   homeAuthedWidgetsSection: {
     width: "100%",
-    maxWidth: "min(760px, var(--home-content-max-width))", // 与 home-primary 输入框同宽，左右边缘对齐
+    maxWidth: "min(880px, var(--home-content-max-width))",
     marginTop: 0,
     marginRight: "auto",
     marginBottom: 0,

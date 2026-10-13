@@ -198,15 +198,13 @@ export function buildCompactObservation(raw, options = {}) {
   const region = requestedRegion || (typeof raw.region === "string" ? raw.region : "");
   const rawElements = Array.isArray(raw.elements) ? raw.elements : [];
   const elementCount = Number.isFinite(raw.elementCount) ? raw.elementCount : rawElements.length;
-  // Invalid or missing offsets read from the start; offsets past the end clamp to the end.
-  const offset = Math.min(clampInteger(options.offset, 0, Number.MAX_SAFE_INTEGER, 0), rawElements.length);
 
   const pageRevision = buildPageRevision(raw.signature);
 
   function assemble(elementLimit, textLimit, htmlLimit) {
     const text = truncateText(raw.text, textLimit);
-    const elements = rawElements.slice(offset, offset + elementLimit).map((element, position) => {
-      const ref = buildElementRef(pageRevision, Number.isFinite(element?.index) ? element.index : offset + position);
+    const elements = rawElements.slice(0, elementLimit).map((element, position) => {
+      const ref = buildElementRef(pageRevision, Number.isFinite(element?.index) ? element.index : position);
       const shaped = {
         ref,
         tag: String(element?.tag ?? ""),
@@ -222,7 +220,6 @@ export function buildCompactObservation(raw, options = {}) {
       if (isIrreversibleActionName(shaped.name)) shaped.sensitive = true;
       return shaped;
     });
-    const pageEnd = offset + elements.length;
     const payload = {
       ok: true,
       url: truncatePlain(raw.url, COMPACT_BUDGET.urlMaxChars),
@@ -233,10 +230,8 @@ export function buildCompactObservation(raw, options = {}) {
       truncated: text.truncated,
       omittedTextChars: text.omittedChars,
       elementCount,
-      offset,
-      nextOffset: pageEnd < elementCount ? pageEnd : null,
       elements,
-      omittedElements: Math.max(0, elementCount - pageEnd),
+      omittedElements: Math.max(0, elementCount - elements.length),
       budget: {
         detail: budget.detail,
         maxChars: budget.maxChars,

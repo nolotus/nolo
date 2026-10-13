@@ -80,7 +80,6 @@ import {
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import { themeColorSequence, themeText } from "./theme";
 import { displayWidth } from "./tuiAnsi";
-import { safeAskText } from "./askTextSanitize";
 import { SGR_MOUSE_REGEX, parseScrollAction } from "./tuiScrollbar";
 import type { UserChoiceRequest, UserChoiceResult } from "../client/localRuntimeAdapterTypes";
 
@@ -124,8 +123,7 @@ function renderTabBar(state: AskChoiceUiState, colorEnabled: boolean): string {
       qs.selectedIds.length > 0 ||
       qs.otherText.trim().length > 0;
     const mark = hasAnswer ? TAB_DONE : q.required ? TAB_MISSING : TAB_OPTIONAL;
-    const header = q.header ? safeAskText(q.header) : "";
-    const label = `${mark} ${header || `Q${i + 1}`}`;
+    const label = `${mark} ${q.header || `Q${i + 1}`}`;
     if (i === state.activeIndex) {
       return colorEnabled
         ? `${themeColorSequence("accent")} ${label} \x1b[0m`
@@ -233,8 +231,8 @@ export function renderAskChoiceFrame(
   // Question text
   lines.push(
     colorEnabled
-      ? `${themeColorSequence("accent")}? ${safeAskText(q.question)}\x1b[0m`
-      : `? ${safeAskText(q.question)}`,
+      ? `${themeColorSequence("accent")}? ${q.question}\x1b[0m`
+      : `? ${q.question}`,
   );
 
   if (q.multiSelect) {
@@ -284,8 +282,8 @@ export function renderAskChoiceFrame(
           : undefined;
       lines.push(
         renderDialogRow({
-          label: `[${i + 1}] ${safeAskText(choice.label)}`,
-          ...(choice.detail ? { detail: safeAskText(choice.detail) } : {}),
+          label: `[${i + 1}] ${choice.label}`,
+          ...(choice.detail ? { detail: choice.detail } : {}),
           focused,
           ...(checkbox ? { checkbox } : {}),
         }),

@@ -1,9 +1,8 @@
 import { isRecord } from "core/isRecord";
 import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
 import { asNonEmptyStringArray } from "core/stringArray";
-import { asOptionalTrimmedString } from "core/optionalString";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
-import type { AgentRuntimeHost, AgentRuntimeToolPolicy, AgentRuntimeWorkspaceMode } from "./types";
+import type { AgentRuntimeHost, AgentRuntimeToolPolicy } from "./types";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -22,29 +21,10 @@ function mergeRecords<T extends Record<string, unknown>>(
   } as T;
 }
 
-function normalizeWorkspacePolicy(value: unknown): AgentRuntimeToolPolicy["workspace"] | undefined {
-  if (!isRecord(value)) return undefined;
-  const mode: AgentRuntimeWorkspaceMode | undefined =
-    value.mode === "none" || value.mode === "current" || value.mode === "lease"
-      ? value.mode
-      : undefined;
-  const readableRoots = unique(asNonEmptyStringArray(value.readableRoots));
-  const writableRoots = unique(asNonEmptyStringArray(value.writableRoots));
-  const cwd = asOptionalTrimmedString(value.cwd);
-  const normalized = {
-    ...(mode ? { mode } : {}),
-    ...(readableRoots.length ? { readableRoots } : {}),
-    ...(writableRoots.length ? { writableRoots } : {}),
-    ...(cwd ? { cwd } : {}),
-  };
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
-}
-
 export function normalizeAgentRuntimeToolPolicy(
   value: unknown,
 ): AgentRuntimeToolPolicy | undefined {
   if (!isRecord(value)) return undefined;
-  const workspace = normalizeWorkspacePolicy(value.workspace);
   return {
     version: 1,
     ...(asNonEmptyStringArray(value.agentTools).length
@@ -53,7 +33,7 @@ export function normalizeAgentRuntimeToolPolicy(
     ...(asNonEmptyStringArray(value.runtimeTools).length
       ? { runtimeTools: unique(asNonEmptyStringArray(value.runtimeTools)) }
       : {}),
-    ...(workspace ? { workspace } : {}),
+    ...(isRecord(value.workspace) ? { workspace: { ...value.workspace } } : {}),
     ...(isRecord(value.shell) ? { shell: { ...value.shell } } : {}),
     ...(isRecord(value.isolation) ? { isolation: { ...value.isolation } } : {}),
     ...(isRecord(value.git) ? { git: { ...value.git } } : {}),
@@ -94,10 +74,6 @@ export function mergeAgentRuntimeToolPolicies(
     workspace: {
       ...(base?.workspace ?? {}),
       ...(override?.workspace ?? {}),
-      readableRoots: unique([
-        ...(base?.workspace?.readableRoots ?? []),
-        ...(override?.workspace?.readableRoots ?? []),
-      ]),
       writableRoots: unique([
         ...(base?.workspace?.writableRoots ?? []),
         ...(override?.workspace?.writableRoots ?? []),

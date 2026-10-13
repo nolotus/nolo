@@ -20,7 +20,7 @@ export function getInternalCommandEntries(renderHelpText: () => string): Command
     ...getTableInternalCommandEntries(),
     ...getAppInternalCommandEntries(),
     ...getWorkflowInternalCommandEntries(),
-    // nolo browser (main) / chrome (alias) — connector setup (status|install|reload) + live browser operations.
+    // nolo chrome — connector setup (status|install|reload) + live-Chrome operations.
     ...getChromeInternalCommandEntries(),
     ...getSystemInternalCommandEntries(renderHelpText),
   ];

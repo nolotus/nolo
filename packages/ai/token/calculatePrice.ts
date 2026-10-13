@@ -10,18 +10,11 @@ import {
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
-  PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
-  PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
   getPlatformHostedDeepSeekV4Price,
   isPlatformHostedDeepSeekV4Model,
   isPlatformHostedImageModel,
   isPlatformHostedOpenAIImageModel,
   PLATFORM_HOSTED_GLM_53_FLASH_BASETEN_PRICE,
-  resolvePlatformHostedRouting,
 } from "ai/llm/platformHosted";
 
 // ==================== 接口定义 ====================
@@ -357,149 +350,6 @@ const calculateCacheBasedCost = (
   };
 };
 
-/**
- * 平台托管 Claude 的 CF（Cloudflare gateway）上游 4 桶计价 —— 2026-10-13 迁移。
- *
- * CF adapter 的 canonical usage 与 Anthropic 原生**语义不同**：
- *   input_tokens = 总输入 = 常规输入 + cache write + cache read（两个缓存桶是子集）。
- * 因此常规输入必须是
- *   regular = max(0, total - write - read)
- * 不能照搬既有两条路径（都会把 write 重复计费或漏价）。
- *
- * 【整合说明】Claude 分支只保留「6 个平台托管 Claude id 白名单 + 显式 write/read
- * 单价」这一层 gate；4 桶算术的唯一实现是下方 calculateCanonicalInputTotalCost，
- * 不再各留一份同样加法（合并时按 gpt sibling 的约定收敛）。
- */
-const PLATFORM_CLAUDE_CANONICAL_INPUT_TOTAL_MODELS = [
-  PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
-  PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
-] as const;
-
-/**
- * 闸门 + 计算（CF canonical 口径）：返回 null 表示「不适用」，调用方回退既有路径。
- * 两个条件同时成立才启用：
- *   1. 模型名在这 6 个平台托管 Claude id 白名单内（其它目录模型语义未必包含式）；
- *   2. 目录**显式**声明了 cachingWrite + cachingRead —— 缺任一项都不启用。
- * 算术委托给唯一实现 calculateCanonicalInputTotalCost，不重复加法。
- */
-export const resolvePlatformClaudeCacheCost = (
-  modelName: string | null | undefined,
-  resolvedPrice: ModelPrice,
-  usage: Usage,
-  externalPrice?: ExternalPrice
-): CostBreakdown | null => {
-  const normalizedModelName = asTrimmedLowercaseString(modelName);
-  const isCanonicalTotalModel = PLATFORM_CLAUDE_CANONICAL_INPUT_TOTAL_MODELS.some(
-    (m) => m === normalizedModelName
-  );
-  const hasExplicitCachingPrices =
-    typeof resolvedPrice.cachingWrite === "number" &&
-    typeof resolvedPrice.cachingRead === "number";
-  if (!isCanonicalTotalModel || !hasExplicitCachingPrices) return null;
-
-  return calculateCanonicalInputTotalCost(resolvedPrice, usage, externalPrice);
-};
-
-/**
- * CF（Cloudflare AI Gateway）上游的 canonical 4 桶计价 —— 2026-10-13。
- *
- * CF adapter 的 canonical usage 与 OpenAI / Anthropic 原生**语义不同**：
- *   input_tokens = 总输入 = 常规输入 + cache write + cache read（两个缓存桶是子集）。
- * 因此常规输入必须是
- *   regular = max(0, total - write - read)
- * 不能照搬既有两条路径（都会把 write 重复计费或漏价）：
- *   - nolo / cache-based：cacheMiss = total - read 里仍含 write → write 按 input
- *     全价再收一次，且既有路径完全不看 cachingWrite；
- *   - anthropic 原生：regular = input - read，同样含 write。
- *
- * 折算（官方 USD 价 ×8），这里不再二次乘倍数 —— 平台 8 倍口径保持不变。
- *
- * 防御（畸形 usage 既不能变成负数账单，也不能把缓存 token 变成免费）：
- *   - 三个计数分别 clamp 到 >= 0；
- *   - regular 再 clamp 到 >= 0：write/read 合计超报时按各自缓存价照计，
- *     既不放行负成本，也不白送超报的缓存 token。
- *
- * 这是「平台托管 + CF canonical 输入口径」的**唯一**算术实现：
- * resolvePlatformClaudeCacheCost（anthropic.messages wire）与本分支
- * resolvePlatformCloudflareCacheCost（responses wire）都只做 gate，算术全部委托到这里。
- */
-export const calculateCanonicalInputTotalCost = (
-  resolvedPrice: ModelPrice,
-  usage: Usage,
-  externalPrice?: ExternalPrice
-): CostBreakdown => {
-  const { input: effectiveInputPrice, output: effectiveOutputPrice } =
-    getEffectivePrices(resolvedPrice, externalPrice);
-
-  const totalInputTokens = Math.max(0, usage.input_tokens ?? 0);
-  const cachingWriteTokens = Math.max(0, usage.cache_creation_input_tokens ?? 0);
-  const cachingReadTokens = Math.max(0, usage.cache_read_input_tokens ?? 0);
-  const outputTokens = Math.max(0, usage.output_tokens ?? 0);
-
-  const regularInputTokens = Math.max(
-    0,
-    totalInputTokens - cachingWriteTokens - cachingReadTokens
-  );
-
-  const cachingWritePrice = resolvedPrice.cachingWrite ?? 0;
-  const cachingReadPrice = resolvedPrice.cachingRead ?? 0;
-
-  const regularTotal =
-    (regularInputTokens * resolvedPrice.input +
-      outputTokens * resolvedPrice.output +
-      cachingWriteTokens * cachingWritePrice +
-      cachingReadTokens * cachingReadPrice) /
-    1_000_000;
-
-  const chargeTotal =
-    (regularInputTokens * effectiveInputPrice +
-      outputTokens * effectiveOutputPrice +
-      cachingWriteTokens * cachingWritePrice +
-      cachingReadTokens * cachingReadPrice) /
-    1_000_000;
-
-  return {
-    regular: regularTotal,
-    charge: chargeTotal,
-    details: {
-      inputCost: (regularInputTokens * resolvedPrice.input) / 1_000_000,
-      outputCost: (outputTokens * resolvedPrice.output) / 1_000_000,
-      cachingWriteCost: (cachingWriteTokens * cachingWritePrice) / 1_000_000,
-      cachingReadCost: (cachingReadTokens * cachingReadPrice) / 1_000_000,
-    },
-  };
-};
-
-/**
- * 闸门：模型在**中央路由表**里指向 Cloudflare 上游，且目录**显式**声明了
- * cachingWrite + cachingRead —— 两个条件同时成立才切 canonical 4 桶，否则返回 null，
- * 调用方回退既有路径（provider=nolo 的 inputCacheHit / simple 分支）。
- *
- * 不另抄模型 id 白名单：platformHostedRoutingTable 的 PLATFORM_HOSTED_ROUTING_TABLE
- * 已是「平台托管模型走哪个上游」的单一真值源；缺任一缓存单价一律不启用；未登记 /
- * 未知模型自然落在回退路径上，作用域不放大。闸门只认「上游是 Cloudflare」这一事实，
- * **不认 wire**（GPT 系 responses、Claude 走 anthropic.messages 同样适用）。
- */
-const resolvePlatformCloudflareCacheCost = (
-  modelName: string | null | undefined,
-  resolvedPrice: ModelPrice,
-  usage: Usage,
-  externalPrice?: ExternalPrice
-): CostBreakdown | null => {
-  const routing = resolvePlatformHostedRouting(modelName);
-  const isCloudflareUpstream = routing?.usageProvider === "cloudflare";
-  const hasExplicitCachingPrices =
-    typeof resolvedPrice.cachingWrite === "number" &&
-    typeof resolvedPrice.cachingRead === "number";
-  if (!isCloudflareUpstream || !hasExplicitCachingPrices) return null;
-
-  return calculateCanonicalInputTotalCost(resolvedPrice, usage, externalPrice);
-};
-
 const calculateSimpleCost = (
   resolvedPrice: ModelPrice,
   usage: Usage,
@@ -641,22 +491,10 @@ const calculateBasicCost = (
     // without it keep simple full-price billing so cached tokens are not
     // priced at 0 — but a platform-hosted model用于 agentic 循环时必须补上
     // 这一项，否则每轮重放的上下文会被按 input 原价重复计费。
-    case "nolo": {
-      // 平台托管模型若在路由表上走 Cloudflare（Responses 或 Anthropic Messages
-      // wire）、且目录同时声明写/读缓存价，按 CF canonical 输入口径（input 含
-      // write/read）4 桶计价；否则保持既有语义不变。
-      const platformCloudflareCosts = resolvePlatformCloudflareCacheCost(
-        model.name,
-        resolvedPrice,
-        usage,
-        externalPrice
-      );
-      if (platformCloudflareCosts) return platformCloudflareCosts;
-
+    case "nolo":
       return typeof resolvedPrice.inputCacheHit === "number"
         ? calculateCacheBasedCost(resolvedPrice, usage, externalPrice)
         : calculateSimpleCost(resolvedPrice, usage, externalPrice);
-    }
 
     case "anthropic":
       return calculateAnthropicCost(resolvedPrice, usage, externalPrice);

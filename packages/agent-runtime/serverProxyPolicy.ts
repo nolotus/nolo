@@ -86,9 +86,7 @@ const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"]);
 function isRemoteCustomEndpoint(url: unknown): boolean {
   if (typeof url !== "string") return false;
   try {
-    // IPv6 literals keep their brackets in `URL.hostname` (`"[::1]"`), while
-    // LOCAL_HOSTS stores the bare form — strip them so loopback stays direct.
-    const host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    const host = new URL(url).hostname.toLowerCase();
     return !LOCAL_HOSTS.has(host);
   } catch {
     return false;

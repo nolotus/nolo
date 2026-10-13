@@ -5,9 +5,6 @@
  *   - Anthropic：顶层 cache_read_input_tokens / cache_creation_input_tokens
  *   - DeepSeek：顶层 prompt_cache_hit_tokens / prompt_cache_miss_tokens
  *   - OpenAI Responses：嵌套 input_tokens_details.cached_tokens
- *   - Cloudflare AI Gateway / OpenAI Responses：嵌套
- *     input_tokens_details.cache_write_tokens（首次请求「只写不读」时
- *     cached_tokens 为 0，写入量只出现在这里）
  *   - OpenAI/RunInfra chat.completions：嵌套 prompt_tokens_details.cached_tokens
  *
  * 这份判定曾经只活在 normalizeUsage 里（写 token 记录用），而 localLoop 的
@@ -71,17 +68,9 @@ export const readCacheReadInputTokens = (usage: unknown): number =>
     nested(["prompt_tokens_details", "cached_tokens"]),
   ]);
 
-/**
- * 本次写入缓存（未命中）的 prompt token 数。
- *
- * 顶层别名优先（语义不变）；最后一个候选是 Responses wire 的嵌套写入读数：
- * Responses 的 usage 只带 input_tokens_details，把 cached_tokens（读）与
- * cache_write_tokens（写）放在同一个容器里。缺这一条时，「只写不读」的
- * 调用（首次发送即全量写缓存，cached_tokens=0）会读成 0，写入侧缓存不可观测。
- */
+/** 本次写入缓存（未命中）的 prompt token 数。 */
 export const readCacheCreationInputTokens = (usage: unknown): number =>
   firstPositive(usage, [
     topLevel("cache_creation_input_tokens"),
     topLevel("prompt_cache_miss_tokens"),
-    nested(["input_tokens_details", "cache_write_tokens"]),
   ]);
