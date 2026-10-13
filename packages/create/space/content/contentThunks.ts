@@ -14,7 +14,10 @@ import { updateContentTitleAction } from "./updateContentTitleAction";
 import { updateContentPinnedAction } from "./updateContentPinnedAction";
 import { updateContentCategoryAction } from "./updateContentCategoryAction";
 import { deleteMultipleContentAction } from "./deleteMultipleContentAction";
-import { uploadAndAddFileToSpaceAction } from "./uploadAndAddFileToSpaceAction";
+import {
+  restoreSpaceFileVersionAction,
+  uploadAndAddFileToSpaceAction,
+} from "./uploadAndAddFileToSpaceAction";
 import { normalizeSpaceId } from "../spaceKeys";
 import { UNCATEGORIZED_ID } from "../constants";
 import { writeStoredCollapsedCategories } from "../spaceCollapsedState";
@@ -133,6 +136,18 @@ export const uploadAndAddFileToSpace = createAsyncThunk(
   "space/uploadAndAddFileToSpace",
   async (arg: any, thunkAPI: any) => {
     const payload = await uploadAndAddFileToSpaceAction(arg, thunkAPI);
+    if (getCurrentSpaceIdRaw() === payload.spaceId) {
+      updateCurrentSpaceIfMatch(payload.spaceId, payload.updatedSpaceData);
+    }
+    return payload;
+  }
+);
+
+/** 恢复空间文件的旧版本（只移动当前版本指针，旧版本从不删除）。 */
+export const restoreSpaceFileVersion = createAsyncThunk(
+  "space/restoreSpaceFileVersion",
+  async (arg: any, thunkAPI: any) => {
+    const payload = await restoreSpaceFileVersionAction(arg, thunkAPI);
     if (getCurrentSpaceIdRaw() === payload.spaceId) {
       updateCurrentSpaceIfMatch(payload.spaceId, payload.updatedSpaceData);
     }

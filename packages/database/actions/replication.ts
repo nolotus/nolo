@@ -8,6 +8,7 @@ import {
   noloUploadRequest,
   noloWriteRequest,
   syncWithServers,
+  type UploadProgressHandler,
 } from "../requests";
 import { planServersForTenant } from "../tenantPlacement";
 import {
@@ -381,6 +382,8 @@ export const uploadToCurrentServer = async ({
   currentServer,
   uploadConfig,
   state,
+  signal,
+  onProgress,
 }: {
   currentServer: string | undefined;
   uploadConfig: {
@@ -390,11 +393,17 @@ export const uploadToCurrentServer = async ({
     userId?: string;
   };
   state: any;
+  signal?: AbortSignal;
+  onProgress?: UploadProgressHandler;
 }): Promise<boolean> => {
   if (!currentServer) {
     return false;
   }
 
+  // 只有调用方要进度/取消时才多传参数，保持既有调用形状不变。
+  if (signal || onProgress) {
+    return noloUploadRequest(currentServer, uploadConfig, state, signal, onProgress);
+  }
   return noloUploadRequest(currentServer, uploadConfig, state);
 };
 

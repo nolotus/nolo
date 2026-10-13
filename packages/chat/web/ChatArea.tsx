@@ -9,6 +9,8 @@ import MessageInputContainer, {
   type MessageInputHandle,
 } from "chat/web/MessageInputContainer";
 import ChatErrorBoundary from "chat/web/ChatErrorBoundary";
+import ForegroundTurnRecovery from "chat/web/ForegroundTurnRecovery";
+import IncompleteBrowserTurnNotice from "chat/web/IncompleteBrowserTurnNotice";
 import type { AgentRuntimeOptions } from "ai/agent/types";
 import type { AgentPickerControlProps } from "chat/web/AgentPickerControl";
 import * as stylex from "@stylexjs/stylex";
@@ -53,7 +55,14 @@ const ChatAreaComponent: React.FC<ChatAreaProps> = ({
             scrollContainerSelector={scrollContainerSelector}
           />
         </ChatErrorBoundary>
+        <ChatErrorBoundary fallbackMessage="运行状态恢复失败">
+          <ForegroundTurnRecovery dialogId={dialogId} />
+        </ChatErrorBoundary>
       </div>
+
+      <ChatErrorBoundary fallbackMessage="未完成回复状态加载失败">
+        <IncompleteBrowserTurnNotice dialogId={dialogId} />
+      </ChatErrorBoundary>
 
       <ChatErrorBoundary fallbackMessage="输入框加载出错">
         <MessageInputContainer

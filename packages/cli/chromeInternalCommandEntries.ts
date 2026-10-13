@@ -2,20 +2,21 @@ import { createArgsCommand, createEnvCommand } from "./cliCommandFactories";
 import type { CommandEntry } from "./cliCommandTypes";
 
 /**
- * `nolo chrome ...` — machine-local Nolo Browser Connector commands, in two halves:
+ * `nolo browser ...` (legacy alias: `nolo chrome ...`) — machine-local Nolo Browser Connector commands, in two halves:
  *
  * - setup (status / install / reload): run once per machine, outside any agent run;
  *   implementation in chromeCommands.ts.
- * - operations (list-tabs / read-page / click / ...): drive the user's live Chrome from
+ * - operations (list-tabs / read-page / click / ...): drive the user's live browser from
  *   scripts and the TUI; implementation in chromeOpsCommands.ts.
  */
 const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
-  { name: "list-tabs", summary: "List controllable Chrome tabs" },
+  { name: "list-tabs", summary: "List controllable browser tabs" },
   { name: "open-tab", summary: "Open a URL in a new tab (--url <url> [--active])" },
   { name: "close-tab", summary: "Close a tab (--tab <id>)" },
   {
     name: "read-page",
-    summary: "Read a tab's text and interactive elements as elementRefs (--tab <id>)",
+    summary:
+      "Read a tab's text and interactive elements as elementRefs (--tab <id> [--offset N] [--viewport])",
   },
   { name: "click", summary: "Click an element (--tab <id> --ref|--selector)" },
   {
@@ -34,10 +35,10 @@ const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
   { name: "read-network", summary: "Read recent network entries (--tab <id>)" },
 ];
 
-function getChromeFamilyEntries(): CommandEntry[] {
+function getBrowserFamilyEntries(): CommandEntry[] {
   return [
     createEnvCommand(
-      ["chrome", "status"],
+      ["browser", "status"],
       "Show Nolo Browser Connector status (native host manifest, token, live connection)",
       async (args, deps) => {
         const { runChromeStatusCommand } = await import("./chromeCommands");
@@ -45,7 +46,7 @@ function getChromeFamilyEntries(): CommandEntry[] {
       },
     ),
     createEnvCommand(
-      ["chrome", "install"],
+      ["browser", "install"],
       "Install the native messaging host manifest for this user (--browser chrome|firefox)",
       async (args, deps) => {
         const { runChromeInstallCommand } = await import("./chromeCommands");
@@ -53,7 +54,7 @@ function getChromeFamilyEntries(): CommandEntry[] {
       },
     ),
     createEnvCommand(
-      ["chrome", "reload"],
+      ["browser", "reload"],
       "Reload the connector extension through the running native host",
       async (args, deps) => {
         const { runChromeReloadCommand } = await import("./chromeCommands");
@@ -61,7 +62,7 @@ function getChromeFamilyEntries(): CommandEntry[] {
       },
     ),
     ...CHROME_OPS_SUBCOMMANDS.map(({ name, summary }) =>
-      createArgsCommand(["chrome", name], summary, async (args) => {
+      createArgsCommand(["browser", name], summary, async (args) => {
         const { runChromeOpsCommand } = await import("./chromeOpsCommands");
         return runChromeOpsCommand(name, args);
       }),
@@ -70,15 +71,15 @@ function getChromeFamilyEntries(): CommandEntry[] {
 }
 
 /**
- * `nolo chrome ...` plus its full-equivalent alias `nolo browser ...`. The alias entries reuse the
- * very same handler function objects as their chrome counterparts (one implementation).
+ * `nolo browser ...` (main) plus its full-equivalent compatibility alias `nolo chrome ...`. The alias entries
+ * reuse the very same handler function objects as their browser counterparts (one implementation).
  */
 export function getChromeInternalCommandEntries(): CommandEntry[] {
-  const chromeEntries = getChromeFamilyEntries();
-  const browserEntries: CommandEntry[] = chromeEntries.map((entry) => ({
+  const browserEntries = getBrowserFamilyEntries();
+  const chromeEntries: CommandEntry[] = browserEntries.map((entry) => ({
     ...entry,
-    path: ["browser", ...entry.path.slice(1)],
-    description: `${entry.description} (Alias of \`nolo chrome ${entry.path.slice(1).join(" ")}\`)`,
+    path: ["chrome", ...entry.path.slice(1)],
+    description: `${entry.description} (Compatibility alias of \`nolo browser ${entry.path.slice(1).join(" ")}\`)`,
   }));
-  return [...chromeEntries, ...browserEntries];
+  return [...browserEntries, ...chromeEntries];
 }

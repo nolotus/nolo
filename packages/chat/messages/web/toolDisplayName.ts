@@ -39,7 +39,6 @@ const TOOL_DISPLAY_NAME_DEFAULTS: Record<string, string> = {
   deleteDialogs: "删除对话记录",
   readDialog: "读取对话",
   listDialogs: "列出对话",
-  setTodoList: "待办计划",
   exa_search: "搜索",
   firecrawl_scrape: "网页抓取",
   firecrawl_search: "网页搜索",
