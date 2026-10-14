@@ -1,5 +1,5 @@
 /**
- * run 终态（完成 / 失败 / 用户叫停）的**唯一真值**：后台结算、一次性 CLI 与
+ * run 终态（完成 / 失败 / 流被中断）的**唯一真值**：后台结算、一次性 CLI 与
  * TUI 的 OSC 7501 生命周期共用同一份判定。
  *
  * 收敛的是两份曾经各写一套的判定：
@@ -35,8 +35,13 @@ export const isRunResultStalledOrTruncated = (result: {
 
 export type TerminalRunSettlementInput = {
   exitCode: number;
-  /** 用户主动叫停（TUI Esc / 一次性 CLI 的 streamInterrupted）。 */
-  cancelled?: boolean;
+  /**
+   * 流被中断。语义比「用户取消」宽：既包含用户主动取消（TUI Esc、一次性 CLI
+   * 的 abort），也包含流中途被中断 —— provider 报错时 runner 会带着 exitCode 0
+   * 返回（client/agentRunStream.ts 的未 abort 报错路径同样给 streamInterrupted），
+   * 此时对话可能仍在服务端继续跑完。两种都不是「程序失败」，也不是「跑完了」。
+   */
+  interrupted?: boolean;
   /** 停滞 / 截断类「伪成功」：runner 没抛错，但没有可用输出。 */
   stalledOrTruncated?: boolean;
 };
@@ -44,11 +49,14 @@ export type TerminalRunSettlementInput = {
 /**
  * 把一次 run 的最终结果映射成 OSC 7501 终态。优先级是有意的，不是随手排序：
  *
- * 1) `cancelled` → idle：用户叫停既不是失败也不是完成。取消优先于 error，
- *    因为报「出错了」会把责任算到程序头上，掩盖是用户自己按了 Esc；取消优
- *    先于 done，因为用户根本没看到结果，报 done 会让终端一直挂着「已完成」。
- *    真实输入域里 streamInterrupted 的生产者恒为 exitCode 0（client/agentRunStream.ts
- *    的 abort 分支），所以「取消优先」不会改变既有判定，只是把这条语义写死。
+ * 1) `interrupted` → idle：流被中断既不是失败也不是完成。中断优先于 error，
+ *    因为报「出错了」会把责任算到程序头上 —— 用户按 Esc 中断不是程序生病，
+ *    provider 中途报错时对话也仍可能在服务端继续跑完；中断优先于 done，因为
+ *    用户看不到结果，报 done 会让终端一直挂着「已完成」。
+ *    中断有两种来源，判据必须同一份，否则同一个 run 在 TUI 与一次性 CLI 会
+ *    得到相反结论：用户取消（abort 分支，恒为 exitCode 0）与流中途被中断
+ *    （client/agentRunStream.ts 的未 abort provider 报错路径，同样是 exitCode 0
+ *    + streamInterrupted）。「中断优先」不改变既有判定，只是把这条语义写死。
  * 2) `stalledOrTruncated || exitCode !== 0` → error：停滞/截断的 run 可以带着
  *    exitCode 0 返回（runner 没抛错，只是没拿到可用输出）。只看 exitCode 会把
  *    它报成 done，而 registry 里记的是 failed/exitCode=1 —— 同一个 run 两个结
@@ -59,7 +67,7 @@ export type TerminalRunSettlementInput = {
 export function resolveTerminalProgramStatusState(
   input: TerminalRunSettlementInput,
 ): TerminalProgramStatusState {
-  if (input.cancelled) return "idle";
+  if (input.interrupted) return "idle";
   if (input.stalledOrTruncated || input.exitCode !== 0) return "error";
   return "done";
 }

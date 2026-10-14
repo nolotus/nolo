@@ -1378,11 +1378,14 @@ export async function runOneAgentTurn(
     }
     // 终态判定与后台结算共用同一份真值（client/terminalRunStatus）：停滞/截断的
     // run 会带着 exitCode 0 返回，只看 exitCode 会把它报成 done，而 registry 记的
-    // 是 failed。epoch 守卫与强停那条 idle 路径不变。
+    // 是 failed。中断同理有两张面孔 —— 用户按 Esc（wasAborted）与流中途被中断
+    // （provider 报错，runResult.streamInterrupted，此时并未 abort，对话可能仍在
+    // 服务端继续）—— 两者都该报 idle；只看 wasAborted 会把后者报成 done，与
+    // 一次性 CLI 对同一个 run 的结论相反。epoch 守卫与强停那条 idle 路径不变。
     emitStatusIfCurrentTurn({
       state: resolveTerminalProgramStatusState({
         exitCode: runResult.exitCode,
-        cancelled: wasAborted,
+        interrupted: wasAborted || runResult.streamInterrupted === true,
         stalledOrTruncated: isRunResultStalledOrTruncated(runResult),
       }),
     });

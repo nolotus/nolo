@@ -9,7 +9,8 @@
  *   失败都不是整体 error（它们根本不经过这里）。
  * - done / error 一旦发出就是终态：不 clear、不被后续 idle/working 覆盖，
  *   finally / 收尾路径再调用也是空操作（终端要保留“跑完了/失败了”给用户看）。
- * - 用户取消（streamInterrupted，exitCode 0）→ idle：用户叫停不是失败也不是完成。
+ * - 流被中断（streamInterrupted，exitCode 0）→ idle：既包含用户取消（abort），
+ *   也包含 provider 中途报错（对话可能仍在服务端继续），两者都不是失败或完成。
  * - 一次性 CLI 没有 stdin 交互（不问问题、不要批准、不就地登录），因此不会产生
  *   blocked；真出现该类等待的入口再接 blocked(kind)，不要在这里虚报。
  */
@@ -22,7 +23,7 @@ import { resolveTerminalProgramStatusState } from "./terminalRunStatus";
 
 export type OneShotRunSettlement = {
   exitCode: number;
-  /** 用户中断（Esc/abort）：runner 以 exitCode 0 + streamInterrupted 返回。 */
+  /** 流被中断（Esc/abort 或 provider 中途报错）：runner 以 exitCode 0 + streamInterrupted 返回。 */
   streamInterrupted?: boolean;
   /** 停滞/截断类“伪成功”：registry 记 failed，终端状态保持一致。 */
   stalledOrTruncated?: boolean;
@@ -38,14 +39,15 @@ export type OneShotTerminalStatus = {
 /**
  * 终态判定本身只有一份：client/terminalRunStatus.ts 的
  * resolveTerminalProgramStatusState（TUI 生命周期共用同一份）。这里只把一次性
- * CLI 的字段名（streamInterrupted）映射过去，优先级与理由见该函数注释。
+ * CLI 的字段名（streamInterrupted）映射过去，优先级与理由见该函数注释：
+ * streamInterrupted 既含用户取消也含流中途被中断（provider 报错），统一报 idle。
  */
 export function resolveOneShotTerminalState(
   result: OneShotRunSettlement,
 ): TerminalProgramStatusState {
   return resolveTerminalProgramStatusState({
     exitCode: result.exitCode,
-    cancelled: result.streamInterrupted,
+    interrupted: result.streamInterrupted,
     stalledOrTruncated: result.stalledOrTruncated,
   });
 }
