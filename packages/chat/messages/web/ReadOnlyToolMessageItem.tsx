@@ -32,7 +32,7 @@ const TR_HEADER_BUTTON_STYLE: React.CSSProperties = {
   appearance: "none",
 };
 
-export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled = true }: { message: any; conversationTodoEnabled?: boolean }) => {
+export const ReadOnlyToolMessageItem = memo(({ message }: { message: any }) => {
   const { content, toolName, isStreaming, toolPayload } = message;
   const rawData = useMemo(() => safeParse(content), [content]);
 
@@ -63,8 +63,6 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
       isError,
     })
   );
-
-  if (toolName === "setTodoList" && !conversationTodoEnabled) return null;
 
   if (toolName === "runStreamingAgent") {
     const handoff = buildRunStreamingAgentHandoffPresentation({
@@ -185,7 +183,6 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
                 : fallback?.defaultValue || _key) as any}
             openPreview={() => {}}
             navigateToPage={() => {}}
-            conversationTodoEnabled={conversationTodoEnabled}
           />
         </div>
       )}

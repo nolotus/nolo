@@ -3,16 +3,14 @@ import { messageInputStyles } from "./messageInputStyles";
 import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 import { LuArrowUp, LuLoader } from "react-icons/lu";
-import { useAppDispatch } from "app/store";
-import {
-  abortAllMessages,
-  useActiveControllers,
-} from "chat/dialog/dialogSlice";
+import { useActiveControllers, useRecoveredForegroundTurn } from "chat/dialog/dialogSlice";
+import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { useHasStreamingMessage } from "chat/messages/messageSlice";
 import { useTranslation } from "react-i18next";
 import { toast } from "app/utils/toast";
 import { useCallback, useEffect, useState } from "react";
 import type React from "react";
+import { useStopCurrentForegroundTurn } from "./useStopCurrentForegroundTurn";
 
 interface SendButtonProps {
   onClick: () => void;
@@ -32,19 +30,24 @@ const SendButton: React.FC<SendButtonProps> = ({
   loading = false,
   testId,
 }) => {
-  const dispatch = useAppDispatch();
   const { t } = useTranslation("chat");
   const activeControllers = useActiveControllers();
   const hasStreamingMessage = useHasStreamingMessage();
-  const canAbort = Object.keys(activeControllers).length > 0 || hasStreamingMessage;
+  const dialogConfig = useCurrentDialogConfig();
+  const recoveredForegroundTurn = useRecoveredForegroundTurn(dialogConfig?.dbKey);
+  const canAbort =
+    Object.keys(activeControllers).length > 0 ||
+    hasStreamingMessage ||
+    recoveredForegroundTurn === "running";
   const isLoading = !canAbort && loading;
+  const stopCurrentForegroundTurn = useStopCurrentForegroundTurn();
 
   const [isAnimating, setIsAnimating] = useState(false);
 
   const handleAbortAllMessages = useCallback(() => {
-    dispatch(abortAllMessages());
+    stopCurrentForegroundTurn();
     toast.success(t("allMessagesAborted", "已停止生成"), { duration: 3000 });
-  }, [dispatch, t]);
+  }, [stopCurrentForegroundTurn, t]);
 
   // 全局 Escape 键快捷打断（无模态框时生效）
   useEffect(() => {

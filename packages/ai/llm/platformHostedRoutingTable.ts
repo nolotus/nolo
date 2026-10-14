@@ -25,12 +25,47 @@ export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL = "anthropic/claude-haiku-4-5
 // 模型名同名（anthropic/claude-* 前缀是 DeepInfra 的官方 id 形态）。
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL = "anthropic/claude-opus-5-5";
 export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL = "anthropic/claude-fable-5-1";
+
+/**
+ * Cloudflare Workers AI / AI Gateway 上游官方 Catalog 模型 ID。
+ * 标点对齐：
+ * - 平台内部常量保留 haiku-4-5 / opus-5-5 / fable-5-1 的连字符定义；
+ * - CF 官方上游模型 ID 对小版本使用点号（如 claude-haiku-4.5、claude-opus-5.5、claude-fable-5.1）。
+ */
+export const CLOUDFLARE_CLAUDE_SONNET_5_UPSTREAM_MODEL_ID =
+  "anthropic/claude-sonnet-5";
+export const CLOUDFLARE_CLAUDE_OPUS_5_UPSTREAM_MODEL_ID =
+  "anthropic/claude-opus-5";
+export const CLOUDFLARE_CLAUDE_FABLE_5_UPSTREAM_MODEL_ID =
+  "anthropic/claude-fable-5";
+export const CLOUDFLARE_CLAUDE_HAIKU_45_UPSTREAM_MODEL_ID =
+  "anthropic/claude-haiku-4.5";
+export const CLOUDFLARE_CLAUDE_OPUS_5_5_UPSTREAM_MODEL_ID =
+  "anthropic/claude-opus-5.5";
+export const CLOUDFLARE_CLAUDE_FABLE_5_1_UPSTREAM_MODEL_ID =
+  "anthropic/claude-fable-5.1";
+
+/**
+ * Cloudflare AI 统一 Messages 端点占位模板。
+ * 静态真值表由浏览器/服务端共享，禁止在模块求值时读取 process.env 也不得硬编码测试账号。
+ * 契约：后续 integration 运行时由服务端 resolver 将 `{account}` 替换为 CLOUDFLARE_ACCOUNT_ID。
+ */
+export const CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE =
+  "https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1/messages";
 export const PLATFORM_HOSTED_GROK_4_6_MODEL = "grok-4.6";
 export const PLATFORM_HOSTED_GPT_6_ASTRA_MODEL = "gpt-6-astra";
 export const PLATFORM_HOSTED_GPT_6_LUNA_MODEL = "gpt-6-luna";
 export const PLATFORM_HOSTED_GPT_56_SOL_MODEL = "gpt-5.6-sol";
 export const PLATFORM_HOSTED_GPT_56_TERRA_MODEL = "gpt-5.6-terra";
 export const PLATFORM_HOSTED_GPT_56_LUNA_MODEL = "gpt-5.6-luna";
+/**
+ * GPT-6.1 Sol（2026-10-13 收进广场）：上游走 Cloudflare AI（Responses 协议）。
+ * CF 官方 catalog id 是 `openai/gpt-6.1-sol`（见下方 CLOUDFLARE_GPT_*_UPSTREAM_MODEL_ID 与
+ * CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE），与平台 id 不同名 → 必须显式 remap，
+ * 不得隐式拼接 `openai/` 前缀。
+ * 官方页：developers.cloudflare.com/ai/models/openai/gpt-6.1-sol/（2026-10-13 核对）。
+ */
+export const PLATFORM_HOSTED_GPT_6_1_SOL_MODEL = "gpt-6.1-sol";
 export const PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID = "qwen/qwen3.8-27b";
 export const PLATFORM_HOSTED_GLM_53_MODEL = "glm-5.3";
 export const PLATFORM_HOSTED_GLM_52_MODEL = "glm-5.2";
@@ -61,8 +96,31 @@ export const PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro";
 export const PLATFORM_HOSTED_LEGACY_DEEPSEEK_V4_FLASH_MODEL = "deepseek-v4-flash";
 
 /**
+ * Cloudflare Workers AI / AI Gateway 上游官方 Catalog 模型 ID（GPT 文本系）。
+ * CF 官方模型名是 `author/model` 形态的 catalog id，与平台 id 不同名
+ * （平台 `gpt-6-astra` ↔ 上游 `openai/gpt-6-astra`，`gpt-6.1-sol` ↔ `openai/gpt-6.1-sol`），
+ * 因此必须逐条显式声明，不得在运行时隐式拼接前缀。
+ * 来源：developers.cloudflare.com/ai/models/openai/<model>/（2026-10-13 核对）。
+ */
+export const CLOUDFLARE_GPT_6_ASTRA_UPSTREAM_MODEL_ID = "openai/gpt-6-astra";
+export const CLOUDFLARE_GPT_6_LUNA_UPSTREAM_MODEL_ID = "openai/gpt-6-luna";
+export const CLOUDFLARE_GPT_56_SOL_UPSTREAM_MODEL_ID = "openai/gpt-5.6-sol";
+export const CLOUDFLARE_GPT_56_TERRA_UPSTREAM_MODEL_ID = "openai/gpt-5.6-terra";
+export const CLOUDFLARE_GPT_56_LUNA_UPSTREAM_MODEL_ID = "openai/gpt-5.6-luna";
+export const CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID = "openai/gpt-6.1-sol";
+
+/**
+ * Cloudflare AI 统一 Responses 端点占位模板（GPT 文本系）。
+ * 静态真值表由浏览器/服务端共享，禁止在模块求值时读取 process.env 也不得硬编码测试账号。
+ * 契约：后续 integration 运行时由服务端 resolver 将 `{account}` 替换为 CLOUDFLARE_ACCOUNT_ID。
+ */
+export const CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE =
+  "https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1/responses";
+
+/**
  * 平台托管上游 id（credential / usage 白名单 / keyName 共用）。
  * 每个成员都必须是 getNoloKey / 凭据解析接受的真实上游 provider。
+ * `cloudflare` 复用 getNoloKey 的 CLOUDFLARE_API_TOKEN 分支（本分支已存在，未改动）。
  */
 export type PlatformHostedUpstreamId =
   | "deepinfra"
@@ -73,7 +131,8 @@ export type PlatformHostedUpstreamId =
   | "google"
   | "openai"
   | "deepseek"
-  | "mimo";
+  | "mimo"
+  | "cloudflare";
 
 /**
  * Kimi K3 的最低客户端版本。
@@ -107,7 +166,7 @@ export type PlatformHostedRoutingEntry = {
   readonly usageProvider: PlatformHostedUpstreamId;
   readonly keyName: PlatformHostedUpstreamId;
   readonly upstreamModelId?: string;
-  readonly wire: "chat.completions" | "responses";
+  readonly wire: "chat.completions" | "responses" | "anthropic.messages";
   /**
    * 是否在 server agentRun 循环中作为托管路由分流。
    * 为 false 时，agentRun 路径保持「未分流模型报错 (no upstream route)」，
@@ -251,99 +310,113 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: true,
   },
-  // Claude 系（真实模型）：DeepInfra 官方 id 与平台 id 同名，无需重映射。
-  // 旧批模型无缓存价（rate_per_input_token_cached=null），计费侧对无
-  // inputCacheHit 的模型按 input 全价计（见 calculatePrice）；Fable 5.1 起
-  // 官方给出缓存读价（输入 1/4），在 platformHosted.ts 的 price 里带
-  // inputCacheHit。
+  // Claude 系（Cloudflare Workers AI 上游，遵循 Anthropic Messages 协议）：
+  // 端点使用统一 accounts/{account}/ai/v1/messages 占位模板，上游使用官方 Catalog ID；
+  // 专用分支按 agentRunHosted 开关放行，缺 CF 凭据/账号在任何 fetch 前显式失败。
   [PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
-    upstreamModelId: PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_SONNET_5_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
     agentRunHosted: true,
   },
   [PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
-    upstreamModelId: PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_OPUS_5_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
     agentRunHosted: true,
   },
   [PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
-    upstreamModelId: PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_FABLE_5_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
     agentRunHosted: true,
   },
   [PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
-    upstreamModelId: PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_HAIKU_45_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
     agentRunHosted: true,
   },
-  // 新一代 Claude（2026-09-24 收进广场）：同 DeepInfra 通道、官方 id 直传。
+  // 新一代 Claude（2026-09-24 收进广场）：同 Cloudflare 通道、官方 Catalog ID。
   [PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
-    upstreamModelId: PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_OPUS_5_5_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
     agentRunHosted: true,
   },
   [PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
-    upstreamModelId: PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_FABLE_5_1_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
     agentRunHosted: true,
   },
-  // GPT-6 / GPT-5.6 系（OpenAI 官方 chat.completions）：
-  // 平台价按短上下文价目定（长上下文档差价由平台吸收），见 platformHosted.ts。
+  // GPT-6 / GPT-6.1 / GPT-5.6 文本系（Cloudflare AI 上游，Responses 协议）：
+  // 平台价仍按短上下文价目定（长上下文档差价由平台吸收），见 platformHosted.ts；
+  // 计价口径不随上游迁移变化，对客价目不动。
+  //
+  // ⚠️ 隔离改动（2026-10-13）：catalog-only 路由切换，**未启用生产**。
+  // endpoint 是账号作用域占位模板（含字面量 `{account}`），必须由运行时 resolver 用
+  // CLOUDFLARE_ACCOUNT_ID 替换、并按 Responses wire 组装请求体；而旧消费者
+  // （server agentRun / chatProxy / agent-runtime platformProviderEndpoints）尚未具备该能力
+  // —— 它们会把 OpenAI chat.completions 形状的 body POST 到这个模板 URL，或用字面量
+  // `{account}` 直接发请求。因此在 wire adapter + account 替换 + 专用 wire 门控合入前，
+  // 集成块（2026-10-13）已为 server agentRun 加专用 wire 分支：这 6 条（含兼容别名 id）
+  // 的 agentRunHosted 翻为 true，专用分支按该开关放行、token/账号缺一在任何 fetch 前显式失败；
   [PLATFORM_HOSTED_GPT_6_ASTRA_MODEL]: {
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    usageProvider: "openai",
-    keyName: "openai",
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_GPT_6_ASTRA_UPSTREAM_MODEL_ID,
+    wire: "responses",
     agentRunHosted: true,
   },
-  // GPT-6 Luna（2026-09-22 随 GPT-6 Sol/Luna 上线；官方模型页
-  // developers.openai.com/api/docs/models/gpt-6-luna，2026-09-23 核对）：
-  // 官方 id 即 `gpt-6-luna`，Chat Completions 与 Responses 端点均可用；
-  // 平台托管沿用 GPT-6 系既有 chat.completions 分流（与 astra 同线同源）。
+  // GPT-6 Luna（2026-09-22 随 GPT-6 Sol/Luna 上线）：CF catalog id `openai/gpt-6-luna`。
   [PLATFORM_HOSTED_GPT_6_LUNA_MODEL]: {
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    usageProvider: "openai",
-    keyName: "openai",
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_GPT_6_LUNA_UPSTREAM_MODEL_ID,
+    wire: "responses",
     agentRunHosted: true,
   },
-  [PLATFORM_HOSTED_GPT_56_SOL_MODEL]: {
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    usageProvider: "openai",
-    keyName: "openai",
-    wire: "chat.completions",
-    agentRunHosted: true,
-  },
+  // gpt-5.6-sol 不再单独建条目：它是 gpt-6.1-sol 的兼容别名
+  // （PLATFORM_MODEL_ALIASES），resolvePlatformHostedRouting 解析到 6.1 的条目。
   [PLATFORM_HOSTED_GPT_56_TERRA_MODEL]: {
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    usageProvider: "openai",
-    keyName: "openai",
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_GPT_56_TERRA_UPSTREAM_MODEL_ID,
+    wire: "responses",
     agentRunHosted: true,
   },
   [PLATFORM_HOSTED_GPT_56_LUNA_MODEL]: {
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    usageProvider: "openai",
-    keyName: "openai",
-    wire: "chat.completions",
+    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_GPT_56_LUNA_UPSTREAM_MODEL_ID,
+    wire: "responses",
+    agentRunHosted: true,
+  },
+  // GPT-6.1 Sol（2026-10-13 新增）：CF 官方页只声明「Responses, Chat Completions」
+  // 两种请求格式与 reasoning_effort；本表按 Responses 统一线走。
+  [PLATFORM_HOSTED_GPT_6_1_SOL_MODEL]: {
+    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID,
+    wire: "responses",
     agentRunHosted: true,
   },
   // Grok -> xAI（server agentRun 侧未分流，保持 no upstream route 报错）
@@ -432,15 +505,69 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
 };
 
 /**
+ * 平台模型兼容别名（单一声明，owner 2026-10-13 明确授权）。
+ *
+ * 语义：旧 id 继续被接受（不报错、不拒绝），但**执行与计费一律落到实际模型**
+ * ——上游调用换用实际模型的 catalog id，记账/定价用实际模型目录价。原始请求 id
+ * 原样留在记录里（`billing_model` 诊断字段），映射是显式记录而非隐藏。
+ *
+ * 作用域（platform-scoped）：只在**平台托管**请求上生效（provider 为平台托管，
+ * 且无自定义端点 / 自带 key）。BYOK / custom / OAuth 的旧 model id 打的是用户
+ * 自己的上游，不做任何重映射。
+ *
+ * 单一真值：路由（resolvePlatformHostedRouting）、上游 id 解析
+ * （resolveCloudflareGptUpstreamModelId）、计费目标（resolveBillingTarget）
+ * 都只从这里读，禁止各写一份。
+ */
+export type PlatformModelAlias = {
+  /** 实际执行 / 计费使用的平台模型 id。 */
+  readonly aliasOf: string;
+  readonly since: string;
+  readonly reason: string;
+};
+
+export const PLATFORM_MODEL_ALIASES: Readonly<
+  Record<string, PlatformModelAlias>
+> = {
+  [PLATFORM_HOSTED_GPT_56_SOL_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
+    since: "2026-10-13",
+    reason:
+      "CF 官方目录换代：gpt-5.6-sol 由 gpt-6.1-sol 承接（owner 授权透明映射，按 6.1 计费）。",
+  },
+};
+
+/** 旧 id 的别名声明（无别名 / 未知 id 返回 undefined）。 */
+export function resolvePlatformModelAlias(
+  model?: string | null,
+): PlatformModelAlias | undefined {
+  const normalized = asTrimmedLowercaseString(model);
+  if (!normalized) return undefined;
+  return PLATFORM_MODEL_ALIASES[normalized];
+}
+
+/** 实际执行 / 计费模型 id（无别名时返回原 id；空值返回 undefined）。 */
+export function resolvePlatformEffectiveModel(
+  model?: string | null,
+): string | undefined {
+  const normalized = asTrimmedLowercaseString(model);
+  if (!normalized) return undefined;
+  return PLATFORM_MODEL_ALIASES[normalized]?.aliasOf ?? normalized;
+}
+
+/**
  * 查询平台托管模型的路由配置。
  * 若模型未在托管表中注册，返回 undefined。
+ *
+ * 兼容别名（PLATFORM_MODEL_ALIASES）在这里解析到**实际模型**的条目：旧 id 拿到
+ * 的上游/端点与 6.1 完全一致，未知 id 也不会穿透到内置 / 客户端路由。
  */
 export function resolvePlatformHostedRouting(
   model?: string | null,
 ): PlatformHostedRoutingEntry | undefined {
-  const normalized = asTrimmedLowercaseString(model);
-  if (!normalized) return undefined;
-  return PLATFORM_HOSTED_ROUTING_TABLE[normalized];
+  const effective = resolvePlatformEffectiveModel(model);
+  if (!effective) return undefined;
+  return PLATFORM_HOSTED_ROUTING_TABLE[effective];
 }
 
 /**

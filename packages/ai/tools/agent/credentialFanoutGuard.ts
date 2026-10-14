@@ -8,14 +8,14 @@
 //
 //   - credentialGroup 为 undefined / 空串 / "unknown" → 一律视为 unknown；
 //   - unknown 与任何条目（包括另一个 unknown）都构成冲突——不能证明独立；
-//   - 两个已知且相同的 credentialGroup → 同一凭证，禁止并发扇出；
+//   - 两个已知且相同的 credentialGroup → 同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道）；显式 allowCredentialConcurrency: false 时拒绝；
 //   - 两个已知且不同的 credentialGroup → 允许并发。
 //
-// 冲突时的放行口都必须由调用方显式给出，绝不静默放行：
+// 冲突时的放行口/收紧口由调用方显式给出，绝不静默放行未知凭证：
 //   - allowUnknownCredential=true（未知凭证；工具参数 allowUnknownCredential /
 //     CLI --force-unknown-credential）：调用方已自行确认两侧不共用上游 key；
-//   - allowCredentialConcurrency=true（已知且相同的凭证组）：调用方确认该
-//     凭证支持并发。
+//   - allowCredentialConcurrency=false（已知且相同的凭证组）：调用方显式
+//     收紧禁止并发（默认允许并发）。
 // 两个字段在每个调用链路上都必须透传（漏传 = 放行口失效，参见 CLI 执行器）。
 //
 // 本模块只做判定；活跃 run 集合的来源由各端自己提供
@@ -69,7 +69,7 @@ export function checkCredentialFanout(args: {
   active: CredentialFanoutEntry[];
   candidate: CredentialFanoutEntry;
   allowUnknownCredential?: boolean;
-  /** 显式允许同一 credentialGroup 的并发扇出（如用户授权或多任务并发）。 */
+  /** 显式禁止同一 credentialGroup 的并发（默认允许）。 */
   allowCredentialConcurrency?: boolean;
 }): CredentialFanoutVerdict {
   const candidateGroup = normalizeCredentialGroupValue(
@@ -109,7 +109,7 @@ export function checkCredentialFanout(args: {
     }
 
     if (candidateGroup === entryGroup) {
-      if (args.allowCredentialConcurrency === true) {
+      if (args.allowCredentialConcurrency !== false) {
         continue;
       }
       return {
@@ -119,7 +119,7 @@ export function checkCredentialFanout(args: {
         message:
           `拒绝并发派发：候选 agent ${describeEntry(args.candidate)} 与已活跃 run ` +
           `${describeEntry(entry)} 同属 credentialGroup "${candidateGroup}"，` +
-          `同一凭证上禁止并发扇出。请串行派发、换用其他 credentialGroup 的 agent，或传 allowCredentialConcurrency: true 允许并发。`,
+          `本次为显式收紧（allowCredentialConcurrency: false）所致。请串行派发、换用其他 credentialGroup 的 agent，或移除该收紧。`,
       };
     }
   }

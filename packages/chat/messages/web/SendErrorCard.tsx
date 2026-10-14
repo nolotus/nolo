@@ -25,6 +25,10 @@ export interface SendErrorCardProps {
 }
 
 const KIND_ICONS: Record<SendErrorKind, React.ComponentType<{ size?: number; className?: string }>> = {
+  config_protocol: LuCircleAlert,
+  empty: LuCircleAlert,
+  policy: LuShieldAlert,
+  transient: LuServerOff,
   network: LuWifiOff,
   timeout: LuClock,
   auth: LuShieldAlert,
@@ -36,6 +40,10 @@ const KIND_ICONS: Record<SendErrorKind, React.ComponentType<{ size?: number; cla
 };
 
 const KIND_LABELS: Record<SendErrorKind, string> = {
+  config_protocol: "配置或通信错误",
+  empty: "模型空响应",
+  policy: "内容安全限制",
+  transient: "服务暂时不可用",
   network: "网络错误",
   timeout: "请求超时",
   auth: "认证失败",

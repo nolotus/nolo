@@ -14,6 +14,8 @@
  */
 
 import { exec, execSync, spawn } from "child_process";
+import type { ChildProcessByStdio } from "child_process";
+import type { Readable } from "stream";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -772,10 +774,11 @@ function executeCodex(
       args.push("-i", imgPath);
     }
     const start = Date.now();
-    const proc = spawn(executable, [...args, prompt], {
+    const proc = spawnCliProcess(executable, [...args, prompt], {
       cwd,
       env: buildCliProcessEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
+      signal: options.signal,
     });
     const stdout = createUtf8Collector();
     const stderr = createUtf8Collector();
@@ -862,10 +865,11 @@ function executeClaude(
     }
 
     const start = Date.now();
-    const proc = spawn("claude", args, {
+    const proc = spawnCliProcess("claude", args, {
       cwd,
       env: buildCliProcessEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
+      signal: options.signal,
     });
     const stdout = createUtf8Collector();
     const stderr = createUtf8Collector();
@@ -952,6 +956,9 @@ function createUtf8Collector() {
   };
 }
 
+/** SIGKILL grace after SIGTERM before the CLI process group is force-killed. */
+const CLI_ABORT_SIGKILL_GRACE_MS = 5_000;
+
 function terminateCliProcessGroup(
   proc: ReturnType<typeof spawn>,
   signal: NodeJS.Signals
@@ -965,11 +972,43 @@ function terminateCliProcessGroup(
       // Fall back to the child process if the group is unavailable.
     }
   }
+  if (pid > 0 && process.platform === "win32") {
+    // Windows has no process-group signals: best-effort tree kill via taskkill
+    // (a CLI may have spawned its own descendants that proc.kill cannot reach).
+    try {
+      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.on("error", () => {});
+      (killer as any).unref?.();
+    } catch {
+      // Best effort only.
+    }
+  }
   try {
     proc.kill(signal);
   } catch {
     // Best effort cleanup only.
   }
+}
+
+/**
+ * Kill the CLI process group politely now, then force-kill after a grace
+ * window if any member is still alive. Descendants of the CLI are part of the
+ * group only when the child was spawned with its own process group (detached),
+ * which `spawnCliProcess` guarantees for abort-aware spawns.
+ */
+function terminateCliProcessGroupEscalating(proc: ReturnType<typeof spawn>) {
+  terminateCliProcessGroup(proc, "SIGTERM");
+  const escalate = setTimeout(() => {
+    // The grace window must not be cancelled just because the CLI parent
+    // exited first: an in-group descendant may ignore SIGTERM and outlive it.
+    // An empty group fails the kill with ESRCH and is caught below; the
+    // timer is unref'd so it never holds the runtime open.
+    terminateCliProcessGroup(proc, "SIGKILL");
+  }, CLI_ABORT_SIGKILL_GRACE_MS);
+  (escalate as any).unref?.();
 }
 
 function createCliAbortError(message = "CLI execution aborted"): DOMException {
@@ -984,16 +1023,65 @@ function attachCliAbortSignal(
 ): () => void {
   if (!signal) return () => {};
   if (signal.aborted) {
-    terminateCliProcessGroup(proc, "SIGTERM");
+    terminateCliProcessGroupEscalating(proc);
     onAbort(createCliAbortError());
     return () => {};
   }
   const handleAbort = () => {
-    terminateCliProcessGroup(proc, "SIGTERM");
+    terminateCliProcessGroupEscalating(proc);
     onAbort(createCliAbortError());
   };
   signal.addEventListener("abort", handleAbort, { once: true });
   return () => signal.removeEventListener("abort", handleAbort);
+}
+
+type CliSpawnOptions = {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  stdio?: Array<"ignore" | "pipe" | "inherit" | number | null>;
+  detached?: boolean;
+  signal?: AbortSignal;
+};
+
+/**
+ * Unified abort-aware spawn for CLI providers.
+ *
+ * - A caller-supplied signal makes the child its own process group (POSIX
+ *   `detached: true`) so the abort path can SIGTERM/SIGKILL the whole group —
+ *   descendants of the CLI included. Without a signal the previous spawn
+ *   semantics are kept untouched.
+ * - Abort only kills; the executor promise still settles through its normal
+ *   close/error path (a killed child surfaces as a null exit code), and the
+ *   server loop classifies the aborted turn as cancelled.
+ *
+ * Overloads preserve the stdio-specialized child type for the shared
+ * `["ignore", "pipe", "pipe"]` shape so call sites keep non-null stdout/stderr.
+ */
+function spawnCliProcess(
+  executable: string,
+  args: string[],
+  options: CliSpawnOptions & { stdio: ["ignore", "pipe", "pipe"] },
+): ChildProcessByStdio<null, Readable, Readable>;
+function spawnCliProcess(
+  executable: string,
+  args: string[],
+  options: CliSpawnOptions,
+): ReturnType<typeof spawn>;
+function spawnCliProcess(
+  executable: string,
+  args: string[],
+  options: CliSpawnOptions,
+): ReturnType<typeof spawn> {
+  const { signal, ...spawnOptions } = options;
+  const proc = spawn(executable, args, {
+    ...spawnOptions,
+    ...(signal ? { detached: true } : {}),
+  } as Parameters<typeof spawn>[2]);
+  if (signal) {
+    const detachAbort = attachCliAbortSignal(proc, signal, () => {});
+    proc.once("exit", detachAbort);
+  }
+  return proc;
 }
 
 function buildAgyTimeoutError(timeout: number, stdout: string, stderr: string) {
@@ -1032,11 +1120,12 @@ function executeAgy(
     }
 
     const start = Date.now();
-    const proc = spawn("agy", args, {
+    const proc = spawnCliProcess("agy", args, {
       cwd,
       env: buildCliProcessEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
+      signal: options.signal,
     });
     const stdout = createUtf8Collector();
     const stderr = createUtf8Collector();
@@ -1133,10 +1222,11 @@ function executeQoder(
     }
 
     const start = Date.now();
-    const proc = spawn("qoder", args, {
+    const proc = spawnCliProcess("qoder", args, {
       cwd,
       env: buildCliProcessEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
+      signal: options.signal,
     });
     const stdout = createUtf8Collector();
     const stderr = createUtf8Collector();
@@ -1262,10 +1352,11 @@ function executeOpenCode(
     args.push(prompt);
 
     const start = Date.now();
-    const proc = spawn("opencode", args, {
+    const proc = spawnCliProcess("opencode", args, {
       cwd,
       env: buildCliProcessEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
+      signal: options.signal,
     });
     const stdout = createUtf8Collector();
     const stderr = createUtf8Collector();
@@ -1389,10 +1480,11 @@ function executeGrok(
     }
 
     const start = Date.now();
-    const proc = spawn("grok", args, {
+    const proc = spawnCliProcess("grok", args, {
       cwd,
       env: buildGrokProcessEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
+      signal: options.signal,
     });
     const stdout = createUtf8Collector();
     const stderr = createUtf8Collector();
@@ -1498,10 +1590,11 @@ function executeKimi(
     }
 
     const start = Date.now();
-    const proc = spawn("kimi", args, {
+    const proc = spawnCliProcess("kimi", args, {
       cwd,
       env: buildCliProcessEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
+      signal: options.signal,
     });
     const stdout = createUtf8Collector();
     const stderr = createUtf8Collector();
@@ -1843,6 +1936,7 @@ export function executeCliStreaming(
     const proc = spawn("gh", args, {
       cwd,
       env: buildCliProcessEnv(resolved.options.env),
+      ...(resolved.options.signal ? { detached: true } : {}),
     });
 
     const stdout = createUtf8Collector();
@@ -1929,6 +2023,7 @@ function executeGeminiStreaming(
         ...options.env,
         NODE_OPTIONS: "--no-deprecation",
       }),
+      ...(options.signal ? { detached: true } : {}),
     });
 
     const stdout = createUtf8Collector();

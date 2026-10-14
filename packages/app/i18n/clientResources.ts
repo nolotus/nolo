@@ -6,6 +6,7 @@ const supportedLanguages = new Set<string>([
   Language.ZH_CN,
   Language.ZH_HANT,
   Language.JA,
+  Language.KO,
 ]);
 
 const loadedLanguages = new Set<string>();
@@ -19,6 +20,7 @@ export const normalizeClientLanguage = (rawLanguage?: string) => {
   }
   if (lower.startsWith("zh")) return Language.ZH_CN;
   if (lower.startsWith("ja")) return Language.JA;
+  if (lower.startsWith("ko")) return Language.KO;
   return Language.EN;
 };
 

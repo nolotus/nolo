@@ -2,22 +2,15 @@ import {
   NOLO_CLUSTER_SERVERS,
   normalizeKnownServerOrigin,
 } from "database/config";
-import { BUILTIN_PLATFORM_AGENT_KEYS as CORE_BUILTIN_PLATFORM_AGENT_KEYS } from "core/builtinAgents";
+import { isBuiltinPlatformAgentKey as isCoreBuiltinPlatformAgentKey } from "core/builtinAgents";
+export { BUILTIN_PLATFORM_AGENT_KEYS } from "core/builtinAgents";
 import { normalizeServerOrigin } from "core/serverOrigin";
-
-export const BUILTIN_PLATFORM_AGENT_KEYS = [
-  ...CORE_BUILTIN_PLATFORM_AGENT_KEYS,
-] as const;
-
-const BUILTIN_PLATFORM_AGENT_KEY_SET = new Set<string>(
-  BUILTIN_PLATFORM_AGENT_KEYS
-);
 
 const normalizeServer = (server: string): string =>
   normalizeKnownServerOrigin(server) ?? normalizeServerOrigin(server);
 
 export const isBuiltinPlatformAgentKey = (dbKey: string): boolean =>
-  typeof dbKey === "string" && BUILTIN_PLATFORM_AGENT_KEY_SET.has(dbKey);
+  isCoreBuiltinPlatformAgentKey(dbKey);
 
 export const resolveAgentReadServers = ({
   dbKey,
