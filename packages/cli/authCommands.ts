@@ -350,6 +350,9 @@ export function runWhoamiCommand(
 
   if (!profileToken && !envToken) {
     output.log("Not logged in. Run: nolo login");
+    output.log(
+      'Or skip login entirely: nolo run "<task>" (local Codex) | nolo auth <provider> (your own subscription)'
+    );
     return 1;
   }
 

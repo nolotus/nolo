@@ -20,11 +20,6 @@
 // batch、concurrent、review…diff/code。漏报代价低：最小协议保留全部安全门，
 // 且一旦出现 startAgentRun/controlAgentRun 调用即行为锁定。
 //
-// B1 修正（2026-10-14 移植复审 WARNING 1）：上述移除造成新增漏报——「多位助手 +
-// 分工 / 同时处理 / 并行 / 分别 / 审查」这类明确要求多执行者的表达不再锁完整协议。
-// 现以 MULTI_EXECUTOR_PATTERN + COLLAB_ACTION_PATTERN 的**组合**补回（见下），
-// 不恢复裸宽泛词，因此不会把已消除的误报放回来。
-//
 // 误判方向不对称：
 // - 误报（无派发意图却注入完整协议）：只是 prompt 变长，无行为风险；
 // - 漏报（有派发意图却用了最小协议）：安全硬门（平台积分授权、review 硬门）
@@ -33,22 +28,6 @@
 
 const DISPATCH_INTENT_PATTERN =
   /(派发|派单|派个|派一|派两|派几|派人|子任务|子\s*[aA]gent|多\s*[aA]gent|多个\s*[aA]gent|并行处理|并行派发|并发派发|并行执行|并发执行|分头|会商|独立\s*review|派.{0,4}review|dispatch|delegat|sub[\s-]?agent|sub[\s-]?task|fan[\s-]?out|orchestrat|in parallel|paralleliz|background run)/i;
-
-// 收窄（B1）后的**新增漏报**修复：只认显式派发词会漏掉「多执行者 + 分工/并行/
-// 审查」这类同样明确要求编排的表达（2026-10-14 移植复审 WARNING 1）。
-// 这里不恢复裸「分工」「同时处理」「代码审查」等宽泛词，而是要求**同一段文本内
-// 同时出现**多执行者数量短语（两位助手 / 几个 agent / these tasks …）与协作动作词
-// （分工 / 同时处理 / 并行 / 分别 / 审查 / concurrently …）；任一侧缺失都不命中，
-// 因此日常歧义词不会重新变成误报。
-//
-// 复审 v2 WARNING（2026-10-14）：数量短语曾用 [0-9]+，于是 0/1 也被当成「多执行者」
-// （「让1位助手审查这段代码」误判 true）。现在数字限定 **≥2**（[2-9] | [1-9][0-9]+），
-// 并加数字边界 (?<![0-9])，避免从 12/20 这类多位数内部截取出 "2位/0位" 之类的子串。
-const MULTI_EXECUTOR_PATTERN =
-  /(?:(?:两|二|三|四|五|六|七|八|九|十|几|多|数|若干|(?<![0-9])(?:[2-9]|[1-9][0-9]+))\s*(?:个|位|名)\s*(?:助手|agent|assistant|worker|reviewer|专家|子\s*agent)|(?:two|three|four|five|six|several|multiple|these|those|the following|(?<![0-9])(?:[2-9]|[1-9][0-9]+))\s+(?:agents?|assistants?|helpers?|reviewers?|workers?|tasks?|sub-?agents?|sub-?tasks?))/i;
-
-const COLLAB_ACTION_PATTERN =
-  /(?:分工|同时处理|同时做|同时推进|同时进行|并行|并发|分别|各自|协作|协同|代码审查|审查|review|concurrently|simultaneously|separately|respectively|in parallel)/i;
 
 // 一旦历史里出现过这些派发/控制工具的调用，后续所有轮次都保持派发协议。
 const DISPATCH_TOOL_NAMES = new Set(["startAgentRun", "controlAgentRun"]);
@@ -59,9 +38,7 @@ const DISPATCH_TOOL_NAMES = new Set(["startAgentRun", "controlAgentRun"]);
  */
 export function detectDispatchIntent(text: string | null | undefined): boolean {
   if (typeof text !== "string" || !text.trim()) return false;
-  if (DISPATCH_INTENT_PATTERN.test(text)) return true;
-  // 上下文约束组合：多执行者数量短语 **且** 协作动作词，二者缺一不命中。
-  return MULTI_EXECUTOR_PATTERN.test(text) && COLLAB_ACTION_PATTERN.test(text);
+  return DISPATCH_INTENT_PATTERN.test(text);
 }
 
 type DispatchIntentMessage = {

@@ -24,6 +24,7 @@ import {
 } from "../client/localRuntimeAdapter";
 import { resolveSkillReference, buildSkillContextBlocks } from "../agentRunPrompts";
 import { buildSkillDiscoveryContextLayer } from "../../agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "../../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
 import { buildResponseGuidelines } from "../../agent-runtime/responseGuidelines";
 import {
@@ -44,6 +45,8 @@ import {
   type PermissionRequest,
 } from "../../agent-runtime/actionGate";
 import type { AgentRuntimeToolResult } from "../agentRuntimeLocal";
+import type { OriginShellGrant } from "../client/originShellGrant";
+import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecution";
 import type { CompactDialogResult } from "../client/compactDialog";
 import { isBalanceExhaustedError, isQuotaExhaustedError } from "../agentRunCommand";
 import { backfillRunRecordParentDialog } from "../agentRunControl";
@@ -77,11 +80,19 @@ import type { CollapsedPasteStore } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
 import { t } from "./i18n";
 import { createChatQueueTuiBinding, type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
+import { resolveAttachmentImageUrls } from "./pasteImage";
+import { transcribeMediaFile, formatTranscriptForModel, describeMediaError } from "./mediaAttachment";
+import { createTrimRequester, resolveTranscribeTrim } from "./transcribePreflight";
 import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
 import {
   buildProcessTerminalTurnMessage,
   parsePendingProcessNoticeLine,
 } from "./processTerminalNotice";
+import { emitTerminalProgramStatus } from "../client/terminalProgramStatus";
+import {
+  isRunResultStalledOrTruncated,
+  resolveTerminalProgramStatusState,
+} from "../client/terminalRunStatus";
 import {
   emitTerminalAttention,
   runWithInputRequiredAttention,
@@ -154,6 +165,11 @@ async function runAgentChat(
   agentRunner: typeof runAgentTurn = runAgentTurn,
   options: {
     imageUrls?: string[];
+    /**
+     * 本机原件路径（图片 / 音视频）→ 只产出给模型的安全附件卡（name/mime/size/kind），
+     * 绝不把 path / machineId 上行（见 packages/cli/tui/localAttachmentParts.ts）。
+     */
+    localAttachmentPaths?: readonly string[];
     actionGateHandler?: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
     confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
     requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
@@ -178,6 +194,18 @@ async function runAgentChat(
      * 权威 turnCredits 经 accumulateSessionCredits 接管，不双计。
      */
     onLiveTurnCredits?: (credits: number) => void;
+    /**
+     * 分享 OAuth agent 的 shell 会话授权（块 D）：宿主装配的会话级 grant
+     * 对象；owner-required 场景 adapter 在首次命令执行类调用前弹确认。
+     * 非 owner 场景该字段存在也不会被触发。
+     */
+    shellGrant?: OriginShellGrant;
+    /**
+     * 工具执行位置消费者（块 D）：owner-required 场景 adapter 回调一次；
+     * 本模块渲染一行「工具在 <deviceName>(<deviceId>) · <workspaceRoot>
+     * 执行 · <status>」。非 owner 场景不回调。
+     */
+    onToolExecutionLocation?: (location: ToolExecutionLocation) => void;
   } = {}
 ) {
   // 用户选中的 agent 就是要跑的 agent —— 不再做首轮自动改写，也不再按对话
@@ -196,6 +224,21 @@ async function runAgentChat(
   let effectiveMessage = message;
   let skillAllowedTools: string[] | undefined;
   let skillContextBlocks: string[] | undefined;
+  // 记忆召回只依赖此刻已固定的 agent 与用户输入（`effectiveMessage` 之后不再
+  // 改写），而 attached-skill 解析是与之相互独立的等待；因此在这里就发起召回，
+  // 让两条 I/O 重叠，再在首次模型请求前 await 同一个 promise。远端优先 /
+  // 本地 fallback / 5000ms 超时语义完全不变（仍走 resolveCliMemory）。
+  // 异常在此处立即收敛为 null：否则 skill 等待期间会产生未处理的 rejection。
+  const memoryPromptPromise =
+    state.cachedMemoryOverlay === undefined
+      ? resolveCliMemory({
+          serverUrl: state.serverUrl,
+          authToken: resolvePlatformAuthToken(env),
+          agentKey: effectiveAgentKey,
+          userInput: effectiveMessage,
+          env,
+        }).catch(() => null)
+      : null;
   if (state.attachedSkills.length > 0) {
     const authToken = resolvePlatformAuthToken(env);
     const resolvedSkills = [];
@@ -245,6 +288,8 @@ async function runAgentChat(
     // index layer so the model knows what skills exist and can readFile them
     // on-demand. Mirrors agentRunCommand.ts and desktopAgentRuntimeTurnService.
     buildSkillDiscoveryContextLayer(state.cwd),
+    // 宿主环境层（session-scope 稳定前缀）：快速注入当前系统发行版、架构与桌面环境
+    buildHostEnvironmentLayer(),
   ];
 
   // 响应展示指南（窄屏/TUI 版）：与 buildSystemPrompt 共享同一 builder
@@ -259,14 +304,9 @@ async function runAgentChat(
   // the current one (the model already has the context from the conversation).
   // /new or dialog switch clears cachedMemoryOverlay so the next dialog reloads.
   let memoryPromptBlock = state.cachedMemoryOverlay;
-  if (memoryPromptBlock === undefined) {
-    memoryPromptBlock = await resolveCliMemory({
-      serverUrl: state.serverUrl,
-      authToken: resolvePlatformAuthToken(env),
-      agentKey: effectiveAgentKey,
-      userInput: effectiveMessage,
-      env,
-    }).catch(() => null);
+  if (memoryPromptBlock === undefined && memoryPromptPromise) {
+    // 等待已提前启动的召回；首次模型请求仍须拿到这个结果。
+    memoryPromptBlock = await memoryPromptPromise;
     // Cache will be propagated to TUI state by the caller via runResult.cachedMemoryOverlay.
   }
   const memoryOverlayLayer = buildMemoryOverlayLayer({ promptBlock: memoryPromptBlock });
@@ -324,6 +364,19 @@ async function runAgentChat(
     message: effectiveMessage,
     continueDialogId: state.dialogId,
     ...(state.dialogId ? { parentDialogId: state.dialogId } : {}),
+    // 显式注入 TUI 真实会话身份（createInitialTuiState mint、跨轮稳定），
+    // owner-required 契约不再从 parentDialogId/workspaceRoot 派生会话身份。
+    // 兜底 `session-ephemeral`：测试/外部构造的 partial TuiState 缺 sessionId
+    // 时给稳定占位（adapter 内仍按 originSession → parentDialogId → ephemeral
+    // 的顺序回退，不会把 undefined 写进契约）。
+    originSession: { sessionId: state.sessionId ?? "session-ephemeral" },
+    // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级 grant 透传；
+    // 非 owner 场景 adapter 不触发该路径。
+    ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
+    // 运行位置展示（块 D）：owner-required 场景 adapter 回调一次。
+    ...(options.onToolExecutionLocation
+      ? { onToolExecutionLocation: options.onToolExecutionLocation }
+      : {}),
     ...(state.agentKey === DEFAULT_TUI_AGENT_KEY && env.NOLO_AUTO_ROUTE !== "0"
       ? { dialogAgentMode: "auto" as const }
       : { dialogAgentMode: "fixed" as const }),
@@ -347,6 +400,9 @@ async function runAgentChat(
     showThinking: state.thinkingDisplay === "show",
     ...(options.imageUrls && options.imageUrls.length > 0
       ? { imageUrls: options.imageUrls }
+      : {}),
+    ...(options.localAttachmentPaths && options.localAttachmentPaths.length > 0
+      ? { localAttachmentPaths: options.localAttachmentPaths }
       : {}),
     ...(options.actionGateHandler ? { actionGateHandler: options.actionGateHandler } : {}),
     ...(options.confirmDestructiveAction
@@ -372,13 +428,24 @@ async function runAgentChat(
         env: factoryEnv,
         cwd: factoryOptions?.cwd ?? state.cwd,
         output,
+        // 与 RunAgentTurnOptions.originSession 同源：TUI 真实会话身份显式注入，
+        // owner-required 契约取它为 origin.sessionId 权威来源（同样兜底
+        // session-ephemeral，防 partial TuiState）。
+        originSession: { sessionId: state.sessionId ?? "session-ephemeral" },
+        // shell 会话授权同一对象透传给 adapter factory 路径——两个接线点共用
+        // 同一份 granted 状态，撤销对两条路径同时生效。
+        ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
+        // 运行位置展示同一回调（块 D）：与 RunAgentTurnOptions 同源。
+        ...(options.onToolExecutionLocation
+          ? { onToolExecutionLocation: options.onToolExecutionLocation }
+          : {}),
         ...(options.confirmDestructiveAction
           ? { confirmDestructiveAction: options.confirmDestructiveAction }
           : {}),
         ...(options.requestUserChoice
           ? { requestUserChoice: options.requestUserChoice }
           : {}),
-        ...(options.pastedTextStore
+        ...(options.pastedTextStore?.items.size
           ? { pastedTextStore: options.pastedTextStore }
           : {}),
         // Stamp spawned background runs with the current TUI dialog so the
@@ -875,9 +942,23 @@ export interface AgentTurnContext {
    * 计数只增不减（仍然有上限，只是更保守）。
    */
   noteUserTurn?: () => void;
+  /** 用户 turn 已准确建档；仅宿主可附加 TUI 展示元数据。 */
+  onUserTurnFinalized?: (turn: import("./tuiHistory").Turn, imageUrls: readonly string[]) => void;
 
   // ── 外部只读 / 动态读取字段 ──
   readonly sessionEnded: boolean;
+  /**
+   * 分享 OAuth agent 的 shell 会话授权（块 D）：宿主在 runTuiWorkspace 启动时
+   * 装配；owner-required 场景 adapter 在首次 execShell/launchProcess 前弹确认。
+   * 会话级单例——dialogId 变化（/new、picker）不重置 granted；用户撤销经
+   * `shellGrant.revoke()` 立即生效。
+   */
+  readonly shellGrant?: OriginShellGrant;
+  /**
+   * 工具执行位置消费者（块 D）：宿主装配；owner-required 场景 adapter 回调
+   * 一次，宿主渲染运行位置行。Web/桌面/RN 按同一契约后续接。
+   */
+  readonly onToolExecutionLocation?: (location: ToolExecutionLocation) => void;
   readonly buffer: string;
   readonly cursorPos: number;
 
@@ -921,6 +1002,11 @@ export async function runOneAgentTurn(
   imageUrls: string[],
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  /**
+   * 本机原件路径（图片 / 音视频）：client 侧转成安全附件卡（只含 name/mime/size/kind），
+   * 不把 path / machineId 发给 provider。缺省 = 无附件卡（行为不变）。
+   */
+  localAttachmentPaths?: readonly string[],
 ): Promise<{ ok: boolean; aborted: boolean }> {
   // LLM 总结标题是 fire-and-forget 后台 patch：saveTurn 返回的 title 是
   // fallback（不阻塞 turn），真正标题 patch 完成后把最终标题同步到
@@ -991,6 +1077,70 @@ export async function runOneAgentTurn(
   ctx.forcedStop = false;
   ctx.turnEpoch += 1;
   const myEpoch = ctx.turnEpoch;
+  const emitStatus = (report: Parameters<typeof emitTerminalProgramStatus>[1]) =>
+    emitTerminalProgramStatus(ctx.output, report);
+  // 迟到的回调不许写回状态，判据有两条：
+  // 1) 本 turn 必须仍是当前 turn：强制收尾（第二次 Esc）把屏幕交还用户后用户
+  //    可能已经开了新一轮，旧 turn 的 done/error/working 会覆盖新一轮的状态。
+  // 2) 「等真人」相关的上报（blocked、等完回来的 working，以及迟到异常）还要
+  //    求本 turn 没被强制收尾过：强停那一下屏幕已交还用户并报过 idle，gate
+  //    回调随后才返回时不许把 idle 覆盖成「在等你」/「出错了」。
+  // 终态上报（强停自己的 idle、正常路径的 done/error）只走第一条：强停那次
+  // forcedStopEpoch 就等于 myEpoch，走第二条反而发不出去。
+  const emitStatusIfCurrentTurn = (report: Parameters<typeof emitTerminalProgramStatus>[1]) => {
+    if (myEpoch === ctx.turnEpoch) emitStatus(report);
+  };
+  const emitStatusUnlessForceStopped = (report: Parameters<typeof emitTerminalProgramStatus>[1]) => {
+    if (myEpoch === ctx.turnEpoch && ctx.forcedStopEpoch !== myEpoch) emitStatus(report);
+  };
+  // turn 开始只报 working。会话启动的那条 idle 由 readlineWorkspace 在开局发
+  // 一次；这里再补一条 idle 会把上一轮还没被用户看到的 done 抹掉（协议：
+  // done/error 持续到有新工作或用户确认，没有自动清除）。
+  emitStatus({ state: "working" });
+  // Agent 被 gate 拦下 = 在等真人操作：`confirm`（写文件 / 破坏性操作确认）报
+  // permission；`handoff`（把命令交给用户自己的终端跑）与 `input`（Agent 提问）
+  // 报 question —— 三者都是「等你」，kind 只区分等待的原因。gate 关掉后回到
+  // working，之后正常走 done/error。整段包在 epoch 守卫里，旧 turn 迟到的 gate
+  // 回调不会把新一轮的 blocked/working 写回去。
+  const gateHandlerWithStatus = async (
+    gate: LocalAgentActionGate,
+  ): Promise<AgentRuntimeToolResult | void> => {
+    // /auto on 的自动放行不是「在等你」：handler 会立刻返回 confirmed，不会有人
+    // 来解除这个等待，报 blocked 就是把「在跑」谎报成「卡在等确认」。判据与
+    // readlineWorkspace 的 actionGateHandler 短路同源（`state` 是可变绑定，
+    // 这里读到的永远是最新值，busy 期间 /auto 也生效）；权限决定仍由 handler
+    // 自己做，这里只决定报不报 blocked。
+    if (ctx.state.autoConfirm && isAutoConfirmableFileWriteGate(gate)) {
+      return await actionGateHandler(gate);
+    }
+    emitStatusUnlessForceStopped({
+      state: "blocked",
+      kind: gate.kind === "confirm" ? "permission" : "question",
+    });
+    try {
+      return await actionGateHandler(gate);
+    } finally {
+      emitStatusUnlessForceStopped({ state: "working" });
+    }
+  };
+  // 破坏性操作确认走的是另一条输入路径（confirmDestructiveAction，不经
+  // actionGateHandler）：真人得在弹窗里批准/拒绝，这就是「在等权限」。同样跳过
+  // /auto on 的自动放行——readlineWorkspace 侧那个 handler 开头就 `return true`，
+  // 没有等待可言。权限决定本身不变，这里只加状态包装。
+  // 输出不是 TTY（管道 / 日志 / JSON）时连包装都不做：状态根本发不出去
+  // （emitTerminalProgramStatus 自己也有同一条 isTTY 闸门），转发的回调保持原样。
+  const confirmDestructiveActionWithStatus =
+    confirmDestructiveAction && ctx.output.isTTY === true
+      ? async (request: PermissionRequest): Promise<boolean> => {
+          if (ctx.state.autoConfirm) return await confirmDestructiveAction(request);
+          emitStatusUnlessForceStopped({ state: "blocked", kind: "permission" });
+          try {
+            return await confirmDestructiveAction(request);
+          } finally {
+            emitStatusUnlessForceStopped({ state: "working" });
+          }
+        }
+      : confirmDestructiveAction;
   // 轮内实时积分从 0 开始：上一轮若经异常路径退出（runAgentChat 抛出、
   // accumulateSessionCredits 未执行），这里兜底清掉残留，防止下一轮把
   // 旧账叠加进 live 值造成重复显示。正常路径的清零在
@@ -1017,6 +1167,10 @@ export async function runOneAgentTurn(
       : transcriptText,
   );
   finalizeCurrentTurn(ctx.history);
+  const finalizedUserTurn = ctx.history.turns[ctx.history.turns.length - 1];
+  if (!isInternalEvent && finalizedUserTurn?.role === "user" && finalizedUserTurn.content === transcriptText) {
+    ctx.onUserTurnFinalized?.(finalizedUserTurn, imageUrls);
+  }
   ctx.renderHistoryToOutput();
   if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
 
@@ -1048,7 +1202,12 @@ export async function runOneAgentTurn(
           // 就值得提醒）；作答 / 取消 / 异常任何退出路径都由 finally 清掉
           // progress（见 runWithInputRequiredAttention）。
           return await runWithInputRequiredAttention(
-            { output: ctx.output, env: ctx.effectiveEnv },
+            {
+              output: ctx.output,
+              env: ctx.effectiveEnv,
+              onWaiting: () => emitStatusUnlessForceStopped({ state: "blocked", kind: "question" }),
+              onResumed: () => emitStatusUnlessForceStopped({ state: "working" }),
+            },
             async () => {
               try {
                 return await ctx.dialogHost!.run((anchor) =>
@@ -1100,13 +1259,26 @@ export async function runOneAgentTurn(
       ctx.options.agentRunner,
       {
         ...(imageUrls.length > 0 ? { imageUrls } : {}),
-        actionGateHandler,
-        ...(confirmDestructiveAction ? { confirmDestructiveAction } : {}),
+        ...(localAttachmentPaths && localAttachmentPaths.length > 0
+          ? { localAttachmentPaths }
+          : {}),
+        actionGateHandler: gateHandlerWithStatus,
+        ...(confirmDestructiveActionWithStatus
+          ? { confirmDestructiveAction: confirmDestructiveActionWithStatus }
+          : {}),
         ...(requestUserChoice ? { requestUserChoice } : {}),
         abortSignal: ctx.activeTurnAbort.signal,
         drainInjections: () => injectionInbox.drain(),
         pastedTextStore: ctx.pasteStore,
         activityReporter: ctx.activityReporter,
+        // 分享 OAuth agent 的 shell 会话授权（块 D）：宿主装配的会话级对象；
+        // 非 owner-required 场景 adapter 不触发。
+        ...(ctx.shellGrant ? { shellGrant: ctx.shellGrant } : {}),
+        // 运行位置展示（块 D）：宿主装配的渲染回调；adapter 只在
+        // owner-required 场景回调一次。
+        ...(ctx.onToolExecutionLocation
+          ? { onToolExecutionLocation: ctx.onToolExecutionLocation }
+          : {}),
         onAgentRunStatus: (snapshot) => {
           if (snapshot) {
             ctx.activityIndicator.updateAgentRun(snapshot);
@@ -1141,6 +1313,7 @@ export async function runOneAgentTurn(
     // dialogId/turnTokens 的状态折叠仍可安全执行（纯数据，不碰 UI 锁）。
     const wasForceStopped = ctx.forcedStopEpoch === myEpoch;
     if (wasForceStopped) {
+      emitStatusIfCurrentTurn({ state: "idle" });
       const nextDialogKey = runResult.dialogId
         ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
           ? ctx.state.dialogKey
@@ -1203,6 +1376,16 @@ export async function runOneAgentTurn(
       ctx.renderHistoryToOutput();
       if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
     }
+    // 终态判定与后台结算共用同一份真值（client/terminalRunStatus）：停滞/截断的
+    // run 会带着 exitCode 0 返回，只看 exitCode 会把它报成 done，而 registry 记的
+    // 是 failed。epoch 守卫与强停那条 idle 路径不变。
+    emitStatusIfCurrentTurn({
+      state: resolveTerminalProgramStatusState({
+        exitCode: runResult.exitCode,
+        cancelled: wasAborted,
+        stalledOrTruncated: isRunResultStalledOrTruncated(runResult),
+      }),
+    });
     if (wasAborted) {
       if (runResult.pendingToolName) {
         // 协作式中止时工具仍在跑：localLoop 放弃等待但工具可能已在后台
@@ -1272,6 +1455,11 @@ export async function runOneAgentTurn(
       }
     }
     return { ok: !wasAborted, aborted: wasAborted };
+  } catch (error) {
+    // 迟到的异常：强停已经把屏幕交还用户并报过 idle，这条属于被丢弃的 turn，
+    // 不许把 idle 改写成 error。
+    emitStatusUnlessForceStopped({ state: "error" });
+    throw error;
   } finally {
     ctx.runRegistryPoller.endHold();
     ctx.idleHeapReleaser.schedule();
@@ -1311,6 +1499,100 @@ export async function runOneAgentTurn(
 }
 
 /**
+ * drain 一条排队请求：若携带 imagePaths，在**此刻**才读成 dataURL（入队时不读：
+ * 排队期间文件可能变，且不让大 base64 挂在队列里）。读不到的路径只打一行
+ * `image skipped:`（与 direct 路径同语义）并继续执行该轮，绝不抛错。
+ */
+export async function runDrainedQueueTurn(
+  ctx: AgentTurnContext,
+  req: TurnRequest,
+  actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  /** 测试注入点：缺省即 runOneAgentTurn。 */
+  runTurn: typeof runOneAgentTurn = runOneAgentTurn,
+): Promise<{ ok: boolean; aborted: boolean }> {
+  let imageUrls: string[] = [];
+  if (req.imagePaths && req.imagePaths.length > 0) {
+    try {
+      ({ imageUrls } = await resolveAttachmentImageUrls({
+        actionImagePaths: req.imagePaths,
+        attachedImages: [],
+        onFailure: (_path, err) =>
+          ctx.output.write(`[nolo] image skipped: ${err.message}\n`),
+      }));
+    } catch (err) {
+      ctx.output.write(
+        `[nolo] image skipped: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      imageUrls = [];
+    }
+  }
+  // 排队消息携带的音视频路径：drain 时才跑转写（与图片延迟读同思路，
+  // 排队期间文件可能变 + 转写产物不应常驻队列）。transcript 块并入
+  // req.text 发给模型；失败输出错误行，消息本体照发（模型拿不到内容
+  // 但有失败说明，路径文本已被剥离）。
+  const mediaPaths = req.mediaPaths ?? [];
+  if (mediaPaths.length > 0) {
+    const authToken = resolvePlatformAuthToken(ctx.effectiveEnv);
+    const blocks: string[] = [];
+    for (const mediaPath of mediaPaths) {
+      const base = mediaPath.split(/[/\\]/).pop() ?? mediaPath;
+      try {
+        // T5：排队消息 drain 时同样先检查尾部静音。ctx.dialogHost 为空
+        // （非交互/无宿主）时 requestChoice 为 null → 只提示不裁剪。
+        const trim = await resolveTranscribeTrim({
+          path: mediaPath,
+          onNotice: ctx.emitCommandOutput,
+          onScanStart: (p) =>
+            ctx.emitCommandOutput(t("mediaSilenceTrimScanning", p.split(/[/\\]/).pop() ?? p)),
+          requestChoice: createTrimRequester({
+            dialogHost: ctx.dialogHost,
+            input: ctx.input,
+            output: ctx.output,
+          }),
+        });
+        ctx.emitCommandOutput(t("mediaPreprocessStart", base));
+        const transcript = await transcribeMediaFile({
+          path: mediaPath,
+          serverUrl: ctx.state.serverUrl,
+          authToken,
+          dialogId: ctx.state.dialogId,
+          fromSec: trim.fromSec,
+          toSec: trim.toSec,
+          fetchImpl: ctx.options.fetchImpl,
+          onProgress: (info) => {
+            const label = info.message ?? info.stage ?? "";
+            if (label) ctx.emitCommandOutput(t("mediaTranscribeProgress", base, label));
+          },
+        });
+        ctx.emitCommandOutput(t("mediaTranscribeDone", base, transcript.txtPath));
+        blocks.push(formatTranscriptForModel(transcript, mediaPath));
+      } catch (err) {
+        const msg = describeMediaError(err).message;
+        ctx.emitCommandOutput(
+          `[nolo] ${t("mediaTranscribeFailed", base, msg)}`,
+        );
+        blocks.push(`[media transcription failed for ${mediaPath}: ${msg}]`);
+      }
+    }
+    if (blocks.length > 0) {
+      const mergedText = req.text
+        ? `${blocks.join("\n\n")}\n\n${req.text}`
+        : blocks.join("\n\n");
+      req = { ...req, text: mergedText, event: { kind: "user", text: mergedText } };
+    }
+  }
+  return runTurn(
+    ctx,
+    req,
+    imageUrls,
+    actionGateHandler,
+    confirmDestructiveAction,
+    [...(req.imagePaths ?? []), ...(req.mediaPaths ?? [])],
+  );
+}
+
+/**
  * S2: 文件级 ensureChatQueueBinding 函数
  *
  * 获取或延迟初始化 TUI chat 队列绑定，并把 drain 执行委托给 runOneAgentTurn。
@@ -1321,8 +1603,8 @@ export function ensureChatQueueBinding(
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
 ): ChatQueueTuiBinding {
   if (ctx.chatQueueBinding) return ctx.chatQueueBinding;
-  ctx.chatQueueBinding = createChatQueueTuiBinding(async (text) => {
-    return runOneAgentTurn(ctx, text, [], actionGateHandler, confirmDestructiveAction);
+  ctx.chatQueueBinding = createChatQueueTuiBinding(async (req) => {
+    return runDrainedQueueTurn(ctx, req, actionGateHandler, confirmDestructiveAction);
   });
   return ctx.chatQueueBinding;
 }

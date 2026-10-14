@@ -16,6 +16,7 @@ import { toast } from "app/utils/toast";
 
 import DocxPreviewDialog from "render/web/ui/modal/DocxPreviewDialog";
 import ToolMessageContent from "./ToolMessageContent";
+import ConversationInteraction from "./ConversationInteraction";
 import AskChoicePanelWeb from "./AskChoicePanelWeb";
 import Editor from "create/editor/Editor";
 
@@ -31,6 +32,7 @@ import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { messagesStyles as styles } from "./messagesStyles";
 import { toolMessageStyles as toolStyles, toolMessageStatusStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
+import { buildUiInteractionPersistChanges } from "../uiInteractionPersistence";
 import {
   buildAskChoicePersistChanges,
   isAskChoiceResolved,
@@ -54,6 +56,10 @@ import {
   formatToolRowHeaderSummary,
 } from "./toolDisplayName";
 import { isQuietDetailTool } from "./toolCallPresentation";
+import {
+  isMediaJobPendingConfirmation,
+  shouldKeepToolRowExpanded,
+} from "../toolPresentation";
 
 /** Agent-run family: dedicated localized summary/detail rows instead of the
  * generic JSON-blob body (results stay expandable in the row body). */
@@ -109,7 +115,8 @@ export const ToolMessageItem = memo(
       (toolPayload?.status === "failed" ||
         !!toolPayload?.error ||
         !!rawData?.error) &&
-      !isRepairableFailure;
+      !isRepairableFailure &&
+      !isMediaJobPendingConfirmation({ toolName, rawData, toolPayload });
     const statusStr = isStreaming
       ? "running"
       : isRepairableFailure
@@ -240,6 +247,8 @@ export const ToolMessageItem = memo(
       if (isStreaming) return false;
       // 个别工具（如星盘）产品上要求默认可见。
       if (toolName === "ziweiChart") return false;
+      // 报价完成、等待用户选档的交互卡默认可见（数据条件：quoted + 有效报价）。
+      if (shouldKeepToolRowExpanded({ toolName, rawData, statusStr })) return false;
       // 已完成的工具行默认折叠 —— loop 里只让“当前正在跑”的那行展开，
       // 旧行收起，避免一长串摊开；想看详情再点开。
       return true;
@@ -274,7 +283,9 @@ export const ToolMessageItem = memo(
         return;
       }
       if (statusStr === "success" && !userCollapsedOverrideRef.current) {
-        setCollapsed(true);
+        // 报价完成、等待选档的交互卡不折叠（否则用户看不见可选档位）；
+        // 其余完成行维持既有「完成即折叠」策略。用户手动折叠过不抢回。
+        setCollapsed(!shouldKeepToolRowExpanded({ toolName, rawData, statusStr }));
       }
       // 长输出工具运行时是折叠的，失败后自动展开让用户看见错误；
       // 用户手动折叠过则不抢回。
@@ -336,6 +347,31 @@ export const ToolMessageItem = memo(
         );
       }
     };
+
+    // Inline choices persist the full card payload before the shared panel sends.
+    if (toolName === "show_interaction" || rawData?.type === "show_interaction") {
+      const handleInteractionResolve = async (resolution: AskChoiceResolution) => {
+        const nextRawData = buildUiInteractionPersistChanges(rawData, resolution);
+        // Same terminal convergence shape as the ask_user branch: the row must not
+        // stay in its running appearance after a successful submit. Persist first
+        // (a failed write throws and keeps the panel retryable), then update memory.
+        const nextToolPayload = {
+          ...(toolPayload ?? {}),
+          toolName,
+          status: "succeeded",
+        };
+        const changes = {
+          content: JSON.stringify(nextRawData),
+          isStreaming: false,
+          toolName,
+          toolPayload: nextToolPayload,
+        };
+        if (!dbKey) throw new Error("show_interaction tool message is missing dbKey");
+        await dispatch(write({ data: { ...message, ...changes, type: DataType.MSG }, customKey: dbKey })).unwrap();
+        dispatch(updateToolMessage({ id: message.id, changes }));
+      };
+      return <ConversationInteraction rawData={rawData} interactive={!readOnly && !isStreaming && !!dbKey} onResolve={handleInteractionResolve} />;
+    }
 
     // --- ask_user ---
     if (toolName === "ask_user" || rawData?.type === "ask_user") {
@@ -678,6 +714,7 @@ export const ToolMessageItem = memo(
                 openPreview={(id, name) => setPreview({ id, name })}
                 navigateToPage={(id) => navigate(`/${id}`)}
                 toolArgs={extractToolCallArgs(toolPayload)}
+                toolRunId={toolRunId}
               />
             </div>
           )}
