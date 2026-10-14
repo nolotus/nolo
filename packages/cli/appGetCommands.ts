@@ -10,7 +10,6 @@ import {
   formatFields,
   type AppCommandDeps,
 } from "./appCommandShared";
-import { t } from "./tui/i18n";
 
 function printAppGetUsage() {
   process.stdout.write(`Usage:
@@ -38,7 +37,7 @@ export async function runAppGetCommand(args: string[], deps: AppCommandDeps): Pr
 
   if (!name && !appId && !appKey) {
     printAppGetUsage();
-    process.stderr.write(t("app.errorNameRequired"));
+    process.stderr.write("\n错误: 必须提供 --name / --app-id / --app-key 之一\n");
     return 1;
   }
 
@@ -49,7 +48,7 @@ export async function runAppGetCommand(args: string[], deps: AppCommandDeps): Pr
     const data = await cliApiRequest({ serverUrl, authToken, path: "/api/app/get", body });
 
     outputResult(data, hasFlag(args, "--json"), () => {
-      process.stdout.write(t("app.detailsTitle"));
+      process.stdout.write("应用详情\n\n");
       const fields: Array<[string, unknown]> = [
         ["name", data.name ?? data.userFriendlyName],
         ["appId", data.appId],

@@ -416,7 +416,6 @@ export function buildLocalToolExecutors(args: {
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
       cwd: args.workspaceRoot,
-      currentAgentKey: args.agentKey,
       ...(args.resolveAgentCredentialGroup
         ? { resolveAgentCredentialGroup: args.resolveAgentCredentialGroup }
         : {}),

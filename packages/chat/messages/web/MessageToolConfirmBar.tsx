@@ -1,12 +1,11 @@
 import * as stylex from "@stylexjs/stylex";
-import React, { useMemo, useCallback, useState } from "react";
+import React, { useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppSelector, useAppDispatch } from "app/store";
 import {
   useToolRunsByMessageId,
   executeToolRun,
 } from "ai/tools/toolRunStore";
-import { authorizeEmailOutbound } from "chat/web/emailOutbound";
 import {
   buildConfirmActionGate,
   shouldShowToolMessageConfirmBanner,
@@ -40,44 +39,12 @@ export const MessageToolConfirmBar: React.FC<MessageToolConfirmBarProps> = ({
     [toolRuns]
   );
 
-  /** email_send 的签发中态：签发期间禁用按钮，避免重复签发/重复发送。 */
-  const [authorizingEmail, setAuthorizingEmail] = useState(false);
-  /** 签发失败按 run id 记录，换 run 后不残留旧错误。 */
-  const [emailAuthError, setEmailAuthError] = useState<{
-    id: string;
-    message: string;
-  } | null>(null);
-
-  const handleConfirmExecute = useCallback(async () => {
+  const handleConfirmExecute = useCallback(() => {
     if (!confirmRun) return;
     // 避免重复点击
-    if (confirmRun.status === "running" || authorizingEmail) return;
-
-    if (confirmRun.toolName !== "email_send") {
-      dispatch(executeToolRun({ id: confirmRun.id }));
-      return;
-    }
-
-    // 外发邮件：先让 owner 当次确认换取一次性凭证，拿不到凭证就绝不执行。
-    setEmailAuthError(null);
-    setAuthorizingEmail(true);
-    try {
-      const confirmationToken = await authorizeEmailOutbound(confirmRun.input ?? {});
-      dispatch(
-        executeToolRun({
-          id: confirmRun.id,
-          inputOverride: { ...confirmRun.input, confirmationToken },
-        })
-      );
-    } catch (err: any) {
-      setEmailAuthError({
-        id: confirmRun.id,
-        message: err?.message || t("toolConfirm.unknownError"),
-      });
-    } finally {
-      setAuthorizingEmail(false);
-    }
-  }, [dispatch, confirmRun, authorizingEmail, t]);
+    if (confirmRun.status === "running") return;
+    dispatch(executeToolRun({ id: confirmRun.id }));
+  }, [dispatch, confirmRun]);
 
   if (!isRobot || !confirmRun) return null;
 
@@ -88,7 +55,7 @@ export const MessageToolConfirmBar: React.FC<MessageToolConfirmBarProps> = ({
   let buttonLabel = "";
   let buttonDisabled = false;
 
-  if (status === "running" || authorizingEmail) {
+  if (status === "running") {
     buttonLabel = t("toolConfirm.executing");
     buttonDisabled = true;
   } else if (status === "succeeded") {
@@ -135,10 +102,6 @@ export const MessageToolConfirmBar: React.FC<MessageToolConfirmBarProps> = ({
     statusText = t("toolConfirm.failure", {
       error: error || t("toolConfirm.unknownError"),
     });
-    statusClass = "failed";
-  } else if (emailAuthError && emailAuthError.id === confirmRun.id) {
-    // 签发失败：不执行发送，只把原因显示给 owner
-    statusText = t("toolConfirm.failure", { error: emailAuthError.message });
     statusClass = "failed";
   }
 

@@ -2,7 +2,6 @@ import { useMemo } from "react";
 
 import { UNCATEGORIZED_ID } from "create/space/constants";
 import {
-  isChildDialogItem,
   matchesSidebarVisibleTypes,
   type SidebarVisibleType,
 } from "create/space/sidebarVisibleTypes";
@@ -30,7 +29,7 @@ export function buildFilteredSidebarGroupedData({
   isFullyLoaded,
   searchQuery,
 }: UseChatSidebarFilteredDataParams): ChatSidebarGroupedData {
-  // 收集子对话（parentDialogId 非空且不等于自身 id），按 parentDialogId 分组。
+  // 收集子对话（parentDialogId 非空），按 parentDialogId 分组。
   // 这些子对话会被 matchesSidebarVisibleTypes 过滤掉（不单独显示），
   // 但我们要把它们挂到父对话下，供侧边栏折叠展开。
   // search 非空时不收集（搜索时展开所有，子对话也参与搜索匹配）。
@@ -38,7 +37,7 @@ export function buildFilteredSidebarGroupedData({
     if (searchQuery) return {};
     const map: Record<string, SpaceContent[]> = {};
     for (const item of items) {
-      if (isChildDialogItem(item) && item.parentDialogId) {
+      if (item.parentDialogId) {
         (map[item.parentDialogId] ??= []).push(item);
       }
     }

@@ -17,32 +17,6 @@ export interface FileUploadButtonProps {
 /** 图片类 */
 const ACCEPT_IMAGE = ["image/*"];
 
-/** 音视频 MIME 通配（覆盖系统 picker 里按 MIME 过滤音频/视频的场景） */
-const ACCEPT_MEDIA_MIME = ["audio/*", "video/*"];
-
-/**
- * 音视频扩展名。
- * 与 app/utils/fileUtils.ts 的 MEDIA_EXTENSION_RE / isMediaFile 对齐：
- * 只列实际能解析的媒体后缀，不加 zip/apk 等非媒体格式。
- */
-const ACCEPT_MEDIA_EXTENSIONS = [
-  ".aac",
-  ".avi",
-  ".flac",
-  ".m4a",
-  ".m4v",
-  ".mkv",
-  ".mov",
-  ".mp3",
-  ".mp4",
-  ".mpeg",
-  ".mpg",
-  ".ogg",
-  ".wav",
-  ".weba",
-  ".webm",
-];
-
 /** Excel / 表格类 */
 const ACCEPT_EXCEL = [".xlsx", ".xls", ".csv", ".ods", ".xlsm", ".xlsb"];
 
@@ -95,14 +69,9 @@ const ACCEPT_JSON = [
   "application/jsonl",
 ];
 
-/**
- * 默认允许的文件类型。
- * 导出以便测试对真实渲染出的 input[accept] 做断言，也方便调用方复用。
- */
-export const DEFAULT_ACCEPT = [
+/** 默认允许的文件类型 */
+const DEFAULT_ACCEPT = [
   ...ACCEPT_IMAGE,
-  ...ACCEPT_MEDIA_MIME,
-  ...ACCEPT_MEDIA_EXTENSIONS,
   ...ACCEPT_EXCEL,
   ...ACCEPT_DOC,
   ...ACCEPT_PLAIN_TEXT_EXTENSIONS,
