@@ -1,4 +1,17 @@
 
+## 0.102.3
+
+## 0.102.3 (2026-10-14)
+
+### Bug Fixes
+
+* **agent-runtime:** keep Responses tool_call arguments when a snapshot is incomplete ([6994079](https://github.com/nolotus/bun-nolo/commit/69940793a85c785e05971b369ea52463957b217b))
+* **agent-runtime:** pair replayed tool results within contiguous turns ([8801643](https://github.com/nolotus/bun-nolo/commit/88016433733b8ae786c2f68e25c78d67bb2ad254))
+* **cli:** keep the TUI run panel scoped to the current dialog ([5684138](https://github.com/nolotus/bun-nolo/commit/56841388c632d1588dbe8e6201fd830b52de7f36))
+* **runtime:** keep Gemini tool enums string-only ([d00602b](https://github.com/nolotus/bun-nolo/commit/d00602b760d0e95ccdc5c4342792bfedddf7396e))
+* **tui:** remove duration and output tokens summary from turn end ([dc03929](https://github.com/nolotus/bun-nolo/commit/dc039294671add953b4d89e5178e25f50deb144e))
+
+
 ## 0.102.2
 
 ## 0.102.2 (2026-10-14)
