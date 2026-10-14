@@ -8,6 +8,10 @@
 // (done 事件) 才算"正常结束";否则视为连接被静默中断。
 
 import { isAbortError } from "core/abortError";
+import {
+    clearForegroundExecutionClientState,
+    observeForegroundExecutionPayload,
+} from "./foregroundExecutionClientState";
 
 export type AgentRunStreamConsumeOutcome =
     | { outcome: "aborted" }
@@ -89,6 +93,20 @@ export async function consumeAgentRunStream(
         onAbort,
     } = handlers;
     let sawDone = false;
+    let observedDialogId = "";
+    let observedExecutionId = "";
+
+    const clearObservedExecution = () => {
+        // Identity-scoped only: if this stream never observed an executionId
+        // (older server, or dialog event raced past), clearing unconditionally
+        // could erase a *newer* same-dialog turn's identity and degrade the
+        // next Stop to dialog-only.
+        if (!observedDialogId || !observedExecutionId) return;
+        clearForegroundExecutionClientState(
+            observedDialogId,
+            observedExecutionId,
+        );
+    };
 
     try {
         while (true) {
@@ -102,6 +120,7 @@ export async function consumeAgentRunStream(
                 ));
             } catch (error) {
                 if (isAbortError(error) || isAborted() || signal?.aborted) {
+                    clearObservedExecution();
                     await onAbort();
                     return { outcome: "aborted" };
                 }
@@ -110,10 +129,12 @@ export async function consumeAgentRunStream(
             // abort 检测必须在 done 判断之前:用户主动取消时,流可能恰好在此刻自然结束,
             // 此时应当走"用户取消"分支,而不是被误判为"连接异常截断"。
             if (isAborted() || signal?.aborted) {
+                clearObservedExecution();
                 await onAbort();
                 return { outcome: "aborted" };
             }
             if (done) {
+                clearObservedExecution();
                 return { outcome: "streamEnded", sawDone };
             }
 
@@ -122,14 +143,32 @@ export async function consumeAgentRunStream(
             );
             for (const payload of payloads) {
                 if (isAborted() || signal?.aborted) {
+                    clearObservedExecution();
                     await onAbort();
                     return { outcome: "aborted" };
                 }
+
+                if (payload && typeof payload === "object") {
+                    if (
+                        payload.type === "dialog" &&
+                        typeof payload.dialogId === "string"
+                    ) {
+                        observedDialogId = payload.dialogId.trim();
+                        observedExecutionId =
+                            typeof payload.executionId === "string"
+                                ? payload.executionId.trim()
+                                : "";
+                    }
+                    observeForegroundExecutionPayload(payload);
+                }
+
                 const directive = await onPayload(payload);
                 if (directive?.reject !== undefined) {
+                    clearObservedExecution();
                     return { outcome: "rejected", message: directive.reject };
                 }
                 if (directive?.abort) {
+                    clearObservedExecution();
                     await onAbort();
                     return { outcome: "aborted" };
                 }
@@ -139,6 +178,7 @@ export async function consumeAgentRunStream(
             }
         }
     } catch (error) {
+        clearObservedExecution();
         if (isAbortError(error) || isAborted() || signal?.aborted) {
             await onAbort();
             return { outcome: "aborted" };

@@ -51,6 +51,11 @@ export function resolveTokenUsagePricing(args: {
     usage,
     fallbackProvider: agentConfig.provider,
     fallbackModel: agentConfig.model,
+    // 可信平台计费身份：apiSource=platform 或代码内置 agent 守卫（canonical key）。
+    // 仅此二者允许平台别名规范化，避免把 BYOK / custom / OAuth 的旧 id 也改写。
+    isPlatformBilled:
+      agentConfig.apiSource === "platform" ||
+      isBuiltinPlatformAgentKey(args.agentId?.trim()),
   });
   const billedProvider = billingTarget.provider;
   const billedModel = billingTarget.model;
@@ -73,6 +78,10 @@ export function resolveTokenUsagePricing(args: {
   if (isPlatformBilled && !isCodeOwnedBuiltin && hasPersistedPrices) {
     console.warn(
       `[billing] platform agent ignored persisted prices (input=${agentConfig.inputPrice}, output=${agentConfig.outputPrice}); canonical key missing or not in builtin set: "${canonicalAgentId || ""}"`,
+    );
+  } else if (!isPlatformBilled && isCodeOwnedBuiltin && hasPersistedPrices) {
+    console.warn(
+      `[billing] code-owned builtin identity ignored persisted prices (input=${agentConfig.inputPrice}, output=${agentConfig.outputPrice}); apiSource="${agentConfig.apiSource || ""}" key="${canonicalAgentId || ""}"`,
     );
   }
 

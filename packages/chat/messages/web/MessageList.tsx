@@ -14,6 +14,7 @@ import React, {
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
   selectAllMsgs,
+  useForegroundTurnSettledVisible,
   useHasStreamingMessage,
   loadOlderMessages,
   selectLastAssistantMessage,
@@ -56,6 +57,7 @@ import { AppRoutePaths } from "app/constants/routePaths";
 import { useLoopStopReason } from "./useLoopStopReason";
 import { LoopStopBadge } from "./LoopStopBadge";
 import { isHiddenOrchestratorToolMessage } from "../toolPresentation";
+import { toolMessageNeedsDefaultExpansion } from "../toolPresentation";
 import {
   hasVisibleAssistantContent,
   isAssistantToolStub,
@@ -63,7 +65,11 @@ import {
   shouldAutoCollapseToolGroup,
 } from "./assistantReplyPendingState";
 import { extractCustomId } from "core/prefix";
-import { useAllToolRuns } from "ai/tools/toolRunStore";
+import {
+  useAllToolRuns,
+  hydrateToolRunsFromMessages,
+} from "ai/tools/toolRunStore";
+import { finalizeConfirmedToolMessages } from "../toolThunks";
 import { LuBrain } from "react-icons/lu";
 import { getSavedMemories } from "../savedMemories";
 import { AssistantReplyPending } from "./AssistantReplyPending";
@@ -73,9 +79,6 @@ import { messageRowSpacing } from "./messageRowSpacing";
 
 /** The pending indicator stands in for the assistant reply that is about to arrive. */
 const PENDING_ASSISTANT_ENTRY = { type: "single", message: { role: "assistant" } };
-import TodoCard from "./TodoCard";
-import { selectLatestConversationTodo } from "../todoState";
-import { selectSystemBuiltinSkills } from "app/settings/settingSlice";
 
 const LOAD_THRESHOLD = 50;
 const DEFAULT_SCROLL_CONTAINER_SELECTOR = ".MainLayout__main";
@@ -184,12 +187,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
   const quickChatFirstMessageText = getQuickChatFirstMessageText(
     location.state as QuickChatRouteState,
   );
-  const systemBuiltinSkills = useAppSelector(selectSystemBuiltinSkills);
-  const conversationTodoEnabled = systemBuiltinSkills["conversation-todo"] !== false;
-  const currentTodo = useMemo(
-    () => selectLatestConversationTodo(messages),
-    [messages],
-  );
   const displayMessages = useMemo(() => {
     if (!quickChatFirstMessageText) return messages;
     if (messages.some((message: any) => message?.role === "user")) {
@@ -210,6 +207,10 @@ const MessagesList: React.FC<MessagesListProps> = ({
   // useSyncExternalStore, not useAppSelector(selectHasStreamingMessage), so
   // streaming-token mutations re-render without scanning Redux msgs.
   const hasStreamingMessage = useHasStreamingMessage(dialogId);
+  // Visible turn-settled fact: after the SSE `done` frame the client stops its
+  // visible busy projection while the send/Stop gate may still be held for the
+  // canonical handoff. Without this the pending row falls back to "正在处理…".
+  const foregroundTurnSettledVisible = useForegroundTurnSettledVisible(dialogId);
   // Primitive id only — content stream tokens must not invalidate list-level branch flags.
   const lastAssistantMessageId = useAppSelector(
     (state) => selectLastAssistantMessage(state, dialogId)?.id ?? null
@@ -245,6 +246,22 @@ const MessagesList: React.FC<MessagesListProps> = ({
     loopStopReason === "pending" && !hasUnresolvedConfirmRun
       ? null
       : loopStopReason;
+
+  // 历史装载回灌：确认卡查的是内存 toolRun store，而 run 只在本次会话的流里
+  // 创建。消息装载（刷新页面 / 重进对话 / 跨轮次 / 后台合并）后必须把
+  // toolPayload.status === "pending" 的持久化工具消息写回 store，否则确认卡
+  // 再也渲染不出来，待确认的操作永远点不到（2026-10-12 缺陷）。
+  // 幂等：已存在的 run 由 store 跳过，不会覆盖本会话已确认/执行中的状态。
+  //
+  // 反方向的对账（M1）：确认栏/媒体卡片走 executeToolRun，只推进内存 run、
+  // 从不回写消息行，落盘会一直是 pending —— 于是「点确认 → 执行成功 → 刷新」
+  // 会把已执行的确认复活，再点一次即重复执行（email_send 不可逆）。所以装载时
+  // 也把「run 已 succeeded、消息行仍 pending」的行写回 succeeded。
+  useEffect(() => {
+    hydrateToolRunsFromMessages(messages);
+    void finalizeConfirmedToolMessages(dispatch, messages);
+  }, [messages, dispatch]);
+
   const navigate = useNavigate();
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -551,13 +568,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
     scroller.scrollTo({ top: 0, behavior: "smooth" });
   }, [getScroller]);
 
-  // The pinned current snapshot replaces its source tool row. Older snapshots
-  // remain in history for replay, while the latest one is shown exactly once.
-  const renderMessages = useMemo(() => {
-    const sourceId = currentTodo?.sourceMessageId;
-    if (!conversationTodoEnabled || !sourceId) return displayMessages;
-    return displayMessages.filter((message: any) => message?.id !== sourceId);
-  }, [conversationTodoEnabled, currentTodo?.sourceMessageId, displayMessages]);
+  const renderMessages = displayMessages;
 
   // Memoize entry list so map work is skipped when only scroll chrome re-renders.
   // wakeEvents（dialog record 上的后台 run 终态事件）按 createdAt 归并进消息流；
@@ -606,12 +617,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
           </div>
         )}
 
-        {conversationTodoEnabled && currentTodo && (
-          <div className="chat-messages__todo-current" data-testid="current-conversation-todo">
-            <TodoCard rawData={{ todos: currentTodo.todos }} />
-          </div>
-        )}
-
         {renderEntries.map((entry, entryIndex) => {
           if (entry.type === "wake-event") {
             // 后台 run 终态系统行：紧凑单行，非用户气泡、非 assistant 消息。
@@ -632,17 +637,22 @@ const MessagesList: React.FC<MessagesListProps> = ({
             // Expand/collapse only — header status icons follow each group's tools.
             // Historical groups (user after) fold even while a later turn runs;
             // idle turns without a final reply also fold so chrome can settle.
+            // 未决交互卡（报价待选档）不能被 group 折叠吞掉：两路自动折叠都必须让位。
+            const hasPendingChoiceCard = entry.messages.some((message) =>
+              toolMessageNeedsDefaultExpansion(message),
+            );
             const canCollapse =
-              shouldAutoCollapseToolGroup({
+              !hasPendingChoiceCard &&
+              (shouldAutoCollapseToolGroup({
                 entries: renderEntries,
                 groupIndex: entryIndex,
                 isRunning,
                 hasStreamingMessage,
               }) ||
-              // A stale session-level running flag must not keep settled tool
-              // UI open. The row's own streaming flag is the reliable UI fact.
-              (!hasStreamingMessage &&
-                entry.messages.every((message) => !message?.isStreaming));
+                // A stale session-level running flag must not keep settled tool
+                // UI open. The row's own streaming flag is the reliable UI fact.
+                (!hasStreamingMessage &&
+                  entry.messages.every((message) => !message?.isStreaming)));
             const settledMessages =
               canCollapse && !hasStreamingMessage
                 ? entry.messages.map((message) =>
@@ -665,7 +675,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
                       messages={settledMessages}
                       activityMessages={entry.activityMessages}
                       canCollapse={canCollapse}
-                      conversationTodoEnabled={conversationTodoEnabled}
                     />
                   </MessageRowErrorBoundary>
                 </div>
@@ -706,7 +715,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
               >
                 <MessageRowErrorBoundary>
                   {isTool ? (
-                    <ToolMessageItem message={msg} conversationTodoEnabled={conversationTodoEnabled} />
+                    <ToolMessageItem message={msg} />
                   ) : isIntermediateNarration ? (
                     <IntermediateNarrationRow message={msg} />
                   ) : (
@@ -728,7 +737,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
           );
         })}
 
-        {(
+        {!foregroundTurnSettledVisible && (
           conversationActivity.kind === "starting" ||
           conversationActivity.kind === "validating" ||
           conversationActivity.kind === "compacting" ||

@@ -1,6 +1,7 @@
 import React, { memo } from "react";
 import type { ImageGenerationState } from "../types";
 import { MessageContent } from "./MessageContent";
+import { MessageToolConfirmBar } from "./MessageToolConfirmBar";
 
 export type IntermediateNarrationRowProps = {
   message: {
@@ -31,11 +32,22 @@ export const IntermediateNarrationRow = memo(function IntermediateNarrationRow({
   const { content, thinkContent, isStreaming = false, id, imageGenerationState } =
     message || {};
 
+  // Agent-initiated confirm tools always land here: any assistant message with
+  // tool_calls is classified as intermediate tool-loop progress
+  // (assistantReplyPendingState.ts), so it renders as this row instead of
+  // MessageItem — which is the only place the generic confirm bar used to
+  // mount. Without this, email_send / deleteDialogs invoked by an agent could
+  // never be confirmed. The bar itself returns null unless a pending confirm
+  // run exists for this message id, so mounting it unconditionally is safe.
+  const confirmBar = id ? (
+    <MessageToolConfirmBar messageId={id} isRobot />
+  ) : null;
+
   // Non-streaming empty narration would otherwise render the
   // empty-assistant-fallback (role="status") placeholder — noise for a
   // lightweight row. Drop it instead.
   if (!isStreaming && isEmptyNarrationBody(content, thinkContent)) {
-    return null;
+    return confirmBar ? <>{confirmBar}</> : null;
   }
 
   return (
@@ -52,6 +64,7 @@ export const IntermediateNarrationRow = memo(function IntermediateNarrationRow({
         messageId={id}
         imageGenerationState={imageGenerationState}
       />
+      {confirmBar}
     </div>
   );
 });

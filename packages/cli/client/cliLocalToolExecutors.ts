@@ -39,7 +39,6 @@ import {
   createCliControlAgentRunExecutor,
   createCliStartAgentRunExecutor,
 } from "./cliAgentRunToolExecutors";
-import { setTodoListFunc } from "../../ai/tools/agent/setTodoListTool";
 import type { ChromeConnectorClient } from "../../desktop-chrome-connector/chromeConnector";
 import { buildCliChromeConnectorToolExecutors } from "./cliChromeConnectorToolExecutors";
 
@@ -417,6 +416,7 @@ export function buildLocalToolExecutors(args: {
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
       cwd: args.workspaceRoot,
+      currentAgentKey: args.agentKey,
       ...(args.resolveAgentCredentialGroup
         ? { resolveAgentCredentialGroup: args.resolveAgentCredentialGroup }
         : {}),
@@ -424,16 +424,6 @@ export function buildLocalToolExecutors(args: {
     controlAgentRun: createCliControlAgentRunExecutor({
       env: args.env,
     }),
-    setTodoList: async (call: any) => {
-      const parsedArgs = typeof call?.arguments === "string"
-        ? (() => { try { return JSON.parse(call.arguments); } catch { return {}; } })()
-        : call?.arguments || {};
-      const res = await setTodoListFunc(parsedArgs);
-      return {
-        content: JSON.stringify(res.rawData),
-        metadata: { displayData: res.displayData },
-      };
-    },
     ...(args.pastedTextStore
       ? { readPastedText: createReadPastedTextExecutor(args.pastedTextStore) }
       : {}),

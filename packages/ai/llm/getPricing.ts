@@ -1,5 +1,7 @@
 import type { Agent } from "app/types";
 import { getModelConfig } from "ai/llm/providers";
+import { isPlatformManagedProvider } from "ai/llm/kimi";
+import { resolvePlatformEffectiveModel } from "ai/llm/platformHostedRoutingTable";
 import { isPlatformHostedImageModel } from "ai/llm/platformHosted";
 import { getPublicImageAgentDefaultProfile } from "ai/agent/utils/publicImageAgentMode";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
@@ -24,18 +26,32 @@ const MAX_OUTPUT_TOKENS = 8192; // 单次返回最大 token 数
 export const getModelPricing = (
   provider: string,
   modelName: string,
-  _requestedServiceTier?: string
+  _requestedServiceTier?: string,
+  /**
+   * 可信平台计费身份（apiSource === "platform" 或代码内置 agent canonical key）。
+   * 判据与 resolveBillingTarget 一致：只有它为 true **且** provider 命中平台托管时
+   * 才做平台别名规范化；BYOK / custom / OAuth（未传 / false）按原 id 估价。
+   */
+  isPlatformBilled?: boolean
 ): ModelPricing | null => {
+  // 平台别名（旧 id → 实际计费模型）：估价必须落在**实际计费目录**上，否则旧 id 的
+  // 余额闸门会按 0 放行（2026-10-13 gpt-5.6-sol → gpt-6.1-sol 的实测缺口）。复用与
+  // 落库计费同一个中央别名解析器；绝不恢复旧目录条目、也不用旧费率。
+  const pricedModel =
+    isPlatformBilled === true && isPlatformManagedProvider(provider, modelName)
+      ? (resolvePlatformEffectiveModel(modelName) ?? modelName)
+      : modelName;
+
   let model;
   try {
-    model = getModelConfig(provider as any, modelName);
+    model = getModelConfig(provider as any, pricedModel);
   } catch {
     return null;
   }
 
   if (!model?.price) return null;
 
-  return getModelPricingForModel(provider, modelName, model);
+  return getModelPricingForModel(provider, pricedModel, model);
 };
 
 export const getModelPricingForModel = (
