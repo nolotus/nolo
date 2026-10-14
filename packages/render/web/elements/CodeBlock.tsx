@@ -72,14 +72,12 @@ const CodeBlock = ({
     (language === "jsx" || language === "tsx") &&
     isPreviewEnabled &&
     /function\s+Example\s*\(/.test(content);
-  const isHtmlPreviewArtifact = language === "html" && isPreviewEnabled;
   const autoPreviewJson = useMemo(
     () => language === "json" && canPreviewJson(content),
     [language, content]
   );
   const syncAutoPreviewEnabled =
     isReactPreviewArtifact ||
-    isHtmlPreviewArtifact ||
     isPreviewEnabled ||
     autoPreviewJson;
 
@@ -213,50 +211,6 @@ const CodeBlock = ({
               fullscreen={fullscreen}
             />
           </Suspense>
-        </div>
-      );
-    }
-
-    if (isHtmlPreviewArtifact && previewMode && !collapsed) {
-      return (
-        <div className="html-artifact-card" style={{ padding: "16px", background: "var(--backgroundSecondary, #f8fafc)", borderRadius: "8px", border: "1px solid var(--border, #e2e8f0)", display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "16px" }}>📄</span>
-              <span style={{ fontWeight: 600, fontSize: "13px" }}>{filename || "即用即弃单页 HTML 制品"}</span>
-            </div>
-            <button
-              type="button"
-              className="btn btn--primary btn--sm"
-              onClick={() => {
-                void import("app/appInspector/appInspectorStore").then((m) => {
-                  m.openPreviewTarget({
-                    kind: "artifact",
-                    title: filename || "单文件 HTML 制品",
-                    html: content,
-                  });
-                });
-              }}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "6px 12px",
-                borderRadius: "6px",
-                background: "var(--primary, #0284c7)",
-                color: "#fff",
-                border: "none",
-                cursor: "pointer",
-                fontSize: "12px",
-                fontWeight: 500,
-              }}
-            >
-              在工作台打开
-            </button>
-          </div>
-          <div style={{ fontSize: "12px", color: "var(--textSecondary, #64748b)" }}>
-            已生成自包含单文件 Web 制品。点击即可在右侧/分栏工作台中全景交互与修改。
-          </div>
         </div>
       );
     }

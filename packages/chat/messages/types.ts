@@ -35,10 +35,6 @@ export type CompletionFinishReason = "stop" | "tool_calls" | "length" | "content
 
 // ========== 发送错误与重试元信息 ==========
 export type SendErrorKind =
-  | "config_protocol"
-  | "empty"
-  | "policy"
-  | "transient"
   | "network"
   | "timeout"
   | "auth"
@@ -180,13 +176,6 @@ export interface ToolPayload {
 
   error?: ToolErrorPayload;
   toolRunId?: string;
-
-  /**
-   * 工具交互模式（落盘，供刷新后从历史消息回灌 toolRun 时还原语义）：
-   * confirm 走通用确认栏，authorize 需要专门凭证，二者不得互相降级。
-   */
-  interaction?: "auto" | "confirm" | "authorize";
-
   startedAt?: number;
   finishedAt?: number;
 
@@ -275,8 +264,6 @@ export interface Message {
 
   // assistant message 的 tool_calls（OpenAI 标准字段名）
   tool_calls?: Array<{
-    thought_signature?: string;
-    extra_content?: { google: { thought_signature: string } };
     id: string;
     type: "function";
     function: {

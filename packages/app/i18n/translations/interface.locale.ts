@@ -427,9 +427,6 @@ export default {
             description: "Built-in Agent capabilities from Nolo, on by default. When turned off, no agent (Web / CLI / desktop) gets the corresponding tools injected. Individual agent capability toggles are unaffected.",
             title: "Agent capability toggles",
           },
-          conversationTodo: {
-            description: "Let the agent show and update task progress in multi-step conversations. When off, chat Todo is no longer shown or used.",
-          },
           title: "Agent capabilities",
           webSearch: {
             description: "Let the agent search the internet and fetch web pages for the latest information. When off, no agent can search online.",
@@ -866,11 +863,9 @@ export default {
           reviewer: "Quality check",
           release: "Release",
           website: "Live result",
-          // 这三条 title 里的 U+00A0 是刻意的英文断行防拆（NBSP 的正确用法：不拆
-          // "the goal" 这类词组）。它们走 sans-serif，不进字体子集；CJK 文案一律不用 NBSP。
           mobileSteps: [
             {
-              title: "Describe the goal",
+              title: "Describe the goal",
               desc: "Start in chat or on the task board with what you want done.",
             },
             {
@@ -878,7 +873,7 @@ export default {
               desc: "A strong model plans the work and assigns each role to the right agent.",
             },
             {
-              title: "Build in parallel",
+              title: "Build in parallel",
               desc: "Other agents handle UI, logic, and data at the same time.",
             },
             {
@@ -886,7 +881,7 @@ export default {
               desc: "An independent agent reviews the work and sends it back until it passes.",
             },
             {
-              title: "Ship the result",
+              title: "Ship the result",
               desc: "Once it passes review, the result is ready to use.",
             },
           ],
@@ -1378,7 +1373,6 @@ export default {
       errors: {
         loadingMessages: "Error loading messages",
       },
-      dialogBackgroundWake: { following: "AI is following up…" },
       selectADialog: "Select a dialog",
       welcomeTitle: "Welcome! Please log in to view and send messages",
       welcomeHint: "Please log in or sign up to start chatting",
@@ -2730,9 +2724,6 @@ export default {
             description: "Nolo 自带的 Agent 能力，默认开启。关闭后所有 agent（Web / CLI / 桌面）都不再注入对应工具。每个 agent 的能力勾选不受影响。",
             title: "Agent 能力开关",
           },
-          conversationTodo: {
-            description: "允许 agent 在多步骤对话中显示和更新任务进度。关闭后不再显示或调用对话 Todo。",
-          },
           title: "Agent 能力",
           webSearch: {
             description: "允许 agent 搜索互联网、抓取网页内容，获取最新信息。关闭后所有 agent 不再具备联网搜索能力。",
@@ -3670,7 +3661,6 @@ export default {
       errors: {
         loadingMessages: "加载消息失败",
       },
-      dialogBackgroundWake: { following: "AI 正在跟进…" },
       selectADialog: "请选择一个对话",
       welcomeTitle: "欢迎！请登录以查看和发送消息",
       welcomeHint: "请登录或注册以开始聊天",
@@ -5023,9 +5013,6 @@ export default {
             description: "Nolo 自帶的 Agent 能力，預設開啟。關閉後所有 agent（Web / CLI / 桌面）都不再注入對應工具。每個 agent 的能力勾選不受影響。",
             title: "Agent 能力開關",
           },
-          conversationTodo: {
-            description: "允許 agent 在多步驟對話中顯示和更新任務進度。關閉後不再顯示或調用對話 Todo。",
-          },
           title: "Agent 能力",
           webSearch: {
             description: "允許 agent 搜索互聯網、擷取網頁內容，獲取最新資訊。關閉後所有 agent 不再具備聯網搜索能力。",
@@ -5963,7 +5950,6 @@ quickChat: {
       errors: {
         loadingMessages: "加載消息失敗",
       },
-      dialogBackgroundWake: { following: "AI 正在跟進…" },
       selectADialog: "請選擇一個對話",
       welcomeTitle: "歡迎！請登入以查看和發送訊息",
       welcomeHint: "請登入或註冊以開始聊天",
@@ -7327,9 +7313,6 @@ quickChat: {
             description: "Nolo 標準搭載の Agent 能力で、既定ではオンです。オフにすると、すべての agent（Web / CLI / デスクトップ）に該当ツールが注入されなくなります。各 agent の能力チェックには影響しません。",
             title: "Agent 能力スイッチ",
           },
-          conversationTodo: {
-            description: "複数ステップの会話で、agent がタスクの進捗を表示・更新できるようにします。オフにすると、チャットの Todo は表示も呼び出しもされなくなります。",
-          },
           title: "Agent の能力",
           webSearch: {
             description: "agent がインターネットを検索し、ウェブページの内容を取得して最新情報を得られるようにします。オフにすると、すべての agent がオンライン検索を使えなくなります。",
@@ -8276,7 +8259,6 @@ quickChat: {
       errors: {
         loadingMessages: "メッセージの読み込みに失敗しました",
       },
-      dialogBackgroundWake: { following: "AI がフォローアップ中…" },
       selectADialog: "ダイアログを選択してください",
       welcomeTitle:
         "ようこそ！メッセージを表示および送信するにはログインしてください",

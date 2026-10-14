@@ -9,13 +9,6 @@ import {
 } from "../../agent-runtime/modelLayerOverride";
 import type { AgentRuntimeHostAdapter } from "../agentRuntimeLocal";
 import {
-  appendAttachmentCard,
-  buildLocalAttachments,
-} from "../tui/localAttachmentParts";
-import type { AttachmentPart } from "../../ai/attachments/attachmentPart";
-import { ENABLE_REMOTE_ATTACHMENT_PART_WRITES } from "../../chat/messages/attachmentWriteRollout";
-import type { AgentRuntimeMessageContent } from "../../agent-runtime/types";
-import {
   createCliLocalRuntimeAdapter,
   isBuiltinNoloAgentRef,
 } from "./localRuntimeAdapter";
@@ -26,6 +19,8 @@ import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
 } from "../../agent-runtime/localLoop";
+import type { EmptyAssistantFallbackReason } from "../../agent-runtime/emptyAssistantRepair";
+import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
 import {
   buildTurnTokenUsage,
   formatUsage,
@@ -67,12 +62,6 @@ import {
 export type { RunAgentTurnOptions, RunAgentTurnResult, TaskEvidenceInput };
 import { Spinner, formatElapsed } from "./agentRunSpinner";
 import {
-  getRunResultHeaderMeta,
-  recordRunResultHeaderMeta,
-  resolveResultServerMeta,
-  serverOriginForDialog,
-} from "../agentRunResultFile";
-import {
   resolveServerPlatformToolNames,
 } from "./agentRunPlatformTools";
 import { isGatewayHttpStatus } from "core/gatewayHttpStatus";
@@ -95,7 +84,6 @@ import {
 import {
   isQuotaLimited403Body,
   mergeAvailabilityDeadline,
-  PROBE_INTERVAL_MS,
   resolveCooldownGate,
 } from "../../ai/agent/agentAvailabilityShared";
 import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
@@ -129,10 +117,10 @@ const stripDebugNoise = (s: string) =>
  * 测试直接覆盖它。
  */
 const pickEmptyAssistantFlags = (result: {
-  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
+  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
   emptyAssistantOutputUsable?: boolean;
 }): {
-  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
+  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
   emptyAssistantOutputUsable?: true;
 } => ({
   ...(result.emptyAssistantFallbackReason
@@ -260,15 +248,6 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     fetchImpl: options.fetchImpl,
     cwd: options.localRuntimeCwd,
     output: options.output,
-    // TUI 显式注入的真实会话身份；缺省时 adapter 内仍回退 parentDialogId。
-    ...(options.originSession ? { originSession: options.originSession } : {}),
-    // 分享 OAuth agent 的 shell 会话授权（块 D）：仅 owner-required 场景生效。
-    ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
-    // 运行位置展示（块 D）：TUI 消费 projectToolExecutionLocation 渲染工具实际
-    // 执行设备/工作区；非 owner-required 场景 adapter 不回调。
-    ...(options.onToolExecutionLocation
-      ? { onToolExecutionLocation: options.onToolExecutionLocation }
-      : {}),
     ...(options.confirmDestructiveAction
       ? { confirmDestructiveAction: options.confirmDestructiveAction }
       : {}),
@@ -352,42 +331,25 @@ function wrapLoadAgentConfigWithModelOverride(
 }
 
 /**
- * 「走所有者通道」提示的去重：**一个进程内同一个 agentKey 只打印一次**。
- *
- * 该 skip 是稳态路由而非异常，重复打印纯属噪音（2026-09-05 用户反馈）。
- * 早先按 output 对象身份去重（WeakSet），但 TUI 每轮 run 都新建 output 对象，
- * 去重永远命不中 → 用户每条消息都看一遍提示（2026-10-07 反馈）。去重键改成
- * agentKey 后与输出流的生命周期无关；CLI 单发 run 每进程只跑一次，行为不变。
- * 提示是纯 UI 通知，去重失败也不影响任何决策（调用处恒 return false，走
- * 本地 owner-proxy 链路）。
+ * 「走所有者通道」提示的去重：同一输出流只打印一次。TUI 的 output 流跨轮
+ * 复用，而该 skip 是稳态路由而非异常——每轮重复打印成噪音（2026-09-05
+ * 用户反馈）。WeakSet 持流引用不阻碍 GC；非对象输出流退回每轮打印。
  */
-const oauthChannelSkipReportedAgentKeys = new Set<string>();
-
-/** 测试专用：清空「走所有者通道」提示的去重状态（跨用例会互相影响）。 */
-export function resetOAuthChannelSkipDedupForTests(): void {
-  oauthChannelSkipReportedAgentKeys.clear();
-}
+const oauthChannelSkipReportedOutputs = new WeakSet<object>();
 
 /**
- * 非本人所有的 OAuth 订阅 agent → 本地 owner-proxy 路由提示（纯信息）。
+ * 非本人所有的 OAuth 订阅 agent 不认领本地 runtime。
  *
  * 收藏 / 空间共享来的 OAuth agent（antigravity / chatgpt / claude / cursor /
- * xai）的模型调用走的是「agent 所有者」的订阅通道：CLI auto 模式下走本地
- * origin-local 链路（localRuntimeAdapter 构造 ownerOriginExecution 契约 →
- * resolveOwnerOAuthProxyTransport），模型经服务端 owner-required 准入烧分享
- * 者订阅、工具留在本机执行。整轮转服务端 loop（/api/agent/run）是**错误**
- * 路由：服务端代跑会用错执行位置、也违反 owner-origin 契约。
- *
- * 本函数只返回提示文案，不做控制流判定：命中时调用处照常进入本地 runtime
- * （fail-closed 由 owner transport 的 verifyOwnerRouteAck / adapter 的
- * origin_unavailable 保证，永不回退本机凭据、不改派其他机器、不回落服务端
- * loop）。纯本机 OAuth 认领（读本机 store 代跑）曾是隐患（2026-09 实证：收藏
- * 他人 antigravity agent 后本地跑，429 冷却连带标记收藏者自己的同凭据
- * agent），现在由 owner-required 契约杜绝。
+ * xai）的模型调用走的是「agent 所有者」的订阅通道：服务端 loop 已按
+ * resolveCredentialOwnerUserId 用所有者凭据解析。CLI 本地认领时读到的却是
+ * 本机 OAuth store——那里面即使恰好有同名 provider 凭据，也是**收藏者自己**
+ * 的订阅，静默代跑等于烧自己的个人配额（2026-09 实证：收藏他人 antigravity
+ * agent 后本地跑，429 冷却还连带标记了收藏者自己的同凭据 agent）。
  *
  * 所有权信号与 withResolvedRuntimeToolSurface 同源：rawRecord.userId（兼读
  * ownerUserId）；历史本地记录缺 ownerId 时维持原行为（视为自己的 agent，
- * 避免误伤本地自建 agent）。显式 --local 仍可强制完全本机（用户自担）。
+ * 避免误伤本地自建 agent）。显式 --local 仍可强制本机（用户自担）。
  */
 function resolveOAuthChannelOwnerSkip(
   agentConfig: Awaited<ReturnType<AgentRuntimeHostAdapter["loadAgentConfig"]>>,
@@ -407,17 +369,10 @@ function resolveOAuthChannelOwnerSkip(
   if (!ownerUserId) return null;
   const localUserId = resolveLocalUserId(options.env);
   if (ownerUserId === localUserId) return null;
-  // 这不是报错：用户在 TUI 选了别人的 sshare agent（跑在 owner 的 OAuth 订阅
-  // 上），本机用户 ID 与 owner 不同，auto 模式改走 owner-required 代理——模型
-  // 走分享者订阅、文件/shell 工具留在本机执行，不是整轮转服务端。文案要说清
-  // 「不是报错 / 模型用分享者订阅 / 工具仍在本机 / 想完全本机跑加 --local」。
   return (
-    t(
-      "agentRun.oauthChannelOwnerSkip",
-      options.agentKey,
-      ownerUserId,
-      localUserId,
-    ) + "\n"
+    `[nolo] auto runtime: skipping local runtime because ${options.agentKey} runs on its owner's ` +
+    `OAuth subscription channel (owner ${ownerUserId}, this machine runs as ${localUserId}). ` +
+    "Use --local explicitly to force this machine's own subscription.\n"
   );
 }
 
@@ -438,33 +393,19 @@ async function shouldSkipAutoLocalForServerPlatformTools(
   // 所有权 gate 必须在 localRuntimeCwd 早退之前：TUI 恒传环境性 cwd 且默认
   // auto 模式，gate 放在早退之后对 TUI 主场景永不生效（review HIGH, 2026-09-05）。
   // cwd 运行仍豁免本函数其余全部 gate（显式本地语义不变）。
-  // owner-required（分享者 OAuth agent）：auto 模式走本地 origin-local 链路
-  // —— adapter 构造 ownerOriginExecution 契约、owner transport 把模型请求
-  // 发服务端 owner-required 准入（烧分享者订阅）、工具留在本机。该路由
-  // 不是「跳过本地」的理由，必须 return false 让 runAgentTurn 进入
-  // runLocalAgentTurnForCli；fail-closed 由下游保证（旧服务器无 ack →
-  // owner_route_unsupported；origin 不可用 → origin_unavailable），本函数
-  // 不再做任何服务端 loop 回退。判定必须先于 localRuntimeCwd 早退与
-  // cliProvider / runtimeBinding / serverTools 等其余 gate：分享 agent 完全
-  // 可能同时命中它们（provider=agy、声明平台工具、绑了别的机器），那些 gate
-  // 会把它错误地转去服务端整轮 loop 或改派绑定机——owner 路由优先一切
-  // 其他 auto 决策。
   const oauthChannelOwnerSkip = resolveOAuthChannelOwnerSkip(agentConfig, options);
   if (oauthChannelOwnerSkip) {
-    // 去重只影响「是否再打印一次提示」，与控制流无关：无论是否命中缓存，
-    // 下面都 return false（走本地 owner-proxy）。output 缺失/非对象时照旧
-    // 直接 write（退回每轮打印，不静默吞掉）。
     if (
       !options.output ||
       typeof options.output !== "object" ||
-      !oauthChannelSkipReportedAgentKeys.has(options.agentKey)
+      !oauthChannelSkipReportedOutputs.has(options.output)
     ) {
       if (options.output && typeof options.output === "object") {
-        oauthChannelSkipReportedAgentKeys.add(options.agentKey);
+        oauthChannelSkipReportedOutputs.add(options.output);
       }
       options.output.write(oauthChannelOwnerSkip);
     }
-    return false;
+    return true;
   }
   if (options.localRuntimeCwd) {
     return false;
@@ -514,29 +455,15 @@ async function shouldSkipAutoLocalForServerPlatformTools(
   return true;
 }
 
-/**
- * 组装 user content：文本 + 图片像素 + durable 附件结构化 part。
- *
- * durable 消息（持久化 content）可以比 provider 发送视图多携带 `attachment`
- * part —— TUI 本机原件 = `local-file` source，含 path / machineId / workspaceRoot。
- * `AgentRuntimeMessageContent` 目前只声明 text / image_url，故此处窄化断言：运行时
- * 由 provider 边界（`composeProviderMessages` → `projectUserPartForModel`）投影成
- * 安全文本卡，定位信息永不进 provider 请求（见 providerMessageProjection.ts）。
- */
-function buildUserInputContent(
-  message: string,
-  imageUrls: string[] = [],
-  attachmentParts: readonly AttachmentPart[] = [],
-): AgentRuntimeMessageContent {
-  if (imageUrls.length === 0 && attachmentParts.length === 0) return message;
+function buildUserInputContent(message: string, imageUrls: string[] = []) {
+  if (imageUrls.length === 0) return message;
   return [
     ...(message.trim() ? [{ type: "text" as const, text: message }] : []),
     ...imageUrls.map((url) => ({
       type: "image_url" as const,
       image_url: { url },
     })),
-    ...attachmentParts,
-  ] as unknown as AgentRuntimeMessageContent;
+  ];
 }
 
 function buildSubjectRefs(options: RunAgentTurnOptions) {
@@ -612,17 +539,15 @@ function isMissingLocalAgentConfigError(error: unknown, agentRef: string) {
  * layer nolo error (which always returns a JSON `{error:{message,code}}`).
  */
 const PROVIDER_HTTP_FAILED_RE =
-  /(.+?)(?:\s+provider|\s+proxy) failed:\s*HTTP\s+(\d+)\b/i;
+  /(.+?) provider failed:\s*HTTP\s+(\d+)\b/i;
 
 /**
  * Platform transports (nolo server proxying the request) are identified by the
- * label containing `platform provider failed` or `owner-required proxy failed`.
- * Everything else is a local transport. `desktop platform provider failed` is
- * the desktop-adapter flavor of the same platform hop and is intentionally
- * covered by this substring.
+ * label containing `platform provider failed`. Everything else is a local
+ * transport. `desktop platform provider failed` is the desktop-adapter flavor
+ * of the same platform hop and is intentionally covered by this substring.
  */
-const PLATFORM_TRANSPORT_RE =
-  /\b(?:platform provider failed|owner-required proxy failed)\b/i;
+const PLATFORM_TRANSPORT_RE = /\bplatform provider failed\b/i;
 
 type ProviderTransport = "local" | "platform";
 
@@ -872,39 +797,9 @@ function buildAuthFailure(ctx: FailureCtx): string {
   // used by the non-interactive no-token path below.
   const platformNoToken =
     ctx.where === "server chat proxy" && isAuthNoTokenBody(ctx.message);
-
-  // True no-token 401 on the platform transport: this install has neither a
-  // platform login nor a usable local model credential. Replace the single
-  // "run nolo login" nudge with the three working paths so a user who never
-  // intends to log in still sees `nolo run` / `nolo auth`.
-  //
-  // The raw provider echo (`raw="{...}"` / `headers=[...]`) is debug noise: by
-  // default it is stripped via stripDebugNoise, and the raw detail is only
-  // re-appended when `NOLO_DEBUG=1` — the same env switch localRuntime* files
-  // already use — or the more targeted `NOLO_CLI_DEBUG_DETAIL=1`.
-  if (platformNoToken) {
-    const guidance =
-      `\n  This turn did not run: you are not logged in to Nolo and no local model credential is available.` +
-      `\n    · Use the Nolo platform: /login (or run \`nolo login\` after exiting the TUI)` +
-      `\n    · Use your own subscription: nolo auth antigravity | claude | chatgpt | xai` +
-      `\n    · No login at all: nolo run "<task>" (runs on local Codex)`;
-    // 这一支专指 AUTH_NO_TOKEN：错误体是固定的平台 JSON（字段名用户看不懂，也没有
-    // 可行动信息），上面三行引导已经把该说的说完了。默认只留一行人类可读摘要，
-    // 不再把整块 JSON 喷给用户；排查时用 NOLO_DEBUG=1 / NOLO_CLI_DEBUG_DETAIL=1
-    // 看完整 Detail（与 stripDebugNoise 的既有开关一致）。
-    const detail =
-      process.env.NOLO_DEBUG === "1" || process.env.NOLO_CLI_DEBUG_DETAIL === "1"
-        ? `\n  Detail: ${ctx.message}`
-        : `\n  Detail: platform returned AUTH_NO_TOKEN (no authentication token provided)`;
-    return (
-      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, no token was sent).` +
-      `${guidance}${detail} ` +
-      `${NO_FALLBACK} ${SERVER_FALLBACK_HINT}\n`
-    );
-  }
-
-  const fix =
-    ctx.where === "server chat proxy"
+  const fix = platformNoToken
+    ? `This install is not logged in — run \`nolo login\`, or set AUTH_TOKEN / NOLO_SERVER`
+    : ctx.where === "server chat proxy"
       ? `Check the agent's provider/api-key settings on nolo.chat`
       : `Fix the local credential/config and retry`;
 
@@ -1010,10 +905,10 @@ function extractRateLimitResetHint(message: string): string | undefined {
 
 function buildRateLimitFailure(ctx: FailureCtx): string {
   // 启动期 429 已由 markStartupRateLimitCooldown 落冷却（与 run 中途同语义）。
-  // 文案必须带上「已暂停该凭证的派发，最晚 <ISO> 自动解除」：不再让用户误以为
-  // 「要等到明天」，而要说明期间会自动试探、成功即恢复，并给出手动恢复命令。
+  // 文案必须带上「已标记冷却至 <ISO>」：用户不再只看到一次限流报错，还能知道
+  // 该 agent 在冷却解除前会被派发门控拦住，不会继续白撞 429。
   const cooldownNote = ctx.cooldownUntil
-    ? ` 已暂停该凭证的派发，本地冷却最晚 ${ctx.cooldownUntil} 到期（不代表上游额度届时一定恢复）；冷却期间再次派发时，约每 ${Math.round(PROBE_INTERVAL_MS / 60000)} 分钟放行一次试探请求，成功即恢复。若已充值或重置额度，可运行 \`nolo auth cooldown\` 查看被暂停的凭证名，再用 \`nolo auth cooldown --clear <凭证名>\` 立即恢复。`
+    ? ` 已标记冷却至 ${ctx.cooldownUntil}，到期前派发会被冷却门控拦截（到期自动 probe 恢复）。`
     : "";
   // 仅凭文本命中的限流（statusInferred）不能声称 "returned HTTP 429"——上游
   // 只是报文里说限流/配额；status 是语义等价码。
@@ -1238,12 +1133,6 @@ export function describeLocalRunFailure(
 
   const cls = classifyLocalRunError(message);
   if (cls.kind === "generic") {
-    if (/owner-required route not acknowledged/i.test(message)) {
-      return (
-        `${RUN_UNAVAILABLE_PREFIX} (${message}). ${NO_FALLBACK} ` +
-        `The server returned a successful response but did not acknowledge the owner route. Check server version or proxy configuration, ${SERVER_FALLBACK_HINT}.\n`
-      );
-    }
     // Socket/network deaths mid-stream are upstream transport failures —
     // telling the user to "fix the local credential/config" points the
     // investigation in the wrong direction (this exact wording misled a real
@@ -1295,7 +1184,7 @@ export function describeLocalRunFailure(
  * 窗口（DEFAULT_PROVIDER_RETRY_MS），不新发明数值。
  *
  * 返回最终生效的冷却截止 ISO（agent 级与 credential 级取更晚者），供失败文案
- * 「已暂停该凭证的派发，最晚 <ISO> 自动解除」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
+ * 「已标记冷却至 <ISO>」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
  * 一律返回 undefined（文案退回原样，退出码与退出路径不变）。
  */
 async function markStartupRateLimitCooldown(
@@ -1527,10 +1416,6 @@ async function runHttpAgentTurn(
   } catch (error) {
     spinner.stop();
     if (options.abortSignal?.aborted) {
-      // 用户 Esc 中断（不是失败）：本分支不带 finalText，结算点也就不会写
-      // `.result.md`/resultFile——已生成的部分正文只留在 .log 与 dialog 里。
-      // 读端看到「无 resultFile + streamInterrupted」应读作「被中断」，不是
-      // 「工具坏了 / 结论丢了」。
       return { exitCode: 0, streamInterrupted: true };
     }
     options.output.write(buildTransportErrorHint(options.serverUrl, error));
@@ -1618,28 +1503,17 @@ async function runHttpAgentTurn(
   const turnCredits = platformCreditsFromUsage(
     data?.usage as Record<string, unknown> | undefined,
   );
-  const serverResult: RunAgentTurnResult = {
+  return {
     exitCode: 0,
     ...(typeof data?.dialogId === "string" && data.dialogId
       ? { dialogId: data.dialogId }
       : {}),
-    // 结论载体与 local 路径同契约（server 模式 / 本地配置缺失时的兜底通道）：
-    // 结算点只认 result.finalText，HTTP 派发不给就等于这批 run 没有结论载体，
-    // status 里既无 lastAssistantText 也无 resultFile。content 已在上面算好。
-    ...(content ? { finalText: content } : {}),
     turnTokens: buildTurnTokenUsage(
       data?.usage,
       typeof data?.model === "string" ? data.model : options.agentKey,
     ),
     ...(turnCredits !== undefined ? { turnCredits } : {}),
   };
-  // server 路径请求的就是 options.serverUrl（dialog 实际落点），origin 直接取它；
-  // 服务端自己持久化，不走 writeDialog 的远端同步，故不写 serverSync。
-  recordRunResultHeaderMeta(serverResult, {
-    model: typeof data?.model === "string" ? data.model : undefined,
-    dialogServer: serverOriginForDialog(options.serverUrl),
-  });
-  return serverResult;
 }
 
 async function runInjectedLocalAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
@@ -1732,58 +1606,22 @@ async function runLocalAgentTurnForCli(
   });
   turnOutput.spinner.start();
   try {
-    // TUI 本机原件路径 → 安全附件卡（共享 describeAttachmentForModel，永不含 path/machineId）。
-    // 机器 id 复用 currentMachineIdResolver / detectCurrentMachineId；取不到就不出卡（显式降级）。
-    // 模型本轮 input 始终是安全卡；durable 落库形态由唯一 rollout 门控（复用
-    // ENABLE_REMOTE_ATTACHMENT_PART_WRITES，默认关闭）：开启时改落结构化 local-file part
-    // （持久化 content 携带 path/machineId），由 provider 边界投影回同一张安全卡。
-    //
-    // machineId 惰性解析：detectCurrentMachineId 的默认实现 probeLaunchable:true
-    // 会真实枚举本机可启动 CLI（秒级）。无附件路径时根本不需要 machineId，
-    // 无条件探测会把这笔开销摊到每一轮 local turn（含 refresh 重试 → ×2），
-    // 2026-10-07 把 "auto mode refreshes missing local agent config" 拖过 5s 超时。
-    const localAttachmentPaths = (options.localAttachmentPaths ?? []).filter(
-      (p): p is string => typeof p === "string" && p.trim().length > 0,
-    );
-    const { cardText: localAttachmentCard, parts: localAttachmentParts } = buildLocalAttachments({
-      paths: localAttachmentPaths,
-      machineId:
-        localAttachmentPaths.length > 0
-          ? await resolveCurrentMachineId(options)
-          : undefined,
-      ...(options.localRuntimeCwd ? { workspaceRoot: options.localRuntimeCwd } : {}),
-    });
-    const messageForLocal = appendAttachmentCard(options.message, localAttachmentCard);
-    // 唯一 rollout 门（不造第二开关）：关闭时 durable 形态逐字节保持旧行为（只带安全卡文本）。
-    const durableAttachmentParts = ENABLE_REMOTE_ATTACHMENT_PART_WRITES
-      ? localAttachmentParts
-      : [];
-    const hasDurableAttachments = durableAttachmentParts.length > 0;
     const runLocalAgentTurn = await loadRunLocalAgentTurn();
     const result = await runLocalAgentTurn({
       adapter,
       agentRef: options.agentKey,
       userLanguage: options.userLanguage ?? options.env.NOLO_LANG ?? null,
-      input: buildUserInputContent(messageForLocal, options.imageUrls),
-      ...(expandedMessage !== options.message || localAttachmentCard !== ""
+      input: buildUserInputContent(options.message, options.imageUrls),
+      ...(expandedMessage !== options.message
         ? {
-            persistedInput: hasDurableAttachments
-              ? buildUserInputContent(
-                  expandedMessage,
-                  options.imageUrls,
-                  durableAttachmentParts,
-                )
-              : buildUserInputContent(
-                  appendAttachmentCard(expandedMessage, localAttachmentCard),
-                  options.imageUrls,
-                ),
-            persistedInputReference: hasDurableAttachments
-              ? buildUserInputContent(
-                  options.message,
-                  options.imageUrls,
-                  durableAttachmentParts,
-                )
-              : buildUserInputContent(messageForLocal, options.imageUrls),
+            persistedInput: buildUserInputContent(
+              expandedMessage,
+              options.imageUrls,
+            ),
+            persistedInputReference: buildUserInputContent(
+              options.message,
+              options.imageUrls,
+            ),
           }
         : {}),
       ...(options.pastedTextStore
@@ -1872,12 +1710,9 @@ async function runLocalAgentTurnForCli(
     });
     turnOutput.finish(result.content);
     const turnCredits = sumPlatformCredits(result.usageRecords);
-    const turnResult: RunAgentTurnResult = {
+    return {
       exitCode: 0,
       dialogId: result.dialogId,
-      ...(typeof result.content === "string" && result.content.trim()
-        ? { finalText: result.content }
-        : {}),
       title: result.title,
       ...(result.titlePatchPromise ? { titlePatchPromise: result.titlePatchPromise } : {}),
       ...pickEmptyAssistantFlags(result),
@@ -1889,19 +1724,6 @@ async function runLocalAgentTurnForCli(
       ...(turnCredits !== undefined ? { turnCredits } : {}),
       ...(result.usageRecords?.length ? { usageRecords: result.usageRecords } : {}),
     };
-    // 头元数据走旁路（不改结果对象形状）：见 agentRunResultFile.ts。
-    // server/serverSync 与 writeDialog 远端同步共用同一判定（见 resolveResultServerMeta）。
-    const serverMeta = resolveResultServerMeta({
-      env: options.env ?? {},
-      userId: resolveLocalUserId(options.env ?? {}),
-      hasSubjectRefs: (buildSubjectRefs(options)?.length ?? 0) > 0,
-    });
-    recordRunResultHeaderMeta(turnResult, {
-      model: result.model,
-      dialogServer: serverMeta.server,
-      serverSync: serverMeta.serverSync,
-    });
-    return turnResult;
   } catch (error) {
     turnOutput.spinner.stop();
     // Abort/error bypasses finish() (it lives on the success path). A user stop
@@ -1920,7 +1742,7 @@ async function runLocalAgentTurnForCli(
     // usageRecords 既存进 saveTurn 也挂到错误上）。不带出去的话，Esc 掉一轮
     // 长对话 = 状态行凭空少算一整轮，而余额是实实在在扣了的。
     const abortedUsageRecords = (
-      error as { usageRecords?: RunAgentTurnResult["usageRecords"] }
+      error as { usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"] }
     )?.usageRecords;
     const abortedTurnCredits = sumPlatformCredits(abortedUsageRecords);
     if (
@@ -1931,12 +1753,6 @@ async function runLocalAgentTurnForCli(
       // If a tool was still running when the stop landed, localLoop attaches
       // its name (error.pendingToolName) so the caller can tell the user the
       // tool may still finish in the background.
-      //
-      // 载体约定（owner 2026-10-07 决定，保持现行为）：被 Esc 中断的 run 不把
-      // 「用户叫停」当正常结论——本分支不产出 finalText，结算点因此不写
-      // `.result.md`，已生成的部分正文只留在 .log / dialog 里。读端看到
-      // status 无 resultFile 且 streamInterrupted 时应读作「被中断」，而不是
-      // 「工具坏了 / 结论丢了」（同语义也写进 controlAgentRun 的 status 描述）。
       const pendingToolName = (error as { pendingToolName?: string })
         ?.pendingToolName;
       return {
@@ -1950,7 +1766,7 @@ async function runLocalAgentTurnForCli(
     }
     // 启动期 429 兜底：分类命中 rate-limit 时与 run 中途同语义落冷却（幂等）。
     // 冷却截止沿用 localLoop 把 dialogId 挂错误上的既有模式挂在错误对象上，
-    // 供 auto 路径 describeLocalRunFailure 渲染「已暂停该凭证的派发，最晚 <ISO> 自动解除」。
+    // 供 auto 路径 describeLocalRunFailure 渲染「已标记冷却至 <ISO>」。
     const cooldownUntil = await markStartupRateLimitCooldown(
       options,
       baseAdapter,
@@ -1972,7 +1788,7 @@ async function runLocalAgentTurnForCli(
       }
       if (cooldownUntil) {
         options.output.write(
-          `[nolo] 已暂停该凭证的派发，本地冷却最晚 ${cooldownUntil} 到期（不代表上游额度届时一定恢复）；冷却期间再次派发时，约每 ${Math.round(PROBE_INTERVAL_MS / 60000)} 分钟放行一次试探请求，成功即恢复。若已充值或重置额度，可运行 \`nolo auth cooldown\` 查看被暂停的凭证名，再用 \`nolo auth cooldown --clear <凭证名>\` 立即恢复。\n`,
+          `[nolo] 已标记冷却至 ${cooldownUntil}，到期前派发该 agent 会被冷却门控拦截。\n`,
         );
       }
     }
@@ -2001,7 +1817,7 @@ async function runLocalAgentTurnForCli(
  */
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode?: 1; credentialKey?: string } | null> {
+): Promise<{ exitCode: 1 } | { credentialKey?: string } | null> {
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
   let config: unknown;
@@ -2081,7 +1897,7 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
 export function foldLocalResultForTui(
   localResult: RunAgentTurnResult,
 ): RunAgentTurnResult {
-  const folded: RunAgentTurnResult = {
+  return {
     exitCode: localResult.exitCode,
     ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
     title: localResult.title,
@@ -2109,17 +1925,7 @@ export function foldLocalResultForTui(
     ...(localResult.pendingToolName
       ? { pendingToolName: localResult.pendingToolName }
       : {}),
-    // 结论正文必须随行：auto→local 是本函数的唯一出口（runAgentTurn 的两处
-    // 成功分支都 return foldLocalResultForTui(...)），漏掉它 = 默认派发路径
-    // 上 finalText 永远到不了结算点 → agentRunCommand 的 settleRunTerminal-
-    // Authoritatively 拿不到 lastAssistantText → `.result.md` 不写、status 无
-    // resultFile，编排者只能去啃带 ANSI 的 .log（同坑位历史：turnCredits）。
-    ...(localResult.finalText ? { finalText: localResult.finalText } : {}),
   };
-  // 头元数据旁路随行（见 agentRunResultFile.ts），否则 auto→local 的头会丢 model。
-  const headerMeta = getRunResultHeaderMeta(localResult);
-  recordRunResultHeaderMeta(folded, headerMeta);
-  return folded;
 }
 
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
@@ -2196,7 +2002,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
 
   // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
   const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
-  if (localAvailability?.exitCode) {
+  if (localAvailability && "exitCode" in localAvailability) {
     return { exitCode: localAvailability.exitCode };
   }
 

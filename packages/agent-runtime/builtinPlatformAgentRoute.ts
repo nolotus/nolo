@@ -8,10 +8,8 @@
  */
 
 import { builtinAgentCatalogEntryById } from "core/builtinAgentCatalog";
-import {
-  isBuiltinPlatformAgentKey,
-  parseBuiltinPlatformAgentId,
-} from "core/builtinAgents";
+import { isBuiltinPlatformAgentKey } from "core/builtinAgents";
+import { parsePublicAgentId } from "core/prefix";
 import {
   isOpenAiResponsesModel,
   resolvePlatformChatCompletionsEndpoint,
@@ -26,7 +24,7 @@ export function resolveBuiltinAgentRuntimeFields(
   agentKey: string,
 ): { provider: string; model: string } | null {
   if (!isBuiltinPlatformAgentKey(agentKey)) return null;
-  const entry = builtinAgentCatalogEntryById(parseBuiltinPlatformAgentId(agentKey));
+  const entry = builtinAgentCatalogEntryById(parsePublicAgentId(agentKey));
   if (!entry) return null;
   return { provider: entry.provider, model: entry.model };
 }

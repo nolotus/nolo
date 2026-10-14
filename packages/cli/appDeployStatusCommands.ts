@@ -9,7 +9,6 @@ import {
   formatFields,
   type AppCommandDeps,
 } from "./appCommandShared";
-import { t } from "./tui/i18n";
 
 function printAppDeployStatusUsage() {
   process.stdout.write(`Usage:
@@ -50,7 +49,7 @@ export async function runAppDeployStatusCommand(args: string[], deps: AppCommand
   const jobId = readOption(args, "--job-id");
   if (!jobId) {
     printAppDeployStatusUsage();
-    process.stderr.write(t("app.errorJobIdRequired"));
+    process.stderr.write("\n错误: 必须提供 --job-id\n");
     return 1;
   }
 
@@ -74,7 +73,7 @@ export async function runAppDeployStatusCommand(args: string[], deps: AppCommand
     }
 
     outputResult(data, shouldOutputJson, () => {
-      process.stdout.write(t("app.deployStatusTitle"));
+      process.stdout.write("部署状态\n\n");
       const fields: Array<[string, unknown]> = [
         ["jobId", data.jobId ?? jobId],
         ["status", data.status],

@@ -68,6 +68,59 @@ function countCodexInputChars(messages: Parameters<CodexComplete>[0]): number {
   }, 0);
 }
 
+/**
+ * 退避等待，与当前请求的 signal 竞争。
+ *
+ * 内层 `fetchWithTransientRetry` 的重试退避只是 `await sleep(ms)`，它不监听 signal：
+ * 取消一旦落在这次退避上，就要等满整个退避（注入的永不完成 sleep 下则是永久悬挂）。
+ * 外层的 `waitBackoff` 拦不住一个尚未返回的内层调用，所以可中断必须在这里成立。
+ * 注入的 `deps.sleep` 仍是真实等待时长，只是额外与 signal 竞争；abort 时立即以
+ * signal.reason 拒绝，该拒绝会直接抛出内层重试循环，取消后不会再发起下一次 fetch。
+ * 默认 `setTimeout` 的句柄由本函数自己持有，结算（abort 或正常完成）时 `clearTimeout`，
+ * 否则定时器仍会引用事件循环，把进程拖到退避结束才退出。
+ */
+function abortableSleep(
+  sleepFn: ((ms: number) => Promise<unknown>) | undefined,
+  ms: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  // 默认路径自己建定时器，必须留下句柄：abort 只是让这个 promise 立即以 signal.reason
+  // 拒绝，未清理的定时器仍引用事件循环，进程会被拖到退避结束才退出（实测 2.267s）。
+  // 注入的 `deps.sleep` 由调用方管理自己的资源，这里不代管。
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waitOnce = (): Promise<unknown> =>
+    sleepFn
+      ? Promise.resolve(sleepFn(ms))
+      : new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, ms);
+        });
+  if (!signal) return waitOnce().then(() => undefined);
+  if (signal.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException("aborted", "AbortError"));
+  }
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      // abort 与正常结算（成功/失败）两条路径都清掉默认定时器。刻意不 unref()：
+      // 正常退避仍要让进程等它结束，清理只应发生在结算路径上。
+      if (timer !== undefined) clearTimeout(timer);
+      settle();
+    };
+    const onAbort = () =>
+      finish(() =>
+        reject(signal.reason ?? new DOMException("aborted", "AbortError")),
+      );
+    signal.addEventListener("abort", onAbort, { once: true });
+    waitOnce().then(
+      () => finish(resolve),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
 export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
   const { agentConfig, deps, fetchImpl, loopbackRequest, additionalToolNames, buildProviderOpenAiTools, recordLocalAvailability, apiKeyRefResolver } = ctx;
   // ChatGPT Codex (subscription OAuth) — Responses API at
@@ -122,7 +175,9 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
           signal: options?.signal,
           fetchImpl: ((url: string | URL | Request, init?: RequestInit) =>
             fetchWithTransientRetry(observedFetch as typeof fetchImpl, url, init, {
-              sleep: deps.sleep,
+              // 内层退避也要能被本次请求的 signal 打断（见 abortableSleep 注释）。
+              sleep: (ms) =>
+                abortableSleep(deps.sleep, ms, init?.signal ?? options?.signal),
               loopbackRequest,
             })) as unknown as typeof fetch,
         });

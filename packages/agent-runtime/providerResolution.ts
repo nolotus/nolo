@@ -10,7 +10,6 @@ import {
   resolvePlatformResponsesEndpoint,
   resolvePlatformChatCompletionsEndpoint,
   resolvePlatformHostedCredentialProvider,
-  resolvePlatformProxyChatGatewayEndpoint,
 } from "./platformProviderEndpoints";
 import { evaluatePlatformHostedClientVersionGate, buildClientVersionGateErrorDetail } from "../ai/llm/platformHostedClientVersionGate";
 import { CLI_PROVIDER_VALUES } from "../ai/agent/cliProviders";
@@ -33,20 +32,8 @@ function resolvePlatformProviderEndpoint(agentConfig: AgentRuntimeAgentConfig) {
     model: agentConfig.model,
     endpointKey: (agentConfig as any).endpointKey,
   })) {
-    // model 必须传下去：平台托管 Responses 模型（DeepSeek 系 / Cloudflare GPT 系）
-    // 的端点由真值表按模型解析；漏传会让路由落到 DeepSeek 默认端点。
-    return resolvePlatformResponsesEndpoint(provider, agentConfig.model) ?? "";
+    return resolvePlatformResponsesEndpoint(provider) ?? "";
   }
-  // ── proxy-only 逻辑网关（在 public chat 选择器之前判）────────────────────
-  // 平台托管 Claude（wire = anthropic.messages）没有客户端可拨号的 chat 端点：
-  // 真实 Messages URL 是账号作用域模板，账号只在服务端 runtime 解析。这里把该线
-  // 映射成逻辑网关标记，客户端只借它判定线形状（OpenAI chat SSE，与服务端
-  // Messages→chat adapter 对接），不会把它当 URL 发出去。
-  const chatGateway = resolvePlatformProxyChatGatewayEndpoint(
-    provider,
-    agentConfig.model,
-  );
-  if (chatGateway) return chatGateway;
   const endpoint = resolvePlatformChatCompletionsEndpoint(
     provider,
     agentConfig.model,
