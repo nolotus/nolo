@@ -96,6 +96,17 @@ export type MediaJobStage =
   | "translate"
   | "summarize";
 
+export type MediaStageExecutor = "agent" | "provider" | "auto";
+
+export interface MediaJobDelegation {
+  key: string;
+  stage: MediaJobStage;
+  runId: string;
+  dialogId: string;
+  dispatchedAt: number;
+  attempts: number;
+}
+
 /** outline=只要大纲重点；translate=转写+翻译；full=全套 */
 export type MediaJobDepth = "outline" | "translate" | "full";
 
@@ -238,6 +249,8 @@ export interface MediaJob {
   confirmation?: MediaJobConfirmation;
   /** 每次成功 start / resume 递增；旧任务缺省视为 0。 */
   executionRevision?: number;
+  /** 按 stage:targetLang:executionRevision 保存异步阶段委派；旧任务无需迁移。 */
+  delegations?: Record<string, MediaJobDelegation>;
   /** 按 revision:stage 保留通知义务与投递凭据，不跨 revision 去重。 */
   notifications?: Partial<Record<MediaJobNotificationKey, MediaJobNotification>>;
   /**
