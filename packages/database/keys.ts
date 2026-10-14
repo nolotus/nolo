@@ -501,6 +501,39 @@ export const createTokenStatsKey = Object.assign(
 );
 
 /**
+ * 「这笔计费的 day stats 已计入」的幂等标记：`token-charge-stats-<userId>-<chargeKey>`。
+ *
+ * 与 day stats 值在同一次 batchWrite 里落库（见 externalToolCost.applyDayStatsOncePerCharge），
+ * 因此「标记存在」⟺「这笔已计入统计」：账本判 duplicate 的重放只有在该标记缺失时才补计，
+ * 保证「同一 chargeKey 重试任意次 → 只扣一次钱、只计一次 stats」。
+ *
+ * 命名刻意避开两个既有扫描范围，不会被误当成记录或统计条目：
+ *   - usage 明细扫描 `token-<userId>-…`（createTokenKey.rangeOfUser）；
+ *   - day stats 扫描 `token-stats-day-user-<userId>-…`（createTokenStatsKey.rangeOfUser）。
+ * 标记值也不带 timestamp / dateKey / model，按时间过滤的读取路径会直接跳过它。
+ *
+ * 但「不被上面两个范围扫到」也意味着删号不会顺带清掉它——必须用下面自带的
+ * rangeOfUser 显式清理（见 auth/server/delete.ts 的 deleteTokenData），
+ * 否则标记会成为删除死角；残留标记会让该用户被重建后的同一 chargeKey 永远不再计费。
+ *
+ * ⚠️ rangeOfUser 只能当**粗筛**：key 段用 `-` 拼接、userId 段没有边界编码，
+ * `userId = "u"` 的范围会圈住 `"u-next"` 的标记（`token-charge-stats-u-` ≤
+ * `token-charge-stats-u-next-charge-abc` ≤ `token-charge-stats-u-\uffff` 成立）。
+ * 调用方必须再用 `value.userId === userId` 精确筛选后才删（旧值缺 userId 就不删）。
+ */
+export const createTokenStatsAppliedKey = Object.assign(
+  (userId: string, chargeKey: string) =>
+    createKey("token", "charge-stats", userId, encodeURIComponent(chargeKey)),
+  {
+    /** 某个用户的全部计费幂等标记范围：token-charge-stats-<userId>-* */
+    rangeOfUser: (userId: string) => ({
+      start: createKey("token", "charge-stats", userId, ""),
+      end: createKey("token", "charge-stats", userId, "\uffff"),
+    }),
+  }
+);
+
+/**
  * 判断一个 dbKey 是否是 Token Stats 的 key
  * 形如：token-stats-day-user-{userId}-{dateKey} 或任何 token-stats-* 统计 key
  */
