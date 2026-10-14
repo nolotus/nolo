@@ -384,10 +384,12 @@ function rawEnumValues(src: Record<string, unknown>): unknown[] | undefined {
 }
 
 /**
- * Gemini function_declarations 的 enum 只接受字符串，非字符串会 400。
+ * Gemini function_declarations 的 enum 只接受字符串，非字符串会 400；但 String()
+ * 化会伪造出原 schema 不允许的值（`null` → 字符串 `"null"`），故非字符串一律降级
+ * 为 description 里的取值说明。
  * - 全字符串：原样保留；
  * - 全 number/boolean：丢弃 enum，把取值追加到 description 末尾（模型仍可见约束）；
- * - 混合：统一转成字符串。
+ * - 混合：同样丢弃结构化 enum，把原值以 JSON 表示追加到 description。
  */
 function geminiEnumFields(
   values: unknown[],
@@ -407,14 +409,24 @@ function geminiEnumFields(
       description: baseDescription ? `${baseDescription} ${note}` : note,
     };
   }
-  const asStrings = values.map((v) =>
-    typeof v === "string"
-      ? v
-      : v !== null && typeof v === "object"
-        ? JSON.stringify(v)
-        : String(v),
-  );
-  return { enum: [...new Set(asStrings)], description: baseDescription };
+  // 混合类型（如 ["string","null"]、[1,"auto"]）：不得 String() 化——那会把 null
+  // 变成含义不同的字符串 "null"，凭空新增原 schema 不允许的取值。与纯数值/布尔分支
+  // 一致：去掉结构化 enum，改为在 description 里保留原值的 JSON 表示（约束降级，
+  // 但不伪造一个含义不同的硬 enum）。
+  const allowed = [...new Set(values.map(geminiEnumLiteral))].join(", ");
+  const note = `(allowed: ${allowed})`;
+  return {
+    description: baseDescription ? `${baseDescription} ${note}` : note,
+  };
+}
+
+/**
+ * description 中的取值表示：统一用 JSON 字面量，使字符串 `"x"` 与字面量 `x`、
+ * 字符串 `"null"` 与 JSON `null` 在文本上可区分。
+ */
+function geminiEnumLiteral(value: unknown): string {
+  const json = JSON.stringify(value);
+  return json === undefined ? String(value) : json;
 }
 
 function applyGeminiEnum(

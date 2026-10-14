@@ -30,125 +30,6 @@ import type {
   AgentRuntimeToolCall,
 } from "./types";
 import { extractDeclaredToolNames } from "./declaredToolNames";
-import { classifyUnparsableToolArgs } from "./toolArgsShape";
-
-/**
- * 内部来源标记：「这条 assistant 消息源自一次工具轮，但该轮的调用被**整体**
- * 降级成了文本」。
- *
- * 为什么需要它（2026-10-10 实机 400 的代码侧盲区）：出站构建顺序是
- * 「先 `sanitizeForOutbound` 降级、后 `toOpenAiCompatibleMessages` 注入占位」，
- * 而占位守卫当时要求「仍带非空 `tool_calls`」。整体降级会把 `tool_calls` 删掉，
- * 于是这条轮在注入阶段看着像普通文本轮 → 拿不到占位。**机制假设（未证实）**：
- * 上游可能仍把这轮当作工具轮、因此仍执行 DeepSeek thinking 回放契约
- * （`reasoning_content must be passed back`）；本地能静态证明的只有「本地投影把它
- * 变成了纯文本轮」，占位属**防御性兼容**。
- *
- * 落点方式：**非枚举 Symbol 属性**。它随对象走（不依赖数组下标做隐式推断）；
- * 它不会出现在上游请求体里的**依据是消费侧实现 + 断言**：消费点只**读**这个标记
- * （`hasDowngradedToolTurnOrigin`），出站消息由 `openAiCompatibleMessages.ts` 的
- * `preserveAgentStateFields` 按**明确字段**重建（见 `openAiCompatibleMessages.test.ts` /
- * `openAiCompatibleProvider.test.ts` 里「标记不进 body」的断言）。这**不是**对「任意
- * 投影/序列化实现都不会带出非枚举 Symbol」的语言级保证——那种一般化声称超出已证实范围。
- *
- * 它还必须在**每一个可能承载该来源的重建点**上被显式转移
- * （`transferDowngradedToolTurnOrigin`）：非枚举 Symbol 不会被展开复制，漏一次就等于
- * 没有标记（见该函数的注释）。反过来，**不承载该来源**的重建点（tool/user 专属重建、
- * 输出块→消息、system/user 前缀构造等）无需转移——那里不存在可继承的已标记 assistant
- * 源对象，故本批未纳入。
- *
- * 注意「上游仍按工具轮校验这一轮」目前是**机制假设、不是已证实事实**（2026-10-10
- * 复核：本地探针全 200、缺失败 attempt 的逐轮形态证据）。此处打标的依据只是
- * 「本地投影把一次工具轮变成了纯文本轮」，占位是**防御性兼容**。
- *
- * 来源有两处：本模块「全部调用被降级」的两条路径，以及 `sanitizeToolCallPairing`
- * （toolCallPairing.ts）的剥离分支（声明过非空 tool_calls、全部配对失败、剥离后保留正文）。
- * pairing 这条路径**保留原正文、只移除调用结构**，不会把调用细节渲染进正文。
- * 部分降级（仍有调用结构、保留）的轮继续走既有规则，不标记、也不会重复注入。
- */
-export const DOWNGRADED_TOOL_TURN_ORIGIN: unique symbol = Symbol(
-  "nolo.downgradedToolTurnOrigin",
-);
-
-/** 给「整体降级的工具轮」打上来源标记（非枚举；消费侧只读它、出站消息按明确字段重建，故不进 wire）。 */
-export function markDowngradedToolTurnOrigin<T extends object>(message: T): T {
-  Object.defineProperty(message, DOWNGRADED_TOOL_TURN_ORIGIN, {
-    value: true,
-    enumerable: false,
-    writable: false,
-    configurable: true,
-  });
-  return message;
-}
-
-/**
- * 显式把来源标记从源消息**转移**到重建后的消息对象上。
- *
- * 为什么必须显式（2026-10-10 复核 P1）：标记是非枚举 Symbol，`{ ...source }`、
- * `Object.assign`、`structuredClone`、JSON 往返都**不会**复制它。因此任何
- * 「重建消息对象」的地方（passthrough 展开、sanitize 二次运行、投影 map）都
- * 会静默丢掉来源：
- *   - 本地链路：`composeProviderMessages`（`downgradeUnparsableToolCalls` 降级
- *     并打标）→ provider builder 的 `sanitizeForOutbound` → `:462` 的
- *     `out.push({ ...m })` 展开 → 标记消失 → 整体降级轮在注入阶段又退回
- *     「看着像普通文本轮」→ 拿不到 reasoning_content 占位。**条件性风险**（不是已证实
- *     后果）：若该通道真的按工具轮校验回放，这类轮会被拒（400）——**该机制尚未证实**
- *     （本地探针全 200、缺失败 attempt 的逐轮形态证据，见本文件上方长注释）。
- * 本函数是这条不变量的收口：**可能承载该来源**的重建点只写
- * `transferDowngradedToolTurnOrigin(source, rebuilt)`，不再依赖展开复制。
- * 源消息没标记时是 no-op，因此对普通轮零影响。
- */
-export function transferDowngradedToolTurnOrigin<T extends object>(
-  source: unknown,
-  rebuilt: T,
-): T {
-  if (hasDowngradedToolTurnOrigin(source)) markDowngradedToolTurnOrigin(rebuilt);
-  return rebuilt;
-}
-
-/** 该消息是否来自「调用被整体降级」的工具轮。 */
-export function hasDowngradedToolTurnOrigin(message: unknown): boolean {
-  return (
-    typeof message === "object" &&
-    message !== null &&
-    (message as Record<PropertyKey, unknown>)[DOWNGRADED_TOOL_TURN_ORIGIN] === true
-  );
-}
-
-/**
- * 毒丸投影的分类统计（纯数字；绝不携带 raw 或预览，也绝不进入 wire 消息）。
- *
- * 两类计数口径不同、允许不相等：
- * - `badArguments`：arguments 实际不可用的调用数（truncated + malformed），
- *   在实际降级使用的分类 pass 里一次只计一个坏调用；
- * - `rewritten*`：因坏参数或同 ID 连带降级而实际改写的调用/消息数。
- *   例如同 ID 一坏一好：坏参数 1，改写调用 2。
- */
-export type ToolArgsProjectionStats = {
-  badArguments: {
-    truncated: number;
-    malformed: number;
-  };
-  rewrittenToolCalls: number;
-  rewrittenAssistantMessages: number;
-  rewrittenToolMessages: number;
-};
-
-/** 降级结果：`downgraded` 保留兼容，恒等于 `stats.rewrittenToolCalls`。 */
-export type DowngradeResult = {
-  messages: AgentRuntimeChatMessage[];
-  downgraded: number;
-  stats: ToolArgsProjectionStats;
-};
-
-function emptyToolArgsProjectionStats(): ToolArgsProjectionStats {
-  return {
-    badArguments: { truncated: 0, malformed: 0 },
-    rewrittenToolCalls: 0,
-    rewrittenAssistantMessages: 0,
-    rewrittenToolMessages: 0,
-  };
-}
 
 export interface OutboundHistorySanitizeOptions {
   /**
@@ -252,9 +133,6 @@ function normalizeToolCall(
     id,
     type: isString(c.type) && c.type ? (c.type as "function") : "function",
     function: { name: fn.name, arguments: jsonStringifyArguments(fn.arguments) },
-    ...(typeof c.extra_content?.google?.thought_signature === "string"
-      ? { extra_content: { google: { thought_signature: c.extra_content.google.thought_signature } } }
-      : {}),
     ...(typeof c.thought_signature === "string"
       ? { thought_signature: c.thought_signature }
       : {}),
@@ -424,29 +302,20 @@ export function sanitizeOutboundHistory(
         const contentWithDowngrade = downgradedText.length > 0
           ? combineContentWithText(m.content, downgradedText)
           : m.content;
-        const sanitizedAssistant: AgentRuntimeChatMessage = transferDowngradedToolTurnOrigin(m, {
+        const sanitizedAssistant: AgentRuntimeChatMessage = {
           ...m,
           content: contentWithDowngrade,
-        });
+        };
         delete sanitizedAssistant.tool_calls;
-        // 记录来源：降级只是本地投影选择，这一轮**原本**是一次工具轮。注入阶段据此
-        // 补 reasoning_content 占位（见本模块 DOWNGRADED_TOOL_TURN_ORIGIN 的说明；
-        // 「上游仍按工具轮校验」是机制假设，非已证实事实）。本行是**来源产生点**，
-        // 无条件打标；上面的 transfer 覆盖「源消息此前已带标记」的情形（`{ ...m }`
-        // 不会复制非枚举 Symbol，见 transferDowngradedToolTurnOrigin）。
-        markDowngradedToolTurnOrigin(sanitizedAssistant);
         out.push(sanitizedAssistant);
 
         // Process any following contiguous tool messages: all must be downgraded to text
         let nextIdx = k + 1;
         while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
-          const downgradedToolMsg = messages[nextIdx];
-          out.push(
-            transferDowngradedToolTurnOrigin(downgradedToolMsg, {
-              role: "assistant",
-              content: renderToolResultAsText(downgradedToolMsg),
-            }),
-          );
+          out.push({
+            role: "assistant",
+            content: renderToolResultAsText(messages[nextIdx]),
+          });
           nextIdx++;
         }
         k = nextIdx;
@@ -456,10 +325,10 @@ export function sanitizeOutboundHistory(
       // Case B: Some (or all) calls survived structurally.
       // Do NOT modify assistant.content with downgraded text!
       // Keep assistant.content pristine so no gateway sees text splitting calls and results.
-      const sanitizedAssistant: AgentRuntimeChatMessage = transferDowngradedToolTurnOrigin(m, {
+      const sanitizedAssistant: AgentRuntimeChatMessage = {
         ...m,
         tool_calls: keptToolCalls,
-      });
+      };
       out.push(sanitizedAssistant);
 
       // Process following contiguous tool messages
@@ -484,9 +353,6 @@ export function sanitizeOutboundHistory(
       // emit them together as an assistant message deferred AFTER the tool results!
       const deferredLines = [...downgradedCallLines, ...deferredResultLines];
       if (deferredLines.length > 0) {
-        // 不转移来源标记：本条是「部分降级」合成的文本消息（该轮仍有结构化保留的
-        // tool_calls，走既有规则），按裁定「部分降级不打标」——打标会让同一工具轮
-        // 重复/额外注入占位。
         out.push({
           role: "assistant",
           content: joinLines(...deferredLines),
@@ -499,23 +365,16 @@ export function sanitizeOutboundHistory(
 
     if (m.role === "tool") {
       // An isolated tool message outside of any assistant tool block (e.g. orphan)
-      out.push(
-        transferDowngradedToolTurnOrigin(m, {
-          role: "assistant",
-          content: renderToolResultAsText(m),
-        }),
-      );
+      out.push({
+        role: "assistant",
+        content: renderToolResultAsText(m),
+      });
       k++;
       continue;
     }
 
     // user / system / assistant without tool_calls: pass through
-    // NOTE: assistant without tool_calls is exactly where a previously
-    // fully-downgraded turn lands on a second sanitize run — `{ ...m }` drops the
-    // non-enumerable origin Symbol (P1, 2026-10-10 review), so the marker must be
-    // transferred explicitly or the builder's sanitize erases the origin before
-    // the placeholder guard runs.
-    out.push(transferDowngradedToolTurnOrigin(m, { ...m }));
+    out.push({ ...m });
     k++;
   }
 
@@ -722,18 +581,12 @@ export function repairTruncatedToolArguments(raw: unknown): string | null {
  * arguments are touched. When history contains no poison the input array is
  * returned by reference and nothing else changes (no declared-name filtering,
  * no dangling-call handling — those remain cross-provider replay concerns).
- *
- * The returned `stats` is derived from the SAME classification pass that drives
- * the rewrites (bad-argument breakdown) plus the emit pass (actual rewrites),
- * so log/diagnostic call sites never re-scan the raw history. It is metadata
- * only: no diagnostic field is ever merged into the messages, so the wire body
- * stays byte-identical to before.
  */
 export function downgradeUnparsableToolCalls(
   messages: AgentRuntimeChatMessage[],
-): DowngradeResult {
+): { messages: AgentRuntimeChatMessage[]; downgraded: number } {
   if (!Array.isArray(messages) || messages.length === 0) {
-    return { messages, downgraded: 0, stats: emptyToolArgsProjectionStats() };
+    return { messages, downgraded: 0 };
   }
 
   // Check if any assistant tool_call has unparsable arguments
@@ -750,7 +603,7 @@ export function downgradeUnparsableToolCalls(
     if (hasAnyPoison) break;
   }
 
-  if (!hasAnyPoison) return { messages, downgraded: 0, stats: emptyToolArgsProjectionStats() };
+  if (!hasAnyPoison) return { messages, downgraded: 0 };
 
   // Local block pairing: only pair bad call IDs within each contiguous assistant + tool block.
   // Avoid global poisonIds to prevent cross-turn contamination.
@@ -758,23 +611,13 @@ export function downgradeUnparsableToolCalls(
   // instances where any is poisoned, downgrade ALL calls sharing that ID to avoid hanging good calls!
   const poisonedCallsPerAssistant = new Map<number, Set<string>>();
   const poisonedToolIndices = new Set<number>();
-  // 坏参数数：与实际降级同源的分类 pass 里统计，对 unparsableIndices 的原始
-  // raw 参数逐个归类，一次只计一个坏调用（同 ID 的连带降级不计入这里）。
-  const badArguments: ToolArgsProjectionStats["badArguments"] = {
-    truncated: 0,
-    malformed: 0,
-  };
 
   let i = 0;
   while (i < messages.length) {
     const m = messages[i];
     if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
       const asstIdx = i;
-      const { unparsableIds, unparsableIndices } = classifyAssistantCalls(m.tool_calls, asstIdx);
-      for (const badIndex of unparsableIndices) {
-        const badCall = m.tool_calls[badIndex] as Record<string, any> | undefined;
-        badArguments[classifyUnparsableToolArgs(badCall?.function?.arguments)] += 1;
-      }
+      const { unparsableIds } = classifyAssistantCalls(m.tool_calls, asstIdx);
 
       let j = i + 1;
       while (j < messages.length && messages[j].role === "tool") {
@@ -796,8 +639,6 @@ export function downgradeUnparsableToolCalls(
   }
 
   let downgraded = 0;
-  let rewrittenAssistantMessages = 0;
-  let rewrittenToolMessages = 0;
   const out: AgentRuntimeChatMessage[] = [];
   let k = 0;
   while (k < messages.length) {
@@ -813,8 +654,6 @@ export function downgradeUnparsableToolCalls(
       const kept: AgentRuntimeToolCall[] = [];
       const lines: string[] = [];
       const { callIds } = classifyAssistantCalls(m.tool_calls, k);
-      // 这条 assistant 消息必然被改写（降级的调用正文 + / 或 tool_calls 变化）。
-      rewrittenAssistantMessages += 1;
 
       m.tool_calls.forEach((call, callIndex) => {
         const id = callIds[callIndex];
@@ -829,30 +668,18 @@ export function downgradeUnparsableToolCalls(
 
       // If nothing survived structurally:
       if (kept.length === 0) {
-        const sanitized: AgentRuntimeChatMessage = transferDowngradedToolTurnOrigin(m, {
+        const sanitized: AgentRuntimeChatMessage = {
           ...m,
           content: combineContentWithText(m.content, joinLines(...lines)),
-        });
+        };
         delete sanitized.tool_calls;
-        // 同 sanitizeOutboundHistory 的 Case A：整体降级的工具轮要能拿到
-        // reasoning_content 占位（CLI 本地链路 composeProviderMessages → 本函数
-        // → 出站 seam 的注入阶段）。本行是来源产生点，无条件打标；transfer 覆盖
-        // 源消息此前已带标记的情形（展开不复制非枚举 Symbol）。
-        markDowngradedToolTurnOrigin(sanitized);
         out.push(sanitized);
 
         // Process following contiguous tool messages: poisoned ones become assistant messages
         let nextIdx = k + 1;
         while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
           if (poisonedToolIndices.has(nextIdx)) {
-            const poisonedToolMsg = messages[nextIdx];
-            out.push(
-              transferDowngradedToolTurnOrigin(poisonedToolMsg, {
-                role: "assistant",
-                content: renderToolResultAsText(poisonedToolMsg),
-              }),
-            );
-            rewrittenToolMessages += 1;
+            out.push({ role: "assistant", content: renderToolResultAsText(messages[nextIdx]) });
           } else {
             out.push(messages[nextIdx]);
           }
@@ -865,11 +692,11 @@ export function downgradeUnparsableToolCalls(
       // Some calls survived structurally:
       // Keep assistant.content as-is or append lines, but tool_calls is kept.
       // Crucial: do NOT emit downgraded tool result messages BEFORE the kept tool results!
-      const sanitized: AgentRuntimeChatMessage = transferDowngradedToolTurnOrigin(m, {
+      const sanitized: AgentRuntimeChatMessage = {
         ...m,
         content: lines.length > 0 ? combineContentWithText(m.content, joinLines(...lines)) : m.content,
         tool_calls: kept,
-      });
+      };
       out.push(sanitized);
 
       // Scan subsequent contiguous tool messages:
@@ -879,7 +706,6 @@ export function downgradeUnparsableToolCalls(
       while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
         if (poisonedToolIndices.has(nextIdx)) {
           deferredResultLines.push(renderToolResultAsText(messages[nextIdx]));
-          rewrittenToolMessages += 1;
         } else {
           out.push(messages[nextIdx]);
         }
@@ -888,7 +714,6 @@ export function downgradeUnparsableToolCalls(
 
       // Deferred poisoned tool results are emitted AFTER the healthy tool results
       if (deferredResultLines.length > 0) {
-        // 同 sanitizeOutboundHistory：部分/连带降级合成的文本消息不打标。
         out.push({
           role: "assistant",
           content: joinLines(...deferredResultLines),
@@ -901,13 +726,7 @@ export function downgradeUnparsableToolCalls(
 
     if (m.role === "tool") {
       if (poisonedToolIndices.has(k)) {
-        out.push(
-          transferDowngradedToolTurnOrigin(m, {
-            role: "assistant",
-            content: renderToolResultAsText(m),
-          }),
-        );
-        rewrittenToolMessages += 1;
+        out.push({ role: "assistant", content: renderToolResultAsText(m) });
       } else {
         out.push(m);
       }
@@ -919,16 +738,5 @@ export function downgradeUnparsableToolCalls(
     k++;
   }
 
-  return {
-    messages: out,
-    downgraded,
-    stats: {
-      badArguments,
-      // 投影改写数与坏参数数是两套口径：rewrittenToolCalls 含同 ID 连带降级的
-      // 调用，二者允许不相等（同 ID 一坏一好 → 坏参数 1、改写调用 2）。
-      rewrittenToolCalls: downgraded,
-      rewrittenAssistantMessages,
-      rewrittenToolMessages,
-    },
-  };
+  return { messages: out, downgraded };
 }

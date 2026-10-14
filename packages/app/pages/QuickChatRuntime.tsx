@@ -15,12 +15,10 @@ import {
   useAppSelector,
 } from "app/store";
 import {
-  createDialog, type PendingFile, clearPendingAttachments, usePendingFiles, GLOBAL_DIALOG_RUNTIME_KEY, } from "chat/dialog/dialogSlice";
+  createDialog, type PendingFile, clearPendingAttachments, usePendingFiles, } from "chat/dialog/dialogSlice";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { markRecentlyCreated } from "chat/web/sidebar/recentlyCreatedStore";
 import { sendFirstMessage } from "chat/messages/sendFirstMessage";
-import { preparePendingAttachmentParts } from "chat/messages/preparePendingAttachmentParts";
-import { resolveBrowserModelImageUrl } from "chat/messages/browserImageUrl";
 import { selectDefaultAgentId } from "app/settings/settingSlice";
 import { useFetchData } from "app/hooks";
 import { isAbortError } from "core/abortError";
@@ -111,22 +109,6 @@ const isAbortLikeError = (error: unknown) => {
 
 export type QuickChatRuntimeSurface = "default" | "home-primary" | "space-home-compact";
 
-/**
- * 占位 composer 把 File[] 交给惰性挂载的 runtime 之前的一次性守卫：
- * 同一批文件只允许被受理一次——重渲染会让 effect 重跑（依赖含
- * handleQuickChatFileSelection），StrictMode 还会双跑 effect，都必须拦住。
- * 返回 null 表示「本批已受理或为空」，调用方不得再次处理。
- */
-export const takePendingQuickChatFiles = (
-  pendingShellFiles: File[] | null | undefined,
-  consumedRef: { current: boolean }
-): File[] | null => {
-  if (consumedRef.current) return null;
-  if (!pendingShellFiles || pendingShellFiles.length === 0) return null;
-  consumedRef.current = true;
-  return pendingShellFiles;
-};
-
 export interface QuickChatRuntimeProps {
   initialText?: string;
   initialAgentId?: string | null;
@@ -135,13 +117,6 @@ export interface QuickChatRuntimeProps {
   spaceId?: string;
   autoSend?: boolean;
   isEmptyState?: boolean;
-  /**
-   * 占位 composer 交接的一次性文件：挂载后走与 FileUploadButton 完全相同的
-   * handleQuickChatFileSelection 路径，只处理一次。
-   */
-  pendingShellFiles?: File[] | null;
-  /** runtime 已受理 pendingShellFiles 后通知调用方清空，避免重新挂载时重复处理。 */
-  onPendingShellFilesConsumed?: () => void;
   onPersonalizationClick?: () => void;
   quickChatMode: QuickChatMode;
   onModeChange: (mode: QuickChatMode) => void;
@@ -155,8 +130,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   spaceId: spaceIdProp,
   autoSend = false,
   isEmptyState = false,
-  pendingShellFiles = null,
-  onPendingShellFilesConsumed,
   onPersonalizationClick,
   quickChatMode,
   onModeChange: handleModeChange,
@@ -191,11 +164,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   const currentSpace = useAppSelector((state) => selectSpaceById(state, currentSpaceId));
   const agentName =
     agent?.name || (currentModeAgentId === noloAgentId ? "nolo" : t("unknown"));
-  // quick chat 无 dialogKey：附件的写入（useMessageInputFiles 的
-  // effectiveDialogKey）与读取都显式用 GLOBAL bucket，不依赖
-  // activeDialogKey 的隐式回退——刷新后两者必须同源，否则恢复的卡片
-  // 会落进另一个 runtime 而渲染不出来。
-  const pendingFiles = usePendingFiles(GLOBAL_DIALOG_RUNTIME_KEY) as PendingFile[];
+  const pendingFiles = usePendingFiles() as PendingFile[];
   const currentUserId = useUserId();
   const { isInitialized: isIdentityInitialized } = useIdentity();
   const currentUserBalance = useAppSelector(selectIdentityUserBalance);
@@ -237,7 +206,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     pendingFilesWithStatus,
     processFiles,
     clearFileStatus,
-    hasInFlightMediaUpload,
   } = useMessageInputFiles(processImages, {
     dispatch,
     t,
@@ -388,9 +356,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     if (
       isStartingRef.current ||
       isSending ||
-      // 媒体上传/建任务中：此时发送会丢掉还没生成的任务卡。
-      processingFileIds.size > 0 ||
-      hasInFlightMediaUpload() ||
       (!trimmedText && !imageFiles.size && !pendingFiles.length)
     )
       return;
@@ -515,9 +480,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         routeState,
       });
       // replace: drop the empty /chat shell so Back does not return to a blank composer.
-      // Home first-send morph; route chunks are static in the main route table,
-      // and the send request below never waits on the animation.
-      if (surface === "home-primary") enableNextRouteViewTransition();
+      enableNextRouteViewTransition();
       navigate(dialogUrl, {
         replace: true,
         state: routeState,
@@ -531,18 +494,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         imageCount: imageFiles.size,
         pendingFileCount: pendingFiles.length,
       });
-      let extraParts;
-      try {
-        const preparedParts = await preparePendingAttachmentParts(pendingFiles, {
-          currentServer,
-          currentUserId,
-          resolveImageUrl: (url) => resolveBrowserModelImageUrl(url, { authToken: token }),
-        });
-        extraParts = preparedParts;
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "媒体附件不可用");
-        return;
-      }
+      const extraParts = buildQuickChatExtraParts(pendingFiles);
       QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] prepare sendFirstMessage", {
         dialogKey,
         textLength: trimmedText.length,
@@ -602,8 +554,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
 
       clearInput();
       clearFileStatus();
-      // 与 quick chat 的 GLOBAL bucket 读写保持一致，同样不依赖 activeDialogKey。
-      dispatch(clearPendingAttachments({ dialogKey: GLOBAL_DIALOG_RUNTIME_KEY }));
+      dispatch(clearPendingAttachments());
       QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] cleared local imageFiles and pendingFiles");
       QUICK_CHAT_DEBUG && console.groupEnd();
 
@@ -633,9 +584,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     }
   }, [
     isSending,
-    processingFileIds,
-    hasInFlightMediaUpload,
-    surface,
     text,
     imageFiles,
     pendingFiles,
@@ -666,47 +614,20 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   const isSendDisabled = useMemo(() => {
     if (isLiveAudioOnly) return true;
     return (
-      (!text.trim() && !imageFiles.size && !pendingFiles.length) ||
-      isSending ||
-      processingFileIds.size > 0
+      (!text.trim() && !imageFiles.size && !pendingFiles.length) || isSending
     );
-  }, [
-    text,
-    imageFiles.size,
-    pendingFiles.length,
-    isSending,
-    isLiveAudioOnly,
-    processingFileIds.size,
-  ]);
+  }, [text, imageFiles.size, pendingFiles.length, isSending, isLiveAudioOnly]);
   const showVoiceInput = useMemo(
     () => !text.trim() && !imageFiles.size && !pendingFiles.length && !isSending,
     [text, imageFiles.size, pendingFiles.length, isSending]
   );
 
   const handleQuickChatFileSelection = useCallback(
-    (files: FileList | File[] | null) => {
+    (files: FileList | null) => {
       void processFiles(files);
     },
     [processFiles]
   );
-
-  // 占位 composer 交接的文件：挂载即受理，与 FileUploadButton 同一条处理路径。
-  // takePendingQuickChatFiles 的 ref 守卫保证同一批文件只处理一次
-  // （重渲染、StrictMode 双跑 effect 都安全）。
-  const pendingFilesConsumedRef = useRef(false);
-  useEffect(() => {
-    const files = takePendingQuickChatFiles(
-      pendingShellFiles,
-      pendingFilesConsumedRef
-    );
-    if (!files) return;
-    handleQuickChatFileSelection(files);
-    onPendingShellFilesConsumed?.();
-  }, [
-    pendingShellFiles,
-    onPendingShellFilesConsumed,
-    handleQuickChatFileSelection,
-  ]);
 
   const { handleChange: autoResizeOnChange } = useAutoResizeTextarea({
     maxHeight: 360,
