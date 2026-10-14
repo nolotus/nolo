@@ -453,6 +453,23 @@ export const createTokenKey = {
   record: curry((userId: string, timestamp: number) =>
     createKey("token", userId, timestamp.toString())
   ),
+  /**
+   * 单次计费记录：`token/<user>/<timestamp>/<chargeId>`。
+   *
+   * 与 `record` 的唯一区别是把「本次计费自己的唯一 id」作为额外一段拼在末尾
+   * —— 同一用户同一毫秒内的两笔合法计费因此各占一个 key，不再互相覆盖，
+   * 也不会共用同一个账本 txId / 幂等键（`token-<tokenKey>` / `token:<tokenKey>`）
+   * 而被账本判为 duplicate 静默漏扣。
+   *
+   * 兼容性：timestamp 仍是第二段且保持首位排序，因此
+   *   - `rangeOfUser(userId)`（usage/统计等读取路径用的全前缀范围）照常覆盖；
+   *   - `range(userId, ts)` 的 `token/<user>/<ts>` … `token/<user>/<ts+1d>`
+   *     区间同样覆盖新 key（`<ts>-xxx` > `<ts>` 且 < `<ts+1>`），历史数据
+   *     与新数据可以在同一区间里混扫。
+   * 幂等键的稳定性由调用方决定：需要「重试同一笔」时传稳定的 chargeId。
+   */
+  recordForCharge: (userId: string, timestamp: number, chargeId: string) =>
+    createKey("token", userId, timestamp.toString(), encodeURIComponent(chargeId)),
   /** Server provider-call record: retry-stable even when the retry clock changes. */
   recordForStableCall: (userId: string, callId: string) =>
     createKey("token", userId, "call", encodeURIComponent(callId)),

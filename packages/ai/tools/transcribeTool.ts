@@ -66,9 +66,16 @@ export type TranscribeToolInput = {
   expectedExecutionRevision?: number;
 };
 
+/**
+ * 复用已有 job 时对「模型多给的参数」的处置说明。只作为**附加说明**随结果返回，
+ * 不参与任何控制字段/授权/计费语义（见 transcribeFunc 里的装配说明）。
+ */
+type ReuseNotes = { sourceLangNote?: string };
+
 async function transcribeInternal(
   input: TranscribeToolInput,
   thunkApi: any,
+  reuseNotes: ReuseNotes,
 ): Promise<any> {
   const { action = "transcribe", fileId, jobId, fromSec, toSec, sourceLang, sttProvider, confirmationToken, expectedExecutionRevision } = input ?? {};
   if (action === "status" && !jobId) throw new Error("status 模式必须提供已有 jobId");
@@ -80,8 +87,18 @@ async function transcribeInternal(
     if (action === "status") return formatJobStatus(job, resolvedJobId);
     if ((fromSec !== undefined && fromSec !== job.scope?.fromSec) || (toSec !== undefined && toSec !== job.scope?.toSec))
       throw new Error("已有 jobId 的 scope 与请求不匹配；拒绝复用/执行");
-    if (sourceLang && sourceLang !== job.sourceLang)
-      throw new Error("已有 jobId 的 sourceLang 与请求不匹配；拒绝复用/执行");
+    // sourceLang 容忍（2026-10-14 真实验收 run-2026-10-14T03-29-57-683Z-1od9g0）：
+    // 模型复用附件 job 时多传 sourceLang="ru"，而该 job 的 sourceLang=null，旧实现一律拒绝，模型白试一轮。
+    // 契约：job 已声明**不同**的非空源语言 → 仍拒绝（防止错语言重跑，既有保护语义不变）；
+    //       job 未声明源语言 → 不拒绝：请求里的 sourceLang 视为「本次显式要求」，但 /api/media-jobs/:id/step
+    //       不消费 sourceLang（handler 的票据 selection 只含 step/sttProvider/targetLang/expectedExecutionRevision，
+    //       见 handler.ts case "POST step"），无从透传 → 忽略并如实说明，绝不改授权/计费/代次语义。
+    if (sourceLang && job.sourceLang) {
+      if (sourceLang !== job.sourceLang)
+        throw new Error("已有 jobId 的 sourceLang 与请求不匹配；拒绝复用/执行");
+    } else if (sourceLang) {
+      reuseNotes.sourceLangNote = `已忽略 sourceLang=${sourceLang}：该任务未声明源语言（jobId=${resolvedJobId}），按该任务既有设置继续`;
+    }
     if (job.stageArtifacts?.transcribe) return formatJobStatus(job, resolvedJobId);
     if (job.status === "running") return formatJobStatus(job, resolvedJobId);
   }
@@ -230,16 +247,22 @@ function formatJobStatus(job: any, jobId: string): any {
 
 /** Model context is independent of the UI summary; never expose authorization tickets. */
 export async function transcribeFunc(input: TranscribeToolInput, thunkApi: any): Promise<any> {
-  const result = await transcribeInternal(input, thunkApi);
+  const reuseNotes: ReuseNotes = {};
+  const result = await transcribeInternal(input, thunkApi, reuseNotes);
   const stepResult = result.rawData?.stepResult ?? result.rawData;
   const artifact = stepResult?.artifacts?.transcribe;
   const fileId = artifact?.fileId ?? stepResult?.fileId;
   const downloadUrl = artifact?.downloadUrl ?? stepResult?.downloadUrl;
+  const sourceLangNote = reuseNotes.sourceLangNote;
   return {
     ...result,
+    // 「已忽略 sourceLang」只作为说明字段：非交互结果附顶层 `note`；交互类结果（授权卡）的控制字段形状
+    // 被媒体确认协议钉死（相对共享构造器只允许多 llmContext 一项），故那一支只走 llmContext.sourceLangNote。
+    ...(sourceLangNote && !("interaction" in (result ?? {})) ? { note: sourceLangNote } : {}),
     llmContext: JSON.stringify({
       status: result.status, jobId: result.jobId, step: "transcribe",
       ...(result.targetLang ? { targetLang: result.targetLang } : {}),
+      ...(sourceLangNote ? { sourceLangNote } : {}),
       artifact: { jobId: result.jobId, type: "transcribe",
         ...(fileId ? { fileId, downloadUrl: downloadUrl ?? null } : {}) },
       ...(result.error ? { error: result.error } : {}),
