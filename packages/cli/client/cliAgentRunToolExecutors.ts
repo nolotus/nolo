@@ -134,6 +134,15 @@ const tailFile = (
 const resolveTodoStore = (deps: CliAgentRunToolExecutorDeps): AgentRunTodoStore =>
   deps.todoStore ?? createFileSystemTodoStore({ env: deps.env, homedir: deps.homedir, fs: deps.fs as any });
 
+const boundedOutputPage = <T>(items: T[], total: number, offset: number, budget = 8 * 1024) => {
+  const bytes = (page: T[]) => new TextEncoder().encode(JSON.stringify({ todos: page, count: page.length, total, hasMore: offset + page.length < total, nextOffset: offset + page.length })).byteLength;
+  if (items.length > 0 && bytes([items[0]]) > budget) {
+    throw new Error("output_item_too_large: first todo exceeds 8 KiB output budget");
+  }
+  while (items.length > 1 && bytes(items) > budget) items.pop();
+  return { items, hasMore: offset + items.length < total, nextOffset: offset + items.length };
+};
+
 const resolveNowMs = (deps: CliAgentRunToolExecutorDeps): number =>
   typeof deps.nowMs === "function" ? deps.nowMs() : Date.now();
 
@@ -626,6 +635,8 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       // opportunistically on the same call; it never touches non-terminal
       // records, so it's safe to run alongside active runs.
       await gcRunRecords(deps);
+      const requestedLimit = typeof args.limit === "number" && Number.isFinite(args.limit) ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 10;
+      const requestedOffset = typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : 0;
       const { runs: records, total, hasMore } = queryRunRecords(
         {
           ...(typeof args.batchId === "string" && args.batchId.trim()
@@ -636,8 +647,8 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             : typeof args.statusFilter === "string" && args.statusFilter.trim()
             ? { status: args.statusFilter.trim() }
             : {}),
-          ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
-          ...(typeof args.offset === "number" ? { offset: args.offset } : {}),
+          limit: requestedLimit,
+          offset: requestedOffset,
         },
         deps,
       );
@@ -646,49 +657,33 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
           runId: record.runId,
           status: record.status,
           agentKey: record.agentKey,
-          ...(record.agentName ? { agentName: record.agentName } : {}),
+          ...(record.agentName ? { agentName: record.agentName.slice(0, 120) } : {}),
+          ...(typeof record.title === "string" ? { title: record.title.slice(0, 160) } : {}),
           ...(record.batchId ? { batchId: record.batchId } : {}),
           pid: record.pid ?? null,
           startedAt: record.startedAt,
         };
       });
+      const outputBudgetBytes = 8 * 1024;
+      const utf8Bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+      const compactRun = (run: any) => ({ ...run, ...(run.agentName ? { agentName: run.agentName.slice(0, 64) } : {}), ...(run.title ? { title: run.title.slice(0, 96) } : {}) });
+      for (let i = 0; i < runs.length; i++) runs[i] = compactRun(runs[i]);
+      const batchIdArg = typeof args.batchId === "string" && args.batchId.trim() ? args.batchId.trim() : undefined;
+      const statusArg = typeof args.status === "string" && args.status.trim() ? args.status.trim() : typeof args.statusFilter === "string" && args.statusFilter.trim() ? args.statusFilter.trim() : undefined;
+      const makeSummary = (items: typeof runs) => {
+        if (!batchIdArg || statusArg && statusArg.toLowerCase() !== "all" || requestedOffset !== 0 || hasMore || items.length !== total || items.length !== records.length) return undefined;
+        const inputs: BatchRunSummary[] = records.slice(0, items.length).map((r) => ({ runId: r.runId, status: r.status, startedAt: r.startedAt, ...(r.agentName ? { agentName: r.agentName.slice(0, 64) } : {}) }));
+        const result = aggregateBatch({ batchId: batchIdArg.slice(0, 96), runs: inputs, now: new Date(resolveNowMs(deps)).toISOString() });
+        return result.summary ? result.summary.slice(0, 1024) : undefined;
+      };
+      const listPayload = (items: typeof runs, summary?: string) => ({ runs: items, count: items.length, total, hasMore: hasMore || items.length < records.length, nextOffset: requestedOffset + items.length, ...(summary ? { batchSummary: summary } : {}) });
+      let summary = makeSummary(runs);
+      while (runs.length > 1 && utf8Bytes(listPayload(runs, summary)) > outputBudgetBytes) { runs.pop(); summary = undefined; }
+      if (runs.length === 1 && utf8Bytes(listPayload(runs, summary)) > outputBudgetBytes) throw new Error("output_item_too_large: run identity exceeds 8 KiB output budget");
+      const outputHasMore = hasMore || runs.length < records.length;
       const labels = agentRunCardLabels();
 
-      // ── D1 接线：list + batchId 时附加批次收敛摘要 ─────────────────
-      // 编排者传 batchId 查询时，在返回前调用 aggregateBatch：批次收敛时
-      // 附加 batchSummary（"3/3 完成"结论式摘要），调用方不必再轮询。
-      // 非 batch 查询不附加，保持原返回形状。
-      const batchIdArg =
-        typeof args.batchId === "string" && args.batchId.trim()
-          ? args.batchId.trim()
-          : undefined;
-      let batchSummary: ReturnType<typeof aggregateBatch> | undefined;
-      if (batchIdArg && records.length > 0) {
-        const batchRuns: BatchRunSummary[] = records.map((r) => ({
-          runId: r.runId,
-          status: r.status,
-          startedAt: r.startedAt,
-          ...(r.agentName ? { agentName: r.agentName } : {}),
-        }));
-        batchSummary = aggregateBatch({
-          batchId: batchIdArg,
-          runs: batchRuns,
-          now: new Date(resolveNowMs(deps)).toISOString(),
-        });
-      }
-
-      return {
-        content: JSON.stringify({
-          runs,
-          count: runs.length,
-          total,
-          hasMore,
-          ...(batchSummary?.summary ? { batchSummary: batchSummary.summary } : {}),
-        }),
-        metadata: {
-          displayData: formatListRunsCard(runs, labels),
-        },
-      };
+      return { content: JSON.stringify(listPayload(runs, summary)), metadata: { displayData: formatListRunsCard(runs, labels) } };
     }
 
     // ── T 接线：action="todo" / "agentRunTodo" 查询 AgentRunTodo 列表 ──────
@@ -731,15 +726,22 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         const wanted = new Set(statusFilter.split(",").map((s) => s.trim()).filter(Boolean));
         enriched = enriched.filter((t) => wanted.has(t.status.toLowerCase()));
       }
+      const todoTotal = enriched.length;
+      const todoLimit = typeof args.limit === "number" && Number.isFinite(args.limit) ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 10;
+      const todoOffset = typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : 0;
+      const todoPage = enriched.slice(todoOffset, todoOffset + todoLimit).map((todo) => ({
+        ...todo,
+        title: typeof todo.title === "string" ? todo.title.slice(0, 160) : todo.title,
+        runIds: todo.runIds.slice(0, 20),
+        ...(todo.runIds.length > 20 ? { omittedRunIdCount: todo.runIds.length - 20 } : {}),
+      }));
+      const boundedTodos = boundedOutputPage(todoPage, todoTotal, todoOffset);
 
       return {
-        content: JSON.stringify({ todos: enriched, count: enriched.length }),
+        content: JSON.stringify({ todos: boundedTodos.items, count: boundedTodos.items.length, total: todoTotal, hasMore: boundedTodos.hasMore, nextOffset: boundedTodos.nextOffset }),
         metadata: {
           displayData: formatListRunsCard(
-            enriched.map((t) => ({
-              agentName: t.title,
-              status: t.status,
-            })),
+            boundedTodos.items.map((t: any) => ({ agentName: t.title, status: t.status })),
             agentRunCardLabels(),
           ),
         },

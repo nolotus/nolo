@@ -169,12 +169,12 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                 limit: {
                     type: "number",
                     description:
-                        "可选。action=list 时限制返回数量，默认 20，上限 200。不带任何参数不会返回全量。",
+                        "可选。local CLI 的 action=list/todo 时限制返回数量，默认 10，上限 50；输出最多 8 KiB，按完整条目分页。server 行为不由此限制。",
                 },
                 offset: {
                     type: "number",
                     description:
-                        "可选。action=list 时跳过前 N 条，配合 limit 翻页。默认 0。",
+                        "可选。action=list/todo 时跳过前 N 条，配合 limit 翻页。默认 0；local CLI 会将非有限或负数规整为 0。",
                 },
             },
             required: ["action"],
@@ -215,7 +215,7 @@ export async function controlAgentRunFunc(
     }
 
     if (action === "todo") {
-        return handleTodo(thunkApi, { status });
+        return handleTodo(thunkApi, { status, limit, offset });
     }
 
     if (action === "append") {
@@ -280,6 +280,7 @@ async function handleList(
         const count = data?.data?.count ?? data?.count ?? runs.length;
         const total = data?.data?.total ?? data?.total ?? count;
         const hasMore = data?.data?.hasMore ?? data?.hasMore ?? false;
+        const nextOffset = data?.data?.nextOffset ?? data?.nextOffset;
         const batchSummary = data?.data?.batchSummary ?? data?.batchSummary;
 
         return {
@@ -288,6 +289,7 @@ async function handleList(
                 count,
                 total,
                 hasMore,
+                ...(typeof nextOffset === "number" ? { nextOffset } : {}),
                 ...(batchSummary ? { batchSummary } : {}),
             },
             displayData: formatListRunsCard(runs),
@@ -301,19 +303,24 @@ async function handleList(
 
 async function handleTodo(
     thunkApi: any,
-    opts: { status?: string }
+    opts: { status?: string; limit?: number; offset?: number }
 ): Promise<{ rawData: any; displayData: string }> {
     try {
         const data = await callToolApi(
             thunkApi,
             "/api/agent/runs/control",
-            { action: "todo", status: opts.status },
+            { action: "todo", status: opts.status, limit: opts.limit ?? 10, offset: opts.offset ?? 0 },
             { withAuth: true }
         );
         const todos = data?.data?.todos ?? data?.todos ?? [];
+        const count = data?.data?.count ?? data?.count ?? todos.length;
+        const total = data?.data?.total ?? data?.total ?? count;
+        const hasMore = data?.data?.hasMore ?? data?.hasMore ?? false;
+        const nextOffset = data?.data?.nextOffset ?? data?.nextOffset ?? ((opts.offset ?? 0) + todos.length);
+        const compact = todos.map((todo: any) => ({ id: todo.id, title: typeof todo.title === "string" ? todo.title.slice(0, 160) : todo.title, status: todo.status, runIds: Array.isArray(todo.runIds) ? todo.runIds.slice(0, 20) : [], ...(todo.latestRunId ? { latestRunId: todo.latestRunId } : {}), ...(todo.latestRunStatus ? { latestRunStatus: todo.latestRunStatus } : {}), updatedAt: todo.updatedAt }));
         return {
-            rawData: { todos },
-            displayData: `Runtime Todo (${todos.length}):\n${JSON.stringify(todos, null, 2)}`,
+            rawData: { todos: compact, count, total, hasMore, nextOffset },
+            displayData: `Runtime Todo (${count}/${total}${hasMore ? ", more" : ""}):\n${compact.map((todo: any) => `${todo.status}: ${todo.title ?? todo.id}`).join("\n")}`,
         };
     } catch (e: any) {
         throw new Error(`controlAgentRun(todo) 失败: ${toErrorMessage(e)}`);
