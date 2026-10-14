@@ -386,6 +386,8 @@ export async function readDialogFunc(args: any, thunkApi: any): Promise<ToolResu
       // 对全量消息做 materialize + 整体 stringify。
       body: JSON.stringify({
         dialogId: resolved.dialogId,
+        // 同作用域已解析出的记录 key：不传则服务端退化为 `dialog-*` 全命名空间扫描。
+        dialogKey: resolved.dbKey,
         limit,
         maxChars: DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS,
       }),

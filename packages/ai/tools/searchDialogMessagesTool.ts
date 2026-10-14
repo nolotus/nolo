@@ -68,6 +68,8 @@ async function fetchDialogMessagesFromServer(args: {
   serverBase: string;
   token?: string;
   dialogId: string;
+  /** 调用方已解析的记录 key；带上可让服务端走 O(1) keyed 读，避免全命名空间扫描。 */
+  dialogKey?: string;
   limit: number;
 }): Promise<DialogMessageSearchRecord[]> {
   const serverBase = args.serverBase.replace(/\/+$/, "");
@@ -79,7 +81,11 @@ async function fetchDialogMessagesFromServer(args: {
       Authorization: `Bearer ${args.token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ dialogId: args.dialogId, limit: args.limit }),
+    body: JSON.stringify({
+      dialogId: args.dialogId,
+      ...(args.dialogKey ? { dialogKey: args.dialogKey } : {}),
+      limit: args.limit,
+    }),
   });
   if (!response.ok) return [];
 
@@ -96,6 +102,7 @@ async function collectBestAvailableDialogMessages(
   dialogId: string,
   thunkApi: any,
   scanLimit: number,
+  dialogKey?: string,
 ): Promise<DialogMessageSearchRecord[]> {
   const localMessages = await collectDialogMessages(db, dialogId);
   const state = thunkApi?.getState?.();
@@ -113,6 +120,7 @@ async function collectBestAvailableDialogMessages(
         serverBase: base,
         token: runtime?.currentToken,
         dialogId,
+        ...(dialogKey ? { dialogKey } : {}),
         limit: scanLimit,
       }).catch(() => [] as DialogMessageSearchRecord[]),
     ),
@@ -204,7 +212,13 @@ export async function searchDialogMessagesFunc(
     1,
     SERVER_SCAN_LIMIT,
   );
-  const messages = await collectBestAvailableDialogMessages(db, dialogId, _thunkApi, scanLimit);
+  const messages = await collectBestAvailableDialogMessages(
+    db,
+    dialogId,
+    _thunkApi,
+    scanLimit,
+    dialogKey,
+  );
   const limit = clampDialogSearchNumber(args.limit, 5, 1, MAX_LIMIT);
   const contextMessages = clampDialogSearchNumber(args.contextMessages, 1, 0, MAX_CONTEXT_MESSAGES);
 
