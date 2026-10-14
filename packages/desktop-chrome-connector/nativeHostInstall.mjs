@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -77,6 +77,11 @@ export function resolveNativeHostInstallPaths({
   // Deliberately the same directory on every platform: the desktop app resolves its connector token
   // from this path (packages/desktop-chrome-connector/chromeConnector.ts) and the two must not drift.
   const supportDir = resolve(home, "Library/Application Support/Nolo/ChromeConnector");
+  // Per-browser wrapper: each manifest must launch a host tagged with its own browser identity (and
+  // port) so a Firefox host never lands on Chrome's endpoint. Chrome keeps the historical name —
+  // the desktop and older installs already point at it.
+  const wrapperName =
+    browser === "firefox" ? "nolo-firefox-native-host" : "nolo-chrome-native-host";
   return {
     connectorRoot,
     browser,
@@ -89,8 +94,24 @@ export function resolveNativeHostInstallPaths({
     ),
     supportDir,
     tokenPath: resolve(supportDir, "token"),
-    wrapperPath: resolve(supportDir, "nolo-chrome-native-host"),
+    wrapperPath: resolve(supportDir, wrapperName),
   };
+}
+
+/**
+ * The RPC port a browser's native host listens on. Chrome retains 38947 (the desktop endpoint's
+ * long-standing contract); Firefox gets 38948 so both can listen simultaneously.
+ *
+ * Override semantics mirror `connectorEndpointForBrowser` in chromeConnector.ts:
+ * `NOLO_CHROME_CONNECTOR_PORT` overrides the Chrome port only; it is deliberately *not* a fallback
+ * for Firefox — setting the Chrome override must not reroute the Firefox host onto Chrome's port.
+ * Firefox honours only `NOLO_FIREFOX_CONNECTOR_PORT`, then its default.
+ */
+export function connectorPortForBrowser({ browser = "chrome", env = process.env } = {}) {
+  if (browser === "firefox") {
+    return Number(env.NOLO_FIREFOX_CONNECTOR_PORT || 38948);
+  }
+  return Number(env.NOLO_CHROME_CONNECTOR_PORT || 38947);
 }
 
 export function installNativeHostManifest({
@@ -115,9 +136,15 @@ export function installNativeHostManifest({
     : "";
   const token = existingToken || randomBytes(32).toString("hex");
   writeFileSync(paths.tokenPath, `${token}\n`, { mode: 0o600 });
+  // Each wrapper pins the host's browser identity + port so the two builds never share an endpoint.
+  const port = connectorPortForBrowser({ browser });
   writeFileSync(
     paths.wrapperPath,
-    `#!/bin/sh\nNOLO_CHROME_CONNECTOR_TOKEN=${JSON.stringify(token)} exec ${JSON.stringify(resolvedNodePath)} ${JSON.stringify(paths.hostPath)}\n`,
+    `#!/bin/sh\n` +
+      `NOLO_CHROME_CONNECTOR_BROWSER=${JSON.stringify(browser)} ` +
+      `NOLO_CHROME_CONNECTOR_TOKEN=${JSON.stringify(token)} ` +
+      `${browser === "firefox" ? `NOLO_FIREFOX_CONNECTOR_PORT=${JSON.stringify(String(port))} ` : ""}` +
+      `exec ${JSON.stringify(resolvedNodePath)} ${JSON.stringify(paths.hostPath)}\n`,
   );
   chmodSync(paths.wrapperPath, 0o755);
 
@@ -145,4 +172,142 @@ export function installNativeHostManifest({
     tokenPath: paths.tokenPath,
     ...paths,
   };
+}
+
+/** Browsers this installer can register a native messaging host for. */
+export const NATIVE_HOST_BROWSERS = ["chrome", "firefox"];
+
+/**
+ * Platforms where a *user-level* native messaging manifest actually works. Windows needs a registry
+ * value (and, for Chrome, an executable launcher), which this installer does not write — see
+ * nativeMessagingHostsDir. Unattended callers check this first so an unsupported platform is a skip
+ * with a reason rather than a per-boot failure log.
+ */
+export const NATIVE_HOST_SUPPORTED_PLATFORMS = ["darwin", "linux"];
+
+/**
+ * A linked git worktree (or a path inside `<checkout>/.worktrees/<name>`) is a throwaway checkout, and
+ * the wrapper this installer writes embeds absolute paths into it: once the worktree is removed, the
+ * browser keeps launching a host script that no longer exists. `nolo chrome install` refuses these for
+ * the same reason (packages/cli/chromeCommands.ts:detectWorktreeCheckout also reports the main
+ * checkout so it can print a fix); this returns just the offending root, for a skip reason.
+ *
+ * Detection: a linked worktree's repo root holds a `.git` *file* (`gitdir: …/worktrees/<name>`); when
+ * that marker is gone the path shape decides, but only when `.worktrees` sits below a real checkout
+ * root — a repository that merely lives under a directory called `.worktrees` is never refused.
+ */
+export function isThrowawayCheckout(root) {
+  const resolvedRoot = resolve(root);
+  let dir = resolvedRoot;
+  let checkoutRoot = null;
+  for (let depth = 0; depth < 8; depth += 1) {
+    const gitEntry = resolve(dir, ".git");
+    if (existsSync(gitEntry)) {
+      let isGitFile = null;
+      try {
+        isGitFile = statSync(gitEntry).isFile();
+      } catch {
+        // Unreadable marker: fall through to the path-based heuristic (fail-safe).
+      }
+      if (isGitFile === true) {
+        try {
+          const match = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitEntry, "utf8"));
+          const gitDir = match ? resolve(dir, match[1].trim()) : null;
+          if (gitDir && gitDir.split(/[\\/]+/).includes("worktrees")) return dir;
+        } catch {
+          // Unreadable .git marker: fall through to the path-based heuristic.
+        }
+      } else if (isGitFile === false) {
+        checkoutRoot = dir;
+      }
+      break;
+    }
+    const parent = resolve(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  const segments = resolvedRoot.split(/[\\/]+/);
+  const markerIndex = segments.indexOf(".worktrees");
+  if (markerIndex <= 0) return null;
+  if (checkoutRoot) {
+    const checkoutDepth = resolve(checkoutRoot).split(/[\\/]+/).length;
+    if (markerIndex < checkoutDepth) return null;
+  }
+  return segments.slice(0, markerIndex + 2).join("/");
+}
+
+/**
+ * Where each target keeps its user profile, used only as evidence that the browser is installed on
+ * this machine. Path existence only: this never reads a profile, and the connector's own token lives
+ * in Nolo's support dir (see resolveNativeHostInstallPaths).
+ *
+ * `chrome` here means Google Chrome, because that is the only Chrome-family directory the installer
+ * writes to; a Chromium-only user is (still) not covered.
+ */
+function browserProfileDirs({ home = process.env.HOME || "", platform = process.platform, browser }) {
+  if (browser === "firefox") {
+    if (platform === "darwin") return [resolve(home, "Library/Application Support/Firefox")];
+    if (platform === "linux") {
+      return [
+        resolve(home, ".mozilla/firefox"),
+        resolve(home, ".config/mozilla/firefox"),
+        resolve(home, "snap/firefox"),
+        resolve(home, ".var/app/org.mozilla.firefox"),
+      ];
+    }
+    return [];
+  }
+  if (platform === "darwin") return [resolve(home, "Library/Application Support/Google/Chrome")];
+  if (platform === "linux") return [resolve(home, ".config/google-chrome")];
+  return [];
+}
+
+export function detectInstalledBrowsers({ home = process.env.HOME || "", platform = process.platform } = {}) {
+  return NATIVE_HOST_BROWSERS.filter((browser) =>
+    browserProfileDirs({ home, platform, browser }).some((dir) => existsSync(dir)),
+  );
+}
+
+/**
+ * Which browsers to register for. An explicit target wins ("all" means every supported browser).
+ * Without one, Chrome stays the default — that is the desktop endpoint's long-standing contract —
+ * and every other detected browser is added on top, so a Firefox user is set up without the CLI.
+ */
+export function resolveNativeHostInstallTargets({ home, platform, browser } = {}) {
+  if (browser === "all") return [...NATIVE_HOST_BROWSERS];
+  if (browser) {
+    if (!NATIVE_HOST_BROWSERS.includes(browser)) {
+      throw new Error(`Unknown native messaging browser target: "${browser}".`);
+    }
+    return [browser];
+  }
+  return [...new Set(["chrome", ...detectInstalledBrowsers({ home, platform })])];
+}
+
+/**
+ * Register the host for several browsers at once. Per-browser failures are collected rather than
+ * thrown: this runs unattended at desktop start-up, and one unsupported platform must not turn into
+ * a desktop app that cannot boot.
+ */
+export function installNativeHostManifests({
+  home,
+  connectorRoot,
+  platform,
+  extensionId,
+  nodePath,
+  browser,
+} = {}) {
+  const installs = [];
+  const errors = [];
+  for (const target of resolveNativeHostInstallTargets({ home, platform, browser })) {
+    try {
+      installs.push(
+        installNativeHostManifest({ home, connectorRoot, platform, extensionId, nodePath, browser: target }),
+      );
+    } catch (error) {
+      errors.push({ browser: target, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { installs, errors };
 }

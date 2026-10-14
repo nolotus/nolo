@@ -1,4 +1,16 @@
 
+## 0.104.0
+
+## 0.104.0 (2026-10-14)
+
+### Features
+
+* **db:** 聚合移植 U24 database（3 个 alpha 提交，文件终态与 alpha 一致） ([6ba03e6](https://github.com/nolotus/bun-nolo/commit/6ba03e637f41f4d7dd47a2758e9d68991fb3c445))
+* **desktop-runtime:** 聚合移植 U21（2 个 alpha 提交，文件终态与 alpha 一致） ([ed02eb2](https://github.com/nolotus/bun-nolo/commit/ed02eb2b45662870d9791644350332aebdc38fca))
+* **integ:** 聚合移植 C18-INTEG（9 个 alpha 提交，文件终态与 alpha 一致） ([d00a4e7](https://github.com/nolotus/bun-nolo/commit/d00a4e7a431e5e750c62c62545ab9eee873f6045))
+* **render:** 聚合移植 U20 render（1 个 alpha 提交，文件终态与 alpha 一致） ([2d9932e](https://github.com/nolotus/bun-nolo/commit/2d9932e2f98257be2420b4005b6ae7dc7b2d9a68))
+
+
 ## 0.103.0
 
 ## 0.103.0 (2026-10-14)

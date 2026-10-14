@@ -354,8 +354,10 @@ export const oauthCredentialUserRange = (userId: string) => ({
 /* ---- User ---- */
 // TODO(keys): 目前 user 相关 key 没有统一的前缀（如 "user-settings-"），
 //             将来如果需要按实体类型/租户范围扫描，可以考虑加前缀做一次轻量重构。
+/** user settings key 后缀：`${userId}-settings`（与 createKey 分隔符一致） */
+export const USER_SETTINGS_KEY_SUFFIX = `${SEPARATOR}settings`;
 export const createUserKey = {
-  settings: (userId: string) => createKey(userId, "settings"),
+  settings: (userId: string) => `${userId}${USER_SETTINGS_KEY_SUFFIX}`,
   profile: (userId: string) => createKey(userId, "profile"),
 };
 
@@ -451,6 +453,23 @@ export const createTokenKey = {
   record: curry((userId: string, timestamp: number) =>
     createKey("token", userId, timestamp.toString())
   ),
+  /**
+   * 单次计费记录：`token/<user>/<timestamp>/<chargeId>`。
+   *
+   * 与 `record` 的唯一区别是把「本次计费自己的唯一 id」作为额外一段拼在末尾
+   * —— 同一用户同一毫秒内的两笔合法计费因此各占一个 key，不再互相覆盖，
+   * 也不会共用同一个账本 txId / 幂等键（`token-<tokenKey>` / `token:<tokenKey>`）
+   * 而被账本判为 duplicate 静默漏扣。
+   *
+   * 兼容性：timestamp 仍是第二段且保持首位排序，因此
+   *   - `rangeOfUser(userId)`（usage/统计等读取路径用的全前缀范围）照常覆盖；
+   *   - `range(userId, ts)` 的 `token/<user>/<ts>` … `token/<user>/<ts+1d>`
+   *     区间同样覆盖新 key（`<ts>-xxx` > `<ts>` 且 < `<ts+1>`），历史数据
+   *     与新数据可以在同一区间里混扫。
+   * 幂等键的稳定性由调用方决定：需要「重试同一笔」时传稳定的 chargeId。
+   */
+  recordForCharge: (userId: string, timestamp: number, chargeId: string) =>
+    createKey("token", userId, timestamp.toString(), encodeURIComponent(chargeId)),
   /** Server provider-call record: retry-stable even when the retry clock changes. */
   recordForStableCall: (userId: string, callId: string) =>
     createKey("token", userId, "call", encodeURIComponent(callId)),
@@ -477,6 +496,39 @@ export const createTokenStatsKey = Object.assign(
     rangeOfUser: (userId: string) => ({
       start: createKey("token", "stats", "day", "user", userId, ""),
       end: createKey("token", "stats", "day", "user", userId, "\uffff"),
+    }),
+  }
+);
+
+/**
+ * 「这笔计费的 day stats 已计入」的幂等标记：`token-charge-stats-<userId>-<chargeKey>`。
+ *
+ * 与 day stats 值在同一次 batchWrite 里落库（见 externalToolCost.applyDayStatsOncePerCharge），
+ * 因此「标记存在」⟺「这笔已计入统计」：账本判 duplicate 的重放只有在该标记缺失时才补计，
+ * 保证「同一 chargeKey 重试任意次 → 只扣一次钱、只计一次 stats」。
+ *
+ * 命名刻意避开两个既有扫描范围，不会被误当成记录或统计条目：
+ *   - usage 明细扫描 `token-<userId>-…`（createTokenKey.rangeOfUser）；
+ *   - day stats 扫描 `token-stats-day-user-<userId>-…`（createTokenStatsKey.rangeOfUser）。
+ * 标记值也不带 timestamp / dateKey / model，按时间过滤的读取路径会直接跳过它。
+ *
+ * 但「不被上面两个范围扫到」也意味着删号不会顺带清掉它——必须用下面自带的
+ * rangeOfUser 显式清理（见 auth/server/delete.ts 的 deleteTokenData），
+ * 否则标记会成为删除死角；残留标记会让该用户被重建后的同一 chargeKey 永远不再计费。
+ *
+ * ⚠️ rangeOfUser 只能当**粗筛**：key 段用 `-` 拼接、userId 段没有边界编码，
+ * `userId = "u"` 的范围会圈住 `"u-next"` 的标记（`token-charge-stats-u-` ≤
+ * `token-charge-stats-u-next-charge-abc` ≤ `token-charge-stats-u-\uffff` 成立）。
+ * 调用方必须再用 `value.userId === userId` 精确筛选后才删（旧值缺 userId 就不删）。
+ */
+export const createTokenStatsAppliedKey = Object.assign(
+  (userId: string, chargeKey: string) =>
+    createKey("token", "charge-stats", userId, encodeURIComponent(chargeKey)),
+  {
+    /** 某个用户的全部计费幂等标记范围：token-charge-stats-<userId>-* */
+    rangeOfUser: (userId: string) => ({
+      start: createKey("token", "charge-stats", userId, ""),
+      end: createKey("token", "charge-stats", userId, "\uffff"),
     }),
   }
 );
