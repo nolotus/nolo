@@ -54,7 +54,7 @@ interface CategorySectionProps {
   categoryName: string;
   items: SpaceContent[];
   /**
-   * 子对话（parentDialogId 非空且 !== 自身 id）按 parentDialogId 分组的 map（key = parentDialogId，即父对话的 id）。
+   * 子对话按 parentDialogId 分组的 map（key = parentDialogId，即父对话的 id）。
    * 侧边栏用它把子对话折叠到父对话下。父对话通过 extractCustomId(contentKey)
    * 提取 id 后在此 map 里查子对话。
    */
@@ -278,6 +278,7 @@ const CategorySection: React.FC<CategorySectionProps> = ({
                     contentKey={item.contentKey}
                     type={item.type}
                     title={item.title}
+                    fileCategory={item.fileCategory ?? null}
                     categoryId={item.categoryId ?? undefined}
                     isActive={isRoutableContentActive({
                       contentKey: item.contentKey,
@@ -292,21 +293,6 @@ const CategorySection: React.FC<CategorySectionProps> = ({
                     onMenuAnchorChange={handleMenuAnchorChange}
                     editSignal={editSignal?.key === item.contentKey ? editSignal.nonce : undefined}
                     pinned={Boolean(item.pinned)}
-                    pinAction={
-                      currentSpaceId
-                        ? {
-                            pinned: Boolean(item.pinned),
-                            onToggle: () =>
-                              (dispatch as any)(
-                                (updateContentPinned as any)({
-                                  spaceId: currentSpaceId,
-                                  contentKey: item.contentKey,
-                                  pinned: !item.pinned,
-                                })
-                              ),
-                          }
-                        : undefined
-                    }
                     childCount={(item as FlatRow).__childCount}
                     isChildCollapsed={!expandedParents.has(item.contentKey)}
                     onToggleChildCollapse={
@@ -352,7 +338,21 @@ const CategorySection: React.FC<CategorySectionProps> = ({
             showDownloadAction={
               activeItem.type === "file" || activeItem.type === "image"
             }
-            fileCategory={activeItem.fileCategory ?? null}
+            pinAction={
+              currentSpaceId
+                ? {
+                    pinned: Boolean(activeItem.pinned),
+                    onToggle: () =>
+                      (dispatch as any)(
+                        (updateContentPinned as any)({
+                          spaceId: currentSpaceId,
+                          contentKey: activeItem.contentKey,
+                          pinned: !activeItem.pinned,
+                        })
+                      ),
+                  }
+                : undefined
+            }
             menuAnchorEl={menuAnchorEl}
             onEditTitle={() => {
               setEditSignal({ key: activeItem.contentKey, nonce: Date.now() });

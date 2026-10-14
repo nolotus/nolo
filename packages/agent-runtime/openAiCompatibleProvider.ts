@@ -32,7 +32,7 @@ import {
 } from "core/chat/bareImageUrlShape";
 import { providerHttpFailure } from "core/chat/providerFailureMessage";
 import {
-  resolveReasoningReplayOptions,
+  shouldReplayReasoningContentForOutbound,
   shouldStripReasoningContentForOutbound,
   toOpenAiCompatibleMessages,
 } from "./openAiCompatibleMessages";
@@ -52,21 +52,6 @@ import {
   finalizeAccumulatedToolCalls,
 } from "./toolCallAccumulator";
 import { sanitizeForOutbound } from "./outboundHistorySanitize";
-import type { ToolArgsProjectionStats } from "./outboundHistorySanitize";
-import {
-  applyShapingCounts,
-  attachProjectionFacts,
-  classifyOutboundErrorCategory,
-  createOutboundDiagnosticCall,
-  createRequestFacts,
-  createRequestShapingCounts,
-  resolveOutboundDiagnosticSink,
-  writeThinkingFacts,
-  type OutboundDiagnosticsOption,
-  type OutboundRequestFacts,
-  type RequestShapingCounts,
-} from "./outboundRequestDiagnostics";
-import { isAbortError } from "core/abortError";
 import { buildResponsesRequestBody } from "../integrations/openai/responsesRequestBody";
 import { normalizeChatCompletionsBodyForProvider } from "../integrations/openai/providerBodyCompatibility";
 import {
@@ -97,6 +82,17 @@ export type OpenAiCompatibleProviderConfig = {
 
 type OpenAiCompatibleTool = Record<string, unknown>;
 
+/**
+ * Placeholder injected for the DeepSeek thinking-mode replay contract
+ * (shouldReplayReasoningContentForOutbound). Non-empty on purpose: whether
+ * the upstream validator accepts an empty string is unverified, while every
+ * normally accepted response on this channel has been observed to carry
+ * non-empty reasoning — so matching that shape is the conservative choice
+ * (evidence in openAiCompatibleMessages.ts).
+ */
+const REASONING_REPLAY_PLACEHOLDER =
+  "(reasoning not captured for this turn)";
+
 export function isOpenAiResponsesEndpoint(endpoint: string): boolean {
   return endpoint.includes("/responses");
 }
@@ -116,13 +112,6 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   stream?: boolean;
   /** Stable conversation id (dialogId, else agent key); sent as x-opencode-session to OpenCode Go only. */
   sessionId?: string;
-  /**
-   * 可选出站诊断收集：shaping 计数（本次实际注入的占位/剥离）与 request facts
-   * （thinking 枚举取自最终 normalized body）。纯数字与枚举，**绝不进入 request
-   * body**，也不改变任何投影行为；缺省时行为与现状逐字节相同。
-   */
-  shapingCounts?: RequestShapingCounts;
-  requestFacts?: OutboundRequestFacts;
 }) {
   const isResponses = resolveOpenAiCompatibleWire(args.providerConfig) === "responses";
   const shouldStripReasoning = shouldStripReasoningContentForOutbound(
@@ -136,37 +125,28 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   // upstream accepts an empty string is unverified, and a non-empty value
   // matches the shape already observed to be accepted on this channel, so it
   // is the conservative choice.
-  // Whether to inject is decided in one place for every outbound seam —
-  // resolveReasoningReplayOptions() owns the strip-vs-replay precedence
-  // (a provider that rejects string reasoning_content would reject the
-  // placeholder too, so stripping wins there). Do not re-assemble the check
-  // here; a new seam must call the same helper.
-  //
+  // Mutually exclusive with shouldStripReasoning by construction (provider
+  // set disjoint); if both somehow matched, stripping wins — a provider that
+  // rejects string reasoning_content would reject the placeholder too.
+  const shouldReplayReasoning = shouldReplayReasoningContentForOutbound(
+    args.providerConfig.provider,
+    args.providerConfig.model,
+  );
   // Sanitize cross-wire history here so this builder is the single seam — any
   // caller (internal `send` or a future direct importer) is covered without
   // remembering to sanitize separately. Downgrades tool_calls not in the
   // current `tools` array to text and pairs tool_calls with results, so strict
   // gateways (ollama) accept the replayed history instead of 400-ing.
   //
-  // Ordering note: sanitize runs BEFORE conversion. A turn whose calls were
-  // *partially* downgraded keeps its surviving tool_calls and is injected here
-  // as before; a turn whose calls were *fully* downgraded to plain text no
-  // longer keeps tool_calls, so it carries an internal non-enumerable
-  // downgraded-origin marker (outboundHistorySanitize) that the placeholder
-  // guard consults — hypothesis (unproven): the upstream may still validate
-  // that replayed round as a tool turn, so injecting the placeholder stays a
-  // defensive compatibility measure. The marker never reaches the wire (see
-  // the leak assertions in openAiCompatibleProvider.test.ts /
-  // openAiCompatibleMessages.test.ts).
+  // Ordering note: sanitize runs BEFORE conversion, so the placeholder only
+  // fills turns that still carry tool_calls — turns already downgraded to
+  // plain text never get a spurious reasoning_content.
   const sanitizedMessages = sanitizeForOutbound(args.messages, args.tools);
   const messages = toOpenAiCompatibleMessages(sanitizedMessages, {
     stripReasoningContent: shouldStripReasoning,
-    ...(args.shapingCounts ? { shapingCounts: args.shapingCounts } : {}),
-    ...resolveReasoningReplayOptions(
-      args.providerConfig.provider,
-      args.providerConfig.model,
-      shouldStripReasoning,
-    ),
+    ...(shouldReplayReasoning && !shouldStripReasoning
+      ? { replayReasoningPlaceholder: REASONING_REPLAY_PLACEHOLDER }
+      : {}),
   });
   const rawBody: Record<string, any> = {
     model: args.providerConfig.model,
@@ -205,13 +185,6 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
         model: args.providerConfig.model,
         endpoint: args.providerConfig.endpoint,
       });
-
-  // 诊断收集：thinking / reasoning_effort 取自**最终 normalized body**（协议判定
-  // 之后），shaping 计数取自本次实际发生的注入/剥离。两者都不进入 wire body。
-  if (args.requestFacts) {
-    applyShapingCounts(args.requestFacts, args.shapingCounts);
-    writeThinkingFacts(args.requestFacts, body);
-  }
 
   const endpoint = args.providerConfig.endpoint;
   const headers: Record<string, string> = {
@@ -392,14 +365,6 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
    * `body` 仅在非 2xx 时提供（已解析的 JSON，失败时为原始文本）。
    */
   onHttpResult?: (result: { status: number; body?: unknown }) => Promise<void> | void;
-  /**
-   * 出站关联诊断（可选、默认关闭）。显式给 sink 或 `enabled: true` 开启；
-   * 缺省时回落 `NOLO_OUTBOUND_DIAGNOSTICS=1`（server / CLI）。浏览器侧只走
-   * 显式 options，不读 Node 环境变量。诊断 fail-open，绝不影响请求结果。
-   */
-  outboundDiagnostics?: OutboundDiagnosticsOption;
-  /** 毒丸投影降级统计（有观测时透传；缺省记 `observed: false`）。 */
-  projectionStats?: ToolArgsProjectionStats;
 }): Promise<AgentRuntimeResult> {
   const isResponses = resolveOpenAiCompatibleWire(args.providerConfig) === "responses";
 
@@ -407,29 +372,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   const timingTracker = createProviderCallTimingTracker();
   const observeMeaningful = () => observeMeaningfulProviderResponse(timingTracker);
 
-  // 出站诊断：每个真实 attempt 各自 dispatch / http-result / terminal。
-  const diagnosticSink = resolveOutboundDiagnosticSink(args.outboundDiagnostics);
-  const diagnosticCall = diagnosticSink
-    ? createOutboundDiagnosticCall({
-        sink: diagnosticSink,
-        seam: "local-runtime",
-        host: args.outboundDiagnostics?.host ?? "client",
-        wire: isResponses ? "responses" : "chat.completions",
-        provider: args.providerConfig.provider,
-        model: args.providerConfig.model,
-        callId: args.outboundDiagnostics?.callId,
-      })
-    : undefined;
-  let diagnosticAttempt = 0;
-  const terminalIfEnabled = (
-    outcome: Parameters<NonNullable<typeof diagnosticCall>["terminal"]>[1],
-  ) => diagnosticCall?.terminal(diagnosticAttempt, outcome);
-
   const send = async (apiKey: string) => {
-    diagnosticAttempt += 1;
-    // shaping facts 与本次 body 一一对应（每次 send 重新构造请求体）。
-    const requestFacts = diagnosticCall ? createRequestFacts() : undefined;
-    if (requestFacts) attachProjectionFacts(requestFacts, args.projectionStats);
     const request = buildOpenAiCompatibleChatCompletionRequest({
       providerConfig:
         apiKey === args.providerConfig.apiKey
@@ -439,10 +382,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
       tools: args.tools,
       stream: args.stream,
       sessionId: args.sessionId,
-      ...(requestFacts ? { requestFacts } : {}),
-      ...(requestFacts ? { shapingCounts: createRequestShapingCounts() } : {}),
     });
-    if (requestFacts) diagnosticCall?.dispatch(diagnosticAttempt, requestFacts);
     return args.fetchImpl(request.url, {
       ...request.init,
       ...(args.signal ? { signal: args.signal } : {}),
@@ -453,32 +393,14 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   if (args.resolveApiKey) {
     apiKey = (await args.resolveApiKey({ force: false })) ?? apiKey;
   }
-  let res: Response;
-  try {
-    res = await send(apiKey);
-  } catch (error) {
-    terminalIfEnabled(isAbortError(error) ? "aborted" : "network-error");
-    throw error;
-  }
+  let res = await send(apiKey);
 
   // token 可能在服务端被提前失效，或在本轮请求发出前刚好过期。强刷一次重试一次。
   if (res.status === 401 && args.resolveApiKey) {
     const refreshed = await args.resolveApiKey({ force: true });
     if (refreshed && refreshed !== apiKey) {
-      // 被刷新的那次 attempt 独立留痕：401 不能被最终 200 覆盖。
-      diagnosticCall?.httpResult(diagnosticAttempt, {
-        status: res.status,
-        headers: res.headers,
-        errorCategory: "authentication",
-      });
-      terminalIfEnabled("http-error");
       await res.body?.cancel().catch(() => {});
-      try {
-        res = await send(refreshed);
-      } catch (error) {
-        terminalIfEnabled(isAbortError(error) ? "aborted" : "network-error");
-        throw error;
-      }
+      res = await send(refreshed);
     }
   }
 
@@ -490,13 +412,6 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
     } catch {
       // keep raw text
     }
-    // 错误类别只用**已读取**的错误文本在内存中分类，输出枚举；不回读响应。
-    diagnosticCall?.httpResult(diagnosticAttempt, {
-      status: res.status,
-      headers: res.headers,
-      errorCategory: classifyOutboundErrorCategory(res.status, raw),
-    });
-    terminalIfEnabled("http-error");
     await args.onHttpResult?.({ status: res.status, body: parsed });
     throw providerHttpFailure({
       label: "local provider",
@@ -506,10 +421,6 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
     });
   }
 
-  diagnosticCall?.httpResult(diagnosticAttempt, {
-    status: res.status,
-    headers: res.headers,
-  });
   await args.onHttpResult?.({ status: res.status });
 
   const contentType = res.headers.get("content-type") ?? "";
@@ -521,34 +432,12 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
       result.usage,
       finalizeProviderCallTiming(timingTracker),
     );
-    // 2xx 且流/响应体消费到底才算 completed。
-    terminalIfEnabled("completed");
     return { ...result, ...(usage ? { usage } : {}) };
   };
 
-  try {
-      if (isEventStream) {
-        if (isResponses) {
-          const streamed = await readResponsesSseCompletion({
-          response: res,
-          ...(args.onTextDelta ? { onTextDelta: args.onTextDelta } : {}),
-          ...(args.onReasoningDelta ? { onReasoningDelta: args.onReasoningDelta } : {}),
-          onMeaningfulDelta: observeMeaningful,
-        });
-        return withTiming({
-          content: streamed.content,
-          model: args.providerConfig.model,
-          provider: args.providerConfig.provider,
-          ...(streamed.tool_calls ? { tool_calls: streamed.tool_calls } : {}),
-          ...(streamed.reasoning_content ? { reasoning_content: streamed.reasoning_content } : {}),
-          ...(streamed.usage ? { usage: streamed.usage } : {}),
-          ...(streamed.stream_complete ? { stream_complete: true } : {}),
-          ...(streamed.finish_reason ? { finish_reason: streamed.finish_reason } : {}),
-          trace: args.messages,
-        });
-      }
-  
-      const streamed = await readOpenAiCompatibleSseCompletion({
+  if (isEventStream) {
+    if (isResponses) {
+      const streamed = await readResponsesSseCompletion({
         response: res,
         ...(args.onTextDelta ? { onTextDelta: args.onTextDelta } : {}),
         ...(args.onReasoningDelta ? { onReasoningDelta: args.onReasoningDelta } : {}),
@@ -566,33 +455,45 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
         trace: args.messages,
       });
     }
-  
-    const raw = await res.text().catch(() => "");
-    let data: any = {};
-    try {
-      data = raw ? JSON.parse(raw) : {};
-    } catch {
-      data = {};
-    }
-  
-    if (isResponses) {
-      return withTiming(parseOpenAiCompatibleResponsesResponse({
-        providerConfig: args.providerConfig,
-        data,
-        trace: args.messages,
-      }));
-    }
-  
-    return withTiming(parseOpenAiCompatibleChatCompletionResponse({
+
+    const streamed = await readOpenAiCompatibleSseCompletion({
+      response: res,
+      ...(args.onTextDelta ? { onTextDelta: args.onTextDelta } : {}),
+      ...(args.onReasoningDelta ? { onReasoningDelta: args.onReasoningDelta } : {}),
+      onMeaningfulDelta: observeMeaningful,
+    });
+    return withTiming({
+      content: streamed.content,
+      model: args.providerConfig.model,
+      provider: args.providerConfig.provider,
+      ...(streamed.tool_calls ? { tool_calls: streamed.tool_calls } : {}),
+      ...(streamed.reasoning_content ? { reasoning_content: streamed.reasoning_content } : {}),
+      ...(streamed.usage ? { usage: streamed.usage } : {}),
+      ...(streamed.stream_complete ? { stream_complete: true } : {}),
+      ...(streamed.finish_reason ? { finish_reason: streamed.finish_reason } : {}),
+      trace: args.messages,
+    });
+  }
+
+  const raw = await res.text().catch(() => "");
+  let data: any = {};
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    data = {};
+  }
+
+  if (isResponses) {
+    return withTiming(parseOpenAiCompatibleResponsesResponse({
       providerConfig: args.providerConfig,
       data,
       trace: args.messages,
     }));
-  } catch (error) {
-    // 2xx 不等于流成功：流体中途失败记 stream-error，绝不记 completed。
-    terminalIfEnabled(
-      args.signal?.aborted || isAbortError(error) ? "aborted" : "stream-error",
-    );
-    throw error;
   }
+
+  return withTiming(parseOpenAiCompatibleChatCompletionResponse({
+    providerConfig: args.providerConfig,
+    data,
+    trace: args.messages,
+  }));
 }

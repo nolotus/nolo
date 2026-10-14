@@ -32,16 +32,6 @@ import {
   type ToolCallTextParseState,
 } from "agent-runtime/toolCallTextParser";
 import { EMPTY_ASSISTANT_REPAIR_PROMPT } from "agent-runtime/emptyAssistantRepair";
-import {
-  classifyOutboundErrorCategory,
-  createOutboundDiagnosticCall,
-  deriveRequestFactsFromBody,
-  resolveOutboundDiagnosticSink,
-  resolveOutboundWire,
-  type OutboundDiagnosticCall,
-  type OutboundDiagnosticsOption,
-  type OutboundTerminalOutcome,
-} from "agent-runtime/outboundRequestDiagnostics";
 import { selectCurrentServer } from "app/settings/serverSelectors";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { getApiEndpoint } from "ai/llm/providers";
@@ -54,8 +44,7 @@ import { extractCustomId } from "core/prefix";
 
 import { performFetchRequest } from "./fetchUtils";
 import { createSSEParser } from "./parseMultilineSSE";
-import { classifyApiError, classifyGenerationError } from "./parseApiError";
-import { normalizeChatCompletionsBodyForProvider } from "integrations/openai/providerBodyCompatibility";
+import { parseApiError } from "./parseApiError";
 import { updateTotalUsage } from "./updateTotalUsage";
 import { accumulateToolCallChunks } from "./accumulateToolCallChunks";
 import {
@@ -128,6 +117,9 @@ function getStreamErrorMessage(data: any): string {
     asOptionalTrimmedString(data?.code);
   if (code) return code;
 
+  const type = asOptionalTrimmedString(data?.error?.type);
+  if (type) return type;
+
   return "Unknown error";
 }
 
@@ -156,7 +148,6 @@ function getChoiceFinishErrorMessage(data: any, choice: any): string | null {
   if (messageContent) return messageContent;
   return null;
 }
-
 
 /** 单次流式请求过程中的全部中间状态（显式 state） */
 type StreamState = {
@@ -342,7 +333,11 @@ function buildRequestBodyWithTools(
   const tools = prepareTools(rawTools, { provider: agentConfig.provider });
   if (!tools.length) return baseBody;
 
-  return { ...baseBody, tools, tool_choice: baseBody.tool_choice ?? "auto" };
+  return {
+    ...baseBody,
+    tools,
+    tool_choice: baseBody.tool_choice ?? "auto",
+  };
 }
 
 /**
@@ -409,7 +404,7 @@ async function finalizeStream(
  * 写入明确的错误文案 + metadata.error 标记,让用户知道该重试。
  */
 const EMPTY_UPSTREAM_STREAM_MESSAGE =
-  "模型返回了空响应，请联系管理员检查服务响应。";
+  "模型返回了空响应，请重试或切换其他模型";
 
 function markEmptyCompletionAsError(
   state: StreamState,
@@ -446,7 +441,6 @@ function markEmptyCompletionAsError(
 function markStreamMessageAborted(
   ctx: FinalizeContext,
   errorMessage: string,
-  classification: { category: string; message: string; retryable: boolean; actions: readonly string[]; diagnostic: Record<string, unknown> } = classifyGenerationError(errorMessage),
 ): void {
   const base = ctx.messageMetadata ?? {};
   const previousMetadata =
@@ -455,15 +449,8 @@ function markStreamMessageAborted(
       : {};
   ctx.messageMetadata = {
     ...base,
-    errorMeta: {
-      kind: classification.category,
-      summary: classification.message,
-      retryable: classification.retryable,
-      actions: classification.actions,
-    },
     metadata: {
       ...previousMetadata,
-      providerError: { category: classification.category, ...classification.diagnostic },
       error: true,
       message: errorMessage,
     },
@@ -510,8 +497,6 @@ function applyDelta(
       ...next,
       accumulatedToolCalls: accumulated,
       assistantToolCalls: accumulated.map((call: any) => ({
-        ...(call.thought_signature !== undefined ? { thought_signature: call.thought_signature } : {}),
-        ...(call.extra_content ? { extra_content: call.extra_content } : {}),
         id: call.id,
         type: "function",
         function: {
@@ -746,8 +731,6 @@ function syncAssistantToolCallsAfterSanitize(
   const base = Array.isArray(state.assistantToolCalls)
     ? state.assistantToolCalls
     : state.accumulatedToolCalls.map((call: any) => ({
-        ...(call.thought_signature !== undefined ? { thought_signature: call.thought_signature } : {}),
-        ...(call.extra_content ? { extra_content: call.extra_content } : {}),
         id: call.id,
         type: "function",
         function: {
@@ -1015,7 +998,6 @@ export const sendOpenAICompletionsRequest = async ({
   disableToolsForThisRequest = false,
   quickChatPerfStartedAt,
   streamThrottlerOptions,
-  outboundDiagnostics,
 }: {
   bodyData: any;
   agentConfig: any;
@@ -1026,11 +1008,6 @@ export const sendOpenAICompletionsRequest = async ({
   disableToolsForThisRequest?: boolean;
   quickChatPerfStartedAt?: number;
   streamThrottlerOptions?: StreamThrottlerOptions;
-  /**
-   * 出站关联诊断（可选、默认关闭）。浏览器侧**只走这里**注入开关/sink，
-   * 不读 Node 环境变量；缺省时不产生任何额外扫描与日志。
-   */
-  outboundDiagnostics?: OutboundDiagnosticsOption;
 }): Promise<CompletionMeta> => {
   const { dispatch, getState, signal: thunkSignal } = thunkApi;
 
@@ -1054,12 +1031,12 @@ export const sendOpenAICompletionsRequest = async ({
 
   dispatch(addActiveController({ messageId, controller, dialogKey }));
 
-  const requestBody: any = await inlineImageUrlsForCustomProvider(
-    normalizeChatCompletionsBodyForProvider({
-      body: buildRequestBodyWithTools(bodyData, agentConfig, disableToolsForThisRequest),
-      provider: agentConfig.provider ?? "",
-      model: agentConfig.model,
-    }),
+  const requestBody = await inlineImageUrlsForCustomProvider(
+    buildRequestBodyWithTools(
+      bodyData,
+      agentConfig,
+      disableToolsForThisRequest
+    ),
     {
       shouldInline: shouldInlineImageUrlsForAgent(agentConfig),
     },
@@ -1085,7 +1062,6 @@ export const sendOpenAICompletionsRequest = async ({
   let lastFinishReason: string | null = null;
   let activeMessageMetadata = messageMetadata;
   // 空轮自动重试只放行一次(与 agent-runtime localLoop / server loop 语义对齐)。
-
   let emptyCompletionRetryUsed = false;
 
   const throttler = createStreamThrottler((latestState) => {
@@ -1111,46 +1087,6 @@ export const sendOpenAICompletionsRequest = async ({
     billingFailed: streamState.billingFailed,
   });
 
-  // 出站关联诊断（默认关闭）。本 seam 负责三阶段配对：
-  // dispatch（请求发出）/ http-result（HTTP 结果）/ terminal（流消费收尾）。
-  // 每次**真实出站**各自留痕（含空轮 repair 的第二次请求），重试绝不覆盖前一次；
-  // 2xx 不等于流成功。
-  const diagnosticSink = resolveOutboundDiagnosticSink(outboundDiagnostics);
-  let diagnosticCall: OutboundDiagnosticCall | undefined;
-  let diagnosticOutcome: OutboundTerminalOutcome = "completed";
-  let diagnosticStreamStarted = false;
-  // 真实出站次数（1-based）与「当前 attempt 是否已经收尾」。
-  let diagnosticAttemptCount = 0;
-  let diagnosticCurrentAttempt = 0;
-  let diagnosticCurrentAttemptClosed = false;
-
-  /** 开始一次真实出站：分配真实编号，dispatch 该 attempt 自己的 facts。 */
-  const beginDiagnosticAttempt = (attemptBody: unknown): number => {
-    if (!diagnosticCall) return 0;
-    diagnosticAttemptCount += 1;
-    diagnosticCurrentAttempt = diagnosticAttemptCount;
-    diagnosticCurrentAttemptClosed = false;
-    diagnosticStreamStarted = false;
-    diagnosticOutcome = "completed";
-    // 本 seam 只能从最终 wire body 反推 facts：placeholder / strip 的「本次注入」只有
-    // 塑形直连点能观测，这里记 null（未观测），不靠占位字符串相等反推。
-    diagnosticCall.dispatch(
-      diagnosticCurrentAttempt,
-      deriveRequestFactsFromBody(attemptBody),
-    );
-    return diagnosticCurrentAttempt;
-  };
-
-  /** 给指定 attempt 记终态（每个 attempt 只收尾一次）。 */
-  const closeDiagnosticAttempt = (
-    attempt: number,
-    outcome: OutboundTerminalOutcome,
-  ): void => {
-    if (!diagnosticCall || attempt <= 0) return;
-    diagnosticCall.terminal(attempt, outcome);
-    if (attempt === diagnosticCurrentAttempt) diagnosticCurrentAttemptClosed = true;
-  };
-
   try {
     if (!parentMessageId) {
       dispatch(
@@ -1172,21 +1108,6 @@ export const sendOpenAICompletionsRequest = async ({
     }
 
     const api = getApiEndpoint(agentConfig);
-    diagnosticCall = diagnosticSink
-      ? createOutboundDiagnosticCall({
-          sink: diagnosticSink,
-          seam: "chat",
-          host: outboundDiagnostics?.host ?? "client",
-          wire: resolveOutboundWire(api),
-          provider: agentConfig?.provider,
-          model: agentConfig?.model,
-          callId: outboundDiagnostics?.callId,
-        })
-      : undefined;
-    if (diagnosticCall) {
-      // 第一次真实出站：attempt 1（facts 取自本次实际请求体）。
-      beginDiagnosticAttempt(requestBody);
-    }
     const token = selectIdentityToken(getState() as RootState) ?? "";
     logQuickChatPerfStage(quickChatPerfStartedAt, "openai-completions-fetch-starting", {
       api,
@@ -1248,58 +1169,7 @@ export const sendOpenAICompletionsRequest = async ({
     }
 
     if (!response.ok) {
-      const rawBody = await response.text();
-      let errorData: any;
-      try { errorData = JSON.parse(rawBody); } catch { errorData = { message: rawBody }; }
-      // HTTP 结果与本次 attempt 配对；错误类别只用**已读取**的文本在内存中
-      // 分类，输出枚举，不回读响应、不从正文抠 ID。
-      diagnosticOutcome = "http-error";
-      diagnosticCall?.httpResult(diagnosticCurrentAttempt, {
-        status: response.status,
-        headers: response.headers,
-        errorCategory: classifyOutboundErrorCategory(response.status, rawBody),
-      });
-      const errorJson = errorData?.error ?? errorData;
-      const apiErrorMessage =
-        errorJson?.message || errorJson?.msg || (typeof rawBody === "string" ? rawBody : "") || `状态码 ${response.status} ${response.statusText}`;
-      const apiErrorCode = errorJson?.code || `E${response.status}`;
-
-      const legacyClassified = classifyApiError({
-        status: response.status,
-        statusText: response.statusText,
-        message: apiErrorMessage,
-        body: rawBody,
-        code: apiErrorCode,
-      });
-
-      let classified: {
-        category: string;
-        message: string;
-        retryable: boolean;
-        actions: any[];
-        diagnostic: Record<string, any>;
-      };
-      if (
-        legacyClassified.kind === "context_overflow" ||
-        legacyClassified.kind === "context_too_large" ||
-        legacyClassified.kind === "auth" ||
-        legacyClassified.code === "MISSING_PROVIDER_API_KEY"
-      ) {
-        classified = {
-          category: legacyClassified.kind,
-          message: legacyClassified.message,
-          retryable: legacyClassified.retryable ?? false,
-          actions: (legacyClassified.actions as any[]) ?? [],
-          diagnostic: {
-            ...(legacyClassified.code ? { code: legacyClassified.code } : {}),
-            status: response.status,
-          },
-        };
-      } else {
-        classified = classifyGenerationError(errorData, response.status);
-      }
-      const errorMessage = classified.message;
-      markStreamMessageAborted(finalizeCtx, errorMessage, classified);
+      const errorMessage = await parseApiError(response);
       streamState = {
         ...streamState,
         contentBuffer: appendTextChunk(
@@ -1312,15 +1182,8 @@ export const sendOpenAICompletionsRequest = async ({
       return buildMeta();
     }
 
-    diagnosticStreamStarted = true;
-    diagnosticCall?.httpResult(diagnosticCurrentAttempt, {
-      status: response.status,
-      headers: response.headers,
-    });
-
     reader = response.body?.getReader();
     if (!reader) {
-      diagnosticOutcome = "stream-error";
       streamState = markEmptyCompletionAsError(streamState, finalizeCtx);
       streamState = await finalizeStream(streamState, finalizeCtx);
       return buildMeta();
@@ -1352,35 +1215,22 @@ export const sendOpenAICompletionsRequest = async ({
           !signal.aborted
         ) {
           emptyCompletionRetryUsed = true;
-          // 首轮 2xx 但零产出 = 业务流失败：先给 attempt 1 收尾（stream-error），再开
-          // 第二次真实请求。两次各自留痕，绝不压成一次、也不覆盖前一次的编号。
-          closeDiagnosticAttempt(diagnosticCurrentAttempt, "stream-error");
-          const repairRequestBody = {
-            ...requestBody,
-            messages: [
-              ...(requestBody.messages ?? []),
-              { role: "user", content: EMPTY_ASSISTANT_REPAIR_PROMPT },
-            ],
-          };
-          const repairAttempt = beginDiagnosticAttempt(repairRequestBody);
           const retryResponse = await performFetchRequest({
             agentConfig,
             api,
-            bodyData: repairRequestBody,
+            bodyData: {
+              ...requestBody,
+              messages: [
+                ...(requestBody.messages ?? []),
+                { role: "user", content: EMPTY_ASSISTANT_REPAIR_PROMPT },
+              ],
+            },
             currentServer: selectCurrentServer(getState() as RootState),
             signal,
             token,
             dialogId,
           });
-          diagnosticCall?.httpResult(repairAttempt, {
-            status: retryResponse.status,
-            headers: retryResponse.headers,
-            ...(retryResponse.ok
-              ? {}
-              : { errorCategory: classifyOutboundErrorCategory(retryResponse.status) }),
-          });
           if (retryResponse.ok && retryResponse.body) {
-            diagnosticStreamStarted = true;
             // 首轮零产出,直接重置流状态读新流;UI 上的流式消息尚无内容。
             // parser/decoder 的闭包缓冲一并重置:首轮若在干净 close 前残留了
             // 半截 SSE 报文或多字节字符,不能拼接到第二轮的首个 chunk 上。
@@ -1391,16 +1241,7 @@ export const sendOpenAICompletionsRequest = async ({
             reader = retryResponse.body.getReader();
             continue;
           }
-          // 重试请求本身失败(非 2xx / 无 body):落入既有空响应错误路径 → 失败终态。
-          diagnosticOutcome = retryResponse.ok ? "stream-error" : "http-error";
-        } else if (
-          producedNothing &&
-          !signal.aborted &&
-          !streamState.hasHandedOff &&
-          !streamState.alreadyFinalized
-        ) {
-          // 空响应落到既有 markEmptyCompletionAsError 错误路径：2xx 不等于成功。
-          diagnosticOutcome = "stream-error";
+          // 重试请求本身失败:落入既有空响应错误路径。
         }
         const completion = await handleStreamCompletion(
           streamState,
@@ -1456,11 +1297,7 @@ export const sendOpenAICompletionsRequest = async ({
 
           if (data.error) {
             throttler.flush();
-            // 2xx 之后的流内业务错误：本次 attempt 的终态是失败，不是 completed。
-            diagnosticOutcome = "stream-error";
-            const classified = classifyGenerationError(data);
-            markStreamMessageAborted(finalizeCtx, classified.message, classified);
-            const errorMsg = classified.message;
+            const errorMsg = `Error: ${formatStreamErrorMessage(data)}`;
             streamState = {
               ...streamState,
               contentBuffer: appendTextChunk(
@@ -1511,34 +1348,22 @@ export const sendOpenAICompletionsRequest = async ({
               // so a later error frame can still mark this round failed.
               throttler.flush();
             } else if (finishReason !== "stop") {
-              if (finishReason === "error") {
-                const finishErrorMessage = getChoiceFinishErrorMessage(data, choice);
-                const errorText = finishErrorMessage
-                  ? `[API Error] Error: ${finishErrorMessage}`
-                  : "[API Error] Error: 模型响应以 error 结束，但上游未返回具体错误。请重试，或切换到其他支持图片输入的模型。";
-                const classified = classifyGenerationError(
-                  choice.error ? choice : data.error ? data : { code: "UPSTREAM_FINISH_ERROR" }
-                );
-                markStreamMessageAborted(finalizeCtx, errorText, classified);
-                // finish_reason=error 同样是业务流失败：不记 completed。
-                diagnosticOutcome = "stream-error";
-                streamState = {
-                  ...streamState,
-                  contentBuffer: appendTextChunk(
-                    streamState.contentBuffer,
-                    `\n${errorText}`
-                  ),
-                  billingFailed: true,
-                };
-              } else {
-                streamState = {
-                  ...streamState,
-                  contentBuffer: appendTextChunk(
-                    streamState.contentBuffer,
-                    `\n[流结束原因: ${finishReason}]`
-                  ),
-                };
-              }
+              const finishErrorMessage =
+                finishReason === "error"
+                  ? getChoiceFinishErrorMessage(data, choice)
+                  : null;
+              streamState = {
+                ...streamState,
+                contentBuffer: appendTextChunk(
+                  streamState.contentBuffer,
+                  finishErrorMessage
+                    ? `\n[API Error] Error: ${finishErrorMessage}`
+                    : finishReason === "error"
+                      ? "\n[API Error] Error: 模型响应以 error 结束，但上游未返回具体错误。请重试，或切换到其他支持图片输入的模型。"
+                    : `\n[流结束原因: ${finishReason}]`
+                ),
+                ...(finishReason === "error" ? { billingFailed: true } : {}),
+              };
             }
           }
         }
@@ -1548,17 +1373,11 @@ export const sendOpenAICompletionsRequest = async ({
     throttler.flush();
     let errorText: string;
     const isAbort = isAbortError(error);
-    // 流已开始消费 → stream-error；请求本身就没发出去/没响应 → network-error。
-    diagnosticOutcome = isAbort
-      ? "aborted"
-      : diagnosticStreamStarted
-        ? "stream-error"
-        : "network-error";
     const skipBilling = shouldSkipBillingForUserAbort(error, streamState.totalUsage);
     if (isAbort) {
       errorText = "\n[用户中断]";
     } else {
-      errorText = `\n[错误: ${classifyGenerationError(toErrorMessage(error)).message}]`;
+      errorText = `\n[错误: ${toErrorMessage(error)}]`;
     }
 
     console.error("[SSE] sendOpenAICompletionsRequest error:", error);
@@ -1576,8 +1395,7 @@ export const sendOpenAICompletionsRequest = async ({
     if (!isAbort) {
       markStreamMessageAborted(
         finalizeCtx,
-        classifyGenerationError(toErrorMessage(error)).message,
-        classifyGenerationError(toErrorMessage(error)),
+        toErrorMessage(error),
       );
     }
     streamState = await finalizeStream(streamState, finalizeCtx);
@@ -1591,15 +1409,6 @@ export const sendOpenAICompletionsRequest = async ({
       await reader?.cancel();
     } catch (_e) {
       // ignore
-    }
-    // 终态：只给「当前 attempt 且尚未收尾」的那次记，绝不覆盖已被淘汰/已被 repair
-    // 取代的前一次 attempt。2xx 之后业务流失败已在上面改写成 stream-error。
-    if (
-      diagnosticCall &&
-      diagnosticCurrentAttempt > 0 &&
-      !diagnosticCurrentAttemptClosed
-    ) {
-      closeDiagnosticAttempt(diagnosticCurrentAttempt, diagnosticOutcome);
     }
   }
 

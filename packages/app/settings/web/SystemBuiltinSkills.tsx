@@ -45,14 +45,21 @@ const SystemBuiltinSkills: React.FC = () => {
         label:
           capability.id === "web-search"
             ? t("settings.systemSkills.webSearch.label", capability.label)
-            : capability.label,
+            : capability.id === "conversation-todo"
+              ? t("settings.systemSkills.conversationTodo.label", capability.label)
+              : capability.label,
         description:
           capability.id === "web-search"
             ? t(
                 "settings.systemSkills.webSearch.description",
                 "允许 agent 搜索互联网、抓取网页内容，获取最新信息。关闭后所有 agent 不再具备联网搜索能力。",
               )
-            : capability.description,
+            : capability.id === "conversation-todo"
+              ? t(
+                  "settings.systemSkills.conversationTodo.description",
+                  "允许 agent 在多步骤对话中显示和更新任务进度。关闭后不再显示或调用对话 Todo。",
+                )
+              : capability.description,
       })),
     [t],
   );

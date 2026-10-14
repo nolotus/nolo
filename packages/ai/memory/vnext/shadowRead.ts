@@ -1,5 +1,4 @@
 import type { MemoryItem, MemoryOwnerRef } from "../types";
-import { createDetachedThrottle, DEFAULT_DETACHED_MEMORY_COOLDOWN_MS } from "./detachedThrottle";
 import { createMemoryVNextRecall, type MemoryRecallResult } from "./recall";
 import type { MemoryBenchmarkTextProvider } from "./benchmark/provider";
 import { resolveLegacyMemoryPrincipal } from "./legacyMigration";
@@ -47,17 +46,7 @@ export interface MemoryVNextShadowInput {
   shadowTimeoutMs?: number;
   /** Injectable clock for tests; defaults to `performance.now`. */
   now?: () => number;
-  /** Per-owner-set cooldown override, in ms (tests); `0` disables it. */
-  cooldownMs?: number;
 }
-
-/**
- * Why a turn did no shadow work at all. The run acquired nothing: no DB read,
- * no provider call, no state change — `skipped_busy` means another shadow read
- * is already in flight in this process, `skipped_cooldown` means this owner set
- * already ran inside the cooldown interval.
- */
-export type MemoryVNextShadowReadSkip = "skipped_busy" | "skipped_cooldown";
 
 /**
  * Minimal Slice 5 observation. No quality/recall score, no similarity metric,
@@ -76,8 +65,6 @@ export interface MemoryShadowReadObservation {
   vnextContextChars: number;
   /** Short error category/message when the shadow failed; absent on success. */
   vnextError?: string;
-  /** Present only when the throttle skipped the turn; absent otherwise. */
-  skipped?: MemoryVNextShadowReadSkip;
 }
 
 /**
@@ -92,57 +79,6 @@ export type MemoryShadowReadLogPayload = MemoryShadowReadObservation & {
 
 const SHADOW_TIMEOUT_MS = 20_000;
 const ERROR_MESSAGE_MAX = 120;
-
-/**
- * Slice 5.1 throttle. Measured on alpha: with `NOLO_MEMORY_VNEXT_SHADOW_READ`
- * on, this detached comparison ran on EVERY runtime turn at ~1–2s of DeepSeek
- * time per turn — on top of the detached lazy promotion (median ~3.1s, max
- * 13.4s) — competing with the user's in-flight request on a 1-core host.
- *
- * It uses the SAME throttle helper as the promotion but its OWN instance, gate
- * and interval: the two features have independent kill switches and different
- * costs (observation-only vs writing State), so skipping must stay attributable
- * per feature and one feature's stall must not starve the other. Cost class is
- * the same (one model call per turn), hence the same default interval, exposed
- * as a separate env key so operators can tune each independently.
- */
-export const MEMORY_VNEXT_SHADOW_READ_COOLDOWN_ENV =
-  "NOLO_MEMORY_VNEXT_SHADOW_READ_COOLDOWN_MS";
-export const DEFAULT_SHADOW_READ_COOLDOWN_MS = DEFAULT_DETACHED_MEMORY_COOLDOWN_MS;
-
-export const shadowReadThrottle = createDetachedThrottle({
-  name: "shadow_read",
-  defaultCooldownMs: DEFAULT_SHADOW_READ_COOLDOWN_MS,
-  cooldownEnvKey: MEMORY_VNEXT_SHADOW_READ_COOLDOWN_ENV,
-});
-
-/** Per-owner-set cooldown; unset/garbage env → default, `0` disables it. */
-export const resolveShadowReadCooldownMs = (
-  env?: Record<string, string | undefined>
-): number => shadowReadThrottle.resolveCooldownMs(env);
-
-/** Test-only: throttle state is process-local module state. */
-export const resetMemoryVNextShadowReadThrottleForTests = (): void =>
-  shadowReadThrottle.reset();
-export const isMemoryVNextShadowReadInFlightForTests = (): boolean =>
-  shadowReadThrottle.isInFlight();
-
-/**
- * Throttle key = the resolved principal set of this turn (user, and possibly
- * space/system). It is stable across turns for one user, so a user's shadow read
- * cannot be triggered more often than the interval, while a different owner set
- * is throttled independently. Sorted, so owner order can never alias two keys.
- */
-const shadowReadThrottleKey = (owners: readonly MemoryOwnerRef[]): string =>
-  owners
-    .map((owner) =>
-      resolveLegacyMemoryPrincipal({
-        ownerType: owner.ownerType,
-        ownerId: owner.ownerId,
-      }).principalId
-    )
-    .sort()
-    .join("\u0001");
 
 /** Collapse whitespace, trim, lowercase — a deliberately simple shared key. */
 const normalizeTextKey = (text: string): string =>
@@ -219,32 +155,6 @@ export const runMemoryVNextShadowRead = async (input: {
   };
   const emit = input.emit ?? defaultEmit;
 
-  // Same class of bound as the detached lazy promotion (shared helper):
-  // process-wide single-flight + per-owner-set cooldown. Both skips return
-  // before any DB read or provider call, so a throttled turn costs nothing.
-  const throttle = shadowReadThrottle.tryAcquire(
-    shadowReadThrottleKey(input.ctx.owners),
-    now(),
-    input.ctx.cooldownMs ?? resolveShadowReadCooldownMs()
-  );
-  if (throttle !== "run") {
-    // `null` overlap counts mean "not computed", exactly as on the error path.
-    const skippedObservation: MemoryShadowReadObservation = {
-      legacyHitCount: input.legacyItems.length,
-      vnextHitCount: 0,
-      overlapCount: null,
-      legacyOnlyCount: null,
-      vnextOnlyCount: null,
-      legacyLatencyMs: input.legacyLatencyMs,
-      vnextLatencyMs: 0,
-      legacyContextChars: input.legacyContextChars,
-      vnextContextChars: 0,
-      skipped: throttle === "busy" ? "skipped_busy" : "skipped_cooldown",
-    };
-    emit(skippedObservation);
-    return skippedObservation;
-  }
-
   const legacyKeys = new Set(
     input.legacyItems.flatMap((item) => legacyItemKeys(item)),
   );
@@ -285,42 +195,33 @@ export const runMemoryVNextShadowRead = async (input: {
   } catch (error) {
     vnextError = shortError(error);
   }
+  const vnextLatencyMs = Math.round((now() - vnextStartedAt) * 10) / 10;
 
-  // The gate is released once the shadow work is over. The recall phase above
-  // cannot throw (its failures collapse into `vnextError`), so protecting this
-  // tail — which includes the caller-supplied `emit` sink — is enough to make
-  // sure a throwing sink can never pin the process-wide gate.
-  try {
-    const vnextLatencyMs = Math.round((now() - vnextStartedAt) * 10) / 10;
-
-    let overlapCount: number | null = null;
-    let legacyOnlyCount: number | null = null;
-    let vnextOnlyCount: number | null = null;
-    if (!vnextError) {
-      let overlap = 0;
-      for (const key of vnextKeys) if (legacyKeys.has(key)) overlap += 1;
-      overlapCount = overlap;
-      legacyOnlyCount = Math.max(0, legacyKeys.size - overlap);
-      vnextOnlyCount = Math.max(0, vnextKeys.size - overlap);
-    }
-
-    const observation: MemoryShadowReadObservation = {
-      legacyHitCount: input.legacyItems.length,
-      vnextHitCount,
-      overlapCount,
-      legacyOnlyCount,
-      vnextOnlyCount,
-      legacyLatencyMs: input.legacyLatencyMs,
-      vnextLatencyMs,
-      legacyContextChars: input.legacyContextChars,
-      vnextContextChars: vnextChars,
-      ...(vnextError ? { vnextError } : {}),
-    };
-    emit(observation);
-    return observation;
-  } finally {
-    shadowReadThrottle.release();
+  let overlapCount: number | null = null;
+  let legacyOnlyCount: number | null = null;
+  let vnextOnlyCount: number | null = null;
+  if (!vnextError) {
+    let overlap = 0;
+    for (const key of vnextKeys) if (legacyKeys.has(key)) overlap += 1;
+    overlapCount = overlap;
+    legacyOnlyCount = Math.max(0, legacyKeys.size - overlap);
+    vnextOnlyCount = Math.max(0, vnextKeys.size - overlap);
   }
+
+  const observation: MemoryShadowReadObservation = {
+    legacyHitCount: input.legacyItems.length,
+    vnextHitCount,
+    overlapCount,
+    legacyOnlyCount,
+    vnextOnlyCount,
+    legacyLatencyMs: input.legacyLatencyMs,
+    vnextLatencyMs,
+    legacyContextChars: input.legacyContextChars,
+    vnextContextChars: vnextChars,
+    ...(vnextError ? { vnextError } : {}),
+  };
+  emit(observation);
+  return observation;
 };
 
 /**

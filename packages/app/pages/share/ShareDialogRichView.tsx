@@ -7,7 +7,7 @@ import { ToolMessageGroup } from "chat/messages/web/ToolMessageGroup";
 import { isAssistantToolStub } from "chat/messages/web/assistantReplyPendingState";
 import { isTouchDevice } from "chat/hooks/useMessageInteraction";
 
-const ShareDialogRichView: React.FC<{ messages: any[] }> = ({ messages }) => {
+const ShareDialogRichView: React.FC<{ messages: any[]; conversationTodoEnabled?: boolean }> = ({ messages, conversationTodoEnabled = true }) => {
   const [isTouch, setIsTouch] = useState(false);
 
   useEffect(() => {
@@ -32,7 +32,7 @@ const ShareDialogRichView: React.FC<{ messages: any[] }> = ({ messages }) => {
         if (entry.type === "tool-group") {
           return (
             <div key={entry.key} className="ShareImportPage-msgWrapper">
-              <ToolMessageGroup messages={entry.messages} readOnly />
+              <ToolMessageGroup messages={entry.messages} readOnly conversationTodoEnabled={conversationTodoEnabled} />
             </div>
           );
         }
@@ -44,7 +44,7 @@ const ShareDialogRichView: React.FC<{ messages: any[] }> = ({ messages }) => {
             className="ShareImportPage-msgWrapper"
           >
             {message.role === "tool" ? (
-              <ReadOnlyToolMessageItem message={message} />
+              <ReadOnlyToolMessageItem message={message} conversationTodoEnabled={conversationTodoEnabled} />
             ) : (
               <ReadOnlyMessageItem message={message} isTouch={isTouch} />
             )}

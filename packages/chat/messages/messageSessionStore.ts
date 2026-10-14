@@ -32,12 +32,6 @@ export interface MessageSessionState {
   // otherwise a lagging DB snapshot wipes the finished transient off screen
   // (2026-10-03 flicker/disappear incident, ~350ms persistence race).
   canonicalHandoffTransient: { id: string; expiresAt: number } | null;
-  // Latency batch (2026-10-13): this dialog's foreground turn finished its
-  // VISIBLE projection (SSE `done` consumed, cursor stopped, transient
-  // finalized) while the send/Stop ownership gate may still be held for the
-  // canonical handoff. MessageList must not fall back to the `starting` pending
-  // row ("正在处理…") in that window: holding the gate is not "still working".
-  foregroundTurnSettledVisible: boolean;
   // Wave12: last stream-clear timestamp for this dialog — written in the same
   // reducer pass as clearAllStreaming (user abort or logout all:true system
   // clear; see messageSlice clearAllStreaming). Memory-only, so async message
@@ -57,7 +51,6 @@ const createEmptyMessageSessionState = (): MessageSessionState => ({
   currentLoadOlderRequestId: undefined,
   streamingMessageId: null,
   canonicalHandoffTransient: null,
-  foregroundTurnSettledVisible: false,
   lastAbortTimestamp: 0,
 });
 
@@ -424,45 +417,4 @@ export function useHasStreamingMessage(dialogId?: string | null): boolean {
 export function resetMessageSessionStoreForTests(): void {
   resetAllMessageSessions();
   version = 0;
-}
-
-// ===== Latency batch: visible turn-settled projection =====
-// Written by the server-owned foreground turn once the SSE `done` frame has
-// been consumed and the visible cursor is stopped, while the send/Stop
-// ownership gate (active controller in dialogRuntimeStore) may still be held
-// for the canonical handoff. Read by MessageList so the pending "正在处理…" row
-// does not reappear during that window.
-
-export function markForegroundTurnSettledVisible(
-  dialogId?: string | null
-): void {
-  const session = ensureMessageSession(dialogId);
-  if (session.foregroundTurnSettledVisible) return;
-  session.foregroundTurnSettledVisible = true;
-  notify();
-}
-
-export function clearForegroundTurnSettledVisible(
-  dialogId?: string | null
-): void {
-  const session = ensureMessageSession(dialogId);
-  if (!session.foregroundTurnSettledVisible) return;
-  session.foregroundTurnSettledVisible = false;
-  notify();
-}
-
-export function getForegroundTurnSettledVisible(
-  dialogId?: string | null
-): boolean {
-  if (dialogId === null) return false;
-  return getMessageSession(dialogId).foregroundTurnSettledVisible;
-}
-
-/** React 读取路径（useSyncExternalStore），与 useHasStreamingMessage 同形。 */
-export function useForegroundTurnSettledVisible(
-  dialogId?: string | null
-): boolean {
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  if (dialogId === null) return false;
-  return getForegroundTurnSettledVisible(dialogId);
 }

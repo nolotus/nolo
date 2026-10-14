@@ -71,7 +71,6 @@ import {
   getCanonicalHandoffTransientId,
   getHasStreamingMessage,
   getMessageSession,
-  getStreamingMessageId,
   markMessageSessionAbort,
   markMessageStreamActivity,
   patchMessageSession,
@@ -103,7 +102,6 @@ export {
   useLastStreamTimestamp,
   useMessagesLoadingState,
   useHasStreamingMessage,
-  useForegroundTurnSettledVisible,
 } from "./messageSessionStore";
 
 const OLDER_LOAD_LIMIT = 30;
@@ -442,9 +440,6 @@ export const messageSlice = createSliceWithThunks({
           payload.dialogId ?? findDialogIdByMessageId(state, payload.id);
         const dialogState = ensureMessageDialogState(state, dialogId);
         removeOneMessage(dialogState, payload.id);
-        if (dialogId && getStreamingMessageId(dialogId) === payload.id) {
-          setStreamingMessageId(dialogId, null);
-        }
       }
     ),
 
@@ -626,19 +621,12 @@ export const messageSlice = createSliceWithThunks({
           dialogKey,
           limit,
           isNew,
-          preferredServerOrigin,
         }: {
           dialogId: string;
           dialogKey?: string;
           /** Positive page size, or omit/0 for full history (default). */
           limit?: number;
           isNew?: boolean;
-          /**
-           * 本轮运行归属 base（前台运行写入的 server）。只用于本次读取的源排序
-           * （该 base 先读，早期视图先出），不是唯一权威：完整 reconcile 仍合并
-           * 全部 base。
-           */
-          preferredServerOrigin?: string;
         },
         thunkApi
       ): Promise<Message[]> => {
@@ -663,9 +651,7 @@ export const messageSlice = createSliceWithThunks({
 
         const state = getState() as any;
         const { currentToken: token, remoteServers } =
-          preferredServerOrigin
-            ? getRuntimeServerContext(state, preferredServerOrigin)
-            : getRuntimeServerContext(state);
+          getRuntimeServerContext(state);
 
         const {
           localMessages,

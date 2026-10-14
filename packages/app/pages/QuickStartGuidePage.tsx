@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { NavLink } from "app/routing";
 import { buildQuickStartGuideContent } from "app/guide/quickStartGuide";
 import { LuDownload, LuArrowRight } from "react-icons/lu";
-import "render/layout/noloSerifFont.css";
 import "./QuickStartGuidePage.css";
 
 const QuickStartGuidePage: React.FC = () => {
