@@ -369,7 +369,6 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
     modelOptions: [
       { id: "claude-opus-5-5", label: "Claude Opus 5.5", hasVision: true, recommended: true },
       { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", hasVision: true },
-      { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", hasVision: true },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", hasVision: true },
       { id: "claude-opus-5", label: "Claude Opus 5", hasVision: true },
       { id: "claude-opus-4-8", label: "Claude Opus 4.8", hasVision: true },
@@ -592,36 +591,6 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     modelOptions: MISTRAL_MODEL_OPTIONS,
     keyFormatHint:
       "在 chat.mistral.ai › Code › Extensions › Vibe API Key 生成（45 位，形如 xxxxx…nb3A）；也可用 Studio 的 API Key。两者都直接有效于 api.mistral.ai/v1。",
-    commercialKind: "subscription",
-    accessVariant: "token_plan_endpoint",
-  },
-  // OpenDesign 聚合网关（open-design.ai）：一个 Key 聚合 GPT / Claude / DeepSeek /
-  // GLM / Kimi / MiMo，OpenAI 兼容。modelOptions 按「品牌知名度」排序（GPT > Claude >
-  // DeepSeek > GLM > Kimi > MiMo，同品牌内按能力/成本排），快照取自 2026-10-11 的
-  // GET /v1/models；上游增删模型时以 `nolo agent models --url <baseUrl>`（或 `--preset opendesign`）实测为准，
-  // CLI 的 --model 仍可填列表外的 ID。
-  {
-    kind: "api_key_template",
-    id: "opendesign",
-    label: "OpenDesign 聚合网关",
-    description: "open-design.ai 聚合订阅（一个 Key 聚合 GPT/Claude/DeepSeek/GLM/Kimi/MiMo，OpenAI 兼容）",
-    provider: "opendesign",
-    baseUrl: "https://amr-link.open-design.ai/v1",
-    defaultModel: "gpt-6-luna",
-    modelOptions: [
-      { id: "gpt-6-luna", label: "GPT-6 Luna", hasVision: true, recommended: true },
-      { id: "claude-haiku-5.5", label: "Claude Haiku 5.5", hasVision: true },
-      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
-      { id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash", hasVision: true },
-      { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
-      { id: "deepseek-v4-flash-vision-exp", label: "DeepSeek V4 Flash Vision Exp", hasVision: true },
-      { id: "glm-5.3-flashx", label: "GLM 5.3 FlashX", hasVision: true },
-      { id: "glm-5.3-flash", label: "GLM 5.3 Flash", hasVision: true },
-      { id: "kimi-k2.7-code", label: "Kimi K2.7 Code", hasVision: true },
-      { id: "mimo-v2.6-pro", label: "MiMo V2.6 Pro", hasVision: true },
-      { id: "mimo-v2.6-flash", label: "MiMo V2.6 Flash", hasVision: true },
-    ],
-    keyFormatHint: "在 open-design.ai 控制台获取（网关自有 Key，非各家官方 Key）。",
     commercialKind: "subscription",
     accessVariant: "token_plan_endpoint",
   },

@@ -13,61 +13,6 @@ import { fetchWithTransientRetry } from "../localRuntimeFetchRetry";
 import { resolveProviderOpenAiToolBundle } from "../localRuntimeTools";
 import type { ProviderResolver } from "./providerResolutionContext";
 
-type CodexComplete = NonNullable<Awaited<ReturnType<ProviderResolver>>>["complete"];
-type CodexCallTrace = {
-  log: (stage: string, fields: Record<string, unknown>) => void;
-  nextAttempt: () => number;
-};
-
-// debug-only 观测：start / headers / end 三节点。日志经 logLocalRuntimeDiagnostic 的
-// 默认 debug gate，未开启时无输出；所有日志调用 best effort，不影响请求语义。
-// 只记录 pid、随机本地 callId、elapsedMs、stage、status、计数，不含正文/header/token。
-function withCodexCallTrace(
-  fn: (trace: CodexCallTrace, messages: Parameters<CodexComplete>[0], options: Parameters<CodexComplete>[1]) => ReturnType<CodexComplete>,
-): CodexComplete {
-  return async (messages, options) => {
-    const callId = Math.random().toString(36).slice(2, 10);
-    const startedAt = Date.now();
-    let attempts = 0;
-    let outcome = "success";
-    const trace: CodexCallTrace = {
-      log: (stage, fields) => {
-        try {
-          logLocalRuntimeDiagnostic(`provider.codex.${stage}`, {
-            pid: process.pid,
-            callId,
-            elapsedMs: Date.now() - startedAt,
-            ...fields,
-          });
-        } catch {
-          // best effort：日志失败不改变请求语义
-        }
-      },
-      nextAttempt: () => ++attempts,
-    };
-    try {
-      trace.log("start", { messageCount: messages.length, inputChars: countCodexInputChars(messages) });
-    } catch {
-      // best effort
-    }
-    try {
-      return await fn(trace, messages, options);
-    } catch (error) {
-      outcome = options?.signal?.aborted ? "aborted" : "error";
-      throw error;
-    } finally {
-      trace.log("end", { outcome, attempts });
-    }
-  };
-}
-
-function countCodexInputChars(messages: Parameters<CodexComplete>[0]): number {
-  return messages.reduce((total, message) => {
-    const content = (message as { content?: unknown })?.content;
-    return total + (typeof content === "string" ? content.length : JSON.stringify(content ?? "").length);
-  }, 0);
-}
-
 export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
   const { agentConfig, deps, fetchImpl, loopbackRequest, additionalToolNames, buildProviderOpenAiTools, recordLocalAvailability, apiKeyRefResolver } = ctx;
   // ChatGPT Codex (subscription OAuth) — Responses API at
@@ -98,16 +43,7 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
     });
     return {
       model: agentConfig.model || "gpt-5.6-sol",
-      complete: withCodexCallTrace(async (trace, messages, options) => {
-        const observedFetch = async (
-          input: Parameters<typeof fetchImpl>[0],
-          requestInit?: Parameters<typeof fetchImpl>[1],
-        ) => {
-          const attempt = trace.nextAttempt();
-          const res = await fetchImpl(input, requestInit);
-          trace.log("headers", { attempt, status: res.status });
-          return res;
-        };
+      complete: async (messages, options) => {
         const result = await fetchCodexResponsesCompletion({
           agentConfig,
           accessToken,
@@ -119,9 +55,8 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
             ...(tools.length > 0 ? { tools } : {}),
           },
           sessionKey: resolveSessionKey({ dialogId: options?.dialogId }),
-          signal: options?.signal,
           fetchImpl: ((url: string | URL | Request, init?: RequestInit) =>
-            fetchWithTransientRetry(observedFetch as typeof fetchImpl, url, init, {
+            fetchWithTransientRetry(fetchImpl, url, init, {
               sleep: deps.sleep,
               loopbackRequest,
             })) as unknown as typeof fetch,
@@ -169,7 +104,7 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
           usage: result.body?.usage as Record<string, any> | undefined,
           trace: messages,
         };
-      }),
+      },
     };
   }
   return null;

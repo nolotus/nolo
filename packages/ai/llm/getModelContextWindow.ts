@@ -19,7 +19,6 @@
  * 那些「靠 getModelInfo 返回 null 走兜底分支」的模型的判定结果，属于越界副作用。
  */
 import { MODEL_LOOKUP_MAP } from "./providers";
-import { isPlatformManagedProvider } from "./kimi";
 import { ALL_MODELS, type ModelWithProvider } from "./models";
 import type { Model } from "./types";
 
@@ -38,19 +37,6 @@ const GPT_6_1_SOL_CONTEXT_WINDOW = 500_000;
 // 空格分隔（"GPT-6.1 Sol" 小写后为 "gpt-6.1 sol"）；拒绝 gpt-6.1-solar 等无关前缀；
 // 不得改成裸 includes("gpt-6.1")，以免误伤 astra / luna。
 const GPT_6_1_SOL_PATTERN = /(^|\/)gpt-6\.1[- ]sol(?![a-z])/;
-
-/**
- * 通道专属窗口：同一个 id 在不同通道上窗口不同，这是**通道事实而非厂商能力**。
- *   gpt-6.1-sol —— Codex OAuth 订阅通道实测 500,000
- *     （client 0.159.2 / 0.161.0，见 GPT_6_1_SOL_CONTEXT_WINDOW）；
- *     CF 平台托管通道 1,050,000（CF 官方模型页，见 platformHosted 的目录条目）。
- * 裸名 / 未知通道取通道真值；显式声明平台通道（provider 命中平台托管）时取平台
- * 目录值。既不全局取大、也不为了「保守」给平台通道设上限。
- */
-function channelPinnedContextWindow(normalizedName: string): number | undefined {
-  if (GPT_6_1_SOL_PATTERN.test(normalizedName)) return GPT_6_1_SOL_CONTEXT_WINDOW;
-  return undefined;
-}
 
 const ANTIGRAVITY_EFFORT_SUFFIXES = [
   "-tiered",
@@ -254,18 +240,11 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
 /**
  * 根据模型名称获取 Context Window 大小
  * @param modelName 模型名称或显示名（如 "qwen3.8-max" / "Qwen3.8 Max"）
- * @param provider 可选：已知的通道 / provider。平台托管通道（provider 命中平台
- *   托管）下，通道专属 id 返回平台目录真值；缺省时按 id 的通道真值解析。
  * @returns Context Window 大小（tokens）
  */
-export const getModelContextWindow = (
-  modelName: string,
-  provider?: string | null,
-): number => {
+export const getModelContextWindow = (modelName: string): number => {
   if (!modelName) return DEFAULT_CONTEXT_WINDOW;
 
-  // 显式平台通道：允许用平台目录（CF）真值；否则一律按 id 的通道真值解析。
-  const onPlatformChannel = isPlatformManagedProvider(provider, modelName);
   const normalizedName = modelName.toLowerCase();
   const map = getFullModelMap();
 
@@ -297,24 +276,10 @@ export const getModelContextWindow = (
   for (const candidate of candidates) {
     const model = map.get(candidate);
     if (model?.contextWindow) {
-      // 通道碰撞：平台目录条目对「通道专属 id」是平台通道真值，裸名 / 其它通道
-      // 不得使用（否则 Codex OAuth 侧被放大到 1.05M）；继续往下取通道真值。
-      if (
-        !onPlatformChannel &&
-        isPlatformManagedProvider(model.provider, model.name) &&
-        channelPinnedContextWindow(model.name.toLowerCase()) !== undefined
-      ) {
-        continue;
-      }
       return typeof model.contextWindow === "number"
         ? model.contextWindow
         : DEFAULT_CONTEXT_WINDOW;
     }
-  }
-
-  if (!onPlatformChannel) {
-    const pinned = channelPinnedContextWindow(normalizedName);
-    if (pinned !== undefined) return pinned;
   }
 
   return fuzzyContextWindow(normalizedName) ?? DEFAULT_CONTEXT_WINDOW;

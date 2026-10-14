@@ -35,7 +35,7 @@ export const CODE_WORK_DISCIPLINE_BODY = `## 效率优先（省 token）
 - task 里必须写明审查对象（\`git diff\` 看工作区改动，或 \`git diff alpha...HEAD\` 看已提交改动），否则 reviewer 不知道审什么。
 - 按角色加载对应 skill：reviewer 先 \`loadSkill("coding-review")\` 拿通用流程，再按角色 \`loadSkill("coding-review-<role>")\` 拿检查项。角色清单：code-quality（**必跑**）/ architecture（**单独派发**，中级以上问题）/ security（按需 + 安全敏感触发必跑）/ frontend-ux（涉及 UI 时）/ backend-data（涉及 server 时）。角色切割的目的是注意力隔离——每个角色只盯自己的检查面，按需启用，避免一个 reviewer 背所有角色导致注意力稀释。
 - Verdict 标准：APPROVE（无 CRITICAL 或 HIGH）→ 可 commit；WARNING（仅 HIGH）→ 报告 owner 决定；BLOCK（有 CRITICAL）→ 必须先修。
-- review 是多轮收敛的：派 reviewer 审工作区 diff → 出 finding 就修 → 复审，直到 APPROVE 才提交。每轮 review 无上下文——reviewer 只看当前工作区 diff，不带上一轮 finding 记忆。**APPROVE 只覆盖被审的那一版**：此后任何改动（含采纳 nit、含只动注释 / 文档）都要重新过一轮 review，作者自评不构成复核（真源 docs/workflow.md）。
+- review 是多轮收敛的：派 reviewer 审工作区 diff → 出 finding 就修 → 复审，直到 APPROVE 才提交。每轮 review 无上下文——reviewer 只看当前工作区 diff，不带上一轮 finding 记忆。
 - 若处于单 Agent 独占环境、其他 agent 不可达、或用户明确要求直接提交：不要补写或伪造 review 证据，也**不要用 [no-review: 原因] 这类写法**——它任何判据都解析不了，写了照样被拦。自有闸门认的形式是 Reviewed-by: <非空署名> 加 Review: 带结论（APPROVE / Approved / WARNING，占位符如 <pending> 不算），commit-msg 与 pre-push / pre-merge 都走这一条正则。pre-push / pre-merge **另**认一条 owner-only 豁免：正文写 No-Review: <原因> 且 commit author email 命中 packages/nolo-ci/core/src/mapping.ts 的 NO_REVIEW_OWNER_EMAILS 白名单——agent 身份（如 app-builder@nolo.local）不适用。真被卡住就如实上报卡点、由 owner 决定；git push --no-verify 仅限管理员/紧急恢复，服务端 G2 不可绕过。`;
 
 /** 带标题的完整段落。 */

@@ -43,11 +43,6 @@ type EmailSendArgs = {
   subject: string;
   text?: string;
   html?: string;
-  /**
-   * 一次性外发确认凭证：只能由确认栏在用户点击后签发并注入（executeToolRun 的
-   * inputOverride），模型入口会被 stripModelToolArgs 剥掉，故不出现在 schema 里。
-   */
-  confirmationToken?: string;
 };
 
 type EmailWaitForArgs = EmailSearchArgs & {
@@ -539,52 +534,6 @@ export async function emailProvisionIdentityFunc(
   };
 }
 
-/** 确认卡正文预览长度上限（字符）。 */
-export const EMAIL_SEND_PREVIEW_BODY_CHARS = 500;
-
-/**
- * email_send 的预览分支（interaction: "confirm"）：只整理草稿，绝不产生副作用
- * ——不调 callToolApi、不发信、不写 KV。用户点确认后由确认栏先签发一次性凭证，
- * 再由 emailSendFunc 真正发送。
- */
-export async function emailSendPreviewFunc(args: EmailSendArgs) {
-  const to = asTrimmedNonEmptyStringArray(args?.to);
-  const cc = asTrimmedNonEmptyStringArray(args?.cc);
-  const bcc = asTrimmedNonEmptyStringArray(args?.bcc);
-  const replyTo = asTrimmedNonEmptyStringArray(args?.replyTo);
-  const subject = asOptionalTrimmedString(args?.subject) ?? "(无主题)";
-  const body =
-    typeof args?.text === "string" && args.text.length > 0
-      ? args.text
-      : typeof args?.html === "string"
-        ? args.html
-        : "";
-  const bodyPreview = body.slice(0, EMAIL_SEND_PREVIEW_BODY_CHARS);
-  const recipientSummary = [
-    ...to,
-    ...cc.map((email) => `cc: ${email}`),
-    ...bcc.map((email) => `bcc: ${email}`),
-    ...replyTo.map((email) => `reply-to: ${email}`),
-  ].join(", ");
-
-  return {
-    rawData: {
-      requiresConfirmation: true,
-      draft: {
-        from: args?.fromEmail ?? "",
-        to,
-        cc,
-        bcc,
-        replyTo,
-        subject,
-        bodyPreview,
-        bodyTruncated: body.length > EMAIL_SEND_PREVIEW_BODY_CHARS,
-      },
-    },
-    displayData: `待确认发送：${subject} → ${recipientSummary || "(无收件人)"}\n\n正文前 ${EMAIL_SEND_PREVIEW_BODY_CHARS} 字：\n${bodyPreview || "(空)"}`,
-  };
-}
-
 export async function emailSendFunc(args: EmailSendArgs, thunkApi: any) {
   const email = await callToolApi<any>(
     thunkApi,
@@ -599,8 +548,6 @@ export async function emailSendFunc(args: EmailSendArgs, thunkApi: any) {
       subject: args.subject,
       text: args.text,
       html: args.html,
-      // 原样透传给 /rpc/sendEmail 做外发放行校验；模型入口已被剥离，只可能来自确认栏。
-      confirmationToken: args.confirmationToken,
     },
     { withAuth: true }
   );

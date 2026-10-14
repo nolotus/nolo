@@ -5,10 +5,7 @@ import { useLocation, useNavigate } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useFetchData } from "app/hooks";
 import { useHasMounted } from "app/hooks/useHasMounted";
-import { useIdentity, useToken } from "identity";
-import { selectCurrentServer } from "app/settings/settingSlice";
-import { useActiveControllers, useRecoveredForegroundTurn } from "chat/dialog/dialogSlice";
-import { useDialogBackgroundWake } from "chat/web/useDialogBackgroundWake";
+import { useIdentity } from "identity";
 import { useTranslation } from "react-i18next";
 import {
   markDialogRead,
@@ -25,7 +22,6 @@ import {
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { ChatArea } from "chat/web/ChatArea";
 import { LiveVoicePanel } from "chat/web/LiveVoicePanel";
-import { useMediaJobContextInjection } from "../web/mediaJobContextInjection";
 import { isLiveAudioOnlyAgent } from "ai/agent/isLiveAudioOnlyAgent";
 import type { Agent } from "app/types";
 import {
@@ -78,7 +74,6 @@ const DIALOG_PAGE_MESSAGES_CLASS = `DialogPage__messages has-scroll-mask ${
 }`.trim();
 import { AgentDraftPanel } from "./AgentDraftPanel";
 import { ChildRunObserverPanel } from "./ChildRunObserverPanel";
-import { DialogRuntimeTargetBadge } from "./DialogRuntimeTargetBadge";
 import { resolveLatestAgentDraftSidePanelState } from "./agentDraftPanelState";
 
 type DialogBootstrapDispatchResult = {
@@ -151,20 +146,6 @@ const DialogPage = ({
   );
   const currentDialogKey = useCurrentDialogKey();
   const configError = useDialogConfigError();
-  // W15：?mediaJobId=… 把对应媒体笔记以「引用」形式挂入当前对话，供首条消息追问。
-  // 取 /result 200（当前账号有权）才挂；403/404/异常静默忽略、不崩。
-  const mediaJobIdParam =
-    typeof location?.search === "string"
-      ? new URLSearchParams(location.search).get("mediaJobId")
-      : null;
-  useMediaJobContextInjection({
-    mediaJobId: mediaJobIdParam,
-    dialogKey: currentDialogKey,
-    onNotice: (status) => {
-      if (status !== "attached")
-        console.info(`[mediaJobContext] 笔记未能挂入对话（${status}），已忽略`);
-    },
-  });
   const currentDialogConfig = useCurrentDialogConfig();
   const isDeviceLocalDialog = useMemo(() => {
     const config = currentDialogConfig as
@@ -200,19 +181,6 @@ const DialogPage = ({
   const messages = useAppSelector((state) =>
     dialogId ? selectAllMsgs(state, dialogId) : [],
   );
-  const wakeToken = useToken();
-  const wakeServer = useAppSelector(selectCurrentServer);
-  const wakeControllers = useActiveControllers(currentDialogConfig?.dbKey ?? null);
-  const wakeRecoveredTurn = useRecoveredForegroundTurn(currentDialogConfig?.dbKey ?? null);
-  const hasLocalForegroundOwner = Object.keys(wakeControllers).length > 0;
-  const backgroundFollowing = useDialogBackgroundWake({
-    dialogId: isLoggedIn ? dialogId : null,
-    server: wakeServer ? String(wakeServer) : null,
-    token: wakeToken ?? null,
-    foregroundActive:
-      hasStreamingMessage || hasLocalForegroundOwner || !!wakeRecoveredTurn,
-    reloadMessages: () => dispatch(initMsgs({ dialogId: dialogId! })).unwrap(),
-  });
   const latestAgentDraftState = useMemo(
     () => resolveLatestAgentDraftSidePanelState(messages),
     [messages],
@@ -977,20 +945,6 @@ const DialogPage = ({
               dialogPageStyles.rootWithSidePanel,
           )}
         >
-          {backgroundFollowing && (
-            <div role="status" aria-live="polite" {...stylex.props(dialogPageStyles.backgroundWakeHint)}>
-              {t("dialogBackgroundWake.following", { defaultValue: "AI 正在跟进…" })}
-            </div>
-          )}
-          {/* F1: intended runtime target (runtimeBinding.target → /api/machines
-              name). Labeled "意图" — the actual per-tool/per-run host is shown
-              separately from server-projected executionLocation. */}
-          <DialogRuntimeTargetBadge
-            runtimeBinding={
-              (currentDialogConfig as { runtimeBinding?: Record<string, unknown> | null } | null)
-                ?.runtimeBinding
-            }
-          />
           {renderContent()}
         </div>
         {shouldShowDraftPanel && latestAgentDraft && (
