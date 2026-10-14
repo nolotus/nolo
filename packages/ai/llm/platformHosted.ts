@@ -24,7 +24,7 @@ import {
   PLATFORM_HOSTED_GROK_4_6_MODEL,
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
   PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
-  PLATFORM_HOSTED_GPT_56_SOL_MODEL,
+  PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
   PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
   PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
   PLATFORM_HOSTED_GLM_53_MODEL,
@@ -145,40 +145,48 @@ export const PLATFORM_HOSTED_GLM_PRICE = {
 } as const;
 
 /**
- * Claude 系（平台托管语义，DeepInfra 上游，官方 id 与平台 id 同名）。
- * DeepInfra 这批模型无缓存价（rate_per_input_token_cached=null），故不设
- * inputCacheHit——计费侧按 input 全价计，缓存 token 不会被打 0 价漏账。
+ * Claude 系（平台托管语义，Cloudflare Workers AI / AI Gateway 上游）。
+ *
  */
 export const PLATFORM_HOSTED_CLAUDE_FABLE_5_PRICE = {
   input: toPlatformCredits(10), // 80 credits
   output: toPlatformCredits(50), // 400 credits
+  cachingWrite: toPlatformCredits(12.5), // 100 credits
+  cachingRead: toPlatformCredits(1.0), // 8 credits
 } as const;
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_PRICE = {
   input: toPlatformCredits(5), // 40 credits
   output: toPlatformCredits(25), // 200 credits
+  cachingWrite: toPlatformCredits(6.25), // 50 credits
+  cachingRead: toPlatformCredits(0.5), // 4 credits
 } as const;
 export const PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE = {
-  input: toPlatformCredits(3), // 24 credits
-  output: toPlatformCredits(15), // 120 credits
+  input: toPlatformCredits(2), // 16 credits
+  output: toPlatformCredits(10), // 80 credits
+  cachingWrite: toPlatformCredits(2.5), // 20 credits
+  cachingRead: toPlatformCredits(0.2), // 1.6 credits
 } as const;
 export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE = {
   input: toPlatformCredits(1), // 8 credits
   output: toPlatformCredits(5), // 40 credits
+  cachingWrite: toPlatformCredits(1.25), // 10 credits
+  cachingRead: toPlatformCredits(0.1), // 0.8 credits
 } as const;
 
 /**
- * Claude Opus 5.5 / Fable 5.1（2026-09 新一代，DeepInfra 上游），价格依据：
- *   × 8 = 32 / 160 credits。缓存读价官方未确认——不猜，暂不设 inputCacheHit；
- *   计费侧按 input 全价计（不会漏账），待官方价目确认后在此补。
+ * Claude Opus 5.5 / Fable 5.1（新一代 Claude，Cloudflare 上游），价格依据：
  */
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_5_PRICE = {
   input: toPlatformCredits(4), // 32 credits
   output: toPlatformCredits(20), // 160 credits
+  cachingWrite: toPlatformCredits(5), // 40 credits
+  cachingRead: toPlatformCredits(0.2), // 1.6 credits
 } as const;
 export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE = {
   input: toPlatformCredits(10), // 80 credits
-  inputCacheHit: toPlatformCredits(2.5), // 20 credits（官方缓存读 = 输入 1/4）
   output: toPlatformCredits(50), // 400 credits
+  cachingWrite: toPlatformCredits(12.5), // 100 credits
+  cachingRead: toPlatformCredits(0.25), // 2 credits
 } as const;
 
 /**
@@ -187,21 +195,34 @@ export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE = {
 export const PLATFORM_HOSTED_GPT_6_ASTRA_PRICE = {
   input: toPlatformCredits(10), // 80 credits
   inputCacheHit: toPlatformCredits(1), // 8 credits
+  cachingRead: toPlatformCredits(1), // 8 credits（CF 官方短档 cached in）
+  cachingWrite: toPlatformCredits(12), // 96 credits（CF 官方短档 cache write）
   output: toPlatformCredits(50), // 400 credits
 } as const;
+/**
+ * 历史计费价目（gpt-5.6-sol 自 2026-10-13 起是 gpt-6.1-sol 的兼容别名）：仅供读取 /
+ * 审计既有 token 记录，**新调用一律按 6.1 目录价（16 / 0.8 / 20 / 80）计费**。
+ * 数值保持 CF 官方短档 ×8 = 16 / 2 / 25 / 80 credits，不追溯、不重算。
+ */
 export const PLATFORM_HOSTED_GPT_56_SOL_PRICE = {
-  input: toPlatformCredits(4), // 32 credits
-  inputCacheHit: toPlatformCredits(0.4), // 3.2 credits
-  output: toPlatformCredits(20), // 160 credits
+  input: toPlatformCredits(2), // 16 credits
+  inputCacheHit: toPlatformCredits(0.25), // 2 credits
+  cachingRead: toPlatformCredits(0.25), // 2 credits（CF 官方短档 cached in）
+  cachingWrite: toPlatformCredits(3.125), // 25 credits（CF 官方短档 cache write）
+  output: toPlatformCredits(10), // 80 credits
 } as const;
 export const PLATFORM_HOSTED_GPT_56_TERRA_PRICE = {
   input: toPlatformCredits(2), // 16 credits
   inputCacheHit: toPlatformCredits(0.2), // 1.6 credits
+  cachingRead: toPlatformCredits(0.2), // 1.6 credits（CF 官方短档 cached in）
+  cachingWrite: toPlatformCredits(2.5), // 20 credits（CF 官方短档 cache write）
   output: toPlatformCredits(12), // 96 credits
 } as const;
 export const PLATFORM_HOSTED_GPT_56_LUNA_PRICE = {
   input: toPlatformCredits(0.2), // 1.6 credits
   inputCacheHit: toPlatformCredits(0.02), // 0.16 credits
+  cachingRead: toPlatformCredits(0.02), // 0.16 credits（CF 官方短档 cached in）
+  cachingWrite: toPlatformCredits(0.25), // 2.0 credits（CF 官方短档 cache write）
   output: toPlatformCredits(1.2), // 9.6 credits
 } as const;
 
@@ -209,11 +230,39 @@ export const PLATFORM_HOSTED_GPT_56_LUNA_PRICE = {
  * GPT-6 Luna（2026-09-22 随 GPT-6 Sol/Luna 上线；官方模型页
  * developers.openai.com/api/docs/models/gpt-6-luna，2026-09-23 核对）：
  * （>272K 官方 2x input/cache、1.5x output 由平台吸收），× 8 = 0.8 / 0.08 / 4.0 credits。
+ *
+ * 2026-10-13：上游切到 Cloudflare AI Gateway（Responses wire，见
+ * platformHostedRoutingTable）。CF 的 canonical usage 里 input_tokens 是**总输入**
+ * ＝常规输入＋cache write＋cache read（两个缓存桶是子集），且「只写不读」的首次调用
+ * 只报 input_tokens_details.cache_write_tokens（cached_tokens=0）；实测两条日志
+ * （run-2026-10-13T09-36-02-330Z-a61x5m / …-s1mrw7）write = 2783 / 6626，read = 0。
+ * 同时显式声明后计费侧才切 canonical 4 桶（见 calculatePrice 的
+ * resolvePlatformCloudflareCacheCost）。基数与短档口径不变：不加 5% 通道费，
+ * 长上下文档差价仍由平台吸收。
  */
 export const PLATFORM_HOSTED_GPT_6_LUNA_PRICE = {
   input: toPlatformCredits(0.1), // 0.8 credits
   inputCacheHit: toPlatformCredits(0.01), // 0.08 credits
+  cachingRead: toPlatformCredits(0.01), // 0.08 credits（CF 官方短档 cached in）
+  cachingWrite: toPlatformCredits(0.125), // 1.0 credits（CF 官方短档 cache write）
   output: toPlatformCredits(0.5), // 4.0 credits
+} as const;
+
+/**
+ * GPT-6.1 Sol（2026-10-13 收进广场）：上游为 Cloudflare AI（Responses），
+ * 价格取自 CF 官方模型页 developers.cloudflare.com/ai/models/openai/gpt-6.1-sol/
+ * （2026-10-13 核对，fetch 记录：spill-fetchWebpage-c9b2fa37b105.log）：
+ *
+ * 口径（与既有 GPT 系一致，不新增算法）：
+ *   2026-10-13 复核 CF 官方模型页捕获（spill-fetchWebpage-c9b2fa37b105 /
+ * - 不加任何 CF 通道手续费/加价（不设 5% uplift）。
+ */
+export const PLATFORM_HOSTED_GPT_6_1_SOL_PRICE = {
+  input: toPlatformCredits(2), // 16 credits
+  inputCacheHit: toPlatformCredits(0.1), // 0.8 credits
+  cachingRead: toPlatformCredits(0.1), // 0.8 credits（CF 官方短档 cached in）
+  cachingWrite: toPlatformCredits(2.5), // 20 credits（CF 官方短档 cache write）
+  output: toPlatformCredits(10), // 80 credits
 } as const;
 
 /**
@@ -717,8 +766,8 @@ export const platformHostedModels = [
     supportsTool: true,
     supportsReasoningEffort: true,
   },
-  // Claude 系（真实 DeepInfra 模型，官方 id 与平台 id 同名）：旧批无缓存价，
-  // 计费按 input 全价（见 calculatePrice）；Fable 5.1 带官方缓存读价。
+  // Claude 系（Cloudflare Workers AI 上游）：全面支持 5m TTL 缓存写入与命中读取
+  // （cachingWrite / cachingRead）；官方 API 统一按 Anthropic Messages 协议暴露。
   {
     name: PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
     displayName: "Claude Sonnet 5",
@@ -800,15 +849,24 @@ export const platformHostedModels = [
     supportsReasoningEffort: true,
   },
   {
-    name: PLATFORM_HOSTED_GPT_56_SOL_MODEL,
-    displayName: "GPT-5.6 Sol",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_GPT_56_SOL_PRICE },
-    maxOutputTokens: 128_000,
+    // GPT-6.1 Sol（2026-10-13 收进广场，上游 Cloudflare AI Responses）：
+    // 事实仅取 CF 官方模型页（developers.cloudflare.com/ai/models/openai/gpt-6.1-sol/，
+    // 2026-10-13 核对）：上下文 1,050,000 tokens；请求格式 Responses / Chat Completions；
+    // 价格见 PLATFORM_HOSTED_GPT_6_1_SOL_PRICE；示例使用 reasoning.effort。
+    // 未声明视觉能力（官方页无 vision/图像输入声明）→ hasVision: false（声明式缺省，
+    // 不等同于「该模型不支持视觉」这一未经验证的能力主张——待官方页确认前不作断言）；
+    // 同理不声明 supportsTool（官方页无模型级 tools 能力声明）；
+    // 官方页未给出该模型的 max output → 不填 maxOutputTokens（沿用缺省，不猜数值）。
+    name: PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
+    displayName: "GPT-6.1 Sol",
+    hasVision: false,
+    price: { ...PLATFORM_HOSTED_GPT_6_1_SOL_PRICE },
     contextWindow: 1_050_000,
-    supportsTool: true,
     supportsReasoningEffort: true,
   },
+  // gpt-5.6-sol（2026-10-13）：旧 id 是 gpt-6.1-sol 的兼容别名（PLATFORM_MODEL_ALIASES），
+  // 不再作为可选商品上架；平台托管请求透明落到 6.1 的上游与 6.1 目录价。
+  // 旧价目常量 PLATFORM_HOSTED_GPT_56_SOL_PRICE 保留给历史记录只读重放（不追溯）。
   {
     name: PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
     displayName: "GPT-5.6 Terra",

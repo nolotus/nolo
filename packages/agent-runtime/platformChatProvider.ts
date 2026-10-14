@@ -29,6 +29,7 @@ import {
   extractToolCallsFromResponseOutput,
   toResponsesTools,
 } from "../integrations/openai/responsesHelpers";
+import { applyFunctionToolReasoningCompatibility } from "../integrations/openai/providerBodyCompatibility";
 import { providerHttpFailure } from "core/chat/providerFailureMessage";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { NOLO_CLIENT_VERSION_HEADER } from "core/clientVersionGate";
@@ -349,6 +350,10 @@ export function buildPlatformChatCompletionRequest(args: {
     ...(args.providerConfig.apiKeyHeader ? { apiKeyHeader: args.providerConfig.apiKeyHeader } : {}),
   };
 
+  const outboundBody = usesResponsesApi
+    ? body
+    : applyFunctionToolReasoningCompatibility(body, args.providerConfig.model);
+
   return {
     url: `${args.providerConfig.serverUrl}${CHAT_PROXY_PATH}`,
     init: {
@@ -378,7 +383,7 @@ export function buildPlatformChatCompletionRequest(args: {
             }
           : {}),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(outboundBody),
     },
   };
 }

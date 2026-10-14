@@ -64,7 +64,9 @@ export const resolvePlatformProxyTransport: ProviderResolver = async (ctx) => {
     return {
       model: providerConfig.model,
       complete: async (messages, options) => {
-        const requestId = crypto.randomUUID();
+        // 调用方可提供 requestId 做日志/服务端归因关联（compaction attempt
+        // 走这条）；缺省仍是每次调用一个随机 id，行为不变。
+        const requestId = options?.requestId ?? crypto.randomUUID();
         const usesResponsesApi =
           providerConfig.endpoint.includes("/responses");
         // Streaming is a client/runtime capability, not a property of the
@@ -99,6 +101,13 @@ export const resolvePlatformProxyTransport: ProviderResolver = async (ctx) => {
             request.url,
             {
               ...request.init,
+              // 取消信号必须落到 fetch init 上：否则 abort 只停止 runtime 侧
+              // 的等待，HTTP 请求仍在途，与 fallback / 下一轮请求重叠。
+              // fetchWithTransientRetry 在 init.signal.aborted 时直接抛出、
+              // 不做任何重试判定（错误分类前先看 aborted），所以 abort 既
+              // 不会被当成可重试的网络错误，也不会重放这个已发起的 POST。
+              // 注意：客户端取消不等于服务端一定停止生成或停止计费。
+              ...(options?.signal ? { signal: options.signal } : {}),
             },
             {
               sleep: deps.sleep,

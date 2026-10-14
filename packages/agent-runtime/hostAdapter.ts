@@ -86,6 +86,12 @@ export type AgentRuntimeCompleteOptions = {
    * 消息 id；见 sessionIdentity.ts，NOLO_STABLE_SESSION_IDENTITY=0 关闭）。新建对话的首轮尚未分配 id，此时为 undefined。
    */
   dialogId?: string;
+  /**
+   * 仅用于日志/归因关联的请求身份（调用方可选提供）。平台代理通道把它同时
+   * 用作本地诊断日志的 requestId 与出站 `x-request-id`（缺省自动生成一个随机
+   * id，与今天一致）。绝不进 prompt、摘要或持久化历史。
+   */
+  requestId?: string;
   onTextDelta?: (chunk: string) => void;
   /**
    * reasoning 增量回调（第一层透传）。provider 在 SSE 读取路径收到
@@ -161,6 +167,8 @@ export type AgentRuntimeSaveTurnInput = {
     /** 本次请求稳定前缀指纹（contextCompiler 同一算法），用于 prefix churn 观测。 */
     stablePrefixHash?: string;
     stablePrefixEstimatedTokens?: number;
+    /** 每次调用的缓存/成本遥测（只含数字与哈希）。 */
+    telemetry?: import("./providerCallTelemetry").ProviderCallTelemetry;
   }>;
   /** Full token consumption across tool-loop and compaction provider calls. */
   accountingUsage?: Record<string, unknown>;
@@ -220,6 +228,8 @@ export type AgentRuntimeHostAdapter = {
     titlePatchPromise?: Promise<string | null>;
   }>;
   resolveProvider(agentConfig: AgentRuntimeAgentConfig): Promise<AgentRuntimeProvider>;
+  /** Optional local-first credential broker for JIT unwrap of opaque credentials. */
+  credentialBroker?: import("./credentialBroker").CredentialBroker;
   executeTool(
     call: AgentRuntimeToolCallInput,
     opts?: {

@@ -16,6 +16,8 @@ import type {
 } from "./localRuntimeAdapterTypes";
 import type { CollapsedPasteStore } from "core/collapsedPaste";
 import type { ChromeConnectorClient } from "../../desktop-chrome-connector/chromeConnector";
+import type { OriginShellGrant } from "./originShellGrant";
+import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecution";
 
 export type CliLocalRuntimeAdapterDeps = {
   env: EnvLike;
@@ -56,6 +58,39 @@ export type CliLocalRuntimeAdapterDeps = {
    */
   parentDialogId?: string;
   /**
+   * TUI 显式注入的真实会话/授权上下文。owner-required 契约以它为权威
+   * sessionId / workspaceId 来源；parentDialogId 仅作非 TUI 调用方的回退。
+   */
+  originSession?: {
+    sessionId: string;
+    workspaceId?: string;
+  };
+  /**
+   * 分享 OAuth agent 的 shell 会话授权（块 D）：仅在 owner-required 场景由
+   * TUI 注入；首次 execShell/launchProcess 前弹确认，默认拒绝，可撤销。
+   * 非 owner 场景不注入 → 旧行为逐字不变。
+   */
+  shellGrant?: OriginShellGrant;
+  /**
+   * owner-required 场景的展示用身份信息（分享 agent 名 / owner / device）。
+   * 仅供 shellGrant 确认对话框与运行位置展示渲染，不是授权凭证。
+   */
+  ownerAgentDisplay?: {
+    agentName: string;
+    agentKey: string;
+    ownerUserId: string;
+    deviceId: string;
+    deviceName?: string;
+  };
+  /**
+   * 工具执行位置投影的消费者（块 D，运行位置展示）：owner-required 场景
+   * adapter 在首次工具调用前把 origin（本机）按 projectToolExecutionLocation
+   * 契约投影成 ToolExecutionLocation 并回调一次。宿主（TUI）渲染「工具在
+   * <deviceName>(<deviceId>) · <workspaceRoot> 执行 · <status>」。
+   * 未知/无法解析 → status: "unknown"（不猜、不静默标 ready）。
+   */
+  onToolExecutionLocation?: (location: ToolExecutionLocation) => void;
+  /**
    * startAgentRun 成功 spawn、但本轮无法盖章 parentDialogId（新会话首轮
    * dialogId 尚未生成、模型也未显式传参）时的回调。TUI 用它收集本轮
    * 「失归属」的 runId，turn 结束拿到 dialogId 后回填记录
@@ -68,12 +103,6 @@ export type PreparedAgentRuntime = {
   agentConfig: AgentRuntimeAgentConfig;
   activeAgentToolNames: string[];
   runtimeToolExecutionLimits: Record<string, unknown>;
-  localToolExecutors: Record<
-    string,
-    (
-      call: any,
-    ) => Promise<{ content: string; metadata?: Record<string, unknown> }>
-  >;
 };
 
 export const preparedAgentRuntimeCache = new Map<string, PreparedAgentRuntime>();
