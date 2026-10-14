@@ -2,6 +2,7 @@ import {
   LuBrain,
   LuBug,
   LuCode,
+  LuCoins,
   LuDownload,
   LuGauge,
   LuKey,
@@ -28,6 +29,11 @@ export const buildSettingNavItems = (t: TranslateFn) => {
       path: SettingRoutePaths.SETTING_ACCOUNT,
       label: String(t("settings.nav.account", "账户")),
       Icon: LuUser,
+    },
+    {
+      path: SettingRoutePaths.SETTING_MEDIA_ALLOWANCE,
+      label: String(t("settings.nav.mediaAllowance", "媒体额度")),
+      Icon: LuCoins,
     },
     {
       path: SettingRoutePaths.SETTING_SECURITY,

@@ -26,6 +26,8 @@ import type { ModelLayerOverride } from "../../agent-runtime/modelLayerOverride"
 import type { ContextBlockScope } from "../../agent-runtime/contextBlockScope";
 import type { TurnTokenUsage } from "./tokenUsage";
 import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
+import type { OriginShellGrant } from "./originShellGrant";
+import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecution";
 
 export type EnvLike = Record<string, string | undefined>;
 
@@ -197,6 +199,30 @@ export type RunAgentTurnOptions = {
   category?: string;
   inheritedFromDialogKey?: string;
   parentDialogId?: string;
+  /**
+   * TUI 真实会话/授权上下文（跨轮稳定）。owner-required 契约用它显式声明
+   * origin.sessionId / workspaceId，不再从 parentDialogId / workspaceRoot 派生：
+   * parentDialogId 是「父对话 id」（可能跨会话复用），而 originSession.sessionId
+   * 是本次 TUI 会话自己 mint 的稳定 id，首轮无 dialogId 时也已存在。
+   * 非 TUI 调用方缺省时 adapter 回退到 parentDialogId（旧语义，逐字不变）。
+   */
+  originSession?: {
+    sessionId: string;
+    workspaceId?: string;
+  };
+  /**
+   * 分享 OAuth agent 的 shell 会话授权（块 D）：TUI 在 owner-required 场景
+   * 注入；首次 execShell/launchProcess 前弹确认，默认拒绝，可撤销。
+   * 非 owner 场景 adapter 不触发该路径（ownerAgentContext 缺省直接跳过）。
+   */
+  shellGrant?: OriginShellGrant;
+  /**
+   * 工具执行位置消费者（块 D，运行位置展示）：owner-required 场景 adapter
+   * 把本机 origin 投影为 ToolExecutionLocation 并回调一次。TUI 渲染
+   * 「工具在 <deviceName>(<deviceId>) · <workspaceRoot> 执行 · <status>」；
+   * Web/桌面/RN 后续按同一契约接。非 owner 场景不回调。
+   */
+  onToolExecutionLocation?: (location: ToolExecutionLocation) => void;
   parentWakeOnTerminal?: boolean;
   subjectDialogKey?: string;
   subjectRefs?: AgentRunSubjectRef[];
@@ -240,6 +266,13 @@ export type RunAgentTurnOptions = {
   taskEvidence?: TaskEvidenceInput;
   fetchImpl?: CliFetchImpl;
   currentMachineIdResolver?: (env: EnvLike) => Promise<string | undefined>;
+  /**
+   * TUI 已检测到的本机原件路径（图片 / 音视频）。只用来产出**给模型的安全附件卡**
+   * （name/mimeType/size/kind，走共享 `describeAttachmentForModel`）——
+   * **绝不把 path / machineId 上行**。本机原件 part 的落库需要先有 provider 边界的
+   * user-part 投影（见 packages/cli/tui/localAttachmentParts.ts 文件头与设计 §5）。
+   */
+  localAttachmentPaths?: readonly string[];
   actionGateHandler?: (
     gate: LocalAgentActionGate,
   ) => Promise<AgentRuntimeToolResult | void>;
@@ -290,6 +323,11 @@ export type RunAgentTurnOptions = {
 export type RunAgentTurnResult = {
   exitCode: number;
   dialogId?: string;
+  /**
+   * 本轮最终 assistant 正文（local 成功路径）。后台 run 结算据此把完整报告
+   * 落盘为 `<runId>.result.md`，编排者不必再解析带 ANSI 的 .log。
+   */
+  finalText?: string;
   /**
    * 本轮以空 assistant 兜底（诊断文案收尾、不抛错）收尾时的成因
    * （length_truncated / stream_truncated / empty_completion）。

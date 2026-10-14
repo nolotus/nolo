@@ -73,6 +73,17 @@ async function runScript(script: string, forwardedArgs: string[], env: NodeJS.Pr
 async function launchTuiWorkspace(args: { scriptDir: string; env: NodeJS.ProcessEnv }) {
   const { startTuiWorkspace } = await import("./tui/readlineWorkspace");
   const { createTuiSummaryLlmCaller } = await import("./client/tuiSummaryLlmCaller");
+  const { setCliAutoCompactionSummaryFallback } = await import(
+    "./client/localRuntimeAdapter"
+  );
+  // 自动上下文压缩的摘要 fallback：复用 /compact 那条平台摘要通道，但**预算独立
+  // 且更短**。不能直接复用下面 90s 的那个实例——自动压缩是后台补注（主通道已经
+  // 超时一次），把一个 90s deadline 接到它后面会把「反复长等待」原样搬过来，而
+  // 单次 fallback 有 30s（caller 默认）上限、总等待可预期。
+  // 未登录 / 无平台通道时 caller 返回 null，自动压缩保持既有 fail-open 行为。
+  setCliAutoCompactionSummaryFallback(
+    createTuiSummaryLlmCaller(args.env, { timeoutMs: 30_000 }),
+  );
   return startTuiWorkspace({
     ...args,
     // Big dialogs produce ~300KB+ summary prompts that routinely take 25–30s+;

@@ -17,6 +17,54 @@ import { performFetchRequest } from "../chat/fetchUtils";
 import { sanitizeOutboundBody } from "../chat/toolCallArgumentGuard";
 import { updateTokensAction } from "chat/dialog/actions/updateTokensAction";
 import { extractCustomId } from "core/prefix";
+import {
+  resolveAgentCallPlan,
+  resolveClientWire,
+} from "agent-runtime/agentCallPlan";
+import { responsesJsonToChatCompletions } from "integrations/openai/responsesJsonToChatCompletions";
+
+/**
+ * 按**本次实际发出的 wire** 解析非流式回包（与出站构造同源）。
+ *
+ * 与 `ai/agent/runAgentClientLoop.ts` 的同名 helper 同一判据、同一理由：
+ * 出站形状由 `generateRequestBody` 用
+ * `resolveClientWire(resolveAgentCallPlan(agentConfig))` 选定（Responses → body.input，
+ * 其余 → body.messages），解析必须用**同一个判定**，否则 Responses wire 的原生回包
+ * （`object:"response"` / `output:[…]`）会被只读 `choices[0]` 的这里误判成「模型空响应」。
+ *
+ * 不用 resolveChatWire：它对 codex-OAuth（DB 实存 `provider:"openai" +
+ * apiKeyRef:"chatgpt"`）返回 "responses"，而该 agent 实际发出 chat.completions
+ * （服务端 codex 翻译器转换、回包是 choices 形状，见 providerRoutingContract.test.ts
+ * 的 INTENDED EXCEPTION 与 chatCodexOAuth.ts）。
+ *
+ * Responses wire 的转换复用服务端**同一份**真值 `responsesJsonToChatCompletions`，
+ * 返回 null（error 帧 / status 非 completed / 缺 output / 已是 chat 形状）→ 交下面
+ * 既有的 `missing choices[0].message.content` 错误路径，绝不静默当成功。
+ */
+const parseCompletionByOutboundWire = (
+  raw: unknown,
+  agentConfig: Agent
+): { chatJson: any; responsesWire: boolean } => {
+  const responsesWire =
+    resolveClientWire(resolveAgentCallPlan(agentConfig as any)) === "responses";
+  if (!responsesWire) return { chatJson: raw, responsesWire };
+  return { chatJson: responsesJsonToChatCompletions(raw), responsesWire };
+};
+
+/** 回包形状线索（只用于排障信息，不参与判定）。 */
+const describeResponseShape = (raw: unknown): string => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return `type=${Array.isArray(raw) ? "array" : typeof raw}`;
+  }
+  const record = raw as Record<string, unknown>;
+  return [
+    `object=${typeof record.object === "string" ? record.object : "-"}`,
+    `status=${typeof record.status === "string" ? record.status : "-"}`,
+    `output=${Array.isArray(record.output) ? "array" : typeof record.output}`,
+    `choices=${Array.isArray(record.choices) ? "array" : typeof record.choices}`,
+    `keys=${Object.keys(record).slice(0, 8).join("|")}`,
+  ].join(" ");
+};
 
 export const _executeModel = async (
   options: {
@@ -126,14 +174,25 @@ export const _executeModel = async (
         }
         throw new Error(message);
       }
-      const result = await response.json();
+      const rawResult = await response.json();
+      // 按本次实际发出的 wire 解析回包（同源判定见 parseCompletionByOutboundWire）。
+      const { chatJson: result, responsesWire } = parseCompletionByOutboundWire(
+        rawResult,
+        resolvedAgentConfig
+      );
       const content = result?.choices?.[0]?.message?.content;
       if (typeof content !== "string") {
         const upstreamMessage =
-          typeof result?.error?.message === "string" ? result.error.message : "";
+          typeof rawResult?.error?.message === "string"
+            ? rawResult.error.message
+            : "";
         throw new Error(
           upstreamMessage.trim() ||
-          "Model response missing choices[0].message.content"
+          (responsesWire
+            ? // 保留既有错误契约前缀（调用方/测试按此后缀识别「模型没给出可消费内容」），
+              // 其后附 Responses wire 的原因与形状线索 —— 上游失败回包的可见原因不能丢。
+              `Model response missing choices[0].message.content：Responses wire 回包无法归一成 chat 形状（error 帧 / status 非 completed / 缺 output）：${describeResponseShape(rawResult)}`
+            : `Model response missing choices[0].message.content：${describeResponseShape(result)}`)
         );
       }
       if (args.billingDialogKey && result?.usage) {

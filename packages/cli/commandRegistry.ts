@@ -5,6 +5,7 @@ export {
   runResolvedCommand,
 } from "./cliCommandDispatch";
 import type { CommandEntry } from "./cliCommandTypes";
+import { t, cliCommandDescription } from "./tui/i18n";
 import { getInternalCommandEntries } from "./internalCommandEntries";
 import { getScriptCommandEntries } from "./scriptCommandEntries";
 
@@ -22,8 +23,8 @@ export const GROUP_ORDER = [
   "skill",
   "agent",
   "machine",
-  "chrome",
   "browser",
+  "chrome",
   "doctor",
   "dialog",
   "memory",
@@ -58,10 +59,10 @@ export function renderHelpText() {
     "  nolo connect --ws --server-url https://api.nolo.chat --machine-key sk_machine_xxx",
     "  nolo connect --daemon --server-url https://api.nolo.chat --machine-key sk_machine_xxx",
     "  nolo machine status",
-    "  nolo chrome install",
-    "  nolo chrome status",
+    "  nolo browser install",
     "  nolo browser status",
-    '  nolo chrome upload --tab 1 --selector "#upload" --file ./photo.jpg',
+    "  nolo chrome status  # compatibility alias",
+    '  nolo browser upload --tab 1 --selector "#upload" --file ./photo.jpg',
     "  nolo doctor",
     "  nolo doctor runtime",
     "  nolo update",
@@ -114,10 +115,13 @@ export function renderCommandGroupHelpText(group: string) {
   const commands = COMMANDS.filter((entry) => entry.path[0] === group);
   if (commands.length === 0) return "";
   return [
-    `nolo ${group} commands`,
+    t("cli.groupCommandsTitle", group),
     "",
-    "Usage:",
-    ...commands.map((entry) => `  nolo ${entry.path.join(" ")}  ${entry.description}`),
+    t("cli.usageLabel"),
+    ...commands.map(
+      (entry) =>
+        `  nolo ${entry.path.join(" ")}  ${cliCommandDescription(entry.path.join(" ")) ?? entry.description}`,
+    ),
     "",
   ].join("\n");
 }
