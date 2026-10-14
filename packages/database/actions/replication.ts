@@ -16,6 +16,10 @@ import {
   isDeviceLocalOwnerId,
 } from "../authority/deviceLocal";
 import { resolveRecordAuthority } from "../authority/recordAuthority";
+import {
+  replicationTargetKey,
+  type WriteReplicationAckHandle,
+} from "./writeAck";
 import { planAuthorityReadServers } from "./readResolution";
 
 const isReadonlyPublicRecordKey = (dbKey: string): boolean =>
@@ -85,35 +89,99 @@ export const resolveAuthorityReplicationServers = ({
   });
 };
 
+/**
+ * 调度一次写入的远程复制（主服务器先写，后备服务器随后）。
+ *
+ * 返回值是各目标的 ACK 清单（WriteReplicationAckHandle）：primary 是主目标
+ * 那次写请求的 Promise，targets 按 server 维度给出每一台的那次请求，供
+ * writeAction 交给 writeAck 槽位——需要服务端 ACK 的调用方（新对话首条消息）
+ * 必须等**本次 run 目标**那台服务器的写请求，而不是固定的 servers[0]。
+ *
+ * 返回值就是「主服务器那次写请求」的 Promise（true = 服务端已确认写入，
+ * false = 服务端拒绝或网络失败），供 writeAction 交给 writeAck 槽位——
+ * 需要服务端 ACK 的调用方（如新对话首条消息）await 的是这一次真实请求，
+ * 不是另建一套同步协议。无可用服务器时返回 null。
+ */
 export const scheduleWriteReplication = (
   servers: string[],
   request: { data: any; customKey: string; userId?: string },
   state: any
-) => {
-  if (servers.length === 0) return;
-  Promise.resolve().then(async () => {
-    const [primaryServer, ...backupServers] = servers;
-    const primarySucceeded = await noloWriteRequest(primaryServer, request, state);
+): WriteReplicationAckHandle | null => {
+  if (servers.length === 0) return null;
+  const [primaryServer, ...backupServers] = servers;
+
+  // 每个目标各有一份 deferred：写请求发出**之前**就登记好条目，这样需要 ACK
+  // 的调用方（新对话首条消息：等本次 run 目标那台服务器）无论等主目标还是
+  // 后备目标，都能拿到对应的那一次 POST /database/write/ 的结果，而不是
+  // 只等 servers[0]。authority 写入顺序不变：仍然是主目标先写、后备随后。
+  const targets = new Map<string, Promise<boolean>>();
+  const settleTarget = new Map<string, (ok: boolean) => void>();
+  for (const server of servers) {
+    const key = replicationTargetKey(server);
+    if (!key || targets.has(key)) continue;
+    targets.set(
+      key,
+      new Promise<boolean>((resolve) => {
+        settleTarget.set(key, resolve);
+      })
+    );
+  }
+  const settleTargetFor = (server: string, ok: boolean): void => {
+    const key = replicationTargetKey(server);
+    const resolve = settleTarget.get(key);
+    if (!resolve) return;
+    settleTarget.delete(key);
+    resolve(ok);
+  };
+
+  const primaryAck = Promise.resolve().then(async () => {
+    let primarySucceeded = false;
+    try {
+      primarySucceeded = await noloWriteRequest(primaryServer, request, state);
+    } finally {
+      // 主目标请求无论成功、失败还是抛错，都要结算它自己的槽位，避免等待方空等。
+      settleTargetFor(primaryServer, primarySucceeded);
+    }
 
     if (!primarySucceeded) {
       console.warn(`Primary write sync failed for ${request.customKey} on ${primaryServer}`);
     }
 
     if (backupServers.length === 0) {
-      return;
+      return primarySucceeded;
     }
 
-    syncWithServers(
-      backupServers,
-      (server, requestConfig, requestState, signal) =>
-        noloWriteRequest(server, requestConfig, requestState, signal, {
-          failureLogLevel: "info",
-        }),
-      `Backup write sync failed for ${request.customKey} on`,
-      request,
-      state
-    );
+    try {
+      syncWithServers(
+        backupServers,
+        (server, requestConfig, requestState, signal) =>
+          noloWriteRequest(server, requestConfig, requestState, signal, {
+            failureLogLevel: "info",
+          }).then(
+            (ok) => {
+              settleTargetFor(server, ok);
+              return ok;
+            },
+            (error) => {
+              settleTargetFor(server, false);
+              throw error;
+            }
+          ),
+        `Backup write sync failed for ${request.customKey} on`,
+        request,
+        state
+      );
+    } catch (error) {
+      // 后备同步连发都没发出去：把还没结算的后备目标标成失败，别让等待方空等。
+      for (const server of backupServers) settleTargetFor(server, false);
+      throw error;
+    }
+
+    // 后备同步仍是即发即忘；主目标 ACK 只等主服务器落库。
+    return primarySucceeded;
   });
+
+  return { servers: [...servers], primary: primaryAck, targets };
 };
 
 export const resolveTenantReplicationServers = ({

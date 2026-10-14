@@ -8,6 +8,7 @@ import {
   resolveAuthorityReplicationServers,
   scheduleWriteReplication,
 } from "./replication";
+import { beginWriteAck, type PendingWriteAck } from "./writeAck";
 import { actionToast as toast } from "./actionToast";
 
 const SPACE_MEMBER_PREFIX = "space-member-";
@@ -97,6 +98,7 @@ export const writeAction = async (
     );
   }
 
+  let writeAck: PendingWriteAck | null = null;
   try {
     // 3. 规范化数据（时间字段 / dbKey / userId）
     const willSaveData = normalizeTimeFields({
@@ -104,6 +106,12 @@ export const writeAction = async (
       dbKey: customKey,
       userId: recordUserId,
     });
+
+    // 3.5 登记本条写入的服务端 ACK 槽位。
+    // 必须在第一个 await 之前：dispatch(write(...)) 同步返回时槽位已存在，
+    // 需要 ACK 的调用方（新对话首条消息：发 run 前 await 对话记录的写入确认）
+    // 才能拿到这次真实写请求的 Promise，而不是另外轮询服务器。
+    writeAck = beginWriteAck(customKey);
 
     // 4. 本地保存
     await saveToClientDb(clientDb, customKey, willSaveData);
@@ -128,8 +136,17 @@ export const writeAction = async (
       logger.debug(
         `[writeAction] Initiating background sync for key: ${customKey} to ${servers.length} servers.`
       );
-      scheduleWriteReplication(servers, serverWriteConfig, state);
+      // scheduleWriteReplication 返回的正是主服务器那次写请求的 Promise：
+      // 复制本身仍是即发即忘（调用方不 await 它），只是把它交给 ACK 槽位，
+      // 让需要服务端确认的路径可以 await 这一次真实请求。
+      const replication = scheduleWriteReplication(
+        servers,
+        serverWriteConfig,
+        state
+      );
+      writeAck.settleWithReplication(replication);
     } else {
+      writeAck.markNotReplicated();
       logger.warn(
         { customKey },
         "[writeAction] No available servers, data only saved locally."
@@ -138,6 +155,7 @@ export const writeAction = async (
 
     return willSaveData;
   } catch (error: any) {
+    writeAck?.markAborted();
     const errorMessage = `Write action failed for ${customKey}: ${error?.message || "Unknown error"
       }`;
     logger.error({ error }, "[writeAction] Error");

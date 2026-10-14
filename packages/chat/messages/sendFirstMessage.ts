@@ -8,6 +8,7 @@ import { waitForFileReady, compressImageFile } from "app/utils/imageUtils";
 import { readFileAsDataURL } from "app/utils/fileReaders";
 import type { RootState } from "app/store";
 import { buildMessageFileContentUrl, isLocalFileContentUrl } from "./fileUrl";
+import { awaitFirstMessageDialogWriteAck } from "./firstMessageWriteAck";
 import type { PendingAttachmentMessagePart } from "./pendingAttachmentParts";
 
 type MessagePart =
@@ -26,6 +27,16 @@ export interface SendFirstMessageParams {
     targetAgentKey?: string;
     extraParts?: PendingAttachmentMessagePart[];
     quickChatPerfStartedAt?: number;
+    /**
+     * 仅新建对话的首条消息传 true：在 dispatch run 之前，有界地等待该对话
+     * 记录的**服务端**写入确认（见 chat/messages/firstMessageWriteAck.ts）。
+     *
+     * 为什么是 opt-in：已有对话的普通发送没有任何待确认的对话记录写入，
+     * 一旦默认开启就等于给所有发送都加一次检查；这里显式标出「这是新对话
+     * 首条消息」这一唯一需要闸门的语义。该 dialogKey 上没有 in-flight 写入
+     * 时等待立即返回（零延迟），超时（1500ms）也照旧继续发 run。
+     */
+    awaitDialogWriteAck?: boolean;
 }
 
 const logQuickChatPerfStage = (
@@ -288,6 +299,17 @@ export const sendFirstMessage =
                 finalParts.length === 1 && finalParts[0].type === "text"
                     ? (finalParts[0] as any).text
                     : finalParts;
+
+            if (params.awaitDialogWriteAck && params.dialogKey) {
+                // 新对话首条消息：先有界地等服务端确认对话记录已落库，再发 run。
+                // 等的是**本次 run 目标**（currentServer，与 /api/agent/run 同一个
+                // 服务器）那份写请求的 ACK，而不是固定等复制计划第一台：authority
+                // override 时两者可能不是同一台。没有 in-flight 写入时立即返回
+                // （零延迟）；1500ms 超时照旧继续，只多打一条 [FirstMessageWriteAck] 日志。
+                await awaitFirstMessageDialogWriteAck(params.dialogKey, {
+                    targetServer: currentServer,
+                });
+            }
 
             console.log("[QuickChatTrace] handleSendMessage dispatch", {
                 dialogKey: params.dialogKey,

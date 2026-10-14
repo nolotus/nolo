@@ -579,6 +579,9 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
             imageFiles: filesArray,
             extraParts: extraParts as any,
             quickChatPerfStartedAt: startedAt,
+            // 新建对话：等对话记录的服务端写入确认后再发 run，避免服务端
+            // 查不到记录而走全库扫描（TTFB 5.6–7.9s）。有界 1500ms，超时照旧继续。
+            awaitDialogWriteAck: true,
             // Auto dialogs do not persist the routed Agent key; pass the
             // resolved target only for this turn.
             targetAgentKey: effectiveAgentId,
