@@ -885,6 +885,21 @@ export function isAgentAutomationOwnerIndexKey(key: string): boolean {
 }
 
 /**
+ * `agent-automation-{userId}-{automationId}` → automationId（**末段**）。
+ * userId 自身可能含 `-`，故只能取最后一段：写入端 createAgentAutomationKey 用
+ * createKey 拼的就是这个布局，与下面 delete ops 的解析同一条约定。
+ * 非 agent-automation 键或解析不出末段时返回 ""（调用方按「无内嵌 id 可比对」处理）。
+ */
+export function parseAgentAutomationIdFromKey(key: string): string {
+  if (typeof key !== "string") return "";
+  const trimmed = key.trim();
+  if (!trimmed || !isAgentAutomationKey(trimmed)) return "";
+  const withoutPrefix = trimmed.slice(`${DataType.AGENT_AUTOMATION}-`.length);
+  const lastDash = withoutPrefix.lastIndexOf("-");
+  return lastDash >= 0 ? withoutPrefix.slice(lastDash + 1) : "";
+}
+
+/**
  * Owner secondary index delete ops for an agent-automation primary record.
  * Safe no-op when ownerAgentKey / automationId cannot be resolved.
  */
