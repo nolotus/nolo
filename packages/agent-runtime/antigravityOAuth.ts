@@ -89,9 +89,9 @@ export type RefreshAntigravityTokenDeps = {
   now?: () => number;
 };
 
-/** 官方 hub 版本来源：antigravity-hub 更新清单 latest-arm64-mac.yml（2026-09-30: 2.18.1）。 */
+/** 默认 hub 版本。2026-10-13: 2.23.1，来源 https://antigravity.google/docs/changelog（此前 2026-09-30 抄自 antigravity-hub 清单 latest-arm64-mac.yml 的 2.18.1）。可用 NOLO_ANTIGRAVITY_VERSION 覆盖。 */
 export function getAntigravityUserAgent(): string {
-  const version = process.env.NOLO_ANTIGRAVITY_VERSION || "2.18.1";
+  const version = process.env.NOLO_ANTIGRAVITY_VERSION || "2.23.1";
   const os = process.platform === "win32" ? "windows" : process.platform;
   const arch =
     process.arch === "x64" ? "amd64" : process.arch === "ia32" ? "386" : process.arch;

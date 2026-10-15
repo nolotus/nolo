@@ -1,4 +1,13 @@
 
+## 0.107.0
+
+## 0.107.0 (2026-10-15)
+
+### Features
+
+* **agent:** 平台接入 Gemini 4 Argon(alpha→main 内容移植) ([0d3d6d7](https://github.com/nolotus/bun-nolo/commit/0d3d6d781f17177aa54247f3f30c69168bdd47af))
+
+
 ## 0.106.2
 
 ## 0.106.2 (2026-10-15)
