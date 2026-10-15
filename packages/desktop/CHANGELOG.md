@@ -1,4 +1,25 @@
 
+## 0.111.0
+
+## 0.111.0 (2026-10-15)
+
+### Features
+
+* **agent:** show caller titles on agent run cards ([b1d3512](https://github.com/nolotus/bun-nolo/commit/b1d35121058b8452c659ea88a2cbc8120fbe2c9c))
+* **cli:** port shared bilingual CLI and TUI copy ([5d4f2da](https://github.com/nolotus/bun-nolo/commit/5d4f2da63a0cc2dde8c90e035b05cde60cd2af3b))
+* **port:** bring alpha content line into main ([0cecf02](https://github.com/nolotus/bun-nolo/commit/0cecf028f7e0269a2dbfb913e20a1c26fb75fa7f))
+
+### Bug Fixes
+
+* **agent:** keep empty workspace roots out of merged tool policy ([f8c3f48](https://github.com/nolotus/bun-nolo/commit/f8c3f489067dbae7695b2a366f6222beae0190ab))
+* **cli:** localize local image job errors ([7c99f3f](https://github.com/nolotus/bun-nolo/commit/7c99f3fb33c430af9fd8dfb73334e7dd8403d6ba))
+* **runtime:** pin stable Effect 4 dependency ([9606232](https://github.com/nolotus/bun-nolo/commit/9606232fbf9c0ac87c60d9d4ba4027e00cb083de))
+
+### Performance Improvements
+
+* **memory:** bound detached promotion and shadow recall work ([974dcb8](https://github.com/nolotus/bun-nolo/commit/974dcb8106405b425365e50d9e911dddd129467d))
+
+
 ## 0.110.1
 
 ## 0.110.1 (2026-10-15)

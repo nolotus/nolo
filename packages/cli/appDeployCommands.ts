@@ -11,6 +11,7 @@ import {
   formatFields,
   type AppCommandDeps,
 } from "./appCommandShared";
+import { t } from "./tui/i18n";
 
 function printAppDeployUsage() {
   process.stdout.write(`Usage:
@@ -49,7 +50,7 @@ export function parseDeployArgs(args: string[]): {
   const deployTarget = readOption(args, "--deploy-target");
 
   if (!name && !appId) {
-    return { body: {}, error: "必须提供 --name 或 --app-id" };
+    return { body: {}, error: t("app.deploy.error.nameOrAppIdRequired") };
   }
 
   let code: string | undefined;
@@ -58,7 +59,10 @@ export function parseDeployArgs(args: string[]): {
     try {
       code = readFileSync(codeFile, "utf-8");
     } catch (error) {
-      return { body: {}, error: `无法读取 --code-file: ${(error as Error).message}` };
+      return {
+      body: {},
+      error: t("app.deploy.error.codeFileUnreadable", (error as Error).message),
+    };
     }
   }
 
@@ -67,19 +71,22 @@ export function parseDeployArgs(args: string[]): {
     try {
       const parsed = JSON.parse(filesFlag);
       if (!Array.isArray(parsed)) {
-        return { body: {}, error: "--files 必须是 JSON 数组" };
+        return { body: {}, error: t("app.deploy.error.filesMustBeArray") };
       }
       files = parsed.map((f: Record<string, unknown>) => ({
         name: String(f.name ?? ""),
         code: String(f.code ?? ""),
       }));
     } catch (error) {
-      return { body: {}, error: `--files 解析失败: ${(error as Error).message}` };
+      return {
+      body: {},
+      error: t("app.deploy.error.filesParseFailed", (error as Error).message),
+    };
     }
   }
 
   if (!code && !files && !appId) {
-    return { body: {}, error: "必须提供 --code / --code-file / --files 之一" };
+    return { body: {}, error: t("app.deploy.error.codeRequired") };
   }
 
   const body = pickDefined({ name, appId, code, files, framework, spaceId, deployTarget });
@@ -95,7 +102,7 @@ export async function runAppDeployCommand(args: string[], deps: AppCommandDeps):
   const { body, error } = parseDeployArgs(args);
   if (error) {
     printAppDeployUsage();
-    process.stderr.write(`\n错误: ${error}\n`);
+    process.stderr.write(t("app.errorWithDetail", error));
     return 1;
   }
 
@@ -104,7 +111,7 @@ export async function runAppDeployCommand(args: string[], deps: AppCommandDeps):
     const data = await cliApiRequest({ serverUrl, authToken, path: "/api/app/deploy", body });
 
     outputResult(data, hasFlag(args, "--json"), () => {
-      process.stdout.write("部署成功\n");
+      process.stdout.write(t("app.deploySucceeded"));
       const fields: Array<[string, unknown]> = [];
       if (data.jobId) fields.push(["jobId", data.jobId]);
       if (data.url) fields.push(["url", data.url]);

@@ -2,25 +2,25 @@
  * Natural tone matching guest home redesign (2026-10-04):
  * - Evening sky gradient on hero; warm paper background;
  * - Serif headings like a field journal;
- * - Quiet cards on warm white (#fffdf8) with soft shadow;
+ * - Quiet cards on warm white (#fffefb) with soft shadow;
  * - Solid ink capsule primary button, thin bordered secondary.
  ────────────────────────────────────────────────────────── */
 
 .QuickStartGuidePage {
   --hl-ink: #1f2733;
   --hl-muted: #5b6472;
-  --hl-paper: #f7f3ec;
-  --hl-warm: #f3e3d0;
+  --hl-paper: #faf8f4;
+  --hl-warm: #f6ece0;
   --hl-line: rgba(31, 39, 51, 0.1);
   --hl-blue: #2879cd;
   --hl-green: #3f7a4c;
-  --hl-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
+  --hl-serif: var(--nolo-serif, "Nolo Serif Latin"), "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
 
   box-sizing: border-box;
   width: 100%;
   min-height: 100%;
   flex-shrink: 0;
-  background: #f7f3ec;
+  background: #faf8f4;
   color: #1f2733;
 }
 
@@ -36,7 +36,7 @@
   position: relative;
   padding: clamp(36px, 5vw, 52px) clamp(24px, 4vw, 44px);
   border-radius: 24px;
-  background: linear-gradient(180deg, #d3dfeb 0%, #e9e4df 48%, #f1d2b4 82%, #eebf98 100%);
+  background: linear-gradient(180deg, #d3dfeb 0%, #ece9e5 48%, #f4ddc6 82%, #f1cdae 100%);
   box-shadow: 0 12px 32px -20px rgba(31, 39, 51, 0.1);
   margin-bottom: 32px;
 }
@@ -76,7 +76,7 @@
 .QuickStartGuidePage__section {
   padding: clamp(22px, 3vw, 28px) clamp(22px, 3.5vw, 32px);
   border-radius: 20px;
-  background: #fffdf8;
+  background: #fffefb;
   border: 1px solid rgba(31, 39, 51, 0.08);
   box-shadow: 0 4px 16px -8px rgba(31, 39, 51, 0.06);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
@@ -148,6 +148,6 @@
 }
 
 .QuickStartGuidePage__btnSecondary:hover {
-  background: #fffdf8;
+  background: #fffefb;
   border-color: rgba(31, 39, 51, 0.5);
 }

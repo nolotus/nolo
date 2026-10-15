@@ -31,6 +31,8 @@
 export type AccumulatedToolCall = {
   id: string;
   type: "function";
+  thought_signature?: string;
+  extra_content?: { google: { thought_signature: string } };
   function: {
     name: string;
     arguments: string;
@@ -47,6 +49,8 @@ export type AccumulatedToolCall = {
 export type ToolCallSlot = {
   id: string;
   type: "function";
+  thought_signature?: string;
+  extra_content?: { google: { thought_signature: string } };
   function: {
     name: string;
     arguments: string | object;
@@ -103,6 +107,16 @@ export function accumulateToolCallDelta(
     const wireIndex = typeof delta.index === "number" ? delta.index : undefined;
     const current = accumulator.slots[resolveSlot(accumulator, deltaId, wireIndex)]!;
 
+    // Gemini's OpenAI-compatible API puts the opaque signature in
+    // extra_content.google; native bridges may expose thought_signature.
+    // It is a whole value, not a concatenated text delta.
+    if (typeof delta.thought_signature === "string") {
+      current.thought_signature = delta.thought_signature;
+    }
+    const signature = (delta.extra_content as any)?.google?.thought_signature;
+    if (typeof signature === "string") {
+      current.extra_content = { google: { thought_signature: signature } };
+    }
     const fn = delta.function;
     if (fn && typeof fn === "object") {
       const functionDelta = fn as { name?: string; arguments?: string | object };
@@ -127,7 +141,9 @@ export function finalizeAccumulatedToolCalls(
 ): AccumulatedToolCall[] {
   return accumulator.slots
     .filter((slot) => slot.function.name)
-    .map(({ id, type, function: fn }) => ({
+    .map(({ id, type, function: fn, thought_signature, extra_content }) => ({
+      ...(thought_signature !== undefined ? { thought_signature } : {}),
+      ...(extra_content ? { extra_content } : {}),
       id,
       type,
       function: {

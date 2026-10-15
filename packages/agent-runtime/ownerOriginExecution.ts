@@ -127,6 +127,16 @@ function only(value: Record<string, unknown>, keys: string[]): boolean {
  * workspaceShell.findWorkspaceShellEscapeToken. That module depends on host IO,
  * so do not import it into this cross-end contract. No node:path/fs dependency.
  * Reject dot segments instead of resolving them or claiming canonicality.
+ *
+ * Boundary split (server projection vs. end-side local resolution):
+ * this check is the server/projection-side contract — a value reaching
+ * projectToolExecutionLocation with a relative or dot-segment path MUST be
+ * refused there (non-canonical input is never silently normalized at the
+ * projection layer). An end host that resolves the same path locally (realpath,
+ * same canonicalization source as its tool actions) instead surfaces the
+ * resulting canonical path; that is the endorsed outcome, not a required
+ * downgrade to {status:"unknown"}.
+ *
  * Do not impose cwd-within-root here: these are identity snapshots, not path
  * capabilities. Containment and any external-access approval belong to the
  * origin host's existing execution policy (including symlink-aware checks).

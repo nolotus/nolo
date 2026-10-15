@@ -1,8 +1,9 @@
 import { isRecord } from "core/isRecord";
 import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
 import { asNonEmptyStringArray } from "core/stringArray";
+import { asOptionalTrimmedString } from "core/optionalString";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
-import type { AgentRuntimeHost, AgentRuntimeToolPolicy } from "./types";
+import type { AgentRuntimeHost, AgentRuntimeToolPolicy, AgentRuntimeWorkspaceMode } from "./types";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -21,10 +22,54 @@ function mergeRecords<T extends Record<string, unknown>>(
   } as T;
 }
 
+function normalizeWorkspacePolicy(value: unknown): AgentRuntimeToolPolicy["workspace"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const mode: AgentRuntimeWorkspaceMode | undefined =
+    value.mode === "none" || value.mode === "current" || value.mode === "lease"
+      ? value.mode
+      : undefined;
+  const readableRoots = unique(asNonEmptyStringArray(value.readableRoots));
+  const writableRoots = unique(asNonEmptyStringArray(value.writableRoots));
+  const cwd = asOptionalTrimmedString(value.cwd);
+  const normalized = {
+    ...(mode ? { mode } : {}),
+    ...(readableRoots.length ? { readableRoots } : {}),
+    ...(writableRoots.length ? { writableRoots } : {}),
+    ...(cwd ? { cwd } : {}),
+  };
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+/**
+ * Merge two workspace policies keeping the same invariant as
+ * `normalizeWorkspacePolicy`: empty root lists and absent keys stay absent
+ * instead of being materialized as `readableRoots: []`.
+ */
+function mergeWorkspacePolicy(
+  base: AgentRuntimeToolPolicy["workspace"],
+  override: AgentRuntimeToolPolicy["workspace"],
+): AgentRuntimeToolPolicy["workspace"] {
+  const readableRoots = unique([
+    ...(base?.readableRoots ?? []),
+    ...(override?.readableRoots ?? []),
+  ]);
+  const writableRoots = unique([
+    ...(base?.writableRoots ?? []),
+    ...(override?.writableRoots ?? []),
+  ]);
+  return {
+    ...(base ?? {}),
+    ...(override ?? {}),
+    ...(readableRoots.length ? { readableRoots } : {}),
+    ...(writableRoots.length ? { writableRoots } : {}),
+  };
+}
+
 export function normalizeAgentRuntimeToolPolicy(
   value: unknown,
 ): AgentRuntimeToolPolicy | undefined {
   if (!isRecord(value)) return undefined;
+  const workspace = normalizeWorkspacePolicy(value.workspace);
   return {
     version: 1,
     ...(asNonEmptyStringArray(value.agentTools).length
@@ -33,7 +78,7 @@ export function normalizeAgentRuntimeToolPolicy(
     ...(asNonEmptyStringArray(value.runtimeTools).length
       ? { runtimeTools: unique(asNonEmptyStringArray(value.runtimeTools)) }
       : {}),
-    ...(isRecord(value.workspace) ? { workspace: { ...value.workspace } } : {}),
+    ...(workspace ? { workspace } : {}),
     ...(isRecord(value.shell) ? { shell: { ...value.shell } } : {}),
     ...(isRecord(value.isolation) ? { isolation: { ...value.isolation } } : {}),
     ...(isRecord(value.git) ? { git: { ...value.git } } : {}),
@@ -71,14 +116,7 @@ export function mergeAgentRuntimeToolPolicies(
       ...(base?.runtimeTools ?? []),
       ...(override?.runtimeTools ?? []),
     ]),
-    workspace: {
-      ...(base?.workspace ?? {}),
-      ...(override?.workspace ?? {}),
-      writableRoots: unique([
-        ...(base?.workspace?.writableRoots ?? []),
-        ...(override?.workspace?.writableRoots ?? []),
-      ]),
-    },
+    workspace: mergeWorkspacePolicy(base?.workspace, override?.workspace),
     shell: mergeRecords(base?.shell, override?.shell),
     isolation: mergeRecords(base?.isolation, override?.isolation),
     git: mergeRecords(base?.git, override?.git),

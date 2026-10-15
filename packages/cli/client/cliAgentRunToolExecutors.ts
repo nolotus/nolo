@@ -11,6 +11,7 @@
 // 返回格式与 web 端 executor 一致：{ content: JSON(rawData), metadata.displayData }，
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
+import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import * as nodeFs from "node:fs";
 import { waitForRunTerminal } from "../../agent-runtime/waitForRunTerminal";
 import { existsSync, readFileSync } from "node:fs";
@@ -51,7 +52,7 @@ import {
   isRunTerminalStatus,
 } from "../agentRunControl";
 import { readTimestamp } from "./agentRunSnapshot";
-import { agentRunCardLabels } from "../tui/i18n";
+import { agentRunCardLabels, t } from "../tui/i18n";
 import {
   aggregateBatch,
   type BatchRunSummary,
@@ -91,6 +92,8 @@ export type CliAgentRunToolExecutorDeps = {
    * 缺省或返回 undefined = 凭证归属**未知**（守卫按未知处理，不是「独立」）。
    */
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
+  /** 当前主进程运行的 agentKey（供 startAgentRun 缺省回填自身派发用）。 */
+  currentAgentKey?: string | null;
 } & AgentRunControlDeps;
 
 const noopOutput: OutputLike = { write: () => {} };
@@ -130,6 +133,15 @@ const tailFile = (
 
 const resolveTodoStore = (deps: CliAgentRunToolExecutorDeps): AgentRunTodoStore =>
   deps.todoStore ?? createFileSystemTodoStore({ env: deps.env, homedir: deps.homedir, fs: deps.fs as any });
+
+const boundedOutputPage = <T>(items: T[], total: number, offset: number, budget = 8 * 1024) => {
+  const bytes = (page: T[]) => new TextEncoder().encode(JSON.stringify({ todos: page, count: page.length, total, hasMore: offset + page.length < total, nextOffset: offset + page.length })).byteLength;
+  if (items.length > 0 && bytes([items[0]]) > budget) {
+    throw new Error("output_item_too_large: first todo exceeds 8 KiB output budget");
+  }
+  while (items.length > 1 && bytes(items) > budget) items.pop();
+  return { items, hasMore: offset + items.length < total, nextOffset: offset + items.length };
+};
 
 const resolveNowMs = (deps: CliAgentRunToolExecutorDeps): number =>
   typeof deps.nowMs === "function" ? deps.nowMs() : Date.now();
@@ -197,6 +209,9 @@ function buildRunStatusPayload(
       pid: reconciled.pid ?? null,
       agentKey: reconciled.agentKey,
       ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
+      // Title rides along so transcript re-render (toolOutput) and the run
+      // panel can show the caller's own words instead of a key/name guess.
+      ...(reconciled.title ? { title: reconciled.title } : {}),
       startedAt: reconciled.startedAt,
       endedAt: reconciled.endedAt ?? null,
       exitCode: reconciled.exitCode ?? null,
@@ -209,6 +224,11 @@ function buildRunStatusPayload(
       // 日志落盘路径始终暴露：stalled/failed 且 dialogId 缺失（如 ephemeral）
       // 时 logTail 只能靠它读，不能只留在进程内存。
       ...(reconciled.logPath ? { logPath: reconciled.logPath } : {}),
+      // 完整报告文件必须紧挨 logPath 排在载荷前段：宿主对长工具结果做「保留
+      // 首尾、省略中段」，而调用方一带 tailLines 就会把 logTail 顶到末尾——
+      // 排在 2000 字 lastAssistantText 之后的键会被整段省略，模型连路径都看
+      // 不到。挂在头部才能保证「结论在哪」永远可见。
+      ...(reconciled.resultFile ? { resultFile: reconciled.resultFile } : {}),
       ...(typeof reconciled.toolCallCount === "number"
         ? { toolCallCount: reconciled.toolCallCount }
         : {}),
@@ -240,6 +260,7 @@ function buildRunStatusPayload(
     metadata: {
       displayData: formatStatusRunCard(name, reconciled.status, {
         runId: reconciled.runId,
+        title: normalizeRunTitle(reconciled.title),
         timing: {
           startedAt: readTimestamp(reconciled.startedAt),
           finishedAt: readTimestamp(reconciled.endedAt),
@@ -262,8 +283,8 @@ function buildRunStatusPayload(
  * 里**仍未终态**的 run 做凭证组冲突检测：
  * - 候选或任一活跃 run 的 credentialGroup 未知 → 拒绝（未知 ≠ 独立，
  *   无法证明不共用上游 key），除非显式 allowUnknownCredential:true；
- * - 两侧 credentialGroup 已知且相同 → 同一凭证并发扇出，拒绝，除非显式
- *   allowCredentialConcurrency:true（调用方确认该凭证支持并发）；
+ * - 两侧 credentialGroup 已知且相同 → 同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），除非显式
+ *   allowCredentialConcurrency:false（调用方显式收紧禁止并发）；
  * - 已知且不同 → 放行。
  *
  * 返回值是解析出的候选 credentialGroup（可能 undefined），由调用方写进
@@ -279,6 +300,7 @@ async function assertCredentialFanoutAllowed(
     /** 调用方（模型）照抄 listAgents 的 credentialGroup；解析器失败时的兜底。 */
     credentialGroup?: string;
     allowUnknownCredential?: boolean;
+    /** 显式禁止同一 credentialGroup 的并发（默认允许）。 */
     allowCredentialConcurrency?: boolean;
   }
 ): Promise<string | undefined> {
@@ -319,7 +341,7 @@ async function assertCredentialFanoutAllowed(
     active,
     candidate: { agentKey: args.agentKey, credentialGroup: candidateGroup },
     allowUnknownCredential: args.allowUnknownCredential === true,
-    allowCredentialConcurrency: args.allowCredentialConcurrency === true,
+    allowCredentialConcurrency: args.allowCredentialConcurrency,
   });
   if (!verdict.allowed) throw new Error(verdict.message);
   return candidateGroup;
@@ -328,17 +350,31 @@ async function assertCredentialFanoutAllowed(
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
-    const agentKey = typeof args.agentKey === "string" ? args.agentKey.trim() : "";
+    const rawAgentKey = typeof args.agentKey === "string" ? args.agentKey.trim() : "";
+    const agentKey =
+      (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
+        ? (deps.currentAgentKey ?? rawAgentKey)
+        : rawAgentKey;
     const task = typeof args.task === "string" ? args.task.trim() : "";
-    if (!agentKey) throw new Error("startAgentRun: 缺少 agentKey 参数。");
-    if (!task) throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
+    const runTitle = normalizeRunTitle(args.title);
+    if (!agentKey) throw new Error(t("agentRunTool.missingAgentKey"));
+    if (!task) throw new Error(t("agentRunTool.missingTask"));
+    if (!runTitle) throw new Error(`startAgentRun 需要非空的一行标题（≤60 字）`);
     const nowMs = resolveNowMs(deps);
+
+    const effectiveAllowCredentialConcurrency =
+      args.allowCredentialConcurrency ?? true;
 
     const message = buildDelegatedTaskContent(task, args.input);
     const payloadMetrics = calculateDelegatedPayloadMetrics(task, args.input, message);
 
     // --msg-file 占位会被 spawnLocalBackgroundRun 的 rewriteMsgFileArg 改写为
     // runs 目录里的内容快照（~/.nolo/runs/<runId>.msg.md）；--bg 会被子进程剥离。
+    // Read-only is declared by the caller, never guessed from task wording:
+    // a keyword heuristic silently flipped reviewers between "no tools" and
+    // "write access" depending on phrasing.
+    const isReadOnlyTask = args.readOnly === true;
+
     const rawArgs = [
       "--agent",
       agentKey,
@@ -348,6 +384,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // 非持久化派发（review 等一次性任务）：透传 --ephemeral，run 完成后不留
       // dialog 记录。与 web 端 runAgentBackground 的 ephemeral: true 对齐。
       ...(args.ephemeral === true ? ["--ephemeral"] : []),
+      // 只读角色安全收敛：审查类任务物理剥离写/改/删工具，遵循最小特权原则。
+      ...(isReadOnlyTask ? ["--read-only"] : []),
     ];
 
     const agentName =
@@ -362,8 +400,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? args.batchId.trim()
         : undefined;
 
-    // 并发扇出凭证隔离：同 batch / 同父对话并发时，未知凭证组与同凭证组冲突
-    // 一律拒绝（除非显式 allowUnknownCredential / allowCredentialConcurrency）。
+    // 并发扇出凭证隔离：同 batch / 同父对话并发时，同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），
+    // 除非显式 allowCredentialConcurrency: false 收紧；未知凭证组冲突一律拒绝（除非显式 allowUnknownCredential）。
     // 解析结果写进 run 记录。
     const parentDialogId =
       typeof args.parentDialogId === "string" && args.parentDialogId.trim()
@@ -377,7 +415,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? { credentialGroup: args.credentialGroup.trim() }
         : {}),
       allowUnknownCredential: args.allowUnknownCredential === true,
-      allowCredentialConcurrency: args.allowCredentialConcurrency === true,
+      allowCredentialConcurrency: effectiveAllowCredentialConcurrency,
     });
 
     const dodCommands = Array.isArray(args.dodCommands)
@@ -399,6 +437,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         cliEntrypointPath: deps.cliEntrypoint,
         agentKey,
         ...(agentName ? { agentName } : {}),
+        ...(runTitle ? { title: runTitle } : {}),
         ...(batchId ? { batchId } : {}),
         ...(credentialGroup ? { credentialGroup } : {}),
         ...(parentDialogId ? { parentDialogId } : {}),
@@ -411,6 +450,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       deps,
     );
 
+    // title 走卡片自己的参数，不进 label：它是显示行不是名字，进了 label 会
+    // 把 key 顶掉、又让 identity 行与 title 行重复。
     const displayName = resolveRunLabel({ agentName, agentKey, runId });
     const labels = agentRunCardLabels();
     // Same reason as the server-side executor: without the task text two
@@ -457,18 +498,21 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     return {
       content: JSON.stringify({
         runId,
+        agentKey,
         status: "running",
         // batchId is always returned so the caller can later filter by it —
         // even when the caller didn't supply one, a fresh id was generated.
         batchId: resolvedBatchId,
         ...(agentName ? { agentName } : {}),
         ...(taskPreview ? { taskPreview } : {}),
+        ...(runTitle ? { title: runTitle } : {}),
         payloadMetrics,
       }),
       metadata: {
         displayData: formatStartRunCard(displayName, "running", {
           task: taskPreview,
           runId,
+          ...(runTitle ? { title: runTitle } : {}),
           labels,
         }),
         payloadMetrics,
@@ -485,7 +529,7 @@ async function spawnContinuationRun(
   // ephemeral run 只有合成的 eph-* dialogId（不落盘、永远读不到）：不再用
   // dialogId 做 guard，否则 ephemeral 续跑会直接抛错；非 ephemeral 的保护不变。
   if (!reconciled.ephemeral && !reconciled.dialogId) {
-    throw new Error("该 run 无关联 dialog，无法续跑。");
+    throw new Error(t("agentRunTool.noDialogToContinue"));
   }
 
   const agentKey = reconciled.agentKey;
@@ -504,7 +548,14 @@ async function spawnContinuationRun(
     "--bg",
     ...(reconciled.ephemeral ? ["--ephemeral"] : []),
   ];
+  // 续跑产生的新 run 记录原 runId（写进 record 与 .result.md 头 continuedFrom）。
+  const continuedFrom = reconciled.runId;
 
+  // 续跑不新派 title——延续原 run 的标题。必须在 spawn 前算好：
+  // spawnLocalBackgroundRun 的 input.title 会被写进新 run 的注册记录
+  // （agentRunControl.ts record.title），没有它注册表/poller/completion 卡
+  // 全部掉回 key。
+  const continuedTitle = normalizeRunTitle(reconciled.title);
   const { runId: newRunId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
     {
       rawArgs,
@@ -512,6 +563,7 @@ async function spawnContinuationRun(
       cliEntrypointPath: deps.cliEntrypoint,
       agentKey,
       ...(agentName ? { agentName } : {}),
+      ...(continuedTitle ? { title: continuedTitle } : {}),
       ...(reconciled.batchId ? { batchId: reconciled.batchId } : {}),
       ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
       // 续跑继承原 run 的凭证组（同一 agent），供并发扇出守卫判定。
@@ -519,12 +571,19 @@ async function spawnContinuationRun(
       cwd: reconciled.cwd ?? deps.cwd ?? process.cwd(),
       message: userInput,
       ...(reconciled.ephemeral ? { ephemeral: true } : {}),
+      continuedFrom,
       output: noopOutput,
     },
     deps,
   );
 
-  const displayName = resolveRunLabel({ agentName, agentKey, runId: newRunId });
+  // title 走卡片自己的参数，不进 label：label 只吃名字字段，title 顶掉
+  // key 反而丢执行者信息。
+  const displayName = resolveRunLabel({
+    agentName,
+    agentKey,
+    runId: newRunId,
+  });
   const labels = agentRunCardLabels();
   const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
 
@@ -540,12 +599,15 @@ async function spawnContinuationRun(
       status: "running",
       ...(agentName ? { agentName } : {}),
       ...(resolvedBatchId ? { batchId: resolvedBatchId } : {}),
+      // 续跑的 title 继承自原 run——随 content 透出，TUI 重建卡时才不会丢。
+      ...(continuedTitle ? { title: continuedTitle } : {}),
       ...(taskPreview ? { taskPreview } : {}),
     }),
     metadata: {
       displayData: formatStartRunCard(displayName, "running", {
         task: taskPreview,
         runId: newRunId,
+        ...(continuedTitle ? { title: continuedTitle } : {}),
         labels,
       }),
     },
@@ -573,6 +635,8 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       // opportunistically on the same call; it never touches non-terminal
       // records, so it's safe to run alongside active runs.
       await gcRunRecords(deps);
+      const requestedLimit = typeof args.limit === "number" && Number.isFinite(args.limit) ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 10;
+      const requestedOffset = typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : 0;
       const { runs: records, total, hasMore } = queryRunRecords(
         {
           ...(typeof args.batchId === "string" && args.batchId.trim()
@@ -583,8 +647,8 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             : typeof args.statusFilter === "string" && args.statusFilter.trim()
             ? { status: args.statusFilter.trim() }
             : {}),
-          ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
-          ...(typeof args.offset === "number" ? { offset: args.offset } : {}),
+          limit: requestedLimit,
+          offset: requestedOffset,
         },
         deps,
       );
@@ -593,49 +657,33 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
           runId: record.runId,
           status: record.status,
           agentKey: record.agentKey,
-          ...(record.agentName ? { agentName: record.agentName } : {}),
+          ...(record.agentName ? { agentName: record.agentName.slice(0, 120) } : {}),
+          ...(typeof record.title === "string" ? { title: record.title.slice(0, 160) } : {}),
           ...(record.batchId ? { batchId: record.batchId } : {}),
           pid: record.pid ?? null,
           startedAt: record.startedAt,
         };
       });
+      const outputBudgetBytes = 8 * 1024;
+      const utf8Bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+      const compactRun = (run: any) => ({ ...run, ...(run.agentName ? { agentName: run.agentName.slice(0, 64) } : {}), ...(run.title ? { title: run.title.slice(0, 96) } : {}) });
+      for (let i = 0; i < runs.length; i++) runs[i] = compactRun(runs[i]);
+      const batchIdArg = typeof args.batchId === "string" && args.batchId.trim() ? args.batchId.trim() : undefined;
+      const statusArg = typeof args.status === "string" && args.status.trim() ? args.status.trim() : typeof args.statusFilter === "string" && args.statusFilter.trim() ? args.statusFilter.trim() : undefined;
+      const makeSummary = (items: typeof runs) => {
+        if (!batchIdArg || statusArg && statusArg.toLowerCase() !== "all" || requestedOffset !== 0 || hasMore || items.length !== total || items.length !== records.length) return undefined;
+        const inputs: BatchRunSummary[] = records.slice(0, items.length).map((r) => ({ runId: r.runId, status: r.status, startedAt: r.startedAt, ...(r.agentName ? { agentName: r.agentName.slice(0, 64) } : {}) }));
+        const result = aggregateBatch({ batchId: batchIdArg.slice(0, 96), runs: inputs, now: new Date(resolveNowMs(deps)).toISOString() });
+        return result.summary ? result.summary.slice(0, 1024) : undefined;
+      };
+      const listPayload = (items: typeof runs, summary?: string) => ({ runs: items, count: items.length, total, hasMore: hasMore || items.length < records.length, nextOffset: requestedOffset + items.length, ...(summary ? { batchSummary: summary } : {}) });
+      let summary = makeSummary(runs);
+      while (runs.length > 1 && utf8Bytes(listPayload(runs, summary)) > outputBudgetBytes) { runs.pop(); summary = undefined; }
+      if (runs.length === 1 && utf8Bytes(listPayload(runs, summary)) > outputBudgetBytes) throw new Error("output_item_too_large: run identity exceeds 8 KiB output budget");
+      const outputHasMore = hasMore || runs.length < records.length;
       const labels = agentRunCardLabels();
 
-      // ── D1 接线：list + batchId 时附加批次收敛摘要 ─────────────────
-      // 编排者传 batchId 查询时，在返回前调用 aggregateBatch：批次收敛时
-      // 附加 batchSummary（"3/3 完成"结论式摘要），调用方不必再轮询。
-      // 非 batch 查询不附加，保持原返回形状。
-      const batchIdArg =
-        typeof args.batchId === "string" && args.batchId.trim()
-          ? args.batchId.trim()
-          : undefined;
-      let batchSummary: ReturnType<typeof aggregateBatch> | undefined;
-      if (batchIdArg && records.length > 0) {
-        const batchRuns: BatchRunSummary[] = records.map((r) => ({
-          runId: r.runId,
-          status: r.status,
-          startedAt: r.startedAt,
-          ...(r.agentName ? { agentName: r.agentName } : {}),
-        }));
-        batchSummary = aggregateBatch({
-          batchId: batchIdArg,
-          runs: batchRuns,
-          now: new Date(resolveNowMs(deps)).toISOString(),
-        });
-      }
-
-      return {
-        content: JSON.stringify({
-          runs,
-          count: runs.length,
-          total,
-          hasMore,
-          ...(batchSummary?.summary ? { batchSummary: batchSummary.summary } : {}),
-        }),
-        metadata: {
-          displayData: formatListRunsCard(runs, labels),
-        },
-      };
+      return { content: JSON.stringify(listPayload(runs, summary)), metadata: { displayData: formatListRunsCard(runs, labels) } };
     }
 
     // ── T 接线：action="todo" / "agentRunTodo" 查询 AgentRunTodo 列表 ──────
@@ -678,15 +726,22 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         const wanted = new Set(statusFilter.split(",").map((s) => s.trim()).filter(Boolean));
         enriched = enriched.filter((t) => wanted.has(t.status.toLowerCase()));
       }
+      const todoTotal = enriched.length;
+      const todoLimit = typeof args.limit === "number" && Number.isFinite(args.limit) ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 10;
+      const todoOffset = typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : 0;
+      const todoPage = enriched.slice(todoOffset, todoOffset + todoLimit).map((todo) => ({
+        ...todo,
+        title: typeof todo.title === "string" ? todo.title.slice(0, 160) : todo.title,
+        runIds: todo.runIds.slice(0, 20),
+        ...(todo.runIds.length > 20 ? { omittedRunIdCount: todo.runIds.length - 20 } : {}),
+      }));
+      const boundedTodos = boundedOutputPage(todoPage, todoTotal, todoOffset);
 
       return {
-        content: JSON.stringify({ todos: enriched, count: enriched.length }),
+        content: JSON.stringify({ todos: boundedTodos.items, count: boundedTodos.items.length, total: todoTotal, hasMore: boundedTodos.hasMore, nextOffset: boundedTodos.nextOffset }),
         metadata: {
           displayData: formatListRunsCard(
-            enriched.map((t) => ({
-              agentName: t.title,
-              status: t.status,
-            })),
+            boundedTodos.items.map((t: any) => ({ agentName: t.title, status: t.status })),
             agentRunCardLabels(),
           ),
         },
@@ -694,9 +749,9 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     }
 
     if (action === "append") {
-      if (!args.runId) throw new Error(`controlAgentRun(action:"append"): 缺少 runId。`);
+      if (!args.runId) throw new Error(t("agentRunTool.appendMissingRunId"));
       const userInput = typeof args.userInput === "string" ? args.userInput.trim() : "";
-      if (!userInput) throw new Error(`controlAgentRun(action:"append"): 缺少有效的 userInput 文本。`);
+      if (!userInput) throw new Error(t("agentRunTool.appendMissingUserInput"));
 
       const record = findRunRecord(String(args.runId), deps);
       if (!record) {
@@ -713,12 +768,13 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       let reconciled = checkStaleRun(record.runId, deps) ?? record;
       if (!isAgentRunTerminalStatus(reconciled.status)) {
         if (!reconciled.queuePath) {
-          throw new Error("该 run 启动时不支持运行中入队（无队列通道），请等终态后再 append");
+          throw new Error(t("agentRunTool.appendQueueUnsupported"));
         }
 
         const queuePath = reconciled.queuePath;
         const { queuedCount, entryId } = await appendRunQueue(queuePath, userInput, deps);
 
+        const enqueuedTitle = normalizeRunTitle(reconciled.title);
         const displayName = resolveRunLabel({
           agentName: reconciled.agentName,
           agentKey: reconciled.agentKey,
@@ -757,12 +813,14 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
                 consumed: true,
                 status: afterCheck.status,
                 ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
+                ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
                 ...(taskPreview ? { taskPreview } : {}),
               }),
               metadata: {
                 displayData: formatStartRunCard(displayName, afterCheck.status, {
                   task: `[consumed] ${taskPreview}`,
                   runId: reconciled.runId,
+                  ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
                   labels,
                 }),
               },
@@ -787,12 +845,14 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             queued: queuedCount,
             status: "running",
             ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
+            ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
             ...(taskPreview ? { taskPreview } : {}),
           }),
           metadata: {
             displayData: formatStartRunCard(displayName, "running", {
               task: `[enqueued ${queuedCount}] ${taskPreview}`,
               runId: reconciled.runId,
+              ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
               labels,
             }),
           },
@@ -803,9 +863,9 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     }
 
     if (action !== "status" && action !== "stop" && action !== "wait") {
-      throw new Error(`controlAgentRun: 未知 action "${action}"。`);
+      throw new Error(t("agentRunTool.unknownAction", String(action)));
     }
-    if (!args.runId) throw new Error(`controlAgentRun(action:"${action}"): 缺少 runId。`);
+    if (!args.runId) throw new Error(t("agentRunTool.missingRunId", String(action)));
 
     const record = findRunRecord(String(args.runId), deps);
     if (!record) {
@@ -861,12 +921,12 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
           release: (token) => { if (token) releaseRunRecordAck(record.runId, token, deps); },
         },
       });
-      if (result.kind === "aborted") throw new Error("controlAgentRun(wait) 已被中止。");
+      if (result.kind === "aborted") throw new Error(t("agentRunTool.waitAborted"));
       if (result.kind === "failed") throw result.error;
       if (result.kind === "timeout") {
         const reconciled = result.lastState ?? record;
         const nowMs = resolveNowMs(deps);
-        return { content: JSON.stringify({ runId: reconciled.runId, found: true, status: "timeout", runStatus: reconciled.status, pid: reconciled.pid ?? null, agentKey: reconciled.agentKey, ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}), startedAt: reconciled.startedAt, waitedMs: result.waitedMs, timeoutMs, ...buildProgressField(reconciled, nowMs) }), metadata: { displayData: `⏳ wait 超时（${Math.round(result.waitedMs / 1000)}s），run 仍在运行：可稍后再 wait，或改用 status/stop` } };
+        return { content: JSON.stringify({ runId: reconciled.runId, found: true, status: "timeout", runStatus: reconciled.status, pid: reconciled.pid ?? null, agentKey: reconciled.agentKey, ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}), startedAt: reconciled.startedAt, waitedMs: result.waitedMs, timeoutMs, ...buildProgressField(reconciled, nowMs) }), metadata: { displayData: t("agentRunWaitTimeout", String(Math.round(result.waitedMs / 1000))) } };
       }
       return buildRunStatusPayload(result.state, deps);
     }
@@ -898,7 +958,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             stopConfirmed: false,
           }),
           metadata: {
-            displayData: `stop failed: process ${record.pid} still alive after SIGKILL`,
+            displayData: t("agentRunStopFailedAlive", String(record.pid)),
           },
         };
       }
@@ -920,7 +980,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       metadata: {
         displayData:
           transition.kind === "contended"
-            ? `${formatStopRunCard(finalRecord.status, labels)} (pending reconcile)`
+            ? t("agentRunPendingReconcile", formatStopRunCard(finalRecord.status, labels))
             : formatStopRunCard(finalRecord.status, labels),
       },
     };

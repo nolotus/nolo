@@ -326,7 +326,7 @@ const baseConfig = {
   chunkNames: "chunks/[name]-[hash]",
 
   // Web 构建中排除 RN 生态的一些依赖
-  external: ["react-native*", "life/web/InviteRewards", "life/LifeSidebar", "app/pages/Pricing/Price", "app/pages/Recharge", "create/space/pages/SpaceInvite", "app/email/AgentEmailE2EPage"],
+  external: ["react-native*", "/public/*"],
 
   plugins: [
     agentRuntimeBrowserCompatPlugin,
