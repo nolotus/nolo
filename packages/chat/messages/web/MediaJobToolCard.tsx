@@ -1,6 +1,5 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ReactReduxContext } from "react-redux";
-import { useNavigate } from "app/routing";
 import { downloadExport } from "app/pages/mediaLectureApi";
 import {
   type ExportFormat,
@@ -262,48 +261,33 @@ function userFacingError(raw?: string): string {
   return firstLine ?? "处理失败，请稍后重试";
 }
 
-const OPEN_NOTE_LINK_STYLE: React.CSSProperties = {
+/**
+ * 「笔记页暂未开放」占位：**非操作状态**——不可点击，也不给按钮观感。
+ * 原实现的 `OpenNoteLink` 是站内跳转 `href=/media-jobs/<jobId>`；笔记页路由
+ * （app/pages/MediaLecturePage*）属批 3，main 上不存在该路由，保留链接即站内死链。
+ * 上一版退化成「蓝底白字按钮样式的 `<span>`」：视觉上像主操作、点了没反应，
+ * 比死链更误导，故此处连按钮样式一并取消，只留弱化说明文案。
+ * 待批 3 带笔记页时恢复为可操作链接（恢复点：`<a href={`/media-jobs/${jobId}`}>` + useNavigate）。
+ */
+const NOTE_PLACEHOLDER_STYLE: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  justifyContent: "center",
   gap: 6,
-  padding: "6px 14px",
-  fontSize: "13px",
-  fontWeight: 500,
-  color: "#ffffff",
-  backgroundColor: "var(--primary, #2563eb)",
-  borderRadius: "var(--radius-md, 6px)",
-  textDecoration: "none",
-  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 400,
+  color: "var(--textMuted, #6b7280)",
+  backgroundColor: "transparent",
   border: "none",
+  padding: 0,
+  cursor: "default",
+  textDecoration: "none",
 };
 
-/**
- * 「打开笔记」链接。站内跳转由卡片自己的 router navigate 完成，不依赖外部 navigateToPage：
- * 工具行（ToolCallRow / ToolMessageGroup）传的是空函数，依赖它会把点击吞掉。
- * href 保留给中键 / 新标签页；修饰键点击不拦截，交还浏览器原生行为。
- */
-const OpenNoteLink: React.FC<{ jobId?: string }> = ({ jobId }) => {
-  const navigate = useNavigate();
-  const href = `/media-jobs/${jobId}`;
-  return (
-    <a
-      data-testid="open-note-link"
-      href={href}
-      onClick={(e) => {
-        if (!jobId) return;
-        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-          return;
-        }
-        e.preventDefault();
-        navigate(href);
-      }}
-      style={OPEN_NOTE_LINK_STYLE}
-    >
-      打开笔记
-    </a>
-  );
-};
+const NotePagePlaceholder: React.FC = () => (
+  <span data-testid="note-page-placeholder" style={NOTE_PLACEHOLDER_STYLE}>
+    笔记页暂未开放
+  </span>
+);
 
 type ExportFormatKey = Exclude<ExportFormat, "vtt">;
 
@@ -2140,7 +2124,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                 }}
               >
                 {hasArtifacts && (
-                  <OpenNoteLink jobId={jobId || job?.id} />
+                  <NotePagePlaceholder />
                 )}
                 {!readOnly && (
                   <button

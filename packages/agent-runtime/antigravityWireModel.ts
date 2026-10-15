@@ -23,16 +23,6 @@ const WIRE_PROFILES: Readonly<Record<string, AntigravityWireProfile>> = {
   // 证据确认 3.8 的 wire modelEnum，禁止虚构，先只声明同档输出上限；enum 待
   // discovery 证据到位后补齐。
   "gemini-3.8-flash-tiered": { maxOutputTokens: 65536 },
-  // Gemini 4 Argon：fetchAvailableModels（2026-10 实测）仅返回键 `gemini-4-argon-disabled`
-  // （MODEL_PLACEHOLDER_M421，maxOutputTokens 65536，disabled=true，提示「仅 Ultra 订阅可用」）。
-  // 该键名带 -disabled 后缀，不是已验证可调用的 wire id：对 streamGenerateContent 用
-  // gemini-4-argon / -disabled / -tiered / -low 均返回 404。因此这里以 logical id 作为
-  // 透传 wire id（开放后若 discovery 给出真实 id，只需改这一行与 resolve 分支），
-  // enum 取自 discovery 的 M421，不凭空推测 low/medium/high 档位 id。
-  // 2026-10-13 实测：UA 升到官方 2.23.1 后 discovery 与 2.18.1 完全一致（仍仅 gemini-4-argon-disabled，
-  // disabled=true，tagTitle "Unavailable"，tagDescription "currently available to Ultra plan subscribers"），
-  // streamGenerateContent 仍 404；loadCodeAssist currentTier=free-tier，账号非 Ultra，故保持占位映射。
-  "gemini-4-argon": { modelEnum: "MODEL_PLACEHOLDER_M421", maxOutputTokens: 65536 },
   "gemini-3.6-flash-low": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-medium": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-high": { maxOutputTokens: 65536 },
@@ -76,19 +66,6 @@ export function resolveAntigravityWireModel(logicalModelId: string): ResolvedAnt
     ["gemini-3.8-flash-low", "gemini-3.8-flash-medium", "gemini-3.8-flash-high"].includes(lower)
   ) {
     const wireModelId = "gemini-3.8-flash-tiered";
-    return { wireModelId, profile: WIRE_PROFILES[wireModelId] };
-  }
-
-  // Gemini 4 Argon：effort 别名折叠到同一 wire id（discovery 未给出分档 id，见 WIRE_PROFILES 注释）。
-  // ⚠️ 这里的折叠只是占位，**没有** 3.7/3.8 那样的调用证据支撑，也**不承诺**
-  // low/medium/high 会得到不同 effort：上游若像 3.7 Flash 那样只认单一 tiered id，
-  // 或另有分档 id，都需 Ultra 账号的 discovery/调用证据才能定论。拿到证据后，
-  // 改 WIRE_PROFILES 的键与这里的 wireModelId 各一处即可。
-  if (
-    lower === "gemini-4-argon" ||
-    ["gemini-4-argon-low", "gemini-4-argon-medium", "gemini-4-argon-high"].includes(lower)
-  ) {
-    const wireModelId = "gemini-4-argon";
     return { wireModelId, profile: WIRE_PROFILES[wireModelId] };
   }
 

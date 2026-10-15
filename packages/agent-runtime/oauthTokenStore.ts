@@ -24,21 +24,6 @@ export type OAuthProvider =
   | "cursor"
   | "devin";
 
-/**
- * 该本地凭据由服务端托管：服务端是唯一的 refresh 持有者与刷新者。
- *
- * 存在这个标记 = 本地绝不能自己刷新（本地文件里也不该再有 refreshToken）。
- * 过期时只能向服务端取新 access token，否则会与其它端互相作废上游授权。
- */
-export type ServerManagedMarker = {
-  /** 托管它的服务器 origin。 */
-  origin: string;
-  /** 属主 userId（防止切换 profile 后把别人的 token 写进来）。 */
-  userId: string;
-  /** 同步成功时刻。 */
-  syncedAt: number;
-};
-
 export type OAuthCredential = {
   provider: OAuthProvider;
   accessToken: string;
@@ -49,8 +34,6 @@ export type OAuthCredential = {
   accountId?: string;
   metadata?: Record<string, unknown>;
   obtainedAt: number;
-  /** 见 ServerManagedMarker。缺省 = 纯本地凭据，行为与以前完全一致。 */
-  serverManaged?: ServerManagedMarker;
 };
 
 export type OAuthTokenStore = {
@@ -194,64 +177,12 @@ export async function resolveFreshAccessToken(args: {
   migration?: CredentialMigrationOptions;
   /** 强制刷新（401 重试路径）：即便本地认为 token 仍新鲜也重新换一次。 */
   force?: boolean;
-  /**
-   * 服务端托管凭据的取 token 通道（由 CLI 注入）。托管凭据过期时走这里，
-   * 绝不走 args.refresh。
-   */
-  pullFromServer?: (input: {
-    provider: OAuthProvider;
-    force: boolean;
-    /** 该凭据的托管标记：调用方据此校验目标服务器与属主，防止串号。 */
-    serverManaged: ServerManagedMarker;
-  }) => Promise<{ accessToken: string; expiresAt?: number; accountId?: string } | null>;
 }): Promise<string | null> {
   const store = args.store ?? createOAuthTokenStore(args.homeDir, args.migration);
   const now = args.now ?? Date.now;
   const credential = store.read(args.provider);
   if (!credential) return null;
-  const skew = args.skewMs ?? DEFAULT_REFRESH_SKEW_MS;
-  const stillFresh = !isTokenExpired(credential, skew, now());
-
-  // 服务端托管：本地永不刷新。过期就向服务端取，取不到就明确失败。
-  if (credential.serverManaged) {
-    if (!args.force && stillFresh) return credential.accessToken;
-    const pull = args.pullFromServer;
-    if (pull) {
-      const pulled = await pull({
-        provider: args.provider,
-        force: args.force === true,
-        serverManaged: credential.serverManaged,
-      });
-      if (pulled?.accessToken) {
-        // 只更新 access/expiresAt/accountId；refreshToken 本就不该存在。
-        // 只在拿到不更旧的 token 时写回，避免并发下用旧值覆盖新值。
-        const notOlder =
-          !credential.expiresAt ||
-          !pulled.expiresAt ||
-          pulled.expiresAt >= credential.expiresAt;
-        if (notOlder) {
-          const { refreshToken: _dropped, ...cleanedBase } = credential;
-          store.write(args.provider, {
-            ...cleanedBase,
-            accessToken: pulled.accessToken,
-            ...(pulled.expiresAt !== undefined ? { expiresAt: pulled.expiresAt } : {}),
-            ...(pulled.accountId ? { accountId: pulled.accountId } : {}),
-          });
-        }
-        return pulled.accessToken;
-      }
-    }
-    // 拉取失败：仍有效的旧 token 继续用，真过期则如实报错（不回退本地刷新）。
-    if (credential.expiresAt && credential.expiresAt > now()) {
-      return credential.accessToken;
-    }
-    throw new Error(
-      `OAuth credential for "${args.provider}" is server-managed and its access token has expired. ` +
-        `Connect to ${credential.serverManaged.origin} to get a fresh one, or re-authorize with \`nolo auth ${args.provider} --sync-to-server\`.`,
-    );
-  }
-
-  if (!args.force && stillFresh) {
+  if (!args.force && !isTokenExpired(credential, args.skewMs ?? DEFAULT_REFRESH_SKEW_MS, now())) {
     return credential.accessToken;
   }
   if (!credential.refreshToken || !args.refresh) return null;

@@ -1,8 +1,3 @@
-import {
-  DEFAULT_DETACHED_MEMORY_COOLDOWN_MS,
-  createDetachedThrottle,
-  readMsEnv,
-} from "./detachedThrottle";
 import type { MemoryItem } from "../types";
 import { applyMemoryInterpreterMutation } from "./applyMutation";
 import { buildLegacyMemoryEvidence } from "./legacyMigration";
@@ -21,11 +16,7 @@ export type MemoryVNextLazyPromotionStatus =
   | "no_op"
   | "conflict"
   | "in_flight"
-  | "error"
-  /** Another promotion is already running somewhere in this process. */
-  | "skipped_busy"
-  /** This owner was promoted less than one cooldown interval ago. */
-  | "skipped_cooldown";
+  | "error";
 
 export interface MemoryVNextLazyPromotionObservation {
   status: MemoryVNextLazyPromotionStatus;
@@ -54,11 +45,6 @@ export interface MemoryVNextLazyPromotionInput {
   skippedCoveredCount?: number;
   skippedNoOpCount?: number;
   timeoutMs?: number;
-  /**
-   * Per-owner cooldown override, in ms (tests). Defaults to
-   * `resolveLazyPromotionCooldownMs()`; `0` disables the throttle.
-   */
-  cooldownMs?: number;
   now?: string;
   nextId?: () => string;
   clock?: () => number;
@@ -74,76 +60,6 @@ const shortError = (error: unknown): string => {
     ? `${message.slice(0, ERROR_MESSAGE_MAX)}…`
     : message;
 };
-
-// ---------------------------------------------------------------------------
-// Slice 6.3 detached-promotion throttling.
-//
-// Measured on alpha: this detached promotion ran on EVERY runtime turn and the
-// Interpreter call alone cost 2.5s–13.4s per turn (`latencyMs` in production
-// logs), competing with the user's in-flight request on a 1-core host (the same
-// request measured 10.6s → 27.1s across runs). Three bounds now apply, none of
-// which touches the legacy answer path:
-//   1. process-wide single-flight — never two promotions concurrently;
-//   2. per-owner cooldown — a given owner is promoted at most once/interval;
-//   3. a hard default timeout on the Interpreter call.
-// ---------------------------------------------------------------------------
-
-/** Default per-owner cooldown (same value/class as the shadow read). */
-export const DEFAULT_LAZY_PROMOTION_COOLDOWN_MS = DEFAULT_DETACHED_MEMORY_COOLDOWN_MS;
-/** Default hard bound for the Interpreter call (mirrors SHADOW_TIMEOUT_MS). */
-export const DEFAULT_LAZY_PROMOTION_TIMEOUT_MS = 20_000;
-export const MEMORY_VNEXT_LAZY_PROMOTION_COOLDOWN_ENV =
-  "NOLO_MEMORY_VNEXT_LAZY_PROMOTION_COOLDOWN_MS";
-export const MEMORY_VNEXT_LAZY_PROMOTION_TIMEOUT_ENV =
-  "NOLO_MEMORY_VNEXT_LAZY_PROMOTION_TIMEOUT_MS";
-
-/**
- * Per-owner cooldown; `0` (env or input) disables the throttle. Wraps the
- * shared detached-work throttle (see ./detachedThrottle.ts).
- */
-export const promotionThrottle = createDetachedThrottle({
-  name: "lazy_promotion",
-  defaultCooldownMs: DEFAULT_LAZY_PROMOTION_COOLDOWN_MS,
-  cooldownEnvKey: MEMORY_VNEXT_LAZY_PROMOTION_COOLDOWN_ENV,
-});
-
-export const resolveLazyPromotionCooldownMs = (
-  env?: Record<string, string | undefined>
-): number => promotionThrottle.resolveCooldownMs(env);
-
-/** Hard bound handed to the Interpreter; always > 0. */
-export const resolveLazyPromotionTimeoutMs = (
-  env: Record<string, string | undefined> = typeof process !== "undefined"
-    ? process.env
-    : {}
-): number =>
-  readMsEnv(
-    env[MEMORY_VNEXT_LAZY_PROMOTION_TIMEOUT_ENV],
-    DEFAULT_LAZY_PROMOTION_TIMEOUT_MS,
-    false
-  );
-
-const withTimeout = async <T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string
-): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(label)), timeoutMs);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-};
-
-/** Test-only: throttle state is module state shared across a test file. */
-export const resetMemoryVNextLazyPromotionThrottleForTests = (): void =>
-  promotionThrottle.reset();
-export const isMemoryVNextLazyPromotionInFlightForTests = (): boolean =>
-  promotionThrottle.isInFlight();
 
 export const loadExistingContext = async (
   db: any,
@@ -378,23 +294,6 @@ export const runMemoryVNextLazyPromotion = async (
   if (inFlight.has(flightKey)) {
     return finish({ status: "in_flight" });
   }
-  // Process-wide single-flight + per-owner cooldown, from the shared detached
-  // throttle (see ./detachedThrottle.ts): this promotion is seconds of LLM work
-  // that competes with the user's in-flight request, so a second one never
-  // starts while another runs, and one owner is not promoted more often than
-  // the interval. Both skips return before any store read or provider call.
-  const throttle = promotionThrottle.tryAcquire(
-    deterministicEvidence.ownerId,
-    clock(),
-    input.cooldownMs
-  );
-  if (throttle === "busy") {
-    return finish({ status: "skipped_busy" });
-  }
-  if (throttle === "cooldown") {
-    return finish({ status: "skipped_cooldown" });
-  }
-
   inFlight.add(flightKey);
 
   try {
@@ -416,22 +315,14 @@ export const runMemoryVNextLazyPromotion = async (
       return finish({ status: "already_covered" });
     }
 
-    const timeoutMs = input.timeoutMs ?? resolveLazyPromotionTimeoutMs();
-    // Always bounded, and bounded here as well as at the provider: a hung
-    // Interpreter that ignored `timeoutMs` would otherwise pin the process-wide
-    // single-flight forever and silently stop every later promotion.
-    const interpreted = await withTimeout(
-      runLegacyMemoryMigrationShadow({
-        item: input.item,
-        provider: input.provider,
-        existing,
-        timeoutMs,
-        ...(input.now === undefined ? {} : { now: input.now }),
-        ...(input.nextId ? { nextId: input.nextId } : {}),
-      }),
-      timeoutMs,
-      `memory vnext lazy promotion interpreter timed out after ${timeoutMs}ms`
-    );
+    const interpreted = await runLegacyMemoryMigrationShadow({
+      item: input.item,
+      provider: input.provider,
+      existing,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      ...(input.now === undefined ? {} : { now: input.now }),
+      ...(input.nextId ? { nextId: input.nextId } : {}),
+    });
 
     // runLegacyMemoryMigrationShadow always carries the deterministic imported
     // Evidence so shadow candidates are self-contained. On the write path that
@@ -457,7 +348,6 @@ export const runMemoryVNextLazyPromotion = async (
     return finish({ status: "error", error: shortError(error) });
   } finally {
     inFlight.delete(flightKey);
-    promotionThrottle.release();
   }
 };
 

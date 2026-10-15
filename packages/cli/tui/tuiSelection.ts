@@ -9,7 +9,7 @@ import {
   tokenizeAnsiLine,
 } from "./tuiAnsi";
 import {
-  buildLayoutRowWindow,
+  buildHistoryLayoutRows,
   type TurnHistory,
 } from "./tuiHistory";
 
@@ -219,18 +219,11 @@ export function extractSelectedText(
   const start = cmp < 0 ? anchor : head;
   const end = cmp < 0 ? head : anchor;
 
-  // 只物化选区覆盖到的行：离屏 turn 一行都不渲染（相交的单条超长消息仍整条物化，
-  // 后续调用靠 turn 缓存复用）。
-  const window = buildLayoutRowWindow(
-    history,
-    contentWidth,
-    start.globalRow,
-    end.globalRow + 1,
-  );
+  const rows = buildHistoryLayoutRows(history, contentWidth);
   const pieces: string[] = [];
 
   for (let r = start.globalRow; r <= end.globalRow; r++) {
-    const row = window.rows[r - window.baseRow];
+    const row = rows[r];
     if (!row) continue;
 
     let lineStartCol = 0;
@@ -277,32 +270,19 @@ export function applySelectionOverlay(
 
   const start = cmp < 0 ? selection.anchor : selection.head;
   const end = cmp < 0 ? selection.head : selection.anchor;
-
-  // 视口内的选区切片：只有这些屏幕行需要 layout 元数据（每行前缀宽度）。
-  // 窗口内的 turn 由 buildLayoutRowWindow 按 turn 缓存复用，离屏 turn 不展开。
-  const firstScreenRow = Math.max(0, start.globalRow - scrollTop);
-  const lastScreenRow = Math.min(
-    visibleLines.length - 1,
-    end.globalRow - scrollTop,
-  );
-  const window =
-    lastScreenRow < firstScreenRow
-      ? null
-      : buildLayoutRowWindow(
-          history,
-          contentWidth,
-          scrollTop + firstScreenRow,
-          scrollTop + lastScreenRow + 1,
-        );
+  const layoutRows = buildHistoryLayoutRows(history, contentWidth);
 
   const result = [...visibleLines];
 
-  for (let screenRow = firstScreenRow; screenRow <= lastScreenRow; screenRow++) {
+  for (let screenRow = 0; screenRow < visibleLines.length; screenRow++) {
     const globalRow = scrollTop + screenRow;
+    if (globalRow < start.globalRow || globalRow > end.globalRow) {
+      continue;
+    }
 
     const currentLine = result[screenRow] ?? "";
     if (currentLine.length === 0) continue;
-    const layoutRow = window?.rows[globalRow - window.baseRow];
+    const layoutRow = layoutRows[globalRow];
 
     let selStartCol = 0;
     let selEndCol = Infinity;

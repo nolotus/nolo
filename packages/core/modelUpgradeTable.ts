@@ -85,22 +85,6 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
     to: { provider: "nolo", model: "grok-4.6" },
     reason: "xai provider 记录统一到 nolo 平台托管（上游 xAI 官方 API）",
   },
-  // Gemini 3.1 Pro 平台下线（2026-10，被 Gemini 4 Argon 取代）：nolo/google 直连存量记录升级。
-  // 迁移前先 `bun scripts/migrateAgentModels.ts --dry-run` 看命中清单与下面的原因说明；
-  // Antigravity/Cursor OAuth 通道的 3.1 Pro 不在此表（订阅通道，保留兼容别名）。
-  {
-    from: { provider: "nolo", model: "gemini-3.1-pro" },
-    to: { provider: "nolo", model: "gemini-4-argon" },
-    reason:
-      "Gemini 3.1 Pro 下线，由 Gemini 4 Argon 取代（nolo 平台托管）；促销期内单价 $2/$10 每 1M 与 3.1 Pro 原价 $2/$12 基本持平（输出还更便宜），2026-12-01 起涨到 $4/$20",
-    kind: "upgrade",
-  },
-  {
-    from: { provider: "google", model: "gemini-3.1-pro" },
-    to: { provider: "nolo", model: "gemini-4-argon" },
-    reason:
-      "Gemini 3.1 Pro 下线，google provider 记录统一到 nolo Gemini 4 Argon；促销期内单价 $2/$10 每 1M 与 3.1 Pro 原价 $2/$12 基本持平（输出还更便宜），2026-12-01 起涨到 $4/$20",
-  },
   {
     from: { provider: "nolo", model: "glm-5.2" },
     to: { provider: "nolo", model: "glm-5.3" },

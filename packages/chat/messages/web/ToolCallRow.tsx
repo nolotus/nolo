@@ -5,15 +5,7 @@ import { safeParse, StatusIcon, withLiteralClass } from "./toolMessageShared";
 import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
 import type { ToolCallPresentation } from "./toolCallPresentation";
-import {
-  formatToolExecutionLocationLine,
-  isQuietDetailTool,
-} from "./toolCallPresentation";
-import {
-  isMediaJobPendingConfirmation,
-  toolMessageNeedsDefaultExpansion,
-} from "../toolPresentation";
-import { createToolNameTranslator, extractToolCallArgs } from "./toolDisplayName";
+import { isQuietDetailTool } from "./toolCallPresentation";
 
 /**
  * Flat, expandable row for one ordinary grouped tool call (Phase 1).
@@ -61,27 +53,16 @@ export const ToolCallRow = memo(
     // Quiet-detail tools (execShell/readFile) stay folded even while running
     // (TUI parity) — long terminal output / file contents must not flood the
     // chat; one click opens the body. Other rows keep running auto-open.
-    // 未决交互卡（报价待选档）必须默认展开：它需要用户操作，藏起来等于阻塞流程。
-    // 用户手动 toggle 之后（userExpanded !== null）一律以用户为准。
     const expanded =
       userExpanded ??
-      (toolMessageNeedsDefaultExpansion(message) ||
-        (presentation.status === "running" &&
-          !isQuietDetailTool(message?.toolName)));
+      (presentation.status === "running" &&
+        !isQuietDetailTool(message?.toolName));
 
     const rawData = safeParse(message?.content);
-    // 媒体任务 start 被确认闸门拦下是「待确认」，不是失败（旧载荷 content 里带
-    // { error: "*_requires_confirmation" }，不能据此判红）。
-    const isPendingConfirmation = isMediaJobPendingConfirmation({
-      toolName: message?.toolName ?? message?.toolPayload?.toolName,
-      rawData,
-      toolPayload: message?.toolPayload,
-    });
     const isError =
-      !isPendingConfirmation &&
-      (message?.toolPayload?.status === "failed" ||
-        !!message?.toolPayload?.error ||
-        !!rawData?.error);
+      message?.toolPayload?.status === "failed" ||
+      !!message?.toolPayload?.error ||
+      !!rawData?.error;
 
     return (
       <div
@@ -181,21 +162,6 @@ export const ToolCallRow = memo(
             id={detailId}
             {...withLiteralClass("tool-call-row__body", toolStyles.rowDetail)}
           >
-            {/* F1: actual execution host (server-projected). Always rendered —
-                unknown state shows "执行位置未知", never blank. Distinct from the
-                dialog's intended runtimeBinding.target. */}
-            <div
-              data-hook="messages-esc-tool-call-row-exec-location"
-              {...withLiteralClass(
-                "tool-call-row__exec-location",
-                toolStyles.execLocation
-              )}
-            >
-              {formatToolExecutionLocationLine(
-                presentation.executionLocation,
-                createToolNameTranslator(t)
-              )}
-            </div>
             <ToolMessageContent
               toolName={message?.toolName}
               rawData={rawData}
@@ -204,8 +170,6 @@ export const ToolCallRow = memo(
               openPreview={() => {}}
               navigateToPage={() => {}}
               presentation="groupDetail"
-              toolArgs={extractToolCallArgs(message?.toolPayload)}
-              toolRunId={message?.toolPayload?.toolRunId ?? message?.toolRunId}
             />
           </div>
         )}

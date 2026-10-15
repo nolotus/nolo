@@ -20,8 +20,6 @@ import {
   type ActivityTimelinePhase,
 } from "./toolDisplayName";
 import ToolCallRow from "./ToolCallRow";
-import { isMediaJobPendingConfirmation } from "../toolPresentation";
-import { extractToolCallArgs } from "./toolDisplayName";
 import {
   buildToolCallPresentation,
   formatToolGroupStatusSummary,
@@ -191,14 +189,9 @@ export const ToolMessageGroup = memo(
       for (const msg of visibleMessages) {
         const rawData = safeParse(msg.content);
         const isError =
-          !isMediaJobPendingConfirmation({
-            toolName: msg.toolName,
-            rawData,
-            toolPayload: msg.toolPayload,
-          }) &&
-          (msg.toolPayload?.status === "failed" ||
-            !!msg.toolPayload?.error ||
-            !!rawData?.error);
+          msg.toolPayload?.status === "failed" ||
+          !!msg.toolPayload?.error ||
+          !!rawData?.error;
         if (msg.isStreaming && !canCollapse) hasRunning = true;
         else lastSettledStatus = isError ? "failed" : "success";
       }
@@ -403,14 +396,9 @@ export const ToolMessageGroup = memo(
         expandedActions.has(action.id) || action.status === "running";
       const rawData = safeParse((action.message as any)?.content);
       const isError =
-        !isMediaJobPendingConfirmation({
-          toolName: (action.message as any)?.toolName,
-          rawData,
-          toolPayload: (action.message as any)?.toolPayload,
-        }) &&
-        ((action.message as any)?.toolPayload?.status === "failed" ||
-          !!(action.message as any)?.toolPayload?.error ||
-          !!rawData?.error);
+        (action.message as any)?.toolPayload?.status === "failed" ||
+        !!(action.message as any)?.toolPayload?.error ||
+        !!rawData?.error;
       return (
         <div
           key={action.id}
@@ -446,8 +434,6 @@ export const ToolMessageGroup = memo(
                 openPreview={() => {}}
                 navigateToPage={() => {}}
                 presentation="groupDetail"
-                toolArgs={extractToolCallArgs((action.message as any)?.toolPayload)}
-                toolRunId={(action.message as any)?.toolPayload?.toolRunId}
               />
             </div>
           )}

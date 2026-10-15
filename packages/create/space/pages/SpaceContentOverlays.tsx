@@ -61,7 +61,6 @@ const SpaceContentOverlays: React.FC<SpaceContentOverlaysProps> = ({
         ref={fileInputRef}
         style={{ display: "none" }}
         multiple
-        data-testid="space-content-upload-input"
         onChange={(e) => {
           if (e.target.files) {
             onFilesAdded(Array.from(e.target.files));
