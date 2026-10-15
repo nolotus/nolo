@@ -350,6 +350,10 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
       { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", hasVision: true, recommended: true },
       { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", hasVision: true },
       { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", hasVision: true },
+      // Gemini 4 Argon 需 Google AI Ultra / 符合条件的企业订阅（官方 2026-10-13 公告）；
+      // 非 Ultra 账号 discovery 返回 gemini-4-argon-disabled，选中后调用 404。标签明示门槛，
+      // 让不具备资格的 Antigravity 用户不会误选；3.1 Pro 保留为所有档位可用的回退。
+      { id: "gemini-4-argon", label: "Gemini 4 Argon（需 Ultra）", hasVision: true },
       { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro", hasVision: true },
       { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", hasVision: true },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", hasVision: true },

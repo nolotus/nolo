@@ -412,6 +412,21 @@ export const GEMINI_3_8_FLASH_DEF = defineAgentSeed({
   tags: ["google", "gemini"],
 });
 
+export const GEMINI_4_ARGON_DEF = defineAgentSeed({
+  id: deterministicId("01GEM4ARGPB", "shared-space-google-gemini-4-argon"),
+  presetKey: "gemini-4-argon",
+  name: "Gemini 4 Argon",
+  provider: "nolo",
+  model: "gemini-4-argon",
+  isPublic: true,
+  introduction: "Gemini 4 Argon 公开助手，Google 旗舰推理模型，适合复杂推理、代码、多模态和长上下文任务。",
+  greeting: "你好，我是 Gemini 4 Argon。适合处理复杂推理、代码、多模态和长上下文任务。",
+  prompt:
+    "优先直接完成任务；需要推理或写代码时保持步骤清晰、结论可靠。",
+  tools: [],
+  tags: ["google", "gemini"],
+});
+
 export const GPT_IMAGE_2_GENERATOR_DEF = defineAgentSeed({
   id: PUBLIC_GPT_IMAGE_2_GENERATOR_AGENT_ID,
   presetKey: "gpt-image-2-generator",
@@ -565,6 +580,7 @@ export const PUBLIC_AGENT_DEFS = [
   CLAUDE_OPUS_5_5_DEF,
   GROK_4_6_DEF,
   GEMINI_3_8_FLASH_DEF,
+  GEMINI_4_ARGON_DEF,
   GPT_IMAGE_2_GENERATOR_DEF,
   GPT_IMAGE_2_EDITOR_DEF,
   GPT_IMAGE_2_CONTINUOUS_DEF,

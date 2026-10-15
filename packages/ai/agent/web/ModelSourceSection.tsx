@@ -89,6 +89,7 @@ const COPILOT_CLI_MODELS = [
 
 const GEMINI_CLI_MODELS = [
   { value: "", label: "默认 (gemini-3.8-flash)" },
+  { value: "gemini-4-argon", label: "Gemini 4 Argon" },
   { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
   { value: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
