@@ -1,4 +1,16 @@
 
+## 0.110.1
+
+## 0.110.1 (2026-10-15)
+
+### Bug Fixes
+
+* **cli:** bound connector websocket discovery probes ([5336ae3](https://github.com/nolotus/bun-nolo/commit/5336ae3894e1f55869faa885ee4d054f4b38b351))
+* **cli:** exclude tombstoned agents from cached listings ([3e6dbc3](https://github.com/nolotus/bun-nolo/commit/3e6dbc351e6eb26f7c667623db9d371fbf72bc07))
+* **connector:** preserve element refs across paged viewport reads ([5227019](https://github.com/nolotus/bun-nolo/commit/5227019321c56f1a0e0e56f2a2c4a032bea15373))
+* **desktop:** include required agent run title normalizer ([4436f86](https://github.com/nolotus/bun-nolo/commit/4436f867a0261d7f5c17e06595a2712e85f45276))
+
+
 ## 0.110.0
 
 ## 0.110.0 (2026-10-15)
