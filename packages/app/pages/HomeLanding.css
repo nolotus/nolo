@@ -1,9 +1,7 @@
 /* Guest home. Nature over tech (owner, 2026-10-04):
  * - hero is one evening sky; the rest is warm paper, never a dark screen;
  * - serif headings read like a field journal;
- * - brand blue is the only accent (relay dots are three tints of it);
- * - type scale (2026-10-11 tightened): display / h2 / 20 card title / 18 lead / 16 body / 14 small;
- *   700 only for serif display headings, 600 for card titles and buttons;
+ * - brand blue only as an accent; each relay step has its own "jacket" color;
  * - green is reserved for the single "done" signal.
  * Night mode: colors are tokens from render/layout/naturePalette.css; never
  * hardcode a color here or it will break one of the two themes. */
@@ -12,18 +10,10 @@
   /* --hl-sky-* / --hl-closing-* are set inline from render/layout/guestHomeTone.ts. */
   --hl-sky: var(--hl-sky-day);
   --hl-closing: var(--hl-closing-day);
-  --hl-serif: var(--nolo-serif, "Nolo Serif Latin"), "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
+  --hl-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
 
   color: var(--hl-ink);
   background: var(--hl-paper);
-}
-
-/* Prefer the UA's CJK/Latin spacing rules when supported so punctuation and
- * Latin runs don't get glued or over-spaced by fallback fonts. */
-@supports (text-autospace: normal) {
-  .home-landing {
-    text-autospace: normal;
-  }
 }
 
 [data-theme="dark"] .home-landing {
@@ -73,7 +63,7 @@
 
 .hl-lead {
   margin: 20px 0 0;
-  font-size: clamp(18px, 2vw, 20px);
+  font-size: clamp(17px, 2vw, 22px);
   line-height: 1.6;
   color: var(--hl-muted);
   max-width: 34em;
@@ -136,7 +126,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 14px 28px;
-  font-size: 16px;
+  font-size: 17px;
 }
 
 .hl-relay-step,
@@ -163,64 +153,13 @@
 
 .hl-relay-done {
   color: var(--hl-green);
-  font-weight: 600;
-}
-
-.hl-relay-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 18px;
-  margin-top: 14px;
-  font-size: 14px;
-  color: var(--hl-muted);
+  font-weight: 700;
 }
 
 .hl-relay-note {
-  margin: 0;
-}
-
-/* Replay: a visually hidden checkbox + its label. Toggling swaps the keyframes
- * name (hl-arrive ⇄ hl-arrive-again), which restarts the CSS animation — so it
- * works before hydration and when JS never loads. */
-.hl-replay-toggle {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  opacity: 0;
-}
-
-.hl-replay,
-.hl-relay-run {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--hl-ink);
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--hl-ink) 30%, transparent);
-  text-underline-offset: 3px;
-}
-
-.hl-replay:hover,
-.hl-relay-run:hover {
-  text-decoration-color: currentColor;
-}
-
-.hl-replay-toggle:focus-visible ~ .hl-relay-meta .hl-replay,
-.hl-relay-run:focus-visible {
-  outline: 2px solid var(--hl-blue);
-  outline-offset: 3px;
-  border-radius: 4px;
-}
-
-.hl-replay-toggle:checked ~ .hl-relay .hl-relay-step,
-.hl-replay-toggle:checked ~ .hl-relay .hl-relay-done {
-  animation-name: hl-arrive-again;
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: var(--hl-muted);
 }
 
 .hl-dot {
@@ -231,17 +170,11 @@
   border-radius: 50%;
 }
 
-.hl-dot-0 { background: color-mix(in srgb, var(--hl-blue) 40%, var(--hl-paper)); }
-.hl-dot-1 { background: color-mix(in srgb, var(--hl-blue) 70%, var(--hl-paper)); }
-.hl-dot-2 { background: var(--hl-blue); }
+.hl-dot-0 { background: var(--hl-coral); }
+.hl-dot-1 { background: var(--hl-blue); }
+.hl-dot-2 { background: var(--hl-sand); }
 
 @keyframes hl-arrive {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* Identical copy; only the name differs so the replay toggle restarts it. */
-@keyframes hl-arrive-again {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
@@ -279,8 +212,8 @@
 
 .hl-pillar h3 {
   margin: 16px 0 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 21px;
+  font-weight: 700;
 }
 
 .hl-pillar p {
@@ -288,48 +221,13 @@
   font-size: 16px;
   line-height: 1.7;
   color: var(--hl-muted);
-  /* CJK 文案不再用 U+00A0 防孤字（NBSP 在中文之间会留 ~4.6px 可见缝隙），
-     改由 text-wrap: pretty 处理行尾孤字/孤标点。 */
-  text-wrap: pretty;
 }
 
 .hl-pillar .hl-pillar-example {
   margin-top: 14px;
   padding-left: 14px;
   border-left: 2px solid var(--hl-line);
-  font-size: 16px;
-  text-wrap: pretty;
-}
-
-/* Why now: three field notes, no numbers. */
-.hl-why-list {
-  list-style: none;
-  margin: 40px 0 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 40px;
-}
-
-.hl-why-item {
-  padding-top: 18px;
-  border-top: 1px solid var(--hl-line);
-}
-
-.hl-why-item h3 {
-  margin: 14px 0 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.4;
-  text-wrap: balance;
-}
-
-.hl-why-item p {
-  margin: 10px 0 0;
-  font-size: 16px;
-  line-height: 1.7;
-  color: var(--hl-muted);
-  text-wrap: pretty;
+  font-size: 15px;
 }
 
 /* Orchestration showcase: the existing animated diagrams, re-skinned for paper.
@@ -406,6 +304,10 @@
 .hl-orch .ws-workflow-desc--lead {
   max-width: 640px;
   margin-inline: auto;
+}
+
+.hl-orch .ws-orchestration-panel-title {
+  font-family: var(--hl-serif);
 }
 
 /* The stage is a soft lift of light, not a framed box. */
@@ -527,8 +429,8 @@
 
 .hl-compare-card h3 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
   color: var(--hl-muted);
 }
 
@@ -547,7 +449,6 @@
   font-size: 16px;
   line-height: 1.55;
   color: var(--hl-muted);
-  text-wrap: pretty;
 }
 
 .hl-compare-card li svg {
@@ -562,6 +463,7 @@
 
 .hl-compare-card-nolo h3 {
   color: var(--hl-blue-text);
+  font-family: var(--hl-serif);
 }
 
 .hl-compare-card-nolo li {
@@ -569,7 +471,7 @@
 }
 
 .hl-compare-card-nolo li svg {
-  color: var(--hl-blue);
+  color: var(--hl-green);
 }
 
 .hl-faq {
@@ -599,22 +501,18 @@
   margin: 0;
   font-size: 18px;
   color: var(--hl-muted);
-  /* Guards orphans on narrow screens now that the CJK copy no longer uses NBSP. */
-  text-wrap: pretty;
 }
 
 .hl-closing-lines {
   margin: 18px 0;
   font-family: var(--hl-serif);
   font-weight: 700;
-  font-size: clamp(26px, 3vw, 32px);
+  font-size: clamp(24px, 3vw, 32px);
   line-height: 1.5;
 }
 
 .hl-closing-lines span {
   display: block;
-  /* Each span is its own block, so the wrap hint lives on the span, not the parent. */
-  text-wrap: pretty;
 }
 
 .hl-trust {
@@ -628,57 +526,6 @@
   text-underline-offset: 3px;
 }
 
-/* ── Paging (owner pitches in person) ─────────────────── */
-
-/* The guest home scrolls inside .MainLayout__main, whose top edge is already
- * below the topbar, so a section's snap edge is the scroller's top edge.
- * proximity (not mandatory): ordinary scrolling is untouched, but PageDown /
- * Space / arrow keys settle on a section boundary. */
-.MainLayout--guest-home .MainLayout__main {
-  scroll-snap-type: y proximity;
-}
-
-.home-landing > section {
-  scroll-snap-align: start;
-  /* Space between the scroller's top edge (under the 56px topbar) and the
-   * section when it snaps or is deep-linked. 0 because the scroller already
-   * starts below the topbar; override if the topbar ever overlays it. */
-  scroll-margin-top: var(--hl-snap-offset, 0px);
-}
-
-/* Orchestration fits one desktop screen: cap the diagram, not the copy. */
-@media (min-width: 761px) {
-  .hl-orch .ws-orchestration-stage {
-    max-height: calc(100svh - 56px - 380px);
-    min-height: 300px;
-    overflow: hidden;
-  }
-}
-
-/* ?present=1 — one section per screen, vertically centered. Ordinary visitors
- * never get this class (it is read from the URL, never linked in navigation). */
-.home-landing--present > section {
-  box-sizing: border-box;
-  min-height: calc(100svh - 56px);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  margin-top: 0;
-  padding-block: 48px;
-}
-
-.home-landing--present > section > .hl-shell {
-  margin-inline: auto;
-}
-
-.home-landing--present .hl-title {
-  margin-top: 40px;
-}
-
-.home-landing--present .hl-relay {
-  margin-top: 56px;
-}
-
 /* ── Small screens ────────────────────────────────────── */
 
 @media (max-width: 760px) {
@@ -690,7 +537,6 @@
   .hl-section { padding-top: 64px; }
   .hl-btn { padding-inline: 18px; }
   .hl-pillars { grid-template-columns: 1fr; gap: 32px; }
-  .hl-why-list { grid-template-columns: 1fr; gap: 28px; margin-top: 32px; }
   .hl-orch .ws-orchestration-stage { display: none; }
   .orch-showcase-route {
     list-style: none;
@@ -705,8 +551,8 @@
     border-radius: 12px;
     background: var(--hl-surface);
   }
-  .orch-showcase-route span { display: block; font-size: 13px; color: var(--hl-muted); }
-  .orch-showcase-route strong { display: block; margin-top: 4px; font-size: 14px; line-height: 1.3; }
+  .orch-showcase-route span { display: block; font-size: 12px; color: var(--hl-muted); }
+  .orch-showcase-route strong { display: block; margin-top: 4px; font-size: 13px; line-height: 1.3; }
   .hl-compare { grid-template-columns: 1fr; }
   .hl-compare-card { padding: 22px 20px; }
   .hl-closing { margin-top: 80px; }
@@ -719,6 +565,4 @@
     opacity: 1;
   }
   .hl-btn { transition: none; }
-  /* Nothing to replay when the relay never animates. */
-  .hl-replay { display: none; }
 }

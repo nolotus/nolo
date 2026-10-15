@@ -73,7 +73,7 @@ export const PLATFORM_HOSTED_GLM_53_FLASH_MODEL = "glm-5-3-flash";
 export const PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL = "gemini-3.8-flash";
 export const PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL = "gemini-3.7-flash";
 export const PLATFORM_HOSTED_GEMINI_25_PRO_MODEL = "gemini-2.5-pro";
-export const PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL = "gemini-4-argon";
+export const PLATFORM_HOSTED_GEMINI_31_PRO_MODEL = "gemini-3.1-pro";
 export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 export const PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL = "gemini-3-pro-image-preview";
 export const PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
@@ -276,8 +276,8 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: true,
   },
-  // Gemini 4 Argon -> Google official OpenAI-compatible endpoint
-  [PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL]: {
+  // Gemini 3.1 Pro -> Google official OpenAI-compatible endpoint
+  [PLATFORM_HOSTED_GEMINI_31_PRO_MODEL]: {
     endpoint:
       "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     usageProvider: "google",

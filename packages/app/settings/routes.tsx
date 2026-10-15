@@ -19,7 +19,6 @@ const DesktopUpdates = lazy(() => import("./web/DesktopUpdates"));
 const DesktopMachines = lazy(() => import("./web/DesktopMachines"));
 const DeveloperConfig = lazy(() => import("./web/DeveloperConfig"));
 const SystemBuiltinSkills = lazy(() => import("./web/SystemBuiltinSkills"));
-const MediaAllowance = lazy(() => import("./web/MediaAllowance"));
 
 const SettingsFallback = <PageLoading fullHeight message="设置加载中..." />;
 
@@ -69,10 +68,6 @@ export const settingRoutes = {
       element: withSuspense(<Appearance />),
     },
     { path: SettingRoutePaths.SETTING_ACCOUNT, element: withSuspense(<UserProfile />) },
-    {
-      path: SettingRoutePaths.SETTING_MEDIA_ALLOWANCE,
-      element: withSuspense(<MediaAllowance />),
-    },
     {
       path: SettingRoutePaths.SETTING_SECURITY,
       element: withSuspense(<SecuritySettings />),

@@ -34,12 +34,6 @@ import {
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
 import { TUI_TREE_MARKER } from "../client/toolOutput";
 import { resolveHistoryViewportHeight } from "./tuiLayout";
-import {
-  layoutImageRows,
-  turnImagesSignature,
-  type TurnImage,
-  type TurnImageRowInfo,
-} from "./tuiImageLayout";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   applySelectionOverlay,
@@ -64,8 +58,6 @@ export type Turn = {
    * 渲染时省略 `› ` 前缀，只显示内容行。
    */
   command?: string;
-  /** 结构化图片元数据（不含字节）；占位行追加在该轮文字行之后。 */
-  images?: TurnImage[];
 };
 
 export type TurnLayoutRow = {
@@ -76,8 +68,6 @@ export type TurnLayoutRow = {
   sourceMapping?: number[];
   softWrapped?: boolean;
   softWrapJoiner?: string;
-  /** 仅图片占位行携带；文字行与分隔行没有该字段。 */
-  image?: TurnImageRowInfo;
 };
 
 export type TurnHistory = {
@@ -89,14 +79,6 @@ export type TurnHistory = {
   followBottom: boolean;
   hasMoreAbove?: boolean;
   hasMoreBelow?: boolean;
-  /** 每个 history 实例自有的图形开关；缺省为 false（文字附件提示）。 */
-  graphicsEnabled?: boolean;
-};
-
-/** 图片占位布局选项；缺省等价于无图片、图形关闭。 */
-export type TurnLayoutOptions = {
-  images?: readonly TurnImage[];
-  graphicsEnabled?: boolean;
 };
 
 export const MAX_TUI_HISTORY_TURNS = 500;
@@ -136,29 +118,9 @@ type TurnLineCacheEntry = {
    * previous theme's colors.
    */
   themeFingerprint: string;
-  /** 图形开关与图片元数据签名变化都会改变占位行数，必须参与失效判定。 */
-  graphicsEnabled: boolean;
-  imagesSignature: string;
   lines: string[];
   layoutRows: TurnLayoutRow[];
 };
-
-function isTurnLineCacheValid(
-  cached: TurnLineCacheEntry,
-  turn: Turn,
-  contentWidth: number,
-  colorEnabled: boolean,
-  themeFingerprint: string,
-  graphicsEnabled: boolean,
-): boolean {
-  return (
-    cached.width === contentWidth &&
-    cached.color === colorEnabled &&
-    cached.themeFingerprint === themeFingerprint &&
-    cached.graphicsEnabled === graphicsEnabled &&
-    cached.imagesSignature === turnImagesSignature(turn.images)
-  );
-}
 
 /** Finalized turns are immutable; cache entries GC when truncation drops them. */
 // Scenario D calibration (fresh child process per capacity; 500 turns, 90
@@ -230,12 +192,7 @@ function setCachedTurnLine(turn: Turn, entry: TurnLineCacheEntry): void {
  * background auto-follow poller invalidate the render cache: counts survive,
  * so only the visible window needs repainting instead of all 400 turns.
  */
-const turnLineCountCache = new WeakMap<Turn, Map<string, number>>();
-
-/** 行数缓存键：宽度 + 图形开关 + 图片签名；任一变化都不会复用旧计数。 */
-function lineCountCacheKey(contentWidth: number, graphicsEnabled: boolean, turn: Turn): string {
-  return `${contentWidth}|${graphicsEnabled ? 1 : 0}|${turnImagesSignature(turn.images)}`;
-}
+const turnLineCountCache = new WeakMap<Turn, Map<number, number>>();
 
 type HistoryFrameBuffer = {
   rows: number;
@@ -464,23 +421,13 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
     : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
   const rawLines = highlighted.split("\n");
   let anchored = false;
-  let inToolBlock = false;
   const styledLines = rawLines.map((line) => {
-    const plain = stripAnsi(line);
-    if (!anchored && plain.trim().length > 0 && !plain.startsWith("[nolo]")) {
-      // 工具顶层行（●/▸/✦/✗）进入工具块，卡片续行与树分支属于工具块；正文首行退出工具块并挂载 ◈ 锚点
-      if (/^[●▸✦✗]/.test(plain)) {
-        inToolBlock = true;
-      } else if (inToolBlock && /^(?:\s+|├──|└──)/.test(plain)) {
-        // 工具卡片缩进详情或树形分支连线，保持在工具块中
-      } else {
-        inToolBlock = false;
-        anchored = true;
-        const anchorPrefix = colorEnabled
-          ? `${themeColorSequence("chrome")}◈\x1b[39m `
-          : "◈ ";
-        return `${anchorPrefix}${line}`;
-      }
+    if (!anchored && line.trim().length > 0 && !line.startsWith("[nolo]")) {
+      anchored = true;
+      const anchorPrefix = colorEnabled
+        ? `${themeColorSequence("chrome")}◈\x1b[39m `
+        : "◈ ";
+      return `${anchorPrefix}${line}`;
     }
     return line.startsWith("[nolo]") && colorEnabled
       ? themeText(line, "chrome", true)
@@ -517,24 +464,6 @@ function fillUserBubbleRow(row: string, surfaceSeq: string, contentWidth: number
  * Layout one turn into rows with exact source metadata for hit-test and selection.
  */
 export function layoutTurnRows(
-  role: TurnRole,
-  content: string,
-  contentWidth: number,
-  colorEnabled: boolean,
-  command?: string,
-  options?: TurnLayoutOptions,
-): TurnLayoutRow[] {
-  const textRows = layoutTextRows(role, content, contentWidth, colorEnabled, command);
-  const images = options?.images;
-  if (!images || images.length === 0) return textRows;
-  const bodyEnd = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").length;
-  return [
-    ...textRows,
-    ...layoutImageRows(images, contentWidth, options?.graphicsEnabled === true, bodyEnd),
-  ];
-}
-
-function layoutTextRows(
   role: TurnRole,
   content: string,
   contentWidth: number,
@@ -654,12 +583,20 @@ function layoutTextRows(
   let rawOffset = 0;
   const rows: TurnLayoutRow[] = [];
 
-  // styleAssistantTurn anchored the first assistant prose line (skipping [nolo]
-  // and tool blocks); match the exact line that received the ◈ prefix so the
-  // wrap bookkeeping (prefixWidth) never drifts.
+  // styleAssistantTurn anchored the first non-empty non-[nolo] line; mirror
+  // that choice here so the ◈ wrap bookkeeping (prefixWidth) lands on the
+  // same row, and a leading blank/[nolo] line never owns the anchor column.
   let anchored = false;
   for (let i = 0; i < styledLines.length; i++) {
     const styledLine = styledLines[i]!;
+    const isFirstLine =
+      !anchored && styledLine.trim().length > 0 && !styledLine.startsWith("[nolo]");
+    if (isFirstLine) anchored = true;
+    const anchorPrefix = isFirstLine
+      ? (colorEnabled ? `${themeColorSequence("chrome")}◈\x1b[39m ` : "◈ ")
+      : "";
+    const prefixWidth = isFirstLine ? 2 : 0;
+    const prefixCharCount = anchorPrefix.length;
 
     // Check if this styled line is an inserted blank line (not in raw source)
     if (styledLine === "" && rawIdx < rawLines.length && rawLines[rawIdx] !== "") {
@@ -673,15 +610,6 @@ function layoutTextRows(
     }
 
     const rawLine = rawIdx < rawLines.length ? rawLines[rawIdx]! : "";
-    const isFirstLine =
-      !anchored &&
-      (styledLine.startsWith("◈ ") || stripAnsi(styledLine).startsWith("◈ "));
-    if (isFirstLine) anchored = true;
-    const anchorPrefix = isFirstLine
-      ? (colorEnabled ? `${themeColorSequence("chrome")}◈\x1b[39m ` : "◈ ")
-      : "";
-    const prefixWidth = isFirstLine ? 2 : 0;
-    const prefixCharCount = anchorPrefix.length;
     const rawLineLen = rawLine.length;
     const sourceMapping = buildSourceMapping(rawLine, styledLine, prefixCharCount);
     const lineRows = wrapTranscriptLineWithLayout(
@@ -708,26 +636,22 @@ export function getTurnLayoutRows(
   contentWidth: number,
   colorEnabled: boolean,
   themeFingerprint: string,
-  graphicsEnabled = false,
 ): TurnLayoutRow[] {
   const cached = getCachedTurnLine(turn);
   if (
     cached &&
-    isTurnLineCacheValid(cached, turn, contentWidth, colorEnabled, themeFingerprint, graphicsEnabled)
+    cached.width === contentWidth &&
+    cached.color === colorEnabled &&
+    cached.themeFingerprint === themeFingerprint
   ) {
     return cached.layoutRows;
   }
-  const layoutRows = layoutTurnRows(turn.role, turn.content, contentWidth, colorEnabled, turn.command, {
-    images: turn.images,
-    graphicsEnabled,
-  });
+  const layoutRows = layoutTurnRows(turn.role, turn.content, contentWidth, colorEnabled, turn.command);
   const lines = layoutRows.map((r) => r.rendered);
   setCachedTurnLine(turn, {
     width: contentWidth,
     color: colorEnabled,
     themeFingerprint,
-    graphicsEnabled,
-    imagesSignature: turnImagesSignature(turn.images),
     lines,
     layoutRows,
   });
@@ -791,327 +715,6 @@ let streamingTurnCache: StreamingTurnCache | null = null;
 
 export function resetStreamingTurnCache(): void {
   streamingTurnCache = null;
-  streamingLayoutCache = null;
-}
-
-/**
- * 当前流式 turn 的 layout 元数据增量缓存（选择高亮 / 复制需要每行的
- * sourceStart/sourceEnd/prefixWidth/softWrapped/softWrapJoiner）。
- *
- * 与 streamingTurnCache（渲染行）同构：把当前 turn 源文本切成「已提交完整逻辑行」+
- * 「未完 tail」，已提交段按段渲染一次后不再重排，每帧只重排 pendingTail；差别在于这里
- * 保留 selection 需要的元数据，因此等价性校验逐字段对照全量 layoutTurnRows（rendered
- * 之外的 offset / prefixWidth / softWrap / sourceMapping 全部比对），不是只比纯文本。
- *
- * 安全模型沿用 streamingTurnCache：非纯追加（含 \r 重写、内容收缩）、role/宽度/配色/
- * 主题变化一律失效重建；可疑内容（fence / 数学块 / 表格 / 标题与列表呼吸 / \r / \x00）
- * 与分段拼接边界一律回退全量布局；首次 splice 另做一次逐字段等价校验（NOLO_TUI_RENDER_VALIDATE=1
- * 可强制每帧校验），失配即本 turn 永久关闭快路径、回退旧行为。只有 assistant 走增量
- * （user / local 不逐字符流式，保持整段 layoutTurnRows）。
- */
-type StreamingLayoutCache = {
-  role: TurnRole;
-  contentWidth: number;
-  colorEnabled: boolean;
-  themeFingerprint: string;
-  /** 本 turn 完整源文本（含 pendingTail），纯追加判定基准。 */
-  fullContent: string;
-  /** 已提交完整逻辑行的 layout 行（按段渲染一次，之后不再重排）。 */
-  committedRows: TurnLayoutRow[];
-  /** 已提交源文本长度（截到最后一个 \n；0 = 尚无完整逻辑行）。 */
-  completeContentLength: number;
-  /** 最后一个 \n 之后的未完行源文本（"" = 干净行边界）。 */
-  pendingTail: string;
-  /** 已提交源文本的 ``` 翻转次数（奇偶 = 围栏内外状态）。 */
-  fenceFlips: number;
-  /** 已提交区域最后一个逻辑行（边界守卫用）。 */
-  committedLastLine: string;
-  /** 是否允许 append-splice（校验失配或非 assistant 时为 false）。 */
-  fastPathEnabled: boolean;
-  /** 快路径与全量布局的一次性逐字段等价校验是否已通过。 */
-  spliceValidated: boolean;
-  /** 上次 compose 的完整结果（内容未变时直接复用，零渲染成本）。 */
-  lastRows: TurnLayoutRow[] | null;
-};
-
-let streamingLayoutCache: StreamingLayoutCache | null = null;
-
-/** 逐字段比对两行 layout 元数据（selection/复制的等价性判据，不只看 rendered）。 */
-function layoutLayoutRowEqual(a: TurnLayoutRow, b: TurnLayoutRow): boolean {
-  if (a.rendered !== b.rendered) return false;
-  if (a.sourceStart !== b.sourceStart || a.sourceEnd !== b.sourceEnd) return false;
-  if (a.prefixWidth !== b.prefixWidth) return false;
-  if ((a.softWrapped ?? false) !== (b.softWrapped ?? false)) return false;
-  if ((a.softWrapJoiner ?? "") !== (b.softWrapJoiner ?? "")) return false;
-  const ma = a.sourceMapping;
-  const mb = b.sourceMapping;
-  if (ma || mb) {
-    if (!ma || !mb || ma.length !== mb.length) return false;
-    for (let i = 0; i < ma.length; i++) {
-      if (ma[i] !== mb[i]) return false;
-    }
-  }
-  return true;
-}
-
-function layoutRowsEqual(a: readonly TurnLayoutRow[], b: readonly TurnLayoutRow[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (!layoutLayoutRowEqual(a[i]!, b[i]!)) return false;
-  }
-  return true;
-}
-
-/**
- * 继续段（非首段）的 layout 行：与 renderTailTurnBlock 同一渲染语义（不挂 ◈ 锚点、
- * 走 formatAssistantDisplay + [nolo] 着色），但保留 source 偏移映射。prefixWidth 恒为 0，
- * 软换行元数据由同一个 wrapTranscriptLineWithLayout 产生，因此与全量网格同义。
- */
-function renderContinuationTurnRows(
-  role: TurnRole,
-  source: string,
-  contentWidth: number,
-  colorEnabled: boolean,
-  sourceOffset: number,
-): TurnLayoutRow[] {
-  const normalized = source.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const styledText = colorEnabled
-    ? formatAssistantDisplay(normalized, { trimEdges: false })
-    : stripAnsi(formatAssistantDisplay(normalized, { trimEdges: false }));
-  const styledLines = styledText
-    .split("\n")
-    .map((line) =>
-      line.startsWith("[nolo]") && colorEnabled ? themeText(line, "chrome", true) : line,
-    );
-  const rawLines = normalized.split("\n");
-  // 样式行与源行数不一致（polish 插入了空行等）→ 无法给出可靠 source 映射，
-  // 交给逐字段校验判失配并回退全量。
-  const pairingSafe = rawLines.length === styledLines.length;
-  const rows: TurnLayoutRow[] = [];
-  let rawOffset = sourceOffset;
-  for (let i = 0; i < styledLines.length; i++) {
-    const rawLine = rawLines[i] ?? "";
-    const styledLine = styledLines[i]!;
-    const sourceMapping = pairingSafe
-      ? buildSourceMapping(rawLine, styledLine, 0)
-      : undefined;
-    rows.push(
-      ...wrapTranscriptLineWithLayout(
-        styledLine,
-        contentWidth,
-        "",
-        rawOffset,
-        0,
-        0,
-        sourceMapping,
-        rawLine.length,
-      ),
-    );
-    rawOffset += rawLine.length + 1;
-  }
-  return rows;
-}
-
-/** 内容/几何变化或非纯追加时的全量重建（成本回退旧行为，正确性优先）。 */
-function rebuildStreamingLayoutCache(
-  content: string,
-  role: TurnRole,
-  contentWidth: number,
-  colorEnabled: boolean,
-  themeFingerprint: string,
-): TurnLayoutRow[] {
-  const rows = layoutTurnRows(role, content, contentWidth, colorEnabled);
-  const lastNewline = content.lastIndexOf("\n");
-  const completeContentLength = lastNewline + 1;
-  const committedSource = content.slice(0, completeContentLength).slice(0, -1);
-  streamingLayoutCache = {
-    role,
-    contentWidth,
-    colorEnabled,
-    themeFingerprint,
-    fullContent: content,
-    committedRows:
-      completeContentLength === 0
-        ? []
-        : layoutTurnRows(role, committedSource, contentWidth, colorEnabled),
-    completeContentLength,
-    pendingTail: lastNewline === -1 ? content : content.slice(lastNewline + 1),
-    fenceFlips: countFenceFlips(content),
-    committedLastLine: lastLogicalLineOf(content.slice(0, completeContentLength)),
-    // assistant 逐字符流式；user / local 不逐字符增长，保持整段布局（旧行为）。
-    fastPathEnabled: role === "assistant",
-    spliceValidated: false,
-    lastRows: rows,
-  };
-  return rows;
-}
-
-function computeStreamingTurnLayoutRows(
-  role: TurnRole,
-  content: string,
-  contentWidth: number,
-  colorEnabled: boolean,
-  themeFingerprint: string,
-): TurnLayoutRow[] {
-  const forceValidate = process.env.NOLO_TUI_RENDER_VALIDATE === "1";
-  let cache = streamingLayoutCache;
-
-  const geometryChanged =
-    !cache ||
-    cache.role !== role ||
-    cache.contentWidth !== contentWidth ||
-    cache.colorEnabled !== colorEnabled ||
-    cache.themeFingerprint !== themeFingerprint;
-  if (geometryChanged || !content.startsWith(cache.fullContent)) {
-    return rebuildStreamingLayoutCache(
-      content,
-      role,
-      contentWidth,
-      colorEnabled,
-      themeFingerprint,
-    );
-  }
-
-  if (content === cache.fullContent && cache.lastRows) {
-    return cache.lastRows;
-  }
-
-  const suffix = content.slice(cache.fullContent.length);
-  if (suffix === "") {
-    return cache.lastRows ?? cache.committedRows;
-  }
-
-  const newTail = cache.pendingTail + suffix;
-  if (
-    !cache.fastPathEnabled ||
-    isSuspiciousAppend(newTail, cache.fenceFlips % 2 === 0) ||
-    isSuspiciousBoundary(cache.committedLastLine, newTail)
-  ) {
-    return rebuildStreamingLayoutCache(
-      content,
-      role,
-      contentWidth,
-      colorEnabled,
-      themeFingerprint,
-    );
-  }
-
-  // 已提交段只渲染一次（按段 append，不重排）；每帧只重排 pendingTail。
-  const lastNewline = newTail.lastIndexOf("\n");
-  const committedRows = [...cache.committedRows];
-  let completeContentLength = cache.completeContentLength;
-  if (lastNewline !== -1) {
-    const completePart = newTail.slice(0, lastNewline + 1);
-    const renderSource = completePart.slice(0, -1);
-    committedRows.push(
-      ...(completeContentLength === 0
-        ? layoutTurnRows(role, renderSource, contentWidth, colorEnabled)
-        : renderContinuationTurnRows(
-            role,
-            renderSource,
-            contentWidth,
-            colorEnabled,
-            completeContentLength,
-          )),
-    );
-    completeContentLength += completePart.length;
-  }
-  const pendingTail = newTail.slice(lastNewline + 1);
-  const composed = [
-    ...committedRows,
-    ...renderContinuationTurnRows(
-      role,
-      pendingTail,
-      contentWidth,
-      colorEnabled,
-      completeContentLength,
-    ),
-  ];
-
-  if (!cache.spliceValidated || forceValidate) {
-    const full = layoutTurnRows(role, content, contentWidth, colorEnabled);
-    if (!layoutRowsEqual(composed, full)) {
-      // 元数据或文本失配 → 本 turn 永久关闭快路径（旧行为，正确性不变）。
-      return rebuildStreamingLayoutCache(
-        content,
-        role,
-        contentWidth,
-        colorEnabled,
-        themeFingerprint,
-      );
-    }
-    cache.spliceValidated = true;
-  }
-
-  cache.fullContent = content;
-  cache.committedRows = committedRows;
-  cache.completeContentLength = completeContentLength;
-  cache.pendingTail = pendingTail;
-  if (lastNewline !== -1) {
-    cache.fenceFlips += countFenceFlips(newTail.slice(0, lastNewline + 1));
-    cache.committedLastLine = lastLogicalLineOf(newTail.slice(0, lastNewline + 1));
-  }
-  cache.lastRows = composed;
-  return composed;
-}
-
-/** 流式 turn 的 layout 行；与 layoutTurnRows 同一网格（含全部 selection 元数据）。 */
-function getStreamingTurnLayoutRows(
-  history: TurnHistory,
-  contentWidth: number,
-  colorEnabled: boolean,
-  themeFingerprint: string,
-): TurnLayoutRow[] {
-  const role = history.currentRole;
-  if (role === null) return [];
-  return computeStreamingTurnLayoutRows(
-    role,
-    history.currentContent,
-    contentWidth,
-    colorEnabled,
-    themeFingerprint,
-  );
-}
-
-/** Test/benchmark-only：按显式参数驱动流式 layout 增量缓存（不读 history）。 */
-export function getStreamingTurnLayoutRowsForTest(
-  role: TurnRole,
-  content: string,
-  contentWidth: number,
-  colorEnabled: boolean,
-  themeFingerprint: string,
-): TurnLayoutRow[] {
-  return computeStreamingTurnLayoutRows(
-    role,
-    content,
-    contentWidth,
-    colorEnabled,
-    themeFingerprint,
-  );
-}
-
-/** Test/benchmark-only：快路径状态（失配即 false → 优化对本 turn 失效）。 */
-export function getStreamingLayoutCacheStateForTest(): {
-  fastPathEnabled: boolean;
-  spliceValidated: boolean;
-  committedRowCount: number;
-  pendingTailLength: number;
-} {
-  const cache = streamingLayoutCache;
-  if (!cache) {
-    return {
-      fastPathEnabled: false,
-      spliceValidated: false,
-      committedRowCount: 0,
-      pendingTailLength: 0,
-    };
-  }
-  return {
-    fastPathEnabled: cache.fastPathEnabled,
-    spliceValidated: cache.spliceValidated,
-    committedRowCount: cache.committedRows.length,
-    pendingTailLength: cache.pendingTail.length,
-  };
 }
 
 /** 与 layoutTurnRows/fence 语义对齐：``` 开头的行（含缩进）翻转围栏状态。 */
@@ -1415,9 +1018,8 @@ export function countTurnLines(
   content: string,
   contentWidth: number,
   command?: string,
-  options?: TurnLayoutOptions,
 ): number {
-  return layoutTurnRows(role, content, contentWidth, false, command, options).length;
+  return layoutTurnRows(role, content, contentWidth, false, command).length;
 }
 
 export type TurnOffsetEntry = {
@@ -1466,7 +1068,6 @@ export function buildTurnOffsets(
 ): TurnOffsets {
   const entries: TurnOffsetEntry[] = [];
   let offset = 0;
-  const graphicsEnabled = history.graphicsEnabled === true;
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
     const separatorAbove = turnSeparatorRows(
@@ -1475,25 +1076,21 @@ export function buildTurnOffsets(
     );
     offset += separatorAbove;
     const cacheMap = turnLineCountCache.get(turn);
-    const key = lineCountCacheKey(contentWidth, graphicsEnabled, turn);
     let lineCount: number;
-    if (cacheMap && cacheMap.has(key)) {
-      lineCount = cacheMap.get(key)!;
+    if (cacheMap && cacheMap.has(contentWidth)) {
+      lineCount = cacheMap.get(contentWidth)!;
     } else {
-      lineCount = countTurnLines(turn.role, turn.content, contentWidth, turn.command, {
-        images: turn.images,
-        graphicsEnabled,
-      });
+      lineCount = countTurnLines(turn.role, turn.content, contentWidth, turn.command);
       if (!cacheMap) {
-        const nextMap = new Map<string, number>();
-        nextMap.set(key, lineCount);
+        const nextMap = new Map<number, number>();
+        nextMap.set(contentWidth, lineCount);
         turnLineCountCache.set(turn, nextMap);
       } else {
         if (cacheMap.size >= 8) {
           const oldestKey = cacheMap.keys().next().value;
           if (oldestKey !== undefined) cacheMap.delete(oldestKey);
         }
-        cacheMap.set(key, lineCount);
+        cacheMap.set(contentWidth, lineCount);
       }
     }
     entries.push({ startRow: offset, lineCount, separatorAbove });
@@ -1547,7 +1144,6 @@ function currentTurnSeparator(history: TurnHistory): number {
 export function buildHistoryLines(history: TurnHistory, contentWidth: number): string[] {
   const colorEnabled = resolveCliColorEnabled();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
-  const graphicsEnabled = history.graphicsEnabled === true;
   const wrapped: string[] = [];
 
   for (let i = 0; i < history.turns.length; i++) {
@@ -1560,7 +1156,6 @@ export function buildHistoryLines(history: TurnHistory, contentWidth: number): s
       contentWidth,
       colorEnabled,
       themeFingerprint,
-      graphicsEnabled,
     );
     wrapped.push(...layoutRows.map((r) => r.rendered));
   }
@@ -1596,123 +1191,43 @@ export function buildHistoryLayoutRows(
 ): TurnLayoutRow[] {
   const colorEnabled = resolveCliColorEnabled();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
-  const graphicsEnabled = history.graphicsEnabled === true;
   const rows: TurnLayoutRow[] = [];
+  const separatorRow = (): TurnLayoutRow => ({
+    rendered: "",
+    sourceStart: 0,
+    sourceEnd: 0,
+    prefixWidth: 0,
+  });
 
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
     for (let s = turnSeparatorRows(i > 0 ? history.turns[i - 1]!.role : null, turn.role); s > 0; s--) {
-      rows.push(blankLayoutRow());
+      rows.push(separatorRow());
     }
     rows.push(...getTurnLayoutRows(
       turn,
       contentWidth,
       colorEnabled,
       themeFingerprint,
-      graphicsEnabled,
     ));
   }
 
   if (history.currentRole !== null && history.currentContent) {
+    const i = history.turns.length;
     for (let s = currentTurnSeparator(history); s > 0; s--) {
-      rows.push(blankLayoutRow());
+      rows.push(separatorRow());
     }
     rows.push(
-      ...getStreamingTurnLayoutRows(history, contentWidth, colorEnabled, themeFingerprint),
+      ...layoutTurnRows(
+        history.currentRole,
+        history.currentContent,
+        contentWidth,
+        colorEnabled,
+      ),
     );
   }
 
   return rows;
-}
-
-/** 空白（分隔）行占位：与 buildHistoryLayoutRows 的 separator 行完全同形。 */
-function blankLayoutRow(): TurnLayoutRow {
-  return {
-    rendered: "",
-    sourceStart: 0,
-    sourceEnd: 0,
-    prefixWidth: 0,
-  };
-}
-
-export type LayoutRowWindow = {
-  /** 全局行号 rows[0] 对应的行；rows[k] 即全局行 baseRow + k。 */
-  readonly baseRow: number;
-  /** 窗口内的 layout 行；范围外/超出行尾的槽位为 undefined（与全量网格同义）。 */
-  readonly rows: (TurnLayoutRow | undefined)[];
-};
-
-/**
- * 与 buildHistoryLayoutRows 完全同一张全局行网格，但只物化 [fromRow, toRowExclusive)
- * 窗口内的行。行位置来自 buildTurnOffsets：只读行数缓存、不跑 markdown，成本 O(turns)
- * （turns ≤ MAX_TUI_HISTORY_TURNS = 500，与总行数/总字符数无关）。只有与窗口相交的
- * turn 才取 getTurnLayoutRows（每 turn 缓存）并按窗口切片——离屏 turn 一行都不会展开。
- * 注意：相交的 turn 仍按整条物化（首次或缓存失效时），因此单条超长消息与窗口相交时
- * 那一次调用的成本与这条消息自身的长度成正比，之后靠 turn 缓存复用。语义（分隔行、
- * 前缀宽度、软换行）与全量构建一致。
- */
-export function buildLayoutRowWindow(
-  history: TurnHistory,
-  contentWidth: number,
-  fromRow: number,
-  toRowExclusive: number,
-): LayoutRowWindow {
-  const baseRow = Math.max(0, Math.floor(fromRow));
-  const endRow = Math.max(baseRow, Math.floor(toRowExclusive));
-  const rows: (TurnLayoutRow | undefined)[] = new Array(endRow - baseRow);
-  if (rows.length === 0) return { baseRow, rows };
-
-  const colorEnabled = resolveCliColorEnabled();
-  const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
-  const graphicsEnabled = history.graphicsEnabled === true;
-
-  const assignSeparators = (startRow: number, count: number): void => {
-    for (let s = 0; s < count; s++) {
-      const row = startRow + s;
-      if (row >= baseRow && row < endRow) rows[row - baseRow] = blankLayoutRow();
-    }
-  };
-  const assignTurnRows = (startRow: number, turnRows: readonly TurnLayoutRow[]): void => {
-    const sliceStart = Math.max(baseRow, startRow);
-    const sliceEnd = Math.min(endRow, startRow + turnRows.length);
-    for (let row = sliceStart; row < sliceEnd; row++) {
-      rows[row - baseRow] = turnRows[row - startRow];
-    }
-  };
-
-  const { entries, totalLines } = buildTurnOffsets(history, contentWidth);
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i]!;
-    if (entry.startRow >= endRow) break;
-    assignSeparators(entry.startRow - entry.separatorAbove, entry.separatorAbove);
-    if (entry.startRow + entry.lineCount > baseRow) {
-      assignTurnRows(
-        entry.startRow,
-        getTurnLayoutRows(
-          history.turns[i]!,
-          contentWidth,
-          colorEnabled,
-          themeFingerprint,
-          graphicsEnabled,
-        ),
-      );
-    }
-  }
-
-  if (history.currentRole !== null && history.currentContent) {
-    let offset = totalLines;
-    const separatorAbove = currentTurnSeparator(history);
-    if (offset < endRow) assignSeparators(offset, separatorAbove);
-    offset += separatorAbove;
-    if (offset < endRow) {
-      assignTurnRows(
-        offset,
-        getStreamingTurnLayoutRows(history, contentWidth, colorEnabled, themeFingerprint),
-      );
-    }
-  }
-
-  return { baseRow, rows };
 }
 
 export let renderCacheMissCount = 0;
@@ -1723,76 +1238,15 @@ export function resetRenderCacheMissCount(): void {
   renderCacheMissCount = 0;
 }
 
-/** 本帧视口内完全可见的图片占位（首行坐标，0 基于视口）。 */
-export type HistoryVisibleImage = {
-  readonly occurrence: string;
-  readonly key: string;
-  /** 0 基，与 renderHistory 写入的视口行一致（终端行 = row + 1）。 */
-  readonly row: number;
-  /** 0 基视口列；内容区从第 0 列开始。 */
-  readonly column: number;
-  readonly columns: number;
-  readonly rows: number;
-};
-
-export type RenderHistoryOptions = {
-  /**
-   * 每帧文字写完后回调完全可见的图形占位（仅 graphicsEnabled 时非空）与本帧视口尺寸。
-   * 缺省时 renderHistory 行为与之前完全一致。
-   */
-  onVisibleImages?: (
-    images: HistoryVisibleImage[],
-    viewport: { readonly rows: number; readonly columns: number },
-  ) => void;
-};
-
-function collectVisibleImageRows(
-  layoutRows: readonly TurnLayoutRow[],
-  turnIndex: number,
-  turnStart: number,
-  winStart: number,
-  winEnd: number,
-  out: HistoryVisibleImage[],
-): void {
-  for (let k = 0; k < layoutRows.length; k++) {
-    const info = layoutRows[k]!.image;
-    if (!info || !info.graphics || info.index !== 0) continue;
-    const start = turnStart + k;
-    if (start < winStart || start + info.rows > winEnd) continue;
-    out.push({
-      // 轮次序号 + 图内序号：与宽度、滚动、视口高度无关，重绘与改宽度时保持稳定，
-      // 渲染器才能把同一处认成同一处（不重复传输、不乱删放置）。
-      occurrence: `${turnIndex}:${info.key}:${info.index}`,
-      key: info.key,
-      row: start - winStart,
-      column: 0,
-      columns: info.columns,
-      rows: info.rows,
-    });
-  }
-}
-
 export function renderHistory(
   output: NodeJS.WritableStream,
   history: TurnHistory,
   inputLines: number,
   selection?: TuiSelectionState,
   reservedRows = 0,
-  options?: RenderHistoryOptions,
 ): void {
   const tty = output as { isTTY?: boolean; rows?: number; columns?: number };
   if (!tty.isTTY) return;
-  // 欢迎 banner 与 transcript 共用屏幕顶部，但 banner 不走本双缓冲——它由
-  // readlineWorkspace 直接写出、按绝对行重绘（repaintBanner）。空 transcript
-  // 时若仍按「全空帧」绘制：① 会把 banner 从屏幕上擦掉（启动后的 git status
-  // 刷新、composer 长高、resize、Ctrl+L 都会触发）；② 更糟的是把帧缓冲预处理
-  // 成全空白，之后 banner 重绘（如 /update 提示行）落在缓冲认为是空白的行上，
-  // 首条真实 turn 的 diff 渲染跳过这些行 → 消息压在 banner 上方形成重合，
-  // 直到流式输出逐行覆盖才消失。空 transcript 时让出屏幕：banner 保持由
-  // repaintBanner 所有，首条 turn 到来时 prevFrame 为空 → 整屏重绘，banner
-  // 被干净替换。清空 transcript 的路径（/new、切对话）都会紧随一条 local
-  // turn，屏幕仍由那一次渲染清干净。
-  if (history.turns.length === 0 && history.currentRole === null) return;
   const rows = tty.rows ?? 24;
   const columns = tty.columns ?? 80;
   const visibleHeight = Math.max(
@@ -1802,7 +1256,6 @@ export function renderHistory(
   const contentWidth = Math.max(1, columns - 1);
   const colorEnabled = resolveCliColorEnabled();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
-  const graphicsEnabled = history.graphicsEnabled === true;
 
   const { entries, totalLines: finalizedLines } = buildTurnOffsets(history, contentWidth);
 
@@ -1837,7 +1290,6 @@ export function renderHistory(
   const winStart = history.scrollTop;
   const winEnd = Math.min(totalLines, winStart + visibleHeight);
   let visibleLines: string[] = new Array(visibleHeight).fill("");
-  const visibleImages: HistoryVisibleImage[] = [];
 
   // Paint ONLY the turns overlapping the visible window.
   for (let i = 0; i < entries.length; i++) {
@@ -1857,7 +1309,9 @@ export function renderHistory(
     let layoutRows: TurnLayoutRow[];
     if (
       cached &&
-      isTurnLineCacheValid(cached, turn, contentWidth, colorEnabled, themeFingerprint, graphicsEnabled)
+      cached.width === contentWidth &&
+      cached.color === colorEnabled &&
+      cached.themeFingerprint === themeFingerprint
     ) {
       layoutRows = cached.layoutRows;
     } else {
@@ -1867,7 +1321,6 @@ export function renderHistory(
         contentWidth,
         colorEnabled,
         themeFingerprint,
-        graphicsEnabled,
       );
     }
     const lines = layoutRows.map((r) => r.rendered);
@@ -1876,9 +1329,6 @@ export function renderHistory(
     const interEnd = Math.min(turnEnd, winEnd);
     for (let r = interStart; r < interEnd; r++) {
       visibleLines[r - winStart] = lines[r - turnStart] ?? "";
-    }
-    if (options?.onVisibleImages) {
-      collectVisibleImageRows(layoutRows, i, turnStart, winStart, winEnd, visibleImages);
     }
   }
   if (currentStart >= 0) {
@@ -1959,9 +1409,6 @@ export function renderHistory(
     frame += `\x1b[${mainBottom};1H`;
     output.write(frame);
   }
-
-  // 图片在文字帧之后放置；可选回调缺省时保持原行为。
-  options?.onVisibleImages?.(visibleImages, { rows: visibleHeight, columns: contentWidth });
 }
 
 export function createHistoryOutputStream(
@@ -2017,9 +1464,7 @@ export function computeScrollMetrics(
   if (history.currentRole !== null && history.currentContent) {
     totalLines +=
       currentTurnSeparator(history) +
-      countTurnLines(history.currentRole, history.currentContent, contentWidth, undefined, {
-        graphicsEnabled: history.graphicsEnabled === true,
-      });
+      countTurnLines(history.currentRole, history.currentContent, contentWidth);
   }
   const maxScrollTop = Math.max(0, totalLines - visibleHeight);
   return { visibleHeight, contentWidth, totalLines, maxScrollTop };

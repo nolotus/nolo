@@ -33,7 +33,7 @@ import {
   PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_25_PRO_MODEL,
-  PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL,
+  PLATFORM_HOSTED_GEMINI_31_PRO_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL,
@@ -315,16 +315,14 @@ export const PLATFORM_HOSTED_GEMINI_25_PRO_PRICE = {
 } as const;
 
 /**
- * Gemini 4 Argon（平台托管语义）：直连 Google 官方原生 API（gemini-4-argon，
+ * Gemini 3.1 Pro（平台托管语义）：直连 Google 官方原生 API（gemini-3.1-pro，
  * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
- * × 8 = 16.0 / 80.0 / 0.8 credits。
- * 仅隐式缓存，无单独缓存写入价，cachingWrite 与 cachingRead 同价。
  */
-export const PLATFORM_HOSTED_GEMINI_4_ARGON_PRICE = {
+export const PLATFORM_HOSTED_GEMINI_31_PRO_PRICE = {
   input: toPlatformCredits(2.0), // 16.0 credits
-  output: toPlatformCredits(10.0), // 80.0 credits
-  cachingWrite: toPlatformCredits(0.1), // 0.8 credits
-  cachingRead: toPlatformCredits(0.1), // 0.8 credits
+  output: toPlatformCredits(12.0), // 96.0 credits
+  cachingWrite: toPlatformCredits(0.5), // 4.0 credits
+  cachingRead: toPlatformCredits(0.5), // 4.0 credits
 } as const;
 
 /**
@@ -689,10 +687,10 @@ export const platformHostedModels = [
     supportsReasoningEffort: true,
   },
   {
-    name: PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL,
-    displayName: "Gemini 4 Argon",
+    name: PLATFORM_HOSTED_GEMINI_31_PRO_MODEL,
+    displayName: "Gemini 3.1 Pro",
     hasVision: true,
-    price: { ...PLATFORM_HOSTED_GEMINI_4_ARGON_PRICE },
+    price: { ...PLATFORM_HOSTED_GEMINI_31_PRO_PRICE },
     maxOutputTokens: 65536,
     contextWindow: 1_048_576,
     supportsTool: true,

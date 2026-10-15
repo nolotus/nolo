@@ -1,7 +1,6 @@
 import {
   BUILTIN_NOLO_AGENT_KEY,
   BUILTIN_NOLO_AGENT_NAME,
-  parseBuiltinPlatformAgentId,
 } from "core/builtinAgents";
 import { API_REPORTED_COST_MULTIPLIER } from "../../ai/token/calculatePrice";
 import { findModelConfig } from "../../ai/llm/providers";
@@ -68,9 +67,7 @@ function resolveEffectiveModel(opts: AgentModelRef): string | undefined {
   const agentKey = opts.agentKey?.trim();
   if (!agentKey) return undefined;
 
-  return builtinAgentCatalogEntryById(
-    parseBuiltinPlatformAgentId(agentKey) ?? parsePublicAgentId(agentKey),
-  )?.model;
+  return builtinAgentCatalogEntryById(parsePublicAgentId(agentKey))?.model;
 }
 
 /**

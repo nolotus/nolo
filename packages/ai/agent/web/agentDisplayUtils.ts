@@ -102,13 +102,6 @@ export interface AgentThreadRuntimeEvidence {
     source?: string;
     artifactKind?: string;
   };
-  /**
-   * F1: server-projected run execution location (RunSummary.executionLocation
-   * shape, ToolExecutionLocation contract). Optional — old servers omit it, and
-   * the UI must render "未知" rather than crash or guess. Raw unknown here; the
-   * renderer passes it through projectToolExecutionLocation before display.
-   */
-  executionLocation?: unknown;
   hasRuntimeToolPolicySnapshot: boolean;
 }
 

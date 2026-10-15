@@ -276,13 +276,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     model: "gemini-3.8-flash",
   },
   {
-    id: "01GEM4ARGPB00000001TDQ94E",
-    group: "public",
-    name: "Gemini 4 Argon",
-    provider: "nolo",
-    model: "gemini-4-argon",
-  },
-  {
     id: "01GROK46PLAZ00000001PTJZ3K",
     group: "public",
     name: "Grok 4.6",

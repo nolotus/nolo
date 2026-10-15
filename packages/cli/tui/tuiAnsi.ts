@@ -597,22 +597,13 @@ export function wrapTranscriptLineWithLayout(
     }
   };
 
-  // 行首守卫用的「最后一个非样式 token 下标」：提前算一次（O(T)），避免每行
-  // tokens.slice(start) 复制剩余 token 数组 —— 那会让长单行退化成 O(rows·T)。
-  let lastContentTokenIndex = -1;
-  for (let i = tokens.length - 1; i >= 0; i -= 1) {
-    if (tokens[i]!.kind !== "sgr") {
-      lastContentTokenIndex = i;
-      break;
-    }
-  }
-
-  let plainCharIndexAtStart = 0;
   let start = 0;
   while (start < tokens.length) {
     // Only zero-width style tokens left: fold them into the previous line
     // instead of emitting a visually blank row.
-    if (start > lastContentTokenIndex && rows.length > 0) break;
+    if (tokens.slice(start).every((token) => token.kind === "sgr")) {
+      if (rows.length > 0) break;
+    }
     const openingStyles = [...activeStyles];
     const isContinuation = rows.length > 0;
     const currentPrefixWidth = isContinuation ? visibleWidth(hangingIndent) : prefixWidth;
@@ -667,9 +658,14 @@ export function wrapTranscriptLineWithLayout(
     let foundFirst = false;
     const rowMapping: number[] = [];
 
-    // 行内纯文本游标继承上一次迭代的累积值：原先每行重扫 tokens[0..start) 累计
-    // plainCharIndex，是 O(rows·T) 二次成本（长单行的主要卡顿来源）。
-    let plainCharIndex = plainCharIndexAtStart;
+    // Calculate plainCharIndex up to segment start (excluding ANSI codes)
+    let plainCharIndex = 0;
+    for (let i = 0; i < start; i++) {
+      const tok = tokens[i]!;
+      if (tok.kind === "char" && tok.charIndex >= prefixCharCount) {
+        plainCharIndex += tok.value.length;
+      }
+    }
 
     for (let i = start; i < segmentEnd; i++) {
       const tok = tokens[i]!;
@@ -716,9 +712,6 @@ export function wrapTranscriptLineWithLayout(
     if (start >= tokens.length && rawLineLength !== undefined) {
       segSourceEnd = lineSourceStart + rawLineLength;
     }
-
-    // 下一次迭代的行首游标（含本轮 joiner 扫描消费掉的空格）。
-    plainCharIndexAtStart = plainCharIndex;
 
     rows.push({
       rendered: rowRendered,
