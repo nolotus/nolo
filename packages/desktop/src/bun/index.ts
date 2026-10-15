@@ -32,7 +32,7 @@ import {
   resolveCapabilitiesByIntent,
   mergeBrowseContext,
   type BrowseContext,
-} from "./browseContextStore";
+} from "core/browseContextStore";
 import { BROWSER_CHROME_SCRIPT } from "./browserChromeTemplates";
 import {
   resolveInitialWindowFrame,
