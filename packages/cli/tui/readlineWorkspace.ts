@@ -930,6 +930,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 终端可能已 resize：重绘时实时读宽度，让 renderWelcome 重新决定是否
     // 保留 scene，避免旧宽度下画的 banner 在新宽度 wrap 出残留。
     const currentColumns = (output as { columns?: number }).columns ?? 80;
+    const currentRows = (output as { rows?: number }).rows ?? 24;
     const welcome = renderWelcome(state, frame, maxFrames, currentColumns);
     // welcome 以换行结尾，pinned agent notice 当初紧随其后再写一段；重绘时
     // 必须一并重写，否则清行（clearLines 含 notice 行数）会把它从屏幕上抹掉。
@@ -954,7 +955,27 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       output.write(frame);
       // 顶部 banner 区域重绘不影响底部 composer，但活动输入行的绘制状态需要
       // 恢复，否则光标/缓冲行与终端实际内容脱节。
-      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+      if (fixedInput.active) {
+        fixedInput.repaint(buffer, cursorPos);
+        // resize 会把 composer 整体顶高（终端行数变多，或草稿在新列宽下占更多
+        // 行），它旧占的行就落到 banner 与 composer 之间：banner 只清自己那几行、
+        // composer 的 ED 只从新 startRow 往屏幕底部清，中间这段没人认领 → 旧
+        // composer 的 ─── 规则行整条留在屏幕中部（欢迎页 resize 残影的根因）。
+        // composer 刚重绘完，startRow 已按新几何更新，此时把 banner 下方到
+        // composer 上方的残段补清（逐行 EL 2K）；DECSC/DECRC 包住清行，保证
+        // 硬件光标仍旧留在 composer（与 tuiImageRenderer 同一手法）。
+        const composerStartRow = Math.max(
+          1,
+          currentRows - fixedInput.getInputLines() + 1,
+        );
+        if (composerStartRow > clearLines + 1) {
+          let stale = "\x1b7";
+          for (let i = clearLines; i < composerStartRow - 1; i += 1) {
+            stale += `\x1b[${i + 1};1H\x1b[2K`;
+          }
+          output.write(`${stale}\x1b8`);
+        }
+      }
     } finally {
       output.write("\x1b[?25h\x1b[?2026l");
     }
@@ -1508,8 +1529,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // 窄终端甚至 wrap 出残行。按新宽度重绘 banner（repaintBanner 实时读
       // columns 决定 scene 去留），composer 单独重 dock。
       if (history.turns.length === 0 && history.currentRole === null) {
+        // repaintBanner 已在同一个 BSU/ESU 帧里按新几何重绘 banner 与 composer
+        // （含两者之间残段的补清），这里不再重复 repaint 一次 composer。
         repaintBanner();
-        fixedInput.repaint(buffer, cursorPos);
         return;
       }
       paintFrame(buffer);

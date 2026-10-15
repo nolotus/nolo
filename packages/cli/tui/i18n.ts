@@ -1560,19 +1560,19 @@ const STRINGS = {
   // ── Non-TUI CLI output: agent-run OAuth channel ownership + stream failures ──
   // 用户在 TUI 选了别人的 sshare agent（跑在 agent owner 的 OAuth 订阅上）：
   // auto 模式下模型请求经服务端 owner-required 代理走分享者订阅、文件/shell
-  // 工具留在本机执行（不是转服务端跑整轮）。文案必须把「模型用分享者订阅 /
-  // 工具在本机 / 想完全本机（自己的订阅）就加 --local」说清。
+  // 工具留在本机执行（不是转服务端跑整轮）。文案说明模型使用分享者订阅、
+  // 工具在本机；不展示内部 ID，也不提供未经保证的订阅切换建议。
   "agentRun.oauthChannelOwnerSkip": {
     en:
-      "[nolo] Info (not an error): {0} runs on its owner's OAuth subscription " +
-      "(owner {1}, this machine runs as {2}). The model is billed to the " +
-      "sharer's subscription; file/shell tools still execute on this machine. " +
-      "Add --local to run fully on this machine, which uses this machine's " +
-      "own subscription.",
+      '[nolo] Using "{0}", shared by someone else: the model uses their ' +
+      "subscription; file operations and commands still run on your computer.",
     zh:
-      "[nolo] 提示（不是报错）：{0} 运行在它主人的 OAuth 订阅上" +
-      "（主人 {1}，本机 {2}）。模型走分享者订阅计费；文件/shell 工具仍在" +
-      "本机执行。想完全在本机运行请加 --local，这会改用本机自己的订阅。",
+      "[nolo] 正在使用对方分享的「{0}」：模型使用对方的订阅，文件操作和命令执行" +
+      "仍在你的电脑上进行。",
+  },
+  "agentRun.sharedAgentFallbackName": {
+    en: "Shared agent",
+    zh: "共享 Agent",
   },
   // 分享 OAuth agent 的 shell 会话授权确认（块 D）：首次 execShell/
   // launchProcess 前弹。必须把三件事说清——这是谁的 agent / 命令在哪台
