@@ -51,9 +51,29 @@ export function buildChatCompletionsRequestBody(
           ...usageRequestOptions,
           ...withTools,
           model,
-          messages: convertResponsesInputToMessages(body.input),
+          messages: [
+            // Responses 线的系统提示在顶层 `instructions`，不在 input 里；
+            // 转 chat.completions 时必须落成 system message，否则降级那一轮
+            // 模型拿不到 agent 的身份/工具契约/安全规则（静默行为退化）。
+            ...(typeof body.instructions === "string" && body.instructions.trim()
+              ? [{ role: "system", content: body.instructions }]
+              : []),
+            ...convertResponsesInputToMessages(body.input),
+          ],
           input: undefined,
           // Responses-only knobs have no completions equivalent.
+          instructions: undefined,
+          // Responses 的 `reasoning:{effort}` 在 completions 线是顶层 `reasoning_effort`；
+          // 显式给了 reasoning_effort 的以它为准，只补缺口，不覆盖。
+          reasoning: undefined,
+          ...(typeof body.reasoning?.effort === "string" &&
+          body.reasoning.effort.trim() &&
+          !body.reasoning_effort
+            ? { reasoning_effort: body.reasoning.effort }
+            : {}),
+          store: undefined,
+          include: undefined,
+          previous_response_id: undefined,
           max_output_tokens: undefined,
           ...(typeof body.max_output_tokens === "number" && body.max_tokens === undefined
             ? { max_tokens: body.max_output_tokens }

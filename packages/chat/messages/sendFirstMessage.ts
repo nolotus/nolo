@@ -9,11 +9,13 @@ import { readFileAsDataURL } from "app/utils/fileReaders";
 import type { RootState } from "app/store";
 import { buildMessageFileContentUrl, isLocalFileContentUrl } from "./fileUrl";
 import { awaitFirstMessageDialogWriteAck } from "./firstMessageWriteAck";
+import type { PendingAttachmentMessagePart } from "./pendingAttachmentParts";
 
 type MessagePart =
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string } }
-    | { type: string; name: string; pageKey: string; dialogKey?: string };
+    | { type: string; name: string; pageKey?: string; dialogKey?: string; id?: string }
+    | { type: "attachment"; v: 1; source: { kind: "remote-file"; fileKey: string }; name: string; mimeType: string; size: number };
 
 export interface SendFirstMessageParams {
     dialogKey?: string;
@@ -23,7 +25,7 @@ export interface SendFirstMessageParams {
     docFiles?: File[];
     runtimeOptions?: AgentRuntimeOptions;
     targetAgentKey?: string;
-    extraParts?: MessagePart[];
+    extraParts?: PendingAttachmentMessagePart[];
     quickChatPerfStartedAt?: number;
     /**
      * 仅新建对话的首条消息传 true：在 dispatch run 之前，有界地等待该对话

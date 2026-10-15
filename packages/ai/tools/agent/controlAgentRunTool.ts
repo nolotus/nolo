@@ -20,6 +20,7 @@ import { selectIdentityUserId } from "identity/selectors";
 import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
 import { formatListRunsCard, formatNotFoundRunCard, formatStatusRunCard, formatStopRunCard, resolveRunLabel } from "./agentRunDisplayHelpers";
+import { normalizeRunTitle } from "./runTitle";
 
 /**
  * 可用 action 的全集。`actions` 描述能力面；`wakeEnabled` 独立描述宿主
@@ -39,7 +40,7 @@ export type ControlAgentRunAction = (typeof CONTROL_AGENT_RUN_ACTIONS)[number];
 /** 每个 action 在 `action` 参数描述里的那一句（顺序由调用方给的 actions 决定）。 */
 const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
     list: "list=列出 run（省略 runId）",
-    status: "status=查单条 run 状态 + 可选日志",
+    status: "status=查单条 run 状态 + 可选日志；终态 run 的完整结论在返回的 resultFile（用 readFile 读原文；lastAssistantText 只是 2000 字摘要，不存在时读 resultFile）；resultFile 缺失可能是 run 被用户中断，按「无结论」处理，不据此判工具故障",
     stop: "stop=取消 run",
     append: "append=向任务追加指令（运行中入队，终态 continuation）",
     wait: "wait=终态阻塞等待：订阅该 dialog 的 SSE 事件流等 done/failed，已终态立即返回，不是轮询",
@@ -52,7 +53,7 @@ const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
  * 失败详情是什么」，不承担等待完成或常规进度跟踪。
  */
 const WAKE_STATUS_ACTION_DESCRIPTION =
-    "status=按需诊断单条 run：仅在怀疑卡死、失败后看详情/日志（tailLines>0）、或用户明确询问执行细节时调用；正常运行的进度由宿主观察，禁止连续 status 查询等待完成";
+    "status=按需诊断单条 run：仅在怀疑卡死、失败后看详情/日志（tailLines>0）、或用户明确询问执行细节时调用；终态 run 的完整结论在返回的 resultFile（readFile 读原文，lastAssistantText 只是 2000 字摘要）；resultFile 缺失也可能是 run 被用户中断（正文只留在 dialog/.log），按「无结论」处理而不是判定工具故障；正常运行的进度由宿主观察，禁止连续 status 查询等待完成";
 
 /**
  * 按环境裁剪后的 controlAgentRun schema。
@@ -141,6 +142,8 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                     type: "number",
                     description:
                         "可选。action=status 时：0=只返回状态摘要，>0=同时返回最近 N 行日志（默认 0）。" +
+                        "摘要里的 resultFile 是终态 run 的完整结论正文（readFile 读它），lastAssistantText 只是 2000 字摘要——长结果不要去啃带 ANSI 的日志。" +
+                        "resultFile 缺失也可能是 run 被用户中断（正文只留在 dialog/.log），不要据此判定工具故障。" +
                         (wake
                             ? "状态摘要含 progress（inFlight=此刻在执行什么、idleMs），用于一次性判断「它是不是卡住了」；正常运行的进度由宿主观察，不要反复调用 status 盯 progress。"
                             : "状态摘要已含 progress（工具调用/LLM 调用/inFlight=此刻在执行什么、idleMs），先看它判断「在干活」还是「卡住」，确实可疑或已失败才拉日志。"),
@@ -166,12 +169,12 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                 limit: {
                     type: "number",
                     description:
-                        "可选。action=list 时限制返回数量，默认 20，上限 200。不带任何参数不会返回全量。",
+                        "可选。local CLI 的 action=list/todo 时限制返回数量，默认 10，上限 50；输出最多 8 KiB，按完整条目分页。server 行为不由此限制。",
                 },
                 offset: {
                     type: "number",
                     description:
-                        "可选。action=list 时跳过前 N 条，配合 limit 翻页。默认 0。",
+                        "可选。action=list/todo 时跳过前 N 条，配合 limit 翻页。默认 0；local CLI 会将非有限或负数规整为 0。",
                 },
             },
             required: ["action"],
@@ -212,7 +215,7 @@ export async function controlAgentRunFunc(
     }
 
     if (action === "todo") {
-        return handleTodo(thunkApi, { status });
+        return handleTodo(thunkApi, { status, limit, offset });
     }
 
     if (action === "append") {
@@ -277,6 +280,7 @@ async function handleList(
         const count = data?.data?.count ?? data?.count ?? runs.length;
         const total = data?.data?.total ?? data?.total ?? count;
         const hasMore = data?.data?.hasMore ?? data?.hasMore ?? false;
+        const nextOffset = data?.data?.nextOffset ?? data?.nextOffset;
         const batchSummary = data?.data?.batchSummary ?? data?.batchSummary;
 
         return {
@@ -285,6 +289,7 @@ async function handleList(
                 count,
                 total,
                 hasMore,
+                ...(typeof nextOffset === "number" ? { nextOffset } : {}),
                 ...(batchSummary ? { batchSummary } : {}),
             },
             displayData: formatListRunsCard(runs),
@@ -298,19 +303,24 @@ async function handleList(
 
 async function handleTodo(
     thunkApi: any,
-    opts: { status?: string }
+    opts: { status?: string; limit?: number; offset?: number }
 ): Promise<{ rawData: any; displayData: string }> {
     try {
         const data = await callToolApi(
             thunkApi,
             "/api/agent/runs/control",
-            { action: "todo", status: opts.status },
+            { action: "todo", status: opts.status, limit: opts.limit ?? 10, offset: opts.offset ?? 0 },
             { withAuth: true }
         );
         const todos = data?.data?.todos ?? data?.todos ?? [];
+        const count = data?.data?.count ?? data?.count ?? todos.length;
+        const total = data?.data?.total ?? data?.total ?? count;
+        const hasMore = data?.data?.hasMore ?? data?.hasMore ?? false;
+        const nextOffset = data?.data?.nextOffset ?? data?.nextOffset ?? ((opts.offset ?? 0) + todos.length);
+        const compact = todos.map((todo: any) => ({ id: todo.id, title: typeof todo.title === "string" ? todo.title.slice(0, 160) : todo.title, status: todo.status, runIds: Array.isArray(todo.runIds) ? todo.runIds.slice(0, 20) : [], ...(todo.latestRunId ? { latestRunId: todo.latestRunId } : {}), ...(todo.latestRunStatus ? { latestRunStatus: todo.latestRunStatus } : {}), updatedAt: todo.updatedAt }));
         return {
-            rawData: { todos },
-            displayData: `Runtime Todo (${todos.length}):\n${JSON.stringify(todos, null, 2)}`,
+            rawData: { todos: compact, count, total, hasMore, nextOffset },
+            displayData: `Runtime Todo (${count}/${total}${hasMore ? ", more" : ""}):\n${compact.map((todo: any) => `${todo.status}: ${todo.title ?? todo.id}`).join("\n")}`,
         };
     } catch (e: any) {
         throw new Error(`controlAgentRun(todo) 失败: ${toErrorMessage(e)}`);
@@ -347,6 +357,7 @@ async function handleStatus(
             rawData: { found: true, ...run, ...(logLines ? { logLines } : {}) },
             displayData: formatStatusRunCard(name, run.status, {
                 runId: opts.runId,
+                title: normalizeRunTitle(run.title),
                 lastToolNames: run.lastToolNames,
                 toolCallCount: run.toolCallCount,
                 lastAssistantText: run.lastAssistantText,
@@ -466,6 +477,7 @@ async function handleWait(
                 rawData: { runId: opts.runId, status: initialRun.status, content: initialRun.lastAssistantText, found: true, ...initialRun },
                 displayData: formatStatusRunCard(name, initialRun.status, {
                     runId: opts.runId,
+                    title: normalizeRunTitle(initialRun.title),
                     lastToolNames: initialRun.lastToolNames,
                     toolCallCount: initialRun.toolCallCount,
                     lastAssistantText: initialRun.lastAssistantText,
@@ -520,6 +532,7 @@ async function handleWait(
                     },
                     displayData: formatStatusRunCard(name, "failed", {
                         runId: opts.runId,
+                        title: normalizeRunTitle(initialRun.title),
                         errorMessage: errMsg,
                     }),
                 };
@@ -564,6 +577,7 @@ async function handleWait(
             rawData,
             displayData: formatStatusRunCard(name, status, {
                 runId: opts.runId,
+                title: normalizeRunTitle(initialRun.title),
                 lastAssistantText: res?.content,
                 errorMessage: res?.errorMessage,
             }),

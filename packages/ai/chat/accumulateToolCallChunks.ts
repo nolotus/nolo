@@ -31,6 +31,8 @@ export interface ToolCallChunk {
   index?: number;
   id?: string;
   type?: "function";
+  thought_signature?: string;
+  extra_content?: { google: { thought_signature: string } };
   function?: {
     name?: string;
     arguments?: string | object;
@@ -41,6 +43,8 @@ export interface AccumulatedToolCall {
   index?: number;
   id: string;
   type: "function";
+  thought_signature?: string;
+  extra_content?: { google: { thought_signature: string } };
   function: {
     name: string;
     arguments: string | object;

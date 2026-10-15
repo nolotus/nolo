@@ -78,6 +78,8 @@ export const devinChannelContextWindow = (
  */
 export const resolveAgentContextWindow = (agent: AgentChannelRef): number =>
   (isDevinOAuthAgent(agent) ? devinChannelContextWindow(agent.model) : undefined) ??
-  getModelContextWindow(agent.model ?? "");
+  // provider 透传给全局解析：平台托管通道（CF）与 Codex OAuth 等通道对同一 id
+  // 窗口不同，按通道取真值，不做全局取大/取小。
+  getModelContextWindow(agent.model ?? "", agent.provider);
 
 export { DEVIN_CHANNEL_CONTEXT_WINDOWS };

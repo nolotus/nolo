@@ -14,6 +14,8 @@
  * 输入已合法时返回语义等价的结果（等价即可，不要求同一引用）。
  */
 
+import { markDowngradedToolTurnOrigin } from "./outboundHistorySanitize";
+
 type AnyMessage = {
   role?: unknown;
   content?: unknown;
@@ -141,7 +143,10 @@ export function sanitizeToolCallPairing<T extends AnyMessage>(messages: T[]): T[
         // content 为空/仅空白 → 整条丢弃
         continue;
       }
-      output.push(stripped);
+      // 声明了 tool_calls 却全部配对失败、剥掉后仍保留正文 = 「降级过的 tool 轮」，
+      // 打上来源标记，供后续 reasoning 回放判定走占位分支。
+      // 此处是来源产生点：即使 m 未标记也须打标，单用 transfer 不足。
+      output.push(markDowngradedToolTurnOrigin(stripped));
       continue;
     }
 
