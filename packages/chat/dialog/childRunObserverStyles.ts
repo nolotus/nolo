@@ -334,6 +334,14 @@ export const croStyles = stylex.create({
     marginBottom: "14px",
     padding: "10px 12px",
   },
+  // F1: run execution-location provenance line ("在 {device} · {root} 执行" /
+  // "执行位置未知"). Mono + tighter spacing so it reads as metadata, not body.
+  execLocation: {
+    fontFamily: "var(--font-mono, monospace)",
+    fontSize: "11px",
+    marginTop: "-8px",
+    color: "var(--textQuaternary, var(--textTertiary, #6b7280))",
+  },
   modalState: {
     color: "var(--textSecondary, #6b7280)",
     fontSize: "13px",

@@ -103,22 +103,24 @@ export const googleModels: Model[] = [
     },
   },
   {
-    name: "gemini-3.1-pro",
-    displayName: "Gemini 3.1 Pro",
+    name: "gemini-4-argon",
+    displayName: "Gemini 4 Argon",
     provider: "google",
     description:
-      "Gemini 3.1 Pro frontier reasoning, coding, and multimodal model.",
+      "Gemini 4 Argon flagship reasoning, coding, and multimodal model.",
     hasVision: true,
     hasAudio: true,
+    // TODO(model-spec): 上下文/最大输出沿用 Gemini 3.x 的 1M/64K 占位，待官方模型页确认后更新。
     contextWindow: 1048576,
     maxOutputTokens: 65536,
     supportsTool: true,
     supportsReasoningEffort: true,
+    // thinking; implicit caching only, so cachingWrite mirrors cachingRead).
     price: {
       input: 16,
-      output: 96,
-      cachingWrite: 4,
-      cachingRead: 4,
+      output: 80,
+      cachingWrite: 0.8,
+      cachingRead: 0.8,
     },
   },
 ];

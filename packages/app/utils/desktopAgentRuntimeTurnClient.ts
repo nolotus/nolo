@@ -136,6 +136,14 @@ export type DesktopStreamEvent =
   | { type: "thinking"; content: string }
   | { type: "status"; phase: DesktopTurnPhase; scope?: "initial" | "in-loop" }
   | { type: "tool"; event: LocalAgentToolEvent }
+  /**
+   * Turn-scoped ACTUAL tool execution location (F2), projected by the desktop
+   * runtime host (detectMachineInfo + turn workspace → projectToolExecutionLocation).
+   * Distinct from the dialog's intended runtimeBinding.target: this is where the
+   * tool actually ran, not where the user asked it to run. `{status:"unknown"}`
+   * is an explicit honest value, not missing data.
+   */
+  | { type: "execution_location"; location: unknown }
   | { type: "done"; result: LocalAgentTurnResult }
   | { type: "error"; error: string };
 

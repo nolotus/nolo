@@ -6,14 +6,21 @@
 // for back-compat with existing callers.
 
 import { runAgentTurn, type RunAgentTurnOptions, type RunAgentTurnResult } from "./client/agentRun";
+import { createOneShotTerminalStatus } from "./client/oneShotTerminalStatus";
+import {
+  FAILED_EMPTY_ASSISTANT_REASONS,
+  isRunResultStalledOrTruncated,
+} from "./client/terminalRunStatus";
 import * as nodeFs from "node:fs";
 import { CLI_AUTO_ROUTE_AGENT_KEY } from "./client/autoModelRouter";
+import { t } from "./tui/i18n";
 import {
   buildModelLayerOverride,
   type ModelLayerOverride,
 } from "../agent-runtime/modelLayerOverride";
 import type { ContextBlockScope } from "../agent-runtime/contextBlockScope";
 import { buildSkillDiscoveryContextLayer } from "../agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../agent-runtime/agentsMd";
 import { CliProviderQuotaError } from "ai/agent/cliExecutor";
 import type { AgentRuntimeHostAdapter } from "./agentRuntimeLocal";
@@ -21,6 +28,7 @@ import { resolveAgentRecordFromHybridStore, readDbRecord } from "./agentRecordHe
 import { resolveAuthToken } from "./cliEnvHelpers";
 import { getReadableCliDb } from "./agentCommandSupport";
 import { toErrorMessage } from "core/errorMessage";
+import { asOptionalTrimmedString } from "core/optionalString";
 import { parsePositiveFiniteNumberOrFallback } from "core/positiveFiniteNumberOrFallback";
 
 import {
@@ -48,6 +56,7 @@ import {
   type AgentRunControlDeps,
   type RunFailureReason,
 } from "./agentRunControl";
+import { getRunResultHeaderMeta } from "./agentRunResultFile";
 import { runDoDCommands, type DoDCommandResult } from "./agentRunDoD";
 import {
   normalizeCliImageInput,
@@ -107,6 +116,8 @@ type OutputLike = {
    * Mirrors `OutputLike.writeErr` in client/agentRunTypes.
    */
   writeErr?(chunk: string): unknown;
+  /** 真实 TTY 输出才会收到 OSC 7501 状态上报（严格 === true）。 */
+  isTTY?: boolean;
 };
 
 export type AgentRunCommandDeps = {
@@ -183,22 +194,10 @@ export function resolveRunOutcome(input: ResolveRunOutcomeInput): RunOutcome {
 }
 
 // ── Empty-assistant settlement semantics ─────────────────────────────────
-// ok_with_warning（有完整正文、只缺 finish_reason 收尾帧）与 fallback（真没
-// 拿到输出）共用 reason 值，结算只能靠 emptyAssistantOutputUsable 区分。
-// 判定与 note 的构造收敛到下面两个纯函数，导出供测试直接断言。
-const FAILED_EMPTY_ASSISTANT_REASONS: ReadonlySet<string> = new Set([
-  "length_truncated",
-  "stream_truncated",
-  "repetition_loop",
-  "stagnant_tool_calls",
-]);
-
-export const isRunResultStalledOrTruncated = (result: {
-  emptyAssistantFallbackReason?: string;
-  emptyAssistantOutputUsable?: boolean;
-}): boolean =>
-  !result.emptyAssistantOutputUsable &&
-  FAILED_EMPTY_ASSISTANT_REASONS.has(result.emptyAssistantFallbackReason ?? "");
+// 停滞/截断的判定与原因集合在 client/terminalRunStatus.ts（唯一真值：后台结算
+// 与 TUI 的 OSC 7501 终态共用同一份判定）。这里按原路径 re-export 同名符号，
+// 既有消费者（含测试）的 import 不用改；本文件只留 note 的构造。
+export { FAILED_EMPTY_ASSISTANT_REASONS, isRunResultStalledOrTruncated };
 
 export const resolveRunSettlementNote = (result: {
   emptyAssistantFallbackReason?: string;
@@ -310,8 +309,31 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
           rejectOnWatchdogFailure = reject;
         })
       : undefined;
-  const raceWithWatchdog = <T>(work: Promise<T>): Promise<T> =>
-    watchdogFailure ? Promise.race([work, watchdogFailure]) : work;
+  // OSC 7501：仅前台、非 events(JSON)、真实 TTY 才上报；后台子进程（有 registry
+  // 记录）的输出进日志文件，不是终端。终态 done/error 保留不清除。
+  // 写入目标跟着 deps.output 走：注入 output（TUI / 测试）时经它的 write 出去；
+  // 没注入时用包装器写 process.stdout，isTTY 也取自 process.stdout（不给 runner
+  // 的 output 加字段）。真正的防线是 isTTY 闸门（emitTerminalProgramStatus 内）：
+  // 管道 / 日志 / JSON / 后台下 isTTY !== true，一条状态都不写，所以 transcript
+  // 与 result file 不会被控制序列污染。
+  const terminalStatus = createOneShotTerminalStatus(
+    parsed.eventsMode || parsed.background || hasRegistry
+      ? null
+      : deps.output
+        ? deps.output
+        : {
+            write: (chunk: string) => process.stdout.write(chunk),
+            isTTY: process.stdout.isTTY === true,
+          },
+  );
+  const raceWithWatchdog = <T>(work: Promise<T>): Promise<T> => {
+    const raced = watchdogFailure ? Promise.race([work, watchdogFailure]) : work;
+    // runner 抛错 / watchdog 失败是整体失败；工具级临时失败不会走到这里。
+    return raced.catch((error) => {
+      terminalStatus.fail();
+      throw error;
+    });
+  };
   const exitFromWatchdog = (code: number) => {
     try {
       processExit(code);
@@ -385,6 +407,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         clearWatchdogs();
         const note = `stalled: no progress for ${stallTimeoutMs}ms`;
         output.write(`[nolo] local run ${note}\n`);
+        terminalStatus.fail();
         const outcome = resolveRunOutcome({ kind: "stall" });
         // The bounded retry must finish before the process exits — after
         // exitFromWatchdog nothing in this process can repair a dropped
@@ -405,6 +428,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       clearWatchdogs();
       const note = `timed out after ${parsed.timeoutMs}ms`;
       output.write(`[nolo] local run ${note}\n`);
+      terminalStatus.fail();
       const outcome = resolveRunOutcome({ kind: "timeout" });
       await finalizeWatchdogOutcome(outcome, note);
       rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
@@ -474,14 +498,14 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     }
     if (hasExplicitAgent && !modelOverride) {
       output.write(
-        "[nolo] auto-route: 覆盖源 agent 读取失败，按原样直跑所选 agent。\n",
+        t("agentRun.autoRouteOverrideFailed"),
       );
     } else {
       effectiveAgentKey = CLI_AUTO_ROUTE_AGENT_KEY;
       // 自动路由只剩默认档一个目标，不再打印档位提示；显式 --agent 的 model
       // 层覆盖仍值得提示（否则用户会疑惑跑的模型为何不是所选 agent 的）。
       if (modelOverride) {
-        output.write(`[nolo] auto-route: model 层覆盖为 ${agentKey}\n`);
+        output.write(t("agentRun.autoRouteModelOverride", agentKey));
       }
     }
   }
@@ -618,6 +642,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // nolo-commit/nolo-cli are invisible to CLI agents even though their SKILL.md
   // files exist in the workspace.
   scopedLayers.push(buildSkillDiscoveryContextLayer(cliCwd));
+  scopedLayers.push(buildHostEnvironmentLayer());
 
   // T3456 — Memory injection route (CLI analogue of desktop T14).
   // Remote-first recall with local fallback. See memoryRecall.ts for details.
@@ -663,6 +688,30 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   extraContextBlocks.push(...contextBlockScopes.map((block) => block.content));
   } // end if (!isSubtask) — subtask keeps extraContextBlocks/contextBlockScopes empty
 
+  // 后台子 run 的父对话引用：spawn 时只写进本机 run 记录（rawArgs 不含
+  // --parent-dialog，那会连带打开 parentWakeOnTerminal，改变唤醒行为），子进程
+  // 必须从 run 记录回读，否则子对话 turn 落库时 parentDialogId 丢失。
+  // 仅在显式参数缺失时回退，不覆盖调用方给出的值。
+  //
+  // 副作用（预期行为，勿误判为 bug）：带上 parentDialogId 后，服务端
+  // packages/server/handlers/agentRun/saveDialog.ts 的 notificationPolicy
+  // （notifyOnDone/notifyOnFailed/channels = !parentDialogId && triggerType !== "localhost"）
+  // 会关闭该子对话自身的独立推送通知。这与「子对话由父会话 surfaced、不单独通知」
+  // 的既有语义一致：完成/失败信号经父会话呈现，子对话不再单发通知。
+  // 回读失败（记录缺失/损坏）时 readRunRecord 返回 null，这里得到 undefined，
+  // 即退化为不写父引用，命令本身不受影响。
+  const runRecordParentDialogId =
+    !parsed.parentDialogId && typeof childRunId === "string" && childRunId.length > 0
+      ? asOptionalTrimmedString(
+          (deps.readRunRecord ?? readRunRecord)(childRunId, {
+            env,
+            homedir: deps.homedir,
+            fs: deps.fs,
+          })?.parentDialogId,
+        )
+      : undefined;
+  const effectiveParentDialogId = parsed.parentDialogId ?? runRecordParentDialogId;
+
   // Build the runner options once; the same options (message, cwd,
   // subjectRefs, runtime mode, etc.) are reused for any quota fallback retry
   // and subsequent queued turn drains so turns execute against an identical request surface.
@@ -699,7 +748,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     ...(parsed.spaceId ? { spaceId: parsed.spaceId } : {}),
     ...(parsed.category ? { category: parsed.category } : {}),
     ...(parsed.inheritedFromDialogKey ? { inheritedFromDialogKey: parsed.inheritedFromDialogKey } : {}),
-    ...(parsed.parentDialogId ? { parentDialogId: parsed.parentDialogId } : {}),
+    ...(effectiveParentDialogId ? { parentDialogId: effectiveParentDialogId } : {}),
     ...(parsed.parentWakeOnTerminal ? { parentWakeOnTerminal: true } : {}),
     ...(parsed.subjectDialogKey ? { subjectDialogKey: parsed.subjectDialogKey } : {}),
     ...(parsed.subjectRefs?.length ? { subjectRefs: parsed.subjectRefs } : {}),
@@ -724,6 +773,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         : {}),
   });
 
+  terminalStatus.working();
   let result: RunAgentTurnResult = await raceWithWatchdog(
     runner({
       ...buildRunOptions(effectiveAgentKey),
@@ -841,6 +891,13 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     }
   }
 
+  // 整次 run 的最终结果（quota fallback / queue drain 之后）：只在这里报终态。
+  terminalStatus.settle({
+    exitCode: result.exitCode,
+    streamInterrupted: result.streamInterrupted,
+    stalledOrTruncated: isRunResultStalledOrTruncated(result),
+  });
+
   if (result.dialogId) {
     if (parsed.background) {
       output.write(`\n[nolo] background dialog ${result.dialogId}\n`);
@@ -952,6 +1009,9 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
       ...(failureReason ? { failureReason } : {}),
       ...(toolCallCount !== undefined ? { toolCallCount } : {}),
+      ...(result.finalText ? { lastAssistantText: result.finalText } : {}),
+      // 仅用于 .result.md 头（front matter）：旁路读取，不改 result 形状。
+      ...getRunResultHeaderMeta(result),
       ...truncationNote,
     },
     {

@@ -113,13 +113,18 @@ export function clearTerminalAttentionProgress(args: {
  * Windows taskbar 永远保持 progress 状态」。
  */
 export async function runWithInputRequiredAttention<T>(
-  args: { output: NodeJS.WritableStream; env?: NodeJS.ProcessEnv },
+  args: { output: NodeJS.WritableStream; env?: NodeJS.ProcessEnv; onWaiting?: () => void; onResumed?: () => void },
   body: () => Promise<T>,
 ): Promise<T> {
   emitTerminalAttention({ output: args.output, env: args.env, reason: "input-required" });
+  args.onWaiting?.();
+  let completed = false;
   try {
-    return await body();
+    const result = await body();
+    completed = true;
+    return result;
   } finally {
+    if (completed) args.onResumed?.();
     clearTerminalAttentionProgress({ output: args.output, env: args.env });
   }
 }

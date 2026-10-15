@@ -44,6 +44,9 @@ export const SettingRoutePaths = {
   // 系统内置 Skill 开关
   SETTING_SYSTEM_SKILLS: "system-skills",
 
+  // 媒体自动执行额度（autoApproveCredits，服务端独占字段）
+  SETTING_MEDIA_ALLOWANCE: "media-allowance",
+
   // SETTING 是基础路径，可以重定向到第一个设置页面，例如 'appearance'
   SETTING: "settings",
 

@@ -66,6 +66,22 @@ export interface AgentRunStreamErrorEvent {
   detail?: Record<string, unknown>;
 }
 
+/**
+ * 取消信号（显式 Stop）：server-owned foreground execution 的 AbortSignal
+ * 被控制面 abort 后，loop 在退出前发出的终态帧。
+ *
+ * 消费契约：
+ * - 持久化包装层（index.ts 的 foreground SSE wrapper）据此把已收集的部分
+ *   输出按 cancelled 落盘（与客户端断线的 cancel-hook 同语义）；
+ * - durable mirror（response.ts）把 cancelled 归类为终态，在流 EOF 后发布
+ *   foreground_turn_terminal { status: "cancelled" }；
+ * - 不得把该帧当成 error 处理（cancelled ≠ failed）。
+ */
+export interface AgentRunStreamCancelledEvent {
+  type: "cancelled";
+  reason?: string;
+}
+
 /** assistant 工具调用声明 */
 export interface AgentRunStreamAssistantToolCallsEvent {
   type: "assistant_tool_calls";
@@ -190,6 +206,7 @@ export type AgentRunStreamEvent =
   | AgentRunStreamThinkingEvent
   | AgentRunStreamDoneEvent
   | AgentRunStreamErrorEvent
+  | AgentRunStreamCancelledEvent
   | AgentRunStreamAssistantToolCallsEvent
   | AgentRunStreamToolStartEvent
   | AgentRunStreamToolResultEvent
