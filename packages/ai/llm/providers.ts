@@ -190,6 +190,8 @@ const toModel = (candidate: ModelLookupCandidate): Model => ({
   serviceTierPriceMultipliers: candidate.serviceTierPriceMultipliers,
   maxOutputTokens: candidate.maxOutputTokens ?? candidate.maxTokens,
   jsonOutput: candidate.jsonOutput,
+  /** Preserve model-level native wire protocol metadata through catalog projection. */
+  nativeProtocol: candidate.nativeProtocol,
   fnCall:
     typeof candidate.fnCall === "boolean"
       ? candidate.fnCall

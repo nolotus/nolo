@@ -30,6 +30,8 @@
 
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import type { Model } from "ai/llm/types";
+import { findModelConfig } from "ai/llm/providers";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 import { isAntigravityOAuthAgent, ANTIGRAVITY_CLOUD_CODE_BASE_URL } from "./antigravityOAuth";
 import {
@@ -60,6 +62,20 @@ export type AuthMethod =
   | { kind: "oauth"; ref: "chatgpt" | "xai" | "antigravity" | "claude" | "cursor" | "devin" }
   | { kind: "cli"; provider: string };
 
+/**
+ * The wire the plan's `endpoint` expects — i.e. what the *upstream* needs, not
+ * what this client must serialize (that is `ClientWire`, see resolveClientWire).
+ *
+ * `custom-*` values describe a **custom (custom-key) endpoint** whose model
+ * declares its native wire through `Model.nativeProtocol`. They are deliberately
+ * distinct from the subscription-OAuth wires `"anthropic-messages"` /
+ * `"gemini-cca"` because `chatHandler` and `buildChatCallPlan` pick their
+ * dedicated translator from `upstreamWire` alone, without looking at the
+ * credential kind: emitting `"anthropic-messages"` for a custom API key would
+ * route it into the Claude OAuth proxy (owner-scoped OAuth credential
+ * resolution), and `"gemini-cca"` into the Antigravity proxy. A custom endpoint
+ * needs its own values so those two switches fall through to the generic path.
+ */
 export type WireFormat =
   | "chat.completions"
   | "responses"
@@ -67,7 +83,10 @@ export type WireFormat =
   | "anthropic-messages"
   | "cli"
   | "cursor-connect"
-  | "devin-connect";
+  | "devin-connect"
+  | "custom-openai-responses"
+  | "custom-anthropic-messages"
+  | "custom-gemini";
 
 export type Transport = "direct" | "server-proxy";
 
@@ -98,6 +117,10 @@ export type ClientWire = "chat.completions" | "responses" | "cli";
  *   the body: antigravity (gemini-cca), Codex (responses + oauth:chatgpt),
  *   Claude (anthropic-messages), and Cursor (cursor-connect).
  *   Here the client speaks `chat.completions` and the translator converts.
+ *   The `custom-*` wires belong here too: a custom endpoint whose model declares
+ *   `Model.nativeProtocol` must be translated (body AND native path) by the
+ *   server, so the client keeps speaking `chat.completions` — the
+ *   `customProviderUrl` contract shape — toward the proxy.
  * - PASS-THROUGH routes — direct calls AND the generic proxy path, which
  *   forwards the body UNCHANGED to the upstream URL. Here the client must
  *   already speak `upstreamWire` (e.g. platform openai-responses agents send
@@ -112,6 +135,10 @@ export function resolveClientWire(plan: AgentCallPlan): ClientWire {
   if (plan.upstreamWire === "anthropic-messages") return "chat.completions";
   if (plan.upstreamWire === "cursor-connect") return "chat.completions";
   if (plan.upstreamWire === "devin-connect") return "chat.completions";
+  // Custom-endpoint native wires: translated by the proxy, never spoken here.
+  if (plan.upstreamWire === "custom-gemini") return "chat.completions";
+  if (plan.upstreamWire === "custom-openai-responses") return "chat.completions";
+  if (plan.upstreamWire === "custom-anthropic-messages") return "chat.completions";
   if (
     plan.upstreamWire === "responses" &&
     plan.authMethod.kind === "oauth" &&
@@ -159,6 +186,46 @@ function agentShouldUseServerProxy(
   agentConfig: AgentRuntimeAgentConfig,
 ): boolean {
   return shouldUseServerProxy(agentConfig);
+}
+
+/** `Model.nativeProtocol` — the catalog's declaration of the wire a model speaks. */
+type ModelNativeProtocol = NonNullable<Model["nativeProtocol"]>;
+
+/**
+ * Upstream-wire resolution for a custom (`customProviderUrl`) agent.
+ *
+ * Priority, first match wins:
+ * 1. catalog `nativeProtocol` — the most specific judge (it is per *model*, and
+ *    the same gateway base serves several wires). One exception:
+ *    1a. `openai-responses` while the endpoint already ends in `/responses`:
+ *        both judges agree, so keep the pre-existing `"responses"` — the client
+ *        speaks Responses and the generic proxy forwards the body unchanged.
+ *        (Downgrading that to a "needs server translation" shape would break
+ *        configs that work today.)
+ * 2. `/responses` endpoint suffix — the pre-existing rule for unannotated
+ *    models; it is also the user's explicit endpoint declaration, so a
+ *    contradiction (e.g. an `anthropic-messages` model pointed at
+ *    `.../responses`) resolves in favour of (1), the catalog being the more
+ *    specific statement about what that model needs.
+ * 3. `"chat.completions"` — the `customProviderUrl` contract default
+ *    (OpenAI-compatible chat/completions endpoint).
+ *
+ * Every custom-native result is a `custom-*` value, never the OAuth wires: see
+ * the `WireFormat` doc — `chatHandler` / `buildChatCallPlan` route on
+ * `upstreamWire` alone and would otherwise send a custom API-key agent down the
+ * Claude/Antigravity OAuth proxy (`custom-anthropic-messages` vs
+ * `anthropic-messages` is exactly that distinction).
+ */
+function resolveCustomUpstreamWire(
+  endpoint: string,
+  nativeProtocol: ModelNativeProtocol | undefined,
+): WireFormat {
+  const responsesEndpoint = endpoint.includes("/responses");
+  if (nativeProtocol === "openai-responses" && responsesEndpoint) return "responses";
+  if (nativeProtocol === "gemini") return "custom-gemini";
+  if (nativeProtocol === "openai-responses") return "custom-openai-responses";
+  if (nativeProtocol === "anthropic-messages") return "custom-anthropic-messages";
+  return responsesEndpoint ? "responses" : "chat.completions";
 }
 
 // ---------------------------------------------------------------------------
@@ -272,10 +339,16 @@ export function resolveAgentCallPlan(
     const transport = agentShouldUseServerProxy(agentConfig) ? "server-proxy" : "direct";
     const endpoint = asOptionalTrimmedString(agentConfig.customProviderUrl) ?? "";
 
-    // Determine upstreamWire from URL: /responses → responses, else chat.completions
-    const upstreamWire: WireFormat = endpoint.includes("/responses")
-      ? "responses"
-      : "chat.completions";
+    // A custom endpoint serves whichever wire its MODEL speaks: read the
+    // catalog's `nativeProtocol` (OpenCode Go's gateway alone mixes
+    // openai-responses / anthropic-messages / gemini behind one base URL) and
+    // merge it with the /responses URL suffix. See resolveCustomUpstreamWire for
+    // the priority; `findModelConfig` is the same lookup the local runtime
+    // transports use, so plan and runtime cannot disagree on the wire.
+    const upstreamWire = resolveCustomUpstreamWire(
+      endpoint,
+      findModelConfig(provider, agentConfig.model ?? "")?.nativeProtocol,
+    );
 
     return {
       authMethod: { kind: "custom-key" },

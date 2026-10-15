@@ -59,6 +59,7 @@ const parseSseEventBlock = (block: string): JsonRecord | null => {
 export async function aggregateAnthropicMessageStream(
   body: ReadableStream<Uint8Array>,
   onMeaningfulOutput: () => void,
+  onTextDelta: (text: string) => void = () => {},
 ): Promise<AnthropicStreamAggregateResult> {
   let payload: JsonRecord | null = null;
   let usage: JsonRecord = {};
@@ -99,7 +100,7 @@ export async function aggregateAnthropicMessageStream(
         if (!block) return;
         if (delta.type === "text_delta" && typeof delta.text === "string") {
           block.text = `${typeof block.text === "string" ? block.text : ""}${delta.text}`;
-          if (delta.text) onMeaningfulOutput();
+          if (delta.text) { onMeaningfulOutput(); onTextDelta(delta.text); }
         } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
           block.thinking = `${typeof block.thinking === "string" ? block.thinking : ""}${delta.thinking}`;
           if (delta.thinking) onMeaningfulOutput();

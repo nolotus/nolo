@@ -9,9 +9,10 @@
  * 5. Cursor Connect。
  * 6. Gemini 3 + tools 的 native 路由 —— 必须先于 platform proxy，后者传不了
  *    thought_signature。
- * 7. owner-required（仅契约存在时；见下方短路说明）。
- * 8. 平台代理。
- * 9. 直连 OpenAI-compatible —— 兜底，永远命中，返回类型上不为 null。
+ * 7. custom provider Gemini / OpenAI Responses native 协议（先于 owner/platform proxy）。
+ * 8. owner-required（仅契约存在时；见下方短路说明）。
+ * 9. 平台代理。
+ * 10. 直连 OpenAI-compatible —— 兜底，永远命中，返回类型上不为 null。
  *
  * **owner-required 短路（安全关键）**：`ctx.ownerOriginExecution` 存在时，
  * 上面的数组**根本不进入遍历**——Antigravity/Claude/Codex 等更早的 transport
@@ -34,7 +35,10 @@ import { resolveCursorTransport } from "./cursorTransport";
 import { resolveDevinTransport } from "./devinTransport";
 import { resolveDirectOpenAiCompatibleTransport } from "./directOpenAiCompatibleTransport";
 import { resolveGeminiNativeToolTransport } from "./geminiNativeToolTransport";
+import { resolveGeminiNativeCustomTransport } from "./geminiNativeCustomTransport";
 import { resolveOwnerOAuthProxyTransport } from "./ownerOAuthProxyTransport";
+import { resolveOpenAiResponsesCustomTransport } from "./openAiResponsesCustomTransport";
+import { resolveAnthropicMessagesCustomTransport } from "./anthropicMessagesCustomTransport";
 import { resolvePlatformProxyTransport } from "./platformProxyTransport";
 import type { ProviderResolutionContext, ProviderResolver } from "./providerResolutionContext";
 
@@ -46,6 +50,10 @@ const TRANSPORTS: readonly ProviderResolver[] = [
   resolveCursorTransport,
   resolveDevinTransport,
   resolveGeminiNativeToolTransport,
+  resolveGeminiNativeCustomTransport,
+  resolveOpenAiResponsesCustomTransport,
+  // Native Anthropic Messages wire for custom providers; keep after Responses transport.
+  resolveAnthropicMessagesCustomTransport,
   // owner-required 是 platform-proxy 的语义超集（同一条 server wire + 额外
   // 准入扩展）。必须排在它前面：ownerOriginExecution 存在时走 owner 通道，
   // 缺省时落到 platform-proxy，旧行为不变。
