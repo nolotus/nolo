@@ -1,4 +1,13 @@
 
+## 0.111.2
+
+## 0.111.2 (2026-10-16)
+
+### Bug Fixes
+
+* **agent:** validate the antigravity Cloud Code host by parsing, not substring matching ([fba3089](https://github.com/nolotus/bun-nolo/commit/fba30892f81475199f85b356c43d9e0ff1391681))
+
+
 ## 0.111.1
 
 ## 0.111.1 (2026-10-16)
