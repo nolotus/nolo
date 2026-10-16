@@ -37,6 +37,10 @@ import {
   toOpenAiCompatibleMessages,
 } from "./openAiCompatibleMessages";
 import { buildProviderAuthHeaders } from "./providerResolution";
+import {
+  collectStablePromptPrefix,
+  stablePromptCacheKey,
+} from "./promptCacheKey";
 import { parseSseDataLineJson } from "./sseDataLine";
 import { readSseFrames } from "./sseFrames";
 import { extractThinkContent, createThinkParserState } from "./thinkTagParser";
@@ -107,6 +111,27 @@ export function resolveOpenAiCompatibleWire(config: {
 }): "responses" | "chat.completions" {
   if (config.wire) return config.wire;
   return isOpenAiResponsesEndpoint(config.endpoint) ? "responses" : "chat.completions";
+}
+
+const PROMPT_CACHE_KEY_PROVIDERS = new Set([
+  "opendesign",
+  "opencode",
+  "opencode-go",
+  "runinfra",
+  "deepseek",
+  "openai",
+]);
+
+function shouldInjectDirectPromptCacheKey(provider: string, endpoint?: string): boolean {
+  const p = (provider || "").toLowerCase().trim();
+  if (PROMPT_CACHE_KEY_PROVIDERS.has(p)) return true;
+  if (typeof endpoint === "string") {
+    const ep = endpoint.toLowerCase();
+    if (ep.includes("open-design.ai") || ep.includes("opencode.ai") || ep.includes("deepseek.com")) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function buildOpenAiCompatibleChatCompletionRequest(args: {
@@ -189,6 +214,23 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
           api: "chat-completions",
           endpoint: args.providerConfig.endpoint,
         })
+      : {}),
+    ...(!isResponses &&
+    !args.providerConfig.requestOptions?.prompt_cache_key &&
+    shouldInjectDirectPromptCacheKey(args.providerConfig.provider, args.providerConfig.endpoint)
+      ? {
+          // 直连通道缓存路由亲和：第三方聚合网关（OpenDesign、OpenCode、RunInfra 等）
+          // 后端是多副本集群，前缀缓存是单节点本地的。键取跨轮稳定的部分（model + system 稳定前缀 + 工具定义），
+          // 确保同任务多轮工具循环始终打到同一后端缓存节点，避免缓存漂移击穿。
+          prompt_cache_key: stablePromptCacheKey(
+            [
+              args.providerConfig.model,
+              collectStablePromptPrefix(sanitizedMessages as unknown[]),
+              args.tools ?? [],
+            ],
+            "nolo-direct",
+          ),
+        }
       : {}),
   };
 
