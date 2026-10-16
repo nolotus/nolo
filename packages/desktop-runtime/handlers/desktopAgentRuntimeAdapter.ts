@@ -639,6 +639,10 @@ async function resolveDesktopCustomNativeProvider(args: {
     // 契约端点（chat/completions 形状）；native 路径由共享执行器按 wire 拼。
     endpoint: providerConfig.endpoint,
     apiKey: providerConfig.apiKey,
+    // **原始配置值**（不是 providerConfig.apiKeyHeader —— 那是解析结果，缺省恒为
+    // "Authorization"，会顶掉 gemini/anthropic 的 wire 默认凭据头）。空/未设置 =
+    // 该 wire 的默认凭据头；非法值由执行器显式抛错。
+    apiKeyHeader: args.agentConfig.apiKeyHeader,
     agentConfig: args.agentConfig,
     tools: args.tools,
     fetchImpl: args.fetchImpl,

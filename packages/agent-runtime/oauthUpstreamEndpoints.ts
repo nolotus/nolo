@@ -15,9 +15,9 @@
  * - antigravity **合法地**从记录取端点：
  *   `antigravityCloudCodeProvider.ts:224`
  *   `` `${resolveAntigravityCloudCodeBaseUrl(agentConfig.customProviderUrl)}${STREAM_PATH}` ``
- *   而 `antigravityOAuth.ts:71` 的 `ANTIGRAVITY_CLOUD_CODE_HOST =
- *   "cloudcode-pa.googleapis.com"` 用 `includes` 判定（同文件 :107 / :130），
- *   所以 `daily-cloudcode-pa.googleapis.com` 与 legacy 泛域都是合法形态。
+ *   而 `antigravityOAuth.ts` 的 `ANTIGRAVITY_CLOUD_CODE_HOSTS` + `isAntigravityCloudCodeBaseUrl`
+ *   用**解析后的 hostname 精确比对**（2026-10-16 前的整串 `includes` 已被后缀 host 绕过，
+ *   见该文件同名注释），所以 `daily-cloudcode-pa.googleapis.com` 与 legacy 泛域都是合法形态。
  *   一张全局白名单会把「`apiKeyRef=antigravity` + `customProviderUrl=Cloud Code 域`」
  *   这些**正在使用**的 agent 全部 400 —— 那是误伤，不是修复。
  *

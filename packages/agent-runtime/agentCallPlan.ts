@@ -33,7 +33,11 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import type { Model } from "ai/llm/types";
 import { findModelConfig } from "ai/llm/providers";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
-import { isAntigravityOAuthAgent, ANTIGRAVITY_CLOUD_CODE_BASE_URL, ANTIGRAVITY_CLOUD_CODE_HOST } from "./antigravityOAuth";
+import {
+  isAntigravityCloudCodeBaseUrl,
+  isAntigravityOAuthAgent,
+  ANTIGRAVITY_CLOUD_CODE_BASE_URL,
+} from "./antigravityOAuth";
 import {
   isOpenAiResponsesModel,
   resolvePlatformResponsesEndpoint,
@@ -274,7 +278,9 @@ export function hasOwnCustomProviderKey(
 ): boolean {
   const endpoint = asOptionalTrimmedString(agentConfig.customProviderUrl);
   if (!endpoint) return false;
-  if (endpoint.includes(ANTIGRAVITY_CLOUD_CODE_HOST)) return false;
+  // 同一条 antigravity 链的 host 判定：只看解析后的 hostname（此前是整串 includes，
+  // 后缀 host / userinfo 形态会被误判成 Cloud Code 端点）。
+  if (isAntigravityCloudCodeBaseUrl(endpoint)) return false;
   return Boolean(asOptionalTrimmedString(agentConfig.apiKey));
 }
 

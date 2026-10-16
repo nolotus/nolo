@@ -1,8 +1,41 @@
 export type SecretFinding = {
   label: string;
   line: number;
+  /**
+   * 脱敏定位串（`<redacted:规则[ len=长度]>`）。
+   *
+   * **绝不含明文候选值**：这条预览会进 pre-commit 失败日志、docCreate 报错与
+   * 记忆写入报错，回显明文等于给扫描器又开一条泄露面（终端回滚、CI 日志、
+   * 把报错粘给别人求助）。只留规则名与候选长度：够定位，不够泄密。
+   */
   preview: string;
+  /** 该行被同行受限标记放行时为 true（只有 `allowInlineWaiver` 调用会产出）。 */
+  waived?: boolean;
+  /** 放行理由（`waived` 为 true 时存在，已去空白）。 */
+  waiverReason?: string;
 };
+
+export type SecretScanOptions = {
+  /** 被扫内容的仓库相对路径。只在 `allowInlineWaiver` 为 true 时参与判定。 */
+  filePath?: string;
+  /**
+   * 是否接受同行「受限豁免标记」。**默认 false**。
+   *
+   * docCreate / docUpdate / askTextSanitize 等调用方不传它 ⇒ 不认注释豁免，
+   * 行为与引入本选项之前逐字相同（文档里写示例、粘贴配置常带 `token: "…"`，
+   * 让那里的调用方能靠注释自证清白，等于把护栏拆掉）。
+   */
+  allowInlineWaiver?: boolean;
+};
+
+/**
+ * 受限豁免标记的常量引用。代码、失败提示、测试都从这里取，避免提示文案与
+ * 实现漂移成两套说法。
+ */
+export const INLINE_WAIVER_MARKER = "secret-scan:allow";
+
+/** 理由去空白后的最短长度：`ok` / `allow` 这类无信息量的理由不算理由。 */
+const INLINE_WAIVER_MIN_REASON_CHARS = 3;
 
 /**
  * 赋值形态的密钥扫描。
@@ -128,30 +161,288 @@ function looksLikeBareSecret(rawValue: string): boolean {
   return true;
 }
 
-function toPreview(line: string): string {
-  return line.length > 120 ? `${line.slice(0, 117)}...` : line;
+/** `<redacted:规则 len=长度>`：不含明文，仍可定位到规则与候选规模。 */
+function redactedPreview(label: string, valueLength: number | null): string {
+  return valueLength === null
+    ? `<redacted:${label}>`
+    : `<redacted:${label} len=${valueLength}>`;
 }
 
-export function findPotentialSecrets(text: string): SecretFinding[] {
+/** 一行里的候选命中（含明文值，只在本函数与下方判定内存在，绝不进返回值）。 */
+type LineCandidate = {
+  label: string;
+  preview: string;
+  /** 命中在行内的结束下标：用来要求豁免标记必须写在候选值**之后**。 */
+  endIndex: number;
+  isPrivateKey: boolean;
+};
+
+/**
+ * 收集一行的全部候选命中。顺序必须与历史实现一致（逐 key 组：先引号后裸值，
+ * 最后私钥块），否则默认调用方的命中顺序会变。
+ */
+function collectLineCandidates(line: string): LineCandidate[] {
+  const candidates: LineCandidate[] = [];
+
+  for (const { label, quoted, bare } of ASSIGNMENT_PATTERNS) {
+    const quotedMatch = quoted.exec(line);
+    if (quotedMatch) {
+      candidates.push({
+        label,
+        preview: redactedPreview(label, quotedMatch[2].length),
+        endIndex: quotedMatch.index + quotedMatch[0].length,
+        isPrivateKey: false,
+      });
+      continue;
+    }
+    const bareMatch = bare.exec(line);
+    if (bareMatch && looksLikeBareSecret(bareMatch[1])) {
+      candidates.push({
+        label,
+        preview: redactedPreview(
+          label,
+          stripTrailingMarkdownFence(bareMatch[1]).length,
+        ),
+        endIndex: bareMatch.index + bareMatch[0].length,
+        isPrivateKey: false,
+      });
+    }
+  }
+
+  const privateKeyMatch = PRIVATE_KEY_PATTERN.exec(line);
+  if (privateKeyMatch) {
+    candidates.push({
+      label: "private key",
+      preview: redactedPreview("private key", null),
+      endIndex: privateKeyMatch.index + privateKeyMatch[0].length,
+      isPrivateKey: true,
+    });
+  }
+
+  return candidates;
+}
+
+/* ------------------------------------------------------------------ *
+ * 受限豁免：只有 staged 扫描器会打开（allowInlineWaiver）。
+ *
+ * 设计取舍，逐条都能指出被它挡住的绕过：
+ *   · 只认同行行尾单行注释，不认跨行、不认 ignore-next-line —— 「下一行豁免」
+ *     等于把豁免与内容解耦，标记可以留在原地，被扫的行随便换。
+ *   · 理由去空白后 ≥3 字符 —— 没有理由的豁免等于没有豁免。
+ *   · 一行多处候选命中一律拒绝 —— 强制拆行，避免「一行塞十个密钥、末尾盖个章」。
+ *   · 私钥块永不豁免 —— 私钥是完整凭据，落到哪都该拦。
+ *   · 路径不匹配（生产源码/配置/scripts/）时整行拦截 —— 标记只对测试与夹具
+ *     源码有效，生产代码请改成常量引用。
+ * ------------------------------------------------------------------ */
+
+/** 标记必须是行尾单行注释：`// secret-scan:allow -- <理由>`（`--` 后至少一个空白）。 */
+const INLINE_WAIVER_PATTERN = new RegExp(
+  `//\\s*${INLINE_WAIVER_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+--[ \\t]+(.*)$`,
+  "g",
+);
+
+/**
+ * 硬拦扩展名：数据/配置/产物文件。它们要么根本不该带行注释（`.json`/`.yaml`）、
+ * 要么是输出而不是源（`.snap`），要么本身就是凭据载体（`.env*`/`.pem`/`.key`）。
+ */
+const NEVER_WAIVABLE_EXTENSION =
+  /\.(?:json|json5|ya?ml|snap|lock|pem|key|crt|cer|txt|csv|md|markdown|example|sample)$/i;
+
+/** `.env` / `.env.local` / `prod.env` 这类环境文件。 */
+const NEVER_WAIVABLE_ENV_FILE = /\.env(\.[^/]*)?$/i;
+
+/** 硬拦顶层目录：`scripts/` 是扫描器自己的家，不许自证清白。 */
+const NEVER_WAIVABLE_TOP_DIRS = new Set(["scripts"]);
+
+/** 可注释的源码扩展名：`[cm]?[jt]sx?`。 */
+const SOURCE_EXTENSION = /\.(?:[cm]?[jt]sx?)$/i;
+/** 测试文件名：`*.test.*` / `*.spec.*`。 */
+const TEST_FILE_NAME = /\.(?:test|spec)\.[cm]?[jt]sx?$/i;
+/** 测试/夹具路径段。 */
+const TEST_PATH_SEGMENTS = new Set([
+  "__tests__",
+  "__mocks__",
+  "__fixtures__",
+  "e2e",
+  "test",
+  "tests",
+  "fixtures",
+]);
+
+/**
+ * 解开 git 的 C 引号（`"a/\346\265\213.ts"`）。
+ *
+ * hook 用 `-c core.quotePath=false` 让非 ASCII 路径保持原文，这里是兜底：人工
+ * 把 `git diff --cached` 管进扫描器时路径会被转义，解不开就会把测试路径误判成
+ * 生产路径（fail-closed，不漏但会误拦）。非 ASCII 是逐字节转义的，所以按字节
+ * 累积再交给 TextDecoder，而不是逐字符 fromCharCode（那会得到乱码）。
+ */
+function decodeGitCQuoting(text: string): string | null {
+  if (!text.startsWith('"')) return text;
+
+  const body = text.endsWith('"') ? text.slice(1, -1) : text.slice(1);
+  const bytes: number[] = [];
+
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index];
+    if (char !== "\\") {
+      bytes.push(char.charCodeAt(0));
+      continue;
+    }
+
+    const next = body[index + 1] ?? "";
+    if (next >= "0" && next <= "7") {
+      let octal = "";
+      while (octal.length < 3 && /[0-7]/.test(body[index + 1 + octal.length] ?? "")) {
+        octal += body[index + 1 + octal.length];
+      }
+      const byte = Number.parseInt(octal, 8);
+      if (!Number.isFinite(byte) || byte > 0xff) return null;
+      bytes.push(byte);
+      index += octal.length;
+      continue;
+    }
+
+    index += 1;
+    if (next === "n") bytes.push(0x0a);
+    else if (next === "t") bytes.push(0x09);
+    else if (next === "r") bytes.push(0x0d);
+    else bytes.push(next.charCodeAt(0));
+  }
+
+  return new TextDecoder().decode(Uint8Array.from(bytes));
+}
+
+/**
+ * 从 `+++ ` 头取出新路径的仓库相对路径。
+ *
+ * 两种形态都要认：`+++ b/<path>`，以及非 ASCII/含特殊字符时 git 的引号形态
+ * `+++ "b/<path>"`（**引号包住 `b/` 前缀**，所以要先解引号再去前缀）。
+ * `+++ /dev/null`（删除）等取不到的情况返回 null。
+ */
+export function parseDiffNewPath(headerLine: string): string | null {
+  if (!headerLine.startsWith("+++ ")) return null;
+  const token = headerLine.slice(4);
+  // 路径含空白时 git 会补一个行尾制表符/空格终止符。
+  const unquoted = decodeGitCQuoting(token.replace(/[\t ]+$/, ""));
+  if (unquoted === null) return null;
+  return unquoted.startsWith("b/") ? unquoted.slice(2) : null;
+}
+
+/**
+ * 归一化成仓库相对路径。任何不确定的输入都返回 null（不豁免）：
+ * 空、绝对路径、含 `..`、含控制字符。
+ */
+function normalizeRepoPath(rawPath: string): string | null {
+  const unquoted = decodeGitCQuoting(rawPath.replace(/[\t ]+$/, ""));
+  if (unquoted === null) return null;
+
+  const normalized = unquoted
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^\.\//, "");
+  if (!normalized) return null;
+  if (normalized.startsWith("/") || /^[a-z]:/i.test(normalized)) return null;
+  // 含 `..` 一律拒绝（宁可误拦 `a..b.ts` 这种怪名）。
+  if (normalized.includes("..")) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(normalized)) return null;
+
+  return normalized;
+}
+
+/**
+ * 路径是否属于「可豁免的测试/夹具源码」。
+ *
+ * 判定顺序是 fail-closed 的：先硬拦（scripts/、配置与数据扩展名），要求是能写
+ * 行注释的源码扩展名，再看是否落在测试文件名/测试路径段里。因此
+ * `__tests__/x.test.ts.snap`、`__fixtures__/data.json` 这类不算测试源码。
+ */
+function isWaivableTestPath(rawPath: string | undefined): boolean {
+  if (!rawPath) return false;
+  const path = normalizeRepoPath(rawPath);
+  if (path === null) return false;
+
+  const lower = path.toLowerCase();
+  const segments = lower.split("/");
+  const topDir = segments[0] ?? "";
+  if (NEVER_WAIVABLE_TOP_DIRS.has(topDir)) return false;
+  if (NEVER_WAIVABLE_EXTENSION.test(lower)) return false;
+  if (NEVER_WAIVABLE_ENV_FILE.test(lower)) return false;
+  if (!SOURCE_EXTENSION.test(lower)) return false;
+
+  const baseName = segments[segments.length - 1] ?? "";
+  if (TEST_FILE_NAME.test(baseName)) return true;
+  return segments.some((segment) => TEST_PATH_SEGMENTS.has(segment));
+}
+
+/**
+ * 逐行解析同行豁免标记，返回理由；不满足任一条件返回 null（照常拦截）。
+ */
+function resolveInlineWaiver(
+  line: string,
+  candidates: LineCandidate[],
+): string | null {
+  // 一行多处候选命中：拒绝豁免，强制拆行。
+  if (candidates.length !== 1) return null;
+
+  const candidate = candidates[0];
+  // 私钥块永不豁免。
+  if (candidate.isPrivateKey) return null;
+
+  let reason: string | null = null;
+  let markerIndex = -1;
+  INLINE_WAIVER_PATTERN.lastIndex = 0;
+  for (
+    let match = INLINE_WAIVER_PATTERN.exec(line);
+    match !== null;
+    match = INLINE_WAIVER_PATTERN.exec(line)
+  ) {
+    reason = match[1].trim();
+    markerIndex = match.index;
+  }
+
+  if (markerIndex < 0 || reason === null) return null;
+  // 标记必须在候选值之后：行尾注释，不是候选值内部的字符串。
+  if (markerIndex <= candidate.endIndex) return null;
+  if (reason.length < INLINE_WAIVER_MIN_REASON_CHARS) return null;
+
+  return reason;
+}
+
+export function findPotentialSecrets(
+  text: string,
+  options: SecretScanOptions = {},
+): SecretFinding[] {
   const findings: SecretFinding[] = [];
+  const mayWaive =
+    options.allowInlineWaiver === true && isWaivableTestPath(options.filePath);
 
   text.split(/\r?\n/).forEach((line, index) => {
     const lineNumber = index + 1;
-    const preview = toPreview(line);
+    const candidates = collectLineCandidates(line);
+    if (candidates.length === 0) return;
 
-    for (const { label, quoted, bare } of ASSIGNMENT_PATTERNS) {
-      if (quoted.test(line)) {
-        findings.push({ label, line: lineNumber, preview });
-        continue;
-      }
-      const bareMatch = bare.exec(line);
-      if (bareMatch && looksLikeBareSecret(bareMatch[1])) {
-        findings.push({ label, line: lineNumber, preview });
+    if (mayWaive) {
+      const reason = resolveInlineWaiver(line, candidates);
+      if (reason !== null) {
+        findings.push({
+          label: candidates[0].label,
+          line: lineNumber,
+          preview: candidates[0].preview,
+          waived: true,
+          waiverReason: reason,
+        });
+        return;
       }
     }
 
-    if (PRIVATE_KEY_PATTERN.test(line)) {
-      findings.push({ label: "private key", line: lineNumber, preview });
+    for (const candidate of candidates) {
+      findings.push({
+        label: candidate.label,
+        line: lineNumber,
+        preview: candidate.preview,
+      });
     }
   });
 
@@ -160,6 +451,11 @@ export function findPotentialSecrets(text: string): SecretFinding[] {
 
 export function formatSecretFindings(findings: SecretFinding[]) {
   return findings
-    .map((finding) => `  line ${finding.line} (${finding.label}): ${finding.preview}`)
+    .map((finding) => {
+      const waivedTag = finding.waived
+        ? ` [waived: ${finding.waiverReason}]`
+        : "";
+      return `  line ${finding.line} (${finding.label}): ${finding.preview}${waivedTag}`;
+    })
     .join("\n");
 }

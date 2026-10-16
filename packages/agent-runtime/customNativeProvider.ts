@@ -51,6 +51,7 @@ import {
 import {
   customNativeAuthHeaders,
   isCallerCancellation,
+  resolveCustomNativeApiKeyHeader,
   resolveCustomNativeEndpoint,
   type CustomNativeWire,
 } from "./customNativeWire";
@@ -115,6 +116,15 @@ export type CreateCustomNativeProviderArgs = {
    */
   endpoint: string;
   apiKey: string;
+  /**
+   * agent 配置里**显式**声明的自定义鉴权头名（`apiKeyHeader`）。非空时替换该 wire
+   * 的默认凭据头（`x-goog-api-key` / `Authorization: Bearer` / `x-api-key`），空/
+   * 未传保持默认。**必须传原始配置值，不要传
+   * `resolveProviderAuthHeaderName` 的解析结果** —— 后者恒有一个 `Authorization`
+   * 默认值，会把 gemini/anthropic 的 wire 默认头错误地换掉。非法头名在这里就抛
+   * `CustomNativeApiKeyHeaderError`（显式报错，不静默回落）。
+   */
+  apiKeyHeader?: string | null;
   agentConfig: AgentRuntimeAgentConfig;
   /** 已解析的 OpenAI 形状工具包（各处解析顺序不同，故由调用方传入）。 */
   tools: unknown[];
@@ -158,6 +168,8 @@ type ResolvedCustomNative = {
   /** 按 wire 拼出的真实上游 URL（供 fetch 与日志 `requestUrl`）。 */
   nativeEndpoint: string;
   apiKey: string;
+  /** 已校验的显式 `apiKeyHeader` 覆盖；`undefined` = 用该 wire 的默认凭据头。 */
+  apiKeyHeader?: string;
   agentConfig: AgentRuntimeAgentConfig;
   tools: unknown[];
   fetchImpl: CustomNativeFetch;
@@ -181,12 +193,15 @@ const noopRecordAvailability: CustomNativeRecordAvailability = async () => {};
 export function createCustomNativeProvider(
   args: CreateCustomNativeProviderArgs,
 ): AgentRuntimeProvider {
+  // 配置错误在这里就暴露（构造期），不拖到第一次请求才炸、更不静默回落默认头。
+  const apiKeyHeader = resolveCustomNativeApiKeyHeader(args.apiKeyHeader);
   const resolved: ResolvedCustomNative = {
     transport: TRANSPORT_LABEL[args.wire],
     model: args.model,
     endpoint: args.endpoint,
     nativeEndpoint: resolveCustomNativeEndpoint(args.endpoint, args.wire, args.model),
     apiKey: args.apiKey,
+    ...(apiKeyHeader ? { apiKeyHeader } : {}),
     agentConfig: args.agentConfig,
     tools: args.tools,
     fetchImpl: args.fetchImpl,
@@ -216,7 +231,7 @@ export function createCustomNativeProvider(
 // ---------------------------------------------------------------------------
 
 function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeProvider {
-  const { model, endpoint, nativeEndpoint, apiKey, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, serverUrl, authToken, transport, log, recordAvailability } = p;
+  const { model, endpoint, nativeEndpoint, apiKey, apiKeyHeader, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, serverUrl, authToken, transport, log, recordAvailability } = p;
   return {
     model,
     complete: async (messages, options) => {
@@ -230,7 +245,7 @@ function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeP
       // gateway session 头是**每调用**的：dialogId 只在 complete() 里可得；同一
       // dialog 的多轮调用必须复用同一个 session（与 canonical 消费者
       // directOpenAiCompatibleTransport 同口径：sessionId = dialogId ?? agentConfig.key）。
-      const response = await fetchImpl(nativeEndpoint, { method: "POST", headers: { "Content-Type": "application/json", ...customNativeAuthHeaders("gemini", apiKey), ...buildProviderSessionHeaders({ endpoint, sessionId: options?.dialogId ?? fallbackSessionId }) }, body: JSON.stringify(body), signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs ?? 120000)]) : AbortSignal.timeout(options?.timeoutMs ?? 120000) });
+      const response = await fetchImpl(nativeEndpoint, { method: "POST", headers: { "Content-Type": "application/json", ...customNativeAuthHeaders("gemini", apiKey, apiKeyHeader), ...buildProviderSessionHeaders({ endpoint, sessionId: options?.dialogId ?? fallbackSessionId }) }, body: JSON.stringify(body), signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs ?? 120000)]) : AbortSignal.timeout(options?.timeoutMs ?? 120000) });
       if (!response.ok) {
         const errText = await response.text();
         const failure = new Error(`gemini native custom provider failed: HTTP ${response.status} ${errText.slice(0, 500)}`);
@@ -263,7 +278,7 @@ function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeP
 // ---------------------------------------------------------------------------
 
 function buildOpenAiResponsesCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeProvider {
-  const { model, endpoint, nativeEndpoint, apiKey, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, transport, log, recordAvailability } = p;
+  const { model, endpoint, nativeEndpoint, apiKey, apiKeyHeader, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, transport, log, recordAvailability } = p;
   return {
     model,
     complete: async (messages, options) => {
@@ -291,7 +306,7 @@ function buildOpenAiResponsesCustomNativeProvider(p: ResolvedCustomNative): Agen
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...customNativeAuthHeaders("openai-responses", apiKey),
+            ...customNativeAuthHeaders("openai-responses", apiKey, apiKeyHeader),
             // gateway session 头是**每调用**的（dialogId 只在 complete() 里可得）；
             // 同一 dialog 的多轮调用必须复用同一个 session，与 canonical 消费者
             // directOpenAiCompatibleTransport 同口径：sessionId = dialogId ?? agentConfig.key。
@@ -395,7 +410,7 @@ function buildOpenAiResponsesCustomNativeProvider(p: ResolvedCustomNative): Agen
 // ---------------------------------------------------------------------------
 
 function buildAnthropicMessagesCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeProvider {
-  const { model, endpoint, nativeEndpoint, apiKey, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, transport, log, recordAvailability } = p;
+  const { model, endpoint, nativeEndpoint, apiKey, apiKeyHeader, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, transport, log, recordAvailability } = p;
   return {
     model,
     complete: async (messages, options) => {
@@ -407,7 +422,7 @@ function buildAnthropicMessagesCustomNativeProvider(p: ResolvedCustomNative): Ag
       const timeout = AbortSignal.timeout(options?.timeoutMs ?? 120000);
       const signal = options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
       log("provider.request.start", { agentKey: agentConfig.key, transport, requestUrl: nativeEndpoint, model, messageCount: messages.length, toolCount: tools.length, requestedToolNames });
-      const response = await fetchImpl(nativeEndpoint, { method: "POST", headers: { "Content-Type": "application/json", ...customNativeAuthHeaders("anthropic-messages", apiKey), ...buildProviderSessionHeaders({ endpoint, sessionId: options?.dialogId ?? fallbackSessionId }) }, body: JSON.stringify(body), signal });
+      const response = await fetchImpl(nativeEndpoint, { method: "POST", headers: { "Content-Type": "application/json", ...customNativeAuthHeaders("anthropic-messages", apiKey, apiKeyHeader), ...buildProviderSessionHeaders({ endpoint, sessionId: options?.dialogId ?? fallbackSessionId }) }, body: JSON.stringify(body), signal });
       if (!response.ok || !response.body) {
         const errText = await response.text();
         const failure = new Error(`Anthropic messages custom provider failed: HTTP ${response.status} ${errText.slice(0, 200)}`);

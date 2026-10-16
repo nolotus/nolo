@@ -57,13 +57,17 @@ export const resolveCustomNativeTransport: ProviderResolver = async (ctx) => {
   const config = await resolveCliOpenAiProviderConfig({ agentConfig, env: deps.env, apiKeyRefResolver, credentialBroker, syncFetcher });
   if (!config.apiKey) return null;
   const { requestedToolNames, tools } = resolveProviderOpenAiToolBundle(agentConfig, deps.env, buildProviderOpenAiTools, additionalToolNames);
-  logLocalRuntimeDiagnostic("provider.selected", { agentKey: agentConfig.key, transport: TRANSPORT_LABEL[wire], provider: config.provider, model: config.model, hasApiKey: true });
+  logLocalRuntimeDiagnostic("provider.selected", { agentKey: agentConfig.key, transport: TRANSPORT_LABEL[wire], provider: config.provider, model: config.model, hasApiKey: true, apiKeyHeader: agentConfig.apiKeyHeader ?? null });
   return createCustomNativeProvider({
     wire,
     model: config.model,
     // 契约端点（chat/completions 形状）；native 路径由共享执行器按 wire 拼。
     endpoint: config.endpoint,
     apiKey: config.apiKey,
+    // **原始配置值**，不是 `config.apiKeyHeader`（后者是 resolveProviderAuthHeaderName
+    // 的解析结果，缺省恒为 "Authorization"，会把 gemini/anthropic 的 wire 默认凭据头
+    // 悄悄换掉）。空/未设置 = 用该 wire 的默认头；非法值由执行器显式抛错。
+    apiKeyHeader: agentConfig.apiKeyHeader,
     agentConfig,
     tools,
     fetchImpl,
