@@ -1,6 +1,5 @@
 // GPT Pro tier 纯函数：模型判定 + 客户端拦截逻辑。
-// 从 auth/gptProTier.ts 下沉到 core，使公开集消费方无需依赖 auth 包。
-// auth/gptProTier.ts 改为 re-export 本文件，私有侧 import 路径不变。
+// 下沉到 core，使公开集消费方无需依赖 auth 包。
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 
 export const ADVANCED_FEATURE_MIN_BALANCE = 19;
@@ -82,18 +81,52 @@ export function isGptProModel(provider: unknown, model: unknown): boolean {
 
 export const GPT_PRO_BLOCKED_MESSAGE = `GPT Pro / Kimi K3 等高级模型需要先开通 ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分档位。`;
 
+/** 199 档位门槛 402 响应里的稳定 reason（服务端与客户端共用一处常量）。 */
+export const GPT_PRO_TIER_REQUIRED_REASON = "gpt_pro_tier_required";
+/** 档位闸门本身不可用（资格查询失败）时的 details.reason。 */
+export const GPT_PRO_TIER_CHECK_UNAVAILABLE_REASON = "tier_check_unavailable";
+
+export interface GptProTierRequiredFields {
+  reason: string;
+  message: string;
+  requiredRechargeAmount: number;
+  details?: { reason: string };
+}
+
 /**
- * 客户端侧：判断当前 agent 是否因 GPT Pro 资格不足被拦截。
- * 只检查用户记录的 gptProAccess.status，不扫描交易历史。
- * 服务端有独立的 hasGptProTierAccess（会扫历史充值），不共用此函数。
+ * 199 档位 402 响应体字段的**唯一**拼装处（agentRun 与 chatCallPlan 共用，禁止各自拼）。
+ * 状态码语义不变：402 / reason=gpt_pro_tier_required / message=GPT_PRO_BLOCKED_MESSAGE /
+ * requiredRechargeAmount=199；details 仅在闸门不可用时附加。
  */
-export function shouldBlockForGptPro(
-  agent: { provider?: unknown; model?: unknown; apiSource?: unknown } | null | undefined,
-  gptProStatus: string | undefined,
-): { blocked: false } | { blocked: true; message: string } {
-  if (!agent) return { blocked: false };
-  if (agent.apiSource === "cli") return { blocked: false };
-  if (!isGptProModel(agent.provider, agent.model)) return { blocked: false };
-  if (gptProStatus === "active") return { blocked: false };
+export function buildGptProTierRequiredFields(
+  tierCheckUnavailable = false,
+): GptProTierRequiredFields {
+  return {
+    reason: GPT_PRO_TIER_REQUIRED_REASON,
+    message: GPT_PRO_BLOCKED_MESSAGE,
+    requiredRechargeAmount: GPT_PRO_REQUIRED_RECHARGE_AMOUNT,
+    ...(tierCheckUnavailable
+      ? { details: { reason: GPT_PRO_TIER_CHECK_UNAVAILABLE_REASON } }
+      : {}),
+  };
+}
+
+/**
+ * 纯决策：入参是**已算好的**布尔（是否高阶、是否平台垫付）+ 用户档位状态。
+ * 「谁出钱」由 ai/agent/platformPaidCall 的 isPlatformPaidAgentCall 判定后传入；本函数
+ * 不再嗅探 agent 记录里的 isOwned / isOAuth / billingSource 形状字段——自声明字段不构成
+ * 通道归属证明（见 platformPaidCall.ts）。
+ */
+export function shouldBlockForGptPro(input: {
+  premium: boolean;
+  platformPaid: boolean;
+  gptProStatus?: string | null;
+}): { blocked: false } | { blocked: true; message: string } {
+  if (input?.premium !== true || input?.platformPaid !== true) {
+    return { blocked: false };
+  }
+  if (asTrimmedLowercaseString(input.gptProStatus) === "active") {
+    return { blocked: false };
+  }
   return { blocked: true, message: GPT_PRO_BLOCKED_MESSAGE };
 }

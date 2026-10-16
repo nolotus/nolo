@@ -18,7 +18,12 @@ import { useAppSelector, useAppDispatch } from "app/store";
 import { useAccountProfileRefresh } from "app/hooks/useAccountProfileRefresh";
 import { useCurrentUser, useUserId } from "identity";
 import { selectIdentityUserBalance } from "identity/selectors";
-import { GPT_PRO_BLOCKED_MESSAGE, shouldBlockForGptPro } from "core/gptProTier";
+import {
+  GPT_PRO_BLOCKED_MESSAGE,
+  isGptProModel,
+  shouldBlockForGptPro,
+} from "core/gptProTier";
+import { isPlatformPaidAgentCall } from "ai/agent/platformPaidCall";
 import { pickRechargeTier } from "core/rechargePreset";
 import { buildNoloDefaultAgentOption } from "./noloDefaultAgentOption";
 import { toast } from "app/utils/toast";
@@ -199,13 +204,22 @@ const MessageInputContainer = forwardRef<
   const resolvedAgentPicker = agentPicker ?? defaultAgentPicker;
 
   const currentUser = useCurrentUser();
+  const currentUserId = useUserId();
 
   const isProBlocked = useMemo(() => {
-    return shouldBlockForGptPro(
-      resolvedActiveAgent,
-      currentUser?.gptProAccess?.status
-    ).blocked;
-  }, [resolvedActiveAgent, currentUser]);
+    if (!resolvedActiveAgent) return false;
+    return shouldBlockForGptPro({
+      premium: isGptProModel(
+        (resolvedActiveAgent as any).provider,
+        (resolvedActiveAgent as any).model
+      ),
+      platformPaid: isPlatformPaidAgentCall({
+        agentConfig: resolvedActiveAgent,
+        callerUserId: currentUserId,
+      }),
+      gptProStatus: currentUser?.gptProAccess?.status,
+    }).blocked;
+  }, [resolvedActiveAgent, currentUser, currentUserId]);
 
   if (isLoading) return <LoadingPlaceholder />;
 

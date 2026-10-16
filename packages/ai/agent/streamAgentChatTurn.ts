@@ -102,7 +102,8 @@ import {
   selectIdentityUser,
   selectIdentityUserId,
 } from "identity/selectors";
-import { shouldBlockForGptPro } from "core/gptProTier";
+import { isGptProModel, shouldBlockForGptPro } from "core/gptProTier";
+import { isPlatformPaidAgentCall } from "./platformPaidCall";
 import { persistMessageWithFixedId } from "./persistMessageWithFixedId";
 import { updateTotalUsage } from "../chat/updateTotalUsage";
 import { estimateMissingUsage } from "ai/token/missingUsageEstimate";
@@ -580,10 +581,17 @@ export const streamAgentChatTurnHandler = async (
             source: agentConfigSource,
         });
 
-        const gptProCheck = shouldBlockForGptPro(
-            agentConfig,
-            selectIdentityUser(getState() as RootState)?.gptProAccess?.status,
-        );
+        // 199 档位门槛的「谁出钱」判据与服务端同源（见 ai/agent/platformPaidCall）：
+        // 记录自声明的 isOwned / isOAuth / billingSource 不构成通道归属证明。
+        const identityState = getState() as RootState;
+        const gptProCheck = shouldBlockForGptPro({
+            premium: isGptProModel(agentConfig.provider, agentConfig.model),
+            platformPaid: isPlatformPaidAgentCall({
+                agentConfig,
+                callerUserId: selectIdentityUserId(identityState),
+            }),
+            gptProStatus: selectIdentityUser(identityState)?.gptProAccess?.status,
+        });
         if (gptProCheck.blocked) {
             return rejectWithValue(gptProCheck.message);
         }
