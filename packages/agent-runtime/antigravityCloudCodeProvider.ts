@@ -144,7 +144,7 @@ type AntigravityCloudCodeCallArgs = {
  * tool_call_id（见 geminiNativeShared.ts）。labels.used_claude 告诉网关
  * 目标模型是 Claude。
  */
-function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) {
+export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) {
   const projectId = readAntigravityProjectId(args.metadata);
   if (!projectId) {
     throw new Error(
@@ -415,4 +415,33 @@ export async function fetchAntigravityCloudCodeCompletion(
     );
   }
   return normalized;
+}
+
+/** 发起 Cloud Code Assist 上游 HTTP 请求，返回原始 Response（用于真流式或原生直通）。 */
+export async function sendAntigravityCloudCodeRequest(
+  args: AntigravityCloudCodeCallArgs,
+): Promise<{ status: number; response: Response; errorBody?: Record<string, unknown> }> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const { url, envelope } = buildCloudCodeAssistPayload(args);
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${args.accessToken}`,
+      "Content-Type": "application/json",
+      "User-Agent": getAntigravityUserAgent(),
+    },
+    body: JSON.stringify(envelope),
+    signal: args.signal,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    return {
+      status: response.status,
+      response,
+      errorBody: parseUpstreamErrorBody(errorText, response.statusText),
+    };
+  }
+
+  return { status: 200, response };
 }

@@ -81,22 +81,7 @@ export const PUBLIC_NANO_BANANA_2_LITE_AGENT_ID = entry("01NB2LITEGEN00000001XE1
 export const PUBLIC_NANO_BANANA_2_LITE_AGENT_KEY = publicAgentKey(PUBLIC_NANO_BANANA_2_LITE_AGENT_ID);
 
 /**
- * Quick-chat 档位 agent：执行真相在代码里（agent-runtime/builtinPlatformAgentConfigs），
- * 对应的 agent-pub-* 记录按设计可以不存在（runtime fallback 合成配置）。
- *
- * 内置 nolo 纳入平台兜底：作为各端默认入口，未 seed 数据库的环境（自建 server、
- * 全新 dev LevelDB）下直接合成代码级配置，保证可用性，绝不报 404 挂掉对话；
- * 线上或已有 seed 记录的环境依然以数据库/远端记录为准。
- */
-export const PLATFORM_TIER_AGENT_KEYS = [
-  BUILTIN_NOLO_AGENT_KEY,
-  PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY,
-  PUBLIC_KIMI_K26_IMAGE_AGENT_KEY,
-] as const;
-
-/**
- * 系统内置可信平台 agent（信任边界判定，与 PLATFORM_TIER_AGENT_KEYS 的 quick-chat
- * 档位语义正交）。
+ * 系统内置可信平台 agent（信任边界判定）。
  *
  * 背景：pro/flash 的 runtime fallback 合成配置只有 provider/model（无 tools/prompt），
  * 而它们在 CLI / 服务端 agent-run 的工具面解析里会被当作普通 public agent

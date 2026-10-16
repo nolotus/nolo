@@ -157,7 +157,6 @@ export function shouldUseServerOwnedWebForegroundTurn(
   }
   if (runtimeOptions?.editingTarget) return false;
   if (runtimeOptions?.imageConfigOverride) return false;
-  if (runtimeOptions?.quickChatModelOverride) return false;
   if (runtimeOptions?.workspaceToolsHint) return false;
   if (runtimeOptions?.cwd) return false;
   if (runtimeOptions?.restrictShellToWorkspace) return false;

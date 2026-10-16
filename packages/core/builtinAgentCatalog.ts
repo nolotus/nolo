@@ -116,8 +116,7 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   },
   // ── quick-chat 档位 public（图片助手已无 runtimeFallback，见下方图片档段） ──
   // 2026-09-10 兜底最小化：runtimeFallback 只保留产品代码显式引用的条目
-  // （nolo 默认档、PLATFORM_TIER_AGENT_KEYS 的 flash/image-compat、
-  // SYSTEM_BUILTIN_TRUSTED 的 flash/pro/glm-flash）。广场档与图片助手不再
+  // （nolo 默认档、SYSTEM_BUILTIN_TRUSTED 的 flash/pro/glm-flash）。广场档与图片助手不再
   // 兜底——记录缺失时明确报 Agent not found，而不是合成无 prompt 的裸配置。
   {
     id: "01DSV4FLASHPB00000000JFPFD",

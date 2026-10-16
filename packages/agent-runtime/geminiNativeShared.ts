@@ -672,11 +672,25 @@ export function applyGeminiChunk(
         ? // cached ⊆ prompt；对畸形上游防御性钳位，避免 cache_read > input 破坏归一化与计费
           Math.min(Math.max(0, Math.floor(meta.cachedContentTokenCount)), prompt)
         : 0;
+    const thoughts =
+      typeof meta.thoughtsTokenCount === "number"
+        ? meta.thoughtsTokenCount
+        : Array.isArray(meta.candidatesTokensDetails) &&
+            typeof (meta.candidatesTokensDetails[0] as any)?.tokensCount === "number"
+          ? (meta.candidatesTokensDetails[0] as any).tokensCount
+          : undefined;
     state.usage = {
       prompt_tokens: prompt,
       completion_tokens: candidates,
       total_tokens: total,
       ...(cached > 0 ? { cache_read_input_tokens: cached } : {}),
+      ...(thoughts !== undefined
+        ? {
+            completion_tokens_details: {
+              reasoning_tokens: thoughts,
+            },
+          }
+        : {}),
     };
     state.events.push({ kind: "usage", usage: state.usage });
   }

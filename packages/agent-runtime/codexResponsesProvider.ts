@@ -444,6 +444,7 @@ async function callCodexResponsesOnce(
     content: text || null,
   };
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
+  if (streamed.reasoning_content) message.reasoning_content = streamed.reasoning_content;
 
   return {
     status: 200,
@@ -524,3 +525,30 @@ export function isCodexOAuthAgent(
   const apiKeyRef = asTrimmedLowercaseString(agentConfig.apiKeyRef);
   return apiKeyRef === "chatgpt";
 }
+
+/** 发起 ChatGPT Codex Responses 上游原生请求，直接返回原始 Response（用于客户端原生直通）。 */
+export async function sendCodexResponsesRequest(args: {
+  accessToken: string;
+  accountId: string;
+  body: Record<string, unknown>;
+  sessionKey?: string;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<Response> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const identity = createCodexRequestIdentity(
+    undefined,
+    args.sessionKey ? { sessionKey: args.sessionKey } : undefined,
+  );
+  const headers = buildCodexCompatibilityHeaders(identity, args.accountId);
+  headers.Authorization = `Bearer ${args.accessToken}`;
+  const sanitizedBody = { ...args.body };
+  delete (sanitizedBody as any).wire;
+  return fetchImpl(CODEX_RESPONSES_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(sanitizedBody),
+    signal: args.signal,
+  });
+}
+

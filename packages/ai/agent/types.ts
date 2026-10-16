@@ -1,7 +1,5 @@
 // 文件路径: ai/agent/types.ts
 
-import type { QuickChatModelOverride } from "./quickChatModelOverride";
-
 export interface AgentRuntimeOptions {
     /** Per-send execution location; dialog selection is the stable default for continuation turns. */
     runtimeTarget?: { kind: "server" | "machine"; machineId?: string };
@@ -88,15 +86,6 @@ export interface AgentRuntimeOptions {
      * 专职/用户自建 agent 完全忽略此 hint。
      */
     workspaceToolsHint?: boolean;
-
-    /**
-     * quick-chat 自动模式「模型层覆盖」：LLM 分类路由落到通用档
-     * （flash/balanced/quality 内置档位 agent）时，用用户选择的收藏 agent
-     * 的 model 层配置替换档位 agent 的 model 层，并把收藏 agent 的
-     * references（技能/能力包）合并进本轮执行。档位 agent 的 prompt /
-     * 工具策略保持不变；专职 agent、image 档与普通对话不使用此字段。
-     */
-    quickChatModelOverride?: QuickChatModelOverride | null;
 
     /** 默认自动挡 DeepSeek V4 Flash 使用的推理强度。 */
     quickChatReasoningEffort?: "max";

@@ -76,7 +76,6 @@ import type { AgentRuntimeOptions } from "./types";
 import { buildAgentViewMessages } from "./cleanAgentMessages";
 import { extractCategorizedMentions, type CategorizedMentions } from "create/editor/utils/slateUtils";
 import { mergeReferences, resolveReferenceAssets, resolveToolsFromKeys } from "./referenceUtils";
-import { applyQuickChatModelOverride } from "./quickChatModelOverride";
 import { estimateTokenCount } from "ai/context/tokenUtils";
 import {
     applyImageConfigRuntimeOverride,
@@ -539,28 +538,6 @@ export const streamAgentChatTurnHandler = async (
             return rejectWithValue(
                 `Agent config not found for ID: ${agentKey}`,
             );
-        }
-
-        // quick-chat 自动模式模型层覆盖：分类路由落到通用档时，
-        // 用收藏 agent 的 model 层替换档位 agent 的 model 层并合并技能引用。
-        // 在读取配置后立刻应用，web / cli / desktop 路由共用同一份覆盖结果。
-        if (runtimeOptions?.quickChatModelOverride) {
-            rawAgentConfig = applyQuickChatModelOverride(
-                rawAgentConfig,
-                runtimeOptions.quickChatModelOverride,
-            );
-        }
-        if (
-            runtimeOptions?.quickChatReasoningEffort &&
-            (rawAgentConfig.model === "deepseek-flash" ||
-                rawAgentConfig.model === "deepseek-v4-flash" ||
-                rawAgentConfig.model === "deepseek-v4-flash-vision-exp" ||
-                rawAgentConfig.model === "deepseek-v4-pro")
-        ) {
-            rawAgentConfig = {
-                ...rawAgentConfig,
-                reasoning_effort: runtimeOptions.quickChatReasoningEffort,
-            };
         }
 
         // ── Live-audio-only guard ────────────────────────────────────────────

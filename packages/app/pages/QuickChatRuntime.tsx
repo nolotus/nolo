@@ -60,10 +60,8 @@ import {
   logQuickChatPerf,
   resolveQuickChatAgentKey,
   QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY,
-  allowsQuickChatModelOverride,
   savePendingQuickChatDraft,
 } from "./quickChatFlow";
-import { buildQuickChatModelOverride } from "ai/agent/quickChatModelOverride";
 import type { AgentRuntimeOptions } from "ai/agent/types";
 import {
   BUILTIN_NOLO_AGENT_KEY,
@@ -434,19 +432,15 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       const hasImages = filesArray.length > 0 || pendingFiles.length > 0;
       const firstMessageText = buildQuickChatFirstMessageText(trimmedText, hasImages);
       const specialistAgentId = initialAgentIdRef.current;
-      // resolveQuickChatAgentKey：有图无图都走单一默认 agent（内置 nolo 本体）；专职 agent 不走自动路由。
-      const resolvedAgent = specialistAgentId
-        ? { agentKey: specialistAgentId }
+      // 专职直达入口优先；其次首页选中的 agent（autoAgentId）；兜底走默认 agent（内置 nolo 本体）。
+      const selectedAgentId = specialistAgentId || autoAgentId;
+      const resolvedAgent = selectedAgentId
+        ? { agentKey: selectedAgentId }
         : await resolveQuickChatAgentKey();
       const effectiveAgentId = resolvedAgent.agentKey || defaultAgentId;
-      // 仅当路由落在通用档（自动选 model 的结果）时应用模型层覆盖；
-      // 专职 agent / image 档 / 手动指定 agent 保持原样。
-      const quickChatModelOverride =
-        autoOverrideAgent && allowsQuickChatModelOverride(effectiveAgentId)
-          ? buildQuickChatModelOverride(autoOverrideAgent)
-          : null;
       const dialogTitle =
-        QUICK_CHAT_AGENT_TITLES[effectiveAgentId] ?? formatQuickChatDialogTitle(agentName);
+        QUICK_CHAT_AGENT_TITLES[effectiveAgentId] ??
+        formatQuickChatDialogTitle(autoOverrideAgent?.name || agentName);
       QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] routing", {
         hasImages,
         effectiveAgentId,
@@ -459,17 +453,17 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       let dialogSpaceId: string | null = null;
 
       try {
-        const dialogAgentMode = specialistAgentId ? "fixed" : "auto";
+        const dialogAgentMode = selectedAgentId ? "fixed" : "auto";
         QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] createDialog dispatch", {
           agentMode: dialogAgentMode,
-          cybots: specialistAgentId ? [effectiveAgentId] : [],
+          cybots: selectedAgentId ? [effectiveAgentId] : [],
           spaceId: currentSpaceId,
           title: dialogTitle,
         });
         const result = await dispatch(
           createDialog({
             agentMode: dialogAgentMode,
-            cybots: specialistAgentId ? [effectiveAgentId] : [],
+            cybots: selectedAgentId ? [effectiveAgentId] : [],
             skipGreeting: true,
             skipAgentConfigRead: true,
             optimisticReturnBeforeWrite: true,
@@ -560,14 +554,10 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       const runtimeOptions: AgentRuntimeOptions = {
         ...(getIsDesktopApp() ? { workspaceToolsHint: true } : {}),
         ...(getIsDesktopApp() && desktopCwd ? { cwd: desktopCwd } : {}),
-        ...(quickChatModelOverride
-          ? { quickChatModelOverride }
-          : {}),
         // 跟随「默认档」语义而不是某个具体 agent key：默认档换指向时
-        // （广场档 → nolo 本体）这段不会悄悄失效。
-        ...(!specialistAgentId &&
-          effectiveAgentId === QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY &&
-          !quickChatModelOverride
+        // （广场档 → nolo 本体）这段不会悄悄失效。用户主动选定 agent 时不强加。
+        ...(!selectedAgentId &&
+          effectiveAgentId === QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY
           ? { quickChatReasoningEffort: "max" as const }
           : {}),
       };

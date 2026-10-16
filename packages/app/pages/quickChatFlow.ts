@@ -8,19 +8,6 @@ import { asTrimmedString } from "core/trimmedString";
 import { QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY } from "app/settings/quickChatTierDefaults";
 
 /**
- * 这个 agent 是否允许被 `quickChatModelOverride` 换掉 model 层。
- *
- * 只有默认档可以：它本来就是「自动选 model」的档位，用户在首页选的收藏 agent
- * 就是通过换它的 model 层生效的。专职 agent（反馈 / 建 Agent / 建应用）有自己
- * 的模型要求，不适用。
- *
- * 曾经是一个装了 flash/balanced/quality 三个 key 的 Set——三个值完全相同，
- * 连它自己的测试都断言 `size === 1`。档位是历史形状，判断只需要一次比较。
- */
-export const allowsQuickChatModelOverride = (agentKey: string): boolean =>
-  agentKey === QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY;
-
-/**
  * `/chat?launch=<slug>` 支持的专职 agent 直达入口。
  * 只允许白名单里的 slug，避免 URL 参数能任意指定 agent 并自动发消息。
  */

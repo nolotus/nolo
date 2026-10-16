@@ -137,10 +137,9 @@ export type ModelLayerOverrideAdmission = {
  * 成立有两种情形：
  * 1. 目标记录不委派凭据（`credentialOwnerUserId === null`）：出站凭据本来就回落
  *    到调用方（`resolveEffectiveCredentialUserId` 的 fallback）——覆盖包改的是
- *    调用方自己的东西。**web / CLI 的合法覆盖流全靠这一条**：合法调用点只会在
+ *    调用方自己的东西。**CLI 的合法覆盖流全靠这一条**：合法调用点只会在
  *    路由落到公开档位 agent（`agent-pub-*`，owner 是平台、不共享配额）时发覆盖包
- *    （见 `app/pages/quickChatFlow.allowsQuickChatModelOverride`、
- *    `cli/client/autoModelRouter.CLI_AUTO_ROUTE_AGENT_KEY`）。
+ *    （见 `cli/client/autoModelRouter.CLI_AUTO_ROUTE_AGENT_KEY`）。
  * 2. `credentialOwnerUserId === callerUserId`：调用方就是这条记录的凭据主人。
  * 其余一律拒绝（含 active agent-grant 与 space 共享：**被授权读用**
  * owner 的凭据 ≠ **有权替 owner 改写**其凭据来源与端点）。
@@ -152,8 +151,7 @@ export type ModelLayerOverrideAdmission = {
  * 凭据会被静默抹掉（`loopUpstream` 的 OAuth 链会因此换一条线出站）。整包丢弃
  * 才等于「记录原值路径逐字不变」。
  *
- * 判定不读任何客户端自检（`allowsQuickChatModelOverride` 只是客户端 UI 判断），
- * 只吃上面的 authority 事实；authority 缺失时 fail-closed。
+ * 判定不读任何客户端自检，只吃上面的 authority 事实；authority 缺失时 fail-closed。
  */
 export function resolveModelLayerOverrideAdmission(
   authority: ModelLayerOverrideAuthority | null | undefined,
