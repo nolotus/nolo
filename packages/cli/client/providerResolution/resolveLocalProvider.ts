@@ -9,7 +9,9 @@
  * 5. Cursor Connect。
  * 6. Gemini 3 + tools 的 native 路由 —— 必须先于 platform proxy，后者传不了
  *    thought_signature。
- * 7. custom provider Gemini / OpenAI Responses native 协议（先于 owner/platform proxy）。
+ * 7. custom provider 的三条 native wire（gemini / openai-responses /
+ *    anthropic-messages）—— 一个 resolver 按目录声明的 `nativeProtocol` 分派，
+ *    占原来三条中最早的那个位置；先于 owner/platform proxy。
  * 8. owner-required（仅契约存在时；见下方短路说明）。
  * 9. 平台代理。
  * 10. 直连 OpenAI-compatible —— 兜底，永远命中，返回类型上不为 null。
@@ -31,14 +33,12 @@ import { resolveAnthropicOAuthTransport } from "./anthropicOAuthTransport";
 import { resolveAntigravityTransport } from "./antigravityTransport";
 import { resolveCliProviderTransport } from "./cliProviderTransport";
 import { resolveCodexOAuthTransport } from "./codexOAuthTransport";
+import { resolveCustomNativeTransport } from "./customNativeTransport";
 import { resolveCursorTransport } from "./cursorTransport";
 import { resolveDevinTransport } from "./devinTransport";
 import { resolveDirectOpenAiCompatibleTransport } from "./directOpenAiCompatibleTransport";
 import { resolveGeminiNativeToolTransport } from "./geminiNativeToolTransport";
-import { resolveGeminiNativeCustomTransport } from "./geminiNativeCustomTransport";
 import { resolveOwnerOAuthProxyTransport } from "./ownerOAuthProxyTransport";
-import { resolveOpenAiResponsesCustomTransport } from "./openAiResponsesCustomTransport";
-import { resolveAnthropicMessagesCustomTransport } from "./anthropicMessagesCustomTransport";
 import { resolvePlatformProxyTransport } from "./platformProxyTransport";
 import type { ProviderResolutionContext, ProviderResolver } from "./providerResolutionContext";
 
@@ -50,10 +50,11 @@ const TRANSPORTS: readonly ProviderResolver[] = [
   resolveCursorTransport,
   resolveDevinTransport,
   resolveGeminiNativeToolTransport,
-  resolveGeminiNativeCustomTransport,
-  resolveOpenAiResponsesCustomTransport,
-  // Native Anthropic Messages wire for custom providers; keep after Responses transport.
-  resolveAnthropicMessagesCustomTransport,
+  // 三条 custom native wire（gemini / openai-responses / anthropic-messages）由
+  // 这一个 resolver 按目录 `nativeProtocol` 分派：三种 wire 互斥（一个模型的
+  // marker 只有一个值），因此合并到原来三条中最早的位置后，与邻居的相对顺序和
+  // 命中结果逐字不变。
+  resolveCustomNativeTransport,
   // owner-required 是 platform-proxy 的语义超集（同一条 server wire + 额外
   // 准入扩展）。必须排在它前面：ownerOriginExecution 存在时走 owner 通道，
   // 缺省时落到 platform-proxy，旧行为不变。

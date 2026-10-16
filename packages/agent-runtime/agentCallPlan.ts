@@ -33,7 +33,7 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import type { Model } from "ai/llm/types";
 import { findModelConfig } from "ai/llm/providers";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
-import { isAntigravityOAuthAgent, ANTIGRAVITY_CLOUD_CODE_BASE_URL } from "./antigravityOAuth";
+import { isAntigravityOAuthAgent, ANTIGRAVITY_CLOUD_CODE_BASE_URL, ANTIGRAVITY_CLOUD_CODE_HOST } from "./antigravityOAuth";
 import {
   isOpenAiResponsesModel,
   resolvePlatformResponsesEndpoint,
@@ -229,6 +229,56 @@ function resolveCustomUpstreamWire(
 }
 
 // ---------------------------------------------------------------------------
+// Credential precedence (single source of truth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this record point at its OWN endpoint *and* hold its OWN raw API key?
+ *
+ * **实际凭证来源优先于引用**: `apiKey` is a credential the record already has,
+ * while `apiKeyRef` is only a *reference* to a subscription credential stored
+ * elsewhere (Claude Pro/Max, ChatGPT, Antigravity, …). When both are present, a
+ * leftover/polluted `apiKeyRef` must not outrank the key the record holds —
+ * otherwise the plan reports an OAuth wire, and `chatHandler` /
+ * `buildChatCallPlan` route on `upstreamWire` alone, so the request is sent into
+ * the provider-specific OAuth proxy (`anthropic-messages` → Claude proxy) and
+ * fails with `MISSING_CLAUDE_OAUTH` even though the record can call its own
+ * endpoint with its own key.
+ *
+ * Both halves are required — this is the whole blast-radius guard:
+ * - no `customProviderUrl` ⇒ nothing that key could be sent to ⇒ `false`, and
+ *   the five OAuth chains keep their exact previous precedence;
+ * - no raw `apiKey` ⇒ only the reference is left to go on ⇒ `false`, OAuth path
+ *   unchanged.
+ *
+ * Only the *raw* `apiKey` counts. `apiKeyFromAgentKey` (legacy raw-key field) and
+ * `credentialRef` (broker/secret ref, "never a raw API key") are deliberately
+ * excluded: the custom-key path resolves its credential from
+ * `credentials.apiKey` / the record's `apiKey`, so planning a custom wire for a
+ * record whose key lives in a field that path never reads would fail closed
+ * where the OAuth path worked before.
+ *
+ * Callers must feed the record's OWN key into the plan for this to fire (see
+ * `chatHandler` / `chatCallPlan`: the record→runtime-config mapping drops
+ * `apiKey`, so those sites attach it explicitly).
+ *
+ * One endpoint is excluded: the Antigravity Cloud Code base URL. That URL is an
+ * OAuth-gated wire endpoint (`gemini-cca`), never a custom endpoint — no
+ * `custom-*` wire can be served by it, and the only OAuth preset that fills
+ * `customProviderUrl` at all is the Antigravity one. So a stray raw `apiKey`
+ * left on such a record must not drag it off the Antigravity chain; this keeps
+ * that chain intact for the whole `isAntigravityOAuthAgent` family.
+ */
+export function hasOwnCustomProviderKey(
+  agentConfig: Pick<AgentRuntimeAgentConfig, "customProviderUrl" | "apiKey">,
+): boolean {
+  const endpoint = asOptionalTrimmedString(agentConfig.customProviderUrl);
+  if (!endpoint) return false;
+  if (endpoint.includes(ANTIGRAVITY_CLOUD_CODE_HOST)) return false;
+  return Boolean(asOptionalTrimmedString(agentConfig.apiKey));
+}
+
+// ---------------------------------------------------------------------------
 // Resolver
 // ---------------------------------------------------------------------------
 
@@ -241,8 +291,16 @@ export function resolveAgentCallPlan(
     agentConfig.provider ?? agentConfig.apiSource,
   );
 
+  // 凭证优先级（单一出处：hasOwnCustomProviderKey）——「实际凭证来源优先于引用」。
+  // 记录自带 custom key 时，下面整条「引用型 OAuth 链」整体让位：请求按 custom-*
+  // 走它自己的端点。只在两半都成立时生效（无 customProviderUrl、或没有自带 key 的
+  // 记录，五条 OAuth 链逐位不变）。
+  const ownCustomKeyWins = hasOwnCustomProviderKey(agentConfig);
+  // OAuth 链看到的引用：自带 custom key 时置空，等价于「这条链没有引用可依」。
+  const oauthApiKeyRef = ownCustomKeyWins ? "" : apiKeyRef;
+
   // ── Antigravity (Google Cloud Code Assist) ──
-  if (isAntigravityOAuthAgent(agentConfig)) {
+  if (!ownCustomKeyWins && isAntigravityOAuthAgent(agentConfig)) {
     return {
       authMethod: { kind: "oauth", ref: "antigravity" },
       transport: "server-proxy",
@@ -254,7 +312,7 @@ export function resolveAgentCallPlan(
   }
 
   // ── ChatGPT Codex (OAuth → Responses API) ──
-  if (apiKeyRef === "chatgpt") {
+  if (oauthApiKeyRef === "chatgpt") {
     return {
       authMethod: { kind: "oauth", ref: "chatgpt" },
       transport: "server-proxy",
@@ -266,7 +324,7 @@ export function resolveAgentCallPlan(
   }
 
   // ── Claude Pro/Max (OAuth → Anthropic Messages API) ──
-  if (apiKeyRef === "claude") {
+  if (oauthApiKeyRef === "claude") {
     return {
       authMethod: { kind: "oauth", ref: "claude" },
       transport: "server-proxy",
@@ -278,7 +336,7 @@ export function resolveAgentCallPlan(
   }
 
   // ── xAI SuperGrok (OAuth → chat.completions) ──
-  if (apiKeyRef === "xai") {
+  if (oauthApiKeyRef === "xai") {
     return {
       authMethod: { kind: "oauth", ref: "xai" },
       transport: "server-proxy",
@@ -295,7 +353,7 @@ export function resolveAgentCallPlan(
   // message shape) and the server chat-proxy / agent-run translator converts
   // to the protobuf AgentRunRequest. Transport is server-proxy so the OAuth
   // token never enters the browser (same as other subscription OAuth refs).
-  if (apiKeyRef === "cursor") {
+  if (oauthApiKeyRef === "cursor") {
     return {
       authMethod: { kind: "oauth", ref: "cursor" },
       transport: "server-proxy",
@@ -311,7 +369,7 @@ export function resolveAgentCallPlan(
   }
 
   // ── Devin (OAuth → ConnectRPC over HTTP/2, GetChatMessage) ──
-  if (apiKeyRef === "devin" || provider === "devin") {
+  if (oauthApiKeyRef === "devin" || (!ownCustomKeyWins && provider === "devin")) {
     return {
       authMethod: { kind: "oauth", ref: "devin" },
       transport: "server-proxy",

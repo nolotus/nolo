@@ -68,7 +68,7 @@ export const ANTIGRAVITY_CLOUD_CODE_BASE_URL =
   "https://daily-cloudcode-pa.googleapis.com";
 
 /** Generic legacy host; kept for detection (daily host contains it as substring). */
-const ANTIGRAVITY_CLOUD_CODE_HOST = "cloudcode-pa.googleapis.com";
+export const ANTIGRAVITY_CLOUD_CODE_HOST = "cloudcode-pa.googleapis.com";
 /** Exact generic host to upgrade to the production Antigravity host. */
 const ANTIGRAVITY_LEGACY_GENERIC_BASE_RE =
   /^https?:\/\/cloudcode-pa\.googleapis\.com$/i;

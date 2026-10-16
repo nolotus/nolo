@@ -141,8 +141,10 @@ export type CreateCustomNativeProviderArgs = {
 
 /**
  * 搬迁前三条通道各自的诊断 transport 标签，逐字保留（改动会影响日志消费方）。
+ * 导出给 CLI 的 `customNativeTransport` 复用：`provider.selected` 与
+ * `provider.request.*` 的标签必须同源，免得两处各写一份后漂移。
  */
-const TRANSPORT_LABEL: Record<CustomNativeWire, string> = {
+export const TRANSPORT_LABEL: Record<CustomNativeWire, string> = {
   "gemini": "gemini-native-custom",
   "openai-responses": "openai-responses-custom",
   "anthropic-messages": "anthropic-messages-custom",
@@ -208,7 +210,8 @@ export function createCustomNativeProvider(
 
 // ---------------------------------------------------------------------------
 // gemini native
-// 搬迁自 packages/cli/client/providerResolution/geminiNativeCustomTransport.ts
+// 搬迁自 packages/cli/client/providerResolution/customNativeTransport.ts 的 gemini wire
+// （原 geminiNativeCustomTransport.ts；M1 起三条同构壳合并为这一个 resolver）
 // 的 `complete()`（`ctx.serverUrl`/`ctx.authToken` → 入参；`config.*` → 入参）。
 // ---------------------------------------------------------------------------
 
@@ -254,7 +257,8 @@ function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeP
 
 // ---------------------------------------------------------------------------
 // OpenAI Responses
-// 搬迁自 packages/cli/client/providerResolution/openAiResponsesCustomTransport.ts
+// 搬迁自 packages/cli/client/providerResolution/customNativeTransport.ts 的 openai-responses wire
+// （原 openAiResponsesCustomTransport.ts；M1 起三条同构壳合并为这一个 resolver）
 // 的 `complete()`。
 // ---------------------------------------------------------------------------
 
@@ -385,7 +389,8 @@ function buildOpenAiResponsesCustomNativeProvider(p: ResolvedCustomNative): Agen
 
 // ---------------------------------------------------------------------------
 // Anthropic Messages
-// 搬迁自 packages/cli/client/providerResolution/anthropicMessagesCustomTransport.ts
+// 搬迁自 packages/cli/client/providerResolution/customNativeTransport.ts 的 anthropic-messages wire
+// （原 anthropicMessagesCustomTransport.ts；M1 起三条同构壳合并为这一个 resolver）
 // 的 `complete()`。
 // ---------------------------------------------------------------------------
 

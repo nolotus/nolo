@@ -42,12 +42,42 @@ function resolveCustomNativeBase(endpoint: string): string {
   return endpoint.replace(CHAT_COMPLETIONS_SUFFIX, "").replace(/\/+$/, "");
 }
 
+/**
+ * 两条「target path 是常量后缀」的 wire 的 native 路径 —— **单一出处**：既供拼接
+ * 使用，也供下面的幂等判定使用（两处若各写一份，迟早漂移）。
+ *
+ * gemini 不在此表内：它的路径含 model 与 query
+ * （`/models/{model}:streamGenerateContent?alt=sse`），不是常量后缀，也没有任何
+ * 端点形状把它当作 customProviderUrl 的既有直连形状。
+ */
+const NATIVE_PATH_SUFFIX = {
+  "openai-responses": "/responses",
+  "anthropic-messages": "/messages",
+} as const;
+
 /** Anthropic Messages wire 要求的固定版本头值。 */
 export const ANTHROPIC_MESSAGES_VERSION = "2023-06-01";
 
 /**
  * 按 wire 拼出真实上游 URL。gemini 的路径含 model，故 model 是必需参数
  * （另两条 wire 忽略它）。
+ *
+ * **幂等**：若传入 endpoint（剥掉 `/chat/completions` 与尾斜杠后的 base）已经就是
+ * 该 wire 的目标路径（`…/responses`、`…/messages`），原样返回，不再重复拼接。
+ *
+ * 理由（不要"简化"掉这段）：`customProviderUrl` 除了 OpenAI 兼容 chat/completions
+ * 形状，还允许**直接**写成目标 wire 的 URL —— `agentCallPlan.ts#resolveCustomUpstreamWire`
+ * 的规则 1a 明确保留「catalog 声明 `openai-responses` 且端点已以 `/responses` 结尾」
+ * 的既有 `"responses"` passthrough（客户端自己说 Responses、通用代理原样转发），
+ * 规则 2 同理会把 `/responses` 结尾端点判成该形状；`resolveCustomProviderEndpoint`
+ * 也原样保留它。但本地 native 通道的 gate 只看 `Model.nativeProtocol`，不看 URL 结尾，
+ * 于是同一个配置在 CLI 直连时会走到这里 —— 不幂等就拼出
+ * `…/v1/responses/responses`（404）。这里做成幂等，两种判据就落到同一个 URL 上：
+ * 判定分歧最多影响「谁发请求」，不会再改坏路径。
+ *
+ * 与 call plan 对齐的判定细节：大小写敏感（plan 规则 1a 用的是 `endpoint.includes("/responses")`，
+ * 本文件的 `CHAT_COMPLETIONS_SUFFIX` 同样是大小写敏感），故 `/RESPONSES` 视为未声明 wire
+ * 的 base，照旧追加。正常形态（纯 base、带/不带 `/chat/completions` 后缀、尾斜杠）行为一字不变。
  */
 export function resolveCustomNativeEndpoint(
   endpoint: string,
@@ -59,9 +89,10 @@ export function resolveCustomNativeEndpoint(
     case "gemini":
       return `${base}/models/${model}:streamGenerateContent?alt=sse`;
     case "openai-responses":
-      return `${base}/responses`;
-    case "anthropic-messages":
-      return `${base}/messages`;
+    case "anthropic-messages": {
+      const suffix = NATIVE_PATH_SUFFIX[wire];
+      return base.endsWith(suffix) ? base : `${base}${suffix}`;
+    }
   }
 }
 

@@ -48,6 +48,10 @@ import {
   describeDesktopAgentRuntimeHostFacts,
   type DesktopAgentRuntimeEnv,
 } from "./desktopAgentRuntimeHostFacts";
+import {
+  resolveDesktopAgentRuntimeAuthToken,
+  resolveDesktopAgentRuntimeServerUrl,
+} from "./desktopAgentRuntimeToolBuilders";
 import { findModelConfig } from "ai/llm/providers";
 import { CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES, CHROME_CONNECTOR_TOOL_NAMES } from "ai/tools/chromeConnectorTools";
 import { appendEnabledPackPromptPatches } from "ai/tools/toolPacks";
@@ -638,8 +642,17 @@ async function resolveDesktopCustomNativeProvider(args: {
     agentConfig: args.agentConfig,
     tools: args.tools,
     fetchImpl: args.fetchImpl,
-    serverUrl: args.env.NOLO_SERVER,
-    authToken: args.env.AUTH_TOKEN,
+    // gemini wire 只认 data URI：执行器把白名单内的图片下载后内联，未命中白名单的
+    // image_url part 会被 geminiNativeShared 的 inlineData 转换**直接丢弃**（图片
+    // 静默消失）。所以这两个参数是必须项：`serverUrl` 是内联白名单（origin 必须
+    // 相等，否则 isAllowedImageUrl 恒 false），`authToken` 是拉图时的 Bearer。
+    // 字段来源沿用本包既有的同源解析（与 memory 同步、混合缓存拉取同一对）：
+    // NOLO_SERVER/BASE_URL（origin，缺省回落 SERVERS.MAIN，与桌面客户端
+    // `selectRuntimeRemoteServer` 的默认一致）+ AUTH_TOKEN/AUTH/NOLO_MACHINE_API_KEY。
+    // 残余：桌面主进程自身不写 NOLO_SERVER，宿主未导出它时「非默认集群域名」的图片
+    // 仍不内联（用例 "pins the gemini image origin allowlist ..." 钉住该现状）。
+    serverUrl: resolveDesktopAgentRuntimeServerUrl(args.env),
+    authToken: resolveDesktopAgentRuntimeAuthToken(args.env),
     recordAvailability: (status, body) =>
       recordAgentAvailabilityFromResponse({
         agent: args.agentConfig as any,
