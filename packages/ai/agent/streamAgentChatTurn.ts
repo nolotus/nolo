@@ -58,6 +58,7 @@ import { isResponseAPIModel } from "ai/llm/isResponseAPIModel";
 import { resolveAgentContextWindow } from "../../agent-runtime/devin/devinChannelWindows";
 import { resolveAgentImageInputSupport } from "ai/llm/agentCapabilities";
 import { resolveBuiltinPlatformAgentRecord } from "../../agent-runtime/builtinPlatformAgentConfigs";
+import { applyPlatformAgentOverrides } from "../../agent-runtime/platformAgentCatalogOverrides";
 import {
     resolveAgentCallPlan,
     resolveClientWire,
@@ -502,7 +503,7 @@ export const streamAgentChatTurnHandler = async (
             rawAgentConfig = providedAgentConfig;
             agentConfigSource = "provided";
         } else if (isUsableAgentConfig(cachedAgentConfig)) {
-            rawAgentConfig = cachedAgentConfig;
+            rawAgentConfig = applyPlatformAgentOverrides(cachedAgentConfig, agentKey);
             agentConfigSource = "cache";
         } else {
             const builtinFallback = resolveBuiltinPlatformAgentRecord(
@@ -515,11 +516,11 @@ export const streamAgentChatTurnHandler = async (
                     quickChatPerfStartedAt,
                 );
                 if (isUsableAgentConfig(readConfig)) {
-                    rawAgentConfig = readConfig;
+                    rawAgentConfig = applyPlatformAgentOverrides(readConfig, agentKey);
                     agentConfigSource = "read";
                 } else {
                     // 记录存在但缺 provider/model（历史残缺副本）：内置配置更可信。
-                    rawAgentConfig = builtinFallback ?? readConfig ?? null;
+                    rawAgentConfig = builtinFallback ?? (readConfig ? applyPlatformAgentOverrides(readConfig, agentKey) : null);
                     agentConfigSource = builtinFallback
                         ? "builtin-unusable-record"
                         : "read";

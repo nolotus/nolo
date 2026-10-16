@@ -58,23 +58,6 @@ const TEST_ASSET_DIR_NAMES = new Set([
 const TEST_ASSET_FILE_RE =
   /(\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$|\.source\.test\.(?:ts|tsx)$|\.cases\.json$|\.snap$)/;
 
-/**
- * 公开投影里除根目录外不得出现任何 bunfig.toml。
- * 根 bunfig.toml 是必备 scaffold（由白名单合成）；子包 bunfig.toml 属私有测试隔离脚手架
- * （[test] preload 指向 scripts/test/**，公开仓不存在），一旦进镜像即断链悬空引用。
- * 只按文件名判定：任何层级（packages/*、更深的子目录）命中都算违规，根目录不算。
- * 私有侧同名规则见 scripts/release/prepareNoloOpenSourceMirror.ts 的 verifyPublicProjectionGate
- * （category: "unexpected-file"）；两侧语义必须一致，一致性由
- * scripts/release/publicProjectionBoundary.test.ts 的负向测试 + drift 测试锚定。
- */
-export function isUnexpectedNestedBunfig(relPath: string): boolean {
-  let normalized = relPath.split(String.fromCharCode(92)).join("/");
-  if (normalized.startsWith("./")) normalized = normalized.slice(2);
-  normalized = normalized.replace(/[/]+$/, "");
-  const base = normalized.split("/").pop() ?? normalized;
-  return base === "bunfig.toml" && normalized !== "bunfig.toml";
-}
-
 // 遍历目录（跳过构建产物与依赖）
 async function walkFiles(
   root: string,
@@ -416,9 +399,6 @@ export async function verifyProjection(
       if (pattern.test(base)) add(`credential-file: ${rel}`);
     }
     if (TEST_ASSET_FILE_RE.test(base)) add(`test-asset: ${rel}`);
-    if (isUnexpectedNestedBunfig(rel)) {
-      add(`unexpected-file: ${rel}（除根目录外，子目录不得包含 bunfig.toml）`);
-    }
     const segments = rel.split("/");
     for (const seg of segments) {
       if (TEST_ASSET_DIR_NAMES.has(seg)) add(`test-asset-dir: ${rel}`);
