@@ -1,24 +1,12 @@
-/**
- * TUI summary LLM caller — builds a function that calls the Nolo platform
- * chat proxy to generate dialog compression summaries.
- *
- * Mirrors the pattern from `generateLocalDialogTitle` (dialogTitleLlm.ts):
- * resolve platform chat provider config → build request → fetch → parse.
- * Uses BUILTIN_SUMMARY_LLM_CONFIG (mimo-v2.6-flash); when that call fails
- * (network / non-2xx / empty result) it retries once with the deepseek-flash
- * fallback (Responses wire — handled by buildPlatformChatCompletionRequest and
- * the server chat proxy).
- *
- * Returns null on any failure (no auth, network error, parse error) so
- * `compactDialog` can degrade to fork-only behavior.
- */
-
+/** Fail-open platform summary caller. Both existing models share one deadline. */
+import { randomUUID } from "node:crypto";
 import {
   resolvePlatformChatProviderConfig,
   buildPlatformChatCompletionRequest,
   parsePlatformChatCompletionResponse,
   canUsePlatformChatProvider,
 } from "../../agent-runtime/platformChatProvider";
+import type { LocalCompactionSummaryFallbackOptions } from "../../agent-runtime/localAutoCompaction";
 import { COMPACTION_SUMMARY_SYSTEM_PROMPT } from "../../ai/context/compactionShared";
 import {
   BUILTIN_DIALOG_LLM_FALLBACK_MODEL,
@@ -28,12 +16,10 @@ import type { AgentRuntimeChatMessage, EnvLike } from "../../agent-runtime/types
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-/**
- * Create a summary LLM caller for TUI /compact.
- *
- * Production: uses global fetch + env-based provider config resolution.
- * Tests: inject fetchImpl and mock dependencies.
- */
+// Room for factual handoff, exact commands/paths and file operations; not a
+// target length. Request-local only: ordinary chat defaults remain untouched.
+export const TUI_SUMMARY_MAX_OUTPUT_TOKENS = 8192;
+
 export function createTuiSummaryLlmCaller(
   env: EnvLike,
   options?: {
@@ -41,100 +27,94 @@ export function createTuiSummaryLlmCaller(
     apiKeyRefResolver?: any;
     credentialBroker?: any;
     timeoutMs?: number;
-    /** Test/host seam: overrides platform provider config resolution. */
     resolveProviderConfig?: typeof resolvePlatformChatProviderConfig;
-  }
-): (content: string) => Promise<string | null> {
+  },
+): (content: string, callOptions?: LocalCompactionSummaryFallbackOptions) => Promise<string | null> {
   const fetchImpl = options?.fetchImpl ?? fetch;
-  const timeoutMs = options?.timeoutMs ?? 30_000;
-  const resolveProviderConfig =
-    options?.resolveProviderConfig ?? resolvePlatformChatProviderConfig;
+  const configuredTimeout = options?.timeoutMs;
+  const timeoutMs = typeof configuredTimeout === "number" && Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? Math.min(configuredTimeout, 30_000) : 30_000;
+  const resolveProviderConfig = options?.resolveProviderConfig ?? resolvePlatformChatProviderConfig;
 
-  return async (content: string): Promise<string | null> => {
-    if (!canUsePlatformChatProvider(env)) {
-      return null;
-    }
-
-    // 单次摘要请求；任何失败点（解析 provider / 网络 / 非 2xx / 空结果）返回 null。
-    const attempt = async (model?: string): Promise<string | null> => {
-      try {
-        const providerConfig = await resolveProviderConfig({
-          agentConfig: {
-            ...BUILTIN_SUMMARY_LLM_CONFIG,
-            ...(model ? { model } : {}),
-            key: BUILTIN_SUMMARY_LLM_CONFIG.id,
-          },
-          env,
-          apiKeyRefResolver: options?.apiKeyRefResolver,
-          credentialBroker: options?.credentialBroker,
-        });
-
-        if (!providerConfig?.authToken) {
+  return async (content, callOptions) => {
+    if (!canUsePlatformChatProvider(env) || callOptions?.signal?.aborted) return null;
+    const deadlineMs = Math.min(Date.now() + timeoutMs, callOptions?.deadlineMs ?? Infinity);
+    const remainingMs = deadlineMs - Date.now();
+    if (!(remainingMs > 0)) return null;
+    const controller = new AbortController();
+    const parentSignal = callOptions?.signal;
+    const onAbort = () => controller.abort(parentSignal?.reason);
+    parentSignal?.addEventListener("abort", onAbort, { once: true });
+    if (parentSignal?.aborted) onAbort();
+    const timer = setTimeout(() => controller.abort(new DOMException("Summary deadline exceeded", "TimeoutError")), remainingMs);
+    const signal = controller.signal;
+    const attemptId = callOptions?.attemptId ?? randomUUID();
+    // Race resolution, HTTP AND body parsing: a slow resolver or a noncooperative
+    // fetch must not extend the shared deadline. The same signal reaches HTTP.
+    const stopped = new Promise<null>((resolve) => {
+      if (signal.aborted) resolve(null);
+      else signal.addEventListener("abort", () => resolve(null), { once: true });
+    });
+    const attempt = async (model: string): Promise<string | null> => {
+      let stage = "resolve";
+      const work = async (): Promise<string | null> => {
+        try {
+          const providerConfig = await resolveProviderConfig({
+            agentConfig: { ...BUILTIN_SUMMARY_LLM_CONFIG, model, key: BUILTIN_SUMMARY_LLM_CONFIG.id },
+            env,
+            apiKeyRefResolver: options?.apiKeyRefResolver,
+            credentialBroker: options?.credentialBroker,
+          });
+          if (signal.aborted) return null;
+          if (!providerConfig?.authToken) { stage = "auth"; return null; }
+          stage = "build";
+          const messages: AgentRuntimeChatMessage[] = [
+            { role: "system", content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
+            { role: "user", content },
+          ];
+          const request = buildPlatformChatCompletionRequest({
+            providerConfig: {
+              ...providerConfig,
+              requestOptions: { ...providerConfig.requestOptions, max_tokens: TUI_SUMMARY_MAX_OUTPUT_TOKENS, reasoning_effort: "low" },
+            },
+            messages,
+            stream: false,
+            requestId: attemptId,
+          });
+          stage = "http";
+          if (signal.aborted) return null;
+          const response = await fetchImpl(request.url, { ...request.init, signal });
+          if (signal.aborted || !response.ok) return null;
+          stage = "body";
+          const data = JSON.parse(await response.text());
+          if (signal.aborted) return null;
+          stage = "parse";
+          // A capped/incomplete summary must not become authoritative history.
+          if (data?.choices?.[0]?.finish_reason === "length" || data?.status === "incomplete" || data?.incomplete_details) {
+            stage = "truncated";
+            return null;
+          }
+          const parsed = parsePlatformChatCompletionResponse({ providerConfig, data, trace: [] });
+          const summary = parsed?.content?.trim() || null;
+          stage = summary ? "done" : "empty";
+          return summary;
+        } catch {
           return null;
         }
-
-        const messages: AgentRuntimeChatMessage[] = [
-          { role: "system", content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
-          { role: "user", content },
-        ];
-
-        const request = buildPlatformChatCompletionRequest({
-          providerConfig,
-          messages,
-          stream: false,
-        });
-
-        let parsedBody: any = {};
-        if (typeof request.init?.body === "string") {
-          parsedBody = safeParseJson(request.init.body) ?? {};
-        } else if (typeof request.init?.body === "object" && request.init?.body !== null) {
-          parsedBody = request.init.body;
-        }
-        const patchedBody = {
-          ...parsedBody,
-          reasoning_effort: "low",
-        };
-
-        const response = await fetchImpl(request.url, {
-          ...request.init,
-          body: JSON.stringify(patchedBody),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-
-        if (!response.ok) {
-          return null;
-        }
-
-        const raw = await response.text().catch(() => "");
-        const data = safeParseJson(raw);
-        if (!data) return null;
-
-        const parsed = parsePlatformChatCompletionResponse({
-          providerConfig,
-          data,
-          trace: [],
-        });
-
-        return parsed?.content?.trim() || null;
-      } catch {
-        return null;
-      }
+      };
+      const result = await Promise.race([work(), stopped]);
+      if (!result) console.warn("[tuiSummary] summary attempt failed", {
+        attemptId, model, stage: parentSignal?.aborted ? "cancelled" : signal.aborted ? "deadline" : stage,
+      });
+      return result;
     };
-
-    const primary = await attempt();
-    if (primary) return primary;
-
-    // 主模型（mimo-v2.6-flash）失败 → 换 deepseek-flash 重试一次。请求经
-    // buildPlatformChatCompletionRequest 构建、由 server 代理处理 wire 差异，
-    // 这里只需要换 model（provider 解析会给出 Responses endpoint）。
-    return await attempt(BUILTIN_DIALOG_LLM_FALLBACK_MODEL);
+    try {
+      const primary = await attempt(BUILTIN_SUMMARY_LLM_CONFIG.model);
+      if (primary || signal.aborted || Date.now() >= deadlineMs) return primary;
+      return await attempt(BUILTIN_DIALOG_LLM_FALLBACK_MODEL);
+    } finally {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", onAbort);
+    }
   };
-}
-
-function safeParseJson(raw: string): any | null {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
 }
