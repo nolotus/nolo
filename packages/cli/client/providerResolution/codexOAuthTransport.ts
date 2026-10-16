@@ -173,6 +173,8 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
           },
           sessionKey: resolveSessionKey({ dialogId: options?.dialogId }),
           signal: options?.signal,
+          ...(options?.onTextDelta ? { onTextDelta: options.onTextDelta } : {}),
+          ...(options?.onReasoningDelta ? { onReasoningDelta: options.onReasoningDelta } : {}),
           fetchImpl: ((url: string | URL | Request, init?: RequestInit) =>
             fetchWithTransientRetry(observedFetch as typeof fetchImpl, url, init, {
               // 内层退避也要能被本次请求的 signal 打断（见 abortableSleep 注释）。
@@ -195,12 +197,19 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
         const choice = Array.isArray(result.body.choices)
           ? result.body.choices[0]
           : undefined;
-        const message = (choice?.message ?? {}) as { content?: unknown; tool_calls?: unknown };
+        const message = (choice?.message ?? {}) as {
+          content?: unknown;
+          tool_calls?: unknown;
+          reasoning_content?: unknown;
+        };
         const content = typeof message.content === "string" ? message.content : "";
+        const reasoning_content =
+          typeof message.reasoning_content === "string"
+            ? message.reasoning_content
+            : undefined;
         const tool_calls = Array.isArray(message.tool_calls)
           ? message.tool_calls
           : undefined;
-        if (content && options?.onTextDelta) options.onTextDelta(content);
         logLocalRuntimeDiagnostic("provider.request.result", {
           agentKey: agentConfig.key,
           transport: "codex-responses",
@@ -214,6 +223,7 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
           model: agentConfig.model || "gpt-5.6-sol",
           provider: "openai",
           ...(tool_calls ? { tool_calls } : {}),
+          ...(reasoning_content ? { reasoning_content } : {}),
           // fetchCodexResponsesCompletion 已把 codex responses 流聚合完毕并归一化成
           // OpenAI chat.completions 形状：choices[0].finish_reason（"stop"/"tool_calls"）
           // + usage（prompt/completion/total_tokens）。必须透传，否则 localLoop 把正常走完

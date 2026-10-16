@@ -40,6 +40,10 @@ import {
     controlAgentRunFunctionSchema,
     controlAgentRunFunc,
 } from "./controlAgentRunTool";
+import {
+    listRuntimesFunctionSchema,
+    listRuntimesToolFunc,
+} from "./listRuntimesTool";
 
 import type { ToolDefinition } from "../index";
 
@@ -197,6 +201,22 @@ export const agentToolDefinitions: ToolDefinition[] = [
         behavior: "data",
         uiGroup: "agent",
         riskLevel: "medium",
+        costLevel: "low",
+        defaultConsent: "auto",
+    },
+    {
+        id: "listRuntimes",
+        schema: listRuntimesFunctionSchema,
+        executor: listRuntimesToolFunc,
+        description: {
+            name: "listRuntimes",
+            description:
+                "列出当前可用的 Agent 运行时执行环境（如服务器、连接的机器等）。返回带有 runtimeKey 的 RuntimeSummary 清单。",
+            category: "计划与编排",
+        },
+        behavior: "data",
+        uiGroup: "agent",
+        riskLevel: "low",
         costLevel: "low",
         defaultConsent: "auto",
     },

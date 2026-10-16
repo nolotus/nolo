@@ -1,3 +1,5 @@
+import { invokeCapability } from "./capabilities/capabilitySdk";
+import type { ExecShellApprovalAuthority } from "./capabilities/capability";
 import type {
   AgentRuntimeToolCallInput,
   AgentRuntimeToolResult,
@@ -185,6 +187,9 @@ export async function executeLocalToolWithPolicy(args: {
    * Optional per-turn AbortSignal propagated from the TUI's activeTurnAbort.
    * Injected into the tool executor call so Esc aborts stuck child process trees.
    */
+  execShellApproval?: ExecShellApprovalAuthority;
+  workspaceRoot?: string;
+  commandOutputLimit?: number;
   abortSignal?: AbortSignal;
   /**
    * Optional override for the execShell auto-detach threshold (ms). When a
@@ -272,6 +277,14 @@ export async function executeLocalToolWithPolicy(args: {
       ? { blockDestructiveWithoutConfirmation: args.blockDestructiveWithoutConfirmation }
       : {}),
   };
+
+  if (args.execShellApproval && decision.toolName === "execShell") {
+    // Authority-bearing calls never enter an unverified custom executor.
+    return invokeCapability("execShell", args.call.arguments, {
+      ...opts, workspaceRoot: args.workspaceRoot, commandOutputLimit: args.commandOutputLimit,
+      execShellApproval: args.execShellApproval,
+    });
+  }
 
   if (decision.toolName === "execShell") {
     let parsedInput: unknown = args.call.arguments;

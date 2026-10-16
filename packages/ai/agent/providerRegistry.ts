@@ -225,6 +225,14 @@ const TOGETHER_MODEL_OPTIONS: ReadonlyArray<{
   { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
 ];
 
+export type WorkBuddyModelPricing = {
+  rate?: number;
+  free: boolean;
+  rateWas?: number;
+  observedAt: number;
+  requiresActivePackage: true;
+};
+
 export type OAuthProviderConfig = {
   kind: "oauth";
   id: string;
@@ -241,6 +249,7 @@ export type OAuthProviderConfig = {
     label: string;
     recommended?: boolean;
     hasVision?: boolean;
+    pricing?: WorkBuddyModelPricing;
   }>;
   /** Cloud Code Assist base URL for direct HTTP (Antigravity) */
   cloudCodeBaseUrl?: string;
@@ -305,6 +314,38 @@ export type ProviderRegistryEntry = OAuthProviderConfig | ApiKeyTemplateConfig;
 
 // Subscription OAuth 提供商（需要用户先登录）
 export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
+  {
+    kind: "oauth",
+    id: "workbuddy",
+    label: "WorkBuddy",
+    description: "使用 WorkBuddy 国内账号及其套餐权益；可用额度与费率可能随活动变化，具体以账号页面为准。",
+    apiKeyRef: "workbuddy",
+    provider: "workbuddy",
+    defaultModel: "auto",
+    modelOptions: [
+      { id: "auto", label: "Auto", recommended: true },
+      { id: "hy3", label: "Hy3" },
+      { id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash" },
+      { id: "glm-5.3", label: "GLM-5.3" },
+      { id: "kimi-k3-1", label: "Kimi K3" },
+    ],
+  },
+  {
+    kind: "oauth",
+    id: "workbuddy-ai",
+    label: "WorkBuddy AI",
+    description: "Use your WorkBuddy AI account and its package benefits. Available quota and rates may change with promotions; check your account for current details.",
+    apiKeyRef: "workbuddy-ai",
+    provider: "workbuddy-ai",
+    defaultModel: "default-model",
+    modelOptions: [
+      { id: "default-model", label: "Default", recommended: true },
+      { id: "fast-model", label: "Fast" },
+      { id: "balanced-model", label: "Balanced" },
+      { id: "gpt-5.5", label: "GPT-5.5" },
+      { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
+    ],
+  },
   {
     kind: "oauth",
     id: "chatgpt",

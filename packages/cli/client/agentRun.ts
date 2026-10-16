@@ -264,6 +264,8 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     ...(options.originSession ? { originSession: options.originSession } : {}),
     // 分享 OAuth agent 的 shell 会话授权（块 D）：仅 owner-required 场景生效。
     ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
+    ...(options.shellApprovalSession ? { shellApprovalSession: options.shellApprovalSession } : {}),
+    ...(options.execShellApproval ? { execShellApproval: options.execShellApproval } : {}),
     // 运行位置展示（块 D）：TUI 消费 projectToolExecutionLocation 渲染工具实际
     // 执行设备/工作区；非 owner-required 场景 adapter 不回调。
     ...(options.onToolExecutionLocation

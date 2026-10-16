@@ -1,3 +1,4 @@
+import { createShellApprovalSession } from "./shellApprovalSession";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
@@ -1255,6 +1256,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例。确认走既有
   // runConfirmDialog + dialogHost 通道；撤销经 shellGrant.revoke() 立即生效
   // （isGranted 同步翻转）。非 owner-required 场景 adapter 不触发该路径。
+  const childShellApprovals = createShellApprovalSession(async (request, signal) =>
+    runWithInputRequiredAttention({ output, env: effectiveEnv }, () => {
+      if (signal.aborted) return Promise.resolve(false);
+      return dialogHost.run((anchor) => runConfirmDialog({
+        request: { id: `child-shell-${crypto.randomUUID()}`, tool: "execShell", action: "shell-per-call",
+          title: "Background shell — approve this command once?",
+          body: `Run: ${request.runId}\nAgent: ${request.agentKey}\nOwner: ${request.ownerUserId}\nDevice: ${request.deviceId}\nWorkspace: ${request.workspaceRoot}\n${request.permissionNotice}`,
+          command: request.command },
+        signal, fullCommand: true, input: input as any, output: output as any, ...anchor,
+      }));
+    }));
   const sessionShellGrant = createOriginShellGrant({
     confirm: async (request) => {
       return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
@@ -1318,6 +1330,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例透传给 turn
     // 执行路径；撤销经 /shell-revoke 或设置面板调 sessionShellGrant.revoke()。
     shellGrant: sessionShellGrant,
+    shellApprovalSession: childShellApprovals.session,
     // 运行位置展示（块 D）：owner-required 场景 adapter 回调一次；渲染一行
     // 「工具在 <deviceName>(<deviceId>) · workspace <root> · status: <s>」。
     // unknown 不猜——直接打印 unknown，不静默标 ready。
@@ -1426,6 +1439,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     if (line.trim().split(/\s+/)[0]?.toLowerCase() === "/shell-revoke") {
       const wasGranted = sessionShellGrant.isGranted();
       sessionShellGrant.revoke();
+      childShellApprovals.revoke();
       emitCommandOutput(
         wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
         "/shell-revoke",
@@ -1556,6 +1570,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const finish = () => {
       if (done) return;
       done = true;
+      childShellApprovals.close();
       sessionEnded = true; // signal in-flight async git refresh to drop its repaint
       scrollAnimator.cancel(); // stop any in-flight wheel animation before teardown
       if (resizeTimer !== null) {
@@ -1988,6 +2003,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (busySlashCommand === "/shell-revoke") {
         const wasGranted = sessionShellGrant.isGranted();
         sessionShellGrant.revoke();
+      childShellApprovals.revoke();
         emitCommandOutput(
           wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
           "/shell-revoke",
@@ -2760,7 +2776,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 非交互（readline）路径结束时不走 interactive 的 finish()，这里同样
     // 标记 session 结束，让迟到的异步回调（如更新检查）不再触发渲染写入
     // 已关闭的 stdout/pipe。
-    sessionEnded = true;
+    childShellApprovals.close();
+      sessionEnded = true;
     // 与 interactive 的 finish() 对齐：停靠区/轮询器/活动行的 setInterval 都是
     // ref'd 计时器且非交互路径不走 finish()。缺了这组 dispose，turn 里
     // beginHold()/updateAgentRun() 起的轮询 interval 会一直挂在事件循环上，

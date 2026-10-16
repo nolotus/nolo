@@ -59,6 +59,11 @@ export interface RunAgentBackgroundArgs {
      */
     parentDialogId?: string;
     /**
+     * listRuntimes 返回的执行位置 key，透传给 /api/agent/run 的 runtimeKey。
+     * 解析、授权与「不可用即报错」都由服务端负责；这里不做本地猜测。
+     */
+    runtimeKey?: string;
+    /**
      * Ephemeral run: do not persist the dialog or its turns. Used for
      * one-shot reviews where leaving a dialog record is noise. The server
      * handler skips createPendingDialog/finalizeDialog when this is true.
@@ -265,7 +270,7 @@ export const runAgentBackground = createAsyncThunk<
     RunAgentBackgroundArgs,
     { state: RootState }
 >("agent/runBackground", async (args, { getState, signal: thunkSignal }) => {
-    const { agentKey, userInput, serverBase, spaceId, parentDialogId, ephemeral, runKind, readOnly, onStatusChange, onDone, onFailed } = args;
+    const { agentKey, userInput, serverBase, spaceId, parentDialogId, ephemeral, runKind, readOnly, runtimeKey, onStatusChange, onDone, onFailed } = args;
 
     const state = getState();
     const currentServer = normalizeServerOrigin(serverBase) || selectCurrentServer(state);
@@ -308,6 +313,7 @@ export const runAgentBackground = createAsyncThunk<
                     background: true,
                     idempotencyKey,
                     ...(parentDialogId ? { parentDialogId } : {}),
+                    ...(runtimeKey ? { runtimeKey } : {}),
                     ...(ephemeral ? { ephemeral: true } : {}),
                     ...(runKind ? { runKind } : {}),
                     runtimeContext: {

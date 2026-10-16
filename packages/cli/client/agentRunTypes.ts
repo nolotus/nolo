@@ -1,3 +1,5 @@
+import type { ShellApprovalSession } from "./originShellApprovalTransport";
+import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
 /**
  * Shared types and helpers for agent run dispatch — used by both
  * CLI-side (agentRun.ts) and connector-side (machineWsRunDispatch.ts).
@@ -216,6 +218,8 @@ export type RunAgentTurnOptions = {
    * 非 owner 场景 adapter 不触发该路径（ownerAgentContext 缺省直接跳过）。
    */
   shellGrant?: OriginShellGrant;
+  shellApprovalSession?: ShellApprovalSession;
+  execShellApproval?: ExecShellApprovalAuthority;
   /**
    * 工具执行位置消费者（块 D，运行位置展示）：owner-required 场景 adapter
    * 把本机 origin 投影为 ToolExecutionLocation 并回调一次。TUI 渲染

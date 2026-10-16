@@ -264,22 +264,39 @@ export async function runAgentCreateCommand(
     });
     clearCliLocalRuntimePreparedAgentCache();
 
-    let verifyResult;
+    let verifyResult: {
+      ok: boolean;
+      status?: number;
+      providerUrl?: string;
+      model?: string;
+      reply?: string;
+      reason?: string;
+    } | undefined;
     if (parsed.verify) {
-      const { verifyCustomProvider } = await import("./agentProviderCommands");
-      const rec = built.nextRecord as {
-        customProviderUrl?: string;
-        apiKey?: string;
-        model?: string;
-      };
-      verifyResult = await verifyCustomProvider({
-        providerUrl: rec.customProviderUrl,
-        apiKey: rec.apiKey,
-        model: rec.model,
-        prompt: parsed.verifyPrompt,
-        fetchImpl,
-      });
+      try {
+        const { verifyCustomProvider } = await import("./agentProviderCommands");
+        const rec = built.nextRecord as {
+          customProviderUrl?: string;
+          apiKey?: string;
+          model?: string;
+        };
+        verifyResult = await verifyCustomProvider({
+          providerUrl: rec.customProviderUrl,
+          apiKey: rec.apiKey,
+          model: rec.model,
+          prompt: parsed.verifyPrompt,
+          fetchImpl,
+        });
+      } catch (error) {
+        verifyResult = {
+          ok: false,
+          reason: toErrorMessage(error),
+        };
+      }
     }
+
+    const isVerifyFailure = parsed.verify ? (!verifyResult || !verifyResult.ok) : false;
+    const verified = parsed.verify ? Boolean(verifyResult?.ok) : null;
 
     const apiKeyRef = String(built.updates?.apiKeyRef || "").trim();
     let authHint: string | undefined;
@@ -295,7 +312,9 @@ export async function runAgentCreateCommand(
     }
 
     output.write(JSON.stringify({
-      ok: true,
+      ok: !isVerifyFailure,
+      created: true,
+      verified,
       agentKey: built.agentKey,
       baseUrl: built.serverUrl,
       updates: sanitizeAgentRecordForCliOutput(built.updates),
@@ -309,7 +328,7 @@ export async function runAgentCreateCommand(
       const errorOutput = deps.error ?? process.stderr;
       errorOutput.write(`[nolo] Hint: ${authHint}\n`);
     }
-    return 0;
+    return isVerifyFailure ? 2 : 0;
   } catch (error) {
     output.write(
       `[nolo] agent create failed: ${

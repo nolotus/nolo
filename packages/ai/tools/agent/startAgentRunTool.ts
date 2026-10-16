@@ -190,6 +190,13 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 type: "string",
                 description: "可选。父对话 id，用于建立父子对话归属关系。默认从运行时当前激活对话获取。",
             },
+            runtimeKey: {
+                type: "string",
+                description:
+                    "可选。这次 run 的执行位置：listRuntimes 返回的稳定 key（local / server / machine:<machineId> / docker:<runtimeId>）。" +
+                    "填了就只在那个位置执行；key 非法 / 运行时未配置 / 机器离线或非本人所有时会显式报错，" +
+                    "不会悄悄改在本机或服务端执行。不填 = 沿用当前宿主默认位置。",
+            },
         },
         required: ["task", "title"],
     },
@@ -219,6 +226,12 @@ interface StartAgentRunArgs {
     /** wait=true 时控制返回内容：full=完整输出；summary=头尾截断总结。默认 full。 */
     resultMode?: "full" | "summary";
     parentDialogId?: string;
+    /**
+     * listRuntimes 返回的执行位置稳定 key（local / server / machine:<id> / docker:<id>）。
+     * 显式指定时该 run 只在目标位置执行；不可用一律由服务端显式报错，不静默回退。
+     * 省略 = 沿用宿主默认位置。
+     */
+    runtimeKey?: string;
 }
 
 export function resolveCurrentAgentKeyForStartRun(
@@ -255,6 +268,14 @@ export async function startAgentRunFunc(
     if (typeof task !== "string" || !task.trim()) throw new Error("startAgentRun 缺少 task");
     const title = normalizeRunTitle(args.title);
     if (!title) throw new Error(`startAgentRun 需要非空的一行标题（≤${RUN_TITLE_MAX} 字）`);
+    // 执行位置 key：格式真源在服务端（runtimeTarget.ts）。这里只挡住「空 key /
+    // 非字符串」——把它当默认位置派发就等于悄悄换了执行环境，宁可早失败。
+    const runtimeKey = typeof args.runtimeKey === "string" ? args.runtimeKey.trim() : "";
+    if (args.runtimeKey !== undefined && (typeof args.runtimeKey !== "string" || !runtimeKey)) {
+        throw new Error(
+            "startAgentRun 的 runtimeKey 必须是非空的 listRuntimes key（local | server | machine:<machineId> | docker:<runtimeId>）；要沿用默认位置请省略该参数"
+        );
+    }
     const resultMode = args.resultMode ?? "full";
     const { dispatch } = thunkApi;
 
@@ -331,6 +352,7 @@ export async function startAgentRunFunc(
                 runTitle: title,
                 ...(args.readOnly === true ? { readOnly: true } : {}),
                 ...(parentDialogId ? { parentDialogId } : {}),
+                ...(runtimeKey ? { runtimeKey } : {}),
             })
         ).unwrap();
 

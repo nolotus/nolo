@@ -91,6 +91,7 @@ export interface MemoryRecallInput {
   spaceId?: string;
   /** 本地运行时环境（用于获取本地 db） */
   env: Record<string, string | undefined>;
+  signal?: AbortSignal;
 }
 
 /**
@@ -103,8 +104,10 @@ const queryRemoteMemory = async (
   agentKey: string,
   userInput: string,
   spaceId?: string,
+  signal?: AbortSignal,
 ): Promise<string | null> => {
   try {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
     const response = await fetch(`${serverUrl}/api/memory/query`, {
       method: "POST",
       headers: {
@@ -116,7 +119,9 @@ const queryRemoteMemory = async (
         userInput,
         ...(spaceId ? { spaceId } : {}),
       }),
-      signal: AbortSignal.timeout(5_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(5_000)])
+        : AbortSignal.timeout(5_000),
     });
     if (!response.ok) {
       logDeduped(
@@ -133,6 +138,8 @@ const queryRemoteMemory = async (
       typeof payload?.promptBlock === "string" ? payload.promptBlock.trim() : "";
     return block || null;
   } catch (error) {
+    // 用户取消不属于网络降级；向上传递以禁止 fallback。
+    if (signal?.aborted) throw error;
     // 远端超时/网络错误 → 本地 fallback 是预期降级路径，记 info 而非 warn。
     logDeduped(
       "info",
@@ -171,6 +178,9 @@ const queryLocalMemory = async (
 export const resolveCliMemory = async (
   input: MemoryRecallInput,
 ): Promise<string | null> => {
+  // 取消必须贯穿远程请求；避免将 AbortError 当普通网络故障触发本地 fallback。
+  if (input.signal?.aborted) throw input.signal.reason ?? new DOMException("Aborted", "AbortError");
+
   // 1. 远程优先（有认证时）
   if (input.authToken && input.serverUrl) {
     const remoteBlock = await queryRemoteMemory(
@@ -179,12 +189,15 @@ export const resolveCliMemory = async (
       input.agentKey,
       input.userInput,
       input.spaceId,
+      input.signal,
     );
     if (remoteBlock) return remoteBlock;
   }
 
   // 2. 本地 fallback（无认证 / 远程失败 / 远程返回空）
+  if (input.signal?.aborted) throw input.signal.reason ?? new DOMException("Aborted", "AbortError");
   try {
+    if (input.signal?.aborted) throw input.signal.reason ?? new DOMException("Aborted", "AbortError");
     return await queryLocalMemory(
       input.env,
       input.agentKey,
@@ -192,6 +205,7 @@ export const resolveCliMemory = async (
       input.spaceId,
     );
   } catch (error) {
+    if (input.signal?.aborted) throw error;
     logDeduped(
       "warn",
       fingerprintFor("local-failed", error instanceof Error ? error.name : undefined),

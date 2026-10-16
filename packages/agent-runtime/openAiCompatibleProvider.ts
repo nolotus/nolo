@@ -389,6 +389,12 @@ export async function readOpenAiCompatibleSseCompletion(args: {
 
   for await (const frame of readSseFrames(args.response)) {
     processOpenAiCompatibleSseEvent(frame, state);
+    if (state.sawDone) {
+      // 关键提速（Gemini 4 副作用审查修复）：收到 OpenAI SSE 协议终结标记 [DONE] 后，
+      // 说明上游数据已完整传毕。立即 break 退出读取循环，消除等待上游超时发送 TCP EOF 的无谓尾部悬停延时；
+      // 不强行调用 locked stream 的 cancel()，避免破坏 HTTP Keep-Alive 连接池复用。
+      break;
+    }
   }
 
   flushChatCompletionStream(state);

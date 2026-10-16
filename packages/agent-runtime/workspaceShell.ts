@@ -207,8 +207,16 @@ export function wrapPowerShellCommand(command: string, shellKind: PowerShellShel
   ].join("; ");
 }
 
+let cachedPowerShellExecutable: string | null | undefined;
+let cachedBashExecutable: string | null | undefined;
+
 export function findPowerShellExecutable(): string | null {
-  return resolveExecutableOnPath("pwsh") || resolveExecutableOnPath("powershell.exe") || resolveExecutableOnPath("powershell");
+  if (cachedPowerShellExecutable !== undefined) return cachedPowerShellExecutable;
+  cachedPowerShellExecutable =
+    resolveExecutableOnPath("pwsh") ||
+    resolveExecutableOnPath("powershell.exe") ||
+    resolveExecutableOnPath("powershell");
+  return cachedPowerShellExecutable;
 }
 
 export function buildPowerShellSpawnArgs(args: {
@@ -233,10 +241,28 @@ export function buildPowerShellCommand(command: string): string[] {
   return buildPowerShellSpawnArgs({ executable, command });
 }
 
-export function buildBashCommand(command: string): string[] {
-  const executable = resolveExecutableOnPath("bash") || resolveExecutableOnPath("sh");
-  if (!executable) throw new Error("bash/sh is not available on this machine.");
-  return [executable, "-lc", command];
+export type ShellLoginMode = "fast" | "login";
+
+export function resolveShellLoginMode(): ShellLoginMode {
+  if (process.env.NOLO_SHELL_LOGIN_MODE === "login" || process.env.NOLO_LOGIN_SHELL === "1") {
+    return "login";
+  }
+  return "fast";
+}
+
+export function buildBashCommand(command: string, options?: { login?: boolean }): string[] {
+  if (cachedBashExecutable === undefined) {
+    cachedBashExecutable =
+      resolveExecutableOnPath("bash") || resolveExecutableOnPath("sh");
+  }
+  if (!cachedBashExecutable) throw new Error("bash/sh is not available on this machine.");
+  const isLogin = options?.login ?? (resolveShellLoginMode() === "login");
+  return [cachedBashExecutable, isLogin ? "-lc" : "-c", command];
+}
+
+export function resetCachedShellExecutablesForTests(): void {
+  cachedPowerShellExecutable = undefined;
+  cachedBashExecutable = undefined;
 }
 
 export type WorkspaceShellPlan = {
@@ -250,9 +276,10 @@ export function buildWorkspaceShellPlan(args: {
   toolName: string;
   command: string;
   shell?: unknown;
+  login?: boolean;
 }): WorkspaceShellPlan {
   if (args.shell === "bash") {
-    const argv = buildBashCommand(args.command);
+    const argv = buildBashCommand(args.command, { login: args.login });
     return { argv, resolvedShell: "bash", executable: argv[0] ?? "bash" };
   }
   if (args.shell === "powershell" || process.platform === "win32") {
@@ -265,7 +292,7 @@ export function buildWorkspaceShellPlan(args: {
       shellKind: resolvePowerShellShellKind(executable),
     };
   }
-  const argv = buildBashCommand(args.command);
+  const argv = buildBashCommand(args.command, { login: args.login });
   return { argv, resolvedShell: "bash", executable: argv[0] ?? "bash" };
 }
 
@@ -273,6 +300,7 @@ export function buildWorkspaceShellCommand(args: {
   toolName: string;
   command: string;
   shell?: unknown;
+  login?: boolean;
 }): string[] {
   return buildWorkspaceShellPlan(args).argv;
 }
