@@ -1,3 +1,4 @@
+import { createShellApprovalChild } from "./client/originShellApprovalTransport";
 // Orchestration entry for `nolo agent run` and the related run/chat
 // shorthands. Pure CLI arg parsing lives in `./agentRunArgs`; prompt
 // construction helpers live in `./agentRunPrompts`; local workspace
@@ -148,7 +149,7 @@ export type AgentRunCommandDeps = {
    * unset (defaults to false).
    */
   memoryRecallDisabled?: boolean;
-} & Pick<AgentRunControlDeps, "homedir" | "spawn" | "fs" | "now" | "sleep" | "generateRunId">;
+} & Pick<AgentRunControlDeps, "homedir" | "spawn" | "fs" | "now" | "sleep" | "generateRunId" | "shellApprovalHost">;
 
 function resolvePositiveMs(value: unknown, fallback: number): number {
   return parsePositiveFiniteNumberOrFallback(value, fallback);
@@ -597,6 +598,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         fs: deps.fs,
         now: deps.now,
         generateRunId: deps.generateRunId,
+        shellApprovalHost: deps.shellApprovalHost,
       }
     );
     output.write(`[nolo] runId=${runId}\n`);
@@ -727,10 +729,18 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       workflowReference
     );
 
+  // IPC is inherited only by the bound spawned child; never trust env approval flags.
+  const shellApprovalChild = process.connected && typeof process.send === "function"
+    ? createShellApprovalChild(process) : undefined;
+  try {
   const buildRunOptions = (
     targetAgentKey: string,
     turnMessage: string = effectiveMessage
   ): RunAgentTurnOptions => ({
+    ...(shellApprovalChild ? { execShellApproval: targetAgentKey === agentKey
+      ? shellApprovalChild.authority
+      : { request: async () => { throw new Error("Shell approval agent binding mismatch"); },
+          consume: () => { throw new Error("Shell approval agent binding mismatch"); } } } : {}),
     agentName: targetAgentKey,
     agentKey: targetAgentKey,
     serverUrl: resolveServerUrl(env),
@@ -1025,6 +1035,10 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   }
 
   return result.exitCode;
+  } finally {
+    shellApprovalChild?.close();
+    if (shellApprovalChild && process.connected) process.disconnect();
+  }
 }
 
 const BALANCE_ERROR_PATTERNS: ReadonlyArray<RegExp> = [

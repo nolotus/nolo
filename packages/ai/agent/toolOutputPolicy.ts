@@ -33,8 +33,8 @@ export const TOOL_OUTPUT_PROFILES: Record<string, ToolOutputProjectionProfile> =
   execShell: { maxChars: 4000, headRatio: 0.35 },
   runCommand: { maxChars: 4000, headRatio: 0.35 },
   launchProcess: { maxChars: 2800, headRatio: 0.35 },
-  editFile: { maxChars: 2800, headRatio: 0.62 },
-  writeFile: { maxChars: 2400, headRatio: 0.62 },
+  editFile: { maxChars: 1200, headRatio: 0.62 },
+  writeFile: { maxChars: 1000, headRatio: 0.62 },
   readPastedText: { maxChars: 4800, headRatio: 0.5, historicalMaxChars: 4800 },
 };
 

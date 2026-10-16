@@ -103,10 +103,12 @@ function buildPrepareToolsCacheKey(
   toolNames: string[],
   disabledToolNames: string[],
   provider: string | undefined,
+  selectableRuntimeCount?: number,
 ): string {
   return [
     currentI18nLanguage(),
     provider ?? "",
+    selectableRuntimeCount !== undefined ? String(selectableRuntimeCount) : "",
     disabledToolNames.join("\x1f"),
     toolNames.join("\x1f"),
   ].join("\0");
@@ -131,17 +133,33 @@ function rememberPrepareToolsResult(key: string, value: any[]) {
  */
 export const prepareTools = (
   toolNames: string[],
-  options?: { provider?: string; disabledToolNames?: string[] },
+  options?: {
+    provider?: string;
+    disabledToolNames?: string[];
+    runtimeCatalog?: { selectableCount: number } | null;
+    selectableRuntimeCount?: number | null;
+  },
 ) => {
   const disabledList = canonicalizeToolNames(options?.disabledToolNames ?? []);
   const disabledToolNames = new Set(disabledList);
-  const canonicalNames = canonicalizeToolNames(toolNames).filter(
-    (toolName) => !disabledToolNames.has(toolName),
-  );
+  const selectableCount =
+    typeof options?.selectableRuntimeCount === "number"
+      ? options.selectableRuntimeCount
+      : typeof options?.runtimeCatalog?.selectableCount === "number"
+        ? options.runtimeCatalog.selectableCount
+        : undefined;
+
+  const canonicalNames = canonicalizeToolNames(toolNames)
+    .filter((toolName) => !disabledToolNames.has(toolName))
+    .filter(
+      (toolName) =>
+        !(selectableCount !== undefined && selectableCount <= 1 && toolName === "listRuntimes"),
+    );
   const cacheKey = buildPrepareToolsCacheKey(
     canonicalNames,
     disabledList,
     options?.provider,
+    selectableCount,
   );
   const cached = prepareToolsResultCache.get(cacheKey);
   if (cached) {

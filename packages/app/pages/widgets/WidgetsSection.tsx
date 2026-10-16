@@ -23,6 +23,7 @@ import { readStorageJSON, writeStorageJSON } from "app/utils/localStorageState";
 import CalendarWidget from "./CalendarWidget";
 import UsageWidget from "./UsageWidget";
 import SurfWidget from "./SurfWidget";
+import RuntimeResourcesWidget from "./RuntimeResourcesWidget";
 import "./actionCards.css";
 import "./WidgetsSection.css";
 
@@ -33,6 +34,7 @@ type WidgetId =
   | "usage"
   | "pricing"
   | "downloadClient"
+  | "runtimeResources"
   | "surf";
 
 // 编辑态“添加模块”区域里各 widget 的展示名：优先复用已有 i18n key，
@@ -51,6 +53,8 @@ function widgetLabel(id: WidgetId, t: TFunction): string {
       return t("homeActions.pricingTitle", "计费详情");
     case "downloadClient":
       return t("homeActions.downloadClientTitle", "下载客户端");
+    case "runtimeResources":
+      return t("widgets.runtimeResources.title", "运行时资源");
     case "surf":
       return t("widgets.surf.title", "冲浪");
   }
@@ -66,6 +70,7 @@ const ALL_WIDGETS: WidgetId[] = [
   "usage",
   "pricing",
   "downloadClient",
+  "runtimeResources",
   "surf",
 ];
 
@@ -74,6 +79,7 @@ const ALL_WIDGETS: WidgetId[] = [
 // 和编辑态 Catalog 中，用户可随时通过「修改」自由添加，老用户的持久化布局完全不受影响。
 const DEFAULT_VISIBLE_WIDGETS: WidgetId[] = [
   "usage",
+  "runtimeResources",
 ];
 
 // 网格列数上限；对应 WidgetsSection.css 的 grid-template-columns: repeat(6, 1fr)
@@ -105,6 +111,7 @@ function defaultState(): PersistedState {
       createNote: 3,
       createTable: 3,
       usage: isDesktop ? 3 : 2,
+      runtimeResources: isDesktop ? 3 : 2,
       pricing: isDesktop ? 3 : 2,
       downloadClient: 2,
       surf: 4,
@@ -114,6 +121,7 @@ function defaultState(): PersistedState {
       createNote: 0,
       createTable: 0,
       usage: 0,
+      runtimeResources: 0,
       pricing: 0,
       downloadClient: 0,
       surf: 0,
@@ -398,6 +406,10 @@ const WidgetsSection: React.FC<WidgetsSectionProps> = ({ isEditing }) => {
 
         {id === "usage" && (
           <UsageWidget isEditing={isEditing} />
+        )}
+
+        {id === "runtimeResources" && (
+          <RuntimeResourcesWidget isEditing={isEditing} />
         )}
 
         {id === "surf" && (

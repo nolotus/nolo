@@ -73,6 +73,8 @@ export interface Model {
   jsonOutput?: boolean; // 是否支持 JSON 结构化输出
   fnCall?: boolean; // 是否支持函数调用
   provider?: string; // 供应商
+  /** Explicit provider wire: gemini → Gemini generateContent (/models/{model}:streamGenerateContent); openai-responses → OpenAI Responses API (/responses); anthropic-messages → Anthropic Messages API (/messages). */
+  nativeProtocol?: "gemini" | "openai-responses" | "anthropic-messages";
   description?: string; // 描述
   hasAudio?: boolean; // 是否支持音频输入
   maxImageResolution?: string; // 最大图像分辨率

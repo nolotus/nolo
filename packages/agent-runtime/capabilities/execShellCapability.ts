@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { AgentRuntimeToolResult } from "../hostAdapter";
 import {
   IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS,
@@ -21,6 +22,7 @@ import type { ProcessOwner } from "../processOwnership";
 export interface ExecShellInput {
   command: string;
   shell?: unknown;
+  login?: boolean;
   activity?: unknown;
   input?: unknown;
   /**
@@ -102,9 +104,15 @@ export function normalizeExecShellInput(input: unknown): ExecShellInput {
     const activity = extractActivity(record);
     const background = record.background === true
       || (typeof record.background === "string" && record.background.trim().toLowerCase() === "true");
+    const login = typeof record.login === "boolean"
+      ? record.login
+      : typeof record.login === "string"
+        ? record.login.trim().toLowerCase() === "true"
+        : undefined;
     return {
       command,
       ...(record.shell !== undefined ? { shell: record.shell } : {}),
+      ...(login !== undefined ? { login } : {}),
       ...(activity ? { activity } : {}),
       ...(record.input !== undefined ? { input: record.input } : {}),
       ...(background ? { background: true } : {}),
@@ -112,6 +120,17 @@ export function normalizeExecShellInput(input: unknown): ExecShellInput {
   }
 
   throw new Error("execShell requires a non-empty command.");
+}
+
+/** Exact normalized execution binding. Environment values stay host-local (digest only). */
+export function execShellExecutionBinding(input: unknown, ctx: CapabilityExecutionContext): string {
+  return JSON.stringify({ input, workspaceRoot: ctx.workspaceRoot || process.cwd(),
+    commandTimeoutMs: ctx.commandTimeoutMs, commandOutputLimit: ctx.commandOutputLimit,
+    commandPrefix: ctx.commandPrefix, restrictToWorkspace: ctx.restrictToWorkspace,
+    detachMs: ctx.detachMs, owner: ctx.owner, confirmed: ctx.confirmed,
+    enableDestructiveShellGuard: ctx.enableDestructiveShellGuard,
+    blockDestructiveWithoutConfirmation: ctx.blockDestructiveWithoutConfirmation,
+    envDigest: createHash("sha256").update(JSON.stringify(process.env)).digest("hex") });
 }
 
 export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRuntimeToolResult> = {
@@ -155,6 +174,7 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
       toolName: "execShell",
       command,
       shell: normalized.shell,
+      ...(typeof normalized.login === "boolean" ? { login: normalized.login } : {}),
     });
 
     // P1 reliable async entry: background:true skips the synchronous wait
@@ -163,7 +183,7 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
     // request wins over the smart-detach heuristic.
     const background = normalized.background === true;
 
-    const result = await runWorkspaceCommand({
+    const executionArgs = {
       workspaceRoot,
       command: shellPlan.argv,
       timeoutMs: resolveExecShellTimeoutMs(ctx.commandTimeoutMs),
@@ -180,7 +200,24 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
       // command keeps its parent dialog so its terminal can resume that
       // conversation (see processOwnership.ts). Absent ctx.owner = unowned.
       owner: (ctx.owner as ProcessOwner | null | undefined) ?? null,
-    });
+    };
+    const authority = ctx.execShellApproval;
+    if (authority) {
+      const binding = execShellExecutionBinding(normalized, ctx);
+      const payload = JSON.stringify({ binding, executionArgs });
+      const signal = ctx.abortSignal;
+      const consume = authority.consume;
+      const ticket = await authority.request(payload);
+      if (ctx.execShellApproval !== authority || ctx.abortSignal !== signal || signal?.aborted ||
+          execShellExecutionBinding(normalized, ctx) !== binding ||
+          JSON.stringify({ binding, executionArgs }) !== payload) {
+        throw new Error("Shell approval final input changed");
+      }
+      // No await or mutable hook between synchronous consume/revocation check and spawn.
+      if (authority.consume !== consume) throw new Error("Shell approval authority changed");
+      consume.call(authority, ticket, payload);
+    }
+    const result = await runWorkspaceCommand(executionArgs);
 
     // P0 same-shape warnings: only for synchronous completions (a detached or
     // spawn-failed call never reached the "looks async but is not" confusion

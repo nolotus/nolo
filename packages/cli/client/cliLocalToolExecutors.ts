@@ -1,3 +1,4 @@
+import type { ShellApprovalHost } from "./originShellApprovalTransport";
 /**
  * Local tool executor assembly for CLI local runtime.
  *
@@ -221,6 +222,7 @@ export function buildCliWorkspaceToolExecutors(args: {
 
 export function buildLocalToolExecutors(args: {
   workspaceRoot: string;
+  shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
   env: EnvLike;
   fetchImpl: CliFetchImpl;
   localToolExecutors?: Record<
@@ -413,6 +415,7 @@ export function buildLocalToolExecutors(args: {
     // agent-orchestration 能力包：startAgentRun / controlAgentRun 本地 --bg 执行器
     // （复用 ~/.nolo/runs/ 注册表，MED-1 修复）。
     startAgentRun: createCliStartAgentRunExecutor({
+      shellApprovalHostForAgent: args.shellApprovalHostForAgent,
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
       cwd: args.workspaceRoot,
@@ -422,6 +425,9 @@ export function buildLocalToolExecutors(args: {
         : {}),
     }),
     controlAgentRun: createCliControlAgentRunExecutor({
+      shellApprovalHostForAgent: args.shellApprovalHostForAgent,
+      cwd: args.workspaceRoot,
+      cliEntrypoint: args.cliEntrypoint,
       env: args.env,
     }),
     ...(args.pastedTextStore

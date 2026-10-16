@@ -126,12 +126,25 @@ const getLegacyModelMap = (): Map<string, ModelWithProvider> => {
  * 多数标准名已被 getFullModelMap 精确命中，本函数只在 map miss 时触发。
  */
 function fuzzyContextWindow(normalizedName: string): number | undefined {
+  // 带传输前缀的 id（如 mistralai/mistral-medium-3 / xiaomi/mimo-v2.6-pro）按最后一段比较。
+  const bareModelName = (
+    normalizedName.includes("/")
+      ? normalizedName.slice(normalizedName.lastIndexOf("/") + 1)
+      : normalizedName
+  ).replace(/:.*$/, "");
+
   // 超长上下文 / 编程系列（具体模式优先，避免被下面的版本号规则吞掉）
   if (normalizedName.includes("qwen-long") || normalizedName.includes("qwen3-long")) return 10_485_760;
   if (normalizedName.includes("qwen-coder") || normalizedName.includes("qwen3-coder")) return 1_048_576;
   // 1M 档
   if (normalizedName.includes("qwen3.8") || normalizedName.includes("qwen3p8")) return 1_000_000;
   if (normalizedName.includes("minimax-m3") || normalizedName.includes("minimax_m3")) return 1_000_000;
+  // MiMo V2.6 Pro = 1M 上下文（官方目录口径 1048576；CommandCode 清单条目已带
+  // contextWindow，经模型表精确命中，属真值源）。本规则只兜底裸 id / 展示名变体，
+  // 刻意不用 includes("mimo-v2.6") 泛匹配：那会把窗口未公布的其它 mimo-v2.6 变体
+  // （*-flash / *-ultraspeed / 参数后缀等，可能来自自定义通道）一起放宽到 1M，
+  // 属无证据放大。
+  if (bareModelName === "mimo-v2.6-pro" || normalizedName === "mimo v2.6 pro") return 1_048_576;
   if (normalizedName.includes("glm-5.3") || normalizedName.includes("glm5.3")) return 1_050_000;
   if (normalizedName.includes("glm-5.2") || normalizedName.includes("glm5.2")) return GLM_5_2_CONTEXT_WINDOW;
   if (normalizedName.includes("deepseek")) return 1_000_000;
@@ -152,12 +165,6 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
   // Mistral 现任家族（依据：GET api.mistral.ai/v1/models 的 max_context_length，
   // 2026-10-07 实测全量读取）。必须置于下方通用 "mistral" → 32k 规则之前；
   // 历史小模型（mistral:7b / mistral-nemo）不在此列，仍落 32k / 128k 档。
-  // 带传输前缀的 id（如 mistralai/mistral-medium-3）按最后一段比较。
-  const bareModelName = (
-    normalizedName.includes("/")
-      ? normalizedName.slice(normalizedName.lastIndexOf("/") + 1)
-      : normalizedName
-  ).replace(/:.*$/, "");
   if (normalizedName.includes("mistral-large-4")) {
     // mistral-large-4 / mistral-large-4-0 = 524288；要求 token 边界，避免命中假想的 -40b 之类。
     // 边界字符刻意不含 "."：mistral-large-4.1 这类尚未存在的版本宁可落通用兜底（同"表外不扩"口径）。

@@ -658,6 +658,19 @@ export function createCliLocalRuntimeAdapter(
       readXhsProfile: deps.readXhsProfile,
       cliEntrypoint: CLI_ENTRYPOINT,
       resolveAgentCredentialGroup,
+      ...(deps.shellApprovalSession ? { shellApprovalHostForAgent: async (childAgentKey: string) => {
+        // Resolve the CHILD owner from the trusted store, never parent grant/model identity.
+        const record = await readAgentFromStore({ agentRef: childAgentKey, store: await getOrCreateSharedStore(deps), userId });
+        const rec = record as Record<string, unknown> | undefined;
+        const ownerUserId = asOptionalTrimmedString(rec?.userId) ?? asOptionalTrimmedString(rec?.ownerUserId);
+        if (!ownerUserId) return undefined;
+        const { detectMachineInfo } = await import("connector-experimental/machineInfo");
+        const machine = await detectMachineInfo({ probeLaunchable: false });
+        const deviceId = asOptionalTrimmedString(machine?.machineId);
+        if (!deviceId) return undefined;
+        return { binding: { runId: "pending-spawn", agentKey: childAgentKey, ownerUserId, deviceId, workspaceRoot },
+          confirm: deps.shellApprovalSession!.confirm, signal: deps.shellApprovalSession!.signal };
+      } } : {}),
       ...(deps.confirmDestructiveAction
         ? { confirmDestructiveAction: deps.confirmDestructiveAction }
         : {}),
@@ -1229,7 +1242,10 @@ export function createCliLocalRuntimeAdapter(
         // 时绝不能 fail-open 放行——共享 OAuth agent 的 shell 在本机可读写该
         // 用户能访问的全部资源，不能因为「模型跑在别人的订阅上」就静默执行。
         // 缺省确认通道 = 拒绝，不是默认放行。
-        if (!deps.shellGrant) {
+        if (deps.execShellApproval && normalizeLocalToolName(call.name) !== "execShell") {
+          throw new Error("Per-call shell authority only supports execShell");
+        }
+        if (!deps.execShellApproval && !deps.shellGrant) {
           throw Object.assign(
             new Error(
               `Shell execution declined: shared agent "${ownerAgentContext.agentName}" ` +
@@ -1240,8 +1256,8 @@ export function createCliLocalRuntimeAdapter(
             { code: "origin_authorization_required" },
           );
         }
-        if (!deps.shellGrant.isGranted()) {
-          const granted = await deps.shellGrant.requestGrant({
+        if (!deps.execShellApproval && !deps.shellGrant!.isGranted()) {
+          const granted = await deps.shellGrant!.requestGrant({
             agentName: ownerAgentContext.agentName,
             agentKey: ownerAgentContext.agentKey,
             ownerUserId: ownerAgentContext.ownerUserId,
@@ -1272,6 +1288,9 @@ export function createCliLocalRuntimeAdapter(
         agentToolNames: activeAgentToolNames,
         runToolNames: activeAgentToolNames,
         call: injectedCall,
+        workspaceRoot,
+        execShellApproval: deps.execShellApproval,
+        ...runtimeToolExecutionLimits,
         executors: localToolExecutors,
         // 分发前参数闸门：只覆盖 agent-runtime 工具族（workspace + nolo
         // workspace）。ai/tools registry 的工具不接——它们有各自的前置 policy

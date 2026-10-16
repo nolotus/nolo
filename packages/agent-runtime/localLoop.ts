@@ -207,6 +207,12 @@ export type LocalAgentTurnInput = {
    */
   progressGuardConfig?: ProgressGuardConfig;
   /**
+   * 任务轮次软上限预警阈值。默认 25 轮。
+   * 达到此阈值时向模型注入收敛提示，促使模型收尾输出阶段性成果或卡点，防止单 run 无限膨胀。
+   * 设置为 <= 0 时禁用预警。
+   */
+  roundBudgetWarningThreshold?: number;
+  /**
    * 回合内注入收件箱的 drain 回调（TUI「后台 run 终态唤醒」直投当前 loop）。
    *
    * 语义：每次调用取走并清空当前待注入的文本条目（调用方负责去重/一次性），
@@ -347,6 +353,76 @@ const LLM_REQUEST_TIMEOUT = "LLM_REQUEST_TIMEOUT";
  */
 export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_COMPACTION_TIMEOUT_MS = 60 * 1000;
+export const DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD = 25;
+export const ROUND_BUDGET_WARNING_PROMPT =
+  "[系统提示] 当前单次任务的连续工具调用已达 25 轮。为防止上下文复合膨胀与成本失控，请在本轮或下一轮内收敛当前执行结果，输出已验证事实、阶段性结论或当前卡点，完成阶段交接。";
+
+export function buildRoundBudgetWarningPrompt(threshold: number): string {
+  return `[系统提示] 当前单次任务的连续工具调用已达 ${threshold} 轮。为防止上下文复合膨胀与成本失控，请在本轮或下一轮内收敛当前执行结果，输出已验证事实、阶段性结论或当前卡点，完成阶段交接。`;
+}
+
+/**
+ * 安全的只读/幂等并发工具集合。
+ * 在单轮工具调用中，相邻的只读工具使用 Promise.all 并行执行，
+ * 遇到写操作或命令执行时切回严格串行；最终结果严格按模型原始 tool_calls 下标保序推入。
+ */
+export const CONCURRENT_READONLY_TOOLS: ReadonlySet<string> = new Set([
+  "readFile",
+  "read_file",
+  "readWorkspaceFile",
+  "globFiles",
+  "readDoc",
+  "readSkillDoc",
+  "listSpaces",
+  "readSpace",
+  "listTables",
+  "queryTableRows",
+  "listDialogs",
+  "readDialog",
+  "queryDialogsBySubjectRef",
+  "listAgents",
+  "readAgent",
+  "cliWhoami",
+  "cliDoctor",
+  "listProcesses",
+  "fetchWebpage",
+  "exa_search",
+]);
+
+type ToolCallWithIndex = {
+  index: number;
+  toolCall: AgentRuntimeToolCall;
+};
+
+type ToolCallExecutionBatch = {
+  isConcurrent: boolean;
+  calls: ToolCallWithIndex[];
+};
+
+export function partitionToolCallsIntoBatches(
+  toolCalls: readonly AgentRuntimeToolCall[],
+): ToolCallExecutionBatch[] {
+  const batches: ToolCallExecutionBatch[] = [];
+  let currentReadBatch: ToolCallWithIndex[] = [];
+
+  for (let i = 0; i < toolCalls.length; i += 1) {
+    const toolCall = toolCalls[i];
+    const isReadOnly = CONCURRENT_READONLY_TOOLS.has(toolCall.function.name);
+    if (isReadOnly) {
+      currentReadBatch.push({ index: i, toolCall });
+    } else {
+      if (currentReadBatch.length > 0) {
+        batches.push({ isConcurrent: true, calls: currentReadBatch });
+        currentReadBatch = [];
+      }
+      batches.push({ isConcurrent: false, calls: [{ index: i, toolCall }] });
+    }
+  }
+  if (currentReadBatch.length > 0) {
+    batches.push({ isConcurrent: true, calls: currentReadBatch });
+  }
+  return batches;
+}
 
 function resolveLlmRequestTimeoutMs(input: LocalAgentTurnInput): number {
   const raw = input.llmRequestTimeoutMs ?? input.timeoutMs;
@@ -1031,6 +1107,8 @@ export async function runLocalAgentTurn(
       return injected;
     };
     const newDialogTelemetryKey = `new:${crypto.randomUUID()}`;
+    let roundBudgetWarningInjected = false;
+    const roundWarningThreshold = input.roundBudgetWarningThreshold ?? DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD;
     while (true) {
       partialContent = "";
       throwIfAborted(input);
@@ -1039,6 +1117,18 @@ export async function runLocalAgentTurn(
       // 的边界耗时，注入的开销应计入随后的 prepareMessagesForProviderCall 相位，
       // 不污染边界读数。注入仍在构造请求消息之前，本轮 provider 调用即可见。
       applyPendingInjections();
+      if (
+        roundWarningThreshold > 0 &&
+        round >= roundWarningThreshold &&
+        !roundBudgetWarningInjected
+      ) {
+        // 关键（Sol Review P1 阻断项修复）：通过 transcript 正式追加路径注入一次。
+        // 这样若模型看到提示后继续发 tool_calls，该提示自然成为 transcript 历史的一部分，
+        // 保证后续轮次的请求严格保持 Append-Only，前缀缓存绝不发生分叉或断裂。
+        const prompt = buildRoundBudgetWarningPrompt(roundWarningThreshold);
+        transcript.push({ role: "user", content: prompt });
+        roundBudgetWarningInjected = true;
+      }
       // 空轮修复：把 repair user message 追加到本轮请求末尾重试一次（系统消息放在末尾会被大部分 Provider API 拒收或返回空消息）。
       const preparedMessages = prepareMessagesForProviderCall(transcript.working());
       const baseRequestMessages = filterImagePartsFromMessages(
@@ -1319,12 +1409,15 @@ export async function runLocalAgentTurn(
         metadata?: Record<string, unknown>;
       }> = [];
       loopTiming.mark("toolLoopStart", round);
-      for (const toolCall of toolCalls) {
-        const toolName = toolCall.function.name;
-        // 单工具事务（参数补全/毒丸诊断、写文件会话门、abort 级联、
-        // tool-start/tool-end 事件与 legacy 桥接、错误转工具结果）整体在
-        // toolCallTransaction.ts；循环侧只保留两本账推入、executedToolResults
-        // 累计与 progressGuard 熔断决策。
+
+      const slotResults = new Array<{
+        toolName: string;
+        toolResult: AgentRuntimeToolResult;
+        toolExecMs?: number;
+      }>(toolCalls.length);
+
+      const runSingleTool = async ({ index, toolCall }: ToolCallWithIndex) => {
+        throwIfAborted(input);
         const { toolResult, toolExecMs } = await executeToolCall({
           input,
           toolCall,
@@ -1339,9 +1432,18 @@ export async function runLocalAgentTurn(
             ...(result.finish_reason ? { finishReason: result.finish_reason } : {}),
           },
         });
-        // 观测字段合并到 metadata：随 tool_result_metadata 一并持久化，供后续
-        // 从历史反推工具耗时分布。formatToolMessageContent 会把它剔除，
-        // 模型可见内容逐字节不变（见该函数注释）。
+        slotResults[index] = {
+          toolName: toolCall.function.name,
+          toolResult,
+          toolExecMs,
+        };
+      };
+
+      const commitSlot = (i: number) => {
+        const toolCall = toolCalls[i];
+        const slot = slotResults[i];
+        if (!slot) return;
+        const { toolName, toolResult, toolExecMs } = slot;
         const observedMetadata =
           toolExecMs === undefined
             ? toolResult.metadata
@@ -1368,6 +1470,35 @@ export async function runLocalAgentTurn(
           toolName,
           ...(observedMetadata ? { tool_result_metadata: observedMetadata } : {}),
         });
+      };
+
+      const batches = partitionToolCallsIntoBatches(toolCalls);
+      for (const batch of batches) {
+        throwIfAborted(input);
+        let batchError: unknown;
+        try {
+          if (batch.isConcurrent && batch.calls.length > 1) {
+            // 相邻只读工具并发执行（Promise.all），将多读取耗时由串行加总压平为单最慢耗时
+            await Promise.all(batch.calls.map(runSingleTool));
+          } else {
+            for (const call of batch.calls) {
+              await runSingleTool(call);
+            }
+          }
+        } catch (error) {
+          batchError = error;
+        } finally {
+          // 关键（Sol & Gemini 4 副作用审查一致发现）：
+          // 无论并发批次是正常完成还是中途抛错/被 Abort 中断，
+          // 立即将该批次中已经就绪的槽位保序推进 transcript，
+          // 确保同批次内已完成的工具结果绝不因兄弟任务的中断或失败而丢失。
+          for (const call of batch.calls) {
+            if (slotResults[call.index]) {
+              commitSlot(call.index);
+            }
+          }
+        }
+        if (batchError) throw batchError;
       }
       // 熔断保护：检查工具调用序列与返回结果是否陷入无进展停滞死循环
       const toolExecutionGuardVerdict = progressGuard.observeToolExecution(

@@ -504,6 +504,7 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
   maxVisible?: number;
   input?: NodeJS.ReadStream;
   output?: NodeJS.WritableStream;
+  signal?: AbortSignal;
   readKey?: KeyReader;
   inputPolicy?: import("./dialogHost").DialogInputPolicy;
   onTranscriptScroll?: (action: string) => void;
@@ -538,6 +539,10 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
   const readKey = args.readKey ?? createRawKeyReader(input);
+  let cancelRead!: () => void;
+  const cancelled = new Promise<typeof STREAM_CLOSED>((resolve) => { cancelRead = () => resolve(STREAM_CLOSED); });
+  args.signal?.addEventListener("abort", cancelRead, { once: true });
+  if (args.signal?.aborted) cancelRead();
   const session = args.session ?? createStandaloneDialogSession({ input, output });
 
   const wheelThrottle = createWheelThrottle();
@@ -592,7 +597,8 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
     paint();
 
     while (true) {
-      const sequence = await readKey();
+      const sequence = await Promise.race([readKey(), cancelled]);
+      if (args.signal?.aborted) return { kind: "cancelled" };
       if (sequence === STREAM_CLOSED) {
         return { kind: "cancelled" };
       }
@@ -647,6 +653,7 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
       }
     }
   } finally {
+    args.signal?.removeEventListener("abort", cancelRead);
     session.setMouseReporting(false);
     resizeTarget.off?.("resize", onOutputResize);
     readKey.dispose?.();

@@ -5,7 +5,7 @@
  * 未命中本通道返回 null，交给 resolveLocalProvider 链上的下一条。
  */
 import type { AgentRuntimeResult } from "../../../agent-runtime";
-import { accumulateGeminiChunks, buildGeminiGenerateContentRequest, isGemini3Model, shouldUseGeminiNativeToolRoute } from "../../../agent-runtime/geminiNativeShared";
+import { accumulateGeminiChunks, buildGeminiGenerateContentRequest, isGemini3Model, resolveGeminiModelQuirks, shouldUseGeminiNativeToolRoute } from "../../../agent-runtime/geminiNativeShared";
 import { parseSseDataLineJson } from "../../../agent-runtime/sseDataLine";
 import { readSseDataValues } from "../../../agent-runtime/sseFrames";
 import { resolvePlatformChatProviderConfig, shouldUsePlatformChatProvider } from "../../agentRuntimeLocal";
@@ -59,6 +59,14 @@ export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) =>
       return {
         model: providerConfig.model,
         complete: async (messages, options) => {
+          // 实际上游模型名 = providerConfig.model（下面 URL 里那个）。
+          // 闸门判的是 agentConfig.model，两者此前相等（plan.model =
+          // agentConfig.model），但平台 remap 后可能分歧；quirks 描述的是**上游
+          // 模型**对 SKIP_THOUGHT_SIGNATURE 的接受度，所以哨兵判据必须锚在这个
+          // 名字上，而不是闸门那个。与 customNativeProvider / 服务端 googleNativeChat
+          // 用同一判据：gemini-3.5 / flash-preview 严格档收到哨兵会 400，
+          // 或更隐蔽地回空 STOP 帧（0 completion tokens，模型假死沉默）。
+          const model = providerConfig.model;
           const requestBody = buildGeminiGenerateContentRequest({
             messages: messages as unknown[],
             tools: tools as unknown[],
@@ -68,10 +76,10 @@ export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) =>
             temperature: typeof agentConfig.temperature === "number"
               ? agentConfig.temperature
               : undefined,
-            attachSkipThoughtSignature: true,
+            attachSkipThoughtSignature:
+              resolveGeminiModelQuirks(model).allowsThoughtSignatureSentinel,
           });
 
-          const model = providerConfig.model;
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
 
           logLocalRuntimeDiagnostic("provider.request.start", {

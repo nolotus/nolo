@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL } from "ai/llm/platformHosted";
 import { PLATFORM_HOSTED_KIMI_K3_MODEL } from "ai/llm/kimi";
 import { getModelsByProvider } from "ai/llm/providers";
+import type { WorkBuddyModelPricing } from "../providerRegistry";
 import {
   CLI_CAPABILITY_BY_PROVIDER,
   CLI_PROVIDER_OPTIONS,

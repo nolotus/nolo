@@ -9,6 +9,11 @@
 // 非空 input_json_delta）调用 onMeaningfulOutput，由调用方喂给 timing tracker
 // （first-write-wins 在 tracker 内保证）。signature_delta / ping / usage-only
 // 事件不算有效输出。
+//
+// 可选增量回调：onTextDelta（text_delta）与 onThinkingDelta（thinking_delta），
+// 每个非空 delta 一次、按上游到达顺序。两者都是**可选**参数，不传时与「只聚合」
+// 的历史行为逐字一致（Claude OAuth 路径只传前两个参数，语义未变）；翻译代理
+// （server/handlers/customProviderNativeWire.ts）用它们发 reasoning/content 增量帧。
 
 type JsonRecord = Record<string, unknown>;
 
@@ -59,6 +64,8 @@ const parseSseEventBlock = (block: string): JsonRecord | null => {
 export async function aggregateAnthropicMessageStream(
   body: ReadableStream<Uint8Array>,
   onMeaningfulOutput: () => void,
+  onTextDelta: (text: string) => void = () => {},
+  onThinkingDelta: (text: string) => void = () => {},
 ): Promise<AnthropicStreamAggregateResult> {
   let payload: JsonRecord | null = null;
   let usage: JsonRecord = {};
@@ -99,10 +106,10 @@ export async function aggregateAnthropicMessageStream(
         if (!block) return;
         if (delta.type === "text_delta" && typeof delta.text === "string") {
           block.text = `${typeof block.text === "string" ? block.text : ""}${delta.text}`;
-          if (delta.text) onMeaningfulOutput();
+          if (delta.text) { onMeaningfulOutput(); onTextDelta(delta.text); }
         } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
           block.thinking = `${typeof block.thinking === "string" ? block.thinking : ""}${delta.thinking}`;
-          if (delta.thinking) onMeaningfulOutput();
+          if (delta.thinking) { onMeaningfulOutput(); onThinkingDelta(delta.thinking); }
         } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
           const index = event.index as number;
           partialJson.set(index, `${partialJson.get(index) ?? ""}${delta.partial_json}`);

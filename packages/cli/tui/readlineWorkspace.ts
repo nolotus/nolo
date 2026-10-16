@@ -1,3 +1,4 @@
+import { createShellApprovalSession } from "./shellApprovalSession";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
@@ -930,6 +931,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 终端可能已 resize：重绘时实时读宽度，让 renderWelcome 重新决定是否
     // 保留 scene，避免旧宽度下画的 banner 在新宽度 wrap 出残留。
     const currentColumns = (output as { columns?: number }).columns ?? 80;
+    const currentRows = (output as { rows?: number }).rows ?? 24;
     const welcome = renderWelcome(state, frame, maxFrames, currentColumns);
     // welcome 以换行结尾，pinned agent notice 当初紧随其后再写一段；重绘时
     // 必须一并重写，否则清行（clearLines 含 notice 行数）会把它从屏幕上抹掉。
@@ -954,7 +956,27 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       output.write(frame);
       // 顶部 banner 区域重绘不影响底部 composer，但活动输入行的绘制状态需要
       // 恢复，否则光标/缓冲行与终端实际内容脱节。
-      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+      if (fixedInput.active) {
+        fixedInput.repaint(buffer, cursorPos);
+        // resize 会把 composer 整体顶高（终端行数变多，或草稿在新列宽下占更多
+        // 行），它旧占的行就落到 banner 与 composer 之间：banner 只清自己那几行、
+        // composer 的 ED 只从新 startRow 往屏幕底部清，中间这段没人认领 → 旧
+        // composer 的 ─── 规则行整条留在屏幕中部（欢迎页 resize 残影的根因）。
+        // composer 刚重绘完，startRow 已按新几何更新，此时把 banner 下方到
+        // composer 上方的残段补清（逐行 EL 2K）；DECSC/DECRC 包住清行，保证
+        // 硬件光标仍旧留在 composer（与 tuiImageRenderer 同一手法）。
+        const composerStartRow = Math.max(
+          1,
+          currentRows - fixedInput.getInputLines() + 1,
+        );
+        if (composerStartRow > clearLines + 1) {
+          let stale = "\x1b7";
+          for (let i = clearLines; i < composerStartRow - 1; i += 1) {
+            stale += `\x1b[${i + 1};1H\x1b[2K`;
+          }
+          output.write(`${stale}\x1b8`);
+        }
+      }
     } finally {
       output.write("\x1b[?25h\x1b[?2026l");
     }
@@ -1234,6 +1256,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例。确认走既有
   // runConfirmDialog + dialogHost 通道；撤销经 shellGrant.revoke() 立即生效
   // （isGranted 同步翻转）。非 owner-required 场景 adapter 不触发该路径。
+  const childShellApprovals = createShellApprovalSession(async (request, signal) =>
+    runWithInputRequiredAttention({ output, env: effectiveEnv }, () => {
+      if (signal.aborted) return Promise.resolve(false);
+      return dialogHost.run((anchor) => runConfirmDialog({
+        request: { id: `child-shell-${crypto.randomUUID()}`, tool: "execShell", action: "shell-per-call",
+          title: "Background shell — approve this command once?",
+          body: `Run: ${request.runId}\nAgent: ${request.agentKey}\nOwner: ${request.ownerUserId}\nDevice: ${request.deviceId}\nWorkspace: ${request.workspaceRoot}\n${request.permissionNotice}`,
+          command: request.command },
+        signal, fullCommand: true, input: input as any, output: output as any, ...anchor,
+      }));
+    }));
   const sessionShellGrant = createOriginShellGrant({
     confirm: async (request) => {
       return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
@@ -1297,6 +1330,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例透传给 turn
     // 执行路径；撤销经 /shell-revoke 或设置面板调 sessionShellGrant.revoke()。
     shellGrant: sessionShellGrant,
+    shellApprovalSession: childShellApprovals.session,
     // 运行位置展示（块 D）：owner-required 场景 adapter 回调一次；渲染一行
     // 「工具在 <deviceName>(<deviceId>) · workspace <root> · status: <s>」。
     // unknown 不猜——直接打印 unknown，不静默标 ready。
@@ -1405,6 +1439,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     if (line.trim().split(/\s+/)[0]?.toLowerCase() === "/shell-revoke") {
       const wasGranted = sessionShellGrant.isGranted();
       sessionShellGrant.revoke();
+      childShellApprovals.revoke();
       emitCommandOutput(
         wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
         "/shell-revoke",
@@ -1508,8 +1543,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // 窄终端甚至 wrap 出残行。按新宽度重绘 banner（repaintBanner 实时读
       // columns 决定 scene 去留），composer 单独重 dock。
       if (history.turns.length === 0 && history.currentRole === null) {
+        // repaintBanner 已在同一个 BSU/ESU 帧里按新几何重绘 banner 与 composer
+        // （含两者之间残段的补清），这里不再重复 repaint 一次 composer。
         repaintBanner();
-        fixedInput.repaint(buffer, cursorPos);
         return;
       }
       paintFrame(buffer);
@@ -1534,6 +1570,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const finish = () => {
       if (done) return;
       done = true;
+      childShellApprovals.close();
       sessionEnded = true; // signal in-flight async git refresh to drop its repaint
       scrollAnimator.cancel(); // stop any in-flight wheel animation before teardown
       if (resizeTimer !== null) {
@@ -1966,6 +2003,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (busySlashCommand === "/shell-revoke") {
         const wasGranted = sessionShellGrant.isGranted();
         sessionShellGrant.revoke();
+      childShellApprovals.revoke();
         emitCommandOutput(
           wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
           "/shell-revoke",
@@ -2738,7 +2776,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 非交互（readline）路径结束时不走 interactive 的 finish()，这里同样
     // 标记 session 结束，让迟到的异步回调（如更新检查）不再触发渲染写入
     // 已关闭的 stdout/pipe。
-    sessionEnded = true;
+    childShellApprovals.close();
+      sessionEnded = true;
     // 与 interactive 的 finish() 对齐：停靠区/轮询器/活动行的 setInterval 都是
     // ref'd 计时器且非交互路径不走 finish()。缺了这组 dispose，turn 里
     // beginHold()/updateAgentRun() 起的轮询 interval 会一直挂在事件循环上，

@@ -431,6 +431,15 @@ export function summarizeHistoricalToolContent(
   });
 }
 
+type ToolProjectionMemo = {
+  projectedContent: AgentRuntimeMessageContent;
+  rawChars: number;
+  projectedChars: number;
+  isTruncated: boolean;
+};
+
+const toolProjectionMemoMap = new WeakMap<AgentRuntimeChatMessage, ToolProjectionMemo>();
+
 export function prepareMessagesForProviderCall(
   messages: AgentRuntimeChatMessage[],
 ): PreparedProviderMessages {
@@ -441,15 +450,9 @@ export function prepareMessagesForProviderCall(
   // 消息）使用与跨 turn 历史（summarizeHistoricalToolContent）完全相同的
   // per-tool 预算与 label。投影因此是 (content, toolName, metadata) 的纯函数，
   // 同一 tool execution 第一次进入 provider transcript 后每轮 byte-identical。
-  // 旧「fresh 32k 宽窗口 → 非 fresh 回压 profile → 跨 turn 1.6k」三档设计会在
-  // 每轮把上一轮的 tool 消息改写一次（实测 17,779 → 4,361 字符），前缀缓存
-  // 从该消息起整体失效（2026-08-25 事故同类根因）。超预算部分仍由
-  // projectToolContentForProvider 通过 spillToolOutput 完整落盘（内容寻址路径，
-  // (toolName, content) 纯函数），provider 看到 deterministic projection +
-  // spillFile 引用；durable 历史/UI 保留完整原文。fresh 窗口的质量代价由 spill
-  // 重读（readFile/grep spill 文件）覆盖，属于已拍板的产品决策
-  // （docs/plans/2026-09-05-tool-output-cache-stability.md，推翻
-  // 2026-09-02 perf sweep 中「仅性能收益不足」的否决——本次目标是 cache ROI）。
+  // 超预算部分仍由 projectToolContentForProvider 通过 spillToolOutput 完整落盘。
+  // 通过 toolProjectionMemoMap 实施不可变消息级的 WeakMap 记忆化，前序历史工具消息
+  // 的衍生截断与字符统计通过 O(1) 直接复用，大幅削减长上下文下的重复正则脱敏与字符串切片开销。
   let toolMessageCount = 0;
   let rawToolContentChars = 0;
   let projectedToolContentChars = 0;
@@ -475,21 +478,33 @@ export function prepareMessagesForProviderCall(
       });
     }
     toolMessageCount += 1;
-    rawToolContentChars += contentCharCount(sanitizedContent);
-    const projectedContent = projectToolContentForProvider({
-      content: sanitizedContent,
-      toolName: providerMessage.toolName,
-      metadata: providerMessage.tool_result_metadata,
-      maxChars: resolveToolOutputProfile(providerMessage.toolName).maxChars,
-      label: TOOL_OUTPUT_PROJECTION_LABEL,
-    });
-    projectedToolContentChars += contentCharCount(projectedContent);
-    if (contentCharCount(projectedContent) < contentCharCount(sanitizedContent)) {
+    let memo = toolProjectionMemoMap.get(message);
+    if (!memo) {
+      const rawChars = contentCharCount(sanitizedContent);
+      const projectedContent = projectToolContentForProvider({
+        content: sanitizedContent,
+        toolName: providerMessage.toolName,
+        metadata: providerMessage.tool_result_metadata,
+        maxChars: resolveToolOutputProfile(providerMessage.toolName).maxChars,
+        label: TOOL_OUTPUT_PROJECTION_LABEL,
+      });
+      const projectedChars = contentCharCount(projectedContent);
+      memo = {
+        projectedContent,
+        rawChars,
+        projectedChars,
+        isTruncated: projectedChars < rawChars,
+      };
+      toolProjectionMemoMap.set(message, memo);
+    }
+    rawToolContentChars += memo.rawChars;
+    projectedToolContentChars += memo.projectedChars;
+    if (memo.isTruncated) {
       truncatedToolResults += 1;
     }
     return {
       ...providerMessage,
-      content: projectedContent,
+      content: memo.projectedContent,
     };
   });
   return {

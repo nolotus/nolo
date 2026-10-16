@@ -301,7 +301,7 @@ export const deleteMemoriesForOwnerFromDb = async (
 
   if (filters.deletionToken && filters.deletionToken !== token) {
     throw new Error(
-      "deletionToken mismatch: memory dataset changed since preview; please rerun dry-run preview before confirming."
+      "deletionToken mismatch: target set differs from preview; preview exact intended targets again."
     );
   }
 

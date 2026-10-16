@@ -42,6 +42,10 @@ export const AGENT_MODELS_USAGE =
   "            exit 0 = live, 1 = static fallback / error. OAuth presets (devin-oauth) take no --api-key.\n" +
   "  --url     list models straight from an OpenAI-compatible provider's /models\n";
 
+export const AGENT_PROVIDERS_USAGE =
+  "Usage: nolo agent providers [--kind <metered_api|subscription|subscription_oauth>] [--json]\n" +
+  "  List the agent-creation provider presets from the shared provider registry.\n";
+
 type DiscoveredModel = {
   id?: string;
   label?: string;
@@ -109,9 +113,67 @@ async function runPresetModelsCommand(
     const body = (await res.json().catch(() => null)) as DiscoverModelsResponse | null;
 
     if (!res.ok || !body || body.ok === false) {
+      let diagnostic: { hint: string; suggestedCommand?: string } | undefined;
+      if (res.status === 409 || body?.code === "PRESET_NOT_WHITELISTED") {
+        try {
+          const { ALL_PROVIDER_REGISTRY } = await import("ai/agent/providerRegistry");
+          const provider =
+            ALL_PROVIDER_REGISTRY.find((p) => p.id === presetId) ??
+            ALL_PROVIDER_REGISTRY.find((p) => p.provider === presetId);
+          const isOpenAICompatBearer =
+            provider &&
+            provider.kind === "api_key_template" &&
+            "baseUrl" in provider &&
+            typeof provider.baseUrl === "string" &&
+            provider.baseUrl &&
+            (!("apiKeyHeader" in provider) ||
+              !provider.apiKeyHeader ||
+              provider.apiKeyHeader.toLowerCase() === "authorization");
+
+          if (isOpenAICompatBearer) {
+            const cmd = `nolo agent models --url ${provider.baseUrl} --api-key <key>`;
+            diagnostic = {
+              hint: `Preset "${presetId}" does not support server-side discovery. Try direct query: ${cmd}`,
+              suggestedCommand: cmd,
+            };
+          } else if (
+            provider &&
+            (provider.kind === "oauth" || ("apiKeyRef" in provider && provider.apiKeyRef))
+          ) {
+            diagnostic = {
+              hint: `Preset "${presetId}" is an OAuth subscription preset and does not support direct model discovery.`,
+            };
+          } else if (
+            provider &&
+            provider.kind === "api_key_template" &&
+            "apiKeyHeader" in provider &&
+            provider.apiKeyHeader
+          ) {
+            diagnostic = {
+              hint: `Preset "${presetId}" uses custom authorization (${provider.apiKeyHeader}) and does not support direct model discovery via --url.`,
+            };
+          } else {
+            diagnostic = {
+              hint: `Preset "${presetId}" is not whitelisted for server-side discovery.`,
+            };
+          }
+        } catch {
+          diagnostic = {
+            hint: `Preset "${presetId}" is not whitelisted for server-side discovery.`,
+          };
+        }
+      }
+
       if (wantJson) {
         output.write(
-          JSON.stringify(body ?? { ok: false, status: res.status }, null, 2) + "\n"
+          JSON.stringify(
+            {
+              ...(body ?? { ok: false, status: res.status }),
+              ...(diagnostic ? { diagnostic } : {}),
+            },
+            null,
+            2
+          ) + "\n"
         );
       } else {
         const code = body?.code ? ` ${body.code}` : "";
@@ -119,6 +181,9 @@ async function runPresetModelsCommand(
         output.write(
           `[nolo] agent models --preset ${presetId} failed (HTTP ${res.status}${code})${detail}\n`
         );
+        if (diagnostic) {
+          output.write(`[nolo] Hint: ${diagnostic.hint}\n`);
+        }
       }
       return 1;
     }
@@ -176,6 +241,11 @@ export async function runAgentModelsCommand(
   const env = asEnvVars(deps.env ?? process.env);
   const output = deps.output ?? process.stdout;
   const fetchImpl = deps.fetchImpl ?? fetch;
+
+  if (args.includes("--help") || args.includes("-h")) {
+    output.write(AGENT_MODELS_USAGE);
+    return 0;
+  }
 
   if (args.includes("--preset")) {
     return runPresetModelsCommand(readOption(args, "--preset") ?? "", args, deps);
@@ -313,6 +383,12 @@ export async function runAgentProvidersCommand(
   deps: AgentCommandDeps = {}
 ): Promise<number> {
   const output = deps.output ?? process.stdout;
+
+  if (args.includes("--help") || args.includes("-h")) {
+    output.write(AGENT_PROVIDERS_USAGE);
+    return 0;
+  }
+
   const wantJson = args.includes("--json");
   const kindFilter = (readOption(args, "--kind") ?? "").trim().toLowerCase();
 
