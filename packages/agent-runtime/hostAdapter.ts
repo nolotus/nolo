@@ -92,6 +92,9 @@ export type AgentRuntimeCompleteOptions = {
    * id，与今天一致）。绝不进 prompt、摘要或持久化历史。
    */
   requestId?: string;
+  /** Request-local generation overrides; consumers must not mutate chat defaults. */
+  max_tokens?: number;
+  reasoning_effort?: "low";
   onTextDelta?: (chunk: string) => void;
   /**
    * reasoning 增量回调（第一层透传）。provider 在 SSE 读取路径收到
