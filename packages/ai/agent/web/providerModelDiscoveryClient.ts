@@ -9,7 +9,6 @@ export type DiscoveredModelOption = {
   label: string;
   recommended?: boolean;
   hasVision?: boolean;
-  pricing?: { rate?: number; free: boolean; rateWas?: number; observedAt: number; requiresActivePackage: true };
 };
 
 export type ProviderDiscoveryClientResult = {
@@ -22,8 +21,6 @@ export type ProviderDiscoveryClientResult = {
 
 export const DISCOVERABLE_PRESET_IDS: ReadonlySet<string> = new Set([
   "devin-oauth",
-  "workbuddy",
-  "workbuddy-ai",
   "deepseek-api",
   "zai-coding-plan",
   "bigmodel-coding-plan",
@@ -41,7 +38,7 @@ export function isDiscoverablePreset(presetId: string | null | undefined): boole
 
 /** OAuth discovery 使用服务端已保存的凭证，绝不发送表单 key。 */
 export function isOAuthDiscoveryPreset(presetId: string): boolean {
-  return presetId === "devin-oauth" || presetId === "workbuddy" || presetId === "workbuddy-ai";
+  return presetId === "devin-oauth";
 }
 
 export type FetchDiscoveredModelsArgs = {
@@ -64,7 +61,6 @@ export type ModelOption = {
   label: string;
   recommended?: boolean;
   hasVision?: boolean;
-  pricing?: DiscoveredModelOption["pricing"];
 };
 
 export function mergeModelOptionsWithDiscovery(
@@ -126,24 +122,9 @@ export async function fetchDiscoveredModels(
     const body = (await res.json()) as Record<string, unknown>;
     if (body.ok !== true) return null;
     const models = Array.isArray(body.models)
-      ? body.models.flatMap((raw): DiscoveredModelOption[] => {
-          if (!raw || typeof raw !== "object") return [];
-          const item = raw as Record<string, unknown>;
-          if (typeof item.id !== "string" || !item.id.trim() || typeof item.label !== "string") return [];
-          const model: DiscoveredModelOption = { id: item.id, label: item.label };
-          if (typeof item.recommended === "boolean") model.recommended = item.recommended;
-          if (typeof item.hasVision === "boolean") model.hasVision = item.hasVision;
-          const p = item.pricing as Record<string, unknown> | undefined;
-          if (p && typeof p.free === "boolean" && typeof p.observedAt === "number" && Number.isFinite(p.observedAt) && p.requiresActivePackage === true &&
-            (p.rate === undefined || (typeof p.rate === "number" && Number.isFinite(p.rate) && p.rate >= 0)) &&
-            (p.rateWas === undefined || (typeof p.rateWas === "number" && Number.isFinite(p.rateWas) && p.rateWas >= 0))) {
-            model.pricing = { free: p.free, observedAt: p.observedAt, requiresActivePackage: true,
-              ...(typeof p.rate === "number" ? { rate: p.rate } : {}),
-              ...(typeof p.rateWas === "number" ? { rateWas: p.rateWas } : {}),
-            };
-          }
-          return [model];
-        })
+      ? (body.models as DiscoveredModelOption[]).filter(
+          (m) => m && typeof m.id === "string" && m.id.length > 0,
+        )
       : [];
     if (models.length === 0 && body.source !== "static") return null;
     return {

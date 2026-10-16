@@ -6,7 +6,7 @@
  * dialog lets providers benefit from the already-hot conversation/cache while
  * the agent still has the execution context in view.
  */
-export const TUI_LEARN_REVIEW_PROMPT = `Review the visible conversation and work so far in this current dialog and look only for reusable improvements to the system. Cover what is actually visible here, including unfinished, failed, or interrupted work; do not assume history you cannot see.
+export const TUI_LEARN_REVIEW_PROMPT = `Review the work you just completed in this current dialog and look only for reusable improvements to the system.
 
 Focus on two surfaces:
 
@@ -22,9 +22,7 @@ Focus on two surfaces:
 
 Rules:
 - Do not invent findings just to produce feedback. "none" is a good result.
-- Every finding must cite concrete visible evidence: the user's correction, the failed call, the repeated work. No evidence, no finding. Keep observed facts separate from assumptions; do not present correlation as root cause.
-- Prefer deleting, merging, or clarifying an existing instruction over adding a new one, and do not generalize a one-off mistake into a global rule.
-- For prompt findings, give the visible original wording or a verifiable location plus the minimal replacement text. If you cannot locate it, say the location is unknown instead of guessing where it came from.
+- Separate observed evidence from hypotheses. Do not present correlation as root cause.
 - Prefer reusable improvements over task-specific preferences.
 - Do not modify code, prompts, tools, memory, or configuration in this review. Review only.
 - Be concise.

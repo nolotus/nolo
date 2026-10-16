@@ -1,4 +1,3 @@
-import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // packages/cli/client/cliAgentRunToolExecutors.ts
 //
 // CLI 本地实现 startAgentRun / controlAgentRun（agent-orchestration 能力包）。
@@ -78,7 +77,6 @@ type OutputLike = { write(chunk: string): unknown };
  - now：缺省 Date.now()。CLI 适配层允许取时钟。
  */
 export type CliAgentRunToolExecutorDeps = {
-  shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
   env?: EnvLike;
   /** CLI entrypoint path（spawn 子进程重启动用）。 */
   cliEntrypoint?: string;
@@ -449,7 +447,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(args.ephemeral === true ? { ephemeral: true } : {}),
         output: noopOutput,
       },
-      { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
+      deps,
     );
 
     // title 走卡片自己的参数，不进 label：它是显示行不是名字，进了 label 会
@@ -576,7 +574,7 @@ async function spawnContinuationRun(
       continuedFrom,
       output: noopOutput,
     },
-    { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
+    deps,
   );
 
   // title 走卡片自己的参数，不进 label：label 只吃名字字段，title 顶掉

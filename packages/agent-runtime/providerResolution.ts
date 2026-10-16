@@ -311,7 +311,7 @@ export function resolveProviderAuthHeaderName(args: {
   return "Authorization";
 }
 
-const OPENCODE_GO_ENDPOINT_RE = /^https?:\/\/opencode\.ai\/(?:zen|inference)\/go\//i;
+const OPENCODE_GO_ENDPOINT_RE = /^https?:\/\/opencode\.ai\/zen\/go\//i;
 export const OPENCODE_SESSION_HEADER = "x-opencode-session";
 export const OPENCODE_USER_AGENT = "nolo-agent/1.0";
 // Last-resort stable id (per process) when the caller has no dialog/agent id.

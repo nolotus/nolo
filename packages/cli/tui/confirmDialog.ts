@@ -64,9 +64,6 @@ function truncateCommand(command: string, maxWidth: number): string {
 
 export async function runConfirmDialog(args: {
   request: PermissionRequest;
-  signal?: AbortSignal;
-  /** Background shell confirmation must display the complete verbatim command. */
-  fullCommand?: boolean;
   input?: NodeJS.ReadStream;
   output?: NodeJS.WritableStream;
   readKey?: KeyReader;
@@ -132,13 +129,12 @@ export async function runConfirmDialog(args: {
   ];
   if (bodyText) titleLines.push(renderDialogTitle(bodyText));
   if (args.request.command) {
-    const shown = args.fullCommand ? args.request.command : truncateCommand(args.request.command, terminalWidth);
+    const shown = truncateCommand(args.request.command, terminalWidth);
     titleLines.push(renderDialogCommand(shown));
   }
 
   const result = await runSelectDialog({
     items,
-    signal: args.signal,
     initialIndex: 1,
     titleLines,
     input,

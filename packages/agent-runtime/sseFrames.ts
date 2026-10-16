@@ -16,44 +16,28 @@ export async function* readSseFrames(
   }
   const decoder = new TextDecoder();
   let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let boundary = findSseFrameBoundary(buffer);
-      while (boundary) {
-        yield buffer.slice(0, boundary.index);
-        buffer = buffer.slice(boundary.index + boundary.separatorLength);
-        boundary = findSseFrameBoundary(buffer);
-      }
-    }
-    const remaining = decoder.decode();
-    if (remaining) {
-      buffer += remaining;
-      let boundary = findSseFrameBoundary(buffer);
-      while (boundary) {
-        yield buffer.slice(0, boundary.index);
-        buffer = buffer.slice(boundary.index + boundary.separatorLength);
-        boundary = findSseFrameBoundary(buffer);
-      }
-    }
-    if (buffer.trim()) yield buffer;
-  } finally {
-    // 关键生命周期管理（Sol & Gemini 4 副作用审查一致发现）：
-    // 当外层消费方收到 [DONE] 提前 break 退出生成器时，
-    // 由持有锁的 reader 执行 cancel 并释放锁，确保底层流干净关闭、不泄漏 reader 锁。
-    try {
-      await reader.cancel();
-    } catch {
-      // cancel 失败不阻塞释放锁
-    }
-    try {
-      reader.releaseLock();
-    } catch {
-      // 已经释放则忽略
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = findSseFrameBoundary(buffer);
+    while (boundary) {
+      yield buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary.separatorLength);
+      boundary = findSseFrameBoundary(buffer);
     }
   }
+  const remaining = decoder.decode();
+  if (remaining) {
+    buffer += remaining;
+    let boundary = findSseFrameBoundary(buffer);
+    while (boundary) {
+      yield buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary.separatorLength);
+      boundary = findSseFrameBoundary(buffer);
+    }
+  }
+  if (buffer.trim()) yield buffer;
 }
 
 /**

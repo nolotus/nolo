@@ -39,8 +39,8 @@ function isCodeFenceLine(line: string) {
 //   - Multi-line `/* ... */` block comments: only the part after `/*` on the
 //     OPENING line is treated as a comment; middle/end lines are NOT.
 //   - Python `"""..."""` triple-quoted strings: same — only the opening line.
-// The only cross-line state allowed is the `inFence` flag plus the current
-// fence's language, both maintained across lines by FenceTracker.
+// The only cross-line state allowed is the pre-existing `inFence` flag plus
+// the current fence's language, both maintained by the callers.
 
 /** ```ts / ```bash / ``` → "ts" / "bash" / "" (closing fence → ""). */
 function readFenceLanguage(line: string): string {
@@ -673,97 +673,6 @@ function styleRichMarkdownLine(line: string, brightness: TuiBrightness) {
 }
 
 /**
- * Event produced by `FenceTracker.processLine(line)`.
- */
-type FenceEvent =
-  | { kind: "open" }
-  | { kind: "close-code" }
-  | { kind: "close-mermaid"; body: string[] }
-  | { kind: "mermaid-body" }
-  | { kind: "code-line"; lang: CodeLang }
-  | { kind: "outside" };
-
-/**
- * Pure state machine tracking Markdown code fences and mermaid block bodies.
- * Shared by `formatAssistantDisplay` (whole-message) and `createRenderAwareStreamWriter` (streaming).
- *
- * Why: The line-local syntax highlighter (`highlightCodeLine`) cannot revise
- * already emitted lines, so `fenceLang` is the only cross-line state it is
- * allowed to consume. Maintaining both fence boundaries and mermaid body
- * buffering in a single state machine ensures the whole-message pass and the
- * streaming pass handle unclosed blocks and language tags identically.
- */
-class FenceTracker {
-  private inFence = false;
-  private inMermaid = false;
-  private fenceLang: CodeLang = "unknown";
-  private mermaidBody: string[] = [];
-
-  isInFence(): boolean {
-    return this.inFence;
-  }
-
-  isInMermaid(): boolean {
-    return this.inMermaid;
-  }
-
-  processLine(line: string): FenceEvent {
-    if (isCodeFenceLine(line)) {
-      if (this.inMermaid) {
-        const body = this.mermaidBody;
-        this.mermaidBody = [];
-        this.inMermaid = false;
-        this.inFence = false;
-        this.fenceLang = "unknown";
-        return { kind: "close-mermaid", body };
-      }
-      if (this.inFence) {
-        this.inFence = false;
-        this.fenceLang = "unknown";
-        return { kind: "close-code" };
-      }
-      const lang = readFenceLanguage(line);
-      this.fenceLang = normalizeCodeLang(lang);
-      this.inFence = true;
-      if (/^mermaid$/i.test(lang)) {
-        this.inMermaid = true;
-        this.mermaidBody = [];
-        return { kind: "open" };
-      }
-      return { kind: "open" };
-    }
-
-    if (this.inMermaid) {
-      this.mermaidBody.push(line);
-      return { kind: "mermaid-body" };
-    }
-
-    if (this.inFence) {
-      return { kind: "code-line", lang: this.fenceLang };
-    }
-
-    return { kind: "outside" };
-  }
-
-  /**
-   * Take unclosed mermaid body lines if currently inside a mermaid block.
-   * Resets mermaid and fence state. Returns null if not in a mermaid block.
-   */
-  flushMermaid(extraLines?: string[]): string[] | null {
-    if (!this.inMermaid) return null;
-    if (extraLines && extraLines.length > 0) {
-      this.mermaidBody.push(...extraLines);
-    }
-    const body = this.mermaidBody;
-    this.mermaidBody = [];
-    this.inMermaid = false;
-    this.inFence = false;
-    this.fenceLang = "unknown";
-    return body;
-  }
-}
-
-/**
  * Render a complete ```mermaid ``` block (body lines only, no fences) as a
  * terminal diagram. Falls back to the raw body rendered as a normal code block
  * when the content isn't a parseable flowchart (so user content is preserved).
@@ -791,29 +700,58 @@ export function formatAssistantDisplay(
   const lines = polished.split("\n");
   const out: string[] = [];
   let i = 0;
-  const tracker = new FenceTracker();
+  let inFence = false;
+  let fenceLang: CodeLang = "unknown";
+  // True while we're inside a ```mermaid ``` block collecting its body.
+  let inMermaid = false;
+  // Accumulated body of the current mermaid block.
+  let mermaidBody: string[] | null = null;
+
+  const flushMermaid = (): void => {
+    if (mermaidBody !== null) {
+      out.push(renderMermaidBody(mermaidBody, brightness));
+      mermaidBody = null;
+    }
+  };
 
   while (i < lines.length) {
     const line = lines[i];
-    const event = tracker.processLine(line);
-    if (event.kind === "close-mermaid") {
-      // Closing mermaid fence: flush the diagram, then the fence marker.
-      out.push(renderMermaidBody(event.body, brightness));
+    if (isCodeFenceLine(line)) {
+      const lang = readFenceLanguage(line);
+      if (inMermaid) {
+        // Closing mermaid fence: flush the diagram, then the fence marker.
+        flushMermaid();
+        inMermaid = false;
+        inFence = false;
+        out.push(`${STYLE.dim}${line}${STYLE.reset}`);
+        i++;
+        continue;
+      }
+      if (inFence) {
+        fenceLang = "unknown";
+        inFence = false;
+        out.push(`${STYLE.dim}${line}${STYLE.reset}`);
+        i++;
+        continue;
+      }
+      // Opening fence.
+      inFence = true;
+      fenceLang = normalizeCodeLang(lang);
+      if (/^mermaid$/i.test(lang)) {
+        inMermaid = true;
+        mermaidBody = [];
+      }
       out.push(`${STYLE.dim}${line}${STYLE.reset}`);
       i++;
       continue;
     }
-    if (event.kind === "open" || event.kind === "close-code") {
-      out.push(`${STYLE.dim}${line}${STYLE.reset}`);
+    if (inMermaid && mermaidBody !== null) {
+      mermaidBody.push(line);
       i++;
       continue;
     }
-    if (event.kind === "mermaid-body") {
-      i++;
-      continue;
-    }
-    if (event.kind === "code-line") {
-      out.push(highlightCodeLine(line, event.lang, brightness));
+    if (inFence) {
+      out.push(highlightCodeLine(line, fenceLang, brightness));
       i++;
       continue;
     }
@@ -862,10 +800,7 @@ export function formatAssistantDisplay(
     i++;
   }
   // Trailing unclosed mermaid: flush whatever we collected.
-  const unclosed = tracker.flushMermaid();
-  if (unclosed !== null) {
-    out.push(renderMermaidBody(unclosed, brightness));
-  }
+  flushMermaid();
   return out.join("\n");
 }
 
@@ -956,7 +891,15 @@ export function createRenderAwareStreamWriter(args: {
 }) {
   const brightness = resolveTuiBrightness();
   let buffer = "";
-  const tracker = new FenceTracker();
+  let inFence = false;
+  // Current fence language, recorded at the opening fence and cleared at the
+  // closing fence. This is the only cross-line state the line-local highlighter
+  // is allowed to consume (see highlightCodeLine).
+  let fenceLang: CodeLang = "unknown";
+  // True while inside a ```mermaid ``` block; body accumulates in mermaidBody
+  // and is rendered once on the closing fence (needs the whole block).
+  let inMermaid = false;
+  let mermaidBody: string[] = [];
   // Last emitted line kind outside (and across) fences — drives stream-path
   // list↔prose breathing so live TUI matches whole-message polish.
   let lastKind: StreamLineKind | null = null;
@@ -985,7 +928,7 @@ export function createRenderAwareStreamWriter(args: {
   };
 
   const flushPartialProse = () => {
-    if (tracker.isInFence() || buffer.length < PARTIAL_FLUSH_THRESHOLD) return;
+    if (inFence || buffer.length < PARTIAL_FLUSH_THRESHOLD) return;
     const firstLine = buffer.split("\n", 1)[0] ?? "";
     // Only flush lines that are definitely plain prose. Any Markdown marker
     // stays buffered so a later chunk can be rendered as one complete span;
@@ -1028,19 +971,34 @@ export function createRenderAwareStreamWriter(args: {
       if (lines.length < 2) break;
       const firstLine = lines[0] ?? "";
 
-      const event = tracker.processLine(firstLine);
-      if (event.kind === "close-mermaid") {
-        // Closing mermaid fence: render the accumulated body, then the fence.
-        const diagram = renderMermaidBody(event.body, brightness);
-        args.write(diagram + "\n");
-        emitBreathIfNeeded("fence");
-        args.write(`${STYLE.dim}${firstLine}${STYLE.reset}\n`);
-        lastKind = "fence";
-        lastLine = firstLine;
-        buffer = lines.slice(1).join("\n");
-        continue;
-      }
-      if (event.kind === "open" || event.kind === "close-code") {
+      if (isCodeFenceLine(firstLine)) {
+        if (inMermaid) {
+          // Closing mermaid fence: render the accumulated body, then the fence.
+          const diagram = renderMermaidBody(mermaidBody, brightness);
+          args.write(diagram + "\n");
+          mermaidBody = [];
+          inMermaid = false;
+          inFence = false;
+          fenceLang = "unknown";
+          emitBreathIfNeeded("fence");
+          args.write(`${STYLE.dim}${firstLine}${STYLE.reset}\n`);
+          lastKind = "fence";
+          lastLine = firstLine;
+          buffer = lines.slice(1).join("\n");
+          continue;
+        }
+        if (inFence) {
+          fenceLang = "unknown";
+          inFence = false;
+        } else {
+          const lang = readFenceLanguage(firstLine);
+          fenceLang = normalizeCodeLang(lang);
+          if (/^mermaid$/i.test(lang)) {
+            inMermaid = true;
+            mermaidBody = [];
+          }
+          inFence = true;
+        }
         // Fence markers are their own kind ("fence"), so a prose line or list
         // run flush against ``` gets the same blank row polishAssistantStructure
         // inserts, while the code interior (also "fence") never breathes.
@@ -1051,14 +1009,15 @@ export function createRenderAwareStreamWriter(args: {
         buffer = lines.slice(1).join("\n");
         continue;
       }
-      if (event.kind === "mermaid-body") {
+      if (inMermaid) {
+        mermaidBody.push(firstLine);
         buffer = lines.slice(1).join("\n");
         continue;
       }
-      if (event.kind === "code-line") {
+      if (inFence) {
         // Line-local highlighting, matching formatAssistantDisplay. No trim,
         // no table conversion inside fences. Interior never breathes as lists.
-        args.write(`${highlightCodeLine(firstLine, event.lang, brightness)}\n`);
+        args.write(`${highlightCodeLine(firstLine, fenceLang, brightness)}\n`);
         // 围栏内部保持 fence：闭围栏贴紧最后一行代码，不在块内插空行。
         lastKind = "fence";
         lastLine = firstLine;
@@ -1070,7 +1029,7 @@ export function createRenderAwareStreamWriter(args: {
       const trimmedFirst = firstLine.trim();
       if (
         (trimmedFirst.startsWith("$$") || trimmedFirst.startsWith("\\[")) &&
-        !tracker.isInFence()
+        !inFence
       ) {
         const isBracket = trimmedFirst.startsWith("\\[");
         const closeMarker = isBracket ? "\\]" : "$$";
@@ -1182,19 +1141,17 @@ export function createRenderAwareStreamWriter(args: {
     },
     flush() {
       // Handle an unclosed mermaid block first: buffer may already be empty
-      // (lines were consumed into tracker's mermaid buffer), but we must still render it.
-      // 取舍披露：flush 视为新流开始：之后再送来的闭围栏会被按新开围栏处理
-      if (tracker.isInMermaid()) {
-        const extra = buffer ? buffer.split("\n") : undefined;
-        const unclosed = tracker.flushMermaid(extra);
-        if (unclosed !== null) {
-          args.write(renderMermaidBody(unclosed, brightness) + "\n");
-        }
+      // (lines were consumed into mermaidBody), but we must still render it.
+      if (inMermaid) {
+        if (buffer) mermaidBody.push(...buffer.split("\n"));
+        args.write(renderMermaidBody(mermaidBody, brightness) + "\n");
+        mermaidBody = [];
+        inMermaid = false;
         buffer = "";
         return;
       }
       if (!buffer) return;
-      if (tracker.isInFence()) {
+      if (inFence) {
         args.write(buffer);
       } else {
         emitFormattedAssistantBlock(args.write, buffer);

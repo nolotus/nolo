@@ -1,4 +1,3 @@
-import { attachShellApprovalHost, type ShellApprovalHost } from "./client/originShellApprovalTransport";
 // Local background agent run control plane.
 //
 // Provides a small registry under ~/.nolo/runs/ and the commands that
@@ -206,8 +205,6 @@ export type KillLike = (pid: number, signal: string | number) => void;
 
 export type SleepLike = (ms: number) => Promise<void>;
 export type AgentRunControlDeps = {
-  /** Trusted parent closure only; binding run/agent/workspace are overwritten at spawn. */
-  shellApprovalHost?: ShellApprovalHost;
   env?: EnvLike;
   homedir?: () => string;
   spawn?: SpawnLike;
@@ -1499,15 +1496,8 @@ export async function spawnLocalBackgroundRun(
     cwd: input.cwd,
     env: childEnv,
     detached: true,
-    stdio: deps.shellApprovalHost ? ["ignore", logFd, logFd, "ipc"] : ["ignore", logFd, logFd],
+    stdio: ["ignore", logFd, logFd],
   });
-  if (deps.shellApprovalHost) {
-    attachShellApprovalHost(proc, { ...deps.shellApprovalHost, binding: {
-      ...deps.shellApprovalHost.binding, runId, agentKey: input.agentKey,
-      workspaceRoot: nodeFs.realpathSync(input.cwd ?? process.cwd()),
-    } });
-    proc.channel?.unref?.();
-  }
   proc.unref();
 
   if (typeof proc.pid === "number") {

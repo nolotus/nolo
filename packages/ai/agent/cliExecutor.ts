@@ -299,14 +299,6 @@ export function buildCliProcessEnv(extraEnv?: Record<string, string | undefined>
     baseEnv.PATH = paths.join(":");
   }
 
-  // OpenCode's standard user install location is missing from GUI runtimes.
-  if (baseEnv.HOME) {
-    const delimiter = process.platform === "win32" ? ";" : ":";
-    const openCodeBin = `${baseEnv.HOME}/.opencode/bin`;
-    const paths = (baseEnv.PATH || "").split(delimiter);
-    if (!paths.includes(openCodeBin)) baseEnv.PATH = [...paths, openCodeBin].filter(Boolean).join(delimiter);
-  }
-
   return Object.fromEntries(
     Object.entries(normalizeProxyEnv(baseEnv)).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string"

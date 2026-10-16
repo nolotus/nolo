@@ -22,9 +22,9 @@ import {
   stablePromptCacheKey,
 } from "./promptCacheKey";
 import { parseSseDataLineObject } from "./sseDataLine";
-import { readSseFrames } from "./sseFrames";
+import { readSseDataValues } from "./sseFrames";
 import {
-  createResponsesStreamCollector,
+  aggregateResponsesStream,
   codexStreamFailureStatus,
   type CodexStreamFailure,
 } from "./responsesSseStream";
@@ -106,8 +106,6 @@ export type CodexResponsesCallArgs = {
   sleep?: (ms: number) => Promise<unknown>;
   /** 注入 monotonic clock，便于验证 logical invocation timing。 */
   now?: () => number;
-  onTextDelta?: (chunk: string) => void;
-  onReasoningDelta?: (chunk: string) => void;
 };
 
 type CodexRequestIdentity = {
@@ -300,27 +298,11 @@ const CODEX_STREAM_MAX_ATTEMPTS = 3;
 
 const CODEX_STREAM_RETRY_BASE_DELAY_MS = 500;
 
-async function readCodexResponsesStream(
-  response: Response,
-  args: CodexResponsesCallArgs,
-  onMeaningfulEvent: () => void,
-  signal?: AbortSignal,
-) {
-  const collector = createResponsesStreamCollector({
-    onTextDelta: args.onTextDelta,
-    onReasoningDelta: args.onReasoningDelta,
-    onMeaningfulDelta: onMeaningfulEvent,
-    fallbackPrefix: "Codex",
+async function readSseEvents(response: Response): Promise<Record<string, unknown>[]> {
+  return readSseDataValues(response, (line) => {
+    const ev = parseSseDataLineObject(line);
+    return ev && !Array.isArray(ev) ? ev : null;
   });
-  for await (const frame of readSseFrames(response)) {
-    throwIfAborted(signal);
-    for (const line of frame.split("\n")) {
-      const event = parseSseDataLineObject(line);
-      if (event && !Array.isArray(event)) collector.processEvent(event);
-    }
-  }
-  throwIfAborted(signal);
-  return collector.finalize();
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -405,14 +387,13 @@ async function callCodexResponsesOnce(
     };
   }
 
+  const events = await readSseEvents(response);
   let firstAcceptedOutputAt: number | undefined;
-  const streamed = await readCodexResponsesStream(response, args, () => {
-    firstAcceptedOutputAt ??= timingTracker.now();
-  }, args.signal);
-  const text = streamed.content;
-  const toolCalls = streamed.tool_calls ?? [];
-  const usage = streamed.usage;
-  const failure = streamed.failure;
+  const { text, toolCalls, usage, failure } = aggregateResponsesStream(events, {
+    onMeaningfulDelta: () => {
+      firstAcceptedOutputAt ??= timingTracker.now();
+    },
+  });
 
   // Only commit a first-output timestamp after this attempt is accepted. A
   // failed attempt may have emitted partial output, but that output is not
@@ -488,20 +469,9 @@ export async function fetchCodexResponsesCompletion(
     : CODEX_STREAM_MAX_ATTEMPTS;
 
   const timingTracker = createProviderCallTimingTracker(args.now);
-  let visibleOutputEmitted = false;
-  const callArgs: CodexResponsesCallArgs = {
-    ...args,
-    ...(args.onTextDelta
-      ? { onTextDelta: (chunk: string) => { if (chunk.length > 0) visibleOutputEmitted = true; args.onTextDelta?.(chunk); } }
-      : {}),
-    ...(args.onReasoningDelta
-      ? { onReasoningDelta: (chunk: string) => { visibleOutputEmitted = true; args.onReasoningDelta?.(chunk); } }
-      : {}),
-  };
-  let result = await callCodexResponsesOnce(callArgs, accountId, timingTracker);
+  let result = await callCodexResponsesOnce(args, accountId, timingTracker);
   for (let attempt = 1; attempt < maxAttempts; attempt += 1) {
     if (!RETRYABLE_CODEX_STREAM_STATUSES.has(result.status)) break;
-    if (visibleOutputEmitted) break;
     // 取消不再当作 503 结果返回：抛出 signal.reason（与原生 fetch 取消语义一致），
     // 调用方据此区分取消与真实上游失败，且取消后不再发起下一次 fetch。
     throwIfAborted(args.signal);
@@ -511,7 +481,7 @@ export async function fetchCodexResponsesCompletion(
       args.sleep,
     );
     throwIfAborted(args.signal);
-    result = await callCodexResponsesOnce(callArgs, accountId, timingTracker);
+    result = await callCodexResponsesOnce(args, accountId, timingTracker);
   }
   return result;
 }

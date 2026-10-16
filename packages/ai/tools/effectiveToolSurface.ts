@@ -44,9 +44,6 @@ export type ResolveEffectiveToolSurfaceInput = {
   hostInjectedToolNames?: Iterable<unknown> | null;
   /** Per-turn additions such as runtimeOptions.extraTools. */
   runtimeExtraToolNames?: Iterable<unknown> | null;
-  /** Runtime catalog or selectable runtime count to dynamically filter listRuntimes. */
-  runtimeCatalog?: { selectableCount: number } | null;
-  selectableRuntimeCount?: number | null;
 };
 
 export function readEffectiveToolName(value: unknown): string | null {
@@ -131,18 +128,6 @@ export function resolveEffectiveToolSurface(
       .filter((name): name is string => !!name),
   );
   for (const name of disabled) byName.delete(name);
-
-  const selectableCount =
-    typeof input.selectableRuntimeCount === "number"
-      ? input.selectableRuntimeCount
-      : typeof input.runtimeCatalog?.selectableCount === "number"
-        ? input.runtimeCatalog.selectableCount
-        : undefined;
-
-  // 只有可选 runtime > 1 时才真正把 listRuntimes 暴露给模型，<= 1 时不暴露给模型工具列表（避免单目标时产生工具调用噪声）。
-  if (selectableCount !== undefined && selectableCount <= 1) {
-    byName.delete("listRuntimes");
-  }
 
   const entries: EffectiveToolSurfaceEntry[] = [...byName.entries()].map(
     ([name, sources]) => ({ name, sources: [...sources] }),

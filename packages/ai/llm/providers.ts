@@ -22,7 +22,6 @@ import { zaiModels } from "./zai";
 import { qwenModels, qwenTokenPlanModels } from "integrations/qwen/models";
 import { moonshotModels, kimiCodeModels } from "integrations/moonshot/models";
 import { stepfunModels, stepfunStepPlanModels } from "integrations/stepfun/models";
-import { commandCodeModels } from "integrations/commandcode/models";
 import type { ModelPrice } from "./types";
 
 /**
@@ -114,10 +113,6 @@ export const MODEL_LOOKUP_MAP = {
   "opencode-go": opencodeGoModels,
   opencode: opencodeGoModels,
   ...MODEL_MAP,
-  // CommandCode Provider API（api.commandcode.ai）：CommandCode 清单是窗口真值源，
-  // 但只把「带官方口径 contextWindow」的条目挂进窗口表——官方未公布窗口的模型不进表、
-  // 不猜值。用过滤而非整表：整表会让 displayName 与其它 provider 的同名条目互相覆盖。
-  commandcode: commandCodeModels.filter((m) => typeof m.contextWindow === "number"),
 } as const;
 
 export type LookupProvider = keyof typeof MODEL_LOOKUP_MAP;
@@ -195,8 +190,6 @@ const toModel = (candidate: ModelLookupCandidate): Model => ({
   serviceTierPriceMultipliers: candidate.serviceTierPriceMultipliers,
   maxOutputTokens: candidate.maxOutputTokens ?? candidate.maxTokens,
   jsonOutput: candidate.jsonOutput,
-  /** Preserve model-level native wire protocol metadata through catalog projection. */
-  nativeProtocol: candidate.nativeProtocol,
   fnCall:
     typeof candidate.fnCall === "boolean"
       ? candidate.fnCall

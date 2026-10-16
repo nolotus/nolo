@@ -47,28 +47,14 @@ const STREAM_USAGE_PROVIDERS = new Set([
   // kimi-code CLI also sends include_usage). Custom agents pointing at the
   // same endpoint are covered by the endpoint check below, not here.
   "kimi-code",
-  // OpenDesign (open-design.ai) and OpenCode Go (opencode.ai): OpenAI-compatible
-  // aggregation / subscription endpoints. Verified to emit terminal usage with
-  // prompt_tokens_details.cached_tokens.
-  "opendesign",
-  "opencode",
-  "opencode-go",
 ]);
 
 // Kimi Code endpoint marker for user-configured custom providers.
 // Duplicated from agent-runtime on purpose: ai/llm must not depend on agent-runtime.
 const KIMI_CODE_ENDPOINT_MARKER = "api.kimi.com";
 
-const isSupportedCustomEndpoint = (endpoint?: string | null): boolean => {
-  if (typeof endpoint !== "string") return false;
-  const ep = endpoint.toLowerCase();
-  return (
-    ep.includes(KIMI_CODE_ENDPOINT_MARKER) ||
-    ep.includes("open-design.ai") ||
-    ep.includes("opencode.ai") ||
-    isOllamaEndpoint(endpoint)
-  );
-};
+const isKimiCodeEndpoint = (endpoint?: string | null): boolean =>
+  typeof endpoint === "string" && endpoint.includes(KIMI_CODE_ENDPOINT_MARKER);
 
 const EXTRA_USAGE_FIELD_PROVIDERS = new Set(["openrouter"]);
 
@@ -83,12 +69,13 @@ export const getUsageRequestOptions = (
   const api = options?.api ?? "chat-completions";
 
   // custom 是用户手配的任意 OpenAI 兼容网关，不能整体进白名单（严格网关不认
-  // stream_options 会 400）；但指向 Kimi For Coding、OpenDesign、OpenCode 或本地/云端 Ollama 端点的
+  // stream_options 会 400）；但指向 Kimi For Coding 或本地/云端 Ollama 端点的
   // custom agent 已实测支持 include_usage，按 endpoint 精准放行，否则订阅/本地流式
   // 永远没有 usage 帧（TUI context 面板不动 + 计费只剩字符估算）。
   const shouldRequestStreamUsage =
     STREAM_USAGE_PROVIDERS.has(normalizedProvider) ||
-    (normalizedProvider === "custom" && isSupportedCustomEndpoint(options?.endpoint));
+    (normalizedProvider === "custom" &&
+      (isKimiCodeEndpoint(options?.endpoint) || isOllamaEndpoint(options?.endpoint)));
 
   if (api === "responses") {
     return EXTRA_USAGE_FIELD_PROVIDERS.has(normalizedProvider)

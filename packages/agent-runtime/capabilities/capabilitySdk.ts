@@ -1,7 +1,7 @@
 import type { AgentRuntimeToolResult } from "../hostAdapter";
 import type { CapabilityExecutionContext, ExecutableCapability } from "./capability";
 import { evaluateCapabilityPolicy } from "./capabilityPolicy";
-import { execShellCapability, execShellExecutionBinding } from "./execShellCapability";
+import { execShellCapability } from "./execShellCapability";
 
 export const BUILTIN_CAPABILITIES: readonly ExecutableCapability<any, any>[] = [
   execShellCapability,
@@ -24,23 +24,12 @@ export async function invokeCapability<I = unknown, O = AgentRuntimeToolResult>(
   // 1. Canonical input normalization & validation
   const normalizedInput = capability.normalizeInput(input);
 
-  const authority = ctx.execShellApproval;
-  const binding = authority && capability.name === "execShell"
-    ? execShellExecutionBinding(normalizedInput, ctx) : undefined;
-  const signal = ctx.abortSignal;
-  const confirm = ctx.confirmDestructiveAction;
-
   // 2. Capability Policy Evaluation
   await evaluateCapabilityPolicy(capability, normalizedInput, ctx);
 
   // 3. Audit / hook (invoked only after policy approval and before execution)
   if (ctx.onInvoke) {
     await ctx.onInvoke(capability.name, normalizedInput);
-  }
-
-  if (binding !== undefined && (ctx.execShellApproval !== authority || ctx.abortSignal !== signal || ctx.confirmDestructiveAction !== confirm ||
-      signal?.aborted || execShellExecutionBinding(normalizedInput, ctx) !== binding)) {
-    throw new Error("Shell approval input changed during policy/hook");
   }
 
   // 4. Low-level capability execution

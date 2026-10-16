@@ -264,8 +264,6 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     ...(options.originSession ? { originSession: options.originSession } : {}),
     // 分享 OAuth agent 的 shell 会话授权（块 D）：仅 owner-required 场景生效。
     ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
-    ...(options.shellApprovalSession ? { shellApprovalSession: options.shellApprovalSession } : {}),
-    ...(options.execShellApproval ? { execShellApproval: options.execShellApproval } : {}),
     // 运行位置展示（块 D）：TUI 消费 projectToolExecutionLocation 渲染工具实际
     // 执行设备/工作区；非 owner-required 场景 adapter 不回调。
     ...(options.onToolExecutionLocation
@@ -389,7 +387,7 @@ export function resetOAuthChannelSkipDedupForTests(): void {
  *
  * 所有权信号与 withResolvedRuntimeToolSurface 同源：rawRecord.userId（兼读
  * ownerUserId）；历史本地记录缺 ownerId 时维持原行为（视为自己的 agent，
- * 避免误伤本地自建 agent）。
+ * 避免误伤本地自建 agent）。显式 --local 仍可强制完全本机（用户自担）。
  */
 function resolveOAuthChannelOwnerSkip(
   agentConfig: Awaited<ReturnType<AgentRuntimeHostAdapter["loadAgentConfig"]>>,
@@ -409,13 +407,18 @@ function resolveOAuthChannelOwnerSkip(
   if (!ownerUserId) return null;
   const localUserId = resolveLocalUserId(options.env);
   if (ownerUserId === localUserId) return null;
-  // 模型走分享者订阅，文件操作和命令执行仍在本机。
-  // 当前配置没有可用的分享者昵称，文案用「对方」兜底，不展示内部 ID。
-  const agentName =
-    asOptionalTrimmedString(agentConfig.name) ??
-    asOptionalTrimmedString(options.agentName) ??
-    t("agentRun.sharedAgentFallbackName");
-  return t("agentRun.oauthChannelOwnerSkip", agentName) + "\n";
+  // 这不是报错：用户在 TUI 选了别人的 sshare agent（跑在 owner 的 OAuth 订阅
+  // 上），本机用户 ID 与 owner 不同，auto 模式改走 owner-required 代理——模型
+  // 走分享者订阅、文件/shell 工具留在本机执行，不是整轮转服务端。文案要说清
+  // 「不是报错 / 模型用分享者订阅 / 工具仍在本机 / 想完全本机跑加 --local」。
+  return (
+    t(
+      "agentRun.oauthChannelOwnerSkip",
+      options.agentKey,
+      ownerUserId,
+      localUserId,
+    ) + "\n"
+  );
 }
 
 async function shouldSkipAutoLocalForServerPlatformTools(
@@ -939,32 +942,6 @@ function buildAuthFailure(ctx: FailureCtx): string {
       `${linkLine}${rawLine}${verifyHint}${retryLine}` +
       `\n  Detail: ${ctx.message} ` +
       `${NO_FALLBACK} Use --server to run on the server explicitly.\n`
-    );
-  }
-
-  // owner-origin admission rejection (HTTP 403 owner_origin_mismatch): the
-  // owner-required proxy could not verify *which device this run came from* —
-  // the declared origin machineId has no live connector connection on the
-  // owner's account, so the server has no ground truth for the machine that
-  // would run the tools (server side: ownerRequiredModelAdmission). Nothing is
-  // wrong with the credential or the agent's api-key settings, so the generic
-  // "auth rejected / check the settings on nolo.chat" copy sends the user to
-  // the wrong fix. Both signatures below are emitted only by
-  // ownerOAuthProxyTransport (message label + admission error code, inlined
-  // verbatim through JSON.stringify so the quotes stay unescaped), and pinning
-  // the status to 403 keeps every other status on its existing branch, so this
-  // cannot swallow an ordinary credential 403.
-  if (
-    ctx.status === 403 &&
-    ctx.message.includes("owner-required proxy failed") &&
-    /"code"\s*:\s*"owner_origin_mismatch"/i.test(ctx.message)
-  ) {
-    return (
-      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, this run's origin device could not be verified — no live connector connection for this machine on this server/account; owner_origin_mismatch).` +
-      `\n    · Start the connector on this machine: \`nolo connect --daemon\` (\`nolo machine status\` shows whether it is online and connected to the same server)` +
-      `\n    · Force a fully local run with --local (needs a local credential for this agent), or run on the server: --server` +
-      `\n  Detail: ${ctx.message} ` +
-      `${NO_FALLBACK} ${SERVER_FALLBACK_HINT}\n`
     );
   }
 

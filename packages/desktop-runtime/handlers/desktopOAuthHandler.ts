@@ -15,8 +15,6 @@ const DESKTOP_OAUTH_PROVIDERS = new Set<OAuthProvider>([
   "claude",
   "cursor",
   "devin",
-  "workbuddy",
-  "workbuddy-ai",
 ]);
 const activeLogins = new Map<OAuthProvider, Promise<OAuthCredential>>();
 
@@ -97,12 +95,6 @@ async function defaultRunLogin(
   if (provider === "devin") {
     const { runDevinOAuthLogin } = await import("../../cli/oauth/flows/devin");
     return runDevinOAuthLogin(flowDeps);
-  }
-  if (provider === "workbuddy" || provider === "workbuddy-ai") {
-    const { runWorkBuddyOAuthLogin } = await import(
-      "../../cli/oauth/flows/workbuddy"
-    );
-    return runWorkBuddyOAuthLogin(provider, flowDeps);
   }
   throw new Error("unsupported_desktop_oauth_provider");
 }

@@ -67,62 +67,8 @@ export const ANTIGRAVITY_TOKEN_REQUEST_TIMEOUT_MS = 30_000;
 export const ANTIGRAVITY_CLOUD_CODE_BASE_URL =
   "https://daily-cloudcode-pa.googleapis.com";
 
-/** Generic legacy host; kept for the official host table below. */
-export const ANTIGRAVITY_CLOUD_CODE_HOST = "cloudcode-pa.googleapis.com";
-
-/**
- * 官方 Cloud Code host 表（**显式**，用于解析后的 hostname 比对）。
- * - `cloudcode-pa.googleapis.com`：legacy 泛域（存量记录形态，会被升级到 daily）；
- * - `daily-cloudcode-pa.googleapis.com`：Antigravity 生产档（用户 4 个在册 agent 的形态）。
- */
-export const ANTIGRAVITY_CLOUD_CODE_HOSTS = [
-  ANTIGRAVITY_CLOUD_CODE_HOST,
-  "daily-cloudcode-pa.googleapis.com",
-] as const;
-
-/**
- * 解析后的 hostname 是否属于官方 Cloud Code 域（**显式 host 表，严格相等**）。
- *
- * 2026-10-16（跨家族复审发现的可复现绕过）：此前 `resolveAntigravityCloudCodeBaseUrl`
- * 与 `isAntigravityOAuthAgent` 都用**整串** `includes("cloudcode-pa.googleapis.com")`
- * 判定，于是下列攻击者可控形态全部通过校验，出站 URL 落到攻击者域名并带上 owner 的
- * `Authorization: Bearer <accessToken>`：
- *   - `cloudcode-pa.googleapis.com.attacker.example`     （官方域作为后缀 host）
- *   - `cloudcode-pa.googleapis.com@attacker.example`     （userinfo；真实 host 是 attacker）
- *   - `attacker.example/?u=cloudcode-pa.googleapis.com`  （query 里带官方串）
- *   - `attacker.example/cloudcode-pa.googleapis.com`     （path 里带官方串）
- * 现在只认 `new URL(...)` 解析出的 hostname，且必须**恰好**等于官方 host 表里的一项
- * （不做任何前缀/后缀/子串匹配）。口径与仓库既有的
- * `oauthUpstreamEndpoints.isGenericOAuthUpstreamUrlAllowed`（解析 + 精确 host）同构。
- *
- * 注：`cloudcode-pa.googleapis.com` 的**前缀标签变体**（`daily-cloudcode-pa…`、
- * `custom-cloudcode-pa…`）与官方 host 之间隔着一个连字符，不是它的子域 —— 因此
- * 「子域后缀」规则在这里不成立，官方变体一律**逐项显式列出**（要放行新的官方变体，
- * 就在这里加一项）。未列出的 host 一律回落到官方常量（fail-safe，不是 fail-closed）。
- */
-export function isAntigravityCloudCodeHostname(
-  rawHost: string | null | undefined,
-): boolean {
-  const hostname = asTrimmedLowercaseString(rawHost ?? "").replace(/\.+$/, "");
-  if (!hostname) return false;
-  return (ANTIGRAVITY_CLOUD_CODE_HOSTS as readonly string[]).includes(hostname);
-}
-
-/**
- * 一个 base / provider URL 是否指向官方 Cloud Code 域（不可解析 ⇒ false ⇒ 调用方
- * 回落到官方常量）。
- */
-export function isAntigravityCloudCodeBaseUrl(
-  raw: string | null | undefined,
-): boolean {
-  const value = typeof raw === "string" ? raw.trim() : "";
-  if (!value) return false;
-  try {
-    return isAntigravityCloudCodeHostname(new URL(value).hostname);
-  } catch {
-    return false;
-  }
-}
+/** Generic legacy host; kept for detection (daily host contains it as substring). */
+const ANTIGRAVITY_CLOUD_CODE_HOST = "cloudcode-pa.googleapis.com";
 /** Exact generic host to upgrade to the production Antigravity host. */
 const ANTIGRAVITY_LEGACY_GENERIC_BASE_RE =
   /^https?:\/\/cloudcode-pa\.googleapis\.com$/i;
@@ -158,9 +104,7 @@ export function resolveAntigravityCloudCodeBaseUrl(
   const raw = (customProviderUrl ?? "").trim();
   if (!raw) return ANTIGRAVITY_CLOUD_CODE_BASE_URL;
   const trimmed = trimTrailingSlash(raw);
-  // host 判定 = 解析后的 hostname（见 isAntigravityCloudCodeBaseUrl）；非法/不可解析
-  // 一律回落到官方常量 —— 绝不把 base 交给攻击者可控的 host。
-  if (isAntigravityCloudCodeBaseUrl(trimmed)) {
+  if (trimmed.includes(ANTIGRAVITY_CLOUD_CODE_HOST)) {
     const base = trimmed.replace(/\/v1internal:.*$/i, "").replace(/\/$/, "");
     // Upgrade legacy agent records pinned to the generic host so paid users
     // hit the Antigravity subscription quota instead of 429ing on the generic
@@ -183,9 +127,7 @@ export function isAntigravityOAuthAgent(
   return (
     apiKeyRef === "antigravity" ||
     provider === "google-antigravity" ||
-    // 只看解析后的 hostname（同 resolver）：后缀 host / userinfo / path 里的官方串
-    // 都不构成 antigravity 身份。
-    isAntigravityCloudCodeBaseUrl(url)
+    url.includes(ANTIGRAVITY_CLOUD_CODE_HOST)
   );
 }
 

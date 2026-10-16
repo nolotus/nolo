@@ -1,4 +1,3 @@
-import type { ShellApprovalSession } from "../client/originShellApprovalTransport";
 /**
  * tuiTurnRunner — TUI turn 执行与队列 drain 的独立模块（S3 迁移）。
  *
@@ -201,7 +200,6 @@ async function runAgentChat(
      * 非 owner 场景该字段存在也不会被触发。
      */
     shellGrant?: OriginShellGrant;
-    shellApprovalSession?: ShellApprovalSession;
     /**
      * 工具执行位置消费者（块 D）：owner-required 场景 adapter 回调一次；
      * 本模块渲染一行「工具在 <deviceName>(<deviceId>) · <workspaceRoot>
@@ -230,9 +228,8 @@ async function runAgentChat(
   // 改写），而 attached-skill 解析是与之相互独立的等待；因此在这里就发起召回，
   // 让两条 I/O 重叠，再在首次模型请求前 await 同一个 promise。远端优先 /
   // 本地 fallback / 5000ms 超时语义完全不变（仍走 resolveCliMemory）。
-  // 立即将召回结算为 outcome：skill 等待期间没有悬空 reject promise，
-  // 汇合点再恢复非取消错误的 null fallback 与用户取消语义。
-  const memoryPromptOutcomePromise =
+  // 异常在此处立即收敛为 null：否则 skill 等待期间会产生未处理的 rejection。
+  const memoryPromptPromise =
     state.cachedMemoryOverlay === undefined
       ? resolveCliMemory({
           serverUrl: state.serverUrl,
@@ -240,11 +237,7 @@ async function runAgentChat(
           agentKey: effectiveAgentKey,
           userInput: effectiveMessage,
           env,
-          ...(options.abortSignal ? { signal: options.abortSignal } : {}),
-        }).then(
-          (promptBlock) => ({ status: "fulfilled" as const, promptBlock }),
-          (error: unknown) => ({ status: "rejected" as const, error }),
-        )
+        }).catch(() => null)
       : null;
   if (state.attachedSkills.length > 0) {
     const authToken = resolvePlatformAuthToken(env);
@@ -311,16 +304,9 @@ async function runAgentChat(
   // the current one (the model already has the context from the conversation).
   // /new or dialog switch clears cachedMemoryOverlay so the next dialog reloads.
   let memoryPromptBlock = state.cachedMemoryOverlay;
-  if (options.abortSignal?.aborted) {
-    throw options.abortSignal.reason ?? new DOMException("Aborted", "AbortError");
-  }
-  if (memoryPromptBlock === undefined && memoryPromptOutcomePromise) {
+  if (memoryPromptBlock === undefined && memoryPromptPromise) {
     // 等待已提前启动的召回；首次模型请求仍须拿到这个结果。
-    const outcome = await memoryPromptOutcomePromise;
-    if (options.abortSignal?.aborted) {
-      throw options.abortSignal.reason ?? new DOMException("Aborted", "AbortError");
-    }
-    memoryPromptBlock = outcome.status === "fulfilled" ? outcome.promptBlock : null;
+    memoryPromptBlock = await memoryPromptPromise;
     // Cache will be propagated to TUI state by the caller via runResult.cachedMemoryOverlay.
   }
   const memoryOverlayLayer = buildMemoryOverlayLayer({ promptBlock: memoryPromptBlock });
@@ -387,7 +373,6 @@ async function runAgentChat(
     // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级 grant 透传；
     // 非 owner 场景 adapter 不触发该路径。
     ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
-        ...(options.shellApprovalSession ? { shellApprovalSession: options.shellApprovalSession } : {}),
     // 运行位置展示（块 D）：owner-required 场景 adapter 回调一次。
     ...(options.onToolExecutionLocation
       ? { onToolExecutionLocation: options.onToolExecutionLocation }
@@ -450,7 +435,6 @@ async function runAgentChat(
         // shell 会话授权同一对象透传给 adapter factory 路径——两个接线点共用
         // 同一份 granted 状态，撤销对两条路径同时生效。
         ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
-        ...(options.shellApprovalSession ? { shellApprovalSession: options.shellApprovalSession } : {}),
         // 运行位置展示同一回调（块 D）：与 RunAgentTurnOptions 同源。
         ...(options.onToolExecutionLocation
           ? { onToolExecutionLocation: options.onToolExecutionLocation }
@@ -970,7 +954,6 @@ export interface AgentTurnContext {
    * `shellGrant.revoke()` 立即生效。
    */
   readonly shellGrant?: OriginShellGrant;
-  readonly shellApprovalSession?: ShellApprovalSession;
   /**
    * 工具执行位置消费者（块 D）：宿主装配；owner-required 场景 adapter 回调
    * 一次，宿主渲染运行位置行。Web/桌面/RN 按同一契约后续接。
@@ -1291,7 +1274,6 @@ export async function runOneAgentTurn(
         // 分享 OAuth agent 的 shell 会话授权（块 D）：宿主装配的会话级对象；
         // 非 owner-required 场景 adapter 不触发。
         ...(ctx.shellGrant ? { shellGrant: ctx.shellGrant } : {}),
-        ...(ctx.shellApprovalSession ? { shellApprovalSession: ctx.shellApprovalSession } : {}),
         // 运行位置展示（块 D）：宿主装配的渲染回调；adapter 只在
         // owner-required 场景回调一次。
         ...(ctx.onToolExecutionLocation
@@ -1477,7 +1459,6 @@ export async function runOneAgentTurn(
     }
     return { ok: !wasAborted, aborted: wasAborted };
   } catch (error) {
-    if (ctx.activeTurnAbort?.signal.aborted) return { ok: false, aborted: true };
     // 迟到的异常：强停已经把屏幕交还用户并报过 idle，这条属于被丢弃的 turn，
     // 不许把 idle 改写成 error。
     emitStatusUnlessForceStopped({ state: "error" });

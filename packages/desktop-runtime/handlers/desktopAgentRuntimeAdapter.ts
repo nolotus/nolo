@@ -27,8 +27,7 @@ import {
   createDevinProvider,
   type CredentialBroker,
 } from "agent-runtime";
-import { resolveAgentCallPlan, type AgentCallPlan, type WireFormat } from "agent-runtime/agentCallPlan";
-import { createCustomNativeProvider, type CustomNativeWire } from "agent-runtime/customNativeProvider";
+import { resolveAgentCallPlan } from "agent-runtime/agentCallPlan";
 import { fetchAntigravityCloudCodeCompletion } from "agent-runtime/antigravityCloudCodeProvider";
 import { fetchAnthropicMessagesCompletion } from "agent-runtime/anthropicMessagesProvider";
 import { fetchCodexResponsesCompletion } from "agent-runtime/codexResponsesProvider";
@@ -48,11 +47,6 @@ import {
   describeDesktopAgentRuntimeHostFacts,
   type DesktopAgentRuntimeEnv,
 } from "./desktopAgentRuntimeHostFacts";
-import {
-  resolveDesktopAgentRuntimeAuthToken,
-  resolveDesktopAgentRuntimeServerUrl,
-} from "./desktopAgentRuntimeToolBuilders";
-import { findModelConfig } from "ai/llm/providers";
 import { CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES, CHROME_CONNECTOR_TOOL_NAMES } from "ai/tools/chromeConnectorTools";
 import { appendEnabledPackPromptPatches } from "ai/tools/toolPacks";
 import { createTokenKey, createTokenStatsKey, createUserKey, dialogMessageRange } from "database/keys";
@@ -546,126 +540,6 @@ export function resolveDesktopAgentRuntimeServerFallbacks(args: {
     .filter((s) => s && s !== primary);
 }
 
-/**
- * 桌面侧「custom provider native wire」的判别 —— 与 CLI 三条 transport
- * （`packages/cli/client/providerResolution/*CustomTransport.ts`）同构。
- *
- * 桌面此前完全不看 `Model.nativeProtocol`，把 `customProviderUrl` 一律当 OpenAI
- * 兼容 `/chat/completions` 直连；而桌面下 custom 模式恒为 direct（见
- * `resolveProviderTransportDecision` 的 custom 分支：只有 `runtimeLocation ===
- * "server"` 且 `useServerProxy === true` 才转 proxy，桌面传 `runtimeKind:"local"`），
- * 因此 native wire 只能在**本地执行壳**里支持，不能靠服务端翻译。
- *
- * 判据优先级：
- * 1. `customProviderUrl` 必须存在 —— 与 CLI gate 相同（`apiSource:"custom"` 但没填
- *    URL 的 agent 不进 native 通道）。
- * 2. plan 的 `upstreamWire` 已是 `custom-*` 时以 plan 为准（单一事实来源：plan 与
- *    runtime 用同一个目录判据，没必要在这里再判一次）。
- * 3. plan 说 `"responses"` 时不进 native：那是 `/responses` 结尾端点的既有直连形状
- *    （`resolveCustomProviderEndpoint` 原样保留它），转成 native 执行器会把路径拼成
- *    `.../responses/responses`。CLI 在这一点上会误拼，桌面不继承该行为。
- * 4. 其余情况回落到与 CLI 同构的目录判据
- *    （`findModelConfig(provider, model)?.nativeProtocol`），以容忍 plan 缺省/非
- *    custom 分支。
- */
-function resolveDesktopCustomNativeWire(args: {
-  callPlan: AgentCallPlan;
-  agentConfig: AgentRuntimeAgentConfig;
-}): CustomNativeWire | null {
-  if (!args.agentConfig.customProviderUrl) return null;
-  const fromPlan = customNativeWireFromUpstreamWire(args.callPlan.upstreamWire);
-  if (fromPlan) return fromPlan;
-  if (args.callPlan.upstreamWire === "responses") return null;
-  return customNativeWireFromNativeProtocol(
-    findModelConfig(
-      args.agentConfig.provider ?? "",
-      args.agentConfig.model ?? "",
-    )?.nativeProtocol,
-  );
-}
-
-/** plan 的 `custom-*` wire → 本地 native wire；非 `custom-*` 返回 null。 */
-function customNativeWireFromUpstreamWire(
-  wire: WireFormat,
-): CustomNativeWire | null {
-  if (wire === "custom-gemini") return "gemini";
-  if (wire === "custom-openai-responses") return "openai-responses";
-  if (wire === "custom-anthropic-messages") return "anthropic-messages";
-  return null;
-}
-
-/**
- * 模型目录 `Model.nativeProtocol` → 本地 native wire。字符串值与 CLI 三条 gate
- * 的比对逐字一致（wire 值即 nativeProtocol 标记）。
- */
-function customNativeWireFromNativeProtocol(
-  nativeProtocol: string | null | undefined,
-): CustomNativeWire | null {
-  if (nativeProtocol === "gemini") return "gemini";
-  if (nativeProtocol === "openai-responses") return "openai-responses";
-  if (nativeProtocol === "anthropic-messages") return "anthropic-messages";
-  return null;
-}
-
-/**
- * 建桌面的 custom native provider。
- *
- * 端点与凭据走与直连通道同一个 `resolveOpenAiCompatibleProviderConfig`
- * （broker → 同步回退 → OAuth resolver → `agentConfig.apiKey` 的既有顺序），
- * 可用性记录走 `desktopAgentAvailability` 的既有入口，执行壳是
- * `agent-runtime/customNativeProvider.ts`（与 CLI 三条 transport 同一份）。
- *
- * 无本地 key 时返回 null，把决定权交回既有路由（平台代理 → 直连兜底）。
- */
-async function resolveDesktopCustomNativeProvider(args: {
-  wire: CustomNativeWire;
-  env: DesktopAgentRuntimeEnv;
-  agentConfig: AgentRuntimeAgentConfig;
-  fetchImpl: typeof fetch;
-  tools: Record<string, unknown>[];
-  credentialBroker?: CredentialBroker;
-  apiKeyRefResolver?: ApiKeyRefResolver;
-}): Promise<AgentRuntimeProvider | null> {
-  const providerConfig = await resolveOpenAiCompatibleProviderConfig({
-    agentConfig: args.agentConfig,
-    env: args.env,
-    ...(args.credentialBroker ? { credentialBroker: args.credentialBroker } : {}),
-    ...(args.apiKeyRefResolver ? { apiKeyRefResolver: args.apiKeyRefResolver } : {}),
-  });
-  if (!providerConfig.apiKey) return null;
-  return createCustomNativeProvider({
-    wire: args.wire,
-    model: providerConfig.model,
-    // 契约端点（chat/completions 形状）；native 路径由共享执行器按 wire 拼。
-    endpoint: providerConfig.endpoint,
-    apiKey: providerConfig.apiKey,
-    // **原始配置值**（不是 providerConfig.apiKeyHeader —— 那是解析结果，缺省恒为
-    // "Authorization"，会顶掉 gemini/anthropic 的 wire 默认凭据头）。空/未设置 =
-    // 该 wire 的默认凭据头；非法值由执行器显式抛错。
-    apiKeyHeader: args.agentConfig.apiKeyHeader,
-    agentConfig: args.agentConfig,
-    tools: args.tools,
-    fetchImpl: args.fetchImpl,
-    // gemini wire 只认 data URI：执行器把白名单内的图片下载后内联，未命中白名单的
-    // image_url part 会被 geminiNativeShared 的 inlineData 转换**直接丢弃**（图片
-    // 静默消失）。所以这两个参数是必须项：`serverUrl` 是内联白名单（origin 必须
-    // 相等，否则 isAllowedImageUrl 恒 false），`authToken` 是拉图时的 Bearer。
-    // 字段来源沿用本包既有的同源解析（与 memory 同步、混合缓存拉取同一对）：
-    // NOLO_SERVER/BASE_URL（origin，缺省回落 SERVERS.MAIN，与桌面客户端
-    // `selectRuntimeRemoteServer` 的默认一致）+ AUTH_TOKEN/AUTH/NOLO_MACHINE_API_KEY。
-    // 残余：桌面主进程自身不写 NOLO_SERVER，宿主未导出它时「非默认集群域名」的图片
-    // 仍不内联（用例 "pins the gemini image origin allowlist ..." 钉住该现状）。
-    serverUrl: resolveDesktopAgentRuntimeServerUrl(args.env),
-    authToken: resolveDesktopAgentRuntimeAuthToken(args.env),
-    recordAvailability: (status, body) =>
-      recordAgentAvailabilityFromResponse({
-        agent: args.agentConfig as any,
-        status,
-        body,
-      }),
-  });
-}
-
 export async function resolveDesktopOpenAiCompatibleProvider(args: {
   env: DesktopAgentRuntimeEnv;
   agentConfig: AgentRuntimeAgentConfig;
@@ -957,29 +831,6 @@ export async function resolveDesktopConfiguredProvider(args: {
           : {}),
       }),
     };
-  }
-
-  // ── custom provider native wire（本地直连）────────────────────────────────
-  // 与 CLI 三条 transport 同构的 gate：`customProviderUrl` + 模型目录
-  // `nativeProtocol`（plan 已给 `custom-*` 时以 plan 为准）。这里是桌面唯一的
-  // native 接线点：custom 模式在桌面恒为 direct，平台的 custom-* 翻译只在服务端
-  // runtime 发生，所以本地必须自己按 native wire 说话。无本地 key 时
-  // `resolveDesktopCustomNativeProvider` 返回 null，交回既有路由。
-  const customNativeWire = resolveDesktopCustomNativeWire({
-    callPlan,
-    agentConfig: args.agentConfig,
-  });
-  if (customNativeWire) {
-    const customNativeProvider = await resolveDesktopCustomNativeProvider({
-      wire: customNativeWire,
-      env: args.env,
-      agentConfig: args.agentConfig,
-      fetchImpl: args.fetchImpl ?? fetch,
-      tools: args.tools ?? [],
-      ...(args.credentialBroker ? { credentialBroker: args.credentialBroker } : {}),
-      ...(args.apiKeyRefResolver ? { apiKeyRefResolver: args.apiKeyRefResolver } : {}),
-    });
-    if (customNativeProvider) return customNativeProvider;
   }
 
   const { requestTimeoutMs, ...rest } = args;

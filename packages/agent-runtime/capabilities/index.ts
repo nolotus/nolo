@@ -1,6 +1,5 @@
 export type {
   CapabilityExecutionContext,
-  ExecShellApprovalAuthority,
   ExecutableCapability,
   OpenAiCompatibleTool,
 } from "./capability";

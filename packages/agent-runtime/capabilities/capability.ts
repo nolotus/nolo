@@ -11,16 +11,7 @@ export type OpenAiCompatibleTool = Record<string, unknown> & {
   };
 };
 
-/** Trusted host only. request may await UI/IPC; consume MUST be synchronous and throw on denial.
- * Payload is an opaque exact execution binding, not model arguments or an approval boolean.
- */
-export interface ExecShellApprovalAuthority {
-  request(payload: string): Promise<string>;
-  consume(ticket: string, payload: string): void;
-}
-
 export interface CapabilityExecutionContext {
-  execShellApproval?: ExecShellApprovalAuthority;
   workspaceRoot?: string;
   /** Parent dialog/turn that asked for this capability (see processOwnership.ts). */
   owner?: ProcessOwner | null;

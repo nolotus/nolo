@@ -1,5 +1,3 @@
-import type { ShellApprovalSession } from "./originShellApprovalTransport";
-import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
 import type { AgentRuntimeAgentConfig } from "../agentRuntimeLocal";
 import type { HybridRecordStore } from "./hybridRecordStore";
 import { getDefaultCliLocalRuntimeDb } from "../localRuntimeDb";
@@ -73,8 +71,6 @@ export type CliLocalRuntimeAdapterDeps = {
    * 非 owner 场景不注入 → 旧行为逐字不变。
    */
   shellGrant?: OriginShellGrant;
-  shellApprovalSession?: ShellApprovalSession;
-  execShellApproval?: ExecShellApprovalAuthority;
   /**
    * owner-required 场景的展示用身份信息（分享 agent 名 / owner / device）。
    * 仅供 shellGrant 确认对话框与运行位置展示渲染，不是授权凭证。
