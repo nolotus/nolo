@@ -25,9 +25,6 @@ import {
   isAgentRunTerminalStatus,
   resolveRunLabel,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
-import { TAIL_LINES_MAX } from "../../core/redactLogLines";
-import { mergeRemoteTaskView, type RemoteTaskView } from "../../core/remoteTaskView";
-import { remoteTaskUnsettled, type RemoteTaskCarrier } from "./runZoneLines";
 
 /** 读一次 json 很便宜，可以贴着面板的重绘节奏走。 */
 export const RUN_POLL_INTERVAL_MS = 1000;
@@ -46,95 +43,11 @@ const DISCOVERY_TERMINAL_LINGER_MS = 60_000;
  */
 export const RUN_RECONCILE_SILENCE_MS = 15_000;
 
-/** 快照 + 远程任务证据载体（载体形状声明在 runZoneLines，两条渲染路径共用）。 */
-export type RemoteAwareSnapshot = AgentRunSnapshot & RemoteTaskCarrier;
-
-/** 控制面读通道送来的一次远程任务投影。 */
-export type RemoteTaskSnapshot = RemoteTaskCarrier & {
-  runId: string;
-  remoteTask: RemoteTaskView;
-};
-
-/**
- * 远程任务的非模型取数通道（契约 §10.2 / M3）。
- *
- * 为什么需要它：远端任务在 `~/.nolo/runs/*.json` 里没有记录（它跑在服务端或
- * 另一台设备上），本机 registry 轮询天然看不见它；而可见性又不能靠模型调
- * controlAgentRun 轮询来换——那是用刷屏换可见性。所以 TUI 自己发一次控制面
- * 读请求（复用既有 control 读 API／客户端），不经过模型、不花 token、不在
- * transcript 里留任何卡片。
- */
-export type RemoteTaskSource = {
-  /** 一次控制面读。同步（缓存）或 Promise 均可，Promise 由轮询器挂回调。 */
-  read(runIds: string[]): RemoteTaskSnapshot[] | Promise<RemoteTaskSnapshot[]>;
-  /** 按需日志：只有显式 requestLogTail 才会被调用，tailLines 已由轮询器钳制。 */
-  readLogTail?(runId: string, tailLines: number): string | undefined;
-};
-
-export type HttpRemoteTaskSourceDeps = {
-  getServerUrl: () => string;
-  getAuthToken?: () => string;
-  fetchImpl?: typeof fetch;
-};
-
-/**
- * 构造基于服务端 control 端点（POST /api/agent/runs/control { action: "list" }）
- * 的非模型远程任务取数源（§10.2 / M3 / H5）。
- */
-export function createHttpRemoteTaskSource(
-  deps: HttpRemoteTaskSourceDeps
-): RemoteTaskSource {
-  const fetchFn = deps.fetchImpl ?? fetch;
-  return {
-    async read(_runIds: string[]): Promise<RemoteTaskSnapshot[]> {
-      const serverUrl = deps.getServerUrl();
-      if (!serverUrl) return [];
-      const authToken = deps.getAuthToken ? deps.getAuthToken() : "";
-      try {
-        const response = await fetchFn(
-          new URL("/api/agent/runs/control", serverUrl),
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-            },
-            body: JSON.stringify({ action: "list" }),
-            signal: AbortSignal.timeout(5_000),
-          }
-        );
-        if (!response.ok) return [];
-        const payload = (await response.json()) as any;
-        if (!payload?.ok || !Array.isArray(payload?.data?.runs)) return [];
-        const now = Date.now();
-        const snapshots: RemoteTaskSnapshot[] = [];
-        for (const item of payload.data.runs) {
-          if (!item || !item.runId) continue;
-          const remoteTask = item.remoteTask;
-          if (!remoteTask || typeof remoteTask !== "object") continue;
-          const hasEvidence =
-            remoteTask.location?.status !== "unknown" ||
-            remoteTask.process?.status !== undefined ||
-            remoteTask.cleanup?.status !== undefined;
-          snapshots.push({
-            runId: item.runId,
-            remoteTask,
-            ...(hasEvidence ? { lastEvidenceAt: now } : {}),
-          });
-        }
-        return snapshots;
-      } catch {
-        return [];
-      }
-    },
-  };
-}
-
 export type RunRegistryPollerDeps = {
   /** 面板当前挂着哪些 run（dock.getRuns()）。 */
-  getDockedRuns: () => RemoteAwareSnapshot[];
+  getDockedRuns: () => AgentRunSnapshot[];
   /** 把读到的状态喂回 dock。 */
-  update: (snapshot: RemoteAwareSnapshot) => void;
+  update: (snapshot: AgentRunSnapshot) => void;
   /** 读一条 run 记录（纯文件读）。 */
   readRecord: (runId: string) => RunRecord | null | undefined;
   /** 可选：扫描本地 registry，供首轮发现尚未上板的 run。 */
@@ -149,11 +62,6 @@ export type RunRegistryPollerDeps = {
    * 服务端，本地 registry 里根本没有）。
    */
   onRecordsPolled?: (records: RunRecord[]) => void;
-  /**
-   * 第二条非模型来路：远程任务的取数通道。不传＝没有远端证据（面板照旧只报
-   * 本机 registry 看得到的东西，绝不猜）。
-   */
-  remoteTasks?: RemoteTaskSource;
   now?: () => number;
   intervalMs?: number;
   reconcileSilenceMs?: number;
@@ -170,8 +78,6 @@ export type RunRegistryPoller = {
   endHold(): void;
   /** 立刻走一轮（测试与首帧用）。 */
   poll(): void;
-  /** 按需取日志切片：只读一次，且 tailLines 钳制到 TAIL_LINES_MAX。 */
-  requestLogTail(runId: string, tailLines: number): void;
   /** 停表并忘掉去重状态；之后仍可被 ensureRunning 重新起表。 */
   stop(): void;
   /** 会话结束时调用：停表，且此后拒绝再起表。 */
@@ -389,13 +295,6 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
       ...discoveredActive,
       ...discoveredTerminal.map((record) => ({ runId: record.runId, status: record.status } as AgentRunSnapshot)),
     ];
-    // 远程任务的轮询名单由远端取数通道维护：本机 registry 里没有它的记录，
-    // 「有没有本地记录」不该决定表停不停——停了就再没人盯着远端了。
-    for (const runId of remoteTracked.keys()) {
-      if (!active.some((run) => run.runId === runId)) {
-        active.push({ runId, status: "running" } as AgentRunSnapshot);
-      }
-    }
     if (active.length === 0 && holdCount === 0) {
       stop();
       return;
@@ -491,161 +390,6 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
         /* observer errors must not take down the poll loop */
       }
     }
-
-    // 本机 registry 读完之后，顺手问一次控制面读通道。这一步不是模型调用：
-    // 没有 tool-result，没有 transcript 卡片，面板要动不需要模型去轮询。
-    pollRemote();
-  };
-
-  /** 已从控制面读通道看到的远程任务（含远端独占、本机没有记录的 run）。 */
-  const remoteTracked = new Map<string, RemoteTaskSnapshot>();
-  /** 远端已收敛但还没从面板摘掉的 run（见 applyRemote 的退休规则）。 */
-  const remoteSettledSeen = new Set<string>();
-  let remoteReadInFlight = false;
-
-  /**
-   * 把一次远端读数落进 dock。
-   *
-   * 只覆盖远程字段：status 与本机字段仍由本机 registry 和 P1 tool-result 决定，
-   * 两条来路在同一个 update() 里合并（dock 的 remote 字段是「粘」的），谁都不
-   * 覆盖谁。
-   */
-  const applyRemote = (list: RemoteTaskSnapshot[]) => {
-    remoteReadInFlight = false;
-    const docked = new Map(deps.getDockedRuns().map((run) => [run.runId, run]));
-    for (const item of list) {
-      if (!item || !item.runId) continue;
-      const prev = remoteTracked.get(item.runId);
-      // 远端投影是增量下发的：缺字段 ≠ 撤回，合并规则只有 core 里那一份。
-      const mergedRemote = prev
-        ? mergeRemoteTaskView(prev.remoteTask, item.remoteTask)
-        : item.remoteTask;
-      const lastEvidenceAt = item.lastEvidenceAt ?? prev?.lastEvidenceAt;
-      const logTail = item.logTail ?? prev?.logTail;
-      const snapshot: RemoteTaskSnapshot = {
-        runId: item.runId,
-        remoteTask: mergedRemote,
-        ...(lastEvidenceAt !== undefined ? { lastEvidenceAt } : {}),
-        ...(logTail !== undefined ? { logTail } : {}),
-      };
-      remoteTracked.set(item.runId, snapshot);
-      const dockedRun = docked.get(item.runId);
-      // 本机记录带的字段优先；远端独占的 run 连 status 都没有，只能借用
-      // 「running」这个占位（面板不会因此显示活跃转轮：远程证据未知时渲染层
-      // 用的是静态标记，见 runZoneLines.remoteTaskClock / runZoneLeadIcon）。
-      deps.update({
-        ...(dockedRun ?? { status: "running", logKey: "" }),
-        runId: item.runId,
-        remoteTask: snapshot.remoteTask,
-        ...(snapshot.lastEvidenceAt !== undefined
-          ? { lastEvidenceAt: snapshot.lastEvidenceAt }
-          : {}),
-        ...(snapshot.logTail !== undefined ? { logTail: snapshot.logTail } : {}),
-      } as RemoteAwareSnapshot);
-    }
-
-    // 远端收敛（进程停了、清理不是「未确认」）之后：本机记录还在跑就交给本机
-    // 那条路；本机也终态了或压根没有本机记录，就让面板再留一帧「已停止/远端
-    // stopped」，下一轮才摘（摘除不留墓碑，重新上板仍然可能）。
-    for (const [runId, snapshot] of [...remoteTracked]) {
-      if (remoteTaskUnsettled(snapshot)) {
-        remoteSettledSeen.delete(runId);
-        continue;
-      }
-      const dockedRun = docked.get(runId);
-      if (dockedRun && !isAgentRunTerminalStatus(dockedRun.status)) {
-        remoteSettledSeen.delete(runId);
-        continue;
-      }
-      if (!remoteSettledSeen.has(runId)) {
-        remoteSettledSeen.add(runId);
-        continue;
-      }
-      remoteTracked.delete(runId);
-      remoteSettledSeen.delete(runId);
-      if (!dockedRun) deps.update({ runId, status: "not_found", logKey: "" });
-    }
-  };
-
-  /**
-   * 非模型取数的一拍。
-   *
-   * 读失败不是「远端什么都没有了」：这一拍没有证据，面板就不该动——失联时
-   * 保持上一帧（外加越走越旧的心跳/年龄）才是唯一不撒谎的呈现。
-   */
-  const pollRemote = () => {
-    const source = deps.remoteTasks;
-    if (!source || remoteReadInFlight) return;
-    const runIds = [
-      ...new Set([...deps.getDockedRuns().map((run) => run.runId), ...remoteTracked.keys()]),
-    ].filter((runId) => Boolean(runId));
-    let result: RemoteTaskSnapshot[] | Promise<RemoteTaskSnapshot[]>;
-    try {
-      result = source.read(runIds);
-    } catch {
-      return;
-    }
-    if (result && typeof (result as Promise<RemoteTaskSnapshot[]>).then === "function") {
-      remoteReadInFlight = true;
-      (result as Promise<RemoteTaskSnapshot[]>).then(
-        (list) => {
-          try {
-            applyRemote(list ?? []);
-          } catch {
-            remoteReadInFlight = false;
-          }
-        },
-        () => {
-          remoteReadInFlight = false;
-        }
-      );
-      return;
-    }
-    try {
-      applyRemote((result as RemoteTaskSnapshot[]) ?? []);
-    } catch {
-      /* 远端投影出岔子不该带走轮询器——它跑在 TUI 主循环上 */
-    }
-  };
-
-  /**
-   * 按需取日志切片（§9.2）。
-   *
-   * 日志不是轮询的产物：每 tick 拉一次尾巴既贵又会把转录区吃满，而面板要的
-   * 只是「最后一屏」。所以轮询一拍都不碰日志，只有显式请求才读一次，且
-   * tailLines 钳制到 TAIL_LINES_MAX——上限只有一份，在 core 里。
-   */
-  const requestLogTail = (runId: string, tailLines: number) => {
-    const source = deps.remoteTasks;
-    if (!source?.readLogTail || !runId) return;
-    const limit =
-      Number.isFinite(tailLines) && tailLines > 0
-        ? Math.min(Math.floor(tailLines), TAIL_LINES_MAX)
-        : TAIL_LINES_MAX;
-    let tail: string | undefined;
-    try {
-      tail = source.readLogTail(runId, limit);
-    } catch {
-      return;
-    }
-    if (typeof tail !== "string") return;
-    const prev = remoteTracked.get(runId);
-    const remoteTask = prev?.remoteTask ?? { runId, location: { status: "unknown" as const } };
-    const snapshot: RemoteTaskSnapshot = {
-      runId,
-      remoteTask,
-      ...(prev?.lastEvidenceAt !== undefined ? { lastEvidenceAt: prev.lastEvidenceAt } : {}),
-      logTail: tail,
-    };
-    remoteTracked.set(runId, snapshot);
-    const dockedRun = deps.getDockedRuns().find((run) => run.runId === runId);
-    deps.update({
-      ...(dockedRun ?? { status: "running", logKey: "" }),
-      runId,
-      remoteTask,
-      ...(snapshot.lastEvidenceAt !== undefined ? { lastEvidenceAt: snapshot.lastEvidenceAt } : {}),
-      logTail: tail,
-    } as RemoteAwareSnapshot);
   };
 
   const ensureRunning = () => {
@@ -666,12 +410,9 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
       if (holdCount > 0) holdCount -= 1;
     },
     poll,
-    requestLogTail,
     stop,
     dispose() {
       disposed = true;
-      remoteTracked.clear();
-      remoteSettledSeen.clear();
       stop();
     },
   };

@@ -38,9 +38,6 @@ import { Tooltip } from "render/web/ui/Tooltip";
 import Kbd from "render/web/ui/Kbd";
 import { AddCategoryModal } from "create/space/category/AddCategoryModal";
 import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
-import { selectIdentityUserId } from "identity/selectors";
-import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
-import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { SidebarPinnedBlock } from "./sidebar/SidebarPinnedBlock";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 import { useFavoriteSidebarItems } from "app/favorite/useFavoriteSidebarItems";
@@ -249,20 +246,6 @@ const ChatSidebar: React.FC = () => {
     />
   );
 
-  // §10.1 跨对话任务全局入口：user 级 scope（不带 dialogId）⇒ 切换对话不消失；
-  // 零任务时组件自身返回 null（attention-first，默认不占位不打断）。
-  const identityUserId = useAppSelector(selectIdentityUserId);
-  const remoteTasksGlobalEntry = useMemo(
-    () =>
-      identityUserId ? (
-        <RemoteTasksGlobalEntry
-          scope={{ userId: identityUserId }}
-          dialogHref={(dialogId) => buildDialogUrl(dialogId, space?.id)}
-        />
-      ) : null,
-    [identityUserId, space?.id],
-  );
-
   // 全局收藏专区（受 typeFilter 控制；可折叠）
   const favoritesSection = (
     <div
@@ -365,7 +348,6 @@ const ChatSidebar: React.FC = () => {
         {favoritesSection}
         {spaceSwitcherHeader}
         <SidebarCoachmark />
-        {remoteTasksGlobalEntry}
         <AllViewSidebar typeFilter={typeFilter} />
         {commandPalette}
       </div>
@@ -388,7 +370,6 @@ const ChatSidebar: React.FC = () => {
       {favoritesSection}
       {spaceSwitcherHeader}
       <SidebarCoachmark />
-      {remoteTasksGlobalEntry}
 
       <SidebarPinnedBlock 
         items={pinnedItems} 
