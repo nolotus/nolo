@@ -820,6 +820,22 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     commercialKind: "api",
     accessVariant: "metered_key",
   },
+  // LithosAI 推理云：预付余额、按量计费（402=insufficient_quota；429 分
+  // rate_limit_exceeded / provider_overloaded）。实测仅 OpenAI 兼容三端点
+  // （GET /models、GET /models/{author}/{slug}、POST /chat/completions），
+  // 思考旋钮为 reasoning_effort（low/high/max，无 thinking 字段）；
+  // 模型 ID 形如 author/slug，不维护静态 modelOptions 清单。
+  {
+    kind: "api_key_template",
+    id: "lithosai-api",
+    label: "LithosAI API 用量计费",
+    description: "LithosAI 推理云（OpenAI 兼容，按量计费，预付余额）",
+    provider: "lithosai",
+    baseUrl: "https://api.lithosai.cloud/v1",
+    defaultModel: "deepseek-ai/DeepSeek-V4.1-Flash",
+    commercialKind: "api",
+    accessVariant: "metered_key",
+  },
 ];
 
 export const ALL_PROVIDER_REGISTRY: ProviderRegistryEntry[] = [

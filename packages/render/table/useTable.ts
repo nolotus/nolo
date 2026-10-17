@@ -41,11 +41,36 @@ export const useTable = (tableKey: string | undefined, options: UseTableOptions 
     }, [tableKey]);
 
     // 2. Load Data
+    //
+    // 2026-10-08 竞态修复：initTable 与 loadTableRows 原先并发 dispatch。
+    // initTable 首行把 currentTable 置 null 再 await 读元数据；若 loadTableRows 的
+    // fetch 更快失败（remoteServers 为空且本地无行时抛错），旧守卫
+    // `if (s.currentTable && ...)` 不成立 → error/rows 被静默丢弃 → 页面显示
+    // 「0 / 0 行」且 error 恒为 null。
+    //
+    // 改为顺序：先 await initTable（元数据），成功后再触发 loadTableRows。这样：
+    //   - 从源头消除竞态（rows 一定在元数据写入之后读）；
+    //   - 元数据失败时 initTable 抛错，直接跳过 loadTableRows（不误发），
+    //     失败信息已由 initTable 写入 store.error；
+    //   - cancelled 标记防止 await 期间 key 变更/卸载后写入过期结果。
     useEffect(() => {
-        if (enabled && valid && tenantId && tableId) {
-            void dispatch(initTable({ tenantId, tableId }));
-            void dispatch(loadTableRows({ tenantId, tableId }));
-        }
+        if (!(enabled && valid && tenantId && tableId)) return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                await dispatch(initTable({ tenantId, tableId }));
+            } catch {
+                // 元数据失败：store.error 已由 initTable 写入，无需再发 loadTableRows。
+                return;
+            }
+            if (cancelled) return;
+            void dispatch(loadTableRows({ tenantId, tableId })).catch(() => {
+                // 行加载失败：store.error 已由 loadTableRows 写入，UI 据此展示。
+            });
+        })();
+        return () => {
+            cancelled = true;
+        };
     }, [dispatch, enabled, valid, tenantId, tableId, currentToken, currentUserId]);
 
     // 3. Domain Store Reads (peeled out of Redux)

@@ -35,6 +35,10 @@ const skillDiscoveryBrowserStub = join(
   configDir,
   "../../packages/agent-runtime/skillDiscovery.browser.stub.ts",
 );
+const dockerRuntimeReadinessBrowserStub = join(
+  configDir,
+  "../../packages/server/handlers/agentRun/dockerRuntimeReadiness.browser.stub.ts",
+);
 
 // ---- Web edition（package.json 条件导出版本）--------------------------------
 // cloud（默认）: 既有云端 web/SSR 构建，nolo-cloud 条件优先。
@@ -117,6 +121,15 @@ const agentRuntimeBrowserCompatPlugin = {
       if (args.kind === "entry-point") return;
       if (args.path.includes("skillDiscovery.browser.stub")) return;
       return { path: skillDiscoveryBrowserStub };
+    });
+    // dockerRuntimeReadiness 的默认 sbx 探测 runner 懒加载 Node child_process；
+    // server/handlers/agentRun 经 agent 工具注册表（listRuntimesTool）静态进入 web 图，
+    // 浏览器无法探测、也不允许 Node 内建进入构建 → 重定向到 fail-closed stub
+    // （纯逻辑与真实实现一致；探测入口如实 not-configured，绝不默认放行）。
+    build.onResolve({ filter: /dockerRuntimeReadiness(\.ts)?$/ }, (args) => {
+      if (args.kind === "entry-point") return;
+      if (args.path.includes("dockerRuntimeReadiness.browser.stub")) return;
+      return { path: dockerRuntimeReadinessBrowserStub };
     });
   },
 };

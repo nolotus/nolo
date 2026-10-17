@@ -111,6 +111,9 @@ export const PROVIDER_REASONING_EFFORT_VALUES: Record<string, ReasoningEffort[]>
   commandcode: ["low", "medium", "high", "xhigh", "max"],
   // 阶跃星辰（StepFun）推理模型（step-3.5-flash-2603 / step-3.7-flash 等）支持 low / medium / high
   stepfun: ["none", "low", "medium", "high"],
+  // LithosAI 推理云：上游为 DeepSeek，文档 reasoning_effort 取值 low / high / max
+  // （low/high 已实测被接受；medium/xhigh 未验证，不列出）。
+  lithosai: ["low", "high", "max"],
 };
 
 /**

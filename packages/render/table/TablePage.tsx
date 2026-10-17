@@ -24,6 +24,7 @@ import {
     updateColumnWidth,
     setTableFocusContext,
     updateTableIcon,
+    loadTableRows,
 } from "./tableStore";
 import { useTable } from "./useTable";
 import NoMatch from "../NoMatch";
@@ -699,6 +700,18 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
             ? String(selectEditorRow[selectEditor.columnName] ?? "")
             : "";
 
+    // 行加载失败时的重试：优先复用 useTable 暴露的 dispatch + loadTableRows，
+    // 保持与初次加载相同的命令路径；仅在缺少 tenant/table 标识时才退回整页刷新。
+    const handleRetryLoadRows = useCallback(() => {
+        if (tenantId && tableId) {
+            void dispatch(loadTableRows({ tenantId, tableId }));
+            return;
+        }
+        if (typeof window !== "undefined") {
+            window.location.reload();
+        }
+    }, [dispatch, tenantId, tableId]);
+
     const gridColSpan = columns.length + 1;
 
     // 8. 所有 Hook 都声明完之后，才允许 early return
@@ -749,9 +762,15 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
                 />
 
                 {error && (
-                    <div className="table-page__error">
-                        <LuCircleAlert size={16} aria-hidden="true" />
-                        {error}
+                    <div
+                        className="table-page__center-state table-page__center-state--error table-page__rows-error"
+                        data-testid="table-page-rows-error"
+                    >
+                        <LuCircleAlert size={24} color="var(--error)" aria-hidden="true" />
+                        <span>{error}</span>
+                        <Button variant="secondary" size="small" onClick={handleRetryLoadRows}>
+                            重试
+                        </Button>
                     </div>
                 )}
 
@@ -790,6 +809,8 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
                         handleMoveColumn={handleMoveColumn}
                         sortedAndOrderedRows={sortedAndOrderedRows}
                         filteredRows={filteredRows}
+                        loadError={error}
+                        isLoadingRows={isLoading && rows.length === 0}
                         editingRowIndex={editingRowIndex}
                         editingCell={editingCell}
                         editingValue={editingValue}

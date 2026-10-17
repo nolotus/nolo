@@ -26,6 +26,7 @@ import {
     LuArrowUpDown,
     LuChevronLeft,
     LuChevronRight,
+    LuLoaderCircle,
     LuStar,
     LuTrash2,
 } from "react-icons/lu";
@@ -55,6 +56,10 @@ export interface TableGridSectionProps {
     handleMoveColumn: (fromIndex: number, toIndex: number) => void;
     sortedAndOrderedRows: any[];
     filteredRows: any[];
+    /** 行加载失败信息（元数据已就绪但行请求失败时非空）。 */
+    loadError?: string | null;
+    /** 行数据是否仍在加载中（用于区分「加载中」与「确实为空」）。 */
+    isLoadingRows?: boolean;
     editingRowIndex: number;
     editingCell: { dbKey: string; columnName: string } | null;
     editingValue: string;
@@ -103,6 +108,8 @@ export const TableGridSection: React.FC<TableGridSectionProps> = ({
     handleMoveColumn,
     sortedAndOrderedRows,
     filteredRows,
+    loadError,
+    isLoadingRows,
     editingRowIndex,
     editingCell,
     editingValue,
@@ -494,7 +501,25 @@ export const TableGridSection: React.FC<TableGridSectionProps> = ({
                     {mountedGridRowCount === 0 && (
                         <BaseTableRow>
                             <BaseTableCell colSpan={gridColSpan} className="table-page__empty-cell">
-                                {filteredRows.length === 0 ? "暂无符合条件的行" : "暂无数据"}
+                                {loadError ? (
+                                    // 行加载失败：页面级错误条已展示信息与「重试」，
+                                    // 此处不再重复报错、更不能显示误导性的空态。
+                                    <span
+                                        className="table-page__rows-error-hint"
+                                        data-testid="table-grid-rows-error"
+                                    >
+                                        行数据加载失败，请查看上方错误提示后重试。
+                                    </span>
+                                ) : isLoadingRows ? (
+                                    <div className="table-page__center-state" data-testid="table-grid-rows-loading">
+                                        <LuLoaderCircle className="spin" size={16} color="var(--primary)" aria-hidden="true" />
+                                        <span>正在加载行数据...</span>
+                                    </div>
+                                ) : filteredRows.length === 0 ? (
+                                    "暂无符合条件的行"
+                                ) : (
+                                    "暂无数据"
+                                )}
                             </BaseTableCell>
                         </BaseTableRow>
                     )}

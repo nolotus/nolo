@@ -32,6 +32,7 @@ import {
   builtinRuntimeFallbackEntries,
 } from "core/builtinAgentCatalog";
 import { parsePublicAgentId, publicAgentKey } from "core/prefix";
+import { BUILTIN_NOLO_AGENT_KEY } from "core/builtinAgents";
 import { resolveBuiltinAgentRuntimeFields } from "./builtinPlatformAgentRoute";
 
 export {
@@ -131,12 +132,35 @@ export function resolveBuiltinPlatformAgentRecord(
  * 而下游有直接从 rawRecord 读 provider/model 的（web 的 streamAgentChatTurn
  * 就是），只盖顶层会留下一份仍是旧值的副本。
  */
+/**
+ * 内置档的额外运行时覆盖字段（provider/model 之外的代码托管字段）。
+ * 目前只有 @nolo：DeepSeek 官方 reasoning_effort 取值 low/high/max，平台默认档
+ * 直接声明 max；服务端代理（chatProxyRouting.enhanceKimiCodeBody）对该值保持
+ * 透传，不再折叠成 high。
+ *
+ * 刻意只作用于 @nolo 本体：其余内置档（含 provider/model 同为 nolo/deepseek-flash
+ * 的应用构建助手 / AI 创建助手 / 反馈入口 / Chrome 操作员）一律不推——owner
+ * 明确要求过不要外推。
+ */
+const BUILTIN_RUNTIME_EXTRA_OVERRIDES: Record<string, Record<string, unknown>> = {
+  [BUILTIN_NOLO_AGENT_KEY]: { reasoningEffort: "max" },
+};
+
 export function applyBuiltinAgentRuntimeOverride<T extends object>(
   agentKey: string,
   record: T,
 ): T {
   const fields = resolveBuiltinAgentRuntimeFields(agentKey);
   if (!fields) return record;
+
+  const extraFields = BUILTIN_RUNTIME_EXTRA_OVERRIDES[agentKey];
+  const extraNeedsOverride = (target: unknown): boolean => {
+    if (extraFields == null || target == null || typeof target !== "object") {
+      return false;
+    }
+    const flat = target as Record<string, unknown>;
+    return Object.entries(extraFields).some(([key, value]) => flat[key] !== value);
+  };
 
   const current = record as {
     provider?: unknown;
@@ -146,12 +170,14 @@ export function applyBuiltinAgentRuntimeOverride<T extends object>(
   const rawNeedsOverride =
     current.rawRecord != null &&
     (current.rawRecord.provider !== fields.provider ||
-      current.rawRecord.model !== fields.model);
+      current.rawRecord.model !== fields.model ||
+      extraNeedsOverride(current.rawRecord));
 
   if (
     current.provider === fields.provider &&
     current.model === fields.model &&
-    !rawNeedsOverride
+    !rawNeedsOverride &&
+    !extraNeedsOverride(record)
   ) {
     return record;
   }
@@ -160,12 +186,14 @@ export function applyBuiltinAgentRuntimeOverride<T extends object>(
     ...record,
     provider: fields.provider,
     model: fields.model,
+    ...(extraFields ?? {}),
     ...(current.rawRecord
       ? {
           rawRecord: {
             ...current.rawRecord,
             provider: fields.provider,
             model: fields.model,
+            ...(extraFields ?? {}),
           },
         }
       : {}),

@@ -18,6 +18,8 @@ export const PROVIDER_KEY_PRESET_IDS = new Set([
   "openrouter-api",
   "deepseek-api",
   "qwen-api",
+  // LithosAI 按量计费 API（api.lithosai.cloud，默认 DeepSeek-V4.1-Flash）。
+  "lithosai-api",
   // MiMo 官方按量计费 API（与 token-plan 订阅 Key 不同通道）。
   "mimo-api",
   "kimi-api",

@@ -32,6 +32,7 @@ export const DISCOVERABLE_PRESET_IDS: ReadonlySet<string> = new Set([
   "qwen-api",
   "kimi-api",
   "minimax-api",
+  "lithosai-api",
 ]);
 
 /** 客户端白名单（API endpoint presets + OAuth 通道；双端各自维护，契约由测试锁定）。 */

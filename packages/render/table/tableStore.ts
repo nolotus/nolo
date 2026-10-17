@@ -22,6 +22,7 @@ import {
   resolveReplicationServers,
   scheduleWriteReplication,
 } from "database/actions/replication";
+import { logger } from "core/logger";
 import { fetchAndCacheTableRows } from "./fetchAndCacheTableRows";
 import {
   addColumnOptionInMeta,
@@ -60,8 +61,21 @@ export interface TableFocusContext {
   isEditing: boolean;
 }
 
+/** 表定位标识（tenantId + tableId）—— 与 TableMeta 的定位字段同构。 */
+export interface TableTargetRef {
+  tenantId: string;
+  tableId: string;
+}
+
 export interface TableState {
   currentTable: TableMeta | null;
+  /**
+   * initTable 首行写入的「当前预期加载的表」；跨表写入守卫的权威标识。
+   * - initTable 运行期间及完成后 = 该表的 tenantId/tableId；
+   * - 从未 initTable（模块初始 / 测试直接 setState）= null，守卫退回按 currentTable 比较。
+   * 不要在 initTable 失败时清空——清空会让「别的表」重新获得写入权（污染窗口回归）。
+   */
+  expectedTableKey: TableTargetRef | null;
   isLoading: boolean;
   isInitialized: boolean;
   error: string | null;
@@ -71,6 +85,7 @@ export interface TableState {
 
 const createInitialState = (): TableState => ({
   currentTable: null,
+  expectedTableKey: null,
   isLoading: false,
   isInitialized: false,
   error: null,
@@ -239,6 +254,9 @@ export const initTable = createTableCommand(
       error: null,
       isInitialized: false,
       currentTable: null,
+      // 从第一行起就声明「预期表」：读取期间 currentTable 为 null，
+      // 但只有本表的 loadTableRows 结果有权写入（见 isCurrentTableTarget）。
+      expectedTableKey: { tenantId, tableId },
       rows: [],
     }));
 
@@ -251,37 +269,52 @@ export const initTable = createTableCommand(
       const meta = ((isMatch && readAction.payload) ? readAction.payload : (readAction?.payload || readAction)) as TableMeta;
 
       if (meta && typeof meta === "object" && ("columns" in meta || "displayName" in meta || "tableId" in meta)) {
-        setState((s) => ({
-          ...s,
-          isLoading: false,
-          isInitialized: true,
-          currentTable: meta,
-          error: null,
-        }));
+        // 翻表竞态守卫（2026-10-08）：await 期间若已被后续 initTable(B) 改写
+        // expectedTableKey，本次 A 的写入一律跳过（不得覆盖 B 的任何状态）。
+        // 判定复用 loadTableRows 同一套 isCurrentTableTarget（定义见下方守卫注释），
+        // 避免两套语义不一致。返回值 meta 仍交给调用方（本身无害），但不触碰 store。
+        setState((s) => {
+          if (!isCurrentTableTarget(s, tenantId, tableId)) return s;
+          return {
+            ...s,
+            isLoading: false,
+            isInitialized: true,
+            currentTable: meta,
+            error: null,
+          };
+        });
         return meta;
       }
 
       const msg =
         (readAction.payload as any)?.message || `无法加载表 ${tableId}`;
-      setState((s) => ({
-        ...s,
-        isLoading: false,
-        isInitialized: true,
-        currentTable: null,
-        error: msg,
-        rows: [],
-      }));
+      setState((s) => {
+        if (!isCurrentTableTarget(s, tenantId, tableId)) return s;
+        return {
+          ...s,
+          isLoading: false,
+          isInitialized: true,
+          currentTable: null,
+          error: msg,
+          rows: [],
+        };
+      });
       throw new Error(msg);
     } catch (e: any) {
       const msg = e?.message || `初始化表 ${tableId} 时出错`;
-      setState((s) => ({
-        ...s,
-        isLoading: false,
-        isInitialized: true,
-        currentTable: null,
-        error: msg,
-        rows: [],
-      }));
+      // 同上：失败/异常路径同样只在「仍是预期表」时写入；仍抛出以让调用方
+      // （useTable 顺序逻辑）感知失败，但不污染后来居上的表 B 的状态。
+      setState((s) => {
+        if (!isCurrentTableTarget(s, tenantId, tableId)) return s;
+        return {
+          ...s,
+          isLoading: false,
+          isInitialized: true,
+          currentTable: null,
+          error: msg,
+          rows: [],
+        };
+      });
       throw e;
     }
   }
@@ -292,6 +325,45 @@ export interface LoadTableRowsArgs {
   tableId: string;
 }
 
+/**
+ * loadTableRows 的写入守卫：只认「本次调用的表标识」是否仍是 store 当前预期的表。
+ *
+ * 竞态背景（2026-10-08）：initTable 首行把 currentTable 置 null 再 await 读元数据，
+ * 若 loadTableRows 的 fetch 先失败，旧守卫 `if (s.currentTable && ...)` 不成立 →
+ * error/rows 被静默丢弃 → 页面显示「0 / 0 行」且 error 恒为 null。
+ *
+ * 但也不能把守卫放宽成「currentTable 为 null 就一律放行」——切换表（A → B）时
+ * initTable(B) 首行同样把 currentTable 置 null，此刻表 A 的旧请求若失败/返回，
+ * 会把 A 的 error/rows 写进 store，用户在表 B 上看到表 A 的失败（跨表状态污染）。
+ *
+ * 现语义（2026-10-08 修）：以 initTable 首行写入的 expectedTableKey（"当前预期表"）为准：
+ *   - expectedTableKey 存在：仅当与本次调用的 tenantId/tableId 一致才允许写入
+ *     （initTable 进行中、currentTable 尚未就绪的本表失败仍写入——保住原竞态修复）；
+ *   - expectedTableKey 为 null（从未 initTable，如旧调用路径 / 测试直接置 currentTable）：
+ *     退回按 currentTable 比较；
+ *   - 两者皆无（尚未初始化过任何表）：允许写入，保留「失败结果不得被静默丢弃」的原修复意图。
+ */
+const sameTableTarget = (
+  target: TableTargetRef | null | undefined,
+  tenantId: string,
+  tableId: string
+): boolean =>
+  !!target && target.tenantId === tenantId && target.tableId === tableId;
+
+const isCurrentTableTarget = (
+  s: TableState,
+  tenantId: string,
+  tableId: string
+): boolean => {
+  if (s.expectedTableKey) {
+    return sameTableTarget(s.expectedTableKey, tenantId, tableId);
+  }
+  if (s.currentTable) {
+    return sameTableTarget(s.currentTable, tenantId, tableId);
+  }
+  return true;
+};
+
 export const loadTableRows = createTableCommand(
   "table/loadTableRows",
   async (args: LoadTableRowsArgs, { getState, extra }: any = {}) => {
@@ -299,11 +371,7 @@ export const loadTableRows = createTableCommand(
     const db = extra?.db;
 
     setState((s) => {
-      if (
-        s.currentTable &&
-        s.currentTable.tenantId === tenantId &&
-        s.currentTable.tableId === tableId
-      ) {
+      if (isCurrentTableTarget(s, tenantId, tableId)) {
         return { ...s, error: null };
       }
       return s;
@@ -322,11 +390,7 @@ export const loadTableRows = createTableCommand(
       });
 
       setState((s) => {
-        if (
-          s.currentTable &&
-          s.currentTable.tenantId === tenantId &&
-          s.currentTable.tableId === tableId
-        ) {
+        if (isCurrentTableTarget(s, tenantId, tableId)) {
           return { ...s, rows };
         }
         return s;
@@ -334,12 +398,26 @@ export const loadTableRows = createTableCommand(
       return rows;
     } catch (e: any) {
       const msg = e?.message || "加载表行失败";
+      // 结构化失败日志：下次一眼定位「没有远端可查」。remoteServers 数量从
+      // getRuntimeServerContext 取（此时 stateObj 可能未变，重新取一次以保证准确）。
+      try {
+        const stateObj = getState ? getState() : {};
+        const { remoteServers } = getRuntimeServerContext(stateObj);
+        logger.warn(
+          {
+            tenantId,
+            tableId,
+            remoteServers: remoteServers?.length ?? 0,
+            err: msg,
+          },
+          "loadTableRows failed"
+        );
+      } catch {
+        // 日志失败不得影响错误写入
+      }
+
       setState((s) => {
-        if (
-          s.currentTable &&
-          s.currentTable.tenantId === tenantId &&
-          s.currentTable.tableId === tableId
-        ) {
+        if (isCurrentTableTarget(s, tenantId, tableId)) {
           return { ...s, error: msg, rows: [] };
         }
         return s;
