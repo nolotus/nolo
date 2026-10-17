@@ -38,6 +38,7 @@ export type SendErrorKind =
   | "config_protocol"
   | "empty"
   | "policy"
+  | "quota"
   | "transient"
   | "network"
   | "timeout"

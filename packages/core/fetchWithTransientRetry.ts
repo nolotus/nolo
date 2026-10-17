@@ -91,8 +91,10 @@ function transientFetchRetryDelayMs(attempt: number) {
  * 而 503 是一次成功的 HTTP 交换，于是服务端说「可以重试、等我 1.5 秒」，
  * 客户端却直接把它当成终局失败上报给用户。
  *
- * 优先级：标准 `Retry-After` 头（复用 core/retryAfterMs，支持秒与 HTTP-date）
- * > 响应体 `retryAfterMs` > 既有退避。读体前先 clone，避免把调用方要用的 body 消费掉。
+ * 优先级：LithosAI 明写的契约是「Prefer the delay we advise, `retry-after-ms` first
+ * and then `retry-after`」——毫秒精度的 `retry-after-ms` 优先于秒级的 `Retry-After`
+ * 头（复用 core/retryAfterMs，支持秒与 HTTP-date）> 响应体 `retryAfterMs` > 既有退避。
+ * 读体前先 clone，避免把调用方要用的 body 消费掉。
  */
 const MAX_RETRY_DELAY_MS = 10_000;
 
@@ -100,9 +102,18 @@ async function resolveRetryAfterMs(
   response: Response,
   attempt: number,
 ): Promise<number> {
-  const headerMs = parseRetryAfterHeaderMs(
-    response.headers.get("retry-after"),
-  );
+  // `retry-after-ms` 是上游给的毫秒精度建议（LithosAI 明示优先它）。它的值本身就是
+  // 毫秒数，必须按数字直接解析——不能走 parseRetryAfterHeaderMs（那会把 `1500`
+  // 当 1500 秒 → 1.5e6 ms → 被 clamp 到上限）。缺省或非数字时再回落到秒级
+  // `Retry-After`，最后回落到 body/指数退避。
+  const rawMsHeader = response.headers.get("retry-after-ms");
+  const msHeader =
+    rawMsHeader !== null && rawMsHeader.trim() !== ""
+      ? normalizeNonNegativeMs(rawMsHeader, -1)
+      : -1;
+  const headerMs = msHeader >= 0
+    ? msHeader
+    : parseRetryAfterHeaderMs(response.headers.get("retry-after"));
   if (headerMs !== null) {
     return Math.min(headerMs, MAX_RETRY_DELAY_MS);
   }
@@ -115,6 +126,19 @@ async function resolveRetryAfterMs(
     // 非 JSON 或 body 不可读：退回既有退避。
   }
   return transientFetchRetryDelayMs(attempt);
+}
+
+/**
+ * 上游 `x-should-retry: false` 判定（LithosAI 明写契约：「do not retry anything
+ * carrying `x-should-retry: false`」）。
+ *
+ * 只认显式 false（大小写不敏感、去空白）：`x-should-retry: true` 或头缺失都返回
+ * false（不额外禁止），把「禁止重试」与「未表态」区分开。调用方在返回响应后自行
+ * 决定如何呈现；本函数只用于**否定**本层的自动重试。
+ */
+export function shouldNotRetryByHeader(response: Response): boolean {
+  const raw = response.headers.get("x-should-retry");
+  return typeof raw === "string" && raw.trim().toLowerCase() === "false";
 }
 
 /**
@@ -231,7 +255,11 @@ export async function fetchWithTransientRetry(
       // 其余可重试状态码走通用预算（默认 3 次）。
       const retryableStatus =
         retryableStatuses.has(response.status) && !init?.signal?.aborted;
-      const callerAllowsRetry = retryableStatus
+      // 上游显式 `x-should-retry: false` 时绝不自动重试，即使状态是 429/503：
+      // 直接交给调用方（LithosAI 契约）。放在 caller 门之前，避免 caller 的
+      // shouldRetryResponse 覆盖上游的明确否决。
+      const upstreamForbidsRetry = shouldNotRetryByHeader(response);
+      const callerAllowsRetry = retryableStatus && !upstreamForbidsRetry
         ? ((await options.shouldRetryResponse?.(response)) ?? true)
         : false;
       if (retryableStatus && callerAllowsRetry) {

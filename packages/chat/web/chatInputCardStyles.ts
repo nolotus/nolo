@@ -25,10 +25,8 @@ export const chatInputCardStyles = stylex.create({
     display: "flex",
     flexDirection: "column",
     backgroundColor: {
-      default:
-        "var(--surfaceInset, var(--surfaceRaised, var(--background)))",
-      ":focus-within":
-        "var(--surfaceInset, var(--surfaceRaised, var(--background)))",
+      default: agentThemeTokens.chatInputCardBackground,
+      ":focus-within": agentThemeTokens.chatInputCardBackground,
     },
     borderRadius: "var(--radius-lg, var(--radius-md, 12px))",
     padding: "var(--space-2) var(--space-4)",

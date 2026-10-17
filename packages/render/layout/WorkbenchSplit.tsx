@@ -25,6 +25,11 @@ const DEFAULT_MIN_SIZE = WORKBENCH_DEFAULT_MIN_SIZE;
 export const WORKBENCH_SEPARATOR_SIZE = WORKBENCH_DEFAULT_SEPARATOR_SIZE;
 /** 键盘 resize 每次移动的 px 步长。 */
 export const WORKBENCH_KEYBOARD_STEP_PX = 32;
+/**
+ * 拖动死区（px）：pointerdown 后水平位移绝对值小于它，视为点击/手抖——
+ * 既不写 preview 也不 commit（否则 1% 舍入会把单击变成真实比例变更）。
+ */
+export const WORKBENCH_DRAG_DEADZONE_PX = 4;
 /** 首次测量前的可用宽度兜底（SSR / 无布局环境），只影响首帧，量测后立即修正。 */
 const FALLBACK_AVAILABLE_WIDTH = 1280;
 
@@ -98,6 +103,20 @@ export default function WorkbenchSplit({
     previousUserSelect: "",
     previousCursor: "",
     pointerId: 0,
+    /** 拖动前的 preview 宽度（px）：Escape 取消时回到它，比例不变。 */
+    startPx: 0,
+    /** pointerdown 时的客户端 X：用于死区判定。 */
+    startX: 0,
+    /** 是否已越过死区（一旦越阈就 latch，拖回原位仍算拖动）。 */
+    hasMoved: false,
+    /** 持有 pointer capture 的元素（release 也走它，不依赖事件 target）。 */
+    captureTarget: null as
+      | (EventTarget & { releasePointerCapture?: (pointerId: number) => void })
+      | null,
+    /** 本次 drag 实际注册到 window 的处理器；按引用移除，避免 stale 闭包漏删。 */
+    moveHandler: null as ((event: PointerEvent) => void) | null,
+    upHandler: null as ((event: PointerEvent) => void) | null,
+    escapeHandler: null as ((event: KeyboardEvent) => void) | null,
   });
   const [availableWidth, setAvailableWidth] = useState(FALLBACK_AVAILABLE_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -178,8 +197,17 @@ export default function WorkbenchSplit({
 
   const handlePointerMove = useCallback(
     (event: PointerEvent) => {
-      if (!dragStateRef.current.active) return;
-      if (event.pointerId !== dragStateRef.current.pointerId) return;
+      const drag = dragStateRef.current;
+      if (!drag.active) return;
+      if (event.pointerId !== drag.pointerId) return;
+      // 死区：|Δx| < 4px 视为点击/手抖，不写 preview、也不记游标位置。
+      // 越过阈值即 latch hasMoved，之后即使拖回原位仍按拖动处理。
+      if (!drag.hasMoved) {
+        if (Math.abs(event.clientX - drag.startX) < WORKBENCH_DRAG_DEADZONE_PX) {
+          return;
+        }
+        drag.hasMoved = true;
+      }
       const px = pointerToSecondaryPx(event.clientX);
       lastPointerXRef.current = event.clientX;
       // 同步计算、直接写 DOM：不经过 RAF，pointerup 永远读到最新值。
@@ -191,40 +219,85 @@ export default function WorkbenchSplit({
     [pointerToSecondaryPx]
   );
 
+  /** 结束一次 drag 的机械清理：全局样式、listeners、pointer capture。 */
+  // commit 由调用方决定（pointerup commit、Escape 不 commit）。
+  const releaseDrag = useCallback(() => {
+    const drag = dragStateRef.current;
+    drag.active = false;
+    if (drag.moveHandler) {
+      window.removeEventListener("pointermove", drag.moveHandler);
+    }
+    if (drag.upHandler) {
+      window.removeEventListener("pointerup", drag.upHandler);
+      window.removeEventListener("pointercancel", drag.upHandler);
+    }
+    if (drag.escapeHandler) {
+      window.removeEventListener("keydown", drag.escapeHandler);
+    }
+    drag.moveHandler = null;
+    drag.upHandler = null;
+    drag.escapeHandler = null;
+    document.body.style.userSelect = drag.previousUserSelect;
+    document.body.style.cursor = drag.previousCursor;
+    try {
+      drag.captureTarget?.releasePointerCapture?.(drag.pointerId);
+    } catch {
+      /* capture already released */
+    }
+    drag.captureTarget = null;
+    drag.hasMoved = false;
+    lastPointerXRef.current = null;
+  }, []);
+
   const handlePointerUp = useCallback(
     (event: PointerEvent) => {
       const drag = dragStateRef.current;
       if (!drag.active || event.pointerId !== drag.pointerId) return;
-      drag.active = false;
-      document.body.style.userSelect = drag.previousUserSelect;
-      document.body.style.cursor = drag.previousCursor;
-      const target = event.currentTarget as (EventTarget & {
-        releasePointerCapture?: (pointerId: number) => void;
-      }) | null;
-      try {
-        target?.releasePointerCapture?.(drag.pointerId);
-      } catch {
-        /* capture already released */
+      // 未越过死区：这是点击而非 resize——无 preview、无 commit。
+      if (!drag.hasMoved) {
+        releaseDrag();
+        setIsResizing(false);
+        return;
       }
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
+      // commit 依赖的值先取：releaseDrag 会清空 lastPointerXRef。
+      const pointerX = lastPointerXRef.current;
+      releaseDrag();
 
       // 同步 commit：基于最后一个指针位置（若 move 未发过，pointerdown 已记录）。
-      if (availableWidth > 0 && secondaryOpen && lastPointerXRef.current != null) {
-        const px = pointerToSecondaryPx(lastPointerXRef.current);
+      if (availableWidth > 0 && secondaryOpen && pointerX != null) {
+        const px = pointerToSecondaryPx(pointerX);
         onSecondaryFractionChange?.(Math.round((px / availableWidth) * 100) / 100);
       }
-      lastPointerXRef.current = null;
       setIsResizing(false);
     },
     [
-      handlePointerMove,
+      releaseDrag,
       availableWidth,
       secondaryOpen,
       pointerToSecondaryPx,
       onSecondaryFractionChange,
     ]
+  );
+
+  /**
+   * 拖动中按 Escape = 取消本次 resize：preview 回到拖动前宽度，不 commit。
+   * 该监听只在 drag 期间注册，非拖动态不存在，不会吞掉外部 Escape。
+   */
+  const handleDragEscape = useCallback(
+    (event: KeyboardEvent) => {
+      const drag = dragStateRef.current;
+      if (!drag.active) return;
+      if (event.key !== "Escape" && event.key !== "Esc") return;
+      event.preventDefault();
+      const restorePx = drag.startPx;
+      releaseDrag();
+      setIsResizing(false);
+      containerRef.current?.style.setProperty(
+        "--workbench-secondary-px",
+        `${restorePx}px`
+      );
+    },
+    [releaseDrag]
   );
 
   const handleSeparatorPointerDown = useCallback(
@@ -237,29 +310,39 @@ export default function WorkbenchSplit({
       const drag = dragStateRef.current;
       drag.active = true;
       drag.pointerId = event.pointerId;
+      drag.captureTarget = event.currentTarget;
+      drag.startPx = secondaryPx;
+      drag.startX = event.clientX;
+      drag.hasMoved = false;
       drag.previousUserSelect = document.body.style.userSelect;
       drag.previousCursor = document.body.style.cursor;
+      drag.moveHandler = handlePointerMove;
+      drag.upHandler = handlePointerUp;
+      drag.escapeHandler = handleDragEscape;
       document.body.style.userSelect = "none";
       document.body.style.cursor = "col-resize";
       lastPointerXRef.current = event.clientX;
       setIsResizing(true);
-      window.addEventListener("pointermove", handlePointerMove);
-      window.addEventListener("pointerup", handlePointerUp);
-      window.addEventListener("pointercancel", handlePointerUp);
+      window.addEventListener("pointermove", drag.moveHandler);
+      window.addEventListener("pointerup", drag.upHandler);
+      window.addEventListener("pointercancel", drag.upHandler);
+      window.addEventListener("keydown", drag.escapeHandler);
     },
-    [handlePointerMove, handlePointerUp, secondaryOpen]
+    [
+      handlePointerMove,
+      handlePointerUp,
+      handleDragEscape,
+      secondaryOpen,
+      secondaryPx,
+    ]
   );
 
-  // 卸载时兜底恢复全局样式（拖动中途 unmount）。
+  // 卸载时兜底（拖动中途 unmount）：恢复全局样式、卸掉 listeners / capture。
   useEffect(() => {
     return () => {
-      if (dragStateRef.current.active) {
-        document.body.style.userSelect = dragStateRef.current.previousUserSelect;
-        document.body.style.cursor = dragStateRef.current.previousCursor;
-        dragStateRef.current.active = false;
-      }
+      if (dragStateRef.current.active) releaseDrag();
     };
-  }, []);
+  }, [releaseDrag]);
 
   // 双击分隔符恢复 50/50。
   const handleSeparatorDoubleClick = useCallback(() => {

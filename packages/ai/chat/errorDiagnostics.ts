@@ -29,7 +29,7 @@ export function sanitizeErrorDiagnostics(value: unknown): SafeErrorDiagnostics |
   if (origin) out.requestOrigin = origin;
   if (["found", "not_found", "invalid_record", "lookup_error", "not_requested"].includes(input.lookupStatus as string)) out.lookupStatus = input.lookupStatus as string;
   if (typeof input.status === "number" && Number.isInteger(input.status) && input.status >= 100 && input.status <= 599) out.status = input.status;
-  if (["config_protocol", "empty", "policy", "transient"].includes(input.category as string)) out.category = input.category as string;
+  if (["config_protocol", "empty", "policy", "quota", "transient"].includes(input.category as string)) out.category = input.category as string;
   return Object.keys(out).length ? out : undefined;
 }
 

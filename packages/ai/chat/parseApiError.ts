@@ -34,6 +34,7 @@ export type ApiErrorKind =
   | "timeout"
   | "rate_limit"
   | "server"
+  | "quota"
   | "generic";
 
 /**
@@ -79,6 +80,35 @@ export const isContextOverflowText = (message: string): boolean =>
   /maximum context|context (length|window|overflow|limit)|context_length_exceed\w*|requested about .*tokens|too many tokens|prompt is too long|exceeds? (the )?(model|max)/i.test(
     message,
   );
+
+/**
+ * 余额/配额耗尽判定（402 Payment Required 归因）。
+ *
+ * 为什么需要独立判定：LithosAI（以及 OpenAI 兼容网关）对**余额耗尽**回 `402
+ * insufficient_quota`，并带 `x-should-retry: false`。此前 402 没有任何 `case`，
+ * 落进 `classifyApiError` 的 `default`（generic + retryable:true）与
+ * `classifyGenerationError` 的初始 `config_protocol`——用户看到的是「模型配置或工具
+ * 通信不兼容，请联系管理员检查配置」，完全没指出真实原因（余额耗尽），
+ * 甚至给出「重试」按钮（重发不会充值）。
+ *
+ * 判定锚点（刻意保守，避免劫持真 429 的「quota reached, resets in 30m」类报文）：
+ *  - 只要 HTTP status === 402（Payment Required 本身语义无歧义）；
+ *  - 或文本出现余额/配额耗尽的确切 code：「insufficient_quota」/「insufficient_balance」
+ *    /「insufficient_credits」/「余额不足」/「wallet balance is insufficient」。
+ *    **不**匹配裸 `quota` / `rate limit`，与 cli/client/balanceErrorPatterns 同一克制口径。
+ */
+export const isQuotaExhaustedError = (
+  status: number,
+  ...texts: Array<string | null | undefined>
+): boolean =>
+  status === 402 ||
+  /insufficient[_\s-]?(?:quota|balance|credits)|余额不足|wallet\s+balance\s+is\s+insufficient|payment[_ ]required/i.test(
+    texts.filter((t): t is string => typeof t === "string").join(" "),
+  );
+
+/** 余额耗尽的可操作文案：指向 console 的 Billing 充值，并明确「重发不解决」。 */
+const QUOTA_EXHAUSTED_MESSAGE =
+  "余额或配额已耗尽，本次请求未被受理。请在 console 的 Billing 页面充值后重试；直接重发同一请求不会解决此问题。";
 
 /**
  * Pure classification from already-parsed response facts. Produces the human
@@ -173,7 +203,28 @@ export function classifyApiError(input: ClassifyApiErrorInput): ApiErrorInfo {
         retryable: true,
         actions: ["retry"],
       };
+    // 402 Payment Required（LithosAI/OpenAI 兼容网关的余额耗尽）。此前无 case，
+    // 落进 default（generic + retryable:true + 重试按钮），误导用户重发。
+    case 402:
+      return {
+        kind: "quota",
+        message: QUOTA_EXHAUSTED_MESSAGE,
+        code,
+        status,
+        // 余额耗尽重发无效：上游亦带 x-should-retry:false。
+        retryable: false,
+      };
     default:
+      // 兜底：非 402 但文本明确是余额/配额耗尽的，同样给可操作文案而非通用长文案。
+      if (isQuotaExhaustedError(status, errorMessage, body, code)) {
+        return {
+          kind: "quota",
+          message: QUOTA_EXHAUSTED_MESSAGE,
+          code,
+          status,
+          retryable: false,
+        };
+      }
       return {
         kind: "generic",
         message: `API请求失败: ${truncateErrorMessage(errorMessage)}`,
@@ -219,7 +270,7 @@ export async function parseApiError(response: Response): Promise<string> {
 }
 
 
-export type GenerationErrorCategory = "config_protocol" | "empty" | "policy" | "transient";
+export type GenerationErrorCategory = "config_protocol" | "empty" | "policy" | "quota" | "transient";
 
 /** Conservative classification: a generic upstream rejection is NOT evidence
  * of moderation or of a safely retryable failure. Never retain prompts, keys,
@@ -237,6 +288,11 @@ export function classifyGenerationError(data: any, status?: number) {
   let category: GenerationErrorCategory = "config_protocol";
   if (/content[_ -]filter|content[_ -]policy|safety[_ -](?:violation|blocked)|policy[_ -]violation|prohibited[_ -]content/i.test(evidence)) {
     category = "policy";
+  } else if (isQuotaExhaustedError(status ?? 0, evidence, code)) {
+    // 余额/配额耗尽（402 或 insufficient_quota 等）：必须排在 config_protocol /
+    // transient 之前——否则 402 会落进初始 config_protocol，给出「模型配置或工具
+    // 通信不兼容」的误导文案。
+    category = "quota";
   } else if (/thought_signature|reasoning_effort|not supported|invalid[_ -](?:request|argument)|authentication|api[_ -]key/i.test(evidence) || status === 401 || status === 403) {
     category = "config_protocol";
   } else if (code === "EMPTY_RESPONSE" || /空响应|empty response/i.test(message)) {
@@ -249,6 +305,7 @@ export function classifyGenerationError(data: any, status?: number) {
     config_protocol: "模型配置或工具通信不兼容，请联系管理员检查配置；重复发送不会解决此问题。",
     empty: "模型返回了空响应，请联系管理员检查服务响应。",
     policy: "服务商的内容安全规则阻止了本次请求。请检查请求是否符合其规则；不会自动重试或改写内容。",
+    quota: QUOTA_EXHAUSTED_MESSAGE,
     transient: "模型服务暂时不可用。你可以稍后手动重试同一模型（新请求可能产生费用）。",
   };
   return {

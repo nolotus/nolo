@@ -367,6 +367,63 @@
   opacity: 1;
 }
 
+/* ── 聊天顶部渐隐：原生 scroll timeline 渐进增强（仅顶部，bottom 不变）──
+ * 只有同时支持 scroll() 时间线与 animation-range 的引擎走这条路径；其他引擎
+ * 完全落回上面的 [data-top-scroll] opacity 回退（视觉与旧版一致，零 JS 变化）。
+ *
+ * why scroll(nearest block) 而不是 scroll(self)：本规则的主体是 .MainLayout__main
+ * 的 ::before，伪元素的发起元素才是那个滚动容器；scroll(self) 会把伪元素自身盒子
+ * 当滚动容器解析，而伪元素盒不可滚动 → 时间线失效，动画恒停在 from。
+ *
+ * why sticky 而非沿用 absolute：absolute 伪元素是滚动容器内的定位子盒，会随内容
+ * 一起上滚（滚过自身高度后整体离开视口），无法贴住视口顶端；sticky 让它钉在
+ * 滚动容器顶端。定位结构改动仅限 ::before，::after（bottom）保持 absolute 不动。
+ *
+ * why height 与 margin-bottom 同步插值：.MainLayout__main 是 flex 列，伪元素会占位；
+ * height: h 配 margin-bottom: -h 使净占位恒为 0，渐隐展开时消息起始位置不位移。
+ *
+ * 不覆盖滚动条：伪元素落在内容盒内（left/right 归 auto，由 stretch 撑满），
+ * 不使用 mask，也不碰全局 has-scroll-mask 类（3c4dd8f00 已移除其调用）。
+ *
+ * 无 overflow / 触顶不遮第一行：这类状态下没有 [data-top-scroll] 守卫属性，
+ * 本块不生效；即使引擎把无滚动范围的时间线当作 fill 末端，本块基准 height 也是 0。
+ */
+@supports (animation-timeline: scroll()) and (animation-range: 0 24px) {
+  .MainLayout__main[data-nolo-chat-scroll-shadow][data-top-scroll]::before {
+    position: sticky;
+    top: 0;
+    left: auto;
+    right: auto;
+    flex: none;
+    /* 基准高度 0：动画从未生效时的兜底，也保证不遮第一行内容。 */
+    height: 0;
+    margin-bottom: 0;
+    /* 渐隐强度改由高度展开表达；显式覆盖上面的 [data-top-scroll] opacity: 1，
+     * 避免「opacity 与 height 两个源不同步」。 */
+    opacity: 1;
+    /* 纯滚动位置驱动，不引入时间过渡（reduced-motion 下同样无时间过渡）。 */
+    transition: none;
+    animation-name: nolo-chat-top-fade;
+    animation-duration: 1ms; /* scroll timeline 忽略时长，仅为通过声明校验 */
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+    animation-timeline: scroll(nearest block);
+    /* 滚到 24px 时渐隐完全展开：0 → 24px。 */
+    animation-range: 0 24px;
+  }
+}
+
+@keyframes nolo-chat-top-fade {
+  from {
+    height: 0;
+    margin-bottom: 0;
+  }
+  to {
+    height: 24px;
+    margin-bottom: -24px;
+  }
+}
+
 /* ── 移动端滚动条隐藏 ──
  * 保留原因：WebKit 专用伪元素 ::-webkit-scrollbar，StyleX 不支持。 */
 

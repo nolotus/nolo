@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useTheme } from "app/theme";
 import copyToClipboard from "app/utils/clipboard";
+import { toast } from "app/utils/toast";
 import JsonBlock from "./JsonBlock";
 import MermaidContent from "./MermaidContent";
 import { BaseModal } from "render/web/ui/modal/BaseModal";
@@ -143,7 +144,7 @@ const CodeBlock = ({
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), 2000);
       },
-      onError: (err) => console.error("Failed to copy:", err),
+      onError: () => toast.error("复制失败"),
     });
   };
 

@@ -11,7 +11,11 @@ import {
   selectFontPreset,
 } from "app/settings/settingSlice";
 import { isRecord } from "core/isRecord";
-import { FONT_PRESET_STORAGE_KEY } from "./fontPreference";
+import {
+  buildRootFontCss,
+  clearInlineFontVariables,
+  FONT_PRESET_STORAGE_KEY,
+} from "./fontPreference";
 import { applyAgentThemeToElement } from "./agentTheme.stylex";
 
 const STYLE_TAG_ID = "global-theme-variables";
@@ -29,8 +33,13 @@ const generateCssVariables = (
     return value != null ? [`--${name}:${value};`] : [];
   });
 
-const generateCssString = (theme: Record<string, unknown>): string =>
-  `:root { ${generateCssVariables(theme).join(" ")} }`;
+const generateCssString = (
+  theme: Record<string, unknown>,
+  rootFontCss: string
+): string => {
+  const declarations = generateCssVariables(theme).join(" ");
+  return `:root { ${declarations}${rootFontCss ? ` ${rootFontCss}` : ""} }`;
+};
 
 /**
  * 全局主题控制器。
@@ -45,7 +54,10 @@ const GlobalThemeController = () => {
   const themeName = useAppSelector(selectThemeName);
   const fontPreset = useAppSelector(selectFontPreset);
 
-  const cssString = useMemo(() => generateCssString(theme), [theme]);
+  const cssString = useMemo(
+    () => generateCssString(theme, buildRootFontCss(fontPreset)),
+    [theme, fontPreset]
+  );
 
   useIsomorphicLayoutEffect(() => {
     const existingTag = document.getElementById(STYLE_TAG_ID);
@@ -61,6 +73,11 @@ const GlobalThemeController = () => {
       document.head.appendChild(styleTag);
     }
     styleTag.textContent = cssString;
+
+    // First-paint bootstrap writes font variables inline on <html>; inline style wins
+    // over this stylesheet, so drop exactly those keys to let preset switches apply.
+    // Other inline styles on documentElement are preserved.
+    clearInlineFontVariables(document.documentElement);
 
     document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
     document.documentElement.setAttribute("data-density", density);

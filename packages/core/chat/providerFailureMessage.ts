@@ -27,7 +27,15 @@ export function describeProviderFailure(args: {
   const clipped = clipCompactText(JSON.stringify(args.body) ?? "", RAW_BODY_CLIP, "…");
 
   const error = isRecord(args.body) ? args.body.error : undefined;
-  const message = isRecord(error) ? error.message : undefined;
+  const nestedMessage = isRecord(error) ? error.message : undefined;
+  // LithosAI 引擎的「扁平」错误信封把 message 放在顶层而不是 error 里：
+  //   {"object":"error","message":"inference error: BadRequest - …",
+  //    "type":"invalid_request_error","code":400}
+  // 只认 body.error.message 时这类回复会退化成裸 JSON 串，用户看到的是机器
+  // 报文而不是可读原因。顶层 message（扁平信封）与 body.error.message（正规
+  // 信封）覆盖两种形态；嵌套优先，保持既有读法不变。
+  const flatMessage = isRecord(args.body) ? args.body.message : undefined;
+  const message = nestedMessage ?? flatMessage;
   if (typeof message === "string" && message) return `${message} | ${clipped}`;
 
   const looksLikeCompletion =

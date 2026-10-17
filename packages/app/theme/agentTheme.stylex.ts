@@ -30,7 +30,8 @@ export const agentThemeTokens = stylex.defineVars({
   "surfaceOverlayStrong": "#E4E4E7",
   "borderOverlayStrong": "#F4F4F5",
   "chipText": "#52525B",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const neutralLight = stylex.createTheme(agentThemeTokens, {
@@ -57,10 +58,12 @@ export const neutralLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#E4E4E7",
   "borderOverlayStrong": "#F4F4F5",
   "chipText": "#52525B",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const neutralDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #18181B 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #18181B 80%, transparent)",
@@ -111,10 +114,12 @@ export const oceanLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#EBF0F4",
   "borderOverlayStrong": "#F6F8FA",
   "chipText": "#57606A",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const oceanDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #0D1117 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #0D1117 80%, transparent)",
@@ -165,10 +170,12 @@ export const forestLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#DDF0DB",
   "borderOverlayStrong": "#EDF5EC",
   "chipText": "#3D6B3A",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const forestDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #0C1209 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #0C1209 80%, transparent)",
@@ -219,10 +226,12 @@ export const trailLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#E8EDF2",
   "borderOverlayStrong": "#EEF2F6",
   "chipText": "#5C6775",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const trailDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #0B1218 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #0B1218 80%, transparent)",
@@ -273,10 +282,12 @@ export const waveLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#ECEAE3",
   "borderOverlayStrong": "#ECEAE3",
   "chipText": "#3D3B4F",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const waveDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #1F1F28 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #1F1F28 80%, transparent)",
@@ -327,10 +338,12 @@ export const irisLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#ECECF3",
   "borderOverlayStrong": "#F2F2F7",
   "chipText": "#4E4B6B",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const irisDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #0F0E17 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #0F0E17 80%, transparent)",
@@ -381,10 +394,12 @@ export const roseLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#F2E9E1",
   "borderOverlayStrong": "#F2E9E1",
   "chipText": "#6E6A86",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const roseDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #191724 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #191724 80%, transparent)",
@@ -435,10 +450,12 @@ export const monoLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#F1F2F4",
   "borderOverlayStrong": "#F1F2F4",
   "chipText": "#57616B",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const monoDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #292E32 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #292E32 80%, transparent)",
@@ -489,10 +506,12 @@ export const catppuccinLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#E8ECF0",
   "borderOverlayStrong": "#D8DEE4",
   "chipText": "#57606A",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const catppuccinDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #1E1E2E 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #1E1E2E 80%, transparent)",
@@ -543,10 +562,12 @@ export const natureLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayStrong": "#EBE7DF",
   "borderOverlayStrong": "#EBE9E7",
   "chipText": "#5B6472",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
+  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
+  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
 });
 
 export const natureDark = stylex.createTheme(agentThemeTokens, {
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))",
   "surfaceGlassHeader": "color-mix(in srgb, #1C1B20 92%, transparent)",
   "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
   "surfaceGlassFooter": "color-mix(in srgb, #1C1B20 80%, transparent)",
