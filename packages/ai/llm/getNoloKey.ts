@@ -14,12 +14,17 @@ export const getNoloKey = (
     | "runinfra"
     | "baseten"
     | "mimo"
-    | "cloudflare",
+    | "cloudflare"
+    | "lithos",
   env: Record<string, string | undefined> = process.env
 ) => {
   switch (provider) {
     case "anthropic":
       return env.ANTHROPIC_API_KEY;
+    // 时段路由（block D）：平台自有的 LithosAI 账户（DeepSeek Flash 高峰改走
+    // https://api.lithosai.cloud/v1）。凭证只存在于服务端 env，绝不下发记录/响应。
+    case "lithos":
+      return env.LITHOS_API_KEY;
     case "google":
       return firstConfiguredKey(
         env.GOOGLE_API_KEY,
