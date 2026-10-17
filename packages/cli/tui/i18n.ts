@@ -388,41 +388,6 @@ const STRINGS = {
     en: "No new model output for {0}, so this turn was stopped. Your message was kept. Retry in this conversation, switch to another model, or run /compact first.",
     zh: "模型已 {0} 没有新输出，本轮已停止等待（可能仍在生成）。你的消息已保留。可在本对话重试、切换到其他模型，或先 /compact 压缩对话。",
   },
-  // --- Local run 429/rate-limit display (compact 3-line block) --------------
-  // 旧 429 文案是一条巨长英文 + 结尾拼接中文冷却说明（又长又中英混排）。现在按
-  // locale 渲染 3 行：headline（含上游 tag 与清洗后的详情）+ 冷却/探测 + 出口。
-  // {0} = 上游标签（antigravity · gemini-3.8-flash-tiered；取不到回退 transport 名）
-  // {1} = 清洗后的上游原文（去 details= / 传输前缀 / 结尾复位句，折叠空白，≤140 字符）
-  localRunRateLimitQuota: {
-    en: "[nolo] Upstream quota exhausted ({0}): {1}",
-    zh: "[nolo] 上游额度已用尽（{0}）：{1}",
-  },
-  localRunRateLimitThrottled: {
-    en: "[nolo] Upstream rate limit ({0}): {1}",
-    zh: "[nolo] 上游限流（{0}）：{1}",
-  },
-  // 第 2 行复位提示：沿用 extractRateLimitResetHint 抓到的上游原文（不换算），
-  // 只作括号补充；没抓到就没有这段括号。
-  localRunRateLimitResetNote: {
-    en: " (upstream reset in {0})",
-    zh: "（上游约 {0}后复位）",
-  },
-  // 第 2 行：{0} = 冷却截止（本地时间，当天 HH:MM / 跨天 MM-DD HH:MM），
-  // {1} = 复位提示或空串，{2} = 自动探测间隔（分钟）。无 cooldownUntil 时整行省略。
-  localRunRateLimitCooldown: {
-    en: " Cooldown until {0}{1}; auto-probing every {2} min meanwhile (the upstream may not be restored by then).",
-    zh: " 冷却至 {0}{1}；期间每 {2} 分钟自动试探一次（上游未必届时恢复）。",
-  },
-  // 第 3 行：三个出口（换 agent / 强制走服务器 / 已充值清冷却）。
-  localRunRateLimitExits: {
-    en: " Switch agent: nolo agent list; force server: --server; topped up: nolo auth cooldown, then --clear <credential>",
-    zh: " 换 agent：nolo agent list；强制走服务器：--server；已充值：nolo auth cooldown 查凭证名后 --clear <凭证名>",
-  },
-  // 派发前的本地冷却拦截（原两行英文 → 本地化单行压缩）。
-  agentCooldownBlocked: {
-    en: "[nolo] Agent {0} is in 429 cooldown until {1}. This dispatch was not sent — pick another agent, or retry after the cooldown.",
-    zh: "[nolo] Agent {0} 冷却中，至 {1}。本次派发未发出——换一个 agent，或到点后重试。",
-  },
   thinkingTraceLine: {
     en: "✻ Thought for {0}",
     zh: "✻ 思考 {0}",

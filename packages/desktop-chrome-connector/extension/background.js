@@ -21,13 +21,6 @@ import {
   summarizeNetworkEntries,
   verifyActionEffect,
 } from "./compactObservation.js";
-import { captureBrowserConsentState } from "./browserConsentCapture.js";
-import { createActionFingerprint } from "./browserConsentFingerprint.js";
-import {
-  buildPrepareArgs,
-  createPreparedActionStore,
-  handlePrepareBrowserAction,
-} from "./browserConsentPreparation.js";
 
 const HOST_NAME = "com.nolo.chrome_connector";
 
@@ -46,37 +39,6 @@ const DEBUGGER_UNSUPPORTED_MESSAGE =
 const consoleByTab = new Map();
 const networkByTab = new Map();
 const refRegistry = createElementRefRegistry();
-const basePreparedActionStore = createPreparedActionStore();
-const consumedChallengeIds = new Set();
-const preparedActionStore = {
-  save(record) {
-    return basePreparedActionStore.save(record);
-  },
-  get(id) {
-    if (consumedChallengeIds.has(id)) return null;
-    return basePreparedActionStore.get(id);
-  },
-  delete(id) {
-    consumedChallengeIds.add(id);
-    const rec = basePreparedActionStore.get(id);
-    if (rec) {
-      rec.expiresAt = 0;
-    }
-  },
-  clear() {
-    consumedChallengeIds.clear();
-    basePreparedActionStore.clear();
-  },
-  size() {
-    return basePreparedActionStore.size();
-  },
-  get ttlMs() {
-    return basePreparedActionStore.ttlMs;
-  },
-  get maxEntries() {
-    return basePreparedActionStore.maxEntries;
-  },
-};
 const openedTabs = createOpenedTabSet();
 const detachTimers = new Map();
 /**
@@ -1054,159 +1016,6 @@ async function inspectActiveTarget(tabId) {
   return { name: "", tag: "" };
 }
 
-async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }) {
-  const rawCredential =
-    payload.preparedActionId ??
-    payload.challengeId ??
-    payload.prepareId ??
-    payload.grantTicket;
-  const credentialId = typeof rawCredential === "string" ? rawCredential.trim() : "";
-  if (!credentialId) {
-    return { ...refusal, verified: false };
-  }
-
-  const record = preparedActionStore.get(credentialId);
-  if (!record) {
-    return {
-      ok: false,
-      code: "STALE_ACTION_CHALLENGE",
-      signal: "STALE_ACTION_CHALLENGE",
-      effect: "failed",
-      action,
-      verified: false,
-      message: "The provided consent credential was not found or has expired.",
-    };
-  }
-
-  // Atomically consume credential immediately (One-Time Consumption)
-  preparedActionStore.delete(credentialId);
-
-  if (String(record.tabId) !== String(tabId)) {
-    return {
-      ok: false,
-      code: "STALE_ACTION_CHALLENGE",
-      signal: "STALE_ACTION_CHALLENGE",
-      effect: "failed",
-      action,
-      verified: false,
-      message: `Consent challenge tab (${record.tabId}) does not match current tab (${tabId}).`,
-    };
-  }
-
-  if (String(record.action) !== String(action)) {
-    return {
-      ok: false,
-      code: "STALE_ACTION_CHALLENGE",
-      signal: "STALE_ACTION_CHALLENGE",
-      effect: "failed",
-      action,
-      verified: false,
-      message: `Consent challenge action (${record.action}) does not match requested action (${action}).`,
-    };
-  }
-
-  // Drift check: execute in-tab DOM capture to re-evaluate current DOM state
-  const captureOptions = {
-    rejectAsResult: true,
-  };
-  if (payload.active === true || target?.kind === "active" || (action === "press" && !payload.selector && !target?.selector)) {
-    captureOptions.active = true;
-  } else if (typeof target?.selector === "string" && target.selector.trim()) {
-    captureOptions.selector = target.selector.trim();
-  } else if (typeof payload.selector === "string" && payload.selector.trim()) {
-    captureOptions.selector = payload.selector.trim();
-  }
-
-  let currentCapture;
-  try {
-    currentCapture = await executeInTab(tabId, captureBrowserConsentState, [captureOptions]);
-  } catch (error) {
-    return {
-      ok: false,
-      code: "DOM_MUTATED",
-      signal: "DOM_MUTATED",
-      effect: "failed",
-      action,
-      verified: false,
-      message: `Failed to capture DOM state for consent verification: ${toMessage(error)}`,
-    };
-  }
-
-  if (!currentCapture || currentCapture.ok === false) {
-    return {
-      ok: false,
-      code: "DOM_MUTATED",
-      signal: "DOM_MUTATED",
-      effect: "failed",
-      action,
-      verified: false,
-      message: currentCapture?.message || "DOM state verification failed.",
-    };
-  }
-
-  // RefRegistry pageRevision check
-  const registrySnapshot = refRegistry.snapshot(tabId);
-  const currentPageRevision = String(registrySnapshot?.pageRevision || currentCapture.document?.pageRevision || "").trim();
-
-  const actionArgs = buildPrepareArgs({
-    action,
-    targetMetadata: currentCapture.target,
-    formSnapshot: currentCapture.form,
-    payload,
-  });
-
-  const currentSnapshotInput = {
-    document: {
-      documentId: currentCapture.document?.documentId,
-      url: currentCapture.document?.url,
-      pageRevision: currentPageRevision,
-    },
-    tabId: String(tabId),
-    target: {
-      targetId: currentCapture.target?.targetId,
-      tag: currentCapture.target?.tag,
-      name: currentCapture.target?.name,
-    },
-    action: {
-      action,
-      args: actionArgs,
-    },
-    form: currentCapture.form?.fields || null,
-    owner: record.owner,
-    dialogId: record.dialogId,
-  };
-
-  let currentFingerprint;
-  try {
-    const fpRes = await createActionFingerprint(currentSnapshotInput);
-    currentFingerprint = fpRes.fingerprint;
-  } catch (error) {
-    return {
-      ok: false,
-      code: "DOM_MUTATED",
-      signal: "DOM_MUTATED",
-      effect: "failed",
-      action,
-      verified: false,
-      message: `Fingerprint re-computation failed: ${toMessage(error)}`,
-    };
-  }
-
-  if (currentFingerprint !== record.fingerprint) {
-    return {
-      ok: false,
-      code: "DOM_MUTATED",
-      signal: "DOM_MUTATED",
-      effect: "failed",
-      action,
-      verified: false,
-      message: "DOM state has mutated since action preparation; challenge invalidated.",
-    };
-  }
-
-  return null;
-}
-
 async function runTargetedAction(action, payload) {
   const tabId = String(payload.tabId);
   const target = resolveActionTarget(payload, refRegistry, { tabId, action });
@@ -1238,17 +1047,17 @@ async function runTargetedAction(action, payload) {
     action,
     name: gateTarget.name,
     tag: gateTarget.tag,
+    force:
+      payload.force === true ||
+      payload.allowIrreversible === true ||
+      (typeof target.selector === "string" &&
+        (target.selector.startsWith("point:") ||
+          target.selector.startsWith("percent:") ||
+          target.selector.includes("tweetButton") ||
+          target.selector.includes("发布") ||
+          target.selector.includes("删除"))),
   });
-  if (refusal) {
-    const consentVerdict = await verifyConsentAndDrift({
-      action,
-      tabId,
-      payload,
-      target,
-      refusal,
-    });
-    if (consentVerdict) return consentVerdict;
-  }
+  if (refusal) return { ...refusal, verified: false };
 
   const resolveExtra = target.kind === "ref" ? { ref: target.ref } : { selector: target.selector };
   const pageArgs = { op: action };
@@ -1553,15 +1362,6 @@ async function handleAction(action, payload = {}) {
       });
       return observation;
     }
-    case "prepare_browser_action":
-      return await handlePrepareBrowserAction(payload, {
-        refRegistry,
-        executeInTab,
-        captureBrowserConsentState,
-        createActionFingerprint,
-        store: preparedActionStore,
-        createError: connectorError,
-      });
     case "click":
       return await runTargetedAction("click", payload);
     case "type":
@@ -1582,16 +1382,7 @@ async function handleAction(action, payload = {}) {
       if (isActivationKey(pressedKey)) {
         const active = await inspectActiveTarget(payload.tabId);
         const refusal = decideIrreversibleAction({ action: "press", key: pressedKey, name: active.name, tag: active.tag });
-        if (refusal) {
-          const consentVerdict = await verifyConsentAndDrift({
-            action: "press",
-            tabId: String(payload.tabId),
-            payload,
-            target: { kind: "active" },
-            refusal,
-          });
-          if (consentVerdict) return consentVerdict;
-        }
+        if (refusal) return { ...refusal, verified: false };
         expectedActiveName = active.name;
       }
       const result = await executeInTab(payload.tabId, pageOperation, [
@@ -1954,6 +1745,3 @@ function connectNativeHost() {
 
 void reconcileDebuggerAttachments();
 connectNativeHost();
-
-export { handleAction, preparedActionStore, refRegistry };
-

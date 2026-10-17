@@ -1,6 +1,3 @@
-import { httpOrigin, sanitizeErrorDiagnostics } from "../../ai/chat/errorDiagnostics";
-import { inferMessageDialogIdFromDbKey } from "../messages/messageDialogIdentity";
-import type { Message } from "../messages/types";
 import { getIsDesktopApp } from "app/utils/env";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
@@ -22,7 +19,6 @@ export type DialogDiagnosticsSource = {
   route?: DialogDiagnosticsRoute | null;
   generatedAt?: string;
   runtime?: DialogDiagnosticsRuntime;
-  latestError?: unknown;
 };
 
 type DialogDiagnosticsPayload = {
@@ -39,7 +35,6 @@ type DialogDiagnosticsPayload = {
   createdAt?: string | number;
   updatedAt?: string | number;
   compressionCount?: number;
-  latestError?: Record<string, string | number>;
 };
 
 const SENSITIVE_QUERY_KEY =
@@ -114,9 +109,9 @@ export const buildDialogDiagnosticsPayload = (
   return {
     generatedAt: source.generatedAt || new Date().toISOString(),
     runtime: source.runtime || (getIsDesktopApp() ? "desktop" : "web"),
-    serverOrigin: httpOrigin(source.currentServer),
+    serverOrigin: asOptionalTrimmedString(source.currentServer),
     route: {
-      origin: httpOrigin(source.route?.origin),
+      origin: asOptionalTrimmedString(source.route?.origin),
       pathname: asOptionalTrimmedString(source.route?.pathname),
       search: sanitizeSearchParams(source.route?.search),
     },
@@ -128,7 +123,6 @@ export const buildDialogDiagnosticsPayload = (
     status: asOptionalTrimmedString(getDialogField(dialog, "status")),
     createdAt: asStringOrNumber(getDialogField(dialog, "createdAt")),
     updatedAt: asStringOrNumber(getDialogField(dialog, "updatedAt")),
-    latestError: sanitizeErrorDiagnostics(source.latestError),
     compressionCount:
       typeof dialog?.compressionCount === "number"
         ? dialog.compressionCount
@@ -144,30 +138,3 @@ export const buildDialogDiagnosticsText = (
     "\n",
   );
 };
-
-/** Selector results are ordered by message id. Re-check identity because legacy
- * selectors can fall back to a shared bucket when the requested bucket is absent. */
-export function latestDialogFailure(messages: readonly Message[], dialogId: string) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (inferMessageDialogIdFromDbKey(message.dbKey) !== dialogId) continue;
-    const metadata = message.metadata ?? {};
-    const errorMeta = message.errorMeta ?? metadata.errorMeta;
-    if (errorMeta && typeof errorMeta === "object") {
-      const fromMeta = sanitizeErrorDiagnostics(
-        (errorMeta as { diagnostics?: unknown }).diagnostics,
-      );
-      if (fromMeta) return fromMeta;
-      if (metadata.providerError && typeof metadata.providerError === "object") {
-        return sanitizeErrorDiagnostics(metadata.providerError);
-      }
-      return undefined;
-    }
-    if (metadata.providerError && typeof metadata.providerError === "object") {
-      return sanitizeErrorDiagnostics(metadata.providerError);
-    }
-    // A newer failure with no safe fields must not expose an older failure.
-    if (metadata.error === true) return undefined;
-  }
-  return undefined;
-}

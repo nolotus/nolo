@@ -4,14 +4,9 @@
  * 由 localRuntimeAdapter 原先 940 行的 resolveProviderBase 拆出，逻辑逐字保留。
  * 未命中本通道返回 null，交给 resolveLocalProvider 链上的下一条。
  */
-import {
-  CliProviderQuotaError,
-  executeCli as defaultExecuteCli,
-  executeCliStreaming as defaultExecuteCliStreaming,
-  type CliExecuteOptions,
-} from "../../../ai/agent/cliExecutor";
+import { CliProviderQuotaError, executeCli as defaultExecuteCli } from "../../../ai/agent/cliExecutor";
 import { buildPromptForCliProvider, collectCliProviderImageInputs, isCliProviderAgent, resolveCliProviderName } from "../cliProviderHelpers";
-import { type LocalCliStreamingExecutor, logLocalRuntimeDiagnostic } from "../localRuntimeDiagnostics";
+import { logLocalRuntimeDiagnostic } from "../localRuntimeDiagnostics";
 import { toErrorMessage } from "core/errorMessage";
 import type { CliImageInput, LocalCliExecutor } from "../localRuntimeAdapter";
 import type { ProviderResolver } from "./providerResolutionContext";
@@ -49,36 +44,17 @@ export const resolveCliProviderTransport: ProviderResolver = async (ctx) => {
             reasoningEffortRaw === "max"
               ? reasoningEffortRaw
               : undefined;
-          const cliOptions: CliExecuteOptions = {
+          const result = await executeCli(provider, prompt, {
             ...(agentConfig.model ? { model: agentConfig.model } : {}),
             ...(reasoningEffort ? { reasoningEffort } : {}),
             ...(typeof options?.timeoutMs === "number"
               ? { timeout: options.timeoutMs }
               : {}),
-            ...(options?.signal ? { signal: options.signal } : {}),
-            ...(options?.onToolEvent ? { onToolEvent: options.onToolEvent } : {}),
-            ...(typeof options?.toolEventRound === "number"
-              ? { toolEventRound: options.toolEventRound }
-              : {}),
             cwd: workspaceRoot,
             yolo: true,
             env: deps.env,
             ...(imageInputs ? { imageInputs } : {}),
-          };
-          // Never silently escape a partially injected executor into a real process.
-          // Production (no executor injection) still uses native CLI streaming.
-          if (options?.onTextDelta && deps.executeCli && !deps.executeCliStreaming) {
-            throw new Error("Streaming requests with an injected executeCli require executeCliStreaming");
-          }
-          const executeCliStreaming =
-            deps.executeCliStreaming ??
-            (defaultExecuteCliStreaming as LocalCliStreamingExecutor);
-          const result = options?.onTextDelta
-            ? await executeCliStreaming(provider, prompt, {
-                ...cliOptions,
-                onChunk: options.onTextDelta,
-              })
-            : await executeCli(provider, prompt, cliOptions);
+          });
           return {
             content: result.text,
             model: agentConfig.model || provider,

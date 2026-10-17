@@ -32,8 +32,7 @@ export function formatRuntimeSummaryCard(runtimes: RuntimeSummary[]): string {
   if (!runtimes.length) return "No runtimes available.";
   const lines = runtimes.map((r) => {
     const statusIcon = r.selectable ? "✓" : "✗";
-    const details = r.details ? `: ${r.details}` : "";
-    const reason = r.reason ? ` (${r.reason}${details})` : "";
+    const reason = r.reason ? ` (${r.reason})` : "";
     return `- [${statusIcon}] ${r.name} (${r.kind}) - ${r.status}${reason} [key: ${r.runtimeKey}]`;
   });
   return `Available Runtimes:\n${lines.join("\n")}`;
@@ -102,10 +101,6 @@ export async function listRuntimesToolFunc(
 
   const serverSelectable = trustedContext?.serverSelectable ?? true;
   const connectorSurface = trustedContext?.connectorSurface ?? "cli";
-  const dockerSelectable = trustedContext?.dockerSelectable === true || thunkApi?.extra?.dockerSelectable === true;
-  const dockerQuotaSnapshot = dockerSelectable
-    ? (trustedContext?.dockerQuotaSnapshot ?? thunkApi?.extra?.dockerQuotaSnapshot)
-    : undefined;
 
   if (!callerUserId || !callerUserId.trim()) {
     return {
@@ -126,8 +121,6 @@ export async function listRuntimesToolFunc(
     connectorSurface,
     machineRegistry,
     connectorConnections,
-    ...(dockerSelectable !== undefined ? { dockerSelectable } : {}),
-    ...(dockerQuotaSnapshot ? { dockerQuotaSnapshot } : {}),
   });
 
   return {

@@ -30,7 +30,7 @@ import {
 import {
   createActivityIndicator,
 } from "./activityIndicator";
-import { createRunRegistryPoller, createHttpRemoteTaskSource } from "./runRegistryPoller";
+import { createRunRegistryPoller } from "./runRegistryPoller";
 import { createIdleHeapReleaser } from "./idleHeapRelease";
 import { createRunCompletionWatcher } from "./runCompletionWatcher";
 import { RUN_WAKE_CHANNEL_ENV } from "../../agent-runtime/agentRunIsolation";
@@ -769,11 +769,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   });
   const effectiveEnv = options.env ? { ...process.env, ...options.env } : process.env;
   const idleHeapReleaser = createIdleHeapReleaser({ env: effectiveEnv });
-  const remoteTasks = options.remoteTasks ?? createHttpRemoteTaskSource({
-    getServerUrl: () => state.serverUrl,
-    getAuthToken: () => resolvePlatformAuthToken(effectiveEnv),
-    fetchImpl,
-  });
   const runRegistryPoller = createRunRegistryPoller({
     getDockedRuns: () => activityIndicator.getAgentRuns(),
     update: (snapshot) => activityIndicator.updateAgentRun(snapshot),
@@ -785,7 +780,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     getCurrentDialogId: () => state.dialogId ?? null,
     reconcile: (runId) => checkStaleRun(runId, { env: effectiveEnv }),
     onRecordsPolled: (records) => runCompletionWatcher.observe(records),
-    remoteTasks,
   });
   const history = createTurnHistory();
   const imageCache = createImageAttachmentCache();
