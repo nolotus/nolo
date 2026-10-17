@@ -293,11 +293,13 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   scroll: {
     action: "scroll",
-    usage: "nolo browser scroll --tab <id> [--delta-x N] [--delta-y N]",
+    usage: "nolo browser scroll --tab <id> [--selector <css>] [--delta-x N] [--delta-y N]",
     payload: (args, usage) => {
       const payload: ChromeConnectorRequestPayload = { tabId: requireTabId(args, usage) };
+      const selector = readTrimmedOption(args, "--selector");
       const deltaX = readIntOption(args, "--delta-x", usage);
       const deltaY = readIntOption(args, "--delta-y", usage);
+      if (selector) payload.selector = selector;
       if (deltaX !== undefined) payload.deltaX = deltaX;
       if (deltaY !== undefined) payload.deltaY = deltaY;
       return payload;

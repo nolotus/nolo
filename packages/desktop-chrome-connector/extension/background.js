@@ -895,32 +895,82 @@ function pageOperation(payload) {
   if (op === "scroll") {
     const deltaX = Number((payload && payload.deltaX) || 0);
     const deltaY = Number((payload && payload.deltaY) || 0);
-    const before = { scrollX: window.scrollX, scrollY: window.scrollY };
-    window.scrollBy(deltaX, deltaY);
+    const measure = (element) => ({
+      scrollTop: element.scrollTop,
+      scrollLeft: element.scrollLeft,
+      scrollHeight: element.scrollHeight,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      clientWidth: element.clientWidth,
+    });
 
-    // 如果 window 没动，尝试查找页面中真正具有滚动条的内部容器（如小红书、Slack 等单页应用）
-    let scrolledContainer = false;
-    if (window.scrollY === before.scrollY && (deltaY !== 0 || deltaX !== 0)) {
-      const candidates = Array.from(document.querySelectorAll("*")).filter((el) => {
-        const style = window.getComputedStyle(el);
-        const overflowY = style.overflowY;
-        const overflowX = style.overflowX;
-        const hasScroll =
-          (overflowY === "auto" || overflowY === "scroll" || overflowX === "auto" || overflowX === "scroll") &&
-          (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth);
-        return hasScroll;
-      });
-      // 优先从最深或者面积最大的内部滚动容器开始滚动
-      for (const c of candidates) {
-        c.scrollBy(deltaX, deltaY);
-        scrolledContainer = true;
+    let target = null;
+    if (typeof payload?.selector === "string") {
+      let matches;
+      try {
+        matches = document.querySelectorAll(payload.selector);
+      } catch (error) {
+        return { ok: false, code: "INVALID_SELECTOR", message: String(error?.message || error) };
       }
+      if (matches.length === 0) {
+        return { ok: false, code: "ELEMENT_NOT_FOUND", message: `Element not found: ${payload.selector}` };
+      }
+      if (matches.length !== 1) {
+        return { ok: false, code: "AMBIGUOUS_SELECTOR", message: `Selector matched ${matches.length} elements: ${payload.selector}` };
+      }
+      target = matches[0];
     }
 
+    const before = { scrollX: window.scrollX, scrollY: window.scrollY };
+    if (target) {
+      const targetBefore = measure(target);
+      if (deltaX !== 0 || deltaY !== 0) {
+        target.scrollBy({ left: deltaX, top: deltaY, behavior: "instant" });
+      }
+      const targetAfter = measure(target);
+      return {
+        ok: true,
+        before: { ...before, target: targetBefore },
+        after: { scrollX: window.scrollX, scrollY: window.scrollY, target: targetAfter },
+        targetBefore,
+        targetAfter,
+        target: { tagName: target.tagName, id: target.id || "" },
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+      };
+    }
+
+    // Keep legacy viewport-first behavior, but report actual movement for every internal scroller.
+    window.scrollBy(deltaX, deltaY);
+    const candidates = Array.from(document.querySelectorAll("*")).filter((element) => {
+      const style = window.getComputedStyle(element);
+      const scrollsY = (style.overflowY === "auto" || style.overflowY === "scroll") && element.scrollHeight > element.clientHeight;
+      const scrollsX = (style.overflowX === "auto" || style.overflowX === "scroll") && element.scrollWidth > element.clientWidth;
+      return scrollsX || scrollsY;
+    });
+    const containersBefore = candidates.map(measure);
+    if (window.scrollY === before.scrollY && (deltaY !== 0 || deltaX !== 0)) {
+      for (const element of candidates) element.scrollBy(deltaX, deltaY);
+    }
+    const changedContainers = [];
+    let containersTotal = 0;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const after = measure(candidates[index]);
+      const beforePosition = containersBefore[index];
+      if (beforePosition.scrollTop === after.scrollTop && beforePosition.scrollLeft === after.scrollLeft) continue;
+      containersTotal += 1;
+      if (changedContainers.length < 5) changedContainers.push({ before: beforePosition, after });
+    }
     return {
       ok: true,
       before,
-      after: { scrollX: window.scrollX, scrollY: window.scrollY, scrolledContainer },
+      after: {
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        scrolledContainer: containersTotal > 0,
+        containers: changedContainers,
+        containersTotal,
+      },
       scrollX: window.scrollX,
       scrollY: window.scrollY,
     };
@@ -1602,12 +1652,39 @@ async function handleAction(action, payload = {}) {
       });
     }
     case "scroll": {
-      const result = await executeInTab(payload.tabId, pageOperation, [
-        { op: "scroll", deltaX: payload.deltaX || 0, deltaY: payload.deltaY || 0 },
-      ]);
+      let result;
+      try {
+        result = await executeInTab(payload.tabId, pageOperation, [
+          {
+            op: "scroll",
+            deltaX: payload.deltaX || 0,
+            deltaY: payload.deltaY || 0,
+            ...(typeof payload.selector === "string" ? { selector: payload.selector } : {}),
+          },
+        ]);
+      } catch (error) {
+        return verdictEnvelope("scroll", {
+          status: "failed",
+          signal: error?.code || "SCROLL_FAILED",
+          message: toMessage(error),
+        });
+      }
+      if (!result?.ok) {
+        return verdictEnvelope("scroll", {
+          status: "failed",
+          signal: result?.code || "SCROLL_FAILED",
+          message: result?.message || "The scroll target could not be resolved.",
+        });
+      }
       return verdictEnvelope("scroll", verifyActionEffect({ action: "scroll", result }), {
-        scrollX: Number(result?.scrollX || 0),
-        scrollY: Number(result?.scrollY || 0),
+        scrollX: Number(result.scrollX || 0),
+        scrollY: Number(result.scrollY || 0),
+        ...(result.targetBefore ? {
+          targetBefore: result.targetBefore,
+          targetAfter: result.targetAfter,
+          target: result.target,
+        } : {}),
+        ...(result.after?.containers ? { containers: result.after.containers } : {}),
       });
     }
     case "mouse_move": {

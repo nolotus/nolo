@@ -676,10 +676,14 @@ export function verifyActionEffect(input = {}) {
   }
 
   if (action === "scroll") {
-    const moved = before.scrollX !== after.scrollX || before.scrollY !== after.scrollY;
+    const targetBefore = result.targetBefore;
+    const targetAfter = result.targetAfter;
+    const movedTarget = targetBefore && targetAfter && (targetBefore.scrollTop !== targetAfter.scrollTop || targetBefore.scrollLeft !== targetAfter.scrollLeft);
+    const movedContainer = Array.isArray(after.containers) && after.containers.some(({ before: b, after: a }) => b.scrollTop !== a.scrollTop || b.scrollLeft !== a.scrollLeft);
+    const moved = movedTarget || movedContainer || before.scrollX !== after.scrollX || before.scrollY !== after.scrollY;
     return moved
       ? { status: "verified", signal: "scroll_changed" }
-      : { status: "uncertain", signal: "no_observable_effect", message: "The viewport position did not change." };
+      : { status: "uncertain", signal: "no_observable_effect", message: "The scroll position did not change." };
   }
 
   if (before.url && after.url && before.url !== after.url) return { status: "verified", signal: "navigation" };

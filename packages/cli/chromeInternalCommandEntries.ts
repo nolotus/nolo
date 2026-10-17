@@ -29,7 +29,10 @@ const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
       "Upload files to a file input element (--tab <id> --ref|--selector --file <path>)",
   },
   { name: "press", summary: "Press a keyboard key (--tab <id> --key <key>)" },
-  { name: "scroll", summary: "Scroll a tab (--tab <id> [--delta-x N] [--delta-y N])" },
+  {
+    name: "scroll",
+    summary: "Scroll a tab or observe a container (--tab <id> [--selector <css>] [--delta-x N] [--delta-y N])",
+  },
   { name: "screenshot", summary: "Capture a screenshot (--tab <id> [--out <path>])" },
   { name: "read-console", summary: "Read recent console entries (--tab <id>)" },
   { name: "read-network", summary: "Read recent network entries (--tab <id>)" },

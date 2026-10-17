@@ -231,9 +231,13 @@ export const chromePressFunctionSchema = baseSchema(
 
 export const chromeScrollFunctionSchema = baseSchema(
   "browser_scroll",
-  "Scroll a browser tab by pixel deltas.",
+  "Scroll the browser page or a CSS-selected container by pixel deltas; with selector and no deltas, observe the container's scroll position without moving it. Selector matching must resolve to exactly one valid element; invalid, missing, or ambiguous selectors fail without falling back to page scrolling. Results include targetBefore and targetAfter measurements for scrollTop, scrollLeft, scrollHeight, scrollWidth, clientHeight, and clientWidth.",
   {
     tabId,
+    selector: {
+      type: "string",
+      description: "Optional CSS selector for exactly one scroll container. When provided, only that container is scrolled; invalid, not-found, or ambiguous selectors fail without falling back. May be used without deltas to observe scroll position.",
+    },
     deltaX: {
       type: "number",
       description: "Horizontal scroll delta in pixels.",
