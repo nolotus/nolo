@@ -171,6 +171,23 @@ export const CAPABILITY_PACKS: CapabilityPack[] = [
     icon: "📚",
   },
   {
+    id: "data-table",
+    label: "数据表格",
+    description:
+      "创建与管理结构化数据表、增删改查记录与多维视图。",
+    tools: [...TOOL_PACKS.TABLE],
+    defaultEnabled: true,
+    icon: "📊",
+    promptPatch: `# 数据表格能力包 — 操作纪律
+
+## 表格操作指南
+- 用户要新建表格时，调用 createTable，并从需求推断合理的字段设计（字段名、类型、必填、可选值）。
+- 新增记录必须调用 addTableRow / addTableRows，不要只在回答里口头描述。
+- addTableRow 的 values 是对象，key 必须用字段名（name，不是显示名 label）；尽量从用户自然语言推断并填满相关字段，必填字段尤其注意；用户没提到的字段可用空字符串或 null 占位；绝不要传空对象 {}。
+- 更新或删除前，先用 queryTableRows 确认目标行，必要时向用户确认目标行/字段。
+`,
+  },
+  {
     id: "app-builder",
     label: "应用构建",
     description:
