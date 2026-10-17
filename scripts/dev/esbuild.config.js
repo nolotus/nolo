@@ -35,6 +35,14 @@ const skillDiscoveryBrowserStub = join(
   configDir,
   "../../packages/agent-runtime/skillDiscovery.browser.stub.ts",
 );
+const dockerRuntimeReadinessBrowserStub = join(
+  configDir,
+  "../../packages/server/handlers/agentRun/dockerRuntimeReadiness.browser.stub.ts",
+);
+const dockerWorkloadLifecycleBrowserStub = join(
+  configDir,
+  "../../packages/server/handlers/agentRun/dockerWorkloadLifecycle.browser.stub.ts",
+);
 
 // ---- Web edition（package.json 条件导出版本）--------------------------------
 // cloud（默认）: 既有云端 web/SSR 构建，nolo-cloud 条件优先。
@@ -117,6 +125,25 @@ const agentRuntimeBrowserCompatPlugin = {
       if (args.kind === "entry-point") return;
       if (args.path.includes("skillDiscovery.browser.stub")) return;
       return { path: skillDiscoveryBrowserStub };
+    });
+    // dockerRuntimeReadiness 的默认 sbx 探测 runner 懒加载 Node child_process；
+    // server/handlers/agentRun 经 agent 工具注册表（listRuntimesTool）静态进入 web 图，
+    // 浏览器无法探测、也不允许 Node 内建进入构建 → 重定向到 fail-closed stub
+    // （纯逻辑与真实实现一致；探测入口如实 not-configured，绝不默认放行）。
+    build.onResolve({ filter: /dockerRuntimeReadiness(\.ts)?$/ }, (args) => {
+      if (args.kind === "entry-point") return;
+      if (args.path.includes("dockerRuntimeReadiness.browser.stub")) return;
+      return { path: dockerRuntimeReadinessBrowserStub };
+    });
+    // dockerWorkloadLifecycle 使用 bun:sqlite / node:crypto / node:path（并连带
+    // dockerSandboxExecutionBackend / dockerQuotaStore 等 server-only 模块），
+    // 经 listRuntimesTool 的「服务端鉴权兜底」动态 import 进入 web 构建解析图；
+    // 浏览器不执行该鉴权路径，也不允许 Node/Bun 内建进入构建 → 重定向到
+    // fail-closed stub（isBound 恒 false，绝不默认放行；与未配置绑定的服务端语义一致）。
+    build.onResolve({ filter: /dockerWorkloadLifecycle(\.ts)?$/ }, (args) => {
+      if (args.kind === "entry-point") return;
+      if (args.path.includes("dockerWorkloadLifecycle.browser.stub")) return;
+      return { path: dockerWorkloadLifecycleBrowserStub };
     });
   },
 };

@@ -12,7 +12,6 @@ import {
   type DockerRuntimeReadiness,
   type DockerRuntimeReadinessSource,
 } from "../../../server/handlers/agentRun/dockerRuntimeReadiness";
-import { getDockerBindingAuthorizer } from "../../../server/handlers/agentRun/dockerWorkloadLifecycle";
 import { selectIdentityUserId } from "identity/selectors";
 
 export const listRuntimesFunctionSchema = {
@@ -88,6 +87,26 @@ export async function resolveTrustedDockerReadiness(
 }
 
 /**
+ * 服务端专用兜底：docker 账户绑定的真相只存在于 server handlers
+ * （bun:sqlite / node:crypto / node:path，并连带 dockerSandboxExecutionBackend 等）。
+ * 这里用动态 import 而不是静态 import：工具注册表所在的 web 图不再静态可达
+ * server-only 模块；esbuild web 构建把该模块重定向到 fail-closed stub。
+ * 加载失败（模块不可用）一律 fail-closed：返回 undefined，绝不默认放行。
+ */
+async function loadDockerBindingIsBoundFallback(): Promise<
+  ((caller: string) => boolean) | undefined
+> {
+  try {
+    const { getDockerBindingAuthorizer } = await import(
+      "../../../server/handlers/agentRun/dockerWorkloadLifecycle"
+    );
+    return (caller: string) => Boolean(getDockerBindingAuthorizer().isBound?.(caller));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Trusted caller identity, in strict precedence order:
  *
  * 1. `trustedContext.callerUserId` — the explicit composition-root binding.
@@ -154,7 +173,7 @@ export async function listRuntimesToolFunc(
     thunkApi?.extra?.isDockerBound ??
     (trustedContext?.dockerSelectable === true ? (() => true) : undefined) ??
     (trustedContext?.dockerReadinessSource ? (() => true) : undefined) ??
-    ((caller: string) => Boolean(getDockerBindingAuthorizer().isBound?.(caller)));
+    (await loadDockerBindingIsBoundFallback());
 
   if (!callerUserId || !callerUserId.trim()) {
     return {
