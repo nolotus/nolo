@@ -59,7 +59,7 @@ import { runAskChoiceDialog } from "./askChoiceDialog";
 import type { DialogHost } from "./dialogHost";
 import { runConfirmDialog } from "./confirmDialog";
 import type { ActivityIndicator, AgentRunStatusSnapshot } from "./activityIndicator";
-import type { RunRegistryPoller } from "./runRegistryPoller";
+import type { RemoteTaskSource, RunRegistryPoller } from "./runRegistryPoller";
 import {
   filterUnclaimedChildRuns,
   buildWakeMessage,
@@ -148,6 +148,8 @@ export type WorkspaceOptions = {
   clipboardWriter?: (text: string) => Promise<void>;
   clipboardReader?: () => Promise<string>;
   clipboardImageReader?: (deps?: ClipboardImageDeps) => Promise<AttachedImage>;
+  /** 外部注入的远程任务取数源（测试/特定宿主自定义取数时使用，未传入时回退默认实现） */
+  remoteTasks?: RemoteTaskSource;
 };
 
 

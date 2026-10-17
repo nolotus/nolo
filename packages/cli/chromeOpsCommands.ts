@@ -238,6 +238,59 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
       return { tabId: requireTabId(args, usage), key };
     },
   },
+  "prepare-action": {
+    action: "prepare_browser_action",
+    usage:
+      "nolo browser prepare-action --tab <id> --action click|type|press (--selector <css> | --active) [--text <text>] [--key <key>] [--owner <id>] [--dialog <id>]",
+    payload: (args, usage) => {
+      const tabId = requireTabId(args, usage);
+      const action = readTrimmedOption(args, "--action").toLowerCase();
+      if (!action || !["click", "type", "press"].includes(action)) {
+        throw new Error(`Invalid or missing --action <click|type|press>. Usage: ${usage}`);
+      }
+
+      if (readOption(args, "--ref") !== undefined) {
+        throw new Error(`--ref is not supported for action preparation; use --selector or --active. Usage: ${usage}`);
+      }
+
+      const active = args.includes("--active");
+      const selector = readTrimmedOption(args, "--selector");
+      if (!active && !selector && action !== "press") {
+        throw new Error(`Provide --selector <css> or --active. Usage: ${usage}`);
+      }
+
+      const payload: ChromeConnectorRequestPayload = {
+        tabId,
+        action,
+        ...(active ? { active: true } : {}),
+        ...(selector ? { selector } : {}),
+      };
+
+      if (action === "type") {
+        const text = readOption(args, "--text");
+        if (text === undefined || text.startsWith("--")) {
+          throw new Error(`Missing required --text <text> for type action. Usage: ${usage}`);
+        }
+        payload.text = text;
+        if (args.includes("--append")) {
+          payload.clearFirst = false;
+        }
+      } else if (action === "press") {
+        const key = readTrimmedOption(args, "--key");
+        if (!key) {
+          throw new Error(`Missing required --key <key> for press action. Usage: ${usage}`);
+        }
+        payload.key = key;
+      }
+
+      const owner = readTrimmedOption(args, "--owner");
+      if (owner) payload.owner = owner;
+      const dialog = readTrimmedOption(args, "--dialog");
+      if (dialog) payload.dialogId = dialog;
+
+      return payload;
+    },
+  },
   scroll: {
     action: "scroll",
     usage: "nolo browser scroll --tab <id> [--delta-x N] [--delta-y N]",
@@ -300,6 +353,8 @@ export function renderChromeOpsHelp(): string {
     "    preferred over --selector); --selector takes a CSS selector.",
     "  Actions the connector classifies as irreversible (Submit / Delete / Pay ...)",
     "    are refused with CONFIRMATION_REQUIRED — ask the user to perform them.",
+    "  prepare-action prepares an immutable action challenge binding for host consent verification;",
+    "    it is strictly read-only, never executes mutations, and does not grant approval.",
     "  read-console / read-network / upload work on Chrome only (Firefox lacks chrome.debugger).",
     "  --browser chrome|firefox selects which connector endpoint serves the call (default",
     "    auto-detects single online browser: chrome = 127.0.0.1:38947, firefox = 127.0.0.1:38948);",

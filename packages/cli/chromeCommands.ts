@@ -20,6 +20,7 @@ import { resolve } from "node:path";
 import { toErrorMessage } from "core/errorMessage";
 import {
   createChromeConnectorClient,
+  NOLO_CHROME_CONNECTOR_DEFAULT_PORTS,
   NOLO_CHROME_CONNECTOR_EXTENSION_ID,
   NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION,
   NOLO_CONNECTOR_EXTENSION_IDS,
@@ -68,8 +69,10 @@ export type ChromeCommandDeps = {
   home?: string;
   /** Explicit connector checkout; skips auto-detection (tests / non-repo installs). */
   connectorRoot?: string;
-  /** RPC override (tests, alternate ports). */
+  /** RPC override (tests, alternate ports). Used for both browsers unless `requestChromeFor` is set. */
   requestChrome?: RequestChrome;
+  /** Per-browser RPC override (tests); lets one build be online while the other is offline. */
+  requestChromeFor?: (browser: ConnectorBrowser) => RequestChrome;
   /** Installer override (tests); defaults to the shared installer. */
   installNativeHost?: (options?: InstallOptions) => InstallResult;
   /** Node executable the generated wrapper must exec (tests / unusual installs). */
@@ -208,6 +211,63 @@ export function compareDeployShas(
   }
 }
 
+/**
+ * One build's slice of `nolo browser status`. Chrome and Firefox are two独立 endpoints with two
+ * extension ids and two native manifests; a status that only reports Chrome reads "offline" while the
+ * Firefox connector is perfectly usable, so every status run probes both and reports both.
+ */
+export type ConnectorBrowserStatus = {
+  browser: ConnectorBrowser;
+  /** RPC endpoint this build listens on (127.0.0.1:38947 Chrome / 38948 Firefox, env-overridable). */
+  endpoint: string;
+  /** Extension id this build reports in `connector_info` (Chrome store id / Firefox Gecko id). */
+  expectedExtensionId: string;
+  nativeHost: {
+    manifestPath: string | null;
+    installed: boolean;
+    wrapperPathMatches: boolean;
+    allowedOriginMatches: boolean;
+  };
+  token: {
+    path: string | null;
+    present: boolean;
+  };
+  rpc: {
+    online: boolean;
+    extensionId: string | null;
+    /** Which build answered, resolved from the extension id; null when offline or unrecognized. */
+    build: ConnectorBrowser | null;
+    protocolVersion: string | null;
+    features: string[];
+    error?: { code: string; message: string };
+  };
+  /**
+   * Mirrors what `nolo browser <op>` auto-selection actually tests per endpoint (a `connector_info`
+   * that answers with an extension id) — see `defaultProbeBrowser` in chromeOpsCommands.ts. An
+   * unrecognized id still counts: it is a connector, just not one of the two known builds, and the
+   * routing layer would use it. `rpc.build` says which build actually answered.
+   */
+  usable: boolean;
+};
+
+export type ConnectorBrowsersReport = {
+  chrome: ConnectorBrowserStatus;
+  firefox: ConnectorBrowserStatus;
+  /** Builds whose RPC answered as themselves. */
+  online: ConnectorBrowser[];
+  /** Build a bare `nolo browser <op>` (and the single-browser fields below) resolves to. */
+  autoSelected: ConnectorBrowser | null;
+  /**
+   * True when both builds are usable: an unqualified call then fails with
+   * `MULTIPLE_BROWSERS_AVAILABLE`, so `--browser chrome|firefox` is mandatory.
+   */
+  requiresExplicitBrowser: boolean;
+  /** `--browser` passed on the command line, if any (pins the single-browser fields below). */
+  explicit: ConnectorBrowser | null;
+  /** Which build the legacy single-browser fields (`rpc`, `nativeHost`, `token`) describe. */
+  selected: ConnectorBrowser | null;
+};
+
 export type ChromeConnectorStatusReport = {
   ok: boolean;
   connectorRoot: string | null;
@@ -253,6 +313,8 @@ export type ChromeConnectorStatusReport = {
     expectedProtocolVersion: string;
     error?: { code: string; message: string };
   };
+  /** Both builds, always probed — this is what makes "Chrome asleep, Firefox fine" visible. */
+  browsers: ConnectorBrowsersReport;
   nextStep: string;
 };
 
@@ -387,6 +449,20 @@ function readJsonFile(path: string): Record<string, any> | null {
   }
 }
 
+/**
+ * RPC endpoint for one build, mirroring the connector's own rule (`connectorEndpointForBrowser` in
+ * chromeConnector.ts): a single explicit `NOLO_CHROME_CONNECTOR_RPC_URL` overrides both builds, the
+ * per-browser port env vars default to 38947 (Chrome) / 38948 (Firefox). `status` prints this so the
+ * "which port did we even try" question never needs a source dive.
+ */
+function resolveConnectorEndpoint(browser: ConnectorBrowser, env: EnvLike): string {
+  const explicitUrl = (env.NOLO_CHROME_CONNECTOR_RPC_URL ?? "").trim();
+  if (explicitUrl) return explicitUrl;
+  const port =
+    browser === "firefox" ? env.NOLO_FIREFOX_CONNECTOR_PORT : env.NOLO_CHROME_CONNECTOR_PORT;
+  return `http://127.0.0.1:${port || NOLO_CHROME_CONNECTOR_DEFAULT_PORTS[browser]}/rpc`;
+}
+
 async function probeConnectorRpc(requestChrome: RequestChrome) {
   try {
     const connectorInfo = (await requestChrome("connector_info", {})) ?? {};
@@ -418,6 +494,130 @@ async function probeConnectorRpc(requestChrome: RequestChrome) {
         message: toErrorMessage(error),
       },
     };
+  }
+}
+
+const CONNECTOR_BROWSER_ORDER = ["chrome", "firefox"] as const;
+
+/**
+ * Stands in for an endpoint this run deliberately did not dial (see the shared-override rule in
+ * `buildChromeConnectorStatus`). Same error shape the real client throws when nothing listens, so the
+ * probe classifies it as "offline" instead of leaking a fake success into the report.
+ */
+const notProbedRequest: RequestChrome = async () => {
+  throw Object.assign(new Error("endpoint not probed (a shared request override pins the other one)"), {
+    code: "CHROME_CONNECTOR_UNAVAILABLE",
+  });
+};
+
+/** Extension id each build reports in `connector_info` (see CONNECTOR_BROWSER_EXTENSION_IDS). */
+function expectedExtensionIdFor(browser: ConnectorBrowser, chromeExtensionId: string): string {
+  return browser === "firefox" ? NOLO_FIREFOX_CONNECTOR_EXTENSION_ID : chromeExtensionId;
+}
+
+/**
+ * Probes both endpoints. Never throws: an offline build is a value, not an error — the whole point of
+ * reporting per browser is that one can be asleep while the other answers.
+ */
+async function probeBrowserStatuses(args: {
+  env: EnvLike;
+  chromeExtensionId: string;
+  requestFor: (browser: ConnectorBrowser) => RequestChrome;
+}): Promise<Record<ConnectorBrowser, ConnectorBrowserStatus>> {
+  const entries = await Promise.all(
+    CONNECTOR_BROWSER_ORDER.map(async (browser) => {
+      const probe = await probeConnectorRpc(args.requestFor(browser));
+      const build = probe.online ? resolveConnectorBrowser(probe.extensionId) : null;
+      const status: ConnectorBrowserStatus = {
+        browser,
+        endpoint: resolveConnectorEndpoint(browser, args.env),
+        expectedExtensionId: expectedExtensionIdFor(browser, args.chromeExtensionId),
+        nativeHost: {
+          manifestPath: null,
+          installed: false,
+          wrapperPathMatches: false,
+          allowedOriginMatches: false,
+        },
+        token: { path: null, present: false },
+        rpc: {
+          online: probe.online,
+          extensionId: probe.extensionId,
+          build,
+          protocolVersion: probe.protocolVersion,
+          features: probe.features,
+          ...(probe.online ? {} : { error: probe.error }),
+        },
+        usable: probe.online,
+      };
+      return [browser, status] as const;
+    }),
+  );
+  return Object.fromEntries(entries) as Record<ConnectorBrowser, ConnectorBrowserStatus>;
+}
+
+/**
+ * Selection summary. Mirrors the ops commands' routing rule exactly: one usable build → picked
+ * automatically; both usable → an unqualified call fails with `MULTIPLE_BROWSERS_AVAILABLE`.
+ */
+function summarizeBrowsers(
+  statuses: Record<ConnectorBrowser, ConnectorBrowserStatus>,
+  explicit: ConnectorBrowser | null,
+): ConnectorBrowsersReport {
+  const online = CONNECTOR_BROWSER_ORDER.filter((browser) => statuses[browser].usable);
+  const requiresExplicitBrowser = online.length > 1;
+  const autoSelected = requiresExplicitBrowser ? null : (online[0] ?? null);
+  return {
+    chrome: statuses.chrome,
+    firefox: statuses.firefox,
+    online: [...online],
+    autoSelected,
+    requiresExplicitBrowser,
+    explicit,
+    // Falls back to Chrome only to keep the legacy single-browser fields non-null-shaped (the old
+    // report always described the Chrome endpoint when nothing was connected).
+    selected: explicit ?? autoSelected ?? "chrome",
+  };
+}
+
+/** Fills one build's manifest/token facts; a platform without a manifest path leaves them unset. */
+function fillBrowserInstallFacts(
+  status: ConnectorBrowserStatus,
+  args: { home: string; connectorRoot: string; platform: string; chromeExtensionId: string },
+) {
+  try {
+    const paths = resolveNativeHostInstallPaths({
+      home: args.home,
+      connectorRoot: args.connectorRoot,
+      platform: args.platform,
+      browser: status.browser,
+    });
+    const installedManifest = existsSync(paths.nativeManifestPath)
+      ? readJsonFile(paths.nativeManifestPath)
+      : null;
+    status.nativeHost = {
+      manifestPath: paths.nativeManifestPath,
+      installed: installedManifest !== null,
+      wrapperPathMatches:
+        typeof installedManifest?.path === "string" && installedManifest.path === paths.wrapperPath,
+      allowedOriginMatches:
+        status.browser === "firefox"
+          ? Array.isArray(installedManifest?.allowed_extensions) &&
+            installedManifest.allowed_extensions.includes(NOLO_FIREFOX_CONNECTOR_EXTENSION_ID)
+          : Array.isArray(installedManifest?.allowed_origins) &&
+            installedManifest.allowed_origins.includes(
+              `chrome-extension://${args.chromeExtensionId}/`,
+            ),
+    };
+    status.token = { path: paths.tokenPath, present: false };
+    if (existsSync(paths.tokenPath)) {
+      try {
+        status.token.present = readFileSync(paths.tokenPath, "utf8").trim().length > 0;
+      } catch {
+        status.token.present = false;
+      }
+    }
+  } catch {
+    // Unsupported platform (or unresolvable paths): the per-browser block reports RPC only.
   }
 }
 
@@ -501,6 +701,13 @@ function resolveStatusNextStep(report: ChromeConnectorStatusReport) {
       "if that persists, the checkout's extension is older than the CLI expects."
     );
   }
+  if (report.browsers.requiresExplicitBrowser) {
+    return (
+      "Both Chrome and Firefox connectors are online, so every unqualified `nolo browser <op>` call " +
+      "fails with MULTIPLE_BROWSERS_AVAILABLE: pass --browser chrome or --browser firefox. The " +
+      `single-browser lines above describe ${browserLabel(report.browsers.selected)} (--browser, else Chrome).`
+    );
+  }
   return `The Nolo Browser Connector is online (${connectedLabel}): connector tools execute against this ${connectedLabel} profile.`;
 }
 
@@ -527,6 +734,27 @@ export async function buildChromeConnectorStatus(
     extensionManifest && typeof extensionManifest.key === "string"
       ? extensionIdFromPublicKey(extensionManifest.key)
       : NOLO_CHROME_CONNECTOR_EXTENSION_ID;
+
+  // Both builds are probed on every status run (in parallel, ~400ms worst case), before the report is
+  // shaped: `status` under-reporting Firefox is the bug this answers — Chrome's worker being asleep
+  // must not read as "the connector is down".
+  // A shared `requestChrome` override (tests, alternate port) stands for the ONE endpoint this run is
+  // about: `--browser`, else Chrome. The other build is reported offline instead of dialing its real
+  // port — a test or an alternate-port install must never reach the user's browser, and letting one
+  // stub answer both endpoints would invent a MULTIPLE_BROWSERS_AVAILABLE that nobody observed.
+  const sharedOverrideTarget: ConnectorBrowser = browserTarget ?? "chrome";
+  const requestFor = (browser: ConnectorBrowser): RequestChrome => {
+    const perBrowser = args.requestChromeFor?.(browser);
+    if (perBrowser) return perBrowser;
+    if (!args.requestChrome) return createChromeConnectorClient({ browser }).request;
+    return browser === sharedOverrideTarget ? args.requestChrome : notProbedRequest;
+  };
+  const browserStatuses = await probeBrowserStatuses({
+    env,
+    chromeExtensionId: expectedId,
+    requestFor,
+  });
+  const browsersReport = summarizeBrowsers(browserStatuses, browserTarget ?? null);
 
   const report: ChromeConnectorStatusReport = {
     ok: false,
@@ -561,6 +789,7 @@ export async function buildChromeConnectorStatus(
       missingFeatures: [...FULL_SUPPORT_CHROME_FEATURES],
       expectedProtocolVersion: NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION,
     },
+    browsers: browsersReport,
     nextStep: "",
   };
 
@@ -608,10 +837,10 @@ export async function buildChromeConnectorStatus(
 
   // Token + 127.0.0.1 only, so the live probe runs even when no checkout was found: an installed CLI
   // pointing at a desktop-installed native host is a healthy state and must not read as "offline".
-  // An explicit --browser routes the probe to that host's endpoint; default is the Chrome endpoint.
-  const requestChrome =
-    args.requestChrome ?? createChromeConnectorClient({ browser: browserTarget }).request;
-  const probe = await probeConnectorRpc(requestChrome);
+  // The probe itself already ran for BOTH builds above; the fields below describe the one this run is
+  // about: an explicit --browser, else the auto-selected build, else Chrome (the legacy default).
+  const selectedBrowser: ConnectorBrowser = browsersReport.selected ?? "chrome";
+  const probe = browserStatuses[selectedBrowser].rpc;
   report.rpc.online = probe.online;
   report.rpc.extensionId = probe.extensionId;
   report.rpc.protocolVersion = probe.protocolVersion;
@@ -686,6 +915,18 @@ export async function buildChromeConnectorStatus(
   report.nativeHost.wrapperPath = paths.wrapperPath;
   report.token.path = paths.tokenPath;
 
+  // Per-build manifest/token facts for BOTH builds (the block above only covers the selected one).
+  if (connectorRoot) {
+    for (const browser of CONNECTOR_BROWSER_ORDER) {
+      fillBrowserInstallFacts(browserStatuses[browser], {
+        home,
+        connectorRoot,
+        platform,
+        chromeExtensionId: expectedId,
+      });
+    }
+  }
+
   const installedManifest = existsSync(paths.nativeManifestPath)
     ? readJsonFile(paths.nativeManifestPath)
     : null;
@@ -727,6 +968,62 @@ function yesNo(value: boolean) {
   return value ? "ok" : "mismatch";
 }
 
+/** `Chrome` / `Firefox` + its RPC port, so the line answers "which port was even tried". */
+function endpointPort(endpoint: string): string {
+  try {
+    return new URL(endpoint).port || "(default)";
+  } catch {
+    return endpoint;
+  }
+}
+
+function formatBrowserStatusLine(status: ConnectorBrowserStatus): string {
+  const rpcText = status.rpc.online
+    ? `RPC online  build ${status.rpc.build ?? "unrecognized"}  extension ${
+        status.rpc.extensionId ?? "unknown"
+      }  protocolVersion ${status.rpc.protocolVersion ?? "unknown"}`
+    : `RPC offline  ${
+        status.rpc.error ? `${status.rpc.error.code}: ${status.rpc.error.message}` : "(no detail)"
+      }`;
+  const installText = status.nativeHost.manifestPath
+    ? `manifest ${status.nativeHost.installed ? "installed" : "missing"}  token ${
+        status.token.present ? "present" : "missing"
+      }`
+    : "manifest (not resolved)";
+  const verdict = !status.usable
+    ? "unusable"
+    : status.rpc.build && status.rpc.build !== status.browser
+      ? `usable, but answers as the ${browserLabel(status.rpc.build)} build`
+      : "usable";
+  return `${rpcText}  port ${endpointPort(status.endpoint)}  ${installText}  -> ${verdict}`;
+}
+
+/**
+ * The routing rule in one line: one build online → it is picked automatically; both online → the
+ * unqualified call fails with `MULTIPLE_BROWSERS_AVAILABLE` and `--browser` becomes mandatory.
+ */
+function describeBrowserSelection(browsers: ConnectorBrowsersReport): string {
+  const explicitNote = browsers.explicit
+    ? `  [--browser ${browsers.explicit} pins this report]`
+    : "";
+  if (browsers.requiresExplicitBrowser) {
+    return (
+      "none — both Chrome and Firefox are online, so pass --browser chrome|firefox " +
+      `(an unqualified call fails with MULTIPLE_BROWSERS_AVAILABLE)${explicitNote}`
+    );
+  }
+  if (browsers.autoSelected) {
+    return (
+      `${browsers.autoSelected} — only ${browserLabel(browsers.autoSelected)} answered, ` +
+      `so a bare \`nolo browser <op>\` routes to it${explicitNote}`
+    );
+  }
+  return (
+    "none — no connector answered, so a bare `nolo browser <op>` fails with " +
+    `CHROME_CONNECTOR_UNAVAILABLE${explicitNote}`
+  );
+}
+
 export function formatChromeConnectorStatus(report: ChromeConnectorStatusReport) {
   const lines: string[] = ["Nolo Browser Connector"];
   lines.push(
@@ -764,6 +1061,12 @@ export function formatChromeConnectorStatus(report: ChromeConnectorStatusReport)
   const localShort = report.deploy.localSha ? report.deploy.localSha.slice(0, 7) : "unknown";
   const onlineShort = report.deploy.onlineSha ? report.deploy.onlineSha.slice(0, 7) : "unknown";
   lines.push(`  deploy status    : local ${localShort}  online ${onlineShort} (${report.deploy.sync})`);
+  // Both builds, always: Chrome's service worker sleeping must not read as "the connector is down"
+  // while Firefox is answering. Then one line saying what an unqualified `nolo browser <op>` does.
+  for (const browser of CONNECTOR_BROWSER_ORDER) {
+    lines.push(`  ${`${browserLabel(browser)}${browser === "chrome" ? " " : ""}`.padEnd(16)}: ${formatBrowserStatusLine(report.browsers[browser])}`);
+  }
+  lines.push(`  auto selection   : ${describeBrowserSelection(report.browsers)}`);
   const rpc = report.rpc;
   if (rpc.online) {
     lines.push(

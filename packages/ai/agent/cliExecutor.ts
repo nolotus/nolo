@@ -22,6 +22,8 @@ import { isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import { resolveLaunchableCodexCommand } from "connector-experimental/codexBinary";
+import type { AgentRuntimeCompleteOptions } from "agent-runtime/hostAdapter";
+import { executeOpenCodeStreaming } from "./executors/opencodeExecutor";
 import { buildCliPrompt } from "./cliPrompt";
 import type { CliProvider } from "./cliProviders";
 
@@ -60,6 +62,8 @@ export interface CliExecuteOptions {
   thinkingBudget?: number;
   /** 图片输入（本地路径 / data URL / file URL）。materialize 由内部处理。 */
   imageInputs?: CliImageInput[];
+  onToolEvent?: AgentRuntimeCompleteOptions["onToolEvent"];
+  toolEventRound?: number;
   /**
    * When aborted (client stop / request disconnect), kill the running CLI
    * child process. Desktop stop button depends on this for local CLI agents.
@@ -152,9 +156,7 @@ const DEFAULT_GROK_TIMEOUT_MS = 600_000;
 const BUFFERED_STREAMING_PROVIDERS = new Set<CliProvider>([
   "codex",
   "claude",
-  "agy",
   "qoder",
-  "opencode",
   "grok",
   "kimi",
 ]);
@@ -344,7 +346,7 @@ function supportsNativeSystemPrompt(provider: CliProvider): boolean {
 function supportsModel(provider: CliProvider): boolean {
   // Codex accepts --model syntactically, but real desktop/subscription installs
   // can fail with plan-gating errors. Keep model routing out of Codex CLI.
-  return provider !== "agy" && provider !== "codex";
+  return provider !== "codex";
 }
 
 function supportsReasoningEffort(provider: CliProvider): boolean {
@@ -1123,6 +1125,7 @@ function executeAgy(
       "--print-timeout",
       formatCliTimeout(timeout),
     ];
+    if (options.model) args.push("--model", options.model);
     if (yolo) {
       args.push("--dangerously-skip-permissions");
     }
@@ -1200,6 +1203,117 @@ function executeAgy(
       console.error("[cliExecutor] agy process error event:", err);
       reject(err);
     });
+  });
+}
+
+function executeAgyStreaming(
+  prompt: string,
+  options: CliExecuteOptions & { onChunk: (chunk: string) => void },
+): Promise<CliExecuteResult> {
+  const {
+    cwd = process.cwd(),
+    timeout = DEFAULT_AGY_TIMEOUT_MS,
+    yolo = true,
+    model,
+    onChunk,
+  } = options;
+
+  return new Promise((resolve, reject) => {
+    const args = [
+      "--add-dir", cwd,
+      "--print=" + prompt,
+      "--output-format", "stream-json",
+      "--print-timeout", formatCliTimeout(timeout),
+    ];
+    if (model) args.push("--model", model);
+    if (yolo) args.push("--dangerously-skip-permissions");
+
+    const start = Date.now();
+    const proc = spawnCliProcess("agy", args, {
+      cwd,
+      env: buildCliProcessEnv(options.env),
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+      signal: options.signal,
+    });
+    const stdout = createUtf8Collector();
+    const stderr = createUtf8Collector();
+    let pending = "";
+    let answer = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // attachCliAbortSignal may synchronously report an already-aborted signal.
+    let detachAbort = () => {};
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      detachAbort();
+      callback();
+    };
+    const fail = (error: unknown) => {
+      if (settled) return;
+      terminateCliProcessGroupEscalating(proc);
+      finish(() => reject(error));
+    };
+    detachAbort = attachCliAbortSignal(proc, options.signal, (error) => {
+      finish(() => reject(error));
+    });
+
+    if (!settled && timeout > 0) {
+      timer = setTimeout(() => {
+        fail(buildAgyTimeoutError(timeout, stdout.end(), stderr.end()));
+      }, timeout + 1_000);
+    }
+
+    const consumeLine = (line: string) => {
+      if (settled || !line.trim()) return;
+      let event: any;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        // Ignore diagnostics and incomplete/non-JSON protocol lines, not callback errors.
+        return;
+      }
+      if (event?.event !== "step_update" ||
+          event.step_update?.step_type !== "agent_response" ||
+          typeof event.step_update.text_delta !== "string") return;
+      const delta = event.step_update.text_delta;
+      if (!delta) return;
+      answer += delta;
+      try {
+        onChunk(delta);
+      } catch (error) {
+        fail(error);
+      }
+    };
+    proc.stdout.on("data", (data: Buffer) => {
+      if (settled) return;
+      pending += stdout.write(data);
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) consumeLine(line);
+    });
+    proc.stderr.on("data", (data: Buffer) => {
+      if (!settled) stderr.write(data);
+    });
+    proc.on("close", (code, signal) => {
+      if (settled) return;
+      pending += stdout.finish();
+      consumeLine(pending);
+      if (settled) return;
+      const raw = stdout.end();
+      const stderrText = stderr.end();
+      if (code !== 0 || signal) {
+        const quota = detectCliProviderQuotaLimit("agy", raw, stderrText, code);
+        finish(() => reject(quota.limited
+          ? new CliProviderQuotaError("agy", quota.message || "Agy reported quota/limit")
+          : new Error(`Antigravity CLI exited with ${signal ? `signal ${signal}` : `code ${code}`}\nstderr: ${stderrText}`)));
+        return;
+      }
+      finish(() => resolve({ text: answer.trim(), raw, elapsed: Date.now() - start }));
+    });
+    proc.on("error", (error) => fail(error));
   });
 }
 
@@ -1904,7 +2018,19 @@ export function executeCliStreaming(
       })
     );
   }
-  if (provider === "agy" || provider === "qoder" || provider === "opencode" || provider === "grok" || provider === "kimi") {
+  if (provider === "agy") {
+    return withCleanup(
+      executeAgyStreaming(resolved.prompt, resolved.options as CliExecuteOptions & { onChunk: (chunk: string) => void })
+        .then((result) => ({ ...result, warnings: [...resolved.warnings, ...(result.warnings ?? [])] }))
+    );
+  }
+  if (provider === "opencode") {
+    return withCleanup(
+      executeOpenCodeStreaming(resolved.prompt, resolved.options as CliExecuteOptions & { onChunk: (chunk: string) => void })
+        .then((result) => ({ ...result, warnings: [...resolved.warnings, ...(result.warnings ?? [])] }))
+    );
+  }
+  if (provider === "qoder" || provider === "grok" || provider === "kimi") {
     return withCleanup(
       executor(resolved.prompt, resolved.options).then((result) => {
         const merged = { ...result, warnings: [...resolved.warnings, ...(result.warnings ?? [])] };

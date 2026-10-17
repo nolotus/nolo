@@ -99,7 +99,8 @@ import {
   resolveCooldownGate,
 } from "../../ai/agent/agentAvailabilityShared";
 import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
-import { t } from "../tui/i18n";
+import { getCliLocale, t } from "../tui/i18n";
+import type { CliLocale } from "../tui/i18n";
 
 /** Local loop is heavy; load only when a local turn actually runs. */
 async function loadRunLocalAgentTurn() {
@@ -1023,39 +1024,289 @@ function buildRejectedPayloadFailure(ctx: FailureCtx): string {
  * 从限流/配额报文里摘出上游给出的 retry-after / 复位时间**原文**（只做展示，
  * 不做解析换算；复位时刻的权威解析在 agentAvailabilityShared）。
  */
-const RATE_LIMIT_RESET_HINT_RE =
-  /retry[-_\s]?after\s*[:=]?\s*\d[\w:-]*|resets?\s+(?:in|at)\s+\d[\w:-]*(?:[ T]\d[\w:-]*)?/i;
+const RESET_HINT_UNIT =
+  String.raw`(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)`;
+/**
+ * 时长值段允许多段连写（`1h26m59s` / `5 hours` / `30 days`）；旧版 `\d[\w:-]*`
+ * 在空格处截断，把 `reset in 5 hours` 只抓成 `reset in 5`，于是正文被挖成
+ * `Your usage limit will hours`、显示又把裸值 5 当秒误报成 `<1 分钟`。
+ */
+const RESET_HINT_DURATION = String.raw`\d+(?:\.\d+)?(?:\s*${RESET_HINT_UNIT})?(?:\s*\d+(?:\.\d+)?\s*${RESET_HINT_UNIT})*`;
+const RATE_LIMIT_RESET_HINT_RE = new RegExp(
+  String.raw`retry[-_\s]?after\s*[:=]?\s*\d[\w:.-]*` +
+    String.raw`|resets?\s+at\s+\d[\w:.-]*` +
+    String.raw`|resets?\s+in\s+${RESET_HINT_DURATION}`,
+  "i",
+);
 
-function extractRateLimitResetHint(message: string): string | undefined {
-  const match = message.match(RATE_LIMIT_RESET_HINT_RE);
-  return match ? match[0].trim() : undefined;
+/**
+ * 复位句必须在原串里**完整结束**才算数：后一个字符若还是字母/`-`/`:`，说明值段被
+ * 截断（`resets in 2026-10-17T06:41:22Z` 只抓到 `resets in 2026`、`resets in 24-48
+ * hours` 只抓到 `resets in 24`），此时宁可少显示，也不能给出错的 ETA。
+ */
+function findRateLimitResetHint(
+  message: string,
+): { raw: string; text: string; index: number } | undefined {
+  const match = RATE_LIMIT_RESET_HINT_RE.exec(message);
+  if (!match) return undefined;
+  const end = match.index + match[0].length;
+  if (/^[a-z:-]/i.test(message[end] ?? "")) return undefined;
+  return { raw: match[0], text: match[0].trim(), index: match.index };
 }
 
-function buildRateLimitFailure(ctx: FailureCtx): string {
-  // 启动期 429 已由 markStartupRateLimitCooldown 落冷却（与 run 中途同语义）。
-  // 文案必须带上「已暂停该凭证的派发，最晚 <ISO> 自动解除」：不再让用户误以为
-  // 「要等到明天」，而要说明期间会自动试探、成功即恢复，并给出手动恢复命令。
-  const cooldownNote = ctx.cooldownUntil
-    ? ` 已暂停该凭证的派发，本地冷却最晚 ${ctx.cooldownUntil} 到期（不代表上游额度届时一定恢复）；冷却期间再次派发时，约每 ${Math.round(PROBE_INTERVAL_MS / 60000)} 分钟放行一次试探请求，成功即恢复。若已充值或重置额度，可运行 \`nolo auth cooldown\` 查看被暂停的凭证名，再用 \`nolo auth cooldown --clear <凭证名>\` 立即恢复。`
-    : "";
-  // 仅凭文本命中的限流（statusInferred）不能声称 "returned HTTP 429"——上游
-  // 只是报文里说限流/配额；status 是语义等价码。
-  const headline = ctx.statusInferred
-    ? `${ctx.where} hit an upstream rate-limit/quota error`
-    : `${ctx.where} returned HTTP ${ctx.status}, rate limited`;
-  // 配额耗尽与短时限流的下一步不同：前者要等配额窗口复位，后者稍后重试即可；
-  // 两者都明确「不是本地凭证问题」，并给出换 agent 的出口。
-  const cause = ctx.quotaExhausted
-    ? "The upstream quota/balance for this agent is exhausted — NOT a local credential/config issue"
-    : "This agent is being throttled by the upstream provider — NOT a local credential/config issue";
-  const reset = extractRateLimitResetHint(ctx.message);
-  const advice = ctx.quotaExhausted
-    ? `Retry after the upstream quota resets${reset ? ` (${reset})` : ""}`
-    : `Retry shortly${reset ? ` (${reset})` : ""}`;
-  return (
-    `${RUN_UNAVAILABLE_PREFIX} (${headline}). Detail: ${ctx.message} ` +
-    `${NO_FALLBACK} ${cause}. ${advice}, switch to another agent (\`nolo agent list\`), ${SERVER_FALLBACK_HINT}${cooldownNote}\n`
+function extractRateLimitResetHint(message: string): string | undefined {
+  return findRateLimitResetHint(message)?.text;
+}
+
+/**
+ * 只有独立成句的复位句才从正文里剥掉：`… Your usage limit will reset in 5 hours`
+ * 是半句，剥了会留下 `will`（旧版真实踩过），这种保留在正文里。
+ */
+function isStandaloneResetSentence(text: string, index: number): boolean {
+  const before = text.slice(0, index).replace(/\s+$/, "");
+  return before === "" || /[.。!！?？;；]$/.test(before);
+}
+
+/** 429 详情压缩上限（字符）；超出后截断并追加 `…`。 */
+const RATE_LIMIT_DETAIL_MAX_CHARS = 140;
+
+/**
+ * 按括号配平剥离 `details=[...]`：上游常把整段调试数组塞进 message，正则贪婪
+ * 删除会连后文一起吞掉；这里逐字符扫描，字符串内的方括号不参与配平，不配平时
+ * 原样返回（交给截断兜底）。
+ */
+function stripRateLimitDetailsArray(message: string): string {
+  const KEY = "details=";
+  let out = message;
+  let searchFrom = 0;
+  for (;;) {
+    const keyIndex = out.indexOf(KEY, searchFrom);
+    if (keyIndex === -1) return out;
+    // 只认 `details=` 之后（跳过空白）**紧接**的 `[`；否则是对象或普通文本，
+    // 绝不去远处找 `[`（`details={"code":1} … [ticket] later` 必须原样保留）。
+    let openIndex = keyIndex + KEY.length;
+    while (openIndex < out.length && /\s/.test(out[openIndex])) openIndex += 1;
+    if (out[openIndex] !== "[") {
+      searchFrom = keyIndex + KEY.length;
+      continue;
+    }
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let endIndex = -1;
+    for (let i = openIndex; i < out.length; i += 1) {
+      const ch = out[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "[") depth += 1;
+      else if (ch === "]") {
+        depth -= 1;
+        if (depth === 0) {
+          endIndex = i;
+          break;
+        }
+      }
+    }
+    // 不配平：原样保留，交给截断兜底。
+    if (endIndex === -1) return out;
+    out = `${out.slice(0, keyIndex)} ${out.slice(endIndex + 1)}`;
+    searchFrom = keyIndex;
+  }
+}
+
+/**
+ * 传输前缀（`local antigravity provider failed: HTTP 429 ` / `server chat proxy …`）
+ * 已由 headline 承担，渲染前剥掉，否则第 1 行会重复「哪个传输 + HTTP 码」。
+ */
+function stripRateLimitTransportPrefix(message: string): string {
+  let out = message.trim();
+  const localPrefix = /^local(?:\s+\S+)?\s+provider failed:\s*/i.exec(out);
+  if (localPrefix) {
+    out = out.slice(localPrefix[0].length);
+  } else {
+    const proxyPrefix = /^server chat proxy[^:]*:\s*/i.exec(out);
+    if (proxyPrefix) out = out.slice(proxyPrefix[0].length);
+  }
+  return out.replace(/^HTTP\s+\d{3}\b[\s:,-]*/i, "").trim();
+}
+
+/**
+ * 第 1 行的上游标签：provider 名（`local <x> provider failed`）+ model
+ * （`"model":"<name>"`）拼成 `antigravity · gemini-3.8-flash-tiered`；两者都取不到
+ * 时回退 ctx.where（`local provider` / `server chat proxy`）。
+ */
+function describeRateLimitSource(ctx: FailureCtx): string {
+  const provider = /^local\s+(\S+)\s+provider failed/i.exec(ctx.message)?.[1];
+  const model = /"model"\s*:\s*"([^"]+)"/.exec(ctx.message)?.[1];
+  const parts = [provider, model].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(" · ") : ctx.where;
+}
+
+/**
+ * 上游原文 → 单行紧凑详情：剥调试噪音（`raw=` / `headers=`）、`details=[...]`
+ * 数组与传输前缀，最后折叠空白并按 140 字符截断。
+ *
+ * 复位句只在 `stripResetSentence` 为 true（即第 2 行确实会渲染——只有
+ * cooldownUntil 存在时）才从正文里剥掉：否则剥了就等于把上游给的 ETA 从整块
+ * 输出里删掉（无 cooldownUntil 路径实测会彻底丢失 `Resets in 30m`）。
+ * 剥的时候也只认独立成句的复位句（`…. Resets in 1h26m59s`）：半句
+ * `… will reset in 5 hours` 与 JSON 包裹形态 `{"message":"Resets in 1h26m59s"}`
+ * 都保留在正文里——前者剥了会留下 `will`，后者剥了会破坏 JSON 外壳。
+ */
+function sanitizeRateLimitDetail(
+  message: string,
+  stripResetSentence: boolean,
+): string {
+  const withoutNoise = stripRateLimitTransportPrefix(
+    stripRateLimitDetailsArray(stripDebugNoise(message)),
   );
+  const collapse = (text: string) =>
+    text
+      .replace(/\s+/g, " ")
+      // 摘掉复位句后可能留下两个句末标点（"…limits. ."）：合并成一个。
+      .replace(/([.。!！?？])\s+(?=[.。!！?？])/g, "")
+      .replace(/([.。!！?？])\1+/g, "$1")
+      .replace(/[\s,;:，；：]+$/, "")
+      .trim();
+  // 独立成句的复位句单独渲染在第 2 行，正文里不重复；摘掉后只剩空串则回退到未摘版本。
+  const hint = stripResetSentence
+    ? findRateLimitResetHint(withoutNoise)
+    : undefined;
+  const stripped =
+    hint && isStandaloneResetSentence(withoutNoise, hint.index)
+      ? `${withoutNoise.slice(0, hint.index)} ${withoutNoise.slice(hint.index + hint.raw.length)}`
+      : withoutNoise;
+  const detail = collapse(stripped) || collapse(withoutNoise);
+  return detail.length > RATE_LIMIT_DETAIL_MAX_CHARS
+    ? `${detail.slice(0, RATE_LIMIT_DETAIL_MAX_CHARS - 1).trimEnd()}…`
+    : detail;
+}
+
+/**
+ * cooldownUntil（ISO）→ 本地时间文案：当天只显示 `HH:MM`，跨天 `MM-DD HH:MM`；
+ * 解析失败时回退原文（宁可显示 ISO 也不显示 Invalid Date）。
+ */
+export function formatCooldownUntilLocal(
+  iso: string,
+  now: Date = new Date(),
+): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const sameDay =
+    at.getFullYear() === now.getFullYear() &&
+    at.getMonth() === now.getMonth() &&
+    at.getDate() === now.getDate();
+  return sameDay ? time : `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`;
+}
+
+/** 复位 hint 里的「值」部分：剥掉 `resets in|at` / `retry-after[:=]` 前缀。 */
+const RESET_HINT_VALUE_RE =
+  /^(?:resets?\s+(?:in|at)\s*|retry[-_\s]?after\s*[:=]?\s*(?:in\s+)?)(.*)$/i;
+/** `1h26m59s` / `30m` / `2d3h` 这类时长（单位可省、可连写）。 */
+const RESET_HINT_DURATION_RE =
+  /^(?:(\d+)\s*d(?:ays?)?)?\s*(?:(\d+)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:ute)?s?)?)?\s*(?:(\d+)\s*s(?:ec(?:ond)?s?)?)?$/i;
+/** `2026-10-17T06:41:22Z` / `2026-10-17 06:41:22` 这类绝对时刻。 */
+const RESET_HINT_ABSOLUTE_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+/** 只有 `resets in` 分支要求值段自带单位词；`retry-after` 的裸数字按秒。 */
+const RESET_HINT_IN_BRANCH_RE = /^resets?\s+in\b/i;
+const RESET_HINT_UNIT_IN_VALUE_RE = new RegExp(String.raw`\d\s*${RESET_HINT_UNIT}`, "i");
+
+function parseResetHintSeconds(value: string): number | undefined {
+  // `retry-after: 30` 的裸数字按秒。
+  if (/^\d+$/.test(value)) return Number(value);
+  const match = RESET_HINT_DURATION_RE.exec(value);
+  if (!match || !match.slice(1).some(Boolean)) return undefined;
+  const [days, hours, minutes, seconds] = match
+    .slice(1)
+    .map((part) => Number(part ?? 0));
+  return days * 86400 + hours * 3600 + minutes * 60 + seconds;
+}
+
+/**
+ * 把 extractRateLimitResetHint 抓到的**上游原文**换算成只含数值的复位提示：
+ *   · `Resets in 1h26m59s` / `Retry after 30m` 这类时长 → `1 小时 27 分` / `1h 27m`；
+ *   · `resets at 2026-10-17T06:41:22Z` 这类时刻 → 复用 formatCooldownUntilLocal；
+ *   · 换算不出时剥掉 `resets? (in|at)` / `retry-after[:=]?` 只留值；仍为空则整段
+ *     省略（宁缺勿重复——第一版直接把上游整句塞进括号，渲染出
+ *     「冷却至 07:35（上游约 Resets in 30m 后复位）」）。
+ * 不足 1 分钟显示 `<1 分钟` / `<1m`；其余按分钟取整（1h26m59s → 1 小时 27 分，30d → 30 天）。
+ */
+function formatRateLimitResetHint(
+  hint: string,
+  locale: CliLocale,
+): string | undefined {
+  const value = (RESET_HINT_VALUE_RE.exec(hint.trim())?.[1] ?? hint).trim();
+  if (!value) return undefined;
+  // `resets in` 分支：值段没有单位词（裸数字 / 被截断的日期）就不换算——旧版把
+  // `resets in 2026-…` 的年份、`resets in 24-48 hours` 的 24 当秒数，凭空造出 ETA。
+  // `retry-after` 的裸秒语义不受影响（另一分支：`retry-after: 30` → 1 分）。
+  if (
+    RESET_HINT_IN_BRANCH_RE.test(hint.trim()) &&
+    !RESET_HINT_UNIT_IN_VALUE_RE.test(value)
+  ) {
+    return undefined;
+  }
+  if (RESET_HINT_ABSOLUTE_RE.test(value)) return formatCooldownUntilLocal(value);
+  const seconds = parseResetHintSeconds(value);
+  if (seconds === undefined) return value;
+  const minutes = Math.round(seconds / 60);
+  const zh = locale === "zh";
+  if (minutes < 1) return zh ? "<1 分钟" : "<1m";
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const rest = minutes % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(zh ? `${days} 天` : `${days}d`);
+  if (hours > 0) parts.push(zh ? `${hours} 小时` : `${hours}h`);
+  if (rest > 0) parts.push(zh ? `${rest} 分` : `${rest}m`);
+  return parts.join(" ");
+}
+
+/**
+ * 429/限流：跟随 locale 的紧凑 3 行块（zh/en 同结构）。旧文案是一条巨长英文 +
+ * 结尾拼接中文冷却说明，既冗长又把「不是本地凭证问题」重复三遍。
+ *   · 第 1 行 = 上游额度已用尽 / 上游限流（上游 tag）：清洗后的上游原文；
+ *   · 第 2 行 = 冷却截止（本地时间）+ 上游复位 hint + 自动探测间隔；无
+ *     cooldownUntil 时整行省略；
+ *   · 第 3 行 = 出口（换 agent / 强制走服务器 / 已充值清冷却）。
+ * statusInferred 为 true 时文案不声称上游返回了 HTTP 429：新版 headline 根本不带
+ * 状态码，status 只是本地分类用的语义等价码。
+ */
+function buildRateLimitFailure(ctx: FailureCtx): string {
+  const headlineKey = ctx.quotaExhausted
+    ? "localRunRateLimitQuota"
+    : "localRunRateLimitThrottled";
+  const lines = [
+    t(
+      headlineKey,
+      describeRateLimitSource(ctx),
+      sanitizeRateLimitDetail(ctx.message, Boolean(ctx.cooldownUntil)),
+    ),
+  ];
+  const cooldownUntil = ctx.cooldownUntil;
+  if (cooldownUntil) {
+    const resetValue = formatRateLimitResetHint(
+      extractRateLimitResetHint(ctx.message) ?? "",
+      getCliLocale(),
+    );
+    lines.push(
+      t(
+        "localRunRateLimitCooldown",
+        formatCooldownUntilLocal(cooldownUntil),
+        resetValue ? t("localRunRateLimitResetNote", resetValue) : "",
+        String(Math.round(PROBE_INTERVAL_MS / 60000)),
+      ),
+    );
+  }
+  lines.push(t("localRunRateLimitExits"));
+  return `${lines.join("\n")}\n`;
 }
 
 function buildTransientFailure(ctx: FailureCtx): string {
@@ -1097,6 +1348,25 @@ export function formatLocalTurnFailureLine(error: unknown): string {
         ? formatElapsed(Math.round(Number(msMatch[1]) / 1000))
         : "the configured window";
     return `[nolo] ${t("llmRequestTimedOut", deadline)}\n`;
+  }
+  // 429/限流：与 auto 路径 describeLocalRunFailure 共用同一套紧凑 3 行渲染
+  // （where = local provider），不再把上游原文裸串成 "Local agent run failed: …"。
+  const cls = classifyLocalRunError(message);
+  if (cls.kind === "rate-limit") {
+    const rawCooldownUntil =
+      error && typeof error === "object"
+        ? (error as { cooldownUntil?: unknown }).cooldownUntil
+        : undefined;
+    return buildRateLimitFailure({
+      message,
+      where: "local provider",
+      status: cls.status,
+      ...(cls.statusInferred ? { statusInferred: true } : {}),
+      ...(cls.quotaExhausted ? { quotaExhausted: true } : {}),
+      ...(typeof rawCooldownUntil === "string" && rawCooldownUntil
+        ? { cooldownUntil: rawCooldownUntil }
+        : {}),
+    });
   }
   return `[nolo] Local agent run failed: ${message}\n`;
 }
@@ -1973,7 +2243,9 @@ async function runLocalAgentTurnForCli(
     }
     // 启动期 429 兜底：分类命中 rate-limit 时与 run 中途同语义落冷却（幂等）。
     // 冷却截止沿用 localLoop 把 dialogId 挂错误上的既有模式挂在错误对象上，
-    // 供 auto 路径 describeLocalRunFailure 渲染「已暂停该凭证的派发，最晚 <ISO> 自动解除」。
+    // 供 formatLocalTurnFailureLine / describeLocalRunFailure 在 429 紧凑块里渲染
+    // 「冷却至 HH:MM」——不再另起一行中文说明（该分支只在 cooldownUntil 存在时触发，
+    // 而它只可能来自 rate-limit）。
     const cooldownUntil = await markStartupRateLimitCooldown(
       options,
       baseAdapter,
@@ -1992,11 +2264,6 @@ async function runLocalAgentTurnForCli(
         options.output.writeErr(failureLine);
       } else {
         options.output.write(failureLine);
-      }
-      if (cooldownUntil) {
-        options.output.write(
-          `[nolo] 已暂停该凭证的派发，本地冷却最晚 ${cooldownUntil} 到期（不代表上游额度届时一定恢复）；冷却期间再次派发时，约每 ${Math.round(PROBE_INTERVAL_MS / 60000)} 分钟放行一次试探请求，成功即恢复。若已充值或重置额度，可运行 \`nolo auth cooldown\` 查看被暂停的凭证名，再用 \`nolo auth cooldown --clear <凭证名>\` 立即恢复。\n`,
-        );
       }
     }
     return {
@@ -2086,8 +2353,13 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
   }
   if (gateDecision !== "blocked") return { credentialKey };
   options.output.write(
-    `[nolo] Agent ${options.agentName || options.agentKey} is temporarily unavailable (429 cooldown) until ${new Date(Number(effectiveNextAvailableAt)).toISOString()}.\n` +
-      "Dispatch aborted before reaching the server. Pick another agent via listAgents, or retry after the cooldown.\n",
+    `${t(
+      "agentCooldownBlocked",
+      options.agentName || options.agentKey,
+      formatCooldownUntilLocal(
+        new Date(Number(effectiveNextAvailableAt)).toISOString(),
+      ),
+    )}\n`,
   );
   return { exitCode: 1 };
 }

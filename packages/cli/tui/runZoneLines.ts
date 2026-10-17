@@ -35,6 +35,7 @@ import {
 import { t } from "./i18n";
 import { fitAnsiLine, visibleWidth } from "./tuiAnsi";
 import { themeText } from "./theme";
+import type { RemoteTaskView } from "../../core/remoteTaskView";
 
 /**
  * 运行区同时展开的 run 行数上限；多出来的折叠成 `+N more`。
@@ -46,8 +47,128 @@ export const RUN_ZONE_MAX_ROWS = 3;
  * 运行中的 lead 图标：spec 要的是 `⚙`（沿用旧 running chip 的机器/齿轮语义），
  * 终态 run 仍用状态图标——`⚙` 挂在一个已经 done/failed 的 run 上是误导。
  */
-function runZoneLeadIcon(status: string): string {
-  if (!isAgentRunTerminalStatus(status)) return "⚙";
+/**
+ * 远程任务证据的载体（契约 §10.2 / M3）。
+ *
+ * 远程任务不在本机 registry 里（`~/.nolo/runs/*.json` 没有它的记录），
+ * 「它还在跑吗、花了多少、停止确认了吗」只能由控制面读通道（非模型，见
+ * runRegistryPoller 的 remoteTasks 入口）送来的投影回答。这里只是读取侧
+ * 关心的三个字段的结构声明，不改变 AgentRunSnapshot 本体的形状。
+ */
+export type RemoteTaskCarrier = {
+  remoteTask?: RemoteTaskView;
+  /** 末次证据到达的时刻（ms）。远端从未给过证据时为 undefined。 */
+  lastEvidenceAt?: number;
+  /** 按需取到的日志切片（已钳制到上限、已脱敏）；只在显式请求后才有值。 */
+  logTail?: string;
+};
+
+export const STOP_CONFIRMED_LABEL = "已停止";
+export const RECLAIMED_LABEL = "已按 TTL 到期回收";
+export const STOP_UNCONFIRMED_LABEL = "停止未确认";
+export const REMOTE_COST_UNKNOWN_LABEL = "费用未知";
+/** 失去证据时的静态标记：不是「正在跑」，也不假装是终态。 */
+export const REMOTE_UNKNOWN_GLYPH = "◌";
+
+/** 远程证据是否「活着」：只有进程明确在跑才算；未知一律不算（禁撒谎）。 */
+export function remoteTaskIsActive(carrier?: RemoteTaskCarrier): boolean {
+  return carrier?.remoteTask?.process?.status === "running";
+}
+
+/**
+ * 远程任务是否还没收敛（§10.2）：
+ * run 的终态只说明本机那个 agent 结束了，说明不了远端进程/清理。
+ * 未收敛时 run 不许从面板上退休——摘掉就等于对用户说「结束了」。
+ */
+export function remoteTaskUnsettled(carrier?: RemoteTaskCarrier): boolean {
+  const view = carrier?.remoteTask;
+  if (!view) return false;
+  // 停止请求还没被确认（含 stop-unverified / pending）＝还没停干净。
+  if (view.cleanup?.pending || view.cleanup?.status === "stop-unverified") return true;
+  // 远端清理已按 TTL 到期回收或已停止确认（且非 pending）＝已收敛
+  if (
+    view.cleanup?.status === "expired" ||
+    (view.cleanup?.status === "stopped" && !view.cleanup.pending)
+  ) {
+    return false;
+  }
+  const status = view.process?.status;
+  // 进程状态未知时按未收敛处理：未知 ≠ 已结束。
+  return status === undefined || status === "running";
+}
+
+/**
+ * elapsed 的时钟（§8.2 未知禁撒谎）。
+ *
+ * 没有活跃证据时，「已运行 12m」是我们编出来的：不知道它还在不在走。返回
+ * lastEvidenceAt 让计时冻结在最后一次证据那一刻；返回 null 表示连证据时间都
+ * 没有，此时调用方宁可不显示耗时。
+ */
+export function remoteTaskClock(
+  carrier: RemoteTaskCarrier | undefined,
+  now: number
+): number | null {
+  if (!carrier?.remoteTask || remoteTaskIsActive(carrier)) return now;
+  const at = carrier.lastEvidenceAt;
+  if (typeof at !== "number" || !Number.isFinite(at) || at <= 0) return null;
+  return Math.min(at, now);
+}
+
+/** 「最后心跳 12s 前」；没有证据时间就什么都不说（不编心跳）。 */
+export function formatRemoteHeartbeat(
+  lastEvidenceAt: number | undefined,
+  now: number
+): string | null {
+  if (typeof lastEvidenceAt !== "number" || !Number.isFinite(lastEvidenceAt) || lastEvidenceAt <= 0) {
+    return null;
+  }
+  return `最后心跳 ${formatDuration(Math.max(0, now - lastEvidenceAt))} 前`;
+}
+
+/** 远程任务的显式事实：心跳 / 远端进程 / 停止回执 / 费用未知。 */
+export function remoteTaskFacts(
+  carrier: RemoteTaskCarrier | undefined,
+  now: number
+): string[] {
+  const view = carrier?.remoteTask;
+  if (!view) return [];
+  const facts: string[] = [];
+  const heartbeat = formatRemoteHeartbeat(carrier?.lastEvidenceAt, now);
+  if (heartbeat) facts.push(heartbeat);
+  const status = view.process?.status;
+  if (status === "running") facts.push("远端运行中");
+  else if (status === "stopped" || status === "exited" || status === "failed") {
+    facts.push(`远端 ${status}`);
+  } else facts.push("远端状态未知");
+  const cleanup = view.cleanup;
+  if (cleanup) {
+    // expired 是按 TTL 到期回收，严禁显示为已停止；
+    // 只有 stopped 且非 pending 才是已确认停止；
+    // pending: true（如 stopped + pending: true）或 stop-unverified 一律保持停止未确认。
+    if (cleanup.status === "expired") {
+      facts.push(RECLAIMED_LABEL);
+    } else if (cleanup.status === "stopped" && !cleanup.pending) {
+      facts.push(STOP_CONFIRMED_LABEL);
+    } else {
+      facts.push(STOP_UNCONFIRMED_LABEL);
+    }
+  }
+  // 显式未知（cost: null）与「缺失」不同：未知要明说。
+  if (view.cost === null) facts.push(REMOTE_COST_UNKNOWN_LABEL);
+  return facts;
+}
+
+/** 远端费用显式未知（cost: null）——未知不是 0，积分 chip 不许顶上来。 */
+export function remoteCostIsExplicitlyUnknown(carrier?: RemoteTaskCarrier): boolean {
+  return carrier?.remoteTask?.cost === null;
+}
+
+export function runZoneLeadIcon(status: string, carrier?: RemoteTaskCarrier): string {
+  if (!isAgentRunTerminalStatus(status)) {
+    // 远程任务失去证据时不摆「正在跑」的转轮：那是我们唯一确定不知道的事。
+    if (carrier?.remoteTask && !remoteTaskIsActive(carrier)) return REMOTE_UNKNOWN_GLYPH;
+    return "⚙";
+  }
   switch (status) {
     case "done":
       return "✓";
@@ -205,12 +326,26 @@ export function formatRunZoneLines(
   );
 
   const lines: string[] = [];
-  for (const snapshot of shown) {
-    const icon = runZoneLeadIcon(snapshot.status);
+  // 远程证据在 sanitize 之前按位置抓住：清洗后的快照不再带这些字段，而
+  // 「远端还在不在跑」正是运行区要说的那句话。
+  const carriers = snapshots.map((snapshot) => snapshot as RemoteTaskCarrier);
+  for (const [index, snapshot] of shown.entries()) {
+    const carrier = carriers[index];
+    const clock = remoteTaskClock(carrier, now);
+    const icon = runZoneLeadIcon(snapshot.status, carrier);
     const label = runZoneLabel(snapshot, duplicateTitles);
-    const { time, rest } = runZoneFacts(snapshot, now);
+    const { time, rest } = runZoneFacts(snapshot, clock ?? now);
+    const remoteFacts = remoteTaskFacts(carrier, now);
+    // 远端费用显式未知时不显示积分 chip——「未知」不是「0」。
+    const hideCredits = remoteCostIsExplicitlyUnknown(carrier);
+    const base = hideCredits ? rest.filter((fact) => !fact.startsWith("⚡")) : rest;
     const hasError = Boolean(snapshot.errorMessage);
-    let factList = [...(time ? [time] : []), ...rest];
+    // 连证据时间都没有（clock === null）时不显示耗时：宁缺勿编。
+    let factList = [
+      ...(time && clock !== null ? [time] : []),
+      ...base,
+      ...remoteFacts,
+    ];
     let shownLabel = label;
     if (columns !== undefined) {
       const fixed = (l: string, f: string[]) =>

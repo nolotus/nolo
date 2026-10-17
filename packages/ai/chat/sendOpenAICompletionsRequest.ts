@@ -1,3 +1,4 @@
+import { extractErrorDiagnostics } from "./errorDiagnostics";
 // 文件路径: chat/sendOpenAICompletionsRequest.ts
 
 import {
@@ -1298,6 +1299,7 @@ export const sendOpenAICompletionsRequest = async ({
       } else {
         classified = classifyGenerationError(errorData, response.status);
       }
+      classified.diagnostic = { ...classified.diagnostic, ...extractErrorDiagnostics(errorData, response.status) };
       const errorMessage = classified.message;
       markStreamMessageAborted(finalizeCtx, errorMessage, classified);
       streamState = {

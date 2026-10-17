@@ -1,29 +1,6 @@
-# 真正的顶层 preload：必须写在第一个 [table] 之前，否则 TOML 会把它归入 [install]，
-#
-# ⚠️ 限制（已实测）：preload 只清「当前进程」的 process.env。Bun.spawn / Bun.spawnSync /
-# node:child_process 不带 env 时继承的是进程【启动时的环境快照】，preload 里删键影响不到子进程：
-#   → 先 unset，子进程却是 /x
-# 因此：进程启动前的清理只能靠 hook 里的 `unset`；任何 spawn git 的位置必须显式传
+preload = ["./scripts/public-build/stylexBunPlugin.ts"]
 
 [install]
 registry = "https://registry.npmjs.org"
 linker = "hoisted"
-
-# ⚠️ 这些 conditions 只影响 `bun install` 的依赖解析，不影响 `bun run` 的 runtime module resolution。
-# Runtime module resolution 需要 CLI flag --conditions=nolo-cloud。
-# 如果遗漏 --conditions=nolo-cloud，identity/cloudRoutes 会走 local 分支（空数组），
-# cloud-only 路由（login/signup/life/*）在 SSR 不注册 → 白屏。
 conditions = ["nolo-cloud", "default"]
-
-# 全局 StyleX 静态 API 编译通道（2026-09-02 提为顶层）：
-# 任何裸 bun 进程（dev server SSR、CLI、agent run worker）import 到
-# *Styles.ts（含 stylex.keyframes/firstThatWorks）都需要这条编译通道，
-#
-# 降级丢掉自己的 unset 行（2026-10-02 事故），清理不能再依赖 hook 版本。
-# 注意（L2）：顶层剥离同样会清掉 GIT_CONFIG_*（含 GIT_CONFIG_PARAMETERS）。这是有意的
-# 取舍——它们同属「把子进程 git 绑到调用方配置」的变量；代价是 bun 脚本里 spawn 的 git
-# 看不到调用方经 `git -c` 传入的临时配置。当前 bun 脚本无依赖这类配置者。
-# 进程不生效（与 stylexBunPlugin 两处都挂同理）。
-preload = [
-  "./scripts/public-build/stylexBunPlugin.ts",
-]

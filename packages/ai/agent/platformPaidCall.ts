@@ -16,10 +16,7 @@
 // 无 agent 字段白名单），服务端没有任何一处写入 isOAuth，所以 `isOAuth: true` 只是
 // 自声明。通道归属改由**形态证明**给出，口径与 safeAgentSummary（其 isOAuth 亦由
 // isOAuthApiKeyRef 重算）及 agentBilling 非自有分支一致：apiKeyRef 是已知 OAuth 订阅
-// id，或记录本身是 Antigravity OAuth agent（该分支不复刻判定逻辑，一律回落到 runtime 的
-// antigravityOAuth.isAntigravityOAuthAgent —— 与 runtime 保持同一口径：Cloud Code 端点在
-// 该模块内按 `new URL(...)` 解析出的 hostname 精确比对官方 host 表，不做整串子串匹配）。
-// 真实 OAuth 记录（含 sshare 形状：
+// id，或记录本身是 Antigravity OAuth agent。真实 OAuth 记录（含 sshare 形状：
 // provider=openai / model=gpt-6.1-sol / isOAuth=true / userId=owner-1 /
 // apiKeyRef=chatgpt）仍如实归属 owner_subscription，不受影响。
 import { isGptProModel } from "core/gptProTier";
