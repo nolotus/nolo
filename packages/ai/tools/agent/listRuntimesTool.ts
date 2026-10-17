@@ -12,6 +12,7 @@ import {
   type DockerRuntimeReadiness,
   type DockerRuntimeReadinessSource,
 } from "../../../server/handlers/agentRun/dockerRuntimeReadiness";
+import { getDockerBindingAuthorizer } from "../../../server/handlers/agentRun/dockerWorkloadLifecycle";
 import { selectIdentityUserId } from "identity/selectors";
 
 export const listRuntimesFunctionSchema = {
@@ -148,6 +149,12 @@ export async function listRuntimesToolFunc(
   const serverSelectable = trustedContext?.serverSelectable ?? true;
   const connectorSurface = trustedContext?.connectorSurface ?? "cli";
   const dockerReadiness = await resolveTrustedDockerReadiness(thunkApi, trustedContext);
+  const isDockerBound =
+    trustedContext?.isDockerBound ??
+    thunkApi?.extra?.isDockerBound ??
+    (trustedContext?.dockerSelectable === true ? (() => true) : undefined) ??
+    (trustedContext?.dockerReadinessSource ? (() => true) : undefined) ??
+    ((caller: string) => Boolean(getDockerBindingAuthorizer().isBound?.(caller)));
 
   if (!callerUserId || !callerUserId.trim()) {
     return {
@@ -169,6 +176,7 @@ export async function listRuntimesToolFunc(
     machineRegistry,
     connectorConnections,
     dockerReadiness,
+    isDockerBound,
   });
 
   return {

@@ -126,6 +126,8 @@ export type DockerSandboxQuotaProvider = () => Promise<DockerSandboxQuotaSnapsho
 export interface DockerSandboxExecutionBackendDeps {
   /** 默认实现 = node:child_process 数组传参、不启用 shell。 */
   runSbx?: SbxCommandFn;
+  /** Trusted lifecycle journal reserves this name before create. */
+  sandboxName?: string;
   /** 缺省视为「额度不可核实」→ 一律拒绝，绝不默认放行。 */
   quotaProvider?: DockerSandboxQuotaProvider;
   /** 缺省为进程内 KV（只适合测试）；生产必须注入 File/Remote store。 */
@@ -505,7 +507,7 @@ export function createDockerSandboxExecutionBackend(
 
       // 3) 创建沙盒。
       const startedAt = now();
-      const sandboxName = buildDockerSandboxName(ticket.ticketId, startedAt);
+      const sandboxName = deps.sandboxName ?? buildDockerSandboxName(ticket.ticketId, startedAt);
       const create = await runSbx(
         buildSbxCloudCreateArgv({ name: sandboxName, shapeId, ttlMinutes }),
         { timeoutMs: controlTimeoutMs },
@@ -551,7 +553,7 @@ export function createDockerSandboxExecutionBackend(
           const stop = await runSbx(["--cloud", "stop", sandboxName], {
             timeoutMs: controlTimeoutMs,
           });
-          stopped = stop.exitCode === 0;
+          stopped = stop.exitCode === 0 && await confirmDockerSandboxStopped(runSbx, sandboxName, controlTimeoutMs);
         } catch {
           stopped = false;
         }
@@ -690,7 +692,7 @@ export function createDockerSandboxExecutionBackend(
       const stop = await runSbx(["--cloud", "stop", entry.sandboxName], {
         timeoutMs: controlTimeoutMs,
       });
-      if (stop.exitCode !== 0) {
+      if (stop.exitCode !== 0 || !await confirmDockerSandboxStopped(runSbx, entry.sandboxName, controlTimeoutMs)) {
         // 不标记 released：允许重试，且明确告知云端可能仍有存活沙盒。
         throw new DockerSandboxBackendError("stop-unverified", undefined, true);
       }
@@ -707,4 +709,18 @@ export function createDockerSandboxExecutionBackend(
       });
     },
   };
+}
+
+/** Exact positive observation only: absent, stopping, malformed and failed ls deny. */
+export async function confirmDockerSandboxStopped(
+  runSbx: SbxCommandFn, sandboxName: string, timeoutMs = 10_000,
+): Promise<boolean> {
+  try {
+    const listing = await runSbx(["--cloud", "ls", "--format", "json"], { timeoutMs });
+    if (listing.exitCode !== 0 || listing.timedOut) return false;
+    const parsed: unknown = JSON.parse(listing.stdout);
+    if (!Array.isArray(parsed)) return false;
+    const matches = parsed.filter(x => x && typeof x === "object" && x.name === sandboxName);
+    return matches.length === 1 && matches[0].status === "stopped";
+  } catch { return false; }
 }
