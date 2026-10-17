@@ -68,11 +68,14 @@ Consequences per feature:
 - Listed add-ons go through AMO review; self-distributed ("unlisted") add-ons are signed without a
   listing but still validated.
 - Source code must be provided if the submitted code is minified or obfuscated (ours is not).
-- **Status 2026-09-28: core port implemented** in `feat/firefox-port` (see
-  `docs/plans/2026-09-28-firefox-amo-port.md`). Single codebase; `buildStorePackage.mjs --browser
-  firefox` rewrites the manifest at pack time (gecko id `nolo-browser-connector@nolo.chat`, no `key`,
-  event-page `background.scripts` + `type: "module"`, no `debugger` permission) and `web-ext lint`
-  passes with zero errors.
+- **Status 2026-10-17: core port shipped & signed (v0.1.4)**:
+  - Automated signing supported via `nolo secret run --with amo -- bunx web-ext sign --channel unlisted`.
+  - Self-hosted auto-updates configured from **0.1.4**: `browser_specific_settings.gecko.update_url`
+    (`https://nolo.chat/public/downloads/firefox-updates.json`).
+  - Installs of 0.1.2 and earlier have no `update_url` and need one manual upgrade to 0.1.4 before
+    the automatic path applies.
+  - Signed `.xpi` is served at `/public/downloads/nolo-browser-connector.xpi`.
+  - Pagination (`read_page --offset`) fully supported.
 - **Capability split at runtime** (`HAS_DEBUGGER` = `typeof chrome.debugger`): read_page / click /
   type / press / scroll / open·list·close_tab / hit_test work unchanged via `scripting`; screenshot
   degrades to `tabs.captureVisibleTab` (visible tab only, honest `TAB_NOT_VISIBLE` /

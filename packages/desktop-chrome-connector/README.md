@@ -130,6 +130,31 @@ The script refuses to produce a package without the four icons, and rejects deve
 (`*.md`, `.DS_Store`, maps). Listing copy, permission justifications, the privacy policy text and the
 ordered submission checklist live in [`store/`](store/).
 
+## Firefox Packaging, Signing and Self-Hosted Updates
+
+Firefox uses an event-page manifest variant and requires Mozilla signatures (AMO).
+
+1. Build the Firefox unlisted package:
+```bash
+bun packages/desktop-chrome-connector/scripts/buildStorePackage.mjs --browser firefox
+```
+2. Automated signing with credentials from the local Nolo secrets store:
+```bash
+nolo secret run --with amo -- bunx web-ext sign \
+  --channel unlisted \
+  --source-dir <unpacked_dir> \
+  --artifacts-dir dist
+```
+3. Self-hosted auto-updates (0.1.4 and later):
+Starting with **0.1.4** the packaged Firefox manifest declares
+`browser_specific_settings.gecko.update_url`, pointing at
+`https://nolo.chat/public/downloads/firefox-updates.json`. Firefox then polls that
+manifest and installs newer signed builds on its own.
+
+**Existing installs (0.1.2 and earlier) have no `update_url`**, so they never check for
+updates: they need one manual install of 0.1.4 before the automatic path takes over.
+
+
 ## Desktop Diagnostics
 
 Nolo Desktop exposes connector diagnostics through the Local provider runtime settings page.

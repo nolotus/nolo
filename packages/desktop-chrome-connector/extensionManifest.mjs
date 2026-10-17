@@ -20,6 +20,13 @@ import { FIREFOX_EXTENSION_ID } from "./nativeHostInstall.mjs";
 export const FIREFOX_DROPPED_PERMISSIONS = Object.freeze(["debugger"]);
 
 /**
+ * 官方 Firefox 自托管更新元数据端点。
+ * 遵循 Mozilla Add-ons update manifest 规范：
+ * https://extensionworkshop.com/documentation/manage/updating-your-extension/
+ */
+export const FIREFOX_UPDATE_URL = "https://nolo.chat/public/downloads/firefox-updates.json";
+
+/**
  * Firefox scopes `tabs.captureVisibleTab` differently from Chrome: host grants for http and
  * https patterns are not enough — the call fails with "Missing activeTab permission" unless
  * the manifest requests `<all_urls>` (or `activeTab` was granted by a fresh user gesture, which
@@ -38,6 +45,7 @@ export function buildFirefoxManifest(manifest) {
     gecko: {
       id: FIREFOX_EXTENSION_ID,
       strict_min_version: "140.0",
+      update_url: FIREFOX_UPDATE_URL,
       ...(firefox.browser_specific_settings?.gecko ?? {}),
     },
   };

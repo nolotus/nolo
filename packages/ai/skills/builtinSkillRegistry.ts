@@ -84,6 +84,13 @@ import {
   buildWorktreeSkillPageKey,
 } from "./worktreeSkill";
 import {
+  SECRETS_MANAGER_SKILL_SLUGS,
+  buildSecretsManagerSkillConfig,
+  buildSecretsManagerSkillContentBySlug,
+  buildSecretsManagerSkillId,
+  buildSecretsManagerSkillPageKey,
+} from "./secretsManagerSkill";
+import {
   SYSTEMATIC_INVESTIGATION_SKILL_SLUGS,
   buildSystematicinvestigationSkillConfig,
   buildSystematicinvestigationSkillContentBySlug,
@@ -225,6 +232,13 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildWorktreeSkillPageKey,
     buildConfig: buildWorktreeSkillConfig,
     buildContent: buildWorktreeSkillContentBySlug,
+  },
+  {
+    slugs: SECRETS_MANAGER_SKILL_SLUGS,
+    buildSkillId: buildSecretsManagerSkillId,
+    buildPageKey: buildSecretsManagerSkillPageKey,
+    buildConfig: buildSecretsManagerSkillConfig,
+    buildContent: buildSecretsManagerSkillContentBySlug,
   },
   {
     slugs: SYSTEMATIC_INVESTIGATION_SKILL_SLUGS,

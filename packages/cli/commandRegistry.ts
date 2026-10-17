@@ -93,6 +93,8 @@ export function renderHelpText() {
     "  nolo app list --json",
     '  nolo app get --name my-app',
     '  nolo app deploy --name my-app --code-file ./worker.js',
+    "  nolo secret list",
+    "  nolo secret run --with amo -- bunx web-ext sign",
   ];
 
   for (const group of GROUP_ORDER) {
