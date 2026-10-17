@@ -222,7 +222,8 @@ export function createNativeHostRouter(deps: NativeHostRouterDeps): ChromeConnec
 }
 
 const TARGET_REQUIRED_ACTIONS = new Set(["click", "type", "set_files"]);
-const TAB_ID_REQUIRED_ACTIONS = new Set(["close_tab", "detach", "set_files"]);
+const TAB_ID_REQUIRED_ACTIONS = new Set(["close_tab", "detach", "set_files", "prepare_browser_action"]);
+const ALLOWED_PREPARE_SUB_ACTIONS = new Set(["click", "type", "press"]);
 
 /**
  * Deterministic, connector-side guard for the action styles. The extension re-checks the same
@@ -245,8 +246,64 @@ export function validateChromeConnectorPayload(
         `Provide the tabId from browser_list_tabs before calling ${action}.`,
       );
     }
-    if (!TARGET_REQUIRED_ACTIONS.has(action)) return;
   }
+
+  // Allow action payloads (click, type, press, etc.) to carry one-time consent credentials.
+  for (const credentialKey of ["challengeId", "prepareId", "preparedActionId", "grantTicket"] as const) {
+    if (payload[credentialKey] !== undefined) {
+      const val = payload[credentialKey];
+      if (typeof val !== "string" || !val.trim()) {
+        throw createConnectorError(
+          "INVALID_ARGUMENTS",
+          `Consent credential ${credentialKey} must be a non-empty string.`,
+        );
+      }
+    }
+  }
+
+  if (action === "prepare_browser_action") {
+    const rawAction = typeof payload.action === "string" ? payload.action.trim().toLowerCase() : "";
+    if (!ALLOWED_PREPARE_SUB_ACTIONS.has(rawAction)) {
+      throw createConnectorError(
+        "UNSUPPORTED_ACTION",
+        `Action '${rawAction || "empty"}' is not supported for preparation; must be click, type, or press.`,
+      );
+    }
+
+    if (payload.ref !== undefined || payload.elementRef !== undefined) {
+      throw createConnectorError(
+        "UNSUPPORTED_TARGET_KIND",
+        "elementRef targeting is not supported for action preparation; use selector or active.",
+      );
+    }
+
+    const hasActive = payload.active === true;
+    const hasSelector = typeof payload.selector === "string" && payload.selector.trim().length > 0;
+    if (!hasActive && !hasSelector && rawAction !== "press") {
+      throw createConnectorError(
+        "MISSING_TARGET_SELECTOR",
+        "Target selector or active flag is required for action preparation.",
+      );
+    }
+
+    if (rawAction === "type") {
+      if (typeof payload.text !== "string") {
+        throw createConnectorError(
+          "INVALID_ARGUMENTS",
+          "Provide --text for type action preparation.",
+        );
+      }
+    } else if (rawAction === "press") {
+      if (typeof payload.key !== "string" || !payload.key.trim()) {
+        throw createConnectorError(
+          "INVALID_ARGUMENTS",
+          "Provide --key for press action preparation.",
+        );
+      }
+    }
+    return;
+  }
+
   if (!TARGET_REQUIRED_ACTIONS.has(action)) return;
   const rawRef =
     typeof payload.elementRef === "string"
@@ -367,6 +424,7 @@ export const REQUIRED_CHROME_CONNECTOR_FEATURES: Record<string, string[]> = {
   read_network: ["browser_debug"],
   detach: ["browser_debug"],
   set_files: ["compact_observation_v2", "file_upload"],
+  prepare_browser_action: ["prepare_browser_action"],
 };
 
 /** Features the runtime requires for an action; empty when the action needs none. */

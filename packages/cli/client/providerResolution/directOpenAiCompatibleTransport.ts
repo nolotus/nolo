@@ -102,7 +102,16 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
         stream,
       });
       const result = await executeOpenAiCompatibleChatCompletion({
-        providerConfig,
+        providerConfig: {
+          ...providerConfig,
+          // Merge BEFORE wire conversion (Responses / provider quirks), without
+          // changing the resolved provider shared with subsequent chat calls.
+          requestOptions: {
+            ...providerConfig.requestOptions,
+            ...(options?.max_tokens !== undefined ? { max_tokens: options.max_tokens } : {}),
+            ...(options?.reasoning_effort ? { reasoning_effort: options.reasoning_effort } : {}),
+          },
+        },
         messages: inlinedMessages,
         tools,
         fetchImpl: (url: string | URL | Request, init?: RequestInit) =>
@@ -116,6 +125,10 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
           asOptionalTrimmedString(agentConfig.key),
         onTextDelta: options?.onTextDelta,
         onReasoningDelta: options?.onReasoningDelta,
+        signal: options?.signal,
+        outboundDiagnostics: options?.requestId
+          ? { callId: options.requestId }
+          : undefined,
         onHttpResult: ({ status, body }) =>
           recordLocalAvailability(status, body),
         ...(resolveRequestApiKey ? { resolveApiKey: resolveRequestApiKey } : {}),

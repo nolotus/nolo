@@ -1,3 +1,4 @@
+import { extractErrorDiagnostics } from "../../../ai/chat/errorDiagnostics";
 // 文件路径: chat/dialog/actions/handleSendMessageAction.ts
 
 import type { RootState } from "app/store";
@@ -182,7 +183,9 @@ const finalizeSendFailureInDialog = async (
     const { key: msgKey, messageId } = createDialogMessageKeyAndId(dialogId);
 
     const parsed = parseSendError(errorInput);
+    const diagnostics = extractErrorDiagnostics(errorInput);
     const errorMeta: MessageErrorMeta = {
+        ...(diagnostics ? { diagnostics } : {}),
         kind: parsed.kind,
         retryable: parsed.retryable,
         stage: parsed.stage,

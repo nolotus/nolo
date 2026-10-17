@@ -72,6 +72,115 @@
   }
 }
 
+/* ═══ §10.1 跨对话任务全局入口（RemoteTasksGlobalEntry）═══
+   attention-first：默认一行、无动画、无常驻高亮；只有展开才占更多高度。 */
+.remote-tasks-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+  min-width: 0;
+  padding: var(--space-1, 4px) var(--space-2, 8px);
+  color: var(--textSecondary, #52525b);
+  font-size: var(--fontSize-sm, 13px);
+}
+
+.remote-tasks-entry__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  width: 100%;
+  min-height: 26px;
+  padding: 2px 6px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+
+.remote-tasks-entry__head:hover {
+  background: var(--surfaceHover, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+.remote-tasks-entry__count,
+.remote-tasks-entry__attention,
+.remote-tasks-entry__detail,
+.remote-tasks-entry__elapsed,
+.remote-tasks-entry__receipt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-tasks-entry__count {
+  color: var(--textTertiary, #71717a);
+}
+
+.remote-tasks-entry__attention {
+  color: var(--textSecondary, #52525b);
+}
+
+.remote-tasks-entry__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.remote-tasks-entry__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--borderSubtle, color-mix(in srgb, var(--border, #e4e4e7) 70%, transparent));
+  border-radius: var(--radius-sm, 6px);
+}
+
+.remote-tasks-entry__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.remote-tasks-entry__name {
+  color: var(--textPrimary, #18181b);
+  font-weight: 600;
+}
+
+.remote-tasks-entry__stop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  min-width: 0;
+}
+
+.remote-tasks-entry__stop-btn,
+.remote-tasks-entry__cancel {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  border: 1px solid var(--border, #e4e4e7);
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+
+.remote-tasks-entry__open {
+  color: var(--link, #2563eb);
+  text-decoration: none;
+}
+
+.remote-tasks-entry__open:hover {
+  text-decoration: underline;
+}
+
 /* ═══ 自 queue-badge.css 迁出（已全部迁入 queueBadgeStyles.ts StyleX）═══ */
 
 /* ═══ 自 chatInputCard.css 迁出（MessageInputCore.tsx / QuickChat.tsx）═══ */
