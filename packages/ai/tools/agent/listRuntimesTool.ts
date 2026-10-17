@@ -2,10 +2,16 @@
 
 import {
   buildRuntimeCatalog,
+  resolveDockerReadiness,
   type RuntimeCatalog,
   type RuntimeCatalogDeps,
   type RuntimeSummary,
-} from "server/handlers/agentRun/runtimeCatalog";
+} from "../../../server/handlers/agentRun/runtimeCatalog";
+import {
+  normalizeDockerReadiness,
+  type DockerRuntimeReadiness,
+  type DockerRuntimeReadinessSource,
+} from "../../../server/handlers/agentRun/dockerRuntimeReadiness";
 import { selectIdentityUserId } from "identity/selectors";
 
 export const listRuntimesFunctionSchema = {
@@ -34,12 +40,51 @@ export function formatRuntimeSummaryCard(runtimes: RuntimeSummary[]): string {
     const statusIcon = r.selectable ? "✓" : "✗";
     const details = r.details ? `: ${r.details}` : "";
     const reason = r.reason ? ` (${r.reason}${details})` : "";
-    return `- [${statusIcon}] ${r.name} (${r.kind}) - ${r.status}${reason} [key: ${r.runtimeKey}]`;
+    // 就绪卡片才带额度摘要（额度不可核实的运行时不输出任何「就绪」暗示）。
+    const quota = r.selectable && r.quotaSnapshot
+      ? ` [quota: ${r.quotaSnapshot.remaining ?? "unknown"} ${r.quotaSnapshot.unit ?? ""} @ ${r.quotaSnapshot.source}]`
+      : "";
+    return `- [${statusIcon}] ${r.name} (${r.kind}) - ${r.status}${reason}${quota} [key: ${r.runtimeKey}]`;
   });
   return `Available Runtimes:\n${lines.join("\n")}`;
 }
 
-export type ListRuntimesTrustedContext = Partial<RuntimeCatalogDeps>;
+export type ListRuntimesTrustedContext = Partial<RuntimeCatalogDeps> & {
+  /**
+   * 生产接线：docker 就绪探测的**单例源**（`createDefaultDockerRuntimeReadinessSource`）。
+   * 传源 = 每次真正探测；传 `dockerReadiness`（快照）= 只消费既有结论。
+   */
+  dockerReadinessSource?: DockerRuntimeReadinessSource;
+};
+
+/**
+ * docker 就绪判定：探测源（最权威）> 就绪快照 > 旧注入面（dockerSelectable）。
+ * 一律 fail-closed：任何异常 / 缺省都返回不可用，绝不默认放行。
+ */
+export async function resolveTrustedDockerReadiness(
+  thunkApi?: any,
+  trustedContext?: ListRuntimesTrustedContext,
+): Promise<DockerRuntimeReadiness> {
+  const source = trustedContext?.dockerReadinessSource ?? thunkApi?.extra?.dockerReadinessSource;
+  if (source && typeof source.get === "function") {
+    try {
+      return normalizeDockerReadiness(await source.get());
+    } catch {
+      return {
+        ready: false,
+        reason: "not-configured",
+        details: "docker readiness source failed; execution stays closed",
+      };
+    }
+  }
+  const injected = trustedContext?.dockerReadiness ?? thunkApi?.extra?.dockerReadiness;
+  if (injected) return normalizeDockerReadiness(injected);
+  return resolveDockerReadiness({
+    dockerSelectable:
+      trustedContext?.dockerSelectable === true || thunkApi?.extra?.dockerSelectable === true,
+    dockerQuotaSnapshot: trustedContext?.dockerQuotaSnapshot ?? thunkApi?.extra?.dockerQuotaSnapshot,
+  });
+}
 
 /**
  * Trusted caller identity, in strict precedence order:
@@ -102,10 +147,7 @@ export async function listRuntimesToolFunc(
 
   const serverSelectable = trustedContext?.serverSelectable ?? true;
   const connectorSurface = trustedContext?.connectorSurface ?? "cli";
-  const dockerSelectable = trustedContext?.dockerSelectable === true || thunkApi?.extra?.dockerSelectable === true;
-  const dockerQuotaSnapshot = dockerSelectable
-    ? (trustedContext?.dockerQuotaSnapshot ?? thunkApi?.extra?.dockerQuotaSnapshot)
-    : undefined;
+  const dockerReadiness = await resolveTrustedDockerReadiness(thunkApi, trustedContext);
 
   if (!callerUserId || !callerUserId.trim()) {
     return {
@@ -126,8 +168,7 @@ export async function listRuntimesToolFunc(
     connectorSurface,
     machineRegistry,
     connectorConnections,
-    ...(dockerSelectable !== undefined ? { dockerSelectable } : {}),
-    ...(dockerQuotaSnapshot ? { dockerQuotaSnapshot } : {}),
+    dockerReadiness,
   });
 
   return {
