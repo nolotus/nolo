@@ -215,16 +215,8 @@ export type LocalAutoCompactionFailureReason = "timeout" | "aborted" | "provider
  * 就地声明而不 `import` CLI 类型：agent-runtime 不能反向依赖 cli 包。CLI 侧
  * 直接把已有的 SummaryLlmCaller 实例按结构传进来即可，不需要适配层。
  */
-export type LocalCompactionSummaryFallbackOptions = {
-  signal?: AbortSignal;
-  deadlineMs?: number;
-  attemptId?: string;
-};
-
-/** One optional argument preserves compatibility with existing one-parameter callers. */
 export type LocalCompactionSummaryFallback = (
   content: string,
-  options?: LocalCompactionSummaryFallbackOptions,
 ) => Promise<string | null>;
 
 /**
@@ -236,17 +228,14 @@ export type LocalCompactionSummaryFallback = (
 async function runSummaryFallback(
   fallback: LocalCompactionSummaryFallback,
   content: string,
-  options: LocalCompactionSummaryFallbackOptions,
 ): Promise<string | null> {
   try {
-    const text = await fallback(content, options);
+    const text = await fallback(content);
     if (typeof text !== "string") return null;
     const trimmed = text.trim();
     return trimmed.length > 0 ? trimmed : null;
   } catch (error) {
-    console.warn("[localLoop] auto-compaction summary fallback failed", {
-      attemptId: options.attemptId, stage: "fallback",
-    });
+    console.warn("[localLoop] auto-compaction summary fallback failed:", error);
     return null;
   }
 }
@@ -695,7 +684,6 @@ export async function maybeAutoCompactLocalHistory(args: {
     const requestController = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     let abortListener: (() => void) | undefined;
-    if (args.abortSignal?.aborted) requestController.abort(args.abortSignal.reason);
     const request = provider.complete(
       [{ role: "system", content: COMPACTION_SUMMARY_SYSTEM_PROMPT }, { role: "user", content: promptContent }],
       {
@@ -704,9 +692,6 @@ export async function maybeAutoCompactLocalHistory(args: {
         // 仅日志用的 attempt id：让 compaction 埋点与 transport 诊断日志 /
         // 服务端 x-request-id 可对上，用于关联请求级证据。不进 prompt/摘要/持久化。
         requestId: compactionAttemptId,
-        // Room for factual handoff, exact commands and file operations.
-        max_tokens: 8192,
-        reasoning_effort: "low",
       },
     ).then(
       (value) => ({ kind: "done" as const, value }),
@@ -719,7 +704,6 @@ export async function maybeAutoCompactLocalHistory(args: {
     if (args.abortSignal) guards.push(new Promise((resolve) => {
       abortListener = () => { requestController.abort(args.abortSignal?.reason); resolve({ kind: "aborted" }); };
       args.abortSignal?.addEventListener("abort", abortListener, { once: true });
-      if (args.abortSignal?.aborted) abortListener();
     }));
     const outcome = guards.length ? await Promise.race([request, ...guards]) : await request;
     // 主通道到结论（含 timeout guard 获胜的那一档）。
@@ -731,9 +715,9 @@ export async function maybeAutoCompactLocalHistory(args: {
     // 绝不 fallback。
     const result = outcome.kind === "done" ? outcome.value : undefined;
     let newSummary =
-      result?.finish_reason !== "length" && typeof result?.content === "string" ? result.content.trim() : "";
+      typeof result?.content === "string" ? result.content.trim() : "";
     const primaryFailure: LocalAutoCompactionFailureReason | null =
-      (outcome.kind === "aborted" || args.abortSignal?.aborted)
+      outcome.kind === "aborted"
         ? "aborted"
         : newSummary
           ? null
@@ -757,11 +741,6 @@ export async function maybeAutoCompactLocalHistory(args: {
       const fallbackSummary = await runSummaryFallback(
         summaryFallback,
         promptContent,
-        {
-          signal: args.abortSignal,
-          deadlineMs: Date.now() + 30_000,
-          attemptId: compactionAttemptId,
-        },
       );
       fallbackElapsedMs = Date.now() - fallbackT0;
       // 用户在 fallback 在途期间取消：既不能算 provider 失败（不该退避），

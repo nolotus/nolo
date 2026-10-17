@@ -70,7 +70,6 @@ export interface MessageErrorMeta {
   stage?: SendErrorStage | string;
   /** 错误摘要（用于失败卡片标题展示） */
   summary?: string;
-  diagnostics?: Record<string, string | number>;
   /** 建议用户采取的动作提示 */
   actionHint?: string;
   /** 账号验证等外链（如 Google 登录验证） */

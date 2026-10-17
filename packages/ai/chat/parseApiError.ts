@@ -1,4 +1,3 @@
-import { extractErrorDiagnostics } from "./errorDiagnostics";
 // 处理失败的API响应
 
 /**
@@ -256,6 +255,6 @@ export function classifyGenerationError(data: any, status?: number) {
     message: messages[category],
     retryable: category === "transient",
     actions: category === "transient" ? ["retry" as const] : [],
-    diagnostic: { ...extractErrorDiagnostics(data, status) },
+    diagnostic: { ...(code ? { code } : {}), ...(status ? { status } : {}) },
   };
 }

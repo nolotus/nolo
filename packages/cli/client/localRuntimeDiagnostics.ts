@@ -9,7 +9,6 @@ import type { EnvLike } from "./localRuntimeHelpers";
 import type { CliFetchImpl } from "../cliFetch";
 import type { ReadToolFn } from "./cliLocalToolExecutors";
 import type { LocalCliExecutor } from "../agentCommandSupport";
-import type { CliExecuteOptions, CliExecuteResult } from "../../ai/agent/cliExecutor";
 import type { FetchInput, FetchInit } from "./localRuntimeFetchRetry";
 import type { buildOpenAiTools } from "./localRuntimeTools";
 import type { PermissionRequest } from "../../agent-runtime/actionGate";
@@ -21,12 +20,6 @@ import type { CollapsedPasteStore } from "core/collapsedPaste";
 import type { ChromeConnectorClient } from "../../desktop-chrome-connector/chromeConnector";
 import type { OriginShellGrant } from "./originShellGrant";
 import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecution";
-
-export type LocalCliStreamingExecutor = (
-  provider: string,
-  prompt: string,
-  options: CliExecuteOptions & { onChunk: (chunk: string) => void },
-) => Promise<CliExecuteResult>;
 
 export type CliLocalRuntimeAdapterDeps = {
   env: EnvLike;
@@ -46,9 +39,6 @@ export type CliLocalRuntimeAdapterDeps = {
   readXPost?: ReadToolFn;
   readXhsProfile?: ReadToolFn;
   executeCli?: LocalCliExecutor;
-  /** Streaming requests with an injected executeCli must also inject this executor.
-   * This prevents partial test/custom injection from spawning a real CLI process. */
-  executeCliStreaming?: LocalCliStreamingExecutor;
   sleep?: (ms: number) => Promise<void>;
   loopbackRequest?: (input: FetchInput, init?: FetchInit) => Promise<Response>;
   /** 重试进度上报（TUI 活动行显示「自动重试 N/M」）。透传给 fetchWithTransientRetry.onRetry。 */

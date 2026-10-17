@@ -51,7 +51,6 @@ export const CONNECTOR_FEATURES = Object.freeze([
   "browser_debug",
   "screenshot",
   "file_upload",
-  "prepare_browser_action",
 ]);
 
 const FEATURE_BY_ACTION = Object.freeze({
@@ -71,7 +70,6 @@ const FEATURE_BY_ACTION = Object.freeze({
   read_network: ["browser_debug"],
   detach: ["browser_debug"],
   set_files: ["compact_observation_v2", "file_upload"],
-  prepare_browser_action: ["prepare_browser_action"],
 });
 
 /**
@@ -582,6 +580,10 @@ const CONFIRMATION_REQUIRED_MESSAGE =
  * in exactly the same shape. `null` means the action may proceed.
  */
 export function decideIrreversibleAction(input = {}) {
+  // 如果调用方或环境显式声明放行不可逆动作（例如用户在当前轮次明确指令授权发布）
+  if (input.allowIrreversible === true || input.force === true) {
+    return null;
+  }
   const action = String(input.action ?? "");
   const name = typeof input.name === "string" ? input.name : "";
   if (!name) return null;

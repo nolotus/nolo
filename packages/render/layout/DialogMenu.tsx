@@ -5,9 +5,6 @@
 // 不再使用自建 portal / 手动定位 / 独立的 MobileMenu 组件；定位、点击外部关闭、
 // Escape、滚动重定位都由标准 Popover 接管。
 
-import { useStore } from "react-redux";
-import { selectAllMsgs } from "../../chat/messages/messageSlice";
-import { extractCustomId } from "core/prefix";
 import React, { useState, useCallback } from "react";
 import {
   MenuTrigger as AriaMenuTrigger,
@@ -32,9 +29,8 @@ import { useAppSelector } from "app/store";
 import { useContentFavorite } from "app/favorite/useContentFavorite";
 import {
   buildCurrentRouteDiagnostics,
-  latestDialogFailure,
   buildDialogDiagnosticsText,
-} from "../../chat/dialog/dialogDiagnostics";
+} from "chat/dialog/dialogDiagnostics";
 import {
   selectCopyDiagnosticsEnabled,
   selectCurrentServer,
@@ -60,7 +56,6 @@ const DialogMenu = ({
   onDelete?: () => void;
 }) => {
   const { t } = useTranslation(["common", "chat"]);
-  const store = useStore();
   const currentServer = useAppSelector(selectCurrentServer);
   const currentSpaceId = useCurrentSpaceId();
   const showCopyDiagnostics = useAppSelector(selectCopyDiagnosticsEnabled);
@@ -87,12 +82,7 @@ const DialogMenu = ({
     : null;
 
   const handleCopyDiagnostics = useCallback(() => {
-    const dialogId = currentDialog?.id || (currentDialog?.dbKey ? extractCustomId(currentDialog.dbKey) : undefined);
-    const latestError = dialogId
-      ? latestDialogFailure(selectAllMsgs(store.getState(), dialogId), dialogId)
-      : undefined;
     const diagnostics = buildDialogDiagnosticsText({
-      latestError,
       dialog: currentDialog,
       currentServer,
       currentSpaceId,
@@ -103,7 +93,7 @@ const DialogMenu = ({
       onSuccess: () => toast.success(t("chat:copySuccess", "复制成功")),
       onError: () => toast.error(t("chat:copyFailed", "复制失败")),
     });
-  }, [currentDialog, currentServer, currentSpaceId, store, t]);
+  }, [currentDialog, currentServer, currentSpaceId, t]);
 
   const handleMenuAction = useCallback(
     (key: Key) => {
