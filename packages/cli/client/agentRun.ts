@@ -172,25 +172,7 @@ function parseEmbeddedBalanceDetails(
   if (jsonStart < 0) return undefined;
 
   try {
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    let jsonEnd = -1;
-    for (let i = jsonStart; i < message.length; i += 1) {
-      const char = message[i];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (char === "\\") escaped = true;
-        else if (char === '"') inString = false;
-      } else if (char === '"') {
-        inString = true;
-      } else if (char === "{") {
-        depth += 1;
-      } else if (char === "}" && --depth === 0) {
-        jsonEnd = i + 1;
-        break;
-      }
-    }
+    const jsonEnd = findJsonObjectEnd(message, jsonStart);
     if (jsonEnd < 0) return undefined;
     const parsed: unknown = JSON.parse(message.slice(jsonStart, jsonEnd));
     if (!parsed || typeof parsed !== "object") return undefined;
@@ -1068,6 +1050,45 @@ function isStandaloneResetSentence(text: string, index: number): boolean {
 /** 429 详情压缩上限（字符）；超出后截断并追加 `…`。 */
 const RATE_LIMIT_DETAIL_MAX_CHARS = 140;
 
+/** 上游标签（provider / model 各自）上限（字符，含 `…`）；超出后截断并追加 `…`。 */
+const UPSTREAM_TAG_MAX_CHARS = 64;
+
+/**
+ * 从 `text[from]` 的 `{` / `[` 起按括号配平找配对结束位，返回结束位**后一位**；
+ * 字符串内的引号 / 转义不参与配平。
+ *
+ * 约定（**旧三处实现的既有行为，勿「修正」**）：起点不是 `{` / `[` 时返回 -1；
+ * 扫描过程中**只统计与起点同类的括号**，另一类括号被完全忽略（`{` 起点下 `[`/`]`
+ * 不参与配平，反之亦然），全文不配平同样返回 -1。若改成嵌套类型校验，
+ * `{"error":{"tags":[1,2],"details":{…}}}` 这类 402 余额解析会直接退化。
+ *
+ * 三处逐字符扫描（429 `details=[…]`、402 `{"error":{…}}`、余额 details）共用。
+ */
+function findJsonObjectEnd(text: string, from: number): number {
+  const open = text[from];
+  if (open !== "{" && open !== "[") return -1;
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = from; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
 /**
  * 按括号配平剥离 `details=[...]`：上游常把整段调试数组塞进 message，正则贪婪
  * 删除会连后文一起吞掉；这里逐字符扫描，字符串内的方括号不参与配平，不配平时
@@ -1088,31 +1109,10 @@ function stripRateLimitDetailsArray(message: string): string {
       searchFrom = keyIndex + KEY.length;
       continue;
     }
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    let endIndex = -1;
-    for (let i = openIndex; i < out.length; i += 1) {
-      const ch = out[i];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') inString = true;
-      else if (ch === "[") depth += 1;
-      else if (ch === "]") {
-        depth -= 1;
-        if (depth === 0) {
-          endIndex = i;
-          break;
-        }
-      }
-    }
+    const endIndex = findJsonObjectEnd(out, openIndex);
     // 不配平：原样保留，交给截断兜底。
     if (endIndex === -1) return out;
-    out = `${out.slice(0, keyIndex)} ${out.slice(endIndex + 1)}`;
+    out = `${out.slice(0, keyIndex)} ${out.slice(endIndex)}`;
     searchFrom = keyIndex;
   }
 }
@@ -1145,7 +1145,12 @@ function describeUpstreamTag(ctx: FailureCtx): string {
   const clean = (value: string | undefined): string | undefined => {
     if (value === undefined) return undefined;
     const normalized = stripControlChars(value).replace(/\s+/g, " ").trim();
-    return normalized ? normalized : undefined;
+    if (!normalized) return undefined;
+    // provider / model 都是 provider 可控文本：不设上限时 `"model":"m"×4000`
+    // 会把「紧凑 3 行」的单行撑爆。按 UPSTREAM_TAG_MAX_CHARS（含 `…`）分别截断。
+    return normalized.length > UPSTREAM_TAG_MAX_CHARS
+      ? `${normalized.slice(0, UPSTREAM_TAG_MAX_CHARS - 1).trimEnd()}…`
+      : normalized;
   };
   const provider = clean(/^local\s+(\S+)\s+provider failed/i.exec(source)?.[1]);
   const model = clean(/"model"\s*:\s*"([^"]+)"/.exec(source)?.[1]);
@@ -1332,30 +1337,9 @@ function stripEmbeddedErrorJson(message: string): string {
   for (;;) {
     const keyIndex = out.indexOf(KEY, searchFrom);
     if (keyIndex === -1) return out;
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    let endIndex = -1;
-    for (let i = keyIndex; i < out.length; i += 1) {
-      const ch = out[i];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') inString = true;
-      else if (ch === "{") depth += 1;
-      else if (ch === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          endIndex = i;
-          break;
-        }
-      }
-    }
+    const endIndex = findJsonObjectEnd(out, keyIndex);
     if (endIndex === -1) return out;
-    out = `${out.slice(0, keyIndex)} ${out.slice(endIndex + 1)}`;
+    out = `${out.slice(0, keyIndex)} ${out.slice(endIndex)}`;
     searchFrom = keyIndex;
   }
 }
