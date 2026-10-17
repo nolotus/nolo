@@ -148,10 +148,12 @@ export function createSqliteAuthorityStore(dbPath: string): AuthorityStore {
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
       const orderClause = options.reverse ? "ORDER BY key DESC" : "ORDER BY key ASC";
+      const selectClause = options.values === false ? "SELECT key FROM kv_store" : "SELECT key, value FROM kv_store";
 
-      const stmt = db!.query(`SELECT key, value FROM kv_store ${whereClause} ${orderClause}`);
+      const stmt = db!.query(`${selectClause} ${whereClause} ${orderClause}`);
       for (const row of stmt.iterate(...params)) {
-        yield [(row as any).key, decodeValue((row as any).value)];
+        const value = options.values === false ? undefined : decodeValue((row as any).value);
+        yield [(row as any).key, value];
       }
     },
   };

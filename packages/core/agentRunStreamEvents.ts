@@ -4,8 +4,17 @@
  * 以 loop.ts 全部 `send({type:...})` 为准，补充 index.ts 转发层事件。
  * 新增 turn_warning 用于空响应 / 长度截断提示。
  *
- * 纯类型文件，无 runtime 依赖。
+ * 纯类型文件，无 runtime 依赖（对 remoteTaskView 的引用是 `import type`，
+ * 编译期擦除，不上运行时依赖）。
  */
+
+import type {
+  RemoteTaskCleanupView,
+  RemoteTaskCostView,
+  RemoteTaskProcessView,
+  RemoteTaskStageView,
+  ToolExecutionLocation,
+} from "./remoteTaskView";
 
 /** 文本增量 */
 export interface AgentRunStreamTextEvent {
@@ -189,15 +198,80 @@ export interface AgentRunLifecycleRun {
 }
 
 /**
+ * SSE scope 结构与鉴权字段的单一声明（§3.5 护栏 2）。
+ * `agent_run` 与 `remote_task` 共用同一结构：不新增鉴权面、不新增第二中心。
+ * 订阅端一律经 canUserAccessDialogEventChannel 校验归属；server 侧二次校验
+ * `scope.userId === run owner userId`，不一致 → 丢弃 + 记诊断（不落库、不改状态）。
+ */
+export interface AgentRunStreamScope {
+  userId: string;
+  dialogId?: string;
+  workspaceId?: string;
+}
+
+/**
  * sub-agent run 生命周期事件。仅发往 run 归属 user 的 scope.dialogId 事件通道
  * （dialog-<dialogId>，订阅端经 canUserAccessDialogEventChannel 校验归属）。
  * 终态 `finished` 之后不再发 `updated`。
+ * 与 `remote_task` 的分界：**本条不豁免** startedAt 代际拒绝（迟到的 updated 按
+ * 代际丢弃，`agentRunStore.ts` 的 tombstone 规则只作用于本成员）；`remote_task`
+ * 明确豁免，见下（§7.3）。
  */
 export interface AgentRunStreamAgentRunEvent {
   type: "agent_run";
   phase: AgentRunLifecyclePhase;
-  scope: { userId: string; dialogId?: string; workspaceId?: string };
+  scope: AgentRunStreamScope;
   run: AgentRunLifecycleRun;
+}
+
+/**
+ * 远程任务（worker / 云沙箱）上报事件 —— 任务级相位，**独立 union 成员**。
+ *
+ * 为何独立成员而非扩入 run payload：本 `phase`（started / updated / stage /
+ * cleanup / finished）无法映射进 `AgentRunLifecyclePhase`（run 轴只有
+ * started | updated | finished），并入会把「run 轴」与「task 轴」混成一条。
+ *
+ * 同通道、同鉴权：scope 与 AgentRunStreamAgentRunEvent **逐字同构**
+ * （AgentRunStreamScope），仍只发往 run 归属 user 的 scope.dialogId 事件通道。
+ *
+ * 增量形态：`task` 只带变化字段；消费端 merge **前必须**过 `stripUndefined`
+ * （packages/core/remoteTaskView.ts，§3.6）——`undefined` 与「非 cost 的 `null`」
+ * 视同「未提供」，**不得**覆盖既有字段；表达「清空」用整对象替换
+ * （如 `cleanup: {status:"stop-unverified", pending:true}`），不允许 `cleanup: null`。
+ * `cost: null` 是本 payload 唯一允许的 null 语义：显式未知（未知 ≠ 缺失，§8.2）。
+ *
+ * tombstone 豁免（§7.3，H3）：与 `agent_run` 不同，本成员**豁免** startedAt 代际
+ * 拒绝 —— run 进入终态（done / failed / cancelled）之后的 cleanup 终局确认、
+ * 失联转 unknown / 需处置等更新**不得被静默丢弃**；防重放改用任务内单调递增的
+ * `eventSeq`（§5.3，拒绝 `eventSeq <= lastAcceptedSeq` 的陈旧上报）。终态后的 task
+ * 状态落在 run 记录的 `remoteTask` 子对象，`run.status` 保持终态不变。
+ * 消费端不得把本成员塞进 `agent_run` 的 startedAt 代际/tombstone 判定。
+ *
+ * 消费端契约（护栏 1，与审计清单同一批落地）：一切 switch / if 链遇未知 `type`
+ * 必须走 default 并**忽略**（不 throw、不落库、不改状态）。审计清单见
+ * docs/plans/2026-10-16-remote-task-visibility.md §4.2。
+ *
+ * 不携带（禁入，§9.3）：worker 凭据 / lease token、绝对本地路径、完整日志正文、
+ * `command` + `args`、环境变量。`stage` 用 RemoteTaskStageView（不含 stdoutTail，
+ * 日志走 §9 的脱敏投影）；`location` 用 ToolExecutionLocation（fail closed）。
+ */
+export interface AgentRunStreamRemoteTaskEvent {
+  type: "remote_task";
+  /** 任务级相位：无法映射进 AgentRunLifecyclePhase，故独立成员 */
+  phase: "started" | "updated" | "stage" | "cleanup" | "finished";
+  scope: AgentRunStreamScope;
+  /** 增量形态：只带变化字段（merge 语义见 §3.6） */
+  task: {
+    runId: string;
+    /** 每任务单调递增，用于重放判重（§5.3、§7.3） */
+    eventSeq: number;
+    location?: ToolExecutionLocation;
+    process?: RemoteTaskProcessView;
+    stage?: RemoteTaskStageView;
+    /** 值域 RemoteTaskCostView：允许 `null` = 显式未知（未知 ≠ 缺失） */
+    cost?: RemoteTaskCostView;
+    cleanup?: RemoteTaskCleanupView;
+  };
 }
 
 /** SSE 事件 discriminated union */
@@ -216,7 +290,8 @@ export type AgentRunStreamEvent =
   | AgentRunStreamDialogEvent
   | AgentRunStreamStatusEvent
   | AgentRunStreamTurnWarningEvent
-  | AgentRunStreamAgentRunEvent;
+  | AgentRunStreamAgentRunEvent
+  | AgentRunStreamRemoteTaskEvent;
 
 /** 窄化 helper：判断事件是否为指定 type */
 export function isAgentRunStreamEvent<T extends AgentRunStreamEvent["type"]>(

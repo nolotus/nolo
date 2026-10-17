@@ -116,7 +116,11 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
         status: null,
       });
       try {
-        await dispatch(initMsgs({ dialogId })).unwrap();
+        // 手上已有该对话的完整 key（dialogConfig.dbKey）：带上它，服务端走
+        // O(1) 规范 key 路径，而不是 keyless 的 `dialog-*` 全命名空间扫描。
+        await dispatch(
+          initMsgs({ dialogId, dialogKey: runtimeDialogKey ?? undefined })
+        ).unwrap();
       } catch {
         // The normal dialog bootstrap/error surface remains authoritative.
       }
@@ -126,7 +130,9 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
     // persisted while the durable channel gave us no frame must still land in
     // the store instead of leaving the page on the stale user row.
     const rereadPersistedMessages = () => {
-      void dispatch(initMsgs({ dialogId }))
+      void dispatch(
+        initMsgs({ dialogId, dialogKey: runtimeDialogKey ?? undefined })
+      )
         .unwrap()
         .catch(() => {});
     };

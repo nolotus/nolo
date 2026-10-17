@@ -37,6 +37,12 @@ type LevelLike = {
   put(key: string, value: unknown): Promise<void>;
   del(key: string): Promise<void>;
   batch(ops?: AuthorityBatchOperation[]): Promise<void> | LevelBatchWriterLike | unknown;
+  /**
+   * 注意：此处 [string, unknown] 类型仅在 keys !== false 时成立。
+   * 实测传 keys: false 时 real Level 产出 [undefined, unknown]（key 为 undefined，不是 null；
+   * value 照常返回），若同时传 values: false 则产出零条目。
+   * 调用方禁止传 keys: false（见 AuthorityIteratorOptions 注释）。
+   */
   iterator(options?: AuthorityIteratorOptions): AsyncIterable<[string, unknown]>;
 };
 

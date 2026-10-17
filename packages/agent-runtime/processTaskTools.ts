@@ -28,6 +28,9 @@ import {
 } from "./processTask";
 import { truncateToolOutput } from "./workspaceShell";
 import { formatToolOverflowMarker, spillToolOutput } from "./toolSpillStore";
+// B9（契约 §3.2 / §6.3 / §11.4）：cleanup 值域从 core 引用，本包不另造第二份。
+// 仅类型引用（编译期擦除），core 不反向依赖本包。
+import type { RemoteTaskCleanupStatus } from "core/remoteTaskView";
 
 /**
  * Default wait budget for one taskWait call — deliberately equal to the ceiling.
@@ -114,6 +117,64 @@ export type TaskLogsResult =
       detail: string;
     };
 
+/**
+ * 停止语义的**单一状态映射实现**（契约 §6.3 失败语义表 / §11.4 条款 4）。
+ *
+ * 两条执行链（本地 `runTaskStop`、云侧 `scripts/ci/dockerVerification.ts` 的 cleanup 上报）
+ * 都只从这里取值 —— 云侧不再持有 `cleanupStatusForTtl` 之类的第二份真值。
+ * 值域 `RemoteTaskCleanupStatus` 来自 core（§3.2），core 不反向依赖本包。
+ */
+export type StopCleanupEvidence = {
+  /** 执行者已**直接**确认目标不存在：本地＝signal-0 探测已死；云侧＝`sbx ls` 返回 stopped。 */
+  confirmedStopped: boolean;
+  /** 云侧硬兜底：沙箱已按 TTL 自动回收（资源确定不存在，但未经 ls 确认）。`expired` ≠ `stopped`。 */
+  ttlExpired?: boolean;
+  /** 重复 stop：目标已是终态 → 幂等路径（不覆盖状态、不重复发事件）。 */
+  alreadyTerminal?: boolean;
+  /** 诊断码（投递/网络失败、kill 被拒、目标未知…）：失败链上的唯一保留点，绝不因它伪装成功。 */
+  diagnostic?: string;
+};
+
+export interface CleanupReport {
+  status: RemoteTaskCleanupStatus;
+  pending: boolean;
+  /** 幂等路径标记：调用方不得覆盖既有状态、不得重复发事件。 */
+  idempotent?: boolean;
+  /** 诊断码；成功/确认路径不带。 */
+  diagnostic?: string;
+}
+
+/**
+ * 证据 → cleanup 报告的唯一点。
+ *
+ * 优先级即契约表的优先级：已确认停止 > 终态幂等 > TTL 到期 > 未确认。
+ * 「未确认」一律 `stop-unverified` + `pending: true`，任何分支都不产出「已停止」文案。
+ */
+export function resolveCleanupReport(
+  evidence: StopCleanupEvidence,
+  previousStatus?: RemoteTaskCleanupStatus,
+): CleanupReport {
+  const diagnostic = evidence.diagnostic ? { diagnostic: evidence.diagnostic } : {};
+
+  if (evidence.confirmedStopped) {
+    return { status: "stopped", pending: false };
+  }
+
+  if (evidence.alreadyTerminal) {
+    // 幂等：终态 run 的重复 stop 原样返回既有状态。无既有记录时，本地进程已终态即 stopped。
+    const status = previousStatus ?? "stopped";
+    // 条款3：只有「停止未确认」才保留 pending；expired/stopped 都不得再挂 pending。
+    return { status, pending: status === "stop-unverified", idempotent: true, ...diagnostic };
+  }
+
+  if (evidence.ttlExpired) {
+    // TTL 到期：资源已被回收，但不是「已停止」（未经 ls 确认）；不再保留无限期 pending。
+    return { status: "expired", pending: false, ...diagnostic };
+  }
+
+  return { status: "stop-unverified", pending: true, ...diagnostic };
+}
+
 export type TaskStopResult =
   | {
       outcome: "stopped";
@@ -122,8 +183,10 @@ export type TaskStopResult =
       status: ProcessTaskStatus;
       signal: "SIGTERM" | "SIGKILL";
       escalated: boolean;
+      /** §6.3 统一 cleanup 表达：本地 stop 与云侧 cleanup 同一映射、同一值域。 */
+      cleanup: CleanupReport;
     }
-  | { outcome: "not-found"; taskId: string; detail: string }
+  | { outcome: "not-found"; taskId: string; detail: string; cleanup: CleanupReport }
   | {
       outcome: "not-stoppable";
       taskId: string;
@@ -131,6 +194,7 @@ export type TaskStopResult =
       status: ProcessTaskStatus;
       reason: "transient-foreground" | "already-terminal" | "kill-refused";
       detail: string;
+      cleanup: CleanupReport;
     };
 
 export type TaskSummary = {
@@ -431,7 +495,12 @@ export async function runTaskStop(args: {
 
   const record = registry.getByTaskId(taskId);
   if (!record) {
-    return { outcome: "not-found", taskId, detail: notFoundDetail(taskId) };
+    return {
+      outcome: "not-found",
+      taskId,
+      detail: notFoundDetail(taskId),
+      cleanup: resolveCleanupReport({ confirmedStopped: false, diagnostic: "task-not-found" }),
+    };
   }
 
   const termed = registry.kill(record.pid, "SIGTERM");
@@ -453,6 +522,13 @@ export async function runTaskStop(args: {
       status: statusOf(record),
       reason,
       detail,
+      // 终态 → 幂等路径（原样返回，不覆盖、不重复发事件）；其余拒绝理由保留诊断码，
+      // 绝不把「没停成」写成「已停止」（§6.3、§11.4 条款 4）。
+      cleanup: resolveCleanupReport(
+        reason === "already-terminal"
+          ? { confirmedStopped: false, alreadyTerminal: true }
+          : { confirmedStopped: false, diagnostic: reason },
+      ),
     };
   }
 
@@ -466,6 +542,7 @@ export async function runTaskStop(args: {
       status: reportedTaskStatus("killed"),
       signal: "SIGTERM",
       escalated: false,
+      cleanup: resolveCleanupReport({ confirmedStopped: true }),
     };
   }
 
@@ -481,6 +558,7 @@ export async function runTaskStop(args: {
     status: reportedTaskStatus("killed"),
     signal: "SIGKILL",
     escalated: true,
+    cleanup: resolveCleanupReport({ confirmedStopped: true }),
   };
 }
 

@@ -12,6 +12,7 @@ import { extractCustomId } from "core/prefix";
 import { clipMultilineText } from "core/clipMultilineText";
 import { asTrimmedString } from "core/trimmedString";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
+import { isDialogRecordKey } from "database/dialogKey";
 import { fetchAndCacheMessages } from "chat/messages/fetchAndCacheMessages";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { TableMeta } from "render/table/types";
@@ -209,6 +210,9 @@ const fetchDialogReference = async (
       return await fetchAndCacheMessages({
         db,
         dialogId,
+        // 引用读也带 key：keyless 读会让服务端退到 `dialog-*` 全命名空间扫描。
+        // dbKey 不是合法的 dialog 记录 key 时不硬编，保持原样（fail-open）。
+        dialogKey: isDialogRecordKey(dbKey) ? dbKey : undefined,
         limit: DIALOG_REFERENCE_MESSAGE_LIMIT,
         token,
         remoteServers: remoteServers.length > 0 ? remoteServers : undefined,

@@ -211,7 +211,8 @@ const DialogPage = ({
     token: wakeToken ?? null,
     foregroundActive:
       hasStreamingMessage || hasLocalForegroundOwner || !!wakeRecoveredTurn,
-    reloadMessages: () => dispatch(initMsgs({ dialogId: dialogId! })).unwrap(),
+    reloadMessages: () =>
+      dispatch(initMsgs({ dialogId: dialogId!, dialogKey: pageKey })).unwrap(),
   });
   const latestAgentDraftState = useMemo(
     () => resolveLatestAgentDraftSidePanelState(messages),

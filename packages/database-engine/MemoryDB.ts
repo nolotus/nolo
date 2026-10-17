@@ -51,7 +51,7 @@ export class MemoryDB {
         };
     }
 
-    async *iterator(options: { gte?: string; lte?: string; lt?: string; reverse?: boolean } = {}): AsyncIterableIterator<[string, any]> {
+    async *iterator(options: { gte?: string; lte?: string; lt?: string; reverse?: boolean; keys?: boolean; values?: boolean } = {}): AsyncIterableIterator<[string, any]> {
         let keys = Array.from(this.data.keys()).sort();
         if (options.reverse) {
             keys.reverse();
@@ -61,7 +61,8 @@ export class MemoryDB {
             if (options.gte && key < options.gte) continue;
             if (options.lte && key > options.lte) continue;
             if (options.lt && key >= options.lt) continue;
-            yield [key, this.data.get(key)] as [string, any];
+            const value = options.values === false ? undefined : this.data.get(key);
+            yield [key, value] as [string, any];
         }
     }
 

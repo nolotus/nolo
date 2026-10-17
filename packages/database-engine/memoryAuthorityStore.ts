@@ -88,7 +88,8 @@ class MemoryAuthorityBacking {
       if (options.gte && entry.key < options.gte) continue;
       if (options.lte && entry.key > options.lte) continue;
       if (options.lt && entry.key >= options.lt) continue;
-      yield [entry.key, entry.value];
+      const value = options.values === false ? undefined : entry.value;
+      yield [entry.key, value];
     }
   }
 }

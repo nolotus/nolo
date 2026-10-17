@@ -28,7 +28,7 @@ import {
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { displayAgentName } from "./agentRunPanelLines";
 import { t } from "./i18n";
-import { formatRunZoneLines, type RunZoneLayout } from "./runZoneLines";
+import { formatRunZoneLines, remoteTaskUnsettled, type RemoteTaskCarrier, type RunZoneLayout } from "./runZoneLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
@@ -154,6 +154,9 @@ export function createRunDock(deps: RunDockDeps): RunDock {
       const expiredTerminal = entry.terminalAt !== null && at - entry.terminalAt >= lingerMs;
       const stale = at - entry.updatedAt >= staleMs;
       if (!expiredTerminal && !stale) continue;
+      // 远程任务还没收敛（远端仍在跑 / 停止未确认）时不退休：run 的终态只说明
+      // 本机 agent 结束了，摘掉这条就等于告诉用户「远端也停了」——那是撒谎。
+      if (remoteTaskUnsettled(entry.snapshot as RemoteTaskCarrier)) continue;
       entries.delete(runId);
       changed = true;
       if (expiredTerminal) {
@@ -202,7 +205,24 @@ export function createRunDock(deps: RunDockDeps): RunDock {
 
     const at = now();
     const prev = entries.get(runId);
-    const merged = prev ? mergeSnapshot(prev.snapshot, snapshot) : snapshot;
+    // 远程证据（§10.2 / M3）从同一个 update() 入口进来，规则却相反：本机字段
+    // 「缺省不覆盖」，远程字段是「粘」的——本轮控制面没带远端字段，不等于远端
+    // 没事了。远端收敛只由轮询器显式 remove 表达，不由缺省撤回。
+    const before = prev?.snapshot as RemoteTaskCarrier | undefined;
+    const incoming = snapshot as RemoteTaskCarrier;
+    const remoteTask = incoming.remoteTask ?? before?.remoteTask;
+    const lastEvidenceAt = incoming.lastEvidenceAt ?? before?.lastEvidenceAt;
+    const logTail = incoming.logTail ?? before?.logTail;
+    const remote =
+      remoteTask || lastEvidenceAt !== undefined || logTail !== undefined
+        ? {
+            ...(remoteTask ? { remoteTask } : {}),
+            ...(lastEvidenceAt !== undefined ? { lastEvidenceAt } : {}),
+            ...(logTail !== undefined ? { logTail } : {}),
+          }
+        : undefined;
+    const base = prev ? mergeSnapshot(prev.snapshot, snapshot) : snapshot;
+    const merged = remote ? { ...base, ...remote } : base;
     const terminal = isAgentRunTerminalStatus(merged.status);
     entries.set(runId, {
       snapshot: merged,

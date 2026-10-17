@@ -72,6 +72,8 @@ export class FakeAuthorityBacking {
     lte?: string;
     lt?: string;
     reverse?: boolean;
+    keys?: boolean;
+    values?: boolean;
   } = {}) {
     const keys = Array.from(this.data.keys()).sort();
     if (options.reverse) keys.reverse();
@@ -79,7 +81,8 @@ export class FakeAuthorityBacking {
       if (options.gte && key < options.gte) continue;
       if (options.lte && key > options.lte) continue;
       if (options.lt && key >= options.lt) continue;
-      yield [key, this.data.get(key)] as [string, unknown];
+      const value = options.values === false ? undefined : this.data.get(key);
+      yield [key, value] as [string, unknown];
     }
   }
 }
@@ -204,6 +207,30 @@ export function runAuthorityStoreConformanceSuite(
       }
 
       expect(scanned).toEqual(["c", "b", "a"]);
+    });
+
+    it("supports keys:true, values:false iteration yielding valid keys and nullish values", async () => {
+      const { store } = await createStore();
+
+      await store.put("k:1", "val1");
+      await store.put("k:2", "val2");
+
+      const entries: Array<[string, unknown]> = [];
+      for await (const entry of store.iterator({
+        gte: "k:",
+        lte: "k:\uffff",
+        keys: true,
+        values: false,
+      })) {
+        entries.push(entry);
+      }
+
+      expect(entries).toHaveLength(2);
+      expect(entries[0][0]).toBe("k:1");
+      expect(entries[1][0]).toBe("k:2");
+      // 断言 value 必须为 nullish（level 给 null，memory/sqlite 给 undefined），严禁返回真实 value
+      expect(entries[0][1] == null).toBe(true);
+      expect(entries[1][1] == null).toBe(true);
     });
   });
 }
