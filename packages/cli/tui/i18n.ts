@@ -418,6 +418,35 @@ const STRINGS = {
     en: " Switch agent: nolo agent list; force server: --server; topped up: nolo auth cooldown, then --clear <credential>",
     zh: " 换 agent：nolo agent list；强制走服务器：--server；已充值：nolo auth cooldown 查凭证名后 --clear <凭证名>",
   },
+  // --- Local run 402/余额不足 display (compact 3-line block) ----------------
+  // 与 429 同结构：headline（余额不足 / Coding Plan 额度用尽 + 上游 tag）+ 复位
+  // 时刻（仅当报文确实给了 reset_at）+ 出口。{0} = 上游标签（provider · model，
+  // 取不到回退 transport 名），{1} = 清洗后的原因（或定量原因）。
+  localRunBalanceExhausted: {
+    en: "[nolo] Insufficient balance, cannot continue ({0}): {1}",
+    zh: "[nolo] 余额不足，无法继续（{0}）：{1}",
+  },
+  // 报文带 coding_plan_exhausted 时的措辞：计划额度与钱包余额是两笔要分别充的账。
+  localRunBalanceCodingPlan: {
+    en: "[nolo] Coding Plan quota exhausted and the wallet balance is insufficient ({0}): {1}",
+    zh: "[nolo] Coding Plan 额度已用尽且钱包余额不足（{0}）：{1}",
+  },
+  // 第 2 行：{0} = 计划额度复位时刻（本地时间）。报文没给复位时刻时整行省略。
+  localRunBalanceReset: {
+    en: " Plan quota resets at {0} — this restores the plan quota only; it does not top up your wallet.",
+    zh: " 计划额度 {0} 复位——只恢复计划额度，不会给钱包充值。",
+  },
+  // 清洗后仍取不到原因（报文只有 `{"error":{}}` 这类空壳）时的兜底：避免悬空冒号。
+  localRunBalanceUnknownReason: {
+    en: "the provider returned a payment-required error without a reason line",
+    zh: "上游只返回了「需要付款」错误，没有给出原因",
+  },
+  // 第 3 行：出口（充值后重发 / 换 agent / 强制走服务器）。刻意不重复 TUI 那句
+  //「你刚发的话已保存在当前对话里」。
+  localRunBalanceExits: {
+    en: " Top up and send again; or switch agent: nolo agent list; force server: --server",
+    zh: " 充值后重发即可；或换 agent：nolo agent list；强制走服务器：--server",
+  },
   // 派发前的本地冷却拦截（原两行英文 → 本地化单行压缩）。
   agentCooldownBlocked: {
     en: "[nolo] Agent {0} is in 429 cooldown until {1}. This dispatch was not sent — pick another agent, or retry after the cooldown.",

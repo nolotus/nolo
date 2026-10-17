@@ -1041,24 +1041,14 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   }
 }
 
-const BALANCE_ERROR_PATTERNS: ReadonlyArray<RegExp> = [
-  /UPSTREAM_402/i,
-  /Insufficient Balance/i,
-  /insufficient\s+balance/i,
-  /余额不足/,
-];
-
-/** Balance/402 — distinct from quota/429; UX should say "top up", not "switch agent". */
-export function isBalanceExhaustedError(error: unknown): boolean {
-  if (!error) return false;
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : String((error as { message?: unknown })?.message ?? "");
-  return BALANCE_ERROR_PATTERNS.some((pattern) => pattern.test(message));
-}
+// ── 余额/402 识别已下沉共享层（packages/cli/client/balanceErrorPatterns）──
+// 词表与 client/agentRun 的 402 分支共用同一份：此前两处各一套，且都只认
+// UPSTREAM_402 / Insufficient Balance / 余额不足 / insufficient balance，
+// 漏掉 insufficient_balance（下划线）、wallet balance is insufficient、
+// coding_plan_exhausted、payment_required。放在 client/ 下是为了避免
+// agentRunCommand ↔ agentRun 的循环依赖。
+// 不再保留第二份 BALANCE_ERROR_PATTERNS / isBalanceExhaustedError。
+export { isBalanceExhaustedError } from "./client/balanceErrorPatterns";
 
 // ── Quota 识别已下沉共享层（packages/ai/tools/agent/quotaCircuitBreaker）──
 // import 供本文件内部调用（fallback 判定）；export 保持既有调用方

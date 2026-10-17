@@ -99,6 +99,12 @@ import {
   resolveCooldownGate,
 } from "../../ai/agent/agentAvailabilityShared";
 import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
+import {
+  CODING_PLAN_EXHAUSTED_RE,
+  matchesBalanceError,
+  stripControlChars,
+  stripZeroWidthChars,
+} from "./balanceErrorPatterns";
 import { getCliLocale, t } from "../tui/i18n";
 import type { CliLocale } from "../tui/i18n";
 
@@ -636,12 +642,6 @@ type LocalRunErrorClass =
       transport: ProviderTransport;
       status: number;
       /**
-       * 无 `<label> provider failed: HTTP <status>` 主形态、仅凭报文文本命中时
-       * 置 true：status 是语义等价码（如 429），文案不得声称上游真的返回了该
-       * HTTP 状态。
-       */
-      statusInferred?: true;
-      /**
        * rate-limit 细分：true = 配额/余额耗尽（insufficient_quota、quota
        * reached…），重试要等配额窗口复位；缺省 = 短时限流，稍后重试即可。
        * 两类都不是本地凭证问题。
@@ -716,7 +716,7 @@ const BARE_UPSTREAM_5XX_RE =
  *   429                → rate-limit      (provider throttling — retry)
  *   500–599            → transient       (gateway/upstream hiccup — retry)
  *   other 4xx          → upstream        (provider-side rejection, not local config)
- *   no `HTTP <status>` → auth / rate-limit / transient by message text (statusInferred),
+ *   no `HTTP <status>` → auth / rate-limit / transient by message text (text-only),
  *                        covered then only: 401/unauthorized… wording, rate-limit/quota
  *                        wording (`resource_exhausted`, `rate limit`, `insufficient_quota`,
  *                        `429`…), bare 5xx wording — generic otherwise
@@ -767,13 +767,12 @@ export function classifyLocalRunError(message: string): LocalRunErrorClass {
   if (AUTH_TEXT_SIGNAL_RE.test(message)) return { kind: "generic" };
   if (looksLikeRateLimitedText(message)) {
     const quotaExhausted = looksLikeQuotaExhaustedText(message);
-    // 429 是语义等价码：文本命中的限流与 HTTP 429 同处置（冷却落盘 + 文案），
-    // statusInferred 让文案不谎称上游真的返回了 HTTP 429。
+    // 429 是语义等价码：文本命中的限流与 HTTP 429 同处置（冷却落盘 + 文案）；
+    // 文案不声称上游真的返回了 HTTP 429（headline 根本不带状态码）。
     return {
       kind: "rate-limit",
       transport,
       status: 429,
-      statusInferred: true,
       ...(quotaExhausted ? { quotaExhausted: true } : {}),
     };
   }
@@ -841,9 +840,8 @@ type FailureCtx = {
   message: string;
   /** Human-readable transport label: "server chat proxy" or "local provider". */
   where: "server chat proxy" | "local provider";
-  status: number;
-  /** 见 LocalRunErrorClass.statusInferred：文案不得声称上游真的返回了该状态码。 */
-  statusInferred?: true;
+  /** HTTP 语义状态码；余额块文案刻意不带状态码，故可选。 */
+  status?: number;
   /** 见 LocalRunErrorClass.quotaExhausted：配额耗尽 vs 短时限流的文案细分。 */
   quotaExhausted?: true;
   /**
@@ -972,7 +970,7 @@ function buildAuthFailure(ctx: FailureCtx): string {
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, auth rejected).` +
     ` Detail: ${ctx.message} ` +
-    `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}.\n`
+    `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}\n`
   );
 }
 
@@ -1138,11 +1136,19 @@ function stripRateLimitTransportPrefix(message: string): string {
 /**
  * 第 1 行的上游标签：provider 名（`local <x> provider failed`）+ model
  * （`"model":"<name>"`）拼成 `antigravity · gemini-3.8-flash-tiered`；两者都取不到
- * 时回退 ctx.where（`local provider` / `server chat proxy`）。
+ * 时回退 ctx.where（`local provider` / `server chat proxy`）。429 与 402 共用。
  */
-function describeRateLimitSource(ctx: FailureCtx): string {
-  const provider = /^local\s+(\S+)\s+provider failed/i.exec(ctx.message)?.[1];
-  const model = /"model"\s*:\s*"([^"]+)"/.exec(ctx.message)?.[1];
+function describeUpstreamTag(ctx: FailureCtx): string {
+  // tag 直接拼进 headline：零宽字符会漏进文案，控制字符（ESC）会驱动终端，model 名里的
+  // `\n` 甚至会把 3 行块撕裂成 4 行。所以先归一化（去不可见字符 + 折叠空白）再抽取。
+  const source = stripZeroWidthChars(ctx.message);
+  const clean = (value: string | undefined): string | undefined => {
+    if (value === undefined) return undefined;
+    const normalized = stripControlChars(value).replace(/\s+/g, " ").trim();
+    return normalized ? normalized : undefined;
+  };
+  const provider = clean(/^local\s+(\S+)\s+provider failed/i.exec(source)?.[1]);
+  const model = clean(/"model"\s*:\s*"([^"]+)"/.exec(source)?.[1]);
   const parts = [provider, model].filter((part): part is string => Boolean(part));
   return parts.length > 0 ? parts.join(" · ") : ctx.where;
 }
@@ -1163,7 +1169,8 @@ function sanitizeRateLimitDetail(
   stripResetSentence: boolean,
 ): string {
   const withoutNoise = stripRateLimitTransportPrefix(
-    stripRateLimitDetailsArray(stripDebugNoise(message)),
+    // 控制字符（ESC 清屏 / 光标移动）是 provider 可控文本，先剥再进用户文案。
+    stripControlChars(stripRateLimitDetailsArray(stripDebugNoise(message))),
   );
   const collapse = (text: string) =>
     text
@@ -1276,8 +1283,8 @@ function formatRateLimitResetHint(
  *   · 第 2 行 = 冷却截止（本地时间）+ 上游复位 hint + 自动探测间隔；无
  *     cooldownUntil 时整行省略；
  *   · 第 3 行 = 出口（换 agent / 强制走服务器 / 已充值清冷却）。
- * statusInferred 为 true 时文案不声称上游返回了 HTTP 429：新版 headline 根本不带
- * 状态码，status 只是本地分类用的语义等价码。
+ * 文案不声称上游真的返回了 HTTP 429：headline 根本不带状态码，status 只是本地
+ * 分类用的语义等价码。
  */
 function buildRateLimitFailure(ctx: FailureCtx): string {
   const headlineKey = ctx.quotaExhausted
@@ -1286,7 +1293,7 @@ function buildRateLimitFailure(ctx: FailureCtx): string {
   const lines = [
     t(
       headlineKey,
-      describeRateLimitSource(ctx),
+      describeUpstreamTag(ctx),
       sanitizeRateLimitDetail(ctx.message, Boolean(ctx.cooldownUntil)),
     ),
   ];
@@ -1309,10 +1316,152 @@ function buildRateLimitFailure(ctx: FailureCtx): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** 第 1 行原因清洗上限（字符）；与 429 详情同一预算。 */
+const BALANCE_DETAIL_MAX_CHARS = RATE_LIMIT_DETAIL_MAX_CHARS;
+
+/**
+ * 按花括号配平剥离报文里内联的 `{"error":{…}}` JSON 体（stripRateLimitDetailsArray
+ * 的兄弟实现，配对符号换成花括号）：真实 402 报文把整个 error 对象压在一行里，
+ * 正则贪婪删除会连后文一起吞掉；字符串内的花括号不参与配平，不配平时原样返回
+ * （交给截断兜底）。
+ */
+function stripEmbeddedErrorJson(message: string): string {
+  const KEY = '{"error"';
+  let out = message;
+  let searchFrom = 0;
+  for (;;) {
+    const keyIndex = out.indexOf(KEY, searchFrom);
+    if (keyIndex === -1) return out;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let endIndex = -1;
+    for (let i = keyIndex; i < out.length; i += 1) {
+      const ch = out[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          endIndex = i;
+          break;
+        }
+      }
+    }
+    if (endIndex === -1) return out;
+    out = `${out.slice(0, keyIndex)} ${out.slice(endIndex + 1)}`;
+    searchFrom = keyIndex;
+  }
+}
+
+/**
+ * 402 原因的清洗：去 debug 噪音（raw=/headers=）→ 剥内联 JSON 体 → 剥传输前缀
+ * → 去零宽字符与控制字符（ESC 等）→ `(\d{3})[` 补空格 → 折叠空白与重复句末标点
+ * → ≤140 截断。注意清洗后可能为空（关键词只出现在被剥掉的 JSON 体里）——调用方
+ * 必须再兜底，不能让 headline 出现悬空冒号。
+ */
+function sanitizeBalanceDetail(message: string): string {
+  const withoutNoise = stripEmbeddedErrorJson(stripDebugNoise(message));
+  const detail = stripControlChars(
+    stripZeroWidthChars(stripRateLimitTransportPrefix(withoutNoise)),
+  )
+    .replace(/(\d{3})\[/g, "$1 [")
+    .replace(/\s+/g, " ")
+    .replace(/([.。!！?？])\s+(?=[.。!！?？])/g, "")
+    .replace(/([.。!！?？])\1+/g, "$1")
+    .replace(/[\s,;:，；：]+$/, "")
+    .trim();
+  return detail.length > BALANCE_DETAIL_MAX_CHARS
+    ? `${detail.slice(0, BALANCE_DETAIL_MAX_CHARS - 1).trimEnd()}…`
+    : detail;
+}
+
+/**
+ * 被剥掉的 JSON 体里的可读标识（`"code":"insufficient_balance"` /
+ * `"type":"payment_required"`）：正文清洗后为空的兜底——这时 JSON 体就是报文唯一的
+ * 内容，绝不能渲染出「余额不足（tag）：」这种悬空冒号。
+ */
+function extractBalanceErrorMarker(message: string): string | undefined {
+  const bodyStart = message.indexOf('{"error"');
+  const body = bodyStart === -1 ? message : message.slice(bodyStart);
+  const match = /"(?:code|type|status)"\s*:\s*"([^"\\]{1,60})"/.exec(body);
+  const marker = match?.[1].trim();
+  return marker ? marker : undefined;
+}
+
+/**
+ * 计划额度复位时刻 → epoch 毫秒：认 `"reset_at":"2026-10-22T06:19:46Z"` 这类 ISO
+ * 字符串（details 内外都认），也认数字（≥ 1e12 当毫秒，否则当秒）。解析不出
+ * （如 `"soon"`）返回 undefined；调用方还会丢掉已过去的时刻。
+ */
+function extractBalanceResetAt(message: string): number | undefined {
+  const text = stripZeroWidthChars(message);
+  const iso = /"reset_at"\s*:\s*"([^"]+)"/.exec(text)?.[1];
+  if (iso) {
+    const at = new Date(iso.trim());
+    return Number.isNaN(at.getTime()) ? undefined : at.getTime();
+  }
+  const epoch = /"reset_at"\s*:\s*(\d{9,16})/.exec(text)?.[1];
+  if (!epoch) return undefined;
+  const value = Number(epoch);
+  if (!Number.isFinite(value)) return undefined;
+  const at = new Date(value >= 1e12 ? value : value * 1000);
+  return Number.isNaN(at.getTime()) ? undefined : at.getTime();
+}
+
+/**
+ * 402/余额不足：跟随 locale 的紧凑 3 行块（与 429 同结构）。
+ *   · 第 1 行 = 余额不足（上游 tag）：清洗后的原因；报文带 coding_plan_exhausted
+ *     时改用「Coding Plan 额度已用尽且钱包余额不足」措辞（两种处境的充值动作不同：
+ *     一个补计划额度，一个补钱包）；
+ *   · 第 2 行 = 计划额度复位时刻（本地时间）+「只恢复计划额度、不会给钱包充值」；
+ *     报文没给 reset_at 时整行省略；
+ *   · 第 3 行 = 出口（充值后重发 / 换 agent / 强制走服务器）；刻意不重复 TUI 的
+ *     「消息已保存在本对话」那句。
+ */
+function buildBalanceFailure(ctx: FailureCtx): string {
+  const normalized = stripZeroWidthChars(ctx.message);
+  const balanceDetails = parseEmbeddedBalanceDetails(normalized);
+  // 清洗后可能为空（原因只出现在被剥掉的 JSON 体里）→ 逐级兜底：JSON 体里的
+  // code/type → 通用文案。任一环缺失都会渲染出悬空冒号，所以必须落到非空串。
+  const reason = balanceDetails
+    ? t("balanceInsufficientReason", balanceDetails.required, balanceDetails.current)
+    : sanitizeBalanceDetail(extractEmbeddedErrorMessage(normalized) ?? ctx.message) ||
+      extractBalanceErrorMarker(normalized) ||
+      t("localRunBalanceUnknownReason");
+  const lines = [
+    t(
+      CODING_PLAN_EXHAUSTED_RE.test(normalized)
+        ? "localRunBalanceCodingPlan"
+        : "localRunBalanceExhausted",
+      describeUpstreamTag(ctx),
+      reason,
+    ),
+  ];
+  const resetAt = extractBalanceResetAt(normalized);
+  // 解析不出 / 时刻已过去都整行省略：渲染一个像将来的过去时刻比省略更误导。
+  if (resetAt !== undefined && resetAt > Date.now()) {
+    lines.push(
+      t(
+        "localRunBalanceReset",
+        formatCooldownUntilLocal(new Date(resetAt).toISOString()),
+      ),
+    );
+  }
+  lines.push(t("localRunBalanceExits"));
+  return `${lines.join("\n")}\n`;
+}
+
 function buildTransientFailure(ctx: FailureCtx): string {
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}; this is an upstream/gateway issue, not your local credential or config). Detail: ${ctx.message} ` +
-    `${NO_FALLBACK} Retry shortly, ${SERVER_FALLBACK_HINT}.\n`
+    `${NO_FALLBACK} Retry shortly, ${SERVER_FALLBACK_HINT}\n`
   );
 }
 
@@ -1325,7 +1474,7 @@ function buildUpstreamFailure(ctx: FailureCtx): string {
     : `Check the agent's endpoint/model settings`;
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}). Detail: ${ctx.message} ` +
-    `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}.\n`
+    `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}\n`
   );
 }
 
@@ -1361,7 +1510,6 @@ export function formatLocalTurnFailureLine(error: unknown): string {
       message,
       where: "local provider",
       status: cls.status,
-      ...(cls.statusInferred ? { statusInferred: true } : {}),
       ...(cls.quotaExhausted ? { quotaExhausted: true } : {}),
       ...(typeof rawCooldownUntil === "string" && rawCooldownUntil
         ? { cooldownUntil: rawCooldownUntil }
@@ -1445,27 +1593,17 @@ export function describeLocalRunFailure(
     );
   }
 
-  // Balance/402 is the common "I just topped up / please continue" case —
-  // never tell the user to fix local credentials.
-  if (
-    /UPSTREAM_402|Insufficient Balance|余额不足|insufficient\s+balance/i.test(
+  // 余额不足 / 402（「刚充值了，继续」这类）：识别走共享词表
+  // （client/balanceErrorPatterns，与 TUI 的 isBalanceExhaustedError 同一份），
+  // 渲染走 buildBalanceFailure —— 与 429 同构的紧凑 3 行。绝不提示「修本地凭证」。
+  if (matchesBalanceError(message)) {
+    // status 对余额块没有读取点（文案刻意不带状态码），只传 transport 标签。
+    return buildBalanceFailure({
       message,
-    )
-  ) {
-    const cleanedMessage = stripDebugNoise(message);
-    const fallback = cleanedMessage.replace(
-      /^[^:]*provider failed: HTTP \d{3}\s*/,
-      "",
-    );
-    const balanceDetails = parseEmbeddedBalanceDetails(cleanedMessage);
-    const shownMessage = balanceDetails
-      ? t(
-          "balanceInsufficientReason",
-          balanceDetails.required,
-          balanceDetails.current,
-        )
-      : extractEmbeddedErrorMessage(cleanedMessage) ?? fallback;
-    return `[nolo] ${shownMessage}\n`;
+      where: PLATFORM_TRANSPORT_RE.test(message)
+        ? "server chat proxy"
+        : "local provider",
+    });
   }
 
   // Context length limit exceeded (HTTP 400 with "maximum context length") —
@@ -1492,7 +1630,7 @@ export function describeLocalRunFailure(
     const cleaned = stripDebugNoise(message);
     return (
       `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
-      `The local authority broker timed out and did not respond in time (an existing broker process may be unresponsive). Check the local broker process or retry, ${SERVER_FALLBACK_HINT}.\n`
+      `The local authority broker timed out and did not respond in time (an existing broker process may be unresponsive). Check the local broker process or retry, ${SERVER_FALLBACK_HINT}\n`
     );
   }
 
@@ -1503,7 +1641,7 @@ export function describeLocalRunFailure(
     }
     return (
       `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
-      `The local runtime could not attach to an existing broker or take database ownership. Check running broker processes holding the local authority store or retry, ${SERVER_FALLBACK_HINT}.\n`
+      `The local runtime could not attach to an existing broker or take database ownership. Check running broker processes holding the local authority store or retry, ${SERVER_FALLBACK_HINT}\n`
     );
   }
 
@@ -1514,7 +1652,7 @@ export function describeLocalRunFailure(
     const cleaned = stripDebugNoise(message);
     return (
       `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
-      `The local authority broker is unavailable. Start or restart the local authority broker and retry, ${SERVER_FALLBACK_HINT}.\n`
+      `The local authority broker is unavailable. Start or restart the local authority broker and retry, ${SERVER_FALLBACK_HINT}\n`
     );
   }
 
@@ -1525,7 +1663,7 @@ export function describeLocalRunFailure(
     const cleaned = stripDebugNoise(message);
     return (
       `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
-      `The local authority broker returned a protocol or malformed response error. Check the running broker process and retry, ${SERVER_FALLBACK_HINT}.\n`
+      `The local authority broker returned a protocol or malformed response error. Check the running broker process and retry, ${SERVER_FALLBACK_HINT}\n`
     );
   }
 
@@ -1534,7 +1672,7 @@ export function describeLocalRunFailure(
     if (/owner-required route not acknowledged/i.test(message)) {
       return (
         `${RUN_UNAVAILABLE_PREFIX} (${message}). ${NO_FALLBACK} ` +
-        `The server returned a successful response but did not acknowledge the owner route. Check server version or proxy configuration, ${SERVER_FALLBACK_HINT}.\n`
+        `The server returned a successful response but did not acknowledge the owner route. Check server version or proxy configuration, ${SERVER_FALLBACK_HINT}\n`
       );
     }
     // Socket/network deaths mid-stream are upstream transport failures —
@@ -1550,7 +1688,7 @@ export function describeLocalRunFailure(
     }
     return (
       `${RUN_UNAVAILABLE_PREFIX} (${message}). ${NO_FALLBACK} ` +
-      `Fix the local credential/config and retry, ${SERVER_FALLBACK_HINT}.\n`
+      `Fix the local credential/config and retry, ${SERVER_FALLBACK_HINT}\n`
     );
   }
 
@@ -1563,7 +1701,6 @@ export function describeLocalRunFailure(
     message,
     where: cls.transport === "platform" ? "server chat proxy" : "local provider",
     status: cls.status,
-    ...(cls.statusInferred ? { statusInferred: true } : {}),
     ...(cls.quotaExhausted ? { quotaExhausted: true } : {}),
     ...(cooldownUntil ? { cooldownUntil } : {}),
     ...(credentialAccountId ? { credentialAccountId } : {}),
