@@ -81,7 +81,7 @@ export type ReasoningEffort = (typeof REASONING_EFFORT_OPTIONS)[number];
  * OpenAI:           none / minimal / low / medium / high / xhigh / max
  * DeepSeek V4:      low / high / max（跳过 medium、xhigh）
  * Kimi K3/Moonshot: none / low / high / max（可关思考；默认 max；跳过 medium、xhigh）
- *                   注意：kimi-code proxy 仍会把 max→high（上游 API 不认 max），见 enhanceKimiCodeBody
+ *                   注意：kimi-code proxy 对 max 原样透传，仅把 xhigh 折到 high，见 enhanceKimiCodeBody
  * xAI Grok:         low / medium / high（默认 high，不可关闭）
  * Anthropic/Google: 不走 reasoning_effort 通道
  */
