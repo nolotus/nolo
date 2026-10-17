@@ -68,10 +68,11 @@ Consequences per feature:
 - Listed add-ons go through AMO review; self-distributed ("unlisted") add-ons are signed without a
   listing but still validated.
 - Source code must be provided if the submitted code is minified or obfuscated (ours is not).
-- **Status 2026-10-17: core port shipped & signed (v0.1.4)**:
+- **Status 2026-10-17: core port shipped & signed (v0.1.5)**:
   - Automated signing supported via `nolo secret run --with amo -- bunx web-ext sign --channel unlisted`.
   - Self-hosted auto-updates configured from **0.1.4**: `browser_specific_settings.gecko.update_url`
-    (`https://nolo.chat/public/downloads/firefox-updates.json`).
+    (`https://nolo.chat/public/downloads/firefox-updates.json`); **0.1.5** re-aligns the packaged
+    extension with the current repo (adds `prepare_browser_action`).
   - Installs of 0.1.2 and earlier have no `update_url` and need one manual upgrade to 0.1.4 before
     the automatic path applies.
   - Signed `.xpi` is served at `/public/downloads/nolo-browser-connector.xpi`.
