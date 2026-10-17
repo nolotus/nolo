@@ -5,8 +5,9 @@
  * 调用=唯一契约保证点，§9.1）。纯函数、无 IO、无环境依赖。
  *
  * 禁入清单（§9.3，逐条写进 redactLogLines.test.ts）：
- * 1. token / 密钥 / 凭据（`Bearer <t>`、`ghp_*`、`token=`/`secret=`/`password=`、
- *    `NOLO_WORKER_TOKEN=` 这类 env 前缀名、`x-nolo-machine-lease` / `x-worker-token` 头）
+ * 1. token / 密钥 / 凭据（`Bearer <t>`、`ghp_*`、`token` / `secret` / `password` 等键名
+ *    后接 `=` 或 `:` 的赋值形态、`NOLO_WORKER_TOKEN=` 这类 env 前缀名、
+ *    `x-nolo-machine-lease` / `x-worker-token` 头）
  * 2. 绝对本地路径（`/home/...`、`/Users/...`、`C:\...`）与 `~/.nolo/...`
  * 3. `bunPath` / `process.execPath`（worker 环境变量）
  * 4. stage-start JSONL 的 `command` + `args`（§9.4；真实形态见
