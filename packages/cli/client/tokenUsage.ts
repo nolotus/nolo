@@ -7,7 +7,6 @@ import { API_REPORTED_COST_MULTIPLIER } from "../../ai/token/calculatePrice";
 import { findModelConfig } from "../../ai/llm/providers";
 import {
   DEFAULT_CONTEXT_WINDOW,
-  findModelContextWindow,
   getModelContextWindow,
 } from "../../ai/llm/getModelContextWindow";
 import { builtinAgentCatalogEntryById } from "core/builtinAgentCatalog";
@@ -100,65 +99,20 @@ export function resolveAgentModelIdentity(
 /**
  * Resolve the context window for a TUI agent selection.
  *
- * 顺序：`resolveEffectiveModel`（显式 model / catalog）→ 显示名 fuzzy → 从
- * agentKey / agentName 派生的 model slug → `DEFAULT_CONTEXT_WINDOW`。
- *
- * 修掉过的历史 bug（两处，同一个病根：查不到就默默当 256k）：
- * - agentName "nolo" 一路落到 256k，而它实际跑在 1M 的模型上；
- * - 自定义 / 广场 agent 不在 builtinAgentCatalog 里，显示名 "OpenDesign V4.1 Flash"
- *   fuzzy miss 后落 256k，而它实际跑在 1M 的模型上，百分比因此虚高 4 倍。
- *
- * 兜底里不写死任何具体模型的数字：猜得到就查模型表，猜不到才用通用默认值。
- * 窗口跟随模型，所以 NOLO_AUTO_ROUTE 不再影响它。
+ * 先按 `resolveEffectiveModel` 解析出真实模型；解析不出来才退回显示名的 fuzzy
+ * 匹配，最后才是通用默认值。修掉过的历史 bug：agentName "nolo" 一路落到
+ * DEFAULT_CONTEXT_WINDOW（256k），而它实际跑在 1M 的模型上。窗口跟随 catalog
+ * 模型，所以 NOLO_AUTO_ROUTE 不再影响它。
  */
 export function resolveAgentContextWindow(opts: AgentModelRef): number {
   const model = resolveEffectiveModel(opts);
   if (model) return getModelContextWindow(model);
 
-  // 显示名直接命中（含 fuzzy）就不用猜 slug 了。
-  const byName = opts.agentName?.trim()
-    ? findModelContextWindow(opts.agentName)
-    : undefined;
-  if (byName !== undefined) return byName;
-
-  const candidates = [
-    ...modelSlugCandidates(opts.agentKey, 2),
-    ...modelSlugCandidates(opts.agentName, 1),
-  ];
-  for (const candidate of candidates) {
-    const window = findModelContextWindow(candidate);
-    if (window !== undefined) return window;
+  if (opts.agentName?.trim()) {
+    return getModelContextWindow(opts.agentName);
   }
 
   return DEFAULT_CONTEXT_WINDOW;
-}
-
-/** agentKey 的 `agent-<uid>-` 前缀：uid 是确定性 seed，不是模型名的一部分。 */
-const AGENT_KEY_PREFIX = /^agent-[a-z0-9]+-/i;
-
-/**
- * 从 agentKey / agentName 猜「可能是什么模型」的 slug 候选。
- *
- * key 形如 `agent-0e95801d90-amr-deepseek-v4-1-flash`：去掉 `agent-<uid>-` 前缀后
- * 剩 `<provider>-<model>`，provider 前缀（`amr-`）也不是模型名，逐段剥离；显示名
- * 形如 `OpenDesign V4.1 Flash`：空格换连字符、点号保留。
- *
- * 这里**不写死任何 provider / 模型名**：候选只是字符串，命中与否交给模型表与
- * fuzzy（`findModelContextWindow`），全 miss 才算查不到。候选按「越完整越靠前」
- * 排列，只有前面的都查不到时才会用到更激进的剥离结果。
- */
-function modelSlugCandidates(source: string | undefined, maxDrop: number): string[] {
-  const raw = source?.trim();
-  if (!raw) return [];
-  const base = raw.replace(/\s+/g, "-").toLowerCase();
-  const seed = base.replace(AGENT_KEY_PREFIX, "");
-  const out = [seed];
-  if (seed !== base) out.push(base);
-  const segments = seed.split("-");
-  for (let drop = 1; drop <= maxDrop && drop < segments.length; drop++) {
-    out.push(segments.slice(drop).join("-"));
-  }
-  return [...new Set(out.filter(Boolean))];
 }
 
 const PROVIDER_LOOKUP_ORDER = [
@@ -358,76 +312,13 @@ export function formatTokenCount(value: number) {  if (!Number.isFinite(value) |
   return compact >= 100 ? `${Math.round(compact)}M` : `${compact.toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-/**
- * 「这一轮上下文占用了多少」——TUI 里唯一的一处口径。
- *
- * 状态栏 chip 与 `/context` 面板的令牌行都必须走这里，两边各算一套才会出现
- * 「chip 说 13.6k、面板说 in —」这种自相矛盾。
- *
- * - `used`：**下一轮会重新发出去的上下文**。有 provider usage 时是 `input`
- *   （prompt 实际大小）；还没收到 usage 时退到系统提示 + 工具的本地估算。
- *   刻意不加 `output`：那是生成量，不是下一轮的上下文占用。
- * - `contextWindow`：usage 自带的窗口优先，其次调用方给的状态兜底。
- * - `left` / `pct`：只有 used 与 window 都有值才给，缺一个就不编数字。
- * - `estimated`：used 来自本地估算（而非 provider usage）时为 true，供展示层
- *   标 `~`。面板标，状态栏 chip 不标（宽度紧，且首轮就标噪声大于信息）。
- */
-export type ContextUsage = {
-  used?: number;
-  contextWindow?: number;
-  left?: number;
-  pct?: number;
-  estimated: boolean;
-};
-
-export function resolveContextUsage(
-  tokens?: TurnTokenUsage,
-  fallbackContextWindow?: number,
-  estimatedContextTokens?: number
-): ContextUsage {
-  const providerUsed = tokens && tokens.input > 0 ? tokens.input : undefined;
-  const estimateUsed =
-    estimatedContextTokens != null && estimatedContextTokens > 0
-      ? estimatedContextTokens
-      : undefined;
-  const used = providerUsed ?? estimateUsed;
-  const contextWindow = tokens?.contextWindow ?? fallbackContextWindow;
-  const usage: ContextUsage = { estimated: providerUsed === undefined };
-  if (used !== undefined) usage.used = used;
-  if (contextWindow != null) usage.contextWindow = contextWindow;
-  if (used !== undefined && contextWindow != null && contextWindow > 0) {
-    usage.left = Math.max(0, contextWindow - used);
-    usage.pct = (used / contextWindow) * 100;
-  }
-  return usage;
-}
-
-export function renderTokenStatus(
-  tokens?: TurnTokenUsage,
-  fallback?: { contextWindow?: number; estimatedContextTokens?: number }
-) {
-  const usage = resolveContextUsage(
-    tokens,
-    fallback?.contextWindow,
-    fallback?.estimatedContextTokens
-  );
-  // 没有 provider usage 但知道窗口 + 估算时，给真实数字而不是三个破折号；
-  // 估算值前面加 `~`，避免和 provider 报的数混为一谈。
-  if (!tokens) {
-    if (usage.used === undefined) return "in — out — left —";
-    const left =
-      usage.left !== undefined ? `~${formatTokenCount(usage.left)}` : "—";
-    return `in ~${formatTokenCount(usage.used)} out — left ${left}`;
-  }
-  const inputText =
-    tokens.input > 0 || usage.used === undefined
-      ? formatTokenCount(tokens.input)
-      : `~${formatTokenCount(usage.used)}`;
+export function renderTokenStatus(tokens?: TurnTokenUsage) {
+  if (!tokens) return "in — out — left —";
   const left =
     tokens.remaining != null
       ? formatTokenCount(tokens.remaining)
-      : usage.left !== undefined
-        ? `${usage.estimated ? "~" : ""}${formatTokenCount(usage.left)}`
+      : tokens.contextWindow
+        ? "—"
         : "—";
   // Cache hits are a slice of `input`, so they read as a parenthetical on it
   // rather than a separate column.
@@ -435,7 +326,7 @@ export function renderTokenStatus(
     tokens.cacheRead != null && tokens.cacheRead > 0
       ? ` (cache ${formatTokenCount(tokens.cacheRead)})`
       : "";
-  return `in ${inputText}${cache} out ${formatTokenCount(tokens.output)} left ${left}`;
+  return `in ${formatTokenCount(tokens.input)}${cache} out ${formatTokenCount(tokens.output)} left ${left}`;
 }
 
 export function shouldShowUsage(env: EnvLike) {

@@ -134,7 +134,6 @@ export type LocalAgentTurnInput = {
   category?: string;
   inheritedFromDialogKey?: string;
   parentDialogId?: string;
-  freshDialog?: boolean;
   runtimeContext?: Record<string, any> | null;
   /** Dispatched leaf runs receive parent-facing final-response guidance. */
   runKind?: "interactive" | "subtask";
@@ -680,9 +679,6 @@ async function persistFailedLocalTurn(args: {
         : {}),
       ...(args.input.parentDialogId
         ? { parentDialogId: args.input.parentDialogId }
-        : {}),
-      ...(typeof args.input.freshDialog === "boolean"
-        ? { freshDialog: args.input.freshDialog }
         : {}),
     });
     return saved?.dialogId;
@@ -1614,7 +1610,6 @@ export async function runLocalAgentTurn(
     ...(input.category ? { category: input.category } : {}),
     ...(input.inheritedFromDialogKey ? { inheritedFromDialogKey: input.inheritedFromDialogKey } : {}),
     ...(input.parentDialogId ? { parentDialogId: input.parentDialogId } : {}),
-    ...(typeof input.freshDialog === "boolean" ? { freshDialog: input.freshDialog } : {}),
   });
   loopTiming.mark("saveTurn", round);
   await loopTiming.flush();

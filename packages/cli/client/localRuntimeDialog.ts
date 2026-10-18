@@ -395,15 +395,7 @@ export async function writeDialog(args: {
   let existingDialog: any = null;
   if (args.input.continueDialogId) {
     const dialogKey = `dialog-${args.userId}-${args.input.continueDialogId}`;
-    // 安全前提：落库 key 由 dialogWritePlan 的 continueDialogId || createId() 决定，
-    // 因此 fresh 时 key 必为本进程新铸、远端不可能存在。
-    // 本路径只读本地（remote: false，亚毫秒），不触发远端兜底，避免新会话首轮白等读取超时。
-    // 注意：这里信任调用方给的 freshDialog。若把已有会话误标为 fresh，本地读不到旧记录，
-    // 记录会按默认值重建（spaceId/createdAt/手工标题可能丢失），因此调用方只能在
-    // 「本进程刚生成新 dialogId」时置真——见 agentRun.ts 的 freshDialog 推导。
-    existingDialog = args.input.freshDialog
-      ? await args.store.read(dialogKey, { remote: false })
-      : await args.store.read(dialogKey);
+    existingDialog = await args.store.read(dialogKey);
   }
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);
@@ -709,7 +701,7 @@ export async function loadCliDialogLastContextUsage(args: {
   dialogId: string;
 }): Promise<{ inputTokens?: number } | null> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
-  const record = await args.store.read(dialogKey, { remote: false });
+  const record = await args.store.read(dialogKey);
   if (!record || typeof record !== "object") return null;
   const lastInputTokens = (record as any).lastInputTokens;
   if (

@@ -245,7 +245,6 @@ export {
 export {
   executeLocalToolWithPolicy,
   resolveLocalToolPolicy,
-  runExecShellGates,
 } from "./localToolPolicy";
 export {
   buildToolParametersIndex,

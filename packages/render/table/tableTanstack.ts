@@ -99,38 +99,15 @@ const tableColumnSort: SortFn<TableFeatures, TableRow> = (
 ): number => compareTableValues(rowA.getValue(columnId), rowB.getValue(columnId));
 
 /**
- * 纯匹配函数，复刻原 tableView.filterRowsByTableFilters 的语义并扩展多选：
- * - filterValue 为 string[] 或 Set 时：若为空集合则放行；若包含行值则保留（多选支持）
- * - filterValue 为单个 string 时：trim 后为空 → 放行；否则精确匹配
- * - 行值若为数组（如 multi_select）：只要与 filterValue 存在交集即放行
+ * 纯匹配函数，复刻原 tableView.filterRowsByTableFilters 的语义：
+ * 过滤值 trim 后为空 → 放行；否则行值与过滤值 trim 后精确相等才保留。
  */
 export const matchesTableFilter = (
   value: unknown,
   filterValue: unknown
 ): boolean => {
-  if (filterValue === null || filterValue === undefined) return true;
-
-  // 1. 多选集合分支（Array / Set）
-  if (Array.isArray(filterValue) || filterValue instanceof Set) {
-    const list = Array.from(filterValue)
-      .map((item) => String(item ?? "").trim())
-      .filter(Boolean);
-    if (list.length === 0) return true;
-    const filterSet = new Set(list);
-
-    if (Array.isArray(value)) {
-      return value.some((v) => filterSet.has(String(v ?? "").trim()));
-    }
-    return filterSet.has(String(value ?? "").trim());
-  }
-
-  // 2. 单值过滤分支
   const expected = String(filterValue ?? "").trim();
   if (!expected) return true;
-
-  if (Array.isArray(value)) {
-    return value.some((v) => String(v ?? "").trim() === expected);
-  }
   return String(value ?? "").trim() === expected;
 };
 
@@ -193,45 +170,19 @@ export const sortingToSortRule = (
     : null;
 };
 
-/**
- * 由快捷筛选或通用多列筛选值派生 columnFilters 状态。
- * 兼容两种调用方式：
- * 1. 传统四参：(statusFilterColumn, statusValue, ownerFilterColumn, ownerValue)
- * 2. 扩展五参：追加 additionalFilters（键为 columnId，值为单字符串或多选数组）
- */
+/** 由两个快捷筛选值派生 columnFilters 状态（与旧 filterRowsByTableFilters 的 AND 语义一致）。 */
 export const buildColumnFilters = (
   statusFilterColumn: Pick<TableColumn, "id"> | null,
-  statusValue: string | string[],
+  statusValue: string,
   ownerFilterColumn: Pick<TableColumn, "id"> | null,
-  ownerValue: string | string[],
-  additionalFilters?: Record<string, string | string[]>
+  ownerValue: string
 ): ColumnFiltersState => {
   const filters: ColumnFiltersState = [];
-
-  const addFilter = (colId: string | undefined, val: string | string[] | undefined) => {
-    if (!colId || val === undefined || val === null) return;
-    if (Array.isArray(val)) {
-      const cleaned = val.map((item) => String(item ?? "").trim()).filter(Boolean);
-      if (cleaned.length > 0) {
-        filters.push({ id: colId, value: cleaned });
-      }
-    } else {
-      const str = String(val).trim();
-      if (str) {
-        filters.push({ id: colId, value: str });
-      }
-    }
-  };
-
-  addFilter(statusFilterColumn?.id, statusValue);
-  addFilter(ownerFilterColumn?.id, ownerValue);
-
-  if (additionalFilters) {
-    for (const [columnId, val] of Object.entries(additionalFilters)) {
-      if (columnId === statusFilterColumn?.id || columnId === ownerFilterColumn?.id) continue;
-      addFilter(columnId, val);
-    }
+  if (statusFilterColumn && statusValue.trim()) {
+    filters.push({ id: statusFilterColumn.id, value: statusValue });
   }
-
+  if (ownerFilterColumn && ownerValue.trim()) {
+    filters.push({ id: ownerFilterColumn.id, value: ownerValue });
+  }
   return filters;
 };
