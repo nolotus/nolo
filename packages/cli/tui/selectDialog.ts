@@ -98,6 +98,13 @@ export function renderSelectDialog<T extends SelectDialogItem>(args: {
    * ANSI-free.
    */
   titleLines?: string[];
+  /**
+   * Extra line(s) rendered under the list inside the same frame (e.g. the
+   * /switch catalog's "some favorites unavailable" notice). Counted like any
+   * other row by the frame painter, so the anchored frame just grows by one
+   * row. Omitted/empty → output identical to before this option existed.
+   */
+  footerLines?: string[];
   maxVisible?: number;
 }) {
   const total = args.items.length;
@@ -135,6 +142,10 @@ export function renderSelectDialog<T extends SelectDialogItem>(args: {
 
   if (window.end < total) {
     lines.push("", renderOverflowBelow(total - window.end));
+  }
+
+  if (args.footerLines && args.footerLines.length > 0) {
+    lines.push(...args.footerLines);
   }
 
   return lines.join("\n");
@@ -501,6 +512,8 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
   title?: string;
   /** See renderSelectDialog.titleLines. */
   titleLines?: string[];
+  /** See renderSelectDialog.footerLines. */
+  footerLines?: string[];
   maxVisible?: number;
   input?: NodeJS.ReadStream;
   output?: NodeJS.WritableStream;
@@ -562,6 +575,7 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
         selectedIndex,
         title: args.title,
         ...(args.titleLines ? { titleLines: args.titleLines } : {}),
+        ...(args.footerLines ? { footerLines: args.footerLines } : {}),
         maxVisible: args.maxVisible,
       }),
     bottomAnchored,

@@ -158,6 +158,14 @@ const STRINGS = {
     en: "Loading agents…",
     zh: "正在加载 agent 列表…",
   },
+  /**
+   * /switch 目录视图的一行提示：收藏项 hydrate 失败时出现，让「收藏看不到」
+   * 有任何线索；失败数为 0 时不渲染这一行。
+   */
+  agentCatalogUnavailableFavorites: {
+    en: "⚠ {0} favorite(s) unavailable right now",
+    zh: "⚠ {0} 个收藏项暂时不可用",
+  },
   historyPickerTitle: {
     en: "Resume dialog (↑↓ Enter Esc)",
     zh: "恢复对话（↑↓ 移动 · Enter 选择 · Esc 取消）",

@@ -5,7 +5,8 @@ import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import {
   findAgentCatalogEntry,
   formatAgentSourceLabel,
-  loadAgentCatalog,
+  formatUnavailableFavoritesNotice,
+  loadAgentCatalogWithNotices,
   renderAgentCatalogList,
   type AgentCatalogEntry,
 } from "./agentCatalog";
@@ -69,9 +70,9 @@ export async function runAgentPicker(args: {
     output.write(t("agentPickerLoading"));
   }
 
-  let entries: Awaited<ReturnType<typeof loadAgentCatalog>>;
+  let loadResult: Awaited<ReturnType<typeof loadAgentCatalogWithNotices>>;
   try {
-    entries = await loadAgentCatalog({
+    loadResult = await loadAgentCatalogWithNotices({
       env: args.env,
       currentKey: args.currentKey,
       fetchImpl: args.fetchImpl,
@@ -84,11 +85,19 @@ export async function runAgentPicker(args: {
       output.write("\r\x1b[2K");
     }
   }
+  const entries = loadResult.entries;
+  // 收藏项 hydrate 失败时的单行提示；成功路径下为 null（零额外输出）。
+  const unavailableNotice = formatUnavailableFavoritesNotice(
+    loadResult.unavailableFavoriteCount
+  );
+  const footerLines = unavailableNotice ? [unavailableNotice] : undefined;
 
   if (!interactive) {
     return {
       kind: "list" as const,
-      output: renderAgentCatalogList(entries, args.currentKey),
+      output: renderAgentCatalogList(entries, args.currentKey, {
+        unavailableFavoriteCount: loadResult.unavailableFavoriteCount,
+      }),
       entries,
     };
   }
@@ -102,6 +111,7 @@ export async function runAgentPicker(args: {
     items,
     initialIndex,
     title: undefined,
+    ...(footerLines ? { footerLines } : {}),
     input,
     output,
     readKey: args.readKey,

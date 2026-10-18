@@ -161,13 +161,48 @@ type AgentCatalogCacheEntry = {
   cacheKey: string;
   at: number;
   entries: AgentCatalogEntry[];
+  /** 这批 entries 对应的 orphan 失败数（随缓存一起命中，口径与数据同源）。 */
+  unavailableFavoriteCount: number;
 };
 
 /** 原始目录数据（网络拉取结果，不含 currentKey 排序）。 */
 type RawCatalogData = {
   privateAgents: AgentCatalogEntry[];
   favoritedAtByKey: Record<string, number>;
+  /** 已收藏但 hydrate 失败的条数：>0 时目录视图给一行提示，0 时零额外输出。 */
+  unavailableFavoriteCount: number;
 };
+
+/** 目录加载结果：条目 + 可见性诊断（提示行用，渲染层不需要猜）。 */
+export type AgentCatalogLoadResult = {
+  entries: AgentCatalogEntry[];
+  /**
+   * orphan 收藏项 hydrate 失败数（读取抛错/超时）。
+   *
+   * 口径说明：`readDbRecord` 把 HTTP 状态码编进错误字符串，tombstone merge 又
+   * 把多服务器 failures 拼进同一条消息，取不到结构化状态码，因此这里只统计
+   * 失败**总数**，不区分 404 与其他错误（不猜类型）。deleted/tombstone 记录
+   * 也走抛错路径，同样计入。因 deadline 预算耗尽而主动跳过的 orphan 不计入：
+   * 它们由 SWR 后台刷新补齐，不是失败。
+   */
+  unavailableFavoriteCount: number;
+};
+
+/**
+ * 提示行文案：仅当失败数 > 0 时返回一行，否则返回 null（成功路径零额外输出）。
+ * 目录列表（非交互）与 picker 底部提示共用同一文案。
+ */
+export function formatUnavailableFavoritesNotice(
+  unavailableFavoriteCount: number
+): string | null {
+  if (!Number.isFinite(unavailableFavoriteCount) || unavailableFavoriteCount <= 0) {
+    return null;
+  }
+  return t(
+    "agentCatalogUnavailableFavorites",
+    String(Math.floor(unavailableFavoriteCount)),
+  );
+}
 
 let agentCatalogCache: AgentCatalogCacheEntry | null = null;
 let agentCatalogRefreshInFlight: Promise<void> | null = null;
@@ -348,8 +383,17 @@ export function invalidateAgentCatalogCache() {
  * - 无缓存 → 前台拉取（仅会话首次），复用 in-flight Promise 避免重复请求；
  * - 有缓存 → 立即返回旧数据；超过新鲜窗口则在后台刷新，
  *   新建的 agent 最迟下次打开出现（不会永远看不到）。
+ *
+ * 返回纯条目数组（历史契约，调用方大多只需要列表）。需要「收藏项取不回来」的
+ * 可见性诊断时用 loadAgentCatalogWithNotices。
  */
-export async function loadAgentCatalog(args: {
+export async function loadAgentCatalog(
+  args: LoadAgentCatalogArgs
+): Promise<AgentCatalogEntry[]> {
+  return (await loadAgentCatalogWithNotices(args)).entries;
+}
+
+export type LoadAgentCatalogArgs = {
   env?: EnvLike;
   currentKey: string;
   fetchImpl?: CliFetchImpl;
@@ -360,7 +404,12 @@ export async function loadAgentCatalog(args: {
   deadlineKind?: "foreground" | "background";
   /** Revalidate before opening a picker instead of serving the SWR snapshot. */
   fresh?: boolean;
-}): Promise<AgentCatalogEntry[]> {
+};
+
+/** 同 loadAgentCatalog，额外带出 orphan 失败数（目录视图提示行用）。 */
+export async function loadAgentCatalogWithNotices(
+  args: LoadAgentCatalogArgs
+): Promise<AgentCatalogLoadResult> {
   const env = args.env ?? process.env;
   const authToken = resolveAuthToken([], env);
   const userId = authToken ? parseUserIdFromAuthToken(authToken) : null;
@@ -372,7 +421,10 @@ export async function loadAgentCatalog(args: {
     if (Date.now() - cached.at >= AGENT_CATALOG_FRESH_MS) {
       refreshAgentCatalogInBackground(args, env, cacheKey);
     }
-    return cached.entries;
+    return {
+      entries: cached.entries,
+      unavailableFavoriteCount: cached.unavailableFavoriteCount,
+    };
   }
 
   // 复用已有的原始数据请求（prefetch 触发后用户很快 /switch 时命中），
@@ -404,7 +456,12 @@ export async function loadAgentCatalog(args: {
   // 先落缓存让 picker 立即出列表：订阅额度探测（一次 /api/agents/quota/refresh
   // 往返，正常 ~300ms、慢时吃满 2s 预算）不再占用 /switch 冷加载关键路径。
   if (generation === agentCatalogGeneration) {
-    agentCatalogCache = { cacheKey, at: Date.now(), entries };
+    agentCatalogCache = {
+      cacheKey,
+      at: Date.now(),
+      entries,
+      unavailableFavoriteCount: rawData.unavailableFavoriteCount,
+    };
   }
   // 额度只是行尾 [quota] 的展示增强——fire-and-forget：探测在后台跑，
   // mergeCatalogQuotas resolve 后就地写 entry.quota（mutate-in-place），
@@ -414,7 +471,7 @@ export async function loadAgentCatalog(args: {
   // 无需额外动作，也绝不能重建/重设 agentCatalogCache.at，否则配额探测
   // 会白送缓存新鲜窗口、延长缓存寿命。探测本身失败静默。
   void mergeCatalogQuotas(entries, { env, fetchImpl: args.fetchImpl }).catch(() => {});
-  return entries;
+  return { entries, unavailableFavoriteCount: rawData.unavailableFavoriteCount };
 }
 
 /** 按需探测额度并就地合并进目录条目（平台条目永远没有 quota，不探测）。 */
@@ -462,7 +519,12 @@ function refreshAgentCatalogInBackground(
       );
       await mergeCatalogQuotas(entries, { env, fetchImpl: args.fetchImpl });
       if (generation === agentCatalogGeneration) {
-        agentCatalogCache = { cacheKey, at: Date.now(), entries };
+        agentCatalogCache = {
+          cacheKey,
+          at: Date.now(),
+          entries,
+          unavailableFavoriteCount: rawData.unavailableFavoriteCount,
+        };
       }
     })
     .catch(() => {
@@ -623,7 +685,9 @@ async function fetchRawCatalogData(
   // 的 agent（典型是收藏的别人/公开 agent，或跨服务器、刚收藏未同步的记录）从各服务器
   // 按 dbKey 重新读回并并入目录，对齐 web 端 useAgentPickerCandidates 与 CLI
   // `nolo agent list --safe`（agentListCommands.ts）的兜底行为，避免 /switch 漏项。
-  // 单个 orphan 读取失败静默跳过，不阻塞目录加载。
+  // 单个 orphan 读取失败不阻塞目录加载，但会**计数**并在目录视图给一行聚合提示
+  // （formatUnavailableFavoritesNotice）：用户至少能看到「有收藏项取不回来」，
+  // 而不是让收藏凭空消失。失败只在计数器上多一次自增，成功路径零额外开销。
   // 三键去重：与 agentListCommands.ts 一致，privateKey/publicKey/id 任一命中即视为已存在，
   // 防止「自有 public agent 以 publicKey 形态被收藏」时同一 agent 重复入目。
   const existingKeys = new Set<string>();
@@ -632,6 +696,7 @@ async function fetchRawCatalogData(
     existingKeys.add(agent.publicKey);
     existingKeys.add(agent.id);
   }
+  let unavailableFavoriteCount = 0;
 
   // orphan 读取共享同一个 deadline 预算：目录主链路（agents + favorites）用掉的
   // 时间从预算里扣，剩余不足时跳过剩余 orphan——错过项由 SWR 后台刷新补齐，
@@ -681,16 +746,25 @@ async function fetchRawCatalogData(
           if (orphanTimer) clearTimeout(orphanTimer);
         }
       } catch {
-        // orphan favorite key, skip it.
+        // orphan 读取失败（404/网络/授权/orphan 超时/tombstone 记录）：不阻塞目录，
+        // 只做一次计数自增，聚合后在目录视图给一行提示。
+        unavailableFavoriteCount += 1;
       }
     }),
   );
 
 
-  return { privateAgents, favoritedAtByKey };
+  return { privateAgents, favoritedAtByKey, unavailableFavoriteCount };
 }
 
-export function renderAgentCatalogList(entries: AgentCatalogEntry[], currentKey: string) {
+export function renderAgentCatalogList(
+  entries: AgentCatalogEntry[],
+  currentKey: string,
+  options?: {
+    /** orphan 收藏项失败数：>0 时多渲染一行提示，0/缺省时输出与以前逐字节一致。 */
+    unavailableFavoriteCount?: number;
+  },
+) {
   const lines = ["Agents:"];
   entries.forEach((entry, index) => {
     const current = entry.key === currentKey ? " (current)" : "";
@@ -705,6 +779,10 @@ export function renderAgentCatalogList(entries: AgentCatalogEntry[], currentKey:
     );
   });
   lines.push("");
+  const notice = formatUnavailableFavoritesNotice(
+    options?.unavailableFavoriteCount ?? 0,
+  );
+  if (notice) lines.push(notice);
   lines.push("Tip: run /switch in an interactive terminal to pick with ↑↓.");
   return lines.join("\n");
 }
