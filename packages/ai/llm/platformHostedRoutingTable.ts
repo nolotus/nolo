@@ -79,8 +79,11 @@ export const PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL = "gemini-3.8-flash";
 export const PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL = "gemini-3.7-flash";
 export const PLATFORM_HOSTED_GEMINI_25_PRO_MODEL = "gemini-2.5-pro";
 export const PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL = "gemini-4-argon";
-export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
-export const PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL = "gemini-3-pro-image-preview";
+export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image";
+// Nano Banana 2.1（2026-10-06 GA，官方新代码默认档）：id 无 preview 后缀。
+export const PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL =
+  "gemini-nano-banana-2.1";
+export const PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL = "gemini-3-pro-image";
 export const PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
 export const PLATFORM_HOSTED_OPENAI_IMAGE_MODEL = "gpt-image-2";
 /**
@@ -235,10 +238,14 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     agentRunHosted: true,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
+  // 同一模型的旧公开 id（点号）：RunInfra 只认连字符 id，必须显式 remap，
+  // 否则会把 "glm-5.3-flash" 直传给上游并拿到
+  // `Model 'glm-5.3-flash' is not available as a verified deployment`（404）。
   "glm-5.3-flash": {
     endpoint: "https://api.runinfra.ai/v1/chat/completions",
     usageProvider: "runinfra",
     keyName: "runinfra",
+    upstreamModelId: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
     wire: "chat.completions",
     agentRunHosted: true,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
@@ -283,6 +290,15 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
   },
   // Gemini 4 Argon -> Google official OpenAI-compatible endpoint
   [PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL]: {
+    endpoint:
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    usageProvider: "google",
+    keyName: "google",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  // Gemini Nano Banana 2.1（图片线唯一在售档）-> Google official OpenAI-compatible endpoint
+  [PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL]: {
     endpoint:
       "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     usageProvider: "google",
@@ -476,7 +492,9 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: true,
   },
-  // OpenAI Image -> OpenAI Responses API
+  // OpenAI Image（legacy 入口）：gpt-image-2 已弃用，真实出图只走 images API 或
+  // Responses 的 image_generation 工具（工具内注入 model）。这条保留只为存量
+  // agent 记录仍能解析上游/凭据，不再作为新预设的主模型。
   [PLATFORM_HOSTED_OPENAI_IMAGE_MODEL]: {
     endpoint: "https://api.openai.com/v1/responses",
     usageProvider: "openai",

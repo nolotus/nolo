@@ -2,7 +2,7 @@
 
 export const uiAskChoiceFunctionSchema = {
     name: "ask_user",
-    description: "让用户在 2～5 个互斥选项之间做选择的通用“出选项”工具（需求模糊、分支决策、问卷等）。本工具用于纯提问、必须停下等待回答的场景；若需要同时展示结构化对比/指标并让用户在同一块里选择，走 show_interaction。调用前须先在普通回复文本里解释背景与权衡（先解释，再调用）。多问题传 questions，单问题传 question+choices。界面自动附带“其他”自由输入行，用户输入的文字会随答案回传；不要自建“其他/自己写”之类的选项——点击普通选项只回传该选项文案，用户无处填写。",
+    description: "让用户在一组选项之间做选择（单选或多选）的通用“出选项”工具（需求模糊、分支决策、问卷等）。本工具用于纯提问、等待用户回答的场景（blocking:false 时不暂停等待）；若需要同时展示结构化对比/指标并让用户在同一块里选择，走 show_interaction。调用前须先在普通回复文本里解释背景与权衡（先解释，再调用）。多问题传 questions，单问题传 question+choices。界面默认提供“其他”自由输入行（可用 allowOther:false 关闭），用户输入的文字会随答案回传；不要自建“其他/自己写”之类的选项——点击普通选项只回传该选项文案，用户无处填写。",
     parameters: {
         type: "object",
         properties: {
@@ -30,11 +30,6 @@ export const uiAskChoiceFunctionSchema = {
                             type: "string",
                             description:
                                 "简短补充（建议一句话），长解释写进调用前的回复文本。"
-                        },
-                        recommended: {
-                            type: "boolean",
-                            description:
-                                "标记为推荐项（放首位并置 true，无推荐则省略）。"
                         },
                         userMessage: {
                             type: "string",
@@ -77,10 +72,6 @@ export const uiAskChoiceFunctionSchema = {
                                         type: "string",
                                         description: "简短补充（建议一句话），长解释写进调用前的回复文本。"
                                     },
-                                    recommended: {
-                                        type: "boolean",
-                                        description: "推荐项标记（置 true 标推荐，无则省略）。"
-                                    },
                                     userMessage: { type: "string" }
                                 },
                                 required: ["id", "label"]
@@ -110,6 +101,120 @@ export const uiAskChoiceFunctionSchema = {
         required: []
     }
 };
+/**
+ * ask_user 入参的语义校验：JSON schema 表达不了的约束（元素形状、空题干、
+ * 重复 id、纯 Other 题的合法性）在这里兜住。
+ *
+ * **两个入口都必须调用**：除了 uiAskChoiceFunc，CLI 的本地执行器会自行解析
+ * arguments、不经过共享 executor，漏接就留了一条绕过校验的路径。
+ *
+ * 返回 null 表示通过；否则返回可展示给模型的原因。缺省 id 不在这里补——
+ * askChoiceState 的归一化负责兼容历史 payload，这里只拒绝显式给出的非法值。
+ */
+/**
+ * 选项列表的形状校验，多题与 legacy 单题共用——两条入口漏掉任何一条，
+ * 都能把空文案选项喂进消费端。显式给出的 id 必须是字符串：消费端会对 id
+ * 做 String()，放行数字会让「7」和「7」这种重复在归一化后才出现。
+ */
+function validateChoiceList(
+    choices: unknown[],
+    scopeLabel: string,
+): string | null {
+    const seenChoiceIds = new Set<string>();
+    for (let index = 0; index < choices.length; index += 1) {
+        const entry = choices[index];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            return `${scopeLabel}.choices[${index}] 必须是对象。`;
+        }
+        const choice = entry as Record<string, unknown>;
+        if (typeof choice.label !== "string" || !choice.label.trim()) {
+            return `${scopeLabel}.choices[${index}].label 必须是非空字符串。`;
+        }
+        if (choice.id !== undefined && typeof choice.id !== "string") {
+            return `${scopeLabel}.choices[${index}].id 必须是字符串。`;
+        }
+        const choiceId = typeof choice.id === "string" ? choice.id.trim() : "";
+        if (choiceId && seenChoiceIds.has(choiceId)) {
+            return `${scopeLabel} 内的选项 id "${choiceId}" 重复。`;
+        }
+        if (choiceId) seenChoiceIds.add(choiceId);
+    }
+    return null;
+}
+
+export function validateAskChoiceInput(raw: unknown): string | null {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return "ask_user 需要一个对象参数。";
+    }
+    const args = raw as Record<string, unknown>;
+
+    if (args.blocking !== undefined && typeof args.blocking !== "boolean") {
+        return "ask_user 的 blocking 必须是布尔值。";
+    }
+
+    const rawQuestions = args.questions;
+    if (rawQuestions !== undefined && !Array.isArray(rawQuestions)) {
+        return "ask_user 的 questions 必须是数组。";
+    }
+    const questions = rawQuestions as unknown[] | undefined;
+
+    // 空数组等同于没给（现有 executor 只在 length > 0 时走多题），继续按
+    // legacy 单题校验，避免把「questions: [] + 顶层 question」判死。
+    if (questions && questions.length > 0) {
+        const seenQuestionIds = new Set<string>();
+        for (let index = 0; index < questions.length; index += 1) {
+            const entry = questions[index];
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+                return `questions[${index}] 必须是对象。`;
+            }
+            const question = entry as Record<string, unknown>;
+            if (question.id !== undefined && typeof question.id !== "string") {
+                return `questions[${index}].id 必须是字符串。`;
+            }
+            const questionId =
+                typeof question.id === "string" ? question.id.trim() : "";
+            if (questionId && seenQuestionIds.has(questionId)) {
+                return `问题 id "${questionId}" 重复。`;
+            }
+            if (questionId) seenQuestionIds.add(questionId);
+            if (
+                typeof question.question !== "string" ||
+                !question.question.trim()
+            ) {
+                return `questions[${index}].question 必须是非空字符串。`;
+            }
+            for (const flag of ["multiSelect", "allowOther", "required"] as const) {
+                if (
+                    question[flag] !== undefined &&
+                    typeof question[flag] !== "boolean"
+                ) {
+                    return `questions[${index}].${flag} 必须是布尔值。`;
+                }
+            }
+            const choices = question.choices;
+            if (!Array.isArray(choices)) {
+                return `questions[${index}].choices 必须是数组。`;
+            }
+            const choiceError = validateChoiceList(choices, `questions[${index}]`);
+            if (choiceError) return choiceError;
+            // 空选项只在允许自由输入时才是可作答的题面；否则用户无处输入。
+            if (choices.length === 0 && question.allowOther === false) {
+                return `questions[${index}] 没有任何选项且 allowOther 为 false，用户无法作答。`;
+            }
+        }
+        return null;
+    }
+
+    // Legacy 单题：顶层 question + choices（生产代码仍直接调用这一形态）。
+    if (typeof args.question !== "string" || !args.question.trim()) {
+        return "ask_user 需要 question（非空字符串）与 choices。";
+    }
+    if (!Array.isArray(args.choices) || args.choices.length === 0) {
+        return "ask_user 需要 question（非空字符串）与 choices。";
+    }
+    return validateChoiceList(args.choices, "ask_user");
+}
+
 export async function uiAskChoiceFunc(
     args: any,
     _thunkApi: any
@@ -123,6 +228,9 @@ export async function uiAskChoiceFunc(
     };
     displayData: string;
 }> {
+    const invalid = validateAskChoiceInput(args);
+    if (invalid) throw new Error(invalid);
+
     const blocking = args?.blocking !== false;
 
     // New multi-question format
@@ -171,7 +279,10 @@ export type UiAskChoiceOption = {
     id?: string;
     label: string;
     detail?: string;
-    /** 推荐标记：有明确推荐时置 true，并建议把该选项放在第一位。 */
+    /**
+     * 仅用于读取历史 payload：不再向模型声明。ask_user 面板不渲染推荐标记，
+     * normalizeQuestion 也会丢弃它；推荐请用「选项顺序 + detail」表达。
+     */
     recommended?: boolean;
     userMessage?: string;
 };

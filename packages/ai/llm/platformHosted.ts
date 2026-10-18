@@ -35,6 +35,7 @@ import {
   PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_25_PRO_MODEL,
   PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL,
+  PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL,
@@ -353,6 +354,7 @@ export const isPlatformHostedOpenAIImageModel = (
   asTrimmedLowercaseString(model) === PLATFORM_HOSTED_OPENAI_IMAGE_MODEL;
 
 export const PLATFORM_HOSTED_GEMINI_IMAGE_MODELS = [
+  PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
@@ -1031,7 +1033,7 @@ export const platformHostedModels: Model[] = [
       {
         key: "speed",
         label: "速度优先",
-        imageModel: "gemini-3.1-flash-image-preview",
+        imageModel: "gemini-nano-banana-2.1",
         waitTimeSeconds: {
           min: 10,
           max: 25,
@@ -1040,7 +1042,7 @@ export const platformHostedModels: Model[] = [
       {
         key: "quality",
         label: "质量优先",
-        imageModel: "gemini-3-pro-image-preview",
+        imageModel: "gemini-3-pro-image",
         waitTimeSeconds: {
           min: 25,
           max: 60,
@@ -1048,16 +1050,17 @@ export const platformHostedModels: Model[] = [
       },
     ],
   }),
+  // Nano Banana 2.1（gemini-nano-banana-2.1）：2026-10-06 GA。
   createPlatformHostedGeminiImageModel({
-    name: PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
-    displayName: "Nano Banana 2 (Gemini 3.1 Flash Image Preview)",
-    inputPrice: 4,
-    outputPrice: 24,
-    imageTokenPricePerMillion: 480,
+    name: PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL,
+    displayName: "Nano Banana 2.1 (Gemini 2.1 Image)",
+    inputPrice: 12,
+    outputPrice: 60,
+    imageTokenPricePerMillion: 240,
     imageOutputTokenEstimateBySize: {
       "1K": 1120,
       "2K": 1680,
-      "4K": 2520,
+      "4K": 3780,
     },
     maxOutputTokens: 65536,
     contextWindow: 65536,
@@ -1069,7 +1072,7 @@ export const platformHostedModels: Model[] = [
       {
         key: "speed",
         label: "速度优先",
-        imageModel: "gemini-3.1-flash-image-preview",
+        imageModel: PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL,
         waitTimeSeconds: {
           min: 10,
           max: 25,
@@ -1078,7 +1081,45 @@ export const platformHostedModels: Model[] = [
       {
         key: "quality",
         label: "质量优先",
-        imageModel: "gemini-3-pro-image-preview",
+        imageModel: "gemini-3-pro-image",
+        waitTimeSeconds: {
+          min: 25,
+          max: 60,
+        },
+      },
+    ],
+  }),
+  createPlatformHostedGeminiImageModel({
+    name: PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
+    displayName: "Nano Banana 2 (Gemini 3.1 Flash Image Preview)",
+    inputPrice: 12,
+    outputPrice: 60,
+    imageTokenPricePerMillion: 240,
+    imageOutputTokenEstimateBySize: {
+      "1K": 1120,
+      "2K": 1680,
+      "4K": 3780,
+    },
+    maxOutputTokens: 65536,
+    contextWindow: 65536,
+    imageGenerationWaitTimeSeconds: {
+      min: 10,
+      max: 25,
+    },
+    imageGenerationProfiles: [
+      {
+        key: "speed",
+        label: "速度优先",
+        imageModel: "gemini-nano-banana-2.1",
+        waitTimeSeconds: {
+          min: 10,
+          max: 25,
+        },
+      },
+      {
+        key: "quality",
+        label: "质量优先",
+        imageModel: "gemini-3-pro-image",
         waitTimeSeconds: {
           min: 25,
           max: 60,
@@ -1091,7 +1132,7 @@ export const platformHostedModels: Model[] = [
     displayName: "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)",
     inputPrice: 2,
     outputPrice: 12,
-    pricePerImage: 0.272,
+    pricePerImage: 0.2688,
     maxOutputTokens: 65536,
     contextWindow: 65536,
     imageGenerationWaitTimeSeconds: {
@@ -1111,7 +1152,7 @@ export const platformHostedModels: Model[] = [
       {
         key: "quality",
         label: "质量优先",
-        imageModel: "gemini-3-pro-image-preview",
+        imageModel: "gemini-3-pro-image",
         waitTimeSeconds: {
           min: 25,
           max: 60,

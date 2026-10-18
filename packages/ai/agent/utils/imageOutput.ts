@@ -4,8 +4,8 @@ import { toTrimmedString } from "core/toTrimmedString";
 import { getPublicImageAgentMode } from "./publicImageAgentMode";
 
 const LEGACY_IMAGE_MODELS = new Set([
-  "google/gemini-3-pro-image-preview",
-  "google/gemini-3.1-flash-image-preview",
+  "google/gemini-3-pro-image",
+  "google/gemini-nano-banana-2.1",
 ]);
 
 export function supportsImageGeneration(agent: Agent): boolean {

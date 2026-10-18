@@ -40,6 +40,7 @@ import {
 import type { LocalAgentToolEvent } from "./localLoopContract";
 
 import type {
+  AgentRuntimeDialogHistorySource,
   AgentRuntimeHostAdapter,
   AgentRuntimeProvider,
   AgentRuntimeToolResult,
@@ -64,6 +65,7 @@ import { createTurnUsageLedger } from "./turnUsageLedger";
 export { addOutOfBandUsage } from "./turnUsageLedger";
 import { buildIdentityBlock } from "./identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
+import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
@@ -134,6 +136,7 @@ export type LocalAgentTurnInput = {
   category?: string;
   inheritedFromDialogKey?: string;
   parentDialogId?: string;
+  freshDialog?: boolean;
   runtimeContext?: Record<string, any> | null;
   /** Dispatched leaf runs receive parent-facing final-response guidance. */
   runKind?: "interactive" | "subtask";
@@ -244,6 +247,12 @@ export type LocalAgentTurnResult = AgentRuntimeResult & {
   /** 后台 LLM 标题 patch（fire-and-forget）；resolve 携带最终标题（无/失败为 null）。 */
   titlePatchPromise?: Promise<string | null>;
   turnMessages?: AgentRuntimeChatMessage[];
+  /**
+   * 本轮续聊历史来源（"local" | "remote" | "none"）。仅续聊轮存在；"none"
+   * 表示本地为空且远端回退失败/无内容——本轮没有拿到历史上下文。留给上层
+   * （TUI）渲染「历史未加载」提示，避免静默当成全新对话。
+   */
+  dialogHistorySource?: AgentRuntimeDialogHistorySource;
   /** Full per-call accounting evidence; context UI must continue using usage. */
   usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"];
   accountingUsage?: Record<string, unknown>;
@@ -680,12 +689,33 @@ async function persistFailedLocalTurn(args: {
       ...(args.input.parentDialogId
         ? { parentDialogId: args.input.parentDialogId }
         : {}),
+      ...(typeof args.input.freshDialog === "boolean"
+        ? { freshDialog: args.input.freshDialog }
+        : {}),
     });
     return saved?.dialogId;
   } catch {
     return args.input.continueDialogId;
   }
 }
+/**
+ * Load continue-dialog history, preferring the source-aware host method when the
+ * adapter implements it (CLI). Hosts without it (desktop/web) keep the plain
+ * array contract and leave the source unknown.
+ */
+async function loadAdapterDialogHistory(
+  adapter: AgentRuntimeHostAdapter,
+  dialogId: string,
+): Promise<{
+  messages: AgentRuntimeChatMessage[];
+  source?: AgentRuntimeDialogHistorySource;
+}> {
+  if (adapter.loadDialogHistoryWithSource) {
+    return await adapter.loadDialogHistoryWithSource(dialogId);
+  }
+  return { messages: await adapter.loadDialogHistory(dialogId) };
+}
+
 export async function runLocalAgentTurn(
   input: LocalAgentTurnInput
 ): Promise<LocalAgentTurnResult> {
@@ -813,10 +843,17 @@ export async function runLocalAgentTurn(
       : await sanitizeInbound(input.persistedInput);
 
   let history: AgentRuntimeChatMessage[] = [];
+  /** Where the continued dialog's history came from ("none" = not loaded). */
+  let dialogHistorySource: AgentRuntimeDialogHistorySource | undefined;
   try {
-    history = input.continueDialogId
-      ? await input.adapter.loadDialogHistory(input.continueDialogId)
-      : [];
+    if (input.continueDialogId) {
+      const loaded = await loadAdapterDialogHistory(
+        input.adapter,
+        input.continueDialogId,
+      );
+      history = loaded.messages;
+      dialogHistorySource = loaded.source;
+    }
   } catch (error) {
     // History load failed mid-continue: still park the user's message on the
     // existing dialog so the next "继续" keeps the same pointer.
@@ -832,6 +869,24 @@ export async function runLocalAgentTurn(
     throw error;
   }
   loopTiming.mark("loadDialogHistory", 0);
+  if (input.continueDialogId && history.length === 0 && dialogHistorySource === "none") {
+    // Explicit "history not loaded" signal instead of silently treating a
+    // resumed dialog as brand-new: the remote fallback failed (network /
+    // unauthenticated / 404), so this turn runs without prior context.
+    console.warn(
+      `[localLoop] dialog history unavailable for ${input.continueDialogId} ` +
+        "(source: none); continuing without prior context.",
+    );
+  } else if (input.continueDialogId && dialogHistorySource === "partial") {
+    // Restored history that must not pass for a complete resume (damaged /
+    // truncated records, or a fallback that could not run). Warning here keeps
+    // the degradation visible instead of silently losing earlier context.
+    console.warn(
+      `[localLoop] dialog history incomplete for ${input.continueDialogId} ` +
+        `(source: partial); only ${history.length} message(s) available, ` +
+        "earlier context may be missing.",
+    );
+  }
   // 轮内压缩的 canonical 坐标底稿：store 全量历史（未投影）。
   // history 随后会被压缩投影/兜底裁剪整体替换（rebind，非原地改），
   // 该引用保持全量原始顺序不变，锚点坐标与 store 持久化历史对齐。
@@ -900,6 +955,9 @@ export async function runLocalAgentTurn(
     // 删除安全红线：系统层最高优先级约束，位于所有块之前（含身份信息块），
     // owner 要求常驻「根本提示词」的最顶部（2026-09-26 批量误删事故）。
     { content: DELETE_SAFETY_RED_LINE, cacheScope: "session" as const },
+    // 并行是默认：系统层固定块，紧随红线（localLoop 无 static 作用域，用 session 占位，
+    // 「最顶」由数组首位保证——与红线同一约定）。
+    { content: PARALLEL_DISPATCH_DEFAULT_RULE, cacheScope: "session" as const },
     { content: identityBlock, cacheScope: "session" as const },
     ...guidanceScopes,
     ...callerScopes,
@@ -1610,6 +1668,7 @@ export async function runLocalAgentTurn(
     ...(input.category ? { category: input.category } : {}),
     ...(input.inheritedFromDialogKey ? { inheritedFromDialogKey: input.inheritedFromDialogKey } : {}),
     ...(input.parentDialogId ? { parentDialogId: input.parentDialogId } : {}),
+    ...(typeof input.freshDialog === "boolean" ? { freshDialog: input.freshDialog } : {}),
   });
   loopTiming.mark("saveTurn", round);
   await loopTiming.flush();
@@ -1625,6 +1684,7 @@ export async function runLocalAgentTurn(
     dialogId: saved.dialogId,
     title: saved.title,
     ...(saved.titlePatchPromise ? { titlePatchPromise: saved.titlePatchPromise } : {}),
+    ...(dialogHistorySource ? { dialogHistorySource } : {}),
     turnMessages,
   };
   } finally {

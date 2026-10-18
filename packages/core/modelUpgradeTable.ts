@@ -65,6 +65,45 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
     reason: "DeepSeek 系列整合为 nolo DeepSeek Flash（deepseek-flash）",
     kind: "upgrade",
   },
+  // Gemini 图片线收敛到 Nano Banana 2.1（2026-10-06 GA）：
+  // 官方已退役全部 -preview id 与 1 代 2.5 Flash Image，3.1 Flash Image / 3 Pro Image
+  // 也不再作为新预设候选。旧 agent 记录统一换代，避免落到无价虚拟模型。
+  {
+    from: { provider: "nolo", model: "gemini-3.1-flash-image-preview" },
+    to: { provider: "nolo", model: "gemini-nano-banana-2.1" },
+    reason: "preview id 已退役，收敛到 Nano Banana 2.1",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "gemini-3-pro-image-preview" },
+    to: { provider: "nolo", model: "gemini-nano-banana-2.1" },
+    reason: "preview id 已退役，收敛到 Nano Banana 2.1",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "gemini-2.5-flash-image" },
+    to: { provider: "nolo", model: "gemini-nano-banana-2.1" },
+    reason: "1 代图片模型退役，收敛到 Nano Banana 2.1",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "gemini-3.1-flash-lite-image" },
+    to: { provider: "nolo", model: "gemini-nano-banana-2.1" },
+    reason: "图片线只保留 Nano Banana 2.1",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "gemini-3.1-flash-image" },
+    to: { provider: "nolo", model: "gemini-nano-banana-2.1" },
+    reason: "图片线只保留 Nano Banana 2.1",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "gemini-3-pro-image" },
+    to: { provider: "nolo", model: "gemini-nano-banana-2.1" },
+    reason: "图片线只保留 Nano Banana 2.1",
+    kind: "upgrade",
+  },
   // 注意：nolo/deepseek-v4-pro 不迁移——V4 Pro 已于 2026-09-14 恢复为平台托管
   // 一等模型，存量 pro 记录留在 pro。
   // Claude 系 2026-09-15 起恢复为真实平台托管（DeepInfra 官方上游，

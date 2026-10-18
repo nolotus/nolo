@@ -448,18 +448,18 @@ export const GEMINI_4_ARGON_DEF = defineAgentSeed({
 export const GPT_IMAGE_2_GENERATOR_DEF = defineAgentSeed({
   id: PUBLIC_GPT_IMAGE_2_GENERATOR_AGENT_ID,
   presetKey: "gpt-image-2-generator",
-  name: "GPT Image 2 图片生成器",
+  name: "GPT Image 2.5 图片生成器",
   provider: "nolo",
-  model: "gpt-6-luna",
-  imageModel: "gpt-image-2",
+  model: "deepseek-flash",
+  imageModel: "gpt-image-2.5-flare",
   isPublic: true,
   hasImageOutput: true,
   imageWorkflow: "generate",
   imageConfig: { enabled: true },
   introduction:
-    "专门负责 GPT Image 2 新图生成：文本生成新图片，也可把上传图片当作参考图来生成新的画面。",
+    "专门负责 GPT Image 2.5 新图生成：文本生成新图片，也可把上传图片当作参考图来生成新的画面。",
   greeting:
-    "你好，我是 GPT Image 2 图片生成器。直接告诉我你想画什么；如果你上传参考图，我会把它们当作灵感参考来生成一张新的图片。",
+    "你好，我是 GPT Image 2.5 图片生成器。直接告诉我你想画什么；如果你上传参考图，我会把它们当作灵感参考来生成一张新的图片。",
   prompt: [
     "定位：",
     "- 你的主任务是文本生成新图片。",
@@ -482,18 +482,18 @@ export const GPT_IMAGE_2_GENERATOR_DEF = defineAgentSeed({
 export const GPT_IMAGE_2_EDITOR_DEF = defineAgentSeed({
   id: PUBLIC_GPT_IMAGE_2_EDITOR_AGENT_ID,
   presetKey: "gpt-image-2-editor",
-  name: "GPT Image 2 图片编辑器",
+  name: "GPT Image 2.5 图片编辑器",
   provider: "nolo",
-  model: "gpt-6-luna",
-  imageModel: "gpt-image-2",
+  model: "deepseek-flash",
+  imageModel: "gpt-image-2.5-sunburst",
   isPublic: true,
   hasImageOutput: true,
   imageWorkflow: "edit",
   imageConfig: { enabled: true },
   introduction:
-    "专门负责 GPT Image 2 单次请求改图：支持单图编辑、多图参考合成，以及带 mask 的精确修改。",
+    "专门负责 GPT Image 2.5 单次请求改图：支持单图编辑、多图参考合成，以及带 mask 的精确修改。",
   greeting:
-    "你好，我是 GPT Image 2 图片编辑器。把要修改的图片、参考图或 mask 发给我，我会按单次请求改图的方式给你一版结果。",
+    "你好，我是 GPT Image 2.5 图片编辑器。把要修改的图片、参考图或 mask 发给我，我会按单次请求改图的方式给你一版结果。",
   prompt: [
     "定位：",
     "- 你的主任务是单次请求改图，不是长对话陪伴式创作。",
@@ -519,18 +519,18 @@ export const GPT_IMAGE_2_EDITOR_DEF = defineAgentSeed({
 export const GPT_IMAGE_2_CONTINUOUS_DEF = defineAgentSeed({
   id: PUBLIC_GPT_IMAGE_2_CONTINUOUS_AGENT_ID,
   presetKey: "gpt-image-2-continuous",
-  name: "GPT Image 2 连续创作助手",
+  name: "GPT Image 2.5 连续创作助手",
   provider: "nolo",
-  model: "gpt-6-luna",
-  imageModel: "gpt-image-2",
+  model: "deepseek-flash",
+  imageModel: "gpt-image-2.5-flare",
   isPublic: true,
   hasImageOutput: true,
   imageWorkflow: "continuous",
   imageConfig: { enabled: true },
   introduction:
-    "专门负责 GPT Image 2 多轮连续创作：适合先出一版，再围绕上一轮图片继续修改、继续扩展和继续迭代。",
+    "专门负责 GPT Image 2.5 多轮连续创作：适合先出一版，再围绕上一轮图片继续修改、继续扩展和继续迭代。",
   greeting:
-    "你好，我是 GPT Image 2 连续创作助手。你可以先让我出一版图，再围绕上一轮继续修改、继续扩展或继续定稿。",
+    "你好，我是 GPT Image 2.5 连续创作助手。你可以先让我出一版图，再围绕上一轮继续修改、继续扩展或继续定稿。",
   prompt: [
     "定位：",
     "- 你的主任务是多轮连续创作。",
@@ -557,15 +557,15 @@ export const GPT_IMAGE_2_CONTINUOUS_DEF = defineAgentSeed({
 export const NANO_BANANA_2_LITE_GENERATOR_DEF = defineAgentSeed({
   id: PUBLIC_NANO_BANANA_2_LITE_AGENT_ID,
   presetKey: "nano-banana-2-lite-generator",
-  name: "Nano Banana 2 Lite 文生图",
+  name: "Nano Banana 2.1 文生图",
   provider: "nolo",
-  model: "gemini-3.1-flash-lite-image",
+  model: "gemini-nano-banana-2.1",
   isPublic: true,
   hasImageOutput: true,
   imageWorkflow: "generate",
   imageConfig: { enabled: true },
   introduction:
-    "Nano Banana 2 Lite 公开文生图助手：Google 最快、最便宜的图片模型，适合快速草稿、批量生图和低成本视觉探索。",
+    "Nano Banana 2.1 公开文生图助手：Google 最新图片模型，兼顾质量与速度，适合草稿、批量生图和视觉探索。",
   greeting:
     "你好，我是 Nano Banana 2 Lite 文生图助手。告诉我你想画什么，我会用 Google 最快的图片模型快速生成。",
   prompt: [

@@ -10,12 +10,12 @@ import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { selectIdentityUserId } from "identity/selectors";
 
-const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview" as const;
+const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-nano-banana-2.1" as const;
 
 type GeminiImageModel =
     | "gemini-3.1-flash-lite-image"
-    | "gemini-3.1-flash-image-preview"
-    | "gemini-3-pro-image-preview";
+    | "gemini-nano-banana-2.1"
+    | "gemini-3-pro-image";
 
 type GeminiImageArg = {
     /**
@@ -467,18 +467,18 @@ export const geminiFlashLiteImageFunc = createGeminiImageExecutor(
 
 /**
  * geminiFlashImage:
- * - 使用 gemini-3.1-flash-image-preview
+ * - 使用 gemini-nano-banana-2.1
  * - 适用于文生图或轻量级基于图片的修改
  */
 export const geminiFlashImageFunc = createGeminiImageExecutor(
-    "gemini-3.1-flash-image-preview"
+    "gemini-nano-banana-2.1"
 );
 
 /**
  * geminiProImagePreview:
- * - 使用 gemini-3-pro-image-preview
+ * - 使用 gemini-3-pro-image
  * - 适用于基于一张或多张图片的复杂编辑、合成
  */
 export const geminiProImagePreviewFunc = createGeminiImageExecutor(
-    "gemini-3-pro-image-preview"
+    "gemini-3-pro-image"
 );

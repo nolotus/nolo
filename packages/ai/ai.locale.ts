@@ -351,7 +351,7 @@ export default {
           description: "Create a new Agent (intelligent assistant/app) based on the given configuration and return the complete Agent information.",
           params: {
             name: "The name of the Agent, e.g., 'Meeting Minutes Assistant'.",
-            model: "The model name to use. Logic: Default 'nolo/deepseek-flash'. Complex tasks: 'openai/gpt-5.6-sol'. Cost-saving: 'openai/gpt-5.5'. Aesthetic/Creative: 'gemini-3.8-flash'. Reliable low-cost summary/reasoning: 'nolo/deepseek-flash'. Image Generation: 'gemini-3-pro-image-preview' (Best/Expensive), 'gemini-3.1-flash-image-preview' (Ordinary), or 'gemini-3.1-flash-lite-image' (Fastest/Cheapest).",
+            model: "The model name to use. Logic: Default 'nolo/deepseek-flash'. Complex tasks: 'openai/gpt-5.6-sol'. Cost-saving: 'openai/gpt-5.5'. Aesthetic/Creative: 'gemini-3.8-flash'. Reliable low-cost summary/reasoning: 'nolo/deepseek-flash'. Image Generation: 'gemini-3-pro-image' (Best/Expensive), 'gemini-nano-banana-2.1' (Ordinary), or 'gemini-3.1-flash-lite-image' (Fastest/Cheapest).",
             provider: "The model provider identifier, must match the selected model, e.g., 'openrouter', 'nolo', 'fireworks', 'mistral', etc.",
             prompt: "System prompt/instruction describing the Agent's role, tone, and usage.",
             introduction: "Introduction displayed in the app market or list, explanatory text for end users.",
@@ -769,7 +769,7 @@ export default {
           description: "根据给定配置创建一个新的 Agent（智能体 / 应用），并返回完整的 Agent 信息。",
           params: {
             name: "Agent 的名称，例如：'会议纪要助手'。",
-            model: "默认使用 'nolo/deepseek-flash'。复杂任务: 'openai/gpt-5.6-sol'。省成本但复杂: 'openai/gpt-5.5'。追求美观/创意: 'gemini-3.8-flash'。低成本摘要/推理: 'nolo/deepseek-flash'。生成图片: 贵/高质量选 'gemini-3-pro-image-preview'，普通选 'gemini-3.1-flash-image-preview'，最快最便宜选 'gemini-3.1-flash-lite-image'。",
+            model: "默认使用 'nolo/deepseek-flash'。复杂任务: 'openai/gpt-5.6-sol'。省成本但复杂: 'openai/gpt-5.5'。追求美观/创意: 'gemini-3.8-flash'。低成本摘要/推理: 'nolo/deepseek-flash'。生成图片: 贵/高质量选 'gemini-3-pro-image'，普通选 'gemini-nano-banana-2.1'，最快最便宜选 'gemini-3.1-flash-lite-image'。",
             provider: "模型提供方标识，必须与所选模型相匹配，例如 'openrouter'、'nolo'、'fireworks'、'mistral' 等。",
             prompt: "系统提示词 / 指令，描述这个 Agent 的角色、语气和使用方式。",
             introduction: "在应用市场或列表中展示的简介，面向终端用户的说明文案。",
@@ -1187,7 +1187,7 @@ export default {
           description: "根據給定設定建立一個新的 Agent（智慧助理 / 應用程式），並返回完整的 Agent 資訊。",
           params: {
             name: "Agent 的名稱，例如：'會議紀錄助理'。",
-            model: "預設使用 'nolo/deepseek-flash'。複雜任務: 'openai/gpt-5.6-sol'。省成本但複雜: 'openai/gpt-5.5'。追求美觀/創意: 'gemini-3.8-flash'。低成本摘要/推理: 'nolo/deepseek-flash'。生成圖片: 貴/高品質選 'gemini-3-pro-image-preview'，一般選 'gemini-3.1-flash-image-preview'，最快最便宜選 'gemini-3.1-flash-lite-image'。",
+            model: "預設使用 'nolo/deepseek-flash'。複雜任務: 'openai/gpt-5.6-sol'。省成本但複雜: 'openai/gpt-5.5'。追求美觀/創意: 'gemini-3.8-flash'。低成本摘要/推理: 'nolo/deepseek-flash'。生成圖片: 貴/高品質選 'gemini-3-pro-image'，一般選 'gemini-nano-banana-2.1'，最快最便宜選 'gemini-3.1-flash-lite-image'。",
             provider: "模型提供方的識別碼，必須與所選模型相符，例如 'openrouter'、'nolo'、'fireworks'、'mistral' 等。",
             prompt: "系統提示詞 / 指令，描述這個 Agent 的角色、語氣和使用方式。",
             introduction: "在應用市場或清單中展示的簡介，面向終端使用者的說明文案。",
@@ -1625,7 +1625,7 @@ export default {
           description: "指定された構成に基づいて新しい Agent（インテリジェントアシスタント / アプリ）を作成し、完全な Agent 情報を返します。",
           params: {
             name: "Agent の名前（例：'議事録アシスタント'）。",
-            model: "既定では 'nolo/deepseek-flash' を使用。複雑なタスク: 'openai/gpt-5.6-sol'。コストを抑えたい複雑な処理: 'openai/gpt-5.5'。美しさ/創造性重視: 'gemini-3.8-flash'。低コストの要約/推論: 'nolo/deepseek-flash'。画像生成: 高価でも高品質なら 'gemini-3-pro-image-preview'、標準なら 'gemini-3.1-flash-image-preview'、最速・最安なら 'gemini-3.1-flash-lite-image'。",
+            model: "既定では 'nolo/deepseek-flash' を使用。複雑なタスク: 'openai/gpt-5.6-sol'。コストを抑えたい複雑な処理: 'openai/gpt-5.5'。美しさ/創造性重視: 'gemini-3.8-flash'。低コストの要約/推論: 'nolo/deepseek-flash'。画像生成: 高価でも高品質なら 'gemini-3-pro-image'、標準なら 'gemini-nano-banana-2.1'、最速・最安なら 'gemini-3.1-flash-lite-image'。",
             provider: "モデルプロバイダーの識別子。選択したモデルに対応している必要があります（例：'openrouter'、'nolo'、'fireworks'、'mistral' など）。",
             prompt: "この Agent の役割、口調、使い方を記述するシステムプロンプト / 指示。",
             introduction: "アプリマーケットや一覧に表示される紹介文。エンドユーザー向けの説明テキスト。",

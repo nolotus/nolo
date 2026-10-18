@@ -11,8 +11,11 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
 import { extractCustomId } from "core/prefix";
 
-const DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1.5" as const;
-const DEFAULT_OPENAI_IMAGE_MODEL_V2 = "gpt-image-2" as const;
+// 2.5 起两条产品线共用同一代模型，只按用途分：出图走 flare（快、质量好），
+// 改图走 sunburst（官方定位：editing precision）。1.5 / 2 已弃用。
+const DEFAULT_OPENAI_IMAGE_GENERATE_MODEL = "gpt-image-2.5-flare" as const;
+const DEFAULT_OPENAI_IMAGE_EDIT_MODEL = "gpt-image-2.5-sunburst" as const;
+const DEFAULT_OPENAI_IMAGE_MODEL = DEFAULT_OPENAI_IMAGE_GENERATE_MODEL;
 
 type OpenAIImageInput = {
   data: string;
@@ -240,7 +243,7 @@ export const openAIGptImageGenerateFunc = async (
   return runOpenAIImageTool(
     { ...args, operation: "generate" },
     thunkApi,
-    DEFAULT_OPENAI_IMAGE_MODEL_V2
+    DEFAULT_OPENAI_IMAGE_GENERATE_MODEL
   );
 };
 
@@ -251,7 +254,7 @@ export const openAIGptImageEditFunc = async (
   return runOpenAIImageTool(
     { ...args, operation: "edit" },
     thunkApi,
-    DEFAULT_OPENAI_IMAGE_MODEL_V2
+    DEFAULT_OPENAI_IMAGE_EDIT_MODEL
   );
 };
 

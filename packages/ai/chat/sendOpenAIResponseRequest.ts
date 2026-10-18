@@ -569,17 +569,28 @@ export const sendOpenAIResponseRequest = async ({
       imageMode === "continuous"
         ? getPublicImageAgentDefaultProfile("continuous")
         : null;
+    // 官方推荐：主模型放顶层，图片模型写进 image_generation 工具的 model 字段。
+    // 不写的话上游会用它自己的默认图片模型，agent 上配的 imageModel 等于失效。
+    const imageGenerationModel = asOptionalTrimmedString(
+      (agentConfig as { imageModel?: string } | null)?.imageModel,
+    );
 
     const tools = [
       ...(toResponsesTools(functionTools) ?? []),
       ...(shouldEnableBuiltInImageGeneration(agentConfig)
-        ? [{ type: "image_generation" as const }]
+        ? [
+            {
+              type: "image_generation" as const,
+              ...(imageGenerationModel ? { model: imageGenerationModel } : {}),
+            },
+          ]
         : []),
       ...(imageMode === "continuous"
         ? [
             {
               type: "image_generation" as const,
               action: "auto" as const,
+              ...(imageGenerationModel ? { model: imageGenerationModel } : {}),
               quality: imageProfile?.quality,
               output_format: imageProfile?.outputFormat,
             },

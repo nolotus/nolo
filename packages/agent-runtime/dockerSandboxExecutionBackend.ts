@@ -36,6 +36,7 @@ import {
   buildDockerQuotaKey,
   InMemoryDockerQuotaKvStore,
   type DockerQuotaKvStore,
+  type DockerQuotaRecord,
 } from "./dockerQuotaStore";
 
 export const DOCKER_SANDBOX_BACKEND_ID = "docker-sandbox-cloud";
@@ -60,7 +61,7 @@ const SAFE_MESSAGE: Record<DockerSandboxBackendFailureCode, string> = {
   "invalid-ticket": "Rejected: execution ticket cannot be satisfied by the docker sandbox backend",
   "quota-unverifiable": "Rejected before any sandbox side effect: docker quota could not be verified",
   "quota-insufficient": "Rejected before any sandbox side effect: docker quota is below the estimated budget",
-  "concurrency-rejected": "Rejected: another sandbox run is still running on this account",
+  "concurrency-rejected": "Rejected: this docker account already holds the maximum number of active sandboxes",
   "create-failed": "Sandbox create failed",
   "lease-not-found": "Unknown execution lease",
   "lease-mismatch": "Lease does not match this backend or ticket",
@@ -140,6 +141,14 @@ export interface DockerSandboxExecutionBackendDeps {
   maxOutputChars?: number;
   /** exec 的默认上界（ms）。请求里的 timeoutMs 只能收紧它，不能放宽。 */
   execTimeoutMs?: number;
+  /**
+   * 按工具分档的 exec 上界（ms）：shell 类 argv 用 `shellMs`，其余用 `defaultMs`。
+   * 未提供的档位回落到 `execTimeoutMs`（再回落 DEFAULT_EXEC_TIMEOUT_MS），
+   * 因此不传本字段 = 与既有单档行为逐位一致。
+   */
+  execTimeouts?: { defaultMs?: number; shellMs?: number };
+  /** 同一 dockerAccount 的活跃沙盒数上限（默认 3）。每 run 一个沙盒，账户内并发 ≤ N。 */
+  maxActiveSandboxesPerAccount?: number;
   /** running 记录被判为陈旧的阈值（ms）；缺省按 ttlMinutes + execTimeoutMs 推导。 */
   staleRunningAfterMs?: number;
 }
@@ -151,6 +160,36 @@ const DEFAULT_MAX_OUTPUT_CHARS = 8_000;
  * `request.timeoutMs ?? 60_000`）。没有它，卡住的 sbx exec 只能等云端 TTL。
  */
 export const DEFAULT_EXEC_TIMEOUT_MS = 60_000;
+/**
+ * 每 dockerAccount 的活跃沙盒上限默认值：每 run 一个沙盒，账户内最多 3 个并发。
+ * 超出即 concurrency-rejected（明确失败码，不排队、不静默降级）。
+ */
+export const DEFAULT_MAX_ACTIVE_SANDBOXES_PER_ACCOUNT = 3;
+
+/**
+ * 活跃沙盒上限的**可配置**覆盖：显式注入 > `NOLO_DOCKER_MAX_ACTIVE_SANDBOXES` > 默认。
+ *
+ * 上限是部署/用户策略，不是常量。撞上限时错误只说「已达上限」，很容易被误判成
+ * 云端限制（2026-10-18 两次实测踩到），所以这里把它显式化、可配、并把非法值
+ * 报出来——静默回落默认值会让人以为设置生效了。
+ */
+export function resolveMaxActiveSandboxesFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): number | null {
+  const raw = (env.NOLO_DOCKER_MAX_ACTIVE_SANDBOXES ?? "").trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(
+      `NOLO_DOCKER_MAX_ACTIVE_SANDBOXES 必须是正整数，收到 "${raw}"；拒绝静默回落默认值`,
+    );
+  }
+  return parsed;
+}
+/** shell 类可执行名：命中 argv[0] 时按 shell 档（`execTimeouts.shellMs`）取执行上界。 */
+const SHELL_EXECUTABLES = new Set([
+  "bash", "sh", "zsh", "dash", "ksh", "mksh", "ash", "fish",
+]);
 /** kill 之后 close 仍未到达时的兜底解锁窗口：保证 await 一定有出口。 */
 const EXEC_TIMEOUT_KILL_GRACE_MS = 2_000;
 /** 判定 running 陈旧时，除沙盒 TTL 之外再附加的对账余量。 */
@@ -236,11 +275,29 @@ export async function defaultRunSbx(
   });
 }
 
+/**
+ * 活跃槽位键：slot 1 = 账户主闸门键（既有记录与外部 CI 工具读写的就是它），
+ * slot 2..N = `${quotaKey}#slot:N`。槽位键是该次运行记录的唯一归属键。
+ */
+export function buildSandboxSlotKey(quotaKey: string, slot: number): string {
+  return slot === 1 ? quotaKey : `${quotaKey}#slot:${slot}`;
+}
+
+/** argv 是否 shell 类（决定本次 exec 走哪一档执行上界）。 */
+export function isShellArgv(argv: readonly string[]): boolean {
+  const head = argv[0];
+  if (typeof head !== "string" || !head) return false;
+  const base = head.split(/[\\/]/).pop()?.toLowerCase().replace(/\.exe$/, "") ?? "";
+  return SHELL_EXECUTABLES.has(base);
+}
+
 type LeaseEntry = {
   ticketId: string;
   grantId: string;
   sandboxName: string;
   quotaKey: string;
+  /** 本次运行占用的活跃槽位键：终态记录必须写回它，否则槽位永不释放。 */
+  slotKey: string;
   estimatedNanoUsd: bigint;
   startedAt: number;
   released: boolean;
@@ -291,6 +348,13 @@ function warnBookkeeping(phase: string, extra: Record<string, string> = {}): voi
     })}`,
   );
 }
+
+/**
+ * 进程级 per-account 准入锁：DockerWorkloadLifecycle 每次 run 都会创建一个新的
+ * backend 实例，实例级锁无法串行化同账户的并发 prepare，故锁必须挂在模块上。
+ * 跨进程的权威闸门是 journal 的 SQLite 事务登记（单 host 拓扑）。
+ */
+const accountLockTails = new Map<string, Promise<unknown>>();
 
 export function createDockerSandboxExecutionBackend(
   deps: DockerSandboxExecutionBackendDeps = {},
@@ -368,20 +432,32 @@ export function createDockerSandboxExecutionBackend(
     });
   };
 
-  const execTimeoutMs =
-    typeof deps.execTimeoutMs === "number" &&
-    Number.isFinite(deps.execTimeoutMs) &&
-    deps.execTimeoutMs > 0
-      ? deps.execTimeoutMs
-      : DEFAULT_EXEC_TIMEOUT_MS;
+  /**
+   * exec 上界分档：shell 类 argv 用 `shellMs`，其余用 `defaultMs`；未提供的档位
+   * 回落到 `execTimeoutMs`（再回落 DEFAULT_EXEC_TIMEOUT_MS）——不传 execTimeouts 时
+   * 两档相同，与既有单档行为逐位一致。
+   */
+  const positiveMs = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  const baseExecTimeoutMs = positiveMs(deps.execTimeoutMs) ?? DEFAULT_EXEC_TIMEOUT_MS;
+  const defaultExecTimeoutMs = positiveMs(deps.execTimeouts?.defaultMs) ?? baseExecTimeoutMs;
+  const shellExecTimeoutMs = positiveMs(deps.execTimeouts?.shellMs) ?? baseExecTimeoutMs;
+  /** 控制面与陈旧阈值取两档的较大者：最慢的工具决定一条运行的存活上界。 */
+  const maxExecTimeoutMs = Math.max(defaultExecTimeoutMs, shellExecTimeoutMs);
+  const maxActiveSandboxes =
+    typeof deps.maxActiveSandboxesPerAccount === "number" &&
+    Number.isInteger(deps.maxActiveSandboxesPerAccount) &&
+    deps.maxActiveSandboxesPerAccount > 0
+      ? deps.maxActiveSandboxesPerAccount
+      : (resolveMaxActiveSandboxesFromEnv() ?? DEFAULT_MAX_ACTIVE_SANDBOXES_PER_ACCOUNT);
   const staleRunningAfterMs =
     typeof deps.staleRunningAfterMs === "number" &&
     Number.isFinite(deps.staleRunningAfterMs) &&
     deps.staleRunningAfterMs > 0
       ? deps.staleRunningAfterMs
-      : deriveStaleRunningMs(ttlMinutes, execTimeoutMs);
+      : deriveStaleRunningMs(ttlMinutes, maxExecTimeoutMs);
   /** create/stop 等控制面调用共用同一上界：卡住的 sbx 不能被无限期 await。 */
-  const controlTimeoutMs = execTimeoutMs;
+  const controlTimeoutMs = maxExecTimeoutMs;
 
   /**
    * 记账写入失败必须可观测：`.catch(() => undefined)` 会把「没落盘」伪装成
@@ -433,6 +509,132 @@ export function createDockerSandboxExecutionBackend(
     }
   };
 
+  /**
+   * per-account 串行锁：KV 只有 get/put（无 compare-and-swap），所以「数活跃 → 占槽位」
+   * 必须整段不可交错，否则两个 prepare 会同时看到空槽位、各自 create 一个计费沙盒。
+   * 跨进程的权威闸门仍是 DockerWorkloadLifecycle 的 SQLite 事务登记（单 host 拓扑），
+   * 本锁负责同进程内（含同 event loop 的并发 prepare）的原子性。
+   */
+  const runWithAccountLock = async <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = accountLockTails.get(key) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(fn);
+    // 失败也必须解锁：不能让一次异常的 prepare 把整个账户永久锁死。
+    const tail = run.catch(() => undefined);
+    accountLockTails.set(key, tail);
+    try {
+      return await run;
+    } finally {
+      if (accountLockTails.get(key) === tail) accountLockTails.delete(key);
+    }
+  };
+
+  /**
+   * 归档一条「不该再占着该槽位」的 running 记录：键沿用 buildStaleAuditKey 语义
+   * （独立键，绝不覆盖主闸门键），供后续 reconcile 看见。无论判定依据是时间推断
+   * 陈旧，还是云真相证明沙盒已不存在，都走同一条归档语义。
+   */
+  const archiveStaleSlotRecord = async (
+    slotKey: string,
+    record: DockerQuotaRecord,
+  ): Promise<void> => {
+    await persistQuotaRecord(
+      "stale-running-archive",
+      buildStaleAuditKey(slotKey, record.sandbox),
+      // 归档记的是「可能仍在计费的泄漏沙盒」：金额与归属必须从被回收的那条
+      // 记录原样带入。改用 0/空串顶替（本函数对缺省字段的回落行为）会把敞口
+      // 与责任归属一起抹掉，事后无法对账、无法定位泄漏来源（M-2）。
+      {
+        status: "running",
+        stale: true,
+        sandbox: record.sandbox ?? "",
+        observedAt: record.observedAt,
+        remainingNanoUsd: record.remainingNanoUsd,
+        pendingEstimateNanoUsd: record.pendingEstimateNanoUsd,
+        estimatedSpendNanoUsd: record.estimatedSpendNanoUsd,
+        taskId: record.taskId,
+      },
+    );
+  };
+
+  /**
+   * 占用一个活跃槽位（只允许在账户临界区内调用）：返回本次运行独占的槽位键。
+   * 槽位全被**活的** running 记录占满 → concurrency-rejected（明确失败码，不排队）；
+   * 被判陈旧的槽位先归档再复用（保留原 sandbox 名与金额，作为可审计泄漏痕迹）。
+   *
+   * 云真相纠偏：本地的时间推断不是「沙盒已死」的证据——被中断/崩溃的 run 留下的
+   * 记录会堵住槽位数小时，而云上沙盒早已被删净（TTL 很长时尤其明显）。所以对
+   * **未**判陈旧的 running 记录，向云列举要一次权威答案：
+   *   - 记录引用的沙盒云上不存在 → 与陈旧记录同一条归档语义处理并释放该槽位；
+   *   - 云上存在               → 活槽位，继续看下一个；
+   *   - 云列举失败/超时/形状不可认 → 不得推定为「都不存在」（那会超卖并发）→
+   *     fail-closed：保持原样（既不释放也不归档），整体抛 quota-unverifiable。
+   *     复用该码而非新码：语义同属「账户级状态无法核实 → 拒绝」，且调用方
+   *     （DockerWorkloadLifecycle 的 pre-create 白名单、CLI 的文案映射）已认识它，
+   *     不会把「核实不了」错当成「确认没有沙盒」。可区分性由告警 phase
+   *     `sandbox-presence-unverifiable` 与 reason 字段承担。
+   */
+  const reserveActiveSlot = async (quotaKey: string): Promise<string> => {
+    // 每个账户每次 reserve 至多一次云列举（3 个槽位不得各调一次）：惰性记忆化，
+    // 且只在真的撞上「running 且未判陈旧」的槽位时才发生——没有这种槽位就零调用。
+    let cloudPresence: Promise<CloudSandboxPresence> | null = null;
+    const cloudSandboxPresence = (): Promise<CloudSandboxPresence> => {
+      cloudPresence ??= probeCloudSandboxPresence(runSbx, controlTimeoutMs);
+      return cloudPresence;
+    };
+
+    for (let slot = 1; slot <= maxActiveSandboxes; slot += 1) {
+      const slotKey = buildSandboxSlotKey(quotaKey, slot);
+      // 闸门读失败不得被当成「该槽位空闲」：readConcurrencyGate 直接抛 quota-unverifiable。
+      const record = await readConcurrencyGate(slotKey);
+      if (record?.status !== "running") return slotKey;
+      const staleReason = staleRunningReason(record, now(), staleRunningAfterMs);
+      if (staleReason) {
+        warnBookkeeping("stale-running-reclaimed", {
+          sandbox: record.sandbox ?? "",
+          reason: staleReason,
+        });
+        await archiveStaleSlotRecord(slotKey, record);
+        return slotKey;
+      }
+      // 未判陈旧 ≠ 沙盒还活着：拿云真相核对这条记录引用的沙盒真的存在吗。
+      const sandboxName = typeof record.sandbox === "string" ? record.sandbox : "";
+      if (!sandboxName) {
+        // 记录没有沙盒引用：既证明不了它已死，也核对不了。宁可继续阻塞，也不能
+        // 凭空放行第二个计费沙盒（同 staleRunningReason 的 fail-closed 立场）。
+        warnBookkeeping("sandbox-presence-unverifiable", { reason: "no-sandbox-reference" });
+        throw new DockerSandboxBackendError(
+          "quota-unverifiable",
+          "active sandbox record carries no sandbox reference",
+        );
+      }
+      const presence = await cloudSandboxPresence();
+      if (!presence.ok) {
+        warnBookkeeping("sandbox-presence-unverifiable", {
+          sandbox: sandboxName,
+          reason: presence.reason,
+        });
+        throw new DockerSandboxBackendError(
+          "quota-unverifiable",
+          "active sandbox presence could not be verified against the cloud listing",
+        );
+      }
+      // 只要云列举里还有这个名字（不论 running/stopped）就按活槽位处理：stop 是
+      // 「挂起并保留状态」，release 成功时本就会写终态记录；一条仍写着 running 的
+      // 记录 + 云上对象尚在，不足以证明它可以被回收。
+      if (presence.names.has(sandboxName)) continue;
+      warnBookkeeping("stale-running-reclaimed", {
+        sandbox: sandboxName,
+        reason: "absent-from-cloud-listing",
+      });
+      await archiveStaleSlotRecord(slotKey, record);
+      return slotKey;
+    }
+    throw new DockerSandboxBackendError(
+      "concurrency-rejected",
+      `active sandbox limit ${maxActiveSandboxes} reached`,
+    );
+  };
+
   return {
     describe() {
       return descriptor;
@@ -470,131 +672,93 @@ export function createDockerSandboxExecutionBackend(
         throw new DockerSandboxBackendError("quota-insufficient");
       }
 
-      // 2) 并发闸门：同账户存在运行中记录即拒绝；但闸门读失败不得被当成
-      //    「没有并发」放行，陈旧 running 也不得让该账户永久自锁。
+      // 2) 活跃槽位闸：每 dockerAccount 的活跃沙盒数 ≤ maxActiveSandboxes（默认 3，
+      //    每 run 一个沙盒）。「数活跃 → 占槽位」+ create + running 落盘确认整段在
+      //    同一账户临界区内完成，杜绝「先查再写」同时放行 N+1 个计费沙盒。
+      //    预算预扣（nanoUSD）语义不变：running 记录仍带 pendingEstimateNanoUsd。
       const quotaKey = buildDockerQuotaKey(owner, dockerAccount);
-      const existing = await readConcurrencyGate(quotaKey);
-      if (existing?.status === "running") {
-        const staleReason = staleRunningReason(existing, now(), staleRunningAfterMs);
-        if (!staleReason) {
-          throw new DockerSandboxBackendError("concurrency-rejected");
-        }
-        // 回收：先把旧记录标记 stale 并归档（保留原 sandbox 名）作为可审计
-        // 痕迹，再放行新一次 prepare。归档写失败只告警：宁可有痕迹缺失，
-        // 也不能让闸门重新变成永久自锁。
-        warnBookkeeping("stale-running-reclaimed", {
-          sandbox: existing.sandbox ?? "",
-          reason: staleReason,
-        });
-        await persistQuotaRecord(
-          "stale-running-archive",
-          buildStaleAuditKey(quotaKey, existing.sandbox),
-          // 归档记的是「可能仍在计费的泄漏沙盒」：金额与归属必须从被回收的那条
-          // 记录原样带入。改用 0/空串顶替（本函数对缺省字段的回落行为）会把敞口
-          // 与责任归属一起抹掉，事后无法对账、无法定位泄漏来源（M-2）。
+      return await runWithAccountLock(quotaKey, async () => {
+        const slotKey = await reserveActiveSlot(quotaKey);
+
+        // 3) 先登记（占用槽位）→ 读回确认 → 才 create：登记失败绝不 create。
+        const startedAt = now();
+        const sandboxName =
+          deps.sandboxName ?? buildDockerSandboxName(ticket.ticketId, startedAt);
+        const reservedRecorded = await persistQuotaRecord(
+          "running",
+          slotKey,
           {
+            remainingNanoUsd: quota.availableNanoUsd.toString(),
+            // 槽位记录的年龄必须从「这条记录落盘的时刻」起算，沿用配额快照的
+            // observedAt 会让陈旧阈值被偷偷缩短（M-1）。配额观察时间没丢，仍在
+            // beforeAfter.before 里。
+            observedAt: now(),
+            pendingEstimateNanoUsd: estimatedNanoUsd.toString(),
+            estimatedSpendNanoUsd: "0",
+            taskId: ticket.ticketId,
+            sandbox: sandboxName,
             status: "running",
-            stale: true,
-            sandbox: existing.sandbox ?? "",
-            observedAt: existing.observedAt,
-            remainingNanoUsd: existing.remainingNanoUsd,
-            pendingEstimateNanoUsd: existing.pendingEstimateNanoUsd,
-            estimatedSpendNanoUsd: existing.estimatedSpendNanoUsd,
-            taskId: existing.taskId,
+            // 显式清 stale：这条槽位记录代表**占位中的沙盒**，绝不能继承上一条终态
+            // 记录残留的 stale:true（否则它会被年龄之外的捷径判成可回收）。
+            stale: false,
+          },
+          {
+            remainingNanoUsd: quota.availableNanoUsd.toString(),
+            observedAt: quota.observedAt,
           },
         );
-      }
-
-      // 3) 创建沙盒。
-      const startedAt = now();
-      const sandboxName = deps.sandboxName ?? buildDockerSandboxName(ticket.ticketId, startedAt);
-      const create = await runSbx(
-        buildSbxCloudCreateArgv({ name: sandboxName, shapeId, ttlMinutes }),
-        { timeoutMs: controlTimeoutMs },
-      );
-      if (create.exitCode !== 0) {
-        await persistQuotaRecord("create-failed", quotaKey, {
-          status: "failed",
-          sandbox: sandboxName,
-          taskId: ticket.ticketId,
-        });
-        throw new DockerSandboxBackendError("create-failed");
-      }
-
-      const runningRecorded = await persistQuotaRecord(
-        "running",
-        quotaKey,
-        {
-          remainingNanoUsd: quota.availableNanoUsd.toString(),
-          // 闸门记录的年龄必须从「这条 running 记录落盘的时刻」起算：沿用配额快照
-          // 的 observedAt 会让陈旧阈值被偷偷缩短（上游允许数分钟旧的快照 → 沙盒刚
-          // 起约 12 分钟就被判陈旧 → 放行第二个计费沙盒，M-1）。配额观察时间没丢，
-          // 仍原样留在 beforeAfter.before 里。
-          observedAt: now(),
-          pendingEstimateNanoUsd: estimatedNanoUsd.toString(),
-          estimatedSpendNanoUsd: "0",
-          taskId: ticket.ticketId,
-          sandbox: sandboxName,
-          status: "running",
-          // 显式清 stale：这条闸门记录代表**正在运行**的沙盒，绝不能继承上一条
-          // 终态记录残留的 stale:true（否则它会被年龄之外的捷径判成可回收）。
-          stale: false,
-        },
-        {
-          remainingNanoUsd: quota.availableNanoUsd.toString(),
-          observedAt: quota.observedAt,
-        },
-      );
-      if (!runningRecorded || !(await runningRecordPersisted(quotaKey, sandboxName))) {
-        // create 已成功但记账未落盘：并发闸门事实上不存在，继续跑就会出现两个
-        // 计费沙盒。fail-closed：收回刚建的沙盒，绝不把「未落盘」当「已有保护」。
-        let stopped = false;
-        try {
-          const stop = await runSbx(["--cloud", "stop", sandboxName], {
-            timeoutMs: controlTimeoutMs,
-          });
-          stopped = stop.exitCode === 0 && await confirmDockerSandboxStopped(runSbx, sandboxName, controlTimeoutMs);
-        } catch {
-          stopped = false;
+        if (!reservedRecorded || !(await runningRecordPersisted(slotKey, sandboxName))) {
+          // 登记没落盘 = 计数闸事实上不存在。此刻**还没有任何沙盒被创建**，故直接
+          // fail-closed 拒绝：不 create、不需要 stop，也不谎报「已清理」。
+          throw new DockerSandboxBackendError("quota-record-failed");
         }
-        if (!stopped) {
-          warnBookkeeping("running-bookkeeping-rollback", {
+
+        // 4) 创建沙盒；create 失败立即把槽位标记为 failed 归还名额。
+        const create = await runSbx(
+          buildSbxCloudCreateArgv({ name: sandboxName, shapeId, ttlMinutes }),
+          { timeoutMs: controlTimeoutMs },
+        );
+        if (create.exitCode !== 0) {
+          await persistQuotaRecord("create-failed", slotKey, {
+            status: "failed",
             sandbox: sandboxName,
-            reason: "stop-unverified",
+            taskId: ticket.ticketId,
           });
+          throw new DockerSandboxBackendError("create-failed");
         }
-        throw new DockerSandboxBackendError("quota-record-failed", undefined, !stopped);
-      }
 
-      const lease: ExecutionLease = {
-        leaseId: sandboxName,
-        backendId: descriptor.id,
-        ticketId: ticket.ticketId,
-        grantId: ticket.grantId,
-        createdAt: startedAt,
-        readableRoots: [],
-        writableRoots: [],
-        metadata: {
+        const lease: ExecutionLease = {
+          leaseId: sandboxName,
+          backendId: descriptor.id,
+          ticketId: ticket.ticketId,
+          grantId: ticket.grantId,
+          createdAt: startedAt,
+          readableRoots: [],
+          writableRoots: [],
+          metadata: {
+            sandboxName,
+            estimatedNanoUsd: estimatedNanoUsd.toString(),
+            quotaKey,
+            slotKey,
+            /**
+             * release() 只 stop 不删除：沙盒在云端以 stopped 状态保留，
+             * 本后端从不发 `sbx rm`。调用方据此判断是否需要另行清理。
+             */
+            sandboxRetainedOnRelease: true,
+          },
+        };
+        leases.set(lease.leaseId, {
+          ticketId: ticket.ticketId,
+          grantId: ticket.grantId,
           sandboxName,
-          estimatedNanoUsd: estimatedNanoUsd.toString(),
           quotaKey,
-          /**
-           * release() 只 stop 不删除：沙盒在云端以 stopped 状态保留，
-           * 本后端从不发 `sbx rm`。调用方据此判断是否需要另行清理。
-           */
-          sandboxRetainedOnRelease: true,
-        },
-      };
-      leases.set(lease.leaseId, {
-        ticketId: ticket.ticketId,
-        grantId: ticket.grantId,
-        sandboxName,
-        quotaKey,
-        estimatedNanoUsd,
-        startedAt,
-        released: false,
+          slotKey,
+          estimatedNanoUsd,
+          startedAt,
+          released: false,
+        });
+        return lease;
       });
-      return lease;
     },
 
     async execute(
@@ -620,8 +784,13 @@ export function createDockerSandboxExecutionBackend(
       ) {
         throw new DockerSandboxBackendError("unsupported-request", "request options not honored");
       }
+      // 上界按工具分档：shell 类 argv 走 shellMs 档，其余走 defaultMs 档。
+      // 未配置 execTimeouts 时两档相同 = 与既有单档行为逐位一致。
+      const tierExecTimeoutMs = isShellArgv(request.argv)
+        ? shellExecTimeoutMs
+        : defaultExecTimeoutMs;
       // timeoutMs 受支持：合法值只用来收紧本次 exec 上界；非有限/非正数或超过
-      // 后端上界一律 fail-closed 拒绝，绝不「按后端上界悄悄放行」。
+      // 所选档位上界一律 fail-closed 拒绝，绝不「按后端上界悄悄放行」。
       const requestedTimeoutMs = request.timeoutMs;
       if (requestedTimeoutMs !== undefined) {
         if (!Number.isFinite(requestedTimeoutMs) || requestedTimeoutMs <= 0) {
@@ -630,7 +799,7 @@ export function createDockerSandboxExecutionBackend(
             "timeoutMs must be a positive finite number",
           );
         }
-        if (requestedTimeoutMs > execTimeoutMs) {
+        if (requestedTimeoutMs > tierExecTimeoutMs) {
           throw new DockerSandboxBackendError(
             "unsupported-request",
             "timeoutMs exceeds the backend execution bound",
@@ -638,7 +807,7 @@ export function createDockerSandboxExecutionBackend(
         }
       }
       // 上界永远存在：没有它，卡住的 sbx exec 只能等云端 TTL，await 没有出口。
-      const execBoundMs = requestedTimeoutMs ?? execTimeoutMs;
+      const execBoundMs = requestedTimeoutMs ?? tierExecTimeoutMs;
 
       const executionId = `${entry.sandboxName}:${now().toString(36)}`;
       const startedAt = now();
@@ -701,7 +870,7 @@ export function createDockerSandboxExecutionBackend(
       // 终态记账失败只告警、不抛：stop 已确认，抛错会被调用方误读为「未清理」。
       // 代价是该记录会停留在 running，直到 M2 的陈旧回收（阈值 = TTL + exec
       // 上界 + 余量）放行下一次 prepare；这期间并发闸门仍然生效（宁可严，不可漏）。
-      await persistQuotaRecord("release-final-state", entry.quotaKey, {
+      await persistQuotaRecord("release-final-state", entry.slotKey, {
         status: reason === "failed" ? "failed" : "stopped",
         pendingEstimateNanoUsd: "0",
         estimatedSpendNanoUsd: entry.estimatedNanoUsd.toString(),
@@ -711,16 +880,106 @@ export function createDockerSandboxExecutionBackend(
   };
 }
 
+/**
+ * `sbx` 会在 JSON 之前打人类可读的告警（实测：
+ * `WARN: docker hub refresh lock held by another process: context deadline exceeded`）。
+ * 直接 JSON.parse 会判成 malformed-listing，进而 fail-closed 把**所有** docker 派发
+ * 拒掉——一条 WARN 让全平台停摆（2026-10-18 实测）。
+ *
+ * 这里只做一件事：跳过 JSON 之前的噪声行。不做"宽松找 JSON"（例如跨行截取），
+ * 免得把坏输出误判成权威清单。
+ */
+export function parseSbxListingJson(stdout: string): unknown {
+  const text = stdout ?? "";
+  let start = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "[" || ch === "{") {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return undefined;
+  return JSON.parse(text.slice(start));
+}
+
+/**
+ * 云真相：账户下活跃沙盒名的集合。
+ *   - `ok: true`  → 这是权威答案（`--cloud ls` 无分页），可用于判定某个沙盒是否
+ *                   真的还存在；
+ *   - `ok: false` → 列举不可用（非 0 退出/超时/JSON 解析失败/元素形状不认识），
+ *                   调用方**不得**把它当成「都不存在」。
+ */
+export type CloudSandboxPresence =
+  | { ok: true; names: ReadonlySet<string> }
+  | { ok: false; reason: "ls-failed" | "malformed-listing" };
+
+/**
+ * 只读列举云沙盒（不创建、不启动、不计费）。`sbx --cloud ls --format json` 是权威
+ * 清单（无分页，实测空账户输出 `[]`）。
+ *
+ * fail-closed 的形状要求：清单必须是数组，且每个元素都得是能读出 `name` 的对象。
+ * 少了 `name` 的元素意味着「清单里可能有一个我认不出来的沙盒」，此时把集合判成
+ * 空集就等于放行并发（超卖计费沙盒），所以整份清单按不可核实处理。
+ */
+export async function probeCloudSandboxPresence(
+  runSbx: SbxCommandFn,
+  timeoutMs: number,
+): Promise<CloudSandboxPresence> {
+  try {
+    const listing = await runSbx(["--cloud", "ls", "--format", "json"], { timeoutMs });
+    if (listing.exitCode !== 0 || listing.timedOut) return { ok: false, reason: "ls-failed" };
+    const parsed: unknown = parseSbxListingJson(listing.stdout);
+    if (!Array.isArray(parsed)) return { ok: false, reason: "malformed-listing" };
+    const names = new Set<string>();
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== "object") return { ok: false, reason: "malformed-listing" };
+      const name = (entry as { name?: unknown }).name;
+      if (typeof name !== "string" || !name) return { ok: false, reason: "malformed-listing" };
+      names.add(name);
+    }
+    return { ok: true, names };
+  } catch {
+    return { ok: false, reason: "ls-failed" };
+  }
+}
+
 /** Exact positive observation only: absent, stopping, malformed and failed ls deny. */
 export async function confirmDockerSandboxStopped(
   runSbx: SbxCommandFn, sandboxName: string, timeoutMs = 10_000,
+  options: { attempts?: number; delayMs?: number } = {},
 ): Promise<boolean> {
+  const attempts = Math.max(1, options.attempts ?? 1);
+  const delayMs = Math.max(0, options.delayMs ?? 0);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const verdict = await probeOnce(runSbx, sandboxName, timeoutMs);
+    if (verdict !== "pending") return verdict;
+    if (attempt < attempts - 1 && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return false;
+}
+
+/**
+ * `sbx --cloud ls --format json` is the authoritative cloud listing (no
+ * pagination), so:
+ *   - name absent            → nothing is billing under that name → stopped
+ *   - name present, "stopped" → stopped
+ *   - name present, other     → still winding down → pending (retry)
+ *   - ls failed / not JSON    → cannot confirm → false
+ */
+async function probeOnce(
+  runSbx: SbxCommandFn, sandboxName: string, timeoutMs: number,
+): Promise<boolean | "pending"> {
   try {
     const listing = await runSbx(["--cloud", "ls", "--format", "json"], { timeoutMs });
     if (listing.exitCode !== 0 || listing.timedOut) return false;
-    const parsed: unknown = JSON.parse(listing.stdout);
+    const parsed: unknown = parseSbxListingJson(listing.stdout);
     if (!Array.isArray(parsed)) return false;
-    const matches = parsed.filter(x => x && typeof x === "object" && x.name === sandboxName);
-    return matches.length === 1 && matches[0].status === "stopped";
+    const matches = parsed.filter(x => x && typeof x === "object" && (x as any).name === sandboxName);
+    if (matches.length === 0) return true;
+    if (matches.length === 1 && (matches[0] as any).status === "stopped") return true;
+    return matches.length === 1 ? "pending" : false;
   } catch { return false; }
 }

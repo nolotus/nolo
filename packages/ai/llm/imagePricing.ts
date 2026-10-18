@@ -72,6 +72,39 @@ export const getApproxPricePerImage = (
 
 const OPENAI_IMAGE_FALLBACK_MODEL = "gpt-image-2";
 
+/**
+ * `usage.input_tokens_details.{text,image}_tokens` 与 `output_tokens_details.image_tokens`，
+ * 用它算出来的成本与 quality 档完全一致（实测 1024²：low 196 / medium 439 / high 1756
+ * 个 image 输出 token），比「每张固定价」精确。
+ *
+ * externalToolCost 里其它条目的口径一致（`gemini-3-pro-image: 1.2` 同理）。
+ */
+const PLATFORM_CREDITS_PER_USD = 8;
+const OPENAI_IMAGE_25_TOKEN_CREDITS = {
+  textInputPerMillion: 5 * PLATFORM_CREDITS_PER_USD,
+  imageInputPerMillion: 8 * PLATFORM_CREDITS_PER_USD,
+  imageOutputPerMillion: 30 * PLATFORM_CREDITS_PER_USD,
+} as const;
+
+/** 按上游返回的 usage 计算一次请求（可能含多张图）的积分成本。 */
+export const computeImageUsageCostCredits = (
+  usage: unknown,
+): number | undefined => {
+  if (!usage || typeof usage !== "object") return undefined;
+  const u = usage as Record<string, any>;
+  const textIn = Number(u?.input_tokens_details?.text_tokens ?? 0);
+  const imageIn = Number(u?.input_tokens_details?.image_tokens ?? 0);
+  const imageOut = Number(u?.output_tokens_details?.image_tokens ?? 0);
+  if (![textIn, imageIn, imageOut].every(Number.isFinite)) return undefined;
+  if (textIn + imageIn + imageOut <= 0) return undefined;
+  return (
+    (textIn * OPENAI_IMAGE_25_TOKEN_CREDITS.textInputPerMillion +
+      imageIn * OPENAI_IMAGE_25_TOKEN_CREDITS.imageInputPerMillion +
+      imageOut * OPENAI_IMAGE_25_TOKEN_CREDITS.imageOutputPerMillion) /
+    1_000_000
+  );
+};
+
 export const getApproxAgentPricePerImage = (
   agent: Pick<Agent, "provider" | "model" | "imageConfig">
 ): number | undefined => {

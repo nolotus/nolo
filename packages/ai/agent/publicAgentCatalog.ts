@@ -105,15 +105,24 @@ export function normalizePublicAgentPlatformPricing<T extends PublicAgentRecord>
   const usesOpenAIImageTool = tools.some(
     (tool) => typeof tool === "string" && GPT_IMAGE_TOOL_NAMES.has(tool)
   );
-  const imageModel =
+  const rawImageModel =
     asOptionalTrimmedString(agent.imageModel) ??
-    (usesOpenAIImageTool ? "gpt-image-2" : "");
+    (usesOpenAIImageTool ? "gpt-image-2.5-flare" : "");
+  // 1.5 / 2 已弃用：存量 agent 记录读到旧 id 时统一映射到 2.5，
+  // 按工作流给出图档（flare）或改图档（sunburst），不静默降级。
+  const legacyOpenAIImageModel =
+    rawImageModel === "gpt-image-1.5" || rawImageModel === "gpt-image-2";
+  const imageModel = legacyOpenAIImageModel
+    ? agent.imageWorkflow === "edit"
+      ? "gpt-image-2.5-sunburst"
+      : "gpt-image-2.5-flare"
+    : rawImageModel;
 
-  // gpt-image-2 已收进 nolo 平台托管目录；历史 agent 记录仍可能是 provider=openai
+  // 平台托管 GPT Image 系（含映射后的 2.5）：走 nolo 平台价
   if (
     usePlatformPricing &&
     (provider === "openai" || provider === "nolo") &&
-    imageModel === "gpt-image-2"
+    imageModel.startsWith("gpt-image-")
   ) {
     next = {
       ...next,
