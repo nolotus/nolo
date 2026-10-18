@@ -7,6 +7,7 @@ import {
   getPublicAgentId,
   getPublicAgentIdentifiers,
 } from "ai/agent/publicAgentIdentity";
+import { catalogReleasedAtMs } from "core/builtinAgentCatalog";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
@@ -129,8 +130,29 @@ export function normalizePublicAgentPlatformPricing<T extends PublicAgentRecord>
 }
 
 export function preparePublicAgentCatalogRecords(agents: Agent[]): Agent[] {
-  return agents
-    .map((agent) => normalizePublicAgentPlatformPricing(agent));
+  return agents.map((agent) =>
+    withCatalogPublishedAt(normalizePublicAgentPlatformPricing(agent))
+  );
+}
+
+/**
+ * 上架时间补缺（广场综合排序新鲜度的真值来源）。
+ *
+ * catalog 声明的 public 条目在记录缺 `publishedAt` 时补上 catalog 的
+ * `releasedAtMs`（平台条目没有别的写入方，DB 记录只见 createdAt）；记录自带合法
+ * 值优先，不覆盖其它写入方的真值。用户自建 agent（不在 catalog）**引用相等原样
+ * 返回**，排序仍按 createdAt/updatedAt，行为不变。
+ */
+function withCatalogPublishedAt<T extends Agent>(agent: T): T {
+  const existing = (agent as { publishedAt?: unknown }).publishedAt;
+  if (typeof existing === "number" && Number.isFinite(existing) && existing > 0) {
+    return agent;
+  }
+  if (typeof existing === "string" && Date.parse(existing) > 0) return agent;
+  const id = getPublicAgentId(agent) ?? (typeof agent.id === "string" ? agent.id : null);
+  const releasedAtMs = catalogReleasedAtMs(id);
+  if (releasedAtMs === undefined) return agent;
+  return { ...agent, publishedAt: releasedAtMs };
 }
 
 const CATALOG_SUMMARY_FIELDS = new Set([
@@ -168,6 +190,7 @@ const CATALOG_SUMMARY_FIELDS = new Set([
   "created",
   "updated_at",
   "deletedAt",
+  "publishedAt",
   "originServer",
   "__sort",
 ]);

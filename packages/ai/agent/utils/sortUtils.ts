@@ -131,6 +131,17 @@ export function getRecommendedScore({
 }
 
 /**
+ * 记录上的上架时间：`publishedAt`（毫秒数或可解析的日期字符串）。
+ * 缺失/非法 → undefined，交由 createdAt/updatedAt 兜底。
+ */
+function readPublishedAtMs(agent?: Agent): number | undefined {
+  const raw = (agent as { publishedAt?: unknown } | undefined)?.publishedAt;
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const ms = toTimeMs(raw);
+  return ms > 0 ? ms : undefined;
+}
+
+/**
  * 根据本地与远程条目构建排序元信息
  */
 export function buildSortMeta(local?: Agent, remote?: Agent): SortMeta {
@@ -138,10 +149,17 @@ export function buildSortMeta(local?: Agent, remote?: Agent): SortMeta {
     toTimeMs(remote?.updatedAt ?? remote?.createdAt),
     toTimeMs(local?.updatedAt ?? local?.createdAt)
   );
-  const publishedAtMs = Math.max(
-    toTimeMs(remote?.createdAt),
-    toTimeMs(local?.createdAt)
+  // 上架时间优先级：记录上的 publishedAt（平台目录 agent 由
+  // agent-runtime/publicAgentCatalogOverride 从 catalog 的 releasedAtMs 写入）
+  // → 退回记录时间（createdAt/updatedAt）。此前 publishedAt 全仓无写入方，
+  // 这里恒等于 createdAt，新鲜度项恒 0 → 平台 agent 分数并列。
+  const explicitPublishedAtMs = firstFiniteNumber(
+    readPublishedAtMs(remote),
+    readPublishedAtMs(local)
   );
+  const publishedAtMs =
+    explicitPublishedAtMs ??
+    Math.max(toTimeMs(remote?.createdAt), toTimeMs(local?.createdAt));
 
   const outputPriceNum = firstFiniteNumber(
     (remote as any)?.outputPrice,

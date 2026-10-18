@@ -57,6 +57,20 @@ export type BuiltinAgentCatalogEntry = {
    */
   lifecycle?: "active" | "retired";
   /**
+   * 上架时间（毫秒时间戳，一律写 UTC 零点）。
+   *
+   * 广场「综合排序」（`ai/agent/utils/sortUtils` 的新鲜度项 + 冷启动加成）唯一
+   * 可信的时间真值：此前排序读 `publishedAt`，但全仓没有写入方（恒 0），新鲜度
+   * 项恒 0 → 所有平台 agent 分数并列 → 落到 id 字典序兜底，新上架的 Claude
+   * Sonnet 5.5 在 /explore 里排到最后。本字段经
+   * `agent-runtime/publicAgentCatalogOverride` 透传到记录的 `publishedAt`。
+   *
+   * 填写纪律：只填**代码注释里明确写出了日期**的条目（注明出处），拿不到就留空
+   * ——留空 = 「未知」，新鲜度 0，禁止按感觉补一个日期（会把排序口径变成猜的）。
+   * 用户自建 agent 永远不走本字段。
+   */
+  releasedAtMs?: number;
+  /**
    * true = 需要运行时兜底（@nolo 引导 / quick-chat 档位 / Kimi K2.6 兼容）。
    * 记录在本地/远端缺失时，runtime 用目录合成配置，保证进站即用。
    * 2026-09-10 兜底最小化：广场档与图片助手不再兜底（记录缺失时明确 404）。
@@ -68,6 +82,15 @@ export type BuiltinAgentCatalogEntry = {
   imageWorkflow?: "generate" | "edit" | "continuous";
   imageConfig?: { enabled: boolean };
 };
+
+/**
+ * catalog 上架时间写法：只接受 `YYYY-MM-DD` 并落到 UTC 零点。
+ * 用 `new Date("2026-09-28")` 也行，但显式 UTC 零点能避免后来的人写成
+ * `new Date(2026, 8, 28)`（本地时区）把日期漂成前一天。
+ */
+function releasedAt(isoDate: string): number {
+  return Date.parse(`${isoDate}T00:00:00.000Z`);
+}
 
 export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   // ── 平台内置 6 个（builtinAgents BUILTIN_*）──
@@ -258,6 +281,8 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "Claude Fable 5.1",
     provider: "nolo",
     model: "anthropic/claude-fable-5-1",
+    // 2026-09-24 广场重新上架（见上方 2026-09-24 上架注释）——上架时间真值。
+    releasedAtMs: releasedAt("2026-09-24"),
   },
   {
     id: "01CLDOPU55PB00000001MQHSW0",
@@ -266,6 +291,8 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "Claude Opus 5.5",
     provider: "nolo",
     model: "anthropic/claude-opus-5-5",
+    // 出处：ai/llm/platformHosted.ts 价格表注释「Claude Opus 5.5（2026-09-22 发布）」。
+    releasedAtMs: releasedAt("2026-09-22"),
   },
   {
     // ID = deterministicId("01CLSNET55PB", "shared-space-anthropic-claude-sonnet-5-5")，
@@ -277,6 +304,9 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "Claude Sonnet 5.5",
     provider: "nolo",
     model: "anthropic/claude-sonnet-5-5",
+    // 出处：ai/llm/platformHosted.ts「Claude Sonnet 5.5（2026-09-28 发布）」+
+    // platformHostedRoutingTable.ts「2026-09-28 发布，替换上一代 Sonnet 5 上架」。
+    releasedAtMs: releasedAt("2026-09-28"),
   },
   {
     id: "01GEM37FLPB00000000FJCRNC",
@@ -349,6 +379,24 @@ export function builtinAgentCatalogEntryById(
 ): BuiltinAgentCatalogEntry | undefined {
   if (!id) return undefined;
   return CATALOG_BY_ID.get(id);
+}
+
+/**
+ * 目录条目的上架时间（毫秒）；非 catalog ID / 未填日期一律 undefined。
+ *
+ * 未填 = 「未知」，不是 0：调用方据此区分「catalog 没给」与「catalog 说是 1970」。
+ * 目前填了日期的只有 Claude 三档（Fable 5.1 / Opus 5.5 / Sonnet 5.5）；GPT-6 Luna
+ * 刻意留空——catalog 注释写「2026-09-23 换代」、价格页注释写「2026-09-22 上线」，
+ * 两个都是代码注释但日期不一致，不猜，留空按未知处理。
+ */
+export function catalogReleasedAtMs(
+  id: string | undefined | null,
+): number | undefined {
+  const value = builtinAgentCatalogEntryById(id)?.releasedAtMs;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return value;
 }
 
 /** 所有需要运行时兜底的目录条目（nolo + quick-chat 档位 + Kimi K2.6 兼容） */

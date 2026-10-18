@@ -9,6 +9,8 @@
  *
  * - 运行时字段（name / provider / model）以 catalog 为准；
  * - 内容字段（introduction / greeting / prompt / tools / tags）以 seed 为准；
+ * - 上架时间 `publishedAt`（毫秒）由 catalog 的 `releasedAtMs` 补缺：记录自带
+ *   合法值时保留，缺失时以 catalog 为准（广场综合排序新鲜度项的真值来源）；
  * - DB 记录只决定「存在性 / 硬 key 可解析」，不再决定平台 agent 的字段真值。
  *
  * 作用域（硬约束）：
@@ -29,6 +31,7 @@
 
 import {
   builtinAgentCatalogEntryById,
+  catalogReleasedAtMs,
   isRetiredCatalogEntry,
 } from "core/builtinAgentCatalog";
 import { PUBLIC_AGENT_DEFS, type AgentSeedConfig } from "core/publicAgentSeeds";
@@ -40,6 +43,8 @@ export type PublicAgentCatalogOverride = {
   name: string;
   provider: string;
   model: string;
+  /** catalog 托管：上架时间（毫秒）；未填日期时为 undefined（= 未知） */
+  releasedAtMs?: number;
   /** seed 托管：内容字段 */
   introduction: string;
   greeting: string | { text: string; menu?: unknown[] };
@@ -122,6 +127,7 @@ export function resolvePublicAgentCatalogOverride(
     name: entry.name,
     provider: entry.provider,
     model: entry.model,
+    releasedAtMs: catalogReleasedAtMs(entry.id),
     introduction: seed.introduction,
     greeting: seed.greeting,
     prompt: seed.prompt,
@@ -160,6 +166,26 @@ function overlayGreeting(
   return recordGreeting;
 }
 
+/** 毫秒时间戳取值：接受数字毫秒或可解析的日期字符串；非法/缺失 → undefined。 */
+function toEpochMs(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const ms = typeof value === "number" ? value : Date.parse(String(value));
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
+/**
+ * `publishedAt`（上架时间）写回规则：
+ * - 记录自带合法值 → 保留（其它写入方的真值优先，本模块只补缺）；
+ * - 记录缺失/非法 → 用 catalog 的 `releasedAtMs`；
+ * - catalog 也没填日期 → 不写字段（= 未知，排序退回 createdAt/updatedAt）。
+ */
+function overlayPublishedAt(
+  recordValue: unknown,
+  catalogValue: number | undefined,
+): number | undefined {
+  return toEpochMs(recordValue) ?? catalogValue;
+}
+
 /**
  * 把 catalog+seed 的真值盖到一条（原始形态的）public catalog agent 记录上。
  *
@@ -184,6 +210,8 @@ export function applyPublicAgentCatalogOverride<T extends object>(
 
   const current = record as Record<string, unknown>;
   const greeting = overlayGreeting(current.greeting, override.greeting);
+  // 上架时间：广场综合排序的新鲜度项读它（此前全仓无写入方，恒 0 → 分数并列）。
+  const publishedAt = overlayPublishedAt(current.publishedAt, override.releasedAtMs);
   return {
     ...record,
     name: override.name,
@@ -193,6 +221,7 @@ export function applyPublicAgentCatalogOverride<T extends object>(
     prompt: override.prompt,
     tools: [...override.tools],
     tags: [...override.tags],
+    ...(publishedAt !== undefined ? { publishedAt } : {}),
     ...(greeting !== undefined ? { greeting } : {}),
   };
 }

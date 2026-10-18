@@ -710,7 +710,24 @@ export const PLATFORM_HOSTED_DEEPSEEK_LITHOS_FALLBACK_STATUSES = [
   402, 408, 429, 500, 502, 503, 504,
 ] as const;
 
-export const platformHostedModels = [
+/**
+ * 目录用「发布 / 上架时间」毫秒值（喂 Model.releasedAtMs，见 ai/llm/types）。
+ *
+ * 一律走 Date.UTC：`Date.parse("2026-09-28")` 会按**本地时区**午夜解析，同一常量
+ * 在 UTC+8 与 UTC 机器上差 8 小时，跨时区 CI / 客户端会漂成前一天，新鲜度打分随之抖动。
+ * month 取自然月 1..12，内部转 0 基，省掉调用处「9 月写成 8」这类错误。
+ */
+const catalogReleasedAt = (year: number, month: number, day: number): number =>
+  Date.UTC(year, month - 1, day);
+
+/**
+ * 平台托管模型目录（客户端/价格页/广场的唯一来源）。
+ *
+ * 显式标注 `Model[]`：目录条目要提供 `releasedAtMs`（新鲜度）与 `featuredRank`
+ * （运营置顶）这两个**可选**目录字段，未标注时数组元素类型由字面量推断，
+ * 消费方（价格页/排序真值）拿不到这两个字段的类型信息。
+ */
+export const platformHostedModels: Model[] = [
   {
     name: PLATFORM_HOSTED_KIMI_K3_MODEL,
     displayName: "Kimi K3",
@@ -866,6 +883,8 @@ export const platformHostedModels = [
     displayName: "Claude Opus 5.5",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_CLAUDE_OPUS_5_5_PRICE },
+    // 2026-09-22 发布（出处：本条目注释与上方 PLATFORM_HOSTED_CLAUDE_OPUS_5_5_PRICE 注释）。
+    releasedAtMs: catalogReleasedAt(2026, 9, 22),
     maxOutputTokens: 128_000,
     contextWindow: 1_000_000,
     supportsTool: false,
@@ -876,6 +895,9 @@ export const platformHostedModels = [
     displayName: "Claude Fable 5.1",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE },
+    // 2026-09-24：代码注释未记录 Fable 5.1 的发布日，此值按编排者指定填入
+    // （与 Opus 5.5 / Sonnet 5.5 同代）。拿到官方日期后请以官方为准替换。
+    releasedAtMs: catalogReleasedAt(2026, 9, 24),
     maxOutputTokens: 4092,
     contextWindow: 1_000_000,
     supportsTool: false,
@@ -886,6 +908,8 @@ export const platformHostedModels = [
     displayName: "Claude Sonnet 5.5",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_CLAUDE_SONNET_5_5_PRICE },
+    // 2026-09-28 发布（出处：本条目注释与 PLATFORM_HOSTED_CLAUDE_SONNET_5_5_PRICE 注释）。
+    releasedAtMs: catalogReleasedAt(2026, 9, 28),
     maxOutputTokens: 128_000,
     contextWindow: 1_000_000,
     supportsTool: false,
@@ -909,6 +933,8 @@ export const platformHostedModels = [
     displayName: "GPT-6 Luna",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_GPT_6_LUNA_PRICE },
+    // 2026-09-22 随 GPT-6 Sol/Luna 上线（出处：PLATFORM_HOSTED_GPT_6_LUNA_PRICE 注释）。
+    releasedAtMs: catalogReleasedAt(2026, 9, 22),
     maxOutputTokens: 128_000,
     contextWindow: 1_050_000,
     supportsTool: true,
@@ -927,6 +953,8 @@ export const platformHostedModels = [
     displayName: "GPT-6.1 Sol",
     hasVision: false,
     price: { ...PLATFORM_HOSTED_GPT_6_1_SOL_PRICE },
+    // 2026-10-13 收进广场（= 平台上架日；出处：PLATFORM_HOSTED_GPT_6_1_SOL_PRICE 注释）。
+    releasedAtMs: catalogReleasedAt(2026, 10, 13),
     contextWindow: 1_050_000,
     supportsReasoningEffort: true,
   },
