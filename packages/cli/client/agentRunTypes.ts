@@ -195,6 +195,7 @@ export type RunAgentTurnOptions = {
   pastedTextStore?: CollapsedPasteStore;
   imageUrls?: string[];
   continueDialogId?: string;
+  freshDialog?: boolean;
   /** Preserve an auto Dialog while a concrete compatibility key executes this turn. */
   dialogAgentMode?: "auto" | "fixed";
   spaceId?: string;

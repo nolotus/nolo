@@ -2120,6 +2120,7 @@ async function runLocalAgentTurnForCli(
         }
       : undefined;
   const currentDialogId = options.continueDialogId ?? ulid();
+  const freshDialog = options.freshDialog ?? !options.continueDialogId;
 
   // Ownership stamp for workspace tools invoked inside this turn — background
   // processes (launchProcess / auto-detached execShell) capture it at spawn
@@ -2207,6 +2208,7 @@ async function runLocalAgentTurnForCli(
           }
         : {}),
       continueDialogId: currentDialogId,
+      ...(freshDialog ? { freshDialog: true } : {}),
       fileWriteSessionId: currentDialogId,
       fileWriteGateEnabled: resolveFileWriteGateEnabled(options.env),
       spaceId: options.spaceId,
@@ -2547,6 +2549,29 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   }
 
   if (runtimeMode === "auto" && shouldAttemptAutoLocal(options)) {
+    // Keep the raw adapter's preparation side effects paired with tools/provider
+    // execution. Only successful reads of this turn's target agent are reused;
+    // model overrides and ephemeral behavior remain layered above this snapshot.
+    const rawAdapter = resolveLocalRuntimeAdapter(options);
+    let config: Awaited<ReturnType<AgentRuntimeHostAdapter["loadAgentConfig"]>> | undefined;
+    const invalidateConfig = () => { config = undefined; };
+    if (rawAdapter) {
+      options = {
+        ...options,
+        localRuntimeAdapter: {
+          ...rawAdapter,
+          loadAgentConfig: async (agentRef) => {
+            if (agentRef !== options.agentKey) {
+              return rawAdapter.loadAgentConfig(agentRef);
+            }
+            if (config) return config;
+            const loaded = await rawAdapter.loadAgentConfig(agentRef);
+            if (loaded) config = loaded;
+            return loaded;
+          },
+        },
+      };
+    }
     const skipLocal = await shouldSkipAutoLocalForServerPlatformTools(options);
     if (!skipLocal) {
       const localResult = await runLocalAgentTurnForCli(options, {
@@ -2555,6 +2580,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
       if (localResult.exitCode === 0) {
         return foldLocalResultForTui(localResult);
       }
+      invalidateConfig();
       if (
         isMissingLocalAgentConfigError(localResult.localError, options.agentKey)
       ) {
@@ -2571,8 +2597,10 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
             if (retriedLocalResult.exitCode === 0) {
               return foldLocalResultForTui(retriedLocalResult);
             }
+            invalidateConfig();
           }
         } catch {
+          invalidateConfig();
           // Fall through to surface local runtime failure.
         }
       }

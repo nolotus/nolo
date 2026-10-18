@@ -21,6 +21,7 @@ import {
   PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
+  PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
   PLATFORM_HOSTED_GROK_4_6_MODEL,
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
   PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
@@ -187,6 +188,18 @@ export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE = {
   output: toPlatformCredits(50), // 400 credits
   cachingWrite: toPlatformCredits(12.5), // 100 credits
   cachingRead: toPlatformCredits(0.25), // 2 credits
+} as const;
+
+/**
+ * Claude Sonnet 5.5（2026-09-28 发布）：官方价与 Sonnet 5 完全一致——
+ * input → 16 credits，output → 80 credits，cachingWrite → 20 credits，
+ * cachingRead → 1.6 credits。
+ */
+export const PLATFORM_HOSTED_CLAUDE_SONNET_5_5_PRICE = {
+  input: toPlatformCredits(2), // 16 credits
+  output: toPlatformCredits(10), // 80 credits
+  cachingWrite: toPlatformCredits(2.5), // 20 credits
+  cachingRead: toPlatformCredits(0.2), // 1.6 credits
 } as const;
 
 /**
@@ -833,33 +846,11 @@ export const platformHostedModels = [
   },
   // Claude 系（Cloudflare Workers AI 上游）：全面支持 5m TTL 缓存写入与命中读取
   // （cachingWrite / cachingRead）；官方 API 统一按 Anthropic Messages 协议暴露。
-  {
-    name: PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
-    displayName: "Claude Sonnet 5",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE },
-    maxOutputTokens: 4092,
-    contextWindow: 1_000_000,
-    supportsTool: false,
-  },
-  {
-    name: PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
-    displayName: "Claude Opus 5",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_CLAUDE_OPUS_5_PRICE },
-    maxOutputTokens: 4092,
-    contextWindow: 1_000_000,
-    supportsTool: false,
-  },
-  {
-    name: PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
-    displayName: "Claude Fable 5",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_CLAUDE_FABLE_5_PRICE },
-    maxOutputTokens: 4092,
-    contextWindow: 1_000_000,
-    supportsTool: false,
-  },
+  //
+  // ⚠️ 2026-10-18：上一代 Sonnet 5 / Opus 5 / Fable 5 已从**上架目录**撤下（新装
+  // 客户端不再看到）。下架 ≠ 删除：对应的 PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE /
+  // OPUS_5 / FABLE_5 价格常量与 routing 条目一律保留，供存量 agent/消息记录继续
+  // 解析上游并计价，绝不因目录下架而让历史记录解析失败。
   {
     name: PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
     displayName: "Claude Haiku 4.5",
@@ -886,6 +877,16 @@ export const platformHostedModels = [
     hasVision: true,
     price: { ...PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE },
     maxOutputTokens: 4092,
+    contextWindow: 1_000_000,
+    supportsTool: false,
+  },
+  {
+    // Claude Sonnet 5.5（2026-09-28 发布）：官方价与 Sonnet 5 相同
+    name: PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
+    displayName: "Claude Sonnet 5.5",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_SONNET_5_5_PRICE },
+    maxOutputTokens: 128_000,
     contextWindow: 1_000_000,
     supportsTool: false,
   },

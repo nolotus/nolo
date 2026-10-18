@@ -16,6 +16,10 @@ import {
   PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
+  PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
+  PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE,
+  PLATFORM_HOSTED_CLAUDE_OPUS_5_PRICE,
+  PLATFORM_HOSTED_CLAUDE_FABLE_5_PRICE,
   getPlatformHostedDeepSeekV4Price,
   isPlatformHostedDeepSeekV4Model,
   isPlatformHostedImageModel,
@@ -366,7 +370,7 @@ const calculateCacheBasedCost = (
  *   regular = max(0, total - write - read)
  * 不能照搬既有两条路径（都会把 write 重复计费或漏价）。
  *
- * 【整合说明】Claude 分支只保留「6 个平台托管 Claude id 白名单 + 显式 write/read
+ * 【整合说明】Claude 分支只保留「7 个平台托管 Claude id 白名单 + 显式 write/read
  * 单价」这一层 gate；4 桶算术的唯一实现是下方 calculateCanonicalInputTotalCost，
  * 不再各留一份同样加法（合并时按 gpt sibling 的约定收敛）。
  */
@@ -377,12 +381,13 @@ const PLATFORM_CLAUDE_CANONICAL_INPUT_TOTAL_MODELS = [
   PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
+  PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
 ] as const;
 
 /**
  * 闸门 + 计算（CF canonical 口径）：返回 null 表示「不适用」，调用方回退既有路径。
  * 两个条件同时成立才启用：
- *   1. 模型名在这 6 个平台托管 Claude id 白名单内（其它目录模型语义未必包含式）；
+ *   1. 模型名在这 7 个平台托管 Claude id 白名单内（其它目录模型语义未必包含式）；
  *   2. 目录**显式**声明了 cachingWrite + cachingRead —— 缺任一项都不启用。
  * 算术委托给唯一实现 calculateCanonicalInputTotalCost，不重复加法。
  */
@@ -728,6 +733,23 @@ const calculatePayDistribution = (
   );
 };
 
+/**
+ * 已下架的目录条目 → 保留的价格常量（下架 ≠ 删除，2026-10-18）。
+ *
+ * `platformHostedModels` 是 `getModelConfig` 的数据源，条目一旦摘掉，存量的
+ * agent 配置 / 历史 token 记录（仍写着这些模型 id）就会落到本函数的 catch 兜底，
+ * 退化成零成本虚拟模型——历史用量白送 = 漏账。价格常量既然为兼容而保留，这里就
+ * 必须显式接回计价，语义与目录内条目完全一致（含 CF canonical 4 桶口径：
+ * 路由条目仍在，resolvePlatformCloudflareCacheCost 的 gate 照旧成立）。
+ */
+const DELISTED_PLATFORM_HOSTED_CLAUDE_PRICES: Readonly<
+  Record<string, ModelPrice>
+> = {
+  [PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL]: PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE,
+  [PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL]: PLATFORM_HOSTED_CLAUDE_OPUS_5_PRICE,
+  [PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL]: PLATFORM_HOSTED_CLAUDE_FABLE_5_PRICE,
+};
+
 export const calculatePrice = ({
   modelName,
   usage,
@@ -801,6 +823,28 @@ export const calculatePrice = ({
       );
       const costs = calculateBasicCost(
         hostedModel,
+        usage,
+        provider,
+        externalPrice,
+        billingServiceTier,
+        nowMs
+      );
+      const pay = calculatePayDistribution(costs, externalPrice, sharingLevel);
+      return { cost: sanitizeCost(costs.charge), pay };
+    }
+
+    // 已下架仍在计价的平台托管 Claude：按保留价目还原真实的 Model，
+    // 而不是零成本虚拟模型（否则下架即等于历史用量免费）。
+    const delistedPrice =
+      DELISTED_PLATFORM_HOSTED_CLAUDE_PRICES[asTrimmedLowercaseString(modelName)];
+    if (provider === "nolo" && delistedPrice) {
+      const delistedModel: Model = {
+        name: modelName,
+        hasVision: true,
+        price: delistedPrice,
+      };
+      const costs = calculateBasicCost(
+        delistedModel,
         usage,
         provider,
         externalPrice,

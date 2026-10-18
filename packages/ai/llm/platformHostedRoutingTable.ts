@@ -25,6 +25,9 @@ export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL = "anthropic/claude-haiku-4-5
 // 模型名同名（anthropic/claude-* 前缀是 DeepInfra 的官方 id 形态）。
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL = "anthropic/claude-opus-5-5";
 export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL = "anthropic/claude-fable-5-1";
+// Claude Sonnet 5.5（2026-09-28 发布）：与 Sonnet 5 同价，替换上一代 Sonnet 5 上架。
+export const PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL =
+  "anthropic/claude-sonnet-5-5";
 
 /**
  * Cloudflare Workers AI / AI Gateway 上游官方 Catalog 模型 ID。
@@ -44,6 +47,8 @@ export const CLOUDFLARE_CLAUDE_OPUS_5_5_UPSTREAM_MODEL_ID =
   "anthropic/claude-opus-5.5";
 export const CLOUDFLARE_CLAUDE_FABLE_5_1_UPSTREAM_MODEL_ID =
   "anthropic/claude-fable-5.1";
+export const CLOUDFLARE_CLAUDE_SONNET_5_5_UPSTREAM_MODEL_ID =
+  "anthropic/claude-sonnet-5.5";
 
 /**
  * Cloudflare AI 统一 Messages 端点占位模板。
@@ -359,6 +364,17 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     usageProvider: "cloudflare",
     keyName: "cloudflare",
     upstreamModelId: CLOUDFLARE_CLAUDE_FABLE_5_1_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
+    agentRunHosted: true,
+  },
+  // Claude Sonnet 5.5（2026-09-28 发布，与 opus-5-5 同通道同协议）：
+  // 目录侧它以新 id 上架，补齐这条路由；上一代 sonnet-5 的路由条目**保留**，
+  // 供存量记录继续解析上游（下架 ≠ 删除）。
+  [PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL]: {
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_SONNET_5_5_UPSTREAM_MODEL_ID,
     wire: "anthropic.messages",
     agentRunHosted: true,
   },

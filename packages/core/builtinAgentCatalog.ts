@@ -268,6 +268,17 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     model: "anthropic/claude-opus-5-5",
   },
   {
+    // ID = deterministicId("01CLSNET55PB", "shared-space-anthropic-claude-sonnet-5-5")，
+    // 与 PUBLIC_AGENT_DEFS 里的 CLAUDE_SONNET_5_5_DEF 逐字一致（builtinAgents.identity
+    // 测试做 1:1 交叉断言）。
+    id: "01CLSNET55PB000000009P2SAA",
+    group: "public",
+    lifecycle: "active",
+    name: "Claude Sonnet 5.5",
+    provider: "nolo",
+    model: "anthropic/claude-sonnet-5-5",
+  },
+  {
     id: "01GEM37FLPB00000000FJCRNC",
     group: "public",
     name: "Gemini 3.8 Flash",

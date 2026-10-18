@@ -69,7 +69,33 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
   // 一等模型，存量 pro 记录留在 pro。
   // Claude 系 2026-09-15 起恢复为真实平台托管（DeepInfra 官方上游，
   // anthropic/claude-{fable,opus,sonnet}-5 + haiku-4-5），存量 claude 记录
-  // 不再迁移，直接命中路由表的真实 Claude 分流。
+  // 不再被改写到 GLM/DeepSeek，直接命中路由表的真实 Claude 分流。
+  // 2026-09-24 / 09-28 起平台只托管最新一代（Opus 5.5 / Fable 5.1 / Sonnet 5.5）：
+  // 旧代 nolo 记录在同一 nolo 命名空间内换代升级，目标必须已登记上游路由
+  // （platformHostedRoutingTable.ts）与平台价（platformHosted.ts），否则计费落
+  // 零价虚拟模型（2026-09-24 Sol/Luna 教训）。
+  // 模型 id 由用户自填，平台不改写。
+  {
+    from: { provider: "nolo", model: "anthropic/claude-sonnet-5" },
+    to: { provider: "nolo", model: "anthropic/claude-sonnet-5-5" },
+    reason:
+      "Sonnet 5 升级为 Sonnet 5.5（2026-09-28 起平台新一代）：官方价与 Sonnet 5 完全一致——$2/$10 每 1M、5m 缓存写 $2.50、5m 缓存读 $0.20（×8 折积分），换代不涨价",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "anthropic/claude-opus-5" },
+    to: { provider: "nolo", model: "anthropic/claude-opus-5-5" },
+    reason:
+      "Opus 5 升级为 Opus 5.5（2026-09-24 起的平台新一代）：官方价 $4/$20、5m 缓存写 $5.00 / 缓存读 $0.20 每 1M（×8 折积分），比 Opus 5 的 $5/$25、缓存读 $0.50 更便宜，换代降价",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "anthropic/claude-fable-5" },
+    to: { provider: "nolo", model: "anthropic/claude-fable-5-1" },
+    reason:
+      "Fable 5 升级为 Fable 5.1（2026-09-24 起的平台新一代）：官方价 $10/$50 每 1M 不变（缓存写 $12.50 不变），5m 缓存读由 $1.00 降到 $0.25，换代不涨价",
+    kind: "upgrade",
+  },
   {
     from: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3" },
     to: { provider: "nolo", model: "deepseek-flash" },

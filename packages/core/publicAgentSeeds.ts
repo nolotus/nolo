@@ -380,6 +380,24 @@ export const CLAUDE_OPUS_5_5_DEF = defineAgentSeed({
   tags: ["anthropic", "claude", "opus"],
 });
 
+export const CLAUDE_SONNET_5_5_DEF = defineAgentSeed({
+  id: deterministicId("01CLSNET55PB", "shared-space-anthropic-claude-sonnet-5-5"),
+  presetKey: "claude-sonnet-5-5",
+  name: "Claude Sonnet 5.5",
+  provider: "nolo",
+  model: "anthropic/claude-sonnet-5-5",
+  isPublic: true,
+  hasVision: true,
+  introduction:
+    "Claude Sonnet 5.5 公开助手，敏捷快档，适合日常复杂问答、代码编写和图片理解。",
+  greeting:
+    "你好，我是 Claude Sonnet 5.5。适合日常复杂问答、写代码、改代码和图片理解。",
+  prompt:
+    "先确认用户要解决的具体问题，再给出准确、可执行的结果；涉及代码时说明改动点与验证方式。",
+  tools: [],
+  tags: ["anthropic", "claude", "sonnet"],
+});
+
 export const GROK_4_6_DEF = defineAgentSeed({
   id: deterministicId("01GROK46PLAZ", "shared-space-xai-grok-4-6"),
   presetKey: "grok-4.6",
@@ -578,6 +596,7 @@ export const PUBLIC_AGENT_DEFS = [
   GLM_5_3_FLASH_DEF,
   CLAUDE_FABLE_5_1_DEF,
   CLAUDE_OPUS_5_5_DEF,
+  CLAUDE_SONNET_5_5_DEF,
   GROK_4_6_DEF,
   GEMINI_3_8_FLASH_DEF,
   GEMINI_4_ARGON_DEF,
