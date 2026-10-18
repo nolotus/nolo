@@ -193,6 +193,12 @@ export type AgentRuntimeSaveTurnInput = {
   category?: string;
   inheritedFromDialogKey?: string;
   parentDialogId?: string;
+  /**
+   * When true, this turn belongs to a brand-new dialog created in this session.
+   * Host storage backends (e.g. writeDialog) can safely skip remote fallback
+   * lookup for existingDialog because the dialog record cannot exist yet.
+   */
+  freshDialog?: boolean;
 };
 
 export type AgentRuntimeDialogSummary = {
@@ -215,11 +221,47 @@ export type AgentRuntimeDialogSummary = {
   schemaVersion?: unknown;
 };
 
+/**
+ * Where a continued dialog's history came from on the last load.
+ *
+ * - `local`   — the host's own store had messages (offline-first path, no network).
+ * - `remote`  — the local store was empty; history was fetched from the server
+ *               (cross-machine resume: the dialog lives on another machine).
+ * - `partial` — history was returned but must not be trusted as a complete
+ *               restore: the host's remote read produced damaged/truncated
+ *               records (e.g. a tool call without its result, or an orphan tool
+ *               result), or the fallback could not run/verify. Callers must warn
+ *               instead of treating it as a full resume.
+ * - `none`    — no history was available: local empty and the remote fallback
+ *               failed / was unauthenticated / 404'd / returned nothing. The turn
+ *               runs without prior context, so callers must treat this as an
+ *               explicit "history not loaded" signal rather than a new dialog.
+ */
+export type AgentRuntimeDialogHistorySource = "local" | "remote" | "partial" | "none";
+
+export type AgentRuntimeDialogHistoryLoadResult = {
+  messages: AgentRuntimeChatMessage[];
+  source: AgentRuntimeDialogHistorySource;
+};
+
 export type AgentRuntimeHostAdapter = {
   host: AgentRuntimeHost;
   capabilities: string[];
   loadAgentConfig(agentRef: string): Promise<AgentRuntimeAgentConfig | null>;
   loadDialogHistory(dialogId: string): Promise<AgentRuntimeChatMessage[]>;
+  /**
+   * Source-aware variant of `loadDialogHistory` (optional).
+   *
+   * `loadDialogHistory` returns only the messages, so a caller cannot tell an
+   * empty-but-real dialog from a failed cross-machine restore — both look like
+   * a brand-new conversation. Hosts that implement remote fallback (CLI) expose
+   * this so the loop can log / surface `source: "none"` instead of silently
+   * starting from zero. Callers MUST fall back to `loadDialogHistory` when this
+   * method is absent (desktop/web hosts keep the plain array contract).
+   */
+  loadDialogHistoryWithSource?(
+    dialogId: string,
+  ): Promise<AgentRuntimeDialogHistoryLoadResult>;
   saveTurn(input: AgentRuntimeSaveTurnInput): Promise<{
     dialogId: string;
     title?: string;

@@ -16,7 +16,7 @@ import type { LongTextCellInfo } from "./LongTextDialog";
 
 export interface KanbanBoardProps {
     tableId?: string;
-    kanbanGroups: Array<{ groupValue: string; rows: any[] }>;
+    kanbanGroups: Array<{ groupValue: string; groupLabel?: string; rows: any[] }>;
     kanbanDetailColumns: any[];
     kanbanDropTargetGroup: string | null;
     draggingRowKey: string | null;
@@ -63,7 +63,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         <div className="table-page__kanban-board">
             {kanbanGroups.map((group) => {
                 const isGroupDropTarget = kanbanDropTargetGroup === group.groupValue;
-                const headerInfo = getKanbanStatusHeaderInfo(group.groupValue);
+                const headerInfo = getKanbanStatusHeaderInfo(group.groupLabel ?? group.groupValue);
                 return (
                     <div
                         className={
@@ -84,14 +84,19 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                     }}
                                 >
                                     {headerInfo.icon}
-                                    <span>{group.groupValue}</span>
+                                    <span>{group.groupLabel ?? group.groupValue}</span>
                                 </span>
                                 <span className="table-page__kanban-count-pill">{group.rows.length}</span>
                             </div>
                         </div>
 
                         <div className="table-page__kanban-cards">
-                            {group.rows.map((row: any) => {
+                            {group.rows.length === 0 ? (
+                                <div className="table-page__kanban-empty-lane">
+                                    暂无卡片
+                                </div>
+                            ) : (
+                                group.rows.map((row: any) => {
                                 const isCardDragging = draggingRowKey === row.dbKey;
                                 const isDropTarget = dropTarget && dropTarget.rowDbKey === row.dbKey;
                                 const dropPos = isDropTarget ? dropTarget.position : null;
@@ -117,9 +122,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                     >
                                         <div className="table-page__kanban-card-top">
                                             <div className="table-page__kanban-card-title-row">
-                                                <span className="table-page__kanban-drag-handle">
-                                                    <LuGripVertical size={14} aria-hidden="true" />
-                                                </span>
                                                 <button
                                                     type="button"
                                                     className="table-page__kanban-card-title"
@@ -213,7 +215,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                         </div>
                                     </div>
                                 );
-                            })}
+                            }))}
                         </div>
                     </div>
                 );

@@ -3088,3 +3088,58 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
     height: var(--tap-target-min);
   }
 }
+
+/* Topbar 表格专属居中标题槽 */
+.topbar__table-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100vw - 320px));
+}
+
+.topbar__table-icon-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.topbar__table-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+}
+
+.topbar__table-title-text {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  border: none;
+  background: transparent;
+  padding: 4px 8px;
+  border-radius: var(--btn-radius, 6px);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  transition: background-color 0.15s ease;
+}
+
+.topbar__table-title-text:hover {
+  background: var(--backgroundHover, rgba(0, 0, 0, 0.05));
+}
+
+.topbar__table-title-input {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  border: 1px solid var(--primary);
+  border-radius: var(--btn-radius, 6px);
+  background: var(--background);
+  padding: 3px 8px;
+  outline: none;
+  min-width: 140px;
+}

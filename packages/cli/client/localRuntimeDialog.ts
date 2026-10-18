@@ -38,6 +38,7 @@ import {
   localTurnHasSubjectRefs,
 } from "./cliAgentConfigHelpers";
 import { buildLocalDialogWritePlan } from "./localDialogRecords";
+import { markLocalDialogHistoryOriginComplete } from "./cliDialogHistoryState";
 import { syncLocalDialogEvidenceToRemote } from "./cliRemoteDialogSync";
 import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
 import { buildDialogFallbackTitleFromUserInput } from "../../chat/dialog/dialogTitle";
@@ -395,7 +396,15 @@ export async function writeDialog(args: {
   let existingDialog: any = null;
   if (args.input.continueDialogId) {
     const dialogKey = `dialog-${args.userId}-${args.input.continueDialogId}`;
-    existingDialog = await args.store.read(dialogKey);
+    // 安全前提：落库 key 由 dialogWritePlan 的 continueDialogId || createId() 决定，
+    // 因此 fresh 时 key 必为本进程新铸、远端不可能存在。
+    // 本路径只读本地（remote: false，亚毫秒），不触发远端兜底，避免新会话首轮白等读取超时。
+    // 注意：这里信任调用方给的 freshDialog。若把已有会话误标为 fresh，本地读不到旧记录，
+    // 记录会按默认值重建（spaceId/createdAt/手工标题可能丢失），因此调用方只能在
+    // 「本进程刚生成新 dialogId」时置真——见 agentRun.ts 的 freshDialog 推导。
+    existingDialog = args.input.freshDialog
+      ? await args.store.read(dialogKey, { remote: false })
+      : await args.store.read(dialogKey);
   }
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);
@@ -483,6 +492,27 @@ export async function writeDialog(args: {
   }
 
   await args.store.batch(plan.ops);
+
+  // 本机首次创建这条 dialog（没有 continueDialogId，即这一轮就是它的第一轮）：
+  // 它的历史在本机是完整的（不存在更早的远端前缀），显式落一条完整性标记，
+  // 后续续聊才能走「本地已确知完整」的快路径——否则每一轮都会去联网回退，离线/
+  // 未登录时还会被误判成「历史不完整」而反复告警。
+  //
+  // 只在没有任何标记时写：已有标记说明这条对话走过远端恢复路径，完整性由加载器
+  // 判定（一次失败的回退留下的 complete:false 绝不能被「本轮把消息存下来了」升级）。
+  if (!args.input.continueDialogId) {
+    const marked = await markLocalDialogHistoryOriginComplete({
+      store: args.store,
+      dialogId: plan.dialogId,
+      messageCount: args.input.messages.length,
+    });
+    if (!marked) {
+      diagLog.info(
+        `dialog-history: local-origin completeness not recorded for ${plan.dialogId} (existing state or write failure)`,
+      );
+    }
+  }
+
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);
     diagLog.info(`perf writeDialog C:store-batch (cumulative): ${ms}ms`);
@@ -701,7 +731,7 @@ export async function loadCliDialogLastContextUsage(args: {
   dialogId: string;
 }): Promise<{ inputTokens?: number } | null> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
-  const record = await args.store.read(dialogKey);
+  const record = await args.store.read(dialogKey, { remote: false });
   if (!record || typeof record !== "object") return null;
   const lastInputTokens = (record as any).lastInputTokens;
   if (

@@ -68,12 +68,12 @@ export const ANTIGRAVITY_CLOUD_CODE_BASE_URL =
   "https://daily-cloudcode-pa.googleapis.com";
 
 /** Generic legacy host; kept for the official host table below. */
-const ANTIGRAVITY_CLOUD_CODE_HOST = "cloudcode-pa.googleapis.com";
+export const ANTIGRAVITY_CLOUD_CODE_HOST = "cloudcode-pa.googleapis.com";
 
 /**
  * 官方 Cloud Code host 表（**显式**，用于解析后的 hostname 比对）。
  * - `cloudcode-pa.googleapis.com`：legacy 泛域（存量记录形态，会被升级到 daily）；
- * - `daily-cloudcode-pa.googleapis.com`：Antigravity 生产档（在册 agent 的形态）。
+ * - `daily-cloudcode-pa.googleapis.com`：Antigravity 生产档（用户 4 个在册 agent 的形态）。
  */
 export const ANTIGRAVITY_CLOUD_CODE_HOSTS = [
   ANTIGRAVITY_CLOUD_CODE_HOST,
@@ -92,7 +92,8 @@ export const ANTIGRAVITY_CLOUD_CODE_HOSTS = [
  *   - `attacker.example/?u=cloudcode-pa.googleapis.com`  （query 里带官方串）
  *   - `attacker.example/cloudcode-pa.googleapis.com`     （path 里带官方串）
  * 现在只认 `new URL(...)` 解析出的 hostname，且必须**恰好**等于官方 host 表里的一项
- * （不做任何前缀/后缀/子串匹配）。
+ * （不做任何前缀/后缀/子串匹配）。口径与仓库既有的
+ * `oauthUpstreamEndpoints.isGenericOAuthUpstreamUrlAllowed`（解析 + 精确 host）同构。
  *
  * 注：`cloudcode-pa.googleapis.com` 的**前缀标签变体**（`daily-cloudcode-pa…`、
  * `custom-cloudcode-pa…`）与官方 host 之间隔着一个连字符，不是它的子域 —— 因此
@@ -100,7 +101,7 @@ export const ANTIGRAVITY_CLOUD_CODE_HOSTS = [
  * 就在这里加一项）。未列出的 host 一律回落到官方常量（fail-safe，不是 fail-closed）。
  */
 export function isAntigravityCloudCodeHostname(
-  rawHost: string | null | undefined
+  rawHost: string | null | undefined,
 ): boolean {
   const hostname = asTrimmedLowercaseString(rawHost ?? "").replace(/\.+$/, "");
   if (!hostname) return false;
@@ -112,7 +113,7 @@ export function isAntigravityCloudCodeHostname(
  * 回落到官方常量）。
  */
 export function isAntigravityCloudCodeBaseUrl(
-  raw: string | null | undefined
+  raw: string | null | undefined,
 ): boolean {
   const value = typeof raw === "string" ? raw.trim() : "";
   if (!value) return false;
@@ -122,7 +123,6 @@ export function isAntigravityCloudCodeBaseUrl(
     return false;
   }
 }
-
 /** Exact generic host to upgrade to the production Antigravity host. */
 const ANTIGRAVITY_LEGACY_GENERIC_BASE_RE =
   /^https?:\/\/cloudcode-pa\.googleapis\.com$/i;

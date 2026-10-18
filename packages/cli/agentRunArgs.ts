@@ -47,6 +47,14 @@ export type ParsedAgentRunArgs = {
   subjectRefs?: Array<{ kind: string; id: string; role?: string }>;
   allowedToolNames?: string[];
   blockedToolNames?: string[];
+  /**
+   * `--machine-shell`：显式申请把本 run 派发到绑定机器，并在那里执行 shell。
+   * 与 `--allowed-tool execShell` 不同——后者只影响模型可见工具面，本开关把
+   * 「runtimeTools: ["execShell"]」作为请求级字段随 runtimeContext 上行，由服务端
+   * 白名单取值后并入 runtime tool policy（sandbox/审批/审计仍由 web 基线给出）。
+   * 要求 agent 记录有 runtimeBinding.machineId，否则命令直接报错退出。
+   */
+  machineShell: boolean;
   background: boolean;
   noStream: boolean;
   /**
@@ -140,6 +148,7 @@ const VALUELESS_FLAGS: Record<string, true> = {
   "--ephemeral": true,
   "--memory-only": true,
   "--read-only": true,
+  "--machine-shell": true,
 };
 
 function isValuelessFlag(arg: string): boolean {
@@ -233,7 +242,7 @@ export function writeUsage(
   }
   output.write(
     "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
-      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
+      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--machine-shell] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
   );
 }
 
@@ -341,6 +350,7 @@ export function parseAgentRunArgs(
         : {}),
     background: args.includes("--bg"),
     noStream: args.includes("--no-stream"),
+    machineShell: args.includes("--machine-shell"),
     ...(continueDialogId ? { continueDialogId } : {}),
     ...(!continueDialogId && spaceId ? { spaceId } : {}),
     ...(category ? { category } : {}),
