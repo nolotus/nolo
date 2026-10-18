@@ -680,6 +680,8 @@ const handleOpenDeleteConfirm = useCallback(async () => {
     pageKey,
     routeAppKey,
     contentKeyType,
+    tableMeta,
+    canEditCurrentContent,
     appDetail,
     refetchApp,
     appPrimaryUrl,

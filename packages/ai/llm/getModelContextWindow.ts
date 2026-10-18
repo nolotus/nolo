@@ -259,17 +259,22 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
 }
 
 /**
- * 根据模型名称获取 Context Window 大小
+ * 解析模型名称的 Context Window，**不套 DEFAULT 兜底**。
+ *
+ * 与 `getModelContextWindow` 共用同一条解析链（精确索引 → 通道 pin → fuzzy），
+ * 唯一差别是 miss 返回 `undefined` 而不是 256k。需要区分「查到了」与「不知道」
+ * 的调用方用这个——把 256k 当成真值去算百分比，会把 1M 的模型显示成虚高 4 倍。
+ *
  * @param modelName 模型名称或显示名（如 "qwen3.8-max" / "Qwen3.8 Max"）
  * @param provider 可选：已知的通道 / provider。平台托管通道（provider 命中平台
  *   托管）下，通道专属 id 返回平台目录真值；缺省时按 id 的通道真值解析。
- * @returns Context Window 大小（tokens）
+ * @returns Context Window 大小（tokens）；解析不出时 undefined
  */
-export const getModelContextWindow = (
+export const findModelContextWindow = (
   modelName: string,
   provider?: string | null,
-): number => {
-  if (!modelName) return DEFAULT_CONTEXT_WINDOW;
+): number | undefined => {
+  if (!modelName) return undefined;
 
   // 显式平台通道：允许用平台目录（CF）真值；否则一律按 id 的通道真值解析。
   const onPlatformChannel = isPlatformManagedProvider(provider, modelName);
@@ -315,7 +320,7 @@ export const getModelContextWindow = (
       }
       return typeof model.contextWindow === "number"
         ? model.contextWindow
-        : DEFAULT_CONTEXT_WINDOW;
+        : undefined;
     }
   }
 
@@ -324,8 +329,19 @@ export const getModelContextWindow = (
     if (pinned !== undefined) return pinned;
   }
 
-  return fuzzyContextWindow(normalizedName) ?? DEFAULT_CONTEXT_WINDOW;
+  return fuzzyContextWindow(normalizedName);
 };
+
+/**
+ * 根据模型名称获取 Context Window 大小（精确表与 fuzzy 都 miss 时落 256k）。
+ *
+ * 语义 = `findModelContextWindow(...) ?? DEFAULT_CONTEXT_WINDOW`，与本函数历史行为
+ * 逐字一致；只是把「查到了」和「查不到」的区分能力留在 `findModelContextWindow` 里。
+ */
+export const getModelContextWindow = (
+  modelName: string,
+  provider?: string | null,
+): number => findModelContextWindow(modelName, provider) ?? DEFAULT_CONTEXT_WINDOW;
 
 /**
  * 获取模型的完整信息。
