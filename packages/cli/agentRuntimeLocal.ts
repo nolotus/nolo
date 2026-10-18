@@ -8,6 +8,7 @@ export {
   hasDirectOpenAiCompatibleProvider,
   createHybridRecordStore,
   executeLocalToolWithPolicy,
+  runExecShellGates,
   buildAgentRuntimeAgentLookupKeys,
   buildAgentRuntimeDialogWritePlan,
   dialogMessageRecordToAgentRuntimeMessage,

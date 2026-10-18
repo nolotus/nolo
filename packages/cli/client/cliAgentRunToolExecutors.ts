@@ -352,6 +352,14 @@ async function assertCredentialFanoutAllowed(
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
+    if (args.runtimeKey !== undefined) {
+      const trimmed = typeof args.runtimeKey === "string" ? args.runtimeKey.trim() : "";
+      if (trimmed !== "local") {
+        throw new Error(
+          `startAgentRun 暂不支持在当前 CLI 宿主派发到指定执行位置 "${String(args.runtimeKey)}"：CLI 宿主仅支持本地派发。请在支持该执行位置的宿主（桌面端或服务端）派发，或省略 runtimeKey 在本地运行。`
+        );
+      }
+    }
     const rawAgentKey = typeof args.agentKey === "string" ? args.agentKey.trim() : "";
     const agentKey =
       (!rawAgentKey || rawAgentKey.toLowerCase() === "self")

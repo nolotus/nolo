@@ -2067,11 +2067,49 @@ async function refreshMissingLocalAgentConfig(options: RunAgentTurnOptions) {
   return Boolean(agentConfig);
 }
 
+/**
+ * run 级收尾：释放本机 OS 沙盒 lease（H3）。bwrap lease 持有常驻进程，只有
+ * `release` 才 kill，所以**正常结束、abort、抛错**三条出口都必须经过这里。
+ * 幂等；adapter 未实现该 CLI 专有方法（非 CLI adapter / 测试假 adapter）时
+ * no-op；释放失败不改变 run 结果（lease 随进程退出失效）。
+ */
+async function releaseAdapterSandboxWorkload(
+  adapter: AgentRuntimeHostAdapter | undefined,
+): Promise<void> {
+  const release = (
+    adapter as { releaseLocalSandboxWorkload?: () => Promise<void> } | undefined
+  )?.releaseLocalSandboxWorkload;
+  if (typeof release !== "function") return;
+  try {
+    await release.call(adapter);
+  } catch {
+    // 收尾失败不得覆盖 run 结果。
+  }
+}
+
 async function runLocalAgentTurnForCli(
   options: RunAgentTurnOptions,
   settings: { reportFailure: boolean },
 ): Promise<RunAgentTurnResult> {
+  // 同一个 adapter 实例贯穿整个 run（factory 每次调用都新建实例，所以这里只
+  // 解析一次并往下传：收尾要释放的必须是真正跑过命令的那个实例）。
   const resolvedBaseAdapter = resolveLocalRuntimeAdapter(options);
+  try {
+    return await runLocalAgentTurnForCliWithAdapter(
+      options,
+      settings,
+      resolvedBaseAdapter,
+    );
+  } finally {
+    await releaseAdapterSandboxWorkload(resolvedBaseAdapter);
+  }
+}
+
+async function runLocalAgentTurnForCliWithAdapter(
+  options: RunAgentTurnOptions,
+  settings: { reportFailure: boolean },
+  resolvedBaseAdapter: AgentRuntimeHostAdapter | undefined,
+): Promise<RunAgentTurnResult> {
   const baseAdapter = (() => {
     let adapter =
       resolvedBaseAdapter && options.modelOverride
