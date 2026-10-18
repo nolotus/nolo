@@ -235,10 +235,14 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     agentRunHosted: true,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
+  // 同一模型的旧公开 id（点号）：RunInfra 只认连字符 id，必须显式 remap，
+  // 否则会把 "glm-5.3-flash" 直传给上游并拿到
+  // `Model 'glm-5.3-flash' is not available as a verified deployment`（404）。
   "glm-5.3-flash": {
     endpoint: "https://api.runinfra.ai/v1/chat/completions",
     usageProvider: "runinfra",
     keyName: "runinfra",
+    upstreamModelId: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
     wire: "chat.completions",
     agentRunHosted: true,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,

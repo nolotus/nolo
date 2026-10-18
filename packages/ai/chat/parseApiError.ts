@@ -272,6 +272,16 @@ export async function parseApiError(response: Response): Promise<string> {
 
 export type GenerationErrorCategory = "config_protocol" | "empty" | "policy" | "quota" | "transient";
 
+/**
+ * 上游鉴权失败（401/403）与「协议/工具不兼容」是两种完全不同的故障：
+ * 前者通常是平台侧凭据（平台托管）或用户自己的 Key 失效，后者是请求形状问题。
+ * 沿用 `config_protocol` 分类以免下游图标/动作表跟着改，但文案必须说清是哪一种，
+ * 否则用户会以为「工具通信坏了」而反复自查提示词。真实案例：平台托管 Claude 的
+ * CF token 缺 Workers AI 权限时，用户看到的正是「模型配置或工具通信不兼容」。
+ */
+export const UPSTREAM_AUTH_FAILURE_MESSAGE =
+  "上游鉴权失败（401/403）。若使用平台托管模型，这是平台侧凭据问题、不是你的配置问题，请联系管理员；若使用自己的 API Key，请检查该 Key 是否有效。重复发送不会解决此问题。";
+
 /** Conservative classification: a generic upstream rejection is NOT evidence
  * of moderation or of a safely retryable failure. Never retain prompts, keys,
  * URLs or the raw provider message in persisted diagnostics. */
@@ -301,8 +311,16 @@ export function classifyGenerationError(data: any, status?: number) {
     /timeout|timed out|秒内没有返回新内容|network|fetch failed|failed to fetch|ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|connection (?:reset|closed)|rate[_ -]limit|overloaded|temporarily unavailable|internal_server_error|service_unavailable/i.test(evidence)) {
     category = "transient";
   }
+  const authFailure =
+    status === 401 ||
+    status === 403 ||
+    /authentication|unauthori[sz]ed|forbidden|invalid[_ -]api[_ -]key|api[_ -]key (?:invalid|revoked)/i.test(
+      evidence,
+    );
   const messages = {
-    config_protocol: "模型配置或工具通信不兼容，请联系管理员检查配置；重复发送不会解决此问题。",
+    config_protocol: authFailure
+      ? UPSTREAM_AUTH_FAILURE_MESSAGE
+      : "模型配置或工具通信不兼容，请联系管理员检查配置；重复发送不会解决此问题。",
     empty: "模型返回了空响应，请联系管理员检查服务响应。",
     policy: "服务商的内容安全规则阻止了本次请求。请检查请求是否符合其规则；不会自动重试或改写内容。",
     quota: QUOTA_EXHAUSTED_MESSAGE,
