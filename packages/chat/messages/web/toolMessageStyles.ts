@@ -338,10 +338,9 @@ export const toolMessageStyles = stylex.create({
     marginLeft: 26,
     overflow: "hidden",
   },
-  // Compact group body: keeps the same light connector as the named-phase
-  // timeline (`groupBody`) so the group header and its calls read as one
-  // unit. The 2026-09 flatten pass dropped the indent entirely, which made
-  // the header and its rows look like flat siblings.
+  // Flat group body/list (P1): ordinary tool-call groups drop the timeline
+  // connector — no left border, no big indent. Named-phase groups keep
+  // `groupBody` + `actionList` above/below.
   groupBodyFlat: {
     maxHeight: "min(32vh, 280px)",
     overflowY: "auto",
@@ -349,17 +348,10 @@ export const toolMessageStyles = stylex.create({
     display: "flex",
     flexDirection: "column",
     gap: 2,
-    marginTop: 2,
-    marginRight: 0,
-    marginBottom: 0,
-    marginLeft: 18,
     paddingTop: 4,
     paddingRight: 0,
     paddingBottom: 8,
-    paddingLeft: 16,
-    borderLeftWidth: 1,
-    borderLeftStyle: "solid",
-    borderLeftColor: "var(--borderMuted, var(--borderSubtle))",
+    paddingLeft: 0,
   },
   flatList: {
     display: "flex",

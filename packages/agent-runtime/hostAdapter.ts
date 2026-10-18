@@ -193,12 +193,6 @@ export type AgentRuntimeSaveTurnInput = {
   category?: string;
   inheritedFromDialogKey?: string;
   parentDialogId?: string;
-  /**
-   * When true, this turn belongs to a brand-new dialog created in this session.
-   * Host storage backends (e.g. writeDialog) can safely skip remote fallback
-   * lookup for existingDialog because the dialog record cannot exist yet.
-   */
-  freshDialog?: boolean;
 };
 
 export type AgentRuntimeDialogSummary = {

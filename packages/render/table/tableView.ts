@@ -16,22 +16,6 @@ export type TableDisplayMode =
       preferredGroupValues: string[];
     };
 
-// 意图：仅排除表格行序号/自增排序列（序号、编号、#、seq、index 等），避免它们占用看板泳道与卡片正文。
-// 边界：只做「整名精确匹配」——「订单编号」这类业务列不会命中；反过来，机器名恰好叫 index / no 的列
-// 会被判成序号（模型建表常用英文短名造序号列），这是本判定的已知取舍。
-export function isKanbanSequenceColumn(column: TableColumn): boolean {
-  return /^(序号|编号|sequence|seq|index|row_?number|serial_?number|no\.?|#)$/i.test(column.name.trim())
-    || /^(序号|编号)$/.test(column.label?.trim() ?? "");
-}
-
-export function getKanbanTitleColumn(columns: TableColumn[]): TableColumn | undefined {
-  const primary = columns.find((column) => column.isPrimary) ?? columns[0];
-  if (primary && !isKanbanSequenceColumn(primary)) return primary;
-  return columns.find((column) => !isKanbanSequenceColumn(column)
-    && /^(任务名|任务名称|任务标题|标题|名称)$/.test(column.label ?? column.name))
-    ?? columns.find((column) => !isKanbanSequenceColumn(column) && /^(title|name)$/i.test(column.name));
-}
-
 export const EMPTY_TABLE_COLUMNS: TableColumn[] = [];
 export const GRID_DISPLAY_MODE: TableDisplayMode = { type: "grid" };
 
@@ -57,12 +41,6 @@ export function normalizeKanbanStatusValue(status: string | null | undefined): s
     return "待办";
   }
   return val;
-}
-
-/** 获取适合作为看板分组候选的列清单（排除 primary 标题列与序号/编号列） */
-export function getKanbanGroupColumnCandidates(columns: TableColumn[]): TableColumn[] {
-  if (!Array.isArray(columns) || columns.length === 0) return [];
-  return columns.filter((col) => !col.isPrimary && !isKanbanSequenceColumn(col));
 }
 
 const ACTIVITY_STATUS_LABELS: Record<string, string> = {

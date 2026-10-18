@@ -33,7 +33,6 @@ import { TopBarProps } from "./topbarUtils";
 import { useTopBarState } from "./useTopBarState.tsx";
 import { getRouteDescriptor } from "./mainLayoutViewMode";
 import TopbarAppSlot from "./TopbarAppSlot";
-import TopbarTableSlot from "./TopbarTableSlot";
 import { TableTopbarOverflowContent } from "./TableTopbarOverflowContent";
 import LanguageSwitcher from "render/web/ui/LanguageSwitcher";
 import NavListItem from "render/layout/blocks/NavListItem";
@@ -480,14 +479,6 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
                 appPrimaryUrl={s.appPrimaryUrl}
                 onShowVersionPanel={() => s.setShowVersionPanel(true)}
                 onDelete={s.handleDeleteApp}
-              />
-            )}
-
-            {/* 表格专属工作台标题槽 */}
-            {s.contentKeyType === "meta" && s.tableMeta && (
-              <TopbarTableSlot
-                tableMeta={s.tableMeta}
-                canEdit={s.canEditCurrentContent ?? true}
               />
             )}
 
