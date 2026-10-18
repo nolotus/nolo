@@ -18,7 +18,6 @@ import { prepareTools } from "../../ai/tools/prepareTools";
 import { expandEnabledPacks } from "../../ai/tools/toolPacks";
 import { buildIdentityBlock } from "../../agent-runtime/identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "../../agent-runtime/deleteSafety";
-import { PARALLEL_DISPATCH_DEFAULT_RULE } from "../../agent-runtime/parallelDispatchDefault";
 import { buildUserResponseLanguageContext } from "../../agent-runtime/userResponseLanguage";
 import {
   buildLocalWorkspaceOpenAiTools,
@@ -113,7 +112,6 @@ export function estimateDefaultCliContextTokens(opts: {
   const systemParts = [
     // 与实际装配线一致：删除安全红线是系统提示词的最顶层块。
     DELETE_SAFETY_RED_LINE,
-    PARALLEL_DISPATCH_DEFAULT_RULE,
     prompt,
     opts.userLanguage?.trim()
       ? buildUserResponseLanguageContext({ language: opts.userLanguage })

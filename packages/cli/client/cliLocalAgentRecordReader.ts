@@ -15,7 +15,7 @@ import {
 import { applyPublicAgentCatalogOverride } from "../../agent-runtime/publicAgentCatalogOverride";
 import type { HybridRecordStore } from "./hybridRecordStore";
 import { buildLocalAgentLookupKeys } from "./localAgentRecords";
-import { dialogMessagePrefix, dialogMessageRange } from "../../database/keys";
+import { dialogMessageRange } from "../../database/keys";
 import { localDialogMessageRecordToRuntimeMessage } from "./localDialogRecords";
 import {
   LOCAL_CODEX_AGENT_ID,
@@ -103,44 +103,6 @@ export async function readAgentFromStore(args: {
   return resolveBuiltinPlatformAgentConfig(args.agentRef);
 }
 
-/** One stored dialog message: its store key, stable message id and raw record. */
-export type LocalDialogMessageRecordEntry = {
-  key: string;
-  /** Id embedded in the store key — stable across reads and re-writes. */
-  messageId: string;
-  record: Record<string, unknown>;
-};
-
-/**
- * Read the raw message records of a dialog, in key order.
- *
- * The raw view (instead of the runtime projection) is what history
- * reconciliation needs: the message id is only present in the key/record, and
- * an idempotent re-write must key on it so a repeated restore cannot duplicate
- * messages.
- */
-export async function readDialogMessageRecords(args: {
-  store: HybridRecordStore;
-  dialogId: string;
-}): Promise<LocalDialogMessageRecordEntry[]> {
-  const entries: LocalDialogMessageRecordEntry[] = [];
-  const { start, end } = dialogMessageRange(args.dialogId);
-  const messagePrefix = `${dialogMessagePrefix(args.dialogId)}-`;
-  const iterator = args.store.iterator({ gte: start, lte: end });
-  // Async iterator — must consume entries sequentially from the store cursor.
-  for await (const [key, value] of iterator) {
-    if (!value || typeof value !== "object") continue;
-    entries.push({
-      key,
-      messageId: key.startsWith(messagePrefix)
-        ? key.slice(messagePrefix.length)
-        : String((value as Record<string, unknown>).id ?? ""),
-      record: value as Record<string, unknown>,
-    });
-  }
-  return entries;
-}
-
 /**
  * Read all messages for a dialog from the store, in key order.
  */
@@ -149,9 +111,11 @@ export async function readDialogMessages(args: {
   dialogId: string;
 }): Promise<AgentRuntimeChatMessage[]> {
   const messages: AgentRuntimeChatMessage[] = [];
-  const entries = await readDialogMessageRecords(args);
-  for (const entry of entries) {
-    const message = localDialogMessageRecordToRuntimeMessage(entry.record);
+  const { start, end } = dialogMessageRange(args.dialogId);
+  const iterator = args.store.iterator({ gte: start, lte: end });
+  // Async iterator — must consume entries sequentially from the store cursor.
+  for await (const [, value] of iterator) {
+    const message = localDialogMessageRecordToRuntimeMessage(value);
     if (message) messages.push(message);
   }
   return messages;

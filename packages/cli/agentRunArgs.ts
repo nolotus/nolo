@@ -19,9 +19,6 @@ import {
 import type { TaskEvidenceInput } from "./client/agentRun";
 import type { AgentRuntimeRequestedMode } from "./agentRuntimeLocal";
 import { HIGH_RISK_MUTATION_TOOL_NAMES } from "../agent-runtime/runtimeToolSurface";
-// 唯一能力表：CLI 参数校验与派发守卫、localDockerWorkload 共用同一份真值，
-// 避免「两处各写一份 runtimeKey 合法性」再分叉。
-import { resolveCliLocalRuntimeKeyCapability } from "../ai/tools/agent/cliLocalRuntimeCapability";
 
 // Re-export the local-CLI key check so orchestration files can stay
 // decoupled from `./agentAliases` for the small set of helpers they need.
@@ -40,7 +37,6 @@ export type ParsedAgentRunArgs = {
   imageUrls: string[];
   allowShell: boolean;
   runtimeMode?: AgentRuntimeRequestedMode;
-  runtimeKey?: string;
   continueDialogId?: string;
   spaceId?: string;
   category?: string;
@@ -51,14 +47,6 @@ export type ParsedAgentRunArgs = {
   subjectRefs?: Array<{ kind: string; id: string; role?: string }>;
   allowedToolNames?: string[];
   blockedToolNames?: string[];
-  /**
-   * `--machine-shell`：显式申请把本 run 派发到绑定机器，并在那里执行 shell。
-   * 与 `--allowed-tool execShell` 不同——后者只影响模型可见工具面，本开关把
-   * 「runtimeTools: ["execShell"]」作为请求级字段随 runtimeContext 上行，由服务端
-   * 白名单取值后并入 runtime tool policy（sandbox/审批/审计仍由 web 基线给出）。
-   * 要求 agent 记录有 runtimeBinding.machineId，否则命令直接报错退出。
-   */
-  machineShell: boolean;
   background: boolean;
   noStream: boolean;
   /**
@@ -152,7 +140,6 @@ const VALUELESS_FLAGS: Record<string, true> = {
   "--ephemeral": true,
   "--memory-only": true,
   "--read-only": true,
-  "--machine-shell": true,
 };
 
 function isValuelessFlag(arg: string): boolean {
@@ -223,26 +210,6 @@ export function buildLocalRunEnv(args: { env: EnvLike; allowShell: boolean }) {
   };
 }
 
-export function isValidRuntimeKey(key: string): boolean {
-  // 形态真值只有一份：packages/ai/tools/agent/cliLocalRuntimeCapability.ts 的
-  // `acceptedByCliArgs`（本文件不再自己写正则/前缀判断）。
-  //
-  // 只取 `acceptedByCliArgs`，**不**取 `fulfillableByCliLocal`：参数层的职责是
-  // 「这个形态该不该接受并交给下游」，不是「本机能不能兑现」。所以
-  // `runtime-v1:<scope>:<owner>:<kind>[:<id>]` 长形式在这里放行（它要转发给服务端
-  // catalog 解析），而本机本地 run 通道兑现不了它 —— 两件事分开表达。
-  //
-  // 与服务端 parseRuntimeKey 的真实差异（旧注释断言错了，这里以实测为准）：
-  //   - 裸 `docker`：CLI 参数层接受；服务端 `parseRuntimeKey("docker")` 是
-  //     `invalid_runtime_key`（runtimeTarget.test.ts 有对应用例），服务端只接受
-  //     `docker:<id>` 与长形式 `runtime-v1:<scope>:<owner>:docker[:<id>]`。
-  //     两侧"逐字对齐"从来不存在，也不需要存在：裸 `docker` 由本机 sbx 通道
-  //     （localDockerWorkload）自己兑现、根本不经服务端解析；把它改成"与服务端
-  //     一致地拒绝"只会砍掉本机沙盒的短形式入口。
-  //   - `runtime-v1:` 前缀：CLI 不复制服务端语法，只按前缀放行整串转发。
-  return resolveCliLocalRuntimeKeyCapability(key.trim()).acceptedByCliArgs;
-}
-
 export function writeUsage(
   output: { write(chunk: string): unknown },
   commandPath?: string[]
@@ -265,8 +232,8 @@ export function writeUsage(
     return;
   }
   output.write(
-    "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--runtime-key <key>] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
-      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--runtime-key <key>] [--machine-shell] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
+    "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
+      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
   );
 }
 
@@ -288,37 +255,6 @@ export function parseAgentRunArgs(
   const rawMessage = explicitMsg ?? fileMessage ?? positional.slice(isNoLoginRunShorthand ? 0 : 1).join(" ");
   if (!agentKey || !rawMessage.trim()) return null;
   const message = rawMessage.trim();
-  const rawRuntimeKey = readFlagValue(args, "--runtime-key");
-  const runtimeKey = rawRuntimeKey?.trim();
-  if (args.includes("--runtime-key") && !runtimeKey) {
-    throw new Error(
-      "runtimeKey 必须是非空的 listRuntimes key（local | server | machine:<machineId> | docker | docker:<runtimeId> | instabox | gcp）"
-    );
-  }
-  const hasModeFlag = args.includes("--local") || args.includes("--server") || args.includes("--auto");
-  // `--local` + docker key 不是位置歧义而是精确组合：在这台机器上、在这台机器的
-  // sbx 沙盒里执行。派发路径就靠这一对参数把子 run 钉在本机沙盒（否则子进程会
-  // 带着同一个 key 走服务端通道）。其它 key 仍与任何 mode flag 互斥。
-  const dockerRuntimeLocalKey = runtimeKey !== undefined && /^docker(:.+)?$/.test(runtimeKey);
-  const localDockerCombination = dockerRuntimeLocalKey && args.includes("--local");
-  if (runtimeKey && hasModeFlag && !localDockerCombination) {
-    throw new Error(
-      "不能同时指定 --local/--server/--auto 与 --runtime-key（位置歧义）：--runtime-key 已直接指定执行后端（如 instabox、gcp、machine:<id>），请移除 --local/--server/--auto（例外：--local + docker 是合法组合，表示「本机沙盒内执行」）"
-    );
-  }
-  if (runtimeKey && !isValidRuntimeKey(runtimeKey)) {
-    throw new Error(
-      `未知或无效的 runtimeKey "${runtimeKey}"。可选值：local | server | machine:<machineId> | docker | docker:<runtimeId> | instabox | gcp`
-    );
-  }
-  // `--machine-shell` 已经把这轮派发锁到「该 agent 绑定机器的 server 通道」，
-  // 再点名 runtimeKey（local / instabox / gcp / machine:<id>）就是两个互相矛盾的
-  // 落点。静默丢弃 runtimeKey 会让人以为指定生效了，因此在入口直接拒绝。
-  if (runtimeKey && args.includes("--machine-shell")) {
-    throw new Error(
-      "不能同时指定 --machine-shell 与 --runtime-key：--machine-shell 已把派发锁到绑定机器的 server 通道，runtimeKey 会失效，请只保留其中一个"
-    );
-  }
   const runtimeMode = runtimeModeFromArgs(args);
   const continueDialogId = readFlagValue(args, "--continue") ?? readFlagValue(args, "--dialog");
   const spaceId = readFlagValue(args, "--space");
@@ -400,13 +336,11 @@ export function parseAgentRunArgs(
       : {}),
     ...(runtimeMode
       ? { runtimeMode }
-      : !runtimeKey && (fullstackLocalWorkspaceDefault || explicitLocalCliAgentDefault || args.includes("--dangerously-allow-shell"))
+      : fullstackLocalWorkspaceDefault || explicitLocalCliAgentDefault || args.includes("--dangerously-allow-shell")
         ? { runtimeMode: "local" as const }
         : {}),
-    ...(runtimeKey ? { runtimeKey } : {}),
     background: args.includes("--bg"),
     noStream: args.includes("--no-stream"),
-    machineShell: args.includes("--machine-shell"),
     ...(continueDialogId ? { continueDialogId } : {}),
     ...(!continueDialogId && spaceId ? { spaceId } : {}),
     ...(category ? { category } : {}),

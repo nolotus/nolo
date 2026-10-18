@@ -13,8 +13,6 @@ import { wrapHistoricalSummaryWithReplayGuard } from "ai/context/staleReplayGuar
 import { MEMORY_USE_GUIDANCE } from "agent-runtime/memoryUseGuidance";
 import { buildIdentityBlock } from "agent-runtime/identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "agent-runtime/deleteSafety";
-// 「并行是默认」与删除红线一样属于系统层固定约束：无条件注入，不做工具门控。
-import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDefault";
 import { buildResponseGuidelines } from "agent-runtime/responseGuidelines";
 import { buildUserResponseLanguageContext } from "agent-runtime/userResponseLanguage";
 // 工具驱动指令表（编排/协作 review 硬门等）独立成模块，localLoop 复用同一份。
@@ -282,13 +280,6 @@ export const buildSystemPromptContext = (options: {
       owner: "platform",
       cacheScope: "static",
       content: DELETE_SAFETY_RED_LINE,
-    },
-    // 并行是默认：系统层固定块，紧随红线（同为无条件前缀，不随工具/轮次变化）。
-    {
-      id: "parallel-dispatch-default",
-      owner: "platform",
-      cacheScope: "static",
-      content: PARALLEL_DISPATCH_DEFAULT_RULE,
     },
     { id: "identity", owner: "platform", cacheScope: "session", content: identitySection },
     { id: "user-response-language", owner: "platform", cacheScope: "session", content: buildUserResponseLanguageContext({ language: safeLanguage }) },

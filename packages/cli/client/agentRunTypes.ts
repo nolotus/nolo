@@ -30,7 +30,6 @@ import type { TurnTokenUsage } from "./tokenUsage";
 import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
 import type { OriginShellGrant } from "./originShellGrant";
 import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecution";
-import type { AgentRuntimeToolPolicy } from "../../agent-runtime/types";
 
 export type EnvLike = Record<string, string | undefined>;
 
@@ -196,7 +195,6 @@ export type RunAgentTurnOptions = {
   pastedTextStore?: CollapsedPasteStore;
   imageUrls?: string[];
   continueDialogId?: string;
-  freshDialog?: boolean;
   /** Preserve an auto Dialog while a concrete compatibility key executes this turn. */
   dialogAgentMode?: "auto" | "fixed";
   spaceId?: string;
@@ -234,19 +232,6 @@ export type RunAgentTurnOptions = {
   subjectRefs?: AgentRunSubjectRef[];
   blockedToolNames?: string[];
   allowedToolNames?: string[];
-  /**
-   * 请求级 runtime tool policy 申请（`nolo agent run --machine-shell`）：随
-   * `runtimeContext.runtimeToolPolicyOverride` 上行。服务端只经白名单取值
-   * （runtimeTools 只认 "execShell"、workspace.mode 只认 "lease"），并在 web 安全基线
-   * 之前合并 —— 申请到的是能力，不是边界（sandbox/审批/审计仍由基线给出）。
-   */
-  runtimeToolPolicyOverride?: AgentRuntimeToolPolicy;
-  /**
-   * `--machine-shell` 的派发锁：本 run 只能派到 agent 绑定的机器执行，绝不在
-   * 当前机器执行模型或工具。置位后 `runAgentTurn` 以 server 模式派发（不走
-   * auto→local 早退），且解析结果为 local 时直接报错退出 1，不静默降级。
-   */
-  requireRemoteDispatch?: boolean;
   background?: boolean;
   noStream?: boolean;
   /**
@@ -268,18 +253,10 @@ export type RunAgentTurnOptions = {
   env: EnvLike;
   output: OutputLike;
   runtimeMode?: AgentRuntimeRequestedMode;
-  runtimeKey?: string;
   localRuntimeAdapter?: AgentRuntimeHostAdapter;
   localRuntimeAdapterFactory?: (
     env: EnvLike,
-    options?: {
-      cwd?: string;
-      /**
-       * 本 run 的 runtimeKey（CLI `--runtime-key`）。与 deps.runtimeKey 同值：
-       * 注入式 factory 据此构造 docker workload 通道 / 对云后端 key fail-closed。
-       */
-      runtimeKey?: string;
-    },
+    options?: { cwd?: string },
   ) => AgentRuntimeHostAdapter;
   localRuntimeCwd?: string;
   timeoutMs?: number;

@@ -19,7 +19,6 @@ import {
   createCliLocalRuntimeAdapter,
   isBuiltinNoloAgentRef,
 } from "./localRuntimeAdapter";
-import { isDockerRuntimeKey } from "./localDockerWorkload";
 import { isAntigravityOAuthAgent } from "../../agent-runtime/antigravityOAuth";
 import { isOAuthApiKeyRef } from "../../agent-runtime/serverProxyPolicy";
 import { resolveLocalUserId } from "./cliAgentConfigHelpers";
@@ -234,14 +233,6 @@ function resolveRequestedRuntimeMode(options: RunAgentTurnOptions) {
   return "auto";
 }
 
-/**
- * `--machine-shell` 在解析成 local 时的统一报错文案（CLI 与派发层共用，避免漂移）：
- * 该开关只能在绑定机器执行，本机执行请去掉它。
- */
-export const MACHINE_SHELL_LOCAL_REFUSAL_MESSAGE =
-  "[nolo] --machine-shell can only run on the machine bound in the agent record (runtimeBinding.machineId): a local run cannot honor it, and it never executes on this computer.\n" +
-  "[nolo] Retry without --local / NOLO_RUNTIME_MODE=local, or drop --machine-shell to run on this computer.\n";
-
 function canResolveCollapsedPasteReference(
   store: import("../../core/collapsedPaste").CollapsedPasteStore,
   content: import("../../agent-runtime/types").AgentRuntimeMessageContent,
@@ -281,10 +272,6 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     ...(options.activityReporter
       ? { activityReporter: options.activityReporter }
       : {}),
-    // runtimeKey 接线：不传下去则本地 run 的 runtimeKey 在 agentRun 层就断了
-    // ——adapter 收不到 → docker workload 永不创建，非 docker 云后端也不会
-    // fail-closed（死代码）。
-    ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
   });
 }
 
@@ -293,9 +280,6 @@ function resolveLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     options.localRuntimeAdapter ||
     options.localRuntimeAdapterFactory?.(options.env, {
       cwd: options.localRuntimeCwd,
-      // 与 buildDefaultLocalRuntimeAdapter 同口径：注入式 factory 也必须拿到
-      // runtimeKey，否则注入了 adapter 的本地 run 会静默丢掉 docker 语义。
-      ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
     }) ||
     buildDefaultLocalRuntimeAdapter(options)
   );
@@ -1913,9 +1897,6 @@ async function runHttpAgentTurn(
         ...(subjectRefs ? { subjectRefs } : {}),
         ...(blockedToolNames !== undefined ? { blockedToolNames } : {}),
         ...(allowedToolNames !== undefined ? { allowedToolNames } : {}),
-        ...(options.runtimeToolPolicyOverride
-          ? { runtimeToolPolicyOverride: options.runtimeToolPolicyOverride }
-          : {}),
       },
       ...(options.continueDialogId
         ? { continueDialogId: options.continueDialogId }
@@ -1930,7 +1911,6 @@ async function runHttpAgentTurn(
         : {}),
       ...(options.background ? { background: true } : {}),
       ...(options.ephemeral ? { ephemeral: true } : {}),
-      ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
       ...(typeof options.timeoutMs === "number"
         ? { timeoutMs: options.timeoutMs }
         : {}),
@@ -2087,69 +2067,11 @@ async function refreshMissingLocalAgentConfig(options: RunAgentTurnOptions) {
   return Boolean(agentConfig);
 }
 
-/**
- * run 级收尾：释放本机 OS 沙盒 lease（H3）。bwrap lease 持有常驻进程，只有
- * `release` 才 kill，所以**正常结束、abort、抛错**三条出口都必须经过这里。
- * 幂等；adapter 未实现该 CLI 专有方法（非 CLI adapter / 测试假 adapter）时
- * no-op；释放失败不改变 run 结果（lease 随进程退出失效）。
- */
-async function releaseAdapterSandboxWorkload(
-  adapter: AgentRuntimeHostAdapter | undefined,
-): Promise<void> {
-  const release = (
-    adapter as { releaseLocalSandboxWorkload?: () => Promise<void> } | undefined
-  )?.releaseLocalSandboxWorkload;
-  if (typeof release !== "function") return;
-  try {
-    await release.call(adapter);
-  } catch {
-    // 收尾失败不得覆盖 run 结果。
-  }
-}
-
 async function runLocalAgentTurnForCli(
   options: RunAgentTurnOptions,
   settings: { reportFailure: boolean },
 ): Promise<RunAgentTurnResult> {
-  // 同一个 adapter 实例贯穿整个 run（factory 每次调用都新建实例，所以这里只
-  // 解析一次并往下传：收尾要释放的必须是真正跑过命令的那个实例）。
   const resolvedBaseAdapter = resolveLocalRuntimeAdapter(options);
-  try {
-    // run 开始前的 runtimeKey 预检：docker 指向时在此创建/校验 sandbox，
-    // 无法兑现即显式失败——此时一个工具调用都还没发生（零宿主执行）。
-    // 非 docker 的 key 在 adapter 创建阶段就已 fail-closed，这里的预检对
-    // 它们是 no-op（prepareLocalRuntimeWorkload 自带该判断）。
-    if (options.runtimeKey) {
-      const prepare = (
-        resolvedBaseAdapter as
-          | { prepareLocalRuntimeWorkload?: () => Promise<void> }
-          | undefined
-      )?.prepareLocalRuntimeWorkload;
-      if (typeof prepare === "function") {
-        try {
-          await prepare.call(resolvedBaseAdapter);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          options.output.write(`[nolo] ${message}\n`);
-          return { exitCode: 1, localError: error };
-        }
-      }
-    }
-    return await runLocalAgentTurnForCliWithAdapter(
-      options,
-      settings,
-      resolvedBaseAdapter,
-    );
-  } finally {
-    await releaseAdapterSandboxWorkload(resolvedBaseAdapter);
-  }
-}
-
-async function runLocalAgentTurnForCliWithAdapter(
-  options: RunAgentTurnOptions,
-  settings: { reportFailure: boolean },
-  resolvedBaseAdapter: AgentRuntimeHostAdapter | undefined,
-): Promise<RunAgentTurnResult> {
   const baseAdapter = (() => {
     let adapter =
       resolvedBaseAdapter && options.modelOverride
@@ -2180,7 +2102,6 @@ async function runLocalAgentTurnForCliWithAdapter(
     subjectRefs ||
     allowedToolNames !== undefined ||
     blockedToolNames !== undefined ||
-    options.runtimeToolPolicyOverride ||
     options.parentWakeOnTerminal ||
     options.dialogAgentMode
       ? {
@@ -2190,9 +2111,6 @@ async function runLocalAgentTurnForCliWithAdapter(
             : {}),
           ...(allowedToolNames !== undefined ? { allowedToolNames } : {}),
           ...(blockedToolNames !== undefined ? { blockedToolNames } : {}),
-          ...(options.runtimeToolPolicyOverride
-            ? { runtimeToolPolicyOverride: options.runtimeToolPolicyOverride }
-            : {}),
           ...(options.parentWakeOnTerminal
             ? { parentWakeOnTerminal: true }
             : {}),
@@ -2202,7 +2120,6 @@ async function runLocalAgentTurnForCliWithAdapter(
         }
       : undefined;
   const currentDialogId = options.continueDialogId ?? ulid();
-  const freshDialog = options.freshDialog ?? !options.continueDialogId;
 
   // Ownership stamp for workspace tools invoked inside this turn — background
   // processes (launchProcess / auto-detached execShell) capture it at spawn
@@ -2290,7 +2207,6 @@ async function runLocalAgentTurnForCliWithAdapter(
           }
         : {}),
       continueDialogId: currentDialogId,
-      ...(freshDialog ? { freshDialog: true } : {}),
       fileWriteSessionId: currentDialogId,
       fileWriteGateEnabled: resolveFileWriteGateEnabled(options.env),
       spaceId: options.spaceId,
@@ -2497,12 +2413,6 @@ async function runLocalAgentTurnForCliWithAdapter(
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
 ): Promise<{ exitCode?: 1; credentialKey?: string } | null> {
-  // 云后端 runtimeKey（gcp / instabox / machine:*）的 run 由服务端通道执行，
-  // 本地 adapter 不参与：这里若照旧构造它，本地通道的 fail-closed 闸门
-  // （assertRuntimeKeyLocalFulfillable）会错误地打死一次合法的 server 派发
-  // （实测：`--runtime-key instabox` 的 HTTP 派发前预检直接抛错）。本地冷却
-  // 预检本就只对本地 runtime 有意义 → 显式放行，交给 server 端 admission guard。
-  if (options.runtimeKey && !isDockerRuntimeKey(options.runtimeKey)) return null;
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
   let config: unknown;
@@ -2630,59 +2540,13 @@ export function foldLocalResultForTui(
 
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
   const authToken = resolveAuthToken(options.env);
-  const requestedRuntimeMode = resolveRequestedRuntimeMode(options);
-
-  // `--machine-shell`（requireRemoteDispatch）：本 run 只能在绑定机器执行。
-  // 解析成 local 时显式报错退出 1，绝不静默在本机执行（历史问题：只挡了显式
-  // --local，NOLO_RUNTIME_MODE=local 仍会在本机跑）。
-  if (options.requireRemoteDispatch && requestedRuntimeMode === "local") {
-    options.output.write(MACHINE_SHELL_LOCAL_REFUSAL_MESSAGE);
-    return { exitCode: 1 };
-  }
-  // 锁定 server 派发：不给 auto→local 早退留口子（本机成功即返回 = 用户以为在
-  // 远程执行，实际在本机），也不受 NOLO_RUNTIME_MODE=local 覆盖。
-  const runtimeMode = options.requireRemoteDispatch
-    ? "server"
-    : requestedRuntimeMode;
+  const runtimeMode = resolveRequestedRuntimeMode(options);
 
   if (runtimeMode === "local") {
-    // docker 指向由本机通道兑现（本地 docker workload）；`local` 表示"就在宿主执行"
-    // ——它同样由本机通道兑现（F1 已在派发/CLI 入口显式确认 allowHostWrites，
-    // 到这里时授权已成立）。其余云后端（gcp / instabox / machine:*）本机无法兑现。
-    const runtimeKeyIsLocallyFulfillable =
-      isDockerRuntimeKey(options.runtimeKey ?? "") ||
-      (typeof options.runtimeKey === "string" && options.runtimeKey.trim() === "local");
-    if (options.runtimeKey && !runtimeKeyIsLocallyFulfillable) {
-      options.output.write("[nolo] 本地 run 由本机沙盒决定，不支持指定云后端\n");
-      return { exitCode: 1 };
-    }
     return runInjectedLocalAgentTurn(options);
   }
 
-  if (runtimeMode === "auto" && !options.runtimeKey && shouldAttemptAutoLocal(options)) {
-    // Keep the raw adapter's preparation side effects paired with tools/provider
-    // execution. Only successful reads of this turn's target agent are reused;
-    // model overrides and ephemeral behavior remain layered above this snapshot.
-    const rawAdapter = resolveLocalRuntimeAdapter(options);
-    let config: Awaited<ReturnType<AgentRuntimeHostAdapter["loadAgentConfig"]>> | undefined;
-    const invalidateConfig = () => { config = undefined; };
-    if (rawAdapter) {
-      options = {
-        ...options,
-        localRuntimeAdapter: {
-          ...rawAdapter,
-          loadAgentConfig: async (agentRef) => {
-            if (agentRef !== options.agentKey) {
-              return rawAdapter.loadAgentConfig(agentRef);
-            }
-            if (config) return config;
-            const loaded = await rawAdapter.loadAgentConfig(agentRef);
-            if (loaded) config = loaded;
-            return loaded;
-          },
-        },
-      };
-    }
+  if (runtimeMode === "auto" && shouldAttemptAutoLocal(options)) {
     const skipLocal = await shouldSkipAutoLocalForServerPlatformTools(options);
     if (!skipLocal) {
       const localResult = await runLocalAgentTurnForCli(options, {
@@ -2691,7 +2555,6 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
       if (localResult.exitCode === 0) {
         return foldLocalResultForTui(localResult);
       }
-      invalidateConfig();
       if (
         isMissingLocalAgentConfigError(localResult.localError, options.agentKey)
       ) {
@@ -2708,10 +2571,8 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
             if (retriedLocalResult.exitCode === 0) {
               return foldLocalResultForTui(retriedLocalResult);
             }
-            invalidateConfig();
           }
         } catch {
-          invalidateConfig();
           // Fall through to surface local runtime failure.
         }
       }

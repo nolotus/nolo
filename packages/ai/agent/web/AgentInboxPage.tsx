@@ -15,7 +15,6 @@ import {
   buildAgentEmailBindingSummary,
   formatDateValue,
 } from "./agentDisplayUtils";
-import { resolveEmailBody } from "./emailBody";
 import { listAgentInboxEmails } from "app/email/agentEmailRpc";
 import { toErrorMessage } from "core/errorMessage";
 import { isRecord } from "core/isRecord";
@@ -64,12 +63,6 @@ const AgentInboxPage = ({ agentKey: agentKeyProp }: AgentInboxPageProps) => {
   const [inboxError, setInboxError] = useState<string | null>(null);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<EmailRecord | null>(null);
-  // Previews are derived from the stored body each render otherwise: the list
-  // runs QP decoding + tag stripping per mail on every selection change.
-  const mailRows = useMemo(
-    () => emails.map((mail) => ({ mail, body: resolveEmailBody(mail) })),
-    [emails]
-  );
 
   const loadInbox = useCallback(async () => {
     if (!primaryMailbox) return;
@@ -120,7 +113,6 @@ const AgentInboxPage = ({ agentKey: agentKeyProp }: AgentInboxPageProps) => {
   }
 
   const agentName = asOptionalTrimmedString(item?.name) ?? agentKey;
-  const selectedBody = selectedEmail ? resolveEmailBody(selectedEmail) : null;
 
   return (
     <div className="agent-inbox-page">
@@ -173,7 +165,7 @@ const AgentInboxPage = ({ agentKey: agentKeyProp }: AgentInboxPageProps) => {
           </section>
         ) : (
           <ul className="agent-inbox-page__list">
-            {mailRows.map(({ mail, body }) => (
+            {emails.map((mail) => (
               <li key={mail.dbKey}>
                 <button
                   type="button"
@@ -191,8 +183,10 @@ const AgentInboxPage = ({ agentKey: agentKeyProp }: AgentInboxPageProps) => {
                   <p className="agent-inbox-page__from">
                     来自 {formatParticipant(mail.from)}
                   </p>
-                  {body.previewText ? (
-                    <p className="agent-inbox-page__preview">{body.previewText}</p>
+                  {mail.text?.trim() ? (
+                    <p className="agent-inbox-page__preview">{mail.text.trim()}</p>
+                  ) : mail.html?.trim() ? (
+                    <p className="agent-inbox-page__preview">（HTML 邮件）</p>
                   ) : null}
                 </button>
               </li>
@@ -238,18 +232,18 @@ const AgentInboxPage = ({ agentKey: agentKeyProp }: AgentInboxPageProps) => {
               ) : null}
             </div>
             <div className="agent-inbox-page__detail-body">
-              {selectedBody?.kind === "html" ? (
+              {selectedEmail.text?.trim() ? (
+                <pre className="agent-inbox-page__detail-text">{selectedEmail.text}</pre>
+              ) : selectedEmail.html?.trim() ? (
                 <iframe
                   className="agent-inbox-page__detail-html"
                   title={
-                    asOptionalTrimmedString(selectedEmail?.subject) ?? "邮件正文"
+                    asOptionalTrimmedString(selectedEmail.subject) ?? "邮件正文"
                   }
                   sandbox=""
-                  srcDoc={selectedBody.content}
+                  srcDoc={selectedEmail.html}
                   referrerPolicy="no-referrer"
                 />
-              ) : selectedBody?.content ? (
-                <pre className="agent-inbox-page__detail-text">{selectedBody.content}</pre>
               ) : (
                 <p className="agent-inbox-page__detail-empty">（无正文内容）</p>
               )}
