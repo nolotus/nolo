@@ -3,6 +3,7 @@ import {
   formatCreditsChip,
   formatTokenCount,
   renderTokenStatus,
+  resolveContextUsage,
   type TurnTokenUsage,
 } from "../client/tokenUsage";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
@@ -42,17 +43,20 @@ export function renderComposerTokenChip(
   fallbackContextWindow?: number,
   estimatedContextTokens?: number,
 ) {
-  const cw = tokens?.contextWindow ?? fallbackContextWindow;
-  if (!cw) {
+  // 口径与 `/context` 面板的令牌行同一处（resolveContextUsage）：
+  // 已用 = 下一轮上下文占用（provider input，未收到 usage 时用本地估算），
+  // **不加 output**——生成量不等于下一轮还要发出去的上下文。
+  const usage = resolveContextUsage(
+    tokens,
+    fallbackContextWindow,
+    estimatedContextTokens,
+  );
+  if (usage.used === undefined || usage.contextWindow === undefined) {
     return "context: —";
   }
-  // Prefer provider usage; otherwise show the measured system+tools estimate.
-  const used = tokens
-    ? tokens.input + tokens.output
-    : Math.max(0, estimatedContextTokens ?? 0);
-  const pct = Math.min(100, (used / cw) * 100);
+  const pct = Math.min(100, usage.pct ?? 0);
   const pctText = pct > 0 && pct < 10 ? pct.toFixed(1) : Math.round(pct).toString();
-  return `context: ${pctText}% (${formatTokenCount(used)}/${formatTokenCount(cw)})`;
+  return `context: ${pctText}% (${formatTokenCount(usage.used)}/${formatTokenCount(usage.contextWindow)})`;
 }
 
 /**
@@ -514,7 +518,15 @@ export function renderContextPanel(
   return [
     ...heading,
     field(labels[0], `${state.agentName} (${state.agentKey})`),
-    field(labels[1], renderTokenStatus(state.turnTokens)),
+    field(
+      labels[1],
+      // 与状态栏 chip 同一口径（resolveContextUsage）：还没收到 provider usage
+      // 时给本地估算 + 剩余，而不是三个破折号。
+      renderTokenStatus(state.turnTokens, {
+        contextWindow: state.contextWindow,
+        estimatedContextTokens: state.estimatedContextTokens,
+      }),
+    ),
     field(
       labels[2],
       state.dialogKey ?? (state.dialogId ? "unavailable" : state.dialogLabel),
