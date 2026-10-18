@@ -3,10 +3,13 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { updateCell } from "./tableStore";
+import { normalizeRowValues } from "./toolValueUtils";
 import {
     EMPTY_TABLE_COLUMNS,
     GRID_DISPLAY_MODE,
-    normalizeKanbanStatusValue,
+    getKanbanTitleColumn,
+    isKanbanSequenceColumn,
+    getKanbanGroupColumnCandidates,
     type TableDisplayMode,
 } from "./tableView";
 import type { TableColumn } from "./types";
@@ -27,6 +30,10 @@ export interface UseKanbanBoardOptions {
     setDropTarget: React.Dispatch<React.SetStateAction<{ rowDbKey: string; position: "before" | "after" } | null>>;
     handleRowDrop: (draggingRowKey: string, targetRowDbKey: string, position: "before" | "after") => void;
     dispatch: any;
+    selectedGroupColumnName?: string;
+    setSelectedGroupColumnName?: (colName: string) => void;
+    visibleCardColumnNames?: string[] | null;
+    setVisibleCardColumnNames?: (names: string[] | null) => void;
 }
 
 export function useKanbanBoard({
@@ -43,20 +50,53 @@ export function useKanbanBoard({
     setDropTarget,
     handleRowDrop,
     dispatch,
+    selectedGroupColumnName,
+    setSelectedGroupColumnName,
+    visibleCardColumnNames,
+    setVisibleCardColumnNames,
 }: UseKanbanBoardOptions) {
     const [kanbanDropTargetGroup, setKanbanDropTargetGroup] = useState<string | null>(null);
 
+    // 切换分组列时把 visibleCardColumnNames 重置为 null（恢复默认全部展示），避免旧分组列残留隐藏
+    const handleSelectGroupColumn = useCallback(
+        (colName: string) => {
+            setSelectedGroupColumnName?.(colName);
+            setVisibleCardColumnNames?.(null);
+        },
+        [setSelectedGroupColumnName, setVisibleCardColumnNames]
+    );
+
+    // 候选分组列（非 primary 字段均可作为看板泳道维度）
+    const kanbanGroupCandidates = useMemo(
+        () => getKanbanGroupColumnCandidates(columns),
+        [columns]
+    );
+
+    // 当前生效的分组列
+    const activeGroupColumn = useMemo(() => {
+        if (selectedGroupColumnName) {
+            const found = columns.find((c) => c.name === selectedGroupColumnName);
+            if (found) return found;
+        }
+        if (tableDisplayMode.type === "kanban") {
+            const preset = columns.find((c) => c.name === tableDisplayMode.groupColumnName);
+            if (preset) return preset;
+        }
+        if (statusFilterColumn) return statusFilterColumn;
+        return kanbanGroupCandidates[0] ?? null;
+    }, [columns, kanbanGroupCandidates, selectedGroupColumnName, statusFilterColumn, tableDisplayMode]);
+
     const kanbanDisplayMode = useMemo<TableDisplayMode>(() => {
-        if (tableDisplayMode.type === "kanban") return tableDisplayMode;
-        if (!statusFilterColumn) return GRID_DISPLAY_MODE;
+
+        if (!activeGroupColumn) return GRID_DISPLAY_MODE;
         return {
             type: "kanban",
-            viewName: "看板",
-            groupColumnName: statusFilterColumn.name,
+            viewName: tableDisplayMode.type === "kanban" ? tableDisplayMode.viewName : "看板",
+            groupColumnName: activeGroupColumn.name,
             visibleColumnNames: columns.map((column: any) => column.name),
-            preferredGroupValues: statusFilterOptions,
+            preferredGroupValues: [],
         };
-    }, [columns, statusFilterColumn, statusFilterOptions, tableDisplayMode]);
+    }, [activeGroupColumn, columns, tableDisplayMode]);
 
     const canUseKanbanView = kanbanDisplayMode.type === "kanban";
 
@@ -77,47 +117,73 @@ export function useKanbanBoard({
         [activeViewChoice, kanbanDisplayMode]
     );
 
+    const kanbanTitleColumn = useMemo(() => getKanbanTitleColumn(columns), [columns]);
+
+    // 卡片不展示序号、标题与当前分组泳道列。
+    const allDetailColumns = useMemo(() => {
+        if (!activeGroupColumn) return EMPTY_TABLE_COLUMNS;
+        const groupColName = activeGroupColumn.name;
+        return columns.filter(
+            (col) => col.name !== groupColName && col.name !== kanbanTitleColumn?.name && !isKanbanSequenceColumn(col)
+        );
+    }, [activeGroupColumn, columns, kanbanTitleColumn]);
+
+    // 实际渲染在卡片上的列（支持用户通过勾选面板自定义显示/隐藏）
     const kanbanDetailColumns = useMemo(() => {
         if (activeDisplayMode.type !== "kanban") return EMPTY_TABLE_COLUMNS;
-        const groupColumnName = activeDisplayMode.groupColumnName;
-        return columns.filter(
-            (column: any) =>
-                column.name !== groupColumnName &&
-                !column.isPrimary &&
-                activeDisplayMode.visibleColumnNames.includes(column.name)
-        );
-    }, [activeDisplayMode, columns]);
-
-    const kanbanGroups = useMemo(() => {
-        if (activeDisplayMode.type !== "kanban") return [];
-
-        const groupMap = new Map<string, any[]>();
-        filteredRows.forEach((row: any) => {
-            const rawValue = String(row[activeDisplayMode.groupColumnName] ?? "");
-            const normalizedValue = normalizeKanbanStatusValue(rawValue);
-            const list = groupMap.get(normalizedValue) ?? [];
-            list.push(row);
-            groupMap.set(normalizedValue, list);
-        });
-
-        const definedOptions = activeDisplayMode.preferredGroupValues.filter(
-            (value) => value.trim().length > 0
-        );
-
-        const result = definedOptions.map((option) => ({
-            groupValue: option,
-            rows: groupMap.get(option) ?? [],
-        }));
-
-        if (groupMap.has("未分类")) {
-            result.push({
-                groupValue: "未分类",
-                rows: groupMap.get("未分类") ?? [],
-            });
+        if (Array.isArray(visibleCardColumnNames)) {
+            return allDetailColumns.filter((col) => visibleCardColumnNames.includes(col.name));
         }
+        return allDetailColumns;
+    }, [activeDisplayMode, allDetailColumns, visibleCardColumnNames]);
 
-        return result;
-    }, [activeDisplayMode, filteredRows]);
+    // Lanes identify exact typed values, not display labels. Multi-select lanes
+    // represent complete selections: moving replaces the selection with an exact
+    // copy of the target combination (never a comma-joined, lossy string).
+    const lanes = useMemo(() => {
+        if (!activeGroupColumn) return [];
+        const column = activeGroupColumn;
+        const map = new Map<string, { groupValue: string; groupLabel: string; value: any; rows: any[] }>();
+        const add = (raw: any, row?: any) => {
+            const value = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0)
+                ? (column.type === "multi_select" ? [] : null) : raw;
+            const key = JSON.stringify(value);
+            if (!map.has(key)) map.set(key, {
+                groupValue: key,
+                groupLabel: value === null || (Array.isArray(value) && !value.length) ? "（空）"
+                    : Array.isArray(value) ? value.join("、") : String(value),
+                value, rows: [],
+            });
+            if (row) map.get(key)!.rows.push(row);
+        };
+        const options = column === statusFilterColumn && statusFilterOptions.length
+            ? statusFilterOptions : column.options ?? [];
+        for (const option of options) {
+            const raw = column.type === "multi_select" ? [option] : option;
+            const result = normalizeRowValues([column], { [column.name]: raw }, { mode: "update" });
+            if (!result.errors.length) add(result.sanitizedValues[column.name]);
+        }
+        if (!column.required) add(null);
+        // Include unfiltered values so empty destinations remain available.
+        for (const row of rows) add(row[column.name]);
+        for (const row of filteredRows) add(row[column.name], row);
+        return [...map.values()];
+    }, [activeGroupColumn, statusFilterColumn, statusFilterOptions, rows, filteredRows]);
+
+    const kanbanGroups = activeDisplayMode.type === "kanban" ? lanes : [];
+    const moveToLane = useCallback((dbKey: string, laneKey: string) => {
+        if (!activeGroupColumn || activeDisplayMode.type !== "kanban") return;
+        const row = rows.find((r) => r.dbKey === dbKey);
+        const lane = lanes.find((entry) => entry.groupValue === laneKey);
+        if (!row || !lane || lane.rows.some((r) => r.dbKey === dbKey)) return;
+        const column = activeGroupColumn;
+        const result = normalizeRowValues([column], { [column.name]: lane.value }, { mode: "update" });
+        if (result.errors.length) return;
+        // Existing multi-select values may predate normalization. Do not silently
+        // trim/drop labels while copying a lane: either copy exactly or refuse.
+        if (column.type === "multi_select" && JSON.stringify(result.sanitizedValues[column.name]) !== JSON.stringify(lane.value)) return;
+        void dispatch(updateCell({ dbKey, columnName: column.name, value: result.sanitizedValues[column.name] }));
+    }, [activeGroupColumn, activeDisplayMode, rows, lanes, dispatch]);
 
     const handleKanbanCardDragStart = useCallback(
         (dbKey: string, e: React.DragEvent<HTMLElement>) => {
@@ -172,20 +238,12 @@ export function useKanbanBoard({
                 return;
             }
 
-            const groupColumnName = activeDisplayMode.groupColumnName;
-            const row = rows.find((r: any) => r.dbKey === draggedDbKey);
-            if (row) {
-                const targetValue = targetGroupValue === "未分类" ? "" : targetGroupValue;
-                const currentValue = String(row[groupColumnName] ?? "");
-                if (currentValue !== targetValue) {
-                    void dispatch(updateCell({ dbKey: draggedDbKey, columnName: groupColumnName, value: targetValue }));
-                }
-            }
+            moveToLane(draggedDbKey, targetGroupValue);
 
             setDraggingRowKey(null);
             setDropTarget(null);
         },
-        [activeDisplayMode, dispatch, draggingRowKey, rows, setDraggingRowKey, setDropTarget]
+        [activeDisplayMode, moveToLane, draggingRowKey, setDraggingRowKey, setDropTarget]
     );
 
     const handleKanbanCardDragOver = useCallback(
@@ -243,31 +301,26 @@ export function useKanbanBoard({
                 return;
             }
 
-            if (activeDisplayMode.type === "kanban") {
-                const groupColumnName = activeDisplayMode.groupColumnName;
-                const row = rows.find((r: any) => r.dbKey === draggedDbKey);
-                if (row) {
-                    const targetValue = targetGroupValue === "未分类" ? "" : targetGroupValue;
-                    const currentValue = String(row[groupColumnName] ?? "");
-                    if (currentValue !== targetValue) {
-                        void dispatch(updateCell({ dbKey: draggedDbKey, columnName: groupColumnName, value: targetValue }));
-                    }
-                }
-            }
+            moveToLane(draggedDbKey, targetGroupValue);
 
             handleRowDrop(draggedDbKey, targetRowDbKey, position);
             setDraggingRowKey(null);
             setDropTarget(null);
             setKanbanDropTargetGroup(null);
         },
-        [activeDisplayMode, dispatch, draggingRowKey, dropTarget, handleRowDrop, rows, setDraggingRowKey, setDropTarget]
+        [moveToLane, draggingRowKey, dropTarget, handleRowDrop, setDraggingRowKey, setDropTarget]
     );
 
     return {
         kanbanDisplayMode,
+        kanbanTitleColumn,
         canUseKanbanView,
+        kanbanGroupCandidates,
+        activeGroupColumn,
+        effectiveGroupColumnName: activeGroupColumn?.name ?? "",
         activeViewChoice,
         activeDisplayMode,
+        allDetailColumns,
         kanbanDetailColumns,
         kanbanGroups,
         kanbanDropTargetGroup,
@@ -280,5 +333,7 @@ export function useKanbanBoard({
         handleKanbanCardDragOver,
         handleKanbanCardDragLeave,
         handleKanbanCardDrop,
+        handleSelectGroupColumn,
+        setSelectedGroupColumnName: handleSelectGroupColumn,
     };
 }

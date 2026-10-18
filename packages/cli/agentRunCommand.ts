@@ -6,7 +6,12 @@ import { createShellApprovalChild } from "./client/originShellApprovalTransport"
 // the dependency-injected orchestration and re-exports the public surface
 // for back-compat with existing callers.
 
-import { runAgentTurn, type RunAgentTurnOptions, type RunAgentTurnResult } from "./client/agentRun";
+import {
+  runAgentTurn,
+  MACHINE_SHELL_LOCAL_REFUSAL_MESSAGE,
+  type RunAgentTurnOptions,
+  type RunAgentTurnResult,
+} from "./client/agentRun";
 import { createOneShotTerminalStatus } from "./client/oneShotTerminalStatus";
 import {
   FAILED_EMPTY_ASSISTANT_REASONS,
@@ -26,6 +31,8 @@ import { readAgentsMdLayerFromDisk } from "../agent-runtime/agentsMd";
 import { CliProviderQuotaError } from "ai/agent/cliExecutor";
 import type { AgentRuntimeHostAdapter } from "./agentRuntimeLocal";
 import { resolveAgentRecordFromHybridStore, readDbRecord } from "./agentRecordHelpers";
+import { resolveBoundMachineId } from "./client/agentRunTypes";
+import { normalizeRuntimeToolPolicyOverride, resolveEffectiveRuntimeToolPolicy } from "../agent-runtime/runtimeToolPolicy";
 import { resolveAuthToken } from "./cliEnvHelpers";
 import { getReadableCliDb } from "./agentCommandSupport";
 import { toErrorMessage } from "core/errorMessage";
@@ -132,6 +139,16 @@ export type AgentRunCommandDeps = {
   inspectLocalRunWorkspace?: typeof inspectLocalRunWorkspace;
   resolveWorkflowReference?: typeof resolveWorkflowReference;
   resolveAgentRunAgentKey?: typeof resolveAgentRunAgentKey;
+  /**
+   * `--machine-shell` 的绑定机器解析。默认读 agent 记录（runtimeBinding.machineId）；
+   * 测试注入桩以避开 LevelDB/网络。
+   */
+  resolveAgentBoundMachineId?: (args: {
+    agentKey: string;
+    cliArgs: string[];
+    env: EnvLike;
+    output: OutputLike;
+  }) => Promise<string | undefined>;
   spawnLocalBackgroundRun?: typeof spawnLocalBackgroundRun;
   transitionRunToTerminal?: typeof transitionRunToTerminal;
   readRunRecord?: typeof readRunRecord;
@@ -231,6 +248,30 @@ async function resolveAgentRunAgentKey(args: {
     fetchImpl: fetch,
   });
   return resolved?.agentKey;
+}
+
+/** `--machine-shell` 申请的 runtime tool policy（白名单会把它裁到只剩 execShell）。 */
+const MACHINE_SHELL_REQUESTED_POLICY = { runtimeTools: ["execShell"] };
+
+/**
+ * `--machine-shell` 的默认绑定机器解析：读 agent 记录取 runtimeBinding.machineId。
+ * 找不到记录 / 未绑定都返回 undefined，由调用方给出可操作报错（绝不静默降级成本机执行）。
+ */
+async function resolveAgentBoundMachineIdFromRecord(args: {
+  agentKey: string;
+  cliArgs: string[];
+  env: EnvLike;
+  output: OutputLike;
+}): Promise<string | undefined> {
+  const db = await getReadableCliDb(args.output);
+  const record = await resolveAgentRecordFromHybridStore({
+    agentInput: args.agentKey,
+    cliArgs: args.cliArgs,
+    env: args.env,
+    db,
+    fetchImpl: fetch,
+  }).catch(() => null);
+  return resolveBoundMachineId(record) || undefined;
 }
 
 export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDeps) {
@@ -472,6 +513,69 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         }).catch(() => undefined)
       : undefined;
   const agentKey = resolvedAgentKey ?? parsed.agentKey;
+  // `--machine-shell`：显式入口 —— 申请把本 run 派到绑定机器，并在那里执行 shell。
+  // 与 `--allowed-tool execShell`（只影响模型可见工具面）不同，本开关把申请作为
+  // 请求级字段 runtimeContext.runtimeToolPolicyOverride 上行，服务端白名单取值后
+  // 并入 runtime tool policy —— 申请到的是能力，sandbox/审批/审计的实际边界由
+  // 绑定机器侧的基线给出，不是 CLI 打印保证。
+  // 缺一即显式报错，不做静默降级：
+  //   1) 解析成 local（--local / 隐式 local / NOLO_RUNTIME_MODE=local）→ 报错退出，
+  //      本开关只能在绑定机器执行；
+  //   2) agent 记录必须有 runtimeBinding.machineId；
+  //   3) 派发一律锁定 server（runtimeMode: "server" + requireRemoteDispatch），
+  //      既不走 auto→local 早退，也不受 NOLO_RUNTIME_MODE=local 覆盖；
+  //   4) 派发前回显机器 id、派发路径、申请的 runtimeTools、sandbox/审批策略来源。
+  // 申请的是 execShell 一项：机器侧 runtimeWorkspacePermissionPolicy 以
+  // runtimeTools 含 execShell 判定 allowShell，lease 只作为白名单允许项保留。
+  let machineShellOverride: RunAgentTurnOptions["runtimeToolPolicyOverride"];
+  if (parsed.machineShell) {
+    // 与 client `resolveRequestedRuntimeMode` 同序：显式 flag 优先于 env。parsed.runtimeMode
+    // 已在解析期把 --local 与隐式 local（local CLI agent / fullstack / --dangerously-allow-shell）
+    // 都归一成 "local"，这里补上 env 这条路径。
+    const envRuntimeMode = env.NOLO_RUNTIME_MODE;
+    const requestedRuntimeMode = parsed.runtimeMode
+      ? parsed.runtimeMode
+      : envRuntimeMode === "local" || envRuntimeMode === "server" || envRuntimeMode === "auto"
+        ? envRuntimeMode
+        : undefined;
+    if (requestedRuntimeMode === "local") {
+      output.write(MACHINE_SHELL_LOCAL_REFUSAL_MESSAGE);
+      return 1;
+    }
+    const machineId = await (
+      deps.resolveAgentBoundMachineId ?? resolveAgentBoundMachineIdFromRecord
+    )({
+      agentKey,
+      cliArgs: args,
+      env,
+      output,
+    }).catch(() => undefined);
+    if (!machineId) {
+      output.write(
+        `[nolo] --machine-shell requires ${agentKey} to be bound to a machine (runtimeBinding.machineId); none found.\n` +
+          `[nolo] bind it with \`nolo agent bind-current ${agentKey}\` on the target computer, then retry.\n`,
+      );
+      return 1;
+    }
+    machineShellOverride = normalizeRuntimeToolPolicyOverride(
+      MACHINE_SHELL_REQUESTED_POLICY,
+    );
+    // 用服务端同一函数（host:"web"）读基线取值：回显的 sandbox / 审批 / 网络策略
+    // 就是服务端将要叠加的那一份，不另抄常量（不会漂移）。这些值是「服务端在绑定
+    // 机器上生效的策略」，不是本机执行的保证 —— 执行位置由 dispatch=server 决定。
+    const baselinePolicy = resolveEffectiveRuntimeToolPolicy({
+      agentConfig: { runtimeToolPolicy: machineShellOverride },
+      host: "web",
+    });
+    output.write(
+      `[nolo] machine-shell: dispatch=server(required) machine=${machineId}` +
+        ` runtimeTools=${(machineShellOverride?.runtimeTools ?? []).join(",") || "-"}` +
+        ` sandbox=${baselinePolicy?.isolation?.mode ?? "-"}` +
+        ` approval=${baselinePolicy?.shell?.commandPolicy ?? "-"}` +
+        ` networkPolicy=${baselinePolicy?.shell?.networkPolicy ?? "-"}` +
+        ` policySource=web-runtime-safety-baseline\n`,
+    );
+  }
   // quick-chat 式自动路由（仅 chat 入口，需显式开启：--auto-route 或
   // NOLO_AUTO_ROUTE=1；默认保持「无 --agent = 免登录 local codex」契约）。
   // 仅在新对话首轮分类（--continue 续跑不分类，与 web「建对话前分类一次」对齐）。
@@ -753,7 +857,16 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       ? { localRuntimeAdapterFactory: deps.localRuntimeAdapterFactory }
       : {}),
     ...(localRuntimeCwd ? { localRuntimeCwd } : {}),
-    ...(parsed.runtimeMode ? { runtimeMode: parsed.runtimeMode } : {}),
+    // `--machine-shell` 强制锁定 server 派发：绑定校验通过后 runtimeMode 一律为
+    // "server"（+ requireRemoteDispatch 在派发层再兜一次），既不给 auto→local 早退
+    // 留口子，也不受 NOLO_RUNTIME_MODE=local 覆盖（resolveRequestedRuntimeMode 以
+    // options.runtimeMode 优先）。这是在唯一构造 runner 参数的入口做的，quota
+    // fallback / 重试等复用 buildRunOptions 的路径同样被锁住。
+    ...(parsed.machineShell
+      ? { runtimeMode: "server" as const, requireRemoteDispatch: true }
+      : parsed.runtimeMode
+        ? { runtimeMode: parsed.runtimeMode }
+        : {}),
     ...(parsed.continueDialogId ? { continueDialogId: parsed.continueDialogId } : {}),
     ...(parsed.spaceId ? { spaceId: parsed.spaceId } : {}),
     ...(parsed.category ? { category: parsed.category } : {}),
@@ -768,6 +881,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         ? { allowedToolNames: parsed.allowedToolNames }
         : {}),
     ...(parsed.blockedToolNames?.length ? { blockedToolNames: parsed.blockedToolNames } : {}),
+    ...(machineShellOverride ? { runtimeToolPolicyOverride: machineShellOverride } : {}),
     ...(activityTracker ? { onLoopEvent: activityTracker.onLoopEvent } : {}),
     background: parsed.background,
     noStream: parsed.noStream,

@@ -175,6 +175,83 @@ export function resolveLocalToolPolicy(args: {
   };
 }
 
+export type ExecShellGateOutcome =
+  | { kind: "pass"; opts: Record<string, unknown> }
+  | { kind: "handled"; result: AgentRuntimeToolResult };
+
+/**
+ * execShell 两道门（逐次授权 → 破坏性命令确认）的**唯一**实现。
+ *
+ * 普通路径（`executeLocalToolWithPolicy`）与 CLI 本机 OS 沙盒路径都必须在
+ * 执行前跑它：沙盒的 writableRoots 含工作区，`git reset --hard` / `rm -rf`
+ * 破坏的正是工作区数据——OS 隔离**不能**替代逐次授权与破坏性确认。任何新增
+ * 执行通道都复用它，而不是照抄一份判定（照抄必然漂移）。
+ *
+ * 语义（与提取前逐字一致）：
+ * - 授权命中（`execShellApproval`）：授权票据带精确输入绑定（绑定
+ *   workspaceRoot/命令体等，中途变更即拒），只能由 capability 管线自己执行
+ *   并消费票据，因此这里直接返回 capability 结果（`handled`）——沙盒通道
+ *   不得接管带授权的调用。
+ * - 其余 execShell：跑破坏性 guard；被拒时抛原错误（declined →
+ *   `destructive_action_requires_confirmation` / 无确认通道 →
+ *   `destructive_action_requires_confirmation`），通过则返回 `pass` +
+ *   已置 `confirmed: true` 的 opts（调用方不得再弹第二次确认）。
+ * - 非 execShell：只返回装配好的 opts（`pass`），不跑 guard。
+ */
+export async function runExecShellGates(args: {
+  toolName: string;
+  callArguments: unknown;
+  execShellApproval?: ExecShellApprovalAuthority;
+  workspaceRoot?: string;
+  commandOutputLimit?: number;
+  abortSignal?: AbortSignal;
+  detachMs?: number;
+  confirmed?: boolean;
+  enableDestructiveShellGuard?: boolean;
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+  blockDestructiveWithoutConfirmation?: boolean;
+}): Promise<ExecShellGateOutcome> {
+  const opts: Record<string, unknown> = {
+    ...(args.abortSignal ? { abortSignal: args.abortSignal } : {}),
+    ...(args.detachMs !== undefined ? { detachMs: args.detachMs } : {}),
+    ...(args.confirmed !== undefined ? { confirmed: args.confirmed } : {}),
+    ...(args.enableDestructiveShellGuard !== undefined
+      ? { enableDestructiveShellGuard: args.enableDestructiveShellGuard }
+      : {}),
+    ...(args.confirmDestructiveAction
+      ? { confirmDestructiveAction: args.confirmDestructiveAction }
+      : {}),
+    ...(args.blockDestructiveWithoutConfirmation !== undefined
+      ? { blockDestructiveWithoutConfirmation: args.blockDestructiveWithoutConfirmation }
+      : {}),
+  };
+
+  if (normalizeLocalToolName(args.toolName) !== "execShell") {
+    return { kind: "pass", opts };
+  }
+
+  if (args.execShellApproval) {
+    // Authority-bearing calls never enter an unverified custom executor.
+    const result = await invokeCapability("execShell", args.callArguments, {
+      ...opts, workspaceRoot: args.workspaceRoot, commandOutputLimit: args.commandOutputLimit,
+      execShellApproval: args.execShellApproval,
+    });
+    return { kind: "handled", result };
+  }
+
+  let parsedInput: unknown = args.callArguments;
+  if (typeof parsedInput === "string") {
+    try {
+      parsedInput = JSON.parse(parsedInput);
+    } catch {
+      parsedInput = { command: parsedInput };
+    }
+  }
+  await evaluateExecShellDestructiveGuard(parsedInput, opts as any);
+  opts.confirmed = true;
+  return { kind: "pass", opts };
+}
+
 export async function executeLocalToolWithPolicy(args: {
   env: EnvLike;
   agentToolNames?: string[];
@@ -263,47 +340,27 @@ export async function executeLocalToolWithPolicy(args: {
     });
     if (!gate.ok) throw new Error(gate.message);
   }
-  const opts: Record<string, unknown> = {
-    ...(args.abortSignal ? { abortSignal: args.abortSignal } : {}),
-    ...(args.detachMs !== undefined ? { detachMs: args.detachMs } : {}),
-    ...(args.confirmed !== undefined ? { confirmed: args.confirmed } : {}),
-    ...(args.enableDestructiveShellGuard !== undefined
-      ? { enableDestructiveShellGuard: args.enableDestructiveShellGuard }
-      : {}),
-    ...(args.confirmDestructiveAction
-      ? { confirmDestructiveAction: args.confirmDestructiveAction }
-      : {}),
-    ...(args.blockDestructiveWithoutConfirmation !== undefined
-      ? { blockDestructiveWithoutConfirmation: args.blockDestructiveWithoutConfirmation }
-      : {}),
-  };
-
-  if (args.execShellApproval && decision.toolName === "execShell") {
-    // Authority-bearing calls never enter an unverified custom executor.
-    return invokeCapability("execShell", args.call.arguments, {
-      ...opts, workspaceRoot: args.workspaceRoot, commandOutputLimit: args.commandOutputLimit,
-      execShellApproval: args.execShellApproval,
-    });
-  }
-
-  if (decision.toolName === "execShell") {
-    let parsedInput: unknown = args.call.arguments;
-    if (typeof parsedInput === "string") {
-      try {
-        parsedInput = JSON.parse(parsedInput);
-      } catch {
-        parsedInput = { command: parsedInput };
-      }
-    }
-    await evaluateExecShellDestructiveGuard(parsedInput, opts as any);
-    opts.confirmed = true;
-  }
+  // 两道门的唯一实现在 runExecShellGates（沙盒路径共用同一份，不复制判定）。
+  const gate = await runExecShellGates({
+    toolName: decision.toolName,
+    callArguments: args.call.arguments,
+    execShellApproval: args.execShellApproval,
+    workspaceRoot: args.workspaceRoot,
+    commandOutputLimit: args.commandOutputLimit,
+    abortSignal: args.abortSignal,
+    detachMs: args.detachMs,
+    confirmed: args.confirmed,
+    enableDestructiveShellGuard: args.enableDestructiveShellGuard,
+    confirmDestructiveAction: args.confirmDestructiveAction,
+    blockDestructiveWithoutConfirmation: args.blockDestructiveWithoutConfirmation,
+  });
+  if (gate.kind === "handled") return gate.result;
 
   return executor(
     {
       ...args.call,
       name: decision.toolName,
     },
-    opts,
+    gate.opts,
   );
 }
