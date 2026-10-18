@@ -102,6 +102,12 @@ import { collectConversationTurns } from "./conversationLinks";
 import { getCliLocale, initCliLocale, t } from "./i18n";
 import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { appendStreamSafeNotice } from "./turnInjectionInbox";
+import {
+  createDeployWakeNotifier,
+  isDeployWakeDisabled,
+  startCiDeployEventStream,
+} from "./deployWake";
+import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
 import { createOriginShellGrant } from "../client/originShellGrant";
 import {
   buildProcessTaskCompletedTurnEvent,
@@ -735,6 +741,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     getCurrentDialogId: () => state.dialogId ?? null,
     onWake: (text) => runWakeHandler?.(text),
   });
+  // 「部署完成」SSE 订阅的退出开关：只在交互式分支里赋值（见 deployWake.ts），
+  // 非交互路径永远是 null，teardown 里调用也是空操作。
+  // 用 holder 对象而不是裸 let：赋值点在嵌套闭包里，裸 let 在 teardown 处会被
+  // TS 的流程分析窄化成 null（error TS2349），属性访问不受影响。
+  const deployWakeLifecycle: { dispose: (() => void) | null } = { dispose: null };
   // ── 进程任务终态通知（pendingProcessNotices）+ 自动续跑 ──
   // 订阅进程 registry 的终态发射：launchProcess / 超时 detach 的 execShell
   // 进入终态（exited/failed/stopped）时，把单行摘要 push 进
@@ -1595,6 +1606,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       idleHeapReleaser.cancel();
       runCompletionWatcher.dispose();
       activityIndicator.dispose();
+      // 部署完成 SSE 订阅：交互式路径的**唯一**出口在这里（下面非交互块的
+      // dispose 走不到，交互分支 finally 后直接 return）。dispose 本身幂等，
+      // finish() 被重复调用（input end/close + finally）不会抛也不会重复副作用。
+      deployWakeLifecycle.dispose?.();
       resolveDone?.();
       clearCollapsedPasteStore(pasteStore);
       resizeTarget.off?.("resize", onResize);
@@ -1728,8 +1743,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 内部事件（后台 run / 进程任务终态唤醒）在 transcript 上的显示：紧凑单行 +
     // 流式安全插入。run 唤醒的 busy 分支与进程任务续跑共用这一份实现，避免两处
     // 漂移（appendStreamSafeNotice 的理由见 turnInjectionInbox.ts）。
-    const printInternalEventLine = (displayText: string): void => {
-      const noticeLine = dimCliText(displayText, resolveCliColorEnabled());
+    const printInternalEventLine = (
+      displayText: string,
+      lineOptions: { dim?: boolean } = {},
+    ): void => {
+      // dim 默认开（后台 run / 进程任务的既有语义）；部署唤醒传 false，
+      // 让 ✔/✖ 前缀保持醒目。
+      const noticeLine =
+        lineOptions.dim === false
+          ? displayText
+          : dimCliText(displayText, resolveCliColorEnabled());
       if (!isInteractiveInput(input)) {
         // 非交互模式本来就不碰 TurnHistory，直写即可（与 emitCommandOutput 一致）。
         output.write(`${noticeLine}\n`);
@@ -1742,6 +1765,41 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       });
       renderHistoryToOutput();
     };
+    // ── 部署完成唤醒（方案 B 的 TUI 侧，见 tui/deployWake.ts） ──────────────
+    // 订阅位置刻意在这里：非交互（管道 / --json / 脚本）永远不会执行到这个分支，
+    // 所以 BEL 与提示行在非交互场景是**结构上不可能**发生的；notifier 内部还有
+    // interactive 闸门做第二道保险。
+    // 降级：401/403 直接放弃、其它错误按退避重连到上限后静默停止，全程不写
+    // stderr、不抛错、不刷错误墙（打印一次提示的口子留在 onGiveUp，这里不接，
+    // 因为「订阅不上」对用户没有可执行信息量）。
+    if (!isDeployWakeDisabled(options.env ?? process.env)) {
+      const deployAuthToken = resolvePlatformAuthToken(options.env ?? process.env);
+      const deployUserId = parseUserIdFromAuthToken(deployAuthToken);
+      // user-{userId} 频道鉴权要求与服务端认证出的 userId 完全一致，
+      // 拿不到（未登录 / token 形状不认识）就不订阅——绝不猜。
+      if (deployAuthToken && deployUserId) {
+        const deployWake = createDeployWakeNotifier({
+          output,
+          interactive: true,
+          printLine: (line) => {
+            printInternalEventLine(line, { dim: false });
+            if (fixedInput.active && !fixedInput.isPaused()) {
+              fixedInput.repaint(buffer, cursorPos);
+            }
+          },
+        });
+        const deployStream = startCiDeployEventStream({
+          serverUrl: state.serverUrl,
+          authToken: deployAuthToken,
+          userId: deployUserId,
+          fetchImpl,
+          onEvent: (raw) => {
+            deployWake.handle(raw);
+          },
+        });
+        deployWakeLifecycle.dispose = () => deployStream.dispose();
+      }
+    }
     runWakeHandler = (event: InternalTurnEvent | string) => {
       if (done) return;
       if (busy || fixedInput.isPaused()) {
@@ -2792,6 +2850,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     idleHeapReleaser.cancel();
     runCompletionWatcher.dispose();
     activityIndicator.dispose();
+    // 部署完成 SSE 订阅（交互式分支才建立）：中止在途请求 + 停掉重连循环。
+    deployWakeLifecycle.dispose?.();
     rl.close();
   }
 } finally {
