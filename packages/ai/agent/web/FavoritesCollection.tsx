@@ -161,7 +161,10 @@ type FavoriteContentData = {
   created?: string | number;
 };
 
-type ContentKind = "page" | "table" | "image" | "file" | "dialog";
+export type ContentKind = "page" | "table" | "image" | "file" | "dialog";
+
+/** 翻译函数的最小契约：组件传入的 react-i18next t 兼容此签名。 */
+type TranslateFn = (key: string, fallback?: string) => string;
 
 function formatContentDate(value: unknown): string | null {
   if (!value) return null;
@@ -169,7 +172,7 @@ function formatContentDate(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
 }
 
-function getContentKind(contentKey: string): ContentKind {
+export function getContentKind(contentKey: string): ContentKind {
   if (contentKey.startsWith("dialog-")) return "dialog";
   if (contentKey.startsWith("meta-")) return "table";
   if (contentKey.startsWith("image-")) return "image";
@@ -307,16 +310,16 @@ const FavoriteContentItem = memo(
   }
 );
 
-type FavoriteFilter = "all" | "agent" | ContentKind;
+export type FavoriteFilter = "all" | "agent" | ContentKind;
 
-type FavoriteEntry = {
+export type FavoriteEntry = {
   id: string;
   type: "agent" | "content";
   kind: "agent" | ContentKind;
   favoritedAt: number;
 };
 
-function matchesFavoriteFilter(entry: FavoriteEntry, filter: FavoriteFilter) {
+export function matchesFavoriteFilter(entry: FavoriteEntry, filter: FavoriteFilter) {
   if (filter === "all") return true;
   if (filter === "agent") return entry.type === "agent";
   return entry.type === "content" && entry.kind === filter;
@@ -325,7 +328,7 @@ function matchesFavoriteFilter(entry: FavoriteEntry, filter: FavoriteFilter) {
 // Empty-state card rendered inside the same GridList so the grid system
 // (grid columns, focus ring, RAC semantics) stays unified across all tabs.
 // CTA + guide link depend on the active filter.
-const FAVORITE_EMPTY_COPY: Record<
+export const FAVORITE_EMPTY_COPY: Record<
   FavoriteFilter,
   { title: string; hint: string; cta: string; ctaTarget: string }
 > = {
@@ -373,7 +376,70 @@ const FAVORITE_EMPTY_COPY: Record<
   },
 };
 
-const FavoriteEmptyCard = memo(
+/**
+ * 收藏页 tab 的构造逻辑（纯函数，供组件与测试共用）。
+ *
+ * 顺序即 UI 中 tab 的渲染顺序：all → agent → page → table → image → file → dialog。
+ * 每个 kind tab 的 count 来自 contentKindCounts，all 的 count 是 agent + content 总数。
+ */
+export function buildFavoriteFilterOptions({
+  t,
+  totalFavorites,
+  agentCount,
+  contentKindCounts,
+}: {
+  t: TranslateFn;
+  totalFavorites: number;
+  agentCount: number;
+  contentKindCounts: Record<ContentKind, number>;
+}) {
+  return [
+    {
+      id: "all" as FavoriteFilter,
+      label: t("favoriteFilterAll", "全部"),
+      count: totalFavorites,
+      icon: CONTENT_TYPE_META.all.icon,
+    },
+    {
+      id: "agent" as FavoriteFilter,
+      label: t("favoriteFilterAgents", "AI"),
+      count: agentCount,
+      icon: CONTENT_TYPE_META.agent.icon,
+    },
+    {
+      id: "page" as FavoriteFilter,
+      label: t("favoriteFilterPages", "页面"),
+      count: contentKindCounts.page,
+      icon: CONTENT_TYPE_META.page.icon,
+    },
+    {
+      id: "table" as FavoriteFilter,
+      label: t("favoriteFilterTables", "表格"),
+      count: contentKindCounts.table,
+      icon: CONTENT_TYPE_META.table.icon,
+    },
+    {
+      id: "image" as FavoriteFilter,
+      label: t("favoriteFilterImages", "图片"),
+      count: contentKindCounts.image,
+      icon: CONTENT_TYPE_META.image.icon,
+    },
+    {
+      id: "file" as FavoriteFilter,
+      label: t("favoriteFilterFiles", "文件"),
+      count: contentKindCounts.file,
+      icon: CONTENT_TYPE_META.file.icon,
+    },
+    {
+      id: "dialog" as FavoriteFilter,
+      label: t("favoriteFilterDialogs", "对话"),
+      count: contentKindCounts.dialog,
+      icon: LuMessageSquare,
+    },
+  ];
+}
+
+export const FavoriteEmptyCard = memo(
   ({
     filter,
     onNavigate,
@@ -570,50 +636,12 @@ const FavoritesCollection = memo(() => {
 
   const filterOptions = useMemo(
     () =>
-      [
-        {
-          id: "all" as FavoriteFilter,
-          label: t("favoriteFilterAll", "全部"),
-          count: totalFavorites,
-          icon: CONTENT_TYPE_META.all.icon,
-        },
-        {
-          id: "agent" as FavoriteFilter,
-          label: t("favoriteFilterAgents", "AI"),
-          count: agentKeys.length,
-          icon: CONTENT_TYPE_META.agent.icon,
-        },
-        {
-          id: "page" as FavoriteFilter,
-          label: t("favoriteFilterPages", "页面"),
-          count: contentKindCounts.page,
-          icon: CONTENT_TYPE_META.page.icon,
-        },
-        {
-          id: "table" as FavoriteFilter,
-          label: t("favoriteFilterTables", "表格"),
-          count: contentKindCounts.table,
-          icon: CONTENT_TYPE_META.table.icon,
-        },
-        {
-          id: "image" as FavoriteFilter,
-          label: t("favoriteFilterImages", "图片"),
-          count: contentKindCounts.image,
-          icon: CONTENT_TYPE_META.image.icon,
-        },
-        {
-          id: "file" as FavoriteFilter,
-          label: t("favoriteFilterFiles", "文件"),
-          count: contentKindCounts.file,
-          icon: CONTENT_TYPE_META.file.icon,
-        },
-        {
-          id: "dialog" as FavoriteFilter,
-          label: t("favoriteFilterDialogs", "对话"),
-          count: contentKindCounts.dialog,
-          icon: LuMessageSquare,
-        },
-      ],
+      buildFavoriteFilterOptions({
+        t,
+        totalFavorites,
+        agentCount: agentKeys.length,
+        contentKindCounts,
+      }),
     [t, totalFavorites, agentKeys.length, contentKindCounts]
   );
 

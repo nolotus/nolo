@@ -54,7 +54,7 @@ const notify = (): void => {
 };
 
 
-type FavoriteRpcMethod = "listFavorites" | "toggleFavorite" | "setFavorite";
+type FavoriteRpcMethod = "listFavorites" | "setFavorite";
 
 interface FavoriteServerSnapshot {
     server: string;
