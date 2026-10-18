@@ -974,21 +974,16 @@ export const renameTable = createTableCommand(
         updatedAt: nowIso,
       };
 
-      setState((s) => {
-        if (!isCurrentTableTarget(s, tenantId, tableId) ||
-            !sameTableTarget(s.currentTable, tenantId, tableId)) return s;
-        return {
-          ...s,
-          currentTable: { ...s.currentTable!, displayName: trimmedName, updatedAt: nowIso },
-          isInitialized: true,
-        };
-      });
+      setState((s) => ({
+        ...s,
+        currentTable: nextMeta,
+        isInitialized: true,
+      }));
 
       return nextMeta;
     } catch (e: any) {
       const msg = e?.message || "重命名表失败";
-      setState((s) => sameTableTarget(s.expectedTableKey ?? s.currentTable, tenantId, tableId)
-        ? { ...s, error: msg } : s);
+      setState((s) => ({ ...s, error: msg }));
       throw e;
     }
   }
@@ -1034,20 +1029,15 @@ export const updateTableIcon = createTableCommand(
         updatedAt: nowIso,
       };
 
-      setState((s) => {
-        if (!isCurrentTableTarget(s, tenantId, tableId) ||
-            !sameTableTarget(s.currentTable, tenantId, tableId)) return s;
-        return {
-          ...s,
-          currentTable: { ...s.currentTable!, icon: icon ?? null, updatedAt: nowIso },
-        };
-      });
+      setState((s) => ({
+        ...s,
+        currentTable: nextMeta,
+      }));
 
       return nextMeta;
     } catch (e: any) {
       const msg = e?.message || "更新表格图标失败";
-      setState((s) => sameTableTarget(s.expectedTableKey ?? s.currentTable, tenantId, tableId)
-        ? { ...s, error: msg } : s);
+      setState((s) => ({ ...s, error: msg }));
       throw e;
     }
   }

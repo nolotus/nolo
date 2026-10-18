@@ -77,6 +77,7 @@ import { useRowInsertion } from "./useRowInsertion";
 import { useGridDragDrop } from "./useGridDragDrop";
 import { useKanbanBoard, type TableViewChoice } from "./useKanbanBoard";
 
+import { TablePageHeader } from "./TablePageHeader";
 import { TableViewControls } from "./TableViewControls";
 import { KanbanBoard } from "./KanbanBoard";
 import { TableGridSection } from "./TableGridSection";
@@ -87,6 +88,18 @@ export interface TablePageProps {
 }
 
 const GRID_WINDOWING_ROW_THRESHOLD = 50;
+
+const readTableSearchParam = (key: "status" | "owner"): string => {
+    if (typeof window === "undefined") return "";
+    const value = new URLSearchParams(window.location.search).get(key);
+    return value ? value.trim() : "";
+};
+
+const readInitialViewChoice = (): TableViewChoice | "" => {
+    if (typeof window === "undefined") return "";
+    const value = new URLSearchParams(window.location.search).get("view");
+    return value === "grid" || value === "kanban" ? value : "";
+};
 
 function TableActivityBadge({
     row,
@@ -121,23 +134,18 @@ function TableActivityBadge({
     );
 }
 
-const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = ({ tableKey, initialSearch }) => {
+const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
     // 1. 使用 useTable hook 解析与加载
     const {
         tenantId,
         tableId,
         valid,
-        tableMeta: loadedTableMeta,
+        tableMeta,
         isLoading,
         error,
-        rows: loadedRows,
+        rows,
         dispatch,
     } = useTable(tableKey);
-    // A route change must not expose the previous table while the domain store loads.
-    const matchesTable = loadedTableMeta?.tenantId === tenantId && loadedTableMeta?.tableId === tableId;
-    const tableMeta = matchesTable ? loadedTableMeta : null;
-    const rows = useMemo(() => matchesTable ? loadedRows.filter((row: any) => row.tenantId === tenantId && row.tableId === tableId) : [],
-        [matchesTable, loadedRows, tenantId, tableId]);
 
     const currentSpaceId = useCurrentSpaceId();
 
@@ -161,20 +169,15 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
     const [longTextPayload, setLongTextPayload] = useState<LongTextCellInfo | null>(null);
 
     const [selectedViewChoice, setSelectedViewChoice] = useState<TableViewChoice | "">(
-        () => { const view = new URLSearchParams(initialSearch).get("view"); return view === "grid" || view === "kanban" ? view : ""; }
+        () => readInitialViewChoice()
     );
 
-    const [selectedStatusFilters, setSelectedStatusFilters] = useState<string[]>(() => {
-        const raw = new URLSearchParams(initialSearch).get("status");
-        return raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-    });
-    const [selectedOwnerFilters, setSelectedOwnerFilters] = useState<string[]>(() => {
-        const raw = new URLSearchParams(initialSearch).get("owner");
-        return raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-    });
-
-    const selectedStatusFilter = selectedStatusFilters[0] ?? "";
-    const selectedOwnerFilter = selectedOwnerFilters[0] ?? "";
+    const [selectedStatusFilter, setSelectedStatusFilter] = useState(() =>
+        readTableSearchParam("status")
+    );
+    const [selectedOwnerFilter, setSelectedOwnerFilter] = useState(() =>
+        readTableSearchParam("owner")
+    );
 
     // 列宽相关（Hook）
     const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
@@ -289,12 +292,6 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
         [ownerFilterOptions, selectedOwnerFilter]
     );
 
-    // ── 通用多选筛选与看板分组依据 ─────────────────────────────────
-    const [selectedGroupColumnName, setSelectedGroupColumnName] = useState<string>("");
-    const [customFilters, setCustomFilters] = useState<Record<string, string[]>>({});
-    // 看板卡片自定义显示列（null 表示默认全选显示）
-    const [visibleCardColumnNames, setVisibleCardColumnNames] = useState<string[] | null>(null);
-
     // ── TanStack Table v9 ──────────────────────────────────────────
     const columnDefs = useMemo(() => buildTableColumnDefs(columns), [columns]);
 
@@ -303,12 +300,11 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
         () =>
             buildColumnFilters(
                 statusFilterColumn,
-                selectedStatusFilters,
+                selectedStatusFilter,
                 ownerFilterColumn,
-                selectedOwnerFilters,
-                customFilters
+                selectedOwnerFilter
             ),
-        [customFilters, ownerFilterColumn, selectedOwnerFilters, selectedStatusFilters, statusFilterColumn]
+        [ownerFilterColumn, selectedOwnerFilter, selectedStatusFilter, statusFilterColumn]
     );
 
     const handleSortingChange = useCallback(
@@ -328,39 +324,18 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
         (updater: Updater<ColumnFiltersState>) => {
             const base = buildColumnFilters(
                 statusFilterColumn,
-                selectedStatusFilters,
+                selectedStatusFilter,
                 ownerFilterColumn,
-                selectedOwnerFilters,
-                customFilters
+                selectedOwnerFilter
             );
             const next = typeof updater === "function" ? updater(base) : updater;
             const byId = new Map(
-                next.map((filter) => [filter.id, filter.value])
+                next.map((filter) => [filter.id, String(filter.value ?? "")])
             );
-            const toArray = (val: unknown): string[] => {
-                if (Array.isArray(val)) return val.map(String);
-                if (typeof val === "string" && val.trim()) return [val.trim()];
-                return [];
-            };
-            setSelectedStatusFilters(toArray(byId.get(statusFilterColumn?.id ?? "")));
-            setSelectedOwnerFilters(toArray(byId.get(ownerFilterColumn?.id ?? "")));
-
-            const nextCustom: Record<string, string[]> = {};
-            for (const filter of next) {
-                if (
-                    (statusFilterColumn && filter.id === statusFilterColumn.id) ||
-                    (ownerFilterColumn && filter.id === ownerFilterColumn.id)
-                ) {
-                    continue;
-                }
-                const values = toArray(filter.value);
-                if (values.length > 0) {
-                    nextCustom[filter.id] = values;
-                }
-            }
-            setCustomFilters(nextCustom);
+            setSelectedStatusFilter(byId.get(statusFilterColumn?.id ?? "") ?? "");
+            setSelectedOwnerFilter(byId.get(ownerFilterColumn?.id ?? "") ?? "");
         },
-        [customFilters, ownerFilterColumn, selectedOwnerFilters, selectedStatusFilters, statusFilterColumn, setCustomFilters]
+        [ownerFilterColumn, selectedOwnerFilter, selectedStatusFilter, statusFilterColumn]
     );
 
     const table = useTanStackTable({
@@ -398,10 +373,6 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
         canUseKanbanView,
         activeViewChoice,
         activeDisplayMode,
-        kanbanGroupCandidates,
-        effectiveGroupColumnName,
-        allDetailColumns,
-        kanbanTitleColumn,
         kanbanDetailColumns,
         kanbanGroups,
         kanbanDropTargetGroup,
@@ -414,7 +385,6 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
         handleKanbanCardDragOver,
         handleKanbanCardDragLeave,
         handleKanbanCardDrop,
-        handleSelectGroupColumn,
     } = useKanbanBoard({
         tableDisplayMode,
         statusFilterColumn,
@@ -429,10 +399,6 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
         setDropTarget,
         handleRowDrop,
         dispatch,
-        selectedGroupColumnName,
-        setSelectedGroupColumnName,
-        visibleCardColumnNames: visibleCardColumnNames ?? undefined,
-        setVisibleCardColumnNames,
     });
 
     const sortedAndOrderedRows = useMemo(() => {
@@ -559,14 +525,14 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
   useEffect(() => {
     if (!tableMeta || !selectedStatusFilter) return;
     if (!statusFilterColumn) {
-      setSelectedStatusFilters([]);
+      setSelectedStatusFilter("");
     }
   }, [selectedStatusFilter, statusFilterColumn, tableMeta]);
 
   useEffect(() => {
     if (!tableMeta || !selectedOwnerFilter) return;
     if (!ownerFilterColumn) {
-      setSelectedOwnerFilters([]);
+      setSelectedOwnerFilter("");
     }
   }, [ownerFilterColumn, selectedOwnerFilter, tableMeta]);
 
@@ -589,11 +555,11 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
       }
     };
 
-    setOrDelete("status", selectedStatusFilters.join(","));
-    setOrDelete("owner", selectedOwnerFilters.join(","));
+    setOrDelete("status", selectedStatusFilter);
+    setOrDelete("owner", selectedOwnerFilter);
     setOrDelete("view", activeViewChoice);
     window.history.replaceState(window.history.state, "", url);
-  }, [activeViewChoice, selectedOwnerFilters, selectedStatusFilters, tableMeta]);
+  }, [activeViewChoice, selectedOwnerFilter, selectedStatusFilter, tableMeta]);
 
     // 7. 各种回调（Hook）
     const handleOpenSelectEditor = useCallback(
@@ -778,6 +744,23 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
     return (
         <>
             <div className="table-page">
+                <TablePageHeader
+                    tableMeta={tableMeta}
+                    isRenamingTable={isRenamingTable}
+                    setIsRenamingTable={setIsRenamingTable}
+                    tableTitleInput={tableTitleInput}
+                    setTableTitleInput={setTableTitleInput}
+                    tableTitleInputRef={tableTitleInputRef}
+                    isIconPickerOpen={isIconPickerOpen}
+                    setIsIconPickerOpen={setIsIconPickerOpen}
+                    newColumnName={newColumnName}
+                    setNewColumnName={setNewColumnName}
+                    handleAddRowTop={handleAddRowTop}
+                    handleAddColumn={handleAddColumn}
+                    handleUpdateTitle={handleUpdateTitle}
+                    handleUpdateIcon={handleUpdateIcon}
+                />
+
                 {error && (
                     <div
                         className="table-page__center-state table-page__center-state--error table-page__rows-error"
@@ -794,34 +777,17 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
                 <TableViewControls
                     statusFilterColumn={statusFilterColumn}
                     selectedStatusFilter={selectedStatusFilter}
-                    setSelectedStatusFilter={(val) => setSelectedStatusFilters(val ? [val] : [])}
-                    selectedStatusFilters={selectedStatusFilters}
-                    setSelectedStatusFilters={setSelectedStatusFilters}
+                    setSelectedStatusFilter={setSelectedStatusFilter}
                     statusSelectOptions={statusSelectOptions}
                     ownerFilterColumn={ownerFilterColumn}
                     selectedOwnerFilter={selectedOwnerFilter}
-                    setSelectedOwnerFilter={(val) => setSelectedOwnerFilters(val ? [val] : [])}
-                    selectedOwnerFilters={selectedOwnerFilters}
-                    setSelectedOwnerFilters={setSelectedOwnerFilters}
+                    setSelectedOwnerFilter={setSelectedOwnerFilter}
                     ownerSelectOptions={ownerSelectOptions}
                     activeViewChoice={activeViewChoice}
                     setSelectedViewChoice={setSelectedViewChoice}
                     canUseKanbanView={canUseKanbanView}
                     filteredCount={filteredRows.length}
                     totalCount={rows.length}
-                    columns={columns}
-                    rows={rows}
-                    kanbanGroupCandidates={kanbanGroupCandidates}
-                    selectedGroupColumnName={selectedGroupColumnName || effectiveGroupColumnName}
-                    setSelectedGroupColumnName={handleSelectGroupColumn}
-                    customFilters={customFilters}
-                    setCustomFilters={setCustomFilters}
-                    allDetailColumns={allDetailColumns}
-                    visibleCardColumnNames={visibleCardColumnNames}
-                    setVisibleCardColumnNames={setVisibleCardColumnNames}
-                    newColumnName={newColumnName}
-                    setNewColumnName={setNewColumnName}
-                    onAddColumn={handleAddColumn}
                 />
 
                 {activeViewChoice === "grid" ? (
@@ -891,7 +857,7 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
                         handleOpenLongText={handleOpenLongText}
                         currentSpaceId={currentSpaceId}
                         TableActivityBadge={TableActivityBadge}
-                        primaryColumn={kanbanTitleColumn}
+                        primaryColumn={primaryColumn}
                     />
                 )}
             </div>
@@ -972,14 +938,6 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
             />
         </>
     );
-};
-
-// Keying the complete stateful page resets every local editor/filter/drag state
-// before rendering another table, rather than resetting in a post-render effect.
-const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
-    const [initialRoute] = useState(() => ({ tableKey, search: typeof window === "undefined" ? "" : window.location.search }));
-    return <TablePageContent key={tableKey ?? ""} tableKey={tableKey}
-        initialSearch={tableKey === initialRoute.tableKey ? initialRoute.search : ""} />;
 };
 
 export default TablePage;

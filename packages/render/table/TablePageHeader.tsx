@@ -1,5 +1,5 @@
 // packages/render/table/TablePageHeader.tsx
-// 表头组件：居中标题与图标编辑、表格/看板视图切换胶囊、表格模式下的新列输入。
+// 表头组件：图标/标题重命名 + 工具栏（「新增行」按钮、新列 input-group）。
 
 import React from "react";
 import Button from "render/web/ui/Button";
@@ -8,8 +8,7 @@ import InlineEditInput from "render/web/ui/InlineEditInput";
 import ContentIcon from "render/contentIcon/ContentIcon";
 import ContentIconPicker from "render/contentIcon/ContentIconPicker";
 import type { ContentIcon as ContentIconValue } from "render/contentIcon/types";
-import { LuCheck, LuLayoutDashboard, LuTable } from "react-icons/lu";
-import type { TableViewChoice } from "./useKanbanBoard";
+import { LuCheck, LuPlus, LuTable } from "react-icons/lu";
 
 export interface TablePageHeaderProps {
     tableMeta: any;
@@ -22,12 +21,10 @@ export interface TablePageHeaderProps {
     setIsIconPickerOpen: (val: boolean) => void;
     newColumnName: string;
     setNewColumnName: (val: string) => void;
+    handleAddRowTop: () => void;
     handleAddColumn: () => void;
     handleUpdateTitle: (title: string) => void;
     handleUpdateIcon: (icon: ContentIconValue | null) => void;
-    activeViewChoice?: TableViewChoice;
-    setSelectedViewChoice?: (choice: TableViewChoice) => void;
-    canUseKanbanView?: boolean;
 }
 
 export const TablePageHeader: React.FC<TablePageHeaderProps> = ({
@@ -41,47 +38,14 @@ export const TablePageHeader: React.FC<TablePageHeaderProps> = ({
     setIsIconPickerOpen,
     newColumnName,
     setNewColumnName,
+    handleAddRowTop,
     handleAddColumn,
     handleUpdateTitle,
     handleUpdateIcon,
-    activeViewChoice = "grid",
-    setSelectedViewChoice,
-    canUseKanbanView = true,
 }) => {
     return (
         <div className="table-page__header">
-            {/* 左侧：表格视图下的新列输入（看板视图下干净隐藏） */}
-            <div className="table-page__header-left">
-                {activeViewChoice === "grid" && (
-                    <div className="table-page__input-group" title="添加新列">
-                        <input
-                            type="text"
-                            className="table-page__input"
-                            placeholder="新列名称..."
-                            value={newColumnName}
-                            onChange={(e) => setNewColumnName(e.target.value)}
-                            onKeyDown={(e) =>
-                                !isImeComposingKeyEvent(e) &&
-                                e.key === "Enter" &&
-                                handleAddColumn()
-                            }
-                        />
-                        <Button
-                            variant="ghost"
-                            size="small"
-                            onClick={handleAddColumn}
-                            title="确认添加列"
-                            aria-label="确认添加列"
-                            style={{ padding: "0 6px", height: "22px", marginRight: "2px" }}
-                        >
-                            <LuCheck size={13} aria-hidden="true" />
-                        </Button>
-                    </div>
-                )}
-            </div>
-
-            {/* 中间：居中展示的表图标与精致大标题 */}
-            <div className="table-page__title table-page__title--center">
+            <div className="table-page__title">
                 <div className="table-page__icon-anchor">
                     <button
                         type="button"
@@ -90,7 +54,7 @@ export const TablePageHeader: React.FC<TablePageHeaderProps> = ({
                         title="修改表图标"
                         aria-label="修改表图标"
                     >
-                        <ContentIcon icon={tableMeta?.icon} fallback={LuTable} size={26} />
+                        <ContentIcon icon={tableMeta?.icon} fallback={LuTable} size={28} />
                     </button>
                     {isIconPickerOpen && (
                         <ContentIconPicker
@@ -112,7 +76,10 @@ export const TablePageHeader: React.FC<TablePageHeaderProps> = ({
                         onChange={(e) => setTableTitleInput(e.target.value)}
                         onBlur={() => handleUpdateTitle(tableTitleInput)}
                         onKeyDown={(e) => {
-                            if (isImeComposingKeyEvent(e)) return;
+                            // IME 组合中（中文选字确认）不触发表格操作。
+                            if (isImeComposingKeyEvent(e)) {
+                                return;
+                            }
                             if (e.key === "Enter") {
                                 handleUpdateTitle(tableTitleInput);
                             } else if (e.key === "Escape") {
@@ -130,40 +97,54 @@ export const TablePageHeader: React.FC<TablePageHeaderProps> = ({
                                 tableMeta.displayName ?? tableMeta.tableId
                             );
                         }}
-                        title="点击重命名表格"
                     >
                         {tableMeta.displayName ?? tableMeta.tableId}
                     </button>
                 )}
             </div>
 
-            {/* 右侧：视图切换胶囊（表格 | 看板） */}
-            <div className="table-page__header-right">
-                {setSelectedViewChoice && (
-                    <div className="table-page__view-switch" role="group" aria-label="视图切换">
-                        <Button
-                            variant="ghost"
-                            size="small"
-                            className={`table-page__view-switch-btn${activeViewChoice === "grid" ? " table-page__view-switch-btn--active" : ""}`}
-                            aria-pressed={activeViewChoice === "grid"}
-                            onClick={() => setSelectedViewChoice("grid")}
-                        >
-                            <LuTable size={14} />
-                            <span>表格</span>
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="small"
-                            className={`table-page__view-switch-btn${activeViewChoice === "kanban" ? " table-page__view-switch-btn--active" : ""}`}
-                            disabled={!canUseKanbanView}
-                            aria-pressed={activeViewChoice === "kanban"}
-                            onClick={() => setSelectedViewChoice("kanban")}
-                        >
-                            <LuLayoutDashboard size={14} />
-                            <span>看板</span>
-                        </Button>
-                    </div>
-                )}
+            <div className="table-page__toolbar">
+                <Button
+                    variant="ghost"
+                    size="small"
+                    onClick={handleAddRowTop}
+                    title="新增行"
+                    aria-label="新增行"
+                    style={{
+                        padding: "0 8px",
+                        height: "24px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                    }}
+                >
+                    <LuPlus size={14} aria-hidden="true" />
+                    <span>新增行</span>
+                </Button>
+                <div className="table-page__input-group">
+                    <input
+                        type="text"
+                        className="table-page__input"
+                        placeholder="新列名称..."
+                        value={newColumnName}
+                        onChange={(e) => setNewColumnName(e.target.value)}
+                        onKeyDown={(e) =>
+                            !isImeComposingKeyEvent(e) &&
+                            e.key === "Enter" &&
+                            handleAddColumn()
+                        }
+                    />
+                    <Button
+                        variant="ghost"
+                        size="small"
+                        onClick={handleAddColumn}
+                        title="确认添加"
+                        aria-label="确认添加"
+                        style={{ padding: "0 8px", height: "24px", marginRight: "4px" }}
+                    >
+                        <LuCheck size={14} aria-hidden="true" />
+                    </Button>
+                </div>
             </div>
         </div>
     );
