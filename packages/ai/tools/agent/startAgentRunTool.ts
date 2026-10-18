@@ -21,6 +21,10 @@
 import { RUN_TITLE_MAX, normalizeRunTitle } from "./runTitle";
 import { resolveStartAgentRunCwd } from "./agentRunCwd";
 import { runAgentBackground } from "ai/agent/runAgentBackground";
+import {
+    HOST_EXECUTOR_UNAVAILABLE_MESSAGE,
+    HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE,
+} from "./runtimeKeyDispatchGuard";
 import { toErrorMessage } from "core/errorMessage";
 import {
     buildDelegatedTaskContent,
@@ -201,9 +205,18 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             runtimeKey: {
                 type: "string",
                 description:
-                    "可选。这次 run 的执行位置：listRuntimes 返回的稳定 key（local / server / machine:<machineId> / docker:<runtimeId>）。" +
+                    "可选。这次 run 的执行位置：listRuntimes 返回的稳定 key（local | server | machine:<machineId> | docker:<runtimeId> | instabox | gcp）。" +
+                    "云后端按 run 计费（instabox 免费额度、gcp 按秒），点名即表示同意在该后端执行。" +
                     "填了就只在那个位置执行；key 非法 / 运行时未配置 / 机器离线或非本人所有时会显式报错，" +
                     "不会悄悄改在本机或服务端执行。不填 = 沿用当前宿主默认位置。",
+            },
+            allowHostWrites: {
+                type: "boolean",
+                description:
+                    "可选。仅当 runtimeKey='local' 时需要显式声明：表示调用方同意子 run 直接在**宿主文件系统**上读写代码（无隔离）。" +
+                    "runtimeKey='local' 但未声明时会被显式拒绝（不回落宿主、也不悄悄改成 docker）。" +
+                    "省略 runtimeKey 时无效。注意**省略 key 时的默认位置有例外**：写型派发默认进本机 docker 沙盒；"
+                    + "只读派发（readOnly=true）仍在宿主执行（它写不了文件，起沙盒是浪费）。",
             },
         },
         required: ["task", "title"],
@@ -240,12 +253,18 @@ interface StartAgentRunArgs {
     resultMode?: "full" | "summary";
     parentDialogId?: string;
     /**
-    /**
-     * listRuntimes 返回的执行位置稳定 key（local / server / machine:<id> / docker:<id>）。
+     * listRuntimes 返回的执行位置稳定 key（local / server / machine:<id> / docker:<id> / instabox | gcp）。
+     * 云后端按 run 计费（instabox 免费额度、gcp 按秒），点名即表示同意在该后端执行。
      * 显式指定时该 run 只在目标位置执行；不可用一律由服务端显式报错，不静默回退。
      * 省略 = 沿用宿主默认位置。
      */
     runtimeKey?: string;
+    /**
+     * 显式确认「这次 run 可以在宿主文件系统上写代码」。只有 `runtimeKey: "local"`
+     * 需要它；其他位置（docker / server / machine / 云后端）与省略 runtimeKey 的
+     * 默认路径都不看这个参数。
+     */
+    allowHostWrites?: boolean;
     /**
      * 子 run 的工作目录（绝对路径）。只在本地运行主机（nolo CLI）生效；
      * 本执行器（服务端后台派发）兑现不了，传了即报错，见 startAgentRunFunc。
@@ -292,7 +311,7 @@ export async function startAgentRunFunc(
     const runtimeKey = typeof args.runtimeKey === "string" ? args.runtimeKey.trim() : "";
     if (args.runtimeKey !== undefined && (typeof args.runtimeKey !== "string" || !runtimeKey)) {
         throw new Error(
-            "startAgentRun 的 runtimeKey 必须是非空的 listRuntimes key（local | server | machine:<machineId> | docker:<runtimeId>）；要沿用默认位置请省略该参数"
+            "startAgentRun 的 runtimeKey 必须是非空的 listRuntimes key（local | server | machine:<machineId> | docker:<runtimeId> | instabox | gcp）；要沿用默认位置请省略该参数"
         );
     }
     const resultMode = args.resultMode ?? "full";
@@ -370,8 +389,45 @@ export async function startAgentRunFunc(
     const parentDialogId =
         explicitParentDialogId ?? (activeDialogKey ? extractCustomId(activeDialogKey) : undefined);
 
+    // F1：`runtimeKey: "local"` = 在**宿主文件系统**上执行（不是 docker 副本）。
+    // 方案 A：它由宿主进程内的**本地执行器**兑现（CLI 通道由
+    // cliLocalToolExecutors 覆盖本工具；其他宿主经 thunkApi.extra 注入
+    // startHostAgentRun）。两件事都必须显式：
+    //   1) allowHostWrites: true（缺失即拒，绝不因为「省略 / 笔误」落到宿主）；
+    //   2) 宿主真的提供宿主执行器 —— 服务端 / 浏览器宿主没有，所以服务端那条路
+    //      **永远**不兑现 local（与 local_target_unsupported 同一政策）；这里提前
+    //      给出可操作文案，而不是发 HTTP 再等 409。
+    const hostAgentRunDispatcher =
+        runtimeKey === "local"
+            ? (thunkApi?.extra as { startHostAgentRun?: unknown } | undefined)?.startHostAgentRun
+            : undefined;
+    if (runtimeKey === "local") {
+        if (args.allowHostWrites !== true) {
+            throw new Error(HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE);
+        }
+        if (typeof hostAgentRunDispatcher !== "function") {
+            throw new Error(HOST_EXECUTOR_UNAVAILABLE_MESSAGE);
+        }
+    }
+
     try {
-        const bgResult = await dispatch(
+        const bgResult = runtimeKey === "local"
+            ? await (
+                  hostAgentRunDispatcher as (
+                      args: Record<string, unknown>
+                  ) => Promise<any>
+              )({
+                  agentKey: effectiveAgentKey,
+                  userInput: content,
+                  waitForCompletion: wait === true,
+                  runKind: "subtask",
+                  runTitle: title,
+                  runtimeKey: "local",
+                  allowHostWrites: true,
+                  ...(args.readOnly === true ? { readOnly: true } : {}),
+                  ...(parentDialogId ? { parentDialogId } : {}),
+              })
+            : await dispatch(
             runAgentBackground({
                 agentKey: effectiveAgentKey,
                 userInput: content,

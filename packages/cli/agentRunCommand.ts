@@ -288,7 +288,13 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     writeUsage(output, deps.commandPath);
     return 0;
   }
-  const parsed = parseAgentRunArgs(args, { commandPath: deps.commandPath });
+  let parsed: ParsedAgentRunArgs | null;
+  try {
+    parsed = parseAgentRunArgs(args, { commandPath: deps.commandPath });
+  } catch (error) {
+    output.write(`[nolo] ${toErrorMessage(error)}\n`);
+    return 1;
+  }
   if (!parsed) {
     writeUsage(output, deps.commandPath);
     return 1;
@@ -486,7 +492,33 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   const rawAgentInput = resolveRawAgentInput(args, deps.commandPath) ?? parsed.agentKey;
   const fullstackLocal = isFullstackCodingAgentRef(rawAgentInput, parsed.agentKey);
   const explicitLocalCli = isLocalCliAgentKey(parsed.agentKey);
-  const isLocalRun = parsed.runtimeMode === "local" || (!parsed.runtimeMode && (fullstackLocal || explicitLocalCli || args.includes("--dangerously-allow-shell")));
+  // runtimeKey 指向 docker（docker / docker:<id>）时本机通道可以真正兑现 sbx 云
+  // 沙盒：只在本 run 本来就会落在本机执行时把它交给本地通道（见 isLocalRun），
+  // 并在那里 fail-closed（无绑定/未授权 → 开跑前显式失败，绝不静默落宿主）。
+  const dockerRuntimeLocal =
+    typeof parsed.runtimeKey === "string" &&
+    /^docker(:.+)?$/.test(parsed.runtimeKey.trim());
+  // F1：`--runtime-key local` = 「在**本进程所在宿主**上执行」。本机就是那台机器，
+  // 所以它必须走本地 runtime（父进程内），**绝不发给服务端**：服务端兑现不了 local
+  // （`local_target_unsupported`，见 server/handlers/agentRun/runtimeTarget.ts），
+  // 历史上「点名宿主执行 → 服务端 409 → 成果搁浅在 docker 副本」正是这条路。
+  const hostRuntimeLocal =
+    typeof parsed.runtimeKey === "string" && parsed.runtimeKey.trim() === "local";
+  // 安全硬门（RV-F1 HIGH）：直接 CLI 入口也必须显式确认宿主写入。
+  // 上层派发工具有 allowHostWrites 守卫，但 `nolo agent run --runtime-key local`
+  // 绕过了那层；这里不校验就等于"任意 shell 都能在宿主改文件"。
+  if (hostRuntimeLocal && !args.includes("--allow-host-writes")) {
+    output.write(
+      "[nolo] runtimeKey=local 会在**宿主文件系统**上执行并写入，必须显式加 --allow-host-writes 确认；" +
+        "要隔离执行请省略 --runtime-key（默认进 docker 沙盒）。\n",
+    );
+    return 1;
+  }
+  const isLocalRun =
+    (dockerRuntimeLocal || hostRuntimeLocal || !parsed.runtimeKey) &&
+    (parsed.runtimeMode === "local" ||
+      hostRuntimeLocal ||
+      (!parsed.runtimeMode && (fullstackLocal || explicitLocalCli || args.includes("--dangerously-allow-shell"))));
 
   if (wantsFallbackSuggestions && !isLocalRun) {
     output.write("[nolo] --fallback-agent (suggestions) is only supported for local CLI runs (use --local)\n");
@@ -504,7 +536,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // local adapter resolves its own way. Without this, a bare handle like
   // "agy-pro" is sent to the server verbatim and 404s.
   const resolvedAgentKey =
-    parsed.runtimeMode !== "local"
+    parsed.runtimeMode !== "local" && !hostRuntimeLocal
       ? await (deps.resolveAgentRunAgentKey ?? resolveAgentRunAgentKey)({
           agentInput: resolveRawAgentInput(args, deps.commandPath) ?? parsed.agentKey,
           cliArgs: args,
@@ -670,7 +702,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     }
   }
   let localRuntimeCwd = parsed.cwd;
-  if (!localRuntimeCwd && parsed.runtimeMode === "local") {
+  if (!localRuntimeCwd && (parsed.runtimeMode === "local" || hostRuntimeLocal)) {
     localRuntimeCwd = process.cwd();
   }
   const runEnv = buildLocalRunEnv({
@@ -862,11 +894,18 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     // 留口子，也不受 NOLO_RUNTIME_MODE=local 覆盖（resolveRequestedRuntimeMode 以
     // options.runtimeMode 优先）。这是在唯一构造 runner 参数的入口做的，quota
     // fallback / 重试等复用 buildRunOptions 的路径同样被锁住。
+    // 非 machine-shell 时保留本地通道判定：显式 runtimeMode 优先，其次
+    // docker/host 本地目标在本地 run 上回落 runtimeMode=local。
     ...(parsed.machineShell
       ? { runtimeMode: "server" as const, requireRemoteDispatch: true }
       : parsed.runtimeMode
         ? { runtimeMode: parsed.runtimeMode }
-        : {}),
+        : (dockerRuntimeLocal || hostRuntimeLocal) && isLocalRun
+          ? { runtimeMode: "local" as const }
+          : {}),
+    // runtimeKey 与 machine-shell 的组合已在 parseAgentRunArgs 入口显式拒绝，
+    // 这里直接透传即可（不再静默丢弃参数）。
+    ...(parsed.runtimeKey ? { runtimeKey: parsed.runtimeKey } : {}),
     ...(parsed.continueDialogId ? { continueDialogId: parsed.continueDialogId } : {}),
     ...(parsed.spaceId ? { spaceId: parsed.spaceId } : {}),
     ...(parsed.category ? { category: parsed.category } : {}),

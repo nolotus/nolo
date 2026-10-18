@@ -36,6 +36,35 @@ export type CliLocalRuntimeAdapterDeps = {
   createId?: () => string;
   fetchImpl?: CliFetchImpl;
   cwd?: string;
+  /**
+   * 本 run 的 runtimeKey（CLI `--runtime-key`）。缺省 = 本机执行。
+   * `docker` / `docker:<id>`：工作区工具走 sbx 云沙盒；其它云后端（gcp /
+   * instabox / machine:*）在 run 开始前显式失败，绝不静默落宿主。
+   */
+  runtimeKey?: string;
+  /**
+   * 测试注入缝：缺省真实 `createLocalDockerWorkload`（复用服务端
+   * DockerWorkloadLifecycle + createDockerToolChannel + sbx）。注入假实现即可
+   * 确定性覆盖「工具调用确实进 channel / 宿主执行器零调用」。
+   */
+  createLocalDockerWorkload?: (args: {
+    runtimeKey: string;
+    runId: string;
+    authenticatedCaller: string;
+    agentKey: string;
+    env: Record<string, string | undefined>;
+    /** 投送来源（宿主工作区根）；块K：本地 docker 通道用它打包仓库送进沙盒。 */
+    workspaceRoot?: string;
+  }) => Promise<{
+    channel: (
+      toolName: string,
+      args: Record<string, unknown>,
+      signal?: AbortSignal,
+    ) => Promise<string>;
+    release: () => Promise<void>;
+    runId?: string;
+    backendId?: string;
+  }>;
   output?: { write(chunk: string): unknown };
   localToolExecutors?: Record<
     string,

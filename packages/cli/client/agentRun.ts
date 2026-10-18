@@ -19,6 +19,7 @@ import {
   createCliLocalRuntimeAdapter,
   isBuiltinNoloAgentRef,
 } from "./localRuntimeAdapter";
+import { isDockerRuntimeKey } from "./localDockerWorkload";
 import { isAntigravityOAuthAgent } from "../../agent-runtime/antigravityOAuth";
 import { isOAuthApiKeyRef } from "../../agent-runtime/serverProxyPolicy";
 import { resolveLocalUserId } from "./cliAgentConfigHelpers";
@@ -280,6 +281,10 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     ...(options.activityReporter
       ? { activityReporter: options.activityReporter }
       : {}),
+    // runtimeKey 接线：不传下去则本地 run 的 runtimeKey 在 agentRun 层就断了
+    // ——adapter 收不到 → docker workload 永不创建，非 docker 云后端也不会
+    // fail-closed（死代码）。
+    ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
   });
 }
 
@@ -288,6 +293,9 @@ function resolveLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     options.localRuntimeAdapter ||
     options.localRuntimeAdapterFactory?.(options.env, {
       cwd: options.localRuntimeCwd,
+      // 与 buildDefaultLocalRuntimeAdapter 同口径：注入式 factory 也必须拿到
+      // runtimeKey，否则注入了 adapter 的本地 run 会静默丢掉 docker 语义。
+      ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
     }) ||
     buildDefaultLocalRuntimeAdapter(options)
   );
@@ -1922,6 +1930,7 @@ async function runHttpAgentTurn(
         : {}),
       ...(options.background ? { background: true } : {}),
       ...(options.ephemeral ? { ephemeral: true } : {}),
+      ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
       ...(typeof options.timeoutMs === "number"
         ? { timeoutMs: options.timeoutMs }
         : {}),
@@ -2106,6 +2115,26 @@ async function runLocalAgentTurnForCli(
   // 解析一次并往下传：收尾要释放的必须是真正跑过命令的那个实例）。
   const resolvedBaseAdapter = resolveLocalRuntimeAdapter(options);
   try {
+    // run 开始前的 runtimeKey 预检：docker 指向时在此创建/校验 sandbox，
+    // 无法兑现即显式失败——此时一个工具调用都还没发生（零宿主执行）。
+    // 非 docker 的 key 在 adapter 创建阶段就已 fail-closed，这里的预检对
+    // 它们是 no-op（prepareLocalRuntimeWorkload 自带该判断）。
+    if (options.runtimeKey) {
+      const prepare = (
+        resolvedBaseAdapter as
+          | { prepareLocalRuntimeWorkload?: () => Promise<void> }
+          | undefined
+      )?.prepareLocalRuntimeWorkload;
+      if (typeof prepare === "function") {
+        try {
+          await prepare.call(resolvedBaseAdapter);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          options.output.write(`[nolo] ${message}\n`);
+          return { exitCode: 1, localError: error };
+        }
+      }
+    }
     return await runLocalAgentTurnForCliWithAdapter(
       options,
       settings,
@@ -2468,6 +2497,12 @@ async function runLocalAgentTurnForCliWithAdapter(
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
 ): Promise<{ exitCode?: 1; credentialKey?: string } | null> {
+  // 云后端 runtimeKey（gcp / instabox / machine:*）的 run 由服务端通道执行，
+  // 本地 adapter 不参与：这里若照旧构造它，本地通道的 fail-closed 闸门
+  // （assertRuntimeKeyLocalFulfillable）会错误地打死一次合法的 server 派发
+  // （实测：`--runtime-key instabox` 的 HTTP 派发前预检直接抛错）。本地冷却
+  // 预检本就只对本地 runtime 有意义 → 显式放行，交给 server 端 admission guard。
+  if (options.runtimeKey && !isDockerRuntimeKey(options.runtimeKey)) return null;
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
   let config: unknown;
@@ -2611,10 +2646,20 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
     : requestedRuntimeMode;
 
   if (runtimeMode === "local") {
+    // docker 指向由本机通道兑现（本地 docker workload）；`local` 表示"就在宿主执行"
+    // ——它同样由本机通道兑现（F1 已在派发/CLI 入口显式确认 allowHostWrites，
+    // 到这里时授权已成立）。其余云后端（gcp / instabox / machine:*）本机无法兑现。
+    const runtimeKeyIsLocallyFulfillable =
+      isDockerRuntimeKey(options.runtimeKey ?? "") ||
+      (typeof options.runtimeKey === "string" && options.runtimeKey.trim() === "local");
+    if (options.runtimeKey && !runtimeKeyIsLocallyFulfillable) {
+      options.output.write("[nolo] 本地 run 由本机沙盒决定，不支持指定云后端\n");
+      return { exitCode: 1 };
+    }
     return runInjectedLocalAgentTurn(options);
   }
 
-  if (runtimeMode === "auto" && shouldAttemptAutoLocal(options)) {
+  if (runtimeMode === "auto" && !options.runtimeKey && shouldAttemptAutoLocal(options)) {
     // Keep the raw adapter's preparation side effects paired with tools/provider
     // execution. Only successful reads of this turn's target agent are reused;
     // model overrides and ephemeral behavior remain layered above this snapshot.

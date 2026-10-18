@@ -6,6 +6,16 @@ import { resolveServerDbPath } from "./dbPath";
 import type { LegacyServerDb } from "./legacyServerDb";
 import type { AuthorityStore } from "./authorityStoreTypes";
 import { getOrCreateServerStoreRuntime } from "./serverStoreFactory";
+import { shouldOpenDatabase } from "core/runtimeRole";
+import {
+  ServerDbRoleViolationError,
+  SERVER_DB_ROLE_VIOLATION_MESSAGE,
+} from "./serverDbRoleViolation";
+
+// 错误类真值住在 ./serverDbRoleViolation：判定发生点在 serverStoreFactory（构造层），
+// 若把类留在 db.ts，factory 与 db 会互相 import 成环。
+// 这里保留 re-export，既有外部导入面不变。
+export { ServerDbRoleViolationError };
 
 const DB_PATH = resolveServerDbPath();
 
@@ -166,6 +176,19 @@ function defaultSleep(ms: number): Promise<void> {
  *   时的崩溃循环；非锁错误立即抛出。
  */
 export async function ensureServerDbOpen(options?: ServerDbOpenRetryOptions) {
+  // 角色 fail-closed：共享 LevelDB 只属于 core。
+  //
+  // 放在最前面（早于 status / 锁重试）的原因：chat-proxy 走到这里，说明某条
+  // 路径越过了 runtimeRole 契约。若这里静默开库，它会握住 LOCK，core 只能在
+  // NOLO_SERVER_DB_OPEN_LOCK_TIMEOUT_MS（生产 90s）后崩溃重启，表现为整站 502
+  // 且日志全是「LevelDB 被其他进程占用」——把「角色配错」伪装成「锁竞争」。
+  // 2026-10-18 生产事故即此形态。
+  // 第二道守卫：构造层（serverStoreFactory）已经保证非 core 角色拿到的是
+  // 永不碰磁盘的 blocked store，这里再拦一次，是为了让**越权调用**得到准确的
+  // 错误语义（角色错，而不是锁竞争），而不是让调用方拿到一个行为怪异的 store。
+  if (!shouldOpenDatabase()) {
+    throw new ServerDbRoleViolationError(SERVER_DB_ROLE_VIOLATION_MESSAGE);
+  }
   const status = authorityStore.status;
   if (status === "open") return;
 

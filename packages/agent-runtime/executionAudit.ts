@@ -39,10 +39,14 @@ export type ExecutionBillingModel =
   /** CPU + memory priced separately, per second of runtime. */
   | {
       kind: "vcpu-gib-second";
-      /** vCPU in thousandths (1000 = 1 vCPU). Integer: 0.5 must be expressible. */
-      vcpuMilli: number;
-      /** GiB in thousandths (500 = 0.5 GiB). */
-      gibMilli: number;
+      /**
+       * vCPU in millionths (1_000_000 = 1 vCPU). Integer so that the smallest
+       * real shapes stay exact: Cloudflare Containers runs 0.0625 vCPU, which a
+       * thousandths field cannot express (62.5 milli).
+       */
+      vcpuMicro: number;
+      /** GiB in millionths (500_000 = 0.5 GiB). */
+      gibMicro: number;
       vcpuRateNanoUsd: string;
       gibRateNanoUsd: string;
     }
@@ -102,6 +106,8 @@ export type ExecutionAuditRecord = {
 
 /** Micro-units per one base unit. */
 const MICROS_PER_UNIT = 1_000_000n;
+/** Millionths of one billing unit (vCPU / GiB). Same scale, different subject. */
+const UNIT_MICROS = 1_000_000n;
 const NANO_PER_MICRO = 1_000n;
 
 function toBigInt(value: string | number | bigint): bigint {
@@ -164,21 +170,22 @@ export function computeExecutionCost(args: {
     case "per-second":
       return finish("second", durationMicros, toBigInt(args.model.rateNanoUsd));
     case "vcpu-gib-second": {
-      const vcpuMilli = BigInt(Math.max(0, Math.round(args.model.vcpuMilli)));
-      const gibMilli = BigInt(Math.max(0, Math.round(args.model.gibMilli)));
-      const denom = 1000n * MICROS_PER_UNIT;
+      const vcpuMicro = BigInt(Math.max(0, Math.round(args.model.vcpuMicro)));
+      const gibMicro = BigInt(Math.max(0, Math.round(args.model.gibMicro)));
+      // size = micro-seconds × millionths-of-a-unit → seconds scaled by 1e12.
+      const denom = UNIT_MICROS * UNIT_MICROS;
       const vcpuCost = ceilDiv(
-        durationMicros * vcpuMilli * toBigInt(args.model.vcpuRateNanoUsd),
+        durationMicros * vcpuMicro * toBigInt(args.model.vcpuRateNanoUsd),
         denom,
       );
       const gibCost = ceilDiv(
-        durationMicros * gibMilli * toBigInt(args.model.gibRateNanoUsd),
+        durationMicros * gibMicro * toBigInt(args.model.gibRateNanoUsd),
         denom,
       );
       return {
         unit: "vcpu-second",
         // Quantity reported in vCPU-seconds (rounded up to a micro-unit).
-        quantityMicros: ceilDiv(durationMicros * vcpuMilli, 1000n).toString(),
+        quantityMicros: ceilDiv(durationMicros * vcpuMicro, UNIT_MICROS).toString(),
         rateNanoUsd: toBigInt(args.model.vcpuRateNanoUsd).toString(),
         costNanoUsd: (vcpuCost + gibCost).toString(),
         source,

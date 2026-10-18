@@ -268,10 +268,18 @@ export type RunAgentTurnOptions = {
   env: EnvLike;
   output: OutputLike;
   runtimeMode?: AgentRuntimeRequestedMode;
+  runtimeKey?: string;
   localRuntimeAdapter?: AgentRuntimeHostAdapter;
   localRuntimeAdapterFactory?: (
     env: EnvLike,
-    options?: { cwd?: string },
+    options?: {
+      cwd?: string;
+      /**
+       * 本 run 的 runtimeKey（CLI `--runtime-key`）。与 deps.runtimeKey 同值：
+       * 注入式 factory 据此构造 docker workload 通道 / 对云后端 key fail-closed。
+       */
+      runtimeKey?: string;
+    },
   ) => AgentRuntimeHostAdapter;
   localRuntimeCwd?: string;
   timeoutMs?: number;

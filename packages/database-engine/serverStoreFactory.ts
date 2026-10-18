@@ -8,6 +8,11 @@ import { createLegacyServerDb, type LegacyServerDb } from "./legacyServerDb";
 import { createLevelAuthorityStore } from "./levelAuthorityStore";
 import { createMemoryAuthorityStore } from "./memoryAuthorityStore";
 import { createSqliteAuthorityStore } from "./sqliteAuthorityStore";
+import { shouldOpenDatabase } from "core/runtimeRole";
+import {
+    ServerDbRoleViolationError,
+    SERVER_DB_ROLE_VIOLATION_MESSAGE,
+} from "./serverDbRoleViolation";
 
 export type ServerStoreDriver = "level" | "memory" | "sqlite";
 
@@ -80,10 +85,65 @@ export function createAuthorityStoreForDriver(
   }
 }
 
+/**
+ * chat-proxy 等非 core 角色使用的「拒绝访问」store。
+ *
+ * 存在的唯一理由：**绝不能构造 real Level 实例**。`new Level()` 的构造器会在
+ * `process.nextTick` 自动 open（abstract-level 的 autoOpen），于是「只是 import
+ * 了 db.ts」就足以握住 LevelDB 的 LOCK —— 2026-10-18 生产整站 502 就是这么来的：
+ * chat-proxy 先起、抢锁，core 等 NOLO_SERVER_DB_OPEN_LOCK_TIMEOUT_MS 超时崩溃循环。
+ * 事后在 ensureServerDbOpen() 里补门禁已经太晚（实测：import 时 status 就是 opening）。
+ *
+ * 因此这里返回一个永远不碰磁盘的 store：open/get/put/... 一律抛 tagged 错误，
+ * status 恒为 "closed"（如实反映「本进程没有库」）。close() 是 no-op —— 关机路径
+ * 会无条件调用它，不该因为「本来就没开」而让关机失败。
+ */
+export function createRoleBlockedAuthorityStore(dbPath: string): AuthorityStore {
+  const blocked = (): never => {
+    throw new ServerDbRoleViolationError(SERVER_DB_ROLE_VIOLATION_MESSAGE);
+  };
+  async function* blockedIterator(): AsyncIterableIterator<[string, unknown]> {
+    blocked();
+  }
+  return {
+    location: dbPath,
+    status: "closed",
+    async open() {
+      blocked();
+    },
+    async close() {
+      // 从未打开过：让 shutdown 路径照常走完。
+    },
+    async get<T>(): Promise<T> {
+      return blocked();
+    },
+    async put() {
+      blocked();
+    },
+    async del() {
+      blocked();
+    },
+    async batchWrite() {
+      blocked();
+    },
+    createBatch() {
+      return blocked();
+    },
+    iterator: blockedIterator,
+  };
+}
+
 export function getOrCreateServerStoreRuntime(
   dbPath: string,
   options: ServerStoreFactoryOptions = {}
 ): ServerStoreRuntime {
+  // 角色守卫必须在**任何**磁盘副作用之前：不 mkdir、不 new Level、不写 globalScope。
+  // 放在 ensureServerDbDirectory/构造之后都晚了 —— 构造即抢锁（见 createRoleBlockedAuthorityStore）。
+  if (!shouldOpenDatabase()) {
+    const blocker = createRoleBlockedAuthorityStore(dbPath);
+    return { authorityStore: blocker, serverDb: createLegacyServerDb(blocker) };
+  }
+
   const globalScope =
     options.globalScope ?? (globalThis as Record<string, unknown>);
   const driver = options.driver ?? resolveServerStoreDriver(options.env);

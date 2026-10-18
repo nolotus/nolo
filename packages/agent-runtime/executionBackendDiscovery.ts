@@ -7,19 +7,20 @@
 // capability, never call a paid API (a run-time probe that costs money would be
 // a worse bug than a stale cache).
 //
-// Boot numbers below are measured values from 2026-10-18, kept as constants so
-// routing can prefer the fastest qualifying backend without a warm-up call.
+// Boot numbers below are read straight from EXECUTION_BACKEND_BENCHMARKS: the
+// COLD number (the user-perceived cost, and the only one routing compares) and,
+// in a separate field, the warm one. No hard-coded fallback on purpose: if a row
+// stops being `measured` the estimate disappears instead of quietly keeping an
+// old number alive.
+
+import { accessSync, constants, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import type { ExecutionBackendCandidate } from "./executionRouting";
 import { LinuxBubblewrapBackend } from "./linuxBubblewrapBackend";
-
-/** Measured boot times, ms. */
-export const MEASURED_BOOT_MS = {
-  "linux-bubblewrap-v1": 4,
-  instabox: 851,
-  "docker-sandbox-cloud": 11_700,
-  "gcp-cloud-run-jobs": 13_119,
-} as const;
+import { measuredBootMs } from "./executionBackendBenchmarks";
 
 export type BackendProbe = () => Promise<boolean>;
 
@@ -37,6 +38,12 @@ export type DiscoveryInputs = {
     bubblewrap?: BackendProbe;
     sbx?: BackendProbe;
     instabox?: BackendProbe;
+    gcp?: BackendProbe;
+    gcpCloudRun?: BackendProbe;
+    cf?: BackendProbe;
+    cfContainers?: BackendProbe;
+    vultr?: BackendProbe;
+    vultrInstance?: BackendProbe;
   };
 };
 
@@ -57,30 +64,93 @@ const defaultBubblewrapProbe: BackendProbe = async () => {
 const presenceProbe = (env: Record<string, string | undefined>, key: string): BackendProbe =>
   async () => Boolean(env[key]?.trim());
 
+const defaultGcpProbe = (env: Record<string, string | undefined>): BackendProbe => async () => {
+  try {
+    if (env.GCLOUD_PATH) {
+      return existsSync(env.GCLOUD_PATH);
+    }
+    const candidates = [
+      env.HOME ? `${env.HOME}/google-cloud-sdk/bin/gcloud` : undefined,
+      "/home/nolotus/google-cloud-sdk/bin/gcloud",
+      "/usr/bin/gcloud",
+      "/usr/local/bin/gcloud",
+    ].filter((p): p is string => Boolean(p));
+
+    for (const p of candidates) {
+      if (existsSync(p)) return true;
+    }
+    const which = spawnSync("which", ["gcloud"], {
+      encoding: "utf8",
+      env: { PATH: env.PATH ?? process.env.PATH },
+    });
+    return which.status === 0 && Boolean(which.stdout?.trim());
+  } catch {
+    return false;
+  }
+};
+
+const defaultCfProbe = (env: Record<string, string | undefined>): BackendProbe => async () => {
+  try {
+    if (Boolean(env.CLOUDFLARE_API_TOKEN?.trim())) {
+      return true;
+    }
+    const home = env.HOME?.trim() || homedir();
+    if (!home) return false;
+    const configPath = join(home, ".config", "cloudflare", "config", "default.json");
+    if (!existsSync(configPath)) return false;
+    accessSync(configPath, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const defaultVultrProbe = (env: Record<string, string | undefined>): BackendProbe => async () => {
+  return Boolean(env.VULTR?.trim() || env.VULTR_API_KEY?.trim());
+};
+
+const safeProbe = async (probe: BackendProbe): Promise<boolean> => {
+  try {
+    return await probe();
+  } catch {
+    return false;
+  }
+};
+
 export async function discoverExecutionBackends(
   inputs: DiscoveryInputs,
 ): Promise<ExecutionBackendCandidate[]> {
   const env = inputs.env ?? process.env;
   const probes = inputs.probes ?? {};
 
-  const [bwrapOk, sbxOk, instaboxOk] = await Promise.all([
-    (probes.bubblewrap ?? defaultBubblewrapProbe)().catch(() => false),
-    (probes.sbx ?? presenceProbe(env, "NOLO_DOCKER_BINDINGS"))().catch(() => false),
-    (probes.instabox ?? presenceProbe(env, "INSTABOX_API_KEY"))().catch(() => false),
+  const [bwrapOk, sbxOk, instaboxOk, gcpOk, cfOk, vultrOk] = await Promise.all([
+    safeProbe(probes.bubblewrap ?? defaultBubblewrapProbe),
+    safeProbe(probes.sbx ?? presenceProbe(env, "NOLO_DOCKER_BINDINGS")),
+    safeProbe(probes.instabox ?? presenceProbe(env, "INSTABOX_API_KEY")),
+    safeProbe(probes.gcp ?? probes.gcpCloudRun ?? defaultGcpProbe(env)),
+    safeProbe(probes.cf ?? probes.cfContainers ?? defaultCfProbe(env)),
+    safeProbe(probes.vultr ?? probes.vultrInstance ?? defaultVultrProbe(env)),
   ]);
 
   const candidates: ExecutionBackendCandidate[] = [...(inputs.platform ?? [])];
 
-  candidates.push({
+  const pushCandidate = (candidate: ExecutionBackendCandidate) => {
+    if (!candidates.some((c) => c.backendId === candidate.backendId)) {
+      candidates.push(candidate);
+    }
+  };
+
+  pushCandidate({
     backendId: "linux-bubblewrap-v1",
     kind: "local-sandbox",
     capabilities: new LinuxBubblewrapBackend().describe().capabilities,
     available: bwrapOk,
     source: "local-device",
-    observedBootMs: MEASURED_BOOT_MS["linux-bubblewrap-v1"],
+    observedColdBootMs: measuredBootMs("linux-bubblewrap-v1"),
+    observedWarmBootMs: measuredBootMs("linux-bubblewrap-v1", { warm: true }),
   });
 
-  candidates.push({
+  pushCandidate({
     backendId: "docker-sandbox-cloud",
     kind: "cloud",
     capabilities: {
@@ -97,10 +167,11 @@ export async function discoverExecutionBackends(
     },
     available: sbxOk,
     source: "platform",
-    observedBootMs: MEASURED_BOOT_MS["docker-sandbox-cloud"],
+    observedColdBootMs: measuredBootMs("docker-sandbox-cloud"),
+    observedWarmBootMs: measuredBootMs("docker-sandbox-cloud", { warm: true }),
   });
 
-  candidates.push({
+  pushCandidate({
     backendId: "instabox",
     kind: "cloud",
     capabilities: {
@@ -117,7 +188,71 @@ export async function discoverExecutionBackends(
     },
     available: instaboxOk,
     source: "user-cloud",
-    observedBootMs: MEASURED_BOOT_MS.instabox,
+    observedColdBootMs: measuredBootMs("instabox"),
+    observedWarmBootMs: measuredBootMs("instabox", { warm: true }),
+  });
+
+  pushCandidate({
+    backendId: "gcp-cloud-run-jobs",
+    kind: "cloud",
+    capabilities: {
+      executionClasses: ["oneshot"],
+      streamingExec: false,
+      filesystem: true,
+      persistentFilesystem: false,
+      processSignals: false,
+      inboundPorts: false,
+      networkPolicy: true,
+      snapshots: false,
+      gpu: false,
+      isolationModes: ["container"],
+    },
+    available: gcpOk,
+    source: "user-cloud",
+    observedColdBootMs: measuredBootMs("gcp-cloud-run-jobs"),
+    observedWarmBootMs: measuredBootMs("gcp-cloud-run-jobs", { warm: true }),
+  });
+
+  pushCandidate({
+    backendId: "cf-containers",
+    kind: "cloud",
+    capabilities: {
+      executionClasses: ["oneshot"],
+      streamingExec: false,
+      filesystem: true,
+      persistentFilesystem: false,
+      processSignals: false,
+      inboundPorts: false,
+      networkPolicy: true,
+      snapshots: false,
+      gpu: false,
+      isolationModes: ["container"],
+    },
+    available: cfOk,
+    source: "user-cloud",
+    observedColdBootMs: measuredBootMs("cf-containers"),
+    observedWarmBootMs: measuredBootMs("cf-containers", { warm: true }),
+  });
+
+  pushCandidate({
+    backendId: "vultr-instance",
+    kind: "cloud",
+    capabilities: {
+      executionClasses: ["session", "oneshot"],
+      streamingExec: false,
+      filesystem: true,
+      persistentFilesystem: true,
+      processSignals: false,
+      inboundPorts: true,
+      networkPolicy: true,
+      snapshots: false,
+      gpu: false,
+      isolationModes: ["container"],
+    },
+    available: vultrOk,
+    source: "user-cloud",
+    observedColdBootMs: measuredBootMs("vultr-instance"),
+    observedWarmBootMs: measuredBootMs("vultr-instance", { warm: true }),
   });
 
   return candidates;

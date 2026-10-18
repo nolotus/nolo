@@ -60,8 +60,17 @@ export type ExecutionBackendCandidate = {
   capabilities: ExecutionBackendCapabilities;
   /** False when the backend is unconfigured, offline, or out of quota. */
   available: boolean;
-  /** Measured boot time, used to prefer the fastest qualifying backend. */
-  observedBootMs?: number;
+  /**
+   * Measured COLD start in ms (request → actually executable). This is the
+   * user-perceived boot cost and the only boot number routing compares.
+   *
+   * Kept separate from `observedWarmBootMs` on purpose: a warm sandbox is a
+   * different quantity, and letting a warm number compete against cold ones
+   * makes whichever backend happens to be warm win by definition.
+   */
+  observedColdBootMs?: number;
+  /** Measured boot in ms with a warm sandbox/instance already running. */
+  observedWarmBootMs?: number;
   /** Defaults to "platform" for backwards compatibility with callers that
    *  predate per-tenant backends. */
   source?: ExecutionBackendSource;
@@ -199,10 +208,12 @@ function pickFastest(
   }
   // Unknown boot time sorts last; ties keep declaration order (stable sort).
   const sorted = [...candidates].sort(
-    (a, b) => (a.observedBootMs ?? Number.POSITIVE_INFINITY) - (b.observedBootMs ?? Number.POSITIVE_INFINITY),
+    (a, b) =>
+      (a.observedColdBootMs ?? Number.POSITIVE_INFINITY) -
+      (b.observedColdBootMs ?? Number.POSITIVE_INFINITY),
   );
   const winner = sorted[0]!;
-  const boot = winner.observedBootMs;
+  const boot = winner.observedColdBootMs;
   // "Only one backend qualified" is not an error: the tenant simply owns less.
   // It must still be visible, because a single-backend tenant may be paying
   // cloud rates for what another tenant runs for free locally.
@@ -210,7 +221,7 @@ function pickFastest(
     ? "; only-available-backend"
     : boot === undefined
       ? ""
-      : `; fastest measured boot (${boot}ms)`;
+      : `; fastest measured cold boot (${boot}ms)`;
   return {
     backendId: winner.backendId,
     reason: `${reason}${suffix}`,

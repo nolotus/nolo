@@ -57,6 +57,8 @@ export const GCP_CLOUD_RUN_DEFAULT_IMAGE = "docker.io/library/busybox";
 export const GCP_CLOUD_RUN_DEFAULT_GCLOUD_PATH =
   "/home/nolotus/google-cloud-sdk/bin/gcloud";
 export const GCP_CLOUD_RUN_DEFAULT_TASK_TIMEOUT_SECONDS = 60;
+export const GCP_CLOUD_RUN_TASK_TIMEOUT_SECONDS_ENV =
+  "GCP_CLOUD_RUN_TASK_TIMEOUT_SECONDS";
 export const GCP_CLOUD_RUN_MAX_OUTPUT_CHARS = 64 * 1024;
 
 /**
@@ -66,10 +68,9 @@ export const GCP_CLOUD_RUN_MAX_OUTPUT_CHARS = 64 * 1024;
  */
 export const GCP_CLOUD_RUN_RATE: ExecutionBillingModel = {
   kind: "vcpu-gib-second",
-  vcpuMilli: 1000,
-  // 512 MiB = 0.5 GiB = 500 milli-GiB. (`gibMilli` counts thousandths of a
-  // GiB, so 512 would mean 0.512 GiB and silently overcharge by 2.4%.)
-  gibMilli: 500,
+  vcpuMicro: 1_000_000,
+  // 512 MiB = 0.5 GiB = 500_000 millionths of a GiB.
+  gibMicro: 500_000,
   vcpuRateNanoUsd: "12600",
   gibRateNanoUsd: "2500",
 };
@@ -100,7 +101,8 @@ export type GcpCloudRunFailureCode =
   | "gcp_lease_released"
   | "gcp_create_failed"
   | "gcp_exec_failed"
-  | "gcp_cleanup_pending";
+  | "gcp_cleanup_pending"
+  | "gcp_log_fetch_failed";
 
 /** 对外只允许固定安全文案；detail 只放状态码/退出码，绝不带凭据或命令行。 */
 const SAFE_MESSAGE: Record<GcpCloudRunFailureCode, string> = {
@@ -116,6 +118,7 @@ const SAFE_MESSAGE: Record<GcpCloudRunFailureCode, string> = {
   "gcp_create_failed": "Cloud Run job create failed",
   "gcp_exec_failed": "Cloud Run job execute failed",
   "gcp_cleanup_pending": "Cloud Run job delete was not confirmed",
+  "gcp_log_fetch_failed": "Cloud Run job execution log fetch failed",
 };
 
 export class GcpCloudRunBackendError extends Error {
@@ -134,7 +137,14 @@ export class GcpCloudRunBackendError extends Error {
 
 /** 注入点：唯一的外部调用通道。argv 是**数组**，绝不接受 shell 字符串。 */
 export type GcpExecResult = { code: number; stdout: string; stderr: string };
-export type GcpExecImpl = (argv: string[]) => Promise<GcpExecResult>;
+export type GcpExecOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+export type GcpExecImpl = (
+  argv: string[],
+  options?: GcpExecOptions,
+) => Promise<GcpExecResult>;
 
 export type GcpCloudRunBackendOptions = {
   execImpl: GcpExecImpl;
@@ -145,6 +155,8 @@ export type GcpCloudRunBackendOptions = {
   maxRetries?: number;
   taskTimeoutSeconds?: number;
   now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  env?: Record<string, string | undefined>;
 };
 
 type LeaseEntry = {
@@ -273,13 +285,47 @@ export function buildGcpCloudRunArgsFlag(argv: readonly string[]): string {
 }
 
 /** 从 gcloud 失败文案里尽量还原容器退出码（`--wait` 不直接回传它）。 */
-function extractTaskExitCode(text: string): number | null {
+export function extractTaskExitCode(text: string): number | null {
   const match =
     /exit(?:ed)?\s*(?:with\s*)?code[:\s]+(-?\d+)/i.exec(text) ??
     /non-zero exit\s*(-?\d+)/i.exec(text);
   if (!match) return null;
   const parsed = Number.parseInt(match[1] ?? "", 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * 从 Cloud Logging 条目中提取消息文本。
+ * 优先级：textPayload -> jsonPayload.message -> JSON.stringify(jsonPayload)。
+ */
+export function extractLogPayload(entry: unknown): string {
+  if (!entry || typeof entry !== "object") return "";
+  const rec = entry as Record<string, unknown>;
+  if (typeof rec.textPayload === "string") {
+    return rec.textPayload;
+  }
+  const json = rec.jsonPayload;
+  if (json && typeof json === "object") {
+    const jsonRec = json as Record<string, unknown>;
+    if (typeof jsonRec.message === "string") {
+      return jsonRec.message;
+    }
+    try {
+      return JSON.stringify(json);
+    } catch {
+      return String(json);
+    }
+  }
+  return "";
+}
+
+/**
+ * 判断 logName 是否属于 stderr。
+ * Cloud Run 日志名常为 ".../logs/run.googleapis.com%2Fstderr" 或 ".../run.googleapis.com/stderr"。
+ */
+export function isStderrLog(logName: unknown): boolean {
+  if (typeof logName !== "string") return false;
+  return /(?:%2F|\/)stderr$/i.test(logName);
 }
 
 /** gcloud 的「job 不存在」是**已删除**的确认，可以当成功；其它失败一律 pending。 */
@@ -320,6 +366,7 @@ export class GcpCloudRunBackend implements ExecutionBackend {
   readonly #maxRetries: number;
   readonly #taskTimeoutSeconds: number;
   readonly #now: () => number;
+  readonly #sleep: (ms: number) => Promise<void>;
   readonly #leases = new Map<string, LeaseEntry>();
 
   constructor(options: GcpCloudRunBackendOptions) {
@@ -358,7 +405,13 @@ export class GcpCloudRunBackend implements ExecutionBackend {
       );
     }
     this.#maxRetries = maxRetries;
-    const taskTimeout = options.taskTimeoutSeconds ?? GCP_CLOUD_RUN_DEFAULT_TASK_TIMEOUT_SECONDS;
+    const envSource = options.env ?? process.env;
+    const envTimeoutStr = envSource[GCP_CLOUD_RUN_TASK_TIMEOUT_SECONDS_ENV]?.trim();
+    const envTimeout = envTimeoutStr ? Number.parseInt(envTimeoutStr, 10) : undefined;
+    const taskTimeout =
+      options.taskTimeoutSeconds ??
+      (envTimeout !== undefined && Number.isFinite(envTimeout) ? envTimeout : undefined) ??
+      GCP_CLOUD_RUN_DEFAULT_TASK_TIMEOUT_SECONDS;
     if (!Number.isInteger(taskTimeout) || taskTimeout < 1 || taskTimeout > 86_400) {
       throw new GcpCloudRunBackendError(
         "gcp_cloud_run_invalid_config",
@@ -367,6 +420,9 @@ export class GcpCloudRunBackend implements ExecutionBackend {
     }
     this.#taskTimeoutSeconds = taskTimeout;
     this.#now = options.now ?? Date.now;
+    this.#sleep =
+      options.sleep ??
+      ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   describe(): ExecutionBackendDescriptor {
@@ -543,6 +599,7 @@ export class GcpCloudRunBackend implements ExecutionBackend {
         "execute",
         entry.jobName,
         "--wait",
+        "--format=value(metadata.name)",
         `--project=${this.#project}`,
         `--region=${this.#region}`,
       ]);
@@ -553,19 +610,237 @@ export class GcpCloudRunBackend implements ExecutionBackend {
       );
     }
 
-    const stdout = truncateOutput(run.stdout ?? "", GCP_CLOUD_RUN_MAX_OUTPUT_CHARS);
-    const stderr = truncateOutput(run.stderr ?? "", GCP_CLOUD_RUN_MAX_OUTPUT_CHARS);
-    let exitCode = 0;
-    let exitCodeSource: "gcloud" | "stderr" | "unknown" = "gcloud";
-    if (run.code !== 0) {
-      const parsed = extractTaskExitCode(stderr) ?? extractTaskExitCode(stdout);
-      if (parsed === null) {
-        exitCode = 1;
-        exitCodeSource = "unknown";
-      } else {
-        exitCode = parsed;
-        exitCodeSource = "stderr";
+    let executionName = run.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+
+    if (!executionName) {
+      const match = /executions\/([A-Za-z0-9._-]+)/.exec(run.stderr);
+      if (match?.[1]) {
+        executionName = match[1];
       }
+    }
+
+    if (!executionName) {
+      let listRes: GcpExecResult;
+      try {
+        listRes = await this.#exec([
+          this.#gcloudPath,
+          "run",
+          "jobs",
+          "executions",
+          "list",
+          `--job=${entry.jobName}`,
+          "--limit=1",
+          "--sort-by=~metadata.creationTimestamp",
+          "--format=value(metadata.name)",
+          `--project=${this.#project}`,
+          `--region=${this.#region}`,
+        ]);
+        if (listRes.code === 0 && listRes.stdout.trim()) {
+          executionName = listRes.stdout
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .find((line) => line.length > 0);
+        }
+      } catch {
+        // list fallback failed
+      }
+    }
+
+    if (!executionName) {
+      throw new GcpCloudRunBackendError(
+        "gcp_log_fetch_failed",
+        `could not resolve execution name (execute code ${run.code})`,
+      );
+    }
+
+    let describeRes: GcpExecResult;
+    try {
+      describeRes = await this.#exec([
+        this.#gcloudPath,
+        "run",
+        "jobs",
+        "executions",
+        "describe",
+        executionName,
+        "--format=json",
+        `--project=${this.#project}`,
+        `--region=${this.#region}`,
+      ]);
+    } catch (error) {
+      throw new GcpCloudRunBackendError(
+        "gcp_log_fetch_failed",
+        `describe transport error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (describeRes.code !== 0) {
+      throw new GcpCloudRunBackendError(
+        "gcp_log_fetch_failed",
+        `describe exited ${describeRes.code}: ${describeRes.stderr}`,
+      );
+    }
+
+    let describeData: Record<string, unknown>;
+    try {
+      describeData = JSON.parse(describeRes.stdout) as Record<string, unknown>;
+    } catch {
+      throw new GcpCloudRunBackendError(
+        "gcp_log_fetch_failed",
+        "describe output is not valid JSON",
+      );
+    }
+
+    const statusObj = describeData?.status as Record<string, unknown> | undefined;
+    const conditions = Array.isArray(statusObj?.conditions)
+      ? (statusObj!.conditions as Array<Record<string, unknown>>)
+      : [];
+    const completedCond = conditions.find((c) => c?.type === "Completed");
+    const isTerminal =
+      completedCond?.status === "True" ||
+      completedCond?.status === "False" ||
+      typeof statusObj?.completionTime === "string";
+
+    const queryLogs = async (): Promise<Record<string, unknown>[]> => {
+      let logRes: GcpExecResult;
+      try {
+        logRes = await this.#exec([
+          this.#gcloudPath,
+          "logging",
+          "read",
+          `resource.type="cloud_run_job" AND resource.labels.job_name="${entry.jobName}" AND labels."run.googleapis.com/execution_name"="${executionName}"`,
+          "--format=json",
+          "--limit=2000",
+          "--freshness=1h",
+          `--project=${this.#project}`,
+        ]);
+      } catch (error) {
+        throw new GcpCloudRunBackendError(
+          "gcp_log_fetch_failed",
+          `logging read transport error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (logRes.code !== 0) {
+        throw new GcpCloudRunBackendError(
+          "gcp_log_fetch_failed",
+          `logging read exited ${logRes.code}: ${logRes.stderr}`,
+        );
+      }
+      const trimmed = logRes.stdout.trim();
+      if (!trimmed) {
+        return [];
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        throw new GcpCloudRunBackendError(
+          "gcp_log_fetch_failed",
+          "logging read output is not valid JSON",
+        );
+      }
+      if (!Array.isArray(parsed)) {
+        throw new GcpCloudRunBackendError(
+          "gcp_log_fetch_failed",
+          "logging read output is not a JSON array",
+        );
+      }
+      return parsed as Record<string, unknown>[];
+    };
+
+    let entries = await queryLogs();
+    if (entries.length === 0) {
+      if (!isTerminal) {
+        throw new GcpCloudRunBackendError(
+          "gcp_log_fetch_failed",
+          "0 log entries and execution is not in terminal state",
+        );
+      }
+      const RETRY_DELAYS = [800, 2000, 4000];
+      for (const delay of RETRY_DELAYS) {
+        await this.#sleep(delay);
+        entries = await queryLogs();
+        if (entries.length > 0) {
+          break;
+        }
+      }
+    }
+
+    // 按完整精度（毫秒小数）比较，不用 localeCompare：`…100Z` 与 `…100001Z`
+    // 在字符串比较下会颠倒（RV-G2 MEDIUM）。同刻用原始下标做稳定次级键。
+    const sortedEntries = entries
+      .map((entry, index) => ({ entry, index, at: Date.parse(String((entry as { timestamp?: unknown }).timestamp ?? "")) }))
+      .sort((a, b) => {
+        const an = Number.isFinite(a.at) ? a.at : Number.POSITIVE_INFINITY;
+        const bn = Number.isFinite(b.at) ? b.at : Number.POSITIVE_INFINITY;
+        if (an !== bn) return an - bn;
+        return a.index - b.index;
+      })
+      .map((item) => item.entry);
+
+    const stdoutParts: string[] = [];
+    const stderrParts: string[] = [];
+    for (const item of sortedEntries) {
+      const text = extractLogPayload(item);
+      if (!text) continue;
+      if (isStderrLog(item?.logName)) {
+        stderrParts.push(text);
+      } else {
+        stdoutParts.push(text);
+      }
+    }
+
+    const stdout = truncateOutput(stdoutParts.join(""), GCP_CLOUD_RUN_MAX_OUTPUT_CHARS);
+    const rawStderr = stderrParts.join("");
+    const stderr = truncateOutput(
+      rawStderr.length > 0 ? rawStderr : (run.stderr ?? ""),
+      GCP_CLOUD_RUN_MAX_OUTPUT_CHARS,
+    );
+
+    const completedMessage =
+      typeof completedCond?.message === "string" ? completedCond.message : "";
+    let exitCode = 0;
+    let exitCodeSource: "task-timeout" | "describe" | "stderr" | "gcloud" | "unknown" | "gcloud-timeout" = "gcloud";
+
+    if (/timed out|deadline exceeded/i.test(completedMessage)) {
+      exitCode = 124;
+      exitCodeSource = "task-timeout";
+    } else {
+      const parsedCond = extractTaskExitCode(completedMessage);
+      if (parsedCond !== null) {
+        exitCode = parsedCond;
+        exitCodeSource = "describe";
+      } else if (completedCond?.status === "True") {
+        exitCode = 0;
+        exitCodeSource = "describe";
+      } else {
+        if (run.code === 124) {
+          // gcloud 等待/日志查询超时：保留 124 与来源，不降格为未知退出码 1（RV-G2 MEDIUM）。
+          exitCode = 124;
+          exitCodeSource = "gcloud-timeout";
+        } else {
+        const fromStderr = extractTaskExitCode(run.stderr) ?? extractTaskExitCode(run.stdout);
+        if (fromStderr !== null) {
+          exitCode = fromStderr;
+          exitCodeSource = "stderr";
+        } else if (run.code !== 0 || completedCond?.status === "False") {
+          exitCode = 1;
+          exitCodeSource = "unknown";
+        } else {
+          exitCode = 0;
+          exitCodeSource = "describe";
+        }
+        }
+      }
+    }
+
+    // 有条目却提取不出任何输出、且执行未到终态：不能返回"成功但空"（RV-G2 HIGH）。
+    if (!stdout && !stderr && entries.length > 0 && !isTerminal) {
+      throw new GcpCloudRunBackendError(
+        "gcp_log_fetch_failed",
+        "log entries were returned but none yielded extractable output, and the execution is not terminal",
+      );
     }
 
     if (stdout) onEvent?.({ type: "stdout", executionId, chunk: stdout, seq: 1 });
@@ -585,8 +860,10 @@ export class GcpCloudRunBackend implements ExecutionBackend {
         stdout,
         stderr,
         jobName: entry.jobName,
+        executionName,
         gcloudExitCode: run.code,
         exitCodeSource,
+        logEntryCount: entries.length,
       },
     };
   }

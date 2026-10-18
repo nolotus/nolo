@@ -16,6 +16,7 @@ import type {
   AgentRuntimeToolResult,
 } from "../../agent-runtime";
 import type { PermissionRequest } from "../../agent-runtime/actionGate";
+import { getLogger } from "../diagnostics";
 
 /**
  * Interactive choice request surfaced by the local `ask_user` executor.
@@ -35,6 +36,11 @@ import type {
 } from "../../agent-runtime/localLoop";
 import type { CliKvDb, HybridRecordStore } from "./hybridRecordStore";
 import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
+import {
+  describeLocalRunExecutionIsolation,
+  recordLocalRunExecutionIsolation,
+  resolveLocalRunExecutionIsolationFact,
+} from "./localRunExecutionIsolation";
 import { createTokenKey, createUserKey, dialogMessageRange } from "../../database/keys";
 import { prepareTokenUsageData } from "../../ai/token/prepareTokenUsageData";
 import { inlineImageUrlsForCustomProvider } from "../../ai/chat/inlineImageUrlsForCustomProvider";
@@ -285,6 +291,14 @@ import {
   createLocalSandboxWorkload,
   LOCAL_SANDBOX_ISOLATION,
 } from "../../agent-runtime/localSandboxWorkload";
+import {
+  assertRuntimeKeyLocalFulfillable,
+  createLocalDockerWorkload as createLocalDockerWorkloadDefault,
+  isDockerRuntimeKey,
+  LOCAL_DOCKER_TOOL_NAMES,
+  type LocalDockerWorkloadHandle,
+} from "./localDockerWorkload";
+import { WORKSPACE_TOOL_NAMES } from "../../agent-runtime/localWorkspaceToolDefs";
 import { getAgentRuntimeToolParametersIndex } from "../agentRuntimeLocal";
 import { inferCaptureIntent } from "../../ai/policy/runtimePolicy";
 import {
@@ -563,6 +577,12 @@ export function createCliLocalRuntimeAdapter(
    */
   releaseLocalSandboxWorkload(): Promise<void>;
   /**
+   * run 开始前的 runtimeKey 就绪预检（CLI 专有）：runtimeKey 指向 docker 时先在
+   * 这里创建/校验 sandbox，无法兑现即抛可操作错误（零工具调用、零宿主执行）。
+   * 非 docker / 非本地通道情形 no-op。
+   */
+  prepareLocalRuntimeWorkload(): Promise<void>;
+  /**
    * 自动上下文压缩的摘要 fallback（CLI 专有，非 AgentRuntimeHostAdapter 接口
    * 成员）。localLoop 在主通道超时/失败时最多调用一次；形状与 CLI 的
    * SummaryLlmCaller 一致。未注入 → undefined（见
@@ -634,6 +654,64 @@ export function createCliLocalRuntimeAdapter(
       return undefined;
     }
   };
+  // 派发卡片/run 记录的名字：调用方（模型）常常只给 agentKey、不传 agentName，
+  // 缺名字时卡片只能显示通用「子智能体」。轻量读 agent 记录拿 name（同
+  // resolveAgentCredentialGroup，不走 loadAgentConfig）；读不到返回 undefined，
+  // 卡片保持原有 fallback，绝不伪造名字。
+  const resolveAgentDisplayName = async (
+    agentRef: string,
+  ): Promise<string | undefined> => {
+    try {
+      const record = await readAgentFromStore({
+        agentRef,
+        store: await getOrCreateSharedStore(deps),
+        userId,
+      });
+      if (!record || typeof record !== "object") return undefined;
+      const name = (record as Record<string, unknown>).name;
+      return typeof name === "string" && name.trim() ? name.trim() : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  // F3：派发判定要读目标 agent 的 runtimeBinding.machineId。轻量读 agent 记录
+  // （同 resolveAgentCredentialGroup，不走 loadAgentConfig），读不到就是「绑定
+  // 信息未知」——判定侧对未知按 fail-closed 处理，绝不默认「就是本机」。
+  const resolveAgentRuntimeBindingMachineId = async (
+    agentRef: string,
+  ): Promise<string | undefined> => {
+    try {
+      const record = await readAgentFromStore({
+        agentRef,
+        store: await getOrCreateSharedStore(deps),
+        userId,
+      });
+      const rec = record as Record<string, unknown> | undefined;
+      const binding = asRecordOrEmpty(rec?.runtimeBinding);
+      return asOptionalTrimmedString(binding.machineId);
+    } catch {
+      return undefined;
+    }
+  };
+  /**
+   * 本机 machineId（判定「绑定机就是本机」用）。缺省走 connector 的
+   * detectMachineInfo（与 shellApprovalHostForAgent 取 deviceId 同源）；
+   * 取不到就返回 undefined，判定侧据此 fail-closed（不假装自己是绑定机）。
+   * 结果按 adapter 生命周期 memo：一次 run/adapter 只探测一次。
+   */
+  let localMachineIdProbe: Promise<string | undefined> | undefined;
+  const resolveLocalMachineId = (): Promise<string | undefined> => {
+    localMachineIdProbe ??= (async () => {
+      try {
+        const { detectMachineInfo } = await import("connector-experimental/machineInfo");
+        const machine = await detectMachineInfo({ probeLaunchable: false });
+        return asOptionalTrimmedString(machine?.machineId);
+      } catch {
+        return undefined;
+      }
+    })();
+    return localMachineIdProbe;
+  };
   let activeAgentToolNames: string[] = [];
   /**
    * owner-required 会话上下文（块 D）：resolveProviderBase 判定本机用户 ≠
@@ -651,6 +729,102 @@ export function createCliLocalRuntimeAdapter(
       }
     | undefined;
   const workspaceRoot = deps.cwd ?? process.cwd();
+  /**
+   * docker workload 通道（runtimeKey 指向 docker）。两点契约：
+   * 1) fail-closed：非 docker 的云后端 runtimeKey（gcp / instabox / machine:*）
+   *    在 adapter 创建（= run 开始）时就抛可操作错误，绝不落到下方宿主路径；
+   * 2) docker 就绪后，工作区工具族的**唯一**执行通道是 sbx channel，宿主执行器
+   *    零调用（与 bwrap 分支不同：这里不提供「通道不可用就回落宿主」的第三态）。
+   */
+  const runtimeKey =
+    typeof deps.runtimeKey === "string" ? deps.runtimeKey.trim() : "";
+  assertRuntimeKeyLocalFulfillable(runtimeKey);
+  const dockerRuntimeEnabled = isDockerRuntimeKey(runtimeKey);
+  let dockerWorkloadLoad: Promise<LocalDockerWorkloadHandle | null> | null =
+    null;
+  let dockerWorkloadReleased = false;
+  const createDockerWorkload =
+    deps.createLocalDockerWorkload ?? createLocalDockerWorkloadDefault;
+  /** 创建失败必须向上抛（显式 degraded），不做任何宿主回落。 */
+  const loadLocalDockerWorkload = (): Promise<LocalDockerWorkloadHandle | null> => {
+    if (!dockerRuntimeEnabled) return Promise.resolve(null);
+    if (dockerWorkloadReleased) {
+      return Promise.reject(
+        new Error(
+          "docker workload 已释放：本 run 的 sandbox lease 已失效，拒绝在宿主执行工具",
+        ),
+      );
+    }
+    dockerWorkloadLoad ??= (async () =>
+      (await createDockerWorkload({
+        runtimeKey,
+        runId: `cli-local-docker-${createId()}`,
+        authenticatedCaller: resolveLocalUserId(deps.env),
+        agentKey: "cli-local-run",
+        env: deps.env,
+        workspaceRoot,
+      })) as unknown as LocalDockerWorkloadHandle)();
+    return dockerWorkloadLoad;
+  };
+  /** run 开始前显式预检（agentRun.ts 在进入 loop 前调用）：无绑定/未授权即失败。 */
+  const prepareLocalRuntimeWorkload = async (): Promise<void> => {
+    if (!dockerRuntimeEnabled) return;
+    await loadLocalDockerWorkload();
+  };
+  /**
+   * F1：本 run 的**执行隔离事实**落盘（`<runsDir>/<runId>.isolation.json` + 一行
+   * stderr）。为什么落在 adapter 构造处：CLI 的 adapter factory 每个 run 新建实例
+   * （见 agentRun.ts 的 resolveLocalRuntimeAdapter 注释），而此刻宿主/docker 落点
+   * 已经确定。此前本地 run 全程没有 execution audit —— 没隔离是「缺席」而不是
+   * 「声明」，于是「这条 run 到底有没有隔离」只能靠猜。
+   *
+   * 覆盖不到的（如实声明，不假装）：bwrap workload 是否接管 execShell 要到工具
+   * 调用时才可能知道，这里按 `bwrapWorkloadAvailable: false` 记录保守事实；
+   * `localRunExecutionIsolation.ts` 已有 `bwrap-execshell-only` 分支（含
+   * 「文件工具仍在宿主执行」的说明），接线在后续块做。
+   * 写盘失败不阻塞 run（可观测性不该让 run 起不来），但绝不静默：stderr 一行。
+   */
+  const recordRunExecutionIsolation = async (): Promise<void> => {
+    try {
+      const { writeFileSync, mkdirSync } = await import("node:fs");
+      const { resolveRunsDir } = await import("../agentRunControl");
+      const fact = resolveLocalRunExecutionIsolationFact({
+        // F1：显式点名宿主执行的 run 在审计里必须与 docker 沙盒区分开
+        // （reason: host-explicit-writes vs docker-workload）。
+        runtimeKey: dockerRuntimeEnabled ? "docker" : runtimeKey === "local" ? "local" : undefined,
+        dockerWorkloadEnabled: dockerRuntimeEnabled,
+      });
+      const runId =
+        asOptionalTrimmedString(deps.env?.NOLO_AGENT_RUN_ID) ?? "interactive";
+      recordLocalRunExecutionIsolation({
+        runId,
+        runsDir: resolveRunsDir(deps.env),
+        fact,
+        fs: {
+          writeFileSync: (path, data) => writeFileSync(path, data),
+          mkdirSync: (path, options) => mkdirSync(path, options),
+        },
+      });
+      getLogger("cli.localRuntimeAdapter").info(
+        `[nolo] ${describeLocalRunExecutionIsolation(fact)}`,
+      );
+    } catch (error) {
+      getLogger("cli.localRuntimeAdapter").warn(
+        `[nolo] 无法记录本 run 的执行隔离事实：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  };
+  void recordRunExecutionIsolation();
+  const releaseLocalDockerWorkload = async (): Promise<void> => {
+    const loaded = dockerWorkloadLoad
+      ? await dockerWorkloadLoad.catch(() => null)
+      : null;
+    dockerWorkloadReleased = true;
+    dockerWorkloadLoad = null;
+    await loaded?.release();
+  };
   /**
    * 本机 OS 沙盒 workload（渐进第一步，只接管 execShell）。惰性创建一次
    * （per run，不是 per tool call）；bwrap 不可用 / 非 Linux / ticket 被拒时
@@ -675,6 +849,10 @@ export function createCliLocalRuntimeAdapter(
       () => null,
     ));
   const releaseLocalSandboxWorkload = async (): Promise<void> => {
+    // docker workload 与 bwrap lease 同寿命：run 收尾都在这里释放（docker 的
+    // backend.release + stopAndConfirm/cleanup_pending 语义由 lifecycle 的
+    // finally 承担，release 失败同样不覆盖 run 结果）。
+    await releaseLocalDockerWorkload();
     const loaded = localSandboxLoad
       ? await localSandboxLoad.catch(() => null)
       : null;
@@ -726,6 +904,9 @@ export function createCliLocalRuntimeAdapter(
       readXhsProfile: deps.readXhsProfile,
       cliEntrypoint: CLI_ENTRYPOINT,
       resolveAgentCredentialGroup,
+      resolveAgentDisplayName,
+      resolveAgentRuntimeBindingMachineId,
+      resolveLocalMachineId,
       ...(deps.shellApprovalSession ? { shellApprovalHostForAgent: async (childAgentKey: string) => {
         // Resolve the CHILD owner from the trusted store, never parent grant/model identity.
         const record = await readAgentFromStore({ agentRef: childAgentKey, store: await getOrCreateSharedStore(deps), userId });
@@ -1367,6 +1548,44 @@ export function createCliLocalRuntimeAdapter(
           }
         }
       }
+      // docker workload 分支（runtimeKey 指向 docker）：工作区工具族在 sbx 云
+      // 沙盒内执行，宿主执行器零调用。通道不可兑现（无绑定 / 账户未授权 / 创建
+      // 失败）时 loadLocalDockerWorkload 抛错——**不回落**到下方宿主路径；不属于
+      // docker allowlist 的工作区工具同样显式拒绝。位置与 bwrap 分支同口径：
+      // deny / 预算 / 会话授权都跑在这一段之前。
+      if (dockerRuntimeEnabled) {
+        const dockerHandle = await loadLocalDockerWorkload();
+        if (dockerHandle) {
+          const dockerToolName = normalizeLocalToolName(call.name);
+          if (
+            (LOCAL_DOCKER_TOOL_NAMES as readonly string[]).includes(
+              dockerToolName,
+            )
+          ) {
+            const dockerArgs =
+              parseToolArgumentsObject(injectedCall.arguments) ?? {};
+            const dockerOutput = await dockerHandle.channel(
+              dockerToolName,
+              dockerArgs,
+              opts?.abortSignal,
+            );
+            if (typeof dockerOutput !== "string") {
+              throw new Error(
+                `docker workload 未返回结果（tool=${dockerToolName}）：拒绝回落到宿主执行`,
+              );
+            }
+            return { content: dockerOutput };
+          }
+          if (
+            (WORKSPACE_TOOL_NAMES as readonly string[]).includes(dockerToolName)
+          ) {
+            throw new Error(
+              `docker workload 不支持工作区工具 "${dockerToolName}"（docker 工具面：` +
+                `${LOCAL_DOCKER_TOOL_NAMES.join(", ")}）；拒绝回落到宿主执行`,
+            );
+          }
+        }
+      }
       // 本机 OS 沙盒分支（只接管 execShell）。deny 仍然优先：先跑与下方
       // executeLocalToolWithPolicy 同源的 run-surface + policy 判定，被拒就
       // 原样落到原有路径抛错（沙盒不是绕过 deny 的通道）。arguments 不可解析
@@ -1492,6 +1711,7 @@ export function createCliLocalRuntimeAdapter(
   return {
     ...adapterBase,
     releaseLocalSandboxWorkload,
+    prepareLocalRuntimeWorkload,
     // 会话级摘要 fallback（未注入 → undefined）：getter 而非快照值，因为 adapter
     // 可能被 prepared-runtime 缓存复用，而注入发生在 CLI 启动早期。
     get compactionSummaryFallback() {

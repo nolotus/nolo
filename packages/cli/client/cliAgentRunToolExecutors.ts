@@ -59,6 +59,7 @@ import {
   type BatchRunSummary,
 } from "../../ai/tools/agent/batchAggregation";
 import { checkCredentialFanout } from "../../ai/tools/agent/credentialFanoutGuard";
+import { assertRuntimeKeyDispatchableByHost, buildCliLocalRuntimeForwardArgs, resolveCliLocalSpawnDispatch } from "../../ai/tools/agent/runtimeKeyDispatchGuard";
 import {
   resolveStartAgentRunCwd,
   type StartAgentRunCwdVerdict,
@@ -100,7 +101,39 @@ export type CliAgentRunToolExecutorDeps = {
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
   /** 当前主进程运行的 agentKey（供 startAgentRun 缺省回填自身派发用）。 */
   currentAgentKey?: string | null;
+  /**
+   * 解析候选 agent 的 `runtimeBinding.machineId`（F3：binding 参与派发判定）。
+   * 缺省 / 返回空 = 绑定信息未知（不等于"无绑定"）。
+   */
+  resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
+  /**
+   * 解析候选 agent 的展示名（写进 run 记录，供卡片/列表显示）。
+   * 调用方通常只给 agentKey 不传 agentName；缺省时卡片只能退回通用「子智能体」。
+   */
+  resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
+  /**
+   * 本机 machineId（判定「绑定机就是本机」用）。未知 = 无法证明，binding 判定
+   * fail-closed（拒绝把绑定到别的机器的 run 伪装成本机执行）。
+   */
+  resolveLocalMachineId?: () => Promise<string | undefined>;
 } & AgentRunControlDeps;
+
+/**
+ * 调用方只给 agentKey 时，从 agent 记录回填展示名。解析失败/无注入一律返回
+ * undefined —— 卡片退回原有「子智能体」标签，不阻塞派发、不伪造名字。
+ */
+async function resolveAgentDisplayNameFromDeps(
+  deps: CliAgentRunToolExecutorDeps,
+  agentKey: string | undefined,
+): Promise<string | undefined> {
+  if (!agentKey || !deps.resolveAgentDisplayName) return undefined;
+  try {
+    const name = await deps.resolveAgentDisplayName(agentKey);
+    return typeof name === "string" && name.trim() ? name.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const noopOutput: OutputLike = { write: () => {} };
 
@@ -377,19 +410,43 @@ async function assertCredentialFanoutAllowed(
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
-    if (args.runtimeKey !== undefined) {
-      const trimmed = typeof args.runtimeKey === "string" ? args.runtimeKey.trim() : "";
-      if (trimmed !== "local") {
-        throw new Error(
-          `startAgentRun 暂不支持在当前 CLI 宿主派发到指定执行位置 "${String(args.runtimeKey)}"：CLI 宿主仅支持本地派发。请在支持该执行位置的宿主（桌面端或服务端）派发，或省略 runtimeKey 在本地运行。`
-        );
-      }
-    }
+    // runtimeKey 的判定必须在任何副作用之前，且分成两件事：
+    //   1) 宿主能不能兑现（guard：本机只有 local 与 docker 可兑现，其它后端派发前拒绝）；
+    //   2) 转发 —— 归一化后的 key 进 rawArgs 的 `--runtime-key <key>`，子进程自己
+    //      按此选定执行后端（docker 由子 run 开跑前的 localDockerWorkload 闸门
+    //      fail-closed：绑定/配额核实不过就显式失败，绝不回落宿主 cwd）。
+    // 以前这里只做 1、不做 2，runtimeKey 被整条丢弃 → 真事故：runtimeKey="docker"
+    // 的 run 的 pwd 是宿主路径，相对路径写进了主仓。
+    // 见 ai/tools/agent/runtimeKeyDispatchGuard.ts。
     const rawAgentKey = typeof args.agentKey === "string" ? args.agentKey.trim() : "";
     const agentKey =
       (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
         ? (deps.currentAgentKey ?? rawAgentKey)
         : rawAgentKey;
+    // runtimeKey / binding 的判定必须在任何副作用之前，且分三件事：
+    //   1) 目标 agent 的 binding 参与判定（F3）：binding 指向非本机 → 拒绝，绝不
+    //      静默在本机 spawn（读 binding 是只读，不是副作用）；
+    //   2) 宿主能不能兑现（guard：本机只有 local 与 docker 可兑现，其它后端派发前拒绝）；
+    //   3) 转发 —— 归一化后的 key 经 buildCliLocalRuntimeForwardArgs 进 rawArgs
+    //      （唯一产出 `--runtime-key` 的地方，返回前跑 F11 成对不变式）。
+    // 默认落点政策见 resolveCliLocalSpawnDispatch：不传 key 的**写型**派发默认落
+    // docker 沙盒；只读派发留宿主（它写不了文件，起沙盒是纯浪费）。
+    const bindingMachineId =
+      agentKey && deps.resolveAgentRuntimeBindingMachineId
+        ? await deps.resolveAgentRuntimeBindingMachineId(agentKey)
+        : undefined;
+    const localMachineId = deps.resolveLocalMachineId
+      ? await deps.resolveLocalMachineId()
+      : undefined;
+    const dispatch = resolveCliLocalSpawnDispatch({
+      runtimeKey: args.runtimeKey,
+      readOnly: args.readOnly === true,
+      // F1：runtimeKey=local 是「在宿主文件系统上改代码」，需要调用方的显式确认
+      // （allowHostWrites: true）；缺失即派发前拒绝（零 spawn、零 run 记录）。
+      allowHostWrites: args.allowHostWrites,
+      ...(bindingMachineId ? { bindingMachineId } : {}),
+      ...(localMachineId ? { localMachineId } : {}),
+    });
     const task = typeof args.task === "string" ? args.task.trim() : "";
     const runTitle = normalizeRunTitle(args.title);
     if (!agentKey) throw new Error(t("agentRunTool.missingAgentKey"));
@@ -425,6 +482,9 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       ...(args.ephemeral === true ? ["--ephemeral"] : []),
       // 只读角色安全收敛：审查类任务物理剥离写/改/删工具，遵循最小特权原则。
       ...(isReadOnlyTask ? ["--read-only"] : []),
+      // 执行后端（默认 docker 沙盒；只读派发留宿主）：唯一产出 `--runtime-key`
+      // 的地方，成对不变式在 buildCliLocalRuntimeForwardArgs 内机械断言。
+      ...buildCliLocalRuntimeForwardArgs(dispatch),
     ];
 
     const agentName =
@@ -432,7 +492,9 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? args.agentName.trim()
         : typeof args.name === "string" && args.name.trim()
         ? args.name.trim()
-        : undefined;
+        : // 调用方没给名字就回填 agent 记录里的 name：否则 run 卡片只能显示
+          // 通用「子智能体」，而这个名字在派发侧本来就能读到。
+          await resolveAgentDisplayNameFromDeps(deps, agentKey);
 
     const batchId =
       typeof args.batchId === "string" && args.batchId.trim()

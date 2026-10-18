@@ -27,6 +27,7 @@ import {
   buildNoloWorkspaceCliToolExecutors,
 } from "../../agent-runtime/noloWorkspaceTools.node";
 import { readXPostFunc } from "../../ai/tools/readXPostTool";
+import { validateAskChoiceInput } from "../../ai/tools/uiAskChoiceTool";
 import { readXhsProfileFunc } from "../../ai/tools/readXhsProfileTool";
 import type {
   UserChoiceOption,
@@ -209,6 +210,30 @@ export function createReadPastedTextExecutor(store: CollapsedPasteStore) {
   };
 }
 
+/**
+ * 派发执行器需要的解析器透传白名单。抽成纯函数是为了让「漏转发」可被单测
+ * 锁住——这类遗漏不会报错，只会让并发守卫 / 绑定判定 / 展示名静默降级。
+ */
+export function pickAgentRunResolverDeps(args: {
+  resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
+  resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
+  resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
+  resolveLocalMachineId?: () => Promise<string | undefined>;
+}) {
+  return {
+    ...(args.resolveAgentCredentialGroup
+      ? { resolveAgentCredentialGroup: args.resolveAgentCredentialGroup }
+      : {}),
+    ...(args.resolveAgentDisplayName
+      ? { resolveAgentDisplayName: args.resolveAgentDisplayName }
+      : {}),
+    ...(args.resolveAgentRuntimeBindingMachineId
+      ? { resolveAgentRuntimeBindingMachineId: args.resolveAgentRuntimeBindingMachineId }
+      : {}),
+    ...(args.resolveLocalMachineId ? { resolveLocalMachineId: args.resolveLocalMachineId } : {}),
+  };
+}
+
 export function buildCliWorkspaceToolExecutors(args: {
   env: EnvLike;
   cliEntrypoint?: string;
@@ -245,6 +270,15 @@ export function buildLocalToolExecutors(args: {
    * cliAgentRunToolExecutors.assertCredentialFanoutAllowed）。
    */
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
+  /**
+   * 解析候选 agent 的 `runtimeBinding.machineId`（F3：binding 参与派发判定）。
+   * 缺省 / 返回空 = 绑定信息未知。
+   */
+  resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
+  /** 解析候选 agent 的展示名（调用方只给 agentKey 时回填 run 记录的 agentName）。 */
+  resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
+  /** 本机 machineId（判定「绑定机就是本机」用；未知 → binding 判定 fail-closed）。 */
+  resolveLocalMachineId?: () => Promise<string | undefined>;
   /** Current executing agent key; used for memory policy. */
   agentKey?: string | null;
   /**
@@ -320,6 +354,18 @@ export function buildLocalToolExecutors(args: {
           return {};
         }
       })();
+      // 校验必须在任何字段解引用之前：CLI 自己解析 arguments、不经过共享
+      // executor，漏这一步就留了一条绕过校验的路径。
+      const invalidChoiceInput = validateAskChoiceInput(parsedArgs);
+      if (invalidChoiceInput) {
+        return {
+          content: JSON.stringify({
+            error: "ask_user",
+            detail: invalidChoiceInput,
+          }),
+          metadata: { uiAskChoice: true, error: true },
+        };
+      }
       const question = String(parsedArgs.question ?? "").trim();
       const choices = Array.isArray(parsedArgs.choices) ? parsedArgs.choices : [];
       const questions = Array.isArray(parsedArgs.questions) ? parsedArgs.questions : undefined;
@@ -416,13 +462,11 @@ export function buildLocalToolExecutors(args: {
     // （复用 ~/.nolo/runs/ 注册表，MED-1 修复）。
     startAgentRun: createCliStartAgentRunExecutor({
       shellApprovalHostForAgent: args.shellApprovalHostForAgent,
+      ...pickAgentRunResolverDeps(args),
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
       cwd: args.workspaceRoot,
       currentAgentKey: args.agentKey,
-      ...(args.resolveAgentCredentialGroup
-        ? { resolveAgentCredentialGroup: args.resolveAgentCredentialGroup }
-        : {}),
     }),
     controlAgentRun: createCliControlAgentRunExecutor({
       shellApprovalHostForAgent: args.shellApprovalHostForAgent,
