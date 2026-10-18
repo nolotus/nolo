@@ -77,6 +77,129 @@ export const getModelPricingForModel = (
   };
 };
 
+/**
+ * 展示用的 token 价格分解（每 1M tokens 的积分）。
+ *
+ * 与 getModelPricing 的分工：那个函数是「余额预估/风控」口径，只需要 input/output；
+ * 这里是**展示**口径，要额外给出缓存命中/写入价，并且必须区分两件事：
+ *   - 模型不支持缓存 → 字段缺席（undefined）
+ *   - 缓存免费 → 字段为 0
+ * 历史上 getModelPricingForModel 把缺失塌成 0，UI 会把「不支持缓存」显示成「免费」。
+ *
+ * 取价顺序与计费侧一致（serverTokenWriter / calculatePrice）：平台自营只认目录价；
+ * 创作者 agent（非平台且带正价）取 max(创作者价, 目录价)；目录解析不到才看 agent 价。
+ * agent 记录上的 inputPrice/outputPrice；cache 价只可能来自目录（agent 记录没有
+ * 这两个字段），所以回落分支下 cache 两个字段必然缺席。
+ */
+export interface AgentTokenPriceBreakdown {
+  inputPrice: number;
+  /** 命中缓存的输入价；模型不支持缓存时缺席（不是 0）。 */
+  cacheReadPrice?: number;
+  /** 写入缓存价；只有显式缓存模型（Anthropic/CF Claude 系）才有。 */
+  cacheWritePrice?: number;
+  outputPrice: number;
+}
+
+export const resolveAgentTokenPriceBreakdown = (
+  agent: Pick<Agent, "provider" | "model" | "inputPrice" | "outputPrice">,
+  isPlatformBilled?: boolean
+): AgentTokenPriceBreakdown | null => {
+  const provider = typeof agent?.provider === "string" ? agent.provider : "";
+  const modelName = typeof agent?.model === "string" ? agent.model : "";
+
+  let catalog:
+    | {
+        input: number;
+        output: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+      }
+    | null = null;
+
+  if (provider && modelName) {
+    const pricedModel =
+      isPlatformBilled === true && isPlatformManagedProvider(provider, modelName)
+        ? (resolvePlatformEffectiveModel(modelName) ?? modelName)
+        : modelName;
+    try {
+      const model = getModelConfig(provider as any, pricedModel);
+      const price = model?.price as
+        | {
+            input?: number;
+            output?: number;
+            cachingRead?: number;
+            inputCacheHit?: number;
+            cachingWrite?: number;
+          }
+        | null
+        | undefined;
+      if (
+        price &&
+        typeof price.input === "number" &&
+        typeof price.output === "number"
+      ) {
+        // 缓存命中价有两个字段名（见 getModelPricingForModel 的同款说明）。
+        const rawCacheHit =
+          typeof price.inputCacheHit === "number"
+            ? price.inputCacheHit
+            : price.cachingRead;
+        catalog = {
+          input: price.input,
+          output: price.output,
+          ...(typeof rawCacheHit === "number" ? { cacheRead: rawCacheHit } : {}),
+          ...(typeof price.cachingWrite === "number"
+            ? { cacheWrite: price.cachingWrite }
+            : {}),
+        };
+      }
+    } catch {
+      catalog = null;
+    }
+  }
+
+  const agentInput = asOptionalFiniteNumber(agent?.inputPrice);
+  const agentOutput = asOptionalFiniteNumber(agent?.outputPrice);
+  const hasAgentInput = agentInput !== undefined && agentInput > 0;
+  const hasAgentOutput = agentOutput !== undefined && agentOutput > 0;
+
+  // 与计费口径严格一致（calculatePrice.getEffectivePrices + prepareTokenUsageData）：
+  //   平台自营（apiSource=platform）→ 只认目录价，持久化价在计费侧被忽略（仅告警）；
+  //   创作者 agent（非平台，且带正价）→ 计费用 max(创作者价, 目录价)。
+  // 少这一层 max，会出现「页面显示底座目录价、实际按创作者加价扣费」的倒挂
+  // （reviewer 在 2026-10-18 抓到；原实现是 catalog 无条件优先）。
+  const pickDisplayPrice = (
+    agentPrice: number | undefined,
+    hasAgentPrice: boolean,
+    catalogPrice: number | undefined
+  ): number | undefined => {
+    if (isPlatformBilled === true) {
+      // 平台自营：计费只认目录价（持久化价在计费侧被无条件忽略，仅告警）。
+      // 目录解析不到时**不回落到持久化价** —— 那等于展示一个计费永远不会采用的
+      // 价格（reviewer 2026-10-18 指出的边界）。宁可不给出价，也不伪装成平台报价。
+      return catalogPrice;
+    }
+    if (catalogPrice === undefined) return hasAgentPrice ? agentPrice : undefined;
+    if (!hasAgentPrice) return catalogPrice;
+    return Math.max(agentPrice as number, catalogPrice);
+  };
+
+  const inputPrice = pickDisplayPrice(agentInput, hasAgentInput, catalog?.input);
+  const outputPrice = pickDisplayPrice(agentOutput, hasAgentOutput, catalog?.output);
+
+  if (inputPrice === undefined && outputPrice === undefined) return null;
+
+  return {
+    inputPrice: inputPrice ?? 0,
+    outputPrice: outputPrice ?? 0,
+    ...(catalog?.cacheRead !== undefined
+      ? { cacheReadPrice: catalog.cacheRead }
+      : {}),
+    ...(catalog?.cacheWrite !== undefined
+      ? { cacheWritePrice: catalog.cacheWrite }
+      : {}),
+  };
+};
+
 export const hasExplicitAgentPricing = (config: any): boolean =>
   [config?.inputPrice, config?.outputPrice].some(
     (value) => asOptionalPositiveFiniteNumber(value) !== undefined

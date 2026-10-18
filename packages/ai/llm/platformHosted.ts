@@ -19,6 +19,7 @@ import {
   PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
+  PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
   PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
@@ -59,6 +60,7 @@ export const PLATFORM_HOSTED_CLAUDE_MODELS = [
   PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
+  PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
 ] as const;
 
 export const isPlatformHostedClaudeModel = (
@@ -173,6 +175,16 @@ export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE = {
   output: toPlatformCredits(5), // 40 credits
   cachingWrite: toPlatformCredits(1.25), // 10 credits
   cachingRead: toPlatformCredits(0.1), // 0.8 credits
+} as const;
+
+/**
+ * 比 4.5（8 / 40）便宜一半。
+ */
+export const PLATFORM_HOSTED_CLAUDE_HAIKU_55_PRICE = {
+  input: toPlatformCredits(0.5), // 4 credits
+  output: toPlatformCredits(2.5), // 20 credits
+  cachingWrite: toPlatformCredits(0.625), // 5 credits
+  cachingRead: toPlatformCredits(0.05), // 0.4 credits
 } as const;
 
 /**
@@ -877,6 +889,16 @@ export const platformHostedModels: Model[] = [
     price: { ...PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE },
     maxOutputTokens: 4092,
     contextWindow: 200_000,
+    supportsTool: false,
+  },
+  {
+    // Claude Haiku 5.5（2026-10-18）：接替 4.5，官方 1M 上下文。
+    name: PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
+    displayName: "Claude Haiku 5.5",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_HAIKU_55_PRICE },
+    maxOutputTokens: 8192,
+    contextWindow: 1_000_000,
     supportsTool: false,
   },
   {

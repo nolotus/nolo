@@ -21,6 +21,9 @@ export const PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL = "anthropic/claude-sonnet-5"
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL = "anthropic/claude-opus-5";
 export const PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL = "anthropic/claude-fable-5";
 export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL = "anthropic/claude-haiku-4-5";
+// 2026-10-18 新一代 Haiku：平台 id 沿用连字符（DeepInfra/CF 内部常量约定），
+// CF 上游用点号。4.5 保留在目录与路由里供存量记录解析（下架 ≠ 删除）。
+export const PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL = "anthropic/claude-haiku-5-5";
 // 2026-09 新一代 Claude（广场只上架最新一代）：DeepInfra 官方模型名与平台
 // 模型名同名（anthropic/claude-* 前缀是 DeepInfra 的官方 id 形态）。
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL = "anthropic/claude-opus-5-5";
@@ -43,6 +46,8 @@ export const CLOUDFLARE_CLAUDE_FABLE_5_UPSTREAM_MODEL_ID =
   "anthropic/claude-fable-5";
 export const CLOUDFLARE_CLAUDE_HAIKU_45_UPSTREAM_MODEL_ID =
   "anthropic/claude-haiku-4.5";
+export const CLOUDFLARE_CLAUDE_HAIKU_55_UPSTREAM_MODEL_ID =
+  "anthropic/claude-haiku-5.5";
 export const CLOUDFLARE_CLAUDE_OPUS_5_5_UPSTREAM_MODEL_ID =
   "anthropic/claude-opus-5.5";
 export const CLOUDFLARE_CLAUDE_FABLE_5_1_UPSTREAM_MODEL_ID =
@@ -363,6 +368,14 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     usageProvider: "cloudflare",
     keyName: "cloudflare",
     upstreamModelId: CLOUDFLARE_CLAUDE_HAIKU_45_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL]: {
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_HAIKU_55_UPSTREAM_MODEL_ID,
     wire: "anthropic.messages",
     agentRunHosted: true,
   },

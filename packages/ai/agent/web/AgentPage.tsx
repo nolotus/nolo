@@ -88,13 +88,12 @@ import {
   LuPlay,
   LuPause,
 } from "react-icons/lu";
-import { formatPriceAmount } from "ai/llm/getPricing";
+import { formatPriceAmount, formatModelCostPerMillion, resolveAgentTokenPriceBreakdown } from "ai/llm/getPricing";
 import {
   buildAgentDialogHistory,
   buildAgentEmailBindingSummary,
   buildAgentThreadOverview,
   buildAgentThreadOverviewFromApi,
-  formatAgentOutputPrice,
   formatAgentEmailReadinessLabel,
   formatCliProviderLabel,
   formatDateValue,
@@ -1094,6 +1093,11 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
       });
     }
 
+    // 展示口径与计费一致：平台自营只认目录价；创作者 agent 取 max(创作者价, 目录价)。
+    const tokenBreakdown = resolveAgentTokenPriceBreakdown(
+      item,
+      item?.apiSource === "platform"
+    );
     if (priceHint && !isCliAgent) {
       if (priceHint.type === "per_image") {
         const priceLabel = priceHint.labelKey
@@ -1109,15 +1113,53 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
           value: priceValue,
           ariaLabel: `${t("price", "价格")} (${priceLabel}): ${priceValue}`,
         });
-      } else if (shouldShowTokenCost) {
-        const costLabel = t("modelCost", "模型成本");
-        const costValue = formatAgentOutputPrice(item.outputPrice);
+      } else if (shouldShowTokenCost && tokenBreakdown) {
+        // 0 价模型的旧文案是「免费」，不要拼成 `1M / 免费`。
+        const perMillion = (v: number) =>
+          v === 0 ? formatModelCostPerMillion(0) : `1M / ${formatModelCostPerMillion(v)}`;
         rows.push({
           icon: <LuCoins size={14} aria-hidden="true" />,
-          key: "price",
-          label: costLabel,
-          value: costValue,
-          ariaLabel: `${t("price", "价格")} (${costLabel}): ${costValue}`,
+          key: "price.input",
+          label: t("inputNoCacheCostLabel", "输入（无缓存）"),
+          value: perMillion(tokenBreakdown.inputPrice),
+          ariaLabel: `${t("inputNoCacheCostLabel", "输入（无缓存）")}: ${perMillion(tokenBreakdown.inputPrice)}`,
+        });
+        // 缓存行只在模型真的有缓存价时出现：字段缺席 = 该模型不支持缓存，
+        // 不是「缓存免费」——把缺席显示成 0 是本仓库踩过的坑。
+        if (tokenBreakdown.cacheReadPrice !== undefined) {
+          const cacheRead = tokenBreakdown.cacheReadPrice;
+          const cacheWrite = tokenBreakdown.cacheWritePrice;
+          const savings =
+            tokenBreakdown.inputPrice > 0 && cacheRead < tokenBreakdown.inputPrice
+              ? Math.round((1 - cacheRead / tokenBreakdown.inputPrice) * 100)
+              : null;
+          const cacheValue = `${perMillion(cacheRead)}${
+            cacheWrite !== undefined
+              ? ` (${t("cacheWriteInlineLabel", "写入 {{value}}", {
+                  value: formatModelCostPerMillion(cacheWrite),
+                })})`
+              : ""
+          }${
+            savings !== null
+              ? ` · ${t("cacheHitSavingsNote", "命中缓存约省 {{percent}}%", {
+                  percent: savings,
+                })}`
+              : ""
+          }`;
+          rows.push({
+            icon: <LuCoins size={14} aria-hidden="true" />,
+            key: "price.cache",
+            label: t("inputCacheHitCostLabel", "输入（缓存命中）"),
+            value: cacheValue,
+            ariaLabel: `${t("inputCacheHitCostLabel", "输入（缓存命中）")}: ${cacheValue}`,
+          });
+        }
+        rows.push({
+          icon: <LuCoins size={14} aria-hidden="true" />,
+          key: "price.output",
+          label: t("outputCostPerMillionTokens", "输出："),
+          value: perMillion(tokenBreakdown.outputPrice),
+          ariaLabel: `${t("outputCostPerMillionTokens", "输出：")} ${perMillion(tokenBreakdown.outputPrice)}`,
         });
       }
     }
