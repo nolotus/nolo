@@ -28,7 +28,7 @@ import {
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { displayAgentName } from "./agentRunPanelLines";
 import { t } from "./i18n";
-import { formatRunZoneLines, remoteTaskUnsettled, type RemoteTaskCarrier, type RunZoneLayout } from "./runZoneLines";
+import { formatProcZoneLines, formatRunZoneLines, PROC_LINGER_MAX_ROWS, procZoneFinished, remoteTaskUnsettled, resolveRunZoneMaxRows, type RemoteTaskCarrier, type RunZoneLayout, type RunZoneProc } from "./runZoneLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
@@ -55,6 +55,14 @@ export type RunDockDeps = {
   lingerMs?: number;
   staleMs?: number;
   maxRows?: number;
+  /**
+   * 运行区里的后台进程来源（`processRegistry.listBackground()` 的 running 视图）。
+   *
+   * 由调用方注入而不是在渲染层直接读 registry 单例：dock 的测试不该依赖全局
+   * 进程状态，而「哪些任务算后台」这个判断属于 registry，不属于排板。
+   * 缺省 = 面板不显示进程行（旧调用方行为不变）。
+   */
+  listProcs?: () => readonly RunZoneProc[];
   setIntervalFn?: (cb: () => void, ms: number) => unknown;
   clearIntervalFn?: (handle: unknown) => void;
 };
@@ -118,6 +126,22 @@ export function createRunDock(deps: RunDockDeps): RunDock {
   const lingerMs = deps.lingerMs ?? RUN_DOCK_LINGER_MS;
   const staleMs = deps.staleMs ?? RUN_DOCK_STALE_MS;
   const maxRows = deps.maxRows ?? RUN_DOCK_MAX_ROWS;
+  const listProcs = deps.listProcs;
+  /**
+   * 当前仍在跑的后台进程。
+   *
+   * 这份数据来自外部 registry 的投影，读取时刻可能与别的写入路径（tool 结果、
+   * 通知注入）交错，所以异常一律吞掉：面板少一行进程是可接受的降级，让整帧
+   * 重绘在渲染线程上抛出异常不是。
+   */
+  const runningProcs = (): readonly RunZoneProc[] => {
+    if (!listProcs) return [];
+    try {
+      return listProcs() ?? [];
+    } catch {
+      return [];
+    }
+  };
   const setIntervalFn = deps.setIntervalFn ?? ((cb, ms) => setInterval(cb, ms));
   const clearIntervalFn =
     deps.clearIntervalFn ??
@@ -170,7 +194,9 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     }
     // 面板清空了就该停表——不管是谁触发的 prune。此前只有 tick() 检查这件事，
     // 于是从 getLines() 里摘掉最后一条 run 后，timer 还会空转一格。
-    if (entries.size === 0) stopTimer();
+    // 进程行也在走秒（`已运行 3m`），所以「还有 procs」同样需要这份心跳：
+    // 只按 entries 判空会让「只有后台进程」时的时间戳冻住不动。
+    if (entries.size === 0 && runningProcs().length === 0) stopTimer();
     return changed;
   };
 
@@ -180,7 +206,12 @@ export function createRunDock(deps: RunDockDeps): RunDock {
   };
 
   const ensureTimer = () => {
-    if (timer === null && entries.size > 0) {
+    // 已销毁的实例绝不能再起表：dispose() 之后的残余重绘（会话已退出，但某个
+    // 迟到的 repaint 仍可能跑进来）会读 getLines()，而 getLines 发现有 procs
+    // 就会来这里补心跳——没有这道守卫就是一条泄漏的每秒定时器。
+    if (disposed) return;
+    // 进程行同样需要每秒重绘（耗时在走），所以「只有后台进程、没有 run」也要转。
+    if (timer === null && (entries.size > 0 || runningProcs().length > 0)) {
       timer = setIntervalFn(tick, tickIntervalMs);
     }
   };
@@ -238,14 +269,18 @@ export function createRunDock(deps: RunDockDeps): RunDock {
 
   const remove = (runId: string) => {
     if (!entries.delete(runId)) return;
-    if (entries.size === 0) stopTimer();
+    // 判停条件必须和 prune 保持一致：还有后台进程时表要继续转（进程行在走秒），
+    // 否则这里停表、紧接着 onRepaint 同步调 getLines 又立刻重启一次，每摘一个
+    // run 就多一轮无意义的停/启。
+    if (entries.size === 0 && runningProcs().length === 0) stopTimer();
     deps.onRepaint();
   };
 
   const clear = () => {
     if (entries.size === 0) return;
     entries.clear();
-    stopTimer();
+    // clear 只清 run 面板，不代表后台进程也没了：进程行还需要秒表。
+    if (runningProcs().length === 0) stopTimer();
     deps.onRepaint();
   };
 
@@ -265,19 +300,78 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     // 这时不该把一条已经该消失的 run 再画一帧。
     prune();
     const ordered = orderedEntries();
-    if (ordered.length === 0) return [];
+    const procs = runningProcs();
+    // 活跃项（run + 仍在跑的后台进程）与残留项（刚退出、短暂停留）分开排队：
+    // 残留永远排在活跃项之后，且有自己的条数上限，不挤占活跃项的行预算。
+    const activeProcs = procs.filter((proc) => !procZoneFinished(proc));
+    const lingeringProcs = procs
+      .filter(procZoneFinished)
+      .sort((a, b) => {
+        // 失败优先（`exit 1` 更需要被看见），同类按拉起时刻新的在前。
+        const aFail = a.status === "killed" || (a.exitCode ?? 0) !== 0 ? 1 : 0;
+        const bFail = b.status === "killed" || (b.exitCode ?? 0) !== 0 ? 1 : 0;
+        if (aFail !== bFail) return bFail - aFail;
+        return b.startedAt - a.startedAt;
+      })
+      .slice(0, PROC_LINGER_MAX_ROWS);
+    if (ordered.length === 0 && activeProcs.length === 0 && lingeringProcs.length === 0) {
+      return [];
+    }
+    // 进程行只在此时才可能发现自己该转表：后台进程是外部 registry 拉起来的，
+    // dock 不会收到它们的 update()，靠每一次重绘自检补上心跳（残留行也要转，
+    // 否则它永远不会到点消失）。
+    if (procs.length > 0) ensureTimer();
+
     const at = now();
+    // 契约（沿用既有运行区语义，别改）：resolveRunZoneMaxRows 给出的是**条目**
+    // 预算，条目溢出时格式化器会额外追加一行 `+N more`。所以面板的真实行高上限
+    // 是 totalRows + 1，既有用例（短终端 1 条 + `+2 more` = 2 行）就是这个语义。
+    const totalRows = resolveRunZoneMaxRows(maxRows, layout?.rows);
+    const maxPanelRows = totalRows + 1;
+    // 进程行与 run 行共用这块高度预算，run 优先；活跃进程非空时给它们留一条——
+    // 这一条原本在状态行是常驻可见的，搬过来不能反而被几个并发 run 挤成不可见。
+    // 残留不参与 reserve：它们是「刚过去的事」，不该抢活跃项的位置。
+    const procReserve = activeProcs.length > 0 && totalRows > 1 ? 1 : 0;
+
     // 固定运行区（顶部，每条一行 `⚙ title · agent · 已耗时 · tools`）。单/多
     // run 走同一个格式化器——运行区就是一张可扫的列表，不是「单条细看 / 多条
     // 汇总」两种形态。normal 模式剥 ANSI/OSC、隐 raw error/log 的 safe 投影
     // 由 formatRunZoneLines 内部兜底完成。
-    return formatRunZoneLines(
-      ordered.map((entry) => entry.snapshot),
-      colorEnabled,
-      at,
-      maxRows,
-      layout
-    );
+    const runLines =
+      ordered.length > 0
+        ? formatRunZoneLines(
+            ordered.map((entry) => entry.snapshot),
+            colorEnabled,
+            at,
+            Math.max(1, totalRows - procReserve),
+            layout
+          )
+        : [];
+
+    // 剩余预算按 run 的**实际**行数扣（含它那行折叠标记），不按计划条目数扣：
+    // 少算这一步就是上一版的超行来源。
+    const remainingRows = Math.max(0, maxPanelRows - runLines.length);
+    let procLines =
+      activeProcs.length > 0 && remainingRows > 0
+        ? formatProcZoneLines(activeProcs, colorEnabled, at, remainingRows, layout)
+        : [];
+    // 两侧同时溢出时折叠标记会让总高再多一行；面板高度是硬约束（顶掉的是历史
+    // 行），所以 proc 侧的折叠标记让位——被裁的是 `还有 N 个`，不是进程事实行，
+    // 全量清单仍在 /procs 里。
+    if (procLines.length > remainingRows) {
+      procLines = procLines.slice(0, remainingRows);
+    }
+
+    // 残留：只吃活跃项剩下的行，且本身不再折叠（超过上限的已在上面 slice 掉）。
+    // 一行都剩不下来时宁可不显示——它们是补充信息，不该把活跃 run 顶掉。
+    const lingerBudget = Math.max(0, maxPanelRows - runLines.length - procLines.length);
+    const lingerShown = lingeringProcs.slice(0, Math.min(PROC_LINGER_MAX_ROWS, lingerBudget));
+    const lingerLines =
+      lingerShown.length > 0
+        ? formatProcZoneLines(lingerShown, colorEnabled, at, lingerShown.length, layout)
+        : [];
+
+    return [...runLines, ...procLines, ...lingerLines];
   };
 
   return {

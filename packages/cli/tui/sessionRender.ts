@@ -6,7 +6,6 @@ import {
   resolveContextUsage,
   type TurnTokenUsage,
 } from "../client/tokenUsage";
-import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { resolveCatalogPlatformAgents } from "./agentCatalog";
 import { renderDialogTitle } from "./dialogFrame";
 import { dailyWelcomeTip, t } from "./i18n";
@@ -150,16 +149,8 @@ export function renderStatusLine(
   parts.push(tokenSegment);
   if (creditsSegment) parts.push(creditsSegment);
 
-  // 后台进程计数 `⚙ N procs`：只数 processRegistry 里仍在 running 的后台任务
-  // （agent-run 归运行区）。非必保字段：窄屏时最先被裁掉（见下方降级循环）。
-  const runningProcCount = getProcessRegistry()
-    .listBackground()
-    .filter((p) => p.status === "running").length;
-  const procsSegment =
-    runningProcCount > 0
-      ? themeText(`⚙ ${runningProcCount} procs`, "info", colorEnabled)
-      : "";
-  if (procsSegment) parts.push(procsSegment);
+  // 后台进程计数（`⚙ N procs`）已搬到 composer 上方的固定运行区，与子 agent
+  // 运行行同处一列：状态行这里只留「终态通知待消费」的 chip（语义不同，见下）。
 
   // 终态通知 chip：还有几条后台任务终态没被下一个 turn 消费。通知一旦注入
   // turn 上下文即清空，chip 归零——它只是「agent 即将知晓」的待办指示，不是
@@ -181,12 +172,12 @@ export function renderStatusLine(
   if (maxWidth && maxWidth > 0) {
     const widthOf = (segments: string[]) => displayWidth(stripAnsi(segments.join(" · "))) + 2;
     // 可让路段的丢弃顺序（挤宽度时从先到后）：
-    //   ⚙ procs（最先）→
     //   cwd（终端标题/上下文已有）→ agent 名（默认档可省）→ context chip →
     //   积分 chip（最后才丢——用户盯的就是它，且它是「花了多少钱」的唯一
     //   可见口径）。
+    // 后台进程计数已不在状态行（搬到 composer 上方的运行区），所以这里没有它。
     // git 脏 / ⏵ auto 是必保状态，任何宽度都不让。
-    for (const optional of [procsSegment, cwdSegment, agentSegment, tokenSegment, creditsSegment]) {
+    for (const optional of [cwdSegment, agentSegment, tokenSegment, creditsSegment]) {
       if (!optional) continue;
       if (widthOf(visibleParts) <= maxWidth) break;
       visibleParts = visibleParts.filter((part) => part !== optional);

@@ -18,10 +18,16 @@
  * 文本重复指示。
  */
 
-import type { RunZoneLayout } from "./runZoneLines";
+import {
+  PROC_LINGER_FAILURE_MS,
+  PROC_LINGER_SUCCESS_MS,
+  type RunZoneLayout,
+  type RunZoneProc,
+} from "./runZoneLines";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import { createRunDock, type RunDock } from "./runDock";
+import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { t } from "./i18n";
 import { themeText } from "./theme";
 
@@ -216,6 +222,32 @@ export function createActivityIndicator(
       now,
       setIntervalFn,
       clearIntervalFn,
+      // 后台进程与子 agent 运行排在同一块面板里。数据源仍是 processRegistry
+      // 的 listBackground()（transient 前台 grace 包络不算后台），这里只把
+      // 渲染需要的四个字段投影过去，registry 记录本身不进 UI 层。
+      listProcs: (): RunZoneProc[] => {
+        const nowMs = Date.now();
+        return getProcessRegistry()
+          .listBackground()
+          .filter((proc) => {
+            if (proc.status === "running") return true;
+            // 残留窗口：成功留 3s、失败留 10s。退出时刻用 registry 记的
+            // durationMs 推算，没有就按 startedAt 兜底——不猜更细的时间。
+            const endedAt = proc.startedAt + (proc.resultCapsule?.durationMs ?? 0);
+            const failed = proc.status === "killed" || (proc.exitCode ?? 0) !== 0;
+            const window = failed ? PROC_LINGER_FAILURE_MS : PROC_LINGER_SUCCESS_MS;
+            return nowMs - endedAt <= window;
+          })
+          .map((proc) => ({
+            pid: proc.pid,
+            label: proc.label,
+            command: proc.command,
+            startedAt: proc.startedAt,
+            status: proc.status,
+            exitCode: proc.exitCode,
+            durationMs: proc.resultCapsule?.durationMs,
+          }));
+      },
     });
 
   const updateAgentRun = (snapshot: AgentRunStatusSnapshot) => {

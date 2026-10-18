@@ -381,3 +381,166 @@ export function formatRunZoneLines(
   }
   return lines;
 }
+
+// ─── Background processes in the same zone ──────────────────────────────────
+
+/**
+ * 运行区里的一条后台进程行（`processRegistry.listBackground()` 的 running 视图）。
+ *
+ * 只声明渲染真正需要的字段：这是纯格式化模块，不该把整个 `RegisteredProcess`
+ * （带 resultCapsule / owner / 事件日志游标）拖进来。
+ */
+export type RunZoneProc = {
+  pid: number;
+  label?: string;
+  command?: string;
+  /** 拉起时刻（ms）；缺失时不输出耗时——宁缺勿编。 */
+  startedAt: number;
+  /** `running` / `exited` / `killed`。缺省视为 running（旧调用方）。 */
+  status?: string;
+  /** 仅退出时有意义；killed 时不可信，渲染时不显示。 */
+  exitCode?: number;
+  /** registry 记下的真实用时（ms）；残留行优先用它算「用时」。 */
+  durationMs?: number;
+};
+
+/**
+ * 进程行图标：与 run 行的 `⚙` 刻意不同。两批东西现在排在同一块面板里，
+ * 「这行是 shell 任务还是 agent 运行」必须一眼看得出，否则用户会把
+ * `npm run dev` 当成一个还在跑的子 agent。
+ */
+export const PROC_ZONE_ICON = "❯";
+
+/** 成功退出后仍在运行区停留的时长。 */
+export const PROC_LINGER_SUCCESS_MS = 3_000;
+/**
+ * 失败退出停留得更久：`exit 1` 是必须看见的信号，一帧就消失等于没报。
+ */
+export const PROC_LINGER_FAILURE_MS = 10_000;
+/** 最多同时展示几条残留（失败优先），避免残留挤占活跃项的行预算。 */
+export const PROC_LINGER_MAX_ROWS = 2;
+
+/** 这条进程行是残留（已退出）还是仍在跑。缺省 status 视为 running。 */
+export function procZoneFinished(proc: RunZoneProc): boolean {
+  return (proc.status ?? "running") !== "running";
+}
+
+/**
+ * 进程行图标：running `❯`、成功退出 `✓`、失败退出 `✗`、被 kill `⊘`。
+ *
+ * 终态必须同时换图标与措辞——留着一个 `❯ … 已运行 3m` 是撒谎，它已经不在跑了。
+ */
+export function procZoneLeadIcon(proc: RunZoneProc): string {
+  const status = proc.status ?? "running";
+  if (status === "killed") return "⊘";
+  if (status === "exited") return (proc.exitCode ?? 0) === 0 ? "✓" : "✗";
+  return PROC_ZONE_ICON;
+}
+
+/**
+ * 残留窗口时长：失败比成功留得久。仍在跑返回 0（不进入残留集合）。
+ */
+export function procLingerMs(proc: RunZoneProc): number {
+  if (!procZoneFinished(proc)) return 0;
+  const failed = proc.status === "killed" || (proc.exitCode ?? 0) !== 0;
+  return failed ? PROC_LINGER_FAILURE_MS : PROC_LINGER_SUCCESS_MS;
+}
+
+/**
+ * 进程行的标题：label 优先（调用方给的人话短标签），空标签回退到 command 的
+ * 首行摘要——绝不输出空标题或 `undefined`。
+ */
+export function procZoneTitle(proc: RunZoneProc, maxWidth = 40): string {
+  const label = proc.label?.trim();
+  if (label) return label;
+  const command = proc.command?.split("\n")[0]?.trim() ?? "";
+  return command ? clipText(command, maxWidth) : `pid ${proc.pid}`;
+}
+
+/**
+ * 渲染后台进程行：`❯ <标题> · 已运行 3m · pid 12345`（残留在跑完时变成
+ * `✓ <标题> · 用时 3m` / `✗ <标题> · 用时 3m · exit 1`），每条一行，超过
+ * maxRows 折叠成 `还有 N 个`（与 run 行同一句溢出文案）。
+ *
+ * 宽度降级沿用 run 行的取舍：时间先保、其余事实后丢、最后才截标题——「跑了
+ * 多久」是判断「卡住了没有」的主证据。
+ */
+export function formatProcZoneLines(
+  procs: readonly RunZoneProc[],
+  colorEnabled: boolean,
+  now: number = Date.now(),
+  maxRows: number = RUN_ZONE_MAX_ROWS,
+  layout: RunZoneLayout = {}
+): string[] {
+  if (procs.length === 0) return [];
+  maxRows = resolveRunZoneMaxRows(maxRows, layout.rows);
+  const columns =
+    typeof layout.columns === "number" && layout.columns > 0 ? layout.columns : undefined;
+  const shown = procs.slice(0, Math.max(1, maxRows));
+
+  const lines: string[] = [];
+  for (const proc of shown) {
+    const icon = procZoneLeadIcon(proc);
+    const finished = procZoneFinished(proc);
+    const facts: string[] = [];
+    const startedAt = proc.startedAt;
+    // 残留优先用 registry 记下的真实用时；没有就退回「现在 - 拉起时刻」。
+    // 两者都没有时不输出耗时——宁缺勿编。
+    const durationMs = proc.durationMs;
+    const elapsedMs =
+      finished && typeof durationMs === "number" && Number.isFinite(durationMs)
+        ? Math.max(0, durationMs)
+        : typeof startedAt === "number" && Number.isFinite(startedAt) && startedAt > 0
+          ? Math.max(0, now - startedAt)
+          : null;
+    const hasElapsed = elapsedMs !== null;
+    if (elapsedMs !== null) {
+      facts.push(t(finished ? "procZoneTook" : "runZoneFor", formatDuration(elapsedMs)));
+    }
+    if (finished) {
+      // 被 kill 的没有可信 exitCode，不编一个 0 出来（图标 ⊘ 已经说明结局）。
+      if (proc.status !== "killed") {
+        facts.push(t("procZoneExit", String(proc.exitCode ?? 0)));
+      }
+    } else {
+      facts.push(t("procZonePid", String(proc.pid)));
+    }
+
+    let title = procZoneTitle(proc);
+    if (columns !== undefined) {
+      const fixed = (l: string, f: string[]) =>
+        visibleWidth(`${icon} ${l}${f.length ? ` · ${f.join(" · ")}` : ""}`);
+      // 1) 从末尾丢事实。有耗时时它是 facts[0]，永远保留、其余先让路；没有耗时
+      //    （startedAt 与 durationMs 都缺）时 pid/exit 也可以让路——判据必须是
+      //    「有没有耗时」，不是「facts 当前长度」，否则弹掉一条后长度变 1，
+      //    下一轮会把耗时一起弹掉。
+      const keep = hasElapsed ? 1 : 0;
+      while (facts.length > keep && fixed(title, facts) > columns) facts.pop();
+      // 2) 还放不下再截标题，事实不动。
+      if (fixed(title, facts) > columns) {
+        const tail = facts.length ? ` · ${facts.join(" · ")}` : "";
+        const room = columns - visibleWidth(`${icon} `) - visibleWidth(tail);
+        title = fitAnsiLine(title, Math.max(1, room));
+      }
+    }
+    const factsPart = facts.length > 0 ? ` · ${facts.join(" · ")}` : "";
+
+    if (!colorEnabled) {
+      lines.push(`${icon} ${title}${factsPart}`);
+      continue;
+    }
+    lines.push(
+      themeText(icon, finished ? "muted" : "info", true) +
+        " " +
+        themeText(title, finished ? "muted" : "chrome", true) +
+        themeText(factsPart, "chrome", true)
+    );
+  }
+
+  const hidden = procs.length - shown.length;
+  if (hidden > 0) {
+    const more = t("runZoneMore", String(hidden));
+    lines.push(colorEnabled ? themeText(`  ${more}`, "chrome") : `  ${more}`);
+  }
+  return lines;
+}

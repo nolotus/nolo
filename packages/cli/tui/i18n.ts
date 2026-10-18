@@ -570,6 +570,12 @@ const STRINGS = {
     en: "+{0} more",
     zh: "还有 {0} 个",
   },
+  // Background-process rows in the same zone (`❯ npm run dev · 已运行 3m · pid 123`).
+  // The pid is how the user targets /stop, so it is a fact, not decoration.
+  procZonePid: { en: "pid {0}", zh: "pid {0}" },
+  // 残留行（进程已退出）：running 用 `已运行`，退出的说「用时」，因为它不再走秒。
+  procZoneTook: { en: "took {0}", zh: "用时 {0}" },
+  procZoneExit: { en: "exit {0}", zh: "exit {0}" },
   // --- Dialog (picker / confirm) copy --------------------------------------
   // Key-hint wording is unified across select / multi-select / confirm so the
   // three dialogs read as one family: "<Label>  <↑↓ move · Enter choose ·
