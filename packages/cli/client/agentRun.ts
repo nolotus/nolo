@@ -233,14 +233,6 @@ function resolveRequestedRuntimeMode(options: RunAgentTurnOptions) {
   return "auto";
 }
 
-/**
- * `--machine-shell` 在解析成 local 时的统一报错文案（CLI 与派发层共用，避免漂移）：
- * 该开关只能在绑定机器执行，本机执行请去掉它。
- */
-export const MACHINE_SHELL_LOCAL_REFUSAL_MESSAGE =
-  "[nolo] --machine-shell can only run on the machine bound in the agent record (runtimeBinding.machineId): a local run cannot honor it, and it never executes on this computer.\n" +
-  "[nolo] Retry without --local / NOLO_RUNTIME_MODE=local, or drop --machine-shell to run on this computer.\n";
-
 function canResolveCollapsedPasteReference(
   store: import("../../core/collapsedPaste").CollapsedPasteStore,
   content: import("../../agent-runtime/types").AgentRuntimeMessageContent,
@@ -1905,9 +1897,6 @@ async function runHttpAgentTurn(
         ...(subjectRefs ? { subjectRefs } : {}),
         ...(blockedToolNames !== undefined ? { blockedToolNames } : {}),
         ...(allowedToolNames !== undefined ? { allowedToolNames } : {}),
-        ...(options.runtimeToolPolicyOverride
-          ? { runtimeToolPolicyOverride: options.runtimeToolPolicyOverride }
-          : {}),
       },
       ...(options.continueDialogId
         ? { continueDialogId: options.continueDialogId }
@@ -2078,49 +2067,11 @@ async function refreshMissingLocalAgentConfig(options: RunAgentTurnOptions) {
   return Boolean(agentConfig);
 }
 
-/**
- * run 级收尾：释放本机 OS 沙盒 lease（H3）。bwrap lease 持有常驻进程，只有
- * `release` 才 kill，所以**正常结束、abort、抛错**三条出口都必须经过这里。
- * 幂等；adapter 未实现该 CLI 专有方法（非 CLI adapter / 测试假 adapter）时
- * no-op；释放失败不改变 run 结果（lease 随进程退出失效）。
- */
-async function releaseAdapterSandboxWorkload(
-  adapter: AgentRuntimeHostAdapter | undefined,
-): Promise<void> {
-  const release = (
-    adapter as { releaseLocalSandboxWorkload?: () => Promise<void> } | undefined
-  )?.releaseLocalSandboxWorkload;
-  if (typeof release !== "function") return;
-  try {
-    await release.call(adapter);
-  } catch {
-    // 收尾失败不得覆盖 run 结果。
-  }
-}
-
 async function runLocalAgentTurnForCli(
   options: RunAgentTurnOptions,
   settings: { reportFailure: boolean },
 ): Promise<RunAgentTurnResult> {
-  // 同一个 adapter 实例贯穿整个 run（factory 每次调用都新建实例，所以这里只
-  // 解析一次并往下传：收尾要释放的必须是真正跑过命令的那个实例）。
   const resolvedBaseAdapter = resolveLocalRuntimeAdapter(options);
-  try {
-    return await runLocalAgentTurnForCliWithAdapter(
-      options,
-      settings,
-      resolvedBaseAdapter,
-    );
-  } finally {
-    await releaseAdapterSandboxWorkload(resolvedBaseAdapter);
-  }
-}
-
-async function runLocalAgentTurnForCliWithAdapter(
-  options: RunAgentTurnOptions,
-  settings: { reportFailure: boolean },
-  resolvedBaseAdapter: AgentRuntimeHostAdapter | undefined,
-): Promise<RunAgentTurnResult> {
   const baseAdapter = (() => {
     let adapter =
       resolvedBaseAdapter && options.modelOverride
@@ -2151,7 +2102,6 @@ async function runLocalAgentTurnForCliWithAdapter(
     subjectRefs ||
     allowedToolNames !== undefined ||
     blockedToolNames !== undefined ||
-    options.runtimeToolPolicyOverride ||
     options.parentWakeOnTerminal ||
     options.dialogAgentMode
       ? {
@@ -2161,9 +2111,6 @@ async function runLocalAgentTurnForCliWithAdapter(
             : {}),
           ...(allowedToolNames !== undefined ? { allowedToolNames } : {}),
           ...(blockedToolNames !== undefined ? { blockedToolNames } : {}),
-          ...(options.runtimeToolPolicyOverride
-            ? { runtimeToolPolicyOverride: options.runtimeToolPolicyOverride }
-            : {}),
           ...(options.parentWakeOnTerminal
             ? { parentWakeOnTerminal: true }
             : {}),
@@ -2173,7 +2120,6 @@ async function runLocalAgentTurnForCliWithAdapter(
         }
       : undefined;
   const currentDialogId = options.continueDialogId ?? ulid();
-  const freshDialog = options.freshDialog ?? !options.continueDialogId;
 
   // Ownership stamp for workspace tools invoked inside this turn — background
   // processes (launchProcess / auto-detached execShell) capture it at spawn
@@ -2261,7 +2207,6 @@ async function runLocalAgentTurnForCliWithAdapter(
           }
         : {}),
       continueDialogId: currentDialogId,
-      ...(freshDialog ? { freshDialog: true } : {}),
       fileWriteSessionId: currentDialogId,
       fileWriteGateEnabled: resolveFileWriteGateEnabled(options.env),
       spaceId: options.spaceId,
@@ -2595,49 +2540,13 @@ export function foldLocalResultForTui(
 
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
   const authToken = resolveAuthToken(options.env);
-  const requestedRuntimeMode = resolveRequestedRuntimeMode(options);
-
-  // `--machine-shell`（requireRemoteDispatch）：本 run 只能在绑定机器执行。
-  // 解析成 local 时显式报错退出 1，绝不静默在本机执行（历史问题：只挡了显式
-  // --local，NOLO_RUNTIME_MODE=local 仍会在本机跑）。
-  if (options.requireRemoteDispatch && requestedRuntimeMode === "local") {
-    options.output.write(MACHINE_SHELL_LOCAL_REFUSAL_MESSAGE);
-    return { exitCode: 1 };
-  }
-  // 锁定 server 派发：不给 auto→local 早退留口子（本机成功即返回 = 用户以为在
-  // 远程执行，实际在本机），也不受 NOLO_RUNTIME_MODE=local 覆盖。
-  const runtimeMode = options.requireRemoteDispatch
-    ? "server"
-    : requestedRuntimeMode;
+  const runtimeMode = resolveRequestedRuntimeMode(options);
 
   if (runtimeMode === "local") {
     return runInjectedLocalAgentTurn(options);
   }
 
   if (runtimeMode === "auto" && shouldAttemptAutoLocal(options)) {
-    // Keep the raw adapter's preparation side effects paired with tools/provider
-    // execution. Only successful reads of this turn's target agent are reused;
-    // model overrides and ephemeral behavior remain layered above this snapshot.
-    const rawAdapter = resolveLocalRuntimeAdapter(options);
-    let config: Awaited<ReturnType<AgentRuntimeHostAdapter["loadAgentConfig"]>> | undefined;
-    const invalidateConfig = () => { config = undefined; };
-    if (rawAdapter) {
-      options = {
-        ...options,
-        localRuntimeAdapter: {
-          ...rawAdapter,
-          loadAgentConfig: async (agentRef) => {
-            if (agentRef !== options.agentKey) {
-              return rawAdapter.loadAgentConfig(agentRef);
-            }
-            if (config) return config;
-            const loaded = await rawAdapter.loadAgentConfig(agentRef);
-            if (loaded) config = loaded;
-            return loaded;
-          },
-        },
-      };
-    }
     const skipLocal = await shouldSkipAutoLocalForServerPlatformTools(options);
     if (!skipLocal) {
       const localResult = await runLocalAgentTurnForCli(options, {
@@ -2646,7 +2555,6 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
       if (localResult.exitCode === 0) {
         return foldLocalResultForTui(localResult);
       }
-      invalidateConfig();
       if (
         isMissingLocalAgentConfigError(localResult.localError, options.agentKey)
       ) {
@@ -2663,10 +2571,8 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
             if (retriedLocalResult.exitCode === 0) {
               return foldLocalResultForTui(retriedLocalResult);
             }
-            invalidateConfig();
           }
         } catch {
-          invalidateConfig();
           // Fall through to surface local runtime failure.
         }
       }

@@ -19,7 +19,6 @@
 //     with waitForCompletion:false, which posts to /api/agent/run {background:true}
 
 import { RUN_TITLE_MAX, normalizeRunTitle } from "./runTitle";
-import { resolveStartAgentRunCwd } from "./agentRunCwd";
 import { runAgentBackground } from "ai/agent/runAgentBackground";
 import { toErrorMessage } from "core/errorMessage";
 import {
@@ -124,13 +123,6 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     `必填。这次子任务的短标题（≤${RUN_TITLE_MAX} 字，一行，如「复审额度 diff」「Opus 本地拉取设计」）。` +
                     "会展示并随运行记录持久化，用于区分并发 run；不得为空或仅含空白。",
             },
-            cwd: {
-                type: "string",
-                description:
-                    "可选。子 run 的工作目录（绝对路径）：子 run 进程的 cwd 与它的工具工作区都指向该目录（例如派到另一个 worktree）。" +
-                    "只在 nolo CLI 本地运行路径生效；必须是已存在的目录，传相对路径 / 不存在的目录会直接报错，不会退化成默认目录。" +
-                    "服务端派发路径兑现不了本地目录，收到该参数会报错而不是静默忽略。不传则沿用宿主当前工作目录。",
-            },
             // 刻意不向模型暴露 ephemeral：AI 不需要知道这个选项，不提供即默认持久化。
             // 非持久化 run 在失败/stall/输出被截断时不会留下任何可找回的结论，而
             // review findings 与子任务产出都必须可回读——把选项藏起来比写一条
@@ -214,11 +206,6 @@ export function buildStartAgentRunFunctionSchema(opts?: {
 /** 全集 schema：服务端 / 支持同步派发的宿主用它。 */
 export const startAgentRunFunctionSchema = buildStartAgentRunFunctionSchema();
 
-// ── cwd 校验（子 run 工作目录）──────────────────────────────────────────────
-//
-// 判定与文案在 agentRunCwd.ts（纯函数，CLI 执行器复用同一份）。本文件只负责
-// 把「服务端派发兑现不了本地目录」这件事说清楚——不静默忽略。
-
 interface StartAgentRunArgs {
     agentKey?: string;
     task: string;
@@ -240,17 +227,11 @@ interface StartAgentRunArgs {
     resultMode?: "full" | "summary";
     parentDialogId?: string;
     /**
-    /**
      * listRuntimes 返回的执行位置稳定 key（local / server / machine:<id> / docker:<id>）。
      * 显式指定时该 run 只在目标位置执行；不可用一律由服务端显式报错，不静默回退。
      * 省略 = 沿用宿主默认位置。
      */
     runtimeKey?: string;
-    /**
-     * 子 run 的工作目录（绝对路径）。只在本地运行主机（nolo CLI）生效；
-     * 本执行器（服务端后台派发）兑现不了，传了即报错，见 startAgentRunFunc。
-     */
-    cwd?: string;
 }
 
 export function resolveCurrentAgentKeyForStartRun(
@@ -321,18 +302,6 @@ export async function startAgentRunFunc(
     }
     if (!task || typeof task !== "string") {
         throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
-    }
-
-    // cwd 是本机目录，本执行器经服务端后台派发（/api/agent/run），服务端 run 的
-    // 文件系统由宿主决定，兑现不了这个参数。显式报错：静默忽略会让模型以为子 run
-    // 已经落在目标目录，随后按错误的路径读它的产出。放在扇出注册之前——被拒的
-    // 派发不该占用批次里的凭证位。
-    const requestedCwd = resolveStartAgentRunCwd(args.cwd);
-    if (requestedCwd) {
-        throw new Error(
-            "startAgentRun: cwd 只在本地运行主机（nolo CLI）可用；本次派发经服务端后台执行，" +
-                `无法把子 run 的工作目录指定为 ${requestedCwd}。请省略 cwd，或在本地 CLI 里派发。`,
-        );
     }
 
     const effectiveAllowCredentialConcurrency =

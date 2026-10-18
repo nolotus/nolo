@@ -245,7 +245,6 @@ export {
 export {
   executeLocalToolWithPolicy,
   resolveLocalToolPolicy,
-  runExecShellGates,
 } from "./localToolPolicy";
 export {
   buildToolParametersIndex,
@@ -260,7 +259,6 @@ export {
 export {
   mergeAgentRuntimeToolPolicies,
   normalizeAgentRuntimeToolPolicy,
-  normalizeRuntimeToolPolicyOverride,
   resolveCurrentRunRuntimeToolPolicy,
   resolveRequestedRuntimeToolNames,
   resolveEffectiveRuntimeToolPolicy,
@@ -312,8 +310,6 @@ export {
 } from "./noloWorkspaceTools.node";
 export type {
   AgentRuntimeAgentConfig,
-  AgentRuntimeDialogHistoryLoadResult,
-  AgentRuntimeDialogHistorySource,
   AgentRuntimeDialogSummary,
   AgentRuntimeHostAdapter,
   AgentRuntimeCompleteOptions,

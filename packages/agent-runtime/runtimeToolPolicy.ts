@@ -1,6 +1,6 @@
 import { isRecord } from "core/isRecord";
 import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
-import { asNonEmptyStringArray, asTrimmedNonEmptyStringArray } from "core/stringArray";
+import { asNonEmptyStringArray } from "core/stringArray";
 import { asOptionalTrimmedString } from "core/optionalString";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 import type { AgentRuntimeHost, AgentRuntimeToolPolicy, AgentRuntimeWorkspaceMode } from "./types";
@@ -84,42 +84,6 @@ export function normalizeAgentRuntimeToolPolicy(
     ...(isRecord(value.git) ? { git: { ...value.git } } : {}),
     ...(isRecord(value.budget) ? { budget: { ...value.budget } } : {}),
     ...(isRecord(value.audit) ? { audit: { ...value.audit } } : {}),
-  };
-}
-
-/**
- * 请求级 runtime tool policy 申请（`nolo agent run --machine-shell`）的**唯一**
- * 白名单闸门 —— 客户端只能「申请能力」，不能「改边界」。
- *
- * 只接受两项，其余（`shell` / `isolation` / `audit` / `network` / `agentTools` /
- * `git` / `budget` / `workspace.readableRoots` 等——含任何未列出的字段）一律丢弃：
- *   - `runtimeTools`：只保留字面量 `"execShell"`；
- *   - `workspace.mode`：只保留 `"lease"`。
- *
- * 合并顺序由 resolveEffectiveRuntimeToolPolicy 钉死：先并入本 override，再叠加
- * applyWebRuntimeSafetyBaseline —— 所以 os-sandbox / commandPolicy=approval /
- * networkPolicy=default-deny / audit 仍然生效（与 agent 自身策略同一条路径）。
- *
- * 无可接受内容时返回 undefined（等价于没有申请，不产生任何 policy）。
- */
-export function normalizeRuntimeToolPolicyOverride(
-  value: unknown,
-): AgentRuntimeToolPolicy | undefined {
-  if (!isRecord(value)) return undefined;
-  const runtimeTools = unique(
-    asTrimmedNonEmptyStringArray(value.runtimeTools).filter(
-      (tool) => tool === "execShell",
-    ),
-  );
-  const workspace =
-    isRecord(value.workspace) && value.workspace.mode === "lease"
-      ? { mode: "lease" as const }
-      : undefined;
-  if (!runtimeTools.length && !workspace) return undefined;
-  return {
-    version: 1,
-    ...(runtimeTools.length ? { runtimeTools } : {}),
-    ...(workspace ? { workspace } : {}),
   };
 }
 
@@ -249,19 +213,9 @@ function applyWebRuntimeSafetyBaseline(
 export function resolveEffectiveRuntimeToolPolicy(args: {
   agentConfig: Pick<AgentRuntimeAgentConfig, "runtimeToolPolicy" | "runtimeBinding">;
   host?: AgentRuntimeHost;
-  /**
-   * 请求级申请（`nolo agent run --machine-shell` → runtimeContext
-   * .runtimeToolPolicyOverride）。只经 normalizeRuntimeToolPolicyOverride
-   * 白名单，且必须在 applyWebRuntimeSafetyBaseline **之前** 合并——顺序即安全
-   * 边界：override 申请得到的能力仍受 web 基线的 sandbox/审批/审计约束。
-   */
-  runtimeToolPolicyOverride?: unknown;
 }): AgentRuntimeToolPolicy | undefined {
   const agentPolicy = resolveCurrentRunRuntimeToolPolicy(args.agentConfig);
-  const requestedPolicy = normalizeRuntimeToolPolicyOverride(
-    args.runtimeToolPolicyOverride,
-  );
-  const effectivePolicy = mergeAgentRuntimeToolPolicies(agentPolicy, requestedPolicy);
+  const effectivePolicy = mergeAgentRuntimeToolPolicies(agentPolicy);
   return args.host === "web"
     ? applyWebRuntimeSafetyBaseline(effectivePolicy)
     : effectivePolicy;

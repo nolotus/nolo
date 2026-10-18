@@ -60,10 +60,6 @@ import {
 } from "../../ai/tools/agent/batchAggregation";
 import { checkCredentialFanout } from "../../ai/tools/agent/credentialFanoutGuard";
 import {
-  resolveStartAgentRunCwd,
-  type StartAgentRunCwdVerdict,
-} from "../../ai/tools/agent/agentRunCwd";
-import {
   deriveAgentRunTodoStatus,
   type AgentRunTodoRecord,
   type AgentRunTodoRunSummary,
@@ -114,27 +110,6 @@ const parseCallArgs = (call: any): Record<string, any> => {
 
 const resolveFs = (deps: CliAgentRunToolExecutorDeps): FsLike =>
   (deps.fs ?? { existsSync, readFileSync }) as FsLike;
-
-/**
- * startAgentRun 的 cwd 探针：判定注入 fs 里的路径是不是目录。
- *
- * 走 `deps.fs` 这一份适配层（测试注入内存实现）；精简实现没带 statSync 时回落
- * node fs。任何 stat 失败都按「不存在或不可用」上报——子 run 反正起不来，报错比
- * 让 spawn 抛 ENOENT/ENOTDIR 更接近模型能自纠的粒度。
- */
-const probeRunCwd = (
-  deps: CliAgentRunToolExecutorDeps,
-): ((absolutePath: string) => StartAgentRunCwdVerdict) => {
-  const fs = deps.fs as (FsLike & { statSync?: typeof nodeFs.statSync }) | undefined;
-  const stat = fs?.statSync ?? nodeFs.statSync;
-  return (absolutePath: string) => {
-    try {
-      return stat(absolutePath).isDirectory() ? "directory" : "not-a-directory";
-    } catch {
-      return "missing";
-    }
-  };
-};
 
 const tailFile = (
   logPath: string,
@@ -377,14 +352,6 @@ async function assertCredentialFanoutAllowed(
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
-    if (args.runtimeKey !== undefined) {
-      const trimmed = typeof args.runtimeKey === "string" ? args.runtimeKey.trim() : "";
-      if (trimmed !== "local") {
-        throw new Error(
-          `startAgentRun 暂不支持在当前 CLI 宿主派发到指定执行位置 "${String(args.runtimeKey)}"：CLI 宿主仅支持本地派发。请在支持该执行位置的宿主（桌面端或服务端）派发，或省略 runtimeKey 在本地运行。`
-        );
-      }
-    }
     const rawAgentKey = typeof args.agentKey === "string" ? args.agentKey.trim() : "";
     const agentKey =
       (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
@@ -395,10 +362,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     if (!agentKey) throw new Error(t("agentRunTool.missingAgentKey"));
     if (!task) throw new Error(t("agentRunTool.missingTask"));
     if (!runTitle) throw new Error(`startAgentRun 需要非空的一行标题（≤60 字）`);
-    // 子 run 的工作目录：不传沿用 deps.cwd（宿主工作区）；传了就按它 spawn，
-    // 非法值在此直接报错——不静默回落到宿主目录，那会让子 run 在错误的
-    // 仓库/worktree 上动手。
-    const requestedCwd = resolveStartAgentRunCwd(args.cwd, probeRunCwd(deps));
     const nowMs = resolveNowMs(deps);
 
     const effectiveAllowCredentialConcurrency =
@@ -481,7 +444,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(credentialGroup ? { credentialGroup } : {}),
         ...(parentDialogId ? { parentDialogId } : {}),
         ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
-        cwd: requestedCwd ?? deps.cwd ?? process.cwd(),
+        cwd: deps.cwd ?? process.cwd(),
         message,
         ...(args.ephemeral === true ? { ephemeral: true } : {}),
         output: noopOutput,

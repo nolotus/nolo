@@ -141,8 +141,8 @@ import {
 import {
   resolveBuiltinLocalCliAgentConfig,
   readAgentFromStore,
+  readDialogMessages,
 } from "./cliLocalAgentRecordReader";
-import { loadCliDialogHistoryWithSource } from "./cliDialogHistoryFallback";
 import {
   shouldUseDeclaredOnlyLocalWorkspaceTools,
 } from "./cliWorkspaceToolVariants";
@@ -279,12 +279,8 @@ import {
 } from "./localDialogRecords";
 import { buildLocalAgentLookupKeys } from "./localAgentRecords";
 import { createCliHybridRecordStore } from "./hybridRecordStore";
-import { executeLocalToolWithPolicy, resolveLocalToolPolicy, runExecShellGates } from "./localToolPolicy";
+import { executeLocalToolWithPolicy, resolveLocalToolPolicy } from "./localToolPolicy";
 import { normalizeLocalToolName } from "../../agent-runtime/localToolPolicy";
-import {
-  createLocalSandboxWorkload,
-  LOCAL_SANDBOX_ISOLATION,
-} from "../../agent-runtime/localSandboxWorkload";
 import { getAgentRuntimeToolParametersIndex } from "../agentRuntimeLocal";
 import { inferCaptureIntent } from "../../ai/policy/runtimePolicy";
 import {
@@ -557,12 +553,6 @@ export function createCliLocalRuntimeAdapter(
   deps: CliLocalRuntimeAdapterDeps,
 ): AgentRuntimeHostAdapter & {
   /**
-   * 本机 OS 沙盒 lease 的收尾入口（CLI 专有，非 AgentRuntimeHostAdapter 接口
-   * 成员）：run 结束时由宿主调用，释放 bwrap lease。幂等；未创建沙盒时 no-op。
-   * 建议的审计隔离级别在 workload 上：LOCAL_SANDBOX_ISOLATION。
-   */
-  releaseLocalSandboxWorkload(): Promise<void>;
-  /**
    * 自动上下文压缩的摘要 fallback（CLI 专有，非 AgentRuntimeHostAdapter 接口
    * 成员）。localLoop 在主通道超时/失败时最多调用一次；形状与 CLI 的
    * SummaryLlmCaller 一致。未注入 → undefined（见
@@ -651,64 +641,6 @@ export function createCliLocalRuntimeAdapter(
       }
     | undefined;
   const workspaceRoot = deps.cwd ?? process.cwd();
-  /**
-   * 本机 OS 沙盒 workload（渐进第一步，只接管 execShell）。惰性创建一次
-   * （per run，不是 per tool call）；bwrap 不可用 / 非 Linux / ticket 被拒时
-   * 为 null，此时 execShell 逐字回落原有本机路径。审计口径：workload 为
-   * null → isolation:"none"，否则 LOCAL_SANDBOX_ISOLATION（落库是后续步）。
-   */
-  let localSandboxLoad: Promise<
-    Awaited<ReturnType<typeof createLocalSandboxWorkload>>
-  > | null = null;
-  let localSandboxAbortWired = false;
-  /**
-   * 测试注入缝：缺省用真实 `createLocalSandboxWorkload`（bwrap）。沙盒分支
-   * 必须能被确定性覆盖——不注入就只能靠机器上有 bwrap 才能跑到该分支，缺
-   * bwrap 的机器上用例会「静默不覆盖」。与 `localSandboxWorkload` 的
-   * `backend`/`env` 注入缝同风格。
-   */
-  const createSandboxWorkload =
-    (deps as { createLocalSandboxWorkload?: typeof createLocalSandboxWorkload })
-      .createLocalSandboxWorkload ?? createLocalSandboxWorkload;
-  const loadLocalSandboxWorkload = () =>
-    (localSandboxLoad ??= createSandboxWorkload({ workspaceRoot }).catch(
-      () => null,
-    ));
-  const releaseLocalSandboxWorkload = async (): Promise<void> => {
-    const loaded = localSandboxLoad
-      ? await localSandboxLoad.catch(() => null)
-      : null;
-    // 释放后 lease 已失效：清零 memo，避免长活 adapter（注入式 adapter 跨
-    // 多个 turn 复用）在下一轮拿到已释放的沙盒而静默失去隔离。
-    localSandboxLoad = null;
-    localSandboxAbortWired = false;
-    await loaded?.release();
-  };
-  /** run 被 abort 时释放 lease（真收尾入口由宿主调用 releaseLocalSandboxWorkload）。 */
-  const ensureLocalSandboxAbortWired = (signal?: AbortSignal) => {
-    if (!signal || localSandboxAbortWired) return;
-    localSandboxAbortWired = true;
-    signal.addEventListener(
-      "abort",
-      () => {
-        void releaseLocalSandboxWorkload();
-      },
-      { once: true },
-    );
-  };
-  const parseToolArgumentsObject = (
-    raw: unknown,
-  ): Record<string, unknown> | null => {
-    if (typeof raw !== "string" || raw.length === 0) return null;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : null;
-    } catch {
-      return null;
-    }
-  };
   let runtimeToolExecutionLimits: ReturnType<
     typeof resolveLocalWorkspaceExecutorOptionsFromPolicy
   > = {};
@@ -880,26 +812,10 @@ export function createCliLocalRuntimeAdapter(
       }
       return exposedAgentConfig;
     },
-    loadDialogHistory: async (dialogId) => {
-      const loaded = await loadCliDialogHistoryWithSource({
+    loadDialogHistory: async (dialogId) =>
+      readDialogMessages({
         dialogId,
         store: await getOrCreateSharedStore(deps),
-        env: deps.env,
-        fetchImpl,
-      });
-      return loaded.messages;
-    },
-    // Source-aware variant so a cross-machine resume that could not load the
-    // remote history reports `none` instead of looking like a new dialog.
-    loadDialogHistoryWithSource: async (dialogId) =>
-      loadCliDialogHistoryWithSource({
-        dialogId,
-        store: await getOrCreateSharedStore(deps),
-        env: deps.env,
-        fetchImpl,
-        log: (message) => {
-          logLocalRuntimeDiagnostic("dialog-history", { dialogId, message });
-        },
       }),
     loadDialogSummary: async (dialogId) =>
       loadCliDialogSummary({
@@ -1367,68 +1283,6 @@ export function createCliLocalRuntimeAdapter(
           }
         }
       }
-      // 本机 OS 沙盒分支（只接管 execShell）。deny 仍然优先：先跑与下方
-      // executeLocalToolWithPolicy 同源的 run-surface + policy 判定，被拒就
-      // 原样落到原有路径抛错（沙盒不是绕过 deny 的通道）。arguments 不可解析
-      // 或缺 command 时同样回落，让原有参数闸门给出可纠正的错误。workload
-      // 缺失（无 bwrap / 非 Linux）时整段不生效，原有路径逐字不变。
-      let sandboxGatePassed = false;
-      if (normalizeLocalToolName(call.name) === "execShell") {
-        const shellArgs = parseToolArgumentsObject(injectedCall.arguments);
-        if (
-          shellArgs &&
-          typeof shellArgs.command === "string" &&
-          shellArgs.command.length > 0
-        ) {
-          const sandbox = await loadLocalSandboxWorkload();
-          if (sandbox) {
-            const deniedBySurfaceOrPolicy =
-              !activeAgentToolNames
-                .map(normalizeLocalToolName)
-                .includes("execShell") ||
-              !resolveLocalToolPolicy({
-                env: deps.env,
-                agentToolNames: activeAgentToolNames,
-                toolName: "execShell",
-              }).allowed;
-            if (!deniedBySurfaceOrPolicy) {
-              // 沙盒不能替代两道门：沙盒 writableRoots 含工作区，
-              // `git reset --hard` / `rm -rf` 破坏的正是工作区数据，所以
-              // 逐次授权与破坏性确认必须在进入沙盒通道之前跑，且与普通路径
-              // 共用同一份实现（runExecShellGates）。
-              // - `handled` = 带授权票据的调用：票据绑定精确输入，只能由
-              //   capability 管线自己执行并消费，这里原样返回其结果（授权
-              //   照旧生效，沙盒通道不接管带授权的调用）。
-              // - gate 被拒时抛原错误（与普通路径同一错误语义）。
-              const gate = await runExecShellGates({
-                toolName: "execShell",
-                callArguments: injectedCall.arguments,
-                execShellApproval: deps.execShellApproval,
-                workspaceRoot,
-                ...runtimeToolExecutionLimits,
-                abortSignal: opts?.abortSignal,
-                detachMs: resolveExecShellDetachMs(deps.env),
-                ...(deps.confirmDestructiveAction
-                  ? { confirmDestructiveAction: deps.confirmDestructiveAction }
-                  : {}),
-              });
-              if (gate.kind === "handled") return gate.result;
-              ensureLocalSandboxAbortWired(opts?.abortSignal);
-              const sandboxOutput = await sandbox.workload.channel(
-                "execShell",
-                shellArgs,
-                opts?.abortSignal,
-              );
-              if (sandboxOutput !== null) {
-                return { content: sandboxOutput };
-              }
-              // 沙盒未接管（理论上只对非 execShell 发生）→ 回落普通路径；
-              // gate 已经跑过，别再弹一次破坏性确认。
-              sandboxGatePassed = true;
-            }
-          }
-        }
-      }
       const result = await executeLocalToolWithPolicy({
         env: deps.env,
         agentToolNames: activeAgentToolNames,
@@ -1438,9 +1292,6 @@ export function createCliLocalRuntimeAdapter(
         execShellApproval: deps.execShellApproval,
         ...runtimeToolExecutionLimits,
         executors: localToolExecutors,
-        // 沙盒分支的 gate 已经跑过（channel 未接管才会落回这里）：把
-        // confirmed 传下去，避免破坏性确认在同一调用里弹第二次。
-        ...(sandboxGatePassed ? { confirmed: true } : {}),
         // 分发前参数闸门：只覆盖 agent-runtime 工具族（workspace + nolo
         // workspace）。ai/tools registry 的工具不接——它们有各自的前置 policy
         // guard 与结构化结果契约（例：createTable 的 capture 确认守卫），
@@ -1491,7 +1342,6 @@ export function createCliLocalRuntimeAdapter(
   // pre-admission zero-cost attempts protected by abort/sawToolEvent guards.
   return {
     ...adapterBase,
-    releaseLocalSandboxWorkload,
     // 会话级摘要 fallback（未注入 → undefined）：getter 而非快照值，因为 adapter
     // 可能被 prepared-runtime 缓存复用，而注入发生在 CLI 启动早期。
     get compactionSummaryFallback() {
