@@ -207,6 +207,11 @@ jobs:
           # prerelease ⇒ 该 URL 恒 404（2026-09-14 实测）。这个值还会被
           # electrobun.config 的 release.baseUrl 烘焙进产物，所以 404 同时污染构建与产物。
           ELECTROBUN_RELEASE_BASE_URL: https://nolo.chat/public/downloads
+          # 安装包版本必须显式注入：main 不再为版本号产生提交后，投影里的
+          # packages/desktop/package.json 会停在 alpha 版本线，真正的发布版本来自
+          # tag / projection metadata。不注入会把 alpha 版本号烘焙进安装包与下载
+          # manifest——包能装能跑，只是版本是错的，没有任何检查会发现。
+          NOLO_DESKTOP_APP_VERSION: ${{ needs.select-targets.outputs.version }}
           # 刻意**不设** NOLO_DESKTOP_SKIP_PATCH：它会让 electrobun 在 Windows 上
           # 跳过 delta patch 阶段，而实测该阶段被跳过时稳定版 payload 会缺运行时
           # 三件套且**不产出 NoloDesktop.tar**（recovery 因此只能退到残缺 payload）。
@@ -234,6 +239,8 @@ jobs:
         shell: bash
         env:
           TMPDIR: ${{ runner.temp }}
+          # 同上：版本来自 metadata，不来自投影的 package.json。
+          NOLO_DESKTOP_APP_VERSION: ${{ needs.select-targets.outputs.version }}
           NOLO_DESKTOP_BUILD_RPM: "1"
           NOLO_DESKTOP_BUILD_DEB: "1"
           # 同上：按渠道选可达基座，绝不使用恒 404 的 releases/latest。
