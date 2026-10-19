@@ -79,6 +79,11 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NOLO_CLI_PUBLISH_DIST_TAG: ${{ inputs.dist_tag }}
+          # 发布版本必须显式注入：main 不再为版本号产生提交之后，投影里的
+          # packages/cli/package.json 会停在 alpha 版本线上，真正的发布版本只在
+          # tag / projection-release-metadata.json 里。不传这一项，脚本会按旧版本
+          # 判定「该版本已存在、本次无新版本」而静默跳过 npm publish。
+          NOLO_CLI_PUBLISH_VERSION: ${{ steps.metadata.outputs.version }}
           NOLO_CLI_PUBLISH_NPM_PREFIX: ${{ runner.temp }}/nolo-cli-prefix
         run: bash ./scripts/ci/runCliPublishPublic.sh
 
@@ -97,8 +102,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # 健康检查读的 packages/cli/package.json 版本必须就是本次发布的版本：
-          # 绑定同一 projection_sha，不读可能已前移的默认分支。
+          # 健康检查必须绑定同一 projection_sha（不读可能已前移的默认分支）；
+          # 版本本身来自 inputs.version / metadata，不来自投影里的 package.json。
           ref: ${{ inputs.projection_sha }}
       - uses: actions/setup-node@v4
         with:
@@ -107,7 +112,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(node -p "require('./packages/cli/package.json').version")"
+          # 用本次发布的声明版本，而不是读投影里的 package.json：main 不再为版本号
+          # 产生提交后，那个文件会停在 alpha 版本线上，健康检查会去装一个旧版本
+          # 并「通过」——查错了对象比失败更糟。
+          VERSION="${{ inputs.version }}"
           npm install -g "nolo-cli@${VERSION}"
           nolo --version
           nolo doctor
