@@ -90,20 +90,12 @@ validate_npm_token() {
 }
 
 validate_cli_version_alignment() {
-  "$NODE_BIN" - <<'NODE'
-const fs = require("node:fs");
-const pkg = require("./packages/cli/package.json");
-const source = fs.readFileSync("./packages/app/constants/cliDownloads.ts", "utf8");
-const match = source.match(/NOLO_CLI_VERSION = "([^"]+)"/);
-if (!match) {
-  throw new Error("NOLO_CLI_VERSION is missing from packages/app/constants/cliDownloads.ts");
-}
-if (match[1] !== pkg.version) {
-  throw new Error(
-    `CLI version mismatch: packages/cli/package.json=${pkg.version} cliDownloads.ts=${match[1]}`
-  );
-}
-NODE
+  # 2026-10-19：守卫收敛到 scripts/release/validateCliVersionSource.ts。
+  # 原先「用正则从 cliDownloads.ts 抠版本号并比对 package.json」这段逻辑在
+  # 本文件、runCliPublishCi.sh、publishNoloCli.sh、applyCliVersion.ts 各有一份；
+  # cliDownloads 改为构建期注入（__NOLO_CLI_VERSION__）后它们全部失配，
+  # 把发布链直接打红。同一个错误不该逐份再犯三次。
+  "$BUN_BIN" ./scripts/release/validateCliVersionSource.ts
 }
 
 verify_published_dist_tag() {
