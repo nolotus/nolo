@@ -1,4 +1,4 @@
-// packages/app/lab/crm/crmRoutes.tsx
+// packages/lab/crm/crmRoutes.tsx
 import React from "react";
 import { Outlet, NavLink } from "app/routing";
 import { CrmProvider, useCrm } from "./CrmContext";

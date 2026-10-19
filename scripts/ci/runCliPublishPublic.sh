@@ -50,30 +50,12 @@ install_dependencies() {
 }
 
 resolve_cli_version() {
-  # 注入优先（与 runCliPublishCi.sh 同语义）：否则 package.json 的旧版本会让
-  # publish 判定「无新版本」而静默跳过，dist-tag 验证也会比对错误对象。
-  if [[ -n "${NOLO_CLI_PUBLISH_VERSION:-}" ]]; then
-    printf '%s\n' "$NOLO_CLI_PUBLISH_VERSION"
-    return
-  fi
   "$NODE_BIN" -p "require('./packages/cli/package.json').version"
 }
 
 prepare_staged_package() {
   rm -rf "$OUT_DIR"
-  # 版本注入：优先用调用方给的 NOLO_CLI_PUBLISH_VERSION（公开仓 cli-publish.yml 传
-  # inputs.version / metadata 声明的版本），未给时退回 packages/cli/package.json。
-  #
-  # 为什么需要它：main 停止为版本号产生提交之后，projection 里的 package.json
-  # 不再是本次发布的版本（它停在 alpha 的版本线上），真正的发布版本只存在于 tag /
-  # projection-release-metadata.json 里。没有这条注入，npm 会发出旧版本，而
-  # cli-publish.yml 的健康检查（读 package.json）也会跟着失准。
-  local version_args=()
-  if [[ -n "${NOLO_CLI_PUBLISH_VERSION:-}" ]]; then
-    log "injecting CLI publish version: ${NOLO_CLI_PUBLISH_VERSION} (from NOLO_CLI_PUBLISH_VERSION)"
-    version_args=(--version "$NOLO_CLI_PUBLISH_VERSION")
-  fi
-  "$BUN_BIN" ./scripts/release/prepareCliPublishPackage.ts --out-dir "$OUT_DIR" ${version_args[@]+"${version_args[@]}"}
+  "$BUN_BIN" ./scripts/release/prepareCliPublishPackage.ts --out-dir "$OUT_DIR"
 }
 
 pack_staged_package() {
@@ -108,12 +90,20 @@ validate_npm_token() {
 }
 
 validate_cli_version_alignment() {
-  # 2026-10-19：守卫收敛到 scripts/release/validateCliVersionSource.ts。
-  # 原先「用正则从 cliDownloads.ts 抠版本号并比对 package.json」这段逻辑在
-  # 本文件、runCliPublishCi.sh、publishNoloCli.sh、applyCliVersion.ts 各有一份；
-  # cliDownloads 改为构建期注入（__NOLO_CLI_VERSION__）后它们全部失配，
-  # 把发布链直接打红。同一个错误不该逐份再犯三次。
-  "$BUN_BIN" ./scripts/release/validateCliVersionSource.ts
+  "$NODE_BIN" - <<'NODE'
+const fs = require("node:fs");
+const pkg = require("./packages/cli/package.json");
+const source = fs.readFileSync("./packages/app/constants/cliDownloads.ts", "utf8");
+const match = source.match(/NOLO_CLI_VERSION = "([^"]+)"/);
+if (!match) {
+  throw new Error("NOLO_CLI_VERSION is missing from packages/app/constants/cliDownloads.ts");
+}
+if (match[1] !== pkg.version) {
+  throw new Error(
+    `CLI version mismatch: packages/cli/package.json=${pkg.version} cliDownloads.ts=${match[1]}`
+  );
+}
+NODE
 }
 
 verify_published_dist_tag() {

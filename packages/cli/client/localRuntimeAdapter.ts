@@ -828,11 +828,6 @@ export function createCliLocalRuntimeAdapter(
     dockerWorkloadReleased = true;
     dockerWorkloadLoad = null;
     if (loaded) {
-      // 块ART2 修复：终态导出要 runsDir，但本闭包不在
-      // `recordRunExecutionIsolation` 的动态 import 作用域内。此前这里直接引用
-      // `resolveRunsDir` → ReferenceError，被 teardown 的「失败只 warn」吞掉，
-      // 于是导出从来没真正跑过（沙盒产出全部丢失，2026-10-19 实测）。
-      const { resolveRunsDir } = await import("../agentRunControl");
       // 块ART2：run 终态自动导出 —— 在沙盒销毁**之前**把工作区改动导成 patch
       // 存进产物层（`runs/<runId>/diff.patch`），ref 写回 runsDir 审计。
       // 导出是审计增强，不是 run 结果的成立条件：任何失败只 warning，既不改变

@@ -305,11 +305,7 @@ export function resolveFilesToCopy(sourceDir: string, filesToCopy: string[]): st
         continue;
       }
       for (const filePath of findTypeScriptFiles(absoluteBaseDir)) {
-        const relativeFilePath = relative(sourceDir, filePath).replace(/\\/g, "/");
-        if (!isPublishableSourceFile(relativeFilePath)) {
-          continue;
-        }
-        resolved.add(relativeFilePath);
+        resolved.add(relative(sourceDir, filePath));
       }
       continue;
     }
@@ -616,18 +612,6 @@ function listWorkspacePackageDirs(sourceDir: string): Set<string> {
   }
 
   return workspaceDirs;
-}
-
-function isPublishableSourceFile(relativeFilePath: string): boolean {
-  // 测试文件不是运行时依赖。把 *.test.ts / *.spec.ts 复制进 dist 只会撑大
-  // 本地构建产物（历史 dist 里带进了数千行的测试文件），发布物本身不受影响
-  // （发布 files 固定为 ["*.js", "README.md"]）。
-  return (
-    !relativeFilePath.endsWith(".test.ts") &&
-    !relativeFilePath.endsWith(".spec.ts") &&
-    !relativeFilePath.endsWith(".test.tsx") &&
-    !relativeFilePath.endsWith(".spec.tsx")
-  );
 }
 
 function shouldInlineWorkspaceFile(relativeFilePath: string): boolean {

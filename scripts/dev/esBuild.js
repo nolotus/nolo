@@ -4,7 +4,7 @@
 // - public/latest-assets.json：给服务端 SSR 使用的入口 JS/CSS 信息
 
 import { write } from "bun";
-import { brotliCompress, constants, gzip } from "node:zlib";
+import { brotliCompress, gzip } from "node:zlib";
 import { copyFile, mkdir, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
@@ -21,24 +21,6 @@ const esbuild = require("esbuild");
 
 const gzipAsync = promisify(gzip);
 const brotliCompressAsync = promisify(brotliCompress);
-
-/**
- * brotli 压缩档位。默认 10。
- *
- * 部署机实测（2026-10-19，`build-web` 里这一段占 30.3s / 21%），用仓库里最大的
- * 5 个 js/css 做的对比：
- *   q11 2843ms  基准
- *   q10 1036ms  +2.32% 体积   ← 2.7x，性价比点
- *   q9     92ms  +9.35% 体积  （30x，但每个访客多下 9%，过度）
- * 选 10：省约 19s/次部署，代价是静态资源大 2.3%。
- *
- * 想回到最高压缩比：NOLO_WEB_BROTLI_QUALITY=11。
- */
-function resolveBrotliQuality() {
-  const raw = process.env.NOLO_WEB_BROTLI_QUALITY?.trim();
-  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 11 ? parsed : 10;
-}
 const ASSET_BUILD_MANIFEST_DIR = "public/.asset-builds";
 const ASSET_OUTPUT_DIR = "public/assets";
 const CLIENT_LOCALE_OUTPUT_DIR = "public/locales";
@@ -316,15 +298,7 @@ const precompressAssets = async (outputs) => {
     files.map(async (path) => {
       const bytes = await readFile(path);
       const [brBytes, gzBytes] = await Promise.all([
-        // BROTLI_PARAM_QUALITY 默认是 11（最慢档）。部署机上这一段实测 30.3s，
-        // 占 build-web 的 21%；9 档通常在 1/3~1/4 的时间内产出体积大 1~3% 的结果，
-        // 对 CDN 传输（已有 gzip 兜底）影响可忽略，是性价比最高的档位。
-        // 想回到最高压缩比可设 NOLO_WEB_BROTLI_QUALITY=11。
-        brotliCompressAsync(bytes, {
-          params: {
-            [constants.BROTLI_PARAM_QUALITY]: resolveBrotliQuality(),
-          },
-        }),
+        brotliCompressAsync(bytes),
         gzipAsync(bytes),
       ]);
       await mkdir(dirname(path), { recursive: true });

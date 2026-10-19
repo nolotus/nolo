@@ -103,8 +103,6 @@ export type TuiState = {
   /** Platform response language used by both the real turn and context estimate. */
   userLanguage?: string;
   gitStatus?: GitStatus;
-  /** 最近一次 nolo-ci 部署的摘要（如 "ci:5b2d62a ✓"）。取不到时保持 undefined —— 状态行不显示这一格。 */
-  ciStatusLine?: string;
   /**
    * Session-only reasoning display preference. This controls terminal chrome
    * only: reasoning generation, transport, persistence, and billing remain
