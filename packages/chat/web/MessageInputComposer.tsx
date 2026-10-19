@@ -31,6 +31,7 @@ export type MessageInputComposerProps = {
   suggestionHeaderText: string;
   onSelectSuggestion: (index: number) => void;
   onHoverSuggestion: (index: number) => void;
+  manualHeight?: number | null;
 };
 
 export const MessageInputComposer = memo(function MessageInputComposer({
@@ -51,6 +52,7 @@ export const MessageInputComposer = memo(function MessageInputComposer({
   suggestionHeaderText,
   onSelectSuggestion,
   onHoverSuggestion,
+  manualHeight,
 }: MessageInputComposerProps) {
   // Stable per-instance prefix so the textarea combobox wiring and the
   // listbox/option ids always refer to the same suggestion surface.
@@ -103,6 +105,17 @@ export const MessageInputComposer = memo(function MessageInputComposer({
           onKeyDown={onKeyDown}
           onBlur={onBlur}
           onPaste={onPaste}
+          style={
+            manualHeight
+              ? {
+                  height: `${manualHeight}px`,
+                  minHeight: `${manualHeight}px`,
+                  maxHeight: `${manualHeight}px`,
+                  overflowY: "auto",
+                  transition: "none",
+                }
+              : undefined
+          }
           {...comboboxAriaProps}
           {...withLiteralClass(
             "message-input__textarea",

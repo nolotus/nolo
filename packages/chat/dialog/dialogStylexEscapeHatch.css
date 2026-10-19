@@ -116,7 +116,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
   background: var(--background);
   background-color: var(--background);
   padding-top: var(--space-2);
-  padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(var(--space-4, 16px) + env(safe-area-inset-bottom, 0px));
   padding-inline: 16px;
   border-top: none;
   backdrop-filter: none;

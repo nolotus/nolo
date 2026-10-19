@@ -51,6 +51,7 @@ import type { AgentRuntimeOptions } from "ai/agent/types";
 import { useIsMobile } from "app/hooks/useIsMobile";
 import { useClipboardFiles } from "app/hooks/useClipboardFiles";
 import { useAutoResizeTextarea } from "app/hooks/useAutoResizeTextarea";
+import { useDragResize } from "app/hooks/useDragResize";
 import { useElementSizeVar } from "app/hooks/useElementSizeVar";
 import { shouldDeferEnterForIme } from "app/utils/ime";
 import { viewTransitionStyle, QUICK_CHAT_COMPOSER_VT_NAME } from "app/viewTransitions";
@@ -125,6 +126,8 @@ import { nanoid } from "nanoid";
 const MOBILE_BREAKPOINT = 768;
 const DESKTOP_TEXTAREA_MAX_HEIGHT = 360;
 const MOBILE_TEXTAREA_MAX_HEIGHT = 220;
+const MIN_MANUAL_TEXTAREA_HEIGHT = 28;
+const MAX_MANUAL_TEXTAREA_HEIGHT = 720;
 
 type CollapsedPasteBlock = {
   id: string;
@@ -402,6 +405,64 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     ? MOBILE_TEXTAREA_MAX_HEIGHT
     : DESKTOP_TEXTAREA_MAX_HEIGHT;
 
+  const [manualHeight, setManualHeight] = useState<number | null>(null);
+  const [isDraggingResize, setIsDraggingResize] = useState(false);
+  const startYRef = useRef(0);
+  const startHeightRef = useRef(0);
+  const isDraggingRef = useRef(false);
+
+  const { handlePointerDown: handleDragResizePointerDown } = useDragResize({
+    cursor: "ns-resize",
+    onStart: () => {
+      isDraggingRef.current = true;
+      setIsDraggingResize(true);
+      const currentHeight = areaRef.current?.clientHeight ?? 40;
+      startHeightRef.current = manualHeight ?? currentHeight;
+    },
+    onMove: (_clientX, clientY) => {
+      if (!isDraggingRef.current) return;
+      const deltaY = startYRef.current - clientY;
+      const nextHeight = Math.max(
+        MIN_MANUAL_TEXTAREA_HEIGHT,
+        Math.min(MAX_MANUAL_TEXTAREA_HEIGHT, startHeightRef.current + deltaY)
+      );
+      setManualHeight(nextHeight);
+      if (areaRef.current) {
+        areaRef.current.style.height = `${nextHeight}px`;
+        areaRef.current.style.minHeight = `${nextHeight}px`;
+        areaRef.current.style.maxHeight = `${nextHeight}px`;
+        areaRef.current.style.overflowY = "auto";
+        areaRef.current.style.transition = "none";
+      }
+    },
+    onStop: () => {
+      isDraggingRef.current = false;
+      setIsDraggingResize(false);
+      if (areaRef.current) {
+        areaRef.current.style.transition = "";
+      }
+    },
+  });
+
+  const handleResizePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
+      startYRef.current = e.clientY;
+      handleDragResizePointerDown(e);
+    },
+    [handleDragResizePointerDown]
+  );
+
+  const handleResetManualHeight = useCallback(() => {
+    setManualHeight(null);
+    if (areaRef.current) {
+      areaRef.current.style.height = "auto";
+      areaRef.current.style.minHeight = "";
+      areaRef.current.style.maxHeight = "";
+      areaRef.current.style.overflowY = "";
+      areaRef.current.style.transition = "";
+    }
+  }, []);
+
   const expandPastedBlock = useCallback(
     (id: string) => {
       const target = pastedBlocks.find((block) => block.id === id);
@@ -434,6 +495,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     onTextChange: setText,
     value: text,
     ref: areaRef,
+    disabled: manualHeight != null,
   });
 
   /**
@@ -1157,6 +1219,28 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
             {...cardStyleProps}
             className={[cardStyleProps.className, "message-input__box"].filter(Boolean).join(" ")}
           >
+            {/* ── Resize Handle (Top Edge) ── */}
+            <div
+              {...withLiteralClass(
+                "message-input__resize-handle",
+                messageInputStyles.resizeHandle
+              )}
+              onPointerDown={handleResizePointerDown}
+              onDoubleClick={handleResetManualHeight}
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label={t("dragToResizeHeight", "拖拽调整高度，双击复位")}
+              title={t("dragToResizeHeight", "拖拽调整高度，双击复位")}
+            >
+              <div
+                {...withLiteralClass(
+                  "message-input__resize-bar",
+                  messageInputStyles.resizeHandleBar,
+                  isDraggingResize && messageInputStyles.resizeHandleBarActive
+                )}
+              />
+            </div>
+
             {/* ── Context Area (Attachments, Browse, Image config, Edit chips, Paste chips) ── */}
             {/* ── Secondary Context Drawer (Attachments, Browse, Image config, Usage) ── */}
             <ComposerDrawer
@@ -1232,6 +1316,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               suggestionHeaderText={suggestionHeaderText}
               onSelectSuggestion={selectComposerSuggestion}
               onHoverSuggestion={handleHoverSuggestion}
+              manualHeight={manualHeight}
             />
 
             {/* ── Controls Bar ── */}

@@ -6,6 +6,7 @@ interface UseAutoResizeTextareaParams {
     onTextChange: (value: string) => void;
     value?: string;
     ref?: React.RefObject<HTMLTextAreaElement | null>;
+    disabled?: boolean;
 }
 
 export function useAutoResizeTextarea({
@@ -13,14 +14,15 @@ export function useAutoResizeTextarea({
     onTextChange,
     value,
     ref,
+    disabled = false,
 }: UseAutoResizeTextareaParams) {
     const adjustHeight = useCallback(
         (el: HTMLTextAreaElement | null) => {
-            if (!el) return;
+            if (!el || disabled) return;
             el.style.height = "auto";
             el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
         },
-        [maxHeight]
+        [disabled, maxHeight]
     );
 
     useEffect(() => {

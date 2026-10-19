@@ -102,7 +102,6 @@ html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
   display: flex;
   min-width: 0;
   min-height: 0;
-  height: 100%;
 }
 /* 左侧栏：桌面端用宽度过渡，移动端用抽屉 */
 .MainLayout__sidebar {
