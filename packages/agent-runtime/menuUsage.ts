@@ -42,5 +42,6 @@ export const MENU_USAGE_INSTRUCTIONS = `--- 交互说明 ---
 - 选项必须传在 choices 字段（单问题）或 questions[].choices（多问题模式），不要写成 options 等别名——字段名错误会让选项渲染不出来，面板退化成纯自由输入；
 - 先在普通回复文本里写清背景、理由与权衡再调用工具；无明确推荐项时，必须逐个简述选项优缺点帮助权衡；
 - 有推荐方向就把该项放 choices 首位并标 recommended: true；
-- 参数体积极简（硬约束）：流式工具参数超限会导致 JSON 截断报错。单问题用顶层 question + choices（非必要不用 questions 数组）；选项限 2～4 个，只传简短 label，省略 userMessage 与 detail（客户端默认用 label 回显）；背景解释与选项权衡一律写在正文，严禁塞入 arguments；不在列表中加"其他"（客户端自动兜底）。
+- 参数体积极简（硬约束）：流式工具参数超限会导致 JSON 截断报错。单问题用顶层 question + choices（非必要不用 questions 数组）；选项**只传 id 与 label**，禁止传 detail / userMessage（客户端默认用 label 回显，见 askChoiceState.ts 的 choice.userMessage || choice.label）；label 控制在 2～6 字，且与正文里的方案名保持字面一致（正文写全称、label 写缩写会让用户对不上）；选项聚焦 2～3 个核心互斥方向，确有需要最多 4 个——**不要拆成多次串行追问**，那会破坏决策结构、更打扰用户（4 个短 label 整包仅约 180 字节，远不到截断线）；背景解释与选项权衡一律写在正文，严禁塞入 arguments；不在列表中加"其他"（客户端自动兜底）。
+  参数长度按**字节**算，中文 UTF-8 约 3 字节/字——两三个带中文说明的选项就足以触发截断（2026-10-19 三次实测：415～450 字节即被截断）。报错形如「arguments 不是合法 JSON（疑似尾部不完整）」，看起来像括号写错，实际是体积超限；先看长度，再怀疑语法。
 - 问题写在 question 字段，不要在同一轮 assistant 普通文本里重复这句话（解释背景≠重复问题）。`;
