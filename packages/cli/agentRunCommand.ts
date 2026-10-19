@@ -907,6 +907,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     // 这里直接透传即可（不再静默丢弃参数）。
     ...(parsed.runtimeKey ? { runtimeKey: parsed.runtimeKey } : {}),
     ...(parsed.continueDialogId ? { continueDialogId: parsed.continueDialogId } : {}),
+    ...(parsed.strictContinueHistory ? { strictContinueHistory: true } : {}),
     ...(parsed.spaceId ? { spaceId: parsed.spaceId } : {}),
     ...(parsed.category ? { category: parsed.category } : {}),
     ...(parsed.inheritedFromDialogKey ? { inheritedFromDialogKey: parsed.inheritedFromDialogKey } : {}),

@@ -117,6 +117,7 @@ export type LocalAgentTurnInput = {
    */
   contextReferenceResolver?: (reference: AgentRuntimeMessageContent) => boolean;
   continueDialogId?: string;
+  strictContinueHistory?: boolean;
   spaceId?: string;
   /**
    * Runtime-assembled context blocks (space/workspace layers from
@@ -706,12 +707,13 @@ async function persistFailedLocalTurn(args: {
 async function loadAdapterDialogHistory(
   adapter: AgentRuntimeHostAdapter,
   dialogId: string,
+  strictContinueHistory?: boolean,
 ): Promise<{
   messages: AgentRuntimeChatMessage[];
   source?: AgentRuntimeDialogHistorySource;
 }> {
   if (adapter.loadDialogHistoryWithSource) {
-    return await adapter.loadDialogHistoryWithSource(dialogId);
+    return await adapter.loadDialogHistoryWithSource(dialogId, { strictContinueHistory });
   }
   return { messages: await adapter.loadDialogHistory(dialogId) };
 }
@@ -850,11 +852,16 @@ export async function runLocalAgentTurn(
       const loaded = await loadAdapterDialogHistory(
         input.adapter,
         input.continueDialogId,
+        input.strictContinueHistory,
       );
+      if (input.strictContinueHistory && (loaded.source === "none" || loaded.source === "partial")) {
+        throw new Error(`Strict continuation history unavailable: ${loaded.source}`);
+      }
       history = loaded.messages;
       dialogHistorySource = loaded.source;
     }
   } catch (error) {
+    if (input.strictContinueHistory) throw error;
     // History load failed mid-continue: still park the user's message on the
     // existing dialog so the next "继续" keeps the same pointer.
     const dialogId = await persistFailedLocalTurn({

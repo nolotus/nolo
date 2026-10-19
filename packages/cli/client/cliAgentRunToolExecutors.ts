@@ -1,3 +1,4 @@
+import { normalizeContinueDialogId } from "../../ai/tools/agent/continueDialogId";
 import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // packages/cli/client/cliAgentRunToolExecutors.ts
 //
@@ -83,6 +84,8 @@ type OutputLike = { write(chunk: string): unknown };
  - now：缺省 Date.now()。CLI 适配层允许取时钟。
  */
 export type CliAgentRunToolExecutorDeps = {
+  /** Read only the current user's dialog namespace; absence fails closed. */
+  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean>;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
   env?: EnvLike;
   /** CLI entrypoint path（spawn 子进程重启动用）。 */
@@ -410,6 +413,10 @@ async function assertCredentialFanoutAllowed(
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
+    const continueDialogId = normalizeContinueDialogId(args.continueDialogId);
+    if (continueDialogId && !(await deps.dialogExistsForCurrentUser?.(continueDialogId))) {
+      throw new Error(`startAgentRun: dialog 不存在或不属于当前用户，无法续跑: ${continueDialogId}`);
+    }
     // runtimeKey 的判定必须在任何副作用之前，且分成两件事：
     //   1) 宿主能不能兑现（guard：本机只有 local 与 docker 可兑现，其它后端派发前拒绝）；
     //   2) 转发 —— 归一化后的 key 进 rawArgs 的 `--runtime-key <key>`，子进程自己
@@ -477,6 +484,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       "--msg-file",
       "PLACEHOLDER",
       "--bg",
+      ...(continueDialogId ? ["--continue", continueDialogId, "--strict-continue-history"] : []),
       // 非持久化派发（review 等一次性任务）：透传 --ephemeral，run 完成后不留
       // dialog 记录。与 web 端 runAgentBackground 的 ephemeral: true 对齐。
       ...(args.ephemeral === true ? ["--ephemeral"] : []),

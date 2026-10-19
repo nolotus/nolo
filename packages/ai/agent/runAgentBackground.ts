@@ -35,6 +35,8 @@ export interface RunAgentBackgroundResult {
 }
 
 export interface RunAgentBackgroundArgs {
+    continueDialogId?: string;
+  strictContinueHistory?: boolean;
     agentKey: string;
     userInput: string;
     serverBase?: string;
@@ -309,6 +311,7 @@ export const runAgentBackground = createAsyncThunk<
                 body: JSON.stringify({
                     agentKey,
                     userInput,
+                    ...(args.continueDialogId ? { continueDialogId: args.continueDialogId, ...(args.strictContinueHistory ? { strictContinueHistory: true } : {}) } : {}),
                     spaceId,
                     background: true,
                     idempotencyKey,

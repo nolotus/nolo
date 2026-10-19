@@ -126,6 +126,10 @@
       "role": "release"
     },
     {
+      "path": "scripts/ci/verifyDesktopMacSigningEnv.sh",
+      "role": "release"
+    },
+    {
       "path": "projection-release-metadata.json",
       "role": "release"
     }

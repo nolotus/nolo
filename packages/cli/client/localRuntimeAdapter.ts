@@ -933,6 +933,10 @@ export function createCliLocalRuntimeAdapter(
       cliEntrypoint: CLI_ENTRYPOINT,
       resolveAgentCredentialGroup,
       resolveAgentDisplayName,
+      dialogExistsForCurrentUser: async (dialogId: string) => {
+        const store = await getOrCreateSharedStore(deps);
+        return !!(await store.read(`dialog-${userId}-${dialogId}`));
+      },
       resolveAgentRuntimeBindingMachineId,
       resolveLocalMachineId,
       ...(deps.shellApprovalSession ? { shellApprovalHostForAgent: async (childAgentKey: string) => {
@@ -1100,8 +1104,9 @@ export function createCliLocalRuntimeAdapter(
     },
     // Source-aware variant so a cross-machine resume that could not load the
     // remote history reports `none` instead of looking like a new dialog.
-    loadDialogHistoryWithSource: async (dialogId) =>
+    loadDialogHistoryWithSource: async (dialogId, options) =>
       loadCliDialogHistoryWithSource({
+        strictContinueHistory: options?.strictContinueHistory,
         dialogId,
         store: await getOrCreateSharedStore(deps),
         env: deps.env,

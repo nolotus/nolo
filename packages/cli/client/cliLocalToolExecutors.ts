@@ -216,6 +216,7 @@ export function createReadPastedTextExecutor(store: CollapsedPasteStore) {
  */
 export function pickAgentRunResolverDeps(args: {
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
+  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
   resolveLocalMachineId?: () => Promise<string | undefined>;
@@ -224,6 +225,7 @@ export function pickAgentRunResolverDeps(args: {
     ...(args.resolveAgentCredentialGroup
       ? { resolveAgentCredentialGroup: args.resolveAgentCredentialGroup }
       : {}),
+    ...(args.dialogExistsForCurrentUser ? { dialogExistsForCurrentUser: args.dialogExistsForCurrentUser } : {}),
     ...(args.resolveAgentDisplayName
       ? { resolveAgentDisplayName: args.resolveAgentDisplayName }
       : {}),
@@ -276,6 +278,7 @@ export function buildLocalToolExecutors(args: {
    */
   resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
   /** 解析候选 agent 的展示名（调用方只给 agentKey 时回填 run 记录的 agentName）。 */
+  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   /** 本机 machineId（判定「绑定机就是本机」用；未知 → binding 判定 fail-closed）。 */
   resolveLocalMachineId?: () => Promise<string | undefined>;

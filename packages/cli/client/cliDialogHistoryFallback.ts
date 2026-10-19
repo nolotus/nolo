@@ -140,6 +140,7 @@ export async function loadCliDialogHistoryWithSource(args: {
   store: HybridRecordStore;
   dialogId: string;
   env: EnvLike;
+  strictContinueHistory?: boolean;
   fetchImpl?: CliFetchImpl;
   /** Diagnostic sink (best-effort; never affects the result). */
   log?: (message: string) => void;
@@ -153,7 +154,7 @@ export async function loadCliDialogHistoryWithSource(args: {
   // explicitly not enough — that is exactly the state a resumed-on-another-
   // machine dialog is left in after a failed fallback (see
   // `cliDialogHistoryState` for the marker semantics).
-  if (localMessages.length > 0 && localState?.complete === true) {
+  if ((localMessages.length > 0 || args.strictContinueHistory) && localState?.complete === true) {
     if (localState.reason === "remote-damaged") {
       // Coverage holds, but the restored source history was already damaged /
       // truncated. Re-fetching cannot repair it, so keep working from the local
@@ -194,6 +195,7 @@ export async function loadCliDialogHistoryWithSource(args: {
       dialogId,
       authToken,
       fetchImpl: args.fetchImpl ?? fetch,
+      strictContinueHistory: args.strictContinueHistory,
     });
     analysis = analyzeRemoteDialogRecords({ records, dialogId });
   } catch (error) {
@@ -204,6 +206,12 @@ export async function loadCliDialogHistoryWithSource(args: {
     );
   }
 
+  if (args.strictContinueHistory && analysis?.complete && analysis.messages.length === 0 && localMessages.length === 0) {
+    return { messages: [], source: "remote" };
+  }
+  if (args.strictContinueHistory && (!analysis || !analysis.complete)) {
+    throw new Error(`Strict continuation history load failed for ${dialogId}`);
+  }
   if (!analysis || analysis.messages.length === 0) {
     if (analysis && analysis.issues.length > 0) {
       args.log?.(
@@ -552,6 +560,7 @@ export function analyzeRemoteDialogRecords(args: {
  * `limit: 0` = unbounded, matching the local full-history read.
  */
 async function fetchRemoteDialogMessageRecords(args: {
+  strictContinueHistory?: boolean;
   base: string;
   dialogId: string;
   authToken: string;
@@ -570,12 +579,12 @@ async function fetchRemoteDialogMessageRecords(args: {
     {
       method: "POST",
       headers,
-      body: JSON.stringify({ dialogId: args.dialogId, limit: 0 }),
+      body: JSON.stringify({ dialogId: args.dialogId, limit: 0, ...(args.strictContinueHistory ? { strictContinueHistory: true } : {}) }),
       signal,
     },
   );
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
+    if (!args.strictContinueHistory && (res.status === 401 || res.status === 403)) {
       return await fetchRemoteDialogMessageRecordsViaBridge({
         ...args,
         headers,
@@ -587,7 +596,8 @@ async function fetchRemoteDialogMessageRecords(args: {
     });
   }
   const data = await res.json();
-  return Array.isArray(data) ? data : [];
+  if (!Array.isArray(data)) throw new Error("getConvMsgs returned invalid history payload");
+  return data;
 }
 
 async function fetchRemoteDialogMessageRecordsViaBridge(args: {
@@ -618,7 +628,8 @@ async function fetchRemoteDialogMessageRecordsViaBridge(args: {
       `dialog-read failed: ${String((payload as { error?: unknown })?.error ?? "unknown error")}`,
     );
   }
-  return Array.isArray(payload.msgs) ? payload.msgs : [];
+  if (!Array.isArray(payload.msgs)) throw new Error("dialog-read returned invalid history payload");
+  return payload.msgs;
 }
 
 /**

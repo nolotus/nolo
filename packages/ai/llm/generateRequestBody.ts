@@ -23,6 +23,7 @@ export interface GenerateRequestBodyArgs {
   prependSystemPrompt?: boolean;
   /** Provider/model-bound Responses continuation state; null explicitly clears it. */
   responsesState?: ResponsesConversationState | null;
+  tools?: unknown[];
 }
 
 const IMAGE_OUTPUT_EXECUTION_PROMPT = [
@@ -134,6 +135,56 @@ const applyImageConfigIfNeeded = (
   return body;
 };
 
+function canonicalizeJsonValue(val: unknown): unknown {
+  if (val === null || typeof val !== "object") {
+    return typeof val === "function" ? undefined : val;
+  }
+  if (Array.isArray(val)) {
+    return val.map(canonicalizeJsonValue);
+  }
+  const obj = val as Record<string, unknown>;
+  const sortedKeys = Object.keys(obj).sort();
+  const res: Record<string, unknown> = {};
+  for (const k of sortedKeys) {
+    const v = canonicalizeJsonValue(obj[k]);
+    if (v !== undefined) {
+      res[k] = v;
+    }
+  }
+  return res;
+}
+
+export function serializeToolsForCacheKey(tools: unknown): string {
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return "";
+  }
+  const items: string[] = [];
+  for (const tool of tools) {
+    if (!tool || typeof tool !== "object") continue;
+    const t = tool as Record<string, unknown>;
+    const fn =
+      typeof t.function === "object" && t.function !== null
+        ? (t.function as Record<string, unknown>)
+        : undefined;
+    const name = fn?.name ?? t.name ?? (t.type ? String(t.type) : "");
+    const description = fn?.description ?? t.description ?? "";
+    const rawParams = fn?.parameters !== undefined ? fn.parameters : t.parameters;
+    const parameters =
+      rawParams !== undefined ? canonicalizeJsonValue(rawParams) ?? null : null;
+
+    items.push(
+      JSON.stringify({
+        description: typeof description === "string" ? description : String(description),
+        name: typeof name === "string" ? name : String(name),
+        parameters,
+      }),
+    );
+  }
+  if (items.length === 0) return "";
+  items.sort();
+  return items.join(";");
+}
+
 export const generateRequestBody = ({
   agentConfig,
   messages,
@@ -141,6 +192,7 @@ export const generateRequestBody = ({
   stableMessages,
   prependSystemPrompt = true,
   responsesState,
+  tools,
 }: GenerateRequestBodyArgs) => {
   const provider = (agentConfig.provider || "").toLowerCase();
   const imageSettings = getImageOutputSettings(agentConfig, provider);
@@ -164,12 +216,14 @@ export const generateRequestBody = ({
       responsesState,
     );
     // 缓存路由亲和：generated instructions 含时间/摘要等动态尾巴，不能整串进键；
-    // model + agent 身份 + 自定义 prompt 是跨轮稳定子集。同 agent 同模型的轮次
+    // model + agent 身份 + 自定义 prompt + 工具定义是跨轮稳定子集。同 agent 同模型同工具的轮次
+    const serializedTools = serializeToolsForCacheKey(tools);
     body.prompt_cache_key ??= stablePromptCacheKey(
       [
         agentConfigForRequest.model,
         agentConfigForRequest.dbKey ?? "",
         agentConfigForRequest.prompt ?? "",
+        serializedTools,
       ],
       "nolo-openai",
     );

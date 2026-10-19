@@ -337,19 +337,12 @@ const nextManifest = mergeDesktopReleaseManifest({
   updatedAt: publishedAt,
 });
 const manifestText = `${JSON.stringify(nextManifest, null, 2)}\n`;
-console.log(`[publish-desktop] Uploading ${plan.channelManifestUploadName}`);
-await uploadText({
-  config,
-  text: manifestText,
-  uploadName: plan.channelManifestUploadName,
-});
 
 for (const target of plan.primary) {
   const url = `${config.publicBase}/${encodeURIComponent(target.uploadName)}`;
   console.log(`[publish-desktop] Verifying primary ${url}`);
   await verifyPublishedUrl(url, target.minBytes);
 }
-await verifyPublishedUrl(`${config.publicBase}/${plan.channelManifestUploadName}`, 1);
 
 // Triple consistency: verify update.json matches what we intended to publish
 for (const target of plan.primary) {
@@ -366,6 +359,14 @@ for (const target of plan.primary) {
   console.log(`[publish-desktop] Verifying update metadata ${result.updateJsonUrl}`);
   assertTripleConsistency(result);
 }
+
+console.log(`[publish-desktop] Uploading ${plan.channelManifestUploadName}`);
+await uploadText({
+  config,
+  text: manifestText,
+  uploadName: plan.channelManifestUploadName,
+});
+await verifyPublishedUrl(`${config.publicBase}/${plan.channelManifestUploadName}`, 1);
 
 for (const target of [...plan.primary, ...plan.optional]) {
   if (!target.aliasUploadName) continue;

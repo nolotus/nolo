@@ -1917,6 +1917,7 @@ async function runHttpAgentTurn(
           ? { runtimeToolPolicyOverride: options.runtimeToolPolicyOverride }
           : {}),
       },
+      ...(options.strictContinueHistory ? { strictContinueHistory: true } : {}),
       ...(options.continueDialogId
         ? { continueDialogId: options.continueDialogId }
         : {}),
@@ -2290,6 +2291,7 @@ async function runLocalAgentTurnForCliWithAdapter(
           }
         : {}),
       continueDialogId: currentDialogId,
+      ...(options.strictContinueHistory ? { strictContinueHistory: true } : {}),
       ...(freshDialog ? { freshDialog: true } : {}),
       fileWriteSessionId: currentDialogId,
       fileWriteGateEnabled: resolveFileWriteGateEnabled(options.env),

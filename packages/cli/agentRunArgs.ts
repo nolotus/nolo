@@ -42,6 +42,7 @@ export type ParsedAgentRunArgs = {
   runtimeMode?: AgentRuntimeRequestedMode;
   runtimeKey?: string;
   continueDialogId?: string;
+  strictContinueHistory?: boolean;
   spaceId?: string;
   category?: string;
   inheritedFromDialogKey?: string;
@@ -147,6 +148,7 @@ const VALUELESS_FLAGS: Record<string, true> = {
   "--dangerously-allow-shell": true,
   "--trace-tools": true,
   "--bg": true,
+  "--strict-continue-history": true,
   "--no-stream": true,
   "--debug": true,
   "--ephemeral": true,
@@ -408,6 +410,7 @@ export function parseAgentRunArgs(
     noStream: args.includes("--no-stream"),
     machineShell: args.includes("--machine-shell"),
     ...(continueDialogId ? { continueDialogId } : {}),
+    ...(args.includes("--strict-continue-history") ? { strictContinueHistory: true } : {}),
     ...(!continueDialogId && spaceId ? { spaceId } : {}),
     ...(category ? { category } : {}),
     ...(inheritedRef?.dialogKey ? { inheritedFromDialogKey: inheritedRef.dialogKey } : {}),

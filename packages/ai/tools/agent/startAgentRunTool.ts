@@ -1,3 +1,4 @@
+import { normalizeContinueDialogId } from "./continueDialogId";
 // packages/ai/tools/agent/startAgentRunTool.ts
 //
 // startAgentRun tool — starts a background agent run. Two modes:
@@ -140,6 +141,10 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             // review findings 与子任务产出都必须可回读——把选项藏起来比写一条
             // 「不要用它」的克制指令更可靠（2026-09-14 owner 反馈）。CLI `--ephemeral`
             // 与 server 透传保持不动，探活/烟测仍走 CLI 侧。
+            continueDialogId: {
+                type: "string",
+                description: "可选。续跑当前用户已有的 dialog（不存在或不属于当前用户时显式报错，不新建）。适用于同一子任务的定向闭合，核验上一轮 finding 是否修好；禁用于评审类任务的独立判断，续跑会带入之前的结论、破坏独立性。2026-10-19 review 机制约定：full 审查用新 dialog（不传本参数），closure 用续跑。",
+            },
             batchId: {
                 type: "string",
                 description:
@@ -239,6 +244,7 @@ interface StartAgentRunArgs {
     agentName?: string;
     /** 短标题（展示用，归一化后落进 run 记录）。 */
     title?: string;
+    continueDialogId?: string;
     batchId?: string;
     /** listAgents 返回的 credentialGroup；缺省视为未知（见 schema 描述）。 */
     credentialGroup?: string;
@@ -303,6 +309,7 @@ export async function startAgentRunFunc(
     _context?: { parentMessageId?: string; signal?: AbortSignal; toolRunId?: string }
 ): Promise<{ rawData: any; displayData: string; metadata?: Record<string, unknown> }> {
     const { agentKey, task, input, agentName, batchId, wait } = args;
+    const continueDialogId = normalizeContinueDialogId(args.continueDialogId);
     if (typeof task !== "string" || !task.trim()) throw new Error("startAgentRun 缺少 task");
     const title = normalizeRunTitle(args.title);
     if (!title) throw new Error(`startAgentRun 需要非空的一行标题（≤${RUN_TITLE_MAX} 字）`);
@@ -419,6 +426,7 @@ export async function startAgentRunFunc(
               )({
                   agentKey: effectiveAgentKey,
                   userInput: content,
+                  ...(continueDialogId ? { continueDialogId, strictContinueHistory: true } : {}),
                   waitForCompletion: wait === true,
                   runKind: "subtask",
                   runTitle: title,
@@ -431,6 +439,7 @@ export async function startAgentRunFunc(
             runAgentBackground({
                 agentKey: effectiveAgentKey,
                 userInput: content,
+                ...(continueDialogId ? { continueDialogId, strictContinueHistory: true } : {}),
                 // wait 缺省必须归一为 false：runAgentBackground 只对
                 // waitForCompletion === false 走「拿到 dialogId 立即返回」快路径，
                 // undefined 会误入同步等待分支。
