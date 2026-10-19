@@ -25,6 +25,7 @@ export const GROUP_ORDER = [
   "machine",
   "browser",
   "chrome",
+  "ci",
   "doctor",
   "dialog",
   "memory",

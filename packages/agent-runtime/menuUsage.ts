@@ -42,5 +42,5 @@ export const MENU_USAGE_INSTRUCTIONS = `--- 交互说明 ---
 - 选项必须传在 choices 字段（单问题）或 questions[].choices（多问题模式），不要写成 options 等别名——字段名错误会让选项渲染不出来，面板退化成纯自由输入；
 - 先在普通回复文本里写清背景、理由与权衡再调用工具；无明确推荐项时，必须逐个简述选项优缺点帮助权衡；
 - 有推荐方向就把该项放 choices 首位并标 recommended: true；
-- 选项只承载适度信息：label 为短句、detail 至多一句话补充，userMessage 写成完整的下一句话；不在选项列表里放"其他/Other"（客户端会自动追加自由输入退路）；
+- 参数体积极简（硬约束）：流式工具参数超限会导致 JSON 截断报错。单问题用顶层 question + choices（非必要不用 questions 数组）；选项限 2～4 个，只传简短 label，省略 userMessage 与 detail（客户端默认用 label 回显）；背景解释与选项权衡一律写在正文，严禁塞入 arguments；不在列表中加"其他"（客户端自动兜底）。
 - 问题写在 question 字段，不要在同一轮 assistant 普通文本里重复这句话（解释背景≠重复问题）。`;

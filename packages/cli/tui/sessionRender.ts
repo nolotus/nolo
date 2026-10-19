@@ -122,6 +122,12 @@ export function renderStatusLine(
     parts.push(`${branchText}${modifiedText}${untrackedText}`);
   }
 
+  // 部署状态：只有在取到值时才占一格。取数失败一律不显示——
+  // 这是可观测性附庸，不能因为远端 ssh 不可达就在状态行上留一个 ❓。
+  if (state.ciStatusLine) {
+    parts.push(themeText(state.ciStatusLine, "muted", colorEnabled));
+  }
+
   // 状态行的积分 = 续聊基数（服务端历史累计）+ 本次会话本地累加。
   //
   // 不再用 `apiSource === "platform"` 当显示开关：那是启动/切换时按静态 agent
