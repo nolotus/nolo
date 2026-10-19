@@ -620,6 +620,59 @@ export function surfaceBackgroundSequence(
 }
 
 /**
+ * Background wash for the docked composer (the input row at the bottom).
+ *
+ * Why this is not `surfaceBackgroundSequence`: that one exists for decorative
+ * chips and returns "" in terminal-native mode *and* paints an absolute hex
+ * from SURFACE_HEX. Both halves broke the composer strip (owner feedback,
+ * 2026-10: "让底部输入区颜色不太一样" shipped but nothing changed on screen):
+ *
+ *  - Startup mode is terminal-native, so the chip sequence was empty and the
+ *    input row was painted with literally no background.
+ *  - Even with a fixed light/dark mode the table value sits a few levels from
+ *    the canvas it is drawn on (catppuccin dark: #181825 on #1E1E2E), so the
+ *    step is invisible in practice.
+ *
+ * So this wash is derived from the terminal's *own* base color: a neutral lift
+ * on dark canvases, a neutral drop on light ones. Neutral on purpose — the
+ * composer already carries the accent chevron, and an accent wash there would
+ * compete with the user-turn bubble that uses accent at full strength.
+ *
+ * Terminal-native mode still needs a trustworthy background (OSC 11 reply or
+ * COLORFGBG) before painting: guessing "dark" can lay a light band across a
+ * light canvas.
+ */
+export function composerSurfaceBackgroundSequence(
+  env: Record<string, string | undefined> = process.env,
+  brightness: TuiBrightness = resolveTuiBrightness(env),
+): string {
+  if (!supportsTruecolor(env)) return "";
+  if (
+    resolveTuiThemeMode(env) === "terminal" &&
+    activeTerminalBaseHex === null &&
+    detectColorFgBgBrightness(env) === null
+  ) {
+    return "";
+  }
+  const base = resolveTerminalBaseHex(brightness);
+  // Direction comes from the base color's own luma, not from the declared
+  // brightness: a pinned `/theme dark` on a light terminal would otherwise
+  // "lift" a #FFFFFF base and paint a white band on a white canvas.
+  const channels = readHexChannels(base.replace(/^#/, "").toUpperCase());
+  const baseLuma = channels
+    ? (0.299 * channels[0] + 0.587 * channels[1] + 0.114 * channels[2]) / 255
+    : null;
+  const darkCanvas = baseLuma === null ? brightness === "dark" : baseLuma < 0.5;
+  // A white lift on dark canvases and a black drop on light ones give the same
+  // perceived step in both directions without shifting hue. The light weight is
+  // lower because a drop from white saturates the eye sooner than a lift from
+  // near-black.
+  const tint = darkCanvas ? "FFFFFF" : "000000";
+  const weight = darkCanvas ? 0.1 : 0.07;
+  return hexToBgSgr(blendHex(tint, base, weight));
+}
+
+/**
  * Background wash for user turns in the history area.
  *
  * User messages must stay findable while scrolling back through a long

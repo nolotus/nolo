@@ -1,49 +1,35 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
-import { Level } from "level";
+import { resolveNoloHome } from "../database-engine/dbPath";
+import { getOrCreateServerStoreRuntime } from "../database-engine/serverStoreFactory";
+import { getDefaultCliLocalRuntimeDb } from "./localRuntimeAuthority";
 
-/**
- * 扫描本地 LevelDB 副本，删除指定 agent key。
- * 单实例架构下只需清理 CLI 缓存和 server DB。
- */
+/** Delete local agent records through their shared owners; never close a shared store. */
 export async function clearAgentKeysFromLocalLevelDbs(args: {
   keys: string[];
 }): Promise<string[]> {
-  const home = os.homedir();
-  const noloHome = process.env.NOLO_HOME?.trim() || path.join(home, ".nolo");
-  const dbPaths: string[] = [];
-
-  // CLI 用户级缓存
-  const cliDb = path.join(noloHome, "data", "leveldb");
-  if (fs.existsSync(cliDb)) dbPaths.push(cliDb);
-
-  // Server DB（如果显式配置）
+  const cliDb = path.join(resolveNoloHome(), "data", "leveldb");
   const serverDbPath = process.env.NOLO_SERVER_DB_PATH?.trim();
-  if (serverDbPath && fs.existsSync(serverDbPath) && !dbPaths.includes(serverDbPath)) {
-    dbPaths.push(serverDbPath);
-  }
-
+  const dbPaths = [cliDb, ...(serverDbPath ? [serverDbPath] : [])];
   const cleaned: string[] = [];
+  const seen = new Set<string>();
   for (const dbPath of dbPaths) {
-    try {
-      const db = new Level(dbPath, { valueEncoding: "json" });
-      await db.open();
-      try {
-        for (const key of args.keys) {
-          try {
-            await db.del(key);
-          } catch {
-            // key not found is fine
-          }
-        }
-        cleaned.push(dbPath);
-      } finally {
-        await db.close();
-      }
-    } catch {
-      // DB 被锁定或无法打开，跳过
+    if (!fs.existsSync(path.join(dbPath, "CURRENT"))) continue;
+    const canonicalPath = fs.realpathSync(dbPath);
+    if (seen.has(canonicalPath)) continue;
+    seen.add(canonicalPath);
+    const isCliHome = fs.existsSync(cliDb) && canonicalPath === fs.realpathSync(cliDb);
+    const db = isCliHome
+      ? await getDefaultCliLocalRuntimeDb()
+      : getOrCreateServerStoreRuntime(dbPath).serverDb;
+    // The server runtime is process-wide. Never delete from a different cached store
+    // or construct a second Level handle if that singleton belongs to another path.
+    if (!isCliHome && (!db.location || fs.realpathSync(db.location) !== canonicalPath)) {
+      throw new Error(`Server database singleton does not own requested cleanup path: ${dbPath}`);
     }
+    await db.open();
+    await db.batch(args.keys.map((key) => ({ type: "del" as const, key })));
+    cleaned.push(dbPath);
   }
   return cleaned;
 }

@@ -26,8 +26,10 @@ import { toErrorMessage } from "core/errorMessage";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { DEFAULT_LOCAL_API_ORIGIN } from "../core/localOrigins";
-import { existsSync } from "node:fs";
-import { resolveLocalDialogDbCandidates, resolveServerDbPath } from "../database-engine/dbPath";
+import { existsSync, realpathSync } from "node:fs";
+import path from "node:path";
+import { getDefaultCliLocalRuntimeDb } from "./localRuntimeAuthority";
+import { resolveLocalDialogDbCandidates, resolveNoloHome, resolveServerDbPath } from "../database-engine/dbPath";
 import { parsePositiveFiniteNumberOrFallback } from "core/positiveFiniteNumberOrFallback";
 import { parsePositiveIntegerOrFallback } from "core/positiveIntegerOrFallback";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
@@ -869,52 +871,22 @@ async function readDialogFromLocalDb(
   };
 }
 
-/**
- * 回退候选库（NOLO_HOME/data/leveldb）的默认只读读取器。
- *
- * 与主读取（serverDb 单例）不同，这里按路径临时开库、读完即关：
- * - 绝不在回退路径上创建库：目录不存在按「missing」分类；createIfMissing: false 防误建；
- * - 编码与宿主写入端一致（serverStoreFactory 的 safeJsonEncoding）；
- * - 被锁打不开快速失败（classic-level 持锁即 EWOULDBLOCK），由调用方按 locked 分类。
- */
+/** CLI-home reads share the authority broker; never open or close another native handle. */
 async function readLocalDialogAtDbPathDefault(args: {
   dbPath: string;
   dialogKey: string;
   dialogId: string;
   limit: number;
 }): Promise<{ meta: any; msgs: any[] }> {
-  if (!existsSync(args.dbPath)) {
+  if (!existsSync(path.join(args.dbPath, "CURRENT"))) {
     throw Object.assign(
-      new Error(`local database directory does not exist: ${args.dbPath}`),
-      { code: "LEVEL_DATABASE_DIR_MISSING" },
+      new Error(`local database does not exist: ${args.dbPath}`),
+      { code: "LEVEL_NOT_FOUND" },
     );
   }
-  const [{ Level }, { safeJsonEncoding }, { fetchMessages }] = await Promise.all([
-    import("level"),
-    import("../database-engine/serverStoreFactory"),
-    import("../chat/messages/fetchMessages"),
-  ]);
-  const db = new Level<string, any>(args.dbPath, {
-    valueEncoding: safeJsonEncoding,
-    createIfMissing: false,
-  });
-  try {
-    await db.open();
-    let meta: any;
-    try {
-      meta = await db.get(args.dialogKey);
-    } catch (error) {
-      if (isLevelNotFoundError(error)) return { meta: undefined, msgs: [] };
-      throw error;
-    }
-    const msgs = await fetchMessages(db, args.dialogId, {
-      limit: args.limit,
-      throwOnError: true,
-    });
-    return { meta, msgs };
-  } finally {
-    await db.close().catch(() => undefined);
-  }
+  const db = await getDefaultCliLocalRuntimeDb();
+  const { readDialogFromLocalDb: reader } = await import("../agent-runtime/localDialogRead");
+  return reader({ ...args, db });
 }
 
 /**
@@ -923,8 +895,8 @@ async function readLocalDialogAtDbPathDefault(args: {
  *
  * 错误分类（不得让锁错误伪装成 not found）：
  * - 主候选：非 not-found / 非锁的真实本地库错误直接抛出（沿用既有语义，不落入 HTTP）；
- * - 回退候选：best-effort，逐项记录 miss/locked/error，绝不中途抛出；
- * - 全部未命中时按「锁 > 真实错误 > not found」收口，并携带 attempts 明细。
+ * - 回退候选：仅 not-found / 锁错误可继续；真实本地库错误直接抛出；
+ * - 全部未命中时按「锁 > not found」收口，并携带 attempts 明细。
  */
 async function readDialogFromLocalDbWithFallback(args: {
   dialogKey: string;
@@ -944,17 +916,24 @@ async function readDialogFromLocalDbWithFallback(args: {
   const attempts: LocalDialogAttempt[] = [];
   let missMessage = "local dialog not found";
   let lockedError: unknown;
-  let genericError: unknown;
 
-  // 候选 1：既有主读取（cwd / NOLO_SERVER_DB_PATH 语义保留）。
+  // A primary path can itself be CLI-home (including a symlink alias).
+  // Resolve it before importing serverDb: constructing that singleton auto-opens LevelDB.
   const primaryPath = candidates[0];
+  const homePath = path.join(resolveNoloHome(), "data", "leveldb");
+  const isHomePath = existsSync(primaryPath) && existsSync(homePath) &&
+    realpathSync(primaryPath) === realpathSync(homePath);
   try {
-    const local = await readDialogFromLocalDb(
-      args.dialogKey,
-      args.dialogId,
-      args.limit,
-      args.readLocalDialog,
-    );
+    if (!args.readLocalDialog && !existsSync(primaryPath)) {
+      throw Object.assign(new Error(`local database directory does not exist: ${primaryPath}`), {
+        code: "LEVEL_NOT_FOUND",
+      });
+    }
+    const local = !args.readLocalDialog && isHomePath
+      ? await readLocalDialogAtDbPathDefault({ ...args, dbPath: primaryPath })
+      : await readDialogFromLocalDb(
+        args.dialogKey, args.dialogId, args.limit, args.readLocalDialog,
+      );
     const localMeta = local.meta;
     if (!localMeta) {
       attempts.push({ path: primaryPath, status: "miss", reason: missMessage });
@@ -1005,11 +984,15 @@ async function readDialogFromLocalDbWithFallback(args: {
       const locked = isLevelDbOpenUnavailableError(error);
       attempts.push({
         path: dbPath,
-        status: locked ? "locked" : "error",
+        status: locked ? "locked" : isLevelNotFoundError(error) ? "miss" : "error",
         reason: toErrorMessage(error),
       });
+      if (!locked && !isLevelNotFoundError(error)) {
+        const failure = error instanceof Error ? error : new Error(toErrorMessage(error));
+        Object.assign(failure, { localAttempts: attempts });
+        throw failure;
+      }
       if (locked && !lockedError) lockedError = error;
-      else if (!locked && !genericError) genericError = error;
     }
   }
 
@@ -1021,7 +1004,6 @@ async function readDialogFromLocalDbWithFallback(args: {
   };
 
   if (lockedError) throw aggregate(lockedError);
-  if (genericError) throw aggregate(genericError);
   throw aggregate(new Error(missMessage), "LEVEL_NOT_FOUND");
 }
 
@@ -1033,7 +1015,7 @@ export async function readDialogSnapshot(args: {
   fetchImpl: CliFetchImpl;
   limit: number;
   readLocalDialog?: LocalDialogRead;
-  /** 注入指定路径库的读取器（回退候选 NOLO_HOME 用），默认按路径临时开库。 */
+  /** 注入指定路径库的读取器（回退候选 NOLO_HOME 用），默认复用 CLI authority broker。 */
   readLocalDialogAtDbPath?: LocalDialogReadAtDbPath;
   /** Skip the meta fetch and only return messages. */
   messagesOnly?: boolean;

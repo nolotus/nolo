@@ -38,11 +38,36 @@ function ensureDbParentDir(dbPath: string) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 }
 
+function findCliAuthorityCorruption(error: unknown): unknown {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if ((current as { code?: unknown }).code === "LEVEL_CORRUPTION" || /Corruption:|missing files/i.test(toErrorMessage(current))) return current;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+function throwCliAuthorityStartupError(error: unknown): never {
+  const corruption = findCliAuthorityCorruption(error);
+  if (corruption) {
+    throw new Error(`Local authority database corruption: ${toErrorMessage(corruption)}`, { cause: error });
+  }
+  throw error;
+}
+
 /** Level lock (shared pure seam) plus CLI broker bind/start contention shapes. */
 function isCliAuthorityLockError(error: unknown) {
-  if (isLevelLockError(error)) return true;
-  const message = toErrorMessage(error);
-  return /Database failed to open|EADDRINUSE|Failed to listen/i.test(message);
+  if (findCliAuthorityCorruption(error)) return false;
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (isLevelLockError(current)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return /EADDRINUSE|Failed to listen/i.test(toErrorMessage(error));
 }
 
 async function sleep(ms: number) {
@@ -132,12 +157,13 @@ export async function connectCliAuthorityBroker(args: {
         endpoint: args.endpoint,
         metadataPath: args.metadataPath,
         healthPath: args.healthPath,
+        dbPath: args.dbPath,
         createStore: () => createLevelAuthorityStore(args.dbPath),
       });
       await client.open();
       return client;
     } catch (error) {
-      if (!isCliAuthorityLockError(error)) throw error;
+      if (!isCliAuthorityLockError(error)) throwCliAuthorityStartupError(error);
 
       if (await attachToExistingBroker(5)) {
         return client;
@@ -151,6 +177,7 @@ export async function connectCliAuthorityBroker(args: {
             endpoint: args.endpoint,
             metadataPath: args.metadataPath,
             healthPath: args.healthPath,
+            dbPath: args.dbPath,
             createStore: () => createLevelAuthorityStore(args.dbPath),
           });
           await client.open();
@@ -166,7 +193,7 @@ export async function connectCliAuthorityBroker(args: {
           if (isCliAuthorityBrokerUnavailableError(retryError)) {
             continue;
           }
-          throw retryError;
+          throwCliAuthorityStartupError(retryError);
         }
       }
       const lastMessage = toErrorMessage(lastError);

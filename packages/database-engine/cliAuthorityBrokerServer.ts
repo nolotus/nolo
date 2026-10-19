@@ -11,10 +11,13 @@ import type {
 } from "./cliAuthorityBrokerTypes";
 
 const brokerRegistry = new Map<string, Promise<CliAuthorityBrokerServerHandle>>();
+const databaseOwners = new Map<string, string>();
 const DEFAULT_ITERATOR_LIMIT = 200;
 
 export type CliAuthorityBrokerServerOptions = {
   endpoint: string;
+  /** Native stores must declare their path before construction (Level auto-opens). */
+  dbPath?: string;
   createStore: () => AuthorityStore | Promise<AuthorityStore>;
   metadataPath?: string;
   healthPath?: string;
@@ -138,7 +141,8 @@ export async function dispatchCliAuthorityBrokerRequest(
         await store.open();
         return { ok: true, result: { type: "open" } };
       case "close":
-        await store.close();
+        // A logical client must never close the shared native owner.
+        // Only the server handle owns the store lifecycle.
         return { ok: true, result: { type: "close" } };
       case "get":
         return { ok: true, result: { type: "get", value: await store.get(request.key) } };
@@ -169,83 +173,108 @@ async function createBrokerHandle(
   options: CliAuthorityBrokerServerOptions
 ): Promise<CliAuthorityBrokerServerHandle> {
   const target = resolveBrokerListenTarget(options.endpoint);
-  if (target.kind === "unix") {
-    ensureParentDir(target.path);
-    removeFileIfPresent(target.path);
-  }
-
-  const store = await options.createStore();
-  await store.open();
-
+  const socketMode = (options.transportMode ?? "socket") === "socket";
+  let store: AuthorityStore | undefined;
+  const sockets = new Set<Socket>();
   const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+    socket.on("error", () => {});
+    // Binding reserves the endpoint before opening the native store. Never serve
+    // requests from that startup window against an unready/partially open store.
+    if (!storeReady || !store) {
+      socket.once("data", () => {
+        socket.end(`${JSON.stringify({ ok: false, error: { code: "BROKER_UNAVAILABLE", message: "CLI authority broker is starting", retryable: true } })}\n`);
+      });
+      return;
+    }
     bindSocketRequestHandler({ socket, store });
   });
-
-  if ((options.transportMode ?? "socket") === "socket") {
-    try {
+  let storeReady = false;
+  try {
+    if (socketMode) {
+      if (target.kind === "unix") ensureParentDir(target.path);
+      // Never unlink an existing Unix socket: it may belong to a live owner.
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
-        if (target.kind === "unix") {
-          server.listen(target.path, () => {
-            server.off("error", reject);
-            resolve();
-          });
-          return;
-        }
-        server.listen(target.port, target.host, () => {
+        const onListening = () => {
           server.off("error", reject);
           resolve();
-        });
+        };
+        if (target.kind === "unix") server.listen(target.path, onListening);
+        else server.listen(target.port, target.host, onListening);
       });
       server.unref();
-    } catch (error) {
-      await store.close().catch(() => {});
-      throw error;
     }
-  }
+    store = await options.createStore();
+    await store.open();
+    storeReady = true;
+    const readyStore = store;
 
-  const now = options.now ?? Date.now;
-  const listeningEndpoint = (options.transportMode ?? "socket") === "socket"
-    ? buildListeningEndpoint(server, target)
-    : options.endpoint;
-  writeJsonFile(options.metadataPath, {
-    pid: process.pid,
-    endpoint: listeningEndpoint,
-    location: store.location ?? listeningEndpoint,
-    startedAt: new Date(now()).toISOString(),
-  });
-  writeJsonFile(options.healthPath, {
-    ok: true,
-    pid: process.pid,
-    endpoint: listeningEndpoint,
-    checkedAt: new Date(now()).toISOString(),
-  });
+    const now = options.now ?? Date.now;
+    const listeningEndpoint = (options.transportMode ?? "socket") === "socket"
+      ? buildListeningEndpoint(server, target)
+      : options.endpoint;
+    writeJsonFile(options.metadataPath, {
+      pid: process.pid,
+      endpoint: listeningEndpoint,
+      location: readyStore.location ?? listeningEndpoint,
+      startedAt: new Date(now()).toISOString(),
+    });
+    writeJsonFile(options.healthPath, {
+      ok: true,
+      pid: process.pid,
+      endpoint: listeningEndpoint,
+      checkedAt: new Date(now()).toISOString(),
+    });
 
-  let closed = false;
-  return {
-    endpoint: options.endpoint,
-    listeningEndpoint,
-    authorityStore: store,
-    request(request: CliAuthorityBrokerRequest) {
-      return dispatchCliAuthorityBrokerRequest(store, request);
-    },
-    async close() {
-      if (closed) return;
-      closed = true;
-      brokerRegistry.delete(options.endpoint);
-      if ((options.transportMode ?? "socket") === "socket") {
-        await new Promise<void>((resolve, reject) => {
-          server.close((error) => error ? reject(error) : resolve());
+    let closing: Promise<void> | undefined;
+    return {
+      endpoint: options.endpoint,
+      listeningEndpoint,
+      authorityStore: readyStore,
+      request(request: CliAuthorityBrokerRequest) {
+        return dispatchCliAuthorityBrokerRequest(readyStore, request);
+      },
+      async close() {
+        closing ??= (async () => {
+          storeReady = false;
+          for (const socket of sockets) socket.destroy();
+          if (server.listening) {
+            await new Promise<void>((resolve, reject) => {
+              server.close((error) => error ? reject(error) : resolve());
+            });
+          }
+          await readyStore.close();
+          brokerRegistry.delete(options.endpoint);
+          releaseDatabaseOwnership(options);
+          removeFileIfPresent(options.metadataPath);
+          removeFileIfPresent(options.healthPath);
+        })().catch((error) => {
+          // Retain ownership if native close fails. A retry must never construct
+          // a second Level while the first may still hold native resources.
+          closing = undefined;
+          throw error;
         });
+        return closing;
+      },
+    };
+  } catch (error) {
+    storeReady = false;
+    // Constructor/open or metadata failures must not strand a listener or store.
+    for (const socket of sockets) socket.destroy();
+    if (server.listening) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    if (store) {
+      try {
+        await store.close();
+      } catch (closeError) {
+        throw Object.assign(new AggregateError([error, closeError], "Broker startup failed and the native authority store could not close"), { retainAuthorityOwnership: true });
       }
-      await store.close();
-      if (target.kind === "unix") {
-        removeFileIfPresent(target.path);
-      }
-      removeFileIfPresent(options.metadataPath);
-      removeFileIfPresent(options.healthPath);
-    },
-  };
+    }
+    throw error;
+  }
 }
 
 function bindSocketRequestHandler(args: { socket: Socket; store: AuthorityStore }) {
@@ -269,13 +298,50 @@ function bindSocketRequestHandler(args: { socket: Socket; store: AuthorityStore 
   });
 }
 
+function canonicalDatabasePath(dbPath: string): string {
+  const absolute = path.resolve(dbPath);
+  try {
+    return fs.realpathSync(absolute);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    // Resolve existing ancestors too, so a not-yet-created DB under a symlink
+    // cannot acquire a second identity when Level creates its directory.
+    const parent = path.dirname(absolute);
+    if (parent === absolute) throw error;
+    return path.join(canonicalDatabasePath(parent), path.basename(absolute));
+  }
+}
+
+function releaseDatabaseOwnership(options: CliAuthorityBrokerServerOptions) {
+  if (!options.dbPath) return;
+  const identity = options.dbPath;
+  if (databaseOwners.get(identity) === options.endpoint) databaseOwners.delete(identity);
+}
+
 export function getOrCreateCliAuthorityBrokerServer(
   options: CliAuthorityBrokerServerOptions
 ): Promise<CliAuthorityBrokerServerHandle> {
+  options = { ...options, dbPath: options.dbPath ? canonicalDatabasePath(options.dbPath) : undefined };
   const existing = brokerRegistry.get(options.endpoint);
-  if (existing) return existing;
+  if (existing) {
+    if (options.dbPath && databaseOwners.get(options.dbPath) !== options.endpoint) {
+      return Promise.reject(new Error(`CLI authority endpoint ${options.endpoint} already owns another database`));
+    }
+    return existing;
+  }
 
+  if (options.dbPath) {
+    const identity = canonicalDatabasePath(options.dbPath);
+    const owner = databaseOwners.get(identity);
+    if (owner) {
+      // Even a failed second Level.open() can release the owner's POSIX lock.
+      // Reject before constructing Level, across endpoints and startup races.
+      return Promise.reject(Object.assign(new Error(`CLI authority database already owned by ${owner}`), { code: "LEVEL_LOCKED" }));
+    }
+    databaseOwners.set(identity, options.endpoint);
+  }
   const pending = createBrokerHandle(options).catch((error) => {
+    if (!error?.retainAuthorityOwnership) releaseDatabaseOwnership(options);
     brokerRegistry.delete(options.endpoint);
     throw error;
   });

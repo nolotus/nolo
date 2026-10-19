@@ -20,7 +20,7 @@ import {
 import { displayWidth, fitAnsiLine, wrapTextToLines } from "./tuiAnsi";
 import { consumeSgrMouseSequence } from "./tuiMouse";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
-import { surfaceBackgroundSequence, themeColorSequence, themeText } from "./theme";
+import { composerSurfaceBackgroundSequence, themeColorSequence, themeText } from "./theme";
 import { t } from "./i18n";
 import { completeSlashCommand } from "./sessionInput";
 import { PASTE_TOKEN_PREFIX } from "./session";
@@ -351,24 +351,30 @@ export function createFixedInput(
       : promptRaw;
 
     // 输入行铺一层 surface 底色，让 composer 读起来是一个区块，而不是裸在终端
-    // 画布上的几行文字（状态行 chip 与用户消息气泡用的是同一套 surface 色）。
+    // 画布上的几行文字。用 composer 专用的 wash（跟随终端真实底色的中性提亮/
+    // 压暗），不是状态行 chip 的 surfaceBackgroundSequence——后者在默认的
+    // terminal 模式下返回空、固定模式下也只差几个色阶，等于没画。
     //
     // 铺满整列而不是只包住文字：输入短的时候，只包文字的底色看起来像补丁。
     // 尾部填空格补到 cols，宽度算的是可见宽度（内容可能带 SGR），所以光标列
     // 不受影响——背景序列零宽度，填充也都在内容之后。
     //
     // `\x1b[49m` 只重置背景：这一行后面若有调用方拼接的着色文本，前景色不该
-    // 被一起清掉。truecolor 不可用 / terminal 主题时 surface 为空，整段退化为
+    // 被一起清掉。truecolor 不可用 / 终端底色未知时 wash 为空，整段退化为
     // 原文（ANSI-16 没有"淡底"，实色会把文字埋掉）。
-    const surface = colorEnabled ? surfaceBackgroundSequence() : "";
+    const surface = colorEnabled ? composerSurfaceBackgroundSequence() : "";
+    // 底色铺满整列，但最后一列留白：写到最右下角会让部分终端提前折行/滚屏。
+    // 折行宽度必须跟着收同样的 1 列，否则满行内容会多出 1 列被裁掉——这里
+    // 之前还额外塞了个前导空格，等于把光标列和文字一起推歪一格。
+    const paintWidth = Math.max(1, surface ? cols - 1 : cols);
     const paintInputRow = (content: string): string => {
       if (!surface) return content;
-      const fitted = fitAnsiLine(content, Math.max(1, cols - 1));
-      const pad = Math.max(0, cols - 1 - displayWidth(fitted));
-      return `${surface} ${fitted}${" ".repeat(pad)}\x1b[49m`;
+      const fitted = fitAnsiLine(content, paintWidth);
+      const pad = Math.max(0, paintWidth - displayWidth(fitted));
+      return `${surface}${fitted}${" ".repeat(pad)}\x1b[49m`;
     };
 
-    const contentWidth = Math.max(1, cols - promptWidth);
+    const contentWidth = Math.max(1, paintWidth - promptWidth);
     const logicalLines = buffer.length === 0 ? [""] : buffer.split("\n");
 
     const targetPos = Math.max(0, Math.min(buffer.length, cursorPos ?? buffer.length));

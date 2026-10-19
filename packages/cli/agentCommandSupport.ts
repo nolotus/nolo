@@ -58,7 +58,7 @@ export type AgentCommandDeps = {
     fetchImpl: CliFetchImpl
   ) => Promise<void>;
   localRuntimeProbe?: (env: EnvLike) => Promise<LocalRuntimeProbeResult>;
-  /** dialog 本地读取注入（测试用；缺省走本地 LevelDB 真实读取）。 */
+  /** dialog 本地读取注入（测试用；CLI-home 缺省通过 authority broker 读取）。 */
   readLocalDialog?: (args: {
     dialogKey: string;
     dialogId: string;

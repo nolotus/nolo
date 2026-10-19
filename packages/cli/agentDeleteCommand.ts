@@ -240,8 +240,8 @@ export async function runAgentDeleteCommand(
 
   // 服务端已 tombstone 至少一个副本后，失效本地缓存里这个 agent 的条目，
   // 否则 `agent read` / `agent list` 的本地缓存路径仍会返回删除前的旧记录。
-  // 必须经由 CLI 当前持有的 db（authority broker）删除：上面的直开 LevelDB
-  // 清理在 broker 持锁时会被静默跳过。全部删除失败时不动缓存（记录仍然存在）。
+  // 上面通过各库共享 owner 清理记录后，这里继续失效 CLI 当前 db 中的缓存别名。
+  // 全部删除失败时不动缓存（记录仍然存在）。
   if (shouldDelete && succeededCount > 0) {
     await invalidateAgentRecordCache({
       db,
