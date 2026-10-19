@@ -491,15 +491,26 @@ async function bundleCliEntry(args: {
   };
 
   const runner = `const {buildSync}=require("esbuild");const c=JSON.parse(process.env.NOLO_ESBUILD_CONFIG||"{}");buildSync(c);`;
-  const result = spawnSync("node", ["-e", runner], {
+  // 用当前运行时（bun）而不是裸 "node"：本仓是 bun 项目，构建机上不一定装 node。
+  // 裸 "node" 在缺 node 的环境里 spawn 直接 ENOENT → result.status 是 undefined，
+  // 报错文案变成 "failed (status undefined): unknown error"，把「进程没起来」
+  // 伪装成「esbuild 失败」，排查时极易误判（2026-10-19 本机实测就是这样）。
+  const result = spawnSync(process.execPath, ["-e", runner], {
     cwd: REAL_REPO_ROOT,
     env: { ...process.env, NOLO_ESBUILD_CONFIG: JSON.stringify(config) },
     encoding: "utf8",
   });
 
   if (result.status !== 0) {
+    // status 为 null/undefined 表示进程从未正常退出（ENOENT、被信号杀掉、超时）。
+    // 这时必须把 result.error 与 signal 一并抛出，否则只剩 "unknown error"。
+    const spawnDetail = result.error
+      ? `spawn error: ${result.error.message}`
+      : result.signal
+        ? `terminated by signal ${result.signal}`
+        : result.stderr || result.stdout || "no output";
     throw new Error(
-      `esbuild CLI bundle failed (status ${result.status}): ${result.stderr || result.stdout || "unknown error"}`
+      `esbuild CLI bundle failed (status ${result.status ?? "null"}): ${spawnDetail}`
     );
   }
 
