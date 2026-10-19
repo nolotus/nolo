@@ -38,7 +38,20 @@ import {
 import { resolvePlatformAuthToken } from "../../agent-runtime/providerResolution";
 import { resolveCliMemory } from "../memoryRecall";
 import { readDbRecord } from "../agentRecordHelpers";
-import { resolveAgentContextWindow, platformCreditsFromUsage } from "../client/tokenUsage";
+import { estimateTokenCount } from "../../ai/context/tokenUtils";
+import {
+  estimateMessagesTokens,
+  historyTokensBeforeLatestAssistant,
+} from "../../ai/context/contextOccupancy";
+import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
+import {
+  resolveAgentContextWindow,
+  platformCreditsFromUsage,
+  resolveAgentModelIdentity,
+  computeBaselineContextTokens,
+  resolveAuthorityTurnCount,
+} from "../client/tokenUsage";
+import { createLiveTurnTracker } from "./liveTurnTracker";
 import type { LocalAgentActionGate, LocalAgentLoopEvent } from "../../agent-runtime/localLoop";
 import type { ContextBlockScope } from "../../agent-runtime/contextBlockScope";
 import {
@@ -1160,11 +1173,6 @@ export async function runOneAgentTurn(
           }
         }
       : confirmDestructiveAction;
-  // 轮内实时积分从 0 开始：上一轮若经异常路径退出（runAgentChat 抛出、
-  // accumulateSessionCredits 未执行），这里兜底清掉残留，防止下一轮把
-  // 旧账叠加进 live 值造成重复显示。正常路径的清零在
-  // accumulateSessionCredits（readlineWorkspace 侧）。
-  ctx.state = { ...ctx.state, liveTurnCredits: undefined };
   ctx.history.followBottom = true;
   // 屏幕上印什么 ≠ 送进模型的是什么。终态唤醒是系统事件，不是用户发言：
   // 模型仍收完整摘要（message），transcript 只留一行紧凑状态，且不套用户
@@ -1193,9 +1201,49 @@ export async function runOneAgentTurn(
   ctx.renderHistoryToOutput();
   if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
 
+  // 统一基线定义：最近一次权威 input + 自那之后所有新增内容（assistant 输出 / user 消息 / tool 结果）的估算增量。
+  // turn 开始时用共享 estimateMessagesTokens 估出新增内容并入基线，并清空上一轮的 turnTokens（避免
+  // 上下文 chip 残留上一轮未包含回答的 provider input）。
+  // 分支判定：只有当存在真实权威 input 且 authTurnCount 有效时才走切片分支；无真权威时必须走估算分支。
+  const nextBaseline = computeBaselineContextTokens({
+    authoritativeInput: ctx.state.turnTokens?.input,
+    lastAuthorityTurnCount: ctx.state.lastAuthorityTurnCount,
+    turns: ctx.history.turns,
+    fallbackEstimate: () =>
+      estimateDefaultCliContextTokens({
+        cwd: ctx.state.cwd,
+        agentKey: ctx.state.agentKey,
+        agentName: ctx.state.agentName,
+        userLanguage: ctx.state.userLanguage,
+        messages: ctx.history.turns,
+        ...resolveAgentModelIdentity({
+          agentKey: ctx.state.agentKey,
+          agentName: ctx.state.agentName,
+        }),
+      }),
+  });
+
+  // 轮内实时积分与估算推进从 0 开始：上一轮若经异常路径退出，这里兜底清掉残留；
+  // 同时重置 turnTokens 为 undefined，由并入新增内容的基线接管展示。
+  ctx.state = {
+    ...ctx.state,
+    turnTokens: undefined,
+    estimatedContextTokens: nextBaseline,
+    liveTurnCredits: undefined,
+    liveTurnEstimatedTokens: undefined,
+  };
+
   startTurn(ctx.history, "assistant");
+  const liveTracker = createLiveTurnTracker();
   const agentOutput = isInteractiveInput(ctx.input)
     ? createHistoryOutputStream(ctx.history, () => {
+        const { updated, liveTokens } = liveTracker.onStreamChunk(ctx.history.currentContent);
+        if (updated) {
+          ctx.state = {
+            ...ctx.state,
+            liveTurnEstimatedTokens: liveTokens,
+          };
+        }
         ctx.scheduleRender();
       })
     : ctx.output;
@@ -1352,6 +1400,22 @@ export async function runOneAgentTurn(
             }
           : {}),
         ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
+        ...(runResult.turnTokens && runResult.turnTokens.input > 0
+          ? (() => {
+              const assistantDelta = Math.max(
+                0,
+                estimateMessagesTokens(ctx.history.turns) -
+                  historyTokensBeforeLatestAssistant(ctx.history.turns),
+              );
+              return {
+                estimatedContextTokens: runResult.turnTokens.input + assistantDelta,
+                lastAuthorityTurnCount: resolveAuthorityTurnCount(ctx.history.turns),
+                liveTurnEstimatedTokens: assistantDelta > 0 ? assistantDelta : undefined,
+              };
+            })()
+          : {
+              liveTurnEstimatedTokens: undefined,
+            }),
         ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
         // 本轮已发起 agent 调用（消息已注入），消费切换通知与进程终态通知。
         pendingCwdNotice: undefined,
@@ -1439,12 +1503,33 @@ export async function runOneAgentTurn(
       ...(runResult.contextWindow
         ? { contextWindow: runResult.contextWindow }
         : {}),
-      // input_tokens 是累计上下文输入（含历史消息），把它持久化到
-      // estimatedContextTokens：下一轮若 provider 不返回 usage，context
-      // chip 仍显示真实累计占用而不是回退到启动时的静态估算。
+      // input_tokens 是累计上下文输入（含历史消息），用本轮权威 input 重置基线；无 usage 时使用对话历史消息估算兜底。
+      // 权威 input 是该次回答生成前的快照，不含最后一轮 assistant 输出；与 Web 侧对齐，用共享
+      // historyTokensBeforeLatestAssistant 将回答本身作为权威增量带入，避免权威到达瞬间 chip 少一条回答。
       ...(runResult.turnTokens && runResult.turnTokens.input > 0
-        ? { estimatedContextTokens: runResult.turnTokens.input }
-        : {}),
+        ? (() => {
+            const assistantDelta = Math.max(
+              0,
+              estimateMessagesTokens(ctx.history.turns) -
+                historyTokensBeforeLatestAssistant(ctx.history.turns),
+            );
+            return {
+              estimatedContextTokens: runResult.turnTokens.input + assistantDelta,
+              lastAuthorityTurnCount: resolveAuthorityTurnCount(ctx.history.turns),
+              liveTurnEstimatedTokens: assistantDelta > 0 ? assistantDelta : undefined,
+            };
+          })()
+        : {
+            estimatedContextTokens: estimateDefaultCliContextTokens({
+              cwd: ctx.state.cwd,
+              agentKey: ctx.state.agentKey,
+              agentName: ctx.state.agentName,
+              userLanguage: ctx.state.userLanguage,
+              messages: ctx.history.turns,
+            }),
+            lastAuthorityTurnCount: undefined,
+            liveTurnEstimatedTokens: undefined,
+          }),
       ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
       // 切换消息/进程终态通知本轮已注入 agent 上下文（runAgentChat 已读），
       // 消费掉，避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实

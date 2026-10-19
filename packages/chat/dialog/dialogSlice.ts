@@ -264,10 +264,13 @@ export const abortAllMessages = createAsyncThunk(
 export const updateTokens = createAsyncThunk(
   "dialog/updateTokens",
   async (args: any, thunkApi) => {
+    const observedAt = Date.now();
     const payload = await updateTokensAction(args, thunkApi);
     const dialogKey = args?.dialogKey;
     if (dialogKey && payload) {
       applyUpdateTokensFulfilled({
+        observedAt,
+        authoritative: args?.contextUsageAuthoritative !== false && (args?.usageRecord?.usage ?? args?.usage)?.billing_estimated !== true,
         dialogKey,
         input_tokens: payload.input_tokens,
         output_tokens: payload.output_tokens,

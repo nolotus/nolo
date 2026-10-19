@@ -19,7 +19,7 @@ import { performFetchRequest } from "ai/chat/fetchUtils";
 import { sanitizeOutboundBody } from "ai/chat/toolCallArgumentGuard";
 import { executeToolCall } from "ai/agent/executeToolCall";
 import { extractCustomId } from "core/prefix";
-import { updateTokensAction } from "chat/dialog/actions/updateTokensAction";
+import { updateAgentTokens } from "./updateAgentTokens";
 import {
   recordConsecutiveToolFailure,
   type ToolFailureGuardState,
@@ -204,7 +204,7 @@ export async function runAgentClientLoop(
     const usageSource = data ?? rawData;
 
     if (billingDialogKey && usageSource?.usage) {
-      await updateTokensAction(
+      await updateAgentTokens(
         {
           dialogId: extractCustomId(billingDialogKey),
           dialogKey: billingDialogKey,

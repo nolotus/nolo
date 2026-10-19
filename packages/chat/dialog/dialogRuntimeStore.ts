@@ -35,6 +35,7 @@ export { GLOBAL_DIALOG_RUNTIME_KEY };
 
 export interface DialogRuntimeState {
   tokens: TokenStats;
+  lastProviderInput: { inputTokens: number; observedAt: number } | null;
   pendingFiles: PendingFile[];
   activeControllers: Record<string, AbortController>;
   pendingRawData: Record<string, PendingRawData>;
@@ -65,6 +66,7 @@ const createEmptyTokenStats = (): TokenStats => ({
 
 const createEmptyDialogRuntimeState = (): DialogRuntimeState => ({
   tokens: createEmptyTokenStats(),
+  lastProviderInput: null,
   pendingFiles: [],
   activeControllers: {},
   pendingRawData: {},
@@ -476,6 +478,9 @@ export function clearPendingUserInputQueue(
 
 export function tokenUsageLiveUpdate(payload: LiveTokenUsagePayload) {
   const runtime = ensureDialogRuntimeState(payload.dialogKey);
+  if (payload.input_tokens > 0) {
+    runtime.lastProviderInput = { inputTokens: payload.input_tokens, observedAt: Date.now() };
+  }
   runtime.tokens.inputTokens += payload.input_tokens;
   runtime.tokens.outputTokens += payload.output_tokens;
   runtime.tokens.totalCost += payload.cost ?? 0;
@@ -504,9 +509,18 @@ export function applyUpdateTokensFulfilled(payload: {
   input_tokens?: number;
   output_tokens?: number;
   cost?: number;
+  observedAt?: number;
+  authoritative?: boolean;
 }): void {
-  const runtime = runtimeByKey[payload.dialogKey];
-  if (!runtime) return;
+  const runtime = ensureDialogRuntimeState(payload.dialogKey);
+  const observedAt = payload.observedAt ?? Date.now();
+  // Billing fulfillment may replay earlier calls after the latest live usage.
+  // Compare per-call timestamps, not whether this dialog ever had live usage.
+  if (payload.authoritative !== false &&
+      typeof payload.input_tokens === "number" && payload.input_tokens > 0 &&
+      (!runtime.lastProviderInput || observedAt > runtime.lastProviderInput.observedAt)) {
+    runtime.lastProviderInput = { inputTokens: payload.input_tokens, observedAt };
+  }
   runtime.tokens.inputTokens = Math.max(
     0,
     runtime.tokens.inputTokens - (payload.input_tokens ?? 0)
@@ -741,4 +755,13 @@ export function resetDialogRuntimeStoreForTests(): void {
   runtimeByKey[GLOBAL_DIALOG_RUNTIME_KEY] = createEmptyDialogRuntimeState();
   clearMediaJobPendingEntries({ all: true });
   notify();
+}
+
+export function getDialogProviderInput(dialogKey?: string | null) {
+  return ensureDialogRuntimeState(dialogKey).lastProviderInput;
+}
+
+export function useDialogProviderInput(dialogKey?: string | null) {
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return getDialogProviderInput(dialogKey);
 }

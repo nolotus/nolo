@@ -5,11 +5,12 @@ import {
 } from "core/builtinAgents";
 import { API_REPORTED_COST_MULTIPLIER } from "../../ai/token/calculatePrice";
 import { findModelConfig } from "../../ai/llm/providers";
+import { findModelContextWindow } from "../../ai/llm/getModelContextWindow";
 import {
-  DEFAULT_CONTEXT_WINDOW,
-  findModelContextWindow,
-  getModelContextWindow,
-} from "../../ai/llm/getModelContextWindow";
+  estimateMessagesTokens,
+  resolveOccupancy,
+  resolveOccupancyWindow,
+} from "../../ai/context/contextOccupancy";
 import { builtinAgentCatalogEntryById } from "core/builtinAgentCatalog";
 import { parsePublicAgentId } from "core/prefix";
 import { normalizeUsage } from "../../ai/token/normalizeUsage";
@@ -111,13 +112,13 @@ export function resolveAgentModelIdentity(
  * 兜底里不写死任何具体模型的数字：猜得到就查模型表，猜不到才用通用默认值。
  * 窗口跟随模型，所以 NOLO_AUTO_ROUTE 不再影响它。
  */
-export function resolveAgentContextWindow(opts: AgentModelRef): number {
+export function resolveAgentContextWindow(opts: AgentModelRef): number | undefined {
   const model = resolveEffectiveModel(opts);
-  if (model) return getModelContextWindow(model);
+  if (model) return resolveContextWindow(model);
 
   // 显示名直接命中（含 fuzzy）就不用猜 slug 了。
   const byName = opts.agentName?.trim()
-    ? findModelContextWindow(opts.agentName)
+    ? resolveOccupancyWindow({ model: opts.agentName })
     : undefined;
   if (byName !== undefined) return byName;
 
@@ -126,11 +127,12 @@ export function resolveAgentContextWindow(opts: AgentModelRef): number {
     ...modelSlugCandidates(opts.agentName, 1),
   ];
   for (const candidate of candidates) {
-    const window = findModelContextWindow(candidate);
+    const window = resolveOccupancyWindow({ model: candidate });
     if (window !== undefined) return window;
   }
 
-  return DEFAULT_CONTEXT_WINDOW;
+  // 查不到窗口时返回 undefined，进入未知态（"context: —"），不得静默用 DEFAULT_CONTEXT_WINDOW 冒充真值。
+  return undefined;
 }
 
 /** agentKey 的 `agent-<uid>-` 前缀：uid 是确定性 seed，不是模型名的一部分。 */
@@ -210,15 +212,22 @@ export function mergeUsageRecords(
   if (!right) return current ?? undefined;
   const cacheRead = (left.cacheRead ?? 0) + (right.cacheRead ?? 0);
   const cacheWrite = (left.cacheWrite ?? 0) + (right.cacheWrite ?? 0);
+  // 这是**计费/统计**口径：input 累加成总输入量（cache 命中率等统计要的是总量）。
+  // 「上下文占用」要的是「最近一次请求的 input」，那是另一条路——
+  // buildTurnTokenUsage 直接取最后一次 provider 上报的 usage，两者不要混。
+  // 曾在这里改成取 max 想服务占用口径，结果累计输入量统计变少，且同分支上
+  // 两条互斥契约（toolOutputClip 断言累加、sessionRender DoD 5 断言取 max）
+  // 同时存在、只有一条能绿——已把 DoD 5 一并改写成两侧分工断言。
+  const inputTokens = left.input + right.input;
   return {
-    input_tokens: left.input + right.input,
+    input_tokens: inputTokens,
     output_tokens: left.output + right.output,
     ...(cacheRead > 0 ? { cache_read_input_tokens: cacheRead } : {}),
     ...(cacheWrite > 0 ? { cache_creation_input_tokens: cacheWrite } : {}),
   };
 }
 
-export function resolveContextWindow(model?: string) {
+export function resolveContextWindow(model?: string): number | undefined {
   const raw = model?.trim();
   if (!raw) return undefined;
 
@@ -229,8 +238,9 @@ export function resolveContextWindow(model?: string) {
 
   // PROVIDER_LOOKUP_ORDER 不含 qwen / moonshot / nolo / xai / zai / anthropic，
   // 且对命名变体（显示名、未在表内的自定义 id）也会 miss。回退到全量模型表 +
-  // fuzzy 兜底，与 TUI 初始 fallback 共用单一真值源（getModelContextWindow）。
-  return getModelContextWindow(raw);
+  // fuzzy 兜底（resolveOccupancyWindow）。查不到时返回 undefined 进入未知态，
+  // 严禁用 DEFAULT_CONTEXT_WINDOW 伪装成真值。
+  return resolveOccupancyWindow({ model: raw });
 }
 
 export function buildTurnTokenUsage(
@@ -380,19 +390,96 @@ export type ContextUsage = {
   estimated: boolean;
 };
 
+/**
+ * 与 Web 线完全对齐：权威到达时计算权威切片点。
+ * provider input 是回答生成前的快照。
+ * 若末条为 assistant，权威快照产生在该 assistant 生成之前（turns.length - 1）；
+ * 若末条非 assistant，权威快照已包含当前所有历史（turns.length）。
+ * 底层对齐共享 historyTokensBeforeLatestAssistant 契约。
+ */
+export function resolveAuthorityTurnCount(
+  turns: readonly { role?: string; content?: unknown }[],
+): number {
+  if (turns.length === 0) return 0;
+  const latest = turns[turns.length - 1];
+  if (latest?.role === "assistant") {
+    return Math.max(0, turns.length - 1);
+  }
+  return turns.length;
+}
+
+export interface ComputeBaselineContextOptions {
+  authoritativeInput?: number;
+  lastAuthorityTurnCount?: number;
+  turns: readonly { role?: string; content?: unknown }[];
+  fallbackEstimate: number | (() => number);
+}
+
+/**
+ * 计算 turn 开始时的上下文占用基线（纯函数，供 TUI turn runner 使用）：
+ * 1. 只有当存在真实权威 input（> 0）且 lastAuthorityTurnCount 有效（>= 0）时，
+ *    才使用切片增量分支：authoritativeInput + estimateMessagesTokens(turns.slice(authTurnCount))。
+ * 2. 否则（无真权威、或 authTurnCount 为 undefined），绝不假装权威，走 fallbackEstimate 估算分支。
+ */
+export function computeBaselineContextTokens(
+  options: ComputeBaselineContextOptions,
+): number {
+  const { authoritativeInput, lastAuthorityTurnCount, turns, fallbackEstimate } = options;
+  if (
+    authoritativeInput !== undefined &&
+    authoritativeInput > 0 &&
+    lastAuthorityTurnCount !== undefined &&
+    lastAuthorityTurnCount >= 0
+  ) {
+    const turnsSinceAuthority = turns.slice(lastAuthorityTurnCount);
+    const addedTokens = estimateMessagesTokens(turnsSinceAuthority);
+    return authoritativeInput + addedTokens;
+  }
+  return typeof fallbackEstimate === "function" ? fallbackEstimate() : fallbackEstimate;
+}
+
+export type ResolveContextUsageInput = {
+  tokens?: TurnTokenUsage;
+  fallbackContextWindow?: number;
+  estimatedContextTokens?: number;
+  /**
+   * turn 内实时推进值（如流式生成阶段的估算增量），随流式实时单调增长。
+   * turn 结束拿到权威 input 后由权威值接管。
+   */
+  turnEstimatedTokens?: number;
+};
+
 export function resolveContextUsage(
-  tokens?: TurnTokenUsage,
-  fallbackContextWindow?: number,
-  estimatedContextTokens?: number
+  opts: ResolveContextUsageInput = {}
 ): ContextUsage {
-  const providerUsed = tokens && tokens.input > 0 ? tokens.input : undefined;
-  const estimateUsed =
-    estimatedContextTokens != null && estimatedContextTokens > 0
-      ? estimatedContextTokens
+  const tokens = opts.tokens;
+  const contextWindow = tokens?.contextWindow ?? opts.fallbackContextWindow;
+  const authoritativeInput = tokens && tokens.input > 0 ? tokens.input : undefined;
+  const baselineEstimate =
+    opts.estimatedContextTokens != null && opts.estimatedContextTokens > 0
+      ? opts.estimatedContextTokens
       : undefined;
-  const used = providerUsed ?? estimateUsed;
-  const contextWindow = tokens?.contextWindow ?? fallbackContextWindow;
-  const usage: ContextUsage = { estimated: providerUsed === undefined };
+  const generatedSinceAuthority =
+    opts.turnEstimatedTokens != null && opts.turnEstimatedTokens > 0
+      ? opts.turnEstimatedTokens
+      : undefined;
+
+  const occupancy = resolveOccupancy({
+    authoritativeInput,
+    baselineEstimate:
+      authoritativeInput === undefined && baselineEstimate !== undefined
+        ? baselineEstimate + (generatedSinceAuthority ?? 0)
+        : baselineEstimate,
+    generatedSinceAuthority,
+  });
+
+  const hasInputSignal =
+    authoritativeInput !== undefined ||
+    baselineEstimate !== undefined ||
+    generatedSinceAuthority !== undefined;
+  const used = hasInputSignal ? occupancy.tokens : undefined;
+
+  const usage: ContextUsage = { estimated: occupancy.estimated };
   if (used !== undefined) usage.used = used;
   if (contextWindow != null) usage.contextWindow = contextWindow;
   if (used !== undefined && contextWindow != null && contextWindow > 0) {
@@ -404,13 +491,33 @@ export function resolveContextUsage(
 
 export function renderTokenStatus(
   tokens?: TurnTokenUsage,
-  fallback?: { contextWindow?: number; estimatedContextTokens?: number }
+  fallback?: {
+    contextWindow?: number;
+    estimatedContextTokens?: number;
+    turnEstimatedTokens?: number;
+  }
 ) {
-  const usage = resolveContextUsage(
+  const usage = resolveContextUsage({
     tokens,
-    fallback?.contextWindow,
-    fallback?.estimatedContextTokens
-  );
+    fallbackContextWindow: fallback?.contextWindow,
+    estimatedContextTokens: fallback?.estimatedContextTokens,
+    turnEstimatedTokens: fallback?.turnEstimatedTokens,
+  });
+  const cache =
+    tokens?.cacheRead != null && tokens.cacheRead > 0
+      ? ` (cache ${formatTokenCount(tokens.cacheRead)})`
+      : "";
+
+  // 窗口未知态：若无窗口，严禁硬编未知百分比或默认值，展示为未知态
+  if (usage.contextWindow === undefined) {
+    const inStr =
+      usage.used !== undefined
+        ? `${usage.estimated ? "~" : ""}${formatTokenCount(usage.used)}`
+        : "—";
+    const outStr = tokens ? formatTokenCount(tokens.output) : "—";
+    return `in ${inStr}${cache} out ${outStr} left —`;
+  }
+
   // 没有 provider usage 但知道窗口 + 估算时，给真实数字而不是三个破折号；
   // 估算值前面加 `~`，避免和 provider 报的数混为一谈。
   if (!tokens) {
@@ -431,10 +538,6 @@ export function renderTokenStatus(
         : "—";
   // Cache hits are a slice of `input`, so they read as a parenthetical on it
   // rather than a separate column.
-  const cache =
-    tokens.cacheRead != null && tokens.cacheRead > 0
-      ? ` (cache ${formatTokenCount(tokens.cacheRead)})`
-      : "";
   return `in ${inputText}${cache} out ${formatTokenCount(tokens.output)} left ${left}`;
 }
 

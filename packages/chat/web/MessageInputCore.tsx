@@ -21,7 +21,6 @@ import { selectIdentityUserBalance, selectIdentityUserId } from "identity/select
 import { toast } from "app/utils/toast";
 import {
   abortAllMessages,
-  selectCurrentDialogTokens,
   useCurrentDialogKey,
   usePendingFiles,
   useActiveControllers,
@@ -31,10 +30,9 @@ import { useCurrentDialogConfig } from "../dialog/useCurrentDialogConfig";
 import { getActiveDialogAgentId } from "chat/dialog/dialogAgents";
 import { useFetchData } from "app/hooks";
 import { applyBuiltinAgentRuntimeOverride } from "agent-runtime/builtinPlatformAgentConfigs";
-import { resolveAgentContextWindow } from "agent-runtime/devin/devinChannelWindows";
+import { useDialogContextUsage } from "chat/dialog/useDialogContextUsage";
 import {
   getContextWindowUsagePercent,
-  getDialogTokenTotal,
 } from "chat/dialog/dialogUsageFormat";
 import {
   selectAllMsgs,
@@ -1055,7 +1053,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     void sendMessageRef.current(transcript);
   }, [sendMessageRef]);
 
-  const tokenStats = useAppSelector(selectCurrentDialogTokens);
   const activeAgentId = getActiveDialogAgentId(currentDialogConfig);
   const { data: activeAgent } = useFetchData<Agent>(activeAgentId || undefined);
   const resolvedAgent =
@@ -1065,15 +1062,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
   // Channel-aware context window: devin channel table (fallback global map) so
   // a switch to a smaller-window model reflects the real capacity, not the
   // stale global default.
-  const contextWindow = resolveAgentContextWindow(resolvedAgent ?? {});
-  const totalTokens = getDialogTokenTotal(
-    tokenStats?.inputTokens ?? 0,
-    tokenStats?.outputTokens ?? 0
-  );
-  const usagePercent =
-    contextWindow > 0 && totalTokens > 0
-      ? getContextWindowUsagePercent(totalTokens, contextWindow)
-      : undefined;
+  const occupancy = useDialogContextUsage(resolvedAgent, currentDialogConfig?.summary);
+  const usagePercent = occupancy.contextWindow
+    ? getContextWindowUsagePercent(occupancy.tokens, occupancy.contextWindow)
+    : undefined;
 
   const browseContext = useBrowseContext();
   const browseHost = useMemo(() => {
@@ -1250,6 +1242,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               browseHost={browseHost}
               imageConfigSummary={imageConfigSummary}
               usagePercent={usagePercent}
+              contextTokens={occupancy.tokens}
               expanded={drawerExpanded}
               onToggle={handleToggleDrawer}
             >

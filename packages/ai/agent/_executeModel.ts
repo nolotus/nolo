@@ -15,7 +15,7 @@ import { applyChatCompletionsStreamMode } from "integrations/openai/chatCompleti
 import { sendOpenAICompletionsRequest } from "../chat/sendOpenAICompletionsRequest";
 import { performFetchRequest } from "../chat/fetchUtils";
 import { sanitizeOutboundBody } from "../chat/toolCallArgumentGuard";
-import { updateTokensAction } from "chat/dialog/actions/updateTokensAction";
+import { updateAgentTokens } from "./updateAgentTokens";
 import { extractCustomId } from "core/prefix";
 import {
   resolveAgentCallPlan,
@@ -196,7 +196,7 @@ export const _executeModel = async (
         );
       }
       if (args.billingDialogKey && result?.usage) {
-        await updateTokensAction(
+        await updateAgentTokens(
           {
             dialogId: extractCustomId(args.billingDialogKey),
             dialogKey: args.billingDialogKey,

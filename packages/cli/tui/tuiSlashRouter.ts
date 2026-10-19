@@ -276,6 +276,8 @@ export async function runSubmittedSlashLine(
     host.state = {
       ...host.state,
       turnTokens: undefined,
+      lastAuthorityTurnCount: undefined,
+      liveTurnEstimatedTokens: undefined,
       // 新对话的积分累计从 0 重新开始：既清掉旧对话的本会话累加，也清掉旧对话
       // 的历史基数（新对话没有历史）。
       sessionCredits: undefined,
@@ -384,6 +386,8 @@ export async function runSubmittedSlashLine(
         // composer chip falls back to the default CLI surface estimate and
         // the context percentage visibly drops. Mirrors the /clear reset.
         turnTokens: undefined,
+        lastAuthorityTurnCount: undefined,
+        liveTurnEstimatedTokens: undefined,
         // compact fork 出新的官方 dialog，计费从新记录开始累计；新 dialog 没有
         // 历史基数，本会话累加也随之归零。
         sessionCredits: undefined,
@@ -394,6 +398,12 @@ export async function runSubmittedSlashLine(
           cwd: host.state.cwd,
           agentKey: host.state.agentKey,
           userLanguage: host.state.userLanguage,
+          messages: [
+            ...(compactResult.summary ? [{ role: "system", content: compactResult.summary }] : []),
+            ...(compactResult.compactedMessageCount > 0
+              ? host.history.turns.slice(compactResult.compactedMessageCount)
+              : (compactResult.summaryGenerated ? [] : host.history.turns)),
+          ],
           ...resolveAgentModelIdentity({
             agentKey: host.state.agentKey,
             agentName: host.state.agentName,
@@ -500,7 +510,7 @@ export async function runSubmittedSlashLine(
       if (!target || !entries.some((entry) => entry.key === target.key)) {
         emitCommandOutput(t("agentUnknown", query));
       } else {
-        const nextState = applyAgentSwitchState(host.state, target);
+        const nextState = applyAgentSwitchState(host.state, target, host.history.turns);
         // No mutation above this point: lookup failures leave all switch state
         // untouched. Commit the validated selection synchronously, without await.
         const oldKey = host.state.agentKey;
@@ -545,7 +555,11 @@ export async function runSubmittedSlashLine(
             agentName: pickResult.name,
             model: pickResult.model,
             userLanguage: host.state.userLanguage,
+            messages: host.history.turns,
           }),
+          turnTokens: undefined,
+          lastAuthorityTurnCount: undefined,
+          liveTurnEstimatedTokens: undefined,
           cachedMemoryOverlay: undefined, // 切换 agent 后重新加载记忆
         };
         persistAgentSelection(host.state, options.env ?? process.env);
@@ -685,12 +699,25 @@ export async function runSubmittedSlashLine(
           dialogLabel: pickResult.dialog.title || pickResult.dialog.id,
           dialogTitle: pickResult.dialog.title,
           turnTokens: undefined,
+          lastAuthorityTurnCount: undefined,
+          liveTurnEstimatedTokens: undefined,
           // 切换对话先清空上一个对话的积分，等下面异步 seed 成功后回填历史基数；
           // 若读取失败也不至于把旧对话的累计值残留显示在状态行。
           sessionCredits: undefined,
           dialogCreditsBase: undefined,
           liveTurnCredits: undefined,
           cachedMemoryOverlay: undefined, // 切换对话后重新加载记忆
+          estimatedContextTokens: estimateDefaultCliContextTokens({
+            cwd: host.state.cwd,
+            agentKey: host.state.agentKey,
+            agentName: host.state.agentName,
+            userLanguage: host.state.userLanguage,
+            messages: history.turns,
+            ...resolveAgentModelIdentity({
+              agentKey: host.state.agentKey,
+              agentName: host.state.agentName,
+            }),
+          }),
         };
         // 切到已有对话：读一次 dialog 记录的 totalCost 当历史基数，之后本会话
         // 的消费由每轮本地累加叠加在它上面。

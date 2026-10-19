@@ -220,6 +220,8 @@ export type CompactDialogResult = {
   summaryGenerated: boolean;
   /** Number of messages folded into the summary (0 when no compression ran). */
   compactedMessageCount: number;
+  /** The generated summary content when compression succeeded. */
+  summary?: string;
 };
 
 /**
@@ -310,6 +312,7 @@ export async function compactDialog(
   // --- Compression phase ---
   let summaryGenerated = false;
   let compactedMessageCount = 0;
+  let generatedSummary: string | undefined = undefined;
 
   if (options.summaryLlmCaller) {
     const allMsgs = await readDialogMessages(
@@ -389,6 +392,7 @@ export async function compactDialog(
             current.referenceKeys = Array.from(extractedKeys);
 
             summaryGenerated = true;
+            generatedSummary = newSummary.trim();
             compactedMessageCount = plan.compressCount;
             // P1-8 压缩埋点
             const metrics = buildCompactionMetricsFromPlan({
@@ -424,5 +428,6 @@ export async function compactDialog(
     spaceId: typeof next.spaceId === "string" ? next.spaceId : undefined,
     summaryGenerated,
     compactedMessageCount,
+    summary: generatedSummary,
   };
 }

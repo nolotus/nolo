@@ -12,6 +12,8 @@ import { Meter } from "render/web/ui/Meter";
 export type DialogUsagePanelProps = {
   tokenStats: TokenStats;
   contextWindow?: number;
+  contextTokens?: number;
+  estimated?: boolean;
   compressionCount?: number;
   className?: string;
 };
@@ -22,6 +24,8 @@ const formatExactTokens = (count: number): string =>
 export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
   tokenStats,
   contextWindow = 0,
+  contextTokens = 0,
+  estimated = true,
   compressionCount = 0,
   className = "",
 }) => {
@@ -36,13 +40,13 @@ export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
 
   const contextUsage = useMemo(() => {
     if (!contextWindow || contextWindow <= 0) return null;
-    const percent = getContextWindowUsagePercent(totalTokens, contextWindow);
+    const percent = getContextWindowUsagePercent(contextTokens, contextWindow);
     return {
       percent,
-      usedExact: formatExactTokens(totalTokens),
+      usedExact: formatExactTokens(contextTokens),
       windowLabel: formatCompactTokenCount(contextWindow),
     };
-  }, [contextWindow, totalTokens]);
+  }, [contextWindow, contextTokens]);
 
   return (
     <div
@@ -52,7 +56,7 @@ export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
       {/* Flat layout: no nested card inside the popover shell. */}
       <div className="dialog-usage-panel__row dialog-usage-panel__row--main">
         <p className="dialog-usage-panel__headline">
-          {contextUsage ? (
+          {t("chat:contextOccupancy", "上下文占用")}{estimated ? t("chat:contextOccupancyEstimated", "（估算）") : ""} · {contextUsage ? (
             <>
               {contextUsage.usedExact}
               <span className="dialog-usage-panel__headline-muted">
@@ -61,7 +65,7 @@ export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
               </span>
             </>
           ) : (
-            formatExactTokens(totalTokens)
+            `${formatExactTokens(contextTokens)} / ${t("chat:contextWindowUnknown", "上下文窗口未知")}`
           )}
         </p>
         <span className="dialog-usage-panel__billing-value">
@@ -69,6 +73,7 @@ export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
         </span>
       </div>
 
+      <p>{t("chat:dialogCumulative", "本对话累计")} · {formatExactTokens(totalTokens)}</p>
       <p className="dialog-usage-panel__io">
         ↑{formatExactTokens(inputTokens)}
         <span className="dialog-usage-panel__io-sep" aria-hidden="true">

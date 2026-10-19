@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Popover } from "render/web/ui/Popover";
 import { useAppSelector } from "app/store";
 import { useFetchData } from "app/hooks";
-import { resolveAgentContextWindow } from "agent-runtime/devin/devinChannelWindows";
+import { useDialogContextUsage } from "chat/dialog/useDialogContextUsage";
 import { selectCurrentDialogTokens } from "chat/dialog/dialogSlice";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { getActiveDialogAgentId } from "chat/dialog/dialogAgents";
@@ -13,12 +13,9 @@ import type { Agent } from "app/types";
 import { DialogUsagePanel } from "./DialogUsagePanel";
 import {
   getContextWindowUsagePercent,
-  getDialogTokenTotal,
 } from "chat/dialog/dialogUsageFormat";
 
-export const DialogUsageTrigger: React.FC<{ usagePercentOverride?: number }> = ({
-  usagePercentOverride,
-}) => {
+export const DialogUsageTrigger: React.FC = () => {
   const { t } = useTranslation(["common", "chat"]);
 
   const tokenStats = useAppSelector(selectCurrentDialogTokens);
@@ -31,29 +28,17 @@ export const DialogUsageTrigger: React.FC<{ usagePercentOverride?: number }> = (
     agent && agentId ? applyBuiltinAgentRuntimeOverride(agentId, agent) : agent;
   // 通道感知的 context window：devin 通道用通道真值表（未登记 id 回落全局表），
   // 其余通道走全局 MODEL_LOOKUP_MAP。切换小窗口模型后这里会立即反映真实容量。
-  const contextWindow = resolveAgentContextWindow(resolvedAgent ?? {});
+  const occupancy = useDialogContextUsage(resolvedAgent, dialogConfig?.summary);
+  const { contextWindow } = occupancy;
+  const percent = contextWindow
+    ? getContextWindowUsagePercent(occupancy.tokens, contextWindow)
+    : undefined;
 
-  const totalTokens = getDialogTokenTotal(
-    tokenStats?.inputTokens ?? 0,
-    tokenStats?.outputTokens ?? 0
-  );
-
-  const percent =
-    typeof usagePercentOverride === "number"
-      ? usagePercentOverride
-      : contextWindow > 0 && totalTokens > 0
-        ? getContextWindowUsagePercent(totalTokens, contextWindow)
-        : undefined;
-
-  // 百分比来自 token 估算，不是 provider 权威 prompt token，因此显式标注“估算/est.”。
-  const percentLabel = t(
-    "chat:contextUsagePercentEstimate",
-    "估算上下文用量 {{percent}}%",
-    { percent }
-  );
+  // Only estimates carry the estimate badge; unknown windows never get a percent.
+  const percentLabel = percent === undefined
+    ? t("chat:contextWindowUnknown")
+    : t("chat:contextOccupancyPercent", { percent });
   const percentEstimate = t("chat:contextUsageEstimate", "est.");
-
-  if (typeof percent !== "number" || percent <= 0) return null;
 
   return (
     <DialogTrigger>
@@ -67,13 +52,13 @@ export const DialogUsageTrigger: React.FC<{ usagePercentOverride?: number }> = (
         <div className="composer-drawer__mini-progress-track">
           <div
             className="composer-drawer__mini-progress-fill"
-            style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+            style={{ width: `${Math.min(100, Math.max(0, percent ?? 0))}%` }}
           />
         </div>
         <span className="composer-drawer__mini-progress-text">
-          {percent}%
+          {percent === undefined ? t("chat:contextWindowUnknown") : `${percent}%`}
           <span className="composer-drawer__mini-progress-estimate">
-            {percentEstimate}
+            {occupancy.estimated ? percentEstimate : ""}
           </span>
         </span>
       </RACButton>
@@ -85,6 +70,8 @@ export const DialogUsageTrigger: React.FC<{ usagePercentOverride?: number }> = (
       >
         <DialogUsagePanel
           tokenStats={tokenStats}
+          contextTokens={occupancy.tokens}
+          estimated={occupancy.estimated}
           contextWindow={contextWindow}
           compressionCount={dialogConfig?.compressionCount ?? 0}
         />

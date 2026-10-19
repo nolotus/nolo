@@ -16,6 +16,7 @@ export type ComposerDrawerProps = {
   browseHost?: string;
   imageConfigSummary?: string;
   usagePercent?: number;
+  contextTokens?: number;
   expanded?: boolean;
   onToggle?: () => void;
   children: React.ReactNode;
@@ -28,6 +29,7 @@ export const ComposerDrawer = memo(function ComposerDrawer({
   browseHost,
   imageConfigSummary,
   usagePercent,
+  contextTokens = 0,
   expanded = true,
   onToggle,
   children,
@@ -38,7 +40,8 @@ export const ComposerDrawer = memo(function ComposerDrawer({
   const hasSecondaryContext =
     attachmentCount > 0 ||
     hasBrowseContext ||
-    Boolean(imageConfigSummary);
+    Boolean(imageConfigSummary) ||
+    contextTokens > 0;
 
   // 当没有任何次级上下文时，保持 Composer 干净，不渲染空的 Drawer 栏
   if (!hasSecondaryContext) {
@@ -61,8 +64,8 @@ export const ComposerDrawer = memo(function ComposerDrawer({
   if (imageConfigSummary) {
     summaryParts.push(`${t("imageConfig", "生图")} ${imageConfigSummary}`);
   }
-  if (typeof usagePercent === "number" && usagePercent > 0) {
-    summaryParts.push(`${t("usage", "用量")} ${usagePercent}%`);
+  if (contextTokens > 0) {
+    summaryParts.push(typeof usagePercent === "number" ? `${t("usage", "用量")} ${usagePercent}%` : t("chat:contextWindowUnknown", "上下文窗口未知"));
   }
 
   const actionText = expanded
@@ -162,8 +165,8 @@ export const ComposerDrawer = memo(function ComposerDrawer({
             composerDrawerStyles.summaryRight
           )}
         >
-          {typeof usagePercent === "number" && usagePercent > 0 ? (
-            <DialogUsageTrigger usagePercentOverride={usagePercent} />
+          {contextTokens > 0 ? (
+            <DialogUsageTrigger />
           ) : null}
 
           <button

@@ -123,6 +123,7 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
 function applyAgentSwitch(
   state: TuiState,
   target: { name: string; key: string; model?: string },
+  historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
 ) {
   const contextWindow = resolveAgentContextWindow({
     agentKey: target.key,
@@ -141,6 +142,7 @@ function applyAgentSwitch(
         agentName: target.name,
         model: target.model,
         userLanguage: state.userLanguage,
+        messages: historyTurns,
       }),
     },
     output: `Switched to ${target.name}. ${
@@ -568,7 +570,7 @@ export function handleTuiInput(
           output: t("agentUnknown", argText),
         };
       }
-      return applyAgentSwitch(state, resolvedTarget);
+      return applyAgentSwitch(state, resolvedTarget, historyTurns);
     }
     case "/agents":
       return {
@@ -585,10 +587,14 @@ export function handleTuiInput(
         nextState: {
           ...state,
           userLanguage: locale,
+          turnTokens: undefined,
+          lastAuthorityTurnCount: undefined,
+          liveTurnEstimatedTokens: undefined,
           estimatedContextTokens: estimateDefaultCliContextTokens({
             cwd: state.cwd,
             agentKey: state.agentKey,
             userLanguage: locale,
+            messages: historyTurns,
             ...resolveAgentModelIdentity({
               agentKey: state.agentKey,
               agentName: state.agentName,

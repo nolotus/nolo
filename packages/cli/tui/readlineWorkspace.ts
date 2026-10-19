@@ -1147,7 +1147,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // （runResult.turnCredits 是「全轮逐次求和」的权威口径，与 llm-end 逐帧
     // 折算同源），再保留 live 值就是双计。credits 为 undefined（非平台计费）
     // 时同样清——本轮既然没有平台计费帧，live 值也不可能是真实消费。
-    state = { ...state, liveTurnCredits: undefined };
+    // liveTurnEstimatedTokens 同样随本轮结束清零，由权威 turnTokens 接管。
+    state = {
+      ...state,
+      liveTurnCredits: undefined,
+      liveTurnEstimatedTokens: undefined,
+    };
     if (credits === undefined || !Number.isFinite(credits)) return;
     state = { ...state, sessionCredits: (state.sessionCredits ?? 0) + credits };
   };

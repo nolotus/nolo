@@ -139,11 +139,22 @@ export type TuiState = {
    */
   liveTurnCredits?: number;
   /**
+   * 本轮 turn 进行中流式生成的输出 token 估算增量（随流式单调增长）。
+   * 轮内用于推进状态栏 chip 上下文占用展示，轮末拿到权威 turnTokens 后清零。
+   */
+  liveTurnEstimatedTokens?: number;
+  /**
    * Measured estimate of built-in system+tools context (AGENTS.md, guidance,
    * skill index, tool schemas). Used by the status chip until provider usage
    * arrives in turnTokens.
    */
   estimatedContextTokens?: number;
+  /**
+   * 最近一次权威 input 产生时历史消息数组包含的 turn 数（快照点）。
+   * 用于新 turn 开始时精准切出权威快照之后新增的 assistant/user 内容，
+   * 配合 estimateMessagesTokens 准确并入上下文占用基线。
+   */
+  lastAuthorityTurnCount?: number;
   /** Resolved from agentName at init / agent-switch; fallback when turnTokens has no contextWindow. */
   contextWindow?: number;
   /**

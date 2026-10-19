@@ -16,6 +16,7 @@ import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
 export function applyAgentSwitchState(
   state: TuiState,
   target: { name: string; key: string; model?: string },
+  messages?: readonly { role?: string; content?: unknown }[],
 ): TuiState {
   return {
     ...state,
@@ -25,7 +26,11 @@ export function applyAgentSwitchState(
     estimatedContextTokens: estimateDefaultCliContextTokens({
       cwd: state.cwd, agentKey: target.key, agentName: target.name,
       model: target.model, userLanguage: state.userLanguage,
+      messages,
     }),
+    turnTokens: undefined,
+    lastAuthorityTurnCount: undefined,
+    liveTurnEstimatedTokens: undefined,
     cachedMemoryOverlay: undefined,
   };
 }

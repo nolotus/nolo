@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveToolGuidedSections } from "../../ai/agent/toolGuidedSections";
 import { estimateTokenCount } from "../../ai/context/tokenUtils";
+import { estimateMessagesTokens } from "../../ai/context/contextOccupancy";
 import { prepareTools } from "../../ai/tools/prepareTools";
 import { expandEnabledPacks } from "../../ai/tools/toolPacks";
 import { buildIdentityBlock } from "../../agent-runtime/identityBlock";
@@ -88,6 +89,10 @@ export function estimateDefaultCliContextTokens(opts: {
   model?: string;
   agentPrompt?: string;
   userLanguage?: string;
+  /** 对话历史消息（如 /switch、/compact 之后或 provider 未回 usage 时的估算） */
+  messages?: readonly { role?: string; content?: unknown }[];
+  /** 纯文本历史或拼接内容 */
+  historyText?: string;
 } = {}): number {
   const cwd = opts.cwd?.trim() || process.cwd();
   // 兜底 = 默认档 nolo，全部从 builtinAgentCatalog 派生。这三行曾手抄
@@ -135,25 +140,12 @@ export function estimateDefaultCliContextTokens(opts: {
     systemParts.filter((part) => part?.trim()).join("\n\n"),
   );
   const toolTokens = estimateToolSchemas(toolNames);
-  return Math.max(0, systemTokens + toolTokens);
-}
-
-/** Estimate tokens for already-assembled chat messages (rough). */
-export function estimateChatMessagesTokens(
-  messages: Array<{ content?: unknown }>,
-): number {
-  if (!messages.length) return 0;
-  const text = messages
-    .map((message) => {
-      const content = message.content;
-      if (typeof content === "string") return content;
-      if (content == null) return "";
-      try {
-        return JSON.stringify(content);
-      } catch {
-        return String(content);
-      }
-    })
-    .join("\n");
-  return estimateTokenCount(text);
+  // 守卫：若同时传入 messages 与 historyText，优先使用结构化的 messages（estimateMessagesTokens），避免双计历史。
+  const historyTokens =
+    opts.messages && opts.messages.length > 0
+      ? estimateMessagesTokens(opts.messages)
+      : opts.historyText
+        ? estimateTokenCount(opts.historyText)
+        : 0;
+  return Math.max(0, systemTokens + toolTokens + historyTokens);
 }

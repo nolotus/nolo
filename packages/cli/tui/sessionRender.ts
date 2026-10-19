@@ -41,15 +41,18 @@ export function renderComposerTokenChip(
   tokens: TurnTokenUsage | undefined,
   fallbackContextWindow?: number,
   estimatedContextTokens?: number,
+  turnEstimatedTokens?: number,
 ) {
   // 口径与 `/context` 面板的令牌行同一处（resolveContextUsage）：
   // 已用 = 下一轮上下文占用（provider input，未收到 usage 时用本地估算），
   // **不加 output**——生成量不等于下一轮还要发出去的上下文。
-  const usage = resolveContextUsage(
+  // turn 内流式推进时，以 turnEstimatedTokens 推进估算。
+  const usage = resolveContextUsage({
     tokens,
     fallbackContextWindow,
     estimatedContextTokens,
-  );
+    turnEstimatedTokens,
+  });
   if (usage.used === undefined || usage.contextWindow === undefined) {
     return "context: —";
   }
@@ -144,6 +147,7 @@ export function renderStatusLine(
       state.turnTokens,
       state.contextWindow,
       state.estimatedContextTokens,
+      state.liveTurnEstimatedTokens,
     ),
     "muted",
     colorEnabled,
@@ -522,6 +526,7 @@ export function renderContextPanel(
       renderTokenStatus(state.turnTokens, {
         contextWindow: state.contextWindow,
         estimatedContextTokens: state.estimatedContextTokens,
+        turnEstimatedTokens: state.liveTurnEstimatedTokens,
       }),
     ),
     field(

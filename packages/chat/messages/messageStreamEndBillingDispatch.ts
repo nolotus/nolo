@@ -84,6 +84,7 @@ export async function dispatchStreamEndBilling(
           dialogId,
           dialogKey,
           usage: billedEstimatedUsage,
+          contextUsageAuthoritative: false,
           agentConfig,
         }),
       ).unwrap();

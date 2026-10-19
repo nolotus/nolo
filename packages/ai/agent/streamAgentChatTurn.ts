@@ -1092,6 +1092,7 @@ export const streamAgentChatTurnHandler = async (
                                 dialogId,
                                 dialogKey,
                                 usage: cliUsage,
+                                contextUsageAuthoritative: !isCliEstimated,
                                 agentConfig: isCliEstimated
                                     ? { ...agentConfig, apiSource: "cli" }
                                     : agentConfig,
