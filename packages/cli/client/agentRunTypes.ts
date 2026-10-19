@@ -10,6 +10,7 @@ import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilitie
  */
 
 import { isLoopbackUrl } from "../../core/localOrigins";
+import { CLI_PROVIDER_VALUES, isCliProvider } from "../../ai/agent/cliProviders";
 import type { CollapsedPasteStore } from "core/collapsedPaste";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
@@ -126,17 +127,7 @@ export function resolveBoundMachineId(agentConfig: any) {
 /**
  * Set of recognized CLI provider names.
  */
-export const CLI_PROVIDER_NAMES = new Set([
-  "agy",
-  "claude",
-  "codex",
-  "copilot",
-  "gemini",
-  "grok",
-  "kimi",
-  "opencode",
-  "qoder",
-]);
+export const CLI_PROVIDER_NAMES = new Set<string>(CLI_PROVIDER_VALUES);
 
 /**
  * Check whether the agent config maps to a CLI provider.
@@ -147,12 +138,13 @@ export const CLI_PROVIDER_NAMES = new Set([
  * 只有白名单内的 CLI 名、显式 apiSource:"cli" 或 provider:"cli" 才算 CLI agent。
  */
 export function isCliProviderAgentConfig(agentConfig: any) {
+  if (!agentConfig || typeof agentConfig !== "object") return false;
   if (asTrimmedLowercaseString(agentConfig?.apiSource) === "cli") return true;
   const cliProvider = asTrimmedLowercaseString(agentConfig?.cliProvider);
-  if (cliProvider && CLI_PROVIDER_NAMES.has(cliProvider)) return true;
+  if (isCliProvider(cliProvider)) return true;
   const provider = asTrimmedLowercaseString(agentConfig?.provider);
   if (provider === "cli") return true;
-  return CLI_PROVIDER_NAMES.has(provider);
+  return isCliProvider(provider);
 }
 
 /**

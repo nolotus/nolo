@@ -9,6 +9,26 @@
 import type { TuiInputResult, TuiState } from "./sessionTypes";
 import { handleTuiInput as handleBaseTuiInput } from "./sessionDispatch";
 import { TUI_LEARN_REVIEW_PROMPT } from "./learnPrompt";
+import { resolveAgentContextWindow } from "../client/tokenUsage";
+import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
+
+/** Apply an already validated target; runtime cache/persistence belong to the host. */
+export function applyAgentSwitchState(
+  state: TuiState,
+  target: { name: string; key: string; model?: string },
+): TuiState {
+  return {
+    ...state,
+    agentName: target.name,
+    agentKey: target.key,
+    contextWindow: resolveAgentContextWindow({ agentKey: target.key, agentName: target.name, model: target.model }),
+    estimatedContextTokens: estimateDefaultCliContextTokens({
+      cwd: state.cwd, agentKey: target.key, agentName: target.name,
+      model: target.model, userLanguage: state.userLanguage,
+    }),
+    cachedMemoryOverlay: undefined,
+  };
+}
 
 // Types
 export type {
@@ -93,5 +113,26 @@ export function handleTuiInput(
     return { nextState: state, output: "", action: { type: "learn-history", limit: Number(value) } };
   }
 
-  return handleBaseTuiInput(input, state, historyTurns);
+  const result = handleBaseTuiInput(input, state, historyTurns);
+  const switchMatch = trimmed.match(/^\/(?:switch|agent)\s+(.+)$/s);
+  if (switchMatch && !["list", "current", "show"].includes(switchMatch[1]!)) {
+    const target = switchMatch[1]!;
+    // Unknown names and unverified raw keys must resolve in the catalog before
+    // any state/cache/profile changes. The base resolver accepts arbitrary keys.
+    if (result.nextState === state || result.nextState.agentName === result.nextState.agentKey) {
+      return { nextState: state, output: "", action: { type: "switch-agent", target } };
+    }
+    return {
+      ...result,
+      nextState: {
+        ...applyAgentSwitchState(state, {
+          key: result.nextState.agentKey, name: result.nextState.agentName,
+        }),
+        // The synchronous platform resolver already has the model identity.
+        contextWindow: result.nextState.contextWindow,
+        estimatedContextTokens: result.nextState.estimatedContextTokens,
+      },
+    };
+  }
+  return result;
 }

@@ -269,6 +269,8 @@ export async function createLocalDockerWorkload(args: {
           ...(args.quotaProvider ? { quotaProvider: args.quotaProvider } : {}),
         });
       return new DockerWorkloadLifecycle({
+        // 本机通道不依赖浏览器核实额度（当天该链路掉 4 次）：跳过核实但继续记账。
+        quotaVerify: false,
         topology: "single-host-shared-sqlite",
         journalPath:
           args.env.NOLO_DOCKER_JOURNAL_PATH ??

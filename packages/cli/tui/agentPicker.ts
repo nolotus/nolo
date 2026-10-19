@@ -6,6 +6,7 @@ import {
   findAgentCatalogEntry,
   formatAgentSourceLabel,
   formatUnavailableFavoritesNotice,
+  hasWarmAgentCatalogCache,
   loadAgentCatalogWithNotices,
   renderAgentCatalogList,
   type AgentCatalogEntry,
@@ -57,6 +58,10 @@ export async function runAgentPicker(args: {
   registerForegroundRepaint?: (repaint: () => void) => void;
   mouseEnabled?: boolean;
   session?: import("./dialogHost").DialogSession;
+  /** Force synchronous network revalidation before opening instead of serving cached catalog. */
+  fresh?: boolean;
+  /** When serving from cache, trigger a background revalidation. Defaults to true. */
+  revalidateInBackground?: boolean;
 }) {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
@@ -64,9 +69,12 @@ export async function runAgentPicker(args: {
     args.interactive ??
     ("isTTY" in input && Boolean(input.isTTY) && "isTTY" in output && Boolean(output.isTTY));
 
-  // 加载期间显示提示，网络快时一闪而过，慢时给用户反馈。
+  const fresh = args.fresh ?? false;
+  // 仅在无可用缓存或显式要求 fresh 时显示 loading 提示；
+  // warm 场景直接返回缓存渲染，避免终端闪烁与无意义网络阻塞。
   const isTty = outputIsTty(output);
-  if (isTty) {
+  const showLoading = isTty && (fresh || !hasWarmAgentCatalogCache({ env: args.env }));
+  if (showLoading) {
     output.write(t("agentPickerLoading"));
   }
 
@@ -77,11 +85,12 @@ export async function runAgentPicker(args: {
       currentKey: args.currentKey,
       fetchImpl: args.fetchImpl,
       fallbackFetchImpl: args.fallbackFetchImpl,
-      fresh: true,
+      fresh,
+      revalidateInBackground: args.revalidateInBackground ?? true,
     });
   } finally {
     // 清除 loading 提示行（异常时也不残留）。
-    if (isTty) {
+    if (showLoading) {
       output.write("\r\x1b[2K");
     }
   }
@@ -90,7 +99,9 @@ export async function runAgentPicker(args: {
   const unavailableNotice = formatUnavailableFavoritesNotice(
     loadResult.unavailableFavoriteCount
   );
-  const footerLines = unavailableNotice ? [unavailableNotice] : undefined;
+  const staleNotice = loadResult.refreshStatus === "degraded" || loadResult.refreshStatus === "failed"
+    ? "列表可能不是最新（刷新未完成，请再次打开重试）" : null;
+  const footerLines = [unavailableNotice, staleNotice].filter((line): line is string => Boolean(line));
 
   if (!interactive) {
     return {

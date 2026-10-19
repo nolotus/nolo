@@ -16,7 +16,8 @@ import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import type { DelegatedPayloadMetrics } from "../../agent-runtime/executionObservation";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
-import { CLI_PROVIDER_NAMES } from "./agentRunTypes";
+import { isCliProviderAgentConfig } from "./agentRunTypes";
+import { CLI_PROVIDER_VALUES, isCliProvider, type CliProvider } from "../../ai/agent/cliProviders";
 
 export type { DelegatedPayloadMetrics };
 
@@ -186,23 +187,26 @@ export function parseJsonObject(raw: string) {
   }
 }
 
-export function isCliProviderAgent(agentConfig: AgentRuntimeAgentConfig) {
-  // 防御：机器派发 payload 里 cliProvider 是服务端 `cliProvider ?? provider`
-  // 兜底出来的。平台 agent（provider="nolo"）会被误判成 CLI worker 并以
-  // "Unknown CLI provider: nolo" 失败。非白名单 CLI 名不算 CLI agent，
-  // 落回 TRANSPORTS 链上的平台代理通道。
-  const providerName = asTrimmedLowercaseString(agentConfig.cliProvider);
-  if (providerName && CLI_PROVIDER_NAMES.has(providerName)) return true;
-  if (agentConfig.apiSource === "cli") return true;
-  if (asTrimmedLowercaseString(agentConfig.provider) === "cli") return true;
-  return false;
-}
+export const isCliProviderAgent = isCliProviderAgentConfig;
 
-export function resolveCliProviderName(agentConfig: AgentRuntimeAgentConfig) {
-  const explicit = asTrimmedLowercaseString(agentConfig.cliProvider);
-  if (explicit && CLI_PROVIDER_NAMES.has(explicit)) return explicit;
-  const providerName = asTrimmedLowercaseString(agentConfig.provider);
-  if (providerName && CLI_PROVIDER_NAMES.has(providerName)) return providerName;
+export function resolveCliProviderName(
+  agentConfig: AgentRuntimeAgentConfig,
+): CliProvider {
+  const explicit = asTrimmedLowercaseString(agentConfig?.cliProvider);
+  if (explicit) {
+    if (isCliProvider(explicit)) return explicit;
+    throw new Error(
+      `Unknown CLI provider: "${agentConfig?.cliProvider}". Expected one of: ${CLI_PROVIDER_VALUES.join(", ")}`,
+    );
+  }
+  const providerName = asTrimmedLowercaseString(agentConfig?.provider);
+  if (providerName) {
+    if (isCliProvider(providerName)) return providerName;
+    if (providerName === "cli") return "codex";
+    throw new Error(
+      `Unknown CLI provider: "${agentConfig?.provider}". Expected one of: ${CLI_PROVIDER_VALUES.join(", ")}`,
+    );
+  }
   return "codex";
 }
 

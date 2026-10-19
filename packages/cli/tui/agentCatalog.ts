@@ -166,7 +166,10 @@ type AgentCatalogCacheEntry = {
 };
 
 /** 原始目录数据（网络拉取结果，不含 currentKey 排序）。 */
+export type AgentCatalogRefreshStatus = "success" | "degraded" | "failed";
+
 type RawCatalogData = {
+  status: AgentCatalogRefreshStatus;
   privateAgents: AgentCatalogEntry[];
   favoritedAtByKey: Record<string, number>;
   /** 已收藏但 hydrate 失败的条数：>0 时目录视图给一行提示，0 时零额外输出。 */
@@ -175,6 +178,7 @@ type RawCatalogData = {
 
 /** 目录加载结果：条目 + 可见性诊断（提示行用，渲染层不需要猜）。 */
 export type AgentCatalogLoadResult = {
+  refreshStatus: AgentCatalogRefreshStatus | null;
   entries: AgentCatalogEntry[];
   /**
    * orphan 收藏项 hydrate 失败数（读取抛错/超时）。
@@ -205,6 +209,15 @@ export function formatUnavailableFavoritesNotice(
 }
 
 let agentCatalogCache: AgentCatalogCacheEntry | null = null;
+let lastRefresh: { cacheKey: string; status: AgentCatalogRefreshStatus } | null = null;
+
+/** Last completed refresh; starting a retry does not erase a failure notice. */
+export function getAgentCatalogRefreshStatus(args: { env?: EnvLike } = {}): AgentCatalogRefreshStatus | null {
+  const env = args.env ?? process.env;
+  const token = resolveAuthToken([], env);
+  const key = `${token ? parseUserIdFromAuthToken(token) ?? "anon" : "anon"}|${resolveServerUrl(env)}`;
+  return lastRefresh?.cacheKey === key ? lastRefresh.status : null;
+}
 let agentCatalogRefreshInFlight: Promise<void> | null = null;
 // Explicit picker refreshes supersede older startup/SWR cache writes.
 let agentCatalogGeneration = 0;
@@ -220,6 +233,8 @@ const agentCatalogRawLoadInFlight = new Map<
 
 /** 缓存「新鲜」窗口：窗口内重复打开 /agent 不再触发后台刷新。 */
 const AGENT_CATALOG_FRESH_MS = 15_000;
+/** Hard limit: older snapshots must synchronously revalidate. */
+export const AGENT_CATALOG_MAX_STALE_MS = 5 * 60_000;
 
 /**
  * 目录网络请求截止时间：跨服务器用 Promise.all 合并，最慢的服务器决定整体耗时。
@@ -375,7 +390,25 @@ export function withFetchDeadline(
 export function invalidateAgentCatalogCache() {
   agentCatalogGeneration++;
   agentCatalogCache = null;
+  lastRefresh = null;
   agentCatalogRawLoadInFlight.clear();
+}
+
+/** 检查当前环境是否已有热目录缓存。 */
+export function hasWarmAgentCatalogCache(args: { env?: EnvLike } = {}): boolean {
+  const env = args.env ?? process.env;
+  const authToken = resolveAuthToken([], env);
+  const userId = authToken ? parseUserIdFromAuthToken(authToken) : null;
+  const cacheKey = `${userId ?? "anon"}|${resolveServerUrl(env)}`;
+  return agentCatalogCache?.cacheKey === cacheKey &&
+    Date.now() - agentCatalogCache.at < AGENT_CATALOG_MAX_STALE_MS;
+}
+
+/** 等待正在进行的后台刷新完成（测试及显式同步使用）。 */
+export async function waitForAgentCatalogBackgroundRefresh(): Promise<void> {
+  while (agentCatalogRefreshInFlight) {
+    await agentCatalogRefreshInFlight;
+  }
 }
 
 /**
@@ -404,6 +437,8 @@ export type LoadAgentCatalogArgs = {
   deadlineKind?: "foreground" | "background";
   /** Revalidate before opening a picker instead of serving the SWR snapshot. */
   fresh?: boolean;
+  /** When serving from cache, trigger a background revalidation. Defaults to true when fresh is not set. */
+  revalidateInBackground?: boolean;
 };
 
 /** 同 loadAgentCatalog，额外带出 orphan 失败数（目录视图提示行用）。 */
@@ -417,12 +452,28 @@ export async function loadAgentCatalogWithNotices(
   const cached =
     agentCatalogCache?.cacheKey === cacheKey ? agentCatalogCache : null;
 
-  if (cached && !args.fresh) {
-    if (Date.now() - cached.at >= AGENT_CATALOG_FRESH_MS) {
+  if (cached && !args.fresh && Date.now() - cached.at < AGENT_CATALOG_MAX_STALE_MS) {
+    const refreshStatus = getAgentCatalogRefreshStatus({ env });
+    if (args.revalidateInBackground || Date.now() - cached.at >= AGENT_CATALOG_FRESH_MS) {
       refreshAgentCatalogInBackground(args, env, cacheKey);
+    }
+    if (args.currentKey && cached.entries.length > 1 && cached.entries[0]?.key !== args.currentKey) {
+      const idx = cached.entries.findIndex((entry) => entry.key === args.currentKey);
+      if (idx > 0) {
+        return {
+          entries: [
+            cached.entries[idx]!,
+            ...cached.entries.slice(0, idx),
+            ...cached.entries.slice(idx + 1),
+          ],
+          refreshStatus,
+          unavailableFavoriteCount: cached.unavailableFavoriteCount,
+        };
+      }
     }
     return {
       entries: cached.entries,
+      refreshStatus,
       unavailableFavoriteCount: cached.unavailableFavoriteCount,
     };
   }
@@ -456,6 +507,9 @@ export async function loadAgentCatalogWithNotices(
   // 先落缓存让 picker 立即出列表：订阅额度探测（一次 /api/agents/quota/refresh
   // 往返，正常 ~300ms、慢时吃满 2s 预算）不再占用 /switch 冷加载关键路径。
   if (generation === agentCatalogGeneration) {
+    lastRefresh = { cacheKey, status: rawData.status };
+  }
+  if (generation === agentCatalogGeneration && rawData.status === "success") {
     agentCatalogCache = {
       cacheKey,
       at: Date.now(),
@@ -471,7 +525,7 @@ export async function loadAgentCatalogWithNotices(
   // 无需额外动作，也绝不能重建/重设 agentCatalogCache.at，否则配额探测
   // 会白送缓存新鲜窗口、延长缓存寿命。探测本身失败静默。
   void mergeCatalogQuotas(entries, { env, fetchImpl: args.fetchImpl }).catch(() => {});
-  return { entries, unavailableFavoriteCount: rawData.unavailableFavoriteCount };
+  return { entries, unavailableFavoriteCount: rawData.unavailableFavoriteCount, refreshStatus: rawData.status };
 }
 
 /** 按需探测额度并就地合并进目录条目（平台条目永远没有 quota，不探测）。 */
@@ -511,6 +565,10 @@ function refreshAgentCatalogInBackground(
     env,
   )
     .then(async (rawData) => {
+      if (generation !== agentCatalogGeneration) return;
+      lastRefresh = { cacheKey, status: rawData.status };
+      // Only authoritative results may replace the retained snapshot.
+      if (rawData.status !== "success") return;
       const entries = mergeCatalogEntries(
         args.currentKey,
         resolveCatalogPlatformAgents(env),
@@ -528,6 +586,7 @@ function refreshAgentCatalogInBackground(
       }
     })
     .catch(() => {
+      if (generation === agentCatalogGeneration) lastRefresh = { cacheKey, status: "failed" };
       // 后台刷新失败：保留旧缓存，下次打开再试。
     })
     .finally(() => {
@@ -589,7 +648,7 @@ async function fetchRawCatalogData(
   const userId = authToken ? parseUserIdFromAuthToken(authToken) : null;
 
   if (!authToken || !userId) {
-    return { privateAgents: [], favoritedAtByKey: {} };
+    return { privateAgents: [], favoritedAtByKey: {}, unavailableFavoriteCount: 0, status: "success" };
   }
 
   const serverUrl = resolveServerUrl(env);
@@ -603,12 +662,16 @@ async function fetchRawCatalogData(
   // 保留原始 ListedAgent[]，供 orphan hydrate 做三键（privateKey/publicKey/id）去重，
   // 与 agentListCommands.ts 的 `nolo agent list --safe` 对齐，避免同一 agent 重复入目。
   let listedAgents: ListedAgent[] = [];
-  // 收藏列表与 agent 目录并行拉取；失败降级为空（不影响目录展示）。
+  let catalogAuthoritative = false;
+  let catalogAvailable = false;
+  let favoritesFailed = false;
+  // 收藏列表与目录并行；保留失败诊断，不能把失败当作权威空收藏。
   const favoritesPromise = listFavoriteAgentIdsAcrossServers({
     authToken,
     fetchImpl,
     serverUrls,
-  }).catch(() => ({} as Record<string, number>));
+    onFailure: () => { favoritesFailed = true; },
+  }).catch(() => { favoritesFailed = true; return {} as Record<string, number>; });
 
   try {
     const remoteResult = await listRemoteAgentsAcrossServers({
@@ -619,6 +682,8 @@ async function fetchRawCatalogData(
       userId,
     });
     listedAgents = remoteResult.agents;
+    catalogAvailable = true;
+    catalogAuthoritative = remoteResult.failures.length === 0 && serverUrls.length === allServerUrls.length;
     // A successful empty result is authoritative, including after tombstone
     // merge. All-server failure already throws in listUserRecordsFromServers;
     // falling back on emptiness would revive historical local agents.
@@ -650,6 +715,7 @@ async function fetchRawCatalogData(
             );
           }),
         ]);
+        catalogAvailable = true;
       } finally {
         if (localTimer) clearTimeout(localTimer);
       }
@@ -664,6 +730,7 @@ async function fetchRawCatalogData(
           queryUserRecords,
           readDbRecord,
         });
+        catalogAvailable = true;
       } catch {
         // 所有通道（跨服务器查询 / 本地 DB / 单服务器重试）都不可用：
         // 返回空私有目录（仅平台内置项可切换），而不是把异常抛给 TUI 交互流。
@@ -697,6 +764,7 @@ async function fetchRawCatalogData(
     existingKeys.add(agent.id);
   }
   let unavailableFavoriteCount = 0;
+  let orphanSkipped = false;
 
   // orphan 读取共享同一个 deadline 预算：目录主链路（agents + favorites）用掉的
   // 时间从预算里扣，剩余不足时跳过剩余 orphan——错过项由 SWR 后台刷新补齐，
@@ -705,7 +773,7 @@ async function fetchRawCatalogData(
     Object.keys(favoritedAtByKey).map(async (favKey) => {
       if (existingKeys.has(favKey)) return;
       const remainingMs = deadlineMs - (performance.now() - fetchStartedAt);
-      if (remainingMs <= 0) return;
+      if (remainingMs <= 0) { orphanSkipped = true; return; }
       try {
         let orphanTimer: ReturnType<typeof setTimeout> | undefined;
         const orphanDeadline = new Promise<never>((_, reject) => {
@@ -754,7 +822,11 @@ async function fetchRawCatalogData(
   );
 
 
-  return { privateAgents, favoritedAtByKey, unavailableFavoriteCount };
+  const status: AgentCatalogRefreshStatus = !catalogAvailable && favoritesFailed
+    ? "failed"
+    : catalogAuthoritative && !favoritesFailed && unavailableFavoriteCount === 0 && !orphanSkipped
+      ? "success" : "degraded";
+  return { privateAgents, favoritedAtByKey, unavailableFavoriteCount, status };
 }
 
 export function renderAgentCatalogList(

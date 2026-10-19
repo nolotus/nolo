@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { buildCliProcessEnv } from "./cliProcessEnv";
 import { resolveLaunchableCodexCommand } from "./codexBinary";
 
 type EnvLike = Record<string, string | undefined>;
@@ -35,17 +36,19 @@ const COMMAND_CAPABILITIES: Array<[probes: CommandProbe[], capabilities: string[
   [[{ command: "grok", args: ["--version"] }], ["grok-cli"]],
 ];
 
-function defaultCommandExists(command: string) {
-  const pathEntries = (process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":");
+function defaultCommandExists(command: string, env: EnvLike) {
+  const pathEntries = (buildCliProcessEnv(env).PATH ?? "").split(process.platform === "win32" ? ";" : ":");
   const extensions = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
   return pathEntries.some((entry) =>
     extensions.some((extension) => existsSync(join(entry, `${command}${extension}`)))
   );
 }
 
-function defaultCommandLaunchable(command: string, args: string[]) {
-  const executable = command === "codex" ? resolveLaunchableCodexCommand() : command;
+function defaultCommandLaunchable(command: string, args: string[], env: EnvLike) {
+  const processEnv = buildCliProcessEnv(env);
+  const executable = command === "codex" ? resolveLaunchableCodexCommand(processEnv) : command;
   const result = spawnSync(executable, args, {
+    env: processEnv,
     stdio: "pipe",
     timeout: 3_000,
     windowsHide: true,
@@ -56,9 +59,10 @@ function defaultCommandLaunchable(command: string, args: string[]) {
 export function detectRuntimeCapabilities(
   options: DetectRuntimeCapabilitiesOptions = {}
 ): string[] {
-  const commandExists = options.commandExists ?? defaultCommandExists;
-  const commandLaunchable = options.commandLaunchable ?? defaultCommandLaunchable;
   const env = options.env ?? process.env;
+  const commandExists = options.commandExists ?? ((command) => defaultCommandExists(command, env));
+  const commandLaunchable = options.commandLaunchable ??
+    ((command, args) => defaultCommandLaunchable(command, args, env));
   const capabilities: string[] = [];
 
   for (const [probes, detectedCapabilities] of COMMAND_CAPABILITIES) {

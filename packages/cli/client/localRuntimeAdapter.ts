@@ -298,6 +298,10 @@ import {
   LOCAL_DOCKER_TOOL_NAMES,
   type LocalDockerWorkloadHandle,
 } from "./localDockerWorkload";
+import {
+  createDockerRunTeardown,
+  exportDockerRunDiffArtifact,
+} from "./localRunArtifactExport";
 import { WORKSPACE_TOOL_NAMES } from "../../agent-runtime/localWorkspaceToolDefs";
 import { getAgentRuntimeToolParametersIndex } from "../agentRuntimeLocal";
 import { inferCaptureIntent } from "../../ai/policy/runtimePolicy";
@@ -823,7 +827,31 @@ export function createCliLocalRuntimeAdapter(
       : null;
     dockerWorkloadReleased = true;
     dockerWorkloadLoad = null;
-    await loaded?.release();
+    if (loaded) {
+      // 块ART2：run 终态自动导出 —— 在沙盒销毁**之前**把工作区改动导成 patch
+      // 存进产物层（`runs/<runId>/diff.patch`），ref 写回 runsDir 审计。
+      // 导出是审计增强，不是 run 结果的成立条件：任何失败只 warning，既不改变
+      // run 结果，也不阻断 release（沙盒不释放会一直计费）。
+      const exportRunDiff =
+        (
+          deps as {
+            exportDockerRunDiffArtifact?: typeof exportDockerRunDiffArtifact;
+          }
+        ).exportDockerRunDiffArtifact ?? exportDockerRunDiffArtifact;
+      const warn = (message: string) => process.stderr.write(`[nolo] ${message}\n`);
+      await createDockerRunTeardown({
+        exportDiff: () =>
+          exportRunDiff({
+            runId: loaded.runId,
+            runsDir: resolveRunsDir(deps.env),
+            exec: (command) => loaded.channel("execShell", { command }),
+            warn,
+          }),
+        release: () => loaded.release(),
+        warn,
+      })();
+      return;
+    }
   };
   /**
    * 本机 OS 沙盒 workload（渐进第一步，只接管 execShell）。惰性创建一次

@@ -374,6 +374,8 @@ export async function listFavoriteAgentIdsAcrossServers(args: {
   authToken: string;
   fetchImpl: CliFetchImpl;
   serverUrls: string[];
+  /** Optional diagnostics; legacy callers still receive best-effort favorites. */
+  onFailure?: (serverUrl: string) => void;
 }): Promise<Record<string, number>> {
   const favoritedAtByKey: Record<string, number> = {};
   await Promise.all(
@@ -387,8 +389,11 @@ export async function listFavoriteAgentIdsAcrossServers(args: {
           },
           body: JSON.stringify({ targetType: "agent" }),
         });
-        if (!res.ok) return;
-        const data: any = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error("favorites request failed");
+        const data: any = await res.json();
+        if (!Array.isArray(data?.items) && !Array.isArray(data?.ids)) {
+          throw new Error("invalid favorites response");
+        }
         const items = Array.isArray(data?.items) ? data.items : [];
         for (const item of items) {
           const id = typeof item?.id === "string" ? item.id : "";
@@ -406,6 +411,7 @@ export async function listFavoriteAgentIdsAcrossServers(args: {
           }
         }
       } catch {
+        args.onFailure?.(serverUrl);
         // 单服务器失败不阻塞目录
       }
     }),

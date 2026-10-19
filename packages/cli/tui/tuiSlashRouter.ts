@@ -8,8 +8,10 @@
 // 快照），分支顺序、输出文本、错误处理路径零改动。
 // 依赖方向单向：本模块 → tuiTurnRunner / session / tuiHistory 等叶子模块；
 // 本模块禁止回指 readlineWorkspace.ts。
+import { loadAgentCatalog } from "./agentCatalog";
+import { resolveAgentSwitchTarget } from "./agentPicker";
 import { collectConversationTurns } from "./conversationLinks";
-import { handleTuiInput, type TuiState } from "./session";
+import { handleTuiInput, applyAgentSwitchState, type TuiState } from "./session";
 import {
   ensureChatQueueBinding,
   isInteractiveInput,
@@ -93,6 +95,8 @@ export interface SlashDispatchHost {
   readonly renderHistoryToOutput: () => void;
   readonly scheduleRender: () => void;
   readonly seedDialogCreditsBase: (dialogId: string, dialogKey: string) => void;
+  /** Optional catalog seam for embedders/tests; production uses loadAgentCatalog. */
+  readonly loadAgentCatalog?: typeof loadAgentCatalog;
   readonly persistExplicitAgentSwitch: (previousAgentKey: string) => boolean;
   // readlineWorkspace 模块级函数（默认档不落盘的 agent 选择持久化），
   // pick-agent 分支与 persistExplicitAgentSwitch 共用；为避免反向依赖经 host 注入。
@@ -192,6 +196,7 @@ export async function runSubmittedSlashLine(
   if ((command === "/agent" || command === "/switch") && result.nextState !== previousState) {
     // Successful explicit selection may refresh the same agent's model.
     clearCliLocalRuntimePreparedAgentCache();
+    persistAgentSelection(host.state, options.env ?? process.env);
   }
 
   // In interactive mode the transcript pane is owned by renderHistory; a raw
@@ -477,6 +482,37 @@ export async function runSubmittedSlashLine(
       emitCommandOutput(result.action.switchMessage);
     }
     scheduleRender();
+  }
+
+  if (result.action?.type === "switch-agent") {
+    const query = result.action.target;
+    try {
+      const entries = await (host.loadAgentCatalog ?? loadAgentCatalog)({
+        env: options.env ?? process.env,
+        currentKey: host.state.agentKey,
+        fetchImpl,
+        fallbackFetchImpl: host.fallbackFetchImpl,
+        fresh: true,
+      });
+      const target = resolveAgentSwitchTarget(query, entries);
+      // The generic resolver deliberately permits unknown raw keys. Explicit
+      // async switches require positive catalog evidence, not that fallback.
+      if (!target || !entries.some((entry) => entry.key === target.key)) {
+        emitCommandOutput(t("agentUnknown", query));
+      } else {
+        const nextState = applyAgentSwitchState(host.state, target);
+        // No mutation above this point: lookup failures leave all switch state
+        // untouched. Commit the validated selection synchronously, without await.
+        const oldKey = host.state.agentKey;
+        host.state = nextState;
+        clearCliLocalRuntimePreparedAgentCache();
+        persistAgentSelection(host.state, options.env ?? process.env);
+        if (host.state.agentKey !== oldKey) persistExplicitAgentSwitch(oldKey);
+        emitCommandOutput(formatAgentSwitchMessage({ name: target.name, dialogId: host.state.dialogId }));
+      }
+    } catch (error) {
+      emitCommandOutput(`[nolo] Agent switch failed: ${toErrorMessage(error)}`);
+    }
   }
 
   if (result.action?.type === "pick-agent") {

@@ -131,6 +131,11 @@ export interface DockerSandboxExecutionBackendDeps {
   sandboxName?: string;
   /** 缺省视为「额度不可核实」→ 一律拒绝，绝不默认放行。 */
   quotaProvider?: DockerSandboxQuotaProvider;
+  /**
+   * 是否用 quotaProvider 核实余额（默认 true = 既有 fail-closed 语义）。
+   * false 时跳过核实、但仍按固定费率记账；由**入口**按部署注入，模块不读 env。
+   */
+  quotaVerify?: boolean;
   /** 缺省为进程内 KV（只适合测试）；生产必须注入 File/Remote store。 */
   kvStore?: DockerQuotaKvStore;
   now?: () => number;
@@ -186,6 +191,9 @@ export function resolveMaxActiveSandboxesFromEnv(
   }
   return parsed;
 }
+/** 不核实余额时的记账费率（nanoUSD/s，benchmarks 实测 medium 档）。 */
+const UNVERIFIED_QUOTA_RATE_NANO_USD = 77_780n; // bigint：calculateEstimatedBudget 只接受 bigint
+
 /** shell 类可执行名：命中 argv[0] 时按 shell 档（`execTimeouts.shellMs`）取执行上界。 */
 const SHELL_EXECUTABLES = new Set([
   "bash", "sh", "zsh", "dash", "ksh", "mksh", "ash", "fish",
@@ -658,17 +666,16 @@ export function createDockerSandboxExecutionBackend(
       }
 
       // 1) 配额与预算准入：不合格时零 sbx 调用。
-      const quota = deps.quotaProvider
+      const quotaVerifyEnabled = deps.quotaVerify !== false;
+      const quota = quotaVerifyEnabled && deps.quotaProvider
         ? await deps.quotaProvider()
-        : ({ ok: false, reason: "no-provider" } as const);
-      if (!quota.ok) {
+        : ({ ok: false, reason: "verification-disabled" } as const);
+      if (quotaVerifyEnabled && !quota.ok) {
         throw new DockerSandboxBackendError("quota-unverifiable");
       }
-      const estimatedNanoUsd = calculateEstimatedBudget(
-        ttlMinutes * 60,
-        quota.rateNanoUsd,
-      );
-      if (quota.availableNanoUsd < estimatedNanoUsd) {
+      const quotaRateNanoUsd = quota.ok ? quota.rateNanoUsd : UNVERIFIED_QUOTA_RATE_NANO_USD;
+      const estimatedNanoUsd = calculateEstimatedBudget(ttlMinutes * 60, quotaRateNanoUsd);
+      if (quota.ok && quota.availableNanoUsd < estimatedNanoUsd) {
         throw new DockerSandboxBackendError("quota-insufficient");
       }
 
@@ -688,7 +695,8 @@ export function createDockerSandboxExecutionBackend(
           "running",
           slotKey,
           {
-            remainingNanoUsd: quota.availableNanoUsd.toString(),
+            // 未核实时没有 availableNanoUsd：记账写 "unverified" 而不是崩溃（RV-FATAL）
+            remainingNanoUsd: quota.ok ? quota.availableNanoUsd.toString() : "unverified",
             // 槽位记录的年龄必须从「这条记录落盘的时刻」起算，沿用配额快照的
             // observedAt 会让陈旧阈值被偷偷缩短（M-1）。配额观察时间没丢，仍在
             // beforeAfter.before 里。
@@ -703,8 +711,9 @@ export function createDockerSandboxExecutionBackend(
             stale: false,
           },
           {
-            remainingNanoUsd: quota.availableNanoUsd.toString(),
-            observedAt: quota.observedAt,
+            // 未核实时没有 availableNanoUsd：记账写 "unverified" 而不是崩溃（RV-FATAL）
+            remainingNanoUsd: quota.ok ? quota.availableNanoUsd.toString() : "unverified",
+            observedAt: quota.ok ? quota.observedAt : now(),
           },
         );
         if (!reservedRecorded || !(await runningRecordPersisted(slotKey, sandboxName))) {

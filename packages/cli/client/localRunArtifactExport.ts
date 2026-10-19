@@ -1,0 +1,123 @@
+// packages/cli/client/localRunArtifactExport.ts
+//
+// 块ART2：CLI 本地 docker 通道的 **run 终态导出绑定**（把 agent-runtime 的
+// 通用导出逻辑接到本机 runsDir 审计与本地产物目录上）。
+//
+// 落点口径沿用既有本地 run 约定（`resolveRunsDir(env)` = `<NOLO_HOME>/runs`）：
+//   - 审计：`<runsDir>/<runId>.artifacts.json`（与 `<runId>.json` /
+//     `<runId>.isolation.json` 同目录、同命名风格）；
+//   - 字节：`<NOLO_HOME>/artifacts`（runs 的同级目录），经 ArtifactStore 落盘，
+//     审计里只留 ref（key / sizeBytes / contentType / createdAt）。
+//
+// 顺序契约（唯一重要的那一条）：导出必须在 `release()` **之前**——沙盒一旦
+// 释放，通道就没了，再想取 diff 也取不到；同时导出失败绝不能阻断 release
+// （沙盒不释放会一直计费）。`createDockerRunTeardown` 就固定了这个顺序。
+
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+import {
+  createLocalArtifactStore,
+  type ArtifactRef,
+  type ArtifactStore,
+} from "agent-runtime/artifactStore";
+import {
+  exportRunDiffArtifact,
+  serializeRunArtifactAudit,
+  type RunArtifactAuditRecord,
+} from "agent-runtime/runArtifactExport";
+
+export type RunArtifactAuditFs = {
+  mkdirSync?: (path: string, options?: { recursive?: boolean }) => unknown;
+  writeFileSync: (path: string, data: string) => unknown;
+};
+
+/** 产物目录：runs 的同级 `artifacts/`（`<NOLO_HOME>/artifacts`）。 */
+export function resolveRunArtifactsRootDir(runsDir: string): string {
+  // 先剥尾部分隔符：`dirname("<…>/runs/")` 会退到 `<…>` 上一级，把
+  // 「带斜杠的同一个目录」误判成不同的落点（实测踩过）。
+  const normalized = runsDir.replace(/[/\\]+$/, "");
+  return join(dirname(normalized || runsDir), "artifacts");
+}
+
+/** 写 ref 审计；返回落盘路径（测试与调用方都据此断言/记录）。 */
+export function writeRunArtifactAudit(args: {
+  runsDir: string;
+  record: RunArtifactAuditRecord;
+  fs?: RunArtifactAuditFs;
+}): string {
+  const fs = args.fs ?? { mkdirSync, writeFileSync };
+  const path = join(args.runsDir, `${args.record.runId}.artifacts.json`);
+  fs.mkdirSync?.(args.runsDir, { recursive: true });
+  fs.writeFileSync(path, serializeRunArtifactAudit(args.record));
+  return path;
+}
+
+export type DockerRunTerminalExportArgs = {
+  runId: string;
+  runsDir: string;
+  /** docker 工具通道上的 execShell：`(command) => channel("execShell", { command })`。 */
+  exec: (command: string) => Promise<string>;
+  store?: ArtifactStore;
+  /** 缺省 `<runsDir>/../artifacts`。 */
+  artifactsRootDir?: string;
+  createStore?: (rootDir: string) => ArtifactStore;
+  fs?: RunArtifactAuditFs;
+  warn?: (message: string) => void;
+};
+
+/** 组装「取 diff → 存产物 → 写审计」三件事，返回一个幂等可调的导出函数。 */
+export function createDockerRunTerminalExport(
+  args: DockerRunTerminalExportArgs,
+): () => Promise<ArtifactRef | null> {
+  return async () => {
+    const store =
+      args.store ??
+      (args.createStore ?? ((rootDir: string) => createLocalArtifactStore({ rootDir })))(
+        args.artifactsRootDir ?? resolveRunArtifactsRootDir(args.runsDir),
+      );
+    return await exportRunDiffArtifact({
+      runId: args.runId,
+      store,
+      exec: args.exec,
+      ...(args.warn ? { warn: args.warn } : {}),
+      writeAudit: (record) => {
+        writeRunArtifactAudit({ runsDir: args.runsDir, record, fs: args.fs });
+      },
+    });
+  };
+}
+
+/**
+ * adapter 注入缝：一次调用完成「取 diff → 存产物 → 写审计」，等价于
+ * `createDockerRunTerminalExport(args)()`。任何失败返回 null（只 warning）。
+ */
+export async function exportDockerRunDiffArtifact(
+  args: DockerRunTerminalExportArgs,
+): Promise<ArtifactRef | null> {
+  return await createDockerRunTerminalExport(args)();
+}
+
+/**
+ * run 收尾：**先导出、后释放**。导出异常只 warning 并继续释放；释放本身失败
+ * 照旧向上抛（那是有后果的失败，不能被吞掉）。
+ */
+export function createDockerRunTeardown(args: {
+  exportDiff: () => Promise<ArtifactRef | null>;
+  release: () => Promise<void>;
+  warn?: (message: string) => void;
+}): () => Promise<void> {
+  const warn = args.warn ?? (() => {});
+  return async () => {
+    try {
+      await args.exportDiff();
+    } catch (error) {
+      warn(
+        `run 终态导出异常（不影响 run 结果）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    await args.release();
+  };
+}

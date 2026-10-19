@@ -224,6 +224,10 @@ export type TuiAction =
       type: "pick-agent";
     }
   | {
+      type: "switch-agent";
+      target: string;
+    }
+  | {
       type: "list-agents";
     }
   | {

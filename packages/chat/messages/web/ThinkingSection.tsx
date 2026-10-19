@@ -59,11 +59,19 @@ export const ThinkingSection = memo(
       const el = viewportRef.current;
       if (!el) return;
       const scrollable = el.scrollHeight > el.clientHeight + 1;
-      setFade({
+      const nextFade = {
         top: scrollable && el.scrollTop > 1,
         bottom:
           scrollable && el.scrollTop + el.clientHeight < el.scrollHeight - 1,
-      });
+      };
+      // 渐隐状态没变时复用旧 state 对象：React 用 Object.is 判等后跳过重渲染。
+      // 若每次 scroll 都 set 新对象，ThinkingSection 会随之重渲染，
+      // 内联 renderText 拿到新引用 → memo 化的 StreamingStructuredMarkdown 整块重渲染 Markdown。
+      setFade((prev) =>
+        prev.top === nextFade.top && prev.bottom === nextFade.bottom
+          ? prev
+          : nextFade
+      );
     }, []);
 
     useEffect(() => {
@@ -108,6 +116,10 @@ export const ThinkingSection = memo(
       () => (thinkContent ? markdownToSlate(thinkContent) : []),
       [thinkContent]
     );
+
+    // 稳定引用：内联箭头每次渲染都是新函数，会让 memo 化的
+    // StreamingStructuredMarkdown 在父组件重渲染时整块重渲染 Markdown。
+    const renderText = useCallback((text: string) => text, []);
 
     if (!shouldRender) return null;
 
@@ -164,7 +176,7 @@ export const ThinkingSection = memo(
                   >
                     <StreamingStructuredMarkdown
                       nodes={slate}
-                      renderText={(text) => text}
+                      renderText={renderText}
                       cursor={null}
                       isStreaming={thinkingLive}
                     />
