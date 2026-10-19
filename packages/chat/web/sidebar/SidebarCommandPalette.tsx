@@ -17,7 +17,6 @@ import {
 } from "app/favorite/favoriteStore";
 import { useFavoriteDeps } from "app/favorite/useFavoriteDeps";
 import { usePublicAgents } from "ai/agent/hooks/usePublicAgents";
-import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 import { getSpaceContentTypeLabel } from "create/space/contentLabels";
 import {
   changeSpace,
@@ -35,6 +34,7 @@ import { CommandPalette } from "./CommandPalette";
 import {
   buildContentPaletteEntries,
   buildFavoritePaletteEntries,
+  buildPaletteEntryPath,
   buildPublicAgentPaletteEntries,
   buildSpacePaletteEntries,
   collectExcludedContentKeys,
@@ -265,11 +265,7 @@ export function SidebarCommandPalette({
         return;
       }
 
-      const to = buildRoutableContentPath({
-        contentKey: entry.contentKey,
-        type: entry.contentType,
-        userId: currentUserId ?? undefined,
-      });
+      const to = buildPaletteEntryPath(entry, currentUserId);
       if (isDialogDetailPath(to)) enableNextStackNavViewTransition();
       navigate(to);
       handleOpenChange(false);
