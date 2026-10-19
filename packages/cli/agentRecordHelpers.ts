@@ -1,4 +1,8 @@
 import { readFileSync } from "node:fs";
+import {
+  classifyAgentApiKeyRef,
+  formatUnsupportedAgentApiKeyRefMessage,
+} from "agent-runtime/oauthProviderRefs";
 import { normalizeAgentHandle } from "core/agentHandle";
 import { toErrorMessage } from "core/errorMessage";
 import { DataType } from "create/types";
@@ -289,6 +293,24 @@ export async function deleteDbRecord(args: {
   return data;
 }
 
+/**
+ * Agent 记录落库前的 apiKeyRef 校验（CLI 收口）。
+ *
+ * 判据与文案的单一出处是 `agent-runtime/oauthProviderRefs.ts`——与 server 写路由
+ * `handleWrite` 共用同一个 `classifyAgentApiKeyRef` 与同一句
+ * `formatUnsupportedAgentApiKeyRefMessage`。非法 ref 若落库，只会在运行时
+ * `parseOAuthProviderKey` 处抛错、再被误报成「作者未同步凭据」，用户按文案操作
+ * 永远修不好，因此在写入处直接失败。
+ */
+export function assertSupportedAgentApiKeyRef(
+  record: Record<string, any> | null | undefined,
+) {
+  const verdict = classifyAgentApiKeyRef(record?.apiKeyRef);
+  if (!verdict.ok) {
+    throw new Error(formatUnsupportedAgentApiKeyRefMessage(verdict.ref));
+  }
+}
+
 export async function writeAgentRecord(args: {
   agentKey: string;
   authToken: string;
@@ -298,6 +320,7 @@ export async function writeAgentRecord(args: {
   userId: string;
   record: Record<string, any>;
 }) {
+  assertSupportedAgentApiKeyRef(args.record);
   const res = await fetchWithTransportFallback(`${args.serverUrl}/api/v1/db/write/`, {
     method: "POST",
     headers: {

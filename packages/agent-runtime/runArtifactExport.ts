@@ -28,12 +28,107 @@ export function runDiffArtifactKey(runId: string): string {
   return `runs/${runId}/diff.patch`;
 }
 
-export type RunArtifactAuditRecord = {
-  runId: string;
-  kind: "diff";
+/** 单个 worktree 导出的 patch 条目（审计里只留 ref，字节在产物层）。 */
+export type RunWorktreeAuditEntry = {
+  name: string;
   key: string;
   ref: ArtifactRef;
 };
+
+export type RunArtifactAuditRecord = {
+  runId: string;
+  kind: "diff";
+  /** 根工作区 patch 的 key；根工作区无改动时为 null（改动可能只在 worktree 里）。 */
+  key: string | null;
+  ref: ArtifactRef | null;
+  /**
+   * `gitignore` 下的 `.worktrees/<name>` 改动：根工作区的 `git add -A` 永远不会
+   * 纳入它们，必须按 worktree 单独导出（见 `exportRunWorktreeDiffArtifacts`）。
+   */
+  worktrees?: RunWorktreeAuditEntry[];
+};
+
+/**
+ * 枚举沙盒里的 worktree。为什么必须单独导：agent 按仓库规则把改动落在
+ * `.worktrees/<name>/`，而 `.gitignore` 忽略该目录 → 根工作区的 `git add -A`
+ * 看不见它们，diff 恒为空。实测代价：一次 16 分钟的 run 因此零产物，沙盒
+ * 释放后改动彻底消失（导出被设计成「失败只 warn」，所以完全静默）。
+ */
+export const RUN_WORKTREE_LIST_COMMAND = "git worktree list --porcelain";
+
+/** porcelain 单个 block 的解析结果（`bare` / `prunable` 不能拿去 `git -C`）。 */
+export type WorktreeEntry = {
+  path: string;
+  bare: boolean;
+  prunable: boolean;
+};
+
+/**
+ * 按行状态机解析 porcelain：`worktree <path>` 开新条目，`bare` / `prunable`
+ * 作为该条目的标记。不用「按空行切块」——那个假设对多余空行与将来的 `-z`
+ * 形态都太脆。
+ *
+ * **路径不做 trim**：末尾空格是路径的一部分，这里只剥 CR。
+ */
+export function parseWorktreeEntries(stdout: string): WorktreeEntry[] {
+  const entries: WorktreeEntry[] = [];
+  let current: WorktreeEntry | null = null;
+  for (const rawLine of String(stdout ?? "").split(/\r?\n/)) {
+    const line = rawLine.replace(/\r$/, "");
+    if (line.startsWith("worktree ")) {
+      if (current) entries.push(current);
+      current = { path: line.slice("worktree ".length), bare: false, prunable: false };
+      continue;
+    }
+    if (!current) continue;
+    if (line === "bare") current.bare = true;
+    else if (line.startsWith("prunable")) current.prunable = true;
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+
+/**
+ * 可逐个导出的 worktree 路径。
+ *
+ * - **跳过第一个 block**：git 文档保证 `worktree list` 的 main worktree 恒列首位，
+ *   而它的 diff 由根导出（`RUN_DIFF_COMMAND`）负责。不跳过就会把同一份 patch
+ *   以 `worktrees/<repo>.patch` 再存一遍，并在审计里多一条误导记录。
+ * - 跳过 `bare`（没有工作区，`git -C` 必失败）与 `prunable`（目录已不在）。
+ */
+export function parseWorktreePaths(stdout: string): string[] {
+  return parseWorktreeEntries(stdout)
+    .slice(1)
+    .filter((entry) => !entry.bare && !entry.prunable)
+    .map((entry) => entry.path);
+}
+
+/** `git -C` 只接受真实目录路径；拒绝空串与 `-` 开头的形态（避免被当成 git flag）。 */
+export function isSafeWorktreePath(path: string): boolean {
+  if (!path) return false;
+  if (path.startsWith("-")) return false;
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+const UNSAFE_WORKTREE_NAME = /[^A-Za-z0-9._-]+/g;
+
+/** worktree 目录名 → 产物 key 片段（key 只接受文件系统与 URL 都安全的字符集）。 */
+export function worktreeArtifactName(path: string): string {
+  const trimmed = String(path ?? "").replace(/[/\\]+$/, "");
+  const base = trimmed.split(/[/\\]/).pop() ?? "";
+  const safe = base.replace(UNSAFE_WORKTREE_NAME, "-").replace(/^[-.]+|[-.]+$/g, "");
+  return safe || "worktree";
+}
+
+export function worktreeDiffArtifactKey(runId: string, name: string): string {
+  return `runs/${runId}/worktrees/${name}.patch`;
+}
+
+/** 单个 worktree 的 diff 命令；用 `-C` 而不是 `cd`，避免影响同一通道的后续调用。 */
+export function worktreeDiffCommand(path: string): string {
+  const quoted = `'${String(path).replace(/'/g, `'\\''`)}'`;
+  return `git -C ${quoted} add -A && git -C ${quoted} diff --cached --binary`;
+}
 
 export type ExecShellChannelOutput = {
   stdout: string;
@@ -161,6 +256,109 @@ export async function exportRunDiffArtifact(
   }
 
   return ref;
+}
+
+export type ExportRunWorktreeDiffsArgs = {
+  runId: string;
+  store: ArtifactStore;
+  exec: (command: string) => Promise<string>;
+  warn?: (message: string) => void;
+};
+
+export type RunWorktreeDiffSummary = {
+  /**
+   * 参与导出的 linked worktree 数（**不含主工作区**：它的 diff 由根导出
+   * `RUN_DIFF_COMMAND` 负责，见 `parseWorktreePaths` 的 slice(1)）。
+   */
+  worktrees: number;
+  artifacts: RunWorktreeAuditEntry[];
+  /** 取到了 diff 但为空（无改动）的 worktree 数。 */
+  empty: number;
+  /** 取 diff 或写产物失败的 worktree 数。 */
+  failed: number;
+};
+
+/**
+ * 逐个 worktree 导出 diff。与 `exportRunDiffArtifact` 一样永不抛错：任何一步失败
+ * 只 `warn`，返回的计数就是可观测证据（调用方据此决定是否告警「有 worktree 但零产物」）。
+ */
+export async function exportRunWorktreeDiffArtifacts(
+  args: ExportRunWorktreeDiffsArgs,
+): Promise<RunWorktreeDiffSummary> {
+  const warn = args.warn ?? (() => {});
+  const summary: RunWorktreeDiffSummary = { worktrees: 0, artifacts: [], empty: 0, failed: 0 };
+  if (!SAFE_RUN_ID.test(args.runId)) return summary;
+
+  let listing: string;
+  try {
+    listing = await args.exec(RUN_WORKTREE_LIST_COMMAND);
+  } catch (error) {
+    warn(`run 终态导出：枚举 worktree 失败：${describeError(error)}`);
+    return summary;
+  }
+  const parsed = parseExecShellChannelOutput(listing);
+  if (parsed.truncated || parsed.exitCode !== 0) {
+    warn("run 终态导出：worktree 枚举不可用（输出截断或非 0 退出），跳过 worktree 导出");
+    return summary;
+  }
+
+  const paths = parseWorktreePaths(parsed.stdout);
+  const exportable = paths.filter((path) => isSafeWorktreePath(path));
+  if (exportable.length !== paths.length) {
+    warn(`run 终态导出：跳过 ${paths.length - exportable.length} 个路径形态不可信的 worktree`);
+  }
+  summary.worktrees = exportable.length;
+
+  const usedNames = new Map<string, number>();
+  for (const path of exportable) {
+    const baseName = worktreeArtifactName(path);
+    const seen = (usedNames.get(baseName) ?? 0) + 1;
+    usedNames.set(baseName, seen);
+    const name = seen === 1 ? baseName : `${baseName}-${seen}`;
+
+    let raw: string;
+    try {
+      raw = await args.exec(worktreeDiffCommand(path));
+    } catch (error) {
+      summary.failed += 1;
+      warn(`run 终态导出：worktree ${name} 取 diff 失败：${describeError(error)}`);
+      continue;
+    }
+    const out = parseExecShellChannelOutput(raw);
+    if (out.truncated) {
+      summary.failed += 1;
+      warn(
+        `run 终态导出：worktree ${name} 的 diff 超过 execShell 输出上限被截断，已丢弃` +
+          "（不保存不完整 patch；需分段导出或提高通道上限后重跑）",
+      );
+      continue;
+    }
+    if (out.exitCode !== 0) {
+      summary.failed += 1;
+      warn(`run 终态导出：worktree ${name} 的 diff 不可用（非 0 退出），未保存`);
+      continue;
+    }
+    if (out.stdout.trim() === "") {
+      summary.empty += 1;
+      continue;
+    }
+    const key = worktreeDiffArtifactKey(args.runId, name);
+    try {
+      const ref = await args.store.put(key, out.stdout, { contentType: RUN_DIFF_CONTENT_TYPE });
+      summary.artifacts.push({ name, key, ref });
+    } catch (error) {
+      summary.failed += 1;
+      warn(`run 终态导出：worktree ${name} 产物写入失败：${describeError(error)}`);
+    }
+  }
+
+  if (summary.worktrees > 0 && summary.artifacts.length === 0) {
+    warn(
+      `run 终态导出：${summary.worktrees} 个 worktree 未导出任何 patch（empty=${summary.empty}, failed=${summary.failed}）` +
+        (summary.failed > 0 ? " —— 沙盒产出可能随释放丢失" : ""),
+    );
+  }
+  return summary;
 }
 
 /** 审计记录的序列化口径（CLI 落盘与测试共用同一份，避免两处各写一遍）。 */
