@@ -36,7 +36,13 @@ export function formatElapsedSeconds(totalSeconds: number): string {
   return `${hours}h ${mins}m`;
 }
 
-/** Soft token chip for the composer status line (no powerline background). */
+/**
+ * Soft token chip (`context: 45% (45k/100k)`, no powerline background).
+ *
+ * 不再用于状态行（状态行只留 git / 积分 / ⏵ auto）：占用口径与详情由
+ * `/context` 面板的 renderTokenStatus 呈现，这里保留同一个 resolveContextUsage
+ * 口径的纯格式化函数，供面板/测试复用。
+ */
 export function renderComposerTokenChip(
   tokens: TurnTokenUsage | undefined,
   fallbackContextWindow?: number,
@@ -125,11 +131,9 @@ export function renderStatusLine(
     parts.push(`${branchText}${modifiedText}${untrackedText}`);
   }
 
-  // 部署状态：只有在取到值时才占一格。取数失败一律不显示——
-  // 这是可观测性附庸，不能因为远端 ssh 不可达就在状态行上留一个 ❓。
-  if (state.ciStatusLine) {
-    parts.push(themeText(state.ciStatusLine, "muted", colorEnabled));
-  }
+  // CI / 部署状态不再上状态行：远端轮询结果仍写进 state（诊断用），但状态行
+  // 只留本机可动作、一眼可判的事实（分支 + 脏 + 积分 + ⏵ auto），否则一旦远端
+  // 不可达就是一块噪声，还挤占真正需要看的窄宽预算。
 
   // 状态行的积分 = 续聊基数（服务端历史累计）+ 本次会话本地累加。
   //
@@ -139,24 +143,14 @@ export function renderStatusLine(
   // credits 只在 billing_unit === "credits" 时才累加，自有 API / 订阅制天然为
   // 0，不显示，这正是「走平台才计积分」想要的判据本身。
   //
-  // 积分是**独立 chip**，不再拼接进 context 芯片尾部：宽度降级时两者解耦，
-  // context 段可以先让路，积分 chip 撑到只剩必保段才丢（用户盯的就是它）。
+  // context 占用不在状态行显示：它每秒都在动、语义是「输入区还有多少余量」，
+  // 口径与详情统一交给 `/context` 面板（renderTokenStatus）。状态行只留积分
+  // chip——用户盯的就是它，且它是「花了多少钱」的唯一可见口径。
   const credits = resolveStatusLineCredits(state);
-  const tokenSegment = themeText(
-    renderComposerTokenChip(
-      state.turnTokens,
-      state.contextWindow,
-      state.estimatedContextTokens,
-      state.liveTurnEstimatedTokens,
-    ),
-    "muted",
-    colorEnabled,
-  );
   const creditsSegment =
     credits !== undefined && credits > 0
       ? themeText(formatCreditsChip(credits), "muted", colorEnabled)
       : "";
-  parts.push(tokenSegment);
   if (creditsSegment) parts.push(creditsSegment);
 
   // 后台进程计数（`⚙ N procs`）已搬到 composer 上方的固定运行区，与子 agent
@@ -182,12 +176,12 @@ export function renderStatusLine(
   if (maxWidth && maxWidth > 0) {
     const widthOf = (segments: string[]) => displayWidth(stripAnsi(segments.join(" · "))) + 2;
     // 可让路段的丢弃顺序（挤宽度时从先到后）：
-    //   cwd（终端标题/上下文已有）→ agent 名（默认档可省）→ context chip →
+    //   cwd（终端标题/上下文已有）→ agent 名（默认档可省）→
     //   积分 chip（最后才丢——用户盯的就是它，且它是「花了多少钱」的唯一
     //   可见口径）。
     // 后台进程计数已不在状态行（搬到 composer 上方的运行区），所以这里没有它。
     // git 脏 / ⏵ auto 是必保状态，任何宽度都不让。
-    for (const optional of [cwdSegment, agentSegment, tokenSegment, creditsSegment]) {
+    for (const optional of [cwdSegment, agentSegment, creditsSegment]) {
       if (!optional) continue;
       if (widthOf(visibleParts) <= maxWidth) break;
       visibleParts = visibleParts.filter((part) => part !== optional);
@@ -207,7 +201,7 @@ export function renderStatusLine(
     if (widthOf(visibleParts) > maxWidth) {
       // Emergency projection for genuinely narrow terminals. These glyphs
       // preserve the actionable facts without their explanatory words;
-      // lower-priority identity/cwd/context and queued previews are already
+      // lower-priority identity/cwd and queued previews are already
       // gone by this point. Joined with single spaces, not the " · " chips:
       // each " · " costs 3 columns and would push the line past ultra-narrow
       // budgets, letting terminal end-clipping eat the trailing (required)
@@ -521,8 +515,8 @@ export function renderContextPanel(
     field(labels[0], `${state.agentName} (${state.agentKey})`),
     field(
       labels[1],
-      // 与状态栏 chip 同一口径（resolveContextUsage）：还没收到 provider usage
-      // 时给本地估算 + 剩余，而不是三个破折号。
+      // 与状态行 renderComposerTokenChip 同一口径（resolveContextUsage）：还没收到
+      // provider usage 时给本地估算 + 剩余，而不是三个破折号。
       renderTokenStatus(state.turnTokens, {
         contextWindow: state.contextWindow,
         estimatedContextTokens: state.estimatedContextTokens,

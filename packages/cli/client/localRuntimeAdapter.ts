@@ -148,6 +148,7 @@ import {
   resolveBuiltinLocalCliAgentConfig,
   readAgentFromStore,
 } from "./cliLocalAgentRecordReader";
+import { createChildShellApprovalHostResolver } from "./childShellApprovalHostResolver";
 import { loadCliDialogHistoryWithSource } from "./cliDialogHistoryFallback";
 import {
   shouldUseDeclaredOnlyLocalWorkspaceTools,
@@ -985,19 +986,22 @@ export function createCliLocalRuntimeAdapter(
       },
       resolveAgentRuntimeBindingMachineId,
       resolveLocalMachineId,
-      ...(deps.shellApprovalSession ? { shellApprovalHostForAgent: async (childAgentKey: string) => {
-        // Resolve the CHILD owner from the trusted store, never parent grant/model identity.
-        const record = await readAgentFromStore({ agentRef: childAgentKey, store: await getOrCreateSharedStore(deps), userId });
-        const rec = record as Record<string, unknown> | undefined;
-        const ownerUserId = asOptionalTrimmedString(rec?.userId) ?? asOptionalTrimmedString(rec?.ownerUserId);
-        if (!ownerUserId) return undefined;
-        const { detectMachineInfo } = await import("connector-experimental/machineInfo");
-        const machine = await detectMachineInfo({ probeLaunchable: false });
-        const deviceId = asOptionalTrimmedString(machine?.machineId);
-        if (!deviceId) return undefined;
-        return { binding: { runId: "pending-spawn", agentKey: childAgentKey, ownerUserId, deviceId, workspaceRoot },
-          confirm: deps.shellApprovalSession!.confirm, signal: deps.shellApprovalSession!.signal };
-      } } : {}),
+      ...(deps.shellApprovalSession ? {
+        shellApprovalHostForAgent: createChildShellApprovalHostResolver({
+          readAgentConfig: async (childAgentKey) => readAgentFromStore({
+            agentRef: childAgentKey,
+            store: await getOrCreateSharedStore(deps),
+            userId,
+          }),
+          resolveDeviceId: async () => {
+            const { detectMachineInfo } = await import("connector-experimental/machineInfo");
+            const machine = await detectMachineInfo({ probeLaunchable: false });
+            return machine?.machineId;
+          },
+          workspaceRoot,
+          session: deps.shellApprovalSession,
+        }),
+      } : {}),
       ...(deps.confirmDestructiveAction
         ? { confirmDestructiveAction: deps.confirmDestructiveAction }
         : {}),

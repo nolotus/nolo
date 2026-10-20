@@ -1,9 +1,17 @@
 # Contributing to Nolo
 
-Thanks for your interest in contributing! This repository is a public projection
-generated from the canonical source. Here's how to contribute:
+This repository is a public source projection generated from Nolo's private
+canonical repository for privacy and security auditing of the CLI, desktop app,
+and other clients whose source has been made public here. It does not include
+unreleased mobile clients or cloud service backends.
 
-## Development Setup
+Privacy and security feedback is welcome. This is not a traditional community
+co-development repository, and routine feature pull requests are not accepted.
+No response or remediation timeline is promised. This maintenance policy does not
+restrict the rights granted by the MIT license, including use, modification,
+forking, and redistribution.
+
+## Audit Setup
 
 1. Install [Bun](https://bun.sh/)
 2. `bun install`
@@ -17,12 +25,14 @@ generated from the canonical source. Here's how to contribute:
 - Do not add imports of `auth/`, `server/`, or `billing/` internal paths.
   The projection gate will reject them.
 
-## Submitting Changes
+## Privacy and Security Feedback
 
-1. Fork and create a feature branch
-2. Run `bun scripts/public-audit/verifyProjection.ts` to verify the projection boundary
-3. Run `bun scripts/dev/esBuild.js` to verify the web build
-4. Open a PR with a clear description
+For non-sensitive privacy or security observations, open an issue with the
+projection revision, affected client, reproduction steps, and expected behavior.
+Do not include credentials, personal data, or exploitable vulnerability details.
+Report sensitive findings privately as described in [SECURITY.md](./SECURITY.md).
+Routine feature pull requests are not accepted; maintenance happens in the
+private canonical repository and is projected here.
 
 ## Security
 
