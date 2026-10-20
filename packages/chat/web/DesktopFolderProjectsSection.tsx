@@ -26,7 +26,14 @@ export function DesktopFolderProjects({ items = [], userId = "", onSelectProject
     ? dialogsForLocalProject(items, userId, selectedId, bindings) : [], [items, userId, selectedId, bindings]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  if (!isDesktop) return null;
+  // 本机项目绑定的是桌面壳才能访问的文件夹路径：Web 端给出说明而不是空白内容区。
+  if (!isDesktop) {
+    return (
+      <p className="navigation-v2-context-note" role="note" data-hook="desktop-projects-unavailable">
+        本机项目只在桌面端可用：它绑定本机文件夹路径，Web 端无法访问。切到「工作」可查看对话状态。
+      </p>
+    );
+  }
 
   const persist = (updated: DesktopFolderProject[]) => {
     try {
