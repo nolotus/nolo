@@ -33,7 +33,12 @@ import {
 } from "./theme";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
 import { TUI_TREE_MARKER } from "../client/toolOutput";
-import { resolveHistoryViewportHeight } from "./tuiLayout";
+import {
+  resolveHistoryViewportHeight,
+  resolveHistoryLayoutGeometry,
+  type HistoryLayoutGeometry,
+} from "./tuiLayout";
+export { resolveHistoryLayoutGeometry, type HistoryLayoutGeometry };
 import {
   layoutImageRows,
   turnImagesSignature,
@@ -1799,7 +1804,7 @@ export function renderHistory(
     1,
     resolveHistoryViewportHeight(rows, inputLines, reservedRows),
   );
-  const contentWidth = Math.max(1, columns - 1);
+  const { contentWidth, marginLeft, marginRight } = resolveHistoryLayoutGeometry(columns);
   const colorEnabled = resolveCliColorEnabled();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
   const graphicsEnabled = history.graphicsEnabled === true;
@@ -1932,7 +1937,9 @@ export function renderHistory(
     const thumb = renderScrollbarRow(i, visibleHeight, totalLines, history.scrollTop);
     const scrollbarPrefix = colorEnabled ? themeColorSequence("chrome") : "";
     const scrollbarSuffix = colorEnabled ? "\x1b[39m" : "";
-    const rowContent = `${padded}\x1b[${columns}G${scrollbarPrefix}${thumb}${scrollbarSuffix}`;
+    const leftPad = marginLeft > 0 ? " ".repeat(marginLeft) : "";
+    const rightPad = marginRight > 0 ? " ".repeat(marginRight) : "";
+    const rowContent = `${leftPad}${padded}${rightPad}\x1b[${columns}G${scrollbarPrefix}${thumb}${scrollbarSuffix}`;
     nextLines[i] = rowContent;
 
     if (!prevLines || prevLines[i] !== rowContent) {
@@ -2011,7 +2018,7 @@ export function computeScrollMetrics(
     1,
     resolveHistoryViewportHeight(rows, inputLines, reservedRows),
   );
-  const contentWidth = Math.max(1, columns - 1);
+  const { contentWidth } = resolveHistoryLayoutGeometry(columns);
   const { totalLines: finalizedLines } = buildTurnOffsets(history, contentWidth);
   let totalLines = finalizedLines;
   if (history.currentRole !== null && history.currentContent) {

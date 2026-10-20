@@ -100,7 +100,7 @@ export class LocalRuntimeKeyUnsupportedError extends Error {
 export function assertRuntimeKeyLocalFulfillable(runtimeKey: string): void {
   const key = runtimeKey.trim();
   if (!key || key === "local" || key === "server") return;
-  if (isDockerRuntimeKey(key)) return;
+  if (isDockerRuntimeKey(key) || key === "instabox") return;
   if (isLocallyUnfulfillableRuntimeKey(key)) {
     throw new LocalRuntimeKeyUnsupportedError(
       "local_runtime_key_unsupported",
@@ -109,7 +109,7 @@ export function assertRuntimeKeyLocalFulfillable(runtimeKey: string): void {
   }
   throw new LocalRuntimeKeyUnsupportedError(
     "local_runtime_key_unknown",
-    `runtimeKey="${key}" 不是本机可兑现的执行后端（可选：local | server | docker（本机 sbx））。${LOCAL_CLOUD_RUNTIME_KEY_HINT}`,
+    `runtimeKey="${key}" 不是本机可兑现的执行后端（可选：local | server | docker（本机 sbx） | instabox）。${LOCAL_CLOUD_RUNTIME_KEY_HINT}`,
   );
 }
 

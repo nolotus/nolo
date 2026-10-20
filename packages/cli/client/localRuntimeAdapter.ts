@@ -299,6 +299,10 @@ import {
   type LocalDockerWorkloadHandle,
 } from "./localDockerWorkload";
 import {
+  createLocalInstaboxWorkload as createLocalInstaboxWorkloadDefault,
+  type LocalInstaboxWorkloadHandle,
+} from "./localInstaboxWorkload";
+import {
   createDockerRunTeardown,
   exportDockerRunDiffArtifact,
 } from "./localRunArtifactExport";
@@ -735,7 +739,7 @@ export function createCliLocalRuntimeAdapter(
   const workspaceRoot = deps.cwd ?? process.cwd();
   /**
    * docker workload 通道（runtimeKey 指向 docker）。两点契约：
-   * 1) fail-closed：非 docker 的云后端 runtimeKey（gcp / instabox / machine:*）
+   * 1) fail-closed：无法由本机兑现的云后端 runtimeKey（gcp / machine:* 等）
    *    在 adapter 创建（= run 开始）时就抛可操作错误，绝不落到下方宿主路径；
    * 2) docker 就绪后，工作区工具族的**唯一**执行通道是 sbx channel，宿主执行器
    *    零调用（与 bwrap 分支不同：这里不提供「通道不可用就回落宿主」的第三态）。
@@ -771,9 +775,37 @@ export function createCliLocalRuntimeAdapter(
     return dockerWorkloadLoad;
   };
   /** run 开始前显式预检（agentRun.ts 在进入 loop 前调用）：无绑定/未授权即失败。 */
+  const instaboxRuntimeEnabled = runtimeKey === "instabox";
+  let instaboxWorkloadLoad: Promise<LocalInstaboxWorkloadHandle | null> | null =
+    null;
+  let instaboxWorkloadReleased = false;
+  const createInstaboxWorkload =
+    (deps as { createLocalInstaboxWorkload?: typeof createLocalInstaboxWorkloadDefault }).createLocalInstaboxWorkload ?? createLocalInstaboxWorkloadDefault;
+  const loadLocalInstaboxWorkload = (): Promise<LocalInstaboxWorkloadHandle | null> => {
+    if (!instaboxRuntimeEnabled) return Promise.resolve(null);
+    if (instaboxWorkloadReleased) {
+      return Promise.reject(
+        new Error(
+          "instabox workload 已释放：本 run 的 lease 已失效，拒绝在宿主执行工具",
+        ),
+      );
+    }
+    instaboxWorkloadLoad ??= (async () =>
+      (await createInstaboxWorkload({
+        runtimeKey,
+        runId: `cli-local-instabox-${createId()}`,
+        authenticatedCaller: resolveLocalUserId(deps.env),
+        agentKey: "cli-local-run",
+        env: deps.env,
+      })) as unknown as LocalInstaboxWorkloadHandle)();
+    return instaboxWorkloadLoad;
+  };
   const prepareLocalRuntimeWorkload = async (): Promise<void> => {
-    if (!dockerRuntimeEnabled) return;
-    await loadLocalDockerWorkload();
+    if (dockerRuntimeEnabled) {
+      await loadLocalDockerWorkload();
+    } else if (instaboxRuntimeEnabled) {
+      await loadLocalInstaboxWorkload();
+    }
   };
   /**
    * F1：本 run 的**执行隔离事实**落盘（`<runsDir>/<runId>.isolation.json` + 一行
@@ -881,11 +913,20 @@ export function createCliLocalRuntimeAdapter(
     (localSandboxLoad ??= createSandboxWorkload({ workspaceRoot }).catch(
       () => null,
     ));
+  const releaseLocalInstaboxWorkload = async (): Promise<void> => {
+    const loaded = instaboxWorkloadLoad
+      ? await instaboxWorkloadLoad.catch(() => null)
+      : null;
+    instaboxWorkloadReleased = true;
+    instaboxWorkloadLoad = null;
+    if (loaded) {
+      await loaded.release().catch(() => undefined);
+    }
+  };
   const releaseLocalSandboxWorkload = async (): Promise<void> => {
-    // docker workload 与 bwrap lease 同寿命：run 收尾都在这里释放（docker 的
-    // backend.release + stopAndConfirm/cleanup_pending 语义由 lifecycle 的
-    // finally 承担，release 失败同样不覆盖 run 结果）。
+    // docker workload 与 bwrap / instabox lease 同寿命：run 收尾都在这里释放
     await releaseLocalDockerWorkload();
+    await releaseLocalInstaboxWorkload();
     const loaded = localSandboxLoad
       ? await localSandboxLoad.catch(() => null)
       : null;
@@ -1584,6 +1625,25 @@ export function createCliLocalRuntimeAdapter(
               { code: "origin_authorization_required" },
             );
           }
+        }
+      }
+      if (instaboxRuntimeEnabled) {
+        const instaboxHandle = await loadLocalInstaboxWorkload();
+        if (instaboxHandle) {
+          const instaboxToolName = normalizeLocalToolName(call.name);
+          const instaboxArgs =
+            parseToolArgumentsObject(injectedCall.arguments) ?? {};
+          const instaboxOutput = await instaboxHandle.channel(
+            instaboxToolName,
+            instaboxArgs,
+            opts?.abortSignal,
+          );
+          if (typeof instaboxOutput !== "string") {
+            throw new Error(
+              `instabox workload 未返回结果（tool=${instaboxToolName}）：拒绝回落到宿主执行`,
+            );
+          }
+          return { content: instaboxOutput };
         }
       }
       // docker workload 分支（runtimeKey 指向 docker）：工作区工具族在 sbx 云

@@ -301,10 +301,6 @@ import {
   chatgptWebImageGenerateFunctionSchema,
   chatgptWebImageGenerateFunc,
 } from "./chatgptWebImageTool";
-import {
-  remotionRenderVideoFunctionSchema,
-  remotionRenderVideoFunc,
-} from "./remotionVideoTool";
 import { uiAskChoiceFunc, uiAskChoiceFunctionSchema } from "./uiAskChoiceTool";
 import { showInteractionFunc, showInteractionFunctionSchema } from "./uiCardTool";
 import {
@@ -2360,24 +2356,6 @@ const baseToolDefinitions: ToolDefinition[] = [
     },
     behavior: "action",
     uiGroup: "media",
-  },
-  {
-    id: "remotionRenderVideo",
-    schema: remotionRenderVideoFunctionSchema,
-    executor: remotionRenderVideoFunc,
-    description: {
-      name: "remotionRenderVideo",
-      description:
-        "使用平台内 Remotion 模板渲染手机传播视频或产品介绍视频，并保存为 MP4。",
-      category: "多媒体生成",
-    },
-    behavior: "action",
-    uiGroup: "media",
-    capability: "general",
-    riskLevel: "medium",
-    costLevel: "medium",
-    defaultConsent: "ask",
-    cancelable: true,
   },
 ];
 

@@ -231,7 +231,7 @@ import { createImageAttachmentCache } from "./tuiImageAttachments";
 import { createTuiImageRenderer } from "./tuiImageRenderer";
 import { randomInt } from "node:crypto";
 import { createScrollAnimator } from "./tuiScrollAnimation";
-import { resolveHistoryViewportHeight } from "./tuiLayout";
+import { resolveHistoryViewportHeight, resolveHistoryLayoutGeometry } from "./tuiLayout";
 // S5 迁移：runSubmittedLine 的 slash 命令 bus 分发（runSubmittedSlashLine /
 // SlashDispatchHost）已迁至 ./tuiSlashRouter。依赖方向单向：
 // 本文件 → tuiSlashRouter；后者禁止回指本文件。
@@ -623,6 +623,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     process.env.NODE_ENV !== "test" &&
     ((options.env ?? process.env).NOLO_CLI_NO_WELCOME_ANIM ?? "") !== "1";
   const bannerColumns = (output as { columns?: number }).columns;
+  const { contentWidth: bannerContentWidth, marginLeft: bannerMarginLeft } =
+    typeof bannerColumns === "number"
+      ? resolveHistoryLayoutGeometry(bannerColumns)
+      : { contentWidth: bannerColumns ?? 80, marginLeft: 0 };
+  const bannerLeftPad = bannerMarginLeft > 0 ? " ".repeat(bannerMarginLeft) : "";
   // 首帧字符串复用两次：写出 + 行数计算。避免把渲染逻辑（含主题/终端状态
   // 读取）执行两遍，导致首帧与行数计算不一致。宽度和 TTY 已知时逐行截断到
   // 列宽（与 repaintBanner 同一函数）：长 tip / version 行在窄终端物理换行
@@ -631,13 +636,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     state,
     0,
     welcomeAnimEnabled ? WELCOME_ANIM_MAX_FRAME : 0,
-    bannerColumns,
+    bannerContentWidth,
   );
   const initialWelcome =
     typeof bannerColumns === "number"
       ? rawWelcome
           .split("\n")
-          .map((line) => padOrTruncateToWidth(line, Math.max(1, bannerColumns)))
+          .map((line) =>
+            padOrTruncateToWidth(
+              `${bannerLeftPad}${line}`,
+              Math.max(1, bannerColumns),
+            ),
+          )
           .join("\n")
       : rawWelcome;
   output.write(initialWelcome);
@@ -965,14 +975,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 保留 scene，避免旧宽度下画的 banner 在新宽度 wrap 出残留。
     const currentColumns = (output as { columns?: number }).columns ?? 80;
     const currentRows = (output as { rows?: number }).rows ?? 24;
-    const welcome = renderWelcome(state, frame, maxFrames, currentColumns);
+    const { contentWidth: bannerContentWidth, marginLeft: bannerMarginLeft } =
+      resolveHistoryLayoutGeometry(currentColumns);
+    const welcome = renderWelcome(state, frame, maxFrames, bannerContentWidth);
     // welcome 以换行结尾，pinned agent notice 当初紧随其后再写一段；重绘时
     // 必须一并重写，否则清行（clearLines 含 notice 行数）会把它从屏幕上抹掉。
     const lines = (welcome + (pinnedAgentNotice ?? "")).split("\n");
     // 窄终端下 update hint / welcome hint 这类长行会物理换行，破坏"逻辑行数 =
     // 物理行数"的逐行定位；写入前按列宽截断，保证每行正好占一行。
-    const safeWidth = Math.max(1, currentColumns);
-    const safeLines = lines.map((line) => padOrTruncateToWidth(line, safeWidth));
+    const bannerLeftPad = bannerMarginLeft > 0 ? " ".repeat(bannerMarginLeft) : "";
+    const safeLines = lines.map((line) =>
+      padOrTruncateToWidth(
+        `${bannerLeftPad}${line}`,
+        Math.max(1, currentColumns),
+      ),
+    );
     const clearLines = Math.max(initialBannerLineCount, safeLines.length);
     // 与 paintSyncedFrame 一致的 BSU/ESU + 光标隐藏包裹，避免清行与写入
     // 之间的中间帧闪烁；composer 重绘也在同一帧内完成。
@@ -1917,7 +1934,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             reservedRows,
           ),
         );
-        const contentWidth = Math.max(1, columns - 1);
+        const { contentWidth, marginLeft } = resolveHistoryLayoutGeometry(columns);
         const step = autoScrollStep();
 
         if (autoScrollDirection === "up") {
@@ -1938,10 +1955,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         }
 
         const screenRow = autoScrollDirection === "up" ? 0 : visibleHeight - 1;
+        const dragCol = Math.max(0, Math.min(contentWidth, lastDragMouseX - 1 - marginLeft));
         const hit = hitTestHistory(
           history,
           screenRow,
-          lastDragMouseX - 1,
+          dragCol,
           contentWidth,
           history.scrollTop,
           visibleHeight,
@@ -1987,7 +2005,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     ): Promise<void> => {
       const tty = output as { rows?: number; columns?: number };
       const columns = tty.columns ?? 80;
-      const contentWidth = Math.max(1, columns - 1);
+      const { contentWidth } = resolveHistoryLayoutGeometry(columns);
       // 诊断计时（选区复制卡顿定位用）：拆开「布局+提取」与「剪贴板写入」两段。
       const extractStartedAt = Date.now();
       const textToCopy = extractSelectedText(
@@ -2309,9 +2327,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             reservedRows,
           ),
         );
-        const contentWidth = Math.max(1, columns - 1);
+        const { contentWidth, marginLeft } = resolveHistoryLayoutGeometry(columns);
         const screenRow = mouseEvent.y - 1;
         const screenCol = mouseEvent.x - 1;
+        const hitContentCol = screenCol - marginLeft;
+        const contentCol = Math.max(0, Math.min(contentWidth, screenCol - marginLeft));
 
         if (mouseEvent.kind === "press" && mouseEvent.button === "left") {
           stopAutoScroll();
@@ -2323,13 +2343,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           if (
             mouseEvent.ctrl &&
             screenRow < visibleHeight &&
-            screenCol < contentWidth &&
+            hitContentCol >= 0 &&
+            hitContentCol < contentWidth &&
             openVisibleUrlAtScreen(
               history,
               contentWidth,
               history.scrollTop,
               screenRow,
-              screenCol,
+              hitContentCol,
               visibleHeight,
               (url) =>
                 openExternalUrl(url, {
@@ -2344,11 +2365,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             paintFrame(buffer);
             return;
           }
-          if (screenRow < visibleHeight && screenCol < contentWidth) {
+          if (screenRow < visibleHeight && screenCol < columns) {
             const hit = hitTestHistory(
               history,
               screenRow,
-              screenCol,
+              contentCol,
               contentWidth,
               history.scrollTop,
               visibleHeight,
@@ -2374,7 +2395,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const hit = hitTestHistory(
             history,
             clampedRow,
-            screenCol,
+            contentCol,
             contentWidth,
             history.scrollTop,
             visibleHeight,
@@ -2404,7 +2425,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             const releaseHit = hitTestHistory(
               history,
               clampedRow,
-              screenCol,
+              contentCol,
               contentWidth,
               history.scrollTop,
               visibleHeight,

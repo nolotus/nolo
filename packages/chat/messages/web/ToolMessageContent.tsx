@@ -743,88 +743,6 @@ const GeminiGallery: React.FC<ToolProps> = ({ rawData, isError, t }) => {
   );
 };
 
-const RemotionVideoCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
-  if (isError || !rawData) return null;
-
-  const metadata = rawData.metadata || {};
-  const title =
-    metadata.originalName ||
-    rawData.outputName ||
-    t("video.generatedTitle", "Remotion video.mp4");
-  const url = rawData.url || rawData.contentUrl || rawData.downloadUrl || "";
-  const template = rawData.template || metadata.template;
-  const size = typeof metadata.size === "number" ? metadata.size : undefined;
-  const sizeLabel =
-    size === undefined
-      ? ""
-      : size > 1024 * 1024
-        ? `${(size / 1024 / 1024).toFixed(1)} MB`
-        : `${Math.round(size / 1024)} KB`;
-
-  const handleCopy = async () => {
-    if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success(t("common.copied", "已复制"));
-    } catch {
-      toast.error(t("common.copyFailed", "复制失败"));
-    }
-  };
-
-  const handleOpen = () => {
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
-  };
-
-  return (
-    <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block remotion-video-card", contentStyles.contentBlock, contentStyles.videoCard)}>
-      {url ? (
-        <video
-           {...withLiteralClass("rvc-player", contentStyles.videoPlayer)}
-          src={url}
-          controls
-          preload="metadata"
-          playsInline
-        />
-      ) : (
-        <div  {...withLiteralClass("rvc-empty", contentStyles.videoEmpty)}>
-          <LuVideo size={24} aria-hidden="true" />
-        </div>
-      )}
-      <div  {...withLiteralClass("rvc-body", contentStyles.videoBody)}>
-        <div  {...withLiteralClass("rvc-main", contentStyles.videoMain)}>
-          <div  {...withLiteralClass("icon-badge info", contentStyles.iconBadge, contentStyles.iconBadgeInfo)}>
-            <LuVideo size={18} aria-hidden="true" />
-          </div>
-          <div {...withLiteralClass("u-flex-1 u-min-w-0", contentStyles.flex1Min0)}>
-            <div {...withLiteralClass("u-font-bold u-truncate u-text-sm", contentStyles.truncate, contentStyles.boldText)}>{title}</div>
-            <div  {...withLiteralClass("rvc-meta", contentStyles.videoMeta)}>
-              {template ? <span>{template}</span> : null}
-              {sizeLabel ? <span>{sizeLabel}</span> : null}
-              {rawData.fileId ? <span {...withLiteralClass("u-font-mono", contentStyles.monoDim)}>{rawData.fileId}</span> : null}
-            </div>
-          </div>
-        </div>
-        <div data-hook="messages-esc-rvc-actions" {...withLiteralClass("rvc-actions", contentStyles.videoActions)}>
-          <button type="button" data-hook="messages-esc-btn-tiny" className="btn-tiny" onClick={handleOpen} disabled={!url}>
-            <LuExternalLink size={13} aria-hidden="true" />
-            {t("common.open", "Open")}
-          </button>
-          <button type="button" data-hook="messages-esc-btn-tiny" className="btn-tiny" onClick={handleCopy} disabled={!url}>
-            <LuCopy size={13} aria-hidden="true" />
-            {t("common.copy", "Copy")}
-          </button>
-          {url ? (
-            <a data-hook="messages-esc-btn-tiny" {...withLiteralClass("btn-tiny rvc-download", contentStyles.minWidth0)} href={url} download={title}>
-              <LuDownload size={13} aria-hidden="true" />
-              {t("common.download", "Download")}
-            </a>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const ZiweiChartCard: React.FC<ToolProps> = ({
   rawData,
   isError,
@@ -1764,7 +1682,6 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
   openAIGptImageGenerate: (props) => <GeminiGallery {...props} />,
   chatgptWebImageGenerate: (props) => <GeminiGallery {...props} />,
   openAIGptImageEdit: (props) => <GeminiGallery {...props} />,
-  remotionRenderVideo: (props) => <RemotionVideoCard {...props} />,
   ziweiChart: (props) => <ZiweiChartCard {...props} />,
   mediaJobTool: (props) => <MediaJobToolCard {...props} />,
   transcribe: (props) => <MediaStepCard toolName="transcribe" {...props} />,

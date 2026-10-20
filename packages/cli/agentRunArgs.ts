@@ -298,14 +298,15 @@ export function parseAgentRunArgs(
     );
   }
   const hasModeFlag = args.includes("--local") || args.includes("--server") || args.includes("--auto");
-  // `--local` + docker key 不是位置歧义而是精确组合：在这台机器上、在这台机器的
-  // sbx 沙盒里执行。派发路径就靠这一对参数把子 run 钉在本机沙盒（否则子进程会
+  // `--local` + docker / instabox key 不是位置歧义而是精确组合：在这台机器上、在这台机器的
+  // 沙盒里执行。派发路径就靠这一对参数把子 run 钉在本机沙盒（否则子进程会
   // 带着同一个 key 走服务端通道）。其它 key 仍与任何 mode flag 互斥。
   const dockerRuntimeLocalKey = runtimeKey !== undefined && /^docker(:.+)?$/.test(runtimeKey);
-  const localDockerCombination = dockerRuntimeLocalKey && args.includes("--local");
-  if (runtimeKey && hasModeFlag && !localDockerCombination) {
+  const instaboxRuntimeLocalKey = runtimeKey === "instabox";
+  const localSandboxCombination = (dockerRuntimeLocalKey || instaboxRuntimeLocalKey) && args.includes("--local");
+  if (runtimeKey && hasModeFlag && !localSandboxCombination) {
     throw new Error(
-      "不能同时指定 --local/--server/--auto 与 --runtime-key（位置歧义）：--runtime-key 已直接指定执行后端（如 instabox、gcp、machine:<id>），请移除 --local/--server/--auto（例外：--local + docker 是合法组合，表示「本机沙盒内执行」）"
+      "不能同时指定 --local/--server/--auto 与 --runtime-key（位置歧义）：--runtime-key 已直接指定执行后端（如 gcp、machine:<id>），请移除 --local/--server/--auto（例外：--local + docker / instabox 是合法组合，表示「本机沙盒内执行」）"
     );
   }
   if (runtimeKey && !isValidRuntimeKey(runtimeKey)) {

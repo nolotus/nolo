@@ -50,6 +50,42 @@ export type TerminalLayout = {
 const DEFAULT_TERMINAL_ROWS = 24;
 const DEFAULT_TERMINAL_COLUMNS = 80;
 
+export const TUI_MARGIN_LEFT = 1;
+export const TUI_MARGIN_RIGHT = 1;
+export const TUI_MARGIN_RESPONSIVE_MIN_COLUMNS = 40;
+
+export type HistoryLayoutGeometry = {
+  contentWidth: number;
+  marginLeft: number;
+  marginRight: number;
+};
+
+/**
+ * 计算 TUI 转录历史与输入区的水平排版几何：
+ * - 正常宽度 (> 40 列)：左右各留 1 列边距，滚动条保持贴死在第 columns 列
+ * - 极窄宽度 (<= 40 列)：自动回退到 0 边距，优先保障小屏可读空间
+ */
+export function resolveHistoryLayoutGeometry(
+  columns?: number,
+): HistoryLayoutGeometry {
+  const cols = Math.max(1, (columns ?? 0) > 0 ? columns! : DEFAULT_TERMINAL_COLUMNS);
+  if (cols <= TUI_MARGIN_RESPONSIVE_MIN_COLUMNS) {
+    return {
+      contentWidth: Math.max(1, cols - 1),
+      marginLeft: 0,
+      marginRight: 0,
+    };
+  }
+  const marginLeft = TUI_MARGIN_LEFT;
+  const marginRight = TUI_MARGIN_RIGHT;
+  const contentWidth = Math.max(1, cols - 1 - marginLeft - marginRight);
+  return {
+    contentWidth,
+    marginLeft,
+    marginRight,
+  };
+}
+
 /**
  * Resolve the height in rows of the scrollable history transcript viewport.
  */

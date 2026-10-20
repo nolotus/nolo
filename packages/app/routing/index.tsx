@@ -688,17 +688,39 @@ export function useSearchParams(): [
 ] {
   const location = useLocation();
   const navigate = useNavigate();
+  // 直接读 RouterContext：用来判断「navigate 会不会真的写 history」。
+  const routerContext = useContext(RouterContext);
 
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
 
+  // setter 身份必须跨 URL 变化保持稳定：RouterContext 的 value（含 navigate）
+  // 每次导航都会重建，把它塞进 useCallback 依赖里会让 setter 每次导航都换身份，
+  // 依赖 setter 的 effect（如 SpaceContent 的搜索防抖）就会被无意义重启。
+  // 代价是读取路径必须走 ref：里面永远是最新的 location / navigate / ctx。
+  const latestLocationRef = useRef(location);
+  latestLocationRef.current = location;
+  const latestNavigateRef = useRef(navigate);
+  latestNavigateRef.current = navigate;
+  const latestRouterContextRef = useRef(routerContext);
+  latestRouterContextRef.current = routerContext;
+
+  // 已知作用域限制（不是全局原子方案，别按全局原子方案去用）：下面的乐观推进
+  // 只对**同一个 hook 实例内部**生效。同一页面里两个不同组件各自调用
+  // useSearchParams 时，各自持有独立的 latestLocationRef，组件 B 看不到组件 A
+  // 的乐观推进值，仍会基于自己 render 时的 location 拼基底。
+  // 跨组件原子合并需要由 RouterContext 统一托管一份待提交 base，或以
+  // window.location.search 为同步基底（history 写入是同步的，window 上是真值）。
   const setSearchParams = useCallback(
     (
       next: SetSearchParamsNext,
       options?: NavigateOptions,
     ) => {
+      // 基准取 ref 里的最新 location，而不是本次 render 闭包里的 location：
+      // 闭包值在同一批次内调用两次时是陈旧的，后一次会把前一次刚写的参数覆盖掉。
+      const base = latestLocationRef.current;
       const resolvedNext =
         typeof next === "function"
-          ? next(new URLSearchParams(location.search))
+          ? next(new URLSearchParams(base.search))
           : next;
       let nextSearch: string;
       if (typeof resolvedNext === "string") {
@@ -718,11 +740,32 @@ export function useSearchParams(): [
         nextSearch = s ? `?${s}` : "";
       }
 
-      if (nextSearch !== location.search) {
-        navigate(`${location.pathname}${nextSearch}${location.hash}`, options);
+      if (nextSearch !== base.search) {
+        // history 已同步写入，但 React 还没重渲染，ref 仍是导航前的位置。
+        // 这里乐观推进基准，让同一批次里的后续写入者看到本次写入。
+        //
+        // 只在导航确实会提交时推进：无 RouterContext（SSR 降级）时 useNavigate
+        // 返回 no-op；有 ctx 但在服务端时 History.push/replace 也直接 return
+        // （History.isSSR === typeof window === "undefined"）。这两种情况下
+        // navigate 不写 history、不触发重渲染，把 ref 改成那个 pending URL
+        // 会让基准与真实 URL 漂移，后续写入基于一个从未发生过的位置。
+        const navigationWillCommit =
+          !!latestRouterContextRef.current && typeof window !== "undefined";
+        if (navigationWillCommit) {
+          latestLocationRef.current = {
+            pathname: base.pathname,
+            search: nextSearch,
+            hash: base.hash,
+            // 乐观对象要与真实写入后 location 的 state 一致，否则后续读取
+            // base.state 的消费者会看到本次导航前的旧 state。
+            state: options?.state !== undefined ? options.state : base.state,
+            key: base.key,
+          };
+        }
+        latestNavigateRef.current(`${base.pathname}${nextSearch}${base.hash}`, options);
       }
     },
-    [location.pathname, location.search, location.hash, navigate],
+    [],
   );
 
   return [searchParams, setSearchParams];
