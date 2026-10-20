@@ -65,6 +65,7 @@ import {
 } from "./pasteFlow";
 import { writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
+import { fetchCiStatus, summarizeLatest } from "./ciStatus";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import {
   applyTuiInputKey,
@@ -931,6 +932,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     void detectGitStatusAsync(state.cwd).then((gitStatus) => {
       if (sessionEnded) return; // session exited while git ran — skip the stale repaint
       state = { ...state, gitStatus };
+      scheduleRender();
+    });
+  };
+
+  // 部署状态：启动时异步取一次（只在交互式分支调用）。
+  // 与 gitStatus 不同，它不随 cwd 变化，所以不需要在 /cd 后重取。
+  // 失败静默：fetchCiStatus 已经保证不抛，这里再守一次 sessionEnded，
+  // 避免会话结束后仍用陈旧结果重绘。
+  const refreshCiStatus = (): void => {
+    if ((options.env?.NOLO_CLI_CI_STATUS ?? process.env.NOLO_CLI_CI_STATUS) === "0") return;
+    void fetchCiStatus().then((jobs) => {
+      if (sessionEnded) return;
+      const ciStatusLine = summarizeLatest(jobs);
+      if (!ciStatusLine) return;
+      state = { ...state, ciStatusLine };
       scheduleRender();
     });
   };
@@ -2764,6 +2780,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       input.once("close", finish);
       fixedInput.repaint(buffer, cursorPos);
       refreshGitStatus();
+      refreshCiStatus();
       await new Promise<void>((resolve) => {
         resolveDone = resolve;
         if (done) resolve(); // finish() may have run before we started waiting

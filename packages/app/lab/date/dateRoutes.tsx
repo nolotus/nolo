@@ -1,4 +1,4 @@
-// src/lab/date/dateRoutes.tsx
+// packages/app/lab/date/dateRoutes.tsx
 import { lazy, Suspense } from "react";
 import { Outlet } from "app/routing";
 import LoginPage from "./pages/LoginPage";

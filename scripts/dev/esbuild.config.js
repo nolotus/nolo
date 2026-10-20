@@ -327,6 +327,23 @@ const baseConfig = {
   legalComments: "none",
 
   define: {
+    // web 产物显示的 CLI 版本：构建期从 packages/cli/package.json 读，注入成字面量。
+    // 目的是让「网页上的版本号」不再是一份需要人工同步的硬编码常量——
+    // 版本号的真值只有一处（package.json / tag），web 只是消费方。
+    __NOLO_CLI_VERSION__: JSON.stringify(
+      (() => {
+        try {
+          return require("../../packages/cli/package.json").version;
+        } catch (error) {
+          // fail-closed：这个文件是 monorepo 内的确定性依赖，读不到说明工程目录
+          // 已经损坏。此时绝不能静默产出 "0.0.0" 让脏产物逃逸到线上（官网会显示
+          // v0.0.0），宁可让构建当场变红。
+          throw new Error(
+            `[esbuild] 无法读取 packages/cli/package.json 的 version，拒绝构建出错误的 web 版本号: ${String(error)}`
+          );
+        }
+      })()
+    ),
     "process.env.PLATFORM": JSON.stringify("web"),
     "process.env.NODE_ENV": JSON.stringify(
       isProduction ? "production" : "development"

@@ -40,6 +40,7 @@ import { AddCategoryModal } from "create/space/category/AddCategoryModal";
 import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
 import { selectIdentityUserId } from "identity/selectors";
 import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
+import { WorkDialogGroupsPreview } from "./WorkDialogGroupsPreview";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { SidebarPinnedBlock } from "./sidebar/SidebarPinnedBlock";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
@@ -366,6 +367,7 @@ const ChatSidebar: React.FC = () => {
         {spaceSwitcherHeader}
         <SidebarCoachmark />
         {remoteTasksGlobalEntry}
+        <WorkDialogGroupsPreview items={allContentItems} userId={identityUserId ?? ""} />
         <AllViewSidebar typeFilter={typeFilter} />
         {commandPalette}
       </div>

@@ -23,6 +23,8 @@ import {
 } from "agent-runtime/artifactStore";
 import {
   exportRunDiffArtifact,
+  exportRunWorktreeDiffArtifacts,
+  runDiffArtifactKey,
   serializeRunArtifactAudit,
   type RunArtifactAuditRecord,
 } from "agent-runtime/runArtifactExport";
@@ -71,20 +73,62 @@ export function createDockerRunTerminalExport(
   args: DockerRunTerminalExportArgs,
 ): () => Promise<ArtifactRef | null> {
   return async () => {
+    const warn = args.warn ?? (() => {});
     const store =
       args.store ??
       (args.createStore ?? ((rootDir: string) => createLocalArtifactStore({ rootDir })))(
         args.artifactsRootDir ?? resolveRunArtifactsRootDir(args.runsDir),
       );
-    return await exportRunDiffArtifact({
+
+    // 根工作区 diff（保持原语义：空 diff 不产出）。
+    const rootRef = await exportRunDiffArtifact({
       runId: args.runId,
       store,
       exec: args.exec,
-      ...(args.warn ? { warn: args.warn } : {}),
-      writeAudit: (record) => {
-        writeRunArtifactAudit({ runsDir: args.runsDir, record, fs: args.fs });
-      },
+      warn,
     });
+
+    // 被 .gitignore 忽略的 `.worktrees/<name>` 改动：根 diff 看不见它们，
+    // 必须按 worktree 逐个导出，否则沙盒释放后产出彻底消失（见 2026-10-19 事故）。
+    const worktrees = await exportRunWorktreeDiffArtifacts({
+      runId: args.runId,
+      store,
+      exec: args.exec,
+      warn,
+    });
+
+    const firstWorktreeRef = worktrees.artifacts[0]?.ref ?? null;
+    const ref = rootRef ?? firstWorktreeRef;
+
+    // 只要有产物就写审计（根工作区无改动、只有 worktree 有改动时也要留证）。
+    if (rootRef || worktrees.artifacts.length > 0) {
+      try {
+        writeRunArtifactAudit({
+          runsDir: args.runsDir,
+          record: {
+            runId: args.runId,
+            kind: "diff",
+            key: rootRef ? runDiffArtifactKey(args.runId) : null,
+            ref: rootRef,
+            worktrees: worktrees.artifacts,
+          },
+          fs: args.fs,
+        });
+      } catch (error) {
+        // 审计是证据增强，不是产物成立条件：写不进磁盘也不能把已有 patch 吞掉。
+        const detail = error instanceof Error ? error.message : String(error);
+        warn(`run 终态导出审计写入失败（不影响 run 结果）：${detail}`);
+      }
+    }
+
+    if (worktrees.worktrees > 0) {
+      warn(
+        `[nolo] run 终态导出：根工作区 ${rootRef ? 1 : 0} 个 patch、` +
+          `worktree ${worktrees.artifacts.length}/${worktrees.worktrees} 个 patch 已存产物层`,
+      );
+    }
+
+    return ref;
   };
 }
 

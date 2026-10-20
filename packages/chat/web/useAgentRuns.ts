@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import {
   getAgentRuns,
   getAgentRunsVersion,
@@ -49,6 +49,10 @@ export type AgentRunHydrationOptions = {
   readVisibilityState?: () => string | undefined;
   now?: () => number;
   throttleMs?: number;
+  onListResult?: (payload: unknown) => void;
+  onListError?: (error: unknown) => void;
+  /** 可选周期刷新（ms）。不传则不建定时器。 */
+  refreshIntervalMs?: number;
 };
 
 function defaultReadVisibilityState(): string | undefined {
@@ -79,20 +83,26 @@ export function installAgentRunHydration(options: AgentRunHydrationOptions): () 
   const throttleMs = Math.max(AGENT_RUN_HYDRATE_THROTTLE_MS, options.throttleMs ?? 0);
   let lastHydrateAt = Number.NEGATIVE_INFINITY;
   let disposed = false;
+  let latestRequest = 0;
 
   const hydrate = (force: boolean) => {
     if (disposed) return;
     const timestamp = now();
     if (!force && timestamp - lastHydrateAt < throttleMs) return;
     lastHydrateAt = timestamp;
+    const requestId = ++latestRequest;
     void Promise.resolve()
       .then(() => fetchList({ action: "list" }))
       .then((payload) => {
         if (disposed) return;
+        // A slower old list must never roll back a newer hydration result.
+        if (requestId !== latestRequest) return;
         hydrateFromServer(payload, scope);
+        options.onListResult?.(payload);
       })
       .catch((error) => {
-        console.warn("[agent-runs] hydrate from server failed:", error);
+        if (!disposed && requestId === latestRequest) options.onListError?.(error);
+        if (!disposed && requestId === latestRequest) console.warn("[agent-runs] hydrate from server failed:", error);
       });
   };
 
@@ -105,15 +115,30 @@ export function installAgentRunHydration(options: AgentRunHydrationOptions): () 
   hydrate(true);
   target?.addEventListener("visibilitychange", onVisibilityChange);
   target?.addEventListener("focus", onFocus);
+  // 可选周期刷新：只有显式开启才建定时器（默认不新增后台开销）。
+  // 作用是让「仍在运行」的时间锚点保持新鲜，否则快照过期后只能报状态不确定。
+  const refreshTimer = options.refreshIntervalMs && options.refreshIntervalMs > 0
+    ? setInterval(() => hydrate(true), options.refreshIntervalMs)
+    : undefined;
 
   return () => {
     disposed = true;
+    latestRequest += 1;
+    if (refreshTimer) clearInterval(refreshTimer);
     target?.removeEventListener("visibilitychange", onVisibilityChange);
     target?.removeEventListener("focus", onFocus);
   };
 }
 
-export function useAgentRuns(scope?: AgentRunScope) {
+export function useAgentRuns(
+  scope?: AgentRunScope,
+  onListEvent?: (payload: unknown | null) => void,
+  options?: { refreshIntervalMs?: number },
+) {
+  const onListEventRef = useRef(onListEvent);
+  const activeUserRef = useRef(scope?.userId);
+  onListEventRef.current = onListEvent;
+  activeUserRef.current = scope?.userId;
   const getSnapshot = useCallback(() => getAgentRunsVersion(), []);
   useSyncExternalStore(subscribeAgentRuns, getSnapshot, getSnapshot);
   const snapshot = getAgentRuns(scope);
@@ -123,8 +148,17 @@ export function useAgentRuns(scope?: AgentRunScope) {
   }, []);
   // §7.2：挂载 + 回前台/可见性恢复的正拉接线（scope 变化即重装）。
   useEffect(() => {
-    return installAgentRunHydration({ scope: scope ?? { userId: "" } });
-  }, [scope?.userId, scope?.dialogId, scope?.workspaceId]);
+    const subscribedScope = scope ?? { userId: "" };
+    return installAgentRunHydration({ scope: subscribedScope,
+      refreshIntervalMs: options?.refreshIntervalMs,
+      onListResult: (payload) => {
+        if (activeUserRef.current === subscribedScope.userId) onListEventRef.current?.(payload);
+      },
+      onListError: () => {
+        if (activeUserRef.current === subscribedScope.userId) onListEventRef.current?.(null);
+      },
+    });
+  }, [scope?.userId, scope?.dialogId, scope?.workspaceId, options?.refreshIntervalMs]);
   // Scope filtering is also applied at render time so an event received before
   // the current dialog changed can never leak into another dialog.
   return snapshot.map((run) => ({ ...run, elapsedMs: getAgentRunElapsedMs(run) }));
