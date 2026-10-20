@@ -1,4 +1,11 @@
 
+## 0.157.0-alpha.1 (2026-10-20)
+
+### Features
+
+* **agent-runtime:** execShell 支持显式任务标签 label ([5110663](https://github.com/nolotus/bun-nolo/commit/51106636b535a70d1f752052250db133d909af34))
+
+
 ## 0.156.0-alpha.3 (2026-10-20)
 
 ### Bug Fixes
