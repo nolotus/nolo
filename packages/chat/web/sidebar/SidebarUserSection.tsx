@@ -106,6 +106,16 @@ const PortalDropdown: React.FC<{
     Math.max(8, rect.left + 8),
     Math.max(8, window.innerWidth - width - 8),
   );
+  // 锚点可能在视口顶部（移动抽屉）也可能在底部（桌面侧栏）：向空间更大的一侧展开，
+  // 并给出 max-height，避免弹层整体跑出视口被裁（否则抽屉里的账号菜单会有一半在屏幕外）。
+  const gap = 8;
+  const spaceAbove = rect.top - gap * 2;
+  const spaceBelow = window.innerHeight - rect.bottom - gap * 2;
+  const openDownward = spaceBelow > spaceAbove;
+  const maxHeight = Math.max(180, openDownward ? spaceBelow : spaceAbove);
+  const verticalStyle = openDownward
+    ? { top: rect.bottom + gap }
+    : { bottom: window.innerHeight - rect.top + gap };
 
   return createPortal(
     <div
@@ -116,9 +126,13 @@ const PortalDropdown: React.FC<{
       onTouchStart={(e) => e.stopPropagation()}
       style={{
         position: "fixed",
-        bottom: window.innerHeight - rect.top + 8,
+        ...verticalStyle,
         left,
         width,
+        maxHeight,
+        overflowY: "auto",
+        overflowX: "hidden",
+        overscrollBehavior: "contain",
       }}
       {...withLiteralClass(
         `SidebarUserSection__dropdown is-open ${className || ""}`,
@@ -613,7 +627,10 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
                 {t("notifications.empty", "No notifications yet")}
               </div>
             ) : (
-              <div className="topbar-notification__list" style={{ maxHeight: "280px" }}>
+              <div
+                className="topbar-notification__list"
+                style={{ maxHeight: "280px", overflowY: "auto", overscrollBehavior: "contain" }}
+              >
                 {visibleNotifications.map((item) => (
                   <button
                     key={item.id}

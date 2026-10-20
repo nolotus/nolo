@@ -1,4 +1,11 @@
 
+## 0.156.0-alpha.2 (2026-10-20)
+
+### Bug Fixes
+
+* **navigation:** Rail 底部弹层按可用空间择向展开并限制高度 ([1e36e8b](https://github.com/nolotus/bun-nolo/commit/1e36e8b0f54471c11e4d2067f32f5a2a1701ecb9))
+
+
 ## 0.156.0-alpha.1 (2026-10-20)
 
 ### Features
