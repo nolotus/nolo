@@ -49,13 +49,27 @@ export function createTuiSummaryLlmCaller(
     const timer = setTimeout(() => controller.abort(new DOMException("Summary deadline exceeded", "TimeoutError")), remainingMs);
     const signal = controller.signal;
     const attemptId = callOptions?.attemptId ?? randomUUID();
-    // Race resolution, HTTP AND body parsing: a slow resolver or a noncooperative
-    // fetch must not extend the shared deadline. The same signal reaches HTTP.
-    const stopped = new Promise<null>((resolve) => {
-      if (signal.aborted) resolve(null);
-      else signal.addEventListener("abort", () => resolve(null), { once: true });
-    });
-    const attempt = async (model: string): Promise<string | null> => {
+    const attempt = async (model: string, remainingModels: number): Promise<string | null> => {
+      const remaining = deadlineMs - Date.now();
+      if (signal.aborted || !(remaining > 0)) return null;
+      const attemptController = new AbortController();
+      const attemptSignal = attemptController.signal;
+      const budgetMs = remaining / remainingModels;
+      const attemptDeadlineMs = Date.now() + budgetMs;
+      const onStop = () => attemptController.abort(signal.reason);
+      signal.addEventListener("abort", onStop, { once: true });
+      if (signal.aborted) onStop();
+      const attemptTimer = setTimeout(() => attemptController.abort(
+        new DOMException("Summary attempt budget exceeded", "TimeoutError"),
+      ), budgetMs);
+      // Race resolution, HTTP and body parsing even if they ignore abort.
+      let onAttemptAbort: () => void = () => {};
+      const stopped = new Promise<null>((resolve) => {
+        onAttemptAbort = () => resolve(null);
+        if (attemptSignal.aborted) resolve(null);
+        else attemptSignal.addEventListener("abort", onAttemptAbort, { once: true });
+      });
+      const isStopped = () => attemptSignal.aborted || Date.now() >= attemptDeadlineMs;
       let stage = "resolve";
       const work = async (): Promise<string | null> => {
         try {
@@ -65,7 +79,7 @@ export function createTuiSummaryLlmCaller(
             apiKeyRefResolver: options?.apiKeyRefResolver,
             credentialBroker: options?.credentialBroker,
           });
-          if (signal.aborted) return null;
+          if (isStopped()) return null;
           if (!providerConfig?.authToken) { stage = "auth"; return null; }
           stage = "build";
           const messages: AgentRuntimeChatMessage[] = [
@@ -82,12 +96,12 @@ export function createTuiSummaryLlmCaller(
             requestId: attemptId,
           });
           stage = "http";
-          if (signal.aborted) return null;
-          const response = await fetchImpl(request.url, { ...request.init, signal });
-          if (signal.aborted || !response.ok) return null;
+          if (isStopped()) return null;
+          const response = await fetchImpl(request.url, { ...request.init, signal: attemptSignal });
+          if (isStopped() || !response.ok) return null;
           stage = "body";
           const data = JSON.parse(await response.text());
-          if (signal.aborted) return null;
+          if (isStopped()) return null;
           stage = "parse";
           // A capped/incomplete summary must not become authoritative history.
           if (data?.choices?.[0]?.finish_reason === "length" || data?.status === "incomplete" || data?.incomplete_details) {
@@ -102,16 +116,25 @@ export function createTuiSummaryLlmCaller(
           return null;
         }
       };
-      const result = await Promise.race([work(), stopped]);
-      if (!result) console.warn("[tuiSummary] summary attempt failed", {
-        attemptId, model, stage: parentSignal?.aborted ? "cancelled" : signal.aborted ? "deadline" : stage,
-      });
-      return result;
+      try {
+        const result = await Promise.race([work(), stopped]);
+        if (!result) console.warn("[tuiSummary] summary attempt failed", {
+          attemptId, model,
+          stage: parentSignal?.aborted ? "cancelled"
+            : signal.aborted || Date.now() >= deadlineMs ? "deadline"
+            : isStopped() ? "attempt-budget" : stage,
+        });
+        return result;
+      } finally {
+        clearTimeout(attemptTimer);
+        signal.removeEventListener("abort", onStop);
+        attemptSignal.removeEventListener("abort", onAttemptAbort);
+      }
     };
     try {
-      const primary = await attempt(BUILTIN_SUMMARY_LLM_CONFIG.model);
-      if (primary || signal.aborted || Date.now() >= deadlineMs) return primary;
-      return await attempt(BUILTIN_DIALOG_LLM_FALLBACK_MODEL);
+      const primary = await attempt(BUILTIN_SUMMARY_LLM_CONFIG.model, 2);
+      if (primary || signal.aborted || parentSignal?.aborted || Date.now() >= deadlineMs) return primary;
+      return await attempt(BUILTIN_DIALOG_LLM_FALLBACK_MODEL, 1);
     } finally {
       clearTimeout(timer);
       parentSignal?.removeEventListener("abort", onAbort);

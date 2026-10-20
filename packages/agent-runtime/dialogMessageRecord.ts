@@ -8,6 +8,7 @@ export function dialogMessageRecordToAgentRuntimeMessage(
   if (!record || typeof record !== "object") return null;
   if (record.role !== "user" && record.role !== "assistant" && record.role !== "tool") return null;
   return {
+    ...(typeof record.id === "string" ? { id: record.id } : {}),
     role: record.role,
     content: record.content ?? "",
     ...(record.contextReference !== undefined
@@ -18,6 +19,7 @@ export function dialogMessageRecordToAgentRuntimeMessage(
       : {}),
     ...(typeof record.toolCallId === "string" ? { tool_call_id: record.toolCallId } : {}),
     ...(Array.isArray(record.tool_calls) ? { tool_calls: record.tool_calls } : {}),
+    ...(record.toolPayload !== undefined ? { toolPayload: record.toolPayload } : {}),
     ...(typeof record.toolName === "string" ? { toolName: record.toolName } : {}),
     // 写侧（dialogWritePlan）把 tool_result_metadata 以 `metadata` 字段落库；
     // 回读必须还原，否则跨 turn 投影丢失 metadata 后缀，同一 tool 消息的字节

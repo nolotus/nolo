@@ -1181,6 +1181,7 @@ export function createCliLocalRuntimeAdapter(
         sourceHash: input.sourceHash,
         sourceCount: input.sourceCount,
         schemaVersion: input.schemaVersion,
+        referenceKeys: input.referenceKeys,
       }),
     loadLastContextUsage: async (dialogId) => {
       // 从 per-dialog 权威持久化记录读取上一次调用的真实 input tokens。

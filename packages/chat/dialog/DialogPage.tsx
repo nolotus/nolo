@@ -24,6 +24,8 @@ import {
 } from "chat/dialog/dialogSlice";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { ChatArea } from "chat/web/ChatArea";
+import { getIsDesktopApp } from "app/utils/env";
+import { resolveDialogWorkspaceFolder } from "chat/web/desktopFolderProjects";
 import { LiveVoicePanel } from "chat/web/LiveVoicePanel";
 import { useMediaJobContextInjection } from "../web/mediaJobContextInjection";
 import { isLiveAudioOnlyAgent } from "ai/agent/isLiveAudioOnlyAgent";
@@ -145,6 +147,18 @@ const DialogPage = ({
   const navigate = useNavigate();
   const location = useLocation();
   const dialogId = pageKey ? extractCustomId(pageKey) : null;
+  // An existing Dialog keeps its own folder binding, independent of sidebar selection.
+  // No binding → the desktop default workspace, which is exactly what the first
+  // message of /chat used; a bound-but-missing Project blocks instead of falling back.
+  let dialogFolder: string | null = null;
+  let projectFolderMissing = false;
+  if (getIsDesktopApp() && pageKey && typeof window !== "undefined") {
+    try {
+      const workspace = resolveDialogWorkspaceFolder(window.localStorage, pageKey);
+      dialogFolder = workspace.cwd;
+      projectFolderMissing = workspace.missing;
+    } catch { projectFolderMissing = true; }
+  }
   const isNew = (location.state as any)?.isNew;
   const quickChatFirstMessageText = getQuickChatFirstMessageText(
     location.state as any,
@@ -861,6 +875,8 @@ const DialogPage = ({
           </div>
           <ChatArea
             dialogId={dialogId}
+            runtimeOptions={dialogFolder ? { cwd: dialogFolder, workspaceToolsHint: true } : undefined}
+            composerBlockedReason={projectFolderMissing ? "关联的本地项目目录不可用。请恢复项目文件夹后再发送消息，避免在错误目录执行。" : undefined}
             scrollContainerSelector=".DialogPage__messages"
             messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
           />
@@ -886,6 +902,8 @@ const DialogPage = ({
           {renderInheritedContextBanner()}
           <ChatArea
             dialogId={dialogId}
+            runtimeOptions={dialogFolder ? { cwd: dialogFolder, workspaceToolsHint: true } : undefined}
+            composerBlockedReason={projectFolderMissing ? "关联的本地项目目录不可用。请恢复项目文件夹后再发送消息，避免在错误目录执行。" : undefined}
             scrollContainerSelector=".DialogPage__messages"
             messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
           />
@@ -913,6 +931,8 @@ const DialogPage = ({
           )}
           <ChatArea
             dialogId={dialogId}
+            runtimeOptions={dialogFolder ? { cwd: dialogFolder, workspaceToolsHint: true } : undefined}
+            composerBlockedReason={projectFolderMissing ? "关联的本地项目目录不可用。请恢复项目文件夹后再发送消息，避免在错误目录执行。" : undefined}
             scrollContainerSelector=".DialogPage__messages"
             messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
           />

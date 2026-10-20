@@ -219,6 +219,7 @@ export type AgentRuntimeDialogSummary = {
    * 字段存在但值畸形（null / 非数字）同样判无效（键存在即透传，读取层不静默丢弃）。
    */
   schemaVersion?: unknown;
+  referenceKeys?: string[];
 };
 
 /**
@@ -301,6 +302,7 @@ export type AgentRuntimeHostAdapter = {
     sourceHash?: string;
     sourceCount?: number;
     schemaVersion?: number;
+    referenceKeys?: string[];
   }): Promise<void>;
   /**
    * Optional: load last context token usage for local auto-compaction trigger.

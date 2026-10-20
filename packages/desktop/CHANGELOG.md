@@ -1,4 +1,17 @@
 
+## 0.166.0-alpha.1 (2026-10-20)
+
+### Features
+
+* **desktop:** 多本地项目文件夹绑定 Dialog cwd，Space 不再持有工作目录 ([3024e9c](https://github.com/nolotus/bun-nolo/commit/3024e9c91a389a7a2188e01bb94123f133a286ca))
+
+### Bug Fixes
+
+* **compaction:** 备用摘要两模型独立尝试预算 ([d830bb7](https://github.com/nolotus/bun-nolo/commit/d830bb7a064ddfdb308659ef03a30ed72fdeb415))
+* **compaction:** 少量超大消息允许安全前缀恢复 ([1403237](https://github.com/nolotus/bun-nolo/commit/1403237787fec9c1e84bdc1689c64d262732fce0))
+* **compaction:** 摘要锚点跨端兼容与失败退避计时 ([7eebeac](https://github.com/nolotus/bun-nolo/commit/7eebeac507848cdba7d6ed3cfa63d766189c266f))
+
+
 ## 0.165.0-alpha.4 (2026-10-20)
 
 ### Bug Fixes

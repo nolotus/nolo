@@ -14,6 +14,7 @@ import { getModelContextWindow, DEFAULT_CONTEXT_WINDOW } from "../../ai/llm/getM
 import { extractReferenceKeysFromMessage } from "../../chat/dialog/actions/extractReferenceKeys";
 import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
+  computeSummarySourceMetadata,
   formatMessagesForSummaryWithTruncation,
   formatFileOperationsFromMessages,
   buildCompactionUserContent,
@@ -379,6 +380,11 @@ export async function compactDialog(
               }
             }
 
+            const sourceMeta = await computeSummarySourceMetadata(
+              allMsgs,
+              plan.newSummarizedBeforeId,
+            );
+
             // referenceKeys participate in the fork carry (FORKED_CARRY_FIELDS);
             // summary/summarizedBeforeId/compressionCount stay dialog-local and
             // are deliberately NOT mirrored onto `current` for the fork.
@@ -387,6 +393,11 @@ export async function compactDialog(
               summarizedBeforeId: plan.newSummarizedBeforeId,
               compressionCount: compressionCount + 1,
               referenceKeys: Array.from(extractedKeys),
+              ...(sourceMeta ? {
+                sourceHash: sourceMeta.sourceHash,
+                sourceCount: sourceMeta.sourceCount,
+                schemaVersion: sourceMeta.schemaVersion,
+              } : {}),
             });
 
             current.referenceKeys = Array.from(extractedKeys);

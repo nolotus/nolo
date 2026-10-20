@@ -9,7 +9,8 @@
  * 否则会打掉 provider 前缀缓存（实测比不压缩更贵）。
  */
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { sha256Hex } from "../core/sha256";
 
 import { planCompression } from "../ai/context/planCompression";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
@@ -18,6 +19,7 @@ import { canonicalizeToolName } from "./toolNameAliases";
 import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   COMPACTION_SUMMARY_SCHEMA_VERSION,
+  computeSummarySourceMetadata,
   formatMessagesForSummaryWithTruncation,
   TOOL_RESULT_TRUNCATE_CHARS,
   computeSummaryInputTokenCap,
@@ -36,6 +38,7 @@ import type { AgentRuntimeChatMessage } from "./types";
 import { normalizeUsage } from "../ai/token/normalizeUsage";
 import { composeProviderMessages } from "./providerMessageProjection";
 import { emitLoopEvent } from "./toolCallTransaction";
+import { extractReferenceKeysFromMessage } from "../chat/dialog/actions/extractReferenceKeys";
 import type { LocalLoopObservationBoundary } from "./observationStream";
 import type { AgentExecutionObservationEvent } from "./executionObservation";
 import type { AgentRuntimeMessageContent } from "./types";
@@ -64,9 +67,9 @@ export function toPlanCompressionMessages(
   history: AgentRuntimeChatMessage[],
 ): PlanCompressionBridgeMessage[] {
   return history.map((message, index) => ({
-    id: `local-${index}`,
+    id: typeof message.id === "string" && message.id.length > 0 ? message.id : `local-${index}`,
     role: message.role,
-    content: message.content,
+    content: message.content ?? "",
     ...(Array.isArray(message.tool_calls)
       ? { tool_calls: message.tool_calls }
       : {}),
@@ -78,18 +81,32 @@ export function toPlanCompressionMessages(
  * 用 JSON.stringify 后的内容寻址哈希做失效检测：历史被 fork/编辑/裁剪后，
  * 切片内容变化 → 重算哈希不匹配 → 摘要判无效。
  */
+function findSummaryAnchorIndex(
+  bridged: PlanCompressionBridgeMessage[],
+  anchorId: string,
+): number {
+  const actual = bridged.findIndex((message) => message.id === anchorId);
+  if (actual >= 0) return actual;
+  const legacy = /^local-(0|[1-9]\d*)$/.exec(anchorId);
+  if (!legacy) return -1;
+  const index = Number(legacy[1]);
+  return Number.isSafeInteger(index) && index < bridged.length ? index : -1;
+}
+
 export function hashSummarySourceSlice(
   history: AgentRuntimeChatMessage[],
   summarizedBeforeId?: string,
 ): string | undefined {
   if (!summarizedBeforeId) return undefined;
   const bridged = toPlanCompressionMessages(history);
-  const found = bridged.findIndex((m) => m.id === summarizedBeforeId);
+  const found = findSummaryAnchorIndex(bridged, summarizedBeforeId);
   if (found === -1) return undefined;
-  const slice = bridged.slice(0, found + 1);
-  return createHash("sha256")
-    .update(JSON.stringify(slice))
-    .digest("hex");
+  const slice = bridged.slice(0, found + 1).map((message, index) => ({
+    ...message,
+    id: `local-${index}`,
+    content: message.content ?? "",
+  }));
+  return sha256Hex(JSON.stringify(slice));
 }
 
 /**
@@ -137,9 +154,7 @@ export function validateStoredSummary(args: {
 
   // (a) 锚点找不到 → 历史被重排/fork
   const bridged = toPlanCompressionMessages(history);
-  const found = bridged.findIndex(
-    (m) => m.id === stored.summarizedBeforeId,
-  );
+  const found = findSummaryAnchorIndex(bridged, stored.summarizedBeforeId ?? "");
   if (found === -1) return false;
 
   // (b) 哈希重算比对
@@ -170,7 +185,7 @@ export function projectHistoryWithSummary(args: {
   const bridged = toPlanCompressionMessages(args.history);
   let startIndex = 0;
   if (args.summarizedBeforeId) {
-    const found = bridged.findIndex((m) => m.id === args.summarizedBeforeId);
+    const found = findSummaryAnchorIndex(bridged, args.summarizedBeforeId);
     if (found !== -1) startIndex = found + 1;
   }
 
@@ -237,17 +252,18 @@ async function runSummaryFallback(
   fallback: LocalCompactionSummaryFallback,
   content: string,
   options: LocalCompactionSummaryFallbackOptions,
-): Promise<string | null> {
+): Promise<{ summary: string | null; error?: string }> {
   try {
     const text = await fallback(content, options);
-    if (typeof text !== "string") return null;
+    if (typeof text !== "string") return { summary: null, error: "non-string output" };
     const trimmed = text.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    return trimmed.length > 0 ? { summary: trimmed } : { summary: null, error: "empty summary" };
   } catch (error) {
     console.warn("[localLoop] auto-compaction summary fallback failed", {
       attemptId: options.attemptId, stage: "fallback",
     });
-    return null;
+    const message = error instanceof Error ? error.message : String(error);
+    return { summary: null, error: message };
   }
 }
 
@@ -510,6 +526,13 @@ export async function maybeAutoCompactLocalHistory(args: {
     typeof stored?.summarizedBeforeId === "string"
       ? stored.summarizedBeforeId
       : undefined;
+  const legacyAnchorIndex = summarizedBeforeId
+    ? findSummaryAnchorIndex(bridged, summarizedBeforeId)
+    : -1;
+  const planAnchorId =
+    summarizedBeforeId && /^local-(0|[1-9]\d*)$/.test(summarizedBeforeId) && legacyAnchorIndex >= 0
+      ? bridged[legacyAnchorIndex]!.id
+      : summarizedBeforeId;
 
   const contextWindow =
     typeof args.contextWindow === "number" &&
@@ -529,7 +552,7 @@ export async function maybeAutoCompactLocalHistory(args: {
 
   const plan = planCompression({
     allMsgs: allMsgs as any,
-    summarizedBeforeId,
+    summarizedBeforeId: planAnchorId,
     summary: existingSummary,
     contextWindow,
     ...(coldResume
@@ -752,9 +775,10 @@ export async function maybeAutoCompactLocalHistory(args: {
     // 不可能与退避叠加成多次请求。fallback 拿到的摘要走下面同一条持久化 /
     // 内容寻址锚点 / schema 版本路径。
     const summaryFallback = args.summaryFallback;
+    let fallbackFailureDetail: string | undefined;
     if (primaryFailure && summaryFallback) {
       const fallbackT0 = Date.now();
-      const fallbackSummary = await runSummaryFallback(
+      const fallbackResult = await runSummaryFallback(
         summaryFallback,
         promptContent,
         {
@@ -771,12 +795,32 @@ export async function maybeAutoCompactLocalHistory(args: {
           compactionReason: "aborted" as const,
         });
       }
-      if (fallbackSummary) newSummary = fallbackSummary;
+      if (fallbackResult.summary) {
+        newSummary = fallbackResult.summary;
+      } else {
+        fallbackFailureDetail = fallbackResult.error ?? "no summary";
+      }
     }
 
     if (!newSummary) {
-      // 两条通道都没拿到摘要：这里才记一次退避（不与 fallback 叠加）。
-      recordCompactionFailure(dialogId, retryNow);
+      // 两条通道都没拿到摘要：以失败结束时的时间记退避（避免开始前取值被长请求耗尽）。
+      const failureNow = args.now?.() ?? Date.now();
+      recordCompactionFailure(dialogId, failureNow);
+      const primaryDetail =
+        outcome.kind === "provider-error"
+          ? outcome.error instanceof Error
+            ? outcome.error.message
+            : String(outcome.error)
+          : outcome.kind === "done"
+            ? "summary model returned empty content"
+            : `auto-compaction timed out after ${timeoutMs ?? primaryElapsedMs}ms`;
+      const primaryDiagnostic = `primary failed (${primaryElapsedMs ?? 0}ms): ${primaryDetail}`;
+      const fallbackDiagnostic =
+        fallbackElapsedMs !== undefined
+          ? `; fallback failed (${fallbackElapsedMs}ms): ${fallbackFailureDetail ?? "no summary"}`
+          : "";
+      const combinedDetail = `${primaryDiagnostic}${fallbackDiagnostic}`;
+
       if (outcome.kind === "done") {
         console.warn(
           "[localLoop] auto-compaction produced empty summary; keeping prior projection",
@@ -785,41 +829,46 @@ export async function maybeAutoCompactLocalHistory(args: {
         logCompactionTiming("empty", {});
         const failureReason = "provider-error" as const;
         emitPhase({ kind: "compaction-failed", reason: failureReason });
+        const failureMessage = combinedDetail.slice(0, 200);
         return {
           ...projectExisting(),
-          failureMessage: "summary model returned empty content",
+          failureMessage,
           failureReason,
           decision: {
             outcome: "failed",
             reason: failureReason,
-            detail: "summary model returned empty content",
+            detail: failureMessage,
           },
         };
       }
       const reason: LocalAutoCompactionFailureReason =
         primaryFailure ?? "provider-error";
-      const detail =
-        outcome.kind === "provider-error"
-          ? outcome.error instanceof Error
-            ? outcome.error.message
-            : String(outcome.error)
-          : `auto-compaction timed out after ${timeoutMs}ms`;
-      throw Object.assign(new Error(detail), { compactionReason: reason });
+      throw Object.assign(new Error(combinedDetail), {
+        compactionReason: reason,
+        primaryElapsedMs,
+        fallbackElapsedMs,
+      });
     }
 
+    const sourceMeta = await computeSummarySourceMetadata(
+      toPlanCompressionMessages(history),
+      plan.newSummarizedBeforeId,
+    );
     const saveT0 = Date.now();
     await adapter.saveDialogSummary({
       dialogId,
       summary: newSummary,
       summarizedBeforeId: plan.newSummarizedBeforeId,
       // 内容寻址失效检测：存锚点切片哈希与长度，供下轮载入校验。
-      sourceHash: hashSummarySourceSlice(history, plan.newSummarizedBeforeId),
-      sourceCount: (() => {
-        const b = toPlanCompressionMessages(history);
-        const i = b.findIndex((m) => m.id === plan.newSummarizedBeforeId);
-        return i === -1 ? 0 : i + 1;
-      })(),
+      sourceHash: sourceMeta?.sourceHash,
+      sourceCount: sourceMeta?.sourceCount ?? 0,
       schemaVersion: COMPACTION_SUMMARY_SCHEMA_VERSION,
+      referenceKeys: Array.from(
+        new Set(
+          history.slice(0, sourceMeta?.sourceCount ?? 0)
+            .flatMap((message) => extractReferenceKeysFromMessage(message as any)),
+        ),
+      ),
     });
     saveElapsedMs = Date.now() - saveT0;
 
@@ -897,7 +946,8 @@ export async function maybeAutoCompactLocalHistory(args: {
     // 失败路径的同结构观测：outcome 直接取失败档
     // （timeout / provider-error / aborted），分段字段区分主通道与 fallback。
     logCompactionTiming(failureReason, {});
-    if (failureReason !== "aborted") recordCompactionFailure(dialogId, retryNow);
+    const failureNow = args.now?.() ?? Date.now();
+    if (failureReason !== "aborted") recordCompactionFailure(dialogId, failureNow);
     emitPhase({ kind: "compaction-failed", reason: failureReason });
     return {
       ...projectExisting(),

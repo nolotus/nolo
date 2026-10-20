@@ -645,6 +645,7 @@ export async function loadCliDialogSummary(args: {
   sourceHash?: string;
   sourceCount?: number;
   schemaVersion?: unknown;
+  referenceKeys?: string[];
 } | null> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
   const record = await args.store.read(dialogKey);
@@ -672,6 +673,9 @@ export async function loadCliDialogSummary(args: {
       ? { sourceCount }
       : {}),
     ...("schemaVersion" in record ? { schemaVersion } : {}),
+    ...(Array.isArray((record as any).referenceKeys)
+      ? { referenceKeys: (record as any).referenceKeys.filter((key: unknown): key is string => typeof key === "string") }
+      : {}),
   };
 }
 
@@ -684,6 +688,7 @@ export async function saveCliDialogSummary(args: {
   sourceHash?: string;
   sourceCount?: number;
   schemaVersion?: number;
+  referenceKeys?: string[];
 }): Promise<void> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
   const existing = (await args.store.read(dialogKey)) ?? {};
@@ -716,6 +721,12 @@ export async function saveCliDialogSummary(args: {
     ...(args.schemaVersion !== undefined
       ? { schemaVersion: args.schemaVersion }
       : {}),
+    referenceKeys: Array.from(new Set([
+      ...(Array.isArray((existing as any).referenceKeys)
+        ? (existing as any).referenceKeys.filter((key: unknown): key is string => typeof key === "string")
+        : []),
+      ...(args.referenceKeys ?? []),
+    ])),
     compressionCount,
     updatedAt: new Date().toISOString(),
   });
