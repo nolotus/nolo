@@ -114,8 +114,8 @@ const PortalDropdown: React.FC<{
   const openDownward = spaceBelow > spaceAbove;
   const maxHeight = Math.max(180, openDownward ? spaceBelow : spaceAbove);
   const verticalStyle = openDownward
-    ? { top: rect.bottom + gap }
-    : { bottom: window.innerHeight - rect.top + gap };
+    ? { top: rect.bottom + gap, bottom: "auto" as const }
+    : { bottom: window.innerHeight - rect.top + gap, top: "auto" as const };
 
   return createPortal(
     <div

@@ -1,4 +1,11 @@
 
+## 0.156.0-alpha.3 (2026-10-20)
+
+### Bug Fixes
+
+* **navigation:** 修复 Rail 弹层向下展开时高度塌缩 ([fd23793](https://github.com/nolotus/bun-nolo/commit/fd23793d613fffb697df60f158f1b2dfdbd550e6))
+
+
 ## 0.156.0-alpha.2 (2026-10-20)
 
 ### Bug Fixes
