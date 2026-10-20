@@ -1,4 +1,11 @@
 
+## 0.169.0-alpha.1 (2026-10-20)
+
+### Features
+
+* **navigation:** Home Work 与 Projects 视图就绪，Rail 底部收敛用户入口 ([85e39bd](https://github.com/nolotus/bun-nolo/commit/85e39bddb8028df41f9467657f4f02f1be139a83)), closes [#169](https://github.com/nolotus/bun-nolo/issues/169)
+
+
 ## 0.168.0-alpha.1 (2026-10-20)
 
 ### Features

@@ -124,7 +124,7 @@ const PortalDropdown: React.FC<{
   );
 };
 
-export const SidebarUserSection: React.FC = () => {
+export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCompact = false }) => {
   const { t } = useTranslation(["common", "chat", "space"]);
   const navigate = useNavigate();
   const location = useLocation();
@@ -271,7 +271,7 @@ export const SidebarUserSection: React.FC = () => {
   return (
     <div
       ref={sectionRef}
-      {...withLiteralClass("SidebarUserSection", sidebarStyles.sidebarUserSection)}
+      {...withLiteralClass(railCompact ? "SidebarUserSection navigation-v2-rail-account" : "SidebarUserSection", sidebarStyles.sidebarUserSection)}
     >
       <div
         {...stylex.props(sidebarStyles.sidebarUserSectionRow)}

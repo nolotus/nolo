@@ -1,12 +1,16 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
+import { NavLink } from "app/routing";
+import type { MyContentListItem } from "app/utils/myContentItems";
+import { buildRoutableContentPath } from "create/space/contentKeyUtils";
+import { dialogsForLocalProject, parseLocalDialogProjectBindings } from "./homeLocalProjectDialogs";
 import { getIsDesktopApp } from "app/utils/env";
 import {
-  DESKTOP_FOLDER_PROJECTS_KEY, DESKTOP_SELECTED_FOLDER_PROJECT_KEY, DESKTOP_FOLDER_SELECTION_EVENT, addDesktopFolderProject,
+  DESKTOP_FOLDER_PROJECTS_KEY, DESKTOP_SELECTED_FOLDER_PROJECT_KEY, DESKTOP_FOLDER_SELECTION_EVENT, DESKTOP_DIALOG_PROJECTS_KEY, addDesktopFolderProject,
   readDesktopFolderProjects, removeDesktopFolderProject, type DesktopFolderProject,
 } from "./desktopFolderProjects";
 
 /** A local-only selector; selection does not implicitly modify any running Agent cwd. */
-export function DesktopFolderProjects() {
+export function DesktopFolderProjects({ items = [], userId = "" }: { items?: readonly MyContentListItem[]; userId?: string }) {
   const isDesktop = getIsDesktopApp();
   const [projects, setProjects] = useState<DesktopFolderProject[]>(() => {
     if (!isDesktop || typeof window === "undefined") return [];
@@ -14,6 +18,12 @@ export function DesktopFolderProjects() {
     catch { return []; }
   });
   const [selectedId, setSelectedId] = useState(() => { try { return window.localStorage.getItem(DESKTOP_SELECTED_FOLDER_PROJECT_KEY); } catch { return null; } });
+  const [bindings, setBindings] = useState<Record<string, unknown>>(() => {
+    try { return parseLocalDialogProjectBindings(window.localStorage.getItem(DESKTOP_DIALOG_PROJECTS_KEY)); }
+    catch { return {}; }
+  });
+  const selectedDialogs = useMemo(() => selectedId
+    ? dialogsForLocalProject(items, userId, selectedId, bindings) : [], [items, userId, selectedId, bindings]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!isDesktop) return null;
@@ -27,6 +37,7 @@ export function DesktopFolderProjects() {
     } catch { setError("无法保存本机文件夹列表"); }
   };
   const selectProject = (id: string | null) => {
+    try { setBindings(parseLocalDialogProjectBindings(window.localStorage.getItem(DESKTOP_DIALOG_PROJECTS_KEY))); } catch { setBindings({}); }
     try {
       if (id) window.localStorage.setItem(DESKTOP_SELECTED_FOLDER_PROJECT_KEY, id);
       else window.localStorage.removeItem(DESKTOP_SELECTED_FOLDER_PROJECT_KEY);
@@ -61,6 +72,13 @@ export function DesktopFolderProjects() {
       </div>
       {error && <p role="alert">{error}</p>}
       {selectedId && <button type="button" onClick={() => selectProject(null)}>清除项目选择</button>}
+      {selectedId && userId && <div aria-label="项目对话" data-hook="project-dialog-list">
+        <strong>项目对话（已加载）</strong>
+        {selectedDialogs.length === 0 && <p>暂无已加载的关联对话。</p>}
+        {selectedDialogs.map((dialog) => <div key={dialog.contentKey}>
+          <NavLink to={buildRoutableContentPath({ contentKey: dialog.contentKey, type: "dialog", userId })}>{dialog.title || dialog.contentKey}</NavLink>
+        </div>)}
+      </div>}
       {projects.map((project) => (
         <div key={project.id} title={project.localPath}>
           <button type="button" aria-pressed={selectedId === project.id}

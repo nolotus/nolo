@@ -1,4 +1,6 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, Suspense, lazy } from "react";
+import { useIsLoggedIn } from "identity";
+const SidebarUserSection = lazy(() => import("./sidebar/SidebarUserSection"));
 import { NavLink, useLocation } from "app/routing";
 import { useTranslation } from "react-i18next";
 import { LuHouse, LuStar, LuCompass } from "react-icons/lu";
@@ -22,6 +24,7 @@ import "./navigationRail.css";
  */
 export function NavigationRail(): React.JSX.Element {
   const { t } = useTranslation("space");
+  const isLoggedIn = useIsLoggedIn();
   const location = useLocation();
   const active: RailView = resolveRailView(location.pathname);
   // 从 Space 回到 Home：先让路由离开 Space，再把作用域切回 all，避免与
@@ -92,10 +95,13 @@ export function NavigationRail(): React.JSX.Element {
             className="navigation-v2-rail__item"
             onClick={view === "home" ? handleHomeClick : undefined}
           >
-            <Icon size={20} aria-hidden="true" />
+            <Icon size={17} aria-hidden="true" />
           </NavLink>
         );
       })}
+      {isLoggedIn && <div className="navigation-v2-rail__footer">
+        <Suspense fallback={null}><SidebarUserSection railCompact /></Suspense>
+      </div>}
     </nav>
   );
 }

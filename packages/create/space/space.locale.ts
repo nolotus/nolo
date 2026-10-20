@@ -285,6 +285,8 @@ export default {
       search_placeholder: "Search content...",
       allView: {
         recent: "Recent",
+        work: "Work",
+        projects: "Projects",
         favorites: "Favorites",
         shares: "My Shares",
         expanded: "Expanded",
@@ -651,6 +653,8 @@ export default {
       search_placeholder: "搜索内容...",
       allView: {
         recent: "最近",
+        work: "工作",
+        projects: "项目",
         favorites: "我的收藏",
         shares: "我的分享",
         expanded: "已展开",
@@ -1013,6 +1017,8 @@ export default {
       search_placeholder: "搜尋內容...",
       allView: {
         recent: "最近",
+        work: "工作",
+        projects: "專案",
         favorites: "我的收藏",
         shares: "我的分享",
         expanded: "已展開",
@@ -1388,6 +1394,8 @@ export default {
       search_placeholder: "コンテンツを検索...",
       allView: {
         recent: "最近",
+        work: "作業",
+        projects: "プロジェクト",
         favorites: "お気に入り",
         shares: "自分の共有",
         expanded: "展開済み",

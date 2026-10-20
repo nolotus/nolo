@@ -22,15 +22,10 @@ const WORK_GROUP_MAX_ROWS = 30;
 export function WorkDialogGroupsPreview({
   items, userId,
 }: { items: readonly MyContentListItem[]; userId: string }) {
-  const [expanded, setExpanded] = useState(false);
-
   if (!userId) return null;
   return (
-    <section aria-label="工作视图预览" data-hook="work-dialog-groups-preview">
-      <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
-        工作视图（预览）
-      </button>
-      {expanded && <WorkDialogGroupsExpanded items={items} userId={userId} />}
+    <section aria-label="工作状态" data-hook="work-dialog-groups">
+      <WorkDialogGroupsExpanded items={items} userId={userId} />
     </section>
   );
 }
@@ -76,8 +71,8 @@ function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContent
   const total = WORK_GROUP_SECTIONS.reduce((sum, [key]) => sum + groups[key].length, 0);
   return (
         <div style={{ maxHeight: 320, overflowY: "auto" }}>
-          <p>仅显示已加载的本人对话；不受侧边栏类型筛选影响。运行状态仅供预览，不能据此判定其他任务已结束。</p>
-          <p>「需要你」当前由「需处置 / 状态未知」触发；「agent 正在等你回答」这条权威信号本批尚未接入。</p>
+
+
           <p role="status">{coverageText(coverage, snapshot)}</p>
           {total === 0 && <p>暂无已加载的对话。</p>}
           {WORK_GROUP_SECTIONS.map(([key, label]) => {

@@ -96,7 +96,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
     isDesktopShell && desktopTitlebarMode === "native";
   const showDesktopTitlebarNavigation = !isDesktopShell;
   // Always fixed in the topbar so every route (life, recharge, no-sidebar) can go home.
-  const showTopbarHome = true;
+  const showTopbarHome = !s.isLoggedIn || isLeftSidebarOpen || !toggleSidebar;
   // Guest home: the topbar dissolves into the landing's sky and carries the
   // brand instead of a bare house icon (2026-10-04 home redesign).
   // Guest nature pages (home + login/signup/cli-authorize) share that look;

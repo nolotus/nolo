@@ -35,7 +35,8 @@
   align-items: center;
   gap: 6px;
   padding: 12px 4px;
-  border-right: 1px solid var(--borderSubtle, rgba(127, 127, 127, 0.24));
+  border-right: 0;
+  background: var(--surfaceInteractive, rgba(127,127,127,0.035));
 }
 
 .navigation-v2-rail__item {
@@ -62,7 +63,8 @@
 .navigation-v2-rail__item[aria-current="page"],
 .navigation-v2-rail__item[data-active="true"] {
   background: var(--primaryGhost, rgba(127, 127, 127, 0.12));
-  box-shadow: inset 0 0 0 2px var(--primary, currentColor);
+  box-shadow: none;
+  color: var(--primary, currentColor);
 }
 
 .navigation-v2-rail__item[aria-current="page"]::before,
@@ -72,8 +74,8 @@
   left: -4px;
   top: 50%;
   transform: translateY(-50%);
-  width: 3px;
-  height: 20px;
+  width: 2px;
+  height: 14px;
   border-radius: 2px;
   background: var(--primary, currentColor);
 }
@@ -144,7 +146,8 @@
     gap: 4px;
     padding: 4px 8px;
     border-right: 0;
-    border-bottom: 1px solid var(--borderSubtle, rgba(127, 127, 127, 0.24));
+    border-bottom: 0;
+    background: var(--surfaceInteractive, rgba(127,127,127,0.035));
   }
 
   .navigation-v2-rail__item[aria-current="page"]::before,
@@ -156,4 +159,29 @@
     width: 20px;
     height: 3px;
   }
+}
+
+/* Existing profile/menu/notifications move as one unit. The popovers continue
+   to be owned by SidebarUserSection, not recreated in the Rail. */
+.navigation-v2-rail { align-self: stretch; min-height: 0; }
+.navigation-v2-rail__footer { margin-top: auto; width: 100%; min-width: 0; }
+.navigation-v2-rail-account { padding: 8px 0 !important; min-width: 0; }
+.navigation-v2-rail-account > div:first-child { flex-direction: column; gap: 6px; }
+.navigation-v2-rail-account > div:first-child > div:first-child {
+  flex: none !important; width: 44px; justify-content: center;
+}
+.navigation-v2-rail-account > div:first-child > div:first-child > button:first-child {
+  flex: 0 1 auto; width: 30px; margin: 0;
+}
+.navigation-v2-rail-account > div:first-child > div:first-child > button:first-child span:not(:first-child) {
+  display: none;
+}
+.navigation-v2-rail-account > div:last-child {
+  flex-direction: column; align-items: center; gap: 6px;
+}
+@media (max-width: 768px) {
+  .navigation-v2-rail__footer { margin-top: 0; margin-left: auto; width: auto; }
+  .navigation-v2-rail-account { display: flex; align-items: center; padding: 0 !important; }
+  .navigation-v2-rail-account > div:first-child,
+  .navigation-v2-rail-account > div:last-child { flex-direction: row; gap: 4px; }
 }

@@ -204,25 +204,6 @@ const ChatSidebar: React.FC = () => {
     <div
       {...stylex.props(sidebarStyles.topBar)}
     >
-      <NavLink
-        to="/explore"
-        end
-        className={({ isActive }) =>
-          withLiteralClass(`AllViewSidebar__nav-row ChatSidebar__top-explore${isActive ? " active" : ""}`, sidebarStyles.navRow, sidebarStyles.topExplore).className
-        }
-      >
-        <span
-          aria-hidden="true"
-          {...stylex.props(sidebarStyles.topExploreMenuIcon)}
-        >
-          <LuSparkles size={15} aria-hidden="true" />
-        </span>
-        <span
-          {...stylex.props(sidebarStyles.allViewMenuLabel)}
-        >
-          {t("common:explorePlaza", "探索")}
-        </span>
-      </NavLink>
       <div className="ChatSidebar__search-slot">
         <Tooltip content={searchTooltip} placement="bottom">
           <button
@@ -376,7 +357,7 @@ const ChatSidebar: React.FC = () => {
         aria-pressed={homeView === "work"}
         onClick={() => selectHomeView("work")}
       >
-        {t("allView.work", "Work")}
+        {t("allView.work", "工作")}
       </button>
       <button
         type="button"
@@ -384,7 +365,7 @@ const ChatSidebar: React.FC = () => {
         aria-pressed={homeView === "projects"}
         onClick={() => selectHomeView("projects")}
       >
-        {t("allView.projects", "Projects")}
+        {t("allView.projects", "项目")}
       </button>
     </div>
   );
@@ -403,8 +384,10 @@ const ChatSidebar: React.FC = () => {
           {topHeaderSection}
           {railView === "favorites" && (
             <>
-              {typeFilterShell}
-              {favoritesSection}
+              {filteredFavoriteItems.length > 0 ? (
+                <SidebarPinnedBlock items={filteredFavoriteItems} activeMenuKey={activeMenuKey}
+                  onToggleMenu={handleToggleMenu} blockId="favorites" className="AllViewSidebar__favorites-block" />
+              ) : <p>{t("allView.noFavorites", "暂无收藏")}</p>}
             </>
           )}
           {commandPalette}
@@ -419,12 +402,12 @@ const ChatSidebar: React.FC = () => {
         <NavigationRail />
         <div data-hook="chat-esc-sidebar"
           {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}>
+          {spaceSwitcherHeader}
           {homeViewSwitcher}
           {homeView === "work" ? (
             <>
               {topHeaderSection}
               {typeFilterShell}
-              {spaceSwitcherHeader}
               <SidebarCoachmark />
               {remoteTasksGlobalEntry}
               <WorkDialogGroupsPreview items={allContentItems} userId={identityUserId ?? ""} />
@@ -433,7 +416,7 @@ const ChatSidebar: React.FC = () => {
           ) : (
             <>
               {topHeaderSection}
-              <DesktopFolderProjects />
+              <DesktopFolderProjects items={allContentItems} userId={identityUserId ?? ""} />
             </>
           )}
           {commandPalette}
@@ -455,6 +438,7 @@ const ChatSidebar: React.FC = () => {
       data-hook="chat-esc-sidebar"
       {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}
     >
+      {spaceSwitcherHeader}
       {homeViewSwitcher}
       {homeView === "projects" ? (
         // Space 不是 Project 的作用域维度：这里不渲染全局项目列表，
@@ -465,7 +449,6 @@ const ChatSidebar: React.FC = () => {
       ) : <>
       {topHeaderSection}
       {typeFilterShell}
-      {spaceSwitcherHeader}
       <SidebarCoachmark />
       {remoteTasksGlobalEntry}
 

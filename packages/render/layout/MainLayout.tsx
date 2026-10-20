@@ -15,6 +15,8 @@ import { Outlet, useLocation } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { zIndex } from "render/styles/zIndex";
 import { setSidebarWidth, selectSidebarWidth } from "app/settings/settingSlice";
+import { shouldShowFirstSidebarCollapseHint } from "app/layout/sidebarCollapsePreference";
+import { toast } from "app/utils/toast";
 import { useViewMode, setViewMode } from "create/space/spaceCurrentStore";
 import PageContentErrorBoundary from "./PageContentErrorBoundary";
 import PageLoading from "../web/ui/PageLoading";
@@ -231,7 +233,14 @@ const MainLayout: React.FC = () => {
     mobileUserOpenedRef.current = isOpening;
     const newWidth = isOpening ? lastWidthRef.current || 280 : 0;
     dispatch(setSidebarWidth(newWidth));
-  }, [dispatch, sidebarWidth]);
+    if (!isOpening && !isMobile && typeof window !== "undefined") {
+      try {
+        if (shouldShowFirstSidebarCollapseHint(window.localStorage)) {
+          toast.info("侧边栏已收起；可在设置中调整折叠提示偏好。");
+        }
+      } catch { /* Local storage unavailable: no hint. */ }
+    }
+  }, [dispatch, sidebarWidth, isMobile]);
 
   const openRightSidebar = useCallback(
     (content: React.ReactNode, options?: RightSidebarOptions) => {
@@ -483,7 +492,8 @@ const MainLayout: React.FC = () => {
             style={shouldRenderMobileLayout ? undefined : { width: sidebarWidth }}
           >
             <div className="MainLayout__sidebarContent">{sidebarContent}</div>
-            {isLoggedIn && (
+            {/* ChatSidebar owns its Rail footer; non-Chat sidebars keep the legacy footer. */}
+            {isLoggedIn && (!renderChatSidebar || mainSidebar.content !== null) && (
               <Suspense fallback={null}>
                 <SidebarUserSection />
               </Suspense>
