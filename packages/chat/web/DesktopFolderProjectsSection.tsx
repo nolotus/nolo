@@ -10,7 +10,7 @@ import {
 } from "./desktopFolderProjects";
 
 /** A local-only selector; selection does not implicitly modify any running Agent cwd. */
-export function DesktopFolderProjects({ items = [], userId = "" }: { items?: readonly MyContentListItem[]; userId?: string }) {
+export function DesktopFolderProjects({ items = [], userId = "", onSelectProjectScope }: { items?: readonly MyContentListItem[]; userId?: string; onSelectProjectScope?: (id: string | null, name?: string) => void }) {
   const isDesktop = getIsDesktopApp();
   const [projects, setProjects] = useState<DesktopFolderProject[]>(() => {
     if (!isDesktop || typeof window === "undefined") return [];
@@ -32,6 +32,7 @@ export function DesktopFolderProjects({ items = [], userId = "" }: { items?: rea
     try {
       window.localStorage.setItem(DESKTOP_FOLDER_PROJECTS_KEY, JSON.stringify(updated));
       setProjects(updated);
+      window.dispatchEvent(new Event(DESKTOP_FOLDER_SELECTION_EVENT));
       if (selectedId && !updated.some((project) => project.id === selectedId)) selectProject(null);
       setError("");
     } catch { setError("无法保存本机文件夹列表"); }
@@ -83,6 +84,7 @@ export function DesktopFolderProjects({ items = [], userId = "" }: { items?: rea
         <div key={project.id} title={project.localPath}>
           <button type="button" aria-pressed={selectedId === project.id}
             onClick={() => selectProject(project.id)}>{project.name}{selectedId === project.id ? " ✓" : ""}</button>{" "}
+          {onSelectProjectScope && <button type="button" onClick={() => onSelectProjectScope(project.id, project.name)}>查看工作</button>}{" "}
           <button type="button" aria-label={`移除 ${project.name}`}
             onClick={() => persist(removeDesktopFolderProject(projects, project.id))}>移除</button>
         </div>

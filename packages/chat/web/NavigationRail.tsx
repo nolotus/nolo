@@ -3,7 +3,7 @@ import { useIsLoggedIn } from "identity";
 const SidebarUserSection = lazy(() => import("./sidebar/SidebarUserSection"));
 import { NavLink, useLocation } from "app/routing";
 import { useTranslation } from "react-i18next";
-import { LuHouse, LuStar, LuCompass } from "react-icons/lu";
+import { LuHouse, LuStar, LuCompass, LuSearch } from "react-icons/lu";
 import { setViewMode } from "create/space/spaceCurrentStore";
 import {
   type RailView,
@@ -81,6 +81,10 @@ export function NavigationRail(): React.JSX.Element {
       data-hook="navigation-v2-rail"
       className="navigation-v2-rail"
     >
+      <button type="button" className="navigation-v2-rail__item" title={t("common:search", "搜索")}
+        aria-label={t("common:search", "搜索")} onClick={() => window.dispatchEvent(new Event("nolo:navigation-search"))}>
+        <LuSearch size={17} aria-hidden="true" />
+      </button>
       {items.map(({ view, to, label, Icon }) => {
         const isActive = active === view;
         return (

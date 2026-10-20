@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { NavLink, useLocation } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
@@ -33,9 +33,7 @@ import {
   useCategoryDragAndDrop,
   useItemDragAndDrop,
 } from "./sidebar/useSidebarDragAndDrop";
-import { LuSparkles, LuSearch, LuFolderPlus, LuStar, LuChevronDown } from "react-icons/lu";
-import { Tooltip } from "render/web/ui/Tooltip";
-import Kbd from "render/web/ui/Kbd";
+import { LuFolderPlus, LuStar, LuChevronDown, LuSearch } from "react-icons/lu";
 import { AddCategoryModal } from "create/space/category/AddCategoryModal";
 import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
 import { selectIdentityUserId } from "identity/selectors";
@@ -44,13 +42,13 @@ import { WorkDialogGroupsPreview } from "./WorkDialogGroupsPreview";
 import { NavigationRail } from "./NavigationRail";
 import { type HomeView, resolveHomeView, resolveRailView } from "./navigationRailView";
 import { DesktopFolderProjects } from "./DesktopFolderProjectsSection";
+import { projectHomeItems, type HomeScope } from "./homeScopeProjection";
+import { parseLocalDialogProjectBindings } from "./homeLocalProjectDialogs";
+import { DESKTOP_DIALOG_PROJECTS_KEY } from "./desktopFolderProjects";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { SidebarPinnedBlock } from "./sidebar/SidebarPinnedBlock";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 import { useFavoriteSidebarItems } from "app/favorite/useFavoriteSidebarItems";
-import {
-  COMMAND_PALETTE_SHORTCUT,
-} from "./sidebar/CommandPalette";
 import { SidebarCommandPalette } from "./sidebar/SidebarCommandPalette";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { useViewMode } from "create/space/spaceCurrentStore";
@@ -80,9 +78,28 @@ const ChatSidebar: React.FC = () => {
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
   // Work / Projects 是 Home 下的两种视图，不是 Rail 一级入口；归一化统一走 resolveHomeView。
   const [homeViewState, setHomeViewState] = useState<HomeView>("work");
+  const [homeScope, setHomeScope] = useState<HomeScope>({ kind: "all" });
+  const [scopeBindings, setScopeBindings] = useState<Record<string, unknown>>({});
+  const selectProjectScope = useCallback((projectId: string | null, projectName?: string) => {
+    if (!projectId) { setHomeScope({ kind: "all" }); return; }
+    try {
+      setScopeBindings(parseLocalDialogProjectBindings(window.localStorage.getItem(DESKTOP_DIALOG_PROJECTS_KEY)));
+      setHomeScope({ kind: "project", projectId, projectName });
+      setHomeViewState("work");
+      // 进入项目筛选时清掉残留的类型筛选，否则只剩「仅含关联对话」的状态提示。
+      setTypeFilter("all");
+    } catch { setHomeScope({ kind: "all" }); }
+  }, []);
+
   const homeView = resolveHomeView(homeViewState);
   const selectHomeView = (view: HomeView) => setHomeViewState(resolveHomeView(view));
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  useEffect(() => {
+    const openPalette = () => setCommandPaletteOpen(true);
+    window.addEventListener("nolo:navigation-search", openPalette);
+    return () => window.removeEventListener("nolo:navigation-search", openPalette);
+  }, []);
+
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState<SidebarTypeFilterId>(readStoredSidebarFilter);
 
@@ -191,37 +208,6 @@ const ChatSidebar: React.FC = () => {
     }
   }, []);
 
-  const searchTooltip = (
-    <span
-      {...stylex.props(sidebarStyles.searchTooltip)}
-    >
-      {t("common:search", "搜索...")}
-      <Kbd shortcut={COMMAND_PALETTE_SHORTCUT} />
-    </span>
-  );
-
-  const topHeaderSection = (
-    <div
-      {...stylex.props(sidebarStyles.topBar)}
-    >
-      <div className="ChatSidebar__search-slot">
-        <Tooltip content={searchTooltip} placement="bottom">
-          <button
-            type="button"
-            onClick={() => setCommandPaletteOpen(true)}
-            aria-label={t("common:search", "搜索...")}
-            aria-haspopup="dialog"
-            aria-expanded={isCommandPaletteOpen}
-            {...withLiteralClass("ChatSidebar__search-btn", sidebarStyles.searchBtn)}
-          >
-            <LuSearch size={16} aria-hidden="true" />
-          </button>
-        </Tooltip>
-      </div>
-    </div>
-  );
-
-  // 全局类型筛选 Shell (放在 favoritesSection 上方，自上而下控制我的收藏和内容列表)
   const typeFilterShell = (
     <div
       {...stylex.props(sidebarStyles.sidebarTypeFilterShell)}
@@ -244,6 +230,14 @@ const ChatSidebar: React.FC = () => {
   // §10.1 跨对话任务全局入口：user 级 scope（不带 dialogId）⇒ 切换对话不消失；
   // 零任务时组件自身返回 null（attention-first，默认不占位不打断）。
   const identityUserId = useAppSelector(selectIdentityUserId);
+  const lastScopeOwner = useRef(identityUserId);
+  useEffect(() => {
+    if (lastScopeOwner.current === identityUserId) return;
+    lastScopeOwner.current = identityUserId;
+    setHomeScope({ kind: "all" });
+    setScopeBindings({});
+  }, [identityUserId]);
+
   const remoteTasksGlobalEntry = useMemo(
     () =>
       identityUserId ? (
@@ -345,6 +339,41 @@ const ChatSidebar: React.FC = () => {
     </div>
   );
 
+  // Stable identity: the Work preview memoizes on `items`; a fresh array on every
+  // render would invalidate its run-state projection on each keystroke/tick.
+  const scopedWorkItems = useMemo(
+    () => projectHomeItems(allContentItems, identityUserId ?? "", homeScope, scopeBindings),
+    [allContentItems, identityUserId, homeScope, scopeBindings],
+  );
+  useEffect(() => {
+    if (homeScope.kind !== "project") return;
+    const refresh = () => {
+      try {
+        const storage = window.localStorage;
+        const projects = JSON.parse(storage.getItem("nolo:desktop-folder-projects:v1") || "[]") as unknown;
+        if (!Array.isArray(projects) || !projects.some((project) =>
+          project && typeof project === "object" && "id" in project && project.id === homeScope.projectId)) {
+          setHomeScope({ kind: "all" });
+          return;
+        }
+        setScopeBindings(parseLocalDialogProjectBindings(storage.getItem(DESKTOP_DIALOG_PROJECTS_KEY)));
+      } catch { setHomeScope({ kind: "all" }); }
+    };
+    window.addEventListener("nolo:desktop-folder-selection", refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener("nolo:desktop-folder-selection", refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [homeScope]);
+  const homeScopeIndicator = homeScope.kind === "project" ? (
+    <button type="button" className="navigation-v2-home-scope" onClick={() => selectProjectScope(null)}
+      title={t("allView.showAllProjects", "清除项目筛选，显示全部工作")}
+      aria-label={t("allView.showAllProjects", "清除项目筛选，显示全部工作")}>
+      <span>{homeScope.projectName || t("allView.projectFilterActive", "当前项目")}</span>
+      <span aria-hidden="true">×</span>
+    </button>
+  ) : null;
   const homeViewSwitcher = (
     <div
       role="group"
@@ -381,11 +410,10 @@ const ChatSidebar: React.FC = () => {
         <NavigationRail />
         <div data-hook="chat-esc-sidebar"
           {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}>
-          {topHeaderSection}
           {railView === "favorites" && (
             <>
-              {filteredFavoriteItems.length > 0 ? (
-                <SidebarPinnedBlock items={filteredFavoriteItems} activeMenuKey={activeMenuKey}
+              {favoriteItems.length > 0 ? (
+                <SidebarPinnedBlock items={favoriteItems} activeMenuKey={activeMenuKey}
                   onToggleMenu={handleToggleMenu} blockId="favorites" className="AllViewSidebar__favorites-block" />
               ) : <p>{t("allView.noFavorites", "暂无收藏")}</p>}
             </>
@@ -406,17 +434,22 @@ const ChatSidebar: React.FC = () => {
           {homeViewSwitcher}
           {homeView === "work" ? (
             <>
-              {topHeaderSection}
               {typeFilterShell}
-              <SidebarCoachmark />
-              {remoteTasksGlobalEntry}
-              <WorkDialogGroupsPreview items={allContentItems} userId={identityUserId ?? ""} />
-              <AllViewSidebar typeFilter={typeFilter} />
+              {homeScopeIndicator}
+              {typeFilter === "all" || typeFilter === "dialog" ? (
+                <>
+                  {homeScope.kind === "all" && remoteTasksGlobalEntry}
+                  <WorkDialogGroupsPreview items={scopedWorkItems} userId={identityUserId ?? ""} />
+                </>
+              ) : homeScope.kind === "all" ? (
+                <AllViewSidebar typeFilter={typeFilter} />
+              ) : (
+                <p role="status">{t("allView.projectDialogOnly", "当前项目仅包含已关联的对话")}</p>
+              )}
             </>
           ) : (
             <>
-              {topHeaderSection}
-              <DesktopFolderProjects items={allContentItems} userId={identityUserId ?? ""} />
+              <DesktopFolderProjects items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} />
             </>
           )}
           {commandPalette}
@@ -447,7 +480,6 @@ const ChatSidebar: React.FC = () => {
           {t("space:projectScopeUnavailable", "项目按全局维度组织，暂不支持在空间内筛选。切回「主页」可查看全局项目。")}
         </p>
       ) : <>
-      {topHeaderSection}
       {typeFilterShell}
       <SidebarCoachmark />
       {remoteTasksGlobalEntry}

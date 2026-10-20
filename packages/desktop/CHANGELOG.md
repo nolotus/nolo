@@ -1,4 +1,11 @@
 
+## 0.170.0-alpha.1 (2026-10-20)
+
+### Features
+
+* **navigation:** Home 单一内容区、Rail 搜索与 Project 作用域 ([f2baadf](https://github.com/nolotus/bun-nolo/commit/f2baadff8267a1e136440f6d71c6c0bbd23ef595))
+
+
 ## 0.169.0-alpha.1 (2026-10-20)
 
 ### Features

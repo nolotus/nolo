@@ -86,7 +86,9 @@ const PortalDropdown: React.FC<{
   children: React.ReactNode;
   className?: string;
   role?: string;
-}> = ({ isOpen, anchorRef, children, className, role }) => {
+  /** Rail anchors are ~52px wide; give the portalled panel a usable minimum. */
+  compact?: boolean;
+}> = ({ isOpen, anchorRef, children, className, role, compact = false }) => {
   const [rect, setRect] = useState<DOMRect | null>(null);
 
   useEffect(() => {
@@ -96,6 +98,14 @@ const PortalDropdown: React.FC<{
   }, [isOpen, anchorRef]);
 
   if (!isOpen || !rect) return null;
+
+  // Width follows the anchor, except in the compact Rail where that would clip
+  // the panel down to the 52px rail. Clamp to the viewport so it never overflows.
+  const width = Math.max(rect.width - 16, compact ? 280 : 0);
+  const left = Math.min(
+    Math.max(8, rect.left + 8),
+    Math.max(8, window.innerWidth - width - 8),
+  );
 
   return createPortal(
     <div
@@ -107,8 +117,8 @@ const PortalDropdown: React.FC<{
       style={{
         position: "fixed",
         bottom: window.innerHeight - rect.top + 8,
-        left: rect.left + 8,
-        width: rect.width - 16,
+        left,
+        width,
       }}
       {...withLiteralClass(
         `SidebarUserSection__dropdown is-open ${className || ""}`,
@@ -244,6 +254,16 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
   const handleOpenSettings = useCallback(() => {
     setMenuOpen(false);
     setBellOpen(false);
+    // 已在设置页时再点一次应关闭（返回），否则按钮看起来失效。
+    const settingsBase = `/${SettingRoutePaths.SETTING}`;
+    if (location.pathname === settingsBase || location.pathname.startsWith(`${settingsBase}/`)) {
+      // 与 SettingLayout.handleClose 同语义：回到打开设置前的页面（保留 search/state），
+      // 历史栈不留脏 entry；直接深链进入设置页时回到首页。
+      const background = (location.state as { backgroundLocation?: typeof location } | null)
+        ?.backgroundLocation;
+      navigate(background ?? "/", { replace: true });
+      return;
+    }
     navigate(SettingRoutePaths.SETTING, { state: { backgroundLocation: location } });
   }, [navigate, location]);
 
@@ -274,23 +294,25 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
       {...withLiteralClass(railCompact ? "SidebarUserSection navigation-v2-rail-account" : "SidebarUserSection", sidebarStyles.sidebarUserSection)}
     >
       <div
-        {...stylex.props(sidebarStyles.sidebarUserSectionRow)}
+        {...withLiteralClass(railCompact ? "navigation-v2-rail-account__row" : "", sidebarStyles.sidebarUserSectionRow)}
       >
         {/* 左侧：头像进 Life，chevron 打开账号菜单 */}
         <div
           ref={menuContainerRef}
-          {...stylex.props(sidebarStyles.sidebarUserSectionCardWrap)}
+          {...withLiteralClass(railCompact ? "navigation-v2-rail-account__profile" : "", sidebarStyles.sidebarUserSectionCardWrap)}
           style={{ flex: 1, minWidth: 0 }}
         >
           <Tooltip
-            content={t("goToProfile", "个人主页")}
+            content={railCompact ? t("openAccountMenu", "账号菜单") : t("goToProfile", "个人主页")}
             placement="top"
             disabled={isMobile}
           >
             <button
               type="button"
-              onClick={handleOpenLifeProfile}
-              aria-label={t("goToProfile", "个人主页")}
+              onClick={railCompact ? () => { setMenuOpen((value) => !value); setBellOpen(false); } : handleOpenLifeProfile}
+              aria-haspopup={railCompact ? "menu" : undefined}
+              aria-expanded={railCompact ? menuOpen : undefined}
+              aria-label={railCompact ? t("openAccountMenu", "账号菜单") : t("goToProfile", "个人主页")}
               {...stylex.props(sidebarStyles.sidebarUserSectionProfile)}
             >
               <Avatar
@@ -302,7 +324,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
               />
               <span
                 title={authUser.email || authUser.username}
-                {...stylex.props(sidebarStyles.sidebarUserSectionUsername)}
+                {...withLiteralClass(railCompact ? "navigation-v2-rail-account__username" : "", sidebarStyles.sidebarUserSectionUsername)}
               >
                 {authUser.email || authUser.username}
               </span>
@@ -311,7 +333,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
           <button
             type="button"
             {...menuToggleStyleProps}
-            className={[menuToggleStyleProps.className, "SidebarUserSection__menu-toggle", menuOpen ? "is-open" : ""]
+            className={[menuToggleStyleProps.className, "SidebarUserSection__menu-toggle", railCompact ? "navigation-v2-rail-account__chevron" : "", menuOpen ? "is-open" : ""]
               .filter(Boolean)
               .join(" ")}
             onClick={() => {
@@ -337,6 +359,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
           anchorRef={sectionRef as React.RefObject<HTMLElement>}
           className="SidebarUserSection__dropdown--menu"
           role="menu"
+          compact={railCompact}
         >
           {/* 身份余额 */}
           <div className="topbar-user-menu__header">
@@ -512,7 +535,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
 
       {/* 右侧：操作按钮 */}
       <div
-        {...stylex.props(sidebarStyles.sidebarUserSectionActions)}
+        {...withLiteralClass(railCompact ? "navigation-v2-rail-account__actions" : "", sidebarStyles.sidebarUserSectionActions)}
       >
         {/* 更新（desktop only） */}
         <SidebarUpdateButton />
@@ -564,7 +587,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
           </Tooltip>
 
           {/* 通知弹窗 - 向上展开 */}
-          <PortalDropdown isOpen={bellOpen} anchorRef={sectionRef as React.RefObject<HTMLElement>} role="menu">
+          <PortalDropdown isOpen={bellOpen} anchorRef={sectionRef as React.RefObject<HTMLElement>} role="menu" compact={railCompact}>
             <div className="topbar-notification__header">
               <div>
                 <div className="topbar-notification__title">
