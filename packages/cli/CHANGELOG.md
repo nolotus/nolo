@@ -1,4 +1,11 @@
 
+## 0.151.0-alpha.2 (2026-10-20)
+
+### Bug Fixes
+
+* **cli:** build shared docker execution boundary without server package ([e7f3f11](https://github.com/nolotus/bun-nolo/commit/e7f3f11190cbf578c0cd4fb66d627ec770327466))
+
+
 ## 0.151.0-alpha.1 (2026-10-20)
 
 ### Features

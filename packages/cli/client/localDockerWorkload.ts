@@ -29,13 +29,13 @@ import type {
 import type {
   DockerAccountBinding,
   DockerWorkloadRuntime,
-} from "../../server/handlers/agentRun/dockerWorkloadLifecycle";
-import { buildSandboxHelperUploadArgv } from "../../server/handlers/agentRun/docker/sandboxWorkspaceHelper";
+} from "agent-runtime/docker/workloadLifecycle";
+import { buildSandboxHelperUploadArgv } from "agent-runtime/docker/sandboxWorkspaceHelper";
 import {
   applyDockerWorkspaceDelivery,
   isDockerWorkspaceDeliveryError,
   type DockerWorkspaceInitSelection,
-} from "../../server/handlers/agentRun/docker/applyDockerWorkspaceDelivery";
+} from "agent-runtime/docker/applyDockerWorkspaceDelivery";
 import {
   prepareHostWorkspaceDelivery,
   type HostWorkspaceDeliveryPreparation,
@@ -46,7 +46,7 @@ import {
   dockerExecutionToolNames,
   type DockerToolChannel,
   type DockerWorkload,
-} from "../../server/handlers/agentRun/dockerToolRouting";
+} from "agent-runtime/docker/toolRouting";
 
 /** 与 `DOCKER_SANDBOX_BACKEND_ID` 一致；本模块不直接依赖 backend 实现。 */
 export const LOCAL_DOCKER_BACKEND_ID = "docker-sandbox-cloud";
@@ -252,19 +252,19 @@ export async function createLocalDockerWorkload(args: {
   const createLifecycle =
     args.createLifecycle ??
     (async () => {
-      const [{ DockerWorkloadLifecycle, getDockerBindingAuthorizer }, server] =
+      const [{ DockerWorkloadLifecycle, createDockerBindingAuthorizer }, accounts] =
         await Promise.all([
-          import("../../server/handlers/agentRun/dockerWorkloadLifecycle"),
-          import("../../server/handlers/agentRun/index"),
+          import("agent-runtime/docker/workloadLifecycle"),
+          import("agent-runtime/docker/accountResolver"),
         ]);
-      // 与服务端 run 通道（`getDockerWorkloadLifecycle`）逐位同一套接线：由 resolver
-      // 补齐 `DockerWorkloadLifecycle` 要求的 kvStore + quotaProvider（lifecycle 会在
-      // 缺任一项时以 `docker_account_backend_not_configured` 拒绝）。这里不另写配额
-      // 逻辑，只把注入缝透传下去：缺省参数 = 服务端生产默认分支（含 DOCKER_ACCOUNT
-      // 归属校验与 `DOCKER_QUOTA_STORAGE`）。
+      // 与服务端 run 通道同一套共享实现：绑定解析、账户归属校验与配额存储都由
+      // `agent-runtime/docker` 承担，本机 CLI 不再依赖 server 包（公开投影没有它）。
+      // 本机通道必须显式传入同一份 env：共享模块缺省不读 process.env，避免把
+      // 另一套环境/凭据的存储上下文悄悄带进来。
       const resolveAccount =
         args.resolveAccount ??
-        server.createProductionDockerAccountResolver({
+        accounts.createDockerAccountResolver({
+          env: args.env,
           ...(args.kvStore ? { kvStore: args.kvStore } : {}),
           ...(args.quotaProvider ? { quotaProvider: args.quotaProvider } : {}),
         });
@@ -275,7 +275,8 @@ export async function createLocalDockerWorkload(args: {
         journalPath:
           args.env.NOLO_DOCKER_JOURNAL_PATH ??
           "/tmp/nolo-docker-workloads.sqlite",
-        authorize: getDockerBindingAuthorizer(),
+        env: args.env,
+        authorize: createDockerBindingAuthorizer(args.env),
         resolveAccount,
       });
     });
