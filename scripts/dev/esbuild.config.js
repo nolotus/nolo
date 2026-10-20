@@ -37,11 +37,11 @@ const skillDiscoveryBrowserStub = join(
 );
 const dockerRuntimeReadinessBrowserStub = join(
   configDir,
-  "../../packages/server/handlers/agentRun/dockerRuntimeReadiness.browser.stub.ts",
+  "../../packages/agent-runtime/dockerRuntimeReadiness.browser.stub.ts",
 );
 const dockerWorkloadLifecycleBrowserStub = join(
   configDir,
-  "../../packages/server/handlers/agentRun/dockerWorkloadLifecycle.browser.stub.ts",
+  "../../packages/agent-runtime/dockerWorkloadLifecycle.browser.stub.ts",
 );
 
 // ---- Web edition（package.json 条件导出版本）--------------------------------

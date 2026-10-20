@@ -1,4 +1,47 @@
 
+## 0.151.0-alpha.1 (2026-10-20)
+
+### Features
+
+* **ai:** 新增共享上下文占用口径模块 ([0441cf6](https://github.com/nolotus/bun-nolo/commit/0441cf637c53717b44d772a104d52535e68215a5))
+* **build:** web 产物注入 CLI 版本，去掉第二份硬编码真值 ([f7e3ab6](https://github.com/nolotus/bun-nolo/commit/f7e3ab61de9ced74daf7922d0f956242a99a08e5))
+* **cli:** nolo ci status —— 部署状态的可查出口 ([4f52dc0](https://github.com/nolotus/bun-nolo/commit/4f52dc0e281b6f5e1b977fe52d15e04dd42d9ebd))
+* **cli:** support controlled secret bindings from inbound credential vault ([f3b7a9a](https://github.com/nolotus/bun-nolo/commit/f3b7a9aee08e7a787e3e41226b3c3985adc9c4c3))
+* **cli:** TUI 内容区增加左右 1 列呼吸留白，滚动条保持贴最右侧 ([c2637a2](https://github.com/nolotus/bun-nolo/commit/c2637a29fdd40e0a13b46367042ca0df0c831e15))
+* **cli:** TUI 状态栏显示最近一次部署 ([ad5f632](https://github.com/nolotus/bun-nolo/commit/ad5f6320e67505348e9d85bd8ba8875296bec15a))
+* **cli:** 支持通过 cli-local 派发通道运行 instabox 沙盒任务 ([47c6b55](https://github.com/nolotus/bun-nolo/commit/47c6b55ca63e1db4a334c051c3718e61060f207a))
+* **navigation:** Navigation V2 首批切片——独立查询状态机与面板目标空间路由 ([c19d947](https://github.com/nolotus/bun-nolo/commit/c19d94777906393399e99b49f2375262cbacfbc3))
+* **navigation:** Work 视图三分组预览接入真实运行状态 ([8b78a07](https://github.com/nolotus/bun-nolo/commit/8b78a07a632d175c9208994373480a63a160d462))
+* **prompt:** 新增系统层平台风控纪律静态指令块 ([f78bc09](https://github.com/nolotus/bun-nolo/commit/f78bc095f220fcba1a81977776a14172bcd516f0))
+* **release:** CLI 二进制 CDN 版本化，回滚不再需要重建旧包 ([e6da42c](https://github.com/nolotus/bun-nolo/commit/e6da42cac9fdffc0af6292cf2f03bf22bfd4eade))
+* **release:** CLI 发布支持版本注入，并用 bun 取代 node 跑 esbuild ([7471018](https://github.com/nolotus/bun-nolo/commit/74710183b8decf6329cd425ec9ff3cc6d8bd28b4))
+
+### Bug Fixes
+
+* **agent-runtime:** ask_user 规则改为只传 id/label，并写明按字节判长度 ([6a07259](https://github.com/nolotus/bun-nolo/commit/6a07259a92d9570955d12ab0dd7c251d6c8b7382))
+* **agent-runtime:** ask_user 调用规范改为结构定额，防参数截断 ([d6828c1](https://github.com/nolotus/bun-nolo/commit/d6828c1c9564122cf1c96e6c21795105598fe48b))
+* **agent:** minimax-api 预设默认改用 MiniMax-M3.1-Flash 并为旧 id 加兼容指向 ([4b67701](https://github.com/nolotus/bun-nolo/commit/4b67701ca3a514ba4112a68f461443f6a3488c98))
+* **ai:** agent-loop 路径上报权威 token 以让占用实时更新 ([5b08cfb](https://github.com/nolotus/bun-nolo/commit/5b08cfbbd046a84459ab0fd1644c4eea11a300e7))
+* **app-detail:** 修复详情页 URL 规范化回环导致地址栏来回变且不跳转 ([7c213e4](https://github.com/nolotus/bun-nolo/commit/7c213e48da2e2bb55e4c4aaa210b6dc89aca84c3))
+* **chat:** 上下文占用与累计计费分离并接上权威遥测 ([f473717](https://github.com/nolotus/bun-nolo/commit/f4737178996d203c1cc3bae4a23b075a7496f2d0))
+* **chat:** 修复输入框最下沿遮挡并支持顶部拖拽拉伸高度 ([9e749f9](https://github.com/nolotus/bun-nolo/commit/9e749f998343120b7639f2b8e95a96cc16f235c5))
+* **cli:** /compact 后占用按压缩结果重算并对齐权威到达口径 ([7afe103](https://github.com/nolotus/bun-nolo/commit/7afe103ed3a16235c4d401099d6f51cba461d350))
+* **cli:** context 芯片按真实上下文占用实时更新 ([e946280](https://github.com/nolotus/bun-nolo/commit/e94628016d761d13c427bd5a7de7cfaf03ecf265))
+* **cli:** publish 构建不再把测试文件复制进 dist ([a8690b0](https://github.com/nolotus/bun-nolo/commit/a8690b0355d10d7b33952fc3318647ab3dd2e434))
+* **cli:** resolve shared child shell approval owner from runtime record ([ee2b3a4](https://github.com/nolotus/bun-nolo/commit/ee2b3a4090060093ec4ca5142c2631255164e69b))
+* **cli:** 删除 4 处零引用死代码包并移除 3 个地图依赖 ([f60009d](https://github.com/nolotus/bun-nolo/commit/f60009da2f152f22329be3a2c4404ad12dd7144a))
+* **cli:** 恢复 usage 合并的计费口径，占用改走「最近一次 provider input」 ([8c3497d](https://github.com/nolotus/bun-nolo/commit/8c3497d04a2f9e173e2165918b43b3c6460a037e))
+* **cli:** 沙盒 run 终态导出能回收 .worktrees 里的改动 ([06c879e](https://github.com/nolotus/bun-nolo/commit/06c879ee09369b1637b98a94e968c7258f456da6))
+* **identity:** isolate cloud lazy imports from public client builds ([6f5e93a](https://github.com/nolotus/bun-nolo/commit/6f5e93af4fb6e07c3afcd636d51b5f7a9037d567))
+* **prompt:** 修复模板字符串里的裸反引号导致 CLI 启动崩溃 ([a9ad456](https://github.com/nolotus/bun-nolo/commit/a9ad4565b1a6d925417917acbe02c5af15a8eb7f))
+* **release:** CLI 版本守卫改为守注入链路，修复上一提交引入的发布回归 ([095a71f](https://github.com/nolotus/bun-nolo/commit/095a71f83023bac40e1b30173dfe723ca9d326e6))
+* **release:** CLI 版本真值收敛到单一来源，修复 6 处被注入改造打红的检查 ([40994a0](https://github.com/nolotus/bun-nolo/commit/40994a01b6d40bba7278d1f01168968f41e9a8a6))
+* **routing:** 修复同批次多写入者覆盖查询参数导致地址栏闪回 ([2b5f3ac](https://github.com/nolotus/bun-nolo/commit/2b5f3acaa53ccbca31dd01531968cbd574c692c3))
+* **server:** agent 的 apiKeyRef 在写入时归一化后再落库 ([7ecc7cd](https://github.com/nolotus/bun-nolo/commit/7ecc7cd5f3bbffa55c1a5d05bc51c5bd766e4a24))
+* **server:** 非法 OAuth provider ref 不再误报成「作者未同步凭据」 ([efa9fd5](https://github.com/nolotus/bun-nolo/commit/efa9fd5b1b7775d331408ec69df0967dcf60a700))
+* **tui:** hide CI and context chips from status line ([53f9e86](https://github.com/nolotus/bun-nolo/commit/53f9e8684dc426af2afaed01a03e69bdb9b4e3f5))
+
+
 ## 0.150.0-alpha.1
 
 ## 0.150.0-alpha.1 (2026-10-19)

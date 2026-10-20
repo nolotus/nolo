@@ -6,12 +6,12 @@ import {
   type RuntimeCatalog,
   type RuntimeCatalogDeps,
   type RuntimeSummary,
-} from "../../../server/handlers/agentRun/runtimeCatalog";
+} from "../../../agent-runtime/runtimeCatalog";
 import {
   normalizeDockerReadiness,
   type DockerRuntimeReadiness,
   type DockerRuntimeReadinessSource,
-} from "../../../server/handlers/agentRun/dockerRuntimeReadiness";
+} from "../../../agent-runtime/dockerRuntimeReadiness.browser.stub";
 import { selectIdentityUserId } from "identity/selectors";
 
 export const listRuntimesFunctionSchema = {
