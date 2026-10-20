@@ -1,0 +1,159 @@
+/* Navigation V2 pilot: desktop rail (left of the context column) and a compact
+   horizontal rail inside the existing mobile drawer.
+   This stylesheet MUST be imported by the component that renders these classes
+   (NavigationRail.tsx) — without the import the whole shell stays unstyled and
+   the Rail degrades into a plain block above the context. */
+
+.navigation-v2-shell {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.navigation-v2-context {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* --- Rail -------------------------------------------------------------- */
+
+.navigation-v2-rail {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  z-index: 1;
+  width: 52px;
+  flex: 0 0 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px;
+  border-right: 1px solid var(--borderSubtle, rgba(127, 127, 127, 0.24));
+}
+
+.navigation-v2-rail__item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.navigation-v2-rail__item:hover {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.12));
+}
+
+/* Selected state is not colour-only: a ring around the item plus a separate
+   indicator bar, so the current destination is recognisable without relying
+   on any colour difference. */
+.navigation-v2-rail__item[aria-current="page"],
+.navigation-v2-rail__item[data-active="true"] {
+  background: var(--primaryGhost, rgba(127, 127, 127, 0.12));
+  box-shadow: inset 0 0 0 2px var(--primary, currentColor);
+}
+
+.navigation-v2-rail__item[aria-current="page"]::before,
+.navigation-v2-rail__item[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--primary, currentColor);
+}
+
+.navigation-v2-rail__item:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 2px;
+}
+
+/* --- Home view switcher (Work / Projects) ------------------------------ */
+
+.navigation-v2-home-views {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+}
+
+.navigation-v2-home-views__item {
+  flex: 1;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* aria-pressed carries the state; weight + border make it visible without colour. */
+.navigation-v2-home-views__item[aria-pressed="true"] {
+  font-weight: 600;
+  border-color: var(--borderSubtle, rgba(127, 127, 127, 0.24));
+  background: var(--primaryGhost, rgba(127, 127, 127, 0.12));
+}
+
+.navigation-v2-home-views__item:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 1px;
+}
+
+/* --- Context note ------------------------------------------------------ */
+
+.navigation-v2-context-note {
+  margin: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--textSecondary, inherit);
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.08));
+}
+
+/* --- Mobile: reuse the existing drawer, rail becomes a top row ---------- */
+
+@media (max-width: 768px) {
+  .navigation-v2-shell {
+    flex-direction: column;
+  }
+
+  .navigation-v2-rail {
+    position: static;
+    box-sizing: border-box;
+    width: 100%;
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 4px 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--borderSubtle, rgba(127, 127, 127, 0.24));
+  }
+
+  .navigation-v2-rail__item[aria-current="page"]::before,
+  .navigation-v2-rail__item[data-active="true"]::before {
+    left: 50%;
+    top: auto;
+    bottom: -4px;
+    transform: translateX(-50%);
+    width: 20px;
+    height: 3px;
+  }
+}

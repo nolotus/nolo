@@ -41,6 +41,8 @@ import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matc
 import { selectIdentityUserId } from "identity/selectors";
 import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
 import { WorkDialogGroupsPreview } from "./WorkDialogGroupsPreview";
+import { NavigationRail } from "./NavigationRail";
+import { type HomeView, resolveHomeView, resolveRailView } from "./navigationRailView";
 import { DesktopFolderProjects } from "./DesktopFolderProjectsSection";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { SidebarPinnedBlock } from "./sidebar/SidebarPinnedBlock";
@@ -76,6 +78,10 @@ const writeStoredSidebarFilter = (filter: SidebarTypeFilterId) => {
 const ChatSidebar: React.FC = () => {
   const { t } = useTranslation("space");
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
+  // Work / Projects 是 Home 下的两种视图，不是 Rail 一级入口；归一化统一走 resolveHomeView。
+  const [homeViewState, setHomeViewState] = useState<HomeView>("work");
+  const homeView = resolveHomeView(homeViewState);
+  const selectHomeView = (view: HomeView) => setHomeViewState(resolveHomeView(view));
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState<SidebarTypeFilterId>(readStoredSidebarFilter);
@@ -92,6 +98,9 @@ const ChatSidebar: React.FC = () => {
   const space = useCurrentSpaceFromEntity();
   const viewMode = useViewMode();
   const location = useLocation();
+  // Rail 目的地由路由推导：Context 只渲染当前目的地的内容，
+  // 避免在 /favorites、/explore 下继续渲染上一个 Space 作用域的内容。
+  const railView = resolveRailView(location.pathname);
 
   // NOTE: Do NOT force setViewMode("all") when space is temporarily null.
   // changeSpace.pending clears currentSpace while navigating to /space/:id;
@@ -355,23 +364,80 @@ const ChatSidebar: React.FC = () => {
     </div>
   );
 
-  // "全部" 或未选择具体空间：全量侧边栏
+  const homeViewSwitcher = (
+    <div
+      role="group"
+      aria-label={t("common:homeViews", "主页视图")}
+      className="navigation-v2-home-views"
+    >
+      <button
+        type="button"
+        className="navigation-v2-home-views__item"
+        aria-pressed={homeView === "work"}
+        onClick={() => selectHomeView("work")}
+      >
+        {t("allView.work", "Work")}
+      </button>
+      <button
+        type="button"
+        className="navigation-v2-home-views__item"
+        aria-pressed={homeView === "projects"}
+        onClick={() => selectHomeView("projects")}
+      >
+        {t("allView.projects", "Projects")}
+      </button>
+    </div>
+  );
+
+  // Navigation V2 pilot: the Rail is route-driven, and the Context column
+  // follows it. Favorites / Explore are not Home, so they must not keep
+  // rendering Home's Work/Projects content — and above all must not keep
+  // rendering a stale Space scope under a non-Space destination.
+  // Nothing here mutates Space, cwd or a running Agent.
+  if (railView !== "home") {
+    return (
+      <div data-hook="navigation-v2-shell" className="navigation-v2-shell">
+        <NavigationRail />
+        <div data-hook="chat-esc-sidebar"
+          {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}>
+          {topHeaderSection}
+          {railView === "favorites" && (
+            <>
+              {typeFilterShell}
+              {favoritesSection}
+            </>
+          )}
+          {commandPalette}
+        </div>
+      </div>
+    );
+  }
+
   if (viewMode === "all" || !space) {
     return (
-      <div
-        data-hook="chat-esc-sidebar"
-        {...withLiteralClass("ChatSidebar", sidebarStyles.chatSidebar)}
-      >
-        {topHeaderSection}
-        {typeFilterShell}
-        {favoritesSection}
-        {spaceSwitcherHeader}
-        <SidebarCoachmark />
-        {remoteTasksGlobalEntry}
-        <DesktopFolderProjects />
-        <WorkDialogGroupsPreview items={allContentItems} userId={identityUserId ?? ""} />
-        <AllViewSidebar typeFilter={typeFilter} />
-        {commandPalette}
+      <div data-hook="navigation-v2-shell" className="navigation-v2-shell">
+        <NavigationRail />
+        <div data-hook="chat-esc-sidebar"
+          {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}>
+          {homeViewSwitcher}
+          {homeView === "work" ? (
+            <>
+              {topHeaderSection}
+              {typeFilterShell}
+              {spaceSwitcherHeader}
+              <SidebarCoachmark />
+              {remoteTasksGlobalEntry}
+              <WorkDialogGroupsPreview items={allContentItems} userId={identityUserId ?? ""} />
+              <AllViewSidebar typeFilter={typeFilter} />
+            </>
+          ) : (
+            <>
+              {topHeaderSection}
+              <DesktopFolderProjects />
+            </>
+          )}
+          {commandPalette}
+        </div>
       </div>
     );
   }
@@ -383,13 +449,22 @@ const ChatSidebar: React.FC = () => {
     1;
 
   return (
-    <div
+    <div data-hook="navigation-v2-shell" className="navigation-v2-shell">
+      <NavigationRail />
+      <div
       data-hook="chat-esc-sidebar"
-      {...withLiteralClass("ChatSidebar", sidebarStyles.chatSidebar)}
+      {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}
     >
+      {homeViewSwitcher}
+      {homeView === "projects" ? (
+        // Space 不是 Project 的作用域维度：这里不渲染全局项目列表，
+        // 避免用户把全局桌面项目误读为当前空间的筛选结果。
+        <p className="navigation-v2-context-note" role="note">
+          {t("space:projectScopeUnavailable", "项目按全局维度组织，暂不支持在空间内筛选。切回「主页」可查看全局项目。")}
+        </p>
+      ) : <>
       {topHeaderSection}
       {typeFilterShell}
-      {favoritesSection}
       {spaceSwitcherHeader}
       <SidebarCoachmark />
       {remoteTasksGlobalEntry}
@@ -567,7 +642,9 @@ const ChatSidebar: React.FC = () => {
           />
         )}
       </div>
+      </>}
       {commandPalette}
+      </div>
     </div>
   );
 };

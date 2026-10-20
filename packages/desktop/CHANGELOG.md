@@ -1,4 +1,11 @@
 
+## 0.167.0-alpha.1 (2026-10-20)
+
+### Features
+
+* **navigation:** Rail 与 Context 分离，Rail 改为路由驱动 ([85b500e](https://github.com/nolotus/bun-nolo/commit/85b500e0de3d89c8b324b65cde535dd6a1f5aa3f)), closes [#168](https://github.com/nolotus/bun-nolo/issues/168) [#168](https://github.com/nolotus/bun-nolo/issues/168) [#7773](https://github.com/nolotus/bun-nolo/issues/7773) [#7772](https://github.com/nolotus/bun-nolo/issues/7772)
+
+
 ## 0.166.0-alpha.1 (2026-10-20)
 
 ### Features
