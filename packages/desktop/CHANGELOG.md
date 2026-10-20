@@ -1,4 +1,12 @@
 
+## 0.165.0-alpha.3 (2026-10-20)
+
+### Bug Fixes
+
+* **desktop:** shorten browser stub chunk names below the tar path limit ([5643588](https://github.com/nolotus/bun-nolo/commit/564358871ea06eda5fc9a770841617e8804614ae))
+* **tui:** honor origin auto mode for child shell approvals ([14fd5c0](https://github.com/nolotus/bun-nolo/commit/14fd5c0357ebf82e9d4083e96a941a0cc682ab0c))
+
+
 ## 0.165.0-alpha.2 (2026-10-20)
 
 ### Bug Fixes

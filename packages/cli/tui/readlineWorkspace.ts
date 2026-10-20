@@ -1321,7 +1321,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           command: request.command },
         signal, fullCommand: true, input: input as any, output: output as any, ...anchor,
       }));
-    }));
+    }), () => state.autoConfirm === true);
   const sessionShellGrant = createOriginShellGrant({
     confirm: async (request) => {
       return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>

@@ -11,7 +11,7 @@ import {
   normalizeDockerReadiness,
   type DockerRuntimeReadiness,
   type DockerRuntimeReadinessSource,
-} from "../../../agent-runtime/dockerRuntimeReadiness.browser.stub";
+} from "../../../agent-runtime/dockerReadiness.stub";
 import { selectIdentityUserId } from "identity/selectors";
 
 export const listRuntimesFunctionSchema = {

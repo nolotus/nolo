@@ -2,7 +2,7 @@ import {
   dockerReadinessNotProbed,
   normalizeDockerReadiness,
   type DockerRuntimeReadiness,
-} from "./dockerRuntimeReadiness.browser.stub";
+} from "./dockerReadiness.stub";
 
 /** Minimal discovery projection; no registry service or execution authority. */
 export type RuntimeCatalogMachine = {

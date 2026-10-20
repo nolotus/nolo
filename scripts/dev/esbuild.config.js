@@ -37,11 +37,11 @@ const skillDiscoveryBrowserStub = join(
 );
 const dockerRuntimeReadinessBrowserStub = join(
   configDir,
-  "../../packages/agent-runtime/dockerRuntimeReadiness.browser.stub.ts",
+  "../../packages/agent-runtime/dockerReadiness.stub.ts",
 );
 const dockerWorkloadLifecycleBrowserStub = join(
   configDir,
-  "../../packages/agent-runtime/dockerWorkloadLifecycle.browser.stub.ts",
+  "../../packages/agent-runtime/dockerLifecycle.stub.ts",
 );
 
 // ---- Web edition（package.json 条件导出版本）--------------------------------
@@ -132,7 +132,7 @@ const agentRuntimeBrowserCompatPlugin = {
     // （纯逻辑与真实实现一致；探测入口如实 not-configured，绝不默认放行）。
     build.onResolve({ filter: /dockerRuntimeReadiness(\.ts)?$/ }, (args) => {
       if (args.kind === "entry-point") return;
-      if (args.path.includes("dockerRuntimeReadiness.browser.stub")) return;
+      if (args.path.includes("dockerReadiness.stub")) return;
       return { path: dockerRuntimeReadinessBrowserStub };
     });
     // dockerWorkloadLifecycle 使用 bun:sqlite / node:crypto / node:path（并连带
@@ -142,7 +142,7 @@ const agentRuntimeBrowserCompatPlugin = {
     // fail-closed stub（isBound 恒 false，绝不默认放行；与未配置绑定的服务端语义一致）。
     build.onResolve({ filter: /dockerWorkloadLifecycle(\.ts)?$/ }, (args) => {
       if (args.kind === "entry-point") return;
-      if (args.path.includes("dockerWorkloadLifecycle.browser.stub")) return;
+      if (args.path.includes("dockerLifecycle.stub")) return;
       return { path: dockerWorkloadLifecycleBrowserStub };
     });
   },
