@@ -86,7 +86,7 @@ const PortalDropdown: React.FC<{
   children: React.ReactNode;
   className?: string;
   role?: string;
-  /** Rail anchors are ~52px wide; give the portalled panel a usable minimum. */
+  /** Rail anchors are ~48px wide; give the portalled panel a usable minimum. */
   compact?: boolean;
 }> = ({ isOpen, anchorRef, children, className, role, compact = false }) => {
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -100,7 +100,7 @@ const PortalDropdown: React.FC<{
   if (!isOpen || !rect) return null;
 
   // Width follows the anchor, except in the compact Rail where that would clip
-  // the panel down to the 52px rail. Clamp to the viewport so it never overflows.
+  // the panel down to the rail width. Clamp to the viewport so it never overflows.
   const width = Math.max(rect.width - 16, compact ? 280 : 0);
   const left = Math.min(
     Math.max(8, rect.left + 8),

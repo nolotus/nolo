@@ -15,8 +15,6 @@ import { Outlet, useLocation } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { zIndex } from "render/styles/zIndex";
 import { setSidebarWidth, selectSidebarWidth } from "app/settings/settingSlice";
-import { shouldShowFirstSidebarCollapseHint } from "app/layout/sidebarCollapsePreference";
-import { toast } from "app/utils/toast";
 import { useViewMode, setViewMode } from "create/space/spaceCurrentStore";
 import PageContentErrorBoundary from "./PageContentErrorBoundary";
 import PageLoading from "../web/ui/PageLoading";
@@ -109,6 +107,8 @@ const MainLayout: React.FC = () => {
   const mainLayoutRef = useRef<HTMLDivElement | null>(null);
   const rightSidebarRef = useRef<HTMLElement | null>(null);
   const lastWidthRef = useRef(sidebarWidth);
+  /** 用户主动折叠后，All-View 恢复 effect 不能把折叠态静默展开。 */
+  const userCollapsedRef = useRef(false);
   const autoClosedByViewportRef = useRef(false);
   // 移动端抽屉只认用户主动打开：登录后服务端设置回填的 sidebarWidth 不算。
   const mobileUserOpenedRef = useRef(false);
@@ -163,6 +163,8 @@ const MainLayout: React.FC = () => {
   useEffect(() => {
     if (sidebarWidth > 0) {
       lastWidthRef.current = sidebarWidth;
+      // 任何程序性展开都视为用户已接受展开，清除折叠标记。
+      userCollapsedRef.current = false;
     }
   }, [sidebarWidth]);
 
@@ -206,6 +208,7 @@ const MainLayout: React.FC = () => {
       return;
     }
     if (sidebarWidth > 0 || hasRestoredAllViewSidebar.current) return;
+    if (userCollapsedRef.current) return;
     hasRestoredAllViewSidebar.current = true;
       dispatch(setSidebarWidth(lastWidthRef.current || 280));
   }, [dispatch, isMobile, sidebarWidth, useAllViewSidebar]);
@@ -227,20 +230,16 @@ const MainLayout: React.FC = () => {
   const sidebarContent = mainSidebar.content ?? defaultSidebarContent;
 
   const hasSidebar = sidebarContent !== null;
+  const railOnly = !isMobile && renderChatSidebar && mainSidebar.content === null && sidebarWidth <= 0;
 
   const toggleSidebar = useCallback(() => {
     const isOpening = sidebarWidth <= 0;
     mobileUserOpenedRef.current = isOpening;
     const newWidth = isOpening ? lastWidthRef.current || 280 : 0;
+    userCollapsedRef.current = !isOpening;
     dispatch(setSidebarWidth(newWidth));
-    if (!isOpening && !isMobile && typeof window !== "undefined") {
-      try {
-        if (shouldShowFirstSidebarCollapseHint(window.localStorage)) {
-          toast.info("侧边栏已收起；可在设置中调整折叠提示偏好。");
-        }
-      } catch { /* Local storage unavailable: no hint. */ }
-    }
-  }, [dispatch, sidebarWidth, isMobile]);
+
+  }, [dispatch, sidebarWidth]);
 
   const openRightSidebar = useCallback(
     (content: React.ReactNode, options?: RightSidebarOptions) => {
@@ -488,8 +487,8 @@ const MainLayout: React.FC = () => {
         {hasSidebar && (
           <aside
             ref={sidebarRef}
-            className={`MainLayout__sidebar ${isOpen ? "is-open" : ""}`}
-            style={shouldRenderMobileLayout ? undefined : { width: sidebarWidth }}
+            className={`MainLayout__sidebar ${isOpen ? "is-open" : ""} ${railOnly ? "MainLayout__sidebar--rail-only" : ""}`}
+            style={shouldRenderMobileLayout ? undefined : { width: railOnly ? 48 : sidebarWidth }}
           >
             <div className="MainLayout__sidebarContent">{sidebarContent}</div>
             {/* ChatSidebar owns its Rail footer; non-Chat sidebars keep the legacy footer. */}
@@ -498,7 +497,7 @@ const MainLayout: React.FC = () => {
                 <SidebarUserSection />
               </Suspense>
             )}
-            {!shouldRenderMobileLayout && (
+            {!shouldRenderMobileLayout && !railOnly && (
               <div
                 className="MainLayout__resizeHandle"
                 onPointerDown={startResizing}

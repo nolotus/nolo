@@ -3142,3 +3142,17 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
   outline: none;
   min-width: 140px;
 }
+
+/* Nav V2 desktop: sidebar toggle folds Context, not the persistent Rail. */
+@media (min-width: 769px) {
+  .MainLayout__sidebar--rail-only .MainLayout__sidebarContent {
+    min-width: 0;
+    /* 只锁横向：矮视口（小窗/放大缩放）下 Rail 列必须仍可纵向滚动，
+       否则底部的通知/设置/头像会被裁掉且无法到达。 */
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .MainLayout__sidebar--rail-only .navigation-v2-context { display: none; }
+  .MainLayout__sidebar--rail-only .navigation-v2-shell { width: 48px; min-width: 0; }
+  .MainLayout__sidebar--rail-only .navigation-v2-rail { width: 48px; flex: 0 0 48px; }
+}

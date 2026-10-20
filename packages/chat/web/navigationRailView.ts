@@ -18,7 +18,7 @@ import { isSpaceRoutePath } from "render/layout/mainLayoutViewMode";
 export type RailView = "home" | "favorites" | "explore";
 
 /** Home content views (a filter of Home, never Rail destinations). */
-export type HomeView = "work" | "projects";
+export type HomeView = "work" | "projects" | "categories";
 
 /** Route of each Rail destination. */
 export const RAIL_VIEW_PATHS: Record<RailView, string> = {
@@ -47,7 +47,9 @@ export function resolveRailView(pathname: string | undefined | null): RailView {
 
 /** Normalise a Home view value coming from state or storage. */
 export function resolveHomeView(value: unknown): HomeView {
-  return value === "projects" ? "projects" : "work";
+  if (value === "projects") return "projects";
+  if (value === "categories") return "categories";
+  return "work";
 }
 
 /**

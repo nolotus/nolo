@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { NavLink } from "app/routing";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useLocation } from "app/routing";
 import type { MyContentListItem } from "app/utils/myContentItems";
 import { useWorkRunListCoverage } from "./useWorkRunListCoverage";
 import { getAgentRuns, getAgentRunsVersion, getRemoteTasks, subscribeAgentRuns } from "./agentRunStore";
@@ -7,17 +7,19 @@ import { parseDialogKey } from "database/dialogKey";
 import { useDialogStatuses, useDialogEventTimestamps } from "create/space/spaceDialogStore";
 import { projectWorkDialogData } from "./workDialogDataProjection";
 import { resolveWorkLiveness, type WorkStoreRun } from "./workRunLiveness";
-import { buildRoutableContentPath } from "create/space/contentKeyUtils";
+import { isRoutableContentActive } from "create/space/contentKeyUtils";
+import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
+import SidebarItemRow from "create/space/SidebarItemRow";
+import { SidebarItemMoreMenu } from "create/space/SidebarItemMoreMenu";
+import { MenuPopover } from "render/web/ui/MenuPopover";
 import type { WorkRunListCoverage, WorkRunListSnapshot } from "./workRunListCoverage";
 import type { WorkRunSignal } from "app/navigation/workDialogProjection";
 
 const WORK_GROUP_SECTIONS = [
-  ["needs-you", "需要你"],
-  ["working", "正在工作"],
-  ["recent", "最近"],
+  ["needs-you", "需要我处理"],
+  ["working", "正在运行"],
+  ["recent", "已完成"],
 ] as const;
-
-const WORK_GROUP_MAX_ROWS = 30;
 
 export function WorkDialogGroupsPreview({
   items, userId,
@@ -35,6 +37,8 @@ function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContent
   const { coverage, snapshot } = useWorkRunListCoverage(userId);
   const dialogStatuses = useDialogStatuses();
   const dialogEventTimestamps = useDialogEventTimestamps();
+  const location = useLocation();
+  const currentSpaceId = useCurrentSpaceId();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 15_000);
@@ -61,42 +65,114 @@ function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContent
     [now, snapshot, storeRuns],
   );
   // V2-B 预览尚未接入「agent 正在等用户回答」的权威来源（waitingUserByDialogKey
-  // 在生产侧不接线）：「需要你」当前由「需处置 / 状态未知」触发，不代表一定在等你。
+  // 在生产侧不接线）：「需要我处理」当前由「需处置 / 状态未知」触发，不代表一定在等你。
   const groups = useMemo(() => projectWorkDialogData(items, tasks, {
     userId, dialogStatuses, dialogEventTimestamps, now,
     liveDialogIds: liveness.liveDialogIds,
     uncertainDialogIds: liveness.uncertainDialogIds,
   }), [items, tasks, userId, dialogStatuses, dialogEventTimestamps, now, liveness]);
-  const titles = new Map(items.map((item) => [item.contentKey, item.title]));
+  const titles = useMemo(() => new Map(items.map((item) => [item.contentKey, item.title])), [items]);
+  const pinnedByKey = useMemo(
+    () => new Map(items.map((item) => [item.contentKey, Boolean(item.pinned)])),
+    [items],
+  );
   const total = WORK_GROUP_SECTIONS.reduce((sum, [key]) => sum + groups[key].length, 0);
+
+  // 侧栏条目的「更多」菜单挂在 row 之外（RAC Menu 不能嵌在 ListBox 里），
+  // 与 CategorySection 同一套约定：row 上报锚点，这里渲染 MenuPopover。
+  const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
+  const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);
+  const menuAnchorKeyRef = useRef<string | null>(null);
+  const [editRequest, setEditRequest] = useState<{ key: string; nonce: number } | null>(null);
+
+  const handleMenuAnchorChange = useCallback((key: string, el: HTMLElement | null) => {
+    if (el) {
+      menuAnchorKeyRef.current = key;
+      setMenuAnchorEl(el);
+      return;
+    }
+    if (menuAnchorKeyRef.current === key) {
+      menuAnchorKeyRef.current = null;
+      setMenuAnchorEl(null);
+    }
+  }, []);
+
+  const closeMenu = useCallback(() => {
+    setActiveMenuKey(null);
+    menuAnchorKeyRef.current = null;
+    setMenuAnchorEl(null);
+  }, []);
+
   return (
-        <div style={{ maxHeight: 320, overflowY: "auto" }}>
-
-
-          <p role="status">{coverageText(coverage, snapshot)}</p>
-          {total === 0 && <p>暂无已加载的对话。</p>}
-          {WORK_GROUP_SECTIONS.map(([key, label]) => {
-            const rows = groups[key];
-            const hidden = Math.max(0, rows.length - WORK_GROUP_MAX_ROWS);
-            return (
-              <div key={key}>
-                <h3>{label} ({rows.length})</h3>
-                {rows.slice(0, WORK_GROUP_MAX_ROWS).map((dialog) => (
-                  <div key={dialog.dialogKey} title={titles.get(dialog.dialogKey) ?? dialog.dialogKey}>
-                    {/* All View 的既有约定：导航不带 spaceId，避免把布局切到 /space/... */}
-                    <NavLink to={buildRoutableContentPath({
-                      contentKey: dialog.dialogKey, type: "dialog", userId,
-                    })}>
-                      {titles.get(dialog.dialogKey) || dialog.dialogKey}
-                    </NavLink>
-                    <span> · {statusLabel(dialog.runs, dialog.needsUserAction)}</span>
-                  </div>
-                ))}
-                {hidden > 0 && <p>还有 {hidden} 条未显示</p>}
-              </div>
-            );
-          })}
-        </div>
+    <div data-hook="home-work-dialog-list">
+      <p role="status">{coverageText(coverage, snapshot)}</p>
+      {total === 0 ? (
+        <p>暂无已加载的对话。</p>
+      ) : WORK_GROUP_SECTIONS.map(([key, label]) => {
+        const rows = groups[key];
+        // 空分组不占位：只有「已完成」在为零时仍保留，用来给出明确空态。
+        if (rows.length === 0 && key !== "recent") return null;
+        return (
+          <div key={key}>
+            <h3>{label} ({rows.length})</h3>
+            {rows.map((dialog) => {
+              const title = titles.get(dialog.dialogKey) || dialog.dialogKey;
+              // 与行自身的链接同源：侧栏条目会带上当前 Space 前缀，并容忍尾斜杠/子路由，
+              // 所以不能拿 pathname 做严格相等。
+              const isActive = isRoutableContentActive({
+                contentKey: dialog.dialogKey,
+                type: "dialog",
+                userId,
+                spaceId: currentSpaceId,
+                currentPath: location.pathname,
+              });
+              return (
+                <div
+                  key={dialog.dialogKey}
+                  title={statusLabel(dialog.runs, dialog.needsUserAction)}
+                >
+                  <SidebarItemRow
+                    contentKey={dialog.dialogKey}
+                    type="dialog"
+                    title={title}
+                    isActive={isActive}
+                    isMenuOpen={activeMenuKey === dialog.dialogKey}
+                    onToggleMenu={setActiveMenuKey}
+                    onMenuAnchorChange={handleMenuAnchorChange}
+                    editSignal={editRequest?.key === dialog.dialogKey ? editRequest.nonce : undefined}
+                    pinned={pinnedByKey.get(dialog.dialogKey) ?? false}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      {activeMenuKey && menuAnchorEl && (
+        <MenuPopover
+          triggerRef={{ current: menuAnchorEl }}
+          isOpen
+          onOpenChange={(open) => { if (!open) closeMenu(); }}
+          placement="bottom end"
+        >
+          <SidebarItemMoreMenu
+            contentKey={activeMenuKey}
+            title={titles.get(activeMenuKey) || activeMenuKey}
+            type="dialog"
+            spaceId={currentSpaceId}
+            canEditInSpace={Boolean(currentSpaceId)}
+            canMoveToSpace
+            showDownloadAction={false}
+            menuAnchorEl={menuAnchorEl}
+            onEditTitle={() => {
+              setEditRequest({ key: activeMenuKey, nonce: Date.now() });
+              closeMenu();
+            }}
+            onClose={closeMenu}
+          />
+        </MenuPopover>
+      )}
+    </div>
   );
 }
 

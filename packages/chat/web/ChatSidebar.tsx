@@ -391,6 +391,14 @@ const ChatSidebar: React.FC = () => {
       <button
         type="button"
         className="navigation-v2-home-views__item"
+        aria-pressed={homeView === "categories"}
+        onClick={() => selectHomeView("categories")}
+      >
+        {t("allView.categories", "分类")}
+      </button>
+      <button
+        type="button"
+        className="navigation-v2-home-views__item"
         aria-pressed={homeView === "projects"}
         onClick={() => selectHomeView("projects")}
       >
@@ -446,6 +454,12 @@ const ChatSidebar: React.FC = () => {
               ) : (
                 <p role="status">{t("allView.projectDialogOnly", "当前项目仅包含已关联的对话")}</p>
               )}
+            </>
+          ) : homeView === "categories" ? (
+            // 「分类」= Navigation V2 之前的主页显示方式：类型筛选 + 全部内容列表。
+            <>
+              {typeFilterShell}
+              <AllViewSidebar typeFilter={typeFilter} />
             </>
           ) : (
             <>

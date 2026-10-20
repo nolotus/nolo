@@ -1,7 +1,6 @@
 // 文件路径：render/layout/SettingLayout.tsx
 
-import React, { useMemo, Suspense, useCallback, useState } from "react";
-import { isSidebarCollapseHintEnabled, setSidebarCollapseHintEnabled } from "app/layout/sidebarCollapsePreference";
+import React, { useMemo, Suspense, useCallback } from "react";
 import {
   Outlet,
   useLocation,
@@ -25,10 +24,6 @@ interface BackgroundState {
 
 const SettingLayout: React.FC = () => {
   useSettingsStylesheet();
-  const [collapseHint, setCollapseHint] = useState(() => {
-    try { return isSidebarCollapseHintEnabled(window.localStorage); } catch { return true; }
-  });
-
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -87,14 +82,6 @@ const SettingLayout: React.FC = () => {
           <LuX size={16} aria-hidden="true" />
         </button>
       </header>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 16px" }}>
-        <input type="checkbox" checked={collapseHint} onChange={(e) => {
-          const next = e.currentTarget.checked;
-          try { setSidebarCollapseHintEnabled(window.localStorage, next); setCollapseHint(next); } catch { /* unavailable */ }
-        }} />
-        {t("settings.sidebarCollapseHint", "首次收起侧边栏时显示设置提示")}
-      </label>
 
       <div className="SettingsLayout">
         <aside className="SettingsLayout__sidebar">
