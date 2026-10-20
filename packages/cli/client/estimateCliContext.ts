@@ -21,6 +21,7 @@ import { buildIdentityBlock } from "../../agent-runtime/identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "../../agent-runtime/deleteSafety";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "../../agent-runtime/parallelDispatchDefault";
 import { PLATFORM_RISK_CONTROL_RULE } from "../../agent-runtime/platformRiskControl";
+import { buildConsultationModeBlock } from "../../agent-runtime/consultationMode";
 import { buildUserResponseLanguageContext } from "../../agent-runtime/userResponseLanguage";
 import {
   buildLocalWorkspaceOpenAiTools,
@@ -121,6 +122,7 @@ export function estimateDefaultCliContextTokens(opts: {
     DELETE_SAFETY_RED_LINE,
     PARALLEL_DISPATCH_DEFAULT_RULE,
     PLATFORM_RISK_CONTROL_RULE,
+    buildConsultationModeBlock(),
     prompt,
     opts.userLanguage?.trim()
       ? buildUserResponseLanguageContext({ language: opts.userLanguage })

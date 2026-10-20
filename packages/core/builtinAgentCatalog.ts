@@ -308,6 +308,52 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     // platformHostedRoutingTable.ts「2026-09-28 发布，替换上一代 Sonnet 5 上架」。
     releasedAtMs: releasedAt("2026-09-28"),
   },
+  // ── 顾问档（2026-10-20 求助模式 escalation-help-mode 上架）──
+  // 这三个模型此前只在平台模型目录里（可计价、可路由），但 catalog 无条目 →
+  // 没有可派发的 agentKey，求助模式无法用 `startAgentRun` 派顾问子 run。
+  // 三个 ID 都由 deterministicId 派生（种子串见 publicAgentSeeds 的对应 DEF），
+  // builtinAgents.identity.test 做 1:1 交叉断言，禁止手抄漂移。
+  {
+    // deterministicId("01GPT6ASTRAP", "shared-space-nolo-gpt-6-astra")
+    id: "01GPT6ASTRAP00000001H1J4UG",
+    group: "public",
+    lifecycle: "active",
+    name: "GPT-6 Astra",
+    provider: "nolo",
+    model: "gpt-6-astra",
+    // 出处：无官方发布日的代码出处（platformHosted 目录对 gpt-6-astra 未填
+    // releasedAtMs）。填本次广场上架日（2026-10-20）——即该商品在本目录里的
+    // 上架时间真值，不猜官方发布日期。
+    releasedAtMs: releasedAt("2026-10-20"),
+  },
+  {
+    // deterministicId("01GPT61SOLPB", "shared-space-nolo-gpt-6-1-sol")
+    id: "01GPT61SOLPB00000001DADDP0",
+    group: "public",
+    lifecycle: "active",
+    name: "GPT-6.1 Sol",
+    provider: "nolo",
+    model: "gpt-6.1-sol",
+    // 注意：model 用 gpt-6.1-sol 而不是 gpt-5.6-sol——后者自 2026-10-13 起是
+    // 前一者的兼容别名（PLATFORM_MODEL_ALIASES），上面 retired 的
+    // 「GPT-5.6 Sol（兼容）」条目按原样保留，只服务存量记录的路由兼容。
+    // 出处：platformHosted.ts 的 PLATFORM_HOSTED_GPT_6_1_SOL_PRICE 注释
+    // 「GPT-6.1 Sol（2026-10-13 收进广场）」= 平台上架日。
+    releasedAtMs: releasedAt("2026-10-13"),
+  },
+  {
+    // deterministicId("01KIMIK3PLAZ", "shared-space-nolo-kimi-k3")
+    id: "01KIMIK3PLAZ00000000CBJU3S",
+    group: "public",
+    lifecycle: "active",
+    name: "Kimi K3",
+    provider: "nolo",
+    model: "kimi-k3",
+    // 出处：无官方发布日的代码出处（platformHosted 目录对 kimi-k3 未填
+    // releasedAtMs；价格注释里的 2026-09-15 是 Baseten 页面核价日，不是发布日）。
+    // 填本次广场上架日（2026-10-20），不猜官方日期。
+    releasedAtMs: releasedAt("2026-10-20"),
+  },
   {
     id: "01GEM37FLPB00000000FJCRNC",
     group: "public",

@@ -67,6 +67,7 @@ import { buildIdentityBlock } from "./identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
 import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
+import { buildConsultationModeBlock } from "./consultationMode";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
@@ -968,6 +969,7 @@ export async function runLocalAgentTurn(
     { content: PARALLEL_DISPATCH_DEFAULT_RULE, cacheScope: "session" as const },
     // 平台风控纪律：无条件系统层块，沿用 session 占位约定。
     { content: PLATFORM_RISK_CONTROL_RULE, cacheScope: "session" as const },
+    { content: buildConsultationModeBlock(), cacheScope: "session" as const },
     { content: identityBlock, cacheScope: "session" as const },
     ...guidanceScopes,
     ...callerScopes,

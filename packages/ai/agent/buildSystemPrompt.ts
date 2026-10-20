@@ -16,6 +16,7 @@ import { DELETE_SAFETY_RED_LINE } from "agent-runtime/deleteSafety";
 // 「并行是默认」与删除红线一样属于系统层固定约束：无条件注入，不做工具门控。
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDefault";
 import { PLATFORM_RISK_CONTROL_RULE } from "agent-runtime/platformRiskControl";
+import { buildConsultationModeBlock } from "agent-runtime/consultationMode";
 import { buildResponseGuidelines } from "agent-runtime/responseGuidelines";
 import { buildUserResponseLanguageContext } from "agent-runtime/userResponseLanguage";
 // 工具驱动指令表（编排/协作 review 硬门等）独立成模块，localLoop 复用同一份。
@@ -298,6 +299,7 @@ export const buildSystemPromptContext = (options: {
       cacheScope: "static",
       content: PLATFORM_RISK_CONTROL_RULE,
     },
+    { id: "consultation-mode", owner: "platform", cacheScope: "static", content: buildConsultationModeBlock() },
     { id: "identity", owner: "platform", cacheScope: "session", content: identitySection },
     { id: "user-response-language", owner: "platform", cacheScope: "session", content: buildUserResponseLanguageContext({ language: safeLanguage }) },
     { id: "startup-protocol", owner: "platform", cacheScope: "static", content: startupProtocol },

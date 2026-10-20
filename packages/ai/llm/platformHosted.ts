@@ -217,6 +217,14 @@ export const PLATFORM_HOSTED_CLAUDE_SONNET_5_5_PRICE = {
 
 /**
  * GPT-6 / GPT-5.6 系（平台托管语义，OpenAI 官方 chat.completions）。
+ *
+ * 长上下文档（2026-10-20 owner 决定「按档浮动计价」）：平台价改为随上游长上下文档位
+ * 浮动，不再按短档固定收。机制用仓库既有的 `pricingStrategy: { type: "tiered_context" }`
+ * （types.ts 定义、calculatePrice / ratingResult 已在按 `usage.input_tokens` 选档），
+ * tiers 只列长档，`minContext = PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS`
+ * （272_001 ⇒ 272_000 及以下仍按基础价，272_001 起整笔请求进长档）。
+ * 逐模型官方页核查结论见各价目常量注释；只有 astra / 6.1 sol / 6 luna 三者在 CF
+ * 官方模型页上**列了长上下文档**，terra / 5.6 sol / 5.6 luna 的官方页只有单档。
  */
 export const PLATFORM_HOSTED_GPT_6_ASTRA_PRICE = {
   input: toPlatformCredits(10), // 80 credits
@@ -224,6 +232,35 @@ export const PLATFORM_HOSTED_GPT_6_ASTRA_PRICE = {
   cachingRead: toPlatformCredits(1), // 8 credits（CF 官方短档 cached in）
   cachingWrite: toPlatformCredits(12), // 96 credits（CF 官方短档 cache write）
   output: toPlatformCredits(50), // 400 credits
+} as const;
+
+/**
+ * 平台托管 GPT-6 系长上下文档门槛：**>272K 输入 token**，即 272_001 起进长档。
+ *
+ * 出处（2026-10-20 核对原始页面）：OpenAI 官方模型页
+ * developers.openai.com/api/docs/models/gpt-6-astra（同页规则亦见于 /gpt-6.1-sol、
+ * /gpt-6-luna）原文：「Prompts with more than 272K input tokens are priced at 2x
+ * input and cache rates and 1.5x output for the full request.」——注意「more than」
+ * ⇒ 恰好 272_000 仍按短档，272_001 才是长档；与 calculatePrice 选档用的是
+ * `contextSize >= tier.minContext` 一致，因此 minContext 取 272_001。
+ * CF 官方模型页（developers.cloudflare.com/ai/models/openai/<model>/）只分别列出
+ * 「Short-context / Long-context」四组美元单价，**未给阈值数值**，阈值口径以上游
+ * OpenAI 官方页为准（CF 长档价目与该 2x/1.5x 规则吻合，可互相印证）。
+ */
+export const PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS = 272_001;
+
+/**
+ * GPT-6 Astra 长上下文档（CF 官方模型页 2026-10-20 核对）。
+ *
+ * developers.cloudflare.com/ai/models/openai/gpt-6-astra/ 明确列出四个 Long-context 价：
+ * 官方规则「2x input and cache rates、1.5x output」与实际档位价一致
+ */
+export const PLATFORM_HOSTED_GPT_6_ASTRA_LONG_CONTEXT_PRICE = {
+  input: toPlatformCredits(20), // 160 credits
+  inputCacheHit: toPlatformCredits(2), // 16 credits
+  cachingRead: toPlatformCredits(2), // 16 credits（CF 官方长档 cached in）
+  cachingWrite: toPlatformCredits(25), // 200 credits（CF 官方长档 cache write）
+  output: toPlatformCredits(75), // 600 credits
 } as const;
 /**
  * 历史计费价目（gpt-5.6-sol 自 2026-10-13 起是 gpt-6.1-sol 的兼容别名）：仅供读取 /
@@ -255,7 +292,9 @@ export const PLATFORM_HOSTED_GPT_56_LUNA_PRICE = {
 /**
  * GPT-6 Luna（2026-09-22 随 GPT-6 Sol/Luna 上线；官方模型页
  * developers.openai.com/api/docs/models/gpt-6-luna，2026-09-23 核对）：
- * （>272K 官方 2x input/cache、1.5x output 由平台吸收），× 8 = 0.8 / 0.08 / 4.0 credits。
+ * 2026-10-20 owner 决定「按档浮动计价」：CF 官方模型页
+ * developers.cloudflare.com/ai/models/openai/gpt-6-luna/（2026-10-20 核对）同时列出
+ * ⇒ 长档见 PLATFORM_HOSTED_GPT_6_LUNA_LONG_CONTEXT_PRICE，tiers.minContext = 272_001。
  *
  * 2026-10-13：上游切到 Cloudflare AI Gateway（Responses wire，见
  * platformHostedRoutingTable）。CF 的 canonical usage 里 input_tokens 是**总输入**
@@ -263,8 +302,8 @@ export const PLATFORM_HOSTED_GPT_56_LUNA_PRICE = {
  * 只报 input_tokens_details.cache_write_tokens（cached_tokens=0）；实测两条日志
  * （run-2026-10-13T09-36-02-330Z-a61x5m / …-s1mrw7）write = 2783 / 6626，read = 0。
  * 同时显式声明后计费侧才切 canonical 4 桶（见 calculatePrice 的
- * resolvePlatformCloudflareCacheCost）。基数与短档口径不变：不加 5% 通道费，
- * 长上下文档差价仍由平台吸收。
+ * resolvePlatformCloudflareCacheCost）。基数与短档口径不变：不加 5% 通道费；
+ * 长上下文档改为按档浮动（见下方 LONG_CONTEXT 价目与模型条目的 pricingStrategy）。
  */
 export const PLATFORM_HOSTED_GPT_6_LUNA_PRICE = {
   input: toPlatformCredits(0.1), // 0.8 credits
@@ -275,11 +314,26 @@ export const PLATFORM_HOSTED_GPT_6_LUNA_PRICE = {
 } as const;
 
 /**
+ * GPT-6 Luna 长上下文档（CF 官方模型页 2026-10-20 核对，同页 Long-context 四组价）：
+ * × 8 → 1.6 / 0.16 / 2 / 6 credits（恰为短档 2x，与官方「2x input/cache」规则一致）。
+ */
+export const PLATFORM_HOSTED_GPT_6_LUNA_LONG_CONTEXT_PRICE = {
+  input: toPlatformCredits(0.2), // 1.6 credits
+  inputCacheHit: toPlatformCredits(0.02), // 0.16 credits
+  cachingRead: toPlatformCredits(0.02), // 0.16 credits（CF 官方长档 cached in）
+  cachingWrite: toPlatformCredits(0.25), // 2 credits（CF 官方长档 cache write）
+  output: 4.2, // 6 credits
+} as const;
+
+/**
  * GPT-6.1 Sol（2026-10-13 收进广场）：上游为 Cloudflare AI（Responses），
  * 价格取自 CF 官方模型页 developers.cloudflare.com/ai/models/openai/gpt-6.1-sol/
  * （2026-10-13 核对，fetch 记录：spill-fetchWebpage-c9b2fa37b105.log）：
  *
  * 口径（与既有 GPT 系一致，不新增算法）：
+ * - 长上下文档（2026-10-20 owner 决定按档浮动）：CF 官方模型页同页列出
+ *   → PLATFORM_HOSTED_GPT_6_1_SOL_LONG_CONTEXT_PRICE（32 / 1.6 / 40 / 120 credits），
+ *   阈值 272K（OpenAI 官方页「more than 272K input tokens」）⇒ minContext 272_001；
  *   2026-10-13 复核 CF 官方模型页捕获（spill-fetchWebpage-c9b2fa37b105 /
  * - 不加任何 CF 通道手续费/加价（不设 5% uplift）。
  */
@@ -289,6 +343,18 @@ export const PLATFORM_HOSTED_GPT_6_1_SOL_PRICE = {
   cachingRead: toPlatformCredits(0.1), // 0.8 credits（CF 官方短档 cached in）
   cachingWrite: toPlatformCredits(2.5), // 20 credits（CF 官方短档 cache write）
   output: toPlatformCredits(10), // 80 credits
+} as const;
+
+/**
+ * GPT-6.1 Sol 长上下文档（CF 官方模型页 2026-10-20 核对）：
+ * × 8 → 32 / 1.6 / 40 / 120 credits（2x input&cache、1.5x output，与官方规则一致）。
+ */
+export const PLATFORM_HOSTED_GPT_6_1_SOL_LONG_CONTEXT_PRICE = {
+  input: toPlatformCredits(4), // 32 credits
+  inputCacheHit: toPlatformCredits(0.2), // 1.6 credits
+  cachingRead: toPlatformCredits(0.2), // 1.6 credits（CF 官方长档 cached in）
+  cachingWrite: toPlatformCredits(5), // 40 credits（CF 官方长档 cache write）
+  output: toPlatformCredits(15), // 120 credits
 } as const;
 
 /**
@@ -944,6 +1010,16 @@ export const platformHostedModels: Model[] = [
     displayName: "GPT-6 Astra",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_GPT_6_ASTRA_PRICE },
+    // 长上下文档（>272K 输入）按档浮动：上游 CF 官方长档价 ×8。
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS,
+          price: { ...PLATFORM_HOSTED_GPT_6_ASTRA_LONG_CONTEXT_PRICE },
+        },
+      ],
+    },
     maxOutputTokens: 128_000,
     contextWindow: 1_050_000,
     supportsTool: true,
@@ -957,6 +1033,15 @@ export const platformHostedModels: Model[] = [
     displayName: "GPT-6 Luna",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_GPT_6_LUNA_PRICE },
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS,
+          price: { ...PLATFORM_HOSTED_GPT_6_LUNA_LONG_CONTEXT_PRICE },
+        },
+      ],
+    },
     // 2026-09-22 随 GPT-6 Sol/Luna 上线（出处：PLATFORM_HOSTED_GPT_6_LUNA_PRICE 注释）。
     releasedAtMs: catalogReleasedAt(2026, 9, 22),
     maxOutputTokens: 128_000,
@@ -977,6 +1062,15 @@ export const platformHostedModels: Model[] = [
     displayName: "GPT-6.1 Sol",
     hasVision: false,
     price: { ...PLATFORM_HOSTED_GPT_6_1_SOL_PRICE },
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS,
+          price: { ...PLATFORM_HOSTED_GPT_6_1_SOL_LONG_CONTEXT_PRICE },
+        },
+      ],
+    },
     // 2026-10-13 收进广场（= 平台上架日；出处：PLATFORM_HOSTED_GPT_6_1_SOL_PRICE 注释）。
     releasedAtMs: catalogReleasedAt(2026, 10, 13),
     contextWindow: 1_050_000,

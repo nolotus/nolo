@@ -1,4 +1,11 @@
 
+## 0.168.0-alpha.1 (2026-10-20)
+
+### Features
+
+* **ai:** 实现请教模式、顾问档广场条目与分档计费平替 ([b0c1f14](https://github.com/nolotus/bun-nolo/commit/b0c1f14ec28c32ab2812481844bddc5399540d48))
+
+
 ## 0.167.0-alpha.1 (2026-10-20)
 
 ### Features
