@@ -1,4 +1,11 @@
 
+## 0.151.0-alpha.4 (2026-10-20)
+
+### Bug Fixes
+
+* **tui:** restore adaptive context status and label process notice origins ([d841043](https://github.com/nolotus/bun-nolo/commit/d8410436d610cf818400c88e6ffce10acf8de4ce))
+
+
 ## 0.151.0-alpha.3 (2026-10-20)
 
 ### Bug Fixes

@@ -764,9 +764,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // context block 注入 agent（tuiTurnRunner 消费后清空）。补发策略：注册时
   // 点不补发——本会话启动之前已终态的任务（上个会话遗留）不重新打扰；
   // 本会话内每次终态转变（markExited / kill）由 registry 保证至多发射一次。
-  // 渲染：状态栏在 ⚙ running chip 旁追加 "⚙ N finished"（见 renderStatusLine），
-  // 到达即 scheduleRender 刷新；非 TTY（readline/管道）路径没有状态行，
-  // 直接跳过（与 run 唤醒的 onWake 通道在非交互模式下的丢弃策略一致）。
+  // 渲染：状态栏 chip 文案为 "↪ N pending"（极限窄宽压成 "↪N"，语义不消失），
+  // 由 sessionRender 决定，到达即 scheduleRender 刷新；非 TTY（readline/管道）
+  // 路径没有状态行，直接跳过（与 run 唤醒的 onWake 通道在非交互模式下的
+  // 丢弃策略一致）。
+  //
+  // 通知行写入时带 ownerDialogId（来自 registry 记录，null = 非会话任务）：
+  // 注入侧据此区分「同对话 / 另一对话 / 归属未知」，不依赖额外的旁路映射。
   //
   // 有归属的任务（派发时 runtimeContext 里带 dialogId/turnId）额外走自动续跑：
   // 判定在 processTerminalResume.ts（归属匹配 / turn 活跃度 / 链深上限），投递
@@ -775,7 +779,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 投递体在交互区里覆盖式安装。
   const pushPendingProcessNotice = (notice: ProcessTerminalNotice): void => {
     if (sessionEnded) return;
-    const line = serializePendingProcessNotice(notice);
+    const ownerDialogId = getProcessRegistry().getByTaskId(notice.taskId)?.owner?.dialogId ?? null;
+    const line = serializePendingProcessNotice(notice, ownerDialogId);
     state = {
       ...state,
       pendingProcessNotices: [...(state.pendingProcessNotices ?? []), line],

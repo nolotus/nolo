@@ -99,6 +99,7 @@ import { transcribeMediaFile, formatTranscriptForModel, describeMediaError } fro
 import { createTrimRequester, resolveTranscribeTrim } from "./transcribePreflight";
 import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
 import {
+  annotatePendingProcessNoticeOrigin,
   buildProcessTerminalTurnMessage,
   parsePendingProcessNoticeLine,
 } from "./processTerminalNotice";
@@ -361,7 +362,14 @@ async function runAgentChat(
     injectedProcessNoticeLines.length > 0
       ? [{
           content: buildProcessTerminalTurnMessage(
-            injectedProcessNoticeLines.map(parsePendingProcessNoticeLine),
+            injectedProcessNoticeLines.map((line) =>
+              annotatePendingProcessNoticeOrigin(
+                parsePendingProcessNoticeLine(line),
+                // 本函数的 state 即当前 session 状态；首轮尚未回填 dialogId
+                // 时为 undefined（标注侧按「不冒充当前任务」处理）。
+                state.dialogId,
+              ),
+            ),
           ),
           cacheScope: "turn" as const,
         }]
