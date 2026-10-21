@@ -32,12 +32,6 @@ export interface ExecShellInput {
    * result capsule. Default false.
    */
   background?: boolean;
-  /**
-   * Human-readable label for the background task (task list + completion
-   * notice). Defaults to deriveLabel(command) — the command's last token, which
-   * is meaningless for pipelines such as `... | tail -25` or `| sort -u`.
-   */
-  label?: string;
   [key: string]: unknown;
 }
 
@@ -64,11 +58,6 @@ export function buildExecShellToolDefinition(toolName = "execShell"): OpenAiComp
             type: "boolean",
             description:
               "Immediately detach this command into a tracked background task (no 120s synchronous wait): returns {detached: true, taskId}, and on completion the platform resumes this conversation with a bounded result capsule (exitCode, duration, stdout/stderr tail). Default false. Use for finite jobs (tests, builds, batch) whose result you need later; NOT for dev servers/watchers — use launchProcess for those.",
-          },
-          label: {
-            type: "string",
-            description:
-              "Optional human-readable label for the resulting background task, shown in the task list and completion notices. Defaults to the command's last token, which is unhelpful for pipelines (e.g. '| tail -25' yields '-25').",
           },
         },
       },
@@ -127,9 +116,6 @@ export function normalizeExecShellInput(input: unknown): ExecShellInput {
       ...(activity ? { activity } : {}),
       ...(record.input !== undefined ? { input: record.input } : {}),
       ...(background ? { background: true } : {}),
-      ...(typeof record.label === "string" && record.label.trim()
-        ? { label: record.label.trim() }
-        : {}),
     };
   }
 
@@ -210,7 +196,6 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
           ? 0
           : ctx.detachMs,
       stdin: typeof normalized.input === "string" ? normalized.input : undefined,
-      label: typeof normalized.label === "string" ? normalized.label : undefined,
       // Ownership of the turn that invoked this command: an auto-detached
       // command keeps its parent dialog so its terminal can resume that
       // conversation (see processOwnership.ts). Absent ctx.owner = unowned.

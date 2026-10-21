@@ -38,7 +38,10 @@ import { withLiteralClass } from "./toolMessageShared";
 import "./messagesStylexEscapeHatch.css";
 import { ScrollToBottomButton } from "chat/web/ScrollToBottomButton";
 import { ScrollToTopButton } from "chat/web/ScrollToTopButton";
-import { useAccountChatDisplayPreferences } from "app/settings/accountChatDisplayOwner";
+import {
+  selectShowScrollToTopButton,
+  selectShowScrollToBottomButton,
+} from "app/settings/settingSlice";
 
 import { useActiveControllers, useDialogTurnPhase } from "chat/dialog/dialogSlice";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
@@ -264,7 +267,8 @@ const MessagesList: React.FC<MessagesListProps> = ({
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
 
-  const { showScrollToTopButton: scrollToTopEnabled, showScrollToBottomButton: scrollToBottomEnabled } = useAccountChatDisplayPreferences();
+  const scrollToTopEnabled = useAppSelector(selectShowScrollToTopButton);
+  const scrollToBottomEnabled = useAppSelector(selectShowScrollToBottomButton);
   // 首次加载标记：跳过入场动画，避免大量消息时动画过慢
   const [isInitialRender, setIsInitialRender] = useState(true);
 

@@ -7,6 +7,7 @@ import { runXaiOAuthDeviceCode, runXaiOAuthLogin } from "./flows/xai";
 import { runAnthropicOAuthLogin } from "./flows/anthropic";
 import { runCursorOAuthLogin } from "./flows/cursor";
 import { runDevinOAuthLogin } from "./flows/devin";
+import { runWorkBuddyOAuthLogin } from "./flows/workbuddy";
 
 import { toErrorMessage } from "core/errorMessage";
 import type { CliRuntimeContext } from "../cliCommandTypes";
@@ -276,6 +277,44 @@ ${SYNC_HELP_LINE}
   --help, -h           Show this help and exit.
 `;
 
+const WORKBUDDY_HELP_TEXT = `Authorize nolo-cli to call WorkBuddy (China) models via your WorkBuddy account.
+
+This authorizes model API access only. It does NOT log you into the Nolo
+platform. To manage agents, docs, spaces, and other Nolo resources, run
+"nolo login" first.
+
+Usage: nolo auth workbuddy [--browser] [--no-browser] [--sync-to-server] [--help]
+
+The flow opens https://copilot.tencent.com in your browser and polls the login status.
+After approval, tokens are stored in $NOLO_HOME/credentials/workbuddy.json (or ~/.nolo/credentials/workbuddy.json when NOLO_HOME is unset).
+Agents can reference the stored token with apiKeyRef: "workbuddy".
+
+Options:
+  --browser         Open the login URL in your browser automatically (default).
+  --no-browser      Print the login URL without opening a browser.
+${SYNC_HELP_LINE}
+  --help, -h        Show this help and exit.
+`;
+
+const WORKBUDDY_AI_HELP_TEXT = `Authorize nolo-cli to call WorkBuddy AI (International) models via your WorkBuddy AI account.
+
+This authorizes model API access only. It does NOT log you into the Nolo
+platform. To manage agents, docs, spaces, and other Nolo resources, run
+"nolo login" first.
+
+Usage: nolo auth workbuddy-ai [--browser] [--no-browser] [--sync-to-server] [--help]
+
+The flow opens https://www.workbuddy.ai in your browser and polls the login status.
+After approval, tokens are stored in $NOLO_HOME/credentials/workbuddy-ai.json (or ~/.nolo/credentials/workbuddy-ai.json when NOLO_HOME is unset).
+Agents can reference the stored token with apiKeyRef: "workbuddy-ai".
+
+Options:
+  --browser         Open the login URL in your browser automatically (default).
+  --no-browser      Print the login URL without opening a browser.
+${SYNC_HELP_LINE}
+  --help, -h        Show this help and exit.
+`;
+
 const HELP_BY_PROVIDER: Record<OAuthProvider, string> = {
   chatgpt: CHATGPT_HELP_TEXT,
   xai: XAI_HELP_TEXT,
@@ -284,6 +323,8 @@ const HELP_BY_PROVIDER: Record<OAuthProvider, string> = {
   cloudflare: CLOUDFLARE_HELP_TEXT,
   cursor: CURSOR_HELP_TEXT,
   devin: DEVIN_HELP_TEXT,
+  workbuddy: WORKBUDDY_HELP_TEXT,
+  "workbuddy-ai": WORKBUDDY_AI_HELP_TEXT,
 };
 
 function isOAuthProvider(value: string): value is OAuthProvider {
@@ -294,7 +335,9 @@ function isOAuthProvider(value: string): value is OAuthProvider {
     value === "claude" ||
     value === "cloudflare" ||
     value === "cursor" ||
-    value === "devin"
+    value === "devin" ||
+    value === "workbuddy" ||
+    value === "workbuddy-ai"
   );
 }
 
@@ -632,6 +675,8 @@ export async function runAuthProviderCommand(
       credential = await runCursorOAuthLogin(flowDeps);
     } else if (provider === "devin") {
       credential = await runDevinOAuthLogin(flowDeps);
+    } else if (provider === "workbuddy" || provider === "workbuddy-ai") {
+      credential = await runWorkBuddyOAuthLogin(provider, flowDeps);
     } else if (provider === "cloudflare") {
       credential = await runCloudflareOAuthLogin({
         ...flowDeps,
@@ -698,7 +743,17 @@ export async function runAuthProviderCommand(
 
     let shouldSync = false;
 
-    if (hasExplicitNoSync || envAutoSync === "0") {
+    if (provider === "workbuddy" || provider === "workbuddy-ai") {
+      if (hasExplicitSync) {
+        setOAuthSync(provider, true);
+        shouldSync = true;
+      } else {
+        if (hasExplicitNoSync) {
+          setOAuthSync(provider, false);
+        }
+        shouldSync = false;
+      }
+    } else if (hasExplicitNoSync || envAutoSync === "0") {
       if (hasExplicitNoSync) {
         setOAuthSync(provider, false);
       }
@@ -839,4 +894,20 @@ export async function runAuthDevinCommand(
   deps?: AuthProviderCommandDeps
 ): Promise<number> {
   return runAuthProviderCommand("devin", args, ctx, deps);
+}
+
+export async function runAuthWorkbuddyCommand(
+  args: string[],
+  ctx?: CliRuntimeContext,
+  deps?: AuthProviderCommandDeps
+): Promise<number> {
+  return runAuthProviderCommand("workbuddy", args, ctx, deps);
+}
+
+export async function runAuthWorkbuddyAiCommand(
+  args: string[],
+  ctx?: CliRuntimeContext,
+  deps?: AuthProviderCommandDeps
+): Promise<number> {
+  return runAuthProviderCommand("workbuddy-ai", args, ctx, deps);
 }

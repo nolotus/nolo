@@ -31,8 +31,6 @@ export type AccountSessionTransition =
   | "signing-out";
 
 export type AccountSessionSnapshot = {
-  /** Core-owned session lifetime; profile/balance updates do not advance it. */
-  sessionGeneration?: number;
   accounts: AccountIdentity[];
   activeAccountId: string | null;
   activeToken: string | null;
@@ -170,7 +168,6 @@ const SSR_SNAPSHOT: AccountSessionSnapshot = Object.freeze({
 
 export class AccountSessionCore {
   private snapshot: AccountSessionSnapshot;
-  private sessionGeneration = 0;
   private readonly tokenByUserId = new Map<string, string>();
   private readonly listeners = new Set<() => void>();
 
@@ -192,7 +189,6 @@ export class AccountSessionCore {
       accounts.some((account) => account.userId === rawActiveId);
 
     this.snapshot = {
-      sessionGeneration: this.sessionGeneration,
       accounts,
       activeAccountId: hasValidPair ? rawActiveId : null,
       activeToken: hasValidPair ? rawActiveToken : null,
@@ -225,18 +221,8 @@ export class AccountSessionCore {
     }
   }
 
-  private setSnapshot(
-    next: AccountSessionSnapshot,
-    forceAdvanceSession = false
-  ): void {
-    if (
-      forceAdvanceSession ||
-      next.activeAccountId !== this.snapshot.activeAccountId ||
-      next.activeToken !== this.snapshot.activeToken
-    ) {
-      this.sessionGeneration += 1;
-    }
-    this.snapshot = { ...next, sessionGeneration: this.sessionGeneration };
+  private setSnapshot(next: AccountSessionSnapshot): void {
+    this.snapshot = next;
     this.emit();
   }
 
@@ -333,7 +319,7 @@ export class AccountSessionCore {
       activeToken: token,
       initialized: true,
       transition: "idle",
-    }, true);
+    });
     return true;
   }
 

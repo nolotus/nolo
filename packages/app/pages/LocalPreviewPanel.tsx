@@ -21,15 +21,11 @@ import {
   useLocalPreviewUrl,
 } from "app/appInspector/appInspectorStore";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
-import { useCurrentDialogKey } from "chat/dialog/dialogRuntimeStore";
-import { getIsDesktopApp } from "app/utils/env";
-import { useLocalPreviewRoot } from "render/layout/TopbarLocalPreviewToggle";
 
 const MESSAGE_SOURCE = "nolo-inspector";
 
 /**
- * 预览某个本地目录下的网页并标注元素。目录来自桌面端的「本地项目」：
- * 优先当前对话绑定的 Project，其次侧栏选中的 Project（Space 不再保存 boundFolder）。
+ * 绑定了本地文件夹的 Space，可以在这里预览该目录下的网页并标注元素。
  * 有 vite 走 vite（带 HMR），否则走内置静态服务器（带 mtime 轮询刷新）。
  * 选中的元素写进全局 appInspectorStore，随下一条对话消息带给 agent。
  *
@@ -37,14 +33,8 @@ const MESSAGE_SOURCE = "nolo-inspector";
  */
 export default function LocalPreviewPanel() {
   const space = useCurrentSpaceFromEntity();
+  const boundFolder = space?.boundFolder;
   const spaceId = space?.id;
-  const dialogKey = useCurrentDialogKey();
-  // 与顶栏开关共用同一个解析口径，否则会出现「有入口但面板空态」。
-  // `space.boundFolder` 只作为网页端的历史字段参与解析。
-  const root = useLocalPreviewRoot(space?.boundFolder ?? null);
-  // 自启的静态服务按 previewId 键控：有 Space 时沿用 Space id（网页端行为不变），
-  // 桌面端对话没有 Space 时用对话 key，否则服务无法寻址（旧实现在这里静默不启动）。
-  const previewId = spaceId ?? dialogKey ?? null;
 
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const storePreviewUrl = useLocalPreviewUrl();
@@ -162,14 +152,14 @@ export default function LocalPreviewPanel() {
   }, []);
 
   const start = useCallback(async () => {
-    if (!root || !previewId) return;
+    if (!boundFolder || !spaceId) return;
     setStarting(true);
     setError(null);
     try {
       const response = await fetch("/api/local-preview/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ previewId, root }),
+        body: JSON.stringify({ previewId: spaceId, root: boundFolder }),
       });
       const payload = (await response.json()) as { url?: string; error?: string };
       if (!response.ok || !payload.url) {
@@ -183,7 +173,7 @@ export default function LocalPreviewPanel() {
     } finally {
       setStarting(false);
     }
-  }, [previewId, root]);
+  }, [boundFolder, spaceId]);
 
   useEffect(() => {
     // If agent opened a preview via store (openPreview tool) or artifact, don't auto-start
@@ -201,7 +191,7 @@ export default function LocalPreviewPanel() {
   // store URL 模式（agent/点击打开的外部地址）不归这套自管服务管，跳过轮询，
   // 否则会误启静态服务、甚至用错误横幅顶掉正在显示的 iframe。
   useEffect(() => {
-    if (storePreviewUrl || isArtifact || !previewUrl || !previewId) return;
+    if (storePreviewUrl || isArtifact || !previewUrl || !spaceId) return;
     let cancelled = false;
 
     const timer = setInterval(async () => {
@@ -209,7 +199,7 @@ export default function LocalPreviewPanel() {
         const response = await fetch("/api/local-preview/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ previewId }),
+          body: JSON.stringify({ previewId: spaceId }),
         });
         const payload = (await response.json()) as { running?: boolean };
         if (cancelled || payload.running) return;
@@ -224,7 +214,7 @@ export default function LocalPreviewPanel() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [previewId, previewUrl, start, storePreviewUrl]);
+  }, [previewUrl, spaceId, start, storePreviewUrl]);
 
   const previewOrigin = useMemo(
     () => (previewUrl ? new URL(previewUrl).origin : null),
@@ -253,16 +243,14 @@ export default function LocalPreviewPanel() {
         postToPreview({ type: "set-inspecting", value: inspecting });
         return;
       }
-      if (data.type === "selected" && data.node && previewId) {
-        // appKey 目前无消费者（store 只写不读），跟着 root 的来源走，
-        // 桌面端对话没有 Space 时标注也不会被静默丢弃。
-        setSelectedNode({ appKey: previewId, node: data.node });
+      if (data.type === "selected" && data.node && spaceId) {
+        setSelectedNode({ appKey: spaceId, node: data.node });
         setInspecting(false);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [inspecting, postToPreview, previewOrigin, previewId]);
+  }, [inspecting, postToPreview, previewOrigin, spaceId]);
 
   useEffect(() => {
     postToPreview({ type: "set-inspecting", value: inspecting });
@@ -270,19 +258,12 @@ export default function LocalPreviewPanel() {
 
   useEffect(() => () => setInspecting(false), []);
 
-  // 没有本地目录时也能预览：agent 或点击打开的 store URL / HTML 制品不依赖
-  // root，只有面板自启动的本地静态服务才需要它。
-  if (!root && !storePreviewUrl) {
+  // 无绑定文件夹的 space 也能预览：agent 或点击打开的 store URL 不依赖
+  // boundFolder，只有面板自启动的本地静态服务才需要它。
+  if (!boundFolder && !storePreviewUrl) {
     return (
       <div style={{ padding: 24 }}>
-        {getIsDesktopApp() ? (
-          <>
-            当前对话没有可预览的本地目录。先在侧栏「本地项目」里添加并选择一个文件夹，
-            或把这个对话绑定到一个本地项目，预览就会自动打开。
-          </>
-        ) : (
-          <>本地目录来自桌面端绑定的本地项目，网页端没有可预览的本地目录。</>
-        )}
+        当前空间没有绑定本地文件夹，无法预览。可以在空间设置里绑定一个目录。
       </div>
     );
   }
@@ -356,9 +337,9 @@ export default function LocalPreviewPanel() {
 
         <span
           className="LocalPreview__path"
-          title={isArtifact ? (previewTarget?.title ?? "单文件 HTML 制品") : (storePreviewUrl ?? root ?? undefined)}
+          title={isArtifact ? (previewTarget?.title ?? "单文件 HTML 制品") : (storePreviewUrl ?? boundFolder)}
         >
-          {isArtifact ? (previewTarget?.title ?? "单文件 HTML 制品") : (storePreviewUrl ?? root)}
+          {isArtifact ? (previewTarget?.title ?? "单文件 HTML 制品") : (storePreviewUrl ?? boundFolder)}
         </span>
 
         {(previewUrl || artifactHostedUrl) ? (

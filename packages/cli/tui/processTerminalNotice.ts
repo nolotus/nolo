@@ -3,7 +3,7 @@
 // 后台进程任务（launchProcess / 超时 detach 的 execShell）终态通知的共享格式化：
 //  - 订阅侧（readlineWorkspace 的 onProcessTerminal 回调）用它生成单行通知；
 //  - 注入侧（tuiTurnRunner 的 turn-scope context block）与状态栏 chip
-//    （sessionRender 的 "↪ N pending"）共用同一文案来源。
+//    （sessionRender 的 "⚙ N finished"）共用同一文案来源。
 //
 // 与 run 终态唤醒（runCompletionWatcher → child-run-completed）刻意分开：
 // 进程任务没有 run 记录、没有子 dialog；promoted execShell 的可恢复输出由
@@ -141,47 +141,29 @@ export function buildProcessTaskCompletedTurnEvent(
 }
 
 /**
- * 把 pendingProcessNotices 里存的 wire line 解析回结构化通知。
+ * 把 pendingProcessNotices 里存的格式化单行解析回结构化通知。
  *
- * state 里存的是模型/持久化专用的 versioned wire line（携带 ownerDialogId 与
- * 可选的 result capsule）；早期版本写入的展示单行（无前缀）仍按 legacy 正则
- * 解析，归属记为 null（未知）。屏幕 displayText 与它已解耦，避免内部 taskId /
- * exit protocol 泄到一级 transcript。
+ * state 里存的是模型/持久化专用的 legacy wire line；屏幕 displayText 与它
+ * 已解耦，避免内部 taskId / exit protocol 泄到一级 transcript。
  */
-export type PendingProcessNotice = ProcessTerminalNotice & {
-  /** 任务派发时所属的 dialog；null = 归属未知（legacy 行或非会话任务）。 */
-  ownerDialogId: string | null;
-};
-
 const PENDING_NOTICE_PREFIX = "process-notice-v1:";
 
-/** Serialize pending notices in a versioned wire format, preserving the full
- * capsule payload and explicit dialog ownership. Legacy display lines remain parseable. */
-export function serializePendingProcessNotice(
-  notice: ProcessTerminalNotice,
-  ownerDialogId?: string | null,
-): string {
-  const withOwner = { ...notice, ownerDialogId: ownerDialogId ?? null };
-  return `${PENDING_NOTICE_PREFIX}${JSON.stringify(withOwner)}`;
+/** Persist the full model payload only when a capsule exists; legacy notices
+ * keep their compact wire representation for backwards compatibility. */
+export function serializePendingProcessNotice(notice: ProcessTerminalNotice): string {
+  return notice.resultCapsule
+    ? `${PENDING_NOTICE_PREFIX}${JSON.stringify(notice)}`
+    : formatProcessTerminalWakeLine(notice);
 }
 
 export function parsePendingProcessNoticeLine(
   line: string,
-): PendingProcessNotice {
+): ProcessTerminalNotice {
   if (line.startsWith(PENDING_NOTICE_PREFIX)) {
     try {
-      const parsed = JSON.parse(line.slice(PENDING_NOTICE_PREFIX.length)) as
-        | (ProcessTerminalNotice & { ownerDialogId?: unknown })
-        | null;
-      if (parsed && typeof parsed.taskId === "string") {
-        const { ownerDialogId, ...rest } = parsed;
-        return {
-          ...rest,
-          // 类型校验：只有非空字符串才是可信归属，其他形状一律降级为未知。
-          ownerDialogId: typeof ownerDialogId === "string" && ownerDialogId.length > 0
-            ? ownerDialogId
-            : null,
-        };
+      const parsed = JSON.parse(line.slice(PENDING_NOTICE_PREFIX.length)) as ProcessTerminalNotice;
+      if (parsed && typeof parsed.taskId === "string" && parsed.resultCapsule) {
+        return parsed;
       }
     } catch {
       // Fall through to the legacy line parser.
@@ -199,7 +181,6 @@ export function parsePendingProcessNoticeLine(
       label: "",
       command: line,
       status: "failed",
-      ownerDialogId: null,
     };
   }
   const [, taskId, rawLabel, status, rawExit] = taskMatch;
@@ -210,33 +191,8 @@ export function parsePendingProcessNoticeLine(
     label,
     command: "",
     status: normalizeStatus(status),
-    ownerDialogId: null,
     ...(rawExit !== undefined ? { exitCode: Number(rawExit) } : {}),
   };
-}
-
-/**
- * turn-scope 注入用：只给 label 打上来历标注，不改 status/exitCode/capsule，
- * 也不参与生命周期决策（自动唤醒、持久化、失败重试仍走各自原有规则）。
- *
- * - ownerDialogId 与当前 dialog 相同 → 原样（同对话不必额外标注）；
- * - ownerDialogId 不同 → 标明来自另一对话、不代表当前任务；
- * - ownerDialogId 为 null（legacy 行 / 非会话任务）→ 标明归属未知。
- *
- * @param currentDialogId 当前 turn 所属 dialog；首轮尚未回填时为 undefined，
- * 此时任何非空归属都按「另一对话」处理（绝不冒充当前任务）。
- */
-export function annotatePendingProcessNoticeOrigin(
-  notice: PendingProcessNotice,
-  currentDialogId: string | undefined,
-): PendingProcessNotice {
-  const withOrigin = (origin: string): PendingProcessNotice => ({
-    ...notice,
-    label: notice.label.trim() ? `${origin} ${notice.label}` : origin,
-  });
-  if (notice.ownerDialogId == null) return withOrigin("[归属未知]");
-  if (notice.ownerDialogId === currentDialogId) return notice;
-  return withOrigin(`[来自另一对话 ${notice.ownerDialogId}，不代表当前任务]`);
 }
 
 function unescapeLabel(raw: string): string {

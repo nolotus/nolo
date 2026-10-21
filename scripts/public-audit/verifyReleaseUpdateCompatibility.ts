@@ -2,10 +2,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { getCliInstallChannel, buildNpmSelfUpdateCommand } from "../../packages/cli/updateCommands";
-import { checkCliDownloadsSource } from "../release/validateCliVersionSource";
 
 export type ReleaseCompatibilityInputs = {
   cliVersion: string;
+  declaredCliVersion: string | undefined;
   cliDownloads: string;
   cliUpdateCommands: string;
   versionBump: string;
@@ -20,14 +20,9 @@ function fail(message: string): never {
 const REMOVED_DESKTOP_WORKFLOW_DISPATCH = /gh workflow run desktop-(alpha|release)\.yml/;
 
 export function validateReleaseUpdateCompatibility(input: ReleaseCompatibilityInputs): void {
-  if (!input.cliVersion) {
-    fail("CLI package version is missing from packages/cli/package.json");
+  if (!input.cliVersion || input.cliVersion !== input.declaredCliVersion) {
+    fail(`CLI package version (${input.cliVersion || "missing"}) does not match NOLO_CLI_VERSION (${input.declaredCliVersion || "missing"})`);
   }
-  // 2026-10-19：cliDownloads 的版本改为构建期注入（__NOLO_CLI_VERSION__），
-  // 文件里已没有可与 package.json 比对的字面量。原先这里比对两个数字，
-  // 现在改为复用发布链的同一判据：注入链路必须完好、不得退回硬编码。
-  const sourceCheck = checkCliDownloadsSource(input.cliDownloads);
-  if (!sourceCheck.ok) fail(sourceCheck.reason);
 
   if (!input.cliDownloads.includes('export type CliReleaseChannel = "alpha" | "latest"')) {
     fail("CLI release channel type must retain alpha and latest");
@@ -89,6 +84,7 @@ if (import.meta.main) {
   const cliDownloads = read("packages/app/constants/cliDownloads.ts");
   validateReleaseUpdateCompatibility({
     cliVersion: cliPackage.version?.trim() ?? "",
+    declaredCliVersion: cliDownloads.match(/NOLO_CLI_VERSION\s*=\s*["']([^"']+)["']/)?.[1],
     cliDownloads,
     cliUpdateCommands: read("packages/cli/updateCommands.ts"),
     versionBump: read(".github/workflows/version-bump.yml"),

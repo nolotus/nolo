@@ -327,49 +327,21 @@ const STRINGS = {
     en: "Usage: /altscreen <on|off>",
     zh: "用法：/altscreen <on|off>",
   },
+  autoCurrent: {
+    en: "Permission auto-approve: {0}",
+    zh: "权限自动化：{0}",
+  },
   autoUsage: {
-    en: "Usage: /auto [local|remote] <on|off> · /auto reset (clear both)",
-    zh: "用法：/auto [local|remote] <on|off> · /auto reset（两桶清零）",
+    en: "Usage: /auto <on|off>",
+    zh: "用法：/auto <on|off>",
   },
-  autoStateLine: {
-    en: "Local-run grant: {0} · Remote-origin shell grant: {1}",
-    zh: "本机 run 授权：{0} · 远程来源在本机执行 shell 授权：{1}",
+  autoOn: {
+    en: "Permission auto-approve ON — destructive shell and external-file confirmations will be skipped for this session.",
+    zh: "权限自动化已开启：本会话内破坏性 shell 与外部文件访问确认将自动放行。",
   },
-  autoStateOnPersisted: {
-    en: "granted (saved)",
-    zh: "已授权（已保存）",
-  },
-  autoStateOff: {
-    en: "ask every time",
-    zh: "逐次询问",
-  },
-  autoKindLocal: {
-    en: "local-run confirmations (destructive shell / outside-workspace files / file writes)",
-    zh: "本机 run 的确认（破坏性命令 / 工作区外文件 / 写文件）",
-  },
-  autoKindRemote: {
-    en: "a remote origin running shell on this machine",
-    zh: "远程来源在本机执行 shell",
-  },
-  autoGrantOn: {
-    en: "Approved and saved: {0}. That class no longer asks (this session and future starts). Undo with {1}.",
-    zh: "已批准并保存：{0}。该类确认不再询问（本次与后续启动都生效）。撤销用 {1}。",
-  },
-  autoGrantOff: {
-    en: "Revoked and saved: {0}. Those confirmations ask again (this session and future starts). Re-enable with {1}.",
-    zh: "已撤销并保存：{0}。该类确认恢复逐次询问（本会话与后续启动都生效）。重新开启用 {1}。",
-  },
-  autoReset: {
-    en: "Cleared and saved: both permission buckets are reset — every confirmation asks again.",
-    zh: "已清空并保存：本机与远程两桶授权都清零，所有确认恢复逐次询问。",
-  },
-  autoPersistFailed: {
-    en: "This grant applies to this session only — it could not be saved to your config (no profile?).",
-    zh: "该授权仅本次会话有效：未能保存到配置（可能还没有 profile）。",
-  },
-  autoPersistedStartup: {
-    en: "Approved from your saved config: {0}. Those confirmations are skipped; undo with /auto reset.",
-    zh: "已从保存的配置生效的授权：{0}。这些确认已被跳过；撤销用 /auto reset。",
+  autoOff: {
+    en: "Permission auto-approve OFF — confirmations will ask again.",
+    zh: "权限自动化已关闭：恢复逐次确认。",
   },
   langSwitched: {
     en: "Language switched to English.",
@@ -639,52 +611,40 @@ const STRINGS = {
     zh: "（↑↓ 移动 · Enter 选择 · Esc 取消）",
   },
   dialogConfirmTitle: {
-    en: "Allow destructive shell commands from local runs?",
-    zh: "允许本机 run 执行破坏性 shell 命令吗？",
+    en: "Confirm destructive shell command",
+    zh: "确认执行破坏性 shell 命令",
   },
   dialogConfirmBody: {
-    en: "This command may delete or reset user content — a local-run destructive shell command.",
-    zh: "该命令可能删除或重置用户内容，属于本机 run 的破坏性 shell 命令。",
+    en: "This command may delete or reset user content and needs explicit confirmation before it runs.",
+    zh: "该命令可能删除或重置用户内容，需要用户明确确认后才能执行。",
   },
   dialogConfirmExternalFileTitle: {
-    en: "Allow reading files outside the workspace?",
-    zh: "允许读取工作区外部文件吗？",
+    en: "Confirm reading a file outside the workspace",
+    zh: "确认读取工作区外部文件",
   },
   dialogConfirmExternalFileBody: {
-    en: "This path is outside the current workspace — a local-run outside-workspace file access.",
-    zh: "该路径位于当前工作区之外，属于本机 run 的工作区外文件访问。",
-  },
-  dialogConfirmFileWriteTitle: {
-    en: "Allow writing files from local runs?",
-    zh: "允许本机 run 写入文件吗？",
-  },
-  dialogConfirmFileWriteBody: {
-    en: "This action writes into the workspace — a local-run file-write confirmation.",
-    zh: "该操作会写入工作区文件，属于本机 run 的写文件确认。",
-  },
-  dialogConfirmRememberLocal: {
-    en: "Approving covers all three local-run classes (destructive shell / outside-workspace files / file writes) and is saved, so they stop asking — this session and future starts. Undo with /auto local off or /auto reset.",
-    zh: "批准后本机 run 的三类确认（破坏性命令 / 工作区外文件 / 写文件）都不再询问，并保存到配置（本次与后续启动都生效）。撤销用 /auto local off 或 /auto reset。",
+    en: "This path is outside the current workspace. Allow this one-time access, or deny it.",
+    zh: "该路径位于当前工作区之外。确认后本次访问放行，否则拒绝。",
   },
   dialogConfirmCommandTruncated: {
     en: "(truncated)",
     zh: "（已截断）",
   },
   dialogConfirmAllowLabel: {
-    en: "Approve & remember",
-    zh: "批准并记住",
+    en: "Allow",
+    zh: "允许",
   },
   dialogConfirmAllowDetail: {
-    en: "stop asking for this class (saved)",
-    zh: "同类确认不再询问（已保存）",
+    en: "execute this time",
+    zh: "本次执行",
   },
   dialogConfirmCancelLabel: {
-    en: "Reject",
-    zh: "拒绝",
+    en: "Cancel",
+    zh: "取消",
   },
   dialogConfirmCancelDetail: {
-    en: "do not run it; ask again next time",
-    zh: "不执行，下次仍会询问",
+    en: "abort the operation",
+    zh: "中止操作",
   },
   // --- Ask choice (ask_user) ------------------------------------------
   askChoiceTitle: {
@@ -929,7 +889,7 @@ const STRINGS = {
       "  Drag a file in        Drop an image file on the terminal to attach it; audio/video transcribes; other files stay paths",
       "  Shift+Enter / Ctrl+J  Insert a newline in the draft",
       "  /mouse <on|off>       Toggle mouse mode (off = drag to select text)",
-      "  /auto [local|remote] <on|off>  Approve one permission bucket (local-run confirms / remote-origin shell) so it stops asking; saved to your config. /auto reset clears both",
+      "  /auto <on|off>        Toggle permission auto-approve (skip destructive-shell, external-file & file-write confirms)",
       "  /shell-revoke         Revoke this session's shell grant; the next shell call re-asks (works while a reply runs; does not interrupt a running command)",
       "  /math <on|off>        Toggle math formula rendering (Unicode transcription)",
       "  /altscreen <on|off>   Toggle the terminal alternate screen (default on; off shares shell scrollback)",
@@ -975,7 +935,7 @@ const STRINGS = {
       "  拖入文件              把图片文件拖进终端即成为附件；音视频自动转写；其他文件只留路径",
       "  Shift+Enter / Ctrl+J  在草稿里换行",
       "  /mouse <on|off>       切换鼠标模式（off 后可直接拖选文本）",
-      "  /auto [local|remote] <on|off>  授权某一桶（本机 run 确认 / 远程来源 shell）不再逐次询问，并保存到配置；/auto reset 两桶清零",
+      "  /auto <on|off>        切换权限自动化（自动放行破坏性 shell、外部文件与写文件确认）",
       "  /shell-revoke         撤销本会话的 shell 执行授权，下一次 shell 调用重新确认（回复进行中也可用；不中断已放行的命令）",
       "  /math <on|off>        切换数学公式渲染（Unicode 转写）",
       "  /altscreen <on|off>   切换终端备用屏（默认 on；off 改为与 shell 共用回滚）",
@@ -1695,45 +1655,21 @@ const STRINGS = {
   // 分享 OAuth agent 的 shell 会话授权确认（块 D）：首次 execShell/
   // launchProcess 前弹。必须把三件事说清——这是谁的 agent / 命令在哪台
   // 设备哪个工作区跑 / 任意 shell 可读写该用户可访问的资源。
-  // 子 run 的 per-call shell 确认（远程来源在本机跑一条命令）：与会话授权同一套
-  // 语义，参数为 runId / agentKey / owner / device / workspace / 权限提示。
-  "shellPerCall.title": {
-    en: "Allow a remote origin to run this command on this machine?",
-    zh: "允许远程来源在本机执行这条命令吗？",
-  },
-  "shellPerCall.body": {
-    en:
-      "A remote origin asked to run one shell command on this device.\n" +
-      "Run: {0}\nAgent: {1}\nOwner: {2}\nDevice: {3}\nWorkspace: {4}\n{5}\n\n" +
-      "Shell commands can read/write anything this user can access. " +
-      "Approving covers this whole class: remote-origin shell confirmations stop " +
-      "asking one by one (this session and future starts). " +
-      "Undo with /shell-revoke or /auto remote off.",
-    zh:
-      "远程来源请求在本机执行一条 shell 命令。\n" +
-      "Run：{0}\nAgent：{1}\n主人：{2}\n设备：{3}\n工作区：{4}\n{5}\n\n" +
-      "任意 shell 命令可读写本机该用户能访问的资源。" +
-      "批准后「远程来源在本机执行 shell」这一类确认不再逐条询问（本次与后续启动都生效）。" +
-      "撤销：/shell-revoke 或 /auto remote off。",
-  },
   "shellGrant.confirmTitle": {
-    en: "Allow remote agent {0} to run shell commands on this machine?",
-    zh: "允许远程 agent {0} 在本机执行 shell 命令吗？",
+    en: "Allow shell commands for shared agent {0}?",
+    zh: "允许分享 agent {0} 执行 shell 命令吗？",
   },
   "shellGrant.confirmBody": {
     en:
-      "Remote agent {0} (owner {1}) requested to run a shell command on this machine.\n" +
-      "Device: {2} ({3})\nWorkspace: {4}\nCommand: {5}\n\n" +
+      "Agent {0} (owner {1}) asked to run shell commands on this device.\n" +
+      "Device: {2} ({3})\nWorkspace: {4}\n\n" +
       "Shell commands can read/write anything this user can access. " +
-      "Approving covers this whole class: remote-origin shell confirmations stop " +
-      "asking one by one (this session and future starts). " +
-      "Undo with /shell-revoke (this session) or /auto remote off (also clears the saved grant).",
+      "Allowed for the rest of this session; revoke any time with /shell-revoke.",
     zh:
-      "远程 agent {0}（主人 {1}）请求在本机执行 shell 命令。\n" +
-      "设备：{2}（{3}）\n工作区：{4}\n命令：{5}\n\n" +
-      "任意 shell 命令可读写本机该用户能访问的资源。" +
-      "批准后「远程来源在本机执行 shell」这一类确认不再逐条询问（本次与后续启动都生效）。" +
-      "撤销：/shell-revoke（本会话）或 /auto remote off（同时清除持久授权）。",
+      "分享 agent {0}（主人 {1}）请求在本机执行 shell 命令。\n" +
+      "设备：{2}（{3}）\n工作区：{4}\n\n" +
+      "任意 shell 命令可读写本机该用户能访问的全部资源。" +
+      "允许后在本会话持续有效；随时可用 /shell-revoke 撤销。",
   },
   "shellGrant.revoked": {
     en: "[nolo] Shell permission revoked for shared agents in this session.",

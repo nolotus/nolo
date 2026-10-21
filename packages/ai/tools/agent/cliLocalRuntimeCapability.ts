@@ -21,8 +21,8 @@
 // 本模块必须保持零依赖（`packages/cli/agentRunArgs.ts` 等纯参数层也用），
 // 不许 import 运行时/服务端代码。
 
-/** 本机 CLI 能兑现的执行面。 */
-export type CliLocalExecutionTarget = "host" | "docker-sandbox" | "instabox";
+/** 本机 CLI 能兑现的两种执行面。 */
+export type CliLocalExecutionTarget = "host" | "docker-sandbox";
 
 /** runtimeKey 的形态分类（用于报错文案与断言，不用于授权判定）。 */
 export type RuntimeKeyKind =
@@ -175,20 +175,17 @@ export function resolveCliLocalRuntimeKeyCapability(
   }
 
   if (key === "instabox" || key.startsWith("instabox:")) {
-    const isBareInstabox = key === "instabox";
     return {
       ...base,
       kind: "instabox",
-      fulfillableByCliLocal: isBareInstabox,
-      target: isBareInstabox ? "instabox" : null,
+      fulfillableByCliLocal: false,
+      target: null,
       requiresDockerSandbox: false,
       // 参数层只放行裸 `instabox`（与改动前的 isValidRuntimeKey 逐字一致）；
       // 带 id 的形态走服务端长形式 `runtime-v1:<scope>:<owner>:instabox:<id>`，
       // 那种形态由下面的 runtime-v1 分支放行。
-      acceptedByCliArgs: isBareInstabox,
-      note: isBareInstabox
-        ? "Instabox 云沙盒：可由本机 CLI 本地通道直接兑现（需 INSTABOX_API_KEY 凭据），执行 execShell 远程命令。"
-        : "instabox 暂无细分子运行时；请使用裸 `instabox`。",
+      acceptedByCliArgs: key === "instabox",
+      note: "Instabox 后端由服务端 run 通道执行，本机 CLI 本地 run 无法兑现。",
     };
   }
 
@@ -234,26 +231,16 @@ export const CLI_LOCAL_FULFILLABLE_RUNTIME_KEYS = [
   "local",
   "docker",
   "docker:<id>",
-  "instabox",
 ] as const;
 
 /**
  * 机械断言：allowlist 与形态判定的关系。
- * 允许列表里除 "local" 之外的每一项都必须是可兑现的受支持沙盒形态（docker 族或 instabox）——
- * 守卫两处真值不得漂移。抛错即代表代码内部不自洽。
+ * 允许列表里除 "local" 之外的每一项都必须真的是 docker 形态 —— 这条关系此前
+ * 只存在于注释里，两份真值各自漂移。抛错即代表代码内部不自洽。
  */
 export function assertCliLocalAllowlistMatchesCapabilityTable(): void {
   for (const entry of CLI_LOCAL_FULFILLABLE_RUNTIME_KEYS) {
     if (entry === "local") continue;
-    if (entry === "instabox") {
-      const capability = resolveCliLocalRuntimeKeyCapability("instabox");
-      if (!capability.fulfillableByCliLocal || capability.target !== "instabox") {
-        throw new Error(
-          `CLI_LOCAL_FULFILLABLE_RUNTIME_KEYS 里的 "instabox" 在能力表里不可兑现：两处真值已漂移`,
-        );
-      }
-      continue;
-    }
     const probe = entry === "docker" ? "docker" : "docker:probe-id";
     if (!isDockerRuntimeKey(probe)) {
       throw new Error(
@@ -270,7 +257,7 @@ export function assertCliLocalAllowlistMatchesCapabilityTable(): void {
     throw new Error("能力表把 local 判成不可兑现：cli-local 通道连宿主执行都办不到");
   }
   // 反向：所有被判定可兑现的形态都必须出现在 allowlist 描述的能力面里。
-  for (const probe of ["docker", "docker:probe-id", "local", "instabox"]) {
+  for (const probe of ["docker", "docker:probe-id", "local"]) {
     if (!resolveCliLocalRuntimeKeyCapability(probe).fulfillableByCliLocal) {
       throw new Error(`能力表与 allowlist 不一致：${probe} 应可兑现`);
     }

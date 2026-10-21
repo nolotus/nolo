@@ -61,17 +61,7 @@ export function getDialogStatuses(): Readonly<Record<string, string>> {
   return state.dialogStatuses;
 }
 
-export function useDialogStatuses(): Readonly<Record<string, string>> {
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  return state.dialogStatuses;
-}
-
 export function getDialogEventTimestamps(): Readonly<Record<string, number>> {
-  return state.dialogEventTimestamps;
-}
-
-export function useDialogEventTimestamps(): Readonly<Record<string, number>> {
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return state.dialogEventTimestamps;
 }
 

@@ -1,28 +1,13 @@
 # Nolo
 
-**Nolo** is an AI-native, local-first workspace.
-
-## Public Audit Projection
-
-This repository is a public source projection generated from Nolo's private
-canonical repository for privacy and security auditing of the CLI, desktop app,
-and other clients whose source has been made public here. It does not include
-unreleased mobile clients or cloud service backends.
-
-Privacy and security feedback is welcome. This is not a traditional community
-co-development repository, and routine feature pull requests are not accepted.
-No response or remediation timeline is promised. This maintenance policy does not
-restrict the rights granted by the MIT license, including use, modification,
-forking, and redistribution.
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for audit setup and feedback guidance,
-and [SECURITY.md](./SECURITY.md) for private vulnerability reporting.
+**Nolo** is an AI-native, local-first cross-platform workspace.
+It deeply integrates AI agents into your daily workflow with local-first data and privacy.
 
 ## 🌟 Core Principles
 
 1. **Agent-First CLI & TUI** — The `nolo` CLI understands context, not just commands.
-2. **Local-First** — Local storage and user-configured API providers support local use.
-3. **Published Client Source** — CLI, Electrobun desktop, and shared web UI source included in this projection.
+2. **Local-First** — Your data stays on your machine. Cloud is optional sync, not a dependency.
+3. **Cross-Platform** — One data layer, React for Web/Desktop, React Native for mobile.
 
 ## 🚀 Quick Start
 
@@ -50,7 +35,7 @@ nolo run "summarize this agent's recent 10 dialogs"
 ## 📂 Project Structure (Monorepo)
 
 - `packages/cli/` — CLI tool and TUI terminal engine.
-- `packages/desktop/` — Electrobun-based desktop app.
+- `packages/desktop/` — Electron-based desktop app (Electrobun).
 - `packages/web/` — Web frontend entry.
 - `packages/app/` — Shared application logic and state management.
 - `packages/chat/` — Chat UI and dialog management.

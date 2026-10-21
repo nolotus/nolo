@@ -19,9 +19,6 @@ import {
   PUBLIC_GPT_IMAGE_2_EDITOR_AGENT_ID,
   PUBLIC_GPT_IMAGE_2_CONTINUOUS_AGENT_ID,
   PUBLIC_NANO_BANANA_2_LITE_AGENT_ID,
-  PUBLIC_GPT_6_ASTRA_AGENT_ID,
-  PUBLIC_GPT_61_SOL_AGENT_ID,
-  PUBLIC_KIMI_K3_AGENT_ID,
 } from "./builtinAgents";
 import { publicAgentKey } from "./prefix";
 
@@ -249,9 +246,6 @@ export {
   PUBLIC_GPT_IMAGE_2_EDITOR_AGENT_ID,
   PUBLIC_GPT_IMAGE_2_CONTINUOUS_AGENT_ID,
   PUBLIC_NANO_BANANA_2_LITE_AGENT_ID,
-  PUBLIC_GPT_6_ASTRA_AGENT_ID,
-  PUBLIC_GPT_61_SOL_AGENT_ID,
-  PUBLIC_KIMI_K3_AGENT_ID,
 };
 
 export const GPT_6_LUNA_DEF = defineAgentSeed({
@@ -402,83 +396,6 @@ export const CLAUDE_SONNET_5_5_DEF = defineAgentSeed({
     "先确认用户要解决的具体问题，再给出准确、可执行的结果；涉及代码时说明改动点与验证方式。",
   tools: [],
   tags: ["anthropic", "claude", "sonnet"],
-});
-
-// ── 顾问档（2026-10-20 求助模式上架）──
-// 这三个 seed 是「求助模式」的升级目标广场卡片（用户可见），文案按产品标准写：
-// 说明适用场景 + 明确的档位/计费前提，不承诺与常规档相同的可用性。
-// - GPT-6 Astra / GPT-6.1 Sol / Kimi K3：core/gptProTier.classifyPremiumModel 判为
-//   premium（gpt-astra / gpt-sol / kimi-k3 家族）→ 平台垫付通道要求充值 199 档位或当前账户余额充足（≥ 19 积分），文案如实说明。
-// tools 一律为空数组：与相邻强模型 seed（Luna / Opus / Fable / Sonnet）一致——
-// 公开档的工具面由运行时按 agent 类型注入，seed 里固化工具白名单会另造一份会漂移
-// 的真相，且顾问子 run 本就不该带写文件/删改类高危工具。
-export const GPT_6_ASTRA_DEF = defineAgentSeed({
-  id: PUBLIC_GPT_6_ASTRA_AGENT_ID,
-  presetKey: "gpt-6-astra",
-  name: "GPT-6 Astra",
-  provider: "nolo",
-  model: "gpt-6-astra",
-  isPublic: true,
-  // 出自平台模型目录：gpt-6-astra hasVision: true、supportsTool: true。
-  hasVision: true,
-  introduction:
-    "GPT-6 Astra 公开助手，OpenAI 重算力旗舰档，适合最难的推理、长链路分析、代码攻关和图片理解。单价高于常规档，适合真正卡住的问题。需开通 199 积分档位或账户保持有效余额（≥ 19 积分）。",
-  greeting:
-    "你好，我是 GPT-6 Astra。适合最难的推理、复杂代码和多模态分析；我会先确认目标与约束，再给结论和依据。需开通 199 积分档位或账户保持有效余额（≥ 19 积分）。",
-  prompt:
-    "定位：重算力旗舰档，用来解决非常规难度的任务。\n" +
-    "使用前提：需开通 199 积分档位或账户保持有效余额（≥ 19 积分）。\n" +
-    "工作方式：\n" +
-    "- 先明确目标、约束和已知事实，再拆解出可验证的中间结论。\n" +
-    "- 证据不足时说明缺什么、怎样补齐，不编造事实或 API。\n" +
-    "- 涉及代码时给出改动点、边界条件和验证方式。\n" +
-    "回复方式：结论先行，关键推断附依据；风险与不确定项单独标注。",
-  tools: [],
-  tags: ["openai", "gpt", "astra"],
-});
-
-export const GPT_61_SOL_DEF = defineAgentSeed({
-  id: PUBLIC_GPT_61_SOL_AGENT_ID,
-  presetKey: "gpt-6-1-sol",
-  name: "GPT-6.1 Sol",
-  provider: "nolo",
-  model: "gpt-6.1-sol",
-  isPublic: true,
-  // 出自平台模型目录：gpt-6.1-sol 显式 hasVision: false（官方页无图像输入声明），
-  // 且未声明 supportsTool —— 不要在这里把它写成会看图/能动手的模型。
-  hasVision: false,
-  introduction:
-    "GPT-6.1 Sol 公开助手，强推理快档，适合复杂分析、代码与长文档任务。需开通 199 积分档位或账户保持有效余额（≥ 19 积分）。",
-  greeting:
-    "你好，我是 GPT-6.1 Sol。适合复杂推理、代码分析和长文档处理；使用前请确保账户开通高阶档位或有充足可用余额。",
-  prompt:
-    "先确认用户要解决的具体问题与约束，再给出可靠、可执行的结果。\n" +
-    "涉及代码时说明改动点、边界条件与验证方式；涉及长文档时先定位关键段落再下结论。\n" +
-    "不确定的内容明确说明，不编造。",
-  tools: [],
-  tags: ["openai", "gpt", "sol"],
-});
-
-export const KIMI_K3_DEF = defineAgentSeed({
-  id: PUBLIC_KIMI_K3_AGENT_ID,
-  presetKey: "kimi-k3",
-  name: "Kimi K3",
-  provider: "nolo",
-  model: "kimi-k3",
-  isPublic: true,
-  // 出自平台模型目录：kimi-k3 hasVision: true、supportsTool: true、1M 上下文。
-  hasVision: true,
-  introduction:
-    "Kimi K3 公开助手，超长上下文强推理档，适合整份文档/代码库分析、多步任务和图片理解。需开通 199 积分档位或账户保持有效余额（≥ 19 积分）。",
-  greeting:
-    "你好，我是 Kimi K3。适合超长文档、代码库分析和多步推理；使用前请确保账户开通高阶档位或有充足可用余额。",
-  prompt:
-    "定位：超长上下文强推理档。\n" +
-    "工作方式：先在海量材料里定位与问题相关的部分，再逐步收窄结论；引用材料时说明出自哪一段，不臆测未读到的内容。\n" +
-    "涉及代码时给出改动点与验证方式。\n" +
-    "回复方式：结论先行，必要时分层给要点。",
-  tools: [],
-  tags: ["moonshot", "kimi", "long-context"],
 });
 
 export const GROK_4_6_DEF = defineAgentSeed({
@@ -680,10 +597,6 @@ export const PUBLIC_AGENT_DEFS = [
   CLAUDE_FABLE_5_1_DEF,
   CLAUDE_OPUS_5_5_DEF,
   CLAUDE_SONNET_5_5_DEF,
-  // 顾问档（求助模式升级目标，2026-10-20）
-  GPT_6_ASTRA_DEF,
-  GPT_61_SOL_DEF,
-  KIMI_K3_DEF,
   GROK_4_6_DEF,
   GEMINI_3_8_FLASH_DEF,
   GEMINI_4_ARGON_DEF,

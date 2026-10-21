@@ -96,6 +96,7 @@ export const addSpaceAction = async (
   const {
     name,
     description = "",
+    boundFolder,
   } = input;
   const visibility = (input.visibility ?? SpaceVisibility.PRIVATE) as SpaceVisibility;
   const { dispatch, getState, extra } = thunkAPI;
@@ -114,6 +115,7 @@ export const addSpaceAction = async (
     id: spaceId,
     name,
     description,
+    boundFolder,
     ownerId: userId,
     userId,
     visibility,
@@ -144,6 +146,7 @@ export const addSpaceAction = async (
     userId,
     name,
     visibility,
+    boundFolder,
     memberSpaceCount: spaces.length,
     hasSpaceForActor,
     currentPath: getCurrentPathForLog(),

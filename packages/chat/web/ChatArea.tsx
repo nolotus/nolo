@@ -20,7 +20,6 @@ interface ChatAreaProps {
   dialogId: string;
   scrollContainerSelector?: string;
   runtimeOptions?: AgentRuntimeOptions;
-  composerBlockedReason?: string;
   messagesClassName?: string;
   /** 可选：对象助手面板的 composer agent 切换器；不传则 composer 无变化。 */
   agentPicker?: AgentPickerControlProps;
@@ -30,7 +29,6 @@ const ChatAreaComponent: React.FC<ChatAreaProps> = ({
   dialogId,
   scrollContainerSelector,
   runtimeOptions,
-  composerBlockedReason,
   messagesClassName,
   agentPicker,
 }) => {
@@ -66,15 +64,15 @@ const ChatAreaComponent: React.FC<ChatAreaProps> = ({
         <IncompleteBrowserTurnNotice dialogId={dialogId} />
       </ChatErrorBoundary>
 
-      {composerBlockedReason ? <p role="alert">{composerBlockedReason}</p> : <ChatErrorBoundary fallbackMessage="输入框加载出错">
+      <ChatErrorBoundary fallbackMessage="输入框加载出错">
         <MessageInputContainer
           ref={messageInputRef}
           runtimeOptions={runtimeOptions}
           agentPicker={agentPicker}
         />
-      </ChatErrorBoundary>}
+      </ChatErrorBoundary>
 
-      {!composerBlockedReason && isDragOver && (
+      {isDragOver && (
         <div {...stylex.props(chatAreaStyles.dropOverlay)}>
           <span>拖入图片或文件以添加附件</span>
         </div>

@@ -43,10 +43,6 @@ import {
   resolveRoutableContentKey,
 } from "create/space/contentKeyUtils";
 import { CHAT_SIDEBAR_TYPE_META } from "create/space/contentTypeMeta";
-import {
-  applyContentQuery,
-  shouldSyncContentQuery,
-} from "create/space/contentSearchQuery";
 import { Tabs, TabList, Tab } from "render/web/ui/Tabs";
 import {
   LuChevronDown,
@@ -171,19 +167,18 @@ const SpaceContent: React.FC = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm);
-      // 目标 q 已经等于 URL 里的 q 时一律不写 URL：之前是无条件写，挂载/每次
-      // debounce 都会触发一轮「写了又回来」的多余导航（地址栏闪一下再回去），
-      // 还会和同页其它 setSearchParams 写入者抢基底。本地过滤用 debouncedSearch，
-      // 与 URL 是否变化无关。规则本身在 create/space/contentSearchQuery 里单测。
-      if (!shouldSyncContentQuery(searchTerm, urlSearch)) return;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
-        applyContentQuery(next, searchTerm);
+        if (searchTerm.trim()) {
+          next.set("q", searchTerm.trim());
+        } else {
+          next.delete("q");
+        }
         return next;
       }, { replace: true });
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchTerm, urlSearch, setSearchParams]);
+  }, [searchTerm, setSearchParams]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contentBodyRef = useRef<HTMLDivElement>(null);

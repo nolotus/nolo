@@ -28,7 +28,6 @@ import * as stylex from "@stylexjs/stylex";
 import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
 import "chat/web/chatStylexEscapeHatch.css";
 import { getIsDesktopApp } from "app/utils/env";
-import { readSelectedDesktopFolderPath, DESKTOP_FOLDER_SELECTION_EVENT, bindSelectedProjectToDialog, readDesktopDefaultWorkspacePath } from "chat/web/desktopFolderProjects";
 import { noloAgentId } from "core/init";
 import { asTrimmedString } from "core/trimmedString";
 import type { Agent } from "app/types";
@@ -494,18 +493,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         return;
       }
 
-      // Capture the selected Project once; later sidebar switches must not retarget this Dialog.
-      // The selection is read here as a snapshot (not from the dispatch-time locals below):
-      // referencing a later `let` in this callback throws a TDZ error that the catch swallows,
-      // which silently skipped the binding and made every reopened Dialog lose its cwd.
-      if (getIsDesktopApp() && typeof window !== "undefined") {
-        try {
-          bindSelectedProjectToDialog(window.localStorage, dialogKey);
-        } catch (error) {
-          console.warn("[QuickChat] local project association could not be saved", error);
-        }
-      }
-
       // Jump to the dialog immediately after create succeeds. Sending continues
       // in the background; staying on /chat after create is a broken UX
       // (dialog appears in sidebar but the shell never leaves QuickChat).
@@ -562,19 +549,11 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         extraPartCount: extraParts.length,
       });
 
-      // Same resolution as DialogPage: bound Project, else the desktop default
-      // workspace. First turn and later turns must never resolve to different roots.
-      const desktopCwd = readDesktopDefaultWorkspacePath() ?? undefined;
-      // Resolve at dispatch time: sidebar navigation never mutates an existing run.
-      let selectedFolder: string | null = null;
-      if (getIsDesktopApp() && typeof window !== "undefined") {
-        try { selectedFolder = readSelectedDesktopFolderPath(window.localStorage); }
-        catch { selectedFolder = null; }
-      }
-      const effectiveCwd = selectedFolder || desktopCwd;
+      const desktopCwd =
+        typeof window !== "undefined" ? window.__NOLO_DESKTOP_CWD__?.trim() : undefined;
       const runtimeOptions: AgentRuntimeOptions = {
         ...(getIsDesktopApp() ? { workspaceToolsHint: true } : {}),
-        ...(getIsDesktopApp() && effectiveCwd ? { cwd: effectiveCwd } : {}),
+        ...(getIsDesktopApp() && desktopCwd ? { cwd: desktopCwd } : {}),
         // 跟随「默认档」语义而不是某个具体 agent key：默认档换指向时
         // （广场档 → nolo 本体）这段不会悄悄失效。用户主动选定 agent 时不强加。
         ...(!selectedAgentId &&
@@ -776,25 +755,8 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     getIsDesktopApp() && typeof window !== "undefined"
       ? window.__NOLO_DESKTOP_CWD__?.trim()
       : undefined;
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(() => {
-    if (!getIsDesktopApp() || typeof window === "undefined") return null;
-    try { return readSelectedDesktopFolderPath(window.localStorage); } catch { return null; }
-  });
-  useEffect(() => {
-    if (!getIsDesktopApp() || typeof window === "undefined") return;
-    const update = () => {
-      try { setSelectedFolder(readSelectedDesktopFolderPath(window.localStorage)); }
-      catch { setSelectedFolder(null); }
-    };
-    window.addEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
-    window.addEventListener("storage", update);
-    return () => {
-      window.removeEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
-      window.removeEventListener("storage", update);
-    };
-  }, []);
-  // Display uses the same priority as the first-message runtime options.
-  const workspacePath = selectedFolder || desktopCwd;
+  // Prefer the current space's bound folder; fall back to the desktop process cwd.
+  const workspacePath = currentSpace?.boundFolder?.trim() || desktopCwd;
   // stylex.props() returns { className } which would clobber the handwritten
   // "quick-chat-box" hook class if spread after it; merge explicitly instead.
   const cardStyleProps = stylex.props(chatInputCardStyles.card);

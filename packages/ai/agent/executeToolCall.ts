@@ -25,18 +25,7 @@ interface ToolCall {
 export async function executeToolCall(
   tc: ToolCall,
   thunkApi: any,
-  context?: {
-    parentMessageId?: string;
-    agentKey?: string;
-    /**
-     * 以下为定档信号（可选，透传给 executor 的 context）。
-     * 调用点拿不到就不传，工具层会按缺失处理（服务端跳过对应规则）。
-     */
-    dialogId?: string;
-    priorSearches?: number;
-    lastResultCount?: number;
-    origin?: "chat" | "agent" | "automation";
-  }
+  context?: { parentMessageId?: string; agentKey?: string }
 ): Promise<string> {
   const toolName: string = tc.function?.name ?? "";
   const parsedToolArgs = (() => {
@@ -56,15 +45,6 @@ export async function executeToolCall(
     const result = await toolDefinition.executor(toolArgs, thunkApi, {
       parentMessageId: context?.parentMessageId ?? "",
       agentKey: context?.agentKey,
-      // 定档信号透传：缺省键一律不写入，避免给工具伪造默认值。
-      ...(context?.dialogId ? { dialogId: context.dialogId } : {}),
-      ...(typeof context?.priorSearches === "number"
-        ? { priorSearches: context.priorSearches }
-        : {}),
-      ...(typeof context?.lastResultCount === "number"
-        ? { lastResultCount: context.lastResultCount }
-        : {}),
-      ...(context?.origin ? { origin: context.origin } : {}),
     });
     // executor 返回 { rawData, displayData? } 或直接返回字符串
     const raw = result?.rawData ?? result;

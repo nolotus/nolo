@@ -388,12 +388,7 @@ export interface SpaceData {
   members: string[]; // userId 列表
   categories: Categories;
   contents: Contents;
-  /**
-   * @deprecated Legacy Space→local-folder binding. Spaces no longer own a working
-   * directory; the local cwd comes from the desktop Project bound to the Dialog.
-   * Kept read-tolerant only so old records do not break parsing. Never a cwd source.
-   */
-  boundFolder?: string | null;
+  boundFolder?: string;
   createdAt: number;
   updatedAt: number;
   type?: DataType;

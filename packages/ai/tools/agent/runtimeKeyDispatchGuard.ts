@@ -165,7 +165,7 @@ export function assertRuntimeKeyDispatchableByHost(
 
     throw new Error(
         `startAgentRun 的 runtimeKey="${requested}" 无法由 CLI 本地派发通道兑现：` +
-            `该通道只能把 run 落到本机（local）、本机 sbx 云沙盒（docker / docker:<id>）或 Instabox 沙盒（instabox），` +
+            `该通道只能把 run 落到本机（local）或本机 sbx 云沙盒（docker / docker:<id>），` +
             `本机没有 ${requested} 对应的执行后端。已拒绝派发，未启动任何 run。` +
             `要真正在 ${requested} 执行：用 CLI 通道 ` +
             `\`nolo agent run --runtime-key ${requested} ...\`，或从能派发到该位置的宿主（服务端）发起。`,
@@ -242,9 +242,9 @@ export function resolveCliLocalSpawnDispatch(
         host: "cli-local",
     });
     if (requested) {
-        const capability = resolveCliLocalRuntimeKeyCapability(requested);
-        const target: CliLocalExecutionTarget =
-            capability.target ?? (isDockerRuntimeKey(requested) ? "docker-sandbox" : "host");
+        const target: CliLocalExecutionTarget = isDockerRuntimeKey(requested)
+            ? "docker-sandbox"
+            : "host";
         if (target === "host" && input.allowHostWrites !== true) {
             // 点名了宿主执行却没确认写入权利：派发前显式失败（零 spawn）。
             throw new Error(HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE);
@@ -306,10 +306,10 @@ export function assertCliLocalSpawnArgvInvariant(
                 `argv=${JSON.stringify(argv)}`,
         );
     }
-    if ((isDockerRuntimeKey(value) || value === "instabox") && !argv.includes("--local")) {
+    if (isDockerRuntimeKey(value) && !argv.includes("--local")) {
         throw new Error(
             `${context} 携带 --runtime-key ${value} 却没有配对的 --local：只带 key 会让子 run 走` +
-                `服务端通道（那边没有本机沙盒凭据），于是「以为在沙盒」而实际落在别处。argv=${JSON.stringify(argv)}`,
+                `服务端通道（那边没有本机 sbx 凭据），于是「以为在沙盒」而实际落在别处。argv=${JSON.stringify(argv)}`,
         );
     }
     // 宿主执行同样成对：CLI 子进程见到 `--runtime-key local` 而没有
@@ -340,7 +340,7 @@ export function buildCliLocalRuntimeForwardArgs(
     const args: string[] = [];
     if (dispatch.runtimeKey) {
         args.push("--runtime-key", dispatch.runtimeKey);
-        if (isDockerRuntimeKey(dispatch.runtimeKey) || dispatch.runtimeKey === "instabox") args.push("--local");
+        if (isDockerRuntimeKey(dispatch.runtimeKey)) args.push("--local");
         // 宿主写入（runtimeKey=local）在 CLI 侧是**成对**要求：agentRunCommand
         // 见到 --runtime-key local 却没有 --allow-host-writes 会直接退出（零 run），
         // 2026-10-18 实测表现为子 run 秒级 orphaned、日志只有那句确认提示。

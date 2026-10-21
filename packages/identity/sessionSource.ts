@@ -90,11 +90,6 @@ export function getSessionSnapshotForState(
   return getBoundSessionSnapshot();
 }
 
-/** Read the owning Core's lifetime without deriving a second identity state. */
-export function getSessionGenerationForState(state: unknown): number | undefined {
-  return getSessionSnapshotForState(state)?.sessionGeneration;
-}
-
 function stampIdentitySessionReader(
   state: unknown,
   reader: SessionSnapshotReader

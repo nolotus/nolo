@@ -266,12 +266,7 @@ function applyRemoteTaskEvent(event: AgentRunStreamRemoteTaskEvent, scope?: Agen
     eventSeq,
     startedAt: existing?.startedAt ?? runs.get(runId)?.run.startedAt,
     lastEvidenceAt: existing ? Math.max(existing.lastEvidenceAt, now) : now,
-    // 落库归属一律取**帧自带**的 scope（event.scope）：
-    // - 准入过滤仍由调用方传入的 scope 负责（matchesScope），
-    // - 归属（ownerDialogId）必须来自帧里的 dialogId，否则用户级订阅会把
-    //   有归属的远端任务记成无归属，「需要你 / 状态未知」就落不到具体对话上。
-    // 与 agent_run 分支（runScopes 记 event.scope）保持同一策略。
-    scope: event.scope,
+    scope: scope ?? event.scope,
   });
   notify();
   return true;
@@ -516,7 +511,7 @@ function asNonEmptyString(value: unknown): string | undefined {
  * 的活跃语义之外的值：`pending` 视为未结束，`orphaned`（进程凭空消失）视为终态
  * 取消（§8.1「不置 failed」只约束失联任务，不约束这里）。
  */
-export function mapServerRunStatus(status: unknown): AgentRunLifecycleRun["status"] {
+function mapServerRunStatus(status: unknown): AgentRunLifecycleRun["status"] {
   if (status === "done") return "done";
   if (status === "failed") return "failed";
   if (status === "cancelled" || status === "orphaned") return "cancelled";
@@ -578,8 +573,6 @@ export function hydrateFromServer(payload: unknown, scope?: AgentRunScope): numb
           scope: scoped,
           task: { ...remoteTask, runId, eventSeq } as AgentRunStreamRemoteTaskEvent["task"],
         },
-        // 准入过滤仍用订阅 scope（与改动前一致，不放宽对话级订阅的准入）；
-        // 落库归属由 store 取帧自带 scope（event.scope = scoped，带 dialogId）。
         scope,
       );
       const stored = remoteTasks.get(runId);

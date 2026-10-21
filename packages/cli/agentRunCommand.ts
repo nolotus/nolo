@@ -498,9 +498,6 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   const dockerRuntimeLocal =
     typeof parsed.runtimeKey === "string" &&
     /^docker(:.+)?$/.test(parsed.runtimeKey.trim());
-  const instaboxRuntimeLocal =
-    typeof parsed.runtimeKey === "string" &&
-    parsed.runtimeKey.trim() === "instabox";
   // F1：`--runtime-key local` = 「在**本进程所在宿主**上执行」。本机就是那台机器，
   // 所以它必须走本地 runtime（父进程内），**绝不发给服务端**：服务端兑现不了 local
   // （`local_target_unsupported`，见 server/handlers/agentRun/runtimeTarget.ts），
@@ -518,7 +515,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     return 1;
   }
   const isLocalRun =
-    (dockerRuntimeLocal || instaboxRuntimeLocal || hostRuntimeLocal || !parsed.runtimeKey) &&
+    (dockerRuntimeLocal || hostRuntimeLocal || !parsed.runtimeKey) &&
     (parsed.runtimeMode === "local" ||
       hostRuntimeLocal ||
       (!parsed.runtimeMode && (fullstackLocal || explicitLocalCli || args.includes("--dangerously-allow-shell"))));
@@ -903,13 +900,12 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       ? { runtimeMode: "server" as const, requireRemoteDispatch: true }
       : parsed.runtimeMode
         ? { runtimeMode: parsed.runtimeMode }
-        : (dockerRuntimeLocal || instaboxRuntimeLocal || hostRuntimeLocal) && isLocalRun
+        : (dockerRuntimeLocal || hostRuntimeLocal) && isLocalRun
           ? { runtimeMode: "local" as const }
           : {}),
     // runtimeKey 与 machine-shell 的组合已在 parseAgentRunArgs 入口显式拒绝，
     // 这里直接透传即可（不再静默丢弃参数）。
     ...(parsed.runtimeKey ? { runtimeKey: parsed.runtimeKey } : {}),
-    ...(parsed.dockerWorkspaceMode ? { dockerWorkspaceMode: parsed.dockerWorkspaceMode } : {}),
     ...(parsed.continueDialogId ? { continueDialogId: parsed.continueDialogId } : {}),
     ...(parsed.strictContinueHistory ? { strictContinueHistory: true } : {}),
     ...(parsed.spaceId ? { spaceId: parsed.spaceId } : {}),

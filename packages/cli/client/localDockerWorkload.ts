@@ -29,14 +29,13 @@ import type {
 import type {
   DockerAccountBinding,
   DockerWorkloadRuntime,
-} from "agent-runtime/docker/workloadLifecycle";
-import { buildSandboxHelperUploadArgv, SANDBOX_WORKSPACE_ROOT } from "agent-runtime/docker/sandboxWorkspaceHelper";
-import { buildInstallGitArgv } from "agent-runtime/docker/sandboxWorkspaceDelivery";
+} from "../../server/handlers/agentRun/dockerWorkloadLifecycle";
+import { buildSandboxHelperUploadArgv } from "../../server/handlers/agentRun/docker/sandboxWorkspaceHelper";
 import {
   applyDockerWorkspaceDelivery,
   isDockerWorkspaceDeliveryError,
   type DockerWorkspaceInitSelection,
-} from "agent-runtime/docker/applyDockerWorkspaceDelivery";
+} from "../../server/handlers/agentRun/docker/applyDockerWorkspaceDelivery";
 import {
   prepareHostWorkspaceDelivery,
   type HostWorkspaceDeliveryPreparation,
@@ -47,7 +46,7 @@ import {
   dockerExecutionToolNames,
   type DockerToolChannel,
   type DockerWorkload,
-} from "agent-runtime/docker/toolRouting";
+} from "../../server/handlers/agentRun/dockerToolRouting";
 
 /** 与 `DOCKER_SANDBOX_BACKEND_ID` 一致；本模块不直接依赖 backend 实现。 */
 export const LOCAL_DOCKER_BACKEND_ID = "docker-sandbox-cloud";
@@ -101,7 +100,7 @@ export class LocalRuntimeKeyUnsupportedError extends Error {
 export function assertRuntimeKeyLocalFulfillable(runtimeKey: string): void {
   const key = runtimeKey.trim();
   if (!key || key === "local" || key === "server") return;
-  if (isDockerRuntimeKey(key) || key === "instabox") return;
+  if (isDockerRuntimeKey(key)) return;
   if (isLocallyUnfulfillableRuntimeKey(key)) {
     throw new LocalRuntimeKeyUnsupportedError(
       "local_runtime_key_unsupported",
@@ -110,7 +109,7 @@ export function assertRuntimeKeyLocalFulfillable(runtimeKey: string): void {
   }
   throw new LocalRuntimeKeyUnsupportedError(
     "local_runtime_key_unknown",
-    `runtimeKey="${key}" 不是本机可兑现的执行后端（可选：local | server | docker（本机 sbx） | instabox）。${LOCAL_CLOUD_RUNTIME_KEY_HINT}`,
+    `runtimeKey="${key}" 不是本机可兑现的执行后端（可选：local | server | docker（本机 sbx））。${LOCAL_CLOUD_RUNTIME_KEY_HINT}`,
   );
 }
 
@@ -222,8 +221,6 @@ export async function createLocalDockerWorkload(args: {
    * —— 与 `localRuntimeAdapter` 里的 `deps.cwd ?? process.cwd()` 同一取值。
    */
   workspaceRoot?: string;
-  /** 明确选择沙盒工作区策略；缺省保留既有仓库投送与 git 初始化行为。 */
-  workspaceMode?: "git" | "empty";
   /** 注入缝（测试用）：宿主侧投送准备（打归档 + 基线）。缺省 `prepareHostWorkspaceDelivery`。 */
   prepareWorkspaceDelivery?: (request: HostWorkspaceDeliveryRequest) => HostWorkspaceDeliveryPreparation;
   /** 注入缝（测试用）：沙盒内投送执行。缺省共享 `applyDockerWorkspaceDelivery`。 */
@@ -255,19 +252,19 @@ export async function createLocalDockerWorkload(args: {
   const createLifecycle =
     args.createLifecycle ??
     (async () => {
-      const [{ DockerWorkloadLifecycle, createDockerBindingAuthorizer }, accounts] =
+      const [{ DockerWorkloadLifecycle, getDockerBindingAuthorizer }, server] =
         await Promise.all([
-          import("agent-runtime/docker/workloadLifecycle"),
-          import("agent-runtime/docker/accountResolver"),
+          import("../../server/handlers/agentRun/dockerWorkloadLifecycle"),
+          import("../../server/handlers/agentRun/index"),
         ]);
-      // 与服务端 run 通道同一套共享实现：绑定解析、账户归属校验与配额存储都由
-      // `agent-runtime/docker` 承担，本机 CLI 不再依赖 server 包（公开投影没有它）。
-      // 本机通道必须显式传入同一份 env：共享模块缺省不读 process.env，避免把
-      // 另一套环境/凭据的存储上下文悄悄带进来。
+      // 与服务端 run 通道（`getDockerWorkloadLifecycle`）逐位同一套接线：由 resolver
+      // 补齐 `DockerWorkloadLifecycle` 要求的 kvStore + quotaProvider（lifecycle 会在
+      // 缺任一项时以 `docker_account_backend_not_configured` 拒绝）。这里不另写配额
+      // 逻辑，只把注入缝透传下去：缺省参数 = 服务端生产默认分支（含 DOCKER_ACCOUNT
+      // 归属校验与 `DOCKER_QUOTA_STORAGE`）。
       const resolveAccount =
         args.resolveAccount ??
-        accounts.createDockerAccountResolver({
-          env: args.env,
+        server.createProductionDockerAccountResolver({
           ...(args.kvStore ? { kvStore: args.kvStore } : {}),
           ...(args.quotaProvider ? { quotaProvider: args.quotaProvider } : {}),
         });
@@ -278,39 +275,12 @@ export async function createLocalDockerWorkload(args: {
         journalPath:
           args.env.NOLO_DOCKER_JOURNAL_PATH ??
           "/tmp/nolo-docker-workloads.sqlite",
-        env: args.env,
-        authorize: createDockerBindingAuthorizer(args.env),
+        authorize: getDockerBindingAuthorizer(),
         resolveAccount,
       });
     });
 
-  /**
-   * 阶段日志默认**不输出**：每个 run 固定多 8~10 行 stderr 属于噪声，只有排查
-   * workload 起不来时才需要。开关与 agentRunStream / agentRun 同款
-   * （NOLO_DEBUG=1 或 NOLO_CLI_DEBUG_DETAIL=1）。
-   */
-  const phaseLogEnabled = () => {
-    const env = args.env as Record<string, string | undefined>;
-    return env.NOLO_DEBUG === "1" || env.NOLO_CLI_DEBUG_DETAIL === "1";
-  };
-  const phaseLog = (event: string, payload: Record<string, unknown>) => {
-    if (!phaseLogEnabled()) return;
-    console.warn(`[docker-workload-phase] ${event}`, payload);
-  };
-  const phase = async <T>(name: string, operation: () => Promise<T> | T): Promise<T> => {
-    const startedAt = Date.now();
-    phaseLog("start", { phase: name, runId: args.runId });
-    try {
-      const result = await operation();
-      phaseLog("complete", { phase: name, runId: args.runId, elapsedMs: Date.now() - startedAt });
-      return result;
-    } catch (error) {
-      const safeError = error && typeof error === "object" ? error as { code?: unknown; name?: unknown } : {};
-      phaseLog("failed", { phase: name, runId: args.runId, elapsedMs: Date.now() - startedAt, errorCode: typeof safeError.code === "string" ? safeError.code : undefined, errorName: typeof safeError.name === "string" ? safeError.name : undefined });
-      throw error;
-    }
-  };
-  const lifecycle = await phase("create-lifecycle", () => createLifecycle());
+  const lifecycle = await createLifecycle();
 
   const grant: AgentRunGrant = {
     version: 1,
@@ -330,7 +300,6 @@ export async function createLocalDockerWorkload(args: {
   };
 
   const workspaceRoot = args.workspaceRoot ?? process.cwd();
-  const workspaceMode = args.workspaceMode ?? "git";
   const prepareDelivery = args.prepareWorkspaceDelivery ?? prepareHostWorkspaceDelivery;
   const applyDelivery = args.applyWorkspaceDelivery ?? applyDockerWorkspaceDelivery;
   /**
@@ -343,22 +312,19 @@ export async function createLocalDockerWorkload(args: {
   const deliverWorkspace = async (runtime: DockerWorkloadRuntime): Promise<void> => {
     if (deliveryApplied) return;
     deliveryApplied = true;
-    const prepared = await phase("host-archive", () => {
-      const result = prepareDelivery({ workspaceRoot });
-      if (!result.ok) {
-        throw new LocalWorkspaceDeliveryError(
-          result.code,
-          `${result.message}（宿主侧投送准备失败，本 run 拒绝进入工具循环）`,
-        );
-      }
-      return result;
-    });
+    const prepared = prepareDelivery({ workspaceRoot });
+    if (!prepared.ok) {
+      throw new LocalWorkspaceDeliveryError(
+        prepared.code,
+        `${prepared.message}（宿主侧投送准备失败，本 run 拒绝进入工具循环）`,
+      );
+    }
     if (args.signal?.aborted) {
       await prepared.cleanup();
       throw new LocalWorkspaceDeliveryError("delivery_cancelled", "run 已取消，放弃工作区投送。");
     }
     try {
-      await phase("delivery", () => applyDelivery(runtime, prepared.selection));
+      await applyDelivery(runtime, prepared.selection);
     } catch (error) {
       const code = isDockerWorkspaceDeliveryError(error) ? error.code : "delivery_failed";
       throw new LocalWorkspaceDeliveryError(
@@ -417,50 +383,13 @@ export async function createLocalDockerWorkload(args: {
       // 它：execShell 通、文件工具全挂在 `docker_execution_failed`（helper 不存在 → 127）。
       // 与服务端 run 通道同一份上传 argv（幂等），失败即 fail-closed，绝不带着半成品沙盒起跑。
       if (runtime) {
-        await phase("sandbox-helper-upload", async () => {
-          const uploaded = await runtime.exec(buildSandboxHelperUploadArgv());
-          if (!uploaded.ok) {
-            throw Object.assign(new Error("docker_helper_upload_failed"), { code: "docker_helper_upload_failed" });
-          }
-        });
-        if (workspaceMode === "git") {
-          // 把宿主仓库投送进沙盒。失败即抛，ready 不会 resolve。
-          await deliverWorkspace(runtime);
-        } else {
-          // 工具 helper 将相对路径解析到既有安全根；创建并核验容器内根目录，
-          // 绝不把宿主 workspaceRoot 当作沙盒路径。
-          await phase("empty-workspace-root", async () => {
-            const root = await runtime.exec([
-              "bash", "-lc",
-              `mkdir -p '${SANDBOX_WORKSPACE_ROOT}' && test -d '${SANDBOX_WORKSPACE_ROOT}' && test -w '${SANDBOX_WORKSPACE_ROOT}'`,
-            ]);
-            if (!root.ok) {
-              throw Object.assign(new Error("docker_empty_workspace_root_failed"), { code: "docker_empty_workspace_root_failed" });
-            }
-            // empty 模式不投递宿主仓库，但工具面仍是同一套 helper，git 是硬需求。
-            // 而钉住的镜像 `docker.io/oven/bun:*` 不带 git（见
-            // sandboxWorkspaceDelivery 顶部探测记录），「装 git」那一步原本只存在于
-            // **被 empty 跳过的投送计划**里 → 只做 `command -v git` 探测在真实镜像上
-            // 必然失败，等于死路。所以顺序固定为「装 → 探」：直接复用投送计划的幂等
-            // argv（内含 `command -v git` 守卫，缺 git 才 apt-get install），装不上
-            // （无网络 / 源不可达 / 无权限）即 fail-closed，绝不带着没有 git 的沙盒 ready。
-            const gitInstall = await runtime.exec(buildInstallGitArgv());
-            if (!gitInstall.ok) {
-              throw Object.assign(
-                new Error(`docker_empty_workspace_git_install_failed (exit ${gitInstall.exitCode})`),
-                { code: "docker_empty_workspace_git_install_failed" },
-              );
-            }
-            // 装完再探：把「安装命令失败」与「装了但不可用」区分成两个错误码，
-            // 否则 ready 之后每个 git 相关调用才逐个失败。
-            const gitProbe = await runtime.exec(["bash", "-lc", "command -v git"]);
-            if (!gitProbe.ok) {
-              throw Object.assign(new Error("docker_empty_workspace_git_missing"), { code: "docker_empty_workspace_git_missing" });
-            }
-          });
-        }
+        const uploaded = await runtime.exec(buildSandboxHelperUploadArgv());
+        if (!uploaded.ok) throw new Error("docker_helper_upload_failed");
+        // 块K：把宿主仓库投送进沙盒（helper 之后、resolveReady 之前 = 第一次工具调用
+        // 之前）。失败即抛：`ready` 永不 resolve，调用方在进入工具循环前失败。
+        await deliverWorkspace(runtime);
       }
-      await phase("ready", () => resolveReady(workload));
+      resolveReady(workload);
       // 沙盒创建成功后才 resolve；release() / 中断 / handle 未能返回前一直持有 lease。
       await waitForReleaseOrAbort();
       return undefined;

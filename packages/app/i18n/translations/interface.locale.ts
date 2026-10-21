@@ -2249,6 +2249,9 @@ export default {
         nameRequired: "Enter an AI name",
       },
       versionManagement: "Version management",
+      video: {
+        generatedTitle: "Remotion video.mp4",
+      },
       videoAttachment: "Video",
       viewDetails: "Technical details",
       viewMode: "View",
@@ -4530,6 +4533,9 @@ export default {
         nameRequired: "请输入 AI 名称",
       },
       versionManagement: "版本管理",
+      video: {
+        generatedTitle: "Remotion 视频.mp4",
+      },
       videoAttachment: "视频",
       viewDetails: "查看详情",
       viewMode: "视图",
@@ -6812,6 +6818,9 @@ quickChat: {
         nameRequired: "請輸入 AI 名稱",
       },
       versionManagement: "版本管理",
+      video: {
+        generatedTitle: "Remotion 影片.mp4",
+      },
       videoAttachment: "影片",
       viewDetails: "查看詳情",
       viewMode: "視圖",
@@ -9116,6 +9125,9 @@ quickChat: {
         nameRequired: "AI の名前を入力してください",
       },
       versionManagement: "バージョン管理",
+      video: {
+        generatedTitle: "Remotion 動画.mp4",
+      },
       videoAttachment: "動画",
       viewDetails: "詳細を表示",
       viewMode: "表示",

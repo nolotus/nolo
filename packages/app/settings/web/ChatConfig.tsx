@@ -4,12 +4,12 @@ import { useAppDispatch, useAppSelector } from "app/store";
 import {
   selectAutoApproveSelfUpdateFields,
   selectAiRecentContentLimit,
+  selectShowScrollToTopButton,
+  selectShowScrollToBottomButton,
   setSettings,
-  setAccountChatDisplayPreferences,
   setAiRecentContentLimit,
 } from "app/settings/settingSlice";
 import ChatConfigSections from "./chat-config/ChatConfigSections";
-import { useAccountChatDisplayPreferences } from "app/settings/accountChatDisplayOwner";
 
 const ChatConfig: React.FC = () => {
   const { t } = useTranslation();
@@ -19,7 +19,8 @@ const ChatConfig: React.FC = () => {
   const autoApproveSelfUpdateFields = useAppSelector(
     selectAutoApproveSelfUpdateFields
   );
-  const { showScrollToTopButton, showScrollToBottomButton } = useAccountChatDisplayPreferences();
+  const showScrollToTopButton = useAppSelector(selectShowScrollToTopButton);
+  const showScrollToBottomButton = useAppSelector(selectShowScrollToBottomButton);
 
   return (
     <>
@@ -39,11 +40,11 @@ const ChatConfig: React.FC = () => {
           }
           showScrollToTopButton={showScrollToTopButton}
           onShowScrollToTopButtonChange={(value) =>
-            dispatch(setAccountChatDisplayPreferences({ showScrollToTopButton: value }))
+            dispatch(setSettings({ showScrollToTopButton: value }))
           }
           showScrollToBottomButton={showScrollToBottomButton}
           onShowScrollToBottomButtonChange={(value) =>
-            dispatch(setAccountChatDisplayPreferences({ showScrollToBottomButton: value }))
+            dispatch(setSettings({ showScrollToBottomButton: value }))
           }
         />
       </div>

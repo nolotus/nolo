@@ -19,6 +19,7 @@ import {
   LuChevronDown,
   LuChartColumnBig,
   LuUserPlus,
+  LuShare2,
   LuFlag,
   LuScale,
 } from "react-icons/lu";
@@ -85,9 +86,7 @@ const PortalDropdown: React.FC<{
   children: React.ReactNode;
   className?: string;
   role?: string;
-  /** Rail anchors are ~48px wide; give the portalled panel a usable minimum. */
-  compact?: boolean;
-}> = ({ isOpen, anchorRef, children, className, role, compact = false }) => {
+}> = ({ isOpen, anchorRef, children, className, role }) => {
   const [rect, setRect] = useState<DOMRect | null>(null);
 
   useEffect(() => {
@@ -98,24 +97,6 @@ const PortalDropdown: React.FC<{
 
   if (!isOpen || !rect) return null;
 
-  // Width follows the anchor, except in the compact Rail where that would clip
-  // the panel down to the rail width. Clamp to the viewport so it never overflows.
-  const width = Math.max(rect.width - 16, compact ? 280 : 0);
-  const left = Math.min(
-    Math.max(8, rect.left + 8),
-    Math.max(8, window.innerWidth - width - 8),
-  );
-  // 锚点可能在视口顶部（移动抽屉）也可能在底部（桌面侧栏）：向空间更大的一侧展开，
-  // 并给出 max-height，避免弹层整体跑出视口被裁（否则抽屉里的账号菜单会有一半在屏幕外）。
-  const gap = 8;
-  const spaceAbove = rect.top - gap * 2;
-  const spaceBelow = window.innerHeight - rect.bottom - gap * 2;
-  const openDownward = spaceBelow > spaceAbove;
-  const maxHeight = Math.max(180, openDownward ? spaceBelow : spaceAbove);
-  const verticalStyle = openDownward
-    ? { top: rect.bottom + gap, bottom: "auto" as const }
-    : { bottom: window.innerHeight - rect.top + gap, top: "auto" as const };
-
   return createPortal(
     <div
       data-hook="chat-esc-user-dropdown"
@@ -125,13 +106,9 @@ const PortalDropdown: React.FC<{
       onTouchStart={(e) => e.stopPropagation()}
       style={{
         position: "fixed",
-        ...verticalStyle,
-        left,
-        width,
-        maxHeight,
-        overflowY: "auto",
-        overflowX: "hidden",
-        overscrollBehavior: "contain",
+        bottom: window.innerHeight - rect.top + 8,
+        left: rect.left + 8,
+        width: rect.width - 16,
       }}
       {...withLiteralClass(
         `SidebarUserSection__dropdown is-open ${className || ""}`,
@@ -147,7 +124,7 @@ const PortalDropdown: React.FC<{
   );
 };
 
-export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCompact = false }) => {
+export const SidebarUserSection: React.FC = () => {
   const { t } = useTranslation(["common", "chat", "space"]);
   const navigate = useNavigate();
   const location = useLocation();
@@ -267,16 +244,6 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
   const handleOpenSettings = useCallback(() => {
     setMenuOpen(false);
     setBellOpen(false);
-    // 已在设置页时再点一次应关闭（返回），否则按钮看起来失效。
-    const settingsBase = `/${SettingRoutePaths.SETTING}`;
-    if (location.pathname === settingsBase || location.pathname.startsWith(`${settingsBase}/`)) {
-      // 与 SettingLayout.handleClose 同语义：回到打开设置前的页面（保留 search/state），
-      // 历史栈不留脏 entry；直接深链进入设置页时回到首页。
-      const background = (location.state as { backgroundLocation?: typeof location } | null)
-        ?.backgroundLocation;
-      navigate(background ?? "/", { replace: true });
-      return;
-    }
     navigate(SettingRoutePaths.SETTING, { state: { backgroundLocation: location } });
   }, [navigate, location]);
 
@@ -304,28 +271,26 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
   return (
     <div
       ref={sectionRef}
-      {...withLiteralClass(railCompact ? "SidebarUserSection navigation-v2-rail-account" : "SidebarUserSection", sidebarStyles.sidebarUserSection)}
+      {...withLiteralClass("SidebarUserSection", sidebarStyles.sidebarUserSection)}
     >
       <div
-        {...withLiteralClass(railCompact ? "navigation-v2-rail-account__row" : "", sidebarStyles.sidebarUserSectionRow)}
+        {...stylex.props(sidebarStyles.sidebarUserSectionRow)}
       >
         {/* 左侧：头像进 Life，chevron 打开账号菜单 */}
         <div
           ref={menuContainerRef}
-          {...withLiteralClass(railCompact ? "navigation-v2-rail-account__profile" : "", sidebarStyles.sidebarUserSectionCardWrap)}
+          {...stylex.props(sidebarStyles.sidebarUserSectionCardWrap)}
           style={{ flex: 1, minWidth: 0 }}
         >
           <Tooltip
-            content={railCompact ? t("openAccountMenu", "账号菜单") : t("goToProfile", "个人主页")}
+            content={t("goToProfile", "个人主页")}
             placement="top"
             disabled={isMobile}
           >
             <button
               type="button"
-              onClick={railCompact ? () => { setMenuOpen((value) => !value); setBellOpen(false); } : handleOpenLifeProfile}
-              aria-haspopup={railCompact ? "menu" : undefined}
-              aria-expanded={railCompact ? menuOpen : undefined}
-              aria-label={railCompact ? t("openAccountMenu", "账号菜单") : t("goToProfile", "个人主页")}
+              onClick={handleOpenLifeProfile}
+              aria-label={t("goToProfile", "个人主页")}
               {...stylex.props(sidebarStyles.sidebarUserSectionProfile)}
             >
               <Avatar
@@ -337,7 +302,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
               />
               <span
                 title={authUser.email || authUser.username}
-                {...withLiteralClass(railCompact ? "navigation-v2-rail-account__username" : "", sidebarStyles.sidebarUserSectionUsername)}
+                {...stylex.props(sidebarStyles.sidebarUserSectionUsername)}
               >
                 {authUser.email || authUser.username}
               </span>
@@ -346,7 +311,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
           <button
             type="button"
             {...menuToggleStyleProps}
-            className={[menuToggleStyleProps.className, "SidebarUserSection__menu-toggle", railCompact ? "navigation-v2-rail-account__chevron" : "", menuOpen ? "is-open" : ""]
+            className={[menuToggleStyleProps.className, "SidebarUserSection__menu-toggle", menuOpen ? "is-open" : ""]
               .filter(Boolean)
               .join(" ")}
             onClick={() => {
@@ -372,7 +337,6 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
           anchorRef={sectionRef as React.RefObject<HTMLElement>}
           className="SidebarUserSection__dropdown--menu"
           role="menu"
-          compact={railCompact}
         >
           {/* 身份余额 */}
           <div className="topbar-user-menu__header">
@@ -417,6 +381,26 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
             >
               <LuChartColumnBig size={14} aria-hidden="true" />
               <span>{t("usage_dashboard", "使用统计")}</span>
+            </button>
+            <button
+              type="button"
+              className="topbar-user-menu__item"
+              onClick={() => {
+                setMenuOpen(false);
+                setBellOpen(false);
+                navigate("/life/shares");
+              }}
+            >
+              <LuShare2 size={14} aria-hidden="true" />
+              <span>{t("space:myShares.title", "我的分享")}</span>
+            </button>
+            <button
+              type="button"
+              className="topbar-user-menu__item"
+              onClick={handleOpenSettings}
+            >
+              <LuSettings size={14} aria-hidden="true" />
+              <span>{t("settings.title", "设置")}</span>
             </button>
           </div>
 
@@ -528,7 +512,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
 
       {/* 右侧：操作按钮 */}
       <div
-        {...withLiteralClass(railCompact ? "navigation-v2-rail-account__actions" : "", sidebarStyles.sidebarUserSectionActions)}
+        {...stylex.props(sidebarStyles.sidebarUserSectionActions)}
       >
         {/* 更新（desktop only） */}
         <SidebarUpdateButton />
@@ -580,7 +564,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
           </Tooltip>
 
           {/* 通知弹窗 - 向上展开 */}
-          <PortalDropdown isOpen={bellOpen} anchorRef={sectionRef as React.RefObject<HTMLElement>} role="menu" compact={railCompact}>
+          <PortalDropdown isOpen={bellOpen} anchorRef={sectionRef as React.RefObject<HTMLElement>} role="menu">
             <div className="topbar-notification__header">
               <div>
                 <div className="topbar-notification__title">
@@ -606,10 +590,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
                 {t("notifications.empty", "No notifications yet")}
               </div>
             ) : (
-              <div
-                className="topbar-notification__list"
-                style={{ maxHeight: "280px", overflowY: "auto", overscrollBehavior: "contain" }}
-              >
+              <div className="topbar-notification__list" style={{ maxHeight: "280px" }}>
                 {visibleNotifications.map((item) => (
                   <button
                     key={item.id}

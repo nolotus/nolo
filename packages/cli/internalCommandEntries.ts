@@ -1,7 +1,6 @@
 import { getAgentInternalCommandEntries } from "./agentInternalCommandEntries";
 import { getAppInternalCommandEntries } from "./appInternalCommandEntries";
 import { getChromeInternalCommandEntries } from "./chromeInternalCommandEntries";
-import { getCiInternalCommandEntries } from "./ciInternalCommandEntries";
 import { getDialogInternalCommandEntries } from "./dialogInternalCommandEntries";
 import { getDocInternalCommandEntries } from "./docInternalCommandEntries";
 import type { CommandEntry } from "./cliCommandTypes";
@@ -23,7 +22,6 @@ export function getInternalCommandEntries(renderHelpText: () => string): Command
     ...getWorkflowInternalCommandEntries(),
     // nolo browser (main) / chrome (alias) — connector setup (status|install|reload) + live browser operations.
     ...getChromeInternalCommandEntries(),
-    ...getCiInternalCommandEntries(),
     ...getSystemInternalCommandEntries(renderHelpText),
   ];
 }

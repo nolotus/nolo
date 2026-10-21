@@ -633,11 +633,6 @@ export async function runWorkspaceCommand(args: {
    * it even after the user has moved on.
    */
   owner?: ProcessOwner | null;
-  /**
-   * Explicit task label. Falls back to deriveLabel(command) — its last token —
-   * which reads badly for piped commands (`... | tail -25` → "-25").
-   */
-  label?: string;
 }): Promise<WorkspaceExecResult> {
   const timeoutMs = asOptionalPositiveFiniteNumber(args.timeoutMs);
   const detached = process.platform !== "win32";
@@ -663,7 +658,7 @@ export async function runWorkspaceCommand(args: {
   // finishes before the detach threshold, completeTransient() drops the
   // envelope again ("不留痕是结果"); if the threshold fires first, promote()
   // reuses this very envelope — same taskId, no re-execution, no second record.
-  const label = args.label?.trim() || deriveLabel(args.command.join(" "));
+  const label = deriveLabel(args.command.join(" "));
   const registry = getProcessRegistry();
   if (typeof proc.pid === "number") {
     registry.add({

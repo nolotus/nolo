@@ -187,22 +187,24 @@ export const buildSpaceContextLayer = async (
 
 export interface BuildWorkspaceContextLayerArgs {
   spaceId?: string | null;
+  /** The space record's boundFolder, when declared. */
+  boundFolder?: string | null;
   /** The effective working directory the runtime actually resolved. */
   cwd?: string | null;
-  /** Human-readable reason when the local workspace could not be resolved. */
+  /** Human-readable reason when boundFolder resolution failed. */
   resolutionError?: string | null;
 }
 
 /**
- * Workspace context layer: tells the model which local folder this dialog runs in
- * (or that the workspace could not be resolved). A Space record never supplies the
- * working directory — the desktop Project binding does. Null when there is neither
- * a cwd nor a failure to report.
+ * Workspace context layer: tells the model which local folder this dialog is
+ * bound to (or that binding resolution failed). Null when there is neither a
+ * binding nor a failure to report.
  */
 export const buildWorkspaceContextLayer = (
   args: BuildWorkspaceContextLayerArgs,
 ): TurnContextLayer | null => {
   const spaceId = asTrimmed(args.spaceId);
+  const boundFolder = asTrimmed(args.boundFolder);
   const cwd = asTrimmed(args.cwd);
   const resolutionError = asTrimmed(args.resolutionError);
 
@@ -211,22 +213,28 @@ export const buildWorkspaceContextLayer = (
       "workspace-context",
       [
         "--- 工作区（Workspace）---",
-        `本对话${spaceId ? `所属 Space ${spaceId} ` : ""}的本地工作区解析失败：${resolutionError}。`,
-        "如被问及工作区/本地目录，请如实说明当前不可用，不要假设工作目录是某个具体路径。",
+        `本对话${spaceId ? `所属 Space ${spaceId} ` : ""}声明绑定了本地工作区，但解析失败：${resolutionError}。`,
+        "如被问及工作区/绑定文件夹，请如实说明绑定存在但当前不可用。",
       ].join("\n"),
     );
   }
 
-  if (!cwd) return null;
+  if (!boundFolder && !cwd) return null;
 
-  return makeLayer(
-    "workspace-context",
-    [
-      "--- 工作区（Workspace）---",
-      `本轮工作目录（cwd）：${cwd}`,
-      "文件/Shell 类工具默认以该目录为根。",
-    ].join("\n"),
-  );
+  const lines = ["--- 工作区（Workspace）---"];
+  if (boundFolder) {
+    lines.push(
+      `本对话${spaceId ? `通过 Space ${spaceId} ` : ""}绑定了本地工作区目录：${boundFolder}`,
+    );
+    if (cwd && cwd !== boundFolder) {
+      lines.push(`本轮实际工作目录（cwd）：${cwd}`);
+    } else {
+      lines.push("文件/Shell 类工具默认以该目录为根。");
+    }
+  } else {
+    lines.push(`本轮工作目录（cwd）：${cwd}`);
+  }
+  return makeLayer("workspace-context", lines.join("\n"));
 };
 
 export interface DiscoveredSkill {

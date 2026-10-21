@@ -107,8 +107,6 @@ interface ProcessToolDataPayload {
   parentMessageId: string;
   toolRunId: string;
   agentKey?: string;
-  /** 当前对话 id：工具层据此数本对话历史（exa_search 定档信号，可选）。 */
-  dialogId?: string;
 }
 
 export interface HandleToolCallsPayload {
@@ -279,9 +277,6 @@ const processToolData = createAsyncThunk(
         parentMessageId,
         toolRunId,
         agentKey,
-        // 定档信号：这里是前台对话流式路径，来源恒为 chat；对话 id 用于数历史搜索。
-        ...(args.dialogId ? { dialogId: args.dialogId } : {}),
-        origin: "chat" as const,
       });
 
       const rawData = toolResult?.rawData ?? toolResult;
@@ -561,7 +556,6 @@ export const handleToolCalls = createAsyncThunk(
             parentMessageId: messageId,
             toolRunId,
             agentKey: agentConfig.dbKey,
-            dialogId,
           })
         ).unwrap();
 

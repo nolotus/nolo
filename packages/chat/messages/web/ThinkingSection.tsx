@@ -8,7 +8,8 @@ import React, {
   memo,
 } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
-import { useAccountChatDisplayPreferences } from "app/settings/accountChatDisplayOwner";
+import { useAppSelector } from "app/store";
+import { selectShowThinking } from "app/settings/settingSlice";
 import { markdownToSlate } from "create/editor/transforms/markdownToSlate";
 import { StreamingStructuredMarkdown } from "./StreamingStructuredMarkdown";
 import { useThinkingVisibility } from "../../hooks/useThinkingVisibility";
@@ -38,7 +39,7 @@ export const ThinkingSection = memo(
     messageId,
   }: ThinkingSectionProps) => {
     // 1. 获取全局设置
-    const { showThinking } = useAccountChatDisplayPreferences();
+    const showThinking = useAppSelector(selectShowThinking);
     const { t } = useTranslation("chat");
 
     // 2. AICSS thinking-reasoning 行为：思考中默认展开实时流出，结束折叠为摘要

@@ -68,10 +68,6 @@ export const DEFAULT_RECOMMENDED_SKILL_SLUGS: readonly string[] = [
   "worktree-isolation",
   "systematic-investigation",
   "show-me",
-  // 凭据管理：仓库已有 nolo secret（set/list/run/bind），但技能发现只扫
-  // `.agents/skills`，内置的 secrets-manager 不会出现在"可用技能"里。放进默认
-  // 提示名单让它至少以一行提示出现（不授工具、不放宽权限）。
-  "secrets-manager",
 ];
 
 const asMode = (value: unknown): AgentSkillMode | null =>

@@ -10,7 +10,6 @@ export type PremiumModelFamily =
   | "claude-fable"
   | "gpt-pro"
   | "gpt-sol"
-  | "gpt-astra"
   | "kimi-k3";
 
 /**
@@ -34,11 +33,6 @@ const GPT_PRO_RE =
 // GPT Sol 家族：必须为独立段（如 gpt-5.6-sol, gpt-6.1-sol），支持 openai/
 const GPT_SOL_RE =
   /^(?:openai\/)?gpt-\d+(?:\.\d+)*-sol(?:-[a-z0-9]+(?:[.-][a-z0-9]+)*)?$/i;
-
-// GPT Astra 家族：必须为独立段（如 gpt-6-astra），支持 openai/。
-// 与 Claude Fable 5.1 同价（80/400 积分每 1M），统一纳入 199 档位以保持计费口径一致。
-const GPT_ASTRA_RE =
-  /^(?:openai\/)?gpt-\d+(?:\.\d+)*-astra(?:-[a-z0-9]+(?:[.-][a-z0-9]+)*)?$/i;
 
 // Kimi K3 家族：精确匹配，支持上游 moonshotai/ 前缀
 const KIMI_K3_MODELS: ReadonlySet<string> = new Set([
@@ -68,10 +62,6 @@ export function classifyPremiumModel(
 
   if (GPT_SOL_RE.test(normalizedModel)) {
     return "gpt-sol";
-  }
-
-  if (GPT_ASTRA_RE.test(normalizedModel)) {
-    return "gpt-astra";
   }
 
   if (KIMI_K3_MODELS.has(normalizedModel)) {

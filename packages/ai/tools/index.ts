@@ -301,6 +301,10 @@ import {
   chatgptWebImageGenerateFunctionSchema,
   chatgptWebImageGenerateFunc,
 } from "./chatgptWebImageTool";
+import {
+  remotionRenderVideoFunctionSchema,
+  remotionRenderVideoFunc,
+} from "./remotionVideoTool";
 import { uiAskChoiceFunc, uiAskChoiceFunctionSchema } from "./uiAskChoiceTool";
 import { showInteractionFunc, showInteractionFunctionSchema } from "./uiCardTool";
 import {
@@ -480,18 +484,6 @@ export type ToolExecutorContext = {
    * 缺失如实上报给端点（端点拒绝无父对话的订阅）。
    */
   dialogId?: string;
-  /**
-   * 定档信号（exa_search 用，契约见 docs/plans/2026-10-21-exa-3-0-sync.md §3/§10）。
-   *
-   * 与 dialogId 同性质：运行时注入、模型不可见。**只在拿得到时出现**——缺省键
-   * 不出现在对象里，executor 就当作「没有这个信号」，绝不补默认值/猜值。
-   */
-  /** 本 dialog 内已发生的 exa_search 次数（不含本次）。 */
-  priorSearches?: number;
-  /** 上一次 exa_search 的返回条数（空结果升档规则需要它）。 */
-  lastResultCount?: number;
-  /** 调用来源：chat（前台对话）/ agent（派发的子 run）/ automation（后台运行）。 */
-  origin?: "chat" | "agent" | "automation";
 };
 
 export interface ToolDefinition {
@@ -1908,7 +1900,7 @@ const baseToolDefinitions: ToolDefinition[] = [
     description: {
       name: "exa_search",
       description:
-        "使用 Exa 智能搜索引擎获取高质量、结构化的网络信息；可按检索意图、内容类目、时间范围与域名收窄，默认由服务端按场景自动定档。",
+        "使用 Exa 神经网络搜索引擎获取高质量、结构化的网络信息（包含正文）。",
       category: "网络与智能",
     },
     behavior: "data",
@@ -2368,6 +2360,24 @@ const baseToolDefinitions: ToolDefinition[] = [
     },
     behavior: "action",
     uiGroup: "media",
+  },
+  {
+    id: "remotionRenderVideo",
+    schema: remotionRenderVideoFunctionSchema,
+    executor: remotionRenderVideoFunc,
+    description: {
+      name: "remotionRenderVideo",
+      description:
+        "使用平台内 Remotion 模板渲染手机传播视频或产品介绍视频，并保存为 MP4。",
+      category: "多媒体生成",
+    },
+    behavior: "action",
+    uiGroup: "media",
+    capability: "general",
+    riskLevel: "medium",
+    costLevel: "medium",
+    defaultConsent: "ask",
+    cancelable: true,
   },
 ];
 

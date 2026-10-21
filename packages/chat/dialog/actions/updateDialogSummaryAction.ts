@@ -16,7 +16,6 @@ import { planCompression } from "../../../ai/context/planCompression";
 import { extractReferenceKeysFromMessage } from "./extractReferenceKeys";
 import {
     COMPACTION_SUMMARY_SYSTEM_PROMPT,
-    computeSummarySourceMetadata,
     formatMessagesForSummaryWithTruncation,
     formatFileOperationsFromMessages,
     buildCompactionUserContent,
@@ -183,10 +182,6 @@ export const updateDialogSummaryAction = async (
 
             if (newSummary && typeof newSummary === "string" && newSummary.trim()) {
                 const currentCount = dialogConfig.compressionCount || 0;
-                const sourceMeta = await computeSummarySourceMetadata(
-                    allMsgs,
-                    newSummarizedBeforeId,
-                );
 
                 await dispatch(
                     patch({
@@ -196,11 +191,6 @@ export const updateDialogSummaryAction = async (
                             summarizedBeforeId: newSummarizedBeforeId,
                             referenceKeys: Array.from(extractedKeys),
                             compressionCount: currentCount + 1,
-                            ...(sourceMeta ? {
-                                sourceHash: sourceMeta.sourceHash,
-                                sourceCount: sourceMeta.sourceCount,
-                                schemaVersion: sourceMeta.schemaVersion,
-                            } : {}),
                         },
                     })
                 ).unwrap();

@@ -1,7 +1,7 @@
 /**
  * Local machine worker for ChatGPT web image generation via Oracle browser.
  * Invoked from connector agent.run when payload.meta.localJob === "chatgptWebImageGenerate".
- * No OpenAI Images API — uses bun x --bun @steipete/oracle --generate-image, then uploads to Nolo FS.
+ * No OpenAI Images API — uses npx @steipete/oracle --generate-image, then uploads to Nolo FS.
  */
 
 import { t } from "./tui/i18n";
@@ -120,9 +120,8 @@ async function runOracleGenerateImage(args: {
 }): Promise<void> {
   const proc = args.spawn({
     cmd: [
-      "bun",
-      "x",
-      "--bun",
+      "npx",
+      "-y",
       "@steipete/oracle",
       "--engine",
       "browser",

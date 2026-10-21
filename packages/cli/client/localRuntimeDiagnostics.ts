@@ -42,14 +42,11 @@ export type CliLocalRuntimeAdapterDeps = {
    * instabox / machine:*）在 run 开始前显式失败，绝不静默落宿主。
    */
   runtimeKey?: string;
-  /** Docker 沙盒工作区策略；仅显式选择，缺省沿用仓库 git 投送。 */
-  dockerWorkspaceMode?: "git" | "empty";
   /**
    * 测试注入缝：缺省真实 `createLocalDockerWorkload`（复用服务端
    * DockerWorkloadLifecycle + createDockerToolChannel + sbx）。注入假实现即可
    * 确定性覆盖「工具调用确实进 channel / 宿主执行器零调用」。
    */
-  createLocalInstaboxWorkload?: (args: { runtimeKey: string; runId: string; authenticatedCaller: string; agentKey: string; env: Record<string, string | undefined> }) => Promise<{ channel: (toolName: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<string>; release: () => Promise<void>; runId?: string; backendId?: string; workspaceRoot?: string | null; fileBridge?: unknown }>;
   createLocalDockerWorkload?: (args: {
     runtimeKey: string;
     runId: string;
@@ -58,7 +55,6 @@ export type CliLocalRuntimeAdapterDeps = {
     env: Record<string, string | undefined>;
     /** 投送来源（宿主工作区根）；块K：本地 docker 通道用它打包仓库送进沙盒。 */
     workspaceRoot?: string;
-    workspaceMode?: "git" | "empty";
   }) => Promise<{
     channel: (
       toolName: string,

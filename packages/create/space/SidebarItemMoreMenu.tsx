@@ -1,14 +1,11 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  LuArrowDown,
-  LuArrowUp,
   LuDownload,
   LuPencil,
   LuPlus,
   LuStar,
   LuTrash2,
-  LuZap,
 } from "react-icons/lu";
 import { nanoid } from "nanoid";
 import { useAppDispatch } from "app/store";
@@ -58,7 +55,6 @@ export type SidebarItemMoreMenuProps = {
   onEditTitle: () => void;
   onClose: () => void;
   onDeleteApp?: () => void;
-  quickAction?: { active: boolean; onToggle: () => void; canMoveUp?: boolean; canMoveDown?: boolean; onMove?: (direction: -1 | 1) => void };
 };
 
 /**
@@ -83,7 +79,6 @@ export function SidebarItemMoreMenu({
   onEditTitle,
   onClose,
   onDeleteApp,
-  quickAction,
 }: SidebarItemMoreMenuProps) {
   const { t } = useTranslation("space");
   const dispatch = useAppDispatch();
@@ -130,12 +125,6 @@ export function SidebarItemMoreMenu({
           handleAddToConversation();
         } else if (key === "favorite" && type === "dialog") {
           toggleFavorite();
-        } else if (key === "quick-toggle" && quickAction) {
-          quickAction.onToggle();
-        } else if (key === "quick-up" && quickAction?.canMoveUp) {
-          quickAction.onMove?.(-1);
-        } else if (key === "quick-down" && quickAction?.canMoveDown) {
-          quickAction.onMove?.(1);
         } else if (key === "edit" && canEditInSpace) {
           onEditTitle();
         } else if (key === "download" && showDownloadAction) {
@@ -156,26 +145,6 @@ export function SidebarItemMoreMenu({
         <MenuItem id="favorite" textValue={isFavorited ? t("unfavorite") : t("favorite")}>
           <LuStar size={ICON_SIZE} aria-hidden="true" />
           <span slot="label">{isFavorited ? t("unfavorite") : t("favorite")}</span>
-        </MenuItem>
-      )}
-      {quickAction && (
-        <MenuItem id="quick-toggle" textValue={quickAction.active ? t("quickRemoveFromRail") : t("quickAddToRail")}>
-          {/* “加入/移出快捷”曾与上面的“收藏”共用星形图标，两个不同动作看起来像同一件事；
-              换成语义独立的闪电，收藏仍独占星形。 */}
-          <LuZap size={ICON_SIZE} aria-hidden="true" />
-          <span slot="label">{quickAction.active ? t("quickRemoveFromRail") : t("quickAddToRail")}</span>
-        </MenuItem>
-      )}
-      {quickAction?.active && quickAction.canMoveUp && (
-        <MenuItem id="quick-up" textValue={t("quickMoveRailUp")}>
-          <LuArrowUp size={ICON_SIZE} aria-hidden="true" />
-          <span slot="label">{t("quickMoveRailUp")}</span>
-        </MenuItem>
-      )}
-      {quickAction?.active && quickAction.canMoveDown && (
-        <MenuItem id="quick-down" textValue={t("quickMoveRailDown")}>
-          <LuArrowDown size={ICON_SIZE} aria-hidden="true" />
-          <span slot="label">{t("quickMoveRailDown")}</span>
         </MenuItem>
       )}
       {canEditInSpace && (

@@ -38,8 +38,6 @@ export interface AgentRuntimeToolCall {
 }
 
 export interface AgentRuntimeChatMessage {
-  /** Durable dialog message identity, when loaded from persisted history. */
-  id?: string;
   role: (typeof AGENT_RUNTIME_MESSAGE_ROLES)[number];
   content: AgentRuntimeMessageContent;
   /** Internal system-prompt boundary used by explicit-cache providers. */
@@ -51,8 +49,6 @@ export interface AgentRuntimeChatMessage {
    */
   context_reference?: AgentRuntimeMessageContent;
   tool_call_id?: string;
-  /** Internal tool output payload retained across persisted-history reads. */
-  toolPayload?: unknown;
   tool_calls?: AgentRuntimeToolCall[];
   /** 工具名：tool 行的语义字段，落库 / 回读 / 折叠头显示都依赖它。 */
   toolName?: string;

@@ -16,7 +16,7 @@ import {
 
 import { initialState } from "./settingInitialState";
 import { normalizeSettingChanges } from "./settingPersistence";
-import type { SettingState, SettingsWriteFailure } from "./settingTypes";
+import type { SettingState } from "./settingTypes";
 
 // ---------------------------------------------------------------------------
 // Slice 创建
@@ -35,27 +35,6 @@ const settingSlice = createSliceWithThunks({
       action: PayloadAction<Partial<SettingState>>,
     ) => {
       Object.assign(state, normalizeSettingChanges(action.payload));
-    },
-    // 单调推进本地用户意图世代：只有 setSettings 的乐观发布走这里（hydrate 不走）。
-    _bumpLocalIntentEpoch: (state) => {
-      state.localIntentEpoch = (state.localIntentEpoch ?? 0) + 1;
-    },
-    // 记录设置写失败状态。专用 reducer：`_updateSettingsState` 会走
-    // normalizeSettingChanges 把该字段剥掉（防止写进云端 record）。
-    _recordSettingsWriteFailure: (
-      state,
-      action: PayloadAction<SettingsWriteFailure | null>,
-    ) => {
-      state.lastWriteFailure = action.payload ?? null;
-    },
-    // 服务端权威回显：原子地写权威值 + 推进权威回显世代。
-    // 专用 reducer：`_updateSettingsState` 会走 normalizeSettingChanges 把
-    // serverAuthorityEchoSeq 剥掉，既写不进值也推不动世代。
-    _recordServerAuthorityEcho: (state, action: PayloadAction<number>) => {
-      const next = action.payload;
-      if (typeof next !== "number" || !Number.isFinite(next)) return;
-      state.autoApproveCredits = next;
-      state.serverAuthorityEchoSeq = (state.serverAuthorityEchoSeq ?? 0) + 1;
     },
     addHostToCurrentServer: (state, action: PayloadAction<string>) => {
       const rawValue = action.payload;
@@ -94,12 +73,6 @@ export { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 
 // 本地 state 写入 action（服务端独占字段保存成功后回写本地状态用）
 export { updateSettingsState } from "./settingActions";
-// 写失败状态的记录 action（由 setSettings 的重试/对账路径 dispatch）
-export { recordSettingsWriteFailure } from "./settingActions";
-// 服务端权威回显 action（原子写权威值 + 推进权威回显世代）
-export { recordServerAuthorityEcho } from "./settingActions";
-// 写失败状态 selector（本轮只备好状态与选择器，UI 组件后续接入）
-export { selectLastWriteFailure, selectHasUnsyncedSettingsWrite } from "./fieldSelectors";
 
 // server selectors
 export {
@@ -114,6 +87,7 @@ export {
 // 简单字段 selectors
 export {
   selectPreferredAnimationSet,
+  selectShowThinking,
   selectMaxCost,
   selectMaxExecutionTime,
   selectAutoApproveCredits,
@@ -135,6 +109,8 @@ export {
   selectDefaultAgentPreference,
   selectDefaultAgentId,
   selectOcrModel,
+  selectShowScrollToTopButton,
+  selectShowScrollToBottomButton,
   selectCreateMenuOpenCount,
   selectDesktopChromeConnectorEnabled,
   selectDeveloperModeEnabled,
@@ -177,11 +153,11 @@ export {
 export {
   getSettings,
   setSettings,
-  setAccountChatDisplayPreferences,
   changeTheme,
   changeDensity,
   changeFontPreset,
   changeDarkMode,
+  toggleShowThinking,
   setThemeFollowsSystem,
   setSidebarWidth,
   toggleEnableReadCurrentSpace,

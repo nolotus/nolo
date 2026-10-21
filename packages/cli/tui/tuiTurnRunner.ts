@@ -99,7 +99,6 @@ import { transcribeMediaFile, formatTranscriptForModel, describeMediaError } fro
 import { createTrimRequester, resolveTranscribeTrim } from "./transcribePreflight";
 import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
 import {
-  annotatePendingProcessNoticeOrigin,
   buildProcessTerminalTurnMessage,
   parsePendingProcessNoticeLine,
 } from "./processTerminalNotice";
@@ -362,14 +361,7 @@ async function runAgentChat(
     injectedProcessNoticeLines.length > 0
       ? [{
           content: buildProcessTerminalTurnMessage(
-            injectedProcessNoticeLines.map((line) =>
-              annotatePendingProcessNoticeOrigin(
-                parsePendingProcessNoticeLine(line),
-                // 本函数的 state 即当前 session 状态；首轮尚未回填 dialogId
-                // 时为 undefined（标注侧按「不冒充当前任务」处理）。
-                state.dialogId,
-              ),
-            ),
+            injectedProcessNoticeLines.map(parsePendingProcessNoticeLine),
           ),
           cacheScope: "turn" as const,
         }]
@@ -909,12 +901,6 @@ export async function resolveActionGate(
     pauseComposer: () => void;
     resumeComposerFromSubprocess: () => void;
     resumeComposerFromDialog: () => void;
-    /**
-     * Approve hook for the local-run bucket: approving a `confirm` gate
-     * remembers + persists that bucket (see permissionGrantPersist). Omitted
-     * by callers that must keep a per-call decision.
-     */
-    onApprove?: () => void;
   },
 ): Promise<AgentRuntimeToolResult> {
   if (gate.kind === "confirm") {
@@ -923,7 +909,6 @@ export async function resolveActionGate(
         request: asConfirmPermissionRequest(gate),
         input: deps.input as NodeJS.ReadStream,
         output: deps.output,
-        onApprove: deps.onApprove,
         ...anchor,
       }),
     );
@@ -1157,7 +1142,7 @@ export async function runOneAgentTurn(
     // readlineWorkspace 的 actionGateHandler 短路同源（`state` 是可变绑定，
     // 这里读到的永远是最新值，busy 期间 /auto 也生效）；权限决定仍由 handler
     // 自己做，这里只决定报不报 blocked。
-    if (ctx.state.permissionGrants?.local === true && isAutoConfirmableFileWriteGate(gate)) {
+    if (ctx.state.autoConfirm && isAutoConfirmableFileWriteGate(gate)) {
       return await actionGateHandler(gate);
     }
     emitStatusUnlessForceStopped({
@@ -1179,7 +1164,7 @@ export async function runOneAgentTurn(
   const confirmDestructiveActionWithStatus =
     confirmDestructiveAction && ctx.output.isTTY === true
       ? async (request: PermissionRequest): Promise<boolean> => {
-          if (ctx.state.permissionGrants?.local === true) return await confirmDestructiveAction(request);
+          if (ctx.state.autoConfirm) return await confirmDestructiveAction(request);
           emitStatusUnlessForceStopped({ state: "blocked", kind: "permission" });
           try {
             return await confirmDestructiveAction(request);

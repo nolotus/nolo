@@ -445,14 +445,6 @@ export async function executeToolCall(args: {
           ? { runToolNames: args.runToolNames }
           : {}),
         ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-        // 定档信号：来源只由 turn 输入推导，不让模型/参数层参与。
-        // 三级判据见 plan §10——后台运行优先于子 run（后台派发的子 run 仍是
-        // 无人值守的，按 automation 报更保守）。
-        origin: input.background
-          ? "automation"
-          : input.runKind === "subtask"
-            ? "agent"
-            : "chat",
       }, {
         ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
         ...(input.runtimeContext

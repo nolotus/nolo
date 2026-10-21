@@ -17,7 +17,7 @@ import {
   resolveRuntimeResources,
   type CloudflareResourceQuota,
   type RuntimeResourcePayload,
-} from "../../../agent-runtime/runtimeResources";
+} from "../../../server/handlers/runtimeResourcesHandler";
 
 /** 服务端真实读取端点；`source=live` 表示要实读而不是要官方静态额度视图。 */
 export const RUNTIME_RESOURCES_PATH = "/api/runtime/resources";

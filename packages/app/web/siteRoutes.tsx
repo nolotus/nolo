@@ -13,12 +13,12 @@ export async function loadRoutes(
   user?: any
 ): Promise<RouteObject[]> {
   if (site === "crm") {
-    const { crmRoutes } = await import("app/lab/crm/crmRoutes");
+    const { crmRoutes } = await import("lab/crm/crmRoutes");
     return crmRoutes;
   }
 
   if (site === "date") {
-    const { dateRoutes } = await import("app/lab/date/dateRoutes");
+    const { dateRoutes } = await import("lab/date/dateRoutes");
     return dateRoutes;
   }
 

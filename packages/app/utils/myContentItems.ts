@@ -80,8 +80,6 @@ export type UserContentRecord = Partial<AppSummaryRecord> & {
   updatedAt?: string | number;
   created?: string | number;
   updated_at?: string | number;
-  deletedAt?: string | number | null;
-  restoredAt?: string | number | null;
   pinned?: boolean;
   spaceId?: string | null;
   serverOrigin?: string;
@@ -352,8 +350,6 @@ export function buildMyContentItemsFromUserData(
         pinned: Boolean(record.pinned),
         createdAt: record.createdAt ?? record.created ?? 0,
         updatedAt: timestamp,
-        ...(record.deletedAt !== undefined ? { deletedAt: record.deletedAt } : {}),
-        ...(record.restoredAt !== undefined ? { restoredAt: record.restoredAt } : {}),
         spaceId,
         spaceName,
         serverOrigin:

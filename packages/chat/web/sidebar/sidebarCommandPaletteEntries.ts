@@ -1,6 +1,5 @@
 import type { MyContentListItem } from "app/utils/myContentItems";
 import { getAgentRecordIdentifiers, getAgentRecordKey } from "ai/agent/utils/agentRecordIdentity";
-import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 import { isAllViewDialogImageAttachment } from "./allViewSearch";
 
 export type PaletteSectionId = "favorites" | "spaces" | "content" | "publicAgents";
@@ -15,8 +14,6 @@ export type SidebarPaletteEntry =
       meta: string;
       contentKey: string;
       contentType?: string;
-      /** Origin from the target item, never the currently selected Space. */
-      spaceId?: string | null;
     }
   | {
       id: string;
@@ -91,23 +88,6 @@ export function formatContentMeta(
   return space ? `${typeLabel} · ${space}` : typeLabel;
 }
 
-/**
- * Route for a palette content entry. The entry's own Space wins over whichever
- * Space the sidebar happens to be browsing; personal (null) entries stay unscoped.
- */
-export function buildPaletteEntryPath(
-  entry: Extract<SidebarPaletteEntry, { kind: "content" }>,
-  userId?: string | null,
-): string {
-  return buildRoutableContentPath({
-    contentKey: entry.contentKey,
-    type: entry.contentType,
-    userId: userId ?? undefined,
-    // Blank ids arrive from unfiltered favorite sources; an empty Space route is worse than none.
-    spaceId: entry.spaceId?.trim() || null,
-  });
-}
-
 export function buildFavoritePaletteEntries(
   favoriteItems: MyContentListItem[],
   typeLabel: (item: MyContentListItem) => string,
@@ -124,7 +104,6 @@ export function buildFavoritePaletteEntries(
       meta,
       contentKey: item.contentKey,
       contentType: item.type,
-      spaceId: item.spaceId,
       textValue: [title, meta, item.spaceName, item.contentKey, "favorite", "收藏"]
         .filter(Boolean)
         .join(" "),
@@ -176,7 +155,6 @@ export function buildContentPaletteEntries(
         meta,
         contentKey: item.contentKey,
         contentType: item.type,
-        spaceId: item.spaceId,
         textValue: [title, meta, item.spaceName, item.contentKey]
           .filter(Boolean)
           .join(" "),

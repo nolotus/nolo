@@ -28,13 +28,13 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { DockerWorkspaceInitSelection } from "agent-runtime/docker/applyDockerWorkspaceDelivery";
+import type { DockerWorkspaceInitSelection } from "../../server/handlers/agentRun/docker/applyDockerWorkspaceDelivery";
 import {
   MAX_BASELINE_DIFF_CHARS,
   MAX_DELIVERY_ARCHIVE_BYTES,
   MAX_DELIVERY_FILE_COUNT,
   type WorkspaceGitBaseline,
-} from "agent-runtime/docker/sandboxWorkspaceDelivery";
+} from "../../server/handlers/agentRun/docker/sandboxWorkspaceDelivery";
 
 /** 宿主命令结果（结构类型：默认实现用 `spawnSync`，测试注入替身）。 */
 export type HostCommandResult = {

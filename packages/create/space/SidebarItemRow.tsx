@@ -91,8 +91,6 @@ export interface SidebarItemRowProps {
   isSelected?: boolean;
   onSelectItem?: (contentKey: string) => void;
   disableDrag?: boolean;
-  /** Navigation-only row: no owner actions, editing, dragging or local visit/read writes. */
-  readOnly?: boolean;
   /** style prop for outer div (e.g. height from ListLayout) */
   style?: React.CSSProperties;
   /** Report the more-button element so parent can host RAC Menu outside ListBox. */
@@ -136,7 +134,6 @@ function SidebarItemRow({
   isSelected,
   onSelectItem,
   disableDrag,
-  readOnly = false,
   style,
   onMenuAnchorChange,
   editSignal,
@@ -278,11 +275,10 @@ function SidebarItemRow({
         e.preventDefault();
         return;
       }
-      if (readOnly) return;
       if (dialogId) dispatch(markDialogRead({ dialogId, dialogKey: routeContentKey }));
       recordRecentVisit({ key: contentKey, type, title: displayTitle });
     },
-    [isSelectionMode, readOnly, dialogId, dispatch, contentKey, type, displayTitle, routeContentKey]
+    [isSelectionMode, dialogId, dispatch, contentKey, type, displayTitle, routeContentKey]
   );
 
 
@@ -299,14 +295,13 @@ function SidebarItemRow({
   // handlers
 
   const startEditing = useCallback(() => {
-    if (readOnly) return;
     setIsEditing(true);
     setEditTitle(displayTitle);
-  }, [displayTitle, readOnly]);
+  }, [displayTitle]);
 
   const handleEditSubmit = useCallback(() => {
     setIsEditing(false);
-    if (!readOnly && editTitle.trim() && editTitle !== displayTitle) {
+    if (editTitle.trim() && editTitle !== displayTitle) {
       (dispatch as any)((updateContentTitle as any)({
         spaceId: effectiveSpaceId,
         // Space content is keyed by the raw contentKey, not the resolved db/route key.
@@ -314,13 +309,13 @@ function SidebarItemRow({
         title: editTitle.trim(),
       }));
     }
-  }, [editTitle, displayTitle, dispatch, contentKey, effectiveSpaceId, readOnly]);
+  }, [editTitle, displayTitle, dispatch, contentKey, effectiveSpaceId]);
 
 
   // drag-and-drop handlers
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
-      if (disableDrag || readOnly) {
+      if (disableDrag) {
         e.preventDefault();
         return;
       }
@@ -331,7 +326,7 @@ function SidebarItemRow({
       e.dataTransfer.setData("dragType", "item");
       e.dataTransfer.effectAllowed = "move";
     },
-    [disableDrag, readOnly, contentKey, categoryId, onToggleMenu]
+    [disableDrag, contentKey, categoryId, onToggleMenu]
   );
 
   const handleDragEnd = useCallback(() => {
@@ -353,13 +348,12 @@ function SidebarItemRow({
       // While inline-renaming, let the text input keep its native context menu
       // (cut/copy/paste) — don't hijack it.
       if (isEditing) return;
-      if (readOnly) return;
       event.preventDefault();
       event.stopPropagation();
       onMenuAnchorChange?.(contentKey, rowRef.current);
       onToggleMenu(contentKey);
     },
-    [isEditing, readOnly, contentKey, onMenuAnchorChange, onToggleMenu]
+    [isEditing, contentKey, onMenuAnchorChange, onToggleMenu]
   );
 
   // Clear menu anchor when closed
@@ -368,10 +362,6 @@ function SidebarItemRow({
       onMenuAnchorChange?.(contentKey, null);
     }
   }, [isMenuOpen, contentKey, onMenuAnchorChange]);
-
-  React.useEffect(() => {
-    if (readOnly) setIsEditing(false);
-  }, [readOnly]);
 
   // External edit trigger from parent-hosted RAC Menu
   React.useEffect(() => {
@@ -441,12 +431,12 @@ function SidebarItemRow({
           </button>
         ) : (
           <div
-            {...stylex.props(styles.iconWrapper, (readOnly || disableDrag) && styles.dragDisabled)}
+            {...stylex.props(styles.iconWrapper, disableDrag && styles.dragDisabled)}
             data-running={isRunningDialog || undefined}
             data-status={dialogStatusTone}
             data-unread={showUnreadDot || undefined}
-            data-drag-disabled={readOnly || disableDrag || undefined}
-            draggable={!readOnly && !disableDrag}
+            data-drag-disabled={disableDrag || undefined}
+            draggable={!disableDrag}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
@@ -488,7 +478,7 @@ function SidebarItemRow({
           </div>
         )}
 
-        {isEditing && !readOnly ? (
+        {isEditing ? (
           <div style={{ flex: 1, minWidth: 0 }}>
             <InlineEditInput
               inputRef={inputRef}
@@ -547,7 +537,7 @@ function SidebarItemRow({
           </NavLink>
         )}
 
-        {!readOnly && !isEditing && !isSelectionMode && showInlineActions && (
+        {!isEditing && !isSelectionMode && showInlineActions && (
           <div
             {...stylex.props(styles.actions, controlsRevealed && styles.actionsVisible, isDragging && styles.actionsDragging)}
             onClick={(e) => e.stopPropagation()}

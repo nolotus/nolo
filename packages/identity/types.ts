@@ -45,8 +45,6 @@ export type AccountSessionTransition =
   | "signing-out";
 
 export interface AccountSessionSnapshot {
-  /** Canonical Core session lifetime, stable across profile/balance updates. */
-  sessionGeneration?: number;
   accounts: IdentityUser[];
   activeAccountId: string | null;
   activeToken: string | null;

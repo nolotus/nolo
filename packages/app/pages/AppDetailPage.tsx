@@ -1,16 +1,13 @@
 import "./AppDetailPage.css";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams, useSearchParams } from "app/routing";
+import { useNavigate, useParams, useSearchParams } from "app/routing";
 import { useTranslation } from "react-i18next";
 import {
+  buildAppDetailPath,
   buildAppChatEditorPath,
   buildAppCodeEditorPath,
   readAppServerOrigin,
 } from "app/constants/appEditor";
-import {
-  buildAppDetailTargetPath,
-  isSameAppDetailTarget,
-} from "app/constants/appDetailTarget";
 import { useAppDetail } from "app/hooks/useAppDetail";
 import { useMyAppActions } from "app/hooks/useMyApps";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
@@ -42,25 +39,20 @@ const AppDetailPage: React.FC = () => {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const { deleteApp } = useMyAppActions({ setApps: () => {} });
   const searchParamsString = searchParams.toString();
-  const buildDetailTarget = useCallback(
-    (appKey: string) =>
-      buildAppDetailTargetPath(appKey, searchParamsString, spaceId, routeServerOrigin),
-    [routeServerOrigin, searchParamsString, spaceId]
-  );
-  // 详情页 URL 规范化：目标 URL 与当前 URL 等价时不写 history。
-  // 少了这道判断，「读 URL → 按 URL 拼目标 → replace 写 URL」会在来源页参数
-  // （如空间内容页的 ?types=app）被带进来时反复自我触发，表现为地址栏参数
-  // 来回变动而页面不跳转。
-  const location = useLocation();
-  const currentPath = `${location.pathname}${location.search}${location.hash}`;
-  const gotoDetailTarget = useCallback(
-    (appKey: string) => {
-      const target = buildDetailTarget(appKey);
-      if (isSameAppDetailTarget(target, currentPath)) return;
-      navigate(target, { replace: true });
-    },
-    [buildDetailTarget, currentPath, navigate]
-  );
+  const buildDetailTarget = useCallback((appKey: string) => {
+    if (!searchParamsString) {
+      return buildAppDetailPath(appKey, spaceId, routeServerOrigin);
+    }
+    const url = new URL(
+      buildAppDetailPath(appKey, spaceId, routeServerOrigin),
+      typeof window !== "undefined" ? window.location.origin : "https://nolo.local"
+    );
+    const params = new URLSearchParams(searchParamsString);
+    for (const [key, value] of params.entries()) {
+      url.searchParams.set(key, value);
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  }, [routeServerOrigin, searchParamsString, spaceId]);
 
   const primaryUrl = useMemo(
     () =>
@@ -84,12 +76,12 @@ const AppDetailPage: React.FC = () => {
   }, [primaryUrl]);
   useEffect(() => {
     if (legacyAppKey && !pageKey) {
-      gotoDetailTarget(legacyAppKey);
+      navigate(buildDetailTarget(legacyAppKey), { replace: true });
       return;
     }
     if (!app?.appKey || !routeAppKey || app.appKey === routeAppKey) return;
-    gotoDetailTarget(app.appKey);
-  }, [app?.appKey, gotoDetailTarget, legacyAppKey, pageKey, routeAppKey]);
+    navigate(buildDetailTarget(app.appKey), { replace: true });
+  }, [app?.appKey, buildDetailTarget, legacyAppKey, navigate, pageKey, routeAppKey]);
 
   useEffect(() => {
     const handler = () => void refetch();

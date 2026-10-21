@@ -10,9 +10,6 @@ export type NoloQueryRequestConfig = {
     /** Incremental sync cursor (epoch ms). Only records updated after this
      * timestamp are returned. Omitted → full query. */
     since?: number;
-    /** Opt-in historical Dialog listing, never incremental sync. */
-    dialogPage?: boolean;
-    dialogPageCursor?: string | null;
   };
   /** 请求超时毫秒；默认 8000。传 0 禁用。 */
   timeoutMs?: number;
@@ -26,10 +23,6 @@ export const noloQueryRequest = async (queryConfig: NoloQueryRequestConfig) => {
   const queryParams = new URLSearchParams({
     limit: options.limit?.toString() ?? "",
   });
-  if (options.dialogPage) {
-    queryParams.set("dialogPage", "1");
-    if (options.dialogPageCursor) queryParams.set("cursor", options.dialogPageCursor);
-  }
   if (typeof options.since === "number" && options.since > 0) {
     queryParams.set("since", options.since.toString());
   }

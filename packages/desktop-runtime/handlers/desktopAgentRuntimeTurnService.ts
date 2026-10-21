@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { detectMachineInfo } from "connector-experimental/machineInfo";
 import { toErrorMessage } from "core/errorMessage";
@@ -937,7 +937,7 @@ export function createDesktopAgentRuntimeActions(args: {
   createId: () => string;
   fetchImpl?: typeof fetch;
   cwd?: string;
-  /** Whether the runtime has an explicit workspace root. */
+  /** True only when cwd came from explicit turn input or Space boundFolder. */
   authorizedWorkspace?: boolean;
   input?: AgentRuntimeMessageContent;
   readXPost?: typeof readXPostFunc;
@@ -1267,57 +1267,17 @@ function resolveDesktopToolWorkspacePaths(
   }
 }
 
-/**
- * 桌面 turn 的 workspace root 只来自本 turn 的显式 input.cwd（Dialog 绑定的
- * 本地 Project）。显式给了 cwd 就必须是一个**真实存在的目录**：路径不存在、
- * 不可访问、或不是目录时直接拒绝发起 turn——
- *   - 绝不回退 process.cwd()（那会把工具落到发起进程的工作目录上）；
- *   - 绝不以 authorized 身份在一个不存在的 root 上执行工具（authorizedWorkspace
- *     由 cwd 推导，校验放在推导之前，因此不存在的 root 永远拿不到授权）；
- *   - 也不静默降级成「无工作区」（那会让模型以为有目录却写不进去）。
- * 错误信息带该路径，经 handler 的 SSE catch → {type:"error"} 帧回到客户端。
- */
-function resolveDesktopTurnWorkspaceDirectory(rawCwd: string): string {
-  const resolved = resolvePath(rawCwd);
-  const describeSource = resolved === rawCwd ? "" : ` (from cwd "${rawCwd}")`;
-  let isDirectory: boolean;
-  try {
-    isDirectory = statSync(resolved).isDirectory();
-  } catch (statError) {
-    const code = (statError as NodeJS.ErrnoException)?.code;
-    const reason =
-      code === "ENOENT"
-        ? "does not exist"
-        : code === "ENOTDIR"
-          ? "is not a directory (a parent segment is not a directory)"
-          : code === "EACCES" || code === "EPERM"
-            ? "is not accessible (permission denied)"
-            : "cannot be inspected";
-    throw new Error(
-      `Desktop turn workspace directory ${reason}: ${resolved}${describeSource}`,
-    );
-  }
-  if (!isDirectory) {
-    throw new Error(
-      `Desktop turn workspace path is not a directory: ${resolved}${describeSource}`,
-    );
-  }
-  return resolved;
-}
-
 export async function runDesktopAgentRuntimeTurn(
   input: DesktopAgentRuntimeTurnInput
 ): Promise<LocalAgentTurnResult> {
-  // Desktop cwd is resolved from this turn's explicit input.cwd ONLY (the local
-  // Project bound to the dialog). The Space record's boundFolder never decides
-  // cwd and is never a workspace authorization source — it is context only.
-  // Validation runs before any store read, network call or dialog write, so a
-  // rejected turn cannot leave a half-created run behind.
-  const explicitCwd = asOptionalTrimmedString(input.cwd);
-  let cwd = explicitCwd
-    ? resolveDesktopTurnWorkspaceDirectory(explicitCwd)
-    : undefined;
+  // Resolve parent dialog spaceId whenever continueDialogId is set (even if cwd
+  // is explicit), so startAgentRun can pass spaceId and the turn context layers can
+  // tell the model which Space/workspace this dialog belongs to. The space
+  // record is read once and reused for boundFolder + the space context layer.
+  let cwd = input.cwd ? resolvePath(input.cwd) : undefined;
+  let resolvedCwdFromBoundFolder = false;
   let parentSpaceId: string | undefined;
+  let boundFolder: string | undefined;
   let workspaceResolutionError: string | undefined;
   let cachedSpaceRecord: Record<string, unknown> | null | undefined;
 
@@ -1357,15 +1317,28 @@ export async function runDesktopAgentRuntimeTurn(
           if (parsed) dialogRecordUserId = parsed;
         }
       }
-      // Space is an authorization/context container, never a filesystem root.
       const effectiveSpaceId = input.spaceId ?? parentSpaceId;
       if (effectiveSpaceId) {
         cachedSpaceRecord = await readRemoteRecord(spaceRecordKey(effectiveSpaceId));
+        const trimmedPath = asOptionalTrimmedString(cachedSpaceRecord?.boundFolder);
+        if (trimmedPath) {
+          if (!isAbsolute(trimmedPath)) {
+            workspaceResolutionError = `boundFolder 不是绝对路径：${trimmedPath}`;
+            console.warn("[desktop-runtime] boundFolder is not absolute, falling back to cwd:", trimmedPath);
+          } else {
+            boundFolder = resolvePath(trimmedPath);
+            // 绑定文件夹优先：桌面端若空间绑定了文件夹，无论调用方是否传了
+            // cwd，都以绑定的文件夹作为 workspace root（用户预期：绑定即根）。
+            // 传入的 cwd 仅作为“本轮实际工作目录”信息在 context 层展示。
+            cwd = boundFolder;
+            resolvedCwdFromBoundFolder = true;
+          }
+        }
       }
     } catch (resolveError) {
       workspaceResolutionError =
         resolveError instanceof Error ? resolveError.message : String(resolveError);
-      console.warn("[desktop-runtime] Space context resolution failed:", resolveError);
+      console.warn("[desktop-runtime] boundFolder resolution failed:", resolveError);
     }
   }
 
@@ -1384,6 +1357,7 @@ export async function runDesktopAgentRuntimeTurn(
   });
   const workspaceContextLayer = buildWorkspaceContextLayer({
     spaceId: turnSpaceId,
+    boundFolder,
     cwd,
     resolutionError: workspaceResolutionError,
   });
@@ -1393,16 +1367,16 @@ export async function runDesktopAgentRuntimeTurn(
   // on-demand via readFile — no auto-injection into the prompt.
   let skillDiscoveryLayer = null;
   let agentsMdLayer = null;
-  if (cwd) {
+  if (boundFolder) {
     try {
-      const discoveredSkills = discoverSkills(cwd);
-      skillDiscoveryLayer = buildSkillDiscoveryLayer(discoveredSkills, cwd);
+      const discoveredSkills = discoverSkills(boundFolder);
+      skillDiscoveryLayer = buildSkillDiscoveryLayer(discoveredSkills, boundFolder);
     } catch (scanError) {
       console.warn("[desktop-runtime] skill discovery scan failed:", scanError);
     }
     // AGENTS.md project context (session-scope for cache stability；
     // 共享实现：agent-runtime/agentsMd，含 8KB 截断与 CLAUDE.md 回退)
-    agentsMdLayer = readAgentsMdLayerFromDisk(cwd);
+    agentsMdLayer = readAgentsMdLayerFromDisk(boundFolder);
   }
 
   // T13 — user global prompt. userId comes from the dialog record only; when
@@ -1509,7 +1483,7 @@ export async function runDesktopAgentRuntimeTurn(
   );
 
   // A workspace is user-authorized only when the turn received an explicit cwd
-  // process.cwd() fallback
+  // or resolved one from the parent Space boundFolder. process.cwd() fallback
   // is not treated as authorized workspace authority.
   const authorizedWorkspace = Boolean(cwd);
 
@@ -1524,7 +1498,7 @@ export async function runDesktopAgentRuntimeTurn(
     input: input.input,
     readXPost: input.readXPost,
     readXhsProfile: input.readXhsProfile,
-    restrictShellToWorkspace: input.restrictShellToWorkspace === true || Boolean(input.cwd),
+    restrictShellToWorkspace: input.restrictShellToWorkspace === true || resolvedCwdFromBoundFolder,
     workspaceToolsHint: input.workspaceToolsHint === true,
     dialogId: asOptionalTrimmedString(input.continueDialogId),
     spaceId: turnSpaceId,

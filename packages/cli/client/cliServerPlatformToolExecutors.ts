@@ -165,37 +165,17 @@ export function buildServerPlatformToolExecutors(args: {
           };
         }
 
-        // 与 exaSearchFunc 镜像同一份 body（plan 第 3 节契约）：
-        // intent 原样转发，没给就不带这个键，由服务端按场景定档；
-        // useAutoprompt 已废弃不转发；type 不再补默认值（服务端按 plan 定档）。
-        const body: Record<string, any> = {
+        const body = {
           query: parsed.query,
-          ...(parsed.numResults !== undefined ? { numResults: parsed.numResults } : {}),
+          numResults: parsed.numResults ?? 5,
+          useAutoprompt: parsed.useAutoprompt ?? true,
+          type: parsed.type ?? "neural",
+          // Model schema uses `includeContent` (boolean); the Exa API
+          // expects `contents: { text: true }`. Mirror exaSearchFunc's
+          // conversion so CLI proxy results match web behavior.
+          contents:
+            parsed.includeContent !== false ? { text: true } : undefined,
         };
-        if (typeof parsed.intent === "string" && parsed.intent) {
-          body.intent = parsed.intent;
-        }
-        if (typeof parsed.category === "string" && parsed.category) {
-          body.category = parsed.category;
-        }
-        if (typeof parsed.timeRange === "string" && parsed.timeRange) {
-          body.timeRange = parsed.timeRange;
-        }
-        if (Array.isArray(parsed.includeDomains) && parsed.includeDomains.length > 0) {
-          body.includeDomains = parsed.includeDomains;
-        }
-        if (Array.isArray(parsed.excludeDomains) && parsed.excludeDomains.length > 0) {
-          body.excludeDomains = parsed.excludeDomains;
-        }
-        // legacy：includeContent 只作兼容映射透传（服务端映射为 detail），不补默认值。
-        if (typeof parsed.includeContent === "boolean") {
-          body.includeContent = parsed.includeContent;
-        }
-        // 定档信号：CLI 手里没有 dialog 消息历史（无 Redux store），
-        // priorSearches / lastResultCount 拿不到就**不发**——服务端对缺失键跳过
-        // 对应规则。origin 由 agent-runtime 从 turn 输入推导后随 call 注入
-        // （toolCallTransaction → AgentRuntimeToolCallInput.origin），有才发。
-        if (call?.origin) body.origin = call.origin;
         const content = await postServer("/api/exa-search", body);
         return {
           content,

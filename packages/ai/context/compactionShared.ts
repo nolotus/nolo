@@ -20,7 +20,6 @@
  */
 
 import { serializeMessageContent } from "core/chat/messageContentSerialize";
-import { sha256Hex } from "core/sha256";
 import { estimateTokenCount } from "./tokenUtils";
 import { getMessageTokenCount, type TokenCountableMessage } from "./planCompression";
 
@@ -644,54 +643,4 @@ export function formatCompactionMetricsLog(metrics: CompactionMetrics): string {
     ? `, summary_llm_in=${metrics.summaryUsage.input_tokens ?? "?"} out=${metrics.summaryUsage.output_tokens ?? "?"}`
     : "";
   return `[Compaction] reason=${metrics.reason} compressed=${metrics.compressedCount}->${metrics.retainedCount} msgs, tokens=${totalBefore}->${totalAfter} (ratio=${ratio})${llmInfo}`;
-}
-
-// --- 摘要锚点元数据（内容寻址哈希与失效检测） ---
-
-export type SummarySourceMetadata = {
-  sourceHash: string;
-  sourceCount: number;
-  schemaVersion: number;
-};
-
-export type SummarySourceMessageInput = {
-  id: string;
-  role?: string;
-  content?: unknown;
-  tool_calls?: unknown;
-  [key: string]: unknown;
-};
-
-/**
- * 共享纯函数：计算摘要锚点切片的元数据（sourceHash / sourceCount / schemaVersion）。
- *
- * 显式接收带 ID 的消息视图，不自行猜测 ID。
- * 锚点定位：通过传入的真实或本地 ID 定位 summarizedBeforeId。
- * 切片投影：统一将切片消息投影为稳定的 `local-${index}` 键（与 Runtime hashSummarySourceSlice
- * 结构对齐），仅包含 id / role / content / tool_calls（仅存在时包含）。
- * 使用 core 的纯 JS SHA-256 实现，避免依赖 Web Crypto API（RN 环境可能不提供 subtle）。
- *
- * 若 summarizedBeforeId 未提供或在 messagesWithIds 中未找到锚点，返回 undefined。
- */
-export function computeSummarySourceMetadata(
-  messagesWithIds: SummarySourceMessageInput[],
-  summarizedBeforeId?: string,
-): SummarySourceMetadata | undefined {
-  if (!summarizedBeforeId) return undefined;
-  const found = messagesWithIds.findIndex((m) => m.id === summarizedBeforeId);
-  if (found === -1) return undefined;
-
-  const slice = messagesWithIds.slice(0, found + 1).map((m, index) => ({
-    id: `local-${index}`,
-    role: m.role,
-    content: m.content ?? "",
-    ...(Array.isArray(m.tool_calls) ? { tool_calls: m.tool_calls } : {}),
-  }));
-
-  const sourceHash = sha256Hex(JSON.stringify(slice));
-  return {
-    sourceHash,
-    sourceCount: found + 1,
-    schemaVersion: COMPACTION_SUMMARY_SCHEMA_VERSION,
-  };
 }

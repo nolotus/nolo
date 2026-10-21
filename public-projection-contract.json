@@ -18,6 +18,7 @@
     "form",
     "identity",
     "integrations",
+    "lab",
     "render",
     "share",
     "shared",
@@ -53,10 +54,6 @@
       "role": "build"
     },
     {
-      "path": "scripts/dev/staticImportClosure.js",
-      "role": "build"
-    },
-    {
       "path": "scripts/public-build/stylexBunPlugin.ts",
       "role": "build"
     },
@@ -86,10 +83,6 @@
     },
     {
       "path": "scripts/public-audit/verifyReleaseUpdateCompatibility.ts",
-      "role": "release"
-    },
-    {
-      "path": "scripts/release/validateCliVersionSource.ts",
       "role": "release"
     },
     {

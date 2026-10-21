@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -19,22 +19,15 @@ export function extensionIdFromPublicKey(publicKeyBase64) {
   ).join("");
 }
 
-/** Resolve a standalone script runtime, never the packaged desktop process.execPath. */
-export function resolveNativeHostRuntimePath({ env = process.env } = {}) {
-  for (const runtime of ["bun", "node"]) {
-    try {
-      const output = execFileSync("/usr/bin/env", [runtime, "-e",
-        'console.log(JSON.stringify({execPath:process.execPath,bun:process.versions.bun,node:process.versions.node}))',
-      ], { env, encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] });
-      const probe = JSON.parse(output.trim());
-      if (isAbsolute(probe.execPath) && (runtime === "bun" ? probe.bun : probe.node && !probe.bun)) {
-        return probe.execPath;
-      }
-    } catch {
-      // A missing runtime or an app executable that cannot evaluate scripts is not a candidate.
-    }
+function resolveNodePath() {
+  if (typeof Bun !== "undefined" && typeof Bun.which === "function") {
+    const bunResolvedNode = Bun.which("node");
+    if (bunResolvedNode) return bunResolvedNode;
   }
-  throw new Error("Native host requires a standalone Bun executable (preferred) or Node.js on PATH; install Bun or pass nodePath explicitly.");
+  const resolved = execFileSync("/usr/bin/env", ["node", "-p", "process.execPath"], {
+    encoding: "utf8",
+  }).trim();
+  return resolved || "node";
 }
 
 /**
@@ -135,7 +128,7 @@ export function installNativeHostManifest({
   const resolvedExtensionId =
     extensionId ||
     (browser === "firefox" ? FIREFOX_EXTENSION_ID : extensionIdFromPublicKey(extensionManifest.key));
-  const resolvedNodePath = nodePath || resolveNativeHostRuntimePath();
+  const resolvedNodePath = nodePath || resolveNodePath();
 
   mkdirSync(paths.supportDir, { recursive: true });
   const existingToken = existsSync(paths.tokenPath)
@@ -307,24 +300,10 @@ export function installNativeHostManifests({
 } = {}) {
   const installs = [];
   const errors = [];
-  // Resolve the runtime once per batch: the probe spawns a real process, and installing for two
-  // browsers must not pay for it twice.
-  let resolvedRuntime = nodePath;
-  if (!resolvedRuntime) {
-    try {
-      resolvedRuntime = resolveNativeHostRuntimePath();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      for (const target of resolveNativeHostInstallTargets({ home, platform, browser })) {
-        errors.push({ browser: target, message });
-      }
-      return { installs, errors };
-    }
-  }
   for (const target of resolveNativeHostInstallTargets({ home, platform, browser })) {
     try {
       installs.push(
-        installNativeHostManifest({ home, connectorRoot, platform, extensionId, nodePath: resolvedRuntime, browser: target }),
+        installNativeHostManifest({ home, connectorRoot, platform, extensionId, nodePath, browser: target }),
       );
     } catch (error) {
       errors.push({ browser: target, message: error instanceof Error ? error.message : String(error) });

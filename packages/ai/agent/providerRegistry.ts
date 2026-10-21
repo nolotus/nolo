@@ -225,37 +225,13 @@ const TOGETHER_MODEL_OPTIONS: ReadonlyArray<{
   { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
 ];
 
-/**
- * MiniMax 开放平台（api.minimaxi.com/v1，OpenAI 兼容，按量计费，用户自带 Key）可选模型。
- *
- * 依据（2026-10-19 核对）：
- * - 官方模型列表 https://platform.minimaxi.com/docs/faq/models.md「可用模型 → 语言模型」
- *   当前只有 `MiniMax-M3.1-Flash`（原生多模态、1M 上下文、思考深度可调）与
- *   `MiniMax-M3`（原生多模态、1M 上下文），本清单与之一致。
- * - 同页「历史模型」标注 M2.7 / M2.5 / M2.1 / M2 系**已下线**（M2.5、M2.7 系列自
- *   2026-10-19 起停止向新用户开放、2026-11-18 正式下线），故不作为新 agent 的候选。
- * - `GET /v1/models` 只用来核对 id 拼写：它会把已下线 / 待下线的 id 一并列出
- *   （实测返回 M2.x 共 9 个），不能用它判定「可用」；M2.x 目前仍可被存量 Key 调用，
- *   且该 preset 的 live discovery 会把平台返回的 id 合并进下拉，历史模型不会消失。
- * 第一项为推荐默认。这里同样是用户自带 Key 的 metered 通道，平台不承担成本、不扣积分；
- * 请求层不做 id remap（直传形如 MiniMax-M3.1-Flash 的官方 id）。旧 id（MiniMax-Text-01 与
- * M2 系）按官方下线 SOP 在 `packages/core/modelUpgradeTable.ts` 里指向 M3.1 Flash，
- * 不在此静态清单重复出现，避免两处真值。
- */
-const MINIMAX_MODEL_OPTIONS: ReadonlyArray<{
-  id: string;
-  label: string;
-  recommended?: boolean;
-  hasVision?: boolean;
-}> = [
-  {
-    id: "MiniMax-M3.1-Flash",
-    label: "MiniMax M3.1 Flash",
-    recommended: true,
-    hasVision: true,
-  },
-  { id: "MiniMax-M3", label: "MiniMax M3", hasVision: true },
-];
+export type WorkBuddyModelPricing = {
+  rate?: number;
+  free: boolean;
+  rateWas?: number;
+  observedAt: number;
+  requiresActivePackage: true;
+};
 
 export type OAuthProviderConfig = {
   kind: "oauth";
@@ -273,6 +249,7 @@ export type OAuthProviderConfig = {
     label: string;
     recommended?: boolean;
     hasVision?: boolean;
+    pricing?: WorkBuddyModelPricing;
   }>;
   /** Cloud Code Assist base URL for direct HTTP (Antigravity) */
   cloudCodeBaseUrl?: string;
@@ -337,6 +314,38 @@ export type ProviderRegistryEntry = OAuthProviderConfig | ApiKeyTemplateConfig;
 
 // Subscription OAuth 提供商（需要用户先登录）
 export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
+  {
+    kind: "oauth",
+    id: "workbuddy",
+    label: "WorkBuddy",
+    description: "使用 WorkBuddy 国内账号及其套餐权益；可用额度与费率可能随活动变化，具体以账号页面为准。",
+    apiKeyRef: "workbuddy",
+    provider: "workbuddy",
+    defaultModel: "auto",
+    modelOptions: [
+      { id: "auto", label: "Auto", recommended: true },
+      { id: "hy3", label: "Hy3" },
+      { id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash" },
+      { id: "glm-5.3", label: "GLM-5.3" },
+      { id: "kimi-k3-1", label: "Kimi K3" },
+    ],
+  },
+  {
+    kind: "oauth",
+    id: "workbuddy-ai",
+    label: "WorkBuddy AI",
+    description: "Use your WorkBuddy AI account and its package benefits. Available quota and rates may change with promotions; check your account for current details.",
+    apiKeyRef: "workbuddy-ai",
+    provider: "workbuddy-ai",
+    defaultModel: "default-model",
+    modelOptions: [
+      { id: "default-model", label: "Default", recommended: true },
+      { id: "fast-model", label: "Fast" },
+      { id: "balanced-model", label: "Balanced" },
+      { id: "gpt-5.5", label: "GPT-5.5" },
+      { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
+    ],
+  },
   {
     kind: "oauth",
     id: "chatgpt",
@@ -792,8 +801,7 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     label: "MiniMax API",
     provider: "minimax",
     baseUrl: "https://api.minimaxi.com/v1",
-    defaultModel: "MiniMax-M3.1-Flash",
-    modelOptions: MINIMAX_MODEL_OPTIONS,
+    defaultModel: "MiniMax-Text-01",
     commercialKind: "api",
     accessVariant: "metered_key",
   },

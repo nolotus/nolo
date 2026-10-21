@@ -1,4 +1,3 @@
-import { resolveCredentialEnvironment } from "core/credentialEnvironment";
 import {
   createProviderCredentialIdentity,
   type ProviderApiKeySource,
@@ -20,10 +19,11 @@ const providerAccountAlias = (provider: string, env: RuntimeCredentialEnv) => {
   );
 };
 
-const credentialEnvironment = (env: RuntimeCredentialEnv) => {
-  // 与其它凭据路径共用同一套环境判定（core/credentialEnvironment）；缺省仍是 undefined。
-  return resolveCredentialEnvironment(env);
-};
+const credentialEnvironment = (env: RuntimeCredentialEnv) =>
+  env.NOLO_DEPLOY_ENV?.trim() ||
+  env.NOLO_ENV?.trim() ||
+  env.NODE_ENV?.trim() ||
+  undefined;
 
 export async function resolveRuntimeProviderCredential({
   provider,

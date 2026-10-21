@@ -1,16 +1,5 @@
 # Security Policy
 
-This repository is a public source projection generated from Nolo's private
-canonical repository for privacy and security auditing of the CLI, desktop app,
-and other clients whose source has been made public here. It does not include
-unreleased mobile clients or cloud service backends.
-
-Privacy and security feedback is welcome. This is not a traditional community
-co-development repository, and routine feature pull requests are not accepted.
-No response or remediation timeline is promised. This maintenance policy does not
-restrict the rights granted by the MIT license, including use, modification,
-forking, and redistribution.
-
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability, please **do not** open a public issue.
@@ -31,12 +20,12 @@ Instead, email security@nolo.chat with details and reproduction steps.
 
 ## Defense in Depth
 
-The private generation process applies projection boundary checks before export.
-In this public repository, run `bun scripts/public-audit/verifyProjection.ts`
-to check the exported projection contract. These are build-time controls, not a
-substitute for security review.
+The public projection includes a safety gate (`prepareNoloOpenSourceMirror.ts`)
+that prevents private modules (auth, billing, server) from leaking into the
+public repository. This is a build-time control, not a substitute for security review.
 
-## Response Expectations
+## Response Timeline
 
-Privacy and security reports are welcome, but acknowledgment, assessment, and
-fixes have no guaranteed response times or service-level commitments.
+- Acknowledgment: within 48 hours
+- Initial assessment: within 7 days
+- Fix or mitigation: depends on severity

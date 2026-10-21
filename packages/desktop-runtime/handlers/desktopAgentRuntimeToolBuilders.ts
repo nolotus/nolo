@@ -247,7 +247,6 @@ export function buildDesktopServerWebToolBody(
   toolName: (typeof DESKTOP_SERVER_WEB_TOOL_NAMES)[number],
   args: Record<string, any>,
   dialogId?: string,
-  origin?: AgentRuntimeToolCallInput["origin"],
 ): Record<string, unknown> {
   switch (toolName) {
     case "fetchWebpage":
@@ -257,7 +256,6 @@ export function buildDesktopServerWebToolBody(
         query: args.query,
         numResults: args.numResults ?? 5,
         contents: args.contents,
-        ...(origin !== undefined ? { origin } : {}),
       }, dialogId);
     case "firecrawl_scrape":
       return withDesktopDialogId({
@@ -531,7 +529,7 @@ export function buildDesktopServerPlatformToolExecutors(args: DesktopServerPlatf
   const webExecutors = Object.fromEntries(
     DESKTOP_SERVER_WEB_TOOL_NAMES.map((toolName) => [
       toolName,
-      async (call: AgentRuntimeToolCallInput) => {
+      async (call: any) => {
         const parsed = parseNoloWorkspaceToolArguments(call.arguments);
         const path =
           toolName === "fetchWebpage" ? "/api/fetch-webpage"
@@ -541,7 +539,7 @@ export function buildDesktopServerPlatformToolExecutors(args: DesktopServerPlatf
         // Body fields/defaults match externalContentServerTools; no local EXA/FIRECRAWL keys or billing.
         const content = await postServer(
           path,
-          buildDesktopServerWebToolBody(toolName, parsed, args.dialogId, call.origin),
+          buildDesktopServerWebToolBody(toolName, parsed, args.dialogId),
         );
         return {
           content,

@@ -1,4 +1,3 @@
-import { normalizeSpaceSavePatch } from "./spaceSaveNormalization";
 import { selectIdentityUserId } from "identity/selectors";
 import { toErrorMessage } from "core/errorMessage";
 import { read, patch } from "database/dbSlice";
@@ -16,10 +15,11 @@ export const updateSpaceAction = async (
     name?: string;
     description?: string;
     visibility?: SpaceVisibility;
+    boundFolder?: string;
   },
   thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
 ) => {
-  const { spaceId, name, description, visibility } = input;
+  const { spaceId, name, description, visibility, boundFolder } = input;
   const { dispatch, getState } = thunkAPI;
   const state = getState();
   const userId = selectIdentityUserId(state);
@@ -49,23 +49,23 @@ export const updateSpaceAction = async (
   }
 
   const changes: Partial<SpaceData> & { updatedAt?: number } = {};
+  let hasChanges = false;
   if (name !== undefined && name !== spaceData.name) {
     changes.name = name.trim();
+    hasChanges = true;
   }
   if (description !== undefined && description !== spaceData.description) {
     changes.description = description;
+    hasChanges = true;
   }
   if (visibility !== undefined && visibility !== spaceData.visibility) {
     changes.visibility = visibility;
+    hasChanges = true;
   }
-  // Legacy Space folder is removed on any settings save; Project owns local cwd.
-  // The normalization result states explicitly whether a legacy cleanup happened,
-  // so `hasChanges` never depends on comparing key counts.
-  const { changes: normalizedChanges, hasLegacyCleanup } = normalizeSpaceSavePatch(
-    spaceData,
-    changes,
-  );
-  const hasChanges = Object.keys(changes).length > 0 || hasLegacyCleanup;
+  if (boundFolder !== undefined && (boundFolder || undefined) !== (spaceData.boundFolder || undefined)) {
+    changes.boundFolder = boundFolder || undefined;
+    hasChanges = true;
+  }
 
   // 如果没有实际的值变化，直接返回，避免不必要的写入操作
   if (!hasChanges) {
@@ -74,15 +74,13 @@ export const updateSpaceAction = async (
 
   const now = Date.now();
   changes.updatedAt = now;
-  // `updatedAt` must reach the database: it is part of the submitted payload.
-  const patchChanges: Record<string, unknown> = { ...normalizedChanges, updatedAt: now };
 
   let updatedSpaceData: SpaceData;
   try {
     updatedSpaceData = await dispatch(
       patch({
         dbKey: spaceKey,
-        changes: patchChanges,
+        changes,
       })
     ).unwrap();
   } catch (patchError) {
