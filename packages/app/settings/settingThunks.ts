@@ -204,7 +204,12 @@ export const changeDarkMode = createAsyncThunk(
 export const toggleShowThinking = createAsyncThunk(
   "settings/toggleShowThinking",
   async (_: void, { dispatch, getState }) => {
-    const currentShowThinking = (getState() as any).settings.showThinking;
+    const userId = selectIdentityUserId(getState() as any);
+    const owner = getAccountChatDisplayOwner(getState);
+    // Keep legacy Redux mirror as fallback while account hydration is pending.
+    const currentShowThinking = userId && owner.getAccountId() === userId
+      ? owner.getSnapshot().showThinking
+      : (getState() as any).settings.showThinking;
     return dispatch(
       setSettings({ showThinking: !currentShowThinking }),
     ).unwrap();
