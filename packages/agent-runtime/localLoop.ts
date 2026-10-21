@@ -65,6 +65,7 @@ import { createTurnUsageLedger } from "./turnUsageLedger";
 export { addOutOfBandUsage } from "./turnUsageLedger";
 import { buildIdentityBlock } from "./identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
+import { CREDENTIAL_HYGIENE_RULE } from "./credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
 import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
 import { buildConsultationModeBlock } from "./consultationMode";
@@ -964,6 +965,8 @@ export async function runLocalAgentTurn(
     // 删除安全红线：系统层最高优先级约束，位于所有块之前（含身份信息块），
     // owner 要求常驻「根本提示词」的最顶部（2026-09-26 批量误删事故）。
     { content: DELETE_SAFETY_RED_LINE, cacheScope: "session" as const },
+    // 凭据纪律：与红线同为系统层固定块，紧随其后（四条装配线同源）。
+    { content: CREDENTIAL_HYGIENE_RULE, cacheScope: "session" as const },
     // 并行是默认：系统层固定块，紧随红线（localLoop 无 static 作用域，用 session 占位，
     // 「最顶」由数组首位保证——与红线同一约定）。
     { content: PARALLEL_DISPATCH_DEFAULT_RULE, cacheScope: "session" as const },

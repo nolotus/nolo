@@ -13,6 +13,7 @@ import { wrapHistoricalSummaryWithReplayGuard } from "ai/context/staleReplayGuar
 import { MEMORY_USE_GUIDANCE } from "agent-runtime/memoryUseGuidance";
 import { buildIdentityBlock } from "agent-runtime/identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "agent-runtime/deleteSafety";
+import { CREDENTIAL_HYGIENE_RULE } from "agent-runtime/credentialHygiene";
 // 「并行是默认」与删除红线一样属于系统层固定约束：无条件注入，不做工具门控。
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDefault";
 import { PLATFORM_RISK_CONTROL_RULE } from "agent-runtime/platformRiskControl";
@@ -284,6 +285,13 @@ export const buildSystemPromptContext = (options: {
       owner: "platform",
       cacheScope: "static",
       content: DELETE_SAFETY_RED_LINE,
+    },
+    // 凭据纪律：与红线同为无条件系统层块，四条装配线同源。
+    {
+      id: "credential-hygiene",
+      owner: "platform",
+      cacheScope: "static",
+      content: CREDENTIAL_HYGIENE_RULE,
     },
     // 并行是默认：系统层固定块，紧随红线（同为无条件前缀，不随工具/轮次变化）。
     {

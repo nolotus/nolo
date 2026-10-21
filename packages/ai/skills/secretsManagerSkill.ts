@@ -116,7 +116,9 @@ export function buildSecretsManagerSkillConfig(
     id: buildSecretsManagerSkillId(slug),
     name: seed.title,
     description: seed.description,
-    triggerMode: "manual",
+    // 合法枚举是 explicit / required / recommended；"manual" 会被
+    // normalizeSkillEnumValue 静默丢弃，导致 front-matter 的 triggerMode 为空。
+    triggerMode: "explicit",
   };
 }
 
