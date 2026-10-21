@@ -16,6 +16,9 @@ import { SidebarAppDeleteDialog } from "create/space/SidebarAppDeleteDialog";
 import { MenuPopover } from "render/web/ui/MenuPopover";
 import { SidebarItemMoreMenu } from "create/space/SidebarItemMoreMenu";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { buildRoutableContentPath, normalizeAppRouteId } from "create/space/contentKeyUtils";
+import { buildAppDetailPath } from "app/constants/appEditor";
+import { useQuickFavorites, setQuickFavorite, moveQuickFavorite } from "../quickFavoriteStore";
 
 /**
  * Minimal item shape shared by SpaceContent (space view) and
@@ -68,6 +71,7 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
   const dispatch = useAppDispatch();
   const currentSpaceId = useCurrentSpaceId();
   const currentUserId = useUserId();
+  const quickFavorites = useQuickFavorites(currentUserId ?? "");
   const currentPath = `${location.pathname}${location.search}`;
 
   const [menuAnchorEl, setMenuAnchorEl] = React.useState<HTMLElement | null>(null);
@@ -207,6 +211,22 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
                 sourceServerOrigin: activeItem.serverOrigin,
               })
             }
+            quickAction={blockId === "favorites" && currentUserId &&
+              ["agent", "page", "table", "app", "dialog"].includes(activeItem.type) ? {
+                active: quickFavorites.some(quick => quick.key === activeItem.contentKey),
+                canMoveUp: quickFavorites.findIndex(quick => quick.key === activeItem.contentKey) > 0,
+                canMoveDown: quickFavorites.findIndex(quick => quick.key === activeItem.contentKey) >= 0 && quickFavorites.findIndex(quick => quick.key === activeItem.contentKey) < quickFavorites.length - 1,
+                onMove: direction => moveQuickFavorite(currentUserId, activeItem.contentKey, direction),
+                onToggle: () => {
+                  const path = activeItem.type === "app"
+                    ? buildAppDetailPath(normalizeAppRouteId(activeItem.contentKey), activeItemSpaceId, activeItem.serverOrigin)
+                    : buildRoutableContentPath({ contentKey: activeItem.contentKey, type: activeItem.type,
+                        userId: currentUserId, spaceId: activeItemSpaceId });
+                  setQuickFavorite(currentUserId, { key: activeItem.contentKey,
+                    type: activeItem.type, title: activeItem.title || t("unnamed"), path },
+                    !quickFavorites.some(quick => quick.key === activeItem.contentKey));
+                },
+              } : undefined}
             onClose={closeMenu}
           />
         </MenuPopover>

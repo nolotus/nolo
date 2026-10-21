@@ -488,7 +488,7 @@ const MainLayout: React.FC = () => {
           <aside
             ref={sidebarRef}
             className={`MainLayout__sidebar ${isOpen ? "is-open" : ""} ${railOnly ? "MainLayout__sidebar--rail-only" : ""}`}
-            style={shouldRenderMobileLayout ? undefined : { width: railOnly ? 48 : sidebarWidth }}
+            style={shouldRenderMobileLayout ? undefined : { width: railOnly ? 44 : sidebarWidth }}
           >
             <div className="MainLayout__sidebarContent">{sidebarContent}</div>
             {/* ChatSidebar owns its Rail footer; non-Chat sidebars keep the legacy footer. */}
