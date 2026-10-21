@@ -28,6 +28,7 @@ import {
 } from "ai/policy/types";
 
 import { updateSettingsState } from "./settingActions";
+import { enqueueAccountSettingsWrite } from "./accountSettingsWriteQueue";
 import { getAccountChatDisplayOwner, pickAccountChatDisplayPreferences } from "./accountChatDisplayOwner";
 import { getSettingDbActionThunks } from "./dbActionThunks";
 import {
@@ -141,33 +142,37 @@ export const setSettings = createAsyncThunk<
   owner.setAccount(userId);
   owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
   dispatch(updateSettingsState(persistencePlan.normalizedChanges));
-  const nextDefaultAgentId =
-    normalizeDefaultAgentIdSetting(
-      persistencePlan.normalizedChanges.defaultAgentId,
-    ) ?? null;
-  if (
-    hasOwn(changes, "defaultAgentId") &&
-    previousDefaultAgentId !== (nextDefaultAgentId ?? SYSTEM_DEFAULT_AGENT_ID)
-  ) {
-    await persistDefaultAgentRegister(
-      dispatch as unknown as (action: unknown) => {
-        unwrap: () => Promise<unknown>;
-      },
-      getState as unknown as () => {
-        db: { entities: Record<string, unknown> };
-      },
-      userId,
-      nextDefaultAgentId,
-    );
-  }
-  if (persistencePlan.settingsPatch) {
-    await dispatch(
-      getSettingDbActionThunks().upsert({
-        dbKey: persistencePlan.settingsPatch.dbKey,
-        data: persistencePlan.settingsPatch.changes,
-      }),
-    ).unwrap();
-  }
+  // Preserve persistence ordering for overlapping writes by this account.
+  // Local UI/Owner publication above remains immediate and optimistic.
+  await enqueueAccountSettingsWrite(getState, userId, async () => {
+    const nextDefaultAgentId =
+      normalizeDefaultAgentIdSetting(
+        persistencePlan.normalizedChanges.defaultAgentId,
+      ) ?? null;
+    if (
+      hasOwn(changes, "defaultAgentId") &&
+      previousDefaultAgentId !== (nextDefaultAgentId ?? SYSTEM_DEFAULT_AGENT_ID)
+    ) {
+      await persistDefaultAgentRegister(
+        dispatch as unknown as (action: unknown) => {
+          unwrap: () => Promise<unknown>;
+        },
+        getState as unknown as () => {
+          db: { entities: Record<string, unknown> };
+        },
+        userId,
+        nextDefaultAgentId,
+      );
+    }
+    if (persistencePlan.settingsPatch) {
+      await dispatch(
+        getSettingDbActionThunks().upsert({
+          dbKey: persistencePlan.settingsPatch.dbKey,
+          data: persistencePlan.settingsPatch.changes,
+        }),
+      ).unwrap();
+    }
+    });
   // No post-await client-state publication: completion order is not intent order.
   return persistencePlan.normalizedChanges;
 });
