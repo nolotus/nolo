@@ -64,6 +64,8 @@ export const getSettings = createAsyncThunk<
       .unwrap()
       .catch(() => null),
   ]);
+  // A pending cloud read must not hydrate a different signed-in account.
+  if (selectIdentityUserId(getState() as any) !== userId) return null;
   const authorityHomeServer =
     readUserPreferenceRegisterValue<string>(
       authorityHomeRecord,
