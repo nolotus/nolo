@@ -81,6 +81,13 @@ export async function runConfirmDialog(args: {
   mouseEnabled?: boolean;
   registerForegroundRepaint?: (repaint: () => void) => void;
   session?: DialogSession;
+  /**
+   * Called once when the user approves, before the dialog resolves `true`.
+   * Approving means "remember this permission class", so callers use it to
+   * record + persist the relevant bucket (local-run / remote-origin).
+   * A throwing callback must never turn the approval into a rejection.
+   */
+  onApprove?: () => void;
 }): Promise<boolean> {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
@@ -89,6 +96,9 @@ export async function runConfirmDialog(args: {
     return false;
   }
 
+  // Two rows only: approve (remember this class + persist it) / reject.
+  // There is no "this once" option — an approval that forgets is exactly what
+  // made the user confirm the same class forever.
   const items: ConfirmDialogItem[] = [
     {
       label: t("dialogConfirmAllowLabel"),
@@ -101,6 +111,8 @@ export async function runConfirmDialog(args: {
       value: false,
     },
   ];
+  // Cursor rests on reject: Enter on a permission prompt must not grant.
+  const rejectIndex = items.length - 1;
 
   // Build the title block as pre-rendered lines so the command can carry its
   // own danger color (renderDialogTitle wraps the whole string in one color
@@ -114,12 +126,24 @@ export async function runConfirmDialog(args: {
   // title/body verbatim.
   let titleText = args.request.title;
   let bodyText = args.request.body;
+  // Local-run bucket: its three classes share one approval, so each dialog
+  // names its own class and then states what approving covers + how to undo.
+  let localRunClass = false;
   if (args.request.action === "destructive_shell_command") {
     titleText = t("dialogConfirmTitle");
     bodyText = t("dialogConfirmBody");
+    localRunClass = true;
   } else if (args.request.action === "external_file_access") {
     titleText = t("dialogConfirmExternalFileTitle");
     bodyText = t("dialogConfirmExternalFileBody");
+    localRunClass = true;
+  } else if (args.request.action === "file_write") {
+    titleText = t("dialogConfirmFileWriteTitle");
+    bodyText = t("dialogConfirmFileWriteBody");
+    localRunClass = true;
+  }
+  if (localRunClass && bodyText && args.onApprove) {
+    bodyText = `${bodyText}\n${t("dialogConfirmRememberLocal")}`;
   }
 
   const terminalWidth =
@@ -139,14 +163,14 @@ export async function runConfirmDialog(args: {
   const result = await runSelectDialog({
     items,
     signal: args.signal,
-    initialIndex: 1,
+    initialIndex: rejectIndex,
     titleLines,
     input,
     output,
-    // Fixed by the modal-ownership spec: this two-item gate never owns the
-    // wheel — "transcript" routes wheel/page events to the workspace history,
+    // Fixed by the modal-ownership spec: this gate never owns the wheel —
+    // "transcript" routes wheel/page events to the workspace history,
     // and when no transcript callback exists (standalone runs) the event is
-    // simply dropped. The wheel must never flip Allow/Cancel.
+    // simply dropped. The wheel must never flip Approve/Reject.
     inputPolicy: { wheel: "transcript", pageKeys: "transcript" },
     onTranscriptScroll: args.onTranscriptScroll,
     mouseEnabled: args.mouseEnabled,
@@ -161,5 +185,17 @@ export async function runConfirmDialog(args: {
     return false;
   }
 
-  return (result.item as ConfirmDialogItem).value;
+  const chosen = result.item as ConfirmDialogItem;
+  if (chosen.value === true && args.onApprove) {
+    // Remembering the grant is a side effect of approving *this* action, so a
+    // failed write (read-only config, no profile) must never flip the answer
+    // to "rejected" — the user approved, and the callback reports the failure.
+    try {
+      args.onApprove();
+    } catch {
+      /* best-effort: the approval below still stands */
+    }
+  }
+
+  return chosen.value;
 }

@@ -909,6 +909,12 @@ export async function resolveActionGate(
     pauseComposer: () => void;
     resumeComposerFromSubprocess: () => void;
     resumeComposerFromDialog: () => void;
+    /**
+     * Approve hook for the local-run bucket: approving a `confirm` gate
+     * remembers + persists that bucket (see permissionGrantPersist). Omitted
+     * by callers that must keep a per-call decision.
+     */
+    onApprove?: () => void;
   },
 ): Promise<AgentRuntimeToolResult> {
   if (gate.kind === "confirm") {
@@ -917,6 +923,7 @@ export async function resolveActionGate(
         request: asConfirmPermissionRequest(gate),
         input: deps.input as NodeJS.ReadStream,
         output: deps.output,
+        onApprove: deps.onApprove,
         ...anchor,
       }),
     );
@@ -1150,7 +1157,7 @@ export async function runOneAgentTurn(
     // readlineWorkspace 的 actionGateHandler 短路同源（`state` 是可变绑定，
     // 这里读到的永远是最新值，busy 期间 /auto 也生效）；权限决定仍由 handler
     // 自己做，这里只决定报不报 blocked。
-    if (ctx.state.autoConfirm && isAutoConfirmableFileWriteGate(gate)) {
+    if (ctx.state.permissionGrants?.local === true && isAutoConfirmableFileWriteGate(gate)) {
       return await actionGateHandler(gate);
     }
     emitStatusUnlessForceStopped({
@@ -1172,7 +1179,7 @@ export async function runOneAgentTurn(
   const confirmDestructiveActionWithStatus =
     confirmDestructiveAction && ctx.output.isTTY === true
       ? async (request: PermissionRequest): Promise<boolean> => {
-          if (ctx.state.autoConfirm) return await confirmDestructiveAction(request);
+          if (ctx.state.permissionGrants?.local === true) return await confirmDestructiveAction(request);
           emitStatusUnlessForceStopped({ state: "blocked", kind: "permission" });
           try {
             return await confirmDestructiveAction(request);

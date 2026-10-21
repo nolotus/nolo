@@ -3,6 +3,7 @@ import type { TurnTokenUsage } from "../client/tokenUsage";
 import type { CliUpdateInfo } from "../updateCommands";
 import type { AttachedImage } from "./pasteImage";
 import type { GitStatus } from "./gitStatus";
+import type { PermissionGrants } from "../client/profileConfig";
 
 export type ThinkingDisplayMode = "show" | "hide";
 
@@ -164,13 +165,18 @@ export type TuiState = {
    */
   cachedMemoryOverlay?: string | null;
   /**
-   * 会话级权限自动化——true 时 TUI 的 confirmDestructiveAction 跳过确认弹窗，
-   * 直接放行破坏性 shell 命令与工作区外部文件访问。仅影响 TUI 的确认回调，
-   * actionGate（handoff/input 类）不受影响。通过 /auto <on|off> 切换，
-   * 默认 off（undefined 视同 off），不持久化，/new / 切换对话也不清除，
-   * 仅随当前 TUI 进程存活。
+   * 两个互相独立的授权桶（缺省 = 逐次询问，即 ask）：
+   * - `local`：本机 run 的三类确认——破坏性 shell 命令、工作区外文件访问、
+   *   写文件 confirm gate。批准一次即记住，本机同类确认不再询问。
+   * - `remote`：远程来源（分享 / owner-required agent）在本机执行 shell 的
+   *   per-call 确认与会话授权。批准一次即记住，不再逐条询问。
+   * 两桶互不连带。持久位置：profile 的 `permissionGrants`，经
+   * NOLO_PERMISSION_GRANTS（如 "local,remote"）在下次启动生效。
+   * 撤销入口：`/auto local off`、`/auto remote off`、`/auto reset`（两桶清零）；
+   * `/shell-revoke` 另会撤销本会话 grant 并清掉持久 remote 桶。
+   * `/new`、切换对话都不清除。
    */
-  autoConfirm?: boolean;
+  permissionGrants?: PermissionGrants;
 };
 
 export type TuiAction =

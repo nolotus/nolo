@@ -137,6 +137,19 @@ export function resolveStatusLineCredits(
 
 // ─── Status line ────────────────────────────────────────────────────────────
 
+/**
+ * 权限授权 chip：两桶独立，只列已授权的桶（两桶都授权时退化为 `⏵ auto`）。
+ * null = 两桶都在逐次询问，不渲染任何内容。
+ */
+export function renderPermissionGrantChip(state: TuiState): string | null {
+  const local = state.permissionGrants?.local === true;
+  const remote = state.permissionGrants?.remote === true;
+  if (local && remote) return "⏵ auto";
+  if (local) return "⏵ local";
+  if (remote) return "⏵ remote";
+  return null;
+}
+
 export function renderStatusLine(
   state: TuiState,
   maxWidth?: number,
@@ -223,11 +236,11 @@ export function renderStatusLine(
     parts.push(themeText(`↪ ${pendingProcessCount} pending`, "info", colorEnabled));
   }
 
-  // 会话级权限自动化标识：仅在 /auto on 时出现，提示用户确认弹窗已被跳过
-  // （破坏性 shell / 外部文件访问不再逐次询问）。warning 色与 git 分支 chip
-  // 同语义——"需要留意的状态"。off / undefined 时不渲染任何内容。
-  if (state.autoConfirm === true) {
-    parts.push(themeText("⏵ auto", "warning", colorEnabled));
+  // 权限授权标识：按桶显示（见 renderPermissionGrantChip）。warning 色与 git
+  // 分支 chip 同语义——"需要留意的状态"。两桶都未授权时不渲染任何内容。
+  const grantChip = renderPermissionGrantChip(state);
+  if (grantChip) {
+    parts.push(themeText(grantChip, "warning", colorEnabled));
   }
 
   // Chip fill + one space of padding per side. The padding is part of the
@@ -353,10 +366,9 @@ export function renderStatusLine(
       // Bare `⚡` is never a stage: an icon is not a number, and dropping the fee
       // silently would read as "this turn cost nothing".
       const budget = maxWidth - padWidth;
-      const autoMark =
-        state.autoConfirm === true
-          ? themeText("⏵", "warning", colorEnabled)
-          : "";
+      const autoMark = renderPermissionGrantChip(state)
+        ? themeText("⏵", "warning", colorEnabled)
+        : "";
       const gitCounts = state.gitStatus
         ? themeText(
             `⑂${

@@ -109,6 +109,9 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
     userLanguage: asOptionalTrimmedString(env.NOLO_LANG),
     gitStatus: undefined,
     thinkingDisplay: resolveThinkingDisplayMode(env),
+    // 持久化的授权桶落成 NOLO_PERMISSION_GRANTS（如 "local,remote"）；
+    // 缺失即两桶都未授权（逐次询问）。
+    permissionGrants: parsePermissionGrants(env.NOLO_PERMISSION_GRANTS),
     contextWindow: resolveAgentContextWindow({ agentKey, agentName }),
     estimatedContextTokens: estimateDefaultCliContextTokens({
       cwd,
@@ -119,6 +122,22 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
   };
 }
 
+
+/**
+ * 解析 NOLO_PERMISSION_GRANTS（如 "local,remote"）：只有明确列出的桶才算已
+ * 授权，未知取值一律忽略——缺失/空串 = 两桶都逐次询问。
+ */
+function parsePermissionGrants(raw: string | undefined): {
+  local?: boolean;
+  remote?: boolean;
+} {
+  const grants: { local?: boolean; remote?: boolean } = {};
+  for (const part of (raw ?? "").split(",")) {
+    const kind = part.trim().toLowerCase();
+    if (kind === "local" || kind === "remote") grants[kind] = true;
+  }
+  return grants;
+}
 
 function applyAgentSwitch(
   state: TuiState,
@@ -391,29 +410,57 @@ export function handleTuiInput(
       };
     }
     case "/auto": {
-      const normalizedArg = asTrimmedLowercaseString(argText);
-      if (!normalizedArg) {
-        return {
-          nextState: state,
-          output: `${t("autoCurrent", state.autoConfirm ? "on" : "off")}\n${t("autoUsage")}`,
-        };
-      }
-      if (normalizedArg === "on") {
-        return {
-          nextState: { ...state, autoConfirm: true },
-          output: t("autoOn"),
-        };
-      }
-      if (normalizedArg === "off") {
-        return {
-          nextState: { ...state, autoConfirm: false },
-          output: t("autoOff"),
-        };
-      }
-      return {
-        nextState: state,
-        output: t("autoUsage"),
+      const words = asTrimmedLowercaseString(argText).split(/\s+/).filter(Boolean);
+      const grants: { local?: boolean; remote?: boolean } =
+        state.permissionGrants ?? {};
+      const stateLine = () =>
+        t(
+          "autoStateLine",
+          grants.local === true ? t("autoStateOnPersisted") : t("autoStateOff"),
+          grants.remote === true ? t("autoStateOnPersisted") : t("autoStateOff"),
+        );
+      // 两桶独立：off 用 delete 保持「缺省即 ask」的形状，写盘层据此删键。
+      const applyKinds = (kinds: ("local" | "remote")[], on: boolean) => {
+        const next: { local?: boolean; remote?: boolean } = { ...grants };
+        for (const kind of kinds) {
+          if (on) next[kind] = true;
+          else delete next[kind];
+        }
+        return { ...state, permissionGrants: next };
       };
+      if (words.length === 0) {
+        return { nextState: state, output: `${stateLine()}\n${t("autoUsage")}` };
+      }
+      const [scope, action] = words;
+      if (scope === "reset") {
+        return {
+          nextState: applyKinds(["local", "remote"], false),
+          output: t("autoReset"),
+        };
+      }
+      if (scope === "on" || scope === "off") {
+        const on = scope === "on";
+        return {
+          nextState: applyKinds(["local", "remote"], on),
+          output: t(
+            on ? "autoGrantOn" : "autoGrantOff",
+            `${t("autoKindLocal")} + ${t("autoKindRemote")}`,
+            on ? "/auto off" : "/auto on",
+          ),
+        };
+      }
+      if ((scope === "local" || scope === "remote") && (action === "on" || action === "off")) {
+        const on = action === "on";
+        return {
+          nextState: applyKinds([scope], on),
+          output: t(
+            on ? "autoGrantOn" : "autoGrantOff",
+            scope === "local" ? t("autoKindLocal") : t("autoKindRemote"),
+            `/auto ${scope} ${on ? "off" : "on"}`,
+          ),
+        };
+      }
+      return { nextState: state, output: `${stateLine()}\n${t("autoUsage")}` };
     }
     case "/tasks":
     case "/jobs":

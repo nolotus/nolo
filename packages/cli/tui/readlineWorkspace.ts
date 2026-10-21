@@ -12,8 +12,15 @@ import {
   getAgentSelectionAuditPath,
   getDefaultProfileConfigPath,
   readLastAgentSelectionAudit,
+  permissionGrantList,
   saveProfileAgentSelection,
+  type PermissionGrants,
 } from "../client/profileConfig";
+import {
+  createPermissionGrantEnabler,
+  createSnapshotGuardedApproval,
+  persistPermissionGrantChanges,
+} from "./permissionGrantPersist";
 import { createTuiAccountSessionRuntime } from "./accountSessionRuntime";
 import {
   checkForCliUpdate,
@@ -109,7 +116,7 @@ import {
   startCiDeployEventStream,
 } from "./deployWake";
 import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
-import { createOriginShellGrant } from "../client/originShellGrant";
+import { createOriginShellGrant, type OriginShellGrant } from "../client/originShellGrant";
 import {
   buildProcessTaskCompletedTurnEvent,
   formatProcessTerminalNoticeLine,
@@ -664,6 +671,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   if (pinnedAgentNotice) {
     output.write(pinnedAgentNotice);
     initialBannerLineCount += pinnedAgentNotice.split("\n").length - 1;
+  }
+
+  // 持久配置里的授权桶：首屏只列已授权的桶（否则用户以为自己仍在逐次确认）。
+  // 故意写在 banner 块之后、且不计入 initialBannerLineCount——repaintBanner 只
+  // 重画 welcome + pinned notice，把它算进重绘行数却不重画，第一次重绘就会抹掉它。
+  const startupGrantKinds = permissionGrantList(state.permissionGrants);
+  if (startupGrantKinds.length > 0) {
+    output.write(
+      `${t(
+        "autoPersistedStartup",
+        startupGrantKinds
+          .map((kind) =>
+            kind === "local" ? t("autoKindLocal") : t("autoKindRemote"),
+          )
+          .join(" + "),
+      )}\n\n`,
+    );
   }
 
   let lastSentTitle: string | null = null;
@@ -1226,6 +1250,19 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
   };
 
+  // 两桶各一个「批准并记住」回调（实现见 permissionGrantPersist）：状态更新 +
+  // 写盘 + 失败提示只有一份代码，四处确认弹窗只是绑定到不同的桶。
+  const grantEnablerDeps = {
+    getGrants: () => state.permissionGrants,
+    setGrants: (next: PermissionGrants) => {
+      state = { ...state, permissionGrants: next };
+    },
+    scheduleRender,
+    onPersistFailed: () => emitCommandOutput(t("autoPersistFailed")),
+  };
+  const approveLocalConfirms = createPermissionGrantEnabler("local", grantEnablerDeps);
+  const approveRemoteShell = createPermissionGrantEnabler("remote", grantEnablerDeps);
+
   /**
    * 唯一的「剪贴板内容 → 界面」应用器。`/paste`、Ctrl+V、空 bracketed-paste
    * 三条入口都走这里，读取流程在 pasteFlow.resolveClipboardPaste 里共享。
@@ -1321,14 +1358,28 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (signal.aborted) return Promise.resolve(false);
       return dialogHost.run((anchor) => runConfirmDialog({
         request: { id: `child-shell-${crypto.randomUUID()}`, tool: "execShell", action: "shell-per-call",
-          title: "Background shell — approve this command once?",
-          body: `Run: ${request.runId}\nAgent: ${request.agentKey}\nOwner: ${request.ownerUserId}\nDevice: ${request.deviceId}\nWorkspace: ${request.workspaceRoot}\n${request.permissionNotice}`,
+          title: t("shellPerCall.title"),
+          body: t(
+            "shellPerCall.body",
+            request.runId,
+            request.agentKey,
+            request.ownerUserId,
+            request.deviceId,
+            request.workspaceRoot,
+            request.permissionNotice,
+          ),
           command: request.command },
-        signal, fullCommand: true, input: input as any, output: output as any, ...anchor,
+        signal, fullCommand: true, input: input as any, output: output as any,
+        onApprove: createSnapshotGuardedApproval("remote", () => state.permissionGrants, approveRemoteShell), ...anchor,
       }));
-    }), () => state.autoConfirm === true);
+    }), () => state.permissionGrants?.remote === true);
   const sessionShellGrant = createOriginShellGrant({
     confirm: async (request) => {
+      // auto 已开：这条 shell 直接放行，不弹窗。granted 状态位由
+      // shellGrantForTurns.isGranted() 的短路保证不被写入——auto 关掉之后必须
+      // 重新逐次询问，不能因为曾经 auto 过就永久授权。这里的守卫兜住直接调用
+      // requestGrant 的路径（正常路径下 adapter 连 requestGrant 都不会走到）。
+      if (state.permissionGrants?.remote === true) return true;
       return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
         dialogHost.run((anchor) =>
           runConfirmDialog({
@@ -1353,12 +1404,22 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             },
             input: input as any,
             output: output as any,
+            onApprove: createSnapshotGuardedApproval("remote", () => state.permissionGrants, approveRemoteShell),
             ...anchor,
           }),
         ),
       );
     },
   });
+  // auto 已开时对 shell 视为已授权，但**不**写 granted：`requestGrant` 一旦返回
+  // true 就把 granted 永久置真，之后 /auto off 仍会静默放行。这里用 isGranted()
+  // 短路让 adapter 直接跳过 requestGrant（弹窗与状态位都不触碰），auto 关掉后
+  // isGranted() 落回真实状态 → 恢复逐次询问。
+  const shellGrantForTurns: OriginShellGrant = {
+    isGranted: () => state.permissionGrants?.remote === true || sessionShellGrant.isGranted(),
+    requestGrant: (request) => sessionShellGrant.requestGrant(request),
+    revoke: () => sessionShellGrant.revoke(),
+  };
   let turnIdentity = 0;
   const turnCtx: AgentTurnContext = {
     get state() { return state; },
@@ -1389,7 +1450,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     get sessionEnded() { return sessionEnded; },
     // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例透传给 turn
     // 执行路径；撤销经 /shell-revoke 或设置面板调 sessionShellGrant.revoke()。
-    shellGrant: sessionShellGrant,
+    shellGrant: shellGrantForTurns,
     shellApprovalSession: childShellApprovals.session,
     // 运行位置展示（块 D）：owner-required 场景 adapter 回调一次；渲染一行
     // 「工具在 <deviceName>(<deviceId>) · workspace <root> · status: <s>」。
@@ -1466,6 +1527,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     get fixedInput() {
       return fixedInput;
     },
+    revokeRemoteShellGrants: () => { sessionShellGrant.revoke(); childShellApprovals.revoke(); },
     history,
     pasteStore,
     dialogHost,
@@ -1500,6 +1562,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const wasGranted = sessionShellGrant.isGranted();
       sessionShellGrant.revoke();
       childShellApprovals.revoke();
+      // /shell-revoke 同时清掉持久 remote 桶，否则重启又带着授权回来。
+      if (state.permissionGrants?.remote === true) {
+        const nextGrants = { ...state.permissionGrants };
+        delete nextGrants.remote;
+        state = { ...state, permissionGrants: nextGrants };
+        if (!persistPermissionGrantChanges({ remote: true }, nextGrants)) {
+          emitCommandOutput(t("autoPersistFailed"));
+        }
+      }
       emitCommandOutput(
         wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
         "/shell-revoke",
@@ -1675,13 +1746,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 自己负责（见 dialogHost.ts 文件注释），这两个处理器不用再手工管理。
     const buildInteractiveTurnHandlers = () => {
       const actionGateHandler = async (gate: LocalAgentActionGate) => {
-        // /auto on（会话级权限自动化）：只放行写文件确认门（file_write 的
+        // 本地桶（permissionGrants.local）：只放行写文件确认门（file_write 的
         // confirm gate）。handoff / input 类 gate 需要真人接管终端，不是
-        // 权限确认，绝不能被 /auto 短路——这是安全边界，见
-        // isAutoConfirmableFileWriteGate 的文档。与 confirmDestructiveAction
-        // 的 state.autoConfirm 先例同款：state 是 runTuiWorkspace 的可变绑定，
-        // 这里在调用时读取，拿到的总是最新值。
-        if (state.autoConfirm && isAutoConfirmableFileWriteGate(gate)) {
+        // 权限确认，绝不能被授权短路——这是安全边界，见
+        // isAutoConfirmableFileWriteGate 的文档。state 是 runTuiWorkspace 的
+        // 可变绑定，这里在调用时读取，拿到的总是最新值。
+        if (state.permissionGrants?.local === true && isAutoConfirmableFileWriteGate(gate)) {
           return buildGateConfirmedResult(gate);
         }
         // `confirm` gates route through dialogHost.run() + a framed dialog;
@@ -1703,15 +1773,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             pauseComposer: () => fixedInput.pause(),
             resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
             resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
+            onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
           }),
         );
       };
       const confirmDestructiveAction = async (request: PermissionRequest) => {
-        // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
+        // 本地桶（permissionGrants.local）：跳过确认弹窗直接放行。state 是
         // runTuiWorkspace 的可变绑定（busy 期间 /auto 走 isBusyLocalSlash
         // 本地处理并回写），这里在调用时读取，拿到的总是最新值。
-        // 只短路破坏性操作确认；actionGate（handoff/input 类）不走这里。
-        if (state.autoConfirm) return true;
+        // 只短路本机 run 的三类确认；远程来源的 shell 走远程桶，handoff/input
+        // 类 gate（要真人接管终端）永远不短路。
+        if (state.permissionGrants?.local === true) return true;
         // 破坏性操作确认同属「Agent 等用户决定」：立即提醒，任何应答路径
         // （approve / cancel / Esc / 异常）都由 finally 清掉 progress。
         return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
@@ -1720,6 +1792,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               request,
               input: input as any,
               output: output as any,
+              onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
               ...anchor,
             }),
           ),
@@ -2112,6 +2185,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         const wasGranted = sessionShellGrant.isGranted();
         sessionShellGrant.revoke();
       childShellApprovals.revoke();
+        // /shell-revoke 同时清掉持久 remote 桶（busy 路径同一份语义）。
+        if (state.permissionGrants?.remote === true) {
+          const nextGrants = { ...state.permissionGrants };
+          delete nextGrants.remote;
+          state = { ...state, permissionGrants: nextGrants };
+          if (!persistPermissionGrantChanges({ remote: true }, nextGrants)) {
+            output.write(`[nolo] ${t("autoPersistFailed")}\n`);
+          }
+        }
         emitCommandOutput(
           wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
           "/shell-revoke",
@@ -2198,8 +2280,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             "next turn), or wait for the reply to finish.\n",
         );
       } else {
+        const grantsBefore = state.permissionGrants;
         state = res.nextState;
+        if (grantsBefore?.remote === true && state.permissionGrants?.remote !== true) {
+          sessionShellGrant.revoke();
+          childShellApprovals.revoke();
+        }
         let msg = res.output;
+        // busy 期间的 /auto … 同样写盘（与空闲路径 tuiSlashRouter 共用同一个
+        // helper）：只写真正翻转的桶；失败用 raw output.write 追一行——streaming
+        // repaint 拥有 transcript，emitCommandOutput 会与它竞争。
+        if (!persistPermissionGrantChanges(grantsBefore, state.permissionGrants)) {
+          output.write(`[nolo] ${t("autoPersistFailed")}\n`);
+        } else if (state.permissionGrants !== grantsBefore) {
+          scheduleRender();
+        }
         if (
           busySlashCommand === "/switch" &&
           persistExplicitAgentSwitch(beforeAgentKey)
@@ -2834,14 +2929,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         (gate) =>
           // /auto on 同款短路，见上方交互路径的 actionGateHandler 注释：
           // 只放行 file_write 的 confirm gate，handoff/input 类仍要求真人操作。
-          state.autoConfirm && isAutoConfirmableFileWriteGate(gate)
+          state.permissionGrants?.local === true && isAutoConfirmableFileWriteGate(gate)
             ? Promise.resolve(buildGateConfirmedResult(gate))
             : waitForActionGate(rl, input, output, gate, spawnRunner),
         async (request) => {
           // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
           // runTuiWorkspace 的可变绑定（runSubmittedLine 会把 handleTuiInput
           // 的 nextState 回写），这里在调用时读取，拿到的总是最新值。
-          if (state.autoConfirm) return true;
+          if (state.permissionGrants?.local === true) return true;
           // Non-TTY input has no interactive confirmation channel. Resolve the
           // request conservatively without calling rl.question(): Bun 1.4
           // closes readline as soon as an ended pipe is consumed, so waiting
@@ -2856,6 +2951,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
                 request,
                 input: input as any,
                 output: output as any,
+                onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
                 ...anchor,
               }),
             );

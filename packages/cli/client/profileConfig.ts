@@ -21,9 +21,34 @@ export type NoloProfile = {
   agentName?: string;
   /** TUI interface language saved by /lang; surfaces as NOLO_LANG. */
   locale?: "zh" | "en";
+  /**
+   * TUI 权限授权桶（见 PermissionGrants）：缺省即「逐次询问」。落盘后经
+   * NOLO_PERMISSION_GRANTS（如 "local,remote"）让新进程沿用同一授权姿态，
+   * 也让 CLI 能区分「因为保存过」与「仅本次会话」。
+   */
+  permissionGrants?: PermissionGrants;
   /** Remembered OAuth sync preferences per provider. */
   oauthSync?: Record<string, boolean>;
 };
+
+export const PERMISSION_GRANT_KINDS = ["local", "remote"] as const;
+export type PermissionGrantKind = (typeof PERMISSION_GRANT_KINDS)[number];
+
+/**
+ * 两个互相独立的授权桶，缺省（未设置）= 逐次询问：
+ * - `local`：本机 run 的三类确认（破坏性 shell、工作区外文件访问、写文件 gate）。
+ * - `remote`：远程来源在本机执行 shell（分享 / owner-required agent 的
+ *   per-call 确认与会话授权）。
+ * 两桶互不连带；各自「批准一次即记住」，经 NOLO_PERMISSION_GRANTS 传给新进程。
+ */
+export type PermissionGrants = { local?: boolean; remote?: boolean };
+
+/** 已授权的桶，按固定顺序（用于 env 编码与提示文案）。 */
+export function permissionGrantList(
+  grants: PermissionGrants | undefined
+): PermissionGrantKind[] {
+  return PERMISSION_GRANT_KINDS.filter((kind) => grants?.[kind] === true);
+}
 
 export type NoloProfileConfig = {
   currentProfile: string;
@@ -174,6 +199,12 @@ export function buildEnvFromProfile(
     ...(profile.agentKey ? { NOLO_AGENT: profile.agentKey } : {}),
     ...(profile.agentName ? { NOLO_AGENT_NAME: profile.agentName } : {}),
     ...(profile.locale ? { NOLO_LANG: profile.locale } : {}),
+    ...(() => {
+      const granted = permissionGrantList(profile.permissionGrants);
+      return granted.length > 0
+        ? { NOLO_PERMISSION_GRANTS: granted.join(",") }
+        : {};
+    })(),
   };
 }
 
@@ -227,6 +258,37 @@ export function saveProfileLocale(
   const profile = config.profiles[config.currentProfile];
   if (!profile) return null;
   profile.locale = locale;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  return config;
+}
+
+/**
+ * Persist one permission bucket. `value: false` deletes that key, and deleting
+ * the last granted bucket removes `permissionGrants` entirely: absent is the
+ * default "ask", so the on-disk profile only carries what the user approved.
+ */
+export function saveProfilePermissionGrant(
+  kind: PermissionGrantKind,
+  value: boolean,
+  path = getDefaultProfileConfigPath()
+): NoloProfileConfig | null {
+  if (isProtectedHomeProfileWrite(path)) return null;
+  const config = loadProfileConfig(path);
+  if (!config) return null;
+  const profile = config.profiles[config.currentProfile];
+  if (!profile) return null;
+  const grants: PermissionGrants = { ...(profile.permissionGrants ?? {}) };
+  if (value === true) {
+    grants[kind] = true;
+  } else {
+    delete grants[kind];
+  }
+  if (permissionGrantList(grants).length > 0) {
+    profile.permissionGrants = grants;
+  } else {
+    delete profile.permissionGrants;
+  }
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return config;
