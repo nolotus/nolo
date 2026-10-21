@@ -70,7 +70,7 @@ const SECRETS_MANAGER_SKILL_DEFINITIONS: Record<
 1. **绝对存储路径**：\`$NOLO_HOME/credentials/secrets.json\`（未设 \`NOLO_HOME\` 时回落 \`~/.nolo/credentials/secrets.json\`），权限严格锁定为 \`0600\`，父目录 \`0700\`。
 2. **禁止回显原则**：
    - Agent 无论在任何情况下，**绝不在对话消息、日志或报告中打印任何密钥明文**；
-   - 查看已保存的凭据一律使用 \`nolo secret list\`（仅输出凭据名称，不输出内容）；
+   - 查看已保存的凭据一律使用 \`nolo secret list\`（人类可读）或 \`nolo secret list --json\`（机器可读，仅输出凭据名称与形态，不输出内容）；
    - Agent **不得**执行 \`nolo secret get\`（该子命令只供人类调试），只允许 \`nolo secret run --with\`。
 3. **用户授权门禁**：
    - 只有当用户在对话中明确提到“允许获取 / 使用本地保存的 xxx 凭据”时，Agent 才被授权调用该凭据；未获用户明确指示时，不得读取或注入。
@@ -80,6 +80,8 @@ const SECRETS_MANAGER_SKILL_DEFINITIONS: Record<
 \`\`\`bash
 # 1. 查看已有秘密（安全，仅输出名称列表，绝不打印密钥值）
 nolo secret list
+# 机器可读版（仅名称与形态，agent 用它来发现"我们有没有相关凭据"）
+nolo secret list --json
 
 # 2. 设置或更新凭据（支持字符串或 JSON 对象）
 nolo secret set amo '{"issuer":"user:<account-id>:<key-id>","secret":"<key>"}'
