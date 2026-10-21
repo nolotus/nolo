@@ -19,7 +19,6 @@ import {
   LuChevronDown,
   LuChartColumnBig,
   LuUserPlus,
-  LuShare2,
   LuFlag,
   LuScale,
 } from "react-icons/lu";
@@ -418,26 +417,6 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
             >
               <LuChartColumnBig size={14} aria-hidden="true" />
               <span>{t("usage_dashboard", "使用统计")}</span>
-            </button>
-            <button
-              type="button"
-              className="topbar-user-menu__item"
-              onClick={() => {
-                setMenuOpen(false);
-                setBellOpen(false);
-                navigate("/life/shares");
-              }}
-            >
-              <LuShare2 size={14} aria-hidden="true" />
-              <span>{t("space:myShares.title", "我的分享")}</span>
-            </button>
-            <button
-              type="button"
-              className="topbar-user-menu__item"
-              onClick={handleOpenSettings}
-            >
-              <LuSettings size={14} aria-hidden="true" />
-              <span>{t("settings.title", "设置")}</span>
             </button>
           </div>
 

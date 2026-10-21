@@ -286,6 +286,7 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     // ——adapter 收不到 → docker workload 永不创建，非 docker 云后端也不会
     // fail-closed（死代码）。
     ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
+    ...(options.dockerWorkspaceMode ? { dockerWorkspaceMode: options.dockerWorkspaceMode } : {}),
   });
 }
 
@@ -297,6 +298,7 @@ function resolveLocalRuntimeAdapter(options: RunAgentTurnOptions) {
       // 与 buildDefaultLocalRuntimeAdapter 同口径：注入式 factory 也必须拿到
       // runtimeKey，否则注入了 adapter 的本地 run 会静默丢掉 docker 语义。
       ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
+      ...(options.dockerWorkspaceMode ? { dockerWorkspaceMode: options.dockerWorkspaceMode } : {}),
     }) ||
     buildDefaultLocalRuntimeAdapter(options)
   );

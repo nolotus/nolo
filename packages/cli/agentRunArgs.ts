@@ -19,6 +19,7 @@ import {
 import type { TaskEvidenceInput } from "./client/agentRun";
 import type { AgentRuntimeRequestedMode } from "./agentRuntimeLocal";
 import { HIGH_RISK_MUTATION_TOOL_NAMES } from "../agent-runtime/runtimeToolSurface";
+import { isLocalCliAgentKey } from "./agentAliases";
 // 唯一能力表：CLI 参数校验与派发守卫、localDockerWorkload 共用同一份真值，
 // 避免「两处各写一份 runtimeKey 合法性」再分叉。
 import { resolveCliLocalRuntimeKeyCapability } from "../ai/tools/agent/cliLocalRuntimeCapability";
@@ -41,6 +42,7 @@ export type ParsedAgentRunArgs = {
   allowShell: boolean;
   runtimeMode?: AgentRuntimeRequestedMode;
   runtimeKey?: string;
+  dockerWorkspaceMode?: "git" | "empty";
   continueDialogId?: string;
   strictContinueHistory?: boolean;
   spaceId?: string;
@@ -267,8 +269,8 @@ export function writeUsage(
     return;
   }
   output.write(
-    "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--runtime-key <key>] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
-      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--runtime-key <key>] [--machine-shell] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
+    "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--runtime-key <key>] [--docker-workspace-mode git|empty] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
+      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--runtime-key <key>] [--docker-workspace-mode git|empty] [--machine-shell] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
   );
 }
 
@@ -292,6 +294,38 @@ export function parseAgentRunArgs(
   const message = rawMessage.trim();
   const rawRuntimeKey = readFlagValue(args, "--runtime-key");
   const runtimeKey = rawRuntimeKey?.trim();
+  const rawDockerWorkspaceMode = readFlagValue(args, "--docker-workspace-mode")?.trim();
+  if (args.includes("--docker-workspace-mode") && rawDockerWorkspaceMode !== "git" && rawDockerWorkspaceMode !== "empty") {
+    throw new Error("--docker-workspace-mode 必须是 git 或 empty");
+  }
+  const dockerWorkspaceMode = rawDockerWorkspaceMode as ParsedAgentRunArgs["dockerWorkspaceMode"];
+  if (dockerWorkspaceMode && !/^docker(:.+)?$/.test(runtimeKey ?? "")) {
+    throw new Error("--docker-workspace-mode 仅适用于 --runtime-key docker[:runtimeId]");
+  }
+  // 只有本机沙盒通道（localDockerWorkload）会兑现这个参数：runtimeMode 解析成
+  // auto / server 时它既不被服务端理解、也走不到本地沙盒，等于静默丢弃后改走
+  // HTTP 派发 + 服务端投送。所以它必须落在**本机执行路径**上。
+  // 但「本机路径」不等于字面 `--local`：与 agentRunCommand 的 isLocalRun 同口径，
+  // 隐式 local（fullstack / local-cli agent / --dangerously-allow-shell）也是真实
+  // 生效的本机路径，按字面 flag 严格拒绝会误拒这些能跑的组合。
+  // `NOLO_RUNTIME_MODE=local` 在派发期（agentRunCommand）归一成本机 runtime，
+  // 本校验只看「参数里是否钉了本机路径」，两者不冲突。
+  const dockerWorkspaceModeRuntimeMode = runtimeModeFromArgs(args);
+  const dockerWorkspaceModeImplicitLocal =
+    !dockerWorkspaceModeRuntimeMode &&
+    (isFullstackCodingAgentRef(rawAgentKey, agentKey) ||
+      isLocalCliAgentKey(agentKey) ||
+      args.includes("--dangerously-allow-shell"));
+  if (
+    dockerWorkspaceMode &&
+    dockerWorkspaceModeRuntimeMode !== "local" &&
+    !dockerWorkspaceModeImplicitLocal
+  ) {
+    throw new Error(
+      "--docker-workspace-mode 需要本机执行路径：不带 --local 时 runtimeMode 解析为 auto，该参数会被静默丢弃并改走服务端派发。" +
+        "请加 --local；隐式 local（fullstack / local-cli agent / --dangerously-allow-shell）同样被接受。"
+    );
+  }
   if (args.includes("--runtime-key") && !runtimeKey) {
     throw new Error(
       "runtimeKey 必须是非空的 listRuntimes key（local | server | machine:<machineId> | docker | docker:<runtimeId> | instabox | gcp）"
@@ -407,6 +441,7 @@ export function parseAgentRunArgs(
         ? { runtimeMode: "local" as const }
         : {}),
     ...(runtimeKey ? { runtimeKey } : {}),
+    ...(dockerWorkspaceMode ? { dockerWorkspaceMode } : {}),
     background: args.includes("--bg"),
     noStream: args.includes("--no-stream"),
     machineShell: args.includes("--machine-shell"),

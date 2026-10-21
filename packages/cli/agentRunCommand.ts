@@ -909,6 +909,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     // runtimeKey 与 machine-shell 的组合已在 parseAgentRunArgs 入口显式拒绝，
     // 这里直接透传即可（不再静默丢弃参数）。
     ...(parsed.runtimeKey ? { runtimeKey: parsed.runtimeKey } : {}),
+    ...(parsed.dockerWorkspaceMode ? { dockerWorkspaceMode: parsed.dockerWorkspaceMode } : {}),
     ...(parsed.continueDialogId ? { continueDialogId: parsed.continueDialogId } : {}),
     ...(parsed.strictContinueHistory ? { strictContinueHistory: true } : {}),
     ...(parsed.spaceId ? { spaceId: parsed.spaceId } : {}),

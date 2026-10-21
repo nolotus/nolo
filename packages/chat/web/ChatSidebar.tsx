@@ -39,7 +39,9 @@ import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matc
 import { selectIdentityUserId } from "identity/selectors";
 import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
 import { WorkDialogGroupsPreview } from "./WorkDialogGroupsPreview";
+import { OtherContentGroups } from "./OtherContentGroups";
 import { NavigationRail } from "./NavigationRail";
+import { ExploreCategoryNav } from "./ExploreCategoryNav";
 import { type HomeView, resolveHomeView, resolveRailView } from "./navigationRailView";
 import { DesktopFolderProjects } from "./DesktopFolderProjectsSection";
 import { projectHomeItems, type HomeScope } from "./homeScopeProjection";
@@ -391,14 +393,6 @@ const ChatSidebar: React.FC = () => {
       <button
         type="button"
         className="navigation-v2-home-views__item"
-        aria-pressed={homeView === "categories"}
-        onClick={() => selectHomeView("categories")}
-      >
-        {t("allView.categories", "分类")}
-      </button>
-      <button
-        type="button"
-        className="navigation-v2-home-views__item"
         aria-pressed={homeView === "projects"}
         onClick={() => selectHomeView("projects")}
       >
@@ -426,6 +420,7 @@ const ChatSidebar: React.FC = () => {
               ) : <p>{t("allView.noFavorites", "暂无收藏")}</p>}
             </>
           )}
+          {railView === "explore" && <ExploreCategoryNav />}
           {commandPalette}
         </div>
       </div>
@@ -448,18 +443,18 @@ const ChatSidebar: React.FC = () => {
                 <>
                   {homeScope.kind === "all" && remoteTasksGlobalEntry}
                   <WorkDialogGroupsPreview items={scopedWorkItems} userId={identityUserId ?? ""} />
+                  {typeFilter === "all" && homeScope.kind === "all" && (
+                    // 「分类」视图并入 Work：全部作用域下按类型列出对话之外的内容。
+                    // 项目作用域只投影对话（projectHomeItems → dialogsForLocalProject），
+                    // 没有非对话内容可列，所以守卫是 homeScope.kind === "all"。
+                    <OtherContentGroups items={scopedWorkItems} userId={identityUserId ?? ""} />
+                  )}
                 </>
               ) : homeScope.kind === "all" ? (
                 <AllViewSidebar typeFilter={typeFilter} />
               ) : (
                 <p role="status">{t("allView.projectDialogOnly", "当前项目仅包含已关联的对话")}</p>
               )}
-            </>
-          ) : homeView === "categories" ? (
-            // 「分类」= Navigation V2 之前的主页显示方式：类型筛选 + 全部内容列表。
-            <>
-              {typeFilterShell}
-              <AllViewSidebar typeFilter={typeFilter} />
             </>
           ) : (
             <>

@@ -17,8 +17,15 @@ import { isSpaceRoutePath } from "render/layout/mainLayoutViewMode";
 /** Primary Rail destinations. */
 export type RailView = "home" | "favorites" | "explore";
 
-/** Home content views (a filter of Home, never Rail destinations). */
-export type HomeView = "work" | "projects" | "categories";
+/**
+ * Home content views (a filter of Home, never Rail destinations).
+ *
+ * 「分类」(the pre-Navigation-V2 type-filtered list) is no longer a Home view:
+ * its capability lives inside Work as the trailing「其他内容」groups, so the
+ * top level stays Work / Projects only. Persisted/legacy `"categories"` values
+ * are normalised to `"work"` by `resolveHomeView`.
+ */
+export type HomeView = "work" | "projects";
 
 /** Route of each Rail destination. */
 export const RAIL_VIEW_PATHS: Record<RailView, string> = {
@@ -45,10 +52,14 @@ export function resolveRailView(pathname: string | undefined | null): RailView {
   return "home";
 }
 
-/** Normalise a Home view value coming from state or storage. */
+/**
+ * Normalise a Home view value coming from state or storage.
+ *
+ * Legacy `"categories"` (and any unknown/garbage value) collapses to Work:
+ * the category/type view is now part of Work's「其他内容」groups.
+ */
 export function resolveHomeView(value: unknown): HomeView {
   if (value === "projects") return "projects";
-  if (value === "categories") return "categories";
   return "work";
 }
 

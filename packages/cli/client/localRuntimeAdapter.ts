@@ -303,6 +303,64 @@ import {
   createLocalInstaboxWorkload as createLocalInstaboxWorkloadDefault,
   type LocalInstaboxWorkloadHandle,
 } from "./localInstaboxWorkload";
+import { INSTABOX_FILE_TOOL_NAMES } from "./localInstaboxFileBridge";
+import { EXECUTION_SHELL_TOOL } from "../../agent-runtime/executionChannel";
+
+/** instabox workload 能兑现的工具面：execShell 走 executionChannel，文件工具走 bridge。 */
+const LOCAL_INSTABOX_TOOL_NAMES: readonly string[] = [
+  EXECUTION_SHELL_TOOL,
+  ...INSTABOX_FILE_TOOL_NAMES,
+];
+
+export type LocalInstaboxToolRoute =
+  | { action: "intercept"; toolName: string }
+  | { action: "reject"; toolName: string; reason: string }
+  | { action: "passthrough"; toolName: string };
+
+/**
+ * instabox 分支的三路分流：支持集内 → 接管；工作区工具但不在支持集 → 显式拒绝
+ * （绝不回落宿主）；非工作区工具（startAgentRun / ask_user / webFetch …）→ 原样
+ * 穿透到下层普通分发路径。接管前仍跑与 bwrap 分支同源的 run-surface + policy
+ * 判定：policy / deny 拒绝时 instabox 通道不是绕过 deny 的路子。
+ */
+export function resolveLocalInstaboxToolRoute(args: {
+  toolName: string;
+  env?: Record<string, string | undefined>;
+  agentToolNames?: readonly string[];
+}): LocalInstaboxToolRoute {
+  const toolName = normalizeLocalToolName(args.toolName);
+  if (!LOCAL_INSTABOX_TOOL_NAMES.includes(toolName)) {
+    return (WORKSPACE_TOOL_NAMES as readonly string[]).includes(toolName)
+      ? {
+          action: "reject",
+          toolName,
+          reason:
+            `instabox workload 不支持工作区工具 "${toolName}"（instabox 工具面：` +
+            `${LOCAL_INSTABOX_TOOL_NAMES.join(", ")}）；拒绝回落到宿主执行`,
+        }
+      : { action: "passthrough", toolName };
+  }
+  const agentToolNames = (args.agentToolNames ?? []).map(
+    normalizeLocalToolName,
+  );
+  const deniedBySurfaceOrPolicy =
+    !agentToolNames.includes(toolName) ||
+    !resolveLocalToolPolicy({
+      env: args.env ?? {},
+      agentToolNames,
+      toolName,
+    }).allowed;
+  if (deniedBySurfaceOrPolicy) {
+    return {
+      action: "reject",
+      toolName,
+      reason:
+        `${toolName} is outside the run tool surface / policy — ` +
+        "instabox workload 不是绕过 deny 的通道；拒绝在宿主执行工作区工具",
+    };
+  }
+  return { action: "intercept", toolName };
+}
 import {
   createDockerRunTeardown,
   exportDockerRunDiffArtifact,
@@ -772,6 +830,7 @@ export function createCliLocalRuntimeAdapter(
         agentKey: "cli-local-run",
         env: deps.env,
         workspaceRoot,
+        ...(deps.dockerWorkspaceMode ? { workspaceMode: deps.dockerWorkspaceMode } : {}),
       })) as unknown as LocalDockerWorkloadHandle)();
     return dockerWorkloadLoad;
   };
@@ -780,10 +839,17 @@ export function createCliLocalRuntimeAdapter(
   let instaboxWorkloadLoad: Promise<LocalInstaboxWorkloadHandle | null> | null =
     null;
   let instaboxWorkloadReleased = false;
+  let instaboxReleasePending = false;
+  let instaboxReleasePromise: Promise<void> | null = null;
   const createInstaboxWorkload =
     (deps as { createLocalInstaboxWorkload?: typeof createLocalInstaboxWorkloadDefault }).createLocalInstaboxWorkload ?? createLocalInstaboxWorkloadDefault;
   const loadLocalInstaboxWorkload = (): Promise<LocalInstaboxWorkloadHandle | null> => {
     if (!instaboxRuntimeEnabled) return Promise.resolve(null);
+    if (instaboxReleasePending) {
+      return Promise.reject(
+        new Error("instabox workload cleanup_pending：lease cleanup 尚未确认，拒绝执行工具"),
+      );
+    }
     if (instaboxWorkloadReleased) {
       return Promise.reject(
         new Error(
@@ -914,15 +980,37 @@ export function createCliLocalRuntimeAdapter(
     (localSandboxLoad ??= createSandboxWorkload({ workspaceRoot }).catch(
       () => null,
     ));
-  const releaseLocalInstaboxWorkload = async (): Promise<void> => {
-    const loaded = instaboxWorkloadLoad
-      ? await instaboxWorkloadLoad.catch(() => null)
-      : null;
-    instaboxWorkloadReleased = true;
-    instaboxWorkloadLoad = null;
-    if (loaded) {
-      await loaded.release().catch(() => undefined);
-    }
+  const releaseLocalInstaboxWorkload = (): Promise<void> => {
+    if (instaboxReleasePromise) return instaboxReleasePromise;
+    const attempt = (async () => {
+      const loaded = instaboxWorkloadLoad
+        ? await instaboxWorkloadLoad.catch(() => null)
+        : null;
+      if (!loaded) {
+        instaboxWorkloadReleased = true;
+        instaboxWorkloadLoad = null;
+        return;
+      }
+      try {
+        await loaded.release();
+        instaboxWorkloadReleased = true;
+        instaboxReleasePending = false;
+        instaboxWorkloadLoad = null;
+      } catch (error) {
+        instaboxReleasePending = true;
+        const record = error as { code?: unknown; cleanupPending?: unknown } | null;
+        const code = record?.code === "instabox_cleanup_pending" || record?.cleanupPending === true
+          ? "cleanup_pending"
+          : "release_failed";
+        process.stderr.write(`[nolo] instabox_release_${code}\n`);
+        throw error;
+      }
+    })();
+    instaboxReleasePromise = attempt;
+    void attempt.finally(() => {
+      if (instaboxReleasePromise === attempt) instaboxReleasePromise = null;
+    }).catch(() => undefined);
+    return attempt;
   };
   const releaseLocalSandboxWorkload = async (): Promise<void> => {
     // docker workload 与 bwrap / instabox lease 同寿命：run 收尾都在这里释放
@@ -1632,20 +1720,37 @@ export function createCliLocalRuntimeAdapter(
           }
         }
       }
+      // instabox workload 分支（runtimeKey 指向 instabox）：只接管本仓 instabox
+      // 工具面（execShell + 文件工具 bridge）。工作区里的其他工具显式拒绝（绝不
+      // 回落宿主），非工作区工具（startAgentRun / ask_user / webFetch …）穿透到
+      // 下方普通分发；接管前跑与 docker / bwrap 同源的 run-surface + policy 判定，
+      // deny 仍然优先——instabox 通道不是绕过策略契约的路子。
       if (instaboxRuntimeEnabled) {
-        const instaboxHandle = await loadLocalInstaboxWorkload();
-        if (instaboxHandle) {
-          const instaboxToolName = normalizeLocalToolName(call.name);
+        const instaboxRoute = resolveLocalInstaboxToolRoute({
+          toolName: call.name,
+          env: deps.env,
+          agentToolNames: activeAgentToolNames,
+        });
+        if (instaboxRoute.action === "reject") {
+          throw new Error(instaboxRoute.reason);
+        }
+        if (instaboxRoute.action === "intercept") {
+          const instaboxHandle = await loadLocalInstaboxWorkload();
+          if (!instaboxHandle) {
+            throw new Error(
+              `instabox workload 不可用（无 handle）：拒绝在宿主执行工作区工具 "${instaboxRoute.toolName}"`,
+            );
+          }
           const instaboxArgs =
             parseToolArgumentsObject(injectedCall.arguments) ?? {};
           const instaboxOutput = await instaboxHandle.channel(
-            instaboxToolName,
+            instaboxRoute.toolName,
             instaboxArgs,
             opts?.abortSignal,
           );
           if (typeof instaboxOutput !== "string") {
             throw new Error(
-              `instabox workload 未返回结果（tool=${instaboxToolName}）：拒绝回落到宿主执行`,
+              `instabox workload 未返回结果（tool=${instaboxRoute.toolName}）：拒绝回落到宿主执行`,
             );
           }
           return { content: instaboxOutput };

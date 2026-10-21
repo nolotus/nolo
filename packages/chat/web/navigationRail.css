@@ -243,3 +243,53 @@
   .navigation-v2-rail-account__actions { flex-direction: row; gap: 2px; flex-wrap: wrap; }
   .navigation-v2-rail-account__actions button { min-width: 32px; min-height: 32px; }
 }
+
+/* Explore categories: vertical list with a selected surface, no hard separators. */
+.navigation-v2-explore-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 16px 10px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+.navigation-v2-explore-category {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+.navigation-v2-explore-category:hover {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.09));
+}
+.navigation-v2-explore-category[data-active="true"] {
+  background: var(--primaryGhost, rgba(127, 127, 127, 0.14));
+  color: var(--primary, inherit);
+  font-weight: 600;
+}
+.navigation-v2-explore-category:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 1px;
+}
+
+/* Narrow screens: the category list scrolls horizontally instead of overflowing. */
+@media (max-width: 768px) {
+  .navigation-v2-explore-categories {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .navigation-v2-explore-categories::-webkit-scrollbar { display: none; }
+  .navigation-v2-explore-category {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 8px 10px;
+  }
+}
