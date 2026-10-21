@@ -87,7 +87,6 @@ export interface SettingState {
   // 对话页面快捷滚动按钮
   showScrollToTopButton: boolean;
   showScrollToBottomButton: boolean;
-  createMenuOpenCount: number;
   desktopChromeConnectorEnabled: boolean;
   /** Master switch for developer-facing settings. Default false. */
   developerModeEnabled: boolean;

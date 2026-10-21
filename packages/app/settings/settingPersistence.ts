@@ -41,7 +41,7 @@ export const normalizeSettingChanges = (
   changes: Partial<SettingState>,
 ): Partial<SettingState> => {
   // Drop removed animation-picker values from historical callers before any write.
-  let normalizedChanges: Partial<SettingState> = omitKeys(changes, ["preferredAnimationSet"]) as Partial<SettingState>;
+  let normalizedChanges: Partial<SettingState> = omitKeys(changes, ["preferredAnimationSet", "createMenuOpenCount"]) as Partial<SettingState>;
 
   if (hasOwn(normalizedChanges, "defaultAgentId")) {
     normalizedChanges = {
@@ -200,6 +200,7 @@ export const stripRegisterBackedFieldsFromSettingsWrite = (
     "defaultSpaceId",
     "userAuthorityRegistry",
     "preferredAnimationSet",
+    "createMenuOpenCount",
     ...LOCAL_APPEARANCE_KEY_NAMES,
   ]) as Partial<SettingState>;
 };

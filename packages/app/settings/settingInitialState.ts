@@ -108,7 +108,6 @@ export const initialState: SettingState = {
   ocrModel: "google_document_ocr",
   showScrollToTopButton: false,
   showScrollToBottomButton: false,
-  createMenuOpenCount: 0,
   desktopChromeConnectorEnabled: false,
   developerModeEnabled: false,
   diagnosticModeEnabled: false,

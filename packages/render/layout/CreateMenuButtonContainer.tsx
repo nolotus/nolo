@@ -5,14 +5,11 @@ import React, { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "app/routing";
 import { toast } from "app/utils/toast";
-import { useAppDispatch, useAppSelector } from "app/store";
+import { useAppDispatch } from "app/store";
 import { useHoverCapable } from "app/hooks/useHoverCapable";
 import type { TypedThunkDispatch } from "app/store";
 import { useStore } from "react-redux";
-import {
-  selectCreateMenuOpenCount,
-  setSettings,
-} from "app/settings/settingSlice";
+import { useCreateMenuOpenCount, incrementCreateMenuOpenCount } from "./createMenuOpenCountStore";
 import { createDocState } from "render/page/docStore";
 import {
   LuFileText,
@@ -67,7 +64,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   const currentSpace = useCurrentSpaceFromEntity();
   const currentSpaceId = useCurrentSpaceId();
   const viewMode = useViewMode();
-  const createMenuOpenCount = useAppSelector(selectCreateMenuOpenCount);
+  const createMenuOpenCount = useCreateMenuOpenCount();
 
   // 仅顶栏在支持 hover 的桌面端走 hover 展开；侧栏 / inline / header 维持点击。
   const hoverOpen = variant === "topbar" && useHoverCapable();
@@ -98,13 +95,11 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
       setIsOpen(open);
       onOpenChange?.(open);
       if (open && count) {
-        void dispatch(
-          setSettings({ createMenuOpenCount: createMenuOpenCount + 1 })
-        );
+        incrementCreateMenuOpenCount();
         if (onOpenMenu) onOpenMenu();
       }
     },
-    [createMenuOpenCount, dispatch, onOpenChange, onOpenMenu]
+    [onOpenChange, onOpenMenu]
   );
 
   const handleOpenChange = useCallback(

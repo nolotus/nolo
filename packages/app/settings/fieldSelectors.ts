@@ -17,7 +17,6 @@ import {
   DEFAULT_AUTO_APPROVED_SELF_UPDATE_FIELDS,
   normalizeAgentUpdateFieldList,
 } from "ai/policy/selfUpdateFields";
-import { parsePositiveFiniteNumberOrFallback } from "core/positiveFiniteNumberOrFallback";
 import { MEDIA_ALLOWANCE_MAX } from "./mediaAllowanceClient";
 
 import {
@@ -143,10 +142,8 @@ export const selectShowScrollToTopButton = (state: RootState): boolean =>
 export const selectShowScrollToBottomButton = (state: RootState): boolean =>
   state.settings.showScrollToBottomButton ?? false;
 
-export const selectCreateMenuOpenCount = (state: RootState): number =>
-  Math.floor(
-    parsePositiveFiniteNumberOrFallback(state.settings.createMenuOpenCount, 0),
-  );
+/** Legacy selector compatibility: the live device owner is outside Redux. */
+export const selectCreateMenuOpenCount = (_state: RootState): number => 0;
 
 export const selectDesktopChromeConnectorEnabled = (
   state: RootState,
