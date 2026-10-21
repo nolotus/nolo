@@ -66,7 +66,6 @@ export const initialState: SettingState = {
     _runtimeBootstrapServer ?? (isProduction ? SERVERS.MAIN : SERVERS.US),
   syncServers: Object.values(SERVERS),
   showThinking: true,
-  preferredAnimationSet: 0,
   maxExecutionTime: 600_000,
   maxCost: 1,
   autoApproveCredits: 0,

@@ -18,7 +18,6 @@ export interface SettingState {
   syncServers: string[];
 
   showThinking: boolean;
-  preferredAnimationSet: number;
   maxExecutionTime: number;
   maxCost: number;
   autoApproveCredits: number;

@@ -40,7 +40,8 @@ import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } fr
 export const normalizeSettingChanges = (
   changes: Partial<SettingState>,
 ): Partial<SettingState> => {
-  let normalizedChanges: Partial<SettingState> = changes;
+  // Drop removed animation-picker values from historical callers before any write.
+  let normalizedChanges: Partial<SettingState> = omitKeys(changes, ["preferredAnimationSet"]) as Partial<SettingState>;
 
   if (hasOwn(normalizedChanges, "defaultAgentId")) {
     normalizedChanges = {
@@ -198,6 +199,7 @@ export const stripRegisterBackedFieldsFromSettingsWrite = (
     "autoApproveCredits",
     "defaultSpaceId",
     "userAuthorityRegistry",
+    "preferredAnimationSet",
     ...LOCAL_APPEARANCE_KEY_NAMES,
   ]) as Partial<SettingState>;
 };
@@ -218,6 +220,7 @@ export const sanitizeStoredSettingsRecord = (
     "autoApproveCredits",
     "defaultSpaceId",
     "schemaVersion",
+    "preferredAnimationSet",
     ...LOCAL_APPEARANCE_KEY_NAMES,
   ]);
   return Object.keys(sanitizedSettings).length > 0 ? sanitizedSettings : null;

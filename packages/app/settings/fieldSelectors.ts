@@ -32,8 +32,8 @@ import type { SettingState } from "./settingTypes";
 
 // --- 通用 / 主题字段 ---
 
-export const selectPreferredAnimationSet = (state: RootState): number =>
-  state.settings.preferredAnimationSet ?? 0;
+/** Retired animation preference: retain selector for legacy callers. */
+export const selectPreferredAnimationSet = (_state: RootState): number => 0;
 
 export const selectShowThinking = (state: RootState): boolean =>
   state.settings.showThinking;
