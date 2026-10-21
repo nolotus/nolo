@@ -1,6 +1,12 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useSyncExternalStore } from "react";
 import { useSelector, useStore } from "react-redux";
 import { selectIdentityUserId } from "identity/selectors";
+
+// Layout effect on the web (sync binding before paint), passive effect where
+// there is no DOM (React Native, SSR): React warns about useLayoutEffect during
+// server rendering, and RN compiles this same module.
+const useIdentitySyncEffect =
+  typeof document !== "undefined" ? useLayoutEffect : useEffect;
 
 /**
  * Account-owned chat presentation preferences. Does not depend on Redux.
@@ -88,6 +94,38 @@ export function useAccountChatDisplayPreferences(): AccountChatDisplayPreference
   const store = useStore();
   const userId = useSelector(selectIdentityUserId);
   const owner = getAccountChatDisplayOwner(store.getState);
-  owner.setAccount(userId ?? null);
-  return useAccountChatDisplaySnapshot(owner);
+  const accountId = userId ?? null;
+
+  // Render phase stays pure: it only derives a value from the owner, it never
+  // moves the owner to another account. While the owner still belongs to a
+  // previous identity (before the commit-phase sync below ran), the frame shows
+  // defaults — the previous account's values are never rendered for a new one.
+  const readPreferences = useCallback(
+    (): AccountChatDisplayPreferences =>
+      owner.getAccountId() === accountId
+        ? owner.getSnapshot()
+        : DEFAULT_ACCOUNT_CHAT_DISPLAY_PREFERENCES,
+    [owner, accountId],
+  );
+  const preferences = useSyncExternalStore(
+    owner.subscribe,
+    readPreferences,
+    () => DEFAULT_ACCOUNT_CHAT_DISPLAY_PREFERENCES,
+  );
+
+  // Commit phase owns the identity switch. Same account is a no-op inside
+  // `setAccount`, so this never fights the hydrate path
+  // (`settingThunks.ts` → owner.setAccount(userId) + updateForAccount) and
+  // never resets an already hydrated snapshot.
+  useIdentitySyncEffect(() => {
+    // Re-read the committed identity instead of trusting the render closure: a
+    // commit whose identity has since been replaced must never move the owner
+    // back to the account it saw (that would reset the newer account's snapshot
+    // to defaults). The render that carries the current identity runs its own
+    // effect, so skipping here cannot leave the owner unsynced.
+    if ((selectIdentityUserId(store.getState()) ?? null) !== accountId) return;
+    owner.setAccount(accountId);
+  }, [owner, accountId, store]);
+
+  return preferences;
 }

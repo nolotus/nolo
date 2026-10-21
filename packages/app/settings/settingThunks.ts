@@ -27,8 +27,21 @@ import {
   type TonePreset,
 } from "ai/policy/types";
 
-import { updateSettingsState } from "./settingActions";
+import {
+  bumpLocalIntentEpoch,
+  recordSettingsWriteFailure,
+  updateSettingsState,
+} from "./settingActions";
 import { enqueueAccountSettingsWrite } from "./accountSettingsWriteQueue";
+import {
+  SETTINGS_WRITE_RETRY_BACKOFF_MS,
+  delaySettingsWriteRetry,
+  describeSettingsWriteFailure,
+  isSettingsWriteSupersededError,
+  readLocalIntentEpoch,
+  resolveSettingsWriteFailureAfterSuccess,
+  SettingsWriteSupersededError,
+} from "./settingsWriteRetry";
 import { getAccountChatDisplayOwner, pickAccountChatDisplayPreferences } from "./accountChatDisplayOwner";
 import { getSettingDbActionThunks } from "./dbActionThunks";
 import {
@@ -37,13 +50,24 @@ import {
   isLocalFirstAppearanceChange,
   normalizeSettingChanges,
   persistDefaultAgentRegister,
+  pickServerAuthoritativeSettings,
 } from "./settingPersistence";
 import {
   hasOwn,
   normalizeDefaultAgentIdSetting,
   resolveDefaultAgentIdSetting,
 } from "./settingNormalizers";
-import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
+import { SYSTEM_DEFAULT_AGENT_ID, type SettingState, type SettingsWriteFailure } from "./settingTypes";
+
+/**
+ * 单调「服务端权威回显」世代。字段缺失/非数值一律读作 0（与
+ * `readLocalIntentEpoch` 同口径：早期 store 行为与旧代码一致）。
+ */
+const readServerAuthorityEchoSeq = (getState: () => unknown): number => {
+  const value = (getState() as { settings?: { serverAuthorityEchoSeq?: unknown } })
+    ?.settings?.serverAuthorityEchoSeq;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+};
 
 /**
  * Read the persisted settings record for the current user, normalize it, and
@@ -56,6 +80,13 @@ export const getSettings = createAsyncThunk<
 >("settings/getSettings", async (_, { dispatch, getState }) => {
   const userId = selectIdentityUserId(getState() as any);
   if (!userId) return null;
+  // Captured before the cloud read: this hydrate may only be applied when no
+  // local user intent was published while the read was in flight.
+  const startLocalIntentEpoch = readLocalIntentEpoch(getState);
+  // Second, independent generation: server-authoritative echo writes (media
+  // allowance echo) advance it. A hydrate may only overwrite
+  // `autoApproveCredits` when no echo happened during the read.
+  const startAuthorityEchoSeq = readServerAuthorityEchoSeq(getState);
   const settingsKey = createUserKey.settings(userId);
   const authorityHomeKey = createUserPreferenceKey.authorityHome(userId);
   const [settingsRecord, authorityHomeRecord] = await Promise.all([
@@ -86,10 +117,51 @@ export const getSettings = createAsyncThunk<
     const { currentServer: _ignored, ...settingsToApply } = normalizedPayload;
     // Hydrate the account owner without allowing a stale cloud read to cross identities.
     if (selectIdentityUserId(getState() as any) !== userId) return null;
+    // Two independent generations guard two different staleness directions:
+    //  - 用户意图世代（localIntentEpoch）：远端读期间用户改过设置 → 丢弃本次
+    //    hydrate 的**用户偏好**字段（不写 Owner、不写用户偏好）；
+    //  - 权威回显世代（serverAuthorityEchoSeq）：远端读期间服务端回显过权威值
+    //    → 丢弃本次 hydrate 的 **autoApproveCredits**（不覆盖更新的回显）。
+    // 两者互不推进、互不代替。
+    const intentChanged =
+      readLocalIntentEpoch(getState) !== startLocalIntentEpoch;
+    const echoChanged =
+      readServerAuthorityEchoSeq(getState) !== startAuthorityEchoSeq;
+    const authoritative = pickServerAuthoritativeSettings(hydrated);
+    const {
+      autoApproveCredits: _ignoredCredits,
+      userAuthorityRegistry: _ignoredRegistry,
+      ...preferenceFields
+    } = settingsToApply;
+    const applied: Partial<SettingState> = {};
+    if (!intentChanged) Object.assign(applied, preferenceFields);
+    // autoApproveCredits：仅当期间没有发生权威回显才应用（回显更新 → 跳过）。
+    if (!echoChanged && hasOwn(authoritative, "autoApproveCredits")) {
+      applied.autoApproveCredits = authoritative.autoApproveCredits as number;
+    }
+    // userAuthorityRegistry：由同一次读派生（不是独立回显），照旧应用。
+    if (hasOwn(authoritative, "userAuthorityRegistry")) {
+      applied.userAuthorityRegistry = authoritative.userAuthorityRegistry as
+        | Record<string, string>
+        | undefined;
+    }
+    // Same account, but the user edited settings while this cloud read was in
+    // flight: the persisted user-preference values are older than local intent,
+    // so drop them (no Owner write-back, no preference write-back).
+    // Server-authoritative fields are still mirrored per the rules above: they
+    // are read-only echoes that user intent can never drive, so keeping them
+    // stale until the next hydrate would leave autoApproveCredits sitting on
+    // the initialState default.
+    if (intentChanged) {
+      if (Object.keys(applied).length > 0) {
+        dispatch(updateSettingsState(applied));
+      }
+      return null;
+    }
     const owner = getAccountChatDisplayOwner(getState);
     owner.setAccount(userId);
-    owner.updateForAccount(userId, pickAccountChatDisplayPreferences(settingsToApply));
-    dispatch(updateSettingsState(settingsToApply));
+    owner.updateForAccount(userId, pickAccountChatDisplayPreferences(preferenceFields));
+    dispatch(updateSettingsState(applied));
   }
   return hydrated;
 });
@@ -125,6 +197,7 @@ export const setSettings = createAsyncThunk<
     } else {
       throw new Error("User not found for persisting settings.");
     }
+    dispatch(bumpLocalIntentEpoch());
     dispatch(updateSettingsState(normalizedChanges));
     return normalizedChanges;
   }
@@ -139,12 +212,30 @@ export const setSettings = createAsyncThunk<
   // newer user intent when they complete out of order.
   if (selectIdentityUserId(getState() as any) !== userId) return {};
   const owner = getAccountChatDisplayOwner(getState);
+  // Local user intent is being published now: advance the generation so any
+  // hydrate that started earlier is discarded instead of overwriting it.
+  dispatch(bumpLocalIntentEpoch());
+  // Identifies this intent for the write path: a failure may only be retried
+  // while this is still the account's newest local intent.
+  const intentEpoch = readLocalIntentEpoch(getState);
   owner.setAccount(userId);
   owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
   dispatch(updateSettingsState(persistencePlan.normalizedChanges));
-  // Preserve persistence ordering for overlapping writes by this account.
-  // Local UI/Owner publication above remains immediate and optimistic.
-  await enqueueAccountSettingsWrite(getState, userId, async () => {
+  // Keys of the user intent (for the failure state) and of the keys that are
+  // actually pushed to the cloud settings record (for reconciliation).
+  const intentKeys = Object.keys(persistencePlan.normalizedChanges);
+  const persistedKeys = Object.keys(
+    persistencePlan.settingsPatch?.changes ?? {},
+  ).filter((key) => key !== "schemaVersion");
+  const performWrite = async () => {
+    // 便宜收紧（非原子）：每次真正发写之前再判一次世代 —— 首次与重试各一次。
+    // 若这次意图已被更新的本地意图取代，就不要把旧 payload 发出去；窗口从
+    // 「退避 200ms + 一次网络往返」缩到一次函数调用。最终一致性仍由同账号串行
+    // 队列保证：新意图的写排在队尾、紧接本次之后执行并覆盖服务端。
+    // 抛哨兵错误（而不是普通 Error）：被取代 ≠ 失败，调用方应正常 resolve。
+    if (readLocalIntentEpoch(getState) !== intentEpoch) {
+      throw new SettingsWriteSupersededError();
+    }
     const nextDefaultAgentId =
       normalizeDefaultAgentIdSetting(
         persistencePlan.normalizedChanges.defaultAgentId,
@@ -172,7 +263,69 @@ export const setSettings = createAsyncThunk<
         }),
       ).unwrap();
     }
+  };
+  // 写成功即收敛已有的失败状态：本次覆盖了失败状态里剩下的全部键 → 清空；
+  // 只覆盖一部分 → 剔除已覆盖的键（剩下的继续可见）；其它账号的状态不动。
+  const settleSettingsWriteFailureAfterSuccess = () => {
+    const existing = (getState() as any)?.settings
+      ?.lastWriteFailure as SettingsWriteFailure | null | undefined;
+    if (!existing) return;
+    const next = resolveSettingsWriteFailureAfterSuccess({
+      failure: existing,
+      accountId: userId,
+      intentKeys,
+      persistedKeys,
     });
+    // 同一引用 = 跨账号状态，本次成功与它无关，不 dispatch。
+    if (next === existing) return;
+    dispatch(recordSettingsWriteFailure(next));
+  };
+  // Preserve persistence ordering for overlapping writes by this account.
+  // Local UI/Owner publication above remains immediate and optimistic.
+  await enqueueAccountSettingsWrite(getState, userId, async () => {
+    let firstFailureAt = 0;
+    try {
+      await performWrite();
+      settleSettingsWriteFailureAfterSuccess();
+      return;
+    } catch (firstError) {
+      // 被更新的本地意图取代（写前复查就已放弃）：不是失败，正常 resolve。
+      // 新意图自己的写正在正常进行，调用方 / UI 不该看到「保存失败」。
+      if (isSettingsWriteSupersededError(firstError)) return;
+      firstFailureAt = Date.now();
+      // Only retry while this intent is still the account's newest local intent.
+      // A newer edit makes the server write of this payload pointless and
+      // dangerous (it would persist a value the user already replaced).
+      // Being superseded at any of these points is a resolve, never a reject.
+      if (readLocalIntentEpoch(getState) !== intentEpoch) return;
+      await delaySettingsWriteRetry(SETTINGS_WRITE_RETRY_BACKOFF_MS);
+      if (readLocalIntentEpoch(getState) !== intentEpoch) return;
+      try {
+        await performWrite();
+        settleSettingsWriteFailureAfterSuccess();
+        return;
+      } catch (retryError) {
+        // 重试本身被世代复查拦下：同样是「被取代」，不是失败。
+        if (isSettingsWriteSupersededError(retryError)) return;
+        // Retry failed too: keep the optimistic local value (never roll back a
+        // newer local edit) and record a readable failure + reconciliation
+        // verdict for the UI. The rejection still bubbles to the caller.
+        // A newer local intent that arrived in the meantime owns the outcome:
+        // do not leave a stale failure state behind for it (and do not reject).
+        if (readLocalIntentEpoch(getState) !== intentEpoch) return;
+        const failure = await describeSettingsWriteFailure({
+          getState: getState as unknown as () => unknown,
+          accountId: userId,
+          intentEpoch,
+          intentKeys,
+          persistedKeys,
+          at: firstFailureAt,
+        });
+        dispatch(recordSettingsWriteFailure(failure));
+        throw retryError;
+      }
+    }
+  });
   // No post-await client-state publication: completion order is not intent order.
   return persistencePlan.normalizedChanges;
 });
@@ -211,9 +364,15 @@ export const toggleShowThinking = createAsyncThunk(
   "settings/toggleShowThinking",
   async (_: void, { dispatch, getState }) => {
     const userId = selectIdentityUserId(getState() as any);
+    // 未登录：`showThinking` 既无法持久化（setSettings 会抛
+    // "User not found for persisting settings."），owner 也没有账号可写。
+    // 因此这里直接安全 no-op：不 dispatch、不抛、正常 resolve——避免调用方
+    // （如 SettingsScreen 的 dispatch）拿到未捕获 rejection，开关也不误翻转。
+    if (!userId) return null;
     const owner = getAccountChatDisplayOwner(getState);
-    // Keep legacy Redux mirror as fallback while account hydration is pending.
-    const currentShowThinking = userId && owner.getAccountId() === userId
+    // 账号上下文尚未 hydrate（owner 还挂着别的/空账号）时，回读 Redux 镜像
+    // 作为当前值的唯一可信来源；owner 已持有该账号时以 owner 快照为准。
+    const currentShowThinking = owner.getAccountId() === userId
       ? owner.getSnapshot().showThinking
       : (getState() as any).settings.showThinking;
     return dispatch(

@@ -41,7 +41,16 @@ export const normalizeSettingChanges = (
   changes: Partial<SettingState>,
 ): Partial<SettingState> => {
   // Drop removed animation-picker values from historical callers before any write.
-  let normalizedChanges: Partial<SettingState> = omitKeys(changes, ["preferredAnimationSet", "createMenuOpenCount"]) as Partial<SettingState>;
+  let normalizedChanges: Partial<SettingState> = omitKeys(changes, [
+    "preferredAnimationSet",
+    "createMenuOpenCount",
+    // 本地意图世代只活在 redux 状态里：既不能从服务端 record 写回，也不能写云。
+    "localIntentEpoch",
+    // 权威回显世代同理：纯本地世代标记，不入云端 record、不被远端回灌。
+    "serverAuthorityEchoSeq",
+    // 写失败状态同样是纯本地 observability：绝不进入云端 settings record。
+    "lastWriteFailure",
+  ]) as Partial<SettingState>;
 
   if (hasOwn(normalizedChanges, "defaultAgentId")) {
     normalizedChanges = {
@@ -263,6 +272,42 @@ export const hydrateStoredSettings = ({
   };
 
   return Object.keys(hydratedSettings).length > 0 ? hydratedSettings : null;
+};
+
+/**
+ * 服务端权威字段：只读回显，不由用户意图驱动。
+ *
+ * 它们既不在 `stripRegisterBackedFieldsFromSettingsWrite` / `sanitizeStoredSettingsRecord`
+ * 的放行口径里（用户永远写不上去），也不该跟着用户偏好一起被丢弃——因此即使一次
+ * hydrate 因 epoch 不一致被整体丢弃，这两个字段仍要落到 Redux。
+ *
+ * 这里**显式列出**，不写成「除用户偏好以外的全部」：以后新增的字段默认不进入
+ * 权威集合，必须在这里被单独确认。
+ */
+const SERVER_AUTHORITATIVE_SETTINGS_KEYS = [
+  "autoApproveCredits",
+  "userAuthorityRegistry",
+] as const satisfies ReadonlyArray<keyof SettingState>;
+
+/**
+ * 从 hydrate 结果里挑出服务端权威字段，作为可独立应用的最小 payload。
+ *
+ * 语义保证（与 `hydrateStoredSettings` 一致）：
+ *  - `autoApproveCredits` 在 `hydrateStoredSettings` 里是**先于 sanitize** 从原始
+ *    record 取的（`sanitizeStoredSettingsRecord` 会剥掉它），因此这里拿到的是权威值；
+ *  - record 里没有该键 → hydrate 结果里也没有该键 → 整项不写，绝不写 0 覆盖当前值；
+ *  - `userAuthorityRegistry` 为空时不出现 → 同样不写空对象覆盖。
+ */
+export const pickServerAuthoritativeSettings = (
+  hydrated: Record<string, unknown>,
+): Partial<SettingState> => {
+  const picked: Record<string, unknown> = {};
+  for (const key of SERVER_AUTHORITATIVE_SETTINGS_KEYS) {
+    if (hasOwn(hydrated, key)) {
+      picked[key] = hydrated[key];
+    }
+  }
+  return picked as Partial<SettingState>;
 };
 
 export const buildSettingsPersistencePlan = ({

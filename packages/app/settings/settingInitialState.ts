@@ -104,6 +104,12 @@ export const initialState: SettingState = {
   autoApproveSelfUpdateFields: [...DEFAULT_AUTO_APPROVED_SELF_UPDATE_FIELDS],
   aiRecentContentLimit: 50,
   defaultAgentId: SYSTEM_DEFAULT_AGENT_ID,
+  // 本地用户意图世代：0 起步，由 setSettings 的乐观发布单调推进。
+  localIntentEpoch: 0,
+  // 服务端权威回显世代：0 起步，由权威回显写入（recordServerAuthorityEcho）单调推进。
+  serverAuthorityEchoSeq: 0,
+  // 设置写失败状态：null = 无未消解的写失败（见 SettingsWriteFailure）。
+  lastWriteFailure: null,
   quickChatAutoAgentId: "",
   ocrModel: "google_document_ocr",
   showScrollToTopButton: false,
