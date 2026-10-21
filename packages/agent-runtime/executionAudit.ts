@@ -261,6 +261,8 @@ export function buildExecutionAuditRecord(args: {
   cleanupStatus: ExecutionAuditRecord["cleanupStatus"];
   /** Only for providers that expose a usage API. */
   providerUsageMs?: number;
+  /** 本次 run 观察到的凭据使用；不传或空数组都表示「未使用凭据」。 */
+  credentialUses?: CredentialAuditEntry[];
 }): ExecutionAuditRecord {
   const { requestedAt, readyAt, finishedAt } = args.times;
   const bootMs = readyAt !== undefined ? Math.max(0, readyAt - requestedAt) : undefined;
@@ -304,6 +306,8 @@ export function buildExecutionAuditRecord(args: {
     status: args.status,
     ...(args.errorCode ? { errorCode: args.errorCode } : {}),
     cleanupStatus: args.cleanupStatus,
+    // 只在真有记录时写这个字段：`[]` 与缺省同义，不制造「记过账但为空」的二义。
+    ...(args.credentialUses?.length ? { credentialUses: args.credentialUses } : {}),
   };
 }
 
