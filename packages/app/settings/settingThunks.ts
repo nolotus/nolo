@@ -133,6 +133,13 @@ export const setSettings = createAsyncThunk<
     changes: normalizedChanges,
     previousDefaultAgentRecord: null,
   });
+  // Publish synchronously alongside the legacy Redux mirror. Waiting for
+  // cloud persistence makes the Owner stale and lets older requests overwrite
+  // newer user intent when they complete out of order.
+  if (selectIdentityUserId(getState() as any) !== userId) return {};
+  const owner = getAccountChatDisplayOwner(getState);
+  owner.setAccount(userId);
+  owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
   dispatch(updateSettingsState(persistencePlan.normalizedChanges));
   const nextDefaultAgentId =
     normalizeDefaultAgentIdSetting(
@@ -161,13 +168,7 @@ export const setSettings = createAsyncThunk<
       }),
     ).unwrap();
   }
-  // The legacy Redux mirror remains until all Web/RN readers have moved.
-  // Never publish delayed persistence results to a different account.
-  if (selectIdentityUserId(getState() as any) === userId) {
-    const owner = getAccountChatDisplayOwner(getState);
-    owner.setAccount(userId);
-    owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
-  }
+  // No post-await client-state publication: completion order is not intent order.
   return persistencePlan.normalizedChanges;
 });
 
