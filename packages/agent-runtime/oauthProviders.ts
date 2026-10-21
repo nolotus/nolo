@@ -168,14 +168,6 @@ export {
   refreshCursorToken,
 };
 
-// --- WorkBuddy & WorkBuddy AI refresh ---
-import {
-  workbuddyRefresh,
-  refreshWorkBuddyToken,
-} from "./workbuddyOAuth";
-
-export { workbuddyRefresh, refreshWorkBuddyToken };
-
 export const OAUTH_PROVIDER_REFRESH: Record<
   string,
   OAuthRefreshFn | undefined
@@ -185,8 +177,6 @@ export const OAUTH_PROVIDER_REFRESH: Record<
   antigravity: antigravityRefresh,
   claude: anthropicRefresh,
   cursor: cursorRefresh,
-  workbuddy: workbuddyRefresh,
-  "workbuddy-ai": workbuddyRefresh,
 };
 
 // ── Server-side apiKeyRef resolution ──────────────────────────────────────────

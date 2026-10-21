@@ -28,6 +28,7 @@ import {
 } from "./tableStore";
 import { useTable } from "./useTable";
 import NoMatch from "../NoMatch";
+import { logger } from "core/logger";
 
 import {
     applyDefaultRecentSort,
@@ -120,6 +121,38 @@ function TableActivityBadge({
     );
 }
 
+// TODO(legacy-grid-removal)：缺列只读兜底网格是临时过渡物，P3 数据回填脚本跑完后删除此块。
+// 样式未入 table.css 的原因：本块为待删除兜底，样式迁移是白做的工。
+//
+// 兜底网格不展示的行级系统字段（只影响缺列时的只读展示，不改行数据本身）。
+// 权威来源（仓库里没有可 import 的共享常量：server 侧 BASE_ROW_FIELDS 是
+// packages/server/handlers/tableToolHandlers.ts:423 的模块私有 Set，render 侧
+// packages/render/table/toolValueUtils.ts:357 也只是内联字面量；render 反向 import
+// server/handlers 会破坏分层，故在此本地罗列并逐项标注注入点）：
+// - dbKey / userId：database/actions/write.ts:104-108（每次写入自动注入）
+// - createdAt / updatedAt：database/actions/common.ts:214-219（normalizeTimeFields）
+// - authorName / authorAvatar：database/server/routes/write.ts:434-437（服务端回填作者）
+// - dbKey / tenantId / tableId / rowId / type / createdAt / updatedAt：render/table/tableStore.ts:453-472（建行）
+// - type / userId / ownerId / deletedAt：server/handlers/tableToolHandlers.ts:423-435（BASE_ROW_FIELDS）；
+//   deletedAt 另见 tableStore.ts:536-548 的 tombstone 写入
+const LEGACY_GRID_HIDDEN_FIELDS = new Set([
+    "dbKey",
+    "tenantId",
+    "tableId",
+    "rowId",
+    "type",
+    "userId",
+    "authorName",
+    "authorAvatar",
+    "ownerId",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+]);
+
+// 兜底网格最多渲染这么多行：没有列定义的老表可能很大，不能把整表拍进 DOM。
+const LEGACY_GRID_MAX_ROWS = 100;
+
 const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = ({ tableKey, initialSearch }) => {
     // 1. 使用 useTable hook 解析与加载
     const {
@@ -133,10 +166,26 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
         dispatch,
     } = useTable(tableKey);
     // A route change must not expose the previous table while the domain store loads.
-    const matchesTable = loadedTableMeta?.tenantId === tenantId && loadedTableMeta?.tableId === tableId;
+    // 身份判据用 dbKey（= 路由传入的 tableKey）：新旧 schema 的 meta 记录都带
+    // dbKey，而老 schema 记录没有 tenantId/tableId，严格比对会把这类旧表判成
+    // 「表不存在」。dbKey 只与当前 key 相等才算本表，路由切换时旧 meta 依旧被扣住。
+    const matchesTable = !!loadedTableMeta && loadedTableMeta.dbKey === tableKey;
     const tableMeta = matchesTable ? loadedTableMeta : null;
     const rows = useMemo(() => matchesTable ? loadedRows.filter((row: any) => row.tenantId === tenantId && row.tableId === tableId) : [],
         [matchesTable, loadedRows, tenantId, tableId]);
+
+    // store 里还留着别的表的 meta（路由切换瞬间）：按 dbKey 去重，只警示一次。
+    const warnedMetaDbKeysRef = useRef<Set<string>>(new Set());
+    const loadedMetaDbKey = loadedTableMeta?.dbKey;
+    useEffect(() => {
+        if (!loadedMetaDbKey || loadedMetaDbKey === tableKey) return;
+        if (warnedMetaDbKeysRef.current.has(loadedMetaDbKey)) return;
+        warnedMetaDbKeysRef.current.add(loadedMetaDbKey);
+        logger.warn(
+            { loadedTableMetaDbKey: loadedMetaDbKey, expectedTableKey: tableKey },
+            "TablePage: loaded table meta belongs to another table, withholding it"
+        );
+    }, [loadedMetaDbKey, tableKey]);
 
     const currentSpaceId = useCurrentSpaceId();
 
@@ -743,6 +792,85 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
                 <Button variant="secondary" size="small" onClick={() => window.location.reload()}>
                     重试
                 </Button>
+            </div>
+        );
+    }
+
+    // 老 schema 的 meta 没有 columns：不假装正常（不给一份"空表"），但也不隐藏行。
+    // 只用行数据自身的字段名做兜底表头做只读展示：不推导列类型、不生成列 ID、
+    // 不写回 meta，也不改变筛选/看板/列宽逻辑（这些仍依赖真 columns）。
+    if (columns.length === 0) {
+        const fieldNames: string[] = [];
+        for (const row of rows as any[]) {
+            for (const field of Object.keys(row)) {
+                if (LEGACY_GRID_HIDDEN_FIELDS.has(field)) continue;
+                if (!fieldNames.includes(field)) fieldNames.push(field);
+            }
+        }
+        // 表头按全量行推导（列越多越完整），但行本身只渲染前 LEGACY_GRID_MAX_ROWS 行，
+        // 避免大表把整表塞进 DOM；不做分页/虚拟化（本块是待删除兜底）。
+        const visibleRows = rows.slice(0, LEGACY_GRID_MAX_ROWS);
+        const isTruncated = rows.length > visibleRows.length;
+
+        return (
+            <div className="table-page">
+                <div
+                    className="table-page__center-state"
+                    data-testid="table-page-columns-repair-pending"
+                    style={{ padding: "12px 16px", alignItems: "flex-start", gap: 8 }}
+                >
+                    <LuCircleAlert size={20} color="var(--warning, #d97706)" aria-hidden="true" />
+                    <span>表结构待修复：这张表缺少列定义（columns），当前按行数据字段只读展示。</span>
+                    <span>共 {rows.length} 行</span>
+                    {isTruncated && (
+                        <span data-testid="table-page-legacy-grid-truncated">
+                            仅显示前 {visibleRows.length} 行，共 {rows.length} 行
+                        </span>
+                    )}
+                </div>
+                <div style={{ overflow: "auto", padding: "0 16px 16px" }}>
+                    <table
+                        data-testid="table-page-legacy-grid"
+                        style={{ borderCollapse: "collapse", width: "100%", fontSize: 14 }}
+                    >
+                        <thead>
+                            <tr>
+                                {fieldNames.map((field) => (
+                                    <th
+                                        key={field}
+                                        style={{
+                                            textAlign: "left",
+                                            padding: "6px 10px",
+                                            whiteSpace: "nowrap",
+                                            borderBottom: "1px solid var(--border, #ddd)",
+                                        }}
+                                    >
+                                        {field}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {visibleRows.map((row: any, index: number) => (
+                                <tr key={row.dbKey ?? index}>
+                                    {fieldNames.map((field) => (
+                                        <td
+                                            key={field}
+                                            style={{
+                                                padding: "6px 10px",
+                                                borderBottom: "1px solid var(--border, #eee)",
+                                            }}
+                                        >
+                                            {row[field] === null || row[field] === undefined
+                                                ? ""
+                                                : String(row[field])}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         );
     }

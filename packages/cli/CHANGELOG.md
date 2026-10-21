@@ -239,7 +239,6 @@
 * **media:** 转写阶段接入 STT 兜底链，按 Modal T4 成本计费 ([01d165f](https://github.com/nolotus/bun-nolo/commit/01d165f9e0eda8cfb38b89865bf50787c43026d1))
 * **media:** 阶段委派（agent-first）pipeline 语义 + 委派模块 + 接线（缺省仍 provider） ([5b3d5d1](https://github.com/nolotus/bun-nolo/commit/5b3d5d1765892cc796eeca0deb3b84817c853578))
 * **models:** 价格页下线旧代模型并上架 Claude Haiku 5.5 ([7401270](https://github.com/nolotus/bun-nolo/commit/7401270de7196d2243c8e1152d408dac27b5e30c))
-* **oauth:** add workbuddy provider integration and runtime transport ([c6fd17a](https://github.com/nolotus/bun-nolo/commit/c6fd17a45d49f20fa858362e7121480195887ca6))
 * **pricing:** agent 卡片与详情页显示缓存价格 ([3798bca](https://github.com/nolotus/bun-nolo/commit/3798bca714795785c35cc445b741f8b5934d3a68))
 * **pricing:** 模型价格表改综合排序，并重构为三层结构 ([c9f414e](https://github.com/nolotus/bun-nolo/commit/c9f414ed8ee16eba4893153bb3e90e7f2e9ad81a))
 * **prompt:** enforce mandatory concurrency in system instructions without user query ([ce68652](https://github.com/nolotus/bun-nolo/commit/ce68652f960fdcac68c9a0d3de53bdbe14d21e16))

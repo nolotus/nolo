@@ -35,8 +35,6 @@ export const OAUTH_PROVIDER_REFS = [
   "claude",
   "cursor",
   "devin",
-  "workbuddy",
-  "workbuddy-ai",
 ] as const;
 
 export type OAuthProviderRef = (typeof OAUTH_PROVIDER_REFS)[number];

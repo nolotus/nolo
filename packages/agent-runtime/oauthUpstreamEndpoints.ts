@@ -21,7 +21,7 @@
  *   一张全局白名单会把「`apiKeyRef=antigravity` + `customProviderUrl=Cloud Code 域`」
  *   这些**正在使用**的 agent 全部 400 —— 那是误伤，不是修复。
  *
- * ## 通用线：xAI SuperGrok 与 WorkBuddy 双站
+ * ## 通用线：xAI SuperGrok
  *
  * `GENERIC_OAUTH_UPSTREAM_HOSTS.xai` 必须与 `XAI_CHAT_COMPLETIONS_URL`
  * （`agentCallPlan.ts:156`）的 host 保持 lockstep；`chatCallPlan.test.ts` 有用例
@@ -35,8 +35,6 @@
 /** 通用 OAuth 线：provider ref → 官方 host（本层守卫唯一放行的 host）。 */
 export const GENERIC_OAUTH_UPSTREAM_HOSTS = {
   xai: "api.x.ai",
-  workbuddy: "copilot.tencent.com",
-  "workbuddy-ai": "www.workbuddy.ai",
 } as const;
 
 export type GenericOAuthRef = keyof typeof GENERIC_OAUTH_UPSTREAM_HOSTS;
@@ -82,7 +80,7 @@ export const resolveGenericOAuthHost = (ref: unknown): string | null => {
  *
  * 口径与仓库既有的 provider host 校验同构（见 `antigravityOAuth.ts` 的
  * `ANTIGRAVITY_CLOUD_CODE_HOST` + includes 判定）：**按 provider 判、只看 host**，
- * xAI 不把整条 URL 钉死；WorkBuddy 双站只允许固定 completions 路径且无 query/hash。
+ * xAI 不把整条 URL 钉死。
  * https 之外、不可解析、非通用线 ref
  * 一律返回 false；调用方必须先判定「是否通用线」再决定放行策略（见 chatProxyRouting
  * 里的 `assertOAuthUpstreamAllowed`：非通用线直接放行，属本轮范围外）。
@@ -98,9 +96,7 @@ export const isGenericOAuthUpstreamUrlAllowed = (
     const parsed = new URL(url.trim());
     return (
       parsed.protocol === "https:" && parsed.host.toLowerCase() === allowedHost &&
-      !parsed.username && !parsed.password &&
-      (!normalizeRef(ref).startsWith("workbuddy") ||
-        (parsed.pathname === "/v2/chat/completions" && !parsed.search && !parsed.hash))
+      !parsed.username && !parsed.password
     );
   } catch {
     return false;
