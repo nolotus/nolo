@@ -65,7 +65,6 @@ export const initialState: SettingState = {
   currentServer:
     _runtimeBootstrapServer ?? (isProduction ? SERVERS.MAIN : SERVERS.US),
   syncServers: Object.values(SERVERS),
-  showThinking: true,
   maxExecutionTime: 600_000,
   maxCost: 1,
   autoApproveCredits: 0,
@@ -112,8 +111,6 @@ export const initialState: SettingState = {
   lastWriteFailure: null,
   quickChatAutoAgentId: "",
   ocrModel: "google_document_ocr",
-  showScrollToTopButton: false,
-  showScrollToBottomButton: false,
   desktopChromeConnectorEnabled: false,
   developerModeEnabled: false,
   diagnosticModeEnabled: false,

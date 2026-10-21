@@ -38,7 +38,7 @@ import { AddCategoryModal } from "create/space/category/AddCategoryModal";
 import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
 import { selectIdentityUserId } from "identity/selectors";
 import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
-import { WorkDialogGroupsPreview } from "./WorkDialogGroupsPreview";
+import { WorkDialogHistory } from "./WorkDialogHistory";
 import { OtherContentGroups } from "./OtherContentGroups";
 import { NavigationRail } from "./NavigationRail";
 import { ExploreCategoryNav } from "./ExploreCategoryNav";
@@ -442,7 +442,7 @@ const ChatSidebar: React.FC = () => {
               {typeFilter === "all" || typeFilter === "dialog" ? (
                 <>
                   {homeScope.kind === "all" && remoteTasksGlobalEntry}
-                  <WorkDialogGroupsPreview items={scopedWorkItems} userId={identityUserId ?? ""} />
+                  <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} />
                   {typeFilter === "all" && homeScope.kind === "all" && (
                     // 「分类」视图并入 Work：全部作用域下按类型列出对话之外的内容。
                     // 项目作用域只投影对话（projectHomeItems → dialogsForLocalProject），

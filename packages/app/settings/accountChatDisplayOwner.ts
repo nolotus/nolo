@@ -129,3 +129,9 @@ export function useAccountChatDisplayPreferences(): AccountChatDisplayPreference
 
   return preferences;
 }
+
+/** Keep legacy server records readable, but never return chat keys to Redux. */
+export const omitAccountChatDisplayPreferences = <T extends object>(value: T): Omit<T, keyof AccountChatDisplayPreferences> => {
+  const { showThinking: _thinking, showScrollToTopButton: _top, showScrollToBottomButton: _bottom, ...rest } = value as Record<string, unknown>;
+  return rest as Omit<T, keyof AccountChatDisplayPreferences>;
+};

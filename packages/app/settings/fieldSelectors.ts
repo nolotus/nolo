@@ -34,9 +34,6 @@ import type { SettingState, SettingsWriteFailure } from "./settingTypes";
 /** Retired animation preference: retain selector for legacy callers. */
 export const selectPreferredAnimationSet = (_state: RootState): number => 0;
 
-export const selectShowThinking = (state: RootState): boolean =>
-  state.settings.showThinking;
-
 export const selectMaxCost = (state: RootState): number =>
   state.settings.maxCost;
 
@@ -158,12 +155,6 @@ export const selectOcrModel = (
   if (state.settings.ocrModel === "olm_ocr") return "olm_ocr";
   return "google_document_ocr";
 };
-
-export const selectShowScrollToTopButton = (state: RootState): boolean =>
-  state.settings.showScrollToTopButton ?? false;
-
-export const selectShowScrollToBottomButton = (state: RootState): boolean =>
-  state.settings.showScrollToBottomButton ?? false;
 
 /** Legacy selector compatibility: the live device owner is outside Redux. */
 export const selectCreateMenuOpenCount = (_state: RootState): number => 0;

@@ -1,3 +1,4 @@
+import { getAccountChatDisplayOwner } from "./accountChatDisplayOwner";
 // packages/app/settings/settingsWriteRetry.ts
 //
 // 单一职责:settings 写云失败后的**有界重试**与**显式对账**的判定逻辑。
@@ -306,8 +307,12 @@ export const describeSettingsWriteFailure = async ({
 
   const localSettings = ((getState() as { settings?: Record<string, unknown> })
     ?.settings ?? {}) as Record<string, unknown>;
+  const owner = getAccountChatDisplayOwner(getState);
+  const localValues = owner.getAccountId() === accountId
+    ? { ...localSettings, ...owner.getSnapshot() }
+    : localSettings;
   const unresolvedKeys = persistedKeys
-    .filter((key) => !isSameSettingValue(localSettings[key], serverRecord[key]))
+    .filter((key) => !isSameSettingValue(localValues[key], serverRecord[key]))
     .sort();
 
   return {

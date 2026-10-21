@@ -9,6 +9,7 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 
 import { selectIdentityUserId } from "identity/selectors";
+import { getSessionGenerationForState } from "identity/sessionSource";
 import { createUserKey, createUserPreferenceKey } from "database/keys";
 import {
   USER_PREFERENCE_NAMES,
@@ -42,7 +43,7 @@ import {
   resolveSettingsWriteFailureAfterSuccess,
   SettingsWriteSupersededError,
 } from "./settingsWriteRetry";
-import { getAccountChatDisplayOwner, pickAccountChatDisplayPreferences } from "./accountChatDisplayOwner";
+import { getAccountChatDisplayOwner, pickAccountChatDisplayPreferences, omitAccountChatDisplayPreferences, type AccountChatDisplayPreferences } from "./accountChatDisplayOwner";
 import { getSettingDbActionThunks } from "./dbActionThunks";
 import {
   buildSettingsPersistencePlan,
@@ -73,6 +74,8 @@ const readServerAuthorityEchoSeq = (getState: () => unknown): number => {
  * Read the persisted settings record for the current user, normalize it, and
  * apply it to local state. Returns the hydrated record (or null when no user).
  */
+const latestChatHydrations = new WeakMap<Function, object>();
+
 export const getSettings = createAsyncThunk<
   Record<string, unknown> | null,
   void,
@@ -80,6 +83,9 @@ export const getSettings = createAsyncThunk<
 >("settings/getSettings", async (_, { dispatch, getState }) => {
   const userId = selectIdentityUserId(getState() as any);
   if (!userId) return null;
+  const session = getSessionGenerationForState(getState());
+  const hydration = {};
+  latestChatHydrations.set(getState, hydration);
   // Captured before the cloud read: this hydrate may only be applied when no
   // local user intent was published while the read was in flight.
   const startLocalIntentEpoch = readLocalIntentEpoch(getState);
@@ -98,7 +104,9 @@ export const getSettings = createAsyncThunk<
       .catch(() => null),
   ]);
   // A pending cloud read must not hydrate a different signed-in account.
-  if (selectIdentityUserId(getState() as any) !== userId) return null;
+  if (selectIdentityUserId(getState() as any) !== userId ||
+      getSessionGenerationForState(getState()) !== session ||
+      latestChatHydrations.get(getState) !== hydration) return null;
   const authorityHomeServer =
     readUserPreferenceRegisterValue<string>(
       authorityHomeRecord,
@@ -116,7 +124,9 @@ export const getSettings = createAsyncThunk<
     );
     const { currentServer: _ignored, ...settingsToApply } = normalizedPayload;
     // Hydrate the account owner without allowing a stale cloud read to cross identities.
-    if (selectIdentityUserId(getState() as any) !== userId) return null;
+    if (selectIdentityUserId(getState() as any) !== userId ||
+      getSessionGenerationForState(getState()) !== session ||
+      latestChatHydrations.get(getState) !== hydration) return null;
     // Two independent generations guard two different staleness directions:
     //  - 用户意图世代（localIntentEpoch）：远端读期间用户改过设置 → 丢弃本次
     //    hydrate 的**用户偏好**字段（不写 Owner、不写用户偏好）；
@@ -161,7 +171,7 @@ export const getSettings = createAsyncThunk<
     const owner = getAccountChatDisplayOwner(getState);
     owner.setAccount(userId);
     owner.updateForAccount(userId, pickAccountChatDisplayPreferences(preferenceFields));
-    dispatch(updateSettingsState(applied));
+    dispatch(updateSettingsState(omitAccountChatDisplayPreferences(applied)));
   }
   return hydrated;
 });
@@ -177,11 +187,12 @@ export const getSettings = createAsyncThunk<
  * appearance keys plus sidebarWidth) are accepted; other settings still
  * require a logged-in user.
  */
-export const setSettings = createAsyncThunk<
+const persistSettingsChanges = createAsyncThunk<
   Partial<SettingState>,
   Partial<SettingState>,
   { state: any }
->("settings/setSettings", async (changes, { dispatch, getState }) => {
+>("settings/persistSettingsChanges", async (changes, { dispatch, getState }) => {
+  const session = getSessionGenerationForState(getState());
   const currentSettings = (getState() as any).settings;
   const normalizedChanges = normalizeSettingChanges(changes);
   const previousDefaultAgentId =
@@ -220,20 +231,24 @@ export const setSettings = createAsyncThunk<
   const intentEpoch = readLocalIntentEpoch(getState);
   owner.setAccount(userId);
   owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
-  dispatch(updateSettingsState(persistencePlan.normalizedChanges));
+  dispatch(updateSettingsState(omitAccountChatDisplayPreferences(persistencePlan.normalizedChanges)));
   // Keys of the user intent (for the failure state) and of the keys that are
   // actually pushed to the cloud settings record (for reconciliation).
   const intentKeys = Object.keys(persistencePlan.normalizedChanges);
   const persistedKeys = Object.keys(
     persistencePlan.settingsPatch?.changes ?? {},
   ).filter((key) => key !== "schemaVersion");
+  const isCurrentIntent = () =>
+    selectIdentityUserId(getState()) === userId &&
+    getSessionGenerationForState(getState()) === session &&
+    readLocalIntentEpoch(getState) === intentEpoch;
   const performWrite = async () => {
     // 便宜收紧（非原子）：每次真正发写之前再判一次世代 —— 首次与重试各一次。
     // 若这次意图已被更新的本地意图取代，就不要把旧 payload 发出去；窗口从
     // 「退避 200ms + 一次网络往返」缩到一次函数调用。最终一致性仍由同账号串行
     // 队列保证：新意图的写排在队尾、紧接本次之后执行并覆盖服务端。
     // 抛哨兵错误（而不是普通 Error）：被取代 ≠ 失败，调用方应正常 resolve。
-    if (readLocalIntentEpoch(getState) !== intentEpoch) {
+    if (!isCurrentIntent()) {
       throw new SettingsWriteSupersededError();
     }
     const nextDefaultAgentId =
@@ -267,6 +282,7 @@ export const setSettings = createAsyncThunk<
   // 写成功即收敛已有的失败状态：本次覆盖了失败状态里剩下的全部键 → 清空；
   // 只覆盖一部分 → 剔除已覆盖的键（剩下的继续可见）；其它账号的状态不动。
   const settleSettingsWriteFailureAfterSuccess = () => {
+    if (!isCurrentIntent()) return;
     const existing = (getState() as any)?.settings
       ?.lastWriteFailure as SettingsWriteFailure | null | undefined;
     if (!existing) return;
@@ -297,9 +313,9 @@ export const setSettings = createAsyncThunk<
       // A newer edit makes the server write of this payload pointless and
       // dangerous (it would persist a value the user already replaced).
       // Being superseded at any of these points is a resolve, never a reject.
-      if (readLocalIntentEpoch(getState) !== intentEpoch) return;
+      if (!isCurrentIntent()) return;
       await delaySettingsWriteRetry(SETTINGS_WRITE_RETRY_BACKOFF_MS);
-      if (readLocalIntentEpoch(getState) !== intentEpoch) return;
+      if (!isCurrentIntent()) return;
       try {
         await performWrite();
         settleSettingsWriteFailureAfterSuccess();
@@ -312,7 +328,7 @@ export const setSettings = createAsyncThunk<
         // verdict for the UI. The rejection still bubbles to the caller.
         // A newer local intent that arrived in the meantime owns the outcome:
         // do not leave a stale failure state behind for it (and do not reject).
-        if (readLocalIntentEpoch(getState) !== intentEpoch) return;
+        if (!isCurrentIntent()) return;
         const failure = await describeSettingsWriteFailure({
           getState: getState as unknown as () => unknown,
           accountId: userId,
@@ -321,6 +337,7 @@ export const setSettings = createAsyncThunk<
           persistedKeys,
           at: firstFailureAt,
         });
+        if (!isCurrentIntent()) return;
         dispatch(recordSettingsWriteFailure(failure));
         throw retryError;
       }
@@ -329,6 +346,42 @@ export const setSettings = createAsyncThunk<
   // No post-await client-state publication: completion order is not intent order.
   return persistencePlan.normalizedChanges;
 });
+
+/**
+ * Account-chat preferences have an explicit Owner-first API.
+ * Persistence, failure state, and per-account ordering remain centralized
+ * in setSettings until the surrounding Settings write protocol is extracted.
+ */
+export const setAccountChatDisplayPreferences = createAsyncThunk(
+  "settings/setAccountChatDisplayPreferences",
+  async (changes: Partial<AccountChatDisplayPreferences>, { dispatch, getState }) => {
+    const userId = selectIdentityUserId(getState());
+    if (!userId) throw new Error("User not found for persisting settings.");
+    const owner = getAccountChatDisplayOwner(getState);
+    owner.setAccount(userId);
+    // Persist the complete current chat intent: a queued, superseded partial
+    // write may be skipped, so a later toggle must carry its sibling values.
+    return dispatch(persistSettingsChanges({
+      ...owner.getSnapshot(),
+      ...pickAccountChatDisplayPreferences(changes),
+    } as Partial<SettingState>)).unwrap();
+  },
+);
+
+/**
+ * Public legacy Settings API explicitly excludes account-chat display fields.
+ * Reject rather than silently dropping user intent from old consumers.
+ */
+export const setSettings = createAsyncThunk(
+  "settings/setSettings",
+  async (changes: Partial<SettingState>, { dispatch }) => {
+    const forbidden = ["showThinking", "showScrollToTopButton", "showScrollToBottomButton"];
+    if (forbidden.some((key) => Object.prototype.hasOwnProperty.call(changes, key))) {
+      throw new Error("Chat display preferences must use setAccountChatDisplayPreferences.");
+    }
+    return dispatch(persistSettingsChanges(changes)).unwrap();
+  },
+);
 
 // --- 细粒度 setter thunk(几乎都是 setSettings 的薄包装) ---
 
@@ -358,27 +411,6 @@ export const changeDarkMode = createAsyncThunk(
     dispatch(
       setSettings({ isDark, themeMode: isDark ? "dark" : "light" }),
     ).unwrap(),
-);
-
-export const toggleShowThinking = createAsyncThunk(
-  "settings/toggleShowThinking",
-  async (_: void, { dispatch, getState }) => {
-    const userId = selectIdentityUserId(getState() as any);
-    // 未登录：`showThinking` 既无法持久化（setSettings 会抛
-    // "User not found for persisting settings."），owner 也没有账号可写。
-    // 因此这里直接安全 no-op：不 dispatch、不抛、正常 resolve——避免调用方
-    // （如 SettingsScreen 的 dispatch）拿到未捕获 rejection，开关也不误翻转。
-    if (!userId) return null;
-    const owner = getAccountChatDisplayOwner(getState);
-    // 账号上下文尚未 hydrate（owner 还挂着别的/空账号）时，回读 Redux 镜像
-    // 作为当前值的唯一可信来源；owner 已持有该账号时以 owner 快照为准。
-    const currentShowThinking = owner.getAccountId() === userId
-      ? owner.getSnapshot().showThinking
-      : (getState() as any).settings.showThinking;
-    return dispatch(
-      setSettings({ showThinking: !currentShowThinking }),
-    ).unwrap();
-  },
 );
 
 export const setThemeFollowsSystem = createAsyncThunk(

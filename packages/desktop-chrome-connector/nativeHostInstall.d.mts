@@ -1,3 +1,8 @@
+/** Absolute standalone Bun path from PATH, with Node.js compatibility fallback. */
+export function resolveNativeHostRuntimePath(options?: {
+  env?: Record<string, string | undefined>;
+}): string;
+
 export const FIREFOX_EXTENSION_ID: string;
 
 /** Browsers this installer can register a native messaging host for. */
@@ -25,6 +30,7 @@ export function installNativeHostManifests(options?: {
   connectorRoot?: string;
   platform?: string;
   extensionId?: string;
+  /** Explicit runtime override (Bun or Node); retained for compatibility. */
   nodePath?: string;
   browser?: string;
 }): {
@@ -87,6 +93,7 @@ export function installNativeHostManifest(options?: {
   connectorRoot?: string;
   platform?: string;
   extensionId?: string;
+  /** Explicit runtime override (Bun or Node); retained for compatibility. */
   nodePath?: string;
   browser?: string;
 }): {

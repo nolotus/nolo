@@ -114,7 +114,6 @@ export {
 // 简单字段 selectors
 export {
   selectPreferredAnimationSet,
-  selectShowThinking,
   selectMaxCost,
   selectMaxExecutionTime,
   selectAutoApproveCredits,
@@ -136,8 +135,6 @@ export {
   selectDefaultAgentPreference,
   selectDefaultAgentId,
   selectOcrModel,
-  selectShowScrollToTopButton,
-  selectShowScrollToBottomButton,
   selectCreateMenuOpenCount,
   selectDesktopChromeConnectorEnabled,
   selectDeveloperModeEnabled,
@@ -180,11 +177,11 @@ export {
 export {
   getSettings,
   setSettings,
+  setAccountChatDisplayPreferences,
   changeTheme,
   changeDensity,
   changeFontPreset,
   changeDarkMode,
-  toggleShowThinking,
   setThemeFollowsSystem,
   setSidebarWidth,
   toggleEnableReadCurrentSpace,

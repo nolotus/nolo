@@ -53,7 +53,6 @@ export interface SettingState {
   currentServer: string;
   syncServers: string[];
 
-  showThinking: boolean;
   maxExecutionTime: number;
   maxCost: number;
   autoApproveCredits: number;
@@ -120,9 +119,6 @@ export interface SettingState {
   // PDF OCR 模型选择("none" 表示不使用 OCR,用 pdf.js 提取文本)
   ocrModel: "none" | "google_document_ocr" | "olm_ocr";
 
-  // 对话页面快捷滚动按钮
-  showScrollToTopButton: boolean;
-  showScrollToBottomButton: boolean;
   desktopChromeConnectorEnabled: boolean;
   /** Master switch for developer-facing settings. Default false. */
   developerModeEnabled: boolean;

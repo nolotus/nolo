@@ -9,7 +9,6 @@
 set -Eeuo pipefail
 
 BUN_BIN="${NOLO_BUN_BIN:-bun}"
-NODE_BIN="${NOLO_NODE_BIN:-node}"
 NPM_BIN="${NOLO_NPM_BIN:-npm}"
 DIST_TAG="${NOLO_CLI_PUBLISH_DIST_TAG:-alpha}"
 OUT_DIR="${NOLO_CLI_PUBLISH_OUT_DIR:-.tmp/nolo-cli-publish}"
@@ -56,7 +55,7 @@ resolve_cli_version() {
     printf '%s\n' "$NOLO_CLI_PUBLISH_VERSION"
     return
   fi
-  "$NODE_BIN" -p "require('./packages/cli/package.json').version"
+  "$BUN_BIN" -p "require('./packages/cli/package.json').version"
 }
 
 prepare_staged_package() {

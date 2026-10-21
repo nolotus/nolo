@@ -1,3 +1,4 @@
+import { mergeSharedHistoryItems } from "./sharedHistoryMerge";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation } from "app/routing";
 import type { MyContentListItem } from "app/utils/myContentItems";
@@ -9,11 +10,18 @@ import { projectWorkDialogData } from "./workDialogDataProjection";
 import { resolveWorkLiveness, type WorkStoreRun } from "./workRunLiveness";
 import { isRoutableContentActive } from "create/space/contentKeyUtils";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
+import { useAppSelector } from "app/store";
+import { selectRuntimeSnapshot } from "app/stateViews/runtime";
+import type { HomeScope } from "./homeScopeProjection";
+import { useSharedSpaceDialogPages } from "database/hooks/useSharedSpaceDialogPages";
 import SidebarItemRow from "create/space/SidebarItemRow";
 import { SidebarItemMoreMenu } from "create/space/SidebarItemMoreMenu";
 import { MenuPopover } from "render/web/ui/MenuPopover";
 import type { WorkRunListCoverage, WorkRunListSnapshot } from "./workRunListCoverage";
 import type { WorkRunSignal } from "app/navigation/workDialogProjection";
+
+const ignoreMenuToggle = (_key: string | null): void => {};
 
 const WORK_GROUP_SECTIONS = [
   ["needs-you", "需要我处理"],
@@ -22,23 +30,39 @@ const WORK_GROUP_SECTIONS = [
 ] as const;
 
 export function WorkDialogGroupsPreview({
-  items, userId,
-}: { items: readonly MyContentListItem[]; userId: string }) {
+  items, userId, homeScope = { kind: "all" },
+}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope }) {
   if (!userId) return null;
   return (
     <section aria-label="工作状态" data-hook="work-dialog-groups">
-      <WorkDialogGroupsExpanded items={items} userId={userId} />
+      <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} />
     </section>
   );
 }
 
-function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContentListItem[]; userId: string }) {
+function WorkDialogGroupsExpanded({ items, userId, homeScope }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope }) {
   // This subscription hydrates run state on mount/focus; per-dialog lookup retains ownership scope.
   const { coverage, snapshot } = useWorkRunListCoverage(userId);
   const dialogStatuses = useDialogStatuses();
   const dialogEventTimestamps = useDialogEventTimestamps();
   const location = useLocation();
   const currentSpaceId = useCurrentSpaceId();
+  const runtime = useAppSelector(selectRuntimeSnapshot);
+  const memberSpaces = useAllMemberSpaces();
+  const sharedEnabled = homeScope.kind !== "project" &&
+    Boolean(runtime.currentUserId && runtime.currentToken) && runtime.currentUserId === userId;
+  const sharedPages = useSharedSpaceDialogPages({
+    enabled: sharedEnabled,
+    spaceIds: memberSpaces.map((space) => space.spaceId),
+    account: runtime.currentUserId ?? "",
+    token: runtime.currentToken ?? "",
+    origins: runtime.syncServers,
+  });
+  const sharedItems = useMemo(() => sharedEnabled ? mergeSharedHistoryItems(sharedPages.records.filter((record) =>
+    record.type === "dialog" && record.ownerUserId && record.ownerUserId !== userId &&
+    parseDialogKey(record.contentKey)?.userId === record.ownerUserId &&
+    memberSpaces.some((space) => space.spaceId === record.spaceId)
+  )) : [], [sharedEnabled, sharedPages.records, userId, memberSpaces]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 15_000);
@@ -67,11 +91,13 @@ function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContent
   // V2-B 预览尚未接入「agent 正在等用户回答」的权威来源（waitingUserByDialogKey
   // 在生产侧不接线）：「需要我处理」当前由「需处置 / 状态未知」触发，不代表一定在等你。
   const groups = useMemo(() => projectWorkDialogData(items, tasks, {
+    sharedItems,
     userId, dialogStatuses, dialogEventTimestamps, now,
     liveDialogIds: liveness.liveDialogIds,
     uncertainDialogIds: liveness.uncertainDialogIds,
-  }), [items, tasks, userId, dialogStatuses, dialogEventTimestamps, now, liveness]);
-  const titles = useMemo(() => new Map(items.map((item) => [item.contentKey, item.title])), [items]);
+  }), [items, tasks, userId, sharedItems, dialogStatuses, dialogEventTimestamps, now, liveness]);
+  const titles = useMemo(() => new Map([...items.map((item) => [item.contentKey, item.title] as const), ...sharedItems.map((item) => [item.contentKey, item.title] as const)]), [items, sharedItems]);
+  const sharedKeys = useMemo(() => new Set(sharedItems.map((item) => item.contentKey)), [sharedItems]);
   const pinnedByKey = useMemo(
     () => new Map(items.map((item) => [item.contentKey, Boolean(item.pinned)])),
     [items],
@@ -106,6 +132,13 @@ function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContent
   return (
     <div data-hook="home-work-dialog-list">
       <p role="status">{coverageText(coverage, snapshot)}</p>
+      {sharedEnabled && sharedPages.hasMoreSpaces.map((spaceId) => {
+        const failed = Boolean(sharedPages.errorsBySpace[spaceId]);
+        return <button key={spaceId} type="button" disabled={sharedPages.loadingSpaces.includes(spaceId)}
+          onClick={() => void sharedPages.loadMore(spaceId)}>
+          {failed ? `重试共享历史失败来源（${spaceId}）` : `加载更多共享历史来源（${spaceId}）`}
+        </button>;
+      })}
       {total === 0 ? (
         <p>暂无已加载的对话。</p>
       ) : WORK_GROUP_SECTIONS.map(([key, label]) => {
@@ -136,11 +169,12 @@ function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContent
                     type="dialog"
                     title={title}
                     isActive={isActive}
-                    isMenuOpen={activeMenuKey === dialog.dialogKey}
-                    onToggleMenu={setActiveMenuKey}
-                    onMenuAnchorChange={handleMenuAnchorChange}
-                    editSignal={editRequest?.key === dialog.dialogKey ? editRequest.nonce : undefined}
-                    pinned={pinnedByKey.get(dialog.dialogKey) ?? false}
+                    isMenuOpen={!sharedKeys.has(dialog.dialogKey) && activeMenuKey === dialog.dialogKey}
+                    readOnly={sharedKeys.has(dialog.dialogKey)}
+                    onToggleMenu={sharedKeys.has(dialog.dialogKey) ? ignoreMenuToggle : setActiveMenuKey}
+                    onMenuAnchorChange={sharedKeys.has(dialog.dialogKey) ? undefined : handleMenuAnchorChange}
+                    editSignal={sharedKeys.has(dialog.dialogKey) ? undefined : editRequest?.key === dialog.dialogKey ? editRequest.nonce : undefined}
+                    pinned={sharedKeys.has(dialog.dialogKey) ? false : pinnedByKey.get(dialog.dialogKey) ?? false}
                   />
                 </div>
               );
@@ -148,7 +182,7 @@ function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContent
           </div>
         );
       })}
-      {activeMenuKey && menuAnchorEl && (
+      {activeMenuKey && !sharedKeys.has(activeMenuKey) && menuAnchorEl && (
         <MenuPopover
           triggerRef={{ current: menuAnchorEl }}
           isOpen
@@ -160,8 +194,8 @@ function WorkDialogGroupsExpanded({ items, userId }: { items: readonly MyContent
             title={titles.get(activeMenuKey) || activeMenuKey}
             type="dialog"
             spaceId={currentSpaceId}
-            canEditInSpace={Boolean(currentSpaceId)}
-            canMoveToSpace
+            canEditInSpace={Boolean(currentSpaceId) && !sharedKeys.has(activeMenuKey)}
+            canMoveToSpace={!sharedKeys.has(activeMenuKey)}
             showDownloadAction={false}
             menuAnchorEl={menuAnchorEl}
             onEditTitle={() => {

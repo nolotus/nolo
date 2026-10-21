@@ -1,6 +1,8 @@
+import { mergeSharedHistoryItems } from "./sharedHistoryMerge";
 import type { RemoteTaskCard } from "./agentRunStore";
 import { toTimestamp, type MyContentListItem } from "app/utils/myContentItems";
 import { parseDialogKey } from "database/dialogKey";
+import type { SharedSpaceDialogSummary } from "database/client/sharedSpaceDialogPage";
 import { groupWorkDialogs, type WorkDialogItem, type WorkGroups, type WorkRunSignal } from "app/navigation/workDialogProjection";
 
 /**
@@ -13,6 +15,7 @@ export function projectWorkDialogData(
   remoteTasks: readonly RemoteTaskCard[],
   options: {
     userId: string;
+    sharedItems?: readonly SharedSpaceDialogSummary[];
     dialogStatuses?: Readonly<Record<string, string>>;
     dialogEventTimestamps?: Readonly<Record<string, number>>;
     now?: number;
@@ -75,6 +78,10 @@ export function projectWorkDialogData(
       runs: signals,
       needsUserAction: options.waitingUserByDialogKey?.[item.contentKey] === true,
     });
+  }
+  for (const item of mergeSharedHistoryItems(options.sharedItems ?? [])) {
+    if (item.type !== "dialog" || !item.ownerUserId || item.ownerUserId === options.userId) continue;
+    dialogs.push({ dialogKey: item.contentKey, spaceId: item.spaceId, updatedAt: toTimestamp(item.updatedAt), runs: [] });
   }
   return groupWorkDialogs(dialogs);
 }
