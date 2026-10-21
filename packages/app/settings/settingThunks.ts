@@ -28,6 +28,7 @@ import {
 } from "ai/policy/types";
 
 import { updateSettingsState } from "./settingActions";
+import { getAccountChatDisplayOwner, pickAccountChatDisplayPreferences } from "./accountChatDisplayOwner";
 import { getSettingDbActionThunks } from "./dbActionThunks";
 import {
   buildSettingsPersistencePlan,
@@ -82,6 +83,11 @@ export const getSettings = createAsyncThunk<
       hydrated as Partial<SettingState>,
     );
     const { currentServer: _ignored, ...settingsToApply } = normalizedPayload;
+    // Hydrate the account owner without allowing a stale cloud read to cross identities.
+    if (selectIdentityUserId(getState() as any) !== userId) return null;
+    const owner = getAccountChatDisplayOwner(getState);
+    owner.setAccount(userId);
+    owner.updateForAccount(userId, pickAccountChatDisplayPreferences(settingsToApply));
     dispatch(updateSettingsState(settingsToApply));
   }
   return hydrated;
@@ -154,6 +160,13 @@ export const setSettings = createAsyncThunk<
         data: persistencePlan.settingsPatch.changes,
       }),
     ).unwrap();
+  }
+  // The legacy Redux mirror remains until all Web/RN readers have moved.
+  // Never publish delayed persistence results to a different account.
+  if (selectIdentityUserId(getState() as any) === userId) {
+    const owner = getAccountChatDisplayOwner(getState);
+    owner.setAccount(userId);
+    owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
   }
   return persistencePlan.normalizedChanges;
 });

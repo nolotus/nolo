@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from "react";
+import { useSelector, useStore } from "react-redux";
+import { selectIdentityUserId } from "identity/selectors";
 
 /**
  * Account-owned chat presentation preferences. Does not depend on Redux.
@@ -61,4 +63,31 @@ export function useAccountChatDisplaySnapshot(owner: AccountChatDisplayOwner) {
     owner.getSnapshot,
     () => DEFAULT_ACCOUNT_CHAT_DISPLAY_PREFERENCES,
   );
+}
+
+// One owner per Redux store during migration; never share accounts across roots.
+const owners = new WeakMap<Function, AccountChatDisplayOwner>();
+export function getAccountChatDisplayOwner(getState: Function): AccountChatDisplayOwner {
+  let owner = owners.get(getState);
+  if (!owner) {
+    owner = createAccountChatDisplayOwner();
+    owners.set(getState, owner);
+  }
+  return owner;
+}
+
+export function pickAccountChatDisplayPreferences(value: Record<string, unknown>): Partial<AccountChatDisplayPreferences> {
+  const result: Partial<Record<keyof AccountChatDisplayPreferences, boolean>> = {};
+  for (const key of ["showThinking", "showScrollToTopButton", "showScrollToBottomButton"] as const) {
+    if (typeof value[key] === "boolean") result[key] = value[key] as boolean;
+  }
+  return result;
+}
+
+export function useAccountChatDisplayPreferences(): AccountChatDisplayPreferences {
+  const store = useStore();
+  const userId = useSelector(selectIdentityUserId);
+  const owner = getAccountChatDisplayOwner(store.getState);
+  owner.setAccount(userId ?? null);
+  return useAccountChatDisplaySnapshot(owner);
 }
