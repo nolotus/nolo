@@ -45,7 +45,7 @@ export async function runSecretCommand(
 
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
     console.log(`用法:
-  nolo secret list                         列出已保存的 secret 名称（不显示值）
+  nolo secret list [--json]                列出已保存的 secret 名称（不显示值；--json 输出机器可读清单）
   nolo secret get <name>                   打印指定 secret 的值（供调试；Agent 不得读取）
   nolo secret set <name> <value|json>      设置 secret（字符串，或以 { / [ 开头的 JSON）
   nolo secret delete <name>                删除指定的 secret
@@ -60,6 +60,7 @@ export async function runSecretCommand(
   try {
     switch (subcommand) {
       case "list": {
+        const wantJson = rest.includes("--json");
         const read = readSecretsForRead();
         if (read.corrupted) {
           console.error(`错误: ${read.error.message}`);
@@ -67,6 +68,22 @@ export async function runSecretCommand(
           return;
         }
         const names = Object.keys(read.data).sort();
+        if (wantJson) {
+          // 机器可读清单：**只出名字与形态，永不出值**。
+          // agent 用它回答「我们有没有相关凭据」，随后由平台侧解析注入。
+          const secrets = names.map((name) => {
+            const value = read.data[name];
+            const kind =
+              typeof value === "string"
+                ? "string"
+                : value !== null && typeof value === "object"
+                  ? "json"
+                  : "other";
+            return { name, kind };
+          });
+          console.log(JSON.stringify({ count: secrets.length, secrets }, null, 2));
+          return;
+        }
         if (names.length === 0) {
           console.log("（当前未保存任何 secret）");
         } else {
