@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { LuHouse, LuStar, LuCompass, LuSearch, LuBot, LuFileText, LuTable2, LuLayoutGrid, LuMessageSquare, LuLink } from "react-icons/lu";
 import { setViewMode } from "create/space/spaceCurrentStore";
 import { useUserId } from "identity";
-import { useFavoriteAgentIds, useFavoriteContentIds, useFavoritesError, useFavoritesInitialized } from "app/favorite/favoriteStore";
+import { useFavoriteAgentIds, useFavoriteContentIds, useFavoritesInitialized, useFavoritesLoading, useFavoritesSnapshotComplete } from "app/favorite/favoriteStore";
 import { pruneQuickFavorites, useQuickFavorites } from "./quickFavoriteStore";
 import {
   type RailView,
@@ -42,9 +42,9 @@ export function NavigationRail(): React.JSX.Element {
   const favoriteAgents = useFavoriteAgentIds();
   const favoriteContent = useFavoriteContentIds();
   const favoritesInitialized = useFavoritesInitialized();
-  // 收藏拉取失败（离线 / 服务端报错）时 favoritesInitialized 仍会置 true，但列表是空的；
-  // 此时不能拿空列表去回收本地快捷，否则一次网络抖动就会把用户的快捷全抹掉。
-  const favoritesError = useFavoritesError();
+  // 只有完整快照才可用于回收本地快捷；部分服务器失败及重试加载期间都不安全。
+  const favoritesSnapshotComplete = useFavoritesSnapshotComplete();
+  const favoritesLoading = useFavoritesLoading();
   const favoriteKeys = new Set([...favoriteAgents, ...favoriteContent]);
   // promoted / favoriteKeys 每次 render 都是新实例，把它们直接放进依赖数组会让
   // 回收 effect 每轮都执行；下面两个「内容签名」是原始值，只有集合真正变化时才变。
@@ -67,9 +67,9 @@ export function NavigationRail(): React.JSX.Element {
   // 所以等 initialized 之后才开始。依赖用收藏 key 的内容签名：prune 的唯一输入就是
   // 「哪些 key 还有效」，promoted 的内容变化不会改变这个判断。
   useEffect(() => {
-    if (!userId || !favoritesInitialized || favoritesError) return;
+    if (!userId || !favoritesInitialized || favoritesLoading || !favoritesSnapshotComplete) return;
     pruneQuickFavorites(userId, favoriteSignature ? favoriteSignature.split("\u0001") : []);
-  }, [userId, favoritesInitialized, favoritesError, favoriteSignature]);
+  }, [userId, favoritesInitialized, favoritesLoading, favoritesSnapshotComplete, favoriteSignature]);
 
   const handleHomeClick = () => {
     if (needsDeferredScopeReset(location.pathname)) {

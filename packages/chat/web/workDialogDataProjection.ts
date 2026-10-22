@@ -50,8 +50,11 @@ export function projectWorkDialogData(
   for (const item of items) {
     if (item.type !== "dialog") continue;
     const parsed = parseDialogKey(item.contentKey);
-    if (!parsed || parsed.userId !== options.userId) continue;
-    const signals = [...(signalsById.get(parsed.dialogId) ?? [])];
+    if (!parsed || (parsed.userId !== options.userId && parsed.userId !== "local")) continue;
+    const isLocal = parsed.userId === "local";
+    // Dialog IDs are only unique within an owner. Runtime state maps are
+    // account-scoped, so never apply them to a same-suffix device-local row.
+    const signals = isLocal ? [] : [...(signalsById.get(parsed.dialogId) ?? [])];
     // Space dialog SSE only has running/done/failed, not user-required evidence.
     // Never classify a normal done or failed turn as "Needs you" automatically.
     // SSE has no heartbeat; do not indefinitely treat its last running event as live.
@@ -62,9 +65,9 @@ export function projectWorkDialogData(
       eventAt <= now && now - eventAt < 90_000;
     // A known terminal task must not be resurrected by an older SSE running flag.
     const hasTerminalTask = signals.includes("terminal");
-    const isLive = options.liveDialogIds?.has(parsed.dialogId) === true;
-    const isUncertain = options.uncertainDialogIds?.has(parsed.dialogId) === true;
-    const hasRecentSse = recentSse && options.dialogStatuses?.[parsed.dialogId] === "running";
+    const isLive = !isLocal && options.liveDialogIds?.has(parsed.dialogId) === true;
+    const isUncertain = !isLocal && options.uncertainDialogIds?.has(parsed.dialogId) === true;
+    const hasRecentSse = !isLocal && recentSse && options.dialogStatuses?.[parsed.dialogId] === "running";
     if ((isLive || (hasRecentSse && !hasTerminalTask)) && !signals.includes("live")) {
       signals.push("live");
     } else if (isUncertain && !signals.includes("live") && !signals.includes("terminal")) {

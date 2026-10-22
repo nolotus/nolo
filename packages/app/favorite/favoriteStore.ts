@@ -26,6 +26,8 @@ interface FavoriteState {
 
     initialized: boolean; // 是否已从服务器加载过（成功或失败都算）
     loading: boolean;
+    /** Only a complete server snapshot is safe to use for pruning local shortcuts. */
+    snapshotComplete: boolean;
     error: string | null;
 }
 
@@ -35,6 +37,7 @@ const createInitialState = (): FavoriteState => ({
     favoritedAtById: {},
     initialized: false,
     loading: false,
+    snapshotComplete: false,
     error: null,
 });
 
@@ -457,7 +460,7 @@ export function removeFavoriteLocally(payload: {
 }
 
 function markFavoritesLoading(): void {
-    state = { ...state, loading: true, error: null };
+    state = { ...state, loading: true };
     notify();
 }
 
@@ -472,6 +475,7 @@ function replaceFavorites(data: {
         favoritedAtById: data.favoritedAtById || {},
         initialized: true,
         loading: false,
+        snapshotComplete: true,
         error: null,
     };
     notify();
@@ -482,6 +486,7 @@ function markFavoritesInitFailed(message: string): void {
         ...state,
         loading: false,
         initialized: true,
+        snapshotComplete: false,
         error: message,
     };
     notify();
@@ -546,6 +551,10 @@ export function getFavoritesInitialized(): boolean {
     return state.initialized;
 }
 
+export function getFavoritesSnapshotComplete(): boolean {
+    return state.snapshotComplete;
+}
+
 export function getFavoritesError(): string | null {
     return state.error;
 }
@@ -596,6 +605,11 @@ export function useFavoritesLoading(): boolean {
 export function useFavoritesInitialized(): boolean {
     useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
     return getFavoritesInitialized();
+}
+
+export function useFavoritesSnapshotComplete(): boolean {
+    useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+    return getFavoritesSnapshotComplete();
 }
 
 export function useFavoritesError(): string | null {
@@ -723,6 +737,10 @@ export async function initFavorites(deps: FavoriteDeps): Promise<unknown> {
                 },
             };
             replaceFavorites(payload);
+            if (failures.length > 0) {
+                state = { ...state, snapshotComplete: false };
+                notify();
+            }
             return payload;
         } catch (error) {
             const message =
