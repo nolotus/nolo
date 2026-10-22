@@ -4,12 +4,13 @@
 // - public/latest-assets.json：给服务端 SSR 使用的入口 JS/CSS 信息
 
 import { write } from "bun";
+import { writeThemeBootstrapAsset } from "./themeBootstrapAsset.js";
 import { brotliCompress, constants, gzip } from "node:zlib";
 import { copyFile, mkdir, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { promisify } from "node:util";
-import { config, timestamp, publicPath, webEdition } from "./esbuild.config";
+import { config, timestamp, publicPath, webEdition, outdir } from "./esbuild.config";
 import { shouldPrecompressWebAssets } from "./webBuildPolicy";
 import { publishDevWebBuildSignal } from "./devAssetManifest.js";
 import { copyRouteStyles } from "./routeStyles.js";
@@ -40,7 +41,7 @@ function resolveBrotliQuality() {
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 11 ? parsed : 10;
 }
 const ASSET_BUILD_MANIFEST_DIR = "public/.asset-builds";
-const ASSET_OUTPUT_DIR = "public/assets";
+const ASSET_OUTPUT_DIR = outdir;
 const CLIENT_LOCALE_OUTPUT_DIR = "public/locales";
 const PDF_WORKER_SOURCE = (() => {
   try {
@@ -262,7 +263,7 @@ const removeEmptyAssetDirs = async (dir = ASSET_OUTPUT_DIR) => {
 // 还在前台/后台标签页里停留的会话。可用 NOLO_WEB_KEEP_ASSET_BUILDS 覆盖。
 const DEFAULT_ASSET_BUILDS_TO_KEEP = 10;
 
-const keepRecentAssetBuilds = async (outputs) => {
+export const keepRecentAssetBuilds = async (outputs) => {
   const keepCount = Math.max(
     1,
     Number.parseInt(
@@ -364,6 +365,17 @@ const writeClientLocaleFiles = async () => {
 // 主构建流程
 // -----------------------------
 
+// Publication must work even when esbuild does not produce a metafile.
+export const publishThemeBootstrap = async (result) => {
+  const { path, bytes, url } = await writeThemeBootstrapAsset(outdir, publicPath);
+  if (result.metafile?.outputs) {
+    result.metafile.outputs[path] = {
+      bytes, inputs: {}, imports: [], exports: [],
+    };
+  }
+  return { themeBootstrapJs: url };
+};
+
 export const runMetaBuild = async () => {
   const totalStart = performance.now();
 
@@ -393,7 +405,10 @@ export const runMetaBuild = async () => {
         ? getDevEntryFiles()
         : await resolveEntryFilesFromOutputDir();
 
+  const { themeBootstrapJs } = await publishThemeBootstrap(result);
+
   const buildInfo = {
+    themeBootstrapJs,
     // 资源基础路径（与服务端路由匹配）
     basePath: publicPath,
 
@@ -457,4 +472,4 @@ export const runMetaBuild = async () => {
 };
 
 // 直接执行构建
-runMetaBuild();
+if (import.meta.main) await runMetaBuild();

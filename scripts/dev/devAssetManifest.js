@@ -3,7 +3,9 @@
  * Used by esDev watch and one-shot esBuild.js.
  */
 import { writeFile } from "node:fs/promises";
-import { publicPath } from "./esbuild.config.js";
+import { getThemeBootstrapUrl } from "../../packages/server/html/themeBootstrap";
+import { writeThemeBootstrapAsset } from "./themeBootstrapAsset.js";
+import { outdir, publicPath } from "./esbuild.config.js";
 
 const LATEST_ASSETS_PATH = "public/latest-assets.json";
 
@@ -11,6 +13,7 @@ export const getDevEntryAssetManifest = () => {
   const ts = Date.now();
   return {
     basePath: publicPath,
+    themeBootstrapJs: getThemeBootstrapUrl(publicPath),
     js: `${publicPath}entry.js?v=${ts}`,
     css: `${publicPath}entry.css?v=${ts}`,
     artifactRuntimeJs: `${publicPath}artifactRuntime.js?v=${ts}`,
@@ -30,6 +33,7 @@ export async function publishDevWebBuildSignal(opts = {}) {
   const buildMs = typeof opts.buildMs === "number" ? opts.buildMs : 0;
   const manifest = getDevEntryAssetManifest();
 
+  await writeThemeBootstrapAsset(outdir, publicPath);
   await writeFile(LATEST_ASSETS_PATH, JSON.stringify(manifest, null, 2), "utf8");
   return { manifest };
 }

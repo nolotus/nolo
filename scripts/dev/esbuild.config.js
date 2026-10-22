@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { webAssetOutdir, webAssetPublicPath } from "../../packages/server/html/webAssetPaths";
 
 const require = createRequire(import.meta.url);
 import stylexUnplugin from "@stylexjs/unplugin";
@@ -189,10 +190,9 @@ export const timestamp = buildId;
  * - 生产和开发都使用稳定目录 public/assets
  * - 文件名自身带内容 hash；发布后未变更文件继续命中浏览器缓存
  */
-const assetDirName = "assets";
-
-export const outdir = `public/${assetDirName}`;
-export const publicPath = `/public/${assetDirName}/`;
+export { webAssetOutdir as outdir, webAssetPublicPath as publicPath };
+const outdir = webAssetOutdir;
+const publicPath = webAssetPublicPath;
 
 // StyleX esbuild 插件（ENABLE_STYLEX 关闭时为 null，plugins 数组里会被过滤掉）。
 // useCSSLayers: false，因为 unlayered 普通 CSS 会无条件压过 layer 内 StyleX 规则；

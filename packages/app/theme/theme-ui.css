@@ -3,6 +3,23 @@
 
 /* ── GlobalBaseStyles ────────────────────────────────── */
 
+/* Limited first-paint safety net: only background/text match the default nature palette.
+   If the external bootstrap is missing (404), --primary, --textSecondary,
+   --border, --backgroundSecondary and --space-* remain unset: button colors,
+   borders and padding degrade. This only prevents a white page, not a complete theme.
+   Follow-up: generate complete fallback CSS from THEME_COLORS.nature and shared
+   spacing tokens at build time; see theme-bootstrap-fallback.md.
+   Zero specificity lets the external bootstrap's :root palette win even
+   though that style is inserted before this stylesheet. */
+:where(:root) {
+  --background: #FAF8F4;
+  --text: #1F2733;
+}
+:where(:root[data-theme="dark"]) {
+  --background: #1C1B20;
+  --text: #ECE6DC;
+}
+
 /* ── Body ── */
     html, body {
       background-color: var(--background);
