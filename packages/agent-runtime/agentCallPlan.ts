@@ -63,7 +63,7 @@ export const DEVIN_CONNECT_URL = "https://server.codeium.com/exa.api_server_pb.A
 export type AuthMethod =
   | { kind: "platform-key" }
   | { kind: "custom-key" }
-  | { kind: "oauth"; ref: "chatgpt" | "xai" | "antigravity" | "claude" | "cursor" | "devin" | "workbuddy" | "workbuddy-ai" }
+  | { kind: "oauth"; ref: "chatgpt" | "xai" | "antigravity" | "claude" | "cursor" | "devin" }
   | { kind: "cli"; provider: string };
 
 /**
@@ -338,19 +338,6 @@ export function resolveAgentCallPlan(
       endpoint: ANTHROPIC_MESSAGES_URL,
       requiredHeaders: ["anthropic-version", "anthropic-beta"],
       vendor: provider || "anthropic",
-    };
-  }
-
-  if (oauthApiKeyRef === "workbuddy" || oauthApiKeyRef === "workbuddy-ai") {
-    return {
-      authMethod: { kind: "oauth", ref: oauthApiKeyRef },
-      transport: "server-proxy",
-      upstreamWire: "chat.completions",
-      endpoint: oauthApiKeyRef === "workbuddy"
-        ? "https://copilot.tencent.com/v2/chat/completions"
-        : "https://www.workbuddy.ai/v2/chat/completions",
-      requiredHeaders: [],
-      vendor: oauthApiKeyRef,
     };
   }
 

@@ -135,6 +135,25 @@ export const sidebarStyles = stylex.create({
     scrollbarWidth: "thin",
     overscrollBehavior: "contain",
   },
+  /* Space 分支（Context 列不带 --fixed）的列表区：退出滚动角色，按内容自然高度参与列的
+     文档流，整列成为唯一的滚动容器。与 scrollArea 一起用 stylex.props 叠加，后者覆盖前者的
+     flex / min-height / overflow —— styleq 按「后传入的同名属性生效」合并，不是靠样式表顺序。
+
+     为什么必须落在 StyleX、不能写进 navigationRail.css：StyleX 原子类的选择器带
+     `:not(#\#)` 提权，特异性是 (a=2,b=1)；本文件里任何 `A > B` 形式的普通 class 规则只有
+     (a=0,b=1)，哪怕选择器写得更长、也不带 !important，都会稳定输给原子类 —— 规则存在但
+     永远不生效（本 PR 早先版本正是踩了这个坑，见 navigationContextStationary.source.test.ts
+     的反死代码断言）。
+
+     overflowX 与 overflowY 必须**同时**是 visible：只要有一个轴是 hidden/scroll/auto，
+     CSS 的 overflow 联动规则会把另一个轴的 visible 计算成 auto，列表又变回滚动容器。
+     横向溢出由 Context 列自身的 overflow-x: hidden 兜住，不需要列表区自己裁。 */
+  scrollAreaFlow: {
+    flex: "0 0 auto",
+    minHeight: 0,
+    overflowX: "visible",
+    overflowY: "visible",
+  },
   content: {
     flex: "0 1 auto",
     display: "flex",

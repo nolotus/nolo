@@ -1,5 +1,6 @@
 
 import type { OAuthCredential, OAuthRefreshFn, OAuthProvider } from "./oauthTokenStore";
+import { OAUTH_PROVIDER_REFS } from "./oauthProviderRefs";
 import {
   DEFAULT_REFRESH_SKEW_MS,
   isTokenExpired,
@@ -167,14 +168,6 @@ export {
   refreshCursorToken,
 };
 
-// --- WorkBuddy & WorkBuddy AI refresh ---
-import {
-  workbuddyRefresh,
-  refreshWorkBuddyToken,
-} from "./workbuddyOAuth";
-
-export { workbuddyRefresh, refreshWorkBuddyToken };
-
 export const OAUTH_PROVIDER_REFRESH: Record<
   string,
   OAuthRefreshFn | undefined
@@ -184,8 +177,6 @@ export const OAUTH_PROVIDER_REFRESH: Record<
   antigravity: antigravityRefresh,
   claude: anthropicRefresh,
   cursor: cursorRefresh,
-  workbuddy: workbuddyRefresh,
-  "workbuddy-ai": workbuddyRefresh,
 };
 
 // ── Server-side apiKeyRef resolution ──────────────────────────────────────────
@@ -376,16 +367,10 @@ export async function resolveApiKeyRefFromStore(args: {
   return refreshPromise;
 }
 
-const OAUTH_PROVIDER_KEYS = new Set<string>([
-  "chatgpt",
-  "xai",
-  "antigravity",
-  "claude",
-  "cursor",
-  "devin",
-  "workbuddy",
-  "workbuddy-ai",
-]);
+// 闭集的唯一出处是 oauthProviderRefs.ts（写入校验、错误文案、审计 detail 也用它）。
+// 这里只做派生：`parseOAuthProviderKey` 的语义逐字不变——精确匹配（大小写敏感、
+// 不做 trim），闭集成员与派生前完全相同。
+const OAUTH_PROVIDER_KEYS = new Set<string>(OAUTH_PROVIDER_REFS);
 
 function parseOAuthProviderKey(provider: string): OAuthProvider {
   if (OAUTH_PROVIDER_KEYS.has(provider)) {

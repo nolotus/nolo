@@ -20,6 +20,7 @@ import {
   isBuiltinNoloAgentRef,
 } from "./localRuntimeAdapter";
 import { isDockerRuntimeKey } from "./localDockerWorkload";
+import { resolveCliLocalRuntimeKeyCapability } from "../../ai/tools/agent/cliLocalRuntimeCapability";
 import { isAntigravityOAuthAgent } from "../../agent-runtime/antigravityOAuth";
 import { isOAuthApiKeyRef } from "../../agent-runtime/serverProxyPolicy";
 import { resolveLocalUserId } from "./cliAgentConfigHelpers";
@@ -285,6 +286,7 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     // ——adapter 收不到 → docker workload 永不创建，非 docker 云后端也不会
     // fail-closed（死代码）。
     ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
+    ...(options.dockerWorkspaceMode ? { dockerWorkspaceMode: options.dockerWorkspaceMode } : {}),
   });
 }
 
@@ -296,6 +298,7 @@ function resolveLocalRuntimeAdapter(options: RunAgentTurnOptions) {
       // 与 buildDefaultLocalRuntimeAdapter 同口径：注入式 factory 也必须拿到
       // runtimeKey，否则注入了 adapter 的本地 run 会静默丢掉 docker 语义。
       ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
+      ...(options.dockerWorkspaceMode ? { dockerWorkspaceMode: options.dockerWorkspaceMode } : {}),
     }) ||
     buildDefaultLocalRuntimeAdapter(options)
   );
@@ -2648,12 +2651,10 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
     : requestedRuntimeMode;
 
   if (runtimeMode === "local") {
-    // docker 指向由本机通道兑现（本地 docker workload）；`local` 表示"就在宿主执行"
-    // ——它同样由本机通道兑现（F1 已在派发/CLI 入口显式确认 allowHostWrites，
-    // 到这里时授权已成立）。其余云后端（gcp / instabox / machine:*）本机无法兑现。
+    // docker / local / instabox 由本机通道兑现（能力表统一真值判定）。
+    // 其余无法在本机兑现的云后端（gcp / machine:*）直接拦截报错。
     const runtimeKeyIsLocallyFulfillable =
-      isDockerRuntimeKey(options.runtimeKey ?? "") ||
-      (typeof options.runtimeKey === "string" && options.runtimeKey.trim() === "local");
+      resolveCliLocalRuntimeKeyCapability(options.runtimeKey).fulfillableByCliLocal;
     if (options.runtimeKey && !runtimeKeyIsLocallyFulfillable) {
       options.output.write("[nolo] 本地 run 由本机沙盒决定，不支持指定云后端\n");
       return { exitCode: 1 };

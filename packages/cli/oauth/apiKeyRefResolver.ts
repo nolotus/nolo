@@ -6,7 +6,7 @@ import {
 } from "./token-store";
 import { refreshAntigravityOAuthToken } from "./flows/antigravity";
 import { refreshOpenAiCodexToken } from "./flows/openai-codex";
-import { anthropicRefresh, cursorRefresh, workbuddyRefresh, xaiRefresh } from "../../agent-runtime/oauthProviders";
+import { anthropicRefresh, cursorRefresh, xaiRefresh } from "../../agent-runtime/oauthProviders";
 import type { OAuthProvider, OAuthRefreshFn } from "./types";
 import type { CredentialMigrationOptions } from "../../agent-runtime/credentialLocationMigration";
 import { createServerAccessTokenPuller } from "./serverAccessTokenPull";
@@ -22,8 +22,6 @@ const REFRESH_BY_PROVIDER: Partial<Record<OAuthProvider, OAuthRefreshFn>> = {
   xai: xaiRefresh,
   claude: anthropicRefresh,
   cursor: cursorRefresh,
-  workbuddy: workbuddyRefresh,
-  "workbuddy-ai": workbuddyRefresh,
 };
 
 function isOAuthProvider(value: string): value is OAuthProvider {
@@ -33,9 +31,7 @@ function isOAuthProvider(value: string): value is OAuthProvider {
     value === "antigravity" ||
     value === "claude" ||
     value === "cursor" ||
-    value === "devin" ||
-    value === "workbuddy" ||
-    value === "workbuddy-ai"
+    value === "devin"
   );
 }
 

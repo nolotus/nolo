@@ -1,24 +1,26 @@
 import "./AgentExplore.css";
-import React, { useMemo, useState } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
-import { LuChevronRight } from "react-icons/lu";
-import { NavLink } from "app/routing";
+import { useLocation } from "app/routing";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import PublicAgents from "ai/agent/web/PublicAgents";
 import { useSSRPublicAgents } from "ai/agent/publicAgentsSSRStore";
 import ShareCommunityPreview from "app/pages/ShareCommunityPreview";
-import { Tabs, TabList, Tab } from "render/web/ui/Tabs";
+import MySharesPage from "app/pages/MySharesPage";
+import { resolveExploreCategory } from "app/navigation/exploreCategory";
 
-type ExploreTab = "aiPlaza" | "shareCommunity";
-
+/**
+ * One Explore destination, driven by `?category=`.
+ * Categories live in the Navigation V2 Context column, not in a second tab bar.
+ */
 const AgentExplore: React.FC = () => {
   const { t } = useTranslation();
+  const location = useLocation();
+  const category = resolveExploreCategory(location.search);
   const pageMeta = useStaticPageMeta("explore");
   usePageMeta(pageMeta);
   // SSR 预载的公开 agents（explore 数据公开）：hydration 后首屏即渲染，无需等 RPC
   const ssrAgents = useSSRPublicAgents();
-
-  const [activeTab, setActiveTab] = useState<ExploreTab>("aiPlaza");
 
   return (
     <div className="agent-explore">
@@ -28,39 +30,19 @@ const AgentExplore: React.FC = () => {
           <p className="agent-explore-subtitle">{t("explorePage.subtitle", "发现并探索更多 AI")}</p>
         </div>
 
-        <Tabs
-          selectedKey={activeTab}
-          onSelectionChange={(key) => setActiveTab(key as ExploreTab)}
-          className="agent-explore-tabs"
-        >
-          <TabList aria-label={t("explorePage.title", "探索")} className="agent-explore-tablist">
-            <Tab id="aiPlaza" className="agent-explore-tab">
-              {t("homeTabs.aiPlaza", "AI 广场")}
-            </Tab>
-            <Tab id="shareCommunity" className="agent-explore-tab">
-              {t("homeTabs.shareCommunity", "社区分享")}
-            </Tab>
-          </TabList>
-        </Tabs>
-
         <div className="agent-explore-content">
-          {activeTab === "aiPlaza" ? (
-            <PublicAgents
-              limit={200}
-              reloadMode="catalog"
-              summary
-              initialData={ssrAgents}
-            />
+          {category === "agent" ? (
+            <PublicAgents limit={200} reloadMode="catalog" summary initialData={ssrAgents} />
+          ) : category === "my-shares" ? (
+            <MySharesPage />
+          ) : category === "dialog" || category === "article" ? (
+            <ShareCommunityPreview key={category} contentCategory={category} />
+          ) : category === "user" ? (
+            <p role="status">{t("explorePage.categoryEmpty.user", "暂无公开的用户。")}</p>
+          ) : category === "plugin" ? (
+            <p role="status">{t("explorePage.categoryEmpty.plugin", "暂无公开的插件。")}</p>
           ) : (
-            <div className="agent-explore-community">
-              <ShareCommunityPreview active={activeTab === "shareCommunity"} />
-              <div className="agent-explore-community-footer">
-                <NavLink to="/share/community" className="agent-explore-community-link">
-                  <span>{t("homeTabs.enterCommunity", "进入社区")}</span>
-                  <LuChevronRight size={16} aria-hidden="true" />
-                </NavLink>
-              </div>
-            </div>
+            <p role="status">{t("explorePage.categoryEmpty.skill", "暂无公开的 Skill。")}</p>
           )}
         </div>
       </div>

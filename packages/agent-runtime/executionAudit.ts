@@ -74,6 +74,46 @@ export type ExecutionAuditTimes = {
 
 export type ExecutionAuditTerminalStatus = "done" | "failed" | "cancelled";
 
+/** 凭据解析/注入发生在哪一步。 */
+export type CredentialAuditPhase = "resolve" | "inject";
+
+/** 解析结果。失败必须也记一条——安全事件恰恰出现在这里。 */
+export type CredentialAuditOutcome = "ok" | "denied" | "not_found" | "expired";
+
+/**
+ * 作用域或凭据形态标签：`local|user|space` 是作用域（D1），`oauth` 是凭据形态，
+ * `unknown` 表示无法判定或不适用（不是第四个作用域）。
+ */
+export type CredentialAuditKind = "local" | "user" | "space" | "oauth" | "unknown";
+
+/**
+ * 一次凭据使用的审计条目（三条轨道共享的字段契约）。
+ *
+ * 硬规则：
+ * - **只记 ref 与元数据**：任何字段都不得包含密钥值、Authorization 原文、cookie；
+ * - **失败必记**：denied / not_found / expired 同样落一条；
+ * - **每次 resolve 一条**，不是每次 run 一条；`callId` 留空即等价于「按 run 记账」；
+ * - `inject` 阶段只在确实发生了注入时记录（用于区分「解析成功但没注入」）；
+ * - `[]` 与缺省同义（都表示未使用凭据）。
+ */
+export type CredentialAuditEntry = {
+  /** 规范句柄（原样记录；命名空间收敛未定稿前同时存 kind，避免解释歧义）。 */
+  ref: string;
+  kind: CredentialAuditKind;
+  /** epoch ms。 */
+  at: number;
+  phase: CredentialAuditPhase;
+  outcome: CredentialAuditOutcome;
+  /** 谁发起（服务端可信身份，不接受客户端自报）。 */
+  actorUserId?: string;
+  /** 用途（新字段，命名空间收敛定稿后与 ref 一起定）。 */
+  purpose?: string;
+  /** 预留：审计粒度从「按 run」升级到「按调用」时填充。 */
+  callId?: string;
+  /** 注入目标（provider 名 / 域名），**绝不含密钥或 header 原文**。 */
+  target?: string;
+};
+
 export type ExecutionAuditRecord = {
   runId: string;
   backendId: string;
@@ -89,6 +129,11 @@ export type ExecutionAuditRecord = {
   cost?: ExecutionCost;
   /** Measured isolation strength. Absent is treated as "none" by consumers. */
   isolation: ExecutionIsolation;
+  /**
+   * 本次 run 期间发生过的凭据使用。缺省 = 该 run 未使用凭据。
+   * 消费者不认这个字段时必须忽略，不得因此排除记录（见 §10 的只加不换）。
+   */
+  credentialUses?: CredentialAuditEntry[];
   /**
    * Set when the LOCAL TIMING WINDOW is unknown (the run finished without ever
    * being observed ready). This is about observability, not about money:
@@ -216,6 +261,8 @@ export function buildExecutionAuditRecord(args: {
   cleanupStatus: ExecutionAuditRecord["cleanupStatus"];
   /** Only for providers that expose a usage API. */
   providerUsageMs?: number;
+  /** 本次 run 观察到的凭据使用；不传或空数组都表示「未使用凭据」。 */
+  credentialUses?: CredentialAuditEntry[];
 }): ExecutionAuditRecord {
   const { requestedAt, readyAt, finishedAt } = args.times;
   const bootMs = readyAt !== undefined ? Math.max(0, readyAt - requestedAt) : undefined;
@@ -259,6 +306,8 @@ export function buildExecutionAuditRecord(args: {
     status: args.status,
     ...(args.errorCode ? { errorCode: args.errorCode } : {}),
     cleanupStatus: args.cleanupStatus,
+    // 只在真有记录时写这个字段：`[]` 与缺省同义，不制造「记过账但为空」的二义。
+    ...(args.credentialUses?.length ? { credentialUses: args.credentialUses } : {}),
   };
 }
 

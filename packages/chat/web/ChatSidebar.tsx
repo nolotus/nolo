@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { NavLink, useLocation } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
@@ -28,25 +28,30 @@ import { getSpaceRouteContext } from "render/layout/mainLayoutViewMode";
 import CategorySection from "./sidebar/CategorySection";
 import AllViewSidebar from "./sidebar/AllViewSidebar";
 import { SidebarCoachmark } from "./sidebar/SidebarCoachmark";
+import { applyEdgeScroll, resolveEdgeScroll } from "./contextColumnEdgeScroll";
 import { useChatSidebarFilteredData } from "./sidebar/useChatSidebarFilteredData";
 import {
   useCategoryDragAndDrop,
   useItemDragAndDrop,
 } from "./sidebar/useSidebarDragAndDrop";
-import { LuSparkles, LuSearch, LuFolderPlus, LuStar, LuChevronDown } from "react-icons/lu";
-import { Tooltip } from "render/web/ui/Tooltip";
-import Kbd from "render/web/ui/Kbd";
+import { LuFolderPlus, LuStar, LuChevronDown, LuSearch } from "react-icons/lu";
 import { AddCategoryModal } from "create/space/category/AddCategoryModal";
 import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
 import { selectIdentityUserId } from "identity/selectors";
 import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
+import { WorkDialogHistory } from "./WorkDialogHistory";
+import { OtherContentGroups } from "./OtherContentGroups";
+import { NavigationRail } from "./NavigationRail";
+import { ExploreCategoryNav } from "./ExploreCategoryNav";
+import { type HomeView, resolveHomeView, resolveRailView } from "./navigationRailView";
+import { DesktopFolderProjects } from "./DesktopFolderProjectsSection";
+import { projectHomeItems, type HomeScope } from "./homeScopeProjection";
+import { parseLocalDialogProjectBindings } from "./homeLocalProjectDialogs";
+import { DESKTOP_DIALOG_PROJECTS_KEY } from "./desktopFolderProjects";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { SidebarPinnedBlock } from "./sidebar/SidebarPinnedBlock";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 import { useFavoriteSidebarItems } from "app/favorite/useFavoriteSidebarItems";
-import {
-  COMMAND_PALETTE_SHORTCUT,
-} from "./sidebar/CommandPalette";
 import { SidebarCommandPalette } from "./sidebar/SidebarCommandPalette";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { useViewMode } from "create/space/spaceCurrentStore";
@@ -71,10 +76,49 @@ const writeStoredSidebarFilter = (filter: SidebarTypeFilterId) => {
 };
 
 // --- 主侧边栏组件 ---
+/**
+ * Navigation V2 shell：Rail + 列高查询槽。
+ * 槽只包着 Context 列，是矮列降级（控件 position: static / 内容按内容定高 / --fixed 列可滚）
+ * 的**唯一**查询容器 —— 槽在 shell 里是 flex:1、列在槽里是 flex:1（StyleX 的 chatSidebar 给
+ * 列声明了 height: 100%），所以槽高恒等于列高。不能把 shell 本身当判据：移动端 shell 顶上还有
+ * 一条横向 Rail，shell 比列高，于是存在「列 ≤460px < shell 高」的区间 —— 按 shell 判时控件已
+ * 降级成 static、内容已退出有限高度链，--fixed 列却仍 overflow: hidden，超出列底的内容滚轮
+ * 滚不到。三条降级规则因此写进同一个 @container（见 navigationRail.css）。
+ */
+const ShellWithRail: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div data-hook="navigation-v2-shell" className="navigation-v2-shell">
+    <NavigationRail />
+    <div className="navigation-v2-context-slot">{children}</div>
+  </div>
+);
+
 const ChatSidebar: React.FC = () => {
   const { t } = useTranslation("space");
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
+  // Work / Projects 是 Home 下的两种视图，不是 Rail 一级入口；归一化统一走 resolveHomeView。
+  const [homeViewState, setHomeViewState] = useState<HomeView>("work");
+  const [homeScope, setHomeScope] = useState<HomeScope>({ kind: "all" });
+  const [scopeBindings, setScopeBindings] = useState<Record<string, unknown>>({});
+  const selectProjectScope = useCallback((projectId: string | null, projectName?: string) => {
+    if (!projectId) { setHomeScope({ kind: "all" }); return; }
+    try {
+      setScopeBindings(parseLocalDialogProjectBindings(window.localStorage.getItem(DESKTOP_DIALOG_PROJECTS_KEY)));
+      setHomeScope({ kind: "project", projectId, projectName });
+      setHomeViewState("work");
+      // 进入项目筛选时清掉残留的类型筛选，否则只剩「仅含关联对话」的状态提示。
+      setTypeFilter("all");
+    } catch { setHomeScope({ kind: "all" }); }
+  }, []);
+
+  const homeView = resolveHomeView(homeViewState);
+  const selectHomeView = (view: HomeView) => setHomeViewState(resolveHomeView(view));
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  useEffect(() => {
+    const openPalette = () => setCommandPaletteOpen(true);
+    window.addEventListener("nolo:navigation-search", openPalette);
+    return () => window.removeEventListener("nolo:navigation-search", openPalette);
+  }, []);
+
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState<SidebarTypeFilterId>(readStoredSidebarFilter);
 
@@ -86,10 +130,17 @@ const ChatSidebar: React.FC = () => {
 
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  // Space 分支的 Context 列与 sticky 控件区：拖拽边缘自动滚动要用它们量「列表的实际可视
+  // 顶部」（控件吸顶时盖住列顶那一条带，见 handleDragOverEdgeScroll）。
+  const columnRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
   const dispatch = useAppDispatch();
   const space = useCurrentSpaceFromEntity();
   const viewMode = useViewMode();
   const location = useLocation();
+  // Rail 目的地由路由推导：Context 只渲染当前目的地的内容，
+  // 避免在 /favorites、/explore 下继续渲染上一个 Space 作用域的内容。
+  const railView = resolveRailView(location.pathname);
 
   // NOTE: Do NOT force setViewMode("all") when space is temporarily null.
   // changeSpace.pending clears currentSpace while navigating to /space/:id;
@@ -160,76 +211,71 @@ const ChatSidebar: React.FC = () => {
   }, []);
 
 
-  // 拖拽到滚动区边缘时自动滚动
+  // 拖拽到滚动区边缘时自动滚动。
+  //
+  // 触发带必须覆盖「sticky 控件所在的那条带」：Space 的控件区是列表区的**兄弟节点**
+  // （z-index: 2），吸顶时盖住列顶约 130px。handler 只绑在列表上时，指针落在控件上
+  // dragover 根本不会冒泡到列表（Chromium hit-test 实测：400px 列 / 130px sticky 控件 /
+  // 已滚 500px 的长列表，列内 y=10…129 全部命中控件，y=131 才命中列表），向顶部拖动分类
+  // 就永远触发不了自动滚动。所以 handler 绑在 **Context 列**上（控件与列表的共同祖先）。
+  //
+  // 触发带的几何与优先级抽在 contextColumnEdgeScroll.ts 的 resolveEdgeScroll() 里（单测断言
+  // scrollTop 方向），顺序即语义：
+  // 1. 真实滚动视口（本列）底边 60px → 向下滚，**优先级最高**。列表顶部还没滚走时会和列底
+  //    带重叠（列底附近时「y - 列表顶」也小于 60px）；旧写法取「列顶带 / 列表顶带」两个上带
+  //    距离的最小值，重叠区里上带获胜 —— 在列底拖拽反而向上滚（复审 Chromium 实测：列 500px
+  //    / 控件 130px / 前置内容 400px / scrollTop=100 / clientY=470 → scrollTop 100 → 95）。
+  //    真实视口底部必须永远可达，不能被内部列表顶部抢占。
+  // 2. 列顶 60px → 向上滚：控件吸顶时盖住的正是这条带。
+  // 3. 控件下沿 / 列表可视顶部 60px → 向上滚：非重叠时控件下沿仍提供向上触发带，
+  //    基准 = max(列顶, 控件底边, 列表顶)，控件底边在拖拽时用 controlsRef 实测。
+  // 列高 < 2×60px 时 1 与 2 重叠，底带胜出（保证底部可达）。列表区仍保留自己的放置/排序
+  // 事件，本 handler 不调用 preventDefault、不 stopPropagation，只做滚动这一件副作用。
   const lastDragScrollTime = useRef(0);
-  const handleDragOverScrollArea = useCallback((e: React.DragEvent) => {
+  const handleDragOverEdgeScroll = useCallback((e: React.DragEvent) => {
     const scrollArea = scrollAreaRef.current;
+    // Home 分支 / Space 的「项目」子分支没有列表区（scrollAreaRef 未挂载）→ 不接管，
+    // Home 的分类拖拽行为与改动前完全一致。
     if (!scrollArea) return;
     const now = Date.now();
     if (now - lastDragScrollTime.current < 16) return;
     lastDragScrollTime.current = now;
-    const rect = scrollArea.getBoundingClientRect();
-    const edgeSize = 60;
-    const y = e.clientY;
-    const distFromTop = y - rect.top;
-    const distFromBottom = rect.bottom - y;
-    if (distFromTop < edgeSize && distFromTop > 0) {
-      scrollArea.scrollTop -= Math.max(2, (edgeSize - distFromTop) / 4);
-    } else if (distFromBottom < edgeSize && distFromBottom > 0) {
-      scrollArea.scrollTop += Math.max(2, (edgeSize - distFromBottom) / 4);
+    // Space 分支按「单一滚动区」设计：列表区的样式由 `sidebarStyles.scrollAreaFlow`（叠加在
+    // scrollArea 上）落地为 overflow: visible，自身不是滚动容器，唯一在滚的是 Context 列。
+    // 所以边缘判定与滚动都必须落在真正在滚的容器上：从列表区的父元素起向上找最近的
+    // overflow-y 可滚祖先，并且**跳过列表区自身** —— 它是拖拽排序的放置目标，`onDragOver`
+    // 的矩形不代表可视区域，把它当滚动宿主会在指针位于列底部附近时误判成「靠近列表顶部」
+    // 而反向滚。找不到可滚祖先时退回列表区只是为了让下方 rect 判定有个几何参照，写
+    // scrollTop 是空操作（没东西可滚）。
+    let scroller: HTMLElement = scrollArea;
+    for (
+      let node: HTMLElement | null = scrollArea.parentElement;
+      node && node !== document.body;
+      node = node.parentElement
+    ) {
+      const { overflowY } = getComputedStyle(node);
+      const scrollable = overflowY === "auto" || overflowY === "scroll";
+      if (scrollable && node.scrollHeight - node.clientHeight > 1) {
+        scroller = node;
+        break;
+      }
+    }
+    const columnRect = (columnRef.current ?? scroller).getBoundingClientRect();
+    const controlsRect = controlsRef.current?.getBoundingClientRect() ?? null;
+    const listRect = scrollArea.getBoundingClientRect();
+    // 触发带优先级（列底 > 列顶 > 控件下沿/列表顶）在纯函数里，见 contextColumnEdgeScroll.ts。
+    const decision = resolveEdgeScroll({
+      pointerY: e.clientY,
+      viewportTop: columnRect.top,
+      viewportBottom: columnRect.bottom,
+      controlsBottom: controlsRect ? controlsRect.bottom : null,
+      listTop: listRect.top,
+    });
+    if (decision.delta !== 0) {
+      scroller.scrollTop = applyEdgeScroll(scroller.scrollTop, decision);
     }
   }, []);
 
-  const searchTooltip = (
-    <span
-      {...stylex.props(sidebarStyles.searchTooltip)}
-    >
-      {t("common:search", "搜索...")}
-      <Kbd shortcut={COMMAND_PALETTE_SHORTCUT} />
-    </span>
-  );
-
-  const topHeaderSection = (
-    <div
-      {...stylex.props(sidebarStyles.topBar)}
-    >
-      <NavLink
-        to="/explore"
-        end
-        className={({ isActive }) =>
-          withLiteralClass(`AllViewSidebar__nav-row ChatSidebar__top-explore${isActive ? " active" : ""}`, sidebarStyles.navRow, sidebarStyles.topExplore).className
-        }
-      >
-        <span
-          aria-hidden="true"
-          {...stylex.props(sidebarStyles.topExploreMenuIcon)}
-        >
-          <LuSparkles size={15} aria-hidden="true" />
-        </span>
-        <span
-          {...stylex.props(sidebarStyles.allViewMenuLabel)}
-        >
-          {t("common:explorePlaza", "探索")}
-        </span>
-      </NavLink>
-      <div className="ChatSidebar__search-slot">
-        <Tooltip content={searchTooltip} placement="bottom">
-          <button
-            type="button"
-            onClick={() => setCommandPaletteOpen(true)}
-            aria-label={t("common:search", "搜索...")}
-            aria-haspopup="dialog"
-            aria-expanded={isCommandPaletteOpen}
-            {...withLiteralClass("ChatSidebar__search-btn", sidebarStyles.searchBtn)}
-          >
-            <LuSearch size={16} aria-hidden="true" />
-          </button>
-        </Tooltip>
-      </div>
-    </div>
-  );
-
-  // 全局类型筛选 Shell (放在 favoritesSection 上方，自上而下控制我的收藏和内容列表)
   const typeFilterShell = (
     <div
       {...stylex.props(sidebarStyles.sidebarTypeFilterShell)}
@@ -252,6 +298,14 @@ const ChatSidebar: React.FC = () => {
   // §10.1 跨对话任务全局入口：user 级 scope（不带 dialogId）⇒ 切换对话不消失；
   // 零任务时组件自身返回 null（attention-first，默认不占位不打断）。
   const identityUserId = useAppSelector(selectIdentityUserId);
+  const lastScopeOwner = useRef(identityUserId);
+  useEffect(() => {
+    if (lastScopeOwner.current === identityUserId) return;
+    lastScopeOwner.current = identityUserId;
+    setHomeScope({ kind: "all" });
+    setScopeBindings({});
+  }, [identityUserId]);
+
   const remoteTasksGlobalEntry = useMemo(
     () =>
       identityUserId ? (
@@ -353,22 +407,147 @@ const ChatSidebar: React.FC = () => {
     </div>
   );
 
-  // "全部" 或未选择具体空间：全量侧边栏
+  // Stable identity: the Work preview memoizes on `items`; a fresh array on every
+  // render would invalidate its run-state projection on each keystroke/tick.
+  const scopedWorkItems = useMemo(
+    () => projectHomeItems(allContentItems, identityUserId ?? "", homeScope, scopeBindings),
+    [allContentItems, identityUserId, homeScope, scopeBindings],
+  );
+  useEffect(() => {
+    if (homeScope.kind !== "project") return;
+    const refresh = () => {
+      try {
+        const storage = window.localStorage;
+        const projects = JSON.parse(storage.getItem("nolo:desktop-folder-projects:v1") || "[]") as unknown;
+        if (!Array.isArray(projects) || !projects.some((project) =>
+          project && typeof project === "object" && "id" in project && project.id === homeScope.projectId)) {
+          setHomeScope({ kind: "all" });
+          return;
+        }
+        setScopeBindings(parseLocalDialogProjectBindings(storage.getItem(DESKTOP_DIALOG_PROJECTS_KEY)));
+      } catch { setHomeScope({ kind: "all" }); }
+    };
+    window.addEventListener("nolo:desktop-folder-selection", refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener("nolo:desktop-folder-selection", refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [homeScope]);
+  const homeScopeIndicator = homeScope.kind === "project" ? (
+    <button type="button" className="navigation-v2-home-scope" onClick={() => selectProjectScope(null)}
+      title={t("allView.showAllProjects", "清除项目筛选，显示全部工作")}
+      aria-label={t("allView.showAllProjects", "清除项目筛选，显示全部工作")}>
+      <span>{homeScope.projectName || t("allView.projectFilterActive", "当前项目")}</span>
+      <span aria-hidden="true">×</span>
+    </button>
+  ) : null;
+  const homeViewSwitcher = (
+    <div
+      role="group"
+      aria-label={t("common:homeViews", "主页视图")}
+      className="navigation-v2-home-views"
+    >
+      <button
+        type="button"
+        className="navigation-v2-home-views__item"
+        aria-pressed={homeView === "work"}
+        onClick={() => selectHomeView("work")}
+      >
+        {t("allView.work", "工作")}
+      </button>
+      <button
+        type="button"
+        className="navigation-v2-home-views__item"
+        aria-pressed={homeView === "projects"}
+        onClick={() => selectHomeView("projects")}
+      >
+        {t("allView.projects", "项目")}
+      </button>
+    </div>
+  );
+
+  // AllViewSidebar 自带 display:flex / flex:1 / min-height:0 的内部滚动区，虚拟列表
+  // 靠父级给出的「有限高度」只挂载视口内的行。它被包进 .navigation-v2-context-content
+  // 之后不再是 Context 列 column-flex 的直接子元素，flex:1 会失效、height 退化为内容
+  // 定高（全部匹配项都被挂载、内部滚动区失去边界）。因此这里把「是否渲染 AllViewSidebar」
+  // 收成一处可读的布尔量：既用来渲染该分支，也用来给内容容器加 --fill 修饰类，恢复
+  // 有限高度的 column-flex 链（见 navigationRail.css）。
+  const rendersAllViewSidebar =
+    homeView === "work" &&
+    typeFilter !== "all" &&
+    typeFilter !== "dialog" &&
+    homeScope.kind === "all";
+  // 只有上面这条撑满分支才改布局；其余 Home 内容继续用普通块级滚动容器。
+  const contextContentClassName = rendersAllViewSidebar
+    ? "navigation-v2-context-content navigation-v2-context-content--fill"
+    : "navigation-v2-context-content";
+
+  // Navigation V2 pilot: the Rail is route-driven, and the Context column
+  // follows it. Favorites / Explore are not Home, so they must not keep
+  // rendering Home's Work/Projects content — and above all must not keep
+  // rendering a stale Space scope under a non-Space destination.
+  // Nothing here mutates Space, cwd or a running Agent.
+  if (railView !== "home") {
+    return (
+      <ShellWithRail>
+        <div data-hook="chat-esc-sidebar"
+          {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}>
+          {railView === "favorites" && (
+            <>
+              {favoriteItems.length > 0 ? (
+                <SidebarPinnedBlock items={favoriteItems} activeMenuKey={activeMenuKey}
+                  onToggleMenu={handleToggleMenu} blockId="favorites" className="AllViewSidebar__favorites-block" />
+              ) : <p>{t("allView.noFavorites", "暂无收藏")}</p>}
+            </>
+          )}
+          {railView === "explore" && <ExploreCategoryNav />}
+          {commandPalette}
+        </div>
+      </ShellWithRail>
+    );
+  }
+
   if (viewMode === "all" || !space) {
     return (
-      <div
-        data-hook="chat-esc-sidebar"
-        {...withLiteralClass("ChatSidebar", sidebarStyles.chatSidebar)}
-      >
-        {topHeaderSection}
-        {typeFilterShell}
-        {favoritesSection}
-        {spaceSwitcherHeader}
-        <SidebarCoachmark />
-        {remoteTasksGlobalEntry}
-        <AllViewSidebar typeFilter={typeFilter} />
-        {commandPalette}
-      </div>
+      <ShellWithRail>
+        <div data-hook="chat-esc-sidebar"
+          {...withLiteralClass("ChatSidebar navigation-v2-context navigation-v2-context--fixed", sidebarStyles.chatSidebar)}>
+          <div className="navigation-v2-context-controls">
+            {spaceSwitcherHeader}
+            {homeViewSwitcher}
+            {homeView === "work" && typeFilterShell}
+            {homeView === "work" && homeScopeIndicator}
+          </div>
+          <div className={contextContentClassName}>
+          {homeView === "work" ? (
+            <>
+              {typeFilter === "all" || typeFilter === "dialog" ? (
+                <>
+                  {homeScope.kind === "all" && remoteTasksGlobalEntry}
+                  <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} />
+                  {typeFilter === "all" && homeScope.kind === "all" && (
+                    // 「分类」视图并入 Work：全部作用域下按类型列出对话之外的内容。
+                    // 项目作用域只投影对话（projectHomeItems → dialogsForLocalProject），
+                    // 没有非对话内容可列，所以守卫是 homeScope.kind === "all"。
+                    <OtherContentGroups items={scopedWorkItems} userId={identityUserId ?? ""} />
+                  )}
+                </>
+              ) : rendersAllViewSidebar ? (
+                <AllViewSidebar typeFilter={typeFilter} />
+              ) : (
+                <p role="status">{t("allView.projectDialogOnly", "当前项目仅包含已关联的对话")}</p>
+              )}
+            </>
+          ) : (
+            <>
+              <DesktopFolderProjects items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} />
+            </>
+          )}
+          </div>
+          {commandPalette}
+        </div>
+      </ShellWithRail>
     );
   }
 
@@ -379,21 +558,44 @@ const ChatSidebar: React.FC = () => {
     1;
 
   return (
-    <div
+    <ShellWithRail>
+      <div
       data-hook="chat-esc-sidebar"
-      {...withLiteralClass("ChatSidebar", sidebarStyles.chatSidebar)}
+      ref={columnRef}
+      onDragOver={handleDragOverEdgeScroll}
+      {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}
     >
-      {topHeaderSection}
-      {typeFilterShell}
-      {favoritesSection}
-      {spaceSwitcherHeader}
+      <div className="navigation-v2-context-controls" ref={controlsRef}>
+        {spaceSwitcherHeader}
+        {homeViewSwitcher}
+        {homeView === "work" && typeFilterShell}
+      </div>
+      {homeView === "projects" ? (
+        // Space 不是 Project 的作用域维度：这里不渲染全局项目列表，
+        // 避免用户把全局桌面项目误读为当前空间的筛选结果。
+        <p className="navigation-v2-context-note" role="note">
+          {t("space:projectScopeUnavailable", "项目按全局维度组织，暂不支持在空间内筛选。切回「主页」可查看全局项目。")}
+        </p>
+      ) : <>
+      {/* 控件之下的一切（引导条 / 跨对话任务入口 / 置顶块 / 列表）都是普通文档流里的
+          兄弟节点：本分支的 Context 列不带 --fixed，列本身是唯一滚动容器（overflow-y:
+          auto），所以无论控件 + 置顶内容多高，都能靠列滚动到达，永远不会被裁切；控件区用
+          sticky 吸顶（navigationRail.css 的 .navigation-v2-context-controls），列滚动
+          时空间选择器 / 工作-项目切换 / 数据类型筛选始终可见。列表区退出滚动角色
+          （flex: 0 0 auto / min-height: 0 / overflow: visible），按内容自然高度参与列的
+          文档流 —— 列内只有一条滚动区，滚轮不会在列表里被 overscroll-behavior 拦住。
+          取舍：置顶块不再在列表滚动时固定不动，它随列一起滚动。
+          拖拽边缘自动滚动（handleDragOverEdgeScroll）绑在本列上而不是列表上：控件区是
+          列表的兄弟节点、z-index: 2 盖住列顶，绑在列表上时指针落在控件上事件根本到不了
+          列表，向顶部拖动分类就触发不了自动滚动。本列与列表同属一条冒泡链，分类的放置/
+          排序事件语义不变。 */}
       <SidebarCoachmark />
       {remoteTasksGlobalEntry}
 
-      <SidebarPinnedBlock 
-        items={pinnedItems} 
-        activeMenuKey={activeMenuKey} 
-        onToggleMenu={handleToggleMenu} 
+      <SidebarPinnedBlock
+        items={pinnedItems}
+        activeMenuKey={activeMenuKey}
+        onToggleMenu={handleToggleMenu}
         blockId="pinned"
         className="ChatSidebar__pinned-block"
       />
@@ -401,8 +603,11 @@ const ChatSidebar: React.FC = () => {
       <div
         data-hook="chat-esc-sidebar-scroll-area"
         ref={scrollAreaRef}
-        onDragOver={handleDragOverScrollArea}
-        {...withLiteralClass("ChatSidebar__scroll-area", sidebarStyles.scrollArea)}
+        {...withLiteralClass(
+          "ChatSidebar__scroll-area",
+          sidebarStyles.scrollArea,
+          sidebarStyles.scrollAreaFlow
+        )}
       >
         {isEmpty && typeFilter !== "all" ? (
           <div
@@ -563,8 +768,10 @@ const ChatSidebar: React.FC = () => {
           />
         )}
       </div>
+      </>}
       {commandPalette}
-    </div>
+      </div>
+    </ShellWithRail>
   );
 };
 

@@ -1,3 +1,4 @@
+import { resolveCredentialEnvironment } from "core/credentialEnvironment";
 import {
   createProviderCredentialIdentity,
   type ProviderApiKeySource,
@@ -23,11 +24,9 @@ export type ProviderCredentialRegistryPublicSummary = {
   effectiveTo?: string;
 };
 
+// 与其它凭据路径共用同一套环境判定（core/credentialEnvironment）；缺省仍是 undefined。
 const credentialEnvironment = (env: RuntimeCredentialEnv) =>
-  env.NOLO_DEPLOY_ENV?.trim() ||
-  env.NOLO_ENV?.trim() ||
-  env.NODE_ENV?.trim() ||
-  undefined;
+  resolveCredentialEnvironment(env);
 
 export function buildProviderCredentialRegistryRegistration({
   provider,

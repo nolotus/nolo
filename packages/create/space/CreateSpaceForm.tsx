@@ -1,4 +1,4 @@
-import { useCallback, useId, useState, type ReactNode } from "react";
+import { useCallback, useId, type ReactNode } from "react";
 import { useTheme } from "app/theme";
 import { useAppDispatch } from "app/store";
 import { object, string, optional, picklist, forward, check, pipe, minLength } from "valibot";
@@ -9,17 +9,15 @@ import { useNavigate } from "app/routing";
 import { Input } from "render/web/form/Input";
 import FormTitle from "render/web/form/FormTitle";
 import Button from "render/web/ui/Button";
-import { LuPlus, LuFolderOpen, LuFolder, LuX } from "react-icons/lu";
+import { LuPlus } from "react-icons/lu";
 import { Select, SelectItem } from "render/web/ui/Select";
 import { SpaceVisibility } from "app/types";
 import { addSpace, changeSpace } from "./spaceThunks";
-import { getIsDesktopApp } from "app/utils/env";
 
 type CreateSpaceRequest = {
   name: string;
   description?: string;
   visibility?: SpaceVisibility;
-  boundFolder?: string;
 };
 
 const FormContainer = ({ children }: { children: ReactNode }) => {
@@ -47,17 +45,11 @@ export const CreateSpaceForm = ({ onClose }: { onClose: () => void }) => {
   const nameId = useId();
   const descriptionId = useId();
   const visibilityId = useId();
-  const boundFolderId = useId();
 
   const onSubmit = useCallback(
     async (data: CreateSpaceRequest) => {
       try {
-        // 名称未填但已绑定文件夹：回退到文件夹名作为空间名
-        let resolvedName = data.name;
-        if ((!resolvedName || !resolvedName.trim()) && data.boundFolder) {
-          resolvedName =
-            data.boundFolder.split("/").filter(Boolean).pop() || data.boundFolder;
-        }
+        const resolvedName = data.name;
         console.info("[space/create] submit", {
           name: resolvedName,
           visibility: data.visibility || SpaceVisibility.PRIVATE,
@@ -68,7 +60,6 @@ export const CreateSpaceForm = ({ onClose }: { onClose: () => void }) => {
             name: resolvedName,
             description: data.description,
             visibility: data.visibility || SpaceVisibility.PRIVATE,
-            ...(data.boundFolder ? { boundFolder: data.boundFolder } : {}),
           })
         ).unwrap();
         await (dispatch as any)((changeSpace as any)(result.spaceId)).unwrap();
@@ -89,13 +80,10 @@ export const CreateSpaceForm = ({ onClose }: { onClose: () => void }) => {
         name: string(),
         description: optional(string()),
         visibility: optional(picklist([SpaceVisibility.PRIVATE, SpaceVisibility.PUBLIC])),
-        boundFolder: optional(string()),
       }),
-      // name 跨字段校验：有 boundFolder 时 name 可为空，否则必填且至少 2 字符
+      // Space name never derives from a local folder.
       forward(
         check((data) => {
-          const hasBound = (data.boundFolder || "").trim().length > 0;
-          if (hasBound) return true;
           return (data.name || "").trim().length >= 2;
         }, t("space.nameRequired")),
         ["name"],
@@ -105,7 +93,6 @@ export const CreateSpaceForm = ({ onClose }: { onClose: () => void }) => {
       name: "",
       description: "",
       visibility: SpaceVisibility.PRIVATE,
-      boundFolder: "",
     },
   });
 
@@ -117,38 +104,6 @@ export const CreateSpaceForm = ({ onClose }: { onClose: () => void }) => {
     submit,
   } = form;
 
-  const isDesktop = getIsDesktopApp();
-  const boundFolder = (values.boundFolder || "") as string;
-  const [pickingFolder, setPickingFolder] = useState(false);
-
-  const handlePickFolder = useCallback(async () => {
-    if (!isDesktop) return;
-    setPickingFolder(true);
-    try {
-      const res = await fetch("/api/desktop/pick-folder", { method: "POST" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data.ok && data.path) {
-        set("boundFolder", data.path);
-        // 未填名称时，用文件夹名作为空间名（满足「文件夹名字就是空间名字」）
-        const currentName = (values.name || "") as string;
-        if (!currentName.trim()) {
-          const folderBasename = data.path.split("/").filter(Boolean).pop() || data.path;
-          set("name", folderBasename);
-        }
-      } else if (data.error) {
-        toast.error(data.error);
-      } else if (data.ok === false) {
-        toast.error(t("pick_folder_failed"));
-      }
-      // data.path === null means user cancelled — no feedback needed
-    } catch (err) {
-      console.warn("[CreateSpaceForm] pick-folder failed:", err);
-      toast.error(t("pick_folder_failed"));
-    } finally {
-      setPickingFolder(false);
-    }
-  }, [isDesktop, set, values.name]);
 
   return (
     <FormContainer>
@@ -161,212 +116,6 @@ export const CreateSpaceForm = ({ onClose }: { onClose: () => void }) => {
           gap: theme.space[5], // 使用主题间距系统
         }}
       >
-        {isDesktop && (
-          <div>
-            <label
-              htmlFor={boundFolderId}
-              style={{
-                display: "block",
-                marginBottom: theme.space[2],
-                fontSize: "var(--fontSize-base)",
-                fontWeight: 500,
-                color: theme.text,
-              }}
-            >
-              {t("bound_folder")}
-            </label>
-
-            {boundFolder ? (
-              // ── 已选择：紧凑卡片，突出文件夹名 ──
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: theme.space[3],
-                  padding: `${theme.space[3]} ${theme.space[4]}`,
-                  borderRadius: "var(--radius-md, 10px)",
-                  background: theme.accentSoft,
-                  border: `1px solid ${theme.primaryBorder}`,
-                }}
-              >
-                <span
-                  style={{
-                    flexShrink: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 36,
-                    height: 36,
-                    borderRadius: "var(--radius-sm, 8px)",
-                    background: theme.primaryBgStrong,
-                    color: theme.primary,
-                  }}
-                >
-                  <LuFolder size={20} aria-hidden="true" />
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: "var(--fontSize-sm)",
-                      fontWeight: 600,
-                      color: theme.text,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                    title={boundFolder}
-                  >
-                    {boundFolder.split("/").filter(Boolean).pop() || boundFolder}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "var(--fontSize-xs)",
-                      color: theme.textMuted,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      marginTop: 2,
-                    }}
-                    title={boundFolder}
-                  >
-                    {boundFolder}
-                  </div>
-                </div>
-                <button
-                  id={boundFolderId}
-                  type="button"
-                  onClick={handlePickFolder}
-                  disabled={pickingFolder}
-                  style={{
-                    flexShrink: 0,
-                    background: "none",
-                    border: "none",
-                    color: theme.primary,
-                    cursor: pickingFolder ? "wait" : "pointer",
-                    fontSize: "var(--fontSize-sm)",
-                    fontWeight: 500,
-                    padding: `${theme.space[1]} ${theme.space[2]}`,
-                    borderRadius: "var(--radius-sm, 6px)",
-                    whiteSpace: "nowrap",
-                  }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = theme.primaryBgStrong)
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "none")
-                  }
-                >
-                  {t("change_folder")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => set("boundFolder", undefined)}
-                  style={{
-                    flexShrink: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 24,
-                    height: 24,
-                    background: "none",
-                    border: "none",
-                    color: theme.textMuted,
-                    cursor: "pointer",
-                    borderRadius: "var(--radius-sm, 6px)",
-                  }}
-                  title={t("clear")}
-                  aria-label={t("clear")}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = theme.text;
-                    e.currentTarget.style.background = theme.primaryBgStrong;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = theme.textMuted;
-                    e.currentTarget.style.background = "none";
-                  }}
-                >
-                  <LuX size={16} aria-hidden="true" />
-                </button>
-              </div>
-            ) : (
-              // ── 未选择：虚线放区域，引导点击 ──
-              <button
-                id={boundFolderId}
-                type="button"
-                onClick={handlePickFolder}
-                disabled={pickingFolder}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: theme.space[2],
-                  width: "100%",
-                  padding: `${theme.space[6]} ${theme.space[4]}`,
-                  borderRadius: "var(--radius-md, 10px)",
-                  background: "transparent",
-                  border: `1.5px dashed ${theme.primaryBorder}`,
-                  cursor: pickingFolder ? "wait" : "pointer",
-                  color: theme.textMuted,
-                  transition: "border-color 0.15s, background 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = theme.primary;
-                  e.currentTarget.style.background = theme.accentSoft;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = theme.primaryBorder;
-                  e.currentTarget.style.background = "transparent";
-                }}
-              >
-                <span
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 48,
-                    height: 48,
-                    borderRadius: "50%",
-                    background: theme.primaryBgStrong,
-                    color: theme.primary,
-                  }}
-                >
-                  <LuFolderOpen size={24} aria-hidden="true" />
-                </span>
-                <span
-                  style={{
-                    fontSize: "var(--fontSize-sm)",
-                    fontWeight: 500,
-                    color: theme.text,
-                  }}
-                >
-                  {pickingFolder
-                    ? t("creating", { ns: "common" })
-                    : t("choose_folder")}
-                </span>
-                <span
-                  style={{
-                    fontSize: "var(--fontSize-xs)",
-                    color: theme.textMuted,
-                  }}
-                >
-                  {t("bound_folder_hint")}
-                </span>
-              </button>
-            )}
-
-            {/* 分组分隔：空间来源（文件夹）与空间信息（名称/描述/可见性）之间 */}
-            <div
-              style={{
-                marginTop: theme.space[5],
-                borderTop: `1px solid ${theme.borderFaint}`,
-                height: 0,
-              }}
-              aria-hidden="true"
-            />
-          </div>
-        )}
-
         <div>
           <label
             htmlFor={nameId}

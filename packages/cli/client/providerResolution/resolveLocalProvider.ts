@@ -36,7 +36,6 @@ import { resolveCodexOAuthTransport } from "./codexOAuthTransport";
 import { resolveCustomNativeTransport } from "./customNativeTransport";
 import { resolveCursorTransport } from "./cursorTransport";
 import { resolveDevinTransport } from "./devinTransport";
-import { resolveWorkbuddyTransport } from "./workbuddyTransport";
 import { resolveDirectOpenAiCompatibleTransport } from "./directOpenAiCompatibleTransport";
 import { resolveGeminiNativeToolTransport } from "./geminiNativeToolTransport";
 import { resolveOwnerOAuthProxyTransport } from "./ownerOAuthProxyTransport";
@@ -50,7 +49,6 @@ const TRANSPORTS: readonly ProviderResolver[] = [
   resolveCodexOAuthTransport,
   resolveCursorTransport,
   resolveDevinTransport,
-  resolveWorkbuddyTransport,
   resolveGeminiNativeToolTransport,
   // 三条 custom native wire（gemini / openai-responses / anthropic-messages）由
   // 这一个 resolver 按目录 `nativeProtocol` 分派：三种 wire 互斥（一个模型的

@@ -6,6 +6,14 @@ import {
   resolveSecretEnvVars,
   SecretsFileCorruptedError,
 } from "core/secretsStore";
+import {
+  getSecretBinding,
+  readSecretBindingsForRead,
+  setSecretBinding,
+  deleteSecretBinding,
+} from "core/secretBindings";
+import { createFileCredentialBroker } from "../agent-runtime/fileCredentialBroker";
+import type { CredentialBroker } from "../agent-runtime/credentialBroker";
 import { spawn } from "child_process";
 
 /** Values that JSON.parse would silently turn into a non-injectable scalar. */
@@ -25,16 +33,26 @@ function parseSecretValue(raw: string): unknown {
   return parsed;
 }
 
-export async function runSecretCommand(args: string[]): Promise<void> {
+export interface RunSecretCommandOptions {
+  broker?: CredentialBroker;
+}
+
+export async function runSecretCommand(
+  args: string[],
+  options: RunSecretCommandOptions = {},
+): Promise<void> {
   const [subcommand, ...rest] = args;
 
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
     console.log(`用法:
-  nolo secret list                         列出已保存的 secret 名称（不显示值）
+  nolo secret list [--json]                列出已保存的 secret 名称（不显示值；--json 输出机器可读清单）
   nolo secret get <name>                   打印指定 secret 的值（供调试；Agent 不得读取）
   nolo secret set <name> <value|json>      设置 secret（字符串，或以 { / [ 开头的 JSON）
   nolo secret delete <name>                删除指定的 secret
   nolo secret run --with <names> -- <cmd>  安全注入 secret 环境变量并执行子命令
+  nolo secret bind <alias> <ref> [--env <ENV_NAME>]  将受控凭据引用绑定到别名
+  nolo secret list-bindings                列出已配置的 secret 别名绑定
+  nolo secret unbind <alias>               解除指定的 secret 别名绑定
 `);
     return;
   }
@@ -42,6 +60,7 @@ export async function runSecretCommand(args: string[]): Promise<void> {
   try {
     switch (subcommand) {
       case "list": {
+        const wantJson = rest.includes("--json");
         const read = readSecretsForRead();
         if (read.corrupted) {
           console.error(`错误: ${read.error.message}`);
@@ -49,6 +68,22 @@ export async function runSecretCommand(args: string[]): Promise<void> {
           return;
         }
         const names = Object.keys(read.data).sort();
+        if (wantJson) {
+          // 机器可读清单：**只出名字与形态，永不出值**。
+          // agent 用它回答「我们有没有相关凭据」，随后由平台侧解析注入。
+          const secrets = names.map((name) => {
+            const value = read.data[name];
+            const kind =
+              typeof value === "string"
+                ? "string"
+                : value !== null && typeof value === "object"
+                  ? "json"
+                  : "other";
+            return { name, kind };
+          });
+          console.log(JSON.stringify({ count: secrets.length, secrets }, null, 2));
+          return;
+        }
         if (names.length === 0) {
           console.log("（当前未保存任何 secret）");
         } else {
@@ -139,11 +174,27 @@ export async function runSecretCommand(args: string[]): Promise<void> {
         for (const name of withNames) {
           // A typo in a multi-name list must not silently drop that credential:
           // collect unknown names and fail before spawning anything.
-          if (getSecret(name) === undefined) {
-            missing.push(name);
+          if (getSecret(name) !== undefined) {
+            Object.assign(injectedEnvs, resolveSecretEnvVars(name));
             continue;
           }
-          Object.assign(injectedEnvs, resolveSecretEnvVars(name));
+
+          const binding = getSecretBinding(name);
+          if (binding) {
+            const broker = options.broker ?? createFileCredentialBroker();
+            const secretValue = await broker.get(binding.brokerRef);
+            if (!secretValue) {
+              console.error(
+                `错误: 凭证引用 ${binding.brokerRef} 在本地保管库中不存在或未授权。`,
+              );
+              process.exitCode = 1;
+              return;
+            }
+            injectedEnvs[binding.envName] = secretValue;
+            continue;
+          }
+
+          missing.push(name);
         }
         if (missing.length > 0) {
           console.error(
@@ -180,6 +231,92 @@ export async function runSecretCommand(args: string[]): Promise<void> {
             finish(1);
           });
         });
+        return;
+      }
+
+      case "bind": {
+        let envOption: string | undefined;
+        const positional: string[] = [];
+
+        for (let i = 0; i < rest.length; i++) {
+          const arg = rest[i];
+          if (arg === "--env") {
+            if (i + 1 < rest.length) {
+              envOption = rest[i + 1];
+              i++;
+            } else {
+              console.error("错误: --env 需要指定环境变量名。例如: --env DEEPINFRA_API_KEY");
+              process.exitCode = 1;
+              return;
+            }
+          } else if (arg.startsWith("--env=")) {
+            envOption = arg.slice("--env=".length);
+          } else {
+            positional.push(arg);
+          }
+        }
+
+        const [alias, rawRef] = positional;
+        if (!alias || !rawRef) {
+          console.error(
+            "错误: 请提供 alias 与凭据引用 (ref)。例如: nolo secret bind deepinfra_api_key vault-cred-xxx [--env DEEPINFRA_API_KEY]",
+          );
+          process.exitCode = 1;
+          return;
+        }
+
+        let brokerRef = rawRef;
+        if (brokerRef.startsWith("$nolo_cred:")) {
+          brokerRef = brokerRef.slice("$nolo_cred:".length);
+        }
+
+        const envName =
+          envOption !== undefined
+            ? envOption
+            : alias.toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+
+        setSecretBinding({
+          alias,
+          brokerRef,
+          envName,
+        });
+
+        console.log(`✅ 成功绑定 secret: "${alias}" -> ${brokerRef} (env: ${envName})`);
+        return;
+      }
+
+      case "list-bindings":
+      case "bindings": {
+        const read = readSecretBindingsForRead();
+        if (read.corrupted) {
+          console.error(`错误: ${read.error.message}`);
+          process.exitCode = 1;
+          return;
+        }
+        const bindings = read.bindings;
+        if (bindings.length === 0) {
+          console.log("（当前未配置任何 secret 别名绑定）");
+        } else {
+          console.log("已配置的 secret 别名绑定列表:");
+          for (const b of bindings) {
+            console.log(`  - ${b.alias} -> ${b.brokerRef} (env: ${b.envName})`);
+          }
+        }
+        return;
+      }
+
+      case "unbind": {
+        const [alias] = rest;
+        if (!alias) {
+          console.error("错误: 请提供要解除绑定的别名 (alias)。例如: nolo secret unbind deepinfra_api_key");
+          process.exitCode = 1;
+          return;
+        }
+        console.log(
+          deleteSecretBinding(alias)
+            ? `✅ 成功解除 secret 绑定: "${alias}"`
+            : `未找到名为 "${alias}" 的 secret 绑定，无需解除`,
+        );
         return;
       }
 

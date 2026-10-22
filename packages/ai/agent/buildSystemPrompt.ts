@@ -13,8 +13,11 @@ import { wrapHistoricalSummaryWithReplayGuard } from "ai/context/staleReplayGuar
 import { MEMORY_USE_GUIDANCE } from "agent-runtime/memoryUseGuidance";
 import { buildIdentityBlock } from "agent-runtime/identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "agent-runtime/deleteSafety";
+import { CREDENTIAL_HYGIENE_RULE } from "agent-runtime/credentialHygiene";
 // 「并行是默认」与删除红线一样属于系统层固定约束：无条件注入，不做工具门控。
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDefault";
+import { PLATFORM_RISK_CONTROL_RULE } from "agent-runtime/platformRiskControl";
+import { buildConsultationModeBlock } from "agent-runtime/consultationMode";
 import { buildResponseGuidelines } from "agent-runtime/responseGuidelines";
 import { buildUserResponseLanguageContext } from "agent-runtime/userResponseLanguage";
 // 工具驱动指令表（编排/协作 review 硬门等）独立成模块，localLoop 复用同一份。
@@ -283,6 +286,13 @@ export const buildSystemPromptContext = (options: {
       cacheScope: "static",
       content: DELETE_SAFETY_RED_LINE,
     },
+    // 凭据纪律：与红线同为无条件系统层块，四条装配线同源。
+    {
+      id: "credential-hygiene",
+      owner: "platform",
+      cacheScope: "static",
+      content: CREDENTIAL_HYGIENE_RULE,
+    },
     // 并行是默认：系统层固定块，紧随红线（同为无条件前缀，不随工具/轮次变化）。
     {
       id: "parallel-dispatch-default",
@@ -290,6 +300,14 @@ export const buildSystemPromptContext = (options: {
       cacheScope: "static",
       content: PARALLEL_DISPATCH_DEFAULT_RULE,
     },
+    // 平台风控纪律：无条件静态前缀，紧随并行派发块。
+    {
+      id: "platform-risk-control",
+      owner: "platform",
+      cacheScope: "static",
+      content: PLATFORM_RISK_CONTROL_RULE,
+    },
+    { id: "consultation-mode", owner: "platform", cacheScope: "static", content: buildConsultationModeBlock() },
     { id: "identity", owner: "platform", cacheScope: "session", content: identitySection },
     { id: "user-response-language", owner: "platform", cacheScope: "session", content: buildUserResponseLanguageContext({ language: safeLanguage }) },
     { id: "startup-protocol", owner: "platform", cacheScope: "static", content: startupProtocol },

@@ -9,7 +9,6 @@ import Button from "render/web/ui/Button";
 import { Select, SelectItem } from "render/web/ui/Select";
 import { ModelOptionLabel } from "./ModelOptionLabel";
 import { ProviderPresetOptionLabel } from "./ProviderPresetOptionLabel";
-import { workbuddyPricingLabel } from "./workbuddyPricingLabel";
 import { PasswordInput } from "render/web/form/Input";
 import { Checkbox } from "render/web/form/Checkbox";
 import { MANUAL_PROVIDER_PRESET_ID } from "../providerPresetApply";
@@ -24,7 +23,6 @@ import {
 import type { SubscriptionOAuthConnection } from "./useSubscriptionOAuthConnection";
 import { useIsLoggedIn, useUserId } from "identity";
 import type { ReasoningEffort } from "../createAgentSchema";
-import type { WorkBuddyModelPricing } from "../providerRegistry";
 import {
   useModelReasoningCapability,
   useReasoningEffortCalibration,
@@ -420,7 +418,7 @@ const AgentCreateApiPanel: React.FC<{
     discoveryFallbackReason?: string;
     lockCustomProviderUrl?: boolean;
     keyFormatHint?: string;
-    modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean; pricing?: { rate?: number; free: boolean; observedAt: number; requiresActivePackage: true } }>;
+    modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean }>;
     provider: string;
   };
   reasoningEffort: ReasoningEffort;
@@ -635,7 +633,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
     discoveryFallbackReason?: string;
     lockCustomProviderUrl?: boolean;
     keyFormatHint?: string;
-    modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean; pricing?: WorkBuddyModelPricing }>;
+    modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean }>;
     provider: string;
   };
   reasoningEffort: ReasoningEffort;
@@ -787,12 +785,10 @@ const AgentCreateSubscriptionPanel: React.FC<{
                     <SelectItem id={subModel} textValue={subModel}>{subModel}</SelectItem>
                   ) : null}
                   {activePresetFields.modelOptions.map((model) => {
-                    const pricing = activePresetFields.provider === "workbuddy" ? workbuddyPricingLabel(model.pricing) : undefined;
-                    const label = `${model.label}${model.recommended ? "（推荐）" : ""}${pricing ? `（${pricing}）` : ""}`;
+                    const label = `${model.label}${model.recommended ? "（推荐）" : ""}`;
                     return (
                       <SelectItem key={model.id} id={model.id} textValue={label}>
                         <ModelOptionLabel label={label} hasVision={model.hasVision} />
-                        {activePresetFields.provider === "workbuddy" ? <span>{t("createAgent.quickCreate.workbuddyPackageNotice", "零费率不保证可调用，仍可能需要有效额度包；活动和费率以账号为准")}</span> : null}
                       </SelectItem>
                     );
                   })}
@@ -918,12 +914,10 @@ const AgentCreateSubscriptionPanel: React.FC<{
                   <SelectItem id={subModel} textValue={subModel}>{subModel}</SelectItem>
                 ) : null}
                 {activePresetFields.modelOptions.map((m) => {
-                  const pricing = activePresetFields.provider === "workbuddy" ? workbuddyPricingLabel(m.pricing) : undefined;
-                  const label = `${m.label}${m.recommended ? "（推荐）" : ""}${pricing ? `（${pricing}）` : ""}`;
+                  const label = `${m.label}${m.recommended ? "（推荐）" : ""}`;
                   return (
                     <SelectItem key={m.id} id={m.id} textValue={label}>
                       <ModelOptionLabel label={label} hasVision={m.hasVision} />
-                      {activePresetFields.provider === "workbuddy" ? <span>{t("createAgent.quickCreate.workbuddyPackageNotice", "零费率不保证可调用，仍可能需要有效额度包；活动和费率以账号为准")}</span> : null}
                     </SelectItem>
                   );
                 })}

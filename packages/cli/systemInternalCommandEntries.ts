@@ -41,14 +41,6 @@ export function getSystemInternalCommandEntries(renderHelpText: () => string): C
       const { runAuthDevinCommand } = await import("./oauth/authCommand");
       return runAuthDevinCommand(args);
     }),
-    createArgsCommand(["auth", "workbuddy"], "Authorize WorkBuddy OAuth (China)", async (args) => {
-      const { runAuthWorkbuddyCommand } = await import("./oauth/authCommand");
-      return runAuthWorkbuddyCommand(args);
-    }),
-    createArgsCommand(["auth", "workbuddy-ai"], "Authorize WorkBuddy AI OAuth (International)", async (args) => {
-      const { runAuthWorkbuddyAiCommand } = await import("./oauth/authCommand");
-      return runAuthWorkbuddyAiCommand(args);
-    }),
     createArgsCommand(["login"], "Log in to Nolo", async (args) => {
       const { runLoginCommand } = await import("./authCommands");
       return runLoginCommand(args);

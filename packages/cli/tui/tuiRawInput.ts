@@ -25,6 +25,7 @@ import { t } from "./i18n";
 import { completeSlashCommand } from "./sessionInput";
 import { PASTE_TOKEN_PREFIX } from "./session";
 import { resetHistoryFrameDiffCache } from "./tuiHistory";
+import { resolveHistoryLayoutGeometry } from "./tuiLayout";
 
 function normalizePasteNewlines(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -363,9 +364,10 @@ export function createFixedInput(
     // 被一起清掉。truecolor 不可用 / 终端底色未知时 wash 为空，整段退化为
     // 原文（ANSI-16 没有"淡底"，实色会把文字埋掉）。
     const surface = colorEnabled ? composerSurfaceBackgroundSequence() : "";
+    // 几何对齐：输入提示符 › 与正文在相同左边距 (marginLeft) 起步，右侧也按 marginRight 预留留白。
+    const { marginLeft, marginRight } = resolveHistoryLayoutGeometry(cols);
+    const leftPad = marginLeft > 0 ? " ".repeat(marginLeft) : "";
     // 底色铺满整列，但最后一列留白：写到最右下角会让部分终端提前折行/滚屏。
-    // 折行宽度必须跟着收同样的 1 列，否则满行内容会多出 1 列被裁掉——这里
-    // 之前还额外塞了个前导空格，等于把光标列和文字一起推歪一格。
     const paintWidth = Math.max(1, surface ? cols - 1 : cols);
     const paintInputRow = (content: string): string => {
       if (!surface) return content;
@@ -374,12 +376,12 @@ export function createFixedInput(
       return `${surface}${fitted}${" ".repeat(pad)}\x1b[49m`;
     };
 
-    const contentWidth = Math.max(1, paintWidth - promptWidth);
+    const contentWidth = Math.max(1, paintWidth - marginLeft - promptWidth);
     const logicalLines = buffer.length === 0 ? [""] : buffer.split("\n");
 
     const targetPos = Math.max(0, Math.min(buffer.length, cursorPos ?? buffer.length));
     let charOffset = 0;
-    let cursorCol = promptWidth;
+    let cursorCol = marginLeft + promptWidth;
     let cursorRow = 0;
     let inputRows = 0;
     let cursorFound = false;
@@ -387,12 +389,14 @@ export function createFixedInput(
     for (let i = 0; i < logicalLines.length; i += 1) {
       const logical = logicalLines[i] ?? "";
       const isFirst = i === 0;
-      const prefix = isFirst ? prompt : " ".repeat(promptWidth);
+      const prefix = isFirst
+        ? `${leftPad}${prompt}`
+        : `${leftPad}${" ".repeat(promptWidth)}`;
 
       if (buffer.length === 0) {
         const placeholder = themeText(t("placeholder"), "chrome", colorEnabled);
         sections.push(paintInputRow(`${prefix}${placeholder}`));
-        cursorCol = promptWidth;
+        cursorCol = marginLeft + promptWidth;
         cursorRow = 0;
         inputRows = 1;
         cursorFound = true;
@@ -402,7 +406,7 @@ export function createFixedInput(
       const wrapped = wrapTextToLines(logical, contentWidth);
       const rows = wrapped.length > 0 ? wrapped : [""];
       for (let j = 0; j < rows.length; j += 1) {
-        const rowPrefix = j === 0 ? prefix : " ".repeat(promptWidth);
+        const rowPrefix = j === 0 ? prefix : `${leftPad}${" ".repeat(promptWidth)}`;
         const rowText = rows[j] ?? "";
         sections.push(
           paintInputRow(`${rowPrefix}${styleCollapsedPastePlaceholders(rowText, colorEnabled)}`),
@@ -416,7 +420,7 @@ export function createFixedInput(
           ) {
             const subOffset = Math.max(0, Math.min(rowLen, targetPos - charOffset));
             const subStr = rowText.slice(0, subOffset);
-            cursorCol = promptWidth + displayWidth(subStr);
+            cursorCol = marginLeft + promptWidth + displayWidth(subStr);
             cursorRow = inputRows;
             cursorFound = true;
           }

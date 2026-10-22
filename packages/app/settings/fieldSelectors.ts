@@ -17,7 +17,6 @@ import {
   DEFAULT_AUTO_APPROVED_SELF_UPDATE_FIELDS,
   normalizeAgentUpdateFieldList,
 } from "ai/policy/selfUpdateFields";
-import { parsePositiveFiniteNumberOrFallback } from "core/positiveFiniteNumberOrFallback";
 import { MEDIA_ALLOWANCE_MAX } from "./mediaAllowanceClient";
 
 import {
@@ -28,18 +27,38 @@ import {
   normalizeSystemBuiltinSkills,
 } from "./settingNormalizers";
 import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } from "ai/tools/agentCapabilities";
-import type { SettingState } from "./settingTypes";
+import type { SettingState, SettingsWriteFailure } from "./settingTypes";
 
 // --- 通用 / 主题字段 ---
 
-export const selectPreferredAnimationSet = (state: RootState): number =>
-  state.settings.preferredAnimationSet ?? 0;
-
-export const selectShowThinking = (state: RootState): boolean =>
-  state.settings.showThinking;
+/** Retired animation preference: retain selector for legacy callers. */
+export const selectPreferredAnimationSet = (_state: RootState): number => 0;
 
 export const selectMaxCost = (state: RootState): number =>
   state.settings.maxCost;
+
+/**
+ * 最近一次设置写云端失败的状态（null = 没有未消解的失败）。只读展示面：
+ * 本轮只备好状态与 selector，不接任何 UI。`keys` 是**仍未确认落地**的设置键，
+ * `reconciliation`/`unresolvedKeys` 是对账结论（见 SettingsWriteFailure）。
+ *
+ * 生命周期：
+ *  - 设置：setSettings 写「首次失败 + 退避后重试一次仍失败」时记录；
+ *      被更新的本地意图取代而放弃重试的情形**不记录**（新意图的写决定结果）。
+ *  - 清除：同一账号的写**成功**且覆盖了状态里剩下的全部 keys → 清空；
+ *      只覆盖一部分 → 从 keys/unresolvedKeys 剔除已覆盖的键，剩余继续可见。
+ *  - 跨账号：`accountId` 不同的一律不动（B 账号写成功不清 A 账号的失败状态）。
+ *
+ * 语义要点：失败**不回滚**乐观值——本 selector 反映的本地状态就是用户的最新编辑，
+ * 服务端可能仍是旧值，差异由 unresolvedKeys 表达。
+ */
+export const selectLastWriteFailure = (
+  state: RootState,
+): SettingsWriteFailure | null => state.settings.lastWriteFailure ?? null;
+
+/** 是否存在未消解的设置写失败（布尔短路用，避免 UI 每次解构整个对象）。 */
+export const selectHasUnsyncedSettingsWrite = (state: RootState): boolean =>
+  selectLastWriteFailure(state) !== null;
 
 export const selectMaxExecutionTime = (state: RootState): number =>
   state.settings.maxExecutionTime;
@@ -137,16 +156,8 @@ export const selectOcrModel = (
   return "google_document_ocr";
 };
 
-export const selectShowScrollToTopButton = (state: RootState): boolean =>
-  state.settings.showScrollToTopButton ?? false;
-
-export const selectShowScrollToBottomButton = (state: RootState): boolean =>
-  state.settings.showScrollToBottomButton ?? false;
-
-export const selectCreateMenuOpenCount = (state: RootState): number =>
-  Math.floor(
-    parsePositiveFiniteNumberOrFallback(state.settings.createMenuOpenCount, 0),
-  );
+/** Legacy selector compatibility: the live device owner is outside Redux. */
+export const selectCreateMenuOpenCount = (_state: RootState): number => 0;
 
 export const selectDesktopChromeConnectorEnabled = (
   state: RootState,

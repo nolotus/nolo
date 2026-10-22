@@ -177,6 +177,61 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
     to: { provider: "nolo", model: "glm-5.3" },
     reason: "GLM 5.2 升级为 GLM 5.3（baseten zai-org/GLM-5.3），统一走 nolo 平台托管",
   },
+  // MiniMax M 系旧模型 → MiniMax-M3.1-Flash 的兼容指向（2026-10-19 官方公告）：
+  // 开放平台 models.md 已把 M2.7 / M2.5 / M2.1 / M2 系列列入「历史模型（均已下线）」，
+  // 其中 M2.5、M2.7 系列自 2026-10-19 起停止向新用户开放、2026-11-18 正式下线；
+  // 旧 preset 默认的 MiniMax-Text-01 也已不在官方可用模型清单里。
+  // 这里只在同一 provider 内换代（保留用户自带 Key 的 minimax 通道，不劫持到 nolo），
+  // 让存量 agent 提前指向仍受支持的旗舰，而不是等到下线当日才对话失败。
+  {
+    from: { provider: "minimax", model: "MiniMax-Text-01" },
+    to: { provider: "minimax", model: "MiniMax-M3.1-Flash" },
+    reason:
+      "MiniMax-Text-01 已不在官方可用模型清单（models.md），换代到 MiniMax-M3.1-Flash",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "minimax", model: "MiniMax-M2.7" },
+    to: { provider: "minimax", model: "MiniMax-M3.1-Flash" },
+    reason: "M2.7 系列 2026-11-18 正式下线（2026-10-19 起停止向新用户开放），换代到 M3.1 Flash",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "minimax", model: "MiniMax-M2.7-highspeed" },
+    to: { provider: "minimax", model: "MiniMax-M3.1-Flash" },
+    reason: "M2.7 系列 2026-11-18 正式下线（2026-10-19 起停止向新用户开放），换代到 M3.1 Flash",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "minimax", model: "MiniMax-M2.5" },
+    to: { provider: "minimax", model: "MiniMax-M3.1-Flash" },
+    reason: "M2.5 系列 2026-11-18 正式下线（2026-10-19 起停止向新用户开放），换代到 M3.1 Flash",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "minimax", model: "MiniMax-M2.5-highspeed" },
+    to: { provider: "minimax", model: "MiniMax-M3.1-Flash" },
+    reason: "M2.5 系列 2026-11-18 正式下线（2026-10-19 起停止向新用户开放），换代到 M3.1 Flash",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "minimax", model: "MiniMax-M2.1" },
+    to: { provider: "minimax", model: "MiniMax-M3.1-Flash" },
+    reason: "M2.1 系列已在官方历史模型（均已下线），换代到 M3.1 Flash",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "minimax", model: "MiniMax-M2.1-highspeed" },
+    to: { provider: "minimax", model: "MiniMax-M3.1-Flash" },
+    reason: "M2.1 系列已在官方历史模型（均已下线），换代到 M3.1 Flash",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "minimax", model: "MiniMax-M2" },
+    to: { provider: "minimax", model: "MiniMax-M3.1-Flash" },
+    reason: "MiniMax-M2 已在官方历史模型（均已下线），换代到 M3.1 Flash",
+    kind: "upgrade",
+  },
 ] as const;
 
 export interface ModelIdentity {

@@ -4,6 +4,14 @@ Open-source Chrome connector used by Nolo Desktop local agents. This is reposito
 
 ## Install For Local Development
 
+The installer resolves a **standalone Bun executable on PATH first** and embeds its absolute path
+in the native host wrapper. If Bun is unavailable, it falls back to standalone Node.js. A packaged
+desktop app's `process.execPath` is not assumed to be Bun. Explicit `nodePath` overrides remain
+supported for both Bun and Node.js. Direct host/installer execution uses `#!/usr/bin/env bun`;
+Node-only environments can invoke the installer explicitly with `node scripts/installNativeHostManifest.mjs`.
+Reinstall after moving/removing the selected runtime or connector checkout.
+
+
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Click `Load unpacked`.

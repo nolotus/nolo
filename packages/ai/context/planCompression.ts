@@ -96,7 +96,8 @@ export interface CompressionPlan {
  * emptyReason 取值：
  * - no-pending：锚点之后没有待处理消息；
  * - not-triggered：真实占用与估算均未过线（附估算/预算/触发线）；
- * - below-min-compress-count：已触发但可压缩条数 < MIN_COMPRESS_COUNT。
+ * - below-min-compress-count：已触发但可摘要条数/内容不足；
+ * - no-safe-prefix：受保护尾部之前没有安全的可摘要前缀。
  */
 export interface CompressionPlanDiagnostics {
   pendingMsgCount: number;
@@ -112,7 +113,7 @@ export interface CompressionPlanDiagnostics {
   shouldRunActiveSummary: boolean;
   /** 触发后实际算出的可压缩条数（未触发时为 undefined）。 */
   compressCount?: number;
-  emptyReason?: "no-pending" | "not-triggered" | "below-min-compress-count";
+  emptyReason?: "no-pending" | "not-triggered" | "below-min-compress-count" | "no-safe-prefix";
 }
 
 // --- 辅助函数（纯函数） ---
@@ -263,8 +264,7 @@ function shouldTriggerCompaction(args: {
   const shouldRunActiveSummary =
     force &&
     reason === "manual" &&
-    !hasOpenEndedToolCall(lastMsg) &&
-    pendingMsgCount >= MIN_TRIGGER_PENDING_COUNT;
+    (pendingMsgCount < MIN_TRIGGER_PENDING_COUNT || !hasOpenEndedToolCall(lastMsg));
 
   const triggeredByColdResume =
     coldResume === true && pendingMsgCount >= MIN_TRIGGER_PENDING_COUNT;
@@ -467,8 +467,37 @@ export function planCompression(input: CompressionInput): CompressionPlan {
   );
   compressCount = guardToolChainBoundary(pendingMsgs, compressCount);
 
-  // 5. 太少不值得压缩
-  if (compressCount < MIN_COMPRESS_COUNT) {
+  // 仅手动/预算路径允许少量大消息；task_completed 保持原有条数门槛。
+  const allowSmallPrefix = reason !== "task_completed" &&
+    (shouldRunActiveSummary || triggeredByRealUsage || diagnostics.triggeredByEstimate);
+  if (allowSmallPrefix &&
+    (compressCount < MIN_COMPRESS_COUNT || pendingMsgs.length < MIN_TRIGGER_PENDING_COUNT)) {
+    // 保留最新用户意图及其后完整执行链，至少留下最后一条原文。
+    let safeLimit = pendingMsgs.length - 1;
+    for (let i = pendingMsgs.length - 1; i >= 0; i--) {
+      if (pendingMsgs[i].role === "user") {
+        safeLimit = i;
+        break;
+      }
+    }
+    compressCount = Math.min(compressCount, safeLimit);
+    // 此处不能向前推进跨过受保护尾部，只能回退完整工具组。
+    while (compressCount > 0 &&
+      (pendingMsgs[compressCount]?.role === "tool" ||
+        hasOpenEndedToolCall(pendingMsgs[compressCount - 1]))) {
+      compressCount--;
+    }
+    if (compressCount === 0) {
+      return emptyPlan(startIndex, {
+        ...diagnostics, compressCount, emptyReason: "no-safe-prefix",
+      });
+    }
+  }
+  const compressibleTokens = pendingMsgs.slice(0, compressCount)
+    .reduce((sum, msg) => sum + getMessageTokenCount(msg), 0);
+  // 与摘要预算既有的 1k token 预留一致，短前缀不因手动触发而无意义压缩。
+  if (compressCount < MIN_COMPRESS_COUNT &&
+    !(allowSmallPrefix && compressibleTokens >= 1000)) {
     return emptyPlan(startIndex, {
       ...diagnostics,
       compressCount,

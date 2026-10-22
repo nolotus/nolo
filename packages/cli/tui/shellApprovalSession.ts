@@ -1,6 +1,9 @@
 import type { ShellApprovalConfirmation, ShellApprovalSession } from "../client/originShellApprovalTransport";
 /** Serial modal ownership; aborts are scoped to the exact request, including queued requests. */
-export function createShellApprovalSession(confirm: ShellApprovalSession["confirm"]) {
+export function createShellApprovalSession(
+  confirm: ShellApprovalSession["confirm"],
+  isAutoConfirm: () => boolean = () => false,
+) {
   let generation = new AbortController();
   let ended = false;
   let tail: Promise<unknown> = Promise.resolve();
@@ -11,6 +14,9 @@ export function createShellApprovalSession(confirm: ShellApprovalSession["confir
       const combined = AbortSignal.any([signal, epoch.signal]);
       const result = tail.then(async () => {
         if (ended || combined.aborted || request.expiresAt <= Date.now()) return false;
+        // Read the live origin TUI state, never a child argument/env flag. IPC
+        // still validates the exact run/agent/device/workspace/command binding.
+        if (isAutoConfirm()) return true;
         const timeout = new AbortController();
         const timer = setTimeout(() => timeout.abort(), Math.max(0, request.expiresAt - Date.now()));
         const scoped = AbortSignal.any([combined, timeout.signal]);

@@ -145,6 +145,14 @@ export type AgentRuntimeToolCallInput = {
   runtimeContext?: Record<string, any> | null;
   /** Canonical effective tool surface for local execution enforcement. */
   runToolNames?: string[];
+  /**
+   * 调用来源（定档信号，见 docs/plans/2026-10-21-exa-3-0-sync.md §3/§10）。
+   *
+   * 宿主注入、模型不可见：由 toolCallTransaction 从 turn 输入推导
+   * （background → automation，runKind=subtask → agent，其余 → chat）。
+   * 没有这个字段的宿主/执行器一律按「无信号」处理，不要造默认值。
+   */
+  origin?: "chat" | "agent" | "automation";
 };
 
 export type AgentRuntimeToolResult = {
@@ -219,6 +227,7 @@ export type AgentRuntimeDialogSummary = {
    * 字段存在但值畸形（null / 非数字）同样判无效（键存在即透传，读取层不静默丢弃）。
    */
   schemaVersion?: unknown;
+  referenceKeys?: string[];
 };
 
 /**
@@ -301,6 +310,7 @@ export type AgentRuntimeHostAdapter = {
     sourceHash?: string;
     sourceCount?: number;
     schemaVersion?: number;
+    referenceKeys?: string[];
   }): Promise<void>;
   /**
    * Optional: load last context token usage for local auto-compaction trigger.

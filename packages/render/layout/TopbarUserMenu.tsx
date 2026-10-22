@@ -6,18 +6,16 @@ import React, {
   useState,
   useMemo } from
 "react";
-import { useNavigate, useLocation } from "app/routing";
+import { useNavigate } from "app/routing";
 import { useTranslation } from "react-i18next";
 import {
-  LuSettings,
   LuUser,
   LuPlus,
   LuLogOut,
   LuLogIn,
   LuDownload,
   LuChartColumnBig,
-  LuUserPlus,
-  LuShare2 } from
+  LuUserPlus } from
 "react-icons/lu";
 import {
   DialogTrigger,
@@ -27,7 +25,6 @@ import {
 
 import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
 import { useAccountProfileRefresh } from "app/hooks/useAccountProfileRefresh";
-import { SettingRoutePaths } from "app/settings/config";
 import { useCurrentUser, useUserId, useAccounts, useIsLoggedIn } from "identity";
 import { cloudLazy } from "identity/cloudLazy";
 import { selectIdentityUserBalance } from "identity/selectors";
@@ -82,7 +79,6 @@ UserMenuItem.displayName = "UserMenuItem";
 const TopbarUserMenu: React.FC = () => {
   const { t } = useTranslation(["common", "chat"]);
   const navigate = useNavigate();
-  const location = useLocation();
   const dispatch = useAppDispatch();
   const accountSession = useAccountSessionService();
   const authUser = useCurrentUser();
@@ -150,12 +146,6 @@ const TopbarUserMenu: React.FC = () => {
     setMenuOpen(false);
     navigate("/life/usage");
   }, [navigate]);
-
-  const handleOpenSettings = useCallback(() => {
-    setMenuOpen(false);
-    navigate(SettingRoutePaths.SETTING, { state: { backgroundLocation: location } });
-  }, [navigate, location]);
-
 
   // 📝 配置项缓存。匿名（desktop 无 session）只保留登录入口与本地功能；
   // 桌面端隐藏纯云端增长项（邀请）。
@@ -283,20 +273,6 @@ const TopbarUserMenu: React.FC = () => {
                   icon={LuChartColumnBig}
                   text={t("usage_dashboard", "使用统计")}
                   onClick={handleOpenLifeUsage}
-                  onClose={() => setMenuOpen(false)}
-                />
-                {!isDesktopApp ? (
-                <UserMenuItem
-                  icon={LuShare2}
-                  text={t("space:myShares.title", "我的分享")}
-                  onClick={() => navigate("/life/shares")}
-                  onClose={() => setMenuOpen(false)}
-                />
-                ) : null}
-                <UserMenuItem
-                  icon={LuSettings}
-                  text={t("settings.title", "设置")}
-                  onClick={handleOpenSettings}
                   onClose={() => setMenuOpen(false)}
                 />
               </div>

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { createServer } from "node:http";
 import { logUploadAudit, validateUploadFiles } from "../uploadSecurity.mjs";
 

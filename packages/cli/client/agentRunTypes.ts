@@ -262,6 +262,7 @@ export type RunAgentTurnOptions = {
   output: OutputLike;
   runtimeMode?: AgentRuntimeRequestedMode;
   runtimeKey?: string;
+  dockerWorkspaceMode?: "git" | "empty";
   localRuntimeAdapter?: AgentRuntimeHostAdapter;
   localRuntimeAdapterFactory?: (
     env: EnvLike,
@@ -272,6 +273,7 @@ export type RunAgentTurnOptions = {
        * 注入式 factory 据此构造 docker workload 通道 / 对云后端 key fail-closed。
        */
       runtimeKey?: string;
+      dockerWorkspaceMode?: "git" | "empty";
     },
   ) => AgentRuntimeHostAdapter;
   localRuntimeCwd?: string;

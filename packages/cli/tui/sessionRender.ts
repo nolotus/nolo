@@ -26,6 +26,21 @@ function formatCwd(cwd: string) {
   return parts.pop() || cwd;
 }
 
+/**
+ * 按显示宽度截断文本，超出部分以 `…` 收尾（CJK / emoji 以 displayWidth 计）。
+ * 宽度不够放下 `x…` 时返回空串，让调用方整体让路而不是留下半个省略号。
+ */
+function truncateToWidth(text: string, maxWidth: number): string {
+  if (displayWidth(text) <= maxWidth) return text;
+  if (maxWidth < 2) return "";
+  let out = "";
+  for (const ch of text) {
+    if (displayWidth(`${out}${ch}…`) > maxWidth) break;
+    out += ch;
+  }
+  return out ? `${out}…` : "";
+}
+
 export function formatElapsedSeconds(totalSeconds: number): string {
   if (totalSeconds < 60) return `${totalSeconds}s`;
   const minutes = Math.floor(totalSeconds / 60);
@@ -36,7 +51,13 @@ export function formatElapsedSeconds(totalSeconds: number): string {
   return `${hours}h ${mins}m`;
 }
 
-/** Soft token chip for the composer status line (no powerline background). */
+/**
+ * Soft token chip (`context: 45% (45k/100k)`, no powerline background).
+ *
+ * 不再用于状态行（状态行只留 git / 积分 / ⏵ auto）：占用口径与详情由
+ * `/context` 面板的 renderTokenStatus 呈现，这里保留同一个 resolveContextUsage
+ * 口径的纯格式化函数，供面板/测试复用。
+ */
 export function renderComposerTokenChip(
   tokens: TurnTokenUsage | undefined,
   fallbackContextWindow?: number,
@@ -62,6 +83,40 @@ export function renderComposerTokenChip(
 }
 
 /**
+ * 状态行的上下文占用 chip，两档呈现（按**可用宽度**降级，不看占用率）：
+ *   宽：`ctx 42% · 84k/200k`
+ *   窄：`ctx 42%`
+ *
+ * 口径仍走 resolveContextUsage（与 `/context` 面板的令牌行同一处）：已用 =
+ * 下一轮上下文占用（provider input，未收到 usage 时用本地估算 + 轮内流式增量），
+ * **不含 output**。用量或窗口任一未知时给 `ctx —` 占位——不伪造 `0%`。
+ */
+function renderStatusContextSegment(
+  state: Pick<
+    TuiState,
+    | "turnTokens"
+    | "contextWindow"
+    | "estimatedContextTokens"
+    | "liveTurnEstimatedTokens"
+  >,
+  compact: boolean,
+): string {
+  const usage = resolveContextUsage({
+    tokens: state.turnTokens,
+    fallbackContextWindow: state.contextWindow,
+    estimatedContextTokens: state.estimatedContextTokens,
+    turnEstimatedTokens: state.liveTurnEstimatedTokens,
+  });
+  if (usage.used === undefined || usage.contextWindow === undefined) {
+    return "ctx —";
+  }
+  const pct = Math.min(100, usage.pct ?? 0);
+  const pctText = pct > 0 && pct < 10 ? pct.toFixed(1) : Math.round(pct).toString();
+  if (compact) return `ctx ${pctText}%`;
+  return `ctx ${pctText}% · ${formatTokenCount(usage.used)}/${formatTokenCount(usage.contextWindow)}`;
+}
+
+/**
  * 状态行展示的积分：续聊基数 + 本次会话累加。两者语义不相交，直接相加。
  * 都没有时返回 undefined（而不是 0），让调用方区分「没花过」与「不该显示」。
  */
@@ -81,6 +136,19 @@ export function resolveStatusLineCredits(
 }
 
 // ─── Status line ────────────────────────────────────────────────────────────
+
+/**
+ * 权限授权 chip：两桶独立，只列已授权的桶（两桶都授权时退化为 `⏵ auto`）。
+ * null = 两桶都在逐次询问，不渲染任何内容。
+ */
+export function renderPermissionGrantChip(state: TuiState): string | null {
+  const local = state.permissionGrants?.local === true;
+  const remote = state.permissionGrants?.remote === true;
+  if (local && remote) return "⏵ auto";
+  if (local) return "⏵ local";
+  if (remote) return "⏵ remote";
+  return null;
+}
 
 export function renderStatusLine(
   state: TuiState,
@@ -125,6 +193,10 @@ export function renderStatusLine(
     parts.push(`${branchText}${modifiedText}${untrackedText}`);
   }
 
+  // CI / 部署状态不再上状态行：远端轮询结果仍写进 state（诊断用），但状态行
+  // 只留本机可动作、一眼可判的事实（分支 + 脏 + 积分 + ⏵ auto），否则一旦远端
+  // 不可达就是一块噪声，还挤占真正需要看的窄宽预算。
+
   // 状态行的积分 = 续聊基数（服务端历史累计）+ 本次会话本地累加。
   //
   // 不再用 `apiSource === "platform"` 当显示开关：那是启动/切换时按静态 agent
@@ -133,69 +205,144 @@ export function renderStatusLine(
   // credits 只在 billing_unit === "credits" 时才累加，自有 API / 订阅制天然为
   // 0，不显示，这正是「走平台才计积分」想要的判据本身。
   //
-  // 积分是**独立 chip**，不再拼接进 context 芯片尾部：宽度降级时两者解耦，
-  // context 段可以先让路，积分 chip 撑到只剩必保段才丢（用户盯的就是它）。
+  // context 占用恢复上状态行，但**按可用宽度自适应**：宽终端给
+  // `ctx 42% · 84k/200k`，窄终端只留 `ctx 42%`，再窄则整体让路。
+  // 它每秒都在动，所以是第一个降级/让路的可选段；口径仍与 `/context` 面板
+  // 共用 resolveContextUsage，不在这里另造估算。
+  const contextFull = renderStatusContextSegment(state, false);
+  const contextCompact = renderStatusContextSegment(state, true);
+  let contextPart = themeText(contextFull, "muted", colorEnabled);
+  parts.push(contextPart);
+
   const credits = resolveStatusLineCredits(state);
-  const tokenSegment = themeText(
-    renderComposerTokenChip(
-      state.turnTokens,
-      state.contextWindow,
-      state.estimatedContextTokens,
-      state.liveTurnEstimatedTokens,
-    ),
-    "muted",
-    colorEnabled,
-  );
   const creditsSegment =
     credits !== undefined && credits > 0
       ? themeText(formatCreditsChip(credits), "muted", colorEnabled)
       : "";
-  parts.push(tokenSegment);
   if (creditsSegment) parts.push(creditsSegment);
 
   // 后台进程计数（`⚙ N procs`）已搬到 composer 上方的固定运行区，与子 agent
   // 运行行同处一列：状态行这里只留「终态通知待消费」的 chip（语义不同，见下）。
 
-  // 终态通知 chip：还有几条后台任务终态没被下一个 turn 消费。通知一旦注入
-  // turn 上下文即清空，chip 归零——它只是「agent 即将知晓」的待办指示，不是
-  // 常驻统计（终态详情在通知行和 /procs 里）。必保字段，不参与宽度降级。
+  // 终态通知 chip：`↪ N pending` = 还有几条**后台进程终态通知待交给 Agent**
+  // （下一个真实 turn 组成时注入，注入即清空，chip 归零）。它读作「待投递给
+  // agent 的输入」，不是用户的待办，也不含子 agent / run 的完成通知（那是运行
+  // 区的事）。因此不用 `⚙`：运行区里 `⚙` 专指「仍在跑的 run」，同屏两个 `⚙`
+  // 会让「还在跑」和「已经结束、等着告诉 agent」混成一句话。必保字段，不参与
+  // 宽度降级（终态详情在通知行和 /procs 里）。
   // 注：processRegistry 的 taskId 与运行区的 runId 语义不同，无需互相去重。
   const pendingProcessCount = state.pendingProcessNotices?.length ?? 0;
   if (pendingProcessCount > 0) {
-    parts.push(themeText(`⚙ ${pendingProcessCount} finished`, "info", colorEnabled));
+    parts.push(themeText(`↪ ${pendingProcessCount} pending`, "info", colorEnabled));
   }
 
-  // 会话级权限自动化标识：仅在 /auto on 时出现，提示用户确认弹窗已被跳过
-  // （破坏性 shell / 外部文件访问不再逐次询问）。warning 色与 git 分支 chip
-  // 同语义——"需要留意的状态"。off / undefined 时不渲染任何内容。
-  if (state.autoConfirm === true) {
-    parts.push(themeText("⏵ auto", "warning", colorEnabled));
+  // 权限授权标识：按桶显示（见 renderPermissionGrantChip）。warning 色与 git
+  // 分支 chip 同语义——"需要留意的状态"。两桶都未授权时不渲染任何内容。
+  const grantChip = renderPermissionGrantChip(state);
+  if (grantChip) {
+    parts.push(themeText(grantChip, "warning", colorEnabled));
   }
 
+  // Chip fill + one space of padding per side. The padding is part of the
+  // rendered width, so every budget below has to count it — but only when the
+  // wash is actually painted. ANSI-16 / terminal-native terminals get no fill
+  // and therefore no padding; charging 2 columns there made a 1-column budget
+  // emit two blank columns (and stole width from the real segments).
+  let surface = colorEnabled ? surfaceBackgroundSequence() : "";
+  let padWidth = surface ? 2 : 0;
+  if (maxWidth && maxWidth > 0 && maxWidth <= padWidth) {
+    // A chip that cannot afford its own two pad columns does not fit at all.
+    surface = "";
+    padWidth = 0;
+  }
+
+  let agentPart = agentSegment;
+  let creditsPart = creditsSegment;
   let visibleParts = parts;
   if (maxWidth && maxWidth > 0) {
-    const widthOf = (segments: string[]) => displayWidth(stripAnsi(segments.join(" · "))) + 2;
+    const widthOf = (segments: string[]) =>
+      displayWidth(stripAnsi(segments.join(" · "))) + padWidth;
     // 可让路段的丢弃顺序（挤宽度时从先到后）：
-    //   cwd（终端标题/上下文已有）→ agent 名（默认档可省）→ context chip →
-    //   积分 chip（最后才丢——用户盯的就是它，且它是「花了多少钱」的唯一
-    //   可见口径）。
+    //   cwd（终端标题/上下文已有）→ agent 名（默认档可省）→
+    //   context chip（每秒都在动，先降级为百分比再整体让路）→
+    //   积分 chip（只压缩文案，不整体丢弃；再窄退成 `⚡…`——显式承认金额
+    //   细节被省略，而不是裸留 `⚡` 冒充「金额还看得见」）。
     // 后台进程计数已不在状态行（搬到 composer 上方的运行区），所以这里没有它。
-    // git 脏 / ⏵ auto 是必保状态，任何宽度都不让。
-    for (const optional of [cwdSegment, agentSegment, tokenSegment, creditsSegment]) {
-      if (!optional) continue;
-      if (widthOf(visibleParts) <= maxWidth) break;
-      visibleParts = visibleParts.filter((part) => part !== optional);
+    // git 脏 / ⏵ auto / 待消费通知是必保状态，任何宽度都不让。
+    //
+    // context 的降级只看实际可用宽度，不看占用率：宽时 `ctx 42% · 84k/200k`，
+    // 放不下就先退成 `ctx 42%`，仍放不下才按上面的顺序整体丢弃。
+    if (contextFull !== contextCompact && widthOf(visibleParts) > maxWidth) {
+      const contextIndex = visibleParts.indexOf(contextPart);
+      if (contextIndex >= 0) {
+        contextPart = themeText(contextCompact, "muted", colorEnabled);
+        visibleParts = visibleParts.with(contextIndex, contextPart);
+      }
     }
+    // cwd 最先让路（终端标题/上下文已有），agent 名先尝试缩写，context 最后整体让路。
+    if (widthOf(visibleParts) > maxWidth) {
+      visibleParts = visibleParts.filter((part) => part !== cwdSegment);
+    }
+    // agent 名按 cwd 让出后的剩余可用宽度缩写（保留 ✦ 与模式后缀）。
+    if (widthOf(visibleParts) > maxWidth) {
+      const agentIndex = visibleParts.indexOf(agentPart);
+      if (agentIndex >= 0) {
+        const othersWidth = widthOf(visibleParts.filter((part) => part !== agentPart));
+        const nameBudget =
+          maxWidth - othersWidth - 3 - displayWidth("✦ ") - displayWidth(modeSuffix);
+        const shortName = truncateToWidth(state.agentName, nameBudget);
+        if (shortName) {
+          agentPart = themeText(`✦ ${shortName}${modeSuffix}`, "accent", colorEnabled);
+          visibleParts = visibleParts.with(agentIndex, agentPart);
+        }
+      }
+    }
+    if (widthOf(visibleParts) > maxWidth) {
+      visibleParts = visibleParts.filter((part) => part !== agentPart);
+    }
+    if (widthOf(visibleParts) > maxWidth) {
+      visibleParts = visibleParts.filter((part) => part !== contextPart);
+    }
+    // 积分文案精简（`⚡ 1.50 积分` → `⚡1.50`），不整段隐藏；连紧凑金额都放不下时
+    // 交给下面的 emergency 投影用 `⚡…` 明说「金额被省略」。
+    if (widthOf(visibleParts) > maxWidth && creditsPart) {
+      const creditsIndex = visibleParts.indexOf(creditsPart);
+      if (creditsIndex >= 0) {
+        creditsPart = themeText(
+          formatCreditsChip(credits ?? 0, { compact: true }),
+          "muted",
+          colorEnabled,
+        );
+        visibleParts = visibleParts.with(creditsIndex, creditsPart);
+      }
+    }
+    // 长分支先缩写到剩余宽度，再退成 `⑂` + 脏数——尽量保留分支名本身。
     if (widthOf(visibleParts) > maxWidth && state.gitStatus) {
       const gitIndex = visibleParts.findIndex((part) => stripAnsi(part).startsWith("⑂ "));
       if (gitIndex >= 0) {
-        const { modified, untracked } = state.gitStatus;
-        const compactDirty = themeText(
-          `⑂${modified > 0 ? ` *${modified}` : ""}${untracked > 0 ? ` ?${untracked}` : ""}`,
-          "warning",
-          colorEnabled,
+        const { branch, modified, untracked } = state.gitStatus;
+        const dirtyText =
+          `${modified > 0 ? ` *${modified}` : ""}${untracked > 0 ? ` ?${untracked}` : ""}`;
+        const othersWidth = widthOf(
+          visibleParts.filter((part) => part !== visibleParts[gitIndex]),
         );
-        visibleParts = visibleParts.with(gitIndex, compactDirty);
+        const branchBudget =
+          maxWidth - othersWidth - 3 - displayWidth("⑂ ") - displayWidth(dirtyText);
+        const shortBranch = truncateToWidth(branch, branchBudget);
+        if (shortBranch) {
+          const branchText = themeText(`⑂ ${shortBranch}`, "warning", colorEnabled);
+          const modifiedText =
+            modified > 0 ? ` ${themeText(`*${modified}`, "danger", colorEnabled)}` : "";
+          const untrackedText =
+            untracked > 0 ? ` ${themeText(`?${untracked}`, "muted", colorEnabled)}` : "";
+          visibleParts = visibleParts.with(
+            gitIndex,
+            `${branchText}${modifiedText}${untrackedText}`,
+          );
+        } else {
+          const compactDirty = themeText(`⑂${dirtyText}`, "warning", colorEnabled);
+          visibleParts = visibleParts.with(gitIndex, compactDirty);
+        }
       }
     }
     if (widthOf(visibleParts) > maxWidth) {
@@ -206,27 +353,111 @@ export function renderStatusLine(
       // each " · " costs 3 columns and would push the line past ultra-narrow
       // budgets, letting terminal end-clipping eat the trailing (required)
       // dirty/auto fields first.
-      const emergency: string[] = [];
-      if (state.autoConfirm === true) {
-        emergency.push(themeText("⏵", "warning", colorEnabled));
-      }
-      if (state.gitStatus) {
-        const { modified, untracked } = state.gitStatus;
-        emergency.push(themeText(
-          `⑂${modified > 0 ? `*${modified}` : ""}${untracked > 0 ? `?${untracked}` : ""}`,
-          "warning",
-          colorEnabled,
-        ));
-      }
-      // 积分是用户盯的唯一「花了多少」口径，极限窄宽也以紧凑形式保留。
-      if (creditsSegment) {
-        emergency.push(themeText(formatCreditsChip(credits ?? 0, { compact: true }), "muted", colorEnabled));
-      }
-      visibleParts = [emergency.join(" ")];
+      //
+      // The projection itself is staged because a joined mega-string can still
+      // overflow (many fields, large counts, CJK agent/branch names) and
+      // terminal end-clipping would silently eat whichever field is last. Keep
+      // the two facts the line exists for — auto-permission state and the
+      // billing counter — ahead of notice/git detail, and stop at the first
+      // stage that fits the *real* budget (surface padding included):
+      //   counts → existence markers (`⑂*?` / `↪`) → drop git → drop notice →
+      //   compact credits → `⚡…` (fee present, amount omitted) → explicit
+      //   unified overflow (`⏵…` / `…`) when even that cannot fit.
+      // Bare `⚡` is never a stage: an icon is not a number, and dropping the fee
+      // silently would read as "this turn cost nothing".
+      const budget = maxWidth - padWidth;
+      const autoMark = renderPermissionGrantChip(state)
+        ? themeText("⏵", "warning", colorEnabled)
+        : "";
+      const gitCounts = state.gitStatus
+        ? themeText(
+            `⑂${
+              state.gitStatus.modified > 0 ? `*${state.gitStatus.modified}` : ""
+            }${
+              state.gitStatus.untracked > 0 ? `?${state.gitStatus.untracked}` : ""
+            }`,
+            "warning",
+            colorEnabled,
+          )
+        : "";
+      // Existence-only marker: the dirty *state* survives even when its counts
+      // no longer fit. Never rendered as `*0` / `?0` — that would fabricate a
+      // "clean" reading instead of admitting the detail was dropped.
+      const gitMark = state.gitStatus
+        ? themeText(
+            `⑂${state.gitStatus.modified > 0 ? "*" : ""}${
+              state.gitStatus.untracked > 0 ? "?" : ""
+            }`,
+            "warning",
+            colorEnabled,
+          )
+        : "";
+      // 待交给 Agent 的进程终态通知只压文案（`↪ 2 pending` → `↪2`），语义不能消失。
+      const noticeFull =
+        pendingProcessCount > 0
+          ? themeText(`↪${pendingProcessCount}`, "info", colorEnabled)
+          : "";
+      const noticeMark =
+        pendingProcessCount > 0
+          ? themeText("↪", "info", colorEnabled)
+          : "";
+      // 积分是用户盯的「花了多少」口径，但极限窄宽装不下金额时不能拿图标冒充
+      // 金额：退成 `⚡…`，用省略号明确承认「有费用、金额细节已省略」。
+      const creditsFull = creditsSegment
+        ? themeText(
+            formatCreditsChip(credits ?? 0, { compact: true }),
+            "muted",
+            colorEnabled,
+          )
+        : "";
+      const creditsMark = creditsSegment
+        ? themeText("⚡…", "muted", colorEnabled)
+        : "";
+      const stages = [
+        [autoMark, gitCounts, noticeFull, creditsFull],
+        [autoMark, gitMark, noticeFull, creditsFull],
+        [autoMark, gitMark, noticeMark, creditsFull],
+        [autoMark, noticeMark, creditsFull],
+        [autoMark, creditsFull],
+        [autoMark, creditsMark],
+        // `autoMark` alone is only an honest projection when nothing was omitted.
+        // With a fee on the line, dropping it silently would claim "no cost".
+        ...(creditsSegment ? [] : [[autoMark]]),
+      ]
+        .map((stage) => stage.filter(Boolean))
+        .filter((stage) => stage.length > 0);
+      const fitted = stages.find(
+        (stage) => displayWidth(stripAnsi(stage.join(" "))) <= budget,
+      );
+      // Physically too narrow for even the markers: state the overflow instead
+      // of claiming every field is visible. Keep `⏵` glued to `…` when the real
+      // budget allows it (2 columns), otherwise a bare `…` — both are explicit
+      // "something is omitted", never a silent drop of the fee.
+      const autoWidth = displayWidth(stripAnsi(autoMark));
+      const overflowMark =
+        autoMark && autoWidth + displayWidth("…") <= budget
+          ? `${autoMark}…`
+          : budget >= 1
+            ? "…"
+            : "";
+      visibleParts = fitted ? [fitted.join(" ")] : [overflowMark];
     }
   }
-  const body = visibleParts.join(sep);
-  const surface = colorEnabled ? surfaceBackgroundSequence() : "";
+  let body = visibleParts.join(sep);
+  if (maxWidth && maxWidth > 0) {
+    // Final guarantee: neither the normal line nor the emergency projection may
+    // exceed the budget the terminal actually gives us. This last resort is
+    // plain text (stripAnsi first) so a themed segment is never cut mid-escape.
+    const budget = Math.max(0, maxWidth - padWidth);
+    if (displayWidth(stripAnsi(body)) > budget) {
+      body =
+        budget >= 2
+          ? truncateToWidth(stripAnsi(body), budget)
+          : budget >= 1
+            ? "…"
+            : "";
+    }
+  }
   if (!surface) return body;
 
   // A surface wash plus one space of padding turns the run of segments into a
@@ -515,8 +746,8 @@ export function renderContextPanel(
     field(labels[0], `${state.agentName} (${state.agentKey})`),
     field(
       labels[1],
-      // 与状态栏 chip 同一口径（resolveContextUsage）：还没收到 provider usage
-      // 时给本地估算 + 剩余，而不是三个破折号。
+      // 与状态行 renderComposerTokenChip 同一口径（resolveContextUsage）：还没收到
+      // provider usage 时给本地估算 + 剩余，而不是三个破折号。
       renderTokenStatus(state.turnTokens, {
         contextWindow: state.contextWindow,
         estimatedContextTokens: state.estimatedContextTokens,

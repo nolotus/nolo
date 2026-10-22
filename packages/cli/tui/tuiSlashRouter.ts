@@ -34,6 +34,7 @@ import { compactDialog } from "../client/compactDialog";
 import {
   saveProfileLocale,
 } from "../client/profileConfig";
+import { persistPermissionGrantChanges } from "./permissionGrantPersist";
 import { setMathRenderingEnabled } from "../client/mathText";
 import { readPipeText, spawnProcess } from "../processSpawn";
 import {
@@ -91,6 +92,7 @@ export interface SlashDispatchHost {
   readonly fetchImpl: typeof fetch;
   readonly turnCtx: AgentTurnContext;
 
+  readonly revokeRemoteShellGrants?: () => void;
   readonly emitCommandOutput: (text: string, command?: string) => void;
   readonly renderHistoryToOutput: () => void;
   readonly scheduleRender: () => void;
@@ -192,6 +194,14 @@ export async function runSubmittedSlashLine(
   const previousState = host.state;
   const previousAgentKey = host.state.agentKey;
   host.state = result.nextState;
+  // `/auto …` 写盘（空闲路径）：只写真正翻转的桶，失败只提示——本会话的授权
+  // 已经生效，持久化是尽力而为。busy 路径用同一个 helper。
+  if (previousState.permissionGrants?.remote === true && host.state.permissionGrants?.remote !== true) {
+    host.revokeRemoteShellGrants?.();
+  }
+  if (!persistPermissionGrantChanges(previousState.permissionGrants, host.state.permissionGrants)) {
+    emitCommandOutput(t("autoPersistFailed"));
+  }
   const command = line.trim().split(/\s+/)[0];
   if ((command === "/agent" || command === "/switch") && result.nextState !== previousState) {
     // Successful explicit selection may refresh the same agent's model.

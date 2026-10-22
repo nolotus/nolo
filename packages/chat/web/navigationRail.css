@@ -1,0 +1,424 @@
+/* Navigation V2 pilot: desktop rail (left of the context column) and a compact
+   horizontal rail inside the existing mobile drawer.
+   This stylesheet MUST be imported by the component that renders these classes
+   (NavigationRail.tsx) — without the import the whole shell stays unstyled and
+   the Rail degrades into a plain block above the context. */
+
+.navigation-v2-shell {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+/* 列高查询容器（矮列降级的**唯一**驱动源）。
+   元素不能查询自己，所以 Context 列自己的降级规则（--fixed 的 overflow）必须由父级判定；
+   而这个父级必须**恒等于列高**。不能拿 shell 当判据：移动端 shell 顶上还有一条横向 Rail
+   （@media max-width: 768px 把 shell 变成 column-flex，Rail 是 flex: 0 0 auto），shell 比
+   列高，于是存在「列 ≤460px < shell 高」的区间 —— 按 shell 判定时控件已降级成 static、内容
+   区已退出有限高度链，--fixed 列却仍 overflow: hidden，超出列底的内容滚轮滚不到（复审
+   Chromium 复现：viewport 800 / shell 480 / Rail 40 / 列 440 / 控件 130 / scrollHeight 1130
+   → 列 position: static、overflow-y: hidden，375px 宽下滚轮滚 1000px 后 scrollTop 仍为 0）。
+   所以给列加一层只包着它的槽：槽在 shell 里是 flex: 1，列在槽里是 flex: 1（StyleX 的
+   chatSidebar 已经给列声明了 height: 100%），槽高与列高恒等 → 槽的 @container 高度就是列高。
+   三条降级规则全部写进同一个 @container 块，靠「同一容器 + 同一阈值」保证同时命中。 */
+.navigation-v2-context-slot {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  container-type: size;
+  container-name: navigation-v2-context-slot;
+}
+
+.navigation-v2-context {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.navigation-v2-context--fixed {
+  overflow: hidden;
+}
+
+/* The scope picker, view switch and type filter are controls, not list rows.
+   Space 分支的 Context 列本身是滚动容器（该分支不带 --fixed），控件区用 sticky 吸顶：
+   列滚动时它始终停在列的顶部，下面的引导条 / 跨对话任务入口 / 置顶块 / 列表照常从它
+   下方滚过，控件永远可见。Home 分支的列是 --fixed（overflow: hidden、没有滚动容器），
+   sticky 在那里没有可吸附的滚动祖先，仍按普通文档流停在列顶，行为与改动前一致。 */
+.navigation-v2-context-controls {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+  min-width: 0;
+  background: var(--backgroundSecondary, var(--background));
+}
+/* Space 分支（列不带 --fixed）的列表区**不在本文件里定义**：它必须由 StyleX props 落地
+   （sidebarStyles.scrollArea + sidebarStyles.scrollAreaFlow，见 ChatSidebar 的渲染处）。
+   原因（真实 Chromium + CDP 实测，不是推测）：StyleX 原子类的选择器带 :not(#\#) 提权，
+   特异性是 (a=2,b=1)；本文件里任何形如 `.navigation-v2-context > .ChatSidebar__scroll-area`
+   的普通 class 规则只有 (a=0,b=1)，即使选择器写得更长、即使不带 !important，也会稳定输给
+   原子类 —— 规则存在但永远不生效。本 PR 早先版本就在这里写过这样的规则，实测结果是列表区
+   始终吃 StyleX 的 flex:1 1 0% + overflow-y:auto：它在列内又开了一个滚动区，指针落在列表上
+   时滚轮被 overscroll-behavior:contain 拦住、拖拽边缘也会选错滚动宿主。
+   规则：作用在带 StyleX 类的元素上、又要改 StyleX 已声明属性的样式，一律写进 StyleX。
+   navigationContextStationary.source.test.ts 会拦住任何重新加回来的这类规则。 */
+.navigation-v2-context-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+/* 撑满分支（Home → 工作 → 类型筛选为非「全部/对话」且作用域为全部 → AllViewSidebar）：
+   AllViewSidebar 靠 flex:1 + min-height:0 从父级拿有限高度，父级必须是 column-flex。
+   这里把本容器补回 flex 容器，并把自身的 overflow-y:auto 收成 hidden —— 滚动只由
+   AllViewSidebar 内部的 scrollArea 提供，避免出现双滚动条。 */
+.navigation-v2-context-content--fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 矮列降级：控件区 flex:0 0 auto、没有高度上限，正常视口下实测约 130px（空间选择器 +
+   工作/项目切换 + 数据类型筛选），并且 sticky 恒吸顶。列矮到与控件同高或更矮时，列里给内容
+   剩下的高度会被压到 0：sticky 控件把可视区整块占满，列表即使随列滚动也永远在控件后面
+   （Chromium hit-test：列 100px / 控件 130px → 滚动后控件仍 top:0 高 130px，列内所有点都
+   命中控件）。Home 的 --fixed 列更差：overflow: hidden + 内容区 min-height: 0，剩余可见高度
+   可以归零。
+
+   判定依据必须是 **Context 列的实际可用高度**，不能用 viewport 高度：列会被外层布局压矮
+   （桌面小窗 / 侧栏面板 / 移动抽屉里顶部横向 Rail 还要先占掉一条）。viewport 高于阈值而列
+   本身矮于控件时，viewport 判据不命中，sticky 控件照样占满列、内容照样不可达。判定容器是
+   .navigation-v2-context-slot（列的直接父级、与列恒等高，见文件顶部注释）：元素不能查询
+   自己，所以列自己的那条规则也只能由它判。
+
+   阈值依据（列内高度，不是 viewport）：控件 ~130px + 引导条 / 跨对话任务入口 / 置顶块
+   ~200px ≈ 330px，是「控件照常吸顶、列表仍能露出」的最小占用；再留 ~130px 给列表（约 4 行
+   32px 行高）→ 460px。低于 460px 继续 sticky 只会把内容挤进死角，所以整条降级为普通文档流：
+   - 控件取消 sticky（position: static）→ 它随列一起滚走，不再永久盖住列顶。
+     **取舍：降级后控件不再持续吸顶可见**（滚过列顶就看不到了），换来的是内容可达 ——
+     两者不可兼得，矮列里优先保证内容能滚到。
+   - 列自己滚：--fixed 分支的 overflow: hidden 放回 auto（长写 overflow-y；overflow-x: hidden
+     保持不变，与基础规则同特异性 0,1,0，靠本块在文件中的更晚位置取胜）。
+   - 内容区改成按内容定高（含 --fill），避免 flex:1 + min-height:0 在矮列里又被压成 0。
+   三条规则必须**同块同阈值**：只降级其中一部分时，内容已经退出有限高度链、容器却仍
+   overflow: hidden，超出列底的内容谁也滚不到（就是 MEDIUM-A 那个 repro）。评审口径是
+   「要么都命中、要么都不命中」，所以这里只有一个 @container 块，且查询容器就是列高本身。
+   注意：本块只写普通 CSS 能生效的属性（这些元素没有对应的 StyleX 原子类），且不得出现
+   任何指向 .ChatSidebar__scroll-area 的规则（那条路径的特异性打不过原子类，写就是死代码）。 */
+@container navigation-v2-context-slot (max-height: 460px) {
+  .navigation-v2-context-controls {
+    position: static;
+  }
+  .navigation-v2-context-content,
+  .navigation-v2-context-content--fill {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  .navigation-v2-context--fixed {
+    overflow-y: auto;
+  }
+}
+
+/* --- Rail -------------------------------------------------------------- */
+
+.navigation-v2-rail {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  z-index: 1;
+  /* 44px 是「外框」宽度：折叠时 aside 就是 44px，padding 必须算在这 44px 内，
+     否则按钮会被裁切。 */
+  box-sizing: border-box;
+  width: 44px;
+  flex: 0 0 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px;
+  /* 折叠态只有 44px 高、图标又固定在 36px，快捷图标一多就会把底部的账号/设置/
+     通知顶出可视区。让 Rail 自己在纵向滚动，页脚用 sticky 留在底部（见
+     .navigation-v2-rail__footer），滚动条隐藏以免 44px 里多出一条竖条。 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  border-right: 0;
+  background: color-mix(in srgb, var(--backgroundSecondary, var(--background)) 72%, var(--background) 28%);
+}
+
+.navigation-v2-rail::-webkit-scrollbar { display: none; }
+
+.navigation-v2-rail__item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.navigation-v2-rail__item:hover {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.12));
+}
+
+/* Selected state is not colour-only: a ring around the item plus a separate
+   indicator bar, so the current destination is recognisable without relying
+   on any colour difference. */
+.navigation-v2-rail__item[aria-current="page"],
+.navigation-v2-rail__item[data-active="true"] {
+  background: var(--primaryGhost, rgba(127, 127, 127, 0.12));
+  box-shadow: none;
+  color: var(--primary, currentColor);
+}
+
+.navigation-v2-rail__item[aria-current="page"]::before,
+.navigation-v2-rail__item[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--primary, currentColor);
+}
+
+.navigation-v2-rail__item:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 2px;
+}
+
+/* --- Home view switcher (Work / Projects) ------------------------------ */
+
+.navigation-v2-home-views {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+}
+
+.navigation-v2-home-views__item {
+  flex: 1;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* aria-pressed carries the state; weight + border make it visible without colour. */
+.navigation-v2-home-views__item[aria-pressed="true"] {
+  font-weight: 600;
+  border-color: var(--borderSubtle, rgba(127, 127, 127, 0.24));
+  background: var(--primaryGhost, rgba(127, 127, 127, 0.12));
+}
+
+.navigation-v2-home-views__item:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 1px;
+}
+
+/* Active Project filter chip: same visual language as the view switcher, so the
+   Home column keeps one coherent level of chrome above the single content region. */
+.navigation-v2-home-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  max-width: calc(100% - 16px);
+  margin: 4px 8px 0;
+  padding: 4px 10px;
+  border: 1px solid var(--borderSubtle, rgba(127, 127, 127, 0.24));
+  border-radius: 999px;
+  background: var(--primaryGhost, rgba(127, 127, 127, 0.1));
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.navigation-v2-home-scope:hover {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.16));
+}
+
+.navigation-v2-home-scope:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 2px;
+}
+
+/* --- Context note ------------------------------------------------------ */
+
+.navigation-v2-context-note {
+  margin: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--textSecondary, inherit);
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.08));
+}
+
+/* --- Mobile: reuse the existing drawer, rail becomes a top row ---------- */
+
+@media (max-width: 768px) {
+  .navigation-v2-shell {
+    flex-direction: column;
+  }
+
+  .navigation-v2-rail {
+    position: static;
+    box-sizing: border-box;
+    width: 100%;
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 4px 8px;
+    border-right: 0;
+    border-bottom: 0;
+    /* 移动端 Rail 是横向换行条，不需要纵向滚动；overflow: visible 同时避免裁掉
+       激活态下划线（bottom: -4px）。 */
+    overflow: visible;
+    background: var(--surfaceInteractive, rgba(127,127,127,0.035));
+  }
+
+  .navigation-v2-rail__item[aria-current="page"]::before,
+  .navigation-v2-rail__item[data-active="true"]::before {
+    left: 50%;
+    top: auto;
+    bottom: -4px;
+    transform: translateX(-50%);
+    width: 20px;
+    height: 3px;
+  }
+}
+
+/* The Rail footer has its own compact layout. Existing menu/notification
+   behavior remains inside SidebarUserSection; no duplicate control trees. */
+.navigation-v2-rail { align-self: stretch; min-height: 0; }
+.navigation-v2-rail__footer { margin-top: auto; width: 100%; min-width: 0;
+  /* 页脚必须始终可见：flex: none 禁止它被压缩，sticky bottom 让它在 Rail 滚动时
+     贴住可视底边（普通流里的页脚会被滚走）。底色与 Rail 相同，滚动到下面的
+     图标不会从页脚后面透出来。 */
+  flex: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--backgroundSecondary, var(--background)) 72%, var(--background) 28%);
+}
+.navigation-v2-rail-account {
+  padding: 8px 2px !important;
+  min-width: 0;
+  border-top: 0 !important;
+}
+.navigation-v2-rail-account__row {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 10px;
+}
+.navigation-v2-rail-account__profile {
+  flex: none !important;
+  width: 36px;
+  justify-content: center;
+  margin: 0;
+}
+.navigation-v2-rail-account__profile button {
+  flex: none;
+  width: 36px;
+  min-height: 36px;
+  margin: 0;
+  padding: 4px;
+  justify-content: center;
+}
+.navigation-v2-rail-account__username,
+.navigation-v2-rail-account__chevron {
+  display: none !important;
+}
+.navigation-v2-rail-account__actions {
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.navigation-v2-rail-account__actions button {
+  min-width: 36px;
+  min-height: 36px;
+}
+@media (max-width: 768px) {
+  .navigation-v2-rail { flex-wrap: wrap; }
+  .navigation-v2-rail__footer { margin-top: 0; margin-left: 0; width: 100%; position: static; }
+  .navigation-v2-rail-account { padding: 0 !important; }
+  .navigation-v2-rail-account__row { flex-direction: row-reverse; justify-content: flex-end; gap: 4px; }
+  .navigation-v2-rail-account__profile { width: 36px; }
+  .navigation-v2-rail-account__actions { flex-direction: row; gap: 2px; flex-wrap: wrap; }
+  .navigation-v2-rail-account__actions button { min-width: 32px; min-height: 32px; }
+}
+
+/* Explore categories: vertical list with a selected surface, no hard separators. */
+.navigation-v2-explore-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 16px 10px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+.navigation-v2-explore-category {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+.navigation-v2-explore-category:hover {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.09));
+}
+.navigation-v2-explore-category[data-active="true"] {
+  background: var(--primaryGhost, rgba(127, 127, 127, 0.14));
+  color: var(--primary, inherit);
+  font-weight: 600;
+}
+.navigation-v2-explore-category:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 1px;
+}
+
+/* Narrow screens: the category list scrolls horizontally instead of overflowing. */
+@media (max-width: 768px) {
+  .navigation-v2-explore-categories {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .navigation-v2-explore-categories::-webkit-scrollbar { display: none; }
+  .navigation-v2-explore-category {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 8px 10px;
+  }
+}
+
+@media (max-width: 768px) { .navigation-v2-rail { width: auto; flex-basis: auto; } }

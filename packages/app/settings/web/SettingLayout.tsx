@@ -24,7 +24,6 @@ interface BackgroundState {
 
 const SettingLayout: React.FC = () => {
   useSettingsStylesheet();
-
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();

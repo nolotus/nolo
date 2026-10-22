@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
   selectAutoApproveCredits,
-  updateSettingsState,
+  recordServerAuthorityEcho,
 } from "app/settings/settingSlice";
 import {
   MEDIA_ALLOWANCE_MAX,
@@ -63,9 +63,9 @@ const MediaAllowance: React.FC = () => {
         toast.error(result.error);
         return;
       }
-      dispatch(
-        updateSettingsState({ autoApproveCredits: result.autoApproveCredits }),
-      );
+      // 权威回显必须原子地写值并推进权威回显世代（专用 action）：
+      // hydrate 若在这次回显之后才返回，不得用 record 里的旧值覆盖它。
+      dispatch(recordServerAuthorityEcho(result.autoApproveCredits));
       toast.success(
         t("settings.mediaAllowance.saved", "媒体自动执行额度已更新"),
       );

@@ -12,8 +12,15 @@ import {
   getAgentSelectionAuditPath,
   getDefaultProfileConfigPath,
   readLastAgentSelectionAudit,
+  permissionGrantList,
   saveProfileAgentSelection,
+  type PermissionGrants,
 } from "../client/profileConfig";
+import {
+  createPermissionGrantEnabler,
+  createSnapshotGuardedApproval,
+  persistPermissionGrantChanges,
+} from "./permissionGrantPersist";
 import { createTuiAccountSessionRuntime } from "./accountSessionRuntime";
 import {
   checkForCliUpdate,
@@ -65,6 +72,7 @@ import {
 } from "./pasteFlow";
 import { writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
+import { fetchCiStatus, summarizeLatest } from "./ciStatus";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import {
   applyTuiInputKey,
@@ -108,7 +116,7 @@ import {
   startCiDeployEventStream,
 } from "./deployWake";
 import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
-import { createOriginShellGrant } from "../client/originShellGrant";
+import { createOriginShellGrant, type OriginShellGrant } from "../client/originShellGrant";
 import {
   buildProcessTaskCompletedTurnEvent,
   formatProcessTerminalNoticeLine,
@@ -230,7 +238,7 @@ import { createImageAttachmentCache } from "./tuiImageAttachments";
 import { createTuiImageRenderer } from "./tuiImageRenderer";
 import { randomInt } from "node:crypto";
 import { createScrollAnimator } from "./tuiScrollAnimation";
-import { resolveHistoryViewportHeight } from "./tuiLayout";
+import { resolveHistoryViewportHeight, resolveHistoryLayoutGeometry } from "./tuiLayout";
 // S5 迁移：runSubmittedLine 的 slash 命令 bus 分发（runSubmittedSlashLine /
 // SlashDispatchHost）已迁至 ./tuiSlashRouter。依赖方向单向：
 // 本文件 → tuiSlashRouter；后者禁止回指本文件。
@@ -622,6 +630,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     process.env.NODE_ENV !== "test" &&
     ((options.env ?? process.env).NOLO_CLI_NO_WELCOME_ANIM ?? "") !== "1";
   const bannerColumns = (output as { columns?: number }).columns;
+  const { contentWidth: bannerContentWidth, marginLeft: bannerMarginLeft } =
+    typeof bannerColumns === "number"
+      ? resolveHistoryLayoutGeometry(bannerColumns)
+      : { contentWidth: bannerColumns ?? 80, marginLeft: 0 };
+  const bannerLeftPad = bannerMarginLeft > 0 ? " ".repeat(bannerMarginLeft) : "";
   // 首帧字符串复用两次：写出 + 行数计算。避免把渲染逻辑（含主题/终端状态
   // 读取）执行两遍，导致首帧与行数计算不一致。宽度和 TTY 已知时逐行截断到
   // 列宽（与 repaintBanner 同一函数）：长 tip / version 行在窄终端物理换行
@@ -630,13 +643,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     state,
     0,
     welcomeAnimEnabled ? WELCOME_ANIM_MAX_FRAME : 0,
-    bannerColumns,
+    bannerContentWidth,
   );
   const initialWelcome =
     typeof bannerColumns === "number"
       ? rawWelcome
           .split("\n")
-          .map((line) => padOrTruncateToWidth(line, Math.max(1, bannerColumns)))
+          .map((line) =>
+            padOrTruncateToWidth(
+              `${bannerLeftPad}${line}`,
+              Math.max(1, bannerColumns),
+            ),
+          )
           .join("\n")
       : rawWelcome;
   output.write(initialWelcome);
@@ -653,6 +671,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   if (pinnedAgentNotice) {
     output.write(pinnedAgentNotice);
     initialBannerLineCount += pinnedAgentNotice.split("\n").length - 1;
+  }
+
+  // 持久配置里的授权桶：首屏只列已授权的桶（否则用户以为自己仍在逐次确认）。
+  // 故意写在 banner 块之后、且不计入 initialBannerLineCount——repaintBanner 只
+  // 重画 welcome + pinned notice，把它算进重绘行数却不重画，第一次重绘就会抹掉它。
+  const startupGrantKinds = permissionGrantList(state.permissionGrants);
+  if (startupGrantKinds.length > 0) {
+    output.write(
+      `${t(
+        "autoPersistedStartup",
+        startupGrantKinds
+          .map((kind) =>
+            kind === "local" ? t("autoKindLocal") : t("autoKindRemote"),
+          )
+          .join(" + "),
+      )}\n\n`,
+    );
   }
 
   let lastSentTitle: string | null = null;
@@ -753,9 +788,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // context block 注入 agent（tuiTurnRunner 消费后清空）。补发策略：注册时
   // 点不补发——本会话启动之前已终态的任务（上个会话遗留）不重新打扰；
   // 本会话内每次终态转变（markExited / kill）由 registry 保证至多发射一次。
-  // 渲染：状态栏在 ⚙ running chip 旁追加 "⚙ N finished"（见 renderStatusLine），
-  // 到达即 scheduleRender 刷新；非 TTY（readline/管道）路径没有状态行，
-  // 直接跳过（与 run 唤醒的 onWake 通道在非交互模式下的丢弃策略一致）。
+  // 渲染：状态栏 chip 文案为 "↪ N pending"（极限窄宽压成 "↪N"，语义不消失），
+  // 由 sessionRender 决定，到达即 scheduleRender 刷新；非 TTY（readline/管道）
+  // 路径没有状态行，直接跳过（与 run 唤醒的 onWake 通道在非交互模式下的
+  // 丢弃策略一致）。
+  //
+  // 通知行写入时带 ownerDialogId（来自 registry 记录，null = 非会话任务）：
+  // 注入侧据此区分「同对话 / 另一对话 / 归属未知」，不依赖额外的旁路映射。
   //
   // 有归属的任务（派发时 runtimeContext 里带 dialogId/turnId）额外走自动续跑：
   // 判定在 processTerminalResume.ts（归属匹配 / turn 活跃度 / 链深上限），投递
@@ -764,7 +803,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 投递体在交互区里覆盖式安装。
   const pushPendingProcessNotice = (notice: ProcessTerminalNotice): void => {
     if (sessionEnded) return;
-    const line = serializePendingProcessNotice(notice);
+    const ownerDialogId = getProcessRegistry().getByTaskId(notice.taskId)?.owner?.dialogId ?? null;
+    const line = serializePendingProcessNotice(notice, ownerDialogId);
     state = {
       ...state,
       pendingProcessNotices: [...(state.pendingProcessNotices ?? []), line],
@@ -935,6 +975,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     });
   };
 
+  // 部署状态：启动时异步取一次（只在交互式分支调用）。
+  // 与 gitStatus 不同，它不随 cwd 变化，所以不需要在 /cd 后重取。
+  // 失败静默：fetchCiStatus 已经保证不抛，这里再守一次 sessionEnded，
+  // 避免会话结束后仍用陈旧结果重绘。
+  const refreshCiStatus = (): void => {
+    if ((options.env?.NOLO_CLI_CI_STATUS ?? process.env.NOLO_CLI_CI_STATUS) === "0") return;
+    void fetchCiStatus().then((jobs) => {
+      if (sessionEnded) return;
+      const ciStatusLine = summarizeLatest(jobs);
+      if (!ciStatusLine) return;
+      state = { ...state, ciStatusLine };
+      scheduleRender();
+    });
+  };
+
   // 版本发布快（AI 辅助开发每次合入即发版）：启动时异步查一次 npm registry
   // 当前通道的最新版。检查永远不阻塞启动、失败静默（离线/超时/registry 抖动
   // 都当无更新），NOLO_CLI_NO_UPDATE_CHECK=1 可整体禁用。结果到达时若用户还
@@ -949,14 +1004,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 保留 scene，避免旧宽度下画的 banner 在新宽度 wrap 出残留。
     const currentColumns = (output as { columns?: number }).columns ?? 80;
     const currentRows = (output as { rows?: number }).rows ?? 24;
-    const welcome = renderWelcome(state, frame, maxFrames, currentColumns);
+    const { contentWidth: bannerContentWidth, marginLeft: bannerMarginLeft } =
+      resolveHistoryLayoutGeometry(currentColumns);
+    const welcome = renderWelcome(state, frame, maxFrames, bannerContentWidth);
     // welcome 以换行结尾，pinned agent notice 当初紧随其后再写一段；重绘时
     // 必须一并重写，否则清行（clearLines 含 notice 行数）会把它从屏幕上抹掉。
     const lines = (welcome + (pinnedAgentNotice ?? "")).split("\n");
     // 窄终端下 update hint / welcome hint 这类长行会物理换行，破坏"逻辑行数 =
     // 物理行数"的逐行定位；写入前按列宽截断，保证每行正好占一行。
-    const safeWidth = Math.max(1, currentColumns);
-    const safeLines = lines.map((line) => padOrTruncateToWidth(line, safeWidth));
+    const bannerLeftPad = bannerMarginLeft > 0 ? " ".repeat(bannerMarginLeft) : "";
+    const safeLines = lines.map((line) =>
+      padOrTruncateToWidth(
+        `${bannerLeftPad}${line}`,
+        Math.max(1, currentColumns),
+      ),
+    );
     const clearLines = Math.max(initialBannerLineCount, safeLines.length);
     // 与 paintSyncedFrame 一致的 BSU/ESU + 光标隐藏包裹，避免清行与写入
     // 之间的中间帧闪烁；composer 重绘也在同一帧内完成。
@@ -1188,6 +1250,19 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
   };
 
+  // 两桶各一个「批准并记住」回调（实现见 permissionGrantPersist）：状态更新 +
+  // 写盘 + 失败提示只有一份代码，四处确认弹窗只是绑定到不同的桶。
+  const grantEnablerDeps = {
+    getGrants: () => state.permissionGrants,
+    setGrants: (next: PermissionGrants) => {
+      state = { ...state, permissionGrants: next };
+    },
+    scheduleRender,
+    onPersistFailed: () => emitCommandOutput(t("autoPersistFailed")),
+  };
+  const approveLocalConfirms = createPermissionGrantEnabler("local", grantEnablerDeps);
+  const approveRemoteShell = createPermissionGrantEnabler("remote", grantEnablerDeps);
+
   /**
    * 唯一的「剪贴板内容 → 界面」应用器。`/paste`、Ctrl+V、空 bracketed-paste
    * 三条入口都走这里，读取流程在 pasteFlow.resolveClipboardPaste 里共享。
@@ -1283,14 +1358,28 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (signal.aborted) return Promise.resolve(false);
       return dialogHost.run((anchor) => runConfirmDialog({
         request: { id: `child-shell-${crypto.randomUUID()}`, tool: "execShell", action: "shell-per-call",
-          title: "Background shell — approve this command once?",
-          body: `Run: ${request.runId}\nAgent: ${request.agentKey}\nOwner: ${request.ownerUserId}\nDevice: ${request.deviceId}\nWorkspace: ${request.workspaceRoot}\n${request.permissionNotice}`,
+          title: t("shellPerCall.title"),
+          body: t(
+            "shellPerCall.body",
+            request.runId,
+            request.agentKey,
+            request.ownerUserId,
+            request.deviceId,
+            request.workspaceRoot,
+            request.permissionNotice,
+          ),
           command: request.command },
-        signal, fullCommand: true, input: input as any, output: output as any, ...anchor,
+        signal, fullCommand: true, input: input as any, output: output as any,
+        onApprove: createSnapshotGuardedApproval("remote", () => state.permissionGrants, approveRemoteShell), ...anchor,
       }));
-    }));
+    }), () => state.permissionGrants?.remote === true);
   const sessionShellGrant = createOriginShellGrant({
     confirm: async (request) => {
+      // auto 已开：这条 shell 直接放行，不弹窗。granted 状态位由
+      // shellGrantForTurns.isGranted() 的短路保证不被写入——auto 关掉之后必须
+      // 重新逐次询问，不能因为曾经 auto 过就永久授权。这里的守卫兜住直接调用
+      // requestGrant 的路径（正常路径下 adapter 连 requestGrant 都不会走到）。
+      if (state.permissionGrants?.remote === true) return true;
       return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
         dialogHost.run((anchor) =>
           runConfirmDialog({
@@ -1315,12 +1404,22 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             },
             input: input as any,
             output: output as any,
+            onApprove: createSnapshotGuardedApproval("remote", () => state.permissionGrants, approveRemoteShell),
             ...anchor,
           }),
         ),
       );
     },
   });
+  // auto 已开时对 shell 视为已授权，但**不**写 granted：`requestGrant` 一旦返回
+  // true 就把 granted 永久置真，之后 /auto off 仍会静默放行。这里用 isGranted()
+  // 短路让 adapter 直接跳过 requestGrant（弹窗与状态位都不触碰），auto 关掉后
+  // isGranted() 落回真实状态 → 恢复逐次询问。
+  const shellGrantForTurns: OriginShellGrant = {
+    isGranted: () => state.permissionGrants?.remote === true || sessionShellGrant.isGranted(),
+    requestGrant: (request) => sessionShellGrant.requestGrant(request),
+    revoke: () => sessionShellGrant.revoke(),
+  };
   let turnIdentity = 0;
   const turnCtx: AgentTurnContext = {
     get state() { return state; },
@@ -1351,7 +1450,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     get sessionEnded() { return sessionEnded; },
     // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例透传给 turn
     // 执行路径；撤销经 /shell-revoke 或设置面板调 sessionShellGrant.revoke()。
-    shellGrant: sessionShellGrant,
+    shellGrant: shellGrantForTurns,
     shellApprovalSession: childShellApprovals.session,
     // 运行位置展示（块 D）：owner-required 场景 adapter 回调一次；渲染一行
     // 「工具在 <deviceName>(<deviceId>) · workspace <root> · status: <s>」。
@@ -1428,6 +1527,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     get fixedInput() {
       return fixedInput;
     },
+    revokeRemoteShellGrants: () => { sessionShellGrant.revoke(); childShellApprovals.revoke(); },
     history,
     pasteStore,
     dialogHost,
@@ -1462,6 +1562,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const wasGranted = sessionShellGrant.isGranted();
       sessionShellGrant.revoke();
       childShellApprovals.revoke();
+      // /shell-revoke 同时清掉持久 remote 桶，否则重启又带着授权回来。
+      if (state.permissionGrants?.remote === true) {
+        const nextGrants = { ...state.permissionGrants };
+        delete nextGrants.remote;
+        state = { ...state, permissionGrants: nextGrants };
+        if (!persistPermissionGrantChanges({ remote: true }, nextGrants)) {
+          emitCommandOutput(t("autoPersistFailed"));
+        }
+      }
       emitCommandOutput(
         wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
         "/shell-revoke",
@@ -1637,13 +1746,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 自己负责（见 dialogHost.ts 文件注释），这两个处理器不用再手工管理。
     const buildInteractiveTurnHandlers = () => {
       const actionGateHandler = async (gate: LocalAgentActionGate) => {
-        // /auto on（会话级权限自动化）：只放行写文件确认门（file_write 的
+        // 本地桶（permissionGrants.local）：只放行写文件确认门（file_write 的
         // confirm gate）。handoff / input 类 gate 需要真人接管终端，不是
-        // 权限确认，绝不能被 /auto 短路——这是安全边界，见
-        // isAutoConfirmableFileWriteGate 的文档。与 confirmDestructiveAction
-        // 的 state.autoConfirm 先例同款：state 是 runTuiWorkspace 的可变绑定，
-        // 这里在调用时读取，拿到的总是最新值。
-        if (state.autoConfirm && isAutoConfirmableFileWriteGate(gate)) {
+        // 权限确认，绝不能被授权短路——这是安全边界，见
+        // isAutoConfirmableFileWriteGate 的文档。state 是 runTuiWorkspace 的
+        // 可变绑定，这里在调用时读取，拿到的总是最新值。
+        if (state.permissionGrants?.local === true && isAutoConfirmableFileWriteGate(gate)) {
           return buildGateConfirmedResult(gate);
         }
         // `confirm` gates route through dialogHost.run() + a framed dialog;
@@ -1665,15 +1773,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             pauseComposer: () => fixedInput.pause(),
             resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
             resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
+            onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
           }),
         );
       };
       const confirmDestructiveAction = async (request: PermissionRequest) => {
-        // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
+        // 本地桶（permissionGrants.local）：跳过确认弹窗直接放行。state 是
         // runTuiWorkspace 的可变绑定（busy 期间 /auto 走 isBusyLocalSlash
         // 本地处理并回写），这里在调用时读取，拿到的总是最新值。
-        // 只短路破坏性操作确认；actionGate（handoff/input 类）不走这里。
-        if (state.autoConfirm) return true;
+        // 只短路本机 run 的三类确认；远程来源的 shell 走远程桶，handoff/input
+        // 类 gate（要真人接管终端）永远不短路。
+        if (state.permissionGrants?.local === true) return true;
         // 破坏性操作确认同属「Agent 等用户决定」：立即提醒，任何应答路径
         // （approve / cancel / Esc / 异常）都由 finally 清掉 progress。
         return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
@@ -1682,6 +1792,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               request,
               input: input as any,
               output: output as any,
+              onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
               ...anchor,
             }),
           ),
@@ -1901,7 +2012,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             reservedRows,
           ),
         );
-        const contentWidth = Math.max(1, columns - 1);
+        const { contentWidth, marginLeft } = resolveHistoryLayoutGeometry(columns);
         const step = autoScrollStep();
 
         if (autoScrollDirection === "up") {
@@ -1922,10 +2033,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         }
 
         const screenRow = autoScrollDirection === "up" ? 0 : visibleHeight - 1;
+        const dragCol = Math.max(0, Math.min(contentWidth, lastDragMouseX - 1 - marginLeft));
         const hit = hitTestHistory(
           history,
           screenRow,
-          lastDragMouseX - 1,
+          dragCol,
           contentWidth,
           history.scrollTop,
           visibleHeight,
@@ -1971,7 +2083,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     ): Promise<void> => {
       const tty = output as { rows?: number; columns?: number };
       const columns = tty.columns ?? 80;
-      const contentWidth = Math.max(1, columns - 1);
+      const { contentWidth } = resolveHistoryLayoutGeometry(columns);
       // 诊断计时（选区复制卡顿定位用）：拆开「布局+提取」与「剪贴板写入」两段。
       const extractStartedAt = Date.now();
       const textToCopy = extractSelectedText(
@@ -2073,6 +2185,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         const wasGranted = sessionShellGrant.isGranted();
         sessionShellGrant.revoke();
       childShellApprovals.revoke();
+        // /shell-revoke 同时清掉持久 remote 桶（busy 路径同一份语义）。
+        if (state.permissionGrants?.remote === true) {
+          const nextGrants = { ...state.permissionGrants };
+          delete nextGrants.remote;
+          state = { ...state, permissionGrants: nextGrants };
+          if (!persistPermissionGrantChanges({ remote: true }, nextGrants)) {
+            output.write(`[nolo] ${t("autoPersistFailed")}\n`);
+          }
+        }
         emitCommandOutput(
           wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
           "/shell-revoke",
@@ -2159,8 +2280,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             "next turn), or wait for the reply to finish.\n",
         );
       } else {
+        const grantsBefore = state.permissionGrants;
         state = res.nextState;
+        if (grantsBefore?.remote === true && state.permissionGrants?.remote !== true) {
+          sessionShellGrant.revoke();
+          childShellApprovals.revoke();
+        }
         let msg = res.output;
+        // busy 期间的 /auto … 同样写盘（与空闲路径 tuiSlashRouter 共用同一个
+        // helper）：只写真正翻转的桶；失败用 raw output.write 追一行——streaming
+        // repaint 拥有 transcript，emitCommandOutput 会与它竞争。
+        if (!persistPermissionGrantChanges(grantsBefore, state.permissionGrants)) {
+          output.write(`[nolo] ${t("autoPersistFailed")}\n`);
+        } else if (state.permissionGrants !== grantsBefore) {
+          scheduleRender();
+        }
         if (
           busySlashCommand === "/switch" &&
           persistExplicitAgentSwitch(beforeAgentKey)
@@ -2293,9 +2427,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             reservedRows,
           ),
         );
-        const contentWidth = Math.max(1, columns - 1);
+        const { contentWidth, marginLeft } = resolveHistoryLayoutGeometry(columns);
         const screenRow = mouseEvent.y - 1;
         const screenCol = mouseEvent.x - 1;
+        const hitContentCol = screenCol - marginLeft;
+        const contentCol = Math.max(0, Math.min(contentWidth, screenCol - marginLeft));
 
         if (mouseEvent.kind === "press" && mouseEvent.button === "left") {
           stopAutoScroll();
@@ -2307,13 +2443,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           if (
             mouseEvent.ctrl &&
             screenRow < visibleHeight &&
-            screenCol < contentWidth &&
+            hitContentCol >= 0 &&
+            hitContentCol < contentWidth &&
             openVisibleUrlAtScreen(
               history,
               contentWidth,
               history.scrollTop,
               screenRow,
-              screenCol,
+              hitContentCol,
               visibleHeight,
               (url) =>
                 openExternalUrl(url, {
@@ -2328,11 +2465,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             paintFrame(buffer);
             return;
           }
-          if (screenRow < visibleHeight && screenCol < contentWidth) {
+          if (screenRow < visibleHeight && screenCol < columns) {
             const hit = hitTestHistory(
               history,
               screenRow,
-              screenCol,
+              contentCol,
               contentWidth,
               history.scrollTop,
               visibleHeight,
@@ -2358,7 +2495,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const hit = hitTestHistory(
             history,
             clampedRow,
-            screenCol,
+            contentCol,
             contentWidth,
             history.scrollTop,
             visibleHeight,
@@ -2388,7 +2525,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             const releaseHit = hitTestHistory(
               history,
               clampedRow,
-              screenCol,
+              contentCol,
               contentWidth,
               history.scrollTop,
               visibleHeight,
@@ -2764,6 +2901,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       input.once("close", finish);
       fixedInput.repaint(buffer, cursorPos);
       refreshGitStatus();
+      refreshCiStatus();
       await new Promise<void>((resolve) => {
         resolveDone = resolve;
         if (done) resolve(); // finish() may have run before we started waiting
@@ -2791,14 +2929,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         (gate) =>
           // /auto on 同款短路，见上方交互路径的 actionGateHandler 注释：
           // 只放行 file_write 的 confirm gate，handoff/input 类仍要求真人操作。
-          state.autoConfirm && isAutoConfirmableFileWriteGate(gate)
+          state.permissionGrants?.local === true && isAutoConfirmableFileWriteGate(gate)
             ? Promise.resolve(buildGateConfirmedResult(gate))
             : waitForActionGate(rl, input, output, gate, spawnRunner),
         async (request) => {
           // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
           // runTuiWorkspace 的可变绑定（runSubmittedLine 会把 handleTuiInput
           // 的 nextState 回写），这里在调用时读取，拿到的总是最新值。
-          if (state.autoConfirm) return true;
+          if (state.permissionGrants?.local === true) return true;
           // Non-TTY input has no interactive confirmation channel. Resolve the
           // request conservatively without calling rl.question(): Bun 1.4
           // closes readline as soon as an ended pipe is consumed, so waiting
@@ -2813,6 +2951,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
                 request,
                 input: input as any,
                 output: output as any,
+                onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
                 ...anchor,
               }),
             );

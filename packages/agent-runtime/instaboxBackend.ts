@@ -10,8 +10,12 @@
  *   → 202 `{id:"op_...", machineId:"m_...", state:"queued"}`（**异步**）。
  * - 轮询 `GET /operations/{opId}?wait=20s` → `{state:"queued"|"succeeded"|"failed", error}`
  *   （服务端长轮询）。
- * - 执行 `POST /machines/{machineId}/exec {cmd, timeoutSeconds}`
+ * - 执行 `POST /machines/{machineId}/exec {cmd, timeoutSeconds, stdin?}`
  *   → `{stdout, stderr, exitCode, timedOut, truncated}`（单次上限 10 分钟）。
+ *   `stdin` 支持已于 2026-10-20 按官方文档核实（https://instabox.sh/docs/api/commands）：
+ *   可选 UTF-8 字符串、上限 1 MiB（按 UTF-8 字节计）、写完即 EOF、**非流式**
+ *   （随请求体一次性提交，输出仍是结束后整包回传）。本后端只做「给了就透传、
+ *   超限/类型不对就在发请求前拒绝」的适配，不声称任何实时流能力。
  * - 用量 `GET /machines/{machineId}/usage`
  *   → `{runningSeconds, vcpuSeconds, memGiBSeconds, diskGiBSeconds}`。
  *   **这是账号累计值**，单机用量只能靠「调用前后取差」得到。
@@ -47,6 +51,12 @@ export const INSTABOX_DEFAULT_BASE_URL = "https://api.instabox.sh/v1";
 
 /** Instabox 服务端单次 exec 的硬上限：10 分钟。 */
 export const INSTABOX_MAX_EXEC_SECONDS = 600;
+
+/**
+ * Instabox exec 的 stdin 上限：1 MiB，**按 UTF-8 字节计**（官方文档的字节口径，
+ * 不是 JS `string.length`——后者会把「中」这种 3 字节字符算成 1）。
+ */
+export const INSTABOX_MAX_STDIN_BYTES = 1024 * 1024;
 
 export type InstaboxFailureCode =
   | "instabox_invalid_config"
@@ -454,12 +464,9 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
         "argv must be a non-empty array",
       );
     }
-    if (request.stdin !== undefined) {
-      throw new InstaboxBackendError(
-        "instabox_unsupported_request",
-        "instabox exec has no stdin channel",
-      );
-    }
+    // 旧实现无条件拒绝 stdin（当时文档未确认支持）。2026-10-20 已按官方文档核实：
+    // 合法就透传、越界/类型不对就在发请求之前拒绝（不产生任何机器侧副作用）。
+    const stdin = this.#resolveStdin(request.stdin);
     const timeoutSeconds = this.#resolveExecTimeoutSeconds(request.timeoutMs);
     const cmd = this.#buildCommand(request);
 
@@ -470,7 +477,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     const response = await this.#call({
       method: "POST",
       path: `/machines/${encodeURIComponent(entry.machineId)}/exec`,
-      body: { cmd, timeoutSeconds },
+      body: { cmd, timeoutSeconds, ...(stdin === undefined ? {} : { stdin }) },
     });
     if (!isSuccess(response.status)) {
       throw new InstaboxBackendError(
@@ -624,6 +631,28 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     return entry;
   }
 
+  /**
+   * stdin 直通校验：`undefined` = 请求里没提供（body 里也不加字段，保持原报文兼容）；
+   * 字符串（含空串）在 1 MiB / UTF-8 字节以内原样透传；其他类型或超限立即拒绝，
+   * 错误文案只带上限数字，**绝不回显输入内容**。
+   */
+  #resolveStdin(stdin: unknown): string | undefined {
+    if (stdin === undefined) return undefined;
+    if (typeof stdin !== "string") {
+      throw new InstaboxBackendError(
+        "instabox_unsupported_request",
+        "stdin must be a string",
+      );
+    }
+    if (utf8ByteLengthExceeds(stdin, INSTABOX_MAX_STDIN_BYTES)) {
+      throw new InstaboxBackendError(
+        "instabox_unsupported_request",
+        `stdin exceeds the ${INSTABOX_MAX_STDIN_BYTES} byte limit`,
+      );
+    }
+    return stdin;
+  }
+
   #resolveExecTimeoutSeconds(timeoutMs: number | undefined): number {
     const boundMs = INSTABOX_MAX_EXEC_SECONDS * 1000;
     if (timeoutMs === undefined) return this.#execTimeoutSeconds;
@@ -642,7 +671,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     return clampExecSeconds(Math.ceil(timeoutMs / 1000));
   }
 
-  /** cwd / env 用 `cd` + 赋值前缀表达（Instabox exec 只有 cmd 一个入口）。 */
+  /** cwd / env 仍用 `cd` + 赋值前缀表达（exec body 只多一个可选 stdin，不承载 cwd/env）。 */
   #buildCommand(request: Extract<ExecutionRequest, { kind: "command" }>): string {
     const script = argvToInstaboxCommand(request.argv);
     const segments: string[] = [];
@@ -783,6 +812,15 @@ function clampExecSeconds(seconds: number): number {
 function truncateOutput(value: string, limitChars: number): string {
   if (value.length <= limitChars) return value;
   return `${value.slice(0, limitChars)}…[truncated ${value.length - limitChars} chars]`;
+}
+
+/**
+ * UTF-8 字节数是否超限。UTF-8 编码后字节数恒 ≥ UTF-16 code unit 数，
+ * 所以 `length` 已超限时无需再编码（避免为超大输入分配一整份副本）。
+ */
+function utf8ByteLengthExceeds(value: string, limit: number): boolean {
+  if (value.length > limit) return true;
+  return new TextEncoder().encode(value).length > limit;
 }
 
 export function createInstaboxExecutionBackend(

@@ -148,6 +148,7 @@ import {
   resolveBuiltinLocalCliAgentConfig,
   readAgentFromStore,
 } from "./cliLocalAgentRecordReader";
+import { createChildShellApprovalHostResolver } from "./childShellApprovalHostResolver";
 import { loadCliDialogHistoryWithSource } from "./cliDialogHistoryFallback";
 import {
   shouldUseDeclaredOnlyLocalWorkspaceTools,
@@ -298,6 +299,68 @@ import {
   LOCAL_DOCKER_TOOL_NAMES,
   type LocalDockerWorkloadHandle,
 } from "./localDockerWorkload";
+import {
+  createLocalInstaboxWorkload as createLocalInstaboxWorkloadDefault,
+  type LocalInstaboxWorkloadHandle,
+} from "./localInstaboxWorkload";
+import { INSTABOX_FILE_TOOL_NAMES } from "./localInstaboxFileBridge";
+import { EXECUTION_SHELL_TOOL } from "../../agent-runtime/executionChannel";
+
+/** instabox workload 能兑现的工具面：execShell 走 executionChannel，文件工具走 bridge。 */
+const LOCAL_INSTABOX_TOOL_NAMES: readonly string[] = [
+  EXECUTION_SHELL_TOOL,
+  ...INSTABOX_FILE_TOOL_NAMES,
+];
+
+export type LocalInstaboxToolRoute =
+  | { action: "intercept"; toolName: string }
+  | { action: "reject"; toolName: string; reason: string }
+  | { action: "passthrough"; toolName: string };
+
+/**
+ * instabox 分支的三路分流：支持集内 → 接管；工作区工具但不在支持集 → 显式拒绝
+ * （绝不回落宿主）；非工作区工具（startAgentRun / ask_user / webFetch …）→ 原样
+ * 穿透到下层普通分发路径。接管前仍跑与 bwrap 分支同源的 run-surface + policy
+ * 判定：policy / deny 拒绝时 instabox 通道不是绕过 deny 的路子。
+ */
+export function resolveLocalInstaboxToolRoute(args: {
+  toolName: string;
+  env?: Record<string, string | undefined>;
+  agentToolNames?: readonly string[];
+}): LocalInstaboxToolRoute {
+  const toolName = normalizeLocalToolName(args.toolName);
+  if (!LOCAL_INSTABOX_TOOL_NAMES.includes(toolName)) {
+    return (WORKSPACE_TOOL_NAMES as readonly string[]).includes(toolName)
+      ? {
+          action: "reject",
+          toolName,
+          reason:
+            `instabox workload 不支持工作区工具 "${toolName}"（instabox 工具面：` +
+            `${LOCAL_INSTABOX_TOOL_NAMES.join(", ")}）；拒绝回落到宿主执行`,
+        }
+      : { action: "passthrough", toolName };
+  }
+  const agentToolNames = (args.agentToolNames ?? []).map(
+    normalizeLocalToolName,
+  );
+  const deniedBySurfaceOrPolicy =
+    !agentToolNames.includes(toolName) ||
+    !resolveLocalToolPolicy({
+      env: args.env ?? {},
+      agentToolNames,
+      toolName,
+    }).allowed;
+  if (deniedBySurfaceOrPolicy) {
+    return {
+      action: "reject",
+      toolName,
+      reason:
+        `${toolName} is outside the run tool surface / policy — ` +
+        "instabox workload 不是绕过 deny 的通道；拒绝在宿主执行工作区工具",
+    };
+  }
+  return { action: "intercept", toolName };
+}
 import {
   createDockerRunTeardown,
   exportDockerRunDiffArtifact,
@@ -735,7 +798,7 @@ export function createCliLocalRuntimeAdapter(
   const workspaceRoot = deps.cwd ?? process.cwd();
   /**
    * docker workload 通道（runtimeKey 指向 docker）。两点契约：
-   * 1) fail-closed：非 docker 的云后端 runtimeKey（gcp / instabox / machine:*）
+   * 1) fail-closed：无法由本机兑现的云后端 runtimeKey（gcp / machine:* 等）
    *    在 adapter 创建（= run 开始）时就抛可操作错误，绝不落到下方宿主路径；
    * 2) docker 就绪后，工作区工具族的**唯一**执行通道是 sbx channel，宿主执行器
    *    零调用（与 bwrap 分支不同：这里不提供「通道不可用就回落宿主」的第三态）。
@@ -767,13 +830,49 @@ export function createCliLocalRuntimeAdapter(
         agentKey: "cli-local-run",
         env: deps.env,
         workspaceRoot,
+        ...(deps.dockerWorkspaceMode ? { workspaceMode: deps.dockerWorkspaceMode } : {}),
       })) as unknown as LocalDockerWorkloadHandle)();
     return dockerWorkloadLoad;
   };
   /** run 开始前显式预检（agentRun.ts 在进入 loop 前调用）：无绑定/未授权即失败。 */
+  const instaboxRuntimeEnabled = runtimeKey === "instabox";
+  let instaboxWorkloadLoad: Promise<LocalInstaboxWorkloadHandle | null> | null =
+    null;
+  let instaboxWorkloadReleased = false;
+  let instaboxReleasePending = false;
+  let instaboxReleasePromise: Promise<void> | null = null;
+  const createInstaboxWorkload =
+    (deps as { createLocalInstaboxWorkload?: typeof createLocalInstaboxWorkloadDefault }).createLocalInstaboxWorkload ?? createLocalInstaboxWorkloadDefault;
+  const loadLocalInstaboxWorkload = (): Promise<LocalInstaboxWorkloadHandle | null> => {
+    if (!instaboxRuntimeEnabled) return Promise.resolve(null);
+    if (instaboxReleasePending) {
+      return Promise.reject(
+        new Error("instabox workload cleanup_pending：lease cleanup 尚未确认，拒绝执行工具"),
+      );
+    }
+    if (instaboxWorkloadReleased) {
+      return Promise.reject(
+        new Error(
+          "instabox workload 已释放：本 run 的 lease 已失效，拒绝在宿主执行工具",
+        ),
+      );
+    }
+    instaboxWorkloadLoad ??= (async () =>
+      (await createInstaboxWorkload({
+        runtimeKey,
+        runId: `cli-local-instabox-${createId()}`,
+        authenticatedCaller: resolveLocalUserId(deps.env),
+        agentKey: "cli-local-run",
+        env: deps.env,
+      })) as unknown as LocalInstaboxWorkloadHandle)();
+    return instaboxWorkloadLoad;
+  };
   const prepareLocalRuntimeWorkload = async (): Promise<void> => {
-    if (!dockerRuntimeEnabled) return;
-    await loadLocalDockerWorkload();
+    if (dockerRuntimeEnabled) {
+      await loadLocalDockerWorkload();
+    } else if (instaboxRuntimeEnabled) {
+      await loadLocalInstaboxWorkload();
+    }
   };
   /**
    * F1：本 run 的**执行隔离事实**落盘（`<runsDir>/<runId>.isolation.json` + 一行
@@ -828,6 +927,11 @@ export function createCliLocalRuntimeAdapter(
     dockerWorkloadReleased = true;
     dockerWorkloadLoad = null;
     if (loaded) {
+      // 块ART2 修复：终态导出要 runsDir，但本闭包不在
+      // `recordRunExecutionIsolation` 的动态 import 作用域内。此前这里直接引用
+      // `resolveRunsDir` → ReferenceError，被 teardown 的「失败只 warn」吞掉，
+      // 于是导出从来没真正跑过（沙盒产出全部丢失，2026-10-19 实测）。
+      const { resolveRunsDir } = await import("../agentRunControl");
       // 块ART2：run 终态自动导出 —— 在沙盒销毁**之前**把工作区改动导成 patch
       // 存进产物层（`runs/<runId>/diff.patch`），ref 写回 runsDir 审计。
       // 导出是审计增强，不是 run 结果的成立条件：任何失败只 warning，既不改变
@@ -876,11 +980,42 @@ export function createCliLocalRuntimeAdapter(
     (localSandboxLoad ??= createSandboxWorkload({ workspaceRoot }).catch(
       () => null,
     ));
+  const releaseLocalInstaboxWorkload = (): Promise<void> => {
+    if (instaboxReleasePromise) return instaboxReleasePromise;
+    const attempt = (async () => {
+      const loaded = instaboxWorkloadLoad
+        ? await instaboxWorkloadLoad.catch(() => null)
+        : null;
+      if (!loaded) {
+        instaboxWorkloadReleased = true;
+        instaboxWorkloadLoad = null;
+        return;
+      }
+      try {
+        await loaded.release();
+        instaboxWorkloadReleased = true;
+        instaboxReleasePending = false;
+        instaboxWorkloadLoad = null;
+      } catch (error) {
+        instaboxReleasePending = true;
+        const record = error as { code?: unknown; cleanupPending?: unknown } | null;
+        const code = record?.code === "instabox_cleanup_pending" || record?.cleanupPending === true
+          ? "cleanup_pending"
+          : "release_failed";
+        process.stderr.write(`[nolo] instabox_release_${code}\n`);
+        throw error;
+      }
+    })();
+    instaboxReleasePromise = attempt;
+    void attempt.finally(() => {
+      if (instaboxReleasePromise === attempt) instaboxReleasePromise = null;
+    }).catch(() => undefined);
+    return attempt;
+  };
   const releaseLocalSandboxWorkload = async (): Promise<void> => {
-    // docker workload 与 bwrap lease 同寿命：run 收尾都在这里释放（docker 的
-    // backend.release + stopAndConfirm/cleanup_pending 语义由 lifecycle 的
-    // finally 承担，release 失败同样不覆盖 run 结果）。
+    // docker workload 与 bwrap / instabox lease 同寿命：run 收尾都在这里释放
     await releaseLocalDockerWorkload();
+    await releaseLocalInstaboxWorkload();
     const loaded = localSandboxLoad
       ? await localSandboxLoad.catch(() => null)
       : null;
@@ -939,19 +1074,22 @@ export function createCliLocalRuntimeAdapter(
       },
       resolveAgentRuntimeBindingMachineId,
       resolveLocalMachineId,
-      ...(deps.shellApprovalSession ? { shellApprovalHostForAgent: async (childAgentKey: string) => {
-        // Resolve the CHILD owner from the trusted store, never parent grant/model identity.
-        const record = await readAgentFromStore({ agentRef: childAgentKey, store: await getOrCreateSharedStore(deps), userId });
-        const rec = record as Record<string, unknown> | undefined;
-        const ownerUserId = asOptionalTrimmedString(rec?.userId) ?? asOptionalTrimmedString(rec?.ownerUserId);
-        if (!ownerUserId) return undefined;
-        const { detectMachineInfo } = await import("connector-experimental/machineInfo");
-        const machine = await detectMachineInfo({ probeLaunchable: false });
-        const deviceId = asOptionalTrimmedString(machine?.machineId);
-        if (!deviceId) return undefined;
-        return { binding: { runId: "pending-spawn", agentKey: childAgentKey, ownerUserId, deviceId, workspaceRoot },
-          confirm: deps.shellApprovalSession!.confirm, signal: deps.shellApprovalSession!.signal };
-      } } : {}),
+      ...(deps.shellApprovalSession ? {
+        shellApprovalHostForAgent: createChildShellApprovalHostResolver({
+          readAgentConfig: async (childAgentKey) => readAgentFromStore({
+            agentRef: childAgentKey,
+            store: await getOrCreateSharedStore(deps),
+            userId,
+          }),
+          resolveDeviceId: async () => {
+            const { detectMachineInfo } = await import("connector-experimental/machineInfo");
+            const machine = await detectMachineInfo({ probeLaunchable: false });
+            return machine?.machineId;
+          },
+          workspaceRoot,
+          session: deps.shellApprovalSession,
+        }),
+      } : {}),
       ...(deps.confirmDestructiveAction
         ? { confirmDestructiveAction: deps.confirmDestructiveAction }
         : {}),
@@ -1131,6 +1269,7 @@ export function createCliLocalRuntimeAdapter(
         sourceHash: input.sourceHash,
         sourceCount: input.sourceCount,
         schemaVersion: input.schemaVersion,
+        referenceKeys: input.referenceKeys,
       }),
     loadLastContextUsage: async (dialogId) => {
       // 从 per-dialog 权威持久化记录读取上一次调用的真实 input tokens。
@@ -1579,6 +1718,42 @@ export function createCliLocalRuntimeAdapter(
               { code: "origin_authorization_required" },
             );
           }
+        }
+      }
+      // instabox workload 分支（runtimeKey 指向 instabox）：只接管本仓 instabox
+      // 工具面（execShell + 文件工具 bridge）。工作区里的其他工具显式拒绝（绝不
+      // 回落宿主），非工作区工具（startAgentRun / ask_user / webFetch …）穿透到
+      // 下方普通分发；接管前跑与 docker / bwrap 同源的 run-surface + policy 判定，
+      // deny 仍然优先——instabox 通道不是绕过策略契约的路子。
+      if (instaboxRuntimeEnabled) {
+        const instaboxRoute = resolveLocalInstaboxToolRoute({
+          toolName: call.name,
+          env: deps.env,
+          agentToolNames: activeAgentToolNames,
+        });
+        if (instaboxRoute.action === "reject") {
+          throw new Error(instaboxRoute.reason);
+        }
+        if (instaboxRoute.action === "intercept") {
+          const instaboxHandle = await loadLocalInstaboxWorkload();
+          if (!instaboxHandle) {
+            throw new Error(
+              `instabox workload 不可用（无 handle）：拒绝在宿主执行工作区工具 "${instaboxRoute.toolName}"`,
+            );
+          }
+          const instaboxArgs =
+            parseToolArgumentsObject(injectedCall.arguments) ?? {};
+          const instaboxOutput = await instaboxHandle.channel(
+            instaboxRoute.toolName,
+            instaboxArgs,
+            opts?.abortSignal,
+          );
+          if (typeof instaboxOutput !== "string") {
+            throw new Error(
+              `instabox workload 未返回结果（tool=${instaboxRoute.toolName}）：拒绝回落到宿主执行`,
+            );
+          }
+          return { content: instaboxOutput };
         }
       }
       // docker workload 分支（runtimeKey 指向 docker）：工作区工具族在 sbx 云

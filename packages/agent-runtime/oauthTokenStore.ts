@@ -22,9 +22,7 @@ export type OAuthProvider =
   | "claude"
   | "cloudflare"
   | "cursor"
-  | "devin"
-  | "workbuddy"
-  | "workbuddy-ai";
+  | "devin";
 
 /**
  * 该本地凭据由服务端托管：服务端是唯一的 refresh 持有者与刷新者。

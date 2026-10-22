@@ -12,7 +12,6 @@ import {
   type ApiKeyTemplateConfig,
   type OAuthProviderConfig,
   type ProviderRegistryEntry,
-  type WorkBuddyModelPricing,
 } from "./providerRegistry";
 import { DEFAULT_REASONING_EFFORT } from "./createAgentSchema";
 import type { ReasoningEffort } from "./createAgentSchema";
@@ -44,7 +43,6 @@ export type ProviderPresetFieldBag = {
     label: string;
     recommended?: boolean;
     hasVision?: boolean;
-    pricing?: WorkBuddyModelPricing;
   }>;
   /**
    * 该 preset 建议的默认推理强度。
