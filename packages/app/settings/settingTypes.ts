@@ -3,8 +3,6 @@
 // 单一职责：声明 settings slice 的 Redux state 形状 + 共享常量。
 // 不依赖任何业务模块,只 import 主题/字体/策略相关类型。
 
-import type { FontPreset } from "app/theme/fontPreference";
-import type { THEME_COLORS } from "app/theme/theme.config";
 import type {
   KnowledgeCaptureLevel,
   SpaceContextLevel,
@@ -57,13 +55,8 @@ export interface SettingState {
   maxCost: number;
   autoApproveCredits: number;
 
-  themeName: keyof typeof THEME_COLORS;
-  themeMode: "system" | "light" | "dark";
-  isDark: boolean; // resolved value: managed by setThemeMode + useSystemTheme
   sidebarWidth: number;
   headerHeight: number;
-  density: "compact" | "spacious";
-  fontPreset: FontPreset;
 
   // 编辑器配置
   editorDefaultMode: "markdown" | "block";

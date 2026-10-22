@@ -1,11 +1,7 @@
 import "../theme-ui.css";
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { useAppDispatch, useAppSelector } from "app/store";
-import {
-  changeFontPreset,
-  selectFontPreset,
-} from "app/settings/settingSlice";
+import { useStoreDeviceAppearance } from "../storeDeviceAppearance";
 import {
   FONT_PRESET_VALUES,
   type FontPreset,
@@ -19,8 +15,8 @@ const FONT_PRESET_OPTIONS = FONT_PRESET_VALUES.map((value) => ({
 
 export const FontPresetPicker: React.FC = () => {
   const { t } = useTranslation();
-  const dispatch = useAppDispatch();
-  const current = useAppSelector(selectFontPreset);
+  const { controller, snapshot } = useStoreDeviceAppearance();
+  const current = snapshot.fontPreset;
 
   return (
     <Select
@@ -28,7 +24,7 @@ export const FontPresetPicker: React.FC = () => {
       selectedKey={current}
       onSelectionChange={(key) => {
         if (key == null) return;
-        dispatch(changeFontPreset(String(key) as FontPreset));
+        controller.updateAndPersist({ fontPreset: String(key) as FontPreset });
       }}
       aria-label={t("settings.appearance.font.title", "字体")}
     >

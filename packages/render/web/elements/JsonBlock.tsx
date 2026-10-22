@@ -2,7 +2,7 @@
 import React, { useMemo } from "react";
 import { JsonView, allExpanded, defaultStyles } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";
-import { useTheme } from "app/theme"; // Assume theme hook path is correct
+import { useWebTheme as useTheme } from "app/theme/webTheme"; // Assume theme hook path is correct
 
 // --- 类型定义 ---
 interface JsonBlockProps {

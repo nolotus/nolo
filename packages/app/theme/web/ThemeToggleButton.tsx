@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { LuMoon, LuSun } from "react-icons/lu";
-import { useThemeModeControl } from "app/theme";
+import { useThemeModeControl } from "./useThemeModeControl";
 
 /**
  * One-tap day/night toggle for chrome without a settings menu (guest topbar).

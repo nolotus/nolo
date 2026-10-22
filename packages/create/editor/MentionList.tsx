@@ -12,7 +12,7 @@ import {
     size,
 } from "@floating-ui/react";
 import { useAppSelector } from "app/store";
-import { selectTheme } from "app/settings/settingSlice";
+import { useWebTheme } from "app/theme/webTheme";
 import { LuFile, LuBot, LuWrench, LuLayoutGrid } from "react-icons/lu"; // Changed LuLayout to LuLayoutGrid
 import { Portal } from "./components";
 
@@ -40,7 +40,7 @@ export const MentionList: React.FC<MentionListProps> = ({
     category,
     onCategoryChange,
 }) => {
-    const theme = useAppSelector(selectTheme);
+    const theme = useWebTheme();
     const editor = useSlate();
     const listRef = useRef<HTMLDivElement>(null);
 

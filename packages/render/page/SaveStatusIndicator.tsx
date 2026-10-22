@@ -1,7 +1,7 @@
 import React from "react";
 import { LuCircleAlert, LuCircleCheck } from "react-icons/lu";
 import { useAppSelector } from "app/store";
-import { selectTheme } from "app/settings/settingSlice";
+import { useWebTheme } from "app/theme/webTheme";
 
 export type SaveStatus = "saving" | "saved" | "error" | "pending" | null;
 
@@ -12,7 +12,7 @@ interface SaveStatusIndicatorProps {
 
 const SaveStatusIndicator: React.FC<SaveStatusIndicatorProps> = React.memo(
   ({ status, hasPendingChanges }) => {
-    const theme = useAppSelector(selectTheme);
+    const theme = useWebTheme();
     const effectiveStatus = status || (hasPendingChanges ? "pending" : null);
     if (!effectiveStatus) return null;
 

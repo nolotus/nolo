@@ -2,7 +2,7 @@ import "../theme-ui.css";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ThemeMode } from "app/theme/themeModeBootstrap";
-import { useThemeModeControl } from "app/theme";
+import { useThemeModeControl } from "./useThemeModeControl";
 import { LuSun, LuMoon, LuMonitor } from "react-icons/lu";
 
 type DarkModeSwitchProps = {

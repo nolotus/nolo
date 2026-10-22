@@ -520,8 +520,7 @@ const ChatSidebar: React.FC = () => {
             {homeView === "work" && homeScopeIndicator}
           </div>
           <div className={contextContentClassName}>
-          {homeView === "work" ? (
-            <>
+            <div style={{ display: homeView === "work" ? "contents" : "none" }}>
               {typeFilter === "all" || typeFilter === "dialog" ? (
                 <>
                   {homeScope.kind === "all" && remoteTasksGlobalEntry}
@@ -538,12 +537,10 @@ const ChatSidebar: React.FC = () => {
               ) : (
                 <p role="status">{t("allView.projectDialogOnly", "当前项目仅包含已关联的对话")}</p>
               )}
-            </>
-          ) : (
-            <>
+            </div>
+            <div style={{ display: homeView === "projects" ? "contents" : "none" }}>
               <DesktopFolderProjects items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} />
-            </>
-          )}
+            </div>
           </div>
           {commandPalette}
         </div>

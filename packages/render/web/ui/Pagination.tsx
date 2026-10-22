@@ -1,6 +1,6 @@
 // render/web/ui/Pagination.tsx
 import React from "react";
-import { useTheme } from "app/theme";
+import { useWebTheme as useTheme } from "app/theme/webTheme";
 import Button from "render/web/ui/Button";
 import pino from "pino";
 

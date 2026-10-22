@@ -117,14 +117,8 @@ export {
   selectMaxCost,
   selectMaxExecutionTime,
   selectAutoApproveCredits,
-  selectIsDark,
-  selectThemeMode,
   selectHeaderHeight,
-  selectThemeName,
-  selectThemeFollowsSystem,
   selectSidebarWidth,
-  selectDensity,
-  selectFontPreset,
   selectEnableReadCurrentSpace,
   selectGlobalPrompt,
   selectUserTonePreset,
@@ -154,10 +148,8 @@ export {
 
 // 复合 selectors
 export {
-  selectEditorCodeTheme,
   selectEditorConfig,
 } from "./editorConfigSelectors";
-export { selectTheme } from "./themeSelectors";
 
 // 持久化 / hydrate 工具
 export {
@@ -178,11 +170,6 @@ export {
   getSettings,
   setSettings,
   setAccountChatDisplayPreferences,
-  changeTheme,
-  changeDensity,
-  changeFontPreset,
-  changeDarkMode,
-  setThemeFollowsSystem,
   setSidebarWidth,
   toggleEnableReadCurrentSpace,
   setEditorDefaultMode,
@@ -201,7 +188,6 @@ export {
   setAiRecentContentLimit,
   setMaxExecutionTime,
   setDefaultAgentId,
-  setThemeMode,
 } from "./settingThunks";
 
 export default settingSlice.reducer;

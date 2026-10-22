@@ -25,6 +25,7 @@ import {
   LuClock,
 } from "react-icons/lu";
 import { Select, SelectItem } from "render/web/ui/Select";
+import { useWebEditorCodeTheme } from "app/theme/webEditorCodeTheme";
 
 // --- UI 组件 ---
 const SettingSection: React.FC<{
@@ -74,13 +75,13 @@ const EditorConfig: React.FC = () => {
     // defaultMode 已删除
     lightCodeTheme,
     darkCodeTheme,
-    codeTheme, // 保留：当前实际生效的主题（展示用）
     wordCountEnabled,
     shortcuts,
     fontSize,
     autoSave,
     autoSaveInterval,
   } = useAppSelector(selectEditorConfig);
+  const codeTheme = useWebEditorCodeTheme();
 
   const shortcutItems = [
     {

@@ -5,7 +5,6 @@
 //
 // 不直接 import state;通过 fieldSelectors 间接取 state。
 
-import { createSelector } from "@reduxjs/toolkit";
 import { DEFAULT_THEME_NAME, SPACE, THEME_COLORS } from "app/theme/theme.config";
 import {
   DEFAULT_FONT_PRESET,
@@ -14,14 +13,7 @@ import {
 } from "app/theme/fontPreference";
 
 import { alphaColor, hexToRgbString } from "./settingNormalizers";
-import {
-  selectDensity,
-  selectFontPreset,
-  selectHeaderHeight,
-  selectIsDark,
-  selectSidebarWidth,
-  selectThemeName,
-} from "./fieldSelectors";
+
 
 type ThemeMode = "light" | "dark";
 
@@ -186,16 +178,14 @@ const DEFAULT_MOTION_EASE = "cubic-bezier(0.33, 0, 0.2, 1)";
 const TIDE_MOTION_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const BREATH_MOTION_EASE = "cubic-bezier(0.4, 0, 0.6, 1)";
 
-export const selectTheme = createSelector(
-  [
-    selectThemeName,
-    selectIsDark,
-    selectSidebarWidth,
-    selectHeaderHeight,
-    selectDensity,
-    selectFontPreset,
-  ],
-  (themeName, isDark, sidebarWidth, headerHeight, density, fontPreset) => {
+export const buildThemeTokens = (
+  themeName: keyof typeof THEME_COLORS,
+  isDark: boolean,
+  sidebarWidth: number,
+  headerHeight: number,
+  density: "compact" | "spacious",
+  fontPreset: import("app/theme/fontPreference").FontPreset,
+) => {
     const mode: ThemeMode = isDark ? "dark" : "light";
     const validThemeName = THEME_COLORS[themeName]
       ? themeName
@@ -392,5 +382,5 @@ export const selectTheme = createSelector(
       linkColorPressed: c.primaryDark,
       borderColorDisabled: c.borderLight,
     };
-  },
-);
+};
+

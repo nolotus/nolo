@@ -15,8 +15,6 @@ import {
   readUserPreferenceRegisterValue,
   type UserPreferenceRegisterRecord,
 } from "database/userPreferenceRegister";
-import { normalizeThemeName } from "app/theme/themeModeBootstrap";
-import { normalizeFontPreset } from "app/theme/fontPreference";
 import { DEFAULT_USER_PREFERENCE_PROFILE } from "ai/policy/types";
 import { normalizeAgentUpdateFieldList } from "ai/policy/selfUpdateFields";
 import { getSettingDbActionThunks } from "./dbActionThunks";
@@ -50,6 +48,8 @@ export const normalizeSettingChanges = (
     "serverAuthorityEchoSeq",
     // 写失败状态同样是纯本地 observability：绝不进入云端 settings record。
     "lastWriteFailure",
+    // Retired device appearance is never accepted by Redux, including legacy callers.
+    "themeName", "themeMode", "isDark", "density", "fontPreset",
   ]) as Partial<SettingState>;
 
   if (hasOwn(normalizedChanges, "defaultAgentId")) {
@@ -66,20 +66,6 @@ export const normalizeSettingChanges = (
     normalizedChanges = omitKeys(normalizedChanges, [
       "defaultSpaceId",
     ]) as Partial<SettingState>;
-  }
-
-  if (hasOwn(normalizedChanges, "themeName")) {
-    const themeName = normalizeThemeName(normalizedChanges.themeName);
-    normalizedChanges = themeName
-      ? { ...normalizedChanges, themeName }
-      : (omitKeys(normalizedChanges, ["themeName"]) as Partial<SettingState>);
-  }
-
-  if (hasOwn(normalizedChanges, "fontPreset")) {
-    const fontPreset = normalizeFontPreset(normalizedChanges.fontPreset);
-    normalizedChanges = fontPreset
-      ? { ...normalizedChanges, fontPreset }
-      : (omitKeys(normalizedChanges, ["fontPreset"]) as Partial<SettingState>);
   }
 
   if (hasOwn(normalizedChanges, "userTonePreset")) {
@@ -144,7 +130,7 @@ const LOCAL_APPEARANCE_KEY_NAMES = [
   "isDark",
   "density",
   "fontPreset",
-] as const satisfies ReadonlyArray<keyof SettingState>;
+] as const;
 
 /**
  * Keys a guest (no logged-in user) may still update in local redux state.
@@ -153,7 +139,6 @@ const LOCAL_APPEARANCE_KEY_NAMES = [
  * local-first sidebar toggle/resize).
  */
 const GUEST_UPDATABLE_KEY_NAMES = [
-  ...LOCAL_APPEARANCE_KEY_NAMES,
   "sidebarWidth",
 ] as const satisfies ReadonlyArray<keyof SettingState>;
 

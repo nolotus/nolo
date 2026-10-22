@@ -13,7 +13,7 @@ import {
 } from "@floating-ui/react";
 
 import { Portal, Menu, Button } from "./components";
-import { selectTheme } from "app/settings/settingSlice";
+import { useWebTheme } from "app/theme/webTheme";
 
 // 1. [图标统一] 从 react-icons/lu 导入图标
 import { LuCheck, LuTrash2 } from "react-icons/lu";
@@ -33,7 +33,7 @@ export const LinkEditorPopover: React.FC<LinkEditorPopoverProps> = ({
   onRemove,
   onClose,
 }) => {
-  const theme = useAppSelector(selectTheme);
+  const theme = useWebTheme();
   const inputRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState("");
   const isEditing = initialUrl !== "";

@@ -1,7 +1,6 @@
 // packages/app/settings/editorConfigSelectors.ts
 //
-// 单一职责:编辑器复合选择器(selectEditorCodeTheme / selectEditorConfig),
-// 聚合 fieldSelectors 的原始字段 + isDark。
+// 仅聚合账号级编辑器配置；外观明暗状态由 Device Appearance Owner 决定。
 
 import { createSelector } from "@reduxjs/toolkit";
 
@@ -15,12 +14,6 @@ import {
   selectEditorShortcuts,
   selectEditorWordCountEnabled,
 } from "./fieldSelectors";
-import { selectIsDark } from "./fieldSelectors";
-
-export const selectEditorCodeTheme = createSelector(
-  [selectEditorLightCodeTheme, selectEditorDarkCodeTheme, selectIsDark],
-  (lightTheme, darkTheme, isDark) => (isDark ? darkTheme : lightTheme),
-);
 
 export const selectEditorConfig = createSelector(
   [
@@ -32,7 +25,6 @@ export const selectEditorConfig = createSelector(
     selectEditorFontSize,
     selectEditorAutoSave,
     selectEditorAutoSaveInterval,
-    selectIsDark,
   ],
   (
     defaultMode,
@@ -43,12 +35,9 @@ export const selectEditorConfig = createSelector(
     fontSize,
     autoSave,
     autoSaveInterval,
-    isDark,
   ) => {
-    const codeTheme = isDark ? darkCodeTheme : lightCodeTheme;
     return {
       defaultMode,
-      codeTheme,
       lightCodeTheme,
       darkCodeTheme,
       wordCountEnabled,

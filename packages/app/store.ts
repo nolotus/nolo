@@ -2,6 +2,9 @@ import { configureStore, combineReducers, type ThunkDispatch, type UnknownAction
 import { useContext } from "react";
 import { ReactReduxContext, TypedUseSelectorHook, useDispatch, useSelector } from "react-redux";
 import { reducer, type RootReducer } from "./reducer";
+import { bindStoreDeviceAppearance } from "app/theme/storeDeviceAppearance";
+import { createDeviceAppearanceController } from "app/theme/deviceAppearanceController";
+import { SYSTEM_DARK_MEDIA_QUERY } from "app/theme/themeModeBootstrap";
 import {
   attachSessionSnapshot,
   configureSessionSnapshot,
@@ -96,6 +99,26 @@ interface CreateStoreOptions {
 
 export const createAppStore = (options: CreateStoreOptions = {}): any => {
   const created = createAppStoreInner(options);
+  // Bind one appearance controller per store. SSR and RN cannot access browser
+  // storage here; platform hosts may rebind with their own storage adapter.
+  const browserStorage = (() => {
+    if (typeof document === "undefined") return null;
+    try { return typeof localStorage !== "undefined" ? localStorage : null; }
+    catch { return null; }
+  })();
+  const systemPrefersDark = (() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+    try {
+      return window.matchMedia(SYSTEM_DARK_MEDIA_QUERY).matches;
+    } catch {
+      // An embedded/locked-down WebView may block media queries.
+      return false;
+    }
+  })();
+  bindStoreDeviceAppearance(
+    created,
+    createDeviceAppearanceController(browserStorage, systemPrefersDark),
+  );
   // 会话快照桥挂载：usage 域读端（token/server/balance/userId）脱离 redux API。
   // reader 在此组装（本文件已 import 全部 slice，无循环风险）。
   // SSR（server/render、ssrPreload）不挂载快照：模块级单例在“每请求一个 store”

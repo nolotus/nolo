@@ -1,8 +1,7 @@
 // 文件路径：render/web/ui/settings/ThemePicker.tsx
 import "../theme-ui.css";
 import React from "react";
-import { useAppDispatch, useAppSelector } from "app/store";
-import { changeTheme, selectThemeName, selectIsDark } from "app/settings/settingSlice";
+import { useStoreDeviceAppearance } from "../storeDeviceAppearance";
 import { wave, iris, catppuccin, rose, trail, mono, nature } from "app/theme/colors";
 import { DEFAULT_THEME_NAME } from "app/theme/theme.config";
 
@@ -20,9 +19,9 @@ const THEME_METADATA: Record<keyof typeof THEMES, { name: string; desc: string }
 };
 
 export const ThemePicker: React.FC = () => {
-  const dispatch = useAppDispatch();
-  const current = useAppSelector(selectThemeName) as keyof typeof THEMES;
-  const isDark = useAppSelector(selectIsDark);
+  const { controller, snapshot } = useStoreDeviceAppearance();
+  const current = snapshot.themeName as keyof typeof THEMES;
+  const isDark = snapshot.isDark;
   const mode = isDark ? "dark" : "light";
 
   const [hoveredKey, setHoveredKey] = React.useState<keyof typeof THEMES | null>(null);
@@ -33,7 +32,7 @@ export const ThemePicker: React.FC = () => {
     } catch {
       // ignore localStorage write failures
     }
-    dispatch(changeTheme(themeName as any));
+    controller.updateAndPersist({ themeName });
   };
 
   const activeKey = (THEMES[current] ? current : DEFAULT_THEME_NAME) as keyof typeof THEMES;

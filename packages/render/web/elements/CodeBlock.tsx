@@ -10,7 +10,7 @@ import {
   lazy,
   Suspense,
 } from "react";
-import { useTheme } from "app/theme";
+import { useWebTheme as useTheme } from "app/theme/webTheme";
 import copyToClipboard from "app/utils/clipboard";
 import { toast } from "app/utils/toast";
 import JsonBlock from "./JsonBlock";

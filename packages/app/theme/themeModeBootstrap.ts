@@ -11,6 +11,7 @@ import {
 } from "./theme.config";
 import {
   FONT_PRESET_STORAGE_KEY,
+  DEFAULT_FONT_PRESET,
   type FontPreset,
   normalizeFontPreset,
 } from "./fontPreference";
@@ -119,3 +120,17 @@ export function resolveThemeModePreload({
     isDark: resolveThemeModeIsDark(themeMode, systemPrefersDark),
   };
 }
+
+/** One read boundary for device appearance: shared by first-paint state and future Owner. */
+export const resolveDeviceAppearancePreload = ({
+  storage,
+  systemPrefersDark,
+}: {
+  storage: StorageLike | null | undefined;
+  systemPrefersDark: boolean;
+}) => ({
+  ...resolveThemeModePreload({ storage, systemPrefersDark }),
+  themeName: readStoredThemeName(storage) ?? DEFAULT_THEME_NAME,
+  density: readStoredThemeDensity(storage) ?? "compact",
+  fontPreset: readStoredFontPreset(storage) ?? DEFAULT_FONT_PRESET,
+});

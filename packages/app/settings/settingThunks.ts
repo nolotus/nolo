@@ -16,12 +16,6 @@ import {
   readUserPreferenceRegisterValue,
 } from "database/userPreferenceRegister";
 import {
-  resolveThemeModeIsDark,
-  SYSTEM_DARK_MEDIA_QUERY,
-} from "app/theme/themeModeBootstrap";
-import type { THEME_COLORS } from "app/theme/theme.config";
-import { normalizeFontPreset, type FontPreset } from "app/theme/fontPreference";
-import {
   DEFAULT_USER_PREFERENCE_PROFILE,
   type KnowledgeCaptureLevel,
   type SpaceContextLevel,
@@ -385,40 +379,6 @@ export const setSettings = createAsyncThunk(
 
 // --- 细粒度 setter thunk(几乎都是 setSettings 的薄包装) ---
 
-export const changeTheme = createAsyncThunk(
-  "settings/changeTheme",
-  async (themeName: keyof typeof THEME_COLORS, { dispatch }) =>
-    dispatch(setSettings({ themeName })).unwrap(),
-);
-
-export const changeDensity = createAsyncThunk(
-  "settings/changeDensity",
-  async (density: "compact" | "spacious", { dispatch }) =>
-    dispatch(setSettings({ density })).unwrap(),
-);
-
-export const changeFontPreset = createAsyncThunk(
-  "settings/changeFontPreset",
-  async (fontPreset: FontPreset, { dispatch }) => {
-    const normalized = normalizeFontPreset(fontPreset) ?? fontPreset;
-    return dispatch(setSettings({ fontPreset: normalized })).unwrap();
-  },
-);
-
-export const changeDarkMode = createAsyncThunk(
-  "settings/changeDarkMode",
-  async (isDark: boolean, { dispatch }) =>
-    dispatch(
-      setSettings({ isDark, themeMode: isDark ? "dark" : "light" }),
-    ).unwrap(),
-);
-
-export const setThemeFollowsSystem = createAsyncThunk(
-  "settings/setThemeFollowsSystem",
-  async (follows: boolean, { dispatch }) =>
-    dispatch(setSettings({ themeMode: follows ? "system" : "light" })).unwrap(),
-);
-
 export const setSidebarWidth = createAsyncThunk(
   "settings/setSidebarWidth",
   async (sidebarWidth: number, { dispatch }) =>
@@ -560,14 +520,3 @@ export const setDefaultAgentId = createAsyncThunk(
     ).unwrap(),
 );
 
-export const setThemeMode = createAsyncThunk(
-  "settings/setThemeMode",
-  async (mode: "system" | "light" | "dark", { dispatch }) => {
-    const changes: Partial<SettingState> = { themeMode: mode };
-    const systemPrefersDark =
-      typeof window !== "undefined" &&
-      window.matchMedia(SYSTEM_DARK_MEDIA_QUERY).matches;
-    changes.isDark = resolveThemeModeIsDark(mode, systemPrefersDark);
-    return dispatch(setSettings(changes)).unwrap();
-  },
-);

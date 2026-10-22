@@ -1,20 +1,15 @@
 // app/theme/GlobalThemeController.tsx
 
 import { useEffect, useLayoutEffect, useMemo } from "react";
-import { useAppSelector } from "app/store";
+import { useDeviceThemeTokens } from "./useDeviceThemeTokens";
 import {
-  selectTheme,
-  selectIsDark,
-  selectThemeMode,
-  selectDensity,
-  selectThemeName,
-  selectFontPreset,
-} from "app/settings/settingSlice";
+  isServerAppearanceSnapshot,
+  useDeviceAppearanceSnapshot,
+} from "./storeDeviceAppearance";
 import { isRecord } from "core/isRecord";
 import {
   buildRootFontCss,
   clearInlineFontVariables,
-  FONT_PRESET_STORAGE_KEY,
 } from "./fontPreference";
 import { applyAgentThemeToElement } from "./agentTheme.stylex";
 
@@ -44,15 +39,21 @@ const generateCssString = (
 /**
  * 全局主题控制器。
  * 渲染 <style id="global-theme-variables"> 并由 React 管理更新（主题切换即时生效）。
- * useEffect 同步 localStorage，供 bootstrap 脚本在下次加载时立即注入正确主题（零闪烁）。
+ * 设备偏好写入只由 Owner Controller 负责，此组件不重复持久化。
  */
 const GlobalThemeController = () => {
-  const theme = useAppSelector(selectTheme);
-  const isDark = useAppSelector(selectIsDark);
-  const themeMode = useAppSelector(selectThemeMode);
-  const density = useAppSelector(selectDensity);
-  const themeName = useAppSelector(selectThemeName);
-  const fontPreset = useAppSelector(selectFontPreset);
+  const theme = useDeviceThemeTokens();
+  const appearanceSnapshot = useDeviceAppearanceSnapshot();
+  const isDark = appearanceSnapshot.isDark;
+  const density = appearanceSnapshot.density;
+  const themeName = appearanceSnapshot.themeName;
+  const fontPreset = appearanceSnapshot.fontPreset;
+
+  // Hydration's first pass renders the SSR-stable snapshot, while the server bootstrap
+  // has already painted the persisted appearance. Publishing this snapshot's defaults
+  // over that paint is exactly the light/dark flash we must not produce, so the layout
+  // effect stays silent until the external store synced browser-local preferences.
+  const liveSnapshot = !isServerAppearanceSnapshot(appearanceSnapshot);
 
   const cssString = useMemo(
     () => generateCssString(theme, buildRootFontCss(fontPreset)),
@@ -60,6 +61,8 @@ const GlobalThemeController = () => {
   );
 
   useIsomorphicLayoutEffect(() => {
+    if (!liveSnapshot) return;
+
     const existingTag = document.getElementById(STYLE_TAG_ID);
     const styleTag =
       existingTag instanceof HTMLStyleElement
@@ -82,15 +85,7 @@ const GlobalThemeController = () => {
     document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
     document.documentElement.setAttribute("data-density", density);
     applyAgentThemeToElement(document.documentElement, String(themeName), isDark);
-    try {
-      localStorage.setItem("nolo-theme-mode", themeMode);
-      localStorage.setItem("nolo-theme-name", String(themeName));
-      localStorage.setItem("nolo-density", density);
-      localStorage.setItem(FONT_PRESET_STORAGE_KEY, fontPreset);
-    } catch {
-      // 无痕模式或 localStorage 不可用时静默忽略
-    }
-  }, [cssString, isDark, themeMode, density, themeName, fontPreset]);
+  }, [cssString, isDark, density, themeName, liveSnapshot]);
 
   return null;
 };

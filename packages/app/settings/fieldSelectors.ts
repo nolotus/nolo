@@ -6,12 +6,6 @@
 
 import { createSelector } from "@reduxjs/toolkit";
 import type { RootState } from "app/store";
-import type { THEME_COLORS } from "app/theme/theme.config";
-import {
-  DEFAULT_FONT_PRESET,
-  type FontPreset,
-  normalizeFontPreset,
-} from "app/theme/fontPreference";
 import { DEFAULT_USER_PREFERENCE_PROFILE } from "ai/policy/types";
 import {
   DEFAULT_AUTO_APPROVED_SELF_UPDATE_FIELDS,
@@ -74,32 +68,8 @@ export const selectAutoApproveCredits = (state: RootState): number => {
   return Math.min(value, MEDIA_ALLOWANCE_MAX);
 };
 
-export const selectIsDark = (state: RootState): boolean =>
-  state.settings.isDark;
-
-export const selectThemeMode = (
-  state: RootState,
-): "system" | "light" | "dark" => state.settings.themeMode ?? "system";
-
-export const selectHeaderHeight = (state: RootState): number =>
-  state.settings.headerHeight;
-
-export const selectThemeName = (
-  state: RootState,
-): keyof typeof THEME_COLORS => state.settings.themeName;
-
-export const selectThemeFollowsSystem = (state: RootState): boolean =>
-  (state.settings.themeMode ?? "system") === "system";
-
-export const selectSidebarWidth = (state: RootState): number =>
-  state.settings.sidebarWidth;
-
-export const selectDensity = (
-  state: RootState,
-): "compact" | "spacious" => state.settings.density ?? "compact";
-
-export const selectFontPreset = (state: RootState): FontPreset =>
-  normalizeFontPreset(state.settings.fontPreset) ?? DEFAULT_FONT_PRESET;
+export const selectHeaderHeight = (state: RootState): number => state.settings.headerHeight;
+export const selectSidebarWidth = (state: RootState): number => state.settings.sidebarWidth;
 
 // --- AI / 上下文策略 ---
 

@@ -143,9 +143,11 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope }: { items: readonl
     setMenuAnchorEl(null);
   }, []);
 
+  const covText = coverageText(coverage, snapshot);
+
   return (
     <div data-hook="home-work-dialog-list">
-      <p role="status">{coverageText(coverage, snapshot)}</p>
+      {covText && <p role="status">{covText}</p>}
       {failedSharedSources > 0 && (
         <p role="status">共享历史有 {failedSharedSources} 个来源暂时查询失败；本人历史不受影响，可稍后重试。</p>
       )}
@@ -237,12 +239,12 @@ function statusLabel(runs: readonly WorkRunSignal[] | undefined, needsUserAction
   return "无运行记录";
 }
 
-function coverageText(coverage: WorkRunListCoverage, snapshot?: WorkRunListSnapshot): string {
-  if (coverage.status === "loading") return "正在检查运行列表范围…";
-  if (coverage.status === "error") return "运行列表查询失败或响应无效；状态可能不完整";
+function coverageText(coverage: WorkRunListCoverage, snapshot?: WorkRunListSnapshot): string | null {
+  if (coverage.status === "loading" || coverage.status === "complete") return null;
+  if (coverage.status === "error") return "运行列表暂时查询失败；未影响会话读取，状态稍后自动更新";
   const attributable = snapshot ? snapshot.attributableRunIds.size : 0;
   if (coverage.status === "partial") {
     return `运行列表仅加载 ${coverage.count}/${coverage.total} 条，其中 ${attributable} 条可归属到对话；未覆盖对话的运行状态未知，不会据此判定已结束`;
   }
-  return `运行列表查询返回 ${coverage.count}/${coverage.total} 条（本次查询范围完整），其中 ${attributable} 条可归属到对话`;
+  return null;
 }

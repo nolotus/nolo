@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { object, string, pipe, minLength, email, number, minValue, maxValue, optional } from "valibot";
 import { useForm } from "form/useForm";
 import { useAppSelector } from "app/store";
-import { selectTheme } from "app/settings/settingSlice";
+import { useWebTheme } from "app/theme/webTheme";
 import Button from "render/web/ui/Button";
 import { Input, NumberInput, PasswordInput } from "render/web/form/Input";
 import { TextArea } from "render/web/form/TextArea";
@@ -34,7 +34,7 @@ interface FormData {
 }
 
 const Lab = () => {
-  const theme = useAppSelector(selectTheme);
+  const theme = useWebTheme();
   const form = useForm<FormData>({
     schema: object({
       username: pipe(string(), minLength(1, "请输入用户名")),

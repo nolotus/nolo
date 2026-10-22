@@ -2,6 +2,7 @@ import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
 import { isAbortError } from "core/abortError";
 import { DataType } from "create/types";
 import { rowKey } from "database/keys";
+import { getIsDesktopApp } from "app/utils/env";
 
 /**
  * 服务器批量行读取上限，与 database/actions/common.ts 的 SERVER_TIMEOUT（5s）对齐。
@@ -107,6 +108,7 @@ const fetchTableRowsFromServer = async (
     const res = await fetchImpl(`${server}/rpc/listTableRows`, {
       method: "POST",
       headers,
+      credentials: "include",
       body: JSON.stringify({
         tenantId,
         tableId,
@@ -253,13 +255,19 @@ export const fetchAndCacheTableRows = async ({
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  if (typeof token === "string" && token.trim()) {
+    headers.Authorization = `Bearer ${token.trim()}`;
   }
+
+  // 架构减法：Web 纯网页模式只向当前主服务读取，不再向全部 remoteServers 盲目扇出并发
+  const isWebBrowser = typeof window !== "undefined" && !getIsDesktopApp();
+  const serversToQuery = isWebBrowser && remoteServers.length > 0
+    ? [remoteServers[0]]
+    : remoteServers;
 
   const localRows = await loadLocalTableRows(db, tenantId, tableId);
   const remoteResults = await Promise.allSettled(
-    remoteServers.map((server) =>
+    serversToQuery.map((server) =>
       fetchTableRowsFromServer(server, tenantId, tableId, headers, fetchImpl)
     )
   );
@@ -280,9 +288,9 @@ export const fetchAndCacheTableRows = async ({
   }
 
   const allRemoteSnapshotsComplete =
-    remoteServers.length > 0 &&
-    remoteResults.length === remoteServers.length &&
-    fulfilledRemoteSnapshots.length === remoteServers.length &&
+    serversToQuery.length > 0 &&
+    remoteResults.length === serversToQuery.length &&
+    fulfilledRemoteSnapshots.length === serversToQuery.length &&
     fulfilledRemoteSnapshots.every((snapshot) => snapshot.complete);
   const localRowsByKey = new Map(
     localRows

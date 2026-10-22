@@ -44,7 +44,7 @@ import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import { useGuestHomeTopbarTone } from "./guestHomeTone";
 import { getGuestNaturePage } from "./guestNaturePages";
 import ThemeToggleButton from "app/theme/web/ThemeToggleButton";
-import { useIsDark } from "app/theme";
+import { useWebIsDark as useIsDark } from "app/theme/webTheme";
 import CreateMenuButton from "./CreateMenuButtonContainer";
 import TopbarLocalPreviewToggle from "./TopbarLocalPreviewToggle";
 import "./naturePalette.css";

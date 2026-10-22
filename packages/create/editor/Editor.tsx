@@ -28,7 +28,8 @@ import { SpaceContent, Category, type Agent } from "app/types";
 import { type Element } from "./types";
 
 import { useAppSelector, useAppDispatch } from "app/store";
-import { selectEditorWordCountEnabled, selectEditorCodeTheme, } from "app/settings/settingSlice";
+import { selectEditorWordCountEnabled, } from "app/settings/settingSlice";
+import { useWebEditorCodeTheme } from "app/theme/webEditorCodeTheme";
 import { useFavoriteAgentIds } from "app/favorite/favoriteStore";
 import { read } from "database/dbSlice";
 import { setDocFocusContext } from "render/page/docStore";
@@ -162,7 +163,7 @@ const NoloEditor: React.FC<NoloEditorProps> = ({
 
   // 全局设置
   const wordCountEnabled = useAppSelector(selectEditorWordCountEnabled);
-  const editorCodeTheme = useAppSelector(selectEditorCodeTheme);
+  const editorCodeTheme = useWebEditorCodeTheme();
 
   // 本地状态
   const [wordCount, setWordCount] = useState(() => countWords(initialValue));

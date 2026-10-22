@@ -1,13 +1,12 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppDispatch, useAppSelector } from "app/store";
-import { changeDensity, selectDensity } from "app/settings/settingSlice";
+import { useStoreDeviceAppearance } from "../storeDeviceAppearance";
 import { LuAlignJustify, LuList } from "react-icons/lu";
 
 export const DensitySwitch: React.FC = () => {
   const { t } = useTranslation();
-  const dispatch = useAppDispatch();
-  const active = useAppSelector(selectDensity);
+  const { controller, snapshot } = useStoreDeviceAppearance();
+  const active = snapshot.density;
   const containerRef = useRef<HTMLDivElement>(null);
   const [slider, setSlider] = useState({ left: 0, width: 0 });
 
@@ -31,7 +30,7 @@ export const DensitySwitch: React.FC = () => {
           key={opt.v}
           className="mode-tab-item"
           data-active={active === opt.v}
-          onClick={() => dispatch(changeDensity(opt.v as "compact" | "spacious"))}
+          onClick={() => controller.updateAndPersist({ density: opt.v as "compact" | "spacious" })}
           aria-label={opt.l}
         >
           {opt.i}
