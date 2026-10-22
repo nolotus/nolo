@@ -61,8 +61,7 @@ export async function fetchSharedSpaceDialogPage(request: SharedSpaceDialogPageR
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   const response = await fetch(`${server}/api/v1/db/space/${encodeURIComponent(spaceId)}/dialog-page?${params}`, {
-    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-    body: JSON.stringify({ type: "dialog", summary: true, includeDeleted: true }),
+    method: "POST", headers: { Authorization: `Bearer ${authToken}` },
   });
   if (!response.ok) throw await requestError(response);
   const payload: unknown = await response.json();
