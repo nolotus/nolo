@@ -34,8 +34,17 @@ const codeOf = (error: unknown) => (error as CodedError | null)?.code;
  *   只把该来源标成可重试，并受控地重置它的游标（下一轮从第一页整体重拉）。
  */
 const INVALID_SPACE_ID = "Invalid spaceId";
-const isInvalidSpaceId = (error: unknown) => codeOf(error) === INVALID_SPACE_ID;
-/** 游标/请求形态类的 400（非 Invalid spaceId）：可恢复，需保留数据并重置游标重拉。 */
+/**
+ * 终态判定必须**同时**约束 status === 400：`error` 只是服务端 400 分支的说明，只看 code 会把非 400 的故障误判成终态。
+ * 各错误分支的实际归属（见 loadMore）：
+ * - `Invalid spaceId` 被判为终态仅此一种：400 + 该 code → 清该来源数据、停发该来源请求；
+ * - 401：全局清空全部数据、清失败/成功/restarting 集合、全部游标置 null；
+ * - 403：单来源撤权 → 清该来源数据、停发该来源请求；
+ * - 400 非该 code（含读不出 code）：游标/请求形态非法 → 保留数据、重置游标从第一页重拉；
+ * - 除上述 401/403 外的其它状态（含无 status，以及携带该 code 的非 400 状态）：普通可重试故障，保留数据与原游标。
+ */
+const isInvalidSpaceId = (error: unknown) => statusOf(error) === 400 && codeOf(error) === INVALID_SPACE_ID;
+/** 游标/请求形态类的 400（非 Invalid spaceId，含读不出 code 的 400）：可恢复，需保留数据并重置游标重拉。 */
 const isStaleCursor = (error: unknown) => statusOf(error) === 400 && !isInvalidSpaceId(error);
 /** 403 = 成员权限被撤销：保持既有撤销语义（清该来源已加载数据并停止请求）。 */
 const isRevoked = (error: unknown) => statusOf(error) === 403;
