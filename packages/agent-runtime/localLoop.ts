@@ -83,6 +83,10 @@ import type {
 } from "./executionObservation";
 import type { ContextBlockScope } from "./contextBlockScope";
 import { normalizeContextBlockScopes } from "./contextBlockScope";
+import {
+  resolveResponseGuidelines,
+  type ResponseViewport,
+} from "./responseGuidelines";
 import { resolveAgentContextWindow } from "./devin/devinChannelWindows";
 import { createTurnCompactionController } from "./localAutoCompaction";
 import { isolateInboundContent } from "./inboundCredentialVault";
@@ -144,6 +148,12 @@ export type LocalAgentTurnInput = {
   runtimeContext?: Record<string, any> | null;
   /** Dispatched leaf runs receive parent-facing final-response guidance. */
   runKind?: "interactive" | "subtask";
+  /**
+   * 宿主可确认的展示能力：narrow（窄屏终端/TUI）、wide（宽屏桌面）、
+   * unknown（默认；拿不到视口信息：非交互 CLI、后台 run、管道、桌面 runtime）。
+   * 行为段恒注入，排版段只在能力已知时注入一份——无法确认时不要猜。
+   */
+  responseViewport?: ResponseViewport;
   timeoutMs?: number;
   background?: boolean;
   noStream?: boolean;
@@ -961,6 +971,22 @@ export async function runLocalAgentTurn(
     input.contextBlocks,
     input.contextBlockScopes,
   );
+  // 回复准则集合经单一入口解析：行为和排版都来自同一处真值，
+  // 宿主只声明能力（input.responseViewport），不自己拼准则文本。
+  const responseGuidelines = resolveResponseGuidelines(
+    input.responseViewport ?? "unknown",
+  );
+  const responseGuidelineScopes: ContextBlockScope[] = [
+    { content: responseGuidelines.behavior, cacheScope: "session" as const },
+    ...(responseGuidelines.presentation.trim().length > 0
+      ? [
+          {
+            content: responseGuidelines.presentation,
+            cacheScope: "session" as const,
+          },
+        ]
+      : []),
+  ];
   const mergedContextBlockScopes: ContextBlockScope[] = [
     // 删除安全红线：系统层最高优先级约束，位于所有块之前（含身份信息块），
     // owner 要求常驻「根本提示词」的最顶部（2026-09-26 批量误删事故）。
@@ -975,6 +1001,10 @@ export async function runLocalAgentTurn(
     { content: buildConsultationModeBlock(), cacheScope: "session" as const },
     { content: identityBlock, cacheScope: "session" as const },
     ...guidanceScopes,
+    // 回复行为准则：local 线（CLI 非交互 / 桌面 / TUI）的唯一注入边界。
+    // 行为段恒注入；排版段只在宿主声明了可确认的展示能力时追加一份
+    // （unknown = 拿不到视口信息，不得猜成宽屏或窄屏）。两块同属 session scope。
+    ...responseGuidelineScopes,
     ...callerScopes,
   ];
   loopTiming.mark("buildContextBlocks", 0);

@@ -27,7 +27,6 @@ import { resolveSkillReference, buildSkillContextBlocks } from "../agentRunPromp
 import { buildSkillDiscoveryContextLayer } from "../../agent-runtime/skillDiscovery";
 import { buildHostEnvironmentLayer } from "../../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
-import { buildResponseGuidelines } from "../../agent-runtime/responseGuidelines";
 import {
   buildMemoryOverlayLayer,
   buildMemoryUseGuidanceLayer,
@@ -87,6 +86,10 @@ import {
   type TurnRequest,
 } from "core/chat/internalTurnEvent";
 import { DEFAULT_TUI_AGENT_KEY, type TuiState } from "./session";
+// TUI 是窄屏终端：context chip 的估算按窄屏口径计一份排版段，才不会低估。
+// 取值与 runtime 调用点共用 TUI_RESPONSE_VIEWPORT（见 ./responseViewport），
+// 不在这里另立字面量——两处必须始终是同一个能力，否则估算与注入对不上。
+import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
 import type { AttachedImage } from "./pasteImage";
 import type { ClipboardImageDeps } from "./clipboardImage";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
@@ -315,12 +318,9 @@ async function runAgentChat(
     buildHostEnvironmentLayer(),
   ];
 
-  // 响应展示指南（窄屏/TUI 版）：与 buildSystemPrompt 共享同一 builder
-  // （agent-runtime/responseGuidelines），此前只注入 server/web 路径。
-  const responseGuidelinesBlock: ContextBlockScope = {
-    content: buildResponseGuidelines(true),
-    cacheScope: "session",
-  };
+  // 响应展示指南（窄屏/TUI 版）不再由宿主自拼：宿主只声明展示能力
+  // （下方传给 runtime 的 responseViewport = TUI_RESPONSE_VIEWPORT），行为段与
+  // 排版段都由 localLoop 这个最终装配边界经 resolveResponseGuidelines 统一注入，各一份。
 
   // Memory overlay: session-scoped — load once per dialog, reuse across turns.
   // New memories written via rememberMemory tool are for FUTURE dialogs, not
@@ -377,7 +377,6 @@ async function runAgentChat(
 
   const contextBlockScopes: ContextBlockScope[] = partitionScopedBlocks([
     ...renderTurnContextBlocksWithScope(layers),
-    responseGuidelinesBlock,
     ...renderTurnContextBlocksWithScope([memoryUseGuidanceLayer]),
     // Attached skill bodies are already self-contained sections built by
     // buildSkillContextBlocks; they stay turn-scope because the user can
@@ -419,6 +418,10 @@ async function runAgentChat(
       ? { dialogAgentMode: "auto" as const }
       : { dialogAgentMode: "fixed" as const }),
     runtimeMode: state.runtimeMode,
+    // TUI 是窄屏终端：只声明展示能力，不自拼准则文本。行为段与窄屏排版段
+    // 都由 localLoop（local 线的最终装配边界）经 resolveResponseGuidelines 注入。
+    // 若该轮走远端 server 线，local 线不参与装配，此字段被忽略（server 线自己注入行为段）。
+    responseViewport: TUI_RESPONSE_VIEWPORT,
     // `/lang` updates the in-memory TUI state immediately. Pass that state
     // explicitly so the next real turn cannot keep using the workspace's
     // launch-time NOLO_LANG value while the estimator already uses the new one.
@@ -1230,6 +1233,7 @@ export async function runOneAgentTurn(
         agentKey: ctx.state.agentKey,
         agentName: ctx.state.agentName,
         userLanguage: ctx.state.userLanguage,
+        responseViewport: TUI_RESPONSE_VIEWPORT,
         messages: ctx.history.turns,
         ...resolveAgentModelIdentity({
           agentKey: ctx.state.agentKey,
@@ -1540,6 +1544,7 @@ export async function runOneAgentTurn(
               agentKey: ctx.state.agentKey,
               agentName: ctx.state.agentName,
               userLanguage: ctx.state.userLanguage,
+              responseViewport: TUI_RESPONSE_VIEWPORT,
               messages: ctx.history.turns,
             }),
             lastAuthorityTurnCount: undefined,

@@ -23,6 +23,10 @@ import { CREDENTIAL_HYGIENE_RULE } from "../../agent-runtime/credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "../../agent-runtime/parallelDispatchDefault";
 import { PLATFORM_RISK_CONTROL_RULE } from "../../agent-runtime/platformRiskControl";
 import { buildConsultationModeBlock } from "../../agent-runtime/consultationMode";
+import {
+  resolveResponseGuidelines,
+  type ResponseViewport,
+} from "../../agent-runtime/responseGuidelines";
 import { buildUserResponseLanguageContext } from "../../agent-runtime/userResponseLanguage";
 import {
   buildLocalWorkspaceOpenAiTools,
@@ -81,11 +85,8 @@ function estimateToolSchemas(toolNames: string[]): number {
   return estimateTokenCount(JSON.stringify([...workspaceTools, ...platformTools]));
 }
 
-/**
- * Estimate built-in context for the default CLI surface (flash tier).
- * Includes identity / guidance / time / AGENTS.md / skill index / tool schemas.
- */
-export function estimateDefaultCliContextTokens(opts: {
+/** 估算器接受的入参（导出是为了让测试与调用方共用同一份形状）。 */
+export type CliContextEstimateOptions = {
   cwd?: string;
   agentName?: string;
   agentKey?: string;
@@ -96,7 +97,29 @@ export function estimateDefaultCliContextTokens(opts: {
   messages?: readonly { role?: string; content?: unknown }[];
   /** 纯文本历史或拼接内容 */
   historyText?: string;
-} = {}): number {
+  /**
+   * 宿主的展示能力：决定是否把「响应展示指南」排版段计入估算。
+   *
+   * 默认 `"unknown"` 只计行为段；显式 narrow/wide 时另计一份对应排版段，与相同能力的
+   * local 装配一致。远端 server 当前固定 unknown，TUI 使用 narrow 估算时会多计一份
+   * 排版段；本函数不保证最终请求 token 精确相等。
+   *
+   * 调用方目前只有 TUI（context chip 的基线估算，见 packages/cli/tui/*），TUI 的
+   * 每个调用点都显式传 `TUI_RESPONSE_VIEWPORT`（narrow），与发给 runtime 的能力同源。
+   */
+  responseViewport?: ResponseViewport;
+};
+
+/**
+ * 组装「估算所依据的系统提示词文本」。
+ *
+ * 与 token 估算拆开，是为了让估算口径可被测试直接断言（哪一段在、哪一段不在），
+ * 而不是只对着一个数字猜。`estimateDefaultCliContextTokens` 就是它 + 工具 +
+ * 历史的 token 和。
+ */
+export function buildCliEstimateSystemText(
+  opts: CliContextEstimateOptions = {},
+): string {
   const cwd = opts.cwd?.trim() || process.cwd();
   // 兜底 = 默认档 nolo，全部从 builtinAgentCatalog 派生。这三行曾手抄
   // "deepseek-v4-flash" / "DeepSeek V4 Flash" / "agent-pub-deepseek-v4-flash"，
@@ -118,6 +141,15 @@ export function estimateDefaultCliContextTokens(opts: {
   // Same table the runtimes inject, so the estimate tracks the orchestration /
   // review-gate sections too.
   const toolSections = resolveToolGuidedSections(toolNames);
+
+  // 回复准则：与装配线同一个入口（resolveResponseGuidelines），按宿主能力取。
+  // 默认 unknown 只计行为段；显式 narrow/wide 时另计一份对应排版段，与相同能力的
+  // local 装配一致。远端 server 当前固定 unknown，TUI 使用 narrow 估算时会多计一份
+  // 排版段；本函数不保证最终请求 token 精确相等。
+  const responseGuidelines = resolveResponseGuidelines(
+    opts.responseViewport ?? "unknown",
+  );
+
   const systemParts = [
     // 与实际装配线一致：删除安全红线是系统提示词的最顶层块。
     DELETE_SAFETY_RED_LINE,
@@ -138,13 +170,34 @@ export function estimateDefaultCliContextTokens(opts: {
     guidance.contextLayerContract,
     guidance.emailRegistrationWorkflow,
     ...Object.values(toolSections),
+    responseGuidelines.behavior,
+    responseGuidelines.presentation,
     readAgentsMd(cwd),
     buildSkillDiscoveryContextBlock(cwd) ?? "",
   ];
 
-  const systemTokens = estimateTokenCount(
-    systemParts.filter((part) => part?.trim()).join("\n\n"),
-  );
+  return systemParts.filter((part) => part?.trim()).join("\n\n");
+}
+
+/**
+ * Estimate built-in context for the default CLI surface (flash tier).
+ * Includes identity / guidance / time / AGENTS.md / skill index / tool schemas.
+ *
+ * 调用方目前只有 TUI（context chip）；TUI 的每个调用点都显式传
+ * `responseViewport: TUI_RESPONSE_VIEWPORT`（narrow），与发给 runtime 的能力同源。
+ * 未传时按 unknown 口径只计行为段。默认 unknown 只计行为段；显式 narrow/wide 时另计
+ * 一份对应排版段，与相同能力的 local 装配一致。远端 server 当前固定 unknown，TUI 使用
+ * narrow 估算时会多计一份排版段；本函数不保证最终请求 token 精确相等。
+ */
+export function estimateDefaultCliContextTokens(
+  opts: CliContextEstimateOptions = {},
+): number {
+  const toolNames = canonicalizeToolNames([
+    ...canonicalizeToolNames(expandEnabledPacks([...DEFAULT_CLI_PACKS], [])),
+    ...DEFAULT_CLI_PLATFORM_TOOLS,
+  ]);
+
+  const systemTokens = estimateTokenCount(buildCliEstimateSystemText(opts));
   const toolTokens = estimateToolSchemas(toolNames);
   // 守卫：若同时传入 messages 与 historyText，优先使用结构化的 messages（estimateMessagesTokens），避免双计历史。
   const historyTokens =

@@ -32,6 +32,7 @@ import {
   resolveAgentModelIdentity,
 } from "../client/tokenUsage";
 import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
+import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { ulid } from "ulid";
 import { formatElapsedSeconds, renderContextPanel, renderCreditsDebug, renderKnownAgents, renderTuiHelp } from "./sessionRender";
@@ -117,6 +118,7 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
       cwd,
       agentKey,
       userLanguage: asOptionalTrimmedString(env.NOLO_LANG),
+      responseViewport: TUI_RESPONSE_VIEWPORT,
       ...resolveAgentModelIdentity({ agentKey, agentName }),
     }),
   };
@@ -161,6 +163,7 @@ function applyAgentSwitch(
         agentName: target.name,
         model: target.model,
         userLanguage: state.userLanguage,
+        responseViewport: TUI_RESPONSE_VIEWPORT,
         messages: historyTurns,
       }),
     },
@@ -641,6 +644,7 @@ export function handleTuiInput(
             cwd: state.cwd,
             agentKey: state.agentKey,
             userLanguage: locale,
+            responseViewport: TUI_RESPONSE_VIEWPORT,
             messages: historyTurns,
             ...resolveAgentModelIdentity({
               agentKey: state.agentKey,

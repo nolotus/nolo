@@ -261,6 +261,13 @@ export type RunAgentTurnOptions = {
   env: EnvLike;
   output: OutputLike;
   runtimeMode?: AgentRuntimeRequestedMode;
+  /**
+   * 宿主可确认的展示能力（仅 local 线消费；类型真值见
+   * agent-runtime/responseGuidelines 的 ResponseViewport）：narrow=TUI/终端，
+   * wide=宽屏桌面，unknown=无法确认（非交互 CLI、后台、管道、桌面 runtime）。
+   * 缺省等价 unknown。server 线不读该字段（它自己注入行为段）。
+   */
+  responseViewport?: "wide" | "narrow" | "unknown";
   runtimeKey?: string;
   dockerWorkspaceMode?: "git" | "empty";
   localRuntimeAdapter?: AgentRuntimeHostAdapter;

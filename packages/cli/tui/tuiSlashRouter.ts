@@ -30,6 +30,7 @@ import {
   resolveAgentModelIdentity,
 } from "../client/tokenUsage";
 import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
+import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
 import { compactDialog } from "../client/compactDialog";
 import {
   saveProfileLocale,
@@ -298,6 +299,7 @@ export async function runSubmittedSlashLine(
         cwd: host.state.cwd,
         agentKey: host.state.agentKey,
         userLanguage: host.state.userLanguage,
+        responseViewport: TUI_RESPONSE_VIEWPORT,
         ...resolveAgentModelIdentity({
           agentKey: host.state.agentKey,
           agentName: host.state.agentName,
@@ -408,6 +410,7 @@ export async function runSubmittedSlashLine(
           cwd: host.state.cwd,
           agentKey: host.state.agentKey,
           userLanguage: host.state.userLanguage,
+          responseViewport: TUI_RESPONSE_VIEWPORT,
           messages: [
             ...(compactResult.summary ? [{ role: "system", content: compactResult.summary }] : []),
             ...(compactResult.compactedMessageCount > 0
@@ -565,6 +568,7 @@ export async function runSubmittedSlashLine(
             agentName: pickResult.name,
             model: pickResult.model,
             userLanguage: host.state.userLanguage,
+            responseViewport: TUI_RESPONSE_VIEWPORT,
             messages: host.history.turns,
           }),
           turnTokens: undefined,
@@ -722,6 +726,7 @@ export async function runSubmittedSlashLine(
             agentKey: host.state.agentKey,
             agentName: host.state.agentName,
             userLanguage: host.state.userLanguage,
+            responseViewport: TUI_RESPONSE_VIEWPORT,
             messages: history.turns,
             ...resolveAgentModelIdentity({
               agentKey: host.state.agentKey,

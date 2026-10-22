@@ -882,6 +882,12 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
           consume: () => { throw new Error("Shell approval agent binding mismatch"); } } } : {}),
     agentName: targetAgentKey,
     agentKey: targetAgentKey,
+    // 当前执行链未提供可靠的最终展示能力，按约定使用 unknown（只注入行为段，不猜
+    // 宽/窄屏；`stdout.isTTY` 只说明是不是终端，说明不了宽度）。这不表示宿主永远
+    // 无法获得尺寸：将来接入时应传展示能力，不应由调用方拼接准则文本。
+    // 放在 buildRunOptions 这个唯一构造点上，首轮 / quota fallback / 队列 drain
+    // 三处 runner(...) 调用自动一致；远端分支走 server 线，不读该字段。
+    responseViewport: "unknown" as const,
     serverUrl: resolveServerUrl(env),
     message: formatTurnMessage(turnMessage),
     imageUrls: parsed.imageUrls.map(normalizeCliImageInput),

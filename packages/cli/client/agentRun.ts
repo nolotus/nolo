@@ -2304,6 +2304,11 @@ async function runLocalAgentTurnForCliWithAdapter(
       parentDialogId: options.parentDialogId,
       runtimeContext: runtimeContextWithOwnership,
       runKind: options.env.NOLO_AGENT_RUN_CHILD === "1" ? "subtask" : "interactive",
+      // 展示能力由宿主声明（TUI=narrow），非交互 CLI/后台留空 → unknown；
+      // 排版段只在能力已知时由 localLoop 注入，server 线不读该字段。
+      ...(options.responseViewport
+        ? { responseViewport: options.responseViewport }
+        : {}),
       background: options.background,
       noStream: options.noStream,
       ...(options.contextBlockScopes?.length

@@ -11,6 +11,7 @@ import { handleTuiInput as handleBaseTuiInput } from "./sessionDispatch";
 import { TUI_LEARN_REVIEW_PROMPT } from "./learnPrompt";
 import { resolveAgentContextWindow } from "../client/tokenUsage";
 import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
+import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
 
 /** Apply an already validated target; runtime cache/persistence belong to the host. */
 export function applyAgentSwitchState(
@@ -26,6 +27,7 @@ export function applyAgentSwitchState(
     estimatedContextTokens: estimateDefaultCliContextTokens({
       cwd: state.cwd, agentKey: target.key, agentName: target.name,
       model: target.model, userLanguage: state.userLanguage,
+      responseViewport: TUI_RESPONSE_VIEWPORT,
       messages,
     }),
     turnTokens: undefined,
