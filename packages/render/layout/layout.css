@@ -112,8 +112,7 @@ html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
   position: relative;
   z-index: var(--z-sidebar, 6);
   overflow: hidden;
-  --sidebar-ambient-glow: color-mix(in srgb, var(--primary) 13%, transparent);
-  background: radial-gradient(circle at 12% 8%, var(--sidebar-ambient-glow) 0%, transparent 65%), var(--backgroundSecondary);
+  background: var(--backgroundSecondary);
   box-shadow:
     1px 0 0 0 rgba(0, 0, 0, 0.018),
     3px 0 8px -1px rgba(0, 0, 0, 0.02),
@@ -132,10 +131,6 @@ html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
     -1px 0 0 0 rgba(0, 0, 0, 0.018),
     -3px 0 8px -1px rgba(0, 0, 0, 0.02),
     -6px 0 16px -3px rgba(0, 0, 0, 0.015);
-}
-
-[data-theme="dark"] .MainLayout__sidebar {
-  --sidebar-ambient-glow: color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
 .MainLayout__sidebarContent {
