@@ -206,7 +206,13 @@ function SidebarItemRow({
       routeContentKey &&
       !entity
     ) {
-      dispatch(read({ dbKey: routeContentKey, preferredServerOrigin: sourceServerOrigin }));
+      dispatch(read({
+        dbKey: routeContentKey,
+        preferredServerOrigin: sourceServerOrigin,
+        // App summaries may synthesize sourceServerOrigin from currentServer.
+        // Without the original record that is only a routing hint, not evidence.
+        authoritativeServerOrigin: type === "app" ? undefined : sourceServerOrigin,
+      }));
     }
   }, [type, routeContentKey, entity, sourceServerOrigin, dispatch, disableAutoRead]);
 

@@ -167,6 +167,8 @@ export const readAction = async (
     dbKey: string;
     signal?: AbortSignal;
     preferredServerOrigin?: string | null;
+    /** Record-level origin evidence only; user authority registry entries are hints. */
+    authoritativeServerOrigin?: string | null;
   },
   thunkApi: DbThunkApi,
 ): Promise<any> => {
@@ -224,7 +226,7 @@ export const readAction = async (
       authorityServer: preferredServerOrigin ?? authority.authorityServer,
       serverOrigin: authority.serverOrigin,
     });
-    const { preferredServer, fallbackServers, orderedServersForLocalHit } =
+    let { preferredServer, fallbackServers, orderedServersForLocalHit } =
       partitionReadServers({
         allServers: authorityPlannedServers,
         preferredServerOrigin:
@@ -248,8 +250,24 @@ export const readAction = async (
       }
     }
 
+    let authoritativeServerOrigin: string | null = null;
+    if (typeof payload.authoritativeServerOrigin === "string") {
+      try {
+        const origin = new URL(payload.authoritativeServerOrigin.trim());
+        if (
+          (origin.protocol === "https:" || origin.protocol === "http:") &&
+          origin.pathname === "/" && !origin.search && !origin.hash &&
+          !origin.username && !origin.password
+        ) {
+          authoritativeServerOrigin = origin.origin;
+        }
+      } catch {
+        // Invalid evidence is unknown ownership: retain the existing fan-out.
+      }
+    }
+
     // 离线 / 无可用远程服务器：只看本地
-    if (authorityPlannedServers.length === 0) {
+    if (authorityPlannedServers.length === 0 && (localData || !authoritativeServerOrigin)) {
       if (localData) {
         if (isDialogKey) {
           console.info("[readAction-perf] dialog offline-local-hit", {
@@ -307,6 +325,11 @@ export const readAction = async (
         });
       }
       return normalizeReadRecord(dbKey, localData);
+    }
+
+    if (authoritativeServerOrigin) {
+      preferredServer = authoritativeServerOrigin;
+      fallbackServers = [];
     }
 
     if (preferredServer) {

@@ -214,6 +214,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
                 return <div key={item.contentKey}>
                   <SidebarItemRow
                     contentKey={item.contentKey}
+                    sourceServerOrigin={item.serverOrigin}
                     type={type}
                     title={item.title || item.contentKey}
                     isActive={isRoutableContentActive({ contentKey: item.contentKey, type, userId, spaceId: currentSpaceId, currentPath: location.pathname })}
@@ -312,10 +313,10 @@ function statusLabel(runs: readonly WorkRunSignal[] | undefined, needsUserAction
 
 function coverageText(coverage: WorkRunListCoverage, snapshot?: WorkRunListSnapshot): string | null {
   if (coverage.status === "loading" || coverage.status === "complete") return null;
-  if (coverage.status === "error") return "运行列表暂时查询失败；未影响会话读取，状态稍后自动更新";
-  const attributable = snapshot ? snapshot.attributableRunIds.size : 0;
+  if (coverage.status === "error") return "部分对话的最新进展暂时查不到，稍后会自动更新";
   if (coverage.status === "partial") {
-    return `已读取 ${coverage.count}/${coverage.total} 条运行记录，其中 ${attributable} 条已匹配到对话。其余对话的运行状态暂不确定，不代表已经结束。`;
+    // 不暴露内部计数，也不承诺完整：只说明有一部分对话的进展暂时无法确定。
+    return "有些对话的最新进展暂时看不到，还不能确定是否已结束。";
   }
   return null;
 }
