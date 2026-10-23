@@ -133,6 +133,8 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
               categoryId={item.categoryId ?? undefined}
               spaceIdOverride={itemSpaceId}
               sourceServerOrigin={item.serverOrigin}
+              summaryStatus={"status" in item ? item.status : undefined}
+              summaryUnreadAt={"unreadAt" in item ? item.unreadAt : undefined}
               disableDrag
               isActive={isRoutableContentActive({
                 contentKey: item.contentKey,

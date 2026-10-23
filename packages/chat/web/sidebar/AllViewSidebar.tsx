@@ -241,6 +241,8 @@ const RecentVirtualList: React.FC<{
               title={item.title || t("unnamed")}
               spaceIdOverride={item.spaceId}
               sourceServerOrigin={item.serverOrigin}
+              summaryStatus={"status" in item ? item.status : undefined}
+              summaryUnreadAt={"unreadAt" in item ? item.unreadAt : undefined}
               disableDrag
               isActive={isRoutableContentActive({
                 contentKey: item.contentKey,

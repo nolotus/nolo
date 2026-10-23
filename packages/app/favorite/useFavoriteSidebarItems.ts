@@ -3,14 +3,10 @@
 //
 // 只显示显式收藏（key 在 favoriteStore 里）的内容；不做「收藏的 agent 的
 // 会话」这类推导（owner 2026-07-29 定：收藏区域只显示收藏数据）。
-// 窗口内的收藏项保留原 filter 行为；窗口外的 key 通过 dispatch(read)
-// 补拉 redux 实体后构建 item，加载完自然补上。
-//
-// 模式照抄 packages/ai/agent/web/FavoritesCollection.tsx 的 selectById + dispatch(read)。
+// 窗口内保留摘要；窗口外只使用已有缓存，无缓存时显示中性占位，不发实体单读。
 
-import { useEffect, useMemo } from "react";
-import { useAppDispatch, useAppSelector } from "app/store";
-import { read } from "database/dbSlice";
+import { useMemo } from "react";
+import { useAppSelector } from "app/store";
 import {
   useFavoriteAgentIds,
   useFavoriteContentIds,
@@ -20,6 +16,7 @@ import type { MyContentListItem } from "app/utils/myContentItems";
 
 /** key 前缀 → type 推断表，实体缺 type 时回退用 */
 const inferTypeFromKey = (key: string): string => {
+  if (key.startsWith("app-")) return "app";
   if (key.startsWith("dialog-")) return "dialog";
   if (key.startsWith("page-")) return "page";
   if (key.startsWith("meta-")) return "table";
@@ -36,7 +33,6 @@ const inferTypeFromKey = (key: string): string => {
 export const useFavoriteSidebarItems = (
   recentItems: MyContentListItem[],
 ): MyContentListItem[] => {
-  const dispatch = useAppDispatch();
   const agentIds = useFavoriteAgentIds();
   const contentIds = useFavoriteContentIds();
   const favoritedAtById = useFavoriteFavoritedAtById();
@@ -72,17 +68,8 @@ export const useFavoriteSidebarItems = (
     return result;
   }, [outsideKeys, dbEntities]);
 
-  // 补拉缺失的实体（实体未到位的 key 暂不出现，加载完自然补上）
-  useEffect(() => {
-    if (outsideKeys.length === 0) return;
-    for (const key of outsideKeys) {
-      if (!outsideEntities[key]) {
-        void dispatch(read({ dbKey: key }));
-      }
-    }
-    // 依赖 outsideKeys 即可；outsideEntities 随 redux 更新触发重渲染
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outsideKeys]);
+  // Do not hydrate full entities for sidebar decoration. Missing summaries use
+  // a neutral title/type placeholder until normal content navigation loads them.
 
   // ── 窗口内收藏项（只认显式收藏 key，无推导）──
   const insideItems = useMemo(
@@ -94,11 +81,9 @@ export const useFavoriteSidebarItems = (
   const outsideItems = useMemo<MyContentListItem[]>(() => {
     const items: MyContentListItem[] = [];
     for (const key of outsideKeys) {
-      const entity = outsideEntities[key];
-      if (!entity) continue; // 实体未到位前暂不出现
+      const entity = outsideEntities[key] ?? {};
       const type = entity.type || inferTypeFromKey(key);
-      // 实体已在 redux（上面的 !entity 挡住了未加载项），但 name/title 字段
-      // 可能尚未就绪（如 agent 实体到位但 name 还在 hydrate）。此时 title 留空，
+      // 无缓存或尚无 name/title 时 title 留空，
       // 由 SidebarItemRow/SidebarPinnedBlock 兜底显示本地化「未命名」，
       // 避免退化回显示原始 dbKey（如 agent-xxx）导致切换视图时名字/头像闪烁。
       const resolvedTitle =

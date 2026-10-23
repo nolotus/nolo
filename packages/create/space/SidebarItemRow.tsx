@@ -71,7 +71,7 @@ import { extractCustomId } from "core/prefix";
 import InlineEditInput from "render/web/ui/InlineEditInput";
 import { parseDialogKey } from "database/dialogKey";
 import { dialogSummaryStatus, dialogSummaryUnreadAt } from "app/utils/myContentItems";
-import { selectEntities, read } from "database/dbSlice";
+import { selectEntities } from "database/dbSlice";
 import AgentAvatar from "ai/agent/web/AgentAvatar";
 import ContentIcon from "render/contentIcon/ContentIcon";
 
@@ -96,7 +96,7 @@ export interface SidebarItemRowProps {
   disableDrag?: boolean;
   /** Navigation-only row: no owner actions, editing, dragging or local visit/read writes. */
   readOnly?: boolean;
-  /** Skip automatic entity hydration for summary-only rows; navigation still loads normally. */
+  /** Compatibility flag: all summary rows now skip hydration; navigation still loads normally. */
   disableAutoRead?: boolean;
   /** style prop for outer div (e.g. height from ListLayout) */
   style?: React.CSSProperties;
@@ -145,7 +145,6 @@ function SidebarItemRow({
   onSelectItem,
   disableDrag,
   readOnly = false,
-  disableAutoRead = false,
   style,
   onMenuAnchorChange,
   editSignal,
@@ -196,25 +195,8 @@ function SidebarItemRow({
     return selectEntities(state)[routeContentKey];
   });
 
-  // lazy-load entity data on first render
-  // dialog 也需加载，用于读取持久化 status/unreadAt 驱动侧边栏未读点。
-  useEffect(() => {
-    if (
-      !disableAutoRead &&
-      (type === "agent" || type === "page" ||
-       type === "table" || type === "app" || type === "dialog") &&
-      routeContentKey &&
-      !entity
-    ) {
-      dispatch(read({
-        dbKey: routeContentKey,
-        preferredServerOrigin: sourceServerOrigin,
-        // App summaries may synthesize sourceServerOrigin from currentServer.
-        // Without the original record that is only a routing hint, not evidence.
-        authoritativeServerOrigin: type === "app" ? undefined : sourceServerOrigin,
-      }));
-    }
-  }, [type, routeContentKey, entity, sourceServerOrigin, dispatch, disableAutoRead]);
+  // Summary rows never hydrate full entities. Cached decorations are optional;
+  // navigation is responsible for loading the actual content.
 
   // dialog status for unread dot / status badge
   const dialogId = type === "dialog" ? extractCustomId(routeContentKey) : null;
@@ -240,8 +222,8 @@ function SidebarItemRow({
     : canUseSummary ? dialogSummaryStatus(summaryStatus) : undefined;
   const persistedUnreadAt = entityUnreadAt !== undefined ? entityUnreadAt
     : canUseSummary ? dialogSummaryUnreadAt(summaryUnreadAt) : undefined;
-  const isUnread = sseUnread !== undefined ? sseIsUnread
-    : typeof persistedUnreadAt === "number" && persistedUnreadAt > 0;
+  const isUnread = canUseSummary && (sseUnread !== undefined ? sseIsUnread
+    : typeof persistedUnreadAt === "number" && persistedUnreadAt > 0);
 
   // space event status (background/automation) OR live local generation loop.
   // Wave9: controllers live in dialogRuntimeStore — must use the hook to subscribe.
