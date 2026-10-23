@@ -836,7 +836,7 @@ export const messageInputStyles = stylex.create({
     height: "4px",
     borderRadius: "999px",
     backgroundColor: "var(--borderMuted, var(--border))",
-    opacity: 0.2,
+    opacity: 0.6,
     pointerEvents: "none",
     transition:
       "background-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease, width 0.15s ease",
