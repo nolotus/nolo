@@ -1,13 +1,16 @@
+import { resolveAgentContextWindow } from "ai/context/agentContextWindow";
 import { extractCustomId } from "core/prefix";
 import { useMemo, useRef } from "react";
 import { useAppSelector } from "app/store";
 import type { Agent } from "app/types";
 import { selectAllMsgs } from "chat/messages/messageSlice";
 import { useCurrentDialogKey, useDialogProviderInput } from "./dialogRuntimeStore";
-import { advanceContextOccupancy, estimateCachedHistory, resolveKnownContextWindow, type HistoryCache, type OccupancyBaseline } from "./dialogContextUsage";
+import { advanceContextOccupancy, estimateCachedHistory, type HistoryCache, type OccupancyBaseline } from "./dialogContextUsage";
+
+export type ContextWindowState = "known" | "unknown" | "loading";
 
 /** Subscribes to message entity updates, including streamed content updates. */
-export function useDialogContextUsage(agent?: Agent | null, summary?: string) {
+export function useDialogContextUsage(agent?: Agent | null, summary?: string, opts?: { isLoading?: boolean }) {
   const key = useCurrentDialogKey();
   const usage = useDialogProviderInput(key);
   const messages = useAppSelector((state: any) => selectAllMsgs(state, key ? extractCustomId(key) : null));
@@ -18,5 +21,14 @@ export function useDialogContextUsage(agent?: Agent | null, summary?: string) {
   const baseline = useRef<OccupancyBaseline | undefined>(undefined);
   const next = advanceContextOccupancy(baseline.current, { key, authority: usage, history: history.tokens, messages, systemAndTools });
   baseline.current = next.baseline;
-  return { ...next.occupancy, contextWindow: resolveKnownContextWindow(agent ?? {}) };
+  const contextWindow = resolveAgentContextWindow({
+    model: agent?.model,
+    provider: agent?.provider,
+    agentKey: agent?.key ?? agent?.id,
+    agentName: agent?.name,
+  });
+  const windowState: ContextWindowState = opts?.isLoading
+    ? "loading"
+    : contextWindow !== undefined ? "known" : "unknown";
+  return { ...next.occupancy, contextWindow, windowState };
 }

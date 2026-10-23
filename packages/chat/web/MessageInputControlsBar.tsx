@@ -19,6 +19,8 @@ export type MessageInputControlsBarProps = {
   sendDisabled: boolean;
   /** 可选：对象助手面板的 composer agent 切换器；不传则不渲染。 */
   agentPicker?: AgentPickerControlProps;
+  /** 可选：上下文用量入口插槽（DialogUsageTrigger），渲染在 controlsRight 内、Send/Voice 按钮左侧 */
+  usageSlot?: React.ReactNode;
 };
 
 export const MessageInputControlsBar = memo(function MessageInputControlsBar({
@@ -30,6 +32,7 @@ export const MessageInputControlsBar = memo(function MessageInputControlsBar({
   onSendClick,
   sendDisabled,
   agentPicker,
+  usageSlot,
 }: MessageInputControlsBarProps) {
   return (
     <div
@@ -64,6 +67,7 @@ export const MessageInputControlsBar = memo(function MessageInputControlsBar({
           .filter(Boolean)
           .join(" ")}
       >
+        {usageSlot}
         {showVoiceInput ? (
           <VoiceInputButton
             onTranscribed={onTranscribed}

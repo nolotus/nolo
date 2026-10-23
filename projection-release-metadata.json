@@ -2,18 +2,18 @@
   "schemaVersion": 2,
   "components": {
     "cli": {
-      "version": "0.153.0",
-      "channel": "stable",
-      "releaseIntent": "release"
+      "version": "0.157.0-alpha.1",
+      "channel": "alpha",
+      "releaseIntent": "none"
     },
     "desktop": {
-      "version": "0.167.0",
-      "channel": "stable",
-      "releaseIntent": "release"
+      "version": "0.171.0-alpha.1",
+      "channel": "alpha",
+      "releaseIntent": "none"
     }
   },
   "provenance": {
-    "sourceSha": "9c224bcddf49ac4e34981b6d58b27043340eefec",
-    "sourceBranch": "main"
+    "sourceSha": "7f653c2dbefeafa48002657aa2f36c6b466493ef",
+    "sourceBranch": "alpha"
   }
 }
