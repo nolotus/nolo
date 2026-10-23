@@ -1059,16 +1059,16 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
  * （drag handle / 行内操作显隐）不受影响；持久态（active / selected / open /
  * dragging）行被 :not(...) 排除，其背景照常。移除 fluid hover 能力
  * （hook 不再设置 data-fluid-hover）即自动恢复原生 :hover。 */
-[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"]:hover:not([data-active]):not([data-selected]):not([data-open]):not([data-dragging]) {
+[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"]:hover:not([data-active]):not([data-selected]):not([data-open]):not([data-dragging]):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background-color: transparent;
 }
 
 /* 持久态行在指针悬停时保持自己的底色（修掉旧级联里 .item:hover 覆盖
  * .active/.selected 的老问题；仅在 fluid hover 列表内生效）。 */
-[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"][data-active]:hover {
+[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"][data-active]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background-color: color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
-[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"][data-selected]:hover {
+[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"][data-selected]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background-color: var(--primaryGhost);
 }
