@@ -41,6 +41,30 @@
       "role": "runtime"
     },
     {
+      "path": "public-projection-contract.json",
+      "role": "audit"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "role": "audit"
+    },
+    {
+      "path": ".github/workflows/cli-publish.yml",
+      "role": "release"
+    },
+    {
+      "path": ".github/workflows/desktop-build.yml",
+      "role": "release"
+    },
+    {
+      "path": ".github/workflows/version-bump.yml",
+      "role": "release"
+    },
+    {
+      "path": "projection-release-metadata.json",
+      "role": "release"
+    },
+    {
       "path": "scripts/dev/esbuild.config.js",
       "role": "build"
     },
@@ -61,48 +85,28 @@
       "role": "build"
     },
     {
+      "path": "scripts/dev/webBuildPolicy.ts",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/devAssetManifest.js",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/routeStyles.js",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/workspaceLinkGuard.ts",
+      "role": "build"
+    },
+    {
       "path": "scripts/public-build/stylexBunPlugin.ts",
       "role": "build"
     },
     {
-      "path": "public-projection-contract.json",
-      "role": "audit"
-    },
-    {
-      "path": ".github/workflows/ci.yml",
-      "role": "audit"
-    },
-    {
       "path": "scripts/public-audit/verifyProjection.ts",
       "role": "audit"
-    },
-    {
-      "path": ".github/workflows/cli-publish.yml",
-      "role": "release"
-    },
-    {
-      "path": ".github/workflows/desktop-build.yml",
-      "role": "release"
-    },
-    {
-      "path": ".github/workflows/version-bump.yml",
-      "role": "release"
-    },
-    {
-      "path": "scripts/public-audit/verifyReleaseUpdateCompatibility.ts",
-      "role": "release"
-    },
-    {
-      "path": "scripts/release/validateCliVersionSource.ts",
-      "role": "release"
-    },
-    {
-      "path": "scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1",
-      "role": "release"
-    },
-    {
-      "path": "scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts",
-      "role": "release"
     },
     {
       "path": "scripts/release/assertProjectionReleaseMetadata.ts",
@@ -113,7 +117,15 @@
       "role": "release"
     },
     {
+      "path": "scripts/release/validateCliVersionSource.ts",
+      "role": "release"
+    },
+    {
       "path": "scripts/release/prepareCliPublishPackage.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/ci/runCliPublishPublic.sh",
       "role": "release"
     },
     {
@@ -129,10 +141,6 @@
       "role": "release"
     },
     {
-      "path": "scripts/ci/runCliPublishPublic.sh",
-      "role": "release"
-    },
-    {
       "path": "scripts/ci/verifyLinuxDesktopDeps.sh",
       "role": "release"
     },
@@ -141,8 +149,20 @@
       "role": "release"
     },
     {
-      "path": "projection-release-metadata.json",
+      "path": "scripts/public-audit/verifyReleaseUpdateCompatibility.ts",
       "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1",
+      "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/desktop/verifyDesktopPackageCapability.ts",
+      "role": "audit"
     }
   ],
   "workflows": [
