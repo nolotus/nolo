@@ -27,13 +27,7 @@ import {
   useRecoveredForegroundTurn,
 } from "../dialog/dialogSlice";
 import { useCurrentDialogConfig } from "../dialog/useCurrentDialogConfig";
-import { getActiveDialogAgentId } from "chat/dialog/dialogAgents";
-import { useFetchData } from "app/hooks";
-import { applyBuiltinAgentRuntimeOverride } from "agent-runtime/builtinPlatformAgentConfigs";
-import { useDialogContextUsage } from "chat/dialog/useDialogContextUsage";
-import {
-  getContextWindowUsagePercent,
-} from "chat/dialog/dialogUsageFormat";
+import { DialogUsageTrigger } from "./DialogUsageTrigger";
 import {
   selectAllMsgs,
   useHasStreamingMessage,
@@ -1053,20 +1047,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     void sendMessageRef.current(transcript);
   }, [sendMessageRef]);
 
-  const activeAgentId = getActiveDialogAgentId(currentDialogConfig);
-  const { data: activeAgent } = useFetchData<Agent>(activeAgentId || undefined);
-  const resolvedAgent =
-    activeAgent && activeAgentId
-      ? applyBuiltinAgentRuntimeOverride(activeAgentId, activeAgent)
-      : activeAgent;
-  // Channel-aware context window: devin channel table (fallback global map) so
-  // a switch to a smaller-window model reflects the real capacity, not the
-  // stale global default.
-  const occupancy = useDialogContextUsage(resolvedAgent, currentDialogConfig?.summary);
-  const usagePercent = occupancy.contextWindow
-    ? getContextWindowUsagePercent(occupancy.tokens, occupancy.contextWindow)
-    : undefined;
-
   const browseContext = useBrowseContext();
   const browseHost = useMemo(() => {
     if (!browseContext?.url) return undefined;
@@ -1234,15 +1214,13 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
             </div>
 
             {/* ── Context Area (Attachments, Browse, Image config, Edit chips, Paste chips) ── */}
-            {/* ── Secondary Context Drawer (Attachments, Browse, Image config, Usage) ── */}
+            {/* ── Secondary Context Drawer (Attachments, Browse, Image config) ── */}
             <ComposerDrawer
               attachmentCount={totalAttachmentCount}
               processingAttachmentCount={processingFileIds.size}
               hasBrowseContext={Boolean(browseContext?.url)}
               browseHost={browseHost}
               imageConfigSummary={imageConfigSummary}
-              usagePercent={usagePercent}
-              contextTokens={occupancy.tokens}
               expanded={drawerExpanded}
               onToggle={handleToggleDrawer}
             >
@@ -1322,6 +1300,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               onSendClick={handleSendClick}
               sendDisabled={sendDisabled}
               agentPicker={agentPicker}
+              usageSlot={<DialogUsageTrigger />}
             />
           </div>
 

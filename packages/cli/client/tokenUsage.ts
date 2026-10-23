@@ -5,7 +5,7 @@ import {
 } from "core/builtinAgents";
 import { API_REPORTED_COST_MULTIPLIER } from "../../ai/token/calculatePrice";
 import { findModelConfig } from "../../ai/llm/providers";
-import { findModelContextWindow } from "../../ai/llm/getModelContextWindow";
+import { resolveAgentContextWindow as resolveSharedAgentContextWindow } from "../../ai/context/agentContextWindow";
 import {
   estimateMessagesTokens,
   resolveOccupancy,
@@ -99,68 +99,14 @@ export function resolveAgentModelIdentity(
 }
 
 /**
- * Resolve the context window for a TUI agent selection.
- *
- * 顺序：`resolveEffectiveModel`（显式 model / catalog）→ 显示名 fuzzy → 从
- * agentKey / agentName 派生的 model slug → `DEFAULT_CONTEXT_WINDOW`。
- *
- * 修掉过的历史 bug（两处，同一个病根：查不到就默默当 256k）：
- * - agentName "nolo" 一路落到 256k，而它实际跑在 1M 的模型上；
- * - 自定义 / 广场 agent 不在 builtinAgentCatalog 里，显示名 "OpenDesign V4.1 Flash"
- *   fuzzy miss 后落 256k，而它实际跑在 1M 的模型上，百分比因此虚高 4 倍。
- *
- * 兜底里不写死任何具体模型的数字：猜得到就查模型表，猜不到才用通用默认值。
- * 窗口跟随模型，所以 NOLO_AUTO_ROUTE 不再影响它。
+ * CLI 先解析显式 model / catalog，保留既有模型配置查询顺序；
+ * 没有有效模型时，将显示名和 key 的兜底解析委托给共享层。
+ * 查不到保持 undefined，不用默认窗口冒充真值。
  */
 export function resolveAgentContextWindow(opts: AgentModelRef): number | undefined {
   const model = resolveEffectiveModel(opts);
   if (model) return resolveContextWindow(model);
-
-  // 显示名直接命中（含 fuzzy）就不用猜 slug 了。
-  const byName = opts.agentName?.trim()
-    ? resolveOccupancyWindow({ model: opts.agentName })
-    : undefined;
-  if (byName !== undefined) return byName;
-
-  const candidates = [
-    ...modelSlugCandidates(opts.agentKey, 2),
-    ...modelSlugCandidates(opts.agentName, 1),
-  ];
-  for (const candidate of candidates) {
-    const window = resolveOccupancyWindow({ model: candidate });
-    if (window !== undefined) return window;
-  }
-
-  // 查不到窗口时返回 undefined，进入未知态（"context: —"），不得静默用 DEFAULT_CONTEXT_WINDOW 冒充真值。
-  return undefined;
-}
-
-/** agentKey 的 `agent-<uid>-` 前缀：uid 是确定性 seed，不是模型名的一部分。 */
-const AGENT_KEY_PREFIX = /^agent-[a-z0-9]+-/i;
-
-/**
- * 从 agentKey / agentName 猜「可能是什么模型」的 slug 候选。
- *
- * key 形如 `agent-0e95801d90-amr-deepseek-v4-1-flash`：去掉 `agent-<uid>-` 前缀后
- * 剩 `<provider>-<model>`，provider 前缀（`amr-`）也不是模型名，逐段剥离；显示名
- * 形如 `OpenDesign V4.1 Flash`：空格换连字符、点号保留。
- *
- * 这里**不写死任何 provider / 模型名**：候选只是字符串，命中与否交给模型表与
- * fuzzy（`findModelContextWindow`），全 miss 才算查不到。候选按「越完整越靠前」
- * 排列，只有前面的都查不到时才会用到更激进的剥离结果。
- */
-function modelSlugCandidates(source: string | undefined, maxDrop: number): string[] {
-  const raw = source?.trim();
-  if (!raw) return [];
-  const base = raw.replace(/\s+/g, "-").toLowerCase();
-  const seed = base.replace(AGENT_KEY_PREFIX, "");
-  const out = [seed];
-  if (seed !== base) out.push(base);
-  const segments = seed.split("-");
-  for (let drop = 1; drop <= maxDrop && drop < segments.length; drop++) {
-    out.push(segments.slice(drop).join("-"));
-  }
-  return [...new Set(out.filter(Boolean))];
+  return resolveSharedAgentContextWindow(opts);
 }
 
 const PROVIDER_LOOKUP_ORDER = [
