@@ -19,6 +19,9 @@ export interface SharedSpaceDialogPagesState {
    * 只有 failedSourceCount > 0 → 重试；两者都 > 0 → 重试并加载更多。
    */
   pendingSourceCount: number;
+  /** 尚未查全且正受 origin 冷却门控的来源，不代表空页或撤权。 */
+  deferredSourceCount: number;
+  actionableSourceCount: number;
   loadingSpaces: string[];
   hasMoreSpaces: string[];
   loadMore: (spaceId?: string) => Promise<void>;
@@ -33,6 +36,11 @@ const codeOf = (error: unknown) => (error as CodedError | null)?.code;
  * - `Invalid dialog page request`：游标非法/绑定校验失败。**第一页已经加载过的记录必须保留**，
  *   只把该来源标成可重试，并受控地重置它的游标（下一轮从第一页整体重拉）。
  */
+const ORIGIN_COOLDOWN_MS = 2000;
+const isOriginOutage = (error: unknown) => {
+  const status = statusOf(error);
+  return status === undefined || status === 404 || status === 408 || status === 429 || status >= 500;
+};
 const INVALID_SPACE_ID = "Invalid spaceId";
 /**
  * 终态判定必须**同时**约束 status === 400：`error` 只是服务端 400 分支的说明，只看 code 会把非 400 的故障误判成终态。
@@ -63,7 +71,12 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
   const sortedOrigins = [...new Set(origins)].sort();
   const identityKey = JSON.stringify([enabled, account, token, sortedOrigins, sortedSpaces]);
   const generation = useRef(0);
+  const controllers = useRef(new Set<AbortController>());
+  // These gates belong to this hook identity, never a persistent capability blacklist.
   const busy = useRef(new Set<string>());
+  const cooldowns = useRef(new Map<string, number>());
+  const nextSpaces = useRef(new Map<string, number>());
+  const wakeups = useRef(new Set<ReturnType<typeof setTimeout>>());
   const failed = useRef(new Set<string>());
   const succeeded = useRef(new Set<string>());
   const unauthorizedOrigins = useRef(new Set<string>());
@@ -74,98 +87,128 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
 
   useEffect(() => {
     generation.current++;
+    for (const controller of controllers.current) controller.abort();
+    controllers.current.clear();
     const ownGeneration = generation.current;
     busy.current.clear();
+    cooldowns.current.clear();
+    nextSpaces.current.clear();
+    for (const timer of wakeups.current) clearTimeout(timer);
+    wakeups.current.clear();
     failed.current.clear();
     succeeded.current.clear();
     unauthorizedOrigins.current.clear();
     restarting.current.clear();
     cursors.current = new Map(sortedSpaces.flatMap((space) => sortedOrigins.map((origin) => [`${space}\n${origin}`, undefined] as const)));
     setState({ key: identityKey, sources: {}, errors: {}, failedSources: 0, loading: [] });
-    return () => { if (generation.current === ownGeneration) generation.current++; busy.current.clear(); };
+    return () => {
+      if (generation.current === ownGeneration) generation.current++;
+      for (const controller of controllers.current) controller.abort();
+      controllers.current.clear();
+      busy.current.clear();
+      for (const timer of wakeups.current) clearTimeout(timer);
+      wakeups.current.clear();
+    };
   }, [identityKey]);
 
-  /**
-   * 一次点击同时做两件事：重试所有失败来源 + 推进所有健康且未加载完的来源。
-   * 判据是**每个来源自己的游标**（`cursor !== null`），而不是「有没有任何失败来源」的全局集合——
-   * 否则只要某个来源持续失败（例如 502），健康来源的后续分页就永远推不动。
-   * 失败来源在失败时保留原游标（见下方错误分支），因此它们天然落进同一批 targets 被重试。
-   */
+  /** Each origin advances independently, with a single in-flight request and fair recovery. */
   const loadMore = useCallback(async (requested?: string) => {
     if (!enabled || !account || !token || sortedOrigins.length === 0) return;
     const run = generation.current;
     const requestedSpace = requested === undefined ? null : normalizeSpaceId(requested);
-    const targets = sortedSpaces.filter((space) => (!requestedSpace || requestedSpace === space) && !busy.current.has(space) && sortedOrigins.some((origin) => !unauthorizedOrigins.current.has(origin) && cursors.current.get(`${space}\n${origin}`) !== null));
-    if (!targets.length) return;
-    for (const space of targets) busy.current.add(space);
-    setState((current) => current.key === identityKey ? { ...current, loading: [...new Set([...current.loading, ...targets])] } : current);
-    const settled = await Promise.all(targets.map(async (spaceId) => {
-      const pages = await Promise.all(sortedOrigins.filter((server) => !unauthorizedOrigins.current.has(server)).map(async (server) => {
+    const originsToLoad = sortedOrigins.filter((origin) => !busy.current.has(origin) &&
+      !unauthorizedOrigins.current.has(origin) && (cooldowns.current.get(origin) ?? 0) <= Date.now());
+    // Claim all gates synchronously: repeated clicks cannot create a second in-flight request.
+    for (const origin of originsToLoad) busy.current.add(origin);
+    await Promise.all(originsToLoad.map(async (server) => {
+      const start = nextSpaces.current.get(server) ?? 0;
+      const ordered = [...sortedSpaces.slice(start), ...sortedSpaces.slice(0, start)];
+      const targets = ordered.filter((space) => (!requestedSpace || requestedSpace === space) && cursors.current.get(`${space}\n${server}`) !== null);
+      if (!targets.length) { busy.current.delete(server); return; }
+      setState((current) => current.key === identityKey ? { ...current, loading: [...new Set([...current.loading, ...targets])] } : current);
+      for (const spaceId of targets) {
+        if (run !== generation.current || unauthorizedOrigins.current.has(server)) break;
         const key = `${spaceId}\n${server}`;
         const cursor = cursors.current.get(key);
-        if (cursor === null) return { server, skipped: true as const };
-        // 上一轮游标被判定非法 → 这一轮从第一页重拉，并在成功时整体替换该来源数据（受控重置）。
         const restart = restarting.current.has(key);
-        try { return { server, restart, page: await fetchSharedSpaceDialogPage({ server, spaceId, authToken: token, cursor: restart ? null : cursor ?? null, limit: 100 }) }; }
-        catch (error) { return { server, restart, error }; }
-      }));
-      return { spaceId, pages };
-    }));
-    if (run !== generation.current) return;
-    const unauthorizedServers = new Set(settled.flatMap(({ pages }) => pages.filter((item) => "error" in item && statusOf(item.error) === 401).map((item) => item.server)));
-    for (const origin of unauthorizedServers) unauthorizedOrigins.current.add(origin);
-    setState((current) => {
-      if (current.key !== identityKey) return current;
-      const sources = { ...current.sources }, errors = { ...current.errors };
-      if (unauthorizedServers.size) {
-        for (const origin of unauthorizedServers) {
-          for (const space of sortedSpaces) {
-            const key = `${space}\n${origin}`;
-            failed.current.delete(key);
-            succeeded.current.delete(key);
-            restarting.current.delete(key);
-            cursors.current.set(key, null);
-            delete sources[key];
-          }
+        const controller = new AbortController();
+        controllers.current.add(controller);
+        const item = await (async () => {
+          try { return { server, restart, page: await fetchSharedSpaceDialogPage({ server, spaceId, authToken: token, cursor: restart ? null : cursor ?? null, limit: 100, signal: controller.signal }) }; }
+          catch (error) { return { server, restart, error }; }
+          finally { controllers.current.delete(controller); }
+        })();
+        if (run !== generation.current) return;
+        nextSpaces.current.set(server, (sortedSpaces.indexOf(spaceId) + 1) % sortedSpaces.length);
+        const outage = "error" in item && isOriginOutage(item.error);
+        if (outage) {
+          cooldowns.current.set(server, Date.now() + ORIGIN_COOLDOWN_MS);
+          const timer = setTimeout(() => {
+            wakeups.current.delete(timer);
+            if (run === generation.current) setState((current) => ({ ...current }));
+          }, ORIGIN_COOLDOWN_MS);
+          wakeups.current.add(timer);
         }
-      }
-      for (const { spaceId, pages } of settled) {
-        let failure: string | null = null;
-        for (const item of pages) {
-          if ("skipped" in item) continue;
-          const key = `${spaceId}\n${item.server}`;
-          // 401 来源已停用；忽略本批次与其它并发 loadMore 的迟到结果，避免数据/游标复活。
-          if (unauthorizedOrigins.current.has(item.server)) continue;
-          if ("error" in item) {
-            const error = item.error;
-            if (isRevoked(error) || isInvalidSpaceId(error)) {
-              // 终态：403 撤权 / 非法 spaceId 都无法靠重试自愈 → 清该来源数据、停发请求、退出重试集合。
-              failed.current.delete(key);
-              restarting.current.delete(key);
-              cursors.current.set(key, null);
-              delete sources[key];
-            } else {
-              // 可恢复来源故障（5xx / 网络 / 404 旧路由 / 游标非法）：保留已加载数据、保留可重试提示。
-              failed.current.add(key);
-              if (isStaleCursor(error)) restarting.current.add(key);
-              failure = error instanceof Error ? error.message : "历史查询失败";
+        const settled = [{ spaceId, pages: [item] }];
+        const unauthorizedServers = new Set(settled.flatMap(({ pages }) => pages.filter((item) => "error" in item && statusOf(item.error) === 401).map((item) => item.server)));
+        for (const origin of unauthorizedServers) unauthorizedOrigins.current.add(origin);
+        setState((current) => {
+          if (current.key !== identityKey || run !== generation.current) return current;
+          const sources = { ...current.sources }, errors = { ...current.errors };
+          if (unauthorizedServers.size) {
+            for (const origin of unauthorizedServers) {
+              for (const space of sortedSpaces) {
+                const key = `${space}\n${origin}`;
+                failed.current.delete(key);
+                succeeded.current.delete(key);
+                restarting.current.delete(key);
+                cursors.current.set(key, null);
+                delete sources[key];
+              }
             }
-          } else {
-            failed.current.delete(key);
-            restarting.current.delete(key);
-            succeeded.current.add(key);
-            cursors.current.set(key, item.page.nextCursor);
-            sources[key] = item.restart ? item.page.records : [...(sources[key] ?? []), ...item.page.records];
           }
-        }
-        // 只要该 Space 有任意一个来源成功过，就不标成整体失败：单来源故障不波及整块共享历史。
-        const everSucceeded = sortedOrigins.some((origin) => succeeded.current.has(`${spaceId}\n${origin}`));
-        if (failure !== null && !everSucceeded) errors[spaceId] = failure;
-        else delete errors[spaceId];
+          for (const { spaceId, pages } of settled) {
+            let failure: string | null = null;
+            for (const item of pages) {
+              if ("skipped" in item) continue;
+              const key = `${spaceId}\n${item.server}`;
+              // 401 来源已停用；忽略本批次与其它并发 loadMore 的迟到结果，避免数据/游标复活。
+              if (unauthorizedOrigins.current.has(item.server)) continue;
+              if ("error" in item) {
+                const error = item.error;
+                if (isRevoked(error) || isInvalidSpaceId(error)) {
+                  // 终态：403 撤权 / 非法 spaceId 都无法靠重试自愈 → 清该来源数据、停发请求、退出重试集合。
+                  failed.current.delete(key);
+                  restarting.current.delete(key);
+                  cursors.current.set(key, null);
+                  delete sources[key];
+                } else {
+                  // 可恢复来源故障（5xx / 网络 / 404 旧路由 / 游标非法）：保留已加载数据、保留可重试提示。
+                  failed.current.add(key);
+                  if (isStaleCursor(error)) restarting.current.add(key);
+                  failure = error instanceof Error ? error.message : "历史查询失败";
+                }
+              } else {
+                failed.current.delete(key);
+                restarting.current.delete(key);
+                succeeded.current.add(key);
+                cursors.current.set(key, item.page.nextCursor);
+                sources[key] = item.restart ? item.page.records : [...(sources[key] ?? []), ...item.page.records];
+              }
+            }
+            // 只要该 Space 有任意一个来源成功过，就不标成整体失败：单来源故障不波及整块共享历史。
+            const everSucceeded = sortedOrigins.some((origin) => succeeded.current.has(`${spaceId}\n${origin}`));
+            if (failure !== null && !everSucceeded && sortedOrigins.every((origin) => failed.current.has(`${spaceId}\n${origin}`) || cursors.current.get(`${spaceId}\n${origin}`) === null)) errors[spaceId] = failure;
+            else delete errors[spaceId];
+          }
+          return { key: identityKey, sources, errors, failedSources: failed.current.size, loading: current.loading };
+        });
+        if (outage || unauthorizedOrigins.current.has(server)) break;
       }
-      return { key: identityKey, sources, errors, failedSources: failed.current.size, loading: current.loading.filter((space) => !targets.includes(space)) };
-    });
-    for (const space of targets) busy.current.delete(space);
+      if (run !== generation.current) return;
+      busy.current.delete(server);
+      setState((current) => current.key === identityKey ? { ...current, loading: busy.current.size ? current.loading : [] } : current);
+    }));
   }, [enabled, account, token, identityKey]);
   useEffect(() => { if (enabled) void loadMore(); }, [loadMore, enabled, identityKey]);
   const valid = state.key === identityKey;
@@ -178,6 +221,10 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
       return cursors.current.get(key) !== null && !failed.current.has(key);
     }).length, 0)
     : 0;
+  const deferredSourceCount = valid ? sortedSpaces.reduce((sum, space) => sum + sortedOrigins.filter((origin) =>
+    cursors.current.get(`${space}\n${origin}`) !== null && (cooldowns.current.get(origin) ?? 0) > Date.now()).length, 0) : 0;
+  const actionableSourceCount = valid ? sortedSpaces.reduce((sum, space) => sum + sortedOrigins.filter((origin) =>
+    cursors.current.get(`${space}\n${origin}`) !== null && !busy.current.has(origin) && (cooldowns.current.get(origin) ?? 0) <= Date.now()).length, 0) : 0;
   return {
     identityKey,
     recordsBySpace,
@@ -185,7 +232,9 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
     errorsBySpace: valid ? state.errors : {},
     failedSourceCount: valid ? state.failedSources : 0,
     pendingSourceCount,
-    loadingSpaces: valid ? state.loading : [],
+    deferredSourceCount,
+    actionableSourceCount,
+    loadingSpaces: valid && busy.current.size > 0 ? state.loading : [],
     hasMoreSpaces: valid ? sortedSpaces.filter((space) => sortedOrigins.some((origin) => cursors.current.get(`${space}\n${origin}`) !== null)) : [],
     loadMore,
   };

@@ -1,13 +1,17 @@
 export const CREATE_MENU_OPEN_COUNT_THRESHOLD = 3;
 
 export type CreateMenuItemId =
+  | "new-chat"
   | "new-page"
+  | "new-project"
   | "new-table"
   | "create-agent-manual"
   | "scheduled-task"
   | "upload-file";
 
 export const CREATE_MENU_ITEM_ORDER: readonly CreateMenuItemId[] = [
+  "new-chat",
+  "new-project",
   "new-page",
   "new-table",
   "create-agent-manual",
@@ -34,8 +38,10 @@ export function isUploadMenuItemVisible(hasUploadHandler: boolean): boolean {
 /** Ordered create-menu ids with conditional items (e.g. upload) filtered out. */
 export function getVisibleCreateMenuItemIds(args: {
   hasUploadHandler: boolean;
+  isDesktop?: boolean;
 }): CreateMenuItemId[] {
   return CREATE_MENU_ITEM_ORDER.filter((id) => {
+    if (id === "new-project") return args.isDesktop === true;
     if (id === "upload-file") {
       return isUploadMenuItemVisible(args.hasUploadHandler);
     }

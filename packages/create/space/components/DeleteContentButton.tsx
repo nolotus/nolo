@@ -102,28 +102,35 @@ function DeleteContentButton({
 
   const hasCustomChildren = children != null;
   const deleteLabel = t("common:delete");
-  const props = {
+  const { onAction: _onAction, isDisabled: _isDisabled, textValue: _textValue, ...safeRest } = rest as DeleteContentButtonProps & Record<string, unknown>;
+  const nativeProps = {
     className: `DeleteButton ${className || ""}`.trim(),
     // MenuItem surfaces its own onAction contract; plain <button> uses onClick.
     onClick: Component === "button" ? handleDelete : undefined,
-    onAction: Component !== "button" ? handleDelete : undefined,
     // Avoid implicit type=submit when rendered as a native <button> inside forms.
     type: Component === "button" ? "button" : undefined,
     disabled: isDeleting,
-    isDisabled: Component !== "button" ? isDeleting : undefined,
-    textValue: Component !== "button" ? deleteLabel : undefined,
     "aria-label": rest["aria-label"] ?? deleteLabel,
     title: htmlTitle ?? deleteLabel,
-    ...rest,
-    ...(Component !== "button" && !hasCustomChildren && {
-      icon: LuTrash2,
-      label: deleteLabel,
-    }),
+    ...safeRest,
   };
+  const menuProps = {
+    ...nativeProps,
+    onClick: undefined,
+    onAction: handleDelete,
+    isDisabled: isDeleting,
+    textValue: deleteLabel,
+    ...(!hasCustomChildren && { icon: LuTrash2, label: deleteLabel }),
+  };
+  // Do not leak menu-only contracts onto a native DOM element, including values
+  // supplied through the permissive button-attribute rest props.
+  const finalProps = Component === "button"
+    ? nativeProps
+    : menuProps;
 
   return React.createElement(
     Component as any,
-    props as any,
+    finalProps as any,
     hasCustomChildren
       ? children
       : Component === "button"

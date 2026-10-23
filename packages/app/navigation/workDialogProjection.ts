@@ -59,3 +59,11 @@ export function groupWorkDialogs(dialogs: readonly WorkDialogItem[]): WorkGroups
   }
   return groups;
 }
+
+/** One chronological list. Status is metadata, never a sorting priority. */
+export function sortWorkDialogTimeline(groups: WorkGroups): GroupedWorkItem[] {
+  return [...groups["needs-you"], ...groups.working, ...groups.recent].sort(
+    (a, b) => b.updatedAt - a.updatedAt ||
+      (a.dialogKey < b.dialogKey ? -1 : a.dialogKey > b.dialogKey ? 1 : 0),
+  );
+}

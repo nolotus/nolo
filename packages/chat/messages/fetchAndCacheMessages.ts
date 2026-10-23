@@ -119,6 +119,9 @@ export const fetchAndCacheMessagesLocalFirst = async ({
   const remotePromise = Promise.all(serverPromises).then(
     (results) => results.flat() as MessageRecord[],
   );
+  // Observe early rejection while the local read is pending. Keep the original
+  // promise so the full merge below still propagates failures to its caller.
+  void remotePromise.catch(() => {});
 
   let localSettledAt: number | null = null;
   const localTimingPromise = localPromise.then((value) => {

@@ -18,6 +18,8 @@ export type SharedSpaceDialogPageRequest = {
   authToken: string;
   cursor?: string | null;
   limit?: number;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -60,13 +62,25 @@ export async function fetchSharedSpaceDialogPage(request: SharedSpaceDialogPageR
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("limit must be between 1 and 100");
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
-  const response = await fetch(`${server}/api/v1/db/space/${encodeURIComponent(spaceId)}/dialog-page?${params}`, {
-    method: "POST", headers: { Authorization: `Bearer ${authToken}` },
-  });
-  if (!response.ok) throw await requestError(response);
-  const payload: unknown = await response.json();
-  if (!isObject(payload) || !isObject(payload.data)) throw new Error("Invalid shared space dialog page response");
-  const data = payload.data;
-  if (data.spaceId !== spaceId || !Array.isArray(data.records) || !data.records.every(validRecord) || !(data.nextCursor === null || isText(data.nextCursor))) throw new Error("Invalid shared space dialog page shape");
-  return { spaceId, records: data.records, nextCursor: data.nextCursor };
+  const controller = new AbortController();
+  const timeoutMs = request.timeoutMs === undefined ? 8000 : request.timeoutMs;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("timeoutMs must be a positive finite number");
+  const abortFromCaller = () => controller.abort(request.signal?.reason);
+  if (request.signal?.aborted) abortFromCaller();
+  else request.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error("Shared Space dialog page request timed out")), timeoutMs);
+  try {
+    const response = await fetch(`${server}/api/v1/db/space/${encodeURIComponent(spaceId)}/dialog-page?${params}`, {
+      method: "POST", headers: { Authorization: `Bearer ${authToken}` }, signal: controller.signal,
+    });
+    if (!response.ok) throw await requestError(response);
+    const payload: unknown = await response.json();
+    if (!isObject(payload) || !isObject(payload.data)) throw new Error("Invalid shared space dialog page response");
+    const data = payload.data;
+    if (data.spaceId !== spaceId || !Array.isArray(data.records) || !data.records.every(validRecord) || !(data.nextCursor === null || isText(data.nextCursor))) throw new Error("Invalid shared space dialog page shape");
+    return { spaceId, records: data.records, nextCursor: data.nextCursor };
+  } finally {
+    clearTimeout(timer);
+    request.signal?.removeEventListener("abort", abortFromCaller);
+  }
 }

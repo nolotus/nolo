@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, Suspense, lazy } from "react";
+import CreateMenuButton from "render/layout/CreateMenuButtonContainer";
 import { useIsLoggedIn } from "identity";
 const SidebarUserSection = lazy(() => import("./sidebar/SidebarUserSection"));
 import { NavLink, useLocation } from "app/routing";
@@ -114,6 +115,7 @@ export function NavigationRail(): React.JSX.Element {
       data-hook="navigation-v2-rail"
       className="navigation-v2-rail"
     >
+      {isLoggedIn && <div className="navigation-v2-rail__create"><CreateMenuButton variant="sidebar" showLabel={false} /></div>}
       <button type="button" className="navigation-v2-rail__item" title={t("common:search", "搜索")}
         aria-label={t("common:search", "搜索")} onClick={() => window.dispatchEvent(new Event("nolo:navigation-search"))}>
         <LuSearch size={17} aria-hidden="true" />

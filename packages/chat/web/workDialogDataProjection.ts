@@ -19,6 +19,8 @@ export function projectWorkDialogData(
     dialogStatuses?: Readonly<Record<string, string>>;
     dialogEventTimestamps?: Readonly<Record<string, number>>;
     now?: number;
+    /** Actual run start/finish times; never receipt/heartbeat/token timestamps. */
+    runActivityTimestamps?: Readonly<Record<string, number>>;
     /** 有时间锚点支撑「仍在运行」的对话。 */
     liveDialogIds?: ReadonlySet<string>;
     /** 无法可靠判定运行状态的对话：不得宣称仍运行，也不得宣称已结束。 */
@@ -77,7 +79,13 @@ export function projectWorkDialogData(
     dialogs.push({
       dialogKey: item.contentKey,
       spaceId: item.spaceId,
-      updatedAt: toTimestamp(item.updatedAt),
+      // SSE timestamps only advance on created/done/failed, not streamed tokens.
+      // Device-local and shared rows must not borrow account-scoped runtime evidence.
+      updatedAt: Math.max(toTimestamp(item.updatedAt),
+        !isLocal && typeof eventAt === "number" && Number.isFinite(eventAt) && eventAt <= now ? eventAt : 0,
+        !isLocal && Number.isFinite(options.runActivityTimestamps?.[parsed.dialogId]) &&
+          options.runActivityTimestamps![parsed.dialogId]! <= now
+          ? options.runActivityTimestamps![parsed.dialogId]! : 0),
       runs: signals,
       needsUserAction: options.waitingUserByDialogKey?.[item.contentKey] === true,
     });

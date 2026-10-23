@@ -10,6 +10,8 @@ import { useHoverCapable } from "app/hooks/useHoverCapable";
 import type { TypedThunkDispatch } from "app/store";
 import { useStore } from "react-redux";
 import { useCreateMenuOpenCount, incrementCreateMenuOpenCount } from "./createMenuOpenCountStore";
+import { useCreateDialog } from "chat/dialog/useCreateDialog";
+import { noloAgentId } from "core/init";
 import { createDocState } from "render/page/docStore";
 import {
   LuFileText,
@@ -60,6 +62,8 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   const dispatch = useAppDispatch() as unknown as TypedThunkDispatch;
   const store = useStore();
   const navigate = useNavigate();
+  const { createNewDialog } = useCreateDialog();
+  const isDesktop = typeof document !== "undefined" && document.documentElement.dataset.noloDesktop === "1";
 
   const currentSpace = useCurrentSpaceFromEntity();
   const currentSpaceId = useCurrentSpaceId();
@@ -167,6 +171,14 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   const handleAction = useCallback(
     (key: Key) => {
       switch (key) {
+        case "new-chat":
+          closeMenu();
+          void createNewDialog({ agents: [noloAgentId] }).catch(() => toast.error(t("chat:createDialogFailed", "新建对话失败")));
+          break;
+        case "new-project":
+          closeMenu();
+          navigate("/?createProject=1");
+          break;
         case "new-page":
           void createNewPageAndClose();
           break;
@@ -192,16 +204,28 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     [
       createNewPageAndClose,
       createNewTable,
+      closeMenu,
+      createNewDialog,
+      t,
       sidebarScopedSpaceId,
       categoryId,
       handleManualCreateAgent,
       handleCreateTask,
       handleUploadClick,
+      navigate,
     ]
   );
 
   const renderMenuItem = (id: CreateMenuItemId): React.ReactNode => {
     switch (id) {
+      case "new-chat": {
+        const label = t("chat:newChat", "新对话");
+        return <MenuItem key={id} id={id} textValue={label}><span aria-hidden="true">✦</span><span slot="label">{label}</span></MenuItem>;
+      }
+      case "new-project": {
+        const label = t("project:newProject", "新建项目");
+        return <MenuItem key={id} id={id} textValue={label}><span aria-hidden="true">▣</span><span slot="label">{label}</span></MenuItem>;
+      }
       case "new-page": {
         const label = t("newPage");
         return (
@@ -286,6 +310,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     <>
       {getVisibleCreateMenuItemIds({
         hasUploadHandler: Boolean(onUploadClick),
+        isDesktop,
       }).map(renderMenuItem)}
     </>
   );

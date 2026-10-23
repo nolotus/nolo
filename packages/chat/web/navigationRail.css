@@ -130,6 +130,7 @@
 /* --- Rail -------------------------------------------------------------- */
 
 .navigation-v2-rail {
+  --rail-gap: 5px;
   position: sticky;
   top: 0;
   align-self: flex-start;
@@ -142,8 +143,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 12px 4px;
+  gap: var(--rail-gap);
+  padding: 10px 4px;
   /* 折叠态只有 44px 高、图标又固定在 36px，快捷图标一多就会把底部的账号/设置/
      通知顶出可视区。让 Rail 自己在纵向滚动，页脚用 sticky 留在底部（见
      .navigation-v2-rail__footer），滚动条隐藏以免 44px 里多出一条竖条。 */
@@ -152,10 +153,42 @@
   overscroll-behavior: contain;
   scrollbar-width: none;
   border-right: 0;
-  background: color-mix(in srgb, var(--backgroundSecondary, var(--background)) 72%, var(--background) 28%);
+  background: var(--background, #fff);
 }
 
 .navigation-v2-rail::-webkit-scrollbar { display: none; }
+
+.navigation-v2-rail__create { flex: 0 0 auto; }
+.navigation-v2-rail__create .create-menu__button {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--borderSubtle, rgba(127, 127, 127, 0.24));
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text, currentColor);
+}
+.navigation-v2-rail__create .create-menu__button:hover,
+.navigation-v2-rail__create .create-menu__button.is-active {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.1));
+  color: var(--text, currentColor);
+}
+.navigation-v2-rail__create .create-menu__button:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 2px;
+}
+.navigation-v2-rail__create .create-menu__icon { transition: none; }
+
+/* A real mounted Rail owns creation only at persistent-sidebar widths.
+   Without that Rail (including custom sidebars), keep the TopBar fallback.
+   Mobile drawers always use the TopBar entry, even while the drawer is open. */
+@media (min-width: 769px) {
+  .MainLayout:has(.MainLayout__sidebar .navigation-v2-rail__create) .topbar__create-entry {
+    display: none;
+  }
+}
+@media (max-width: 768px) {
+  .navigation-v2-rail__create { display: none; }
+}
 
 .navigation-v2-rail__item {
   position: relative;
@@ -175,14 +208,12 @@
   background: var(--surfaceInteractive, rgba(127, 127, 127, 0.12));
 }
 
-/* Selected state is not colour-only: a ring around the item plus a separate
-   indicator bar, so the current destination is recognisable without relying
-   on any colour difference. */
+/* Keep the active destination neutral; the current label and aria state carry its meaning. */
 .navigation-v2-rail__item[aria-current="page"],
 .navigation-v2-rail__item[data-active="true"] {
-  background: var(--primaryGhost, rgba(127, 127, 127, 0.12));
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.12));
   box-shadow: none;
-  color: var(--primary, currentColor);
+  color: var(--text, currentColor);
 }
 
 .navigation-v2-rail__item[aria-current="page"]::before,
@@ -195,7 +226,24 @@
   width: 2px;
   height: 14px;
   border-radius: 2px;
-  background: var(--primary, currentColor);
+  background: var(--textSecondary, currentColor);
+}
+
+.navigation-v2-rail__item:focus-visible,
+.navigation-v2-home-views__item:focus-visible,
+.navigation-v2-home-scope:focus-visible {
+  outline-color: var(--text, currentColor);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navigation-v2-rail *,
+  .navigation-v2-home-views *,
+  .navigation-v2-home-scope {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 .navigation-v2-rail__item:focus-visible {
@@ -259,6 +307,51 @@
 }
 
 .navigation-v2-home-scope:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 2px;
+}
+
+/* --- Context work and local-project content ---------------------------- */
+.navigation-v2-shell .desktop-folder-projects,
+.navigation-v2-shell [data-hook="work-dialog-groups"] {
+  min-width: 0;
+  padding: 8px 12px;
+  color: var(--text, currentColor);
+}
+
+.navigation-v2-shell [data-hook="work-dialog-groups"] > h2,
+.navigation-v2-shell .desktop-folder-projects > h2 {
+  margin: 8px 0 6px;
+  font-size: var(--fontSize-sm, 14px);
+  font-weight: 600;
+}
+
+.navigation-v2-shell .home-work-dialog-list > div[aria-label="最近活动对话"],
+.navigation-v2-shell .home-work-dialog-list > div[aria-label="最近活动内容"] {
+  display: grid;
+  gap: 2px;
+}
+
+.navigation-v2-shell .desktop-folder-projects > div[title],
+.navigation-v2-shell [data-hook="project-dialog-list"] > div {
+  min-width: 0;
+  margin-block: 2px;
+}
+
+.navigation-v2-shell .desktop-folder-projects button,
+.navigation-v2-shell .desktop-folder-projects a,
+.navigation-v2-shell [data-hook="project-dialog-list"] a {
+  max-width: 100%;
+  min-height: 32px;
+  color: var(--text, currentColor);
+}
+
+.navigation-v2-shell .desktop-folder-projects button[aria-pressed="true"] {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.12));
+}
+
+.navigation-v2-shell .desktop-folder-projects :focus-visible,
+.navigation-v2-shell [data-hook="work-dialog-groups"] :focus-visible {
   outline: 2px solid var(--primary, currentColor);
   outline-offset: 2px;
 }

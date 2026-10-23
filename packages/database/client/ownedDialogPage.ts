@@ -16,6 +16,8 @@ export type OwnedDialogSummary = {
   title?: string;
   deletedAt?: string | number | null;
   restoredAt?: string | number | null;
+  status?: "pending" | "running" | "done" | "completed" | "failed" | "cancelled" | null;
+  unreadAt?: number | null;
 };
 /**
  * Reads the opt-in listing endpoint. This fetches user-owned dialogs only.

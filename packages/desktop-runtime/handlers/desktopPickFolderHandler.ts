@@ -1,5 +1,7 @@
 import { existsSync, statSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { isTrustedDesktopSameOriginRequest } from "../desktopRequestTrust";
 
 import { toErrorMessage } from "core/errorMessage";
 
@@ -78,15 +80,39 @@ async function pickFolderNative(): Promise<string | null> {
 
 export async function handleDesktopPickFolder(
   req: Request,
-  deps: { env?: Record<string, string | undefined> } = {}
+  deps: {
+    env?: Record<string, string | undefined>;
+    pickFolder?: () => Promise<string | null>;
+    createFolder?: (path: string) => Promise<unknown>;
+  } = {}
 ): Promise<Response> {
   const env = deps.env ?? process.env;
   if (env.NOLO_DESKTOP !== "1") {
     return json({ error: "Desktop runtime only" }, 404);
   }
 
+  let name: string | null = null;
+  if (req.headers.get("content-type")?.includes("application/json")) {
+    let body: unknown;
+    try { body = await req.json(); }
+    catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
+    if (!body || typeof body !== "object" || !("action" in body) || body.action !== "create") {
+      return json({ ok: false, error: "Unknown folder action" }, 400);
+    }
+    if (!isTrustedDesktopSameOriginRequest(req, env)) {
+      return json({ ok: false, error: "Trusted Desktop request required" }, 403);
+    }
+    name = "name" in body && typeof body.name === "string" ? body.name.trim() : "";
+    // One portable child name only. Never accept a path or overwrite an existing directory.
+    if (!name || name === "." || name === ".." || name.length > 120 ||
+        /[\\/<>:"|?*\x00-\x1f]/.test(name) || /[. ]$/.test(name) ||
+        /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) {
+      return json({ ok: false, error: "请输入有效的项目名称（不能包含路径分隔符）" }, 400);
+    }
+  }
+
   try {
-    const folderPath = await pickFolderNative();
+    const folderPath = await (deps.pickFolder ?? pickFolderNative)();
     if (!folderPath) {
       return json({ ok: true, path: null });
     }
@@ -101,6 +127,12 @@ export async function handleDesktopPickFolder(
       return json({ ok: false, error: "Selected path is not a directory" }, 400);
     }
 
+    if (name !== null) {
+      const projectPath = resolve(normalizedPath, name);
+      // recursive:false is deliberate: EEXIST must not silently open or modify a directory.
+      await (deps.createFolder ?? ((path: string) => mkdir(path, { recursive: false })))(projectPath);
+      return json({ ok: true, path: projectPath });
+    }
     return json({ ok: true, path: normalizedPath });
   } catch (error) {
     const message = toErrorMessage(error);

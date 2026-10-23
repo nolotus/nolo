@@ -35,7 +35,17 @@ export type OwnedAppContentItem = {
   app: AppSummary;
 };
 
+export const dialogSummaryStatus = (value: unknown) =>
+  value === null || (typeof value === "string" &&
+    ["pending", "running", "done", "completed", "failed", "cancelled"].includes(value))
+    ? value as "pending" | "running" | "done" | "completed" | "failed" | "cancelled" | null : undefined;
+export const dialogSummaryUnreadAt = (value: unknown): number | null | undefined =>
+  value === null || (typeof value === "number" && Number.isFinite(value) && value > 0)
+    ? value : undefined;
+
 export type QueriedContentItem = {
+  status?: ReturnType<typeof dialogSummaryStatus>;
+  unreadAt?: number | null;
   source: "user-data";
   title: string;
   type: string;
@@ -67,6 +77,8 @@ export const MY_CONTENT_USER_DATA_TYPES: DataType[] = [
 ];
 
 export type UserContentRecord = Partial<AppSummaryRecord> & {
+  status?: unknown;
+  unreadAt?: unknown;
   dbKey?: string;
   contentKey?: string;
   type?: string;
@@ -349,6 +361,7 @@ export function buildMyContentItemsFromUserData(
             ? record.originalName
             : undefined,
         contentKey,
+        ...(record.type === "dialog" ? { status: dialogSummaryStatus(record.status), unreadAt: dialogSummaryUnreadAt(record.unreadAt) } : {}),
         pinned: Boolean(record.pinned),
         createdAt: record.createdAt ?? record.created ?? 0,
         updatedAt: timestamp,

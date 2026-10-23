@@ -566,7 +566,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
               className="topbar__user-area topbar__user-area--compact"
             >
               <TopbarLocalPreviewToggle contentKeyType={s.contentKeyType} />
-              <CreateMenuButton variant="topbar" />
+              <CreateMenuButton variant="topbar" className="topbar__create-entry" />
             </div>
           ) : (
             <>

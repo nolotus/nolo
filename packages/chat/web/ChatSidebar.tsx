@@ -1,5 +1,7 @@
+import { useCreateProjectNavigation } from "render/layout/createProjectNavigation";
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { NavLink, useLocation } from "app/routing";
+import { NavLink, useLocation, useNavigate } from "app/routing";
+import { getIsDesktopApp } from "app/utils/env";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
   selectCurrentSpace,
@@ -40,7 +42,6 @@ import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matc
 import { selectIdentityUserId } from "identity/selectors";
 import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
 import { WorkDialogHistory } from "./WorkDialogHistory";
-import { OtherContentGroups } from "./OtherContentGroups";
 import { NavigationRail } from "./NavigationRail";
 import { ExploreCategoryNav } from "./ExploreCategoryNav";
 import { type HomeView, resolveHomeView, resolveRailView } from "./navigationRailView";
@@ -110,7 +111,11 @@ const ChatSidebar: React.FC = () => {
     } catch { setHomeScope({ kind: "all" }); }
   }, []);
 
-  const homeView = resolveHomeView(homeViewState);
+  const isDesktop = getIsDesktopApp();
+  const navigate = useNavigate();
+  const showProjects = useCallback(() => setHomeViewState("projects"), []);
+  const createProjectRequest = useCreateProjectNavigation(isDesktop, showProjects);
+  const homeView = isDesktop ? resolveHomeView(homeViewState) : "work";
   const selectHomeView = (view: HomeView) => setHomeViewState(resolveHomeView(view));
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
   useEffect(() => {
@@ -442,7 +447,7 @@ const ChatSidebar: React.FC = () => {
       <span aria-hidden="true">×</span>
     </button>
   ) : null;
-  const homeViewSwitcher = (
+  const homeViewSwitcher = isDesktop ? (
     <div
       role="group"
       aria-label={t("common:homeViews", "主页视图")}
@@ -465,7 +470,7 @@ const ChatSidebar: React.FC = () => {
         {t("allView.projects", "项目")}
       </button>
     </div>
-  );
+  ) : null;
 
   // AllViewSidebar 自带 display:flex / flex:1 / min-height:0 的内部滚动区，虚拟列表
   // 靠父级给出的「有限高度」只挂载视口内的行。它被包进 .navigation-v2-context-content
@@ -508,7 +513,7 @@ const ChatSidebar: React.FC = () => {
     );
   }
 
-  if (viewMode === "all" || !space) {
+  if (viewMode === "all" || !space || (isDesktop && homeView === "projects")) {
     return (
       <ShellWithRail>
         <div data-hook="chat-esc-sidebar"
@@ -524,13 +529,7 @@ const ChatSidebar: React.FC = () => {
               {typeFilter === "all" || typeFilter === "dialog" ? (
                 <>
                   {homeScope.kind === "all" && remoteTasksGlobalEntry}
-                  <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} />
-                  {typeFilter === "all" && homeScope.kind === "all" && (
-                    // 「分类」视图并入 Work：全部作用域下按类型列出对话之外的内容。
-                    // 项目作用域只投影对话（projectHomeItems → dialogsForLocalProject），
-                    // 没有非对话内容可列，所以守卫是 homeScope.kind === "all"。
-                    <OtherContentGroups items={scopedWorkItems} userId={identityUserId ?? ""} />
-                  )}
+                  <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} includeNonDialogs={typeFilter === "all"} />
                 </>
               ) : rendersAllViewSidebar ? (
                 <AllViewSidebar typeFilter={typeFilter} />
@@ -539,7 +538,7 @@ const ChatSidebar: React.FC = () => {
               )}
             </div>
             <div style={{ display: homeView === "projects" ? "contents" : "none" }}>
-              <DesktopFolderProjects items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} />
+              <DesktopFolderProjects createRequest={createProjectRequest} items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} />
             </div>
           </div>
           {commandPalette}

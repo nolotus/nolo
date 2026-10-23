@@ -1,4 +1,5 @@
 import type { SharedSpaceDialogSummary } from "database/client/sharedSpaceDialogPage";
+import { dialogSummaryStatus, dialogSummaryUnreadAt } from "app/utils/myContentItems";
 import type { MyContentListItem } from "app/utils/myContentItems";
 import { parseDialogKey } from "database/dialogKey";
 import type { OwnedDialogSummary } from "database/client/ownedDialogPage";
@@ -22,6 +23,7 @@ type Candidate = { record: HistorySummary; cached?: MyContentListItem };
 const tieKey = (record: HistorySummary): string => JSON.stringify([
   record.title, record.pinned, record.createdAt, record.spaceId,
   record.spaceName, record.restoredAt, record.updatedAt, record.ownerUserId, record.dbKey,
+  record.status, record.unreadAt,
 ]);
 
 /** Reconcile complete per-key evidence before projecting visible rows.
@@ -91,6 +93,8 @@ export function mergeHistoryItems(
         source: candidate.cached?.source ?? item?.source ?? "user-data",
         type: candidate.cached?.type ?? item?.type ?? "dialog",
         contentKey: key,
+        status: dialogSummaryStatus(summary.status) !== undefined ? dialogSummaryStatus(summary.status) : item && "status" in item ? item.status : undefined,
+        unreadAt: dialogSummaryUnreadAt(summary.unreadAt) !== undefined ? dialogSummaryUnreadAt(summary.unreadAt) : item && "unreadAt" in item ? item.unreadAt : undefined,
         title: typeof summary.title === "string" ? summary.title : item?.title ?? key,
         pinned: typeof summary.pinned === "boolean" ? summary.pinned : item?.pinned ?? false,
         createdAt: summary.createdAt ?? item?.createdAt ?? summary.updatedAt ?? 0,

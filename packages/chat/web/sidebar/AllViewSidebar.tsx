@@ -74,7 +74,6 @@ import {
   matchesTypeFilter,
   type SidebarTypeFilterId,
 } from "./SidebarTypeFilter";
-import { isRecentlyCreated } from "./recentlyCreatedStore";
 import { runSidebarViewTransition } from "./sidebarViewTransitions";
 import "../stackNavViewTransition.css";
 import {
@@ -379,66 +378,11 @@ const AllViewSidebar: React.FC<{
     [recentFilter, sidebarRecentItems]
   );
 
-  // ── US5: stable ordering during background sync ──
-  // With single-query + client-side filtering, switching filter no longer
-  // refetches data. The remaining reorder source is localFirst's progressive
-  // merge: local partial data arrives first, account full sync arrives later,
-  // and dedup may shift an item's updatedAt, causing visible jumps.
-  // Fix: freeze relative order for old background-synced items; newly created
-  // or freshly active items prepend to the top so fresh user actions are visible
-  // immediately at position 0. Reset on filter switch.
-  const orderRef = React.useRef<Map<string, number>>(new Map());
-  const orderFilterRef = React.useRef<SidebarTypeFilterId>(recentFilter);
-  const highestSeenTimestampRef = React.useRef<number>(0);
-  const stableRecentItems = useMemo(() => {
-    // Filter changed → discard old order, rebuild from current snapshot.
-    if (orderFilterRef.current !== recentFilter) {
-      orderRef.current = new Map();
-      orderFilterRef.current = recentFilter;
-      highestSeenTimestampRef.current = 0;
-    }
-    const order = orderRef.current;
-    let minPosition = order.size > 0 ? Math.min(...order.values()) : 0;
-    let maxPosition = order.size > 0 ? Math.max(...order.values()) : 0;
-    let highestTimestamp = highestSeenTimestampRef.current;
-
-    for (const item of filteredRecentItems) {
-      const itemTs = toTimestamp(item.updatedAt);
-      const isNewlyCreated = isRecentlyCreated(item.contentKey);
-      const isNewerThanBaseline = highestTimestamp > 0 && itemTs > highestTimestamp;
-
-      if (!order.has(item.contentKey)) {
-        if (isNewlyCreated || isNewerThanBaseline) {
-          // 新创建的会话或最新活跃项目：分配负序号置于最前（第 1 位）
-          order.set(item.contentKey, --minPosition);
-        } else {
-          // 远端拉回的旧历史项：追加到末尾防跳屏
-          order.set(item.contentKey, ++maxPosition);
-        }
-      } else if (isNewlyCreated || (itemTs > 0 && itemTs > highestTimestamp)) {
-        // 已有项目发生新消息交互：提升到最前面置顶
-        order.set(item.contentKey, --minPosition);
-      }
-
-      if (itemTs > highestTimestamp) {
-        highestTimestamp = itemTs;
-      }
-    }
-    highestSeenTimestampRef.current = highestTimestamp;
-
-    // Prune keys that disappeared (deleted/cleared) to prevent unbounded growth.
-    if (order.size > filteredRecentItems.length * 2) {
-      const liveKeys = new Set(filteredRecentItems.map((i) => i.contentKey));
-      for (const key of [...order.keys()]) {
-        if (!liveKeys.has(key)) order.delete(key);
-      }
-    }
-    // Sort by stable position: already-seen keys keep their frozen relative
-    // order; newly active keys appear at the top.
-    return [...filteredRecentItems].sort(
-      (a, b) => order.get(a.contentKey)! - order.get(b.contentKey)!
-    );
-  }, [filteredRecentItems, recentFilter]);
+  // Activity timestamps, not status, receipt order or the current clock, decide order.
+  const stableRecentItems = useMemo(() => [...filteredRecentItems].sort(
+    (a, b) => toTimestamp(b.updatedAt) - toTimestamp(a.updatedAt) ||
+      (a.contentKey < b.contentKey ? -1 : a.contentKey > b.contentKey ? 1 : 0),
+  ), [filteredRecentItems]);
 
   const favoriteItems = useFavoriteSidebarItems(recentItems);
 

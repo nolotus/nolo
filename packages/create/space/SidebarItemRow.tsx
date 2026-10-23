@@ -47,7 +47,7 @@ import { useUserId } from "identity";
 import {
   selectCurrentSpaceId,
   selectDialogStatusFromEntity,
-  selectIsDialogUnreadFromEntity,
+
 } from "create/space/spaceCurrentSelectors";
 import { markDialogRead } from "create/space/markDialogReadThunk";
 import { updateContentTitle } from "create/space/content/contentThunks";
@@ -55,6 +55,7 @@ import { updateContentTitle } from "create/space/content/contentThunks";
 import {
   useDialogStatus,
   useIsDialogUnread,
+  getUnreadDialogIds,
 } from "create/space/spaceDialogStore";
 import {
   buildRoutableContentPath,
@@ -68,6 +69,8 @@ import {
 } from "chat/dialog/dialogSlice";
 import { extractCustomId } from "core/prefix";
 import InlineEditInput from "render/web/ui/InlineEditInput";
+import { parseDialogKey } from "database/dialogKey";
+import { dialogSummaryStatus, dialogSummaryUnreadAt } from "app/utils/myContentItems";
 import { selectEntities, read } from "database/dbSlice";
 import AgentAvatar from "ai/agent/web/AgentAvatar";
 import ContentIcon from "render/contentIcon/ContentIcon";
@@ -93,6 +96,8 @@ export interface SidebarItemRowProps {
   disableDrag?: boolean;
   /** Navigation-only row: no owner actions, editing, dragging or local visit/read writes. */
   readOnly?: boolean;
+  /** Skip automatic entity hydration for summary-only rows; navigation still loads normally. */
+  disableAutoRead?: boolean;
   /** style prop for outer div (e.g. height from ListLayout) */
   style?: React.CSSProperties;
   /** Report the more-button element so parent can host RAC Menu outside ListBox. */
@@ -112,6 +117,9 @@ export interface SidebarItemRowProps {
    */
   pinAction?: { pinned: boolean; onToggle: () => void };
 
+  /** Owner/local listing fallback only; SSE and hydrated entity fields take priority. */
+  summaryStatus?: unknown;
+  summaryUnreadAt?: unknown;
   /** 子对话数：父对话折叠的子对话数量。非空时显示折叠箭头 + 数量。 */
   childCount?: number;
   /** 父对话的子列表是否折叠。默认 true（折叠）。 */
@@ -137,11 +145,14 @@ function SidebarItemRow({
   onSelectItem,
   disableDrag,
   readOnly = false,
+  disableAutoRead = false,
   style,
   onMenuAnchorChange,
   editSignal,
   pinned,
   pinAction,
+  summaryStatus,
+  summaryUnreadAt,
   childCount,
   isChildCollapsed = true,
   onToggleChildCollapse,
@@ -189,6 +200,7 @@ function SidebarItemRow({
   // dialog 也需加载，用于读取持久化 status/unreadAt 驱动侧边栏未读点。
   useEffect(() => {
     if (
+      !disableAutoRead &&
       (type === "agent" || type === "page" ||
        type === "table" || type === "app" || type === "dialog") &&
       routeContentKey &&
@@ -196,7 +208,7 @@ function SidebarItemRow({
     ) {
       dispatch(read({ dbKey: routeContentKey, preferredServerOrigin: sourceServerOrigin }));
     }
-  }, [type, routeContentKey, entity, sourceServerOrigin, dispatch]);
+  }, [type, routeContentKey, entity, sourceServerOrigin, dispatch, disableAutoRead]);
 
   // dialog status for unread dot / status badge
   const dialogId = type === "dialog" ? extractCustomId(routeContentKey) : null;
@@ -208,19 +220,22 @@ function SidebarItemRow({
     () => type === "dialog" ? selectDialogStatusFromEntity(routeContentKey) : null,
     [type, routeContentKey]
   );
-  const entityUnreadSelector = useMemo(
-    () => type === "dialog" ? selectIsDialogUnreadFromEntity(routeContentKey) : null,
-    [type, routeContentKey]
-  );
   const entityDialogStatus = useAppSelector((state) =>
     entityStatusSelector ? entityStatusSelector(state) : undefined
   );
-  const entityIsUnread = useAppSelector((state) =>
-    entityUnreadSelector ? entityUnreadSelector(state) : false
-  );
-  // SSE 实时优先（当前 space 立即反馈），实体兜底（跨 space / 刷新后持久）。
-  const dialogStatus = sseDialogStatus ?? entityDialogStatus;
-  const isUnread = sseIsUnread || entityIsUnread;
+  const entityUnreadAt = dialogSummaryUnreadAt((entity as { unreadAt?: unknown } | undefined)?.unreadAt);
+  const ownerId = parseDialogKey(routeContentKey)?.userId;
+  const canUseSummary = type === "dialog" && !readOnly &&
+    (ownerId === currentUserId || ownerId === "local");
+  // The boolean hook subscribes; the existing map distinguishes unknown from false.
+  const sseUnread = dialogId ? getUnreadDialogIds()[dialogId] : undefined;
+  const dialogStatus = sseDialogStatus !== undefined ? sseDialogStatus
+    : dialogSummaryStatus(entityDialogStatus) !== undefined ? dialogSummaryStatus(entityDialogStatus)
+    : canUseSummary ? dialogSummaryStatus(summaryStatus) : undefined;
+  const persistedUnreadAt = entityUnreadAt !== undefined ? entityUnreadAt
+    : canUseSummary ? dialogSummaryUnreadAt(summaryUnreadAt) : undefined;
+  const isUnread = sseUnread !== undefined ? sseIsUnread
+    : typeof persistedUnreadAt === "number" && persistedUnreadAt > 0;
 
   // space event status (background/automation) OR live local generation loop.
   // Wave9: controllers live in dialogRuntimeStore — must use the hook to subscribe.
