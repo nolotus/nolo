@@ -16,6 +16,8 @@ import { DELETE_SAFETY_RED_LINE } from "agent-runtime/deleteSafety";
 import { CREDENTIAL_HYGIENE_RULE } from "agent-runtime/credentialHygiene";
 // 「并行是默认」与删除红线一样属于系统层固定约束：无条件注入，不做工具门控。
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDefault";
+// 派发落点是「并行是默认」的下一层（派到哪个后端执行），紧随其后注入。
+import { DISPATCH_BACKEND_POLICY } from "agent-runtime/dispatchBackendPolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "agent-runtime/platformRiskControl";
 import { buildConsultationModeBlock } from "agent-runtime/consultationMode";
 import { buildResponseGuidelines } from "agent-runtime/responseGuidelines";
@@ -299,6 +301,13 @@ export const buildSystemPromptContext = (options: {
       owner: "platform",
       cacheScope: "static",
       content: PARALLEL_DISPATCH_DEFAULT_RULE,
+    },
+    // 派发落点：并行派发纪律的下一层（派到哪个执行后端），紧随并行块。
+    {
+      id: "dispatch-backend-policy",
+      owner: "platform",
+      cacheScope: "static",
+      content: DISPATCH_BACKEND_POLICY,
     },
     // 平台风控纪律：无条件静态前缀，紧随并行派发块。
     {

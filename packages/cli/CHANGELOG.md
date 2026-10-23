@@ -1,4 +1,64 @@
 
+## 0.158.0-alpha.1 (2026-10-23)
+
+### Features
+
+* **agent-runtime:** add client for credential exec broker ([0cb23e6](https://github.com/nolotus/bun-nolo/commit/0cb23e6b96328fac40e4d9db0460911c70d896e6))
+* **agent-runtime:** add credential exec broker skeleton ([e0c4e10](https://github.com/nolotus/bun-nolo/commit/e0c4e1086770eee7782ed06b32c2efa63f048266))
+* **agent-runtime:** wrap credential exec client as a tool handler ([773dd55](https://github.com/nolotus/bun-nolo/commit/773dd5596985ed823485497cf820ff902493e037))
+* **agent:** point credential discovery at secret list --json ([2561bfa](https://github.com/nolotus/bun-nolo/commit/2561bfa130c58afa41d6bba77b223bb033372684))
+* **agent:** route credential handling to nolo secret ([f1403aa](https://github.com/nolotus/bun-nolo/commit/f1403aa0640e04b002cc90e089f0267be4cdc58f))
+* **ai:** Exa 提为第一搜索源并接通定档信号 ([9efb0ca](https://github.com/nolotus/bun-nolo/commit/9efb0cae785643cb7beb0c24721780b6d7d4c677))
+* **ai:** 同步 Exa 3.0 检索档位与自动定档 ([8dded82](https://github.com/nolotus/bun-nolo/commit/8dded824e559e93c0095f03fd1dcfbc492eeb252))
+* **audit:** add credential use audit contract ([b48a0ad](https://github.com/nolotus/bun-nolo/commit/b48a0ad6019523ebb8847c62f8a4e5e0afa439ca))
+* **audit:** let buildExecutionAuditRecord carry credential uses ([d274e24](https://github.com/nolotus/bun-nolo/commit/d274e249f93a90da94f2101f85c72a1a5fd204d6))
+* **chat:** 上下文占用三态展示 + 用量入口移出空抽屉栏 ([b03202f](https://github.com/nolotus/bun-nolo/commit/b03202fdd28f9a2c5644f06de0ae63c2a366b7b2))
+* **cli:** add --json to nolo secret list ([8dfb142](https://github.com/nolotus/bun-nolo/commit/8dfb142883fa9c7898be38f7ec0b683b5836d553))
+* **credentials:** add local secret resolver for the exec broker ([1e89fae](https://github.com/nolotus/bun-nolo/commit/1e89fae2f2bb14cdb12aad2756949cadfbd03783))
+* **docker:** 可选 empty 工作区模式（跳过整仓打包）与阶段诊断 ([67d1903](https://github.com/nolotus/bun-nolo/commit/67d19033ef6d1f743d341d1b8ee31a6a1ce53a1c))
+* **explore:** Explore 改由 ?category= 驱动，七分类统一入口 ([d4a41d4](https://github.com/nolotus/bun-nolo/commit/d4a41d44544c4b97d830bf3c29394f8033db67b1))
+* **home:** Home 增加「分类」视图（旧式类型筛选 + 全部内容列表） ([75c5d91](https://github.com/nolotus/bun-nolo/commit/75c5d91c586b2fc5177cb6e531850b9121326c31))
+* **home:** Work 列表复用侧栏条目，空分组不占位，第三组改称「已完成」 ([84e85ca](https://github.com/nolotus/bun-nolo/commit/84e85cabb60c62cb131a1a7e1967c31b93bb81be))
+* **home:** 用「其他内容」类型分组取代独立「分类」视图 ([1e67591](https://github.com/nolotus/bun-nolo/commit/1e675911025e3b6e1a00e563971daa55f7162517))
+* **instabox:** 固定工作目录 + 结构化文件工具桥 + 释放状态机 ([1656c13](https://github.com/nolotus/bun-nolo/commit/1656c1382469d704d91df44e75240c78da028c2a))
+* **instabox:** 支持原生 stdin（≤1 MiB，按 UTF-8 字节计） ([a9ae76e](https://github.com/nolotus/bun-nolo/commit/a9ae76ebb0c263294ed956846ac5b1923bef3892))
+* **navigation:** 44px rail with promoted favorite shortcuts ([a888e23](https://github.com/nolotus/bun-nolo/commit/a888e23947ec61da8d0dc72b8ead480920bc5ff1))
+* **navigation:** paginated Work history with authorized shared Space dialogs ([7037edc](https://github.com/nolotus/bun-nolo/commit/7037edc1ef816e4fea63dd593e30af7b85aa90e6))
+* **tui:** split permission confirmations into local and remote grants ([c3721d8](https://github.com/nolotus/bun-nolo/commit/c3721d877c52c02e7c81b8086e80d1226b77d57c))
+* **work:** 最近工作列表改版并修复历史加载可靠性 ([b32ac90](https://github.com/nolotus/bun-nolo/commit/b32ac9019e9b88c6f3f3cd0e811d42e77da90c79))
+
+### Bug Fixes
+
+* **agent-runtime:** unify response guidance across runtime surfaces ([bc63faa](https://github.com/nolotus/bun-nolo/commit/bc63faae8f42127dc4da706bac08916c4822a023))
+* **agent-runtime:** 显式 cwd 与沙盒后端互斥并补派发落点提示词块 ([64f40fd](https://github.com/nolotus/bun-nolo/commit/64f40fd468c8a4011d204dd4138b5b65d3952159))
+* **auth:** Web 端凭据双轨支持与生命周期做减法 ([3626d7e](https://github.com/nolotus/bun-nolo/commit/3626d7eaf94f26ca2c8faaf20691364feb5501dd))
+* **chat:** 共享历史失败按来源归因，侧栏收敛为单条重试控件 ([cbde341](https://github.com/nolotus/bun-nolo/commit/cbde3419faa1b9eb00dd929daa628849ae79686f))
+* **database:** 共享 Space 历史端点恒 400，删除 body 准入协议 ([c4f3c54](https://github.com/nolotus/bun-nolo/commit/c4f3c5477228ddf4ba23f9136bc94d8d83484018))
+* **database:** 已知记录归属只问该来源并消除消息读取的全库扫描退化 ([03b8ae2](https://github.com/nolotus/bun-nolo/commit/03b8ae2c21b626a1a8b4dd5da783e35660f33d7d))
+* **database:** 收紧共享历史终态判定，避免非 400 故障清空来源数据 ([be66269](https://github.com/nolotus/bun-nolo/commit/be6626990868e543c296201cb2290d6b6cf03ed3))
+* **home:** Web 端「项目」视图给出说明而不是空白内容区 ([d0c2194](https://github.com/nolotus/bun-nolo/commit/d0c2194c6341706cd3bc4f1ca6df8ca072a4a0c3))
+* **instabox:** 修正文件桥根目录与探针判定（真机 probe_failed） ([5217021](https://github.com/nolotus/bun-nolo/commit/5217021479fddc3780615d1cf54b0af548c75fb3))
+* **navigation:** 修复收藏误删、共享 401 过度清空与 Work 漏掉本地对话 ([f2049ab](https://github.com/nolotus/bun-nolo/commit/f2049ab14fce12c174c100d9814f3ff9fe9a570a))
+* **navigation:** 折叠只隐藏 Context，保留常驻 48px Rail ([4efac05](https://github.com/nolotus/bun-nolo/commit/4efac05ba4721482a9d1e1139ae54fe3b1146936))
+* **navigation:** 让 Space 侧边栏在 Context 列内滚动，控件吸顶不遮挡内容 ([6a591ca](https://github.com/nolotus/bun-nolo/commit/6a591cad690b3023691b76bb9ebf398ed853e52d)), closes [#198](https://github.com/nolotus/bun-nolo/issues/198)
+* **release:** 主题引导下沉 app 包并补投影白名单 ([f03afd1](https://github.com/nolotus/bun-nolo/commit/f03afd108471216cedc8177245d240ee53f59eee))
+* **security:** unify credential environment judgement ([8f7056b](https://github.com/nolotus/bun-nolo/commit/8f7056b13240d66bf8ef291d17f1f2396f27f71c))
+* **settings:** publish account chat preferences synchronously and avoid stale completion writes ([#186](https://github.com/nolotus/bun-nolo/issues/186)) ([2705801](https://github.com/nolotus/bun-nolo/commit/27058011554df41b2af7a5f194531fc50815418e))
+* **settings:** serialize per-account Settings writes and test failure recovery ([#187](https://github.com/nolotus/bun-nolo/issues/187)) ([a164b9f](https://github.com/nolotus/bun-nolo/commit/a164b9f7cd1a8937de009337db3aa4db198942d2))
+* **settings:** 服务端权威回显世代与登出态 toggle 反馈 ([bb5eb66](https://github.com/nolotus/bun-nolo/commit/bb5eb662288a725266af4be3f7d15d7aed22a3c0))
+* **settings:** 消除 chat display owner 的渲染期 setAccount ([85bdead](https://github.com/nolotus/bun-nolo/commit/85bdead8bfdb746dd159e6ff13c1ff55e72a799a))
+* **settings:** 用本地意图世代守卫 settings hydrate ([e602b91](https://github.com/nolotus/bun-nolo/commit/e602b9173738d836a33f5b939527e2d79bbd889b))
+* **settings:** 设置写失败可见、有界重试与权威对账 ([15f2590](https://github.com/nolotus/bun-nolo/commit/15f259018cb4a6291bc725ff0d9ffd9d7c98a525))
+* **style:** 提升fluid hover行的特异性以胜过StyleX原子类 ([82876e3](https://github.com/nolotus/bun-nolo/commit/82876e36d770654cba0ee91ed9834087e0e3cbab))
+* **table:** 当前表判定改用 dbKey，恢复老 schema 表的只读展示 ([6d72d4b](https://github.com/nolotus/bun-nolo/commit/6d72d4bcbc9e4f7abb56982ef9bd8c7fdb7cac2f))
+* **theme:** let read-only appearance consumers render on unbound stores ([c2146bc](https://github.com/nolotus/bun-nolo/commit/c2146bc8b257f47656d1b943419d1faa33378130))
+
+### Performance Improvements
+
+* **sidebar:** 侧边栏摘要行不再逐条读取完整实体 ([ce6be26](https://github.com/nolotus/bun-nolo/commit/ce6be26b60fc4798f7c4416697d6c8f0ef46a85c))
+* **web:** 主题与字体静态数据外置为带 hash 的静态资源 ([8671c0d](https://github.com/nolotus/bun-nolo/commit/8671c0d7c12bf12ec5cb3636a3fec05a1ccb38a5))
+
+
 ## 0.157.0-alpha.1 (2026-10-20)
 
 ### Features
