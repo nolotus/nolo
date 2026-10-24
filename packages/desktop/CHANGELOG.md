@@ -1,4 +1,11 @@
 
+## 0.176.0-alpha.1 (2026-10-24)
+
+### Features
+
+* **downloads:** updateMeta 支持 mirrors 协议字段并加固 mirrors 过滤 ([3d5d9a5](https://github.com/nolotus/bun-nolo/commit/3d5d9a59d53b0cd12efe405ff4d1ef08f366d5ea))
+
+
 ## 0.175.0-alpha.2 (2026-10-24)
 
 ### Bug Fixes

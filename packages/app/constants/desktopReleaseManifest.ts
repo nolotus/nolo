@@ -7,6 +7,11 @@ export type DesktopReleaseUpdateMeta = {
   size: number;
   version: string;
   hash: string;
+  /**
+   * 同一更新包的其它可信下载地址（主站直出时通常就是 CF 对象存储地址）。
+   * 可选的新增字段：旧客户端忽略未知字段，`url` 仍是首选源，语义不变。
+   */
+  mirrors?: string[];
 };
 
 export type DesktopReleaseArtifact = {
@@ -139,12 +144,24 @@ export function normalizeDesktopReleaseManifest(
       typeof (rawUpdateMeta as Record<string, unknown>).hash === "string"
     ) {
       const meta = rawUpdateMeta as Record<string, unknown>;
+      // mirrors 是可选扩展字段：只保留非空字符串，按上限截断，顺序保留
+      // （发布端把首选镜像写在最前）。
+      const rawMetaMirrors = meta.mirrors;
+      const metaMirrors = Array.isArray(rawMetaMirrors)
+        ? rawMetaMirrors
+            .filter(
+              (entry): entry is string =>
+                typeof entry === "string" && entry.trim() !== "",
+            )
+            .slice(0, MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS)
+        : [];
       updateMeta = {
         url: meta.url as string,
         sha256: meta.sha256 as string,
         size: meta.size as number,
         version: meta.version as string,
         hash: meta.hash as string,
+        ...(metaMirrors.length ? { mirrors: metaMirrors } : {}),
       };
     }
 
