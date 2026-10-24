@@ -1,4 +1,15 @@
 
+## 0.160.0-alpha.1 (2026-10-24)
+
+### Features
+
+* **cli:** run turn 结束归还堆页并提示本机内存 ([d6974ab](https://github.com/nolotus/bun-nolo/commit/d6974abe6a784b9a04c2d72300f4061ba2dcfd5d))
+
+### Bug Fixes
+
+* **agent-runtime:** shell 输出超限改为排空落盘并收紧驻留上限 ([a5e25e9](https://github.com/nolotus/bun-nolo/commit/a5e25e9211f5be6cbde548418fdc0038c5819085))
+
+
 ## 0.159.0-alpha.4 (2026-10-24)
 
 ### Bug Fixes

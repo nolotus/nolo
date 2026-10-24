@@ -5,9 +5,11 @@
 //
 // Extracted to avoid circular dependencies between execShellCapability and workspace adapters.
 
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { spawn as spawnChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 
 import { toErrorMessage } from "core/errorMessage";
 import { isRecord } from "core/isRecord";
@@ -461,47 +463,240 @@ export function truncateToolOutput(
 
 export const DEFAULT_MAX_STREAM_BUFFER_BYTES = 5 * 1024 * 1024; // 5MB 流式内存防爆硬上限
 
+export interface ReadNodeStreamOptions {
+  /** In-memory retention cap (default DEFAULT_MAX_STREAM_BUFFER_BYTES). */
+  maxBytes?: number;
+  /** When set, the complete output (retained head + every later chunk) is
+   *  written to this file once the cap is exceeded. */
+  spillPath?: string;
+  /** Test seam: builds the writable used for spillPath. Defaults to
+   *  fs.createWriteStream — injectable so slow/failing sinks stay testable. */
+  spillSinkFactory?: (path: string) => NodeJS.WritableStream;
+}
+
+/** Spill lifecycle: "disabled" (no path), "idle" (path given, not yet opened),
+ *  "open" (writable live), "ok" (flushed + closed cleanly), "failed". */
+type SpillState = "disabled" | "idle" | "open" | "ok" | "failed";
+
+/** Drain a child stream with a bounded in-memory buffer.
+ *
+ * The buffer cap is a *memory* bound, not a *pipe* bound: once the cap is
+ * exceeded we keep consuming (and discarding) the remaining bytes until
+ * end/close. Destroying the stream early would close the OS pipe and make the
+ * child die of SIGPIPE (exit code 141) — a verbose-but-successful command then
+ * looks like a failure to the agent.
+ *
+ * Memory stays bounded in the spill case too: bytes past the cap are handed to
+ * the spill writable, and when that writable applies backpressure the source is
+ * paused until "drain" (slow disk makes the child wait — it never inflates the
+ * write queue). If the spill writable fails, the source is resumed again and
+ * the note reports "spill failed ... output incomplete" instead of claiming a
+ * complete file. */
 export function readNodeStream(
   stream: NodeJS.ReadableStream | null,
-  maxBytes = DEFAULT_MAX_STREAM_BUFFER_BYTES,
+  maxBytesOrOptions: number | ReadNodeStreamOptions = DEFAULT_MAX_STREAM_BUFFER_BYTES,
 ): Promise<string> {
   if (!stream) return Promise.resolve("");
+  const options: ReadNodeStreamOptions =
+    typeof maxBytesOrOptions === "number"
+      ? { maxBytes: maxBytesOrOptions }
+      : (maxBytesOrOptions ?? {});
+  const maxBytes =
+    typeof options.maxBytes === "number" && Number.isFinite(options.maxBytes) && options.maxBytes >= 0
+      ? options.maxBytes
+      : DEFAULT_MAX_STREAM_BUFFER_BYTES;
+  const spillPath = asOptionalTrimmedString(options.spillPath);
+  const createSink =
+    options.spillSinkFactory ?? ((path: string) => createWriteStream(path));
+
   return new Promise<string>((resolveStream, rejectStream) => {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
     let settled = false;
+    let truncated = false;
+
+    let spillState: SpillState = spillPath ? "idle" : "disabled";
+    let spillError: string | null = null;
+    let spillSink: NodeJS.WritableStream | null = null;
+    let sourcePausedForSpill = false;
+    let sinkFinished = false;
 
     const formatLimit =
       maxBytes >= 1024 * 1024
         ? `${Math.round(maxBytes / (1024 * 1024))}MB`
         : `${Math.round(maxBytes / 1024)}KB`;
 
-    const finalize = (truncated = false) => {
+    const resumeSourceIfPaused = () => {
+      if (!sourcePausedForSpill) return;
+      sourcePausedForSpill = false;
+      try {
+        (stream as any).resume?.();
+      } catch {
+        // fail-open
+      }
+    };
+
+    /** Single idempotent failure path for the spill writable: record why, drop
+     *  the sink (closing its fd) and let the source flow again so a broken
+     *  spill can never stall the capture. */
+    const markSpillFailed = (error: unknown) => {
+      if (spillState === "failed") return;
+      spillState = "failed";
+      if (!spillError) {
+        spillError = toErrorMessage(error);
+      }
+      const sink = spillSink;
+      spillSink = null;
+      if (sink) {
+        try {
+          (sink as any).destroy?.();
+        } catch {
+          // fail-open
+        }
+      }
+      resumeSourceIfPaused();
+    };
+
+    const writeToSink = (buf: Buffer) => {
+      const sink = spillSink;
+      if (!sink || spillState !== "open") return;
+      if ((sink as any).destroyed === true) {
+        // Closed underneath us without finish and without error.
+        markSpillFailed(new Error("spill writable closed before finish"));
+        return;
+      }
+      let accepted = true;
+      try {
+        accepted = (sink as any).write(buf) !== false;
+      } catch (error) {
+        markSpillFailed(error);
+        return;
+      }
+      if (!accepted && !sourcePausedForSpill) {
+        // Backpressure: bounded memory wins over throughput. The child waits on
+        // the pipe instead of queueing unbounded bytes in the writable.
+        sourcePausedForSpill = true;
+        try {
+          (stream as any).pause?.();
+        } catch {
+          sourcePausedForSpill = false;
+        }
+      }
+    };
+
+    /** Lazily open the spill file the first time the cap is crossed, seeding it
+     *  with the already-retained head so the file holds the complete output. */
+    const openSpill = (headChunks: Buffer[], crossingChunk: Buffer) => {
+      if (!spillPath || spillState !== "idle") return;
+      let sink: NodeJS.WritableStream;
+      try {
+        mkdirSync(dirname(spillPath), { recursive: true });
+        sink = createSink(spillPath);
+        sink.on("error", (error: unknown) => markSpillFailed(error));
+        sink.on("drain", () => {
+          if (settled) return;
+          resumeSourceIfPaused();
+        });
+        sink.on("finish", () => {
+          sinkFinished = true;
+        });
+        // Lifecycle close, registered at creation: a writable that dies without
+        // "finish" while the source is paused for backpressure would otherwise
+        // never get a drain, never reach finalize, and park the source (and the
+        // promise) forever — markSpillFailed resumes the source.
+        sink.on("close", () => {
+          if (sinkFinished || spillState !== "open") return;
+          markSpillFailed(new Error("spill writable closed before finish"));
+        });
+      } catch (error) {
+        spillState = "failed";
+        spillError = toErrorMessage(error);
+        spillSink = null;
+        return;
+      }
+      spillSink = sink;
+      spillState = "open";
+      for (const head of headChunks) writeToSink(head);
+      writeToSink(crossingChunk);
+    };
+
+    const finalize = (wasTruncated: boolean) => {
       if (settled) return;
       settled = true;
-      let text = Buffer.concat(chunks).toString("utf8");
-      if (truncated) {
-        text += `\n\n[stream pipe truncated: output exceeded ${formatLimit} buffer limit]`;
+      const truncatedNow = wasTruncated || truncated;
+      const baseText = Buffer.concat(chunks).toString("utf8");
+
+      const done = () => {
+        let text = baseText;
+        if (truncatedNow) {
+          const notes = [`output exceeded ${formatLimit} buffer limit`];
+          if (spillState === "ok") {
+            notes.push(`full output: ${spillPath}`);
+          } else if (spillPath) {
+            // Never advertise a file we did not finish writing.
+            notes.push(
+              `spill failed${spillError ? ` (${spillError})` : ""}; output incomplete`,
+            );
+          }
+          text += `\n\n[stream pipe truncated: ${notes.join("; ")}]`;
+        }
+        resolveStream(text);
+      };
+
+      const sink = spillSink;
+      if (!sink || spillState !== "open") {
+        done();
+        return;
       }
-      resolveStream(text);
+
+      let closed = false;
+      const settleSink = (failed: boolean, error?: unknown) => {
+        if (closed) return;
+        closed = true;
+        if (failed) {
+          markSpillFailed(error ?? new Error("spill write failed"));
+        } else if (spillState === "open") {
+          spillState = "ok";
+        }
+        done();
+      };
+      if ((sink as any).destroyed === true) {
+        // Already closed before we could flush: "finish" will never arrive.
+        settleSink(true, new Error("spill writable closed before finish"));
+        return;
+      }
+      sink.once("error", (error: unknown) => settleSink(true, error));
+      sink.once("finish", () => settleSink(false));
+      // "close" alone proves only that the resource is gone, not that the bytes
+      // landed: a writable destroyed before "finish" must not report success.
+      sink.once("close", () => {
+        settleSink(!sinkFinished, new Error("spill writable closed before finish"));
+      });
+      try {
+        (sink as any).end?.();
+      } catch (error) {
+        settleSink(true, error);
+      }
     };
 
     stream.on("data", (chunk) => {
       if (settled) return;
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (truncated) {
+        // Over the memory cap: drop from memory, but keep draining so the
+        // child never blocks on a full pipe / dies of SIGPIPE.
+        writeToSink(buf);
+        return;
+      }
       if (totalBytes + buf.length >= maxBytes) {
         const remaining = Math.max(0, maxBytes - totalBytes);
+        const headChunks = chunks.slice();
         if (remaining > 0) {
           chunks.push(buf.subarray(0, remaining));
         }
-        try {
-          if (typeof (stream as any).destroy === "function") {
-            (stream as any).destroy();
-          }
-        } catch {
-          // fail-open
-        }
-        finalize(true);
+        totalBytes += buf.length;
+        truncated = true;
+        openSpill(headChunks, buf);
         return;
       }
       totalBytes += buf.length;
@@ -511,6 +706,26 @@ export function readNodeStream(
     stream.on("error", (error) => {
       if (settled) return;
       settled = true;
+      // The spill fd must not outlive a failed source; the caller still sees the
+      // original source error, not a spill error.
+      const sink = spillSink;
+      spillSink = null;
+      if (!spillError) spillError = toErrorMessage(error);
+      // Terminal spill failure: a source that dies mid-capture can never be
+      // reported as a complete spill file.
+      if (spillState !== "failed" && spillState !== "disabled") {
+        spillState = "failed";
+      }
+      if (sink) {
+        try {
+          (sink as any).destroy?.();
+        } catch {
+          // fail-open
+        }
+      }
+      // A source paused for spill backpressure must be released here: the drain
+      // handler early-returns once `settled`, so nothing else would resume it.
+      resumeSourceIfPaused();
       rejectStream(error);
     });
 
@@ -700,8 +915,14 @@ export async function runWorkspaceCommand(args: {
   exitPromise.then(detachSignalCleanup, detachSignalCleanup);
   // Attach rejection handlers immediately: detached streams may reject before
   // the process close event, and Node otherwise reports an unhandled rejection.
-  const stdoutCapture = stdoutPromiseResult(readNodeStream(proc.stdout));
-  const stderrCapture = stdoutPromiseResult(readNodeStream(proc.stderr));
+  // A spill path keeps the full output inspectable when it exceeds the 5MB
+  // in-memory cap (the stream is drained, not destroyed, so no SIGPIPE).
+  const stdoutCapture = stdoutPromiseResult(
+    readNodeStream(proc.stdout, { spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}.log`) }),
+  );
+  const stderrCapture = stdoutPromiseResult(
+    readNodeStream(proc.stderr, { spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}-stderr.log`) }),
+  );
   const killChild = (signal: NodeJS.Signals) => {
     if (detached && typeof proc.pid === "number") {
       try {

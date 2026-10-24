@@ -83,6 +83,7 @@ import { NOLO_CLIENT_VERSION_HEADER } from "core/clientVersionGate";
 import { extractGoogleValidationLink } from "core/chat/validationUrl";
 import { resolveClientVersion } from "../../agent-runtime/providerResolution";
 import { expandCollapsedPastes } from "../../core/collapsedPaste";
+import { releaseHeapPages } from "../idleHeapRelease";
 
 import { ulid } from "ulid";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -2149,7 +2150,31 @@ async function runLocalAgentTurnForCli(
   }
 }
 
-async function runLocalAgentTurnForCliWithAdapter(
+export async function runLocalAgentTurnForCliWithAdapter(
+  options: RunAgentTurnOptions,
+  settings: { reportFailure: boolean },
+  resolvedBaseAdapter: AgentRuntimeHostAdapter | undefined,
+): Promise<RunAgentTurnResult> {
+  try {
+    return await executeLocalAgentTurnForCliWithAdapter(
+      options,
+      settings,
+      resolvedBaseAdapter,
+    );
+  } finally {
+    try {
+      if (typeof options.releaseHeapPages === "function") {
+        options.releaseHeapPages();
+      } else {
+        releaseHeapPages({ env: options.env as NodeJS.ProcessEnv });
+      }
+    } catch {
+      // Memory hygiene must never break the host process or turn result.
+    }
+  }
+}
+
+async function executeLocalAgentTurnForCliWithAdapter(
   options: RunAgentTurnOptions,
   settings: { reportFailure: boolean },
   resolvedBaseAdapter: AgentRuntimeHostAdapter | undefined,

@@ -38,7 +38,7 @@ import {
   createActivityIndicator,
 } from "./activityIndicator";
 import { createRunRegistryPoller, createHttpRemoteTaskSource } from "./runRegistryPoller";
-import { createIdleHeapReleaser } from "./idleHeapRelease";
+import { createIdleHeapReleaser } from "../idleHeapRelease";
 import { createRunCompletionWatcher } from "./runCompletionWatcher";
 import { RUN_WAKE_CHANNEL_ENV } from "../../agent-runtime/agentRunIsolation";
 import {

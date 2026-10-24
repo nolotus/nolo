@@ -325,6 +325,10 @@ export type RunAgentTurnOptions = {
    */
   modelOverride?: ModelLayerOverride | null;
   /**
+   * Optional hook / override for post-turn heap release (testing and custom runtimes).
+   */
+  releaseHeapPages?: () => void;
+  /**
    * Extra context blocks appended to the system prompt after the agent's own
    * prompt, before the user message. Used for skill content and AGENTS.md
    * project instructions — placing them here (instead of prepending to the

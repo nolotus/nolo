@@ -125,7 +125,7 @@ import {
   type TurnHistory,
 } from "./tuiHistory";
 import type { FixedInputController } from "./tuiRawInput";
-import type { IdleHeapReleaser } from "./idleHeapRelease";
+import type { IdleHeapReleaser } from "../idleHeapRelease";
 import { withSuspendedRenderer } from "./suspendedRenderer";
 
 /** Max bytes of AGENTS.md/CLAUDE.md to inject — prevents context window overflow. */

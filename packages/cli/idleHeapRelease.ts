@@ -1,5 +1,5 @@
 /**
- * Return freed JS heap pages to the OS once the TUI goes idle after a turn.
+ * Return freed JS heap pages to the OS once the TUI or headless turn goes idle.
  *
  * Why: a turn allocates in bursts (streamed text, tool outputs, JSON
  * round-trips). After the burst the live JS heap drops back to ~18 MB, but
@@ -23,7 +23,7 @@
 
 export const IDLE_HEAP_RELEASE_DELAY_MS = 2_000;
 
-type BunHeapApi = {
+export type BunHeapApi = {
   gc?: (force?: boolean) => void;
   shrink?: () => void;
 };
@@ -34,6 +34,27 @@ export type IdleHeapReleaser = {
   /** Call when a turn starts or the workspace exits; drops a pending release. */
   cancel(): void;
 };
+
+/**
+ * Return freed JS heap pages to the OS immediately: Bun.gc(true) + Bun.shrink().
+ * Safe to call in any environment (swallows errors, no-op if unsupported or disabled).
+ */
+export function releaseHeapPages(options: {
+  env?: NodeJS.ProcessEnv;
+  bun?: BunHeapApi | undefined;
+} = {}): void {
+  const env = options.env ?? process.env;
+  if (env.NOLO_TUI_IDLE_HEAP_RELEASE === "0") return;
+  const bun: BunHeapApi | undefined =
+    "bun" in options ? options.bun : (globalThis as { Bun?: BunHeapApi }).Bun;
+  if (typeof bun?.gc !== "function" || typeof bun?.shrink !== "function") return;
+  try {
+    bun.gc(true);
+    bun.shrink();
+  } catch {
+    // Memory hygiene must never break the host process.
+  }
+}
 
 export function createIdleHeapReleaser(options: {
   env?: NodeJS.ProcessEnv;
@@ -67,12 +88,7 @@ export function createIdleHeapReleaser(options: {
 
   const release = () => {
     pending = null;
-    try {
-      bun!.gc!(true);
-      bun!.shrink!();
-    } catch {
-      // Memory hygiene must never break the TUI.
-    }
+    releaseHeapPages({ env, bun });
   };
 
   return {

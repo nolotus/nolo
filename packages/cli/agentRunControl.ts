@@ -14,6 +14,11 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import * as nodeFs from "node:fs";
 import { execFileSync as nodeExecFileSync, spawn as nodeSpawn } from "node:child_process";
 import { isCompiledBinary, resolveCliEntrypointPath } from "./cliEnvHelpers";
+import {
+  formatHostMemoryLine,
+  readHostMemory,
+  type HostMemorySnapshot,
+} from "./client/hostMemory";
 import { buildResultFileContent } from "./agentRunResultFile";
 import { isAgentRunTerminalStatus as sharedIsAgentRunTerminalStatus } from "../ai/tools/agent/agentRunDisplayHelpers";
 import {
@@ -221,6 +226,8 @@ export type AgentRunControlDeps = {
   clearSignalHandler?: () => void;
   getProcessStartTime?: (pid: number) => Date | null | undefined;
   execFileSync?: typeof nodeExecFileSync;
+  /** 本机内存快照读取（缺省读真实 /proc/meminfo）；只影响提示文案，不参与准入。 */
+  readHostMemory?: () => HostMemorySnapshot | null;
 };
 
 export function resolveNoloHome(env?: EnvLike, homedir = nodeHomedir): string {
@@ -1353,6 +1360,44 @@ export function buildAgentRunChildCommand(
   return { execPath, childArgs: [entrypoint, ...commandParts, ...strippedArgs] };
 }
 
+/**
+ * 读一次本机内存；任何失败都退化为 null。
+ * 存在的唯一目的是保证「读内存」永远不会成为派发失败的原因。
+ */
+function safeReadHostMemory(
+  reader: () => HostMemorySnapshot | null
+): HostMemorySnapshot | null {
+  try {
+    return reader();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 把内存提示写到已有 output 通道；返回写出去的文案（未写则 undefined）。
+ * 写不进去（output.write 抛错）也只是没有这行提示，spawn 结果照常返回。
+ */
+function emitHostMemoryNotice(
+  mem: HostMemorySnapshot | null,
+  output: OutputLike | undefined
+): string | undefined {
+  if (!mem || !output) return undefined;
+  let notice: string;
+  try {
+    notice = formatHostMemoryLine(mem);
+  } catch {
+    return undefined;
+  }
+  try {
+    output.write(`${notice}\n`);
+  } catch {
+    // 提示通道坏了不影响派发结果，但字段仍如实反映「读过并格式化成功」。
+    return notice;
+  }
+  return notice;
+}
+
 export async function spawnLocalBackgroundRun(
   input: {
     rawArgs: string[];
@@ -1387,7 +1432,15 @@ export async function spawnLocalBackgroundRun(
     output: OutputLike;
   },
   deps: AgentRunControlDeps = {}
-): Promise<{ runId: string; pid?: number; logPath: string; queuePath: string; batchId: string }> {
+): Promise<{
+  runId: string;
+  pid?: number;
+  logPath: string;
+  queuePath: string;
+  batchId: string;
+  /** 派发时打到 output 上的那行本机内存文案（供上层展示/记录）；读不到则无。 */
+  hostMemoryNotice?: string;
+}> {
   const env = deps.env ?? process.env;
   const homedir = deps.homedir ?? nodeHomedir;
   const fs = deps.fs ?? nodeFs;
@@ -1494,6 +1547,10 @@ export async function spawnLocalBackgroundRun(
     NOLO_AGENT_RUN_ID: runId,
   };
 
+  // 派发时的一瞥：spawn 之前采集一次本机内存，之后一个字都不改行为。
+  // 读不到（非 Linux / 字段缺失）就是 null，这里不做任何分支判断。
+  const hostMemory = safeReadHostMemory(deps.readHostMemory ?? readHostMemory);
+
   const logFd = fs.openSync(logPath, "a");
   const proc = spawn(execPath, childArgs, {
     cwd: input.cwd,
@@ -1510,6 +1567,10 @@ export async function spawnLocalBackgroundRun(
   }
   proc.unref();
 
+  // spawn 成功后才提示（失败没有任何东西需要用户去并发权衡）。写失败/输出通道
+  // 抛错一律吞掉：这行字的价值远小于「派发已经成功了」这件事。
+  const hostMemoryNotice = emitHostMemoryNotice(hostMemory, input.output);
+
   if (typeof proc.pid === "number") {
     const processStartedAt = (deps.getProcessStartTime ?? defaultGetProcessStartTime)(proc.pid);
     // 必须持锁并在锁内重读：子进程此刻已经在跑，它的创建即心跳（keepAlive）
@@ -1525,7 +1586,14 @@ export async function spawnLocalBackgroundRun(
     });
   }
 
-  return { runId, pid: proc.pid, logPath, queuePath, batchId };
+  return {
+    runId,
+    pid: proc.pid,
+    logPath,
+    queuePath,
+    batchId,
+    ...(hostMemoryNotice ? { hostMemoryNotice } : {}),
+  };
 }
 
 export function ackRunRecord(

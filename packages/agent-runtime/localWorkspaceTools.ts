@@ -1145,7 +1145,13 @@ function defensivelyTruncateReadFile(args: {
   };
 }
 
-const READ_FILE_LEDGER_MAX_RECORDS = 64;
+export const READ_FILE_LEDGER_MAX_RECORDS = 64;
+/**
+ * 文件读取去重账本最大文件键数（LRU 淘汰最久未用）。
+ * 实测依据：每个文件最多 64 条范围，2000 文件 × 64 条 = 16MB；
+ * 加 LRU 上限 256 个文件键（超出淘汰最久未用），防止文件键无限制膨胀。
+ */
+export const READ_FILE_LEDGER_MAX_KEYS = 256;
 
 async function readFileTool(args: {
   call: AgentRuntimeToolCallInput;
@@ -1204,6 +1210,9 @@ async function readFileTool(args: {
     const retainedCap = resolveHistoricalToolContentCap("readFile", 0);
     const retained = filterRetainedLedgerRecords(entry.records, retainedCap);
     if (retained.length > 0 && isLineRangeCovered(requestRange, retained)) {
+      // LRU refresh: 访问命中时移至最新，避免高频复读的文件键被过早淘汰
+      ledger.delete(relativePath);
+      ledger.set(relativePath, entry);
       return {
         content:
           `[readFile] ${relativePath} lines ${requestRange.startLine}-${requestRange.endLine} were already ` +
@@ -1250,10 +1259,16 @@ async function readFileTool(args: {
       JSON.stringify(metadata).length;
     const records = entry?.records ?? [];
     records.push({ ...requestRange, chars: persistedChars });
+    ledger.delete(relativePath);
     ledger.set(relativePath, {
       fingerprint,
       records: records.slice(-READ_FILE_LEDGER_MAX_RECORDS),
     });
+    while (ledger.size > READ_FILE_LEDGER_MAX_KEYS) {
+      const oldestKey = ledger.keys().next().value;
+      if (oldestKey === undefined) break;
+      ledger.delete(oldestKey);
+    }
   }
   return { content: truncatedRead.content, metadata };
 }
@@ -1994,10 +2009,15 @@ async function execShellTool(args: {
  * arrive, so capsule.truncated and the spill metadata stay truthful even
  * when (b) hits its bound.
  */
-const LAUNCH_PROCESS_STREAM_RING_CHARS = 65_536;
-const LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS = 4_000_000;
+export const LAUNCH_PROCESS_STREAM_RING_CHARS = 65_536;
+/**
+ * 长驻进程流捕获上限。
+ * 实测依据：4M 字符 = 4MB 常驻/路（bun 对 ASCII 用 latin1）。多路长驻进程线性叠加。
+ * 改为 1_000_000（4MB → 1MB/路）。保持 ring 65536 不变。
+ */
+export const LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS = 1_000_000;
 
-type LaunchProcessStreamCapture = {
+export type LaunchProcessStreamCapture = {
   push(chunk: string | Buffer): void;
   /** SPILL source — the full captured text while it fit, else the bounded
    *  head-preserving prefix once the capture bound was reached. Equals the
@@ -2015,7 +2035,7 @@ type LaunchProcessStreamCapture = {
   totalLines(): number;
 };
 
-function createLaunchProcessStreamCapture(): LaunchProcessStreamCapture {
+export function createLaunchProcessStreamCapture(): LaunchProcessStreamCapture {
   let ring = "";
   // Activated on the first ring eviction; holds the full output from the
   // snapshot onward, bounded by LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS.
