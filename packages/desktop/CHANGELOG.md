@@ -1,4 +1,11 @@
 
+## 0.179.0-alpha.3 (2026-10-24)
+
+### Bug Fixes
+
+* **gate:** 符号检查补数组解构与标准全局白名单 ([0884cb6](https://github.com/nolotus/bun-nolo/commit/0884cb6d21316689d5285e3677929c793fcea075))
+
+
 ## 0.179.0-alpha.2 (2026-10-24)
 
 ### Bug Fixes
