@@ -1,4 +1,11 @@
 
+## 0.163.0-alpha.1 (2026-10-24)
+
+### Features
+
+* **agent:** startAgentRun schema 暴露任务预算参数 ([1967162](https://github.com/nolotus/bun-nolo/commit/19671626b87f181eb4d69e85e15fa174c734ecb7))
+
+
 ## 0.162.0-alpha.1 (2026-10-24)
 
 ### Features
