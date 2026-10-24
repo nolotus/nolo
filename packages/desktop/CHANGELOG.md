@@ -1,4 +1,11 @@
 
+## 0.174.0-alpha.3 (2026-10-24)
+
+### Bug Fixes
+
+* **cli:** nolo update 独立二进制改为可验证的原子替换，并拒绝降级 ([c8110df](https://github.com/nolotus/bun-nolo/commit/c8110df092b71c6c71dff4852881137937c43700))
+
+
 ## 0.174.0-alpha.2 (2026-10-24)
 
 ### Bug Fixes

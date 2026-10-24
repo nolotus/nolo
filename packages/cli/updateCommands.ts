@@ -316,6 +316,157 @@ async function runShellScript(
   return exitCode;
 }
 
+type StandaloneUpdateScriptArgs = {
+  tarballUrl: string;
+  fallbackUrl: string;
+  extractDir: string;
+  symlinkPath: string;
+  currentVersion: string;
+};
+
+function shellQuote(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+/** POSIX sh only: no pipefail, pipelines, or GNU-only mv flags. */
+export function buildStandaloneUpdateScript(args: StandaloneUpdateScriptArgs): string {
+  const curl = "curl -fL --progress-bar --connect-timeout 20 --max-time 600 --speed-limit 1 --speed-time 60";
+  return `set -eu
+EXTRACT_DIR=${shellQuote(args.extractDir)}
+ENTRY=${shellQuote(args.symlinkPath)}
+CURRENT_VERSION=${shellQuote(args.currentVersion)}
+STAGING="$EXTRACT_DIR.new.$$"
+BACKUP="$EXTRACT_DIR.old.$$"
+LINK="$ENTRY.new.$$"
+old_moved=0
+new_moved=0
+committed=0
+cleanup() {
+  status=$?
+  trap - 0 HUP INT TERM
+  if [ "$committed" = 0 ]; then
+    if [ "$new_moved" = 1 ] && [ -d "$EXTRACT_DIR" ]; then
+      mv "$EXTRACT_DIR" "$STAGING" || exit 1
+    fi
+    if [ "$old_moved" = 1 ] && [ -d "$BACKUP" ]; then
+      mv "$BACKUP" "$EXTRACT_DIR" || exit 1
+    fi
+  fi
+  rm -rf "$STAGING"
+  rm -f "$LINK"
+  exit "$status"
+}
+# Refuse collisions before installing cleanup: never remove somebody else's path.
+if [ -e "$STAGING" ] || [ -L "$STAGING" ] ||
+   [ -e "$BACKUP" ] || [ -L "$BACKUP" ] ||
+   [ -e "$LINK" ] || [ -L "$LINK" ]; then
+  echo "Error: update staging path already exists" >&2
+  exit 1
+fi
+mkdir -p "\${EXTRACT_DIR%/*}"
+mkdir "$STAGING"
+trap cleanup 0
+trap 'exit 1' HUP INT TERM
+
+echo ${shellQuote(`Downloading nolo from ${args.tarballUrl}...`)}
+if ! ${curl} ${shellQuote(args.tarballUrl)} -o "$STAGING/bundle.tar.gz"; then
+  ${args.tarballUrl !== args.fallbackUrl
+    ? `echo ${shellQuote(`Primary source unavailable, trying ${args.fallbackUrl}...`)}
+  if ! ${curl} ${shellQuote(args.fallbackUrl)} -o "$STAGING/bundle.tar.gz"; then
+    echo "Error: download failed" >&2
+    exit 1
+  fi`
+    : `echo "Error: download failed" >&2
+  exit 1`}
+fi
+tar -xzf "$STAGING/bundle.tar.gz" -C "$STAGING"
+rm -f "$STAGING/bundle.tar.gz"
+chmod +x "$STAGING/nolo"
+# A failing, empty or malformed version response must not touch the live install.
+VERSION_TEXT=$("$STAGING/nolo" -v)
+case "$VERSION_TEXT" in
+  "nolo-cli "*) VERSION=\${VERSION_TEXT#nolo-cli } ;;
+  *) VERSION=$VERSION_TEXT ;;
+esac
+CORE=\${VERSION%%[-+]*}
+MAJOR=\${CORE%%.*}
+REST=\${CORE#*.}
+MINOR=\${REST%%.*}
+PATCH=\${REST#*.}
+case "$MAJOR:$MINOR:$PATCH" in
+  *[!0-9:]*|:*|*::*|*:) echo "Error: invalid bundle version" >&2; exit 1 ;;
+esac
+if [ "$CORE" != "$MAJOR.$MINOR.$PATCH" ]; then
+  echo "Error: invalid bundle version" >&2
+  exit 1
+fi
+case "$VERSION" in
+  *[!0-9A-Za-z.+-]*) echo "Error: invalid bundle version" >&2; exit 1 ;;
+esac
+case "$CURRENT_VERSION" in
+  "nolo-cli "*) CUR_VER=\${CURRENT_VERSION#nolo-cli } ;;
+  *) CUR_VER=$CURRENT_VERSION ;;
+esac
+CUR_CORE=\${CUR_VER%%[-+]*}
+CUR_MAJOR=\${CUR_CORE%%.*}
+CUR_REST=\${CUR_CORE#*.}
+CUR_MINOR=\${CUR_REST%%.*}
+CUR_PATCH=\${CUR_REST#*.}
+if [ -n "$CUR_MAJOR" ] && [ -n "$CUR_MINOR" ] && [ -n "$CUR_PATCH" ]; then
+  case "$CUR_MAJOR:$CUR_MINOR:$CUR_PATCH" in
+    *[!0-9:]*|:*|*::*|*:) ;;
+    *)
+      if [ "$CUR_CORE" = "$CUR_MAJOR.$CUR_MINOR.$CUR_PATCH" ]; then
+        is_downgrade=0
+        if [ "$MAJOR" -lt "$CUR_MAJOR" ]; then
+          is_downgrade=1
+        elif [ "$MAJOR" -eq "$CUR_MAJOR" ]; then
+          if [ "$MINOR" -lt "$CUR_MINOR" ]; then
+            is_downgrade=1
+          elif [ "$MINOR" -eq "$CUR_MINOR" ]; then
+            if [ "$PATCH" -lt "$CUR_PATCH" ]; then
+              is_downgrade=1
+            fi
+          fi
+        fi
+        if [ "$is_downgrade" = 1 ]; then
+          echo "Error: refusing downgrade from $CURRENT_VERSION to $VERSION" >&2
+          exit 11
+        fi
+      fi
+      ;;
+  esac
+fi
+if [ "$VERSION" = "$CURRENT_VERSION" ]; then
+  echo "✓ Already up to date (nolo-cli $VERSION)."
+  exit 10
+fi
+mkdir -p "\${ENTRY%/*}"
+# mv without -T is portable only when the destination is not a directory.
+if [ -d "$ENTRY" ] || [ -L "$EXTRACT_DIR" ]; then
+  echo "Error: refusing directory entrypoint or symlink bundle directory" >&2
+  exit 1
+fi
+ln -s "$EXTRACT_DIR/nolo" "$LINK"
+if [ -e "$EXTRACT_DIR" ]; then
+  old_moved=1
+  mv "$EXTRACT_DIR" "$BACKUP"
+fi
+new_moved=1
+mv "$STAGING" "$EXTRACT_DIR"
+mv -f "$LINK" "$ENTRY"
+committed=1
+# Retain only the newest recovery copy from this run; prune older backups.
+for old_copy in "$EXTRACT_DIR.old."*; do
+  if [ -d "$old_copy" ] && [ ! -L "$old_copy" ] && [ "$old_copy" != "$BACKUP" ]; then
+    rm -rf "$old_copy"
+  fi
+done
+# Retain the previous bundle as a recovery copy; never unlink the live entry.
+echo "nolo updated to $ENTRY"
+`;
+}
+
 /**
  * Update a standalone-bundle install (Bun `--compile` binary installed via
  * install-nolo.sh) by re-running the same curl+tar+symlink flow as the
@@ -355,40 +506,13 @@ export async function runStandaloneBundleUpdate(
   const installDir = resolveStandaloneInstallDir();
   const symlinkPath = join(installDir, "nolo");
 
-  // Single self-contained shell script that mirrors install-nolo.sh's main():
-  // temp dir + trap cleanup, curl with fallback, tar extract, atomic symlink
-  // swap. Run as one sh -c so the trap + set -e semantics match the installer.
-  const script = `set -euo pipefail
-TEMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TEMP_DIR"' EXIT
-
-echo "Downloading nolo from ${tarballUrl}..."
-if ! curl -fL --progress-bar "${tarballUrl}" -o "$TEMP_DIR/${tarballName}"; then
-  ${
-    tarballUrl !== fallbackUrl
-      ? `echo "Primary source unavailable, trying ${fallbackUrl}..."
-  if ! curl -fL --progress-bar "${fallbackUrl}" -o "$TEMP_DIR/${tarballName}"; then
-    echo "Error: download failed from ${fallbackUrl}" >&2
-    exit 1
-  fi`
-      : `echo "Error: download failed from ${tarballUrl}" >&2
-  exit 1`
-  }
-fi
-
-mkdir -p "${extractDir}"
-tar -xzf "$TEMP_DIR/${tarballName}" -C "${extractDir}"
-chmod +x "${extractDir}/nolo"
-
-mkdir -p "${installDir}"
-if [ -e "${symlinkPath}" ] || [ -L "${symlinkPath}" ]; then
-  rm -f "${symlinkPath}"
-fi
-ln -s "${extractDir}/nolo" "${symlinkPath}"
-trap - EXIT
-
-echo "nolo updated to ${installDir}/nolo"
-`;
+  const script = buildStandaloneUpdateScript({
+    tarballUrl,
+    fallbackUrl,
+    extractDir,
+    symlinkPath,
+    currentVersion: readPackageInfo().version,
+  });
 
   output.write(`\nNolo Agent CLI Installer & Updater\n`);
   output.write(`-----------------------------------------\n`);
@@ -402,6 +526,11 @@ echo "nolo updated to ${installDir}/nolo"
     env,
     useCustomSink,
   });
+
+  if (exitCode === 10) {
+    output.write(`  ${renderProgressBar(100.0)}\n`);
+    return 0;
+  }
 
   if (exitCode === 0) {
     output.write(`  ${renderProgressBar(100.0)}\n`);
