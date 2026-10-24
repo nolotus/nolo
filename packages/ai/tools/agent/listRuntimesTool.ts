@@ -177,8 +177,10 @@ export async function resolveTrustedInstaboxReadiness(
  * Trusted caller identity, in strict precedence order:
  *
  * 1. `trustedContext.callerUserId` — the explicit composition-root binding.
- *    A supplied-but-blank value fail-closes: it is never treated as "absent",
- *    so a caller that means "no caller" cannot silently inherit store identity.
+ *    Explicit presence of the key in `trustedContext` (even if its value is
+ *    `undefined`, `null`, empty string, or non-string) fail-closes and immediately
+ *    evaluates to `""` — it is NEVER treated as "absent" and MUST NOT fall back
+ *    to store or extra identities under any circumstances.
  * 2. `selectIdentityUserId(thunkApi.getState())` — the repo-standard identity
  *    selector. Phase 5 deleted the Redux auth slice, so there is no
  *    `state.identity.userId` to read; identity lives in the session runtime the
@@ -190,11 +192,18 @@ function resolveTrustedCallerUserId(
   thunkApi?: any,
   trustedContext?: ListRuntimesTrustedContext,
 ): string | undefined {
-  const bound = trustedContext?.callerUserId;
-  if (bound !== undefined && bound !== null) return bound;
+  if (trustedContext && "callerUserId" in trustedContext) {
+    const bound = trustedContext.callerUserId;
+    return typeof bound === "string" ? bound : "";
+  }
 
-  const fromStore = selectIdentityUserId(thunkApi?.getState?.());
-  if (fromStore) return fromStore;
+  if (typeof thunkApi?.getState === "function") {
+    const state = thunkApi.getState();
+    if (state != null) {
+      const fromStore = selectIdentityUserId(state);
+      if (fromStore) return fromStore;
+    }
+  }
 
   const fromExtra = thunkApi?.extra?.userId;
   return typeof fromExtra === "string" ? fromExtra : undefined;

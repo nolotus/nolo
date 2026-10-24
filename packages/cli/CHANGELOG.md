@@ -1,4 +1,11 @@
 
+## 0.164.0-alpha.3 (2026-10-24)
+
+### Bug Fixes
+
+* **tools:** take runtime identity from the trusted context only ([148a4e1](https://github.com/nolotus/bun-nolo/commit/148a4e1255987ec239995276a790967ea6397f93))
+
+
 ## 0.164.0-alpha.2 (2026-10-24)
 
 ### Bug Fixes
