@@ -451,12 +451,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // F1：runtimeKey=local 是「在宿主文件系统上改代码」，需要调用方的显式确认
       // （allowHostWrites: true）；缺失即派发前拒绝（零 spawn、零 run 记录）。
       allowHostWrites: args.allowHostWrites,
-      // 政策第 5 条：显式宿主 cwd × 沙盒落点必须在派发前失败（沙盒不兑现宿主
-      // 路径，cwd 会被静默替换、改动随沙盒消失）。这里传的是调用方**原始**
-      // args.cwd —— `requestedCwd` 走 resolveStartAgentRunCwd，要读 fs 探测，
-      // 排在这条判定之后；守卫自己只认宿主绝对路径（相对/空白自行跳过，交给
-      // resolveStartAgentRunCwd 报「必须是绝对路径」）。
-      ...(typeof args.cwd === "string" && args.cwd.trim() ? { cwd: args.cwd } : {}),
       ...(bindingMachineId ? { bindingMachineId } : {}),
       ...(localMachineId ? { localMachineId } : {}),
     });
