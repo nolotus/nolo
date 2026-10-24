@@ -22,6 +22,7 @@ import { zaiModels } from "./zai";
 import { qwenModels, qwenTokenPlanModels } from "integrations/qwen/models";
 import { moonshotModels, kimiCodeModels } from "integrations/moonshot/models";
 import { stepfunModels, stepfunStepPlanModels } from "integrations/stepfun/models";
+import { minimaxModels } from "integrations/minimax/models";
 import { commandCodeModels } from "integrations/commandcode/models";
 import type { ModelPrice } from "./types";
 
@@ -105,6 +106,7 @@ const MODEL_MAP = {
   qwen: qwenAllModels,
   moonshot: moonshotAllModels,
   stepfun: stepfunAllModels,
+  minimax: minimaxModels,
 } as const;
 
 export const MODEL_LOOKUP_MAP = {

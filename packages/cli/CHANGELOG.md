@@ -1,4 +1,12 @@
 
+## 0.159.0-alpha.1 (2026-10-24)
+
+### Features
+
+* **ai:** MiniMax 官方模型规范化接入模型表与上下文真值 ([be3a982](https://github.com/nolotus/bun-nolo/commit/be3a982dc05e87df6d06eec61ddb01c0abe9c263))
+* **ai:** 放行 MiniMax 官方端点流式 usage 采集选项 ([1f7fdbf](https://github.com/nolotus/bun-nolo/commit/1f7fdbf873e897643c7637bade2e021887d760f0))
+
+
 ## 0.158.0-alpha.1 (2026-10-23)
 
 ### Features

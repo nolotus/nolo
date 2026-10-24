@@ -47,6 +47,8 @@ const STREAM_USAGE_PROVIDERS = new Set([
   // kimi-code CLI also sends include_usage). Custom agents pointing at the
   // same endpoint are covered by the endpoint check below, not here.
   "kimi-code",
+  // MiniMax 官方 API（api.minimaxi.com）：OpenAI 兼容流式端点，支持 stream_options.include_usage。
+  "minimax",
   // OpenDesign (open-design.ai) and OpenCode Go (opencode.ai): OpenAI-compatible
   // aggregation / subscription endpoints. Verified to emit terminal usage with
   // prompt_tokens_details.cached_tokens.
@@ -59,10 +61,26 @@ const STREAM_USAGE_PROVIDERS = new Set([
 // Duplicated from agent-runtime on purpose: ai/llm must not depend on agent-runtime.
 const KIMI_CODE_ENDPOINT_MARKER = "api.kimi.com";
 
+function extractHostname(endpoint: string): string | null {
+  try {
+    const raw = endpoint.includes("://") ? endpoint : `https://${endpoint}`;
+    return new URL(raw).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** 严格校验 MiniMax 官方端点 host，避免包含在路径、查询参数或伪造二级域名中误放行 */
+const isMiniMaxEndpoint = (endpoint: string): boolean => {
+  const host = extractHostname(endpoint);
+  return host === "api.minimaxi.com" || host === "api.minimax.chat";
+};
+
 const isSupportedCustomEndpoint = (endpoint?: string | null): boolean => {
   if (typeof endpoint !== "string") return false;
   const ep = endpoint.toLowerCase();
   return (
+    isMiniMaxEndpoint(endpoint) ||
     ep.includes(KIMI_CODE_ENDPOINT_MARKER) ||
     ep.includes("open-design.ai") ||
     ep.includes("opencode.ai") ||
