@@ -709,7 +709,7 @@ const LOCK_STALE_MS = 5_000;
  */
 const TMP_STALE_MS = 60_000;
 
-function withRunRecordLock<T>(
+export function withRunRecordLock<T>(
   runId: string,
   deps: AgentRunControlDeps,
   fn: () => T,
@@ -720,10 +720,14 @@ function withRunRecordLock<T>(
   const lockPath = `${resolveRunRecordPath(runId, deps.env, deps.homedir)}.lock`;
   let held = false;
   try {
+    fs.mkdirSync(dirname(lockPath), { recursive: true });
     try {
       fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
       held = true;
-    } catch {
+    } catch (err: any) {
+      if (err?.code !== "EEXIST") {
+        throw err;
+      }
       // Contended, or stale from a crashed holder. Break it only when clearly
       // stale, so a live holder's section is never cut short.
       try {
@@ -1443,8 +1447,9 @@ export async function spawnLocalBackgroundRun(
   /** 派发时打到 output 上的那行本机内存文案（供上层展示/记录）；读不到则无。 */
   hostMemoryNotice?: string;
 }> {
-  const env = deps.env ?? process.env;
   const homedir = deps.homedir ?? nodeHomedir;
+  const env: EnvLike = deps.env ?? (deps.homedir ? { ...process.env, NOLO_HOME: join(homedir(), ".nolo") } : process.env);
+  const resolvedDeps: AgentRunControlDeps = { ...deps, env, homedir };
   const fs = deps.fs ?? nodeFs;
   const spawn = deps.spawn ?? nodeSpawn;
   const generateRunId = deps.generateRunId ?? defaultGenerateRunId;
@@ -1570,10 +1575,10 @@ export async function spawnLocalBackgroundRun(
   let proc: ChildProcess;
   try {
     reservation = reserveHostMemory({
-      runsDir, runId, fs: reservationFs, now: deps.now,
-      readHostMemory: () => (hostMemory = (deps.readHostMemory ?? readHostMemory)()),
-      getProcessStartTime: deps.getProcessStartTime ?? defaultGetProcessStartTime,
-      withLock: (id, fn, opts) => withRunRecordLock(id, deps, fn, opts),
+      runsDir, runId, fs: reservationFs, now: resolvedDeps.now,
+      readHostMemory: () => (hostMemory = (resolvedDeps.readHostMemory ?? readHostMemory)()),
+      getProcessStartTime: resolvedDeps.getProcessStartTime ?? defaultGetProcessStartTime,
+      withLock: (id, fn, opts) => withRunRecordLock(id, resolvedDeps, fn, opts),
     });
     proc = spawn(execPath, childArgs, {
       cwd: input.cwd, env: childEnv, detached: true,
@@ -1583,7 +1588,7 @@ export async function spawnLocalBackgroundRun(
     try {
       reservation?.release("spawn_sync_failed");
     } finally {
-      finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, deps);
+      finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, resolvedDeps);
     }
     throw error;
   } finally {
@@ -1596,10 +1601,10 @@ export async function spawnLocalBackgroundRun(
       // Keep the failed reservation on disk; do not crash the parent from an
       // EventEmitter callback or silently claim the budget was released.
       finalizeRunRecord(runId, { status: "failed", exitCode: 1,
-        note: `${error}; reservation release failed: ${releaseError}` }, deps);
+        note: `${error}; reservation release failed: ${releaseError}` }, resolvedDeps);
       return;
     }
-    finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, deps);
+    finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, resolvedDeps);
   });
   // spawn 成功后才提示（失败没有任何东西需要用户去并发权衡）。写失败/输出通道
   // 抛错一律吞掉：这行字的价值远小于「派发已经成功了」这件事。
@@ -1608,7 +1613,7 @@ export async function spawnLocalBackgroundRun(
   if (typeof proc.pid === "number") {
     let processStartedAt: Date | null | undefined;
     try {
-      processStartedAt = (deps.getProcessStartTime ?? defaultGetProcessStartTime)(proc.pid);
+      processStartedAt = (resolvedDeps.getProcessStartTime ?? defaultGetProcessStartTime)(proc.pid);
       if (processStartedAt && !Number.isFinite(processStartedAt.getTime())) processStartedAt = null;
     } catch {
       processStartedAt = null;
@@ -1618,15 +1623,15 @@ export async function spawnLocalBackgroundRun(
     // rename 回去——pid 一丢，stop 直接拒绝、checkStaleRun 永远提前返回，
     // 真死的子进程会留下永远 running 的幽灵记录；反向交错则抹掉 activity，
     // 重新开出本批要修的那个「无心跳窗口」。
-    withRunRecordLock(runId, deps, () => {
-      const latest = readRunRecord(runId, deps) ?? record;
+    withRunRecordLock(runId, resolvedDeps, () => {
+      const latest = readRunRecord(runId, resolvedDeps) ?? record;
       latest.pid = proc.pid;
       if (processStartedAt) latest.processStartedAt = processStartedAt.toISOString();
-      writeRunRecord(latest, deps);
+      writeRunRecord(latest, resolvedDeps);
       return true;
     }, { strict: true });
     try {
-      const persisted = readRunRecord(runId, deps);
+      const persisted = readRunRecord(runId, resolvedDeps);
       reservation!.associate({ runId, pid: proc.pid, processStartedAt: processStartedAt?.toISOString() });
       if (persisted?.pid !== proc.pid || !persisted.processStartedAt) throw new Error("Child identity persistence failed");
     } catch (error) {

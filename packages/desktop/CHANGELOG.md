@@ -1,4 +1,11 @@
 
+## 0.180.0-alpha.4 (2026-10-24)
+
+### Bug Fixes
+
+* **cli:** keep isolated runs on one NOLO_HOME so lock paths cannot diverge ([3c0bedf](https://github.com/nolotus/bun-nolo/commit/3c0bedfae8ccdcf7f9f038556ede877f6ccc9da0))
+
+
 ## 0.180.0-alpha.3 (2026-10-24)
 
 ### Bug Fixes
