@@ -31,7 +31,6 @@
 // 保留语义：本函数必须在任何副作用之前调用；拒绝即零 spawn、零 run 记录。
 // 服务端宿主不在这里重复判定（服务端才是授权/就绪状态的权威）。
 
-import { isAbsoluteRunCwd } from "./agentRunCwd";
 import {
     assertCliLocalAllowlistMatchesCapabilityTable,
     isDockerRuntimeKey,
@@ -225,11 +224,6 @@ export const HOST_EXECUTOR_UNAVAILABLE_MESSAGE =
  *   3. 显式 runtimeKey 一律以它为计划；不可兑现即由守卫抛错（不回落宿主）。
  *   4. 交互式 `nolo agent run`（用户自己在终端敲）不走这里：本机执行是正当用法，
  *      但必须**显式**（`--local` / `--runtime-key`），不能是「忘了传参」的默认结果。
- *   5. **显式 cwd 与沙盒后端互斥**（2026-10-23 事故）：调用方点名了一个宿主绝对
- *      cwd，而落点是沙盒 —— 沙盒不兑现宿主 cwd（仓库挂在沙盒内自己的路径），
- *      cwd 被静默替换、改动随沙盒停止一起消失，调用方却拿到「成功」。这种组合
- *      一律派发前显式失败，既不静默替换路径、也不静默降级到宿主。
- *      （只读派发与显式 `runtimeKey: "local"` + `allowHostWrites` 落宿主，不受影响。）
  */
 export function resolveCliLocalSpawnDispatch(
     input: {
@@ -241,41 +235,17 @@ export function resolveCliLocalSpawnDispatch(
          * 缺失即显式拒绝，绝不回落宿主也不回落 docker。
          */
         allowHostWrites?: unknown;
-        /**
-         * 调用方显式指定的**宿主绝对** cwd（未传 / 空白 / 相对路径 → 不在此处判定，
-         * 相对路径由 `agentRunCwd.resolveStartAgentRunCwd` 报「必须是绝对路径」）。
-         * 传了它就必须落在能兑现它的宿主执行面，见政策第 5 条。
-         */
-        cwd?: unknown;
     } & CliLocalRuntimeBindingCheck,
 ): CliLocalSpawnDispatchPlan {
     const requested = assertRuntimeKeyDispatchableByHost({
         ...input,
         host: "cli-local",
     });
-    const plan = resolvePlanForRequestedKey(requested, input.allowHostWrites, input.readOnly);
-    assertExplicitCwdHonoredByDispatchTarget({
-        cwd: input.cwd,
-        target: plan.target,
-        ...(plan.runtimeKey !== undefined ? { runtimeKey: plan.runtimeKey } : {}),
-    });
-    return plan;
-}
-
-/**
- * 决策主体的**唯一**实现（分支顺序：显式 key → 只读 → 默认沙盒）。拆出来只为让
- * `resolveCliLocalSpawnDispatch` 在同一条返回路径上跑 cwd 断言，不产出半成品计划。
- */
-function resolvePlanForRequestedKey(
-    requested: string | undefined,
-    allowHostWrites: unknown,
-    readOnly: boolean | undefined,
-): CliLocalSpawnDispatchPlan {
     if (requested) {
         const capability = resolveCliLocalRuntimeKeyCapability(requested);
         const target: CliLocalExecutionTarget =
             capability.target ?? (isDockerRuntimeKey(requested) ? "docker-sandbox" : "host");
-        if (target === "host" && allowHostWrites !== true) {
+        if (target === "host" && input.allowHostWrites !== true) {
             // 点名了宿主执行却没确认写入权利：派发前显式失败（零 spawn）。
             throw new Error(HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE);
         }
@@ -285,7 +255,7 @@ function resolvePlanForRequestedKey(
             reason: target === "host" ? "requested-host-writes" : "requested",
         };
     }
-    if (readOnly === true) {
+    if (input.readOnly === true) {
         return { target: "host", reason: "read-only-host" };
     }
     return {
@@ -293,76 +263,6 @@ function resolvePlanForRequestedKey(
         target: "docker-sandbox",
         reason: "default-docker-sandbox",
     };
-}
-
-/**
- * 取出「调用方点名的宿主绝对 cwd」；不是宿主绝对路径就返回 undefined。
- *
- * 只认绝对路径是有意的：相对路径在 `agentRunCwd` 里已经有更准确的报错
- * （「cwd 必须是绝对路径」），这里再拦一次会把那条提示挤掉、换成不准的原因。
- */
-export function normalizeExplicitHostCwd(rawCwd: unknown): string | undefined {
-    if (typeof rawCwd !== "string") return undefined;
-    const trimmed = rawCwd.trim();
-    if (!trimmed || !isAbsoluteRunCwd(trimmed)) return undefined;
-    return trimmed;
-}
-
-/** 沙盒不兑现 cwd 的原因（唯一文案，错误信息与文档共用）。 */
-export const SANDBOX_DOES_NOT_HONOR_CWD_REASON =
-    `沙盒后端不兑现宿主 cwd：沙盒里的仓库挂在沙盒内自己的路径（如 /home/bun/app），` +
-    `传进去的 cwd 会被静默替换；子 run 改的文件随沙盒停止一起消失，` +
-    `而调用方拿到的是「成功」（2026-10-23 事故）。`;
-
-/** 落点的人话名字（只用于报错，不参与判定）。 */
-function describeDispatchTarget(
-    target: CliLocalExecutionTarget,
-    runtimeKey: string | undefined,
-): string {
-    if (target === "docker-sandbox") {
-        return `本机 docker 沙盒（runtimeKey="${runtimeKey ?? "docker"}"）`;
-    }
-    if (target === "instabox") return `Instabox 沙盒（runtimeKey="instabox"）`;
-    return "宿主执行";
-}
-
-/** 显式 cwd × 沙盒落点的可执行报错文案。 */
-export function buildExplicitCwdSandboxConflictMessage(input: {
-    cwd: string;
-    target: CliLocalExecutionTarget;
-    runtimeKey?: string;
-}): string {
-    const landing = describeDispatchTarget(input.target, input.runtimeKey);
-    return (
-        `startAgentRun 显式传了 cwd="${input.cwd}"，但本次决策的落点是${landing}：` +
-        SANDBOX_DOES_NOT_HONOR_CWD_REASON +
-        `已拒绝派发，未启动任何 run（不静默替换路径、也不静默降级到宿主）。` +
-        `要让它真的在 ${input.cwd} 上动手：改用 runtimeKey: "local" + allowHostWrites: true` +
-        `（宿主执行，cwd 会被如实兑现）；或去掉 cwd，让子 run 在沙盒自己的仓库里工作。`
-    );
-}
-
-/**
- * 政策第 5 条的机械断言：显式宿主绝对 cwd + 非宿主落点 → 抛可执行错误。
- *
- * 必须在 spawn 之前调用；抛错即零 spawn、零 run 记录。只读派发与
- * `runtimeKey: "local"` + `allowHostWrites` 的 target 是 `host`，天然放行。
- */
-export function assertExplicitCwdHonoredByDispatchTarget(input: {
-    cwd?: unknown;
-    target: CliLocalExecutionTarget;
-    runtimeKey?: string;
-}): void {
-    const explicitCwd = normalizeExplicitHostCwd(input.cwd);
-    if (!explicitCwd) return;
-    if (input.target === "host") return;
-    throw new Error(
-        buildExplicitCwdSandboxConflictMessage({
-            cwd: explicitCwd,
-            target: input.target,
-            ...(input.runtimeKey !== undefined ? { runtimeKey: input.runtimeKey } : {}),
-        }),
-    );
 }
 
 /** F11 不变式 3：允许完全不出现 `--runtime-key` 的两种正当理由。 */

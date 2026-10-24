@@ -3,7 +3,7 @@
  * Used by esDev watch and one-shot esBuild.js.
  */
 import { writeFile } from "node:fs/promises";
-import { getThemeBootstrapUrl } from "../../packages/app/theme/themeBootstrap";
+import { getThemeBootstrapUrl } from "../../packages/server/html/themeBootstrap";
 import { writeThemeBootstrapAsset } from "./themeBootstrapAsset.js";
 import { outdir, publicPath } from "./esbuild.config.js";
 

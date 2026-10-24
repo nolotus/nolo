@@ -56,6 +56,7 @@ export const CLI_PUBLISH_DEPENDENCY_ALLOWLIST = [
   "js-base64",
   "crypto-js",
   "js-yaml",
+  "pino",
   "rambda",
   "zod",
 ];
@@ -202,6 +203,8 @@ export async function buildPublishArtifactBundled(
     "classic-level",   // 直接依赖时也 external
     "ulid",            // UMD 初始化需 require("crypto")，不能 inline 进 ESM chunk
     "tweetnacl",       // CJS 入口 require("crypto")，inline 进 ESM chunk 会触发 Dynamic require 崩溃
+    "pino",            // pino（经 sonic-boom）在 CJS 里 require("node:os")，被 inline 进 ESM chunk 后 esbuild 的 __require shim 会抛 Dynamic require of "node:os" is not supported（Node 26 实测崩溃）
+    "clipboardy",      // 虽然只被 TUI 粘贴流 await import，但它带着 CJS 依赖簇（fs/path/os/child_process…）一起 inline 后全是 __require("fs") 这类 shim 调用，一旦触发即同一类崩溃
     "react-native",
     "react-native/*",
   ];
@@ -228,7 +231,7 @@ export async function buildPublishArtifactBundled(
   }
   const publishVersionMap = buildPublishVersionMap(sourceDir);
   const keptDeps: Record<string, string> = {};
-  for (const name of ["level", "ulid", "tweetnacl"]) {
+  for (const name of ["level", "ulid", "tweetnacl", "pino", "clipboardy"]) {
     if (!emittedExternalDeps.has(name)) continue;
     const version = distPkg.dependencies?.[name] ?? publishVersionMap[name];
     if (version) keptDeps[name] = version;

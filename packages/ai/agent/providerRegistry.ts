@@ -7,7 +7,6 @@ import { commandCodeModels } from "../../integrations/commandcode/models";
 import { deepseekModels } from "../../integrations/deepseek/models";
 import { stepfunModels, stepfunStepPlanModels } from "../../integrations/stepfun/models";
 import { mistralModels } from "../../integrations/mistral/models";
-import { minimaxModels } from "../../integrations/minimax/models";
 import type { ReasoningEffort } from "./createAgentSchema";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 // 统一维护 agent 创建时可选择的 provider：
@@ -241,19 +240,22 @@ const TOGETHER_MODEL_OPTIONS: ReadonlyArray<{
  * 第一项为推荐默认。这里同样是用户自带 Key 的 metered 通道，平台不承担成本、不扣积分；
  * 请求层不做 id remap（直传形如 MiniMax-M3.1-Flash 的官方 id）。旧 id（MiniMax-Text-01 与
  * M2 系）按官方下线 SOP 在 `packages/core/modelUpgradeTable.ts` 里指向 M3.1 Flash，
- * 不在此清单重复出现，由 integrations/minimax/models.ts 共享真值派生。
+ * 不在此静态清单重复出现，避免两处真值。
  */
 const MINIMAX_MODEL_OPTIONS: ReadonlyArray<{
   id: string;
   label: string;
   recommended?: boolean;
   hasVision?: boolean;
-}> = minimaxModels.map((m, i) => ({
-  id: m.name,
-  label: m.displayName ?? m.name,
-  hasVision: m.hasVision,
-  ...(i === 0 ? { recommended: true } : {}),
-}));
+}> = [
+  {
+    id: "MiniMax-M3.1-Flash",
+    label: "MiniMax M3.1 Flash",
+    recommended: true,
+    hasVision: true,
+  },
+  { id: "MiniMax-M3", label: "MiniMax M3", hasVision: true },
+];
 
 export type OAuthProviderConfig = {
   kind: "oauth";

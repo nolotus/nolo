@@ -928,30 +928,6 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
     height: 22px;
     font-size: 11px;
   }
-
-  /* Usage trigger in controls bar: compress gracefully without displacing send button */
-  .message-input__controls-right .dialog-usage-trigger {
-    flex-shrink: 1;
-    min-width: 0;
-    max-width: 88px;
-    padding: 0 6px;
-    height: 24px;
-  }
-
-  .message-input__controls-right .send-button,
-  .message-input__controls-right .voice-btn-in-send {
-    flex-shrink: 0;
-  }
-}
-
-/* ── Resize Handle: idle low-contrast, prominent on hover/focus ── */
-/* 只保留 hover 显形：handle 不参与 tab 序（无键盘调整能力，可聚焦 separator
-   会违反 ARIA 模式），因此 :focus-visible / :focus-within 在这里都是不可达死规则。 */
-.message-input__resize-handle:hover .message-input__resize-bar {
-  background-color: var(--primary);
-  opacity: 1;
-  width: 52px;
-  transform: scaleY(1.3);
 }
 
 /* ── ComposerSuggestionMenu: unified suggestion surface density ──
@@ -1059,33 +1035,6 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   transition:
     stroke-dashoffset 0.3s ease,
     stroke 0.2s ease;
-}
-
-.dialog-usage-panel__hint {
-  font-size: 11px;
-  color: var(--textTertiary);
-  line-height: 1.4;
-  margin: 0;
-}
-
-.dialog-usage-popover__compact {
-  width: 100%;
-  height: 28px;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--borderMuted);
-  background: var(--surfaceRaised, var(--backgroundSecondary));
-  color: var(--text);
-  font-size: 12px;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--surfaceInteractiveHover, var(--backgroundHover));
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
 }
 
 .dialog-usage-panel__meter .nolo-meter-track {
