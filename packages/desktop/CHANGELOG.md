@@ -1,4 +1,11 @@
 
+## 0.175.0-alpha.1 (2026-10-24)
+
+### Features
+
+* **downloads:** 下载镜像 mirrors 与安装器源回退 ([7d28dca](https://github.com/nolotus/bun-nolo/commit/7d28dca64bcf79a8ae9bbb6abe0521018a955885))
+
+
 ## 0.174.0-alpha.4 (2026-10-24)
 
 ### Bug Fixes

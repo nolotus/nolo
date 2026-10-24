@@ -16,8 +16,16 @@ export type DesktopReleaseArtifact = {
   version?: string;
   buildSha?: string;
   publishedAt?: string;
+  /**
+   * 同一产物的其它可信下载地址（主站直出时通常就是 CF 对象存储地址）。
+   * 可选的新增字段：旧客户端忽略未知字段，`url` 仍是首选源，语义不变。
+   */
+  mirrors?: string[];
   updateMeta?: DesktopReleaseUpdateMeta;
 };
+
+/** mirrors 数量上限：manifest 可能来自上游存储，不信任其长度。 */
+export const MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS = 8;
 
 export type DesktopReleaseManifest = {
   schemaVersion: 1;
@@ -140,6 +148,18 @@ export function normalizeDesktopReleaseManifest(
       };
     }
 
+    // mirrors 同样是可选扩展字段：只有非空字符串才算数，长度按上限截断，
+    // 顺序保留（发布端把首选镜像写在最前）。
+    const rawMirrors = (artifact as Record<string, unknown>).mirrors;
+    const mirrors = Array.isArray(rawMirrors)
+      ? rawMirrors
+          .filter(
+            (entry): entry is string =>
+              typeof entry === "string" && entry.trim() !== "",
+          )
+          .slice(0, MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS)
+      : [];
+
     artifacts[platform] = {
       url: artifact.url,
       size: artifact.size,
@@ -147,6 +167,7 @@ export function normalizeDesktopReleaseManifest(
       ...(typeof artifact.version === "string" ? { version: artifact.version } : {}),
       ...(typeof artifact.buildSha === "string" ? { buildSha: artifact.buildSha } : {}),
       ...(typeof artifact.publishedAt === "string" ? { publishedAt: artifact.publishedAt } : {}),
+      ...(mirrors.length ? { mirrors } : {}),
       ...(updateMeta ? { updateMeta } : {}),
     };
   }
