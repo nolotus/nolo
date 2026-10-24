@@ -1,4 +1,11 @@
 
+## 0.173.0-alpha.3 (2026-10-24)
+
+### Bug Fixes
+
+* **cli:** 发布链加产物级 Dynamic require 门，并把 crypto-js/detect-libc 也改 external ([5349b11](https://github.com/nolotus/bun-nolo/commit/5349b1176c9e59e8c7a8d3c8a46c592d2cc5f804))
+
+
 ## 0.173.0-alpha.2 (2026-10-24)
 
 ### Bug Fixes

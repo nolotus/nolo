@@ -49,6 +49,7 @@ export const CLI_PUBLISH_DEPENDENCY_DENYLIST = [
 
 export const CLI_PUBLISH_DEPENDENCY_ALLOWLIST = [
   "clipboardy",
+  "detect-libc",
   "diff",
   "ulid",
   "level",
@@ -205,6 +206,8 @@ export async function buildPublishArtifactBundled(
     "tweetnacl",       // CJS 入口 require("crypto")，inline 进 ESM chunk 会触发 Dynamic require 崩溃
     "pino",            // pino（经 sonic-boom）在 CJS 里 require("node:os")，被 inline 进 ESM chunk 后 esbuild 的 __require shim 会抛 Dynamic require of "node:os" is not supported（Node 26 实测崩溃）
     "clipboardy",      // 虽然只被 TUI 粘贴流 await import，但它带着 CJS 依赖簇（fs/path/os/child_process…）一起 inline 后全是 __require("fs") 这类 shim 调用，一旦触发即同一类崩溃
+    "crypto-js",       // UMD 里 hasBinary 分支 require("crypto")，inline 进 ESM chunk 即变成 __require("crypto") 的 Dynamic require 崩溃
+    "detect-libc",     // sharp/lightningcss 的传递依赖，CJS 里 require("fs")/require("child_process")，同上
     "react-native",
     "react-native/*",
   ];
@@ -231,12 +234,42 @@ export async function buildPublishArtifactBundled(
   }
   const publishVersionMap = buildPublishVersionMap(sourceDir);
   const keptDeps: Record<string, string> = {};
-  for (const name of ["level", "ulid", "tweetnacl", "pino", "clipboardy"]) {
+  for (const name of ["level", "ulid", "tweetnacl", "pino", "clipboardy", "crypto-js", "detect-libc"]) {
     if (!emittedExternalDeps.has(name)) continue;
-    const version = distPkg.dependencies?.[name] ?? publishVersionMap[name];
-    if (version) keptDeps[name] = version;
+    const declaredVersion = distPkg.dependencies?.[name] ?? publishVersionMap[name];
+    if (declaredVersion) {
+      keptDeps[name] = declaredVersion;
+      continue;
+    }
+    // crypto-js 声明在 packages/core（不在本文件的 version map 里）、detect-libc
+    // 是 sharp/lightningcss 的传递依赖（我们 manifest 里根本没有声明），两者都只能
+    // 按「已安装版本」pin（与下面 level 的做法一致，避免 tarball 依赖没测过的区间）。
+    // 读不到就必须失败：external 只是「不打进 bundle」，manifest 没版本的话安装侧
+    // 直接 ERR_MODULE_NOT_FOUND —— 静默跳过等于把故障推给用户。
+    const installedVersion = resolveInstalledPackageVersion(name);
+    if (!installedVersion) {
+      throw new Error(
+        `Cannot pin external publish dependency "${name}": it is emitted by the bundle and ` +
+          `externalized, but is neither declared in the publish manifest/version map nor installed ` +
+          `at node_modules/${name}. Install it (or declare it) so the tarball can carry a version, ` +
+          `otherwise installs fail with ERR_MODULE_NOT_FOUND.`
+      );
+    }
+    keptDeps[name] = installedVersion;
   }
   distPkg.dependencies = keptDeps;
+
+  // external 只负责「不打进 bundle」，运行时仍要靠安装者解析到它。产物里实际发出的
+  // external import 必须在发布 manifest 里有版本，否则用户侧 ERR_MODULE_NOT_FOUND。
+  for (const name of PUBLISH_EXTERNAL) {
+    if (name.includes("*")) continue;
+    if (emittedExternalDeps.has(name) && !keptDeps[name]) {
+      throw new Error(
+        `Published manifest is missing an external dependency: "${name}" is imported by the ` +
+          `bundle but has no version in package.json dependencies.`
+      );
+    }
+  }
   distPkg.files = ["*.js", "README.md"];
   distPkg.bin = { nolo: "index.js" };
   distPkg.module = "index.js";
@@ -369,6 +402,26 @@ export function materializeBundledClosure(input: {
   }
 
   return copied;
+}
+
+/**
+ * Resolve a package's installed version regardless of node_modules layout.
+ *
+ * `node_modules/<name>` is the common case, but hoisting/workspace/worktree
+ * layouts can put a package one or more levels up (e.g. the aliased dep is only
+ * installed in the enclosing repo root). Fall back to Bun's resolver so a
+ * transitive-only dependency still gets pinned instead of silently skipped.
+ */
+function resolveInstalledPackageVersion(name: string): string | undefined {
+  const direct = readInstalledPackageVersion(join(REAL_REPO_ROOT, "node_modules", name));
+  if (direct) return direct;
+  try {
+    const pkgJsonPath = Bun.resolveSync(`${name}/package.json`, REAL_REPO_ROOT);
+    const version = JSON.parse(readFileSync(pkgJsonPath, "utf8")).version;
+    return typeof version === "string" ? version : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
