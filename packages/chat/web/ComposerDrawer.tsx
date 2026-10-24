@@ -7,7 +7,6 @@ import { LuChevronDown, LuGlobe, LuImage, LuPaperclip } from "react-icons/lu";
 import * as stylex from "@stylexjs/stylex";
 import { composerDrawerStyles } from "./composerDrawerStyles";
 import { withLiteralClass } from "./withLiteralClass";
-import { DialogUsageTrigger } from "./DialogUsageTrigger";
 
 export type ComposerDrawerProps = {
   attachmentCount?: number;
@@ -15,8 +14,6 @@ export type ComposerDrawerProps = {
   hasBrowseContext?: boolean;
   browseHost?: string;
   imageConfigSummary?: string;
-  usagePercent?: number;
-  contextTokens?: number;
   expanded?: boolean;
   onToggle?: () => void;
   children: React.ReactNode;
@@ -28,8 +25,6 @@ export const ComposerDrawer = memo(function ComposerDrawer({
   hasBrowseContext = false,
   browseHost,
   imageConfigSummary,
-  usagePercent,
-  contextTokens = 0,
   expanded = true,
   onToggle,
   children,
@@ -40,8 +35,7 @@ export const ComposerDrawer = memo(function ComposerDrawer({
   const hasSecondaryContext =
     attachmentCount > 0 ||
     hasBrowseContext ||
-    Boolean(imageConfigSummary) ||
-    contextTokens > 0;
+    Boolean(imageConfigSummary);
 
   // 当没有任何次级上下文时，保持 Composer 干净，不渲染空的 Drawer 栏
   if (!hasSecondaryContext) {
@@ -63,9 +57,6 @@ export const ComposerDrawer = memo(function ComposerDrawer({
   }
   if (imageConfigSummary) {
     summaryParts.push(`${t("imageConfig", "生图")} ${imageConfigSummary}`);
-  }
-  if (contextTokens > 0) {
-    summaryParts.push(typeof usagePercent === "number" ? `${t("usage", "用量")} ${usagePercent}%` : t("chat:contextWindowUnknown", "上下文窗口未知"));
   }
 
   const actionText = expanded
@@ -165,10 +156,6 @@ export const ComposerDrawer = memo(function ComposerDrawer({
             composerDrawerStyles.summaryRight
           )}
         >
-          {contextTokens > 0 ? (
-            <DialogUsageTrigger />
-          ) : null}
-
           <button
             type="button"
             {...withLiteralClass("composer-drawer__chevron-btn", composerDrawerStyles.chevronBtn)}

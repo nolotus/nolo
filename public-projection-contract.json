@@ -41,35 +41,11 @@
       "role": "runtime"
     },
     {
-      "path": "scripts/dev/esbuild.config.js",
-      "role": "build"
-    },
-    {
-      "path": "scripts/dev/esBuild.js",
-      "role": "build"
-    },
-    {
-      "path": "scripts/dev/checkDangling.mjs",
-      "role": "build"
-    },
-    {
-      "path": "scripts/dev/staticImportClosure.js",
-      "role": "build"
-    },
-    {
-      "path": "scripts/public-build/stylexBunPlugin.ts",
-      "role": "build"
-    },
-    {
       "path": "public-projection-contract.json",
       "role": "audit"
     },
     {
       "path": ".github/workflows/ci.yml",
-      "role": "audit"
-    },
-    {
-      "path": "scripts/public-audit/verifyProjection.ts",
       "role": "audit"
     },
     {
@@ -85,20 +61,52 @@
       "role": "release"
     },
     {
-      "path": "scripts/public-audit/verifyReleaseUpdateCompatibility.ts",
+      "path": "projection-release-metadata.json",
       "role": "release"
     },
     {
-      "path": "scripts/release/validateCliVersionSource.ts",
-      "role": "release"
+      "path": "scripts/dev/esbuild.config.js",
+      "role": "build"
     },
     {
-      "path": "scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1",
-      "role": "release"
+      "path": "scripts/dev/esBuild.js",
+      "role": "build"
     },
     {
-      "path": "scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts",
-      "role": "release"
+      "path": "scripts/dev/themeBootstrapAsset.js",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/checkDangling.mjs",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/staticImportClosure.js",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/webBuildPolicy.ts",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/devAssetManifest.js",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/routeStyles.js",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/workspaceLinkGuard.ts",
+      "role": "build"
+    },
+    {
+      "path": "scripts/public-build/stylexBunPlugin.ts",
+      "role": "build"
+    },
+    {
+      "path": "scripts/public-audit/verifyProjection.ts",
+      "role": "audit"
     },
     {
       "path": "scripts/release/assertProjectionReleaseMetadata.ts",
@@ -109,7 +117,15 @@
       "role": "release"
     },
     {
+      "path": "scripts/release/validateCliVersionSource.ts",
+      "role": "release"
+    },
+    {
       "path": "scripts/release/prepareCliPublishPackage.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/ci/runCliPublishPublic.sh",
       "role": "release"
     },
     {
@@ -125,10 +141,6 @@
       "role": "release"
     },
     {
-      "path": "scripts/ci/runCliPublishPublic.sh",
-      "role": "release"
-    },
-    {
       "path": "scripts/ci/verifyLinuxDesktopDeps.sh",
       "role": "release"
     },
@@ -137,8 +149,20 @@
       "role": "release"
     },
     {
-      "path": "projection-release-metadata.json",
+      "path": "scripts/public-audit/verifyReleaseUpdateCompatibility.ts",
       "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1",
+      "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/desktop/verifyDesktopPackageCapability.ts",
+      "role": "audit"
     }
   ],
   "workflows": [

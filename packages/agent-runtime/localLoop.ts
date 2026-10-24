@@ -67,6 +67,8 @@ import { buildIdentityBlock } from "./identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
 import { CREDENTIAL_HYGIENE_RULE } from "./credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
+// 派发落点：并行派发纪律的下一层，紧随其后（localLoop 无 static 作用域，session 占位）。
+import { DISPATCH_BACKEND_POLICY } from "./dispatchBackendPolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
 import { buildConsultationModeBlock } from "./consultationMode";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
@@ -996,6 +998,8 @@ export async function runLocalAgentTurn(
     // 并行是默认：系统层固定块，紧随红线（localLoop 无 static 作用域，用 session 占位，
     // 「最顶」由数组首位保证——与红线同一约定）。
     { content: PARALLEL_DISPATCH_DEFAULT_RULE, cacheScope: "session" as const },
+    // 派发落点：并行派发纪律的下一层（派到哪个执行后端），沿用 session 占位约定。
+    { content: DISPATCH_BACKEND_POLICY, cacheScope: "session" as const },
     // 平台风控纪律：无条件系统层块，沿用 session 占位约定。
     { content: PLATFORM_RISK_CONTROL_RULE, cacheScope: "session" as const },
     { content: buildConsultationModeBlock(), cacheScope: "session" as const },
