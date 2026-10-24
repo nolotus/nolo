@@ -35,8 +35,6 @@ export interface RunAgentBackgroundResult {
 }
 
 export interface RunAgentBackgroundArgs {
-    /** 已解析的子任务硬预算（派发边界产出）：随 run 请求传给子 run，子 run 只消费。 */
-    subtaskBudgetLimits?: { maxToolCalls: number; maxWallClockMs: number };
     continueDialogId?: string;
   strictContinueHistory?: boolean;
     agentKey: string;
@@ -319,7 +317,6 @@ export const runAgentBackground = createAsyncThunk<
                     idempotencyKey,
                     ...(parentDialogId ? { parentDialogId } : {}),
                     ...(runtimeKey ? { runtimeKey } : {}),
-                    ...(args.subtaskBudgetLimits ? { subtaskBudgetLimits: args.subtaskBudgetLimits } : {}),
                     ...(ephemeral ? { ephemeral: true } : {}),
                     ...(runKind ? { runKind } : {}),
                     runtimeContext: {

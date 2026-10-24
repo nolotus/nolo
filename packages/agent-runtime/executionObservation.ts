@@ -103,28 +103,6 @@ export type AgentExecutionObservationEvent =
     }
   | { kind: "image-downgraded"; reason: "no-vision"; atMs: number }
   | {
-      /**
-       * 派发子任务触达**硬预算上限**（工具调用数 / 墙钟），run 被优雅终止。
-       *
-       * 语义：这是「有界结果（bounded result）」的信号——父方/UI 据此知道
-       * 本次子任务是**中间结论**而非失败或 provider 报错。绝不与 provider
-       * error 混用。
-       */
-      kind: "budget-exhausted";
-      /** 触发的上限种类。 */
-      limit: "max-tool-calls" | "max-wall-clock-ms";
-      atMs: number;
-      /** 生效的上限值。 */
-      maxToolCalls: number;
-      maxWallClockMs: number;
-      /** 已实际执行的工具调用数。 */
-      toolCallsExecuted: number;
-      /** 从 run 开始到触发的墙钟耗时（毫秒）。 */
-      elapsedMs: number;
-      round?: number;
-      detail?: string;
-    }
-  | {
       kind: "loop-stalled";
       reason: string;
       atMs: number;

@@ -71,15 +71,6 @@ import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
 // 派发落点：并行派发纪律的下一层，紧随其后（localLoop 无 static 作用域，session 占位）。
 import { DISPATCH_BACKEND_POLICY } from "./dispatchBackendPolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
-// 派发子任务的硬预算（不依赖模型自觉的强制终止）：见 ./subtaskBudget。
-import {
-  buildSubtaskBudgetExhaustedContent,
-  createSubtaskBudgetTracker,
-  DEFAULT_SUBTASK_MAX_TOOL_CALLS,
-  DEFAULT_SUBTASK_MAX_WALL_CLOCK_MS,
-  type SubtaskBudgetExhaustion,
-  type SubtaskBudgetLimits,
-} from "./subtaskBudget";
 import { buildConsultationModeBlock } from "./consultationMode";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
@@ -160,28 +151,6 @@ export type LocalAgentTurnInput = {
   runtimeContext?: Record<string, any> | null;
   /** Dispatched leaf runs receive parent-facing final-response guidance. */
   runKind?: "interactive" | "subtask";
-  /**
-   * 硬预算上限：**只对 runKind === "subtask" 生效**，交互式会话不受影响。
-   *
-   * 与 roundBudgetWarningThreshold（软提醒，靠模型自觉收尾）是两回事：
-   * 这里到限即**不再发起**新的模型调用与工具调用，并把当前成果作为
-   * 「中间结论」交回父方。详见 ./subtaskBudget。
-   */
-  subtaskMaxToolCalls?: number;
-  /** 硬预算墙钟上限（毫秒）：只对 runKind === "subtask" 生效。 */
-  subtaskMaxWallClockMs?: number;
-  /**
-   * **已解析**的硬预算上限：由**派发边界**（创建子 run 的入口）一次解析后传入
-   * （显式参数 > 环境变量 > 默认值，见 ./subtaskBudget 的
-   * resolveDispatchedSubtaskBudget）。
-   *
-   * localLoop **只消费**、**不再自行读 env**：父子 run 处在不同执行环境时
-   * （父在 CLI、子在服务端），各自读 env 会得到不同的授权解释——额度必须由
-   * 派发方一次定死，子 run 原样执行。
-   */
-  subtaskBudgetLimits?: SubtaskBudgetLimits;
-  /** 墙钟时钟 seam（测试注入假时钟；默认 Date.now）。 */
-  subtaskBudgetNow?: () => number;
   /**
    * 宿主可确认的展示能力：narrow（窄屏终端/TUI）、wide（宽屏桌面）、
    * unknown（默认；拿不到视口信息：非交互 CLI、后台 run、管道、桌面 runtime）。
@@ -788,34 +757,6 @@ export async function runLocalAgentTurn(
   // 门控关闭时每个调用点仅一次布尔判断（见 ./loopTiming）。
   const loopTiming = createLoopTiming();
 
-  // ── 硬预算（只对子任务生效）───────────────────────────────────────────
-  // 不依赖模型自觉的强制终止：到限后不再发起新的模型调用与工具调用，
-  // 而是把已完成的工作作为「中间结论」交回父方（不是 provider 报错）。
-  // 只在 runKind === "subtask" 时创建 tracker——交互式会话（用户在 TUI
-  // 里跑长任务）完全不受影响。
-  const subtaskBudgetClock = input.subtaskBudgetNow ?? (() => Date.now());
-  // 硬预算上限**只消费**派发边界解析好的结果：显式入参 > 派发边界传入 > 默认值。
-  // 这里**不读 env**：agent-runtime 不解释 process.env，授权额度由派发方一次定死。
-  const subtaskBudgetLimits: SubtaskBudgetLimits = {
-    maxToolCalls:
-      input.subtaskMaxToolCalls ??
-      input.subtaskBudgetLimits?.maxToolCalls ??
-      DEFAULT_SUBTASK_MAX_TOOL_CALLS,
-    maxWallClockMs:
-      input.subtaskMaxWallClockMs ??
-      input.subtaskBudgetLimits?.maxWallClockMs ??
-      DEFAULT_SUBTASK_MAX_WALL_CLOCK_MS,
-  };
-  const subtaskBudgetTracker =
-    input.runKind === "subtask"
-      ? createSubtaskBudgetTracker({
-          limits: subtaskBudgetLimits,
-          now: subtaskBudgetClock,
-          // 墙钟从 run 开始计（含 provider 初始化与首轮前的准备）。
-          startedAtMs: subtaskBudgetClock(),
-        })
-      : null;
-
   try {
     // 入口先打点，覆盖 loadAgentConfig/loadDialogHistory 段。
     loopTiming.mark("turnStart", 0);
@@ -1213,11 +1154,7 @@ export async function runLocalAgentTurn(
   let toolCallCount = 0;
   // 兜底标记（emptyAssistantFallbackReason / emptyAssistantOutputUsable）已
   // 收敛到 AgentRuntimeResult 本体，这里不再需要本地类型放宽。
-  // 结果容器：给一个**确定的初值**（content 为空，其余字段缺省）。
-  // 原因：provider 首轮就抛错时 result 从未被赋值，下游读 result.content 会直接崩，
-  // TS 也会报 TS2454（used before being assigned）。有了初值，
-  // 「还没有 provider 结果」这条路径也有稳定形态。
-  let result: AgentRuntimeResult = { content: "" } as unknown as AgentRuntimeResult;
+  let result: AgentRuntimeResult;
   // 计费/用量账本：逐次调用证据（callId 优先 provider_call_id）+ 带外摘要
   // 用量 + 结算口径；成功与失败两条路径共用同一出口。
   const usageLedger = createTurnUsageLedger({
@@ -1233,32 +1170,6 @@ export async function runLocalAgentTurn(
   if (initialCompactionUsage) usageLedger.addCompaction(initialCompactionUsage);
   let loopError: unknown;
   let round = 0;
-  // 硬预算终止状态（只对子任务生效；未触发时恒为 null）。
-  let budgetExhaustion: SubtaskBudgetExhaustion | null = null;
-  // 已完成的工具名日志（供预算终止文案说明「当前完成到哪一步」）。
-  const executedToolNameLog: string[] = [];
-  /**
-   * 标记硬预算到限并发出观测事件（只发一次）。
-   *
-   * 事件 kind = "budget-exhausted"，让父方/UI 能识别这是「有界结果
-   * （中间结论）」而不是 provider 报错或崩溃。
-   */
-  const markBudgetExhausted = (): void => {
-    if (!subtaskBudgetTracker || budgetExhaustion) return;
-    const exhaustion = subtaskBudgetTracker.exhaustion();
-    if (!exhaustion) return;
-    budgetExhaustion = exhaustion;
-    emitLoopEvent(observationBoundary, {
-      kind: "budget-exhausted",
-      limit: exhaustion.limit,
-      atMs: exhaustion.atMs,
-      maxToolCalls: exhaustion.limits.maxToolCalls,
-      maxWallClockMs: exhaustion.limits.maxWallClockMs,
-      toolCallsExecuted: exhaustion.toolCallsExecuted,
-      elapsedMs: exhaustion.elapsedMs,
-      round,
-    });
-  };
   // 空轮修复状态（语义与 server loop 对齐）：
   //   repairPending  → 下一轮请求注入 repair system message
   //   repairUsed     → 已用过 repair，二次仍空则 fallback
@@ -1273,20 +1184,6 @@ export async function runLocalAgentTurn(
   // 供 loopError 分支在 saveTurn 时写入，避免中断时丢失已生成的部分回复。
   let partialContent = "";
   const progressGuard = createLocalLoopProgressGuard(input.progressGuardConfig);
-
-  /**
-   * 硬预算准入闸门（子任务）：在**启动**新的模型调用 / 工具调用之前判定。
-   *
-   * 语义：到限 → 标记终止（有界收尾），返回 false 表示「不要再启动新工作」。
-   * 所有启动点（首轮模型调用、每一轮模型调用、并发批次里的每个工具、
-   * compaction 之后的下一轮）都走这**同一套**判断，避免「某些启动点漏检」。
-   */
-  const budgetAdmissionGate = (): boolean => {
-    if (!subtaskBudgetTracker) return true;
-    if (!subtaskBudgetTracker.isExhausted()) return true;
-    markBudgetExhausted();
-    return false;
-  };
 
   try {
     // resolveProvider used to sit outside the try: credential / provider-init
@@ -1390,14 +1287,6 @@ export async function runLocalAgentTurn(
         messages: requestMessages,
         toolsHash: safeToolNamesHash(agentTools),
       });
-      // 硬预算准入闸门（子任务）：**启动模型调用之前**判定一次。
-      // 这一处覆盖首轮、每一轮，以及 compaction 之后回到循环顶部的下一轮——
-      // 循环尾部的检查只能拦「下一轮」，不能代替「启动前」这一层。
-      if (!budgetAdmissionGate()) {
-        // 到限即停止启动新工作：result 保留「已拿到的最后一份 provider 结果」，
-        // 若 provider 从未返回过则是初值（空内容）——由上面的初值保证。
-        break;
-      }
       result = await runCompleteWithTimeout({
         provider,
         messages: requestMessages,
@@ -1642,16 +1531,6 @@ export async function runLocalAgentTurn(
 
       const runSingleTool = async ({ index, toolCall }: ToolCallWithIndex) => {
         throwIfAborted(input);
-        // 硬预算准入闸门（子任务）：到限后不再发起新的工具调用。
-        // 已完成的工具结果照常保留（commitSlot 不受影响）。
-        // 额度在**启动前**立即占用（不是执行完再计数），并发批次里的每个工具
-        // 各自过一次闸门、各自占一格。
-        if (!budgetAdmissionGate()) {
-          skippedToolCalls.push(toolCall);
-          return;
-        }
-        // 计数点：按**实际发起执行**的工具调用计（不是轮次）。
-        subtaskBudgetTracker?.recordToolCallExecuted();
         const { toolResult, toolExecMs } = await executeToolCall({
           input,
           toolCall,
@@ -1671,7 +1550,6 @@ export async function runLocalAgentTurn(
           toolResult,
           toolExecMs,
         };
-        executedToolNameLog.push(toolCall.function.name);
       };
 
       const commitSlot = (i: number) => {
@@ -1707,8 +1585,6 @@ export async function runLocalAgentTurn(
         });
       };
 
-      // 硬预算到限时被跳过的工具调用（未执行）：补一条显式结果，保持 tool_call/结果成对。
-      const skippedToolCalls: AgentRuntimeToolCall[] = [];
       const batches = partitionToolCallsIntoBatches(toolCalls);
       for (const batch of batches) {
         throwIfAborted(input);
@@ -1737,21 +1613,6 @@ export async function runLocalAgentTurn(
         }
         if (batchError) throw batchError;
       }
-      // 硬预算到限：未执行的工具调用补一条显式结果（保持 tool_call/结果成对，
-      // 便于持久化与重放）；已完成的结果一条都不丢。
-      for (const skipped of skippedToolCalls) {
-        transcript.pushTool({
-          role: "tool",
-          content:
-            "[子任务预算上限已触发] 该工具调用未执行：已达子任务预算上限，本轮不再发起新的工具调用。",
-          tool_call_id: skipped.id,
-          toolName: skipped.function.name,
-        });
-      }
-      if (budgetExhaustion) {
-        // 硬预算到限：不再发起下一轮模型调用（优雅终止，不是报错）。
-        break;
-      }
       // 熔断保护：检查工具调用序列与返回结果是否陷入无进展停滞死循环
       const toolExecutionGuardVerdict = progressGuard.observeToolExecution(
         toolCalls,
@@ -1777,36 +1638,11 @@ export async function runLocalAgentTurn(
       // contextUsage 在手时按真实遥测判定；缺失时每轮走估算兜底——
       // 「不报 usage 的上游」与「新对话首轮（无 dialogId）」都不再有零保护窗口。
       await compaction.maybeCompactInLoop();
-      // 硬预算准入闸门（子任务）：到限后不再发起下一轮模型调用（优雅终止，非报错）。
-      // 与「启动模型调用之前」那处是同一套判断（compaction 之后的下一轮同样被覆盖）。
-      if (!budgetAdmissionGate()) {
-        break;
-      }
       loopTiming.mark("roundEnd", round);
       round += 1;
     }
   } catch (error) {
     loopError = error;
-  }
-
-  // 硬预算终止（只对子任务生效）：把结果改写成明确的「中间结论」——
-  // 含「已达预算上限 / 这是中间结论 / 当前完成到哪一步」，
-  // 并且**不**标记为 provider error 或崩溃。
-  if (budgetExhaustion) {
-    const previousContent = typeof result?.content === "string" ? result.content.trim() : "";
-    result = {
-      ...result,
-      content: [
-        previousContent,
-        buildSubtaskBudgetExhaustedContent({
-          exhaustion: budgetExhaustion,
-          roundsCompleted: round,
-          recentToolNames: executedToolNameLog,
-        }),
-      ]
-        .filter((part) => part.length > 0)
-        .join("\n\n"),
-    };
   }
 
   // 即使 provider 循环失败（超时/额度/凭证等），也保存 dialog 以便续聊与复盘
