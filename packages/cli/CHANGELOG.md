@@ -1,4 +1,12 @@
 
+## 0.160.0-alpha.6 (2026-10-24)
+
+### Bug Fixes
+
+* **server:** 准入去掉启动时间窗口，仅以 draining 判定部署期 ([c07bd25](https://github.com/nolotus/bun-nolo/commit/c07bd25d4292902b24a58443d7c3218a1585138e))
+* **server:** 部署退场时通知连接器重连，准入窗口内返回可重试 503 ([e531674](https://github.com/nolotus/bun-nolo/commit/e531674cd811e5ed377cf1bae7d3ec30d6d8a7a8))
+
+
 ## 0.160.0-alpha.5 (2026-10-24)
 
 ### Bug Fixes
