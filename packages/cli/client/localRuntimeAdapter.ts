@@ -303,6 +303,10 @@ import {
   createLocalInstaboxWorkload as createLocalInstaboxWorkloadDefault,
   type LocalInstaboxWorkloadHandle,
 } from "./localInstaboxWorkload";
+import {
+  loadInstaboxRunConfig,
+  type ParsedInstaboxRunConfig,
+} from "./instaboxRunConfig";
 import { INSTABOX_FILE_TOOL_NAMES } from "./localInstaboxFileBridge";
 import { EXECUTION_SHELL_TOOL } from "../../agent-runtime/executionChannel";
 
@@ -857,14 +861,29 @@ export function createCliLocalRuntimeAdapter(
         ),
       );
     }
-    instaboxWorkloadLoad ??= (async () =>
-      (await createInstaboxWorkload({
+    instaboxWorkloadLoad ??= (async () => {
+      let runConfig: ParsedInstaboxRunConfig;
+      try {
+        runConfig = loadInstaboxRunConfig({ env: deps.env });
+      } catch (err) {
+        throw new Error(
+          `instabox workload 受控配置缺失或校验失败：${
+            err instanceof Error ? err.message : String(err)
+          }。不得从模型参数或宿主任意路径取授权。`,
+        );
+      }
+      return (await createInstaboxWorkload({
         runtimeKey,
         runId: `cli-local-instabox-${createId()}`,
         authenticatedCaller: resolveLocalUserId(deps.env),
         agentKey: "cli-local-run",
         env: deps.env,
-      })) as unknown as LocalInstaboxWorkloadHandle)();
+        workspaceSelection: runConfig.workspaceSelection,
+        workspaceRecovery: runConfig.workspaceRecovery,
+        allowRemoteRelease: runConfig.allowRemoteRelease,
+        billingPolicy: runConfig.billingPolicy,
+      })) as unknown as LocalInstaboxWorkloadHandle;
+    })();
     return instaboxWorkloadLoad;
   };
   const prepareLocalRuntimeWorkload = async (): Promise<void> => {

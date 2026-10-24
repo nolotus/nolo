@@ -51,6 +51,10 @@ export type InstaboxBridgeProbe = {
   runtime: InstaboxRuntimeBinary | null;
   /** helper 上传并实测读通 = ready；file 工具只在 ready 时才可用。 */
   ready: boolean;
+  /** 真实 probeId（用于回收时精准忽略探针）。 */
+  probeId?: string;
+  /** 真实探针绝对路径。 */
+  probePath?: string | null;
   /** 未就绪原因（稳定码，可直接进 model-facing 文案）。 */
   reason?: "runtime_missing" | "root_unavailable" | "upload_failed" | "probe_failed" | "root_mismatch" | "helper_source_invalid";
 };
@@ -61,6 +65,11 @@ const PROBE_FILE_NAME = "nolo-bridge-probe";
 function escapeForShell(value: string): string {
   const cleaned = String(value).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 40);
   return cleaned || "run";
+}
+
+/** 本 run 自建的桥接探针文件名（相对 workspace root）。 */
+export function getInstaboxProbeFileName(probeId: string): string {
+  return `${escapeForShell(probeId)}-${PROBE_FILE_NAME}`;
 }
 const PROBE_FILE_CONTENT = "nolo-bridge-ok";
 

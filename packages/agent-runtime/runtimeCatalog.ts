@@ -15,10 +15,11 @@ export type RuntimeCatalogMachine = {
 export type RuntimeCatalogTarget =
   | { kind: "server" }
   | { kind: "machine"; machineId: string }
-  | { kind: "docker"; runtimeId?: string };
+  | { kind: "docker"; runtimeId?: string }
+  | { kind: "instabox" };
 
 /** Public discovery only: neither a key nor a ready summary grants execution rights. */
-export type RuntimeKind = "server" | "machine" | "local" | "docker" | "cloudflare";
+export type RuntimeKind = "server" | "machine" | "local" | "docker" | "cloudflare" | "instabox";
 /**
  * "not-configured"          = 该运行时没有配置（含 docker 探测未做 / sbx CLI 缺失）
  * "quota-unverifiable"      = 已配置但额度无法核实（cloud/auth 不可达或没有额度来源）
@@ -48,6 +49,15 @@ export type RuntimeSummary = {
   quotaSnapshot?: RuntimeQuotaSnapshot;
 };
 export type RuntimeCatalog = { runtimes: RuntimeSummary[]; selectableCount: number };
+export const INSTABOX_DEFAULT_TEMPLATE_ID = "universal";
+
+export type InstaboxReadiness = {
+  ready: boolean;
+  reason?: RuntimeUnavailableReason;
+  details?: string;
+  quotaSnapshot?: RuntimeQuotaSnapshot;
+};
+
 /** Construct ONLY in the server composition root, never from model/request fields.
  * serverScope is a stable public opaque deployment ID, NOT a server URL or secret.
  * Registry must be owner-filtered; the additional owner check is defense in depth.
@@ -74,6 +84,16 @@ export type RuntimeCatalogDeps = {
   dockerSelectable?: boolean;
   /** @deprecated 旧注入面；只有 dockerSelectable 为 true 时才被采纳。 */
   dockerQuotaSnapshot?: RuntimeQuotaSnapshot;
+  /**
+   * Instabox 用户凭证是否已绑定（由 callerUserId 的 INSTABOX_API_KEY 决定）。
+   * 缺省 / false 则判定未配置。
+   */
+  isInstaboxBound?: (callerUserId: string) => boolean;
+  /**
+   * Instabox 就绪探测结果。
+   * 绑定不等于 ready：未 probe 或 probe 未通过一律不可选（selectable: false）。
+   */
+  instaboxReadiness?: InstaboxReadiness;
 };
 
 /**
@@ -155,9 +175,38 @@ export function buildRuntimeCatalog(deps: RuntimeCatalogDeps): RuntimeCatalog {
         reason: dockerReadiness.reason ?? "not-configured",
         ...(dockerReadiness.details ? { details: dockerReadiness.details } : {}),
       };
+  const isInstaboxBound = deps.isInstaboxBound
+    ? Boolean(deps.isInstaboxBound(ctx.owner))
+    : false;
+  const instaboxReady = Boolean(isInstaboxBound && deps.instaboxReadiness?.ready === true);
+  const instaboxKey = key(ctx.scope, ctx.owner, "instabox");
+  const instaboxSummary: RuntimeSummary = instaboxReady
+    ? {
+        runtimeKey: instaboxKey,
+        kind: "instabox",
+        name: "Instabox",
+        status: "ready",
+        selectable: true,
+        ...(deps.instaboxReadiness?.quotaSnapshot ? { quotaSnapshot: deps.instaboxReadiness.quotaSnapshot } : {}),
+      }
+    : {
+        runtimeKey: instaboxKey,
+        kind: "instabox",
+        name: "Instabox",
+        status: "unavailable",
+        selectable: false,
+        reason: isInstaboxBound ? (deps.instaboxReadiness?.reason ?? "quota-unverifiable") : "not-configured",
+        ...(isInstaboxBound && !deps.instaboxReadiness
+          ? { details: "Instabox credentials configured but readiness not probed" }
+          : deps.instaboxReadiness?.details
+            ? { details: deps.instaboxReadiness.details }
+            : {}),
+      };
+
   runtimes.push(
     summary("local", "Local (client only)", false, "unsupported-local"),
     dockerSummary,
+    instaboxSummary,
     summary("cloudflare", "Cloudflare", false, "not-configured"),
   );
   return { runtimes, selectableCount: runtimes.filter((runtime) => runtime.selectable).length };
@@ -193,6 +242,13 @@ export function resolveRuntimeKey(runtimeKey: string, deps: RuntimeCatalogDeps):
     const isBound = Boolean(ctx.owner && deps.isDockerBound?.(ctx.owner));
     if (isBound && runtime.selectable) {
       return { ok: true, target: { kind: "docker" }, runtime };
+    }
+    return { ok: false, reason: "runtime-unavailable", unavailableReason: runtime.reason ?? "not-configured" };
+  }
+  if (runtime.kind === "instabox") {
+    const isBound = Boolean(ctx.owner && deps.isInstaboxBound?.(ctx.owner));
+    if (isBound && runtime.selectable) {
+      return { ok: true, target: { kind: "instabox" }, runtime };
     }
     return { ok: false, reason: "runtime-unavailable", unavailableReason: runtime.reason ?? "not-configured" };
   }

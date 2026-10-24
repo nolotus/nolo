@@ -7,6 +7,9 @@ import { createShellApprovalChild } from "./client/originShellApprovalTransport"
 // for back-compat with existing callers.
 
 import {
+  writeInstaboxRunConfig,
+} from "./client/instaboxRunConfigWrite";
+import {
   runAgentTurn,
   MACHINE_SHELL_LOCAL_REFUSAL_MESSAGE,
   type RunAgentTurnOptions,
@@ -708,6 +711,23 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   if (!localRuntimeCwd && (parsed.runtimeMode === "local" || hostRuntimeLocal)) {
     localRuntimeCwd = process.cwd();
   }
+
+  if (parsed.runtimeKey === "instabox") {
+    try {
+      writeInstaboxRunConfig({
+        workspaceMode: parsed.instaboxWorkspace!,
+        artifactDir: parsed.instaboxArtifactDir!,
+        manifestPath: parsed.instaboxManifestPath,
+        allowRemoteRelease: parsed.instaboxAllowRemoteRelease,
+        allowPaid: parsed.instaboxAllowPaid,
+        env,
+      });
+    } catch (err) {
+      output.write(`[nolo] instabox 配置生成失败: ${toErrorMessage(err)}\n`);
+      return 1;
+    }
+  }
+
   const runEnv = buildLocalRunEnv({
     env,
     allowShell: parsed.allowShell,

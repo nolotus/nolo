@@ -6,7 +6,7 @@
 // that need external state (env, cwd) pass it in.
 
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
@@ -19,7 +19,6 @@ import {
 import type { TaskEvidenceInput } from "./client/agentRun";
 import type { AgentRuntimeRequestedMode } from "./agentRuntimeLocal";
 import { HIGH_RISK_MUTATION_TOOL_NAMES } from "../agent-runtime/runtimeToolSurface";
-import { isLocalCliAgentKey } from "./agentAliases";
 // 唯一能力表：CLI 参数校验与派发守卫、localDockerWorkload 共用同一份真值，
 // 避免「两处各写一份 runtimeKey 合法性」再分叉。
 import { resolveCliLocalRuntimeKeyCapability } from "../ai/tools/agent/cliLocalRuntimeCapability";
@@ -43,6 +42,11 @@ export type ParsedAgentRunArgs = {
   runtimeMode?: AgentRuntimeRequestedMode;
   runtimeKey?: string;
   dockerWorkspaceMode?: "git" | "empty";
+  instaboxWorkspace?: "empty" | "snapshot";
+  instaboxManifestPath?: string;
+  instaboxArtifactDir?: string;
+  instaboxAllowRemoteRelease?: boolean;
+  instaboxAllowPaid?: boolean;
   continueDialogId?: string;
   strictContinueHistory?: boolean;
   spaceId?: string;
@@ -157,6 +161,7 @@ const VALUELESS_FLAGS: Record<string, true> = {
   "--memory-only": true,
   "--read-only": true,
   "--machine-shell": true,
+  "--instabox-allow-remote-release": true,
 };
 
 function isValuelessFlag(arg: string): boolean {
@@ -269,8 +274,8 @@ export function writeUsage(
     return;
   }
   output.write(
-    "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--runtime-key <key>] [--docker-workspace-mode git|empty] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
-      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--runtime-key <key>] [--docker-workspace-mode git|empty] [--machine-shell] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
+    "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--runtime-key <key>] [--docker-workspace-mode git|empty] [--instabox-workspace empty|snapshot] [--instabox-manifest <path>] [--instabox-artifact-dir <path>] [--instabox-allow-remote-release] [--instabox-allow-paid] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
+      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--runtime-key <key>] [--docker-workspace-mode git|empty] [--instabox-workspace empty|snapshot] [--instabox-manifest <path>] [--instabox-artifact-dir <path>] [--instabox-allow-remote-release] [--instabox-allow-paid] [--machine-shell] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
   );
 }
 
@@ -355,6 +360,41 @@ export function parseAgentRunArgs(
     throw new Error(
       "不能同时指定 --machine-shell 与 --runtime-key：--machine-shell 已把派发锁到绑定机器的 server 通道，runtimeKey 会失效，请只保留其中一个"
     );
+  }
+
+  const rawInstaboxWorkspace = readFlagValue(args, "--instabox-workspace")?.trim();
+  const rawInstaboxManifest = readFlagValue(args, "--instabox-manifest")?.trim();
+  const rawInstaboxArtifactDir = readFlagValue(args, "--instabox-artifact-dir")?.trim();
+  const instaboxAllowRemoteRelease = args.includes("--instabox-allow-remote-release");
+  const instaboxAllowPaid = args.includes("--instabox-allow-paid");
+
+  const hasInstaboxFlags =
+    args.includes("--instabox-workspace") ||
+    args.includes("--instabox-manifest") ||
+    args.includes("--instabox-artifact-dir") ||
+    instaboxAllowRemoteRelease ||
+    instaboxAllowPaid;
+
+  if (hasInstaboxFlags && runtimeKey !== "instabox") {
+    throw new Error("--instabox-* 参数仅适用于 --runtime-key instabox");
+  }
+
+  if (runtimeKey === "instabox") {
+    if (!rawInstaboxWorkspace || (rawInstaboxWorkspace !== "empty" && rawInstaboxWorkspace !== "snapshot")) {
+      throw new Error("--runtime-key instabox 必须指定 --instabox-workspace empty|snapshot");
+    }
+    if (!rawInstaboxArtifactDir) {
+      throw new Error("--runtime-key instabox 必须指定 --instabox-artifact-dir <绝对路径>");
+    }
+    if (!isAbsolute(rawInstaboxArtifactDir) || rawInstaboxArtifactDir.includes("\0") || rawInstaboxArtifactDir.split("/").includes("..")) {
+      throw new Error(`--instabox-artifact-dir 必须为合法绝对路径，且不能包含 .. 或空字符: "${rawInstaboxArtifactDir}"`);
+    }
+    if (rawInstaboxWorkspace === "snapshot" && !rawInstaboxManifest) {
+      throw new Error("--instabox-workspace snapshot 必须指定 --instabox-manifest <文件路径>");
+    }
+    if (rawInstaboxWorkspace === "empty" && args.includes("--instabox-manifest")) {
+      throw new Error('--instabox-workspace empty 不得指定 --instabox-manifest');
+    }
   }
   const runtimeMode = runtimeModeFromArgs(args);
   const continueDialogId = readFlagValue(args, "--continue") ?? readFlagValue(args, "--dialog");
@@ -442,6 +482,11 @@ export function parseAgentRunArgs(
         : {}),
     ...(runtimeKey ? { runtimeKey } : {}),
     ...(dockerWorkspaceMode ? { dockerWorkspaceMode } : {}),
+    ...(rawInstaboxWorkspace ? { instaboxWorkspace: rawInstaboxWorkspace as "empty" | "snapshot" } : {}),
+    ...(rawInstaboxManifest ? { instaboxManifestPath: rawInstaboxManifest } : {}),
+    ...(rawInstaboxArtifactDir ? { instaboxArtifactDir: rawInstaboxArtifactDir } : {}),
+    ...(instaboxAllowRemoteRelease ? { instaboxAllowRemoteRelease: true } : {}),
+    ...(instaboxAllowPaid ? { instaboxAllowPaid: true } : {}),
     background: args.includes("--bg"),
     noStream: args.includes("--no-stream"),
     machineShell: args.includes("--machine-shell"),

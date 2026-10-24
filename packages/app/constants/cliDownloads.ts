@@ -8,7 +8,7 @@ export const NOLO_CLI_PACKAGE_NAME = "nolo-cli";
 // 目标状态是 main 不再为版本号产生提交，版本只由 tag 决定，web 构建时注入。
 // 未注入时（bun 直接跑源码 / 测试 / SSR）回退到下面的常量，行为与改造前一致。
 declare const __NOLO_CLI_VERSION__: string;
-const FALLBACK_CLI_VERSION = "0.152.0";
+const FALLBACK_CLI_VERSION = "0.150.0";
 export const NOLO_CLI_VERSION: string =
   typeof __NOLO_CLI_VERSION__ === "string" && __NOLO_CLI_VERSION__
     ? __NOLO_CLI_VERSION__

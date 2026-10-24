@@ -49,6 +49,7 @@ import {
   serializeQueueEntries,
   withQueueLock,
   queryRunRecords,
+  resolveRunsDir,
   spawnLocalBackgroundRun,
   terminateRunProcess,
   isRunTerminalStatus,
@@ -72,6 +73,11 @@ import {
   type AgentRunTodoStore,
 } from "../../ai/tools/agent/agentRunTodo";
 import { createFileSystemTodoStore } from "./fileSystemStores";
+import type { HostMemorySnapshot, HostMemoryDeps } from "./hostMemory";
+import {
+  evaluateAutoInstaboxPlacement,
+  type TrustedInstaboxPlacementEvidence,
+} from "./localMemoryPlacement";
 
 type EnvLike = Record<string, string | undefined>;
 type OutputLike = { write(chunk: string): unknown };
@@ -119,6 +125,18 @@ export type CliAgentRunToolExecutorDeps = {
    * fail-closed（拒绝把绑定到别的机器的 run 伪装成本机执行）。
    */
   resolveLocalMachineId?: () => Promise<string | undefined>;
+  /** 读取宿主内存快照（测试/环境注入）。 */
+  readHostMemory?: (deps?: HostMemoryDeps) => HostMemorySnapshot | null;
+  /** 宿主内存探针依赖。 */
+  hostMemoryDeps?: HostMemoryDeps;
+  /** 是否启用 Instabox 自动内存分流（同义于环境变量 NOLO_INSTABOX_AUTO=1）。 */
+  autoInstaboxPlacementEnabled?: boolean;
+  /** 读取受控 placement evidence（测试/可信宿主注入）。 */
+  readInstaboxPlacementEvidence?: () => Promise<TrustedInstaboxPlacementEvidence | undefined>;
+  /** 服务端准入 / 就绪探测。 */
+  checkInstaboxReadiness?: () => Promise<{ ready: boolean; reason?: string }> | { ready: boolean; reason?: string };
+  /** runs 目录（测试/环境注入；缺省时由 resolveRunsDir 解析）。 */
+  runsDir?: string;
 } & AgentRunControlDeps;
 
 /**
@@ -445,8 +463,32 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     const localMachineId = deps.resolveLocalMachineId
       ? await deps.resolveLocalMachineId()
       : undefined;
-    const dispatch = resolveCliLocalSpawnDispatch({
+
+    let memoryPlacementNote: string | undefined;
+    let effectiveRuntimeKey = args.runtimeKey;
+
+    const autoPlacement = await evaluateAutoInstaboxPlacement({
       runtimeKey: args.runtimeKey,
+      cwd: args.cwd,
+      readOnly: args.readOnly === true,
+      env: deps.env,
+      autoEnabled: deps.autoInstaboxPlacementEnabled,
+      readHostMemory: deps.readHostMemory,
+      hostMemoryDeps: deps.hostMemoryDeps,
+      readEvidence: deps.readInstaboxPlacementEvidence,
+      checkReadiness: deps.checkInstaboxReadiness,
+      runsDir: deps.runsDir ?? resolveRunsDir(deps.env, deps.homedir),
+    });
+
+    if (autoPlacement.memoryPlacementNote) {
+      memoryPlacementNote = autoPlacement.memoryPlacementNote;
+    }
+    if (autoPlacement.selectedRuntimeKey) {
+      effectiveRuntimeKey = autoPlacement.selectedRuntimeKey;
+    }
+
+    const dispatch = resolveCliLocalSpawnDispatch({
+      runtimeKey: effectiveRuntimeKey,
       readOnly: args.readOnly === true,
       // F1：runtimeKey=local 是「在宿主文件系统上改代码」，需要调用方的显式确认
       // （allowHostWrites: true）；缺失即派发前拒绝（零 spawn、零 run 记录）。
@@ -622,6 +664,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(taskPreview ? { taskPreview } : {}),
         ...(runTitle ? { title: runTitle } : {}),
         payloadMetrics,
+        ...(memoryPlacementNote ? { memoryPlacementNote, note: memoryPlacementNote } : {}),
       }),
       metadata: {
         displayData: formatStartRunCard(displayName, "running", {
@@ -631,6 +674,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
           labels,
         }),
         payloadMetrics,
+        ...(memoryPlacementNote ? { memoryPlacementNote } : {}),
       },
     };
   };

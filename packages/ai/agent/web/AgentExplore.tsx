@@ -8,6 +8,7 @@ import { useSSRPublicAgents } from "ai/agent/publicAgentsSSRStore";
 import ShareCommunityPreview from "app/pages/ShareCommunityPreview";
 import MySharesPage from "app/pages/MySharesPage";
 import { resolveExploreCategory } from "app/navigation/exploreCategory";
+import PluginExplore from "./PluginExplore";
 
 /**
  * One Explore destination, driven by `?category=`.
@@ -40,7 +41,7 @@ const AgentExplore: React.FC = () => {
           ) : category === "user" ? (
             <p role="status">{t("explorePage.categoryEmpty.user", "暂无公开的用户。")}</p>
           ) : category === "plugin" ? (
-            <p role="status">{t("explorePage.categoryEmpty.plugin", "暂无公开的插件。")}</p>
+            <PluginExplore />
           ) : (
             <p role="status">{t("explorePage.categoryEmpty.skill", "暂无公开的 Skill。")}</p>
           )}

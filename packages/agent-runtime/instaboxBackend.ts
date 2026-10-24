@@ -93,16 +93,20 @@ export class InstaboxBackendError extends Error {
   readonly code: InstaboxFailureCode;
   /** true = 云端可能仍有存活机器，调用方不得当作已清理。 */
   readonly cleanupPending: boolean;
+  readonly upstreamErrorCode?: string;
 
   constructor(
     code: InstaboxFailureCode,
     detail?: string,
     cleanupPending = false,
+    readonly machineId?: string,
+    upstreamErrorCode?: string,
   ) {
     super(detail ? `${SAFE_MESSAGE[code]} (${detail})` : SAFE_MESSAGE[code]);
     this.name = "InstaboxBackendError";
     this.code = code;
     this.cleanupPending = cleanupPending;
+    this.upstreamErrorCode = upstreamErrorCode;
   }
 }
 
@@ -151,9 +155,34 @@ export type InstaboxExecutionBackend = Omit<ExecutionBackend, "release"> & {
   ): Promise<InstaboxReleaseOutcome>;
 };
 
+/** Exact, caller-scoped create contract. This is NOT a zero-cost authorization:
+ * the API has no atomic "create only if org is still free" precondition.
+ * maxRunMinutes is an expected server default, never sent with an API key.
+ */
+export type InstaboxBillingPolicy = "free-only" | "allow-paid";
+
+export type InstaboxCreationPlan = {
+  orgId: string; name: string; templateId: string;
+  vcpus: number; memMiB: number; maxRunMinutes: number;
+  snapshotId?: string; persistentDiskGiB?: number; rootDiskGiB?: number;
+};
+export type InstaboxFreeOrgObservation = {
+  orgId: string; tier: "free" | "pro" | "team" | "enterprise"; observedAt: number;
+  allowedSpecs: { vcpus: number; memMiB: number; persistentDiskGiB: number }[];
+};
+
 export type InstaboxBackendOptions = {
   apiKey: string;
   templateId: string;
+  /** 创建合同（plan + 自由组织证据）：生产建机路径**必须**提供。
+   * 计费闸门依赖它：缺 plan 时后端直接 fail-closed，不会发出建机请求。 */
+  creationPlan?: InstaboxCreationPlan;
+  /** 测试专用开关：允许无 plan 的 legacy 建机路径。
+   * 生产调用点**禁止**设置 —— 它会绕过计费闸门；只给既有 legacy 单测用。 */
+  testOnlyAllowLegacyNoPlan?: boolean;
+  freeOrgObservation?: InstaboxFreeOrgObservation;
+  billingPolicy?: InstaboxBillingPolicy;
+  deleteMachineImpl?: (machineId: string) => Promise<void>;
   baseUrl?: string;
   /** 注入时钟（毫秒）。 */
   now?: () => number;
@@ -313,6 +342,10 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
   readonly #maxPollAttempts: number;
   readonly #execTimeoutSeconds: number;
   readonly #maxOutputChars: number;
+  readonly #creationPlan?: InstaboxCreationPlan;
+  readonly #freeOrgObservation?: InstaboxFreeOrgObservation;
+  readonly #billingPolicy: InstaboxBillingPolicy;
+  readonly #deleteMachineImpl?: (machineId: string) => Promise<void>;
   readonly #leases = new Map<string, LeaseEntry>();
 
   constructor(options: InstaboxBackendOptions) {
@@ -321,6 +354,21 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     if (!apiKey || !templateId) {
       throw new InstaboxBackendError("instabox_invalid_config");
     }
+    if (options.freeOrgObservation && !options.creationPlan) {
+      throw new InstaboxBackendError("instabox_invalid_config");
+    }
+    if (!options.creationPlan && options.testOnlyAllowLegacyNoPlan !== true) {
+      // 计费闸门：没有创建合同就不许建机。legacy 无 plan 分支只对显式的
+      // testOnlyAllowLegacyNoPlan 开放（测试专用），生产路径永远走不到。
+      throw new InstaboxBackendError(
+        "instabox_invalid_config",
+        "creation plan is required: a plan-less create would bypass the billing gate",
+      );
+    }
+    this.#creationPlan = options.creationPlan ? structuredClone(options.creationPlan) : undefined;
+    this.#freeOrgObservation = options.freeOrgObservation ? structuredClone(options.freeOrgObservation) : undefined;
+    this.#billingPolicy = options.billingPolicy ?? "free-only";
+    this.#deleteMachineImpl = options.deleteMachineImpl;
     this.#apiKey = apiKey;
     this.#templateId = templateId;
     this.#baseUrl = (options.baseUrl ?? INSTABOX_DEFAULT_BASE_URL).replace(
@@ -367,22 +415,59 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       throw new InstaboxBackendError("instabox_invalid_ticket");
     }
     const requestedAt = this.#now();
-    const machineName = buildInstaboxMachineName(ticket.ticketId, ticket.agentKey);
+    // plan 缺省只可能来自显式的 testOnlyAllowLegacyNoPlan（构造函数已挡掉生产路径）。
+    const plan = this.#creationPlan;
+    if (plan) {
+      const observation = this.#freeOrgObservation;
+      const positive = (v: number) => Number.isSafeInteger(v) && v > 0;
+      if (!plan.orgId?.trim() || !plan.name?.trim() || plan.templateId !== this.#templateId ||
+          (this.#billingPolicy === "free-only" && plan.templateId !== "agent-browser") ||
+          plan.snapshotId !== undefined ||
+          plan.persistentDiskGiB !== undefined || plan.rootDiskGiB !== undefined ||
+          !positive(plan.vcpus) || !positive(plan.memMiB) || plan.maxRunMinutes !== 480 ||
+          !observation || observation.orgId !== plan.orgId ||
+          (observation.tier !== "free" && this.#billingPolicy !== "allow-paid") ||
+          !Number.isFinite(observation.observedAt) || observation.observedAt > requestedAt ||
+          requestedAt - observation.observedAt > 30_000 ||
+          !Array.isArray(observation.allowedSpecs) ||
+          observation.allowedSpecs.filter(s => s.vcpus === plan.vcpus && s.memMiB === plan.memMiB &&
+            Number.isSafeInteger(s.persistentDiskGiB) && s.persistentDiskGiB >= 0).length !== 1) {
+        throw new InstaboxBackendError("instabox_invalid_config", "creation plan lacks matching fresh free-org evidence");
+      }
+    }
+    const machineName = plan?.name ?? buildInstaboxMachineName(ticket.ticketId, ticket.agentKey);
 
     const created = await this.#call({
       method: "POST",
       path: "/machines",
       idempotencyKey: buildInstaboxCreateIdempotencyKey(ticket.ticketId),
-      body: {
+      body: plan ? {
+        name: plan.name, templateId: plan.templateId, orgId: plan.orgId,
+        vcpus: plan.vcpus, memMiB: plan.memMiB,
+        // Ordinary API keys cannot change free maxRunMinutes. Do not send it.
+      } : {
         name: machineName,
         templateId: this.#templateId,
         timeoutSeconds: this.#machineTimeoutSeconds,
       },
     });
     if (!isSuccess(created.status)) {
+      const upstreamCode = extractInstaboxErrorCode(created.payload);
+      let detail = `create HTTP ${created.status}`;
+      if (upstreamCode) {
+        detail += `: ${upstreamCode}`;
+      } else if (created.transportError) {
+        detail += ` ${created.transportError}`;
+      }
+      if (upstreamCode === "template_not_allowed" || created.status === 403) {
+        detail += "; 免费层仅允许 agent-browser 或快照";
+      }
       throw new InstaboxBackendError(
         "instabox_create_failed",
-        `create HTTP ${created.status}${created.transportError ? ` ${created.transportError}` : ""}`,
+        detail,
+        false,
+        undefined,
+        upstreamCode,
       );
     }
     const record = asRecord(created.payload);
@@ -390,19 +475,92 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     const operationId = readString(record?.id);
     if (!machineId || !operationId) {
       throw new InstaboxBackendError(
-        "instabox_create_failed",
-        "create response missing machineId or operation id",
+        "instabox_create_unconfirmed",
+        "create accepted but response missing machineId or operation id; identity unverified; cleanup pending",
+        true,
+        machineId ?? undefined,
       );
     }
 
-    await this.#awaitOperation({
-      operationId,
-      failCode: "instabox_create_failed",
-      unconfirmedCode: "instabox_create_unconfirmed",
-      timeoutMs: this.#createTimeoutMs,
-      /** 建机 op 失败/未确认时云端可能已留下机器，必须让调用方知道要清理。 */
-      cleanupPendingOnFailure: true,
-    });
+    try {
+      await this.#awaitOperation({
+        operationId,
+        failCode: "instabox_create_failed",
+        unconfirmedCode: "instabox_create_unconfirmed",
+        timeoutMs: this.#createTimeoutMs,
+        cleanupPendingOnFailure: true,
+      });
+    } catch (error) {
+      // POST binds the known id, but operation failure does not verify machine
+      // identity. Preserve cleanup diagnostics without authorizing DELETE or
+      // retaining arbitrary upstream text in a cause.
+      throw new InstaboxBackendError(
+        error instanceof InstaboxBackendError ? error.code : "instabox_create_unconfirmed",
+        error instanceof InstaboxBackendError && error.code === "instabox_create_failed"
+          ? "create operation failed; identity unverified; cleanup pending"
+          : "create operation not confirmed; identity unverified; cleanup pending",
+        true,
+        machineId,
+      );
+    }
+    if (plan) {
+      const response = await this.#call({ method: "GET", path: `/machines/${encodeURIComponent(machineId)}` });
+      const machine = asRecord(response.payload);
+      const spec = asRecord(machine?.spec);
+      const template = asRecord(machine?.template);
+      const expectedSpec = this.#freeOrgObservation!.allowedSpecs.find(s => s.vcpus === plan.vcpus && s.memMiB === plan.memMiB)!;
+      // Only a successful identity read may authorize compensating deletion.
+      if (!isSuccess(response.status) || machine?.id !== machineId || machine.orgId !== plan.orgId) {
+        throw new InstaboxBackendError("instabox_create_unconfirmed",
+          "created machine identity could not be verified (HTTP/id/orgId mismatch); cleanup pending", true, machineId);
+      }
+      const mismatches: string[] = [];
+      if (this.#billingPolicy === "free-only" && machine.free !== true) {
+        mismatches.push("created machine is not confirmed free; allow-paid-required");
+      } else if (typeof machine.free !== "boolean") {
+        mismatches.push("machine.free is not boolean");
+      }
+      if (machine.name !== plan.name) mismatches.push("name mismatch");
+      if (template?.id !== plan.templateId) mismatches.push("template mismatch");
+      if (spec?.vcpus !== plan.vcpus || spec?.memMiB !== plan.memMiB ||
+          spec?.persistentDiskGiB !== expectedSpec.persistentDiskGiB) mismatches.push("spec mismatch");
+      if (this.#billingPolicy === "free-only" && machine.maxRunMinutes !== 480) mismatches.push("maxRunMinutes mismatch");
+      if (mismatches.length > 0) {
+        const reason = mismatches.join("; ");
+        try {
+          if (this.#deleteMachineImpl) {
+            await this.#deleteMachineImpl(machineId);
+          } else {
+            const deleted = await this.#call({
+              method: "DELETE",
+              path: `/machines/${encodeURIComponent(machineId)}`,
+              idempotencyKey: buildInstaboxDeleteIdempotencyKey(machineId),
+            });
+            const opId = readString(asRecord(deleted.payload)?.id);
+            if (!isSuccess(deleted.status) || !opId) {
+              throw new InstaboxBackendError("instabox_cleanup_pending",
+                `delete HTTP ${deleted.status}${!opId ? "; missing operation id" : ""}`,
+                true, machineId, extractInstaboxErrorCode(deleted.payload));
+            }
+            await this.#awaitOperation({
+              operationId: opId,
+              failCode: "instabox_cleanup_pending",
+              unconfirmedCode: "instabox_cleanup_pending",
+              timeoutMs: this.#deleteTimeoutMs,
+              cleanupPendingOnFailure: true,
+            });
+          }
+        } catch (error) {
+          // Do not include arbitrary hook/transport messages in the safe error.
+          const detail = error instanceof InstaboxBackendError ? error.message : "delete failed";
+          throw new InstaboxBackendError("instabox_create_unconfirmed",
+            `${reason}; cleanup pending: ${detail}`, true, machineId,
+            error instanceof InstaboxBackendError ? error.upstreamErrorCode : undefined);
+        }
+        throw new InstaboxBackendError("instabox_create_failed", `${reason}; compensating deletion succeeded`);
+      }
+    }
+
     const readyAt = this.#now();
 
     // 建机完成即取基线：usage 是账号累计值，之后的对账只能靠取差。
@@ -782,9 +940,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       if (state === "failed") {
         throw new InstaboxBackendError(
           args.failCode,
-          `operation ${args.operationId} failed${
-            readString(record?.error) ? `: ${readString(record?.error)}` : ""
-          }`,
+          "operation failed",
           args.cleanupPendingOnFailure,
         );
       }
@@ -792,7 +948,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     }
     throw new InstaboxBackendError(
       args.unconfirmedCode,
-      `operation ${args.operationId} not confirmed (last HTTP ${lastStatus})`,
+      `operation not confirmed (last HTTP ${lastStatus})`,
       args.cleanupPendingOnFailure,
     );
   }
@@ -845,6 +1001,22 @@ export function asExecutionBackend(
       await backend.release(lease, reason);
     },
   };
+}
+
+// Only codes already used by this backend's Instabox contract may be displayed.
+// A syntactically valid code can still contain credentials; never echo unknown values.
+const DISPLAYABLE_INSTABOX_ERROR_CODES: ReadonlySet<string> = new Set([
+  "template_not_allowed",
+]);
+
+export function extractInstaboxErrorCode(payload: unknown): string | undefined {
+  const rec = asRecord(payload);
+  if (!rec) return undefined;
+  const code = readString(asRecord(rec.error)?.code)
+    ?? readString(rec.code)
+    ?? readString(rec.error);
+  if (code === null) return undefined;
+  return DISPLAYABLE_INSTABOX_ERROR_CODES.has(code) ? code : "upstream_error";
 }
 
 /** 供测试/调用方判断 argv 是否走 shell 透传（`bash -lc`）。 */

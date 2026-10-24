@@ -19,6 +19,7 @@ import {
   readHostMemory,
   type HostMemorySnapshot,
 } from "./client/hostMemory";
+import { reserveHostMemory, type HostMemoryReservationFs, type MemoryReservationHandle } from "./client/hostMemoryReservation";
 import { buildResultFileContent } from "./agentRunResultFile";
 import { isAgentRunTerminalStatus as sharedIsAgentRunTerminalStatus } from "../ai/tools/agent/agentRunDisplayHelpers";
 import {
@@ -183,6 +184,7 @@ export type FsLike = {
   readdirSync: typeof nodeFs.readdirSync;
   existsSync: typeof nodeFs.existsSync;
   openSync: typeof nodeFs.openSync;
+  closeSync?: typeof nodeFs.closeSync;
   unlinkSync: typeof nodeFs.unlinkSync;
   /** Optional: enables directory removal for lock release when present. */
   rmdirSync?: typeof nodeFs.rmdirSync;
@@ -226,7 +228,7 @@ export type AgentRunControlDeps = {
   clearSignalHandler?: () => void;
   getProcessStartTime?: (pid: number) => Date | null | undefined;
   execFileSync?: typeof nodeExecFileSync;
-  /** 本机内存快照读取（缺省读真实 /proc/meminfo）；只影响提示文案，不参与准入。 */
+  /** 本机内存快照读取（缺省读真实 /proc/meminfo）。 */
   readHostMemory?: () => HostMemorySnapshot | null;
 };
 
@@ -1450,6 +1452,7 @@ export async function spawnLocalBackgroundRun(
 
   const runId = generateRunId();
   const batchId = input.batchId ?? (deps.generateBatchId ?? defaultGenerateBatchId)();
+
   const logPath = resolveRunLogPath(runId, env, homedir);
   const queuePath = resolveRunQueuePath(runId, env, homedir);
   const recordPath = resolveRunRecordPath(runId, env, homedir);
@@ -1547,32 +1550,69 @@ export async function spawnLocalBackgroundRun(
     NOLO_AGENT_RUN_ID: runId,
   };
 
-  // 派发时的一瞥：spawn 之前采集一次本机内存，之后一个字都不改行为。
-  // 读不到（非 Linux / 字段缺失）就是 null，这里不做任何分支判断。
-  const hostMemory = safeReadHostMemory(deps.readHostMemory ?? readHostMemory);
-
+  let hostMemory: HostMemorySnapshot | null = null;
+  let reservation: MemoryReservationHandle | undefined;
   const logFd = fs.openSync(logPath, "a");
-  const proc = spawn(execPath, childArgs, {
-    cwd: input.cwd,
-    env: childEnv,
-    detached: true,
-    stdio: deps.shellApprovalHost ? ["ignore", logFd, logFd, "ipc"] : ["ignore", logFd, logFd],
-  });
-  if (deps.shellApprovalHost) {
-    attachShellApprovalHost(proc, { ...deps.shellApprovalHost, binding: {
-      ...deps.shellApprovalHost.binding, runId, agentKey: input.agentKey,
-      workspaceRoot: nodeFs.realpathSync(input.cwd ?? process.cwd()),
-    } });
-    proc.channel?.unref?.();
+  // FsLike 是 node:fs 的宽面（readFileSync 带重载），预留模块只声明它真正用到的
+  // 窄面。在这里显式收敛签名，而不是把 `fs` 强转过去：转换点集中在一处，越界
+  // 调用在编译期就能发现。
+  const reservationFs: HostMemoryReservationFs = {
+    existsSync: (path) => fs.existsSync(path),
+    readFileSync: (path, encoding) => fs.readFileSync(path, encoding as BufferEncoding) as string,
+    writeFileSync: (path, data, options) => fs.writeFileSync(path, data, options),
+    mkdirSync: (path, options) => fs.mkdirSync(path, options),
+    readdirSync: (path) => fs.readdirSync(path),
+    ...(fs.renameSync ? { renameSync: (from: string, to: string) => fs.renameSync!(from, to) } : {}),
+    ...(fs.statSync
+      ? { statSync: (path: string) => ({ mtimeMs: fs.statSync!(path).mtimeMs }) }
+      : {}),
+  };
+  let proc: ChildProcess;
+  try {
+    reservation = reserveHostMemory({
+      runsDir, runId, fs: reservationFs, now: deps.now,
+      readHostMemory: () => (hostMemory = (deps.readHostMemory ?? readHostMemory)()),
+      getProcessStartTime: deps.getProcessStartTime ?? defaultGetProcessStartTime,
+      withLock: (id, fn, opts) => withRunRecordLock(id, deps, fn, opts),
+    });
+    proc = spawn(execPath, childArgs, {
+      cwd: input.cwd, env: childEnv, detached: true,
+      stdio: deps.shellApprovalHost ? ["ignore", logFd, logFd, "ipc"] : ["ignore", logFd, logFd],
+    });
+  } catch (error) {
+    try {
+      reservation?.release("spawn_sync_failed");
+    } finally {
+      finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, deps);
+    }
+    throw error;
+  } finally {
+    fs.closeSync?.(logFd);
   }
-  proc.unref();
-
+  proc.once?.("error", (error) => {
+    try {
+      reservation!.release("child_error");
+    } catch (releaseError) {
+      // Keep the failed reservation on disk; do not crash the parent from an
+      // EventEmitter callback or silently claim the budget was released.
+      finalizeRunRecord(runId, { status: "failed", exitCode: 1,
+        note: `${error}; reservation release failed: ${releaseError}` }, deps);
+      return;
+    }
+    finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, deps);
+  });
   // spawn 成功后才提示（失败没有任何东西需要用户去并发权衡）。写失败/输出通道
   // 抛错一律吞掉：这行字的价值远小于「派发已经成功了」这件事。
   const hostMemoryNotice = emitHostMemoryNotice(hostMemory, input.output);
 
   if (typeof proc.pid === "number") {
-    const processStartedAt = (deps.getProcessStartTime ?? defaultGetProcessStartTime)(proc.pid);
+    let processStartedAt: Date | null | undefined;
+    try {
+      processStartedAt = (deps.getProcessStartTime ?? defaultGetProcessStartTime)(proc.pid);
+      if (processStartedAt && !Number.isFinite(processStartedAt.getTime())) processStartedAt = null;
+    } catch {
+      processStartedAt = null;
+    }
     // 必须持锁并在锁内重读：子进程此刻已经在跑，它的创建即心跳（keepAlive）
     // 随时可能落盘。无锁的读-改-写会把 pid/processStartedAt 整段丢掉的旧快照
     // rename 回去——pid 一丢，stop 直接拒绝、checkStaleRun 永远提前返回，
@@ -1583,8 +1623,28 @@ export async function spawnLocalBackgroundRun(
       latest.pid = proc.pid;
       if (processStartedAt) latest.processStartedAt = processStartedAt.toISOString();
       writeRunRecord(latest, deps);
-    });
+      return true;
+    }, { strict: true });
+    try {
+      const persisted = readRunRecord(runId, deps);
+      reservation!.associate({ runId, pid: proc.pid, processStartedAt: processStartedAt?.toISOString() });
+      if (persisted?.pid !== proc.pid || !persisted.processStartedAt) throw new Error("Child identity persistence failed");
+    } catch (error) {
+      // The child may already be executing. Keep the reservation and running record;
+      // never release its budget or claim spawn success after an association failure.
+      throw new Error(`[host-memory-reservation] child ${proc.pid}, run ${runId}: association failed: ${error}`);
+    }
   }
+
+  if (deps.shellApprovalHost) {
+    attachShellApprovalHost(proc, { ...deps.shellApprovalHost, binding: {
+      ...deps.shellApprovalHost.binding, runId, agentKey: input.agentKey,
+      workspaceRoot: nodeFs.realpathSync(input.cwd ?? process.cwd()),
+    } });
+    proc.channel?.unref?.();
+  }
+  proc.unref();
+
 
   return {
     runId,

@@ -10,9 +10,17 @@
 
 import {
   asExecutionBackend,
+  buildInstaboxMachineName,
   createInstaboxExecutionBackend,
   INSTABOX_BACKEND_ID,
+  type InstaboxBackendOptions,
 } from "../../agent-runtime/instaboxBackend";
+import {
+  resolveInstaboxCreationContract,
+  type InstaboxBillingPolicy,
+  type InstaboxContractProbe,
+  type InstaboxHttpFetch,
+} from "../../agent-runtime/instaboxQuota";
 import type {
   ExecutionBackend,
   ExecutionLease,
@@ -37,6 +45,31 @@ import {
 import { parseToolOutput } from "../../agent-runtime/docker/sandboxWorkspaceHelper";
 import type { ExecutionRequest } from "../../agent-runtime/executionBackend";
 import { LocalRuntimeKeyUnsupportedError } from "./localDockerWorkload";
+
+import { deliverInstaboxWorkspace, validateInstaboxWorkspaceSelection, type InstaboxWorkspaceSelection, type InstaboxWorkspaceDelivery } from "./localInstaboxWorkspaceDelivery";
+
+import {
+  captureInstaboxBaseline,
+  recoverInstaboxWorkspace,
+  type InstaboxRecoveryPolicy,
+  type InstaboxRecoveryReceipt,
+  type InstaboxWorkspaceBaseline,
+} from "./localInstaboxWorkspaceRecovery";
+
+function sanitizeReleaseError(error: unknown): Error {
+  const raw = error instanceof Error ? error.message : String(error);
+  const sanitized = raw
+    .replace(/(?:api[_-]?key|bearer|token|password|secret)[=:\s]+[A-Za-z0-9_\-\.]{8,}/gi, "[REDACTED]")
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED]")
+    .slice(0, 500);
+  const safe = new Error(sanitized);
+  if (error instanceof Error) {
+    safe.name = error.name;
+    if ((error as any).code) (safe as any).code = (error as any).code;
+    if ((error as any).cleanupPending !== undefined) (safe as any).cleanupPending = (error as any).cleanupPending;
+  }
+  return safe;
+}
 
 export const LOCAL_INSTABOX_BACKEND_ID = INSTABOX_BACKEND_ID;
 
@@ -121,8 +154,8 @@ async function prepareFileBridge(
   // 探针文件是本 run 自己创建的专属文件（名字带 runId），读完**不删除**：
   // 通用代码无权断言「同名文件一定是我写的」，机器随 lease 结束即销毁。
   return verdict.ready
-    ? { root: pinned.root, runtime: pinned.runtime, ready: true }
-    : { root: pinned.root, runtime: pinned.runtime, ready: false, reason: verdict.reason ?? "probe_failed" };
+    ? { root: pinned.root, runtime: pinned.runtime, ready: true, probeId, probePath: parsed.probePath }
+    : { root: pinned.root, runtime: pinned.runtime, ready: false, reason: verdict.reason ?? "probe_failed", probeId, probePath: parsed.probePath };
 }
 
 export type LocalInstaboxWorkloadHandle = {
@@ -138,8 +171,42 @@ export type LocalInstaboxWorkloadHandle = {
   workspaceRoot: string | null;
   /** 文件工具 bridge 的真实就绪状态；未就绪时文件工具显式拒绝。 */
   fileBridge: InstaboxBridgeProbe;
+  workspaceDelivery: InstaboxWorkspaceDelivery;
+  workspaceBaseline: InstaboxWorkspaceBaseline | null;
+  readonly recoveryReceipt: InstaboxRecoveryReceipt | null;
+  readonly cleanupState: string;
   release: () => Promise<void>;
 };
+
+export type InstaboxOrgTier = "free" | "pro" | "team" | "enterprise" | string;
+
+/**
+ * 解析默认模板：
+ * 优先级：显式 args.templateId > args.env.INSTABOX_TEMPLATE_ID 覆盖 > 组织分层默认。
+ * 组织分层默认：免费组织默认 "agent-browser"，付费组织默认 "universal"；
+ * 若无法确定组织层级（undefined / unknown），沿用现有默认 "universal"。
+ */
+export function resolveInstaboxTemplateId(options: {
+  templateId?: string;
+  env?: Record<string, string | undefined>;
+  orgTier?: InstaboxOrgTier;
+}): string {
+  const explicit = options.templateId?.trim();
+  if (explicit) return explicit;
+  const envOverride = options.env?.INSTABOX_TEMPLATE_ID?.trim();
+  if (envOverride) return envOverride;
+  const tier = options.orgTier?.trim().toLowerCase();
+  if (tier === "free") {
+    return "agent-browser";
+  }
+  if (tier === "pro" || tier === "team" || tier === "enterprise" || tier === "paid") {
+    return "universal";
+  }
+  // 无法确定组织层级：落到免费层可用的模板。反向（默认 universal）在免费组织
+  // 上必然 template_not_allowed（2026-10-24 真机实测 403），而 agent-browser
+  // 在付费层同样可用；真要换模板由 INSTABOX_TEMPLATE_ID 显式覆盖。
+  return "agent-browser";
+}
 
 export type CreateLocalInstaboxWorkloadArgs = {
   runtimeKey: string;
@@ -151,6 +218,21 @@ export type CreateLocalInstaboxWorkloadArgs = {
   /** 测试注入：跳过真实 Instabox HTTP 通信。 */
   backend?: ExecutionBackend;
   templateId?: string;
+  /** 组织层级：free / pro / team / enterprise 等。若无法确定则为 undefined。 */
+  orgTier?: InstaboxOrgTier;
+  /** Explicit authority-approved manifest only; omitted means no host reads or delivery. */
+  workspaceSelection?: InstaboxWorkspaceSelection;
+  workspaceRecovery?: InstaboxRecoveryPolicy;
+  /** Explicit caller authorization for destructive backend release, after verified recovery. */
+  allowRemoteRelease?: boolean;
+  /** 计费策略授权（用户显式允许付费）。层级证据只来自官方 API，不来自这里。 */
+  billingPolicy?: InstaboxBillingPolicy;
+  /** 测试注入：替换官方创建合同探针（零真实网络）。 */
+  contractProbe?: InstaboxContractProbe;
+  /** 测试注入：替换后端工厂（用于断言 plan / billingPolicy 真的传到了后端）。 */
+  backendFactory?: (options: InstaboxBackendOptions) => ExecutionBackend;
+  /** 测试注入：官方探针用的 fetch。 */
+  fetchFn?: InstaboxHttpFetch;
 };
 
 /**
@@ -167,20 +249,54 @@ export async function createLocalInstaboxWorkload(
     );
   }
 
+  validateInstaboxWorkspaceSelection(args.workspaceSelection);
+
   // 凭据与额度 fail-closed
   const apiKey = assertInstaboxPrerequisites(args.env);
 
-  const backend: ExecutionBackend =
-    args.backend ??
-    asExecutionBackend(
-      createInstaboxExecutionBackend({
-        apiKey,
-        templateId:
-          args.templateId ??
-          args.env.INSTABOX_TEMPLATE_ID?.trim() ??
-          "universal",
-      }),
-    );
+  const templateId = resolveInstaboxTemplateId({
+    templateId: args.templateId,
+    env: args.env,
+    orgTier: args.orgTier,
+  });
+
+  // 计费闸门：生产建机路径必须先拿到官方探针产出的创建合同
+  // （plan + 自由组织证据），拿不到就 fail-closed —— 零建机请求，
+  // 绝不回落 legacy 无 plan 分支。
+  let backend: ExecutionBackend;
+  if (args.backend) {
+    backend = args.backend;
+  } else {
+    const probe = await (args.contractProbe ?? resolveInstaboxCreationContract)(apiKey, {
+      billingPolicy: args.billingPolicy ?? "free-only",
+      templateId,
+      machineName: buildInstaboxMachineName(
+        `ticket-${args.runId}`,
+        args.agentKey || "instabox-agent",
+      ),
+      ...(args.fetchFn ? { fetchFn: args.fetchFn } : {}),
+    });
+    if (!probe.ok || !probe.contract) {
+      throw new LocalRuntimeKeyUnsupportedError(
+        "instabox_creation_contract_unavailable",
+        `instabox 创建合同不可用，已拒绝建机（未发出任何建机请求）：${
+          probe.missingEvidence.join(", ") || probe.error || "unknown"
+        }。`,
+      );
+    }
+    const { plan, freeOrgObservation } = probe.contract;
+    const factory =
+      args.backendFactory ??
+      ((options: InstaboxBackendOptions) =>
+        asExecutionBackend(createInstaboxExecutionBackend(options)));
+    backend = factory({
+      apiKey,
+      templateId: plan.templateId,
+      creationPlan: plan,
+      freeOrgObservation,
+      billingPolicy: probe.billingPolicy,
+    });
+  }
 
   const workspaceRoot = resolveInstaboxWorkspaceRoot(args.env);
 
@@ -211,12 +327,24 @@ export async function createLocalInstaboxWorkload(
   try {
     lease = await backend.prepare(ticket);
   } catch (error) {
-    throw new LocalRuntimeKeyUnsupportedError(
-      "instabox_workload_unavailable",
-      `runtimeKey 指向 instabox，但云沙盒初始化失败：${
-        error instanceof Error ? error.message : String(error)
-      }。${instaboxFailureHint}`,
-    );
+    const rawMsg = error instanceof Error ? error.message : String(error);
+    const fields = error !== null && typeof error === "object"
+      ? error as { code?: unknown; cleanupPending?: unknown; machineId?: unknown; upstreamErrorCode?: unknown }
+      : {};
+    const hintNeeded =
+      !rawMsg.includes("免费层仅允许 agent-browser 或快照") &&
+      (rawMsg.includes("template_not_allowed") ||
+        [fields.code, fields.upstreamErrorCode].some(code => typeof code === "string" && code.includes("template")));
+    const hint = hintNeeded ? "（免费层仅允许 agent-browser 或快照）" : "";
+    throw Object.assign(new LocalRuntimeKeyUnsupportedError(
+      typeof fields.code === "string" ? fields.code : "instabox_workload_unavailable",
+      `runtimeKey 指向 instabox，但云沙盒初始化失败：${rawMsg}${hint ? ` ${hint}` : ""}。${instaboxFailureHint}`,
+    ), {
+      cleanupPending: fields.cleanupPending,
+      machineId: fields.machineId,
+      upstreamErrorCode: fields.upstreamErrorCode,
+      cause: error,
+    });
   }
 
   /**
@@ -237,6 +365,8 @@ export async function createLocalInstaboxWorkload(
    * 的调用点用 try/catch 包住并转成 rejected promise，避免同步异常把状态永远停在
    * releasing（既不放行也不可重试）。
    */
+  let recoveryReceipt: InstaboxRecoveryReceipt | null = null;
+  let activeExecutions = 0;
   const releaseBackend = (): Promise<void> => {
     if (releaseState === "released") return Promise.resolve();
     if (releasePromise) return releasePromise;
@@ -244,7 +374,22 @@ export async function createLocalInstaboxWorkload(
     let attempt: Promise<unknown>;
     try {
       // 同步 throw 也必须进状态机：转成 rejected promise，否则状态停在 releasing。
-      attempt = Promise.resolve(backend.release(lease, "completed"));
+      attempt = (async () => {
+        if (!args.allowRemoteRelease || activeExecutions > 0) {
+          throw Object.assign(new Error("instabox cleanup_pending: explicit release approval required or tools still running"), { code: "instabox_cleanup_pending", cleanupPending: true, leaseId: lease.leaseId });
+        }
+        recoveryReceipt = await recoverInstaboxWorkspace({
+          root: workspaceRoot,
+          runtime: bridge?.runtime ?? "node",
+          delivery: workspaceDelivery ?? { workspaceMode: "empty", manifest: null, manifestSha256: null, approvalId: null, baseSha: null, remoteGitHistory: false },
+          baseline: workspaceBaseline,
+          policy: args.workspaceRecovery,
+          exec: execDirect,
+          runId: args.runId,
+          probeId: bridge?.probeId ?? args.runId,
+        });
+        await backend.release(lease, "completed");
+      })();
     } catch (error) {
       attempt = Promise.reject(error);
     }
@@ -255,24 +400,17 @@ export async function createLocalInstaboxWorkload(
         },
         (error) => {
           releaseState = "cleanup_pending";
-          throw error;
+          const cause = sanitizeReleaseError(error);
+          throw Object.assign(
+            new Error(`instabox cleanup_pending: recovery or release unconfirmed: ${cause.message}`, { cause }),
+            { code: "instabox_cleanup_pending", cleanupPending: true, leaseId: lease.leaseId, cause },
+          );
         },
       )
       .finally(() => {
         releasePromise = null;
       });
     return releasePromise;
-  };
-
-  /** release 失败的证据文案：区分「真的清理不了」与「只是没输赢」。 */
-  const describeReleaseFailure = (error: unknown): string => {
-    const record = error as { cleanupPending?: unknown; code?: unknown } | null;
-    const cleanupPending =
-      record?.cleanupPending === true || record?.code === "instabox_cleanup_pending";
-    const detail = error instanceof Error ? error.message : String(error);
-    return cleanupPending
-      ? `且机器删除未确认：cleanup_pending（${detail}）——云端可能仍有存活机器，不得当作已清理，需人工核对后删除`
-      : `且 release 也失败（${detail}）`;
   };
 
   // 同一 lease 内的直接执行（bootstrap / 探针用）：不经 model-facing channel，
@@ -289,23 +427,33 @@ export async function createLocalInstaboxWorkload(
   };
 
   // bootstrap 只做一次（同一 lease），不按工具重建机器。
-  let bridge: InstaboxBridgeProbe;
+  let bridge!: InstaboxBridgeProbe;
+  let workspaceDelivery!: InstaboxWorkspaceDelivery;
+  let workspaceBaseline: InstaboxWorkspaceBaseline | null = null;
   try {
     bridge = await prepareFileBridge(execDirect, workspaceRoot, args.runId);
-  } catch (error) {
-    // 拿到 lease 之后失败：必须在这里收尾，绝不留下一台没人释放的机器。
-    let cleanupNote = "本次 lease 已释放";
-    try {
-      await releaseBackend();
-    } catch (releaseError) {
-      cleanupNote = describeReleaseFailure(releaseError);
+    if (args.workspaceSelection && (!bridge.ready || !bridge.root || !bridge.runtime)) {
+      throw new Error("instabox_workspace_delivery:bridge_not_ready");
     }
-    throw new LocalRuntimeKeyUnsupportedError(
-      "instabox_bridge_bootstrap_failed",
-      `runtimeKey 指向 instabox，但容器内文件工具桥 bootstrap 失败：${
-        error instanceof Error ? error.message : String(error)
-      }；${cleanupNote}。${instaboxFailureHint}`,
-    );
+    workspaceDelivery = await deliverInstaboxWorkspace({
+      selection: args.workspaceSelection, root: bridge.root ?? workspaceRoot,
+      runtime: bridge.runtime ?? "node", exec: execDirect,
+    });
+    if (bridge.ready && bridge.root && bridge.runtime) {
+      workspaceBaseline = await captureInstaboxBaseline({
+        root: bridge.root,
+        runtime: bridge.runtime,
+        exec: execDirect,
+      });
+    }
+  } catch (error) {
+    // Bootstrap/delivery/baseline may have written unique bytes. Never delete on this error path.
+    releaseState = "cleanup_pending";
+    const cause = error instanceof Error ? error : new Error(String(error));
+    throw Object.assign(new Error(`instabox bootstrap/delivery/baseline failed; cleanup_pending; lease retained: ${cause.message}`, { cause }), {
+      code: "instabox_cleanup_pending", cleanupPending: true, leaseId: lease.leaseId,
+      retryCleanup: releaseBackend,
+    });
   }
 
   const rawChannel = createExecutionChannel({
@@ -330,7 +478,7 @@ export async function createLocalInstaboxWorkload(
     await releaseBackend();
   };
 
-  const channel = async (
+  const channelInternal = async (
     toolName: string,
     toolArgs: Record<string, unknown>,
     signal?: AbortSignal,
@@ -380,9 +528,17 @@ export async function createLocalInstaboxWorkload(
   return {
     backendId: LOCAL_INSTABOX_BACKEND_ID,
     runId: args.runId,
-    channel,
+    channel: async (name, input, signal) => {
+      activeExecutions++;
+      try { return await channelInternal(name, input, signal); }
+      finally { activeExecutions--; }
+    },
     workspaceRoot: bridge.root,
     fileBridge: bridge,
+    workspaceDelivery,
+    workspaceBaseline,
+    get recoveryReceipt() { return recoveryReceipt; },
+    get cleanupState() { return releaseState; },
     release,
   };
 }

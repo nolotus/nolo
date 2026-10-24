@@ -3,6 +3,7 @@
 import {
   buildRuntimeCatalog,
   resolveDockerReadiness,
+  type InstaboxReadiness,
   type RuntimeCatalog,
   type RuntimeCatalogDeps,
   type RuntimeSummary,
@@ -55,7 +56,37 @@ export type ListRuntimesTrustedContext = Partial<RuntimeCatalogDeps> & {
    * 传源 = 每次真正探测；传 `dockerReadiness`（快照）= 只消费既有结论。
    */
   dockerReadinessSource?: DockerRuntimeReadinessSource;
+  /**
+   * 生产接线：instabox 就绪探测的单例源。
+   * 传源 = 每次真正探测；传 `instaboxReadiness`（快照）= 只消费既有结论。
+   */
+  instaboxReadinessSource?: {
+    get(callerUserId: string): Promise<InstaboxReadiness>;
+    snapshot?(callerUserId: string): InstaboxReadiness;
+  };
 };
+
+export type ListRuntimesServerHooks = {
+  getDockerBindingAuthorizer?: () => { isBound?: (caller: string) => boolean };
+  isInstaboxBound?: (callerUserId: string) => boolean | Promise<boolean>;
+  getInstaboxReadiness?: (callerUserId: string) => Promise<InstaboxReadiness>;
+};
+
+let serverHooks: ListRuntimesServerHooks | undefined;
+
+/**
+ * 供服务端通过可信 DI 注册 server-only 绑定与就绪钩子。
+ * 共享工具层不在 web 构建图中静态或动态 import server 模块。
+ */
+export function registerListRuntimesServerHooks(
+  hooks: ListRuntimesServerHooks | undefined,
+): void {
+  serverHooks = hooks;
+}
+
+export function getRegisteredListRuntimesServerHooks(): ListRuntimesServerHooks | undefined {
+  return serverHooks;
+}
 
 /**
  * docker 就绪判定：探测源（最权威）> 就绪快照 > 旧注入面（dockerSelectable）。
@@ -86,24 +117,60 @@ export async function resolveTrustedDockerReadiness(
   });
 }
 
-/**
- * 服务端专用兜底：docker 账户绑定的真相只存在于 server handlers
- * （bun:sqlite / node:crypto / node:path，并连带 dockerSandboxExecutionBackend 等）。
- * 这里用动态 import 而不是静态 import：工具注册表所在的 web 图不再静态可达
- * server-only 模块；esbuild web 构建把该模块重定向到 fail-closed stub。
- * 加载失败（模块不可用）一律 fail-closed：返回 undefined，绝不默认放行。
- */
-async function loadDockerBindingIsBoundFallback(): Promise<
-  ((caller: string) => boolean) | undefined
-> {
-  try {
-    const { getDockerBindingAuthorizer } = await import(
-      "../../../server/handlers/agentRun/dockerWorkloadLifecycle"
-    );
-    return (caller: string) => Boolean(getDockerBindingAuthorizer().isBound?.(caller));
-  } catch {
-    return undefined;
+function loadDockerBindingIsBoundFallback(): ((caller: string) => boolean) | undefined {
+  if (serverHooks?.getDockerBindingAuthorizer) {
+    try {
+      const authorizer = serverHooks.getDockerBindingAuthorizer();
+      return (caller: string) => Boolean(authorizer?.isBound?.(caller));
+    } catch {
+      return undefined;
+    }
   }
+  return undefined;
+}
+
+async function loadInstaboxBoundFallback(callerUserId?: string): Promise<boolean> {
+  if (!callerUserId) return false;
+  if (serverHooks?.isInstaboxBound) {
+    try {
+      return await serverHooks.isInstaboxBound(callerUserId);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+export async function resolveTrustedInstaboxReadiness(
+  callerUserId?: string,
+  thunkApi?: any,
+  trustedContext?: ListRuntimesTrustedContext,
+  isInstaboxBound?: (caller: string) => boolean,
+): Promise<InstaboxReadiness | undefined> {
+  const source = trustedContext?.instaboxReadinessSource ?? thunkApi?.extra?.instaboxReadinessSource;
+  if (source && typeof source.get === "function" && callerUserId) {
+    try {
+      return await source.get(callerUserId);
+    } catch {
+      return {
+        ready: false,
+        reason: "quota-unverifiable",
+        details: "Instabox readiness source probe failed",
+      };
+    }
+  }
+  const injected = trustedContext?.instaboxReadiness ?? thunkApi?.extra?.instaboxReadiness;
+  if (injected) return injected;
+  if (callerUserId && isInstaboxBound?.(callerUserId)) {
+    if (serverHooks?.getInstaboxReadiness) {
+      try {
+        return await serverHooks.getInstaboxReadiness(callerUserId);
+      } catch {
+        return undefined;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -175,6 +242,21 @@ export async function listRuntimesToolFunc(
     (trustedContext?.dockerReadinessSource ? (() => true) : undefined) ??
     (await loadDockerBindingIsBoundFallback());
 
+  const explicitInstaboxBound =
+    trustedContext?.isInstaboxBound ?? thunkApi?.extra?.isInstaboxBound;
+  let isInstaboxBound: ((caller: string) => boolean) | undefined = explicitInstaboxBound;
+  if (!isInstaboxBound && callerUserId) {
+    const bound = await loadInstaboxBoundFallback(callerUserId);
+    isInstaboxBound = (caller: string) => (caller === callerUserId ? bound : false);
+  }
+
+  const instaboxReadiness = await resolveTrustedInstaboxReadiness(
+    callerUserId,
+    thunkApi,
+    trustedContext,
+    isInstaboxBound,
+  );
+
   if (!callerUserId || !callerUserId.trim()) {
     return {
       rawData: {
@@ -196,6 +278,8 @@ export async function listRuntimesToolFunc(
     connectorConnections,
     dockerReadiness,
     isDockerBound,
+    isInstaboxBound,
+    instaboxReadiness,
   });
 
   return {
