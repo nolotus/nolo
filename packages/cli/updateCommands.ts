@@ -352,8 +352,8 @@ cleanup() {
       mv "$BACKUP" "$EXTRACT_DIR" || exit 1
     fi
   fi
-  rm -rf "$STAGING"
-  rm -f "$LINK"
+  rm -rf "$STAGING" || true
+  rm -f "$LINK" || true
   exit "$status"
 }
 # Refuse collisions before installing cleanup: never remove somebody else's path.
@@ -459,7 +459,7 @@ committed=1
 # Retain only the newest recovery copy from this run; prune older backups.
 for old_copy in "$EXTRACT_DIR.old."*; do
   if [ -d "$old_copy" ] && [ ! -L "$old_copy" ] && [ "$old_copy" != "$BACKUP" ]; then
-    rm -rf "$old_copy"
+    rm -rf "$old_copy" || true
   fi
 done
 # Retain the previous bundle as a recovery copy; never unlink the live entry.
