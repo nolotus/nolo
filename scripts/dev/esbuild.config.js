@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { webAssetOutdir, webAssetPublicPath } from "../../packages/server/html/webAssetPaths";
+import { webAssetOutdir, webAssetPublicPath } from "../../packages/app/theme/webAssetPaths";
 
 const require = createRequire(import.meta.url);
 import stylexUnplugin from "@stylexjs/unplugin";

@@ -129,8 +129,10 @@ import {
     appendCliCapabilityWarnings,
 } from "./streamTurnMessageBuild";
 import {
+    extractImageUrlsFromMessages,
     stripImagePartsForTextOnlyAgent,
 } from "./imagePreprocessing";
+import { toast } from "app/utils/toast";
 import {
     consumeAgentRunStream,
     type AgentRunStreamConsumeOutcome,
@@ -407,6 +409,44 @@ function safeParseToolArgs(argsStr: string): any {
     }
 }
 
+
+/**
+ * 记录已向用户发出“图片被省略”提示的用户消息 ID。
+ * 同一用户消息因工具续轮、重试再次预处理时不重复提示。
+ */
+export const notifiedOmittedImageUserMessageIds = new Set<string>();
+
+export function notifyOmittedImagesIfPresent({
+    downgraded,
+    messagesBeforeStrip,
+    targetUserMessageId,
+}: {
+    downgraded: boolean;
+    messagesBeforeStrip: Array<{ id?: unknown; content: unknown }>;
+    targetUserMessageId?: string;
+}): void {
+    if (!downgraded || !targetUserMessageId) return;
+    if (notifiedOmittedImageUserMessageIds.has(targetUserMessageId)) return;
+
+    // 在实际预处理输入中找到该用户消息
+    const targetMsg = messagesBeforeStrip.find((m) => m.id === targetUserMessageId);
+    if (!targetMsg) return;
+
+    // 仅统计本轮该用户消息中被剥离的图片数量，不把历史图片数量误报为本次发送
+    const currentMessageImageCount = extractImageUrlsFromMessages([targetMsg as any]).length;
+    if (currentMessageImageCount <= 0) return;
+
+    notifiedOmittedImageUserMessageIds.add(targetUserMessageId);
+    if (notifiedOmittedImageUserMessageIds.size > 1000) {
+        const first = notifiedOmittedImageUserMessageIds.values().next().value;
+        if (first) notifiedOmittedImageUserMessageIds.delete(first);
+    }
+
+    toast.info(
+        `当前模型不支持图片，本次发送的 ${currentMessageImageCount} 张图片已省略，文字仍会发送。`,
+        { id: `image-omitted-${targetUserMessageId}` },
+    );
+}
 
 /** streamAgentChatTurn 参数（聊天轮次专用） */
 export interface StreamAgentChatTurnArgs {
@@ -2121,6 +2161,7 @@ export const streamAgentChatTurnHandler = async (
             });
 
             let appendTempUserInput = true;
+            let activeTurnUserMessageId: string | undefined;
             let currentParentMessageId = parentMessageId ?? undefined;
             const storedResponsesState = currentDialog?.responsesState;
             let responsesState = selectResponsesConversationState(
@@ -2249,21 +2290,29 @@ export const streamAgentChatTurnHandler = async (
 
                 if (
                     appendTempUserInput &&
-                    hasAgentRunUserInputContent(agentRunUserInput) &&
-                    !isLastMessageMatchingUserInput(visibleMessages, agentRunUserInput)
+                    hasAgentRunUserInputContent(agentRunUserInput)
                 ) {
-                    visibleMessages = [
-                        ...visibleMessages,
-                        {
-                            id: `__tmp_user_${Date.now()}`,
-                            dbKey: "",
-                            role: "user",
-                            content: agentRunUserInput,
-                            thinkContent: "",
-                            cybotKey: agentConfigForCall.dbKey,
-                            isStreaming: false,
-                        } as any,
-                    ];
+                    if (!isLastMessageMatchingUserInput(visibleMessages, agentRunUserInput)) {
+                        const tempId = `__tmp_user_${Date.now()}`;
+                        visibleMessages = [
+                            ...visibleMessages,
+                            {
+                                id: tempId,
+                                dbKey: "",
+                                role: "user",
+                                content: agentRunUserInput,
+                                thinkContent: "",
+                                cybotKey: agentConfigForCall.dbKey,
+                                isStreaming: false,
+                            } as any,
+                        ];
+                        activeTurnUserMessageId = tempId;
+                    } else {
+                        const lastMsg = visibleMessages[visibleMessages.length - 1];
+                        if (lastMsg && typeof lastMsg.id === "string") {
+                            activeTurnUserMessageId = lastMsg.id;
+                        }
+                    }
                 }
 
                 const cleanedMessages = filterAndCleanMessages(visibleMessages);
@@ -2272,10 +2321,16 @@ export const streamAgentChatTurnHandler = async (
                 const summaryTokenCount = contexts.dialogSummary
                     ? estimateTokenCount(contexts.dialogSummary)
                     : 0;
+                const messagesBeforeStrip = compressOldToolResults(cleanedMessages) as any[];
                 const preprocessedResult = await stripImagePartsForTextOnlyAgent(
-                    compressOldToolResults(cleanedMessages) as any,
+                    messagesBeforeStrip,
                     agentConfigForCall as any,
                 );
+                notifyOmittedImagesIfPresent({
+                    downgraded: preprocessedResult.downgraded,
+                    messagesBeforeStrip,
+                    targetUserMessageId: activeTurnUserMessageId,
+                });
                 let processedMessages = trimMessagesWithSummary(
                     preprocessedResult.messages as any,
                     ctxWindow,
@@ -2388,13 +2443,14 @@ export const streamAgentChatTurnHandler = async (
                         dispatch(clearPendingUserInputQueue({ dialogKey }));
                         break;
                     }
-                    await dispatch(
+                    const persisted = await dispatch(
                         prepareAndPersistUserMessage({
                             userInput: queuedText,
                             dialogConfig: currentDialogConfig,
                         })
                     ).unwrap();
                     dispatch(dequeueUserInput({ dialogKey }));
+                    activeTurnUserMessageId = (persisted as any)?.id;
                     continue;
                 }
 
@@ -2435,6 +2491,7 @@ export const streamAgentChatTurnHandler = async (
         });
 
         let appendTempUserInput = true;
+        let activeTurnUserMessageId: string | undefined;
         let currentParentMessageId = parentMessageId ?? undefined;
 
         const w = typeof globalThis !== "undefined" && (globalThis as any).window ? (globalThis as any).window : null;
@@ -2557,21 +2614,29 @@ export const streamAgentChatTurnHandler = async (
 
             if (
                 appendTempUserInput &&
-                hasAgentRunUserInputContent(agentRunUserInput) &&
-                !isLastMessageMatchingUserInput(visibleMessages, agentRunUserInput)
+                hasAgentRunUserInputContent(agentRunUserInput)
             ) {
-                visibleMessages = [
-                    ...visibleMessages,
-                    {
-                        id: `__tmp_user_${Date.now()}`,
-                        dbKey: "",
-                        role: "user",
-                        content: agentRunUserInput,
-                        thinkContent: "",
-                        cybotKey: agentConfigForCall.dbKey,
-                        isStreaming: false,
-                    } as any,
-                ];
+                if (!isLastMessageMatchingUserInput(visibleMessages, agentRunUserInput)) {
+                    const tempId = `__tmp_user_${Date.now()}`;
+                    visibleMessages = [
+                        ...visibleMessages,
+                        {
+                            id: tempId,
+                            dbKey: "",
+                            role: "user",
+                            content: agentRunUserInput,
+                            thinkContent: "",
+                            cybotKey: agentConfigForCall.dbKey,
+                            isStreaming: false,
+                        } as any,
+                    ];
+                    activeTurnUserMessageId = tempId;
+                } else {
+                    const lastMsg = visibleMessages[visibleMessages.length - 1];
+                    if (lastMsg && typeof lastMsg.id === "string") {
+                        activeTurnUserMessageId = lastMsg.id;
+                    }
+                }
             }
 
             const cleanedMessages = filterAndCleanMessages(visibleMessages);
@@ -2581,10 +2646,16 @@ export const streamAgentChatTurnHandler = async (
                 ? estimateTokenCount(contexts.dialogSummary)
                 : 0;
 
+            const messagesBeforeStrip = compressOldToolResults(cleanedMessages) as any[];
             const preprocessedResult = await stripImagePartsForTextOnlyAgent(
-                compressOldToolResults(cleanedMessages) as any,
+                messagesBeforeStrip,
                 agentConfigForCall as any,
             );
+            notifyOmittedImagesIfPresent({
+                downgraded: preprocessedResult.downgraded,
+                messagesBeforeStrip,
+                targetUserMessageId: activeTurnUserMessageId,
+            });
             let processedMessages = trimMessagesWithSummary(
                 preprocessedResult.messages as any,
                 ctxWindow,
@@ -2680,7 +2751,7 @@ export const streamAgentChatTurnHandler = async (
                     dispatch(clearPendingUserInputQueue({ dialogKey }));
                     break;
                 }
-                await dispatch(
+                const persisted = await dispatch(
                     prepareAndPersistUserMessage({
                         userInput: queuedText,
                         dialogConfig: currentDialogConfig,
@@ -2688,6 +2759,7 @@ export const streamAgentChatTurnHandler = async (
                 ).unwrap();
                 // 持久化成功后再出队，避免 persist 失败时丢消息
                 dispatch(dequeueUserInput({ dialogKey }));
+                activeTurnUserMessageId = (persisted as any)?.id;
                 // 用户消息已持久化到 DB，下一轮 selectAllMsgs 会自动包含它
                 // 不设置 appendTempUserInput，直接继续下一轮
                 continue;

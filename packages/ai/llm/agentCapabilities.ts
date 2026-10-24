@@ -1,3 +1,5 @@
+import { resolveAgentCallPlan } from "../../agent-runtime/agentCallPlan";
+import { SUBSCRIPTION_OAUTH_PROVIDERS } from "../agent/providerRegistry";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import {
@@ -7,9 +9,13 @@ import {
 
 export type AgentCapabilityConfig = {
   apiSource?: string | null;
+  cliProvider?: string | null;
   provider?: string | null;
   model?: string | null;
   hasVision?: boolean | null;
+  apiKeyRef?: string | null;
+  customProviderUrl?: string | null;
+  apiKey?: string | null;
   useServerProxy?: boolean | null;
 };
 
@@ -66,18 +72,21 @@ const lookupKnownModelVision = (
     if (provider && provider !== "custom") {
       const direct = findModelConfig(provider, candidate);
       if (direct && typeof direct.hasVision === "boolean") return direct.hasVision;
-    }
-
-    const detected = getProviderByModelName(candidate);
-    if (detected) {
-      const found = findModelConfig(detected, candidate)?.hasVision;
-      if (found !== undefined) return found;
+    } else {
+      // Only infer a provider when the record does not specify a channel.
+      const detected = getProviderByModelName(candidate);
+      if (detected) {
+        const found = findModelConfig(detected, candidate)?.hasVision;
+        if (found !== undefined) return found;
+      }
     }
 
     if (candidate.includes("/")) {
       const slash = candidate.indexOf("/");
       const modelProvider = candidate.slice(0, slash).toLowerCase();
       const modelName = candidate.slice(slash + 1);
+      // Qualified IDs still work within the explicit channel, never across it.
+      if (provider && provider !== "custom" && provider !== modelProvider) continue;
       const nested = findModelConfig(modelProvider, modelName);
       if (nested && typeof nested.hasVision === "boolean") return nested.hasVision;
     }
@@ -91,12 +100,30 @@ export const resolveAgentImageInputSupport = (
 ): boolean => {
   if (!agent) return true;
 
-  const provider = asTrimmedLowercaseString(agent.provider) || null;
+  const provider = asTrimmedLowercaseString(agent.provider)
+    || asTrimmedLowercaseString(agent.apiSource)
+    || null;
   const model = asOptionalTrimmedString(agent.model) ?? "";
-  const catalogHasVision = lookupKnownModelVision(
-    provider,
+  // Use the outbound route's credential precedence, not the display provider:
+  // ChatGPT records use provider=openai; an own endpoint + key can override a ref.
+  const { authMethod } = resolveAgentCallPlan({
+    key: "",
+    provider: agent.provider ?? undefined,
+    apiSource: agent.apiSource ?? undefined,
+    cliProvider: agent.cliProvider ?? undefined,
     model,
-  );
+    apiKeyRef: agent.apiKeyRef ?? undefined,
+    customProviderUrl: agent.customProviderUrl ?? undefined,
+    apiKey: agent.apiKey ?? undefined,
+    useServerProxy: agent.useServerProxy ?? undefined,
+  });
+  const catalogHasVision = authMethod.kind === "oauth"
+    ? SUBSCRIPTION_OAUTH_PROVIDERS
+        .find((entry) => entry.apiKeyRef === authMethod.ref)
+        ?.modelOptions.find((entry) =>
+          [model, stripEffortSuffix(model), stripPreviewSuffix(model)].includes(entry.id),
+        )?.hasVision
+    : lookupKnownModelVision(provider, model);
 
   if (catalogHasVision !== undefined) {
     return catalogHasVision;

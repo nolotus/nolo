@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { formatCredits } from "app/utils/credits";
+import type { ContextWindowState } from "chat/dialog/useDialogContextUsage";
 import type { TokenStats } from "chat/dialog/dialogSlice";
 import {
   formatCompactTokenCount,
@@ -12,6 +13,7 @@ import { Meter } from "render/web/ui/Meter";
 export type DialogUsagePanelProps = {
   tokenStats: TokenStats;
   contextWindow?: number;
+  windowState?: ContextWindowState;
   contextTokens?: number;
   estimated?: boolean;
   compressionCount?: number;
@@ -25,7 +27,8 @@ export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
   tokenStats,
   contextWindow = 0,
   contextTokens = 0,
-  estimated = true,
+  estimated = false,
+  windowState = contextWindow > 0 ? "known" : "unknown",
   compressionCount = 0,
   className = "",
 }) => {
@@ -35,18 +38,18 @@ export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
   const outputTokens = tokenStats?.outputTokens ?? 0;
   const totalTokens = getDialogTokenTotal(inputTokens, outputTokens);
   const totalCost = tokenStats?.totalCost ?? 0;
-  const creditsUnit = t("chat:creditsUnit", "积分");
-  const contextWindowLabel = t("chat:contextWindow", "上下文窗口");
+  const creditsUnit = t("chat:creditsUnit");
+  const contextWindowLabel = t("chat:contextWindow");
 
   const contextUsage = useMemo(() => {
-    if (!contextWindow || contextWindow <= 0) return null;
+    if (windowState !== "known" || !contextWindow || contextWindow <= 0) return null;
     const percent = getContextWindowUsagePercent(contextTokens, contextWindow);
     return {
       percent,
       usedExact: formatExactTokens(contextTokens),
       windowLabel: formatCompactTokenCount(contextWindow),
     };
-  }, [contextWindow, contextTokens]);
+  }, [contextWindow, contextTokens, windowState]);
 
   return (
     <div
@@ -56,24 +59,27 @@ export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
       {/* Flat layout: no nested card inside the popover shell. */}
       <div className="dialog-usage-panel__row dialog-usage-panel__row--main">
         <p className="dialog-usage-panel__headline">
-          {t("chat:contextOccupancy", "上下文占用")}{estimated ? t("chat:contextOccupancyEstimated", "（估算）") : ""} · {contextUsage ? (
-            <>
-              {contextUsage.usedExact}
-              <span className="dialog-usage-panel__headline-muted">
-                {" "}
-                / {contextUsage.windowLabel} · {contextUsage.percent}%
-              </span>
-            </>
-          ) : (
-            `${formatExactTokens(contextTokens)} / ${t("chat:contextWindowUnknown", "上下文窗口未知")}`
-          )}
+          {windowState === "loading"
+            ? t("chat:contextUsageLoading")
+            : contextUsage
+              ? t("chat:contextUsageKnownPanel", {
+                  tokens: contextUsage.usedExact,
+                  window: contextUsage.windowLabel,
+                  percent: contextUsage.percent,
+                })
+              : t(estimated ? "chat:contextUsageUnknownPanelEstimated" : "chat:contextUsageUnknownPanel", { tokens: formatExactTokens(contextTokens) })}
+          {windowState === "known" && estimated && t("chat:contextOccupancyEstimated")}
         </p>
         <span className="dialog-usage-panel__billing-value">
           {formatCredits(totalCost, creditsUnit, 4)}
         </span>
       </div>
 
-      <p>{t("chat:dialogCumulative", "本对话累计")} · {formatExactTokens(totalTokens)}</p>
+      {windowState === "unknown" && (
+        <p className="dialog-usage-panel__hint">{t("chat:contextUsageUnknownHint")}</p>
+      )}
+
+      <p>{t("chat:dialogCumulative")} · {formatExactTokens(totalTokens)}</p>
       <p className="dialog-usage-panel__io">
         ↑{formatExactTokens(inputTokens)}
         <span className="dialog-usage-panel__io-sep" aria-hidden="true">
@@ -95,7 +101,7 @@ export const DialogUsagePanel: React.FC<DialogUsagePanelProps> = ({
 
       {compressionCount > 0 && (
         <p className="dialog-usage-panel__compression">
-          {t("compressedTimes", "已压缩 {{count}} 次", { count: compressionCount })}
+          {t("common:compressedTimes", { count: compressionCount })}
         </p>
       )}
     </div>

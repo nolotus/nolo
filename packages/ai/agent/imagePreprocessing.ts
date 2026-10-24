@@ -43,8 +43,12 @@ export function hasImageInRuntimeMessages(messages: AgentRuntimeChatMessage[]): 
  * 剥离单条消息 content 里的 image_url parts。模型不支持图片输入时，发上去会 400
  * "this model does not support image input"。对 local runtime 而言，这会把本可成功的轮
  * 判成失败、fallback 到 server——而 server 端没有 local code 工具，agent 报 blocker。
- * 过滤后如果为空则返回占位文本（不是 ""），因为主流 Provider API 要求 user 消息
- * content 非空，空串会触发 400 "content is required and must be non-empty"。
+ *
+ * 行为原则：
+ * - 纯图输入（剥离后无其他内容）：返回占位文本字符串 IMAGE_OMITTED_PLACEHOLDER，
+ *   因为主流 Provider API 要求 user 消息 content 非空，空串会触发 400。
+ * - 文字+图片混排：将每个 image_url part 替换为携带 IMAGE_OMITTED_PLACEHOLDER
+ *   的 text part，保留原有文字并给模型明确占位说明，绝不静默丢图。
  */
 export const IMAGE_OMITTED_PLACEHOLDER =
   "[Image content omitted: model does not support image input]";
@@ -53,9 +57,15 @@ export function stripImagePartsFromContent(
   content: AgentRuntimeMessageContent,
 ): AgentRuntimeMessageContent {
   if (!Array.isArray(content)) return content;
-  const filtered = content.filter((part) => part?.type !== "image_url");
-  if (filtered.length === 0) return IMAGE_OMITTED_PLACEHOLDER;
-  return filtered as AgentRuntimeMessageContent;
+  const hasImage = content.some((part) => part && typeof part === "object" && part.type === "image_url");
+  if (!hasImage) return content;
+  const hasNonImage = content.some((part) => part && typeof part === "object" && part.type !== "image_url");
+  if (!hasNonImage) return IMAGE_OMITTED_PLACEHOLDER;
+  return content.map((part) =>
+    part && typeof part === "object" && part.type === "image_url"
+      ? { type: "text" as const, text: IMAGE_OMITTED_PLACEHOLDER }
+      : part,
+  ) as AgentRuntimeMessageContent;
 }
 
 export function stripImagePartsFromMessages<T extends { content: unknown }>(
@@ -67,6 +77,12 @@ export function stripImagePartsFromMessages<T extends { content: unknown }>(
   }));
 }
 
+export interface StripImagePartsResult<T> {
+  messages: T[];
+  downgraded: boolean;
+  omittedImageCount: number;
+}
+
 /**
  * Web / Desktop / RN stream 路径的图片输入兜底。
  *
@@ -75,15 +91,25 @@ export function stripImagePartsFromMessages<T extends { content: unknown }>(
  * 不触碰其他字段。
  *
  * 行为：
- * - 模型支持 vision 或无图片：原样返回
- * - 模型不支持 vision 且有图片：剥离 image_url part 并替换为占位文本，
- *   绝不报错中断用户的会话。
+ * - 模型支持 vision 或无图片：原样返回，downgraded=false
+ * - 模型不支持 vision 且有图片：剥离 image_url part 并替换为明确占位文本，
+ *   返回降级事实供调用方与用户提示消费，绝不报错中断用户的会话。
  */
 export async function stripImagePartsForTextOnlyAgent<T extends { id?: unknown; content: unknown }>(
   messages: T[],
   agentConfig: unknown,
-): Promise<{ messages: T[] }> {
+): Promise<StripImagePartsResult<T>> {
   const supportsVision = resolveAgentImageInputSupport(agentConfig as any);
-  const hasImages = hasImageInRuntimeMessages(messages as unknown as AgentRuntimeChatMessage[]);
-  return { messages: !supportsVision && hasImages ? stripImagePartsFromMessages(messages) : messages };
+  const runtimeMessages = messages as unknown as AgentRuntimeChatMessage[];
+  const hasImages = hasImageInRuntimeMessages(runtimeMessages);
+  const shouldStrip = !supportsVision && hasImages;
+  const omittedImageCount = shouldStrip
+    ? extractImageUrlsFromMessages(runtimeMessages).length
+    : 0;
+
+  return {
+    messages: shouldStrip ? stripImagePartsFromMessages(messages) : messages,
+    downgraded: shouldStrip,
+    omittedImageCount,
+  };
 }

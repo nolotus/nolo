@@ -5,7 +5,10 @@ import { runLlm } from "ai/agent/agentSlice";
 import { BUILTIN_DIALOG_LLM_FALLBACK_MODEL, BUILTIN_SUMMARY_LLM_CONFIG } from "./builtinDialogLlm";
 import { patch, selectById } from "database/dbSlice";
 import { DialogConfig, Agent } from "app/types";
-import { getModelContextWindow, DEFAULT_CONTEXT_WINDOW } from "ai/llm/getModelContextWindow";
+import { DEFAULT_CONTEXT_WINDOW } from "ai/llm/getModelContextWindow";
+import { resolveAgentContextWindow } from "ai/context/agentContextWindow";
+import { applyBuiltinAgentRuntimeOverride } from "agent-runtime/builtinPlatformAgentConfigs";
+import { getActiveDialogAgentId } from "../dialogAgents";
 import { extractCustomId } from "core/prefix";
 import {
     notifyCompressionFailure,
@@ -80,12 +83,28 @@ export const updateDialogSummaryAction = async (
         if (!dialogConfig) return;
 
         let contextWindow = DEFAULT_CONTEXT_WINDOW;
-        if (dialogConfig.cybots && dialogConfig.cybots.length > 0) {
-            const agentId = dialogConfig.cybots[0];
-            const agent = selectById(state, agentId) as Agent;
-            if (agent?.model) {
-                contextWindow = getModelContextWindow(agent.model);
-            }
+        {
+            // 选人必须与展示侧同一入口：activeAgentKey → primaryAgentKey → cybots[0]
+            //（历史数据里 primaryAgentKey 可能不等于 cybots[0]，硬编码 cybots[0] 会让
+            //   chip 算出的 ≥70% 与真正的压缩阈值用了两个 agent 的窗口）。
+            const agentId = getActiveDialogAgentId(dialogConfig);
+            const agent = agentId
+                ? (selectById(state, agentId) as Agent | undefined)
+                : undefined;
+            // agent 记录可能尚未进 entity adapter（内置 key 场景），override 对 undefined
+            // record 会抛 TypeError，所以必须先用 agent && 收口——旧代码的 agent?.model
+            // 就是这个防御，改窗口解析时不能丢。
+            const resolvedAgent =
+                agent && agentId
+                    ? applyBuiltinAgentRuntimeOverride(agentId, agent)
+                    : agent;
+            // 执行侧保守兜底；展示层不套默认值，未知窗口保持 unknown。
+            contextWindow = resolveAgentContextWindow({
+                model: resolvedAgent?.model,
+                provider: resolvedAgent?.provider,
+                agentKey: agentId,
+                agentName: resolvedAgent?.name,
+            }) ?? DEFAULT_CONTEXT_WINDOW;
         }
 
         // 2. 获取消息

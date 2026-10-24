@@ -52,6 +52,7 @@ import type {
   AgentRuntimeMessageContent,
   AgentRuntimeOutputBlock,
   AgentRuntimeResult,
+  AgentRuntimeToolCall,
 } from "./types";
 import {
   buildAbortedError,
@@ -67,6 +68,8 @@ import { buildIdentityBlock } from "./identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
 import { CREDENTIAL_HYGIENE_RULE } from "./credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
+// 派发落点：并行派发纪律的下一层，紧随其后（localLoop 无 static 作用域，session 占位）。
+import { DISPATCH_BACKEND_POLICY } from "./dispatchBackendPolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
 import { buildConsultationModeBlock } from "./consultationMode";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
@@ -996,6 +999,8 @@ export async function runLocalAgentTurn(
     // 并行是默认：系统层固定块，紧随红线（localLoop 无 static 作用域，用 session 占位，
     // 「最顶」由数组首位保证——与红线同一约定）。
     { content: PARALLEL_DISPATCH_DEFAULT_RULE, cacheScope: "session" as const },
+    // 派发落点：并行派发纪律的下一层（派到哪个执行后端），沿用 session 占位约定。
+    { content: DISPATCH_BACKEND_POLICY, cacheScope: "session" as const },
     // 平台风控纪律：无条件系统层块，沿用 session 占位约定。
     { content: PLATFORM_RISK_CONTROL_RULE, cacheScope: "session" as const },
     { content: buildConsultationModeBlock(), cacheScope: "session" as const },
@@ -1104,15 +1109,11 @@ export async function runLocalAgentTurn(
   // vision 能力检测：catalog 已知模型按 hasVision 判定，未知模型默认 true。
   // 不支持图片时，buildMessages 产出的 image_url parts 必须在发给 provider 前剥离，
   // 否则上游 400 "this model does not support image input" → local 判失败 → fallback
-  // 到没有 local code 工具的 server → agent 报 blocker。hasVision 字段类型不一定在
-  // AgentRuntimeAgentConfig 上声明，用 as any 兜底。
-  const supportsImages = resolveAgentImageInputSupport({
-    apiSource: agentConfig.apiSource,
-    provider: agentConfig.provider,
-    model: agentConfig.model,
-    hasVision: (agentConfig as any).hasVision,
-  });
+  // 到没有 local code 工具的 server → agent 报 blocker。直接传入完整 agentConfig，
+  // 供能力检测层按需解构 apiSource/provider/model/apiKeyRef/customProviderUrl/apiKey 等。
+  const supportsImages = resolveAgentImageInputSupport(agentConfig as any);
 
+  let imageDowngradeEmitted = false;
   // 纯文本模型 + 有图：无 vision 能力时剥离 image_url 为占位符，避免上游 400。
   if (!supportsImages && hasImageInRuntimeMessages(messages)) {
     messages = filterImagePartsFromMessages(messages, false);
@@ -1121,6 +1122,7 @@ export async function runLocalAgentTurn(
       reason: "no-vision",
       atMs: Date.now(),
     });
+    imageDowngradeEmitted = true;
   }
 
   // 发送视图（messages）与持久化原文（raw）收成一本账：压缩只换发送视图，
@@ -1234,6 +1236,14 @@ export async function runLocalAgentTurn(
       }
       // 空轮修复：把 repair user message 追加到本轮请求末尾重试一次（系统消息放在末尾会被大部分 Provider API 拒收或返回空消息）。
       const preparedMessages = prepareMessagesForProviderCall(transcript.working());
+      if (!supportsImages && hasImageInRuntimeMessages(preparedMessages.messages) && !imageDowngradeEmitted) {
+        emitLoopEvent(observationBoundary, {
+          kind: "image-downgraded",
+          reason: "no-vision",
+          atMs: Date.now(),
+        });
+        imageDowngradeEmitted = true;
+      }
       const baseRequestMessages = filterImagePartsFromMessages(
         preparedMessages.messages,
         supportsImages,

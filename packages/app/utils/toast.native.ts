@@ -28,6 +28,15 @@ export const toast = {
         }
         return "";
     },
+    // Match web's info=default semantics: neutral feedback, not an error alert.
+    info: (msg: string, _options?: ToastOptions) => {
+        if (Platform.OS === 'android') {
+            ToastAndroid.show(msg, ToastAndroid.SHORT);
+        } else {
+            console.log('Toast info:', msg);
+        }
+        return "";
+    },
     loading: (msg: string, _options?: ToastOptions) => {
         console.log('Toast loading:', msg);
         return "loading-id";
