@@ -191,7 +191,8 @@ export async function probeInstaboxOfficialQuota(apiKey: string, deps: InstaboxQ
 /** 生产建机路径的「创建合同」解析。
  *
  * 证据**只认官方 API**（/me、/orgs 的 tier / kind / allowedSpecs /
- * limits.freeSandboxes / usage.machines）；**不认** run config 布尔或环境变量。
+ * enabled / subscription）；容量字段可缺省，未知交由服务端 429/402 拦截。
+ * **不认** run config 布尔或环境变量作为免费层证据。
  * 拿不到合同 = 不许建机：调用方必须 fail-closed，零建机请求。
  */
 export type InstaboxCreationContract = {
@@ -212,6 +213,8 @@ export type InstaboxContractProbeDeps = {
 export type InstaboxContractProbeResult = {
   ok: boolean;
   contract?: InstaboxCreationContract;
+  /** 官方容量字段缺省或无效；不阻断建机，由服务端执行额度限制。 */
+  capacityUnverified?: boolean;
   /** 真正生效的计费策略：免费组织一律收紧成 free-only。 */
   billingPolicy: InstaboxBillingPolicy;
   tier?: InstaboxAdmissionEvaluation["tier"];
@@ -346,21 +349,19 @@ export async function resolveInstaboxCreationContract(
       const freeSandboxes = org.limits?.freeSandboxes;
       const maxMachines = org.limits?.maxMachines;
       const machines = org.usage?.machines;
-      if (!count(freeSandboxes) || !count(machines)) {
-        missing.add("official-capacity-evidence");
-        return finish();
-      }
+      const capacityUnverified = !count(freeSandboxes) || !count(maxMachines) ||
+        !count(machines) || !count(org.usage?.freeMachines);
       if (isFree) {
-        if (machines >= freeSandboxes) {
+        if (count(machines) && count(freeSandboxes) && machines >= freeSandboxes) {
           missing.add("available-free-slot");
           return finish();
         }
         const freeMachines = org.usage?.freeMachines;
-        if (count(freeMachines) && freeMachines !== machines) {
+        if (count(machines) && count(freeMachines) && freeMachines !== machines) {
           missing.add("available-free-slot");
           return finish();
         }
-      } else if (count(maxMachines) && maxMachines > 0 && machines >= maxMachines) {
+      } else if (count(machines) && count(maxMachines) && maxMachines > 0 && machines >= maxMachines) {
         missing.add("available-machine-slot");
         return finish();
       }
@@ -398,6 +399,7 @@ export async function resolveInstaboxCreationContract(
       reasons.push(isFree ? "free-org-evidence" : "paid-org-with-allow-paid");
       return {
         ok: true,
+        capacityUnverified,
         contract: {
           plan: structuredClone(plan),
           freeOrgObservation: structuredClone(freeOrgObservation),

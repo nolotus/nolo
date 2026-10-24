@@ -1,4 +1,11 @@
 
+## 0.164.0-alpha.2 (2026-10-24)
+
+### Bug Fixes
+
+* **instabox:** 免费层不因缺容量字段被拒建机 ([b951dec](https://github.com/nolotus/bun-nolo/commit/b951dec7c4c99de9677b4c51a89590ff9526ce71))
+
+
 ## 0.164.0-alpha.1 (2026-10-24)
 
 ### Features
