@@ -27,6 +27,7 @@ import {
     HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE,
 } from "./runtimeKeyDispatchGuard";
 import { toErrorMessage } from "core/errorMessage";
+import { resolveDispatchedSubtaskBudget } from "agent-runtime/subtaskBudget";
 import {
     buildDelegatedTaskContent,
     calculateDelegatedPayloadMetrics,
@@ -185,6 +186,21 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     "可选。为 true 时本次 run 会被记录进 runtime todo（~/.nolo/todos.json）。" +
                     "传了 batchId 时默认即记录（每批对应一项 todo）。" +
                     "todo 状态由关联 run 状态 + review 结论推导，用 controlAgentRun(action:\"todo\") 查询。",
+            },
+            maxToolCalls: {
+                type: "number",
+                description:
+                    "可选。这次子任务的工具调用授权额度（硬上限）。不传则用 runtime 默认 200。" +
+                    "到限即停止启动新的工具与模型调用、有界收尾，返回中间结论并标记 budget-exhausted（不算 provider 错误）。" +
+                    "应按任务意图收紧：改一个常量给 10~20，单文件修复给 40，审查给 60。" +
+                    "注意默认 200 只用来兜无界损失，不是失控识别——跑到上限不代表任务正常。",
+            },
+            maxWallClockMs: {
+                type: "number",
+                description:
+                    "可选。这次子任务的墙钟硬上限（毫秒）。不传则用 runtime 默认 3600000（60 分钟）。" +
+                    "与 maxToolCalls 任一先到即终止。作用是兜住「单次调用里套循环」这类工具计数测不出耗时的场景，" +
+                    "例如一条 shell 里 `for i in 1 2 3` 反复跑同一套测试，调用数只有 1 但耗时很长。",
             },
             ...(supportsWait
                 ? {
@@ -382,6 +398,18 @@ export async function startAgentRunFunc(
     }
 
     const content = buildDelegatedTaskContent(task, input);
+    // ── 硬预算：派发边界一次解析 ──────────────────────────────────────
+    // 显式参数 > 环境变量 > 默认值（200 次工具调用 / 60 分钟墙钟兜底）。
+    // 父子 run 处在不同执行环境时（父在 CLI、子在服务端），各自读 env 会得到
+    // 不同的授权额度——所以额度在这里定死，随 run 请求传给子 run；子 run 只消费。
+    const dispatchedSubtaskBudget = resolveDispatchedSubtaskBudget({
+        ...(typeof (args as { maxToolCalls?: number }).maxToolCalls === "number"
+            ? { maxToolCalls: (args as { maxToolCalls?: number }).maxToolCalls as number }
+            : {}),
+        ...(typeof (args as { maxWallClockMs?: number }).maxWallClockMs === "number"
+            ? { maxWallClockMs: (args as { maxWallClockMs?: number }).maxWallClockMs as number }
+            : {}),
+    });
     const payloadMetrics = calculateDelegatedPayloadMetrics(task, input, content);
 
     // 从入参或模块级单例取当前对话 key/id，提取 id 作为 parentDialogId 透传给服务端，
@@ -431,6 +459,8 @@ export async function startAgentRunFunc(
                   runKind: "subtask",
                   runTitle: title,
                   runtimeKey: "local",
+                  // 已解析的硬预算（子 run 只消费，不再自行读 env）。
+                  subtaskBudgetLimits: dispatchedSubtaskBudget.limits,
                   allowHostWrites: true,
                   ...(args.readOnly === true ? { readOnly: true } : {}),
                   ...(parentDialogId ? { parentDialogId } : {}),
@@ -446,6 +476,8 @@ export async function startAgentRunFunc(
                 waitForCompletion: wait === true,
                 runKind: "subtask",
                 runTitle: title,
+                // 已解析的硬预算（子 run 只消费，不再自行读 env）。
+                subtaskBudgetLimits: dispatchedSubtaskBudget.limits,
                 ...(args.readOnly === true ? { readOnly: true } : {}),
                 ...(parentDialogId ? { parentDialogId } : {}),
                 ...(runtimeKey ? { runtimeKey } : {}),
