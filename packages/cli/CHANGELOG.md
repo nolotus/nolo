@@ -1,4 +1,11 @@
 
+## 0.162.0-alpha.1 (2026-10-24)
+
+### Features
+
+* **runtime:** 子任务加硬预算，超限优雅终止并交中间结论 ([67ea036](https://github.com/nolotus/bun-nolo/commit/67ea036b2d8ff64111c94056e51d5529d67169ba))
+
+
 ## 0.161.0-alpha.1 (2026-10-24)
 
 ### Features

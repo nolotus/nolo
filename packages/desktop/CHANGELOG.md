@@ -1,4 +1,15 @@
 
+## 0.178.0-alpha.1 (2026-10-24)
+
+### Features
+
+* **runtime:** 子任务加硬预算，超限优雅终止并交中间结论 ([67ea036](https://github.com/nolotus/bun-nolo/commit/67ea036b2d8ff64111c94056e51d5529d67169ba))
+
+### Bug Fixes
+
+* **gate:** 符号检查不再把声明误判为未声明调用 ([df90523](https://github.com/nolotus/bun-nolo/commit/df90523d56abb190f84e79944ce163afd7570fdd))
+
+
 ## 0.177.0-alpha.1 (2026-10-24)
 
 ### Features
