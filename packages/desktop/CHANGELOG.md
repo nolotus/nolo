@@ -1,4 +1,11 @@
 
+## 0.174.0-alpha.2 (2026-10-24)
+
+### Bug Fixes
+
+* **cli:** 安装器断点续传与失败后保留进度 ([4b1f077](https://github.com/nolotus/bun-nolo/commit/4b1f077e0a87a3fc96b5d9522c30b982a7b01097))
+
+
 ## 0.174.0-alpha.1 (2026-10-24)
 
 ### Features
