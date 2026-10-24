@@ -54,6 +54,25 @@ const SOURCE = "instabox-official-quota";
 export const INSTABOX_OBSERVATION_MAX_AGE_MS = 30_000;
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const count = (v: unknown): v is number => finite(v) && Number.isSafeInteger(v);
+/** Missing capacity is observational only; contradictory or exhausted evidence still rejects. */
+function evaluateCapacity(org: RawInstaboxOrg | undefined, isFree: boolean): {
+  capacityUnverified: boolean; missingEvidence?: string;
+} {
+  const machines = org?.usage?.machines;
+  const freeMachines = org?.usage?.freeMachines;
+  const limit = isFree ? org?.limits?.freeSandboxes : org?.limits?.maxMachines;
+  const inconsistent = isFree && freeMachines !== undefined &&
+    (!count(freeMachines) || (count(machines) && freeMachines !== machines));
+  const capacityUnverified = !count(limit) || !count(machines) || inconsistent;
+  const exhausted = count(limit) && count(machines) &&
+    (isFree || limit > 0) && machines >= limit;
+  return {
+    capacityUnverified,
+    ...(inconsistent || exhausted
+      ? { missingEvidence: isFree ? "available-free-slot" : "available-machine-slot" }
+      : {}),
+  };
+}
 export function sanitizeErrorMessage(_err: unknown, status?: number): string {
   const labels: Record<number, string> = {401: "Unauthorized", 402: "Payment Required", 403: "Forbidden", 404: "Not Found", 429: "Rate Limit Exceeded"};
   return status && Number.isInteger(status) && status >= 100 && status <= 599
@@ -110,16 +129,8 @@ export function evaluateFreeOnlyAdmission(
   if (!finite(observedAt) || !finite(now) || observedAt > now || now - observedAt > INSTABOX_OBSERVATION_MAX_AGE_MS) missing.add("fresh-observation");
 
   const l = org?.limits, u = org?.usage;
-  const freeSandboxes = l?.freeSandboxes;
-  const maxMachines = l?.maxMachines;
-  const machines = u?.machines;
-  const freeMachines = u?.freeMachines;
-  let capacityUnverified = false;
-  if (!count(freeSandboxes) || !count(maxMachines) || !count(machines) || !count(freeMachines)) {
-    capacityUnverified = true;
-  } else if (machines !== freeMachines || machines >= freeSandboxes || (maxMachines > 0 && machines >= maxMachines)) {
-    missing.add("available-free-slot");
-  }
+  const { capacityUnverified, missingEvidence: capacityMissing } = evaluateCapacity(org, isFreeTier);
+  if (capacityMissing) missing.add(capacityMissing);
 
   if (!plan || plan.snapshotId || plan.templateId !== "agent-browser" || plan.persistentDiskGiB !== undefined || plan.rootDiskGiB !== undefined) missing.add("supported-free-create-source");
   if (!plan || !Number.isSafeInteger(plan.vcpus) || plan.vcpus <= 0 || !Number.isSafeInteger(plan.memMiB) || plan.memMiB <= 0 || !Array.isArray(org?.allowedSpecs) || org.allowedSpecs.filter(s => s.vcpus === plan.vcpus && s.memMiB === plan.memMiB && Number.isSafeInteger(s.persistentDiskGiB) && s.persistentDiskGiB >= 0).length !== 1) missing.add("allowed-create-spec");
@@ -346,23 +357,9 @@ export async function resolveInstaboxCreationContract(
       }
       // 生效策略：免费组织一律收紧为 free-only；付费组织必须显式 allow-paid。
       const billingPolicy: InstaboxBillingPolicy = isFree ? "free-only" : "allow-paid";
-      const freeSandboxes = org.limits?.freeSandboxes;
-      const maxMachines = org.limits?.maxMachines;
-      const machines = org.usage?.machines;
-      const capacityUnverified = !count(freeSandboxes) || !count(maxMachines) ||
-        !count(machines) || !count(org.usage?.freeMachines);
-      if (isFree) {
-        if (count(machines) && count(freeSandboxes) && machines >= freeSandboxes) {
-          missing.add("available-free-slot");
-          return finish();
-        }
-        const freeMachines = org.usage?.freeMachines;
-        if (count(machines) && count(freeMachines) && freeMachines !== machines) {
-          missing.add("available-free-slot");
-          return finish();
-        }
-      } else if (count(machines) && count(maxMachines) && maxMachines > 0 && machines >= maxMachines) {
-        missing.add("available-machine-slot");
+      const { capacityUnverified, missingEvidence: capacityMissing } = evaluateCapacity(org, isFree);
+      if (capacityMissing) {
+        missing.add(capacityMissing);
         return finish();
       }
       const requestedTemplate = deps.templateId?.trim();
