@@ -1,4 +1,15 @@
 
+## 0.161.0-alpha.1 (2026-10-24)
+
+### Features
+
+* **ops:** detect email routes whose mailbox owner is gone ([c069c57](https://github.com/nolotus/bun-nolo/commit/c069c570ef06b19940c206ff46015606842b7a89))
+
+### Bug Fixes
+
+* **email:** stop blocking bind on route readiness probe ([07622d2](https://github.com/nolotus/bun-nolo/commit/07622d2ac238fac687b70bc10a1777411d816b90))
+
+
 ## 0.160.0-alpha.6 (2026-10-24)
 
 ### Bug Fixes
