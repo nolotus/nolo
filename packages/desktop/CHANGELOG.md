@@ -1,4 +1,11 @@
 
+## 0.180.0-alpha.10 (2026-10-25)
+
+### Bug Fixes
+
+* **hooks:** report test runner startup failures without masking regressions ([023279e](https://github.com/nolotus/bun-nolo/commit/023279ee8bf66bf5faee5e45705e8a17903afd9e))
+
+
 ## 0.180.0-alpha.9 (2026-10-25)
 
 ### Bug Fixes
