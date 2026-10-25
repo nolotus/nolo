@@ -106,12 +106,6 @@ export function isRetryableS3UploadError(error: unknown) {
   );
 }
 
-export type S3ObjectMetadata = {
-  contentLength: number;
-  contentType?: string;
-  etag?: string;
-};
-
 /**
  * S3 请求失败的错误。
  *
@@ -199,17 +193,17 @@ export async function readS3Object(args: {
 }
 
 /**
- * 走 S3/R2 API 直连发 HEAD 请求读取对象元信息与字节大小。
+ * 走 S3/R2 API 直连 GET Range 读取对象总大小。
  * payload hash 采用空字符串 sha256（与 GET 一致，符合 AWS SigV4 规范）。
  */
-export async function headS3Object(args: {
+export async function getS3ObjectSizeByRange(args: {
   config: DesktopPublishS3Config;
   uploadName: string;
   /** 重试退避基数（毫秒）。默认与写入路径一致；测试可传 0 以免拖慢。 */
   retryBaseMs?: number;
   fetchFn?: typeof fetch;
   sleepFn?: (ms: number) => Promise<unknown>;
-}): Promise<S3ObjectMetadata | null> {
+}): Promise<number | null> {
   const url = buildS3ObjectUrl(args.config, args.uploadName);
   const payloadHash = sha256Hex("");
   const retryBaseMs = args.retryBaseMs ?? S3_UPLOAD_RETRY_BASE_MS;
@@ -220,7 +214,7 @@ export async function headS3Object(args: {
     const { amzDate, dateStamp } = amzDateParts();
     const authorization = signS3Request({
       config: args.config,
-      method: "HEAD",
+      method: "GET",
       url,
       payloadHash,
       amzDate,
@@ -232,9 +226,12 @@ export async function headS3Object(args: {
     let response: Response;
     try {
       response = await fetcher(url, {
-        method: "HEAD",
+        method: "GET",
         headers: {
           authorization,
+          // S3 SigV4 允许 Range 不签名；保留现有 host 与 x-amz-* 签名范围。
+          // https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+          Range: "bytes=0-0",
           "x-amz-content-sha256": payloadHash,
           "x-amz-date": amzDate,
         },
@@ -244,7 +241,7 @@ export async function headS3Object(args: {
         throw error;
       }
       console.warn(
-        `[s3-head] S3 head failed for ${args.uploadName}: ${toErrorMessage(error)}; retrying (${attempt + 1}/${S3_UPLOAD_MAX_ATTEMPTS})`
+        `[s3-range] S3 range failed for ${args.uploadName}: ${toErrorMessage(error)}; retrying (${attempt + 1}/${S3_UPLOAD_MAX_ATTEMPTS})`
       );
       await sleeper(retryBaseMs * attempt);
       continue;
@@ -252,36 +249,30 @@ export async function headS3Object(args: {
 
     if (response.status === 404) return null;
     if (response.ok) {
-      const lengthHeader = response.headers.get("content-length");
-      const contentLength =
-        lengthHeader !== null && !Number.isNaN(Number(lengthHeader))
-          ? Number(lengthHeader)
-          : Number.NaN;
+      const total = /^bytes 0-0\/(\d+)$/i.exec(response.headers.get("content-range") ?? "")?.[1]
+        ?? (response.status === 200 ? response.headers.get("content-length") : null);
+      const size = total && /^\d+$/.test(total) ? Number(total) : Number.NaN;
       if (response.body) {
         await response.body.cancel().catch(() => undefined);
       }
-      return {
-        contentLength,
-        contentType: response.headers.get("content-type") ?? undefined,
-        etag: response.headers.get("etag") ?? undefined,
-      };
+      return size;
     }
 
     const responseText = await response.text().catch(() => "");
-    const message = `S3 head failed for ${args.uploadName}: ${response.status}${responseText ? ` ${responseText}` : ""}`.trim();
+    const message = `S3 range failed for ${args.uploadName}: ${response.status}${responseText ? ` ${responseText}` : ""}`.trim();
     if (!isRetryableS3UploadStatus(response.status) || attempt === S3_UPLOAD_MAX_ATTEMPTS) {
       // 带状态码抛出：调用方据此判断「永久失败」还是「可重试」，不靠匹配文案
       // （正文里可能含 "connection" 等会被网络错误正则命中的字样）。
       throw new S3RequestError(message, response.status);
     }
     console.warn(
-      `[s3-head] ${message}; retrying (${attempt + 1}/${S3_UPLOAD_MAX_ATTEMPTS})`
+      `[s3-range] ${message}; retrying (${attempt + 1}/${S3_UPLOAD_MAX_ATTEMPTS})`
     );
 
     await sleeper(retryBaseMs * attempt);
   }
 
-  throw new Error(`S3 head failed for ${args.uploadName}: exhausted ${S3_UPLOAD_MAX_ATTEMPTS} attempts`);
+  throw new Error(`S3 range failed for ${args.uploadName}: exhausted ${S3_UPLOAD_MAX_ATTEMPTS} attempts`);
 }
 
 /**
@@ -295,8 +286,8 @@ export async function verifyS3Object(args: {
   retryBaseMs?: number;
   fetchFn?: typeof fetch;
   sleepFn?: (ms: number) => Promise<unknown>;
-}): Promise<S3ObjectMetadata> {
-  const meta = await headS3Object({
+}): Promise<number> {
+  const size = await getS3ObjectSizeByRange({
     config: args.config,
     uploadName: args.uploadName,
     retryBaseMs: args.retryBaseMs,
@@ -304,19 +295,19 @@ export async function verifyS3Object(args: {
     sleepFn: args.sleepFn,
   });
 
-  if (meta === null) {
+  if (size === null) {
     throw new Error(`Published S3 artifact not found: ${args.uploadName} (status 404)`);
   }
 
   const minBytes = args.minBytes ?? 1;
-  if (!Number.isFinite(meta.contentLength) || meta.contentLength < minBytes) {
+  if (!Number.isFinite(size) || size < minBytes) {
     throw new Error(
       `Published S3 artifact is too small or its size is unavailable: ${args.uploadName} ` +
-        `(HEAD content-length ${Number.isFinite(meta.contentLength) ? meta.contentLength : "missing"}, minimum ${minBytes} bytes)`
+        `(GET Range size ${Number.isFinite(size) ? size : "missing"}, minimum ${minBytes} bytes)`
     );
   }
 
-  return meta;
+  return size;
 }
 
 export async function uploadS3Object(args: {

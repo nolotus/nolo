@@ -14,11 +14,10 @@ import { compareDesktopVersions } from "../../packages/core/desktop/desktopUpdat
 import { DESKTOP_APP_VERSION } from "../../packages/desktop/desktopVersion";
 import {
   buildS3ObjectUrl,
-  headS3Object,
+  getS3ObjectSizeByRange,
   isRetryableS3UploadError,
   readS3Object,
   S3RequestError,
-  type S3ObjectMetadata,
 } from "./s3Upload";
 
 export type DesktopPublishChannelInput = DesktopReleaseChannel | "main";
@@ -885,10 +884,10 @@ export async function verifyPublishedS3Object(
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let meta: S3ObjectMetadata | null = null;
+    let size: number | null = null;
     let networkError: unknown = null;
     try {
-      meta = await headS3Object({
+      size = await getS3ObjectSizeByRange({
         config: args.config,
         uploadName: args.uploadName,
         retryBaseMs: 0,
@@ -914,20 +913,20 @@ export async function verifyPublishedS3Object(
       // 网络层异常（如 ECONNRESET）——保留原始错误，不要在后面被「对象不存在」
       // 覆盖成 404：那会把「网络不通」误报成「对象没上传」，排障方向完全跑偏。
       lastError = networkError;
-    } else if (meta === null) {
-      // 404 = 对象当前不可见。S3/R2 是最终一致的，上传后立刻 HEAD 可能短暂
+    } else if (size === null) {
+      // 404 = 对象当前不可见。S3/R2 是最终一致的，上传后立刻 GET Range 可能短暂
       // 404，所以它属于「值得再等一次」而不是立即失败——但仍要走到重试预算
       // 耗尽才 fail-closed。
       lastError = new Error(`Published S3 artifact not found: ${args.uploadName} (status 404)`);
-    } else if (!Number.isFinite(meta.contentLength) || meta.contentLength < args.minBytes) {
+    } else if (!Number.isFinite(size) || size < args.minBytes) {
       // 大小不符是**确定性**结论：对象已在，大小不会再变。重试无意义，
       // 立即失败，避免把「已上传但产物不对」拖成 15 秒后才报。
       throw new Error(
         `Published S3 artifact is too small or its size is unavailable: ${args.uploadName} ` +
-          `(HEAD content-length ${Number.isFinite(meta.contentLength) ? meta.contentLength : "missing"}, minimum ${args.minBytes} bytes)`,
+          `(GET Range size ${Number.isFinite(size) ? size : "missing"}, minimum ${args.minBytes} bytes)`,
       );
     } else {
-      return meta;
+      return size;
     }
 
     if (attempt < maxAttempts) {

@@ -1,4 +1,11 @@
 
+## 0.180.0-alpha.8 (2026-10-25)
+
+### Bug Fixes
+
+* **release:** S3 大小校验改走 GET Range，删掉 HEAD 路径 ([c68537b](https://github.com/nolotus/bun-nolo/commit/c68537b6b8010a633c8dc01fb581d3ad2ef80b41))
+
+
 ## 0.180.0-alpha.7 (2026-10-25)
 
 ### Bug Fixes
