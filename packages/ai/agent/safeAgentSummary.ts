@@ -19,6 +19,17 @@ import {
   resolveDefaultAgentTier,
   type AgentTier,
 } from "./agentTier";
+import {
+  resolveAgentAvailability,
+  type AgentAvailabilityStatus,
+  type AgentAvailabilityReason,
+} from "./agentAvailabilityShared";
+
+export {
+  resolveAgentAvailability,
+  type AgentAvailabilityStatus,
+  type AgentAvailabilityReason,
+};
 
 export {
   resolveAgentSelectionPriority,
@@ -174,6 +185,10 @@ export interface SafeAgentSummary {
   isOAuth: boolean;
   /** Epoch ms at which a provider quota/rate-limit is expected to recover. */
   nextAvailableAt?: number;
+  /** 可用性四态：available / quota_exhausted / rate_limited / unverified */
+  availabilityStatus?: AgentAvailabilityStatus;
+  /** 可用性具体原因 */
+  availabilityReason?: AgentAvailabilityReason;
   /**
    * 最近一次上游响应上报的配额窗口快照（x-ratelimit-* / anthropic-unified /
    * x-goog-quota-* / body quota 等）。只在「上游真给过数据」的 agent 上存在；
@@ -476,6 +491,11 @@ export function toSafeAgentSummary(
   // 默认档位：纯函数按 model 名解析，不读用户偏好（覆盖由编排提示词负责）。
   const { tier } = resolveDefaultAgentTier(record?.model);
 
+  const availability = resolveAgentAvailability(
+    { nextAvailableAt, quota },
+    options?.now ?? Date.now(),
+  );
+
   return {
     id,
     ...(agentKey !== undefined ? { agentKey } : {}),
@@ -500,6 +520,8 @@ export function toSafeAgentSummary(
     isOwned,
     isOAuth,
     ...(nextAvailableAt !== undefined ? { nextAvailableAt } : {}),
+    availabilityStatus: availability.status,
+    availabilityReason: availability.reason,
     ...(quota !== undefined ? { quota } : {}),
     ...(credentialGroup !== undefined ? { credentialGroup } : {}),
     ...(credentialKind !== undefined ? { credentialKind } : {}),
@@ -546,6 +568,8 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "nextAvailableAt",
   // 额度快照：只有上游真上报过窗口的 agent 才带（通常是小对象）。
   "quota",
+  "availabilityStatus",
+  "availabilityReason",
   "credentialGroup",
   "credentialKind",
   "credentialed",
@@ -599,6 +623,8 @@ export const UNAVAILABLE_AGENT_SUMMARY_FIELDS = [
   "isOAuth",
   "isOwned",
   "nextAvailableAt",
+  "availabilityStatus",
+  "availabilityReason",
   "quota",
   "favoritedAt",
   "updatedAt",
@@ -614,6 +640,8 @@ export type UnavailableAgentSummary = {
   isOAuth: boolean;
   isOwned: boolean;
   nextAvailableAt?: number;
+  availabilityStatus?: AgentAvailabilityStatus;
+  availabilityReason?: AgentAvailabilityReason;
   quota?: AgentQuota;
   favoritedAt?: number | string;
   updatedAt?: number | string;

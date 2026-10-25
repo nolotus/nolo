@@ -13,7 +13,12 @@ import {
 } from "ai/agent/agentDiscovery";
 import { getReadableCliDb, type AgentCommandDeps, type OutputLike } from "./agentCommandSupport";
 import { refreshSubscriptionQuotas } from "./subscriptionQuotaRefresh";
-import { shouldClearCooldownFromQuota } from "ai/agent/agentAvailabilityShared";
+import {
+  shouldClearCooldownFromQuota,
+  resolveAgentAvailability,
+  DEFAULT_PROVIDER_RETRY_MS,
+  resolveCredentialCandidateKeys,
+} from "ai/agent/agentAvailabilityShared";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
   listFavoriteAgentIdsAcrossServers,
@@ -31,6 +36,7 @@ import {
   clearCredentialAvailabilityIfMarkedAt,
   readCredentialAvailability,
   readCredentialEntry,
+  readEffectiveCredentialEntry,
   resolveCredentialKeyWithFallback,
 } from "./credentialAvailability";
 import {
@@ -235,9 +241,20 @@ export async function runAgentListCommand(
         try {
           const key = resolveCredentialKeyWithFallback(agent);
           if (!key) continue;
-          const entry = await readCredentialEntry(key, env);
+          const entry = await readEffectiveCredentialEntry(key, env);
           if (entry && shouldClearCooldownFromQuota(entry, quota, now)) {
-            await clearCredentialAvailabilityIfMarkedAt(key, entry.markedAt!, env);
+            const candidatesToClear =
+              entry.candidates && entry.candidates.length > 0
+                ? entry.candidates
+                : resolveCredentialCandidateKeys(key).map((candKey) => ({
+                    key: candKey,
+                    markedAt: entry.markedAt,
+                  }));
+            for (const cand of candidatesToClear) {
+              if (typeof cand.markedAt === "number") {
+                await clearCredentialAvailabilityIfMarkedAt(cand.key, cand.markedAt, env);
+              }
+            }
             const remainingAvailability = await readCredentialAvailability(env).catch(() => ({}));
             // 还原原始 agent deadline，再应用仍存在的凭证冷却，避免误删独立 agent 级冷却。
             for (const sibling of agents) {
@@ -250,6 +267,15 @@ export async function runAgentListCommand(
           }
         } catch {
           // 可用性改善失败静默，不影响列表命令。
+        }
+      }
+      for (const agent of agents) {
+        const decision = resolveAgentAvailability(agent, now);
+        if (decision.status === "quota_exhausted") {
+          const resetAt = decision.resetAt ?? (now + DEFAULT_PROVIDER_RETRY_MS);
+          if (typeof agent.nextAvailableAt !== "number" || agent.nextAvailableAt < resetAt) {
+            agent.nextAvailableAt = resetAt;
+          }
         }
       }
       unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
@@ -427,6 +453,8 @@ export async function runAgentListCommand(
       const credentialLine = agent.credentialConfigured
         ? `credentialConfigured=true${agent.credentialRef ? ` credentialRef=${agent.credentialRef}` : ""}${agent.apiKeyRef ? ` apiKeyRef=${agent.apiKeyRef}` : ""}`
         : "credentialConfigured=false";
+      const availDecision = resolveAgentAvailability(agent);
+      const availabilityStatusLine = `availability=${availDecision.status} (${availDecision.reason})`;
       const availabilityLine =
         typeof agent.nextAvailableAt === "number" && agent.nextAvailableAt > Date.now()
           ? `nextAvailableAt=${new Date(agent.nextAvailableAt).toISOString()}`
@@ -447,6 +475,7 @@ export async function runAgentListCommand(
           `publicKey=${agent.publicRecordExists ? agent.publicKey : "-"}${flagMismatch}`,
           `tools=${agent.tools.join(", ") || "-"}`,
           credentialLine,
+          availabilityStatusLine,
           availabilityLine,
           quotaLine,
         ].join("\n")

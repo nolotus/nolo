@@ -71,6 +71,10 @@ export type ListedAgent = {
    * platform_credits，误导编排者去索取平台积分授权）。
    */
   ownerId?: string;
+  /** 属主用户 ID，统一与 resolveCredentialKey / resolveAgentOwnerUserId 对齐 */
+  userId?: string;
+  ownerUserId?: string;
+  agentKey?: string;
   /**
    * 仅收藏水化分支设置：本次用调用者凭据读成功的那把 key（证明可解析）。
    * 空间共享 / grant 的他人 agent 既非自有也无 public 记录，没有它
@@ -118,6 +122,9 @@ export function normalizeListedAgent(record: any): ListedAgent | null {
     id: rawId,
     privateKey,
     publicKey: keys.publicKey,
+    userId: ownerUserId,
+    ownerUserId,
+    agentKey: privateKey,
     name: typeof record?.name === "string" && record.name ? record.name : "(unnamed)",
     model: typeof record?.model === "string" && record.model ? record.model : "-",
     ...(typeof record?.handle === "string" && record.handle ? { handle: record.handle } : {}),

@@ -30,6 +30,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 
 import {
   mergeAvailabilityDeadline,
+  resolveCredentialCandidateKeys,
   resolveCredentialKey,
   resolveCredentialKeyWithFallback,
 } from "ai/agent/agentAvailabilityShared";
@@ -44,6 +45,16 @@ export type CredentialAvailabilityEntry = {
    * 可选：旧格式文件缺该字段仍能正常读（视为从未探测），不因结构变化让现存文件失效。
    */
   lastProbeAt?: number;
+};
+
+export type EffectiveCredentialCandidate = {
+  key: string;
+  markedAt?: number;
+};
+
+export type EffectiveCredentialEntry = CredentialAvailabilityEntry & {
+  matchedKey?: string;
+  candidates?: EffectiveCredentialCandidate[];
 };
 export type CredentialAvailabilityFile = {
   entries: Record<string, CredentialAvailabilityEntry>;
@@ -154,6 +165,82 @@ export async function readCredentialAvailability(
 }
 
 /**
+ * 候选 key 读取的唯一底层入口：统一支持精确 key（apiKeyRef@ownerUserId）与旧格式 key（apiKeyRef）。
+ *
+ * 遍历 resolveCredentialCandidateKeys(credentialKey)，若存在生效中的冷却记录，
+ * 按统一契约「取更晚者」（mergeAvailabilityDeadline）合并 nextAvailableAt，
+ * 保证 HTTP 预检、本地 gate、列表查表三处入口行为严格一致。
+ */
+export async function readEffectiveCredentialEntry(
+  credentialKey: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  now = Date.now(),
+): Promise<EffectiveCredentialEntry | undefined> {
+  if (!credentialKey) return undefined;
+  const candidates = resolveCredentialCandidateKeys(credentialKey);
+  if (candidates.length === 0) return undefined;
+
+  const entries = await readCredentialEntries(env, now);
+  let effectiveEntry: EffectiveCredentialEntry | undefined;
+  const activeCandidates: EffectiveCredentialCandidate[] = [];
+
+  for (const key of candidates) {
+    const entry = entries[key];
+    if (!entry || entry.nextAvailableAt <= now) continue;
+    activeCandidates.push({ key, markedAt: entry.markedAt });
+
+    if (!effectiveEntry) {
+      effectiveEntry = { ...entry, matchedKey: key };
+    } else {
+      const mergedDeadline = mergeAvailabilityDeadline(
+        effectiveEntry.nextAvailableAt,
+        entry.nextAvailableAt,
+      );
+      const mergedProbe =
+        effectiveEntry.lastProbeAt !== undefined || entry.lastProbeAt !== undefined
+          ? Math.max(effectiveEntry.lastProbeAt ?? 0, entry.lastProbeAt ?? 0)
+          : undefined;
+      const mergedMarkedAt =
+        effectiveEntry.markedAt !== undefined || entry.markedAt !== undefined
+          ? Math.max(effectiveEntry.markedAt ?? 0, entry.markedAt ?? 0)
+          : undefined;
+      effectiveEntry = {
+        nextAvailableAt: mergedDeadline ?? entry.nextAvailableAt,
+        ...(mergedMarkedAt !== undefined ? { markedAt: mergedMarkedAt } : {}),
+        ...(mergedProbe !== undefined ? { lastProbeAt: mergedProbe } : {}),
+        matchedKey: effectiveEntry.matchedKey,
+      };
+    }
+  }
+
+  if (effectiveEntry) {
+    effectiveEntry.candidates = activeCandidates;
+  }
+
+  return effectiveEntry;
+}
+
+/**
+ * 从内存中的冷却字典解析候选 key 的生效冷却（同样统一按候选 key 遍历并取更晚者）。
+ */
+export function resolveEffectiveCredentialCooldown(
+  credentialKey: string | undefined,
+  credentialAvailability: Record<string, number>,
+  now = 0,
+): number | undefined {
+  if (!credentialKey) return undefined;
+  const candidates = resolveCredentialCandidateKeys(credentialKey);
+  let effective: number | undefined;
+  for (const key of candidates) {
+    const at = credentialAvailability[key];
+    if (typeof at === "number" && Number.isFinite(at) && (now === 0 || at > now)) {
+      effective = mergeAvailabilityDeadline(effective, at);
+    }
+  }
+  return effective;
+}
+
+/**
  * 读取单个凭证的冷却 entry（含 lastProbeAt）。无冷却/已过期返回 undefined。
  * 供派发 gate 读取探测时间；旧格式文件缺 lastProbeAt 字段时该值为 undefined，
  * 由共享层 `resolveCooldownGate` 按「从未探测」处理（立即 probe）。
@@ -163,9 +250,10 @@ export async function readCredentialEntry(
   env: NodeJS.ProcessEnv = process.env,
   now = Date.now(),
 ): Promise<CredentialAvailabilityEntry | undefined> {
-  if (!credentialKey) return undefined;
-  const entries = await readCredentialEntries(env, now);
-  return entries[credentialKey];
+  const effective = await readEffectiveCredentialEntry(credentialKey, env, now);
+  if (!effective) return undefined;
+  const { matchedKey, candidates, ...entry } = effective;
+  return entry;
 }
 
 async function writeCredentialAvailability(
@@ -229,8 +317,15 @@ export async function clearCredentialAvailability(
 ): Promise<void> {
   if (!credentialKey) return;
   const live = await readCredentialEntries(env, now);
-  if (!(credentialKey in live)) return;
-  delete live[credentialKey];
+  const candidates = resolveCredentialCandidateKeys(credentialKey);
+  let changed = false;
+  for (const key of candidates) {
+    if (key in live) {
+      delete live[key];
+      changed = true;
+    }
+  }
+  if (!changed) return;
   await writeCredentialAvailability(live, env);
 }
 
@@ -238,6 +333,7 @@ export async function clearCredentialAvailability(
  * 记录一次「冷却期自动重试探测」：把 lastProbeAt 更新为 `now`。
  * 由派发点在做 probe 放行时调用，供下次 `resolveCooldownGate` 判断是否又到间隔。
  * 无冷却 / 冷却已过期时是空操作，不写盘。
+ * 贯穿候选 key：精确 key 不在 live 时回退匹配生效中的候选 key。
  */
 export async function recordCredentialProbe(
   credentialKey: string,
@@ -246,9 +342,16 @@ export async function recordCredentialProbe(
 ): Promise<void> {
   if (!credentialKey) return;
   const live = await readCredentialEntries(env, now);
-  const existing = live[credentialKey];
+  let targetKey = credentialKey;
+  if (!(targetKey in live)) {
+    const candidates = resolveCredentialCandidateKeys(credentialKey);
+    const found = candidates.find((k) => k in live);
+    if (!found) return;
+    targetKey = found;
+  }
+  const existing = live[targetKey];
   if (!existing) return;
-  live[credentialKey] = { ...existing, lastProbeAt: now };
+  live[targetKey] = { ...existing, lastProbeAt: now };
   await writeCredentialAvailability(live, env);
 }
 
@@ -267,7 +370,7 @@ export function applyCredentialAvailability<
     // 冷却期内 agent 仍会被 list 列出并被选中。
     const key = resolveCredentialKeyWithFallback(agent);
     if (!key) return agent;
-    const at = credentialAvailability[key];
+    const at = resolveEffectiveCredentialCooldown(key, credentialAvailability);
     if (typeof at !== "number") return agent;
     const merged = mergeAvailabilityDeadline(
       agent.nextAvailableAt as number | undefined,

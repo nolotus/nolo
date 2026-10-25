@@ -266,6 +266,7 @@ import {
   markCredentialUnavailable,
   readCredentialAvailability,
   readCredentialEntry,
+  readEffectiveCredentialEntry,
   recordCredentialProbe,
   resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
@@ -1622,12 +1623,13 @@ export function createCliLocalRuntimeAdapter(
       const credentialKeyForGate = resolveCredentialKeyWithFallback(
         agentConfig as unknown as Record<string, unknown>,
       );
-      const credentialCooldowns: Record<string, number> = credentialKeyForGate
-        ? await readCredentialAvailability(deps.env, nowMs).catch(() => ({}))
-        : {};
-      const credentialCooldownAt = credentialKeyForGate
-        ? credentialCooldowns[credentialKeyForGate]
+      // H2: 统一使用共享层候选 key 读取入口，精确 key 与旧格式 key 行为一致
+      const gateEntry = credentialKeyForGate
+        ? await readEffectiveCredentialEntry(credentialKeyForGate, deps.env, nowMs).catch(
+            () => undefined,
+          )
         : undefined;
+      const credentialCooldownAt = gateEntry?.nextAvailableAt;
       // agent 级（含旧数据）与 credential 级取更晚者，升级后旧冷却不失效。
       const agentLevelNextAvailableAt = (
         agentConfig as { nextAvailableAt?: number }
@@ -1653,11 +1655,6 @@ export function createCliLocalRuntimeAdapter(
       // 请求自己完成试探，成功后会在 recordLocalAvailability（2xx → clear）里清除冷却。
       // lastProbeAt 必须一并读出：缺省时 resolveCooldownGate 一律判 "probe"，
       // 会让 "blocked" 永不可达、冷却完全失效（每次派发都放行 → 反复撞 429）。
-      const gateEntry = credentialKeyForGate
-        ? await readCredentialEntry(credentialKeyForGate, deps.env, nowMs).catch(
-            () => undefined,
-          )
-        : undefined;
       const gateDecision = resolveCooldownGate(
         {
           nextAvailableAt: effectiveNextAvailableAt,
@@ -1682,8 +1679,9 @@ export function createCliLocalRuntimeAdapter(
       // 拿到 2xx 才清除冷却，并非「延迟一个窗口即恢复」。刻意取舍：这仍远优于
       // 反向故障——冷却落不了盘导致每次派发都撞 429；且 MAX_COOLDOWN_MS 保证
       // 任何冷却最长 24h 自然过期。
-      if (gateDecision === "probe" && credentialKeyForGate) {
-        await recordCredentialProbe(credentialKeyForGate, deps.env, nowMs).catch(
+      const activeKeyForGate = gateEntry?.matchedKey || credentialKeyForGate;
+      if (gateDecision === "probe" && activeKeyForGate) {
+        await recordCredentialProbe(activeKeyForGate, deps.env, nowMs).catch(
           () => undefined,
         );
       }
