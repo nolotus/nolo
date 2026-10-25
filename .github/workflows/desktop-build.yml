@@ -349,6 +349,12 @@ jobs:
             $PLATFORM_ARGS
 
       - name: Verify legacy alias URLs
+        env:
+          DESKTOP_DOWNLOAD_S3_ENDPOINT: ${{ secrets.DESKTOP_DOWNLOAD_S3_ENDPOINT }}
+          DESKTOP_DOWNLOAD_S3_BUCKET: ${{ secrets.DESKTOP_DOWNLOAD_S3_BUCKET }}
+          DESKTOP_DOWNLOAD_S3_REGION: ${{ secrets.DESKTOP_DOWNLOAD_S3_REGION }}
+          DESKTOP_DOWNLOAD_S3_ACCESS_KEY_ID: ${{ secrets.DESKTOP_DOWNLOAD_S3_ACCESS_KEY_ID }}
+          DESKTOP_DOWNLOAD_S3_SECRET_ACCESS_KEY: ${{ secrets.DESKTOP_DOWNLOAD_S3_SECRET_ACCESS_KEY }}
         run: |
           if [ "${{ needs.select-targets.outputs.channel }}" = "stable" ]; then
             bun ./scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts \

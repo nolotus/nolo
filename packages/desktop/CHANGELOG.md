@@ -1,4 +1,11 @@
 
+## 0.180.0-alpha.9 (2026-10-25)
+
+### Bug Fixes
+
+* **release:** legacy alias 校验改走 S3 直连，公开 URL 403 不再阻断发布 ([dfd509a](https://github.com/nolotus/bun-nolo/commit/dfd509a9163ff8e1a28ea59aeeae41358115d687))
+
+
 ## 0.180.0-alpha.8 (2026-10-25)
 
 ### Bug Fixes
