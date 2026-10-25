@@ -1,4 +1,12 @@
 
+## 0.180.0-alpha.7 (2026-10-25)
+
+### Bug Fixes
+
+* **desktop:** 无 Apple 证书时用 ad-hoc 签名，macOS 产物仍可安装 ([bdbca94](https://github.com/nolotus/bun-nolo/commit/bdbca944b5fc39bb42a48567d90cf1f20f14260b))
+* **release:** 上传后校验改走 S3 直连，不再打公开 CDN URL ([d393ed1](https://github.com/nolotus/bun-nolo/commit/d393ed15381e750272b29758a675707716c3828f))
+
+
 ## 0.180.0-alpha.6 (2026-10-25)
 
 ### Bug Fixes

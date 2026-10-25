@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
+import { toErrorMessage } from "core/errorMessage";
 import {
   DESKTOP_RELEASE_MANIFEST_PUBLIC_PATH,
   desktopReleaseManifestPublicPath,
@@ -11,6 +12,14 @@ import {
 } from "../../packages/app/constants/desktopReleaseManifest";
 import { compareDesktopVersions } from "../../packages/core/desktop/desktopUpdatePolicy";
 import { DESKTOP_APP_VERSION } from "../../packages/desktop/desktopVersion";
+import {
+  buildS3ObjectUrl,
+  headS3Object,
+  isRetryableS3UploadError,
+  readS3Object,
+  S3RequestError,
+  type S3ObjectMetadata,
+} from "./s3Upload";
 
 export type DesktopPublishChannelInput = DesktopReleaseChannel | "main";
 export type DesktopPublishPlatformInput = DesktopReleasePlatform | "all" | "auto";
@@ -849,4 +858,143 @@ export function assertTripleConsistency(result: DesktopTripleConsistencyResult) 
       `${result.platform} manifest version ${result.manifestVersion} does not match update.json version ${result.publishedVersion}`,
     );
   }
+}
+
+export type PublishedS3VerificationOptions = {
+  fetchFn?: typeof fetch;
+  sleepFn?: (ms: number) => Promise<unknown>;
+  maxAttempts?: number;
+  baseDelayMs?: number;
+};
+
+/**
+ * S3 存储模式下的直连对象校验：通过 HEAD 确认对象存在且字节大小达标。
+ * 绕过公开 CDN / Cloudflare 边缘反爬 challenge。
+ */
+export async function verifyPublishedS3Object(
+  args: {
+    config: DesktopPublishS3Config;
+    uploadName: string;
+    minBytes: number;
+  },
+  options: PublishedS3VerificationOptions = {},
+) {
+  const sleepFn = options.sleepFn ?? Bun.sleep;
+  const maxAttempts = options.maxAttempts ?? 5;
+  const baseDelayMs = options.baseDelayMs ?? 1500;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let meta: S3ObjectMetadata | null = null;
+    let networkError: unknown = null;
+    try {
+      meta = await headS3Object({
+        config: args.config,
+        uploadName: args.uploadName,
+        retryBaseMs: 0,
+        fetchFn: options.fetchFn,
+        sleepFn: options.sleepFn,
+      });
+    } catch (error) {
+      // 永久性 HTTP 错误（403 权限不足、400 请求非法等）重试无意义。这里按
+      // **状态码**判断，而不是匹配错误文案——错误文案里混着 S3 的响应正文，
+      // 而正文可能含 "connection"/"network"（Cloudflare 的 "The connection to
+      // origin was lost" 即属此类），用正则判网络错误会把永久性 403 误判成
+      // 可重试，白白付 5 次请求 + 15 秒退避。
+      if (error instanceof S3RequestError) {
+        throw error;
+      }
+      if (!isRetryableS3UploadError(error)) {
+        throw error;
+      }
+      networkError = error;
+    }
+
+    if (networkError) {
+      // 网络层异常（如 ECONNRESET）——保留原始错误，不要在后面被「对象不存在」
+      // 覆盖成 404：那会把「网络不通」误报成「对象没上传」，排障方向完全跑偏。
+      lastError = networkError;
+    } else if (meta === null) {
+      // 404 = 对象当前不可见。S3/R2 是最终一致的，上传后立刻 HEAD 可能短暂
+      // 404，所以它属于「值得再等一次」而不是立即失败——但仍要走到重试预算
+      // 耗尽才 fail-closed。
+      lastError = new Error(`Published S3 artifact not found: ${args.uploadName} (status 404)`);
+    } else if (!Number.isFinite(meta.contentLength) || meta.contentLength < args.minBytes) {
+      // 大小不符是**确定性**结论：对象已在，大小不会再变。重试无意义，
+      // 立即失败，避免把「已上传但产物不对」拖成 15 秒后才报。
+      throw new Error(
+        `Published S3 artifact is too small or its size is unavailable: ${args.uploadName} ` +
+          `(HEAD content-length ${Number.isFinite(meta.contentLength) ? meta.contentLength : "missing"}, minimum ${args.minBytes} bytes)`,
+      );
+    } else {
+      return meta;
+    }
+
+    if (attempt < maxAttempts) {
+      await sleepFn(baseDelayMs * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * S3 存储模式下的 update.json 三元一致性校验：
+ * 直接走 S3 GET 读取已发布的 update.json 内容，与本地文件和 manifest 比对。
+ */
+export async function verifyPublishedS3TripleConsistency(args: {
+  platform: DesktopReleasePlatform;
+  config: DesktopPublishS3Config;
+  updateJsonUploadName: string;
+  updateJsonSourcePath: string;
+  manifestArtifactVersion?: string;
+  fetchFn?: typeof fetch;
+  sleepFn?: (ms: number) => Promise<unknown>;
+}): Promise<DesktopTripleConsistencyResult> {
+  const raw = await readS3Object({
+    config: args.config,
+    uploadName: args.updateJsonUploadName,
+    retryBaseMs: 0,
+    fetchFn: args.fetchFn,
+    sleepFn: args.sleepFn,
+  });
+
+  if (raw === null) {
+    throw new Error(`Failed to fetch S3 ${args.updateJsonUploadName}: 404 Not Found`);
+  }
+
+  let publishedUpdateJson: { version?: string; hash?: string };
+  try {
+    publishedUpdateJson = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Failed to parse published S3 update.json for ${args.platform} (${args.updateJsonUploadName}): ${toErrorMessage(error)}`,
+    );
+  }
+
+  const localUpdateJson = (await Bun.file(args.updateJsonSourcePath).json()) as {
+    version?: string;
+    hash?: string;
+  };
+
+  const publishedVersion = publishedUpdateJson.version?.trim();
+  const publishedHash = publishedUpdateJson.hash?.trim();
+  const localVersion = localUpdateJson.version?.trim() ?? "";
+  const localHash = localUpdateJson.hash?.trim() ?? "";
+  const updateJsonUrl = buildS3ObjectUrl(args.config, args.updateJsonUploadName).toString();
+
+  return {
+    platform: args.platform,
+    updateJsonUrl,
+    publishedVersion,
+    publishedHash,
+    localVersion,
+    localHash,
+    manifestVersion: args.manifestArtifactVersion?.trim(),
+    versionMatch: publishedVersion === localVersion,
+    hashMatch: publishedHash === localHash,
+    manifestVersionMatch:
+      !args.manifestArtifactVersion?.trim() ||
+      args.manifestArtifactVersion.trim() === publishedVersion,
+  };
 }

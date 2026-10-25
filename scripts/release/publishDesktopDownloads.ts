@@ -14,6 +14,8 @@ import {
   validateDesktopUpdateMetadata,
   verifyPublishedUrl,
   verifyPublishedTripleConsistency,
+  verifyPublishedS3Object,
+  verifyPublishedS3TripleConsistency,
   type DesktopPublishConfig,
   type DesktopBuiltUpdateMetadata,
   type DesktopPublishPlatformInput,
@@ -336,9 +338,18 @@ const nextManifest = mergeDesktopReleaseManifest({
 const manifestText = `${JSON.stringify(nextManifest, null, 2)}\n`;
 
 for (const target of plan.primary) {
-  const url = `${config.publicBase}/${encodeURIComponent(target.uploadName)}`;
-  console.log(`[publish-desktop] Verifying primary ${url}`);
-  await verifyPublishedUrl(url, target.minBytes);
+  if (config.storage === "s3") {
+    console.log(`[publish-desktop] Verifying primary S3 object ${target.uploadName}`);
+    await verifyPublishedS3Object({
+      config,
+      uploadName: target.uploadName,
+      minBytes: target.minBytes,
+    });
+  } else {
+    const url = `${config.publicBase}/${encodeURIComponent(target.uploadName)}`;
+    console.log(`[publish-desktop] Verifying primary ${url}`);
+    await verifyPublishedUrl(url, target.minBytes);
+  }
 }
 
 // Triple consistency: verify update.json matches what we intended to publish
@@ -346,13 +357,22 @@ for (const target of plan.primary) {
   const updateJsonTarget = plan.updateMetadata[target.platform];
   if (!updateJsonTarget) continue;
 
-  const result = await verifyPublishedTripleConsistency({
-    platform: target.platform,
-    publicBase: config.publicBase,
-    updateJsonUploadName: updateJsonTarget.uploadName,
-    updateJsonSourcePath: updateJsonTarget.sourcePath,
-    manifestArtifactVersion: nextManifest.artifacts[target.platform]?.version,
-  });
+  const result =
+    config.storage === "s3"
+      ? await verifyPublishedS3TripleConsistency({
+          platform: target.platform,
+          config,
+          updateJsonUploadName: updateJsonTarget.uploadName,
+          updateJsonSourcePath: updateJsonTarget.sourcePath,
+          manifestArtifactVersion: nextManifest.artifacts[target.platform]?.version,
+        })
+      : await verifyPublishedTripleConsistency({
+          platform: target.platform,
+          publicBase: config.publicBase,
+          updateJsonUploadName: updateJsonTarget.uploadName,
+          updateJsonSourcePath: updateJsonTarget.sourcePath,
+          manifestArtifactVersion: nextManifest.artifacts[target.platform]?.version,
+        });
   console.log(`[publish-desktop] Verifying update metadata ${result.updateJsonUrl}`);
   assertTripleConsistency(result);
 }
@@ -363,7 +383,16 @@ await uploadText({
   text: manifestText,
   uploadName: plan.channelManifestUploadName,
 });
-await verifyPublishedUrl(`${config.publicBase}/${plan.channelManifestUploadName}`, 1);
+if (config.storage === "s3") {
+  console.log(`[publish-desktop] Verifying S3 manifest ${plan.channelManifestUploadName}`);
+  await verifyPublishedS3Object({
+    config,
+    uploadName: plan.channelManifestUploadName,
+    minBytes: 1,
+  });
+} else {
+  await verifyPublishedUrl(`${config.publicBase}/${plan.channelManifestUploadName}`, 1);
+}
 
 for (const target of [...plan.primary, ...plan.optional]) {
   if (!target.aliasUploadName) continue;
@@ -373,9 +402,18 @@ for (const target of [...plan.primary, ...plan.optional]) {
     sourcePath: target.sourcePath,
     uploadName: target.aliasUploadName,
   });
-  const aliasUrl = `${config.publicBase}/${encodeURIComponent(target.aliasUploadName)}`;
-  console.log(`[publish-desktop] Verifying legacy alias ${aliasUrl}`);
-  await verifyPublishedUrl(aliasUrl, target.minBytes);
+  if (config.storage === "s3") {
+    console.log(`[publish-desktop] Verifying legacy alias S3 object ${target.aliasUploadName}`);
+    await verifyPublishedS3Object({
+      config,
+      uploadName: target.aliasUploadName,
+      minBytes: target.minBytes,
+    });
+  } else {
+    const aliasUrl = `${config.publicBase}/${encodeURIComponent(target.aliasUploadName)}`;
+    console.log(`[publish-desktop] Verifying legacy alias ${aliasUrl}`);
+    await verifyPublishedUrl(aliasUrl, target.minBytes);
+  }
 }
 
 console.log(`[publish-desktop] Uploading legacy alias ${plan.legacyManifestUploadName}`);
@@ -384,7 +422,16 @@ await uploadText({
   text: manifestText,
   uploadName: plan.legacyManifestUploadName,
 });
-await verifyPublishedUrl(`${config.publicBase}/${plan.legacyManifestUploadName}`, 1);
+if (config.storage === "s3") {
+  console.log(`[publish-desktop] Verifying legacy alias S3 manifest ${plan.legacyManifestUploadName}`);
+  await verifyPublishedS3Object({
+    config,
+    uploadName: plan.legacyManifestUploadName,
+    minBytes: 1,
+  });
+} else {
+  await verifyPublishedUrl(`${config.publicBase}/${plan.legacyManifestUploadName}`, 1);
+}
 
 const done = {
   ...summary,

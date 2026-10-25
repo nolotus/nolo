@@ -106,15 +106,43 @@ export function isRetryableS3UploadError(error: unknown) {
   );
 }
 
+export type S3ObjectMetadata = {
+  contentLength: number;
+  contentType?: string;
+  etag?: string;
+};
+
+/**
+ * S3 请求失败的错误。
+ *
+ * 带 `status`（HTTP 状态码）是为了让调用方**按状态码**区分「永久性失败」与
+ * 「网络层抖动」，而不是靠匹配错误文案——文案里会混入响应正文，而 Cloudflare
+ * 之类的正文里就含 "connection"（"The connection to origin was lost"），
+ * 用正则判网络错误会把永久性 403 误判成可重试。
+ */
+export class S3RequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "S3RequestError";
+    this.status = status;
+  }
+}
+
 export async function readS3Object(args: {
   config: DesktopPublishS3Config;
   uploadName: string;
   /** 重试退避基数（毫秒）。默认与写入路径一致；测试可传 0 以免拖慢。 */
   retryBaseMs?: number;
+  fetchFn?: typeof fetch;
+  sleepFn?: (ms: number) => Promise<unknown>;
 }): Promise<string | null> {
   const url = buildS3ObjectUrl(args.config, args.uploadName);
   const payloadHash = sha256Hex("");
   const retryBaseMs = args.retryBaseMs ?? S3_UPLOAD_RETRY_BASE_MS;
+  const fetcher = args.fetchFn ?? fetch;
+  const sleeper = args.sleepFn ?? sleep;
 
   for (let attempt = 1; attempt <= S3_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
     const { amzDate, dateStamp } = amzDateParts();
@@ -133,7 +161,7 @@ export async function readS3Object(args: {
     // 立即失败的请求重试到耗尽。
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await fetcher(url, {
         method: "GET",
         headers: {
           authorization,
@@ -148,7 +176,7 @@ export async function readS3Object(args: {
       console.warn(
         `[s3-read] S3 read failed for ${args.uploadName}: ${toErrorMessage(error)}; retrying (${attempt + 1}/${S3_UPLOAD_MAX_ATTEMPTS})`
       );
-      await sleep(retryBaseMs * attempt);
+      await sleeper(retryBaseMs * attempt);
       continue;
     }
 
@@ -164,10 +192,131 @@ export async function readS3Object(args: {
       `[s3-read] ${message}; retrying (${attempt + 1}/${S3_UPLOAD_MAX_ATTEMPTS})`
     );
 
-    await sleep(retryBaseMs * attempt);
+    await sleeper(retryBaseMs * attempt);
   }
 
   throw new Error(`S3 read failed for ${args.uploadName}: exhausted ${S3_UPLOAD_MAX_ATTEMPTS} attempts`);
+}
+
+/**
+ * 走 S3/R2 API 直连发 HEAD 请求读取对象元信息与字节大小。
+ * payload hash 采用空字符串 sha256（与 GET 一致，符合 AWS SigV4 规范）。
+ */
+export async function headS3Object(args: {
+  config: DesktopPublishS3Config;
+  uploadName: string;
+  /** 重试退避基数（毫秒）。默认与写入路径一致；测试可传 0 以免拖慢。 */
+  retryBaseMs?: number;
+  fetchFn?: typeof fetch;
+  sleepFn?: (ms: number) => Promise<unknown>;
+}): Promise<S3ObjectMetadata | null> {
+  const url = buildS3ObjectUrl(args.config, args.uploadName);
+  const payloadHash = sha256Hex("");
+  const retryBaseMs = args.retryBaseMs ?? S3_UPLOAD_RETRY_BASE_MS;
+  const fetcher = args.fetchFn ?? fetch;
+  const sleeper = args.sleepFn ?? sleep;
+
+  for (let attempt = 1; attempt <= S3_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+    const { amzDate, dateStamp } = amzDateParts();
+    const authorization = signS3Request({
+      config: args.config,
+      method: "HEAD",
+      url,
+      payloadHash,
+      amzDate,
+      dateStamp,
+    });
+
+    // try 只包住 fetch：HTTP 状态判断在 catch 之外，
+    // 避免 4xx 状态码被 isRetryableS3UploadError 误判成网络错误而重试到耗尽。
+    let response: Response;
+    try {
+      response = await fetcher(url, {
+        method: "HEAD",
+        headers: {
+          authorization,
+          "x-amz-content-sha256": payloadHash,
+          "x-amz-date": amzDate,
+        },
+      });
+    } catch (error) {
+      if (!isRetryableS3UploadError(error) || attempt === S3_UPLOAD_MAX_ATTEMPTS) {
+        throw error;
+      }
+      console.warn(
+        `[s3-head] S3 head failed for ${args.uploadName}: ${toErrorMessage(error)}; retrying (${attempt + 1}/${S3_UPLOAD_MAX_ATTEMPTS})`
+      );
+      await sleeper(retryBaseMs * attempt);
+      continue;
+    }
+
+    if (response.status === 404) return null;
+    if (response.ok) {
+      const lengthHeader = response.headers.get("content-length");
+      const contentLength =
+        lengthHeader !== null && !Number.isNaN(Number(lengthHeader))
+          ? Number(lengthHeader)
+          : Number.NaN;
+      if (response.body) {
+        await response.body.cancel().catch(() => undefined);
+      }
+      return {
+        contentLength,
+        contentType: response.headers.get("content-type") ?? undefined,
+        etag: response.headers.get("etag") ?? undefined,
+      };
+    }
+
+    const responseText = await response.text().catch(() => "");
+    const message = `S3 head failed for ${args.uploadName}: ${response.status}${responseText ? ` ${responseText}` : ""}`.trim();
+    if (!isRetryableS3UploadStatus(response.status) || attempt === S3_UPLOAD_MAX_ATTEMPTS) {
+      // 带状态码抛出：调用方据此判断「永久失败」还是「可重试」，不靠匹配文案
+      // （正文里可能含 "connection" 等会被网络错误正则命中的字样）。
+      throw new S3RequestError(message, response.status);
+    }
+    console.warn(
+      `[s3-head] ${message}; retrying (${attempt + 1}/${S3_UPLOAD_MAX_ATTEMPTS})`
+    );
+
+    await sleeper(retryBaseMs * attempt);
+  }
+
+  throw new Error(`S3 head failed for ${args.uploadName}: exhausted ${S3_UPLOAD_MAX_ATTEMPTS} attempts`);
+}
+
+/**
+ * 校验 S3 对象存在且字节大小达标（≥ minBytes）。
+ * 若对象不存在或大小不足，直接 fail-closed 抛错。
+ */
+export async function verifyS3Object(args: {
+  config: DesktopPublishS3Config;
+  uploadName: string;
+  minBytes?: number;
+  retryBaseMs?: number;
+  fetchFn?: typeof fetch;
+  sleepFn?: (ms: number) => Promise<unknown>;
+}): Promise<S3ObjectMetadata> {
+  const meta = await headS3Object({
+    config: args.config,
+    uploadName: args.uploadName,
+    retryBaseMs: args.retryBaseMs,
+    fetchFn: args.fetchFn,
+    sleepFn: args.sleepFn,
+  });
+
+  if (meta === null) {
+    throw new Error(`Published S3 artifact not found: ${args.uploadName} (status 404)`);
+  }
+
+  const minBytes = args.minBytes ?? 1;
+  if (!Number.isFinite(meta.contentLength) || meta.contentLength < minBytes) {
+    throw new Error(
+      `Published S3 artifact is too small or its size is unavailable: ${args.uploadName} ` +
+        `(HEAD content-length ${Number.isFinite(meta.contentLength) ? meta.contentLength : "missing"}, minimum ${minBytes} bytes)`
+    );
+  }
+
+  return meta;
 }
 
 export async function uploadS3Object(args: {
