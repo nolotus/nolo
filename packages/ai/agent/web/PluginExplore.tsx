@@ -17,6 +17,7 @@ import { toast } from "app/utils/toast";
 import { useAppSelector } from "app/store";
 import { useToken } from "identity";
 import { selectRemoteServer } from "app/settings/settingSlice";
+import { CLOUD_PLUGIN_SPECS } from "../../../agent-runtime/cloudPluginSpecs";
 import "./PluginExplore.css";
 
 const SECRET_KEY_API_KEY = "INSTABOX_API_KEY";
@@ -49,6 +50,171 @@ type InstaboxReadinessResponse =
       observedAt: number;
     };
 
+type CloudConnection = {
+  platformId: string;
+  owner?: { kind: string };
+  credentialPresent?: boolean | Record<string, boolean>;
+  reasonCode?: string;
+};
+
+// Only server-declared presence is retained, never returned credential values.
+const connectionSummary = (value: unknown): CloudConnection[] => {
+  const rows = Array.isArray(value) ? value :
+    value && typeof value === "object" && "connections" in value ? value.connections : null;
+  if (!Array.isArray(rows)) throw new Error("INVALID_CONNECTION_RESPONSE");
+  return rows.flatMap((row) => {
+    if (!row || typeof row !== "object" || typeof row.platformId !== "string") return [];
+    const presence = row.credentialPresent;
+    return [{
+      platformId: row.platformId,
+      owner: row.owner && typeof row.owner === "object" && typeof row.owner.kind === "string"
+        ? { kind: row.owner.kind } : undefined,
+      credentialPresent: typeof presence === "boolean" ? presence :
+        presence && typeof presence === "object" ? Object.fromEntries(
+          Object.entries(presence).map(([key, present]) => [key, present === true])
+        ) : false,
+      reasonCode: typeof row.reasonCode === "string" ? row.reasonCode : undefined,
+    }];
+  });
+};
+
+const unavailableReason = async (res: Response): Promise<string> => {
+  const data = await res.json().catch(() => null);
+  const reasonCode = typeof data?.reasonCode === "string" ? data.reasonCode :
+    typeof data?.error?.reasonCode === "string" ? data.error.reasonCode : `HTTP_${res.status}`;
+  return `未接线/不可用 · ${reasonCode}`;
+};
+
+const CloudPluginCards: React.FC<{ token: string; server: string }> = ({ token, server }) => {
+  const [connections, setConnections] = useState<CloudConnection[]>([]);
+  const [inputs, setInputs] = useState<Record<string, Record<string, string>>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [listError, setListError] = useState<string | null>(null);
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(false);
+  const generationRef = useRef(0);
+  const controllers = useRef(new Set<AbortController>());
+
+  useEffect(() => {
+    const generation = ++generationRef.current;
+    setConnections([]);
+    setInputs({});
+    setErrors({});
+    setListError(null);
+    setPending({});
+    setLoading(false);
+    if (!token || !server) return;
+    const controller = new AbortController();
+    controllers.current.add(controller);
+    setLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch(`${server}/api/cloud-plugins/connections`, {
+          headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(await unavailableReason(res));
+        const rows = connectionSummary(await res.json());
+        if (!controller.signal.aborted && generationRef.current === generation) setConnections(rows);
+      } catch (error) {
+        if (!controller.signal.aborted && generationRef.current === generation) {
+          setConnections([]);
+          setListError(error instanceof Error && error.message.startsWith("未接线/不可用")
+            ? error.message : "未接线/不可用 · CONNECTION_LIST_FAILED");
+        }
+      } finally {
+        controllers.current.delete(controller);
+        if (!controller.signal.aborted && generationRef.current === generation) setLoading(false);
+      }
+    })();
+    return () => {
+      ++generationRef.current;
+      controllers.current.forEach((request) => request.abort());
+      controllers.current.clear();
+    };
+  }, [token, server]);
+
+  const save = async (platformId: string) => {
+    if (!token || !server || pending[platformId]) return;
+    const spec = CLOUD_PLUGIN_SPECS.find((item) => item.id === platformId);
+    if (!spec) return;
+    const credentials = Object.fromEntries(spec.configFields
+      .filter((field) => !field.operatorOnly && inputs[platformId]?.[field.key]?.trim())
+      .map((field) => [field.key, inputs[platformId][field.key].trim()]));
+    const generation = generationRef.current;
+    const controller = new AbortController();
+    controllers.current.add(controller);
+    setPending((prev) => ({ ...prev, [platformId]: true }));
+    setErrors((prev) => ({ ...prev, [platformId]: "" }));
+    try {
+      const res = await fetch(`${server}/api/cloud-plugins/connections`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ platformId, scope: "personal", credentials }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(await unavailableReason(res));
+      // Re-read safe presence metadata; saving is not a readiness probe.
+      const listed = await fetch(`${server}/api/cloud-plugins/connections`, {
+        headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+      });
+      if (!listed.ok) throw new Error(await unavailableReason(listed));
+      const rows = connectionSummary(await listed.json());
+      if (controller.signal.aborted || generationRef.current !== generation) return;
+      setConnections(rows);
+      setListError(null);
+    } catch (error) {
+      if (!controller.signal.aborted && generationRef.current === generation) {
+        setErrors((prev) => ({ ...prev, [platformId]:
+          error instanceof Error && error.message.startsWith("未接线/不可用")
+            ? error.message : "未接线/不可用 · CONNECTION_SAVE_FAILED" }));
+      }
+    } finally {
+      controllers.current.delete(controller);
+      if (!controller.signal.aborted && generationRef.current === generation) {
+        setInputs((prev) => ({ ...prev, [platformId]: {} }));
+        setPending((prev) => ({ ...prev, [platformId]: false }));
+      }
+    }
+  };
+
+  return <>{CLOUD_PLUGIN_SPECS.map((spec) => {
+    const connection = connections.find((item) => item.platformId === spec.id && item.owner?.kind === "user");
+    const credentialPresent = connection?.credentialPresent;
+    const present = (key: string) => typeof credentialPresent === "boolean"
+      ? credentialPresent : credentialPresent?.[key] === true;
+    const error = errors[spec.id] || listError;
+    return <section className="plugin-card" key={spec.id} data-testid={`plugin-card-${spec.id}`}>
+      <div className="plugin-card__header"><h3>{spec.displayName}</h3></div>
+      <p>runtimeKey: {spec.runtimeKey} · {spec.credentialMode}</p>
+      <p>能力声明：probe {String(spec.capabilities.probe)} / execute {String(spec.capabilities.execute)}（不代表就绪）</p>
+      <p role="status">{error || (loading ? "加载中…" : connection?.reasonCode
+        ? `未接线/不可用 · ${connection.reasonCode}` : connection
+          ? "连接已保存，尚未验证可用" : "尚未保存连接，尚未验证可用")}</p>
+      <p>组织连接暂不可用：当前入口无法传入 organizationId。</p>
+      {token ? <form className="plugin-form" onSubmit={(event) => { event.preventDefault(); void save(spec.id); }}>
+        {spec.configFields.map((field) => <div className="plugin-form-group" key={field.key}>
+          <label className="plugin-form-label" htmlFor={`${spec.id}-${field.key}`}>{field.label}{field.required ? " *" : ""}</label>
+          <p className="plugin-form-hint">{field.description}</p>
+          <p>credentialPresent: {String(present(field.key))}</p>
+          {field.operatorOnly ? <p>仅运营方配置，不接受用户输入。</p> : <input
+            id={`${spec.id}-${field.key}`} className="plugin-form-input"
+            type={field.secret ? "password" : "text"} autoComplete="new-password"
+            required={field.required && !present(field.key)}
+            disabled={pending[spec.id] || loading || !server}
+            value={inputs[spec.id]?.[field.key] ?? ""}
+            onChange={(event) => setInputs((prev) => ({ ...prev, [spec.id]: {
+              ...prev[spec.id], [field.key]: event.target.value,
+            } }))}
+          />}
+        </div>)}
+        <button className="plugin-btn-save" type="submit" disabled={pending[spec.id] || loading || !server}>
+          {pending[spec.id] ? "保存中…" : "保存个人连接"}
+        </button>
+      </form> : <p>请登录后配置个人连接。</p>}
+    </section>;
+  })}</>;
+};
+
 export const PluginExplore: React.FC = () => {
   const { t } = useTranslation();
   const currentToken = useToken();
@@ -63,6 +229,7 @@ export const PluginExplore: React.FC = () => {
   const [templateIdInput, setTemplateIdInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [instaboxAvailabilityError, setInstaboxAvailabilityError] = useState<string | null>(null);
 
   // 就绪状态与连接检查
   const [checkingReadiness, setCheckingReadiness] = useState(false);
@@ -89,6 +256,7 @@ export const PluginExplore: React.FC = () => {
     }
 
     setSecrets({});
+    setInstaboxAvailabilityError(null);
     setApiKeyInput("");
     setTemplateIdInput("");
     setLoading(false);
@@ -109,7 +277,7 @@ export const PluginExplore: React.FC = () => {
     const loadSecrets = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${currentServer}/api/n`, {
+        const res = await fetch(`${currentServer}/api/user-secrets`, {
           headers: {
             Authorization: `Bearer ${currentToken}`,
           },
@@ -121,7 +289,7 @@ export const PluginExplore: React.FC = () => {
         }
 
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+          throw new Error(await unavailableReason(res));
         }
 
         const data = await res.json();
@@ -130,10 +298,13 @@ export const PluginExplore: React.FC = () => {
         }
 
         setSecrets(data.secrets ?? {});
-      } catch {
+        setInstaboxAvailabilityError(null);
+      } catch (error) {
         if (controller.signal.aborted || generationRef.current !== currentGeneration) {
           return;
         }
+        setInstaboxAvailabilityError(error instanceof Error && error.message.startsWith("未接线/不可用")
+          ? error.message : "未接线/不可用 · SECRET_LIST_FAILED");
         toast.error(t("explorePage.plugin.loadSecretsFailed", "加载凭据配置状态失败"));
       } finally {
         if (!controller.signal.aborted && generationRef.current === currentGeneration) {
@@ -198,8 +369,7 @@ export const PluginExplore: React.FC = () => {
       }
 
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `HTTP ${res.status}`);
+        throw new Error(await unavailableReason(res));
       }
 
       const data: InstaboxReadinessResponse = await res.json();
@@ -282,21 +452,25 @@ export const PluginExplore: React.FC = () => {
     }
 
     setSaving(true);
+    setInstaboxAvailabilityError(null);
 
     try {
       const saveSingleSecret = async (
         key: string,
         value: string
       ): Promise<{ success: boolean; masked?: string }> => {
-        const res = await fetch(`${serverSnapshot}/api/n/set`, {
+        const res = await fetch(`${serverSnapshot}/api/user-secrets/set`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${tokenSnapshot}`,
           },
           body: JSON.stringify({ key, value }),
+          signal: abortControllerRef.current?.signal,
         });
         if (!res.ok) {
+          const reason = await unavailableReason(res);
+          if (generationRef.current === saveGeneration) setInstaboxAvailabilityError(reason);
           return { success: false };
         }
         const data = await res.json();
@@ -722,6 +896,8 @@ export const PluginExplore: React.FC = () => {
             </div>
           )}
         </section>
+        {instaboxAvailabilityError && <p role="alert">{instaboxAvailabilityError}</p>}
+        <CloudPluginCards token={currentToken || ""} server={currentServer || ""} />
       </div>
     </div>
   );
