@@ -96,7 +96,8 @@ import {
   resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
 import {
-  isQuotaLimited403Body,
+  isCapacitySaturatedRateLimit,
+  isQuotaExhaustedText,
   mergeAvailabilityDeadline,
   PROBE_INTERVAL_MS,
   resolveCooldownGate,
@@ -694,7 +695,9 @@ const QUOTA_EXHAUSTED_EXTRA_RE =
   /insufficient[_\s-]?(?:quota|balance|credits?)|余额不足|额度已?用尽/i;
 
 function looksLikeQuotaExhaustedText(message: string): boolean {
-  return isQuotaLimited403Body(message) || QUOTA_EXHAUSTED_EXTRA_RE.test(message);
+  // 复用共享判据（含中文「用量上限」、`usage limit reached` 等），
+  // 避免这里维护一份更窄的词表把额度耗尽误报成「上游限流」。
+  return isQuotaExhaustedText(message) || QUOTA_EXHAUSTED_EXTRA_RE.test(message);
 }
 
 /**
@@ -1312,9 +1315,13 @@ function formatRateLimitResetHint(
  * 分类用的语义等价码。
  */
 function buildRateLimitFailure(ctx: FailureCtx): string {
-  const headlineKey = ctx.quotaExhausted
-    ? "localRunRateLimitQuota"
-    : "localRunRateLimitThrottled";
+  // 容量饱和优先单独一档：它既不是账号额度用尽、也不是常规限流。文案若混用
+  // 「额度/限流」，用户会以为自己配额被用完了（真实案例：Codex "is at capacity"）。
+  const headlineKey = isCapacitySaturatedRateLimit(ctx.message, Date.now())
+    ? "localRunRateLimitCapacity"
+    : ctx.quotaExhausted
+      ? "localRunRateLimitQuota"
+      : "localRunRateLimitThrottled";
   const lines = [
     t(
       headlineKey,

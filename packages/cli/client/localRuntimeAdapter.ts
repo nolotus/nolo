@@ -255,6 +255,7 @@ import {
   isAnthropicOAuthAgent,
 } from "../../agent-runtime/anthropicMessagesProvider";
 import {
+  isCapacitySaturatedRateLimit,
   mergeAvailabilityDeadline,
   resolveAvailabilityAction,
   resolveCooldownGate,
@@ -505,6 +506,93 @@ import {
 } from "./localRuntimeDialog";
 
 /**
+ * 只把**代码内固定白名单**里的错误码映射成公开标签；未知值一律省略。
+ *
+ * 不能用「字符形态合法」当安全判据：`sk-` + 30 个 `a` 同样满足
+ * `[A-Za-z0-9_.:-]{1,48}`，那样等于给凭据留了一条进日志的通道。
+ */
+const KNOWN_HINT_LABELS = new Map<string, string>([
+  ["usage_limit_reached", "usage-limit"],
+  ["rate_limit_exceeded", "rate-limit"],
+  ["insufficient_quota", "insufficient-quota"],
+  ["quota_exceeded", "quota-exceeded"],
+  ["invalid_request_error", "invalid-request"],
+  ["authentication_error", "auth"],
+  ["permission_denied", "permission-denied"],
+  ["model_not_found", "model-not-found"],
+  ["context_length_exceeded", "context-length"],
+  ["proxy_failed", "proxy-failed"],
+  ["upstream_transport_error", "upstream-transport"],
+  ["core_draining", "core-draining"],
+  ["owner_origin_mismatch", "owner-origin-mismatch"],
+  ["overloaded", "overloaded"],
+  ["capacity", "capacity"],
+]);
+
+/** 未知错误码返回 undefined（不落盘），已知错误码返回固定标签。 */
+function hintLabelOf(raw: string): string | undefined {
+  return KNOWN_HINT_LABELS.get(raw.trim().toLowerCase());
+}
+
+/** 从 body 里收集可以安全落盘的错误码标签（code / type），最多两层、最多 3 个。 */
+function collectSafeHints(body: unknown, out: string[] = [], depth = 0): string[] {
+  if (depth > 2 || out.length >= 3) return out;
+  if (Array.isArray(body)) {
+    for (const item of body) collectSafeHints(item, out, depth + 1);
+    return out;
+  }
+  if (!body || typeof body !== "object") return out;
+  for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+    const normalizedKey = k.toLowerCase().replace(/[-_]/g, "");
+    if ((normalizedKey === "code" || normalizedKey === "type") && typeof v === "string") {
+      const label = hintLabelOf(v);
+      if (label && out.length < 3 && !out.includes(label)) {
+        out.push(label);
+      }
+    } else if (v && typeof v === "object") {
+      collectSafeHints(v, out, depth + 1);
+    }
+  }
+  return out;
+}
+
+/**
+ * body 摘要——**刻意不含任何 body 原文**。
+ *
+ * 这里曾经做的是「脱敏后输出前 200 字符」，连续多轮复审证明这条路不可能收敛：
+ * 转义 JSON（`{\"access_token\":\"…\"}`）、含空格的值、Bearer 尾部、否定式表述……
+ * 每补一条规则就漏下一条；而且 JWT 正则本身有二阶复杂度（96KB 输入 705ms），
+ * 这个成本在 debug 开关关闭时也照付，等于让上游错误文案能同步拖住事件循环。
+ *
+ * 既然上游文案不可控，就不再试图改写它，只保留可以安全枚举的事实：
+ * 分类、原文长度、code/type 这类短枚举值。排障时「是容量饱和还是额度耗尽」
+ * 这个关键问题由 classification 直接回答，不需要原文。
+ */
+export function buildSafeBodyPreview(
+  body: unknown,
+  classification = "unknown",
+): string | undefined {
+  try {
+    const serialized = typeof body === "string" ? body : JSON.stringify(body ?? "");
+    const hints = collectSafeHints(body);
+    const parts = [`class=${classification}`, `len=${serialized.length}`];
+    if (hints.length > 0) parts.push(`hints=${hints.join("|")}`);
+    return parts.join(" ");
+  } catch {
+    return undefined;
+  }
+}
+
+function formatSafeIsoDeadline(epochMs: number): string {
+  try {
+    const d = new Date(epochMs);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 「一次上游响应 → 可用性落盘」的可复用核心（模块级导出）。
  *
  * 与 run 中途路径（resolveProviderBase 里的 `recordLocalAvailability` 闭包）完全
@@ -541,6 +629,46 @@ export async function recordLocalAvailabilityForAgent(args: {
   // 静默丢弃，nextAvailableAt 永远是 now。credential 存储不依赖 agent
   // 记录是否存在，因此即使本地没缓存过该 agent，冷却也能落盘。
   const credentialKey = resolveCredentialKeyWithFallback(agentConfig);
+
+  try {
+    if (action.kind === "mark") {
+      const payload: Record<string, unknown> = {
+        agentKey: key,
+        credentialKey,
+        status,
+        nextAvailableAt: action.nextAvailableAt,
+        nextAvailableAtIso: formatSafeIsoDeadline(action.nextAvailableAt),
+      };
+      // 分类标签直接回答「是容量饱和还是额度耗尽」，这正是排障要的关键信息，
+      // 因此不必把 body 原文写进日志（原文脱敏无法收敛，见 buildSafeBodyPreview 注释）。
+      // 注意全程容错：body 可能带会抛错的 getter，分类失败不能让整条日志丢失。
+      const bodyClass = (() => {
+        try {
+          if (status === 429) {
+            return isCapacitySaturatedRateLimit(args.body, now())
+              ? "capacity-saturated"
+              : "quota-or-unknown";
+          }
+          return status >= 500 ? "server-error" : "other";
+        } catch {
+          return "unclassified";
+        }
+      })();
+      const bodyPreview = buildSafeBodyPreview(args.body, bodyClass);
+      if (bodyPreview !== undefined) {
+        payload.bodyPreview = bodyPreview;
+      }
+      logLocalRuntimeDiagnostic("availability.mark", payload);
+    } else if (action.kind === "clear") {
+      logLocalRuntimeDiagnostic("availability.clear", {
+        agentKey: key,
+        credentialKey,
+        status,
+      });
+    }
+  } catch {
+    // 日志绝不能抛异常影响主流程
+  }
   if (credentialKey) {
     if (action.kind === "mark") {
       await markCredentialUnavailable(

@@ -20,6 +20,11 @@ import type { AgentQuota } from "./quotaSnapshot";
 export const DEFAULT_PROVIDER_RETRY_MS = 5 * 60 * 1000;
 
 /**
+ * 薄 429 已有请求内重试兜底，凭证级只锁 60s；5 分钟是额度类信号的保守窗口。
+ */
+export const THIN_RATE_LIMIT_COOLDOWN_MS = 60 * 1000;
+
+/**
  * 冷却时长的**硬上限**。上游解析出的复位时刻被 clamp 到
  * `[now, now + MAX_COOLDOWN_MS]`，防止荒谬 deadline（如 2051 年）把 agent 锁死数天/数十年。
  *
@@ -181,22 +186,15 @@ export function isQuotaLimited403Body(body: unknown): boolean {
     /(?:quota|usage).{0,40}\b(?:reset|resets)\s+at\b/i.test(text)
   );
 }
-export type AvailabilityAction =
-  | { kind: "clear" }
-  | { kind: "mark"; nextAvailableAt: number }
-  | { kind: "noop" };
-
 /**
- * 把一次上游 429 响应解析成绝对的 epoch-ms 可用时刻。
- *
- * 优先级：Retry-After 头 → body 里的 retryAfter → resets_at/resetsAt →
- * 文案里的绝对 "reset at" → 周期性硬配额文案 → 文案里的相对时长 → 默认窗口。
+ * 提取上游响应中的显式复位时刻信号（含 clamp 到 [now, now + MAX_COOLDOWN_MS]）。
+ * 若不包含任何显式复位/限流/周期配额信号，返回 undefined。
  */
-export function resolveNextAvailableAt(
+function parseExplicitAvailableAt(
   body: unknown,
   now: number,
   headers?: Headers | Record<string, string> | null,
-): number {
+): number | undefined {
   const headerRetryAfter =
     headers && typeof (headers as Headers).get === "function"
       ? (headers as Headers).get("retry-after")
@@ -217,16 +215,139 @@ export function resolveNextAvailableAt(
 
   const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
   const absoluteFromText = parseResetAtText(text, now);
+  if (absoluteFromText !== undefined) {
+    return clampCooldownDeadline(absoluteFromText, now);
+  }
+
   // 周期性硬配额文案必须先于 parseResetsInMs 判定：后者对整个 body 文本做全局
   // 「数字+单位」扫描，provider 可控内容（用户名 "star_2sun"、ref "12m-9"）会被
   // 误读成相对时长，把本该 24h 的冷却短路成秒级，原 bug 复活。绝对 "reset at"
   // 是精确信号，仍优先于该启发式。
-  const parsed =
-    absoluteFromText ??
-    (matchesPeriodicUsageLimitText(text)
-      ? now + MAX_COOLDOWN_MS
-      : now + (parseResetsInMs(text) ?? DEFAULT_PROVIDER_RETRY_MS));
-  return clampCooldownDeadline(parsed, now);
+  if (matchesPeriodicUsageLimitText(text)) {
+    return clampCooldownDeadline(now + MAX_COOLDOWN_MS, now);
+  }
+
+  const relativeMs = parseResetsInMs(text);
+  if (relativeMs !== undefined) {
+    return clampCooldownDeadline(now + relativeMs, now);
+  }
+
+  return undefined;
+}
+
+/**
+ * 仅明确是容量抖动、且无显式复位/配额信号的 429 才放行；默认从严。
+ * 空 body、未知文案和额度耗尽均不视为薄限流，保留保守冷却且不重试。
+ *
+ * 真实案例：`local Codex OAuth provider failed: HTTP 429Codex is at capacity, please try again later`。
+ * 上游明确表示容量饱和且没有复位信号时，才使用 60s 冷却及请求内重试。
+ * 本函数只用于 429 分支，不得用于 5xx。
+ */
+/**
+ * 额度耗尽类文案：命中即**否决**容量饱和判定。
+ *
+ * 为什么必须优先否决：额度问题重试无用（重试只会重复撞墙并放大配额压力），
+ * 而部分上游会把 "please try again later" 这类通用提示和额度文案放在一起。
+ * 中文文案没有 word boundary，故中文分支不套 \b。
+ */
+/**
+ * 额度耗尽类文案：命中即**否决**容量饱和判定。
+ *
+ * 两个刻意的实现约束：
+ * 1) 中间只允许**固定词表**（is|has|been|…），不用 `(?:\w+\s*){0,3}`。
+ *    后者因为 `\s*` 可零宽，同一个长单词能被多种方式拆给多次 `\w+`，
+ *    尾部词匹配失败时回溯爆炸（实测 2KB 文案卡 2.7 秒，等于给上游错误文案
+ *    开了一条同步阻塞事件循环的口子）。
+ * 2) 词表里**不含 not / isn't / hasn't**，于是 `quota not exhausted` 这种
+ *    「明确说未耗尽」的文案天然不匹配——不会误否决容量分类。
+ */
+const QUOTA_EXHAUSTED_TEXT_RE =
+  /insufficient[_ ]?quota|quota\s*(?:(?:is|has|been|was|now|fully|completely|already|entirely)\s+)*(?:limit\s+)?(?:exhausted|depleted|used\s*up|reached|exceeded)|usage\s*limit\s*(?:reached|exceeded|exhausted)|exceeded\s*your\s*(?:current\s*)?quota|insufficient[_\s-]?(?:balance|credits?)|balance\s*(?:is\s*)?(?:insufficient|too\s*low)|(?:额度|配额|用量)(?:已|已经|也)?(?:用尽|耗尽|用完|超限|不足)|(?:已达|已达到|超出|超过)[^。;,\n]{0,12}(?:用量上限|配额上限|额度上限)|余额(?:不足|不够|已用尽|已耗尽)/i;
+
+/**
+ * 明确的容量饱和表述。
+ *
+ * 刻意**不含** "please try again later"：那条几乎出现在所有 429 文案里，
+ * 单独出现不构成任何容量证据（否则 `quota exhausted, please try again later`
+ * 会被误判为容量抖动）。
+ */
+const CAPACITY_SATURATED_TEXT_RE =
+  /\b(?:is\s+at\s+capacity|at\s+capacity|capacity\s*(?:is\s*)?(?:saturated|exceeded|unavailable)|overloaded|over\s*capacity)\b/i;
+
+/**
+ * 否定表述（`not at capacity` / `not capacity saturated`）不算证据。
+ *
+ * 否定词必须**紧跟**容量短语（最多允许一个程度副词），不能用 `[^.]{0,40}?` 这种
+ * 任意距离通配：否则 `quota not exhausted; server overloaded` 里的 `not` 会被
+ * 算到后面的 `overloaded` 头上，把真正的容量饱和误判成否定。
+ */
+const NEGATED_CAPACITY_TEXT_RE =
+  /\b(?:not|no\s+longer|never)\s+(?:(?:currently|really|actually|yet)\s+)?(?:at\s+capacity|capacity\s*(?:is\s*)?(?:saturated|exceeded|unavailable)|overloaded|over\s*capacity)\b/i;
+
+/**
+ * 纯判定：该响应/文案是否表示「额度已耗尽」（区别于短时限流与容量饱和）。
+ *
+ * 单一真值：CLI 的失败文案归类（agentRun.looksLikeQuotaExhaustedText）与冷却分级
+ * 都走这里，避免各自维护一份词表而漏掉某种语言/厂商的写法。真实缺口案例：
+ * MiniMax 的「已达到 Token Plan 用量上限」和英文 `usage limit reached` 曾都不被
+ * 识别，于是被显示成「上游限流」而不是「额度已用尽」。
+ */
+export function isQuotaExhaustedText(body: unknown): boolean {
+  const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
+  if (!text) return false;
+  return QUOTA_EXHAUSTED_TEXT_RE.test(text) || isQuotaLimited403Body(text);
+}
+
+/**
+ * 仅「明确是容量抖动、且无显式复位/配额信号」的 429 才放行；默认从严。
+ *
+ * 判据顺序（每一项都是否决权，先命中先返回 false）：
+ * 1) 有显式复位信号（Retry-After / resets_at / 周期额度文案 / 相对时长）→ 不是薄限流；
+ * 2) 命中额度耗尽文案 → 否决（重试无用）；
+ * 3) 命中否定表述（`not at capacity`）→ 否决；
+ * 4) 命中明确的容量饱和表述 → 才算。
+ *
+ * 空 body、无法解析的 JSON、未知文案一律 false：宁可保守冷却 5 分钟，
+ * 也不把未知情况当成容量抖动去高频重试。
+ *
+ * 真实案例：`local Codex OAuth provider failed: HTTP 429Codex is at capacity, please try again later`。
+ * 本函数只用于 429 分支，不得用于 5xx。
+ */
+export function isCapacitySaturatedRateLimit(
+  body: unknown,
+  now: number,
+  headers?: Headers | Record<string, string> | null,
+): boolean {
+  if (parseExplicitAvailableAt(body, now, headers) !== undefined) return false;
+  const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
+  if (!text) return false;
+  // 额度否决必须覆盖**完整**的额度判据（`isQuotaExhaustedText` 还包含
+  // isQuotaLimited403Body 的 access_terminated_error / weekly usage limit 等）。
+  // 只查共享正则会出现「额度=true 且 容量=true」并存，CLI 按容量优先渲染，
+  // 把真正的额度耗尽显示成容量饱和（复审实测）。
+  if (isQuotaExhaustedText(text)) return false;
+  if (NEGATED_CAPACITY_TEXT_RE.test(text)) return false;
+  return CAPACITY_SATURATED_TEXT_RE.test(text);
+}
+
+export type AvailabilityAction =
+  | { kind: "clear" }
+  | { kind: "mark"; nextAvailableAt: number }
+  | { kind: "noop" };
+
+/**
+ * 把一次上游 429 响应解析成绝对的 epoch-ms 可用时刻。
+ *
+ * 优先级：Retry-After 头 → body 里的 retryAfter → resets_at/resetsAt →
+ * 文案里的绝对 "reset at" → 周期性硬配额文案 → 文案里的相对时长 → 默认窗口。
+ */
+export function resolveNextAvailableAt(
+  body: unknown,
+  now: number,
+  headers?: Headers | Record<string, string> | null,
+): number {
+  const parsed = parseExplicitAvailableAt(body, now, headers);
+  return parsed ?? clampCooldownDeadline(now + DEFAULT_PROVIDER_RETRY_MS, now);
 }
 
 /**
@@ -245,6 +366,9 @@ export function resolveAvailabilityAction(
   }
   if (status >= 200 && status < 300) return { kind: "clear" };
   if (status === 429) {
+    if (isCapacitySaturatedRateLimit(body, now, headers)) {
+      return { kind: "mark", nextAvailableAt: now + THIN_RATE_LIMIT_COOLDOWN_MS };
+    }
     return { kind: "mark", nextAvailableAt: resolveNextAvailableAt(body, now, headers) };
   }
   if (status >= 500) {
