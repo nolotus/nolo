@@ -19,6 +19,7 @@ import {
   type DesktopPublishPlatformInput,
 } from "./desktopReleasePublisher";
 import {
+  readS3Object,
   sha256Hex,
   uploadS3Object,
 } from "./s3Upload";
@@ -178,16 +179,12 @@ async function readRemoteManifest(
 ): Promise<DesktopReleaseManifest | null> {
   const channelManifestName = desktopReleaseManifestFileName(config.channel);
   if (config.storage === "s3") {
-    const response = await fetch(`${config.publicBase}/${channelManifestName}`, {
-      cache: "no-store",
+    const raw = await readS3Object({
+      config,
+      uploadName: channelManifestName,
     });
-    if (response.status === 404) return null;
-    if (!response.ok) {
-      throw new Error(
-        `Failed to read desktop release manifest: ${response.status} ${await response.text()}`
-      );
-    }
-    return normalizeDesktopReleaseManifest(await response.json());
+    if (raw === null) return null;
+    return normalizeDesktopReleaseManifest(JSON.parse(raw));
   }
 
   const remotePath = `${config.remoteDir}/${channelManifestName}`;

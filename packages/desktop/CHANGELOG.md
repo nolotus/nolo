@@ -1,4 +1,18 @@
 
+## 0.180.0-alpha.6 (2026-10-25)
+
+### Bug Fixes
+
+* **desktop:** 更新检查改走 S3 直连，绕开 Cloudflare challenge ([92ce3ec](https://github.com/nolotus/bun-nolo/commit/92ce3ec664ad18bf7fc18e363a8fb9eb18d769b9))
+
+
+## 0.180.0-alpha.5 (2026-10-24)
+
+### Bug Fixes
+
+* **cli:** fail instabox preparation before any host fallback ([22fa7bf](https://github.com/nolotus/bun-nolo/commit/22fa7bf156900230cbbf4d57c8b88dd39d641aaa))
+
+
 ## 0.180.0-alpha.4 (2026-10-24)
 
 ### Bug Fixes

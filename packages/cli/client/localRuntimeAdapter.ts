@@ -300,6 +300,7 @@ import {
   type LocalDockerWorkloadHandle,
 } from "./localDockerWorkload";
 import {
+  assertInstaboxPrerequisites,
   createLocalInstaboxWorkload as createLocalInstaboxWorkloadDefault,
   type LocalInstaboxWorkloadHandle,
 } from "./localInstaboxWorkload";
@@ -862,6 +863,7 @@ export function createCliLocalRuntimeAdapter(
       );
     }
     instaboxWorkloadLoad ??= (async () => {
+      assertInstaboxPrerequisites(deps.env);
       let runConfig: ParsedInstaboxRunConfig;
       try {
         runConfig = loadInstaboxRunConfig({ env: deps.env });
