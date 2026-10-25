@@ -2,7 +2,7 @@ name: Version Bump
 
 on:
   push:
-    branches: [main]
+    branches: [main, alpha]
   workflow_dispatch:
 
 concurrency:
@@ -105,4 +105,4 @@ jobs:
           # 只 dispatch 已声明的 desktop release；目标版本与本次投影 commit SHA
           # 显式绑定，desktop-build 侧会再做一次 fail-closed 校验（repair/rebuild
           # 同入口）。
-          gh workflow run desktop-build.yml -f targets=all -f version="$DESKTOP_VERSION" -f projection_sha="$PROJECTION_SHA"
+          gh workflow run desktop-build.yml --ref "${{ github.ref_name }}" -f targets=all -f version="$DESKTOP_VERSION" -f projection_sha="$PROJECTION_SHA"

@@ -1,6 +1,7 @@
 import type { ElectrobunConfig } from "electrobun";
 import { resolve } from "node:path";
 import { DESKTOP_APP_VERSION } from "./desktopVersion";
+import { resolveMacSigningPlan } from "./scripts/macSigningPlan";
 
 /**
  * Repo-root runtime dirs that must never trigger a desktop rebuild.
@@ -31,20 +32,18 @@ export const resolveDesktopDevWatchIgnores = (
     "../../packages/ai/agent/web/**",
   ];
 
-const hasDeveloperId = Boolean(process.env.ELECTROBUN_DEVELOPER_ID);
-const hasAppleApiNotaryCreds = Boolean(
-  process.env.ELECTROBUN_APPLEAPIISSUER &&
-    process.env.ELECTROBUN_APPLEAPIKEY &&
-    process.env.ELECTROBUN_APPLEAPIKEYPATH
-);
-const hasAppleIdNotaryCreds = Boolean(
-  process.env.ELECTROBUN_APPLEID &&
-    process.env.ELECTROBUN_APPLEIDPASS &&
-    process.env.ELECTROBUN_TEAMID
-);
-const shouldCodesignMacRelease = hasDeveloperId;
-const shouldNotarizeMacRelease =
-  hasDeveloperId && (hasAppleApiNotaryCreds || hasAppleIdNotaryCreds);
+// macOS 签名计划的唯一判定源在 ./scripts/macSigningPlan（postWrap 与 DMG
+// 打包链共用同一份），这里只消费它的结论，避免两处判定漂移。
+//
+// electrobun 的 build.mac.codesign 是 boolean，只能表达「用 Developer ID 签」
+// 或「完全不签」，无法表达 ad-hoc 签名。所以：
+// - 有 Developer ID → electrobun 原生正式签名（+ 有公证凭据才公证），行为与
+//   改造前完全一致。
+// - 无 Developer ID → electrobun 不签，由 postWrap / DMG 阶段补 ad-hoc 签名
+//   （codesign --force --deep --sign -）。这是过渡方案：让 macOS 用户能安装
+//   （首次需右键「打开」放行），不消除 Gatekeeper 警告。Apple 官方明确未签名/
+//   自签名分发不能当作正式分发渠道；owner 拿到证书后本判定自动切回正式签名。
+const macSigningPlan = resolveMacSigningPlan();
 
 export const resolveGeneratePatch = (
   platform = process.platform,
@@ -172,12 +171,12 @@ export default {
     ],
     mac: {
       bundleCEF: false,
-      codesign: shouldCodesignMacRelease,
+      codesign: macSigningPlan.electrobunCodesign,
       createDmg:
         process.env.NOLO_DESKTOP_SKIP_DMG !== "1" &&
         process.env.NOLO_DESKTOP_BRANDED_DMG === "0",
       defaultRenderer: "native",
-      notarize: shouldNotarizeMacRelease,
+      notarize: macSigningPlan.electrobunNotarize,
       // v2 default resolves "icon.iconset" against the project root; the repo
       // keeps the iconset under assets/ (hutch warns when it is missing —
       // post-wrap still injects AppIcon.icns as a fallback, but declare the

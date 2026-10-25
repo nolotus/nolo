@@ -1,6 +1,9 @@
 import {
   adhocCodesignAppBundle,
+  describeEffectiveMacSigningMode,
   findAppBundleInDir,
+  resolveEffectiveMacSigningMode,
+  resolveMissingResourcesAction,
   rewriteTarballFromDir,
   shouldRunLocalAdhocCodesign,
   withTempDir,
@@ -16,9 +19,27 @@ if (!wrapperBundlePath) {
   );
 }
 
+// 模式横幅：CI 日志里必须一眼看出本次走的是正式签名还是 ad-hoc 回退。
+// 第一次真跑就在 CI 的 macos-latest runner 上，这一行是 owner 判断
+// 「脚本坏了」还是「凭据缺失」的第一现场。
+const effectiveSigningMode = resolveEffectiveMacSigningMode();
+console.log(
+  `[desktop] mac-signing mode=${effectiveSigningMode} — ${describeEffectiveMacSigningMode(effectiveSigningMode)}`
+);
+
 const appIconIcnsPath = resolve(import.meta.dir, "../assets/AppIcon.icns");
 const wrapperResourcesPath = join(wrapperBundlePath, "Contents", "Resources");
 if (!existsSync(wrapperResourcesPath)) {
+  // 既有分支：Resources 目录不存在时直接退出（v2 迁移引入，处理某些形态）。
+  // 但在 ad-hoc 模式下它会**静默跳过全部签名**——产出一个装不上的 .app 却
+  // 报「构建成功」。所以这里只在非 ad-hoc 路径保留原行为，ad-hoc 下必须
+  // 明确失败（fail-closed）。
+  if (resolveMissingResourcesAction(shouldRunLocalAdhocCodesign) === "fail") {
+    throw new Error(
+      `ad-hoc 签名模式：wrapper bundle 的 Resources 目录不存在（${wrapperResourcesPath}），` +
+        `无法定位待签名的 app bundle。构建中止，不产出未签名的 macOS 产物。`
+    );
+  }
   process.exit(0);
 }
 

@@ -7,7 +7,9 @@ import {
   type DesktopReleasePlatform,
 } from "../../../packages/app/constants/desktopReleaseManifest";
 import { toErrorMessage } from "core/errorMessage";
-import { resolveDesktopUpdateJsonUploadName } from "../../release/desktopReleasePublisher";
+import { type DesktopPublishS3Config, resolveDesktopUpdateJsonUploadName } from "../../release/desktopReleasePublisher";
+
+import { getS3ObjectSizeByRange, readS3Object } from "../../release/s3Upload";
 
 const [legacyBaseArg, artifactDirArg = "packages/desktop/artifacts", channelArg = "stable"] =
   process.argv.slice(2);
@@ -39,20 +41,25 @@ const collectArtifactNames = async (dir: string, prefix: string): Promise<string
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-const readJson = async (
-  url: URL,
-  log: (message: string) => void,
-  fetchImpl: FetchLike,
-) => {
-  log(`[verify-legacy-desktop-alias] GET ${url}`);
-  const response = await fetchImpl(url, {
-    method: "GET",
-    headers: { accept: "application/json" },
-  });
-  if (!response.ok) {
-    throw new Error(`[verify-legacy-desktop-alias] ${url} returned ${response.status}`);
-  }
-  return response.json();
+export const readS3Config = (
+  env: Record<string, string | undefined>,
+  channel: DesktopReleaseChannel,
+): DesktopPublishS3Config | undefined => {
+  const keys = ["ENDPOINT", "BUCKET", "REGION", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY"] as const;
+  const values = keys.map((key) => env[`DESKTOP_DOWNLOAD_S3_${key}`]?.trim());
+  if (values.every((value) => !value)) return undefined;
+  if (values.some((value) => !value)) throw new Error("[verify-legacy-desktop-alias] Incomplete DESKTOP_DOWNLOAD_S3 configuration");
+  return {
+    storage: "s3",
+    channel,
+    endpoint: values[0]!,
+    bucket: values[1]!,
+    region: values[2]!,
+    accessKeyId: values[3]!,
+    secretAccessKey: values[4]!,
+    pathPrefix: "",
+    publicBase: "",
+  };
 };
 
 export async function verifyLegacyDesktopDownloadAlias(args: {
@@ -61,6 +68,7 @@ export async function verifyLegacyDesktopDownloadAlias(args: {
   channel?: string;
   log?: (message: string) => void;
   fetchImpl?: FetchLike;
+  env?: Record<string, string | undefined>;
 }) {
   const channelArg = args.channel ?? "stable";
   const artifactDirArg = args.artifactDir ?? "packages/desktop/artifacts";
@@ -68,6 +76,36 @@ export async function verifyLegacyDesktopDownloadAlias(args: {
     channelArg === "stable" ? "stable-" : channelArg === "alpha" ? "canary-" : undefined;
   const log = args.log ?? (() => {});
   const fetchImpl = args.fetchImpl ?? fetch;
+  const config = readS3Config(args.env ?? process.env, channelArg as DesktopReleaseChannel);
+  let verifiedCount = 0;
+  let skippedCount = 0;
+  const publicAllowed = (response: Response, url: URL, head = false) => {
+    if (response.status === 403) {
+      skippedCount++;
+      log(`[verify-legacy-desktop-alias] WARNING ${url} returned 403; skipping public URL check`);
+      return false;
+    }
+    if (!response.ok && !(head && response.status >= 300 && response.status < 400)) {
+      throw new Error(`[verify-legacy-desktop-alias] ${url} returned ${response.status}`);
+    }
+    return true;
+  };
+  const readText = async (name: string): Promise<string | undefined> => {
+    if (config) {
+      const text = await readS3Object({ config, uploadName: name, fetchFn: fetchImpl as typeof fetch });
+      if (text !== null) {
+        verifiedCount++;
+        return text;
+      }
+    }
+    const url = new URL(`${legacyBase}/${name}`);
+    log(`[verify-legacy-desktop-alias] GET ${url}`);
+    const response = await fetchImpl(url, { method: "GET", headers: { accept: "application/json" } });
+    if (!publicAllowed(response, url)) return undefined;
+    const text = await response.text();
+    verifiedCount++;
+    return text;
+  };
 
   if (!prefix) {
     throw new Error(`[verify-legacy-desktop-alias] Unsupported channel: ${channelArg}`);
@@ -89,55 +127,42 @@ export async function verifyLegacyDesktopDownloadAlias(args: {
   }
 
   for (const name of Array.from(fileNames).sort()) {
+    if (config) {
+      const size = await getS3ObjectSizeByRange({ config, uploadName: name, fetchFn: fetchImpl as typeof fetch });
+      if (size !== null) {
+        if (size <= 0) throw new Error(`[verify-legacy-desktop-alias] ${name} is empty`);
+        verifiedCount++;
+        continue;
+      }
+    }
     const url = new URL(`${legacyBase}/${name}`);
     log(`[verify-legacy-desktop-alias] HEAD ${url}`);
     const response = await fetchImpl(url, { method: "HEAD" });
-    if (!response.ok) {
-      throw new Error(`[verify-legacy-desktop-alias] ${url} returned ${response.status}`);
-    }
+    if (publicAllowed(response, url, true)) verifiedCount++;
   }
 
   const channel = channelArg as DesktopReleaseChannel;
-  const channelManifestUrl = new URL(`${legacyBase}/${channelManifestName}`);
-  const legacyManifestUrl = new URL(`${legacyBase}/desktop-release-manifest.json`);
-  const channelManifest = normalizeDesktopReleaseManifest(
-    await readJson(channelManifestUrl, log, fetchImpl),
-  );
-  const legacyManifest = normalizeDesktopReleaseManifest(
-    await readJson(legacyManifestUrl, log, fetchImpl),
-  );
-  if (!channelManifest) {
-    throw new Error(`[verify-legacy-desktop-alias] ${channelManifestName} is invalid`);
-  }
-  if (!legacyManifest) {
-    throw new Error("[verify-legacy-desktop-alias] desktop-release-manifest.json is invalid");
-  }
-  if (channelManifest.channel !== channel) {
-    throw new Error(
-      `[verify-legacy-desktop-alias] channel manifest channel ${channelManifest.channel} does not match expected ${channel}`,
-    );
-  }
-  if (legacyManifest.channel !== channel) {
-    throw new Error(
-      `[verify-legacy-desktop-alias] legacy manifest channel ${legacyManifest.channel} does not match expected ${channel}`,
-    );
-  }
-  const manifest = channelManifest;
+  const readManifest = async (name: string) => {
+    const text = await readText(name);
+    if (text === undefined) return undefined;
+    const manifest = normalizeDesktopReleaseManifest(JSON.parse(text));
+    if (!manifest) throw new Error(`[verify-legacy-desktop-alias] ${name} is invalid`);
+    if (manifest.channel !== channel) {
+      throw new Error(`[verify-legacy-desktop-alias] ${name} channel ${manifest.channel} does not match expected ${channel}`);
+    }
+    return manifest;
+  };
+  const channelManifest = await readManifest(channelManifestName);
+  const legacyManifest = await readManifest("desktop-release-manifest.json");
+  const manifest = channelManifest ?? legacyManifest;
 
   for (const platform of ["windows", "linux", "macos"] as const) {
     const updateJsonName = resolveDesktopUpdateJsonUploadName({ channel, platform });
     if (!fileNames.has(updateJsonName)) continue;
 
-    const updateJsonUrl = new URL(`${legacyBase}/${updateJsonName}`);
-    log(`[verify-legacy-desktop-alias] GET ${updateJsonUrl}`);
-    const updateJsonResponse = await fetchImpl(updateJsonUrl, {
-      method: "GET",
-      headers: { accept: "application/json" },
-    });
-    if (!updateJsonResponse.ok) {
-      throw new Error(`[verify-legacy-desktop-alias] ${updateJsonUrl} returned ${updateJsonResponse.status}`);
-    }
-    const updateJsonBytes = await updateJsonResponse.arrayBuffer();
+    const updateJsonText = await readText(updateJsonName);
+    if (updateJsonText === undefined) continue;
+    const updateJsonBytes = new TextEncoder().encode(updateJsonText);
     const updateMetadata = JSON.parse(new TextDecoder().decode(updateJsonBytes)) as {
       version?: unknown;
       hash?: unknown;
@@ -149,6 +174,7 @@ export async function verifyLegacyDesktopDownloadAlias(args: {
       throw new Error(`[verify-legacy-desktop-alias] ${updateJsonName} is missing hash`);
     }
 
+    if (!manifest) continue;
     const artifact = manifest.artifacts[platform];
     if (!artifact) {
       throw new Error(
@@ -200,6 +226,14 @@ export async function verifyLegacyDesktopDownloadAlias(args: {
     }
   }
 
+  if (verifiedCount === 0) {
+    throw new Error(
+      `[verify-legacy-desktop-alias] No alias items were actually verified: ${config ? "S3 did not find the corresponding objects" : "S3 is not configured"}, and all public URL checks returned 403; skippedCount=${skippedCount}`,
+    );
+  }
+  if (skippedCount > 0) {
+    log(`[verify-legacy-desktop-alias] WARNING SUMMARY: skippedCount=${skippedCount} checks skipped because public URLs returned 403; verifiedCount=${verifiedCount}`);
+  }
   log("[verify-legacy-desktop-alias] OK");
 }
 

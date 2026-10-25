@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { buildMacosDmgInstallerTheme } from "./macos-dmg-theme";
 import { getMacosDmgInstallerCopyForBuild } from "./macos-dmg-i18n";
 import { renderMacosDmgBackgroundPng } from "./macos-dmg-background";
+import { adhocCodesignAppBundle, shouldAdhocCodesign } from "./codesign-local";
 
 const escapeAppleScript = (value: string) => value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 
@@ -163,6 +164,13 @@ export const createBrandedMacosDmg = async ({
   await mkdir(stagingDir, { recursive: true });
   await mkdir(join(stagingDir, ".background"), { recursive: true });
   await cp(appBundlePath, join(stagingDir, source.appBundleName), { recursive: true });
+  // DMG 里真正被安装的是 staging 里的这份 .app 副本。ad-hoc 模式下必须对它
+  // 再签一次：postWrap 签的是构建目录里的 .app，而这里的来源可能是 electrobun
+  // 自己打的 DMG（其内 .app 是 postWrap 之前的副本），签名状态不可假定。
+  // Apple Silicon 上未签名的可执行文件会被 Gatekeeper 判为「已损坏」且不可绕过。
+  if (shouldAdhocCodesign()) {
+    await adhocCodesignAppBundle(join(stagingDir, source.appBundleName));
+  }
   await cp(backgroundPath, join(stagingDir, ".background", "installer-background.png"));
   await symlink("/Applications", join(stagingDir, "Applications"));
 
@@ -215,6 +223,40 @@ export const createBrandedMacosDmg = async ({
       process.env.ELECTROBUN_DEVELOPER_ID,
       outputDmg,
     ]);
+  } else if (shouldAdhocCodesign()) {
+    // DMG 自身的签名只影响「下载的 DMG 被当成独立可执行体」的场景，Gatekeeper
+    // 判定的是 DMG 里的 .app（上面已用 ad-hoc 签过并通过 --verify --strict）。
+    // 这里仍补一次 ad-hoc 签名：仓库既有的 verifyMacDmgArtifact.sh 会对发布的
+    // DMG 跑 codesign --verify，未签名的 DMG 会让那条校验直接失败。
+    //
+    // 失败即中止，不静默继续：签名步骤被静默吞掉时，owner 看到的日志会以为
+    // 产物已签名，而真正的签名状态要到用户安装时才暴露——那时已经发布出去了。
+    for (const command of [
+      ["codesign", "--force", "--sign", "-", outputDmg],
+      ["codesign", "--verify", "--verbose=2", outputDmg],
+    ]) {
+      const proc = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      const exitCode = await proc.exited;
+      const rawOutput = [stdout, stderr]
+        .map((chunk) => chunk.trim())
+        .filter(Boolean)
+        .join("\n");
+      console.log(
+        `[desktop] dmg codesign: ${command.join(" ")} (exit ${exitCode})\n${rawOutput}`
+      );
+      if (exitCode !== 0) {
+        throw new Error(
+          `ad-hoc 签名 dmg 失败（${command.join(" ")}，退出码 ${exitCode}）：${rawOutput || "(codesign produced no output)"}\n` +
+            `DMG 自身签名失败，macOS 用户从浏览器下载该 DMG 时可能看到「无法验证开发者」提示，` +
+            `仓库的 verifyMacDmgArtifact.sh 也会在 codesign --verify 上失败。` +
+            `构建中止，不发布签名状态不可控的产物。`
+        );
+      }
+    }
   }
 
   rmSync(workDir, { recursive: true, force: true });

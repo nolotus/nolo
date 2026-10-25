@@ -1,4 +1,11 @@
 
+## 0.172.1 (2026-10-25)
+
+### Bug Fixes
+
+* **desktop:** stable 线补齐桌面发布链的 S3 直连与 mac 签名修复 ([76ba79d](https://github.com/nolotus/bun-nolo/commit/76ba79d3507c99fc2520fcbb025e4c249726de78))
+
+
 ## 0.172.0 (2026-10-25)
 
 ### Features
