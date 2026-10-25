@@ -1,4 +1,12 @@
 
+## 0.172.2 (2026-10-25)
+
+### Bug Fixes
+
+* **desktop:** trigger stable 0.172.2 release for sync origin sha256 fix ([221c625](https://github.com/nolotus/bun-nolo/commit/221c6254f6199bbb026bd23a35861c3f0c6ea581))
+* **hooks:** report test runner startup failures without masking regressions ([a90275d](https://github.com/nolotus/bun-nolo/commit/a90275d64e552f19cfdef03d3f7bd00b74e3c42f))
+
+
 ## 0.172.1 (2026-10-25)
 
 ### Bug Fixes
