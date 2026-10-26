@@ -116,7 +116,6 @@ export default {
           emailReach: {
             noEmail: "No email",
             optOutAll: "Opted out of all",
-            mutedUntil: "Muted until {{time}}",
             optOutTags: "Opted out: {{tags}}",
             welcomeSent: "Welcome: {{time}}",
             welcomeNotSent: "Welcome: not sent",
@@ -620,7 +619,6 @@ export default {
           emailReach: {
             noEmail: "无邮箱",
             optOutAll: "全局退订",
-            mutedUntil: "静默至:{{time}}",
             optOutTags: "已退订标签:{{tags}}",
             welcomeSent: "欢迎:{{time}}",
             welcomeNotSent: "欢迎:未发",
@@ -1103,7 +1101,6 @@ export default {
           emailReach: {
             noEmail: "無電郵",
             optOutAll: "全部退訂",
-            mutedUntil: "靜默至:{{time}}",
             optOutTags: "已退訂標籤:{{tags}}",
             welcomeSent: "歡迎:{{time}}",
             welcomeNotSent: "歡迎:未發",
@@ -1588,7 +1585,6 @@ export default {
           emailReach: {
             noEmail: "メールなし",
             optOutAll: "全配信停止",
-            mutedUntil: "ミュート期限:{{time}}",
             optOutTags: "配信停止タグ:{{tags}}",
             welcomeSent: "ウェルカム:{{time}}",
             welcomeNotSent: "ウェルカム:未送信",

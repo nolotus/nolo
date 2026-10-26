@@ -9,6 +9,7 @@ import PageLoading from "render/web/ui/PageLoading";
 const SettingLayout = lazy(() => import("./web/SettingLayout"));
 const Appearance = lazy(() => import("./web/Appearance"));
 const UserProfile = lazy(() => import("./web/UserProfile"));
+const EmailPreferences = lazy(() => import("./web/EmailPreferences"));
 const SecuritySettings = lazy(() => import("./web/SecuritySettings"));
 const EditorConfig = lazy(() => import("./web/EditorConfig"));
 const ChatConfig = lazy(() => import("./web/ChatConfig"));
@@ -69,6 +70,10 @@ export const settingRoutes = {
       element: withSuspense(<Appearance />),
     },
     { path: SettingRoutePaths.SETTING_ACCOUNT, element: withSuspense(<UserProfile />) },
+    {
+      path: SettingRoutePaths.SETTING_EMAIL_PREFERENCES,
+      element: withSuspense(<EmailPreferences />),
+    },
     {
       path: SettingRoutePaths.SETTING_MEDIA_ALLOWANCE,
       element: withSuspense(<MediaAllowance />),

@@ -789,6 +789,16 @@
           padding: 0;
         }
 
+        /* 设置弹窗背后的遮罩模糊：共享的 .modal 遮罩只有 rgba(0,0,0,0.25) 底色、
+           没有 backdrop-filter，这里仅给设置弹窗补一档轻微模糊（0 → 4px）。
+           只作用在设置弹窗上，遮罩底色/透明度、边框、阴影都不动；:has() 的特异性
+           高于 modal.css 的 .modal，不依赖样式加载顺序。
+           prefers-reduced-motion 下 modal.css 的 backdrop-filter: none !important 仍然生效。 */
+        .modal:has(> .modal__content.SettingsModal) {
+          backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
+        }
+
         .SettingsModal__container {
           display: flex;
           flex-direction: column;

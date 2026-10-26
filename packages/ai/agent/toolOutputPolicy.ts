@@ -36,6 +36,10 @@ export const TOOL_OUTPUT_PROFILES: Record<string, ToolOutputProjectionProfile> =
   editFile: { maxChars: 1200, headRatio: 0.62 },
   writeFile: { maxChars: 1000, headRatio: 0.62 },
   readPastedText: { maxChars: 4800, headRatio: 0.5, historicalMaxChars: 4800 },
+  // loadSkill 内联的是文档正文（SKILL.md 全文），与 readFile 同类，不该因为工具名未登记就退回
+  // DEFAULT 的 4000。历史事故（nolo-plan omitted middle）正是 headRatio 0.5 掐掉中段，把
+  // 「MUST / 禁止」所在的中段静默省略。取 4800（与 readFile 同级），不激进放大；headRatio 同 DEFAULT。
+  loadSkill: { maxChars: 4800, headRatio: 0.5 },
 };
 
 export function resolveToolOutputProfile(

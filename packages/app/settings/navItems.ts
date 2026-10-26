@@ -7,6 +7,7 @@ import {
   LuGauge,
   LuKey,
   LuLaptop,
+  LuMail,
   LuMessageSquare,
   LuPalette,
   LuShield,
@@ -29,6 +30,11 @@ export const buildSettingNavItems = (t: TranslateFn) => {
       path: SettingRoutePaths.SETTING_ACCOUNT,
       label: String(t("settings.nav.account", "账户")),
       Icon: LuUser,
+    },
+    {
+      path: SettingRoutePaths.SETTING_EMAIL_PREFERENCES,
+      label: String(t("settings.nav.emailPreferences", "邮件偏好")),
+      Icon: LuMail,
     },
     {
       path: SettingRoutePaths.SETTING_MEDIA_ALLOWANCE,

@@ -1,4 +1,11 @@
 
+## 0.182.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **email:** 邮件偏好独立设置页 + 用户可设余额提醒门槛 + 删除静默 ([a8d5404](https://github.com/nolotus/bun-nolo/commit/a8d5404b7c6f42efaee08dd4e5e7d1254c33ab6c))
+
+
 ## 0.181.0-alpha.1 (2026-10-26)
 
 ### Features
