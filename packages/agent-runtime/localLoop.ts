@@ -423,6 +423,7 @@ export function buildRoundBudgetWarningPrompt(threshold: number): string {
  * 在单轮工具调用中，相邻的只读工具使用 Promise.all 并行执行，
  * 遇到写操作或命令执行时切回严格串行；最终结果严格按模型原始 tool_calls 下标保序推入。
  */
+// list_cloud_resources and cloud_probe are server-only tools; excluded from localLoop concurrency set.
 export const CONCURRENT_READONLY_TOOLS: ReadonlySet<string> = new Set([
   "readFile",
   "read_file",

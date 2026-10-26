@@ -9,6 +9,7 @@ import ShareCommunityPreview from "app/pages/ShareCommunityPreview";
 import MySharesPage from "app/pages/MySharesPage";
 import { resolveExploreCategory } from "app/navigation/exploreCategory";
 import PluginExplore from "./PluginExplore";
+import CreatorExplore from "./CreatorExplore";
 
 /**
  * One Explore destination, driven by `?category=`.
@@ -39,7 +40,7 @@ const AgentExplore: React.FC = () => {
           ) : category === "dialog" || category === "article" ? (
             <ShareCommunityPreview key={category} contentCategory={category} />
           ) : category === "user" ? (
-            <p role="status">{t("explorePage.categoryEmpty.user", "暂无公开的用户。")}</p>
+            <CreatorExplore />
           ) : category === "plugin" ? (
             <PluginExplore />
           ) : (

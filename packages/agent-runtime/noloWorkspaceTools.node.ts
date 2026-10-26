@@ -25,7 +25,7 @@ import {
   noloStringArg,
   parseNoloWorkspaceToolArguments,
   resolveNoloDialogInput,
-  NOLO_WORKSPACE_TOOL_NAMES,
+  CLI_NOLO_WORKSPACE_TOOL_NAMES,
 } from "./noloWorkspaceTools";
 import { spawnToWebStreams } from "./runtimeCompat";
 
@@ -194,7 +194,7 @@ export function buildNoloWorkspaceCliToolExecutors(args: {
     content: string;
     metadata?: Record<string, unknown>;
   }>> = {};
-  for (const toolName of NOLO_WORKSPACE_TOOL_NAMES) {
+  for (const toolName of CLI_NOLO_WORKSPACE_TOOL_NAMES) {
     // loadSkill is a local-fs tool (resolves SKILL.md from the agent's bound
     // workspace and reads it inline). It has no `nolo` CLI subcommand, so the
     // CLI-bridge executor must not register it — hosts wire

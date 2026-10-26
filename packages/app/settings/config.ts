@@ -14,6 +14,9 @@ export const SettingRoutePaths = {
   // 2. 账户设置 (保持独立)
   SETTING_ACCOUNT: "user-profile",
 
+  // 2.1 邮件偏好 (从账户页拆出的独立页面)
+  SETTING_EMAIL_PREFERENCES: "email-preferences",
+
   // 3. 安全设置
   SETTING_SECURITY: "security",
 

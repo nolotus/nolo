@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 // 会导致共享 chunk 符号级 import 丢失（Oe is not defined，2026-08-21 生产事故），
 // 直接 import 后 hook 随 UserProfile chunk 内联，产物自洽。
 import { useDeleteOwnAccountFlow } from "identity/useDeleteOwnAccountFlow";
-import { useCurrentUser, useToken } from "identity";
+import { useCurrentUser } from "identity";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "app/routing";
 
@@ -35,9 +35,7 @@ import { selectRemoteServer } from "app/settings/settingSlice";
 import { buildDatabaseFileContentUrl } from "database/fileUrl";
 import { createUserKey } from "database/keys";
 import { toast } from "app/utils/toast"
-import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import LanguageSwitcher from "render/web/ui/LanguageSwitcher";
-import { USER_EMAIL_PREFERENCE_ENDPOINTS } from "app/email/emailApiRoutes";
 import Button from "render/web/ui/Button";
 import { ConfirmModal } from "render/web/ui/modal/ConfirmModal";
 
@@ -48,11 +46,17 @@ const EditableProfileItem: React.FC<{
   value?: string;
   onSave: (newValue: string) => Promise<void>;
   placeholder?: string;
-}> = ({ icon, label, value, onSave, placeholder }) => {
+  displayValue?: string;
+  /** 常显说明（解释留空/默认的含义），编辑态也显示 */
+  hint?: string;
+  /** 返回错误文案时不提交、保持编辑态，并把文案显示在输入框下方 */
+  validate?: (raw: string) => string | null;
+}> = ({ icon, label, value, onSave, placeholder, displayValue, hint, validate }) => {
   const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [tempValue, setTempValue] = useState(value || "");
   const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setTempValue(value || "");
@@ -61,12 +65,22 @@ const EditableProfileItem: React.FC<{
   const handleSave = async () => {
     if (tempValue === (value || "")) {
       setIsEditing(false);
+      setError(null);
       return;
     }
+    // 先校验再提交：非法输入保持编辑态并就地报错，不静默丢弃用户输入
+    const validationError = validate ? validate(tempValue) : null;
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setError(null);
     setIsSaving(true);
     try {
       await onSave(tempValue);
       setIsEditing(false);
+    } catch {
+      // onSave 内部已 toast 反馈；这里保持编辑态，避免用户输入被吞掉
     } finally {
       setIsSaving(false);
     }
@@ -79,17 +93,34 @@ const EditableProfileItem: React.FC<{
         <div className="profile-item-content">
           <span className="profile-item-label">{label}</span>
           {isEditing ? (
-            <input
-              autoFocus
-              className="profile-item-input"
-              value={tempValue}
-              onChange={(e) => setTempValue(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              placeholder={placeholder}
-              disabled={isSaving}
-            />
+            <>
+              <input
+                autoFocus
+                className="profile-item-input"
+                value={tempValue}
+                onChange={(e) => {
+                  setTempValue(e.target.value);
+                  if (error) setError(null);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handleSave()}
+                placeholder={placeholder}
+                disabled={isSaving}
+                aria-invalid={error ? true : undefined}
+              />
+              {error && (
+                <span className="profile-item-subtext media-allowance-error" role="alert">
+                  {error}
+                </span>
+              )}
+              {hint && <span className="profile-item-subtext">{hint}</span>}
+            </>
           ) : (
-            <span className="profile-item-value">{value || placeholder || t("userProfile.profileItem.notSet", "未设置")}</span>
+            <>
+              <span className="profile-item-value">
+                {displayValue ?? (value || placeholder || t("userProfile.profileItem.notSet", "未设置"))}
+              </span>
+              {hint && <span className="profile-item-subtext">{hint}</span>}
+            </>
           )}
         </div>
       </div>
@@ -188,27 +219,17 @@ const StaticProfileItem: React.FC<{
   );
 };
 
+
+
 const UserProfile: React.FC = () => {
   const user = useCurrentUser();
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const currentServer = useAppSelector(selectRemoteServer);
-  const currentToken = useToken();
 
   const userId = user?.userId;
   const profileKey = useMemo(() => (userId ? createUserKey.profile(userId) : null), [userId]);
-  const [emailPrefs, setEmailPrefs] = useState<{
-    emailOptOutAll: boolean;
-    emailMutedUntil: number;
-    emailOptOutTags: string[];
-  }>({
-    emailOptOutAll: false,
-    emailMutedUntil: 0,
-    emailOptOutTags: [],
-  });
-  const [emailPrefsLoading, setEmailPrefsLoading] = useState(false);
-  const [emailPrefsSaving, setEmailPrefsSaving] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const {
     deleteAccount,
@@ -229,39 +250,6 @@ const UserProfile: React.FC = () => {
   useEffect(() => {
     if (profileKey) dispatch(read({ dbKey: profileKey }) as any);
   }, [profileKey, dispatch]);
-
-  useEffect(() => {
-    if (!currentServer || !userId || !currentToken) return;
-    let cancelled = false;
-    const loadEmailPrefs = async () => {
-      setEmailPrefsLoading(true);
-      try {
-        const res = await fetch(
-          `${currentServer}${USER_EMAIL_PREFERENCE_ENDPOINTS.get.path}`,
-          {
-            method: USER_EMAIL_PREFERENCE_ENDPOINTS.get.method,
-            headers: {
-              Authorization: `Bearer ${currentToken}`,
-            },
-          }
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        if (cancelled) return;
-        setEmailPrefs({
-          emailOptOutAll: Boolean(data?.emailOptOutAll),
-          emailMutedUntil: Number(data?.emailMutedUntil || 0),
-          emailOptOutTags: Array.isArray(data?.emailOptOutTags) ? data.emailOptOutTags : [],
-        });
-      } finally {
-        if (!cancelled) setEmailPrefsLoading(false);
-      }
-    };
-    void loadEmailPrefs();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentServer, userId, currentToken]);
 
   const profile = useAppSelector((state) =>
     profileKey ? (selectById(state as any, profileKey) as any) : null
@@ -338,38 +326,6 @@ const UserProfile: React.FC = () => {
     }
   };
 
-  const handleUpdateEmailPrefs = async (changes: Record<string, any>) => {
-    if (!currentServer || !currentToken) return;
-    setEmailPrefsSaving(true);
-    try {
-      const res = await fetch(
-        `${currentServer}${USER_EMAIL_PREFERENCE_ENDPOINTS.update.path}`,
-        {
-          method: USER_EMAIL_PREFERENCE_ENDPOINTS.update.method,
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${currentToken}`,
-          },
-          body: JSON.stringify(changes),
-        }
-      );
-      if (!res.ok) {
-        throw new Error("update_email_preferences_failed");
-      }
-      const data = await res.json();
-      setEmailPrefs({
-        emailOptOutAll: Boolean(data?.emailOptOutAll),
-        emailMutedUntil: Number(data?.emailMutedUntil || 0),
-        emailOptOutTags: Array.isArray(data?.emailOptOutTags) ? data.emailOptOutTags : [],
-      });
-      toast.success(t("userProfile.saveSuccess", "保存成功"));
-    } catch {
-      toast.error(t("userProfile.saveFailed", "保存失败"));
-    } finally {
-      setEmailPrefsSaving(false);
-    }
-  };
-
   const handleDeleteAccount = async () => {
     if (!userId) {
       toast.error(
@@ -442,81 +398,6 @@ const UserProfile: React.FC = () => {
           <div className="section-group">
             <h2 className="section-title"><LuGlobe size={16} aria-hidden="true" />{t("userProfile.language", "显示语言")}</h2>
             <LanguageSwitcher />
-          </div>
-
-          <div className="section-group">
-            <h2 className="section-title"><LuMail size={16} aria-hidden="true" />{t("userProfile.emailPreferences", "邮件偏好")}</h2>
-            <div className="profile-item">
-              <div className="profile-item-main">
-                <div className="profile-item-icon"><LuMail size={18} aria-hidden="true" /></div>
-                <div className="profile-item-content">
-                  <span className="profile-item-label">{t("userProfile.emailAllSwitch", "通知总开关")}</span>
-                  <span className="profile-item-value">
-                    {emailPrefs.emailOptOutAll
-                      ? t("userProfile.emailDisabled", "已关闭所有邮件")
-                      : t("userProfile.emailEnabled", "已开启邮件通知")}
-                  </span>
-                </div>
-              </div>
-              <div className="profile-item-actions">
-                <button
-                  type="button"
-                  className="action-btn text-btn"
-                  disabled={emailPrefsLoading || emailPrefsSaving}
-                  onClick={() =>
-                    handleUpdateEmailPrefs({ emailOptOutAll: !emailPrefs.emailOptOutAll })
-                  }
-                >
-                  {emailPrefs.emailOptOutAll ? t("userProfile.enable", "开启") : t("userProfile.disable", "关闭")}
-                </button>
-              </div>
-            </div>
-
-            <div className="profile-item">
-              <div className="profile-item-main">
-                <div className="profile-item-icon"><LuKeyRound size={18} aria-hidden="true" /></div>
-                <div className="profile-item-content">
-                  <span className="profile-item-label">{t("userProfile.emailMuteUntil", "静默到期时间")}</span>
-                  <span className="profile-item-value">
-                    {emailPrefs.emailMutedUntil
-                      ? new Date(emailPrefs.emailMutedUntil).toLocaleString()
-                      : t("userProfile.notMuted", "未静默")}
-                  </span>
-                </div>
-              </div>
-              <div className="profile-item-actions">
-                <button
-                  type="button"
-                  className="action-btn text-btn"
-                  disabled={emailPrefsLoading || emailPrefsSaving}
-                  onClick={() => handleUpdateEmailPrefs({ muteForDays: 3 })}
-                >
-                  {t("userProfile.mute3Days", "静默3天")}
-                </button>
-                <button
-                  type="button"
-                  className="action-btn text-btn"
-                  disabled={emailPrefsLoading || emailPrefsSaving}
-                  onClick={() => handleUpdateEmailPrefs({ clearMute: true })}
-                >
-                  {t("userProfile.clearMute", "取消静默")}
-                </button>
-              </div>
-            </div>
-
-            <EditableProfileItem
-              icon={<LuClipboard size={18} aria-hidden="true" />}
-              label={t("userProfile.emailOptOutTags.label", "退订标签（逗号分隔）")}
-              value={emailPrefs.emailOptOutTags.join(",")}
-              onSave={async (value) => {
-                const tags = value
-                  .split(",")
-                  .map((tag) => asTrimmedLowercaseString(tag))
-                  .filter(Boolean);
-                await handleUpdateEmailPrefs({ emailOptOutTags: tags });
-              }}
-              placeholder={t("userProfile.emailOptOutTags.placeholder", "reengagement,onboarding-guide")}
-            />
           </div>
 
           <div className="section-group">

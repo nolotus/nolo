@@ -4,7 +4,8 @@ let yahooFinancePromise: Promise<any> | null = null;
 function getYahooFinanceClient(): Promise<any> {
   if (!yahooFinancePromise) {
     const pending = import("yahoo-finance2").then(
-      ({ default: YahooFinance }) => new YahooFinance(),
+      ({ default: YahooFinance }) =>
+        new YahooFinance({ suppressNotices: ["yahooSurvey", "ripHistorical"] }),
     );
     yahooFinancePromise = pending;
     // 加载失败不缓存，下次调用可重试；按身份清除，不误清后来的重试。

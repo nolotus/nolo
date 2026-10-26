@@ -54,7 +54,7 @@ import {
 import {
   buildExternalOpenAiTools,
   buildExternalToolExecutors,
-  filterExternalToolNames,
+  filterExternalToolNamesForDesktop,
 } from "agent-runtime/externalTools";
 import { resolveDesktopRuntimeEntrypoint } from "agent-runtime/desktopRuntimeEntrypoint";
 import type {
@@ -715,8 +715,10 @@ function buildDesktopLocalToolExecutors(args: {
       createId: args.createId,
       runChildDesktopTurn: args.runChildDesktopTurn,
     }),
+    // 数据源工具的执行器同样走桌面端闸门（fail-closed）：工具面已被过滤，
+    // 这里让 executor map 里也不存在这些键，防止经 executeTool 直接点名调用。
     ...buildExternalToolExecutors({
-      toolNames: args.toolNames ?? [],
+      toolNames: filterExternalToolNamesForDesktop(args.toolNames ?? []),
       authenticatedBillingContext: {
         onPreflight: async (toolName) => {
           if (!process.env.SERPAPI_API_KEY) {

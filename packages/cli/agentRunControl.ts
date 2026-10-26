@@ -2057,11 +2057,27 @@ export function isPidGone(pid: number, deps: AgentRunControlDeps = {}): boolean 
 }
 
 /**
- * Attempts to retrieve process start time for a PID via `ps` CLI tool.
- * Returns null if unsupported (Windows / ps missing / process not found).
+ * Reads process identity using the native platform process API.
+ * Returns null for missing/inaccessible processes; callers must keep identity guards.
  */
 export function defaultGetProcessStartTime(pid: number): Date | null {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
+    if (process.platform === "win32") {
+      const shell = process.env.SystemRoot
+        ? join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        : "powershell.exe";
+      const output = nodeExecFileSync(shell, [
+        "-NoProfile", "-NonInteractive", "-Command",
+        `$ErrorActionPreference='Stop'; (Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
+      ], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5000, windowsHide: true,
+      }).trim();
+      if (!output) return null;
+      const date = new Date(output);
+      return Number.isFinite(date.getTime()) ? date : null;
+    }
     const output = nodeExecFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],

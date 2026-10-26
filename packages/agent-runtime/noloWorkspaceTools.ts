@@ -21,14 +21,53 @@ export const NOLO_WORKSPACE_TOOL_NAMES = [
   "queryTableRows",
   "cliWhoami",
   "cliDoctor",
+  "list_cloud_resources",
+  "cloud_probe",
+  "cloud_exec",
 ] as const;
+
+export const SERVER_ONLY_NOLO_WORKSPACE_TOOL_NAMES = [
+  "list_cloud_resources",
+  "cloud_probe",
+  "cloud_exec",
+] as const;
+export type ServerOnlyNoloWorkspaceToolName = typeof SERVER_ONLY_NOLO_WORKSPACE_TOOL_NAMES[number];
+
+const SERVER_ONLY_NOLO_WORKSPACE_TOOL_NAME_SET = new Set<string>(SERVER_ONLY_NOLO_WORKSPACE_TOOL_NAMES);
+
+export function isServerOnlyNoloWorkspaceTool(name: string): boolean {
+  return SERVER_ONLY_NOLO_WORKSPACE_TOOL_NAME_SET.has(name);
+}
+
+// Cloud tools require server authority/persistence; never advertise or execute via CLI or desktop.
+export const CLI_NOLO_WORKSPACE_TOOL_NAMES = NOLO_WORKSPACE_TOOL_NAMES.filter(
+  name => !isServerOnlyNoloWorkspaceTool(name),
+);
+
+/**
+ * Filter tool names for client/local runtimes (CLI and Desktop).
+ * Excludes server-only tools so client runtimes never declare schemas for tools without local executors.
+ */
+export function filterClientNoloWorkspaceToolNames(toolNames?: string[]): string[] {
+  if (!toolNames) return [...CLI_NOLO_WORKSPACE_TOOL_NAMES];
+  return toolNames.filter(name => !isServerOnlyNoloWorkspaceTool(name));
+}
 
 export type NoloWorkspaceToolName = typeof NOLO_WORKSPACE_TOOL_NAMES[number];
 
 export const NOLO_WORKSPACE_TOOL_PROMPT =
-  "Nolo workspace tools: listDialogs/readDialog/queryDialogsBySubjectRef for dialogs; listAgents/readAgent for agent config and delegation with runnable agentKey; listSpaces/readSpace for spaces; readDoc/readSkillDoc for docs; loadSkill to activate skills; listTables/queryTableRows for tables; cliWhoami/cliDoctor for CLI status. deleteDialogs requires confirmation.";
+  "Nolo workspace tools: listDialogs/readDialog/queryDialogsBySubjectRef for dialogs; listAgents/readAgent for agent config and delegation with runnable agentKey; listSpaces/readSpace for spaces; readDoc/readSkillDoc for docs; loadSkill to activate skills; listTables/queryTableRows for tables; cliWhoami/cliDoctor for CLI status; list_cloud_resources/cloud_probe for cloud resources and readiness; cloud_exec for audited execution of a task on an owned cloud resource. deleteDialogs requires confirmation.";
 
 const NOLO_WORKSPACE_TOOL_NAME_SET = new Set<string>(NOLO_WORKSPACE_TOOL_NAMES);
+/**
+ * Cloud tools declare closed object schemas: unknown or credential-shaped fields
+ * are rejected by the schema itself, never parsed and discarded downstream.
+ */
+const CLOSED_OBJECT_SCHEMA_TOOL_NAMES = new Set<string>([
+  "list_cloud_resources",
+  "cloud_probe",
+  "cloud_exec",
+]);
 const DIALOG_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 const DIALOG_PATH_RE = /^\/(?:space\/([^/]+)\/)?dialog-(.+)-([0-9A-HJKMNP-TV-Z]{26})\/?$/i;
 
@@ -57,6 +96,7 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
         parameters: {
           type: "object",
           properties,
+          ...(CLOSED_OBJECT_SCHEMA_TOOL_NAMES.has(name) ? { additionalProperties: false } : {}),
           ...(required.length ? { required } : {}),
         },
       },
@@ -142,6 +182,39 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
   }, ["table"]);
   add("cliWhoami", "Show the current Nolo CLI login state.", {});
   add("cliDoctor", "Show Nolo CLI doctor diagnostics.", {});
+  add("list_cloud_resources", "List cloud resources you may use (your own connections plus any shared with you). Never outputs credentials.", {
+    ownerKind: {
+      type: "string",
+      enum: ["user", "space"],
+      description: "Scope selector. user (default) = everything you may use; space = only connections in one Space you belong to.",
+    },
+    spaceId: stringToolParam("Required when ownerKind is space."),
+    platformId: stringToolParam("Optional cloud platform filter (e.g. docker, cloudflare, gcp)."),
+  });
+  add("cloud_probe", "Probe read-only connectivity and readiness of a cloud resource. Never accepts credential parameters.", {
+    resourceId: stringToolParam("Target cloud resource ID to probe."),
+  }, ["resourceId"]);
+  add("cloud_exec", "Execute a shell task on an owned cloud resource through the server execution gate (authorization → capability → idempotent single-flight → audit → adapter). Never accepts credential parameters; refusals come back as { status: \"blocked\", reasonCode } instead of throwing.", {
+    resourceId: stringToolParam("Target cloud resource ID the caller owns or may use."),
+    task: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["shell"], description: "Task kind. Only shell is supported." },
+        argv: {
+          type: "array",
+          items: { type: "string" },
+          description: "Command and arguments: 1..32 items, each at most 512 characters, no NUL.",
+        },
+        timeoutMs: {
+          type: "integer",
+          description: "Optional timeout in milliseconds, clamped to 1000..120000.",
+        },
+      },
+      additionalProperties: false,
+      required: ["kind", "argv"],
+    },
+    idempotencyKey: stringToolParam("Caller idempotency key, 8..128 characters of [A-Za-z0-9_.:-]; a concurrent duplicate is rejected."),
+  }, ["resourceId", "task", "idempotencyKey"]);
   return tools;
 }
 

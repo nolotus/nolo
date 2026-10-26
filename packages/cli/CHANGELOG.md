@@ -1,17 +1,103 @@
 
-## 0.159.0 (2026-10-26)
+## 0.170.0 (2026-10-26)
 
 ### Features
 
-* **cloud-plugins:** add docker and cloudflare platform spec registry ([a6b00ee](https://github.com/nolotus/bun-nolo/commit/a6b00eec48ba78d697b104b3b67ec6d538afcee3))
-* **cloud-plugins:** register gcp, vultr, hetzner and digitalocean ([8406aa6](https://github.com/nolotus/bun-nolo/commit/8406aa6c6813dd6a3217830959e842009afce35b))
-* **explore:** wire docker and cloudflare cards into the plugin page ([de1a124](https://github.com/nolotus/bun-nolo/commit/de1a12438e544da14776f6fa6d8c09b93f40781e))
+* **agent:** list and probe cloud resources from the tool surface ([f6d151d](https://github.com/nolotus/bun-nolo/commit/f6d151d4dfbef350a0d3b9ae176f4bb365eae248))
+* **ai:** Explore 创作者目录与作者名快照 ([3e8d2a5](https://github.com/nolotus/bun-nolo/commit/3e8d2a5d8b690993d69f416cf1f3ab6f6bc85cb1))
+* **ai:** make commit review gate configurable under auto-review ([7bfeed3](https://github.com/nolotus/bun-nolo/commit/7bfeed33ef5d54539ca05592c930ba99a035b649))
+* **cloud-plugins:** register cloud_exec behind explicit opt-in ([b2a263d](https://github.com/nolotus/bun-nolo/commit/b2a263daffb6483aa2494fafe6648f960b02e9c4))
+* **cloud-plugins:** serve connections by grant, drop the organization scope ([e6a7a6f](https://github.com/nolotus/bun-nolo/commit/e6a7a6ff8f8bf92e51717e5c5dee2d8fb1c7942b))
+* **email:** 邮件偏好独立设置页 + 用户可设余额提醒门槛 + 删除静默 ([a8d5404](https://github.com/nolotus/bun-nolo/commit/a8d5404b7c6f42efaee08dd4e5e7d1254c33ab6c))
+* **plugins:** make data-source tools opt-in per user, off by default ([6df08fb](https://github.com/nolotus/bun-nolo/commit/6df08fb1ebbfff61304ccbcd5703c95569aee304))
 
 ### Bug Fixes
 
+* **ai:** 插件配置页不再把空间共享连接当成个人已连接 ([cd7be41](https://github.com/nolotus/bun-nolo/commit/cd7be41633c3ee9ac3b6faeea0bca2a5ebc8d9a0))
+* **cli:** resolve windows process start time and child entrypoint ([ae7771d](https://github.com/nolotus/bun-nolo/commit/ae7771d86ad3620e0debd80c79a60def81ec58a3))
+* **core:** 允许 HTTP_PORT=0（OS 分配临时端口），修 48631ef0d 引入的回归 ([9c6a90c](https://github.com/nolotus/bun-nolo/commit/9c6a90c14e715b0c5b49017816ad16bf46d62333))
+* **docker:** confirm a cloud sandbox stop with backoff ([5f9b980](https://github.com/nolotus/bun-nolo/commit/5f9b98002061771f0d664b1692b25c74f2af77a6))
+* **release:** restore the cli version to the highest reachable alpha tag ([41e612e](https://github.com/nolotus/bun-nolo/commit/41e612e0cedecacf73eec14727b102459bfb0450))
+* **security:** drop the unused zod declaration from the cli ai stub ([2e6349a](https://github.com/nolotus/bun-nolo/commit/2e6349abc6ce79ac071818c4d14075acc3199243))
+* **server:** HTTP_PORT 缺失时 fail-closed，不再静默退到 80 ([48631ef](https://github.com/nolotus/bun-nolo/commit/48631ef0d541582e9c633ba2051c8bc1b36c8301))
+* **yahoo-finance:** suppress survey and historical notices ([605cb47](https://github.com/nolotus/bun-nolo/commit/605cb470e000083f7e846554528085cb01f043cb))
+
+
+## 0.169.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **ai:** make commit review gate configurable under auto-review ([7bfeed3](https://github.com/nolotus/bun-nolo/commit/7bfeed33ef5d54539ca05592c930ba99a035b649))
+
+### Bug Fixes
+
+* **cli:** resolve windows process start time and child entrypoint ([ae7771d](https://github.com/nolotus/bun-nolo/commit/ae7771d86ad3620e0debd80c79a60def81ec58a3))
+
+
+## 0.168.0-alpha.2 (2026-10-26)
+
+### Bug Fixes
+
+* **core:** 允许 HTTP_PORT=0（OS 分配临时端口），修 48631ef0d 引入的回归 ([9c6a90c](https://github.com/nolotus/bun-nolo/commit/9c6a90c14e715b0c5b49017816ad16bf46d62333))
+* **server:** HTTP_PORT 缺失时 fail-closed，不再静默退到 80 ([48631ef](https://github.com/nolotus/bun-nolo/commit/48631ef0d541582e9c633ba2051c8bc1b36c8301))
+
+
+## 0.168.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **ai:** Explore 创作者目录与作者名快照 ([3e8d2a5](https://github.com/nolotus/bun-nolo/commit/3e8d2a5d8b690993d69f416cf1f3ab6f6bc85cb1))
+
+### Bug Fixes
+
+* **ai:** 插件配置页不再把空间共享连接当成个人已连接 ([cd7be41](https://github.com/nolotus/bun-nolo/commit/cd7be41633c3ee9ac3b6faeea0bca2a5ebc8d9a0))
+
+
+## 0.167.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **cloud-plugins:** serve connections by grant, drop the organization scope ([e6a7a6f](https://github.com/nolotus/bun-nolo/commit/e6a7a6ff8f8bf92e51717e5c5dee2d8fb1c7942b))
+* **plugins:** make data-source tools opt-in per user, off by default ([6df08fb](https://github.com/nolotus/bun-nolo/commit/6df08fb1ebbfff61304ccbcd5703c95569aee304))
+
+
+## 0.166.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **email:** 邮件偏好独立设置页 + 用户可设余额提醒门槛 + 删除静默 ([a8d5404](https://github.com/nolotus/bun-nolo/commit/a8d5404b7c6f42efaee08dd4e5e7d1254c33ab6c))
+
+
+## 0.165.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **agent:** list and probe cloud resources from the tool surface ([f6d151d](https://github.com/nolotus/bun-nolo/commit/f6d151d4dfbef350a0d3b9ae176f4bb365eae248))
+* **cli:** TUI 收到部署事件后响铃并在状态区提示 ([d47a1e9](https://github.com/nolotus/bun-nolo/commit/d47a1e9c8567be537a3d210242fbc419f1e64f63))
+* **cli:** TUI 收藏失败可见化 + 部署生效 watcher ([6e70c03](https://github.com/nolotus/bun-nolo/commit/6e70c034e2bbd8c8851e811a667645eaafceaae8))
+* **cloud-plugins:** add docker and cloudflare platform spec registry ([a6b00ee](https://github.com/nolotus/bun-nolo/commit/a6b00eec48ba78d697b104b3b67ec6d538afcee3))
+* **cloud-plugins:** register cloud_exec behind explicit opt-in ([b2a263d](https://github.com/nolotus/bun-nolo/commit/b2a263daffb6483aa2494fafe6648f960b02e9c4))
+* **cloud-plugins:** register gcp, vultr, hetzner and digitalocean ([8406aa6](https://github.com/nolotus/bun-nolo/commit/8406aa6c6813dd6a3217830959e842009afce35b))
+* **context:** 上下文占用口径统一：权威 input 优先、实时更新、未知窗口不假装真值 ([7cdb6c7](https://github.com/nolotus/bun-nolo/commit/7cdb6c70fb0b5d1666e101fbe20e513df8526374))
+* **explore:** wire docker and cloudflare cards into the plugin page ([de1a124](https://github.com/nolotus/bun-nolo/commit/de1a12438e544da14776f6fa6d8c09b93f40781e))
+* **ops:** detect email routes whose mailbox owner is gone ([9691ef1](https://github.com/nolotus/bun-nolo/commit/9691ef168aa00718fdec152f02eabe2accebead7))
+
+### Bug Fixes
+
+* **agent:** 公开 agent 缺 DB 记录时可解析（收藏/TUI 可见） ([eadcd78](https://github.com/nolotus/bun-nolo/commit/eadcd78f41d0eb132b0d264938ebd445b87e108a))
 * **cli:** 修复 crypto-js 子路径在 Node ESM 下无法解析导致的启动崩溃 ([41dc5ee](https://github.com/nolotus/bun-nolo/commit/41dc5ee1a18da0e2810e0292e6279d2a9a106bf2))
 * **cli:** 凭证冷却按 owner 隔离，失败原因细分并透传，listAgents 四态化 ([cee6385](https://github.com/nolotus/bun-nolo/commit/cee6385a91552135d9b712393e0f1b843f5efce0))
+* **cli:** 发布链加产物级 Dynamic require 门，并把 crypto-js/detect-libc 也改 external ([75b3421](https://github.com/nolotus/bun-nolo/commit/75b3421abc37a06d99fb886757e9038e2959e39d))
+* **cli:** 恢复 usage 合并的计费口径，占用改走「最近一次 provider input」 ([6186a78](https://github.com/nolotus/bun-nolo/commit/6186a7871ef6c7a8fd38ffe2904ce736673d4d51))
+* **cli:** 把 pino 与 clipboardy 保持为发布 external，修复 Node 26 启动崩溃 ([225adeb](https://github.com/nolotus/bun-nolo/commit/225adeb9ddf2d9fa8547afa166eced70bef169f2))
 * **cli:** 按上游语义分级 429/额度失败，区分容量饱和、额度耗尽与普通限流 ([cd85bea](https://github.com/nolotus/bun-nolo/commit/cd85bea6653eac51609924e245ae2b61c1de1ba2))
+* **database:** 阻止 chat-proxy 角色抢走共享 LevelDB 锁 ([d92e38f](https://github.com/nolotus/bun-nolo/commit/d92e38f06e025f37c74f363d6e61c9de03672447))
+* **docker:** confirm a cloud sandbox stop with backoff ([5f9b980](https://github.com/nolotus/bun-nolo/commit/5f9b98002061771f0d664b1692b25c74f2af77a6))
+* **email:** stop blocking bind on route readiness probe ([8406683](https://github.com/nolotus/bun-nolo/commit/840668355f55fbb9c83cb2fed30e9bde55df0e12))
+* **release:** restore the cli version to the highest reachable alpha tag ([41e612e](https://github.com/nolotus/bun-nolo/commit/41e612e0cedecacf73eec14727b102459bfb0450))
+* **release:** 修复合并引入的16处回归并纠正过时断言 ([5a28b77](https://github.com/nolotus/bun-nolo/commit/5a28b779c57fa56f431ea5eb1dfabc547ac34171))
+* **security:** drop the unused zod declaration from the cli ai stub ([2e6349a](https://github.com/nolotus/bun-nolo/commit/2e6349abc6ce79ac071818c4d14075acc3199243))
+* **yahoo-finance:** suppress survey and historical notices ([605cb47](https://github.com/nolotus/bun-nolo/commit/605cb470e000083f7e846554528085cb01f043cb))
 
 
 ## 0.158.0 (2026-10-26)

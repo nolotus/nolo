@@ -1,0 +1,179 @@
+/* ── CreatorExplore（Explore「用户」栏目的创作者目录） ───────────────
+   只复用既有设计变量与 AgentGrid / EmptyState 的视觉语言，不新造设计系统。 */
+
+.creator-explore {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5, 20px);
+  width: 100%;
+  animation: creator-explore-fade-in 0.4s ease-out;
+}
+
+@keyframes creator-explore-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.creator-explore__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.creator-explore__title {
+  margin: 0;
+  font-size: var(--fontSize-xl, 20px);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.creator-explore__subtitle {
+  margin: 0;
+  font-size: var(--fontSize-sm, 14px);
+  color: var(--textSecondary);
+  line-height: 1.5;
+}
+
+/* ── 创作者卡片 ─────────────────────────────────────────── */
+
+.creator-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4, 16px);
+  padding: var(--space-4, 16px);
+  background: var(--surfaceRaised, var(--backgroundSecondary));
+  border: 1px solid var(--borderMuted, var(--border));
+  border-radius: var(--radius-lg, 14px);
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.creator-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+  box-shadow: 0 8px 20px var(--shadowLight);
+}
+
+.creator-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.creator-card__avatar {
+  flex: 0 0 auto;
+}
+
+.creator-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+}
+
+.creator-card__name {
+  font-size: var(--fontSize-md, 16px);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.creator-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3, 12px);
+  font-size: var(--fontSize-xs, 12px);
+  color: var(--textSecondary);
+}
+
+.creator-card__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── 加载骨架 ───────────────────────────────────────────── */
+
+.creator-card--skeleton {
+  pointer-events: none;
+}
+
+.creator-card__avatar-skeleton {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--surfaceInset, var(--backgroundSecondary));
+}
+
+.creator-card__line-skeleton {
+  height: 12px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surfaceInset, var(--backgroundSecondary));
+}
+
+.creator-card__line-skeleton--name {
+  width: 120px;
+  height: 14px;
+}
+
+.creator-card__line-skeleton--stats {
+  width: 168px;
+}
+
+.creator-explore__shimmer {
+  animation: creator-explore-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes creator-explore-shimmer {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .creator-explore,
+  .creator-explore__shimmer {
+    animation: none;
+  }
+  .creator-card:hover {
+    transform: none;
+  }
+}
+
+/* ── 错误 + 重试 ────────────────────────────────────────── */
+
+.creator-explore__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  padding: var(--space-8, 32px) var(--space-6, 24px);
+  border: 1px solid var(--borderMuted, var(--border));
+  border-radius: var(--radius-lg, 14px);
+  background: var(--backgroundSecondary);
+  color: var(--textSecondary);
+  font-size: var(--fontSize-sm, 14px);
+  text-align: center;
+}
+
+.creator-explore__retry {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surfaceRaised, var(--backgroundSecondary));
+  color: var(--text);
+  font-size: var(--fontSize-sm, 14px);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.creator-explore__retry:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}

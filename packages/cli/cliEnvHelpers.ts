@@ -194,5 +194,6 @@ export function resolveCliEntrypointPath(fromModuleUrl = import.meta.url): strin
   }
   const sourcePath = fileURLToPath(fromModuleUrl);
   const ext = extname(sourcePath) || ".ts";
-  return join(dirname(sourcePath), "..", `index${ext}`);
+  // Source helpers and published chunks both live beside the CLI entrypoint.
+  return join(dirname(sourcePath), `index${ext}`);
 }

@@ -1,0 +1,105 @@
+/* packages/app/settings/web/EmailPreferences.css
+   独立邮件偏好页的骨架：内层复用 settings.css 的 .profile-section / .section-group /
+   .profile-item 等全局样式，这里只补页面容器与页头。 */
+
+.email-preferences-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 820px;
+  padding: var(--space-3) var(--space-3) var(--space-8);
+  margin: 0 auto;
+  width: 100%;
+}
+
+.email-preferences__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.email-preferences__header .page-title {
+  margin: 0;
+}
+
+.email-preferences__subtitle {
+  margin: 0;
+  font-size: var(--fontSize-sm);
+  color: var(--textTertiary);
+  line-height: 1.5;
+}
+
+/* 总控：一块紧凑区域（一行控件 + 一行小字说明），不再各占一个大行。 */
+.email-master-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--borderLight);
+  border-radius: var(--radius-md);
+}
+
+.email-master-bar__title {
+  margin: 0;
+  font-size: var(--fontSize-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.email-master-bar__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.email-master-bar__label {
+  font-size: var(--fontSize-base);
+  color: var(--text);
+}
+
+.email-master-bar__hint {
+  margin: 0;
+  font-size: var(--fontSize-sm);
+  color: var(--textTertiary);
+  line-height: 1.5;
+}
+
+/* 高级：默认折叠，且视觉上明显次级（弱化颜色 + 无卡片边框）。 */
+.email-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.email-advanced__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--textTertiary);
+  font-size: var(--fontSize-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.email-advanced__toggle:hover {
+  color: var(--textSecondary);
+}
+
+.email-advanced__hint {
+  margin: 0;
+  font-size: var(--fontSize-sm);
+  color: var(--textTertiary);
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .email-preferences-page {
+    padding: var(--space-3);
+    gap: var(--space-4);
+  }
+}

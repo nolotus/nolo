@@ -169,6 +169,9 @@ const CATALOG_SUMMARY_FIELDS = new Set([
   "id",
   "type",
   "userId",
+  // 作者名快照（发布时写进公开副本，见 publicAgentAuthorName.ts）：
+  // summary 列表是 explore 创作者目录的数据源，不列在这里就会被裁掉。
+  "authorName",
   "name",
   "title",
   "displayName",

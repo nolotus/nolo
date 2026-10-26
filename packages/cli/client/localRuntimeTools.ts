@@ -45,6 +45,7 @@ import { buildStartAgentRunFunctionSchema } from "../../ai/tools/agent/startAgen
 import { canonicalizeToolNames } from "../../ai/tools/toolNameAliases";
 import {
   buildNoloWorkspaceOpenAiTools,
+  filterClientNoloWorkspaceToolNames,
 } from "../../agent-runtime/noloWorkspaceTools";
 import { readXhsProfileFunctionSchema } from "../../ai/tools/readXhsProfileTool";
 import { readXPostFunctionSchema } from "../../ai/tools/readXPostTool";
@@ -163,7 +164,9 @@ export function buildOpenAiTools(args: {
     }),
     ...buildCliChromeConnectorOpenAiTools({ toolNames: args.toolNames }),
     ...buildServerPlatformOpenAiTools({ toolNames: args.toolNames }),
-    ...buildNoloWorkspaceOpenAiTools({ toolNames: args.toolNames }),
+    ...buildNoloWorkspaceOpenAiTools({
+      toolNames: filterClientNoloWorkspaceToolNames(args.toolNames),
+    }),
     ...buildOrchestrationOpenAiTools({
       toolNameSet,
       env: args.env,

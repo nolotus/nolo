@@ -18,8 +18,11 @@ import {
 import { buildCodeWorkSkillPrompt, CODE_PLANNER_COMPILED_EFFECTIVE_TOOLS } from "ai/skills/codePlannerSkills";
 import { buildLocalWorkspaceToolset, buildLocalWorkspacePolicyToolNames, buildLocalWorkspaceOpenAiTools } from "agent-runtime/localWorkspaceTools";
 import { SHELL_TOOL_NAMES } from "agent-runtime/localWorkspaceToolDefs";
-import { buildExternalOpenAiTools, filterExternalToolNames } from "agent-runtime/externalTools";
-import { buildNoloWorkspaceOpenAiTools, filterNoloWorkspaceToolNames } from "agent-runtime/noloWorkspaceTools";
+import {
+  buildExternalOpenAiTools,
+  filterExternalToolNamesForDesktop,
+} from "agent-runtime/externalTools";
+import { buildNoloWorkspaceOpenAiTools, filterNoloWorkspaceToolNames, filterClientNoloWorkspaceToolNames } from "agent-runtime/noloWorkspaceTools";
 import { TOOL_PACKS, FORCED_TOOLS, applyDisabledTools, expandEnabledPacks, addDefaultLightWebToolsForConfiguredAgents } from "ai/tools/toolPacks";
 // Re-export so downstream modules (desktopAgentRuntimeTurnService) keep importing
 // from here without needing to know the shared implementation moved to toolPacks.
@@ -326,10 +329,14 @@ export function buildDesktopOpenAiTools(args: {
     }),
     ...buildDesktopServerPlatformOpenAiTools({ toolNames: args.toolNames }),
     ...buildNoloWorkspaceOpenAiTools({
-      toolNames: args.toolNames,
+      toolNames: args.toolNames ? filterClientNoloWorkspaceToolNames(args.toolNames) : undefined,
     }),
   ];
-  const externalToolNames = filterExternalToolNames(args.toolNames ?? []);
+  // 数据源工具走与 server 同一道过滤（filterExternalToolNamesByDataSourcePlugins），
+  // 但桌面端拿不到用户开关 → 启用集合为空 → fail-closed，桌面工具面恒不含
+  // getYahooFinanceQuote / searchArxivPapers / getWorldBankIndicator / searchGoogle*。
+  // 绝不能用裸 filterExternalToolNames 绕开开关（那等于桌面端反而能用）。
+  const externalToolNames = filterExternalToolNamesForDesktop(args.toolNames ?? []);
   if (externalToolNames.length > 0) {
     for (const tool of buildExternalOpenAiTools({
       toolNames: externalToolNames,
@@ -387,7 +394,9 @@ export function buildDesktopLocalPolicyToolNames(args: {
     ...filterDesktopServerWebToolNames(args.toolNames),
     ...(hasDesktopStartAgentRunTool(args.toolNames) ? [DESKTOP_SERVER_START_AGENT_RUN_TOOL_NAME] : []),
     ...filterNoloWorkspaceToolNames(args.toolNames),
-    ...filterExternalToolNames(args.toolNames),
+    // 与 buildDesktopOpenAiTools 同一道闸门：数据源工具在桌面端未放行时，
+    // 连「声明了所以允许调用」的 policy 面也不能留下它们。
+    ...filterExternalToolNamesForDesktop(args.toolNames),
   ];
 }
 
