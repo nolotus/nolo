@@ -1,4 +1,15 @@
 
+## 0.184.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **ai:** Explore 创作者目录与作者名快照 ([3e8d2a5](https://github.com/nolotus/bun-nolo/commit/3e8d2a5d8b690993d69f416cf1f3ab6f6bc85cb1))
+
+### Bug Fixes
+
+* **ai:** 插件配置页不再把空间共享连接当成个人已连接 ([cd7be41](https://github.com/nolotus/bun-nolo/commit/cd7be41633c3ee9ac3b6faeea0bca2a5ebc8d9a0))
+
+
 ## 0.183.0-alpha.1 (2026-10-26)
 
 ### Features

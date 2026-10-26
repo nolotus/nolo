@@ -20,8 +20,10 @@ import { DataType } from "create/types";
 import { toast } from "app/utils/toast"
 import { isSystemAdmin } from "core/init";
 import { normalizeUserId } from "core/userId";
-import { LuGlobe, LuPencil, LuTrash2, LuShare2 } from "react-icons/lu";
+import { LuGlobe, LuTrash2, LuShare2 } from "react-icons/lu";
 import EmptyState from "ai/agent/web/EmptyState";
+
+const formatCount = (value: number) => value.toLocaleString();
 
 const CreatorPage: React.FC = () => {
     const { userId = "" } = useParams<"userId">();
@@ -98,26 +100,30 @@ const CreatorPage: React.FC = () => {
         reloadMode: "catalog",
     });
 
-    const loading = agentsLoading || isProfileLoading;
-
     // 确定展示名称：优先从用户资料中提取，再从智能体元数据中提取，最后用 ID 兜底
-    const creatorName = React.useMemo(() => {
+    const creatorIdentity = React.useMemo(() => {
         if (!isProfileLoading) {
-            if (profile?.nickname) return profile.nickname;
-            if (profile?.username) return profile.username;
-            if (profile?.name) return profile.name;
+            if (profile?.nickname) return { name: profile.nickname as string, fromProfile: true };
+            if (profile?.username) return { name: profile.username as string, fromProfile: true };
+            if (profile?.name) return { name: profile.name as string, fromProfile: true };
         }
 
         const firstAgent = agents?.[0];
-        if (firstAgent?.userName) return firstAgent.userName;
-        if (firstAgent?.creatorName) return firstAgent.creatorName;
-        if (firstAgent?.creator?.name) return firstAgent.creator.name;
+        if (firstAgent?.userName) return { name: firstAgent.userName as string, fromProfile: true };
+        if (firstAgent?.creatorName) return { name: firstAgent.creatorName as string, fromProfile: true };
+        if (firstAgent?.creator?.name) return { name: firstAgent.creator.name as string, fromProfile: true };
 
         // 如果个人资料还在加载且没有数据，先不展示以避免文字长度剧烈抖动
-        if (isProfileLoading) return " ";
+        if (isProfileLoading) return { name: " ", fromProfile: true };
 
-        return cleanUserId.slice(0, 8) || t("unknownUser");
+        return {
+            name: cleanUserId.slice(0, 8) || t("unknownUser"),
+            fromProfile: false,
+        };
     }, [profile, agents, cleanUserId, t, isProfileLoading]);
+
+    const creatorName = creatorIdentity.name.trim();
+    const isIdFallback = Boolean(creatorName) && !creatorIdentity.fromProfile;
 
     // 计算汇总数据
     const stats = React.useMemo(() => {
@@ -166,103 +172,136 @@ const CreatorPage: React.FC = () => {
     // 尝试获取头像 URL
     const avatarSrc = profile?.avatar || profile?.avatarUrl || profile?.avatarFileId;
 
+    const hasAnyPublishedContent =
+        stats.count > 0 || stats.totalUse > 0 || shares.length > 0;
+
     return (
         <div className="creator-page">
             <header className="creator-page__header">
-                <div className="creator-page__header-bg" />
+                <div className="creator-page__header-bg" aria-hidden="true" />
                 <div className="creator-page__header-content">
                     {isProfileLoading && !profile ? (
-                        <>
-                            <div className="creator-page__avatar-wrapper creator-page__avatar-wrapper--skeleton">
-                                <div className="creator-page__avatar-skeleton creator-page__shimmer" />
-                            </div>
+                        <div className="creator-page__identity" aria-hidden="true">
+                            <span className="creator-page__skeleton creator-page__skeleton--avatar" />
                             <div className="creator-page__main-info">
-                                <div className="creator-page__title-row">
-                                    <div className="creator-page__title-skeleton creator-page__shimmer" />
-                                </div>
-                                <div className="creator-page__bio-skeleton creator-page__shimmer" />
+                                <span className="creator-page__skeleton creator-page__skeleton--title" />
+                                <span className="creator-page__skeleton creator-page__skeleton--line" />
+                                <span className="creator-page__skeleton creator-page__skeleton--value" />
                             </div>
-                            <div className="creator-page__stats-grid">
-                                <div className="creator-page__stat-card-skeleton creator-page__shimmer" />
-                                <div className="creator-page__stat-card-skeleton creator-page__shimmer" />
-                            </div>
-                        </>
+                        </div>
                     ) : (
                         <>
-                            <div className="creator-page__avatar-wrapper">
-                                <Avatar
-                                    name={creatorName}
-                                    size="xxlarge"
-                                    type="user"
-                                    shape="full"
-                                    className="creator-page__avatar"
-                                    src={avatarSrc}
-                                />
-                            </div>
-                            <div className="creator-page__main-info">
-                                <div className="creator-page__title-row">
-                                    <h1 className="creator-page__title">{creatorName}</h1>
-                                    <span className="creator-page__badge">Verified Creator</span>
+                            <div className="creator-page__identity">
+                                <div className="creator-page__avatar-wrapper">
+                                    <Avatar
+                                        name={creatorName}
+                                        size="xxlarge"
+                                        type="user"
+                                        shape="full"
+                                        className="creator-page__avatar"
+                                        src={avatarSrc}
+                                    />
                                 </div>
-                                {(profile?.bio || profile?.signature) && (
-                                    <div className="creator-page__bio">
-                                        <LuPencil size={14} className="creator-page__bio-icon" aria-hidden="true" />
-                                        <span>{profile.bio || profile.signature}</span>
-                                    </div>
-                                )}
-                                {profile?.website && (
-                                    <div className="creator-page__website">
-                                        <LuGlobe size={14} className="creator-page__website-icon" aria-hidden="true" />
-                                        <a href={profile.website.startsWith('http') ? profile.website : `https://${profile.website}`} target="_blank" rel="noopener noreferrer">
-                                            {profile.website.replace(/^https?:\/\//, '')}
-                                        </a>
-                                    </div>
-                                )}
+                                <div className="creator-page__main-info">
+                                    <h1
+                                        className={
+                                            isIdFallback
+                                                ? "creator-page__title creator-page__title--fallback"
+                                                : "creator-page__title"
+                                        }
+                                        title={creatorName || undefined}
+                                    >
+                                        {creatorName}
+                                    </h1>
+                                    {(profile?.bio || profile?.signature) && (
+                                        <p className="creator-page__bio">{profile.bio || profile.signature}</p>
+                                    )}
+                                    {profile?.website && (
+                                        <div className="creator-page__website">
+                                            <LuGlobe
+                                                size={14}
+                                                className="creator-page__website-icon"
+                                                aria-hidden="true"
+                                            />
+                                            <a
+                                                href={profile.website.startsWith('http') ? profile.website : `https://${profile.website}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                            >
+                                                {profile.website.replace(/^https?:\/\//, '')}
+                                            </a>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <div className="creator-page__stats-grid">
-                                <div className="creator-page__stat-card">
-                                    <span className="creator-page__stat-value">
-                                        {agentsLoading && !agents ? (
-                                            <span className="creator-page__stat-value-skeleton creator-page__shimmer" />
-                                        ) : (
-                                            stats.count
-                                        )}
+                            {agentsLoading ? (
+                                <div className="creator-page__meta" aria-hidden="true">
+                                    <span className="creator-page__skeleton creator-page__skeleton--value" />
+                                </div>
+                            ) : hasAnyPublishedContent ? (
+                                <div className="creator-page__meta">
+                                    <span
+                                        className={
+                                            stats.totalUse > 0
+                                                ? "creator-page__meta-item"
+                                                : "creator-page__meta-item creator-page__meta-item--zero"
+                                        }
+                                    >
+                                        <span className="creator-page__meta-value">
+                                            {formatCount(stats.totalUse)}
+                                        </span>
+                                        <span className="creator-page__meta-label">
+                                            {t("totalUse", "总使用")}
+                                        </span>
                                     </span>
-                                    <span className="creator-page__stat-label">{t("published", "已发布")}</span>
                                 </div>
-                                <div className="creator-page__stat-card">
-                                    <span className="creator-page__stat-value">
-                                        {agentsLoading && !agents ? (
-                                            <span className="creator-page__stat-value-skeleton creator-page__shimmer" />
-                                        ) : (
-                                            stats.totalUse
-                                        )}
-                                    </span>
-                                    <span className="creator-page__stat-label">{t("totalUse", "总使用")}</span>
-                                </div>
-                            </div>
+                            ) : null}
                         </>
                     )}
                 </div>
             </header>
 
             <div className="creator-page__content">
-                <div className="creator-page__tabs">
+                <div className="creator-page__tabs" role="tablist">
                     <button
                         type="button"
+                        role="tab"
+                        aria-selected={activeTab === "agents"}
                         className={`creator-page__tab-btn ${activeTab === "agents" ? "active" : ""}`}
                         onClick={() => setActiveTab("agents")}
                     >
                         {t("publicAgents", "展示橱窗")}
-                        {!loading && <span className="creator-page__tab-badge">{stats.count}</span>}
+                        {!agentsLoading && (
+                            <span
+                                className={
+                                    stats.count > 0
+                                        ? "creator-page__tab-badge"
+                                        : "creator-page__tab-badge creator-page__tab-badge--zero"
+                                }
+                            >
+                                {formatCount(stats.count)}
+                            </span>
+                        )}
                     </button>
                     <button
                         type="button"
+                        role="tab"
+                        aria-selected={activeTab === "shares"}
                         className={`creator-page__tab-btn ${activeTab === "shares" ? "active" : ""}`}
                         onClick={() => setActiveTab("shares")}
                     >
                         {t("communityShares", "社区分享")}
-                        {!sharesLoading && <span className="creator-page__tab-badge">{shares.length}</span>}
+                        {!sharesLoading && (
+                            <span
+                                className={
+                                    shares.length > 0
+                                        ? "creator-page__tab-badge"
+                                        : "creator-page__tab-badge creator-page__tab-badge--zero"
+                                }
+                            >
+                                {formatCount(shares.length)}
+                            </span>
+                        )}
                     </button>
                 </div>
 
@@ -270,38 +309,45 @@ const CreatorPage: React.FC = () => {
                     <div className="creator-page__tab-pane">
                         <PublicAgentsList
                             loading={agentsLoading}
+                            error={error}
                             data={agents}
                             reload={retry}
                             keepGridHeight
                         />
-                        {error && (
-                            <div className="creator-page__error">
-                                <p>{t("loadError", "无法加载创作者内容")}</p>
-                                <button type="button" className="creator-page__retry-btn" onClick={() => void retry()}>
-                                    {t("retry", "重新加载")}
-                                </button>
-                            </div>
-                        )}
                     </div>
                 )}
 
                 {activeTab === "shares" && (
                     <div className="creator-page__tab-pane">
                         {sharesLoading && (
-                            <div className="creator-page__share-state">
-                                {t("loading", "加载中...")}
+                            <div className="creator-page__share-grid" aria-hidden="true">
+                                {[0, 1, 2].map((index) => (
+                                    <div
+                                        key={index}
+                                        className="creator-page__share-card creator-page__share-card--skeleton"
+                                    >
+                                        <span className="creator-page__skeleton creator-page__skeleton--title" />
+                                        <span className="creator-page__skeleton creator-page__skeleton--line" />
+                                        <span className="creator-page__skeleton creator-page__skeleton--line" />
+                                    </div>
+                                ))}
                             </div>
                         )}
 
                         {!sharesLoading && sharesError && (
-                            <div className="creator-page__share-state">{sharesError}</div>
+                            <div className="creator-page__share-state" role="status">
+                                {sharesError}
+                            </div>
                         )}
 
                         {!sharesLoading && !sharesError && shares.length === 0 && (
                             <EmptyState
                                 icon={<LuShare2 size={32} />}
                                 title={t("noCommunityShares", "暂无公开的分享内容")}
-                                subtitle="该用户暂未在社区公开分享任何内容"
+                                subtitle={t(
+                                    "noCommunitySharesHint",
+                                    "该用户还没有在社区公开分享内容"
+                                )}
                             />
                         )}
 
@@ -317,6 +363,17 @@ const CreatorPage: React.FC = () => {
                                                 {formatShareTime(share.createdAt)}
                                             </span>
                                         </div>
+                                        {canDeleteShare(share) && (
+                                            <button
+                                                type="button"
+                                                className="creator-page__share-delete-btn"
+                                                onClick={() => void handleDeleteShare(share)}
+                                                aria-label={t("deleteShare", "删除该分享")}
+                                                title={t("delete", "删除")}
+                                            >
+                                                <LuTrash2 size={16} aria-hidden="true" />
+                                            </button>
+                                        )}
                                         <h3 className="creator-page__share-title">{share.title}</h3>
                                         {share.description && (
                                             <p className="creator-page__share-description">{share.description}</p>
@@ -339,16 +396,6 @@ const CreatorPage: React.FC = () => {
                                                     {t("viewDetails", "查看详情")}
                                                 </Link>
                                             )}
-                                            {canDeleteShare(share) && (
-                                                <button
-                                                    type="button"
-                                                    className="creator-page__share-delete-btn"
-                                                    onClick={() => void handleDeleteShare(share)}
-                                                >
-                                                    <LuTrash2 size={14} aria-hidden="true" />
-                                                    {t("delete", "删除")}
-                                                </button>
-                                            )}
                                         </div>
                                     </article>
                                 ))}
@@ -357,8 +404,6 @@ const CreatorPage: React.FC = () => {
                     </div>
                 )}
             </div>
-
-            
         </div>
     );
 };

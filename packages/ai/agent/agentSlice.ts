@@ -8,6 +8,7 @@ import { write, patch, remove } from "database/dbSlice";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { pushServerSyncedCredential } from "../chat/agentCredentialSyncClient";
 import { createAgentKey } from "database/keys";
+import { readAuthorNameSnapshot, withAuthorNameSnapshot } from "ai/agent/publicAgentAuthorName";
 import { DataType } from "create/types";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
@@ -520,12 +521,18 @@ export const slice = createSliceWithThunks({
           )
           .unwrap();
 
-        // 如需公开，再写入公共副本
+        // 如需公开，再写入公共副本。
+        // 公开副本是 explore 列表/创作者目录的唯一数据源，服务端不做用户资料 join，
+        // 所以在这里把作者名快照写进记录（authorName，见 publicAgentAuthorName.ts）。
         if (agent.isPublic) {
+          const authorName = await readAuthorNameSnapshot(
+            (thunkApi.extra as any)?.db,
+            effectiveUserId
+          );
           await thunkApi
             .dispatch(
               write({
-                data: agent,
+                data: withAuthorNameSnapshot(agent as any, authorName),
                 customKey: publicKey,
                 userId: effectiveUserId,
               })
@@ -689,13 +696,22 @@ export const slice = createSliceWithThunks({
             : wasPublic;
 
           if (nowPublic) {
-            const mergedPublic: Agent = {
-              ...(previousAgent as any),
-              ...(changes as any),
-              id: normalizedAgentId,
-              type: previousAgent.type || DataType.AGENT,
-              userId: effectiveUserId,
-            };
+            // 作者名快照：发布/更新公开副本时写入当前用户的显示名，让
+            // explore 创作者目录直接显示真名（不需要 N 次用户资料请求）。
+            const authorName = await readAuthorNameSnapshot(
+              (thunkApi.extra as any)?.db,
+              effectiveUserId
+            );
+            const mergedPublic: Agent = withAuthorNameSnapshot(
+              {
+                ...(previousAgent as any),
+                ...(changes as any),
+                id: normalizedAgentId,
+                type: previousAgent.type || DataType.AGENT,
+                userId: effectiveUserId,
+              },
+              authorName
+            ) as Agent;
 
             await thunkApi
               .dispatch(
