@@ -1,4 +1,15 @@
 
+## 0.185.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **ai:** make commit review gate configurable under auto-review ([7bfeed3](https://github.com/nolotus/bun-nolo/commit/7bfeed33ef5d54539ca05592c930ba99a035b649))
+
+### Bug Fixes
+
+* **cli:** resolve windows process start time and child entrypoint ([ae7771d](https://github.com/nolotus/bun-nolo/commit/ae7771d86ad3620e0debd80c79a60def81ec58a3))
+
+
 ## 0.184.0-alpha.2 (2026-10-26)
 
 ### Bug Fixes

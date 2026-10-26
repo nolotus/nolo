@@ -114,34 +114,48 @@ const AGENT_CONFIRM_BOUNDARY = `--- 确认边界 ---
 - 收到「子对话禁止再创建孙对话」＝你已是子对话，禁止再派发，把结果返回父对话即可。
 - **目标范围控制**：发现原交付物不能实现，不得自行缩成文案/手动退路后宣称完成；陈述已证实限制、原目标差距、推荐替代及影响，缩减用户可见能力需明确确认；同范围技术细节不需问，已授权不变范围继续推进，防变成事事确认。`;
 
-// 完整编排协议 = 价值/方法 + 各硬门按原顺序拼接（段落间原以单个空行分隔）。
-// 默认派发规则与安全硬门在最小/完整协议中同源。
-const AGENT_COLLABORATION_INSTRUCTIONS = [
-    AGENT_COLLABORATION_VALUE_AND_METHOD,
-    AGENT_DELEGATE_FIRST_DEFAULT,
-    AGENT_PLATFORM_CREDITS_GATE,
-    AGENT_DISPATCH_PRECHECK,
-    AGENT_COLLABORATION_FULL_PROTOCOL,
-    AGENT_COMMIT_REVIEW_GATE,
-    AGENT_CONFIRM_BOUNDARY,
-].join("\n\n");
-
-// ── 最小派发协议（无派发意图时注入）────────────────────────────────────────
-// 常驻默认派发、startAgentRun 参数与凭证约束、
-// 以及必须常在的安全硬门（平台积分授权门 / 派发前自检 / commit review 硬门 /
-// 确认边界）。完整协议（派发价值三杠杆、默认派发流程、选人五档、发散/会商、
-// 拆分与 brief 纪律）在检测到派发意图时注入（dispatchIntent.ts）。
-const AGENT_COLLABORATION_MIN_INSTRUCTIONS = [
-    `--- 多 Agent 派发（最小协议） ---
+const AGENT_COLLABORATION_MIN_DISPATCH = `--- 多 Agent 派发（最小协议） ---
 - startAgentRun 启动子 Agent：省略 agentKey（或传 'self'）自动派发自身执行细分子任务；派其他 Agent 时 agentKey 必须原样照抄 listAgents 返回的 agentKey 字段（不拼接/不推断/不换格式/不传 name）；wait:false（默认）异步返回 runId，派发后立即收尾等终态通知，禁止轮询；并行派发用同一 batchId 归组。
 - 并行扇出：同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道）；若需分散上游压力，优先跨不同 credentialGroup 派发；credentialed:false（凭证归属未知）的 agent 不是「独立凭证」，同批并发会被守卫拒绝，需串行派发或显式 allowUnknownCredential 确认风险。
-- 本轮未注入完整编排协议（无派发意图）；如确需多 Agent 编排，按本最小协议与 startAgentRun 工具描述执行，安全硬门见下。`,
-    AGENT_DELEGATE_FIRST_DEFAULT,
-    AGENT_PLATFORM_CREDITS_GATE,
-    AGENT_DISPATCH_PRECHECK,
-    AGENT_COMMIT_REVIEW_GATE,
-    AGENT_CONFIRM_BOUNDARY,
-].join("\n\n");
+- 本轮未注入完整编排协议（无派发意图）；如确需多 Agent 编排，按本最小协议与 startAgentRun 工具描述执行，安全硬门见下。`;
+
+function isCommitReviewGateEnabled(opts?: ToolGuidedSectionsOptions): boolean {
+    if (opts?.enableCommitReviewGate !== undefined) {
+        return opts.enableCommitReviewGate;
+    }
+    if (typeof process !== "undefined" && process.env?.NOLO_DISABLE_COMMIT_REVIEW_GATE === "1") {
+        return false;
+    }
+    return true;
+}
+
+function buildAgentCollaborationInstructions(opts?: ToolGuidedSectionsOptions): string {
+    const isFull = opts?.dispatchIntent === true;
+    const gateEnabled = isCommitReviewGateEnabled(opts);
+    const sections = isFull
+        ? [
+            AGENT_COLLABORATION_VALUE_AND_METHOD,
+            AGENT_DELEGATE_FIRST_DEFAULT,
+            AGENT_PLATFORM_CREDITS_GATE,
+            AGENT_DISPATCH_PRECHECK,
+            AGENT_COLLABORATION_FULL_PROTOCOL,
+            ...(gateEnabled ? [AGENT_COMMIT_REVIEW_GATE] : []),
+            AGENT_CONFIRM_BOUNDARY,
+        ]
+        : [
+            AGENT_COLLABORATION_MIN_DISPATCH,
+            AGENT_DELEGATE_FIRST_DEFAULT,
+            AGENT_PLATFORM_CREDITS_GATE,
+            AGENT_DISPATCH_PRECHECK,
+            ...(gateEnabled ? [AGENT_COMMIT_REVIEW_GATE] : []),
+            AGENT_CONFIRM_BOUNDARY,
+        ];
+    return sections.join("\n\n");
+}
+
+// 导出常量供测试与兼容既有快照比对使用
+const AGENT_COLLABORATION_INSTRUCTIONS = buildAgentCollaborationInstructions({ dispatchIntent: true });
+const AGENT_COLLABORATION_MIN_INSTRUCTIONS = buildAgentCollaborationInstructions({ dispatchIntent: false });
 
 // ============================================================================
 // 交互说明（有 ask_user 工具时注入）
@@ -242,6 +256,13 @@ export type ToolGuidedSectionsOptions = {
      * （安全硬门逐字常在，不受影响）。
      */
     dispatchIntent?: boolean;
+    /**
+     * 是否启用 commit 前独立审查硬门（归属 auto-review 机制）。
+     * 缺省为 true（保持既有安全默认），或受环境变量 NOLO_DISABLE_COMMIT_REVIEW_GATE 控制。
+     * 当显式设为 false 或开启禁用开关时，不注入强制阻断式 commit 独立 review 硬门，
+     * 允许由用户/管理员在单 Agent 独占或自举修复时直接控制提交。
+     */
+    enableCommitReviewGate?: boolean;
 };
 
 /**
@@ -318,10 +339,7 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
         ],
         // 按需注入：完整编排协议仅在有派发意图时给；无派发意图给最小协议
         // （派发机制 + 安全硬门常在：平台积分授权门 / commit review 硬门）。
-        build: (_tools, opts) =>
-            opts?.dispatchIntent === true
-                ? AGENT_COLLABORATION_INSTRUCTIONS
-                : AGENT_COLLABORATION_MIN_INSTRUCTIONS,
+        build: (_tools, opts) => buildAgentCollaborationInstructions(opts),
     },
     { id: "menuUsage", triggerTools: ["ask_user"], build: () => MENU_USAGE_INSTRUCTIONS },
     {
