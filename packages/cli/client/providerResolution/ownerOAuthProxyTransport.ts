@@ -33,6 +33,7 @@ import {
   PlatformStreamInterruptedError,
   type PlatformChatProviderConfig,
 } from "../../../agent-runtime/platformChatProvider";
+import { isCapacitySaturatedRateLimit } from "../../../ai/agent/agentAvailabilityShared";
 import { logLocalRuntimeDiagnostic, summarizeOpenAiToolNames } from "../localRuntimeDiagnostics";
 import { fetchWithTransientRetry } from "../localRuntimeFetchRetry";
 import { resolveProviderOpenAiToolBundle } from "../localRuntimeTools";
@@ -83,9 +84,8 @@ const OWNER_PROXY_BODY_FORBIDDEN_KEYS = [
  * 那个集合影响所有调用方，这里只在 owner-required 这一条链上沿用同样的口径。
  *
  * - 503：服务端明示的排空信号（core_draining / retryable:true），既有语义逐字保留。
- * - 429：与 core 默认口径一致地列在这里，但**是否真的重试由 shouldRetryResponse
- *   决定**，而该钩子只放行 503 的排空信号；所以 429 在本调用点的实际行为与
- *   改动前完全一致（不重试）。
+ * - 429：是否真的重试由 shouldRetryOwnerProxyResponse 决定。仅明确容量饱和且无复位信号时放行重试；
+ *   额度耗尽、未知 body 或带复位信号的 429 均不重试，应立刻走 mark 冷却分支。
  * - 500：**不在集合里**。500 是服务端兜底码——未知内部错误、代理自身的 TypeError、
  *   上游 fetch 抛错都落在 500 PROXY_FAILED / UPSTREAM_TRANSPORT_ERROR 上
  *   （见 packages/server/handlers/chatHandler.ts 的 PROXY_FAILED 兜底分支），
@@ -151,16 +151,35 @@ async function readStructuredErrorCode(
 /**
  * 本调用点的响应重试闸门。
  *
+ * - 429：仅明确容量饱和且无复位信号才放行，默认从严。
+ *   额度耗尽或未知 body 不重试，应立刻走 mark 冷却分支。
+ *   真实案例：`local Codex OAuth provider failed: HTTP 429Codex is at capacity, please try again later`
+ *   （上游服务容量饱和，与该账号 4% 的额度无关）。
+ *   通过 `response.clone()` 读 body（先 json，失败退化为 text 字符串）与 headers，
+ *   调用 `isCapacitySaturatedRateLimit(body, Date.now(), response.headers)`。
  * - 503：只重试服务端明示可重试的排空信号（core_draining / retryable:true），
  *   与改动前逐字一致。
  * - 500：**一律不重试**。500 是服务端兜底码（PROXY_FAILED / UPSTREAM_TRANSPORT_ERROR
  *   / 未知内部错误共用），不是「上游没受理、可以安全重放」的信号；服务端自己
  *   保留重试所有权，客户端重放会把可能已发往上游的推理重复一遍。
- * - 其它状态码（含 429）：不放行，行为与改动前一致。
+ * - 其它状态码：不放行，行为与改动前一致。
  */
 export async function shouldRetryOwnerProxyResponse(
   response: Response,
 ): Promise<boolean> {
+  if (response.status === 429) {
+    try {
+      let body: unknown;
+      try {
+        body = await response.clone().json();
+      } catch {
+        body = await response.clone().text();
+      }
+      return isCapacitySaturatedRateLimit(body, Date.now(), response.headers);
+    } catch {
+      return false;
+    }
+  }
   if (response.status === 503) {
     try {
       const body = (await response.clone().json()) as {

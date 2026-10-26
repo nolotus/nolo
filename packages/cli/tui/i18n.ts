@@ -211,8 +211,8 @@ const STRINGS = {
     zh: "本次回复出错。已排队的消息仍保留，按 Enter 可重新发送。",
   },
   quotaExhaustedHint: {
-    en: "This agent seems to have hit a quota/rate limit (HTTP 429).\nUse /agent to switch to another agent and keep going — the dialog context is preserved.",
-    zh: "当前 agent 似乎额度/速率受限（429）。\n可以用 /agent 切换到其他 agent 后继续，同一对话会保留上下文。",
+    en: "This agent is temporarily unavailable (HTTP 429).\nUse /agent to switch to another agent and keep going — the dialog context is preserved.",
+    zh: "当前 agent 暂时不可用（HTTP 429）。\n可以用 /agent 切换到其他 agent 后继续，同一对话会保留上下文。",
   },
   balanceExhaustedHint: {
     en: "Your message is saved in this dialog — top up, then send again or say \"continue\" to pick up where you left off.",
@@ -436,6 +436,12 @@ const STRINGS = {
   localRunRateLimitThrottled: {
     en: "[nolo] Upstream rate limit ({0}): {1}",
     zh: "[nolo] 上游限流（{0}）：{1}",
+  },
+  // 上游明确表示「服务容量饱和」（如 Codex 的 "is at capacity"）。这与账号额度
+  // 无关，用「额度」措辞会让人误以为是自己配额用完了。单独一档。
+  localRunRateLimitCapacity: {
+    en: "[nolo] Upstream service at capacity ({0}): {1}",
+    zh: "[nolo] 上游服务容量饱和（{0}）：{1}",
   },
   // 第 2 行复位提示：沿用 extractRateLimitResetHint 抓到的上游原文（不换算），
   // 只作括号补充；没抓到就没有这段括号。

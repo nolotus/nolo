@@ -92,14 +92,19 @@ import { toErrorMessage } from "core/errorMessage";
 import {
   clearCredentialAvailability,
   readCredentialEntry,
+  readEffectiveCredentialEntry,
   recordCredentialProbe,
   resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
 import {
-  isQuotaLimited403Body,
+  classifyFailureSubclass,
+  isCapacitySaturatedRateLimit,
+  isQuotaExhaustedText,
   mergeAvailabilityDeadline,
   PROBE_INTERVAL_MS,
   resolveCooldownGate,
+  resolveCredentialCandidateKeys,
+  type AgentRunFailureSubclass,
 } from "../../ai/agent/agentAvailabilityShared";
 import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
 import {
@@ -694,7 +699,9 @@ const QUOTA_EXHAUSTED_EXTRA_RE =
   /insufficient[_\s-]?(?:quota|balance|credits?)|余额不足|额度已?用尽/i;
 
 function looksLikeQuotaExhaustedText(message: string): boolean {
-  return isQuotaLimited403Body(message) || QUOTA_EXHAUSTED_EXTRA_RE.test(message);
+  // 复用共享判据（含中文「用量上限」、`usage limit reached` 等），
+  // 避免这里维护一份更窄的词表把额度耗尽误报成「上游限流」。
+  return isQuotaExhaustedText(message) || QUOTA_EXHAUSTED_EXTRA_RE.test(message);
 }
 
 /**
@@ -1312,9 +1319,13 @@ function formatRateLimitResetHint(
  * 分类用的语义等价码。
  */
 function buildRateLimitFailure(ctx: FailureCtx): string {
-  const headlineKey = ctx.quotaExhausted
-    ? "localRunRateLimitQuota"
-    : "localRunRateLimitThrottled";
+  // 容量饱和优先单独一档：它既不是账号额度用尽、也不是常规限流。文案若混用
+  // 「额度/限流」，用户会以为自己配额被用完了（真实案例：Codex "is at capacity"）。
+  const headlineKey = isCapacitySaturatedRateLimit(ctx.message, Date.now())
+    ? "localRunRateLimitCapacity"
+    : ctx.quotaExhausted
+      ? "localRunRateLimitQuota"
+      : "localRunRateLimitThrottled";
   const lines = [
     t(
       headlineKey,
@@ -1972,8 +1983,15 @@ async function runHttpAgentTurn(
       // 「工具坏了 / 结论丢了」。
       return { exitCode: 0, streamInterrupted: true };
     }
+    const failureSubclass = classifyFailureSubclass({
+      message: toErrorMessage(error),
+      body: error,
+    });
     options.output.write(buildTransportErrorHint(options.serverUrl, error));
-    return { exitCode: 1 };
+    return {
+      exitCode: 1,
+      ...(failureSubclass && failureSubclass !== "unknown" ? { failureSubclass } : {}),
+    };
   }
 
   if (shouldStream && isGatewayHttpStatus(res.status)) {
@@ -1988,8 +2006,15 @@ async function runHttpAgentTurn(
         res = await postAgentRun(false);
       } catch (error) {
         spinner.stop();
+        const failureSubclass = classifyFailureSubclass({
+          message: toErrorMessage(error),
+          body: error,
+        });
         options.output.write(buildTransportErrorHint(options.serverUrl, error));
-        return { exitCode: 1 };
+        return {
+          exitCode: 1,
+          ...(failureSubclass && failureSubclass !== "unknown" ? { failureSubclass } : {}),
+        };
       }
     }
   }
@@ -2037,9 +2062,16 @@ async function runHttpAgentTurn(
         `[nolo] continue with: nolo agent run ${options.agentKey} --continue ${dialogIdText} --msg "retry"\n`,
       );
     }
-    return dialogIdText
-      ? { exitCode: 1, dialogId: dialogIdText }
-      : { exitCode: 1 };
+    const failureSubclass = classifyFailureSubclass({
+      status: res.status,
+      message: `${errorText || messageText} ${reasonText || ""} ${codeText || ""}`.trim(),
+      body: data,
+    });
+    return {
+      exitCode: 1,
+      ...(dialogIdText ? { dialogId: dialogIdText } : {}),
+      ...(failureSubclass && failureSubclass !== "unknown" ? { failureSubclass } : {}),
+    };
   }
 
   const content = formatAssistantResponseForCli(
@@ -2509,6 +2541,10 @@ async function executeLocalAgentTurnForCliWithAdapter(
     return {
       exitCode: 1,
       localError: error,
+      failureSubclass: classifyFailureSubclass({
+        message: toErrorMessage(error),
+        body: error,
+      }),
       ...(savedDialogId ? { dialogId: savedDialogId } : {}),
       ...(abortedTurnCredits !== undefined ? { turnCredits: abortedTurnCredits } : {}),
       ...(abortedUsageRecords?.length ? { usageRecords: abortedUsageRecords } : {}),
@@ -2531,7 +2567,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
  */
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode?: 1; credentialKey?: string } | null> {
+): Promise<{ exitCode?: 1; credentialKey?: string; failureSubclass?: AgentRunFailureSubclass } | null> {
   // 云后端 runtimeKey（gcp / instabox / machine:*）的 run 由服务端通道执行，
   // 本地 adapter 不参与：这里若照旧构造它，本地通道的 fail-closed 闸门
   // （assertRuntimeKeyLocalFulfillable）会错误地打死一次合法的 server 派发
@@ -2554,7 +2590,11 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
   const baseRecord =
     (config as { rawRecord?: Record<string, unknown> }).rawRecord ??
     (config as unknown as Record<string, unknown>);
-  let credentialKey = resolveCredentialKeyWithFallback(baseRecord);
+  let credentialKey = resolveCredentialKeyWithFallback(
+    baseRecord.agentKey || baseRecord.key
+      ? baseRecord
+      : { ...baseRecord, agentKey: options.agentKey },
+  );
   // 外来 OAuth agent（resolveOAuthChannelOwnerSkip 命中）的 run 走所有者通道，
   // 不使用本机凭据——本机 credential 级冷却条目对其是 false positive（收藏者
   // 自己的历史 429 会把走所有者通道的 run 拦到窗口重置）。排除之；agent 级
@@ -2579,25 +2619,34 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
   }
   const env = options.env as NodeJS.ProcessEnv;
   const now = Date.now();
-  const entry = credentialKey
-    ? await readCredentialEntry(credentialKey, env, now).catch(() => undefined)
-    : undefined;
+  let entry: { nextAvailableAt: number; lastProbeAt?: number } | undefined;
+  let matchedKey: string | undefined;
+  if (credentialKey) {
+    const effective = await readEffectiveCredentialEntry(credentialKey, env, now).catch(() => undefined);
+    if (effective) {
+      entry = effective;
+      matchedKey = effective.matchedKey;
+    }
+  }
   const entryAt = entry?.nextAvailableAt;
   const effectiveNextAvailableAt =
     typeof entryAt === "number"
       ? mergeAvailabilityDeadline(agentLevelNextAvailableAt, entryAt)
       : agentLevelNextAvailableAt;
-  if (typeof effectiveNextAvailableAt !== "number") return { credentialKey };
+  const activeKey = matchedKey || credentialKey;
+  if (typeof effectiveNextAvailableAt !== "number") {
+    return { credentialKey: credentialKey || activeKey, matchedKey };
+  }
   const gateDecision = resolveCooldownGate(
     { nextAvailableAt: effectiveNextAvailableAt, lastProbeAt: entry?.lastProbeAt },
     now,
   );
-  if (gateDecision === "probe" && credentialKey) {
+  if (gateDecision === "probe" && activeKey) {
     // 与执行期 gate 同语义：放行本次真实请求前记录探测时间，避免间隔内反复重试。
-    await recordCredentialProbe(credentialKey, env, now).catch(() => undefined);
-    return { credentialKey };
+    await recordCredentialProbe(activeKey, env, now).catch(() => undefined);
+    return { credentialKey: credentialKey || activeKey, matchedKey };
   }
-  if (gateDecision !== "blocked") return { credentialKey };
+  if (gateDecision !== "blocked") return { credentialKey: credentialKey || activeKey, matchedKey };
   options.output.write(
     `${t(
       "agentCooldownBlocked",
@@ -2607,7 +2656,7 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
       ),
     )}\n`,
   );
-  return { exitCode: 1 };
+  return { exitCode: 1, failureSubclass: "rate_limit" };
 }
 
 /**
@@ -2656,6 +2705,9 @@ export function foldLocalResultForTui(
     // Authoritatively 拿不到 lastAssistantText → `.result.md` 不写、status 无
     // resultFile，编排者只能去啃带 ANSI 的 .log（同坑位历史：turnCredits）。
     ...(localResult.finalText ? { finalText: localResult.finalText } : {}),
+    ...(localResult.failureSubclass
+      ? { failureSubclass: localResult.failureSubclass }
+      : {}),
   };
   // 头元数据旁路随行（见 agentRunResultFile.ts），否则 auto→local 的头会丢 model。
   const headerMeta = getRunResultHeaderMeta(localResult);
@@ -2751,9 +2803,16 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
       const localErrorMessage = localResult.localError
         ? toErrorMessage(localResult.localError)
         : "local runtime failed";
+      const failureSubclass =
+        localResult.failureSubclass ??
+        classifyFailureSubclass({
+          message: localErrorMessage,
+          body: localResult.localError,
+        });
       options.output.write(describeLocalRunFailure(localErrorMessage, localResult.localError));
       return {
         exitCode: 1,
+        failureSubclass,
         ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
         // Keep localError so TUI can show balance/quota/dialog-preserved hints
         // instead of only the raw auto-runtime line.
@@ -2785,7 +2844,10 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
   const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
   if (localAvailability?.exitCode) {
-    return { exitCode: localAvailability.exitCode };
+    return {
+      exitCode: localAvailability.exitCode,
+      failureSubclass: localAvailability.failureSubclass ?? "rate_limit",
+    };
   }
 
   const httpResult = await runHttpAgentTurn(options, authToken);
@@ -2794,10 +2856,11 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   if (
     httpResult.exitCode === 0 &&
     !httpResult.streamInterrupted &&
-    localAvailability?.credentialKey
+    (localAvailability?.credentialKey || localAvailability?.matchedKey)
   ) {
+    const keyToClear = localAvailability.credentialKey || localAvailability.matchedKey!;
     await clearCredentialAvailability(
-      localAvailability.credentialKey,
+      keyToClear,
       options.env as NodeJS.ProcessEnv,
     ).catch(() => undefined);
   }

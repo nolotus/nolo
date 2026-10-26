@@ -18,7 +18,11 @@ import {
   omitNullishAgentSummaryFields,
   summarizeCredentialGroups,
 } from "./safeAgentSummary";
-import { isAgentUnavailableNow } from "./agentAvailabilityShared";
+import {
+  isAgentUnavailableNow,
+  resolveAgentAvailability,
+  DEFAULT_PROVIDER_RETRY_MS,
+} from "./agentAvailabilityShared";
 
 export type DiscoveryScope = "preferred" | "public" | "all";
 export { resolveBillingSource };
@@ -191,6 +195,29 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
   if (options.query && typeof options.query === "string" && options.query.trim()) {
     scopedAgents = scopedAgents.filter((a) => matchesAgentQuery(a, options.query));
   }
+
+  scopedAgents = scopedAgents.map((agent) => {
+    const decision = resolveAgentAvailability(agent, now);
+    if (decision.status === "quota_exhausted") {
+      const resetAt = decision.resetAt ?? (now + DEFAULT_PROVIDER_RETRY_MS);
+      const nextAvailableAt =
+        typeof agent.nextAvailableAt === "number" && agent.nextAvailableAt > resetAt
+          ? agent.nextAvailableAt
+          : resetAt;
+      return {
+        ...agent,
+        nextAvailableAt,
+        availableAt: nextAvailableAt,
+        availabilityStatus: decision.status,
+        availabilityReason: decision.reason,
+      };
+    }
+    return {
+      ...agent,
+      availabilityStatus: decision.status,
+      availabilityReason: decision.reason,
+    };
+  });
 
   const unavailableList = scopedAgents.filter((a) => isAgentUnavailableNow(a, now));
   const unavailableCount = unavailableList.length;
