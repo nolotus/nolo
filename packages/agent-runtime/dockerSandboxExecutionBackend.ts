@@ -156,6 +156,14 @@ export interface DockerSandboxExecutionBackendDeps {
   maxActiveSandboxesPerAccount?: number;
   /** running 记录被判为陈旧的阈值（ms）；缺省按 ttlMinutes + execTimeoutMs 推导。 */
   staleRunningAfterMs?: number;
+  /**
+   * `stop` 之后的确认退避（attempts × delayMs）。真实云 `sbx --cloud stop` 是**异步**的：
+   * 返回 0 之后沙盒还会经历 `running → stopping → stopped`（2026-10-26 真实云实测单轮
+   * 约 17.6s 才到 stopped），所以单次 `--cloud ls` 查证几乎必然扑空。
+   * 这里**只改查证时序**，不改判定语义：仍然只认「名字缺席」或 `status === "stopped"`，
+   * 其余（stopping / running / ls 失败 / 形状不认识）一律继续重试，重试耗尽仍报未查证。
+   */
+  stopConfirm?: { attempts?: number; delayMs?: number };
 }
 
 const DEFAULT_TTL_MINUTES = 15;
@@ -170,6 +178,13 @@ export const DEFAULT_EXEC_TIMEOUT_MS = 60_000;
  * 超出即 concurrency-rejected（明确失败码，不排队、不静默降级）。
  */
 export const DEFAULT_MAX_ACTIVE_SANDBOXES_PER_ACCOUNT = 3;
+/**
+ * stop 确认默认退避：6 次 × 2.5s 间隔 ≈ 12.5s 固定等待，加上每轮 `--cloud ls` 自身耗时
+ * （上界 = controlTimeoutMs），覆盖实测约 17.6s 的 `stopping → stopped` 窗口；
+ * 全部 6 轮仍无法确认才报 `stop-unverified`。最坏总耗时 ≈ 6×ls 上界 + 12.5s。
+ */
+export const DEFAULT_STOP_CONFIRM_ATTEMPTS = 6;
+export const DEFAULT_STOP_CONFIRM_DELAY_MS = 2_500;
 
 /**
  * 活跃沙盒上限的**可配置**覆盖：显式注入 > `NOLO_DOCKER_MAX_ACTIVE_SANDBOXES` > 默认。
@@ -375,6 +390,11 @@ export function createDockerSandboxExecutionBackend(
   const shapeId = deps.shapeId ?? SANDBOX_DEFAULT_SHAPE;
   const ttlMinutes = deps.ttlMinutes ?? DEFAULT_TTL_MINUTES;
   const maxOutputChars = deps.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
+  /** 先解析一次：release 每轮都要用，避免把「缺省」在循环里重复推导。 */
+  const stopConfirm = {
+    attempts: Math.max(1, deps.stopConfirm?.attempts ?? DEFAULT_STOP_CONFIRM_ATTEMPTS),
+    delayMs: Math.max(0, deps.stopConfirm?.delayMs ?? DEFAULT_STOP_CONFIRM_DELAY_MS),
+  };
   const leases = new Map<string, LeaseEntry>();
 
   const descriptor: ExecutionBackendDescriptor = {
@@ -870,7 +890,7 @@ export function createDockerSandboxExecutionBackend(
       const stop = await runSbx(["--cloud", "stop", entry.sandboxName], {
         timeoutMs: controlTimeoutMs,
       });
-      if (stop.exitCode !== 0 || !await confirmDockerSandboxStopped(runSbx, entry.sandboxName, controlTimeoutMs)) {
+      if (stop.exitCode !== 0 || !await confirmDockerSandboxStopped(runSbx, entry.sandboxName, controlTimeoutMs, stopConfirm)) {
         // 不标记 released：允许重试，且明确告知云端可能仍有存活沙盒。
         throw new DockerSandboxBackendError("stop-unverified", undefined, true);
       }

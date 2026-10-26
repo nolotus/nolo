@@ -78,7 +78,7 @@
     "ulid": "^2.3.0",
     "valibot": "^1.4.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "yahoo-finance2": "^3.15.3",
+    "yahoo-finance2": "^4.0.5",
     "sucrase": "3.35.1",
     "react-stately": "3.49.0",
     "bun": "latest",
