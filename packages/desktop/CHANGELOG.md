@@ -1,4 +1,12 @@
 
+## 0.184.0-alpha.2 (2026-10-26)
+
+### Bug Fixes
+
+* **core:** 允许 HTTP_PORT=0（OS 分配临时端口），修 48631ef0d 引入的回归 ([9c6a90c](https://github.com/nolotus/bun-nolo/commit/9c6a90c14e715b0c5b49017816ad16bf46d62333))
+* **server:** HTTP_PORT 缺失时 fail-closed，不再静默退到 80 ([48631ef](https://github.com/nolotus/bun-nolo/commit/48631ef0d541582e9c633ba2051c8bc1b36c8301))
+
+
 ## 0.184.0-alpha.1 (2026-10-26)
 
 ### Features
