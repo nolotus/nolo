@@ -29,6 +29,30 @@ function extractModuleSpecifiers(content: string): string[] {
   return Array.from(specifiers);
 }
 
+/**
+ * 裸子路径 specifier（`pkg/sub`、`@scope/pkg/sub`），已排除相对/绝对路径、
+ * `node:`/`bun:` 内建、`#internal` 与包入口。只做提取，能不能被 Node 解析
+ * 由调用方判断——与 extractExternalImports 共用同一份 specifier 口径，
+ * 避免发布门自己再养一套正则。
+ */
+export function extractBareSubpathSpecifiers(content: string): string[] {
+  const found = new Set<string>();
+  for (const specifier of extractModuleSpecifiers(content)) {
+    if (
+      specifier.startsWith(".") ||
+      specifier.startsWith("/") ||
+      specifier.startsWith("#")
+    ) {
+      continue;
+    }
+    if (specifier.startsWith("node:") || specifier.startsWith("bun:")) continue;
+    const nameSegmentCount = specifier.startsWith("@") ? 2 : 1;
+    if (specifier.split("/").length <= nameSegmentCount) continue;
+    found.add(specifier);
+  }
+  return Array.from(found).sort();
+}
+
 export function extractExternalImports(content: string): string[] {
   const imports = new Set<string>();
   for (const importPath of extractModuleSpecifiers(content)) {

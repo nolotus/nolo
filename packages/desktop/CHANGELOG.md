@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+* **cli:** 修复 crypto-js 子路径在 Node ESM 下无法解析导致的启动崩溃 ([41dc5ee](https://github.com/nolotus/bun-nolo/commit/41dc5ee1a18da0e2810e0292e6279d2a9a106bf2))
 * **cli:** 凭证冷却按 owner 隔离，失败原因细分并透传，listAgents 四态化 ([cee6385](https://github.com/nolotus/bun-nolo/commit/cee6385a91552135d9b712393e0f1b843f5efce0))
 * **cli:** 按上游语义分级 429/额度失败，区分容量饱和、额度耗尽与普通限流 ([cd85bea](https://github.com/nolotus/bun-nolo/commit/cd85bea6653eac51609924e245ae2b61c1de1ba2))
 * **desktop:** trigger stable 0.172.2 release for sync origin sha256 fix ([221c625](https://github.com/nolotus/bun-nolo/commit/221c6254f6199bbb026bd23a35861c3f0c6ea581))

@@ -161,6 +161,85 @@ smoke_install_staged_package() {
     return 1
   fi
   log "staged CLI loads its app graph (no-arg, non-TTY) and prints help"
+
+  # 0.157.0 事故：crypto-js 的裸子路径只在 TUI 命令图里加载，而上面那条
+  # `nolo </dev/null` 是非 TTY → 走帮助分支，永远碰不到它（发布 run 全绿，
+  # 用户在真实终端里跑 `nolo` 才崩）。这里额外让 Node 直接加载 TUI 根 chunk，
+  # 把 TUI 链也纳入冒烟。判定靶向：只对「模块解析失败/挂起」阻断，避免把
+  # TUI 顶层初始化在 CI 环境里的噪声当成发布缺陷。
+  assert_tui_graph_loads_under_node
+}
+
+assert_tui_graph_loads_under_node() {
+  local node_bin cli_dir tui_chunk load_log load_status resolution_failure dynamic_target
+  node_bin="${NOLO_NODE_BIN:-node}"
+
+  if ! command -v "$node_bin" >/dev/null 2>&1; then
+    log "node not found on PATH; skipping TUI graph load smoke (bun cannot reproduce Node resolver semantics)"
+    return 0
+  fi
+  if ! command -v timeout >/dev/null 2>&1; then
+    log "warning: timeout not found; TUI load smoke NOT executed (counted as uncovered, not as passed)"
+    return 0
+  fi
+
+  cli_dir="$(find "$NPM_PREFIX" -path "*/node_modules/nolo-cli" -type d -print -quit 2>/dev/null || true)"
+  if [[ -z "$cli_dir" ]]; then
+    echo "TUI graph smoke: cannot find the installed nolo-cli package under $NPM_PREFIX." >&2
+    return 1
+  fi
+
+  tui_chunk="$(find "$cli_dir" -maxdepth 1 -name 'readlineWorkspace-*.js' -print -quit 2>/dev/null || true)"
+  if [[ -z "$tui_chunk" ]]; then
+    # 文件改名也不误阻断：从 index.js 里挑一个 TUI 相关的懒加载 chunk。
+    # 注意字符类不能收窄成 [A-Za-z0-9_]：真实 chunk 名都带连字符（esbuild hash）。
+    dynamic_target="$(grep -oE 'import\("\./[^"]+\.js"\)' "$cli_dir/index.js" 2>/dev/null \
+      | grep -iE 'readlineWorkspace' | head -n 1 | sed -E 's/^import\("\.\/([^"]+)"\)$/\1/' || true)"
+    if [[ -z "$dynamic_target" ]]; then
+      dynamic_target="$(grep -oE 'import\("\./[^"]+\.js"\)' "$cli_dir/index.js" 2>/dev/null \
+      | grep -iE 'tui|workspace' | head -n 1 | sed -E 's/^import\("\.\/([^"]+)"\)$/\1/' || true)"
+    fi
+    if [[ -n "$dynamic_target" ]]; then tui_chunk="$cli_dir/$dynamic_target"; fi
+  fi
+  if [[ -z "$tui_chunk" || ! -f "$tui_chunk" ]]; then
+    log "warning: cannot locate a TUI entry chunk under $cli_dir (renamed?); skipping TUI load smoke"
+    return 0
+  fi
+
+  load_log="$(mktemp)"
+  load_status=0
+  timeout 60 "$node_bin" -e '
+    const { pathToFileURL } = require("node:url");
+    import(pathToFileURL(process.argv[1]).href).then(
+      () => process.exit(0),
+      (error) => {
+        console.error(error && error.stack ? error.stack : String(error));
+        process.exit(1);
+      }
+    );
+  ' "$tui_chunk" >"$load_log" 2>&1 || load_status=$?
+
+  if [[ "$load_status" -eq 0 ]]; then
+    rm -f "$load_log"
+    log "TUI graph root chunk loads under Node: $(basename "$tui_chunk")"
+    return 0
+  fi
+
+  resolution_failure=0
+  if grep -qE 'Cannot find module|Dynamic require of|ERR_[A-Z_]*(MODULE|EXPORT|SPECIFIER|PACKAGE)|ERR_UNSUPPORTED_DIR_IMPORT|ERR_UNKNOWN_FILE_EXTENSION' "$load_log"; then
+    resolution_failure=1
+  fi
+
+  if [[ "$resolution_failure" -eq 1 || "$load_status" -eq 124 ]]; then
+    echo "TUI graph root chunk cannot be loaded by Node (status $load_status):" >&2
+    tail -n 20 "$load_log" >&2
+    rm -f "$load_log"
+    return 1
+  fi
+
+  log "warning: TUI graph load smoke exited $load_status for a non-resolution reason; not blocking publish"
+  tail -n 10 "$load_log" >&2 || true
+  rm -f "$load_log"
 }
 
 validate_npm_token() {
