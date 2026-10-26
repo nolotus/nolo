@@ -150,6 +150,20 @@ export const TOOL_EXECUTION_CONTRACT: Readonly<
   readSkillDoc: serverPureRead("read-only"),
   listTables: serverPureRead("read-only"),
   queryTableRows: serverPureRead("read-only"),
+  list_cloud_resources: serverPureRead("read-only"),
+  cloud_probe: serverPureRead("read-only"),
+
+  // Audited execution against an owned cloud resource. Same class as execShell
+  // (arbitrary command, not replayable), except the executor itself runs on the
+  // server through the authorization/capability/audit gate. Never read-only.
+  cloud_exec: {
+    replay: "unsafe",
+    sideEffects: "mutation",
+    locality: "server",
+    interaction: "none",
+    concurrency: "exclusive",
+    durableWebForeground: false,
+  },
 
   // Read-only presentation payload. Actions remain inert; this adds no submit or
   // open-app authority to server-owned projection.

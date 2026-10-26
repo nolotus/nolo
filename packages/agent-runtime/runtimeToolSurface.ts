@@ -18,6 +18,10 @@ export const DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS = [
   "queryTableRows",
   "cliWhoami",
   "cliDoctor",
+  "list_cloud_resources",
+  "cloud_probe",
+  // cloud_exec 故意不在此清单：硬边界是「永不默认开 exec」。它只在 agent 显式启用时出现，
+  // 且只读 run 会被 HIGH_RISK_MUTATION_TOOL_NAMES 挡住（runtimeToolSurface.test.ts 钉住）。
 ] as const;
 
 export const DEFAULT_SUBTASK_REFERENCE_NOLO_WORKSPACE_TOOLS = [
@@ -85,6 +89,10 @@ export const HIGH_RISK_MUTATION_TOOL_NAMES = [
   // controlAgentRun 能追加指令/停止它；只读 run 不应拿到这两个（review A-1）。
   "startAgentRun",
   "controlAgentRun",
+  // 受控云端执行：在用户拥有的云资源上跑任意命令，不可重放、副作用在云端。
+  // 硬边界：它永不进 DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS（见该清单注释），
+  // 必须由 agent 显式启用才出现；这里进名单保证只读 run 即使被显式要求也拿不到。
+  "cloud_exec",
 ] as const;
 
 /**

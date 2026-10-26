@@ -19,7 +19,7 @@ import { buildCodeWorkSkillPrompt, CODE_PLANNER_COMPILED_EFFECTIVE_TOOLS } from 
 import { buildLocalWorkspaceToolset, buildLocalWorkspacePolicyToolNames, buildLocalWorkspaceOpenAiTools } from "agent-runtime/localWorkspaceTools";
 import { SHELL_TOOL_NAMES } from "agent-runtime/localWorkspaceToolDefs";
 import { buildExternalOpenAiTools, filterExternalToolNames } from "agent-runtime/externalTools";
-import { buildNoloWorkspaceOpenAiTools, filterNoloWorkspaceToolNames } from "agent-runtime/noloWorkspaceTools";
+import { buildNoloWorkspaceOpenAiTools, filterNoloWorkspaceToolNames, filterClientNoloWorkspaceToolNames } from "agent-runtime/noloWorkspaceTools";
 import { TOOL_PACKS, FORCED_TOOLS, applyDisabledTools, expandEnabledPacks, addDefaultLightWebToolsForConfiguredAgents } from "ai/tools/toolPacks";
 // Re-export so downstream modules (desktopAgentRuntimeTurnService) keep importing
 // from here without needing to know the shared implementation moved to toolPacks.
@@ -326,7 +326,7 @@ export function buildDesktopOpenAiTools(args: {
     }),
     ...buildDesktopServerPlatformOpenAiTools({ toolNames: args.toolNames }),
     ...buildNoloWorkspaceOpenAiTools({
-      toolNames: args.toolNames,
+      toolNames: args.toolNames ? filterClientNoloWorkspaceToolNames(args.toolNames) : undefined,
     }),
   ];
   const externalToolNames = filterExternalToolNames(args.toolNames ?? []);

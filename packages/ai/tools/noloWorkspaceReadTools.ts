@@ -29,7 +29,7 @@ import {
   filterNoloDialogSubjectRefEvidence,
   getNoloComparableUpdatedAt,
   getNoloDialogIdFromKey,
-  NOLO_WORKSPACE_TOOL_NAMES,
+  CLI_NOLO_WORKSPACE_TOOL_NAMES,
   normalizeNoloExcludeDialogIds,
   normalizeNoloSpaceInput,
   resolveNoloDialogInput,
@@ -962,8 +962,8 @@ export async function cliDoctorFunc(_args: any, thunkApi: any): Promise<ToolResu
     diagnosticScope: "nolo_workspace_subset",
     message:
       "workspaceTools is a subset for Nolo workspace inspection, not necessarily the complete current run tool surface.",
-    noloWorkspaceToolSubset: [...NOLO_WORKSPACE_TOOL_NAMES],
-    workspaceTools: [...NOLO_WORKSPACE_TOOL_NAMES],
+    noloWorkspaceToolSubset: [...CLI_NOLO_WORKSPACE_TOOL_NAMES],
+    workspaceTools: [...CLI_NOLO_WORKSPACE_TOOL_NAMES],
     workspaceToolsAreSubset: true,
   };
   return { rawData: result, displayData: jsonPreview(result) };
