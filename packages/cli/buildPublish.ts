@@ -9,6 +9,7 @@ import {
 import {
   collectTypeScriptSourceFiles,
   collectWorkspaceDependencies,
+  extractBareSubpathSpecifiers,
   extractExternalImports,
   rewriteCrossPackageImports,
 } from "./buildPublishImportAnalysis";
@@ -217,9 +218,11 @@ export async function buildPublishArtifactBundled(
   // 发布依赖只留 bundle 产物实际引用的 external 包；其余纯 JS 已 inline。
   // 不能只依据源码可达图保留依赖，因为 tree shaking 可能移除整个 external import。
   const emittedExternalDeps = new Set<string>();
+  const emittedArtifacts: Array<{ path: string; content: string }> = [];
   for (const entry of readdirSync(distDir)) {
     if (!entry.endsWith(".js")) continue;
     const content = readFileSync(join(distDir, entry), "utf8");
+    emittedArtifacts.push({ path: entry, content });
     for (const dependency of extractExternalImports(content)) {
       emittedExternalDeps.add(dependency);
     }
@@ -232,6 +235,10 @@ export async function buildPublishArtifactBundled(
       if (dependency) emittedExternalDeps.add(dependency);
     }
   }
+  // external 包的裸子路径不会被 Node 自动补扩展名：产物必须能被纯 Node 加载，
+  // 否则 Windows（没有 native 二进制、只能走 JS bundle）启动即崩。
+  assertNodeResolvableBareImports(sourceDir, emittedArtifacts);
+
   const publishVersionMap = buildPublishVersionMap(sourceDir);
   const keptDeps: Record<string, string> = {};
   for (const name of ["level", "ulid", "tweetnacl", "pino", "clipboardy", "crypto-js", "detect-libc"]) {
@@ -577,6 +584,126 @@ async function bundleCliEntry(args: {
     if (!content.startsWith("#!")) {
       writeFileSync(entryOut, "#!/usr/bin/env node\n" + content);
     }
+  }
+}
+
+/**
+ * Node 的 ESM 解析器不会像 CJS/bun 那样给裸子路径补扩展名：目标包没有
+ * "exports" 字段时，`import "pkg/sub"` 会按字面路径找文件，即使 `pkg/sub.js`
+ * 存在也报 ERR_MODULE_NOT_FOUND（"Did you mean to import ...sub.js?"）。
+ * esbuild 会把 external 包的裸子路径原样留在产物里，所以这类 import 只在纯
+ * Node 运行时炸——本地与 CI 用 bun 跑永远绿。nolo-cli 0.157.0 即因此启动崩溃：
+ * chunk 里留着 `import SHA256 from "crypto-js/sha256"`，而 crypto-js@4.2.0
+ * 的 package.json 没有 exports map。
+ */
+const JS_FILE_EXTENSION = /\.(?:js|mjs|cjs|json|node)$/;
+
+function splitBareSpecifier(specifier: string): {
+  packageName: string;
+  subpath: string;
+} {
+  const segments = specifier.split("/");
+  const nameSegmentCount = specifier.startsWith("@") ? 2 : 1;
+  return {
+    packageName: segments.slice(0, nameSegmentCount).join("/"),
+    subpath: segments.slice(nameSegmentCount).join("/"),
+  };
+}
+
+/**
+ * 目标包的 exports map 是否覆盖 `./<subpath>`（支持 `*` 通配）。
+ * `exports` 是字符串/数组时只描述包根，不覆盖任何子路径。
+ */
+function exportsCoversSubpath(
+  manifest: Record<string, any>,
+  subpath: string
+): boolean {
+  const exported = manifest.exports;
+  if (!exported || typeof exported !== "object" || Array.isArray(exported)) {
+    return false;
+  }
+  const target = `./${subpath}`;
+  return Object.keys(exported).some((key) => {
+    if (key === target) return true;
+    if (!key.includes("*")) return false;
+    const [prefix, suffix] = key.split("*");
+    return (
+      target.length >= prefix.length + suffix.length &&
+      target.startsWith(prefix) &&
+      target.endsWith(suffix)
+    );
+  });
+}
+
+/**
+ * 产物里的裸子路径 import 必须能被纯 Node 的 ESM 解析器加载。三种会崩的形态：
+ * - 目标包没有 exports map，且 specifier 没写扩展名 → Node 按字面路径找文件
+ *   （ERR_MODULE_NOT_FOUND，"Did you mean ...sub.js?"）。这就是 0.157.0 的崩溃；
+ * - 目标包有 exports map，但没导出该子路径（**带扩展名也一样**）→
+ *   ERR_PACKAGE_PATH_NOT_EXPORTED；
+ * - 目标包在构建机上无法验证（没装）→ 同样按失败处理（fail-closed），
+ *   否则「声明了 external 却没装」会静默带着裸子路径发给用户。
+ */
+export function assertNodeResolvableBareImports(
+  sourceDir: string,
+  artifacts: Array<{ path: string; content: string }>
+): void {
+  const problems: string[] = [];
+  for (const artifact of artifacts) {
+    for (const specifier of extractBareSubpathSpecifiers(artifact.content)) {
+      const { packageName, subpath } = splitBareSpecifier(specifier);
+      const manifest = readInstalledPackageManifest(packageName, sourceDir);
+      if (!manifest) {
+        problems.push(
+          `${artifact.path}: "${specifier}" — cannot verify: "${packageName}" is not installed under node_modules`
+        );
+        continue;
+      }
+      if (manifest.exports) {
+        if (!exportsCoversSubpath(manifest, subpath)) {
+          problems.push(
+            `${artifact.path}: "${specifier}" — not exported by "${packageName}"`
+          );
+        }
+        continue;
+      }
+      if (!JS_FILE_EXTENSION.test(subpath)) {
+        problems.push(
+          `${artifact.path}: "${specifier}" — missing file extension`
+        );
+      }
+    }
+  }
+  if (problems.length === 0) return;
+  throw new Error(
+    [
+      "Bundled CLI artifact keeps bare subpath imports that Node's ESM resolver cannot load:",
+      "  (missing file extension without an exports map / exports map without that subpath / unverifiable package)",
+      ...problems.map((problem) => `  ${problem}`),
+      'Fix: import the concrete file with its extension (e.g. "crypto-js/sha256.js"), or inline the dependency.',
+    ].join("\n")
+  );
+}
+
+function readInstalledPackageManifest(
+  packageName: string,
+  sourceDir: string
+): Record<string, any> | undefined {
+  const packageDir = resolveInstalledPackageDir(
+    sourceDir,
+    packageName,
+    REAL_REPO_ROOT
+  );
+  if (!packageDir) return undefined;
+  const manifestPath = join(packageDir, "package.json");
+  try {
+    return JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Cannot parse installed package manifest ${manifestPath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 

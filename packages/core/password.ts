@@ -9,10 +9,12 @@
 //   而非 `crypto-js/sha512` 导出的快捷函数 CryptoJS.SHA512（HasherHelper）。
 //   `crypto-js/sha512` 加载时会把算法类注册到共享 core 的 CryptoJS.algo，
 //   因此先 import 它（副作用），再从 `crypto-js/core` 取 algo.SHA512。
-import PBKDF2 from "crypto-js/pbkdf2";
-import Base64 from "crypto-js/enc-base64";
-import "crypto-js/sha512";
-import CryptoJScore from "crypto-js/core";
+// 子路径一律带 .js：crypto-js 没有 exports map，Node 的 ESM 解析器不会像 bun
+// 那样给裸子路径补扩展名，而 CLI 产物把 crypto-js 设为 external 后会原样保留这些 import。
+import PBKDF2 from "crypto-js/pbkdf2.js";
+import Base64 from "crypto-js/enc-base64.js";
+import "crypto-js/sha512.js";
+import CryptoJScore from "crypto-js/core.js";
 import { SALT, AUTH_VERSION } from "core/config";
 
 const SHA512Algo = CryptoJScore.algo.SHA512;

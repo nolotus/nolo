@@ -161,6 +161,142 @@ smoke_install_staged_package() {
     return 1
   fi
   log "staged CLI loads its app graph (no-arg, non-TTY) and prints help"
+
+  # 0.157.0 事故：crypto-js 的裸子路径只在 TUI 命令图里加载，而上面那条
+  # `nolo </dev/null` 是非 TTY → 走帮助分支，永远碰不到它（发布 run 全绿，
+  # 用户在真实终端里跑 `nolo` 才崩）。这里额外让 Node 直接加载 TUI 根 chunk，
+  # 把 TUI 链也纳入冒烟。判定靶向：只对「模块解析失败/挂起」阻断，避免把
+  # TUI 顶层初始化在 CI 环境里的噪声当成发布缺陷。
+  # 注意：timed_phase 用 `set +e` 包裹，函数退出状态 = 最后一条语句。
+  # 两条门必须显式聚合，否则 TUI 门失败会被命令门的 0 掩盖（等于重开 0.157.0 的洞）。
+  local tui_load_status=0 command_load_status=0
+  assert_tui_graph_loads_under_node || tui_load_status=$?
+
+  # `nolo --help` 是假门（提前退出、不加载应用图）。agent 命令是 TUI 之外的
+  # 第二个懒加载簇，用真实命令覆盖它。
+  assert_command_loads_under_node "agent list --help" agent list --help || command_load_status=$?
+
+  [[ "$tui_load_status" -eq 0 && "$command_load_status" -eq 0 ]]
+}
+
+assert_tui_graph_loads_under_node() {
+  local node_bin cli_dir tui_chunk load_log load_status dynamic_target
+  node_bin="${NOLO_NODE_BIN:-node}"
+
+  if ! command -v "$node_bin" >/dev/null 2>&1; then
+    log "node not found on PATH; skipping TUI graph load smoke (bun cannot reproduce Node resolver semantics)"
+    return 0
+  fi
+  if ! command -v timeout >/dev/null 2>&1; then
+    log "warning: timeout not found; TUI load smoke NOT executed (counted as uncovered, not as passed)"
+    return 0
+  fi
+
+  cli_dir="$(find "$NPM_PREFIX" -path "*/node_modules/nolo-cli" -type d -print -quit 2>/dev/null || true)"
+  if [[ -z "$cli_dir" ]]; then
+    echo "TUI graph smoke: cannot find the installed nolo-cli package under $NPM_PREFIX." >&2
+    return 1
+  fi
+
+  tui_chunk="$(find "$cli_dir" -maxdepth 1 -name 'readlineWorkspace-*.js' -print -quit 2>/dev/null || true)"
+  if [[ -z "$tui_chunk" ]]; then
+    # 文件改名也不误阻断：从 index.js 里挑一个 TUI 相关的懒加载 chunk。
+    # 注意字符类不能收窄成 [A-Za-z0-9_]：真实 chunk 名都带连字符（esbuild hash）。
+    dynamic_target="$(grep -oE 'import\("\./[^"]+\.js"\)' "$cli_dir/index.js" 2>/dev/null \
+      | grep -iE 'readlineWorkspace' | head -n 1 | sed -E 's/^import\("\.\/([^"]+)"\)$/\1/' || true)"
+    if [[ -z "$dynamic_target" ]]; then
+      dynamic_target="$(grep -oE 'import\("\./[^"]+\.js"\)' "$cli_dir/index.js" 2>/dev/null \
+      | grep -iE 'tui|workspace' | head -n 1 | sed -E 's/^import\("\.\/([^"]+)"\)$/\1/' || true)"
+    fi
+    if [[ -n "$dynamic_target" ]]; then tui_chunk="$cli_dir/$dynamic_target"; fi
+  fi
+  if [[ -z "$tui_chunk" || ! -f "$tui_chunk" ]]; then
+    log "warning: cannot locate a TUI entry chunk under $cli_dir (renamed?); skipping TUI load smoke"
+    return 0
+  fi
+
+  load_log="$(mktemp)"
+  load_status=0
+  timeout 60 "$node_bin" -e '
+    const { pathToFileURL } = require("node:url");
+    import(pathToFileURL(process.argv[1]).href).then(
+      () => process.exit(0),
+      (error) => {
+        console.error(error && error.stack ? error.stack : String(error));
+        process.exit(1);
+      }
+    );
+  ' "$tui_chunk" >"$load_log" 2>&1 || load_status=$?
+
+  if [[ "$load_status" -eq 0 ]]; then
+    log "TUI graph root chunk loads under Node: $(basename "$tui_chunk")"
+  fi
+
+  if assert_no_node_resolution_failure "$load_log" "$load_status" "TUI graph root chunk"; then
+    rm -f "$load_log"
+    return 0
+  fi
+  rm -f "$load_log"
+  return 1
+}
+
+# 判定口径统一在这里：
+# - 模块解析类失败（Cannot find module / Dynamic require / ERR_*MODULE|EXPORT|SPECIFIER|PACKAGE）
+#   或 60s 超时 → 阻断发布；
+# - 其它非零退出（CLI 在 CI 环境里的初始化噪声）→ 告警不阻断。
+# 2026-10-26 教训：`nolo --help` 会提前退出、不加载应用图，拿它当门等于没测。
+assert_no_node_resolution_failure() {
+  local log_file="$1" status="$2" label="$3"
+
+  if grep -qE 'Cannot find module|Dynamic require of|ERR_[A-Z_]*(MODULE|EXPORT|SPECIFIER|PACKAGE)|ERR_UNSUPPORTED_DIR_IMPORT|ERR_UNKNOWN_FILE_EXTENSION' "$log_file"; then
+    echo "${label}: Node cannot resolve this path (status ${status}):" >&2
+    tail -n 20 "$log_file" >&2
+    return 1
+  fi
+  if [[ "$status" -eq 124 ]]; then
+    echo "${label}: timed out after 60s:" >&2
+    tail -n 20 "$log_file" >&2
+    return 1
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    log "warning: ${label} exited ${status} for a non-resolution reason; not blocking publish"
+    tail -n 10 "$log_file" >&2 || true
+  fi
+  return 0
+}
+
+# 跑一条真实 CLI 命令，覆盖 TUI 之外的懒加载簇（agent 命令图）。
+# 实测：`agent list --help` 会加载 agent chunk；`nolo --help` 不会（提前退出）。
+assert_command_loads_under_node() {
+  local label="$1"
+  shift
+  local node_bin load_log load_status
+  node_bin="${NOLO_NODE_BIN:-node}"
+
+  if ! command -v "$node_bin" >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
+    log "warning: node/timeout unavailable; command load smoke (${label}) NOT executed (counted as uncovered, not as passed)"
+    return 0
+  fi
+
+  [[ -x "$NPM_PREFIX/bin/nolo" ]] || {
+    echo "command load smoke: missing executable $NPM_PREFIX/bin/nolo" >&2
+    return 1
+  }
+
+  load_log="$(mktemp)"
+  load_status=0
+  timeout 60 "$NPM_PREFIX/bin/nolo" "$@" </dev/null >"$load_log" 2>&1 || load_status=$?
+
+  if [[ "$load_status" -eq 0 ]]; then
+    log "command loads under Node: nolo ${label}"
+  fi
+
+  if assert_no_node_resolution_failure "$load_log" "$load_status" "nolo ${label}"; then
+    rm -f "$load_log"
+    return 0
+  fi
+  rm -f "$load_log"
+  return 1
 }
 
 validate_npm_token() {

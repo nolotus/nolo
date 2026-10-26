@@ -1,4 +1,13 @@
 
+## 0.158.0 (2026-10-26)
+
+### Bug Fixes
+
+* **cli:** crypto-js 子路径导入补 `.js`，修复 Windows 上 `nolo` 启动即崩（Node 的 ESM 解析不补扩展名，bun 会补）
+* **cli:** 发布产物门校验裸子路径能被 Node 解析（exports map / 扩展名 / 未安装 fail-closed）
+* **cli:** 发布冒烟用真实 Node 加载 TUI 根 chunk，覆盖「非 TTY 走帮助分支」碰不到的 TUI 命令图
+
+
 ## 0.157.0 (2026-10-25)
 
 ### Features
