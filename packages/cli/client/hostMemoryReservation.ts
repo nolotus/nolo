@@ -24,6 +24,7 @@ export type MemoryReservationRecord = {
   holderPid: number;
   holderStartedAt?: string;
   childStartedAt?: string;
+  childIdentity?: "verified" | "unverified";
   childPid?: number;
   runId?: string;
   releasedAt?: string;
@@ -206,7 +207,7 @@ export function scanActiveReservations(
     }
     const reused = expectedStart && actualStart && Number.isFinite(actualStart.getTime()) &&
       actualStart.toISOString() !== expectedStart;
-    if (!alive || reused || (record.status === "active" && ageMs >= startupWindowMs)) {
+    if (!alive || reused || (record.status === "active" && !!expectedStart && record.childIdentity !== "unverified" && ageMs >= startupWindowMs)) {
       updateReservationFile(filePath, fs, (r) => {
         r.status = "reclaimed";
         r.reclaimedAt = new Date(nowMs).toISOString();
@@ -307,14 +308,14 @@ export function reserveHostMemory(
           if (r.status !== "reserved") throw new Error("Reservation is not reserved");
           // Persist the child even if identity probing failed: parent death must
           // not reclaim a possibly live child's reservation.
+          r.status = "active";
+          r.childIdentity = validStart ? "verified" : "unverified";
           if (validStart) {
-            r.status = "active";
             r.childStartedAt = params.processStartedAt;
           }
           if (params.runId) r.runId = params.runId;
           if (typeof params.pid === "number") r.childPid = params.pid;
         }));
-        if (!validStart) throw new Error("Child starttime unknown; reservation retained");
       },
       release(reason?: string) {
         locked(() => updateReservationFile(recordPath, fs, (r) => {

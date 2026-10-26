@@ -115,6 +115,7 @@ export type RunRecord = {
   reconciledAt?: string;
   /** OS-reported start time of the spawned process, when the platform exposes it. */
   processStartedAt?: string;
+  processIdentity?: "verified" | "unverified";
   activity?: RunActivity;
   /** DoD commands to verify when run reaches terminal state. */
   dodCommands?: string[];
@@ -228,6 +229,7 @@ export type AgentRunControlDeps = {
   clearSignalHandler?: () => void;
   getProcessStartTime?: (pid: number) => Date | null | undefined;
   execFileSync?: typeof nodeExecFileSync;
+  platform?: NodeJS.Platform;
   /** 本机内存快照读取（缺省读真实 /proc/meminfo）。 */
   readHostMemory?: () => HostMemorySnapshot | null;
 };
@@ -788,6 +790,19 @@ export function writeRunRecord(record: RunRecord, deps: AgentRunControlDeps = {}
     }
   }
   fs.writeFileSync(path, payload);
+}
+
+/** Called only by the child run: millisecond ISO baseline, without ps/PowerShell. */
+export function reportRunProcessIdentity(runId: string, deps: AgentRunControlDeps = {}): void {
+  const processStartedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
+  withRunRecordLock(runId, deps, () => {
+    const record = readRunRecord(runId, deps);
+    if (!record || (record.pid !== undefined && record.pid !== process.pid)) return;
+    record.pid = process.pid;
+    record.processStartedAt = processStartedAt;
+    record.processIdentity = "verified";
+    writeRunRecord(record, deps);
+  }, { strict: true });
 }
 
 const FILE_EDIT_TOOL_NAMES = new Set(["writeFile", "editFile"]);
@@ -1577,7 +1592,8 @@ export async function spawnLocalBackgroundRun(
     reservation = reserveHostMemory({
       runsDir, runId, fs: reservationFs, now: resolvedDeps.now,
       readHostMemory: () => (hostMemory = (resolvedDeps.readHostMemory ?? readHostMemory)()),
-      getProcessStartTime: resolvedDeps.getProcessStartTime ?? defaultGetProcessStartTime,
+      // Admission remains conservative for existing reservations; no OS probes on startup.
+      getProcessStartTime: () => null,
       withLock: (id, fn, opts) => withRunRecordLock(id, resolvedDeps, fn, opts),
     });
     proc = spawn(execPath, childArgs, {
@@ -1611,13 +1627,6 @@ export async function spawnLocalBackgroundRun(
   const hostMemoryNotice = emitHostMemoryNotice(hostMemory, input.output);
 
   if (typeof proc.pid === "number") {
-    let processStartedAt: Date | null | undefined;
-    try {
-      processStartedAt = (resolvedDeps.getProcessStartTime ?? defaultGetProcessStartTime)(proc.pid);
-      if (processStartedAt && !Number.isFinite(processStartedAt.getTime())) processStartedAt = null;
-    } catch {
-      processStartedAt = null;
-    }
     // 必须持锁并在锁内重读：子进程此刻已经在跑，它的创建即心跳（keepAlive）
     // 随时可能落盘。无锁的读-改-写会把 pid/processStartedAt 整段丢掉的旧快照
     // rename 回去——pid 一丢，stop 直接拒绝、checkStaleRun 永远提前返回，
@@ -1626,14 +1635,15 @@ export async function spawnLocalBackgroundRun(
     withRunRecordLock(runId, resolvedDeps, () => {
       const latest = readRunRecord(runId, resolvedDeps) ?? record;
       latest.pid = proc.pid;
-      if (processStartedAt) latest.processStartedAt = processStartedAt.toISOString();
+      // Preserve a baseline already self-reported by the child. Never probe at spawn.
+      latest.processIdentity ??= "unverified";
       writeRunRecord(latest, resolvedDeps);
       return true;
     }, { strict: true });
     try {
       const persisted = readRunRecord(runId, resolvedDeps);
-      reservation!.associate({ runId, pid: proc.pid, processStartedAt: processStartedAt?.toISOString() });
-      if (persisted?.pid !== proc.pid || !persisted.processStartedAt) throw new Error("Child identity persistence failed");
+      reservation!.associate({ runId, pid: proc.pid, processStartedAt: persisted?.processStartedAt });
+      if (persisted?.pid !== proc.pid) throw new Error("Child identity persistence failed: pid not bound");
     } catch (error) {
       // The child may already be executing. Keep the reservation and running record;
       // never release its budget or claim spawn success after an association failure.
@@ -2060,14 +2070,19 @@ export function isPidGone(pid: number, deps: AgentRunControlDeps = {}): boolean 
  * Reads process identity using the native platform process API.
  * Returns null for missing/inaccessible processes; callers must keep identity guards.
  */
-export function defaultGetProcessStartTime(pid: number): Date | null {
+export function defaultGetProcessStartTime(
+  pid: number,
+  deps: Pick<AgentRunControlDeps, "platform" | "execFileSync" | "env"> = {},
+): Date | null {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
-    if (process.platform === "win32") {
-      const shell = process.env.SystemRoot
-        ? join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    const execFileSync = deps.execFileSync ?? nodeExecFileSync;
+    if ((deps.platform ?? process.platform) === "win32") {
+      const systemRoot = (deps.env ?? process.env).SystemRoot;
+      const shell = systemRoot
+        ? join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
         : "powershell.exe";
-      const output = nodeExecFileSync(shell, [
+      const output = execFileSync(shell, [
         "-NoProfile", "-NonInteractive", "-Command",
         `$ErrorActionPreference='Stop'; (Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
       ], {
@@ -2078,7 +2093,7 @@ export function defaultGetProcessStartTime(pid: number): Date | null {
       const date = new Date(output);
       return Number.isFinite(date.getTime()) ? date : null;
     }
-    const output = nodeExecFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    const output = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 1000,
@@ -2105,6 +2120,14 @@ export const MAX_PROCESS_START_TIME_DIFF_MS = 30_000;
 // 秒级四舍五入（±1s）+ 记录写入延迟（<1s）。宁可多容忍 1s 的 pid 复用误判
 // （概率极低），也绝不把活进程误判为孤儿。
 const MAX_PERSISTED_PROCESS_START_TIME_DIFF_MS = 2_000;
+
+function probeProcessStartTime(pid: number, deps: AgentRunControlDeps): Date | null {
+  try {
+    const date = deps.getProcessStartTime
+      ? deps.getProcessStartTime(pid) : defaultGetProcessStartTime(pid, deps);
+    return date && Number.isFinite(date.getTime()) ? date : null;
+  } catch { return null; }
+}
 
 /**
  * How long a run must be silent before a dead-pid inference may orphan it.
@@ -2146,8 +2169,7 @@ export function isPidReused(
   deps: AgentRunControlDeps = {},
   maxDiffMs = MAX_PROCESS_START_TIME_DIFF_MS
 ): boolean {
-  const getStartTime = deps.getProcessStartTime ?? defaultGetProcessStartTime;
-  const procStartTime = getStartTime(pid);
+  const procStartTime = probeProcessStartTime(pid, deps);
   if (!procStartTime) {
     // Fallback path: platform or test cannot fetch process start time.
     // Safe degradation rule: NEVER misjudge a living process as dead.
@@ -2189,7 +2211,8 @@ export function checkStaleRun(
     ? MAX_PERSISTED_PROCESS_START_TIME_DIFF_MS
     : MAX_PROCESS_START_TIME_DIFF_MS;
   const pidReused =
-    !pidGone && isPidReused(record.pid, expectedStartedAt, deps, maxStartTimeDiffMs);
+    !pidGone && record.processIdentity !== "unverified" &&
+    isPidReused(record.pid, expectedStartedAt, deps, maxStartTimeDiffMs);
 
   if (!pidGone && !pidReused) return record;
 
@@ -2622,7 +2645,7 @@ export const TERMINATE_KILL_GRACE_MS = 5_000;
  * killed in that case.
  */
 export async function terminateRunProcess(
-  record: Pick<RunRecord, "pid">,
+  record: Pick<RunRecord, "runId" | "pid"> & Partial<Pick<RunRecord, "processStartedAt" | "processIdentity" | "startedAt">>,
   initialSignal: "SIGTERM" | "SIGKILL",
   deps: AgentRunControlDeps,
 ): Promise<boolean> {
@@ -2636,8 +2659,38 @@ export async function terminateRunProcess(
   const nowMs = (): number => (deps.now ? deps.now().getTime() : Date.now());
 
   const signalGroup = (sig: "SIGTERM" | "SIGKILL"): void => {
+    // Re-probe before every destructive signal, including escalation: PID may
+    // have been reused during the grace period. Never swallow identity errors.
+    const fail = (reason: string): never => {
+      throw new Error(`Run ${record.runId}, pid ${pid}, platform ${deps.platform ?? process.platform}: 身份未验证，无法安全终止 (${reason}). 可先确认进程状态或重启该 run；确认身份后重试 stop/kill。`);
+    };
+    const expectedMs = readTimestampMs(record.processStartedAt ?? record.startedAt);
+    if (expectedMs === null) fail("no trusted process start baseline");
+    // 容差与 checkStaleRun 对齐：有子进程自报的精确基准时收紧到 2s；
+    // 只有 spawn 时刻的粗基准（老记录）时才放宽到 30s。
+    const maxDiffMs = record.processStartedAt
+      ? MAX_PERSISTED_PROCESS_START_TIME_DIFF_MS
+      : MAX_PROCESS_START_TIME_DIFF_MS;
+    const actual = probeProcessStartTime(pid, deps);
+    if (!actual || Math.abs(actual.getTime() - expectedMs!) > maxDiffMs) {
+      fail("identity probe failed or PID start time mismatch");
+    }
+    const persisted = withRunRecordLock(record.runId, deps, () => {
+      const latest = readRunRecord(record.runId, deps);
+      if (latest) {
+        if (latest.pid !== pid || latest.processStartedAt !== record.processStartedAt ||
+            latest.startedAt !== record.startedAt) {
+          fail("record changed");
+        }
+        // Retain the trusted child/spawn baseline; never adopt the OS observation.
+        latest.processIdentity = "verified";
+        writeRunRecord(latest, deps);
+      }
+      return true;
+    }, { strict: true });
+    if (persisted !== true) fail("identity persistence lock contended");
     try {
-      if (process.platform !== "win32") {
+      if ((deps.platform ?? process.platform) !== "win32") {
         kill(-pid, sig); // negative pid = the whole process group
       } else {
         kill(pid, sig);
@@ -2694,7 +2747,11 @@ async function runSignalCommand(
     deps.output.write(`Run not found: ${target}\n`);
     return 1;
   }
-  const reconciled = checkStaleRun(record.runId, deps) ?? record;
+  // Only reconcile a missing process here. A live PID (including a reused
+  // one) must pass termination's strict identity checks, never bypass them
+  // through stale-run reconciliation.
+  const reconciled = record.status === "running" && typeof record.pid === "number" && isPidGone(record.pid, deps)
+    ? (checkStaleRun(record.runId, deps) ?? record) : record;
   if (sharedIsAgentRunTerminalStatus(reconciled.status)) {
     deps.output.write(`Run ${reconciled.runId} is already ${reconciled.status}.\n`);
     return 0;
@@ -2703,7 +2760,13 @@ async function runSignalCommand(
     deps.output.write(`Run has no pid: ${reconciled.runId}\n`);
     return 1;
   }
-  const confirmed = await terminateRunProcess(reconciled, signal, deps);
+  let confirmed: boolean;
+  try {
+    confirmed = await terminateRunProcess(reconciled, signal, deps);
+  } catch (error) {
+    deps.output.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
   if (!confirmed) {
     deps.output.write(
       `Failed to ${verb} ${record.runId} (pid ${record.pid}): process still alive after SIGKILL.\n`
