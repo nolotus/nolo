@@ -1,4 +1,19 @@
 
+## 0.159.0 (2026-10-26)
+
+### Features
+
+* **cloud-plugins:** add docker and cloudflare platform spec registry ([a6b00ee](https://github.com/nolotus/bun-nolo/commit/a6b00eec48ba78d697b104b3b67ec6d538afcee3))
+* **cloud-plugins:** register gcp, vultr, hetzner and digitalocean ([8406aa6](https://github.com/nolotus/bun-nolo/commit/8406aa6c6813dd6a3217830959e842009afce35b))
+* **explore:** wire docker and cloudflare cards into the plugin page ([de1a124](https://github.com/nolotus/bun-nolo/commit/de1a12438e544da14776f6fa6d8c09b93f40781e))
+
+### Bug Fixes
+
+* **cli:** 修复 crypto-js 子路径在 Node ESM 下无法解析导致的启动崩溃 ([41dc5ee](https://github.com/nolotus/bun-nolo/commit/41dc5ee1a18da0e2810e0292e6279d2a9a106bf2))
+* **cli:** 凭证冷却按 owner 隔离，失败原因细分并透传，listAgents 四态化 ([cee6385](https://github.com/nolotus/bun-nolo/commit/cee6385a91552135d9b712393e0f1b843f5efce0))
+* **cli:** 按上游语义分级 429/额度失败，区分容量饱和、额度耗尽与普通限流 ([cd85bea](https://github.com/nolotus/bun-nolo/commit/cd85bea6653eac51609924e245ae2b61c1de1ba2))
+
+
 ## 0.158.0 (2026-10-26)
 
 ### Bug Fixes

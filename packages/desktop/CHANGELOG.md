@@ -1,4 +1,27 @@
 
+## 0.181.0 (2026-10-26)
+
+### Features
+
+* **cloud-plugins:** add docker and cloudflare platform spec registry ([a6b00ee](https://github.com/nolotus/bun-nolo/commit/a6b00eec48ba78d697b104b3b67ec6d538afcee3))
+* **cloud-plugins:** register gcp, vultr, hetzner and digitalocean ([8406aa6](https://github.com/nolotus/bun-nolo/commit/8406aa6c6813dd6a3217830959e842009afce35b))
+* **explore:** wire docker and cloudflare cards into the plugin page ([de1a124](https://github.com/nolotus/bun-nolo/commit/de1a12438e544da14776f6fa6d8c09b93f40781e))
+
+### Bug Fixes
+
+* **cli:** 修复 crypto-js 子路径在 Node ESM 下无法解析导致的启动崩溃 ([41dc5ee](https://github.com/nolotus/bun-nolo/commit/41dc5ee1a18da0e2810e0292e6279d2a9a106bf2))
+* **cli:** 凭证冷却按 owner 隔离，失败原因细分并透传，listAgents 四态化 ([cee6385](https://github.com/nolotus/bun-nolo/commit/cee6385a91552135d9b712393e0f1b843f5efce0))
+* **cli:** 按上游语义分级 429/额度失败，区分容量饱和、额度耗尽与普通限流 ([cd85bea](https://github.com/nolotus/bun-nolo/commit/cd85bea6653eac51609924e245ae2b61c1de1ba2))
+* **desktop:** trigger stable 0.172.2 release for sync origin sha256 fix ([221c625](https://github.com/nolotus/bun-nolo/commit/221c6254f6199bbb026bd23a35861c3f0c6ea581))
+* **desktop:** 无 Apple 证书时用 ad-hoc 签名，macOS 产物仍可安装 ([bdbca94](https://github.com/nolotus/bun-nolo/commit/bdbca944b5fc39bb42a48567d90cf1f20f14260b))
+* **desktop:** 更新检查改走 S3 直连，绕开 Cloudflare challenge ([92ce3ec](https://github.com/nolotus/bun-nolo/commit/92ce3ec664ad18bf7fc18e363a8fb9eb18d769b9))
+* **hooks:** report test runner startup failures without masking regressions ([023279e](https://github.com/nolotus/bun-nolo/commit/023279ee8bf66bf5faee5e45705e8a17903afd9e))
+* **hooks:** report test runner startup failures without masking regressions ([a90275d](https://github.com/nolotus/bun-nolo/commit/a90275d64e552f19cfdef03d3f7bd00b74e3c42f))
+* **release:** legacy alias 校验改走 S3 直连，公开 URL 403 不再阻断发布 ([dfd509a](https://github.com/nolotus/bun-nolo/commit/dfd509a9163ff8e1a28ea59aeeae41358115d687))
+* **release:** S3 大小校验改走 GET Range，删掉 HEAD 路径 ([c68537b](https://github.com/nolotus/bun-nolo/commit/c68537b6b8010a633c8dc01fb581d3ad2ef80b41))
+* **release:** 上传后校验改走 S3 直连，不再打公开 CDN URL ([d393ed1](https://github.com/nolotus/bun-nolo/commit/d393ed15381e750272b29758a675707716c3828f))
+
+
 ## 0.180.0-alpha.9 (2026-10-25)
 
 ### Bug Fixes

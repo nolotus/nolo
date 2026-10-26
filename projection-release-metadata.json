@@ -2,13 +2,13 @@
   "schemaVersion": 2,
   "components": {
     "cli": {
-      "version": "0.158.0",
+      "version": "0.159.0",
       "channel": "stable",
-      "releaseIntent": "release"
+      "releaseIntent": "none"
     },
     "desktop": {
-      "version": "0.180.0-alpha.9",
-      "channel": "alpha",
+      "version": "0.181.0",
+      "channel": "stable",
       "releaseIntent": "none"
     }
   },
