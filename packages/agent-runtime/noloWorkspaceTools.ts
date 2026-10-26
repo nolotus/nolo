@@ -182,13 +182,13 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
   }, ["table"]);
   add("cliWhoami", "Show the current Nolo CLI login state.", {});
   add("cliDoctor", "Show Nolo CLI doctor diagnostics.", {});
-  add("list_cloud_resources", "List accessible cloud resources for personal or organization scope. Never outputs credentials.", {
+  add("list_cloud_resources", "List cloud resources you may use (your own connections plus any shared with you). Never outputs credentials.", {
     ownerKind: {
       type: "string",
-      enum: ["user", "organization"],
-      description: "Owner scope kind. Defaults to user (caller).",
+      enum: ["user", "space"],
+      description: "Scope selector. user (default) = everything you may use; space = only connections in one Space you belong to.",
     },
-    organizationId: stringToolParam("Required when ownerKind is organization."),
+    spaceId: stringToolParam("Required when ownerKind is space."),
     platformId: stringToolParam("Optional cloud platform filter (e.g. docker, cloudflare, gcp)."),
   });
   add("cloud_probe", "Probe read-only connectivity and readiness of a cloud resource. Never accepts credential parameters.", {

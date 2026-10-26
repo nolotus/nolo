@@ -1,4 +1,12 @@
 
+## 0.183.0-alpha.1 (2026-10-26)
+
+### Features
+
+* **cloud-plugins:** serve connections by grant, drop the organization scope ([e6a7a6f](https://github.com/nolotus/bun-nolo/commit/e6a7a6ff8f8bf92e51717e5c5dee2d8fb1c7942b))
+* **plugins:** make data-source tools opt-in per user, off by default ([6df08fb](https://github.com/nolotus/bun-nolo/commit/6df08fb1ebbfff61304ccbcd5703c95569aee304))
+
+
 ## 0.182.0-alpha.1 (2026-10-26)
 
 ### Features
