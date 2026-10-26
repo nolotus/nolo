@@ -1,4 +1,12 @@
 
+## 0.185.0-alpha.2 (2026-10-26)
+
+### Bug Fixes
+
+* **cli:** 终止身份容差按基准来源分级（自报 2s / spawn 30s） ([fd148ea](https://github.com/nolotus/bun-nolo/commit/fd148eab6f62f6f99c68b74d2940847e003f4bb7))
+* **cli:** 身份基准改子进程自报，Windows 子 run 不再被身份探测卡死 ([3e31ddf](https://github.com/nolotus/bun-nolo/commit/3e31ddfa407564e15c7a79558f0b2b6d12fe299d))
+
+
 ## 0.185.0-alpha.1 (2026-10-26)
 
 ### Features

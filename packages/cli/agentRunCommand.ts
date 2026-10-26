@@ -56,6 +56,7 @@ import {
 } from "./agentRunArgs";
 import {
   createRunActivityTracker,
+  reportRunProcessIdentity,
   finalizeRunRecord,
   settleRunTerminalAuthoritatively,
   transitionRunToTerminal,
@@ -318,6 +319,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   const nowMs = () => (deps.now ? deps.now().getTime() : Date.now());
   const childRunId = env.NOLO_AGENT_RUN_ID;
   const hasRegistry = typeof childRunId === "string" && childRunId.length > 0;
+  if (hasRegistry) reportRunProcessIdentity(childRunId, { env, homedir: deps.homedir, fs: deps.fs, now: deps.now });
   const processExit = deps.processExit ?? ((code: number) => process.exit(code));
   const stallTimeoutMs = resolvePositiveMs(
     deps.stallTimeoutMs ?? env.NOLO_LOCAL_RUN_STALL_TIMEOUT_MS,
