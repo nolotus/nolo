@@ -1,4 +1,11 @@
 
+## 0.186.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **llm:** deepseek-flash 默认改走 LithosAI，失效回落官方 ([7bc15cd](https://github.com/nolotus/bun-nolo/commit/7bc15cd21727182c01d108eb2a0fab1206147465))
+
+
 ## 0.185.0-alpha.2 (2026-10-26)
 
 ### Bug Fixes

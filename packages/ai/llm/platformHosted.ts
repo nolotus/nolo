@@ -728,10 +728,15 @@ export const resolvePlatformDeepseekRoute = (args: {
 export const resolvePlatformDeepseekFlashRoute = resolvePlatformDeepseekRoute;
 
 /**
- * 时段路由（block D）：DeepSeek Flash 默认档在官方高峰改走 LithosAI。
+ * 上游路由：DeepSeek Flash 默认档**恒走 LithosAI**，任何失效回落官方 DeepSeek。
  * owner 决策：策略做在平台背后（服务端层），凭证 = 平台自己的 LithosAI 账户
  * （env.LITHOS_API_KEY，见 getNoloKey 的 "lithos" case）；缺 key fail-open
  * 回落官方，绝不拿官方 key 打 Lithos 端点（端点与凭据同源由选择函数单一产出）。
+ *
+ * 选择**不看时段**（2026-10-27 owner 决策：默认档默认走 Lithos，取代原「仅官方
+ * 高峰切 Lithos」）。「失效 → 官方」由调用点的 PLATFORM_HOSTED_DEEPSEEK_LITHOS_
+ * FALLBACK_STATUSES（402/408/429/500/502/503/504）+ fallbackOnTimeout（连接超时）
+ * + fallbackOnFirstFrameTimeout（2xx 但无 data 帧）表达，不在本函数里。
  */
 
 /** LithosAI OpenAI 兼容端点（平台服务器持有 LITHOS_API_KEY）。 */
@@ -741,17 +746,6 @@ export const LITHOS_DEEPSEEK_FLASH_CHAT_COMPLETIONS_URL =
 /** LithosAI 侧的上游模型 id（与 Baseten 兜底线的同名 id 不是一家，勿混）。 */
 export const LITHOS_DEEPSEEK_FLASH_UPSTREAM_MODEL =
   "deepseek-ai/DeepSeek-V4.1-Flash";
-
-/**
- * true = 官方高峰：周一至周五 UTC 01:00–04:00 / 06:00–10:00
- * （≡ 北京 09–12 / 14–18）。直接复用 isDeepSeekOffPeakBeijingTime 一处真值
- * （+8h 后读北京星期/小时），不写第二份窗口常量；不查中国假日表——假日被
- * 误判为高峰只会改走 LithosAI，而 LithosAI 费率 ≡ 官方低谷价，零额外成本；
- * 漏判高峰才会付官方双倍。
- */
-export const isDeepSeekOfficialPeakBeijingTime = (
-  nowMs = Date.now(),
-): boolean => !isDeepSeekOffPeakBeijingTime(nowMs);
 
 /** flash 线（deepseek-flash + legacy 别名）；deepseek-v4-pro 不在内——pro 恒官方。 */
 export const isPlatformHostedDeepSeekFlashLine = (
@@ -768,18 +762,21 @@ export type DeepseekFlashUpstreamChoice = "official" | "lithos";
 
 /**
  * 服务端上游选择纯函数（chat proxy / server agentRun / key 预检三点同源）：
- * - 仅 flash 线（deepseek-flash + legacy 别名）可切；pro / 其它模型恒 "official"；
- * - 仅官方高峰切 LithosAI；低谷/周末恒 "official"；
+ * - 仅 flash 线（deepseek-flash + legacy 别名）可走 Lithos；pro / 其它模型恒 "official"；
+ * - flash 线 + 有 LITHOS_API_KEY → 恒 "lithos"（默认档默认走 Lithos，不看时段）；
  * - 缺 LITHOS_API_KEY 恒 "official"（fail-open，保住服务）。
+ *
+ * 「Lithos 失效 → 官方」不在这里：由调用点按
+ * PLATFORM_HOSTED_DEEPSEEK_LITHOS_FALLBACK_STATUSES + fallbackOnTimeout +
+ * fallbackOnFirstFrameTimeout 表达（同一 wire 主体、跨 wire 回落官方 responses）。
  */
 export const selectDeepseekFlashUpstream = (args: {
   model?: string | null;
-  nowMs?: number;
   hasLithosKey: boolean;
 }): DeepseekFlashUpstreamChoice => {
   if (!isPlatformHostedDeepSeekFlashLine(args.model)) return "official";
   if (!args.hasLithosKey) return "official";
-  return isDeepSeekOfficialPeakBeijingTime(args.nowMs) ? "lithos" : "official";
+  return "lithos";
 };
 
 /**
