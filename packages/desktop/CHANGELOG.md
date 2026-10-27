@@ -3,6 +3,7 @@
 
 ### Features
 
+* **browser-connector:** show the approved option, not the raw value ([3099955](https://github.com/nolotus/bun-nolo/commit/3099955da7630a488d6412af15adf486f44952fb))
 * **browser-connector:** show the target site in the approval window ([11ac07c](https://github.com/nolotus/bun-nolo/commit/11ac07c8551cca9f985e18fc3bd05b94c9e085d6))
 
 

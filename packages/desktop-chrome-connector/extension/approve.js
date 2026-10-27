@@ -15,6 +15,32 @@ const targetName = params.get("target") || "";
  * code, and it could be written to imitate a brand next to the origin.
  */
 const targetOrigin = (params.get("origin") || "").trim();
+/**
+ * What the action would change, for a select: the option it would set (`{"value":"jp","label":"Japan"}`).
+ *
+ * The control name and the site say *where* the action happens; this says *which item*. Without it
+ * the user cannot tell two identically named controls on the same site apart, nor two requests for
+ * the same control with different options — so the decision would be made blind.
+ *
+ * Only the option label ever travels here. The text a `type` action typed is free text
+ * (it can carry a name, a token, a password) and is not a "which one of these" decision, so it is
+ * never part of this summary. The page title is absent for a different reason: it is decorative and
+ * page-controlled, while the option label is the item being approved.
+ */
+function parseSummary(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return null;
+    const label = String(parsed.label ?? "").trim();
+    if (!label) return null;
+    return { label };
+  } catch {
+    return null;
+  }
+}
+const summary = parseSummary(params.get("summary"));
 
 const ACTION_LABELS = {
   click: "点击",
@@ -34,6 +60,12 @@ const actionLabel = document.getElementById("action-label");
 
 actionLabel.textContent = ACTION_LABELS[action] || ACTION_LABELS.click;
 targetLine.textContent = targetName ? `「${targetName}」` : "未命名控件";
+// The item the action would set, right after the control it would set it on. With no summary the
+// line stays exactly as it was — a lone arrow would say nothing.
+if (summary) {
+  const summaryText = summary.label;
+  if (summaryText) targetLine.textContent += `→ ${summaryText}`;
+}
 // A site the user cannot name is a site the user cannot judge: say "unknown" instead of leaving
 // the line blank, so a missing origin never reads as "nothing to see here".
 if (siteLine) {

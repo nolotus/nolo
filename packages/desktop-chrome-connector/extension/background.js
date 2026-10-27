@@ -175,7 +175,9 @@ function sweepApprovalRecords(nowMs = Date.now()) {
     if (!(Number(record.expiresAt) <= nowMs)) continue;
     record.state = "expired";
     record.expiredAt = nowMs;
-    void persistApprovalRecord(record);
+    // A failed write only costs durability across a worker restart — the in-memory record stays
+    // authoritative, and the authorization decision itself is unaffected by it.
+    void persistApprovalRecord(record).catch(() => {});
   }
 }
 
@@ -318,6 +320,51 @@ async function resolveApprovalSite(tabId) {
 }
 
 /**
+ * The option a select request would set, read without touching the page.
+ *
+ * Why this exists: the approval window names the action, the control and the site. That still does
+ * not say *which option* of the select would be chosen — and the user cannot make a correct
+ * decision without it: two pages on the same site can carry a control with the very same name, and
+ * one select can be asked for different options on two runs. The option label is exactly the piece
+ * the decision is about, so it belongs on the window.
+ *
+ * Note the asymmetry with the page title, which is deliberately not shown anywhere: the title is
+ * decorative and page-controlled (a page can write a brand name next to a hostile origin), while the
+ * option label is the item the user is being asked to approve. The test is not "is the content
+ * page-controlled" but "can the user still decide correctly without it" — and without the label
+ * they cannot.
+ *
+ * Only the resolved option label is carried — never the raw value or payload.
+ */
+function approvalPageArgs(target) {
+  return target?.kind === "ref" ? {
+    region: target.expect?.region || "", expectedUrl: target.expect?.url,
+    expectedSignature: target.expect?.signature, index: target.expect?.index,
+    expectedTag: target.expect?.tag, expectedName: target.expect?.name,
+  } : { selector: String(target?.selector || "") };
+}
+
+/** Match in the page using the same identity and option rules as execution; export labels only. */
+async function resolveSelectApprovalSummary({ action, tabId, payload, target }) {
+  if (action !== "set_select_value") return null;
+  const pageArgs = approvalPageArgs(target);
+  const mark = await captureSelectToken(tabId, pageArgs);
+  if (!mark.ok) return null;
+  try {
+    const result = await executeInTab(tabId, pageOperation, [{
+      ...pageArgs, op: "read_select_options", selectToken: mark.token,
+      value: payload?.value, label: payload?.label,
+    }]);
+    return result?.ok === true && result.matched === true && result.label
+      ? { label: result.label } : null;
+  } catch {
+    return null;
+  } finally {
+    await clearSelectToken(tabId, mark.token);
+  }
+}
+
+/**
  * Opens the approval window and returns a pending verdict. Fails closed to `USER_APPROVAL_DENIED`
  * when this runtime has no `chrome.windows` (Firefox builds, bare test stubs, a rejected create): a
  * pending record nobody can ever approve is worse than a plain refusal.
@@ -339,17 +386,26 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
   const approvalId = `apr_${randomId()}`;
   const nonce = randomId();
   const targetInfo = refusal?.target || {};
-  const targetName = String(targetInfo.name ?? "").slice(0, 200);
+  // Approval metadata is separate from labelOf: changing identity labels would invalidate refs.
+  let targetName = "未命名控件";
+  try {
+    const inspected = await executeInTab(tabId, pageOperation, [{ ...approvalPageArgs(target), op: "inspect" }]);
+    if (inspected?.ok === true) targetName = String(inspected.approvalName ?? inspected.name ?? "未命名控件").slice(0, 200);
+  } catch { /* Unreadable controls must not fall back to potentially private content. */ }
   // The site the action belongs to: the approval window is the only place the user can decide, so
   // it has to say *which site* is asking, not only which control.
   const site = await resolveApprovalSite(tabId);
+  // What the action would change, in one phrase: for a select, the option it would set. The control
+  // name and the site say *where*; this says *which item*.
+  const summary = await resolveSelectApprovalSummary({ action, tabId, payload, target, refusal });
 
   // One pending request per tab: a second gate must not stack windows the user cannot tell apart.
   for (const record of approvalRecords.values()) {
     if (record.state === "pending" && String(record.tabId) === String(tabId)) {
       record.state = "superseded";
       record.supersededAt = now;
-      void persistApprovalRecord(record);
+      // A failed write only costs durability across a worker restart, not the decision itself.
+      void persistApprovalRecord(record).catch(() => {});
     }
   }
 
@@ -367,6 +423,8 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
       role: String(targetInfo.role ?? ""),
       type: String(targetInfo.type ?? ""),
     },
+    // Only the option label — never the raw value or payload.
+    summary: summary ? { label: summary.label } : null,
     owner: typeof payload?.owner === "string" ? payload.owner : "",
     dialogId: typeof payload?.dialogId === "string" ? payload.dialogId : "",
     state: "pending",
@@ -388,6 +446,11 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
       // No title: the page controls its title, so it must not be able to put text next to the origin.
       origin: site,
     });
+    // The item the action would set, for a select: only the option label.
+    // Nothing else of the request travels — no payload, and never the text a `type` action typed.
+    if (summary) {
+      params.set("summary", JSON.stringify({ label: summary.label }));
+    }
     const created = await chrome.windows.create({
       url: `${base}?${params.toString()}`,
       type: "popup",
@@ -441,7 +504,8 @@ async function consumeApprovalCredential({ approvalId, record, action }) {
     if (record.state !== "expired") {
       record.state = "expired";
       record.expiredAt = Date.now();
-      void persistApprovalRecord(record);
+      // A failed write only costs durability across a worker restart, not the decision itself.
+      void persistApprovalRecord(record).catch(() => {});
     }
     return { verdict: approvalVerdict(APPROVAL_EXPIRED_CODE, approvalExpiredMessage, { action, approvalId }) };
   }
@@ -543,7 +607,8 @@ function denyApprovalsForWindow(windowId) {
     record.state = "denied";
     record.deniedAt = Date.now();
     record.denyReason = "approval_window_closed";
-    void persistApprovalRecord(record);
+    // A failed write only costs durability across a worker restart, not the decision itself.
+    void persistApprovalRecord(record).catch(() => {});
   }
 }
 
@@ -1233,7 +1298,7 @@ function pageOperation(payload) {
           message: `Region selector matched no element: ${region}`,
         };
       }
-      const resolved = resolveElement(found, { selector: payload.selector });
+      const resolved = resolveElement(found, payload);
       if (resolved.code) return { ok: false, code: resolved.code, message: resolved.message };
       element = resolved.element;
     }
@@ -1246,6 +1311,11 @@ function pageOperation(payload) {
     return {
       ok: true,
       name: labelOf(element),
+      // Do not use editable content as approval metadata; keep identity labels unchanged.
+      approvalName: (tag === "textarea" || tag === "input" || element.isContentEditable ||
+        (element.hasAttribute("contenteditable") && element.getAttribute("contenteditable") !== "false"))
+        ? (["name", "aria-label", "placeholder", "title"].map((key) => element.getAttribute(key)).find((text) => text?.trim()) || "未命名控件")
+        : labelOf(element),
       tag,
       role: declaredRole,
       type: tag === "input" ? String(element.type || declaredType || "text").toLowerCase() : declaredType,
@@ -1500,7 +1570,7 @@ function pageOperation(payload) {
     return { ok: true, token, signature: signatureOf(foundForMark) };
   }
 
-  if (op === "read_select_state") {
+  if (op === "read_select_state" || op === "read_select_options") {
     const stateOf = (select) => {
       const chosen = Array.prototype.slice.call(select.options || []).filter((option) => option.selected === true)[0] || null;
       return {
@@ -1560,6 +1630,15 @@ function pageOperation(payload) {
       // No name comparison: `labelOf` falls back to `innerText` and, for a select, that text is
       // the selected option — it changes precisely because the set succeeded. The registry already
       // pins which node this is about.
+      if (op === "read_select_options") {
+        const { matches } = matchSelectOptions(select);
+        if (matches.length !== 1 || select.multiple || select.disabled || matches[0].disabled ||
+            (matches[0].parentElement?.tagName === "OPTGROUP" && matches[0].parentElement.disabled)) {
+          return { ok: true, matched: false };
+        }
+        const label = String(matches[0].textContent || matches[0].label || "").replace(/\s+/g, " ").trim().slice(0, 120);
+        return { ok: true, matched: true, ...(label ? { label } : {}) };
+      }
       return { ok: true, ...stateOf(select) };
     } finally {
       // The mark lives exactly one operation: it is gone whether the read succeeded or not.
@@ -1606,6 +1685,20 @@ function pageOperation(payload) {
       message: "Another select now occupies the target, so the select that was set is no longer in the page; it cannot be confirmed that it is the same control and the applied option could not be verified.",
     };
   }
+
+  // One matcher for both preview and execution: exactly one string target, including "".
+  function matchSelectOptions(select) {
+    const wantedValue = typeof payload.value === "string" ? payload.value : null;
+    const wantedLabel = typeof payload.label === "string" ? payload.label : null;
+    const allOptions = Array.prototype.slice.call(select.options || []);
+    const valid = (wantedValue === null) !== (wantedLabel === null);
+    const normalize = (text) => String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+    const matches = !valid ? [] : allOptions.filter((option) => wantedValue !== null
+      ? String(option.value) === wantedValue
+      : normalize(option.textContent || option.label || "") === normalize(wantedLabel));
+    return { wantedValue, wantedLabel, allOptions, matches, valid };
+  }
+
 
   if (op === "set_select_value") {
     const applySelectValue = () => {
@@ -1714,9 +1807,8 @@ function pageOperation(payload) {
         };
       }
 
-      const wantedValue = typeof payload.value === "string" ? payload.value : null;
-      const wantedLabel = typeof payload.label === "string" ? payload.label : null;
-      if ((wantedValue === null) === (wantedLabel === null)) {
+      const { wantedValue, wantedLabel, allOptions, matches, valid } = matchSelectOptions(select);
+      if (!valid) {
         return {
           ok: false,
           code: "OPTION_TARGET_REQUIRED",
@@ -1724,12 +1816,6 @@ function pageOperation(payload) {
         };
       }
 
-      const allOptions = Array.prototype.slice.call(select.options || []);
-      // Never guess: a wrong option on a real form can be an irreversible choice, so every
-      // uncertainty (no match, several matches, disabled option) is an error the model must resolve.
-      const matches = wantedValue !== null
-        ? allOptions.filter((option) => String(option.value) === wantedValue)
-        : allOptions.filter((option) => normalizeOptionText(option.textContent || option.label || "") === normalizeOptionText(wantedLabel));
       if (matches.length === 0) {
         return {
           ok: false,
