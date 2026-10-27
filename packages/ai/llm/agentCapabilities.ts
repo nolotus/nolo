@@ -157,10 +157,6 @@ export const resolveToolImagePolicy = (input: ToolImagePolicyInput): {
       reason: "legacy",
     };
   }
-  if (input.routeKind === "antigravity"
-    && env?.NOLO_TOOL_IMAGES_ALLOW_ANTIGRAVITY !== "1") {
-    return { supportsToolImages: false, reason: "route-unsupported" };
-  }
   const catalog = resolveCatalogImageSupport(input);
   if (catalog !== undefined) return { supportsToolImages: catalog, reason: "catalog" };
   if (typeof input.hasVision === "boolean") {

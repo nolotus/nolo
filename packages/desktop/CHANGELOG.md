@@ -1,4 +1,11 @@
 
+## 0.194.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **capabilities:** 撤销 antigravity 路由禁图（实测可用，此前结论基于旧代码） ([32ed1f3](https://github.com/nolotus/bun-nolo/commit/32ed1f33bead23ad5560bab41c255fde0b5eaded))
+
+
 ## 0.194.0-alpha.1 (2026-10-27)
 
 ### Features
