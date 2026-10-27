@@ -1,4 +1,11 @@
 
+## 0.188.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **agent-runtime:** 让 agent 声明的 hasVision 真正到达运行时 + 图片归属标签 ([82c1fe4](https://github.com/nolotus/bun-nolo/commit/82c1fe4a8d413c8039053fbdbfddb32ed878ed62))
+
+
 ## 0.188.0-alpha.1 (2026-10-27)
 
 ### Features

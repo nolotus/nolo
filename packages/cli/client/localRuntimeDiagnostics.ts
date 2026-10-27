@@ -1,3 +1,4 @@
+import type { AgentRuntimeToolResult } from "../../agent-runtime/hostAdapter";
 import type { ShellApprovalSession } from "./originShellApprovalTransport";
 import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
 import type { AgentRuntimeAgentConfig } from "../agentRuntimeLocal";
@@ -74,7 +75,7 @@ export type CliLocalRuntimeAdapterDeps = {
     string,
     (
       call: any,
-    ) => Promise<{ content: string; metadata?: Record<string, unknown> }>
+    ) => Promise<AgentRuntimeToolResult>
   >;
   readXPost?: ReadToolFn;
   readXhsProfile?: ReadToolFn;

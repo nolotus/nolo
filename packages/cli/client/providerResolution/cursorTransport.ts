@@ -70,7 +70,7 @@ export const resolveCursorTransport: ProviderResolver = async (ctx) => {
           : {}),
       });
       return {
-        content: result.content,
+        ...result,
         metadata: {
           ...(result.metadata ?? {}),
           workspaceRoot,

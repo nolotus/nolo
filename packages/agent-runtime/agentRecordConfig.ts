@@ -83,6 +83,7 @@ export function resolveAgentRuntimeConfigFromRecord(
     ...(name ? { name } : {}),
     ...(prompt ? { prompt } : {}),
     ...(model ? { model } : {}),
+    ...(typeof record.hasVision === "boolean" ? { hasVision: record.hasVision } : {}),
     ...(provider ? { provider } : {}),
     ...(apiSource ? { apiSource } : {}),
     ...(cliProvider ? { cliProvider } : {}),
