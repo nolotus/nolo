@@ -4,10 +4,8 @@ import { fileURLToPath } from "node:url";
 import { initializeDiagnostics, detectMode } from "./diagnostics";
 import { isCompiledBinary } from "./cliEnvHelpers";
 import { readPackageInfo } from "./updateCommands";
-import {
-  consumeWindowsUpdateStartupNotice,
-  getWindowsUpdateStatus,
-} from "./windowsSelfUpdate";
+import { getWindowsUpdateStatus } from "./windowsSelfUpdate";
+import { takeVersionChangeNotice } from "./versionChangeNotice";
 
 // —— 阶段 0 / Slice 1：诊断先行 ——
 // 在任何应用模块顶层代码可能缓存 console 引用之前，完成模式判定 + console bridge。
@@ -37,15 +35,10 @@ if (process.platform === "win32") {
     process.exit(0);
   }
 
-  const updateNotice = consumeWindowsUpdateStartupNotice(process.env, {
-    ownerUpdateId: process.env.NOLO_UPDATE_OWNER_ID,
-  });
-  if (updateNotice) {
-    process.stderr.write(`${updateNotice.text}\n`);
-    if (updateNotice.blocking) {
-      process.exit(75);
-    }
-  }
+  // 2026-10-27 减法：删除启动门禁。
+  // 更新失败不再阻塞 `nolo` 启动——旧版本目录保持可用，更新只在下次启动生效。
+  // 依据：安装走独立版本目录（managedRoot/<version>-<updateId>）+ 切换入口，
+  // 不原地覆盖正在使用的版本，因此"等所有 nolo 进程退出"这个前提本身不成立。
 }
 
 const SOURCE_CLI_DIR = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +46,22 @@ const CLI_DIR = isCompiledBinary() ? dirname(process.execPath) : SOURCE_CLI_DIR;
 const ROOT_DIR = join(CLI_DIR, "..", "..");
 const SCRIPT_DIR = join(ROOT_DIR, "scripts");
 const packageInfo = readPackageInfo();
+
+// 版本变化提示：只保存一个版本号，不参与启动门禁。
+// 仅在交互终端、且不是版本查询 / 机器输出 / update 这类脚本用途时打扰一次。
+const isScriptLikeArgs =
+  cliArgs[0] === "update" ||
+  cliArgs[0] === "-v" ||
+  cliArgs[0] === "--version" ||
+  cliArgs.includes("--json");
+if (process.stdout.isTTY && !isScriptLikeArgs) {
+  const change = takeVersionChangeNotice(packageInfo.version);
+  if (change) {
+    process.stderr.write(
+      `▸ Nolo version changed: ${change.from} → ${change.to}\n`,
+    );
+  }
+}
 
 const args = cliArgs;
 

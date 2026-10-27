@@ -40,7 +40,7 @@ type RunSelfUpdateOptions = {
   platform?: NodeJS.Platform;
   scheduleWindowsUpdate?: (
     options: WindowsUpdateLaunchOptions,
-  ) => { helperPid: number; statePath: string; logPath: string };
+  ) => { helperPid: number; logPath: string };
 };
 
 export type SelfUpdateExecution = {
@@ -704,10 +704,10 @@ export async function runSelfUpdateDetailed(
       output.write(`\nNolo Agent CLI Installer & Updater\n`);
       output.write(`-----------------------------------------\n`);
       output.write(`✓ Target channel: ${channel} (nolo-cli@${channel})\n`);
-      output.write(`✓ Safe Windows update scheduled (helper pid ${scheduled.helperPid}).\n`);
-      output.write(`▸ Exit Nolo normally. Installation starts after this process releases its files.\n`);
-      output.write(`▸ Do not open another Nolo window until the update finishes.\n`);
-      output.write(`  Log: ${scheduled.logPath}\n\n`);
+      output.write(`✓ Update scheduled in background (helper pid ${scheduled.helperPid}).\n`);
+      output.write(`▸ You can keep using Nolo — no need to close this or any other window.\n`);
+      output.write(`▸ Installation continues in the background; once it finishes, the next Nolo launch uses the new version.\n`);
+      output.write(`  Check version: nolo -v    Log: ${scheduled.logPath}\n\n`);
       return { exitCode: 0, disposition: "scheduled" };
     } catch (error) {
       output.write(

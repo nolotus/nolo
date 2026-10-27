@@ -1,4 +1,15 @@
 
+## 0.179.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **cli:** 更新可感知——文案修正 + 完成通知 + 版本变化提示 ([7fb82c8](https://github.com/nolotus/bun-nolo/commit/7fb82c8e12493ec289e3e66802d4ee1b98908136))
+
+### Bug Fixes
+
+* **cli:** Windows 自更新不再阻塞启动，删除等待进程与状态机 ([d20a762](https://github.com/nolotus/bun-nolo/commit/d20a762ebdddb8e099c0bc274d94e2f4e62e012b))
+
+
 ## 0.178.0-alpha.2 (2026-10-27)
 
 ### Bug Fixes
