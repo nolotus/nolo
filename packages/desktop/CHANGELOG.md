@@ -1,4 +1,11 @@
 
+## 0.194.0-alpha.3 (2026-10-27)
+
+### Bug Fixes
+
+* **agent-runtime:** 渲染器缺参 fail fast，不再静默等到超时 ([a86691e](https://github.com/nolotus/bun-nolo/commit/a86691ee2052ef105c5306128102cffc16f9276f))
+
+
 ## 0.194.0-alpha.2 (2026-10-27)
 
 ### Bug Fixes

@@ -223,7 +223,7 @@ function buildCaptureVisualStateTool(): OpenAiCompatibleTool {
           },
           waitSelector: {
             type: "string",
-            description: "CSS selector that must become visible before capture.",
+            description: "Required non-empty CSS selector that must become visible before capture; choose the element that proves the page is ready.",
           },
           scrollSelector: {
             type: "string",

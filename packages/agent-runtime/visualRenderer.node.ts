@@ -94,9 +94,33 @@ export async function renderVisualPage(args: {
   url: string; workspaceRoot: string; screenshotPath: string; waitSelector: string;
   scrollSelector?: string; focusSelector?: string; expectText?: string; timeoutMs?: number;
 }) {
+  // Validate caller input before capability discovery, DNS, queueing or browser startup.
+  for (const field of ["workspaceRoot", "url", "screenshotPath", "waitSelector"] as const) {
+    if (typeof args?.[field] !== "string" || !args[field].trim()) {
+      throw new Error(`renderVisualPage: ${field} is required (expected a non-empty string)`);
+    }
+  }
+  if (!isAbsolute(args.workspaceRoot)) {
+    throw new Error("renderVisualPage: workspaceRoot must be an absolute path");
+  }
+  if (!isAbsolute(args.screenshotPath) || !relative(args.workspaceRoot, args.screenshotPath) || isVisualPathOutside(relative(args.workspaceRoot, args.screenshotPath))) {
+    throw new Error("renderVisualPage: screenshotPath must be a file path inside workspaceRoot");
+  }
+  if (args.timeoutMs !== undefined && (typeof args.timeoutMs !== "number" || !Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
+    throw new Error("renderVisualPage: timeoutMs must be a finite number greater than 0");
+  }
+  let parsedUrl: URL;
+  try { parsedUrl = new URL(args.url); } catch {
+    throw new Error("renderVisualPage: url must be an absolute http:, https:, or file: URL");
+  }
+  if (!["http:", "https:", "file:"].includes(parsedUrl.protocol)) {
+    throw new Error("renderVisualPage: url must use http:, https:, or file:");
+  }
+  const url = await validateVisualUrl(args.url, args.workspaceRoot).catch((error) => {
+    throw new Error(`renderVisualPage: url is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  });
   const capability = visualRendererCapability();
   if (!capability.available) throw new Error(capability.reason);
-  const url = await validateVisualUrl(args.url, args.workspaceRoot);
   return renderSlots.run(async () => {
   const timeout = Math.max(1, Math.min(args.timeoutMs ?? 20_000, 20_000));
   const deadline = Date.now() + timeout;
