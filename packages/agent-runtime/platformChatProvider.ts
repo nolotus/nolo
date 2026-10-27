@@ -306,25 +306,25 @@ export function buildPlatformChatCompletionRequest(args: {
           // Responses 协议天然支持 reasoning 数组回放，因此不 stripReasoningContent。
           input: convertMessagesToResponsesInput(
             toOpenAiCompatibleMessages(sanitizedMessages, {
-              supportsToolImages: resolveToolImagePolicy({
+              ...resolveToolImagePolicy({
                 routeKind: "platform",
                 provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
                 model: args.providerConfig.model,
                 customProviderUrl: args.providerConfig.endpoint,
                 hasVision: args.providerConfig.hasVision,
-              }).supportsToolImages,
+              }),
             }) as any,
           ),
         }
       : {
           messages: toOpenAiCompatibleMessages(sanitizedMessages, {
-            supportsToolImages: resolveToolImagePolicy({
+            ...resolveToolImagePolicy({
               routeKind: "platform",
               provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
               model: args.providerConfig.model,
               customProviderUrl: args.providerConfig.endpoint,
               hasVision: args.providerConfig.hasVision,
-            }).supportsToolImages,
+            }),
             stripReasoningContent: shouldStripReasoning,
           }),
         }),

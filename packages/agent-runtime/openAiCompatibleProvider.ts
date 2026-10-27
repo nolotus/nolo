@@ -195,6 +195,7 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
     hasVision: args.providerConfig.hasVision,
   });
   const messages = toOpenAiCompatibleMessages(sanitizedMessages, {
+    maxImagesPerRequest: toolImagePolicy.maxImagesPerRequest,
     supportsToolImages: !isResponses && toolImagePolicy.supportsToolImages,
     stripReasoningContent: shouldStripReasoning,
     ...(args.shapingCounts ? { shapingCounts: args.shapingCounts } : {}),
@@ -252,7 +253,7 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   // server 一致不走该判定（buildResponsesRequestBody 自成一体）。
   const body = isResponses
     ? buildResponsesRequestBody(rawBody, args.providerConfig.model, {
-        supportsToolImages: toolImagePolicy.supportsToolImages,
+        ...toolImagePolicy,
       })
     : normalizeChatCompletionsBodyForProvider({
         body: rawBody,

@@ -147,20 +147,23 @@ export type ToolImagePolicyInput = AgentCapabilityConfig & {
 
 export const resolveToolImagePolicy = (input: ToolImagePolicyInput): {
   supportsToolImages: boolean;
+  maxImagesPerRequest: number;
   reason: string;
 } => {
+  const maxImagesPerRequest = input.routeKind === "antigravity" || input.provider === "google-antigravity" ? 3 : 4;
   const env = typeof process !== "undefined" ? process.env : undefined;
   if (env?.NOLO_TOOL_IMAGE_POLICY === "legacy") {
     return {
       supportsToolImages: input.legacySupportsToolImages
         ?? resolveAgentImageInputSupport({ ...input, hasVision: input.hasVision ?? false }),
+      maxImagesPerRequest,
       reason: "legacy",
     };
   }
   const catalog = resolveCatalogImageSupport(input);
-  if (catalog !== undefined) return { supportsToolImages: catalog, reason: "catalog" };
+  if (catalog !== undefined) return { maxImagesPerRequest, supportsToolImages: catalog, reason: "catalog" };
   if (typeof input.hasVision === "boolean") {
-    return { supportsToolImages: input.hasVision, reason: "agent-declaration" };
+    return { maxImagesPerRequest, supportsToolImages: input.hasVision, reason: "agent-declaration" };
   }
-  return { supportsToolImages: false, reason: "unknown" };
+  return { maxImagesPerRequest, supportsToolImages: false, reason: "unknown" };
 };

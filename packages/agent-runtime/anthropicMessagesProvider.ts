@@ -415,7 +415,7 @@ export function buildAnthropicMessagesBody(args: {
     system.push({ type: "text", text: args.agentConfig.prompt.trim() });
   }
   const messages: JsonRecord[] = [];
-  const imageBudget = createToolImageBudget();
+  const imageBudget = createToolImageBudget(resolveToolImagePolicy({ ...args.agentConfig, routeKind: "anthropic" }).maxImagesPerRequest);
 
   for (const raw of rawMessages) {
     if (!raw || typeof raw !== "object") continue;

@@ -233,13 +233,13 @@ function collectInstructions(
 export function convertMessagesToCodexInput(
   messages: Parameters<typeof convertMessagesToResponsesInput>[0],
   // 兼容两种调用形态：布尔（策略解析结果）与 options 对象（既有调用方/测试）
-  supportsToolImages: boolean | { supportsToolImages?: boolean } = false,
+  supportsToolImages: boolean | { supportsToolImages?: boolean; maxImagesPerRequest?: number } = false,
 ): ResponseInputItem[] {
   const normalizedToolImages =
     typeof supportsToolImages === "boolean"
       ? supportsToolImages
       : supportsToolImages.supportsToolImages === true;
-  return convertMessagesToResponsesInput(messages, { supportsToolImages: normalizedToolImages }).map((item) => {
+  return convertMessagesToResponsesInput(messages, { supportsToolImages: normalizedToolImages, maxImagesPerRequest: typeof supportsToolImages === "boolean" ? undefined : supportsToolImages.maxImagesPerRequest }).map((item) => {
     if (item.type !== "reasoning") return item;
     return {
       type: "reasoning",
@@ -269,7 +269,7 @@ export function buildCodexRequestBody(
     model: typeof args.openAiBody.model === "string" ? args.openAiBody.model : args.agentConfig.model,
     routeKind: "codex/responses",
     legacySupportsToolImages: false,
-  }).supportsToolImages);
+  }));
   const instructions = collectInstructions(rawMessages, args.agentConfig.prompt);
   const stableInstructions = collectStablePromptPrefix(rawMessages, args.agentConfig.prompt);
   const model =

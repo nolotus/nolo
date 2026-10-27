@@ -1,4 +1,11 @@
 
+## 0.178.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **capabilities:** 每通道每请求图片上限 + 超限截断补投 ([bf3e586](https://github.com/nolotus/bun-nolo/commit/bf3e5868ca457e83f0fb82e4c99a391ef141fda6))
+
+
 ## 0.177.0-alpha.3 (2026-10-27)
 
 ### Bug Fixes

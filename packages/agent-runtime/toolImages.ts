@@ -49,7 +49,8 @@ export const MAX_TOOL_IMAGE_BASE64_BYTES_PER_REQUEST = 8 * 1024 * 1024;
 export const formatToolImageBudgetNote = (omittedCount: number) =>
   `Note: ${omittedCount} image(s) omitted (request budget: ${MAX_TOOL_IMAGES_PER_REQUEST} images / 8 MiB base64) — they were NOT delivered, do not guess their content.`;
 
-export function createToolImageBudget() {
+export function createToolImageBudget(maxImagesPerRequest = MAX_TOOL_IMAGES_PER_REQUEST) {
+  const limit = Math.min(MAX_TOOL_IMAGES_PER_REQUEST, maxImagesPerRequest);
   let count = 0;
   let bytes = 0;
   const seen = new Set<string>();
@@ -63,7 +64,7 @@ export function createToolImageBudget() {
       delivery.set(image, "impossible");
       return "impossible";
     }
-    if (count >= MAX_TOOL_IMAGES_PER_REQUEST || bytes + size > MAX_TOOL_IMAGE_BASE64_BYTES_PER_REQUEST) return "pending";
+    if (count >= limit || bytes + size > MAX_TOOL_IMAGE_BASE64_BYTES_PER_REQUEST) return "pending";
     count += 1;
     bytes += size;
     delivery.set(image, "delivered");

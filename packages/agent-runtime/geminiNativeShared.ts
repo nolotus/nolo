@@ -247,6 +247,7 @@ export function convertOpenAiMessagesToGemini(
   options: {
     attachSkipThoughtSignature: boolean;
     supportsToolImages?: boolean;
+    maxImagesPerRequest?: number;
   },
 ): { contents: GeminiContent[]; systemTexts: string[] } {
   const sanitizedMessages = filterOrphanedToolMessages(
@@ -255,6 +256,7 @@ export function convertOpenAiMessagesToGemini(
   const effectiveMessages = projectOpenAiToolImages(
     sanitizedMessages,
     options.supportsToolImages === true,
+    options.maxImagesPerRequest,
   );
   const contents: GeminiContent[] = [];
   const systemTexts: string[] = [];
@@ -1006,17 +1008,18 @@ export function buildGeminiGenerateContentRequest(args: {
   supportsToolImages?: boolean;
   toolImagePolicy?: ToolImagePolicyInput;
 }): Record<string, unknown> {
-  const supportsToolImages = resolveToolImagePolicy(args.toolImagePolicy ?? {
+  const toolImagePolicy = resolveToolImagePolicy(args.toolImagePolicy ?? {
     routeKind: "gemini-native",
     hasVision: args.supportsToolImages,
     legacySupportsToolImages: args.supportsToolImages ?? false,
-  }).supportsToolImages;
+  });
 
   const { contents, systemTexts } = convertOpenAiMessagesToGemini(
     args.messages,
     {
       attachSkipThoughtSignature: args.attachSkipThoughtSignature,
-      supportsToolImages,
+      supportsToolImages: toolImagePolicy.supportsToolImages,
+      maxImagesPerRequest: toolImagePolicy.maxImagesPerRequest,
     },
   );
 

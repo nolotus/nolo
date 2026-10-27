@@ -174,10 +174,10 @@ export const convertMessagesToResponsesInput = (
     | (Pick<Message, "role" | "content" | "tool_calls" | "tool_call_id"> & { reasoning_content?: unknown })
     | { role: string; content?: any; tool_calls?: any; tool_call_id?: string; reasoning_content?: unknown }
   >,
-  options?: { stripReasoningContent?: boolean; supportsToolImages?: boolean },
+  options?: { stripReasoningContent?: boolean; supportsToolImages?: boolean; maxImagesPerRequest?: number },
 ): ResponseInputItem[] => {
   const input: ResponseInputItem[] = [];
-  const imageBudget = createToolImageBudget();
+  const imageBudget = createToolImageBudget(options?.maxImagesPerRequest);
   let acceptedImages = 0;
 
   for (const message of messages) {

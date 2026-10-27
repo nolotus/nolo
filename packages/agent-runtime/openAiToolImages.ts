@@ -31,11 +31,13 @@ const INTRO =
 export function projectOpenAiToolImages(
   messages: AgentRuntimeChatMessage[],
   supportsImages: boolean,
+  maxImagesPerRequest?: number,
 ): AgentRuntimeChatMessage[] {
   const parts: AttachmentPart[] = [];
   const omitted: string[] = [];
-  const budget = createToolImageBudget();
+  const budget = createToolImageBudget(maxImagesPerRequest);
   let accepted = 0;
+  let deferred = 0;
   let lastTool = -1;
 
   messages.forEach((message, index) => {
@@ -46,6 +48,7 @@ export function projectOpenAiToolImages(
       if (decision === "duplicate") continue;
       const source = toolImageSource(message, imageIndex);
       if (decision !== "delivered") {
+        if (decision === "pending") deferred += 1;
         omitted.push(toolImageOmission(source, decision === "impossible"));
         continue;
       }
@@ -68,7 +71,7 @@ export function projectOpenAiToolImages(
     : "";
   const attachment: AgentRuntimeChatMessage = {
     role: "user",
-    content: [{ type: "text", text: `${INTRO}${note}` }, ...parts],
+    content: [{ type: "text", text: `${INTRO}${deferred ? ` 本次投递 ${accepted} 张，另有 ${deferred} 张未投递（${deferred} 张 deferred to a later round）。` : ""}${note}` }, ...parts],
   } as AgentRuntimeChatMessage;
 
   return [...messages.slice(0, lastTool + 1), attachment, ...messages.slice(lastTool + 1)];

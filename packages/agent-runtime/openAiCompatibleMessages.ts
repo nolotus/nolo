@@ -38,6 +38,7 @@ export type OpenAiCompatibleRequestMessage = {
  */
 export type PreserveAgentStateOptions = {
   supportsToolImages?: boolean;
+  maxImagesPerRequest?: number;
   stripReasoningContent?: boolean;
   /**
    * When set to a non-empty string, assistant messages that carry a non-empty
@@ -229,7 +230,7 @@ export function toOpenAiCompatibleMessages(
   messages: AgentRuntimeChatMessage[],
   options?: PreserveAgentStateOptions,
 ): OpenAiCompatibleRequestMessage[] {
-  return projectOpenAiToolImages(messages, options?.supportsToolImages === true).map((message) =>
+  return projectOpenAiToolImages(messages, options?.supportsToolImages === true, options?.maxImagesPerRequest).map((message) =>
     preserveAgentStateFields(message, {
       role: message.role,
       content: message.content ?? "",

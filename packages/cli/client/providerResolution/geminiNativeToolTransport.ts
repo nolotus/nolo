@@ -6,7 +6,6 @@
  */
 import type { AgentRuntimeResult } from "../../../agent-runtime";
 import { accumulateGeminiChunks, buildGeminiGenerateContentRequest, isGemini3Model, resolveGeminiModelQuirks, shouldUseGeminiNativeToolRoute } from "../../../agent-runtime/geminiNativeShared";
-import { resolveToolImagePolicy } from "../../../ai/llm/agentCapabilities";
 import { parseSseDataLineJson } from "../../../agent-runtime/sseDataLine";
 import { readSseDataValues } from "../../../agent-runtime/sseFrames";
 import { resolvePlatformChatProviderConfig, shouldUsePlatformChatProvider } from "../../agentRuntimeLocal";
@@ -68,13 +67,13 @@ export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) =>
           // 用同一判据：gemini-3.5 / flash-preview 严格档收到哨兵会 400，
           // 或更隐蔽地回空 STOP 帧（0 completion tokens，模型假死沉默）。
           const model = providerConfig.model;
-          const supportsToolImages = resolveToolImagePolicy({
+          const toolImagePolicy = {
             routeKind: "gemini-native",
             provider: providerConfig.usageProvider ?? providerConfig.provider,
             model: providerConfig.model,
             customProviderUrl: providerConfig.endpoint,
             hasVision: (agentConfig as any).hasVision,
-          }).supportsToolImages;
+          } as const;
           const requestBody = buildGeminiGenerateContentRequest({
             messages: messages as unknown[],
             tools: tools as unknown[],
@@ -86,7 +85,7 @@ export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) =>
               : undefined,
             attachSkipThoughtSignature:
               resolveGeminiModelQuirks(model).allowsThoughtSignatureSentinel,
-            supportsToolImages,
+            toolImagePolicy,
           });
 
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;

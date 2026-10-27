@@ -163,16 +163,16 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
   const quirks = resolveGeminiModelQuirks(model);
   const isClaude = quirks.isClaudeCrossModel;
 
-  const supportsToolImages = resolveToolImagePolicy({
+  const toolImagePolicy = resolveToolImagePolicy({
     ...args.agentConfig,
     routeKind: "antigravity",
     model,
     hasVision: args.agentConfig.hasVision,
-  }).supportsToolImages;
+  });
 
   const { contents, systemTexts } = convertOpenAiMessagesToGemini(rawMessages, {
     attachSkipThoughtSignature: quirks.allowsThoughtSignatureSentinel,
-    supportsToolImages,
+    ...toolImagePolicy,
   });
   if (contents.length === 0) {
     throw new Error("Antigravity Cloud Code Assist request has no user/model contents.");
