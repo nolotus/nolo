@@ -1,4 +1,12 @@
 
+## 0.183.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **token:** usage records 支持按 dialogId 查询 + 补跨用户隔离 ([06220e0](https://github.com/nolotus/bun-nolo/commit/06220e07679cb8857e0e1813f4d22a364640203e))
+* **token:** 非流式调用记录 canonical timing + CLI 查对话速度 ([679c48b](https://github.com/nolotus/bun-nolo/commit/679c48ba515118a20826ec1079a9a29bb2175fbd))
+
+
 ## 0.182.0-alpha.1 (2026-10-27)
 
 ### Features

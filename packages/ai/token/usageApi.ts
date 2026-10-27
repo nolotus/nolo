@@ -70,6 +70,7 @@ export async function fetchTokenStats(
 }
 
 export interface UsageRecordsPageParams {
+  dialogId?: string;
   startTime?: number;
   endTime?: number;
   model?: string;
@@ -90,9 +91,10 @@ export async function fetchUsageRecordsPage(
   deps: UsageApiDeps,
   params: UsageRecordsPageParams
 ): Promise<UsageRecordsPageResult> {
-  const { startTime, endTime, model, pageSize = 50, cursor } = params;
+  const { startTime, endTime, model, dialogId, pageSize = 50, cursor } = params;
 
   const query = new URLSearchParams();
+  if (dialogId) query.set("dialogId", dialogId);
   if (typeof startTime === "number" && Number.isFinite(startTime)) {
     query.set("startTime", String(startTime));
   }
@@ -102,6 +104,9 @@ export async function fetchUsageRecordsPage(
   query.set("limit", String(pageSize));
   if (model && model !== ALL_MODELS) {
     query.set("model", model);
+  }
+  if (dialogId) {
+    query.set("dialogId", dialogId);
   }
   if (cursor) {
     query.set("cursor", cursor);
@@ -139,7 +144,7 @@ export interface FetchAllUsageRecordsResult extends QueryResult {
 
 export async function fetchAllUsageRecords(
   deps: UsageApiDeps,
-  params: Pick<UsageRecordsPageParams, "startTime" | "endTime" | "model">,
+  params: Pick<UsageRecordsPageParams, "startTime" | "endTime" | "model" | "dialogId">,
   pageSize = 200
 ): Promise<FetchAllUsageRecordsResult> {
   let allRecords: TokenRecord[] = [];

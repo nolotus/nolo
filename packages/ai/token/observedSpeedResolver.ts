@@ -10,7 +10,7 @@
 //
 // 明确不做：selector、profile、score、baseline、reliability、UI、独立
 // performance DB。旧记录（或非流式记录）没有 firstOutputMs 时依然可解析
-// ——只是对应的中位数缺样本。
+// ——first-output 中位数缺样本，吞吐按 end-to-end 分组。
 //
 // 结果字段：
 //   - firstOutputSampleCount：支撑 medianFirstOutputMs 的合法 first-output
@@ -23,6 +23,8 @@
 //     仅当 outputTokens > 0、数值有限、生成窗口 ≥ MIN_THROUGHPUT_WINDOW_MS
 //     且 TPS ≤ MAX_PLAUSIBLE_OUTPUT_TPS；无效/不可信值忽略，不除零。
 //     first-output 样本不受吞吐过滤影响。
+//   - throughputGroups：按 basis 独立计算中位数；end-to-end 使用完整 callDurationMs。
+//     顶层旧汇总字段始终只代表 generation，不聚合两种口径。
 
 import { normalizeTimingMs } from "./providerCallTiming";
 import type { TokenRecord, TokenUsageData } from "./types";
@@ -30,7 +32,7 @@ import type { TokenRecord, TokenUsageData } from "./types";
 export const DEFAULT_OBSERVED_SPEED_SAMPLE_SIZE = 20;
 
 /**
- * 吞吐样本的最短生成窗口（callDurationMs - firstOutputMs，毫秒）。
+ * 吞吐样本的最短观测窗口（端到端使用完整 callDurationMs）；生成窗口（callDurationMs - firstOutputMs，毫秒）。
  *
  * 理由：部分通道（如 codex responses 的 GPT 系）首个有效输出到达时整段输出
  * 已经一次性到齐，生成窗口≈0–1ms，算出 15 万～84 万 tok/s 的假值；窗口过短时
@@ -40,7 +42,7 @@ export const DEFAULT_OBSERVED_SPEED_SAMPLE_SIZE = 20;
 export const MIN_THROUGHPUT_WINDOW_MS = 200;
 
 /**
- * 单次流式调用可信的输出吞吐上限（tokens/秒）。
+ * 单次调用可信的输出吞吐上限（端到端同样不应超过此上限）（tokens/秒）。
  *
  * 理由：当前最快的公开推理服务（Cerebras / Groq 类专用硬件）单流峰值约
  * 2–3k tok/s；超过 3000 的样本几乎必然是缓冲后突发到达（生成窗口被压扁），
@@ -48,7 +50,18 @@ export const MIN_THROUGHPUT_WINDOW_MS = 200;
  */
 export const MAX_PLAUSIBLE_OUTPUT_TPS = 3_000;
 
+export interface ObservedThroughputGroup {
+  basis: "generation" | "end-to-end";
+  throughputSampleCount: number;
+  medianOutputTokensPerSecond: number;
+  /** Named metric for consumers that must distinguish end-to-end latency. */
+  endToEndTps?: number;
+}
+
 export interface ObservedSpeedResult {
+  /** Legacy summary below remains generation-only. Never averages across bases. */
+  basis: "generation";
+  throughputGroups: ObservedThroughputGroup[];
   /** 合法 first-output 观测数（支撑 medianFirstOutputMs 的 evidence count）。 */
   firstOutputSampleCount: number;
   /** 合法吞吐观测数（支撑 medianOutputTokensPerSecond 的 evidence count）。 */
@@ -98,6 +111,7 @@ export function resolveObservedSpeed(
 
   const firstOutputSamples: number[] = [];
   const tpsSamples: number[] = [];
+  const endToEndSamples: number[] = [];
 
   for (const record of sample) {
     if (!record || typeof record !== "object") continue;
@@ -110,6 +124,20 @@ export function resolveObservedSpeed(
     // first-output 样本：有合法观测即可（独立于 callDuration 是否存在）。
     if (firstOutput !== undefined) {
       firstOutputSamples.push(firstOutput);
+    }
+
+    // Only genuinely missing first-output observations qualify. Invalid values are
+    // not reinterpreted as non-streaming samples. The same jitter/burst guards apply.
+    if (
+      firstOutputMs === undefined &&
+      callDuration !== undefined &&
+      callDuration >= MIN_THROUGHPUT_WINDOW_MS &&
+      isFiniteNumber(outputTokens) && outputTokens > 0
+    ) {
+      const endToEndTps = outputTokens / (callDuration / 1000);
+      if (isFiniteNumber(endToEndTps) && endToEndTps <= MAX_PLAUSIBLE_OUTPUT_TPS) {
+        endToEndSamples.push(endToEndTps);
+      }
     }
 
     // 吞吐样本：仅 outputTokens > 0、有限、callDuration > firstOutput（不除零）。
@@ -132,8 +160,22 @@ export function resolveObservedSpeed(
 
   const medianFirstOutputMs = medianOf(firstOutputSamples);
   const medianTps = medianOf(tpsSamples);
+  const throughputGroups: ObservedThroughputGroup[] = [];
+  for (const [basis, samples] of [
+    ["generation", tpsSamples], ["end-to-end", endToEndSamples],
+  ] as const) {
+    const median = medianOf([...samples]);
+    if (median === undefined) continue;
+    const tps = Math.round(median * 100) / 100;
+    throughputGroups.push({
+      basis, throughputSampleCount: samples.length, medianOutputTokensPerSecond: tps,
+      ...(basis === "end-to-end" ? { endToEndTps: tps } : {}),
+    });
+  }
 
   return {
+    basis: "generation",
+    throughputGroups,
     firstOutputSampleCount: firstOutputSamples.length,
     throughputSampleCount: tpsSamples.length,
     ...(medianFirstOutputMs !== undefined

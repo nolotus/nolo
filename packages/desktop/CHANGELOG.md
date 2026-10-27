@@ -1,4 +1,13 @@
 
+## 0.200.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **connector:** reach same-origin child frames for actions and consent capture ([f7c7463](https://github.com/nolotus/bun-nolo/commit/f7c74635e9eeaa33a9f049645bdd280775c7b774))
+* **token:** usage records 支持按 dialogId 查询 + 补跨用户隔离 ([06220e0](https://github.com/nolotus/bun-nolo/commit/06220e07679cb8857e0e1813f4d22a364640203e))
+* **token:** 非流式调用记录 canonical timing + CLI 查对话速度 ([679c48b](https://github.com/nolotus/bun-nolo/commit/679c48ba515118a20826ec1079a9a29bb2175fbd))
+
+
 ## 0.199.0-alpha.1 (2026-10-27)
 
 ### Features

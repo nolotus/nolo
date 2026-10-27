@@ -10,6 +10,10 @@ import type { CommandEntry } from "./cliCommandTypes";
 
 export function getSystemInternalCommandEntries(renderHelpText: () => string): CommandEntry[] {
   return [
+    createContextCommand(["dialog", "usage"], "Show dialog tokens, recorded duration and speed by basis", async (args, ctx) => {
+      const { runDialogUsageCommand } = await import("./dialogUsageCommand");
+      return runDialogUsageCommand(args, { env: ctx.env });
+    }),
     createContextCommand(["auth", "cooldown"], "List / clear credential availability cooldowns", async (_args, ctx) => {
       const { runAuthCooldownCommand } = await import("./cooldownCommands");
       return runAuthCooldownCommand(_args, ctx.env);

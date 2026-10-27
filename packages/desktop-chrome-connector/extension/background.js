@@ -214,7 +214,7 @@ async function getApprovalRecord(approvalId) {
  * inputs, so an approval can only ever cover the page state the user was asked about.
  */
 async function computeApprovalFingerprint({ action, tabId, payload, target }) {
-  const captureOptions = { rejectAsResult: true };
+  const captureOptions = { rejectAsResult: true, _frameId: target?.kind === "ref" ? 0 : target?._frameId };
   if (
     payload?.active === true ||
     target?.kind === "active" ||
@@ -640,14 +640,92 @@ function tabTarget(tabId) {
   return { tabId: Number(tabId) };
 }
 
-async function executeInTab(tabId, func, args = []) {
+/** Read-only discovery. Never runs a page action while enumerating frames. */
+function probeTargetFrame(options) {
+  let allowed = true;
+  try {
+    let view = window;
+    while (view !== view.top) {
+      const parent = view.parent;
+      const frame = view.frameElement;
+      if (!frame || frame.contentDocument !== view.document || parent.document !== frame.ownerDocument) {
+        allowed = false;
+        break;
+      }
+      view = parent;
+    }
+  } catch (_) { allowed = false; }
+  // Sole source-of-truth predicate, mirrored verbatim in browserConsentCapture.js,
+  // probeTargetFrame and pageOperation in background.js: update all three together.
+  // Each function is serialized into the page independently; module helpers cannot be shared.
+  // aria-disabled is semantic, not a click barrier; opacity:0 layers can receive clicks.
+  function isTargetCandidate(element) {
+    if (!element || element.isConnected === false || element.type === "hidden" ||
+        element.closest?.('[inert], [hidden]')) return false;
+    const view = element.ownerDocument?.defaultView;
+    if (!view || typeof element.getBoundingClientRect !== "function") return false;
+    const rect = element.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = view.getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" ||
+          style.visibility === "collapse") return false;
+    }
+    return true;
+  }
+  let count = 0;
+  if (options.selector) {
+    // Routing cannot safely infer the meaning of non-CSS selectors in child documents.
+    try { count = Array.from(document.querySelectorAll(options.selector)).filter(isTargetCandidate).length; }
+    catch (_) { return { allowed, count: 0, nonCss: true }; }
+  } else {
+    const el = document.activeElement;
+    count = el && el !== document.body && el !== document.documentElement &&
+      !/^(iframe|frame)$/i.test(el.tagName) && document.hasFocus() ? 1 : 0;
+  }
+  return { allowed, count };
+}
+
+async function executeInTab(tabId, func, args = [], frameId) {
   await assertScriptableTab(tabId);
+  const options = args[0] || {};
+  frameId ??= options._frameId;
+  const routedOps = new Set(["inspect", "click", "type", "press", "mark_select_token", "set_select_value", "read_select_state"]);
+  const discover = frameId === undefined &&
+    (func === captureBrowserConsentState || (func === pageOperation && routedOps.has(options.op))) &&
+    (options.selector || options.active || options.subject === "active" || options.op === "press");
+  if (discover) {
+    const probes = await chrome.scripting.executeScript({
+      target: { ...tabTarget(tabId), allFrames: true },
+      func: probeTargetFrame,
+      args: [{ selector: options.selector || "" }],
+    });
+    const matches = probes.filter((entry) => entry.result?.count > 0);
+    if (matches.some((entry) => !entry.result.allowed)) {
+      throw connectorError("UNSUPPORTED_IFRAME", "Target crosses an inaccessible frame boundary.");
+    }
+    if (matches.length > 1 || matches.some((entry) => entry.result.count > 1)) {
+      throw connectorError("FRAME_TARGET_AMBIGUOUS", "Target does not identify one element in one document.");
+    }
+    if (matches.length === 1) {
+      frameId = matches[0].frameId;
+      if (!Number.isInteger(frameId)) throw connectorError("UNSUPPORTED_IFRAME", "Target frame identity is unavailable.");
+    } else if (probes.some((entry) => entry.result?.allowed === false)) {
+      throw connectorError("UNSUPPORTED_IFRAME", "No target can be proven across an inaccessible frame boundary.");
+    } else if (!options.selector) {
+      throw connectorError("TARGET_NOT_FOUND", "No focused accessible frame target was found.");
+    } else if (options.selector && !probes.some((entry) => entry.frameId === 0 && entry.result?.nonCss)) {
+      throw connectorError("TARGET_NOT_FOUND", "No unique accessible frame target was found.");
+    }
+  }
   const [result] = await chrome.scripting.executeScript({
-    target: tabTarget(tabId),
+    target: frameId === undefined ? tabTarget(tabId) : { ...tabTarget(tabId), frameIds: [frameId] },
     func,
     args,
   });
-  return result?.result;
+  const value = result?.result;
+  if (value && typeof value === "object" && Number.isInteger(frameId)) value._frameId = frameId;
+  return value;
 }
 
 /**
@@ -892,6 +970,43 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  * self-contained: no closure over service worker state, no imports.
  */
 function pageOperation(payload) {
+  // Recheck at the effect boundary: a navigation between discovery and injection
+  // must not turn an allowed frame into an inaccessible one.
+  try {
+    let view = window;
+    while (view !== view.top) {
+      const frame = view.frameElement;
+      if (!frame || frame.contentDocument !== view.document || frame.ownerDocument !== view.parent.document) {
+        return { ok: false, code: "UNSUPPORTED_IFRAME", message: "Inaccessible frame boundary" };
+      }
+      view = view.parent;
+    }
+  } catch (_) { return { ok: false, code: "UNSUPPORTED_IFRAME", message: "Inaccessible frame boundary" }; }
+  // Sole source-of-truth predicate, mirrored verbatim in browserConsentCapture.js,
+  // probeTargetFrame and pageOperation in background.js: update all three together.
+  // Each function is serialized into the page independently; module helpers cannot be shared.
+  // aria-disabled is semantic, not a click barrier; opacity:0 layers can receive clicks.
+  function isTargetCandidate(element) {
+    if (!element || element.isConnected === false || element.type === "hidden" ||
+        element.closest?.('[inert], [hidden]')) return false;
+    const view = element.ownerDocument?.defaultView;
+    if (!view || typeof element.getBoundingClientRect !== "function") return false;
+    const rect = element.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = view.getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" ||
+          style.visibility === "collapse") return false;
+    }
+    return true;
+  }
+  if (payload.selector && !/^(point:|percent:|text:)/.test(payload.selector)) {
+    try {
+      if (Array.from(document.querySelectorAll(payload.selector)).filter(isTargetCandidate).length > 1) {
+        return { ok: false, code: "FRAME_TARGET_AMBIGUOUS", message: "Multiple target elements" };
+      }
+    } catch (_) { /* Existing non-CSS selector semantics remain top-frame only. */ }
+  }
   const MAX_CANDIDATES = 300;
   const INTERACTIVE_SELECTOR =
     'a[href],button,input:not([type="hidden"]),select,textarea,[role],[contenteditable="true"],[tabindex]';
@@ -1069,7 +1184,7 @@ function pageOperation(payload) {
     }
     if (/text=|:has-text\(/i.test(selector)) return null;
     try {
-      return document.querySelectorAll(selector).length;
+      return Array.from(document.querySelectorAll(selector)).filter(isTargetCandidate).length;
     } catch (_) {
       return null;
     }
@@ -1197,7 +1312,7 @@ function pageOperation(payload) {
       }
       if (!bySelector) {
         try {
-          bySelector = document.querySelector(target.selector);
+          bySelector = Array.from(document.querySelectorAll(target.selector)).filter(isTargetCandidate)[0] || null;
         } catch (_) {}
       }
 
@@ -2282,6 +2397,7 @@ async function inspectSelectorTarget(tabId, selector) {
     tag: String(inspected.tag ?? ""),
     role: String(inspected.role ?? ""),
     type: String(inspected.type ?? ""),
+    _frameId: inspected._frameId,
   };
 }
 
@@ -2295,9 +2411,11 @@ async function inspectActiveTarget(tabId) {
         tag: String(inspected.tag ?? ""),
         role: String(inspected.role ?? ""),
         type: String(inspected.type ?? ""),
+        _frameId: inspected._frameId,
       };
     }
-  } catch {
+  } catch (error) {
+    if (error?.code !== "TARGET_NOT_FOUND") throw error;
     // Pressing a key with nothing inspectable is not an irreversible action.
   }
   return { name: "", tag: "", role: "", type: "" };
@@ -2343,6 +2461,7 @@ async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }
   // Drift check: execute in-tab DOM capture to re-evaluate current DOM state
   const captureOptions = {
     rejectAsResult: true,
+    _frameId: target?.kind === "ref" ? 0 : target?._frameId,
   };
   if (payload.active === true || target?.kind === "active" || (action === "press" && !payload.selector && !target?.selector)) {
     captureOptions.active = true;
@@ -2497,10 +2616,10 @@ async function captureSelectToken(tabId, pageArgs) {
 }
 
 /** Take the marker off the page again — on every path, successful or not. */
-async function clearSelectToken(tabId, token) {
+async function clearSelectToken(tabId, token, frameId) {
   if (!token || typeof token !== "string") return;
   try {
-    await executeInTab(tabId, pageOperation, [{ op: "clear_select_token", selectToken: token }]);
+    await executeInTab(tabId, pageOperation, [{ op: "clear_select_token", selectToken: token, _frameId: frameId }]);
   } catch (_) {
     // Best effort: when the page is gone, the marker is gone with it.
   }
@@ -2517,7 +2636,7 @@ const SELECT_SETTLE_MS = 60;
  */
 async function readSelectStateAfterSettle(tabId, target, pageArgs) {
   await new Promise((resolve) => setTimeout(resolve, SELECT_SETTLE_MS));
-  const readBackArgs = { op: "read_select_state" };
+  const readBackArgs = { op: "read_select_state", _frameId: pageArgs._frameId };
   // The marker is the only address the read-back uses: it names the node, not a kind of control.
   // The selector/index are still carried along, but only to explain *why* the marked node is gone
   // if it disappeared — never to read a value from another control.
@@ -2562,6 +2681,8 @@ async function runTargetedAction(action, payload) {  const tabId = String(payloa
   let gateTarget;
   if (target.kind === "ref") {
     gateTarget = {
+      // refRegistry observations are registered only for the top-level document.
+      _frameId: 0,
       name: target.expect?.name ?? "",
       tag: target.expect?.tag ?? "",
       role: target.expect?.role ?? "",
@@ -2582,6 +2703,7 @@ async function runTargetedAction(action, payload) {  const tabId = String(payloa
       };
     }
   }
+  target._frameId = gateTarget._frameId;
   const refusal = decideIrreversibleAction({
     action,
     name: gateTarget.name,
@@ -2601,7 +2723,7 @@ async function runTargetedAction(action, payload) {  const tabId = String(payloa
   }
 
   const resolveExtra = target.kind === "ref" ? { ref: target.ref } : { selector: target.selector };
-  const pageArgs = { op: action };
+  const pageArgs = { op: action, _frameId: gateTarget._frameId };
   if (target.kind === "ref") {
     pageArgs.region = target.expect.region || "";
     pageArgs.expectedUrl = target.expect.url;
@@ -2704,7 +2826,7 @@ async function runTargetedAction(action, payload) {  const tabId = String(payloa
   } finally {
     // The marker must never outlive the operation: on every path it comes off the page again.
     if (action === "set_select_value") {
-      await clearSelectToken(payload.tabId, pageArgs.selectToken);
+      await clearSelectToken(payload.tabId, pageArgs.selectToken, pageArgs._frameId);
     }
   }
 }
@@ -2999,8 +3121,8 @@ async function handleAction(action, payload = {}) {
     case "press": {
       const pressedKey = String(payload.key || "");
       let expectedActiveName = "";
+      const active = await inspectActiveTarget(payload.tabId);
       if (isActivationKey(pressedKey)) {
-        const active = await inspectActiveTarget(payload.tabId);
         const refusal = decideIrreversibleAction({
           action: "press",
           key: pressedKey,
@@ -3014,7 +3136,7 @@ async function handleAction(action, payload = {}) {
             action: "press",
             tabId: String(payload.tabId),
             payload,
-            target: { kind: "active" },
+            target: { kind: "active", _frameId: active._frameId },
             refusal,
           });
           if (consentVerdict) return consentVerdict;
@@ -3022,7 +3144,7 @@ async function handleAction(action, payload = {}) {
         expectedActiveName = active.name;
       }
       const result = await executeInTab(payload.tabId, pageOperation, [
-        { op: "press", key: pressedKey, ...(expectedActiveName ? { expectedActiveName } : {}) },
+        { op: "press", key: pressedKey, _frameId: active._frameId, ...(expectedActiveName ? { expectedActiveName } : {}) },
       ]);
       return verdictEnvelope("press", verifyActionEffect({ action: "press", result }), {
         pressed: String(payload.key || ""),
@@ -3421,5 +3543,5 @@ function connectNativeHost() {
 void reconcileDebuggerAttachments();
 connectNativeHost();
 
-export { handleAction, pageOperation, preparedActionStore, refRegistry };
+export { handleAction, pageOperation, preparedActionStore, refRegistry, probeTargetFrame, executeInTab };
 

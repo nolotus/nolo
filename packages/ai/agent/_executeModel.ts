@@ -16,6 +16,11 @@ import { sendOpenAICompletionsRequest } from "../chat/sendOpenAICompletionsReque
 import { performFetchRequest } from "../chat/fetchUtils";
 import { sanitizeOutboundBody } from "../chat/toolCallArgumentGuard";
 import { updateAgentTokens } from "./updateAgentTokens";
+import {
+  createProviderCallTimingTracker,
+  finalizeProviderCallTiming,
+  withProviderCallTimingFields,
+} from "ai/token/providerCallTiming";
 import { extractCustomId } from "core/prefix";
 import {
   resolveAgentCallPlan,
@@ -148,6 +153,8 @@ export const _executeModel = async (
       // body 可能是 chat.completions 形状（含 messages）或 responses 形状
       // （含 input），按实际形状守卫，避免注入多余的 messages: [] 或漏洗 input。
       const sanitizedBodyData = sanitizeOutboundBody(bodyData) as any;
+      // Non-streaming: measure fetch + full body read; no first-output observation.
+      const timingTracker = createProviderCallTimingTracker();
       const response = await performFetchRequest({
         agentConfig: resolvedAgentConfig,
         api: getApiEndpoint(resolvedAgentConfig),
@@ -175,6 +182,7 @@ export const _executeModel = async (
         throw new Error(message);
       }
       const rawResult = await response.json();
+      const timing = finalizeProviderCallTiming(timingTracker);
       // 按本次实际发出的 wire 解析回包（同源判定见 parseCompletionByOutboundWire）。
       const { chatJson: result, responsesWire } = parseCompletionByOutboundWire(
         rawResult,
@@ -200,7 +208,7 @@ export const _executeModel = async (
           {
             dialogId: extractCustomId(args.billingDialogKey),
             dialogKey: args.billingDialogKey,
-            usage: result.usage,
+            usage: withProviderCallTimingFields(result.usage, timing),
             agentConfig: resolvedAgentConfig,
           },
           thunkApi

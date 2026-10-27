@@ -142,8 +142,36 @@ export async function captureBrowserConsentState(options = {}) {
       throw createCaptureError("NO_DOCUMENT_CONTEXT", "No active Document context available");
     }
 
-    const win = (options && options.window)
-      || (doc && doc.defaultView)
+    // Bind collection to the target's own document, but only through a proven
+    // same-origin ancestor chain. Each document retains its own WeakMap identity.
+    if (options.target?.ownerDocument && options.target.ownerDocument !== doc) {
+      let child = options.target.ownerDocument;
+      try {
+        while (child !== doc) {
+          const frame = child.defaultView?.frameElement;
+          if (!frame || frame.contentDocument !== child) throw new Error("inaccessible frame");
+          child = frame.ownerDocument;
+        }
+        doc = options.target.ownerDocument;
+      } catch (_) {
+        throw createCaptureError("UNSUPPORTED_IFRAME", "Target document has no accessible same-origin ancestor chain");
+      }
+    }
+    try {
+      let view = doc.defaultView;
+      while (view && view !== view.top) {
+        const frame = view.frameElement;
+        if (!frame || frame.contentDocument !== view.document || frame.ownerDocument !== view.parent.document) {
+          throw new Error("inaccessible frame");
+        }
+        view = view.parent;
+      }
+    } catch (_) {
+      throw createCaptureError("UNSUPPORTED_IFRAME", "Target crosses an inaccessible frame boundary");
+    }
+
+    const win = (doc && doc.defaultView)
+      || (options && options.window)
       || (typeof window !== "undefined" ? window : null)
       || (typeof globalThis !== "undefined" ? globalThis : null);
 
@@ -202,12 +230,33 @@ export async function captureBrowserConsentState(options = {}) {
       return docRecord.elements.get(element);
     }
 
+  // Sole source-of-truth predicate, mirrored verbatim in browserConsentCapture.js,
+  // probeTargetFrame and pageOperation in background.js: update all three together.
+  // Each function is serialized into the page independently; module helpers cannot be shared.
+  // aria-disabled is semantic, not a click barrier; opacity:0 layers can receive clicks.
+  function isTargetCandidate(element) {
+    if (!element || element.isConnected === false || element.type === "hidden" ||
+        element.closest?.('[inert], [hidden]')) return false;
+    const view = element.ownerDocument?.defaultView;
+    if (!view || typeof element.getBoundingClientRect !== "function") return false;
+    const rect = element.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = view.getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" ||
+          style.visibility === "collapse") return false;
+    }
+    return true;
+  }
+
     // 4. Locate Target Element
     let targetEl = null;
     if (options && options.target && typeof options.target === "object" && options.target.nodeType === 1) {
       targetEl = options.target;
     } else if (options && typeof options.selector === "string" && options.selector.trim()) {
-      targetEl = doc.querySelector(options.selector.trim());
+      const matches = Array.from(doc.querySelectorAll(options.selector.trim())).filter(isTargetCandidate);
+      if (matches.length > 1) throw createCaptureError("FRAME_TARGET_AMBIGUOUS", "Selector does not identify one target");
+      targetEl = matches[0];
     } else if (options && options.active) {
       targetEl = doc.activeElement;
     } else {
