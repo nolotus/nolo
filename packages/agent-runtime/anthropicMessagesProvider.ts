@@ -1,3 +1,4 @@
+import type { AgentRuntimeChatMessage } from "./types";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -390,7 +391,7 @@ function normalizeAnthropicWireModel(model: string): string {
   return model;
 }
 
-import { EMPTY_TOOL_RESULT_TEXT, hadToolImages, toolImages } from "./toolImages";
+import { EMPTY_TOOL_RESULT_TEXT, hadToolImages, toolImages, createToolImageBudget, toolImageSource, toolImageOmission, toolImageNotices } from "./toolImages";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 
 export function buildAnthropicMessagesBody(args: {
@@ -406,6 +407,7 @@ export function buildAnthropicMessagesBody(args: {
     system.push({ type: "text", text: args.agentConfig.prompt.trim() });
   }
   const messages: JsonRecord[] = [];
+  const imageBudget = createToolImageBudget();
 
   for (const raw of rawMessages) {
     if (!raw || typeof raw !== "object") continue;
@@ -445,15 +447,30 @@ export function buildAnthropicMessagesBody(args: {
             // Image-bearing results keep a text block from their first send,
             // including after runtime payloads have been stripped from history.
             const effective = text.trim() ? text : EMPTY_TOOL_RESULT_TEXT;
-            if (!images.length) return [{ type: "text", text: effective }];
-            if (!resolveAgentImageInputSupport(args.agentConfig)) {
-              return [{ type: "text", text: effective }];
+            const notices = toolImageNotices(message);
+            const imageBlocks: JsonRecord[] = [];
+            if (resolveAgentImageInputSupport(args.agentConfig)) {
+              for (const image of images) {
+                const decision = imageBudget(image);
+                if (decision === "duplicate") continue;
+                if (decision !== "delivered") {
+                  if (!notices.seen.has(image)) {
+                    notices.seen.add(image);
+                    notices.text.push(toolImageOmission(toolImageSource(message as unknown as AgentRuntimeChatMessage), decision === "impossible"));
+                  }
+                } else {
+                  imageBlocks.push({ type: "image", source: {
+                    type: "base64", media_type: image.mimeType, data: image.dataBase64,
+                  } });
+                }
+              }
             }
+            // A deferred notice is a stable historical block, not a placeholder
+            // to replace. Supplemental image blocks only append after it.
             return [
               { type: "text", text: effective },
-              ...images.map((image) => ({ type: "image", source: {
-                type: "base64", media_type: image.mimeType, data: image.dataBase64,
-              } })),
+              ...notices.text.map((text) => ({ type: "text", text })),
+              ...imageBlocks,
             ];
           })(),
         }]);

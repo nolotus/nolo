@@ -62,7 +62,7 @@ import {
 } from "./toolCallTransaction";
 export { LOCAL_TURN_ABORTED_CODE } from "./toolCallTransaction";
 import { createTurnTranscript } from "./turnTranscript";
-import { TOOL_HAD_IMAGES, TOOL_IMAGES, createToolImageLedger, stripToolImages, toolImages } from "./toolImages";
+import { TOOL_IMAGE_NOTICES, createToolImageNotices, TOOL_HAD_IMAGES, TOOL_IMAGES, createToolImageLedger, stripToolImages, toolImages, resetToolImageDelivery, toolImageDelivery } from "./toolImages";
 import { createTurnUsageLedger } from "./turnUsageLedger";
 export { addOutOfBandUsage } from "./turnUsageLedger";
 import { buildIdentityBlock } from "./identityBlock";
@@ -1402,6 +1402,7 @@ export async function runLocalAgentTurn(
         // 若 provider 从未返回过则是初值（空内容）——由上面的初值保证。
         break;
       }
+      resetToolImageDelivery(requestMessages.flatMap(toolImages));
       result = await runCompleteWithTimeout({
         provider,
         messages: requestMessages,
@@ -1453,10 +1454,17 @@ export async function runLocalAgentTurn(
         providerName: agentConfig.provider,
         model: provider.model,
       });
-      acceptToolImages.commit(requestMessages.flatMap(toolImages));
+      acceptToolImages.discard(requestMessages.flatMap(toolImages).filter((image) => toolImageDelivery(image) === "impossible"));
+      acceptToolImages.commit(
+        requestMessages.flatMap(toolImages).filter((image) => toolImageDelivery(image) === "delivered"),
+        requestMessages.flatMap(toolImages).filter((image) => !toolImageDelivery(image)),
+      );
       // Strip payload only — never rewrite content, or the prompt prefix diverges
       // at this message and every later cache hit is lost.
-      transcript.replaceWorkingHistory(transcript.working().map((message) => stripToolImages(message)));
+      transcript.replaceWorkingHistory(transcript.working().map((message) => {
+        const pending = toolImages(message).filter((image) => supportsImages && !toolImageDelivery(image));
+        return pending.length ? { ...message, [TOOL_IMAGES]: pending } : stripToolImages(message);
+      }));
       loopTiming.mark("llmCall", round);
       usageLedger.recordProviderCall({
         usage: result.usage,
@@ -1712,6 +1720,7 @@ export async function runLocalAgentTurn(
           tool_call_id: toolCall.id,
           toolName,
           [TOOL_IMAGES]: acceptToolImages(toolResult.images),
+          [TOOL_IMAGE_NOTICES]: createToolImageNotices(),
           ...((observedMetadata || toolResult.images?.length) ? { tool_result_metadata: {
             ...observedMetadata,
             ...(toolResult.images?.length ? { [TOOL_HAD_IMAGES]: true } : {}),

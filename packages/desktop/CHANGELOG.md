@@ -1,4 +1,11 @@
 
+## 0.190.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **agent-runtime:** 超预算图片只记已投递，未投递可续取且不破坏前缀 ([7b4e8e9](https://github.com/nolotus/bun-nolo/commit/7b4e8e9c7564ce5d63a7804a67333d79d2c7be0c))
+
+
 ## 0.190.0-alpha.1 (2026-10-27)
 
 ### Features

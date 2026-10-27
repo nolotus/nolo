@@ -1,8 +1,5 @@
 import type { AgentRuntimeChatMessage } from "./types";
-import { toolImages } from "./toolImages";
-
-const MAX_IMAGES_PER_REQUEST = 4;
-const MAX_BASE64_BYTES_PER_REQUEST = 8 * 1024 * 1024;
+import { createToolImageBudget, toolImageSource, toolImageOmission, toolImages } from "./toolImages";
 
 type AttachmentPart =
   | { type: "text"; text: string }
@@ -32,8 +29,7 @@ export function projectOpenAiToolImages(
 ): AgentRuntimeChatMessage[] {
   const parts: AttachmentPart[] = [];
   const omitted: string[] = [];
-  const seen = new Set<string>();
-  let bytes = 0;
+  const budget = createToolImageBudget();
   let accepted = 0;
   let lastTool = -1;
 
@@ -41,25 +37,17 @@ export function projectOpenAiToolImages(
     if (message.role === "tool") lastTool = index;
     if (!supportsImages) return;
     for (const image of toolImages(message)) {
-      const key = `${image.mimeType}\u0000${image.dataBase64}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const size = Buffer.byteLength(image.dataBase64, "utf8");
-      if (accepted >= MAX_IMAGES_PER_REQUEST || bytes + size > MAX_BASE64_BYTES_PER_REQUEST) {
-        omitted.push(`#${omitted.length + 1}`);
+      const decision = budget(image);
+      if (decision === "duplicate") continue;
+      const source = toolImageSource(message);
+      if (decision !== "delivered") {
+        omitted.push(toolImageOmission(source, decision === "impossible"));
         continue;
       }
-      bytes += size;
       accepted += 1;
-      const source = typeof message.content === "string"
-        ? (message.content.match(/→ ([^\s\x00-\x1f\x7f]+)/u)?.[1]?.replace(/\]$/, "") ?? "")
-        : "";
-      const toolCallId = typeof (message as { tool_call_id?: unknown }).tool_call_id === "string"
-        ? (message as { tool_call_id: string }).tool_call_id
-        : "unknown";
       parts.push({
         type: "text",
-        text: `Image ${accepted} — from tool result ${toolCallId.replace(/[\x00-\x1f\x7f]/g, "")}${source ? ` (${source})` : ""}`,
+        text: `Image ${accepted} — from tool result ${source}`,
       });
       parts.push({ type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.dataBase64}` } });
     }
@@ -71,7 +59,7 @@ export function projectOpenAiToolImages(
   if (!parts.length && !omitted.length) return messages;
 
   const note = omitted.length
-    ? ` Note: ${omitted.length} image(s) omitted (request budget: ${MAX_IMAGES_PER_REQUEST} images / 8 MiB base64) — they were NOT delivered, do not guess their content.`
+    ? ` Note: ${omitted.length} image(s) omitted. ${omitted.join(" ")}`
     : "";
   const attachment: AgentRuntimeChatMessage = {
     role: "user",
