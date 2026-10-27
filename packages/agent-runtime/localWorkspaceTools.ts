@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { readLocalImage } from "./readImage";
 import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -2460,6 +2461,16 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
         ? { resolveRipgrepBinary: args.resolveRipgrepBinary }
         : {}),
     }),
+    read_image: async (call: AgentRuntimeToolCallInput) => {
+      const parsed = parseWorkspaceToolArguments(call.arguments);
+      if (Object.keys(parsed).some((key) => key !== "path")) throw new Error("read_image accepts exactly one path");
+      const absolutePath = await resolveLocalWorkspaceToolPath({
+        workspaceRoot: args.workspaceRoot,
+        requestedPath: requireWorkspaceToolPath(parsed),
+        ...fileAccess,
+      });
+      return readLocalImage(absolutePath);
+    },
     readFile: (call: AgentRuntimeToolCallInput) => readFileTool({
       call,
       workspaceRoot: args.workspaceRoot,

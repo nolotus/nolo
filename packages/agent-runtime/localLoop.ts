@@ -62,6 +62,7 @@ import {
 } from "./toolCallTransaction";
 export { LOCAL_TURN_ABORTED_CODE } from "./toolCallTransaction";
 import { createTurnTranscript } from "./turnTranscript";
+import { TOOL_IMAGES, createToolImageLedger, omitToolImages } from "./toolImages";
 import { createTurnUsageLedger } from "./turnUsageLedger";
 export { addOutOfBandUsage } from "./turnUsageLedger";
 import { buildIdentityBlock } from "./identityBlock";
@@ -426,6 +427,7 @@ export function buildRoundBudgetWarningPrompt(threshold: number): string {
 // list_cloud_resources and cloud_probe are server-only tools; excluded from localLoop concurrency set.
 export const CONCURRENT_READONLY_TOOLS: ReadonlySet<string> = new Set([
   "readFile",
+  "read_image",
   "read_file",
   "readWorkspaceFile",
   "globFiles",
@@ -1203,6 +1205,7 @@ export async function runLocalAgentTurn(
           content: truncateToolOutputForContext(msg.content, contextWindow),
         }
       : msg;
+  const acceptToolImages = createToolImageLedger();
   const transcript = createTurnTranscript({
     initialWorking: messages,
     prefixCount,
@@ -1450,6 +1453,9 @@ export async function runLocalAgentTurn(
         providerName: agentConfig.provider,
         model: provider.model,
       });
+      transcript.replaceWorkingHistory(transcript.working().map((message) =>
+        omitToolImages(message, "already sent this turn"),
+      ));
       loopTiming.mark("llmCall", round);
       usageLedger.recordProviderCall({
         usage: result.usage,
@@ -1704,6 +1710,7 @@ export async function runLocalAgentTurn(
           }),
           tool_call_id: toolCall.id,
           toolName,
+          [TOOL_IMAGES]: acceptToolImages(toolResult.images),
           ...(observedMetadata ? { tool_result_metadata: observedMetadata } : {}),
         });
       };

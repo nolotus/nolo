@@ -290,6 +290,7 @@ import { buildLocalAgentLookupKeys } from "./localAgentRecords";
 import { createCliHybridRecordStore } from "./hybridRecordStore";
 import { executeLocalToolWithPolicy, resolveLocalToolPolicy, runExecShellGates } from "./localToolPolicy";
 import { normalizeLocalToolName } from "../../agent-runtime/localToolPolicy";
+import { hasRunWakeChannel } from "../../agent-runtime/agentRunIsolation";
 import {
   createLocalSandboxWorkload,
   LOCAL_SANDBOX_ISOLATION,
@@ -301,6 +302,7 @@ import {
   LOCAL_DOCKER_TOOL_NAMES,
   type LocalDockerWorkloadHandle,
 } from "./localDockerWorkload";
+import { dockerExecutionToolNames } from "../../agent-runtime/docker/toolRouting";
 import {
   assertInstaboxPrerequisites,
   createLocalInstaboxWorkload as createLocalInstaboxWorkloadDefault,
@@ -1290,12 +1292,13 @@ export function createCliLocalRuntimeAdapter(
           // Local settings are best-effort; a read failure keeps skills enabled.
         }
       }
-      const cacheKey = buildPreparedAgentCacheKey({
+      const cacheKey = `${buildPreparedAgentCacheKey({
         userId,
         agentRef,
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
-      });
+        wake: hasRunWakeChannel(deps.env),
+      })}:${dockerRuntimeEnabled ? "docker" : instaboxRuntimeEnabled ? "instabox" : "host"}`;
       // Paste availability changes the prepared tool surface, so paste-aware
       // runs remain isolated from the shared metadata cache.
       const cached = deps.pastedTextStore
@@ -1336,7 +1339,21 @@ export function createCliLocalRuntimeAdapter(
             systemBuiltinSkills,
           )
         : [];
-      const effectiveToolNames = [...requestedToolNames, ...additionalToolNames];
+      let effectiveToolNames = [...requestedToolNames, ...additionalToolNames];
+      const backendExecutionToolNames: readonly string[] | null = dockerRuntimeEnabled
+        ? (dockerExecutionToolNames as readonly string[])
+        : instaboxRuntimeEnabled
+          ? (LOCAL_INSTABOX_TOOL_NAMES as readonly string[])
+          : null;
+      if (backendExecutionToolNames) {
+        effectiveToolNames = effectiveToolNames.filter((toolName) => {
+          const normalized = normalizeLocalToolName(toolName);
+          if ((WORKSPACE_TOOL_NAMES as readonly string[]).includes(normalized)) {
+            return backendExecutionToolNames.includes(normalized);
+          }
+          return true;
+        });
+      }
       activeAgentToolNames = buildLocalPolicyToolNames({
         agentKey: agentConfig?.key,
         toolNames: effectiveToolNames,
@@ -1365,9 +1382,14 @@ export function createCliLocalRuntimeAdapter(
       const exposedAgentConfig = agentConfig
         ? {
             ...agentConfig,
+            toolNames: activeAgentToolNames,
             exposedToolNames: activeAgentToolNames,
             toolSurface: {
               ...((agentConfig as any).toolSurface ?? {}),
+              finalToolNames: activeAgentToolNames,
+            },
+            runScopedToolSurface: {
+              ...((agentConfig as any).runScopedToolSurface ?? {}),
               finalToolNames: activeAgentToolNames,
             },
           }

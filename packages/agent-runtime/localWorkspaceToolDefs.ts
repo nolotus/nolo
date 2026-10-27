@@ -26,7 +26,7 @@ import type { OpenAiCompatibleTool } from "./capabilities";
 export type { OpenAiCompatibleTool };
 
 const WORKSPACE_TOOL_NAMES = [
-  "readFile", "writeFile", "editFile", "globFiles", "captureVisualState",
+  "readFile", "read_image", "writeFile", "editFile", "globFiles", "captureVisualState",
   "execShell", "launchProcess", "listProcesses",
   "taskWait", "taskStop",
   "openDesktopPreview",
@@ -393,6 +393,16 @@ function buildTaskStopTool(): OpenAiCompatibleTool {
 }
 
 export function buildWorkspaceToolDefinition(toolName: string) {
+  if (toolName === "read_image") {
+    return {
+      type: "function" as const,
+      function: {
+        name: "read_image",
+        description: "Read one local PNG/JPEG/WebP/GIF image. Long edges above 1568px are resized to JPEG q80. Maximum encoded base64 size is 2MiB.",
+        parameters: { type: "object", properties: { path: buildWorkspacePathProperty() }, required: ["path"], additionalProperties: false },
+      },
+    };
+  }
   if (toolName === "readFile") {
     return buildReadWorkspaceFileTool();
   }

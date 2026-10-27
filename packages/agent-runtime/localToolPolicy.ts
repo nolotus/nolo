@@ -29,6 +29,7 @@ const NEVER_LOCAL_TOOLS = new Set([
  */
 export const DEFAULT_LOCAL_TOOLS = new Set([
   "readFile",
+  "read_image",
   "writeFile",
   "editFile",
   "globFiles",

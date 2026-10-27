@@ -40,11 +40,12 @@ export const TOOL_PACKS = {
   // L2 - 联网搜索：与 CAPABILITY_PACKS「web-search」对齐。
   // 社交读工具属于「social-reader」包，不得因 exa_search 被旁路注入。
   LIGHT_WEB: ["exa_search", "fetchWebpage"],
-  // 本地工作区代码读写与执行。唯一真相源——「代码执行」能力包与 coding skill
+  // 本地工作区代码读写、本地图片读取与执行。唯一真相源——「代码执行」能力包与 coding skill
   // 都从这里取。以前两边各抄一份（coding 还多抄了 agent-orchestration 那 3 个），
   // 改一个忘另一个就会静默不同步。
   CODE: [
     "readFile",
+    "read_image",
     "writeFile",
     "editFile",
     "applyEdit",

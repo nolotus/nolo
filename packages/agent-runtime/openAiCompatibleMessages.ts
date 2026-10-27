@@ -210,6 +210,7 @@ export function findAgentStatePairingIssues(
   return issues;
 }
 
+// TODO(tool-images): Chat Completions / Responses need a following user image message; never inject images into role:tool.
 export function toOpenAiCompatibleMessages(
   messages: AgentRuntimeChatMessage[],
   options?: PreserveAgentStateOptions,

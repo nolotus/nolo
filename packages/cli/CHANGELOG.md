@@ -1,4 +1,15 @@
 
+## 0.171.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** 工具结果可携带图片（切片1：Anthropic 通道 + read_image + 护栏） ([dd6d6a6](https://github.com/nolotus/bun-nolo/commit/dd6d6a6b9b45f9724f23f27ff23cc62f1609e038))
+
+### Bug Fixes
+
+* **tools:** read_image 真正进入请求面，并按后端可执行能力过滤 ([3287ad4](https://github.com/nolotus/bun-nolo/commit/3287ad46ad7e3682bf9a083ae8d124d97fea5545))
+
+
 ## 0.170.0-alpha.1 (2026-10-27)
 
 ### Features

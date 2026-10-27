@@ -14,6 +14,7 @@
  * 3. persisted(...) 返回 raw 的持久化形态（首条 user 消息换成 paste 展开），
  *    不修改内部状态。
  */
+import { withoutToolImages } from "./toolImages";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeMessageContent,
@@ -99,13 +100,13 @@ export function createTurnTranscript(args: {
     pushTool: (msg) => {
       const capped = cap(msg);
       working.push(capped);
-      raw.push(capped);
+      raw.push(withoutToolImages(capped));
     },
     popLast: () => {
       raw.pop();
       return working.pop();
     },
     persisted: (persistedInput, persistedInputReference) =>
-      applyPersistedTurnInput(raw, persistedInput, persistedInputReference),
+      applyPersistedTurnInput(raw.map(withoutToolImages), persistedInput, persistedInputReference),
   };
 }

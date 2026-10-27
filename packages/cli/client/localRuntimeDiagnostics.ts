@@ -164,6 +164,7 @@ export function buildPreparedAgentCacheKey(args: {
   agentRef: string;
   cwd: string;
   systemBuiltinSkills?: Record<string, boolean> | null;
+  wake?: boolean;
 }) {
   const systemBuiltinSkillsKey = args.systemBuiltinSkills
     ? JSON.stringify(
@@ -172,7 +173,8 @@ export function buildPreparedAgentCacheKey(args: {
           .map((key) => [key, args.systemBuiltinSkills?.[key]]),
       )
     : "default";
-  return `${args.userId}\0${args.agentRef}\0${args.cwd}\0${systemBuiltinSkillsKey}`;
+  const wakeKey = args.wake !== undefined ? (args.wake ? "wake:1" : "wake:0") : "";
+  return `${args.userId}\0${args.agentRef}\0${args.cwd}\0${systemBuiltinSkillsKey}${wakeKey ? `\0${wakeKey}` : ""}`;
 }
 
 export function clearCliLocalRuntimePreparedAgentCache() {

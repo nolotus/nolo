@@ -141,6 +141,7 @@ export const CODE_PLANNER_SKILL_SEEDS: readonly CodePlannerSkillSeedDef[] = [
     triggerMode: "required",
     toolNames: [
       "readFile",
+      "read_image",
       "globFiles",
       "editFile",
       "execShell",

@@ -1,3 +1,4 @@
+import { IMAGE_OMITTED_PLACEHOLDER } from "../ai/agent/imagePreprocessing";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -349,6 +350,29 @@ function foldIntoTrailingToolResult(
   return true;
 }
 
+/**
+ * Anthropic rejects a tool_result whose content is missing or empty. Emptiness can
+ * only be judged after the trailing-text fold runs (a folded user text turns an
+ * empty string into a non-empty text block), so repair the whole list once here
+ * instead of substituting a placeholder at construction time.
+ */
+function assertNonEmptyToolResults(messages: JsonRecord[]): void {
+  const placeholder = "[Tool completed without output]";
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const block of message.content as JsonRecord[]) {
+      if (!block || block.type !== "tool_result") continue;
+      if (typeof block.content === "string") {
+        if (block.content.trim() === "") block.content = placeholder;
+      } else if (Array.isArray(block.content)) {
+        if (block.content.length === 0) block.content = placeholder;
+      } else if (block.content === undefined || block.content === null) {
+        block.content = placeholder;
+      }
+    }
+  }
+}
+
 function hasClaudeCodeIdentity(system: JsonRecord[]): boolean {
   return system.some((block) => {
     if (!block || typeof block !== "object") return false;
@@ -366,6 +390,9 @@ function normalizeAnthropicWireModel(model: string): string {
   if (model === "claude-haiku-5.5") return "claude-haiku-5-5";
   return model;
 }
+
+import { toolImages } from "./toolImages";
+import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 
 export function buildAnthropicMessagesBody(args: {
   agentConfig: AgentRuntimeAgentConfig;
@@ -410,9 +437,24 @@ export function buildAnthropicMessagesBody(args: {
         pushMessage(messages, "user", [{
           type: "tool_result",
           tool_use_id: toolUseId,
-          content: typeof message.content === "string"
-            ? message.content
-            : JSON.stringify(message.content ?? ""),
+          content: (() => {
+            const text = typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? "");
+            const images = toolImages(message);
+            // Keep the raw text (including "") here: the trailing-text fold needs to
+            // see an empty tool_result so it can drop the empty block instead of
+            // emitting {type:"text",text:""}. Emptiness is repaired for real once
+            // the whole message list is built (see assertNonEmptyToolResults).
+            if (!images.length) return text;
+            if (!resolveAgentImageInputSupport(args.agentConfig)) {
+              return [{ type: "text", text: `${text}\n${IMAGE_OMITTED_PLACEHOLDER}` }];
+            }
+            return [
+              ...(text.trim() ? [{ type: "text", text }] : []),
+              ...images.map((image) => ({ type: "image", source: {
+                type: "base64", media_type: image.mimeType, data: image.dataBase64,
+              } })),
+            ];
+          })(),
         }]);
       }
       continue;
@@ -442,6 +484,8 @@ export function buildAnthropicMessagesBody(args: {
     }
     pushMessage(messages, role, blocks);
   }
+
+  assertNonEmptyToolResults(messages);
 
   // Anthropic currently rejects third-party OAuth Sonnet/Opus unless the
   // request carries Claude Code identity + beta fingerprint.

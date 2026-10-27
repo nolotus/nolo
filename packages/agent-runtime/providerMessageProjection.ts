@@ -11,6 +11,8 @@
 //    落盘（(toolName, content) 纯函数，失败 fail-open 不影响投影文本）。
 //
 // runLocalAgentTurn 主状态机不在这里；这里只有消息形状变换。
+import { IMAGE_OMITTED_PLACEHOLDER } from "../ai/agent/imagePreprocessing";
+import { omitToolImages } from "./toolImages";
 import { clipCompactText } from "core/clipCompactText";
 import type {
   AgentRuntimeChatMessage,
@@ -559,7 +561,7 @@ export function filterImagePartsFromMessages(
   // 来源标记会在那里丢掉（2026-10-10 复核 P1 同类点）。这里逐条把标记转移到重建后的
   // 对象上（index 对齐，因为 callee 是纯 map）；源消息无标记时是 no-op。
   return stripImagePartsFromMessages(messages).map((stripped, index) =>
-    transferDowngradedToolTurnOrigin(messages[index], stripped),
+    omitToolImages(transferDowngradedToolTurnOrigin(messages[index], stripped), "model has no vision", IMAGE_OMITTED_PLACEHOLDER),
   );
 }
 
