@@ -209,7 +209,7 @@ function buildCaptureVisualStateTool(): OpenAiCompatibleTool {
     type: "function",
     function: {
       name: "captureVisualState",
-      description: "Capture a real local app screenshot and DOM/computed-style metrics for a selected UI state.",
+      description: "Render a URL to an image and DOM/computed-style metrics using platform Playwright/Chromium on the runtime host. Requires an installed renderer; never runs workspace scripts.",
       parameters: {
         type: "object",
         properties: {

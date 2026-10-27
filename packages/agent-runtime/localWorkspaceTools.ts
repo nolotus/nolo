@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readLocalImage } from "./readImage";
+import { renderVisualPage, visualRendererCapability } from "./visualRenderer.node";
 import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -294,6 +295,7 @@ export function buildLocalWorkspaceOpenAiTools(args: {
   return WORKSPACE_TOOL_NAMES
     .filter((toolName) => {
       if (!declaredTools.has(toolName)) return false;
+      if (toolName === "captureVisualState" && !visualRendererCapability().available) return false;
       if (!args.exposeShellTools && SHELL_TOOL_NAMES.includes(toolName as any)) {
         return false;
       }
@@ -1902,59 +1904,34 @@ async function captureVisualStateTool(args: {
   workspaceRoot: string;
   commandTimeoutMs?: number;
 }): Promise<AgentRuntimeToolResult> {
-  const parsed = parseWorkspaceToolArguments(args.call.arguments);
-  const captureArgs = readVisualStateCaptureArgs(parsed);
-  const baseUrl = await resolveVisualStateBaseUrl({
-    explicitBaseUrl: captureArgs.baseUrl,
-  });
-  const extraArgs = [
-    "--base",
-    baseUrl,
-    "--path",
-    captureArgs.path,
-    "--wait-selector",
-    captureArgs.waitSelector,
-    ...(captureArgs.scrollSelector ? ["--scroll-selector", captureArgs.scrollSelector] : []),
-    ...(captureArgs.focusSelector ? ["--focus-selector", captureArgs.focusSelector] : []),
-    ...(captureArgs.expectText ? ["--expect-text", captureArgs.expectText] : []),
-    "--screenshot",
-    captureArgs.screenshotPath,
-    "--metrics",
-    captureArgs.metricsPath,
-  ];
-  const result = await runWorkspacePackageScript({
-    workspaceRoot: args.workspaceRoot,
-    script: "probe:visual-review",
-    extraArgs,
-    commandTimeoutMs: args.commandTimeoutMs,
-  });
-  const metrics = parseLastJsonObject(String(result.metadata?.stdoutTail ?? result.content));
-  return {
-    content: [
-      `pageUrl: ${typeof metrics?.pageUrl === "string" ? metrics.pageUrl : ""}`,
-      `screenshotPath: ${captureArgs.screenshotPath}`,
-      `metricsPath: ${captureArgs.metricsPath}`,
-      `waitSelector: ${captureArgs.waitSelector}`,
-      ...(captureArgs.focusSelector ? [`focusSelector: ${captureArgs.focusSelector}`] : []),
-      ...(captureArgs.expectText ? [`expectText: ${captureArgs.expectText}`] : []),
-      "",
-      result.content,
-    ].join("\n").trim(),
-    metadata: {
-      ...result.metadata,
-      script: "probe:visual-review",
-      args: extraArgs,
-      baseUrl,
-      path: captureArgs.path,
-      waitSelector: captureArgs.waitSelector,
-      scrollSelector: captureArgs.scrollSelector,
-      focusSelector: captureArgs.focusSelector,
-      expectText: captureArgs.expectText,
-      screenshotPath: captureArgs.screenshotPath,
-      metricsPath: captureArgs.metricsPath,
-      ...(metrics ?? {}),
-    },
-  };
+  try {
+    const parsed = parseWorkspaceToolArguments(args.call.arguments);
+    const captureArgs = readVisualStateCaptureArgs(parsed);
+    const capability = visualRendererCapability();
+    if (!capability.available) return { content: `captureVisualState unavailable: ${capability.reason}`, metadata: { ok: false, rendererAvailable: false } };
+    const baseUrl = await resolveVisualStateBaseUrl({ explicitBaseUrl: captureArgs.baseUrl });
+    const pageUrl = new URL(captureArgs.path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).href;
+    const screenshotPath = resolveRequestedWorkspacePath(args.workspaceRoot, captureArgs.screenshotPath);
+    const metricsPath = resolveRequestedWorkspacePath(args.workspaceRoot, captureArgs.metricsPath);
+    const rendered = await renderVisualPage({ ...captureArgs, workspaceRoot: args.workspaceRoot, url: pageUrl, screenshotPath, timeoutMs: args.commandTimeoutMs });
+    const metrics = { ...captureArgs, ...rendered, scrollSelector: captureArgs.scrollSelector ?? null,
+      focusSelector: captureArgs.focusSelector ?? null, expectText: captureArgs.expectText ?? null };
+    await mkdir(dirname(metricsPath), { recursive: true });
+    await writeFile(metricsPath, JSON.stringify(metrics, null, 2));
+    const image = await readLocalImage(screenshotPath);
+    // Preserve legacy path/metrics fields; script/args are explicitly retired.
+    return {
+      content: [`pageUrl: ${metrics.pageUrl}`, `screenshotPath: ${captureArgs.screenshotPath}`, `metricsPath: ${captureArgs.metricsPath}`, `waitSelector: ${captureArgs.waitSelector}`,
+        ...(captureArgs.focusSelector ? [`focusSelector: ${captureArgs.focusSelector}`] : []),
+        ...(captureArgs.expectText ? [`expectText: ${captureArgs.expectText}`] : []),
+        image.content.replace("[image ", "[screenshot ").replace(/(\d+) bytes/, (_, bytes) => `${Math.ceil(Number(bytes) / 1024)}KB`)].join("\n"),
+      images: image.images,
+      metadata: { ...captureArgs, ...metrics, ok: true, exitCode: 0, baseUrl, script: null, args: [], compatibilityVersion: 2,
+        compatibilityNote: "Platform rendering replaces workspace scripts; script/args/stdoutTail no longer describe a subprocess. Existing page metrics and path fields are retained." },
+    };
+  } catch (error) {
+    return { content: `captureVisualState failed: ${toErrorMessage(error)}`, metadata: { ok: false } };
+  }
 }
 
 async function execShellTool(args: {

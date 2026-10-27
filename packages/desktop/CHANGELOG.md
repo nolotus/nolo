@@ -1,4 +1,11 @@
 
+## 0.191.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** 页面无头渲染 → 图片（替代用户工作区脚本） ([821e619](https://github.com/nolotus/bun-nolo/commit/821e6192e8c7a30c9fd53afed73748b64081a663))
+
+
 ## 0.190.0-alpha.3 (2026-10-27)
 
 ### Bug Fixes
