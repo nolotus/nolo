@@ -1,4 +1,11 @@
 
+## 0.186.2 (2026-10-27)
+
+### Performance Improvements
+
+* **deploy:** 预构建与部署门测试并行 + 测试不再写仓库产物路径 ([df839e2](https://github.com/nolotus/bun-nolo/commit/df839e27d1e80560149deec8a4131a6aeb05d7c4))
+
+
 ## 0.186.1 (2026-10-26)
 
 ### Bug Fixes
