@@ -43,6 +43,12 @@ export function resetToolImageDelivery(images: ToolImage[]) {
   for (const image of images) delivery.delete(image);
 }
 export function toolImageDelivery(image: ToolImage) { return delivery.get(image); }
+export const MAX_TOOL_IMAGES_PER_REQUEST = 4;
+export const MAX_TOOL_IMAGE_BASE64_BYTES_PER_REQUEST = 8 * 1024 * 1024;
+/** 统一的预算说明文案（各协议投影共用，避免第二份措辞）。 */
+export const formatToolImageBudgetNote = (omittedCount: number) =>
+  `Note: ${omittedCount} image(s) omitted (request budget: ${MAX_TOOL_IMAGES_PER_REQUEST} images / 8 MiB base64) — they were NOT delivered, do not guess their content.`;
+
 export function createToolImageBudget() {
   let count = 0;
   let bytes = 0;
@@ -53,11 +59,11 @@ export function createToolImageBudget() {
     seen.add(key);
     const size = Buffer.byteLength(image.dataBase64, "utf8");
     // A single oversized image cannot fit in ANY later request: terminal on first attempt (N=1).
-    if (size > 8 * 1024 * 1024) {
+    if (size > MAX_TOOL_IMAGE_BASE64_BYTES_PER_REQUEST) {
       delivery.set(image, "impossible");
       return "impossible";
     }
-    if (count >= 4 || bytes + size > 8 * 1024 * 1024) return "pending";
+    if (count >= MAX_TOOL_IMAGES_PER_REQUEST || bytes + size > MAX_TOOL_IMAGE_BASE64_BYTES_PER_REQUEST) return "pending";
     count += 1;
     bytes += size;
     delivery.set(image, "delivered");

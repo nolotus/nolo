@@ -1,5 +1,6 @@
 import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { createHash } from "node:crypto";
+import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { deriveStableUuid, isStableSessionIdentityEnabled } from "./sessionIdentity";
 import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
 import { randomUUID } from "node:crypto";
@@ -231,9 +232,14 @@ function collectInstructions(
  */
 export function convertMessagesToCodexInput(
   messages: Parameters<typeof convertMessagesToResponsesInput>[0],
-  supportsToolImages = false,
+  // 兼容两种调用形态：布尔（策略解析结果）与 options 对象（既有调用方/测试）
+  supportsToolImages: boolean | { supportsToolImages?: boolean } = false,
 ): ResponseInputItem[] {
-  return convertMessagesToResponsesInput(messages, { supportsToolImages }).map((item) => {
+  const normalizedToolImages =
+    typeof supportsToolImages === "boolean"
+      ? supportsToolImages
+      : supportsToolImages.supportsToolImages === true;
+  return convertMessagesToResponsesInput(messages, { supportsToolImages: normalizedToolImages }).map((item) => {
     if (item.type !== "reasoning") return item;
     return {
       type: "reasoning",

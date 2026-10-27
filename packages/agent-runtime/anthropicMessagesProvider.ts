@@ -391,8 +391,16 @@ function normalizeAnthropicWireModel(model: string): string {
   return model;
 }
 
-import { EMPTY_TOOL_RESULT_TEXT, hadToolImages, toolImages, createToolImageBudget, toolImageSource, toolImageOmission, toolImageNotices } from "./toolImages";
-import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
+import {
+  EMPTY_TOOL_RESULT_TEXT,
+  hadToolImages,
+  toolImages,
+  createToolImageBudget,
+  toolImageSource,
+  toolImageOmission,
+  toolImageNotices,
+} from "./toolImages";
+import { resolveAgentImageInputSupport, resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 
 export function buildAnthropicMessagesBody(args: {
   agentConfig: AgentRuntimeAgentConfig;
@@ -449,7 +457,7 @@ export function buildAnthropicMessagesBody(args: {
             const effective = text.trim() ? text : EMPTY_TOOL_RESULT_TEXT;
             const notices = toolImageNotices(message);
             const imageBlocks: JsonRecord[] = [];
-            if (resolveAgentImageInputSupport(args.agentConfig)) {
+            if (resolveToolImagePolicy({ ...args.agentConfig, routeKind: "anthropic" }).supportsToolImages) {
               for (const image of images) {
                 const decision = imageBudget(image);
                 if (decision === "duplicate") continue;

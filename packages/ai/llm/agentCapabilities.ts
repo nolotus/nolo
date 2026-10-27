@@ -135,7 +135,8 @@ export const resolveAgentImageInputSupport = (
 
 export type ToolImageRouteKind =
   | "openai-compatible" | "responses" | "codex/responses"
-  | "gemini-native" | "antigravity" | "platform";
+  | "gemini-native" | "antigravity" | "platform"
+  | "anthropic";
 
 export type ToolImagePolicyInput = AgentCapabilityConfig & {
   /** Actual outbound transport, never the agent's display provider. */

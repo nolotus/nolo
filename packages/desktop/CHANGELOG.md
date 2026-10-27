@@ -1,4 +1,12 @@
 
+## 0.193.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** Responses/codex 通道注入工具图片（原生 output 数组） ([24fb17a](https://github.com/nolotus/bun-nolo/commit/24fb17adf50b7c4bf61243ac3cc184aacc7ad94c))
+* **agent-runtime:** Responses/codex 通道注入工具图片（原生 output 数组） ([0684318](https://github.com/nolotus/bun-nolo/commit/06843180c43c0e2d65573225d963034afab417f5))
+
+
 ## 0.192.0-alpha.1 (2026-10-27)
 
 ### Features

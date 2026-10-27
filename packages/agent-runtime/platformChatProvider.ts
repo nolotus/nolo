@@ -301,15 +301,20 @@ export function buildPlatformChatCompletionRequest(args: {
     model: args.providerConfig.model,
     ...(usesResponsesApi
       ? {
-          input: convertMessagesToResponsesInput(sanitizedMessages as any, {
-            supportsToolImages: resolveToolImagePolicy({
-              routeKind: "responses",
-              provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
-              model: args.providerConfig.model,
-              hasVision: args.providerConfig.hasVision,
-              legacySupportsToolImages: false,
-            }).supportsToolImages,
-          }),
+          // 平台代理路径：网关中转通常仅支持字符串形态的 function_call_output.output，
+          // 保持「合成 user 消息」方案传递图片附件。
+          // Responses 协议天然支持 reasoning 数组回放，因此不 stripReasoningContent。
+          input: convertMessagesToResponsesInput(
+            toOpenAiCompatibleMessages(sanitizedMessages, {
+              supportsToolImages: resolveToolImagePolicy({
+                routeKind: "platform",
+                provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
+                model: args.providerConfig.model,
+                customProviderUrl: args.providerConfig.endpoint,
+                hasVision: args.providerConfig.hasVision,
+              }).supportsToolImages,
+            }) as any,
+          ),
         }
       : {
           messages: toOpenAiCompatibleMessages(sanitizedMessages, {

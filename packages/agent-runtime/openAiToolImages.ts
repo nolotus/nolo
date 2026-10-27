@@ -1,5 +1,10 @@
 import type { AgentRuntimeChatMessage } from "./types";
 import { createToolImageBudget, toolImageSource, toolImageOmission, toolImages } from "./toolImages";
+export {
+  MAX_TOOL_IMAGES_PER_REQUEST,
+  MAX_TOOL_IMAGE_BASE64_BYTES_PER_REQUEST,
+  formatToolImageBudgetNote,
+} from "./toolImages";
 
 type AttachmentPart =
   | { type: "text"; text: string }

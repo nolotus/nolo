@@ -6,6 +6,7 @@
  * tool_call_id / tool_calls / reasoning_content passthrough.
  */
 import { projectOpenAiToolImages } from "./openAiToolImages";
+import { TOOL_IMAGES } from "./toolImages";
 import type { AgentRuntimeChatMessage } from "./types";
 import type { RequestShapingCounts } from "./outboundRequestDiagnostics";
 import { hasDowngradedToolTurnOrigin } from "./outboundHistorySanitize";
@@ -160,6 +161,17 @@ export function preserveAgentStateFields<T extends Record<string, any>>(
     }
   }
   if (source.role === "tool") {
+    if (TOOL_IMAGES in (source as any)) {
+      (mutableTarget as any)[TOOL_IMAGES] = (source as any)[TOOL_IMAGES];
+    }
+    if ((source as any).tool_result_metadata) {
+      Object.defineProperty(mutableTarget, "tool_result_metadata", {
+        value: (source as any).tool_result_metadata,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+    }
     const toolCallId =
       typeof source.tool_call_id === "string"
         ? source.tool_call_id.trim()
