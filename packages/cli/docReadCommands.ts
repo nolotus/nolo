@@ -9,30 +9,15 @@ import {
   resolveWriteTargets,
 } from "./docCommandShared";
 import { readOption } from "./cliEnvHelpers";
+import { t } from "./i18n";
 import type { DocKind, DocWriteDeps } from "./docCommandShared";
 
 function printDocReadUsage(output: { write(chunk: string): unknown }) {
-  output.write(`Usage:
-  nolo doc read (--id <pageId> | --key <pageKey>)
-
-Options:
-  --id <pageId>             Page id (without user prefix).
-  --key <pageKey>           Full dbKey, e.g. page-<userId>-<pageId>.
-  --server <url>            Server to read from.
-  --token <jwt>             Auth token. Required for reads.
-`);
+  output.write(t("docCmd.readUsage"));
 }
 
 function printSkillDocReadUsage(output: { write(chunk: string): unknown }) {
-  output.write(`Usage:
-  nolo skill-doc read (--id <skillId> | --key <pageKey>)
-
-Options:
-  --id <skillId>            Skill id (without user prefix).
-  --key <pageKey>           Full dbKey, e.g. page-<userId>-<skillId>.
-  --server <url>            Server to read from.
-  --token <jwt>             Auth token. Required for reads.
-`);
+  output.write(t("docCmd.skillReadUsage"));
 }
 
 async function runReadCommand(
@@ -58,7 +43,7 @@ async function runReadCommand(
   const { authToken, userId } = requireTokenUser(args, deps.env, false);
   const targets = resolveWriteTargets(args, deps.env);
   if (!targets.length) {
-    throw new Error("No read targets resolved. Check --server.");
+    throw new Error(t("docCmd.noReadTargetsResolved"));
   }
 
   const dbKey = explicitKey ?? (docKind === "skill"
@@ -76,15 +61,15 @@ async function runReadCommand(
   }
 
   if (!record) {
-    throw new Error(`doc not found: ${dbKey}`);
+    throw new Error(t("docCmd.docNotFound", dbKey));
   }
 
   if (shouldOutputJson) {
     process.stdout.write(`${JSON.stringify({ dbKey, record }, null, 2)}\n`);
   } else {
-    process.stdout.write(`read ${docKind}: ${dbKey}\n`);
-    process.stdout.write(`title: ${record.title ?? "(none)"}\n`);
-    process.stdout.write(`spaceId: ${record.spaceId ?? "(none)"}\n`);
+    process.stdout.write(t("docCmd.readDoc", docKind, dbKey));
+    process.stdout.write(t("docCmd.titleLine", String(record.title ?? t("docCmd.none"))));
+    process.stdout.write(t("docCmd.spaceIdLine", String(record.spaceId ?? t("docCmd.none"))));
   }
 
   return 0;

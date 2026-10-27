@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import {
   createArgsCommand,
   createContextCommand,
@@ -86,8 +87,27 @@ export function getSystemInternalCommandEntries(renderHelpText: () => string): C
       );
       return 0;
     }),
-    createContextCommand(["update"], "Update the CLI", async (_args, ctx) => {
-      const { resolveSelfUpdateServerUrl, runSelfUpdate } = await import("./updateCommands");
+    createContextCommand(["update"], t("updateDescription"), async (args, ctx) => {
+      const { resolveSelfUpdateServerUrl, runSelfUpdate, buildCliVersionText, getCliInstallChannel } = await import("./updateCommands");
+      // Only a bare `nolo update` installs. Everything else is read-only:
+      // `status` reports, help flags and unknown args print usage. Before this
+      // guard `nolo update --help` (and any stray arg) entered runSelfUpdate and
+      // really installed a new version.
+      if (args.length > 0) {
+        const sub = args[0];
+        if (sub === "status") {
+          if (process.platform === "win32") {
+            const { getWindowsUpdateStatus } = await import("./windowsSelfUpdate");
+            console.log(getWindowsUpdateStatus(ctx.env, { currentVersion: ctx.packageInfo.version }).text);
+          } else {
+            console.log(t("updateStatusText", buildCliVersionText(ctx.packageInfo), getCliInstallChannel(resolveSelfUpdateServerUrl(ctx.env))));
+          }
+          return 0;
+        }
+        console.log(t("updateUsage"));
+        // `--help` / `-h` is a successful request for help; anything else is a usage error.
+        return sub === "--help" || sub === "-h" ? 0 : 1;
+      }
       return runSelfUpdate({
         entrypointPath: ctx.entrypointPath,
         serverUrl: resolveSelfUpdateServerUrl(ctx.env),

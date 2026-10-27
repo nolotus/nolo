@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { existsSync, readFileSync, accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -209,20 +210,20 @@ export function resolveSelfUpdateServerUrl(
 
 export function buildCliDoctorText(info: DoctorInfo) {
   return [
-    "Nolo CLI doctor",
+    t("updateDoctorTitle"),
     "---------------",
-    `version  ${info.packageName} ${info.version}`,
-    `install  ${info.installKind}`,
-    `channel  ${info.updateChannel}`,
-    `entry    ${info.entrypoint}`,
-    `server   ${info.serverUrl}`,
-    `profile  ${info.profileName}`,
-    `update   nolo update`,
+    t("updateDoctorVersion", info.packageName, info.version),
+    t("updateDoctorInstall", info.installKind),
+    t("updateDoctorChannel", info.updateChannel),
+    t("updateDoctorEntry", info.entrypoint),
+    t("updateDoctorServer", info.serverUrl),
+    t("updateDoctorProfile", info.profileName),
+    t("updateDoctorCommand"),
     "",
-    "If direct `nolo` differs from repo-local `bun ./packages/cli/index.ts`,",
-    "the global install is older than this checkout.",
+    t("updateDoctorDiff"),
+    t("updateDoctorOlder"),
     "",
-    `Manual update: ${info.installKind === "standalone-bundle" ? buildStandaloneManualUpdateHint(info.updateChannel) : buildNpmSelfUpdateCommand(info.updateChannel).join(" ")}`,
+    t("updateDoctorManual", info.installKind === "standalone-bundle" ? buildStandaloneManualUpdateHint(info.updateChannel) : buildNpmSelfUpdateCommand(info.updateChannel).join(" ")),
   ].join("\n");
 }
 
@@ -488,11 +489,7 @@ export async function runStandaloneBundleUpdate(
   const platform = resolveStandaloneBundlePlatform();
   if (!platform) {
     output.write(
-      `✗ Standalone-bundle self-update is not supported on this platform\n` +
-      `  (platform=${process.platform}, arch=${process.arch}).\n` +
-      `  Only linux-x64 and darwin-arm64 bundles are published.\n` +
-      `  Falling back is not possible from a compiled binary; reinstall via:\n` +
-      `    ${buildStandaloneManualUpdateHint(channel)}\n`,
+      t("updateUnsupported", process.platform, process.arch, buildStandaloneManualUpdateHint(channel)),
     );
     return 1;
   }
@@ -514,10 +511,10 @@ export async function runStandaloneBundleUpdate(
     currentVersion: readPackageInfo().version,
   });
 
-  output.write(`\nNolo Agent CLI Installer & Updater\n`);
+  output.write(`\n${t("updateInstallerTitle")}\n`);
   output.write(`-----------------------------------------\n`);
-  output.write(`✓ Target channel: ${channel} (standalone bundle)\n`);
-  output.write(`▸ Downloading and installing bundle...\n`);
+  output.write(`${t("updateBundleTarget", channel)}\n`);
+  output.write(`${t("updateBundleDownloading")}\n`);
 
   const useCustomSink = options.output !== undefined;
   const exitCode = await runShellScript(script, {
@@ -534,7 +531,7 @@ export async function runStandaloneBundleUpdate(
 
   if (exitCode === 0) {
     output.write(`  ${renderProgressBar(100.0)}\n`);
-    output.write(`✓ Update completed successfully!\n\n`);
+    output.write(`${t("updateCompleted")}\n\n`);
   }
 
   return exitCode;
@@ -701,29 +698,29 @@ export async function runSelfUpdateDetailed(
         entrypointPath,
         env,
       });
-      output.write(`\nNolo Agent CLI Installer & Updater\n`);
+      output.write(`\n${t("updateInstallerTitle")}\n`);
       output.write(`-----------------------------------------\n`);
-      output.write(`✓ Target channel: ${channel} (nolo-cli@${channel})\n`);
-      output.write(`✓ Update scheduled in background (helper pid ${scheduled.helperPid}).\n`);
-      output.write(`▸ You can keep using Nolo — no need to close this or any other window.\n`);
-      output.write(`▸ Installation continues in the background; once it finishes, the next Nolo launch uses the new version.\n`);
-      output.write(`  Check version: nolo -v    Log: ${scheduled.logPath}\n\n`);
+      output.write(`${t("updateNpmTarget", channel)}\n`);
+      output.write(`${t("updateScheduled", String(scheduled.helperPid))}\n`);
+      output.write(`${t("updateKeepUsing")}\n`);
+      output.write(`${t("updateBackground")}\n`);
+      output.write(`${t("updateCheckLog", scheduled.logPath)}\n\n`);
       return { exitCode: 0, disposition: "scheduled" };
     } catch (error) {
       output.write(
-        `✗ Could not schedule the Windows update: ${error instanceof Error ? error.message : String(error)}\n`,
+        `${t("updateScheduleFailed", error instanceof Error ? error.message : String(error))}\n`,
       );
       output.write(
-        `  Manual update after closing every Nolo window: ${command.join(" ")}\n`,
+        `${t("updateManualClose", command.join(" "))}\n`,
       );
       return { exitCode: 1, disposition: "completed" };
     }
   }
 
-  output.write(`\nNolo Agent CLI Installer & Updater\n`);
+  output.write(`\n${t("updateInstallerTitle")}\n`);
   output.write(`-----------------------------------------\n`);
-  output.write(`✓ Target channel: ${channel} (nolo-cli@${channel})\n`);
-  output.write(`▸ Downloading and installing package via npm...\n`);
+  output.write(`${t("updateNpmTarget", channel)}\n`);
+  output.write(`${t("updateNpmDownloading")}\n`);
 
   const useCustomSink = options.output !== undefined;
   const proc: SpawnedProcess = spawn({
@@ -739,7 +736,7 @@ export async function runSelfUpdateDetailed(
     const exitCode = await proc.exited;
     if (exitCode === 0) {
       output.write(`  ${renderProgressBar(100.0)}\n`);
-      output.write(`✓ Update completed successfully!\n\n`);
+      output.write(`${t("updateCompleted")}\n\n`);
     }
     return { exitCode, disposition: "completed" };
   }
@@ -752,7 +749,7 @@ export async function runSelfUpdateDetailed(
 
   if (exitCode === 0) {
     output.write(`  ${renderProgressBar(100.0)}\n`);
-    output.write(`✓ Update completed successfully!\n\n`);
+    output.write(`${t("updateCompleted")}\n\n`);
   }
 
   return { exitCode, disposition: "completed" };

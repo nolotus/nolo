@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { MachineHeartbeat } from "connector-experimental/protocol";
 import { isRecord } from "core/isRecord";
 import { normalizeServerOrigin } from "core/serverOrigin";
@@ -196,7 +197,7 @@ function resolveAuthToken(env: EnvLike) {
 
 function writeAuthMissing(output: OutputLike) {
   output.write(
-    "[nolo] Machine commands require an auth token. Run `nolo login` or set AUTH_TOKEN.\n"
+    `${t("cliMachineAuthMissing")}\n`
   );
 }
 

@@ -1,4 +1,12 @@
 
+## 0.181.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **cli:** help 本地化收尾 + 修英文提示写成中文 + 加固 i18n 守卫 ([1daaa07](https://github.com/nolotus/bun-nolo/commit/1daaa07c329e06ad51cbf2bf3c9993ff62571c2c))
+* **cli:** 输出统一接入 i18n（zh/en），词条拆域 + 修 update 只读缺口 ([5abaf44](https://github.com/nolotus/bun-nolo/commit/5abaf44a5bb2439206ceb13139be6a48c6a26b2b))
+
+
 ## 0.180.0-alpha.2 (2026-10-27)
 
 ### Bug Fixes

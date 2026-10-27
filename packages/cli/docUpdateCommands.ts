@@ -22,66 +22,15 @@ import {
 import { parseSkillDocProtocol, resolvePageSkillMetadata } from "../ai/skills/skillDocProtocol";
 import { readOption } from "./cliEnvHelpers";
 import { findPotentialSecrets, formatSecretFindings } from "./secretScan";
+import { t } from "./i18n";
 import type { DocKind, DocWriteDeps } from "./docCommandShared";
 
 function printDocUpdateUsage(output: { write(chunk: string): unknown }) {
-  output.write(`Usage:
-  nolo doc update (--id <pageId> | --key <pageKey>) [--title ...] [--body ... | --body-file path] [--space ...]
-
-Options:
-  --id <pageId>             Page id (without user prefix).
-  --key <pageKey>           Full dbKey, e.g. page-<userId>-<pageId>.
-  --title <text>            New title.
-  --description <text>      New page description stored in meta.
-  --body <text>             New page body.
-  --body-file <path>       Read body from file.
-  --space <spaceId>         Move/attach the page to this space.
-  --sync local,main,us      Choose write targets. Values may also be full URLs.
-  --local-only              Write only to the local server target.
-  --no-local                Exclude local targets when --sync includes them.
-  --dry-run                 Build and validate without writing.
-  --json                    Print machine-readable JSON.
-  --allow-secrets           Allow bodies that look like credentials.
-  --server <url>            Default write target when --sync is omitted.
-  --token <jwt>             Auth token. Required for writes.
-`);
+  output.write(t("docCmd.updateUsage"));
 }
 
 function printSkillDocUpdateUsage(output: { write(chunk: string): unknown }) {
-  output.write(`Usage:
-  nolo skill-doc update (--id <skillId> | --key <pageKey>) [--title ...] [--description ...] [--body ... | --body-file path]
-
-Options:
-  --id <skillId>            Skill id (without user prefix).
-  --key <pageKey>           Full dbKey, e.g. page-<userId>-<skillId>.
-  --title <text>            New page title. Also renames the skill unless --name is given.
-  --name <text>             New skill name only, leaving the page title untouched.
-                            The name is the skill's identity that other docs
-                            reference, so prefer this over --title when you only
-                            want a nicer title.
-  --description <text>      New skill description.
-  --body <text>             New skill body.
-  --body-file <path>       Read body from file.
-  --space <spaceId>         Move/attach the skill page to this space.
-  --tools '["readDoc"]'                 Replace tool names this skill expects.
-  --required-skills '["skill-a"]'       Replace required skill references.
-  --recommended-skills '["skill-b"]'    Replace recommended skill references.
-  --trigger-mode explicit|required|recommended
-  --prompt-patch <text>
-  --sync local,main,us                  Choose write targets. Values may also be full URLs.
-  --local-only                          Write only to the local server target.
-  --no-local                            Exclude local targets when --sync includes them.
-  --dry-run                             Build and validate without writing.
-  --json                                Print machine-readable JSON.
-  --allow-secrets                       Allow bodies that look like credentials.
-  --token <jwt>                         Auth token. Required for writes.
-
-Promotion:
-  If the target is a plain page whose body already contains a valid
-  <!-- skill-config ... --> block, this command adopts it: the block is parsed,
-  normalized and written back into record.meta (kind="skill" + skillConfig),
-  keeping the same dbKey. Use --dry-run first to preview.
-`);
+  output.write(t("docCmd.skillUpdateUsage"));
 }
 
 async function resolveExistingRecord(args: {
@@ -103,7 +52,7 @@ async function resolveExistingRecord(args: {
       // try next target
     }
   }
-  throw new Error(`doc not found on any target: ${args.dbKey}`);
+  throw new Error(t("docCmd.docNotFoundOnTargets", args.dbKey));
 }
 
 async function runUpdateCommand(
@@ -131,7 +80,7 @@ async function runUpdateCommand(
   const { authToken, userId } = requireTokenUser(args, deps.env, shouldDryRun);
   const targets = resolveWriteTargets(args, deps.env);
   if (!targets.length) {
-    throw new Error("No write targets resolved. Check --sync / --local-only / --no-local.");
+    throw new Error(t("docCmd.noWriteTargetsResolved"));
   }
 
   const dbKey = explicitKey ?? (docKind === "skill"
@@ -152,12 +101,10 @@ async function runUpdateCommand(
   // doc here too. Letting `doc update --body ...` through would silently overwrite
   // the skill-config block and demote a mountable skill back to a plain page.
   if (docKind === "page" && (metaKindIsSkill || bodyDeclaresSkill)) {
-    throw new Error(`Target page is a skill doc. Use nolo skill-doc update --key ${dbKey}`);
+    throw new Error(t("docCmd.targetIsSkillDoc", dbKey));
   }
   if (docKind === "skill" && !metaKindIsSkill && !bodyDeclaresSkill) {
-    throw new Error(
-      `Target page is not a skill doc and its body has no valid skill-config block. Use nolo doc update --key ${dbKey}`
-    );
+    throw new Error(t("docCmd.targetNotSkillDoc", dbKey));
   }
 
   const isPromotion = docKind === "skill" && !metaKindIsSkill && bodyDeclaresSkill;
@@ -165,7 +112,7 @@ async function runUpdateCommand(
   const explicitTitle = readTitle(args);
   const title = explicitTitle ?? existing?.title;
   if (!title) {
-    throw new Error(`doc has no title and none was provided: ${dbKey}`);
+    throw new Error(t("docCmd.docNoTitle", dbKey));
   }
 
   const newSpaceId = readOption(args, "--space");
@@ -178,7 +125,7 @@ async function runUpdateCommand(
     const meta = existingSkillMeta;
     const currentConfig = meta?.skillConfig;
     if (!currentConfig) {
-      throw new Error(`existing skill doc is missing skillConfig: ${dbKey}`);
+      throw new Error(t("docCmd.existingSkillMissingConfig", dbKey));
     }
 
     const parsed = parseSkillDocProtocol(existing?.content ?? "", meta);
@@ -186,7 +133,7 @@ async function runUpdateCommand(
 
     const explicitName = readOption(args, "--name");
     if (explicitName !== undefined && !explicitName.trim()) {
-      throw new Error("--name cannot be empty. Omit it to keep the current skill name.");
+      throw new Error(t("docCmd.nameCannotBeEmpty"));
     }
     const body = readBodyArg(args, parsed.content ?? "");
 
@@ -194,7 +141,7 @@ async function runUpdateCommand(
     if (secretFindings.length && !allowSecrets) {
       throw new Error(
         [
-          "Document body appears to contain credentials or secrets. Pass --allow-secrets to write it anyway.",
+          t("docCmd.secretBodyWarning"),
           formatSecretFindings(secretFindings),
         ].join("\n")
       );
@@ -238,6 +185,7 @@ async function runUpdateCommand(
       workflowConfig: meta?.workflowConfig,
       existing,
     });
+
     skillSummary = buildSkillSummaryForRecord(record) ?? undefined;
   } else {
     const description = readOption(args, "--description") ?? existing?.meta?.description ?? "";
@@ -247,7 +195,7 @@ async function runUpdateCommand(
     if (secretFindings.length && !allowSecrets) {
       throw new Error(
         [
-          "Document body appears to contain credentials or secrets. Pass --allow-secrets to write it anyway.",
+          t("docCmd.secretBodyWarning"),
           formatSecretFindings(secretFindings),
         ].join("\n")
       );
@@ -296,11 +244,11 @@ async function runUpdateCommand(
   if (shouldOutputJson) {
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   } else if (shouldDryRun) {
-    process.stdout.write(`dry-run ok${isPromotion ? " (promote page -> skill)" : ""}: ${dbKey}\n`);
+    process.stdout.write(isPromotion ? t("docCmd.dryRunOkPromote", dbKey) : t("docCmd.dryRunOk", dbKey));
   } else if (isPromotion) {
-    process.stdout.write(`promoted page to skill: ${dbKey}\n`);
+    process.stdout.write(t("docCmd.promotedPageToSkill", dbKey));
   } else {
-    process.stdout.write(`updated ${docKind}: ${dbKey}\n`);
+    process.stdout.write(t("docCmd.updatedDoc", docKind, dbKey));
   }
 
   return 0;

@@ -39,15 +39,15 @@ export const GROUP_ORDER = [
 
 export function renderHelpText() {
   const lines = [
-    "nolo — Agent-first terminal workspace",
+    t("cliHelpTitle"),
     "",
-    "Usage:",
+    t("cli.usageLabel"),
     "  nolo",
     "  nolo <command> [subcommand] [...args]",
     "  nolo doctor",
     "  nolo update",
     "",
-    "Examples:",
+    t("cliExamplesLabel"),
     "  nolo",
     "  nolo chat",
     "  nolo login",
@@ -103,7 +103,7 @@ export function renderHelpText() {
     if (commands.length === 0) continue;
     lines.push("", group);
     for (const entry of commands) {
-      lines.push(`  ${entry.path.join(" ")}  ${entry.description}`);
+      lines.push(`  ${entry.path.join(" ")}  ${cliCommandDescription(entry.path.join(" ")) ?? entry.description}`);
     }
   }
 
