@@ -40,7 +40,7 @@ type RunSelfUpdateOptions = {
   platform?: NodeJS.Platform;
   scheduleWindowsUpdate?: (
     options: WindowsUpdateLaunchOptions,
-  ) => { helperPid: number; statePath: string; logPath: string };
+  ) => { helperPid: number; logPath: string };
 };
 
 export type SelfUpdateExecution = {

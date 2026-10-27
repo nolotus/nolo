@@ -1,4 +1,11 @@
 
+## 0.170.2 (2026-10-27)
+
+### Bug Fixes
+
+* **cli:** Windows 自更新不再阻塞启动，删除等待进程与状态机 ([d20a762](https://github.com/nolotus/bun-nolo/commit/d20a762ebdddb8e099c0bc274d94e2f4e62e012b))
+
+
 ## 0.170.1 (2026-10-26)
 
 ### Bug Fixes
