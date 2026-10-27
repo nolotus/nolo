@@ -771,6 +771,21 @@ export const SELECT_VALUE_CODES = Object.freeze({
   // The read-back itself failed, so nothing can be claimed about the applied option. The page's own
   // reason is preferred when it has one (`SELECT_GONE`, `STALE_PAGE_REVISION`, `REGION_NOT_FOUND`).
   SELECT_VALUE_UNVERIFIED: "SELECT_VALUE_UNVERIFIED",
+  // The set itself refused: the marker written before the set and the element the target resolves
+  // to are not the same node (the page moved or swapped the control in between), or the selector
+  // names no single control because several elements match it.
+  SELECT_TARGET_CONFLICT: "SELECT_TARGET_CONFLICT",
+  SELECT_TARGET_AMBIGUOUS: "SELECT_TARGET_AMBIGUOUS",
+  // Identity is proven by a token-to-node reference kept in the extension's isolated world, never by
+  // a DOM attribute: `cloneNode(true)` copies attributes, so an attribute can be inherited by a
+  // different control that then reads back the wrong value and looks verified. These three say the
+  // proof was unavailable, so the set is refused rather than written to a guess.
+  SELECT_TOKEN_UNAVAILABLE: "SELECT_TOKEN_UNAVAILABLE",
+  SELECT_TOKEN_REQUIRED: "SELECT_TOKEN_REQUIRED",
+  SELECT_TOKEN_FAILED: "SELECT_TOKEN_FAILED",
+  // `type` used to write into a native <select> directly, which bypassed option matching, the
+  // identity proof and the read-back. It is refused now and points at `set_select_value`.
+  TYPE_ON_SELECT_REFUSED: "TYPE_ON_SELECT_REFUSED",
   SELECT_GONE: "SELECT_GONE",
   STALE_PAGE_REVISION: "STALE_PAGE_REVISION",
   REGION_NOT_FOUND: "REGION_NOT_FOUND",

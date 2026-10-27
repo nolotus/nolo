@@ -792,6 +792,174 @@ function pageOperation(payload) {
     return String(text).replace(/\s+/g, " ").trim().slice(0, 200);
   }
 
+  /**
+   * The identity of a marked select lives *outside* the page's DOM, in a registry of live node
+   * references that the page cannot see, copy or forge.
+   *
+   * Why not a marker attribute (the previous design): `cloneNode(true)` copies attributes. A clone
+   * that replaces the original carries the very same marker value, so "the element carrying the
+   * token" stops being proof of identity — the token names a *value*, and the page may hand that
+   * value to another node. A registry of node references cannot be copied: a clone is a different
+   * object, is not in the registry, and therefore can never be mistaken for the node that was
+   * marked. (An attribute value such as id → name → aria-label is weaker still: it names a *kind*
+   * of control, not a node.)
+   *
+   * Where the registry lives: `chrome.scripting.executeScript({func, args})` runs the injected
+   * function in the extension's *isolated world*, and that world keeps one `globalThis` for as long
+   * as the frame lives. The page's own scripts run in a different world and can neither read nor
+   * write this registry.
+   *
+   * ASSUMPTION (not verified on a real browser): that the isolated world survives between two
+   * `executeScript` calls. The JSDOM tests simulate exactly this — one shared `globalThis` per
+   * frame — but they run the page op in the page realm, so the *isolation* is not exercised there.
+   * If the assumption were false, the registry would be empty at the set/read step and both would
+   * fail closed: the set is refused and nothing is written. The failure mode is "refuses to
+   * write", never "writes to the wrong control".
+   */
+  const SELECT_TOKEN_REGISTRY_KEY = "__noloSelectTokens";
+  /** A bounded registry: an abandoned mark must not keep its node alive forever. */
+  const SELECT_TOKEN_REGISTRY_LIMIT = 32;
+  /** The attribute an older version used; it is only ever removed, never written. */
+  const SELECT_TOKEN_ATTRIBUTE = "data-nolo-select-token";
+
+  /** A fresh, unpredictable marker value per operation. */
+  function randomSelectToken() {
+    const bytes = new Uint8Array(16);
+    const source = typeof globalThis !== "undefined" ? globalThis.crypto : null;
+    if (source && typeof source.getRandomValues === "function") {
+      source.getRandomValues(bytes);
+    } else {
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = Math.floor(Math.random() * 256);
+      }
+    }
+    let hex = "";
+    for (let index = 0; index < bytes.length; index += 1) {
+      hex += bytes[index].toString(16).padStart(2, "0");
+    }
+    return `nolo-${hex}`;
+  }
+
+  /**
+   * The registry of marked nodes, or null when no registry can exist at all.
+   *
+   * A missing registry is a hard failure and never a fallback: without it there is no identity
+   * proof, and a set without identity proof would write to whatever control the selector happens
+   * to name now — the very failure this design exists to prevent.
+   */
+  function selectTokenRegistry() {
+    try {
+      const host = globalThis;
+      if (!host) return null;
+      let registry = host[SELECT_TOKEN_REGISTRY_KEY];
+      if (!registry || typeof registry.get !== "function" || typeof registry.set !== "function") {
+        registry = new Map();
+        host[SELECT_TOKEN_REGISTRY_KEY] = registry;
+      }
+      return registry;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /** Drop entries whose node is gone and keep the registry inside its bound. */
+  function pruneSelectTokens(registry) {
+    if (!registry) return 0;
+    try {
+      for (const [token, node] of registry) {
+        if (!node || node.isConnected !== true) registry.delete(token);
+      }
+      // The oldest entry goes first, so a fresh mark always fits within the limit.
+      while (registry.size >= SELECT_TOKEN_REGISTRY_LIMIT) {
+        const oldest = registry.keys().next();
+        if (oldest.done) break;
+        registry.delete(oldest.value);
+      }
+    } catch (_) {}
+    return registry.size;
+  }
+
+  /**
+   * The node a token stands for — or null when the token is unknown, its node was detached, or it
+   * is no longer a select. A clone is a different node and is not in the registry, so it can never
+   * be returned here.
+   */
+  function selectTokenNode(registry, token) {
+    if (!registry || !token || typeof token !== "string") return null;
+    let node = null;
+    try {
+      node = registry.get(token) || null;
+    } catch (_) {
+      return null;
+    }
+    if (!node) return null;
+    if (node.isConnected !== true) return null;
+    if (String(node.tagName || "").toLowerCase() !== "select") return null;
+    return node;
+  }
+
+  /**
+   * Take the mark off the page again: it must never outlive its operation.
+   *
+   * The registry entry *is* the mark now, so clearing it is a lookup rather than a sweep of the
+   * current document: a mark on a node that has already been detached is cleared with it.
+   */
+  function clearSelectToken(token) {
+    if (!token || typeof token !== "string") return 0;
+    let removed = 0;
+    const registry = selectTokenRegistry();
+    if (registry) {
+      try {
+        if (registry.delete(token)) removed += 1;
+      } catch (_) {}
+    }
+    // An older version put the mark on the node as an attribute; take such leftovers off as well,
+    // so no page-visible trace of a mark survives the operation.
+    try {
+      for (const holder of Array.prototype.slice.call(document.querySelectorAll(`[${SELECT_TOKEN_ATTRIBUTE}]`))) {
+        try {
+          holder.removeAttribute(SELECT_TOKEN_ATTRIBUTE);
+          removed += 1;
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return removed;
+  }
+
+  /**
+   * How many elements a plain CSS selector matches, or null when the selector is not a plain one.
+   *
+   * A selector that matches several controls names no single control. `querySelector` would
+   * silently return the first of them, and the read-back could not tell that apart from the
+   * control that was really set — so such a selector is refused instead of resolved by luck.
+   */
+  function plainSelectorMatchCount(selector) {
+    if (typeof selector !== "string" || !selector) return null;
+    if (selector.startsWith("point:") || selector.startsWith("percent:") || selector.startsWith("text:")) {
+      return null;
+    }
+    if (/text=|:has-text\(/i.test(selector)) return null;
+    try {
+      return document.querySelectorAll(selector).length;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /** The one control an action addresses — or a refusal, never a guess. */
+  function resolveSelectTarget(found, payload) {
+    const resolved = resolveElement(found, payload, { verifyName: true });
+    if (!resolved.element) return resolved;
+    const matchCount = plainSelectorMatchCount(payload.selector);
+    if (matchCount !== null && matchCount > 1) {
+      return {
+        code: "SELECT_TARGET_AMBIGUOUS",
+        message: `The selector ${payload.selector} matches ${matchCount} elements, so it names no single control; the value was not set.`,
+      };
+    }
+    return resolved;
+  }
+
   function describe(element, index) {
     const tag = String(element.tagName || "").toLowerCase();
     const described = {
@@ -1091,6 +1259,21 @@ function pageOperation(payload) {
     }
 
     if (op === "type") {
+      // A native <select> is not a text field: writing `value` on it does not type anything, it
+      // silently clears the selection (an unknown value leaves the control with no option chosen).
+      // `type` used to be a way around `set_select_value` — and therefore around its identity
+      // check, its option matching and its read-back — so it refuses selects outright and points
+      // at the action that does verify itself.
+      const targetTag = String(target.tagName || "").toLowerCase();
+      if (targetTag === "select") {
+        return {
+          ok: false,
+          code: "TYPE_ON_SELECT_REFUSED",
+          message:
+            "The target is a native <select>; typing does not choose an option. Use set_select_value instead — the value was not changed.",
+          signature: signatureOf(found),
+        };
+      }
       const before = snapshotOf(target);
       try {
         target.focus();
@@ -1184,6 +1367,75 @@ function pageOperation(payload) {
     };
   }
 
+  if (op === "mark_select_token") {
+    // Mark the target select *before* its value is set. The marker is the one thing that can
+    // prove, later, that the read-back is looking at the very same node.
+    const foundForMark = candidates(region);
+    if (!foundForMark) {
+      return {
+        ok: false,
+        code: "REGION_NOT_FOUND",
+        message: `Region selector matched no element: ${region}`,
+        region,
+      };
+    }
+    if (payload.expectedUrl && String(location.href) !== payload.expectedUrl) {
+      return {
+        ok: false,
+        code: "STALE_PAGE_REVISION",
+        message: "The tab navigated to a different document; call chrome_read_page again.",
+      };
+    }
+    if (payload.expectedSignature && signatureOf(foundForMark) !== payload.expectedSignature) {
+      return {
+        ok: false,
+        code: "STALE_PAGE_REVISION",
+        message: "The page revision changed since the elementRef was issued; call chrome_read_page again.",
+        signature: signatureOf(foundForMark),
+      };
+    }
+    const resolvedForMark = resolveSelectTarget(foundForMark, payload);
+    const element = resolvedForMark.element || null;
+    if (!element) {
+      return {
+        ok: false,
+        code: typeof resolvedForMark.code === "string" ? resolvedForMark.code : "ELEMENT_NOT_FOUND",
+        message: resolvedForMark.message || "The target select could not be located.",
+      };
+    }
+    if (String(element.tagName || "").toLowerCase() !== "select") {
+      const tag = String(element.tagName || "").toLowerCase();
+      return {
+        ok: false,
+        code: "NOT_A_SELECT",
+        message: `The target is a <${tag || "unknown"}>, not a native <select>; a custom dropdown must be opened with click and one of its options clicked.`,
+      };
+    }
+    const token = randomSelectToken();
+    const registry = selectTokenRegistry();
+    if (!registry) {
+      // Fail closed: without a registry there is no identity proof, and a set without one would
+      // write to whichever control the selector names now.
+      return {
+        ok: false,
+        code: "SELECT_TOKEN_UNAVAILABLE",
+        message:
+          "This page cannot hold a select identity token, so the target select cannot be identified safely; the value was not set.",
+      };
+    }
+    pruneSelectTokens(registry);
+    try {
+      registry.set(token, element);
+    } catch (error) {
+      return {
+        ok: false,
+        code: "SELECT_TOKEN_FAILED",
+        message: `The target select could not be marked: ${String((error && error.message) || error)}`,
+      };
+    }
+    return { ok: true, token, signature: signatureOf(foundForMark) };
+  }
+
   if (op === "read_select_state") {
     const stateOf = (select) => {
       const chosen = Array.prototype.slice.call(select.options || []).filter((option) => option.selected === true)[0] || null;
@@ -1192,12 +1444,12 @@ function pageOperation(payload) {
         label: chosen ? String(chosen.textContent || chosen.label || "").replace(/\s+/g, " ").trim() : "",
       };
     };
-    // Read the select back through the very same resolution `set_select_value` used: a selector the
-    // setter accepts (point:/percent:/text=/:has-text()) must resolve to the same element here,
-    // otherwise a legitimate set can never be verified.
-    // No name comparison: `labelOf` falls back to `innerText` and, for a select, that text is the
-    // selected option — it changes precisely because the set succeeded. A read-back only asks "what
-    // is this element now"; the index and tag still pin its identity.
+    // Why the registry and not the selector/index: the read-back has to answer "what does the
+    // control that was set hold now?". A selector or an index names a *place*, and the page may
+    // have put another control there; an attribute value names a *kind* of control, and the page
+    // may have handed that value to another element. The registry holds the node itself, so
+    // finding it again is proof that the node is the one that was set — and a clone that replaced
+    // it is simply not in the registry.
     const foundForRead = candidates(region);
     if (!foundForRead) {
       return {
@@ -1207,44 +1459,6 @@ function pageOperation(payload) {
         region,
       };
     }
-    const resolvedForRead = resolveElement(foundForRead, payload, { verifyName: false });
-    const element = resolvedForRead.element || null;
-    if (!element) {
-      // Keep the page's own reason instead of flattening every miss into one code: a select that was
-      // replaced or moved reads as STALE_PAGE_REVISION, a broken region as REGION_NOT_FOUND. Only a
-      // selector that no longer matches is reported as SELECT_GONE, which is what it means here.
-      const resolvedCode = typeof resolvedForRead.code === "string" ? resolvedForRead.code : "";
-      const code = resolvedCode === "ELEMENT_NOT_FOUND" ? "SELECT_GONE" : resolvedCode || "SELECT_GONE";
-      const message = code === "SELECT_GONE"
-        ? "The select is no longer in the page."
-        : resolvedForRead.message || "The select can no longer be read back from the page.";
-      return { ok: false, code, message };
-    }
-    if (String(element.tagName || "").toLowerCase() !== "select") {
-      return { ok: false, code: "NOT_A_SELECT", message: "The target is no longer a native <select>." };
-    }
-    return { ok: true, ...stateOf(element) };
-  }
-
-  if (op === "set_select_value") {
-    const normalizeOptionText = (value) => String(value == null ? "" : value).replace(/\s+/g, " ").trim();
-    const describeOption = (option) => ({
-      value: String(option.value),
-      label: normalizeOptionText(option.textContent || option.label || ""),
-      disabled: Boolean(option.disabled),
-    });
-    const selectedStateOf = (select) => {
-      const chosen = Array.prototype.slice.call(select.options || []).filter((option) => option.selected === true)[0] || null;
-      return {
-        value: select.value == null ? "" : String(select.value),
-        label: chosen ? normalizeOptionText(chosen.textContent || chosen.label || "") : "",
-      };
-    };
-
-    const found = candidates(region);
-    if (!found) {
-      return { ok: false, code: "REGION_NOT_FOUND", message: `Region selector matched no element: ${region}`, region };
-    }
     if (payload.expectedUrl && String(location.href) !== payload.expectedUrl) {
       return {
         ok: false,
@@ -1252,115 +1466,282 @@ function pageOperation(payload) {
         message: "The tab navigated to a different document; call chrome_read_page again.",
       };
     }
-    if (payload.expectedSignature && signatureOf(found) !== payload.expectedSignature) {
+    if (payload.expectedSignature && signatureOf(foundForRead) !== payload.expectedSignature) {
       return {
         ok: false,
         code: "STALE_PAGE_REVISION",
         message: "The page revision changed since the elementRef was issued; call chrome_read_page again.",
-        signature: signatureOf(found),
+        signature: signatureOf(foundForRead),
       };
     }
-    const resolved = resolveElement(found, payload);
-    if (!resolved.element) {
-      return { ok: false, code: resolved.code, message: resolved.message, signature: signatureOf(found) };
+    const token = typeof payload.selectToken === "string" ? payload.selectToken : "";
+    try {
+      const registry = selectTokenRegistry();
+      if (!registry) {
+        return {
+          ok: false,
+          code: "SELECT_TOKEN_UNAVAILABLE",
+          message:
+            "This page cannot hold a select identity token, so the select that was set cannot be identified; the applied option could not be verified.",
+        };
+      }
+      const select = selectTokenNode(registry, token);
+      if (!select) {
+        // The marked node is gone: it was removed, or the page re-rendered and replaced it. Some
+        // other control may well sit at the same place now, but it is a different node, so
+        // nothing at all can be said about the value that was set. Report *why* it is gone
+        // without reading a value from any look-alike.
+        return diagnoseMissingSelect(foundForRead, payload);
+      }
+      // No name comparison: `labelOf` falls back to `innerText` and, for a select, that text is
+      // the selected option — it changes precisely because the set succeeded. The registry already
+      // pins which node this is about.
+      return { ok: true, ...stateOf(select) };
+    } finally {
+      // The mark lives exactly one operation: it is gone whether the read succeeded or not.
+      clearSelectToken(token);
     }
-    const select = resolved.element;
-    const selectTag = String(select.tagName || "").toLowerCase();
-    if (selectTag !== "select") {
+  }
+
+  /**
+   * Why the marked node is gone, without reading any value from a look-alike.
+   *
+   * The marker is what proves the identity, so its absence is the end of the proof: a control that
+   * carries the same id is a different control and says nothing about the value that was set.
+   * The reason is still worth reporting, so the verdict can say whether the control was removed
+   * or replaced by something else.
+   */
+  function diagnoseMissingSelect(found, payload) {
+    const resolved = resolveElement(found, payload, { verifyName: false });
+    if (!resolved.element) {
+      const code = typeof resolved.code === "string" && resolved.code ? resolved.code : "";
+      if (code && code !== "ELEMENT_NOT_FOUND") {
+        return {
+          ok: false,
+          code,
+          message: "The element that was set is no longer the same control, so it cannot be confirmed that it is the same control and the applied option could not be verified.",
+        };
+      }
+      return {
+        ok: false,
+        code: "SELECT_GONE",
+        message: "The select that was set is no longer in the page (it was removed or replaced), so it cannot be confirmed that it is the same control and the applied option could not be verified.",
+      };
+    }
+    const tag = String(resolved.element.tagName || "").toLowerCase();
+    if (tag !== "select") {
       return {
         ok: false,
         code: "NOT_A_SELECT",
-        message: `The target is a <${selectTag || "unknown"}>, not a native <select>; a custom dropdown must be opened with click and one of its options clicked.`,
-        signature: signatureOf(found),
+        message: "The target is no longer a native <select>, so it cannot be confirmed that it is the same control and the applied option could not be verified.",
       };
     }
-    if (select.disabled) {
-      return { ok: false, code: "SELECT_DISABLED", message: "The target <select> is disabled; the value was not set." };
-    }
-    if (select.multiple) {
-      return {
-        ok: false,
-        code: "SELECT_MULTIPLE_UNSUPPORTED",
-        message: "The target <select> accepts multiple selections; only single-choice selects are supported.",
-      };
-    }
+    return {
+      ok: false,
+      code: "SELECT_GONE",
+      message: "Another select now occupies the target, so the select that was set is no longer in the page; it cannot be confirmed that it is the same control and the applied option could not be verified.",
+    };
+  }
 
-    const wantedValue = typeof payload.value === "string" ? payload.value : null;
-    const wantedLabel = typeof payload.label === "string" ? payload.label : null;
-    if ((wantedValue === null) === (wantedLabel === null)) {
-      return {
-        ok: false,
-        code: "OPTION_TARGET_REQUIRED",
-        message: "Provide exactly one of value or label for the option to select.",
+  if (op === "set_select_value") {
+    const applySelectValue = () => {
+      const normalizeOptionText = (value) => String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+      const describeOption = (option) => ({
+        value: String(option.value),
+        label: normalizeOptionText(option.textContent || option.label || ""),
+        disabled: Boolean(option.disabled),
+      });
+      const selectedStateOf = (select) => {
+        const chosen = Array.prototype.slice.call(select.options || []).filter((option) => option.selected === true)[0] || null;
+        return {
+          value: select.value == null ? "" : String(select.value),
+          label: chosen ? normalizeOptionText(chosen.textContent || chosen.label || "") : "",
+        };
       };
-    }
 
-    const allOptions = Array.prototype.slice.call(select.options || []);
-    // Never guess: a wrong option on a real form can be an irreversible choice, so every
-    // uncertainty (no match, several matches, disabled option) is an error the model must resolve.
-    const matches = wantedValue !== null
-      ? allOptions.filter((option) => String(option.value) === wantedValue)
-      : allOptions.filter((option) => normalizeOptionText(option.textContent || option.label || "") === normalizeOptionText(wantedLabel));
-    if (matches.length === 0) {
-      return {
-        ok: false,
-        code: "OPTION_NOT_FOUND",
-        message: `No option matched ${
-          wantedValue !== null ? `value ${JSON.stringify(wantedValue)}` : `label ${JSON.stringify(wantedLabel)}`
-        }.`,
-        options: allOptions.slice(0, 20).map(describeOption),
-        signature: signatureOf(found),
-      };
-    }
-    if (matches.length > 1) {
-      return {
-        ok: false,
-        code: "OPTION_AMBIGUOUS",
-        message: `${matches.length} options carry that label; pass the option value instead, or disambiguate the label.`,
-        options: matches.slice(0, 20).map(describeOption),
-        signature: signatureOf(found),
-      };
-    }
-    const option = matches[0];
-    if (option.disabled) {
-      return {
-        ok: false,
-        code: "OPTION_DISABLED",
-        message: `The option ${JSON.stringify(
-          normalizeOptionText(option.textContent || option.label || ""),
-        )} is disabled and cannot be selected.`,
-        signature: signatureOf(found),
-      };
-    }
+      const found = candidates(region);
+      if (!found) {
+        return { ok: false, code: "REGION_NOT_FOUND", message: `Region selector matched no element: ${region}`, region };
+      }
+      if (payload.expectedUrl && String(location.href) !== payload.expectedUrl) {
+        return {
+          ok: false,
+          code: "STALE_PAGE_REVISION",
+          message: "The tab navigated to a different document; call chrome_read_page again.",
+        };
+      }
+      if (payload.expectedSignature && signatureOf(found) !== payload.expectedSignature) {
+        return {
+          ok: false,
+          code: "STALE_PAGE_REVISION",
+          message: "The page revision changed since the elementRef was issued; call chrome_read_page again.",
+          signature: signatureOf(found),
+        };
+      }
+      const resolved = resolveSelectTarget(found, payload);
+      // The mark taken before the set is the identity proof: the element this resolution points
+      // at has to be the very node that was marked. If it is not, the page moved the target (or
+      // swapped the control) in between, and writing the value would change a control nobody
+      // addressed — so nothing is written at all.
+      const selectToken = typeof payload.selectToken === "string" && payload.selectToken ? payload.selectToken : "";
+      if (!selectToken) {
+        // No mark means no identity proof. A set without one would write to whichever control the
+        // selector names now, so it is refused outright.
+        return {
+          ok: false,
+          code: "SELECT_TOKEN_REQUIRED",
+          message:
+            "The target select was not marked before the set, so it cannot be identified; the value was not set.",
+          signature: signatureOf(found),
+        };
+      }
+      const registry = selectTokenRegistry();
+      if (!registry) {
+        return {
+          ok: false,
+          code: "SELECT_TOKEN_UNAVAILABLE",
+          message:
+            "This page cannot hold a select identity token, so the target select cannot be identified safely; the value was not set.",
+          signature: signatureOf(found),
+        };
+      }
+      const marked = selectTokenNode(registry, selectToken);
+      if (!marked) {
+        // The marked node is gone (removed, re-rendered away) or is no longer a select. A clone
+        // that replaced it is a different node and is not in the registry, so it can never be
+        // mistaken for the node that was marked.
+        return {
+          ok: false,
+          code: "SELECT_GONE",
+          message:
+            "The select that was marked before the set is no longer the same node in the page, so the value was not set.",
+          signature: signatureOf(found),
+        };
+      }
+      if (resolved.element && resolved.element !== marked) {
+        return {
+          ok: false,
+          code: "SELECT_TARGET_CONFLICT",
+          message: "The target resolved to a different control than the one that was marked before the set, so the value was not set on either of them.",
+          signature: signatureOf(found),
+        };
+      }
+      if (!resolved.element) {
+        return { ok: false, code: resolved.code, message: resolved.message, signature: signatureOf(found) };
+      }
+      const select = resolved.element;
+      const selectTag = String(select.tagName || "").toLowerCase();
+      if (selectTag !== "select") {
+        return {
+          ok: false,
+          code: "NOT_A_SELECT",
+          message: `The target is a <${selectTag || "unknown"}>, not a native <select>; a custom dropdown must be opened with click and one of its options clicked.`,
+          signature: signatureOf(found),
+        };
+      }
+      if (select.disabled) {
+        return { ok: false, code: "SELECT_DISABLED", message: "The target <select> is disabled; the value was not set." };
+      }
+      if (select.multiple) {
+        return {
+          ok: false,
+          code: "SELECT_MULTIPLE_UNSUPPORTED",
+          message: "The target <select> accepts multiple selections; only single-choice selects are supported.",
+        };
+      }
 
-    const before = selectedStateOf(select);
-    const requested = { value: String(option.value), label: describeOption(option).label };
+      const wantedValue = typeof payload.value === "string" ? payload.value : null;
+      const wantedLabel = typeof payload.label === "string" ? payload.label : null;
+      if ((wantedValue === null) === (wantedLabel === null)) {
+        return {
+          ok: false,
+          code: "OPTION_TARGET_REQUIRED",
+          message: "Provide exactly one of value or label for the option to select.",
+        };
+      }
+
+      const allOptions = Array.prototype.slice.call(select.options || []);
+      // Never guess: a wrong option on a real form can be an irreversible choice, so every
+      // uncertainty (no match, several matches, disabled option) is an error the model must resolve.
+      const matches = wantedValue !== null
+        ? allOptions.filter((option) => String(option.value) === wantedValue)
+        : allOptions.filter((option) => normalizeOptionText(option.textContent || option.label || "") === normalizeOptionText(wantedLabel));
+      if (matches.length === 0) {
+        return {
+          ok: false,
+          code: "OPTION_NOT_FOUND",
+          message: `No option matched ${
+            wantedValue !== null ? `value ${JSON.stringify(wantedValue)}` : `label ${JSON.stringify(wantedLabel)}`
+          }.`,
+          options: allOptions.slice(0, 20).map(describeOption),
+          signature: signatureOf(found),
+        };
+      }
+      if (matches.length > 1) {
+        return {
+          ok: false,
+          code: "OPTION_AMBIGUOUS",
+          message: `${matches.length} options carry that label; pass the option value instead, or disambiguate the label.`,
+          options: matches.slice(0, 20).map(describeOption),
+          signature: signatureOf(found),
+        };
+      }
+      const option = matches[0];
+      if (option.disabled) {
+        return {
+          ok: false,
+          code: "OPTION_DISABLED",
+          message: `The option ${JSON.stringify(
+            normalizeOptionText(option.textContent || option.label || ""),
+          )} is disabled and cannot be selected.`,
+          signature: signatureOf(found),
+        };
+      }
+
+      const before = selectedStateOf(select);
+      const requested = { value: String(option.value), label: describeOption(option).label };
+      try {
+        option.selected = true;
+        select.value = requested.value;
+      } catch (error) {
+        return {
+          ok: false,
+          code: "SELECT_VALUE_NOT_APPLIED",
+          message: `Assigning the option failed: ${String((error && error.message) || error)}`,
+        };
+      }
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      // Synchronous read-back only: it proves the events were dispatched with the value in place, but
+      // NOT that the page kept it (a listener may still revert us). The worker re-reads after a short
+      // delay and that second read-back decides the verdict.
+      const immediate = selectedStateOf(select);
+      return {
+        ok: true,
+        before,
+        immediate,
+        requested,
+        clickedIndex: allOptions.indexOf(option),
+        element: snapshotOf(select),
+        signature: signatureOf(candidates(region) || found),
+        url: String(location.href),
+      };
+    };
+    let outcome = null;
     try {
-      option.selected = true;
-      select.value = requested.value;
+      outcome = applySelectValue();
     } catch (error) {
-      return {
+      outcome = {
         ok: false,
         code: "SELECT_VALUE_NOT_APPLIED",
         message: `Assigning the option failed: ${String((error && error.message) || error)}`,
       };
     }
-    select.dispatchEvent(new Event("input", { bubbles: true }));
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    // Synchronous read-back only: it proves the events were dispatched with the value in place, but
-    // NOT that the page kept it (a listener may still revert us). The worker re-reads after a short
-    // delay and that second read-back decides the verdict.
-    const immediate = selectedStateOf(select);
-    return {
-      ok: true,
-      before,
-      immediate,
-      requested,
-      clickedIndex: allOptions.indexOf(option),
-      element: snapshotOf(select),
-      signature: signatureOf(candidates(region) || found),
-      url: String(location.href),
-    };
+    if (!outcome || outcome.ok !== true) {
+      // The operation is over: the marker must not stay on the page.
+      clearSelectToken(typeof payload.selectToken === "string" ? payload.selectToken : "");
+    }
+    return outcome;
   }
 
   if (op === "rect_row_delete") {
@@ -1694,6 +2075,14 @@ function pageOperation(payload) {
     };
   }
 
+  if (op === "clear_select_token") {
+    // The marker's lifetime is one operation; this op is how the worker takes it off the page on
+    // every path, including the ones where the set itself never ran.
+    const token = String((payload && payload.selectToken) || "");
+    const removed = clearSelectToken(token);
+    return { ok: true, removed };
+  }
+
   if (op === "cleanup_marker") {
     const marker = String((payload && payload.marker) || "");
     if (marker) {
@@ -1903,6 +2292,70 @@ async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }
   return null;
 }
 
+/**
+ * Mark the select a set is about to target, before its value changes.
+ *
+ * The mark is a one-shot entry in the page world's registry, pointing at that very node, and it is
+ * the only proof available later that the read-back is looking at the same control: an id or a
+ * name can be handed to another element, a clone copies every attribute, and a value that merely
+ * compares equal says nothing about which node was addressed.
+ *
+ * A failed mark is *not* a soft failure: the caller must not go on to set the value without it,
+ * because a set without an identity proof writes to whichever control the selector names now.
+ */
+async function captureSelectToken(tabId, pageArgs) {
+  let result = null;
+  try {
+    result = await executeInTab(tabId, pageOperation, [
+      { ...pageArgs, op: "mark_select_token" },
+    ]);
+  } catch (error) {
+    return {
+      ok: false,
+      token: null,
+      code: "SELECT_TOKEN_FAILED",
+      message: `The target select could not be marked, so it cannot be identified; the value was not set: ${toMessage(
+        error,
+      )}`,
+    };
+  }
+  if (!result || result.ok !== true) {
+    return {
+      ok: false,
+      token: null,
+      code:
+        typeof result?.code === "string" && result.code
+          ? result.code
+          : "SELECT_TOKEN_FAILED",
+      message:
+        typeof result?.message === "string" && result.message
+          ? `${result.message} The value was not set.`
+          : "The target select could not be marked, so it cannot be identified; the value was not set.",
+    };
+  }
+  const token = result.token;
+  if (!token || typeof token !== "string") {
+    return {
+      ok: false,
+      token: null,
+      code: "SELECT_TOKEN_FAILED",
+      message:
+        "The target select could not be marked, so it cannot be identified; the value was not set.",
+    };
+  }
+  return { ok: true, token };
+}
+
+/** Take the marker off the page again — on every path, successful or not. */
+async function clearSelectToken(tabId, token) {
+  if (!token || typeof token !== "string") return;
+  try {
+    await executeInTab(tabId, pageOperation, [{ op: "clear_select_token", selectToken: token }]);
+  } catch (_) {
+    // Best effort: when the page is gone, the marker is gone with it.
+  }
+}
+
 /** How long the page gets to run its listeners and re-render before the select is read back. */
 const SELECT_SETTLE_MS = 60;
 
@@ -1915,6 +2368,10 @@ const SELECT_SETTLE_MS = 60;
 async function readSelectStateAfterSettle(tabId, target, pageArgs) {
   await new Promise((resolve) => setTimeout(resolve, SELECT_SETTLE_MS));
   const readBackArgs = { op: "read_select_state" };
+  // The marker is the only address the read-back uses: it names the node, not a kind of control.
+  // The selector/index are still carried along, but only to explain *why* the marked node is gone
+  // if it disappeared — never to read a value from another control.
+  if (pageArgs.selectToken) readBackArgs.selectToken = pageArgs.selectToken;
   if (target.kind === "selector") {
     readBackArgs.selector = target.selector;
   } else {
@@ -2014,71 +2471,92 @@ async function runTargetedAction(action, payload) {  const tabId = String(payloa
   if (action === "set_select_value") {
     if (typeof payload.value === "string") pageArgs.value = payload.value;
     if (typeof payload.label === "string") pageArgs.label = payload.label;
-  }
-
-  let result;
-  try {
-    result = await executeInTab(payload.tabId, pageOperation, [pageArgs]);
-  } catch (error) {
-    if (error?.code === PROTECTED_PAGE_CODE) {
-      return {
-        ok: false,
-        verified: false,
-        effect: "failed",
-        action,
-        signal: PROTECTED_PAGE_CODE,
-        message: toMessage(error),
-        ...resolveExtra,
-      };
+    // Mark the target before the value changes: the mark is the only proof that the read-back is
+    // looking at the very same node, even when the page re-renders around it while settling.
+    // A mark that did not succeed stops the set right here — without it the set would write to
+    // whichever control the selector names now, and the read-back could prove nothing.
+    const mark = await captureSelectToken(payload.tabId, pageArgs);
+    if (!mark.ok) {
+      return verdictEnvelope(
+        "set_select_value",
+        { status: "failed", signal: mark.code, message: mark.message },
+        resolveExtra,
+        { okRequiresVerified: true },
+      );
     }
-    refRegistry.invalidate(tabId);
-    return verdictEnvelope(
-      action,
-      {
-        status: "uncertain",
-        signal: "page_context_destroyed",
-        message: `The page navigated or its frame was replaced while the action ran (${toMessage(
-          error,
-        )}). Re-read the page before acting again.`,
-      },
-      resolveExtra,
-      { okRequiresVerified: action === "set_select_value" },
-    );
+    pageArgs.selectToken = mark.token;
   }
 
-  let pageResult = result;
-  if (action === "set_select_value" && result && result.ok === true) {
-    pageResult = { ...result, after: await readSelectStateAfterSettle(payload.tabId, target, pageArgs) };
-  }
-
-  const verification =
-    action === "set_select_value"
-      ? verifySelectValueEffect({ result: pageResult })
-      : verifyActionEffect({
+  try {
+    let result;
+    try {
+      result = await executeInTab(payload.tabId, pageOperation, [pageArgs]);
+    } catch (error) {
+      if (error?.code === PROTECTED_PAGE_CODE) {
+        return {
+          ok: false,
+          verified: false,
+          effect: "failed",
           action,
-          target: target.kind === "ref" ? { name: target.expect.name } : undefined,
-          expected: action === "type" ? { text: pageArgs.text, clearFirst: pageArgs.clearFirst } : undefined,
-          result,
-        });
+          signal: PROTECTED_PAGE_CODE,
+          message: toMessage(error),
+          ...resolveExtra,
+        };
+      }
+      refRegistry.invalidate(tabId);
+      return verdictEnvelope(
+        action,
+        {
+          status: "uncertain",
+          signal: "page_context_destroyed",
+          message: `The page navigated or its frame was replaced while the action ran (${toMessage(
+            error,
+          )}). Re-read the page before acting again.`,
+        },
+        resolveExtra,
+        { okRequiresVerified: action === "set_select_value" },
+      );
+    }
 
-  if (result && typeof result.signature === "string" && result.signature) {
-    refRegistry.notePageChanged({ tabId, signature: result.signature, url: result.url });
+    let pageResult = result;
+    if (action === "set_select_value" && result && result.ok === true) {
+      pageResult = { ...result, after: await readSelectStateAfterSettle(payload.tabId, target, pageArgs) };
+    }
+
+    const verification =
+      action === "set_select_value"
+        ? verifySelectValueEffect({ result: pageResult })
+        : verifyActionEffect({
+            action,
+            target: target.kind === "ref" ? { name: target.expect.name } : undefined,
+            expected: action === "type" ? { text: pageArgs.text, clearFirst: pageArgs.clearFirst } : undefined,
+            result,
+          });
+
+    if (result && typeof result.signature === "string" && result.signature) {
+      refRegistry.notePageChanged({ tabId, signature: result.signature, url: result.url });
+    }
+
+    return verdictEnvelope(action, verification, {
+      ...resolveExtra,
+      ...(action === "set_select_value" && pageResult
+        ? {
+            // Report what the select holds after the page settled, not what was requested.
+            value: pageResult.after && pageResult.after.value != null ? String(pageResult.after.value) : "",
+            label: pageResult.after && typeof pageResult.after.label === "string" ? pageResult.after.label : "",
+          }
+        : {}),
+      ...(result?.hitElement ? { hitElement: result.hitElement } : {}),
+      ...(result && typeof result.signature === "string" && result.signature
+        ? { pageRevision: buildPageRevision(result.signature) }
+        : {}),
+    }, { okRequiresVerified: action === "set_select_value" });
+  } finally {
+    // The marker must never outlive the operation: on every path it comes off the page again.
+    if (action === "set_select_value") {
+      await clearSelectToken(payload.tabId, pageArgs.selectToken);
+    }
   }
-
-  return verdictEnvelope(action, verification, {
-    ...resolveExtra,
-    ...(action === "set_select_value" && pageResult
-      ? {
-          // Report what the select holds after the page settled, not what was requested.
-          value: pageResult.after && pageResult.after.value != null ? String(pageResult.after.value) : "",
-          label: pageResult.after && typeof pageResult.after.label === "string" ? pageResult.after.label : "",
-        }
-      : {}),
-    ...(result?.hitElement ? { hitElement: result.hitElement } : {}),
-    ...(result && typeof result.signature === "string" && result.signature
-      ? { pageRevision: buildPageRevision(result.signature) }
-      : {}),
-  }, { okRequiresVerified: action === "set_select_value" });
 }
 
 async function handleSetFiles(payload = {}) {

@@ -1,4 +1,11 @@
 
+## 0.197.0-alpha.3 (2026-10-27)
+
+### Bug Fixes
+
+* **browser-connector:** prove select identity by node reference, not attributes ([09d743b](https://github.com/nolotus/bun-nolo/commit/09d743b3e3471b56895b750ebb298276ccfbb346))
+
+
 ## 0.197.0-alpha.2 (2026-10-27)
 
 ### Bug Fixes
