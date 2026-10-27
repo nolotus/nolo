@@ -457,14 +457,15 @@ export function buildAnthropicMessagesBody(args: {
             const effective = text.trim() ? text : EMPTY_TOOL_RESULT_TEXT;
             const notices = toolImageNotices(message);
             const imageBlocks: JsonRecord[] = [];
+            // 合并两边意图：能力判定走统一策略（anthropic 路由），循环带 imageIndex 供归属标签使用
             if (resolveToolImagePolicy({ ...args.agentConfig, routeKind: "anthropic" }).supportsToolImages) {
-              for (const image of images) {
+              for (const [imageIndex, image] of images.entries()) {
                 const decision = imageBudget(image);
                 if (decision === "duplicate") continue;
                 if (decision !== "delivered") {
                   if (!notices.seen.has(image)) {
                     notices.seen.add(image);
-                    notices.text.push(toolImageOmission(toolImageSource(message as unknown as AgentRuntimeChatMessage), decision === "impossible"));
+                    notices.text.push(toolImageOmission(toolImageSource(message as unknown as AgentRuntimeChatMessage, imageIndex), decision === "impossible"));
                   }
                 } else {
                   imageBlocks.push({ type: "image", source: {

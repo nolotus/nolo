@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { AgentRuntimeToolResult } from "./hostAdapter";
+import { formatImageSummary } from "./imageSummary";
 import { readLocalImage } from "./readImage";
 
 export const HOST_CAPTURE_TIMEOUT_MS = 9_000;
@@ -118,11 +119,9 @@ export function createHostWindowCapture(options: {
         const path = fileURLToPath(uri);
         const image = await (options.readImage ?? readLocalImage)(path);
         if (!image.images?.length) throw new Error("portal image could not be decoded");
-        const dimensions = /\[image (\d+x\d+) (\d+) bytes/.exec(image.content);
-        if (!dimensions) throw new Error("invalid image summary");
         return {
           ...image,
-          content: `[screenshot ${dimensions[1]} ${Math.round(Number(dimensions[2]) / 1024)}KB → ${path}]\n来源：宿主 portal 全屏/交互选择结果；portal 未提供应用/窗口身份，无法确认窗口名。`,
+          content: `${formatImageSummary({ kind: "screenshot", ...image.imageSummary })}\n来源：宿主 portal 全屏/交互选择结果；portal 未提供应用/窗口身份，无法确认窗口名。`,
         };
       } finally {
         active--;

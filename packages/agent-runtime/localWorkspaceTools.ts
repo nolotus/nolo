@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { formatImageSummary } from "./imageSummary";
 import { readLocalImage } from "./readImage";
 import { renderVisualPage, visualRendererCapability } from "./visualRenderer.node";
 import { captureHostWindow } from "./hostWindowCapture";
@@ -1925,7 +1926,7 @@ async function captureVisualStateTool(args: {
       content: [`pageUrl: ${metrics.pageUrl}`, `screenshotPath: ${captureArgs.screenshotPath}`, `metricsPath: ${captureArgs.metricsPath}`, `waitSelector: ${captureArgs.waitSelector}`,
         ...(captureArgs.focusSelector ? [`focusSelector: ${captureArgs.focusSelector}`] : []),
         ...(captureArgs.expectText ? [`expectText: ${captureArgs.expectText}`] : []),
-        image.content.replace("[image ", "[screenshot ").replace(/(\d+) bytes/, (_, bytes) => `${Math.ceil(Number(bytes) / 1024)}KB`)].join("\n"),
+        formatImageSummary({ kind: "screenshot", ...image.imageSummary })].join("\n"),
       images: image.images,
       metadata: { ...captureArgs, ...metrics, ok: true, exitCode: 0, baseUrl, script: null, args: [], compatibilityVersion: 2,
         compatibilityNote: "Platform rendering replaces workspace scripts; script/args/stdoutTail no longer describe a subprocess. Existing page metrics and path fields are retained." },
@@ -2448,13 +2449,45 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
     },
     read_image: async (call: AgentRuntimeToolCallInput) => {
       const parsed = parseWorkspaceToolArguments(call.arguments);
-      if (Object.keys(parsed).some((key) => key !== "path")) throw new Error("read_image accepts exactly one path");
-      const absolutePath = await resolveLocalWorkspaceToolPath({
-        workspaceRoot: args.workspaceRoot,
-        requestedPath: requireWorkspaceToolPath(parsed),
-        ...fileAccess,
-      });
-      return readLocalImage(absolutePath);
+      if (Object.keys(parsed).some((key) => key !== "path" && key !== "paths")) {
+        throw new Error("read_image accepts only path or paths");
+      }
+      // 宽容合并：模型常把 path 与 paths 一起传（2026-10-27 实测导致重试死循环）。
+      // 危险的输入是「合并后为空/超 4 张/非图片」，不是多传一个等价字段。
+      const mergedPaths: unknown[] = [];
+      if ("paths" in parsed) {
+        if (!Array.isArray(parsed.paths)) throw new Error("read_image: paths must be an array of strings");
+        mergedPaths.push(...parsed.paths);
+      }
+      if ("path" in parsed) mergedPaths.unshift(requireWorkspaceToolPath(parsed));
+      if (mergedPaths.length === 0) {
+        throw new Error("read_image requires path or paths");
+      }
+      if (mergedPaths.length > 4) {
+        throw new Error(`read_image: maximum 4 images; received ${mergedPaths.length}`);
+      }
+      const paths = mergedPaths;
+      if (!Array.isArray(paths) || paths.length === 0 ||
+          paths.some((path) => typeof path !== "string" || !path.trim())) {
+        throw new Error("read_image: paths must contain 1 to 4 non-empty string paths (maximum 4 images)");
+      }
+      // Return only after every image succeeds; never expose a partial batch.
+      const results = await Promise.all(paths.map(async (path: string) => {
+        try {
+          const absolutePath = await resolveLocalWorkspaceToolPath({
+            workspaceRoot: args.workspaceRoot,
+            requestedPath: path,
+            ...fileAccess,
+          });
+          return await readLocalImage(absolutePath);
+        } catch (error) {
+          throw new Error(`read_image: failed to read ${JSON.stringify(path)}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }));
+      return {
+        content: results.map((result) => result.content).join("\n"),
+        images: results.flatMap((result) => result.images ?? []),
+      };
     },
     readFile: (call: AgentRuntimeToolCallInput) => readFileTool({
       call,

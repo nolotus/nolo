@@ -408,8 +408,17 @@ export function buildWorkspaceToolDefinition(toolName: string) {
       type: "function" as const,
       function: {
         name: "read_image",
-        description: "Read one local PNG/JPEG/WebP/GIF image. Long edges above 1568px are resized to JPEG q80. Maximum encoded base64 size is 2MiB.",
-        parameters: { type: "object", properties: { path: buildWorkspacePathProperty() }, required: ["path"], additionalProperties: false },
+        description: "Read 1 to 4 local PNG/JPEG/WebP/GIF images in one call. Supply either path (one image) or paths (1–4 images), never both. Any failure rejects the entire batch. Long edges above 1568px are resized to JPEG q80. Maximum encoded base64 size is 2MiB per image; request budget remains 4 images / 8MiB.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: buildWorkspacePathProperty(),
+            paths: { type: "array", items: buildWorkspacePathProperty(), minItems: 1, maxItems: 4 },
+          },
+          // 不用 oneOf：不少兼容网关/严格模式不支持参数级组合子，模型会两个都传 →
+          // 执行器拒绝 → 反复重试形成死循环（2026-10-27 实测）。互斥由执行器校验。
+          additionalProperties: false,
+        },
       },
     };
   }

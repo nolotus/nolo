@@ -1,4 +1,15 @@
 
+## 0.177.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** read_image 一次多张（≤4）+ 摘要统一为结构化 formatter ([74bb152](https://github.com/nolotus/bun-nolo/commit/74bb1525bc9985889a61020d126eb2f57e8e8d84))
+
+### Bug Fixes
+
+* **agent-runtime:** read_image 宽容合并 path/paths，schema 去掉参数级组合子 ([df8a578](https://github.com/nolotus/bun-nolo/commit/df8a57872b3b189c2cc5346ac34002b620930e58))
+
+
 ## 0.176.0-alpha.1 (2026-10-27)
 
 ### Features

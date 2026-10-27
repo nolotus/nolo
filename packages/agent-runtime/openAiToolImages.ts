@@ -41,10 +41,10 @@ export function projectOpenAiToolImages(
   messages.forEach((message, index) => {
     if (message.role === "tool") lastTool = index;
     if (!supportsImages) return;
-    for (const image of toolImages(message)) {
+    for (const [imageIndex, image] of toolImages(message).entries()) {
       const decision = budget(image);
       if (decision === "duplicate") continue;
-      const source = toolImageSource(message);
+      const source = toolImageSource(message, imageIndex);
       if (decision !== "delivered") {
         omitted.push(toolImageOmission(source, decision === "impossible"));
         continue;

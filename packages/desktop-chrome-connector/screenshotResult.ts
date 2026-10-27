@@ -2,6 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentRuntimeToolResult } from "../agent-runtime/hostAdapter";
+import { formatImageSummary } from "../agent-runtime/imageSummary";
 import { readLocalImage } from "../agent-runtime/readImage";
 import { toErrorMessage } from "core/errorMessage";
 
@@ -27,7 +28,7 @@ export async function screenshotResult(result: unknown): Promise<AgentRuntimeToo
     if (!path) throw new Error("screenshot result has no savedTo or image data URL");
     const image = await readLocalImage(path);
     return {
-      content: `${JSON.stringify({ ok: true, result: { ...summary, savedTo: path } })}\n${image.content.replace(/^\[image /, "[screenshot ")}`,
+      content: `${JSON.stringify({ ok: true, result: { ...summary, savedTo: path } })}\n${formatImageSummary({ kind: "screenshot", ...image.imageSummary })}`,
       images: image.images,
     };
   } catch (error) {

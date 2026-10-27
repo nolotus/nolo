@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
+import { formatImageSummary, type ImageSummary } from "./imageSummary";
 import type { AgentRuntimeToolResult } from "./hostAdapter";
 
 export const MAX_IMAGE_BASE64_BYTES = 2 * 1024 * 1024;
@@ -26,7 +27,7 @@ function detectMime(bytes: Buffer): string | undefined {
 export async function readLocalImage(
   path: string,
   options?: { maxBase64Bytes?: number },
-): Promise<AgentRuntimeToolResult> {
+): Promise<AgentRuntimeToolResult & { imageSummary: ImageSummary }> {
   const limit = options?.maxBase64Bytes ?? MAX_IMAGE_BASE64_BYTES;
   const expected = MIME_BY_EXTENSION[extname(path).toLowerCase()];
   if (!expected) throw new Error("read_image: unsupported image extension (PNG/JPEG/WebP/GIF only)");
@@ -70,8 +71,10 @@ export async function readLocalImage(
     height = resized.info.height;
     mimeType = "image/jpeg";
   }
+  const imageSummary = { width, height, bytes: output.length, path };
   return {
-    content: `[image ${width}x${height} ${output.length} bytes → ${path}]`,
+    imageSummary,
+    content: formatImageSummary({ kind: "image", ...imageSummary }),
     images: [{ mimeType, dataBase64: output.toString("base64") }],
   };
 }

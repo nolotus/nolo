@@ -70,9 +70,9 @@ export function createToolImageBudget() {
     return "delivered";
   };
 }
-export function toolImageSource(message: AgentRuntimeChatMessage): string {
+export function toolImageSource(message: AgentRuntimeChatMessage, imageIndex = 0): string {
   const path = typeof message.content === "string"
-    ? message.content.match(/→ ([^\s\x00-\x1f\x7f]+)/u)?.[1]?.replace(/\]$/, "") : undefined;
+    ? (Array.from(message.content.matchAll(/→ ([^\s\x00-\x1f\x7f]+)/gu))[imageIndex]?.[1] ?? message.content.match(/→ ([^\s\x00-\x1f\x7f]+)/u)?.[1])?.replace(/\]$/, "") : undefined;
   return `${(message.tool_call_id ?? "unknown").replace(/[\x00-\x1f\x7f]/g, "")}${path ? ` (${path})` : ""}`;
 }
 export function toolImageOmission(source: string, impossible: boolean): string {
