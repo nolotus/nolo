@@ -27,7 +27,7 @@ export async function screenshotResult(result: unknown): Promise<AgentRuntimeToo
     if (!path) throw new Error("screenshot result has no savedTo or image data URL");
     const image = await readLocalImage(path);
     return {
-      content: `${JSON.stringify({ ok: true, result: { ...summary, savedTo: path } })}\nscreenshot saved to ${path}`,
+      content: `${JSON.stringify({ ok: true, result: { ...summary, savedTo: path } })}\n${image.content.replace(/^\[image /, "[screenshot ")}`,
       images: image.images,
     };
   } catch (error) {

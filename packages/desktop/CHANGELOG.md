@@ -1,4 +1,11 @@
 
+## 0.189.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **connector:** 截图摘要统一为 [screenshot WxH NKB → path]，归属标签可提取路径 ([f9245df](https://github.com/nolotus/bun-nolo/commit/f9245df9d85aaaad20376b9f01f57cf033241974))
+
+
 ## 0.189.0-alpha.1 (2026-10-27)
 
 ### Features

@@ -52,7 +52,7 @@ export function projectOpenAiToolImages(
       bytes += size;
       accepted += 1;
       const source = typeof message.content === "string"
-        ? (message.content.match(/→ ([^\s\x00-\x1f\x7f]+)/u)?.[1] ?? "")
+        ? (message.content.match(/→ ([^\s\x00-\x1f\x7f]+)/u)?.[1]?.replace(/\]$/, "") ?? "")
         : "";
       const toolCallId = typeof (message as { tool_call_id?: unknown }).tool_call_id === "string"
         ? (message as { tool_call_id: string }).tool_call_id
