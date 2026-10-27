@@ -1,6 +1,14 @@
-import { createHash } from "node:crypto";
 import type { AgentRuntimeChatMessage } from "./types";
 import type { AgentRuntimeToolResult } from "./hostAdapter";
+
+/** Shape-stable fallback for a tool_result with no text (must match from the first send). */
+export const EMPTY_TOOL_RESULT_TEXT = "[Tool completed without output]";
+
+/** Persisted boolean only; never contains image bytes or adds model-visible text. */
+export const TOOL_HAD_IMAGES = "toolHadImages";
+export function hadToolImages(message: AgentRuntimeChatMessage): boolean {
+  return message.tool_result_metadata?.[TOOL_HAD_IMAGES] === true || toolImages(message).length > 0;
+}
 
 export type ToolImage = NonNullable<AgentRuntimeToolResult["images"]>[number];
 // Symbol keys survive object spreads but never JSON serialization, logs or storage.
@@ -12,19 +20,52 @@ export function toolImages(message: object): ToolImage[] {
 export function withoutToolImages<T extends object>(message: T): T {
   if (!(TOOL_IMAGES in message)) return message;
   const { [TOOL_IMAGES]: _images, ...textOnly } = message as T & { [TOOL_IMAGES]?: ToolImage[] };
-  return textOnly as T;
+  return (_images?.length ? {
+    ...textOnly,
+    tool_result_metadata: {
+      ...(message as AgentRuntimeChatMessage).tool_result_metadata,
+      [TOOL_HAD_IMAGES]: true,
+    },
+  } : textOnly) as T;
 }
 /** One ledger per turn, never process-global or shared across dialogs. */
 export function createToolImageLedger() {
-  const seen = new Set<string>();
-  return (images: ToolImage[] | undefined): ToolImage[] => (images ?? []).filter((image) => {
-    const hash = createHash("sha256").update(Buffer.from(image.dataBase64, "base64")).digest("hex");
-    if (seen.has(hash)) return false;
-    seen.add(hash);
+  const committed = new Set<string>();
+  // Pending = images accepted for the CURRENT request batch but not yet sent.
+  // Dedupe must cover committed ∪ pending, otherwise two tools returning the
+  // same image in one round both pass and Anthropic (no request-level dedupe)
+  // emits the same image block twice.
+  let pending = new Set<string>();
+  // No node:crypto here: this module is reachable from the web bundle. Exact string
+  // equality is enough for dedupe and the payload is already in memory.
+  const keyOf = (image: ToolImage) => `${image.mimeType}\u0000${image.dataBase64}`;
+  const candidates = (images: ToolImage[] | undefined): ToolImage[] => (images ?? []).filter((image) => {
+    const key = keyOf(image);
+    if (committed.has(key) || pending.has(key)) return false;
+    pending.add(key);
     return true;
   });
+  return Object.assign(candidates, {
+    /** Only after the provider call succeeded: failed sends must stay replayable. */
+    commit(images: ToolImage[]) {
+      for (const image of images) committed.add(keyOf(image));
+      pending = new Set();
+    },
+    /** 当前生命周期不依赖 reset，仅供未来中途放弃批次时使用。 */
+    reset() { pending = new Set(); },
+  });
 }
-export function omitToolImages<T extends AgentRuntimeChatMessage>(message: T, reason: string, placeholder = `[image omitted: ${reason}]`): T {
+
+/**
+ * Strip the in-memory image payload WITHOUT touching content.
+ *
+ * Never rewrite `content` here: the same history message is re-serialized on every
+ * later round, so appending a marker (e.g. "already sent this turn") would diverge
+ * the prompt prefix at that message and invalidate all downstream prompt cache
+ * (OpenAI / Anthropic / DeepSeek). Tool results already carry their own text
+ * summary (`[image WxH N bytes → path]`), which is enough for the model.
+ */
+export function stripToolImages<T extends AgentRuntimeChatMessage>(message: T): T {
   if (!toolImages(message).length) return message;
-  return { ...withoutToolImages(message), content: `${message.content ?? ""}\n${placeholder}` };
+  return withoutToolImages(message);
 }

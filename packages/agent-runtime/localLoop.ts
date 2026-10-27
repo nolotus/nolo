@@ -62,7 +62,7 @@ import {
 } from "./toolCallTransaction";
 export { LOCAL_TURN_ABORTED_CODE } from "./toolCallTransaction";
 import { createTurnTranscript } from "./turnTranscript";
-import { TOOL_IMAGES, createToolImageLedger, omitToolImages } from "./toolImages";
+import { TOOL_HAD_IMAGES, TOOL_IMAGES, createToolImageLedger, stripToolImages, toolImages } from "./toolImages";
 import { createTurnUsageLedger } from "./turnUsageLedger";
 export { addOutOfBandUsage } from "./turnUsageLedger";
 import { buildIdentityBlock } from "./identityBlock";
@@ -1453,9 +1453,10 @@ export async function runLocalAgentTurn(
         providerName: agentConfig.provider,
         model: provider.model,
       });
-      transcript.replaceWorkingHistory(transcript.working().map((message) =>
-        omitToolImages(message, "already sent this turn"),
-      ));
+      acceptToolImages.commit(requestMessages.flatMap(toolImages));
+      // Strip payload only — never rewrite content, or the prompt prefix diverges
+      // at this message and every later cache hit is lost.
+      transcript.replaceWorkingHistory(transcript.working().map((message) => stripToolImages(message)));
       loopTiming.mark("llmCall", round);
       usageLedger.recordProviderCall({
         usage: result.usage,
@@ -1711,7 +1712,10 @@ export async function runLocalAgentTurn(
           tool_call_id: toolCall.id,
           toolName,
           [TOOL_IMAGES]: acceptToolImages(toolResult.images),
-          ...(observedMetadata ? { tool_result_metadata: observedMetadata } : {}),
+          ...((observedMetadata || toolResult.images?.length) ? { tool_result_metadata: {
+            ...observedMetadata,
+            ...(toolResult.images?.length ? { [TOOL_HAD_IMAGES]: true } : {}),
+          } } : {}),
         });
       };
 

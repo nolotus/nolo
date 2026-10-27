@@ -1,3 +1,4 @@
+import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
 import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
 import { extractUsageFromSsePayload, hasUsageTokens } from "ai/token/sseUsageExtract";
@@ -146,6 +147,7 @@ export type PlatformChatProviderConfig = {
   model: string;
   provider: string;
   endpoint: string;
+  hasVision?: boolean;
   requestOptions: Record<string, number | string>;
   apiKey?: string;
   apiKeyHeader?: string;
@@ -226,6 +228,7 @@ export async function resolvePlatformChatProviderConfig(args: {
       serverUrl: resolvePlatformServerUrl(args.env),
       authToken: resolvePlatformAuthToken(args.env),
       agentKey: args.agentConfig.key,
+      hasVision: args.agentConfig.hasVision,
       model: plan.model,
       provider: plan.provider,
       endpoint: plan.endpoint,
@@ -243,6 +246,7 @@ export async function resolvePlatformChatProviderConfig(args: {
     serverUrl: plan.serverUrl,
     authToken: plan.authToken,
     agentKey: plan.agentKey,
+    hasVision: args.agentConfig.hasVision,
     model: plan.model,
     provider: plan.provider,
     endpoint: plan.endpoint,
@@ -301,6 +305,7 @@ export function buildPlatformChatCompletionRequest(args: {
         }
       : {
           messages: toOpenAiCompatibleMessages(sanitizedMessages, {
+    supportsToolImages: resolveAgentImageInputSupport({ provider: args.providerConfig.usageProvider ?? args.providerConfig.provider, model: args.providerConfig.model, customProviderUrl: args.providerConfig.endpoint, hasVision: args.providerConfig.hasVision ?? false }),
             stripReasoningContent: shouldStripReasoning,
           }),
         }),

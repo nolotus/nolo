@@ -5,6 +5,7 @@
  * openAiCompatibleProvider and platformChatProvider cannot drift on optional
  * tool_call_id / tool_calls / reasoning_content passthrough.
  */
+import { projectOpenAiToolImages } from "./openAiToolImages";
 import type { AgentRuntimeChatMessage } from "./types";
 import type { RequestShapingCounts } from "./outboundRequestDiagnostics";
 import { hasDowngradedToolTurnOrigin } from "./outboundHistorySanitize";
@@ -35,6 +36,7 @@ export type OpenAiCompatibleRequestMessage = {
  * error, so the field must be dropped when replaying prior turns.
  */
 export type PreserveAgentStateOptions = {
+  supportsToolImages?: boolean;
   stripReasoningContent?: boolean;
   /**
    * When set to a non-empty string, assistant messages that carry a non-empty
@@ -210,12 +212,12 @@ export function findAgentStatePairingIssues(
   return issues;
 }
 
-// TODO(tool-images): Chat Completions / Responses need a following user image message; never inject images into role:tool.
+// Keep agent-state shaping unchanged; attachments are projected as one trailing user message.
 export function toOpenAiCompatibleMessages(
   messages: AgentRuntimeChatMessage[],
   options?: PreserveAgentStateOptions,
 ): OpenAiCompatibleRequestMessage[] {
-  return messages.map((message) =>
+  return projectOpenAiToolImages(messages, options?.supportsToolImages === true).map((message) =>
     preserveAgentStateFields(message, {
       role: message.role,
       content: message.content ?? "",

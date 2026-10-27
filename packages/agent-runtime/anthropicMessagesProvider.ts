@@ -1,4 +1,3 @@
-import { IMAGE_OMITTED_PLACEHOLDER } from "../ai/agent/imagePreprocessing";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -357,7 +356,7 @@ function foldIntoTrailingToolResult(
  * instead of substituting a placeholder at construction time.
  */
 function assertNonEmptyToolResults(messages: JsonRecord[]): void {
-  const placeholder = "[Tool completed without output]";
+  const placeholder = EMPTY_TOOL_RESULT_TEXT;
   for (const message of messages) {
     if (!Array.isArray(message.content)) continue;
     for (const block of message.content as JsonRecord[]) {
@@ -391,7 +390,7 @@ function normalizeAnthropicWireModel(model: string): string {
   return model;
 }
 
-import { toolImages } from "./toolImages";
+import { EMPTY_TOOL_RESULT_TEXT, hadToolImages, toolImages } from "./toolImages";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 
 export function buildAnthropicMessagesBody(args: {
@@ -440,16 +439,18 @@ export function buildAnthropicMessagesBody(args: {
           content: (() => {
             const text = typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? "");
             const images = toolImages(message);
-            // Keep the raw text (including "") here: the trailing-text fold needs to
-            // see an empty tool_result so it can drop the empty block instead of
-            // emitting {type:"text",text:""}. Emptiness is repaired for real once
-            // the whole message list is built (see assertNonEmptyToolResults).
-            if (!images.length) return text;
+            // Ordinary results retain the legacy string contract. Fold trailing
+            // text before the final empty-result repair, not before it.
+            if (!hadToolImages(message)) return text;
+            // Image-bearing results keep a text block from their first send,
+            // including after runtime payloads have been stripped from history.
+            const effective = text.trim() ? text : EMPTY_TOOL_RESULT_TEXT;
+            if (!images.length) return [{ type: "text", text: effective }];
             if (!resolveAgentImageInputSupport(args.agentConfig)) {
-              return [{ type: "text", text: `${text}\n${IMAGE_OMITTED_PLACEHOLDER}` }];
+              return [{ type: "text", text: effective }];
             }
             return [
-              ...(text.trim() ? [{ type: "text", text }] : []),
+              { type: "text", text: effective },
               ...images.map((image) => ({ type: "image", source: {
                 type: "base64", media_type: image.mimeType, data: image.dataBase64,
               } })),

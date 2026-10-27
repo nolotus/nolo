@@ -1,4 +1,15 @@
 
+## 0.172.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** OpenAI Chat Completions 通道注入工具图片（B1） ([4ed5d49](https://github.com/nolotus/bun-nolo/commit/4ed5d49125f29765c5c2e0e56c0854e6941a3f02))
+
+### Bug Fixes
+
+* **agent-runtime:** 去掉 toolImages/openAiToolImages 的 node:crypto（web bundle 可达） ([f432f19](https://github.com/nolotus/bun-nolo/commit/f432f190d3eb0af4bcf17921970d5fc2b2bc48dc))
+
+
 ## 0.171.0-alpha.1 (2026-10-27)
 
 ### Features
