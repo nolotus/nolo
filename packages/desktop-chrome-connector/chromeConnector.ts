@@ -3,6 +3,7 @@ import type {
   AgentRuntimeToolResult,
 } from "../agent-runtime";
 import { existsSync, readFileSync } from "node:fs";
+import { screenshotResult } from "./screenshotResult";
 import { resolve } from "node:path";
 
 import { toErrorMessage } from "core/errorMessage";
@@ -663,7 +664,9 @@ export async function executeChromeConnectorTool(args: {
           createVerifiedChromeConnectorClient({ client: createChromeConnectorClient() }));
     const result = await client.request(action, payload);
     return {
-      content: JSON.stringify({ ok: true, result }),
+      ...(action === "screenshot"
+        ? await screenshotResult(result)
+        : { content: JSON.stringify({ ok: true, result }) }),
       metadata: {
         chromeConnector: true,
         action,

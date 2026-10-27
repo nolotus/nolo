@@ -1,4 +1,11 @@
 
+## 0.189.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **connector:** 截图工具结果携带图片，模型无需再手动 read_image ([4b11b3c](https://github.com/nolotus/bun-nolo/commit/4b11b3c3ccfbefc093971506bf6813cfd270f104))
+
+
 ## 0.188.0-alpha.2 (2026-10-27)
 
 ### Bug Fixes
