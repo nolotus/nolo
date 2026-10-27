@@ -1,3 +1,4 @@
+import { canonicalizeToolName } from "./toolNameAliases";
 import { isRecord } from "core/isRecord";
 import { isOwnedAgentKey } from "core/prefix";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
@@ -127,6 +128,40 @@ export function applyToolSurfaceConstraints<T extends RuntimeToolSurfaceNames>(
     injectedToolNames: narrow(surface.injectedToolNames),
     finalToolNames: narrow(surface.finalToolNames),
   };
+}
+
+/** Request surface = requested ∩ profile ∩ backend execution capabilities.
+ * Backend capabilities may cover only one namespace (e.g. workspace tools);
+ * tools outside that scope remain routed by their own executors.
+ * null backend means unrestricted host execution, not an empty capability set.
+ * Inputs are already pack-expanded; this resolver never injects tools.
+ */
+export function resolveRequestToolSurface(args: {
+  requestedToolNames: readonly string[];
+  profile?: ToolSurfaceConstraints;
+  backend: { toolNames: readonly string[]; scopedToolNames?: readonly string[] } | null;
+}) {
+  const normalize = (name: string) => canonicalizeToolName(name.trim().replace(/^functions\./i, ""));
+  const names = (values: readonly string[]) => new Set(values.map(normalize));
+  const allowed = args.profile?.allowedToolNames == null ? null : names(args.profile.allowedToolNames);
+  const blocked = names(args.profile?.blockedToolNames ?? []);
+  const supported = args.backend ? names(args.backend.toolNames) : null;
+  const scope = args.backend?.scopedToolNames ? names(args.backend.scopedToolNames) : null;
+  const filteredTools: Array<{
+    toolName: string;
+    reason: "profile-not-allowed" | "profile-blocked" | "backend-unsupported";
+  }> = [];
+  const finalToolNames = args.requestedToolNames.filter((toolName) => {
+    const name = normalize(toolName);
+    const reason = allowed && !allowed.has(name) ? "profile-not-allowed"
+      : blocked.has(name) ? "profile-blocked"
+      : supported && (!scope || scope.has(name)) && !supported.has(name) ? "backend-unsupported"
+      : null;
+    if (!reason) return true;
+    filteredTools.push({ toolName, reason });
+    return false;
+  });
+  return { finalToolNames, filteredTools };
 }
 
 export type RuntimeToolSurfaceInput = {

@@ -1,3 +1,4 @@
+import { resolveRequestToolSurface } from "../../agent-runtime/runtimeToolSurface";
 import type {
   AgentRuntimeAgentConfig,
   AgentRuntimeHostAdapter,
@@ -1298,6 +1299,7 @@ export function createCliLocalRuntimeAdapter(
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
         wake: hasRunWakeChannel(deps.env),
+        env: deps.env,
       })}:${dockerRuntimeEnabled ? "docker" : instaboxRuntimeEnabled ? "instabox" : "host"}`;
       // Paste availability changes the prepared tool surface, so paste-aware
       // runs remain isolated from the shared metadata cache.
@@ -1339,21 +1341,20 @@ export function createCliLocalRuntimeAdapter(
             systemBuiltinSkills,
           )
         : [];
-      let effectiveToolNames = [...requestedToolNames, ...additionalToolNames];
-      const backendExecutionToolNames: readonly string[] | null = dockerRuntimeEnabled
-        ? (dockerExecutionToolNames as readonly string[])
-        : instaboxRuntimeEnabled
-          ? (LOCAL_INSTABOX_TOOL_NAMES as readonly string[])
-          : null;
-      if (backendExecutionToolNames) {
-        effectiveToolNames = effectiveToolNames.filter((toolName) => {
-          const normalized = normalizeLocalToolName(toolName);
-          if ((WORKSPACE_TOOL_NAMES as readonly string[]).includes(normalized)) {
-            return backendExecutionToolNames.includes(normalized);
-          }
-          return true;
-        });
-      }
+      const backendExecutionToolNames = dockerRuntimeEnabled
+        ? dockerExecutionToolNames
+        : instaboxRuntimeEnabled ? LOCAL_INSTABOX_TOOL_NAMES : null;
+      // resolveCliRequestedToolNames has expanded the current profile (including
+      // declared-only / child-run constraints). Never expand again after this gate.
+      const requestSurface = resolveRequestToolSurface({
+        requestedToolNames: [...requestedToolNames, ...additionalToolNames],
+        profile: { allowedToolNames: [...requestedToolNames, ...additionalToolNames] },
+        backend: backendExecutionToolNames ? {
+          toolNames: backendExecutionToolNames,
+          scopedToolNames: WORKSPACE_TOOL_NAMES,
+        } : null,
+      });
+      const effectiveToolNames = requestSurface.finalToolNames;
       activeAgentToolNames = buildLocalPolicyToolNames({
         agentKey: agentConfig?.key,
         toolNames: effectiveToolNames,

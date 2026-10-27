@@ -153,7 +153,19 @@ export type PreparedAgentRuntime = {
   runtimeToolExecutionLimits: Record<string, unknown>;
 };
 
-export const preparedAgentRuntimeCache = new Map<string, PreparedAgentRuntime>();
+export const PREPARED_AGENT_RUNTIME_CACHE_LIMIT = 128;
+
+/** FIFO bound: refreshing an entry does not grow the cache. */
+class PreparedAgentRuntimeCache extends Map<string, PreparedAgentRuntime> {
+  override set(key: string, value: PreparedAgentRuntime): this {
+    super.set(key, value);
+    while (this.size > PREPARED_AGENT_RUNTIME_CACHE_LIMIT) {
+      super.delete(this.keys().next().value!);
+    }
+    return this;
+  }
+}
+export const preparedAgentRuntimeCache = new PreparedAgentRuntimeCache();
 export const hybridStoreCache = new Map<string, Promise<HybridRecordStore>>();
 
 export function normalizeRuntimeCacheCwd(cwd?: string) {
@@ -166,6 +178,7 @@ export function buildPreparedAgentCacheKey(args: {
   cwd: string;
   systemBuiltinSkills?: Record<string, boolean> | null;
   wake?: boolean;
+  env?: EnvLike;
 }) {
   const systemBuiltinSkillsKey = args.systemBuiltinSkills
     ? JSON.stringify(
@@ -175,7 +188,17 @@ export function buildPreparedAgentCacheKey(args: {
       )
     : "default";
   const wakeKey = args.wake !== undefined ? (args.wake ? "wake:1" : "wake:0") : "";
-  return `${args.userId}\0${args.agentRef}\0${args.cwd}\0${systemBuiltinSkillsKey}${wakeKey ? `\0${wakeKey}` : ""}`;
+  // Include every env selector consumed by profile expansion / local policy.
+  // Values, not secrets: only these explicit non-credential policy keys enter it.
+  const policyKey = JSON.stringify([
+    args.env?.NOLO_LOCAL_WORKSPACE_TOOLSET ?? "",
+    args.env?.NOLO_LOCAL_TOOLSET_MODE ?? "",
+    args.env?.NOLO_AGENT_RUN_CHILD ?? "",
+    args.env?.NOLO_LOCAL_TOOL_MODE ?? "",
+    args.env?.NOLO_LOCAL_ALLOWED_TOOLS ?? "",
+    args.env?.NOLO_LOCAL_ALLOW_UNDECLARED_TOOLS ?? "",
+  ]);
+  return `${policyKey}\0${args.userId}\0${args.agentRef}\0${args.cwd}\0${systemBuiltinSkillsKey}${wakeKey ? `\0${wakeKey}` : ""}`;
 }
 
 export function clearCliLocalRuntimePreparedAgentCache() {
