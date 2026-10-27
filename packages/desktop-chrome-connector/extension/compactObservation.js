@@ -71,6 +71,9 @@ const FEATURE_BY_ACTION = Object.freeze({
   read_network: ["browser_debug"],
   detach: ["browser_debug"],
   set_files: ["compact_observation_v2", "file_upload"],
+  // A native <select> can carry an irreversible choice (a country the account cannot change, a
+  // plan, a shipping method), so choosing its option goes through the same name gate as click/type.
+  set_select_value: ["compact_observation_v2", "action_gate"],
   prepare_browser_action: ["prepare_browser_action"],
 });
 
@@ -461,6 +464,8 @@ export function resolveActionTarget(payload = {}, registry, context = {}) {
         index: entry.index,
         tag: entry.tag,
         name: entry.name,
+        role: entry.role ?? "",
+        type: entry.type ?? "",
       },
     };
   }
@@ -556,6 +561,25 @@ export function isIrreversibleActionName(name) {
 }
 
 /**
+ * Advisory only: describes how strongly an element *looks* like a control. It is used for the
+ * confirmation copy and for statistics, **never** for the release decision.
+ *
+ * An earlier revision made this predicate the gate itself, which turned the gate fail-open: any real
+ * action handler on a `<div onclick>`, an `<a>`, a `contenteditable` or a custom element stopped
+ * being gated, so a genuine "发送" moved from "asks the user" to "just sends". The gate therefore
+ * keys on the label alone (fail-closed) and this predicate only softens the wording.
+ */
+export function isOperableControlTarget(input = {}) {
+  const tag = String(input.tag ?? "").trim().toLowerCase();
+  if (tag === "button" || tag === "input") return true;
+  if (String(input.role ?? "").trim().toLowerCase() === "button") return true;
+  const type = String(input.type ?? "").trim().toLowerCase();
+  // <input type="submit|button"> is covered by the tag rule; this keeps the intent explicit for
+  // callers that report only role/type metadata.
+  return type === "submit" || type === "button";
+}
+
+/**
  * Keys that activate a focused control. Single source of truth: both the decision function below and
  * the connector's press handler use it, because two copies of this list already drifted once (the
  * handler kept its own Enter-only list, which made the Space branch unreachable).
@@ -573,9 +597,10 @@ export function isActivationKey(key) {
 }
 
 const CONFIRMATION_REQUIRED_MESSAGE =
-  "This control is an irreversible external action (payment, send, delete, publish or permission change), and this " +
-  "desktop runtime has no interactive approval channel to ask the user with. Nolo does not perform such an action on " +
-  "the user's behalf: name the control, ask the user to activate it themselves, and stop here.";
+  "This control is an irreversible external action (payment, send, delete, publish or permission change). A " +
+  "confirmation request has already been opened for the user in the browser: ask the user to click \"Allow once\" " +
+  "there, then retry this exact action with the approvalId the connector returned. Nothing has been performed yet; " +
+  "do not retry without that approvalId and do not switch to another selector to get around it.";
 
 /**
  * One decision point for the gate, so every action that can trigger an irreversible effect is refused
@@ -585,7 +610,7 @@ export function decideIrreversibleAction(input = {}) {
   const action = String(input.action ?? "");
   const name = typeof input.name === "string" ? input.name : "";
   if (!name) return null;
-  if (action === "click" || action === "type") {
+  if (action === "click" || action === "type" || action === "set_select_value") {
     if (!isIrreversibleActionName(name)) return null;
   } else if (action === "press") {
     const key = String(input.key ?? "");
@@ -595,6 +620,12 @@ export function decideIrreversibleAction(input = {}) {
   } else {
     return null;
   }
+  // Fail-closed by design: a matching label asks the user, no matter which element carries it.
+  // Judging by tag/role turned the gate fail-open — `<div onclick="send()">发送</div>`, `<a>`,
+  // `contenteditable` and custom elements are ordinary buttons on real sites, so a real action
+  // handler stopped being gated entirely. Over-blocking costs one "Allow once" click on a navigation
+  // item named 已发送; under-blocking sends, pays or deletes without asking. `isOperableControlTarget`
+  // deliberately stays out of this decision; it only softens the confirmation wording.
   return {
     ok: false,
     code: CONFIRMATION_REQUIRED_CODE,
@@ -604,7 +635,11 @@ export function decideIrreversibleAction(input = {}) {
     target: {
       name: name.slice(0, 200),
       ...(input.tag ? { tag: String(input.tag) } : {}),
+      ...(input.role ? { role: String(input.role) } : {}),
+      ...(input.type ? { type: String(input.type) } : {}),
     },
+    // Copy/statistics only (the approval window and logs): never read to decide whether to release.
+    operableControl: isOperableControlTarget(input),
     message: CONFIRMATION_REQUIRED_MESSAGE,
   };
 }
@@ -709,8 +744,108 @@ export function verifyActionEffect(input = {}) {
   };
 }
 
-const LOW_VALUE_NETWORK_TYPES = new Set(["image", "media", "font", "stylesheet", "manifest"]);
-const LOW_VALUE_NETWORK_URL = /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|css|woff2?|ttf|otf|eot|map)([?#]|$)/i;
+/**
+ * Success signal for `set_select_value`. Published as a constant because three sides name it — the
+ * extension handler, the desktop feature table and the tests.
+ */
+export const SELECT_VALUE_SET_SIGNAL = "select_value_set";
+
+/**
+ * Failure codes reported for `set_select_value`. The set operation re-raises the page-side codes
+ * verbatim so a model can tell "no such option" from "several options" without parsing prose.
+ * Two of these are synthesized in the worker because no page ever returns them:
+ * `SELECT_VALUE_NOT_APPLIED` (the read-back disagrees with the request) and
+ * `SELECT_VALUE_UNVERIFIED` (the read-back never came back at all). Everything else can arrive from
+ * the page — including `SELECT_GONE`, `STALE_PAGE_REVISION` and `REGION_NOT_FOUND`, which the
+ * read-back still returns when it cannot find the select it set.
+ */
+export const SELECT_VALUE_CODES = Object.freeze({
+  NOT_A_SELECT: "NOT_A_SELECT",
+  SELECT_DISABLED: "SELECT_DISABLED",
+  SELECT_MULTIPLE_UNSUPPORTED: "SELECT_MULTIPLE_UNSUPPORTED",
+  OPTION_TARGET_REQUIRED: "OPTION_TARGET_REQUIRED",
+  OPTION_NOT_FOUND: "OPTION_NOT_FOUND",
+  OPTION_AMBIGUOUS: "OPTION_AMBIGUOUS",
+  OPTION_DISABLED: "OPTION_DISABLED",
+  SELECT_VALUE_NOT_APPLIED: "SELECT_VALUE_NOT_APPLIED",
+  // The read-back itself failed, so nothing can be claimed about the applied option. The page's own
+  // reason is preferred when it has one (`SELECT_GONE`, `STALE_PAGE_REVISION`, `REGION_NOT_FOUND`).
+  SELECT_VALUE_UNVERIFIED: "SELECT_VALUE_UNVERIFIED",
+  SELECT_GONE: "SELECT_GONE",
+  STALE_PAGE_REVISION: "STALE_PAGE_REVISION",
+  REGION_NOT_FOUND: "REGION_NOT_FOUND",
+});
+
+/**
+ * Verification for `set_select_value`: the only accepted proof is a read-back taken *after* the
+ * `input`/`change` events were dispatched. Dispatching an event proves nothing — a framework
+ * listener can re-render the select back to its previous option, and then the page state is what the
+ * user would see, not what was asked for. So a mismatch is a failure, never a success.
+ *
+ * The page reports `requested` (the option it matched) and `after` (what the select reads back
+ * once the events settled); both value and visible label must agree.
+ */
+export function verifySelectValueEffect(input = {}) {
+  const result = input.result;
+  if (!result || typeof result !== "object") {
+    return { status: "uncertain", signal: "no_result", message: "The connector returned no observation for this action." };
+  }
+  if (result.ok === false) {
+    return {
+      status: "failed",
+      signal: typeof result.code === "string" && result.code ? result.code : "SELECT_FAILED",
+      message: typeof result.message === "string" && result.message
+        ? result.message
+        : "The connector could not set the select value.",
+    };
+  }
+
+  const requested = result.requested && typeof result.requested === "object" ? result.requested : {};
+  const after = result.after && typeof result.after === "object" ? result.after : {};
+  if (after.value === null || after.value === undefined) {
+    // A read-back is the only accepted proof, so an unreadable select is never `verified` — and the
+    // caller must not treat it as ok either. `code` carries the page's own reason (`SELECT_GONE`
+    // when the select was removed, `NOT_A_SELECT` when it changed type), falling back to
+    // SELECT_VALUE_UNVERIFIED when the read itself never came back.
+    const sourceCode = typeof after.code === "string" && after.code ? after.code : "";
+    return {
+      status: "uncertain",
+      signal: "select_value_not_readable",
+      code: sourceCode || SELECT_VALUE_CODES.SELECT_VALUE_UNVERIFIED,
+      message: sourceCode === SELECT_VALUE_CODES.SELECT_GONE
+        ? "The select is no longer in the page, so the applied option could not be verified."
+        : "The select value cannot be read back, so the applied option could not be verified.",
+    };
+  }
+
+  const requestedValue = String(requested.value ?? "");
+  const appliedValue = String(after.value);
+  if (appliedValue !== requestedValue) {
+    return {
+      status: "failed",
+      signal: SELECT_VALUE_CODES.SELECT_VALUE_NOT_APPLIED,
+      message: `The change event was dispatched but the select reads back ${JSON.stringify(
+        appliedValue,
+      )} instead of ${JSON.stringify(requestedValue)}; a page listener rejected or reverted the selection.`,
+    };
+  }
+
+  const requestedLabel = typeof requested.label === "string" ? requested.label : "";
+  const appliedLabel = typeof after.label === "string" ? after.label : "";
+  if (requestedLabel && appliedLabel !== requestedLabel) {
+    return {
+      status: "failed",
+      signal: SELECT_VALUE_CODES.SELECT_VALUE_NOT_APPLIED,
+      message: `The select value was applied but the selected option reads ${JSON.stringify(
+        appliedLabel,
+      )} instead of ${JSON.stringify(requestedLabel)}.`,
+    };
+  }
+
+  return { status: "verified", signal: SELECT_VALUE_SET_SIGNAL };
+}
+
+const LOW_VALUE_NETWORK_TYPES = new Set(["image", "media", "font", "stylesheet", "manifest"]);const LOW_VALUE_NETWORK_URL = /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|css|woff2?|ttf|otf|eot|map)([?#]|$)/i;
 
 /** Static assets and inline blobs are low signal for debugging; they are filtered by default. */
 export function isLowValueNetworkEntry(entry) {

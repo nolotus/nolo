@@ -1,4 +1,16 @@
 
+## 0.197.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **browser-connector:** ask the user before irreversible actions ([3588386](https://github.com/nolotus/bun-nolo/commit/35883864b1b4a05088a083a7a10cd4ade47fdeda))
+* **browser-connector:** set native select values with readback verification ([a2e5a0a](https://github.com/nolotus/bun-nolo/commit/a2e5a0a89073a1b9cc361c87a5117247bef0edf6))
+
+### Bug Fixes
+
+* **browser-connector:** carry approvalId through select, align merged state ([70a2978](https://github.com/nolotus/bun-nolo/commit/70a29787c680c931f5affae3cf96e8671f862253))
+
+
 ## 0.196.0-alpha.1 (2026-10-27)
 
 ### Features

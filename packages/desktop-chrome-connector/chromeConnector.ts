@@ -127,6 +127,7 @@ const CHROME_TOOL_ACTIONS: Record<string, string> = {
   browser_read_page: "read_page",
   browser_click_element: "click",
   browser_type: "type",
+  browser_set_select_value: "set_select_value",
   browser_press: "press",
   browser_scroll: "scroll",
   browser_screenshot: "screenshot",
@@ -139,6 +140,7 @@ const CHROME_TOOL_ACTIONS: Record<string, string> = {
   chrome_read_page: "read_page",
   chrome_click: "click",
   chrome_type: "type",
+  chrome_set_select_value: "set_select_value",
   chrome_press: "press",
   chrome_scroll: "scroll",
   chrome_screenshot: "screenshot",
@@ -222,8 +224,14 @@ export function createNativeHostRouter(deps: NativeHostRouterDeps): ChromeConnec
   };
 }
 
-const TARGET_REQUIRED_ACTIONS = new Set(["click", "type", "set_files"]);
-const TAB_ID_REQUIRED_ACTIONS = new Set(["close_tab", "detach", "set_files", "prepare_browser_action"]);
+const TARGET_REQUIRED_ACTIONS = new Set(["click", "type", "set_select_value", "set_files"]);
+const TAB_ID_REQUIRED_ACTIONS = new Set([
+  "close_tab",
+  "detach",
+  "set_files",
+  "set_select_value",
+  "prepare_browser_action",
+]);
 const ALLOWED_PREPARE_SUB_ACTIONS = new Set(["click", "type", "press"]);
 
 /**
@@ -250,7 +258,18 @@ export function validateChromeConnectorPayload(
   }
 
   // Allow action payloads (click, type, press, etc.) to carry one-time consent credentials.
-  for (const credentialKey of ["challengeId", "prepareId", "preparedActionId", "grantTicket"] as const) {
+  //
+  // `approvalId` belongs here for a different reason than the rest: it is not an authorization, it is
+  // the lookup key for an approval the *user* gave in the browser (the connector returned it with
+  // USER_APPROVAL_PENDING). Without it in the allow-list the documented "retry with the approvalId"
+  // round trip could never reach the extension, so the flow could never complete.
+  for (const credentialKey of [
+    "challengeId",
+    "prepareId",
+    "preparedActionId",
+    "grantTicket",
+    "approvalId",
+  ] as const) {
     if (payload[credentialKey] !== undefined) {
       const val = payload[credentialKey];
       if (typeof val !== "string" || !val.trim()) {
@@ -319,6 +338,19 @@ export function validateChromeConnectorPayload(
       "ELEMENT_TARGET_REQUIRED",
       "Provide elementRef from browser_read_page or a CSS selector.",
     );
+  }
+  if (action === "set_select_value") {
+    const hasValue = typeof payload.value === "string";
+    const hasLabel = typeof payload.label === "string";
+    // Exactly one of the two: "value or label, never both" keeps the match unambiguous, and the
+    // extension refuses to guess when neither resolves to exactly one option.
+    if (hasValue === hasLabel) {
+      throw createConnectorError(
+        "OPTION_TARGET_REQUIRED",
+        "Provide exactly one of value or label for the option to select.",
+      );
+    }
+    return;
   }
   if (action === "set_files") {
     if (!Array.isArray(payload.files) || payload.files.length === 0) {
@@ -415,6 +447,7 @@ export const REQUIRED_CHROME_CONNECTOR_FEATURES: Record<string, string[]> = {
   read_page: ["compact_observation_v2"],
   click: ["compact_observation_v2", "action_gate"],
   type: ["compact_observation_v2", "action_gate"],
+  set_select_value: ["compact_observation_v2", "action_gate"],
   press: ["compact_observation_v2", "action_gate"],
   scroll: ["compact_observation_v2"],
   // Both browsers advertise the dedicated `screenshot` feature: Chrome serves it through

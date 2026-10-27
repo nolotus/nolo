@@ -24,6 +24,11 @@ const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
     summary: "Type text into an element (--tab <id> --ref|--selector --text <text>)",
   },
   {
+    name: "select",
+    summary:
+      "Set a native <select> value and verify it (--tab <id> --ref|--selector --value <v>|--label <l>)",
+  },
+  {
     name: "upload",
     summary:
       "Upload files to a file input element (--tab <id> --ref|--selector --file <path>)",

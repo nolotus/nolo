@@ -141,6 +141,19 @@ function requireTarget(args: string[], usage: string): ChromeConnectorRequestPay
   };
 }
 
+/**
+ * `--approval-id` is the id a previous USER_APPROVAL_PENDING response returned after the user clicked
+ * "Allow once" in the browser. It carries no authority of its own: the CLI cannot mint a usable one,
+ * it only hands back what the user already approved.
+ */
+function withApprovalId(
+  args: string[],
+  payload: ChromeConnectorRequestPayload,
+): ChromeConnectorRequestPayload {
+  const approvalId = readTrimmedOption(args, "--approval-id");
+  return approvalId ? { ...payload, approvalId } : payload;
+}
+
 export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   "list-tabs": {
     action: "list_tabs",
@@ -183,16 +196,18 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   click: {
     action: "click",
-    usage: "nolo browser click --tab <id> (--ref <elementRef> | --selector <css>)",
-    payload: (args, usage) => ({
-      tabId: requireTabId(args, usage),
-      ...requireTarget(args, usage),
-    }),
+    usage:
+      "nolo browser click --tab <id> (--ref <elementRef> | --selector <css>) [--approval-id <id>]",
+    payload: (args, usage) =>
+      withApprovalId(args, {
+        tabId: requireTabId(args, usage),
+        ...requireTarget(args, usage),
+      }),
   },
   type: {
     action: "type",
     usage:
-      "nolo browser type --tab <id> (--ref <elementRef> | --selector <css>) --text <text> [--append]",
+      "nolo browser type --tab <id> (--ref <elementRef> | --selector <css>) --text <text> [--append] [--approval-id <id>]",
     payload: (args, usage) => {
       const text = readOption(args, "--text");
       // A value that starts with "--" is a swallowed flag, not text: fail instead of
@@ -200,12 +215,39 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
       if (text === undefined || text.startsWith("--")) {
         throw new Error(`Missing required --text <text>. Usage: ${usage}`);
       }
-      return {
+      return withApprovalId(args, {
         tabId: requireTabId(args, usage),
         ...requireTarget(args, usage),
         text,
         ...(args.includes("--append") ? { clearFirst: false } : {}),
-      };
+      });
+    },
+  },
+  select: {
+    action: "set_select_value",
+    usage:
+      "nolo browser select --tab <id> (--ref <elementRef> | --selector <css>) (--value <v> | --label <l>) [--approval-id <id>]",
+    payload: (args, usage) => {
+      const value = readOption(args, "--value");
+      const label = readOption(args, "--label");
+      if ((value === undefined) === (label === undefined)) {
+        throw new Error(`Provide exactly one of --value <v> or --label <l>. Usage: ${usage}`);
+      }
+      // A value that starts with "--" is a swallowed flag, not an option value: fail instead of
+      // selecting something the user never meant.
+      for (const optionValue of [value, label]) {
+        if (typeof optionValue === "string" && optionValue.startsWith("--")) {
+          throw new Error(`A flag was passed where an option value was expected. Usage: ${usage}`);
+        }
+      }
+      // A select behind an irreversible-looking name opens the same approval window as click/type,
+      // so the retry needs the approvalId the connector returned — without this the user could
+      // allow the window and the caller would still have no way to complete the action.
+      return withApprovalId(args, {
+        tabId: requireTabId(args, usage),
+        ...requireTarget(args, usage),
+        ...(value !== undefined ? { value } : { label }),
+      });
     },
   },
   upload: {
@@ -229,13 +271,13 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   press: {
     action: "press",
-    usage: "nolo browser press --tab <id> --key <key>",
+    usage: "nolo browser press --tab <id> --key <key> [--approval-id <id>]",
     payload: (args, usage) => {
       const key = readTrimmedOption(args, "--key");
       if (!key) {
         throw new Error(`Missing required --key <key>. Usage: ${usage}`);
       }
-      return { tabId: requireTabId(args, usage), key };
+      return withApprovalId(args, { tabId: requireTabId(args, usage), key });
     },
   },
   "prepare-action": {
@@ -353,8 +395,10 @@ export function renderChromeOpsHelp(): string {
     "Notes:",
     "  --ref takes an elementRef copied from `nolo browser read-page` (revision-scoped,",
     "    preferred over --selector); --selector takes a CSS selector.",
-    "  Actions the connector classifies as irreversible (Submit / Delete / Pay ...)",
-    "    are refused with CONFIRMATION_REQUIRED — ask the user to perform them.",
+    "  Actions the connector classifies as irreversible (pay / send / delete / publish / permission)",
+    "    open a confirmation request in the browser and return USER_APPROVAL_PENDING with an approvalId:",
+    "    the user clicks \"Allow once\" there, then rerun the same command with --approval-id <id>.",
+    "    That id is not an authorization — only the lookup key for the decision the user already made.",
     "  prepare-action prepares an immutable action challenge binding for host consent verification;",
     "    it is strictly read-only, never executes mutations, and does not grant approval.",
     "  read-console / read-network / upload work on Chrome only (Firefox lacks chrome.debugger).",

@@ -20,6 +20,7 @@ import {
   summarizeConsoleEntries,
   summarizeNetworkEntries,
   verifyActionEffect,
+  verifySelectValueEffect,
 } from "./compactObservation.js";
 import { captureBrowserConsentState } from "./browserConsentCapture.js";
 import { createActionFingerprint } from "./browserConsentFingerprint.js";
@@ -77,6 +78,421 @@ const preparedActionStore = {
     return basePreparedActionStore.maxEntries;
   },
 };
+/* ------------------------------------------------------------------------------------------------
+ * Interactive approval for irreversible actions
+ *
+ * The agent never authorizes itself. When the gate fires, this worker opens a small extension page
+ * (`approve.html`) that the *user* clicks; the agent only ever receives `USER_APPROVAL_PENDING` plus a
+ * query key (`approvalId`). A record holding only `prepareId`/`challengeId`/`grantTicket` therefore
+ * authorizes nothing: preparation is not consent.
+ *
+ * Storage: the in-memory Map is the working copy and `chrome.storage.session` is the durable copy —
+ * MV3 recycles this worker, but a 60 s approval window has to survive that. Hydration is lazy and
+ * merges "memory wins", so a storage stub that returns nothing simply leaves the Map authoritative.
+ * ---------------------------------------------------------------------------------------------- */
+const APPROVAL_TTL_MS = 60_000;
+const APPROVAL_SWEEP_INTERVAL_MS = 60_000;
+const APPROVAL_STORAGE_PREFIX = "noloConnectorApproval:";
+const APPROVAL_PENDING_CODE = "USER_APPROVAL_PENDING";
+const APPROVAL_DENIED_CODE = "USER_APPROVAL_DENIED";
+const APPROVAL_EXPIRED_CODE = "USER_APPROVAL_EXPIRED";
+const APPROVAL_STALE_CODE = "STALE_ACTION_CHALLENGE";
+const APPROVAL_DECISION_MESSAGE_TYPE = "browser_consent_decision";
+const APPROVAL_PAGE_PATH = "approve.html";
+
+const approvalPendingMessage =
+  "A confirmation request has been opened for the user in the browser. Ask the user to click \"Allow once\" in the " +
+  "Nolo window, then retry this exact action with this approvalId before it expires. Nothing has been performed yet.";
+const approvalDeniedMessage =
+  "The user did not allow this action, so nothing was performed. Name the control and ask the user to activate it " +
+  "themselves; do not retry the same request hoping for a different answer.";
+const approvalExpiredMessage =
+  "The approval window for this action expired before the user allowed it. Nothing was performed.";
+
+const approvalRecords = new Map();
+let approvalHydration = null;
+
+function normalizeApprovalId(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function approvalStorageArea() {
+  const area = typeof chrome !== "undefined" ? chrome?.storage?.session : null;
+  return area && typeof area.get === "function" && typeof area.set === "function" ? area : null;
+}
+
+function approvalSnapshot(record) {
+  const target = record?.target || {};
+  return {
+    ...record,
+    target: {
+      name: String(target.name ?? ""),
+      tag: String(target.tag ?? ""),
+      role: String(target.role ?? ""),
+      type: String(target.type ?? ""),
+    },
+  };
+}
+
+async function persistApprovalRecord(record) {
+  const area = approvalStorageArea();
+  if (!area || !record) return;
+  try {
+    await area.set({ [APPROVAL_STORAGE_PREFIX + record.approvalId]: approvalSnapshot(record) });
+  } catch {
+    // Session storage only adds durability across worker restarts; the Map stays authoritative.
+  }
+}
+
+async function hydrateApprovals() {
+  if (approvalHydration) return approvalHydration;
+  approvalHydration = (async () => {
+    const area = approvalStorageArea();
+    if (!area) return;
+    try {
+      const raw = await area.get(null);
+      const items = raw && typeof raw === "object" ? raw : {};
+      for (const [key, value] of Object.entries(items)) {
+        if (typeof key !== "string" || !key.startsWith(APPROVAL_STORAGE_PREFIX)) continue;
+        if (!value || typeof value !== "object") continue;
+        const approvalId =
+          typeof value.approvalId === "string" ? value.approvalId : key.slice(APPROVAL_STORAGE_PREFIX.length);
+        // Memory wins: a state this worker already advanced must never be rolled back by a merge.
+        if (approvalRecords.has(approvalId)) continue;
+        approvalRecords.set(approvalId, { ...value, approvalId });
+      }
+    } catch {
+      // A failed hydrate must not authorize anything; the Map simply stays empty.
+    }
+  })();
+  return approvalHydration;
+}
+
+function sweepApprovalRecords(nowMs = Date.now()) {
+  for (const record of approvalRecords.values()) {
+    if (record.state !== "pending" && record.state !== "approved") continue;
+    if (!(Number(record.expiresAt) <= nowMs)) continue;
+    record.state = "expired";
+    record.expiredAt = nowMs;
+    void persistApprovalRecord(record);
+  }
+}
+
+const approvalSweepTimer =
+  typeof setInterval === "function"
+    ? setInterval(() => {
+        sweepApprovalRecords();
+      }, APPROVAL_SWEEP_INTERVAL_MS)
+    : null;
+// `unref()` keeps this worker-level timer from holding bun's test process open.
+if (approvalSweepTimer && typeof approvalSweepTimer.unref === "function") approvalSweepTimer.unref();
+
+function approvalVerdict(code, message, extra = {}) {
+  return {
+    ok: false,
+    code,
+    signal: code,
+    effect: code === APPROVAL_PENDING_CODE ? "approval_pending" : "failed",
+    verified: false,
+    ...extra,
+    message,
+  };
+}
+
+async function getApprovalRecord(approvalId) {
+  await hydrateApprovals();
+  sweepApprovalRecords();
+  return approvalRecords.get(approvalId) || null;
+}
+
+/**
+ * Recomputes the DOM fingerprint the action would be bound to. Kept deliberately identical in shape
+ * to the drift check in `verifyConsentAndDrift`: the same document/revision/target/args/form/owner
+ * inputs, so an approval can only ever cover the page state the user was asked about.
+ */
+async function computeApprovalFingerprint({ action, tabId, payload, target }) {
+  const captureOptions = { rejectAsResult: true };
+  if (
+    payload?.active === true ||
+    target?.kind === "active" ||
+    (action === "press" && !payload?.selector && !target?.selector)
+  ) {
+    captureOptions.active = true;
+  } else if (typeof target?.selector === "string" && target.selector.trim()) {
+    captureOptions.selector = target.selector.trim();
+  } else if (typeof payload?.selector === "string" && payload.selector.trim()) {
+    captureOptions.selector = payload.selector.trim();
+  }
+
+  let currentCapture;
+  try {
+    currentCapture = await executeInTab(tabId, captureBrowserConsentState, [captureOptions]);
+  } catch (error) {
+    return {
+      ok: false,
+      verdict: approvalVerdict("DOM_MUTATED", `Failed to capture DOM state before asking the user: ${toMessage(error)}`, {
+        action,
+      }),
+    };
+  }
+  if (!currentCapture || currentCapture.ok === false) {
+    return {
+      ok: false,
+      verdict: approvalVerdict("DOM_MUTATED", currentCapture?.message || "DOM state verification failed.", { action }),
+    };
+  }
+
+  const registrySnapshot = refRegistry.snapshot(tabId);
+  const pageRevision = String(registrySnapshot?.pageRevision || currentCapture.document?.pageRevision || "").trim();
+  const actionArgs = buildPrepareArgs({
+    action,
+    targetMetadata: currentCapture.target,
+    formSnapshot: currentCapture.form,
+    payload,
+  });
+
+  try {
+    const fpRes = await createActionFingerprint({
+      document: {
+        documentId: currentCapture.document?.documentId,
+        url: currentCapture.document?.url,
+        pageRevision,
+      },
+      tabId: String(tabId),
+      target: {
+        targetId: currentCapture.target?.targetId,
+        tag: currentCapture.target?.tag,
+        name: currentCapture.target?.name,
+      },
+      action: { action, args: actionArgs },
+      form: currentCapture.form?.fields || null,
+      owner: typeof payload?.owner === "string" ? payload.owner : "",
+      dialogId: typeof payload?.dialogId === "string" ? payload.dialogId : "",
+    });
+    return { ok: true, fingerprint: fpRes.fingerprint };
+  } catch (error) {
+    return {
+      ok: false,
+      verdict: approvalVerdict("DOM_MUTATED", `Fingerprint computation failed: ${toMessage(error)}`, { action }),
+    };
+  }
+}
+
+/**
+ * Opens the approval window and returns a pending verdict. Fails closed to `USER_APPROVAL_DENIED`
+ * when this runtime has no `chrome.windows` (Firefox builds, bare test stubs, a rejected create): a
+ * pending record nobody can ever approve is worse than a plain refusal.
+ */
+async function requestUserApproval({ action, tabId, payload, target, refusal }) {
+  if (typeof chrome === "undefined" || typeof chrome?.windows?.create !== "function") {
+    return approvalVerdict(APPROVAL_DENIED_CODE, approvalDeniedMessage, { action });
+  }
+
+  const computed = await computeApprovalFingerprint({ action, tabId, payload, target });
+  if (!computed.ok) return computed.verdict;
+
+  await hydrateApprovals();
+  const now = Date.now();
+  const randomId = () =>
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${now}-${Math.random().toString(36).slice(2)}`;
+  const approvalId = `apr_${randomId()}`;
+  const nonce = randomId();
+  const targetInfo = refusal?.target || {};
+  const targetName = String(targetInfo.name ?? "").slice(0, 200);
+
+  // One pending request per tab: a second gate must not stack windows the user cannot tell apart.
+  for (const record of approvalRecords.values()) {
+    if (record.state === "pending" && String(record.tabId) === String(tabId)) {
+      record.state = "superseded";
+      record.supersededAt = now;
+      void persistApprovalRecord(record);
+    }
+  }
+
+  const record = {
+    approvalId,
+    nonce,
+    windowId: null,
+    tabId: String(tabId),
+    action: String(action),
+    fingerprint: computed.fingerprint,
+    target: {
+      name: targetName,
+      tag: String(targetInfo.tag ?? ""),
+      role: String(targetInfo.role ?? ""),
+      type: String(targetInfo.type ?? ""),
+    },
+    owner: typeof payload?.owner === "string" ? payload.owner : "",
+    dialogId: typeof payload?.dialogId === "string" ? payload.dialogId : "",
+    state: "pending",
+    createdAt: now,
+    expiresAt: now + APPROVAL_TTL_MS,
+  };
+  approvalRecords.set(approvalId, record);
+
+  let windowId = null;
+  try {
+    const base =
+      typeof chrome?.runtime?.getURL === "function" ? chrome.runtime.getURL(APPROVAL_PAGE_PATH) : APPROVAL_PAGE_PATH;
+    const params = new URLSearchParams({ approvalId, nonce, action: String(action), target: targetName });
+    const created = await chrome.windows.create({
+      url: `${base}?${params.toString()}`,
+      type: "popup",
+      width: 460,
+      height: 260,
+      focused: true,
+    });
+    windowId = Number(created?.id);
+    if (!Number.isFinite(windowId)) throw new Error("chrome.windows.create returned no window id");
+  } catch (error) {
+    approvalRecords.delete(approvalId);
+    return approvalVerdict(APPROVAL_DENIED_CODE, `${approvalDeniedMessage} (${toMessage(error)})`, { action });
+  }
+
+  record.windowId = windowId;
+  await persistApprovalRecord(record);
+
+  return approvalVerdict(APPROVAL_PENDING_CODE, approvalPendingMessage, {
+    action,
+    approvalId,
+    expiresAtMs: record.expiresAt,
+    target: { name: targetName },
+  });
+}
+
+/**
+ * The credential check that has to pass before any page effect: approved by the user, not expired,
+ * not used. Consumption happens here — before execution — so a later drift failure cannot hand the
+ * credential back.
+ */
+async function consumeApprovalCredential({ approvalId, record, action }) {
+  if (!record) {
+    return {
+      verdict: approvalVerdict(
+        APPROVAL_STALE_CODE,
+        "The provided approvalId was not found, was already used, or belongs to another worker session.",
+        { action, approvalId },
+      ),
+    };
+  }
+  if (record.state === "consumed") {
+    return {
+      verdict: approvalVerdict(
+        APPROVAL_STALE_CODE,
+        "That approvalId has already been used once; an approval covers exactly one action.",
+        { action, approvalId },
+      ),
+    };
+  }
+  if (record.state === "expired" || Number(record.expiresAt) <= Date.now()) {
+    if (record.state !== "expired") {
+      record.state = "expired";
+      record.expiredAt = Date.now();
+      void persistApprovalRecord(record);
+    }
+    return { verdict: approvalVerdict(APPROVAL_EXPIRED_CODE, approvalExpiredMessage, { action, approvalId }) };
+  }
+  if (record.state === "pending") {
+    // Still waiting on the user: repeat the pending verdict and never extend the window.
+    return {
+      verdict: approvalVerdict(APPROVAL_PENDING_CODE, approvalPendingMessage, {
+        action,
+        approvalId,
+        expiresAtMs: record.expiresAt,
+        target: { name: String(record.target?.name ?? "") },
+      }),
+    };
+  }
+  if (record.state === "denied" || record.state === "superseded") {
+    return { verdict: approvalVerdict(APPROVAL_DENIED_CODE, approvalDeniedMessage, { action, approvalId }) };
+  }
+  if (record.state !== "approved") {
+    return {
+      verdict: approvalVerdict(APPROVAL_STALE_CODE, "The approval record is not in a usable state.", {
+        action,
+        approvalId,
+      }),
+    };
+  }
+
+  record.state = "consumed";
+  record.consumedAt = Date.now();
+  await persistApprovalRecord(record);
+  return { ok: true, record };
+}
+
+/**
+ * The only writer of `approved`. Reachable exclusively from the extension's own approve page: a
+ * decision must come from this extension, from that page URL, with this request's nonce, from the
+ * window this worker opened. Anything else discards the request instead of retrying.
+ */
+export async function handleApprovalDecision(message = {}, sender = {}) {
+  const approvalId = normalizeApprovalId(message?.approvalId);
+  if (!approvalId) return { ok: false, code: "USER_APPROVAL_REJECTED" };
+
+  const record = await getApprovalRecord(approvalId);
+  if (!record) return { ok: false, code: "USER_APPROVAL_REJECTED" };
+
+  const extensionId = typeof chrome !== "undefined" ? chrome?.runtime?.id : "";
+  const senderId = typeof sender?.id === "string" ? sender.id : "";
+  const senderUrl = typeof sender?.url === "string" ? sender.url : "";
+  const approvePagePrefix = extensionId && typeof extensionId === "string"
+    ? `chrome-extension://${extensionId}/${APPROVAL_PAGE_PATH}`
+    : "";
+  const senderOk =
+    Boolean(approvePagePrefix) && senderId === extensionId && senderUrl.startsWith(approvePagePrefix);
+  const nonceOk = typeof record.nonce === "string" && record.nonce.length > 0 && message?.nonce === record.nonce;
+  const windowOk = record.windowId != null && Number(message?.windowId) === Number(record.windowId);
+
+  if (!senderOk || !nonceOk || !windowOk || record.state !== "pending" || Number(record.expiresAt) <= Date.now()) {
+    if (record.state === "pending") {
+      record.state = "denied";
+      record.deniedAt = Date.now();
+      record.denyReason = "unverified_decision_sender";
+      await persistApprovalRecord(record);
+    }
+    return { ok: false, code: "USER_APPROVAL_REJECTED" };
+  }
+
+  const approved = message?.decision === "approve";
+  record.state = approved ? "approved" : "denied";
+  record[approved ? "approvedAt" : "deniedAt"] = Date.now();
+  await persistApprovalRecord(record);
+
+  if (typeof chrome?.windows?.remove === "function" && record.windowId != null) {
+    try {
+      await chrome.windows.remove(record.windowId);
+    } catch {
+      // The user may have closed the window already; the decision still stands.
+    }
+  }
+  return { ok: true, approvalId, state: record.state };
+}
+
+/** Closing the approval window is a refusal, not an implicit approval left hanging in `pending`. */
+function denyApprovalsForWindow(windowId) {
+  for (const record of approvalRecords.values()) {
+    if (record.state !== "pending") continue;
+    if (record.windowId == null || Number(record.windowId) !== Number(windowId)) continue;
+    record.state = "denied";
+    record.deniedAt = Date.now();
+    record.denyReason = "approval_window_closed";
+    void persistApprovalRecord(record);
+  }
+}
+
+if (typeof chrome !== "undefined" && chrome?.windows?.onRemoved?.addListener) {
+  try {
+    chrome.windows.onRemoved.addListener((windowId) => {
+      denyApprovalsForWindow(windowId);
+    });
+  } catch {
+    // A runtime without windows events simply keeps relying on expiry.
+  }
+}
+
 const openedTabs = createOpenedTabSet();
 const detachTimers = new Map();
 /**
@@ -121,6 +537,28 @@ async function assertScriptableTab(tabId) {
     throw connectorError(
       PROTECTED_PAGE_CODE,
       `Chrome does not allow scripts on this page (${url.split("?")[0].slice(0, 80)}), so it cannot be read or operated automatically. Ask the user to look at it or act on it.`,
+    );
+  }
+}
+
+/**
+ * The debugger path never runs a page script, so `assertScriptableTab` does not cover it: attaching to
+ * the extension's own approval page and dispatching `Input.dispatchMouseEvent` there would let the
+ * connector press "Allow once" itself. Same protected-prefix list, same refusal — deliberately not a
+ * second policy to keep in sync.
+ */
+async function assertDebuggableTab(tabId) {
+  let url = "";
+  try {
+    const tab = await chrome.tabs.get(Number(tabId));
+    url = typeof tab?.url === "string" ? tab.url : "";
+  } catch {
+    return; // A missing tab is reported by the debugger attach itself.
+  }
+  if (isProtectedPageUrl(url)) {
+    throw connectorError(
+      PROTECTED_PAGE_CODE,
+      `Chrome does not allow debugging this page (${url.split("?")[0].slice(0, 80)}), so the connector will not send it input. Ask the user to act on it.`,
     );
   }
 }
@@ -230,6 +668,9 @@ async function ensureDebugger(tabId) {
     throw connectorError(DEBUGGER_UNSUPPORTED_SIGNAL, DEBUGGER_UNSUPPORTED_MESSAGE);
   }
   const target = tabTarget(tabId);
+  // The debugger path dispatches *trusted* input, which no script-level guard covers: attaching to
+  // the extension's own approval page would let the connector click "Allow once" itself.
+  await assertDebuggableTab(tabId);
   try {
     await chrome.debugger.attach(target, "1.3");
   } catch (error) {
@@ -353,7 +794,12 @@ function pageOperation(payload) {
 
   function describe(element, index) {
     const tag = String(element.tagName || "").toLowerCase();
-    const described = { index, tag, name: labelOf(element) };
+    const described = {
+      index,
+      tag,
+      name: labelOf(element),
+      role: String(element.getAttribute?.("role") || "").toLowerCase(),
+    };
     if (element.disabled) described.disabled = true;
     if (element.readOnly) described.readonly = true;
     if (tag === "input" || tag === "textarea" || tag === "select") {
@@ -424,7 +870,17 @@ function pageOperation(payload) {
     };
   }
 
-  function resolveElement(found, target) {
+  /**
+   * Resolve the element an action means to address.
+   *
+   * `expectedName` is the guard that stops the page from swapping a different control in between
+   * inspection and action, and nothing more: `labelOf` falls back to `innerText`, and for a select
+   * that text *is the selected option*, so a label comparison cannot survive the very change the
+   * setter performs. Callers that only ask "what is this element now" (the read-back) pass
+   * `verifyName: false`; `expectedTag` and the index still pin the identity.
+   */
+  function resolveElement(found, target, options) {
+    const verifyName = !(options && options.verifyName === false);
     if (target.selector) {
       let bySelector = null;
       if (target.selector === "point:bottom-publish") {
@@ -504,7 +960,7 @@ function pageOperation(payload) {
         message: "The elementRef resolved to a different element; call chrome_read_page again.",
       };
     }
-    if (target.expectedName && labelOf(candidate) !== target.expectedName) {
+    if (verifyName && target.expectedName && labelOf(candidate) !== target.expectedName) {
       return {
         code: "STALE_PAGE_REVISION",
         message: "The elementRef target changed on the page; call chrome_read_page again.",
@@ -553,11 +1009,14 @@ function pageOperation(payload) {
       return { ok: false, code: "ELEMENT_NOT_FOUND", message: "There is no element to inspect." };
     }
     const tag = String(element.tagName || "").toLowerCase();
+    const declaredRole = String(element.getAttribute?.("role") || "").toLowerCase();
+    const declaredType = String(element.getAttribute?.("type") || "").toLowerCase();
     return {
       ok: true,
       name: labelOf(element),
       tag,
-      type: tag === "input" ? String(element.type || "text").toLowerCase() : "",
+      role: declaredRole,
+      type: tag === "input" ? String(element.type || declaredType || "text").toLowerCase() : declaredType,
     };
   }
 
@@ -721,6 +1180,185 @@ function pageOperation(payload) {
       },
       element: snapshotOf(target),
       signature: signatureOf(found),
+      url: String(location.href),
+    };
+  }
+
+  if (op === "read_select_state") {
+    const stateOf = (select) => {
+      const chosen = Array.prototype.slice.call(select.options || []).filter((option) => option.selected === true)[0] || null;
+      return {
+        value: select.value == null ? "" : String(select.value),
+        label: chosen ? String(chosen.textContent || chosen.label || "").replace(/\s+/g, " ").trim() : "",
+      };
+    };
+    // Read the select back through the very same resolution `set_select_value` used: a selector the
+    // setter accepts (point:/percent:/text=/:has-text()) must resolve to the same element here,
+    // otherwise a legitimate set can never be verified.
+    // No name comparison: `labelOf` falls back to `innerText` and, for a select, that text is the
+    // selected option — it changes precisely because the set succeeded. A read-back only asks "what
+    // is this element now"; the index and tag still pin its identity.
+    const foundForRead = candidates(region);
+    if (!foundForRead) {
+      return {
+        ok: false,
+        code: "REGION_NOT_FOUND",
+        message: `Region selector matched no element: ${region}`,
+        region,
+      };
+    }
+    const resolvedForRead = resolveElement(foundForRead, payload, { verifyName: false });
+    const element = resolvedForRead.element || null;
+    if (!element) {
+      // Keep the page's own reason instead of flattening every miss into one code: a select that was
+      // replaced or moved reads as STALE_PAGE_REVISION, a broken region as REGION_NOT_FOUND. Only a
+      // selector that no longer matches is reported as SELECT_GONE, which is what it means here.
+      const resolvedCode = typeof resolvedForRead.code === "string" ? resolvedForRead.code : "";
+      const code = resolvedCode === "ELEMENT_NOT_FOUND" ? "SELECT_GONE" : resolvedCode || "SELECT_GONE";
+      const message = code === "SELECT_GONE"
+        ? "The select is no longer in the page."
+        : resolvedForRead.message || "The select can no longer be read back from the page.";
+      return { ok: false, code, message };
+    }
+    if (String(element.tagName || "").toLowerCase() !== "select") {
+      return { ok: false, code: "NOT_A_SELECT", message: "The target is no longer a native <select>." };
+    }
+    return { ok: true, ...stateOf(element) };
+  }
+
+  if (op === "set_select_value") {
+    const normalizeOptionText = (value) => String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+    const describeOption = (option) => ({
+      value: String(option.value),
+      label: normalizeOptionText(option.textContent || option.label || ""),
+      disabled: Boolean(option.disabled),
+    });
+    const selectedStateOf = (select) => {
+      const chosen = Array.prototype.slice.call(select.options || []).filter((option) => option.selected === true)[0] || null;
+      return {
+        value: select.value == null ? "" : String(select.value),
+        label: chosen ? normalizeOptionText(chosen.textContent || chosen.label || "") : "",
+      };
+    };
+
+    const found = candidates(region);
+    if (!found) {
+      return { ok: false, code: "REGION_NOT_FOUND", message: `Region selector matched no element: ${region}`, region };
+    }
+    if (payload.expectedUrl && String(location.href) !== payload.expectedUrl) {
+      return {
+        ok: false,
+        code: "STALE_PAGE_REVISION",
+        message: "The tab navigated to a different document; call chrome_read_page again.",
+      };
+    }
+    if (payload.expectedSignature && signatureOf(found) !== payload.expectedSignature) {
+      return {
+        ok: false,
+        code: "STALE_PAGE_REVISION",
+        message: "The page revision changed since the elementRef was issued; call chrome_read_page again.",
+        signature: signatureOf(found),
+      };
+    }
+    const resolved = resolveElement(found, payload);
+    if (!resolved.element) {
+      return { ok: false, code: resolved.code, message: resolved.message, signature: signatureOf(found) };
+    }
+    const select = resolved.element;
+    const selectTag = String(select.tagName || "").toLowerCase();
+    if (selectTag !== "select") {
+      return {
+        ok: false,
+        code: "NOT_A_SELECT",
+        message: `The target is a <${selectTag || "unknown"}>, not a native <select>; a custom dropdown must be opened with click and one of its options clicked.`,
+        signature: signatureOf(found),
+      };
+    }
+    if (select.disabled) {
+      return { ok: false, code: "SELECT_DISABLED", message: "The target <select> is disabled; the value was not set." };
+    }
+    if (select.multiple) {
+      return {
+        ok: false,
+        code: "SELECT_MULTIPLE_UNSUPPORTED",
+        message: "The target <select> accepts multiple selections; only single-choice selects are supported.",
+      };
+    }
+
+    const wantedValue = typeof payload.value === "string" ? payload.value : null;
+    const wantedLabel = typeof payload.label === "string" ? payload.label : null;
+    if ((wantedValue === null) === (wantedLabel === null)) {
+      return {
+        ok: false,
+        code: "OPTION_TARGET_REQUIRED",
+        message: "Provide exactly one of value or label for the option to select.",
+      };
+    }
+
+    const allOptions = Array.prototype.slice.call(select.options || []);
+    // Never guess: a wrong option on a real form can be an irreversible choice, so every
+    // uncertainty (no match, several matches, disabled option) is an error the model must resolve.
+    const matches = wantedValue !== null
+      ? allOptions.filter((option) => String(option.value) === wantedValue)
+      : allOptions.filter((option) => normalizeOptionText(option.textContent || option.label || "") === normalizeOptionText(wantedLabel));
+    if (matches.length === 0) {
+      return {
+        ok: false,
+        code: "OPTION_NOT_FOUND",
+        message: `No option matched ${
+          wantedValue !== null ? `value ${JSON.stringify(wantedValue)}` : `label ${JSON.stringify(wantedLabel)}`
+        }.`,
+        options: allOptions.slice(0, 20).map(describeOption),
+        signature: signatureOf(found),
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        code: "OPTION_AMBIGUOUS",
+        message: `${matches.length} options carry that label; pass the option value instead, or disambiguate the label.`,
+        options: matches.slice(0, 20).map(describeOption),
+        signature: signatureOf(found),
+      };
+    }
+    const option = matches[0];
+    if (option.disabled) {
+      return {
+        ok: false,
+        code: "OPTION_DISABLED",
+        message: `The option ${JSON.stringify(
+          normalizeOptionText(option.textContent || option.label || ""),
+        )} is disabled and cannot be selected.`,
+        signature: signatureOf(found),
+      };
+    }
+
+    const before = selectedStateOf(select);
+    const requested = { value: String(option.value), label: describeOption(option).label };
+    try {
+      option.selected = true;
+      select.value = requested.value;
+    } catch (error) {
+      return {
+        ok: false,
+        code: "SELECT_VALUE_NOT_APPLIED",
+        message: `Assigning the option failed: ${String((error && error.message) || error)}`,
+      };
+    }
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    // Synchronous read-back only: it proves the events were dispatched with the value in place, but
+    // NOT that the page kept it (a listener may still revert us). The worker re-reads after a short
+    // delay and that second read-back decides the verdict.
+    const immediate = selectedStateOf(select);
+    return {
+      ok: true,
+      before,
+      immediate,
+      requested,
+      clickedIndex: allOptions.indexOf(option),
+      element: snapshotOf(select),
+      signature: signatureOf(candidates(region) || found),
       url: String(location.href),
     };
   }
@@ -1069,13 +1707,25 @@ function pageOperation(payload) {
 }
 
 /** Action verdicts are explicit: `effect` (and `verified`) is the authority, never `ok` alone. */
-function verdictEnvelope(action, verification, extra = {}) {
+function verdictEnvelope(action, verification, extra = {}, options = {}) {
+  // `ok` is a promise about the outcome, not just "did not fail". Selects are strict: only a
+  // read-back that matches the requested option may answer ok, so an unreadable/unverifiable select
+  // (status `uncertain`) reports ok:false with an explicit code instead of passing as success.
+  const ok = options.okRequiresVerified === true
+    ? verification.status === "verified"
+    : verification.status !== "failed";
+  // Only strict verdicts carry a `code`: their callers need to tell "unverifiable" from "rejected".
+  const failureCode = !ok && options.okRequiresVerified === true
+    ? (typeof verification.code === "string" && verification.code) ||
+      (typeof verification.signal === "string" ? verification.signal : "")
+    : "";
   return {
-    ok: verification.status !== "failed",
+    ok,
     verified: verification.status === "verified",
     effect: verification.status,
     action,
     signal: verification.signal,
+    ...(failureCode ? { code: failureCode } : {}),
     ...(verification.message ? { message: verification.message } : {}),
     ...extra,
   };
@@ -1088,7 +1738,12 @@ async function inspectSelectorTarget(tabId, selector) {
     const code = typeof inspected?.code === "string" && inspected.code ? inspected.code : "ELEMENT_INSPECTION_FAILED";
     throw connectorError(code, inspected?.message || "The target element could not be inspected before acting.");
   }
-  return { name: String(inspected.name ?? ""), tag: String(inspected.tag ?? "") };
+  return {
+    name: String(inspected.name ?? ""),
+    tag: String(inspected.tag ?? ""),
+    role: String(inspected.role ?? ""),
+    type: String(inspected.type ?? ""),
+  };
 }
 
 /** The same question for the focused element, used before Enter-like key presses. */
@@ -1096,40 +1751,31 @@ async function inspectActiveTarget(tabId) {
   try {
     const inspected = await executeInTab(tabId, pageOperation, [{ op: "inspect", subject: "active" }]);
     if (inspected && inspected.ok === true) {
-      return { name: String(inspected.name ?? ""), tag: String(inspected.tag ?? "") };
+      return {
+        name: String(inspected.name ?? ""),
+        tag: String(inspected.tag ?? ""),
+        role: String(inspected.role ?? ""),
+        type: String(inspected.type ?? ""),
+      };
     }
   } catch {
     // Pressing a key with nothing inspectable is not an irreversible action.
   }
-  return { name: "", tag: "" };
+  return { name: "", tag: "", role: "", type: "" };
 }
 
 async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }) {
-  const rawCredential =
-    payload.preparedActionId ??
-    payload.challengeId ??
-    payload.prepareId ??
-    payload.grantTicket;
-  const credentialId = typeof rawCredential === "string" ? rawCredential.trim() : "";
-  if (!credentialId) {
-    return { ...refusal, verified: false };
+  const approvalId = normalizeApprovalId(payload?.approvalId);
+  if (!approvalId) {
+    // Nothing is authorized without a user decision. A prepared action records intent only, so a
+    // prepareId / challengeId / grantTicket arriving here is handled exactly like no credential:
+    // the user is asked now and the caller gets `USER_APPROVAL_PENDING`.
+    return await requestUserApproval({ action, tabId, payload, target, refusal });
   }
 
-  const record = preparedActionStore.get(credentialId);
-  if (!record) {
-    return {
-      ok: false,
-      code: "STALE_ACTION_CHALLENGE",
-      signal: "STALE_ACTION_CHALLENGE",
-      effect: "failed",
-      action,
-      verified: false,
-      message: "The provided consent credential was not found or has expired.",
-    };
-  }
-
-  // Atomically consume credential immediately (One-Time Consumption)
-  preparedActionStore.delete(credentialId);
+  const record = await getApprovalRecord(approvalId);
+  const consumption = await consumeApprovalCredential({ approvalId, record, action });
+  if (consumption.verdict) return consumption.verdict;
 
   if (String(record.tabId) !== String(tabId)) {
     return {
@@ -1257,18 +1903,63 @@ async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }
   return null;
 }
 
-async function runTargetedAction(action, payload) {
-  const tabId = String(payload.tabId);
+/** How long the page gets to run its listeners and re-render before the select is read back. */
+const SELECT_SETTLE_MS = 60;
+
+/**
+ * Second look at a select after its value was set. It deliberately ignores page revisions: a
+ * dependent select re-rendering is a legitimate consequence of the choice, and the only question
+ * here is what this select holds now. A select that vanished or is unreadable answers `null`, which
+ * the verifier reports as uncertain rather than success.
+ */
+async function readSelectStateAfterSettle(tabId, target, pageArgs) {
+  await new Promise((resolve) => setTimeout(resolve, SELECT_SETTLE_MS));
+  const readBackArgs = { op: "read_select_state" };
+  if (target.kind === "selector") {
+    readBackArgs.selector = target.selector;
+  } else {
+    if (pageArgs.region) readBackArgs.region = pageArgs.region;
+    readBackArgs.index = pageArgs.index;
+    readBackArgs.expectedTag = pageArgs.expectedTag;
+    // Carried for context only: `read_select_state` resolves with `verifyName: false`, because the
+    // label of a select is its selected option and this read happens after that option changed.
+    readBackArgs.expectedName = pageArgs.expectedName;
+  }
+  let state = null;
+  try {
+    state = await executeInTab(tabId, pageOperation, [readBackArgs]);
+  } catch (_) {
+    state = null;
+  }
+  if (!state || state.ok !== true) {
+    // Keep the page's own reason (SELECT_GONE / NOT_A_SELECT) so the verdict can say why the
+    // read-back failed instead of a generic "unverified".
+    const code = state && typeof state.code === "string" && state.code ? state.code : "";
+    return { value: null, label: "", code };
+  }
+  return {
+    value: state.value == null ? "" : String(state.value),
+    label: typeof state.label === "string" ? state.label : "",
+  };
+}
+
+async function runTargetedAction(action, payload) {  const tabId = String(payload.tabId);
   const target = resolveActionTarget(payload, refRegistry, { tabId, action });
   if (!target.ok) {
     return { ok: false, verified: false, effect: "failed", action, signal: target.code, message: target.message };
   }
 
-  // Irreversible external actions are refused before any page effect: this desktop runtime has no
-  // interactive approval channel, so the only safe completion is the user activating the control.
+  // Irreversible external actions never run on the agent's word alone: the gate stops the page
+  // effect and the user is asked in their own window. Only an approved, single-use credential lets
+  // the same action through on a later retry.
   let gateTarget;
   if (target.kind === "ref") {
-    gateTarget = { name: target.expect?.name ?? "", tag: target.expect?.tag ?? "" };
+    gateTarget = {
+      name: target.expect?.name ?? "",
+      tag: target.expect?.tag ?? "",
+      role: target.expect?.role ?? "",
+      type: target.expect?.type ?? "",
+    };
   } else {
     try {
       gateTarget = await inspectSelectorTarget(payload.tabId, target.selector);
@@ -1288,6 +1979,8 @@ async function runTargetedAction(action, payload) {
     action,
     name: gateTarget.name,
     tag: gateTarget.tag,
+    role: gateTarget.role,
+    type: gateTarget.type,
   });
   if (refusal) {
     const consentVerdict = await verifyConsentAndDrift({
@@ -1318,6 +2011,10 @@ async function runTargetedAction(action, payload) {
     pageArgs.text = typeof payload.text === "string" ? payload.text : "";
     pageArgs.clearFirst = payload.clearFirst !== false;
   }
+  if (action === "set_select_value") {
+    if (typeof payload.value === "string") pageArgs.value = payload.value;
+    if (typeof payload.label === "string") pageArgs.label = payload.label;
+  }
 
   let result;
   try {
@@ -1345,15 +2042,24 @@ async function runTargetedAction(action, payload) {
         )}). Re-read the page before acting again.`,
       },
       resolveExtra,
+      { okRequiresVerified: action === "set_select_value" },
     );
   }
 
-  const verification = verifyActionEffect({
-    action,
-    target: target.kind === "ref" ? { name: target.expect.name } : undefined,
-    expected: action === "type" ? { text: pageArgs.text, clearFirst: pageArgs.clearFirst } : undefined,
-    result,
-  });
+  let pageResult = result;
+  if (action === "set_select_value" && result && result.ok === true) {
+    pageResult = { ...result, after: await readSelectStateAfterSettle(payload.tabId, target, pageArgs) };
+  }
+
+  const verification =
+    action === "set_select_value"
+      ? verifySelectValueEffect({ result: pageResult })
+      : verifyActionEffect({
+          action,
+          target: target.kind === "ref" ? { name: target.expect.name } : undefined,
+          expected: action === "type" ? { text: pageArgs.text, clearFirst: pageArgs.clearFirst } : undefined,
+          result,
+        });
 
   if (result && typeof result.signature === "string" && result.signature) {
     refRegistry.notePageChanged({ tabId, signature: result.signature, url: result.url });
@@ -1361,11 +2067,18 @@ async function runTargetedAction(action, payload) {
 
   return verdictEnvelope(action, verification, {
     ...resolveExtra,
+    ...(action === "set_select_value" && pageResult
+      ? {
+          // Report what the select holds after the page settled, not what was requested.
+          value: pageResult.after && pageResult.after.value != null ? String(pageResult.after.value) : "",
+          label: pageResult.after && typeof pageResult.after.label === "string" ? pageResult.after.label : "",
+        }
+      : {}),
     ...(result?.hitElement ? { hitElement: result.hitElement } : {}),
     ...(result && typeof result.signature === "string" && result.signature
       ? { pageRevision: buildPageRevision(result.signature) }
       : {}),
-  });
+  }, { okRequiresVerified: action === "set_select_value" });
 }
 
 async function handleSetFiles(payload = {}) {
@@ -1556,11 +2269,17 @@ async function handleAction(action, payload = {}) {
     case "list_tabs": {
       await loadOpenedTabs();
       const tabs = await chrome.tabs.query({});
+      // The connector's own pages (the approval popup above all) are never listed: their URL carries
+      // the approvalId + nonce and `serializeTab` would also hand out the windowId, which is exactly
+      // what an approval decision is bound to. Not a page the agent has any business in.
+      const ownOrigin = typeof chrome?.runtime?.getURL === "function" ? chrome.runtime.getURL("") : "";
       return {
-        tabs: tabs.map((tab) => ({
-          ...serializeTab(tab),
-          openedByConnector: openedTabs.has(tab.id),
-        })),
+        tabs: tabs
+          .filter((tab) => !ownOrigin || !String(tab?.url || "").startsWith(ownOrigin))
+          .map((tab) => ({
+            ...serializeTab(tab),
+            openedByConnector: openedTabs.has(tab.id),
+          })),
       };
     }
     case "open_tab": {
@@ -1616,6 +2335,27 @@ async function handleAction(action, payload = {}) {
       return await runTargetedAction("click", payload);
     case "type":
       return await runTargetedAction("type", payload);
+    case "set_select_value": {
+      const hasValue = typeof payload.value === "string";
+      const hasLabel = typeof payload.label === "string";
+      if (hasValue === hasLabel) {
+        return verdictEnvelope("set_select_value", {
+          status: "failed",
+          signal: "OPTION_TARGET_REQUIRED",
+          message: "Provide exactly one of value or label for the option to select.",
+        }, {}, { okRequiresVerified: true });
+      }
+      if (!String(payload.tabId ?? "").trim()) {
+        return verdictEnvelope("set_select_value", {
+          status: "failed",
+          signal: "TAB_ID_REQUIRED",
+          message: "Provide the tabId before calling set_select_value.",
+        }, {}, { okRequiresVerified: true });
+      }
+      // Goes through runTargetedAction so ref freshness, the irreversible-action gate and the
+      // page-revision bookkeeping are the very same code path as click/type.
+      return await runTargetedAction("set_select_value", payload);
+    }
     case "set_files": {
       if (!HAS_DEBUGGER) {
         return verdictEnvelope("set_files", {
@@ -1631,7 +2371,14 @@ async function handleAction(action, payload = {}) {
       let expectedActiveName = "";
       if (isActivationKey(pressedKey)) {
         const active = await inspectActiveTarget(payload.tabId);
-        const refusal = decideIrreversibleAction({ action: "press", key: pressedKey, name: active.name, tag: active.tag });
+        const refusal = decideIrreversibleAction({
+          action: "press",
+          key: pressedKey,
+          name: active.name,
+          tag: active.tag,
+          role: active.role,
+          type: active.type,
+        });
         if (refusal) {
           const consentVerdict = await verifyConsentAndDrift({
             action: "press",
@@ -1704,6 +2451,7 @@ async function handleAction(action, payload = {}) {
       return { ok: true, mouseMoved: { x: mx, y: my } };
     }
     case "hit_test": {
+      await assertDebuggableTab(payload.tabId);
       const ht = await executeInTab(payload.tabId, pageOperation, [
         { op: "hit_test", x: payload.x, y: payload.y },
       ]);
@@ -1986,10 +2734,21 @@ async function handleAction(action, payload = {}) {
 }
 
 /**
- * The toolbar popup asks the worker whether the desktop app is actually connected. The popup is the
- * only user-facing surface in the extension: it reports status and reads no page data.
+ * Two user-facing message types: the toolbar popup asks whether the desktop app is connected, and
+ * the approve page reports the user's decision. Both read no page data.
  */
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.type === APPROVAL_DECISION_MESSAGE_TYPE) {
+    // Verified inside handleApprovalDecision (sender id + approve-page URL + nonce + window id).
+    void handleApprovalDecision(message, sender || {}).then((decision) => {
+      try {
+        sendResponse(decision);
+      } catch {
+        // The approve page may already be closing; the recorded state is what matters.
+      }
+    });
+    return true;
+  }
   if (!message || message.type !== "connector_status") return false;
   sendResponse({
     extensionId: chrome.runtime.id,
@@ -2032,5 +2791,5 @@ function connectNativeHost() {
 void reconcileDebuggerAttachments();
 connectNativeHost();
 
-export { handleAction, preparedActionStore, refRegistry };
+export { handleAction, pageOperation, preparedActionStore, refRegistry };
 
