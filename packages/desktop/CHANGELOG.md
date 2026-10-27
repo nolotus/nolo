@@ -1,4 +1,11 @@
 
+## 0.199.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **browser-connector:** show the target site in the approval window ([11ac07c](https://github.com/nolotus/bun-nolo/commit/11ac07c8551cca9f985e18fc3bd05b94c9e085d6))
+
+
 ## 0.198.0-alpha.1 (2026-10-27)
 
 ### Features

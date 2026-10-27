@@ -280,6 +280,44 @@ async function computeApprovalFingerprint({ action, tabId, payload, target }) {
 }
 
 /**
+ * The origin of the page an approval is about — origin only, never a full URL.
+ *
+ * A URL can carry a token in its query string, and the approval page is a document the user reads
+ * (and whose address bar is visible), so only the origin is ever derived from it. Non-http(s) pages
+ * (chrome://, file://, about:) have no meaningful origin and are reported as unknown.
+ */
+function originFromUrl(rawUrl) {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) return "";
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Which site the user is about to authorize. Read from the tab the action targets, so the approval
+ * window can name the site the action belongs to; a tab that cannot be read yields an empty
+ * origin, which the approval page shows as "unknown site" rather than as a blank line.
+ *
+ * Only the origin is returned — never the tab title. The title is content the *page* controls: it
+ * can carry a mail subject, an account name or a one-time code, and it can be written to look like
+ * a brand ("Google 账号") to make a hostile origin look familiar. The origin is handed out by the
+ * browser and cannot be forged by the page, so it alone answers "which site is asking".
+ */
+async function resolveApprovalSite(tabId) {
+  try {
+    if (typeof chrome === "undefined" || typeof chrome?.tabs?.get !== "function") return "";
+    const tab = await chrome.tabs.get(Number(tabId));
+    return originFromUrl(typeof tab?.url === "string" ? tab.url : "");
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Opens the approval window and returns a pending verdict. Fails closed to `USER_APPROVAL_DENIED`
  * when this runtime has no `chrome.windows` (Firefox builds, bare test stubs, a rejected create): a
  * pending record nobody can ever approve is worse than a plain refusal.
@@ -302,6 +340,9 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
   const nonce = randomId();
   const targetInfo = refusal?.target || {};
   const targetName = String(targetInfo.name ?? "").slice(0, 200);
+  // The site the action belongs to: the approval window is the only place the user can decide, so
+  // it has to say *which site* is asking, not only which control.
+  const site = await resolveApprovalSite(tabId);
 
   // One pending request per tab: a second gate must not stack windows the user cannot tell apart.
   for (const record of approvalRecords.values()) {
@@ -319,6 +360,7 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
     tabId: String(tabId),
     action: String(action),
     fingerprint: computed.fingerprint,
+    origin: site,
     target: {
       name: targetName,
       tag: String(targetInfo.tag ?? ""),
@@ -337,7 +379,15 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
   try {
     const base =
       typeof chrome?.runtime?.getURL === "function" ? chrome.runtime.getURL(APPROVAL_PAGE_PATH) : APPROVAL_PAGE_PATH;
-    const params = new URLSearchParams({ approvalId, nonce, action: String(action), target: targetName });
+    const params = new URLSearchParams({
+      approvalId,
+      nonce,
+      action: String(action),
+      target: targetName,
+      // Origin only: a query string can carry a token, and this URL is visible in the popup.
+      // No title: the page controls its title, so it must not be able to put text next to the origin.
+      origin: site,
+    });
     const created = await chrome.windows.create({
       url: `${base}?${params.toString()}`,
       type: "popup",

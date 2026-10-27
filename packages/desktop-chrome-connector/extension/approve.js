@@ -8,6 +8,13 @@ const approvalId = params.get("approvalId") || "";
 const nonce = params.get("nonce") || "";
 const action = params.get("action") || "click";
 const targetName = params.get("target") || "";
+/**
+ * The site the action belongs to. Only an origin ever reaches this page — a full URL could carry a
+ * token in its query string, and this page is shown to the user. The tab title is deliberately
+ * absent: the page controls it, so it could carry a mail subject, an account name or a one-time
+ * code, and it could be written to imitate a brand next to the origin.
+ */
+const targetOrigin = (params.get("origin") || "").trim();
 
 const ACTION_LABELS = {
   click: "点击",
@@ -22,10 +29,16 @@ const allowButton = document.getElementById("allow");
 const denyButton = document.getElementById("deny");
 const statusLine = document.getElementById("status");
 const targetLine = document.getElementById("target-name");
+const siteLine = document.getElementById("target-site");
 const actionLabel = document.getElementById("action-label");
 
 actionLabel.textContent = ACTION_LABELS[action] || ACTION_LABELS.click;
 targetLine.textContent = targetName ? `「${targetName}」` : "未命名控件";
+// A site the user cannot name is a site the user cannot judge: say "unknown" instead of leaving
+// the line blank, so a missing origin never reads as "nothing to see here".
+if (siteLine) {
+  siteLine.textContent = targetOrigin ? `目标站点：${targetOrigin}` : "目标站点：未知站点";
+}
 
 let decided = false;
 
