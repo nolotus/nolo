@@ -1,4 +1,11 @@
 
+## 0.190.0-alpha.3 (2026-10-27)
+
+### Bug Fixes
+
+* **agent-runtime:** 评测语料 FLAG 与文件名解耦（防答案泄露） ([24880df](https://github.com/nolotus/bun-nolo/commit/24880dfc071676334a3dded8b686815dc6fca78a))
+
+
 ## 0.190.0-alpha.2 (2026-10-27)
 
 ### Bug Fixes

@@ -1,4 +1,5 @@
 import { deflateSync, inflateSync } from "node:zlib";
+import { createHash } from "node:crypto";
 
 export type Shape = "圆" | "方" | "三角";
 export type Color = "红" | "蓝" | "绿" | "黄" | "黑" | "白";
@@ -442,6 +443,13 @@ export function generateCorpus(options: GenerateOptions): CorpusItem[] {
   const sizeMap = options.sizeConfig ?? SIZE_CONFIG_DEFAULT;
 
   const prng = createPrng(options.seed);
+  // Domain-separated deterministic sources: neither filenames nor geometry
+  // consume the FLAG stream (the seed is the reproducibility key only).
+  const flagPrng = createPrng(createHash("sha256")
+    .update(`vision-eval:flags:${options.seed}`).digest().readUInt32BE(0));
+  const flagTokens = Array.from({ length: count }, () =>
+    Math.floor(flagPrng() * 0x1000000).toString(16).padStart(6, "0"));
+  const usedFileIds = new Set<string>();
 
   const shapes: Shape[] = ["圆", "方", "三角"];
   const colors: Color[] = ["红", "蓝", "绿", "黄", "黑", "白"];
@@ -451,14 +459,17 @@ export function generateCorpus(options: GenerateOptions): CorpusItem[] {
   const items: CorpusItem[] = [];
 
   for (let idx = 0; idx < count; idx++) {
-    // 随机但确定的 flag: FLAG-xxxxxx
-    const hexChars = "0123456789abcdef";
-    let hexStr = "";
-    for (let k = 0; k < 6; k++) {
-      const cIdx = Math.floor(prng() * hexChars.length);
-      hexStr += hexChars[cIdx];
-    }
-    const flag = `FLAG-${hexStr}`;
+    const flag = `FLAG-${flagTokens[idx]!}`;
+    // Filename input never includes flags, pixels, or geometry. Reject even
+    // accidental matches with ANY answer in this corpus, and resolve collisions.
+    let fileId: string;
+    let attempt = 0;
+    do {
+      fileId = createHash("sha256")
+        .update(`vision-eval:files:${options.seed}:${idx}:${attempt++}`)
+        .digest("hex").slice(0, 12);
+    } while (usedFileIds.has(fileId) || flagTokens.some((token) => fileId.includes(token)));
+    usedFileIds.add(fileId);
 
     // 严禁挪格子：中心必须严格位于格子正中心
     // 遇到越界或重叠时：断言 + 换 seed 重试 (PRNG retry)
@@ -650,7 +661,7 @@ export function generateCorpus(options: GenerateOptions): CorpusItem[] {
     }
 
     const png = encodeRgbaToPng(width, height, rgba);
-    const fileName = `${hexStr}.png`;
+    const fileName = `${fileId}.png`;
 
     // 编码前点阵一致性自检
     const ocrRead = localOcrReadFlag(rgba, width, height, playAreaHeight);
@@ -664,7 +675,7 @@ export function generateCorpus(options: GenerateOptions): CorpusItem[] {
       // 真值中心来源 (a)：落入生成时记录的真实几何
       elements: [elem1, elem2],
       pngBuffer: png,
-      hash: hexStr,
+      hash: fileId,
     });
   }
 
