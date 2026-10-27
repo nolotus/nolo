@@ -1,4 +1,4 @@
-import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
+import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 /**
  * OpenAI 兼容协议 Provider 适配器（Inference Compatibility Seam）。
  *
@@ -187,7 +187,14 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   // openAiCompatibleMessages.test.ts).
   const sanitizedMessages = sanitizeForOutbound(args.messages, args.tools);
   const messages = toOpenAiCompatibleMessages(sanitizedMessages, {
-    supportsToolImages: !isResponses && resolveAgentImageInputSupport({ provider: args.providerConfig.usageProvider ?? args.providerConfig.provider, model: args.providerConfig.model, customProviderUrl: args.providerConfig.endpoint, hasVision: args.providerConfig.hasVision ?? false }),
+    supportsToolImages: resolveToolImagePolicy({
+      routeKind: isResponses ? "responses" : "openai-compatible",
+      legacySupportsToolImages: isResponses ? false : undefined,
+      provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
+      model: args.providerConfig.model,
+      customProviderUrl: args.providerConfig.endpoint,
+      hasVision: args.providerConfig.hasVision,
+    }).supportsToolImages,
     stripReasoningContent: shouldStripReasoning,
     ...(args.shapingCounts ? { shapingCounts: args.shapingCounts } : {}),
     ...resolveReasoningReplayOptions(

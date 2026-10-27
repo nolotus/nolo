@@ -1,4 +1,4 @@
-import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
+import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
 import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
 import { extractUsageFromSsePayload, hasUsageTokens } from "ai/token/sseUsageExtract";
@@ -301,11 +301,25 @@ export function buildPlatformChatCompletionRequest(args: {
     model: args.providerConfig.model,
     ...(usesResponsesApi
       ? {
-          input: convertMessagesToResponsesInput(sanitizedMessages as any),
+          input: convertMessagesToResponsesInput(sanitizedMessages as any, {
+            supportsToolImages: resolveToolImagePolicy({
+              routeKind: "responses",
+              provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
+              model: args.providerConfig.model,
+              hasVision: args.providerConfig.hasVision,
+              legacySupportsToolImages: false,
+            }).supportsToolImages,
+          }),
         }
       : {
           messages: toOpenAiCompatibleMessages(sanitizedMessages, {
-    supportsToolImages: resolveAgentImageInputSupport({ provider: args.providerConfig.usageProvider ?? args.providerConfig.provider, model: args.providerConfig.model, customProviderUrl: args.providerConfig.endpoint, hasVision: args.providerConfig.hasVision ?? false }),
+            supportsToolImages: resolveToolImagePolicy({
+              routeKind: "platform",
+              provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
+              model: args.providerConfig.model,
+              customProviderUrl: args.providerConfig.endpoint,
+              hasVision: args.providerConfig.hasVision,
+            }).supportsToolImages,
             stripReasoningContent: shouldStripReasoning,
           }),
         }),

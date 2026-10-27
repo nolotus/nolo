@@ -1,3 +1,4 @@
+import { projectOpenAiToolImages } from "../../agent-runtime/openAiToolImages";
 import type { Message } from "app/types";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -158,11 +159,13 @@ export const convertMessagesToResponsesInput = (
     | (Pick<Message, "role" | "content" | "tool_calls" | "tool_call_id"> & { reasoning_content?: unknown })
     | { role: string; content?: any; tool_calls?: any; tool_call_id?: string; reasoning_content?: unknown }
   >,
-  options?: { stripReasoningContent?: boolean },
+  options?: { stripReasoningContent?: boolean; supportsToolImages?: boolean },
 ): ResponseInputItem[] => {
   const input: ResponseInputItem[] = [];
 
-  for (const message of messages) {
+  for (const message of (options?.supportsToolImages
+    ? projectOpenAiToolImages(messages as any, true)
+    : messages)) {
     if (!message?.role) continue;
 
     if (message.role === "tool") {

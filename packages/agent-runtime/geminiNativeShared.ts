@@ -1,3 +1,4 @@
+import { resolveToolImagePolicy, type ToolImagePolicyInput } from "../ai/llm/agentCapabilities";
 /**
  * Gemini Native generateContent 共享协议与模型怪癖适配器（Google/Antigravity Quirk Matrix）。
  *
@@ -1003,8 +1004,13 @@ export function buildGeminiGenerateContentRequest(args: {
   temperature?: number;
   attachSkipThoughtSignature: boolean;
   supportsToolImages?: boolean;
+  toolImagePolicy?: ToolImagePolicyInput;
 }): Record<string, unknown> {
-  const supportsToolImages = args.supportsToolImages ?? false;
+  const supportsToolImages = resolveToolImagePolicy(args.toolImagePolicy ?? {
+    routeKind: "gemini-native",
+    hasVision: args.supportsToolImages,
+    legacySupportsToolImages: args.supportsToolImages ?? false,
+  }).supportsToolImages;
 
   const { contents, systemTexts } = convertOpenAiMessagesToGemini(
     args.messages,

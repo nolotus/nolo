@@ -25,7 +25,7 @@ import {
   resolveGeminiModelQuirks,
   isGemini3Model,
 } from "./geminiNativeShared";
-import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
+import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 
 const STREAM_PATH = "/v1internal:streamGenerateContent?alt=sse";
 
@@ -163,11 +163,12 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
   const quirks = resolveGeminiModelQuirks(model);
   const isClaude = quirks.isClaudeCrossModel;
 
-  const supportsToolImages = resolveAgentImageInputSupport({
+  const supportsToolImages = resolveToolImagePolicy({
     ...args.agentConfig,
+    routeKind: "antigravity",
     model,
-    hasVision: args.agentConfig.hasVision ?? false,
-  });
+    hasVision: args.agentConfig.hasVision,
+  }).supportsToolImages;
 
   const { contents, systemTexts } = convertOpenAiMessagesToGemini(rawMessages, {
     attachSkipThoughtSignature: quirks.allowsThoughtSignatureSentinel,

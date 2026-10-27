@@ -1,3 +1,4 @@
+import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { createHash } from "node:crypto";
 import { deriveStableUuid, isStableSessionIdentityEnabled } from "./sessionIdentity";
 import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
@@ -230,8 +231,9 @@ function collectInstructions(
  */
 export function convertMessagesToCodexInput(
   messages: Parameters<typeof convertMessagesToResponsesInput>[0],
+  supportsToolImages = false,
 ): ResponseInputItem[] {
-  return convertMessagesToResponsesInput(messages).map((item) => {
+  return convertMessagesToResponsesInput(messages, { supportsToolImages }).map((item) => {
     if (item.type !== "reasoning") return item;
     return {
       type: "reasoning",
@@ -256,7 +258,12 @@ export function buildCodexRequestBody(
     const role = m && typeof m === "object" ? String((m as { role?: unknown }).role) : "";
     return role !== "system" && role !== "developer";
   });
-  const input = convertMessagesToCodexInput(nonSystem as any);
+  const input = convertMessagesToCodexInput(nonSystem as any, resolveToolImagePolicy({
+    ...args.agentConfig,
+    model: typeof args.openAiBody.model === "string" ? args.openAiBody.model : args.agentConfig.model,
+    routeKind: "codex/responses",
+    legacySupportsToolImages: false,
+  }).supportsToolImages);
   const instructions = collectInstructions(rawMessages, args.agentConfig.prompt);
   const stableInstructions = collectStablePromptPrefix(rawMessages, args.agentConfig.prompt);
   const model =

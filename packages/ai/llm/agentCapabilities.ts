@@ -95,10 +95,7 @@ const lookupKnownModelVision = (
   return undefined;
 };
 
-export const resolveAgentImageInputSupport = (
-  agent: AgentCapabilityConfig | null | undefined,
-): boolean => {
-  if (!agent) return true;
+const resolveCatalogImageSupport = (agent: AgentCapabilityConfig): boolean | undefined => {
 
   const provider = asTrimmedLowercaseString(agent.provider)
     || asTrimmedLowercaseString(agent.apiSource)
@@ -125,13 +122,48 @@ export const resolveAgentImageInputSupport = (
         )?.hasVision
     : lookupKnownModelVision(provider, model);
 
-  if (catalogHasVision !== undefined) {
-    return catalogHasVision;
-  }
+  return catalogHasVision;
+};
 
-  if (typeof agent.hasVision === "boolean") {
-    return agent.hasVision;
-  }
+// User-input vision keeps its historical permissive fallback. Tool images do not.
+export const resolveAgentImageInputSupport = (
+  agent: AgentCapabilityConfig | null | undefined,
+): boolean => {
+  if (!agent) return true;
+  return resolveCatalogImageSupport(agent) ?? agent.hasVision ?? true;
+};
 
-  return true;
+export type ToolImageRouteKind =
+  | "openai-compatible" | "responses" | "codex/responses"
+  | "gemini-native" | "antigravity" | "platform";
+
+export type ToolImagePolicyInput = AgentCapabilityConfig & {
+  /** Actual outbound transport, never the agent's display provider. */
+  routeKind: ToolImageRouteKind;
+  /** Only for restoring a boundary's historical serializer default. */
+  legacySupportsToolImages?: boolean;
+};
+
+export const resolveToolImagePolicy = (input: ToolImagePolicyInput): {
+  supportsToolImages: boolean;
+  reason: string;
+} => {
+  const env = typeof process !== "undefined" ? process.env : undefined;
+  if (env?.NOLO_TOOL_IMAGE_POLICY === "legacy") {
+    return {
+      supportsToolImages: input.legacySupportsToolImages
+        ?? resolveAgentImageInputSupport({ ...input, hasVision: input.hasVision ?? false }),
+      reason: "legacy",
+    };
+  }
+  if (input.routeKind === "antigravity"
+    && env?.NOLO_TOOL_IMAGES_ALLOW_ANTIGRAVITY !== "1") {
+    return { supportsToolImages: false, reason: "route-unsupported" };
+  }
+  const catalog = resolveCatalogImageSupport(input);
+  if (catalog !== undefined) return { supportsToolImages: catalog, reason: "catalog" };
+  if (typeof input.hasVision === "boolean") {
+    return { supportsToolImages: input.hasVision, reason: "agent-declaration" };
+  }
+  return { supportsToolImages: false, reason: "unknown" };
 };

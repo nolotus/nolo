@@ -48,7 +48,7 @@ import {
   buildGeminiGenerateContentRequest,
   resolveGeminiModelQuirks,
 } from "./geminiNativeShared";
-import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
+import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import {
   customNativeAuthHeaders,
   isCallerCancellation,
@@ -241,12 +241,13 @@ function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeP
         isAllowedImageUrl: (url) => { try { return new URL(url).origin === new URL(serverUrl as string).origin; } catch { return false; } },
         fetchImage: async (url) => { const image = await fetchImpl(url, { headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined, signal: options?.signal }); if (!image.ok) return { ok: false, error: `HTTP ${image.status}` }; return { ok: true, mimeType: image.headers.get("content-type") ?? "application/octet-stream", bytes: new Uint8Array(await image.arrayBuffer()) }; },
       }) as { messages: typeof messages };
-      const supportsToolImages = resolveAgentImageInputSupport({
+      const supportsToolImages = resolveToolImagePolicy({
+        routeKind: "gemini-native",
         ...agentConfig,
         provider: agentConfig.provider ?? "google",
         model,
-        hasVision: agentConfig.hasVision ?? false,
-      });
+        hasVision: agentConfig.hasVision,
+      }).supportsToolImages;
       const body = buildGeminiGenerateContentRequest({ messages: inlineResult.messages as unknown[], tools: tools as unknown[], maxTokens: typeof agentConfig.max_tokens === "number" ? agentConfig.max_tokens : undefined, temperature: typeof agentConfig.temperature === "number" ? agentConfig.temperature : undefined, attachSkipThoughtSignature: resolveGeminiModelQuirks(model).allowsThoughtSignatureSentinel, supportsToolImages });
       log("provider.request.start", { agentKey: agentConfig.key, transport, requestUrl: nativeEndpoint, model, messageCount: messages.length, toolCount: tools.length, requestedToolNames });
       // gateway session 头是**每调用**的：dialogId 只在 complete() 里可得；同一
