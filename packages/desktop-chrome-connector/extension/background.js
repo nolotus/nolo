@@ -13,6 +13,7 @@ import {
   decideIrreversibleAction,
   deserializeOpenedTabs,
   isActivationKey,
+  isOwnExtensionPage,
   isProtectedPageUrl,
   normalizeTabId,
   resolveActionTarget,
@@ -438,11 +439,24 @@ export async function handleApprovalDecision(message = {}, sender = {}) {
   const extensionId = typeof chrome !== "undefined" ? chrome?.runtime?.id : "";
   const senderId = typeof sender?.id === "string" ? sender.id : "";
   const senderUrl = typeof sender?.url === "string" ? sender.url : "";
-  const approvePagePrefix = extensionId && typeof extensionId === "string"
-    ? `chrome-extension://${extensionId}/${APPROVAL_PAGE_PATH}`
-    : "";
+  // The approval page is an extension page, so its URL carries the browser's extension scheme:
+  // `chrome-extension://<id>/approve.html` on Chrome, `moz-extension://<uuid>/approve.html` on
+  // Firefox. `runtime.getURL()` is the only source that is right on both (on Firefox the moz
+  // uuid is not `runtime.id` for AMO-signed add-ons), so ask the browser first and keep the
+  // Chrome-shaped spelling as the fallback for a runtime without getURL.
+  const approvePagePrefixes = [];
+  if (typeof chrome?.runtime?.getURL === "function") {
+    const ownPage = chrome.runtime.getURL(APPROVAL_PAGE_PATH);
+    if (ownPage) approvePagePrefixes.push(ownPage);
+  }
+  if (typeof extensionId === "string" && extensionId) {
+    approvePagePrefixes.push(`chrome-extension://${extensionId}/${APPROVAL_PAGE_PATH}`);
+    approvePagePrefixes.push(`moz-extension://${extensionId}/${APPROVAL_PAGE_PATH}`);
+  }
   const senderOk =
-    Boolean(approvePagePrefix) && senderId === extensionId && senderUrl.startsWith(approvePagePrefix);
+    Boolean(approvePagePrefixes.length) &&
+    senderId === extensionId &&
+    approvePagePrefixes.some((prefix) => senderUrl.startsWith(prefix));
   const nonceOk = typeof record.nonce === "string" && record.nonce.length > 0 && message?.nonce === record.nonce;
   const windowOk = record.windowId != null && Number(message?.windowId) === Number(record.windowId);
 
@@ -2750,10 +2764,12 @@ async function handleAction(action, payload = {}) {
       // The connector's own pages (the approval popup above all) are never listed: their URL carries
       // the approvalId + nonce and `serializeTab` would also hand out the windowId, which is exactly
       // what an approval decision is bound to. Not a page the agent has any business in.
+      // `getURL("")` is the browser's own origin for extension pages — `chrome-extension://<id>/`
+      // on Chrome, `moz-extension://<uuid>/` on Firefox — so the same filter works on both.
       const ownOrigin = typeof chrome?.runtime?.getURL === "function" ? chrome.runtime.getURL("") : "";
       return {
         tabs: tabs
-          .filter((tab) => !ownOrigin || !String(tab?.url || "").startsWith(ownOrigin))
+          .filter((tab) => !isOwnExtensionPage(String(tab?.url || ""), ownOrigin))
           .map((tab) => ({
             ...serializeTab(tab),
             openedByConnector: openedTabs.has(tab.id),

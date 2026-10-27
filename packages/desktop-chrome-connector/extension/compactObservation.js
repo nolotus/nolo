@@ -12,11 +12,22 @@ export const CONNECTOR_PROTOCOL_VERSION = "2";
 /** Chrome refuses script injection into its own UI and the Web Store; say so instead of failing oddly. */
 export const PROTECTED_PAGE_CODE = "PROTECTED_PAGE";
 
+/**
+ * Extension-owned pages live under a browser-specific URL scheme: Chrome serves them from
+ * `chrome-extension://<id>/`, Firefox from `moz-extension://<uuid>/`. Every judgement that has to
+ * recognise "a page this extension owns" must cover both, or Firefox silently loses the guard
+ * Chrome has (the approval page in particular).
+ *
+ * These are full URL schemes, matched with `startsWith` — never a bare `-extension://` substring,
+ * which would also swallow unrelated URLs.
+ */
+export const EXTENSION_URL_PREFIXES = Object.freeze(["chrome-extension://", "moz-extension://"]);
+
 const PROTECTED_URL_PREFIXES = Object.freeze([
   "chrome://",
   "chrome-untrusted://",
   "chrome-search://",
-  "chrome-extension://",
+  ...EXTENSION_URL_PREFIXES,
   "devtools://",
   "edge://",
   "about:",
@@ -25,8 +36,31 @@ const PROTECTED_URL_PREFIXES = Object.freeze([
   "https://chromewebstore.google.com",
 ]);
 
+/** True for any extension-scheme page (Chrome's or Firefox's), whatever extension owns it. */
+export function isExtensionPageUrl(url) {
+  const value = typeof url === "string" ? url.trim().toLowerCase() : "";
+  if (!value) return false;
+  return EXTENSION_URL_PREFIXES.some((prefix) => value.startsWith(prefix));
+}
+
 /**
- * Chrome refuses script injection into its own UI, the Web Store and other browser-owned origins.
+ * True for a page served by *this* extension.
+ *
+ * `ownOrigin` is `chrome.runtime.getURL("")`, which is `chrome-extension://<id>/` on Chrome and
+ * `moz-extension://<uuid>/` on Firefox — the browser already knows its own shape, so we ask it
+ * instead of guessing. When the runtime does not expose `getURL` (a stripped-down host), fall
+ * back to the extension scheme so the extension's own pages still stay out of the way.
+ */
+export function isOwnExtensionPage(url, ownOrigin = "") {
+  const value = typeof url === "string" ? url.trim() : "";
+  if (!value) return false;
+  if (typeof ownOrigin === "string" && ownOrigin) return value.startsWith(ownOrigin);
+  return isExtensionPageUrl(value);
+}
+
+/**
+ * Chrome refuses script injection into its own UI, the Web Store and other browser-owned origins;
+ * Firefox refuses the same for its own `moz-extension://` pages.
  *
  * `file://` and `data:` are deliberately absent: a file page fails because the extension has no file
  * access (and enabling it is the user's choice), and `data:` URLs are not navigable tabs here. Both
