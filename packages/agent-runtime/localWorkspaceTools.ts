@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readLocalImage } from "./readImage";
 import { renderVisualPage, visualRendererCapability } from "./visualRenderer.node";
+import { captureHostWindow } from "./hostWindowCapture";
 import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -2438,6 +2439,13 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
         ? { resolveRipgrepBinary: args.resolveRipgrepBinary }
         : {}),
     }),
+    captureHostWindow: async (call: AgentRuntimeToolCallInput) => {
+      let parsed: unknown;
+      try { parsed = JSON.parse(call.arguments || "{}"); }
+      catch { return { content: "captureHostWindow accepts an empty JSON object" }; }
+      if (!isRecord(parsed) || Object.keys(parsed).length) return { content: "captureHostWindow accepts no arguments" };
+      return captureHostWindow();
+    },
     read_image: async (call: AgentRuntimeToolCallInput) => {
       const parsed = parseWorkspaceToolArguments(call.arguments);
       if (Object.keys(parsed).some((key) => key !== "path")) throw new Error("read_image accepts exactly one path");

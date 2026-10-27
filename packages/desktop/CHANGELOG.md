@@ -1,4 +1,11 @@
 
+## 0.192.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** 宿主窗口捕获（xdg-desktop-portal）→ 图片（**需显式声明**） ([54c82dc](https://github.com/nolotus/bun-nolo/commit/54c82dc4a6697e482567d80ab0c85471feab2e67))
+
+
 ## 0.191.0-alpha.1 (2026-10-27)
 
 ### Features

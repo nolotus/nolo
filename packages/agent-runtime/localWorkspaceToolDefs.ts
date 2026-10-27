@@ -26,7 +26,7 @@ import type { OpenAiCompatibleTool } from "./capabilities";
 export type { OpenAiCompatibleTool };
 
 const WORKSPACE_TOOL_NAMES = [
-  "readFile", "read_image", "writeFile", "editFile", "globFiles", "captureVisualState",
+  "readFile", "read_image", "captureHostWindow", "writeFile", "editFile", "globFiles", "captureVisualState",
   "execShell", "launchProcess", "listProcesses",
   "taskWait", "taskStop",
   "openDesktopPreview",
@@ -393,6 +393,16 @@ function buildTaskStopTool(): OpenAiCompatibleTool {
 }
 
 export function buildWorkspaceToolDefinition(toolName: string) {
+  if (toolName === "captureHostWindow") {
+    return {
+      type: "function" as const,
+      function: {
+        name: "captureHostWindow",
+        description: "Capture the host desktop through the Screenshot portal (interactive permission/selection may appear). Returns an image or a fail-closed reason within 9s. Portal does not identify the application/window: never infer a window name. Linux host requires /usr/bin/python3 with Gio. No arguments.",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+      },
+    };
+  }
   if (toolName === "read_image") {
     return {
       type: "function" as const,
