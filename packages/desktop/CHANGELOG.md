@@ -1,4 +1,11 @@
 
+## 0.195.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **capabilities:** antigravity 每请求上限 3→4（原值源自单次观测，已证伪） ([ce24515](https://github.com/nolotus/bun-nolo/commit/ce245156cbcf451bb8bf172979bd3b78b86325f3))
+
+
 ## 0.195.0-alpha.1 (2026-10-27)
 
 ### Features

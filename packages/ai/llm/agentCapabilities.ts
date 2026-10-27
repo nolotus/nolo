@@ -150,7 +150,10 @@ export const resolveToolImagePolicy = (input: ToolImagePolicyInput): {
   maxImagesPerRequest: number;
   reason: string;
 } => {
-  const maxImagesPerRequest = input.routeKind === "antigravity" || input.provider === "google-antigravity" ? 3 : 4;
+  // 阈值必须来自重复 ≥3 次的观测，不能把单次失败当作硬限制。
+  // antigravity 曾因单次 4 张失败被设为 3；随后旧代码两次 4/4 命中，
+  // 重复观测证伪了该误判，恢复所有路由默认 4（并非据此宣称新的硬限制）。
+  const maxImagesPerRequest = 4;
   const env = typeof process !== "undefined" ? process.env : undefined;
   if (env?.NOLO_TOOL_IMAGE_POLICY === "legacy") {
     return {
