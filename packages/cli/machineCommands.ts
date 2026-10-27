@@ -21,6 +21,12 @@ import {
   resolveConnectorWebSocketTarget,
 } from "./connectorWebSocketTarget";
 import {
+  CONNECTOR_LOCK_CORRUPT_RECLAIM_SECONDS,
+  acquireConnectorInstanceLock,
+  clearConnectorAlive,
+  withConnectorAliveSignal,
+} from "./connectorInstanceLock";
+import {
   checkConnectorWorkspaceLinks,
   runMachineDaemonCommand,
 } from "./machineDaemonCommands";
@@ -174,6 +180,8 @@ type MachineCommandDeps = {
     env: EnvLike;
     logPath: string;
   }) => { pid?: number };
+  /** 单实例锁 / 存活信号的 home 目录（测试隔离用；默认用 `~/.nolo` 或 `$NOLO_HOME`）。 */
+  connectorHomeDir?: string;
 };
 
 function resolveServerUrl(env: EnvLike) {
@@ -406,11 +414,13 @@ export async function runMachineConnectCommand(
       cliEntrypointPath: deps.cliEntrypointPath,
       validateWorkspaceLinks: deps.validateWorkspaceLinks,
       spawnDaemon: deps.spawnDaemon,
+      connectorHomeDir: deps.connectorHomeDir,
     });
   }
 
   const machine = (deps.machineInfo ?? detectLaunchableMachineInfo)();
-  const sendHeartbeat = () =>
+  const machineId = machine.machineId;
+  const sendHeartbeatBase = () =>
     postMachineHeartbeat({
       fetchImpl,
       serverUrl,
@@ -424,27 +434,63 @@ export async function runMachineConnectCommand(
     if (!(await checkConnectorWorkspaceLinks(process.cwd(), output, validateWorkspaceLinks))) {
       return 1;
     }
-    const maxAttempts = deps.maxConnectorAttempts ?? Infinity;
-    const sleep = deps.sleep ?? defaultSleep;
-    const reconnectDelayMs = resolveConnectorReconnectDelayMs(env);
-    // 本机工具授权配置在本次 connector 启动时定一次（改 env 需重启 connector）。
-    const toolGrants = readMachineToolGrants(env);
-    // 机器工具路由 v1（只读）：executors 按 daemon 进程建一次（刻意跨 WS
-    // 重连存活）；机器路由不挂 readFile 去重 ledger，跨 server 会话重读
-    // 文件始终返回真实内容（M3 隔离）。workspaceRoot = daemon 进程 cwd
-    // （用户运行 nolo connect 的目录）。
-    const toolInvokeHandlers = createMachineToolInvokeHandlers({
-      workspaceRoot: process.cwd(),
-      // M2 修复：机器侧授权复核与握手上报共用同一来源——本次 `deps.env ??
-      // process.env`。grants 快照与 WS URL 上报的那份逐字节相同；未配置时也
-      // 显式传 env，工厂不再回落到 process.env（调用方经 deps.env 注入环境时
-      // 两端曾不一致）。
-      env,
-      ...(toolGrants ? { grants: toolGrants as MachineToolGrants } : {}),
+    // 单实例互斥（2026-10-27 事故）：同一台机器同时只允许一个 connector。锁用
+    // O_EXCL 原子创建，两个进程同时起只有一个能拿到；已有存活实例时直接拒绝
+    // 启动并打印它的 pid——避免两进程互相把对方的 WS 连接踢下线。
+    const instanceLock = acquireConnectorInstanceLock({
+      machineId,
+      homeDir: deps.connectorHomeDir,
+      noloHome: env.NOLO_HOME,
+      kind: "ws",
     });
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      if (deps.signal?.aborted) {
-        return 0;
+    if (!instanceLock.ok) {
+      // pid=0 = 锁文件读不出有效 pid：要么另一个 connector 正在启动（写锁内容的窗口
+      // 里，文件还是 0 字节），要么锁文件损坏。两种情况都必须 fail-closed：拒绝启动。
+      const owner = instanceLock.pid > 0 ? `pid=${instanceLock.pid}` : "owner pid unknown";
+      output.write(
+        `[nolo] A connector for this machine is already running (${owner}). ` +
+          `Do not start two connectors at the same time — stop the running one first ` +
+          `(or check whether it is still healthy) before starting a new one.\n`
+      );
+      return 3;
+    }
+    if (instanceLock.reclaimed === "corrupt") {
+      // 接管了一个「读不出有效 pid 且已过期」的坏锁：这通常来自上一次 connector 在写
+      // 锁内容的途中崩溃。留一行日志，便于事后判断是不是反复发生。
+      output.write(
+        `[nolo] Reclaimed a corrupt connector lock (no readable pid, older than ` +
+          `${CONNECTOR_LOCK_CORRUPT_RECLAIM_SECONDS}s) — a previous connector likely ` +
+          `crashed while writing it.\n`
+      );
+    }
+    // 心跳成功才更新存活信号（给外部观察者用的 epoch 时间戳）。
+    const sendHeartbeat = withConnectorAliveSignal(sendHeartbeatBase, {
+      machineId,
+      homeDir: deps.connectorHomeDir,
+      noloHome: env.NOLO_HOME,
+    });
+    try {
+      const maxAttempts = deps.maxConnectorAttempts ?? Infinity;
+      const sleep = deps.sleep ?? defaultSleep;
+      const reconnectDelayMs = resolveConnectorReconnectDelayMs(env);
+      // 本机工具授权配置在本次 connector 启动时定一次（改 env 需重启 connector）。
+      const toolGrants = readMachineToolGrants(env);
+      // 机器工具路由 v1（只读）：executors 按 daemon 进程建一次（刻意跨 WS
+      // 重连存活）；机器路由不挂 readFile 去重 ledger，跨 server 会话重读
+      // 文件始终返回真实内容（M3 隔离）。workspaceRoot = daemon 进程 cwd
+      // （用户运行 nolo connect 的目录）。
+      const toolInvokeHandlers = createMachineToolInvokeHandlers({
+        workspaceRoot: process.cwd(),
+        // M2 修复：机器侧授权复核与握手上报共用同一来源——本次 `deps.env ??
+        // process.env`。grants 快照与 WS URL 上报的那份逐字节相同；未配置时也
+        // 显式传 env，工厂不再回落到 process.env（调用方经 deps.env 注入环境时
+        // 两端曾不一致）。
+        env,
+        ...(toolGrants ? { grants: toolGrants as MachineToolGrants } : {}),
+      });
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        if (deps.signal?.aborted) {
+          return 0;
       }
       const runtimeServerUrl =
         env.NOLO_CONNECT_RUNTIME_SERVER_URL ||
@@ -513,6 +559,14 @@ export async function runMachineConnectCommand(
       await sleepWithAbort(retryDelayMs, sleep, deps.signal);
     }
     return 0;
+    } finally {
+      instanceLock.release();
+      clearConnectorAlive({
+        machineId,
+        homeDir: deps.connectorHomeDir,
+        noloHome: env.NOLO_HOME,
+      });
+    }
   }
 
   if (hasFlag(args, "--watch")) {
@@ -520,7 +574,7 @@ export async function runMachineConnectCommand(
       env,
       output,
       machine,
-      sendHeartbeat,
+      sendHeartbeat: sendHeartbeatBase,
       runHeartbeatLoop: deps.runHeartbeatLoop ?? defaultRunHeartbeatLoop,
     });
   }
@@ -528,7 +582,7 @@ export async function runMachineConnectCommand(
   return runMachineHeartbeatConnectCommand({
     output,
     machine,
-    sendHeartbeat,
+    sendHeartbeat: sendHeartbeatBase,
   });
 }
 

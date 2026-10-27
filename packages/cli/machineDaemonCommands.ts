@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSyn
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveMachineId } from "connector-experimental/machineInfo";
 import { isCompiledBinary } from "./cliEnvHelpers";
+import { acquireConnectorInstanceLock } from "./connectorInstanceLock";
 
 type EnvLike = Record<string, string | undefined>;
 type OutputLike = { write(chunk: string): unknown };
@@ -187,6 +189,10 @@ export type MachineDaemonCommandDeps = {
     env: EnvLike;
     logPath: string;
   }) => { pid?: number };
+  /** 单实例锁的 home 目录（测试隔离用；默认 `~/.nolo` 或 `$NOLO_HOME`）。 */
+  connectorHomeDir?: string;
+  /** 机器 id（默认从 machine-id 文件解析；测试可注入）。 */
+  machineId?: string;
 };
 
 export async function runMachineDaemonCommand(
@@ -199,6 +205,26 @@ export async function runMachineDaemonCommand(
   if (!(await checkConnectorWorkspaceLinks(process.cwd(), output, validateWorkspaceLinks))) {
     return 1;
   }
+
+  // 单实例互斥（2026-10-27 事故）：daemon 之前先探一次锁——已有存活实例时直接
+  // 拒绝，不再多起一个进程（多起的那个会和存量实例互相踢下线）。
+  // 真正的锁由随后 spawn 的 `connect --ws` 子进程持有：子进程自己用 O_EXCL
+  // 原子获取，锁里的 pid 始终是那个活着的 connector 进程，陈旧锁判活才准确。
+  const probe = acquireConnectorInstanceLock({
+    machineId: deps.machineId ?? resolveMachineId(),
+    homeDir: deps.connectorHomeDir,
+    noloHome: env.NOLO_HOME,
+    kind: "daemon",
+  });
+  if (!probe.ok) {
+    output.write(
+      `[nolo] A connector for this machine is already running (pid=${probe.pid}). ` +
+        `Do not start two connectors at the same time — stop the running one first ` +
+        `(or check whether it is still healthy) before starting a new one.\n`
+    );
+    return 3;
+  }
+  probe.release();
 
   const logPath = resolveDaemonLogPath(env);
   const result = (deps.spawnDaemon ?? defaultSpawnDaemon)({

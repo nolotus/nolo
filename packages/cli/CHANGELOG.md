@@ -1,4 +1,11 @@
 
+## 0.180.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **cli:** make the machine connector single-instance and observable ([4ecebd0](https://github.com/nolotus/bun-nolo/commit/4ecebd03a6688e880f0a09cc6c9ccd673731b065))
+
+
 ## 0.180.0-alpha.1 (2026-10-27)
 
 ### Features
