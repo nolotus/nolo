@@ -27,6 +27,7 @@
  */
 
 import type { AgentRuntimeChatMessage, AgentRuntimeToolCall } from "./types";
+import { projectOpenAiToolImages } from "./openAiToolImages";
 
 /** 哨兵：gemini-3 可用，gemini-3.5/flash-preview 不接受。 */
 export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
@@ -63,6 +64,30 @@ export function isGemini3Model(modelId: string): boolean {
 
 // ---- Types ----
 
+/**
+ * Gemini Part 类型定义。
+ *
+ * 协议依据与工具图片投影策略说明：
+ * 1. Google 官方 Protobuf 规范出处：
+ *    `google/ai/generativelanguage/v1beta/content.proto`
+ *    - `message Part` 的 payload 采用 `oneof data` 联合体：
+ *      `text (1)`, `inline_data (2)`, `function_call (3)`, `function_response (4)`, `file_data (5)`。
+ *    - `message FunctionResponse` 的字段为：
+ *      `string name = 1; google.protobuf.Struct response = 2; string id = 3;`
+ *      以及 `repeated FunctionResponsePart parts = 8`；而
+ *      `FunctionResponsePart { FunctionResponseBlob inline_data = 1; ... }`
+ *      —— 也就是说**协议本身支持**通过 `parts[].inline_data` 携带媒体。
+ *      （此前的注释误称“无 inline_data”，已更正：见 googleapis 仓库
+ *      `google/ai/generativelanguage/v1beta/content.proto` 第 642/166 行。）
+ * 2. 混合 Part 与投影设计的保守选择：
+ *    虽然 Gemini `Content` 允许 `repeated Part parts`，理论上一个 user turn 内部可以并列包含
+ *    `function_response` 与 `inline_data`，但此种多模态混排在各类下游网关（如 Antigravity
+ *    Cloud Code Assist 反向映射回 Claude tool_result、第三方代理与各企业网关）上的兼容性
+ *    未经官方端点实测验证，是否触发 400 属**兼容性未验证**（不是协议禁止）。
+ *    因此采用保守选择：将工具图片通过 `projectOpenAiToolImages` 投影为紧随工具批次之后的
+ *    合成 user 消息（或紧随其后的 user turn parts），既符合官方 Proto 结构，又规避了未知网关
+ *    对混排 Part 的兼容性风险。
+ */
 export type GeminiPart =
   | { text: string }
   | {
@@ -130,6 +155,82 @@ function extractInlineDataParts(
 }
 
 /**
+ * 提前过滤掉没有匹配 preceding assistant tool_calls 的孤立工具结果（orphaned tool messages）。
+ *
+ * 必须在 projectOpenAiToolImages() 之前执行：
+ * 否则工具消息虽然后续被丢弃，其携带的图片却会被提前合成为 user 附件消息，
+ * 并错误挂载到前一条不相关的 user 消息上。
+ */
+export function filterOrphanedToolMessages(
+  messages: AgentRuntimeChatMessage[],
+): AgentRuntimeChatMessage[] {
+  if (!Array.isArray(messages)) return [];
+  const result: AgentRuntimeChatMessage[] = [];
+  let pendingFunctionCalls: Array<{ name: string; id: string }> = [];
+  let toolCallIndex = 0;
+
+  for (const raw of messages) {
+    if (!raw || typeof raw !== "object" || !("role" in raw)) continue;
+    const role = String((raw as { role: unknown }).role);
+
+    if (role === "system") {
+      result.push(raw);
+      continue;
+    }
+
+    if (role === "user") {
+      pendingFunctionCalls = [];
+      result.push(raw);
+      continue;
+    }
+
+    if (role === "assistant" || role === "model") {
+      pendingFunctionCalls = [];
+      const calls =
+        "tool_calls" in raw && Array.isArray((raw as { tool_calls: unknown }).tool_calls)
+          ? ((raw as { tool_calls: unknown[] }).tool_calls as AgentRuntimeToolCall[])
+          : [];
+
+      for (const call of calls) {
+        if (!call || typeof call !== "object") continue;
+        const name = call.function?.name || `tool_${++toolCallIndex}`;
+        const id = typeof call.id === "string" ? call.id : "";
+        pendingFunctionCalls.push({ name, id });
+      }
+      result.push(raw);
+      continue;
+    }
+
+    if (role === "tool") {
+      const toolCallId =
+        "tool_call_id" in raw &&
+        typeof (raw as { tool_call_id: unknown }).tool_call_id === "string"
+          ? (raw as { tool_call_id: string }).tool_call_id
+          : "";
+      const rawName =
+        "name" in raw &&
+        typeof (raw as { name: unknown }).name === "string"
+          ? (raw as { name: string }).name.trim()
+          : "";
+      const pendingIndex = pendingFunctionCalls.findIndex((p) =>
+        toolCallId ? p.id === toolCallId : rawName ? p.name === rawName : true,
+      );
+      if (pendingIndex === -1) {
+        // 孤立工具结果：前面没有未响应的 functionCall，丢弃
+        continue;
+      }
+      pendingFunctionCalls.splice(pendingIndex, 1);
+      result.push(raw);
+      continue;
+    }
+
+    result.push(raw);
+  }
+
+  return result;
+}
+
+/**
  * Convert OpenAI-format messages to Gemini generateContent contents.
  *
  * Handles thoughtSignature replay:
@@ -142,8 +243,18 @@ function extractInlineDataParts(
  */
 export function convertOpenAiMessagesToGemini(
   messages: unknown[],
-  options: { attachSkipThoughtSignature: boolean },
+  options: {
+    attachSkipThoughtSignature: boolean;
+    supportsToolImages?: boolean;
+  },
 ): { contents: GeminiContent[]; systemTexts: string[] } {
+  const sanitizedMessages = filterOrphanedToolMessages(
+    (messages ?? []) as AgentRuntimeChatMessage[],
+  );
+  const effectiveMessages = projectOpenAiToolImages(
+    sanitizedMessages,
+    options.supportsToolImages === true,
+  );
   const contents: GeminiContent[] = [];
   const systemTexts: string[] = [];
   let toolCallIndex = 0;
@@ -174,7 +285,7 @@ export function convertOpenAiMessagesToGemini(
     pushOrMergeContent("user", dummyResponses);
   };
 
-  for (const raw of messages) {
+  for (const raw of effectiveMessages) {
     if (!raw || typeof raw !== "object" || !("role" in raw)) continue;
     const role = String((raw as { role: unknown }).role);
     const content =
@@ -190,16 +301,25 @@ export function convertOpenAiMessagesToGemini(
 
     if (role === "user") {
       flushPendingFunctionCalls();
-      const text = messageText(
-        content as AgentRuntimeChatMessage["content"],
-      );
-      const imageParts = extractInlineDataParts(
-        content as AgentRuntimeChatMessage["content"],
-      );
-      if (!text && imageParts.length === 0) continue;
       const parts: GeminiPart[] = [];
-      if (text) parts.push({ text });
-      for (const img of imageParts) parts.push(img);
+      if (typeof content === "string") {
+        const text = content.trim();
+        if (text) parts.push({ text });
+      } else if (Array.isArray(content)) {
+        for (const part of content) {
+          if (!part || typeof part !== "object") continue;
+          if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+            parts.push({ text: part.text });
+          } else if (part.type === "image_url") {
+            const url = (part as { image_url?: { url?: string } }).image_url?.url;
+            if (typeof url === "string" && url.trim()) {
+              const inline = parseDataUrlToInlineData(url);
+              if (inline) parts.push({ inlineData: inline });
+            }
+          }
+        }
+      }
+      if (parts.length === 0) continue;
       pushOrMergeContent("user", parts);
       continue;
     }
@@ -882,10 +1002,16 @@ export function buildGeminiGenerateContentRequest(args: {
   maxTokens?: number;
   temperature?: number;
   attachSkipThoughtSignature: boolean;
+  supportsToolImages?: boolean;
 }): Record<string, unknown> {
+  const supportsToolImages = args.supportsToolImages ?? false;
+
   const { contents, systemTexts } = convertOpenAiMessagesToGemini(
     args.messages,
-    { attachSkipThoughtSignature: args.attachSkipThoughtSignature },
+    {
+      attachSkipThoughtSignature: args.attachSkipThoughtSignature,
+      supportsToolImages,
+    },
   );
 
   const request: Record<string, unknown> = { contents };

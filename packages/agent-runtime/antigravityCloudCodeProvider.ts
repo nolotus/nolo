@@ -25,6 +25,7 @@ import {
   resolveGeminiModelQuirks,
   isGemini3Model,
 } from "./geminiNativeShared";
+import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 
 const STREAM_PATH = "/v1internal:streamGenerateContent?alt=sse";
 
@@ -162,8 +163,15 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
   const quirks = resolveGeminiModelQuirks(model);
   const isClaude = quirks.isClaudeCrossModel;
 
+  const supportsToolImages = resolveAgentImageInputSupport({
+    ...args.agentConfig,
+    model,
+    hasVision: args.agentConfig.hasVision ?? false,
+  });
+
   const { contents, systemTexts } = convertOpenAiMessagesToGemini(rawMessages, {
     attachSkipThoughtSignature: quirks.allowsThoughtSignatureSentinel,
+    supportsToolImages,
   });
   if (contents.length === 0) {
     throw new Error("Antigravity Cloud Code Assist request has no user/model contents.");

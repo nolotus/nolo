@@ -1,4 +1,11 @@
 
+## 0.190.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** Gemini 原生通道注入工具图片 ([4ee3c55](https://github.com/nolotus/bun-nolo/commit/4ee3c55610d165b03a8aeff98e50e41b4818a0b9))
+
+
 ## 0.189.0-alpha.2 (2026-10-27)
 
 ### Bug Fixes
