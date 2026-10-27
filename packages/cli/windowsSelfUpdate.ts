@@ -150,6 +150,42 @@ const { dirname, isAbsolute, join, normalize, relative } = require("node:path");
 
 const payload = JSON.parse(Buffer.from(process.argv[2], "base64url").toString("utf8"));
 const log = (line) => appendFileSync(payload.logPath, "[" + new Date().toISOString() + "] " + line + "\n", "utf8");
+// 完成通知：best-effort。通知失败（无 PowerShell / 通知被禁用 / 无 notify-send）
+// 一律静默，绝不能影响更新结果本身。
+const notify = (title, message) => {
+  try {
+    if (process.platform === "win32") {
+      const psPath = join(process.env.SystemRoot || process.env.WINDIR || "C:\\\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+      // 脚本里不含任何动态文本：title/message 经环境变量传入。
+      // 拼接转义永远追不上解释器认的引号集合（ASCII 单引号、弯引号 ‘ ’ 都会被当成引号），
+      // 所以这里不用引号包裹，直接用 $env: 取值。
+      const ps = [
+        "Add-Type -AssemblyName System.Windows.Forms",
+        "Add-Type -AssemblyName System.Drawing",
+        "$n = New-Object System.Windows.Forms.NotifyIcon",
+        "$n.Icon = [System.Drawing.SystemIcons]::Information",
+        "$n.Visible = $true",
+        "$n.ShowBalloonTip(6000, $env:NOLO_NOTIFY_TITLE, $env:NOLO_NOTIFY_MESSAGE, 'Info')",
+        "Start-Sleep -Milliseconds 800",
+        "$n.Dispose()",
+      ].join("; ");
+      spawnSync(psPath, ["-NoProfile", "-NonInteractive", "-Command", ps], {
+        windowsHide: true,
+        timeout: 15000,
+        env: { ...process.env, NOLO_NOTIFY_TITLE: title, NOLO_NOTIFY_MESSAGE: message },
+      });
+    } else if (process.platform === "darwin") {
+      // 同理：AppleScript 通过 argv 取参，脚本正文是常量。
+      spawnSync(
+        "osascript",
+        ["-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run", title, message],
+        { timeout: 10000 },
+      );
+    } else {
+      spawnSync("notify-send", [title, message], { timeout: 10000 });
+    }
+  } catch {}
+};
 const runNpm = (args) => {
   const command = [payload.nodePath, payload.npmCliPath, ...args].join(" ");
   log("> " + command);
@@ -309,6 +345,8 @@ const switchWindowsShims = (shimDir, entrypoint) => {
     updateId: payload.updateId,
     lockPath: payload.lockPath,
   };
+  let updateSucceeded = false;
+  let alreadyCurrent = false;
   try {
     // 2026-10-27 减法：不再等待父进程或其它 Nolo 窗口退出。
     // 新版本写入独立版本目录、最后只切换入口，因此其它进程继续运行旧版本是安全的；
@@ -388,7 +426,9 @@ const switchWindowsShims = (shimDir, entrypoint) => {
       log("Verified nolo-cli " + targetVersion + " at " + stagedEntrypoint);
     } else {
       log("Already current at " + targetVersion);
+      alreadyCurrent = true;
     }
+    updateSucceeded = true;
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
     log("ERROR: " + message);
@@ -408,6 +448,12 @@ const switchWindowsShims = (shimDir, entrypoint) => {
       }
     } catch {}
     try { rmSync(__filename, { force: true }); } catch {}
+    // 通知放在锁释放之后：同步通知最多阻塞十几秒，不能拖住下一次更新。
+    if (updateSucceeded) {
+      notify("Nolo", alreadyCurrent ? "Nolo is already up to date" : "Update finished - the next Nolo launch uses the new version");
+    } else {
+      notify("Nolo", "Update failed - see log: " + payload.logPath);
+    }
   }
 })();
 `;

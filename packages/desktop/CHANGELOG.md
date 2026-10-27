@@ -1,4 +1,11 @@
 
+## 0.187.0 (2026-10-27)
+
+### Features
+
+* **cli:** 更新可感知——文案修正 + 完成通知 + 版本变化提示 ([7fb82c8](https://github.com/nolotus/bun-nolo/commit/7fb82c8e12493ec289e3e66802d4ee1b98908136))
+
+
 ## 0.186.3 (2026-10-27)
 
 ### Bug Fixes
