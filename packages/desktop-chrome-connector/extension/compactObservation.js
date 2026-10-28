@@ -517,6 +517,70 @@ export function isSensitiveActionName(name) {
   return typeof name === "string" && SENSITIVE_NAME_PATTERN.test(name);
 }
 
+export const CN_IRREVERSIBLE_VERBS = Object.freeze([
+  "付款",
+  "支付",
+  "购买",
+  "下单",
+  "提交订单",
+  "结算",
+  "结账",
+  "转账",
+  "汇款",
+  "捐赠",
+  "提现",
+  "退款",
+  "预约",
+  "删除",
+  "移除",
+  "退订",
+  "取消订阅",
+  "清空",
+  "发布",
+  "公布",
+  "发送",
+  "重发",
+  "授权",
+  "撤销授权",
+  "权限变更",
+  "同意授权",
+  "确认支付",
+  "确认下单",
+  "完成支付",
+]);
+
+/**
+ * A completed-state prefix ("已发送", "已删除") names a place rather than a command. It is only ever
+ * stripped before the tail is judged — see `isIrreversibleActionName`. A match here is never a
+ * release by itself; the tail decides.
+ */
+export const COMPLETED_STATE_LABEL_PATTERN = new RegExp(
+  `^已\\s*(?:${CN_IRREVERSIBLE_VERBS.join("|")})`,
+  "u",
+);
+
+/**
+ * What may follow a completed-state prefix and still leave the label a place rather than an action:
+ * nothing, one or more container nouns ("已发送邮件列表"), and optionally an unread count
+ * ("已发送(3)", "已发送 3", "已发送(3)条").
+ *
+ * Whitelisting the tail, rather than re-testing it for known verbs, is deliberate. Re-testing only
+ * catches the verbs already in the list, so "已发送 Forward", "已发送 Crosspost" and "已发送 转发"
+ * would slip through while every verb was chased one at a time. Anything outside this tail keeps the
+ * gate closed, so a folder may be labelled with these container nouns but an action cannot ride along
+ * behind 已发送.
+ */
+const COMPLETED_STATE_TAIL_PATTERN = new RegExp(
+  [
+    "^\\s*(?:的)?\\s*",
+    "(?:邮件|消息|会话|对话|群聊|聊天|记录|列表|文件夹|邮件夹|邮件箱|信箱|邮箱|草稿|文件|项目",
+    "|订单|账单|通知|申请|申请单|信息|内容|任务|日志|历史|详情|明细|回复|评论|工单|报告|文章",
+    "|帖子|动态|视频|图片|照片)*",
+    "\\s*(?:(?:\\d+|[(（]\\s*\\d+\\s*[)）])\\s*(?:条|封|个|项)?)?\\s*$",
+  ].join(""),
+  "u",
+);
+
 /**
  * The irreversible-action gate. Deliberately narrower than SENSITIVE_NAME_PATTERN: the broad pattern
  * drives post-hoc verification, while this one stops the connector from performing an action whose
@@ -545,9 +609,13 @@ const IRREVERSIBLE_ACTION_PATTERN = new RegExp(
     "\\bdelete\\b",
     "\\bremove\\b",
     "\\bunsubscribe\\b",
-    // publish / send
+    // publish / send. resend/republish carry their own word boundary because `\bsend\b` cannot see
+    // the verb inside them; this covers the bare labels. On the completed-state path the base pattern
+    // is never reached — the tail whitelist is what keeps "已发送 Resend" closed.
     "\\bpublish\\b",
     "\\bsend\\b",
+    "\\bresend\\b",
+    "\\brepublish\\b",
     // permissions and security
     "\\brevoke\\b",
     "\\bgrant\\b",
@@ -556,34 +624,7 @@ const IRREVERSIBLE_ACTION_PATTERN = new RegExp(
     // Chinese equivalents. 清空 is included (clearing a recycle bin is irreversible) but its plain
     // English counterparts are not: "Clear search" and "Reset zoom" are ordinary local actions, and
     // the Latin side has no equivalent that separates the destructive case.
-    "付款",
-    "支付",
-    "购买",
-    "下单",
-    "提交订单",
-    "结算",
-    "结账",
-    "转账",
-    "汇款",
-    "捐赠",
-    "提现",
-    "退款",
-    "预约",
-    "删除",
-    "移除",
-    "退订",
-    "取消订阅",
-    "清空",
-    "发布",
-    "公布",
-    "发送",
-    "授权",
-    "撤销授权",
-    "权限变更",
-    "同意授权",
-    "确认支付",
-    "确认下单",
-    "完成支付",
+    ...CN_IRREVERSIBLE_VERBS,
   ].join("|"),
   "i",
 );
@@ -591,7 +632,16 @@ const IRREVERSIBLE_ACTION_PATTERN = new RegExp(
 export const CONFIRMATION_REQUIRED_CODE = "SENSITIVE_ACTION_REQUIRES_CONFIRMATION";
 
 export function isIrreversibleActionName(name) {
-  return typeof name === "string" && IRREVERSIBLE_ACTION_PATTERN.test(name);
+  if (typeof name !== "string") return false;
+  const trimmed = name.trim();
+  // The completed-state prefix is exempt only when what follows it is a place-name tail; any other
+  // tail keeps the gate closed (fail-closed). Judging the tail by whitelist instead of by verb list
+  // is what keeps "已发送 Forward" and "已发送 转发" gated without chasing every verb in existence.
+  if (COMPLETED_STATE_LABEL_PATTERN.test(trimmed)) {
+    const remainder = trimmed.replace(COMPLETED_STATE_LABEL_PATTERN, "");
+    return !COMPLETED_STATE_TAIL_PATTERN.test(remainder);
+  }
+  return IRREVERSIBLE_ACTION_PATTERN.test(name);
 }
 
 /**
@@ -657,8 +707,11 @@ export function decideIrreversibleAction(input = {}) {
   // Fail-closed by design: a matching label asks the user, no matter which element carries it.
   // Judging by tag/role turned the gate fail-open — `<div onclick="send()">发送</div>`, `<a>`,
   // `contenteditable` and custom elements are ordinary buttons on real sites, so a real action
-  // handler stopped being gated entirely. Over-blocking costs one "Allow once" click on a navigation
-  // item named 已发送; under-blocking sends, pays or deletes without asking. `isOperableControlTarget`
+  // handler stopped being gated entirely. The one narrowing is the completed-state prefix: a label
+  // like "已发送"/"已删除" names a place, and the gate releases it only when what follows that prefix
+  // is a place-name tail (COMPLETED_STATE_TAIL_PATTERN). Still no element-shape judgement, and any
+  // other tail — "已发送 Forward", "已发送，再次发送" — keeps the gate closed. The cost it removes was
+  // a pointless "Allow once" click on a plain navigation item. `isOperableControlTarget`
   // deliberately stays out of this decision; it only softens the confirmation wording.
   return {
     ok: false,

@@ -1,4 +1,11 @@
 
+## 0.200.0-alpha.2 (2026-10-28)
+
+### Bug Fixes
+
+* **connector:** release completed-state labels instead of asking to confirm them ([c6a033b](https://github.com/nolotus/bun-nolo/commit/c6a033b86234e8a7aba6739e651a197f26cfb384))
+
+
 ## 0.200.0-alpha.1 (2026-10-27)
 
 ### Features
