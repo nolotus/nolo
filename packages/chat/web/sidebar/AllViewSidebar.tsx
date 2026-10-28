@@ -569,24 +569,37 @@ const AllViewSidebar: React.FC<{
         />
       )}
 
-      {/* Favorites were filtered out of the recent list below (`favoriteKeysSet`) and then never
-          rendered: every favorited item vanished from this sidebar. SidebarPinnedBlock already
-          special-cases blockId="favorites" (pinned=false, 取消收藏 quick action), so the block only
-          had to be mounted. Without this, favoriting an agent removed it from the list entirely. */}
-      {filteredFavoriteItems.length > 0 && (
-        <SidebarPinnedBlock
-          items={filteredFavoriteItems}
-          activeMenuKey={activeMenuKey}
-          onToggleMenu={setActiveMenuKey}
-          blockId="favorites"
-          className="AllViewSidebar__favorites-block"
-        />
-      )}
-
       <div
         className={`AllViewSidebar__scroll-area ${stylex.props(sidebarStyles.scrollArea).className ?? ""}`}
         ref={scrollAreaRef}
       >
+        {/* Favorites were filtered out of the recent list below (`favoriteKeysSet`) and then never
+            rendered: every favorited item vanished from this sidebar. SidebarPinnedBlock already
+            special-cases blockId="favorites" (pinned=false, 取消收藏 quick action), so the block only
+            had to be mounted. Without this, favoriting an agent removed it from the list entirely.
+
+            Mounted *inside* the scroll area, ahead of the recent list, wrapped in
+            `.AllViewSidebar__favorites-content` — the wrapper repeats the exact padding of
+            `.AllViewSidebar__recent-content` (both from `sidebarScrollContentPadding`), because the
+            scroll area already insets by `--sidebar-gutter` and the recent content insets once more.
+            Without the wrapper the favorites rows sat 8px left of every recent row. Consequence: the
+            favorites block now scrolls with the list, while the pinned block above stays fixed. */}
+        {filteredFavoriteItems.length > 0 && (
+          <div
+            className={`AllViewSidebar__favorites-content ${
+              stylex.props(sidebarStyles.allViewFavoritesContent).className ?? ""
+            }`}
+          >
+            <SidebarPinnedBlock
+              items={filteredFavoriteItems}
+              activeMenuKey={activeMenuKey}
+              onToggleMenu={setActiveMenuKey}
+              blockId="favorites"
+              className="AllViewSidebar__favorites-block"
+            />
+          </div>
+        )}
+
         <div
           className={`AllViewSidebar__recent-content ${
             stylex.props(sidebarStyles.allViewRecentContent).className ?? ""

@@ -601,8 +601,8 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
       const created = await chrome.windows.create({
         url: `${base}?${params.toString()}`,
         type: "popup",
-        width: 460,
-        height: 260,
+        width: 820,
+        height: 680,
         focused: true,
       });
       windowId = Number(created?.id);

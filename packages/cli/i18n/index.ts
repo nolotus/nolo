@@ -512,6 +512,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     en: "Read recent network entries (--tab <id>)",
     zh: "读取最近的网络条目（--tab <id>）",
   },
+  "browser eval": {
+    en: "Evaluate JS in a tab, user-approved per call (--tab <id> --expr <js> [--await] [--timeout-ms N])",
+    zh: "在标签页中执行 JS，每次调用需用户批准（--tab <id> --expr <js> [--await] [--timeout-ms N]）",
+  },
   "chrome status": {
     en: "Show Nolo Browser Connector status (native host manifest, token, live connection) (Compatibility alias of `nolo browser status`)",
     zh: "显示 Nolo 浏览器连接器状态（原生 host manifest、令牌、在线连接）（`nolo browser status` 的兼容别名）",
@@ -575,6 +579,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
   "chrome read-network": {
     en: "Read recent network entries (--tab <id>) (Compatibility alias of `nolo browser read-network`)",
     zh: "读取最近的网络条目（--tab <id>）（`nolo browser read-network` 的兼容别名）",
+  },
+  "chrome eval": {
+    en: "Evaluate JS in a tab, user-approved per call (--tab <id> --expr <js> [--await] [--timeout-ms N]) (Compatibility alias of `nolo browser eval`)",
+    zh: "在标签页中执行 JS，每次调用需用户批准（--tab <id> --expr <js> [--await] [--timeout-ms N]）（`nolo browser eval` 的兼容别名）",
   },
   "ci status": {
     en: "Show recent nolo-ci deploy jobs (alpha / main)",

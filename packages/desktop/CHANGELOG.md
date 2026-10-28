@@ -1,4 +1,17 @@
 
+## 0.202.0-alpha.2 (2026-10-28)
+
+### Bug Fixes
+
+* **browser-connector:** 审批弹窗放大到 820×680，并补页面滚动兜底 ([b34fc51](https://github.com/nolotus/bun-nolo/commit/b34fc51aeb74ce236d49b1f9bc5707dcd4615f06))
+* **chat:** 收藏分区与最近列表左对齐 ([ed5ad07](https://github.com/nolotus/bun-nolo/commit/ed5ad07ff6338a5a5cab1a5ba9e13bab97bf2ef9))
+* **cli:** 补 eval 的命令描述，覆盖率门改读定义源 ([10c077c](https://github.com/nolotus/bun-nolo/commit/10c077ca1940a39e8df93223d2b88879de74d439))
+
+### Performance Improvements
+
+* **prepush:** web bundle 护栏改走独立入口，不再经 test:heavy ([a857824](https://github.com/nolotus/bun-nolo/commit/a857824ea02e0b7f2c89b78450def35345409fb4))
+
+
 ## 0.202.0-alpha.1 (2026-10-28)
 
 ### Features

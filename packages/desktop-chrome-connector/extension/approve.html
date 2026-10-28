@@ -7,6 +7,9 @@
       :root { color-scheme: light dark; }
       body {
         margin: 0;
+        height: 100vh;
+        box-sizing: border-box;
+        overflow-y: auto;
         padding: 18px 20px;
         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
         display: flex;
@@ -30,7 +33,9 @@
         font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        max-height: 45vh;
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: 62vh;
         overflow: auto;
       }
       #script-preview[hidden], #script-caption[hidden] { display: none; }

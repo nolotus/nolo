@@ -1,4 +1,12 @@
 
+## 0.185.0-alpha.2 (2026-10-28)
+
+### Bug Fixes
+
+* **chat:** 收藏分区与最近列表左对齐 ([ed5ad07](https://github.com/nolotus/bun-nolo/commit/ed5ad07ff6338a5a5cab1a5ba9e13bab97bf2ef9))
+* **cli:** 补 eval 的命令描述，覆盖率门改读定义源 ([10c077c](https://github.com/nolotus/bun-nolo/commit/10c077ca1940a39e8df93223d2b88879de74d439))
+
+
 ## 0.185.0-alpha.1 (2026-10-28)
 
 ### Features
