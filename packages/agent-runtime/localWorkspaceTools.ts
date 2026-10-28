@@ -4,7 +4,7 @@ import { formatImageSummary } from "./imageSummary";
 import { readLocalImage } from "./readImage";
 import { renderVisualPage, visualRendererCapability } from "./visualRenderer.node";
 import { captureHostWindow } from "./hostWindowCapture";
-import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawn as spawnChildProcess } from "node:child_process";
@@ -57,6 +57,16 @@ type LocalWorkspaceToolArgs = {
   commandTimeoutMs?: number;
   commandOutputLimit?: number;
   commandPrefix?: string[];
+  /**
+   * Prefix applied to `execShell` ONLY (e.g. the bwrap sandbox argv from
+   * sandboxCommandPrefix.ts). Kept separate from `commandPrefix` on purpose:
+   * `commandPrefix` also feeds `launchProcess`, and a long-running dev server
+   * must NOT inherit a prefix that unshares the network namespace.
+   *
+   * Composed as [...execShellCommandPrefix, ...commandPrefix] so the sandbox
+   * wrapper stays outermost.
+   */
+  execShellCommandPrefix?: string[];
   restrictShellToWorkspace?: boolean;
   /**
    * Optional confirmation callback for file tools that resolve to a path
@@ -218,6 +228,17 @@ import {
 import { isImmediateDetachShellCommand } from "./shellCommandPolicy";
 import { invokeCapability } from "./capabilities";
 import { resolveNoloStateDir } from "./noloStateDir";
+import {
+  ensureGuardApprovedDirectory,
+  isPathInsideRoot,
+  readGuardApprovedFile,
+  resolveWorkspaceSafePath,
+  workspacePathGuardError,
+  writeGuardApprovedBinaryFile,
+  writeGuardApprovedFile,
+  type WorkspacePathGuardSuccess,
+} from "./workspacePathGuard";
+
 
 function readTrimmedString(value: unknown): string | undefined {
   return asOptionalTrimmedString(value);
@@ -1002,10 +1023,8 @@ async function runWorkspaceCommandLimitedLines(args: {
 }
 
 
-function isPathInsideRoot(root: string, targetPath: string): boolean {
-  const rel = relative(resolve(root), resolve(targetPath));
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-}
+// isPathInsideRoot lives in ./workspacePathGuard (single implementation shared
+// with the realpath boundary); the spill-root check below uses it.
 
 /**
  * Resolve a runtime-owned spill target, or return null when the path is not a
@@ -1062,16 +1081,33 @@ export function resolveRequestedWorkspacePath(
   return resolve(resolve(workspaceRoot), expandHomePath(requestedPath));
 }
 
-export async function resolveLocalWorkspaceToolPath(args: {
+/**
+ * Resolve a requested path to the absolute path a tool will open, running the
+ * realpath containment guard first.
+ *
+ * The guard is the security boundary for every host-side path-taking tool: a
+ * path that is lexically inside the workspace but physically outside it
+ * (in-workspace symlink to `/root/.nolo/credentials`, symlinked ancestor of a
+ * not-yet-created file, ...) is rejected outright, before any external-access
+ * prompt could be shown for the harmless-looking request.
+ */
+export async function resolveLocalWorkspaceToolApproval(args: {
   workspaceRoot: string;
   requestedPath: string;
   confirmExternalFileAccess?: (request: PermissionRequest) => Promise<boolean>;
   /** Only read/search operations may use the runtime-owned spill exception. */
   allowRuntimeOwnedSpill?: boolean;
-}) {
+}): Promise<WorkspacePathGuardSuccess> {
   const workspaceRoot = resolve(args.workspaceRoot);
   const targetPath = resolveRequestedWorkspacePath(workspaceRoot, args.requestedPath);
   const insideWorkspace = isPathInsideWorkspace({ workspaceRoot, targetPath });
+  const guard = await resolveWorkspaceSafePath({
+    workspaceRoot,
+    targetPath,
+    requestedPath: args.requestedPath,
+    lexicalInside: insideWorkspace,
+  });
+  if (!guard.ok) throw workspacePathGuardError(guard);
   const trustedSpillPath = !insideWorkspace && args.allowRuntimeOwnedSpill === true
     ? await resolveRuntimeOwnedSpillPath(targetPath)
     : null;
@@ -1103,8 +1139,29 @@ export async function resolveLocalWorkspaceToolPath(args: {
   // Trusted spill reads must proceed through the canonical target that passed
   // containment; workspace paths and user-confirmed external paths keep the
   // requested path untouched.
-  return trustedSpillPath ?? targetPath;
+  if (trustedSpillPath !== null) {
+    return {
+      ...guard,
+      path: trustedSpillPath,
+      realPath: trustedSpillPath,
+      insideWorkspace: false,
+      allowedRoots: [trustedSpillPath],
+    };
+  }
+  return guard;
 }
+
+export async function resolveLocalWorkspaceToolPath(args: {
+  workspaceRoot: string;
+  requestedPath: string;
+  confirmExternalFileAccess?: (request: PermissionRequest) => Promise<boolean>;
+  /** Only read/search operations may use the runtime-owned spill exception. */
+  allowRuntimeOwnedSpill?: boolean;
+}) {
+  const approval = await resolveLocalWorkspaceToolApproval(args);
+  return approval.path;
+}
+
 
 export const READ_FILE_MAX_CHAR_LIMIT = 32_000;
 
@@ -1168,7 +1225,7 @@ async function readFileTool(args: {
   const parsed = parseWorkspaceToolArguments(args.call.arguments);
   const requestedPath = requireWorkspaceToolPath(parsed);
   const { warnings, ...sliceArgs } = readFileSliceArgs(parsed);
-  const absolutePath = await resolveLocalWorkspaceToolPath({
+  const approval = await resolveLocalWorkspaceToolApproval({
     workspaceRoot: args.workspaceRoot,
     requestedPath,
     allowRuntimeOwnedSpill: true,
@@ -1176,7 +1233,8 @@ async function readFileTool(args: {
       ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
       : {}),
   });
-  const content = await readFile(absolutePath, "utf8");
+  const absolutePath = approval.path;
+  const content = await readGuardApprovedFile(approval);
   const activity = extractActivity(parsed);
   const sliced = sliceReadFileContent({
     content,
@@ -1278,6 +1336,31 @@ async function readFileTool(args: {
   return { content: truncatedRead.content, metadata };
 }
 
+/**
+ * Guard and create the directory tree a write target lives in.
+ *
+ * `mkdir` is a write of its own and cannot ride on the file approval: without
+ * its own check, `writeFile({path: "../../evil/x", ...})` creates directory
+ * trees wherever the process can write, and `mkdir({recursive: true})` walks
+ * through any existing symlink component — an in-workspace directory symlink to
+ * an external location would be created through, and the file then written
+ * there. The external-access question is already settled by the *file*
+ * approval (it prompted, or no callback is wired), so the directory is approved
+ * under the same lexical policy instead of prompting the user twice.
+ */
+async function ensureGuardedParentDirectory(args: {
+  workspaceRoot: string;
+  fileApproval: WorkspacePathGuardSuccess;
+}): Promise<void> {
+  const directoryGuard = await resolveWorkspaceSafePath({
+    workspaceRoot: args.workspaceRoot,
+    targetPath: dirname(args.fileApproval.path),
+    requestedPath: args.fileApproval.requested,
+  });
+  if (!directoryGuard.ok) throw workspacePathGuardError(directoryGuard);
+  await ensureGuardApprovedDirectory(directoryGuard);
+}
+
 async function writeFileTool(args: {
   call: AgentRuntimeToolCallInput;
   workspaceRoot: string;
@@ -1286,15 +1369,16 @@ async function writeFileTool(args: {
   const parsed = parseWorkspaceToolArguments(args.call.arguments);
   const requestedPath = requireWorkspaceToolPath(parsed);
   const content = requireWorkspaceFileContent(parsed);
-  const absolutePath = await resolveLocalWorkspaceToolPath({
+  const approval = await resolveLocalWorkspaceToolApproval({
     workspaceRoot: args.workspaceRoot,
     requestedPath,
     ...(args.confirmExternalFileAccess
       ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
       : {}),
   });
-  await mkdir(dirname(absolutePath), { recursive: true });
-  await writeFile(absolutePath, content, "utf8");
+  const absolutePath = approval.path;
+  await ensureGuardedParentDirectory({ workspaceRoot: args.workspaceRoot, fileApproval: approval });
+  await writeGuardApprovedFile(approval, content);
   const relativePath = normalizeWorkspaceRelativePath({
     workspaceRoot: resolve(args.workspaceRoot),
     targetPath: absolutePath,
@@ -1420,14 +1504,15 @@ async function editFileTool(args: {
   const oldText = requireWorkspaceOldText(parsed);
   const newText = requireWorkspaceNewText(parsed);
   const expectedReplacements = readExpectedReplacementCount(parsed);
-  const absolutePath = await resolveLocalWorkspaceToolPath({
+  const approval = await resolveLocalWorkspaceToolApproval({
     workspaceRoot: args.workspaceRoot,
     requestedPath,
     ...(args.confirmExternalFileAccess
       ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
       : {}),
   });
-  const content = await readFile(absolutePath, "utf8");
+  const absolutePath = approval.path;
+  const content = await readGuardApprovedFile(approval);
   // Count and replace in a single EOL-tolerant pass so the reported count
   // always equals the actual number of replacements, even in mixed-EOL files.
   // Each match adopts the EOL style found at that position; unmatched bytes
@@ -1446,7 +1531,7 @@ async function editFileTool(args: {
         (hint ? `\n\n${hint}` : "")
     );
   }
-  await writeFile(absolutePath, nextContent, "utf8");
+  await writeGuardApprovedFile(approval, nextContent);
   const relativePath = normalizeWorkspaceRelativePath({
     workspaceRoot: resolve(args.workspaceRoot),
     targetPath: absolutePath,
@@ -1901,10 +1986,51 @@ async function resolveVisualStateBaseUrl(args: {
   return DEFAULT_LOCAL_API_ORIGIN;
 }
 
+/**
+ * Persist the PNG of a render that started *after* the caller's approval.
+ *
+ * The approval above is deliberately re-checked here: it was granted before the
+ * browser launched, and the agent has `execShell` during the whole render
+ * (startup + navigation, up to `commandTimeoutMs`). Swapping `shots/` for a
+ * symlink to an external directory in that window used to land the PNG outside
+ * the workspace, because the renderer wrote it with its own path-only check.
+ * Now the write happens here, after a *fresh* containment resolution, through
+ * the fd-verified binary writer — so a swapped directory is rejected before
+ * anything exists outside, and the residual race is the microsecond one the
+ * descriptor check closes.
+ */
+export async function persistApprovedScreenshot(args: {
+  workspaceRoot: string;
+  approval: WorkspacePathGuardSuccess;
+  bytes: Uint8Array;
+}): Promise<void> {
+  const fresh = await resolveWorkspaceSafePath({
+    workspaceRoot: args.workspaceRoot,
+    targetPath: args.approval.path,
+    requestedPath: args.approval.requested,
+  });
+  if (!fresh.ok) throw workspacePathGuardError(fresh);
+  if (!fresh.insideWorkspace) {
+    // Same policy the tool enforced before rendering: a screenshot never leaves
+    // the workspace, so a path that stopped being inside is a rejection.
+    throw workspacePathGuardError({
+      ok: false,
+      error: "path_outside_workspace",
+      target: args.approval.requested,
+    });
+  }
+  await ensureGuardedParentDirectory({
+    workspaceRoot: args.workspaceRoot,
+    fileApproval: fresh,
+  });
+  await writeGuardApprovedBinaryFile(fresh, args.bytes);
+}
+
 async function captureVisualStateTool(args: {
   call: AgentRuntimeToolCallInput;
   workspaceRoot: string;
   commandTimeoutMs?: number;
+  confirmExternalFileAccess?: (request: PermissionRequest) => Promise<boolean>;
 }): Promise<AgentRuntimeToolResult> {
   try {
     const parsed = parseWorkspaceToolArguments(args.call.arguments);
@@ -1913,13 +2039,45 @@ async function captureVisualStateTool(args: {
     if (!capability.available) return { content: `captureVisualState unavailable: ${capability.reason}`, metadata: { ok: false, rendererAvailable: false } };
     const baseUrl = await resolveVisualStateBaseUrl({ explicitBaseUrl: captureArgs.baseUrl });
     const pageUrl = new URL(captureArgs.path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).href;
-    const screenshotPath = resolveRequestedWorkspacePath(args.workspaceRoot, captureArgs.screenshotPath);
-    const metricsPath = resolveRequestedWorkspacePath(args.workspaceRoot, captureArgs.metricsPath);
-    const rendered = await renderVisualPage({ ...captureArgs, workspaceRoot: args.workspaceRoot, url: pageUrl, screenshotPath, timeoutMs: args.commandTimeoutMs });
+    // Both paths are written by this tool, so both go through exactly the same
+    // boundary as writeFile (approval → guarded mkdir → fd-verified write). No
+    // exception is claimed here: the screenshot is NOT written by the renderer
+    // (it only returns the bytes), because its write would happen after the
+    // whole browser render — an unbounded window in which the approved
+    // directory can be swapped for a symlink. See persistApprovedScreenshot.
+    const fileApprovalArgs = args.confirmExternalFileAccess
+      ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
+      : {};
+    const screenshotApproval = await resolveLocalWorkspaceToolApproval({
+      workspaceRoot: args.workspaceRoot,
+      requestedPath: captureArgs.screenshotPath,
+      ...fileApprovalArgs,
+    });
+    if (!screenshotApproval.insideWorkspace) {
+      throw new Error(
+        `captureVisualState screenshotPath must stay inside the workspace: ${captureArgs.screenshotPath}`,
+      );
+    }
+    const metricsApproval = await resolveLocalWorkspaceToolApproval({
+      workspaceRoot: args.workspaceRoot,
+      requestedPath: captureArgs.metricsPath,
+      ...fileApprovalArgs,
+    });
+    await ensureGuardedParentDirectory({
+      workspaceRoot: args.workspaceRoot,
+      fileApproval: screenshotApproval,
+    });
+    await ensureGuardedParentDirectory({
+      workspaceRoot: args.workspaceRoot,
+      fileApproval: metricsApproval,
+    });
+    const screenshotPath = screenshotApproval.path;
+    const metricsPath = metricsApproval.path;
+    const rendered = await renderVisualPage({ ...captureArgs, workspaceRoot: args.workspaceRoot, url: pageUrl, screenshotPath, timeoutMs: args.commandTimeoutMs,
+      persistScreenshot: (bytes) => persistApprovedScreenshot({ workspaceRoot: args.workspaceRoot, approval: screenshotApproval, bytes }) });
     const metrics = { ...captureArgs, ...rendered, scrollSelector: captureArgs.scrollSelector ?? null,
       focusSelector: captureArgs.focusSelector ?? null, expectText: captureArgs.expectText ?? null };
-    await mkdir(dirname(metricsPath), { recursive: true });
-    await writeFile(metricsPath, JSON.stringify(metrics, null, 2));
+    await writeGuardApprovedFile(metricsApproval, JSON.stringify(metrics, null, 2));
     const image = await readLocalImage(screenshotPath);
     // Preserve legacy path/metrics fields; script/args are explicitly retired.
     return {
@@ -2504,6 +2662,7 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
       call,
       workspaceRoot: args.workspaceRoot,
       commandTimeoutMs: args.commandTimeoutMs,
+      ...fileAccess,
     }),
     execShell: (
       call: AgentRuntimeToolCallInput,
@@ -2521,7 +2680,10 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
       workspaceRoot: args.workspaceRoot,
       commandTimeoutMs: args.commandTimeoutMs,
       commandOutputLimit: args.commandOutputLimit,
-      commandPrefix: args.commandPrefix,
+      commandPrefix: [
+        ...(args.execShellCommandPrefix ?? []),
+        ...(args.commandPrefix ?? []),
+      ],
       restrictToWorkspace: args.restrictShellToWorkspace,
       abortSignal: opts?.abortSignal ?? args.abortSignal,
       detachMs: opts?.detachMs ?? args.detachMs,

@@ -17,6 +17,11 @@
 import { wrapHistoricalSummaryWithReplayGuard } from "./staleReplayGuard";
 import { MEMORY_USE_GUIDANCE } from "./memoryUseGuidance";
 import {
+  mapDiscoveredSkillsToCatalogEntries,
+  mergeSkillCatalog,
+  type SkillCatalog,
+} from "./skillCatalog";
+import {
   buildUserResponseLanguageContext,
   buildUserResponseLanguageReadFailureContext,
 } from "./userResponseLanguage";
@@ -237,33 +242,90 @@ export interface DiscoveredSkill {
 }
 
 /**
- * Skill discovery layer: lists SKILL.md files found in conventional skill
- * directories inside the bound folder. The model sees what skills are
- * available and can read them on-demand via readFile/globFiles tools.
+ * Skill discovery layer over a merged skill catalog (see `skillCatalog.ts`).
  *
- * Session-scope: the index is a pure function of the workspace skill dirs, so
- * it is byte-identical across every turn of a session. It belongs in the
- * cached stable prefix — leaving it in the dynamic suffix inflated the
- * uncached region (~1.5k tokens in this repo) for no benefit. A skill added
- * mid-session is picked up on the next process start, same as AGENTS.md.
+ * This is the single renderer for the skill index: the file-scan path
+ * (`buildSkillDiscoveryLayer`) funnels through it, and non-Node hosts that
+ * inject their own catalog sources (platform / agent config) call it directly
+ * with the merged `SkillCatalog`.
+ *
+ * Session-scope: the index is a pure function of the skill sources, so it is
+ * byte-identical across every turn of a session. It belongs in the cached
+ * stable prefix — leaving it in the dynamic suffix inflated the uncached
+ * region (~1.5k tokens in this repo) for no benefit.
+ *
+ * Single-source catalogs render exactly the historical line format
+ * (`- name: description`); the source tag / availability tag / conflict notes
+ * only appear once more than one kind of source is in play, so adding the
+ * catalog contract does not perturb the existing prompt prefix.
+ *
+ * Null when the catalog is empty (the caller resolved and found nothing).
+ */
+export const buildSkillDiscoveryCatalogLayer = (
+  catalog: SkillCatalog,
+): TurnContextLayer | null => {
+  if (catalog.entries.length === 0) return null;
+  const sources = catalog.entries
+    .map((entry) => entry.source)
+    .filter((source, index, all) => all.indexOf(source) === index);
+  const multiSource = sources.length > 1;
+  const lines = [
+    "--- 可用技能（Skills）---",
+    multiSource
+      ? `共发现 ${catalog.entries.length} 个技能（来源：${sources.join(", ")}），模型可按需用 loadSkill 按名加载或 readFile 直接读取（路径规则 .agents/skills/<name>/SKILL.md）：`
+      : `工作区中发现了 ${catalog.entries.length} 个技能（SKILL.md），模型可按需用 loadSkill 按名加载或 readFile 直接读取（路径规则 .agents/skills/<name>/SKILL.md）：`,
+    ...catalog.entries.map((entry) => {
+      const marks = [
+        multiSource ? ` [${entry.source}]` : "",
+        entry.available ? "" : ` [不可用：${entry.unavailableReason ?? "unknown"}]`,
+      ].join("");
+      return `- ${entry.name}${marks}: ${entry.description}`;
+    }),
+  ];
+  if (catalog.droppedEntries.length > 0) {
+    // 超出上限被裁掉的条目必须在提示里可见：否则「技能变少了」只能靠人去数
+    // 目录（LOW-1）。
+    const names = catalog.droppedEntries
+      .map((entry) => entry.name || entry.id)
+      .join(", ");
+    lines.push(
+      `另有 ${catalog.droppedEntries.length} 个技能超出目录上限（${catalog.budget.maxEntries} 项）未列出：${names}`,
+    );
+  }
+  if (catalog.conflicts.length > 0) {
+    // 同名遮蔽必须在提示里可见：否则模型只知道有一个名字，不知道本地/平台
+    // 各有一份、生效的是哪一份（静默覆盖是明确禁止的行为）。
+    lines.push("同名技能只列出生效的一份（按来源优先级，前者生效）：");
+    for (const conflict of catalog.conflicts) {
+      const shadowedSources = conflict.shadowed
+        .map((entry) => entry.source)
+        .filter((source, index, all) => all.indexOf(source) === index);
+      lines.push(
+        `- ${conflict.name}: 生效 ${conflict.winner.source}，覆盖 ${shadowedSources.join(" / ")}`,
+      );
+    }
+  }
+  return makeLayer("skill-discovery", lines.join("\n"), "session");
+};
+
+/**
+ * Skill discovery layer from file-scan results (Node adapters and the desktop
+ * runtime). Routes through the host-neutral catalog contract so the same
+ * merge/priority/budget rules apply to every host; for a single local source
+ * the rendered output is identical to the historical implementation.
+ *
+ * `_boundFolder` 在 HEAD 就已是不使用的参数（只保留签名兼容）：第 2 位参数
+ * 至今没有任何渲染路径消费它，所以包装器这里也不引入新语义（LOW-2 复核结论）。
  *
  * Null when no skills were discovered (the caller scanned and found nothing).
  */
 export const buildSkillDiscoveryLayer = (
   skills: DiscoveredSkill[],
   _boundFolder?: string,
-): TurnContextLayer | null => {
-  if (skills.length === 0) return null;
-  const lines = [
-    "--- 可用技能（Skills）---",
-    `工作区中发现了 ${skills.length} 个技能（SKILL.md），模型可按需用 loadSkill 按名加载或 readFile 直接读取（路径规则 .agents/skills/<name>/SKILL.md）：`,
-    ...skills.map(
-      (s) =>
-        `- ${s.name}: ${s.description}`,
-    ),
-  ];
-  return makeLayer("skill-discovery", lines.join("\n"), "session");
-};
+): TurnContextLayer | null =>
+  buildSkillDiscoveryCatalogLayer(
+    mergeSkillCatalog(mapDiscoveredSkillsToCatalogEntries(skills)),
+  );
 
 /**
  * AGENTS.md project context layer: injects the project-level instructions

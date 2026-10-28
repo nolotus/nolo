@@ -1,8 +1,8 @@
 // Host-only platform renderer. Never execute code/scripts from the user workspace.
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { mkdir, realpath, stat, readFile, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, win32 } from "node:path";
+import { realpath, stat, readFile } from "node:fs/promises";
+import { isAbsolute, relative, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Both separators must be recognized even when tests run on POSIX.
@@ -93,12 +93,25 @@ export function visualRendererCapability() {
 export async function renderVisualPage(args: {
   url: string; workspaceRoot: string; screenshotPath: string; waitSelector: string;
   scrollSelector?: string; focusSelector?: string; expectText?: string; timeoutMs?: number;
+  /**
+   * Sink for the PNG bytes. The renderer deliberately does NOT write the file
+   * itself: the bytes only exist after a whole browser startup + navigation
+   * (seconds), and any containment check taken before that render is stale by
+   * the time it completes — an agent with `execShell` can swap the output
+   * directory for a symlink during it. Persisting through the caller's
+   * fd-verified writer is what keeps the child-side check and the write in the
+   * same short window.
+   */
+  persistScreenshot: (bytes: Uint8Array) => Promise<void>;
 }) {
   // Validate caller input before capability discovery, DNS, queueing or browser startup.
   for (const field of ["workspaceRoot", "url", "screenshotPath", "waitSelector"] as const) {
     if (typeof args?.[field] !== "string" || !args[field].trim()) {
       throw new Error(`renderVisualPage: ${field} is required (expected a non-empty string)`);
     }
+  }
+  if (typeof args.persistScreenshot !== "function") {
+    throw new Error("renderVisualPage: persistScreenshot is required (expected a function that stores the PNG bytes)");
   }
   if (!isAbsolute(args.workspaceRoot)) {
     throw new Error("renderVisualPage: workspaceRoot must be an absolute path");
@@ -204,8 +217,9 @@ export async function renderVisualPage(args: {
     const result = { ...metrics, pageUrl: localFile ? url.href : page.url(), title: await page.title(), viewport: page.viewportSize(), renderer: "platform-playwright", capturedAt: new Date().toISOString() };
     if (Date.now() >= deadline) throw new Error("Renderer timed out before screenshot persistence.");
     if (timer) clearTimeout(timer);
-    await mkdir(dirname(args.screenshotPath), { recursive: true });
-    await writeFile(args.screenshotPath, screenshot);
+    // No mkdir/writeFile here: persistence is the caller's guarded write, so the
+    // path cannot be redirected between the check and the bytes hitting disk.
+    await args.persistScreenshot(screenshot);
     return result;
     };
     return await Promise.race([routeFailure, work(), new Promise<never>((_, reject) => {

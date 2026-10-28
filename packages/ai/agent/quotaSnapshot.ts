@@ -278,6 +278,30 @@ function withUnreportedFields(
   return out;
 }
 
+/** 跨观测合并的可选语义；不传即等于历史行为（下面的注释逐条说明默认值）。 */
+export type MergeQuotaObservationsOptions = {
+  /**
+   * 「让位合并」专用（review LOW-1）：`incoming` 没报 `resetAt` 时，保留 `existing`
+   * 一侧已知的 `resetAt`（默认 false = 丢掉）。
+   *
+   * 只该在「incoming 更晚、但信息更少」的那一次合并里打开（见
+   * `agentAvailability.writeAgentQuotaSnapshot` 的 `existingIsNewer` 分支）：
+   * - 默认的 false 针对的是**新观测**（我们自己的 probe / 上游新响应）。它没报
+   *   重置时刻，说明这份观测没采到这个字段，但同时也可能已经跨过复位周期，沿用
+   *   旧周期的边界就是给倒计时指错周期，所以默认丢弃。
+   * - 让位合并的两侧可信度不同：`existing` 一侧的 `resetAt` 通常来自主动探测
+   *   （独立用量接口 / body 里上游明示的 reset 字段），`incoming` 一侧是顺手
+   *   采到的被动响应头——订阅窗口被动头经常只给 utilization、不给 reset。被动侧
+   *   缺字段只说明「没采到」，不构成「边界变了」的证据，而真耗尽窗口一旦丢了
+   *   resetAt，可用性判定就从 `quota_exhausted(quota_remaining_zero)` 退化成
+   *   `unverified(quota_window_reset)`，方向变松（本该拦住却放行）。所以这里以
+   *   已知边界为准。
+   * - 不会因此凭空造出「耗尽」：判定侧只在 `resetAt > now` 时才认耗尽窗口，保留
+   *   一个已经过去的旧边界最多退回 `unverified`，与丢弃它等价。
+   */
+  retainKnownResetAt?: boolean;
+};
+
 /**
  * 跨观测合并：把一次新观测的窗口合入已存快照的窗口。
  * 调用方负责「更旧的观测不覆盖更新的值」这层时间序判定。
@@ -285,6 +309,7 @@ function withUnreportedFields(
 export function mergeQuotaWindowObservations(
   existing: QuotaWindow[] | undefined,
   incoming: QuotaWindow[],
+  opts?: MergeQuotaObservationsOptions,
 ): QuotaWindow[] {
   const map = new Map<string, QuotaWindow>();
   for (const win of existing ?? []) {
@@ -303,7 +328,14 @@ export function mergeQuotaWindowObservations(
       // 订阅窗口：最新读数即真值（不取 max/min，旧值不得锁死新值）。
       // resetAt 不沿用上一周期（LOW-1）：新观测没报重置时刻就没有倒计时，
       // 而不是拿旧周期的边界去算一个指错周期的倒计时。
-      map.set(win.scope, withUnreportedFields(prev, win, { keepResetAt: false }));
+      // 例外是让位合并（retainKnownResetAt，见 MergeQuotaObservationsOptions）：
+      // 那时 incoming 只是「更晚但更粗」的被动读数，保留我们已知的边界。
+      map.set(
+        win.scope,
+        withUnreportedFields(prev, win, {
+          keepResetAt: opts?.retainKnownResetAt === true,
+        }),
+      );
       continue;
     }
     const sameResetBoundary =

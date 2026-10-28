@@ -38,6 +38,7 @@ import type {
 import type { CliKvDb, HybridRecordStore } from "./hybridRecordStore";
 import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
 import {
+  createLocalRunIsolationNoticeEmitter,
   describeLocalRunExecutionIsolation,
   recordLocalRunExecutionIsolation,
   resolveLocalRunExecutionIsolationFact,
@@ -771,6 +772,26 @@ export function getCliAutoCompactionSummaryFallback():
   return cliAutoCompactionSummaryFallback;
 }
 
+/**
+ * G12：无沙盒后端时的**一次性告警**（结构化字段 + 用户可读文案）。
+ *
+ * 为什么放在模块级：emitter 的去重集合是「一次/进程」，同一台 macOS 上每个 run
+ * 各建一个 adapter；若 per-run 建 emitter，每个 run 都会再刷一遍同样的告警。
+ * 它只有可观测性用途 —— 返回值不参与任何控制流，执行行为逐字不变。
+ *
+ * **可见范围（如实验收，别读成闭环）**：sink 落到
+ * `getLogger("cli.localRuntimeAdapter").warn`，而 `initializeDiagnostics` 在
+ * `mode === "tui"` 时不挂 stderr sink（`packages/cli/diagnostics/index.ts:243-264`）。
+ * 于是 `nolo run` 非 TUI 直接可见，**TUI 交互模式只进 ring buffer 与
+ * `~/.nolo/logs`**，用户仍要翻文件。TUI 可见通道（在 client 适配器与 TUI 渲染层
+ * 之间新开通知通路）尚未接，状态见 roadmap §12 的 G12 行。
+ */
+const emitRunIsolationNotice = createLocalRunIsolationNoticeEmitter({
+  sink: ({ message, fields }) => {
+    getLogger("cli.localRuntimeAdapter").child({ fields }).warn(`[nolo] ${message}`);
+  },
+});
+
 export function createCliLocalRuntimeAdapter(
   deps: CliLocalRuntimeAdapterDeps,
 ): AgentRuntimeHostAdapter & {
@@ -1041,17 +1062,33 @@ export function createCliLocalRuntimeAdapter(
    * 写盘失败不阻塞 run（可观测性不该让 run 起不来），但绝不静默：stderr 一行。
    */
   const recordRunExecutionIsolation = async (): Promise<void> => {
+    // F1：显式点名宿主执行的 run 在审计里必须与 docker 沙盒区分开
+    // （reason: host-explicit-writes vs docker-workload）。
+    // G12：平台决定「这台机器到底有没有隔离后端」——macOS / Windows 没有，
+    // 不能只在审计里写一条泛泛的 host-no-sandbox 就算了。
+    const fact = resolveLocalRunExecutionIsolationFact({
+      runtimeKey: dockerRuntimeEnabled
+        ? "docker"
+        : instaboxRuntimeEnabled
+          ? "instabox"
+          : runtimeKey === "local"
+            ? "local"
+            : undefined,
+      dockerWorkloadEnabled: dockerRuntimeEnabled,
+      // MEDIUM-1（review）：instabox 是容器隔离通道（execShell + 文件工具 bridge，
+      // 显式拒绝回落宿主），darwin / win32 上同样不是宿主执行。不传这一项会落进
+      // 「本平台没有隔离后端」分支，产出「本机执行无沙盒隔离」的误报。
+      instaboxWorkloadEnabled: instaboxRuntimeEnabled,
+      platform: process.platform,
+    });
+    const runId =
+      asOptionalTrimmedString(deps.env?.NOLO_AGENT_RUN_ID) ?? "interactive";
+    // G12：**先发告警、再落盘** —— 落盘失败（只读 home、磁盘满）不能连带把
+    // 「本机没有沙盒」这句话一起吞掉，那正是最需要用户知道的时刻。
+    emitRunIsolationNotice(fact, { runId });
     try {
       const { writeFileSync, mkdirSync } = await import("node:fs");
       const { resolveRunsDir } = await import("../agentRunControl");
-      const fact = resolveLocalRunExecutionIsolationFact({
-        // F1：显式点名宿主执行的 run 在审计里必须与 docker 沙盒区分开
-        // （reason: host-explicit-writes vs docker-workload）。
-        runtimeKey: dockerRuntimeEnabled ? "docker" : runtimeKey === "local" ? "local" : undefined,
-        dockerWorkloadEnabled: dockerRuntimeEnabled,
-      });
-      const runId =
-        asOptionalTrimmedString(deps.env?.NOLO_AGENT_RUN_ID) ?? "interactive";
       recordLocalRunExecutionIsolation({
         runId,
         runsDir: resolveRunsDir(deps.env),

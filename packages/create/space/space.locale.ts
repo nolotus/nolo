@@ -167,6 +167,8 @@ export default {
       unpin: "Unpin",
       favorite: "Favorite",
       unfavorite: "Unfavorite",
+      favoriteDetailMissingHint:
+        "Favorited item — opening it will show its title",
       quickAddToRail: "Add to Rail Shortcut",
       quickRemoveFromRail: "Remove from Rail Shortcut",
       quickMoveRailUp: "Move Rail Shortcut Up",
@@ -540,6 +542,7 @@ export default {
       unpin: "取消置顶",
       favorite: "收藏",
       unfavorite: "取消收藏",
+      favoriteDetailMissingHint: "收藏项，打开后会显示标题",
       quickAddToRail: "加入快捷",
       quickRemoveFromRail: "从快捷移除",
       quickMoveRailUp: "快捷上移",
@@ -908,6 +911,7 @@ export default {
       unpin: "取消置頂",
       favorite: "收藏",
       unfavorite: "取消收藏",
+      favoriteDetailMissingHint: "收藏項，開啟後會顯示標題",
       quickAddToRail: "加入快捷",
       quickRemoveFromRail: "從快捷移除",
       quickMoveRailUp: "快捷上移",
@@ -1285,6 +1289,8 @@ export default {
       unpin: "ピン留め解除",
       favorite: "お気に入り",
       unfavorite: "お気に入り解除",
+      favoriteDetailMissingHint:
+        "お気に入り項目。開くとタイトルが表示されます",
       quickAddToRail: "レールに追加",
       quickRemoveFromRail: "レールから削除",
       quickMoveRailUp: "レール内で上へ移動",

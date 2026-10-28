@@ -47,6 +47,15 @@ const inferTypeFromKey = (key: string): string => {
 };
 
 /**
+ * 收藏分区条目：在通用 item 之上携带「详情缺失」这一渲染态。
+ *
+ * detailMissing = 本地没有这条收藏的实体记录，title 只是按类型的标签占位。
+ * 渲染层据此把这一行画成「类型图标 + 类型标签」的完整条目外观，而不是一个
+ * 看起来像标题丢失的空壳；它不承诺任何自动加载（本 hook 依旧零请求）。
+ */
+export type FavoriteSidebarItem = MyContentListItem & { detailMissing?: boolean };
+
+/**
  * 输入调用方已有的 recentItems，输出完整收藏 items（窗口内 + 窗口外）。
  * 按 favoritedAt 降序；缺收藏时间的项排最后。
  *
@@ -54,7 +63,7 @@ const inferTypeFromKey = (key: string): string => {
  */
 export const useFavoriteSidebarItems = (
   recentItems: MyContentListItem[],
-): MyContentListItem[] => {
+): FavoriteSidebarItem[] => {
   const { t } = useTranslation("space");
   const agentIds = useFavoriteAgentIds();
   const contentIds = useFavoriteContentIds();
@@ -102,8 +111,8 @@ export const useFavoriteSidebarItems = (
   );
 
   // ── 窗口外收藏项（本地实体优先，取不到标题时用类型占位）──
-  const outsideItems = useMemo<MyContentListItem[]>(() => {
-    const items: MyContentListItem[] = [];
+  const outsideItems = useMemo<FavoriteSidebarItem[]>(() => {
+    const items: FavoriteSidebarItem[] = [];
     for (const key of outsideKeys) {
       const entity = outsideEntities[key];
       const type = entity?.type || inferTypeFromKey(key);
@@ -111,12 +120,18 @@ export const useFavoriteSidebarItems = (
       // 的（用户已打开过、或最近列表之外的缓存仍在）都能显示真名。
       // 完全没有本地记录时，用「按类型的诚实占位」而不是「未命名」：
       // 用户至少能看出这是一条对话 / 文档 / 表格 / AI，也知道这不是标题丢失。
-      const resolvedTitle =
-        resolveUserContentTitle(entity ?? {}) ||
+      const resolvedTitle = resolveUserContentTitle(entity ?? {});
+      // 完全没有本地记录时，用「按类型的诚实占位」而不是「未命名」：
+      // 用户至少能看出这是一条对话 / 文档 / 表格 / AI，也知道这不是标题丢失。
+      // 同时把这一态带给渲染层（detailMissing），由它决定这行画成
+      // 「类型图标 + 类型标签」，而不是一个像丢了标题的空壳。
+      const detailMissing = !resolvedTitle;
+      const title =
+        resolvedTitle ||
         getSpaceContentTypeLabel({ type, contentKey: key }, t);
       items.push({
         source: "user-data",
-        title: resolvedTitle,
+        title,
         type,
         contentKey: key,
         pinned: false,
@@ -128,13 +143,14 @@ export const useFavoriteSidebarItems = (
         fileCategory: entity?.fileCategory ?? undefined,
         mimeType: entity?.mimeType,
         originalName: entity?.originalName,
-      } as MyContentListItem);
+        detailMissing: detailMissing || undefined,
+      });
     }
     return items;
   }, [outsideKeys, outsideEntities, t]);
 
   // ── 合并 + 按 favoritedAt 降序 ──
-  const allItems = useMemo(() => {
+  const allItems = useMemo<FavoriteSidebarItem[]>(() => {
     const combined = [...insideItems, ...outsideItems];
     combined.sort((a, b) => {
       const aTime = favoritedAtById[a.contentKey] ?? 0;
