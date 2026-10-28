@@ -1,4 +1,12 @@
 
+## 0.202.0-alpha.5 (2026-10-28)
+
+### Bug Fixes
+
+* **chat:** 窗口外收藏改用类型标签，不再显示「未命名」 ([ee4867e](https://github.com/nolotus/bun-nolo/commit/ee4867e2ee3fb300de78e8c0636861bcc618ef0a))
+* **prepush:** 护栏失败文案不再把非零退出一律归因为依赖污染 ([2beebb6](https://github.com/nolotus/bun-nolo/commit/2beebb6cc896eb8139a171a9d3124fb146578255))
+
+
 ## 0.202.0-alpha.4 (2026-10-28)
 
 ### Bug Fixes

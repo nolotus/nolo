@@ -1,4 +1,11 @@
 
+## 0.185.0-alpha.4 (2026-10-28)
+
+### Bug Fixes
+
+* **chat:** 窗口外收藏改用类型标签，不再显示「未命名」 ([ee4867e](https://github.com/nolotus/bun-nolo/commit/ee4867e2ee3fb300de78e8c0636861bcc618ef0a))
+
+
 ## 0.185.0-alpha.3 (2026-10-28)
 
 ### Bug Fixes
