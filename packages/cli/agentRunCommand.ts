@@ -516,10 +516,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // 上层派发工具有 allowHostWrites 守卫，但 `nolo agent run --runtime-key local`
   // 绕过了那层；这里不校验就等于"任意 shell 都能在宿主改文件"。
   if (hostRuntimeLocal && !args.includes("--allow-host-writes")) {
-    output.write(
-      "[nolo] runtimeKey=local 会在**宿主文件系统**上执行并写入，必须显式加 --allow-host-writes 确认；" +
-        "要隔离执行请省略 --runtime-key（默认进 docker 沙盒）。\n",
-    );
+    output.write(t("agentRun.hostWriteGuard"));
     return 1;
   }
   const isLocalRun =
@@ -725,7 +722,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         env,
       });
     } catch (err) {
-      output.write(`[nolo] instabox 配置生成失败: ${toErrorMessage(err)}\n`);
+      output.write(t("agentRun.instaboxConfigFailed", toErrorMessage(err)));
       return 1;
     }
   }

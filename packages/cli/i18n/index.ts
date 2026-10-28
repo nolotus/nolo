@@ -18,6 +18,7 @@ import { updateStrings } from "./strings/update";
 import { secretStrings } from "./strings/secret";
 import { docCommandStrings } from "./strings/docCommands";
 import { cliSurfaceStrings } from "./strings/cliSurface";
+import { dialogCommandStrings } from "./strings/dialogCommands";
 import { commonStrings } from "./strings/common";
 
 export const STRINGS = {
@@ -31,6 +32,7 @@ export const STRINGS = {
   ...secretStrings,
   ...docCommandStrings,
   ...cliSurfaceStrings,
+  ...dialogCommandStrings,
   ...commonStrings,
 } as const;
 

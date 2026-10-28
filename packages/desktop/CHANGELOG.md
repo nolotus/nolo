@@ -1,4 +1,15 @@
 
+## 0.201.0-alpha.1 (2026-10-28)
+
+### Features
+
+* **cli:** 修英文词条残留中文，抽离高频命令报错到 i18n ([edc95e0](https://github.com/nolotus/bun-nolo/commit/edc95e0332621fec12596356ec1c8ec5e83c003e))
+
+### Bug Fixes
+
+* **connector:** see through characters that hide a verb from the action gate ([084bb6a](https://github.com/nolotus/bun-nolo/commit/084bb6ab9377dca726cce7b9fea104be40a4d5ce))
+
+
 ## 0.200.0-alpha.2 (2026-10-28)
 
 ### Bug Fixes

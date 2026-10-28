@@ -513,8 +513,49 @@ export function resolveActionTarget(payload = {}, registry, context = {}) {
   };
 }
 
+/**
+ * Page-provided labels can carry characters that render as nothing but break a literal keyword
+ * match: a zero-width space inside 删除 ("删\u200b除"), a variation selector or combining mark inside
+ * a Latin word ("S\u180Fend", "S\uFE0Fend"), a braille blank ("S\u2800end"), full-width letters
+ * ("Ｓｅｎｄ"), or plain spacing inside a word ("删 除", "S e n d").
+ *
+ * Enumerating the invisible ones is a losing game — U+180F is a variation selector outside `\p{Cf}`,
+ * U+2800 is a blank with a visible-looking category — so the compact view keeps only letters and
+ * digits and drops everything else. NFKC folds full-width and compatibility forms first. Normalising
+ * applies to the text being matched only: the label echoed back in error payloads and in the approval
+ * window stays what the page actually said.
+ */
+const INVISIBLE_CHARS = /\p{Cf}/gu;
+const COMBINING_MARKS = /\p{Mn}/gu;
+// Look like blanks but carry the Letter category, so \p{L} would keep them: Hangul fillers.
+const FILLER_CHARS = /[\u115F\u1160\u3164\uFFA0]/gu;
+const NON_ALPHANUMERIC = /[^\p{L}\p{N}]/gu;
+
+function stripInvisible(name) {
+  return (
+    name
+      .normalize("NFKC")
+      .replace(INVISIBLE_CHARS, "")
+      // Decompose, drop the marks, recompose. NFKC alone fuses "Se\u0301nd" into "Sénd", where the
+      // accent is part of a different letter and the verb is no longer visible to a keyword match.
+      .normalize("NFD")
+      .replace(COMBINING_MARKS, "")
+      .normalize("NFC")
+  );
+}
+
+/**
+ * Invisible characters, spacing, punctuation, marks and Hangul fillers all removed, leaving only
+ * letters and digits. This is the view CJK verbs are matched against (they carry no word boundary)
+ * and the view Latin verbs are matched against without a boundary, which is what makes "删 除",
+ * "删\u180F除" and "S e n d email" all read as the verb they are.
+ */
+function compactLabel(name) {
+  return stripInvisible(name).replace(FILLER_CHARS, "").replace(NON_ALPHANUMERIC, "");
+}
+
 export function isSensitiveActionName(name) {
-  return typeof name === "string" && SENSITIVE_NAME_PATTERN.test(name);
+  return typeof name === "string" && SENSITIVE_NAME_PATTERN.test(compactLabel(name));
 }
 
 export const CN_IRREVERSIBLE_VERBS = Object.freeze([
@@ -631,17 +672,58 @@ const IRREVERSIBLE_ACTION_PATTERN = new RegExp(
 
 export const CONFIRMATION_REQUIRED_CODE = "SENSITIVE_ACTION_REQUIRES_CONFIRMATION";
 
+/**
+ * The same Latin verbs without word boundaries, for the compact view. A label can split a verb
+ * ("S e n d") and, once spacing is collapsed, glue it to its object ("Sendemail"), where `\bsend\b`
+ * can no longer see it. Dropping the boundary costs a false positive on brand-like labels (PayPal
+ * contains "pay"), which is the direction this gate already prefers over missing a send.
+ */
+const EN_IRREVERSIBLE_COMPACT_PATTERN = new RegExp(
+  [
+    "pay",
+    "payment",
+    "purchase",
+    "buy",
+    "delete",
+    "remove",
+    "unsubscribe",
+    "publish",
+    "send",
+    "resend",
+    "republish",
+    "revoke",
+    "grant",
+    "authorize",
+    "permission",
+    "transfer",
+    "donate",
+  ].join("|"),
+  "i",
+);
+
 export function isIrreversibleActionName(name) {
   if (typeof name !== "string") return false;
-  const trimmed = name.trim();
+  // Two views of the same label. `stripInvisible` removes format characters, folds compatibility
+  // forms with NFKC and drops combining marks (Mn) while keeping spacing, so `\bsend\b` still has its
+  // boundary; the compact view
+  // additionally drops spacing, punctuation and Hangul fillers, which is what makes "删 除", "S e n d"
+  // and "S\u115Fend" read as the verb they are. Both views are matched.
+  const normalized = stripInvisible(name);
+  const compact = compactLabel(name);
   // The completed-state prefix is exempt only when what follows it is a place-name tail; any other
   // tail keeps the gate closed (fail-closed). Judging the tail by whitelist instead of by verb list
   // is what keeps "已发送 Forward" and "已发送 转发" gated without chasing every verb in existence.
-  if (COMPLETED_STATE_LABEL_PATTERN.test(trimmed)) {
-    const remainder = trimmed.replace(COMPLETED_STATE_LABEL_PATTERN, "");
+  if (COMPLETED_STATE_LABEL_PATTERN.test(compact)) {
+    const remainder = compact.replace(COMPLETED_STATE_LABEL_PATTERN, "");
     return !COMPLETED_STATE_TAIL_PATTERN.test(remainder);
   }
-  return IRREVERSIBLE_ACTION_PATTERN.test(name);
+  return (
+    IRREVERSIBLE_ACTION_PATTERN.test(normalized) ||
+    IRREVERSIBLE_ACTION_PATTERN.test(compact) ||
+    // No word boundary: covers a Latin verb split by spacing and then glued to its object, which the
+    // boundary-carrying pattern cannot see ("S e n d email" -> "Sendemail").
+    EN_IRREVERSIBLE_COMPACT_PATTERN.test(compact)
+  );
 }
 
 /**

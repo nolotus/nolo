@@ -1,4 +1,11 @@
 
+## 0.184.0-alpha.1 (2026-10-28)
+
+### Features
+
+* **cli:** 修英文词条残留中文，抽离高频命令报错到 i18n ([edc95e0](https://github.com/nolotus/bun-nolo/commit/edc95e0332621fec12596356ec1c8ec5e83c003e))
+
+
 ## 0.183.0-alpha.1 (2026-10-27)
 
 ### Features

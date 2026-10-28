@@ -47,6 +47,7 @@ import {
 } from "../agent-runtime/dialogReadProjection";
 
 import { loadLocalRunChildDialogIds } from "./tui/localRunChildDialogIds";
+import { t } from "./tui/i18n";
 
 const logger = createClientLogger("cli:dialog");
 
@@ -1506,9 +1507,7 @@ function formatDialogReadFailure(error: unknown, fallbackDialogId?: string): str
     lines.push(`    - attempted: yes`);
     lines.push(`    - reason: ${localFailure.reason}`);
     if (localFailure.attempts?.length) {
-      lines.push(
-        "    - databases tried（回退链: <cwd>/data/leveldb → NOLO_HOME/data/leveldb）:",
-      );
+      lines.push(t("dialogCmd.localDbFallbackChain"));
       for (const attempt of localFailure.attempts) {
         lines.push(`      - ${attempt.path} — ${attempt.status}: ${attempt.reason}`);
       }
@@ -1516,9 +1515,7 @@ function formatDialogReadFailure(error: unknown, fallbackDialogId?: string): str
       lines.push(`    - database: ${localFailure.path}`);
     }
     if (localFailure.locked) {
-      lines.push(
-        "    - 本地库正被某个进程持有 LevelDB 排他锁（常常就是当前 TUI 宿主进程自己，本地只读在持锁期间不可用）；请通过 server 端点读取该 dialog。",
-      );
+      lines.push(t("dialogCmd.localDbLockedAdvice"));
     }
   }
 
@@ -1563,17 +1560,11 @@ function formatDialogReadFailure(error: unknown, fallbackDialogId?: string): str
 
   if (allNotFound) {
     const triedPaths = localFailure?.paths?.length
-      ? `（已尝试：${localFailure.paths.join(" → ")}）`
+      ? t("dialogCmd.notFoundTriedPaths", localFailure.paths.join(" → "))
       : "";
-    lines.push(
-      "  next-step: 目标 dialog 可能不在这些 server 上；本地 run 的对话按 <cwd>/data/leveldb → NOLO_HOME/data/leveldb（默认 ~/.nolo）回退查找" +
-        triedPaths +
-        "，请用存储方对应环境/服务读取，运行中 run 可用 `nolo agent status <runId|pid>` 或 dialog 的 status 模式查摘要。",
-    );
+    lines.push(t("dialogCmd.notFoundNextStep", triedPaths));
   } else if (hasConnRefusedOrTimeout) {
-    lines.push(
-      "  next-step: 存在连接拒绝/超时，请检查 NOLO_SERVER/--server 指向的 server 是否可达、是否在运行。",
-    );
+    lines.push(t("dialogCmd.connectivityNextStep"));
   }
 
   return lines.join("\n");

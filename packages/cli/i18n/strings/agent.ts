@@ -290,4 +290,15 @@ export const agentStrings = {
     en: "[nolo] Raw error detail (NOLO_DEBUG=1): {0}\n",
     zh: "[nolo] 原始错误详情（NOLO_DEBUG=1）：{0}\n",
   },
+  // --- `nolo agent run` CLI surface (packages/cli/agentRunCommand.ts) ---
+  // The direct CLI entry bypasses the dispatch tool's allowHostWrites guard, so
+  // this is the only thing standing between `--runtime-key=local` and host writes.
+  "agentRun.hostWriteGuard": {
+    en: "[nolo] runtimeKey=local executes on — and writes to — the **host filesystem**, so it needs an explicit --allow-host-writes confirmation; drop --runtime-key to run isolated instead (docker sandbox by default).\n",
+    zh: "[nolo] runtimeKey=local 会在**宿主文件系统**上执行并写入，必须显式加 --allow-host-writes 确认；要隔离执行请省略 --runtime-key（默认进 docker 沙盒）。\n",
+  },
+  "agentRun.instaboxConfigFailed": {
+    en: "[nolo] instabox config generation failed: {0}\n",
+    zh: "[nolo] instabox 配置生成失败: {0}\n",
+  },
 } as const;
