@@ -544,16 +544,56 @@ const COMBINING_MARKS = /\p{Mn}/gu;
 const FILLER_CHARS = /[\u115F\u1160\u3164\uFFA0]/gu;
 const NON_ALPHANUMERIC = /[^\p{L}\p{N}]/gu;
 
+/**
+ * Homoglyphs: Cyrillic and Greek letters that render like Latin ones. A label can spell "Delete" with
+ * a Cyrillic е and stay invisible to any Latin keyword. Folding applies to the text being matched
+ * only, so a genuine Russian or Greek label keeps its own text in every payload the user sees, and
+ * folding cannot invent a false positive: the folded word still has to be a verb in the list.
+ */
+const HOMOGLYPHS = new Map([
+  // Lowercase Cyrillic/Greek → lowercase Latin.
+  ["а", "a"], ["в", "b"], ["е", "e"], ["к", "k"], ["м", "m"], ["н", "h"], ["о", "o"],
+  ["р", "p"], ["с", "c"], ["т", "t"], ["у", "y"], ["х", "x"], ["ѕ", "s"], ["і", "i"],
+  ["ј", "j"], ["ԁ", "d"], ["һ", "h"], ["ӏ", "l"], ["ԛ", "q"], ["ԝ", "w"],
+  ["α", "a"], ["β", "b"], ["ε", "e"], ["ι", "i"], ["κ", "k"], ["ν", "v"], ["ο", "o"],
+  ["ρ", "p"], ["τ", "t"], ["υ", "u"], ["χ", "x"], ["γ", "y"], ["ϲ", "c"],
+  // Uppercase → uppercase Latin. Folding to lowercase instead would erase the CamelCase boundary
+  // ("DeleteΑccount") and would map Ν to ν→v even though it renders as N.
+  ["А", "A"], ["В", "B"], ["Е", "E"], ["К", "K"], ["М", "M"], ["Н", "H"], ["О", "O"],
+  ["Р", "P"], ["С", "C"], ["Т", "T"], ["У", "Y"], ["Х", "X"], ["Ѕ", "S"], ["І", "I"],
+  ["Ј", "J"], ["Ԁ", "D"], ["Һ", "H"], ["Ӏ", "L"], ["Ԛ", "Q"], ["Ԝ", "W"],
+  ["Α", "A"], ["Β", "B"], ["Ε", "E"], ["Ζ", "Z"], ["Η", "H"], ["Ι", "I"], ["Κ", "K"],
+  ["Μ", "M"], ["Ν", "N"], ["Ο", "O"], ["Ρ", "P"], ["Τ", "T"], ["Υ", "Y"], ["Χ", "X"],
+  ["Ϲ", "C"],
+]);
+
+// Cyrillic (including the U+0500 block, where ԁ lives) and Greek.
+const HOMOGLYPH_RANGE = /[\u0370-\u03FF\u0400-\u04FF\u0500-\u052F]/g;
+
+function foldHomoglyphs(text) {
+  // Exact character first, then its lowercase: the table carries both cases, so an uppercase lookalike
+  // folds to an uppercase Latin letter and keeps the CamelCase boundary intact.
+  return text.replace(
+    HOMOGLYPH_RANGE,
+    (char) => HOMOGLYPHS.get(char) ?? HOMOGLYPHS.get(char.toLowerCase()) ?? char,
+  );
+}
+
 function stripInvisible(name) {
   return (
-    name
-      .normalize("NFKC")
-      .replace(INVISIBLE_CHARS, "")
-      // Decompose, drop the marks, recompose. NFKC alone fuses "Se\u0301nd" into "Sénd", where the
-      // accent is part of a different letter and the verb is no longer visible to a keyword match.
-      .normalize("NFD")
-      .replace(COMBINING_MARKS, "")
-      .normalize("NFC")
+    // Folding runs on both sides of NFKC: before it, because NFKC rewrites some lookalikes into a
+    // different character the table does not know (lunate sigma Ϲ becomes Σ); after it, because
+    // decomposition can produce a lookalike the table does know (ё becomes Cyrillic е plus a mark).
+    foldHomoglyphs(
+      foldHomoglyphs(name)
+        .normalize("NFKC")
+        .replace(INVISIBLE_CHARS, "")
+        // Decompose, drop the marks, recompose. NFKC alone fuses "Se\u0301nd" into "Sénd", where the
+        // accent is part of a different letter and the verb is no longer visible to a keyword match.
+        .normalize("NFD")
+        .replace(COMBINING_MARKS, "")
+        .normalize("NFC"),
+    )
   );
 }
 
@@ -568,7 +608,10 @@ function compactLabel(name) {
 }
 
 export function isSensitiveActionName(name) {
-  return typeof name === "string" && SENSITIVE_NAME_PATTERN.test(compactLabel(name));
+  if (typeof name !== "string") return false;
+  // The same two views as the gate: the broad pattern over the compact text, plus the Latin token
+  // check, so a split or transposed verb is not reported as an ordinary click after the fact either.
+  return SENSITIVE_NAME_PATTERN.test(compactLabel(name)) || gateLatinLabel(stripInvisible(name));
 }
 
 export const CN_IRREVERSIBLE_VERBS = Object.freeze([
@@ -686,33 +729,178 @@ const IRREVERSIBLE_ACTION_PATTERN = new RegExp(
 export const CONFIRMATION_REQUIRED_CODE = "SENSITIVE_ACTION_REQUIRES_CONFIRMATION";
 
 /**
- * The same Latin verbs without word boundaries, for the compact view. A label can split a verb
- * ("S e n d") and, once spacing is collapsed, glue it to its object ("Sendemail"), where `\bsend\b`
- * can no longer see it. Dropping the boundary costs a false positive on brand-like labels (PayPal
- * contains "pay"), which is the direction this gate already prefers over missing a send.
+ * Latin verbs, matched as whole tokens rather than substrings. A label can hide a verb in two ways
+ * that a substring match cannot separate from an ordinary noun: split it ("S e n d", "De lete"), or
+ * transpose two letters ("Sned"). Tokens cover both without the false positives of a boundary-free
+ * substring match — "Sender settings" and "Deleted items" are single tokens that simply are not the
+ * verb, so they stay ordinary navigation. The accepted losses are CamelCase names whose first word is
+ * a verb — "PayPal" ("Pay Pal"), "SendGrid" ("Send Grid"), "SendBird" — which is the price of catching
+ * "SendEmail" and "DeleteAccount".
+ *
+ * Split CJK characters ("刂余" for 删) are out of scope: recognising a glyph assembled from separate
+ * characters would need a decomposition table, and its false-positive surface has not been assessed.
+ * That is a known limit, not a claim that no agent could read such a label as the verb.
  */
-const EN_IRREVERSIBLE_COMPACT_PATTERN = new RegExp(
-  [
-    "pay",
-    "payment",
-    "purchase",
-    "buy",
-    "delete",
-    "remove",
-    "unsubscribe",
-    "publish",
-    "send",
-    "resend",
-    "republish",
-    "revoke",
-    "grant",
-    "authorize",
-    "permission",
-    "transfer",
-    "donate",
-  ].join("|"),
-  "i",
-);
+const EN_IRREVERSIBLE_VERBS = Object.freeze([
+  "pay",
+  "payment",
+  "purchase",
+  "buy",
+  "delete",
+  "remove",
+  "unsubscribe",
+  "publish",
+  "send",
+  "resend",
+  "republish",
+  "revoke",
+  "grant",
+  "authorize",
+  "permission",
+  "transfer",
+  "donate",
+]);
+
+const EN_IRREVERSIBLE_VERB_SET = new Set(EN_IRREVERSIBLE_VERBS);
+
+// CamelCase is a word boundary: "DeleteAccount" and "DELETEAccount" are a verb plus its object, while
+// "Sender" and "Deleted" are single words. The cost is "PayPal" (split into "Pay Pal"), accepted
+// because the alternative is letting "SendEmail" through.
+const CAMEL_LOWER_UPPER = /([a-z0-9])([A-Z])/g;
+const CAMEL_UPPER_WORD = /([A-Z]+)([A-Z][a-z])/g;
+const LATIN_TOKENS = /[A-Za-z]+/g;
+// The longest verb is "unsubscribe" (11).
+const MAX_VERB_LENGTH = 11;
+// Transposition needs four letters to be meaningful; three-letter abbreviations such as "APY" or
+// "BYU" would otherwise collide with "pay" and "buy".
+const MIN_TRANSPOSITION_LENGTH = 4;
+const MAX_LATIN_TOKEN_LENGTH = 24;
+// A split verb leaves a token that is a prefix of one ("Dele", "Unsub", "s"), or one swap away from
+// being a prefix ("dle" -> "del"). Only such a token anchors the stream search, so a label like
+// "A Sender" — where "a" happens to prefix "authorize" — cannot drag an unrelated "Sender" into it.
+// The anchor decides where to look; it never widens what may match there.
+// Common short English words are not evidence of a split verb, even when they happen to prefix one:
+// "Re Sender" would otherwise join to "resend" and gate an ordinary label. Single letters other than
+// these stay eligible, which is what keeps "S e n d" detectable.
+const LATIN_STOP_WORDS = new Set([
+  "a", "an", "re", "id", "in", "to", "do", "go", "up", "on", "of", "or", "be", "is", "it", "at",
+  "as", "by", "we", "he", "me", "my", "no", "so", "us", "am", "if", "ok",
+]);
+
+function isVerbFragment(token) {
+  if (!token) return false;
+  const prefixesOf = (value) =>
+    EN_IRREVERSIBLE_VERBS.some((verb) => verb.length > value.length && verb.startsWith(value));
+  if (prefixesOf(token)) return true;
+  for (let index = 0; index + 1 < token.length; index += 1) {
+    const swapped =
+      token.slice(0, index) + token[index + 1] + token[index] + token.slice(index + 2);
+    if (prefixesOf(swapped)) return true;
+  }
+  return false;
+}
+
+// Complete English words that appear in ordinary navigation labels. Crossing into one changes what
+// the search accepts: the exact spelling belongs to that word ("Re Sender" -> resend), so only a
+// scrambled spelling can still be the action ("Re end s message" -> reends). Accepted false positive:
+// "Re: End status" also yields reends and asks once — a constructible bypass costs the attacker
+// nothing, an extra confirmation costs the user a click.
+const LATIN_WORD_ANCHORS = new Set([
+  "sender", "senders", "settings", "setting", "deleted", "items", "item", "sent", "ends", "end",
+  "apy", "byu", "new", "id", "ids", "account", "accounts", "user", "users", "profile", "profiles",
+  "mail", "mails", "message", "messages", "inbox", "draft", "drafts", "folder", "folders", "list",
+  "lists", "page", "pages", "home", "search", "help", "docs", "documentation", "security", "privacy",
+  "payment", "payments", "purchase", "purchases", "permission", "permissions", "transfer", "transfers",
+  "grant", "grants", "publisher", "publishers", "order", "orders", "invoice", "invoices", "bill",
+  "bills", "team", "teams", "workspace", "workspaces",
+]);
+
+function isCompleteWord(token) {
+  for (const word of LATIN_WORD_ANCHORS) {
+    if (token === word || token.startsWith(word)) return true;
+  }
+  return false;
+}
+
+function sortedLetters(value) {
+  return value.split("").sort().join("");
+}
+
+function matchesAnagram(candidate) {
+  if (candidate.length < MIN_TRANSPOSITION_LENGTH || candidate.length > MAX_VERB_LENGTH) return false;
+  const sorted = sortedLetters(candidate);
+  return EN_IRREVERSIBLE_VERBS.some(
+    (verb) => verb.length === candidate.length && sortedLetters(verb) === sorted,
+  );
+}
+
+function matchesVerb(candidate) {
+  if (candidate.length < 3 || candidate.length > MAX_VERB_LENGTH) return false;
+  if (EN_IRREVERSIBLE_VERB_SET.has(candidate)) return true;
+  if (candidate.length >= MIN_TRANSPOSITION_LENGTH && hasAdjacentTransposition(candidate)) return true;
+  return matchesAnagram(candidate);
+}
+
+function isVerbToken(token) {
+  return EN_IRREVERSIBLE_VERB_SET.has(token) || hasAdjacentTransposition(token);
+}
+
+function latinTokens(text) {
+  const spaced = text
+    .replace(CAMEL_LOWER_UPPER, "$1 $2")
+    .replace(CAMEL_UPPER_WORD, "$1 $2");
+  return (spaced.match(LATIN_TOKENS) ?? []).map((token) => token.toLowerCase());
+}
+
+function hasAdjacentTransposition(token) {
+  if (token.length < MIN_TRANSPOSITION_LENGTH || token.length > MAX_LATIN_TOKEN_LENGTH) return false;
+  for (let index = 0; index + 1 < token.length; index += 1) {
+    const swapped =
+      token.slice(0, index) + token[index + 1] + token[index] + token.slice(index + 2);
+    if (EN_IRREVERSIBLE_VERB_SET.has(swapped)) return true;
+  }
+  return false;
+}
+
+function gateLatinLabel(text) {
+  const tokens = latinTokens(text);
+  if (!tokens.length) return false;
+  if (tokens.some(isVerbToken)) return true;
+
+  const spans = [];
+  let offset = 0;
+  for (const token of tokens) {
+    spans.push({ token, start: offset, end: offset + token.length });
+    offset += token.length;
+  }
+  const stream = tokens.join("");
+
+  for (const span of spans) {
+    if (!isVerbFragment(span.token)) continue;
+    const stopAnchor = LATIN_STOP_WORDS.has(span.token);
+    let candidate = "";
+    let crossedWord = false;
+    for (let pos = span.start; pos < stream.length; pos += 1) {
+      const owner = spans.find((entry) => pos >= entry.start && pos < entry.end);
+      // A stop word only anchors its own label: crossing into a complete word means the rest is an
+      // ordinary noun ("Re Sender"). Past that point only a scrambled spelling can still be the action
+      // — "resend" belongs to "Sender", while "reends" ("Re end s message") does not belong to "end".
+      if (stopAnchor && owner !== span && isCompleteWord(owner.token)) crossedWord = true;
+      candidate += stream[pos];
+      if (candidate.length > MAX_VERB_LENGTH) break;
+      if (crossedWord) {
+        // Past a complete word only a scrambled spelling can still be the action: "resend" belongs to
+        // "Sender", while "reends" does not belong to "end". This deliberately also gates
+        // "Re: End status" (re + end + s), an accepted false positive: the attacker can write
+        // "Re endsmessage" at no cost, so a constructible bypass is worse than one extra confirmation.
+        if (!EN_IRREVERSIBLE_VERB_SET.has(candidate) && matchesAnagram(candidate)) return true;
+      } else if (matchesVerb(candidate)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 export function isIrreversibleActionName(name) {
   if (typeof name !== "string") return false;
@@ -733,9 +921,9 @@ export function isIrreversibleActionName(name) {
   return (
     IRREVERSIBLE_ACTION_PATTERN.test(normalized) ||
     IRREVERSIBLE_ACTION_PATTERN.test(compact) ||
-    // No word boundary: covers a Latin verb split by spacing and then glued to its object, which the
-    // boundary-carrying pattern cannot see ("S e n d email" -> "Sendemail").
-    EN_IRREVERSIBLE_COMPACT_PATTERN.test(compact)
+    // Tokens, not substrings: "S e n d email" and "Sned" are gated, while "Sender settings" and
+    // "Deleted items" stay ordinary navigation.
+    gateLatinLabel(normalized)
   );
 }
 

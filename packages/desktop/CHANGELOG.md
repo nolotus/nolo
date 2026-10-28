@@ -1,4 +1,11 @@
 
+## 0.202.0-alpha.3 (2026-10-28)
+
+### Bug Fixes
+
+* **connector:** normalize labels and match Latin verbs as tokens ([a953239](https://github.com/nolotus/bun-nolo/commit/a953239d8aeb640ea30c955605f8ebfdf65eb131))
+
+
 ## 0.202.0-alpha.2 (2026-10-28)
 
 ### Bug Fixes
