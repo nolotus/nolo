@@ -1,3 +1,4 @@
+import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 /**
  * OpenAI 兼容协议 Provider 适配器（Inference Compatibility Seam）。
  *
@@ -88,6 +89,7 @@ export type OpenAiCompatibleProviderConfig = {
   apiKey: string;
   apiKeyHeader?: string;
   provider: string;
+  hasVision?: boolean;
   requestOptions: Record<string, number | string>;
   wire?: "responses" | "chat.completions";
   /**
@@ -184,7 +186,17 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   // the leak assertions in openAiCompatibleProvider.test.ts /
   // openAiCompatibleMessages.test.ts).
   const sanitizedMessages = sanitizeForOutbound(args.messages, args.tools);
+  const toolImagePolicy = resolveToolImagePolicy({
+    routeKind: isResponses ? "responses" : "openai-compatible",
+    legacySupportsToolImages: isResponses ? false : undefined,
+    provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
+    model: args.providerConfig.model,
+    customProviderUrl: args.providerConfig.endpoint,
+    hasVision: args.providerConfig.hasVision,
+  });
   const messages = toOpenAiCompatibleMessages(sanitizedMessages, {
+    maxImagesPerRequest: toolImagePolicy.maxImagesPerRequest,
+    supportsToolImages: !isResponses && toolImagePolicy.supportsToolImages,
     stripReasoningContent: shouldStripReasoning,
     ...(args.shapingCounts ? { shapingCounts: args.shapingCounts } : {}),
     ...resolveReasoningReplayOptions(
@@ -240,7 +252,9 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   // 这道判定会发出不合规 body，上游中途断流且照常扣费。responses wire 与
   // server 一致不走该判定（buildResponsesRequestBody 自成一体）。
   const body = isResponses
-    ? buildResponsesRequestBody(rawBody, args.providerConfig.model)
+    ? buildResponsesRequestBody(rawBody, args.providerConfig.model, {
+        ...toolImagePolicy,
+      })
     : normalizeChatCompletionsBodyForProvider({
         body: rawBody,
         provider: args.providerConfig.provider,

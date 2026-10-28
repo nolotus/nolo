@@ -97,6 +97,7 @@ function resolveOneBare(
   model: string,
   samplesByModel: SpeedSamplesByModel,
 ): Omit<CandidateSpeedFact, "model"> | null {
+  // Legacy scalar TPS is generation-only; end-to-end groups never enter this view.
   const observed = resolveObservedSpeed(samplesByModel.get(model) ?? [], {
     limit: OBSERVED_SPEED_WINDOW,
   });
@@ -172,7 +173,7 @@ const formatSeconds = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
 const formatTps = (tps: number): string => String(Math.round(tps));
 
 export const SPEED_CONTEXT_HEADER =
-  "speed (observed=本用户最近调用中位数, firstOutput 含推理输出; aa=Artificial Analysis 快照, firstAnswer 含思考时间, 两源不可直接比较; tps=n/a 表示无可信吞吐样本):";
+  "speed (observed=本用户最近调用中位数, firstOutput 含推理输出; aa=Artificial Analysis 快照, firstAnswer 含思考时间, 两源不可直接比较; observed tps=generation（不含端到端口径）, tps=n/a 表示无可信吞吐样本):";
 
 export function formatCandidateSpeedFacts(facts: readonly CandidateSpeedFact[]): string | null {
   if (facts.length === 0) return null;

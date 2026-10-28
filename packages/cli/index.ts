@@ -5,7 +5,8 @@ import { initializeDiagnostics, detectMode } from "./diagnostics";
 import { isCompiledBinary } from "./cliEnvHelpers";
 import { readPackageInfo } from "./updateCommands";
 import { getWindowsUpdateStatus } from "./windowsSelfUpdate";
-import { takeVersionChangeNotice } from "./versionChangeNotice";
+import { formatVersionChangeNotice, takeVersionChangeNotice } from "./versionChangeNotice";
+import { initCliLocale, t } from "./i18n";
 
 // —— 阶段 0 / Slice 1：诊断先行 ——
 // 在任何应用模块顶层代码可能缓存 console 引用之前，完成模式判定 + console bridge。
@@ -41,6 +42,11 @@ if (process.platform === "win32") {
   // 不原地覆盖正在使用的版本，因此"等所有 nolo 进程退出"这个前提本身不成立。
 }
 
+// 子命令与 TUI 共享早期 locale 初始化，使 CLI 子命令路径也能按环境变量 (NOLO_LANG / LANG / LC_ALL) 获得正确文案。
+// 兜底传 "en"：这些输出在 i18n 之前一直是硬编码英文，zh 兜底会让 LANG=C.UTF-8（Docker/CI 默认）或无 LANG 的用户
+// 从英文变中文，属于回归。TUI 侧沿用 initCliLocale 的 zh 默认，行为不变。
+initCliLocale(process.env, "en");
+
 const SOURCE_CLI_DIR = dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = isCompiledBinary() ? dirname(process.execPath) : SOURCE_CLI_DIR;
 const ROOT_DIR = join(CLI_DIR, "..", "..");
@@ -58,7 +64,7 @@ if (process.stdout.isTTY && !isScriptLikeArgs) {
   const change = takeVersionChangeNotice(packageInfo.version);
   if (change) {
     process.stderr.write(
-      `▸ Nolo version changed: ${change.from} → ${change.to}\n`,
+      `${formatVersionChangeNotice(change)}\n`,
     );
   }
 }
@@ -144,7 +150,7 @@ async function main(): Promise<never> {
   const command = resolveCommand(commandArgs);
   if (!command) {
     // "Unknown command" 也是用户面输出（stderr），直写不走诊断。
-    process.stderr.write(`Unknown command: ${args.join(" ")}\n\n`);
+    process.stderr.write(`${t("cliUnknownCommand", args.join(" "))}\n\n`);
     process.stdout.write(`${renderHelpText()}\n`);
     process.exit(1);
   }

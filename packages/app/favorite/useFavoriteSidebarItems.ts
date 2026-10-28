@@ -3,10 +3,30 @@
 //
 // 只显示显式收藏（key 在 favoriteStore 里）的内容；不做「收藏的 agent 的
 // 会话」这类推导（owner 2026-07-29 定：收藏区域只显示收藏数据）。
-// 窗口内保留摘要；窗口外只使用已有缓存，无缓存时显示中性占位，不发实体单读。
+//
+// ── 窗口外收藏的标题：零请求，按类型给诚实占位 ──
+// 窗口外的 key 往往从未被读过，db.entities 里没有它，标题就无从解析。补读看起来
+// 是拿到真名的唯一办法，但它换不到有界负载，所以这里明确不做：
+//  1. `read` thunk 在本地命中时也是「先启动后台 revalidation、再立即返回」，
+//     所以「队列槽位释放」≠「远端请求结束」——按在飞槽位算并发上限根本约束不到
+//     wire 上的请求数（ce6be26b6 的形态照样能复现）。
+//  2. 现有的批量摘要通道只能按 type 取「最近 N 条」，没有按 key 集合过滤的能力：
+//     noloQueryRequest 把 condition 原样 POST 给服务端（packages/database/client/
+//     queryRequest.ts），而仓库里所有调用点的 condition 都只有 { type, ... }
+//     （packages/database/hooks/useUserData.ts:287,311、
+//     packages/database/client/ownedDialogPage.ts:40、packages/app/fetchOwnedApps.ts:242），
+//     URL 上也只接受 limit / since / dialogPage+cursor。窗口外收藏按定义就落在
+//     「最近 N 条」之外，要用这条通道补名就得把该用户的整份内容列表翻出来——
+//     那是比单读更大的服务端负载。
+// 因此：有本地记录就用与最近列表同一条标题链（resolveUserContentTitle）解析真名；
+// 没有本地记录时显示按类型的诚实占位（「对话」/「文档」/「表格」/「AI」/…），
+// 既不是「未命名」，也不把原始 dbKey（如 agent-xxx）暴露到界面上。
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppSelector } from "app/store";
+import { getSpaceContentTypeLabel } from "create/space/contentLabels";
+import { resolveUserContentTitle } from "app/utils/myContentItems";
 import {
   useFavoriteAgentIds,
   useFavoriteContentIds,
@@ -29,10 +49,13 @@ const inferTypeFromKey = (key: string): string => {
 /**
  * 输入调用方已有的 recentItems，输出完整收藏 items（窗口内 + 窗口外）。
  * 按 favoritedAt 降序；缺收藏时间的项排最后。
+ *
+ * 只读 store / 本地实体，不发任何请求——窗口外收藏没有本地记录时用类型占位。
  */
 export const useFavoriteSidebarItems = (
   recentItems: MyContentListItem[],
 ): MyContentListItem[] => {
+  const { t } = useTranslation("space");
   const agentIds = useFavoriteAgentIds();
   const contentIds = useFavoriteContentIds();
   const favoritedAtById = useFavoriteFavoritedAtById();
@@ -48,19 +71,23 @@ export const useFavoriteSidebarItems = (
     [recentItems],
   );
 
-  // 窗口外的 key：在 favoriteKeysSet 但不在 recentContentKeys 中
+  // 窗口外的收藏 key。它们本地通常没有记录，这里也不为它们读任何东西。
   const outsideKeys = useMemo(
-    () => Array.from(favoriteKeysSet).filter((key) => !recentContentKeys.has(key)),
+    () =>
+      Array.from(favoriteKeysSet).filter((key) => !recentContentKeys.has(key)),
     [favoriteKeysSet, recentContentKeys],
   );
 
-  // 读所有窗口外 key 的实体。用 useAppSelector + useMemo 避免每次渲染返回新对象
+  // 读本地已有的实体。用 useAppSelector + useMemo 避免每次渲染返回新对象
   // 导致 useAppSelector 引发无限循环。
-  const dbEntities = useAppSelector((s) => s.db.entities);
+  const dbEntities = useAppSelector((s) => s.db.entities) as Record<
+    string,
+    any
+  > | undefined;
   const outsideEntities = useMemo(() => {
     const result: Record<string, any> = {};
     for (const key of outsideKeys) {
-      const entity = dbEntities[key];
+      const entity = dbEntities?.[key];
       if (entity) {
         result[key] = entity;
       }
@@ -68,28 +95,25 @@ export const useFavoriteSidebarItems = (
     return result;
   }, [outsideKeys, dbEntities]);
 
-  // Do not hydrate full entities for sidebar decoration. Missing summaries use
-  // a neutral title/type placeholder until normal content navigation loads them.
-
   // ── 窗口内收藏项（只认显式收藏 key，无推导）──
   const insideItems = useMemo(
     () => recentItems.filter((item) => favoriteKeysSet.has(item.contentKey)),
     [recentItems, favoriteKeysSet],
   );
 
-  // ── 窗口外收藏项（从 redux 实体构建）──
+  // ── 窗口外收藏项（本地实体优先，取不到标题时用类型占位）──
   const outsideItems = useMemo<MyContentListItem[]>(() => {
     const items: MyContentListItem[] = [];
     for (const key of outsideKeys) {
-      const entity = outsideEntities[key] ?? {};
-      const type = entity.type || inferTypeFromKey(key);
-      // 无缓存或尚无 name/title 时 title 留空，
-      // 由 SidebarItemRow/SidebarPinnedBlock 兜底显示本地化「未命名」，
-      // 避免退化回显示原始 dbKey（如 agent-xxx）导致切换视图时名字/头像闪烁。
+      const entity = outsideEntities[key];
+      const type = entity?.type || inferTypeFromKey(key);
+      // 标题优先链与最近列表共用（title → displayName → name）：凡是本地有记录
+      // 的（用户已打开过、或最近列表之外的缓存仍在）都能显示真名。
+      // 完全没有本地记录时，用「按类型的诚实占位」而不是「未命名」：
+      // 用户至少能看出这是一条对话 / 文档 / 表格 / AI，也知道这不是标题丢失。
       const resolvedTitle =
-        type === "agent"
-          ? entity.name || entity.title || ""
-          : entity.title || "";
+        resolveUserContentTitle(entity ?? {}) ||
+        getSpaceContentTypeLabel({ type, contentKey: key }, t);
       items.push({
         source: "user-data",
         title: resolvedTitle,
@@ -98,16 +122,16 @@ export const useFavoriteSidebarItems = (
         pinned: false,
         createdAt: 0,
         updatedAt: 0,
-        spaceId: entity.spaceId ?? null,
+        spaceId: entity?.spaceId ?? null,
         spaceName: "",
-        serverOrigin: entity.serverOrigin,
-        fileCategory: entity.fileCategory ?? undefined,
-        mimeType: entity.mimeType,
-        originalName: entity.originalName,
+        serverOrigin: entity?.serverOrigin,
+        fileCategory: entity?.fileCategory ?? undefined,
+        mimeType: entity?.mimeType,
+        originalName: entity?.originalName,
       } as MyContentListItem);
     }
     return items;
-  }, [outsideKeys, outsideEntities]);
+  }, [outsideKeys, outsideEntities, t]);
 
   // ── 合并 + 按 favoritedAt 降序 ──
   const allItems = useMemo(() => {

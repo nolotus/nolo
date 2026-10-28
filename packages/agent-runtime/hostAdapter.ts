@@ -11,6 +11,8 @@ export type AgentRuntimeAgentConfig = {
   name?: string;
   prompt?: string;
   model?: string;
+  /** Explicit image-input capability; unknown remains conservative. */
+  hasVision?: boolean;
   provider?: string;
   apiSource?: string;
   cliProvider?: string;
@@ -157,6 +159,7 @@ export type AgentRuntimeToolCallInput = {
 
 export type AgentRuntimeToolResult = {
   content: string;
+  images?: Array<{ mimeType: string; dataBase64: string }>;
   metadata?: Record<string, unknown>;
 };
 

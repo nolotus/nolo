@@ -1,3 +1,4 @@
+import { TOOL_HAD_IMAGES, hadToolImages } from "./toolImages";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import type {
@@ -248,7 +249,10 @@ function buildDialogMessageWriteOps(args: {
           ...(message.tool_call_id ? { toolCallId: message.tool_call_id } : {}),
           ...(toolName ? { toolName } : {}),
           ...(Array.isArray(message.tool_calls) ? { tool_calls: message.tool_calls } : {}),
-          ...(message.tool_result_metadata ? { metadata: message.tool_result_metadata } : {}),
+          ...((message.tool_result_metadata || hadToolImages(message)) ? { metadata: {
+            ...message.tool_result_metadata,
+            ...(hadToolImages(message) ? { [TOOL_HAD_IMAGES]: true } : {}),
+          } } : {}),
           createdAt: args.nowIso,
         },
       };

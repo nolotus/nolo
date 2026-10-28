@@ -95,10 +95,7 @@ const lookupKnownModelVision = (
   return undefined;
 };
 
-export const resolveAgentImageInputSupport = (
-  agent: AgentCapabilityConfig | null | undefined,
-): boolean => {
-  if (!agent) return true;
+const resolveCatalogImageSupport = (agent: AgentCapabilityConfig): boolean | undefined => {
 
   const provider = asTrimmedLowercaseString(agent.provider)
     || asTrimmedLowercaseString(agent.apiSource)
@@ -125,13 +122,51 @@ export const resolveAgentImageInputSupport = (
         )?.hasVision
     : lookupKnownModelVision(provider, model);
 
-  if (catalogHasVision !== undefined) {
-    return catalogHasVision;
-  }
+  return catalogHasVision;
+};
 
-  if (typeof agent.hasVision === "boolean") {
-    return agent.hasVision;
-  }
+// User-input vision keeps its historical permissive fallback. Tool images do not.
+export const resolveAgentImageInputSupport = (
+  agent: AgentCapabilityConfig | null | undefined,
+): boolean => {
+  if (!agent) return true;
+  return resolveCatalogImageSupport(agent) ?? agent.hasVision ?? true;
+};
 
-  return true;
+export type ToolImageRouteKind =
+  | "openai-compatible" | "responses" | "codex/responses"
+  | "gemini-native" | "antigravity" | "platform"
+  | "anthropic";
+
+export type ToolImagePolicyInput = AgentCapabilityConfig & {
+  /** Actual outbound transport, never the agent's display provider. */
+  routeKind: ToolImageRouteKind;
+  /** Only for restoring a boundary's historical serializer default. */
+  legacySupportsToolImages?: boolean;
+};
+
+export const resolveToolImagePolicy = (input: ToolImagePolicyInput): {
+  supportsToolImages: boolean;
+  maxImagesPerRequest: number;
+  reason: string;
+} => {
+  // 阈值必须来自重复 ≥3 次的观测，不能把单次失败当作硬限制。
+  // antigravity 曾因单次 4 张失败被设为 3；随后旧代码两次 4/4 命中，
+  // 重复观测证伪了该误判，恢复所有路由默认 4（并非据此宣称新的硬限制）。
+  const maxImagesPerRequest = 4;
+  const env = typeof process !== "undefined" ? process.env : undefined;
+  if (env?.NOLO_TOOL_IMAGE_POLICY === "legacy") {
+    return {
+      supportsToolImages: input.legacySupportsToolImages
+        ?? resolveAgentImageInputSupport({ ...input, hasVision: input.hasVision ?? false }),
+      maxImagesPerRequest,
+      reason: "legacy",
+    };
+  }
+  const catalog = resolveCatalogImageSupport(input);
+  if (catalog !== undefined) return { maxImagesPerRequest, supportsToolImages: catalog, reason: "catalog" };
+  if (typeof input.hasVision === "boolean") {
+    return { maxImagesPerRequest, supportsToolImages: input.hasVision, reason: "agent-declaration" };
+  }
+  return { maxImagesPerRequest, supportsToolImages: false, reason: "unknown" };
 };

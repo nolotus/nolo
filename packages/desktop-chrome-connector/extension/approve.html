@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Nolo 需要你确认</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        height: 100vh;
+        box-sizing: border-box;
+        overflow-y: auto;
+        padding: 18px 20px;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      h1 { margin: 0; font-size: 15px; font-weight: 600; }
+      p { margin: 0; }
+      .target { font-weight: 600; word-break: break-word; }
+      .site { font-size: 13px; opacity: 0.85; word-break: break-all; }
+      .hint { opacity: 0.7; font-size: 12px; }
+      #script-caption { font-size: 13px; font-weight: 600; }
+      /* A script is shown as a scrollable block, with its own line breaks: a flattened one-liner
+         let a leading comment hide the statement that actually ran. */
+      #script-preview {
+        margin: 0;
+        padding: 10px 12px;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        border-radius: 8px;
+        background: color-mix(in srgb, currentColor 6%, transparent);
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: 62vh;
+        overflow: auto;
+      }
+      #script-preview[hidden], #script-caption[hidden] { display: none; }
+      .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: auto; }
+      button {
+        font: inherit;
+        padding: 7px 14px;
+        border-radius: 8px;
+        border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+        background: transparent;
+        cursor: pointer;
+      }
+      button.primary { border-color: transparent; background: #2563eb; color: #fff; font-weight: 600; }
+      button:disabled { opacity: 0.55; cursor: default; }
+      #status { font-size: 12px; opacity: 0.75; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Nolo 想对你<span id="action-label">点击</span>下面这个控件</h1>
+    <p class="target" id="target-name"></p>
+    <p class="site" id="target-site"></p>
+    <p id="script-caption" hidden>要执行的脚本（原文，换行保留；可滚动查看）</p>
+    <pre id="script-preview" hidden></pre>
+    <p class="hint">允许只对这一次动作有效，60 秒后失效；页面内容变化后也会作废。</p>
+    <div id="status" role="status" aria-live="polite"></div>
+    <div class="row">
+      <button type="button" id="deny">取消</button>
+      <button type="button" id="allow" class="primary">允许一次</button>
+    </div>
+    <script src="approve.js"></script>
+  </body>
+</html>

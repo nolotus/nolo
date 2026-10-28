@@ -188,51 +188,17 @@ async function run() {
     {
       const root = createWorkspace();
       roots.push(root);
-      writeFileSync(join(root, "package.json"), JSON.stringify({
-        scripts: {
-          "probe:visual-review": "bun ./probe.ts",
-        },
-      }));
-      writeFileSync(join(root, "probe.ts"), [
-        "import { writeFileSync, mkdirSync } from 'node:fs';",
-        "import { dirname } from 'node:path';",
-        "const args = process.argv.slice(2);",
-        "const get = (name: string) => args[args.indexOf(name) + 1];",
-        "const screenshotPath = get('--screenshot');",
-        "const metricsPath = get('--metrics');",
-        "mkdirSync(dirname(screenshotPath), { recursive: true });",
-        "mkdirSync(dirname(metricsPath), { recursive: true });",
-        "writeFileSync(screenshotPath, 'png');",
-        "writeFileSync(metricsPath, JSON.stringify({ targetText: '开聊' }));",
-        "console.log(JSON.stringify({",
-        "  pageUrl: get('--base') + get('--path'),",
-        "  screenshotPath,",
-        "  metricsPath,",
-        "  waitSelector: get('--wait-selector'),",
-        "  focusSelector: get('--focus-selector'),",
-        "  expectText: get('--expect-text'),",
-        "  targetText: get('--expect-text'),",
-        "  targetRect: { width: 251, height: 36 },",
-        "  targetComputed: { display: 'flex' }",
-        "}));",
-      ].join("\n"));
+      writeFileSync(join(root, "index.html"), '<main class="agent"><button class="agent__primary">开聊</button></main>');
+      writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { "probe:visual-review": "exit 99" } }));
       const executors = createLocalWorkspaceToolExecutors({ workspaceRoot: root });
       const capture = await executors.captureVisualState({
-        id: "call-capture",
-        name: "captureVisualState",
-        arguments: JSON.stringify({
-          baseUrl: "http://127.0.0.1:38323",
-          path: "/",
-          waitSelector: ".agent",
-          focusSelector: ".agent__primary",
-          expectText: "开聊",
-          screenshotPath: "test-results/frontend-agent/after.png",
-          metricsPath: "test-results/frontend-agent/metrics.json",
-        }),
+        id: "call-capture", name: "captureVisualState",
+        arguments: JSON.stringify({ baseUrl: `file://${root}/`, path: "index.html", waitSelector: ".agent", focusSelector: ".agent__primary", expectText: "开聊", screenshotPath: "test-results/frontend-agent/after.png", metricsPath: "test-results/frontend-agent/metrics.json" }),
       });
       assertContains(capture.content, "screenshotPath: test-results/frontend-agent/after.png", "capture content");
-      assert(capture.metadata?.pageUrl === "http://127.0.0.1:38323/", "capture should parse pageUrl");
-      assert(capture.metadata?.targetText === "开聊", "capture should parse targetText");
+      assert(capture.metadata?.pageUrl === `file://${root}/index.html`, "capture should retain pageUrl");
+      assert(capture.metadata?.targetText === "开聊", "capture should retain targetText");
+      assert((capture.images?.length ?? 0) > 0, "platform capture must return images");
     }
 
   } finally {

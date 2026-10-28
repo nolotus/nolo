@@ -8,6 +8,7 @@
  * resolve via credentialRef + the host file broker only.
  */
 
+import { TOOL_HAD_IMAGES, hadToolImages } from "./toolImages";
 import { isRecord } from "core/isRecord";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -473,6 +474,11 @@ function sanitizeChatMessage(value: unknown): AgentRuntimeChatMessage | null {
     asOptionalTrimmedString(value.tool_call_id) ??
     asOptionalTrimmedString(value.toolCallId);
   if (toolCallId) message.tool_call_id = toolCallId;
+  // Only retain the bounded image-history flag, never arbitrary tool metadata.
+  const metadata = isRecord(value.tool_result_metadata) ? value.tool_result_metadata : value.metadata;
+  if (role === "tool" && (hadToolImages(value as unknown as AgentRuntimeChatMessage) || (isRecord(metadata) && metadata[TOOL_HAD_IMAGES] === true))) {
+    message.tool_result_metadata = { [TOOL_HAD_IMAGES]: true };
+  }
   const toolCalls = sanitizeToolCalls(value.tool_calls);
   if (toolCalls) message.tool_calls = toolCalls;
   if (typeof value.reasoning_content === "string" && value.reasoning_content) {

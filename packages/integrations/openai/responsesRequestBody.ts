@@ -4,6 +4,7 @@ import { convertMessagesToResponsesInput, toResponsesTools } from "./responsesHe
 export function buildResponsesRequestBody(
   body: Record<string, any>,
   model: string,
+  options?: { supportsToolImages?: boolean; maxImagesPerRequest?: number },
 ): Record<string, any> {
   const tools = Array.isArray(body.tools) ? toResponsesTools(body.tools) : undefined;
   const reasoningEffort =
@@ -18,7 +19,9 @@ export function buildResponsesRequestBody(
     input:
       Array.isArray(body.input) && body.input.length > 0
         ? body.input
-        : convertMessagesToResponsesInput(body.messages ?? []),
+        : convertMessagesToResponsesInput(body.messages ?? [], {
+            ...options,
+          }),
     ...(Array.isArray(body.tools) ? { tools: tools ?? undefined } : {}),
     ...(typeof body.max_tokens === "number"
       ? { max_output_tokens: body.max_tokens }

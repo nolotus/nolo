@@ -17,6 +17,40 @@ const port = Number(
     : process.env.NOLO_CHROME_CONNECTOR_PORT || DEFAULT_PORT,
 );
 const connectorToken = process.env.NOLO_CHROME_CONNECTOR_TOKEN || "";
+/**
+ * `/rpc` used to forward `body.action` verbatim to the extension, so any string that reached
+ * 127.0.0.1:38947 became an extension command. An explicit allow-list of the actions the connector
+ * actually implements keeps unknown/internal names from being reachable over the socket.
+ */
+const ALLOWED_RPC_ACTIONS = new Set([
+  "connector_info",
+  "list_tabs",
+  "open_tab",
+  "close_tab",
+  "read_page",
+  "prepare_browser_action",
+  "set_select_value",
+  "click",
+  "type",
+  "press",
+  "set_files",
+  "scroll",
+  "screenshot",
+  "read_console",
+  "read_network",
+  "eval_script",
+  "list_pending_approvals",
+  "submit_approval_decision",
+  "hit_test",
+  "mouse_move",
+  "mouse_click",
+  "detach",
+  "reload_extension",
+  "douyin_delete_one",
+  "douyin_delete_one_v2",
+  "douyin_rect_row",
+  "douyin_rect_confirm",
+]);
 const ignoreStdinCloseForTest = process.env.NOLO_CHROME_CONNECTOR_IGNORE_STDIN_CLOSE_FOR_TEST === "1";
 const pending = new Map();
 let shuttingDown = false;
@@ -140,6 +174,20 @@ server = createServer(async (req, res) => {
   }
   try {
     const body = await readJsonBody(req);
+    const requestedAction = String(body?.action || "");
+    if (!ALLOWED_RPC_ACTIONS.has(requestedAction)) {
+      res.statusCode = 400;
+      res.end(
+        JSON.stringify({
+          ok: false,
+          error: {
+            code: "UNKNOWN_ACTION",
+            message: `Unknown connector action "${requestedAction}". /rpc only accepts actions the connector implements.`,
+          },
+        }),
+      );
+      return;
+    }
     if (body.action === "set_files") {
       try {
         const validated = validateUploadFiles({

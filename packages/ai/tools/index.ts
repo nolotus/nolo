@@ -1893,7 +1893,9 @@ const baseToolDefinitions: ToolDefinition[] = [
       behavior: getChromeConnectorToolBehavior(name),
       capability: "browser_automation",
       riskLevel:
-        name === "browser_click_element" || name === "browser_type"
+        name === "browser_click_element" ||
+        name === "browser_type" ||
+        name === "browser_set_select_value"
           ? "medium"
           : "low",
       costLevel: "low",

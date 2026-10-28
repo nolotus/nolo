@@ -24,6 +24,11 @@ const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
     summary: "Type text into an element (--tab <id> --ref|--selector --text <text>)",
   },
   {
+    name: "select",
+    summary:
+      "Set a native <select> value and verify it (--tab <id> --ref|--selector --value <v>|--label <l>)",
+  },
+  {
     name: "upload",
     summary:
       "Upload files to a file input element (--tab <id> --ref|--selector --file <path>)",
@@ -36,6 +41,11 @@ const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
   { name: "screenshot", summary: "Capture a screenshot (--tab <id> [--out <path>])" },
   { name: "read-console", summary: "Read recent console entries (--tab <id>)" },
   { name: "read-network", summary: "Read recent network entries (--tab <id>)" },
+  {
+    name: "eval",
+    summary:
+      "Evaluate JS in a tab, user-approved per call (--tab <id> --expr <js> [--await] [--timeout-ms N])",
+  },
 ];
 
 function getBrowserFamilyEntries(): CommandEntry[] {

@@ -1,3 +1,4 @@
+import type { AgentRuntimeToolResult } from "../../agent-runtime/hostAdapter";
 import type { ShellApprovalHost } from "./originShellApprovalTransport";
 /**
  * Local tool executor assembly for CLI local runtime.
@@ -254,7 +255,7 @@ export function buildLocalToolExecutors(args: {
   fetchImpl: CliFetchImpl;
   localToolExecutors?: Record<
     string,
-    (call: any) => Promise<{ content: string; metadata?: Record<string, unknown> }>
+    (call: any) => Promise<AgentRuntimeToolResult>
   >;
   readXPost?: ReadToolFn;
   readXhsProfile?: ReadToolFn;

@@ -1,24 +1,11 @@
+import { t } from "./i18n";
 import {
   clearCredentialAvailability,
   readCredentialAvailability,
 } from "./credentialAvailability";
 
-export const AUTH_COOLDOWN_HELP_TEXT = `Manage per-credential availability cooldowns (429 限流冷却).
-
-Usage:
-  nolo auth cooldown                List all active cooldowns
-  nolo auth cooldown --clear <credential>   Clear one credential's cooldown
-  nolo auth cooldown --clear-all            Clear all cooldowns
-
-Options:
-  --clear <credential>  Clear the cooldown for the given credential
-                       (e.g. chatgpt / claude / antigravity / api-key:agent-...).
-  --clear-all           Clear every credential cooldown.
-  --help                Show this help.
-
-No argument lists the currently cooled credentials with their human-readable
-recovery time and remaining duration.
-`;
+// `nolo auth cooldown` 帮助文本按调用时 locale 现算（见 runAuthCooldownCommand），
+// 不要导出模块级常量：常量会在首次 import 时冻结 locale，TUI /lang 切换后即过期。
 
 function wantsHelp(args: string[]) {
   return args.includes("--help") || args.includes("-h");
@@ -29,9 +16,9 @@ function formatRemaining(ms: number): string {
   const days = Math.floor(totalSec / 86400);
   const hours = Math.floor((totalSec % 86400) / 3600);
   const minutes = Math.floor((totalSec % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  if (days > 0) return t("cliCooldownDays", String(days), String(hours), String(minutes));
+  if (hours > 0) return t("cliCooldownHours", String(hours), String(minutes));
+  return t("cliCooldownMinutes", String(minutes));
 }
 
 export async function runAuthCooldownCommand(
@@ -39,7 +26,7 @@ export async function runAuthCooldownCommand(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
   if (wantsHelp(args)) {
-    console.log(AUTH_COOLDOWN_HELP_TEXT);
+    console.log(t("cliCooldownHelp"));
     return 0;
   }
 
@@ -51,8 +38,8 @@ export async function runAuthCooldownCommand(
     }
     console.log(
       keys.length > 0
-        ? `Cleared ${keys.length} credential cooldown(s).`
-        : "No credential cooldowns to clear.",
+        ? t("cliCooldownClearedCount", String(keys.length))
+        : t("cliCooldownNoneToClear"),
     );
     return 0;
   }
@@ -62,34 +49,34 @@ export async function runAuthCooldownCommand(
     const key = args[clearIdx + 1];
     if (!key || key.startsWith("-")) {
       console.log(
-        "Missing credential for --clear. Usage: nolo auth cooldown --clear <credential>",
+        t("cliCooldownMissingCredential"),
       );
       return 1;
     }
     const entries = await readCredentialAvailability(env);
     if (!(key in entries)) {
-      console.log(`No active cooldown for credential: ${key}`);
+      console.log(t("cliCooldownNotActive", key));
       return 0;
     }
     await clearCredentialAvailability(key, env);
-    console.log(`Cleared cooldown for credential: ${key}`);
+    console.log(t("cliCooldownCleared", key));
     return 0;
   }
 
   const entries = await readCredentialAvailability(env);
   const keys = Object.keys(entries);
   if (keys.length === 0) {
-    console.log("No active credential cooldowns.");
+    console.log(t("cliCooldownNoneActive"));
     return 0;
   }
   const now = Date.now();
-  console.log("Active credential cooldowns:");
+  console.log(t("cliCooldownActive"));
   for (const key of keys.sort()) {
     const at = entries[key];
     console.log(
       // 列宽按最长的 fallback key（custom-endpoint:<origin>，如
       // custom-endpoint:https://ollama.com = 34 字符）取值，避免撑破对齐。
-      `  ${key.padEnd(34)} recovers ${new Date(at).toISOString()}  (${formatRemaining(at - now)} remaining)`,
+      t("cliCooldownEntry", key.padEnd(34), new Date(at).toISOString(), formatRemaining(at - now)),
     );
   }
   return 0;

@@ -7,6 +7,15 @@ import * as stylex from "@stylexjs/stylex";
  * 与原 CSS 保持 1:1：同一元素、同一声明、同值。
  * 运行时 :root 变量由 GlobalThemeController 注入，var(--global-*) 原样保留。
  */
+/**
+ * 侧边栏滚动区（.AllViewSidebar__scroll-area）内两个同级内容区块的共用水平内边距。
+ *
+ * scroll-area 自己已经吃了一层 `var(--sidebar-gutter)`；其下 `.AllViewSidebar__recent-content`
+ * 与 `.AllViewSidebar__favorites-content` 必须再吃同一层，两块的行才落在同一条左边线上。
+ * 单点定义：改这里两处一起变，不再出现「收藏行比最近行整体左移 8px」的漂移。
+ */
+export const sidebarScrollContentPadding = "4px var(--sidebar-gutter)" as const;
+
 export const sidebarStyles = stylex.create({
   /* ── ChatSidebar Alignment System ── */
   chatSidebar: {
@@ -341,10 +350,19 @@ export const sidebarStyles = stylex.create({
     display: "flex",
     flexDirection: "column",
     gap: "var(--space-1)",
-    padding: "4px var(--sidebar-gutter)",
+    padding: sidebarScrollContentPadding,
     flex: 1,
     minHeight: 0,
     overflow: "hidden",
+  },
+  /* 收藏区块容器：与 `.AllViewSidebar__recent-content` 同级、同 padding（共用常量），
+     但不参与 flex 分配 —— 收藏块按内容高度占位，最近列表继续吃掉剩余高度。 */
+  allViewFavoritesContent: {
+    display: "flex",
+    flexDirection: "column",
+    padding: sidebarScrollContentPadding,
+    flexShrink: 0,
+    minHeight: 0,
   },
   navGroupFavorites: {
     display: "flex",

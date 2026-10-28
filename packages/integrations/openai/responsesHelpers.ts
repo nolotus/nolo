@@ -1,6 +1,18 @@
 import type { Message } from "app/types";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
+import {
+  toolImages,
+  hadToolImages,
+  createToolImageBudget,
+  EMPTY_TOOL_RESULT_TEXT,
+  TOOL_HAD_IMAGES,
+} from "../../agent-runtime/toolImages";
+import {
+  MAX_TOOL_IMAGES_PER_REQUEST,
+  MAX_TOOL_IMAGE_BASE64_BYTES_PER_REQUEST,
+  formatToolImageBudgetNote,
+} from "../../agent-runtime/openAiToolImages";
 
 type MessageContentPart =
   | { type: "text"; text: string }
@@ -34,10 +46,14 @@ type ResponseFunctionCall = {
   arguments: string;
 };
 
-type ResponseFunctionCallOutput = {
+export type ResponseFunctionCallOutputItem =
+  | { type: "input_text"; text: string }
+  | { type: "input_image"; image_url: string; detail?: "low" | "high" | "auto" };
+
+export type ResponseFunctionCallOutput = {
   type: "function_call_output";
   call_id: string;
-  output: string;
+  output: string | Array<ResponseFunctionCallOutputItem>;
 };
 type ResponseReasoning = {
   type: "reasoning";
@@ -158,19 +174,69 @@ export const convertMessagesToResponsesInput = (
     | (Pick<Message, "role" | "content" | "tool_calls" | "tool_call_id"> & { reasoning_content?: unknown })
     | { role: string; content?: any; tool_calls?: any; tool_call_id?: string; reasoning_content?: unknown }
   >,
-  options?: { stripReasoningContent?: boolean },
+  options?: { stripReasoningContent?: boolean; supportsToolImages?: boolean; maxImagesPerRequest?: number },
 ): ResponseInputItem[] => {
   const input: ResponseInputItem[] = [];
+  const imageBudget = createToolImageBudget(options?.maxImagesPerRequest);
+  let acceptedImages = 0;
 
   for (const message of messages) {
     if (!message?.role) continue;
 
     if (message.role === "tool") {
       if (!message.tool_call_id) continue;
+
+      if (!options?.supportsToolImages || !hadToolImages(message as object)) {
+        input.push({
+          type: "function_call_output",
+          call_id: message.tool_call_id,
+          output: normalizeToolOutput(message.content),
+        });
+        continue;
+      }
+
+      const images = toolImages(message as object);
+      const text = typeof message.content === "string" ? message.content : normalizeToolOutput(message.content);
+      const effectiveText = text.trim() ? text : EMPTY_TOOL_RESULT_TEXT;
+      const outputParts: ResponseFunctionCallOutputItem[] = [
+        { type: "input_text", text: effectiveText },
+      ];
+
+      let toolOmitted = 0;
+      for (const image of images) {
+        const decision = imageBudget(image);
+        if (decision === "duplicate") continue;
+        if (decision !== "delivered") {
+          toolOmitted += 1;
+          continue;
+        }
+
+        acceptedImages += 1;
+        outputParts.push({
+          type: "input_text",
+          text: `Image ${acceptedImages}`,
+        });
+        outputParts.push({
+          type: "input_image",
+          image_url: `data:${image.mimeType};base64,${image.dataBase64}`,
+        });
+      }
+
+      if (toolOmitted > 0) {
+        outputParts.push({
+          type: "input_text",
+          text: formatToolImageBudgetNote(toolOmitted),
+        });
+      }
+
+      const hadPersistedImages = (message as any)?.tool_result_metadata?.[TOOL_HAD_IMAGES] === true;
+      const hasInjectedParts = outputParts.some((p) => p.type === "input_image") || toolOmitted > 0;
+      const shouldUseArray = hadPersistedImages || hasInjectedParts;
+
       input.push({
         type: "function_call_output",
         call_id: message.tool_call_id,
-        output: normalizeToolOutput(message.content),
+        output: shouldUseArray ? outputParts : normalizeToolOutput(message.content),
       });
       continue;
     }
@@ -372,11 +438,53 @@ export const convertResponsesInputToMessages = (
     if (item.type === "function_call_output") {
       const callId = asOptionalTrimmedString(item.call_id);
       if (!callId) continue;
+      let outputContent: string;
+      const imageParts: Array<Record<string, any>> = [];
+
+      if (typeof item.output === "string") {
+        outputContent = item.output;
+      } else if (Array.isArray(item.output)) {
+        const textParts: string[] = [];
+        for (const part of item.output) {
+          if (!isRecord(part)) continue;
+          if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
+            const text = typeof part.text === "string" ? part.text : "";
+            if (!text) continue;
+            textParts.push(text);
+            continue;
+          }
+          if (part.type === "input_image" || part.type === "image_url") {
+            const rawUrl = isRecord(part.image_url) ? part.image_url.url : part.image_url;
+            const url = asOptionalTrimmedString(rawUrl);
+            if (!url) continue;
+            imageParts.push({
+              type: "image_url",
+              image_url: { url, ...(part.detail ? { detail: part.detail } : {}) },
+            });
+            continue;
+          }
+        }
+        if (textParts.length > 0) {
+          outputContent = textParts.join("\n");
+        } else if (imageParts.length > 0) {
+          outputContent = "";
+        } else {
+          outputContent = JSON.stringify(item.output);
+        }
+      } else {
+        outputContent = JSON.stringify(item.output ?? "");
+      }
       messages.push({
         role: "tool",
         tool_call_id: callId,
-        content: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? ""),
+        content: outputContent,
       });
+      if (imageParts.length > 0) {
+        messages.push({
+          role: "user",
+          content: imageParts,
+        });
+      }
       continue;
     }
 

@@ -22,42 +22,15 @@ import {
 } from "./docCommandShared";
 import { readOption } from "./cliEnvHelpers";
 import { findPotentialSecrets, formatSecretFindings } from "./secretScan";
+import { t } from "./i18n";
 import type { DocKind, DocWriteDeps } from "./docCommandShared";
 
 function printDocCreateUsage(output: { write(chunk: string): unknown }) {
-  output.write(`Usage:
-  nolo doc create --title <title> [--body ... | --body-file path] [--id ...] [--space ...]
-
-Options:
-  --description <text>      Optional page description stored in meta.
-  --sync local,main,us      Choose write targets. Values may also be full URLs.
-  --local-only              Write only to the local server target.
-  --no-local                Exclude local targets when --sync includes them.
-  --dry-run                 Build and validate without writing.
-  --json                    Print machine-readable JSON.
-  --allow-secrets           Allow bodies that look like credentials.
-  --server <url>            Default write target when --sync is omitted.
-  --token <jwt>             Auth token. Required for writes.
-`);
+  output.write(t("docCmd.createUsage"));
 }
 
 function printSkillDocCreateUsage(output: { write(chunk: string): unknown }) {
-  output.write(`Usage:
-  nolo skill-doc create --title <title> --description <text> [--body ... | --body-file path]
-  nolo skill create-doc --title <title> --description <text> [--body ... | --body-file path]
-
-Options:
-  --tools '["readDoc"]'                 Tool names this skill expects.
-  --required-skills '["skill-a"]'       Required skill references.
-  --recommended-skills '["skill-b"]'    Recommended skill references.
-  --trigger-mode explicit|required|recommended
-  --prompt-patch <text>
-  --page | --kind page                  Create a normal page instead of a skill-backed page.
-  --sync local,main,us                  Choose write targets. Values may also be full URLs.
-  --dry-run                             Build and validate without writing.
-  --json                                Print machine-readable JSON.
-  --token <jwt>                         Auth token. Required for writes.
-`);
+  output.write(t("docCmd.skillCreateUsage"));
 }
 
 async function runCreateCommand(
@@ -88,7 +61,7 @@ async function runCreateCommand(
   if (secretFindings.length && !allowSecrets) {
     throw new Error(
       [
-        "Document body appears to contain credentials or secrets. Pass --allow-secrets to write it anyway.",
+        t("docCmd.secretBodyWarning"),
         formatSecretFindings(secretFindings),
       ].join("\n")
     );
@@ -97,7 +70,7 @@ async function runCreateCommand(
   const { authToken, userId } = requireTokenUser(args, deps.env, shouldDryRun);
   const targets = resolveWriteTargets(args, deps.env);
   if (!targets.length) {
-    throw new Error("No write targets resolved. Check --sync / --local-only / --no-local.");
+    throw new Error(t("docCmd.noWriteTargetsResolved"));
   }
 
   const explicitId = readOption(args, "--id");
@@ -175,9 +148,9 @@ async function runCreateCommand(
   if (shouldOutputJson) {
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   } else if (shouldDryRun) {
-    process.stdout.write(`dry-run ok: ${dbKey}\n`);
+    process.stdout.write(t("docCmd.dryRunOk", dbKey));
   } else {
-    process.stdout.write(`created ${docKind}: ${dbKey}\n`);
+    process.stdout.write(t("docCmd.createdDoc", docKind, dbKey));
   }
 
   return 0;

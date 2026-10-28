@@ -1,48 +1,275 @@
 
-## 0.171.0 (2026-10-27)
+## 0.186.0 (2026-10-28)
+
+### Features
+
+* **agent-runtime:** Gemini 原生通道注入工具图片 ([4ee3c55](https://github.com/nolotus/bun-nolo/commit/4ee3c55610d165b03a8aeff98e50e41b4818a0b9))
+* **agent-runtime:** OpenAI Chat Completions 通道注入工具图片（B1） ([4ed5d49](https://github.com/nolotus/bun-nolo/commit/4ed5d49125f29765c5c2e0e56c0854e6941a3f02))
+* **agent-runtime:** read_image 一次多张（≤4）+ 摘要统一为结构化 formatter ([74bb152](https://github.com/nolotus/bun-nolo/commit/74bb1525bc9985889a61020d126eb2f57e8e8d84))
+* **agent-runtime:** Responses/codex 通道注入工具图片（原生 output 数组） ([24fb17a](https://github.com/nolotus/bun-nolo/commit/24fb17adf50b7c4bf61243ac3cc184aacc7ad94c))
+* **agent-runtime:** Responses/codex 通道注入工具图片（原生 output 数组） ([0684318](https://github.com/nolotus/bun-nolo/commit/06843180c43c0e2d65573225d963034afab417f5))
+* **agent-runtime:** 宿主窗口捕获（xdg-desktop-portal）→ 图片（**需显式声明**） ([54c82dc](https://github.com/nolotus/bun-nolo/commit/54c82dc4a6697e482567d80ab0c85471feab2e67))
+* **agent-runtime:** 工具结果可携带图片（切片1：Anthropic 通道 + read_image + 护栏） ([dd6d6a6](https://github.com/nolotus/bun-nolo/commit/dd6d6a6b9b45f9724f23f27ff23cc62f1609e038))
+* **agent-runtime:** 页面无头渲染 → 图片（替代用户工作区脚本） ([821e619](https://github.com/nolotus/bun-nolo/commit/821e6192e8c7a30c9fd53afed73748b64081a663))
+* **browser-connector:** ask the user before irreversible actions ([3588386](https://github.com/nolotus/bun-nolo/commit/35883864b1b4a05088a083a7a10cd4ade47fdeda))
+* **browser-connector:** set native select values with readback verification ([a2e5a0a](https://github.com/nolotus/bun-nolo/commit/a2e5a0a89073a1b9cc361c87a5117247bef0edf6))
+* **browser-connector:** show the target site in the approval window ([11ac07c](https://github.com/nolotus/bun-nolo/commit/11ac07c8551cca9f985e18fc3bd05b94c9e085d6))
+* **browser-connector:** 标签页执行脚本（eval）与对话内审批 ([28b96c2](https://github.com/nolotus/bun-nolo/commit/28b96c296e1bafaaed61a55ccf5ca66990716e6f))
+* **capabilities:** 每通道每请求图片上限 + 超限截断补投 ([bf3e586](https://github.com/nolotus/bun-nolo/commit/bf3e5868ca457e83f0fb82e4c99a391ef141fda6))
+* **cli:** help 本地化收尾 + 修英文提示写成中文 + 加固 i18n 守卫 ([1daaa07](https://github.com/nolotus/bun-nolo/commit/1daaa07c329e06ad51cbf2bf3c9993ff62571c2c))
+* **cli:** 修英文词条残留中文，抽离高频命令报错到 i18n ([edc95e0](https://github.com/nolotus/bun-nolo/commit/edc95e0332621fec12596356ec1c8ec5e83c003e))
+* **cli:** 补齐全部子命令的中文描述并加覆盖率门 ([d3775d7](https://github.com/nolotus/bun-nolo/commit/d3775d7a42f287f7876be55aa1ec07c320525e3a))
+* **cli:** 输出统一接入 i18n（zh/en），词条拆域 + 修 update 只读缺口 ([5abaf44](https://github.com/nolotus/bun-nolo/commit/5abaf44a5bb2439206ceb13139be6a48c6a26b2b))
+* **llm:** deepseek-flash 默认改走 LithosAI，失效回落官方 ([7bc15cd](https://github.com/nolotus/bun-nolo/commit/7bc15cd21727182c01d108eb2a0fab1206147465))
+* **token:** usage records 支持按 dialogId 查询 + 补跨用户隔离 ([06220e0](https://github.com/nolotus/bun-nolo/commit/06220e07679cb8857e0e1813f4d22a364640203e))
+* **token:** 非流式调用记录 canonical timing + CLI 查对话速度 ([679c48b](https://github.com/nolotus/bun-nolo/commit/679c48ba515118a20826ec1079a9a29bb2175fbd))
+
+### Bug Fixes
+
+* **agent-runtime:** read_image 宽容合并 path/paths，schema 去掉参数级组合子 ([df8a578](https://github.com/nolotus/bun-nolo/commit/df8a57872b3b189c2cc5346ac34002b620930e58))
+* **agent-runtime:** 去掉 toolImages/openAiToolImages 的 node:crypto（web bundle 可达） ([f432f19](https://github.com/nolotus/bun-nolo/commit/f432f190d3eb0af4bcf17921970d5fc2b2bc48dc))
+* **agent-runtime:** 渲染器缺参 fail fast，不再静默等到超时 ([a86691e](https://github.com/nolotus/bun-nolo/commit/a86691ee2052ef105c5306128102cffc16f9276f))
+* **agent-runtime:** 让 agent 声明的 hasVision 真正到达运行时 + 图片归属标签 ([82c1fe4](https://github.com/nolotus/bun-nolo/commit/82c1fe4a8d413c8039053fbdbfddb32ed878ed62))
+* **agent-runtime:** 评测语料 FLAG 与文件名解耦（防答案泄露） ([24880df](https://github.com/nolotus/bun-nolo/commit/24880dfc071676334a3dded8b686815dc6fca78a))
+* **agent-runtime:** 超预算图片只记已投递，未投递可续取且不破坏前缀 ([7b4e8e9](https://github.com/nolotus/bun-nolo/commit/7b4e8e9c7564ce5d63a7804a67333d79d2c7be0c))
+* **browser-connector:** carry approvalId through select, align merged state ([70a2978](https://github.com/nolotus/bun-nolo/commit/70a29787c680c931f5affae3cf96e8671f862253))
+* **capabilities:** antigravity 每请求上限 3→4（原值源自单次观测，已证伪） ([ce24515](https://github.com/nolotus/bun-nolo/commit/ce245156cbcf451bb8bf172979bd3b78b86325f3))
+* **capabilities:** 撤销 antigravity 路由禁图（实测可用，此前结论基于旧代码） ([32ed1f3](https://github.com/nolotus/bun-nolo/commit/32ed1f33bead23ad5560bab41c255fde0b5eaded))
+* **chat:** 侧边栏补回收藏分区，收藏项不再从列表消失 ([de67868](https://github.com/nolotus/bun-nolo/commit/de6786890e47bafb6f19bb80ac42208ab5879ac2))
+* **chat:** 收藏分区与最近列表左对齐 ([ed5ad07](https://github.com/nolotus/bun-nolo/commit/ed5ad07ff6338a5a5cab1a5ba9e13bab97bf2ef9))
+* **chat:** 窗口外收藏改用类型标签，不再显示「未命名」 ([ee4867e](https://github.com/nolotus/bun-nolo/commit/ee4867e2ee3fb300de78e8c0636861bcc618ef0a))
+* **cli:** make the machine connector single-instance and observable ([4ecebd0](https://github.com/nolotus/bun-nolo/commit/4ecebd03a6688e880f0a09cc6c9ccd673731b065))
+* **cli:** 补 eval 的命令描述，覆盖率门改读定义源 ([10c077c](https://github.com/nolotus/bun-nolo/commit/10c077ca1940a39e8df93223d2b88879de74d439))
+* **connector:** 截图摘要统一为 [screenshot WxH NKB → path]，归属标签可提取路径 ([f9245df](https://github.com/nolotus/bun-nolo/commit/f9245df9d85aaaad20376b9f01f57cf033241974))
+* **quota:** 订阅窗口合并改为最新读数为准，修正面板与官方显示不一致 ([6ff93f5](https://github.com/nolotus/bun-nolo/commit/6ff93f564f2b7e04f29a852fa879a58a7443e333))
+* **tools:** read_image 真正进入请求面，并按后端可执行能力过滤 ([3287ad4](https://github.com/nolotus/bun-nolo/commit/3287ad46ad7e3682bf9a083ae8d124d97fea5545))
+
+
+## 0.185.0-alpha.4 (2026-10-28)
+
+### Bug Fixes
+
+* **chat:** 窗口外收藏改用类型标签，不再显示「未命名」 ([ee4867e](https://github.com/nolotus/bun-nolo/commit/ee4867e2ee3fb300de78e8c0636861bcc618ef0a))
+
+
+## 0.185.0-alpha.3 (2026-10-28)
+
+### Bug Fixes
+
+* **quota:** 订阅窗口合并改为最新读数为准，修正面板与官方显示不一致 ([6ff93f5](https://github.com/nolotus/bun-nolo/commit/6ff93f564f2b7e04f29a852fa879a58a7443e333))
+
+
+## 0.185.0-alpha.2 (2026-10-28)
+
+### Bug Fixes
+
+* **chat:** 收藏分区与最近列表左对齐 ([ed5ad07](https://github.com/nolotus/bun-nolo/commit/ed5ad07ff6338a5a5cab1a5ba9e13bab97bf2ef9))
+* **cli:** 补 eval 的命令描述，覆盖率门改读定义源 ([10c077c](https://github.com/nolotus/bun-nolo/commit/10c077ca1940a39e8df93223d2b88879de74d439))
+
+
+## 0.185.0-alpha.1 (2026-10-28)
+
+### Features
+
+* **browser-connector:** 标签页执行脚本（eval）与对话内审批 ([28b96c2](https://github.com/nolotus/bun-nolo/commit/28b96c296e1bafaaed61a55ccf5ca66990716e6f))
+* **cli:** 补齐全部子命令的中文描述并加覆盖率门 ([d3775d7](https://github.com/nolotus/bun-nolo/commit/d3775d7a42f287f7876be55aa1ec07c320525e3a))
+
+### Bug Fixes
+
+* **chat:** 侧边栏补回收藏分区，收藏项不再从列表消失 ([de67868](https://github.com/nolotus/bun-nolo/commit/de6786890e47bafb6f19bb80ac42208ab5879ac2))
+
+
+## 0.184.0-alpha.1 (2026-10-28)
+
+### Features
+
+* **cli:** 修英文词条残留中文，抽离高频命令报错到 i18n ([edc95e0](https://github.com/nolotus/bun-nolo/commit/edc95e0332621fec12596356ec1c8ec5e83c003e))
+
+
+## 0.183.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **token:** usage records 支持按 dialogId 查询 + 补跨用户隔离 ([06220e0](https://github.com/nolotus/bun-nolo/commit/06220e07679cb8857e0e1813f4d22a364640203e))
+* **token:** 非流式调用记录 canonical timing + CLI 查对话速度 ([679c48b](https://github.com/nolotus/bun-nolo/commit/679c48ba515118a20826ec1079a9a29bb2175fbd))
+
+
+## 0.182.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **browser-connector:** show the target site in the approval window ([11ac07c](https://github.com/nolotus/bun-nolo/commit/11ac07c8551cca9f985e18fc3bd05b94c9e085d6))
+
+
+## 0.181.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **cli:** help 本地化收尾 + 修英文提示写成中文 + 加固 i18n 守卫 ([1daaa07](https://github.com/nolotus/bun-nolo/commit/1daaa07c329e06ad51cbf2bf3c9993ff62571c2c))
+* **cli:** 输出统一接入 i18n（zh/en），词条拆域 + 修 update 只读缺口 ([5abaf44](https://github.com/nolotus/bun-nolo/commit/5abaf44a5bb2439206ceb13139be6a48c6a26b2b))
+
+
+## 0.180.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **cli:** make the machine connector single-instance and observable ([4ecebd0](https://github.com/nolotus/bun-nolo/commit/4ecebd03a6688e880f0a09cc6c9ccd673731b065))
+
+
+## 0.180.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **browser-connector:** ask the user before irreversible actions ([3588386](https://github.com/nolotus/bun-nolo/commit/35883864b1b4a05088a083a7a10cd4ade47fdeda))
+* **browser-connector:** set native select values with readback verification ([a2e5a0a](https://github.com/nolotus/bun-nolo/commit/a2e5a0a89073a1b9cc361c87a5117247bef0edf6))
+
+### Bug Fixes
+
+* **browser-connector:** carry approvalId through select, align merged state ([70a2978](https://github.com/nolotus/bun-nolo/commit/70a29787c680c931f5affae3cf96e8671f862253))
+
+
+## 0.179.0-alpha.1 (2026-10-27)
 
 ### Features
 
 * **cli:** 更新可感知——文案修正 + 完成通知 + 版本变化提示 ([7fb82c8](https://github.com/nolotus/bun-nolo/commit/7fb82c8e12493ec289e3e66802d4ee1b98908136))
-
-
-## 0.170.2 (2026-10-27)
 
 ### Bug Fixes
 
 * **cli:** Windows 自更新不再阻塞启动，删除等待进程与状态机 ([d20a762](https://github.com/nolotus/bun-nolo/commit/d20a762ebdddb8e099c0bc274d94e2f4e62e012b))
 
 
-## 0.170.1 (2026-10-26)
+## 0.178.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **capabilities:** antigravity 每请求上限 3→4（原值源自单次观测，已证伪） ([ce24515](https://github.com/nolotus/bun-nolo/commit/ce245156cbcf451bb8bf172979bd3b78b86325f3))
+
+
+## 0.178.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **capabilities:** 每通道每请求图片上限 + 超限截断补投 ([bf3e586](https://github.com/nolotus/bun-nolo/commit/bf3e5868ca457e83f0fb82e4c99a391ef141fda6))
+
+
+## 0.177.0-alpha.3 (2026-10-27)
+
+### Bug Fixes
+
+* **agent-runtime:** 渲染器缺参 fail fast，不再静默等到超时 ([a86691e](https://github.com/nolotus/bun-nolo/commit/a86691ee2052ef105c5306128102cffc16f9276f))
+
+
+## 0.177.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **capabilities:** 撤销 antigravity 路由禁图（实测可用，此前结论基于旧代码） ([32ed1f3](https://github.com/nolotus/bun-nolo/commit/32ed1f33bead23ad5560bab41c255fde0b5eaded))
+
+
+## 0.177.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** read_image 一次多张（≤4）+ 摘要统一为结构化 formatter ([74bb152](https://github.com/nolotus/bun-nolo/commit/74bb1525bc9985889a61020d126eb2f57e8e8d84))
+
+### Bug Fixes
+
+* **agent-runtime:** read_image 宽容合并 path/paths，schema 去掉参数级组合子 ([df8a578](https://github.com/nolotus/bun-nolo/commit/df8a57872b3b189c2cc5346ac34002b620930e58))
+
+
+## 0.176.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** Responses/codex 通道注入工具图片（原生 output 数组） ([24fb17a](https://github.com/nolotus/bun-nolo/commit/24fb17adf50b7c4bf61243ac3cc184aacc7ad94c))
+* **agent-runtime:** Responses/codex 通道注入工具图片（原生 output 数组） ([0684318](https://github.com/nolotus/bun-nolo/commit/06843180c43c0e2d65573225d963034afab417f5))
+
+
+## 0.175.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** 宿主窗口捕获（xdg-desktop-portal）→ 图片（**需显式声明**） ([54c82dc](https://github.com/nolotus/bun-nolo/commit/54c82dc4a6697e482567d80ab0c85471feab2e67))
+
+
+## 0.174.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** 页面无头渲染 → 图片（替代用户工作区脚本） ([821e619](https://github.com/nolotus/bun-nolo/commit/821e6192e8c7a30c9fd53afed73748b64081a663))
+
+
+## 0.173.0-alpha.3 (2026-10-27)
+
+### Bug Fixes
+
+* **agent-runtime:** 评测语料 FLAG 与文件名解耦（防答案泄露） ([24880df](https://github.com/nolotus/bun-nolo/commit/24880dfc071676334a3dded8b686815dc6fca78a))
+
+
+## 0.173.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **agent-runtime:** 超预算图片只记已投递，未投递可续取且不破坏前缀 ([7b4e8e9](https://github.com/nolotus/bun-nolo/commit/7b4e8e9c7564ce5d63a7804a67333d79d2c7be0c))
+
+
+## 0.173.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** Gemini 原生通道注入工具图片 ([4ee3c55](https://github.com/nolotus/bun-nolo/commit/4ee3c55610d165b03a8aeff98e50e41b4818a0b9))
+
+
+## 0.172.0-alpha.3 (2026-10-27)
+
+### Bug Fixes
+
+* **connector:** 截图摘要统一为 [screenshot WxH NKB → path]，归属标签可提取路径 ([f9245df](https://github.com/nolotus/bun-nolo/commit/f9245df9d85aaaad20376b9f01f57cf033241974))
+
+
+## 0.172.0-alpha.2 (2026-10-27)
+
+### Bug Fixes
+
+* **agent-runtime:** 让 agent 声明的 hasVision 真正到达运行时 + 图片归属标签 ([82c1fe4](https://github.com/nolotus/bun-nolo/commit/82c1fe4a8d413c8039053fbdbfddb32ed878ed62))
+
+
+## 0.172.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** OpenAI Chat Completions 通道注入工具图片（B1） ([4ed5d49](https://github.com/nolotus/bun-nolo/commit/4ed5d49125f29765c5c2e0e56c0854e6941a3f02))
+
+### Bug Fixes
+
+* **agent-runtime:** 去掉 toolImages/openAiToolImages 的 node:crypto（web bundle 可达） ([f432f19](https://github.com/nolotus/bun-nolo/commit/f432f190d3eb0af4bcf17921970d5fc2b2bc48dc))
+
+
+## 0.171.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **agent-runtime:** 工具结果可携带图片（切片1：Anthropic 通道 + read_image + 护栏） ([dd6d6a6](https://github.com/nolotus/bun-nolo/commit/dd6d6a6b9b45f9724f23f27ff23cc62f1609e038))
+
+### Bug Fixes
+
+* **tools:** read_image 真正进入请求面，并按后端可执行能力过滤 ([3287ad4](https://github.com/nolotus/bun-nolo/commit/3287ad46ad7e3682bf9a083ae8d124d97fea5545))
+
+
+## 0.170.0-alpha.1 (2026-10-27)
+
+### Features
+
+* **llm:** deepseek-flash 默认改走 LithosAI，失效回落官方 ([7bc15cd](https://github.com/nolotus/bun-nolo/commit/7bc15cd21727182c01d108eb2a0fab1206147465))
+
+
+## 0.169.0-alpha.2 (2026-10-26)
 
 ### Bug Fixes
 
 * **cli:** 终止身份容差按基准来源分级（自报 2s / spawn 30s） ([fd148ea](https://github.com/nolotus/bun-nolo/commit/fd148eab6f62f6f99c68b74d2940847e003f4bb7))
 * **cli:** 身份基准改子进程自报，Windows 子 run 不再被身份探测卡死 ([3e31ddf](https://github.com/nolotus/bun-nolo/commit/3e31ddfa407564e15c7a79558f0b2b6d12fe299d))
-
-
-## 0.170.0 (2026-10-26)
-
-### Features
-
-* **agent:** list and probe cloud resources from the tool surface ([f6d151d](https://github.com/nolotus/bun-nolo/commit/f6d151d4dfbef350a0d3b9ae176f4bb365eae248))
-* **ai:** Explore 创作者目录与作者名快照 ([3e8d2a5](https://github.com/nolotus/bun-nolo/commit/3e8d2a5d8b690993d69f416cf1f3ab6f6bc85cb1))
-* **ai:** make commit review gate configurable under auto-review ([7bfeed3](https://github.com/nolotus/bun-nolo/commit/7bfeed33ef5d54539ca05592c930ba99a035b649))
-* **cloud-plugins:** register cloud_exec behind explicit opt-in ([b2a263d](https://github.com/nolotus/bun-nolo/commit/b2a263daffb6483aa2494fafe6648f960b02e9c4))
-* **cloud-plugins:** serve connections by grant, drop the organization scope ([e6a7a6f](https://github.com/nolotus/bun-nolo/commit/e6a7a6ff8f8bf92e51717e5c5dee2d8fb1c7942b))
-* **email:** 邮件偏好独立设置页 + 用户可设余额提醒门槛 + 删除静默 ([a8d5404](https://github.com/nolotus/bun-nolo/commit/a8d5404b7c6f42efaee08dd4e5e7d1254c33ab6c))
-* **plugins:** make data-source tools opt-in per user, off by default ([6df08fb](https://github.com/nolotus/bun-nolo/commit/6df08fb1ebbfff61304ccbcd5703c95569aee304))
-
-### Bug Fixes
-
-* **ai:** 插件配置页不再把空间共享连接当成个人已连接 ([cd7be41](https://github.com/nolotus/bun-nolo/commit/cd7be41633c3ee9ac3b6faeea0bca2a5ebc8d9a0))
-* **cli:** resolve windows process start time and child entrypoint ([ae7771d](https://github.com/nolotus/bun-nolo/commit/ae7771d86ad3620e0debd80c79a60def81ec58a3))
-* **core:** 允许 HTTP_PORT=0（OS 分配临时端口），修 48631ef0d 引入的回归 ([9c6a90c](https://github.com/nolotus/bun-nolo/commit/9c6a90c14e715b0c5b49017816ad16bf46d62333))
-* **docker:** confirm a cloud sandbox stop with backoff ([5f9b980](https://github.com/nolotus/bun-nolo/commit/5f9b98002061771f0d664b1692b25c74f2af77a6))
-* **release:** restore the cli version to the highest reachable alpha tag ([41e612e](https://github.com/nolotus/bun-nolo/commit/41e612e0cedecacf73eec14727b102459bfb0450))
-* **security:** drop the unused zod declaration from the cli ai stub ([2e6349a](https://github.com/nolotus/bun-nolo/commit/2e6349abc6ce79ac071818c4d14075acc3199243))
-* **server:** HTTP_PORT 缺失时 fail-closed，不再静默退到 80 ([48631ef](https://github.com/nolotus/bun-nolo/commit/48631ef0d541582e9c633ba2051c8bc1b36c8301))
-* **yahoo-finance:** suppress survey and historical notices ([605cb47](https://github.com/nolotus/bun-nolo/commit/605cb470e000083f7e846554528085cb01f043cb))
 
 
 ## 0.169.0-alpha.1 (2026-10-26)

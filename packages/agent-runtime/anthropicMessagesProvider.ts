@@ -1,3 +1,4 @@
+import type { AgentRuntimeChatMessage } from "./types";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -349,6 +350,29 @@ function foldIntoTrailingToolResult(
   return true;
 }
 
+/**
+ * Anthropic rejects a tool_result whose content is missing or empty. Emptiness can
+ * only be judged after the trailing-text fold runs (a folded user text turns an
+ * empty string into a non-empty text block), so repair the whole list once here
+ * instead of substituting a placeholder at construction time.
+ */
+function assertNonEmptyToolResults(messages: JsonRecord[]): void {
+  const placeholder = EMPTY_TOOL_RESULT_TEXT;
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const block of message.content as JsonRecord[]) {
+      if (!block || block.type !== "tool_result") continue;
+      if (typeof block.content === "string") {
+        if (block.content.trim() === "") block.content = placeholder;
+      } else if (Array.isArray(block.content)) {
+        if (block.content.length === 0) block.content = placeholder;
+      } else if (block.content === undefined || block.content === null) {
+        block.content = placeholder;
+      }
+    }
+  }
+}
+
 function hasClaudeCodeIdentity(system: JsonRecord[]): boolean {
   return system.some((block) => {
     if (!block || typeof block !== "object") return false;
@@ -367,6 +391,17 @@ function normalizeAnthropicWireModel(model: string): string {
   return model;
 }
 
+import {
+  EMPTY_TOOL_RESULT_TEXT,
+  hadToolImages,
+  toolImages,
+  createToolImageBudget,
+  toolImageSource,
+  toolImageOmission,
+  toolImageNotices,
+} from "./toolImages";
+import { resolveAgentImageInputSupport, resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
+
 export function buildAnthropicMessagesBody(args: {
   agentConfig: AgentRuntimeAgentConfig;
   openAiBody: JsonRecord;
@@ -380,6 +415,7 @@ export function buildAnthropicMessagesBody(args: {
     system.push({ type: "text", text: args.agentConfig.prompt.trim() });
   }
   const messages: JsonRecord[] = [];
+  const imageBudget = createToolImageBudget(resolveToolImagePolicy({ ...args.agentConfig, routeKind: "anthropic" }).maxImagesPerRequest);
 
   for (const raw of rawMessages) {
     if (!raw || typeof raw !== "object") continue;
@@ -410,9 +446,42 @@ export function buildAnthropicMessagesBody(args: {
         pushMessage(messages, "user", [{
           type: "tool_result",
           tool_use_id: toolUseId,
-          content: typeof message.content === "string"
-            ? message.content
-            : JSON.stringify(message.content ?? ""),
+          content: (() => {
+            const text = typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? "");
+            const images = toolImages(message);
+            // Ordinary results retain the legacy string contract. Fold trailing
+            // text before the final empty-result repair, not before it.
+            if (!hadToolImages(message)) return text;
+            // Image-bearing results keep a text block from their first send,
+            // including after runtime payloads have been stripped from history.
+            const effective = text.trim() ? text : EMPTY_TOOL_RESULT_TEXT;
+            const notices = toolImageNotices(message);
+            const imageBlocks: JsonRecord[] = [];
+            // 合并两边意图：能力判定走统一策略（anthropic 路由），循环带 imageIndex 供归属标签使用
+            if (resolveToolImagePolicy({ ...args.agentConfig, routeKind: "anthropic" }).supportsToolImages) {
+              for (const [imageIndex, image] of images.entries()) {
+                const decision = imageBudget(image);
+                if (decision === "duplicate") continue;
+                if (decision !== "delivered") {
+                  if (!notices.seen.has(image)) {
+                    notices.seen.add(image);
+                    notices.text.push(toolImageOmission(toolImageSource(message as unknown as AgentRuntimeChatMessage, imageIndex), decision === "impossible"));
+                  }
+                } else {
+                  imageBlocks.push({ type: "image", source: {
+                    type: "base64", media_type: image.mimeType, data: image.dataBase64,
+                  } });
+                }
+              }
+            }
+            // A deferred notice is a stable historical block, not a placeholder
+            // to replace. Supplemental image blocks only append after it.
+            return [
+              { type: "text", text: effective },
+              ...notices.text.map((text) => ({ type: "text", text })),
+              ...imageBlocks,
+            ];
+          })(),
         }]);
       }
       continue;
@@ -442,6 +511,8 @@ export function buildAnthropicMessagesBody(args: {
     }
     pushMessage(messages, role, blocks);
   }
+
+  assertNonEmptyToolResults(messages);
 
   // Anthropic currently rejects third-party OAuth Sonnet/Opus unless the
   // request carries Claude Code identity + beta fingerprint.

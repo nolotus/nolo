@@ -25,6 +25,7 @@ export async function resolveOpenAiCompatibleProviderConfig(args: {
     throw new Error("OpenAI-compatible provider config requires a direct provider execution plan.");
   }
   return {
+    hasVision: args.agentConfig.hasVision,
     model: plan.model,
     endpoint: plan.endpoint,
     apiKey: plan.apiKey,

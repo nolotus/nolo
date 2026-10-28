@@ -140,6 +140,11 @@ function readUtilization(raw: unknown): number | undefined {
   return n > 1 ? n / 100 : n;
 }
 
+/**
+ * 同一次观测内、同 scope 多个信号的合并（一个响应里 header 与 body 可能各报一份）：
+ * 取更紧的一方是对的——它们描述的是同一时刻。**跨观测（落库）不能用它**，
+ * 见 `mergeQuotaWindowObservations`。
+ */
 function mergeWindow(into: Map<string, QuotaWindow>, win: QuotaWindow) {
   const existing = into.get(win.scope);
   if (!existing) {
@@ -175,7 +180,7 @@ function mergeWindow(into: Map<string, QuotaWindow>, win: QuotaWindow) {
   existing.source = win.source;
 }
 
-/** 供持久层把两次观测的窗口按 scope 合并（与 mergeWindow 同规则，批量版）。 */
+/** 供「同一次观测内」把窗口按 scope 合并（与 mergeWindow 同规则，批量版）。 */
 export function mergeQuotaWindows(
   existing: QuotaWindow[] | undefined,
   incoming: QuotaWindow[],
@@ -188,6 +193,151 @@ export function mergeQuotaWindows(
   }
   for (const win of incoming) {
     if (win && typeof win.scope === "string" && win.scope) mergeWindow(map, win);
+  }
+  return [...map.values()];
+}
+
+// ── 跨观测合并（持久化用）────────────────────────────────────────────────────
+// 背景：快照落库时曾直接复用 mergeQuotaWindows（max utilization / min remaining）。
+// 那套「取更紧」只在一个观测内部成立——跨观测用它会出真问题：一次高利用率、
+// 一次低剩余会被永久钉住，即使上游已经回落、甚至窗口已经进入下一个复位周期
+// 也不释放（线上：面板显示 0%，对应快照 utilization=1.00，上游实际 0.81）。
+//
+// 跨观测的正确语义：
+// - 订阅窗口（5h / 7d 家族）：同一把尺子的最新读数就是真值 → 整窗替换。
+//   被动路径（上游响应头）与主动探测因此共享同一语义，谁也不会把谁锁死。
+// - 其余资源计数器（requests / tokens / …）：只有两次观测**声明了同一个复位边界**
+//   （resetAt 完全一致，能证明还在同一周期内）才保留「取更紧」；边界一变就整窗
+//   替换。既保住防上游多副本抖动的初衷，又不会跨周期锁死。
+// 「最新观测」的先后由调用方按 observedAt 判定（更旧的观测不得到达这里）。
+
+/** 订阅窗口的家庭名：这些 scope 的新观测即真值。 */
+const SUBSCRIPTION_WINDOW_SCOPE_RE = /(^|[-_:])(5h|7d)([-_:]|$)/i;
+const SUBSCRIPTION_PERIOD_SCOPES = new Set([
+  "daily",
+  "weekly",
+  "monthly",
+  "credits",
+  "extra-usage",
+]);
+
+/** scope 是否属于「订阅窗口」（5h/7d 及其变体、套餐周期窗口）。 */
+export function isSubscriptionQuotaScope(scope: string): boolean {
+  if (typeof scope !== "string") return false;
+  const s = scope.trim().toLowerCase();
+  if (!s) return false;
+  return SUBSCRIPTION_WINDOW_SCOPE_RE.test(s) || SUBSCRIPTION_PERIOD_SCOPES.has(s);
+}
+
+/**
+ * 旧版 Codex 窗口分类器会把长度直接拼进 scope（`3h` / `1d` / `window`），
+ * 现在只产出 5h / 7d。这类 scope 是历史残留：同一指标会在快照里留两条记录。
+ *
+ * ⚠️ 这是**形状启发式**，不是 provider 感知的判定：`^\d+[hd]$` 同样会命中
+ * 别的 provider 自己用的数值型 bucket（`1h` / `12h` / `24h` 之类）。所以它只
+ * 用于两处、且都不静默删数据：清理脚本（默认 dry-run，`--apply` 前 dump 到
+ * /tmp，见 scripts/ops/cleanupLegacyQuotaWindowScopes.ts）与落库时丢弃
+ * **已过 resetAt** 的窗口（见 writeAgentQuotaSnapshot）。未过期的旧 scope
+ * 一律留给人确认。
+ */
+export function isLegacyQuotaWindowScope(scope: string): boolean {
+  if (typeof scope !== "string") return false;
+  const s = scope.trim().toLowerCase();
+  if (!s || s === "5h" || s === "7d") return false;
+  return s === "window" || /^\d+[hd]$/.test(s);
+}
+
+/**
+ * incoming 没报的字段沿用已存值，避免「只报了 resetAt」的响应把利用率抹掉。
+ *
+ * 但有两条边界（review LOW-1）：
+ * - `resetAt` 默认**不**沿用：订阅窗口的新观测没报重置时刻时，沿用上一周期的
+ *   resetAt 会让倒计时指向已经过去的那个周期边界。只有能证明"还在同一个复位
+ *   边界内"的资源计数器（`sameResetBoundary`）才适合沿用。
+ * - utilization 的沿用意味着「旧读数 + 新时间戳」，调用方要明白这不是新观测。
+ */
+function withUnreportedFields(
+  prev: QuotaWindow,
+  next: QuotaWindow,
+  opts?: { keepResetAt?: boolean },
+): QuotaWindow {
+  const out: QuotaWindow = { ...next };
+  if (out.remaining === undefined && prev.remaining !== undefined) out.remaining = prev.remaining;
+  if (out.limit === undefined && prev.limit !== undefined) out.limit = prev.limit;
+  if (out.utilization === undefined && prev.utilization !== undefined) {
+    out.utilization = prev.utilization;
+  }
+  if (
+    opts?.keepResetAt !== false &&
+    out.resetAt === undefined &&
+    prev.resetAt !== undefined
+  ) {
+    out.resetAt = prev.resetAt;
+  }
+  if (out.unit === undefined && prev.unit !== undefined) out.unit = prev.unit;
+  return out;
+}
+
+/**
+ * 跨观测合并：把一次新观测的窗口合入已存快照的窗口。
+ * 调用方负责「更旧的观测不覆盖更新的值」这层时间序判定。
+ */
+export function mergeQuotaWindowObservations(
+  existing: QuotaWindow[] | undefined,
+  incoming: QuotaWindow[],
+): QuotaWindow[] {
+  const map = new Map<string, QuotaWindow>();
+  for (const win of existing ?? []) {
+    if (win && typeof win.scope === "string" && win.scope) {
+      map.set(win.scope, { ...win });
+    }
+  }
+  for (const win of incoming) {
+    if (!win || typeof win.scope !== "string" || !win.scope) continue;
+    const prev = map.get(win.scope);
+    if (!prev) {
+      map.set(win.scope, { ...win });
+      continue;
+    }
+    if (isSubscriptionQuotaScope(win.scope)) {
+      // 订阅窗口：最新读数即真值（不取 max/min，旧值不得锁死新值）。
+      // resetAt 不沿用上一周期（LOW-1）：新观测没报重置时刻就没有倒计时，
+      // 而不是拿旧周期的边界去算一个指错周期的倒计时。
+      map.set(win.scope, withUnreportedFields(prev, win, { keepResetAt: false }));
+      continue;
+    }
+    const sameResetBoundary =
+      prev.resetAt !== undefined && win.resetAt !== undefined && prev.resetAt === win.resetAt;
+    if (!sameResetBoundary) {
+      // 复位边界未知或已前移（新周期）：旧周期的剩余量/利用率不再适用。
+      map.set(win.scope, {
+        ...withUnreportedFields(prev, win),
+        ...(win.resetAt !== undefined ? { resetAt: win.resetAt } : {}),
+      });
+      continue;
+    }
+    // 同一复位边界内：保留更紧的一方（剩余量取小、利用率取高、上限取小），
+    // source 以最新观测为准。这是「取更紧」唯一还成立的地方。
+    const merged: QuotaWindow = { ...prev };
+    if (win.remaining !== undefined) {
+      merged.remaining =
+        merged.remaining === undefined
+          ? win.remaining
+          : Math.min(merged.remaining, win.remaining);
+    }
+    if (win.limit !== undefined) {
+      merged.limit =
+        merged.limit === undefined ? win.limit : Math.min(merged.limit, win.limit);
+    }
+    if (win.utilization !== undefined) {
+      merged.utilization =
+        merged.utilization === undefined
+          ? win.utilization
+          : Math.max(merged.utilization, win.utilization);
+    }
+    if (win.unit !== undefined && merged.unit === undefined) merged.unit = win.unit;
+    merged.source = win.source;
+    map.set(win.scope, merged);
   }
   return [...map.values()];
 }

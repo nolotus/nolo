@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { spawn } from "node:child_process";
 import {
   closeSync,
@@ -449,10 +450,11 @@ const switchWindowsShims = (shimDir, entrypoint) => {
     } catch {}
     try { rmSync(__filename, { force: true }); } catch {}
     // 通知放在锁释放之后：同步通知最多阻塞十几秒，不能拖住下一次更新。
+    if (!payload.notifications) return;
     if (updateSucceeded) {
-      notify("Nolo", alreadyCurrent ? "Nolo is already up to date" : "Update finished - the next Nolo launch uses the new version");
+      notify(payload.notifications.title, alreadyCurrent ? payload.notifications.current : payload.notifications.finished);
     } else {
-      notify("Nolo", "Update failed - see log: " + payload.logPath);
+      notify(payload.notifications.title, payload.notifications.failed);
     }
   }
 })();
@@ -513,6 +515,12 @@ export function scheduleWindowsSelfUpdate(
 
   const payload = Buffer.from(
     JSON.stringify({
+      notifications: {
+        title: t("updateNotifyTitle"),
+        current: t("updateNotifyCurrent"),
+        finished: t("updateNotifyFinished"),
+        failed: t("updateNotifyFailed", logPath),
+      },
       currentVersion: options.currentVersion,
       channel: options.channel,
       entrypointPath: normalize(options.entrypointPath),

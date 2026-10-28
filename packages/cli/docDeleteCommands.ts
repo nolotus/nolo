@@ -11,39 +11,15 @@ import {
 import { removePageFromSpace } from "./docSpaceHelpers";
 import { readOption } from "./cliEnvHelpers";
 import { deleteDbRecordOnServers } from "./globalRecordOperations";
+import { t } from "./i18n";
 import type { DocKind, DocWriteDeps } from "./docCommandShared";
 
 function printDocDeleteUsage(output: { write(chunk: string): unknown }) {
-  output.write(`Usage:
-  nolo doc delete (--id <pageId> | --key <pageKey>)
-
-Options:
-  --id <pageId>             Page id (without user prefix).
-  --key <pageKey>           Full dbKey, e.g. page-<userId>-<pageId>.
-  --sync local,main,us      Choose delete targets. Values may also be full URLs.
-  --local-only              Delete only on the local server target.
-  --no-local                Exclude local targets when --sync includes them.
-  --dry-run                 Show what would be deleted without deleting.
-  --json                    Print machine-readable JSON.
-  --server <url>            Default target when --sync is omitted.
-  --token <jwt>             Auth token. Required for deletes.
-`);
+  output.write(t("docCmd.deleteUsage"));
 }
 
 function printSkillDocDeleteUsage(output: { write(chunk: string): unknown }) {
-  output.write(`Usage:
-  nolo skill-doc delete (--id <skillId> | --key <pageKey>)
-
-Options:
-  --id <skillId>            Skill id (without user prefix).
-  --key <pageKey>           Full dbKey, e.g. page-<userId>-<skillId>.
-  --sync local,main,us      Choose delete targets. Values may also be full URLs.
-  --local-only              Delete only on the local server target.
-  --no-local                Exclude local targets when --sync includes them.
-  --dry-run                 Show what would be deleted without deleting.
-  --json                    Print machine-readable JSON.
-  --token <jwt>             Auth token. Required for deletes.
-`);
+  output.write(t("docCmd.skillDeleteUsage"));
 }
 
 async function runDeleteCommand(
@@ -70,7 +46,7 @@ async function runDeleteCommand(
   const { authToken, userId } = requireTokenUser(args, deps.env, shouldDryRun);
   const targets = resolveWriteTargets(args, deps.env);
   if (!targets.length) {
-    throw new Error("No delete targets resolved. Check --sync / --local-only / --no-local.");
+    throw new Error(t("docCmd.noDeleteTargetsResolved"));
   }
 
   const dbKey = explicitKey ?? (docKind === "skill"
@@ -80,10 +56,10 @@ async function runDeleteCommand(
   const existing = await readPageRecord({ authToken, dbKey, serverUrl: targets[0] });
 
   if (docKind === "page" && existing?.meta?.kind === "skill") {
-    throw new Error(`Target page is a skill doc. Use nolo skill-doc delete --key ${dbKey}`);
+    throw new Error(t("docCmd.targetIsSkillDocDelete", dbKey));
   }
   if (docKind === "skill" && existing?.meta?.kind !== "skill") {
-    throw new Error(`Target page is not a skill doc. Use nolo doc delete --key ${dbKey}`);
+    throw new Error(t("docCmd.targetNotSkillDocDelete", dbKey));
   }
 
   const spaceId = typeof existing?.spaceId === "string" ? existing.spaceId : null;
@@ -121,9 +97,11 @@ async function runDeleteCommand(
     const failed = results.filter((result) => !result.ok);
     if (failed.length) {
       throw new Error(
-        `delete ${dbKey} failed on ${failed
-          .map((result) => `${result.serverUrl}: ${result.error}`)
-          .join("; ")}`
+        t(
+          "docCmd.deleteFailedOnServers",
+          dbKey,
+          failed.map((result) => `${result.serverUrl}: ${result.error}`).join("; ")
+        )
       );
     }
 
@@ -133,9 +111,9 @@ async function runDeleteCommand(
   if (shouldOutputJson) {
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   } else if (shouldDryRun) {
-    process.stdout.write(`dry-run ok: ${dbKey}\n`);
+    process.stdout.write(t("docCmd.dryRunOk", dbKey));
   } else {
-    process.stdout.write(`deleted ${docKind}: ${dbKey}\n`);
+    process.stdout.write(t("docCmd.deletedDoc", docKind, dbKey));
   }
 
   return 0;

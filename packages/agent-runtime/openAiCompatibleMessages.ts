@@ -5,6 +5,8 @@
  * openAiCompatibleProvider and platformChatProvider cannot drift on optional
  * tool_call_id / tool_calls / reasoning_content passthrough.
  */
+import { projectOpenAiToolImages } from "./openAiToolImages";
+import { TOOL_IMAGES } from "./toolImages";
 import type { AgentRuntimeChatMessage } from "./types";
 import type { RequestShapingCounts } from "./outboundRequestDiagnostics";
 import { hasDowngradedToolTurnOrigin } from "./outboundHistorySanitize";
@@ -35,6 +37,8 @@ export type OpenAiCompatibleRequestMessage = {
  * error, so the field must be dropped when replaying prior turns.
  */
 export type PreserveAgentStateOptions = {
+  supportsToolImages?: boolean;
+  maxImagesPerRequest?: number;
   stripReasoningContent?: boolean;
   /**
    * When set to a non-empty string, assistant messages that carry a non-empty
@@ -158,6 +162,17 @@ export function preserveAgentStateFields<T extends Record<string, any>>(
     }
   }
   if (source.role === "tool") {
+    if (TOOL_IMAGES in (source as any)) {
+      (mutableTarget as any)[TOOL_IMAGES] = (source as any)[TOOL_IMAGES];
+    }
+    if ((source as any).tool_result_metadata) {
+      Object.defineProperty(mutableTarget, "tool_result_metadata", {
+        value: (source as any).tool_result_metadata,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+    }
     const toolCallId =
       typeof source.tool_call_id === "string"
         ? source.tool_call_id.trim()
@@ -210,11 +225,12 @@ export function findAgentStatePairingIssues(
   return issues;
 }
 
+// Keep agent-state shaping unchanged; attachments are projected as one trailing user message.
 export function toOpenAiCompatibleMessages(
   messages: AgentRuntimeChatMessage[],
   options?: PreserveAgentStateOptions,
 ): OpenAiCompatibleRequestMessage[] {
-  return messages.map((message) =>
+  return projectOpenAiToolImages(messages, options?.supportsToolImages === true, options?.maxImagesPerRequest).map((message) =>
     preserveAgentStateFields(message, {
       role: message.role,
       content: message.content ?? "",

@@ -15,6 +15,7 @@ import {
 import { createFileCredentialBroker } from "../agent-runtime/fileCredentialBroker";
 import type { CredentialBroker } from "../agent-runtime/credentialBroker";
 import { spawn } from "child_process";
+import { t } from "./i18n";
 
 /** Values that JSON.parse would silently turn into a non-injectable scalar. */
 function parseSecretValue(raw: string): unknown {
@@ -25,10 +26,10 @@ function parseSecretValue(raw: string): unknown {
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    throw new Error("value starts with { or [ but is not valid JSON");
+    throw new Error(t("secret.jsonInvalid"));
   }
   if (typeof parsed !== "object" || parsed === null) {
-    throw new Error("JSON values must be an object or an array, not a scalar");
+    throw new Error(t("secret.jsonScalar"));
   }
   return parsed;
 }
@@ -44,16 +45,7 @@ export async function runSecretCommand(
   const [subcommand, ...rest] = args;
 
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
-    console.log(`用法:
-  nolo secret list [--json]                列出已保存的 secret 名称（不显示值；--json 输出机器可读清单）
-  nolo secret get <name>                   打印指定 secret 的值（供调试；Agent 不得读取）
-  nolo secret set <name> <value|json>      设置 secret（字符串，或以 { / [ 开头的 JSON）
-  nolo secret delete <name>                删除指定的 secret
-  nolo secret run --with <names> -- <cmd>  安全注入 secret 环境变量并执行子命令
-  nolo secret bind <alias> <ref> [--env <ENV_NAME>]  将受控凭据引用绑定到别名
-  nolo secret list-bindings                列出已配置的 secret 别名绑定
-  nolo secret unbind <alias>               解除指定的 secret 别名绑定
-`);
+    console.log(t("secret.help"));
     return;
   }
 
@@ -63,7 +55,7 @@ export async function runSecretCommand(
         const wantJson = rest.includes("--json");
         const read = readSecretsForRead();
         if (read.corrupted) {
-          console.error(`错误: ${read.error.message}`);
+          console.error(t("secret.errorPrefix", read.error.message));
           process.exitCode = 1;
           return;
         }
@@ -85,9 +77,9 @@ export async function runSecretCommand(
           return;
         }
         if (names.length === 0) {
-          console.log("（当前未保存任何 secret）");
+          console.log(t("secret.listEmpty"));
         } else {
-          console.log("已配置的 secret 列表:");
+          console.log(t("secret.listHeader"));
           for (const name of names) console.log(`  - ${name}`);
         }
         return;
@@ -96,19 +88,19 @@ export async function runSecretCommand(
       case "get": {
         const [name] = rest;
         if (!name) {
-          console.error("错误: 请提供 secret 名称。例如: nolo secret get amo");
+          console.error(t("secret.getNameRequired"));
           process.exitCode = 1;
           return;
         }
         const read = readSecretsForRead();
         if (read.corrupted) {
-          console.error(`错误: ${read.error.message}`);
+          console.error(t("secret.errorPrefix", read.error.message));
           process.exitCode = 1;
           return;
         }
         const val = read.data[name];
         if (val === undefined) {
-          console.error(`错误: 未找到名为 "${name}" 的 secret`);
+          console.error(t("secret.getNotFound", name));
           process.exitCode = 1;
           return;
         }
@@ -119,18 +111,18 @@ export async function runSecretCommand(
       case "set": {
         const [name, ...valParts] = rest;
         if (!name) {
-          console.error("错误: 请提供 secret 名称与值");
+          console.error(t("secret.setNameAndValueRequired"));
           process.exitCode = 1;
           return;
         }
         const rawVal = valParts.join(" ").trim();
         if (!rawVal) {
-          console.error("错误: 请提供 secret 值");
+          console.error(t("secret.setValueRequired"));
           process.exitCode = 1;
           return;
         }
         setSecret(name, parseSecretValue(rawVal));
-        console.log(`✅ 成功保存 secret: "${name}"（权限 0600）`);
+        console.log(t("secret.setSuccess", name));
         return;
       }
 
@@ -139,12 +131,14 @@ export async function runSecretCommand(
       case "rm": {
         const [name] = rest;
         if (!name) {
-          console.error("错误: 请提供要删除的 secret 名称");
+          console.error(t("secret.deleteNameRequired"));
           process.exitCode = 1;
           return;
         }
         console.log(
-          deleteSecret(name) ? `✅ 成功删除 secret: "${name}"` : `未找到名为 "${name}" 的 secret，无需删除`,
+          deleteSecret(name)
+            ? t("secret.deleteSuccess", name)
+            : t("secret.deleteNotFound", name),
         );
         return;
       }
@@ -164,7 +158,7 @@ export async function runSecretCommand(
         }
 
         if (cmdParts.length === 0) {
-          console.error("错误: 请提供要执行的命令。例如: nolo secret run --with amo -- bunx web-ext sign");
+          console.error(t("secret.runCmdRequired"));
           process.exitCode = 1;
           return;
         }
@@ -184,9 +178,7 @@ export async function runSecretCommand(
             const broker = options.broker ?? createFileCredentialBroker();
             const secretValue = await broker.get(binding.brokerRef);
             if (!secretValue) {
-              console.error(
-                `错误: 凭证引用 ${binding.brokerRef} 在本地保管库中不存在或未授权。`,
-              );
+              console.error(t("secret.runMissingBrokerRef", binding.brokerRef));
               process.exitCode = 1;
               return;
             }
@@ -197,16 +189,12 @@ export async function runSecretCommand(
           missing.push(name);
         }
         if (missing.length > 0) {
-          console.error(
-            `错误: 未找到 secret: ${missing.join(", ")}。用 nolo secret list 核对已保存的名称。`,
-          );
+          console.error(t("secret.runMissingSecrets", missing.join(", ")));
           process.exitCode = 1;
           return;
         }
         if (withNames.length > 0 && Object.keys(injectedEnvs).length === 0) {
-          console.error(
-            `错误: --with ${withNames.join(",")} 没有解析出任何环境变量（凭据无法映射成变量）。`,
-          );
+          console.error(t("secret.runNoInjectedEnvs", withNames.join(",")));
           process.exitCode = 1;
           return;
         }
@@ -227,7 +215,7 @@ export async function runSecretCommand(
             finish(signal ? 1 : (code ?? 1)),
           );
           child.on("error", (err) => {
-            console.error(`执行命令失败: ${err.message}`);
+            console.error(t("secret.runCommandFailed", err.message));
             finish(1);
           });
         });
@@ -245,7 +233,7 @@ export async function runSecretCommand(
               envOption = rest[i + 1];
               i++;
             } else {
-              console.error("错误: --env 需要指定环境变量名。例如: --env DEEPINFRA_API_KEY");
+              console.error(t("secret.bindEnvValueRequired"));
               process.exitCode = 1;
               return;
             }
@@ -258,9 +246,7 @@ export async function runSecretCommand(
 
         const [alias, rawRef] = positional;
         if (!alias || !rawRef) {
-          console.error(
-            "错误: 请提供 alias 与凭据引用 (ref)。例如: nolo secret bind deepinfra_api_key vault-cred-xxx [--env DEEPINFRA_API_KEY]",
-          );
+          console.error(t("secret.bindArgsRequired"));
           process.exitCode = 1;
           return;
         }
@@ -281,7 +267,7 @@ export async function runSecretCommand(
           envName,
         });
 
-        console.log(`✅ 成功绑定 secret: "${alias}" -> ${brokerRef} (env: ${envName})`);
+        console.log(t("secret.bindSuccess", alias, brokerRef, envName));
         return;
       }
 
@@ -289,15 +275,15 @@ export async function runSecretCommand(
       case "bindings": {
         const read = readSecretBindingsForRead();
         if (read.corrupted) {
-          console.error(`错误: ${read.error.message}`);
+          console.error(t("secret.errorPrefix", read.error.message));
           process.exitCode = 1;
           return;
         }
         const bindings = read.bindings;
         if (bindings.length === 0) {
-          console.log("（当前未配置任何 secret 别名绑定）");
+          console.log(t("secret.bindingsEmpty"));
         } else {
-          console.log("已配置的 secret 别名绑定列表:");
+          console.log(t("secret.bindingsHeader"));
           for (const b of bindings) {
             console.log(`  - ${b.alias} -> ${b.brokerRef} (env: ${b.envName})`);
           }
@@ -308,27 +294,27 @@ export async function runSecretCommand(
       case "unbind": {
         const [alias] = rest;
         if (!alias) {
-          console.error("错误: 请提供要解除绑定的别名 (alias)。例如: nolo secret unbind deepinfra_api_key");
+          console.error(t("secret.unbindAliasRequired"));
           process.exitCode = 1;
           return;
         }
         console.log(
           deleteSecretBinding(alias)
-            ? `✅ 成功解除 secret 绑定: "${alias}"`
-            : `未找到名为 "${alias}" 的 secret 绑定，无需解除`,
+            ? t("secret.unbindSuccess", alias)
+            : t("secret.unbindNotFound", alias),
         );
         return;
       }
 
       default:
-        console.error(`未知子命令: ${subcommand}。运行 nolo secret --help 查看用法`);
+        console.error(t("secret.unknownSubcommand", subcommand));
         process.exitCode = 1;
     }
   } catch (error) {
     if (error instanceof SecretsFileCorruptedError) {
-      console.error(`错误: ${error.message}`);
+      console.error(t("secret.errorPrefix", error.message));
     } else {
-      console.error(`错误: ${(error as Error).message}`);
+      console.error(t("secret.errorPrefix", (error as Error).message));
     }
     process.exitCode = 1;
   }

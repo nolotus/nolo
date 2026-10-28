@@ -1,4 +1,6 @@
+import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { createHash } from "node:crypto";
+import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { deriveStableUuid, isStableSessionIdentityEnabled } from "./sessionIdentity";
 import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
 import { randomUUID } from "node:crypto";
@@ -230,8 +232,14 @@ function collectInstructions(
  */
 export function convertMessagesToCodexInput(
   messages: Parameters<typeof convertMessagesToResponsesInput>[0],
+  // 兼容两种调用形态：布尔（策略解析结果）与 options 对象（既有调用方/测试）
+  supportsToolImages: boolean | { supportsToolImages?: boolean; maxImagesPerRequest?: number } = false,
 ): ResponseInputItem[] {
-  return convertMessagesToResponsesInput(messages).map((item) => {
+  const normalizedToolImages =
+    typeof supportsToolImages === "boolean"
+      ? supportsToolImages
+      : supportsToolImages.supportsToolImages === true;
+  return convertMessagesToResponsesInput(messages, { supportsToolImages: normalizedToolImages, maxImagesPerRequest: typeof supportsToolImages === "boolean" ? undefined : supportsToolImages.maxImagesPerRequest }).map((item) => {
     if (item.type !== "reasoning") return item;
     return {
       type: "reasoning",
@@ -256,7 +264,12 @@ export function buildCodexRequestBody(
     const role = m && typeof m === "object" ? String((m as { role?: unknown }).role) : "";
     return role !== "system" && role !== "developer";
   });
-  const input = convertMessagesToCodexInput(nonSystem as any);
+  const input = convertMessagesToCodexInput(nonSystem as any, resolveToolImagePolicy({
+    ...args.agentConfig,
+    model: typeof args.openAiBody.model === "string" ? args.openAiBody.model : args.agentConfig.model,
+    routeKind: "codex/responses",
+    legacySupportsToolImages: false,
+  }));
   const instructions = collectInstructions(rawMessages, args.agentConfig.prompt);
   const stableInstructions = collectStablePromptPrefix(rawMessages, args.agentConfig.prompt);
   const model =

@@ -111,7 +111,7 @@ export type ConnectorBrowser = "chrome" | "firefox";
  * (console/network reads) and no CDP file-input path (`set_files` is refused there).
  * Everything else — tabs, compact observation, action gate, screenshot — is supported.
  */
-export const FIREFOX_UNAVAILABLE_FEATURES = ["browser_debug", "file_upload"] as const;
+export const FIREFOX_UNAVAILABLE_FEATURES = ["browser_debug", "file_upload", "eval"] as const;
 
 /** Map a connected `connector_info.extensionId` back to its build, or null when unrecognized. */
 export function resolveConnectorBrowser(extensionId: string | null): ConnectorBrowser | null {

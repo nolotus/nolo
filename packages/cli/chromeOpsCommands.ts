@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 /**
  * `nolo browser <op>` (legacy alias: `nolo chrome <op>`) — the operation half of the browser group:
  * read / click / type against the user's live browser (the machine-setup half — status / install / reload —
@@ -87,7 +88,7 @@ function readIntOption(args: string[], flag: string, usage: string): number | un
   if (raw === undefined) return undefined;
   const value = Number.parseInt(raw, 10);
   if (!Number.isFinite(value)) {
-    throw new Error(`Invalid ${flag} <N>. Usage: ${usage}`);
+    throw new Error(t("cliBrowserInvalidNumber", flag, usage));
   }
   return value;
 }
@@ -104,17 +105,17 @@ function readNonNegativeIntOption(
       : readOption(args, flag);
   if (raw === undefined) {
     if (args.includes(flag)) {
-      throw new Error(`Invalid ${flag} <N>. Usage: ${usage}`);
+      throw new Error(t("cliBrowserInvalidNumber", flag, usage));
     }
     return undefined;
   }
   const trimmed = raw.trim();
   if (!/^\d+$/.test(trimmed)) {
-    throw new Error(`Invalid ${flag} <N>. Usage: ${usage}`);
+    throw new Error(t("cliBrowserInvalidNumber", flag, usage));
   }
   const value = Number.parseInt(trimmed, 10);
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`Invalid ${flag} <N>. Usage: ${usage}`);
+    throw new Error(t("cliBrowserInvalidNumber", flag, usage));
   }
   return value;
 }
@@ -122,7 +123,7 @@ function readNonNegativeIntOption(
 function requireTabId(args: string[], usage: string): string {
   const tabId = readTrimmedOption(args, "--tab");
   if (!tabId) {
-    throw new Error(`Missing required --tab <id>. Usage: ${usage}`);
+    throw new Error(t("cliBrowserMissingTab", usage));
   }
   return tabId;
 }
@@ -132,7 +133,7 @@ function requireTarget(args: string[], usage: string): ChromeConnectorRequestPay
   const selector = readTrimmedOption(args, "--selector");
   if (!elementRef && !selector) {
     throw new Error(
-      `Provide --ref <elementRef> (from read-page) or --selector <css>. Usage: ${usage}`,
+      t("cliBrowserMissingTarget", usage),
     );
   }
   return {
@@ -140,6 +141,27 @@ function requireTarget(args: string[], usage: string): ChromeConnectorRequestPay
     ...(selector ? { selector } : {}),
   };
 }
+
+/**
+ * `--approval-id` is the id a previous USER_APPROVAL_PENDING response returned after the user clicked
+ * "Allow once" in the browser. It carries no authority of its own: the CLI cannot mint a usable one,
+ * it only hands back what the user already approved.
+ */
+function withApprovalId(
+  args: string[],
+  payload: ChromeConnectorRequestPayload,
+): ChromeConnectorRequestPayload {
+  const approvalId = readTrimmedOption(args, "--approval-id");
+  return approvalId ? { ...payload, approvalId } : payload;
+}
+
+/**
+ * `eval` bounds: too small a timeout cannot survive a debugger round trip, too large one holds the
+ * user's approval (and the tab) hostage. Kept in the CLI surface so the failure is a clear usage
+ * error instead of a connector-side rejection.
+ */
+const EVAL_TIMEOUT_MIN_MS = 100;
+const EVAL_TIMEOUT_MAX_MS = 60000;
 
 export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   "list-tabs": {
@@ -153,7 +175,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
     payload: (args, usage) => {
       const url = readTrimmedOption(args, "--url");
       if (!url) {
-        throw new Error(`Missing required --url <url>. Usage: ${usage}`);
+        throw new Error(t("cliBrowserMissingUrl", usage));
       }
       return { url, active: args.includes("--active") };
     },
@@ -183,29 +205,58 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   click: {
     action: "click",
-    usage: "nolo browser click --tab <id> (--ref <elementRef> | --selector <css>)",
-    payload: (args, usage) => ({
-      tabId: requireTabId(args, usage),
-      ...requireTarget(args, usage),
-    }),
+    usage:
+      "nolo browser click --tab <id> (--ref <elementRef> | --selector <css>) [--approval-id <id>]",
+    payload: (args, usage) =>
+      withApprovalId(args, {
+        tabId: requireTabId(args, usage),
+        ...requireTarget(args, usage),
+      }),
   },
   type: {
     action: "type",
     usage:
-      "nolo browser type --tab <id> (--ref <elementRef> | --selector <css>) --text <text> [--append]",
+      "nolo browser type --tab <id> (--ref <elementRef> | --selector <css>) --text <text> [--append] [--approval-id <id>]",
     payload: (args, usage) => {
       const text = readOption(args, "--text");
       // A value that starts with "--" is a swallowed flag, not text: fail instead of
       // typing "--append" into the page (and clearing the field on the way).
       if (text === undefined || text.startsWith("--")) {
-        throw new Error(`Missing required --text <text>. Usage: ${usage}`);
+        throw new Error(t("cliBrowserMissingText", usage));
       }
-      return {
+      return withApprovalId(args, {
         tabId: requireTabId(args, usage),
         ...requireTarget(args, usage),
         text,
         ...(args.includes("--append") ? { clearFirst: false } : {}),
-      };
+      });
+    },
+  },
+  select: {
+    action: "set_select_value",
+    usage:
+      "nolo browser select --tab <id> (--ref <elementRef> | --selector <css>) (--value <v> | --label <l>) [--approval-id <id>]",
+    payload: (args, usage) => {
+      const value = readOption(args, "--value");
+      const label = readOption(args, "--label");
+      if ((value === undefined) === (label === undefined)) {
+        throw new Error(`Provide exactly one of --value <v> or --label <l>. Usage: ${usage}`);
+      }
+      // A value that starts with "--" is a swallowed flag, not an option value: fail instead of
+      // selecting something the user never meant.
+      for (const optionValue of [value, label]) {
+        if (typeof optionValue === "string" && optionValue.startsWith("--")) {
+          throw new Error(`A flag was passed where an option value was expected. Usage: ${usage}`);
+        }
+      }
+      // A select behind an irreversible-looking name opens the same approval window as click/type,
+      // so the retry needs the approvalId the connector returned — without this the user could
+      // allow the window and the caller would still have no way to complete the action.
+      return withApprovalId(args, {
+        tabId: requireTabId(args, usage),
+        ...requireTarget(args, usage),
+        ...(value !== undefined ? { value } : { label }),
+      });
     },
   },
   upload: {
@@ -215,7 +266,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
     payload: (args, usage) => {
       const files = readAllOptions(args, "--file");
       if (files.length === 0) {
-        throw new Error(`Missing required --file <path>. Usage: ${usage}`);
+        throw new Error(t("cliBrowserMissingFile", usage));
       }
       const target = requireTarget(args, usage);
       const tabId = requireTabId(args, usage);
@@ -229,13 +280,13 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   press: {
     action: "press",
-    usage: "nolo browser press --tab <id> --key <key>",
+    usage: "nolo browser press --tab <id> --key <key> [--approval-id <id>]",
     payload: (args, usage) => {
       const key = readTrimmedOption(args, "--key");
       if (!key) {
-        throw new Error(`Missing required --key <key>. Usage: ${usage}`);
+        throw new Error(t("cliBrowserMissingKey", usage));
       }
-      return { tabId: requireTabId(args, usage), key };
+      return withApprovalId(args, { tabId: requireTabId(args, usage), key });
     },
   },
   "prepare-action": {
@@ -246,17 +297,17 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
       const tabId = requireTabId(args, usage);
       const action = readTrimmedOption(args, "--action").toLowerCase();
       if (!action || !["click", "type", "press"].includes(action)) {
-        throw new Error(`Invalid or missing --action <click|type|press>. Usage: ${usage}`);
+        throw new Error(t("cliBrowserAction", usage));
       }
 
       if (readOption(args, "--ref") !== undefined) {
-        throw new Error(`--ref is not supported for action preparation; use --selector or --active. Usage: ${usage}`);
+        throw new Error(t("cliBrowserRefUnsupported", usage));
       }
 
       const active = args.includes("--active");
       const selector = readTrimmedOption(args, "--selector");
       if (!active && !selector && action !== "press") {
-        throw new Error(`Provide --selector <css> or --active. Usage: ${usage}`);
+        throw new Error(t("cliBrowserSelector", usage));
       }
 
       const payload: ChromeConnectorRequestPayload = {
@@ -269,7 +320,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
       if (action === "type") {
         const text = readOption(args, "--text");
         if (text === undefined || text.startsWith("--")) {
-          throw new Error(`Missing required --text <text> for type action. Usage: ${usage}`);
+          throw new Error(t("cliBrowserTypeText", usage));
         }
         payload.text = text;
         if (args.includes("--append")) {
@@ -278,7 +329,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
       } else if (action === "press") {
         const key = readTrimmedOption(args, "--key");
         if (!key) {
-          throw new Error(`Missing required --key <key> for press action. Usage: ${usage}`);
+          throw new Error(t("cliBrowserPressKey", usage));
         }
         payload.key = key;
       }
@@ -334,41 +385,48 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
       return payload;
     },
   },
+  eval: {
+    action: "eval_script",
+    usage:
+      "nolo browser eval --tab <id> --expr <js> [--await] [--timeout-ms N] [--approval-id <id>]",
+    payload: (args, usage) => {
+      const expression = readOption(args, "--expr");
+      // Same rule as --text: a value that starts with "--" is a swallowed flag, not an expression.
+      if (
+        expression === undefined ||
+        expression.trim() === "" ||
+        expression.startsWith("--")
+      ) {
+        throw new Error(t("cliBrowserMissingExpression", usage));
+      }
+      const payload: ChromeConnectorRequestPayload = {
+        tabId: requireTabId(args, usage),
+        expression,
+      };
+      const timeoutMs = readNonNegativeIntOption(args, "--timeout-ms", usage);
+      if (timeoutMs !== undefined) {
+        if (timeoutMs < EVAL_TIMEOUT_MIN_MS || timeoutMs > EVAL_TIMEOUT_MAX_MS) {
+          throw new Error(t("cliBrowserEvalTimeoutRange", usage));
+        }
+        payload.timeoutMs = timeoutMs;
+      }
+      // Only `--await` sets awaitPromise: the connector/extension must never infer it.
+      if (args.includes("--await")) payload.awaitPromise = true;
+      return withApprovalId(args, payload);
+    },
+  },
 };
 
 export function renderChromeOpsHelp(): string {
   const lines = [
-    "Operate the user's browser (Chrome or Firefox) through the Nolo Browser Connector",
-    "(the desktop bridge; the same RPC the browser_* agent tools use — legacy `chrome_*` names still work).",
-    "",
-    "Usage:",
-    "  nolo browser <subcommand> [flags]",
-    "  nolo chrome <subcommand> [flags]  # compatibility alias",
-    "",
-    "Subcommands:",
+    t("cliBrowserHelpIntro"),
     ...Object.values(CHROME_OPS_SUBCOMMANDS).map(
       (spec) => `  ${spec.usage.replace(/^nolo browser /, "")}`,
     ),
-    "",
-    "Notes:",
-    "  --ref takes an elementRef copied from `nolo browser read-page` (revision-scoped,",
-    "    preferred over --selector); --selector takes a CSS selector.",
-    "  Actions the connector classifies as irreversible (Submit / Delete / Pay ...)",
-    "    are refused with CONFIRMATION_REQUIRED — ask the user to perform them.",
-    "  prepare-action prepares an immutable action challenge binding for host consent verification;",
-    "    it is strictly read-only, never executes mutations, and does not grant approval.",
-    "  read-console / read-network / upload work on Chrome only (Firefox lacks chrome.debugger).",
-    "  --browser chrome|firefox selects which connector endpoint serves the call (default",
-    "    auto-detects single online browser: chrome = 127.0.0.1:38947, firefox = 127.0.0.1:38948);",
-    "    the wrong browser is refused.",
-    "  Every subcommand prints the connector's raw JSON result; failures exit 1.",
-    "  Endpoint: NOLO_CHROME_CONNECTOR_RPC_URL or per-browser NOLO_CHROME_CONNECTOR_PORT /",
-    "    NOLO_FIREFOX_CONNECTOR_PORT (default http://127.0.0.1:38947/rpc).",
+    t("cliBrowserHelpNotes"),
   ];
   return lines.join("\n");
 }
-
-export const CHROME_OPS_HELP_TEXT = renderChromeOpsHelp();
 
 // 探测读 process.env
 async function defaultProbeBrowser(
@@ -415,18 +473,18 @@ export async function runChromeOpsCommand(
 
   const spec = CHROME_OPS_SUBCOMMANDS[subcommand];
   if (!spec) {
-    io.stderr(`Unknown browser subcommand "${subcommand}".\n\n${CHROME_OPS_HELP_TEXT}`);
+    io.stderr(`${t("cliBrowserUnknown", subcommand)}\n\n${renderChromeOpsHelp()}`);
     return 1;
   }
   if (wantsHelp(args)) {
-    io.stdout(CHROME_OPS_HELP_TEXT);
+    io.stdout(renderChromeOpsHelp());
     return 0;
   }
 
   const browserFlag = readBrowserFlag(args);
   if (browserFlag === null) {
     io.stderr(
-      `Invalid --browser value: expected "chrome" or "firefox". Usage: ${spec.usage}`,
+      t("cliBrowserBrowser", spec.usage),
     );
     return 1;
   }

@@ -9,10 +9,25 @@ import { t, cliCommandDescription } from "./tui/i18n";
 import { getInternalCommandEntries } from "./internalCommandEntries";
 import { getScriptCommandEntries } from "./scriptCommandEntries";
 
-export const COMMANDS: CommandEntry[] = [
-  ...getInternalCommandEntries(renderHelpText),
-  ...getScriptCommandEntries(),
-];
+export const COMMANDS: CommandEntry[] = buildRegisteredCommandEntries();
+
+/**
+ * The command set rebuilt from its static definition sources.
+ *
+ * `COMMANDS` is a mutable array shared by the whole process (tests push synthetic
+ * probes into it), so any coverage gate reading it observes whatever happened to be
+ * in the array at that moment. Rebinding from the definition sources makes such a
+ * gate a function of the source code only — load order and runtime mutations cannot
+ * change the answer.
+ *
+ * This is NOT a runtime snapshot equivalent to `COMMANDS`: it re-runs the definition
+ * sources, so fields resolved at that moment (e.g. a description computed from the
+ * active locale) reflect the current call, and handler references are freshly
+ * created. Use it for coverage and prediction checks, not as a substitute registry.
+ */
+export function buildRegisteredCommandEntries(): CommandEntry[] {
+  return [...getInternalCommandEntries(renderHelpText), ...getScriptCommandEntries()];
+}
 
 export const GROUP_ORDER = [
   "run",
@@ -39,15 +54,15 @@ export const GROUP_ORDER = [
 
 export function renderHelpText() {
   const lines = [
-    "nolo — Agent-first terminal workspace",
+    t("cliHelpTitle"),
     "",
-    "Usage:",
+    t("cli.usageLabel"),
     "  nolo",
     "  nolo <command> [subcommand] [...args]",
     "  nolo doctor",
     "  nolo update",
     "",
-    "Examples:",
+    t("cliExamplesLabel"),
     "  nolo",
     "  nolo chat",
     "  nolo login",
@@ -103,7 +118,7 @@ export function renderHelpText() {
     if (commands.length === 0) continue;
     lines.push("", group);
     for (const entry of commands) {
-      lines.push(`  ${entry.path.join(" ")}  ${entry.description}`);
+      lines.push(`  ${entry.path.join(" ")}  ${cliCommandDescription(entry.path.join(" ")) ?? entry.description}`);
     }
   }
 

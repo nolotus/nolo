@@ -101,6 +101,18 @@ export type UserContentRecord = Partial<AppSummaryRecord> & {
 
 const normalizeText = (value: unknown): string => asTrimmedString(value);
 
+/**
+ * 记录 → 标题的唯一优先链：title → displayName → name。
+ * 最近列表（buildMyContentItemsFromUserData）与侧边栏收藏分区
+ * （useFavoriteSidebarItems 的窗口外条目）必须共用这一条链，否则同一份
+ * 数据在两处会解析出不同的名字（或空名）。
+ * 返回空串表示该记录本身没有任何标题来源（如部分附件）。
+ */
+export const resolveUserContentTitle = (record: UserContentRecord): string =>
+  normalizeText(record.title) ||
+  normalizeText(record.displayName) ||
+  normalizeText(record.name);
+
 export const resolveUserContentRecordKey = (record: UserContentRecord): string => {
   const contentKey = normalizeText(record.contentKey);
   if (contentKey) return contentKey;
@@ -343,10 +355,7 @@ export function buildMyContentItemsFromUserData(
 
     if (!contentKey || !contentType) return [];
 
-    const title = normalizeText(record.title) ||
-      normalizeText(record.displayName) ||
-      normalizeText(record.name) ||
-      contentKey;
+    const title = resolveUserContentTitle(record) || contentKey;
 
     return [
       {

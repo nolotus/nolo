@@ -3,6 +3,7 @@ import type {
   AgentRuntimeToolResult,
 } from "../agent-runtime";
 import { existsSync, readFileSync } from "node:fs";
+import { screenshotResult } from "./screenshotResult";
 import { resolve } from "node:path";
 
 import { toErrorMessage } from "core/errorMessage";
@@ -14,7 +15,16 @@ import {
   validateUploadFiles,
 } from "./uploadSecurity";
 
-export type ChromeConnectorRequestPayload = Record<string, unknown>;
+export type ChromeConnectorRequestPayload = Record<string, unknown> & {
+  /** `eval_script`: JS expression/source to run in the tab (Chrome only; every call is user-approved). */
+  expression?: string;
+  /** `eval_script`: wait for the returned promise to settle instead of handing it back unresolved. */
+  awaitPromise?: boolean;
+  /** `eval_script`: execution timeout in ms (100..60000). */
+  timeoutMs?: number;
+  /** One-time approval the USER clicked in the browser (see validateChromeConnectorPayload). */
+  approvalId?: string;
+};
 
 export type ChromeConnectorClient = {
   request(action: string, payload: ChromeConnectorRequestPayload): Promise<unknown>;
@@ -126,11 +136,16 @@ const CHROME_TOOL_ACTIONS: Record<string, string> = {
   browser_read_page: "read_page",
   browser_click_element: "click",
   browser_type: "type",
+  browser_set_select_value: "set_select_value",
   browser_press: "press",
   browser_scroll: "scroll",
   browser_screenshot: "screenshot",
   browser_read_console: "read_console",
   browser_read_network: "read_network",
+  // `eval_script` lives on the same table as the rest on purpose: the host's in-conversation approval
+  // card is installed over the browser tool table, so an eval reachable only through
+  // `nolo browser eval` would fall outside the card entirely.
+  browser_eval_script: "eval_script",
   // Legacy aliases (kept for existing agents/tests).
   chrome_list_tabs: "list_tabs",
   chrome_open_tab: "open_tab",
@@ -138,11 +153,13 @@ const CHROME_TOOL_ACTIONS: Record<string, string> = {
   chrome_read_page: "read_page",
   chrome_click: "click",
   chrome_type: "type",
+  chrome_set_select_value: "set_select_value",
   chrome_press: "press",
   chrome_scroll: "scroll",
   chrome_screenshot: "screenshot",
   chrome_read_console: "read_console",
   chrome_read_network: "read_network",
+  chrome_eval_script: "eval_script",
   chrome_set_files: "set_files",
   chrome_upload_file: "set_files",
   chrome_upload: "set_files",
@@ -221,8 +238,15 @@ export function createNativeHostRouter(deps: NativeHostRouterDeps): ChromeConnec
   };
 }
 
-const TARGET_REQUIRED_ACTIONS = new Set(["click", "type", "set_files"]);
-const TAB_ID_REQUIRED_ACTIONS = new Set(["close_tab", "detach", "set_files", "prepare_browser_action"]);
+const TARGET_REQUIRED_ACTIONS = new Set(["click", "type", "set_select_value", "set_files"]);
+const TAB_ID_REQUIRED_ACTIONS = new Set([
+  "close_tab",
+  "detach",
+  "set_files",
+  "set_select_value",
+  "prepare_browser_action",
+  "eval_script",
+]);
 const ALLOWED_PREPARE_SUB_ACTIONS = new Set(["click", "type", "press"]);
 
 /**
@@ -249,7 +273,18 @@ export function validateChromeConnectorPayload(
   }
 
   // Allow action payloads (click, type, press, etc.) to carry one-time consent credentials.
-  for (const credentialKey of ["challengeId", "prepareId", "preparedActionId", "grantTicket"] as const) {
+  //
+  // `approvalId` belongs here for a different reason than the rest: it is not an authorization, it is
+  // the lookup key for an approval the *user* gave in the browser (the connector returned it with
+  // USER_APPROVAL_PENDING). Without it in the allow-list the documented "retry with the approvalId"
+  // round trip could never reach the extension, so the flow could never complete.
+  for (const credentialKey of [
+    "challengeId",
+    "prepareId",
+    "preparedActionId",
+    "grantTicket",
+    "approvalId",
+  ] as const) {
     if (payload[credentialKey] !== undefined) {
       const val = payload[credentialKey];
       if (typeof val !== "string" || !val.trim()) {
@@ -318,6 +353,19 @@ export function validateChromeConnectorPayload(
       "ELEMENT_TARGET_REQUIRED",
       "Provide elementRef from browser_read_page or a CSS selector.",
     );
+  }
+  if (action === "set_select_value") {
+    const hasValue = typeof payload.value === "string";
+    const hasLabel = typeof payload.label === "string";
+    // Exactly one of the two: "value or label, never both" keeps the match unambiguous, and the
+    // extension refuses to guess when neither resolves to exactly one option.
+    if (hasValue === hasLabel) {
+      throw createConnectorError(
+        "OPTION_TARGET_REQUIRED",
+        "Provide exactly one of value or label for the option to select.",
+      );
+    }
+    return;
   }
   if (action === "set_files") {
     if (!Array.isArray(payload.files) || payload.files.length === 0) {
@@ -414,6 +462,7 @@ export const REQUIRED_CHROME_CONNECTOR_FEATURES: Record<string, string[]> = {
   read_page: ["compact_observation_v2"],
   click: ["compact_observation_v2", "action_gate"],
   type: ["compact_observation_v2", "action_gate"],
+  set_select_value: ["compact_observation_v2", "action_gate"],
   press: ["compact_observation_v2", "action_gate"],
   scroll: ["compact_observation_v2"],
   // Both browsers advertise the dedicated `screenshot` feature: Chrome serves it through
@@ -425,6 +474,9 @@ export const REQUIRED_CHROME_CONNECTOR_FEATURES: Record<string, string[]> = {
   detach: ["browser_debug"],
   set_files: ["compact_observation_v2", "file_upload"],
   prepare_browser_action: ["prepare_browser_action"],
+  // debugger-backed (`chrome.debugger` → Runtime.evaluate), so the same feature name the extension
+  // publishes also says "Chrome would run this, Firefox cannot" — see FIREFOX_UNAVAILABLE_FEATURES.
+  eval_script: ["eval"],
 };
 
 /** Features the runtime requires for an action; empty when the action needs none. */
@@ -663,7 +715,9 @@ export async function executeChromeConnectorTool(args: {
           createVerifiedChromeConnectorClient({ client: createChromeConnectorClient() }));
     const result = await client.request(action, payload);
     return {
-      content: JSON.stringify({ ok: true, result }),
+      ...(action === "screenshot"
+        ? await screenshotResult(result)
+        : { content: JSON.stringify({ ok: true, result }) }),
       metadata: {
         chromeConnector: true,
         action,

@@ -12,7 +12,9 @@ import {
   decideCloseTab,
   decideIrreversibleAction,
   deserializeOpenedTabs,
+  hashSignature,
   isActivationKey,
+  isOwnExtensionPage,
   isProtectedPageUrl,
   normalizeTabId,
   resolveActionTarget,
@@ -20,6 +22,7 @@ import {
   summarizeConsoleEntries,
   summarizeNetworkEntries,
   verifyActionEffect,
+  verifySelectValueEffect,
 } from "./compactObservation.js";
 import { captureBrowserConsentState } from "./browserConsentCapture.js";
 import { createActionFingerprint } from "./browserConsentFingerprint.js";
@@ -28,6 +31,21 @@ import {
   createPreparedActionStore,
   handlePrepareBrowserAction,
 } from "./browserConsentPreparation.js";
+import {
+  buildEvalApprovalPreview,
+  clampEvalTimeout,
+  clampExpression,
+  summarizeEvalResult,
+} from "./evalResult.js";
+import {
+  EVAL_CONTEXT_UNAVAILABLE,
+  approvalContextSnapshot,
+  createExecutionContextRegistry,
+  evalDocumentIdentity,
+  executionContextFromEvent,
+  isMissingContextError,
+  sameExecutionContext,
+} from "./evalExecutionContext.js";
 
 const HOST_NAME = "com.nolo.chrome_connector";
 
@@ -45,6 +63,12 @@ const DEBUGGER_UNSUPPORTED_MESSAGE =
 
 const consoleByTab = new Map();
 const networkByTab = new Map();
+/**
+ * Per-tab execution contexts, filled from `Runtime.executionContextCreated` (the `Runtime.enable` in
+ * `ensureDebugger` reports the live ones) and pruned on `executionContextDestroyed`. `eval_script`
+ * authorizes one document, so the approval records which context it was shown for.
+ */
+const executionContexts = createExecutionContextRegistry();
 const refRegistry = createElementRefRegistry();
 const basePreparedActionStore = createPreparedActionStore();
 const consumedChallengeIds = new Set();
@@ -77,6 +101,734 @@ const preparedActionStore = {
     return basePreparedActionStore.maxEntries;
   },
 };
+/* ------------------------------------------------------------------------------------------------
+ * Interactive approval for irreversible actions
+ *
+ * The agent never authorizes itself. When the gate fires, this worker opens a small extension page
+ * (`approve.html`) that the *user* clicks; the agent only ever receives `USER_APPROVAL_PENDING` plus a
+ * query key (`approvalId`). A record holding only `prepareId`/`challengeId`/`grantTicket` therefore
+ * authorizes nothing: preparation is not consent.
+ *
+ * Storage: the in-memory Map is the working copy and `chrome.storage.session` is the durable copy —
+ * MV3 recycles this worker, but a 60 s approval window has to survive that. Hydration is lazy and
+ * merges "memory wins", so a storage stub that returns nothing simply leaves the Map authoritative.
+ * ---------------------------------------------------------------------------------------------- */
+const APPROVAL_TTL_MS = 60_000;
+const APPROVAL_SWEEP_INTERVAL_MS = 60_000;
+const APPROVAL_STORAGE_PREFIX = "noloConnectorApproval:";
+const APPROVAL_PENDING_CODE = "USER_APPROVAL_PENDING";
+const APPROVAL_DENIED_CODE = "USER_APPROVAL_DENIED";
+const APPROVAL_EXPIRED_CODE = "USER_APPROVAL_EXPIRED";
+const APPROVAL_STALE_CODE = "STALE_ACTION_CHALLENGE";
+const APPROVAL_DECISION_MESSAGE_TYPE = "browser_consent_decision";
+const APPROVAL_PAGE_PATH = "approve.html";
+
+const approvalPendingMessage =
+  "A confirmation request has been opened for the user in the browser. Ask the user to click \"Allow once\" in the " +
+  "Nolo window, then retry this exact action with this approvalId before it expires. Nothing has been performed yet.";
+const approvalDeniedMessage =
+  "The user did not allow this action, so nothing was performed. Name the control and ask the user to activate it " +
+  "themselves; do not retry the same request hoping for a different answer.";
+const approvalExpiredMessage =
+  "The approval window for this action expired before the user allowed it. Nothing was performed.";
+
+const approvalRecords = new Map();
+let approvalHydration = null;
+
+function normalizeApprovalId(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function approvalStorageArea() {
+  const area = typeof chrome !== "undefined" ? chrome?.storage?.session : null;
+  return area && typeof area.get === "function" && typeof area.set === "function" ? area : null;
+}
+
+function approvalSnapshot(record) {
+  const target = record?.target || {};
+  return {
+    ...record,
+    target: {
+      name: String(target.name ?? ""),
+      tag: String(target.tag ?? ""),
+      role: String(target.role ?? ""),
+      type: String(target.type ?? ""),
+    },
+  };
+}
+
+/**
+ * Writes the durable copy of a record.
+ *
+ * Best-effort by default: losing that copy only costs durability across a worker restart, because the
+ * in-memory Map stays authoritative and hydration revives nothing but `pending` records.
+ * `required: true` is reserved for the one irreversible step — consuming an approval — where a write
+ * that did not happen must stop the action instead of being assumed to have happened.
+ */
+async function persistApprovalRecord(record, { required = false } = {}) {
+  const area = approvalStorageArea();
+  if (!record) return;
+  // No session storage at all: nothing could ever be hydrated, so the Map being the only copy is the
+  // normal case and not a failed write. A write that was attempted and failed is the opposite.
+  if (!area) return;
+  try {
+    await area.set({ [APPROVAL_STORAGE_PREFIX + record.approvalId]: approvalSnapshot(record) });
+  } catch (error) {
+    if (required) throw error;
+    // Session storage only adds durability across worker restarts; the Map stays authoritative.
+  }
+}
+
+async function hydrateApprovals() {
+  if (approvalHydration) return approvalHydration;
+  approvalHydration = (async () => {
+    const area = approvalStorageArea();
+    if (!area) return;
+    try {
+      const raw = await area.get(null);
+      const items = raw && typeof raw === "object" ? raw : {};
+      for (const [key, value] of Object.entries(items)) {
+        if (typeof key !== "string" || !key.startsWith(APPROVAL_STORAGE_PREFIX)) continue;
+        if (!value || typeof value !== "object") continue;
+        const approvalId =
+          typeof value.approvalId === "string" ? value.approvalId : key.slice(APPROVAL_STORAGE_PREFIX.length);
+        // Memory wins: a state this worker already advanced must never be rolled back by a merge.
+        if (approvalRecords.has(approvalId)) continue;
+        // Only a request still waiting on the user is worth reviving. An `approved` record with no
+        // consumption left in memory was granted before the restart and the click that produced it
+        // cannot be re-verified, so a restart voids it; `consumed`/`denied`/`expired` are settled.
+        if (value.state !== "pending") continue;
+        approvalRecords.set(approvalId, { ...value, approvalId });
+      }
+    } catch {
+      // A failed hydrate must not authorize anything; the Map simply stays empty.
+    }
+  })();
+  return approvalHydration;
+}
+
+function sweepApprovalRecords(nowMs = Date.now()) {
+  for (const record of approvalRecords.values()) {
+    if (record.state !== "pending" && record.state !== "approved") continue;
+    if (!(Number(record.expiresAt) <= nowMs)) continue;
+    record.state = "expired";
+    record.expiredAt = nowMs;
+    // A failed write only costs durability across a worker restart — the in-memory record stays
+    // authoritative, and the authorization decision itself is unaffected by it.
+    void persistApprovalRecord(record).catch(() => {});
+  }
+}
+
+const approvalSweepTimer =
+  typeof setInterval === "function"
+    ? setInterval(() => {
+        sweepApprovalRecords();
+      }, APPROVAL_SWEEP_INTERVAL_MS)
+    : null;
+// `unref()` keeps this worker-level timer from holding bun's test process open.
+if (approvalSweepTimer && typeof approvalSweepTimer.unref === "function") approvalSweepTimer.unref();
+
+function approvalVerdict(code, message, extra = {}) {
+  return {
+    ok: false,
+    code,
+    signal: code,
+    effect: code === APPROVAL_PENDING_CODE ? "approval_pending" : "failed",
+    verified: false,
+    ...extra,
+    message,
+  };
+}
+
+async function getApprovalRecord(approvalId) {
+  await hydrateApprovals();
+  sweepApprovalRecords();
+  return approvalRecords.get(approvalId) || null;
+}
+
+/** The tab's document URL, used only to derive a fingerprint — it is never shown to the user. */
+async function tabUrlForApproval(tabId) {
+  try {
+    if (typeof chrome === "undefined" || typeof chrome?.tabs?.get !== "function") return "";
+    const tab = await chrome.tabs.get(Number(tabId));
+    return typeof tab?.url === "string" ? tab.url.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fingerprint for `eval_script`, which has no control to inspect.
+ *
+ * What the user is asked about is "this script, on this document". So the binding is the document
+ * (its execution context, URL included) plus the script itself and `awaitPromise`; a different
+ * script, or a tab that navigated elsewhere — even to the same URL — no longer matches the approval
+ * and the user is asked again. The page is never read here, so the same input recomputes to the same
+ * fingerprint at drift time. Without an explicit `context` (request time) the tab's live main-frame
+ * context is captured and handed back with the fingerprint, so the approval can record it.
+ */
+async function computeEvalApprovalFingerprint({ tabId, payload, context }) {
+  const url = await tabUrlForApproval(tabId);
+  if (!url) {
+    return {
+      ok: false,
+      verdict: approvalVerdict(
+        "DOM_MUTATED",
+        "The URL of the target tab could not be read, so nothing was asked and nothing was run.",
+        { action: "eval_script" },
+      ),
+    };
+  }
+  let documentContext = context || null;
+  if (!documentContext) {
+    try {
+      documentContext = await ensureLiveMainFrameContext(tabId);
+    } catch (error) {
+      return {
+        ok: false,
+        verdict: approvalVerdict(
+          EVAL_CONTEXT_UNAVAILABLE,
+          `The document of the target tab could not be identified (${toMessage(error)}), so nothing was asked and nothing was run.`,
+          { action: "eval_script" },
+        ),
+      };
+    }
+    if (!documentContext) {
+      return {
+        ok: false,
+        verdict: approvalVerdict(
+          EVAL_CONTEXT_UNAVAILABLE,
+          "The document of the target tab could not be identified, so nothing was asked and nothing was run.",
+          { action: "eval_script" },
+        ),
+      };
+    }
+  }
+  const identity = evalDocumentIdentity({ url, context: documentContext });
+  try {
+    const fpRes = await createActionFingerprint({
+      document: {
+        documentId: hashSignature(identity),
+        url,
+        pageRevision: hashSignature(`${identity}|eval_script`),
+      },
+      tabId: String(tabId),
+      target: { targetId: "document", tag: "", name: "" },
+      action: {
+        action: "eval_script",
+        args: {
+          expression: typeof payload?.expression === "string" ? payload.expression : "",
+          awaitPromise: payload?.awaitPromise === true,
+        },
+      },
+      form: null,
+      owner: typeof payload?.owner === "string" ? payload.owner : "",
+      dialogId: typeof payload?.dialogId === "string" ? payload.dialogId : "",
+    });
+    return { ok: true, fingerprint: fpRes.fingerprint, context: documentContext };
+  } catch (error) {
+    return {
+      ok: false,
+      verdict: approvalVerdict("DOM_MUTATED", `Fingerprint computation failed: ${toMessage(error)}`, {
+        action: "eval_script",
+      }),
+    };
+  }
+}
+
+/**
+ * Recomputes the DOM fingerprint the action would be bound to. Kept deliberately identical in shape
+ * to the drift check in `verifyConsentAndDrift`: the same document/revision/target/args/form/owner
+ * inputs, so an approval can only ever cover the page state the user was asked about.
+ */
+async function computeApprovalFingerprint({ action, tabId, payload, target, context }) {
+  if (action === "eval_script") return await computeEvalApprovalFingerprint({ tabId, payload, context });
+
+  const captureOptions = { rejectAsResult: true, _frameId: target?.kind === "ref" ? 0 : target?._frameId };
+  if (
+    payload?.active === true ||
+    target?.kind === "active" ||
+    (action === "press" && !payload?.selector && !target?.selector)
+  ) {
+    captureOptions.active = true;
+  } else if (typeof target?.selector === "string" && target.selector.trim()) {
+    captureOptions.selector = target.selector.trim();
+  } else if (typeof payload?.selector === "string" && payload.selector.trim()) {
+    captureOptions.selector = payload.selector.trim();
+  }
+
+  let currentCapture;
+  try {
+    currentCapture = await executeInTab(tabId, captureBrowserConsentState, [captureOptions]);
+  } catch (error) {
+    return {
+      ok: false,
+      verdict: approvalVerdict("DOM_MUTATED", `Failed to capture DOM state before asking the user: ${toMessage(error)}`, {
+        action,
+      }),
+    };
+  }
+  if (!currentCapture || currentCapture.ok === false) {
+    return {
+      ok: false,
+      verdict: approvalVerdict("DOM_MUTATED", currentCapture?.message || "DOM state verification failed.", { action }),
+    };
+  }
+
+  const registrySnapshot = refRegistry.snapshot(tabId);
+  const pageRevision = String(registrySnapshot?.pageRevision || currentCapture.document?.pageRevision || "").trim();
+  const actionArgs = buildPrepareArgs({
+    action,
+    targetMetadata: currentCapture.target,
+    formSnapshot: currentCapture.form,
+    payload,
+  });
+
+  try {
+    const fpRes = await createActionFingerprint({
+      document: {
+        documentId: currentCapture.document?.documentId,
+        url: currentCapture.document?.url,
+        pageRevision,
+      },
+      tabId: String(tabId),
+      target: {
+        targetId: currentCapture.target?.targetId,
+        tag: currentCapture.target?.tag,
+        name: currentCapture.target?.name,
+      },
+      action: { action, args: actionArgs },
+      form: currentCapture.form?.fields || null,
+      owner: typeof payload?.owner === "string" ? payload.owner : "",
+      dialogId: typeof payload?.dialogId === "string" ? payload.dialogId : "",
+    });
+    return { ok: true, fingerprint: fpRes.fingerprint };
+  } catch (error) {
+    return {
+      ok: false,
+      verdict: approvalVerdict("DOM_MUTATED", `Fingerprint computation failed: ${toMessage(error)}`, { action }),
+    };
+  }
+}
+
+/**
+ * The origin of the page an approval is about — origin only, never a full URL.
+ *
+ * A URL can carry a token in its query string, and the approval page is a document the user reads
+ * (and whose address bar is visible), so only the origin is ever derived from it. Non-http(s) pages
+ * (chrome://, file://, about:) have no meaningful origin and are reported as unknown.
+ */
+function originFromUrl(rawUrl) {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) return "";
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Which site the user is about to authorize. Read from the tab the action targets, so the approval
+ * window can name the site the action belongs to; a tab that cannot be read yields an empty
+ * origin, which the approval page shows as "unknown site" rather than as a blank line.
+ *
+ * Only the origin is returned — never the tab title. The title is content the *page* controls: it
+ * can carry a mail subject, an account name or a one-time code, and it can be written to look like
+ * a brand ("Google 账号") to make a hostile origin look familiar. The origin is handed out by the
+ * browser and cannot be forged by the page, so it alone answers "which site is asking".
+ */
+async function resolveApprovalSite(tabId) {
+  try {
+    if (typeof chrome === "undefined" || typeof chrome?.tabs?.get !== "function") return "";
+    const tab = await chrome.tabs.get(Number(tabId));
+    return originFromUrl(typeof tab?.url === "string" ? tab.url : "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The option a select request would set, read without touching the page.
+ *
+ * Why this exists: the approval window names the action, the control and the site. That still does
+ * not say *which option* of the select would be chosen — and the user cannot make a correct
+ * decision without it: two pages on the same site can carry a control with the very same name, and
+ * one select can be asked for different options on two runs. The option label is exactly the piece
+ * the decision is about, so it belongs on the window.
+ *
+ * Note the asymmetry with the page title, which is deliberately not shown anywhere: the title is
+ * decorative and page-controlled (a page can write a brand name next to a hostile origin), while the
+ * option label is the item the user is being asked to approve. The test is not "is the content
+ * page-controlled" but "can the user still decide correctly without it" — and without the label
+ * they cannot.
+ *
+ * Only the resolved option label is carried — never the raw value or payload.
+ */
+function approvalPageArgs(target) {
+  return target?.kind === "ref" ? {
+    region: target.expect?.region || "", expectedUrl: target.expect?.url,
+    expectedSignature: target.expect?.signature, index: target.expect?.index,
+    expectedTag: target.expect?.tag, expectedName: target.expect?.name,
+  } : { selector: String(target?.selector || "") };
+}
+
+/** Match in the page using the same identity and option rules as execution; export labels only. */
+async function resolveSelectApprovalSummary({ action, tabId, payload, target }) {
+  if (action !== "set_select_value") return null;
+  const pageArgs = approvalPageArgs(target);
+  const mark = await captureSelectToken(tabId, pageArgs);
+  if (!mark.ok) return null;
+  try {
+    const result = await executeInTab(tabId, pageOperation, [{
+      ...pageArgs, op: "read_select_options", selectToken: mark.token,
+      value: payload?.value, label: payload?.label,
+    }]);
+    return result?.ok === true && result.matched === true && result.label
+      ? { label: result.label } : null;
+  } catch {
+    return null;
+  } finally {
+    await clearSelectToken(tabId, mark.token);
+  }
+}
+
+/**
+ * Opens the approval window and returns a pending verdict. Fails closed to `USER_APPROVAL_DENIED`
+ * when this runtime has no `chrome.windows` (Firefox builds, bare test stubs, a rejected create): a
+ * pending record nobody can ever approve is worse than a plain refusal.
+ */
+async function requestUserApproval({ action, tabId, payload, target, refusal }) {
+  // The host (TUI/desktop) renders the approval card itself, so there is no browser window to open
+  // and no `chrome.windows` to need: its absence is not a refusal on this path. The decision arrives
+  // through `decideApprovalFromHost`, and `windowId` stays null.
+  const hostApproval = payload?.hostApproval === true;
+  if (!hostApproval && (typeof chrome === "undefined" || typeof chrome?.windows?.create !== "function")) {
+    return approvalVerdict(APPROVAL_DENIED_CODE, approvalDeniedMessage, { action });
+  }
+
+  const computed = await computeApprovalFingerprint({ action, tabId, payload, target });
+  if (!computed.ok) return computed.verdict;
+
+  await hydrateApprovals();
+  const now = Date.now();
+  const randomId = () =>
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${now}-${Math.random().toString(36).slice(2)}`;
+  const approvalId = `apr_${randomId()}`;
+  const nonce = randomId();
+  const targetInfo = refusal?.target || {};
+  // Approval metadata is separate from labelOf: changing identity labels would invalidate refs.
+  let targetName = "未命名控件";
+  if (action === "eval_script") {
+    // A script has no control to name, and "unidentified control" would misdescribe the request.
+    targetName = "当前页面";
+  } else {
+    try {
+      const inspected = await executeInTab(tabId, pageOperation, [{ ...approvalPageArgs(target), op: "inspect" }]);
+      if (inspected?.ok === true) targetName = String(inspected.approvalName ?? inspected.name ?? "未命名控件").slice(0, 200);
+    } catch { /* Unreadable controls must not fall back to potentially private content. */ }
+  }
+  // The site the action belongs to: the approval window is the only place the user can decide, so
+  // it has to say *which site* is asking, not only which control.
+  const site = await resolveApprovalSite(tabId);
+  // What the action would change, in one phrase: for a select, the option it would set. The control
+  // name and the site say *where*; this says *which item*. For a script it is the script itself,
+  // flattened to one line — the user cannot approve code they cannot see.
+  const summary =
+    action === "eval_script"
+      ? { label: buildEvalApprovalPreview(payload?.expression) }
+      : await resolveSelectApprovalSummary({ action, tabId, payload, target, refusal });
+
+  // One pending request per tab: a second gate must not stack windows the user cannot tell apart.
+  for (const record of approvalRecords.values()) {
+    if (record.state === "pending" && String(record.tabId) === String(tabId)) {
+      record.state = "superseded";
+      record.supersededAt = now;
+      // A failed write only costs durability across a worker restart, not the decision itself.
+      void persistApprovalRecord(record).catch(() => {});
+    }
+  }
+
+  const record = {
+    approvalId,
+    nonce,
+    windowId: null,
+    tabId: String(tabId),
+    action: String(action),
+    fingerprint: computed.fingerprint,
+    // Which document the user is being asked about (eval_script): the main frame's execution
+    // context, so a navigation between the request and the retry cannot be executed in.
+    context: computed.context ? approvalContextSnapshot(computed.context) : null,
+    origin: site,
+    target: {
+      name: targetName,
+      tag: String(targetInfo.tag ?? ""),
+      role: String(targetInfo.role ?? ""),
+      type: String(targetInfo.type ?? ""),
+    },
+    // Only the option label — never the raw value or payload.
+    summary: summary ? { label: summary.label } : null,
+    owner: typeof payload?.owner === "string" ? payload.owner : "",
+    dialogId: typeof payload?.dialogId === "string" ? payload.dialogId : "",
+    state: "pending",
+    createdAt: now,
+    expiresAt: now + APPROVAL_TTL_MS,
+  };
+  approvalRecords.set(approvalId, record);
+
+  let windowId = null;
+  try {
+    const base =
+      typeof chrome?.runtime?.getURL === "function" ? chrome.runtime.getURL(APPROVAL_PAGE_PATH) : APPROVAL_PAGE_PATH;
+    const params = new URLSearchParams({
+      approvalId,
+      nonce,
+      action: String(action),
+      target: targetName,
+      // Origin only: a query string can carry a token, and this URL is visible in the popup.
+      // No title: the page controls its title, so it must not be able to put text next to the origin.
+      origin: site,
+    });
+    // The item the action would set, for a select: only the option label.
+    // Nothing else of the request travels — no payload, and never the text a `type` action typed.
+    if (summary) {
+      params.set("summary", JSON.stringify({ label: summary.label }));
+    }
+    if (!hostApproval) {
+      const created = await chrome.windows.create({
+        url: `${base}?${params.toString()}`,
+        type: "popup",
+        width: 820,
+        height: 680,
+        focused: true,
+      });
+      windowId = Number(created?.id);
+      if (!Number.isFinite(windowId)) throw new Error("chrome.windows.create returned no window id");
+    }
+  } catch (error) {
+    approvalRecords.delete(approvalId);
+    return approvalVerdict(APPROVAL_DENIED_CODE, `${approvalDeniedMessage} (${toMessage(error)})`, { action });
+  }
+
+  record.windowId = windowId;
+  await persistApprovalRecord(record);
+  // The request bound a debugger attachment to identify the document; release the banner on the
+  // idle timer like any other debugger-backed action instead of holding it while the user decides.
+  if (record.context) scheduleDetach(tabId);
+
+  return approvalVerdict(APPROVAL_PENDING_CODE, approvalPendingMessage, {
+    action,
+    approvalId,
+    expiresAtMs: record.expiresAt,
+    target: { name: targetName },
+  });
+}
+
+/**
+ * The credential check that has to pass before any page effect: approved by the user, not expired,
+ * not used. Consumption happens here — before execution — so a later drift failure cannot hand the
+ * credential back.
+ */
+async function consumeApprovalCredential({ approvalId, record, action }) {
+  if (!record) {
+    return {
+      verdict: approvalVerdict(
+        APPROVAL_STALE_CODE,
+        "The provided approvalId was not found, was already used, or belongs to another worker session.",
+        { action, approvalId },
+      ),
+    };
+  }
+  if (record.state === "consumed") {
+    return {
+      verdict: approvalVerdict(
+        APPROVAL_STALE_CODE,
+        "That approvalId has already been used once; an approval covers exactly one action.",
+        { action, approvalId },
+      ),
+    };
+  }
+  if (record.state === "expired" || Number(record.expiresAt) <= Date.now()) {
+    if (record.state !== "expired") {
+      record.state = "expired";
+      record.expiredAt = Date.now();
+      // A failed write only costs durability across a worker restart, not the decision itself.
+      void persistApprovalRecord(record).catch(() => {});
+    }
+    return { verdict: approvalVerdict(APPROVAL_EXPIRED_CODE, approvalExpiredMessage, { action, approvalId }) };
+  }
+  if (record.state === "pending") {
+    // Still waiting on the user: repeat the pending verdict and never extend the window.
+    return {
+      verdict: approvalVerdict(APPROVAL_PENDING_CODE, approvalPendingMessage, {
+        action,
+        approvalId,
+        expiresAtMs: record.expiresAt,
+        target: { name: String(record.target?.name ?? "") },
+      }),
+    };
+  }
+  if (record.state === "denied" || record.state === "superseded") {
+    return { verdict: approvalVerdict(APPROVAL_DENIED_CODE, approvalDeniedMessage, { action, approvalId }) };
+  }
+  if (record.state !== "approved") {
+    return {
+      verdict: approvalVerdict(APPROVAL_STALE_CODE, "The approval record is not in a usable state.", {
+        action,
+        approvalId,
+      }),
+    };
+  }
+
+  // Consuming is the one irreversible step: the record has to be durably `consumed` *before* the
+  // action runs. A write that did not happen means the single use was never recorded, so the action
+  // is refused instead of executed on an approval the store does not know is spent.
+  record.state = "consumed";
+  record.consumedAt = Date.now();
+  try {
+    await persistApprovalRecord(record, { required: true });
+  } catch (error) {
+    return {
+      verdict: approvalVerdict(
+        APPROVAL_STALE_CODE,
+        `本次审批的一次性额度没能写入持久化存储（${toMessage(error)}），为避免动作被执行两次，这次没有执行；` +
+          "请让用户重新审批。",
+        { action, approvalId },
+      ),
+    };
+  }
+  return { ok: true, record };
+}
+
+/**
+ * The only writer of `approved`. Reachable exclusively from the extension's own approve page: a
+ * decision must come from this extension, from that page URL, with this request's nonce, from the
+ * window this worker opened. Anything else discards the request instead of retrying.
+ */
+export async function handleApprovalDecision(message = {}, sender = {}) {
+  const approvalId = normalizeApprovalId(message?.approvalId);
+  if (!approvalId) return { ok: false, code: "USER_APPROVAL_REJECTED" };
+
+  const record = await getApprovalRecord(approvalId);
+  if (!record) return { ok: false, code: "USER_APPROVAL_REJECTED" };
+
+  const extensionId = typeof chrome !== "undefined" ? chrome?.runtime?.id : "";
+  const senderId = typeof sender?.id === "string" ? sender.id : "";
+  const senderUrl = typeof sender?.url === "string" ? sender.url : "";
+  // The approval page is an extension page, so its URL carries the browser's extension scheme:
+  // `chrome-extension://<id>/approve.html` on Chrome, `moz-extension://<uuid>/approve.html` on
+  // Firefox. `runtime.getURL()` is the only source that is right on both (on Firefox the moz
+  // uuid is not `runtime.id` for AMO-signed add-ons), so ask the browser first and keep the
+  // Chrome-shaped spelling as the fallback for a runtime without getURL.
+  const approvePagePrefixes = [];
+  if (typeof chrome?.runtime?.getURL === "function") {
+    const ownPage = chrome.runtime.getURL(APPROVAL_PAGE_PATH);
+    if (ownPage) approvePagePrefixes.push(ownPage);
+  }
+  if (typeof extensionId === "string" && extensionId) {
+    approvePagePrefixes.push(`chrome-extension://${extensionId}/${APPROVAL_PAGE_PATH}`);
+    approvePagePrefixes.push(`moz-extension://${extensionId}/${APPROVAL_PAGE_PATH}`);
+  }
+  const senderOk =
+    Boolean(approvePagePrefixes.length) &&
+    senderId === extensionId &&
+    approvePagePrefixes.some((prefix) => senderUrl.startsWith(prefix));
+  const nonceOk = typeof record.nonce === "string" && record.nonce.length > 0 && message?.nonce === record.nonce;
+  const windowOk = record.windowId != null && Number(message?.windowId) === Number(record.windowId);
+
+  if (!senderOk || !nonceOk || !windowOk || record.state !== "pending" || Number(record.expiresAt) <= Date.now()) {
+    if (record.state === "pending") {
+      record.state = "denied";
+      record.deniedAt = Date.now();
+      record.denyReason = "unverified_decision_sender";
+      await persistApprovalRecord(record);
+    }
+    return { ok: false, code: "USER_APPROVAL_REJECTED" };
+  }
+
+  const approved = message?.decision === "approve";
+  return await commitApprovalDecision(record, approved ? "approve" : "deny");
+}
+
+/**
+ * The one place a record leaves `pending` with a decision, and the one place the approval window is
+ * closed again. Both decision entry points (the approve page and the host RPC) end here, so the two
+ * can never drift apart in state, timestamps or cleanup.
+ */
+async function commitApprovalDecision(record, decision) {
+  const approved = decision === "approve";
+  record.state = approved ? "approved" : "denied";
+  record[approved ? "approvedAt" : "deniedAt"] = Date.now();
+  await persistApprovalRecord(record);
+
+  if (typeof chrome?.windows?.remove === "function" && record.windowId != null) {
+    try {
+      await chrome.windows.remove(record.windowId);
+    } catch {
+      // The user may have closed the window already; the decision still stands.
+    }
+  }
+  return { ok: true, approvalId: record.approvalId, state: record.state };
+}
+
+/**
+ * The host-RPC decision entry: a TUI/desktop host renders the approval card itself and relays the
+ * user's answer here instead of through the browser window.
+ *
+ * Its authority is the connector request — the host process that opened the request — so there is no
+ * approve-page sender, nonce or window id to verify: those three exist to prove a click happened *in
+ * the window this worker opened*, and this path has no such click to prove. Everything that decides
+ * the outcome is shared with the approve page: the record must still be `pending` and unexpired, it
+ * leaves `pending` only through commitApprovalDecision, and no approval authorizes anything by
+ * itself — verifyConsentAndDrift re-checks tab, action and fingerprint on retry, and that retry is
+ * what consumes it.
+ */
+async function decideApprovalFromHost({ approvalId, decision }) {
+  const record = await getApprovalRecord(approvalId);
+  if (!record) return { ok: false, code: "USER_APPROVAL_REJECTED" };
+  if (record.state === "expired" || Number(record.expiresAt) <= Date.now()) {
+    return { ok: false, code: APPROVAL_EXPIRED_CODE };
+  }
+  // A repeated answer is idempotent: a host card can be answered twice (a double click, a retry
+  // after a lost reply), and re-sending the same decision must not read as the user having refused.
+  if (record.state === "approved") {
+    if (decision === "approve") return { ok: true, status: "allowed" };
+    return { ok: false, code: "USER_APPROVAL_REJECTED" };
+  }
+  if (record.state === "denied" && decision === "deny") return { ok: true, status: "denied" };
+  // Consumed, superseded or otherwise settled: an approval covers exactly one action, and a second
+  // answer to a spent request is not a decision, it is a replay.
+  if (record.state !== "pending") return { ok: false, code: "USER_APPROVAL_REJECTED" };
+  const committed = await commitApprovalDecision(record, decision);
+  return { ok: true, status: committed.state === "approved" ? "allowed" : "denied" };
+}
+
+/** Closing the approval window is a refusal, not an implicit approval left hanging in `pending`. */
+function denyApprovalsForWindow(windowId) {
+  for (const record of approvalRecords.values()) {
+    if (record.state !== "pending") continue;
+    if (record.windowId == null || Number(record.windowId) !== Number(windowId)) continue;
+    record.state = "denied";
+    record.deniedAt = Date.now();
+    record.denyReason = "approval_window_closed";
+    // A failed write only costs durability across a worker restart, not the decision itself.
+    void persistApprovalRecord(record).catch(() => {});
+  }
+}
+
+if (typeof chrome !== "undefined" && chrome?.windows?.onRemoved?.addListener) {
+  try {
+    chrome.windows.onRemoved.addListener((windowId) => {
+      denyApprovalsForWindow(windowId);
+    });
+  } catch {
+    // A runtime without windows events simply keeps relying on expiry.
+  }
+}
+
 const openedTabs = createOpenedTabSet();
 const detachTimers = new Map();
 /**
@@ -95,14 +847,92 @@ function tabTarget(tabId) {
   return { tabId: Number(tabId) };
 }
 
-async function executeInTab(tabId, func, args = []) {
+/** Read-only discovery. Never runs a page action while enumerating frames. */
+function probeTargetFrame(options) {
+  let allowed = true;
+  try {
+    let view = window;
+    while (view !== view.top) {
+      const parent = view.parent;
+      const frame = view.frameElement;
+      if (!frame || frame.contentDocument !== view.document || parent.document !== frame.ownerDocument) {
+        allowed = false;
+        break;
+      }
+      view = parent;
+    }
+  } catch (_) { allowed = false; }
+  // Sole source-of-truth predicate, mirrored verbatim in browserConsentCapture.js,
+  // probeTargetFrame and pageOperation in background.js: update all three together.
+  // Each function is serialized into the page independently; module helpers cannot be shared.
+  // aria-disabled is semantic, not a click barrier; opacity:0 layers can receive clicks.
+  function isTargetCandidate(element) {
+    if (!element || element.isConnected === false || element.type === "hidden" ||
+        element.closest?.('[inert], [hidden]')) return false;
+    const view = element.ownerDocument?.defaultView;
+    if (!view || typeof element.getBoundingClientRect !== "function") return false;
+    const rect = element.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = view.getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" ||
+          style.visibility === "collapse") return false;
+    }
+    return true;
+  }
+  let count = 0;
+  if (options.selector) {
+    // Routing cannot safely infer the meaning of non-CSS selectors in child documents.
+    try { count = Array.from(document.querySelectorAll(options.selector)).filter(isTargetCandidate).length; }
+    catch (_) { return { allowed, count: 0, nonCss: true }; }
+  } else {
+    const el = document.activeElement;
+    count = el && el !== document.body && el !== document.documentElement &&
+      !/^(iframe|frame)$/i.test(el.tagName) && document.hasFocus() ? 1 : 0;
+  }
+  return { allowed, count };
+}
+
+async function executeInTab(tabId, func, args = [], frameId) {
   await assertScriptableTab(tabId);
+  const options = args[0] || {};
+  frameId ??= options._frameId;
+  const routedOps = new Set(["inspect", "click", "type", "press", "mark_select_token", "set_select_value", "read_select_state"]);
+  const discover = frameId === undefined &&
+    (func === captureBrowserConsentState || (func === pageOperation && routedOps.has(options.op))) &&
+    (options.selector || options.active || options.subject === "active" || options.op === "press");
+  if (discover) {
+    const probes = await chrome.scripting.executeScript({
+      target: { ...tabTarget(tabId), allFrames: true },
+      func: probeTargetFrame,
+      args: [{ selector: options.selector || "" }],
+    });
+    const matches = probes.filter((entry) => entry.result?.count > 0);
+    if (matches.some((entry) => !entry.result.allowed)) {
+      throw connectorError("UNSUPPORTED_IFRAME", "Target crosses an inaccessible frame boundary.");
+    }
+    if (matches.length > 1 || matches.some((entry) => entry.result.count > 1)) {
+      throw connectorError("FRAME_TARGET_AMBIGUOUS", "Target does not identify one element in one document.");
+    }
+    if (matches.length === 1) {
+      frameId = matches[0].frameId;
+      if (!Number.isInteger(frameId)) throw connectorError("UNSUPPORTED_IFRAME", "Target frame identity is unavailable.");
+    } else if (probes.some((entry) => entry.result?.allowed === false)) {
+      throw connectorError("UNSUPPORTED_IFRAME", "No target can be proven across an inaccessible frame boundary.");
+    } else if (!options.selector) {
+      throw connectorError("TARGET_NOT_FOUND", "No focused accessible frame target was found.");
+    } else if (options.selector && !probes.some((entry) => entry.frameId === 0 && entry.result?.nonCss)) {
+      throw connectorError("TARGET_NOT_FOUND", "No unique accessible frame target was found.");
+    }
+  }
   const [result] = await chrome.scripting.executeScript({
-    target: tabTarget(tabId),
+    target: frameId === undefined ? tabTarget(tabId) : { ...tabTarget(tabId), frameIds: [frameId] },
     func,
     args,
   });
-  return result?.result;
+  const value = result?.result;
+  if (value && typeof value === "object" && Number.isInteger(frameId)) value._frameId = frameId;
+  return value;
 }
 
 /**
@@ -121,6 +951,28 @@ async function assertScriptableTab(tabId) {
     throw connectorError(
       PROTECTED_PAGE_CODE,
       `Chrome does not allow scripts on this page (${url.split("?")[0].slice(0, 80)}), so it cannot be read or operated automatically. Ask the user to look at it or act on it.`,
+    );
+  }
+}
+
+/**
+ * The debugger path never runs a page script, so `assertScriptableTab` does not cover it: attaching to
+ * the extension's own approval page and dispatching `Input.dispatchMouseEvent` there would let the
+ * connector press "Allow once" itself. Same protected-prefix list, same refusal — deliberately not a
+ * second policy to keep in sync.
+ */
+async function assertDebuggableTab(tabId) {
+  let url = "";
+  try {
+    const tab = await chrome.tabs.get(Number(tabId));
+    url = typeof tab?.url === "string" ? tab.url : "";
+  } catch {
+    return; // A missing tab is reported by the debugger attach itself.
+  }
+  if (isProtectedPageUrl(url)) {
+    throw connectorError(
+      PROTECTED_PAGE_CODE,
+      `Chrome does not allow debugging this page (${url.split("?")[0].slice(0, 80)}), so the connector will not send it input. Ask the user to act on it.`,
     );
   }
 }
@@ -148,6 +1000,7 @@ function dropTabState(tabId) {
   if (!id) return;
   consoleByTab.delete(id);
   networkByTab.delete(id);
+  executionContexts.clear(id);
   refRegistry.invalidate(id);
   const timer = detachTimers.get(id);
   if (timer) clearTimeout(timer);
@@ -174,6 +1027,8 @@ async function detachTab(tabId) {
   try {
     await chrome.debugger.detach(tabTarget(id));
     attachedInThisWorker.delete(id);
+    // The session ends here: its context ids no longer describe anything.
+    executionContexts.clear(id);
     return true;
   } catch (error) {
     console.warn(`[nolo chrome connector] debugger detach skipped for tab ${id}: ${toMessage(error)}`);
@@ -230,6 +1085,9 @@ async function ensureDebugger(tabId) {
     throw connectorError(DEBUGGER_UNSUPPORTED_SIGNAL, DEBUGGER_UNSUPPORTED_MESSAGE);
   }
   const target = tabTarget(tabId);
+  // The debugger path dispatches *trusted* input, which no script-level guard covers: attaching to
+  // the extension's own approval page would let the connector click "Allow once" itself.
+  await assertDebuggableTab(tabId);
   try {
     await chrome.debugger.attach(target, "1.3");
   } catch (error) {
@@ -240,6 +1098,82 @@ async function ensureDebugger(tabId) {
   await chrome.debugger.sendCommand(target, "Runtime.enable");
   await chrome.debugger.sendCommand(target, "Network.enable");
   attachedInThisWorker.add(normalizeTabId(tabId));
+}
+
+/** How long a fresh `Runtime.enable` gets to report the contexts that already exist. */
+const EXECUTION_CONTEXT_WAIT_MS = 1_500;
+
+/**
+ * The tab's live main-frame execution context, attaching first when needed. `Runtime.enable`
+ * replays every live context as `executionContextCreated`, so a re-attach answers with the same
+ * document; a tab whose document cannot be identified yields null and the caller fails closed.
+ */
+async function ensureLiveMainFrameContext(tabId) {
+  const key = normalizeTabId(tabId);
+  if (!key) return null;
+  await ensureDebugger(key);
+  const mainFrameId = await tabMainFrameId(key);
+  if (!mainFrameId) return null;
+  const known = executionContexts.mainFrame(key, mainFrameId);
+  if (known) return known;
+  const deadline = Date.now() + EXECUTION_CONTEXT_WAIT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const reported = executionContexts.mainFrame(key, mainFrameId);
+    if (reported) return reported;
+  }
+  return null;
+}
+
+/** The tab's main frame id: the only way to tell the document from a child frame's own world. */
+async function tabMainFrameId(tabId) {
+  try {
+    const tree = await chrome.debugger.sendCommand(tabTarget(tabId), "Page.getFrameTree");
+    const id = tree?.frameTree?.frame?.id;
+    return typeof id === "string" ? id : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Binds an approved `eval_script` to the document the user was shown. The recorded context has to be
+ * the tab's live main frame; when it is gone, was replaced by a navigation, or belongs to another
+ * frame, the approval no longer covers anything and nothing is evaluated.
+ */
+async function resolveApprovedEvalContext({ tabId, record }) {
+  const recorded = record?.context || null;
+  const stale = (message) => ({
+    verdict: approvalVerdict(APPROVAL_STALE_CODE, message, { action: "eval_script" }),
+  });
+  if (!recorded) {
+    return stale(
+      "This approval does not name a document execution context, so it authorizes nothing. Ask the user again.",
+    );
+  }
+  // Without a unique context id there is nothing to bind the script to: the numeric id can be
+  // re-issued to a different document by a re-attach, so this authorizes nothing (fail closed).
+  if (typeof recorded.uniqueId !== "string" || !recorded.uniqueId) {
+    return stale(
+      "这次审批没有记录可核验的文档标识（uniqueId），因此不授权任何执行；请让用户在当前页面重新审批。",
+    );
+  }
+  const key = normalizeTabId(tabId);
+  if (!key) return stale("The approved tab is gone, so the approved script was not run.");
+  if (executionContexts.isDestroyed(key, recorded.contextId)) {
+    return stale(
+      "The document this script was approved for is gone (the page navigated or its frame was replaced). " +
+        "Nothing was run; ask the user to approve the script again on the current page.",
+    );
+  }
+  const live = await ensureLiveMainFrameContext(key);
+  if (!live || !sameExecutionContext(recorded, live)) {
+    return stale(
+      "The main frame of the tab is no longer the document this script was approved for (the page navigated " +
+        "or its frame was replaced). Nothing was run; ask the user to approve the script again on the current page.",
+    );
+  }
+  return { context: live };
 }
 
 /**
@@ -280,6 +1214,15 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
         .slice(0, COMPACT_BUDGET.console.rawTextMaxChars),
       timestamp: params.timestamp,
     }, COMPACT_BUDGET.console.rawCap);
+  }
+  if (method === "Runtime.executionContextCreated") {
+    executionContexts.record(tabId, executionContextFromEvent(params));
+  }
+  if (method === "Runtime.executionContextDestroyed") {
+    executionContexts.destroy(tabId, params?.executionContextId);
+  }
+  if (method === "Runtime.executionContextsCleared") {
+    executionContexts.clear(tabId);
   }
   if (method === "Runtime.exceptionThrown") {
     const ex = params.exceptionDetails || {};
@@ -322,6 +1265,43 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  * self-contained: no closure over service worker state, no imports.
  */
 function pageOperation(payload) {
+  // Recheck at the effect boundary: a navigation between discovery and injection
+  // must not turn an allowed frame into an inaccessible one.
+  try {
+    let view = window;
+    while (view !== view.top) {
+      const frame = view.frameElement;
+      if (!frame || frame.contentDocument !== view.document || frame.ownerDocument !== view.parent.document) {
+        return { ok: false, code: "UNSUPPORTED_IFRAME", message: "Inaccessible frame boundary" };
+      }
+      view = view.parent;
+    }
+  } catch (_) { return { ok: false, code: "UNSUPPORTED_IFRAME", message: "Inaccessible frame boundary" }; }
+  // Sole source-of-truth predicate, mirrored verbatim in browserConsentCapture.js,
+  // probeTargetFrame and pageOperation in background.js: update all three together.
+  // Each function is serialized into the page independently; module helpers cannot be shared.
+  // aria-disabled is semantic, not a click barrier; opacity:0 layers can receive clicks.
+  function isTargetCandidate(element) {
+    if (!element || element.isConnected === false || element.type === "hidden" ||
+        element.closest?.('[inert], [hidden]')) return false;
+    const view = element.ownerDocument?.defaultView;
+    if (!view || typeof element.getBoundingClientRect !== "function") return false;
+    const rect = element.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = view.getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" ||
+          style.visibility === "collapse") return false;
+    }
+    return true;
+  }
+  if (payload.selector && !/^(point:|percent:|text:)/.test(payload.selector)) {
+    try {
+      if (Array.from(document.querySelectorAll(payload.selector)).filter(isTargetCandidate).length > 1) {
+        return { ok: false, code: "FRAME_TARGET_AMBIGUOUS", message: "Multiple target elements" };
+      }
+    } catch (_) { /* Existing non-CSS selector semantics remain top-frame only. */ }
+  }
   const MAX_CANDIDATES = 300;
   const INTERACTIVE_SELECTOR =
     'a[href],button,input:not([type="hidden"]),select,textarea,[role],[contenteditable="true"],[tabindex]';
@@ -351,9 +1331,182 @@ function pageOperation(payload) {
     return String(text).replace(/\s+/g, " ").trim().slice(0, 200);
   }
 
+  /**
+   * The identity of a marked select lives *outside* the page's DOM, in a registry of live node
+   * references that the page cannot see, copy or forge.
+   *
+   * Why not a marker attribute (the previous design): `cloneNode(true)` copies attributes. A clone
+   * that replaces the original carries the very same marker value, so "the element carrying the
+   * token" stops being proof of identity — the token names a *value*, and the page may hand that
+   * value to another node. A registry of node references cannot be copied: a clone is a different
+   * object, is not in the registry, and therefore can never be mistaken for the node that was
+   * marked. (An attribute value such as id → name → aria-label is weaker still: it names a *kind*
+   * of control, not a node.)
+   *
+   * Where the registry lives: `chrome.scripting.executeScript({func, args})` runs the injected
+   * function in the extension's *isolated world*, and that world keeps one `globalThis` for as long
+   * as the frame lives. The page's own scripts run in a different world and can neither read nor
+   * write this registry.
+   *
+   * ASSUMPTION (not verified on a real browser): that the isolated world survives between two
+   * `executeScript` calls. The JSDOM tests simulate exactly this — one shared `globalThis` per
+   * frame — but they run the page op in the page realm, so the *isolation* is not exercised there.
+   * If the assumption were false, the registry would be empty at the set/read step and both would
+   * fail closed: the set is refused and nothing is written. The failure mode is "refuses to
+   * write", never "writes to the wrong control".
+   */
+  const SELECT_TOKEN_REGISTRY_KEY = "__noloSelectTokens";
+  /** A bounded registry: an abandoned mark must not keep its node alive forever. */
+  const SELECT_TOKEN_REGISTRY_LIMIT = 32;
+  /** The attribute an older version used; it is only ever removed, never written. */
+  const SELECT_TOKEN_ATTRIBUTE = "data-nolo-select-token";
+
+  /** A fresh, unpredictable marker value per operation. */
+  function randomSelectToken() {
+    const bytes = new Uint8Array(16);
+    const source = typeof globalThis !== "undefined" ? globalThis.crypto : null;
+    if (source && typeof source.getRandomValues === "function") {
+      source.getRandomValues(bytes);
+    } else {
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = Math.floor(Math.random() * 256);
+      }
+    }
+    let hex = "";
+    for (let index = 0; index < bytes.length; index += 1) {
+      hex += bytes[index].toString(16).padStart(2, "0");
+    }
+    return `nolo-${hex}`;
+  }
+
+  /**
+   * The registry of marked nodes, or null when no registry can exist at all.
+   *
+   * A missing registry is a hard failure and never a fallback: without it there is no identity
+   * proof, and a set without identity proof would write to whatever control the selector happens
+   * to name now — the very failure this design exists to prevent.
+   */
+  function selectTokenRegistry() {
+    try {
+      const host = globalThis;
+      if (!host) return null;
+      let registry = host[SELECT_TOKEN_REGISTRY_KEY];
+      if (!registry || typeof registry.get !== "function" || typeof registry.set !== "function") {
+        registry = new Map();
+        host[SELECT_TOKEN_REGISTRY_KEY] = registry;
+      }
+      return registry;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /** Drop entries whose node is gone and keep the registry inside its bound. */
+  function pruneSelectTokens(registry) {
+    if (!registry) return 0;
+    try {
+      for (const [token, node] of registry) {
+        if (!node || node.isConnected !== true) registry.delete(token);
+      }
+      // The oldest entry goes first, so a fresh mark always fits within the limit.
+      while (registry.size >= SELECT_TOKEN_REGISTRY_LIMIT) {
+        const oldest = registry.keys().next();
+        if (oldest.done) break;
+        registry.delete(oldest.value);
+      }
+    } catch (_) {}
+    return registry.size;
+  }
+
+  /**
+   * The node a token stands for — or null when the token is unknown, its node was detached, or it
+   * is no longer a select. A clone is a different node and is not in the registry, so it can never
+   * be returned here.
+   */
+  function selectTokenNode(registry, token) {
+    if (!registry || !token || typeof token !== "string") return null;
+    let node = null;
+    try {
+      node = registry.get(token) || null;
+    } catch (_) {
+      return null;
+    }
+    if (!node) return null;
+    if (node.isConnected !== true) return null;
+    if (String(node.tagName || "").toLowerCase() !== "select") return null;
+    return node;
+  }
+
+  /**
+   * Take the mark off the page again: it must never outlive its operation.
+   *
+   * The registry entry *is* the mark now, so clearing it is a lookup rather than a sweep of the
+   * current document: a mark on a node that has already been detached is cleared with it.
+   */
+  function clearSelectToken(token) {
+    if (!token || typeof token !== "string") return 0;
+    let removed = 0;
+    const registry = selectTokenRegistry();
+    if (registry) {
+      try {
+        if (registry.delete(token)) removed += 1;
+      } catch (_) {}
+    }
+    // An older version put the mark on the node as an attribute; take such leftovers off as well,
+    // so no page-visible trace of a mark survives the operation.
+    try {
+      for (const holder of Array.prototype.slice.call(document.querySelectorAll(`[${SELECT_TOKEN_ATTRIBUTE}]`))) {
+        try {
+          holder.removeAttribute(SELECT_TOKEN_ATTRIBUTE);
+          removed += 1;
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return removed;
+  }
+
+  /**
+   * How many elements a plain CSS selector matches, or null when the selector is not a plain one.
+   *
+   * A selector that matches several controls names no single control. `querySelector` would
+   * silently return the first of them, and the read-back could not tell that apart from the
+   * control that was really set — so such a selector is refused instead of resolved by luck.
+   */
+  function plainSelectorMatchCount(selector) {
+    if (typeof selector !== "string" || !selector) return null;
+    if (selector.startsWith("point:") || selector.startsWith("percent:") || selector.startsWith("text:")) {
+      return null;
+    }
+    if (/text=|:has-text\(/i.test(selector)) return null;
+    try {
+      return Array.from(document.querySelectorAll(selector)).filter(isTargetCandidate).length;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /** The one control an action addresses — or a refusal, never a guess. */
+  function resolveSelectTarget(found, payload) {
+    const resolved = resolveElement(found, payload, { verifyName: true });
+    if (!resolved.element) return resolved;
+    const matchCount = plainSelectorMatchCount(payload.selector);
+    if (matchCount !== null && matchCount > 1) {
+      return {
+        code: "SELECT_TARGET_AMBIGUOUS",
+        message: `The selector ${payload.selector} matches ${matchCount} elements, so it names no single control; the value was not set.`,
+      };
+    }
+    return resolved;
+  }
+
   function describe(element, index) {
     const tag = String(element.tagName || "").toLowerCase();
-    const described = { index, tag, name: labelOf(element) };
+    const described = {
+      index,
+      tag,
+      name: labelOf(element),
+      role: String(element.getAttribute?.("role") || "").toLowerCase(),
+    };
     if (element.disabled) described.disabled = true;
     if (element.readOnly) described.readonly = true;
     if (tag === "input" || tag === "textarea" || tag === "select") {
@@ -424,7 +1577,17 @@ function pageOperation(payload) {
     };
   }
 
-  function resolveElement(found, target) {
+  /**
+   * Resolve the element an action means to address.
+   *
+   * `expectedName` is the guard that stops the page from swapping a different control in between
+   * inspection and action, and nothing more: `labelOf` falls back to `innerText`, and for a select
+   * that text *is the selected option*, so a label comparison cannot survive the very change the
+   * setter performs. Callers that only ask "what is this element now" (the read-back) pass
+   * `verifyName: false`; `expectedTag` and the index still pin the identity.
+   */
+  function resolveElement(found, target, options) {
+    const verifyName = !(options && options.verifyName === false);
     if (target.selector) {
       let bySelector = null;
       if (target.selector === "point:bottom-publish") {
@@ -444,7 +1607,7 @@ function pageOperation(payload) {
       }
       if (!bySelector) {
         try {
-          bySelector = document.querySelector(target.selector);
+          bySelector = Array.from(document.querySelectorAll(target.selector)).filter(isTargetCandidate)[0] || null;
         } catch (_) {}
       }
 
@@ -504,7 +1667,7 @@ function pageOperation(payload) {
         message: "The elementRef resolved to a different element; call chrome_read_page again.",
       };
     }
-    if (target.expectedName && labelOf(candidate) !== target.expectedName) {
+    if (verifyName && target.expectedName && labelOf(candidate) !== target.expectedName) {
       return {
         code: "STALE_PAGE_REVISION",
         message: "The elementRef target changed on the page; call chrome_read_page again.",
@@ -545,7 +1708,7 @@ function pageOperation(payload) {
           message: `Region selector matched no element: ${region}`,
         };
       }
-      const resolved = resolveElement(found, { selector: payload.selector });
+      const resolved = resolveElement(found, payload);
       if (resolved.code) return { ok: false, code: resolved.code, message: resolved.message };
       element = resolved.element;
     }
@@ -553,11 +1716,19 @@ function pageOperation(payload) {
       return { ok: false, code: "ELEMENT_NOT_FOUND", message: "There is no element to inspect." };
     }
     const tag = String(element.tagName || "").toLowerCase();
+    const declaredRole = String(element.getAttribute?.("role") || "").toLowerCase();
+    const declaredType = String(element.getAttribute?.("type") || "").toLowerCase();
     return {
       ok: true,
       name: labelOf(element),
+      // Do not use editable content as approval metadata; keep identity labels unchanged.
+      approvalName: (tag === "textarea" || tag === "input" || element.isContentEditable ||
+        (element.hasAttribute("contenteditable") && element.getAttribute("contenteditable") !== "false"))
+        ? (["name", "aria-label", "placeholder", "title"].map((key) => element.getAttribute(key)).find((text) => text?.trim()) || "未命名控件")
+        : labelOf(element),
       tag,
-      type: tag === "input" ? String(element.type || "text").toLowerCase() : "",
+      role: declaredRole,
+      type: tag === "input" ? String(element.type || declaredType || "text").toLowerCase() : declaredType,
     };
   }
 
@@ -632,6 +1803,21 @@ function pageOperation(payload) {
     }
 
     if (op === "type") {
+      // A native <select> is not a text field: writing `value` on it does not type anything, it
+      // silently clears the selection (an unknown value leaves the control with no option chosen).
+      // `type` used to be a way around `set_select_value` — and therefore around its identity
+      // check, its option matching and its read-back — so it refuses selects outright and points
+      // at the action that does verify itself.
+      const targetTag = String(target.tagName || "").toLowerCase();
+      if (targetTag === "select") {
+        return {
+          ok: false,
+          code: "TYPE_ON_SELECT_REFUSED",
+          message:
+            "The target is a native <select>; typing does not choose an option. Use set_select_value instead — the value was not changed.",
+          signature: signatureOf(found),
+        };
+      }
       const before = snapshotOf(target);
       try {
         target.focus();
@@ -723,6 +1909,399 @@ function pageOperation(payload) {
       signature: signatureOf(found),
       url: String(location.href),
     };
+  }
+
+  if (op === "mark_select_token") {
+    // Mark the target select *before* its value is set. The marker is the one thing that can
+    // prove, later, that the read-back is looking at the very same node.
+    const foundForMark = candidates(region);
+    if (!foundForMark) {
+      return {
+        ok: false,
+        code: "REGION_NOT_FOUND",
+        message: `Region selector matched no element: ${region}`,
+        region,
+      };
+    }
+    if (payload.expectedUrl && String(location.href) !== payload.expectedUrl) {
+      return {
+        ok: false,
+        code: "STALE_PAGE_REVISION",
+        message: "The tab navigated to a different document; call chrome_read_page again.",
+      };
+    }
+    if (payload.expectedSignature && signatureOf(foundForMark) !== payload.expectedSignature) {
+      return {
+        ok: false,
+        code: "STALE_PAGE_REVISION",
+        message: "The page revision changed since the elementRef was issued; call chrome_read_page again.",
+        signature: signatureOf(foundForMark),
+      };
+    }
+    const resolvedForMark = resolveSelectTarget(foundForMark, payload);
+    const element = resolvedForMark.element || null;
+    if (!element) {
+      return {
+        ok: false,
+        code: typeof resolvedForMark.code === "string" ? resolvedForMark.code : "ELEMENT_NOT_FOUND",
+        message: resolvedForMark.message || "The target select could not be located.",
+      };
+    }
+    if (String(element.tagName || "").toLowerCase() !== "select") {
+      const tag = String(element.tagName || "").toLowerCase();
+      return {
+        ok: false,
+        code: "NOT_A_SELECT",
+        message: `The target is a <${tag || "unknown"}>, not a native <select>; a custom dropdown must be opened with click and one of its options clicked.`,
+      };
+    }
+    const token = randomSelectToken();
+    const registry = selectTokenRegistry();
+    if (!registry) {
+      // Fail closed: without a registry there is no identity proof, and a set without one would
+      // write to whichever control the selector names now.
+      return {
+        ok: false,
+        code: "SELECT_TOKEN_UNAVAILABLE",
+        message:
+          "This page cannot hold a select identity token, so the target select cannot be identified safely; the value was not set.",
+      };
+    }
+    pruneSelectTokens(registry);
+    try {
+      registry.set(token, element);
+    } catch (error) {
+      return {
+        ok: false,
+        code: "SELECT_TOKEN_FAILED",
+        message: `The target select could not be marked: ${String((error && error.message) || error)}`,
+      };
+    }
+    return { ok: true, token, signature: signatureOf(foundForMark) };
+  }
+
+  if (op === "read_select_state" || op === "read_select_options") {
+    const stateOf = (select) => {
+      const chosen = Array.prototype.slice.call(select.options || []).filter((option) => option.selected === true)[0] || null;
+      return {
+        value: select.value == null ? "" : String(select.value),
+        label: chosen ? String(chosen.textContent || chosen.label || "").replace(/\s+/g, " ").trim() : "",
+      };
+    };
+    // Why the registry and not the selector/index: the read-back has to answer "what does the
+    // control that was set hold now?". A selector or an index names a *place*, and the page may
+    // have put another control there; an attribute value names a *kind* of control, and the page
+    // may have handed that value to another element. The registry holds the node itself, so
+    // finding it again is proof that the node is the one that was set — and a clone that replaced
+    // it is simply not in the registry.
+    const foundForRead = candidates(region);
+    if (!foundForRead) {
+      return {
+        ok: false,
+        code: "REGION_NOT_FOUND",
+        message: `Region selector matched no element: ${region}`,
+        region,
+      };
+    }
+    if (payload.expectedUrl && String(location.href) !== payload.expectedUrl) {
+      return {
+        ok: false,
+        code: "STALE_PAGE_REVISION",
+        message: "The tab navigated to a different document; call chrome_read_page again.",
+      };
+    }
+    if (payload.expectedSignature && signatureOf(foundForRead) !== payload.expectedSignature) {
+      return {
+        ok: false,
+        code: "STALE_PAGE_REVISION",
+        message: "The page revision changed since the elementRef was issued; call chrome_read_page again.",
+        signature: signatureOf(foundForRead),
+      };
+    }
+    const token = typeof payload.selectToken === "string" ? payload.selectToken : "";
+    try {
+      const registry = selectTokenRegistry();
+      if (!registry) {
+        return {
+          ok: false,
+          code: "SELECT_TOKEN_UNAVAILABLE",
+          message:
+            "This page cannot hold a select identity token, so the select that was set cannot be identified; the applied option could not be verified.",
+        };
+      }
+      const select = selectTokenNode(registry, token);
+      if (!select) {
+        // The marked node is gone: it was removed, or the page re-rendered and replaced it. Some
+        // other control may well sit at the same place now, but it is a different node, so
+        // nothing at all can be said about the value that was set. Report *why* it is gone
+        // without reading a value from any look-alike.
+        return diagnoseMissingSelect(foundForRead, payload);
+      }
+      // No name comparison: `labelOf` falls back to `innerText` and, for a select, that text is
+      // the selected option — it changes precisely because the set succeeded. The registry already
+      // pins which node this is about.
+      if (op === "read_select_options") {
+        const { matches } = matchSelectOptions(select);
+        if (matches.length !== 1 || select.multiple || select.disabled || matches[0].disabled ||
+            (matches[0].parentElement?.tagName === "OPTGROUP" && matches[0].parentElement.disabled)) {
+          return { ok: true, matched: false };
+        }
+        const label = String(matches[0].textContent || matches[0].label || "").replace(/\s+/g, " ").trim().slice(0, 120);
+        return { ok: true, matched: true, ...(label ? { label } : {}) };
+      }
+      return { ok: true, ...stateOf(select) };
+    } finally {
+      // The mark lives exactly one operation: it is gone whether the read succeeded or not.
+      clearSelectToken(token);
+    }
+  }
+
+  /**
+   * Why the marked node is gone, without reading any value from a look-alike.
+   *
+   * The marker is what proves the identity, so its absence is the end of the proof: a control that
+   * carries the same id is a different control and says nothing about the value that was set.
+   * The reason is still worth reporting, so the verdict can say whether the control was removed
+   * or replaced by something else.
+   */
+  function diagnoseMissingSelect(found, payload) {
+    const resolved = resolveElement(found, payload, { verifyName: false });
+    if (!resolved.element) {
+      const code = typeof resolved.code === "string" && resolved.code ? resolved.code : "";
+      if (code && code !== "ELEMENT_NOT_FOUND") {
+        return {
+          ok: false,
+          code,
+          message: "The element that was set is no longer the same control, so it cannot be confirmed that it is the same control and the applied option could not be verified.",
+        };
+      }
+      return {
+        ok: false,
+        code: "SELECT_GONE",
+        message: "The select that was set is no longer in the page (it was removed or replaced), so it cannot be confirmed that it is the same control and the applied option could not be verified.",
+      };
+    }
+    const tag = String(resolved.element.tagName || "").toLowerCase();
+    if (tag !== "select") {
+      return {
+        ok: false,
+        code: "NOT_A_SELECT",
+        message: "The target is no longer a native <select>, so it cannot be confirmed that it is the same control and the applied option could not be verified.",
+      };
+    }
+    return {
+      ok: false,
+      code: "SELECT_GONE",
+      message: "Another select now occupies the target, so the select that was set is no longer in the page; it cannot be confirmed that it is the same control and the applied option could not be verified.",
+    };
+  }
+
+  // One matcher for both preview and execution: exactly one string target, including "".
+  function matchSelectOptions(select) {
+    const wantedValue = typeof payload.value === "string" ? payload.value : null;
+    const wantedLabel = typeof payload.label === "string" ? payload.label : null;
+    const allOptions = Array.prototype.slice.call(select.options || []);
+    const valid = (wantedValue === null) !== (wantedLabel === null);
+    const normalize = (text) => String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+    const matches = !valid ? [] : allOptions.filter((option) => wantedValue !== null
+      ? String(option.value) === wantedValue
+      : normalize(option.textContent || option.label || "") === normalize(wantedLabel));
+    return { wantedValue, wantedLabel, allOptions, matches, valid };
+  }
+
+
+  if (op === "set_select_value") {
+    const applySelectValue = () => {
+      const normalizeOptionText = (value) => String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+      const describeOption = (option) => ({
+        value: String(option.value),
+        label: normalizeOptionText(option.textContent || option.label || ""),
+        disabled: Boolean(option.disabled),
+      });
+      const selectedStateOf = (select) => {
+        const chosen = Array.prototype.slice.call(select.options || []).filter((option) => option.selected === true)[0] || null;
+        return {
+          value: select.value == null ? "" : String(select.value),
+          label: chosen ? normalizeOptionText(chosen.textContent || chosen.label || "") : "",
+        };
+      };
+
+      const found = candidates(region);
+      if (!found) {
+        return { ok: false, code: "REGION_NOT_FOUND", message: `Region selector matched no element: ${region}`, region };
+      }
+      if (payload.expectedUrl && String(location.href) !== payload.expectedUrl) {
+        return {
+          ok: false,
+          code: "STALE_PAGE_REVISION",
+          message: "The tab navigated to a different document; call chrome_read_page again.",
+        };
+      }
+      if (payload.expectedSignature && signatureOf(found) !== payload.expectedSignature) {
+        return {
+          ok: false,
+          code: "STALE_PAGE_REVISION",
+          message: "The page revision changed since the elementRef was issued; call chrome_read_page again.",
+          signature: signatureOf(found),
+        };
+      }
+      const resolved = resolveSelectTarget(found, payload);
+      // The mark taken before the set is the identity proof: the element this resolution points
+      // at has to be the very node that was marked. If it is not, the page moved the target (or
+      // swapped the control) in between, and writing the value would change a control nobody
+      // addressed — so nothing is written at all.
+      const selectToken = typeof payload.selectToken === "string" && payload.selectToken ? payload.selectToken : "";
+      if (!selectToken) {
+        // No mark means no identity proof. A set without one would write to whichever control the
+        // selector names now, so it is refused outright.
+        return {
+          ok: false,
+          code: "SELECT_TOKEN_REQUIRED",
+          message:
+            "The target select was not marked before the set, so it cannot be identified; the value was not set.",
+          signature: signatureOf(found),
+        };
+      }
+      const registry = selectTokenRegistry();
+      if (!registry) {
+        return {
+          ok: false,
+          code: "SELECT_TOKEN_UNAVAILABLE",
+          message:
+            "This page cannot hold a select identity token, so the target select cannot be identified safely; the value was not set.",
+          signature: signatureOf(found),
+        };
+      }
+      const marked = selectTokenNode(registry, selectToken);
+      if (!marked) {
+        // The marked node is gone (removed, re-rendered away) or is no longer a select. A clone
+        // that replaced it is a different node and is not in the registry, so it can never be
+        // mistaken for the node that was marked.
+        return {
+          ok: false,
+          code: "SELECT_GONE",
+          message:
+            "The select that was marked before the set is no longer the same node in the page, so the value was not set.",
+          signature: signatureOf(found),
+        };
+      }
+      if (resolved.element && resolved.element !== marked) {
+        return {
+          ok: false,
+          code: "SELECT_TARGET_CONFLICT",
+          message: "The target resolved to a different control than the one that was marked before the set, so the value was not set on either of them.",
+          signature: signatureOf(found),
+        };
+      }
+      if (!resolved.element) {
+        return { ok: false, code: resolved.code, message: resolved.message, signature: signatureOf(found) };
+      }
+      const select = resolved.element;
+      const selectTag = String(select.tagName || "").toLowerCase();
+      if (selectTag !== "select") {
+        return {
+          ok: false,
+          code: "NOT_A_SELECT",
+          message: `The target is a <${selectTag || "unknown"}>, not a native <select>; a custom dropdown must be opened with click and one of its options clicked.`,
+          signature: signatureOf(found),
+        };
+      }
+      if (select.disabled) {
+        return { ok: false, code: "SELECT_DISABLED", message: "The target <select> is disabled; the value was not set." };
+      }
+      if (select.multiple) {
+        return {
+          ok: false,
+          code: "SELECT_MULTIPLE_UNSUPPORTED",
+          message: "The target <select> accepts multiple selections; only single-choice selects are supported.",
+        };
+      }
+
+      const { wantedValue, wantedLabel, allOptions, matches, valid } = matchSelectOptions(select);
+      if (!valid) {
+        return {
+          ok: false,
+          code: "OPTION_TARGET_REQUIRED",
+          message: "Provide exactly one of value or label for the option to select.",
+        };
+      }
+
+      if (matches.length === 0) {
+        return {
+          ok: false,
+          code: "OPTION_NOT_FOUND",
+          message: `No option matched ${
+            wantedValue !== null ? `value ${JSON.stringify(wantedValue)}` : `label ${JSON.stringify(wantedLabel)}`
+          }.`,
+          options: allOptions.slice(0, 20).map(describeOption),
+          signature: signatureOf(found),
+        };
+      }
+      if (matches.length > 1) {
+        return {
+          ok: false,
+          code: "OPTION_AMBIGUOUS",
+          message: `${matches.length} options carry that label; pass the option value instead, or disambiguate the label.`,
+          options: matches.slice(0, 20).map(describeOption),
+          signature: signatureOf(found),
+        };
+      }
+      const option = matches[0];
+      if (option.disabled) {
+        return {
+          ok: false,
+          code: "OPTION_DISABLED",
+          message: `The option ${JSON.stringify(
+            normalizeOptionText(option.textContent || option.label || ""),
+          )} is disabled and cannot be selected.`,
+          signature: signatureOf(found),
+        };
+      }
+
+      const before = selectedStateOf(select);
+      const requested = { value: String(option.value), label: describeOption(option).label };
+      try {
+        option.selected = true;
+        select.value = requested.value;
+      } catch (error) {
+        return {
+          ok: false,
+          code: "SELECT_VALUE_NOT_APPLIED",
+          message: `Assigning the option failed: ${String((error && error.message) || error)}`,
+        };
+      }
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      // Synchronous read-back only: it proves the events were dispatched with the value in place, but
+      // NOT that the page kept it (a listener may still revert us). The worker re-reads after a short
+      // delay and that second read-back decides the verdict.
+      const immediate = selectedStateOf(select);
+      return {
+        ok: true,
+        before,
+        immediate,
+        requested,
+        clickedIndex: allOptions.indexOf(option),
+        element: snapshotOf(select),
+        signature: signatureOf(candidates(region) || found),
+        url: String(location.href),
+      };
+    };
+    let outcome = null;
+    try {
+      outcome = applySelectValue();
+    } catch (error) {
+      outcome = {
+        ok: false,
+        code: "SELECT_VALUE_NOT_APPLIED",
+        message: `Assigning the option failed: ${String((error && error.message) || error)}`,
+      };
+    }
+    if (!outcome || outcome.ok !== true) {
+      // The operation is over: the marker must not stay on the page.
+      clearSelectToken(typeof payload.selectToken === "string" ? payload.selectToken : "");
+    }
+    return outcome;
   }
 
   if (op === "rect_row_delete") {
@@ -1056,6 +2635,14 @@ function pageOperation(payload) {
     };
   }
 
+  if (op === "clear_select_token") {
+    // The marker's lifetime is one operation; this op is how the worker takes it off the page on
+    // every path, including the ones where the set itself never ran.
+    const token = String((payload && payload.selectToken) || "");
+    const removed = clearSelectToken(token);
+    return { ok: true, removed };
+  }
+
   if (op === "cleanup_marker") {
     const marker = String((payload && payload.marker) || "");
     if (marker) {
@@ -1069,13 +2656,25 @@ function pageOperation(payload) {
 }
 
 /** Action verdicts are explicit: `effect` (and `verified`) is the authority, never `ok` alone. */
-function verdictEnvelope(action, verification, extra = {}) {
+function verdictEnvelope(action, verification, extra = {}, options = {}) {
+  // `ok` is a promise about the outcome, not just "did not fail". Selects are strict: only a
+  // read-back that matches the requested option may answer ok, so an unreadable/unverifiable select
+  // (status `uncertain`) reports ok:false with an explicit code instead of passing as success.
+  const ok = options.okRequiresVerified === true
+    ? verification.status === "verified"
+    : verification.status !== "failed";
+  // Only strict verdicts carry a `code`: their callers need to tell "unverifiable" from "rejected".
+  const failureCode = !ok && options.okRequiresVerified === true
+    ? (typeof verification.code === "string" && verification.code) ||
+      (typeof verification.signal === "string" ? verification.signal : "")
+    : "";
   return {
-    ok: verification.status !== "failed",
+    ok,
     verified: verification.status === "verified",
     effect: verification.status,
     action,
     signal: verification.signal,
+    ...(failureCode ? { code: failureCode } : {}),
     ...(verification.message ? { message: verification.message } : {}),
     ...extra,
   };
@@ -1088,7 +2687,13 @@ async function inspectSelectorTarget(tabId, selector) {
     const code = typeof inspected?.code === "string" && inspected.code ? inspected.code : "ELEMENT_INSPECTION_FAILED";
     throw connectorError(code, inspected?.message || "The target element could not be inspected before acting.");
   }
-  return { name: String(inspected.name ?? ""), tag: String(inspected.tag ?? "") };
+  return {
+    name: String(inspected.name ?? ""),
+    tag: String(inspected.tag ?? ""),
+    role: String(inspected.role ?? ""),
+    type: String(inspected.type ?? ""),
+    _frameId: inspected._frameId,
+  };
 }
 
 /** The same question for the focused element, used before Enter-like key presses. */
@@ -1096,40 +2701,33 @@ async function inspectActiveTarget(tabId) {
   try {
     const inspected = await executeInTab(tabId, pageOperation, [{ op: "inspect", subject: "active" }]);
     if (inspected && inspected.ok === true) {
-      return { name: String(inspected.name ?? ""), tag: String(inspected.tag ?? "") };
+      return {
+        name: String(inspected.name ?? ""),
+        tag: String(inspected.tag ?? ""),
+        role: String(inspected.role ?? ""),
+        type: String(inspected.type ?? ""),
+        _frameId: inspected._frameId,
+      };
     }
-  } catch {
+  } catch (error) {
+    if (error?.code !== "TARGET_NOT_FOUND") throw error;
     // Pressing a key with nothing inspectable is not an irreversible action.
   }
-  return { name: "", tag: "" };
+  return { name: "", tag: "", role: "", type: "" };
 }
 
 async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }) {
-  const rawCredential =
-    payload.preparedActionId ??
-    payload.challengeId ??
-    payload.prepareId ??
-    payload.grantTicket;
-  const credentialId = typeof rawCredential === "string" ? rawCredential.trim() : "";
-  if (!credentialId) {
-    return { ...refusal, verified: false };
+  const approvalId = normalizeApprovalId(payload?.approvalId);
+  if (!approvalId) {
+    // Nothing is authorized without a user decision. A prepared action records intent only, so a
+    // prepareId / challengeId / grantTicket arriving here is handled exactly like no credential:
+    // the user is asked now and the caller gets `USER_APPROVAL_PENDING`.
+    return await requestUserApproval({ action, tabId, payload, target, refusal });
   }
 
-  const record = preparedActionStore.get(credentialId);
-  if (!record) {
-    return {
-      ok: false,
-      code: "STALE_ACTION_CHALLENGE",
-      signal: "STALE_ACTION_CHALLENGE",
-      effect: "failed",
-      action,
-      verified: false,
-      message: "The provided consent credential was not found or has expired.",
-    };
-  }
-
-  // Atomically consume credential immediately (One-Time Consumption)
-  preparedActionStore.delete(credentialId);
+  const record = await getApprovalRecord(approvalId);
+  const consumption = await consumeApprovalCredential({ approvalId, record, action });
+  if (consumption.verdict) return consumption.verdict;
 
   if (String(record.tabId) !== String(tabId)) {
     return {
@@ -1156,8 +2754,33 @@ async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }
   }
 
   // Drift check: execute in-tab DOM capture to re-evaluate current DOM state
+  // A script has no control to re-inspect: it is bound to the document and to its own text, so the
+  // same fingerprint is recomputed from the tab alone. A different script — or a tab that navigated
+  // — no longer matches and the user is asked again.
+  if (action === "eval_script") {
+    // The approval names one document: the context it was shown for has to still be this tab's main
+    // frame before anything is evaluated.
+    const approved = await resolveApprovedEvalContext({ tabId, record });
+    if (approved.verdict) return approved.verdict;
+    const computed = await computeEvalApprovalFingerprint({ tabId, payload, context: approved.context });
+    if (!computed.ok) return computed.verdict;
+    if (computed.fingerprint !== record.fingerprint) {
+      return {
+        ok: false,
+        code: "DOM_MUTATED",
+        signal: "DOM_MUTATED",
+        effect: "failed",
+        action,
+        verified: false,
+        message: "The script or the page it was approved for changed since the approval; challenge invalidated.",
+      };
+    }
+    return null;
+  }
+
   const captureOptions = {
     rejectAsResult: true,
+    _frameId: target?.kind === "ref" ? 0 : target?._frameId,
   };
   if (payload.active === true || target?.kind === "active" || (action === "press" && !payload.selector && !target?.selector)) {
     captureOptions.active = true;
@@ -1257,18 +2880,133 @@ async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }
   return null;
 }
 
-async function runTargetedAction(action, payload) {
-  const tabId = String(payload.tabId);
+/**
+ * Mark the select a set is about to target, before its value changes.
+ *
+ * The mark is a one-shot entry in the page world's registry, pointing at that very node, and it is
+ * the only proof available later that the read-back is looking at the same control: an id or a
+ * name can be handed to another element, a clone copies every attribute, and a value that merely
+ * compares equal says nothing about which node was addressed.
+ *
+ * A failed mark is *not* a soft failure: the caller must not go on to set the value without it,
+ * because a set without an identity proof writes to whichever control the selector names now.
+ */
+async function captureSelectToken(tabId, pageArgs) {
+  let result = null;
+  try {
+    result = await executeInTab(tabId, pageOperation, [
+      { ...pageArgs, op: "mark_select_token" },
+    ]);
+  } catch (error) {
+    return {
+      ok: false,
+      token: null,
+      code: "SELECT_TOKEN_FAILED",
+      message: `The target select could not be marked, so it cannot be identified; the value was not set: ${toMessage(
+        error,
+      )}`,
+    };
+  }
+  if (!result || result.ok !== true) {
+    return {
+      ok: false,
+      token: null,
+      code:
+        typeof result?.code === "string" && result.code
+          ? result.code
+          : "SELECT_TOKEN_FAILED",
+      message:
+        typeof result?.message === "string" && result.message
+          ? `${result.message} The value was not set.`
+          : "The target select could not be marked, so it cannot be identified; the value was not set.",
+    };
+  }
+  const token = result.token;
+  if (!token || typeof token !== "string") {
+    return {
+      ok: false,
+      token: null,
+      code: "SELECT_TOKEN_FAILED",
+      message:
+        "The target select could not be marked, so it cannot be identified; the value was not set.",
+    };
+  }
+  return { ok: true, token };
+}
+
+/** Take the marker off the page again — on every path, successful or not. */
+async function clearSelectToken(tabId, token, frameId) {
+  if (!token || typeof token !== "string") return;
+  try {
+    await executeInTab(tabId, pageOperation, [{ op: "clear_select_token", selectToken: token, _frameId: frameId }]);
+  } catch (_) {
+    // Best effort: when the page is gone, the marker is gone with it.
+  }
+}
+
+/** How long the page gets to run its listeners and re-render before the select is read back. */
+const SELECT_SETTLE_MS = 60;
+
+/**
+ * Second look at a select after its value was set. It deliberately ignores page revisions: a
+ * dependent select re-rendering is a legitimate consequence of the choice, and the only question
+ * here is what this select holds now. A select that vanished or is unreadable answers `null`, which
+ * the verifier reports as uncertain rather than success.
+ */
+async function readSelectStateAfterSettle(tabId, target, pageArgs) {
+  await new Promise((resolve) => setTimeout(resolve, SELECT_SETTLE_MS));
+  const readBackArgs = { op: "read_select_state", _frameId: pageArgs._frameId };
+  // The marker is the only address the read-back uses: it names the node, not a kind of control.
+  // The selector/index are still carried along, but only to explain *why* the marked node is gone
+  // if it disappeared — never to read a value from another control.
+  if (pageArgs.selectToken) readBackArgs.selectToken = pageArgs.selectToken;
+  if (target.kind === "selector") {
+    readBackArgs.selector = target.selector;
+  } else {
+    if (pageArgs.region) readBackArgs.region = pageArgs.region;
+    readBackArgs.index = pageArgs.index;
+    readBackArgs.expectedTag = pageArgs.expectedTag;
+    // Carried for context only: `read_select_state` resolves with `verifyName: false`, because the
+    // label of a select is its selected option and this read happens after that option changed.
+    readBackArgs.expectedName = pageArgs.expectedName;
+  }
+  let state = null;
+  try {
+    state = await executeInTab(tabId, pageOperation, [readBackArgs]);
+  } catch (_) {
+    state = null;
+  }
+  if (!state || state.ok !== true) {
+    // Keep the page's own reason (SELECT_GONE / NOT_A_SELECT) so the verdict can say why the
+    // read-back failed instead of a generic "unverified".
+    const code = state && typeof state.code === "string" && state.code ? state.code : "";
+    return { value: null, label: "", code };
+  }
+  return {
+    value: state.value == null ? "" : String(state.value),
+    label: typeof state.label === "string" ? state.label : "",
+  };
+}
+
+async function runTargetedAction(action, payload) {  const tabId = String(payload.tabId);
   const target = resolveActionTarget(payload, refRegistry, { tabId, action });
   if (!target.ok) {
     return { ok: false, verified: false, effect: "failed", action, signal: target.code, message: target.message };
   }
 
-  // Irreversible external actions are refused before any page effect: this desktop runtime has no
-  // interactive approval channel, so the only safe completion is the user activating the control.
+  // Irreversible external actions never run on the agent's word alone: the gate stops the page
+  // effect and the user is asked in their own window. Only an approved, single-use credential lets
+  // the same action through on a later retry.
   let gateTarget;
   if (target.kind === "ref") {
-    gateTarget = { name: target.expect?.name ?? "", tag: target.expect?.tag ?? "" };
+    gateTarget = {
+      // refRegistry observations are registered only for the top-level document.
+      _frameId: 0,
+      name: target.expect?.name ?? "",
+      tag: target.expect?.tag ?? "",
+      role: target.expect?.role ?? "",
+      type: target.expect?.type ?? "",
+    };
   } else {
     try {
       gateTarget = await inspectSelectorTarget(payload.tabId, target.selector);
@@ -1284,10 +3022,13 @@ async function runTargetedAction(action, payload) {
       };
     }
   }
+  target._frameId = gateTarget._frameId;
   const refusal = decideIrreversibleAction({
     action,
     name: gateTarget.name,
     tag: gateTarget.tag,
+    role: gateTarget.role,
+    type: gateTarget.type,
   });
   if (refusal) {
     const consentVerdict = await verifyConsentAndDrift({
@@ -1301,7 +3042,7 @@ async function runTargetedAction(action, payload) {
   }
 
   const resolveExtra = target.kind === "ref" ? { ref: target.ref } : { selector: target.selector };
-  const pageArgs = { op: action };
+  const pageArgs = { op: action, _frameId: gateTarget._frameId };
   if (target.kind === "ref") {
     pageArgs.region = target.expect.region || "";
     pageArgs.expectedUrl = target.expect.url;
@@ -1318,54 +3059,95 @@ async function runTargetedAction(action, payload) {
     pageArgs.text = typeof payload.text === "string" ? payload.text : "";
     pageArgs.clearFirst = payload.clearFirst !== false;
   }
-
-  let result;
-  try {
-    result = await executeInTab(payload.tabId, pageOperation, [pageArgs]);
-  } catch (error) {
-    if (error?.code === PROTECTED_PAGE_CODE) {
-      return {
-        ok: false,
-        verified: false,
-        effect: "failed",
-        action,
-        signal: PROTECTED_PAGE_CODE,
-        message: toMessage(error),
-        ...resolveExtra,
-      };
+  if (action === "set_select_value") {
+    if (typeof payload.value === "string") pageArgs.value = payload.value;
+    if (typeof payload.label === "string") pageArgs.label = payload.label;
+    // Mark the target before the value changes: the mark is the only proof that the read-back is
+    // looking at the very same node, even when the page re-renders around it while settling.
+    // A mark that did not succeed stops the set right here — without it the set would write to
+    // whichever control the selector names now, and the read-back could prove nothing.
+    const mark = await captureSelectToken(payload.tabId, pageArgs);
+    if (!mark.ok) {
+      return verdictEnvelope(
+        "set_select_value",
+        { status: "failed", signal: mark.code, message: mark.message },
+        resolveExtra,
+        { okRequiresVerified: true },
+      );
     }
-    refRegistry.invalidate(tabId);
-    return verdictEnvelope(
-      action,
-      {
-        status: "uncertain",
-        signal: "page_context_destroyed",
-        message: `The page navigated or its frame was replaced while the action ran (${toMessage(
-          error,
-        )}). Re-read the page before acting again.`,
-      },
-      resolveExtra,
-    );
+    pageArgs.selectToken = mark.token;
   }
 
-  const verification = verifyActionEffect({
-    action,
-    target: target.kind === "ref" ? { name: target.expect.name } : undefined,
-    expected: action === "type" ? { text: pageArgs.text, clearFirst: pageArgs.clearFirst } : undefined,
-    result,
-  });
+  try {
+    let result;
+    try {
+      result = await executeInTab(payload.tabId, pageOperation, [pageArgs]);
+    } catch (error) {
+      if (error?.code === PROTECTED_PAGE_CODE) {
+        return {
+          ok: false,
+          verified: false,
+          effect: "failed",
+          action,
+          signal: PROTECTED_PAGE_CODE,
+          message: toMessage(error),
+          ...resolveExtra,
+        };
+      }
+      refRegistry.invalidate(tabId);
+      return verdictEnvelope(
+        action,
+        {
+          status: "uncertain",
+          signal: "page_context_destroyed",
+          message: `The page navigated or its frame was replaced while the action ran (${toMessage(
+            error,
+          )}). Re-read the page before acting again.`,
+        },
+        resolveExtra,
+        { okRequiresVerified: action === "set_select_value" },
+      );
+    }
 
-  if (result && typeof result.signature === "string" && result.signature) {
-    refRegistry.notePageChanged({ tabId, signature: result.signature, url: result.url });
+    let pageResult = result;
+    if (action === "set_select_value" && result && result.ok === true) {
+      pageResult = { ...result, after: await readSelectStateAfterSettle(payload.tabId, target, pageArgs) };
+    }
+
+    const verification =
+      action === "set_select_value"
+        ? verifySelectValueEffect({ result: pageResult })
+        : verifyActionEffect({
+            action,
+            target: target.kind === "ref" ? { name: target.expect.name } : undefined,
+            expected: action === "type" ? { text: pageArgs.text, clearFirst: pageArgs.clearFirst } : undefined,
+            result,
+          });
+
+    if (result && typeof result.signature === "string" && result.signature) {
+      refRegistry.notePageChanged({ tabId, signature: result.signature, url: result.url });
+    }
+
+    return verdictEnvelope(action, verification, {
+      ...resolveExtra,
+      ...(action === "set_select_value" && pageResult
+        ? {
+            // Report what the select holds after the page settled, not what was requested.
+            value: pageResult.after && pageResult.after.value != null ? String(pageResult.after.value) : "",
+            label: pageResult.after && typeof pageResult.after.label === "string" ? pageResult.after.label : "",
+          }
+        : {}),
+      ...(result?.hitElement ? { hitElement: result.hitElement } : {}),
+      ...(result && typeof result.signature === "string" && result.signature
+        ? { pageRevision: buildPageRevision(result.signature) }
+        : {}),
+    }, { okRequiresVerified: action === "set_select_value" });
+  } finally {
+    // The marker must never outlive the operation: on every path it comes off the page again.
+    if (action === "set_select_value") {
+      await clearSelectToken(payload.tabId, pageArgs.selectToken, pageArgs._frameId);
+    }
   }
-
-  return verdictEnvelope(action, verification, {
-    ...resolveExtra,
-    ...(result?.hitElement ? { hitElement: result.hitElement } : {}),
-    ...(result && typeof result.signature === "string" && result.signature
-      ? { pageRevision: buildPageRevision(result.signature) }
-      : {}),
-  });
 }
 
 async function handleSetFiles(payload = {}) {
@@ -1534,6 +3316,37 @@ async function handleSetFiles(payload = {}) {
   }
 }
 
+const EVAL_TIMEOUT_TOKEN = Symbol("eval_timeout");
+
+/**
+ * One `Runtime.evaluate` with a hard deadline. The deadline is not advisory: a script that blocks
+ * the page would hold the attachment open until the browser gives up on it, so on timeout the
+ * execution is terminated best-effort and the caller gets a plain failure instead of a result.
+ */
+async function evaluateWithDeadline(tabId, params, timeoutMs, terminateParams = null) {
+  const target = tabTarget(tabId);
+  const pending = Promise.resolve().then(() => chrome.debugger.sendCommand(target, "Runtime.evaluate", params));
+  let timer = null;
+  try {
+    const outcome = await Promise.race([
+      pending,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(EVAL_TIMEOUT_TOKEN), timeoutMs);
+      }),
+    ]);
+    if (outcome !== EVAL_TIMEOUT_TOKEN) return outcome;
+    // Only a script that is still running can be terminated; a finished one ignores this.
+    // Scoped to the approved context when the browser takes an id, so the page's own scripts are not
+    // killed along with it: terminating the whole target is the fallback, not the default.
+    await chrome.debugger.sendCommand(target, "Runtime.terminateExecution", terminateParams || {}).catch(() => {});
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+    // The losing promise must not surface as an unhandled rejection once the deadline has fired.
+    void pending.catch(() => {});
+  }
+}
+
 async function handleAction(action, payload = {}) {
   switch (action) {
     case "connector_info": {
@@ -1549,18 +3362,27 @@ async function handleAction(action, payload = {}) {
         // advertised features must drop it too or the desktop would believe uploads work.
         features: CONNECTOR_FEATURES.filter(
           (feature) =>
-            HAS_DEBUGGER || (feature !== "browser_debug" && feature !== "file_upload"),
+            HAS_DEBUGGER ||
+            (feature !== "browser_debug" && feature !== "file_upload" && feature !== "eval"),
         ),
       };
     }
     case "list_tabs": {
       await loadOpenedTabs();
       const tabs = await chrome.tabs.query({});
+      // The connector's own pages (the approval popup above all) are never listed: their URL carries
+      // the approvalId + nonce and `serializeTab` would also hand out the windowId, which is exactly
+      // what an approval decision is bound to. Not a page the agent has any business in.
+      // `getURL("")` is the browser's own origin for extension pages — `chrome-extension://<id>/`
+      // on Chrome, `moz-extension://<uuid>/` on Firefox — so the same filter works on both.
+      const ownOrigin = typeof chrome?.runtime?.getURL === "function" ? chrome.runtime.getURL("") : "";
       return {
-        tabs: tabs.map((tab) => ({
-          ...serializeTab(tab),
-          openedByConnector: openedTabs.has(tab.id),
-        })),
+        tabs: tabs
+          .filter((tab) => !isOwnExtensionPage(String(tab?.url || ""), ownOrigin))
+          .map((tab) => ({
+            ...serializeTab(tab),
+            openedByConnector: openedTabs.has(tab.id),
+          })),
       };
     }
     case "open_tab": {
@@ -1616,6 +3438,27 @@ async function handleAction(action, payload = {}) {
       return await runTargetedAction("click", payload);
     case "type":
       return await runTargetedAction("type", payload);
+    case "set_select_value": {
+      const hasValue = typeof payload.value === "string";
+      const hasLabel = typeof payload.label === "string";
+      if (hasValue === hasLabel) {
+        return verdictEnvelope("set_select_value", {
+          status: "failed",
+          signal: "OPTION_TARGET_REQUIRED",
+          message: "Provide exactly one of value or label for the option to select.",
+        }, {}, { okRequiresVerified: true });
+      }
+      if (!String(payload.tabId ?? "").trim()) {
+        return verdictEnvelope("set_select_value", {
+          status: "failed",
+          signal: "TAB_ID_REQUIRED",
+          message: "Provide the tabId before calling set_select_value.",
+        }, {}, { okRequiresVerified: true });
+      }
+      // Goes through runTargetedAction so ref freshness, the irreversible-action gate and the
+      // page-revision bookkeeping are the very same code path as click/type.
+      return await runTargetedAction("set_select_value", payload);
+    }
     case "set_files": {
       if (!HAS_DEBUGGER) {
         return verdictEnvelope("set_files", {
@@ -1629,15 +3472,22 @@ async function handleAction(action, payload = {}) {
     case "press": {
       const pressedKey = String(payload.key || "");
       let expectedActiveName = "";
+      const active = await inspectActiveTarget(payload.tabId);
       if (isActivationKey(pressedKey)) {
-        const active = await inspectActiveTarget(payload.tabId);
-        const refusal = decideIrreversibleAction({ action: "press", key: pressedKey, name: active.name, tag: active.tag });
+        const refusal = decideIrreversibleAction({
+          action: "press",
+          key: pressedKey,
+          name: active.name,
+          tag: active.tag,
+          role: active.role,
+          type: active.type,
+        });
         if (refusal) {
           const consentVerdict = await verifyConsentAndDrift({
             action: "press",
             tabId: String(payload.tabId),
             payload,
-            target: { kind: "active" },
+            target: { kind: "active", _frameId: active._frameId },
             refusal,
           });
           if (consentVerdict) return consentVerdict;
@@ -1645,7 +3495,7 @@ async function handleAction(action, payload = {}) {
         expectedActiveName = active.name;
       }
       const result = await executeInTab(payload.tabId, pageOperation, [
-        { op: "press", key: pressedKey, ...(expectedActiveName ? { expectedActiveName } : {}) },
+        { op: "press", key: pressedKey, _frameId: active._frameId, ...(expectedActiveName ? { expectedActiveName } : {}) },
       ]);
       return verdictEnvelope("press", verifyActionEffect({ action: "press", result }), {
         pressed: String(payload.key || ""),
@@ -1704,6 +3554,7 @@ async function handleAction(action, payload = {}) {
       return { ok: true, mouseMoved: { x: mx, y: my } };
     }
     case "hit_test": {
+      await assertDebuggableTab(payload.tabId);
       const ht = await executeInTab(payload.tabId, pageOperation, [
         { op: "hit_test", x: payload.x, y: payload.y },
       ]);
@@ -1925,6 +3776,159 @@ async function handleAction(action, payload = {}) {
         includeLowValue: payload.includeAssets === true,
       });
     }
+    case "eval_script": {
+      if (!HAS_DEBUGGER) {
+        return {
+          ok: false,
+          action: "eval_script",
+          verified: false,
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message:
+            "eval_script relies on chrome.debugger (Runtime.evaluate), which Firefox does not implement.",
+        };
+      }
+      const clamped = clampExpression(payload?.expression);
+      if (!clamped.ok) {
+        return {
+          ok: false,
+          action: "eval_script",
+          verified: false,
+          code: clamped.code,
+          signal: clamped.code,
+          effect: "failed",
+          message: clamped.message,
+        };
+      }
+      const tabId = normalizeTabId(payload?.tabId);
+      if (!tabId) {
+        return {
+          ok: false,
+          action: "eval_script",
+          verified: false,
+          code: "TAB_NOT_FOUND",
+          signal: "TAB_NOT_FOUND",
+          effect: "failed",
+          message: "eval_script needs the id of the tab the script should run in.",
+        };
+      }
+      // Every call is approved on its own, including a retry of the same script: arbitrary code in
+      // the user's page is never the agent's decision, and one approval covers exactly this script
+      // on exactly this document (see computeEvalApprovalFingerprint).
+      const evalPayload = {
+        ...payload,
+        tabId,
+        expression: clamped.expression,
+        timeoutMs: clampEvalTimeout(payload?.timeoutMs),
+      };
+      const consentVerdict = await verifyConsentAndDrift({
+        action: "eval_script",
+        tabId,
+        payload: evalPayload,
+        target: { kind: "document" },
+        refusal: { reason: "eval_script", target: {} },
+      });
+      if (consentVerdict) return consentVerdict;
+
+      // Re-bound right before the call: the credential was consumed above, so the document the user
+      // approved is the only one this run may touch.
+      const approved = await resolveApprovedEvalContext({
+        tabId,
+        record: await getApprovalRecord(normalizeApprovalId(evalPayload?.approvalId)),
+      });
+      if (approved.verdict) return approved.verdict;
+      try {
+        const answer = await evaluateWithDeadline(
+          tabId,
+          {
+            // Explicit context, never the session default: the default is whichever document the
+            // tab shows at this instant, which is exactly what the approval does not cover.
+            // The unique id, never the numeric one and never the session default: the numbers are
+            // re-issued when the debugger session re-attaches, and the default context is whichever
+            // document the tab shows at this instant — neither is the document the user approved.
+            uniqueContextId: approved.context.uniqueId,
+            expression: evalPayload.expression,
+            returnByValue: true,
+            awaitPromise: evalPayload.awaitPromise === true,
+            userGesture: true,
+            includeCommandLineAPI: false,
+          },
+          evalPayload.timeoutMs,
+          // Best-effort scoping for the timeout kill: same document, not the whole target.
+          Number.isInteger(Number(approved.context.contextId))
+            ? { executionContextId: Number(approved.context.contextId) }
+            : null,
+        );
+        if (!answer) {
+          return {
+            ok: false,
+            action: "eval_script",
+            verified: false,
+            code: "EVAL_TIMEOUT",
+            signal: "EVAL_TIMEOUT",
+            effect: "failed",
+            message:
+              `脚本在 ${evalPayload.timeoutMs} ms 内没有结束，已按超时终止：未收到结果。脚本可能已部分执行，` +
+              "页面自身的脚本也可能被一并终止，副作用不可撤销。只有确认脚本确实需要这么久时才调大 timeoutMs。",
+          };
+        }
+        // `summarizeEvalResult` is shared with the other eval paths; the fields the exception branch
+        // may omit are filled in here so a throw is never reported as a verified outcome.
+        const summarized = summarizeEvalResult(answer);
+        if (summarized && summarized.ok === false) {
+          return {
+            ...summarized,
+            verified: false,
+            code: summarized.code ?? "EVAL_THREW",
+            signal: summarized.signal ?? "EVAL_THREW",
+            effect: summarized.effect ?? "failed",
+          };
+        }
+        return summarized;
+      } catch (error) {
+        // CDP refuses the call because that context no longer exists: the document went away after
+        // the approval. Reported as stale, and never retried against the default context.
+        if (isMissingContextError(error)) {
+          return approvalVerdict(
+            APPROVAL_STALE_CODE,
+            "The document this script was approved for is gone (the page navigated or its frame was replaced). " +
+              "Nothing was run; ask the user to approve the script again on the current page.",
+            { action: "eval_script" },
+          );
+        }
+        throw error;
+      } finally {
+        scheduleDetach(tabId);
+      }
+    }
+    case "list_pending_approvals": {
+      // Read-only: this lists what is waiting on a decision and grants nothing. Only records that can
+      // still be decided are listed — an expired or already consumed record would be a card the user
+      // cannot act on.
+      await hydrateApprovals();
+      sweepApprovalRecords();
+      const now = Date.now();
+      const approvals = [...approvalRecords.values()]
+        .filter((record) => record.state === "pending" && Number(record.expiresAt) > now)
+        .sort((a, b) => Number(a.expiresAt) - Number(b.expiresAt))
+        .map((record) => ({
+          approvalId: record.approvalId,
+          action: String(record.action ?? ""),
+          tabId: String(record.tabId ?? ""),
+          origin: String(record.origin ?? ""),
+          summary: typeof record.summary?.label === "string" ? record.summary.label : "",
+          expiresAt: Number(record.expiresAt),
+        }));
+      return { ok: true, approvals };
+    }
+    case "submit_approval_decision": {
+      // The host's answer to a request it rendered itself. `allow_once` is the only positive answer:
+      // deciding leaves nothing behind but this one record, which the retry consumes.
+      const approvalId = normalizeApprovalId(payload?.approvalId);
+      const decision =
+        payload?.decision === "deny" ? "deny" : payload?.decision === "allow_once" ? "approve" : "";
+      if (!approvalId || !decision) return { ok: false, code: "USER_APPROVAL_REJECTED" };
+      return await decideApprovalFromHost({ approvalId, decision });
+    }
     case "close_tab": {
       await loadOpenedTabs();
       const requested = normalizeTabId(payload.tabId);
@@ -1986,10 +3990,21 @@ async function handleAction(action, payload = {}) {
 }
 
 /**
- * The toolbar popup asks the worker whether the desktop app is actually connected. The popup is the
- * only user-facing surface in the extension: it reports status and reads no page data.
+ * Two user-facing message types: the toolbar popup asks whether the desktop app is connected, and
+ * the approve page reports the user's decision. Both read no page data.
  */
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.type === APPROVAL_DECISION_MESSAGE_TYPE) {
+    // Verified inside handleApprovalDecision (sender id + approve-page URL + nonce + window id).
+    void handleApprovalDecision(message, sender || {}).then((decision) => {
+      try {
+        sendResponse(decision);
+      } catch {
+        // The approve page may already be closing; the recorded state is what matters.
+      }
+    });
+    return true;
+  }
   if (!message || message.type !== "connector_status") return false;
   sendResponse({
     extensionId: chrome.runtime.id,
@@ -2032,5 +4047,5 @@ function connectNativeHost() {
 void reconcileDebuggerAttachments();
 connectNativeHost();
 
-export { handleAction, preparedActionStore, refRegistry };
+export { handleAction, pageOperation, preparedActionStore, refRegistry, probeTargetFrame, executeInTab };
 

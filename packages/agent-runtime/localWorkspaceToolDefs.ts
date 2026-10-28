@@ -26,7 +26,7 @@ import type { OpenAiCompatibleTool } from "./capabilities";
 export type { OpenAiCompatibleTool };
 
 const WORKSPACE_TOOL_NAMES = [
-  "readFile", "writeFile", "editFile", "globFiles", "captureVisualState",
+  "readFile", "read_image", "captureHostWindow", "writeFile", "editFile", "globFiles", "captureVisualState",
   "execShell", "launchProcess", "listProcesses",
   "taskWait", "taskStop",
   "openDesktopPreview",
@@ -209,7 +209,7 @@ function buildCaptureVisualStateTool(): OpenAiCompatibleTool {
     type: "function",
     function: {
       name: "captureVisualState",
-      description: "Capture a real local app screenshot and DOM/computed-style metrics for a selected UI state.",
+      description: "Render a URL to an image and DOM/computed-style metrics using platform Playwright/Chromium on the runtime host. Requires an installed renderer; never runs workspace scripts.",
       parameters: {
         type: "object",
         properties: {
@@ -223,7 +223,7 @@ function buildCaptureVisualStateTool(): OpenAiCompatibleTool {
           },
           waitSelector: {
             type: "string",
-            description: "CSS selector that must become visible before capture.",
+            description: "Required non-empty CSS selector that must become visible before capture; choose the element that proves the page is ready.",
           },
           scrollSelector: {
             type: "string",
@@ -393,6 +393,35 @@ function buildTaskStopTool(): OpenAiCompatibleTool {
 }
 
 export function buildWorkspaceToolDefinition(toolName: string) {
+  if (toolName === "captureHostWindow") {
+    return {
+      type: "function" as const,
+      function: {
+        name: "captureHostWindow",
+        description: "Capture the host desktop through the Screenshot portal (interactive permission/selection may appear). Returns an image or a fail-closed reason within 9s. Portal does not identify the application/window: never infer a window name. Linux host requires /usr/bin/python3 with Gio. No arguments.",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+      },
+    };
+  }
+  if (toolName === "read_image") {
+    return {
+      type: "function" as const,
+      function: {
+        name: "read_image",
+        description: "Read 1 to 4 local PNG/JPEG/WebP/GIF images in one call. Supply either path (one image) or paths (1–4 images), never both. Any failure rejects the entire batch. Long edges above 1568px are resized to JPEG q80. Maximum encoded base64 size is 2MiB per image; request budget remains 4 images / 8MiB.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: buildWorkspacePathProperty(),
+            paths: { type: "array", items: buildWorkspacePathProperty(), minItems: 1, maxItems: 4 },
+          },
+          // 不用 oneOf：不少兼容网关/严格模式不支持参数级组合子，模型会两个都传 →
+          // 执行器拒绝 → 反复重试形成死循环（2026-10-27 实测）。互斥由执行器校验。
+          additionalProperties: false,
+        },
+      },
+    };
+  }
   if (toolName === "readFile") {
     return buildReadWorkspaceFileTool();
   }

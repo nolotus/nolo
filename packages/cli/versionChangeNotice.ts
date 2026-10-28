@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -46,4 +47,9 @@ export function takeVersionChangeNotice(
 
   // 没有旧值时不提示：无从知道「从什么变过来的」
   return previous ? { from: previous, to: currentVersion } : null;
+}
+
+/** Format separately from persistence so callers can choose their output stream. */
+export function formatVersionChangeNotice(change: VersionChangeNotice): string {
+  return t("updateVersionChanged", change.from, change.to);
 }

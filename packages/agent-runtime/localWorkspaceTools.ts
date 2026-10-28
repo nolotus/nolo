@@ -1,5 +1,9 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { formatImageSummary } from "./imageSummary";
+import { readLocalImage } from "./readImage";
+import { renderVisualPage, visualRendererCapability } from "./visualRenderer.node";
+import { captureHostWindow } from "./hostWindowCapture";
 import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -293,6 +297,7 @@ export function buildLocalWorkspaceOpenAiTools(args: {
   return WORKSPACE_TOOL_NAMES
     .filter((toolName) => {
       if (!declaredTools.has(toolName)) return false;
+      if (toolName === "captureVisualState" && !visualRendererCapability().available) return false;
       if (!args.exposeShellTools && SHELL_TOOL_NAMES.includes(toolName as any)) {
         return false;
       }
@@ -1901,59 +1906,34 @@ async function captureVisualStateTool(args: {
   workspaceRoot: string;
   commandTimeoutMs?: number;
 }): Promise<AgentRuntimeToolResult> {
-  const parsed = parseWorkspaceToolArguments(args.call.arguments);
-  const captureArgs = readVisualStateCaptureArgs(parsed);
-  const baseUrl = await resolveVisualStateBaseUrl({
-    explicitBaseUrl: captureArgs.baseUrl,
-  });
-  const extraArgs = [
-    "--base",
-    baseUrl,
-    "--path",
-    captureArgs.path,
-    "--wait-selector",
-    captureArgs.waitSelector,
-    ...(captureArgs.scrollSelector ? ["--scroll-selector", captureArgs.scrollSelector] : []),
-    ...(captureArgs.focusSelector ? ["--focus-selector", captureArgs.focusSelector] : []),
-    ...(captureArgs.expectText ? ["--expect-text", captureArgs.expectText] : []),
-    "--screenshot",
-    captureArgs.screenshotPath,
-    "--metrics",
-    captureArgs.metricsPath,
-  ];
-  const result = await runWorkspacePackageScript({
-    workspaceRoot: args.workspaceRoot,
-    script: "probe:visual-review",
-    extraArgs,
-    commandTimeoutMs: args.commandTimeoutMs,
-  });
-  const metrics = parseLastJsonObject(String(result.metadata?.stdoutTail ?? result.content));
-  return {
-    content: [
-      `pageUrl: ${typeof metrics?.pageUrl === "string" ? metrics.pageUrl : ""}`,
-      `screenshotPath: ${captureArgs.screenshotPath}`,
-      `metricsPath: ${captureArgs.metricsPath}`,
-      `waitSelector: ${captureArgs.waitSelector}`,
-      ...(captureArgs.focusSelector ? [`focusSelector: ${captureArgs.focusSelector}`] : []),
-      ...(captureArgs.expectText ? [`expectText: ${captureArgs.expectText}`] : []),
-      "",
-      result.content,
-    ].join("\n").trim(),
-    metadata: {
-      ...result.metadata,
-      script: "probe:visual-review",
-      args: extraArgs,
-      baseUrl,
-      path: captureArgs.path,
-      waitSelector: captureArgs.waitSelector,
-      scrollSelector: captureArgs.scrollSelector,
-      focusSelector: captureArgs.focusSelector,
-      expectText: captureArgs.expectText,
-      screenshotPath: captureArgs.screenshotPath,
-      metricsPath: captureArgs.metricsPath,
-      ...(metrics ?? {}),
-    },
-  };
+  try {
+    const parsed = parseWorkspaceToolArguments(args.call.arguments);
+    const captureArgs = readVisualStateCaptureArgs(parsed);
+    const capability = visualRendererCapability();
+    if (!capability.available) return { content: `captureVisualState unavailable: ${capability.reason}`, metadata: { ok: false, rendererAvailable: false } };
+    const baseUrl = await resolveVisualStateBaseUrl({ explicitBaseUrl: captureArgs.baseUrl });
+    const pageUrl = new URL(captureArgs.path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).href;
+    const screenshotPath = resolveRequestedWorkspacePath(args.workspaceRoot, captureArgs.screenshotPath);
+    const metricsPath = resolveRequestedWorkspacePath(args.workspaceRoot, captureArgs.metricsPath);
+    const rendered = await renderVisualPage({ ...captureArgs, workspaceRoot: args.workspaceRoot, url: pageUrl, screenshotPath, timeoutMs: args.commandTimeoutMs });
+    const metrics = { ...captureArgs, ...rendered, scrollSelector: captureArgs.scrollSelector ?? null,
+      focusSelector: captureArgs.focusSelector ?? null, expectText: captureArgs.expectText ?? null };
+    await mkdir(dirname(metricsPath), { recursive: true });
+    await writeFile(metricsPath, JSON.stringify(metrics, null, 2));
+    const image = await readLocalImage(screenshotPath);
+    // Preserve legacy path/metrics fields; script/args are explicitly retired.
+    return {
+      content: [`pageUrl: ${metrics.pageUrl}`, `screenshotPath: ${captureArgs.screenshotPath}`, `metricsPath: ${captureArgs.metricsPath}`, `waitSelector: ${captureArgs.waitSelector}`,
+        ...(captureArgs.focusSelector ? [`focusSelector: ${captureArgs.focusSelector}`] : []),
+        ...(captureArgs.expectText ? [`expectText: ${captureArgs.expectText}`] : []),
+        formatImageSummary({ kind: "screenshot", ...image.imageSummary })].join("\n"),
+      images: image.images,
+      metadata: { ...captureArgs, ...metrics, ok: true, exitCode: 0, baseUrl, script: null, args: [], compatibilityVersion: 2,
+        compatibilityNote: "Platform rendering replaces workspace scripts; script/args/stdoutTail no longer describe a subprocess. Existing page metrics and path fields are retained." },
+    };
+  } catch (error) {
+    return { content: `captureVisualState failed: ${toErrorMessage(error)}`, metadata: { ok: false } };
+  }
 }
 
 async function execShellTool(args: {
@@ -2460,6 +2440,55 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
         ? { resolveRipgrepBinary: args.resolveRipgrepBinary }
         : {}),
     }),
+    captureHostWindow: async (call: AgentRuntimeToolCallInput) => {
+      let parsed: unknown;
+      try { parsed = JSON.parse(call.arguments || "{}"); }
+      catch { return { content: "captureHostWindow accepts an empty JSON object" }; }
+      if (!isRecord(parsed) || Object.keys(parsed).length) return { content: "captureHostWindow accepts no arguments" };
+      return captureHostWindow();
+    },
+    read_image: async (call: AgentRuntimeToolCallInput) => {
+      const parsed = parseWorkspaceToolArguments(call.arguments);
+      if (Object.keys(parsed).some((key) => key !== "path" && key !== "paths")) {
+        throw new Error("read_image accepts only path or paths");
+      }
+      // 宽容合并：模型常把 path 与 paths 一起传（2026-10-27 实测导致重试死循环）。
+      // 危险的输入是「合并后为空/超 4 张/非图片」，不是多传一个等价字段。
+      const mergedPaths: unknown[] = [];
+      if ("paths" in parsed) {
+        if (!Array.isArray(parsed.paths)) throw new Error("read_image: paths must be an array of strings");
+        mergedPaths.push(...parsed.paths);
+      }
+      if ("path" in parsed) mergedPaths.unshift(requireWorkspaceToolPath(parsed));
+      if (mergedPaths.length === 0) {
+        throw new Error("read_image requires path or paths");
+      }
+      if (mergedPaths.length > 4) {
+        throw new Error(`read_image: maximum 4 images; received ${mergedPaths.length}`);
+      }
+      const paths = mergedPaths;
+      if (!Array.isArray(paths) || paths.length === 0 ||
+          paths.some((path) => typeof path !== "string" || !path.trim())) {
+        throw new Error("read_image: paths must contain 1 to 4 non-empty string paths (maximum 4 images)");
+      }
+      // Return only after every image succeeds; never expose a partial batch.
+      const results = await Promise.all(paths.map(async (path: string) => {
+        try {
+          const absolutePath = await resolveLocalWorkspaceToolPath({
+            workspaceRoot: args.workspaceRoot,
+            requestedPath: path,
+            ...fileAccess,
+          });
+          return await readLocalImage(absolutePath);
+        } catch (error) {
+          throw new Error(`read_image: failed to read ${JSON.stringify(path)}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }));
+      return {
+        content: results.map((result) => result.content).join("\n"),
+        images: results.flatMap((result) => result.images ?? []),
+      };
+    },
     readFile: (call: AgentRuntimeToolCallInput) => readFileTool({
       call,
       workspaceRoot: args.workspaceRoot,

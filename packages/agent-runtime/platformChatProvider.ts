@@ -1,3 +1,4 @@
+import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
 import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
 import { extractUsageFromSsePayload, hasUsageTokens } from "ai/token/sseUsageExtract";
@@ -146,6 +147,7 @@ export type PlatformChatProviderConfig = {
   model: string;
   provider: string;
   endpoint: string;
+  hasVision?: boolean;
   requestOptions: Record<string, number | string>;
   apiKey?: string;
   apiKeyHeader?: string;
@@ -226,6 +228,7 @@ export async function resolvePlatformChatProviderConfig(args: {
       serverUrl: resolvePlatformServerUrl(args.env),
       authToken: resolvePlatformAuthToken(args.env),
       agentKey: args.agentConfig.key,
+      hasVision: args.agentConfig.hasVision,
       model: plan.model,
       provider: plan.provider,
       endpoint: plan.endpoint,
@@ -243,6 +246,7 @@ export async function resolvePlatformChatProviderConfig(args: {
     serverUrl: plan.serverUrl,
     authToken: plan.authToken,
     agentKey: plan.agentKey,
+    hasVision: args.agentConfig.hasVision,
     model: plan.model,
     provider: plan.provider,
     endpoint: plan.endpoint,
@@ -297,10 +301,30 @@ export function buildPlatformChatCompletionRequest(args: {
     model: args.providerConfig.model,
     ...(usesResponsesApi
       ? {
-          input: convertMessagesToResponsesInput(sanitizedMessages as any),
+          // 平台代理路径：网关中转通常仅支持字符串形态的 function_call_output.output，
+          // 保持「合成 user 消息」方案传递图片附件。
+          // Responses 协议天然支持 reasoning 数组回放，因此不 stripReasoningContent。
+          input: convertMessagesToResponsesInput(
+            toOpenAiCompatibleMessages(sanitizedMessages, {
+              ...resolveToolImagePolicy({
+                routeKind: "platform",
+                provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
+                model: args.providerConfig.model,
+                customProviderUrl: args.providerConfig.endpoint,
+                hasVision: args.providerConfig.hasVision,
+              }),
+            }) as any,
+          ),
         }
       : {
           messages: toOpenAiCompatibleMessages(sanitizedMessages, {
+            ...resolveToolImagePolicy({
+              routeKind: "platform",
+              provider: args.providerConfig.usageProvider ?? args.providerConfig.provider,
+              model: args.providerConfig.model,
+              customProviderUrl: args.providerConfig.endpoint,
+              hasVision: args.providerConfig.hasVision,
+            }),
             stripReasoningContent: shouldStripReasoning,
           }),
         }),

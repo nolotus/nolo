@@ -6,11 +6,13 @@ export const CHROME_CONNECTOR_TOOL_NAMES = [
   "browser_read_page",
   "browser_click_element",
   "browser_type",
+  "browser_set_select_value",
   "browser_press",
   "browser_scroll",
   "browser_screenshot",
   "browser_read_console",
   "browser_read_network",
+  "browser_eval_script",
 ] as const;
 
 export type ChromeConnectorToolName = typeof CHROME_CONNECTOR_TOOL_NAMES[number];
@@ -26,11 +28,13 @@ export const CHROME_CONNECTOR_LEGACY_TOOL_ALIASES = {
   chrome_read_page: "browser_read_page",
   chrome_click: "browser_click_element",
   chrome_type: "browser_type",
+  chrome_set_select_value: "browser_set_select_value",
   chrome_press: "browser_press",
   chrome_scroll: "browser_scroll",
   chrome_screenshot: "browser_screenshot",
   chrome_read_console: "browser_read_console",
   chrome_read_network: "browser_read_network",
+  chrome_eval_script: "browser_eval_script",
 } as const satisfies Record<string, ChromeConnectorToolName>;
 
 export type ChromeConnectorLegacyToolName = keyof typeof CHROME_CONNECTOR_LEGACY_TOOL_ALIASES;
@@ -186,20 +190,31 @@ export const chromeReadPageFunctionSchema = baseSchema(
   ["tabId"],
 );
 
+/**
+ * The approval round trip, model side. This id is *not* an authorization: the model cannot mint or
+ * reuse one, it can only hand back what the connector returned after the user clicked "Allow once".
+ */
+const approvalId = {
+  type: "string",
+  description:
+    "Only echo a value the connector returned in a USER_APPROVAL_PENDING response for this same action: after the user clicks \"Allow once\", retry with that approvalId. It grants nothing by itself (it is the lookup key for the user's decision), never invent or reuse one, and do not pass a previous id to a different action — it is single-use and expires quickly.",
+};
+
 export const chromeClickFunctionSchema = baseSchema(
   "browser_click_element",
-  "Click a visible element in a browser tab by elementRef from browser_read_page, or by CSS selector. Controls whose name indicates an irreversible external action (payment, send, delete, publish, permission change) are refused with SENSITIVE_ACTION_REQUIRES_CONFIRMATION: this desktop runtime has no approval channel, so name the control and ask the user to activate it themselves.",
+  "Click a visible element in a browser tab by elementRef from browser_read_page, or by CSS selector. Clicking an element whose accessible name indicates an irreversible external action — whatever its tag, including a div with a click handler, an anchor or a custom element — opens a confirmation request for the user and returns USER_APPROVAL_PENDING (approval_pending) with an approvalId: ask the user to click \"Allow once\" in the Nolo window, then retry the same click. Do not retry without that approvalId, and do not switch to another selector or elementRef to get around the gate.",
   {
     tabId,
     elementRef,
     selector,
+    approvalId,
   },
   ["tabId"],
 );
 
 export const chromeTypeFunctionSchema = baseSchema(
   "browser_type",
-  "Type text into a browser page element identified by elementRef from browser_read_page or by CSS selector. Typing into a control whose name indicates an irreversible external action is refused with SENSITIVE_ACTION_REQUIRES_CONFIRMATION, same as clicking it.",
+  "Type text into a browser page element identified by elementRef from browser_read_page or by CSS selector. Typing into an operable control whose name indicates an irreversible external action behaves like clicking it: a confirmation request goes to the user and the call returns USER_APPROVAL_PENDING with an approvalId — ask the user to allow it, then retry with that approvalId.",
   {
     tabId,
     elementRef,
@@ -212,19 +227,41 @@ export const chromeTypeFunctionSchema = baseSchema(
       type: "boolean",
       description: "Whether to clear the field before typing. Defaults to true.",
     },
+    approvalId,
   },
   ["tabId", "text"],
 );
 
+export const chromeSetSelectValueSchema = baseSchema(
+  "browser_set_select_value",
+  "Choose an option in a native <select> element and verify the result. Use this for real <select> controls instead of click/press: clicking a select never changes its value (type reports value_mismatch, key presses have no observable effect, and <option> elements do not appear in browser_read_page). Provide exactly one of value (matched exactly against option values) or label (the option's visible text, which must match exactly one option). When the option is missing (OPTION_NOT_FOUND), several options share the label (OPTION_AMBIGUOUS) or the option is disabled (OPTION_DISABLED), the call fails with that code instead of guessing — call browser_read_page again and pass the exact value. The result is ok only when the select reads back the requested option after input/change were dispatched (verified is true on that same read-back); SELECT_VALUE_NOT_APPLIED means the page rejected or reverted the choice. If the select cannot be read back at all — for example a change listener removed it — the call returns ok:false with effect \"uncertain\" and code SELECT_GONE (or SELECT_VALUE_UNVERIFIED when the read never returned), which means unverified, not success: re-read the page before reporting the choice. Custom (non-native) dropdowns still need browser_click_element. Selecting an option in a control whose accessible name indicates an irreversible external action (delete, 支付, 发送…) opens a confirmation request for the user and returns USER_APPROVAL_PENDING with an approvalId: ask the user to click \"Allow once\" in the Nolo window, then retry this same call with that approvalId. Do not retry without it, and do not switch to another selector or elementRef to get around the gate. Four further codes say the select's identity could not be proven: SELECT_TOKEN_UNAVAILABLE means this page cannot hold a select identity token at all (the value was not set), SELECT_TOKEN_REQUIRED means the target select was not marked before the set so it cannot be identified (the value was not set), and SELECT_TOKEN_FAILED means marking that token failed (the value was not set) — in all three cases the connector cannot prove which control it addressed, so call browser_read_page again and retry with a fresh selector or elementRef. TYPE_ON_SELECT_REFUSED means browser_type was aimed at a native <select>, which never chooses an option — use browser_set_select_value for that control instead.",
+  {
+    tabId,
+    elementRef,
+    selector,
+    value: {
+      type: "string",
+      description: "Exact option value to select. Mutually exclusive with label.",
+    },
+    label: {
+      type: "string",
+      description: "Visible option text to select; must match exactly one option. Mutually exclusive with value.",
+    },
+    approvalId,
+  },
+  ["tabId"],
+);
+
 export const chromePressFunctionSchema = baseSchema(
   "browser_press",
-  "Send a keyboard key or shortcut to a browser tab. Enter-like keys are refused with SENSITIVE_ACTION_REQUIRES_CONFIRMATION when the focused control is an irreversible action.",
+  "Send a keyboard key or shortcut to a browser tab. Enter-like keys on a focused operable control whose name indicates an irreversible action first ask the user for confirmation and return USER_APPROVAL_PENDING with an approvalId.",
   {
     tabId,
     key: {
       type: "string",
       description: "Key or shortcut, for example Enter, Escape, ArrowDown, or Meta+L.",
     },
+    approvalId,
   },
   ["tabId", "key"],
 );
@@ -293,6 +330,35 @@ export const chromeReadNetworkFunctionSchema = baseSchema(
   ["tabId"],
 );
 
+/**
+ * Script execution is the only connector action whose *payload* is code, so its description says the
+ * approval rule out loud: a model that reads only the schema must still know that every single call
+ * is asked before it runs, that an approved call has to be retried with the `approvalId` it was given,
+ * and that the value it gets back is live page data.
+ */
+export const chromeEvalScriptFunctionSchema = baseSchema(
+  "browser_eval_script",
+  "Run a JavaScript expression in a browser tab and get its value back. Chrome only (it needs chrome.debugger), and every call requires a fresh user approval: the connector answers USER_APPROVAL_PENDING with an approvalId while the user allows this exact script once, and only then may the same call be retried with that approvalId. The script is never rewritten before it runs, but the approval card cannot print all of a long script: it shows the script with its own line breaks, states how many characters were cut (the approval still covers the whole text), and prints the first 8 hex digits of the script's SHA-256 so the user can check that what they read is the text being approved. Results are capped at 100 000 characters: when the reply has truncated === true (and complete === false) the value is only a cut-down part of the result and you must say so — report it as truncated instead of presenting it as the complete value. A value that cannot be serialised answers ok: false with code EVAL_RESULT_NOT_SERIALIZABLE and no value. The value comes from the live page and may contain data the user did not mean to share — report it back to the user, do not send it anywhere else.",
+  {
+    tabId,
+    expression: {
+      type: "string",
+      description:
+        "JavaScript source to evaluate in the tab. Sent verbatim; the approval card shows it with its own line breaks, states any part it had to cut, and prints the SHA-256 prefix of the full text.",
+    },
+    awaitPromise: {
+      type: "boolean",
+      description: "Wait for the returned promise to settle before answering. Omit to hand back a pending promise unresolved.",
+    },
+    timeoutMs: {
+      type: "number",
+      description: "Execution deadline in ms (100..60000). The connector clamps out-of-range values.",
+    },
+    approvalId,
+  },
+  ["tabId", "expression"],
+);
+
 export const chromeConnectorToolSchemas = [
   chromeListTabsFunctionSchema,
   chromeOpenTabFunctionSchema,
@@ -300,11 +366,13 @@ export const chromeConnectorToolSchemas = [
   chromeReadPageFunctionSchema,
   chromeClickFunctionSchema,
   chromeTypeFunctionSchema,
+  chromeSetSelectValueSchema,
   chromePressFunctionSchema,
   chromeScrollFunctionSchema,
   chromeScreenshotFunctionSchema,
   chromeReadConsoleFunctionSchema,
   chromeReadNetworkFunctionSchema,
+  chromeEvalScriptFunctionSchema,
 ];
 
 export async function chromeConnectorUnavailableFunc(): Promise<never> {
