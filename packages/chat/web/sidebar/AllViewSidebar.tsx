@@ -393,9 +393,19 @@ const AllViewSidebar: React.FC<{
     [favoriteItems],
   );
 
+  // A favorited item that is also pinned already renders in the pinned block. Both blocks draw from
+  // the same records (useFavoriteSidebarItems keeps the original `pinned` flag), so without this the
+  // same row would appear twice. Pinned wins: the favorite block only takes what has no other home.
+  const pinnedKeys = useMemo(
+    () => new Set(stableRecentItems.filter((item) => item.pinned).map((item) => item.contentKey)),
+    [stableRecentItems]
+  );
   const filteredFavoriteItems = useMemo(
-    () => favoriteItems.filter((item) => matchesTypeFilter(item, recentFilter)),
-    [favoriteItems, recentFilter]
+    () =>
+      favoriteItems
+        .filter((item) => matchesTypeFilter(item, recentFilter))
+        .filter((item) => !pinnedKeys.has(item.contentKey)),
+    [favoriteItems, recentFilter, pinnedKeys]
   );
 
   // ── perf: mark mount ──
@@ -556,6 +566,20 @@ const AllViewSidebar: React.FC<{
           onToggleMenu={setActiveMenuKey}
           blockId="pinned"
           className="AllViewSidebar__pinned-block"
+        />
+      )}
+
+      {/* Favorites were filtered out of the recent list below (`favoriteKeysSet`) and then never
+          rendered: every favorited item vanished from this sidebar. SidebarPinnedBlock already
+          special-cases blockId="favorites" (pinned=false, 取消收藏 quick action), so the block only
+          had to be mounted. Without this, favoriting an agent removed it from the list entirely. */}
+      {filteredFavoriteItems.length > 0 && (
+        <SidebarPinnedBlock
+          items={filteredFavoriteItems}
+          activeMenuKey={activeMenuKey}
+          onToggleMenu={setActiveMenuKey}
+          blockId="favorites"
+          className="AllViewSidebar__favorites-block"
         />
       )}
 

@@ -15,7 +15,16 @@ import {
   validateUploadFiles,
 } from "./uploadSecurity";
 
-export type ChromeConnectorRequestPayload = Record<string, unknown>;
+export type ChromeConnectorRequestPayload = Record<string, unknown> & {
+  /** `eval_script`: JS expression/source to run in the tab (Chrome only; every call is user-approved). */
+  expression?: string;
+  /** `eval_script`: wait for the returned promise to settle instead of handing it back unresolved. */
+  awaitPromise?: boolean;
+  /** `eval_script`: execution timeout in ms (100..60000). */
+  timeoutMs?: number;
+  /** One-time approval the USER clicked in the browser (see validateChromeConnectorPayload). */
+  approvalId?: string;
+};
 
 export type ChromeConnectorClient = {
   request(action: string, payload: ChromeConnectorRequestPayload): Promise<unknown>;
@@ -133,6 +142,10 @@ const CHROME_TOOL_ACTIONS: Record<string, string> = {
   browser_screenshot: "screenshot",
   browser_read_console: "read_console",
   browser_read_network: "read_network",
+  // `eval_script` lives on the same table as the rest on purpose: the host's in-conversation approval
+  // card is installed over the browser tool table, so an eval reachable only through
+  // `nolo browser eval` would fall outside the card entirely.
+  browser_eval_script: "eval_script",
   // Legacy aliases (kept for existing agents/tests).
   chrome_list_tabs: "list_tabs",
   chrome_open_tab: "open_tab",
@@ -146,6 +159,7 @@ const CHROME_TOOL_ACTIONS: Record<string, string> = {
   chrome_screenshot: "screenshot",
   chrome_read_console: "read_console",
   chrome_read_network: "read_network",
+  chrome_eval_script: "eval_script",
   chrome_set_files: "set_files",
   chrome_upload_file: "set_files",
   chrome_upload: "set_files",
@@ -231,6 +245,7 @@ const TAB_ID_REQUIRED_ACTIONS = new Set([
   "set_files",
   "set_select_value",
   "prepare_browser_action",
+  "eval_script",
 ]);
 const ALLOWED_PREPARE_SUB_ACTIONS = new Set(["click", "type", "press"]);
 
@@ -459,6 +474,9 @@ export const REQUIRED_CHROME_CONNECTOR_FEATURES: Record<string, string[]> = {
   detach: ["browser_debug"],
   set_files: ["compact_observation_v2", "file_upload"],
   prepare_browser_action: ["prepare_browser_action"],
+  // debugger-backed (`chrome.debugger` → Runtime.evaluate), so the same feature name the extension
+  // publishes also says "Chrome would run this, Firefox cannot" — see FIREFOX_UNAVAILABLE_FEATURES.
+  eval_script: ["eval"],
 };
 
 /** Features the runtime requires for an action; empty when the action needs none. */

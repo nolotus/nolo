@@ -12,6 +12,7 @@ export const CHROME_CONNECTOR_TOOL_NAMES = [
   "browser_screenshot",
   "browser_read_console",
   "browser_read_network",
+  "browser_eval_script",
 ] as const;
 
 export type ChromeConnectorToolName = typeof CHROME_CONNECTOR_TOOL_NAMES[number];
@@ -33,6 +34,7 @@ export const CHROME_CONNECTOR_LEGACY_TOOL_ALIASES = {
   chrome_screenshot: "browser_screenshot",
   chrome_read_console: "browser_read_console",
   chrome_read_network: "browser_read_network",
+  chrome_eval_script: "browser_eval_script",
 } as const satisfies Record<string, ChromeConnectorToolName>;
 
 export type ChromeConnectorLegacyToolName = keyof typeof CHROME_CONNECTOR_LEGACY_TOOL_ALIASES;
@@ -328,6 +330,35 @@ export const chromeReadNetworkFunctionSchema = baseSchema(
   ["tabId"],
 );
 
+/**
+ * Script execution is the only connector action whose *payload* is code, so its description says the
+ * approval rule out loud: a model that reads only the schema must still know that every single call
+ * is asked before it runs, that an approved call has to be retried with the `approvalId` it was given,
+ * and that the value it gets back is live page data.
+ */
+export const chromeEvalScriptFunctionSchema = baseSchema(
+  "browser_eval_script",
+  "Run a JavaScript expression in a browser tab and get its value back. Chrome only (it needs chrome.debugger), and every call requires a fresh user approval: the connector answers USER_APPROVAL_PENDING with an approvalId while the user allows this exact script once, and only then may the same call be retried with that approvalId. The script is never rewritten before it runs, but the approval card cannot print all of a long script: it shows the script with its own line breaks, states how many characters were cut (the approval still covers the whole text), and prints the first 8 hex digits of the script's SHA-256 so the user can check that what they read is the text being approved. Results are capped at 100 000 characters: when the reply has truncated === true (and complete === false) the value is only a cut-down part of the result and you must say so — report it as truncated instead of presenting it as the complete value. A value that cannot be serialised answers ok: false with code EVAL_RESULT_NOT_SERIALIZABLE and no value. The value comes from the live page and may contain data the user did not mean to share — report it back to the user, do not send it anywhere else.",
+  {
+    tabId,
+    expression: {
+      type: "string",
+      description:
+        "JavaScript source to evaluate in the tab. Sent verbatim; the approval card shows it with its own line breaks, states any part it had to cut, and prints the SHA-256 prefix of the full text.",
+    },
+    awaitPromise: {
+      type: "boolean",
+      description: "Wait for the returned promise to settle before answering. Omit to hand back a pending promise unresolved.",
+    },
+    timeoutMs: {
+      type: "number",
+      description: "Execution deadline in ms (100..60000). The connector clamps out-of-range values.",
+    },
+    approvalId,
+  },
+  ["tabId", "expression"],
+);
+
 export const chromeConnectorToolSchemas = [
   chromeListTabsFunctionSchema,
   chromeOpenTabFunctionSchema,
@@ -341,6 +372,7 @@ export const chromeConnectorToolSchemas = [
   chromeScreenshotFunctionSchema,
   chromeReadConsoleFunctionSchema,
   chromeReadNetworkFunctionSchema,
+  chromeEvalScriptFunctionSchema,
 ];
 
 export async function chromeConnectorUnavailableFunc(): Promise<never> {

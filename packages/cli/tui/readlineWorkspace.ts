@@ -31,6 +31,11 @@ import { runConfirmDialog } from "./confirmDialog";
 import { type SelectDialogItem } from "./selectDialog";
 import { createDialogHost } from "./dialogHost";
 import {
+  createInlineHostApprovalPrompt,
+  type InlineHostApprovalPrompt,
+} from "./hostApprovalCard";
+import { registerHostApprovalRenderer } from "../client/hostApprovalFlow";
+import {
   clearTerminalAttentionProgress,
   runWithInputRequiredAttention,
 } from "./terminalNotification";
@@ -1226,6 +1231,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // question (fixed by routing through this hook instead).
   let composerDecoderDrain: (() => void) | null = null;
 
+  // 对话内浏览器审批卡（见 ./hostApprovalCard）：连接器动作需要用户批准时，由本宿主在对话流里
+  // 渲染一张卡并按 y/n 决定，决定经 submit_approval_decision 直接发给连接器，不经过模型。
+  // 未创建（非交互/旧宿主）时工具执行器拿不到 approver，行为与改动前逐字一致。
+  let hostApprovalPrompt: InlineHostApprovalPrompt | null = null;
+  let unregisterHostApprovalRenderer: (() => void) | null = null;
+
   // 草稿世代（async 粘贴守卫）：每次草稿被提交/清空时自增。剪贴板读取是异步的，
   // 读回来时若世代已变（用户已提交、已清空、已退出会话），迟到结果必须丢弃而不
   // 是写进一个新草稿。
@@ -1701,6 +1712,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const finish = () => {
       if (done) return;
       done = true;
+      // 会话收尾：注销审批渲染器并放掉仍在等的卡片（一律按拒绝结算，避免工具调用挂死）。
+      unregisterHostApprovalRenderer?.();
+      unregisterHostApprovalRenderer = null;
+      hostApprovalPrompt?.dispose();
+      hostApprovalPrompt = null;
       childShellApprovals.close();
       sessionEnded = true; // signal in-flight async git refresh to drop its repaint
       scrollAnimator.cancel(); // stop any in-flight wheel animation before teardown
@@ -2336,6 +2352,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         rawActionGateTokenHandler?.(sequence);
         return;
       }
+      // 对话内审批卡：y/n/Esc 只在 composer 草稿为空时属于卡片（否则它们只是用户正在输入的字
+      // 母）；Esc 在跑轮次时仍保留「停止本轮」的含义，卡片不抢。模态（dialogHost）优先，见上。
+      if (hostApprovalPrompt?.handleKey(sequence, {
+        draftEmpty: buffer.length === 0,
+        busy,
+      })) {
+        return;
+      }
       // While an agent turn is running we let the user keep typing into the
       // docked composer (draft buffer) but ignore submit so a second turn
       // cannot race the in-flight one. The draft is preserved and shown
@@ -2887,6 +2911,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       },
     });
     composerDecoderDrain = () => onData.destroy();
+    // 注册为进程内的宿主审批渲染器：工具表早在本地 runtime 装配时就建好了，这里按调用延迟绑定，
+    // 决定由本进程直接投递给连接器（模型既看不到也答不了）。
+    hostApprovalPrompt = createInlineHostApprovalPrompt({
+      write: (text) => {
+        emitCommandOutput(text.replace(/\n$/, ""));
+      },
+      columns: () => (output as { columns?: number }).columns ?? 80,
+    });
+    unregisterHostApprovalRenderer = registerHostApprovalRenderer(
+      hostApprovalPrompt.awaitHostApproval,
+    );
     try {
       onGraphicsData = (chunk: Buffer | string) => {
         const filtered = graphicsRuntime!.filterInput(chunk.toString());

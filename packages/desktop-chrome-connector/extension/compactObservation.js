@@ -86,6 +86,12 @@ export const CONNECTOR_FEATURES = Object.freeze([
   "screenshot",
   "file_upload",
   "prepare_browser_action",
+  // Arbitrary script execution in a tab. Its own name because it is its own capability: Chrome
+  // runs it through chrome.debugger (Runtime.evaluate) and every call needs a fresh approval.
+  "eval",
+  // The two halves of the host-side approval channel (list what is waiting, answer it from the
+  // host's own card). Not debugger-backed: it only reads and moves the worker's approval records.
+  "approval_inbox",
 ]);
 
 const FEATURE_BY_ACTION = Object.freeze({
@@ -109,6 +115,13 @@ const FEATURE_BY_ACTION = Object.freeze({
   // plan, a shipping method), so choosing its option goes through the same name gate as click/type.
   set_select_value: ["compact_observation_v2", "action_gate"],
   prepare_browser_action: ["prepare_browser_action"],
+  // debugger-backed like read_console, and gated like click: the two together mean `eval` already
+  // says "this cannot run on Firefox without a debugger".
+  eval_script: ["eval"],
+  // Listing is read-only and deciding only moves a record the user was already asked about; neither
+  // needs a page or a debugger, so both sit behind one feature name.
+  list_pending_approvals: ["approval_inbox"],
+  submit_approval_decision: ["approval_inbox"],
 });
 
 /**

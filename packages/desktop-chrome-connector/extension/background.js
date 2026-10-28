@@ -12,6 +12,7 @@ import {
   decideCloseTab,
   decideIrreversibleAction,
   deserializeOpenedTabs,
+  hashSignature,
   isActivationKey,
   isOwnExtensionPage,
   isProtectedPageUrl,
@@ -30,6 +31,21 @@ import {
   createPreparedActionStore,
   handlePrepareBrowserAction,
 } from "./browserConsentPreparation.js";
+import {
+  buildEvalApprovalPreview,
+  clampEvalTimeout,
+  clampExpression,
+  summarizeEvalResult,
+} from "./evalResult.js";
+import {
+  EVAL_CONTEXT_UNAVAILABLE,
+  approvalContextSnapshot,
+  createExecutionContextRegistry,
+  evalDocumentIdentity,
+  executionContextFromEvent,
+  isMissingContextError,
+  sameExecutionContext,
+} from "./evalExecutionContext.js";
 
 const HOST_NAME = "com.nolo.chrome_connector";
 
@@ -47,6 +63,12 @@ const DEBUGGER_UNSUPPORTED_MESSAGE =
 
 const consoleByTab = new Map();
 const networkByTab = new Map();
+/**
+ * Per-tab execution contexts, filled from `Runtime.executionContextCreated` (the `Runtime.enable` in
+ * `ensureDebugger` reports the live ones) and pruned on `executionContextDestroyed`. `eval_script`
+ * authorizes one document, so the approval records which context it was shown for.
+ */
+const executionContexts = createExecutionContextRegistry();
 const refRegistry = createElementRefRegistry();
 const basePreparedActionStore = createPreparedActionStore();
 const consumedChallengeIds = new Set();
@@ -135,12 +157,24 @@ function approvalSnapshot(record) {
   };
 }
 
-async function persistApprovalRecord(record) {
+/**
+ * Writes the durable copy of a record.
+ *
+ * Best-effort by default: losing that copy only costs durability across a worker restart, because the
+ * in-memory Map stays authoritative and hydration revives nothing but `pending` records.
+ * `required: true` is reserved for the one irreversible step — consuming an approval — where a write
+ * that did not happen must stop the action instead of being assumed to have happened.
+ */
+async function persistApprovalRecord(record, { required = false } = {}) {
   const area = approvalStorageArea();
-  if (!area || !record) return;
+  if (!record) return;
+  // No session storage at all: nothing could ever be hydrated, so the Map being the only copy is the
+  // normal case and not a failed write. A write that was attempted and failed is the opposite.
+  if (!area) return;
   try {
     await area.set({ [APPROVAL_STORAGE_PREFIX + record.approvalId]: approvalSnapshot(record) });
-  } catch {
+  } catch (error) {
+    if (required) throw error;
     // Session storage only adds durability across worker restarts; the Map stays authoritative.
   }
 }
@@ -160,6 +194,10 @@ async function hydrateApprovals() {
           typeof value.approvalId === "string" ? value.approvalId : key.slice(APPROVAL_STORAGE_PREFIX.length);
         // Memory wins: a state this worker already advanced must never be rolled back by a merge.
         if (approvalRecords.has(approvalId)) continue;
+        // Only a request still waiting on the user is worth reviving. An `approved` record with no
+        // consumption left in memory was granted before the restart and the click that produced it
+        // cannot be re-verified, so a restart voids it; `consumed`/`denied`/`expired` are settled.
+        if (value.state !== "pending") continue;
         approvalRecords.set(approvalId, { ...value, approvalId });
       }
     } catch {
@@ -208,12 +246,104 @@ async function getApprovalRecord(approvalId) {
   return approvalRecords.get(approvalId) || null;
 }
 
+/** The tab's document URL, used only to derive a fingerprint — it is never shown to the user. */
+async function tabUrlForApproval(tabId) {
+  try {
+    if (typeof chrome === "undefined" || typeof chrome?.tabs?.get !== "function") return "";
+    const tab = await chrome.tabs.get(Number(tabId));
+    return typeof tab?.url === "string" ? tab.url.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fingerprint for `eval_script`, which has no control to inspect.
+ *
+ * What the user is asked about is "this script, on this document". So the binding is the document
+ * (its execution context, URL included) plus the script itself and `awaitPromise`; a different
+ * script, or a tab that navigated elsewhere — even to the same URL — no longer matches the approval
+ * and the user is asked again. The page is never read here, so the same input recomputes to the same
+ * fingerprint at drift time. Without an explicit `context` (request time) the tab's live main-frame
+ * context is captured and handed back with the fingerprint, so the approval can record it.
+ */
+async function computeEvalApprovalFingerprint({ tabId, payload, context }) {
+  const url = await tabUrlForApproval(tabId);
+  if (!url) {
+    return {
+      ok: false,
+      verdict: approvalVerdict(
+        "DOM_MUTATED",
+        "The URL of the target tab could not be read, so nothing was asked and nothing was run.",
+        { action: "eval_script" },
+      ),
+    };
+  }
+  let documentContext = context || null;
+  if (!documentContext) {
+    try {
+      documentContext = await ensureLiveMainFrameContext(tabId);
+    } catch (error) {
+      return {
+        ok: false,
+        verdict: approvalVerdict(
+          EVAL_CONTEXT_UNAVAILABLE,
+          `The document of the target tab could not be identified (${toMessage(error)}), so nothing was asked and nothing was run.`,
+          { action: "eval_script" },
+        ),
+      };
+    }
+    if (!documentContext) {
+      return {
+        ok: false,
+        verdict: approvalVerdict(
+          EVAL_CONTEXT_UNAVAILABLE,
+          "The document of the target tab could not be identified, so nothing was asked and nothing was run.",
+          { action: "eval_script" },
+        ),
+      };
+    }
+  }
+  const identity = evalDocumentIdentity({ url, context: documentContext });
+  try {
+    const fpRes = await createActionFingerprint({
+      document: {
+        documentId: hashSignature(identity),
+        url,
+        pageRevision: hashSignature(`${identity}|eval_script`),
+      },
+      tabId: String(tabId),
+      target: { targetId: "document", tag: "", name: "" },
+      action: {
+        action: "eval_script",
+        args: {
+          expression: typeof payload?.expression === "string" ? payload.expression : "",
+          awaitPromise: payload?.awaitPromise === true,
+        },
+      },
+      form: null,
+      owner: typeof payload?.owner === "string" ? payload.owner : "",
+      dialogId: typeof payload?.dialogId === "string" ? payload.dialogId : "",
+    });
+    return { ok: true, fingerprint: fpRes.fingerprint, context: documentContext };
+  } catch (error) {
+    return {
+      ok: false,
+      verdict: approvalVerdict("DOM_MUTATED", `Fingerprint computation failed: ${toMessage(error)}`, {
+        action: "eval_script",
+      }),
+    };
+  }
+}
+
 /**
  * Recomputes the DOM fingerprint the action would be bound to. Kept deliberately identical in shape
  * to the drift check in `verifyConsentAndDrift`: the same document/revision/target/args/form/owner
  * inputs, so an approval can only ever cover the page state the user was asked about.
  */
-async function computeApprovalFingerprint({ action, tabId, payload, target }) {
+async function computeApprovalFingerprint({ action, tabId, payload, target, context }) {
+  if (action === "eval_script") return await computeEvalApprovalFingerprint({ tabId, payload, context });
+
   const captureOptions = { rejectAsResult: true, _frameId: target?.kind === "ref" ? 0 : target?._frameId };
   if (
     payload?.active === true ||
@@ -370,7 +500,11 @@ async function resolveSelectApprovalSummary({ action, tabId, payload, target }) 
  * pending record nobody can ever approve is worse than a plain refusal.
  */
 async function requestUserApproval({ action, tabId, payload, target, refusal }) {
-  if (typeof chrome === "undefined" || typeof chrome?.windows?.create !== "function") {
+  // The host (TUI/desktop) renders the approval card itself, so there is no browser window to open
+  // and no `chrome.windows` to need: its absence is not a refusal on this path. The decision arrives
+  // through `decideApprovalFromHost`, and `windowId` stays null.
+  const hostApproval = payload?.hostApproval === true;
+  if (!hostApproval && (typeof chrome === "undefined" || typeof chrome?.windows?.create !== "function")) {
     return approvalVerdict(APPROVAL_DENIED_CODE, approvalDeniedMessage, { action });
   }
 
@@ -388,16 +522,25 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
   const targetInfo = refusal?.target || {};
   // Approval metadata is separate from labelOf: changing identity labels would invalidate refs.
   let targetName = "未命名控件";
-  try {
-    const inspected = await executeInTab(tabId, pageOperation, [{ ...approvalPageArgs(target), op: "inspect" }]);
-    if (inspected?.ok === true) targetName = String(inspected.approvalName ?? inspected.name ?? "未命名控件").slice(0, 200);
-  } catch { /* Unreadable controls must not fall back to potentially private content. */ }
+  if (action === "eval_script") {
+    // A script has no control to name, and "unidentified control" would misdescribe the request.
+    targetName = "当前页面";
+  } else {
+    try {
+      const inspected = await executeInTab(tabId, pageOperation, [{ ...approvalPageArgs(target), op: "inspect" }]);
+      if (inspected?.ok === true) targetName = String(inspected.approvalName ?? inspected.name ?? "未命名控件").slice(0, 200);
+    } catch { /* Unreadable controls must not fall back to potentially private content. */ }
+  }
   // The site the action belongs to: the approval window is the only place the user can decide, so
   // it has to say *which site* is asking, not only which control.
   const site = await resolveApprovalSite(tabId);
   // What the action would change, in one phrase: for a select, the option it would set. The control
-  // name and the site say *where*; this says *which item*.
-  const summary = await resolveSelectApprovalSummary({ action, tabId, payload, target, refusal });
+  // name and the site say *where*; this says *which item*. For a script it is the script itself,
+  // flattened to one line — the user cannot approve code they cannot see.
+  const summary =
+    action === "eval_script"
+      ? { label: buildEvalApprovalPreview(payload?.expression) }
+      : await resolveSelectApprovalSummary({ action, tabId, payload, target, refusal });
 
   // One pending request per tab: a second gate must not stack windows the user cannot tell apart.
   for (const record of approvalRecords.values()) {
@@ -416,6 +559,9 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
     tabId: String(tabId),
     action: String(action),
     fingerprint: computed.fingerprint,
+    // Which document the user is being asked about (eval_script): the main frame's execution
+    // context, so a navigation between the request and the retry cannot be executed in.
+    context: computed.context ? approvalContextSnapshot(computed.context) : null,
     origin: site,
     target: {
       name: targetName,
@@ -451,15 +597,17 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
     if (summary) {
       params.set("summary", JSON.stringify({ label: summary.label }));
     }
-    const created = await chrome.windows.create({
-      url: `${base}?${params.toString()}`,
-      type: "popup",
-      width: 460,
-      height: 260,
-      focused: true,
-    });
-    windowId = Number(created?.id);
-    if (!Number.isFinite(windowId)) throw new Error("chrome.windows.create returned no window id");
+    if (!hostApproval) {
+      const created = await chrome.windows.create({
+        url: `${base}?${params.toString()}`,
+        type: "popup",
+        width: 460,
+        height: 260,
+        focused: true,
+      });
+      windowId = Number(created?.id);
+      if (!Number.isFinite(windowId)) throw new Error("chrome.windows.create returned no window id");
+    }
   } catch (error) {
     approvalRecords.delete(approvalId);
     return approvalVerdict(APPROVAL_DENIED_CODE, `${approvalDeniedMessage} (${toMessage(error)})`, { action });
@@ -467,6 +615,9 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
 
   record.windowId = windowId;
   await persistApprovalRecord(record);
+  // The request bound a debugger attachment to identify the document; release the banner on the
+  // idle timer like any other debugger-backed action instead of holding it while the user decides.
+  if (record.context) scheduleDetach(tabId);
 
   return approvalVerdict(APPROVAL_PENDING_CODE, approvalPendingMessage, {
     action,
@@ -532,9 +683,23 @@ async function consumeApprovalCredential({ approvalId, record, action }) {
     };
   }
 
+  // Consuming is the one irreversible step: the record has to be durably `consumed` *before* the
+  // action runs. A write that did not happen means the single use was never recorded, so the action
+  // is refused instead of executed on an approval the store does not know is spent.
   record.state = "consumed";
   record.consumedAt = Date.now();
-  await persistApprovalRecord(record);
+  try {
+    await persistApprovalRecord(record, { required: true });
+  } catch (error) {
+    return {
+      verdict: approvalVerdict(
+        APPROVAL_STALE_CODE,
+        `本次审批的一次性额度没能写入持久化存储（${toMessage(error)}），为避免动作被执行两次，这次没有执行；` +
+          "请让用户重新审批。",
+        { action, approvalId },
+      ),
+    };
+  }
   return { ok: true, record };
 }
 
@@ -585,6 +750,16 @@ export async function handleApprovalDecision(message = {}, sender = {}) {
   }
 
   const approved = message?.decision === "approve";
+  return await commitApprovalDecision(record, approved ? "approve" : "deny");
+}
+
+/**
+ * The one place a record leaves `pending` with a decision, and the one place the approval window is
+ * closed again. Both decision entry points (the approve page and the host RPC) end here, so the two
+ * can never drift apart in state, timestamps or cleanup.
+ */
+async function commitApprovalDecision(record, decision) {
+  const approved = decision === "approve";
   record.state = approved ? "approved" : "denied";
   record[approved ? "approvedAt" : "deniedAt"] = Date.now();
   await persistApprovalRecord(record);
@@ -596,7 +771,39 @@ export async function handleApprovalDecision(message = {}, sender = {}) {
       // The user may have closed the window already; the decision still stands.
     }
   }
-  return { ok: true, approvalId, state: record.state };
+  return { ok: true, approvalId: record.approvalId, state: record.state };
+}
+
+/**
+ * The host-RPC decision entry: a TUI/desktop host renders the approval card itself and relays the
+ * user's answer here instead of through the browser window.
+ *
+ * Its authority is the connector request — the host process that opened the request — so there is no
+ * approve-page sender, nonce or window id to verify: those three exist to prove a click happened *in
+ * the window this worker opened*, and this path has no such click to prove. Everything that decides
+ * the outcome is shared with the approve page: the record must still be `pending` and unexpired, it
+ * leaves `pending` only through commitApprovalDecision, and no approval authorizes anything by
+ * itself — verifyConsentAndDrift re-checks tab, action and fingerprint on retry, and that retry is
+ * what consumes it.
+ */
+async function decideApprovalFromHost({ approvalId, decision }) {
+  const record = await getApprovalRecord(approvalId);
+  if (!record) return { ok: false, code: "USER_APPROVAL_REJECTED" };
+  if (record.state === "expired" || Number(record.expiresAt) <= Date.now()) {
+    return { ok: false, code: APPROVAL_EXPIRED_CODE };
+  }
+  // A repeated answer is idempotent: a host card can be answered twice (a double click, a retry
+  // after a lost reply), and re-sending the same decision must not read as the user having refused.
+  if (record.state === "approved") {
+    if (decision === "approve") return { ok: true, status: "allowed" };
+    return { ok: false, code: "USER_APPROVAL_REJECTED" };
+  }
+  if (record.state === "denied" && decision === "deny") return { ok: true, status: "denied" };
+  // Consumed, superseded or otherwise settled: an approval covers exactly one action, and a second
+  // answer to a spent request is not a decision, it is a replay.
+  if (record.state !== "pending") return { ok: false, code: "USER_APPROVAL_REJECTED" };
+  const committed = await commitApprovalDecision(record, decision);
+  return { ok: true, status: committed.state === "approved" ? "allowed" : "denied" };
 }
 
 /** Closing the approval window is a refusal, not an implicit approval left hanging in `pending`. */
@@ -793,6 +1000,7 @@ function dropTabState(tabId) {
   if (!id) return;
   consoleByTab.delete(id);
   networkByTab.delete(id);
+  executionContexts.clear(id);
   refRegistry.invalidate(id);
   const timer = detachTimers.get(id);
   if (timer) clearTimeout(timer);
@@ -819,6 +1027,8 @@ async function detachTab(tabId) {
   try {
     await chrome.debugger.detach(tabTarget(id));
     attachedInThisWorker.delete(id);
+    // The session ends here: its context ids no longer describe anything.
+    executionContexts.clear(id);
     return true;
   } catch (error) {
     console.warn(`[nolo chrome connector] debugger detach skipped for tab ${id}: ${toMessage(error)}`);
@@ -890,6 +1100,82 @@ async function ensureDebugger(tabId) {
   attachedInThisWorker.add(normalizeTabId(tabId));
 }
 
+/** How long a fresh `Runtime.enable` gets to report the contexts that already exist. */
+const EXECUTION_CONTEXT_WAIT_MS = 1_500;
+
+/**
+ * The tab's live main-frame execution context, attaching first when needed. `Runtime.enable`
+ * replays every live context as `executionContextCreated`, so a re-attach answers with the same
+ * document; a tab whose document cannot be identified yields null and the caller fails closed.
+ */
+async function ensureLiveMainFrameContext(tabId) {
+  const key = normalizeTabId(tabId);
+  if (!key) return null;
+  await ensureDebugger(key);
+  const mainFrameId = await tabMainFrameId(key);
+  if (!mainFrameId) return null;
+  const known = executionContexts.mainFrame(key, mainFrameId);
+  if (known) return known;
+  const deadline = Date.now() + EXECUTION_CONTEXT_WAIT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const reported = executionContexts.mainFrame(key, mainFrameId);
+    if (reported) return reported;
+  }
+  return null;
+}
+
+/** The tab's main frame id: the only way to tell the document from a child frame's own world. */
+async function tabMainFrameId(tabId) {
+  try {
+    const tree = await chrome.debugger.sendCommand(tabTarget(tabId), "Page.getFrameTree");
+    const id = tree?.frameTree?.frame?.id;
+    return typeof id === "string" ? id : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Binds an approved `eval_script` to the document the user was shown. The recorded context has to be
+ * the tab's live main frame; when it is gone, was replaced by a navigation, or belongs to another
+ * frame, the approval no longer covers anything and nothing is evaluated.
+ */
+async function resolveApprovedEvalContext({ tabId, record }) {
+  const recorded = record?.context || null;
+  const stale = (message) => ({
+    verdict: approvalVerdict(APPROVAL_STALE_CODE, message, { action: "eval_script" }),
+  });
+  if (!recorded) {
+    return stale(
+      "This approval does not name a document execution context, so it authorizes nothing. Ask the user again.",
+    );
+  }
+  // Without a unique context id there is nothing to bind the script to: the numeric id can be
+  // re-issued to a different document by a re-attach, so this authorizes nothing (fail closed).
+  if (typeof recorded.uniqueId !== "string" || !recorded.uniqueId) {
+    return stale(
+      "这次审批没有记录可核验的文档标识（uniqueId），因此不授权任何执行；请让用户在当前页面重新审批。",
+    );
+  }
+  const key = normalizeTabId(tabId);
+  if (!key) return stale("The approved tab is gone, so the approved script was not run.");
+  if (executionContexts.isDestroyed(key, recorded.contextId)) {
+    return stale(
+      "The document this script was approved for is gone (the page navigated or its frame was replaced). " +
+        "Nothing was run; ask the user to approve the script again on the current page.",
+    );
+  }
+  const live = await ensureLiveMainFrameContext(key);
+  if (!live || !sameExecutionContext(recorded, live)) {
+    return stale(
+      "The main frame of the tab is no longer the document this script was approved for (the page navigated " +
+        "or its frame was replaced). Nothing was run; ask the user to approve the script again on the current page.",
+    );
+  }
+  return { context: live };
+}
+
 /**
  * A `chrome.debugger` attachment outlives the service worker that created it, so an idle timer can
  * die with the worker and leave Chrome's "started debugging this browser" banner up for the rest of
@@ -928,6 +1214,15 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
         .slice(0, COMPACT_BUDGET.console.rawTextMaxChars),
       timestamp: params.timestamp,
     }, COMPACT_BUDGET.console.rawCap);
+  }
+  if (method === "Runtime.executionContextCreated") {
+    executionContexts.record(tabId, executionContextFromEvent(params));
+  }
+  if (method === "Runtime.executionContextDestroyed") {
+    executionContexts.destroy(tabId, params?.executionContextId);
+  }
+  if (method === "Runtime.executionContextsCleared") {
+    executionContexts.clear(tabId);
   }
   if (method === "Runtime.exceptionThrown") {
     const ex = params.exceptionDetails || {};
@@ -2459,6 +2754,30 @@ async function verifyConsentAndDrift({ action, tabId, payload, target, refusal }
   }
 
   // Drift check: execute in-tab DOM capture to re-evaluate current DOM state
+  // A script has no control to re-inspect: it is bound to the document and to its own text, so the
+  // same fingerprint is recomputed from the tab alone. A different script — or a tab that navigated
+  // — no longer matches and the user is asked again.
+  if (action === "eval_script") {
+    // The approval names one document: the context it was shown for has to still be this tab's main
+    // frame before anything is evaluated.
+    const approved = await resolveApprovedEvalContext({ tabId, record });
+    if (approved.verdict) return approved.verdict;
+    const computed = await computeEvalApprovalFingerprint({ tabId, payload, context: approved.context });
+    if (!computed.ok) return computed.verdict;
+    if (computed.fingerprint !== record.fingerprint) {
+      return {
+        ok: false,
+        code: "DOM_MUTATED",
+        signal: "DOM_MUTATED",
+        effect: "failed",
+        action,
+        verified: false,
+        message: "The script or the page it was approved for changed since the approval; challenge invalidated.",
+      };
+    }
+    return null;
+  }
+
   const captureOptions = {
     rejectAsResult: true,
     _frameId: target?.kind === "ref" ? 0 : target?._frameId,
@@ -2997,6 +3316,37 @@ async function handleSetFiles(payload = {}) {
   }
 }
 
+const EVAL_TIMEOUT_TOKEN = Symbol("eval_timeout");
+
+/**
+ * One `Runtime.evaluate` with a hard deadline. The deadline is not advisory: a script that blocks
+ * the page would hold the attachment open until the browser gives up on it, so on timeout the
+ * execution is terminated best-effort and the caller gets a plain failure instead of a result.
+ */
+async function evaluateWithDeadline(tabId, params, timeoutMs, terminateParams = null) {
+  const target = tabTarget(tabId);
+  const pending = Promise.resolve().then(() => chrome.debugger.sendCommand(target, "Runtime.evaluate", params));
+  let timer = null;
+  try {
+    const outcome = await Promise.race([
+      pending,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(EVAL_TIMEOUT_TOKEN), timeoutMs);
+      }),
+    ]);
+    if (outcome !== EVAL_TIMEOUT_TOKEN) return outcome;
+    // Only a script that is still running can be terminated; a finished one ignores this.
+    // Scoped to the approved context when the browser takes an id, so the page's own scripts are not
+    // killed along with it: terminating the whole target is the fallback, not the default.
+    await chrome.debugger.sendCommand(target, "Runtime.terminateExecution", terminateParams || {}).catch(() => {});
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+    // The losing promise must not surface as an unhandled rejection once the deadline has fired.
+    void pending.catch(() => {});
+  }
+}
+
 async function handleAction(action, payload = {}) {
   switch (action) {
     case "connector_info": {
@@ -3012,7 +3362,8 @@ async function handleAction(action, payload = {}) {
         // advertised features must drop it too or the desktop would believe uploads work.
         features: CONNECTOR_FEATURES.filter(
           (feature) =>
-            HAS_DEBUGGER || (feature !== "browser_debug" && feature !== "file_upload"),
+            HAS_DEBUGGER ||
+            (feature !== "browser_debug" && feature !== "file_upload" && feature !== "eval"),
         ),
       };
     }
@@ -3424,6 +3775,159 @@ async function handleAction(action, payload = {}) {
         limit: payload.limit,
         includeLowValue: payload.includeAssets === true,
       });
+    }
+    case "eval_script": {
+      if (!HAS_DEBUGGER) {
+        return {
+          ok: false,
+          action: "eval_script",
+          verified: false,
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message:
+            "eval_script relies on chrome.debugger (Runtime.evaluate), which Firefox does not implement.",
+        };
+      }
+      const clamped = clampExpression(payload?.expression);
+      if (!clamped.ok) {
+        return {
+          ok: false,
+          action: "eval_script",
+          verified: false,
+          code: clamped.code,
+          signal: clamped.code,
+          effect: "failed",
+          message: clamped.message,
+        };
+      }
+      const tabId = normalizeTabId(payload?.tabId);
+      if (!tabId) {
+        return {
+          ok: false,
+          action: "eval_script",
+          verified: false,
+          code: "TAB_NOT_FOUND",
+          signal: "TAB_NOT_FOUND",
+          effect: "failed",
+          message: "eval_script needs the id of the tab the script should run in.",
+        };
+      }
+      // Every call is approved on its own, including a retry of the same script: arbitrary code in
+      // the user's page is never the agent's decision, and one approval covers exactly this script
+      // on exactly this document (see computeEvalApprovalFingerprint).
+      const evalPayload = {
+        ...payload,
+        tabId,
+        expression: clamped.expression,
+        timeoutMs: clampEvalTimeout(payload?.timeoutMs),
+      };
+      const consentVerdict = await verifyConsentAndDrift({
+        action: "eval_script",
+        tabId,
+        payload: evalPayload,
+        target: { kind: "document" },
+        refusal: { reason: "eval_script", target: {} },
+      });
+      if (consentVerdict) return consentVerdict;
+
+      // Re-bound right before the call: the credential was consumed above, so the document the user
+      // approved is the only one this run may touch.
+      const approved = await resolveApprovedEvalContext({
+        tabId,
+        record: await getApprovalRecord(normalizeApprovalId(evalPayload?.approvalId)),
+      });
+      if (approved.verdict) return approved.verdict;
+      try {
+        const answer = await evaluateWithDeadline(
+          tabId,
+          {
+            // Explicit context, never the session default: the default is whichever document the
+            // tab shows at this instant, which is exactly what the approval does not cover.
+            // The unique id, never the numeric one and never the session default: the numbers are
+            // re-issued when the debugger session re-attaches, and the default context is whichever
+            // document the tab shows at this instant — neither is the document the user approved.
+            uniqueContextId: approved.context.uniqueId,
+            expression: evalPayload.expression,
+            returnByValue: true,
+            awaitPromise: evalPayload.awaitPromise === true,
+            userGesture: true,
+            includeCommandLineAPI: false,
+          },
+          evalPayload.timeoutMs,
+          // Best-effort scoping for the timeout kill: same document, not the whole target.
+          Number.isInteger(Number(approved.context.contextId))
+            ? { executionContextId: Number(approved.context.contextId) }
+            : null,
+        );
+        if (!answer) {
+          return {
+            ok: false,
+            action: "eval_script",
+            verified: false,
+            code: "EVAL_TIMEOUT",
+            signal: "EVAL_TIMEOUT",
+            effect: "failed",
+            message:
+              `脚本在 ${evalPayload.timeoutMs} ms 内没有结束，已按超时终止：未收到结果。脚本可能已部分执行，` +
+              "页面自身的脚本也可能被一并终止，副作用不可撤销。只有确认脚本确实需要这么久时才调大 timeoutMs。",
+          };
+        }
+        // `summarizeEvalResult` is shared with the other eval paths; the fields the exception branch
+        // may omit are filled in here so a throw is never reported as a verified outcome.
+        const summarized = summarizeEvalResult(answer);
+        if (summarized && summarized.ok === false) {
+          return {
+            ...summarized,
+            verified: false,
+            code: summarized.code ?? "EVAL_THREW",
+            signal: summarized.signal ?? "EVAL_THREW",
+            effect: summarized.effect ?? "failed",
+          };
+        }
+        return summarized;
+      } catch (error) {
+        // CDP refuses the call because that context no longer exists: the document went away after
+        // the approval. Reported as stale, and never retried against the default context.
+        if (isMissingContextError(error)) {
+          return approvalVerdict(
+            APPROVAL_STALE_CODE,
+            "The document this script was approved for is gone (the page navigated or its frame was replaced). " +
+              "Nothing was run; ask the user to approve the script again on the current page.",
+            { action: "eval_script" },
+          );
+        }
+        throw error;
+      } finally {
+        scheduleDetach(tabId);
+      }
+    }
+    case "list_pending_approvals": {
+      // Read-only: this lists what is waiting on a decision and grants nothing. Only records that can
+      // still be decided are listed — an expired or already consumed record would be a card the user
+      // cannot act on.
+      await hydrateApprovals();
+      sweepApprovalRecords();
+      const now = Date.now();
+      const approvals = [...approvalRecords.values()]
+        .filter((record) => record.state === "pending" && Number(record.expiresAt) > now)
+        .sort((a, b) => Number(a.expiresAt) - Number(b.expiresAt))
+        .map((record) => ({
+          approvalId: record.approvalId,
+          action: String(record.action ?? ""),
+          tabId: String(record.tabId ?? ""),
+          origin: String(record.origin ?? ""),
+          summary: typeof record.summary?.label === "string" ? record.summary.label : "",
+          expiresAt: Number(record.expiresAt),
+        }));
+      return { ok: true, approvals };
+    }
+    case "submit_approval_decision": {
+      // The host's answer to a request it rendered itself. `allow_once` is the only positive answer:
+      // deciding leaves nothing behind but this one record, which the retry consumes.
+      const approvalId = normalizeApprovalId(payload?.approvalId);
+      const decision =
+        payload?.decision === "deny" ? "deny" : payload?.decision === "allow_once" ? "approve" : "";
+      if (!approvalId || !decision) return { ok: false, code: "USER_APPROVAL_REJECTED" };
+      return await decideApprovalFromHost({ approvalId, decision });
     }
     case "close_tab": {
       await loadOpenedTabs();

@@ -49,6 +49,8 @@ const ACTION_LABELS = {
   // Without this the window labelled a select as "点击", which is a different action than the
   // one the user is being asked to allow.
   set_select_value: "选择",
+  // Arbitrary script: the label has to name it as its own kind of action, never as a click.
+  eval_script: "执行脚本",
 };
 
 const allowButton = document.getElementById("allow");
@@ -60,11 +62,34 @@ const actionLabel = document.getElementById("action-label");
 
 actionLabel.textContent = ACTION_LABELS[action] || ACTION_LABELS.click;
 targetLine.textContent = targetName ? `「${targetName}」` : "未命名控件";
-// The item the action would set, right after the control it would set it on. With no summary the
-// line stays exactly as it was — a lone arrow would say nothing.
-if (summary) {
-  const summaryText = summary.label;
-  if (summaryText) targetLine.textContent += `→ ${summaryText}`;
+const scriptCaption = document.getElementById("script-caption");
+const scriptPreview = document.getElementById("script-preview");
+
+/**
+ * A script is shown as its own block, line for line, in a scrollable <pre>.
+ *
+ * The old window put the script into the single-line control name after a "→", so a preview that
+ * had been flattened to one line (comment first, statement second) read as one harmless sentence:
+ * the user approved text they had never been shown. Line breaks are kept here, and the connector's
+ * header (first line of the preview) states the full length, any truncation and the digest of the
+ * whole script, so "this is an excerpt" is visible instead of implied.
+ */
+function renderScriptPreview() {
+  const text = summary ? summary.label : "";
+  if (scriptCaption) scriptCaption.hidden = false;
+  if (!scriptPreview) return;
+  scriptPreview.hidden = false;
+  // Assigned as text, never as HTML: the script is page-adjacent data, not markup.
+  scriptPreview.textContent = text || "（脚本内容缺失：请取消，回到 Nolo 重新发起）";
+}
+
+if (action === "eval_script") {
+  // A script has no value to set, so it never joins the control line.
+  renderScriptPreview();
+} else if (summary && summary.label) {
+  // The item the action would set, right after the control it would set it on. With no summary the
+  // line stays exactly as it was — a lone arrow would say nothing.
+  targetLine.textContent += `→ ${summary.label}`;
 }
 // A site the user cannot name is a site the user cannot judge: say "unknown" instead of leaving
 // the line blank, so a missing origin never reads as "nothing to see here".

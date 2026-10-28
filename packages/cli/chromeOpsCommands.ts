@@ -155,6 +155,14 @@ function withApprovalId(
   return approvalId ? { ...payload, approvalId } : payload;
 }
 
+/**
+ * `eval` bounds: too small a timeout cannot survive a debugger round trip, too large one holds the
+ * user's approval (and the tab) hostage. Kept in the CLI surface so the failure is a clear usage
+ * error instead of a connector-side rejection.
+ */
+const EVAL_TIMEOUT_MIN_MS = 100;
+const EVAL_TIMEOUT_MAX_MS = 60000;
+
 export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   "list-tabs": {
     action: "list_tabs",
@@ -375,6 +383,36 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
       if (limit !== undefined) payload.limit = limit;
       if (args.includes("--include-assets")) payload.includeAssets = true;
       return payload;
+    },
+  },
+  eval: {
+    action: "eval_script",
+    usage:
+      "nolo browser eval --tab <id> --expr <js> [--await] [--timeout-ms N] [--approval-id <id>]",
+    payload: (args, usage) => {
+      const expression = readOption(args, "--expr");
+      // Same rule as --text: a value that starts with "--" is a swallowed flag, not an expression.
+      if (
+        expression === undefined ||
+        expression.trim() === "" ||
+        expression.startsWith("--")
+      ) {
+        throw new Error(t("cliBrowserMissingExpression", usage));
+      }
+      const payload: ChromeConnectorRequestPayload = {
+        tabId: requireTabId(args, usage),
+        expression,
+      };
+      const timeoutMs = readNonNegativeIntOption(args, "--timeout-ms", usage);
+      if (timeoutMs !== undefined) {
+        if (timeoutMs < EVAL_TIMEOUT_MIN_MS || timeoutMs > EVAL_TIMEOUT_MAX_MS) {
+          throw new Error(t("cliBrowserEvalTimeoutRange", usage));
+        }
+        payload.timeoutMs = timeoutMs;
+      }
+      // Only `--await` sets awaitPromise: the connector/extension must never infer it.
+      if (args.includes("--await")) payload.awaitPromise = true;
+      return withApprovalId(args, payload);
     },
   },
 };

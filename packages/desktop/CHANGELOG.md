@@ -1,4 +1,16 @@
 
+## 0.202.0-alpha.1 (2026-10-28)
+
+### Features
+
+* **browser-connector:** 标签页执行脚本（eval）与对话内审批 ([28b96c2](https://github.com/nolotus/bun-nolo/commit/28b96c296e1bafaaed61a55ccf5ca66990716e6f))
+* **cli:** 补齐全部子命令的中文描述并加覆盖率门 ([d3775d7](https://github.com/nolotus/bun-nolo/commit/d3775d7a42f287f7876be55aa1ec07c320525e3a))
+
+### Bug Fixes
+
+* **chat:** 侧边栏补回收藏分区，收藏项不再从列表消失 ([de67868](https://github.com/nolotus/bun-nolo/commit/de6786890e47bafb6f19bb80ac42208ab5879ac2))
+
+
 ## 0.201.0-alpha.1 (2026-10-28)
 
 ### Features

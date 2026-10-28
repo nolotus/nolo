@@ -41,6 +41,11 @@ const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
   { name: "screenshot", summary: "Capture a screenshot (--tab <id> [--out <path>])" },
   { name: "read-console", summary: "Read recent console entries (--tab <id>)" },
   { name: "read-network", summary: "Read recent network entries (--tab <id>)" },
+  {
+    name: "eval",
+    summary:
+      "Evaluate JS in a tab, user-approved per call (--tab <id> --expr <js> [--await] [--timeout-ms N])",
+  },
 ];
 
 function getBrowserFamilyEntries(): CommandEntry[] {
