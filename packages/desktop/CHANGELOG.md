@@ -1,4 +1,11 @@
 
+## 0.202.0-alpha.4 (2026-10-28)
+
+### Bug Fixes
+
+* **quota:** 订阅窗口合并改为最新读数为准，修正面板与官方显示不一致 ([6ff93f5](https://github.com/nolotus/bun-nolo/commit/6ff93f564f2b7e04f29a852fa879a58a7443e333))
+
+
 ## 0.202.0-alpha.3 (2026-10-28)
 
 ### Bug Fixes

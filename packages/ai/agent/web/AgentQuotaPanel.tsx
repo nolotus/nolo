@@ -26,6 +26,13 @@ const WINDOW_LABELS: Array<{ match: (scope: string) => boolean; label: string }>
   { match: (s) => s === "7d" || s.endsWith("-7d"), label: "每周" },
 ];
 
+// 口径来源标签：面板显示的是「我们探测到的上游接口」，不是官方用量页面的镜像。
+// 两者刷新时机/统计窗口/是否含子功能额度都可能不同，直接对比会误判成"显示错误"。
+// 纯映射逻辑放在 quotaProvenance.ts（可单测，见 quotaProvenance.test.ts）。
+import { describeQuotaProvenance, formatProbeAge } from "./quotaProvenance";
+
+export { describeQuotaProvenance, formatProbeAge };
+
 export function pickDisplayWindows(
   quota: AgentQuota | undefined,
 ): Array<{ label: string; window: QuotaWindow }> {
@@ -147,6 +154,18 @@ export function AgentQuotaPanel({
                   {reset}
                 </div>
               ) : null}
+              {/* 口径来源 + 探测时刻：面板读的是我们主动探测的上游接口，
+                  不是 chatgpt.com/settings/usage 等官方页面的镜像（刷新时机、
+                  统计窗口、是否含子功能额度都可能不同）。 */}
+              <div
+                style={{ fontSize: 11, color: "var(--textTertiary)", marginTop: 2 }}
+                title="数据来自平台对上游额度接口的主动探测，与官方用量页面的口径和刷新时机可能不同"
+              >
+                {describeQuotaProvenance(window.source)} ·{" "}
+                {/* 窗口自身没有观测时刻，所有窗口共用快照的 observedAt：
+                    显式标成「整份快照」，别让混合龄窗口读成各自刚刚探测（LOW-4）。 */}
+                {`整份快照 · ${formatProbeAge(quota?.observedAt, now)}`}
+              </div>
             </div>
           );
         })}
