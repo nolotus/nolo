@@ -90,6 +90,11 @@ export interface SidebarItemRowProps {
    * 这里不做任何加载——只是一个诚实的状态表达。
    */
   detailMissing?: boolean;
+  /**
+   * 收藏分区专有：收藏关系记录里带来的头像（displayAvatarFileId）。
+   * 本地没有实体记录时用它画头像；没有则回退到类型图标。
+   */
+  avatarFileId?: string | null;
   categoryId?: string;
   spaceIdOverride?: string | null;
   sourceServerOrigin?: string;
@@ -141,6 +146,7 @@ function SidebarItemRow({
   type,
   title,
   detailMissing,
+  avatarFileId,
   categoryId,
   spaceIdOverride,
   sourceServerOrigin,
@@ -474,9 +480,10 @@ function SidebarItemRow({
               />
             ) : pinned ? (
               <LuPin size={ICON_SIZE} {...stylex.props(styles.icon, isActive && styles.iconActive)} aria-hidden="true" />
-            ) : type === "agent" && entity ? (
+            ) : type === "agent" && (entity || avatarFileId) ? (
               <AgentAvatar
-                agent={entity}
+                // 窗口外收藏没有本地实体时，用收藏关系记录里带来的头像 + 摘要标题。
+                agent={entity ?? { name: title, avatarFileId: avatarFileId ?? null }}
                 size={ICON_SIZE}
                 avatarSize="small"
                 {...stylex.props(styles.avatar)}

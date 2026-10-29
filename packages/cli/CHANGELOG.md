@@ -1,4 +1,12 @@
 
+## 0.191.0-alpha.1 (2026-10-29)
+
+### Features
+
+* **favorite:** 合并收藏显示摘要 ([d1a8fd2](https://github.com/nolotus/bun-nolo/commit/d1a8fd21f67ca00289f0dc3c807e1e2ec55dbe1d))
+* **favorite:** 收藏时携带显示摘要，侧边栏不再只显示类型标签 ([319703e](https://github.com/nolotus/bun-nolo/commit/319703e9bbd1cce8051a8f0de7b0fe711d988629))
+
+
 ## 0.190.0-alpha.2 (2026-10-29)
 
 ### Performance Improvements
