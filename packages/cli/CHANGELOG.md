@@ -1,4 +1,11 @@
 
+## 0.188.0-alpha.1 (2026-10-29)
+
+### Features
+
+* **agent-runtime:** 并行提示词扩到每一批工具调用 ([db35592](https://github.com/nolotus/bun-nolo/commit/db35592425cab68cc7eb21ff8d9893aa981ab805))
+
+
 ## 0.187.0-alpha.1 (2026-10-29)
 
 ### Features
