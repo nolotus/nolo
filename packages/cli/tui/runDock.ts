@@ -27,6 +27,10 @@ import {
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { displayAgentName } from "./agentRunPanelLines";
+import {
+  formatToolProgressFact,
+  runProgressStalled,
+} from "./runProgressHeartbeat";
 import { t } from "./i18n";
 import { formatProcZoneLines, formatRunZoneLines, PROC_LINGER_MAX_ROWS, procZoneFinished, remoteTaskUnsettled, resolveRunZoneMaxRows, type RemoteTaskCarrier, type RunZoneLayout, type RunZoneProc } from "./runZoneLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
@@ -470,9 +474,12 @@ function formatRunDockRow(
   else if (age) facts.push(age);
   const unassigned = formatUnassignedFact(snapshot);
   if (unassigned) facts.push(unassigned);
-  if (typeof snapshot.toolCallCount === "number" && Number.isFinite(snapshot.toolCallCount)) {
-    facts.push(t("runToolsCount", String(snapshot.toolCallCount)));
-  }
+  // 工具信息存在时保持原样；纯推理 run（0 次工具调用）改用模型调用次数当心跳。
+  const toolFact = formatToolProgressFact(snapshot);
+  if (toolFact) facts.push(toolFact);
+  // 停滞信号：次数不涨才是真正的异常（终态 run 不参与判定）。
+  const stalled = runProgressStalled(snapshot, now);
+  if (stalled) facts.push(t("runStalled"));
   // 平台积分（收尾自报）。多 run 行宽有限，用紧凑形式「⚡0.04」。
   if (typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)) {
     facts.push(formatCreditsChip(snapshot.credits, { compact: true }));
@@ -505,6 +512,6 @@ function formatRunDockRow(
     themeText(icon, statusColor, true) +
     " " +
     themeText(label, "chrome", true) +
-    themeText(factsPart, errorTail ? "danger" : "chrome")
+    themeText(factsPart, errorTail ? "danger" : stalled ? "warning" : "chrome")
   );
 }

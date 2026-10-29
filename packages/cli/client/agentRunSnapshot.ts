@@ -51,6 +51,19 @@ export type AgentRunSnapshot = {
    */
   credits?: number;
   toolCallCount?: number;
+  /**
+   * 模型调用次数（activity.counters.llmCalls）。
+   *
+   * 纯推理 run（0 次工具调用）的心跳：工具栏空着的时候，它是唯一还能证明
+   * 「这条 run 还在动」的计数。只由本地 registry 轮询提供。
+   */
+  llmCallCount?: number;
+  /**
+   * 最后一次事件的时刻（epoch ms，activity.lastEventAt）。
+   *
+   * 「次数不涨」才是真正的异常，所以停滞判定靠它，而不是靠耗时。
+   */
+  lastEventAt?: number;
   lastToolNames?: string[];
   lastAssistantText?: string;
   errorMessage?: string;

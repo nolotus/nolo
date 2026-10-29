@@ -1,4 +1,12 @@
 
+## 0.190.0-alpha.1 (2026-10-29)
+
+### Features
+
+* **cli:** TUI 里 0 工具的 run 也能看出还活不活着 ([f4c81e5](https://github.com/nolotus/bun-nolo/commit/f4c81e54c1f7b97fa7490a4dfedad52f029e28c4))
+* **cli:** 合并 TUI run 心跳 ([0886c09](https://github.com/nolotus/bun-nolo/commit/0886c09e4286f995f1292b18a2ddced24d4baa84))
+
+
 ## 0.189.0-alpha.1 (2026-10-29)
 
 ### Features

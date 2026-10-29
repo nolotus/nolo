@@ -106,6 +106,16 @@ export const agentStrings = {
     en: "+{0} more",
     zh: "还有 {0} 个",
   },
+  // 纯推理 run（0 次工具调用）的心跳：模型调用次数。
+  runLlmCalls: {
+    en: "{0} model calls",
+    zh: "{0} 次模型调用",
+  },
+  // 停滞信号：最后一次事件太久没有更新（次数不涨）。
+  runStalled: {
+    en: "may be stuck",
+    zh: "可能卡住",
+  },
   agentsTitle: {
     en: "Agents:",
     zh: "智能体：",

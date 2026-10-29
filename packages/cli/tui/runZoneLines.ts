@@ -26,6 +26,10 @@ import {
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { displayAgentName } from "./agentRunPanelLines";
 import {
+  formatToolProgressFact,
+  runProgressStalled,
+} from "./runProgressHeartbeat";
+import {
   activeInFlight,
   formatInFlightFact,
   formatUnassignedFact,
@@ -229,7 +233,7 @@ function runZoneLabel(
 function runZoneFacts(
   snapshot: AgentRunSnapshot,
   now: number
-): { time: string | null; rest: string[] } {
+): { time: string | null; rest: string[]; stalled: boolean } {
   const facts: string[] = [];
   let time: string | null = null;
 
@@ -248,9 +252,10 @@ function runZoneFacts(
   const unassigned = formatUnassignedFact(snapshot);
   if (unassigned) facts.push(unassigned);
 
-  if (typeof snapshot.toolCallCount === "number" && Number.isFinite(snapshot.toolCallCount)) {
-    facts.push(t("runToolsCount", String(snapshot.toolCallCount)));
-  }
+  // 工具信息存在时保持原样；工具信息为空（纯推理 run）时改用模型调用次数
+  // 当心跳——否则这条 run 在面板上只剩一个时长，看不出死活。
+  const toolFact = formatToolProgressFact(snapshot);
+  if (toolFact) facts.push(toolFact);
   if (typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)) {
     facts.push(formatCreditsChip(snapshot.credits, { compact: true }));
   }
@@ -264,7 +269,7 @@ function runZoneFacts(
   }
   if (snapshot.errorMessage) facts.push(clipText(snapshot.errorMessage, 40));
 
-  return { time, rest: facts };
+  return { time, rest: facts, stalled: runProgressStalled(snapshot, now) };
 }
 
 /**
@@ -334,7 +339,7 @@ export function formatRunZoneLines(
     const clock = remoteTaskClock(carrier, now);
     const icon = runZoneLeadIcon(snapshot.status, carrier);
     const label = runZoneLabel(snapshot, duplicateTitles);
-    const { time, rest } = runZoneFacts(snapshot, clock ?? now);
+    const { time, rest, stalled } = runZoneFacts(snapshot, clock ?? now);
     const remoteFacts = remoteTaskFacts(carrier, now);
     // 远端费用显式未知时不显示积分 chip——「未知」不是「0」。
     const hideCredits = remoteCostIsExplicitlyUnknown(carrier);
@@ -343,6 +348,8 @@ export function formatRunZoneLines(
     // 连证据时间都没有（clock === null）时不显示耗时：宁缺勿编。
     let factList = [
       ...(time && clock !== null ? [time] : []),
+      // 停滞提示紧跟耗时：宽度不够被裁时，它比积分/工具名更该留在屏上。
+      ...(stalled ? [t("runStalled")] : []),
       ...base,
       ...remoteFacts,
     ];
@@ -350,8 +357,8 @@ export function formatRunZoneLines(
     if (columns !== undefined) {
       const fixed = (l: string, f: string[]) =>
         visibleWidth(`${icon} ${l}${f.length ? ` · ${f.join(" · ")}` : ""}`);
-      // 1) 丢次要事实（从末尾），时间永远留在 factList[0]。
-      const keep = time ? 1 : 0;
+      // 1) 丢次要事实（从末尾），耗时与停滞提示永远留在 factList 头部。
+      const keep = (time && clock !== null ? 1 : 0) + (stalled ? 1 : 0);
       while (factList.length > keep && fixed(label, factList) > columns) factList.pop();
       // 2) 还放不下：截断标题/agent，时间不动。
       if (fixed(label, factList) > columns) {
@@ -370,7 +377,7 @@ export function formatRunZoneLines(
       themeText(icon, runStatusTone(snapshot.status), true) +
         " " +
         themeText(shownLabel, "chrome", true) +
-        themeText(factsPart, hasError ? "danger" : "chrome")
+        themeText(factsPart, hasError ? "danger" : stalled ? "warning" : "chrome")
     );
   }
 
