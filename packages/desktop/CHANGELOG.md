@@ -1,4 +1,11 @@
 
+## 0.209.0-alpha.2 (2026-10-29)
+
+### Bug Fixes
+
+* **space:** 恢复空间正文的本地优先读，修复冷启动直链卡「加载中」 ([d01dd57](https://github.com/nolotus/bun-nolo/commit/d01dd577eca10a49c6eeeb2616d3662fa975cf0b))
+
+
 ## 0.209.0-alpha.1 (2026-10-29)
 
 ### Features

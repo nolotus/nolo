@@ -9,6 +9,7 @@ import { isDeviceLocalSpaceBody } from "database/authority/deviceLocal";
 import { isTombstoneRecord } from "database/tombstones";
 import { withTimeout } from "./withTimeout";
 
+
 type FetchSpaceInput = SpaceId | { spaceId: SpaceId; fresh?: boolean };
 
 export const fetchSpaceAction = async (
@@ -67,6 +68,9 @@ export const fetchSpaceAction = async (
     const { token, userId, servers } = selectSpaceRemoteAuth(thunkAPI.getState());
     // Guest / no token: never hit remote for Space body.
     if (token && userId && servers.length > 0) {
+      // 远端读本身已经有超时（fetchFromServer 的 5s abort），这里不再叠一层 race：
+      // 叠了会导致预算不自洽（本地 1.5s×2 + 远端 8s > 切换 10s 上限），而且回退用的
+      // localBody 来自 readAndWait（它要等远端），远端慢时必为 null，回退形同虚设。
       const remoteSpace = await fetchAuthoritativeRemoteSpace({
         servers,
         token,

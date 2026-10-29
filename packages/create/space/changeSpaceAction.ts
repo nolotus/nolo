@@ -4,8 +4,6 @@ import { normalizeSpaceId } from "./spaceKeys";
 import { fetchSpaceSidebarStateAction } from "./fetchSpaceSidebarStateAction";
 import { fetchSpaceAction } from "./fetchSpaceAction";
 import { applyFetchSpaceFulfilled } from "./applyFetchSpaceFulfilled";
-import { selectSpaceRemoteAuth } from "./spaceAccess";
-import { isDeviceLocalOwnerId } from "database/authority/deviceLocal";
 // Wave E: state.space 已随 spaceSlice 删除，当前空间改读 module store。
 import {
   getCurrentSpaceIdRaw,
@@ -43,26 +41,21 @@ export const changeSpaceAction = async (
   let spaceData: SpaceData | null = null;
   let usedLocal = false;
 
-  // Only the device-local actor (`local`, desktop/CLI local mode) has an
-  // authoritative local body. For account actors the local store is not a
-  // source of truth, so skip the local-first step entirely and let the fresh
-  // path resolve the body (its local read is bounded and degrades to remote).
-  const { userId: actorId } = selectSpaceRemoteAuth(thunkAPI.getState());
-  const useLocalFirst = isDeviceLocalOwnerId(actorId ?? "");
-
-  if (useLocalFirst) {
-    try {
-      const local = await fetchSpaceAction(
-        { spaceId: normalizedSpaceId, fresh: false },
-        thunkAPI,
-      );
-      if (local?.spaceData) {
-        spaceData = local.spaceData as SpaceData;
-        usedLocal = true;
-      }
-    } catch {
-      // fall through to fresh path
+  // 空间正文仍是本地优先内容：冷启动直链时本地 body 命中就能立刻渲染，不应为了
+  // 「账号 actor 不读本地成员索引」把 body 也一起砍掉（实测会导致整页卡在加载态，
+  // 因为远端 fresh 拿不到时没有兜底）。这里的本地读已被 withTimeout 限时，卡住的
+  // 存储会退化成远端路径，不会挂死。
+  try {
+    const local = await fetchSpaceAction(
+      { spaceId: normalizedSpaceId, fresh: false },
+      thunkAPI,
+    );
+    if (local?.spaceData) {
+      spaceData = local.spaceData as SpaceData;
+      usedLocal = true;
     }
+  } catch {
+    // fall through to fresh path
   }
 
   if (!spaceData) {
