@@ -1,4 +1,12 @@
 
+## 0.188.0-alpha.2 (2026-10-29)
+
+### Bug Fixes
+
+* **cli:** dialog usage 支持本地回退，subagent 的 token 终于查得到 ([801ddf3](https://github.com/nolotus/bun-nolo/commit/801ddf31931147ab73fc919669929798de6265af))
+* **cli:** 合并 dialog usage 本地回退 ([3baebf3](https://github.com/nolotus/bun-nolo/commit/3baebf35026be3361d0a510eff752231d14010c6))
+
+
 ## 0.188.0-alpha.1 (2026-10-29)
 
 ### Features
