@@ -1,4 +1,12 @@
 
+## 0.191.0-alpha.3 (2026-10-29)
+
+### Bug Fixes
+
+* **render:** agent 头像回退成名字首字 + 稳定配色，不再清一色机器人 ([604da29](https://github.com/nolotus/bun-nolo/commit/604da293054de086cead780381fe39634f7e2ca7)), closes [#fff](https://github.com/nolotus/bun-nolo/issues/fff)
+* **render:** 合并 agent 头像首字回退 ([cbf96da](https://github.com/nolotus/bun-nolo/commit/cbf96da45652e154da39a767b6c9bae4ca4e3cf5))
+
+
 ## 0.191.0-alpha.2 (2026-10-29)
 
 ### Bug Fixes
