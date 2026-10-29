@@ -1,4 +1,11 @@
 
+## 0.211.0-alpha.1 (2026-10-29)
+
+### Features
+
+* **navigation:** 为主 rail 增加常驻标签并优化间距 ([1de523a](https://github.com/nolotus/bun-nolo/commit/1de523afa4e4f5ae65787071ba1f2ec340699662))
+
+
 ## 0.210.0-alpha.1 (2026-10-29)
 
 ### Features

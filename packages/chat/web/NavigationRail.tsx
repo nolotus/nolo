@@ -135,6 +135,7 @@ export function NavigationRail(): React.JSX.Element {
             onClick={view === "home" ? handleHomeClick : undefined}
           >
             <Icon size={17} aria-hidden="true" />
+            <span className="navigation-v2-rail__label">{label}</span>
           </NavLink>
         );
       })}
