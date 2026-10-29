@@ -130,7 +130,7 @@
 /* --- Rail -------------------------------------------------------------- */
 
 :root {
-  --navigation-rail-width: 68px;
+  --navigation-rail-width: 52px;
 }
 
 .navigation-v2-rail {
@@ -139,15 +139,15 @@
   top: 0;
   align-self: flex-start;
   z-index: 1;
-  /* 68px 是外框宽度：容纳图标与常驻文字，折叠时 aside 同步为 68px。 */
+  /* 52px 是外框宽度：左右各 4px 内边距 + 44px 文字图标块（图标 17px + 文字 11px），折叠时 aside 同步为 52px。 */
   box-sizing: border-box;
-  width: var(--navigation-rail-width, 68px);
-  flex: 0 0 var(--navigation-rail-width, 68px);
+  width: var(--navigation-rail-width, 52px);
+  flex: 0 0 var(--navigation-rail-width, 52px);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--rail-gap);
-  padding: 10px 6px;
+  padding: 10px 4px;
   /* 折叠态纵向滚动，页脚用 sticky 留在底部，滚动条隐藏以免多出一条竖条。 */
   overflow-y: auto;
   overflow-x: hidden;
@@ -197,7 +197,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 56px;
+  width: 44px;
   min-height: 38px;
   border: 0;
   border-radius: var(--radius-md, 10px);
