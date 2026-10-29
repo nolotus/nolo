@@ -11,11 +11,9 @@ import {
   selectSpaceRemoteAuth,
   spaceListsUser,
 } from "create/space/spaceAccess";
-// Wave E: spaceSlice 已删除，本地水合/恢复直接写 module store。
+// Wave E: spaceSlice 已删除，恢复结果直接写 module store。
 import {
-  hydrateMemberSpacesFromLocal,
   appendRecoveredMemberships,
-  getMemberSpaces,
 } from "create/space/spaceMembershipStore";
 import { DataType } from "create/types";
 import { API_ENDPOINTS } from "database/config";
@@ -67,38 +65,6 @@ const membershipCheckUserId = (
   isDeviceLocalSpaceMembership(membership)
     ? DEVICE_LOCAL_OWNER_ID
     : activeUserId;
-
-const buildLocalMembershipPreview = async (
-  userId: string,
-  db: any,
-  memberships: SpaceMemberWithSpaceInfo[]
-): Promise<SpaceMemberWithSpaceInfo[]> => {
-  const preview = await Promise.all(
-    memberships.map(async (membership) => {
-      if (isTombstoneRecord(membership)) return null;
-      const checkUserId = membershipCheckUserId(membership, userId);
-      if (!membershipBelongsToUser(membership, checkUserId)) return null;
-
-      const normalizedSpaceId = normalizeSpaceId(membership.spaceId);
-      const localSpaceData = await readLocalSpaceData(db, normalizedSpaceId);
-      // Offline preview only surfaces Spaces that are locally openable:
-      // body must exist, be non-tombstoned, and list the active actor.
-      // Device-local never remote-verifies; account rows without a body
-      // must not advertise as usable while remote is pending/unavailable.
-      if (!localSpaceData || isTombstoneRecord(localSpaceData)) return null;
-      if (!spaceListsUser(localSpaceData, checkUserId)) return null;
-
-      return {
-        ...membership,
-        spaceId: normalizedSpaceId,
-      };
-    })
-  );
-
-  return preview.filter(
-    (membership): membership is SpaceMemberWithSpaceInfo => !!membership
-  );
-};
 
 /**
  * 从本地 IndexedDB 按 userId 前缀扫描 space-member-{userId}-*
@@ -277,11 +243,12 @@ const recoverMembershipsFromContentSpaces = async ({
 /**
  * 获取用户的所有空间成员资格。
  *
- * Device-local foundation:
- * - Always unions `space-member-local-*` with the active account prefix.
- * - Guest (`userId === "local"`) needs no token/server.
+ * Authority split（2026-10 故障后确立）:
+ * - 账号 actor：只信服务端 RPC。`getUserSpaceMemberships` 已用
+ *   hasActiveSpaceMembership 逐条校验，本地索引不再是真值；也不再读它
+ *   （本地 Level/IndexedDB 没有超时，一次卡死的 open 会让列表永久 loading）。
+ * - 设备本地 actor（`userId === "local"`）：本地索引就是权威，无需 token/server。
  * - Device-local rows never remote-verify and never recover remotely.
- * - Same spaceId collision: active-account membership wins over local.
  */
 export const fetchUserSpaceMembershipsAction = async (
   userId: string,
@@ -292,7 +259,14 @@ export const fetchUserSpaceMembershipsAction = async (
   const { token, servers } = selectSpaceRemoteAuth(state);
   const isLocalActor = isDeviceLocalOwnerId(userId);
 
-  const localMembershipsPromise = fetchLocalUnion(userId, db);
+  // Account actors read the membership index from the server only.
+  //
+  // The local prefix scan is not a source of truth (the server validates every
+  // row in getUserSpaceMemberships) and it used to be the *first* await on this
+  // path — reading a Level/IndexedDB store that has no timeout. A stalled
+  // browser store therefore left the Space list at "loading" forever, with no
+  // error and no retry. Device-local actors (`local`) keep the local index;
+  // account actors never read it.
   // Guest / local actor: never hit remote membership RPC (no token required).
   const remoteResultsPromise = isLocalActor
     ? Promise.resolve([] as Awaited<
@@ -304,20 +278,9 @@ export const fetchUserSpaceMembershipsAction = async (
         )
       );
 
-  const localMemberships = await localMembershipsPromise;
-  // Wave E: state.space 已随 spaceSlice 删除，"memberships 未加载"改读 module store。
-  if (getMemberSpaces() === null && localMemberships.length > 0) {
-    const localPreview = await buildLocalMembershipPreview(
-      userId,
-      db,
-      localMemberships
-    );
-    // Only advertise Spaces that are locally openable offline.
-    if (localPreview.length > 0) {
-      // Wave E: spaceSlice 已删除，直接调用 module store。
-      hydrateMemberSpacesFromLocal(localPreview);
-    }
-  }
+  const localMemberships: MembershipWithSource[] = isLocalActor
+    ? await fetchLocalUnion(userId, db)
+    : [];
 
   const remoteResults = await remoteResultsPromise;
 
@@ -336,6 +299,16 @@ export const fetchUserSpaceMembershipsAction = async (
   if (hasRemoteAuthority && !hasSuccessfulRemoteFetch) {
     throw new Error(
       `${SPACE_MEMBERSHIP_REMOTE_UNAVAILABLE}: unable to refresh memberships from ${servers.join(", ")}`
+    );
+  }
+
+  // An account actor without remote authority (no token / no configured server)
+  // has no authoritative source left now that the local index is out of this
+  // path. Surface it as the recoverable remote-unavailable error instead of
+  // silently reporting "no spaces".
+  if (!isLocalActor && !hasRemoteAuthority) {
+    throw new Error(
+      `${SPACE_MEMBERSHIP_REMOTE_UNAVAILABLE}: no remote authority for ${userId}`
     );
   }
 
@@ -395,13 +368,25 @@ export const fetchUserSpaceMembershipsAction = async (
     if (!membershipBelongsToUser(membership, checkUserId)) return null;
 
     const normalizedSpaceId = normalizeSpaceId(membership.spaceId);
-    const localSpaceData = await readLocalSpaceData(db, normalizedSpaceId);
     const isDeviceLocal =
       membership.deviceLocal || isDeviceLocalSpaceMembership(membership);
+    // Lazy local body read. The normal account path is server-verified and must
+    // not touch the browser store at all: a stalled store there is exactly what
+    // turned the Space list into a permanent "loading" with no error.
+    let localSpaceDataLoaded = false;
+    let localSpaceDataCache: any = null;
+    const loadLocalSpaceData = async (): Promise<any> => {
+      if (!localSpaceDataLoaded) {
+        localSpaceDataCache = await readLocalSpaceData(db, normalizedSpaceId);
+        localSpaceDataLoaded = true;
+      }
+      return localSpaceDataCache;
+    };
 
     // Device-local memberships never remote-verify. Body must exist, be
     // non-tombstoned, and list `"local"` — missing body is ghost membership.
     if (isDeviceLocal) {
+      const localSpaceData = await loadLocalSpaceData();
       if (!localSpaceData || isTombstoneRecord(localSpaceData)) return null;
       if (!spaceListsUser(localSpaceData, checkUserId)) {
         return null;
@@ -419,23 +404,26 @@ export const fetchUserSpaceMembershipsAction = async (
       };
     }
 
+    // Memberships returned by the remote RPC (sourceServer set) are already
+    // server-verified (methods.ts getUserSpaceMemberships calls
+    // hasActiveSpaceMembership per record before returning). Re-validating
+    // each client-side via fetchRemoteSpace is redundant N remote round-trips
+    // that dominate cold-load latency — and reading the local body here would
+    // put the browser store back on the hot path. Trust the server result.
+    if (membership.sourceServer && !membership.requiresRemoteSpaceVerification) {
+      const { sourceServer: _ss, ...verifiedMembership } = membership;
+      return {
+        ...verifiedMembership,
+        spaceId: normalizedSpaceId,
+      };
+    }
+
     if (membership.sourceServer || membership.requiresRemoteSpaceVerification) {
+      const localSpaceData = await loadLocalSpaceData();
       if (localSpaceData && isTombstoneRecord(localSpaceData)) return null;
-      // Memberships returned by the remote RPC (sourceServer set) are already
-      // server-verified (methods.ts getUserSpaceMemberships calls
-      // hasActiveSpaceMembership per record before returning). Re-validating
-      // each client-side via fetchRemoteSpace is redundant N remote round-trips
-      // that dominate cold-load latency. Trust the server result directly;
-      // only locally-flagged requiresRemoteSpaceVerification records (local
+      // Only locally-flagged requiresRemoteSpaceVerification records (local
       // index present but remote index mismatch — legacy data) still pay the
       // remote verification cost.
-      if (membership.sourceServer && !membership.requiresRemoteSpaceVerification) {
-        const { sourceServer: _ss, ...verifiedMembership } = membership;
-        return {
-          ...verifiedMembership,
-          spaceId: normalizedSpaceId,
-        };
-      }
       try {
         const remoteSpaceServers = Array.from(
           new Set(
@@ -469,6 +457,7 @@ export const fetchUserSpaceMembershipsAction = async (
       }
     }
 
+    const localSpaceData = await loadLocalSpaceData();
     if (localSpaceData) {
       return !spaceListsUser(localSpaceData, userId)
         ? null

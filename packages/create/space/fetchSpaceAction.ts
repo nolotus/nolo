@@ -7,6 +7,7 @@ import {
 } from "create/space/spaceAccess";
 import { isDeviceLocalSpaceBody } from "database/authority/deviceLocal";
 import { isTombstoneRecord } from "database/tombstones";
+import { withTimeout } from "./withTimeout";
 
 type FetchSpaceInput = SpaceId | { spaceId: SpaceId; fresh?: boolean };
 
@@ -29,14 +30,13 @@ export const fetchSpaceAction = async (
   const readSpace = async (dbKey: string): Promise<SpaceData | null> => {
     try {
       const { read, readAndWait } = await import("database/dbSlice");
-      if (fresh) {
-        return await dispatch(readAndWait(dbKey)).unwrap();
-      }
-      return await dispatch(
-        read({
-          dbKey,
-        })
-      ).unwrap();
+      const readPromise = fresh
+        ? dispatch(readAndWait(dbKey)).unwrap()
+        : dispatch(read({ dbKey })).unwrap();
+      // Local reads are an accelerator, never the authority: bound them so a
+      // wedged IndexedDB/Level store degrades to the remote fetch below instead
+      // of hanging the Space content area (and any caller awaiting it) forever.
+      return await withTimeout<SpaceData>(readPromise as Promise<SpaceData>);
     } catch {
       return null;
     }

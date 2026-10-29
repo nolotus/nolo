@@ -1,4 +1,16 @@
 
+## 0.192.0-alpha.1 (2026-10-29)
+
+### Features
+
+* **space:** 加成员改为服务端原子命令（一次提交两处状态） ([ba4fc1c](https://github.com/nolotus/bun-nolo/commit/ba4fc1c46ef34d893809f6850aaec73475d77e8f))
+
+### Bug Fixes
+
+* **space:** 清理 changeSpace 的超时定时器 ([3444a44](https://github.com/nolotus/bun-nolo/commit/3444a44f0347882eea8cbc8da2ff559a2cb8a806))
+* **space:** 账号空间列表只信服务端，切换空间不再阻塞在本地库 ([cc25eb3](https://github.com/nolotus/bun-nolo/commit/cc25eb3b867956ad6394255c92092c321816ff9a))
+
+
 ## 0.191.0-alpha.3 (2026-10-29)
 
 ### Bug Fixes

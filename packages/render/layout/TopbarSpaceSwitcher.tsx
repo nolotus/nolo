@@ -14,7 +14,6 @@ import { getMyRoutePathForTab } from "app/constants/mySections";
 import { changeSpace } from "create/space/spaceThunks";
 import { fetchUserSpaceMemberships } from "create/space/member/memberThunks";
 import { setViewMode } from "create/space/spaceCurrentStore";
-import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import {
   useAllMemberSpaces,
   useMemberSpacesLoaded,
@@ -34,7 +33,7 @@ import { Dialog } from "render/web/ui/modal/Dialog";
 import { CreateSpaceForm } from "create/space/CreateSpaceForm";
 import { zIndex } from "render/styles/zIndex";
 import "./layout.css";
-import { useViewMode } from "create/space/spaceCurrentStore";
+import { useCurrentSpaceId, useViewMode } from "create/space/spaceCurrentStore";
 
 interface SpaceItemData {
   spaceId: string;
@@ -81,7 +80,18 @@ export const TopbarSpaceSwitcher: React.FC<TopbarSpaceSwitcherProps> = ({
   const navigate = useNavigate();
 
   const spaces = useAllMemberSpaces() || [];
-  const space = useCurrentSpaceFromEntity();
+  // The current Space is a projection of the membership list, not a record read
+  // from the local database (or from Redux entities). Reading it from there put
+  // the browser store on the switcher's render path: a stalled store blanked
+  // the selector even after the list itself had loaded.
+  const currentSpaceId = useCurrentSpaceId();
+  const space = useMemo(() => {
+    if (!currentSpaceId) return null;
+    const membership = spaces.find(
+      (item: SpaceItemData) => item.spaceId === currentSpaceId
+    );
+    return { id: currentSpaceId, name: membership?.spaceName };
+  }, [currentSpaceId, spaces]);
   const loading = useSpaceLoading();
   const membershipStatus = useMembershipStatus();
   const memberSpacesLoaded = useMemberSpacesLoaded();

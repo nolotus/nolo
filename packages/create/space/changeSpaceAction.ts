@@ -4,6 +4,8 @@ import { normalizeSpaceId } from "./spaceKeys";
 import { fetchSpaceSidebarStateAction } from "./fetchSpaceSidebarStateAction";
 import { fetchSpaceAction } from "./fetchSpaceAction";
 import { applyFetchSpaceFulfilled } from "./applyFetchSpaceFulfilled";
+import { selectSpaceRemoteAuth } from "./spaceAccess";
+import { isDeviceLocalOwnerId } from "database/authority/deviceLocal";
 // Wave E: state.space 已随 spaceSlice 删除，当前空间改读 module store。
 import {
   getCurrentSpaceIdRaw,
@@ -41,17 +43,26 @@ export const changeSpaceAction = async (
   let spaceData: SpaceData | null = null;
   let usedLocal = false;
 
-  try {
-    const local = await fetchSpaceAction(
-      { spaceId: normalizedSpaceId, fresh: false },
-      thunkAPI,
-    );
-    if (local?.spaceData) {
-      spaceData = local.spaceData as SpaceData;
-      usedLocal = true;
+  // Only the device-local actor (`local`, desktop/CLI local mode) has an
+  // authoritative local body. For account actors the local store is not a
+  // source of truth, so skip the local-first step entirely and let the fresh
+  // path resolve the body (its local read is bounded and degrades to remote).
+  const { userId: actorId } = selectSpaceRemoteAuth(thunkAPI.getState());
+  const useLocalFirst = isDeviceLocalOwnerId(actorId ?? "");
+
+  if (useLocalFirst) {
+    try {
+      const local = await fetchSpaceAction(
+        { spaceId: normalizedSpaceId, fresh: false },
+        thunkAPI,
+      );
+      if (local?.spaceData) {
+        spaceData = local.spaceData as SpaceData;
+        usedLocal = true;
+      }
+    } catch {
+      // fall through to fresh path
     }
-  } catch {
-    // fall through to fresh path
   }
 
   if (!spaceData) {
