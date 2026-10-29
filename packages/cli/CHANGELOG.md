@@ -1,4 +1,12 @@
 
+## 0.190.0-alpha.2 (2026-10-29)
+
+### Performance Improvements
+
+* **cli:** 合并 token 二级索引（68× 提速） ([1e83f59](https://github.com/nolotus/bun-nolo/commit/1e83f5926817294c31d616e0409c0363bdd1983f))
+* **cli:** 按 dialogId 查用量加二级索引，68× 提速 ([6b963b3](https://github.com/nolotus/bun-nolo/commit/6b963b3275165018c2379d6668c0fc044f3ddd05))
+
+
 ## 0.190.0-alpha.1 (2026-10-29)
 
 ### Features

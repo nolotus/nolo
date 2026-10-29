@@ -56,6 +56,7 @@ import { findModelConfig } from "ai/llm/providers";
 import { CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES, CHROME_CONNECTOR_TOOL_NAMES } from "ai/tools/chromeConnectorTools";
 import { appendEnabledPackPromptPatches } from "ai/tools/toolPacks";
 import { createTokenKey, createTokenStatsKey, createUserKey, dialogMessageRange } from "database/keys";
+import { buildTokenDialogIndexOps } from "ai/token/tokenDialogIndex";
 import { prepareTokenUsageData } from "ai/token/prepareTokenUsageData";
 import { applyTokenUsageToDayStats } from "ai/token/applyTokenUsageToDayStats";
 import format from "date-fns/format";
@@ -462,6 +463,15 @@ export async function saveDesktopAgentRuntimeTurnToRecordStore(args: {
         ...prepared.tokenData,
       },
     });
+    // 二级索引（按 dialogId 查明细）：与主记录同一次 batch 落库，缺一不可。
+    tokenOps.push(
+      ...buildTokenDialogIndexOps({
+        userId: args.userId,
+        dialogId: typeof prepared.tokenData.dialogId === "string" ? prepared.tokenData.dialogId : "",
+        callId: item.callId,
+        recordKey: tokenKey,
+      }),
+    );
     const dateKey = format(timestamp, "yyyy-MM-dd");
     const statsKey = createTokenStatsKey(args.userId, dateKey);
     if (stats === null) {

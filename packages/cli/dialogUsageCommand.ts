@@ -34,6 +34,14 @@ const LOCAL_TOKEN_SCAN_TIMEOUT_MS = 120_000;
  */
 const LOCAL_TOKEN_SCAN_MAX_RECORDS = 400_000;
 
+/**
+ * 索引范围扫描的**原始键数**上限（脏索引 / 脏数据的兜底）。
+ *
+ * 与「有效匹配数」上限（LOCAL_TOKEN_SCAN_MAX_RECORDS）分开：判定「索引异常」看
+ * 的是有效匹配数，扫描键数只是防止一个坏掉的 range 把整个库拖进来。
+ */
+const LOCAL_TOKEN_INDEX_MAX_SCANNED_KEYS = 4_000_000;
+
 /** 用量记录的来源：远端仓库 / 本机 LevelDB。 */
 export type UsageRecordSource = "remote" | "local";
 
@@ -127,7 +135,7 @@ function readLiveBrokerEndpoint(metadataPath: string): string | undefined {
  * 与普通 `get` 不同：扫描要把整段 range 物化 + 传输，默认 200 条/页 + 5s
  * 超时会让一次扫描退化成上千次请求。因此这里显式放大页大小与超时。
  */
-async function openLocalTokenScanClient(env: EnvLike) {
+export async function openLocalTokenScanClient(env: EnvLike) {
   const [{ getDefaultCliLocalRuntimeAuthority }, driver, broker] = await Promise.all([
     import("./localRuntimeAuthority"),
     import("../database-engine/cliAuthorityStoreDriver"),
@@ -158,16 +166,139 @@ async function openLocalTokenScanClient(env: EnvLike) {
  * 不做任何换算。远端扫用户 token 前缀，本地同样只扫该用户的前缀
  * （`token-<userId>-…`），统计类 key（token-stats-*）不在该范围内。
  */
+/**
+ * 本机 LevelDB 读取用到的最小 broker 能力（测试可注入假的实现）。
+ */
+export type LocalTokenScanClient = {
+  get(key: string): Promise<unknown>;
+  iterator(options: {
+    gte: string;
+    lte?: string;
+    lt?: string;
+    reverse?: boolean;
+    limit?: number;
+  }): AsyncIterable<[string, any]>;
+};
+
+/**
+ * 从本机 LevelDB 读取某条对话的 token 明细。
+ *
+ * 优先走**二级索引** `idx-token-dialog-<userId>-<dialogId>-<callId>`：范围扫描的
+ * 代价 = O(该对话的调用数)，与该用户的总记录数无关（本机 27.7 万条的全量扫描是
+ * 2.3s / 峰值 700MB）。
+ *
+ * 索引未回填（回填标记 `idx-tokendlg-backfill-<userId>` 缺失）时退回全量扫描
+ * （带 40 万条上限兜底）——绝不因为「索引里没有」就回答「没有用量记录」，那是
+ * 静默的数据缺失。索引条目结构异常时同样退回全量扫描。
+ */
 export async function readLocalDialogTokenRecords(
   query: LocalUsageRecordQuery,
+  deps: {
+    /** 打开 broker 客户端（测试注入假的实现）。 */
+    openClient?: (env: EnvLike) => Promise<LocalTokenScanClient>;
+    /** 强制走旧的全量扫描路径（对比/兜底用）。 */
+    forceScan?: boolean;
+  } = {},
 ): Promise<TokenRecord[]> {
-  const [{ createTokenKey, createKey }] = await Promise.all([import("database/keys")]);
+  const [{ createTokenKey, createKey, createTokenDialogIndexKey, createTokenDialogBackfillKey, TOKEN_DIALOG_INDEX_FORMAT }] =
+    await Promise.all([import("database/keys")]);
   const env = query.env ?? process.env;
-  const client = await openLocalTokenScanClient(env);
+  const client = await (deps.openClient ?? openLocalTokenScanClient)(env);
+  const candidates = new Set(
+    [query.dialogKey, query.dialogId].filter((value): value is string => Boolean(value)),
+  );
+  if (query.userId && !deps.forceScan) {
+    const indexed = await readLocalDialogTokenRecordsByIndex({
+      client,
+      userId: query.userId,
+      candidates,
+      rangeOfDialog: createTokenDialogIndexKey.rangeOfDialog,
+      backfillKey: createTokenDialogBackfillKey(query.userId),
+      indexFormat: TOKEN_DIALOG_INDEX_FORMAT,
+    });
+    if (indexed) return indexed;
+  }
+  return readLocalDialogTokenRecordsByScan({ client, query, candidates, createTokenKey, createKey });
+}
+
+/**
+ * 走二级索引读取；返回 null = 「不能只靠索引回答」，调用方退回全量扫描。
+ */
+async function readLocalDialogTokenRecordsByIndex(args: {
+  client: LocalTokenScanClient;
+  userId: string;
+  candidates: Set<string>;
+  rangeOfDialog: (userId: string, dialogId: string) => { start: string; end: string };
+  backfillKey: string;
+  /** 当前索引键格式版本：标记里的版本对不上 → 索引不可信 → 退回全量扫描。 */
+  indexFormat: string;
+}): Promise<TokenRecord[] | null> {
+  const { client, userId, candidates } = args;
+  const marker = await client.get(args.backfillKey).catch(() => null);
+  const markerRecord = marker && typeof marker === "object" ? (marker as Record<string, unknown>) : null;
+  // 标记不存在 / 标记是旧格式 → 这个用户的索引**不可信**（没回填，或回填用的是
+  // 旧键格式）→ 退回全量扫描。绝不能因为「索引里没有」就答「没有用量记录」。
+  if (!markerRecord || markerRecord.format !== args.indexFormat) return null;
+
+  const recordKeys: string[] = [];
+  const seen = new Set<string>();
+  let scannedKeys = 0;
+  for (const dialogId of candidates) {
+    const range = args.rangeOfDialog(userId, dialogId);
+    for await (const [, value] of client.iterator({ gte: range.start, lte: range.end })) {
+      scannedKeys += 1;
+      // 原始扫描键数只作「脏索引把 range 撑爆」的兜底（比有效匹配数宽松一个量级）；
+      // 判定「索引异常」用的是**有效匹配数**，不是扫描键数——否则别的对话的条目
+      // （前缀重叠 / 脏数据）会把计数抬高，把正常查询误判成异常并退回全量扫描。
+      if (scannedKeys > LOCAL_TOKEN_INDEX_MAX_SCANNED_KEYS) return null;
+      const recordKey =
+        value && typeof value === "object" && typeof value.recordKey === "string"
+          ? value.recordKey
+          : "";
+      // 索引项缺 recordKey = 索引结构坏了（不是「这个对话没有记录」）→ 退回全量。
+      if (!recordKey) return null;
+      if (seen.has(recordKey)) continue;
+      seen.add(recordKey);
+      recordKeys.push(recordKey);
+    }
+  }
+
+  // 索引可信（标记是当前格式）→ 这里「一条都没有」就是**真的没有记录**，
+  // 直接返回空，不再白扫一遍全量前缀。
+  const records: TokenRecord[] = [];
+  for (const recordKey of recordKeys) {
+    const raw = (await client.get(recordKey).catch(() => null)) as Record<string, unknown> | undefined;
+    if (!raw || typeof raw !== "object") continue;
+    if (raw.type !== undefined && raw.type !== "token") continue;
+    // 索引前缀与用户 id 段之间没有边界编码（`user-1` / `user-1-extra`），逐条核验归属。
+    if (typeof raw.userId === "string" && raw.userId !== userId) continue;
+    const recordDialogId = typeof raw.dialogId === "string" ? raw.dialogId : "";
+    if (!recordDialogId || !candidates.has(recordDialogId)) continue;
+    const record = toUsageTokenRecord(raw);
+    if (record) records.push(record);
+  }
+  // 上限判定看的是**实际匹配到的记录数**，不是扫到的索引键数：别的对话的条目
+  // （前缀重叠 / 脏数据）只会抬高扫描键数，不会让这条查询被误判成异常。
+  if (records.length > LOCAL_TOKEN_SCAN_MAX_RECORDS) return null;
+  return records;
+}
+
+/**
+ * 旧路径：全量扫该用户的 token 前缀再在内存里按 dialogId 过滤。
+ *
+ * 只在「索引未回填 / 索引异常 / 拿不到 userId」时走；40 万条上限是 OOM 兜底。
+ */
+async function readLocalDialogTokenRecordsByScan(args: {
+  client: LocalTokenScanClient;
+  query: LocalUsageRecordQuery;
+  candidates: Set<string>;
+  createTokenKey: typeof import("database/keys").createTokenKey;
+  createKey: typeof import("database/keys").createKey;
+}): Promise<TokenRecord[]> {
+  const { client, query, candidates } = args;
   const range = query.userId
-    ? createTokenKey.rangeOfUser(query.userId)
-    : { start: createKey("token", ""), end: createKey("token", "\uffff") };
-  const candidates = new Set([query.dialogKey, query.dialogId]);
+    ? args.createTokenKey.rangeOfUser(query.userId)
+    : { start: args.createKey("token", ""), end: args.createKey("token", "\uffff") };
   const records: TokenRecord[] = [];
   let scanned = 0;
   for await (const [, value] of client.iterator({ gte: range.start, lte: range.end })) {

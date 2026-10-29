@@ -27,6 +27,7 @@ import { prepareTokenUsageData } from "../../ai/token/prepareTokenUsageData";
 import { normalizeUsage } from "../../ai/token/normalizeUsage";
 import { applyTokenUsageToDayStats } from "../../ai/token/applyTokenUsageToDayStats";
 import { createTokenKey, createTokenStatsKey } from "../../database/keys";
+import { buildTokenDialogIndexOps } from "../../ai/token/tokenDialogIndex";
 import { runKeyed } from "core/keyedTaskQueue";
 import format from "date-fns/format";
 import { appendFileSync, mkdirSync } from "fs";
@@ -307,7 +308,15 @@ export async function writeLocalTokenRecord(args: {
       ...prepared.tokenData,
     };
 
-    await args.store.write(recordKey, tokenRecord);
+    await args.store.batch([
+      { type: "put", key: recordKey, value: tokenRecord },
+      ...buildTokenDialogIndexOps({
+        userId: args.userId,
+        dialogId: typeof prepared.tokenData.dialogId === "string" ? prepared.tokenData.dialogId : "",
+        callId,
+        recordKey,
+      }),
+    ]);
     // Note: only detail records are returned in `ops` for remote sync.
     // Server-side `ownsCliProjection` handles server stats projection authoritatively from details,
     // avoiding dual-writer race conditions between stats upload and server projection.
