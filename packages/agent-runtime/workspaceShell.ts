@@ -5,8 +5,8 @@
 //
 // Extracted to avoid circular dependencies between execShellCapability and workspace adapters.
 
-import { createWriteStream, existsSync, mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { createWriteStream, existsSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { spawn as spawnChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -21,7 +21,7 @@ import { resolveExecutableOnPath } from "./runtimeCompat";
 import { getProcessRegistry } from "./processRegistry";
 import type { ProcessOwner } from "./processOwnership";
 import { buildProcessTaskResultCapsule, type ProcessTaskResultCapsule } from "./processTaskResult";
-import { spillToolOutput } from "./toolSpillStore";
+import { promoteToolSpillFile, spillToolOutput } from "./toolSpillStore";
 
 export const EXEC_SHELL_TIMEOUT_ENV = "NOLO_EXEC_SHELL_TIMEOUT_MS";
 export const EXEC_SHELL_DETACH_ENV = "NOLO_EXEC_SHELL_DETACH_MS";
@@ -463,6 +463,15 @@ export function truncateToolOutput(
 
 export const DEFAULT_MAX_STREAM_BUFFER_BYTES = 5 * 1024 * 1024; // 5MB 流式内存防爆硬上限
 
+/** Delete a spill file, ignoring "not there" and permission noise. */
+function removeSpillFile(path: string): void {
+  try {
+    rmSync(path, { force: true });
+  } catch {
+    // best effort: a leftover temp file must never fail the command
+  }
+}
+
 export interface ReadNodeStreamOptions {
   /** In-memory retention cap (default DEFAULT_MAX_STREAM_BUFFER_BYTES). */
   maxBytes?: number;
@@ -472,6 +481,20 @@ export interface ReadNodeStreamOptions {
   /** Test seam: builds the writable used for spillPath. Defaults to
    *  fs.createWriteStream — injectable so slow/failing sinks stay testable. */
   spillSinkFactory?: (path: string) => NodeJS.WritableStream;
+  /**
+   * Lifecycle of the spill file once the stream settles.
+   *
+   * "keep" (default): the file stays where it was written — the caller owns
+   * it. "promote": a *complete* spill is moved into the managed spill store
+   * (quota + TTL cleaned) and the "full output:" note points at the new
+   * location; an incomplete one is deleted. "discard": the file is deleted.
+   *
+   * Every terminal path (normal end, source error, timeout, abort) settles
+   * the file, so a spill never outlives the stream that produced it.
+   */
+  spillRetention?: "keep" | "promote" | "discard";
+  /** Workspace root used to resolve the managed spill directory ("promote"). */
+  spillWorkspaceRoot?: string;
 }
 
 /** Spill lifecycle: "disabled" (no path), "idle" (path given, not yet opened),
@@ -506,6 +529,7 @@ export function readNodeStream(
       ? options.maxBytes
       : DEFAULT_MAX_STREAM_BUFFER_BYTES;
   const spillPath = asOptionalTrimmedString(options.spillPath);
+  const spillRetention = options.spillRetention ?? "keep";
   const createSink =
     options.spillSinkFactory ?? ((path: string) => createWriteStream(path));
 
@@ -517,6 +541,11 @@ export function readNodeStream(
 
     let spillState: SpillState = spillPath ? "idle" : "disabled";
     let spillError: string | null = null;
+    /** Path the user can actually read the full output from (set only when the
+     *  spill file survived the settle). */
+    let spillRetainedPath: string | null = null;
+    /** 只有 source 读到 end 才算完整捕获；close 先到不代表读完。 */
+    let sourceEnded = false;
     let spillSink: NodeJS.WritableStream | null = null;
     let sourcePausedForSpill = false;
     let sinkFinished = false;
@@ -620,22 +649,59 @@ export function readNodeStream(
       writeToSink(crossingChunk);
     };
 
+    /** Settle the spill file's lifecycle once the stream is done with it.
+     *  "keep" leaves it to the caller, "promote" moves a complete spill into
+     *  the managed spill store (and drops an incomplete one), "discard"
+     *  deletes it. Runs on every terminal path — normal end, source error,
+     *  timeout, abort — so a spill file never outlives the command that
+     *  produced it. */
+    const settleSpillRetention = async () => {
+      if (!spillPath || spillRetention === "keep") {
+        if (spillPath && spillRetention === "keep" && spillState === "ok") {
+          spillRetainedPath = spillPath;
+        }
+        return;
+      }
+      // 只有「source 真读到 end」才可能宣称完整：close 可能在没有 end 的情况下
+      // 先到（下游提前关闭），此时文件里只是已收到的字节，不能当完整输出搬运出去。
+      if (spillRetention === "promote" && spillState === "ok" && sourceEnded) {
+        const promoted = await promoteToolSpillFile(spillPath, {
+          workspaceRoot: options.spillWorkspaceRoot,
+        });
+        if (promoted.ok) {
+          spillRetainedPath = promoted.displayPath;
+          return;
+        }
+        if (promoted.preservedPath) {
+          // 完整内容还在磁盘上（发布失败）：不许删，也不要对外宣称完整输出。
+          return;
+        }
+      }
+      // Nothing worth keeping (never opened, incomplete, or promotion
+      // failed): drop the temp file instead of leaking it.
+      removeSpillFile(spillPath);
+    };
+
     const finalize = (wasTruncated: boolean) => {
       if (settled) return;
       settled = true;
       const truncatedNow = wasTruncated || truncated;
       const baseText = Buffer.concat(chunks).toString("utf8");
 
-      const done = () => {
+      const done = async () => {
+        await settleSpillRetention();
         let text = baseText;
         if (truncatedNow) {
           const notes = [`output exceeded ${formatLimit} buffer limit`];
-          if (spillState === "ok") {
-            notes.push(`full output: ${spillPath}`);
+          if (spillRetainedPath && sourceEnded) {
+            notes.push(`full output: ${spillRetainedPath}`);
           } else if (spillPath) {
-            // Never advertise a file we did not finish writing.
+            // Never advertise a file we did not finish writing (or one we
+            // already dropped).
             notes.push(
-              `spill failed${spillError ? ` (${spillError})` : ""}; output incomplete`,
+              spillState === "failed"
+                ? `spill failed${spillError ? ` (${spillError})` : ""}; output incomplete`
+                : `spill output not retained; output incomplete`,
             );
           }
           text += `\n\n[stream pipe truncated: ${notes.join("; ")}]`;
@@ -645,7 +711,7 @@ export function readNodeStream(
 
       const sink = spillSink;
       if (!sink || spillState !== "open") {
-        done();
+        void done();
         return;
       }
 
@@ -658,7 +724,7 @@ export function readNodeStream(
         } else if (spillState === "open") {
           spillState = "ok";
         }
-        done();
+        void done();
       };
       if ((sink as any).destroyed === true) {
         // Already closed before we could flush: "finish" will never arrive.
@@ -726,10 +792,17 @@ export function readNodeStream(
       // A source paused for spill backpressure must be released here: the drain
       // handler early-returns once `settled`, so nothing else would resume it.
       resumeSourceIfPaused();
+      // The spill never completed: settle it here too, otherwise a partial
+      // file would stay behind in the temp dir.
+      void settleSpillRetention();
       rejectStream(error);
     });
 
-    stream.on("end", () => finalize(false));
+    stream.on("end", () => {
+      // 只有 end 证明 source 真读完；close 可能先到且没有 end。
+      sourceEnded = true;
+      finalize(false);
+    });
     stream.on("close", () => finalize(false));
   });
 }
@@ -917,11 +990,23 @@ export async function runWorkspaceCommand(args: {
   // the process close event, and Node otherwise reports an unhandled rejection.
   // A spill path keeps the full output inspectable when it exceeds the 5MB
   // in-memory cap (the stream is drained, not destroyed, so no SIGPIPE).
+  // The spill file itself is a temp artifact: it is promoted into the managed
+  // spill store (quota + TTL cleaned) as soon as the stream settles, and
+  // dropped when it is incomplete — the system temp dir must not accumulate
+  // one file per command.
   const stdoutCapture = stdoutPromiseResult(
-    readNodeStream(proc.stdout, { spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}.log`) }),
+    readNodeStream(proc.stdout, {
+      spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}.log`),
+      spillRetention: "promote",
+      spillWorkspaceRoot: args.workspaceRoot,
+    }),
   );
   const stderrCapture = stdoutPromiseResult(
-    readNodeStream(proc.stderr, { spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}-stderr.log`) }),
+    readNodeStream(proc.stderr, {
+      spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}-stderr.log`),
+      spillRetention: "promote",
+      spillWorkspaceRoot: args.workspaceRoot,
+    }),
   );
   const killChild = (signal: NodeJS.Signals) => {
     if (detached && typeof proc.pid === "number") {

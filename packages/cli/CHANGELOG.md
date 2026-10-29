@@ -1,4 +1,11 @@
 
+## 0.191.0-alpha.2 (2026-10-29)
+
+### Bug Fixes
+
+* **agent-runtime:** execShell 溢出落盘不再泄漏到 /tmp，失败路径不丢唯一副本 ([5b7c20c](https://github.com/nolotus/bun-nolo/commit/5b7c20c1c888057735e54abf52f97ecd3f1dcd4f))
+
+
 ## 0.191.0-alpha.1 (2026-10-29)
 
 ### Features
