@@ -103,7 +103,15 @@ const SpaceContent: React.FC = () => {
   const dispatch = useAppDispatch();
   const { open } = useRightSidebar();
   const currentUserId = useUserId();
-  const { spaceData, loading: spaceLoading } = useSpaceData(spaceId!);
+  const { spaceData, loading: spaceLoading, error: spaceError } = useSpaceData(spaceId!);
+  // 正文加载失败必须说出来：否则「失败」会被渲染成「空空间」，用户以为这里没内容。
+  useEffect(() => {
+    if (spaceError) {
+      toast.error(
+        `空间内容加载失败：${(spaceError as Error)?.message ?? "未知错误"}`
+      );
+    }
+  }, [spaceError]);
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const isFilesRoute = useMemo(() => location.pathname.endsWith("/files"), [location.pathname]);

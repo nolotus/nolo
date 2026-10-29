@@ -3,6 +3,11 @@ import { withTranslation, type WithTranslation } from "react-i18next";
 
 interface ErrorBoundaryProps extends WithTranslation {
   children: ReactNode;
+  /**
+   * 变化时复位错误态（例如路由变了），但**不重挂载子树**——用 key 会造成整棵
+   * 路由子树卸载重建，丢失滚动/多选状态并触发重复请求。
+   */
+  resetKey?: string;
 }
 
 interface ErrorBoundaryState {
@@ -17,6 +22,15 @@ class PageContentErrorBoundary extends Component<
 
   static getDerivedStateFromError(): ErrorBoundaryState {
     return { hasError: true };
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps) {
+    if (
+      this.state.hasError &&
+      prevProps.resetKey !== this.props.resetKey
+    ) {
+      this.setState({ hasError: false });
+    }
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {

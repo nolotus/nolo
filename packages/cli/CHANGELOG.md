@@ -1,4 +1,11 @@
 
+## 0.194.0-alpha.2 (2026-10-29)
+
+### Bug Fixes
+
+* **space:** 懒加载超时收敛为可见错误，修复空间页永久「加载中」 ([d107803](https://github.com/nolotus/bun-nolo/commit/d10780373fe6e369fbf80277de77902797c2ea69))
+
+
 ## 0.194.0-alpha.1 (2026-10-29)
 
 ### Features
