@@ -1,123 +1,15 @@
 
-## 0.211.0-alpha.2 (2026-10-29)
-
-### Bug Fixes
-
-* **space:** 懒加载超时收敛为可见错误，修复空间页永久「加载中」 ([d107803](https://github.com/nolotus/bun-nolo/commit/d10780373fe6e369fbf80277de77902797c2ea69))
-
-
-## 0.211.0-alpha.1 (2026-10-29)
-
-### Features
-
-* **navigation:** 为主 rail 增加常驻标签并优化间距 ([1de523a](https://github.com/nolotus/bun-nolo/commit/1de523afa4e4f5ae65787071ba1f2ec340699662))
-
-
-## 0.210.0-alpha.1 (2026-10-29)
-
-### Features
-
-* **explore:** 展示内置 Skill 目录与搜索预览 ([b8b6a5b](https://github.com/nolotus/bun-nolo/commit/b8b6a5bff18c5e17ef1d13d56226b741967ea65e))
-
-
-## 0.209.0-alpha.2 (2026-10-29)
-
-### Bug Fixes
-
-* **space:** 恢复空间正文的本地优先读，修复冷启动直链卡「加载中」 ([d01dd57](https://github.com/nolotus/bun-nolo/commit/d01dd577eca10a49c6eeeb2616d3662fa975cf0b))
-
-
-## 0.209.0-alpha.1 (2026-10-29)
-
-### Features
-
-* **space:** 加成员改为服务端原子命令（一次提交两处状态） ([ba4fc1c](https://github.com/nolotus/bun-nolo/commit/ba4fc1c46ef34d893809f6850aaec73475d77e8f))
-
-### Bug Fixes
-
-* **space:** 清理 changeSpace 的超时定时器 ([3444a44](https://github.com/nolotus/bun-nolo/commit/3444a44f0347882eea8cbc8da2ff559a2cb8a806))
-* **space:** 账号空间列表只信服务端，切换空间不再阻塞在本地库 ([cc25eb3](https://github.com/nolotus/bun-nolo/commit/cc25eb3b867956ad6394255c92092c321816ff9a))
-
-
-## 0.208.0-alpha.3 (2026-10-29)
-
-### Bug Fixes
-
-* **render:** agent 头像回退成名字首字 + 稳定配色，不再清一色机器人 ([604da29](https://github.com/nolotus/bun-nolo/commit/604da293054de086cead780381fe39634f7e2ca7)), closes [#fff](https://github.com/nolotus/bun-nolo/issues/fff)
-* **render:** 合并 agent 头像首字回退 ([cbf96da](https://github.com/nolotus/bun-nolo/commit/cbf96da45652e154da39a767b6c9bae4ca4e3cf5))
-
-
-## 0.208.0-alpha.2 (2026-10-29)
-
-### Bug Fixes
-
-* **agent-runtime:** execShell 溢出落盘不再泄漏到 /tmp，失败路径不丢唯一副本 ([5b7c20c](https://github.com/nolotus/bun-nolo/commit/5b7c20c1c888057735e54abf52f97ecd3f1dcd4f))
-
-
-## 0.208.0-alpha.1 (2026-10-29)
-
-### Features
-
-* **favorite:** 合并收藏显示摘要 ([d1a8fd2](https://github.com/nolotus/bun-nolo/commit/d1a8fd21f67ca00289f0dc3c807e1e2ec55dbe1d))
-* **favorite:** 收藏时携带显示摘要，侧边栏不再只显示类型标签 ([319703e](https://github.com/nolotus/bun-nolo/commit/319703e9bbd1cce8051a8f0de7b0fe711d988629))
-
-
-## 0.207.0-alpha.2 (2026-10-29)
-
-### Performance Improvements
-
-* **cli:** 合并 token 二级索引（68× 提速） ([1e83f59](https://github.com/nolotus/bun-nolo/commit/1e83f5926817294c31d616e0409c0363bdd1983f))
-* **cli:** 按 dialogId 查用量加二级索引，68× 提速 ([6b963b3](https://github.com/nolotus/bun-nolo/commit/6b963b3275165018c2379d6668c0fc044f3ddd05))
-
-
-## 0.207.0-alpha.1 (2026-10-29)
-
-### Features
-
-* **cli:** TUI 里 0 工具的 run 也能看出还活不活着 ([f4c81e5](https://github.com/nolotus/bun-nolo/commit/f4c81e54c1f7b97fa7490a4dfedad52f029e28c4))
-* **cli:** 合并 TUI run 心跳 ([0886c09](https://github.com/nolotus/bun-nolo/commit/0886c09e4286f995f1292b18a2ddced24d4baa84))
-
-
-## 0.206.0-alpha.1 (2026-10-29)
-
-### Features
-
-* **cli:** 合并 agent 收藏/取消收藏命令 ([8abfea1](https://github.com/nolotus/bun-nolo/commit/8abfea1e2fe4f229b3547844e2707e35eadfe90f))
-* **cli:** 补 agent 收藏/取消收藏命令 ([33c6a82](https://github.com/nolotus/bun-nolo/commit/33c6a82cb5c50eee71363798cea7b21d331acb09))
-
-
-## 0.205.0-alpha.2 (2026-10-29)
-
-### Bug Fixes
-
-* **cli:** dialog usage 支持本地回退，subagent 的 token 终于查得到 ([801ddf3](https://github.com/nolotus/bun-nolo/commit/801ddf31931147ab73fc919669929798de6265af))
-* **cli:** 合并 dialog usage 本地回退 ([3baebf3](https://github.com/nolotus/bun-nolo/commit/3baebf35026be3361d0a510eff752231d14010c6))
-
-
-## 0.205.0-alpha.1 (2026-10-29)
-
-### Features
-
-* **agent-runtime:** 并行提示词扩到每一批工具调用 ([db35592](https://github.com/nolotus/bun-nolo/commit/db35592425cab68cc7eb21ff8d9893aa981ab805))
-
-
-## 0.204.0-alpha.1 (2026-10-29)
+## 0.204.0 (2026-10-29)
 
 ### Features
 
 * **agent-runtime:** 6 个执行档位定义与逐档断言 ([d091317](https://github.com/nolotus/bun-nolo/commit/d0913178813dbb841d53e12bd5e9fef3154a792e))
-* **exec-policy:** 把沙盒策略接进真实执行入口，拒绝出口不再泄露宿主路径 ([474d99f](https://github.com/nolotus/bun-nolo/commit/474d99f08933657c28f1d9b77954e227b1e27f4a))
-
-
-## 0.203.0-alpha.1 (2026-10-28)
-
-### Features
-
 * **agent-runtime:** execShell 接 bwrap 沙盒（fail-closed + 遮蔽 + 同形探测） ([d585e38](https://github.com/nolotus/bun-nolo/commit/d585e3899b127d167d780404ac217203d5b4606a))
 * **agent-runtime:** 工作区文件工具 realpath 边界（防符号链接逃逸） ([81e42d9](https://github.com/nolotus/bun-nolo/commit/81e42d9d097ba96aeeba7c9e0f06c80fa8a5038c))
 * **agent-runtime:** 执行端点契约 + 能力标注 ([bd4176a](https://github.com/nolotus/bun-nolo/commit/bd4176ac1483d459f1fb7ef7f968a232daf8eb95))
 * **agent-runtime:** 观测事件队列增加字节上限（默认 2MB） ([c66ecaa](https://github.com/nolotus/bun-nolo/commit/c66ecaa761081a78be349376545babd69e2ff880))
 * **agent-runtime:** 隔离硬约束——executionPolicy + 来源可信度 ([030bc35](https://github.com/nolotus/bun-nolo/commit/030bc355fb0fd67609e274bfa9604043707d19f7))
+* **exec-policy:** 把沙盒策略接进真实执行入口，拒绝出口不再泄露宿主路径 ([474d99f](https://github.com/nolotus/bun-nolo/commit/474d99f08933657c28f1d9b77954e227b1e27f4a))
 * **skills:** 统一技能目录契约 + 可注入来源适配器 ([00e6554](https://github.com/nolotus/bun-nolo/commit/00e6554bd5558fa2b2b5246d494629e3facca21b))
 * **skills:** 统一技能目录契约 + 可注入来源适配器 ([2562f9c](https://github.com/nolotus/bun-nolo/commit/2562f9ceb4c6a22766fe87e1e91c53bf9022a8e4))
 
@@ -127,6 +19,65 @@
 * **chat:** 缺失详情的收藏项用类型图标与标签，不再像空壳 ([52fa5c3](https://github.com/nolotus/bun-nolo/commit/52fa5c3f074fc1c0bedd1f885531bdf3550d4364))
 * **cli:** macOS 无沙盒后端不再静默；instabox 归入容器隔离分支 ([24d6e06](https://github.com/nolotus/bun-nolo/commit/24d6e061509cd9c325f8a87f8bf520527b9893e9))
 * **quota:** 让位合并保留 resetAt、补写保留并发 plan、修正 import 顺序 ([5a78aa8](https://github.com/nolotus/bun-nolo/commit/5a78aa84e8beb440d3f704e2c72efb31ee0b5ba2))
+
+
+## 0.203.0 (2026-10-28)
+
+### Features
+
+* **agent-runtime:** Gemini 原生通道注入工具图片 ([4ee3c55](https://github.com/nolotus/bun-nolo/commit/4ee3c55610d165b03a8aeff98e50e41b4818a0b9))
+* **agent-runtime:** OpenAI Chat Completions 通道注入工具图片（B1） ([4ed5d49](https://github.com/nolotus/bun-nolo/commit/4ed5d49125f29765c5c2e0e56c0854e6941a3f02))
+* **agent-runtime:** read_image 一次多张（≤4）+ 摘要统一为结构化 formatter ([74bb152](https://github.com/nolotus/bun-nolo/commit/74bb1525bc9985889a61020d126eb2f57e8e8d84))
+* **agent-runtime:** Responses/codex 通道注入工具图片（原生 output 数组） ([24fb17a](https://github.com/nolotus/bun-nolo/commit/24fb17adf50b7c4bf61243ac3cc184aacc7ad94c))
+* **agent-runtime:** Responses/codex 通道注入工具图片（原生 output 数组） ([0684318](https://github.com/nolotus/bun-nolo/commit/06843180c43c0e2d65573225d963034afab417f5))
+* **agent-runtime:** 宿主窗口捕获（xdg-desktop-portal）→ 图片（**需显式声明**） ([54c82dc](https://github.com/nolotus/bun-nolo/commit/54c82dc4a6697e482567d80ab0c85471feab2e67))
+* **agent-runtime:** 工具结果可携带图片（切片1：Anthropic 通道 + read_image + 护栏） ([dd6d6a6](https://github.com/nolotus/bun-nolo/commit/dd6d6a6b9b45f9724f23f27ff23cc62f1609e038))
+* **agent-runtime:** 页面无头渲染 → 图片（替代用户工作区脚本） ([821e619](https://github.com/nolotus/bun-nolo/commit/821e6192e8c7a30c9fd53afed73748b64081a663))
+* **browser-connector:** ask the user before irreversible actions ([3588386](https://github.com/nolotus/bun-nolo/commit/35883864b1b4a05088a083a7a10cd4ade47fdeda))
+* **browser-connector:** set native select values with readback verification ([a2e5a0a](https://github.com/nolotus/bun-nolo/commit/a2e5a0a89073a1b9cc361c87a5117247bef0edf6))
+* **browser-connector:** show the approved option, not the raw value ([3099955](https://github.com/nolotus/bun-nolo/commit/3099955da7630a488d6412af15adf486f44952fb))
+* **browser-connector:** show the target site in the approval window ([11ac07c](https://github.com/nolotus/bun-nolo/commit/11ac07c8551cca9f985e18fc3bd05b94c9e085d6))
+* **browser-connector:** 标签页执行脚本（eval）与对话内审批 ([28b96c2](https://github.com/nolotus/bun-nolo/commit/28b96c296e1bafaaed61a55ccf5ca66990716e6f))
+* **capabilities:** 每通道每请求图片上限 + 超限截断补投 ([bf3e586](https://github.com/nolotus/bun-nolo/commit/bf3e5868ca457e83f0fb82e4c99a391ef141fda6))
+* **cli:** help 本地化收尾 + 修英文提示写成中文 + 加固 i18n 守卫 ([1daaa07](https://github.com/nolotus/bun-nolo/commit/1daaa07c329e06ad51cbf2bf3c9993ff62571c2c))
+* **cli:** 修英文词条残留中文，抽离高频命令报错到 i18n ([edc95e0](https://github.com/nolotus/bun-nolo/commit/edc95e0332621fec12596356ec1c8ec5e83c003e))
+* **cli:** 补齐全部子命令的中文描述并加覆盖率门 ([d3775d7](https://github.com/nolotus/bun-nolo/commit/d3775d7a42f287f7876be55aa1ec07c320525e3a))
+* **cli:** 输出统一接入 i18n（zh/en），词条拆域 + 修 update 只读缺口 ([5abaf44](https://github.com/nolotus/bun-nolo/commit/5abaf44a5bb2439206ceb13139be6a48c6a26b2b))
+* **connector:** reach same-origin child frames for actions and consent capture ([f7c7463](https://github.com/nolotus/bun-nolo/commit/f7c74635e9eeaa33a9f049645bdd280775c7b774))
+* **connector:** 截图工具结果携带图片，模型无需再手动 read_image ([4b11b3c](https://github.com/nolotus/bun-nolo/commit/4b11b3c3ccfbefc093971506bf6813cfd270f104))
+* **llm:** deepseek-flash 默认改走 LithosAI，失效回落官方 ([7bc15cd](https://github.com/nolotus/bun-nolo/commit/7bc15cd21727182c01d108eb2a0fab1206147465))
+* **token:** usage records 支持按 dialogId 查询 + 补跨用户隔离 ([06220e0](https://github.com/nolotus/bun-nolo/commit/06220e07679cb8857e0e1813f4d22a364640203e))
+* **token:** 非流式调用记录 canonical timing + CLI 查对话速度 ([679c48b](https://github.com/nolotus/bun-nolo/commit/679c48ba515118a20826ec1079a9a29bb2175fbd))
+
+### Bug Fixes
+
+* **agent-runtime:** read_image 宽容合并 path/paths，schema 去掉参数级组合子 ([df8a578](https://github.com/nolotus/bun-nolo/commit/df8a57872b3b189c2cc5346ac34002b620930e58))
+* **agent-runtime:** 去掉 toolImages/openAiToolImages 的 node:crypto（web bundle 可达） ([f432f19](https://github.com/nolotus/bun-nolo/commit/f432f190d3eb0af4bcf17921970d5fc2b2bc48dc))
+* **agent-runtime:** 渲染器缺参 fail fast，不再静默等到超时 ([a86691e](https://github.com/nolotus/bun-nolo/commit/a86691ee2052ef105c5306128102cffc16f9276f))
+* **agent-runtime:** 让 agent 声明的 hasVision 真正到达运行时 + 图片归属标签 ([82c1fe4](https://github.com/nolotus/bun-nolo/commit/82c1fe4a8d413c8039053fbdbfddb32ed878ed62))
+* **agent-runtime:** 评测语料 FLAG 与文件名解耦（防答案泄露） ([24880df](https://github.com/nolotus/bun-nolo/commit/24880dfc071676334a3dded8b686815dc6fca78a))
+* **agent-runtime:** 超预算图片只记已投递，未投递可续取且不破坏前缀 ([7b4e8e9](https://github.com/nolotus/bun-nolo/commit/7b4e8e9c7564ce5d63a7804a67333d79d2c7be0c))
+* **browser-connector:** carry approvalId through select, align merged state ([70a2978](https://github.com/nolotus/bun-nolo/commit/70a29787c680c931f5affae3cf96e8671f862253))
+* **browser-connector:** prove select identity by node reference, not attributes ([09d743b](https://github.com/nolotus/bun-nolo/commit/09d743b3e3471b56895b750ebb298276ccfbb346))
+* **browser-connector:** 审批弹窗放大到 820×680，并补页面滚动兜底 ([b34fc51](https://github.com/nolotus/bun-nolo/commit/b34fc51aeb74ce236d49b1f9bc5707dcd4615f06))
+* **capabilities:** antigravity 每请求上限 3→4（原值源自单次观测，已证伪） ([ce24515](https://github.com/nolotus/bun-nolo/commit/ce245156cbcf451bb8bf172979bd3b78b86325f3))
+* **capabilities:** 撤销 antigravity 路由禁图（实测可用，此前结论基于旧代码） ([32ed1f3](https://github.com/nolotus/bun-nolo/commit/32ed1f33bead23ad5560bab41c255fde0b5eaded))
+* **chat:** 侧边栏补回收藏分区，收藏项不再从列表消失 ([de67868](https://github.com/nolotus/bun-nolo/commit/de6786890e47bafb6f19bb80ac42208ab5879ac2))
+* **chat:** 收藏分区与最近列表左对齐 ([ed5ad07](https://github.com/nolotus/bun-nolo/commit/ed5ad07ff6338a5a5cab1a5ba9e13bab97bf2ef9))
+* **chat:** 窗口外收藏改用类型标签，不再显示「未命名」 ([ee4867e](https://github.com/nolotus/bun-nolo/commit/ee4867e2ee3fb300de78e8c0636861bcc618ef0a))
+* **cli:** make the machine connector single-instance and observable ([4ecebd0](https://github.com/nolotus/bun-nolo/commit/4ecebd03a6688e880f0a09cc6c9ccd673731b065))
+* **cli:** 补 eval 的命令描述，覆盖率门改读定义源 ([10c077c](https://github.com/nolotus/bun-nolo/commit/10c077ca1940a39e8df93223d2b88879de74d439))
+* **connector:** normalize labels and match Latin verbs as tokens ([a953239](https://github.com/nolotus/bun-nolo/commit/a953239d8aeb640ea30c955605f8ebfdf65eb131))
+* **connector:** release completed-state labels instead of asking to confirm them ([c6a033b](https://github.com/nolotus/bun-nolo/commit/c6a033b86234e8a7aba6739e651a197f26cfb384))
+* **connector:** see through characters that hide a verb from the action gate ([084bb6a](https://github.com/nolotus/bun-nolo/commit/084bb6ab9377dca726cce7b9fea104be40a4d5ce))
+* **connector:** 截图摘要统一为 [screenshot WxH NKB → path]，归属标签可提取路径 ([f9245df](https://github.com/nolotus/bun-nolo/commit/f9245df9d85aaaad20376b9f01f57cf033241974))
+* **prepush:** 护栏失败文案不再把非零退出一律归因为依赖污染 ([2beebb6](https://github.com/nolotus/bun-nolo/commit/2beebb6cc896eb8139a171a9d3124fb146578255))
+* **quota:** 订阅窗口合并改为最新读数为准，修正面板与官方显示不一致 ([6ff93f5](https://github.com/nolotus/bun-nolo/commit/6ff93f564f2b7e04f29a852fa879a58a7443e333))
+* **tools:** read_image 真正进入请求面，并按后端可执行能力过滤 ([3287ad4](https://github.com/nolotus/bun-nolo/commit/3287ad46ad7e3682bf9a083ae8d124d97fea5545))
+
+### Performance Improvements
+
+* **prepush:** web bundle 护栏改走独立入口，不再经 test:heavy ([a857824](https://github.com/nolotus/bun-nolo/commit/a857824ea02e0b7f2c89b78450def35345409fb4))
 
 
 ## 0.202.0-alpha.5 (2026-10-28)
