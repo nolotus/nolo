@@ -1,4 +1,12 @@
 
+## 0.206.0-alpha.1 (2026-10-29)
+
+### Features
+
+* **cli:** 合并 agent 收藏/取消收藏命令 ([8abfea1](https://github.com/nolotus/bun-nolo/commit/8abfea1e2fe4f229b3547844e2707e35eadfe90f))
+* **cli:** 补 agent 收藏/取消收藏命令 ([33c6a82](https://github.com/nolotus/bun-nolo/commit/33c6a82cb5c50eee71363798cea7b21d331acb09))
+
+
 ## 0.205.0-alpha.2 (2026-10-29)
 
 ### Bug Fixes

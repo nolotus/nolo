@@ -264,6 +264,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     en: "Hard-delete an agent's private and public records",
     zh: "硬删除智能体的私有与公开记录",
   },
+  "agent favorite": {
+    en: "Favorite an agent for the current user (--off to unfavorite)",
+    zh: "收藏智能体（--off 取消收藏）",
+  },
   "agent grant": {
     en: "Grant another user access to this agent's owner credentials",
     zh: "授权其他用户使用该智能体的属主凭证",
