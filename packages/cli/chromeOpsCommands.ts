@@ -618,6 +618,17 @@ export async function runChromeOpsCommand(
     }
   }
 
+  // 审批待决时额外打一行稳定可 grep 的 approvalId：它一直嵌在 result 里，
+  // 人或 agent 想“重试这次操作”都需要先把这个 id 抠出来。
+  const pendingVerdict = result as { code?: unknown; approvalId?: unknown } | null;
+  if (
+    pendingVerdict &&
+    pendingVerdict.code === "USER_APPROVAL_PENDING" &&
+    typeof pendingVerdict.approvalId === "string" &&
+    pendingVerdict.approvalId.length > 0
+  ) {
+    io.stdout(`approvalId: ${pendingVerdict.approvalId}`);
+  }
   io.stdout(JSON.stringify({ ok: true, result }, null, 2));
   return 0;
 }
