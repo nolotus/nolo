@@ -1,4 +1,12 @@
 
+## 0.204.0-alpha.1 (2026-10-29)
+
+### Features
+
+* **agent-runtime:** 6 个执行档位定义与逐档断言 ([d091317](https://github.com/nolotus/bun-nolo/commit/d0913178813dbb841d53e12bd5e9fef3154a792e))
+* **exec-policy:** 把沙盒策略接进真实执行入口，拒绝出口不再泄露宿主路径 ([474d99f](https://github.com/nolotus/bun-nolo/commit/474d99f08933657c28f1d9b77954e227b1e27f4a))
+
+
 ## 0.203.0-alpha.1 (2026-10-28)
 
 ### Features

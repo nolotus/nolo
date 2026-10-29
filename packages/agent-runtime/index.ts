@@ -294,6 +294,7 @@ export {
   buildBwrapCommandPrefix,
   invalidateBwrapProbeCache,
   isShellSandboxEnabled,
+  isShellSandboxExplicitlyDisabled,
   noteBwrapSpawnFailure,
   probeBwrap,
   probeBwrapCached,

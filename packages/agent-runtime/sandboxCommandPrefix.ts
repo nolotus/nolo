@@ -55,6 +55,7 @@ import { mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join, resolve as resolvePath, sep } from "node:path";
 
+import type { ExecutionPolicy } from "./executionEndpoint";
 import { resolveNoloStateDir } from "./noloStateDir";
 import { resolveExecutableOnPath } from "./runtimeCompat";
 
@@ -537,6 +538,25 @@ export function isShellSandboxEnabled(
   return value === "1" || value === "true" || value === "yes";
 }
 
+/**
+ * The ops kill switch: `NOLO_SHELL_SANDBOX=0|false|off` (case-insensitive).
+ *
+ * This is NOT the same question as `isShellSandboxEnabled`. That one asks
+ * "did someone ask for isolation?" (a feature switch, owner machine); this
+ * one asks "did the operator forbid isolation?" (an ops override, every
+ * policy). Under `isolated-strictly` the env var no longer opts *in* — it can
+ * only veto. And a veto means "do not execute", never "execute on the host":
+ * turning the sandbox off is turning the *execution* off.
+ */
+export function isShellSandboxExplicitlyDisabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const raw = env[SHELL_SANDBOX_ENV];
+  if (typeof raw !== "string") return false;
+  const value = raw.trim().toLowerCase();
+  return value === "0" || value === "false" || value === "off";
+}
+
 export type ResolveShellSandboxPrefixArgs = {
   workspaceRoot: string;
   /** Defaults to true: execShell is the write path, not an inspection path. */
@@ -547,6 +567,20 @@ export type ResolveShellSandboxPrefixArgs = {
   tmpfsSizeBytes?: number;
   envVars?: Record<string, string>;
   resolveShadowTargets?: SandboxShadowResolver;
+  /**
+   * Which execution policy asks for this shell.
+   *
+   * - `host-trusted` (owner machine): `NOLO_SHELL_SANDBOX` stays a feature
+   *   switch — unset/negative means "run on the host", `1` means "isolate".
+   * - `isolated-strictly` (web origin, third-party code): the env var is an
+   *   **ops override**, not a feature switch. Isolation is the default; the
+   *   env var can only veto it (`0|false|off` → refuse, never fall back to
+   *   the host).
+   *
+   * Defaults to `isolated-strictly` (fail-closed): an undeclared policy must
+   * never be read as "the operator trusts the host".
+   */
+  executionPolicy?: ExecutionPolicy;
 };
 
 /**
@@ -572,7 +606,34 @@ export type ShellSandboxPlan =
 /** The one entry point server/host wiring should call. Fails CLOSED. */
 export function resolveShellSandboxPlan(args: ResolveShellSandboxPrefixArgs): ShellSandboxPlan {
   const env = args.env ?? process.env;
-  if (!isShellSandboxEnabled(env)) return { kind: "off", status: "host" };
+  const policy = args.executionPolicy ?? "isolated-strictly";
+
+  if (policy === "host-trusted") {
+    // Owner machine: unchanged behaviour. The env var is a feature switch —
+    // off means "the operator asked for host execution".
+    if (!isShellSandboxEnabled(env)) return { kind: "off", status: "host" };
+  } else {
+    // isolated-strictly: the env var is an ops override that can only VETO
+    // isolation. A veto means "do not execute" — never "execute on the host".
+    if (isShellSandboxExplicitlyDisabled(env)) {
+      const reason =
+        "shell sandbox was explicitly disabled by the operator; refusing to run the command on the host (fail-closed)";
+      emitSandboxWarning(
+        args.warn,
+        `[shell-sandbox] ${reason}`,
+        "operator-disabled",
+      );
+      return {
+        kind: "unavailable",
+        status: `host:unavailable:${reason}`,
+        error: "shell_sandbox_unavailable",
+        reason,
+      };
+    }
+    // Not disabled → isolation is mandatory: probe and build the prefix. The
+    // "switch on" wording is gone; there is no "not on" state any more.
+  }
+
   const outcome = buildBwrapPrefixOutcome({
     workspaceRoot: args.workspaceRoot,
     workspaceWritable: args.workspaceWritable ?? true,
@@ -682,14 +743,63 @@ function describeFsErrorCode(error: unknown): string {
  * stderr comes from bwrap and can quote the paths it was given
  * (`bwrap: Can't find source path /root/ws`), so the plan is scrubbed as a
  * whole rather than trusting each producer.
+ *
+ * Guarantee: any `/…` or `C:\…` token that starts at a word boundary becomes
+ * `<path>`, whether it has one segment (`/secrets`) or many. Known bound: a
+ * path containing spaces is only fully swallowed within the next
+ * `PATH_TAIL_WINDOW_WORDS` words, and absorbing a tail also eats the plain
+ * words in between (`<path> but src/lib` → `<path>`). Over-redacting a word of
+ * an error message is the cheaper mistake; a surviving user name is not.
  */
 export function redactHostPaths(text: string): string {
   if (!text) return text;
-  return text
-    // POSIX: /root/.nolo, /tmp/nolo-hosted-workspaces/01H… (two or more segments)
-    .replace(/(^|[\s(["'`:=])\/(?:[^\s"'`(),;:])*\/(?:[^\s"'`(),;:])*/g, "$1<path>")
-    // Windows: C:\Users\x
-    .replace(/(^|[\s(["'`:=])[A-Za-z]:\\[^\s"'`(),;:]*/g, "$1<path>");
+  return absorbPathTail(
+    text
+      // Any absolute POSIX token: /root, /secrets, /root/.nolo/data/x — and
+      // commas are filename characters, so they must not end the match.
+      .replace(/(^|[\s(["'`{(\[=,;:<>])\/[^\s"'`();:]*/g, "$1<path>")
+      // Windows: C:\Users\x
+      .replace(/(^|[\s(["'`{(\[=,;:<>])[A-Za-z]:\\[^\s"'`(),;:]*/g, "$1<path>"),
+  );
+}
+
+/** How far a space-containing path tail is followed. */
+const PATH_TAIL_WINDOW_WORDS = 6;
+
+/**
+ * `<path>` only ever covers one whitespace-delimited token, so the rest of a
+ * path that contains spaces stays behind (`/home/john doe/x` → `<path> doe/x`)
+ * — and that tail is the part carrying the user name. Absorb the following
+ * words through the last one that still looks like a path segment.
+ */
+function absorbPathTail(text: string): string {
+  if (!text.includes("<path>")) return text;
+  const parts = text.split(/(\s+)/); // even indices are words, odd are the gaps
+  const result: string[] = [];
+  for (let i = 0; i < parts.length; i += 1) {
+    const word = parts[i];
+    result.push(word);
+    // The anchor may carry a prefix or suffix (`(<path>`, `"<path>`,
+    // `source=<path>`): the replaced token is not always the whole word.
+    if (!word.includes("<path>")) continue;
+    let absorbThrough = -1;
+    const limit = Math.min(parts.length - 1, i + PATH_TAIL_WINDOW_WORDS * 2);
+    for (let j = i + 2; j <= limit; j += 2) {
+      const candidate = parts[j];
+      // A path segment wins over the terminator test: file names contain dots
+      // (`doe/secret/file.txt`), so a `.` inside a path-looking word is not the
+      // end of the path.
+      if (/[/\\]/.test(candidate)) {
+        absorbThrough = j;
+        continue;
+      }
+      // Otherwise a sentence terminator ends the path: prose must not be eaten.
+      if (/[.;:!?]/.test(candidate)) break;
+    }
+    // Drop the absorbed tail instead of re-emitting it.
+    if (absorbThrough > i) i = absorbThrough;
+  }
+  return result.join("");
 }
 
 function describeProbeFailure(result: { status: number | null; stderr?: string | Buffer | null }): string {
