@@ -383,6 +383,13 @@ export async function listFavoriteAgentIdsAcrossServers(args: {
   serverUrls: string[];
   /** Optional diagnostics; legacy callers still receive best-effort favorites. */
   onFailure?: (serverUrl: string) => void;
+  /**
+   * Optional out-param: 服务端在**收藏写入时**采集的显示摘要（displayTitle /
+   * displayAvatarFileId）也一并带出来。
+   * 三态：displayTitle === undefined = 从未采集（老收藏记录）；"" = 采集过但为空。
+   * 老服务端不返回这些字段 → 这里就没有条目（向后兼容）。
+   */
+  summariesByKey?: Record<string, { displayTitle?: string; displayAvatarFileId?: string | null }>;
 }): Promise<Record<string, number>> {
   const favoritedAtByKey: Record<string, number> = {};
   await Promise.all(
@@ -410,6 +417,19 @@ export async function listFavoriteAgentIdsAcrossServers(args: {
             favoritedAtByKey[id] ?? 0,
             at || Date.now(),
           );
+          if (
+            args.summariesByKey &&
+            (item?.displayTitle !== undefined || item?.displayAvatarFileId !== undefined)
+          ) {
+            args.summariesByKey[id] = {
+              ...(typeof item?.displayTitle === "string"
+                ? { displayTitle: item.displayTitle }
+                : {}),
+              ...(item?.displayAvatarFileId !== undefined
+                ? { displayAvatarFileId: item.displayAvatarFileId }
+                : {}),
+            };
+          }
         }
         const ids = Array.isArray(data?.ids) ? data.ids : [];
         for (const id of ids) {

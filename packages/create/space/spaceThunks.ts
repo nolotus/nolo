@@ -57,6 +57,8 @@ export const fetchSpaceSidebarState = createAsyncThunk(
   }
 );
 
+export const SPACE_SWITCH_TIMEOUT_MS = 10_000;
+
 export const changeSpace = createAsyncThunk(
   "space/changeSpace",
   async (arg: any, thunkAPI: any) => {
@@ -67,8 +69,30 @@ export const changeSpace = createAsyncThunk(
       setCurrentSpace(null);
     }
 
+    // The body load touches the local store (as an accelerator) and the remote
+    // RPC, so it is raced against a bound: a wedged store has to surface as a
+    // *bounded rejection* rather than an await that never settles. Callers rely
+    // on that rejection to fall back (mobile PinnedDock creates a local guide
+    // Space in its catch), and RN SpaceScreen reads the body from this result.
+    const actionPromise = changeSpaceAction(arg, thunkAPI);
+    // Keep a late rejection from becoming an unhandled rejection when the bound
+    // wins the race.
+    actionPromise.catch(() => {});
+
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const payload = await changeSpaceAction(arg, thunkAPI);
+      const payload = await Promise.race([
+        actionPromise,
+        new Promise<never>((_, reject) => {
+          timeoutTimer = setTimeout(
+            () =>
+              reject(
+                new Error("切换空间超时：本地存储或服务端未在时限内返回")
+              ),
+            SPACE_SWITCH_TIMEOUT_MS
+          );
+        }),
+      ]);
       setCurrentSpaceBoth(payload.spaceId, payload.spaceData);
       setMembershipLoaded();
       setCollapsedCategoriesUi(
@@ -81,6 +105,10 @@ export const changeSpace = createAsyncThunk(
       setCurrentSpaceBoth(null, null);
       setCollapsedCategoriesUi({}, null);
       throw error;
+    } finally {
+      // Normal switches settle in tens of ms; without this the 10s timer keeps
+      // a pending macrotask alive per switch.
+      if (timeoutTimer) clearTimeout(timeoutTimer);
     }
   }
 );

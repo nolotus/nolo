@@ -10,6 +10,7 @@ import MySharesPage from "app/pages/MySharesPage";
 import { resolveExploreCategory } from "app/navigation/exploreCategory";
 import PluginExplore from "./PluginExplore";
 import CreatorExplore from "./CreatorExplore";
+import SkillExplore from "./SkillExplore";
 
 /**
  * One Explore destination, driven by `?category=`.
@@ -43,6 +44,8 @@ const AgentExplore: React.FC = () => {
             <CreatorExplore />
           ) : category === "plugin" ? (
             <PluginExplore />
+          ) : category === "skill" ? (
+            <SkillExplore />
           ) : (
             <p role="status">{t("explorePage.categoryEmpty.skill", "暂无公开的 Skill。")}</p>
           )}

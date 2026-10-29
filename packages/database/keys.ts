@@ -487,6 +487,120 @@ export const createTokenKey = {
   }),
 };
 
+/* ---- Token dialog secondary index ----
+ *
+ * 用途：按 dialogId 查「某个对话的全部 token 明细」，不再全量扫 `token-<userId>-`
+ * 前缀（本机 27.7 万条 = 2.3s / 峰值 700MB）。
+ *
+ * 键布局：`idx-token-dialog-<enc(userId)>-<enc(dialogId)>-<enc(callId)>`
+ *   1. **前缀固定** → 同一对话的索引项在 LevelDB 字典序里连续聚簇，
+ *      范围扫描的代价 = O(匹配条数)，与该用户的总记录数无关；
+ *   2. **callId 放后缀**（不是「一个 dialogId 存一个 callId 数组」）→ 每次写入是
+ *      独立原子 Put，不存在读-改-写竞争；
+ *   3. 主记录键存在索引 value 里 → 读取时不必从键里反解 callId。
+ *
+ * ⚠️ 段内**不允许出现分隔符 `-`**（见 encodeTokenIndexSegment）：否则
+ * `dialogId = "chat"` 与 `dialogId = "chat-feature"` 的键空间会重叠——
+ * 前者的扫描范围（`…-chat-` … `…-chat-\uffff`）会把后者的索引键一起扫进来，
+ * 污染计数（触发「索引异常」误判 → 退回全量扫描），跨 userId 段同理。
+ * 段编码（百分号转义）让「键 = 固定前缀 + 若干不含分隔符的段」成为
+ * **前缀无关码**：不同 (userId, dialogId) 的扫描范围互不相交。
+ *
+ * 索引项与主记录在**同一次 batchWrite** 里落库 → 两者不脱节。
+ */
+export const TOKEN_DIALOG_INDEX_PREFIX = "idx-token-dialog";
+
+/**
+ * 索引键段编码：只保留 [A-Za-z0-9]，其余字符（含 `-`、`%`、`_`）一律按 UTF-8
+ * 字节转义成 %XX。
+ *
+ * 目的只有一个：**段内永远不含分隔符 `-`**。这样
+ * `idx-token-dialog-<user>-<dialog>-` 这个前缀就唯一确定了一个 (user, dialog)，
+ * 任何别的 (user', dialog') 的键都不可能落进它的范围（编码是前缀无关的：
+ * 短的段先遇到分隔符 `-`（0x2D），长的段在该位置是编码后的字符，两者不等 →
+ * 范围互斥）。
+ *
+ * 用 %XX 转义而不是 \x00 / `|`：键保持 ASCII 可打印，日志/grep/遥测里可读。
+ */
+export const encodeTokenIndexSegment = (segment: string): string => {
+  let out = "";
+  for (const ch of segment) {
+    if (/[A-Za-z0-9]/.test(ch)) {
+      out += ch;
+      continue;
+    }
+    for (const byte of new TextEncoder().encode(ch)) {
+      out += `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+    }
+  }
+  return out;
+};
+
+export type TokenDialogIndexValue = {
+  userId: string;
+  dialogId: string;
+  callId: string;
+  /** 主记录键：`token-<userId>-call-<callId>` */
+  recordKey: string;
+};
+
+export const createTokenDialogIndexKey = Object.assign(
+  (userId: string, dialogId: string, callId: string): string =>
+    createKey(
+      TOKEN_DIALOG_INDEX_PREFIX,
+      encodeTokenIndexSegment(userId),
+      encodeTokenIndexSegment(dialogId),
+      encodeTokenIndexSegment(callId),
+    ),
+  {
+    /** 某个用户在某个对话下的全部索引项范围（范围扫描用） */
+    rangeOfDialog: (userId: string, dialogId: string) => ({
+      start: createKey(
+        TOKEN_DIALOG_INDEX_PREFIX,
+        encodeTokenIndexSegment(userId),
+        encodeTokenIndexSegment(dialogId),
+        "",
+      ),
+      end: createKey(
+        TOKEN_DIALOG_INDEX_PREFIX,
+        encodeTokenIndexSegment(userId),
+        encodeTokenIndexSegment(dialogId),
+        "\uffff",
+      ),
+    }),
+  }
+);
+
+/**
+ * 索引键格式版本：写进回填标记里，读取路径据此判断「这个索引是不是当前格式」。
+ *
+ * 格式变了（段编码规则改了）但用户还没重新回填时，旧标记不带当前版本 →
+ * 读取路径不信任索引 → 退回全量扫描（慢但**不会静默查不到**）。
+ */
+export const TOKEN_DIALOG_INDEX_FORMAT = "v2";
+
+
+/**
+ * 回填完成标记：`idx-tokendlg-backfill-<userId>`。
+ *
+ * 存在 = 该用户的 token 明细**已全部**带索引 → 读取路径可以只走索引。
+ * 缺失 = 还没回填（老数据没有索引）→ 读取路径退回全量扫描（带 40 万条上限兜底），
+ * 否则会出现「索引里没有 → 查不到」的静默数据缺失。
+ *
+ * 标记单独用 `idx-tokendlg-` 前缀：既不落在 `token-<userId>-`（明细扫描范围）里，
+ * 也不落在 `idx-token-dialog-<userId>-<dialogId>-`（索引扫描范围）里。
+ *
+ * 标记值里带 `format`（当前索引键格式版本）：读取路径**只信任**当前格式的标记，
+ * 格式变更后没重新回填的用户 → 标记版本不匹配 → 退回全量扫描（慢但不会静默
+ * 查不到）。见 TOKEN_DIALOG_INDEX_FORMAT。
+ *
+ * ⚠️ 标记的含义是「**回填那一刻为止**的明细已全部带索引」。之后由**旧版写入
+ * 路径**（没写索引的旧二进制）落盘的记录不会自动有索引项 → 按 dialogId 查会
+ * 少报。升级到带索引写入的版本后重跑一次回填脚本即可补齐（幂等）。
+ */
+export const createTokenDialogBackfillKey = (userId: string): string =>
+  createKey("idx-tokendlg-backfill", encodeTokenIndexSegment(userId));
+
 /* ---- Token Stats ---- */
 export const createTokenStatsKey = Object.assign(
   (userId: string, dateKey: string) =>

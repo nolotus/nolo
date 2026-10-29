@@ -11,6 +11,7 @@
 import { useSyncExternalStore } from "react";
 import type {
     FavoriteTargetType,
+    FavoriteDisplaySummary,
     FavoriteListItem,
     ListFavoritesResult,
     SetFavoriteResult,
@@ -23,6 +24,11 @@ interface FavoriteState {
     contentIds: string[];
     // 记录收藏时间（毫秒时间戳），用于跨类型排序
     favoritedAtById: Record<string, number>;
+    /**
+     * 收藏关系记录里带来的显示摘要（displayTitle / displayAvatarFileId）。
+     * 老收藏记录没有摘要 → 这里没有条目 → 侧边栏回退成类型标签。
+     */
+    displaySummaryById: Record<string, FavoriteDisplaySummary>;
 
     initialized: boolean; // 是否已从服务器加载过（成功或失败都算）
     loading: boolean;
@@ -35,6 +41,7 @@ const createInitialState = (): FavoriteState => ({
     agentIds: [],
     contentIds: [],
     favoritedAtById: {},
+    displaySummaryById: {},
     initialized: false,
     loading: false,
     snapshotComplete: false,
@@ -118,6 +125,84 @@ function buildFavoritedMap(result: ListFavoritesResult): Record<string, number> 
     }
 
     return map;
+}
+
+/**
+ * 从 listFavorites 的结果里取显示摘要。
+ *
+ * 三态必须区分（见 app/favorite/type.ts）：
+ *  - displayTitle === undefined → 从未采集（老记录），允许修复
+ *  - displayTitle === ""        → 采集过但没有标题/无权读取，不再重试
+ */
+function buildSummaryMap(result: ListFavoritesResult): Record<string, FavoriteDisplaySummary> {
+    const map: Record<string, FavoriteDisplaySummary> = {};
+    if (!Array.isArray(result.items)) return map;
+
+    result.items.forEach((item: FavoriteListItem) => {
+        if (!item?.id) return;
+        if (item.displayTitle === undefined && item.displayAvatarFileId === undefined) return;
+        map[item.id] = {
+            ...(item.displayTitle !== undefined ? { displayTitle: item.displayTitle } : {}),
+            ...(item.displayAvatarFileId !== undefined ? { displayAvatarFileId: item.displayAvatarFileId } : {}),
+            ...(item.displayCapturedAt !== undefined ? { displayCapturedAt: item.displayCapturedAt } : {}),
+        };
+    });
+    return map;
+}
+
+/**
+ * 合并两份摘要里的标题。
+ *
+ * 三态必须保真：**绝不能**把「采集过但为空」（""）退回成「从未采集」（undefined），
+ * 否则会让人以为还能补读、引发反复补读。
+ *  - prev === undefined → 用对方的态（可能是 ""）
+ *  - prev === "" 且对方有名字 → 取名字（更具体）
+ *  - 其它情况 → 保留先到的
+ */
+function preferSummaryTitle(prev?: string, next?: string): string | undefined {
+    if (prev === undefined) return next;
+    if (prev === "" && next) return next;
+    return prev;
+}
+
+/** 同上，null = 采集过但没有头像。 */
+function preferSummaryAvatar(
+    prev?: string | null,
+    next?: string | null
+): string | null | undefined {
+    if (prev === undefined) return next;
+    if (prev === null && next) return next;
+    return prev;
+}
+
+function mergeSummaryMaps(
+    results: ListFavoritesResult[]
+): Record<string, FavoriteDisplaySummary> {
+    const merged: Record<string, FavoriteDisplaySummary> = {};
+
+    results.forEach((result) => {
+        const map = buildSummaryMap(result);
+        Object.entries(map).forEach(([id, summary]) => {
+            const prev = merged[id];
+            if (!prev) {
+                merged[id] = summary;
+                return;
+            }
+            const title = preferSummaryTitle(prev.displayTitle, summary.displayTitle);
+            const avatar = preferSummaryAvatar(
+                prev.displayAvatarFileId,
+                summary.displayAvatarFileId
+            );
+            const capturedAt = prev.displayCapturedAt ?? summary.displayCapturedAt;
+            merged[id] = {
+                ...(title !== undefined ? { displayTitle: title } : {}),
+                ...(avatar !== undefined ? { displayAvatarFileId: avatar } : {}),
+                ...(capturedAt !== undefined ? { displayCapturedAt: capturedAt } : {}),
+            };
+        });
+    });
+
+    return merged;
 }
 
 function mergeFavoritedMaps(
@@ -330,7 +415,7 @@ async function setFavoriteAcrossServers(
     token: string,
     servers: string[],
     favoritedAt?: number
-): Promise<void> {
+): Promise<SetFavoriteResult | undefined> {
     if (servers.length === 0) {
         throw new Error("没有可用服务器，无法同步收藏");
     }
@@ -375,6 +460,13 @@ async function setFavoriteAcrossServers(
             failures.map((failure) => failure.reason)
         );
     }
+
+    // 回带服务端在收藏时采到的显示摘要（displayTitle / displayAvatarFileId）。
+    const fulfilled = results.find(
+        (result): result is PromiseFulfilledResult<SetFavoriteResult> =>
+            result.status === "fulfilled"
+    );
+    return fulfilled?.value;
 }
 
 async function reconcileFavoriteUnion(
@@ -439,8 +531,10 @@ export function removeFavoriteLocally(payload: {
             ...state,
             agentIds: state.agentIds.filter((item) => item !== id),
             favoritedAtById: { ...state.favoritedAtById },
+            displaySummaryById: { ...state.displaySummaryById },
         };
         delete state.favoritedAtById[id];
+        delete state.displaySummaryById[id];
         notify();
         return;
     }
@@ -453,8 +547,10 @@ export function removeFavoriteLocally(payload: {
             ...state,
             contentIds: state.contentIds.filter((item) => item !== id),
             favoritedAtById: { ...state.favoritedAtById },
+            displaySummaryById: { ...state.displaySummaryById },
         };
         delete state.favoritedAtById[id];
+        delete state.displaySummaryById[id];
         notify();
     }
 }
@@ -468,11 +564,13 @@ function replaceFavorites(data: {
     agentIds: string[];
     contentIds: string[];
     favoritedAtById: Record<string, number>;
+    displaySummaryById?: Record<string, FavoriteDisplaySummary>;
 }): void {
     state = {
         agentIds: data.agentIds || [],
         contentIds: data.contentIds || [],
         favoritedAtById: data.favoritedAtById || {},
+        displaySummaryById: data.displaySummaryById || {},
         initialized: true,
         loading: false,
         snapshotComplete: true,
@@ -492,35 +590,54 @@ function markFavoritesInitFailed(message: string): void {
     notify();
 }
 
-function applyAgentToggle(agentKey: string, isFavorite: boolean): void {
+function applyAgentToggle(
+    agentKey: string,
+    isFavorite: boolean,
+    summary?: FavoriteDisplaySummary
+): void {
     const favoritedAtById = { ...state.favoritedAtById };
+    const displaySummaryById = { ...state.displaySummaryById };
     let agentIds = state.agentIds;
     if (isFavorite) {
         if (!agentIds.includes(agentKey)) {
             agentIds = [agentKey, ...agentIds];
         }
         favoritedAtById[agentKey] = Date.now();
+        // 服务端回带的摘要（displayTitle === undefined 表示从未采集，不写）。
+        if (summary && summary.displayTitle !== undefined) {
+            displaySummaryById[agentKey] = { ...summary };
+        }
     } else {
         agentIds = agentIds.filter((id) => id !== agentKey);
         delete favoritedAtById[agentKey];
+        delete displaySummaryById[agentKey];
     }
-    state = { ...state, agentIds, favoritedAtById };
+    state = { ...state, agentIds, favoritedAtById, displaySummaryById };
     notify();
 }
 
-function applyContentToggle(contentKey: string, isFavorite: boolean): void {
+function applyContentToggle(
+    contentKey: string,
+    isFavorite: boolean,
+    summary?: FavoriteDisplaySummary
+): void {
     const favoritedAtById = { ...state.favoritedAtById };
+    const displaySummaryById = { ...state.displaySummaryById };
     let contentIds = state.contentIds;
     if (isFavorite) {
         if (!contentIds.includes(contentKey)) {
             contentIds = [contentKey, ...contentIds];
         }
         favoritedAtById[contentKey] = Date.now();
+        if (summary && summary.displayTitle !== undefined) {
+            displaySummaryById[contentKey] = { ...summary };
+        }
     } else {
         contentIds = contentIds.filter((id) => id !== contentKey);
         delete favoritedAtById[contentKey];
+        delete displaySummaryById[contentKey];
     }
-    state = { ...state, contentIds, favoritedAtById };
+    state = { ...state, contentIds, favoritedAtById, displaySummaryById };
     notify();
 }
 
@@ -541,6 +658,10 @@ export function getFavoriteContentIds(): string[] {
 
 export function getFavoriteFavoritedAtById(): Record<string, number> {
     return state.favoritedAtById;
+}
+
+export function getFavoriteDisplaySummaries(): Record<string, FavoriteDisplaySummary> {
+    return state.displaySummaryById;
 }
 
 export function getFavoritesLoading(): boolean {
@@ -595,6 +716,12 @@ export function useFavoriteContentIds(): string[] {
 export function useFavoriteFavoritedAtById(): Record<string, number> {
     useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
     return getFavoriteFavoritedAtById();
+}
+
+/** 收藏项的显示摘要（来自收藏关系记录）。老收藏没有摘要 → 空对象。 */
+export function useFavoriteDisplaySummaries(): Record<string, FavoriteDisplaySummary> {
+    useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+    return getFavoriteDisplaySummaries();
 }
 
 export function useFavoritesLoading(): boolean {
@@ -735,6 +862,10 @@ export async function initFavorites(deps: FavoriteDeps): Promise<unknown> {
                     ...agentFavoritedAtById,
                     ...contentFavoritedAtById,
                 },
+                displaySummaryById: {
+                    ...mergeSummaryMaps(snapshots.map((snapshot) => snapshot.agentFavorites)),
+                    ...mergeSummaryMaps(snapshots.map((snapshot) => snapshot.contentFavorites)),
+                },
             };
             replaceFavorites(payload);
             if (failures.length > 0) {
@@ -764,7 +895,7 @@ export async function toggleFavorite(
     }
 
     try {
-        await setFavoriteAcrossServers(
+        const result = await setFavoriteAcrossServers(
             "agent",
             agentKey,
             nextFavoriteState,
@@ -772,7 +903,7 @@ export async function toggleFavorite(
             servers,
             favoritedAt
         );
-        applyAgentToggle(agentKey, nextFavoriteState);
+        applyAgentToggle(agentKey, nextFavoriteState, result);
         return { agentKey, isFavorite: nextFavoriteState };
     } catch (error) {
         const message =
@@ -798,7 +929,7 @@ export async function toggleContentFavorite(
     }
 
     try {
-        await setFavoriteAcrossServers(
+        const result = await setFavoriteAcrossServers(
             "content",
             contentKey,
             nextFavoriteState,
@@ -806,7 +937,7 @@ export async function toggleContentFavorite(
             servers,
             favoritedAt
         );
-        applyContentToggle(contentKey, nextFavoriteState);
+        applyContentToggle(contentKey, nextFavoriteState, result);
         return { contentKey, isFavorite: nextFavoriteState };
     } catch (error) {
         const message =

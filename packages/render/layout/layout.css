@@ -3148,6 +3148,6 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
     overflow-y: auto;
   }
   .MainLayout__sidebar--rail-only .navigation-v2-context { display: none; }
-  .MainLayout__sidebar--rail-only .navigation-v2-shell { width: 44px; min-width: 0; }
-  .MainLayout__sidebar--rail-only .navigation-v2-rail { width: 44px; flex: 0 0 44px; }
+  .MainLayout__sidebar--rail-only .navigation-v2-shell { width: var(--navigation-rail-width, 68px); min-width: 0; }
+  .MainLayout__sidebar--rail-only .navigation-v2-rail { width: var(--navigation-rail-width, 68px); flex: 0 0 var(--navigation-rail-width, 68px); }
 }

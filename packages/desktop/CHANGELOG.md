@@ -1,4 +1,37 @@
 
+## 0.205.0 (2026-10-29)
+
+### Features
+
+* **agent-runtime:** 并行提示词扩到每一批工具调用 ([db35592](https://github.com/nolotus/bun-nolo/commit/db35592425cab68cc7eb21ff8d9893aa981ab805))
+* **cli:** TUI 里 0 工具的 run 也能看出还活不活着 ([f4c81e5](https://github.com/nolotus/bun-nolo/commit/f4c81e54c1f7b97fa7490a4dfedad52f029e28c4))
+* **cli:** 合并 agent 收藏/取消收藏命令 ([8abfea1](https://github.com/nolotus/bun-nolo/commit/8abfea1e2fe4f229b3547844e2707e35eadfe90f))
+* **cli:** 合并 TUI run 心跳 ([0886c09](https://github.com/nolotus/bun-nolo/commit/0886c09e4286f995f1292b18a2ddced24d4baa84))
+* **cli:** 补 agent 收藏/取消收藏命令 ([33c6a82](https://github.com/nolotus/bun-nolo/commit/33c6a82cb5c50eee71363798cea7b21d331acb09))
+* **explore:** 展示内置 Skill 目录与搜索预览 ([b8b6a5b](https://github.com/nolotus/bun-nolo/commit/b8b6a5bff18c5e17ef1d13d56226b741967ea65e))
+* **favorite:** 合并收藏显示摘要 ([d1a8fd2](https://github.com/nolotus/bun-nolo/commit/d1a8fd21f67ca00289f0dc3c807e1e2ec55dbe1d))
+* **favorite:** 收藏时携带显示摘要，侧边栏不再只显示类型标签 ([319703e](https://github.com/nolotus/bun-nolo/commit/319703e9bbd1cce8051a8f0de7b0fe711d988629))
+* **navigation:** 为主 rail 增加常驻标签并优化间距 ([1de523a](https://github.com/nolotus/bun-nolo/commit/1de523afa4e4f5ae65787071ba1f2ec340699662))
+* **space:** 加成员改为服务端原子命令（一次提交两处状态） ([ba4fc1c](https://github.com/nolotus/bun-nolo/commit/ba4fc1c46ef34d893809f6850aaec73475d77e8f))
+
+### Bug Fixes
+
+* **agent-runtime:** execShell 溢出落盘不再泄漏到 /tmp，失败路径不丢唯一副本 ([5b7c20c](https://github.com/nolotus/bun-nolo/commit/5b7c20c1c888057735e54abf52f97ecd3f1dcd4f))
+* **cli:** dialog usage 支持本地回退，subagent 的 token 终于查得到 ([801ddf3](https://github.com/nolotus/bun-nolo/commit/801ddf31931147ab73fc919669929798de6265af))
+* **cli:** 合并 dialog usage 本地回退 ([3baebf3](https://github.com/nolotus/bun-nolo/commit/3baebf35026be3361d0a510eff752231d14010c6))
+* **render:** agent 头像回退成名字首字 + 稳定配色，不再清一色机器人 ([604da29](https://github.com/nolotus/bun-nolo/commit/604da293054de086cead780381fe39634f7e2ca7)), closes [#fff](https://github.com/nolotus/bun-nolo/issues/fff)
+* **render:** 合并 agent 头像首字回退 ([cbf96da](https://github.com/nolotus/bun-nolo/commit/cbf96da45652e154da39a767b6c9bae4ca4e3cf5))
+* **space:** 恢复空间正文的本地优先读，修复冷启动直链卡「加载中」 ([d01dd57](https://github.com/nolotus/bun-nolo/commit/d01dd577eca10a49c6eeeb2616d3662fa975cf0b))
+* **space:** 懒加载超时收敛为可见错误，修复空间页永久「加载中」 ([d107803](https://github.com/nolotus/bun-nolo/commit/d10780373fe6e369fbf80277de77902797c2ea69))
+* **space:** 清理 changeSpace 的超时定时器 ([3444a44](https://github.com/nolotus/bun-nolo/commit/3444a44f0347882eea8cbc8da2ff559a2cb8a806))
+* **space:** 账号空间列表只信服务端，切换空间不再阻塞在本地库 ([cc25eb3](https://github.com/nolotus/bun-nolo/commit/cc25eb3b867956ad6394255c92092c321816ff9a))
+
+### Performance Improvements
+
+* **cli:** 合并 token 二级索引（68× 提速） ([1e83f59](https://github.com/nolotus/bun-nolo/commit/1e83f5926817294c31d616e0409c0363bdd1983f))
+* **cli:** 按 dialogId 查用量加二级索引，68× 提速 ([6b963b3](https://github.com/nolotus/bun-nolo/commit/6b963b3275165018c2379d6668c0fc044f3ddd05))
+
+
 ## 0.204.0 (2026-10-29)
 
 ### Features

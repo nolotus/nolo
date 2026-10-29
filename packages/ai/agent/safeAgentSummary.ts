@@ -49,6 +49,45 @@ export interface CredentialGroupSummary {
   availableAt?: number;
 }
 
+/**
+ * ⚠️ **对 OAuth 分支而言**，`credentialGroup` **不是「凭据身份」**，只是 provider 家族标签。
+ * （api-key 分支是 `cred-<ref 的哈希>`、custom 分支是 `custom-<userId|url 的哈希>`，
+ * 两者本来就按账号/配置区分，不存在这个问题。）
+ *
+ * 对本机 OAuth，它直接返回 provider 名（`chatgpt` / `antigravity` / …，见
+ * 下方 `trimmed.toLowerCase()` 分支），而 `apiKeyRef` 本身就不含账号信息
+ * （`OAUTH_APIKEY_REFS` 是一组裸 provider 名）。后果：
+ *
+ *   · 你自己 OAuth 登录的 chatgpt agent  → credentialGroup = "chatgpt"
+ *   · 别人分享给你的 chatgpt agent       → credentialGroup = "chatgpt"
+ *
+ * 两者撞成同一组，但它们花的是**不同账号的配额**。2026-09-18 已因此把别人的
+ * agent 并进调用者的 429 冷却组（见 summarizeCredentialGroups 的跳过逻辑）；
+ * 2026-10-29 又因此让编排者误判「这两个 agent 共用凭据」。
+ *
+ * **判断「是不是同一份凭据」不要只看 credentialGroup**，按这三层看：
+ *   · `billingSource`：自有 = `user_subscription` / `user_api`；非自有 =
+ *     `owner_subscription` **或 `platform_credits`**（非自有且记录缺 userId/ownerId
+ *     时走后者，见 agentBilling.ts 的 resolveBillingSource）——不能把「非自有」
+ *     简单等同于「跑别人的订阅」。
+ *   · `isOwned`：**未登录时一律 false**（isOwnedAgentRecord 的既有行为），
+ *     所以 `false` 有时是「不知道」，不等于「属于别人」。
+ *   · 需要更细时读 record 的 `userId` / `ownerId`。注意 agentKey 有三种形态：
+ *     自有 `agent-<userId>-<id>`、空间共享 `agent-<ownerUserId>-<id>`、
+ *     公开 `agent-pub-<id>`（**没有 userId**）；且 userId 本身可能含连字符
+ *     （如 `user-1`），**不能按 `-` 分段解析**。
+ *
+ * 并发准入（credentialFanoutGuard）只做 credentialGroup 的字符串比较，其 entry
+ * 是 `{runId, agentKey, credentialGroup}`——**不含 isOwned**。所以「自己的 OAuth」
+ * 与「别人的同 provider OAuth」在准入层依然同组；之所以没把别人的冷却算进来，
+ * 靠的是 summarizeCredentialGroups 跳过非自有 agent，不是准入层的判断。
+ * 要根治需把 credentialGroup 拆成「provider 家族」与「凭据身份（provider +
+ * 归属账号）」两个字段。
+ *
+ * **它什么时候是对的**：`isOwned === true` 且同为 OAuth 时，同 provider 的几个
+ * 自有 agent 确实共用你自己那一份账号凭据，此时 credentialGroup 分组完全正确。
+ * 错的只有「跨归属」这一种情况——别因此把 credentialGroup 整体当成不可用。
+ */
 export function deriveCredentialGroup(ref?: string | null): {
   credentialGroup: string;
   credentialKind: CredentialKind;

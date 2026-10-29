@@ -39,6 +39,11 @@ export interface SidebarPinnedItem {
    * 渲染层据此画成「类型图标 + 类型标签」的完整条目，而不是空壳。
    */
   detailMissing?: boolean;
+  /**
+   * 收藏分区专有：收藏关系记录里带来的头像（displayAvatarFileId）。
+   * 没有头像时由行回退到类型图标 / 实体头像。
+   */
+  avatarFileId?: string | null;
 }
 
 interface SidebarPinnedBlockProps {
@@ -139,6 +144,7 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
               spaceIdOverride={itemSpaceId}
               sourceServerOrigin={item.serverOrigin}
               detailMissing={item.detailMissing}
+              avatarFileId={item.avatarFileId}
               summaryStatus={"status" in item ? item.status : undefined}
               summaryUnreadAt={"unreadAt" in item ? item.unreadAt : undefined}
               disableDrag

@@ -21,6 +21,25 @@
 // 因此：有本地记录就用与最近列表同一条标题链（resolveUserContentTitle）解析真名；
 // 没有本地记录时显示按类型的诚实占位（「对话」/「文档」/「表格」/「AI」/…），
 // 既不是「未命名」，也不把原始 dbKey（如 agent-xxx）暴露到界面上。
+//
+// ── 窗口外收藏的标题：收藏时采集的摘要（仍然零请求）──
+// 收藏写入时，服务端把「显示摘要」（displayTitle / displayAvatarFileId）写进
+// **正向关系记录**（fav-agent-key-{userId}-{agentKey} / fav-page-key-…），
+// 读取时随 listFavorites 一起带回来。于是窗口外的收藏项也能显示真名——
+// 依然没有任何「打开侧边栏时补读」的请求。
+//
+// 三态必须区分（否则会引发反复补读的死循环）：
+//  - displayTitle === undefined → **没有采到**（老收藏 / 无权读取 / 记录不存在）→ 允许修复
+//  - displayTitle === ""        → 采集到了，但内容本来没有标题/头像 → 终态，不再试
+//  - displayTitle === "名字"     → 采集到的显示名
+//
+// 明确不做（别在别处重复实现）：
+//  - 内容改名后同步更新摘要（后台事件 / 重试 / 合并连续改名）
+//  - 历史收藏的批量回填 / 迁移
+//  - 任何「打开侧边栏时补读」的路径
+//  - 「内容已删除 / 无权访问」的细化处理（先按空摘要处理）
+//
+// 接受的取舍：老收藏（没有摘要的）继续显示类型标签，直到用户重新收藏一次。
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -31,6 +50,7 @@ import {
   useFavoriteAgentIds,
   useFavoriteContentIds,
   useFavoriteFavoritedAtById,
+  useFavoriteDisplaySummaries,
 } from "./favoriteStore";
 import type { MyContentListItem } from "app/utils/myContentItems";
 
@@ -53,7 +73,14 @@ const inferTypeFromKey = (key: string): string => {
  * 渲染层据此把这一行画成「类型图标 + 类型标签」的完整条目外观，而不是一个
  * 看起来像标题丢失的空壳；它不承诺任何自动加载（本 hook 依旧零请求）。
  */
-export type FavoriteSidebarItem = MyContentListItem & { detailMissing?: boolean };
+export type FavoriteSidebarItem = MyContentListItem & {
+  detailMissing?: boolean;
+  /**
+   * 收藏关系记录里带来的头像（displayAvatarFileId）。
+   * 没有则由渲染层回退到类型图标 / 实体头像。
+   */
+  avatarFileId?: string | null;
+};
 
 /**
  * 输入调用方已有的 recentItems，输出完整收藏 items（窗口内 + 窗口外）。
@@ -68,6 +95,8 @@ export const useFavoriteSidebarItems = (
   const agentIds = useFavoriteAgentIds();
   const contentIds = useFavoriteContentIds();
   const favoritedAtById = useFavoriteFavoritedAtById();
+  // 收藏关系记录里的显示摘要（服务端在收藏写入时采集）。
+  const displaySummaries = useFavoriteDisplaySummaries();
 
   const favoriteKeysSet = useMemo(
     () => new Set([...agentIds, ...contentIds]),
@@ -120,8 +149,18 @@ export const useFavoriteSidebarItems = (
       // 的（用户已打开过、或最近列表之外的缓存仍在）都能显示真名。
       // 完全没有本地记录时，用「按类型的诚实占位」而不是「未命名」：
       // 用户至少能看出这是一条对话 / 文档 / 表格 / AI，也知道这不是标题丢失。
-      const resolvedTitle = resolveUserContentTitle(entity ?? {});
-      // 完全没有本地记录时，用「按类型的诚实占位」而不是「未命名」：
+      const localTitle = resolveUserContentTitle(entity ?? {});
+      // 收藏关系记录里带回来的显示摘要（收藏写入时采集，守读权限）。
+      // 三态：undefined = 从未采集（老收藏，允许修复）；"" = 采集过但为空（不再试）。
+      const summary = displaySummaries[key];
+      const summaryTitle =
+        typeof summary?.displayTitle === "string" &&
+        summary.displayTitle.trim().length > 0
+          ? summary.displayTitle
+          : "";
+      // 本地实体优先（可能比收藏时更新的名字新），其次用摘要里的真名。
+      const resolvedTitle = localTitle || summaryTitle;
+      // 完全没有本地记录、摘要也没有名字时，用「按类型的诚实占位」而不是「未命名」：
       // 用户至少能看出这是一条对话 / 文档 / 表格 / AI，也知道这不是标题丢失。
       // 同时把这一态带给渲染层（detailMissing），由它决定这行画成
       // 「类型图标 + 类型标签」，而不是一个像丢了标题的空壳。
@@ -143,11 +182,12 @@ export const useFavoriteSidebarItems = (
         fileCategory: entity?.fileCategory ?? undefined,
         mimeType: entity?.mimeType,
         originalName: entity?.originalName,
+        avatarFileId: entity?.avatarFileId ?? summary?.displayAvatarFileId ?? null,
         detailMissing: detailMissing || undefined,
       });
     }
     return items;
-  }, [outsideKeys, outsideEntities, t]);
+  }, [outsideKeys, outsideEntities, displaySummaries, t]);
 
   // ── 合并 + 按 favoritedAt 降序 ──
   const allItems = useMemo<FavoriteSidebarItem[]>(() => {

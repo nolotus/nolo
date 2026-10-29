@@ -13,6 +13,11 @@ import {
   runShowsLogTail,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
+import {
+  formatStallFact,
+  formatToolProgressFact,
+  runProgressStalled,
+} from "./runProgressHeartbeat";
 import { agentRunStatusWord, t } from "./i18n";
 import { themeText } from "./theme";
 
@@ -22,9 +27,12 @@ import { themeText } from "./theme";
  */
 function formatPanelProgress(snapshot: AgentRunSnapshot, now: number): string {
   const parts: string[] = [];
-  if (typeof snapshot.toolCallCount === "number" && Number.isFinite(snapshot.toolCallCount)) {
-    parts.push(t("runToolsCount", String(snapshot.toolCallCount)));
-  }
+  // 工具信息存在时保持原样；纯推理 run（0 次工具调用）改用模型调用次数当心跳。
+  const toolFact = formatToolProgressFact(snapshot);
+  if (toolFact) parts.push(toolFact);
+  // 停滞信号：事件计数不涨。
+  const stallFact = formatStallFact(snapshot, now);
+  if (stallFact) parts.push(stallFact);
   // 「此刻在做什么」压过「最后做过什么」——前者带自己的计时，看得出卡没卡住；
   // 后者只是历史。只有本地 registry 轮询报得出它。
   const inFlight = activeInFlight(snapshot);
@@ -111,6 +119,7 @@ export function formatAgentRunPanelLines(
   const unassignedFact = formatUnassignedFact(snapshot);
   const unassignedPart = unassignedFact ? ` · ${unassignedFact}` : "";
   const progressPart = formatPanelProgress(snapshot, now);
+  const stalled = runProgressStalled(snapshot, now);
   const age = formatTerminalRunAge(snapshot, now);
   const agePart = age ? ` · ${age}` : "";
   const creditsPart =
@@ -129,7 +138,9 @@ export function formatAgentRunPanelLines(
     const statusText = themeText(` · ${statusSymbol} ${statusWord}`, statusColor, true);
     const unassignedText = unassignedPart ? themeText(unassignedPart, "muted") : "";
     const ageText = agePart ? themeText(agePart, "chrome") : "";
-    const progressText = progressPart ? themeText(progressPart, "chrome") : "";
+    const progressText = progressPart
+      ? themeText(progressPart, stalled ? "warning" : "chrome")
+      : "";
     const creditsText = creditsPart ? themeText(creditsPart, "muted") : "";
     const errorText = errPart ? themeText(errPart, "danger") : "";
     lines.push(`${botIcon}${nameText}${titleText}${statusText}${unassignedText}${ageText}${progressText}${creditsText}${errorText}`);

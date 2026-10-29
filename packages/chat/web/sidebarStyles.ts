@@ -91,13 +91,14 @@ export const sidebarStyles = stylex.create({
       outline: "none",
     },
   },
-  /* 自逃生舱 .ChatSidebar__header-wrapper--space 迁入（2026-08-31） */
+  /* 自逃生舱 .ChatSidebar__header-wrapper--space 迁入（2026-08-31）
+     No divider rule here on purpose: the Space switcher is the first control of
+     the Context column, so a top border drew a stray horizontal line above it
+     with nothing to separate. Separation below (view switch / type filter) is
+     handled by their own spacing. */
   headerWrapperSpace: {
     marginTop: "4px",
     paddingTop: "6px",
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
-    borderTopColor: "color-mix(in srgb, var(--border) 45%, transparent)",
   },
   createRow: {
     padding: "2px 8px 4px",

@@ -101,6 +101,10 @@ export function getAgentInternalCommandEntries(): CommandEntry[] {
       const { runAgentGrantCommand } = await import("./agentGrantCommands");
       return runAgentGrantCommand(args, deps);
     }),
+    createEnvCommand(["agent", "favorite"], "Favorite an agent for the current user (--off to unfavorite)", async (args, deps) => {
+      const { runAgentFavoriteCommand } = await import("./agentFavoriteCommands");
+      return runAgentFavoriteCommand(args, deps);
+    }),
     createEnvCommand(["agent", "grants"], "List active credential grants for an agent", async (args, deps) => {
       const { runAgentGrantsListCommand } = await import("./agentGrantCommands");
       return runAgentGrantsListCommand(args, deps);

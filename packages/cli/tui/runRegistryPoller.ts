@@ -201,6 +201,8 @@ export function snapshotFromRunRecord(
   const endedAt = readTimestamp(record.endedAt);
   const activity = record.activity;
   const counters = activity?.counters;
+  // 最后一次事件时刻：停滞判定（「次数不涨」）的唯一依据。
+  const lastEventAtMs = activity?.lastEventAt ? Date.parse(activity.lastEventAt) : NaN;
 
   // inFlight.sinceMs 是「截至 activity.updatedAt 已经进行了多久」，是个采样值。
   // 换算回绝对起点后面板就能自己把秒数走下去，而不是每帧重复那个旧数字。
@@ -228,6 +230,10 @@ export function snapshotFromRunRecord(
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(endedAt !== undefined ? { finishedAt: endedAt } : {}),
     ...(typeof counters?.toolCalls === "number" ? { toolCallCount: counters.toolCalls } : {}),
+    // 纯推理 run（0 次工具调用）的心跳：模型调用次数 + 最后一次事件时刻。
+    // 两者都来自记录里已有的字段，不新增任何采集。
+    ...(typeof counters?.llmCalls === "number" ? { llmCallCount: counters.llmCalls } : {}),
+    ...(Number.isFinite(lastEventAtMs) ? { lastEventAt: lastEventAtMs } : {}),
     // 收尾自报的平台积分 → dock 行「⚡ x.xx 积分」。
     ...(typeof record.credits === "number" && Number.isFinite(record.credits)
       ? { credits: record.credits }
@@ -254,6 +260,9 @@ function fingerprint(snapshot: AgentRunSnapshot): string {
     snapshot.title ?? "",
     (snapshot as any).unassigned ?? false,
     snapshot.toolCallCount ?? -1,
+    // 模型调用次数与事件时刻都是「变了就该重画」：纯推理 run 的心跳靠它们。
+    snapshot.llmCallCount ?? -1,
+    snapshot.lastEventAt ?? 0,
     snapshot.errorMessage ?? "",
     snapshot.finishedAt ?? 0,
     snapshot.credits ?? -1,

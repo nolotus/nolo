@@ -129,25 +129,26 @@
 
 /* --- Rail -------------------------------------------------------------- */
 
+:root {
+  --navigation-rail-width: 68px;
+}
+
 .navigation-v2-rail {
-  --rail-gap: 5px;
+  --rail-gap: 6px;
   position: sticky;
   top: 0;
   align-self: flex-start;
   z-index: 1;
-  /* 44px 是「外框」宽度：折叠时 aside 就是 44px，padding 必须算在这 44px 内，
-     否则按钮会被裁切。 */
+  /* 68px 是外框宽度：容纳图标与常驻文字，折叠时 aside 同步为 68px。 */
   box-sizing: border-box;
-  width: 44px;
-  flex: 0 0 44px;
+  width: var(--navigation-rail-width, 68px);
+  flex: 0 0 var(--navigation-rail-width, 68px);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--rail-gap);
-  padding: 10px 4px;
-  /* 折叠态只有 44px 高、图标又固定在 36px，快捷图标一多就会把底部的账号/设置/
-     通知顶出可视区。让 Rail 自己在纵向滚动，页脚用 sticky 留在底部（见
-     .navigation-v2-rail__footer），滚动条隐藏以免 44px 里多出一条竖条。 */
+  padding: 10px 6px;
+  /* 折叠态纵向滚动，页脚用 sticky 留在底部，滚动条隐藏以免多出一条竖条。 */
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
@@ -160,16 +161,16 @@
 
 .navigation-v2-rail__create { flex: 0 0 auto; }
 .navigation-v2-rail__create .create-menu__button {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--borderSubtle, rgba(127, 127, 127, 0.24));
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-md, 10px);
   background: transparent;
   color: var(--text, currentColor);
 }
 .navigation-v2-rail__create .create-menu__button:hover,
 .navigation-v2-rail__create .create-menu__button.is-active {
-  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.1));
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.08));
   color: var(--text, currentColor);
 }
 .navigation-v2-rail__create .create-menu__button:focus-visible {
@@ -192,28 +193,57 @@
 
 .navigation-v2-rail__item {
   position: relative;
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  min-height: 38px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md, 10px);
   background: transparent;
   color: inherit;
+  font-weight: 500;
   text-decoration: none;
   cursor: pointer;
+  box-sizing: border-box;
+}
+
+.navigation-v2-rail__item:has(.navigation-v2-rail__label) {
+  min-height: 52px;
+  padding: 6px 4px 5px;
+  gap: 3px;
+}
+
+.navigation-v2-rail__icon {
+  flex: 0 0 auto;
+}
+
+.navigation-v2-rail__label {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: inherit;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
 }
 
 .navigation-v2-rail__item:hover {
-  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.12));
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.08));
 }
 
-/* Keep the active destination neutral; the current label and aria state carry its meaning. */
+/* Keep the active destination neutral; font-weight + aria state + indicator carry its meaning. */
 .navigation-v2-rail__item[aria-current="page"],
 .navigation-v2-rail__item[data-active="true"] {
   background: var(--surfaceInteractive, rgba(127, 127, 127, 0.12));
   box-shadow: none;
   color: var(--text, currentColor);
+  font-weight: 600;
 }
 
 .navigation-v2-rail__item[aria-current="page"]::before,
@@ -223,9 +253,9 @@
   left: -4px;
   top: 50%;
   transform: translateY(-50%);
-  width: 2px;
-  height: 14px;
-  border-radius: 2px;
+  width: 3px;
+  height: 18px;
+  border-radius: 3px;
   background: var(--textSecondary, currentColor);
 }
 
@@ -382,14 +412,24 @@
     flex: 0 0 auto;
     flex-direction: row;
     justify-content: flex-start;
-    gap: 4px;
-    padding: 4px 8px;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
     border-right: 0;
     border-bottom: 0;
-    /* 移动端 Rail 是横向换行条，不需要纵向滚动；overflow: visible 同时避免裁掉
-       激活态下划线（bottom: -4px）。 */
-    overflow: visible;
+    /* 移动端 Rail 是横向换行/横滚条，主标签完整保留常驻，账号仍可达。 */
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
     background: var(--surfaceInteractive, rgba(127,127,127,0.035));
+  }
+
+  .navigation-v2-rail__item:has(.navigation-v2-rail__label) {
+    min-width: 52px;
+    height: 48px;
+    min-height: 48px;
+    padding: 4px 6px;
   }
 
   .navigation-v2-rail__item[aria-current="page"]::before,

@@ -41,6 +41,10 @@ export const changeSpaceAction = async (
   let spaceData: SpaceData | null = null;
   let usedLocal = false;
 
+  // 空间正文仍是本地优先内容：冷启动直链时本地 body 命中就能立刻渲染，不应为了
+  // 「账号 actor 不读本地成员索引」把 body 也一起砍掉（实测会导致整页卡在加载态，
+  // 因为远端 fresh 拿不到时没有兜底）。这里的本地读已被 withTimeout 限时，卡住的
+  // 存储会退化成远端路径，不会挂死。
   try {
     const local = await fetchSpaceAction(
       { spaceId: normalizedSpaceId, fresh: false },
