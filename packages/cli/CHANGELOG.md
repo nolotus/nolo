@@ -1,4 +1,11 @@
 
+## 0.193.0-alpha.1 (2026-10-29)
+
+### Features
+
+* **explore:** 展示内置 Skill 目录与搜索预览 ([b8b6a5b](https://github.com/nolotus/bun-nolo/commit/b8b6a5bff18c5e17ef1d13d56226b741967ea65e))
+
+
 ## 0.192.0-alpha.2 (2026-10-29)
 
 ### Bug Fixes

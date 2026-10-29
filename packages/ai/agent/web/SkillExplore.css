@@ -1,0 +1,343 @@
+/* packages/ai/agent/web/SkillExplore.css
+ * Explore Skill 只读目录样式：
+ * 全部使用系统设计 token，支持深浅色模式自适应，保持与 PluginExplore / AgentExplore 一致。
+ */
+
+.skill-explore {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6, 24px);
+  width: 100%;
+}
+
+.skill-explore__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.skill-explore__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4, 16px);
+  flex-wrap: wrap;
+}
+
+.skill-explore__title {
+  margin: 0;
+  font-size: var(--fontSize-xl, 1.25rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text, #18181b);
+}
+
+.skill-explore__subtitle {
+  margin: 0;
+  font-size: var(--fontSize-sm, 0.875rem);
+  line-height: var(--leading-normal, 1.5);
+  color: var(--textSecondary, #71717a);
+  max-width: 720px;
+}
+
+/* ── 搜索控制栏 ─────────────────────────────────────────── */
+
+.skill-explore__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4, 16px);
+  flex-wrap: wrap;
+}
+
+.skill-explore__search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 440px;
+  min-width: 240px;
+}
+
+.skill-explore__search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--textTertiary, #a1a1aa);
+  pointer-events: none;
+}
+
+.skill-explore__search-input {
+  width: 100%;
+  padding: 8px 12px 8px 36px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--borderSubtle, var(--border, #e4e4e7));
+  background: var(--surfaceCard, var(--surface, #ffffff));
+  color: var(--text, #18181b);
+  font-size: var(--fontSize-sm, 0.875rem);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.skill-explore__search-input:focus {
+  border-color: var(--primary, #1677ff);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #1677ff) 20%, transparent);
+}
+
+.skill-explore__search-clear {
+  position: absolute;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--textTertiary, #a1a1aa);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.skill-explore__search-clear:hover {
+  color: var(--text, #18181b);
+}
+
+.skill-explore__count {
+  font-size: var(--fontSize-xs, 0.75rem);
+  color: var(--textSecondary, #71717a);
+}
+
+/* ── 卡片网格 ───────────────────────────────────────────── */
+
+.skill-explore__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  width: 100%;
+  align-items: start;
+}
+
+@media (max-width: 640px) {
+  .skill-explore__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 单个 Skill 卡片 ─────────────────────────────────────── */
+
+.skill-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  padding: var(--space-4, 16px);
+  background: var(--surfaceCard, var(--surface, #ffffff));
+  border: 1px solid var(--borderSubtle, var(--border, #e4e4e7));
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow1, 0 1px 2px rgba(0, 0, 0, 0.04));
+  min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.skill-card:hover {
+  border-color: color-mix(in srgb, var(--primary, #1677ff) 35%, var(--borderSubtle, #e4e4e7));
+  box-shadow: var(--shadow2, 0 2px 8px rgba(0, 0, 0, 0.06));
+}
+
+.skill-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  min-width: 0;
+}
+
+.skill-card__header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  min-width: 0;
+  flex: 1;
+}
+
+.skill-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--primary, #1677ff) 10%, transparent);
+  color: var(--primary, #1677ff);
+}
+
+.skill-card__title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.skill-card__title {
+  margin: 0;
+  font-size: var(--fontSize-base, 1rem);
+  font-weight: 600;
+  color: var(--text, #18181b);
+  line-height: var(--leading-snug, 1.3);
+  word-break: break-word;
+}
+
+.skill-card__slug {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--textTertiary, #a1a1aa);
+  background: color-mix(in srgb, var(--textSecondary, #71717a) 8%, transparent);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs, 4px);
+  width: fit-content;
+}
+
+.skill-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.skill-badge--builtin {
+  background: color-mix(in srgb, var(--primary, #1677ff) 12%, transparent);
+  color: var(--primary, #1677ff);
+  border: 1px solid color-mix(in srgb, var(--primary, #1677ff) 24%, transparent);
+}
+
+.skill-card__desc {
+  margin: 0;
+  font-size: var(--fontSize-sm, 0.875rem);
+  line-height: var(--leading-normal, 1.5);
+  color: var(--textSecondary, #71717a);
+  word-break: break-word;
+}
+
+/* ── 标签与依赖行 ─────────────────────────────────────────── */
+
+.skill-card__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skill-card__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--textTertiary, #a1a1aa);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  background: var(--surfaceOverlayStrong, color-mix(in srgb, var(--textSecondary, #71717a) 6%, transparent));
+  color: var(--text, #18181b);
+}
+
+.skill-chip--tool {
+  background: color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent);
+  color: var(--text, #18181b);
+  border-color: color-mix(in srgb, var(--warning, #f59e0b) 25%, transparent);
+}
+
+.skill-chip--dep {
+  background: color-mix(in srgb, var(--info, #3b82f6) 10%, transparent);
+  color: var(--text, #18181b);
+  border-color: color-mix(in srgb, var(--info, #3b82f6) 25%, transparent);
+}
+
+/* ── 原生 details 正文预览 ────────────────────────────────── */
+
+.skill-card__details {
+  border-top: 1px solid var(--borderSubtle, var(--border, #e4e4e7));
+  padding-top: var(--space-2, 8px);
+  margin-top: auto;
+}
+
+.skill-card__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--fontSize-xs, 0.75rem);
+  font-weight: 600;
+  color: var(--primary, #1677ff);
+  padding: 4px 0;
+  list-style: none;
+}
+
+.skill-card__summary::-webkit-details-marker {
+  display: none;
+}
+
+.skill-card__summary:hover {
+  text-decoration: underline;
+}
+
+.skill-card__preview {
+  margin: var(--space-2, 8px) 0 0;
+  padding: 10px 12px;
+  background: var(--backgroundTertiary, color-mix(in srgb, var(--textSecondary, #71717a) 6%, transparent));
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  border-radius: var(--radius-sm, 6px);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text, #18181b);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* ── 空状态 ─────────────────────────────────────────────── */
+
+.skill-explore__empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-12, 48px) var(--space-4, 16px);
+  background: var(--surfaceCard, var(--surface, #ffffff));
+  border: 1.5px dashed var(--borderSubtle, #e4e4e7);
+  border-radius: var(--radius-lg, 12px);
+  color: var(--textSecondary, #71717a);
+  text-align: center;
+  gap: var(--space-2, 8px);
+}
+
+.skill-explore__empty-title {
+  font-size: var(--fontSize-base, 1rem);
+  font-weight: 600;
+  color: var(--text, #18181b);
+  margin: 0;
+}
+
+.skill-explore__empty-desc {
+  font-size: var(--fontSize-sm, 0.875rem);
+  color: var(--textSecondary, #71717a);
+  margin: 0;
+}
