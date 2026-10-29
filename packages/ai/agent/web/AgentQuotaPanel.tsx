@@ -12,6 +12,10 @@ import * as stylex from "@stylexjs/stylex";
 import { LuGauge } from "react-icons/lu";
 import type { AgentQuota, QuotaWindow } from "ai/agent/quotaSnapshot";
 import { agentPageStyles as styles } from "./agentPageStyles";
+// 口径来源标签：面板显示的是「我们探测到的上游接口」，不是官方用量页面的镜像。
+// 两者刷新时机/统计窗口/是否含子功能额度都可能不同，直接对比会误判成"显示错误"。
+// 纯映射逻辑放在 quotaProvenance.ts（可单测，见 quotaProvenance.test.ts）。
+import { describeQuotaProvenance, formatProbeAge } from "./quotaProvenance";
 import { QUOTA_RESET_TICK_MS, formatResetLine } from "./quotaResetLabels";
 
 type Props = {
@@ -26,11 +30,7 @@ const WINDOW_LABELS: Array<{ match: (scope: string) => boolean; label: string }>
   { match: (s) => s === "7d" || s.endsWith("-7d"), label: "每周" },
 ];
 
-// 口径来源标签：面板显示的是「我们探测到的上游接口」，不是官方用量页面的镜像。
-// 两者刷新时机/统计窗口/是否含子功能额度都可能不同，直接对比会误判成"显示错误"。
-// 纯映射逻辑放在 quotaProvenance.ts（可单测，见 quotaProvenance.test.ts）。
-import { describeQuotaProvenance, formatProbeAge } from "./quotaProvenance";
-
+// 口径来源标签的再导出（import 已在文件顶部）。
 export { describeQuotaProvenance, formatProbeAge };
 
 export function pickDisplayWindows(

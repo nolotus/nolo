@@ -1,4 +1,26 @@
 
+## 0.187.0 (2026-10-29)
+
+### Features
+
+* **agent-runtime:** 6 个执行档位定义与逐档断言 ([d091317](https://github.com/nolotus/bun-nolo/commit/d0913178813dbb841d53e12bd5e9fef3154a792e))
+* **agent-runtime:** execShell 接 bwrap 沙盒（fail-closed + 遮蔽 + 同形探测） ([d585e38](https://github.com/nolotus/bun-nolo/commit/d585e3899b127d167d780404ac217203d5b4606a))
+* **agent-runtime:** 工作区文件工具 realpath 边界（防符号链接逃逸） ([81e42d9](https://github.com/nolotus/bun-nolo/commit/81e42d9d097ba96aeeba7c9e0f06c80fa8a5038c))
+* **agent-runtime:** 执行端点契约 + 能力标注 ([bd4176a](https://github.com/nolotus/bun-nolo/commit/bd4176ac1483d459f1fb7ef7f968a232daf8eb95))
+* **agent-runtime:** 观测事件队列增加字节上限（默认 2MB） ([c66ecaa](https://github.com/nolotus/bun-nolo/commit/c66ecaa761081a78be349376545babd69e2ff880))
+* **agent-runtime:** 隔离硬约束——executionPolicy + 来源可信度 ([030bc35](https://github.com/nolotus/bun-nolo/commit/030bc355fb0fd67609e274bfa9604043707d19f7))
+* **exec-policy:** 把沙盒策略接进真实执行入口，拒绝出口不再泄露宿主路径 ([474d99f](https://github.com/nolotus/bun-nolo/commit/474d99f08933657c28f1d9b77954e227b1e27f4a))
+* **skills:** 统一技能目录契约 + 可注入来源适配器 ([00e6554](https://github.com/nolotus/bun-nolo/commit/00e6554bd5558fa2b2b5246d494629e3facca21b))
+* **skills:** 统一技能目录契约 + 可注入来源适配器 ([2562f9c](https://github.com/nolotus/bun-nolo/commit/2562f9ceb4c6a22766fe87e1e91c53bf9022a8e4))
+
+### Bug Fixes
+
+* **agent-runtime:** 工具输出控制序列清洗（终端注入防护） ([1e2b90a](https://github.com/nolotus/bun-nolo/commit/1e2b90a7ffad5b12475c2b3e7435816c8d24c3c2))
+* **chat:** 缺失详情的收藏项用类型图标与标签，不再像空壳 ([52fa5c3](https://github.com/nolotus/bun-nolo/commit/52fa5c3f074fc1c0bedd1f885531bdf3550d4364))
+* **cli:** macOS 无沙盒后端不再静默；instabox 归入容器隔离分支 ([24d6e06](https://github.com/nolotus/bun-nolo/commit/24d6e061509cd9c325f8a87f8bf520527b9893e9))
+* **quota:** 让位合并保留 resetAt、补写保留并发 plan、修正 import 顺序 ([5a78aa8](https://github.com/nolotus/bun-nolo/commit/5a78aa84e8beb440d3f704e2c72efb31ee0b5ba2))
+
+
 ## 0.186.0 (2026-10-28)
 
 ### Features

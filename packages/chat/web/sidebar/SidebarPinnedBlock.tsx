@@ -34,6 +34,11 @@ export interface SidebarPinnedItem {
   categoryId?: string | null;
   spaceId?: string | null;
   serverOrigin?: string;
+  /**
+   * 收藏分区专有：本地没有这条收藏的实体记录，title 只是类型标签占位。
+   * 渲染层据此画成「类型图标 + 类型标签」的完整条目，而不是空壳。
+   */
+  detailMissing?: boolean;
 }
 
 interface SidebarPinnedBlockProps {
@@ -133,6 +138,7 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
               categoryId={item.categoryId ?? undefined}
               spaceIdOverride={itemSpaceId}
               sourceServerOrigin={item.serverOrigin}
+              detailMissing={item.detailMissing}
               summaryStatus={"status" in item ? item.status : undefined}
               summaryUnreadAt={"unreadAt" in item ? item.unreadAt : undefined}
               disableDrag

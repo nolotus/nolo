@@ -45,6 +45,7 @@ import {
 } from "../ai/agent/contextCompiler";
 import type { ContextBlockScope } from "./contextBlockScope";
 import { scrubObjectSecrets, scrubSecrets } from "./secretScrubber";
+import { sanitizeToolOutputText } from "./toolOutputSanitizer";
 import { projectUserPartForModel } from "../ai/attachments/projectUserPart";
 
 /**
@@ -71,7 +72,9 @@ export function formatToolMessageContent(args: {
   content: string;
   metadata?: Record<string, unknown>;
 }) {
-  const scrubbedContent = scrubSecrets(args.content).cleaned;
+  // 控制序列清洗要在脱敏之前：先删掉不可见序列，正则看到的是模型真正会看到的文本。
+  const sanitizedContent = sanitizeToolOutputText(args.content ?? "");
+  const scrubbedContent = scrubSecrets(sanitizedContent).cleaned;
   if (
     (
       args.toolName !== "globFiles" &&
@@ -311,7 +314,12 @@ export function projectToolContentForProvider(args: {
   maxChars: number;
   label: string;
 }): AgentRuntimeMessageContent {
-  const content = args.content;
+  const rawContent = args.content;
+  // 历史回放/压缩重建的兜底清洗：修复前落库的旧行里可能已经带着原始控制序列，
+  // 不能只依赖写入侧的清洗。幂等，故与新写入内容叠加无副作用。
+  const content = typeof rawContent === "string"
+    ? sanitizeToolOutputText(rawContent)
+    : rawContent;
   if (typeof content !== "string") return content;
   const metadataText = compactToolMetadata(args.metadata);
   // Some tool formatters already append the full metadata JSON to the durable
@@ -356,7 +364,7 @@ export function projectToolContentForProvider(args: {
   let clipped = clipToolText(contentForProjection, initialBudget, headRatio);
   const wasClipped = clipped.length < contentForProjection.trim().length;
   const needsProjection = wasClipped || Boolean(metadataSuffix) || embeddedMetadataIndex >= 0;
-  if (!needsProjection) return args.content;
+  if (!needsProjection) return content;
 
   let spillNote = "";
   if (wasClipped) {

@@ -32,6 +32,7 @@ import {
   type ToolArgsDiagnosticContext,
 } from "./toolArgsTruncationPolicy";
 import { summarizeToolArguments } from "./summarizeToolArguments";
+import { sanitizeToolOutputContent } from "./toolOutputSanitizer";
 import { buildToolArgumentsFingerprint } from "./toolArgumentsFingerprint";
 import type { AgentExecutionObservationEvent } from "./executionObservation";
 import type { LocalAgentActionGate, LocalAgentTurnInput } from "./localLoop";
@@ -151,6 +152,19 @@ function projectSafeToolObservationMetadata(
   if (typeof metadata.byteCount === "number") safe.byteCount = metadata.byteCount;
   if (typeof metadata.lineCount === "number") safe.lineCount = metadata.lineCount;
   return Object.keys(safe).length > 0 ? safe : undefined;
+}
+
+/**
+ * transcript / UI / provider 可见前的统一清洗点（见 toolOutputSanitizer）：
+ * 删除 ANSI/VT 控制序列（CSI / OSC / DCS / SOS / PM / APC）、除 `\n` `\t` 外的 C0
+ * （含 `\r` 复写）、DEL、C1，孤立代理项替换为 U+FFFD。内容未变时返回**同一对象**，
+ * 不制造无谓的新引用（上游有基于身份/指纹的缓存与幂等契约）。
+ */
+function sanitizeToolResultContent(
+  result: AgentRuntimeToolResult,
+): AgentRuntimeToolResult {
+  const content = sanitizeToolOutputContent(result.content);
+  return content === result.content ? result : { ...result, content };
 }
 
 function summarizeToolResult(content: unknown, metadata?: Record<string, unknown>) {
@@ -486,6 +500,9 @@ export async function executeToolCall(args: {
         toolResult = replacement as AgentRuntimeToolResult;
       }
     }
+    // provider / UI / transcript 共用这一份清洗：必须在 tool-result 事件之前，
+    // 否则 UI 与审核侧先看到原始控制序列，清洗等于没做。
+    toolResult = sanitizeToolResultContent(toolResult);
     const finishedAt = Date.now();
     const summary = summarizeToolResult(toolResult.content, toolResult.metadata);
     const safeMetadata = projectSafeToolObservationMetadata(toolResult.metadata);
@@ -569,5 +586,7 @@ export async function executeToolCall(args: {
       },
     };
   }
-  return { toolResult: toolResult!, toolExecMs };
+  // 错误路径（catch 内）构造的工具结果在事件发出后才落值，这里再兜一次；
+  // 已是清洗过的内容时快速路径直接返回同一引用，没有重复开销。
+  return { toolResult: sanitizeToolResultContent(toolResult!), toolExecMs };
 }

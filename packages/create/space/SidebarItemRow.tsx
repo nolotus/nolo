@@ -84,6 +84,12 @@ export interface SidebarItemRowProps {
   contentKey: string;
   type: string;
   title: string;
+  /**
+   * 收藏分区专有：本地没有这条收藏的实体记录，`title` 只是按类型的标签。
+   * 此时标题位画成类型标签（chip），与类型图标一起构成完整条目外观；
+   * 这里不做任何加载——只是一个诚实的状态表达。
+   */
+  detailMissing?: boolean;
   categoryId?: string;
   spaceIdOverride?: string | null;
   sourceServerOrigin?: string;
@@ -134,6 +140,7 @@ function SidebarItemRow({
   contentKey,
   type,
   title,
+  detailMissing,
   categoryId,
   spaceIdOverride,
   sourceServerOrigin,
@@ -540,13 +547,23 @@ function SidebarItemRow({
                 <span {...stylex.props(styles.childCount)}>{childCount}</span>
               </button>
             ) : null}
-            <span
-              {...stylex.props(styles.title, isActive && styles.titleActive, isChildRow && styles.titleChild)}
-              data-status={dialogStatusTone}
-              title={displayTitle}
-            >
-              {displayTitle}
-            </span>
+            {detailMissing ? (
+              <span
+                {...stylex.props(styles.typeLabel, isActive && styles.typeLabelActive, isChildRow && styles.titleChild)}
+                data-hook="create-space-sidebar-type-label"
+                title={t("favoriteDetailMissingHint", "收藏项，打开后会显示标题")}
+              >
+                {displayTitle}
+              </span>
+            ) : (
+              <span
+                {...stylex.props(styles.title, isActive && styles.titleActive, isChildRow && styles.titleChild)}
+                data-status={dialogStatusTone}
+                title={displayTitle}
+              >
+                {displayTitle}
+              </span>
+            )}
           </NavLink>
         )}
 

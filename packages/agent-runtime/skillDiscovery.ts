@@ -12,28 +12,31 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { load as loadYaml } from "js-yaml";
 import {
-  buildSkillDiscoveryLayer,
+  buildSkillDiscoveryCatalogLayer,
   type DiscoveredSkill,
   type TurnContextLayer,
 } from "./turnContext";
+import {
+  applySkillDescriptionBudget,
+  DEFAULT_SKILL_CATALOG_BUDGET,
+  mapDiscoveredSkillsToCatalogEntries,
+  resolveSkillCatalog,
+  resolveSkillCatalogSync,
+  type SkillCatalog,
+  type SkillCatalogBudget,
+  type SkillCatalogEntryInput,
+  type SkillCatalogSourceProvider,
+} from "./skillCatalog";
 
 // Discovery only scans `.agents/skills` — the single skill source-of-truth.
 // Each skill lives at `.agents/skills/<name>/SKILL.md`; `resolveSkillByName`
 // (below) resolves by directory stem or frontmatter name within this dir.
 const SKILL_SCAN_DIRS = [".agents/skills"] as const;
-const MAX_DISCOVERED_SKILLS = 50;
-// Total character budget for all skill descriptions in the discovery list.
-// Modeled on Codex's "skills list ≤ 2% of context" approach: when the sum of
-// descriptions exceeds this budget, each description is shortened proportionally
-// (keeping the front — where authors should front-load activation triggers and
-// key use cases, per the Agent Skills authoring guide) rather than hard-cut at
-// a fixed per-skill limit. 2026-09 基线：15 个 skill，description 原文合计
-// ≈3.0K 字符、sanitize（每条 ≤200）后 ≈2.5K，距 4000 预算仍有余量；
-// 新增 skill 时注意 description 从简（触发词前置）。
-const MAX_DISCOVERY_DESC_BUDGET = 4000;
-// Floor per-skill description length when budget pressure requires shortening.
-// Ensures every skill still gets a meaningful one-line summary.
-const MIN_DESC_LENGTH = 80;
+// 目录规模 / 描述预算的常量已迁到 host-neutral 的 `skillCatalog.ts`
+// （`DEFAULT_SKILL_CATALOG_BUDGET`）：同一份预算要同时约束本地文件来源和平台
+// 来源，两处各存一份就会分叉。语义未变——最多 50 项、描述合计 4000 字符、
+// 超预算按比例缩短且每条不低于 80 字符。
+const MAX_DISCOVERED_SKILLS = DEFAULT_SKILL_CATALOG_BUDGET.maxEntries;
 
 export function parseSkillFrontmatter(filePath: string): { name?: string; description?: string } {
   try {
@@ -104,19 +107,10 @@ export function discoverSkills(cwd: string): DiscoveredSkill[] {
   // Budget control (Codex-style): if total description length exceeds the
   // budget, shorten each description proportionally — keeping the front (where
   // authors should front-load activation triggers) and never below the floor.
-  // Only kicks in when total description length exceeds the budget; keep
-  // descriptions lean so the proportionate shortening stays dormant.
-  const totalDescLen = skills.reduce((sum, s) => sum + s.description.length, 0);
-  if (totalDescLen > MAX_DISCOVERY_DESC_BUDGET && skills.length > 0) {
-    const scale = MAX_DISCOVERY_DESC_BUDGET / totalDescLen;
-    for (const s of skills) {
-      const targetLen = Math.max(MIN_DESC_LENGTH, Math.floor(s.description.length * scale));
-      if (s.description.length > targetLen) {
-        s.description = s.description.slice(0, targetLen).trimEnd();
-      }
-    }
-  }
-  return skills;
+  // Shared implementation in skillCatalog.ts: the merged catalog (local +
+  // builtin + platform) must apply the exact same rule, and the function is
+  // idempotent, so applying it here and again after merge does not double-trim.
+  return applySkillDescriptionBudget(skills);
 }
 
 /**
@@ -171,24 +165,126 @@ export function resolveSkillByName(cwd: string, name: string): string | null {
   return null;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * 技能目录适配器（Node 宿主）
+ *
+ * 文件扫描结果在这里映射进 `skillCatalog` 的宿主无关契约，再由
+ * `turnContext.buildSkillDiscoveryCatalogLayer` 统一渲染。宿主只需提供来源：
+ * 本地文件来源由本模块实现，builtin / platform 来源由接线处注入
+ * （见 `collectWorkspaceSkillCatalog` 的 `sources`）。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** 本地工作区文件来源的条目（扫描 `.agents/skills/<name>/SKILL.md`）。 */
+export function listLocalWorkspaceSkillCatalogEntries(
+  cwd: string,
+): SkillCatalogEntryInput[] {
+  return mapDiscoveredSkillsToCatalogEntries(discoverSkills(cwd));
+}
+
+/**
+ * 本地工作区文件来源（`local-workspace`，优先级最高）。
+ * 非 Node 宿主没有这个来源，改为注入 `builtin` / `platform` 来源。
+ */
+export function createLocalWorkspaceSkillCatalogSource(): SkillCatalogSourceProvider {
+  return {
+    id: "local-workspace",
+    list: (query) =>
+      query.cwd ? listLocalWorkspaceSkillCatalogEntries(query.cwd) : [],
+  };
+}
+
+export interface CollectWorkspaceSkillCatalogArgs {
+  /** 工作区根目录；缺省时只合并注入的来源（无文件来源）。 */
+  cwd?: string;
+  /** 额外来源（builtin 注册表 / 平台 agent 配置）。优先级由 `skillCatalog` 定。 */
+  sources?: readonly SkillCatalogSourceProvider[];
+  /** 关闭文件来源（迁移到平台后只剩注入来源时用）。 */
+  includeLocalWorkspace?: boolean;
+  budget?: SkillCatalogBudget;
+}
+
+const collectSources = (
+  args: CollectWorkspaceSkillCatalogArgs,
+): SkillCatalogSourceProvider[] => [
+  ...(args.includeLocalWorkspace === false || !args.cwd
+    ? []
+    : [createLocalWorkspaceSkillCatalogSource()]),
+  ...(args.sources ?? []),
+];
+
+/**
+ * 合并「本地文件 + 注入来源」得到一份目录（异步版，平台来源可走 DB/HTTP）。
+ *
+ * 单个来源失败按空清单处理并在 console 留痕，不拖垮整份菜单。
+ */
+export async function collectWorkspaceSkillCatalog(
+  args: CollectWorkspaceSkillCatalogArgs,
+): Promise<SkillCatalog> {
+  return resolveSkillCatalog(
+    collectSources(args),
+    { cwd: args.cwd },
+    args.budget ?? DEFAULT_SKILL_CATALOG_BUDGET,
+  );
+}
+
+/**
+ * 同步版合并（CLI / desktop 的会话层装配是同步的）。
+ * 注入异步来源会抛错——静默返回空清单会让「平台版本没出现」查不出来。
+ */
+export function collectWorkspaceSkillCatalogSync(
+  args: CollectWorkspaceSkillCatalogArgs,
+): SkillCatalog {
+  return resolveSkillCatalogSync(
+    collectSources(args),
+    { cwd: args.cwd },
+    args.budget ?? DEFAULT_SKILL_CATALOG_BUDGET,
+    // HIGH-1：注入来源里混进异步实现时，跳过它并在 skillCatalog 里打 warn，
+    // 而不是抛错把「已经收集到的本地文件技能」一起丢掉。
+    { onAsyncSource: "skip" },
+  );
+}
+
+/** 已合并目录 → skill-discovery 上下文层（host-neutral 渲染，浏览器也可用）。 */
+export function buildSkillDiscoveryContextLayerFromCatalog(
+  catalog: SkillCatalog,
+): TurnContextLayer | null {
+  return buildSkillDiscoveryCatalogLayer(catalog);
+}
+
 /**
  * One-call helper for host entry points (CLI agentRunCommand, TUI
  * readlineWorkspace, desktop runtime) to build the skill-discovery context
- * block. Encapsulates discoverSkills + buildSkillDiscoveryLayer + best-effort
+ * block. Encapsulates the local file scan + catalog merge + best-effort
  * try/catch so every entry point gets identical behavior and a new entry
  * point can't accidentally omit the scan (the exact bug that made skills
  * invisible to CLI agents).
+ *
+ * `options.sources` injects extra catalog sources (builtin registry / platform
+ * agent config); they are merged with the same priority rules as the file
+ * source. Non-Node hosts call `buildSkillDiscoveryContextLayerFromCatalog`
+ * with their own merged catalog instead — this function needs the file system.
  *
  * Returns the layer content string ready to push into extraContextBlocks,
  * or null when no skills were found / the scan failed.
  */
 export function buildSkillDiscoveryContextLayer(
   cwd: string,
+  options: { sources?: readonly SkillCatalogSourceProvider[] } = {},
 ): TurnContextLayer | null {
   try {
-    return buildSkillDiscoveryLayer(discoverSkills(cwd), cwd);
-  } catch {
-    // Skill discovery is best-effort; a scan failure must not abort the run.
+    return buildSkillDiscoveryCatalogLayer(
+      collectWorkspaceSkillCatalogSync({ cwd, sources: options.sources }),
+    );
+  } catch (error) {
+    // Skill discovery 是 best-effort：扫描失败不该中止整轮 run。但「静默返回
+    // null」会让「技能变少/消失」变成一个查不出来的现象（HIGH-1），所以必须
+    // 留痕；注入的异步来源已由 collectWorkspaceSkillCatalogSync 跳过并 warn，
+    // 走到这里说明是文件扫描本身的意外错误。
+    console.warn(
+      `[skillDiscovery] 技能目录装配失败，本轮不带技能索引运行：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return null;
   }
 }
@@ -200,6 +296,9 @@ export function buildSkillDiscoveryContextLayer(
  * cacheScope, so callers don't have to string-match the block marker to work
  * out where it belongs in the prompt.
  */
-export function buildSkillDiscoveryContextBlock(cwd: string): string | null {
-  return buildSkillDiscoveryContextLayer(cwd)?.content ?? null;
+export function buildSkillDiscoveryContextBlock(
+  cwd: string,
+  options: { sources?: readonly SkillCatalogSourceProvider[] } = {},
+): string | null {
+  return buildSkillDiscoveryContextLayer(cwd, options)?.content ?? null;
 }

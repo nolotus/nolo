@@ -68,6 +68,10 @@ export const sidebarItemStyles = stylex.create({
   title: { display: "block", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", letterSpacing: "0.005em" },
   titleChild: { paddingLeft: 8 },
   titleActive: { fontWeight: 600 },
+  // 收藏分区里「本地无记录」的条目：标题位改画类型标签（chip），
+  // 让这一行看起来是「类型图标 + 类型标签」的完整条目，而不是像丢了标题。
+  typeLabel: { display: "inline-block", flexShrink: 0, maxWidth: "100%", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", paddingTop: 0, paddingRight: "6px", paddingBottom: 0, paddingLeft: "6px", borderRadius: "var(--radius-xs, 4px)", backgroundColor: "color-mix(in srgb, var(--text) 6%, transparent)", color: "var(--textSecondary)", fontSize: "11px", lineHeight: "16px", letterSpacing: "0.01em" },
+  typeLabelActive: { color: "inherit" },
   actions: { position: "absolute", right: "var(--space-2)", top: "50%", display: "grid", gridAutoFlow: "column", alignItems: "center", columnGap: "2px", paddingTop: "2px", paddingRight: "2px", paddingBottom: "2px", paddingLeft: "2px", borderWidth: "1px", borderStyle: "solid", borderColor: "color-mix(in srgb, var(--border) 30%, transparent)", borderRadius: "var(--radius-md)", backgroundColor: "color-mix(in srgb, var(--surfaceRaised, var(--background)) 40%, transparent)", boxShadow: "0 10px 22px -18px var(--shadowHeavy), 0 1px 2px color-mix(in srgb, var(--shadowLight) 70%, transparent)", backdropFilter: "blur(16px)", opacity: 0, pointerEvents: "none", transform: { default: "translateY(-50%) translateX(4px)", "@media (prefers-reduced-motion: reduce)": "none" }, transitionProperty: { default: "opacity, transform", "@media (prefers-reduced-motion: reduce)": "none" }, transitionDuration: "0.15s", transitionTimingFunction: "ease" },
   actionsVisible: { opacity: 1, pointerEvents: "auto", transform: "translateY(-50%) translateX(0)" },
   actionsDragging: { opacity: 0, pointerEvents: "none" },
