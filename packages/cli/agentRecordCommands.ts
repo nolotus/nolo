@@ -278,11 +278,13 @@ export async function runAgentCreateCommand(
         const rec = built.nextRecord as {
           customProviderUrl?: string;
           apiKey?: string;
+          apiKeyHeader?: string;
           model?: string;
         };
         verifyResult = await verifyCustomProvider({
           providerUrl: rec.customProviderUrl,
           apiKey: rec.apiKey,
+          apiKeyHeader: rec.apiKeyHeader,
           model: rec.model,
           prompt: parsed.verifyPrompt,
           fetchImpl,

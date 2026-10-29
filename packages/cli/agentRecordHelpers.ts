@@ -28,6 +28,8 @@ const PROVIDER_COPY_FIELDS = [
   "model",
   "customProviderUrl",
   "apiKey",
+  "apiKeyRef",
+  "apiKeyHeader",
   "useServerProxy",
   "inputPrice",
   "outputPrice",
@@ -791,7 +793,7 @@ export async function buildCreatedAgentRecord(args: {
       throw new Error(`provider source agent not found: ${args.parsed.copyProviderFrom}`);
     }
     for (const field of PROVIDER_COPY_FIELDS) {
-      if (field in providerSource.record) {
+      if (field in providerSource.record && !(field in args.parsed.updates)) {
         args.parsed.updates[field] = providerSource.record[field];
       }
     }
@@ -877,7 +879,7 @@ export async function buildUpdatedAgentRecord(args: {
       throw new Error(`provider source agent not found: ${args.parsed.copyProviderFrom}`);
     }
     for (const field of PROVIDER_COPY_FIELDS) {
-      if (field in providerSource.record) {
+      if (field in providerSource.record && !(field in args.parsed.updates)) {
         args.parsed.updates[field] = providerSource.record[field];
       }
     }
