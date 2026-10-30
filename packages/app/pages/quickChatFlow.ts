@@ -3,7 +3,10 @@ import { useState, useCallback } from "react";
 
 import type { PendingFile } from "chat/dialog/dialogSlice";
 import { pendingAttachmentsToMessageParts } from "chat/messages/pendingAttachmentParts";
-import { BUILTIN_FEEDBACK_AGENT_KEY } from "core/builtinAgents";
+import {
+  BUILTIN_FEEDBACK_AGENT_KEY,
+  BUILTIN_APP_BUILDER_AGENT_KEY,
+} from "core/builtinAgents";
 import { asTrimmedString } from "core/trimmedString";
 import { QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY } from "app/settings/quickChatTierDefaults";
 
@@ -19,6 +22,16 @@ export const QUICK_CHAT_LAUNCH_SPECIALISTS: Record<
     agentKey: BUILTIN_FEEDBACK_AGENT_KEY,
     promptKey: "quickChat.chipFeedbackAgentPrompt",
     promptFallback: "我要反馈",
+  },
+  "create-app": {
+    agentKey: BUILTIN_APP_BUILDER_AGENT_KEY,
+    promptKey: "quickChat.chipCreateAppPrompt",
+    promptFallback: "我想创建一个新应用",
+  },
+  "create-app-surf": {
+    agentKey: BUILTIN_APP_BUILDER_AGENT_KEY,
+    promptKey: "quickChat.chipCreateAppSurfPrompt",
+    promptFallback: "我想用冲浪模板构建我的冲浪工作台，包含实时浪况与风向潮汐数据，并支持添加和管理我的自定义浪点。",
   },
 };
 

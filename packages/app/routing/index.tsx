@@ -500,12 +500,46 @@ export function useRoutes(
   const location = locationArg ?? ctx.location;
   const matches = matchRoutes(routes, location.pathname);
 
+  const overrideContextValue = useMemo<RouterContextValue | null>(() => {
+    if (!locationArg) return null;
+    return {
+      location: {
+        pathname: locationArg.pathname,
+        search: locationArg.search ?? "",
+        hash: locationArg.hash ?? "",
+        state: locationArg.state ?? null,
+        key: locationArg.key ?? "default",
+      },
+      navigate: ctx.navigate,
+      navigationType: ctx.navigationType,
+    };
+  }, [
+    locationArg,
+    locationArg?.pathname,
+    locationArg?.search,
+    locationArg?.hash,
+    locationArg?.state,
+    locationArg?.key,
+    ctx.navigate,
+    ctx.navigationType,
+  ]);
+
   if (!matches) return null;
 
-  return (
+  const content = (
     <RouteParamsMatchContext.Provider value={matches}>
       {renderMatches(matches, 0)}
     </RouteParamsMatchContext.Provider>
+  );
+
+  if (!overrideContextValue) {
+    return content;
+  }
+
+  return (
+    <RouterContext.Provider value={overrideContextValue}>
+      {content}
+    </RouterContext.Provider>
   );
 }
 

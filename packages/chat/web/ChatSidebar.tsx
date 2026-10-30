@@ -36,13 +36,15 @@ import {
   useCategoryDragAndDrop,
   useItemDragAndDrop,
 } from "./sidebar/useSidebarDragAndDrop";
-import { LuFolderPlus, LuStar, LuChevronDown, LuSearch } from "react-icons/lu";
+import { LuFolderPlus, LuStar, LuChevronDown, LuSearch, LuPanelLeftClose, LuPanelLeftOpen } from "react-icons/lu";
 import { AddCategoryModal } from "create/space/category/AddCategoryModal";
 import { SidebarTypeFilter, mapFilterToVisibleTypes, isSidebarTypeFilterId, matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
 import { selectIdentityUserId } from "identity/selectors";
 import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
 import { WorkDialogHistory } from "./WorkDialogHistory";
 import { NavigationRail } from "./NavigationRail";
+import { useSidebarToggleContext } from "render/layout/SidebarToggleContext";
+import "render/layout/sidebarContextToggle.css";
 import { ExploreCategoryNav } from "./ExploreCategoryNav";
 import { type HomeView, resolveHomeView, resolveRailView } from "./navigationRailView";
 import { DesktopFolderProjects } from "./DesktopFolderProjectsSection";
@@ -86,12 +88,47 @@ const writeStoredSidebarFilter = (filter: SidebarTypeFilterId) => {
  * 降级成 static、内容已退出有限高度链，--fixed 列却仍 overflow: hidden，超出列底的内容滚轮
  * 滚不到。三条降级规则因此写进同一个 @container（见 navigationRail.css）。
  */
-const ShellWithRail: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div data-hook="navigation-v2-shell" className="navigation-v2-shell">
-    <NavigationRail />
-    <div className="navigation-v2-context-slot">{children}</div>
-  </div>
-);
+const ShellWithRail: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { t } = useTranslation("space");
+  const sidebarToggle = useSidebarToggleContext();
+  const isDesktop = sidebarToggle?.isDesktop ?? false;
+  const isOpen = sidebarToggle?.isOpen ?? true;
+  const toggle = sidebarToggle?.toggleSidebar;
+
+  const showToggle = isDesktop && !!toggle;
+
+  return (
+    <div
+      data-hook="navigation-v2-shell"
+      className={`navigation-v2-shell ${isOpen ? "is-expanded" : "is-collapsed"}`}
+    >
+      <NavigationRail
+        headerSlot={
+          showToggle ? (
+            <button
+              type="button"
+              className="sidebar-context-toggle sidebar-context-toggle--rail"
+              onClick={toggle}
+              title={isOpen ? t("common:collapseSidebar", "收起侧边栏") : t("common:expandSidebar", "展开侧边栏")}
+              aria-label={isOpen ? t("common:collapseSidebar", "收起侧边栏") : t("common:expandSidebar", "展开侧边栏")}
+              aria-expanded={isOpen}
+              data-hook="sidebar-context-toggle-button"
+            >
+              {isOpen ? (
+                <LuPanelLeftClose size={16} aria-hidden="true" />
+              ) : (
+                <LuPanelLeftOpen size={16} aria-hidden="true" />
+              )}
+            </button>
+          ) : null
+        }
+      />
+      <div className="navigation-v2-context-slot">
+        {children}
+      </div>
+    </div>
+  );
+};
 
 const ChatSidebar: React.FC = () => {
   const { t } = useTranslation("space");

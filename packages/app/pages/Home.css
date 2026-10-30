@@ -36,11 +36,6 @@
     var(--home-motion-ease) 0.04s both;
 }
 
-.home-widgets-tip {
-  animation: home-surface-in var(--home-motion-duration-slow)
-    var(--home-motion-ease) both;
-}
-
 @keyframes home-surface-in {
   from {
     opacity: 0;

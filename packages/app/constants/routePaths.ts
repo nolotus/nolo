@@ -20,3 +20,13 @@ export enum AppRoutePaths {
  * 直达内置反馈 agent（见 app/pages/quickChatFlow 的 QUICK_CHAT_LAUNCH_SPECIALISTS）。
  */
 export const QUICK_CHAT_FEEDBACK_LAUNCH_PATH = `${AppRoutePaths.CHAT}?launch=feedback`;
+
+/**
+ * 新增应用与模板入口：/chat 的 `launch` 白名单 slug，
+ * 直达内置应用构建 agent（BUILTIN_APP_BUILDER_AGENT_KEY）。
+ */
+export const QUICK_CHAT_CREATE_APP_LAUNCH_SLUG = "create-app";
+export const QUICK_CHAT_CREATE_APP_SURF_LAUNCH_SLUG = "create-app-surf";
+
+export const QUICK_CHAT_CREATE_APP_LAUNCH_PATH = `${AppRoutePaths.CHAT}?launch=${QUICK_CHAT_CREATE_APP_LAUNCH_SLUG}`;
+export const QUICK_CHAT_CREATE_APP_SURF_LAUNCH_PATH = `${AppRoutePaths.CHAT}?launch=${QUICK_CHAT_CREATE_APP_SURF_LAUNCH_SLUG}`;

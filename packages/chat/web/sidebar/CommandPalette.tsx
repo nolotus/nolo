@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Autocomplete as AriaAutocomplete,
   Dialog,
@@ -9,11 +10,13 @@ import {
   useFilter,
   type Key,
 } from "react-aria-components";
+import { LuSearch } from "react-icons/lu";
 import { Menu } from "render/web/ui/Menu";
 import { matchShortcut } from "app/settings/shortcutUtils";
 import * as stylex from "@stylexjs/stylex";
 import { commandPaletteStyles } from "./commandPaletteStyles";
 import "../chatStylexEscapeHatch.css";
+import "./sidebarSearchSimple.css";
 
 export const COMMAND_PALETTE_SHORTCUT = "mod+k";
 
@@ -28,6 +31,8 @@ export interface CommandPaletteProps<T extends object> {
   emptyState?: React.ReactNode;
   /** Optional footer (e.g. keyboard hints). */
   footer?: React.ReactNode;
+  /** Accessible label for close button */
+  closeAriaLabel?: string;
   /** Controlled search text. */
   inputValue?: string;
   onInputChange?: (value: string) => void;
@@ -48,12 +53,15 @@ export function CommandPalette<T extends object>(props: CommandPaletteProps<T>) 
     searchAriaLabel = "Search",
     emptyState = "No results found.",
     footer,
+    closeAriaLabel,
     inputValue,
     onInputChange,
     enableGlobalShortcut = true,
     className,
     "aria-label": ariaLabel,
   } = props;
+  const { t } = useTranslation(["common", "space"]);
+  const resolvedCloseLabel = closeAriaLabel ?? t("common:close", "关闭");
   const { contains } = useFilter({ sensitivity: "base" });
 
   useEffect(() => {
@@ -83,20 +91,40 @@ export function CommandPalette<T extends object>(props: CommandPaletteProps<T>) 
         {...stylex.props(commandPaletteStyles.modal)}
       >
         <Dialog
+          data-hook="chat-esc-cp-dialog"
           {...stylex.props(commandPaletteStyles.dialog)}
           aria-label={ariaLabel ?? searchAriaLabel}
         >
           <AriaAutocomplete filter={contains} inputValue={inputValue} onInputChange={onInputChange}>
-            <SearchField
-              autoFocus
-              aria-label={searchAriaLabel}
-              {...stylex.props(commandPaletteStyles.search)}
+            <div
+              data-hook="chat-esc-cp-search-row"
+              {...stylex.props(commandPaletteStyles.searchRow)}
             >
-              <Input
-                data-hook="chat-esc-cp-search-input"
-                placeholder={placeholder}
-              />
-            </SearchField>
+              <SearchField
+                autoFocus
+                aria-label={searchAriaLabel}
+                data-hook="chat-esc-cp-searchfield"
+                {...stylex.props(commandPaletteStyles.search)}
+              >
+                <LuSearch
+                  data-hook="chat-esc-cp-search-icon"
+                  size={16}
+                  aria-hidden="true"
+                />
+                <Input
+                  data-hook="chat-esc-cp-search-input"
+                  placeholder={placeholder}
+                />
+              </SearchField>
+              <button
+                type="button"
+                data-hook="chat-esc-cp-esc-btn"
+                aria-label={resolvedCloseLabel}
+                onClick={() => onOpenChange(false)}
+              >
+                Esc
+              </button>
+            </div>
             <Menu
               items={items}
               onAction={onAction}
@@ -108,7 +136,11 @@ export function CommandPalette<T extends object>(props: CommandPaletteProps<T>) 
               {children as any}
             </Menu>
             {footer ? (
-              <div {...stylex.props(commandPaletteStyles.footer)} aria-hidden="true">
+              <div
+                data-hook="chat-esc-cp-footer"
+                {...stylex.props(commandPaletteStyles.footer)}
+                aria-hidden="true"
+              >
                 {footer}
               </div>
             ) : null}

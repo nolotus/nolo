@@ -1,7 +1,6 @@
 // 文件路径: packages/app/pages/Home.tsx
 
-import { Suspense, lazy, useCallback, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useCallback, useState } from "react";
 
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
@@ -10,10 +9,8 @@ import { useMyContentItems } from "app/hooks/useMyContentItems";
 
 import HomeLanding from "./HomeLanding";
 import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
-import HomePaneSkeleton from "./HomePaneSkeleton";
 import QuickChat from "./QuickChat";
 import { getIsDesktopApp } from "app/utils/env";
-import { readStorageFlag, writeStorageFlag } from "app/utils/localStorageState";
 import {
   readLocalFirstOnboardingDismissed,
   writeLocalFirstOnboardingDismissed,
@@ -25,12 +22,7 @@ import { withLiteralClass } from "./share/withLiteralClass";
 import "./home-motion.css";
 import "./Home.css";
 
-const WidgetsSection = lazy(() => import("./widgets/WidgetsSection"));
-
-const WIDGETS_TIP_KEY = "home-widgets-customize-tip-v1";
-
 const Home = () => {
-  const { t } = useTranslation();
   const hasMounted = useHasMounted();
   const isLoggedIn = useIsLoggedIn();
   const currentUser = useCurrentUser();
@@ -44,15 +36,6 @@ const Home = () => {
   const pageMeta = useStaticPageMeta(showAuthedHome ? "default" : "home");
   const { items: myContentItems, loading: myContentLoading } = useMyContentItems();
   const isEmptyState = showAuthedHome && !myContentLoading && myContentItems.length === 0;
-  const [isEditingWidgets, setIsEditingWidgets] = useState(false);
-  // SSR 或存储不可用（异常）时默认视为已看（不渲染提示气泡）；浏览器端读持久化 flag。
-  const [widgetsTipSeen, setWidgetsTipSeen] = useState(
-    () => typeof window === "undefined" || readStorageFlag(WIDGETS_TIP_KEY, true)
-  );
-  const dismissWidgetsTip = useCallback(() => {
-    setWidgetsTipSeen(true);
-    writeStorageFlag(WIDGETS_TIP_KEY);
-  }, []);
 
   // Desktop Agent-first onboarding. Device-local durable dismiss (shared local-first key),
   // matching RN: login/signup/local paths/skip all complete onboarding. Not account-scoped
@@ -110,43 +93,6 @@ const Home = () => {
                 >
                   <QuickChat surface="home-primary" isEmptyState={isEmptyState} />
                 </div>
-              </section>
-
-              {/* 辅助区域：自定义看板/Widget卡片（排列在输入框下方，向下滑动可见） */}
-              <section {...stylex.props(homeStyles.homeAuthedWidgetsSection)}>
-                <div {...stylex.props(homeStyles.homeAuthedWidgetsHeader)}>
-                  <button
-                    type="button"
-                    {...stylex.props(
-                      homeStyles.homeEditBtn,
-                      isEditingWidgets && homeStyles.homeEditBtnActive
-                    )}
-                    onClick={() => { dismissWidgetsTip(); setIsEditingWidgets((v) => !v); }}
-                  >
-                    {isEditingWidgets
-                      ? t("homeTabs.editDone", "完成")
-                      : t("homeTabs.editCustom", "修改")}
-                  </button>
-                  {!widgetsTipSeen && !isEditingWidgets && (
-                    <div
-                      {...withLiteralClass(
-                        "home-widgets-tip",
-                        homeStyles.homeWidgetsTip,
-                        homeStyles.homeWidgetsTipBefore
-                      )}
-                    >
-                      <p {...stylex.props(homeStyles.homeWidgetsTipText)} role="status">
-                        {t("homeWidgets.customizeTip", "Customize your home: click Customize to reorder, resize, or hide cards.")}
-                      </p>
-                      <button type="button" {...stylex.props(homeStyles.homeWidgetsTipDone)} onClick={dismissWidgetsTip}>
-                        {t("homeWidgets.customizeTipDone", "知道了")}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <Suspense fallback={<HomePaneSkeleton />}>
-                  <WidgetsSection isEditing={isEditingWidgets} />
-                </Suspense>
               </section>
             </>
           ) : (

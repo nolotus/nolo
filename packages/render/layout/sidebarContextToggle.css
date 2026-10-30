@@ -1,0 +1,129 @@
+/* Sidebar Context Toggle:
+   - Toggle button is permanently mounted at the top slot of NavigationRail.
+   - Slot position & height remain identical across expanded/collapsed states (no jump).
+   - Context content area does not render toggle buttons.
+   - Smooth 180-220ms decelerated transition on sidebar width (no 380ms squash).
+   - Context renders at a stable fixed width and is clipped (overflow: hidden), avoiding text re-wrapping per frame.
+   - Rail stays fixed (52px) and unmoved throughout the transition.
+*/
+
+.navigation-v2-context-slot {
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar-context-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--textSecondary, var(--textMuted, #666));
+  border-radius: var(--radius-md, 6px);
+  cursor: pointer;
+  box-sizing: border-box;
+  padding: 0;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.sidebar-context-toggle:hover {
+  color: var(--primary, #0052ad);
+  background-color: var(--hoverBg, rgba(127, 127, 127, 0.08));
+}
+
+.sidebar-context-toggle:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 1px;
+}
+
+.sidebar-context-toggle--rail {
+  width: 40px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
+@media (min-width: 769px) {
+  /* 侧栏宽度平滑减速过渡：约 200ms cubic-bezier(0, 0, 0.2, 1) */
+  /* Specificity must beat layout.css's `.MainLayout__sidebar` shorthand
+     (same specificity, later in the bundle) — otherwise the legacy
+     `--sidebar-slide-duration` transition wins and the 200ms curve never
+     applies. */
+  .MainLayout .MainLayout__sidebar--has-rail {
+    transition: width 200ms cubic-bezier(0, 0, 0.2, 1) !important;
+    will-change: width;
+    overflow: hidden;
+  }
+
+  /* 拖拽调整大小时必须即时响应，完全禁用过渡动画 */
+  .MainLayout.is-resizing .MainLayout__sidebar--has-rail,
+  .MainLayout__sidebar--has-rail.is-resizing {
+    transition: none !important;
+  }
+
+  /* The context column must keep a stable width during the animation so its
+     content never re-wraps frame by frame; the clip reveal handles the rest. */
+  .MainLayout .MainLayout__sidebar--has-rail .navigation-v2-context {
+    width: calc(var(--sidebar-shell-width, 280px) - 52px);
+    min-width: calc(var(--sidebar-shell-width, 280px) - 52px);
+    flex-shrink: 0;
+  }
+
+  /* 动效减弱偏好 */
+  @media (prefers-reduced-motion: reduce) {
+    .MainLayout__sidebar--has-rail {
+      transition: none !important;
+    }
+  }
+
+  .MainLayout__sidebar--has-rail .MainLayout__sidebarContent {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* Rail 固定 52px，不随宽度变化移动或变形 */
+  .MainLayout__sidebar--has-rail .navigation-v2-shell {
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+    width: var(--sidebar-shell-width, 280px);
+    min-width: var(--sidebar-shell-width, 280px);
+    overflow: hidden;
+  }
+
+  .MainLayout__sidebar--has-rail .navigation-v2-rail {
+    flex: 0 0 52px;
+    width: 52px;
+    min-width: 52px;
+  }
+
+  /* Context 内容容器以稳定宽度渲染并依靠 overflow: hidden 裁剪揭开/收起，避免逐帧换行 */
+  .MainLayout__sidebar--has-rail .navigation-v2-context-slot {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .MainLayout__sidebar--has-rail .navigation-v2-context {
+    width: calc(var(--sidebar-shell-width, 280px) - 52px);
+    min-width: calc(var(--sidebar-shell-width, 280px) - 52px);
+    flex-shrink: 0;
+  }
+
+  /* 动画期间强制显示 context 进行平滑 clip 收起/揭开 */
+  .MainLayout__sidebar--has-rail.is-transitioning .navigation-v2-context {
+    display: flex !important;
+    visibility: visible !important;
+  }
+
+  /* 动画完全结束后处于折叠状态时隐藏 context */
+  .MainLayout__sidebar--rail-only:not(.is-transitioning) .navigation-v2-context {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar-context-toggle {
+    display: none !important;
+  }
+}

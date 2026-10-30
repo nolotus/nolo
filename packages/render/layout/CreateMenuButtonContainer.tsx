@@ -13,6 +13,8 @@ import { useCreateMenuOpenCount, incrementCreateMenuOpenCount } from "./createMe
 import { useCreateDialog } from "chat/dialog/useCreateDialog";
 import { noloAgentId } from "core/init";
 import { createDocState } from "render/page/docStore";
+import { APP_TEMPLATES } from "app/constants/appTemplates";
+import { AppRoutePaths, QUICK_CHAT_CREATE_APP_LAUNCH_SLUG } from "app/constants/routePaths";
 import {
   LuFileText,
   LuBot,
@@ -20,6 +22,9 @@ import {
   LuUpload,
   LuCalendarClock,
   LuMessageCirclePlus,
+  LuAppWindow,
+  LuWaves,
+  LuLayoutTemplate,
 } from "react-icons/lu";
 import { useCreateTable } from "render/table/useCreateTable";
 import CreateTaskModal from "chat/web/CreateTaskModal";
@@ -39,8 +44,14 @@ import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { useViewMode } from "create/space/spaceCurrentStore";
 
+const RAIL_CREATE_APP_GROUP_ITEM_IDS: readonly CreateMenuItemId[] = [
+  "create-app",
+  ...APP_TEMPLATES.map((tmpl) => `create-app-template-${tmpl.id}` as CreateMenuItemId),
+];
+
 const RAIL_CREATE_MENU_GROUPS: readonly (readonly CreateMenuItemId[])[] = [
   ["new-chat"],
+  RAIL_CREATE_APP_GROUP_ITEM_IDS,
   ["new-project", "new-page", "new-table"],
   ["create-agent-manual", "scheduled-task"],
   ["upload-file"],
@@ -181,6 +192,22 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
 
   const handleAction = useCallback(
     (key: Key) => {
+      const strKey = String(key);
+      if (strKey === "create-app") {
+        closeMenu();
+        navigate(`${AppRoutePaths.CHAT}?launch=${QUICK_CHAT_CREATE_APP_LAUNCH_SLUG}`);
+        return;
+      }
+      if (strKey.startsWith("create-app-template-")) {
+        const templateId = strKey.slice("create-app-template-".length);
+        const template = APP_TEMPLATES.find((tmpl) => tmpl.id === templateId);
+        if (template) {
+          closeMenu();
+          navigate(`${AppRoutePaths.CHAT}?launch=${template.launchSlug}`);
+          return;
+        }
+      }
+
       switch (key) {
         case "new-chat":
           closeMenu();
@@ -319,9 +346,39 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
           </MenuItem>
         );
       }
+      case "create-app": {
+        const label = t("app:newApp", "新建应用");
+        return (
+          <MenuItem key={id} id={id} textValue={label}>
+            <LuAppWindow size={16} aria-hidden="true" />
+            <span slot="label" title={label}>
+              {label}
+            </span>
+          </MenuItem>
+        );
+      }
       default: {
-        const _exhaustive: never = id;
-        return _exhaustive;
+        const strId = String(id);
+        if (strId.startsWith("create-app-template-")) {
+          const templateId = strId.slice("create-app-template-".length);
+          const template = APP_TEMPLATES.find((tmpl) => tmpl.id === templateId);
+          if (template) {
+            const label = t(template.labelKey, template.fallback);
+            return (
+              <MenuItem key={id} id={id} textValue={label}>
+                {template.id === "surf" ? (
+                  <LuWaves size={16} aria-hidden="true" />
+                ) : (
+                  <LuLayoutTemplate size={16} aria-hidden="true" />
+                )}
+                <span slot="label" title={label}>
+                  {label}
+                </span>
+              </MenuItem>
+            );
+          }
+        }
+        return null;
       }
     }
   };
@@ -331,11 +388,17 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     isDesktop,
   });
 
+  const isItemVisibleInRail = (id: CreateMenuItemId) => {
+    if (id === "new-project") return isDesktop;
+    if (id === "upload-file") return Boolean(onUploadClick);
+    return true;
+  };
+
   const menuItems =
     isRail ? (
       <>
         {RAIL_CREATE_MENU_GROUPS.map((group, groupIndex) => {
-          const activeItems = group.filter((id) => visibleItemIds.includes(id));
+          const activeItems = group.filter(isItemVisibleInRail);
           if (activeItems.length === 0) return null;
           return (
             <MenuSection key={groupIndex} className="create-menu__section">

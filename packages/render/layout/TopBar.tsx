@@ -63,13 +63,14 @@ const getCurrentBrowserHistoryIndex = () => {
   return typeof state?.idx === "number" ? state.idx : null;
 };
 
-const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
+const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen, hasRail }) => {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const navigationType = useNavigationType();
   const s = useTopBarState(toggleSidebar);
   const isLeftSidebarOpen = isSidebarOpen ?? s.isSidebarOpen;
+  const showTopbarSidebarToggle = !!toggleSidebar && !hasRail;
   const sidebarToggleLabel = isLeftSidebarOpen
     ? t("collapseSidebar", "收起侧边栏")
     : t("expandSidebar", "展开侧边栏");
@@ -95,8 +96,9 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
   const showTopbarHistoryControls =
     isDesktopShell && desktopTitlebarMode === "native";
   const showDesktopTitlebarNavigation = !isDesktopShell;
-  // Always fixed in the topbar so every route (life, recharge, no-sidebar) can go home.
-  const showTopbarHome = !s.isLoggedIn || isLeftSidebarOpen || !toggleSidebar;
+  // Always fixed in the topbar when no rail is present so every route can go home;
+  // when the Rail is active, Rail owns Home and TopBar avoids duplicating it.
+  const showTopbarHome = !hasRail || !s.isLoggedIn || !toggleSidebar;
   // Guest home: the topbar dissolves into the landing's sky and carries the
   // brand instead of a bare house icon (2026-10-04 home redesign).
   // Guest nature pages (home + login/signup/cli-authorize) share that look;
@@ -307,7 +309,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
       >
         {/* 左侧：侧边栏开关 + Home */}
         <div className="topbar__section topbar__section--left">
-          {toggleSidebar && (
+          {showTopbarSidebarToggle && (
             <Tooltip
               content={
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>

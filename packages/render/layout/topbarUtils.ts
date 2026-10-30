@@ -15,6 +15,7 @@ export type ContentKeyType =
 export interface TopBarProps {
   toggleSidebar?: () => void;
   isSidebarOpen?: boolean;
+  hasRail?: boolean;
 }
 
 export const getObjectAssistantLabels = (

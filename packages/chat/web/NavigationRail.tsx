@@ -34,7 +34,7 @@ const pathOf = (to: string): string => to.split(/[?#]/)[0];
  * space switcher's "全部" action, so leaving a Space never leaves the
  * sidebar rendering a stale Space scope.
  */
-export function NavigationRail(): React.JSX.Element {
+export function NavigationRail({ headerSlot }: { headerSlot?: React.ReactNode } = {}): React.JSX.Element {
   const { t } = useTranslation("space");
   const isLoggedIn = useIsLoggedIn();
   const location = useLocation();
@@ -117,10 +117,11 @@ export function NavigationRail(): React.JSX.Element {
       data-hook="navigation-v2-rail"
       className="navigation-v2-rail"
     >
+      {headerSlot}
       {isLoggedIn && <div className="navigation-v2-rail__create"><CreateMenuButton variant="sidebar" showLabel={false} /></div>}
       <button type="button" className="navigation-v2-rail__item" title={t("common:search", "搜索")}
         aria-label={t("common:search", "搜索")} onClick={() => window.dispatchEvent(new Event("nolo:navigation-search"))}>
-        <LuSearch size={17} aria-hidden="true" />
+        <span className="navigation-v2-rail__icon"><LuSearch size={17} aria-hidden="true" /></span>
       </button>
       {items.map(({ view, to, label, Icon }) => {
         const isActive = active === view;
@@ -136,7 +137,7 @@ export function NavigationRail(): React.JSX.Element {
             className="navigation-v2-rail__item"
             onClick={view === "home" ? handleHomeClick : undefined}
           >
-            <Icon size={17} aria-hidden="true" />
+            <span className="navigation-v2-rail__icon"><Icon size={17} aria-hidden="true" /></span>
             <span className="navigation-v2-rail__label">{label}</span>
           </NavLink>
         );
@@ -145,7 +146,7 @@ export function NavigationRail(): React.JSX.Element {
         const Icon = quickIcons[item.type as keyof typeof quickIcons] ?? LuLink;
         return <NavLink key={item.key} to={item.path} className="navigation-v2-rail__item"
           title={item.title} aria-label={item.title} aria-current={pathOf(item.path) === location.pathname ? "page" : undefined}>
-          <Icon size={16} aria-hidden="true" />
+          <span className="navigation-v2-rail__icon"><Icon size={16} aria-hidden="true" /></span>
         </NavLink>;
       })}
       {isLoggedIn && <div className="navigation-v2-rail__footer">
