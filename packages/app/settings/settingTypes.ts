@@ -109,6 +109,18 @@ export interface SettingState {
   // 空字符串 = 不覆盖（使用内置档位 agent）。
   quickChatAutoAgentId: string;
 
+  /**
+   * quick-chat 运行环境目标选择：
+   * kind: "server" | "machine"
+   * machineId?: string
+   * serverOrigin?: string
+   */
+  quickChatRuntimeTarget?: {
+    kind: "server" | "machine";
+    machineId?: string;
+    serverOrigin?: string;
+  };
+
   // PDF OCR 模型选择("none" 表示不使用 OCR,用 pdf.js 提取文本)
   ocrModel: "none" | "google_document_ocr" | "olm_ocr";
 

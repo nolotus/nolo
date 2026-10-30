@@ -35,6 +35,7 @@ import type { Agent } from "app/types";
 import { useChatInput } from "chat/hooks/useChatInput";
 import { useFileDropZone } from "app/hooks/useFileDropZone";
 import { shouldDeferEnterForIme } from "app/utils/ime";
+import { normalizeServerOrigin } from "core/serverOrigin";
 import { compactWorkspacePath } from "app/utils/compactWorkspacePath";
 import { read, selectEntities } from "database/dbSlice";
 import { fetchAccountProfile } from "identity/accountProfile";
@@ -77,6 +78,8 @@ import { LiveVoicePanel } from "chat/web/LiveVoicePanel";
 import { isLiveAudioOnlyAgent } from "ai/agent/isLiveAudioOnlyAgent";
 import { LuSettings2 } from "react-icons/lu";
 import QuickChatModeSelector from "./QuickChatModeSelector";
+import QuickChatRuntimeSelector from "chat/web/QuickChatRuntimeSelector";
+import type { DialogRuntimeBinding } from "app/types";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 // 默认档路由出来的对话统一叫 nolo（而不是具体型号名），型号换代不改标题。
 const QUICK_CHAT_AGENT_TITLES: Record<string, string> = {
@@ -203,6 +206,13 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   // Phase 5：余额刷新直连 auth/session，写入显式解析的 AccountSessionService。
   const accountSession = useAccountSessionService();
   const ocrModel = useAppSelector(selectOcrModel);
+  const quickChatRuntimeTarget = useAppSelector(
+    (state) =>
+      (state.settings as Record<string, unknown> | undefined)
+        ?.quickChatRuntimeTarget as
+        | { kind: "server" | "machine"; machineId?: string; serverOrigin?: string }
+        | undefined,
+  );
   const isComposingRef = useRef(false);
   const lastCompositionEndAtRef = useRef(0);
   const isStartingRef = useRef(false);
@@ -455,11 +465,43 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
 
       try {
         const dialogAgentMode = selectedAgentId ? "fixed" : "auto";
+
+        const targetOrigin = normalizeServerOrigin(
+          quickChatRuntimeTarget?.serverOrigin,
+        );
+        const currentOrigin = normalizeServerOrigin(currentServer);
+        const isServerOriginMatched =
+          !targetOrigin || !currentOrigin || targetOrigin === currentOrigin;
+
+        const isUserSelectedMachine =
+          quickChatRuntimeTarget?.kind === "machine" &&
+          Boolean(quickChatRuntimeTarget.machineId) &&
+          isServerOriginMatched;
+
+        const runtimeBinding: DialogRuntimeBinding = {
+          version: 1,
+          controller: "request",
+          agentKey: effectiveAgentId || "",
+          runtimeAnchorDialogId: "",
+          ...(isUserSelectedMachine
+            ? {
+                target: {
+                  kind: "machine",
+                  machineId: quickChatRuntimeTarget!.machineId!,
+                  serverOrigin: targetOrigin || currentOrigin,
+                  source: "user",
+                  selectedAt: Date.now(),
+                } as unknown as DialogRuntimeTargetSelection,
+              }
+            : {}),
+        };
+
         QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] createDialog dispatch", {
           agentMode: dialogAgentMode,
           cybots: selectedAgentId ? [effectiveAgentId] : [],
           spaceId: currentSpaceId,
           title: dialogTitle,
+          runtimeBinding,
         });
         const result = await dispatch(
           createDialog({
@@ -470,6 +512,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
             optimisticReturnBeforeWrite: true,
             spaceId: currentSpaceId,
             title: dialogTitle,
+            runtimeBinding,
           })
         ).unwrap();
         dialogKey = (result as { dbKey?: string } | undefined)?.dbKey ?? "";
@@ -874,6 +917,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
               />
 
               <QuickChatModeSelector mode={quickChatMode} onModeChange={handleModeChange} surface={surface} />
+              <QuickChatRuntimeSelector surface={surface} />
             </div>
 
             <div className="message-input__controls-right">

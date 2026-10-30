@@ -399,13 +399,27 @@
         }
       
         /* ── Shared AgentPickerControl surface overrides (home QuickChat) ── */
-        .quick-chat-mode-selector {
+        .quick-chat-mode-selector,
+        .quick-chat-runtime-selector {
           display: inline-flex;
           align-items: center;
         }
 
+        .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+          font-size: var(--fontSize-base, 14px);
+          max-width: 220px;
+          padding: var(--space-2, 8px) var(--space-3, 12px);
+          min-height: var(--control-md, 36px);
+        }
+
+        .quick-chat-runtime-selector-trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+          max-width: 160px;
+        }
+
         .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-.quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+        .quick-chat-container[data-surface="home-primary"] .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+        .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+        .quick-chat-container[data-surface="space-home-compact"] .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           font-size: var(--fontSize-base, 14px);
           max-width: 220px;
           padding: var(--space-2, 8px) var(--space-3, 12px);
@@ -414,7 +428,9 @@
         }
 
         .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-.quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+        .quick-chat-container[data-surface="home-primary"] .quick-chat-runtime-selector-trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+        .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+        .quick-chat-container[data-surface="space-home-compact"] .quick-chat-runtime-selector-trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           max-width: 160px;
         }
 
@@ -423,6 +439,24 @@
            声明必须后于 base 才能生效。
            透明底控件只撑盒不改视觉：文字/图标尺寸不变，命中区域变大。 */
         @media (max-width: 640px) {
+          .quick-chat-box .message-input__controls-left {
+            flex-wrap: wrap;
+            gap: var(--space-2, 8px);
+          }
+          .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="home-primary"] .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="space-home-compact"] .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+            max-width: 130px;
+          }
+          .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="home-primary"] .quick-chat-runtime-selector-trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="space-home-compact"] .quick-chat-runtime-selector-trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-runtime-selector-trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+            max-width: 80px;
+          }
           .quick-chat-container[data-surface="home-primary"] .upload-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
           .quick-chat-container[data-surface="home-primary"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
           .quick-chat-container[data-surface="space-home-compact"] .upload-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
@@ -438,7 +472,10 @@
             height: var(--tap-target-min, 44px);
           }
           .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-          .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+          .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="home-primary"] .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="space-home-compact"] .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-runtime-selector-trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
             min-height: var(--tap-target-min, 44px);
           }
           .personalization-button {
