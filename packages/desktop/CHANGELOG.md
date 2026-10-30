@@ -1,4 +1,15 @@
 
+## 0.206.0 (2026-10-30)
+
+### Features
+
+* **cli:** 审批待决时额外输出一行可 grep 的 approvalId ([565a31a](https://github.com/nolotus/bun-nolo/commit/565a31a1ff7971d5ba1ef1318dfa94d04180ab40))
+
+### Bug Fixes
+
+* **navigation:** 收窄 rail 并简化收藏文案 ([20fedbd](https://github.com/nolotus/bun-nolo/commit/20fedbd90deeea1f10c2fea2378ff990234dcfff))
+
+
 ## 0.205.0 (2026-10-29)
 
 ### Features

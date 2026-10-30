@@ -518,12 +518,12 @@ function parseLinesArg(value: unknown): { slice?: ReadFileSlice; warning?: strin
   const text = asTrimmedString(value);
   if (!text) {
     return {
-      warning: `Ignored lines: expected ${LINES_ARG_SYNTAX}, received ${describeRejectedArgValue(value)}.`,
+      warning: `Ignored lines: only ONE range is supported (${LINES_ARG_SYNTAX}); comma-separated segments are not, received ${describeRejectedArgValue(value)}.`,
     };
   }
 
   const reject = {
-    warning: `Ignored lines: expected ${LINES_ARG_SYNTAX}, received ${JSON.stringify(text)}.`,
+    warning: `Ignored lines: only ONE range is supported (${LINES_ARG_SYNTAX}); comma-separated segments are not, received ${JSON.stringify(text)}.`,
   };
 
   if (/^\d+$/.test(text)) {

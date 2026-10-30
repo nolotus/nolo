@@ -98,7 +98,9 @@ export function NavigationRail(): React.JSX.Element {
     {
       view: "favorites",
       to: RAIL_VIEW_PATHS.favorites,
-      label: t("allView.favorites", "我的收藏"),
+      // Rail 文案用 common 命名空间的既有「收藏」key（不再用 allView.favorites「我的收藏」），
+      // 避免改动侧栏其它位置共享的 allView.favorites。
+      label: t("common:favorite", "收藏"),
       Icon: LuStar,
     },
     {
