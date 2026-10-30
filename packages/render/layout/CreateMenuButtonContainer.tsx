@@ -19,6 +19,7 @@ import {
   LuGrid2X2,
   LuUpload,
   LuCalendarClock,
+  LuMessageCirclePlus,
 } from "react-icons/lu";
 import { useCreateTable } from "render/table/useCreateTable";
 import CreateTaskModal from "chat/web/CreateTaskModal";
@@ -28,6 +29,7 @@ import { DataType } from "create/types";
 import type { Key } from "react-aria-components";
 import CreateMenuButton from "./CreateMenuButton";
 import { MenuItem } from "render/web/ui/Menu";
+import { MenuSection } from "render/web/ui/Menu";
 import {
   type CreateMenuItemId,
   getVisibleCreateMenuItemIds,
@@ -36,6 +38,13 @@ import {
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { useViewMode } from "create/space/spaceCurrentStore";
+
+const RAIL_CREATE_MENU_GROUPS: readonly (readonly CreateMenuItemId[])[] = [
+  ["new-chat"],
+  ["new-project", "new-page", "new-table"],
+  ["create-agent-manual", "scheduled-task"],
+  ["upload-file"],
+] as const;
 
 interface CreateMenuButtonContainerProps {
   variant?: "sidebar" | "topbar" | "inline" | "header";
@@ -126,6 +135,8 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     variant,
     createMenuOpenCount,
   });
+
+  const isRail = variant === "sidebar" && !shouldShowLabel;
 
   const createNewPageAndClose = useCallback(async () => {
     setIsCreatingPage(true);
@@ -220,7 +231,16 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     switch (id) {
       case "new-chat": {
         const label = t("chat:newChat", "新对话");
-        return <MenuItem key={id} id={id} textValue={label}><span aria-hidden="true">✦</span><span slot="label">{label}</span></MenuItem>;
+        return (
+          <MenuItem key={id} id={id} textValue={label}>
+            {isRail ? (
+              <LuMessageCirclePlus size={16} aria-hidden="true" />
+            ) : (
+              <span aria-hidden="true">✦</span>
+            )}
+            <span slot="label">{label}</span>
+          </MenuItem>
+        );
       }
       case "new-project": {
         const label = t("project:newProject", "新建项目");
@@ -306,14 +326,27 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     }
   };
 
-  const menuItems = (
-    <>
-      {getVisibleCreateMenuItemIds({
-        hasUploadHandler: Boolean(onUploadClick),
-        isDesktop,
-      }).map(renderMenuItem)}
-    </>
-  );
+  const visibleItemIds = getVisibleCreateMenuItemIds({
+    hasUploadHandler: Boolean(onUploadClick),
+    isDesktop,
+  });
+
+  const menuItems =
+    isRail ? (
+      <>
+        {RAIL_CREATE_MENU_GROUPS.map((group, groupIndex) => {
+          const activeItems = group.filter((id) => visibleItemIds.includes(id));
+          if (activeItems.length === 0) return null;
+          return (
+            <MenuSection key={groupIndex} className="create-menu__section">
+              {activeItems.map(renderMenuItem)}
+            </MenuSection>
+          );
+        })}
+      </>
+    ) : (
+      <>{visibleItemIds.map(renderMenuItem)}</>
+    );
 
   return (
     <>
