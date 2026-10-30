@@ -917,7 +917,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
               />
 
               <QuickChatModeSelector mode={quickChatMode} onModeChange={handleModeChange} surface={surface} />
-              <QuickChatRuntimeSelector surface={surface} />
+              {/* 暂时隐藏运行环境选择器（待方案成熟后再启用） */ false && <QuickChatRuntimeSelector surface={surface} />}
             </div>
 
             <div className="message-input__controls-right">

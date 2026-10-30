@@ -51,9 +51,9 @@ const RAIL_CREATE_APP_GROUP_ITEM_IDS: readonly CreateMenuItemId[] = [
   ),
 ];
 
+// 暂时隐藏「新建应用」及其模板分组，待产品方案成熟后再启用
 const RAIL_CREATE_MENU_GROUPS: readonly (readonly CreateMenuItemId[])[] = [
   ["new-chat"],
-  RAIL_CREATE_APP_GROUP_ITEM_IDS,
   ["new-project", "new-page", "new-table"],
   ["create-agent-manual", "scheduled-task"],
   ["upload-file"],
