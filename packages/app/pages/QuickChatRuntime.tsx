@@ -478,30 +478,31 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
           Boolean(quickChatRuntimeTarget.machineId) &&
           isServerOriginMatched;
 
-        const runtimeBinding: DialogRuntimeBinding = {
-          version: 1,
-          controller: "request",
-          agentKey: effectiveAgentId || "",
-          runtimeAnchorDialogId: "",
-          ...(isUserSelectedMachine
-            ? {
-                target: {
-                  kind: "machine",
-                  machineId: quickChatRuntimeTarget!.machineId!,
-                  serverOrigin: targetOrigin || currentOrigin,
-                  source: "user",
-                  selectedAt: Date.now(),
-                } as unknown as DialogRuntimeTargetSelection,
-              }
-            : {}),
-        };
+        // 只有用户显式选定了远程机器时才构建并下发 runtimeBinding；
+        // 默认情况下保持 undefined，绝不向自动模式对话写入任何虚假的绑卡对象，
+        // 确保首页自动模式对话维持原生的动态路由与流式调度，彻底杜绝空响应。
+        const runtimeBinding: DialogRuntimeBinding | undefined = isUserSelectedMachine
+          ? {
+              version: 1,
+              controller: "request",
+              agentKey: effectiveAgentId || "",
+              runtimeAnchorDialogId: "",
+              target: {
+                kind: "machine",
+                machineId: quickChatRuntimeTarget!.machineId!,
+                serverOrigin: targetOrigin || currentOrigin,
+                source: "user",
+                selectedAt: Date.now(),
+              } as unknown as DialogRuntimeTargetSelection,
+            }
+          : undefined;
 
         QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] createDialog dispatch", {
           agentMode: dialogAgentMode,
           cybots: selectedAgentId ? [effectiveAgentId] : [],
           spaceId: currentSpaceId,
           title: dialogTitle,
-          runtimeBinding,
+          ...(runtimeBinding ? { runtimeBinding } : {}),
         });
         const result = await dispatch(
           createDialog({
@@ -512,7 +513,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
             optimisticReturnBeforeWrite: true,
             spaceId: currentSpaceId,
             title: dialogTitle,
-            runtimeBinding,
+            ...(runtimeBinding ? { runtimeBinding } : {}),
           })
         ).unwrap();
         dialogKey = (result as { dbKey?: string } | undefined)?.dbKey ?? "";
