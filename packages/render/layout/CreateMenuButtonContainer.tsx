@@ -46,7 +46,9 @@ import { useViewMode } from "create/space/spaceCurrentStore";
 
 const RAIL_CREATE_APP_GROUP_ITEM_IDS: readonly CreateMenuItemId[] = [
   "create-app",
-  ...APP_TEMPLATES.map((tmpl) => `create-app-template-${tmpl.id}` as CreateMenuItemId),
+  ...APP_TEMPLATES.filter((tmpl) => tmpl.showInCreateMenu).map(
+    (tmpl) => `create-app-template-${tmpl.id}` as CreateMenuItemId,
+  ),
 ];
 
 const RAIL_CREATE_MENU_GROUPS: readonly (readonly CreateMenuItemId[])[] = [
