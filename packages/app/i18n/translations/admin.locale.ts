@@ -15,6 +15,7 @@ export default {
     translation: {
       life: {
         usage: "Usage",
+        runtime: "Runtime Resources",
         mySection: "Mine",
         adminSection: "Admin",
         userAdmin: "User management",
@@ -521,6 +522,7 @@ export default {
     translation: {
       life: {
         usage: "使用",
+        runtime: "运行资源",
         mySection: "我的",
         adminSection: "管理后台",
         userAdmin: "用户管理",
@@ -1003,6 +1005,7 @@ export default {
     translation: {
       life: {
         usage: "使用",
+        runtime: "運行資源",
         mySection: "我的",
         adminSection: "管理後台",
         userAdmin: "用戶管理",
@@ -1485,6 +1488,7 @@ export default {
     translation: {
       life: {
         usage: "使用状況",
+        runtime: "実行リソース",
         mySection: "マイページ",
         adminSection: "管理画面",
         userAdmin: "ユーザー管理",

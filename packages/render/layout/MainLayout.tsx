@@ -7,6 +7,7 @@ import React, {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   lazy,
@@ -51,7 +52,9 @@ import {
 import { MobileDownloadBanner } from "./MobileDownloadBanner";
 import { getIsDesktopApp } from "app/utils/env";
 import { getGuestNaturePage } from "./guestNaturePages";
+import { SidebarToggleContext } from "./SidebarToggleContext";
 import "./layout.css";
+import "./sidebarContextToggle.css";
 
 const TopBar = lazy(() => import("./TopBar"));
 // 页脚只出现在内容型路由，懒加载避免拖累工作区首屏
@@ -131,6 +134,33 @@ const MainLayout: React.FC = () => {
   const [containerWidth, setContainerWidth] = useState<number>(() =>
     typeof window !== "undefined" ? window.innerWidth : 1200
   );
+  const isSidebarTransitioningRef = useRef(false);
+  // The marker must live in React state: the same render that flips
+  // railOnly/is-open rewrites the className attribute, which would wipe a
+  // manually added classList flag and collapse the context column at t=0.
+  const [isSidebarTransitioning, setIsSidebarTransitioning] = useState(false);
+  const pendingContainerWidthRef = useRef<number | null>(null);
+  /** 折叠请求中、尚未提交到 store 的侧栏宽度（用于连续点击时判断方向）。 */
+  const pendingSidebarWidthRef = useRef<number | null>(null);
+  /** 本次过渡的目标宽度：用于忽略上一次切换残留的 transitionend。 */
+  const transitionTargetWidthRef = useRef<number | null>(null);
+  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const finishSidebarTransition = useCallback(() => {
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
+    if (!isSidebarTransitioningRef.current) return;
+    isSidebarTransitioningRef.current = false;
+    setIsSidebarTransitioning(false);
+    // 侧栏短动画结束一次收敛：应用动画期间暂缓的最新测量值
+    if (pendingContainerWidthRef.current !== null) {
+      const finalW = pendingContainerWidthRef.current;
+      pendingContainerWidthRef.current = null;
+      setContainerWidth(finalW);
+    }
+  }, []);
 
   const preferredWidth = useRightSidebarPreferredWidth();
   const navigationPlacement = useNavigationPlacement();
@@ -145,6 +175,7 @@ const MainLayout: React.FC = () => {
   const isRightOpen = rightSidebar.isOpen;
 
   // 监听 contentRow 容器尺寸变化（Navigation 折叠/展开或窗口 resize），动态适配 effectiveWidth
+  // 动画期间暂缓测量更新，避免 ResizeObserver 逐帧 setContainerWidth 带来的 React 重复渲染，动画结束一次收敛
   useEffect(() => {
     const el = contentRowRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -152,13 +183,38 @@ const MainLayout: React.FC = () => {
       for (const entry of entries) {
         const w = entry.contentRect.width;
         if (w > 0) {
-          setContainerWidth(w);
+          if (isSidebarTransitioningRef.current) {
+            pendingContainerWidthRef.current = w;
+          } else {
+            setContainerWidth(w);
+          }
         }
       }
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // 监听侧栏宽度 transition 结束事件
+  useEffect(() => {
+    const el = sidebarRef.current;
+    if (!el) return;
+    const handleTransitionEnd = (e: TransitionEvent) => {
+      if (e.target !== el || e.propertyName !== "width") return;
+      // 连续切换时，上一次动画的 transitionend 可能先到：只在当前宽度已经
+      // 落到本次目标宽度时才收敛，否则会把过渡标记提前摘掉、动画中途闪断。
+      const target = transitionTargetWidthRef.current;
+      const current = Number.parseFloat(el.style.width);
+      if (target !== null && Number.isFinite(current) && current !== target) {
+        return;
+      }
+      finishSidebarTransition();
+    };
+    el.addEventListener("transitionend", handleTransitionEnd);
+    return () => {
+      el.removeEventListener("transitionend", handleTransitionEnd);
+    };
+  }, [finishSidebarTransition]);
 
   useEffect(() => {
     if (sidebarWidth > 0) {
@@ -230,16 +286,55 @@ const MainLayout: React.FC = () => {
   const sidebarContent = mainSidebar.content ?? defaultSidebarContent;
 
   const hasSidebar = sidebarContent !== null;
-  const railOnly = !isMobile && renderChatSidebar && mainSidebar.content === null && sidebarWidth <= 0;
+  const hasRail = !isMobile && renderChatSidebar && mainSidebar.content === null;
+  const railOnly = hasRail && sidebarWidth <= 0;
 
   const toggleSidebar = useCallback(() => {
-    const isOpening = sidebarWidth <= 0;
+    // 用 pending 宽度判断方向：宽度被推迟一帧提交，连续点击时方向才不会算错。
+    const currentWidth = pendingSidebarWidthRef.current ?? sidebarWidth;
+    const isOpening = currentWidth <= 0;
     mobileUserOpenedRef.current = isOpening;
     const newWidth = isOpening ? lastWidthRef.current || 280 : 0;
     userCollapsedRef.current = !isOpening;
-    dispatch(setSidebarWidth(newWidth));
 
-  }, [dispatch, sidebarWidth]);
+    const prefersReducedMotion =
+      !isMobile &&
+      hasRail &&
+      typeof window !== "undefined" &&
+      Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+
+    if (!isMobile && hasRail && !prefersReducedMotion) {
+      isSidebarTransitioningRef.current = true;
+      setIsSidebarTransitioning(true);
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+      }
+      // 约 180-220ms 减速过渡，加少量裕量 240ms 兜底收敛
+      transitionTimerRef.current = setTimeout(() => {
+        finishSidebarTransition();
+      }, 240);
+      // 先让浏览器提交一帧「带过渡属性」的样式，再改宽度。宽度与过渡在同一帧
+      // 生效时浏览器没有旧值可比较，动画不会发生（折叠看起来就是硬切）。
+      pendingSidebarWidthRef.current = newWidth;
+      // 折叠时 DOM 的目标宽度是 rail 的 52px（railOnly 时内联 width 取 52），
+      // 不是 store 里的 0；记录错会让本次 transitionend 被当成残留事件丢弃。
+      transitionTargetWidthRef.current = newWidth <= 0 ? 52 : newWidth;
+      // 先提交一帧带过渡属性的样式再改宽度，动画才会发生；rAF 在后台标签页
+      // 会被浏览器挂起，所以再加一个定时器兜底，保证折叠在任何情况下都生效。
+      let committed = false;
+      const commitWidth = () => {
+        if (committed) return;
+        committed = true;
+        pendingSidebarWidthRef.current = null;
+        dispatch(setSidebarWidth(newWidth));
+      };
+      requestAnimationFrame(commitWidth);
+      setTimeout(commitWidth, 32);
+      return;
+    }
+
+    dispatch(setSidebarWidth(newWidth));
+  }, [dispatch, isMobile, hasRail, sidebarWidth, finishSidebarTransition]);
 
   const openRightSidebar = useCallback(
     (content: React.ReactNode, options?: RightSidebarOptions) => {
@@ -285,7 +380,12 @@ const MainLayout: React.FC = () => {
 
   const { handlePointerDown: startResizing } = useDragResize({
     cursor: "col-resize",
-    onStart: () => setIsResizing(true),
+    onStart: () => {
+      if (isSidebarTransitioningRef.current) {
+        finishSidebarTransition();
+      }
+      setIsResizing(true);
+    },
     onMove: (clientX) => {
       requestAnimationFrame(() => {
         const rootEl = mainLayoutRef.current;
@@ -429,13 +529,25 @@ const MainLayout: React.FC = () => {
     }
   }, [isMobile, sidebarWidth, dispatch]);
 
-  // 路由切换时，如有需要自动关闭右侧栏
+  // 路由切换时，如有需要自动关闭右侧栏；若处于侧栏动画中，立即收敛并清理
   useEffect(() => {
+    if (isSidebarTransitioningRef.current) {
+      finishSidebarTransition();
+    }
     setRightSidebar((prev) => {
       if (!prev.isOpen || !prev.closeOnRouteChange) return prev;
       return { ...prev, isOpen: false };
     });
-  }, [location.pathname]);
+  }, [location.pathname, finishSidebarTransition]);
+
+  // 组件卸载时清理过渡兜底定时器
+  useEffect(() => {
+    return () => {
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+      }
+    };
+  }, []);
 
   // 移动端锁 body 滚动（仅在我们需要时改为 hidden，并在结束时恢复）
   useEffect(() => {
@@ -463,22 +575,34 @@ const MainLayout: React.FC = () => {
   const placementClass =
     navigationPlacement === "end" ? "MainLayout--navigation-end" : "";
 
+  const isDesktop = !shouldRenderMobileLayout;
+  const sidebarToggleValue = useMemo(
+    () => ({
+      toggleSidebar,
+      isOpen: hasSidebar ? isOpen : false,
+      isDesktop,
+      hasRail,
+    }),
+    [toggleSidebar, hasSidebar, isOpen, isDesktop, hasRail]
+  );
+
   return (
-    <MainSidebarContext.Provider
-      value={{
-        setContent: setMainSidebarContent,
-        clearContent: clearMainSidebarContent,
-        currentId: mainSidebar.id,
-      }}
-    >
-      <RightSidebarContext.Provider
+    <SidebarToggleContext.Provider value={sidebarToggleValue}>
+      <MainSidebarContext.Provider
         value={{
-          open: openRightSidebar,
-          close: closeRightSidebar,
-          isOpen: isRightOpen,
-          currentId: rightSidebar.id,
+          setContent: setMainSidebarContent,
+          clearContent: clearMainSidebarContent,
+          currentId: mainSidebar.id,
         }}
       >
+        <RightSidebarContext.Provider
+          value={{
+            open: openRightSidebar,
+            close: closeRightSidebar,
+            isOpen: isRightOpen,
+            currentId: rightSidebar.id,
+          }}
+        >
         <div
           ref={mainLayoutRef}
           className={`MainLayout ${placementClass} ${isResizing ? "is-resizing" : ""} ${guestNaturePage ? `MainLayout--guest-nature MainLayout--guest-${guestNaturePage}` : ""}`.trim()}
@@ -487,8 +611,15 @@ const MainLayout: React.FC = () => {
         {hasSidebar && (
           <aside
             ref={sidebarRef}
-            className={`MainLayout__sidebar ${isOpen ? "is-open" : ""} ${railOnly ? "MainLayout__sidebar--rail-only" : ""}`}
-            style={shouldRenderMobileLayout ? undefined : { width: railOnly ? 52 : sidebarWidth }}
+            className={`MainLayout__sidebar ${isOpen ? "is-open" : ""} ${railOnly ? "MainLayout__sidebar--rail-only" : ""} ${hasRail ? "MainLayout__sidebar--has-rail" : ""} ${isSidebarTransitioning ? "is-transitioning" : ""}`}
+            style={
+              shouldRenderMobileLayout
+                ? undefined
+                : {
+                    width: railOnly ? 52 : sidebarWidth,
+                    ["--sidebar-shell-width" as any]: `${lastWidthRef.current || 280}px`,
+                  }
+            }
           >
             <div className="MainLayout__sidebarContent">{sidebarContent}</div>
             {/* ChatSidebar owns its Rail footer; non-Chat sidebars keep the legacy footer. */}
@@ -519,6 +650,7 @@ const MainLayout: React.FC = () => {
             <TopBar
               toggleSidebar={hasSidebar ? toggleSidebar : undefined}
               isSidebarOpen={hasSidebar ? isOpen : false}
+              hasRail={hasRail}
             />
           </Suspense>
 
@@ -598,6 +730,7 @@ const MainLayout: React.FC = () => {
         </div>
       </RightSidebarContext.Provider>
     </MainSidebarContext.Provider>
+  </SidebarToggleContext.Provider>
   );
 };
 

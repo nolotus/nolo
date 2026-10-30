@@ -1,0 +1,58 @@
+/* railAccountMenu.css - Navigation Rail compact account menu styles */
+
+/* 桌面端 (min-width: 769px): 纵向 Rail，常驻通知在头像上方 */
+@media (min-width: 769px) {
+  div.SidebarUserSection.navigation-v2-rail-account {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    width: 100%;
+    padding: 8px 2px !important;
+    border-top: 0 !important;
+  }
+
+  /* actions 包含更新与通知，order: 1 排在头像上方 */
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__row > .navigation-v2-rail-account__actions {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 8px !important;
+    order: 1 !important;
+    width: 100%;
+  }
+
+  /* row 包含 profile（头像），order: 2 排在 actions 下方 */
+  div.SidebarUserSection.navigation-v2-rail-account > .navigation-v2-rail-account__row {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 6px !important;
+    order: 2 !important;
+    width: 100%;
+  }
+
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__profile {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    order: 2;
+    width: 100%;
+  }
+}
+
+/* 隐藏 compact 独立 chevron 但保留普通形态 */
+div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__chevron,
+div.SidebarUserSection.navigation-v2-rail-account .SidebarUserSection__menu-toggle {
+  display: none !important;
+}
+
+/* 隐藏 compact 下的用户名文本 */
+div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__username {
+  display: none !important;
+}
+
+/* popup 紧凑右上轻边框 6px */
+.SidebarUserSection__dropdown--compact {
+  border-radius: 6px !important;
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08)) !important;
+}

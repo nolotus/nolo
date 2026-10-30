@@ -13,12 +13,18 @@ import { useCreateMenuOpenCount, incrementCreateMenuOpenCount } from "./createMe
 import { useCreateDialog } from "chat/dialog/useCreateDialog";
 import { noloAgentId } from "core/init";
 import { createDocState } from "render/page/docStore";
+import { APP_TEMPLATES } from "app/constants/appTemplates";
+import { AppRoutePaths, QUICK_CHAT_CREATE_APP_LAUNCH_SLUG } from "app/constants/routePaths";
 import {
   LuFileText,
   LuBot,
   LuGrid2X2,
   LuUpload,
   LuCalendarClock,
+  LuMessageCirclePlus,
+  LuAppWindow,
+  LuWaves,
+  LuLayoutTemplate,
 } from "react-icons/lu";
 import { useCreateTable } from "render/table/useCreateTable";
 import CreateTaskModal from "chat/web/CreateTaskModal";
@@ -28,6 +34,7 @@ import { DataType } from "create/types";
 import type { Key } from "react-aria-components";
 import CreateMenuButton from "./CreateMenuButton";
 import { MenuItem } from "render/web/ui/Menu";
+import { MenuSection } from "render/web/ui/Menu";
 import {
   type CreateMenuItemId,
   getVisibleCreateMenuItemIds,
@@ -36,6 +43,21 @@ import {
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { useViewMode } from "create/space/spaceCurrentStore";
+
+const RAIL_CREATE_APP_GROUP_ITEM_IDS: readonly CreateMenuItemId[] = [
+  "create-app",
+  ...APP_TEMPLATES.filter((tmpl) => tmpl.showInCreateMenu).map(
+    (tmpl) => `create-app-template-${tmpl.id}` as CreateMenuItemId,
+  ),
+];
+
+// 暂时隐藏「新建应用」及其模板分组，待产品方案成熟后再启用
+const RAIL_CREATE_MENU_GROUPS: readonly (readonly CreateMenuItemId[])[] = [
+  ["new-chat"],
+  ["new-project", "new-page", "new-table"],
+  ["create-agent-manual", "scheduled-task"],
+  ["upload-file"],
+] as const;
 
 interface CreateMenuButtonContainerProps {
   variant?: "sidebar" | "topbar" | "inline" | "header";
@@ -127,6 +149,8 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     createMenuOpenCount,
   });
 
+  const isRail = variant === "sidebar" && !shouldShowLabel;
+
   const createNewPageAndClose = useCallback(async () => {
     setIsCreatingPage(true);
     try {
@@ -170,6 +194,22 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
 
   const handleAction = useCallback(
     (key: Key) => {
+      const strKey = String(key);
+      if (strKey === "create-app") {
+        closeMenu();
+        navigate(`${AppRoutePaths.CHAT}?launch=${QUICK_CHAT_CREATE_APP_LAUNCH_SLUG}`);
+        return;
+      }
+      if (strKey.startsWith("create-app-template-")) {
+        const templateId = strKey.slice("create-app-template-".length);
+        const template = APP_TEMPLATES.find((tmpl) => tmpl.id === templateId);
+        if (template) {
+          closeMenu();
+          navigate(`${AppRoutePaths.CHAT}?launch=${template.launchSlug}`);
+          return;
+        }
+      }
+
       switch (key) {
         case "new-chat":
           closeMenu();
@@ -220,7 +260,16 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     switch (id) {
       case "new-chat": {
         const label = t("chat:newChat", "新对话");
-        return <MenuItem key={id} id={id} textValue={label}><span aria-hidden="true">✦</span><span slot="label">{label}</span></MenuItem>;
+        return (
+          <MenuItem key={id} id={id} textValue={label}>
+            {isRail ? (
+              <LuMessageCirclePlus size={16} aria-hidden="true" />
+            ) : (
+              <span aria-hidden="true">✦</span>
+            )}
+            <span slot="label">{label}</span>
+          </MenuItem>
+        );
       }
       case "new-project": {
         const label = t("project:newProject", "新建项目");
@@ -299,21 +348,70 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
           </MenuItem>
         );
       }
+      case "create-app": {
+        const label = t("app:newApp", "新建应用");
+        return (
+          <MenuItem key={id} id={id} textValue={label}>
+            <LuAppWindow size={16} aria-hidden="true" />
+            <span slot="label" title={label}>
+              {label}
+            </span>
+          </MenuItem>
+        );
+      }
       default: {
-        const _exhaustive: never = id;
-        return _exhaustive;
+        const strId = String(id);
+        if (strId.startsWith("create-app-template-")) {
+          const templateId = strId.slice("create-app-template-".length);
+          const template = APP_TEMPLATES.find((tmpl) => tmpl.id === templateId);
+          if (template) {
+            const label = t(template.labelKey, template.fallback);
+            return (
+              <MenuItem key={id} id={id} textValue={label}>
+                {template.id === "surf" ? (
+                  <LuWaves size={16} aria-hidden="true" />
+                ) : (
+                  <LuLayoutTemplate size={16} aria-hidden="true" />
+                )}
+                <span slot="label" title={label}>
+                  {label}
+                </span>
+              </MenuItem>
+            );
+          }
+        }
+        return null;
       }
     }
   };
 
-  const menuItems = (
-    <>
-      {getVisibleCreateMenuItemIds({
-        hasUploadHandler: Boolean(onUploadClick),
-        isDesktop,
-      }).map(renderMenuItem)}
-    </>
-  );
+  const visibleItemIds = getVisibleCreateMenuItemIds({
+    hasUploadHandler: Boolean(onUploadClick),
+    isDesktop,
+  });
+
+  const isItemVisibleInRail = (id: CreateMenuItemId) => {
+    if (id === "new-project") return isDesktop;
+    if (id === "upload-file") return Boolean(onUploadClick);
+    return true;
+  };
+
+  const menuItems =
+    isRail ? (
+      <>
+        {RAIL_CREATE_MENU_GROUPS.map((group, groupIndex) => {
+          const activeItems = group.filter(isItemVisibleInRail);
+          if (activeItems.length === 0) return null;
+          return (
+            <MenuSection key={groupIndex} className="create-menu__section">
+              {activeItems.map(renderMenuItem)}
+            </MenuSection>
+          );
+        })}
+      </>
+    ) : (
+      <>{visibleItemIds.map(renderMenuItem)}</>
+    );
 
   return (
     <>

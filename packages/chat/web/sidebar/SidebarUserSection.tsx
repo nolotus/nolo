@@ -65,6 +65,7 @@ import { sidebarStyles } from "../sidebarStyles";
 import { withLiteralClass } from "../withLiteralClass";
 import { SidebarUpdateButton } from "./SidebarUpdateButton";
 import "../chatStylexEscapeHatch.css";
+import "./railAccountMenu.css";
 
 const getNotificationIcon = (item: AppNotification) => {
   if (item.kind === "agent_notice") return <LuBell size={15} aria-hidden="true" />;
@@ -100,9 +101,10 @@ const PortalDropdown: React.FC<{
 
   // Width follows the anchor, except in the compact Rail where that would clip
   // the panel down to the rail width. Clamp to the viewport so it never overflows.
-  const width = Math.max(rect.width - 16, compact ? 280 : 0);
+  const rawWidth = Math.max(rect.width - 16, compact ? 280 : 0);
+  const width = compact ? Math.max(0, Math.min(rawWidth, window.innerWidth - 16)) : rawWidth;
   const left = Math.min(
-    Math.max(8, rect.left + 8),
+    Math.max(8, compact ? rect.right + 8 : rect.left + 8),
     Math.max(8, window.innerWidth - width - 8),
   );
   // 锚点可能在视口顶部（移动抽屉）也可能在底部（桌面侧栏）：向空间更大的一侧展开，
@@ -111,10 +113,16 @@ const PortalDropdown: React.FC<{
   const spaceAbove = rect.top - gap * 2;
   const spaceBelow = window.innerHeight - rect.bottom - gap * 2;
   const openDownward = spaceBelow > spaceAbove;
-  const maxHeight = Math.max(180, openDownward ? spaceBelow : spaceAbove);
+  const availableSpace = openDownward ? spaceBelow : spaceAbove;
+  const maxHeight = Math.max(0, Math.min(availableSpace, window.innerHeight - gap * 2));
   const verticalStyle = openDownward
     ? { top: rect.bottom + gap, bottom: "auto" as const }
-    : { bottom: window.innerHeight - rect.top + gap, top: "auto" as const };
+    : {
+        bottom: compact
+          ? Math.max(8, window.innerHeight - rect.bottom)
+          : window.innerHeight - rect.top + gap,
+        top: "auto" as const,
+      };
 
   return createPortal(
     <div
@@ -134,7 +142,7 @@ const PortalDropdown: React.FC<{
         overscrollBehavior: "contain",
       }}
       {...withLiteralClass(
-        `SidebarUserSection__dropdown is-open ${className || ""}`,
+        `SidebarUserSection__dropdown is-open ${compact ? "SidebarUserSection__dropdown--compact " : ""}${className || ""}`,
         sidebarStyles.sidebarUserSectionDropdown,
         sidebarStyles.sidebarUserSectionDropdownOpen,
         className?.includes("SidebarUserSection__dropdown--menu") &&
@@ -267,17 +275,8 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
   const handleOpenSettings = useCallback(() => {
     setMenuOpen(false);
     setBellOpen(false);
-    // 已在设置页时再点一次应关闭（返回），否则按钮看起来失效。
-    const settingsBase = `/${SettingRoutePaths.SETTING}`;
-    if (location.pathname === settingsBase || location.pathname.startsWith(`${settingsBase}/`)) {
-      // 与 SettingLayout.handleClose 同语义：回到打开设置前的页面（保留 search/state），
-      // 历史栈不留脏 entry；直接深链进入设置页时回到首页。
-      const background = (location.state as { backgroundLocation?: typeof location } | null)
-        ?.backgroundLocation;
-      navigate(background ?? "/", { replace: true });
-      return;
-    }
-    navigate(SettingRoutePaths.SETTING, { state: { backgroundLocation: location } });
+    const backgroundLocation = (location.state as { backgroundLocation?: typeof location } | null)?.backgroundLocation ?? location;
+    navigate("/settings/appearance", { state: { backgroundLocation } });
   }, [navigate, location]);
 
 
@@ -463,6 +462,16 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
 
           {/* 功能菜单 */}
           <div className="topbar-user-menu__list">
+            {railCompact && (
+              <button
+                type="button"
+                className="topbar-user-menu__item"
+                onClick={handleOpenSettings}
+              >
+                <LuSettings size={14} aria-hidden="true" />
+                <span>{t("settings.title", "设置")}</span>
+              </button>
+            )}
             <button
               type="button"
               className="topbar-user-menu__item"
@@ -533,16 +542,18 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
         {/* 更新（desktop only） */}
         <SidebarUpdateButton />
         {/* 设置 */}
-        <Tooltip content={t("settings.title", "设置")} placement="top" disabled={isMobile}>
-          <button
-            type="button"
-            onClick={handleOpenSettings}
-            aria-label={t("settings.title", "设置")}
-            {...stylex.props(sidebarStyles.sidebarUserSectionToolBtn)}
-          >
-            <LuSettings size={17} aria-hidden="true" />
-          </button>
-        </Tooltip>
+        {!railCompact && (
+          <Tooltip content={t("settings.title", "设置")} placement="top" disabled={isMobile}>
+            <button
+              type="button"
+              onClick={handleOpenSettings}
+              aria-label={t("settings.title", "设置")}
+              {...stylex.props(sidebarStyles.sidebarUserSectionToolBtn)}
+            >
+              <LuSettings size={17} aria-hidden="true" />
+            </button>
+          </Tooltip>
+        )}
         {/* 通知 */}
         <div
           ref={bellContainerRef}

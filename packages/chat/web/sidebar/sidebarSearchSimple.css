@@ -1,0 +1,196 @@
+/*
+ * sidebarSearchSimple.css
+ * ─────────────────────────────────────────────────────────────
+ * 搜索视觉优化专属样式表（基于 data-hook 精确覆盖，无全局污染）：
+ * - 桌面约 480 宽、6px 圆角、轻边框淡阴影、平整无多层框与大留白
+ * - 输入行：搜索图标 + 输入框 + 低调 Esc（可点击关闭），聚焦不额外套厚边框
+ * - 结果：统一紧凑 36px 行、16px 图标、标签与 meta 稳定不挤
+ * - 分组标题：低调小字与稳定间距
+ * - 选中淡底清楚
+ * - 空态/加载/快捷键底栏保持
+ * - 移动端视口防护不溢出
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/* ── 输入行容器 ── */
+[data-hook~="chat-esc-cp-search-row"] {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+[data-hook~="chat-esc-cp-searchfield"] {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* 搜索前缀图标：清晰且低调 */
+[data-hook~="chat-esc-cp-search-icon"] {
+  flex-shrink: 0;
+  margin-left: 12px;
+  margin-right: 2px;
+  color: var(--textTertiary, #8e8e93);
+  pointer-events: none;
+}
+
+/* 输入框：无内嵌多层框，占满输入行高度，聚焦无额外厚边框 */
+[data-hook~="chat-esc-cp-modal"] [data-hook~="chat-esc-cp-search-input"],
+[data-hook~="chat-esc-cp-dialog"] [data-hook~="chat-esc-cp-search-input"],
+[data-hook~="chat-esc-cp-searchfield"] [data-hook~="chat-esc-cp-search-input"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 42px;
+  line-height: 42px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--fontSize-sm, 13.5px);
+  color: var(--textPrimary, var(--text, #18181b));
+  outline: none;
+}
+
+[data-hook~="chat-esc-cp-modal"] [data-hook~="chat-esc-cp-search-input"]:focus,
+[data-hook~="chat-esc-cp-dialog"] [data-hook~="chat-esc-cp-search-input"]:focus,
+[data-hook~="chat-esc-cp-searchfield"] [data-hook~="chat-esc-cp-search-input"]:focus {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+[data-hook~="chat-esc-cp-modal"] [data-hook~="chat-esc-cp-search-input"]::placeholder,
+[data-hook~="chat-esc-cp-searchfield"] [data-hook~="chat-esc-cp-search-input"]::placeholder {
+  color: var(--textTertiary, #8e8e93);
+}
+
+/* 低调 Esc（可点击关闭按钮） */
+[data-hook~="chat-esc-cp-esc-btn"] {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  padding: 1px 6px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--textTertiary, #8e8e93);
+  background: var(--surfaceMuted, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--borderSubtle, rgba(0, 0, 0, 0.08));
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+[data-hook~="chat-esc-cp-esc-btn"]:hover {
+  color: var(--textSecondary, #52525b);
+  background: var(--surfaceHover, rgba(0, 0, 0, 0.08));
+  border-color: var(--border, rgba(0, 0, 0, 0.15));
+}
+
+[data-hook~="chat-esc-cp-esc-btn"]:focus-visible {
+  outline: 2px solid var(--primary, #2563eb);
+  outline-offset: 1px;
+}
+
+/* ── 结果菜单列表 ── */
+[data-hook~="chat-esc-cp-menu"].react-aria-Menu,
+[data-hook~="chat-esc-cp-menu"] {
+  padding: 4px 0 6px;
+  max-height: 360px;
+}
+
+/* 结果项：统一紧凑 36px 行、16px 图标、标签和 meta 不挤 */
+[data-hook~="chat-esc-cp-menu"] .react-aria-MenuItem,
+[data-hook~="chat-esc-cp-item"].react-aria-MenuItem {
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  margin: 1px 6px;
+  border-radius: 4px;
+  gap: 8px;
+  font-size: var(--fontSize-sm, 13px);
+  cursor: pointer;
+}
+
+/* 选中淡底清楚 */
+[data-hook~="chat-esc-cp-menu"] .react-aria-MenuItem[data-focused],
+[data-hook~="chat-esc-cp-menu"] .react-aria-MenuItem[data-hovered],
+[data-hook~="chat-esc-cp-menu"] .react-aria-MenuItem[data-pressed],
+[data-hook~="chat-esc-cp-menu"] .react-aria-MenuItem[data-open] {
+  background: var(--surfaceHover, var(--backgroundHover, rgba(0, 0, 0, 0.05)));
+  color: var(--textPrimary, var(--text, #18181b));
+}
+
+/* 16px 图标稳定渲染 */
+[data-hook~="chat-esc-cp-item"].react-aria-MenuItem > svg {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  max-width: 16px;
+  flex-shrink: 0;
+  color: var(--textSecondary, #71717a);
+}
+
+[data-hook~="chat-esc-cp-menu"] .react-aria-MenuItem[data-focused] > svg,
+[data-hook~="chat-esc-cp-menu"] .react-aria-MenuItem[data-hovered] > svg {
+  color: var(--textPrimary, var(--text, #18181b));
+}
+
+/* 分组标题：低调小字与稳定间距 */
+[data-hook~="chat-esc-cp-menu"] [data-hook~="chat-esc-cp-section-header"],
+[data-hook~="chat-esc-cp-menu"] .react-aria-Header {
+  padding: 6px 14px 2px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--textTertiary, #8e8e93);
+  background: var(--background, #fff);
+  backdrop-filter: none;
+}
+
+/* 结果项中内容与 meta */
+[data-hook~="chat-esc-cp-menu"] [data-hook~="chat-esc-cp-item"] [slot="label"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 空态显示保持 */
+[data-hook~="chat-esc-cp-menu"][data-empty] {
+  min-height: 84px;
+  padding: 20px 16px;
+  color: var(--textTertiary, #8e8e93);
+  font-size: var(--fontSize-sm, 13px);
+  font-style: normal;
+}
+
+/* 快捷键底栏 */
+[data-hook~="chat-esc-cp-footer"] {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+/* 移动端视口防护：不溢出 */
+@media (max-width: 640px) {
+  [data-hook~="chat-esc-cp-menu"] .react-aria-MenuItem,
+  [data-hook~="chat-esc-cp-item"].react-aria-MenuItem {
+    margin: 1px 4px;
+    padding: 0 8px;
+  }
+}

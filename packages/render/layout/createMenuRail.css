@@ -1,0 +1,162 @@
+/* Rail sidebar create menu styles */
+
+.navigation-v2-rail__create {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Higher specificity via [data-rail="true"] to reliably override
+   .navigation-v2-rail__create .create-menu__button (40px/theme radius) in navigationRail.css
+   regardless of stylesheet loading order, without touching normal sidebars. */
+.navigation-v2-rail__create .create-menu__button[data-rail="true"],
+.navigation-v2-rail__create .create-menu[data-rail="true"] .create-menu__button,
+.create-menu[data-rail="true"] .create-menu__button {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid var(--borderSubtle, rgba(127, 127, 127, 0.24));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--textSecondary, currentColor);
+  box-sizing: border-box;
+  box-shadow: none;
+}
+
+.navigation-v2-rail__create .create-menu__button[data-rail="true"]:hover,
+.navigation-v2-rail__create .create-menu[data-rail="true"] .create-menu__button:hover,
+.create-menu[data-rail="true"] .create-menu__button:hover {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.08));
+  color: var(--text, currentColor);
+  border-color: var(--borderSubtle, rgba(127, 127, 127, 0.36));
+}
+
+.navigation-v2-rail__create .create-menu__button[data-rail="true"].is-active,
+.navigation-v2-rail__create .create-menu[data-rail="true"] .create-menu__button.is-active,
+.create-menu[data-rail="true"] .create-menu__button.is-active {
+  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.14));
+  color: var(--text, currentColor);
+  border-color: var(--borderSubtle, rgba(127, 127, 127, 0.42));
+  box-shadow: none;
+}
+
+.navigation-v2-rail__create .create-menu__button[data-rail="true"]::before,
+.navigation-v2-rail__create .create-menu[data-rail="true"] .create-menu__button::before,
+.create-menu[data-rail="true"] .create-menu__button::before {
+  display: none;
+}
+
+/* Compact Popover surface exclusively for rail sidebar create menu */
+.create-menu-popover[data-rail="true"] {
+  min-width: 156px;
+  max-width: 220px;
+  padding: 4px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--borderSubtle, var(--border-subtle, rgba(127, 127, 127, 0.2))) !important;
+  box-sizing: border-box !important;
+}
+
+.create-menu-popover[data-rail="true"] .react-aria-Menu {
+  min-width: 148px;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Grouping: 组间距统一4px，去多余边框与重复padding */
+.create-menu-popover[data-rail="true"] .create-menu__section {
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+}
+
+.create-menu-popover[data-rail="true"] .create-menu__section + .create-menu__section {
+  margin-top: 4px !important;
+  padding-top: 0 !important;
+  border-top: none !important;
+}
+
+/* Compact uniform menu items:
+   各行32px border-box、同左右内边距、图标16px同对齐文字13px，
+   不叠加minheight+padding造成实际行高膨胀；
+   统一普通列表，新对话无单独卡片/底色/强调。 */
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem {
+  box-sizing: border-box !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 8px !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 4px !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px !important;
+  line-height: normal !important;
+  font-weight: 500;
+  color: var(--text, currentColor) !important;
+  background: transparent !important;
+  cursor: pointer;
+  outline: none !important;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+/* 图标16px同对齐 */
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem > svg,
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem > span[aria-hidden="true"],
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem > .spinner {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  max-width: 16px !important;
+  max-height: 16px !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  font-size: 13px !important;
+  line-height: 1 !important;
+  color: var(--textSecondary, currentColor) !important;
+  transition: color 0.12s ease;
+}
+
+/* 文字13px，居中对齐 */
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem [slot="label"],
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem > span:not([aria-hidden="true"]) {
+  font-size: 13px !important;
+  line-height: 16px !important;
+  color: inherit !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  flex: 1 1 auto;
+}
+
+/* 交互态：统一高亮，无任何单项底色特殊化 */
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem:hover,
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem[data-focused],
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem[data-hovered],
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem[data-pressed],
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem[data-open] {
+  background-color: var(--surfaceInteractive, var(--backgroundHover, rgba(127, 127, 127, 0.08))) !important;
+  color: var(--text, currentColor) !important;
+}
+
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem:hover > svg,
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem[data-focused] > svg,
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem[data-hovered] > svg,
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem:hover > span[aria-hidden="true"],
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem[data-focused] > span[aria-hidden="true"],
+.create-menu-popover[data-rail="true"] .react-aria-MenuItem[data-hovered] > span[aria-hidden="true"] {
+  color: var(--text, currentColor) !important;
+}

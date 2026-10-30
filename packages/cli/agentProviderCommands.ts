@@ -324,6 +324,7 @@ export async function runAgentModelsCommand(
 export async function verifyCustomProvider(options: {
   providerUrl: string | undefined;
   apiKey: string | undefined;
+  apiKeyHeader?: string;
   model: string | undefined;
   prompt?: string;
   fetchImpl?: CliFetchImpl;
@@ -353,7 +354,7 @@ export async function verifyCustomProvider(options: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        [options.apiKeyHeader || "Authorization"]: options.apiKeyHeader && options.apiKeyHeader.toLowerCase() !== "authorization" ? apiKey : `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model,

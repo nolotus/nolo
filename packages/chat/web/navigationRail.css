@@ -200,23 +200,32 @@
   width: 44px;
   min-height: 38px;
   border: 0;
-  border-radius: var(--radius-md, 10px);
+  border-radius: 6px;
   background: transparent;
-  color: inherit;
+  color: var(--textSecondary, currentColor);
   font-weight: 500;
   text-decoration: none;
   cursor: pointer;
   box-sizing: border-box;
+  transition: color 0.15s ease;
 }
 
 .navigation-v2-rail__item:has(.navigation-v2-rail__label) {
   min-height: 52px;
-  padding: 6px 4px 5px;
-  gap: 3px;
+  padding: 2px 0 4px;
+  gap: 2px;
 }
 
 .navigation-v2-rail__icon {
-  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  flex: 0 0 32px;
+  background: transparent;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .navigation-v2-rail__label {
@@ -231,32 +240,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   letter-spacing: -0.01em;
+  background: transparent;
 }
 
 .navigation-v2-rail__item:hover {
-  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.08));
+  background: transparent;
+  color: var(--text, currentColor);
 }
 
-/* Keep the active destination neutral; font-weight + aria state + indicator carry its meaning. */
+.navigation-v2-rail__item:hover .navigation-v2-rail__icon {
+  background: color-mix(in srgb, var(--text, #222) 3.5%, transparent);
+}
+
+/* Selected destination: icon gets 32x32 6px neutral tint, text has no background and deepens */
 .navigation-v2-rail__item[aria-current="page"],
 .navigation-v2-rail__item[data-active="true"] {
-  background: var(--surfaceInteractive, rgba(127, 127, 127, 0.12));
+  background: transparent;
   box-shadow: none;
   color: var(--text, currentColor);
   font-weight: 600;
 }
 
-.navigation-v2-rail__item[aria-current="page"]::before,
-.navigation-v2-rail__item[data-active="true"]::before {
-  content: "";
-  position: absolute;
-  left: -4px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 18px;
-  border-radius: 3px;
-  background: var(--textSecondary, currentColor);
+.navigation-v2-rail__item[aria-current="page"] .navigation-v2-rail__icon,
+.navigation-v2-rail__item[data-active="true"] .navigation-v2-rail__icon {
+  background: color-mix(in srgb, var(--text, #222) 6%, transparent);
+}
+
+.navigation-v2-rail__item[aria-current="page"]:hover .navigation-v2-rail__icon,
+.navigation-v2-rail__item[data-active="true"]:hover .navigation-v2-rail__icon {
+  background: color-mix(in srgb, var(--text, #222) 7.5%, transparent);
 }
 
 .navigation-v2-rail__item:focus-visible,
@@ -429,17 +441,8 @@
     min-width: 52px;
     height: 48px;
     min-height: 48px;
-    padding: 4px 6px;
-  }
-
-  .navigation-v2-rail__item[aria-current="page"]::before,
-  .navigation-v2-rail__item[data-active="true"]::before {
-    left: 50%;
-    top: auto;
-    bottom: -4px;
-    transform: translateX(-50%);
-    width: 20px;
-    height: 3px;
+    padding: 2px 4px;
+    gap: 1px;
   }
 }
 

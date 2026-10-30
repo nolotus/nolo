@@ -4,6 +4,7 @@ import { useAppDispatch } from "app/store";
 import { useState } from "react";
 import { useNavigate } from "app/routing";
 import { markRecentlyCreated } from "chat/web/sidebar/recentlyCreatedStore";
+import type { DialogRuntimeBinding } from "app/types";
 import { createDialog } from "./dialogSlice";
 import { buildDialogUrl } from "./dialogUrl";
 
@@ -13,6 +14,7 @@ export interface CreateDialogParams {
   spaceId?: string;
   preferredServerOrigin?: string | null;
   category?: string;
+  runtimeBinding?: DialogRuntimeBinding;
 }
 
 interface UseCreateDialogResult {
@@ -34,6 +36,7 @@ export const useCreateDialog = (): UseCreateDialogResult => {
     spaceId,
     preferredServerOrigin,
     category,
+    runtimeBinding,
   }: CreateDialogParams) => {
     setIsLoading(true);
     setIsSuccess(false);
@@ -49,6 +52,7 @@ export const useCreateDialog = (): UseCreateDialogResult => {
           spaceId,
           preferredServerOrigin,
           category,
+          runtimeBinding,
         })
       ).unwrap();
       if (result?.dbKey) {

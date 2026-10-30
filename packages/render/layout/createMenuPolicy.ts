@@ -7,7 +7,9 @@ export type CreateMenuItemId =
   | "new-table"
   | "create-agent-manual"
   | "scheduled-task"
-  | "upload-file";
+  | "upload-file"
+  | "create-app"
+  | `create-app-template-${string}`;
 
 export const CREATE_MENU_ITEM_ORDER: readonly CreateMenuItemId[] = [
   "new-chat",

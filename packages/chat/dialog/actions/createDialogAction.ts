@@ -80,6 +80,7 @@ interface CreateDialogArgs {
   optimisticReturnBeforeWrite?: boolean;
   preferredServerOrigin?: string | null;
   extraReferences?: import("app/types").ReferenceItem[];
+  runtimeBinding?: import("app/types").DialogRuntimeBinding;
 }
 
 // `cybot-local-` 是更名前的设备本地 key 前缀，存量本地对话仍可能引用，仅保留识别
@@ -313,6 +314,15 @@ export const createDialogAction = async (
     }
   }
 
+  const runtimeBinding = args.runtimeBinding
+    ? {
+        ...args.runtimeBinding,
+        runtimeAnchorDialogId:
+          args.runtimeBinding.runtimeAnchorDialogId || dialogId,
+        agentKey: args.runtimeBinding.agentKey || agentKey || "",
+      }
+    : undefined;
+
   // 2. 准备并写入对话数据
   const dialogData = {
     id: dialogId,
@@ -328,6 +338,7 @@ export const createDialogAction = async (
     ...(spaceId && { spaceId }),
     category,
     referenceKeys,
+    ...(runtimeBinding ? { runtimeBinding } : {}),
     ...(args.extraReferences && args.extraReferences.length > 0 && { extraReferences: args.extraReferences }),
     ...(inheritedFromDialogKey && { inheritedFromDialogKey }),
     ...(inheritedFromDialogTitle && { inheritedFromDialogTitle }),

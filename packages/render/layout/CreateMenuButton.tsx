@@ -12,6 +12,7 @@ import {
 import { Popover } from "render/web/ui/Popover";
 import { Menu } from "render/web/ui/Menu";
 import "./layout.css";
+import "./createMenuRail.css";
 
 export type CreateMenuButtonPresentationProps = {
   variant?: "sidebar" | "topbar" | "inline" | "header";
@@ -46,6 +47,8 @@ const CreateMenuButton: React.FC<CreateMenuButtonPresentationProps> = ({
   hoverOpen = false,
   children,
 }) => {
+  const isRail = variant === "sidebar" && !shouldShowLabel;
+
   const triggerTitle = title ?? createLabel;
 
   const triggerBaseClass =
@@ -55,12 +58,13 @@ const CreateMenuButton: React.FC<CreateMenuButtonPresentationProps> = ({
         ? "topbar-user-menu__toggle create-menu__button--topbar"
         : "";
 
-  const iconSize = variant === "sidebar" ? 20 : variant === "header" ? 14 : 17;
+  const iconSize = isRail ? 16 : variant === "sidebar" ? 20 : variant === "header" ? 14 : 17;
 
   const triggerButton = (
     <RacButton
       className={`${triggerBaseClass} ${isOpen ? "is-active" : ""} ${className}`}
       aria-label={triggerTitle}
+      data-rail={isRail ? "true" : undefined}
     >
       <LuPlus
         size={iconSize}
@@ -76,7 +80,15 @@ const CreateMenuButton: React.FC<CreateMenuButtonPresentationProps> = ({
   const menuPopover = (
     <Popover
       className="create-menu-popover"
-      placement={variant === "topbar" ? "bottom end" : "bottom start"}
+      data-variant={variant}
+      data-rail={isRail ? "true" : undefined}
+      placement={
+        variant === "topbar"
+          ? "bottom end"
+          : isRail
+            ? "right top"
+            : "bottom start"
+      }
       hideArrow
       offset={8}
     >
@@ -86,7 +98,8 @@ const CreateMenuButton: React.FC<CreateMenuButtonPresentationProps> = ({
 
   return (
     <div
-      className={`create-menu ${variant === "sidebar" && shouldShowLabel ? "create-menu--sidebar-wide" : ""}`}
+      className={`create-menu ${isRail ? "create-menu--rail" : ""} ${variant === "sidebar" && shouldShowLabel ? "create-menu--sidebar-wide" : ""}`}
+      data-rail={isRail ? "true" : undefined}
     >
       {hoverOpen ? (
         // PreviewTrigger：hover/focus 展开非模态预览。
