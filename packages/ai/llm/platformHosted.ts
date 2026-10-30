@@ -727,17 +727,7 @@ export const resolvePlatformDeepseekRoute = (args: {
 
 export const resolvePlatformDeepseekFlashRoute = resolvePlatformDeepseekRoute;
 
-/**
- * 上游路由：DeepSeek Flash 默认档**恒走 LithosAI**，任何失效回落官方 DeepSeek。
- * owner 决策：策略做在平台背后（服务端层），凭证 = 平台自己的 LithosAI 账户
- * （env.LITHOS_API_KEY，见 getNoloKey 的 "lithos" case）；缺 key fail-open
- * 回落官方，绝不拿官方 key 打 Lithos 端点（端点与凭据同源由选择函数单一产出）。
- *
- * 选择**不看时段**（2026-10-27 owner 决策：默认档默认走 Lithos，取代原「仅官方
- * 高峰切 Lithos」）。「失效 → 官方」由调用点的 PLATFORM_HOSTED_DEEPSEEK_LITHOS_
- * FALLBACK_STATUSES（402/408/429/500/502/503/504）+ fallbackOnTimeout（连接超时）
- * + fallbackOnFirstFrameTimeout（2xx 但无 data 帧）表达，不在本函数里。
- */
+/** DeepSeek Flash 默认走官方 Responses；官方 key 缺失时保留 Lithos 通路。 */
 
 /** LithosAI OpenAI 兼容端点（平台服务器持有 LITHOS_API_KEY）。 */
 export const LITHOS_DEEPSEEK_FLASH_BASE_URL = "https://api.lithosai.cloud/v1";
@@ -761,21 +751,16 @@ export const isPlatformHostedDeepSeekFlashLine = (
 export type DeepseekFlashUpstreamChoice = "official" | "lithos";
 
 /**
- * 服务端上游选择纯函数（chat proxy / server agentRun / key 预检三点同源）：
- * - 仅 flash 线（deepseek-flash + legacy 别名）可走 Lithos；pro / 其它模型恒 "official"；
- * - flash 线 + 有 LITHOS_API_KEY → 恒 "lithos"（默认档默认走 Lithos，不看时段）；
- * - 缺 LITHOS_API_KEY 恒 "official"（fail-open，保住服务）。
- *
- * 「Lithos 失效 → 官方」不在这里：由调用点按
- * PLATFORM_HOSTED_DEEPSEEK_LITHOS_FALLBACK_STATUSES + fallbackOnTimeout +
- * fallbackOnFirstFrameTimeout 表达（同一 wire 主体、跨 wire 回落官方 responses）。
+ * chat proxy / server agentRun / key 预检共用选择：官方优先，缺官方 key 才选 Lithos。
+ * 会话 pin 与已选 Lithos 的故障回落仍由调用点处理；不改变模型或计费身份。
  */
 export const selectDeepseekFlashUpstream = (args: {
   model?: string | null;
   hasLithosKey: boolean;
+  hasOfficialKey: boolean;
 }): DeepseekFlashUpstreamChoice => {
   if (!isPlatformHostedDeepSeekFlashLine(args.model)) return "official";
-  if (!args.hasLithosKey) return "official";
+  if (args.hasOfficialKey || !args.hasLithosKey) return "official";
   return "lithos";
 };
 
