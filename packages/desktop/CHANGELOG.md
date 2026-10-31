@@ -1,4 +1,11 @@
 
+## 0.217.0-alpha.2 (2026-10-31)
+
+### Bug Fixes
+
+* **agent-form:** 切回同一 agent 时恢复同步 reset，消除空白表单窗口 ([f147979](https://github.com/nolotus/bun-nolo/commit/f1479799f7824a208c83d4624d437cbe9e2ec319))
+
+
 ## 0.217.0-alpha.1 (2026-10-31)
 
 ### Features

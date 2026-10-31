@@ -515,6 +515,10 @@ const AgentForm: React.FC<AgentFormProps> = ({
   // 编辑模式挂载/切换 Agent 时初始化表单：仅在首次装载或切换 agentKey/server 身份时 reset，避免后续同一记录权威基线到达时冲掉用户草稿（HIGH-2）
   const lastLoadedIdentityRef = useRef<string | null>(null);
   useEffect(() => {
+    if (isCreate) {
+      lastLoadedIdentityRef.current = null;
+      return;
+    }
     const identityKey = `${agentKey}@${server}`;
     if (!isCreate && agentKey && lastLoadedIdentityRef.current !== identityKey) {
       lastLoadedIdentityRef.current = identityKey;
