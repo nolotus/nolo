@@ -1,4 +1,11 @@
 
+## 0.201.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **app:** replace quick-chat brainstorm with client download chip ([9cefecc](https://github.com/nolotus/bun-nolo/commit/9cefecc6e75b72ac26265ea5cfdf9b7e7f025c5c))
+
+
 ## 0.200.0-alpha.3 (2026-10-31)
 
 ### Bug Fixes

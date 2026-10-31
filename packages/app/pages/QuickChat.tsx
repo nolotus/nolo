@@ -5,7 +5,6 @@ import { TextField, TextArea } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import {
   LuBot,
-  LuMessageCircle,
   LuMic,
   LuPaperclip,
   LuArrowUp,
@@ -366,6 +365,10 @@ const QuickChat: React.FC<QuickChatProps> = ({
 
   const handleChipClick = useCallback(
     (chip: QuickChatChipAction) => {
+      if (chip.action === "download") {
+        navigate(AppRoutePaths.CLIENT_DOWNLOADS);
+        return;
+      }
       if (chip.action === "personalization") {
         void startPersonalization();
         return;
@@ -384,7 +387,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
       void preloadQuickChatRuntimeDependencies();
       setRuntimeActive(true);
     },
-    [startPersonalization]
+    [navigate, startPersonalization]
   );
 
   // `/chat?launch=feedback` 等直达入口：挂载后自动以专职 agent 开一轮对话，只触发一次。
@@ -578,8 +581,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
             />
           </Suspense>
         </QuickChatChunkErrorBoundary>
-        {!isCompact && <QuickChatChips onChipClick={handleChipClick} />}
-        {!isCompact && !isDesktopApp && surface === "home-primary" && <QuickChatDownloadEntry />}
+        {!isCompact && <QuickChatChips onChipClick={handleChipClick} showDownload={!isDesktopApp} />}
       </div>
     );
   }
@@ -604,8 +606,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
         quickChatMode={quickChatMode}
         onModeChange={handleModeChange}
       />
-      {!isCompact && <QuickChatChips onChipClick={handleChipClick} />}
-      {!isCompact && !isDesktopApp && surface === "home-primary" && <QuickChatDownloadEntry />}
+      {!isCompact && <QuickChatChips onChipClick={handleChipClick} showDownload={!isDesktopApp} />}
     </div>
   );
 };
@@ -741,7 +742,8 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
 type QuickChatChipAction =
   | { action: "prompt"; prompt: string }
   | { action: "personalization" }
-  | { action: "specialist"; agentKey: string; prompt: string };
+  | { action: "specialist"; agentKey: string; prompt: string }
+  | { action: "download" };
 
 interface QuickChatChip {
   key: string;
@@ -752,19 +754,27 @@ interface QuickChatChip {
 
 interface QuickChatChipsProps {
   onChipClick: (chip: QuickChatChipAction) => void;
+  showDownload?: boolean;
 }
 
-const QuickChatChips: React.FC<QuickChatChipsProps> = ({ onChipClick }) => {
+const QuickChatChips: React.FC<QuickChatChipsProps> = ({
+  onChipClick,
+  showDownload = true,
+}) => {
   const { t } = useTranslation();
 
   const chips = useMemo<QuickChatChip[]>(
     () => [
-      {
-        key: "brainstorm",
-        label: t("quickChat.chipBrainstorm", "头脑风暴"),
-        icon: <LuMessageCircle size={16} aria-hidden="true" />,
-        action: { action: "prompt", prompt: t("quickChat.chipBrainstormPrompt", "帮我做一次头脑风暴") },
-      },
+      ...(showDownload
+        ? [
+            {
+              key: "downloadClient",
+              label: t("downloadClient", "下载客户端"),
+              icon: <LuDownload size={16} aria-hidden="true" />,
+              action: { action: "download" as const },
+            },
+          ]
+        : []),
       {
         key: "createAgent",
         label: t("quickChat.chipCreateAgent", "创建agent"),
@@ -786,7 +796,7 @@ const QuickChatChips: React.FC<QuickChatChipsProps> = ({ onChipClick }) => {
         },
       },
     ],
-    [t]
+    [showDownload, t]
   );
 
   return (
@@ -802,31 +812,6 @@ const QuickChatChips: React.FC<QuickChatChipsProps> = ({ onChipClick }) => {
           <span>{chip.label}</span>
         </button>
       ))}
-    </div>
-  );
-};
-
-/**
- * 首页 quick-chat 下方的次级入口：客户端下载。
- *
- * 「下载客户端」原先只挂在头像弹出的账号菜单里（顶栏 + 聊天侧栏两处），
- * 入口默认折叠、且混在账号操作里，用户几乎看不到。首页是登录后最高频的
- * 落点，把入口放在 quick-chat 正下方更符合「我要装客户端」的心智路径。
- */
-const QuickChatDownloadEntry: React.FC = () => {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-
-  return (
-    <div className="quick-chat-secondary-links">
-      <button
-        type="button"
-        className="quick-chat-secondary-link"
-        onClick={() => navigate(AppRoutePaths.CLIENT_DOWNLOADS)}
-      >
-        <LuDownload size={14} aria-hidden="true" />
-        <span>{t("downloadClient", "下载客户端")}</span>
-      </button>
     </div>
   );
 };

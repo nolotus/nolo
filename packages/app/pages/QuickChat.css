@@ -398,39 +398,6 @@
           box-shadow: 0 2px 6px var(--shadowLight);
         }
 
-        /* quick-chat 下方次级入口（客户端下载）：比 chip 更轻，不抢主行动 */
-        .quick-chat-secondary-links {
-          display: flex;
-          justify-content: center;
-          margin-top: var(--space-2, 8px);
-        }
-
-        .quick-chat-secondary-link {
-          display: inline-flex;
-          align-items: center;
-          gap: var(--space-1, 4px);
-          background: transparent;
-          border: none;
-          padding: var(--space-1, 4px) var(--space-2, 8px);
-          min-height: var(--control-sm, 28px);
-          font-size: var(--fontSize-min-readable, 12px);
-          color: var(--textTertiary, var(--textSecondary));
-          cursor: pointer;
-          transition: color 0.2s ease;
-        }
-
-        .quick-chat-secondary-link:hover {
-          color: var(--text);
-          text-decoration: underline;
-          text-underline-offset: 3px;
-        }
-
-        .quick-chat-secondary-link:focus-visible {
-          outline: 2px solid var(--focusRing, var(--accent, currentColor));
-          outline-offset: 2px;
-          border-radius: var(--radius-sm);
-        }
-      
         /* ── Shared AgentPickerControl surface overrides (home QuickChat) ── */
         .quick-chat-mode-selector,
         .quick-chat-runtime-selector {
