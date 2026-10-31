@@ -1,4 +1,11 @@
 
+## 0.214.0-alpha.2 (2026-10-31)
+
+### Bug Fixes
+
+* **web:** 下载客户端入口样式补齐圆角 token，去掉 px 回退 ([25abecc](https://github.com/nolotus/bun-nolo/commit/25abeccd9477663d2c3fae703c8d27a476e7b0c2))
+
+
 ## 0.214.0-alpha.1 (2026-10-31)
 
 ### Features

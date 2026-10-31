@@ -428,7 +428,7 @@
         .quick-chat-secondary-link:focus-visible {
           outline: 2px solid var(--focusRing, var(--accent, currentColor));
           outline-offset: 2px;
-          border-radius: var(--radius-sm, 6px);
+          border-radius: var(--radius-sm);
         }
       
         /* ── Shared AgentPickerControl surface overrides (home QuickChat) ── */
