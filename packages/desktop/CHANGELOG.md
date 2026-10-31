@@ -1,4 +1,15 @@
 
+## 0.214.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **web:** 将下载客户端入口从头像菜单移到首页 quick-chat 下方 ([da72e58](https://github.com/nolotus/bun-nolo/commit/da72e5896bfa2b0aab718de3c32781b136783e6c))
+
+### Bug Fixes
+
+* **server:** 下载兜底 302 + 审计改真取字节 ([c45f7be](https://github.com/nolotus/bun-nolo/commit/c45f7be9331fb2587aaa9ebd0b14bb66e34fece2))
+
+
 ## 0.213.0-alpha.1 (2026-10-31)
 
 ### Features

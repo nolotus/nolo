@@ -10,6 +10,7 @@ import {
   LuPaperclip,
   LuArrowUp,
   LuLayoutGrid,
+  LuDownload,
 } from "react-icons/lu";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
@@ -25,6 +26,8 @@ import {
 import { toErrorMessage } from "core/errorMessage";
 import { asTrimmedString } from "core/trimmedString";
 import { useNavigate } from "app/routing";
+import { AppRoutePaths } from "app/constants/routePaths";
+import { getIsDesktopApp } from "app/utils/env";
 import { toast } from "app/utils/toast"
 import { read } from "database/dbSlice";
 // 只复用 accept 常量：占位 composer 的系统文件选择器必须与 runtime 的
@@ -341,6 +344,8 @@ const QuickChat: React.FC<QuickChatProps> = ({
 
   const [quickChatMode, handleModeChange] = useQuickChatMode();
   const isCompact = surface === "space-home-compact";
+  // 桌面客户端内部不再提示"下载桌面客户端"——那是对着已经装好的客户端说下载。
+  const isDesktopApp = getIsDesktopApp();
 
   const startPersonalization = useCallback(async () => {
     try {
@@ -574,6 +579,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
           </Suspense>
         </QuickChatChunkErrorBoundary>
         {!isCompact && <QuickChatChips onChipClick={handleChipClick} />}
+        {!isCompact && !isDesktopApp && surface === "home-primary" && <QuickChatDownloadEntry />}
       </div>
     );
   }
@@ -599,6 +605,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
         onModeChange={handleModeChange}
       />
       {!isCompact && <QuickChatChips onChipClick={handleChipClick} />}
+      {!isCompact && !isDesktopApp && surface === "home-primary" && <QuickChatDownloadEntry />}
     </div>
   );
 };
@@ -795,6 +802,31 @@ const QuickChatChips: React.FC<QuickChatChipsProps> = ({ onChipClick }) => {
           <span>{chip.label}</span>
         </button>
       ))}
+    </div>
+  );
+};
+
+/**
+ * 首页 quick-chat 下方的次级入口：客户端下载。
+ *
+ * 「下载客户端」原先只挂在头像弹出的账号菜单里（顶栏 + 聊天侧栏两处），
+ * 入口默认折叠、且混在账号操作里，用户几乎看不到。首页是登录后最高频的
+ * 落点，把入口放在 quick-chat 正下方更符合「我要装客户端」的心智路径。
+ */
+const QuickChatDownloadEntry: React.FC = () => {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+
+  return (
+    <div className="quick-chat-secondary-links">
+      <button
+        type="button"
+        className="quick-chat-secondary-link"
+        onClick={() => navigate(AppRoutePaths.CLIENT_DOWNLOADS)}
+      >
+        <LuDownload size={14} aria-hidden="true" />
+        <span>{t("downloadClient", "下载客户端")}</span>
+      </button>
     </div>
   );
 };

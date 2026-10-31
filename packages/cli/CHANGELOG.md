@@ -1,4 +1,11 @@
 
+## 0.197.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **web:** 将下载客户端入口从头像菜单移到首页 quick-chat 下方 ([da72e58](https://github.com/nolotus/bun-nolo/commit/da72e5896bfa2b0aab718de3c32781b136783e6c))
+
+
 ## 0.196.0-alpha.1 (2026-10-31)
 
 ### Features

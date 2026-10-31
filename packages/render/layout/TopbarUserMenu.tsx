@@ -13,7 +13,6 @@ import {
   LuPlus,
   LuLogOut,
   LuLogIn,
-  LuDownload,
   LuChartColumnBig,
   LuUserPlus } from
 "react-icons/lu";
@@ -153,13 +152,11 @@ const TopbarUserMenu: React.FC = () => {
     if (!isLoggedIn) {
       return [
         { icon: LuLogIn, text: t("login", "登录"), onClick: handleLoginOther, className: "topbar-user-menu__item--login" },
-        { icon: LuDownload, text: t("downloadClient", "下载客户端"), onClick: () => navigate("/downloads"), className: "topbar-user-menu__item--download" },
       ];
     }
     return [
     { icon: LuLogIn, text: t("loginOtherUser", "登录其他用户"), onClick: handleLoginOther, className: "topbar-user-menu__item--login-other" },
     ...(isDesktopApp ? [] : [{ icon: LuUserPlus, text: t("inviteFriend"), onClick: handleInvite, className: "topbar-user-menu__item--invite" }]),
-    { icon: LuDownload, text: t("downloadClient", "下载客户端"), onClick: () => navigate("/downloads"), className: "topbar-user-menu__item--download" },
     { icon: LuLogOut, text: t("logout"), onClick: handleLogout, className: "topbar-user-menu__item--logout" }];
   },
   [t, isLoggedIn, isDesktopApp, handleLoginOther, handleInvite, handleLogout, navigate]);
