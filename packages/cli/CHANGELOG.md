@@ -1,4 +1,11 @@
 
+## 0.196.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **ai:** 派发对象不默认是自身，候选池扫描前置 ([0705709](https://github.com/nolotus/bun-nolo/commit/0705709949cfb8b0552690ae0aa9ef911b2a97b9))
+
+
 ## 0.195.0-alpha.1 (2026-10-31)
 
 ### Features
