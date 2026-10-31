@@ -1,4 +1,30 @@
 
+## 0.195.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **chat:** let quick chat pick a remote machine as its runtime ([a80dd95](https://github.com/nolotus/bun-nolo/commit/a80dd95aead6749704481909d6982abe52a933bf))
+* **cli:** 审批待决时额外输出一行可 grep 的 approvalId ([565a31a](https://github.com/nolotus/bun-nolo/commit/565a31a1ff7971d5ba1ef1318dfa94d04180ab40))
+* **navigation:** add rail create-app templates and smooth sidebar toggle ([376c02e](https://github.com/nolotus/bun-nolo/commit/376c02e5beadd587e2be4e1c05edbbcf5e0c8cce))
+* **navigation:** temporarily hide unready runtime picker and new app menu ([08cbc38](https://github.com/nolotus/bun-nolo/commit/08cbc38b5a2abed6de1da8e01e938b79634df73f))
+
+### Bug Fixes
+
+* **agent:** qualify completion claims with scoped evidence ([c947c8a](https://github.com/nolotus/bun-nolo/commit/c947c8a930bbc67e5146b66a7fb39ade8f63def0))
+* **ai:** identify MiniMax quota exhausted response and persist state ([66fce89](https://github.com/nolotus/bun-nolo/commit/66fce89fa692f6b80390ff9e91ba257292458dd4))
+* **chat:** only write runtimeBinding when machine is explicitly chosen ([208df08](https://github.com/nolotus/bun-nolo/commit/208df089d3a8405c3bd967e6aa107bde13829c2a))
+* **chat:** preserve client response wire across upstream fallback ([db1c1aa](https://github.com/nolotus/bun-nolo/commit/db1c1aab7dc59266c4394193e901376d4dcaabeb))
+* **cli:** copy provider fields completely and establish anti-slop guidelines ([d3e0e6a](https://github.com/nolotus/bun-nolo/commit/d3e0e6ae2457afd70508b8a9995abf4601e9ce3b))
+* **llm:** prefer official DeepSeek for default Flash routing ([95c8690](https://github.com/nolotus/bun-nolo/commit/95c8690af0aaccf1a9c7f8d7d64905b4a7f0457f))
+* **navigation:** commit sidebar width even when animation frames are suspended ([0d30196](https://github.com/nolotus/bun-nolo/commit/0d301963ab6d0a29e7b05c74b59ea45049e81913))
+* **navigation:** drop the surf template from the create menu ([5d6c0be](https://github.com/nolotus/bun-nolo/commit/5d6c0be728fab8c8e67c7426bfc8e0bf879dcf89))
+* **navigation:** simplify rail account menu ([3676141](https://github.com/nolotus/bun-nolo/commit/367614194ec190da32723207a1c31fe84d516f51))
+* **navigation:** simplify rail active state to icon surface ([f2661ba](https://github.com/nolotus/bun-nolo/commit/f2661ba6e9f0f5ef2ee30b0453b88afa001d6ae4))
+* **navigation:** simplify rail creation menu spacing ([0ded656](https://github.com/nolotus/bun-nolo/commit/0ded656afd7b180d402fe48f523eb598ca7f5acf))
+* **navigation:** 收窄 rail 并简化收藏文案 ([20fedbd](https://github.com/nolotus/bun-nolo/commit/20fedbd90deeea1f10c2fea2378ff990234dcfff))
+* **routing:** isolate background page location from settings overlay ([90a3805](https://github.com/nolotus/bun-nolo/commit/90a38057270acf1c2198e61f72fa7c0d7565ef87))
+
+
 ## 0.187.0 (2026-10-29)
 
 ### Features
