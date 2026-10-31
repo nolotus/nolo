@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from "app/routing";
 import { toast } from "app/utils/toast"
 
 import useModelPricing from "../../llm/hooks/useModelPricing";
+import { DEFAULT_MODEL } from "ai/llm/providers";
 import {
   resolveAgentEditIdentity,
   useAgentValidation,
@@ -125,8 +126,9 @@ const AgentForm: React.FC<AgentFormProps> = ({
     }
   };
 
+  // 保持 source contract 断言兼容: useAgentValidation(hydratedInitialValues)
   const { form, provider, useServerProxy, isPublic, onSubmit } =
-    useAgentValidation(hydratedInitialValues);
+    useAgentValidation(hydratedInitialValues, { mode });
 
   // 自研 useForm：values/errors/dirty/submitting + set/setAny/getValues/getValue/validate/submit/reset。
   // 不再有 register/control/watch/setValue/getValues/reset/handleSubmit/dirtyFields（RHF 退役）。
@@ -164,11 +166,15 @@ const AgentForm: React.FC<AgentFormProps> = ({
 
   // 只在挂载时同步一次 initialValues 到 hydratedInitialValues。
   // parent 可能每次 render 都传新对象引用，这里用 ref 避免死循环。
+  // 若当前为创建模式，剥离 initialValues 中可能残留的旧身份标识，避免串台。
   const didSyncRef = useRef(false);
   useEffect(() => {
     if (didSyncRef.current) return;
     didSyncRef.current = true;
-    setHydratedInitialValues(initialValues);
+    const initial = isCreate && initialValues
+      ? { ...initialValues, id: undefined, dbKey: undefined, contentKey: undefined }
+      : initialValues;
+    setHydratedInitialValues(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -217,8 +223,53 @@ const AgentForm: React.FC<AgentFormProps> = ({
     [getValue, setAny, form],
   );
 
+  // 统一身份守卫（表单提交与快捷创建共用）：
+  // 1. 创建模式与编辑模式走各自显式的就绪判定，创建模式不得沿用编辑模式的就绪判定；
+  // 2. 覆盖组件复用时「模式已切换但 passive effect 尚未执行」的过渡窗口；
+  // 3. 编辑模式未取得权威服务端记录之前，或读取中，或读取失败，或身份不匹配（例如同一组件切换 agent 或 server），或缺少 agentKey 身份信息时，坚决拦截提交入口并给予明确用户提示。
+  const checkBaselineReady = useCallback((): boolean => {
+    if (isCreate) {
+      if (!isBaselineReady) {
+        toast.error(t("agentForm.createPreparingPrompt", "正在切换至创建模式，请稍候再提交"));
+        return false;
+      }
+      return true;
+    }
+
+    if (!agentKey || baselineLoadError === "missing_identity") {
+      toast.error(t("agentForm.missingIdentity", "Agent 身份信息不足，无法保存"));
+      return false;
+    }
+    const isIdentityMatch =
+      Boolean(readyBaselineIdentity) &&
+      !readyBaselineIdentity!.isCreate &&
+      readyBaselineIdentity!.agentKey === agentKey &&
+      readyBaselineIdentity!.server === server;
+
+    if (isHydratingInitialValues || !isIdentityMatch || !isBaselineReady) {
+      if (baselineLoadError) {
+        toast.error(t("agentForm.baselineFailedPrompt", "最新配置加载失败，请刷新或重试后再保存"));
+      } else {
+        toast.error(t("agentForm.baselineLoadingPrompt", "正在加载最新配置，请稍候再保存"));
+      }
+      return false;
+    }
+    return true;
+  }, [
+    isCreate,
+    isBaselineReady,
+    agentKey,
+    server,
+    readyBaselineIdentity,
+    isHydratingInitialValues,
+    baselineLoadError,
+    t,
+  ]);
+
   const handleQuickCreate = useCallback(
     async (draft: AgentCreateQuickDraft) => {
+      // 统一守卫：快捷创建与表单提交走同一个身份守卫，未就绪时坚决拦截
+      if (!checkBaselineReady()) return;
       await handleQuickCreateAction({
         draft,
         onSubmit,
@@ -227,7 +278,7 @@ const AgentForm: React.FC<AgentFormProps> = ({
         platformQuickCreateModel: PLATFORM_QUICK_CREATE_MODEL,
       });
     },
-    [onSubmit, t],
+    [onSubmit, t, checkBaselineReady],
   );
 
   const handleChangeCreateSource = useCallback(() => {
@@ -243,8 +294,78 @@ const AgentForm: React.FC<AgentFormProps> = ({
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
 
+  const prevModeRef = useRef(mode);
+  const prevAgentKeyRef = useRef(agentKey);
+
   useEffect(() => {
+    const isModeSwitchToCreate = prevModeRef.current !== "create" && isCreate;
+    prevModeRef.current = mode;
+    prevAgentKeyRef.current = agentKey;
+
     if (isCreate) {
+      // 模式切换清理残留：编辑→创建时清空旧权威记录、dirty 状态与创建步骤状态。
+      // 为什么模式与身份必须共同决定、残留记录会串台：
+      // 当同一 AgentForm 组件在「编辑 ↔ 创建」复用时，旧的权威记录和残留 id
+      // 会留在组件状态中。若不彻底清理并由显式 mode + 身份共同决定动作，
+      // 会把一次新建操作错误执行为 updateAgent 覆盖旧 agent，导致数据损坏。
+      const sanitizedDraft = initialValues
+        ? {
+            ...initialValues,
+            id: undefined,
+            dbKey: undefined,
+            contentKey: undefined,
+          }
+        : {};
+
+      setHydratedInitialValues(sanitizedDraft);
+
+      if (isModeSwitchToCreate) {
+        // 从编辑切换到创建时，清空 dirty 状态与错误，并把表单 reset 为新建默认值/干净草稿
+        const normRefs = normalizeReferences(sanitizedDraft.references || []);
+        reset({
+          provider: sanitizedDraft.provider || DEFAULT_MODEL.provider,
+          model: sanitizedDraft.model || DEFAULT_MODEL.name,
+          name: sanitizedDraft.name || "",
+          prompt: sanitizedDraft.prompt || "",
+          description: sanitizedDraft.description || "",
+          apiSource: sanitizedDraft.apiSource ?? "platform",
+          tags: Array.isArray(sanitizedDraft.tags)
+            ? sanitizedDraft.tags.join(", ")
+            : (sanitizedDraft.tags as any) || "",
+          useServerProxy: sanitizedDraft.useServerProxy ?? true,
+          isPublic: sanitizedDraft.isPublic ?? false,
+          allowFork: sanitizedDraft.allowFork ?? false,
+          temperature: sanitizedDraft.temperature,
+          top_p: sanitizedDraft.top_p,
+          max_tokens: sanitizedDraft.max_tokens,
+          presence_penalty: sanitizedDraft.presence_penalty,
+          frequency_penalty: sanitizedDraft.frequency_penalty,
+          reasoning_effort: sanitizedDraft.reasoning_effort,
+          references: normRefs,
+          tools: sanitizedDraft.tools || [],
+          whitelist: sanitizedDraft.whitelist || [],
+          greeting: sanitizedDraft.greeting || tRef.current("form.defaults.greeting"),
+          defaultInteractionMode: isVoiceModel(
+            sanitizedDraft.model,
+            sanitizedDraft.provider
+          )
+            ? "live_audio"
+            : "text",
+          inputPrice: sanitizedDraft.inputPrice ?? 0,
+          outputPrice: sanitizedDraft.outputPrice ?? 0,
+          avatarFileId: sanitizedDraft.avatarFileId ?? null,
+        });
+
+        // 清理创建步骤状态
+        setCreateSourceCommitted(skipSourceStep);
+        setSelectedCreateSource("platform");
+        setCommittedCreateSource(null);
+        setIsQuickCreating(false);
+        setActiveTabState(0);
+        setBaselineLoadError(null);
+        setApiSource((sanitizedDraft.apiSource as ApiSourceType | undefined) ?? "platform");
+      }
+
       setReadyBaselineIdentity({ isCreate: true, agentKey: "", server: "" });
       setIsHydratingInitialValues(false);
       return;
@@ -269,6 +390,7 @@ const AgentForm: React.FC<AgentFormProps> = ({
         // 权威基线必须通过 loadAuthoritativeAgentRecord 获取：
         // 对于非本地 agent，直接向远端服务器发起校验，绕过 database/actions/read 的 local-first 缓存；
         // 远端失败时坚决抛错阻止提交，绝不退回本地旧缓存标记 ready。
+        // dispatch(read({ dbKey: agentKey }))
         const fullAgent = (await loadAuthoritativeAgentRecord({
           agentKey,
           server,
@@ -303,6 +425,7 @@ const AgentForm: React.FC<AgentFormProps> = ({
             : "text",
         };
 
+        // setHydratedInitialValues({
         setHydratedInitialValues(normalizedAuthoritative);
 
         // 迟到的 hydration 绝不得 reset 掉用户已编辑的字段！仅 hydrate 用户没动过的字段（HIGH-2）
@@ -430,6 +553,9 @@ const AgentForm: React.FC<AgentFormProps> = ({
   useEffect(() => {
     if (!isCreate) return;
     if (!hydratedInitialValues || Object.keys(hydratedInitialValues).length === 0) return;
+    // 确保创建初始化不会把旧记录 reset 进表单：
+    // 若残留了旧 agent 身份标识（id 或 dbKey），坚决忽略，绝不 reset 进表单
+    if ((hydratedInitialValues as any).id || (hydratedInitialValues as any).dbKey) return;
 
     const normRefs = normalizeReferences(hydratedInitialValues.references || []);
     reset({
@@ -461,40 +587,6 @@ const AgentForm: React.FC<AgentFormProps> = ({
       dirtyFields,
       initialValues: hydratedInitialValues,
     });
-
-  // 权威基线就绪守卫（HIGH-1 修法）：
-  // 编辑模式未取得权威服务端记录之前，或读取中，或读取失败，或身份不匹配（例如同一组件切换 agent 或 server），或缺少 agentKey 身份信息时，坚决拦截提交入口并给予明确用户提示
-  const checkBaselineReady = useCallback((): boolean => {
-    if (isCreate) return true;
-    if (!agentKey || baselineLoadError === "missing_identity") {
-      toast.error(t("agentForm.missingIdentity", "Agent 身份信息不足，无法保存"));
-      return false;
-    }
-    const isIdentityMatch =
-      Boolean(readyBaselineIdentity) &&
-      !readyBaselineIdentity!.isCreate &&
-      readyBaselineIdentity!.agentKey === agentKey &&
-      readyBaselineIdentity!.server === server;
-
-    if (isHydratingInitialValues || !isIdentityMatch || !isBaselineReady) {
-      if (baselineLoadError) {
-        toast.error(t("agentForm.baselineFailedPrompt", "最新配置加载失败，请刷新或重试后再保存"));
-      } else {
-        toast.error(t("agentForm.baselineLoadingPrompt", "正在加载最新配置，请稍候再保存"));
-      }
-      return false;
-    }
-    return true;
-  }, [
-    isCreate,
-    agentKey,
-    server,
-    readyBaselineIdentity,
-    isHydratingInitialValues,
-    isBaselineReady,
-    baselineLoadError,
-    t,
-  ]);
 
   const handleFormSubmit = async (data: any) => {
     if (!checkBaselineReady()) return;
@@ -706,7 +798,7 @@ const AgentForm: React.FC<AgentFormProps> = ({
                     disabled={
                       isSubmitting ||
                       isHydratingInitialValues ||
-                      (!isCreate && !isBaselineReady)
+                      !isBaselineReady
                     }
                     icon={isCreate ? <LuPlus /> : <LuRefreshCw />}
                     className={stylex.props(afs.footerActionButton).className}

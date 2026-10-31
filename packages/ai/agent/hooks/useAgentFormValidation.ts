@@ -46,7 +46,8 @@ interface ExtendedFormData extends FormData {
 }
 
 export const resolveAgentEditIdentity = (
-  initialValues?: AgentEditIdentityInput
+  initialValues?: AgentEditIdentityInput,
+  explicitMode?: "create" | "edit"
 ) => {
   const rawAgentKey =
     asOptionalTrimmedString(initialValues?.dbKey) ??
@@ -57,22 +58,54 @@ export const resolveAgentEditIdentity = (
 
   const agentId = rawAgentId ? extractAgentId(rawAgentId) : undefined;
 
+  // 模式与身份共同决定动作：
+  // 避免在组件复用或草稿预填时，因 initialValues 残留了旧记录的 id / dbKey，
+  // 导致将一次「创建」误判为「编辑」，进而触发 updateAgent 破坏旧 agent 数据。
+  // 若显式为 "create"，坚决不是 editing；若显式为 "edit"，必须有有效 agentId。
+  const isEditing =
+    explicitMode === "create"
+      ? false
+      : explicitMode === "edit"
+        ? Boolean(agentId)
+        : Boolean(agentId);
+
   return {
     agentKey: rawAgentKey,
     agentId,
-    isEditing: Boolean(agentId),
+    isEditing,
   };
 };
 
-export const useAgentValidation = (initialValues?: ExtendedFormData) => {
+export type UseAgentValidationOptions = {
+  mode?: "create" | "edit";
+};
+
+export const useAgentValidation = (
+  initialValues?: ExtendedFormData,
+  options?: UseAgentValidationOptions | "create" | "edit"
+) => {
+  const explicitMode: "create" | "edit" | undefined =
+    typeof options === "string" ? options : options?.mode;
+
   const dispatch = useAppDispatch();
   const { createNewDialog } = useCreateDialog();
   const { currentUser: user } = useIdentity();
   const { t } = useTranslation("ai");
   const currentSpaceId = useCurrentSpaceId();
   const currentSpace = useCurrentSpaceFromEntity();
-  const { agentId: resolvedAgentId, isEditing } =
-    resolveAgentEditIdentity(initialValues);
+  const { agentId: resolvedAgentId, isEditing: resolvedIsEditing } =
+    resolveAgentEditIdentity(initialValues, explicitMode);
+
+  // 动作分支判定：创建/更新由「显式 mode + 当前身份」共同决定，不再由残留记录的 id 单独决定。
+  // 1. 显式 create 模式下，强制 isEditing = false，哪怕 initialValues 带旧 id；
+  // 2. 显式 edit 模式下，必须具备有效 resolvedAgentId 才算真正处于编辑模式；
+  // 3. 未显式传参时向下兼容，由 resolvedIsEditing && resolvedAgentId 共同决定。
+  const isEditing =
+    explicitMode === "create"
+      ? false
+      : explicitMode === "edit"
+        ? Boolean(resolvedAgentId)
+        : Boolean(resolvedIsEditing && resolvedAgentId);
 
   const form = useForm<FormData>({
     schema: getCreateAgentSchema(t) as any,
@@ -109,8 +142,15 @@ export const useAgentValidation = (initialValues?: ExtendedFormData) => {
         ? user.userId.trim()
         : "local";
 
-      // -------- 编辑模式：走 updateAgent thunk --------
-      if (isEditing && resolvedAgentId && initialValues) {
+      // 动作分支判定：显式 mode + 当前身份共同决定。
+      // 1. 编辑模式缺少有效身份时直接拒绝，绝不静默降级为创建（避免产生孤儿记录）；
+      if (explicitMode === "edit" && !resolvedAgentId) {
+        throw new Error("Missing agent identity in edit mode");
+      }
+
+      // 2. 只要显式为 create 模式，坚决不能走 updateAgent；
+      //    只有在非 create 模式且 isEditing 且存在有效 resolvedAgentId 时，才走 updateAgent。
+      if (explicitMode !== "create" && isEditing && resolvedAgentId && initialValues) {
         await dispatch(
           updateAgent({
             userId: effectiveUserId,

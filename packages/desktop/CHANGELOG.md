@@ -1,4 +1,11 @@
 
+## 0.216.0-alpha.4 (2026-10-31)
+
+### Bug Fixes
+
+* **agent:** 创建/更新由显式 mode + 身份共同决定，杜绝创建误更新旧 agent ([d664507](https://github.com/nolotus/bun-nolo/commit/d6645077b7066ae76fe511d6aa7968228fb22bad))
+
+
 ## 0.216.0-alpha.3 (2026-10-31)
 
 ### Bug Fixes
