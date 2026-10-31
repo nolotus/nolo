@@ -89,6 +89,12 @@ export interface SettingState {
    */
   enabledPromptSkills: string[];
 
+  /**
+   * 用户显式启用的账号级可选 Skill（如 ["ub-mode", "auto-review"]）。
+   * 保留缺席语义（undefined = 未显式配置，可读取 legacy enabledPromptSkills 回退）。
+   */
+  enabledSkills?: string[];
+
   // 通用提示词
   globalPrompt: string;
 

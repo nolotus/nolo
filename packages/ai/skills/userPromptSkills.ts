@@ -6,6 +6,7 @@
  */
 
 import { resolveBuiltinSkillEntry } from "./builtinSkillRegistry";
+import { parseSkillDocProtocol } from "./skillDocProtocol";
 import {
   isAgentSkillDisabled,
   type AgentSkillConfigSource,
@@ -107,9 +108,12 @@ export function resolveUserPromptSkillPatches(
       continue;
     }
 
-    const content = entry.content?.trim();
-    if (content) {
-      patches.push(content);
+    const parsed = parseSkillDocProtocol(entry.content);
+    const patch = (
+      parsed.meta?.skillConfig?.promptPatch || parsed.content
+    ).trim();
+    if (patch) {
+      patches.push(patch);
     }
   }
 

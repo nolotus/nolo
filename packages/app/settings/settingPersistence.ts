@@ -31,6 +31,7 @@ import {
 import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } from "ai/tools/agentCapabilities";
 import { normalizeEnabledPromptSkills } from "ai/skills/userPromptSkills";
+import { normalizeEnabledSkills } from "ai/skills/userSkills";
 
 /**
  * Run every field-level normalizer that may apply to a `setSettings` payload.
@@ -122,6 +123,15 @@ export const normalizeSettingChanges = (
       ...normalizedChanges,
       enabledPromptSkills: normalizeEnabledPromptSkills(
         normalizedChanges.enabledPromptSkills,
+      ),
+    };
+  }
+
+  if (hasOwn(normalizedChanges, "enabledSkills")) {
+    normalizedChanges = {
+      ...normalizedChanges,
+      enabledSkills: normalizeEnabledSkills(
+        normalizedChanges.enabledSkills,
       ),
     };
   }
@@ -259,9 +269,13 @@ export const hydrateStoredSettings = ({
       ? { ...existingRegistry, [userId]: normalizedAuthorityHome }
       : existingRegistry;
   const userAuthorityRegistryIsEmpty = Object.keys(userAuthorityRegistry).length === 0;
-  const hydratedSettings = {
+  const hasRecordEnabledSkills = hasOwn(record, "enabledSkills");
+  const hydratedSettings: Record<string, unknown> = {
     ...baseSettings,
     enabledPromptSkills: resolvedEnabledPromptSkills,
+    ...(hasRecordEnabledSkills
+      ? { enabledSkills: normalizeEnabledSkills(record.enabledSkills) }
+      : {}),
     // 服务端独占字段：只读回显（缺失时沿用初始值 0，非法值按 0）
     ...(hasOwn(record, "autoApproveCredits")
       ? { autoApproveCredits: typeof record.autoApproveCredits === "number" && Number.isFinite(record.autoApproveCredits) && record.autoApproveCredits >= 0 ? record.autoApproveCredits : 0 }
@@ -269,6 +283,10 @@ export const hydrateStoredSettings = ({
     ...(userAuthorityRegistryIsEmpty ? {} : { userAuthorityRegistry }),
     defaultAgentId: resolvedDefaultAgentId,
   };
+
+  if (!hasRecordEnabledSkills && "enabledSkills" in hydratedSettings) {
+    delete hydratedSettings.enabledSkills;
+  }
 
   return Object.keys(hydratedSettings).length > 0 ? hydratedSettings : null;
 };

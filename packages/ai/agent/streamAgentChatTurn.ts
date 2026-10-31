@@ -89,6 +89,7 @@ import {
     trimMessagesWithSummary,
     validateAccessAndBalance,
 } from "./streamAgentChatTurnUtils";
+import { resolveUserSkillRuntime } from "ai/skills/userSkillRuntime";
 import { buildCliPrompt } from "./cliPrompt";
 import { createCliChatTurnStream } from "./cliChatClient";
 import { getCliChatSession, startCliChatSession } from "./cliChatClient";
@@ -2111,11 +2112,19 @@ export const streamAgentChatTurnHandler = async (
         const initialHistoryIds = new Set(initialRawMsgs.map((m: any) => m.id));
 
         // 4. 合并工具 (Base + Default + Context + Mentioned + Runtime) + 图片配置
-        const agentConfigWithTools = mergeAgentToolsWithRuntime(
-            agentConfigWithReferences,
-            [...contextTools, ...attachmentTools],
-            mentionedTools,
-            runtimeOptions,
+        // Resolve account contributions from this turn's captured preference snapshot.
+        const accountSkillRuntime = agentConfigWithReferences.runtimePromptAlreadyInMessages
+            ? null
+            : await resolveUserSkillRuntime(agentConfigWithReferences, state.settings);
+        const agentConfigWithTools = resolveWebAgentRuntimeToolSurface(
+            mergeAgentToolsWithRuntime(
+                agentConfigWithReferences,
+                [...contextTools, ...attachmentTools],
+                mentionedTools,
+                runtimeOptions,
+                state,
+                accountSkillRuntime,
+            ),
             state,
         );
         const agentConfigForCall = applyImageConfigRuntimeOverride(

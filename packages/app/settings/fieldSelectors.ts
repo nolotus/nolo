@@ -21,6 +21,7 @@ import {
   normalizeSystemBuiltinSkills,
 } from "./settingNormalizers";
 import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } from "ai/tools/agentCapabilities";
+import { resolveUserEnabledSkills } from "ai/skills/userSkills";
 import type { SettingState, SettingsWriteFailure } from "./settingTypes";
 
 // --- 通用 / 主题字段 ---
@@ -81,6 +82,30 @@ export const selectGlobalPrompt = (state: RootState): string =>
 
 export const selectEnabledPromptSkills = (state: RootState): string[] =>
   state.settings.enabledPromptSkills ?? [];
+
+/**
+ * 选择当前生效的用户已启用 Skill 列表。
+ * 使用 createSelector 进行稳定记忆化，当 enabledSkills 与 legacy enabledPromptSkills 引用未变时，
+ * 避免每次 Redux 更新重新计算并返回新数组引用。
+ * 同时保留输入状态中 enabledSkills 的真实 own 存在性，区分属性缺失（允许 legacy 回退）与 own undefined（显式/畸形关闭）。
+ */
+export const selectEnabledSkills = createSelector(
+  [
+    (state: RootState) =>
+      Boolean(
+        state.settings &&
+          Object.prototype.hasOwnProperty.call(state.settings, "enabledSkills"),
+      ),
+    (state: RootState) => state.settings?.enabledSkills,
+    (state: RootState) => state.settings?.enabledPromptSkills,
+  ],
+  (hasOwnEnabledSkills, enabledSkills, enabledPromptSkills): string[] => {
+    const preferences = hasOwnEnabledSkills
+      ? { enabledSkills, enabledPromptSkills }
+      : { enabledPromptSkills };
+    return resolveUserEnabledSkills(preferences);
+  },
+);
 
 export const selectUserTonePreset = (state: RootState) =>
   normalizeTonePresetSetting(state.settings.userTonePreset);

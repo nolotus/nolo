@@ -1,4 +1,8 @@
-import { resolveUserPromptSkillPatches } from "../../ai/skills/userPromptSkills";
+import { resolveUserSkillRuntime } from "../../ai/skills/userSkillRuntime";
+import {
+  resolveUserEnabledSkills,
+  type UserSkillPreferences,
+} from "../../ai/skills/userSkills";
 import { resolveRequestToolSurface } from "../../agent-runtime/runtimeToolSurface";
 import type {
   AgentRuntimeAgentConfig,
@@ -1316,7 +1320,7 @@ export function createCliLocalRuntimeAdapter(
       // Read the global skill settings before checking the prepared-runtime cache.
       // Otherwise a setting change would keep reusing the old tool surface.
       let systemBuiltinSkills: Record<string, boolean> | null = null;
-      let enabledPromptSkills: unknown = [];
+      let skillPreferences: UserSkillPreferences = {};
       const sharedStore = await getOrCreateSharedStore(deps);
       if (userId) {
         try {
@@ -1324,9 +1328,15 @@ export function createCliLocalRuntimeAdapter(
             createUserKey.settings(userId),
             { remote: false },
           );
-          enabledPromptSkills = settingsRecord && typeof settingsRecord === "object"
-            ? (settingsRecord as any).enabledPromptSkills ?? []
-            : [];
+          if (settingsRecord && typeof settingsRecord === "object") {
+            // Preserve absence: own enabledSkills (even undefined) overrides legacy.
+            skillPreferences = {
+              ...(Object.prototype.hasOwnProperty.call(settingsRecord, "enabledSkills")
+                ? { enabledSkills: (settingsRecord as any).enabledSkills }
+                : {}),
+              enabledPromptSkills: (settingsRecord as any).enabledPromptSkills,
+            };
+          }
           systemBuiltinSkills =
             settingsRecord && typeof settingsRecord === "object"
               ? (settingsRecord as any).systemBuiltinSkills ?? null
@@ -1335,12 +1345,14 @@ export function createCliLocalRuntimeAdapter(
           // Tool defaults stay enabled; account prompt preferences fail closed.
         }
       }
+      // Canonical order drives both graph traversal and the prepared cache key.
+      const enabledSkills = resolveUserEnabledSkills(skillPreferences).sort();
       const cacheKey = `${buildPreparedAgentCacheKey({
         userId,
         agentRef,
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
-        enabledPromptSkills,
+        enabledSkills,
         wake: hasRunWakeChannel(deps.env),
         env: deps.env,
       })}:${dockerRuntimeEnabled ? "docker" : instaboxRuntimeEnabled ? "instabox" : "host"}`;
@@ -1364,8 +1376,22 @@ export function createCliLocalRuntimeAdapter(
       const fallbackLocalCliAgentConfig = storedAgentConfig
         ? null
         : resolveBuiltinLocalCliAgentConfig(agentRef, userId);
+      const sourceAgentConfig = storedAgentConfig ?? fallbackLocalCliAgentConfig;
+      const userSkills = await resolveUserSkillRuntime(sourceAgentConfig, {
+        enabledSkills,
+        enabledPromptSkills: skillPreferences.enabledPromptSkills,
+      });
+      // Account skills contribute declarations, not execution authority. Merge
+      // before every existing surface/profile/backend/local-policy gate; never
+      // mutate rawRecord, persisted skills, or the agent's enabled packs.
       const baseAgentConfig = withResolvedRuntimeToolSurface(
-        storedAgentConfig ?? fallbackLocalCliAgentConfig,
+        sourceAgentConfig && {
+          ...sourceAgentConfig,
+          toolNames: [...new Set([
+            ...(sourceAgentConfig.toolNames ?? []),
+            ...userSkills.requiredTools,
+          ])],
+        },
         deps.env,
       );
       // CLI 端 system prompt 直用 agentConfig.prompt（不经 buildSystemPrompt 的
@@ -1374,9 +1400,7 @@ export function createCliLocalRuntimeAdapter(
       const packAgentConfig = baseAgentConfig
         ? withRuntimeEnabledPacksAndPrompt(baseAgentConfig)
         : baseAgentConfig;
-      const userPromptPatches = resolveUserPromptSkillPatches(
-        packAgentConfig?.rawRecord ?? packAgentConfig, enabledPromptSkills,
-      );
+      const userPromptPatches = userSkills.skillPromptPatches;
       const agentConfig = packAgentConfig && userPromptPatches.length
         ? {
             ...packAgentConfig,

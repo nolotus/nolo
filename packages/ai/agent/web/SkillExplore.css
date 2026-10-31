@@ -1,5 +1,5 @@
 /* packages/ai/agent/web/SkillExplore.css
- * Explore Skill 只读与推荐目录样式：
+ * Explore Skill 目录与详情样式：
  * 全部使用系统设计 token，支持深浅色模式自适应，保持与 PluginExplore / AgentExplore 一致。
  */
 
@@ -101,14 +101,15 @@
   color: var(--text, #18181b);
 }
 
-.skill-explore__count {
+.skill-explore__search-status {
   font-size: var(--fontSize-xs, 0.75rem);
   color: var(--textSecondary, #71717a);
 }
 
 /* ── 专区划分 ───────────────────────────────────────────── */
 
-.skill-explore__section {
+.skill-explore__recommended-section,
+.skill-explore__catalog-section {
   display: flex;
   flex-direction: column;
   gap: var(--space-3, 12px);
@@ -117,14 +118,19 @@
 
 .skill-explore__section-header {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.skill-explore__section-title {
+.skill-explore__section-title-wrap {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.skill-explore__section-title {
   margin: 0;
   font-size: var(--fontSize-base, 1rem);
   font-weight: 600;
@@ -135,8 +141,7 @@
   color: var(--warning, #f59e0b);
 }
 
-.skill-explore__section-desc {
-  margin: 0;
+.skill-explore__section-hint {
   font-size: var(--fontSize-xs, 0.75rem);
   color: var(--textSecondary, #71717a);
 }
@@ -151,27 +156,18 @@
   align-items: start;
 }
 
-.skill-explore__grid--recommended {
-  grid-template-columns: 1fr;
-}
-
-@media (min-width: 840px) {
-  .skill-explore__grid--recommended {
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  }
-}
-
 @media (max-width: 640px) {
   .skill-explore__grid {
     grid-template-columns: 1fr;
   }
 }
 
-/* ── 单个 Skill 卡片 ─────────────────────────────────────── */
+/* ── 单个 Skill 卡片（精简版） ───────────────────────────── */
 
 .skill-card {
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   gap: var(--space-3, 12px);
   padding: var(--space-4, 16px);
   background: var(--surfaceCard, var(--surface, #ffffff));
@@ -179,22 +175,27 @@
   border-radius: var(--radius-lg, 12px);
   box-shadow: var(--shadow1, 0 1px 2px rgba(0, 0, 0, 0.04));
   min-width: 0;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  min-height: 140px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .skill-card:hover {
-  border-color: color-mix(in srgb, var(--primary, #1677ff) 35%, var(--borderSubtle, #e4e4e7));
-  box-shadow: var(--shadow2, 0 2px 8px rgba(0, 0, 0, 0.06));
+  border-color: color-mix(in srgb, var(--primary, #1677ff) 40%, var(--borderSubtle, #e4e4e7));
+  box-shadow: var(--shadow2, 0 2px 8px rgba(0, 0, 0, 0.08));
 }
 
 .skill-card--recommended {
-  border-color: color-mix(in srgb, var(--warning, #f59e0b) 40%, var(--borderSubtle, #e4e4e7));
+  border-color: color-mix(in srgb, var(--warning, #f59e0b) 45%, var(--borderSubtle, #e4e4e7));
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--warning, #f59e0b) 3%, var(--surfaceCard, #ffffff)) 0%,
+    color-mix(in srgb, var(--warning, #f59e0b) 4%, var(--surfaceCard, #ffffff)) 0%,
     var(--surfaceCard, #ffffff) 100%
   );
-  box-shadow: var(--shadow2, 0 2px 8px rgba(0, 0, 0, 0.06));
+}
+
+.skill-card--composite {
+  border-left: 3px solid var(--primary, #1677ff);
 }
 
 .skill-card__header {
@@ -231,25 +232,44 @@
   border-radius: var(--radius-md, 8px);
   background: color-mix(in srgb, var(--primary, #1677ff) 10%, transparent);
   color: var(--primary, #1677ff);
+  border: 1px solid color-mix(in srgb, var(--primary, #1677ff) 20%, transparent);
 }
 
 .skill-card__icon--recommended {
   background: color-mix(in srgb, var(--warning, #f59e0b) 14%, transparent);
   color: var(--warning, #d97706);
+  border-color: color-mix(in srgb, var(--warning, #f59e0b) 25%, transparent);
 }
 
-.skill-card__title-wrap {
+.skill-card__icon--composite {
+  background: color-mix(in srgb, var(--info, #0284c7) 12%, transparent);
+  color: var(--info, #0284c7);
+  border-color: color-mix(in srgb, var(--info, #0284c7) 25%, transparent);
+}
+
+.skill-card__icon--tools {
+  background: color-mix(in srgb, var(--textSecondary, #71717a) 10%, transparent);
+  color: var(--text, #18181b);
+  border-color: color-mix(in srgb, var(--borderSubtle, #e4e4e7) 80%, transparent);
+}
+
+.skill-card__icon--prompt {
+  background: color-mix(in srgb, var(--success, #10b981) 10%, transparent);
+  color: var(--success, #059669);
+  border-color: color-mix(in srgb, var(--success, #10b981) 20%, transparent);
+}
+
+.skill-card__title-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.skill-card__title-line {
+.skill-card__title-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .skill-card__title {
@@ -283,15 +303,27 @@
 }
 
 .skill-badge--builtin {
-  background: color-mix(in srgb, var(--primary, #1677ff) 12%, transparent);
+  background: color-mix(in srgb, var(--primary, #1677ff) 10%, transparent);
   color: var(--primary, #1677ff);
   border: 1px solid color-mix(in srgb, var(--primary, #1677ff) 24%, transparent);
 }
 
-.skill-badge--featured {
+.skill-badge--recommended {
   background: color-mix(in srgb, var(--warning, #f59e0b) 14%, transparent);
   color: var(--warning, #d97706);
   border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 30%, transparent);
+}
+
+.skill-badge--composite {
+  background: color-mix(in srgb, var(--info, #0284c7) 12%, transparent);
+  color: var(--info, #0284c7);
+  border: 1px solid color-mix(in srgb, var(--info, #0284c7) 28%, transparent);
+}
+
+.skill-badge--count {
+  background: color-mix(in srgb, var(--textSecondary, #71717a) 10%, transparent);
+  color: var(--textSecondary, #71717a);
+  border: 1px solid var(--borderSubtle, #e4e4e7);
 }
 
 .skill-badge--enabled {
@@ -318,58 +350,58 @@
   border: 1px solid color-mix(in srgb, var(--error, #ef4444) 28%, transparent);
 }
 
+/* 两行内用途说明 */
 .skill-card__desc {
   margin: 0;
   font-size: var(--fontSize-sm, 0.875rem);
-  line-height: var(--leading-normal, 1.5);
+  line-height: var(--leading-normal, 1.45);
   color: var(--textSecondary, #71717a);
   word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ── 推荐面板与操作控制栏 ─────────────────────────────────── */
+.skill-card__notice-summary {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--textTertiary, #a1a1aa);
+  border-top: 1px dashed var(--borderSubtle, #e4e4e7);
+  padding-top: 6px;
+}
 
-.skill-card__recommendation-panel {
+/* 底部精简操作栏 */
+.skill-card__footer {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 12px);
-  padding: var(--space-3, 12px);
-  background: color-mix(in srgb, var(--backgroundSecondary, #f4f4f5) 60%, transparent);
-  border: 1px solid var(--borderSubtle, #e4e4e7);
-  border-radius: var(--radius-md, 8px);
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--borderSubtle, #f4f4f5);
 }
 
-.skill-card__action-row {
+.skill-card__footer-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3, 12px);
+  gap: 8px;
   flex-wrap: wrap;
 }
 
-.skill-card__action-info {
+.skill-card__action-switch-wrap {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
 }
 
-.skill-card__action-label {
-  font-size: var(--fontSize-xs, 0.75rem);
-  font-weight: 600;
-  color: var(--text, #18181b);
-}
-
-.skill-card__action-hint {
-  font-size: 11px;
-  color: var(--textTertiary, #71717a);
-}
-
-/* ── 操作按钮（清晰可感知，常驻边框与切换动效） ───────────────── */
-
+/* 启停按钮（默认态具有常驻边框与高可辨识度） */
 .skill-toggle-button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 12px 5px 6px;
+  padding: 4px 10px 4px 6px;
   border-radius: 999px;
   font-size: var(--fontSize-xs, 0.75rem);
   font-weight: 600;
@@ -377,11 +409,8 @@
   outline: none;
   transition: all 0.2s ease;
   user-select: none;
-}
-
-.skill-toggle-button--inactive {
+  border: 1px solid var(--borderSubtle, #d4d4d8);
   background: var(--surfaceCard, #ffffff);
-  border: 1.5px solid var(--borderSubtle, #d4d4d8);
   color: var(--textSecondary, #52525b);
 }
 
@@ -392,7 +421,7 @@
 
 .skill-toggle-button--active {
   background: color-mix(in srgb, var(--primary, #1677ff) 10%, var(--surfaceCard, #ffffff));
-  border: 1.5px solid var(--primary, #1677ff);
+  border-color: var(--primary, #1677ff);
   color: var(--primary, #1677ff);
 }
 
@@ -417,8 +446,8 @@
 .skill-toggle-button__switch {
   display: inline-flex;
   align-items: center;
-  width: 28px;
-  height: 16px;
+  width: 26px;
+  height: 14px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--textSecondary, #71717a) 25%, transparent);
   position: relative;
@@ -432,8 +461,8 @@
 .skill-toggle-button__thumb {
   position: absolute;
   left: 2px;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -448,110 +477,328 @@
   line-height: 1;
 }
 
-/* ── 错误与重试提示 ───────────────────────────────────────── */
-
-.skill-card__error-banner {
-  display: flex;
+/* 查看详情按钮（默认态常驻边框与图标） */
+.skill-detail-open-btn {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm, 6px);
-  background: color-mix(in srgb, var(--error, #ef4444) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--error, #ef4444) 25%, transparent);
-  color: var(--error, #dc2626);
-  font-size: 11px;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  background: var(--surfaceCard, #ffffff);
+  color: var(--textSecondary, #52525b);
+  font-size: var(--fontSize-xs, 0.75rem);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.skill-card__error-text {
-  flex: 1;
+.skill-detail-open-btn:hover {
+  border-color: var(--primary, #1677ff);
+  color: var(--primary, #1677ff);
+  background: color-mix(in srgb, var(--primary, #1677ff) 5%, transparent);
 }
 
-.skill-card__retry-button {
+.skill-detail-open-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #1677ff) 30%, transparent);
+}
+
+/* 重试按钮 */
+.skill-retry-button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
-  border-radius: var(--radius-xs, 4px);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 4px);
   border: 1px solid color-mix(in srgb, var(--error, #ef4444) 30%, transparent);
-  background: var(--surfaceCard, #ffffff);
+  background: color-mix(in srgb, var(--error, #ef4444) 8%, transparent);
   color: var(--error, #dc2626);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
 
-.skill-card__retry-button:hover {
-  background: color-mix(in srgb, var(--error, #ef4444) 8%, transparent);
+.skill-retry-button:hover {
+  background: color-mix(in srgb, var(--error, #ef4444) 15%, transparent);
 }
 
-/* ── 简短范围一句说明 ───────────────────────────────────────── */
+.skill-spin {
+  animation: skill-rotate 1s linear infinite;
+}
 
-.skill-card__notice-summary {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--borderSubtle, #e4e4e7);
+@keyframes skill-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 错误条幅 */
+.skill-card__error-banner {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--error, #ef4444) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error, #ef4444) 25%, transparent);
+  color: var(--error, #dc2626);
   font-size: 11px;
-  line-height: 1.45;
-  color: var(--textSecondary, #52525b);
+  line-height: 1.4;
 }
 
-.skill-card__notice-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--textTertiary, #a1a1aa);
+/* ── 详情弹窗面板（Modal / Dialog） ───────────────────────── */
+
+.skill-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: skill-overlay-fade 0.15s ease-out;
 }
 
-/* ── 折叠详情内部元信息与来源链接 ─────────────────────────── */
-
-.skill-card__details-meta {
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--borderSubtle, #e4e4e7);
-  margin-bottom: 8px;
+@keyframes skill-overlay-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-/* ── 外部来源链接 ─────────────────────────────────────────── */
+.skill-detail-modal {
+  background: var(--surfaceCard, var(--surface, #ffffff));
+  border: 1px solid var(--borderSubtle, var(--border, #e4e4e7));
+  border-radius: var(--radius-xl, 16px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  width: 100%;
+  max-width: 680px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  animation: skill-modal-scale 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
 
-.skill-card__links {
+@keyframes skill-modal-scale {
+  from {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.skill-detail-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--borderSubtle, #e4e4e7);
+  background: var(--surfaceCard, #ffffff);
+}
+
+.skill-detail-modal__header-left {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
-  padding-top: 4px;
+  min-width: 0;
 }
 
-.skill-card__external-link {
+.skill-detail-modal__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-lg, 10px);
+  flex-shrink: 0;
+}
+
+.skill-detail-modal__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skill-detail-modal__title {
+  margin: 0;
+  font-size: var(--fontSize-lg, 1.125rem);
+  font-weight: 700;
+  color: var(--text, #18181b);
+}
+
+.skill-detail-modal__slug-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.skill-detail-modal__slug {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--textTertiary, #a1a1aa);
+  background: color-mix(in srgb, var(--textSecondary, #71717a) 8%, transparent);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs, 4px);
+}
+
+.skill-detail-modal__close-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  background: transparent;
+  color: var(--textSecondary, #71717a);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.skill-detail-modal__close-btn:hover {
+  background: color-mix(in srgb, var(--textSecondary, #71717a) 10%, transparent);
+  color: var(--text, #18181b);
+}
+
+.skill-detail-modal__body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.skill-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-detail-section__title {
+  margin: 0;
+  font-size: var(--fontSize-sm, 0.875rem);
+  font-weight: 600;
+  color: var(--text, #18181b);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skill-detail-desc {
+  margin: 0;
+  font-size: var(--fontSize-sm, 0.875rem);
+  line-height: var(--leading-normal, 1.5);
+  color: var(--textSecondary, #52525b);
+}
+
+.skill-detail-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fontSize-xs, 0.75rem);
+}
+
+.skill-detail-meta-label {
+  font-size: var(--fontSize-xs, 0.75rem);
+  font-weight: 600;
+  color: var(--textTertiary, #71717a);
+}
+
+/* 状态控制卡片 */
+.skill-detail-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg, 10px);
+  background: color-mix(in srgb, var(--backgroundSecondary, #f4f4f5) 60%, transparent);
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  flex-wrap: wrap;
+}
+
+.skill-detail-status-card__info {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  font-size: 11px;
-  color: var(--primary, #1677ff);
-  text-decoration: none;
-  font-weight: 500;
+  flex: 1;
+  min-width: 220px;
 }
 
-.skill-card__external-link:hover {
-  text-decoration: underline;
+.skill-detail-status-card__desc {
+  margin: 0;
+  font-size: var(--fontSize-xs, 0.75rem);
+  line-height: 1.45;
+  color: var(--textSecondary, #71717a);
 }
 
-/* ── 标签与依赖行 ─────────────────────────────────────────── */
+.skill-detail-status-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
-.skill-card__section {
+/* 包含子项网格 */
+.skill-detail-contained-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.skill-detail-subitem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  background: var(--surfaceCard, #ffffff);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.skill-detail-subitem:hover {
+  border-color: var(--primary, #1677ff);
+  background: color-mix(in srgb, var(--primary, #1677ff) 4%, transparent);
+}
+
+.skill-detail-subitem__title {
+  font-size: var(--fontSize-xs, 0.75rem);
+  font-weight: 600;
+  color: var(--text, #18181b);
+}
+
+.skill-detail-subitem__slug {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--textTertiary, #a1a1aa);
+}
+
+.skill-detail-subitem__tools {
+  font-size: 10px;
+  color: var(--textSecondary, #71717a);
+}
+
+/* 依赖块 */
+.skill-detail-dep-block {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.skill-card__label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--textTertiary, #a1a1aa);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
+/* Chips */
 .skill-chips {
   display: flex;
   flex-wrap: wrap;
@@ -561,99 +808,140 @@
 .skill-chip {
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm, 6px);
   font-size: 11px;
-  font-weight: 500;
-  line-height: 1.4;
+  background: color-mix(in srgb, var(--textSecondary, #71717a) 10%, transparent);
   border: 1px solid var(--borderSubtle, #e4e4e7);
-  background: var(--surfaceOverlayStrong, color-mix(in srgb, var(--textSecondary, #71717a) 6%, transparent));
-  color: var(--text, #18181b);
+  color: var(--textSecondary, #52525b);
 }
 
 .skill-chip--tool {
-  background: color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent);
-  color: var(--text, #18181b);
-  border-color: color-mix(in srgb, var(--warning, #f59e0b) 25%, transparent);
+  background: color-mix(in srgb, var(--primary, #1677ff) 8%, transparent);
+  border-color: color-mix(in srgb, var(--primary, #1677ff) 20%, transparent);
+  color: var(--primary, #1677ff);
+  font-family: var(--font-mono, monospace);
 }
 
 .skill-chip--dep {
-  background: color-mix(in srgb, var(--info, #3b82f6) 10%, transparent);
-  color: var(--text, #18181b);
-  border-color: color-mix(in srgb, var(--info, #3b82f6) 25%, transparent);
+  background: color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warning, #f59e0b) 25%, transparent);
+  color: var(--warning, #d97706);
 }
 
-/* ── 原生 details 正文预览 ────────────────────────────────── */
-
-.skill-card__details {
-  border-top: 1px solid var(--borderSubtle, var(--border, #e4e4e7));
-  padding-top: var(--space-2, 8px);
-  margin-top: auto;
-}
-
-.skill-card__summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-  user-select: none;
+.skill-detail-empty-text {
+  margin: 0;
   font-size: var(--fontSize-xs, 0.75rem);
-  font-weight: 600;
-  color: var(--primary, #1677ff);
-  padding: 4px 0;
-  list-style: none;
+  color: var(--textTertiary, #a1a1aa);
+  font-style: italic;
 }
 
-.skill-card__summary::-webkit-details-marker {
-  display: none;
-}
-
-.skill-card__summary:hover {
-  text-decoration: underline;
-}
-
-.skill-card__preview {
-  margin: var(--space-2, 8px) 0 0;
-  padding: 10px 12px;
-  background: var(--backgroundTertiary, color-mix(in srgb, var(--textSecondary, #71717a) 6%, transparent));
+/* 正文预览 */
+.skill-detail-content-preview {
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--backgroundSecondary, #f4f4f5) 80%, transparent);
   border: 1px solid var(--borderSubtle, #e4e4e7);
-  border-radius: var(--radius-sm, 6px);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   line-height: 1.5;
   color: var(--text, #18181b);
   white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 260px;
+  word-break: break-all;
+  max-height: 240px;
   overflow-y: auto;
 }
 
-/* ── 空状态 ─────────────────────────────────────────────── */
+.skill-detail-modal__footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--borderSubtle, #e4e4e7);
+  display: flex;
+  justify-content: flex-end;
+  background: var(--surfaceCard, #ffffff);
+}
+
+.skill-detail-close-action-btn {
+  padding: 6px 16px;
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  background: var(--surfaceCard, #ffffff);
+  color: var(--text, #18181b);
+  font-size: var(--fontSize-xs, 0.75rem);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.skill-detail-close-action-btn:hover {
+  background: color-mix(in srgb, var(--textSecondary, #71717a) 10%, transparent);
+}
 
 .skill-explore__empty {
-  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--space-12, 48px) var(--space-4, 16px);
-  background: var(--surfaceCard, var(--surface, #ffffff));
-  border: 1.5px dashed var(--borderSubtle, #e4e4e7);
-  border-radius: var(--radius-lg, 12px);
-  color: var(--textSecondary, #71717a);
+  padding: 48px 16px;
   text-align: center;
-  gap: var(--space-2, 8px);
+  border: 1px dashed var(--borderSubtle, #e4e4e7);
+  border-radius: var(--radius-lg, 12px);
+  grid-column: 1 / -1;
 }
 
 .skill-explore__empty-title {
+  margin: 0 0 8px;
   font-size: var(--fontSize-base, 1rem);
   font-weight: 600;
   color: var(--text, #18181b);
-  margin: 0;
 }
 
 .skill-explore__empty-desc {
+  margin: 0;
   font-size: var(--fontSize-sm, 0.875rem);
   color: var(--textSecondary, #71717a);
-  margin: 0;
+  max-width: 400px;
+}
+
+/* 背景隔离容器：display: contents 保持原有 flex 布局，
+   详情弹窗打开时由 JS 置为 inert + aria-hidden */
+.skill-explore__content {
+  display: contents;
+}
+
+/* 工具汇总分组 */
+.skill-detail-tool-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skill-detail-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 原生 button 化后的子技能入口 / 依赖 chip：复位浏览器默认样式 */
+button.skill-detail-subitem {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+button.skill-detail-subitem:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+button.skill-chip {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.skill-chip:disabled {
+  cursor: default;
+  opacity: 0.65;
 }

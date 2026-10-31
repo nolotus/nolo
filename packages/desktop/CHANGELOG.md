@@ -1,4 +1,11 @@
 
+## 0.217.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **skills:** 账号可选 Skill 目录与启停卡片 ([e0d3cbd](https://github.com/nolotus/bun-nolo/commit/e0d3cbd8ba5abab9de06f2d04de2a9b8cabe2298))
+
+
 ## 0.216.0-alpha.5 (2026-10-31)
 
 ### Bug Fixes

@@ -6,6 +6,7 @@ import {
   type EffectiveToolSurface,
   type EffectiveToolSurfaceEntry,
 } from "ai/tools/effectiveToolSurface";
+import type { ResolvedSkillGraph } from "ai/skills/referenceRuntime";
 import { mergeAgentToolsWithRuntime } from "./streamAgentChatTurnUtils";
 import type { AgentRuntimeOptions } from "./types";
 import type { TurnToolContext } from "./turnToolContext";
@@ -28,6 +29,7 @@ export function resolveServerOwnedWebEffectiveToolSurface(args: {
   runtimeOptions?: AgentRuntimeOptions | null;
   state: RootState;
   turnToolContext?: TurnToolContext | null;
+  accountSkillRuntime?: ResolvedSkillGraph | null;
 }): EffectiveToolSurface {
   const referencedToolNames = args.turnToolContext?.referencedToolNames ?? [];
   const mentionedToolNames = args.turnToolContext?.mentionedToolNames ?? [];
@@ -45,6 +47,7 @@ export function resolveServerOwnedWebEffectiveToolSurface(args: {
     mentionedToolNames,
     args.runtimeOptions ?? undefined,
     args.state,
+    args.accountSkillRuntime,
   );
   const rawNames = (Array.isArray((mergedAgent as any).tools) ? (mergedAgent as any).tools : [])
     .map(readEffectiveToolName)

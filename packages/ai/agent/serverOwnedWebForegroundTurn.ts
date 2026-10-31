@@ -38,6 +38,7 @@ import { createServerOwnedToolProjection } from "./serverOwnedToolProjection";
 import { waitForNewCanonicalAssistant } from "./serverOwnedWebForegroundHandoff";
 import { resolveServerOwnedWebEffectiveToolSurface } from "./serverOwnedWebEffectiveToolSurface";
 import { resolveTurnToolContext } from "./turnToolContext";
+import { resolveUserSkillRuntime } from "ai/skills/userSkillRuntime";
 import {
   applyServerOwnedAssistantStreamPayload,
   EMPTY_SERVER_OWNED_ASSISTANT_STREAM,
@@ -130,11 +131,16 @@ export async function canRunServerOwnedWebForegroundTurn(
       runtimeOptions: args.runtimeOptions,
     });
 
+    const accountSkillRuntime = agentConfig.runtimePromptAlreadyInMessages
+      ? null
+      : await resolveUserSkillRuntime(agentConfig, state.settings);
+
     const effectiveToolSurface = resolveServerOwnedWebEffectiveToolSurface({
       agentConfig,
       runtimeOptions: args.runtimeOptions,
       state,
       turnToolContext,
+      accountSkillRuntime,
     });
 
     const eligible = shouldUseServerOwnedWebForegroundTurn({
