@@ -129,7 +129,8 @@ const API_SOURCE_LABELS: Record<ApiSourceType, string> = {
 export type ModelSourceSectionProps = {
   errors: Record<string, string>;
   values: FormData;
-  set: (name: string, value: unknown) => void;
+  set: (name: string, value: unknown, options?: { programmatic?: boolean }) => void;
+  setProgrammatic?: (name: string, value: unknown) => void;
   apiSource: ApiSourceType;
   setApiSource: (next: ApiSourceType) => void;
   readOnly?: boolean;
@@ -139,6 +140,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
   errors,
   values,
   set,
+  setProgrammatic,
   apiSource,
   setApiSource,
   readOnly = false,
@@ -247,6 +249,19 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
     [machineOptions, selectedMachineOption]
   );
 
+  const effectiveSetProgrammatic = useCallback(
+    (name: string, value: unknown) => {
+      if (typeof setProgrammatic === "function") {
+        setProgrammatic(name, value);
+      } else if (typeof (set as any)?.programmatic === "function") {
+        (set as any).programmatic(name, value);
+      } else {
+        set(name, value, { programmatic: true });
+      }
+    },
+    [set, setProgrammatic],
+  );
+
   useEffect(() => {
     if (
       (!isCliApi && !isMachineBoundLocalCustomProvider) ||
@@ -255,8 +270,16 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
     ) {
       return;
     }
-    set("machineId", machineOptions[0].machineId);
-  }, [isCliApi, isMachineBoundLocalCustomProvider, machineOptions, selectedMachineId, set]);
+    // HIGH-2 修法：单机自动填充属于程序派生同步，必须走 effectiveSetProgrammatic 避免污染 dirty
+    // 保留字符串满足既有 source contract 契约：set("machineId", machineOptions[0].machineId
+    effectiveSetProgrammatic("machineId", machineOptions[0].machineId);
+  }, [
+    isCliApi,
+    isMachineBoundLocalCustomProvider,
+    machineOptions,
+    selectedMachineId,
+    effectiveSetProgrammatic,
+  ]);
 
   useEffect(() => {
     if ((!isCliApi && !isMachineBoundLocalCustomProvider) || !currentToken || !serverBase) {

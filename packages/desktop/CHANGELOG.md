@@ -1,4 +1,11 @@
 
+## 0.216.0-alpha.2 (2026-10-31)
+
+### Bug Fixes
+
+* **agent:** 编辑保存前端：dirty-only payload 与失败可见 ([2698df2](https://github.com/nolotus/bun-nolo/commit/2698df20ccb49e6440aa40595c30a10c6f218458))
+
+
 ## 0.216.0-alpha.1 (2026-10-31)
 
 ### Features
