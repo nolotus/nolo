@@ -10,8 +10,6 @@ import {
   BUILTIN_NOLO_AGENT_MODEL,
   BUILTIN_NOLO_AGENT_NAME,
 } from "core/builtinAgents";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { resolveToolGuidedSections } from "../../ai/agent/toolGuidedSections";
 import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import { estimateMessagesTokens } from "../../ai/context/contextOccupancy";
@@ -36,6 +34,7 @@ import {
 import { buildRuntimeGuidanceBlocks } from "../../agent-runtime/runtimeGuidance";
 import { buildSkillDiscoveryContextBlock } from "../../agent-runtime/skillDiscovery";
 import { canonicalizeToolNames } from "../../agent-runtime/toolNameAliases";
+import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
 
 /** Default CLI packs when an agent does not declare enabledPacks. */
 const DEFAULT_CLI_PACKS = ["code", "agent-orchestration", "skills"] as const;
@@ -57,16 +56,7 @@ const DEFAULT_PROMPT_ESTIMATE_BASELINE =
   "你是共享空间里的高性价比通用 AI 助手。优先快速、直接、稳定地完成任务；需要推理时保持步骤清晰。";
 
 function readAgentsMd(cwd: string): string {
-  for (const name of ["AGENTS.md", "agents.md"]) {
-    const path = join(cwd, name);
-    if (!existsSync(path)) continue;
-    try {
-      return readFileSync(path, "utf8");
-    } catch {
-      return "";
-    }
-  }
-  return "";
+  return readAgentsMdLayerFromDisk(cwd)?.content ?? "";
 }
 
 function estimateToolSchemas(toolNames: string[]): number {

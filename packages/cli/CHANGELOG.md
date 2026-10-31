@@ -1,4 +1,12 @@
 
+## 0.201.0-alpha.2 (2026-10-31)
+
+### Bug Fixes
+
+* **agent:** 补回并行门的两条约束到系统层常量 ([41c4805](https://github.com/nolotus/bun-nolo/commit/41c480581550b33e6bdfea0c6bb9f48c2dbedbbe))
+* **agent:** 请教模式改为机械触发门并瘦身 ([6761021](https://github.com/nolotus/bun-nolo/commit/676102114844bbdcc786f57575446530bf0e41d6))
+
+
 ## 0.201.0-alpha.1 (2026-10-31)
 
 ### Features
