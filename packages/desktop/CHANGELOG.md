@@ -1,4 +1,11 @@
 
+## 0.216.0-alpha.3 (2026-10-31)
+
+### Bug Fixes
+
+* **app:** 存储受限时不再跳过整套主题变量生成 ([faba891](https://github.com/nolotus/bun-nolo/commit/faba891b87c685ffd83b1ebc56192b513ed1c191))
+
+
 ## 0.216.0-alpha.2 (2026-10-31)
 
 ### Bug Fixes
