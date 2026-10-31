@@ -14,6 +14,17 @@
 :where(:root) {
   --background: #FAF8F4;
   --text: #1F2733;
+
+  /* 首屏圆角兜底：取 defaultThemeName(nature) 在宽松(spacious)下的基准值。
+     防范场景：localStorage 抛异常/受限时，themeBootstrap 外部脚本跳过主题变量注入，
+     若无静态兜底，--radius-* token 缺失会导致 border-radius 计算值失效回落为初始值 0（圆角消失）。
+     bootstrap 正常执行时，JS 注入的 :root 规则具有更高特异性，会覆盖这里的静态兜底值。
+     基准映射源自 themeBootstrap.ts (nature boost=2, spacious: xs=12px, sm=16+2=18px, md=24px, lg=sm, xl=md)。 */
+  --radius-xs: 12px;
+  --radius-sm: 18px;
+  --radius-md: 24px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 }
 :where(:root[data-theme="dark"]) {
   --background: #1C1B20;

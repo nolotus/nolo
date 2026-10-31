@@ -1,4 +1,11 @@
 
+## 0.198.0-alpha.3 (2026-10-31)
+
+### Bug Fixes
+
+* **app:** 首屏补 5 个圆角 token 静态兜底 ([9b326db](https://github.com/nolotus/bun-nolo/commit/9b326dbbe62adfdd75fab58a79fa4288cfe8e3e4))
+
+
 ## 0.198.0-alpha.2 (2026-10-31)
 
 ### Bug Fixes
