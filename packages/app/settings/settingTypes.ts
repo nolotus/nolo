@@ -83,6 +83,12 @@ export interface SettingState {
   // 是否允许读取当前空间内容作为上下文
   enableReadCurrentSpace: boolean;
 
+  /**
+   * 用户显式启用的账号级纯提示 Skill（如 ["ub-mode"]）。
+   * 默认空数组。不授予工具，不改 agent 配置，由三端运行时注入对应 prompt patch。
+   */
+  enabledPromptSkills: string[];
+
   // 通用提示词
   globalPrompt: string;
 

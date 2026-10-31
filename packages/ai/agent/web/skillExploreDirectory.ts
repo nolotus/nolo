@@ -1,8 +1,29 @@
 import { listBuiltinSkills, type BuiltinSkillEntry } from "ai/skills/builtinSkillRegistry";
+import {
+  RECOMMENDED_PROMPT_SKILL_SLUGS,
+  type RecommendedPromptSkillSlug,
+} from "ai/skills/userPromptSkills";
 
 export type SkillDirectoryFilter = {
   query?: string;
 };
+
+/**
+ * 判断指定 slug 是否为平台推荐的纯提示 Skill。
+ * 基于审定的 RECOMMENDED_PROMPT_SKILL_SLUGS，不在 UI 中硬编码单个 skill 名字分支。
+ */
+export function isRecommendedPromptSkill(slug: string): boolean {
+  return (RECOMMENDED_PROMPT_SKILL_SLUGS as readonly string[]).includes(slug);
+}
+
+/**
+ * 从内置技能列表中筛选出平台推荐的纯提示技能条目。
+ */
+export function getRecommendedPromptSkillEntries(
+  skills: readonly BuiltinSkillEntry[],
+): readonly BuiltinSkillEntry[] {
+  return skills.filter((entry) => isRecommendedPromptSkill(entry.slug));
+}
 
 /**
  * 纯目录辅助函数：基于内置 Skill 注册表进行搜索过滤。

@@ -79,6 +79,9 @@ export const selectEnableReadCurrentSpace = (state: RootState): boolean =>
 export const selectGlobalPrompt = (state: RootState): string =>
   state.settings.globalPrompt;
 
+export const selectEnabledPromptSkills = (state: RootState): string[] =>
+  state.settings.enabledPromptSkills ?? [];
+
 export const selectUserTonePreset = (state: RootState) =>
   normalizeTonePresetSetting(state.settings.userTonePreset);
 

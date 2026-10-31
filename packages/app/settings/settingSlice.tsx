@@ -126,6 +126,7 @@ export {
   selectSpaceContextLevel,
   selectAutoApproveSelfUpdateFields,
   selectAiRecentContentLimit,
+  selectEnabledPromptSkills,
   selectDefaultAgentPreference,
   selectDefaultAgentId,
   selectOcrModel,

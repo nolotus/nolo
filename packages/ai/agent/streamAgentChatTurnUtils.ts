@@ -61,6 +61,7 @@ import {
 // force a full tools/index (all schemas + executors) load on the chat hot path.
 import { TOOL_PACKS, applyDisabledTools, expandEnabledPacks, resolveEffectiveEnabledPacks, expandEnabledPackPromptPatches, applyDefaultWebToolPacks, applySystemBuiltinSkillFilter, addDefaultSystemCapabilityTools } from "ai/tools/toolPacks";
 import { resolveAgentRecommendedSkillNames, resolveAgentRequiredPackIds } from "ai/tools/agentSkillConfig";
+import { resolveUserPromptSkillPatches } from "ai/skills/userPromptSkills";
 import { canonicalizeToolNames, prioritizeToolNames } from "ai/tools/toolNameAliases";
 import { resolveAgentImageInputSupport } from "ai/llm/agentCapabilities";
 import {
@@ -823,6 +824,13 @@ export const mergeAgentToolsWithRuntime = (
     const skillPromptPatches = [
         ...new Set([
             ...asNonEmptyStringArray((agentConfig as any).skillPromptPatches),
+            // Server-prepared messages already contain the authenticated preference.
+            ...((agentConfig as any).runtimePromptAlreadyInMessages
+                ? []
+                : resolveUserPromptSkillPatches(
+                    agentConfig,
+                    (state as any)?.settings?.enabledPromptSkills,
+                )),
             // 能力包的 promptPatch（方法论文档）与 skill reference 的 patch 走同一条
             // 注入链（buildSkillGuidanceBlock → buildSkillGuidancePromptBlock），
             // 让「工具 + 配套纪律」作为一个能力包整体注入 system prompt。

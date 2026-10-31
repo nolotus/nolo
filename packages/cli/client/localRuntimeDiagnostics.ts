@@ -177,6 +177,7 @@ export function buildPreparedAgentCacheKey(args: {
   agentRef: string;
   cwd: string;
   systemBuiltinSkills?: Record<string, boolean> | null;
+  enabledPromptSkills?: unknown;
   wake?: boolean;
   env?: EnvLike;
 }) {
@@ -187,6 +188,13 @@ export function buildPreparedAgentCacheKey(args: {
           .map((key) => [key, args.systemBuiltinSkills?.[key]]),
       )
     : "default";
+  // Cache only the audited allowlist selector, never arbitrary setting bodies.
+  // Missing, malformed and failed settings reads all share the disabled state.
+  const promptSkillsKey = JSON.stringify(
+    Array.isArray(args.enabledPromptSkills) && args.enabledPromptSkills.includes("ub-mode")
+      ? ["ub-mode"]
+      : [],
+  );
   const wakeKey = args.wake !== undefined ? (args.wake ? "wake:1" : "wake:0") : "";
   // Include every env selector consumed by profile expansion / local policy.
   // Values, not secrets: only these explicit non-credential policy keys enter it.
@@ -198,7 +206,7 @@ export function buildPreparedAgentCacheKey(args: {
     args.env?.NOLO_LOCAL_ALLOWED_TOOLS ?? "",
     args.env?.NOLO_LOCAL_ALLOW_UNDECLARED_TOOLS ?? "",
   ]);
-  return `${policyKey}\0${args.userId}\0${args.agentRef}\0${args.cwd}\0${systemBuiltinSkillsKey}${wakeKey ? `\0${wakeKey}` : ""}`;
+  return `${policyKey}\0${args.userId}\0${args.agentRef}\0${args.cwd}\0${systemBuiltinSkillsKey}\0${promptSkillsKey}${wakeKey ? `\0${wakeKey}` : ""}`;
 }
 
 export function clearCliLocalRuntimePreparedAgentCache() {

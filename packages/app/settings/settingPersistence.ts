@@ -30,6 +30,7 @@ import {
 } from "./settingNormalizers";
 import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } from "ai/tools/agentCapabilities";
+import { normalizeEnabledPromptSkills } from "ai/skills/userPromptSkills";
 
 /**
  * Run every field-level normalizer that may apply to a `setSettings` payload.
@@ -112,6 +113,15 @@ export const normalizeSettingChanges = (
       systemBuiltinSkills: normalizeSystemBuiltinSkills(
         normalizedChanges.systemBuiltinSkills,
         DEFAULT_SYSTEM_BUILTIN_SKILLS,
+      ),
+    };
+  }
+
+  if (hasOwn(normalizedChanges, "enabledPromptSkills")) {
+    normalizedChanges = {
+      ...normalizedChanges,
+      enabledPromptSkills: normalizeEnabledPromptSkills(
+        normalizedChanges.enabledPromptSkills,
       ),
     };
   }
@@ -234,6 +244,9 @@ export const hydrateStoredSettings = ({
   const resolvedDefaultAgentId =
     normalizeDefaultAgentIdSetting(record.defaultAgentId) ??
     SYSTEM_DEFAULT_AGENT_ID;
+  const resolvedEnabledPromptSkills = normalizeEnabledPromptSkills(
+    record.enabledPromptSkills,
+  );
 
   const baseSettings = sanitizeStoredSettingsRecord(settingsRecord) ?? {};
   const normalizedAuthorityHome =
@@ -248,6 +261,7 @@ export const hydrateStoredSettings = ({
   const userAuthorityRegistryIsEmpty = Object.keys(userAuthorityRegistry).length === 0;
   const hydratedSettings = {
     ...baseSettings,
+    enabledPromptSkills: resolvedEnabledPromptSkills,
     // 服务端独占字段：只读回显（缺失时沿用初始值 0，非法值按 0）
     ...(hasOwn(record, "autoApproveCredits")
       ? { autoApproveCredits: typeof record.autoApproveCredits === "number" && Number.isFinite(record.autoApproveCredits) && record.autoApproveCredits >= 0 ? record.autoApproveCredits : 0 }

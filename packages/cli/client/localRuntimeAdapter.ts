@@ -1,3 +1,4 @@
+import { resolveUserPromptSkillPatches } from "../../ai/skills/userPromptSkills";
 import { resolveRequestToolSurface } from "../../agent-runtime/runtimeToolSurface";
 import type {
   AgentRuntimeAgentConfig,
@@ -1315,6 +1316,7 @@ export function createCliLocalRuntimeAdapter(
       // Read the global skill settings before checking the prepared-runtime cache.
       // Otherwise a setting change would keep reusing the old tool surface.
       let systemBuiltinSkills: Record<string, boolean> | null = null;
+      let enabledPromptSkills: unknown = [];
       const sharedStore = await getOrCreateSharedStore(deps);
       if (userId) {
         try {
@@ -1322,12 +1324,15 @@ export function createCliLocalRuntimeAdapter(
             createUserKey.settings(userId),
             { remote: false },
           );
+          enabledPromptSkills = settingsRecord && typeof settingsRecord === "object"
+            ? (settingsRecord as any).enabledPromptSkills ?? []
+            : [];
           systemBuiltinSkills =
             settingsRecord && typeof settingsRecord === "object"
               ? (settingsRecord as any).systemBuiltinSkills ?? null
               : null;
         } catch {
-          // Local settings are best-effort; a read failure keeps skills enabled.
+          // Tool defaults stay enabled; account prompt preferences fail closed.
         }
       }
       const cacheKey = `${buildPreparedAgentCacheKey({
@@ -1335,6 +1340,7 @@ export function createCliLocalRuntimeAdapter(
         agentRef,
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
+        enabledPromptSkills,
         wake: hasRunWakeChannel(deps.env),
         env: deps.env,
       })}:${dockerRuntimeEnabled ? "docker" : instaboxRuntimeEnabled ? "instabox" : "host"}`;
@@ -1365,9 +1371,22 @@ export function createCliLocalRuntimeAdapter(
       // CLI 端 system prompt 直用 agentConfig.prompt（不经 buildSystemPrompt 的
       // skill-guidance 层），这里把启用能力包的 promptPatch 纪律追加进 prompt，
       // 与 web 端 skillPromptPatches 注入对齐。
-      const agentConfig = baseAgentConfig
+      const packAgentConfig = baseAgentConfig
         ? withRuntimeEnabledPacksAndPrompt(baseAgentConfig)
         : baseAgentConfig;
+      const userPromptPatches = resolveUserPromptSkillPatches(
+        packAgentConfig?.rawRecord ?? packAgentConfig, enabledPromptSkills,
+      );
+      const agentConfig = packAgentConfig && userPromptPatches.length
+        ? {
+            ...packAgentConfig,
+            prompt: [
+              packAgentConfig.prompt,
+              ...userPromptPatches.filter((patch) =>
+                !String(packAgentConfig.prompt ?? "").includes(patch)),
+            ].filter(Boolean).join("\n\n"),
+          }
+        : packAgentConfig;
       // 读取用户全局设置中的「系统内置 Skill」开关映射，传给工具展开管道，
       // 让 CLI 端与 Web/桌面端行为一致：用户关闭「联网搜索」后，CLI agent
       // 也不再注入 web-search 包工具。best-effort，读失败视为默认全开。

@@ -1,4 +1,11 @@
 
+## 0.216.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **skills:** add recommended ub-mode with account enablement ([4cc47ea](https://github.com/nolotus/bun-nolo/commit/4cc47ea4c7a0644afb105ff7c0099c5898745e16))
+
+
 ## 0.215.0-alpha.3 (2026-10-31)
 
 ### Bug Fixes
