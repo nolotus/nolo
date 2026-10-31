@@ -234,6 +234,8 @@ export interface SafeAgentSummary {
    * 窗口按 scope 合并保留全部（不只最紧张的）。
    */
   quota?: AgentQuota;
+  /** 上游明确报额度耗尽的观测，不包含凭证或原始错误体。 */
+  quotaExhaustion?: { observedAt: number };
   /** Stable non-secret identifier grouping agents that share the same credential. */
   credentialGroup?: string;
   /** Credential kind: oauth or api-key. */
@@ -454,6 +456,10 @@ export function toSafeAgentSummary(
       : undefined;
   // 配额快照透传：只在校验为合法形状（windows 数组 + 数值 observedAt）时带出，
   // 坏数据静默丢弃（与 nextAvailableAt 同一口径——上游写的脏数据不进摘要）。
+  const quotaExhaustion = record?.quotaExhaustion &&
+    typeof record.quotaExhaustion.observedAt === "number" &&
+    Number.isFinite(record.quotaExhaustion.observedAt)
+    ? { observedAt: record.quotaExhaustion.observedAt } : undefined;
   const rawQuota = record?.quota;
   const quota: AgentQuota | undefined =
     rawQuota && typeof rawQuota === "object" &&
@@ -531,7 +537,7 @@ export function toSafeAgentSummary(
   const { tier } = resolveDefaultAgentTier(record?.model);
 
   const availability = resolveAgentAvailability(
-    { nextAvailableAt, quota },
+    { nextAvailableAt, quota, quotaExhaustion },
     options?.now ?? Date.now(),
   );
 
@@ -562,6 +568,7 @@ export function toSafeAgentSummary(
     availabilityStatus: availability.status,
     availabilityReason: availability.reason,
     ...(quota !== undefined ? { quota } : {}),
+    ...(quotaExhaustion ? { quotaExhaustion } : {}),
     ...(credentialGroup !== undefined ? { credentialGroup } : {}),
     ...(credentialKind !== undefined ? { credentialKind } : {}),
     // 「未知 ≠ 独立」：无 credentialGroup 时显式 credentialed:false，调用方

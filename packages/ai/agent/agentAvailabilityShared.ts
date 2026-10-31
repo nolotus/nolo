@@ -112,6 +112,7 @@ export type AgentAvailabilityStatus =
   | "unverified";
 
 export type AgentAvailabilityReason =
+  | "quota_exhausted_response"
   | "quota_ok"
   | "quota_utilization_high"
   | "quota_remaining_zero"
@@ -138,11 +139,16 @@ export interface AgentAvailabilityDecision {
  */
 export function resolveAgentAvailability(
   agent:
-    | { nextAvailableAt?: number; quota?: AgentQuota }
+    | { nextAvailableAt?: number; quota?: AgentQuota; quotaExhaustion?: { observedAt: number } }
     | null
     | undefined,
   now = Date.now(),
 ): AgentAvailabilityDecision {
+  // 错误响应也是额度证据，但不伪造窗口余量或重置时刻。
+  const exhaustion = agent?.quotaExhaustion;
+  if (isAdmissibleQuotaSnapshot(exhaustion, now)) {
+    return { status: "quota_exhausted", reason: "quota_exhausted_response" };
+  }
   const quota = agent?.quota;
   const isAdmissible = isAdmissibleQuotaSnapshot(quota, now);
   const hasObservedAt =
@@ -407,7 +413,7 @@ function parseExplicitAvailableAt(
  *    「明确说未耗尽」的文案天然不匹配——不会误否决容量分类。
  */
 const QUOTA_EXHAUSTED_TEXT_RE =
-  /insufficient[_ ]?quota|quota\s*(?:(?:is|has|been|was|now|fully|completely|already|entirely)\s+)*(?:limit\s+)?(?:exhausted|depleted|used\s*up|reached|exceeded)|usage\s*limit\s*(?:reached|exceeded|exhausted)|(?:\b(?:weekly|monthly|5-?hour|5h|7-?day|7d)\s*(?:\([^)]*\)\s*)?limit\s*(?:reached|exceeded|exhausted|depleted)\b)|(?:reached|exceeded)\s+your\s+.*?(?:usage\s+)?limit|exceeded\s*your\s*(?:current\s*)?quota|insufficient[_\s-]?(?:balance|credits?)|balance\s*(?:is\s*)?(?:insufficient|too\s*low)|(?:额度|配额|用量)(?:已|已经|也)?(?:用尽|耗尽|用完|超限|不足)|(?:已达|已达到|超出|超过)[^。;,\n]{0,12}(?:用量上限|配额上限|额度上限)|余额(?:不足|不够|已用尽|已耗尽)/i;
+  /insufficient[_ ]?quota|quota\s*(?:(?:is|has|been|was|now|fully|completely|already|entirely)\s+)*(?:limit\s+)?(?:exhausted|depleted|used\s*up|reached|exceeded)|usage\s*limit\s*(?:reached|exceeded|exhausted)|(?:\b(?:weekly|monthly|5-?hour|5h|7-?day|7d)\s*(?:\([^)]*\)\s*)?limit\s*(?:reached|exceeded|exhausted|depleted)\b)|(?:reached|exceeded)\s+your\s+.*?(?:usage\s+)?limit|exceeded\s*your\s*(?:current\s*)?quota|insufficient[_\s-]?(?:balance|credits?)|balance\s*(?:is\s*)?(?:insufficient|too\s*low)|(?:额度|配额|用量)(?:已|已经|也)?(?:用尽|耗尽|用完|超限|不足)|(?:已达到|已达|超出|超过)[^。;,\n]{0,40}(?:用量上限|配额上限|额度上限)|余额(?:不足|不够|已用尽|已耗尽)/i;
 
 /**
  * 否定配额表述（`quota is not exhausted` / `limit not reached` 等），排除误判。
@@ -446,6 +452,9 @@ const NEGATED_CAPACITY_TEXT_RE =
 export function isQuotaExhaustedText(body: unknown): boolean {
   const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
   if (!text) return false;
+  // MiniMax 业务错误可能包在 HTTP 200 或序列化的错误体内；只匹配码字段，
+  // 不把消息里的任意数字 2056 当成配额事实。
+  if (/"(?:code|status_code)"\s*:\s*"?2056"?(?=\s*[,}])/.test(text)) return true;
   if (NEGATED_QUOTA_TEXT_RE.test(text)) return false;
   return QUOTA_EXHAUSTED_TEXT_RE.test(text) || isQuotaLimited403Body(text);
 }
@@ -504,7 +513,8 @@ export function resolveNextAvailableAt(
 
 /**
  * 纯决策：把一次上游 status + body 映射成可用性动作。
- * 2xx → clear；429 → mark；403 配额耗尽 → mark；5xx → mark；其余 → noop。
+ * 2xx → clear（非正常 completion 的结构化配额错误除外）；429 → mark；
+ * 配额耗尽错误 → mark；5xx → mark；其余 → noop。
  * 执行（读写记录）由各端适配层负责。
  */
 export function resolveAvailabilityAction(
@@ -513,10 +523,26 @@ export function resolveAvailabilityAction(
   now: number,
   headers?: Headers | Record<string, string> | null,
 ): AvailabilityAction {
-  if (status === 403 && isQuotaLimited403Body(body)) {
+  if (status >= 200 && status < 300) {
+    // Successful completions can quote quota errors. Never scan or serialize their
+    // content; MiniMax's HTTP 200 business errors require an explicit error code.
+    const b = body as {
+      choices?: unknown;
+      code?: unknown;
+      error?: { code?: unknown } | null;
+      base_resp?: { status_code?: unknown } | null;
+    } | null;
+    if (b && typeof b === "object" && !(Array.isArray(b.choices) && b.choices.length > 0)) {
+      const isQuotaCode = (code: unknown) => code === 2056 || code === "2056";
+      if (isQuotaCode(b.code) || isQuotaCode(b.error?.code) || isQuotaCode(b.base_resp?.status_code)) {
+        return { kind: "mark", nextAvailableAt: resolveNextAvailableAt(body, now, headers) };
+      }
+    }
+    return { kind: "clear" };
+  }
+  if (isQuotaExhaustedText(body)) {
     return { kind: "mark", nextAvailableAt: resolveNextAvailableAt(body, now, headers) };
   }
-  if (status >= 200 && status < 300) return { kind: "clear" };
   if (status === 429) {
     if (isCapacitySaturatedRateLimit(body, now, headers)) {
       return { kind: "mark", nextAvailableAt: now + THIN_RATE_LIMIT_COOLDOWN_MS };
