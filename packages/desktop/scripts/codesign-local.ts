@@ -237,8 +237,12 @@ export const rewriteTarballFromDir = async (
   cwdDir: string,
   entryName: string
 ) => {
+  // --format=ustar：与上游 electrobun 2.0.4 的发布归档格式保持一致。GNU tar 默认格式
+  // 对 >100 字符的路径写 longname 'L'/'K' 记录，自解压器不支持，会以
+  // TarUnsupportedFileType 中止解包；USTAR 把长路径拆成 prefix+name，正是解包器
+  // fullFileName() 会读的组合（最长 255 字符）。
   const repackProc = Bun.spawn(
-    ["tar", "--zstd", "-cf", tarballPath, "-C", cwdDir, entryName],
+    ["tar", "--zstd", "--format=ustar", "-cf", tarballPath, "-C", cwdDir, entryName],
     {
       stdout: "inherit",
       stderr: "inherit",

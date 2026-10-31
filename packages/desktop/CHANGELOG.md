@@ -1,4 +1,15 @@
 
+## 0.215.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **desktop:** Electrobun 升到 2.0.4（hutch 0.28.1） ([154cb02](https://github.com/nolotus/bun-nolo/commit/154cb0217d6cf4f647959c6988a8705075ecf9e8))
+
+### Bug Fixes
+
+* **desktop:** Linux 载荷重打包改用 USTAR，并加路径字节上限闸门 ([8fe620f](https://github.com/nolotus/bun-nolo/commit/8fe620fd61c9ce92b381d9e6ff55c753581499c5))
+
+
 ## 0.214.0-alpha.2 (2026-10-31)
 
 ### Bug Fixes

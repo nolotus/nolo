@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { validateWorkspacePackageLinks } from "../../../scripts/dev/workspaceLinkGuard";
 import { ensureBundledRipgrep } from "./ensure-bundled-ripgrep";
@@ -12,11 +12,6 @@ const vendorDir = join(generatedDir, "vendor");
 // electrobun 2 copy keys may not escape the project root (UnsafeOutputPath),
 // so every runtime tree that lives outside packages/desktop is physically
 // staged here and the copy map references the in-root path only.
-const chromiumBidiStubDir = join(vendorDir, "chromium-bidi");
-// Cottontail's bundler resolves bare specifiers from the repo root's
-// node_modules (it ignores packages/desktop's own tree), so the generated
-// stub must be written there to be resolvable at bundle time.
-const chromiumBidiStubInstallDir = join(repoRoot, "node_modules", "chromium-bidi");
 const sourcePublicDir = join(repoRoot, "public");
 const sourceAssetsDir = join(sourcePublicDir, "assets");
 const sourceAssetBuildManifestDir = join(sourcePublicDir, ".asset-builds");
@@ -51,12 +46,11 @@ if (workspaceLinkErrors.length > 0) {
 //    level resolves its native .node prebuild via node-gyp-build at runtime,
 //    so the whole tree (not just JS) must be physically present inside the
 //    packaged app at Resources/app/node_modules/<name>.
-// 2) chromium-bidi stub. hutch 0.24.3 drops build.bun.external from the
-//    cottontail build spec (upstream bug — external/minify/sourcemap/define
-//    never reach Bun.build), so playwright-core gets bundled and its
-//    coreBundle eagerly requires "chromium-bidi/lib/cjs/..." paths that no
-//    longer exist upstream. Provide a resolvable inert stub package so the
-//    bundler resolves it; this must not depend on hand-patched node_modules.
+// 2) External dependency trees (playwright / playwright-core / chromium-bidi)
+//    are kept out of the desktop bundle by build.bun.external, which hutch
+//    passes straight through to Bun.build — the main-process bundle keeps
+//    them as runtime imports, so no stub package is needed and pre-build
+//    never writes into the repo-root node_modules.
 const stagedNodeModuleNames = [
   "abstract-level",
   "classic-level",
@@ -72,11 +66,10 @@ const stagedWorkspacePackages = [
     name: "desktop-chrome-connector",
     destName: "desktop-chrome-connector",
     // Chrome Web Store 上架素材（store/listing.md、store/screenshots/*.png、
-    // promo/）只用于人工提审，不属于运行时载荷。打包前缀
-    // `NoloDesktop-canary/Resources/app/integrations/connector/` 下
-    // `store/screenshots/02-bounded-output-1280x800.png` 是 104 字符——
-    // 会让 GNU tar 写出 'L' 记录、触发自解压器 TarUnsupportedFileType
-    // （2026-09-21 alpha Linux leg 因此 fail-closed 10 次，mac/win 白跑）。
+    // promo/）只用于人工提审，不属于运行时载荷，剪掉还能明显减小发布载荷。
+    // 打包前缀 `NoloDesktop-canary/Resources/app/integrations/connector/` 下
+    // `store/screenshots/02-bounded-output-1280x800.png` 会让条目路径达到 104
+    // 字符——USTAR 能表示（prefix+name 拆分），但没必要把提审素材带进运行时。
     // 在 staged 副本里剪掉 store/**，仓库源目录不动。
     exclude: ["store"],
   },
@@ -86,8 +79,9 @@ const stagedWorkspacePackages = [
 
 /**
  * 打包前从 staged node_modules 里剪掉的测试目录。`abstract-level/test/` 下
- * `iterator-explicit-snapshot-test.js` 在 canary 前缀下正好 100 字符、贴边
- * 界；依赖一升级就会越界。测试代码本就不该进运行时载荷。
+ * `iterator-explicit-snapshot-test.js` 这类文件名很长，会把 canary 前缀下的
+ * 条目路径顶到 100 字符上下；依赖一升级就可能继续变长。
+ * 测试代码本就不该进运行时载荷。
  */
 const STAGED_NODE_MODULES_PRUNE_DIRS = ["test", "tests"] as const;
 const STAGED_NODE_MODULES_PRUNE_PACKAGES = ["abstract-level"] as const;
@@ -128,7 +122,9 @@ const stageRuntimeTrees = async () => {
       }
     }
   }
-  for (const { name, destName, exclude } of stagedWorkspacePackages) {
+  for (const workspacePackage of stagedWorkspacePackages) {
+    const { name, destName } = workspacePackage;
+    const exclude = "exclude" in workspacePackage ? workspacePackage.exclude : undefined;
     const source = join(repoRoot, "packages", name);
     const target = join(vendorDir, "packages", destName);
     await cp(source, target, { recursive: true });
@@ -140,47 +136,6 @@ const stageRuntimeTrees = async () => {
       }
     }
   }
-};
-
-/**
- * Write an inert chromium-bidi stub package so the cottontail bundler can
- * resolve playwright-core's eager
- * require("chromium-bidi/lib/cjs/{bidiMapper/BidiMapper,cdp/CdpConnection}")
- * without hand-patching node_modules. The canonical copy lives in
- * .generated/vendor/chromium-bidi; it is mirrored into the repo-root
- * node_modules because that is where Cottontail resolves bare specifiers.
- * See electrobun.config.ts build.bun external note for the upstream hutch
- * bug (spec drops `external`) this works around.
- */
-const writeChromiumBidiStub = async () => {
-  await mkdir(chromiumBidiStubDir, { recursive: true });
-  const files: Array<[string, string]> = [
-    [
-      "package.json",
-      JSON.stringify(
-        {
-          name: "chromium-bidi",
-          version: "0.0.0-nolo-desktop-stub",
-          main: "./lib/cjs/stub.js",
-        },
-        null,
-        2
-      ) + "\n",
-    ],
-    ["lib/cjs/bidiMapper/BidiMapper.js", "// chromium-bidi stub (see packages/desktop/scripts/pre-build.ts): playwright-core's bundled coreBundle eagerly requires this path; the project never uses the bidi channel.\nmodule.exports = {};\n"],
-    ["lib/cjs/cdp/CdpConnection.js", "// chromium-bidi stub (see packages/desktop/scripts/pre-build.ts): playwright-core's bundled coreBundle eagerly requires this path; the project never uses the bidi channel.\nmodule.exports = {};\n"],
-  ];
-  for (const [relPath, content] of files) {
-    const target = join(chromiumBidiStubDir, relPath);
-    await mkdir(resolve(target, ".."), { recursive: true });
-    await writeFile(target, content);
-  }
-  // Mirror into the location Cottontail actually resolves from (idempotent).
-  // NOTE: 与把 chromium-bidi 加入 devDependencies 互斥——此处每次无条件
-  // rm+覆盖 repo 根 node_modules/chromium-bidi；若未来改用真实包（上游
-  // hutch 修复 external 丢弃后），必须连同本 stub 生成逻辑一起删除。
-  await rm(chromiumBidiStubInstallDir, { recursive: true, force: true });
-  await cp(chromiumBidiStubDir, chromiumBidiStubInstallDir, { recursive: true });
 };
 
 // Stage platform ripgrep for Desktop local codeSearch/globFiles (does not require user brew install).
@@ -380,7 +335,6 @@ const copyPublicRuntimeDirectories = async () => {
 };
 
 await stageRuntimeTrees();
-await writeChromiumBidiStub();
 
 await rm(desktopPublicDir, { recursive: true, force: true });
 await mkdir(desktopPublicDir, { recursive: true });

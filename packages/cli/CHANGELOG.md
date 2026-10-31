@@ -1,4 +1,11 @@
 
+## 0.198.0-alpha.1 (2026-10-31)
+
+### Features
+
+* **desktop:** Electrobun 升到 2.0.4（hutch 0.28.1） ([154cb02](https://github.com/nolotus/bun-nolo/commit/154cb0217d6cf4f647959c6988a8705075ecf9e8))
+
+
 ## 0.197.0-alpha.2 (2026-10-31)
 
 ### Bug Fixes

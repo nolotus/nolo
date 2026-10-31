@@ -158,16 +158,21 @@ const extractTarZst = async (archivePath: string, destDir: string): Promise<void
   }
 };
 
-const repackTarZst = async (appRootDirName: string, srcDir: string, archivePath: string): Promise<void> => {
-  // --format=posix：强制 POSIX.2001 pax 格式。路径 >100 字符时写 PAX 扩展头
-  // （'x'/'g'，自解压器支持）而不是 GNU longname 'L'/'K'（不支持，会触发
-  // TarUnsupportedFileType 中止——2026-09-16 事故的同一类条目）。
+export const repackTarZst = async (appRootDirName: string, srcDir: string, archivePath: string): Promise<void> => {
+  // --format=ustar：与上游 electrobun 2.0.4 的发布归档格式保持一致（hutch
+  // appendBundleTarArgs 在 linux 平台同样追加 --format=ustar）。
+  // GNU tar 默认格式对 >100 字符的路径写 longname 'L'/'K' 记录，自解压器不支持，
+  // 会以 TarUnsupportedFileType 中止解包——2026-09-16 事故的同一类条目。
+  // PAX（'x'/'g'）虽在支持类型表里，但解包器只跳过扩展头、不套用其中的 path=
+  // 覆盖 → 超长路径会被解成错误的名字（静默损坏，比直接失败更糟）。USTAR 把长路径
+  // 拆成 prefix+name（解包器 fullFileName() 正是这么拼的，最长可表达 255 字符）；
+  // 路径无法用 USTAR 表示时让 tar 直接失败，好过静默解错名字。
   // --sort=name 固定条目序（可复现）；--numeric-owner --owner=0 --group=0
   // 抹平构建机 uid/gid。
   const proc = Bun.spawn(
     [
       "tar", "--zstd",
-      "--format=posix", "--sort=name", "--numeric-owner", "--owner=0", "--group=0",
+      "--format=ustar", "--sort=name", "--numeric-owner", "--owner=0", "--group=0",
       "-cf", archivePath, "-C", srcDir, appRootDirName,
     ],
     { stdout: "inherit", stderr: "inherit" },

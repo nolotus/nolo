@@ -82,7 +82,7 @@
     "sucrase": "3.35.1",
     "react-stately": "3.49.0",
     "bun": "latest",
-    "electrobun": "2.0.1",
+    "electrobun": "2.0.4",
     "rcedit": "5.0.2",
     "nanoid": "5.1.16",
     "ws": "8.21.3",
