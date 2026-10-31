@@ -2,8 +2,14 @@ import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { DataType } from "create/types";
 import {
   assembleAgentDiscoveryResult,
+  buildAgentDiscoveryResult,
   resolveDiscoveryScope,
+  toDiscoverySafeAgentSummary,
 } from "../agent/agentDiscovery";
+import {
+  mergeAvailabilityDeadline,
+  resolveCredentialKeyWithFallback,
+} from "../agent/agentAvailabilityShared";
 import { fetchPublicAgentsForDiscovery } from "../agent/publicAgentDiscovery";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { toErrorMessage } from "core/errorMessage";
@@ -55,7 +61,25 @@ const jsonPreview = (value: unknown, maxLength = 1800) => {
 
 const getRuntime = (thunkApi: any) => {
   const state = thunkApi?.getState?.();
-  return state ? selectRuntimeSnapshot(state) : null;
+  if (!state) return null;
+  const snapshot = selectRuntimeSnapshot(state);
+  return {
+    ...snapshot,
+    currentUserId:
+      snapshot?.currentUserId ??
+      state.currentUserId ??
+      state.userId ??
+      state.auth?.userId ??
+      state.auth?.currentUser?.userId,
+    currentToken:
+      snapshot?.currentToken ??
+      state.currentToken ??
+      state.auth?.currentToken,
+    currentServer:
+      snapshot?.currentServer ??
+      state.currentServer ??
+      state.settings?.currentServer,
+  };
 };
 
 const authHeaders = (token?: string) =>
@@ -678,6 +702,22 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   }
 
   const userId = runtime?.currentUserId ?? undefined;
+  const now = typeof args?.now === "number" ? args.now : Date.now();
+  const env = (args?.env ?? process.env) as NodeJS.ProcessEnv;
+
+  let localCooldowns: Record<string, number> = {};
+  let resolveCooldownFn: ((key: string | undefined, map: Record<string, number>, now?: number) => number | undefined) | undefined;
+  try {
+    const credModulePath = "../../agent-runtime/credentialAvailability";
+    const credMod: any = await import(credModulePath);
+    if (credMod?.readCredentialAvailability && credMod?.resolveEffectiveCredentialCooldown) {
+      localCooldowns = await credMod.readCredentialAvailability(env, now).catch(() => ({}));
+      resolveCooldownFn = credMod.resolveEffectiveCredentialCooldown;
+    }
+  } catch {
+    // 浏览器环境或 import 失败时跳过合并，保持 fail-open（以云端记录为准）
+  }
+
   // NOTE: We intentionally do NOT pass publicRecordExists for plain records.
   // record.isPublic is a flag on the private record; it does NOT prove the
   // agent-pub-<id> record actually exists (real data has isPublic=true with no
@@ -686,18 +726,63 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   // that verified favKey is pinned as publicKey there. Per the safe-summary
   // contract: omit publicKey rather than emit one that cannot resolve. Explicit
   // record.publicKey (if present) is still trusted by toSafeAgentSummary.
-  const discovery = assembleAgentDiscoveryResult({
-    records: [...Array.from(recordsMap.values()), ...publicRecords],
-    summaryOptions: (record) => ({
+  const allRecords = [...Array.from(recordsMap.values()), ...publicRecords];
+  const agents = allRecords.map((record) => {
+    const summary = toDiscoverySafeAgentSummary(record, {
       favoritesMap,
       userId,
       publicRecordExists: publicRecords.includes(record) ? true : undefined,
-    }),
+    });
+
+    if (Object.keys(localCooldowns).length > 0) {
+      let localDeadline: number | undefined;
+
+      // 1. apiKeyRef / fallback credential key 精准匹配（apiKeyRef@ownerUserId 或 custom-endpoint）
+      const credKey = resolveCredentialKeyWithFallback(record);
+      if (credKey && resolveCooldownFn) {
+        const at = resolveCooldownFn(credKey, localCooldowns, now);
+        if (typeof at === "number") {
+          localDeadline = mergeAvailabilityDeadline(localDeadline, at);
+        }
+      }
+
+      // 2. 裸 apiKeyRef / credentialRef 匹配
+      for (const ref of [record?.apiKeyRef, record?.credentialRef]) {
+        if (typeof ref === "string" && ref.trim()) {
+          const at = localCooldowns[ref.trim()];
+          if (typeof at === "number" && at > now) {
+            localDeadline = mergeAvailabilityDeadline(localDeadline, at);
+          }
+        }
+      }
+
+      // 3. credentialGroup 匹配（仅对非他人共享的凭据组，避免跨租户误伤）
+      if (summary.credentialGroup && summary.isOwned !== false) {
+        const at = localCooldowns[summary.credentialGroup];
+        if (typeof at === "number" && at > now) {
+          localDeadline = mergeAvailabilityDeadline(localDeadline, at);
+        }
+      }
+
+      if (typeof localDeadline === "number") {
+        const merged = mergeAvailabilityDeadline(summary.nextAvailableAt, localDeadline);
+        if (typeof merged === "number") {
+          summary.nextAvailableAt = merged;
+        }
+      }
+    }
+
+    return summary;
+  });
+
+  const discovery = buildAgentDiscoveryResult({
+    agents,
     scope: args?.scope,
     query: args?.query,
     publicOnly: args?.publicOnly,
     showUnavailable: args?.showUnavailable,
     verbose: args?.verbose,
+    now,
   });
 
   return {

@@ -1,4 +1,12 @@
 
+## 0.216.0-alpha.5 (2026-10-31)
+
+### Bug Fixes
+
+* **ai:** listAgents 并入本地 429 冷却，不再显示偏乐观的可用性 ([a9cf848](https://github.com/nolotus/bun-nolo/commit/a9cf84801ac4f62c7aa59df56fbae0b0a0f0b109))
+* **ai:** listAgents 的本地冷却读取改为动态 import，避免污染浏览器包 ([df0f017](https://github.com/nolotus/bun-nolo/commit/df0f0178511899edf84676604dfc7d894f6f0376))
+
+
 ## 0.216.0-alpha.4 (2026-10-31)
 
 ### Bug Fixes
