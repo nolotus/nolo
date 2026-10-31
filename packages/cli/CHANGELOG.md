@@ -1,4 +1,12 @@
 
+## 0.200.0-alpha.3 (2026-10-31)
+
+### Bug Fixes
+
+* **cli:** 修掉 CLI broker boundary 测试的产物目录竞态 ([34446a9](https://github.com/nolotus/bun-nolo/commit/34446a9b31278d5667c8b17d78731991b49f4536))
+* **theme:** 删掉主题名读取里的死代码，避免部分存储失败丢掉已选主题 ([b2961f7](https://github.com/nolotus/bun-nolo/commit/b2961f718e731e6f815901536755d899ddd5634b))
+
+
 ## 0.200.0-alpha.2 (2026-10-31)
 
 ### Bug Fixes
