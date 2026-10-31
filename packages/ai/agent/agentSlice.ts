@@ -4,8 +4,10 @@ import { asyncThunkCreator, buildCreateSlice } from "@reduxjs/toolkit";
 import type { Agent, AgentRuntimeBinding, ReferenceItem } from "app/types";
 import type { RootState } from "app/store";
 
-import { write, patch, remove } from "database/dbSlice";
+import { write, upsertSSREntity } from "database/dbSlice";
+import { AgentUpdateError, agentRequest, agentUpdateFailure, updateAgentRecord } from "database/agentUpdate";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
+import { resolveRecordAuthority } from "database/authority/recordAuthority";
 import { pushServerSyncedCredential } from "../chat/agentCredentialSyncClient";
 import { createAgentKey } from "database/keys";
 import { readAuthorNameSnapshot, withAuthorNameSnapshot } from "ai/agent/publicAgentAuthorName";
@@ -394,6 +396,9 @@ const processAgentUpdateChanges = (
     }
   }
 
+  for (const key of Object.keys(changes)) {
+    if ((data as any)[key] === null) changes[key] = null;
+  }
   return changes;
 };
 
@@ -578,15 +583,7 @@ export const slice = createSliceWithThunks({
       }
     ),
 
-    /**
-     * 更新 Agent（支持局部字段 patch）：
-     * - patch 私有副本
-     * - 如提供 previousAgent，则同步更新 / 删除公共副本
-     *
-     * 注意：
-     * - Tool 场景下一般不提供 previousAgent，此时只保证私有副本被更新；
-     *   公共副本（应用市场）不做强一致保证。
-     */
+    // 旧快照只能辅助凭据迁移，不能作为持久化基底；否则会覆盖服务端较新的模型。
     updateAgent: create.asyncThunk(
       async (
         { userId, agentId, formData, previousAgent }: UpdateAgentArgs,
@@ -631,115 +628,52 @@ export const slice = createSliceWithThunks({
           }
         }
 
-        // 1) 检查本地是否存在
-        let localExists = false;
         try {
-          const { db } = thunkApi.extra as any;
-          const localData = await db.get(privateKey);
-          localExists = !!localData;
-        } catch (e) {
-          // ignore
-        }
-
-        if (localExists) {
-          // 有本地数据，直接 patch
-          await thunkApi
-            .dispatch(
-              patch({
-                dbKey: privateKey,
-                changes,
-              })
-            )
-            .unwrap();
-        } else if (previousAgent) {
-          // 无本地数据，但有 UI 传来的 previousAgent，用 write 回填
-          const merged = {
-            ...previousAgent,
-            ...changes,
-            id: normalizedAgentId,
-            type: previousAgent.type || DataType.AGENT,
-            userId: effectiveUserId,
-          };
-          await thunkApi
-            .dispatch(
-              write({
-                data: merged,
-                customKey: privateKey,
-                userId: effectiveUserId,
-              })
-            )
-            .unwrap();
-        } else {
-          // 既无本地也无 previousAgent，尝试标准 path (可能会失败 if remote also fails or path throws)
-          // 但既然到了 update，大概率之前 read 过。
-          // 兜底调用 patch，让 patch 内部去报错
-          await thunkApi
-            .dispatch(
-              patch({
-                dbKey: privateKey,
-                changes,
-              })
-            )
-            .unwrap();
-        }
-
-        // 2) 如提供 previousAgent，则尝试保持公共副本同步
-        // Local agents must never create, update, or delete a public copy.
-        if (previousAgent && effectiveUserId !== "local") {
-          const wasPublic = !!previousAgent.isPublic;
-          const hasIsPublicChange = Object.prototype.hasOwnProperty.call(
-            changes,
-            "isPublic"
-          );
-          const nowPublic = hasIsPublicChange
-            ? !!(changes as any).isPublic
-            : wasPublic;
-
-          if (nowPublic) {
-            // 作者名快照：发布/更新公开副本时写入当前用户的显示名，让
-            // explore 创作者目录直接显示真名（不需要 N 次用户资料请求）。
-            const authorName = await readAuthorNameSnapshot(
-              (thunkApi.extra as any)?.db,
-              effectiveUserId
-            );
-            const mergedPublic: Agent = withAuthorNameSnapshot(
-              {
-                ...(previousAgent as any),
-                ...(changes as any),
-                id: normalizedAgentId,
-                type: previousAgent.type || DataType.AGENT,
-                userId: effectiveUserId,
-              },
-              authorName
-            ) as Agent;
-
-            await thunkApi
-              .dispatch(
-                write({
-                  data: mergedPublic,
-                  customKey: publicKey,
-                  userId: effectiveUserId,
-                })
-              )
-              .unwrap();
-          } else if (wasPublic && !nowPublic) {
-            await thunkApi
-              .dispatch(remove(publicKey))
-              .unwrap();
+          const state = thunkApi.getState() as RootState;
+          const context = getRuntimeServerContext(state);
+          const { currentServer } = context;
+          const db = (thunkApi.extra as any)?.db;
+          const localOnly = effectiveUserId === "local";
+          const authority = resolveRecordAuthority({ dbKey: privateKey, currentServer,
+            currentUserId: effectiveUserId, userAuthorityRegistry: context.userAuthorityRegistry });
+          const server = authority.authorityServer ?? currentServer ?? "";
+          if (!server && !localOnly) throw new AgentUpdateError({ kind: "network", code: "missing_server",
+            message: "未连接服务端，未确认保存结果" });
+          const saved = await updateAgentRecord({ server, state, dbKey: privateKey, changes, localDb: db });
+          // 私有成功后立即刷新 UI；公共失败不能把 UI 回滚成旧快照。
+          const entity = { ...saved, dbKey: privateKey };
+          thunkApi.dispatch(upsertSSREntity(entity));
+          try {
+            // 本地记录由 updateAgentRecord 唯一持久化；这里只缓存远端结果。
+            if (db && !localOnly) await db.put(privateKey, saved);
+          } catch (error) {
+            throw new AgentUpdateError({ ...agentUpdateFailure(error), kind: "conflict", code: "local_cache_failed",
+              privateSaved: true, agent: saved, message: "私有记录已保存，本地缓存更新失败；请勿重新提交整次编辑" });
           }
+          try {
+            if (!localOnly && saved.isPublic) {
+              const authorName = await readAuthorNameSnapshot(db, effectiveUserId);
+              const projection = withAuthorNameSnapshot({ ...saved, id: normalizedAgentId,
+                type: saved.type || DataType.AGENT, userId: effectiveUserId }, authorName);
+              await agentRequest(server, state, "write", "POST", {
+                data: projection, customKey: publicKey, userId: effectiveUserId,
+              });
+            } else if (!localOnly && Object.hasOwn(changes, "isPublic") && changes.isPublic === false) {
+              // 仅明确取消公开时撤下公共副本，陈旧 previousAgent.isPublic 不参与判断。
+              try {
+                await agentRequest(server, state, `delete/${encodeURIComponent(publicKey)}`, "DELETE");
+              } catch (error) {
+                if (!(error instanceof AgentUpdateError && error.status === 404)) throw error;
+              }
+            }
+          } catch (error) {
+            throw new AgentUpdateError({ ...agentUpdateFailure(error), code: "public_sync_failed",
+              privateSaved: true, agent: saved, message: "私有记录已保存，公共副本同步失败；请勿重新提交整次编辑" });
+          }
+          return saved as Agent;
+        } catch (error) {
+          return thunkApi.rejectWithValue(agentUpdateFailure(error));
         }
-
-        // 3) 返回“私有视角”的最新 Agent（主要给前端本地状态使用）
-        const base = previousAgent ?? ({} as Partial<Agent>);
-        const mergedPrivate: Agent = {
-          ...(base as any),
-          ...(changes as any),
-          id: normalizedAgentId,
-          type: base.type || DataType.AGENT,
-          userId: effectiveUserId,
-        };
-
-        return mergedPrivate;
       }
     ),
   }),

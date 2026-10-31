@@ -1,4 +1,11 @@
 
+## 0.215.0-alpha.2 (2026-10-31)
+
+### Bug Fixes
+
+* **agent:** 编辑保存以服务端权威记录为准，失败不再静默 ([3a743d8](https://github.com/nolotus/bun-nolo/commit/3a743d83facb2ab9c6b63dc7410a20d1c12f01e3))
+
+
 ## 0.215.0-alpha.1 (2026-10-31)
 
 ### Features
