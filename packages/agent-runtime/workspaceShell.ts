@@ -18,6 +18,11 @@ import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import type { AgentRuntimeToolResult } from "./hostAdapter";
 import { resolveExecutableOnPath } from "./runtimeCompat";
+import {
+  findWindowsPowerShellAlias,
+  isWindowsStoreAliasPath,
+  resolveWindowsPowerShellAliasTarget,
+} from "./windowsPowerShellAlias";
 import { getProcessRegistry } from "./processRegistry";
 import type { ProcessOwner } from "./processOwnership";
 import { buildProcessTaskResultCapsule, type ProcessTaskResultCapsule } from "./processTaskResult";
@@ -212,12 +217,44 @@ export function wrapPowerShellCommand(command: string, shellKind: PowerShellShel
 let cachedPowerShellExecutable: string | null | undefined;
 let cachedBashExecutable: string | null | undefined;
 
+export type PowerShellExecutableSelectionDeps = {
+  platform?: string;
+  env?: NodeJS.ProcessEnv;
+  resolveOnPath?: (name: string) => string | null;
+  resolveAliasTarget?: (path: string) => string | null;
+  isAliasPath?: (path: string) => boolean;
+  findAlias?: () => string | null;
+};
+
+/**
+ * 选择要启动的 PowerShell 可执行文件。
+ *
+ * 关键点：PATH 命中的 `pwsh` 可能就是 Store 别名本身（WindowsApps\pwsh.exe）。
+ * 别名无法被 Bun spawn，所以命中别名时必须换成别名指向的真实 target；
+ * 解析失败也不能退回别名本身，只能走别名扫描，最后回退 PowerShell 5.1。
+ */
+export function selectPowerShellExecutable(
+  deps: PowerShellExecutableSelectionDeps = {},
+): string | null {
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  const resolveOnPath = deps.resolveOnPath ?? resolveExecutableOnPath;
+  const resolveAliasTarget = deps.resolveAliasTarget
+    ?? ((path: string) => resolveWindowsPowerShellAliasTarget(path, { platform, env }));
+  const isAliasPath = deps.isAliasPath
+    ?? ((path: string) => isWindowsStoreAliasPath(path, { platform, env }));
+  const pathHit = resolveOnPath("pwsh");
+  const aliasTarget = pathHit ? resolveAliasTarget(pathHit) : null;
+  if (aliasTarget) return aliasTarget;
+  if (pathHit && !isAliasPath(pathHit)) return pathHit;
+  const alias = (deps.findAlias ?? (() => findWindowsPowerShellAlias({ platform, env })))();
+  if (alias) return alias;
+  return resolveOnPath("powershell.exe") ?? resolveOnPath("powershell");
+}
+
 export function findPowerShellExecutable(): string | null {
   if (cachedPowerShellExecutable !== undefined) return cachedPowerShellExecutable;
-  cachedPowerShellExecutable =
-    resolveExecutableOnPath("pwsh") ||
-    resolveExecutableOnPath("powershell.exe") ||
-    resolveExecutableOnPath("powershell");
+  cachedPowerShellExecutable = selectPowerShellExecutable();
   return cachedPowerShellExecutable;
 }
 
