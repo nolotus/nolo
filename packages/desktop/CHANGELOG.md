@@ -1,4 +1,60 @@
 
+## 0.219.0-alpha.1 (2026-11-02)
+
+### Features
+
+* **agent:** durable non-final run evidence and agent discovery summaries ([fa7d671](https://github.com/nolotus/bun-nolo/commit/fa7d67104a252e23ce6a2fb5817c507bcadd82c0))
+* **ai:** GPT 模型按家族收敛到最新代 + 上架 6.1 Terra + 补 ultra 档 ([fb312ef](https://github.com/nolotus/bun-nolo/commit/fb312ef7161d9d6fe0bd71026dfc5844ad1c7049))
+* **ai:** register LongCat provider preset and model options ([6bef4dd](https://github.com/nolotus/bun-nolo/commit/6bef4ddc9ad3be07be84ee67a38993bfa6116994))
+* **chat:** skill slash 快捷指令在首轮模型调用前精确加载 ([e1f4cc4](https://github.com/nolotus/bun-nolo/commit/e1f4cc4363fbf3a9680180e5cbb50354e2023a18))
+* **chat:** 右栏改为多槽位，「运行中进程」搬到独立槽位并与宿主对账 ([60ae948](https://github.com/nolotus/bun-nolo/commit/60ae948cd8b2c47d918e8734079e3c4d8a6b6e07))
+* **chat:** 工作列表去掉「加载更多对话」，改为底部哨兵自动续页 ([460face](https://github.com/nolotus/bun-nolo/commit/460face29b07ec90a2275ddff9abdce462a6007f))
+* **cli:** support --active flag for browser connector and refine self-diagnosis guidelines ([1352c87](https://github.com/nolotus/bun-nolo/commit/1352c874f329230593782717ff738b0fdb11269b))
+* **cli:** TUI 停靠区能看到别的会话对本对话的续跑 ([88b7696](https://github.com/nolotus/bun-nolo/commit/88b7696ca824d34406c95959397185a3d4a6218b))
+* **cli:** 后台 run 在 TUI 里显示最近用过的工具名 ([b721b0d](https://github.com/nolotus/bun-nolo/commit/b721b0da775d19d38f1c2fba6e3fb14c0449e1cd))
+* **cli:** 支持安全终端无回显交互输入 (--prompt) 与流式输入 (--stdin) ([7780afc](https://github.com/nolotus/bun-nolo/commit/7780afcf9a8ca1a4a5aa982356f3e8eafe41be32))
+* **nolo-ci:** merge the alpha remote executor into alpha ([d2f0d61](https://github.com/nolotus/bun-nolo/commit/d2f0d61a46c32b157178144cc5802523ae6d0361))
+* **nolo-ci:** run alpha-deploy on the alpha host through a locked supervisor ([48ed2da](https://github.com/nolotus/bun-nolo/commit/48ed2da1460b35ac6f72e35d9ba85240b870e457))
+* **observability:** record prompt cache usage in run results ([7d14c9f](https://github.com/nolotus/bun-nolo/commit/7d14c9fd85d02eb79daca396a2175d3804635d57))
+* **skills:** add android-adb methodology skill ([869de62](https://github.com/nolotus/bun-nolo/commit/869de62427009e891647f798b6f1b3d1dbfc0e3b))
+
+### Bug Fixes
+
+* **agent-runtime:** always emit items for Gemini array declarations ([cf392e9](https://github.com/nolotus/bun-nolo/commit/cf392e92d51303c822cb597f6b1b3cd6ca8f103f))
+* **agent-runtime:** clarify execShell taskWait contract in terminal wake environments ([2b9beed](https://github.com/nolotus/bun-nolo/commit/2b9beedef023ab667a7345cdb8d7dba0bb3641e1))
+* **agent-runtime:** resolve the Windows Store PowerShell alias before using it ([ebd22c9](https://github.com/nolotus/bun-nolo/commit/ebd22c91e088b14d18a72813f98f80195174ec2c))
+* **agent-runtime:** resolve Windows Store PowerShell executable targets ([7fbe376](https://github.com/nolotus/bun-nolo/commit/7fbe3763f8eda640c4067203b72316ae6edd3a7a))
+* **agent-runtime:** stop Gemini union sanitizer from narrowing legal values ([67564f3](https://github.com/nolotus/bun-nolo/commit/67564f326a6cbcbc8b57160901ffd4d6596d26f5))
+* **agent-runtime:** tell editFile callers the count to retry with ([a28de50](https://github.com/nolotus/bun-nolo/commit/a28de5052b42f9e4e7d0dfdbbacd2774b87e65ba))
+* **ai:** clarify runtimeKey local rejection for read-only dispatch ([5a54d62](https://github.com/nolotus/bun-nolo/commit/5a54d62e538bc03527469cc6b6cb65d0136399ff))
+* **ai:** surface public agent catalog failures instead of an empty success ([53f6b5d](https://github.com/nolotus/bun-nolo/commit/53f6b5db2266f669cd78bd8181363a14e68a8426))
+* **app:** chip 行间距回到 4px 栅格，满足 uiPolishStandard ([e03f68e](https://github.com/nolotus/bun-nolo/commit/e03f68eed2a395756b21ada22e0741c6b4cc4a67))
+* **build:** readX 桥接工具保持惰性加载，避免污染浏览器图 ([1269614](https://github.com/nolotus/bun-nolo/commit/1269614e82e98f0ae53df1951ce665557230b574))
+* **bundle:** 静态化绕过打包器的动态模块加载 ([79aba77](https://github.com/nolotus/bun-nolo/commit/79aba77cca52016c03b8988d08367f61f3c0932a))
+* **chat:** /skill@ 在 Web 回退路径改为单轮生效 ([89fb2d3](https://github.com/nolotus/bun-nolo/commit/89fb2d3b1147f1b29f3c306fb6caf67634f7f187))
+* **chat:** bypass catalog pricing checks for agents with customProviderUrl ([34d22b2](https://github.com/nolotus/bun-nolo/commit/34d22b2f8d2bb0883b6055d40abe978515b204c2))
+* **chat:** 停止进程后立即收起右栏槽位 ([a289b99](https://github.com/nolotus/bun-nolo/commit/a289b99fa32a9b6417e23adc1c2c45995d19fcf7))
+* **cli:** add breathing lines between heterogeneous tool rows ([5180afe](https://github.com/nolotus/bun-nolo/commit/5180afe46a48b2a9c6ceb9c4e9af7a241134e94e))
+* **cli:** allow remote settings sync in local runtime adapter ([853ad68](https://github.com/nolotus/bun-nolo/commit/853ad68bdce8d294b92ae8f7e4b3a5f3c14aced3))
+* **cli:** CI 状态取数直连 CI 宿主 ([dba20e4](https://github.com/nolotus/bun-nolo/commit/dba20e46ef36fdcfc1e8fe8dc86bb75c3809a063))
+* **cli:** launch bundled child runs through CLI entrypoint ([d6e5808](https://github.com/nolotus/bun-nolo/commit/d6e58087cc695b74e82fd58ed1d603b2a1677305))
+* **cli:** rework local history origin marking ([7f1b57d](https://github.com/nolotus/bun-nolo/commit/7f1b57d730a51468cbd5c9489705f3b03f2a17b5))
+* **cli:** 流式出字算作进展，长生成不再被判 stalled ([24fe8cf](https://github.com/nolotus/bun-nolo/commit/24fe8cfcae401b86394849bf32e8260b732ab69b))
+* **cli:** 用共享的 PowerShell 选择做进程身份探测 ([84cb521](https://github.com/nolotus/bun-nolo/commit/84cb52101731312378dc2b210d8bf3ffb03d89a0))
+* **explore:** 窄视口分类入口移到顶部横条，卡片按自身宽度排版 ([0fcaa08](https://github.com/nolotus/bun-nolo/commit/0fcaa08df47eb08da8976c000d28c1f3a0c228c5))
+* **nolo-ci:** merge the pinned supervisor path into alpha ([436e4f4](https://github.com/nolotus/bun-nolo/commit/436e4f434d185b5f3f3686ccf456ec91e1ba319b))
+* **nolo-ci:** merge the supervisor deploy-env fix into alpha ([0c4b524](https://github.com/nolotus/bun-nolo/commit/0c4b524d548b3a0d2c1e0b9887f4fe0c2349aef4))
+* **release:** 把 alpha 版本号对齐到本线最高可达 tag ([9212736](https://github.com/nolotus/bun-nolo/commit/9212736d92b9c511ce4961c727d4e5ff07f38e14))
+* **runtime:** enforce instabox dispatch contract ([892bbee](https://github.com/nolotus/bun-nolo/commit/892bbee404fd17234f51d4a236cb3f2bd17800b3))
+* **runtime:** keep authorized work moving past round reminders ([37bfa9d](https://github.com/nolotus/bun-nolo/commit/37bfa9de7fae54053a3d44366b5d3966a6e5c6ae))
+* **runtime:** stop platform stream reads at done boundary ([70a9761](https://github.com/nolotus/bun-nolo/commit/70a97611a979de89e3275086e6fe7e9260d3de09))
+* **sidebar:** 折叠按钮改为品牌 logo、chip 与输入框同轴、页脚账号列对齐 ([65f6b8a](https://github.com/nolotus/bun-nolo/commit/65f6b8ac7b53817e899bd519716ef46258417409))
+
+### Performance Improvements
+
+* **chat:** yield event loop every 32 items during long dialog message iteration ([257efde](https://github.com/nolotus/bun-nolo/commit/257efdef213d5abd6088d6dfb67244c6457d7523))
+
+
 ## 0.207.0 (2026-10-30)
 
 ### Features
