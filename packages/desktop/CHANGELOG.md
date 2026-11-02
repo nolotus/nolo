@@ -1,4 +1,11 @@
 
+## 0.219.0-alpha.2 (2026-11-02)
+
+### Bug Fixes
+
+* **agent-runtime:** 别名被顶掉时不再把整次调用拦死 ([17cdd20](https://github.com/nolotus/bun-nolo/commit/17cdd2017a9de30bc5d9606b40822575580a353e))
+
+
 ## 0.219.0-alpha.1 (2026-11-02)
 
 ### Features
