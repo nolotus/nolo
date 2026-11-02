@@ -9,6 +9,15 @@ export function isCompactDialogSlashCommand(input: string): boolean {
   return input.trim() === COMPACT_DIALOG_SLASH_COMMAND;
 }
 
+/** Supplied by the caller; the composer never discovers skills or builds tokens. */
+export interface SkillCandidate {
+  name: string;
+  description: string;
+  source: string;
+  /** Complete, exact slash reference supplied by the upstream skill catalog. */
+  token: string;
+}
+
 /**
  * Presentation metadata for one completable slash command.
  * Runtime execution semantics stay in useMessageInputSend /

@@ -58,6 +58,8 @@ export type ResolveTurnToolContextInput = {
   state?: RootState | null;
   dispatch?: AppDispatch | any;
   runtimeOptions?: Record<string, any> | null;
+  /** 临时引用只作用于当轮，不写回 dialog */
+  ephemeralReferences?: ReferenceItem[] | null;
 };
 
 const KNOWN_MENTION_RESOURCE_TYPES = new Set([
@@ -179,7 +181,11 @@ export async function resolveTurnToolContext(
   const dialogExtraRefs = Array.isArray(input.dialogConfig?.extraReferences)
     ? (input.dialogConfig!.extraReferences as ReferenceItem[])
     : [];
-  const mergedReferences = mergeReferences(agentRefs, dialogExtraRefs);
+  // 临时引用只作用于当轮，不写回 dialog。
+  const mergedReferences = mergeReferences(
+    mergeReferences(agentRefs, dialogExtraRefs),
+    input.ephemeralReferences,
+  );
 
   let refAssets: ResolvedReferenceAssets = {
     references: [],

@@ -165,9 +165,18 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
   add("readSkillDoc", "Read one skill doc in the Nolo workspace.", {
     doc: stringToolParam("Skill doc/page key."),
   }, ["doc"]);
-  add("loadSkill", "Load a skill by name (.agents/skills/<name>/SKILL.md) and return its full instructions inline. Returns available skills if not found.", {
-    name: stringToolParam("Skill name advertised in skill discovery."),
-  }, ["name"]);
+  add("loadSkill", "Load a skill and return its full instructions inline. Use legacy name alone (returns available skills if not found), or an exact reference without name: source=space + dbKey, source=builtin + slug, or source=project + projectBinding + relativePath. Do not mix selectors. Server execution supports space/builtin; local CLI/desktop execution supports builtin/project, not space.", {
+    name: stringToolParam("Legacy skill name advertised in skill discovery. Use without exact-reference fields."),
+    source: {
+      type: "string",
+      enum: ["space", "builtin", "project"],
+      description: "Exact skill source. Requires dbKey for space, slug for builtin, or projectBinding and relativePath for project. Omit name.",
+    },
+    dbKey: stringToolParam("Exact skill document dbKey; use only with source=space (server execution)."),
+    slug: stringToolParam("Exact builtin skill slug; use only with source=builtin."),
+    projectBinding: stringToolParam("Authorized project root as an absolute path matching the executor cwd; use only with source=project (local execution)."),
+    relativePath: stringToolParam("Project-relative path to SKILL.md within the authorized project's .agents/skills/ directory; use only with source=project (local execution)."),
+  });
   add("listTables", "List tables in the current user scope or an optional space scope.", {
     limit: { type: "integer", description: "Maximum tables to return." },
     space: stringToolParam("Optional space id or URL."),

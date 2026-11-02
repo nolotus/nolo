@@ -237,7 +237,8 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     "可选。仅当 runtimeKey='local' 时需要显式声明：表示调用方同意子 run 直接在**宿主文件系统**上读写代码（无隔离）。" +
                     "runtimeKey='local' 但未声明时会被显式拒绝（不回落宿主、也不悄悄改成 docker）。" +
                     "省略 runtimeKey 时无效。注意**省略 key 时的默认位置有例外**：写型派发默认进本机 docker 沙盒；"
-                    + "只读派发（readOnly=true）仍在宿主执行（它写不了文件，起沙盒是浪费）。",
+                    + "只读派发（readOnly=true）仍在宿主执行（它移除了专用写工具，起沙盒是浪费；"
+                    + "但 shell 仍可写文件，这不是文件系统只读隔离）。",
             },
         },
         required: ["task", "title"],

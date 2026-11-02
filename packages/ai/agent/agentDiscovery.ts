@@ -165,12 +165,19 @@ export function matchesAgentQuery(agent: SafeAgentSummary, query?: string): bool
   return candidates.some((text) => typeof text === "string" && text.toLowerCase().includes(q));
 }
 
+/**
+ * listAgents 结果形状。**字段顺序是契约的一部分**（不是排版问题）：
+ * host 按字节截断超长工具输出时保留头尾，派发唯一必需的 `agents`
+ * （内含必须逐字复制的 agentKey）必须排在最前，凭证分组/限流清单这类
+ * 大块说明性数据排在最后。历史事故：agents 在最末 + 顶层大块在前，
+ * 截断后每个候选的 agentKey/tier/billingSource 全部落在被砍掉的中段。
+ */
 export interface AgentDiscoveryResult {
   total: number;
   unavailableCount: number;
-  unavailableAgents: UnavailableAgentSummary[];
-  credentialGroups: CredentialGroupSummary[];
   agents: (CompactSafeAgentSummary | SafeAgentSummary)[];
+  credentialGroups: CredentialGroupSummary[];
+  unavailableAgents: UnavailableAgentSummary[];
 }
 
 /**
@@ -234,12 +241,14 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
       ? sortedAgents.map(omitNullishAgentSummaryFields)
       : sortedAgents.map(toCompactAgentSummary);
 
+  // 键插入顺序即 JSON.stringify 的输出顺序：把 agents 放在最前，
+  // credentialGroups / unavailableAgents 放到最后（见 AgentDiscoveryResult）。
   return {
     total: projectedAgents.length,
     unavailableCount,
-    unavailableAgents,
-    credentialGroups,
     agents: projectedAgents,
+    credentialGroups,
+    unavailableAgents,
   };
 }
 

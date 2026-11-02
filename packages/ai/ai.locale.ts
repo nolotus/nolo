@@ -107,6 +107,7 @@ export default {
             high: "High",
             xhigh: "X-High",
             max: "Max",
+            ultra: "Ultra",
           },
         },
       },
@@ -250,7 +251,7 @@ export default {
         maxTokensMin: "Max Tokens must be at least 1",
         maxTokensMax: "Max Tokens must be at most 500,000",
         maxTokensRange: "Max Tokens must be between {{min}} and {{max}}",
-        reasoningEffortInvalid: "Reasoning effort must be none, minimal, low, medium, high, xhigh, or max",
+        reasoningEffortInvalid: "Reasoning effort must be none, minimal, low, medium, high, xhigh, max, or ultra",
         thinkingBudgetMin: "Thinking budget must be at least 1024 tokens",
         thinkingBudgetMax: "Thinking budget must be at most 100,000 tokens",
         apiKeyRequired:
@@ -538,6 +539,7 @@ export default {
             high: "高",
             xhigh: "超高",
             max: "最大",
+            ultra: "极致",
           },
         },
       },
@@ -676,7 +678,7 @@ export default {
         maxTokensMin: "最大Token数必须至少为1",
         maxTokensMax: "最大Token数不能超过500,000",
         maxTokensRange: "最大Token数必须在 {{min}} 和 {{max}} 之间",
-        reasoningEffortInvalid: "推理强度必须是 none, minimal, low, medium, high, xhigh, 或 max",
+        reasoningEffortInvalid: "推理强度必须是 none, minimal, low, medium, high, xhigh, max, 或 ultra",
         thinkingBudgetMin: "思考预算至少需要 1024 个 Token",
         thinkingBudgetMax: "思考预算不能超过 100,000 个 Token",
         apiKeyRequired:
@@ -963,6 +965,7 @@ export default {
             high: "高",
             xhigh: "超高",
             max: "最大",
+            ultra: "極致",
           },
         },
       },
@@ -1101,7 +1104,7 @@ export default {
         maxTokensMin: "最大Token數必須至少為1",
         maxTokensMax: "最大Token數不得超過500,000",
         maxTokensRange: "最大Token數必須在 {{min}} 和 {{max}} 之間",
-        reasoningEffortInvalid: "推理強度必須是 none, minimal, low, medium, high, xhigh, 或 max",
+        reasoningEffortInvalid: "推理強度必須是 none, minimal, low, medium, high, xhigh, max, 或 ultra",
         thinkingBudgetMin: "思考預算至少需要 1024 個 Token",
         thinkingBudgetMax: "思考預算不能超過 100,000 個 Token",
         apiKeyRequired:
@@ -1393,6 +1396,7 @@ export default {
             high: "高",
             xhigh: "超高",
             max: "最大",
+            ultra: "ウルトラ",
           },
         },
       },
@@ -1543,7 +1547,7 @@ export default {
         maxTokensMax: "最大トークン数は500,000以下である必要があります",
         maxTokensRange: "最大トークン数は {{min}} 〜 {{max}} の範囲で入力してください",
         reasoningEffortInvalid:
-          "推論強度は none, minimal, low, medium, high, xhigh, max のいずれかである必要があります",
+          "推論強度は none, minimal, low, medium, high, xhigh, max, ultra のいずれかである必要があります",
         thinkingBudgetMin: "思考予算は1024トークン以上である必要があります",
         thinkingBudgetMax: "思考予算は100,000トークン以下である必要があります",
         apiKeyRequired:

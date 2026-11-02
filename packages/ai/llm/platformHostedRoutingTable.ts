@@ -65,6 +65,11 @@ export const CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE =
 export const PLATFORM_HOSTED_GROK_4_6_MODEL = "grok-4.6";
 export const PLATFORM_HOSTED_GPT_6_ASTRA_MODEL = "gpt-6-astra";
 export const PLATFORM_HOSTED_GPT_6_LUNA_MODEL = "gpt-6-luna";
+/**
+ * GPT-6 Sol：平台侧**没有**独立目录条目（CF 目录未上架该 id），仅作为
+ * 「同家族旧代」的别名存在——owner 2026-11-01 决定它透明落到 gpt-6.1-sol。
+ */
+export const PLATFORM_HOSTED_GPT_6_SOL_MODEL = "gpt-6-sol";
 export const PLATFORM_HOSTED_GPT_56_SOL_MODEL = "gpt-5.6-sol";
 export const PLATFORM_HOSTED_GPT_56_TERRA_MODEL = "gpt-5.6-terra";
 export const PLATFORM_HOSTED_GPT_56_LUNA_MODEL = "gpt-5.6-luna";
@@ -76,6 +81,14 @@ export const PLATFORM_HOSTED_GPT_56_LUNA_MODEL = "gpt-5.6-luna";
  * 官方页：developers.cloudflare.com/ai/models/openai/gpt-6.1-sol/（2026-10-13 核对）。
  */
 export const PLATFORM_HOSTED_GPT_6_1_SOL_MODEL = "gpt-6.1-sol";
+/**
+ * GPT-6.1 Terra（2026-11-01 收进广场）：与 6.1 Sol 同代同通道（Cloudflare AI
+ * Responses），是更便宜的效率档。CF 官方 catalog id 是 `openai/gpt-6.1-terra`，
+ * 与平台 id 不同名 → 必须显式 remap（不得隐式拼接 `openai/` 前缀）。
+ * 官方页：developers.cloudflare.com/ai/models/openai/gpt-6.1-terra/（2026-11-01 核对）：
+ * ctx 1,050,000；Request formats Responses / Chat Completions；Zero data retention Yes。
+ */
+export const PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL = "gpt-6.1-terra";
 export const PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID = "qwen/qwen3.8-27b";
 export const PLATFORM_HOSTED_GLM_53_MODEL = "glm-5.3";
 export const PLATFORM_HOSTED_GLM_52_MODEL = "glm-5.2";
@@ -121,6 +134,8 @@ export const CLOUDFLARE_GPT_56_SOL_UPSTREAM_MODEL_ID = "openai/gpt-5.6-sol";
 export const CLOUDFLARE_GPT_56_TERRA_UPSTREAM_MODEL_ID = "openai/gpt-5.6-terra";
 export const CLOUDFLARE_GPT_56_LUNA_UPSTREAM_MODEL_ID = "openai/gpt-5.6-luna";
 export const CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID = "openai/gpt-6.1-sol";
+// GPT-6.1 Terra：CF catalog id 与平台 id 不同名（点号保留、无下划线差异）。
+export const CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID = "openai/gpt-6.1-terra";
 
 /**
  * Cloudflare AI 统一 Responses 端点占位模板（GPT 文本系）。
@@ -464,6 +479,17 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "responses",
     agentRunHosted: true,
   },
+  // GPT-6.1 Terra（2026-11-01 新增）：与 6.1 Sol 同一条 Responses 线（CF 官方页同样
+  // 只声明「Responses, Chat Completions」与 reasoning.effort）；上游是独立 catalog id，
+  // 不得与 sol 混用。不是任何模型的别名 —— gpt-5.6-terra 仍指它自己的 5.6 上游。
+  [PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL]: {
+    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID,
+    wire: "responses",
+    agentRunHosted: true,
+  },
   // Grok -> xAI（server agentRun 侧未分流，保持 no upstream route 报错）
   [PLATFORM_HOSTED_GROK_4_6_MODEL]: {
     endpoint: "https://api.x.ai/v1/chat/completions",
@@ -581,6 +607,27 @@ export const PLATFORM_MODEL_ALIASES: Readonly<
     since: "2026-10-13",
     reason:
       "CF 官方目录换代：gpt-5.6-sol 由 gpt-6.1-sol 承接（owner 授权透明映射，按 6.1 计费）。",
+  },
+  // 家族内换代（owner 2026-11-01 决定）：每个模型指向**自己家族的最新版本**，
+  // 不跨家族合并——故 luna 仍落 luna（不并到 terra，避免廉价档被抬到 10 倍价），
+  // astra 家族无新版、保持独立。
+  [PLATFORM_HOSTED_GPT_56_TERRA_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL,
+    since: "2026-11-01",
+    reason:
+      "同家族换代（owner 2026-11-01 决定）：gpt-5.6-terra 指向同家族最新代 gpt-6.1-terra，透明映射，按 6.1 Terra 计费。",
+  },
+  [PLATFORM_HOSTED_GPT_56_LUNA_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
+    since: "2026-11-01",
+    reason:
+      "同家族换代（owner 2026-11-01 决定）：gpt-5.6-luna 指向同家族最新代 gpt-6-luna（上游无 6.1-luna），透明映射，按 6 Luna 计费。",
+  },
+  [PLATFORM_HOSTED_GPT_6_SOL_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
+    since: "2026-11-01",
+    reason:
+      "同家族换代（owner 2026-11-01 决定）：gpt-6-sol 指向同家族最新代 gpt-6.1-sol，透明映射，按 6.1 Sol 计费。",
   },
 };
 

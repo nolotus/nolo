@@ -78,12 +78,12 @@ if (typeof window !== "undefined") {
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 360;
 
-interface RightSidebarState {
-  isOpen: boolean;
-  content: React.ReactNode | null;
+interface RightSidebarSlotItem {
+  id: string;
+  content: React.ReactNode;
   requestedWidth: number | null;
   closeOnRouteChange: boolean;
-  id?: string;
+  isDefault?: boolean;
 }
 
 interface MainSidebarState {
@@ -118,13 +118,7 @@ const MainLayout: React.FC = () => {
   const hasRestoredAllViewSidebar = useRef(false);
   const bodyOverflowRef = useRef<string | null>(null);
 
-  const [rightSidebar, setRightSidebar] = useState<RightSidebarState>({
-    isOpen: false,
-    content: null,
-    requestedWidth: null,
-    closeOnRouteChange: true,
-    id: undefined,
-  });
+  const [rightSidebarSlots, setRightSidebarSlots] = useState<RightSidebarSlotItem[]>([]);
   const [mainSidebar, setMainSidebar] = useState<MainSidebarState>({
     content: null,
     id: undefined,
@@ -165,14 +159,49 @@ const MainLayout: React.FC = () => {
   const preferredWidth = useRightSidebarPreferredWidth();
   const navigationPlacement = useNavigationPlacement();
   const companionPlacement = useCompanionPlacement();
-  const targetPreferred = rightSidebar.requestedWidth ?? preferredWidth;
+
+  /**
+   * 只有「有内容」的槽位才算打开：显式 null / undefined / false / 空字符串都算空。
+   *
+   * 已知边界：内容组件自己在渲染时返回 null 无法在打开状态里静态识别（ReactNode
+   * 与最终 DOM 之间没有可靠的契约）。这类「内容由组件决定」的槽位必须由所有者
+   * 显式 closeSlot —— DialogPage 就是按进程数量决定开/关，不依赖这里兜底。
+   */
+  const isRenderableSlotContent = (content: React.ReactNode): boolean =>
+    content !== null &&
+    content !== undefined &&
+    content !== false &&
+    content !== "";
+
+  const visibleRightSidebarSlots = useMemo(
+    () => rightSidebarSlots.filter((slot) => isRenderableSlotContent(slot.content)),
+    [rightSidebarSlots]
+  );
+
+  const activeRequestedWidth = useMemo(() => {
+    // 宽度只从「可见」槽位取，否则一个空槽位的 width 会覆盖真正有内容的那一格。
+    const defaultSlot = visibleRightSidebarSlots.find(
+      (s) => s.isDefault && s.requestedWidth != null
+    );
+    if (defaultSlot?.requestedWidth != null) return defaultSlot.requestedWidth;
+    for (const slot of visibleRightSidebarSlots) {
+      if (slot.requestedWidth != null) return slot.requestedWidth;
+    }
+    return null;
+  }, [visibleRightSidebarSlots]);
+
+  const targetPreferred = activeRequestedWidth ?? preferredWidth;
   const geometry = resolveCompanionEffectiveWidth({
     preferredWidth: targetPreferred,
     containerWidth,
   });
   const effectiveWidth = geometry.effectiveWidth;
 
-  const isRightOpen = rightSidebar.isOpen;
+  const isRightOpen = visibleRightSidebarSlots.length > 0;
+  const currentSlotId = useMemo(() => {
+    const defaultSlot = visibleRightSidebarSlots.find((s) => s.isDefault);
+    return defaultSlot ? defaultSlot.id : visibleRightSidebarSlots[0]?.id;
+  }, [visibleRightSidebarSlots]);
 
   // 监听 contentRow 容器尺寸变化（Navigation 折叠/展开或窗口 resize），动态适配 effectiveWidth
   // 动画期间暂缓测量更新，避免 ResizeObserver 逐帧 setContainerWidth 带来的 React 重复渲染，动画结束一次收敛
@@ -338,22 +367,73 @@ const MainLayout: React.FC = () => {
 
   const openRightSidebar = useCallback(
     (content: React.ReactNode, options?: RightSidebarOptions) => {
-      setRightSidebar({
-        isOpen: true,
-        content,
-        requestedWidth: options?.width ?? null,
-        closeOnRouteChange: options?.closeOnRouteChange ?? true,
-        id: options?.id,
+      const slotId = options?.id ?? "default";
+      setRightSidebarSlots((prev) => {
+        const nextSlot: RightSidebarSlotItem = {
+          id: slotId,
+          content,
+          requestedWidth: options?.width ?? null,
+          closeOnRouteChange: options?.closeOnRouteChange ?? true,
+          isDefault: true,
+        };
+        const idx = prev.findIndex((s) => s.isDefault || s.id === slotId);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = nextSlot;
+          return next;
+        }
+        return [nextSlot, ...prev];
       });
     },
     []
   );
 
   const closeRightSidebar = useCallback(() => {
-    setRightSidebar((prev) => ({
-      ...prev,
-      isOpen: false,
-    }));
+    setRightSidebarSlots([]);
+  }, []);
+
+  const openSlot = useCallback(
+    (id: string, content: React.ReactNode, options?: RightSidebarOptions) => {
+      setRightSidebarSlots((prev) => {
+        const requestedWidth = options?.width ?? null;
+        const closeOnRouteChange = options?.closeOnRouteChange ?? true;
+        const idx = prev.findIndex((s) => s.id === id);
+        if (idx >= 0) {
+          const current = prev[idx];
+          // 幂等：内容/宽度/关闭语义都没变时不写状态。调用方（如 dialog 的
+          // effect）可能在每次渲染里重新 open，若这里无条件 setState，就会
+          // 形成 state → context → effect → state 的自激循环。
+          if (
+            current.content === content &&
+            current.requestedWidth === requestedWidth &&
+            current.closeOnRouteChange === closeOnRouteChange
+          ) {
+            return prev;
+          }
+          const next = [...prev];
+          next[idx] = {
+            id,
+            content,
+            requestedWidth,
+            closeOnRouteChange,
+            isDefault: current.isDefault,
+          };
+          return next;
+        }
+        return [
+          ...prev,
+          { id, content, requestedWidth, closeOnRouteChange, isDefault: false },
+        ];
+      });
+    },
+    []
+  );
+
+  const closeSlot = useCallback((id: string) => {
+    setRightSidebarSlots((prev) =>
+      // 同样要求幂等：不存在的槽位不产生新数组，避免无意义的 context 更新。
+      prev.some((s) => s.id === id) ? prev.filter((s) => s.id !== id) : prev
+    );
   }, []);
 
   const setMainSidebarContent = useCallback(
@@ -457,7 +537,10 @@ const MainLayout: React.FC = () => {
         rightSidebarRef.current.style.width = "";
         if (!isNaN(finalWidth)) {
           setRightSidebarPreferredWidth(finalWidth);
-          setRightSidebar((prev) => ({ ...prev, requestedWidth: null }));
+          // 手动调整宽度后取消各槽位的显式宽度，避免继续压过用户偏好。
+          setRightSidebarSlots((prev) =>
+            prev.map((slot) => ({ ...slot, requestedWidth: null }))
+          );
         }
       }
       setIsRightResizing(false);
@@ -490,7 +573,9 @@ const MainLayout: React.FC = () => {
           containerWidth,
         });
         setRightSidebarPreferredWidth(finalClamped);
-        setRightSidebar((prev) => ({ ...prev, requestedWidth: null }));
+        setRightSidebarSlots((prev) =>
+          prev.map((slot) => ({ ...slot, requestedWidth: null }))
+        );
       }
     },
     [companionPlacement, containerWidth, geometry.maxWidth, targetPreferred]
@@ -534,10 +619,9 @@ const MainLayout: React.FC = () => {
     if (isSidebarTransitioningRef.current) {
       finishSidebarTransition();
     }
-    setRightSidebar((prev) => {
-      if (!prev.isOpen || !prev.closeOnRouteChange) return prev;
-      return { ...prev, isOpen: false };
-    });
+    setRightSidebarSlots((prev) =>
+      prev.filter((slot) => slot.closeOnRouteChange === false)
+    );
   }, [location.pathname, finishSidebarTransition]);
 
   // 组件卸载时清理过渡兜底定时器
@@ -599,8 +683,10 @@ const MainLayout: React.FC = () => {
           value={{
             open: openRightSidebar,
             close: closeRightSidebar,
+            openSlot,
+            closeSlot,
             isOpen: isRightOpen,
-            currentId: rightSidebar.id,
+            currentId: currentSlotId,
           }}
         >
         <div
@@ -699,11 +785,22 @@ const MainLayout: React.FC = () => {
                   onKeyDown={handleRightResizeKeyDown}
                 />
               )}
-              {rightSidebar.content && (
+              {visibleRightSidebarSlots.length > 0 && (
                 <div className="MainLayout__sidebarContent MainLayout__sidebarContent--right">
-                  <Suspense fallback={<div className="MainLayout__sidebar-loading" />}>
-                    {rightSidebar.content}
-                  </Suspense>
+                  {visibleRightSidebarSlots.map((slot) => {
+                    if (!slot.content) return null;
+                    return (
+                      <div
+                        key={slot.id}
+                        className="MainLayout__sidebarSlot"
+                        data-slot-id={slot.id}
+                      >
+                        <Suspense fallback={<div className="MainLayout__sidebar-loading" />}>
+                          {slot.content}
+                        </Suspense>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </aside>

@@ -104,13 +104,17 @@ export function parseCiStatusPayload(raw: string): CiJob[] | undefined {
   return single ? [single] : undefined;
 }
 
-export function buildRemoteCommand(limit: number): string {
+function resolveCiPort(): string {
   // port 来自 env，直接拼进「在 alpha 上执行的 shell 命令」等于把注入面交给环境变量。
   // 只接受纯数字且落在合法端口区间；其余一律回退默认值。
   const rawPort = process.env.NOLO_CI_PORT?.trim() ?? "";
-  const port = /^\d{1,5}$/.test(rawPort) && Number(rawPort) > 0 && Number(rawPort) <= 65535
+  return /^\d{1,5}$/.test(rawPort) && Number(rawPort) > 0 && Number(rawPort) <= 65535
     ? rawPort
     : DEFAULT_CI_PORT;
+}
+
+export function buildRemoteCommand(limit: number): string {
+  const port = resolveCiPort();
   const safeLimit = Math.max(1, Math.min(20, Math.trunc(limit) || 5));
   return `curl -s -m 3 "http://127.0.0.1:${port}/status?limit=${safeLimit}"`;
 }
@@ -121,10 +125,14 @@ export function buildRemoteCommand(limit: number): string {
  * @param timeoutMs 整体超时。远小于调用方（TUI 首屏）能容忍的等待。
  */
 export function fetchCiStatus(limit = 5, timeoutMs = 4000): Promise<CiJob[] | undefined> {
+  return fetchCiPayload(buildRemoteCommand(limit), parseCiStatusPayload, timeoutMs);
+}
+
+function fetchCiPayload<T>(command: string, parse: (stdout: string) => T | undefined, timeoutMs: number): Promise<T | undefined> {
   return new Promise((resolve) => {
     let settled = false;
     let guard: ReturnType<typeof setTimeout> | undefined;
-    const finish = (value: CiJob[] | undefined) => {
+    const finish = (value: T | undefined) => {
       if (settled) return;
       settled = true;
       if (guard) clearTimeout(guard);
@@ -137,14 +145,18 @@ export function fetchCiStatus(limit = 5, timeoutMs = 4000): Promise<CiJob[] | un
     try {
       execFile(
         "ssh",
-        ["-o", "BatchMode=yes", "-o", `ConnectTimeout=3`, resolveSshTarget(), buildRemoteCommand(limit)],
+        ["-o", "BatchMode=yes", "-o", `ConnectTimeout=3`, resolveSshTarget(), command],
         { timeout: timeoutMs, encoding: "utf8", maxBuffer: 1024 * 1024 },
         (error, stdout) => {
           if (error) {
             finish(undefined);
             return;
           }
-          finish(parseCiStatusPayload(stdout ?? ""));
+          try {
+            finish(parse(stdout ?? ""));
+          } catch {
+            finish(undefined);
+          }
         }
       );
     } catch {
@@ -165,4 +177,20 @@ export function summarizeLatest(jobs: CiJob[] | undefined): string | undefined {
     return `ci:${sha} ✗${latest.failedPhase ? ` ${latest.failedPhase}` : ""}`;
   }
   return `ci:${sha} ${latest.status}`;
+}
+
+/** Same SSH channel as status; failures stay silent and never alter process exitCode. */
+// 取消是「远端 cancel + 最多 10 次终态查询」的有界过程（见 alphaRemote.cancelAlphaRemote），
+// 服务端可能比状态查询久得多；CLI 超时若短于它，就会出现「CLI 报失败、服务端仍在取消」的假失败。
+export function fetchCiCancel(jobId: string, timeoutMs = 120000): Promise<boolean | undefined> {
+  const body = JSON.stringify({ jobId }).replace(/'/g, "'\\''");
+  const endpoint = `http://127.0.0.1:${resolveCiPort()}/cancel`;
+  return fetchCiPayload(
+    `curl -s -m 110 -H 'Content-Type: application/json' -X POST --data '${body}' "${endpoint}"`,
+    stdout => {
+      const response = JSON.parse(stdout);
+      return response?.ok === true && response?.cancelled === true && response?.jobId === jobId ? true : false;
+    },
+    timeoutMs,
+  );
 }

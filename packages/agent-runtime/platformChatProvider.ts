@@ -548,6 +548,7 @@ function processPlatformChatSseEvent(
     dsmlToolCallState: DsmlParserState;
     billing?: Record<string, unknown>;
     sawDone: boolean;
+    sawResponseCompleted?: boolean;
   },
 ) {
   for (const line of event.split("\n")) {
@@ -561,7 +562,7 @@ function processPlatformChatSseEvent(
     // later treating the response as a cut-off stream.
     if (payload === "[DONE]") {
       state.sawDone = true;
-      continue;
+      return;
     }
     let parsed: any;
     try {
@@ -661,10 +662,12 @@ function processPlatformChatSseEvent(
       applyResponsesToolEvent(state.responsesToolCalls, parsed);
       continue;
     }
-    if (eventType === "response.completed" && parsed?.response) {
+    if (eventType === "response.completed") {
+      state.sawResponseCompleted = true;
       state.completedResponsesPayload = parsed.response;
       // usage 已在帧顶部经 extractUsageFromSsePayload 统一提取
       // （response.completed.response.usage 形状），这里不再重复赋值。
+      continue;
     }
   }
 }
@@ -697,12 +700,17 @@ export async function readPlatformChatSseCompletion(args: {
     toolCallTextState: createToolCallTextParserState(),
     finishReason: undefined as string | undefined,
     sawDone: false,
+    sawResponseCompleted: false,
   };
 
   try {
     for await (const frame of readSseFrames(args.response)) {
       frameCount += 1;
       processPlatformChatSseEvent(frame, state);
+      // Platform billing can follow response.completed. Only [DONE] ends
+      // the platform stream without waiting for socket EOF; the frame reader
+      // cancels/releases its body reader on this early exit.
+      if (state.sawDone) break;
     }
   } catch (cause) {
     if (cause instanceof PlatformStreamInterruptedError) {
@@ -752,7 +760,7 @@ export async function readPlatformChatSseCompletion(args: {
   // 代理把上游故障编成 HTTP 200 + 错误帧；不抛就会伪装成空回答落进对话历史。
   throwIfChatCompletionStreamFailed(state);
 
-  const streamComplete = state.sawDone || Boolean(state.usage) || Boolean(state.finishReason);
+  const streamComplete = state.sawDone || state.sawResponseCompleted || Boolean(state.usage) || Boolean(state.finishReason);
   const streamTruncated = !streamComplete;
 
   if (state.usesResponsesApi) {

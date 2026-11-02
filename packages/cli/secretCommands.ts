@@ -15,6 +15,7 @@ import {
 import { createFileCredentialBroker } from "../agent-runtime/fileCredentialBroker";
 import type { CredentialBroker } from "../agent-runtime/credentialBroker";
 import { spawn } from "child_process";
+import { StringDecoder } from "string_decoder";
 import { t } from "./i18n";
 
 /** Values that JSON.parse would silently turn into a non-injectable scalar. */
@@ -34,8 +35,258 @@ function parseSecretValue(raw: string): unknown {
   return parsed;
 }
 
+export type SecretPromptReader = (promptText?: string) => Promise<string>;
+
 export interface RunSecretCommandOptions {
   broker?: CredentialBroker;
+  stdin?: NodeJS.ReadableStream;
+  stdinTimeoutMs?: number;
+  stdinMaxBytes?: number;
+  promptReader?: SecretPromptReader;
+  stdout?: NodeJS.WritableStream;
+}
+
+export class PromptReadError extends Error {
+  constructor(
+    readonly i18nKey:
+      | "secret.promptNonTtyNotSupported"
+      | "secret.promptEmpty"
+      | "secret.promptAborted"
+      | "secret.promptReadError",
+  ) {
+    super(i18nKey);
+  }
+}
+
+export async function defaultPromptReader(
+  promptLabel?: string,
+  input: NodeJS.ReadStream = process.stdin,
+  output: NodeJS.WritableStream = process.stderr,
+): Promise<string> {
+  if (!Boolean((input as any)?.isTTY) || typeof (input as any)?.setRawMode !== "function") {
+    throw new PromptReadError("secret.promptNonTtyNotSupported");
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    let wasRaw = false;
+    try {
+      wasRaw = Boolean((input as any).isRaw);
+    } catch {
+      // ignore
+    }
+
+    let settled = false;
+    const chars: string[] = [];
+    const decoder = new StringDecoder("utf8");
+
+    const restoreTerminal = () => {
+      try {
+        if (typeof (input as any).setRawMode === "function") {
+          (input as any).setRawMode(wasRaw);
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        if (typeof (input as any).pause === "function") {
+          (input as any).pause();
+        }
+      } catch {
+        // ignore
+      }
+      (input as any).removeListener?.("data", onData);
+      (input as any).removeListener?.("error", onError);
+      (input as any).removeListener?.("end", onEnd);
+      (input as any).removeListener?.("close", onClose);
+    };
+
+    const finish = (err?: Error, value?: string) => {
+      if (settled) return;
+      settled = true;
+      restoreTerminal();
+      try {
+        output.write("\n");
+      } catch {
+        // ignore
+      }
+      if (err) {
+        reject(err);
+      } else {
+        resolve(value ?? "");
+      }
+    };
+
+    const processChars = (str: string) => {
+      for (const char of str) {
+        if (char === "\u0003") {
+          // Ctrl+C
+          finish(new PromptReadError("secret.promptAborted"));
+          return;
+        }
+        if (char === "\u0004") {
+          // Ctrl+D (EOF)
+          const val = chars.join("");
+          if (val.length === 0) {
+            finish(new PromptReadError("secret.promptAborted"));
+          } else {
+            finish(undefined, val);
+          }
+          return;
+        }
+        if (char === "\r" || char === "\n") {
+          finish(undefined, chars.join(""));
+          return;
+        }
+        if (char === "\u0008" || char === "\u007f") {
+          // Backspace
+          chars.pop();
+          continue;
+        }
+        if (char >= " " || char === "\t") {
+          chars.push(char);
+        }
+      }
+    };
+
+    const onData = (chunk: Buffer | string) => {
+      if (settled) return;
+      const str = typeof chunk === "string" ? chunk : decoder.write(chunk);
+      processChars(str);
+    };
+
+    const onError = (_err?: unknown) => {
+      if (settled) return;
+      finish(new PromptReadError("secret.promptReadError"));
+    };
+
+    const onEnd = () => {
+      if (settled) return;
+      finish(new PromptReadError("secret.promptAborted"));
+    };
+
+    const onClose = () => {
+      if (settled) return;
+      finish(new PromptReadError("secret.promptAborted"));
+    };
+
+    try {
+      if (promptLabel) {
+        output.write(promptLabel);
+      }
+      (input as any).setRawMode(true);
+      if (typeof (input as any).resume === "function") {
+        (input as any).resume();
+      }
+      (input as any).on("data", onData);
+      (input as any).on("error", onError);
+      (input as any).on("end", onEnd);
+      (input as any).on("close", onClose);
+    } catch {
+      finish(new PromptReadError("secret.promptReadError"));
+    }
+  });
+}
+
+class StdinReadError extends Error {
+  constructor(
+    readonly i18nKey:
+      | "secret.stdinTooLarge"
+      | "secret.stdinTimeout"
+      | "secret.stdinReadError"
+      | "secret.stdinEmpty"
+      | "secret.stdinTtyNotSupported",
+  ) {
+    super(i18nKey);
+  }
+}
+
+const DEFAULT_STDIN_TIMEOUT_MS = 10_000;
+const DEFAULT_STDIN_MAX_BYTES = 64 * 1024; // 64 KiB
+
+async function readSecretFromStdinStream(
+  stream: NodeJS.ReadableStream,
+  timeoutMs: number = DEFAULT_STDIN_TIMEOUT_MS,
+  maxBytes: number = DEFAULT_STDIN_MAX_BYTES,
+): Promise<string> {
+  if (Boolean((stream as any)?.isTTY)) {
+    throw new StdinReadError("secret.stdinTtyNotSupported");
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    let totalBytes = 0;
+    const chunks: Buffer[] = [];
+
+    const timer = setTimeout(() => {
+      finish(new StdinReadError("secret.stdinTimeout"));
+    }, timeoutMs);
+    timer.unref?.();
+
+    const onData = (chunk: Buffer | string) => {
+      if (settled) return;
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buf.length;
+      if (totalBytes > maxBytes) {
+        finish(new StdinReadError("secret.stdinTooLarge"));
+        return;
+      }
+      chunks.push(buf);
+    };
+
+    const onEnd = () => {
+      if (settled) return;
+      clearTimeout(timer);
+      cleanup();
+      settled = true;
+
+      const raw = Buffer.concat(chunks).toString("utf8");
+      let value = raw;
+      if (value.endsWith("\r\n")) {
+        value = value.slice(0, -2);
+      } else if (value.endsWith("\n")) {
+        value = value.slice(0, -1);
+      }
+
+      if (value.length === 0 || /^\s*$/.test(value)) {
+        reject(new StdinReadError("secret.stdinEmpty"));
+        return;
+      }
+
+      resolve(value);
+    };
+
+    const onError = () => {
+      if (settled) return;
+      finish(new StdinReadError("secret.stdinReadError"));
+    };
+
+    function finish(err: Error) {
+      if (settled) return;
+      clearTimeout(timer);
+      cleanup();
+      settled = true;
+      try {
+        (stream as any).destroy?.();
+      } catch {
+        // ignore
+      }
+      reject(err);
+    }
+
+    function cleanup() {
+      stream.removeListener?.("data", onData as any);
+      stream.removeListener?.("end", onEnd as any);
+      stream.removeListener?.("error", onError as any);
+    }
+
+    stream.on("data", onData as any);
+    stream.on("end", onEnd as any);
+    stream.on("error", onError as any);
+
+    if (typeof (stream as any).resume === "function") {
+      (stream as any).resume();
+    }
+  });
 }
 
 export async function runSecretCommand(
@@ -109,6 +360,134 @@ export async function runSecretCommand(
       }
 
       case "set": {
+        const stdinFlags = rest.filter((arg) => arg === "--stdin");
+        const promptFlags = rest.filter((arg) => arg === "--prompt");
+
+        if (stdinFlags.length > 1) {
+          console.error(t("secret.stdinDuplicateFlag"));
+          process.exitCode = 1;
+          return;
+        }
+
+        if (promptFlags.length > 1) {
+          console.error(t("secret.promptDuplicateFlag"));
+          process.exitCode = 1;
+          return;
+        }
+
+        if (stdinFlags.length > 0 && promptFlags.length > 0) {
+          console.error(t("secret.cannotMixStdinAndPrompt"));
+          process.exitCode = 1;
+          return;
+        }
+
+        const isStdin = stdinFlags.length === 1;
+        const isPrompt = promptFlags.length === 1;
+        const nonFlagArgs = rest.filter((arg) => arg !== "--stdin" && arg !== "--prompt");
+
+        if (isStdin) {
+          if (nonFlagArgs.length === 0) {
+            console.error(t("secret.setNameRequired"));
+            process.exitCode = 1;
+            return;
+          }
+          if (nonFlagArgs.length > 1) {
+            console.error(t("secret.stdinMixedWithValue"));
+            process.exitCode = 1;
+            return;
+          }
+          const [name] = nonFlagArgs;
+          let val: string;
+          try {
+            val = await readSecretFromStdinStream(
+              options.stdin ?? process.stdin,
+              options.stdinTimeoutMs ?? DEFAULT_STDIN_TIMEOUT_MS,
+              options.stdinMaxBytes ?? DEFAULT_STDIN_MAX_BYTES,
+            );
+          } catch (err) {
+            if (err instanceof StdinReadError) {
+              console.error(t(err.i18nKey));
+            } else {
+              console.error(t("secret.stdinReadError"));
+            }
+            process.exitCode = 1;
+            return;
+          }
+
+          let parsedVal: unknown;
+          try {
+            parsedVal = parseSecretValue(val);
+          } catch (err) {
+            console.error(t("secret.errorPrefix", (err as Error).message));
+            process.exitCode = 1;
+            return;
+          }
+
+          setSecret(name, parsedVal);
+          console.log(t("secret.setSuccess", name));
+          return;
+        }
+
+        if (isPrompt) {
+          if (nonFlagArgs.length === 0) {
+            console.error(t("secret.promptNameRequired"));
+            process.exitCode = 1;
+            return;
+          }
+          if (nonFlagArgs.length > 1) {
+            console.error(t("secret.promptMixedWithValue"));
+            process.exitCode = 1;
+            return;
+          }
+          const [name] = nonFlagArgs;
+          let rawInput: string;
+          try {
+            if (options.promptReader) {
+              rawInput = await options.promptReader(t("secret.promptLabel", name));
+            } else {
+              rawInput = await defaultPromptReader(
+                t("secret.promptLabel", name),
+                (options.stdin as any) ?? process.stdin,
+                (options.stdout as any) ?? process.stderr,
+              );
+            }
+          } catch (err) {
+            if (err instanceof PromptReadError) {
+              console.error(t(err.i18nKey));
+            } else {
+              console.error(t("secret.promptReadError"));
+            }
+            process.exitCode = 1;
+            return;
+          }
+
+          let val = rawInput;
+          if (val.endsWith("\r\n")) {
+            val = val.slice(0, -2);
+          } else if (val.endsWith("\n")) {
+            val = val.slice(0, -1);
+          }
+
+          if (val.length === 0 || /^\s*$/.test(val)) {
+            console.error(t("secret.promptEmpty"));
+            process.exitCode = 1;
+            return;
+          }
+
+          let parsedVal: unknown;
+          try {
+            parsedVal = parseSecretValue(val);
+          } catch (err) {
+            console.error(t("secret.errorPrefix", (err as Error).message));
+            process.exitCode = 1;
+            return;
+          }
+
+          setSecret(name, parsedVal);
+          console.log(t("secret.setSuccess", name));
+          return;
+        }
+
         const [name, ...valParts] = rest;
         if (!name) {
           console.error(t("secret.setNameAndValueRequired"));

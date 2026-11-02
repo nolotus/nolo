@@ -43,7 +43,9 @@ export const useSendPermission = (userBalance: number = 0) => {
     fixedAgentConfig ?? resolveDialogAutoAgentConfig(currentDialogConfig);
   const currentDialogId = currentDialogKey ? extractCustomId(currentDialogKey) : null;
 
-  const isCustomApi = agentConfig?.apiSource === "custom";
+  const isCustomApi =
+    agentConfig?.apiSource === "custom" ||
+    Boolean(agentConfig?.customProviderUrl);
   const isCliApi = agentConfig?.apiSource === "cli";
   // Subscription OAuth providers are billed by upstream subscription, not per-token.
   const SUBSCRIPTION_OAUTH_REFS = new Set([

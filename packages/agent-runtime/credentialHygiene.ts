@@ -11,6 +11,6 @@
 
 export const CREDENTIAL_HYGIENE_RULE = `--- 凭据纪律 ---
 - 需要任何凭据 / API key 时：先 \`nolo secret list --json\` 看已有条目（只出名字与形态，不含值），再用 \`nolo secret run --with <name> -- <cmd>\` 注入环境变量执行；不要在命令行里拼接密钥值。
-- 新增凭据：请用户本人执行 \`nolo secret set <name> <value>\`（值不要经过 agent 的命令行或回复），之后照常用 \`run --with\` 使用。
-- 禁止把密钥写进文件（含 \`~/.config/*.env\`）、禁止在参数或回复里回显；\`nolo secret get\` 与直接读取 \`$NOLO_HOME/credentials/secrets.json\` 均仅供人工调试，Agent 不得读取。
-- 用户把密钥直接贴进对话时：照常使用，但提醒事后轮换，并提示用户把它迁进 \`nolo secret\`。`;
+- 新增凭据：请用户本人在终端执行 \`nolo secret set <name> --prompt\`（或通过 \`--stdin\` 安全传入，避免命令行参数留痕），之后照常用 \`run --with\` 使用。
+- 禁止把密钥写进明文文件（含 \`~/.config/*.env\`）、禁止在参数或回复里回显；\`nolo secret get\` 与直接读取 \`$NOLO_HOME/credentials/secrets.json\` 均仅供人工调试，Agent 不得读取。
+- 用户把密钥直接贴进对话时：照常使用，但提醒事后轮换，并提示用户将其安全迁入 \`nolo secret\`。`;

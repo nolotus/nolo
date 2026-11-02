@@ -19,6 +19,7 @@ import {
 } from "./desktopTurnSegments";
 
 import type { RootState } from "app/store";
+import type { ReferenceItem } from "app/types";
 import { patch, read, selectById, write } from "database/dbSlice";
 import { generateRequestBody } from "ai/llm/generateRequestBody";
 import {
@@ -89,6 +90,7 @@ import {
     trimMessagesWithSummary,
     validateAccessAndBalance,
 } from "./streamAgentChatTurnUtils";
+import { resolveUserSkillRuntime } from "ai/skills/userSkillRuntime";
 import { buildCliPrompt } from "./cliPrompt";
 import { createCliChatTurnStream } from "./cliChatClient";
 import { getCliChatSession, startCliChatSession } from "./cliChatClient";
@@ -464,6 +466,7 @@ export interface StreamAgentChatTurnArgs {
     parentMessageId?: string;
     runtimeOptions?: AgentRuntimeOptions;
     quickChatPerfStartedAt?: number;
+    ephemeralReferences?: ReferenceItem[];
 }
 
 export const streamAgentChatTurnHandler = async (
@@ -478,6 +481,7 @@ export const streamAgentChatTurnHandler = async (
         parentMessageId,
         runtimeOptions,
         quickChatPerfStartedAt,
+        ephemeralReferences,
     } = args;
     const { getState, dispatch, rejectWithValue } = thunkApi;
     const state = getState() as RootState;
@@ -2078,6 +2082,7 @@ export const streamAgentChatTurnHandler = async (
             state,
             dispatch,
             runtimeOptions,
+            ephemeralReferences,
         });
 
         const mentionedTools = turnToolContext.mentionedToolNames;
@@ -2111,11 +2116,19 @@ export const streamAgentChatTurnHandler = async (
         const initialHistoryIds = new Set(initialRawMsgs.map((m: any) => m.id));
 
         // 4. 合并工具 (Base + Default + Context + Mentioned + Runtime) + 图片配置
-        const agentConfigWithTools = mergeAgentToolsWithRuntime(
-            agentConfigWithReferences,
-            [...contextTools, ...attachmentTools],
-            mentionedTools,
-            runtimeOptions,
+        // Resolve account contributions from this turn's captured preference snapshot.
+        const accountSkillRuntime = agentConfigWithReferences.runtimePromptAlreadyInMessages
+            ? null
+            : await resolveUserSkillRuntime(agentConfigWithReferences, state.settings);
+        const agentConfigWithTools = resolveWebAgentRuntimeToolSurface(
+            mergeAgentToolsWithRuntime(
+                agentConfigWithReferences,
+                [...contextTools, ...attachmentTools],
+                mentionedTools,
+                runtimeOptions,
+                state,
+                accountSkillRuntime,
+            ),
             state,
         );
         const agentConfigForCall = applyImageConfigRuntimeOverride(

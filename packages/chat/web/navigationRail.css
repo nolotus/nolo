@@ -457,10 +457,14 @@
   position: sticky;
   bottom: 0;
   z-index: 1;
-  background: color-mix(in srgb, var(--backgroundSecondary, var(--background)) 72%, var(--background) 28%);
+  /* 与 Rail 同色：以前这里是 backgroundSecondary 混出的偏深色带，底部会长出
+     一块比 Rail 窄、颜色又不一样的补丁；同色后滚动内容也不会从后面透出来。 */
+  background: var(--background, #fff);
 }
 .navigation-v2-rail-account {
-  padding: 8px 2px !important;
+  /* 0 左右内边距：账号列与上面的导航项同宽（52 - 4*2 = 44），
+     头像和通知的圆心才落在导航图标的同一条中轴上。 */
+  padding: 8px 0 !important;
   min-width: 0;
   border-top: 0 !important;
 }
@@ -496,6 +500,14 @@
 .navigation-v2-rail-account__actions button {
   min-width: 36px;
   min-height: 36px;
+}
+
+/* 未读角标收进按钮自身范围并换上 Rail 底色：-6px 的右边溢出会顶到 Rail 的
+   内边距里，看起来整列往左歪。 */
+.navigation-v2-rail-account__actions button > span[aria-hidden] {
+  top: -2px;
+  right: -2px;
+  box-shadow: 0 0 0 2px var(--background, #fff);
 }
 @media (max-width: 768px) {
   .navigation-v2-rail { flex-wrap: wrap; }

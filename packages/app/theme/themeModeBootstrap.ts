@@ -82,15 +82,13 @@ export function readStoredThemeName(
   storage: StorageLike | null | undefined
 ): keyof typeof THEME_COLORS | undefined {
   try {
-    const value = normalizeThemeName(storage?.getItem("nolo-theme-name"));
-    if (!value) return undefined;
-
-    const isExplicitSelection =
-      storage?.getItem("nolo-theme-name-explicit") === "1";
-
-    if (isExplicitSelection) return value;
-
-    return value;
+    // 只读「主题名」这一项。历史上这里还额外读过 nolo-theme-name-explicit，
+    // 但两个分支返回值完全相同（是死代码），它唯一的作用是给这个 try 增加了
+    // 第二个可能抛错的存储访问：只要 explicit 读取失败，已经成功读到的主题名
+    // 会被一起丢掉，调用方回落到默认主题 nature——表现为首屏 catppuccin、
+    // hydrate 后跳成 nature。2026-10-31 用探针确认过该失效路径
+    // （theme-name 正常、explicit 抛错 → 返回 undefined）。
+    return normalizeThemeName(storage?.getItem("nolo-theme-name")) || undefined;
   } catch {
     return undefined;
   }

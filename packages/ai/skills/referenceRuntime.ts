@@ -35,6 +35,13 @@ export type SkillGraphVisit = {
   meta?: ReturnType<typeof resolvePageSkillMetadata>;
 };
 
+export type SkillGraphBlockedRoot = {
+  root: SkillGraphRoot;
+  /** Canonical skill ids (falling back to dbKey); missing nodes retain the requested identifier. */
+  path: string[];
+  reason: "denied" | "missing";
+};
+
 export type ResolvedSkillGraph = {
   requiredTools: string[];
   recommendedTools: string[];
@@ -42,6 +49,7 @@ export type ResolvedSkillGraph = {
   skillPromptPatches: string[];
   contentByKey: Map<string, SkillRuntimePageLike>;
   visits: SkillGraphVisit[];
+  blockedRoots?: SkillGraphBlockedRoot[];
 };
 
 export const joinUniqueStrings = (...groups: Array<string[] | undefined>): string[] =>
@@ -171,14 +179,37 @@ export async function resolveSkillGraphFromRoots(options: {
   roots: SkillGraphRoot[];
   loadPage: (identifier: string) => Promise<SkillRuntimePageLike>;
   contentByKey?: Map<string, SkillRuntimePageLike>;
+  /** Checked before collecting capabilities; identifier is skillConfig.id ?? dbKey. */
+  admitSkill?: (page: NonNullable<SkillRuntimePageLike>, identifier: string) => boolean | Promise<boolean>;
+  /** Atomically discard a root when it or any required dependency is missing/denied. */
+  strictRequiredDependencies?: boolean;
 }): Promise<ResolvedSkillGraph> {
   const contentByKey = new Map<string, SkillRuntimePageLike>(options.contentByKey ?? []);
-  const requiredTools = new Set<string>();
-  const recommendedTools = new Set<string>();
-  const recommendedSkillHints = new Set<string>();
-  const skillPromptPatches = new Set<string>();
-  const visits: SkillGraphVisit[] = [];
-  const visited = new Set<string>();
+  const createContribution = (ancestors?: Set<string>) => ({
+    requiredTools: new Set<string>(),
+    recommendedTools: new Set<string>(),
+    recommendedSkillHints: new Set<string>(),
+    skillPromptPatches: new Set<string>(),
+    visits: [] as SkillGraphVisit[],
+    visited: new Set(ancestors),
+  });
+  type Contribution = ReturnType<typeof createContribution>;
+  type Failure = Pick<SkillGraphBlockedRoot, "path" | "reason">;
+  const contribution = createContribution();
+  const strict = options.strictRequiredDependencies === true;
+  const blockedRoots: SkillGraphBlockedRoot[] = [];
+
+  const mergeContribution = (target: Contribution, source: Contribution) => {
+    source.requiredTools.forEach((value) => target.requiredTools.add(value));
+    source.recommendedTools.forEach((value) => target.recommendedTools.add(value));
+    source.recommendedSkillHints.forEach((value) => target.recommendedSkillHints.add(value));
+    source.skillPromptPatches.forEach((value) => target.skillPromptPatches.add(value));
+    for (const visit of source.visits) {
+      const key = `${visit.mode}:${visit.dbKey}`;
+      if (!target.visited.has(key)) target.visits.push(visit);
+      target.visited.add(key);
+    }
+  };
 
   const loadPageCached = async (identifier: string): Promise<SkillRuntimePageLike> => {
     const resolvedIdentifier = buildIdentifierCandidates(identifier, contentByKey);
@@ -197,23 +228,31 @@ export async function resolveSkillGraphFromRoots(options: {
     return page ?? null;
   };
 
+  // One traversal for both legacy and strict callers. Only contribution boundaries differ.
   const visit = async (
     identifier: string,
     mode: "required" | "recommended",
-    sourceLabel?: string,
-  ): Promise<void> => {
+    sourceLabel: string | undefined,
+    target: Contribution,
+    path: string[] = [],
+  ): Promise<Failure[]> => {
     const page = await loadPageCached(identifier);
-    if (!page?.dbKey) return;
-    const visitKey = `${mode}:${page.dbKey}`;
-    if (visited.has(visitKey)) return;
-    visited.add(visitKey);
-
+    if (!page?.dbKey) return strict ? [{ path: [...path, identifier], reason: "missing" }] : [];
     const meta = resolvePageSkillMetadata(page);
+    const canonicalIdentifier = asOptionalTrimmedString(meta?.skillConfig?.id) ?? page.dbKey;
+    const nextPath = [...path, canonicalIdentifier];
+    if (options.admitSkill && !(await options.admitSkill(page, canonicalIdentifier))) {
+      return strict ? [{ path: nextPath, reason: "denied" }] : [];
+    }
+    const visitKey = `${mode}:${page.dbKey}`;
+    if (target.visited.has(visitKey)) return [];
+    target.visited.add(visitKey);
+
     const directTools = canonicalizeToolNames(page.tools ?? []);
     const skillTools = canonicalizeToolNames(meta?.skillConfig?.toolNames ?? []);
     const mergedTools = joinUniqueStrings(directTools, skillTools);
 
-    visits.push({
+    target.visits.push({
       dbKey: page.dbKey,
       title: page.title,
       mode,
@@ -222,37 +261,65 @@ export async function resolveSkillGraphFromRoots(options: {
     });
 
     if (mode === "required") {
-      mergedTools.forEach((toolName) => requiredTools.add(toolName));
+      mergedTools.forEach((toolName) => target.requiredTools.add(toolName));
       if (meta?.skillConfig?.promptPatch) {
-        skillPromptPatches.add(meta.skillConfig.promptPatch);
+        target.skillPromptPatches.add(meta.skillConfig.promptPatch);
       }
     } else {
-      mergedTools.forEach((toolName) => recommendedTools.add(toolName));
+      mergedTools.forEach((toolName) => target.recommendedTools.add(toolName));
       if (meta?.skillConfig?.name) {
-        recommendedSkillHints.add(meta.skillConfig.name);
+        target.recommendedSkillHints.add(meta.skillConfig.name);
       }
     }
 
     const nextHard = meta?.requiredSkills ?? meta?.skillConfig?.requiredSkills ?? [];
     const nextSoft = meta?.recommendedSkills ?? meta?.skillConfig?.recommendedSkills ?? [];
-
-    if (mode === "required") {
-      await Promise.all(nextHard.map((childKey) => visit(childKey, "required", page.dbKey)));
-      await Promise.all(nextSoft.map((childKey) => visit(childKey, "recommended", page.dbKey)));
-      return;
+    if (strict) {
+      // Required edges remain mandatory even within a recommended branch.
+      const failures = (await Promise.all(nextHard.map((childKey) =>
+        visit(childKey, mode, page.dbKey, target, nextPath),
+      ))).flat();
+      await Promise.all(nextSoft.map(async (childKey) => {
+        const branch = createContribution(target.visited);
+        const branchFailures = await visit(childKey, "recommended", page.dbKey, branch, nextPath);
+        if (branchFailures.length === 0) mergeContribution(target, branch);
+      }));
+      return failures;
     }
 
-    await Promise.all([...nextHard, ...nextSoft].map((childKey) => visit(childKey, "recommended", page.dbKey)));
+    if (mode === "required") {
+      await Promise.all(nextHard.map((childKey) => visit(childKey, "required", page.dbKey, target)));
+      await Promise.all(nextSoft.map((childKey) => visit(childKey, "recommended", page.dbKey, target)));
+      return [];
+    }
+
+    await Promise.all([...nextHard, ...nextSoft].map((childKey) => visit(childKey, "recommended", page.dbKey, target)));
+    return [];
   };
 
-  await Promise.all(options.roots.map((root) => visit(root.identifier, root.mode, root.sourceLabel)));
+  if (strict) {
+    const results = await Promise.all(options.roots.map(async (root) => {
+      const target = createContribution();
+      const failures = await visit(root.identifier, root.mode, root.sourceLabel, target);
+      return { root, target, failures };
+    }));
+    for (const { root, target, failures } of results) {
+      if (failures.length > 0) blockedRoots.push(...failures.map((failure) => ({ root, ...failure })));
+      else mergeContribution(contribution, target);
+    }
+  } else {
+    await Promise.all(options.roots.map((root) =>
+      visit(root.identifier, root.mode, root.sourceLabel, contribution),
+    ));
+  }
 
   return {
-    requiredTools: Array.from(requiredTools),
-    recommendedTools: Array.from(recommendedTools),
-    recommendedSkillHints: Array.from(recommendedSkillHints),
-    skillPromptPatches: Array.from(skillPromptPatches),
+    requiredTools: Array.from(contribution.requiredTools),
+    recommendedTools: Array.from(contribution.recommendedTools),
+    recommendedSkillHints: Array.from(contribution.recommendedSkillHints),
+    skillPromptPatches: Array.from(contribution.skillPromptPatches),
     contentByKey,
-    visits,
+    visits: contribution.visits,
+    ...(strict ? { blockedRoots } : {}),
   };
 }

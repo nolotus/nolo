@@ -54,7 +54,7 @@ export interface CliExecuteOptions {
   env?: Record<string, string | undefined>;
   yolo?: boolean;     // 允许所有工具，默认 true（后台任务常用）
   systemPrompt?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   temperature?: number;
   topP?: number;
   frequencyPenalty?: number;

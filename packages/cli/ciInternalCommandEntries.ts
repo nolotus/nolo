@@ -1,5 +1,5 @@
 import type { CommandEntry } from "./cliCommandTypes";
-import { fetchCiStatus, type CiJob } from "./tui/ciStatus";
+import { fetchCiCancel, fetchCiStatus, type CiJob } from "./tui/ciStatus";
 
 function formatDuration(job: CiJob): string {
   if (typeof job.durationMs !== "number") return "-";
@@ -36,6 +36,25 @@ function parseLimit(args: string[]): number {
  */
 export function getCiInternalCommandEntries(): CommandEntry[] {
   return [
+    {
+      path: ["ci", "cancel"],
+      description: "取消 alpha 部署任务",
+      kind: "internal",
+      handler: async (args) => {
+        const jobId = args[0]?.trim();
+        if (!jobId) {
+          console.error("取消失败：缺少 jobId（nolo ci cancel <jobId>）");
+          return 1;
+        }
+        const cancelled = await fetchCiCancel(jobId);
+        if (!cancelled) {
+          console.error(`取消失败：${jobId} 不可取消，或 CI 通道不可用`);
+          return 1;
+        }
+        console.log(`已请求取消 CI 任务 ${jobId}`);
+        return 0;
+      },
+    },
     {
       path: ["ci", "status"],
       description: "Show recent nolo-ci deploy jobs (alpha / main)",

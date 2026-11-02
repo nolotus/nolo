@@ -38,10 +38,48 @@
     order: 2;
     width: 100%;
   }
+
+  /* 头像与通知必须落在同一个盒子里。这些元素身上还挂着横向侧栏那套 stylex 规则
+     （profile 的 flex:1 + marginLeft:-6px、padding 4px 6px、gap 8px、按钮 width 28px），
+     零散覆盖会在纵轴 Rail 里留下 2~3px 偏心，所以这里一次性把盒子拉齐：
+     所有相关容器固定 36px 宽（= 按钮宽），去掉内外边距与 gap，内容网格居中。 */
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__profile,
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__actions,
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__actions > div {
+    box-sizing: border-box;
+    display: grid !important;
+    grid-auto-flow: row;
+    justify-items: center !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 36px !important;
+    flex: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__profile button:not(.navigation-v2-rail-account__chevron),
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__actions button {
+    box-sizing: border-box;
+    display: grid !important;
+    place-items: center !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
 }
 
-/* 隐藏 compact 独立 chevron 但保留普通形态 */
-div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__chevron,
+/* 隐藏 compact 独立 chevron 但保留普通形态。
+   选择器带上 button 元素名：上面的「按钮盒子拉齐」规则同样命中 profile 内的 button，
+   同优先级时会把这条 display:none 顶掉，让 chevron 在头像下面多出一行。 */
+div.SidebarUserSection.navigation-v2-rail-account button.navigation-v2-rail-account__chevron,
 div.SidebarUserSection.navigation-v2-rail-account .SidebarUserSection__menu-toggle {
   display: none !important;
 }

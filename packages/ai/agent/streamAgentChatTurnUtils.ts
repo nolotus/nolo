@@ -61,6 +61,7 @@ import {
 // force a full tools/index (all schemas + executors) load on the chat hot path.
 import { TOOL_PACKS, applyDisabledTools, expandEnabledPacks, resolveEffectiveEnabledPacks, expandEnabledPackPromptPatches, applyDefaultWebToolPacks, applySystemBuiltinSkillFilter, addDefaultSystemCapabilityTools } from "ai/tools/toolPacks";
 import { resolveAgentRecommendedSkillNames, resolveAgentRequiredPackIds } from "ai/tools/agentSkillConfig";
+import type { ResolvedSkillGraph } from "ai/skills/referenceRuntime";
 import { canonicalizeToolNames, prioritizeToolNames } from "ai/tools/toolNameAliases";
 import { resolveAgentImageInputSupport } from "ai/llm/agentCapabilities";
 import {
@@ -403,7 +404,9 @@ export const validateAccessAndBalance = (
     const userBalance = selectIdentityUserBalance(state);
     const currentUserId = selectIdentityUserId(state);
 
-    const isCustomApi = agentConfig.apiSource === "custom";
+    const isCustomApi =
+        agentConfig.apiSource === "custom" ||
+        Boolean(agentConfig.customProviderUrl);
     const isCliApi = agentConfig.apiSource === "cli";
     // M3: device-local owner when logged out; account match when logged in.
     const isDeviceLocalOwner =
@@ -765,7 +768,12 @@ export const mergeAgentToolsWithRuntime = (
     mentionedTools: string[],
     runtimeOptions?: AgentRuntimeOptions,
     state?: RootState,
+    accountSkillRuntime?: ResolvedSkillGraph | null,
 ): Agent => {
+    // Account graph traversal belongs to async callers, not synchronous tool assembly.
+    // Server-prepared messages already contain account prompt contributions.
+    const userSkills = agentConfig.runtimePromptAlreadyInMessages ? null : accountSkillRuntime;
+    const userSkillPromptPatches = userSkills?.skillPromptPatches ?? [];
     const rawBaseTools = Array.isArray((agentConfig as any).tools)
         ? ((agentConfig as any).tools as string[])
         : [];
@@ -804,10 +812,10 @@ export const mergeAgentToolsWithRuntime = (
     );
     const baseTools = canonicalizeToolNames(expandedPackTools);
     const requiredSkillTools = canonicalizeToolNames(
-        (agentConfig as any).referencedTools ?? []
+        [...((agentConfig as any).referencedTools ?? []), ...(userSkills?.requiredTools ?? [])]
     );
     const recommendedSkillTools = canonicalizeToolNames(
-        (agentConfig as any).recommendedSkillTools ?? []
+        [...((agentConfig as any).recommendedSkillTools ?? []), ...(userSkills?.recommendedTools ?? [])]
     );
     // 「启用」档（recommended）的能力名进「相关技能」一行。这一档的工具刻意不
     // 常驻，所以模型必须先知道它存在、才谈得上按需 loadSkill——不给提示的话，
@@ -818,11 +826,13 @@ export const mergeAgentToolsWithRuntime = (
         ...new Set([
             ...asNonEmptyStringArray((agentConfig as any).recommendedSkillHints),
             ...resolveAgentRecommendedSkillNames(agentConfig as any),
+            ...(userSkills?.recommendedSkillHints ?? []),
         ]),
     ];
     const skillPromptPatches = [
         ...new Set([
             ...asNonEmptyStringArray((agentConfig as any).skillPromptPatches),
+            ...userSkillPromptPatches,
             // 能力包的 promptPatch（方法论文档）与 skill reference 的 patch 走同一条
             // 注入链（buildSkillGuidanceBlock → buildSkillGuidancePromptBlock），
             // 让「工具 + 配套纪律」作为一个能力包整体注入 system prompt。

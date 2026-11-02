@@ -1,3 +1,8 @@
+import { resolveUserSkillRuntime } from "../../ai/skills/userSkillRuntime";
+import {
+  resolveUserEnabledSkills,
+  type UserSkillPreferences,
+} from "../../ai/skills/userSkills";
 import { resolveRequestToolSurface } from "../../agent-runtime/runtimeToolSurface";
 import type {
   AgentRuntimeAgentConfig,
@@ -6,8 +11,7 @@ import type {
 } from "../agentRuntimeLocal";
 import { resolveLocalProvider } from "./providerResolution/resolveLocalProvider";
 import type { ProviderResolutionContext } from "./providerResolution/providerResolutionContext";
-import { dirname, extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveLocalRuntimePaths } from "./localRuntimePaths";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeProvider,
@@ -425,27 +429,16 @@ export type LocalCliExecutor = (
     cwd?: string;
     yolo?: boolean;
     env?: Record<string, string | undefined>;
-    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
     imageInputs?: CliImageInput[];
   },
 ) => Promise<CliExecuteResult>;
 
 // Max wait for remote dialog-evidence sync fetches (POST write / GET read)
 // before aborting, so an unreachable/hung server cannot stall a turn.
-const currentMetaFile = fileURLToPath(import.meta.url);
-const isJsBundle = extname(currentMetaFile) === ".js";
-const SOURCE_CLI_DIR = isJsBundle
-  ? dirname(currentMetaFile)
-  : dirname(dirname(currentMetaFile));
-const CLI_DIR = isCompiledBinary() ? dirname(process.execPath) : SOURCE_CLI_DIR;
-// Mirror the source/compiled extension so workspace tools can re-launch the
-// same CLI entrypoint in both repo development (bun + .ts) and published
-// packages (node + .js). Using a hardcoded .ts breaks installed packages.
-const CLI_ENTRYPOINT = isCompiledBinary()
-  ? process.execPath
-  : isJsBundle
-    ? currentMetaFile
-    : join(SOURCE_CLI_DIR, "index.ts");
+const { cliDir: CLI_DIR, cliEntrypoint: CLI_ENTRYPOINT } = resolveLocalRuntimePaths(
+  import.meta.url, isCompiledBinary(), process.execPath,
+);
 
 export {
   normalizeRuntimeCacheCwd,
@@ -1315,6 +1308,7 @@ export function createCliLocalRuntimeAdapter(
       // Read the global skill settings before checking the prepared-runtime cache.
       // Otherwise a setting change would keep reusing the old tool surface.
       let systemBuiltinSkills: Record<string, boolean> | null = null;
+      let skillPreferences: UserSkillPreferences = {};
       const sharedStore = await getOrCreateSharedStore(deps);
       if (userId) {
         try {
@@ -1322,19 +1316,31 @@ export function createCliLocalRuntimeAdapter(
             createUserKey.settings(userId),
             { remote: false },
           );
+          if (settingsRecord && typeof settingsRecord === "object") {
+            // Preserve absence: own enabledSkills (even undefined) overrides legacy.
+            skillPreferences = {
+              ...(Object.prototype.hasOwnProperty.call(settingsRecord, "enabledSkills")
+                ? { enabledSkills: (settingsRecord as any).enabledSkills }
+                : {}),
+              enabledPromptSkills: (settingsRecord as any).enabledPromptSkills,
+            };
+          }
           systemBuiltinSkills =
             settingsRecord && typeof settingsRecord === "object"
               ? (settingsRecord as any).systemBuiltinSkills ?? null
               : null;
         } catch {
-          // Local settings are best-effort; a read failure keeps skills enabled.
+          // Tool defaults stay enabled; account prompt preferences fail closed.
         }
       }
+      // Canonical order drives both graph traversal and the prepared cache key.
+      const enabledSkills = resolveUserEnabledSkills(skillPreferences).sort();
       const cacheKey = `${buildPreparedAgentCacheKey({
         userId,
         agentRef,
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
+        enabledSkills,
         wake: hasRunWakeChannel(deps.env),
         env: deps.env,
       })}:${dockerRuntimeEnabled ? "docker" : instaboxRuntimeEnabled ? "instabox" : "host"}`;
@@ -1358,16 +1364,41 @@ export function createCliLocalRuntimeAdapter(
       const fallbackLocalCliAgentConfig = storedAgentConfig
         ? null
         : resolveBuiltinLocalCliAgentConfig(agentRef, userId);
+      const sourceAgentConfig = storedAgentConfig ?? fallbackLocalCliAgentConfig;
+      const userSkills = await resolveUserSkillRuntime(sourceAgentConfig, {
+        enabledSkills,
+        enabledPromptSkills: skillPreferences.enabledPromptSkills,
+      });
+      // Account skills contribute declarations, not execution authority. Merge
+      // before every existing surface/profile/backend/local-policy gate; never
+      // mutate rawRecord, persisted skills, or the agent's enabled packs.
       const baseAgentConfig = withResolvedRuntimeToolSurface(
-        storedAgentConfig ?? fallbackLocalCliAgentConfig,
+        sourceAgentConfig && {
+          ...sourceAgentConfig,
+          toolNames: [...new Set([
+            ...(sourceAgentConfig.toolNames ?? []),
+            ...userSkills.requiredTools,
+          ])],
+        },
         deps.env,
       );
       // CLI 端 system prompt 直用 agentConfig.prompt（不经 buildSystemPrompt 的
       // skill-guidance 层），这里把启用能力包的 promptPatch 纪律追加进 prompt，
       // 与 web 端 skillPromptPatches 注入对齐。
-      const agentConfig = baseAgentConfig
+      const packAgentConfig = baseAgentConfig
         ? withRuntimeEnabledPacksAndPrompt(baseAgentConfig)
         : baseAgentConfig;
+      const userPromptPatches = userSkills.skillPromptPatches;
+      const agentConfig = packAgentConfig && userPromptPatches.length
+        ? {
+            ...packAgentConfig,
+            prompt: [
+              packAgentConfig.prompt,
+              ...userPromptPatches.filter((patch) =>
+                !String(packAgentConfig.prompt ?? "").includes(patch)),
+            ].filter(Boolean).join("\n\n"),
+          }
+        : packAgentConfig;
       // 读取用户全局设置中的「系统内置 Skill」开关映射，传给工具展开管道，
       // 让 CLI 端与 Web/桌面端行为一致：用户关闭「联网搜索」后，CLI agent
       // 也不再注入 web-search 包工具。best-effort，读失败视为默认全开。

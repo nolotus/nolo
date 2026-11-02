@@ -234,6 +234,8 @@ export interface SafeAgentSummary {
    * 窗口按 scope 合并保留全部（不只最紧张的）。
    */
   quota?: AgentQuota;
+  /** 上游明确报额度耗尽的观测，不包含凭证或原始错误体。 */
+  quotaExhaustion?: { observedAt: number };
   /** Stable non-secret identifier grouping agents that share the same credential. */
   credentialGroup?: string;
   /** Credential kind: oauth or api-key. */
@@ -454,6 +456,10 @@ export function toSafeAgentSummary(
       : undefined;
   // 配额快照透传：只在校验为合法形状（windows 数组 + 数值 observedAt）时带出，
   // 坏数据静默丢弃（与 nextAvailableAt 同一口径——上游写的脏数据不进摘要）。
+  const quotaExhaustion = record?.quotaExhaustion &&
+    typeof record.quotaExhaustion.observedAt === "number" &&
+    Number.isFinite(record.quotaExhaustion.observedAt)
+    ? { observedAt: record.quotaExhaustion.observedAt } : undefined;
   const rawQuota = record?.quota;
   const quota: AgentQuota | undefined =
     rawQuota && typeof rawQuota === "object" &&
@@ -531,7 +537,7 @@ export function toSafeAgentSummary(
   const { tier } = resolveDefaultAgentTier(record?.model);
 
   const availability = resolveAgentAvailability(
-    { nextAvailableAt, quota },
+    { nextAvailableAt, quota, quotaExhaustion },
     options?.now ?? Date.now(),
   );
 
@@ -562,6 +568,7 @@ export function toSafeAgentSummary(
     availabilityStatus: availability.status,
     availabilityReason: availability.reason,
     ...(quota !== undefined ? { quota } : {}),
+    ...(quotaExhaustion ? { quotaExhaustion } : {}),
     ...(credentialGroup !== undefined ? { credentialGroup } : {}),
     ...(credentialKind !== undefined ? { credentialKind } : {}),
     // 「未知 ≠ 独立」：无 credentialGroup 时显式 credentialed:false，调用方
@@ -585,33 +592,37 @@ export function sortSafeAgentSummaries<T extends AgentSelectionCandidate>(agents
  * 为 null 的字段在截断预算里是纯噪音，默认剔除。verbose 模式拿回完整字段集。
  */
 export const COMPACT_AGENT_SUMMARY_FIELDS = [
+  // —— 派发决策必需（短字段，必须排最前）——
+  // agentKey 是唯一不可推导、必须逐字复制的字段；截断时它首先被保住。
   "agentKey",
   "name",
   "model",
   // 能力档弱先验（unknown = 模型名没给出信号，不推断强弱）。
   "tier",
-  "provider",
-  "apiSource",
   "billingSource",
+  "availabilityStatus",
+  "credentialGroup",
   "isFavorite",
   "isOAuth",
   "isOwned",
   "isPublic",
-  "tools",
-  // Phase 2A economics 快照（period/multipliers/changesAt 等小对象）。
-  // 只对 DeepSeek API / BigModel GLM Coding Plan 存在；不含完整 policy/windows。
-  "economics",
+  // —— 次要身份/来源字段（仍很短）——
+  "provider",
+  "apiSource",
+  "credentialKind",
+  "credentialed",
   // 仅限流中的 agent 才会带（可用 agent 上不存在）。对"现在能不能选它"是
   // 决策信息（CLI --show-unavailable 场景）；默认列表已把这类 agent 过滤掉，
   // 所以通常根本不占字节。
   "nextAvailableAt",
-  // 额度快照：只有上游真上报过窗口的 agent 才带（通常是小对象）。
-  "quota",
-  "availabilityStatus",
   "availabilityReason",
-  "credentialGroup",
-  "credentialKind",
-  "credentialed",
+  // —— 体积大的说明性字段（排在每条记录最后，截断时先牺牲它们）——
+  // Phase 2A economics 快照（period/multipliers/changesAt 等小对象）。
+  // 只对 DeepSeek API / BigModel GLM Coding Plan 存在；不含完整 policy/windows。
+  "economics",
+  "tools",
+  // 额度快照（windows 数组，体积最大）：只有上游真上报过窗口的 agent 才带。
+  "quota",
 ] as const;
 
 export type CompactSafeAgentSummary = Pick<

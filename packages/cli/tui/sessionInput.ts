@@ -11,6 +11,9 @@ import { compactWhitespace } from "core/compactWhitespace";
 import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { discoverSkills } from "../../agent-runtime/skillDiscovery";
+import { listBuiltinSkills } from "ai/skills/builtinSkillRegistry";
+import { formatSkillSlashReference } from "../../agent-runtime/skillSlashReference";
 import type { TuiKeyInfo, TuiInputKeyResult } from "./sessionTypes";
 
 // ─── Key handling ───────────────────────────────────────────────────────────
@@ -182,23 +185,53 @@ export function applyTuiInputKey(
     return { buffer, cursorPos: curPos };
   }
 
-  if (seq === "\t" || key.name === "tab") {
-    // 路径补全优先：`/cd <部分路径>` 场景下展开目录候选。
-    // 单候选直接补完（补全到「部分路径+目录名 + '/'」便于继续下钻）；
-    // 多候选保留原 buffer——候选行由 renderInputArea 的 completeSlashCommand
-    // 渲染，用户输入消歧后再次 TAB 收敛。与命令名补全的「单候选即补完、
-    // 多候选仅显示」交互约定保持一致。
-    if (options?.cwd) {
-      const pathCandidates = completeSlashCommand(buffer, options.cwd);
-      if (pathCandidates.length === 1) {
-        // 候选已是完整行（`/cd <head><name>/`），直接落盘；尾斜杠留给
-        // 后续下钻（再输字符 + TAB 进入子目录）。
-        const [only] = pathCandidates;
-        return { buffer: only, cursorPos: only.length };
+  const isBackTab =
+    seq === "\x1b[Z" ||
+    key.name === "backtab" ||
+    (Boolean(key.shift) && (seq === "\t" || key.name === "tab"));
+  const isTab = !isBackTab && (seq === "\t" || key.name === "tab");
+  if (isTab || isBackTab) {
+    const isReverse = isBackTab;
+    let candidates = completeSlashCandidates(buffer, options?.cwd);
+
+    // If buffer is a /cd path ending in slash, check if it is cycling among parent's candidates
+    if (options?.cwd && buffer.startsWith("/cd ") && buffer.endsWith("/")) {
+      const prefix = buffer.slice("/cd ".length);
+      const trimmedSlash = prefix.slice(0, -1);
+      const lastSlash = trimmedSlash.lastIndexOf("/");
+      const parentPrefix = lastSlash >= 0 ? trimmedSlash.slice(0, lastSlash + 1) : "";
+      const parentCandidates = completeSlashCandidates(`/cd ${parentPrefix}`, options.cwd);
+      const parentIdx = parentCandidates.findIndex(
+        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
+      );
+      if (parentIdx >= 0 && parentCandidates.length > 1) {
+        candidates = parentCandidates;
       }
-      if (pathCandidates.length > 1) {
-        return { buffer, cursorPos: curPos };
+    }
+
+    if (candidates.length === 1) {
+      const [only] = candidates;
+      return { buffer: only.insertText, cursorPos: only.insertText.length };
+    }
+    if (candidates.length > 1) {
+      const currentIndex = candidates.findIndex(
+        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
+      );
+      if (currentIndex >= 0) {
+        const step = isReverse ? -1 : 1;
+        const nextIndex =
+          (currentIndex + step + candidates.length) % candidates.length;
+        const next = candidates[nextIndex];
+        return { buffer: next.insertText, cursorPos: next.insertText.length };
       }
+      const common = findCommonPrefix(candidates.map((c) => c.insertText));
+      if (common.length > buffer.length) {
+        return { buffer: common, cursorPos: common.length };
+      }
+      const chosen = isReverse
+        ? candidates[candidates.length - 1]
+        : candidates[0];
+      return { buffer: chosen.insertText, cursorPos: chosen.insertText.length };
     }
     const completed = completeSlashPrefix(buffer) ?? buffer;
     return { buffer: completed, cursorPos: completed.length };
@@ -420,7 +453,29 @@ export function completeSlashPrefix(buffer: string): string | null {
   return prefix.length > buffer.length ? prefix : null;
 }
 
-export function completeSlashCommand(buffer: string, cwd?: string): string[] {
+export interface SlashCommandCandidate {
+  label: string;
+  insertText: string;
+  source?: "builtin" | "project" | "path" | string;
+  description?: string;
+}
+
+function findCommonPrefix(strings: string[]): string {
+  if (strings.length === 0) return "";
+  let prefix = strings[0] ?? "";
+  for (let i = 1; i < strings.length; i++) {
+    while (!strings[i]!.startsWith(prefix)) {
+      prefix = prefix.slice(0, -1);
+      if (prefix === "") return "";
+    }
+  }
+  return prefix;
+}
+
+export function completeSlashCandidates(
+  buffer: string,
+  cwd?: string,
+): SlashCommandCandidate[] {
   if (!buffer.startsWith("/")) return [];
   const trimmed = buffer.trim();
   if (cwd && buffer.startsWith("/cd ")) {
@@ -429,10 +484,74 @@ export function completeSlashCommand(buffer: string, cwd?: string): string[] {
     // 空前缀（`/cd ` + TAB）列出 cwd 下全部子目录。注意用原始 buffer 判断
     // 前缀：`/cd `.trim() 会吃掉尾空格，导致空参数场景漏判。
     const prefix = buffer.slice("/cd ".length);
-    return completeCdPathCandidates(prefix, cwd);
+    const pathLines = completeCdPathCandidates(prefix, cwd);
+    return pathLines.map((line) => ({
+      label: line,
+      insertText: line,
+      source: "path",
+    }));
   }
   if (trimmed.includes(" ")) return [];
-  return SLASH_COMMANDS.filter((cmd) => cmd.startsWith(trimmed) && cmd !== trimmed);
+
+  const candidates: SlashCommandCandidate[] = [];
+
+  for (const cmd of SLASH_COMMANDS) {
+    if (cmd.startsWith(trimmed) && cmd !== trimmed) {
+      candidates.push({
+        label: cmd,
+        insertText: `${cmd} `,
+        source: "builtin",
+      });
+    }
+  }
+
+  // 内置 skill 也要能补全：Web 候选池与 CLI 执行器都支持 builtin 源，TAB 只补
+  // 系统命令和项目 skill 会让两端体验分叉。
+  const slashQuery = trimmed.slice(1).toLowerCase();
+  for (const skill of listBuiltinSkills()) {
+    const slug = skill.slug;
+    if (slashQuery !== "" && !slug.toLowerCase().startsWith(slashQuery)) continue;
+    candidates.push({
+      label: `/${slug} (builtin)`,
+      insertText: `${formatSkillSlashReference({
+        source: "builtin",
+        id: slug,
+      })} `,
+      source: "builtin",
+      description: skill.title || "Builtin skill",
+    });
+  }
+
+  if (cwd) {
+    try {
+      const skills = discoverSkills(cwd);
+      const query = trimmed.slice(1).toLowerCase();
+      for (const skill of skills) {
+        const nameLower = skill.name.toLowerCase();
+        if (query === "" || nameLower.startsWith(query)) {
+          const insertText = `${formatSkillSlashReference({
+            source: "project",
+            projectBinding: cwd,
+            relativePath: skill.relativePath,
+          })} `;
+          candidates.push({
+            label: `/${skill.name} (project)`,
+            insertText,
+            source: "project",
+            description: skill.description || "Project skill",
+          });
+        }
+      }
+    } catch {
+      // Swallowed: keep built-in candidates on fs errors
+    }
+  }
+
+  return candidates;
+}
+
+export function completeSlashCommand(buffer: string, cwd?: string): string[] {
+  return completeSlashCandidates(buffer, cwd).map((c) => c.label);
 }
 
 /**

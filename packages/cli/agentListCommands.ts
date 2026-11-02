@@ -383,9 +383,11 @@ export async function runAgentListCommand(
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
         total: discovery.total,
         unavailableCount: discovery.unavailableCount,
-        unavailableAgents: discovery.unavailableAgents,
-        credentialGroups: discovery.credentialGroups,
+        // agents 在最前：host 截断长输出时保头保尾，派发所需的 agentKey
+        // 必须落在头部；凭证分组/限流清单是说明性大块，放最后。
         agents: discovery.agents,
+        credentialGroups: discovery.credentialGroups,
+        unavailableAgents: discovery.unavailableAgents,
       }, null, 2);
       // Observed speed data needs the local db; the call is disk-cached with a
       // scan budget and degrades to AA-only on any failure (it never throws), so
@@ -410,9 +412,9 @@ export async function runAgentListCommand(
         total: agentsForOutput.length,
         publicCount: agentsForOutput.filter((agent) => agent.publicRecordExists).length,
         unavailableCount,
-        credentialGroups,
-        source,
         agents: agentsForOutput,
+        source,
+        credentialGroups,
       }, null, 2));
       output.write("\n");
       return 0;

@@ -10,7 +10,6 @@ import {
   LuUser,
   LuLogIn,
   LuLogOut,
-  LuDownload,
   LuCheck,
   LuArrowRight,
   LuCircleX,
@@ -312,7 +311,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
         <div
           ref={menuContainerRef}
           {...withLiteralClass(railCompact ? "navigation-v2-rail-account__profile" : "", sidebarStyles.sidebarUserSectionCardWrap)}
-          style={{ flex: 1, minWidth: 0 }}
+          style={railCompact ? undefined : { flex: 1, minWidth: 0 }}
         >
           <Tooltip
             content={railCompact ? t("openAccountMenu", "账号菜单") : t("goToProfile", "个人主页")}
@@ -487,14 +486,6 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
             >
               <LuUserPlus size={14} aria-hidden="true" />
               <span>{t("inviteFriend", "邀请朋友")}</span>
-            </button>
-            <button
-              type="button"
-              className="topbar-user-menu__item"
-              onClick={() => { navigate("/downloads"); setMenuOpen(false); }}
-            >
-              <LuDownload size={14} aria-hidden="true" />
-              <span>{t("downloadClient", "下载客户端")}</span>
             </button>
             <button
               type="button"

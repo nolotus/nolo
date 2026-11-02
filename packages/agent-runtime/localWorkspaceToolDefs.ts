@@ -147,8 +147,13 @@ function buildReplaceWorkspaceTextTool(): OpenAiCompatibleTool {
           },
           expectedReplacements: {
             type: "integer",
+            minimum: 1,
             description: "Expected replacement count. Defaults to 1.",
           },
+          // 刻意保持单一声明（integer），不引入 anyOf/oneOf 组合 schema：
+          // provider 对组合 schema 的处理不一致——Gemini 会把无顶层 type 的联合
+          // 节点归并成 type:"object"，连原本合法的整数输入都不再符合它的声明；
+          // Fireworks 直接剥掉组合子、只剩描述。
         },
         required: ["path", "oldText", "newText"],
       },
@@ -408,7 +413,7 @@ export function buildWorkspaceToolDefinition(toolName: string) {
       type: "function" as const,
       function: {
         name: "read_image",
-        description: "Read 1 to 4 local PNG/JPEG/WebP/GIF images in one call. Supply either path (one image) or paths (1–4 images), never both. Any failure rejects the entire batch. Long edges above 1568px are resized to JPEG q80. Maximum encoded base64 size is 2MiB per image; request budget remains 4 images / 8MiB.",
+        description: "Read 1 to 4 local PNG/JPEG/WebP/GIF images in one call. Supply either path (one image) or paths (1–4 images), never both. Any failure rejects the entire batch. Long edges above 1568px are resized to JPEG q80. Maximum encoded base64 size is 2MiB per image; request budget remains 4 images / 8MiB. Note: Chat attachments labeled [附件] are already delivered directly into visual context; do not call read_image for chat attachments.",
         parameters: {
           type: "object",
           properties: {

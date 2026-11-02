@@ -59,14 +59,18 @@ export const themeBootstrapSource = `      (function(){try{
             ${fontRootVariableLines}
           }
         }catch(e){}
-        var t=localStorage.getItem('nolo-theme-mode');
+        var t;
+        try{t=localStorage.getItem('nolo-theme-mode');}catch(e){}
         if(!t||t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
         document.documentElement.setAttribute('data-theme',t);
-        var d=localStorage.getItem('nolo-density');
+        var d;
+        try{d=localStorage.getItem('nolo-density');}catch(e){}
         if(d==='compact'||d==='spacious')document.documentElement.setAttribute('data-density',d);
         var themeData=${themeBootstrapData};
-        var themeName=localStorage.getItem('nolo-theme-name');
-        var themeExplicit=localStorage.getItem('nolo-theme-name-explicit')==='1';
+        var themeName;
+        try{themeName=localStorage.getItem('nolo-theme-name');}catch(e){}
+        var themeExplicit=false;
+        try{themeExplicit=localStorage.getItem('nolo-theme-name-explicit')==='1';}catch(e){}
         var isDark=t==='dark';
         function hexToRgbString(value){
           if(typeof value!=='string') return null;
@@ -211,7 +215,7 @@ export const themeBootstrapSource = `      (function(){try{
           });
         }
         if(themeName==='neutral'&&!themeExplicit){
-          localStorage.removeItem('nolo-theme-name');
+          try{localStorage.removeItem('nolo-theme-name');}catch(e){}
         }
         var css=buildThemeCss(themeName,isDark,d||'compact');
         if(css){var s=document.createElement('style');s.id='global-theme-variables';s.textContent=css;document.head.appendChild(s);}
@@ -223,5 +227,5 @@ export const themeBootstrapUrl = getThemeBootstrapUrl();
 
 // Runs before the blocking external script, even when its asset is unavailable.
 // A nonce-bearing script works with CSP without requiring unsafe-inline handlers.
-export const themeBootstrapFallback = `(function(){var r=document.documentElement,t,d;try{t=localStorage.getItem('nolo-theme-mode');d=localStorage.getItem('nolo-density')}catch(e){}r.setAttribute('data-theme',t==='dark'||t==='light'?t:window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');r.setAttribute('data-density',d==='spacious'?'spacious':'compact')})();`;
+export const themeBootstrapFallback = `(function(){var r=document.documentElement,t,d;try{t=localStorage.getItem('nolo-theme-mode');}catch(e){}try{d=localStorage.getItem('nolo-density');}catch(e){}r.setAttribute('data-theme',t==='dark'||t==='light'?t:window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');r.setAttribute('data-density',d==='spacious'?'spacious':'compact')})();`;
 

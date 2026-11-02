@@ -43,7 +43,7 @@ export type LocalCliExecutor = (
     cwd?: string;
     yolo?: boolean;
     env?: EnvLike;
-    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
     imageInputs?: Array<{ source: string; materializedPath?: string }>;
   }
 ) => Promise<{ text: string; raw?: string; elapsed?: number }>;

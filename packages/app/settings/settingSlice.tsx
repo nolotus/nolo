@@ -126,6 +126,8 @@ export {
   selectSpaceContextLevel,
   selectAutoApproveSelfUpdateFields,
   selectAiRecentContentLimit,
+  selectEnabledPromptSkills,
+  selectEnabledSkills,
   selectDefaultAgentPreference,
   selectDefaultAgentId,
   selectOcrModel,
@@ -164,6 +166,17 @@ export {
   stripRegisterBackedFieldsFromSettingsWrite,
   sanitizeStoredSettingsRecord,
 } from "./settingPersistence";
+
+// Skill 元数据与偏好工具
+export {
+  SUPPORTED_USER_SKILL_SLUGS,
+  RECOMMENDED_USER_SKILL_SLUGS,
+  isUserSkillToggleable,
+  normalizeEnabledSkills,
+  resolveUserEnabledSkills,
+  type SupportedUserSkillSlug,
+  type RecommendedUserSkillSlug,
+} from "ai/skills/userSkills";
 
 // thunks
 export {

@@ -22,7 +22,7 @@ import { consumeSgrMouseSequence } from "./tuiMouse";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import { composerSurfaceBackgroundSequence, themeColorSequence, themeText } from "./theme";
 import { t } from "./i18n";
-import { completeSlashCommand } from "./sessionInput";
+import { completeSlashCandidates, completeSlashCommand } from "./sessionInput";
 import { PASTE_TOKEN_PREFIX } from "./session";
 import { resetHistoryFrameDiffCache } from "./tuiHistory";
 import { resolveHistoryLayoutGeometry } from "./tuiLayout";
@@ -288,10 +288,33 @@ export function createFixedInput(
     const colorEnabled = resolveCliColorEnabled();
     const cols = Math.max(1, getColumns());
 
-    const completions = completeSlashCommand(buffer, config.getCwd?.());
+    let completions = completeSlashCandidates(buffer, config.getCwd?.());
+    const cwd = config.getCwd?.();
+    if (cwd && buffer.startsWith("/cd ") && buffer.endsWith("/")) {
+      const prefix = buffer.slice("/cd ".length);
+      const trimmedSlash = prefix.slice(0, -1);
+      const lastSlash = trimmedSlash.lastIndexOf("/");
+      const parentPrefix = lastSlash >= 0 ? trimmedSlash.slice(0, lastSlash + 1) : "";
+      const parentCompletions = completeSlashCandidates(`/cd ${parentPrefix}`, cwd);
+      const parentIdx = parentCompletions.findIndex(
+        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
+      );
+      if (parentIdx >= 0 && parentCompletions.length > 1) {
+        completions = parentCompletions;
+      }
+    }
     const sections: string[] = [];
     if (completions.length > 0) {
-      sections.push(fitAnsiLine(dimCliText(completions.join("  "), colorEnabled), cols));
+      const selectedIndex = completions.findIndex(
+        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
+      );
+      const labels = completions.map((c, idx) => {
+        if (idx === selectedIndex && colorEnabled) {
+          return `\x1b[1;7m${c.label}\x1b[0m`;
+        }
+        return c.label;
+      });
+      sections.push(fitAnsiLine(dimCliText(labels.join("  "), colorEnabled), cols));
     }
 
     // Activity line(s) (e.g. active tool execution or sub-agent run panel)

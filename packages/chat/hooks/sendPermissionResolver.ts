@@ -83,7 +83,9 @@ export function resolveSendPermissionState(input: {
     };
   }
 
-  const isCustomApi = agentConfig.apiSource === "custom";
+  const isCustomApi =
+    agentConfig.apiSource === "custom" ||
+    Boolean(agentConfig.customProviderUrl);
   const isCliApi = agentConfig.apiSource === "cli";
   // Subscription OAuth providers (Cursor/ChatGPT/xAI/Antigravity/Claude) are
   // billed by the upstream subscription, not per-token. Treat them as custom

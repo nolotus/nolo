@@ -77,6 +77,13 @@ import {
   buildAutoReviewSkillPageKey,
 } from "./autoReviewSkill";
 import {
+  UB_MODE_SKILL_SLUGS,
+  buildUbModeSkillConfig,
+  buildUbModeSkillContentBySlug,
+  buildUbModeSkillId,
+  buildUbModeSkillPageKey,
+} from "./ubModeSkill";
+import {
   WORKTREE_SKILL_SLUGS,
   buildWorktreeSkillConfig,
   buildWorktreeSkillContentBySlug,
@@ -225,6 +232,13 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildAutoReviewSkillPageKey,
     buildConfig: buildAutoReviewSkillConfig,
     buildContent: buildAutoReviewSkillContentBySlug,
+  },
+  {
+    slugs: UB_MODE_SKILL_SLUGS,
+    buildSkillId: buildUbModeSkillId,
+    buildPageKey: buildUbModeSkillPageKey,
+    buildConfig: buildUbModeSkillConfig,
+    buildContent: buildUbModeSkillContentBySlug,
   },
   {
     slugs: WORKTREE_SKILL_SLUGS,

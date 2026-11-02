@@ -14,7 +14,6 @@ import {
   stageStableWindowsUploadSet,
 } from "./stableWindowsUploadSet";
 import { pruneClassicLevelPrebuilds } from "./prune-native-prebuilds";
-import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
 import { extractWindowsTarball } from "./windows-tarball-extract";
 import {
   cpSync,
@@ -544,9 +543,6 @@ async function recoverInstallerFromRawTar() {
       throw error;
     }
     await pruneClassicLevelPrebuilds(payloadDir);
-    // DLL 的 PE 补丁在 gate 之后执行，故其缺失返回值无需再消费；
-    // 若 patch 自身失败会自行 fail loud（见 patch-electrobun-windows-core.ts）。
-    patchElectrobunWindowsCore(join(payloadDir, "bin", "ElectrobunCore.dll"));
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "bun.exe"));
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "launcher.exe"));
 

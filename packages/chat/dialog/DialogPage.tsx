@@ -62,6 +62,21 @@ import {
 } from "./dialogAttention";
 
 // 懒加载组件
+const EMPTY_SLOT_MESSAGES: any[] = [];
+
+/**
+ * 右栏「运行中进程」槽位的内容组件。消息由它自己从 store 订阅：槽位内容经
+ * openSlot 写入 context，如果把 messages 放进 DialogPage 的 effect 依赖，
+ * 每来一条消息都会重开槽位（context 更新 + 面板重挂载），既浪费又会让
+ * effect 依赖不稳定。
+ */
+function RunningProcessesSlot({ dialogId }: { dialogId?: string | null }) {
+  const messages = useAppSelector((state) =>
+    dialogId ? selectAllMsgs(state, dialogId) : EMPTY_SLOT_MESSAGES
+  );
+  return <RunningProcessesPanel messages={messages} />;
+}
+
 const GuestGuide = React.lazy(() => import("render/web/ui/GuestGuide"));
 const ErrorView = React.lazy(() => import("render/web/ui/ErrorView"));
 
@@ -78,6 +93,12 @@ import "./dialogStylexEscapeHatch.css";
 const DIALOG_PAGE_MESSAGES_CLASS = `DialogPage__messages has-scroll-mask ${
   stylex.props(dialogPageStyles.messages).className ?? ""
 }`.trim();
+import { useIsMobile } from "app/hooks/useIsMobile";
+import { useRightSidebarOptional } from "render/layout/RightSidebarContext";
+import {
+  RunningProcessesPanel,
+  useRunningProcesses,
+} from "chat/web/MessageInputContextPanels";
 import { AgentDraftPanel } from "./AgentDraftPanel";
 import { ChildRunObserverPanel } from "./ChildRunObserverPanel";
 import { DialogRuntimeTargetBadge } from "./DialogRuntimeTargetBadge";
@@ -214,6 +235,36 @@ const DialogPage = ({
   const messages = useAppSelector((state) =>
     dialogId ? selectAllMsgs(state, dialogId) : [],
   );
+
+  const isMobile = useIsMobile();
+  const rightSidebar = useRightSidebarOptional();
+  const runningProcesses = useRunningProcesses(messages);
+
+  const openRightSlot = rightSidebar?.openSlot;
+  const closeRightSlot = rightSidebar?.closeSlot;
+  const hasRunningProcesses = runningProcesses.length > 0;
+
+  useEffect(() => {
+    // 不在伴随栏宿主内（独立渲染/测试/SSR）时什么都不做。
+    if (!openRightSlot || !closeRightSlot) return;
+    // 窄屏 / 移动端不要挤压正文（进程数据本身只在桌面宿主里存在）
+    if (isMobile || !hasRunningProcesses) {
+      closeRightSlot("running-processes");
+      return;
+    }
+
+    openRightSlot(
+      "running-processes",
+      <RunningProcessesSlot dialogId={dialogId} />,
+    );
+
+    return () => {
+      closeRightSlot("running-processes");
+    };
+    // 只依赖稳定方法与布尔量。rightSidebar 是 context 对象，每次渲染都是新
+    // 引用；把它（或 messages 数组）放进依赖会形成
+    // effect → setState → context → effect 的自激循环。
+  }, [closeRightSlot, dialogId, hasRunningProcesses, isMobile, openRightSlot]);
   const wakeToken = useToken();
   const wakeServer = useAppSelector(selectCurrentServer);
   const wakeControllers = useActiveControllers(currentDialogConfig?.dbKey ?? null);

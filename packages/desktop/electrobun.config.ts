@@ -4,6 +4,23 @@ import { DESKTOP_APP_VERSION } from "./desktopVersion";
 import { resolveMacSigningPlan } from "./scripts/macSigningPlan";
 
 /**
+ * Minimum supported electrobun: 2.0.4.
+ *
+ * 2.0.2 first carried the upstream fix that makes the native websocket server
+ * fall through to the next free port instead of crashing on Windows "port
+ * already in use" (TCP 50000). We now require 2.0.4 because that is the
+ * release we pin, build and test against: it is paired with hutch 0.28.1, it
+ * ships USTAR release archives (the installer/updater extractor cannot read
+ * GNU longname records), and its devkit is the one projected into
+ * `.hutch/devkit`.
+ *
+ * The npm dependency AND the `electrobun.version` pin in `hutch.config.ts`
+ * must move together: the npm package version decides which Hutch release
+ * the bootstrap downloads, the pin decides which devkit Hutch projects.
+ * Do not lower either below 2.0.4.
+ */
+
+/**
  * Repo-root runtime dirs that must never trigger a desktop rebuild.
  *
  * IMPORTANT: electrobun's watcher matches watchIgnore globs against paths
@@ -92,13 +109,12 @@ export default {
       // Desktop bundles never execute React Native upload code or server-side
       // browser automation during normal startup, so keep those optional
       // dependency trees out of Bun's desktop/server bundle graph.
-      // NOTE (hutch 0.24.3): `external` / `minify` / `sourcemap` / `define` in
-      // build.bun are all silently dropped from the cottontail build spec
-      // (hutch-engine cottontail-build-helper passes only entryPoints/bundle/
-      // platform/format/outfile/alias through) — with mainProcess: "bun" they
-      // are honored again. See pre-build.ts for the chromium-bidi stub that
-      // compensates for eager resolution of playwright-core's bundled
-      // require("chromium-bidi/...").
+      // NOTE: with mainProcess: "bun", hutch expands the whole build.bun spec
+      // into Bun.build (`{ ...input, ... }`), so `external` / `minify` /
+      // `sourcemap` / `define` are all honored and reach the bundler — these
+      // entries really do keep playwright & friends out of the bundle
+      // (verified in the packaged Resources/app/bun/index.js: no
+      // playwright-core / chromium-bidi code in the main-process bundle).
       external: [
         "react-native",
         "react-native/*",
@@ -133,8 +149,10 @@ export default {
       ".generated/vendor/node_modules/module-error": "node_modules/module-error",
       ".generated/vendor/node_modules/node-gyp-build": "node_modules/node-gyp-build",
       // 目录名用 integrations/connector（而非 integrations/desktop-chrome-connector）：
-      // electrobun 自解压器要求 tar 路径 ≤100 字符，原名会让 native-host 清单路径达到
-      // 112 字符并中止解包（TarUnsupportedFileType，2026-09-16 实测）。运行时解析见
+      // 打包前缀下的条目路径会进发布 tarball 的 header；短目录名给 USTAR 的
+      // prefix+name 拆分留足余量（解包器 fullFileName() 读 prefix(155)+name(100)，
+      // 最长 255 字符）。原名会让 native-host 清单路径达到 112 字符
+      // （2026-09-16 实测触发 TarUnsupportedFileType）。运行时解析见
       // desktopChromeConnectorHandler 的多路径探测。
       ".generated/vendor/packages/desktop-chrome-connector": "integrations/connector",
       ".generated/vendor/packages/x-reader": "integrations/x-reader",

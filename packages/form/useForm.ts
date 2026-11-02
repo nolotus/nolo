@@ -65,23 +65,39 @@ export interface FormApi<T extends object> {
   dirty: ReadonlySet<string>;
   /** 是否正在提交。 */
   submitting: boolean;
-  /** 写入单字段。等价于 set("name", e.target.value) 的便捷版。 */
-  set: <K extends string & keyof T>(name: K, value: T[K]) => void;
-  /** 写入字段的便捷重载：任意字符串 path（支持嵌套如 "refs.0.title"）。 */
-  setAny: (name: string, value: unknown) => void;
+  /** 写入单字段。等价于 set("name", e.target.value) 的便捷版。标记为 dirty（若 options.programmatic 为 true 则不标 dirty）。 */
+  set: <K extends string & keyof T>(
+    name: K,
+    value: T[K],
+    options?: { programmatic?: boolean },
+  ) => void;
+  /** 写入字段的便捷重载：任意字符串 path。标记为 dirty（若 options.programmatic 为 true 则不标 dirty）。 */
+  setAny: (
+    name: string,
+    value: unknown,
+    options?: { programmatic?: boolean },
+  ) => void;
+  /** 程序化/派生自动写入字段：更新 values 但不标记 dirty，用于模型派生定价、apiSource 状态同步等场景。 */
+  setProgrammatic: (name: string, value: unknown) => void;
   /** 读最新所有值（ref 保证回调里拿到的是最新值，而非 render 快照）。 */
   getValues: () => T;
   /** 读最新单字段值（ref 保证回调里拿到的是最新值）。 */
   getValue: (name: string) => unknown;
   /** 触发整表校验，返回错误 map（同时更新 errors）。 */
   validate: () => Record<string, string>;
-  /** 生成 onSubmit 句柄：自动 preventDefault + 校验 + 分派。 */
+  /** 生成 onSubmit 句柄：自动 preventDefault + 校验 + 分派。可选的 onSubmitError 出口在提交失败时触发。 */
   submit: (
     onValid: (values: T) => void | Promise<void>,
     onInvalid?: (errors: Record<string, string>) => void,
+    onSubmitError?: (error: unknown) => void,
   ) => (e?: FormEvent) => Promise<void>;
   /** 用新值整体替换状态，并清空错误与 dirty。不传参则只清空错误和 dirty，保留当前 values。 */
   reset: (values?: T) => void;
+  /**
+   * 仅 hydrate 用户未编辑过的字段（保留 dirty 集合中的字段与 dirty 标记）。
+   * 适用于从服务端异步/迟到加载权威基线，防止冲掉用户已编辑的草稿。
+   */
+  hydrate: (values: Partial<T>) => void;
 }
 
 // --- 状态 ---
@@ -117,10 +133,11 @@ type State<T extends object> = {
 };
 
 type Action<T extends object> =
-  | { type: "set"; name: string; value: unknown }
+  | { type: "set"; name: string; value: unknown; isProgrammatic?: boolean }
   | { type: "errors"; errors: Record<string, string> }
   | { type: "submitting"; on: boolean }
-  | { type: "reset"; values?: T };
+  | { type: "reset"; values?: T }
+  | { type: "hydrate"; values: Partial<T> };
 
 function reducer<T extends object>(s: State<T>, a: Action<T>): State<T> {
   switch (a.type) {
@@ -128,7 +145,9 @@ function reducer<T extends object>(s: State<T>, a: Action<T>): State<T> {
       return {
         ...s,
         values: { ...s.values, [a.name]: a.value } as T,
-        dirty: new Set<string>(s.dirty).add(a.name),
+        dirty: a.isProgrammatic
+          ? s.dirty
+          : new Set<string>(s.dirty).add(a.name),
       };
     case "errors":
       return { ...s, errors: a.errors };
@@ -141,6 +160,22 @@ function reducer<T extends object>(s: State<T>, a: Action<T>): State<T> {
         dirty: new Set<string>(),
         submitting: false,
       };
+    case "hydrate": {
+      // 迟到的权威基线数据到达时，仅将用户尚未动过的字段更新为权威值；
+      // 用户已经修改过的字段（在 dirty 集合中）保留其当前编辑值与 dirty 标记，防止草稿被冲掉。
+      const incoming = a.values;
+      if (!incoming || typeof incoming !== "object") return s;
+      const nextValues = { ...s.values };
+      for (const [key, val] of Object.entries(incoming)) {
+        if (!s.dirty.has(key)) {
+          (nextValues as Record<string, unknown>)[key] = val;
+        }
+      }
+      return {
+        ...s,
+        values: nextValues,
+      };
+    }
   }
 }
 
@@ -180,15 +215,39 @@ export function useForm<T extends object>(opts: {
   valuesRef.current = state.values;
 
   const set = useCallback(
-    <K extends string & keyof T>(name: K, value: T[K]) => {
-      dispatch({ type: "set", name: name as string, value });
+    <K extends string & keyof T>(
+      name: K,
+      value: T[K],
+      options?: { programmatic?: boolean },
+    ) => {
+      dispatch({
+        type: "set",
+        name: name as string,
+        value,
+        isProgrammatic: Boolean(options?.programmatic),
+      });
     },
     [],
   );
 
-  const setAny = useCallback((name: string, value: unknown) => {
-    dispatch({ type: "set", name, value });
+  const setAny = useCallback(
+    (name: string, value: unknown, options?: { programmatic?: boolean }) => {
+      dispatch({
+        type: "set",
+        name,
+        value,
+        isProgrammatic: Boolean(options?.programmatic),
+      });
+    },
+    [],
+  );
+
+  const setProgrammatic = useCallback((name: string, value: unknown) => {
+    dispatch({ type: "set", name, value, isProgrammatic: true });
   }, []);
+
+  (set as any).programmatic = setProgrammatic;
+  (setAny as any).programmatic = setProgrammatic;
 
   const validate = useCallback((): Record<string, string> => {
     const schema = schemaRef.current;
@@ -214,6 +273,7 @@ export function useForm<T extends object>(opts: {
     (
       onValid: (values: T) => void | Promise<void>,
       onInvalid?: (errors: Record<string, string>) => void,
+      onSubmitError?: (error: unknown) => void,
     ) =>
       async (e?: FormEvent) => {
         e?.preventDefault();
@@ -225,6 +285,10 @@ export function useForm<T extends object>(opts: {
         dispatch({ type: "submitting", on: true });
         try {
           await onValid(valuesRef.current);
+        } catch (error) {
+          // 提交失败时触发可选的错误出口；不绑定具体提示文案、不与字段校验混用、异常继续向外抛
+          onSubmitError?.(error);
+          throw error;
         } finally {
           dispatch({ type: "submitting", on: false });
         }
@@ -234,6 +298,10 @@ export function useForm<T extends object>(opts: {
 
   const reset = useCallback((values?: T) => {
     dispatch({ type: "reset", values: values as T });
+  }, []);
+
+  const hydrate = useCallback((values: Partial<T>) => {
+    dispatch({ type: "hydrate", values });
   }, []);
 
   const getValues = useCallback((): T => valuesRef.current, []);
@@ -248,10 +316,12 @@ export function useForm<T extends object>(opts: {
     submitting: state.submitting,
     set,
     setAny,
+    setProgrammatic,
     getValues,
     getValue,
     validate,
     submit,
     reset,
+    hydrate,
   };
 }

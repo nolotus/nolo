@@ -337,6 +337,15 @@ export const buildSkillDiscoveryLayer = (
  *
  * Null when no AGENTS.md file was found.
  */
+/**
+ * AGENTS.md 注入块的头部。导出成单一真值：调用方（如 agentsMd.ts）需要把
+ * 头部字节计入注入预算，否则「正文按预算截断 + 头部」会超出预算。
+ */
+export const buildAgentsMdLayerHeader = (
+  /** Source filename shown in the block header — hosts may fall back to CLAUDE.md. */
+  fileName = "AGENTS.md",
+): string => `--- 项目指令（${fileName}）---\n`;
+
 export const buildAgentsMdLayer = (
   content: string,
   /** Source filename shown in the block header — hosts may fall back to CLAUDE.md. */
@@ -346,7 +355,7 @@ export const buildAgentsMdLayer = (
   if (!trimmed) return null;
   return makeLayer(
     "agents-md",
-    `--- 项目指令（${fileName}）---\n${trimmed}`,
+    `${buildAgentsMdLayerHeader(fileName)}${trimmed}`,
     "session",
   );
 };

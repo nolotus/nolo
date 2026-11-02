@@ -235,6 +235,11 @@ export function buildLoadSkillExecutor(args: { cwd: string }) {
     metadata?: Record<string, unknown>;
   }> => {
     const parsed = parseNoloWorkspaceToolArguments(call.arguments);
+    // A precise reference must never fall through to legacy name resolution.
+    const referenceKeys = ["source", "slug", "projectBinding", "relativePath", "dbKey", "id", "skillId"];
+    if (referenceKeys.some((key) => Object.hasOwn(parsed, key))) {
+      return loadPreciseSkill(args.cwd, parsed);
+    }
     const name = noloStringArg(parsed.name ?? parsed.skillName ?? parsed.skill);
     if (!name) {
       return {
@@ -292,6 +297,75 @@ export function buildLoadSkillExecutor(args: { cwd: string }) {
       };
     }
   };
+}
+
+async function loadPreciseSkill(cwd: string, parsed: Record<string, unknown>) {
+  const source = parsed.source;
+  const has = (key: string) => Object.hasOwn(parsed, key);
+  const reject = (reason: string) => ({
+    content: `Skill reference rejected: ${reason}`,
+    metadata: { loadSkill: true, resolved: false, source, error: reason },
+  });
+  const nonEmpty = (value: unknown): value is string =>
+    typeof value === "string" && value.trim().length > 0;
+  if (source === "space") return reject("space references are not supported by this local executor.");
+  if (source !== "builtin" && source !== "project") return reject("unknown or missing source.");
+  if (["name", "skillName", "skill", "dbKey", "id", "skillId"].some(has)) {
+    return reject("mixed skill reference selectors.");
+  }
+  if (source === "builtin") {
+    if (!nonEmpty(parsed.slug) || has("projectBinding") || has("relativePath")) {
+      return reject("builtin requires only an exact slug.");
+    }
+    const { listBuiltinSkills } = await import("ai/skills/builtinSkillRegistry");
+    const builtin = listBuiltinSkills().find((entry) => entry.slug === parsed.slug);
+    if (!builtin) return reject("builtin slug not found.");
+    return {
+      content: `Skill "${builtin.slug}" loaded inline. Follow its instructions.\n\n${builtin.content}`,
+      metadata: {
+        loadSkill: true, resolved: true, source, builtin: true,
+        slug: builtin.slug, name: builtin.slug, requestedName: builtin.slug,
+        ...(builtin.config.toolNames?.length ? { toolNames: [...builtin.config.toolNames] } : {}),
+      },
+    };
+  }
+  if (has("slug") || !nonEmpty(parsed.projectBinding) || !nonEmpty(parsed.relativePath)) {
+    return reject("project requires projectBinding and relativePath only.");
+  }
+  try {
+    const { realpathSync, statSync, readFileSync } = await import("node:fs");
+    const { resolve, relative, isAbsolute, basename, sep } = await import("node:path");
+    const inside = (root: string, target: string) => {
+      const rel = relative(root, target);
+      return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+    };
+    const realCwd = realpathSync(cwd);
+    if (!isAbsolute(parsed.projectBinding) || realpathSync(parsed.projectBinding) !== realCwd) {
+      return reject("projectBinding does not match the authorized cwd.");
+    }
+    if (isAbsolute(parsed.relativePath) || basename(parsed.relativePath) !== "SKILL.md") {
+      return reject("relativePath must reference a project SKILL.md.");
+    }
+    const skillsRoot = resolve(realCwd, ".agents", "skills");
+    const candidate = resolve(realCwd, parsed.relativePath);
+    if (!inside(skillsRoot, candidate)) return reject("path is outside cwd/.agents/skills/.");
+    const realRoot = realpathSync(skillsRoot);
+    const realPath = realpathSync(candidate);
+    if (realRoot !== skillsRoot || !inside(realRoot, realPath) || basename(realPath) !== "SKILL.md") {
+      return reject("skill path escapes cwd/.agents/skills/ or is not SKILL.md.");
+    }
+    if (!statSync(realPath).isFile()) return reject("SKILL.md is not a file.");
+    const body = readFileSync(realPath, "utf8");
+    return {
+      content: `Skill "${parsed.relativePath}" loaded inline. Follow its instructions.\n\n${body}`,
+      metadata: {
+        loadSkill: true, resolved: true, source, projectBinding: parsed.projectBinding,
+        relativePath: parsed.relativePath, path: realPath,
+      },
+    };
+  } catch {
+    return reject("project reference is stale, inaccessible, or invalid.");
+  }
 }
 
 async function formatUnknownSkillMessage(cwd: string, requestedName: string): Promise<string> {

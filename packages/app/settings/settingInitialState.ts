@@ -58,6 +58,7 @@ export const initialState: SettingState = {
   editorTabSize: 2,
   editorFontFamily: "SF Mono, Monaco, Cascadia Code, Roboto Mono, monospace",
   enableReadCurrentSpace: true,
+  enabledPromptSkills: [],
   globalPrompt: "",
   userTonePreset: "default",
   knowledgeCaptureLevel: DEFAULT_USER_PREFERENCE_PROFILE.knowledgeCaptureLevel,

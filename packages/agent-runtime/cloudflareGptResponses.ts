@@ -27,14 +27,17 @@ import {
   CLOUDFLARE_GPT_56_SOL_UPSTREAM_MODEL_ID,
   CLOUDFLARE_GPT_56_TERRA_UPSTREAM_MODEL_ID,
   CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID,
+  CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID,
   CLOUDFLARE_GPT_6_ASTRA_UPSTREAM_MODEL_ID,
   CLOUDFLARE_GPT_6_LUNA_UPSTREAM_MODEL_ID,
   PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
   PLATFORM_HOSTED_GPT_56_SOL_MODEL,
   PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
   PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
+  PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL,
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
   PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
+  PLATFORM_HOSTED_GPT_6_SOL_MODEL,
 } from "../ai/llm/platformHostedRoutingTable";
 import { buildResponsesRequestBody } from "../integrations/openai/responsesRequestBody";
 
@@ -42,22 +45,34 @@ import { buildResponsesRequestBody } from "../integrations/openai/responsesReque
 // `../ai/llm/platformHostedRoutingTable`（catalog 侧声明）；本模块只 import 消费，
 // 不再本地复制一份常量——否则会立刻长出第二份会腐化的真值表。
 
-/** 走 Cloudflare Responses 的平台 GPT 模型（5 个既有 + gpt-6.1-sol）。 */
+/**
+ * 走 Cloudflare Responses 的平台 GPT 模型（5 个既有 + gpt-6.1-sol + gpt-6.1-terra
+ * + gpt-6-sol 别名 id）。
+ * 注意：这里必须包含**所有**在 PLATFORM_HOSTED_ROUTING_TABLE 里有 CF Responses 条目的
+ * GPT id（含别名 id）——本清单同时是 `isCloudflareGptPlatformModel` 守卫的真值：
+ * 漏一个 id，存量记录里的该 id 会在守卫处被判 false 并抛 unsupported_model，
+ * 即使别名表能解析它也进不了 CF 分支（静默换路）。
+ */
 export const CLOUDFLARE_GPT_PLATFORM_MODEL_IDS = [
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
   PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
   PLATFORM_HOSTED_GPT_56_SOL_MODEL,
   PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
   PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
+  PLATFORM_HOSTED_GPT_6_SOL_MODEL,
   PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
+  PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL,
 ] as const;
 
 /**
  * 可上架（新建 / 选择器可选项）的 CF GPT 平台目录：排除兼容别名 id。
- * 2026-10-13 起 gpt-5.6-sol 是 gpt-6.1-sol 的兼容别名 → 6 个可路由 id 中 5 个可选。
+ * 2026-11-01 起同家族旧代统一透明重定向到家族最新代（PLATFORM_MODEL_ALIASES：
+ * gpt-6-sol / gpt-5.6-sol → gpt-6.1-sol、gpt-5.6-terra → gpt-6.1-terra、
+ * gpt-5.6-luna → gpt-6-luna）→ 8 个可路由 id 中 4 个可选
+ * （gpt-6-astra / gpt-6-luna / gpt-6.1-sol / gpt-6.1-terra）。
  * `CLOUDFLARE_GPT_PLATFORM_MODEL_IDS` 仍保留旧 id，因为它是「平台 id → CF
  * catalog id」的路由真值：删掉会让未知 id 穿透到别的路由（静默换路），旧 id 也
- * 无法被透明映射到 6.1。
+ * 无法被透明映射到新模型。
  */
 export const CLOUDFLARE_GPT_ACTIVE_PLATFORM_MODEL_IDS =
   CLOUDFLARE_GPT_PLATFORM_MODEL_IDS.filter(
@@ -76,11 +91,13 @@ const CLOUDFLARE_GPT_UPSTREAM_MODEL_IDS: Readonly<
 > = {
   [PLATFORM_HOSTED_GPT_6_ASTRA_MODEL]: CLOUDFLARE_GPT_6_ASTRA_UPSTREAM_MODEL_ID,
   [PLATFORM_HOSTED_GPT_6_LUNA_MODEL]: CLOUDFLARE_GPT_6_LUNA_UPSTREAM_MODEL_ID,
-  // 兼容别名（PLATFORM_MODEL_ALIASES）：旧 id 的上游/执行模型就是 6.1。
+  // 同家族旧代（PLATFORM_MODEL_ALIASES）：旧 id 的上游/执行模型就是家族最新代。
   [PLATFORM_HOSTED_GPT_56_SOL_MODEL]: CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID,
-  [PLATFORM_HOSTED_GPT_56_TERRA_MODEL]: CLOUDFLARE_GPT_56_TERRA_UPSTREAM_MODEL_ID,
-  [PLATFORM_HOSTED_GPT_56_LUNA_MODEL]: CLOUDFLARE_GPT_56_LUNA_UPSTREAM_MODEL_ID,
+  [PLATFORM_HOSTED_GPT_6_SOL_MODEL]: CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID,
+  [PLATFORM_HOSTED_GPT_56_TERRA_MODEL]: CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID,
+  [PLATFORM_HOSTED_GPT_56_LUNA_MODEL]: CLOUDFLARE_GPT_6_LUNA_UPSTREAM_MODEL_ID,
   [PLATFORM_HOSTED_GPT_6_1_SOL_MODEL]: CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID,
+  [PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL]: CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID,
 };
 
 /**

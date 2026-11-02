@@ -412,12 +412,14 @@ const LLM_REQUEST_TIMEOUT = "LLM_REQUEST_TIMEOUT";
 export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_COMPACTION_TIMEOUT_MS = 60 * 1000;
 export const DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD = 25;
-export const ROUND_BUDGET_WARNING_PROMPT =
-  "[系统提示] 当前单次任务的连续工具调用已达 25 轮。为防止上下文复合膨胀与成本失控，请在本轮或下一轮内收敛当前执行结果，输出已验证事实、阶段性结论或当前卡点，完成阶段交接。";
 
 export function buildRoundBudgetWarningPrompt(threshold: number): string {
-  return `[系统提示] 当前单次任务的连续工具调用已达 ${threshold} 轮。为防止上下文复合膨胀与成本失控，请在本轮或下一轮内收敛当前执行结果，输出已验证事实、阶段性结论或当前卡点，完成阶段交接。`;
+  return `[系统提示] 当前单次任务的连续工具调用已达 ${threshold} 轮，请进行进展与成本检查：若已授权目标未完成且持续有进展，应继续推进，不得仅因轮数交接；仅在目标已完成、遇到真实阻塞或触及硬预算时才收尾；若进展停滞，请及时更换策略。`;
 }
+
+export const ROUND_BUDGET_WARNING_PROMPT = buildRoundBudgetWarningPrompt(
+  DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD,
+);
 
 /**
  * 安全的只读/幂等并发工具集合。
@@ -744,9 +746,23 @@ async function persistFailedLocalTurn(args: {
         ? { freshDialog: args.input.freshDialog }
         : {}),
     });
+    attachFailedTurnPersistence(args.error, "saved");
     return saved?.dialogId;
   } catch {
+    // Preserve the original provider error, but never mistake an existing
+    // dialog pointer for evidence that this failed turn was saved.
+    attachFailedTurnPersistence(args.error, "failed");
     return args.input.continueDialogId;
+  }
+}
+
+function attachFailedTurnPersistence(error: unknown, status: "saved" | "failed") {
+  if (!error || typeof error !== "object") return;
+  try {
+    Object.assign(error, { failedTurnPersistence: { status } });
+  } catch {
+    // Frozen foreign errors cannot carry metadata; clients must treat absent
+    // evidence as unknown, not as successful persistence.
   }
 }
 /**

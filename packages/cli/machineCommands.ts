@@ -329,7 +329,7 @@ async function defaultExecuteCli(
     cwd?: string;
     yolo?: boolean;
     env?: EnvLike;
-    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   }
 ) {
   const { executeCli } = await import("ai/agent/cliExecutor");

@@ -122,10 +122,13 @@ function readNonNegativeIntOption(
 
 function requireTabId(args: string[], usage: string): string {
   const tabId = readTrimmedOption(args, "--tab");
-  if (!tabId) {
-    throw new Error(t("cliBrowserMissingTab", usage));
+  if (tabId) {
+    return tabId;
   }
-  return tabId;
+  if (args.includes("--active")) {
+    return "active";
+  }
+  throw new Error(t("cliBrowserMissingTab", usage));
 }
 
 function requireTarget(args: string[], usage: string): ChromeConnectorRequestPayload {
@@ -580,6 +583,17 @@ export async function runChromeOpsCommand(
       } else {
         client = createChromeConnectorClient();
       }
+    }
+
+    if (payload.tabId === "active") {
+      const tabsRes = (await client.request("list_tabs", {})) as {
+        tabs?: Array<{ id: string | number; active?: boolean }>;
+      };
+      const activeTab = tabsRes?.tabs?.find((t) => t.active) || tabsRes?.tabs?.[0];
+      if (!activeTab?.id) {
+        throw new Error("No active tab found in browser.");
+      }
+      payload.tabId = String(activeTab.id);
     }
 
     result = await client.request(spec.action, payload);

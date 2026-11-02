@@ -249,8 +249,12 @@ const IMMEDIATE_DETACH_COMMAND_PATTERNS: RegExp[] = [
 // this value verbatim — a consistency test locks the two together.
 export const IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS = 5;
 
+// Sleep duration token captures up to the first shell boundary (whitespace,
+// semicolon, control operators, closing parenthesis) so compound commands like
+// `sleep 4; echo x` parse the number cleanly instead of swallowing `;` as part
+// of the token and mistakenly detaching under the unparseable fail-safe.
 const SLEEP_PREFIX_PATTERN =
-  /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:nohup\s+|time\s+)*sleep\s+(\S+)/;
+  /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:nohup\s+|time\s+)*sleep\s+([^\s;&|)]+)/;
 
 function parseSleepDurationSeconds(token: string): number | undefined {
   const match = /^(\d+(?:\.\d+)?)(s|m|h|d)?$/i.exec(token);

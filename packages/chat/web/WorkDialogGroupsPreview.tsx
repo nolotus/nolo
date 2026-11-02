@@ -24,6 +24,12 @@ import { sortWorkDialogTimeline, type WorkRunSignal, type GroupedWorkItem } from
 
 const ignoreMenuToggle = (_key: string | null): void => {};
 
+/**
+ * 自动续页的最小间隔。不能「间隔不够就直接丢掉这次机会」——observer 只在可见性
+ * 变化时通知，被丢掉的那次之后哨兵一直可见就再也不会通知，续页会永久停住。
+ */
+const AUTO_LOAD_MIN_INTERVAL_MS = 1000;
+
 export function WorkDialogGroupsPreview({
   items, userId, homeScope = { kind: "all" }, includeNonDialogs = false, paginationOwner = false, ownedPages,
 }: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; includeNonDialogs?: boolean; paginationOwner?: boolean; ownedPages?: { error: string | null; loading: boolean; hasMore: boolean; loadMore: () => Promise<void> } }) {
@@ -165,6 +171,83 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
     void Promise.allSettled(tasks);
   };
 
+  // ── 底部自动续页 ──────────────────────────────────────────────────
+  // 「加载更多对话」这件事本身没有需要人判断的地方：还有下一页就续上。所以列表
+  // 底部改成哨兵，进入可视区（含 240px 预取）就自动续页；只有「失败 / 冷却 /
+  // 连续两页拿不回新行」时才退回成手动按钮，避免自动续页静默卡死。
+  const loadNeedsRetry = failedSharedSources > 0 || deferredSharedSources > 0 || Boolean(ownedPages?.error);
+  const [autoLoadStalled, setAutoLoadStalled] = useState(false);
+  const autoLoadSentinelRef = useRef<HTMLDivElement | null>(null);
+  // 触发器走 ref：observer 不能因为 loadCombined 每次渲染换身份而反复重订阅。
+  const autoLoadTriggerRef = useRef(loadCombined);
+  // 上一轮续页发起时的条目数：下一轮发起时如果条目没增长，说明上一轮没拿回新行。
+  const autoLoadFromTotalRef = useRef<number | null>(null);
+  const autoLoadEmptyRoundsRef = useRef(0);
+  const autoLoadLastTriggerAtRef = useRef(0);
+  // 哨兵当前可见性 + 最新可加载状态：定时器到期时要重新确认，不能盲发。
+  const autoLoadVisibleRef = useRef(false);
+  const autoLoadCanLoadMoreRef = useRef(canLoadMore);
+  const autoLoadTotalRef = useRef(total);
+  const autoLoadActive = typeof IntersectionObserver !== "undefined" && !loadNeedsRetry && !autoLoadStalled;
+  autoLoadTriggerRef.current = loadCombined;
+  autoLoadCanLoadMoreRef.current = canLoadMore;
+  autoLoadTotalRef.current = total;
+
+  useEffect(() => {
+    if (!autoLoadActive || !combinedActionable || !canLoadMore) return;
+    const node = autoLoadSentinelRef.current;
+    if (!node) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+
+    const flush = () => {
+      timer = undefined;
+      if (disposed || !autoLoadVisibleRef.current || !autoLoadCanLoadMoreRef.current) return;
+      const from = autoLoadFromTotalRef.current;
+      const current = autoLoadTotalRef.current;
+      // 按「一轮完成后的净增量」判进展：上一轮发起时的条目数没被超过 = 那一轮空转。
+      if (from !== null && current <= from) {
+        autoLoadEmptyRoundsRef.current += 1;
+        if (autoLoadEmptyRoundsRef.current >= 2) {
+          // 连续两轮拿不回新行：停手，让渲染分支退回手动按钮。
+          setAutoLoadStalled(true);
+          return;
+        }
+      } else {
+        autoLoadEmptyRoundsRef.current = 0;
+      }
+      autoLoadLastTriggerAtRef.current = Date.now();
+      autoLoadFromTotalRef.current = current;
+      autoLoadTriggerRef.current();
+      // 自己接着守候下一轮：一次发起如果没有改变任何 effect 依赖，就不会有新的
+      // observer 通知，链条会在这里断掉，stall 计数也永远累计不到 2。
+      schedule();
+    };
+
+    // 关键：节流不能「直接 return 丢掉这次机会」。observer 只在可见性变化时通知，
+    // 一页若在闸门窗口内加载完，重订阅后的首次通知会被丢掉、哨兵又一直可见，
+    // 自动续页就永久停住且没有手动入口。这里改成「到期后再确认一次」。
+    const schedule = () => {
+      if (timer !== undefined || disposed) return;
+      const wait = Math.max(0, AUTO_LOAD_MIN_INTERVAL_MS - (Date.now() - autoLoadLastTriggerAtRef.current));
+      timer = setTimeout(() => {
+        flush();
+      }, wait);
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.some((entry) => entry.isIntersecting);
+      autoLoadVisibleRef.current = visible;
+      if (visible) schedule();
+    }, { rootMargin: "240px 0px" });
+    observer.observe(node);
+    return () => {
+      disposed = true;
+      if (timer !== undefined) clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [autoLoadActive, combinedActionable, canLoadMore, total]);
+
   // 侧栏条目的「更多」菜单挂在 row 之外（RAC Menu 不能嵌在 ListBox 里），
   // 与 CategorySection 同一套约定：row 上报锚点，这里渲染 MenuPopover。
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
@@ -198,11 +281,6 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
       {covText && <p role="status">{covText}</p>}
       {(paginationOwner || sharedIncomplete) && (failedSharedSources > 0 || deferredSharedSources > 0 || ownedPages?.error) && (
         <p role="status">部分对话暂时未能加载，已显示的对话仍可打开。</p>
-      )}
-      {(paginationOwner || sharedIncomplete) && combinedActionable && (
-        <button type="button" disabled={!canLoadMore} onClick={loadCombined}>
-          {loadingOnly ? "正在加载对话…" : coolingDown ? "稍后重试" : failedSharedSources > 0 || ownedPages?.error ? "重试加载" : "加载更多对话"}
-        </button>
       )}
       {total === 0 ? (
         <p>{includeNonDialogs ? "暂无已加载的内容。" : "暂无已加载的对话。"}</p>
@@ -269,6 +347,22 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
               );
             })}
           </div>
+      )}
+      {/* 分页控制必须挂在列表**之后**：哨兵要随列表增长被推下去，滚到底部附近才续页。
+          放到列表上方会在页面一打开就可见，等于一进来就连续翻页，而用户滚到底部时
+          哨兵早已离开视口，该加载时反而不加载。 */}
+      {(paginationOwner || sharedIncomplete) && combinedActionable && (
+        autoLoadActive && canLoadMore ? (
+          <div
+            ref={autoLoadSentinelRef}
+            data-hook="work-dialog-autoload-sentinel"
+            aria-hidden="true"
+          />
+        ) : (
+          <button type="button" disabled={!canLoadMore} onClick={loadCombined}>
+            {loadingOnly ? "正在加载对话…" : coolingDown ? "稍后重试" : failedSharedSources > 0 || ownedPages?.error ? "重试加载" : "加载更多对话"}
+          </button>
+        )
       )}
       {activeMenuKey && !sharedKeys.has(activeMenuKey) && menuAnchorEl && (
         <MenuPopover

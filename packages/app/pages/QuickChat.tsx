@@ -5,11 +5,11 @@ import { TextField, TextArea } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import {
   LuBot,
-  LuMessageCircle,
   LuMic,
   LuPaperclip,
   LuArrowUp,
   LuLayoutGrid,
+  LuDownload,
 } from "react-icons/lu";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
@@ -25,6 +25,8 @@ import {
 import { toErrorMessage } from "core/errorMessage";
 import { asTrimmedString } from "core/trimmedString";
 import { useNavigate } from "app/routing";
+import { AppRoutePaths } from "app/constants/routePaths";
+import { getIsDesktopApp } from "app/utils/env";
 import { toast } from "app/utils/toast"
 import { read } from "database/dbSlice";
 // 只复用 accept 常量：占位 composer 的系统文件选择器必须与 runtime 的
@@ -341,6 +343,8 @@ const QuickChat: React.FC<QuickChatProps> = ({
 
   const [quickChatMode, handleModeChange] = useQuickChatMode();
   const isCompact = surface === "space-home-compact";
+  // 桌面客户端内部不再提示"下载桌面客户端"——那是对着已经装好的客户端说下载。
+  const isDesktopApp = getIsDesktopApp();
 
   const startPersonalization = useCallback(async () => {
     try {
@@ -361,6 +365,10 @@ const QuickChat: React.FC<QuickChatProps> = ({
 
   const handleChipClick = useCallback(
     (chip: QuickChatChipAction) => {
+      if (chip.action === "download") {
+        navigate(AppRoutePaths.CLIENT_DOWNLOADS);
+        return;
+      }
       if (chip.action === "personalization") {
         void startPersonalization();
         return;
@@ -379,7 +387,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
       void preloadQuickChatRuntimeDependencies();
       setRuntimeActive(true);
     },
-    [startPersonalization]
+    [navigate, startPersonalization]
   );
 
   // `/chat?launch=feedback` 等直达入口：挂载后自动以专职 agent 开一轮对话，只触发一次。
@@ -573,7 +581,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
             />
           </Suspense>
         </QuickChatChunkErrorBoundary>
-        {!isCompact && <QuickChatChips onChipClick={handleChipClick} />}
+        {!isCompact && <QuickChatChips onChipClick={handleChipClick} showDownload={!isDesktopApp} />}
       </div>
     );
   }
@@ -598,7 +606,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
         quickChatMode={quickChatMode}
         onModeChange={handleModeChange}
       />
-      {!isCompact && <QuickChatChips onChipClick={handleChipClick} />}
+      {!isCompact && <QuickChatChips onChipClick={handleChipClick} showDownload={!isDesktopApp} />}
     </div>
   );
 };
@@ -734,7 +742,8 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
 type QuickChatChipAction =
   | { action: "prompt"; prompt: string }
   | { action: "personalization" }
-  | { action: "specialist"; agentKey: string; prompt: string };
+  | { action: "specialist"; agentKey: string; prompt: string }
+  | { action: "download" };
 
 interface QuickChatChip {
   key: string;
@@ -745,19 +754,27 @@ interface QuickChatChip {
 
 interface QuickChatChipsProps {
   onChipClick: (chip: QuickChatChipAction) => void;
+  showDownload?: boolean;
 }
 
-const QuickChatChips: React.FC<QuickChatChipsProps> = ({ onChipClick }) => {
+const QuickChatChips: React.FC<QuickChatChipsProps> = ({
+  onChipClick,
+  showDownload = true,
+}) => {
   const { t } = useTranslation();
 
   const chips = useMemo<QuickChatChip[]>(
     () => [
-      {
-        key: "brainstorm",
-        label: t("quickChat.chipBrainstorm", "头脑风暴"),
-        icon: <LuMessageCircle size={16} aria-hidden="true" />,
-        action: { action: "prompt", prompt: t("quickChat.chipBrainstormPrompt", "帮我做一次头脑风暴") },
-      },
+      ...(showDownload
+        ? [
+            {
+              key: "downloadClient",
+              label: t("downloadClient", "下载客户端"),
+              icon: <LuDownload size={16} aria-hidden="true" />,
+              action: { action: "download" as const },
+            },
+          ]
+        : []),
       {
         key: "createAgent",
         label: t("quickChat.chipCreateAgent", "创建agent"),
@@ -779,7 +796,7 @@ const QuickChatChips: React.FC<QuickChatChipsProps> = ({ onChipClick }) => {
         },
       },
     ],
-    [t]
+    [showDownload, t]
   );
 
   return (

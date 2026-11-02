@@ -43,11 +43,17 @@ const INSTALLER_PAYLOAD_PATTERN = Buffer.concat([INSTALLER_PAYLOAD_MARKER, ZSTD_
 
 const SUPPORTED_TAR_TYPES = new Set<string>(["0", "5", "2", "x", "g"]);
 const TAR_HEADER_BYTES = 512;
+/**
+ * 解包器 fullFileName() 的缓冲上限：上游 electrobun 用 `[255]u8` 拼
+ * 「prefix + '/' + name」。GNU tar 的 ustar 写入器允许 prefix(155)+name(100)
+ * 再加一个分隔符 = 256，比解包器多 1 字节 → 必须在这道闸门里自己卡住。
+ */
+const EXTRACTOR_MAX_PATH_BYTES = 255;
 const MARKER_SEARCH_CHUNK_BYTES = 4 * 1024 * 1024;
 const COPY_CHUNK_BYTES = 4 * 1024 * 1024;
 
 export type PayloadCompatViolation = {
-  kind: "longname" | "hardlink" | "unsupported-type";
+  kind: "longname" | "hardlink" | "unsupported-type" | "path-too-long";
   entry: string;
 };
 
@@ -157,7 +163,8 @@ export const scanTarFileForCompat = (
       entries += 1;
       const nameField = header.subarray(0, 100);
       const nameEnd = nameField.indexOf(0);
-      const name = (nameEnd === -1 ? nameField : nameField.subarray(0, nameEnd)).toString("utf8");
+      const nameBytes = nameEnd === -1 ? nameField : nameField.subarray(0, nameEnd);
+      const name = nameBytes.toString("utf8");
       const sizeField = header
         .subarray(124, 136)
         .toString("ascii")
@@ -190,6 +197,25 @@ export const scanTarFileForCompat = (
         violations.push({ kind: "hardlink", entry: name });
       } else if (!SUPPORTED_TAR_TYPES.has(type)) {
         violations.push({ kind: "unsupported-type", entry: `${type} ${name}` });
+      } else {
+        // USTAR 条目把长路径拆成 prefix(155) + name(100)，解包器 fullFileName()
+        // 用 `[255]u8` 缓冲拼「prefix + '/' + name」——超出 255 字节会写穿缓冲区。
+        // GNU tar 的 ustar 写入器允许 prefix+name 到 256（多出 1 字节正好溢出），
+        // 所以这里必须自己卡一道：路径放不进解包器的缓冲 → 直接 fail-closed。
+        const prefixField = header.subarray(345, 500);
+        const prefixEnd = prefixField.indexOf(0);
+        const prefixBytes = prefixEnd === -1 ? prefixField : prefixField.subarray(0, prefixEnd);
+        const prefix = prefixBytes.toString("utf8");
+        if (prefixBytes.length > 0) {
+          // The native buffer holds bytes, not JS UTF-16 code units.
+          const fullLength = prefixBytes.length + 1 + nameBytes.length;
+          if (fullLength > EXTRACTOR_MAX_PATH_BYTES) {
+            violations.push({
+              kind: "path-too-long",
+              entry: `${fullLength} bytes: ${prefix}/${name}`,
+            });
+          }
+        }
       }
 
       offset += TAR_HEADER_BYTES + Math.ceil(entrySize / TAR_HEADER_BYTES) * TAR_HEADER_BYTES;
@@ -292,7 +318,8 @@ export const verifyLinuxPayloadArtifacts = async (
     throw new Error(
       `Linux payload artifacts are not electrobun-extractor compatible ` +
         `(GNU longname/hardlink/unknown tar entries abort install & update with ` +
-        `TarUnsupportedFileType):\n${lines.join("\n")}`,
+        `TarUnsupportedFileType; USTAR paths longer than the extractor's 255-byte ` +
+        `buffer overflow it):\n${lines.join("\n")}`,
     );
   }
   return reports;

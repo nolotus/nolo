@@ -199,7 +199,15 @@ export type CliLocalSpawnDispatchPlan = {
 export const HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE =
     "runtimeKey 'local' 意味着子 run 直接在宿主文件系统上读写代码（无隔离）：必须由调用方显式声明 " +
     "allowHostWrites: true 才能派发。未声明时已拒绝派发（未启动任何 run）；要沙盒执行请省略 runtimeKey" +
-    "（默认本机 docker 沙盒）或显式点名 docker / docker:<id>。";
+    "（默认本机 docker 沙盒）或显式点名 docker / docker:<id>。" +
+    // 只读派发是这条拒绝最常见的一类调用方误用（2026-11-01 实测）：它想要的
+    // 正是「在宿主上跑但不写代码」，而省略 runtimeKey 时 readOnly 本来就落宿主。
+    // 这里必须点明该路径，否则调用方会照着「要沙盒执行请省略」的指引去起一个
+    // 纯属浪费的沙盒（沙盒还兑不兑现显式 cwd）。
+    "只读派发（readOnly: true）不需要 runtimeKey：省略它即在宿主执行，无需 allowHostWrites。" +
+    // readOnly 只移除专用写工具，shell 仍可写文件（见 startAgentRunTool 的 readOnly
+    // 参数说明）。把这条边界写在拒绝文案里，避免被读成「readOnly 就一定隔离」。
+    "注意 readOnly 不提供文件系统只读隔离（shell 仍可写），需要隔离请显式指定 docker。";
 
 /**
  * F1：宿主没有宿主执行器时（服务端 / 浏览器 run）的文案。

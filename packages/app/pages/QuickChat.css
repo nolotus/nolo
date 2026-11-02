@@ -363,13 +363,20 @@
           }
         }
       
+        /* 与输入框同轴：宽度对齐输入框的那一列再整体居中，
+           否则 flex 子项塌成内容宽，行中线会和输入框中线错开。
+           间距用 4px 栅格 token（uiPolishStandard 拒绝 10/14 这类裸 px）。 */
         .quick-chat-chips {
           display: flex;
           flex-wrap: wrap;
-          gap: 8px;
+          gap: var(--space-3, 12px);
+          align-items: center;
           justify-content: center;
+          width: 100%;
+          max-width: var(--home-content-max-width, 1040px);
           margin-top: var(--space-3, 12px);
-          max-width: 800px;
+          margin-right: auto;
+          margin-left: auto;
         }
 
         .quick-chat-chip {
@@ -397,7 +404,7 @@
           transform: translateY(-1px);
           box-shadow: 0 2px 6px var(--shadowLight);
         }
-      
+
         /* ── Shared AgentPickerControl surface overrides (home QuickChat) ── */
         .quick-chat-mode-selector,
         .quick-chat-runtime-selector {
