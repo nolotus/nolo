@@ -11,7 +11,7 @@ export interface AppSelectedNode {
 
 export type PreviewTarget =
   | { kind: "dev"; spaceId?: string; url: string; title?: string }
-  | { kind: "artifact"; title?: string; html: string; ref?: string }
+  | { kind: "artifact"; title?: string; html: string; ref?: string; artifactId?: string; dialogKey?: string }
   | { kind: "url"; url: string; title?: string };
 
 const listeners = new Set<() => void>();
@@ -26,6 +26,8 @@ let previewOpen = false;
 let previewUrl: string | null = null;
 /** 当前分栏工作台的目标载荷（区分开发工程、单文件制品与外部网页）。 */
 let previewTarget: PreviewTarget | null = null;
+/** 用户主动关闭工作台的代数计数器（初始为 0；主动关闭时递增，用于防御异步恢复弹回）。 */
+let closeGeneration = 0;
 
 export function isLocalDevUrl(url: string): boolean {
   try {
@@ -77,6 +79,9 @@ export function clearSelectedNode(): void {
 }
 
 export function setPreviewOpen(next: boolean): void {
+  if (previewOpen && !next) {
+    closeGeneration += 1;
+  }
   previewOpen = next;
   if (!next) {
     inspecting = false;
@@ -97,6 +102,9 @@ export function setPreviewUrl(next: string | null): void {
 }
 
 export function setPreview(open: boolean, url?: string | null): void {
+  if (previewOpen && !open) {
+    closeGeneration += 1;
+  }
   previewOpen = open;
   if (url !== undefined) {
     previewUrl = url;
@@ -109,6 +117,12 @@ export function setPreview(open: boolean, url?: string | null): void {
     }
   }
   if (!open) inspecting = false;
+  bump();
+}
+
+export function clearPreviewTarget(): void {
+  previewTarget = null;
+  previewUrl = null;
   bump();
 }
 
@@ -183,6 +197,10 @@ export function useLocalPreviewTarget(): PreviewTarget | null {
   return getPreviewTarget();
 }
 
+export function getCloseGeneration(): number {
+  return closeGeneration;
+}
+
 export function resetAppInspectorStoreForTests(): void {
   inspecting = false;
   appKey = null;
@@ -190,5 +208,6 @@ export function resetAppInspectorStoreForTests(): void {
   previewOpen = false;
   previewUrl = null;
   previewTarget = null;
+  closeGeneration = 0;
   bump();
 }

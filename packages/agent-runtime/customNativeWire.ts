@@ -98,6 +98,35 @@ function normalizeOpencodeGoGeminiBase(base: string, wire: CustomNativeWire): st
 }
 
 /**
+ * endpoint 自身**已经写成**某条 native wire 的目标路径时返回该 wire
+ * （`…/responses`、`…/messages`），否则 `null`。
+ *
+ * 这是「URL 结尾」判据的单一出处。两处使用：
+ * - `resolveCustomNativeEndpoint` 的幂等判定（避免拼成 `…/responses/responses`）；
+ * - `nolo agent create --verify` 的探活（对 `/responses` 端点不能再拼 `/chat/completions`，
+ *   否则 404 会被误读成「模型名 / 端点 / Key 有一个错了」）。
+ *
+ * 与 `agentCallPlan.ts#resolveCustomUpstreamWire` 的规则 2 对齐但**刻意更窄**：那边用
+ * `endpoint.includes("/responses")`（历史行为，还覆盖带 path 尾巴的形状），这里只认结尾。
+ * 改那边会动真正的路由判定，不属于本函数职责。
+ *
+ * 注意这只是「端点写了什么」的判据，**不等于运行时会走这条 wire**：CLI 本地直连通道
+ * （`customNativeTransport.ts`）与 call plan 的 native 分支都以模型 catalog 的
+ * `Model.nativeProtocol` 为准。所以 `…/messages` 这种形状必须搭配 catalog 里声明了
+ * `nativeProtocol: "anthropic-messages"` 的模型，否则探活能过、真跑仍走 chat.completions
+ * （`/responses` 例外：call plan 规则 1a/2 认端点后缀，未声明 catalog 也照转发）。
+ */
+export function detectDeclaredCustomNativeWire(endpoint: string): CustomNativeWire | null {
+  const trimmed = typeof endpoint === "string" ? endpoint.trim().replace(/\/+$/, "") : "";
+  if (!trimmed) return null;
+  // query/hash 不属于路径判断：`…/responses?tenant=1` 仍是 Responses 端点。
+  const pathname = trimmed.split(/[?#]/)[0] ?? "";
+  if (pathname.endsWith(NATIVE_PATH_SUFFIX["openai-responses"])) return "openai-responses";
+  if (pathname.endsWith(NATIVE_PATH_SUFFIX["anthropic-messages"])) return "anthropic-messages";
+  return null;
+}
+
+/**
  * 按 wire 拼出真实上游 URL。gemini 的路径含 model，故 model 是必需参数
  * （另两条 wire 忽略它）。
  *
@@ -130,7 +159,7 @@ export function resolveCustomNativeEndpoint(
     case "openai-responses":
     case "anthropic-messages": {
       const suffix = NATIVE_PATH_SUFFIX[wire];
-      return base.endsWith(suffix) ? base : `${base}${suffix}`;
+      return detectDeclaredCustomNativeWire(base) === wire ? base : `${base}${suffix}`;
     }
   }
 }

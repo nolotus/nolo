@@ -1,6 +1,8 @@
 import React, { memo } from "react";
 import { List } from "render/web/elements/List";
 import CodeBlock from "render/web/elements/CodeBlock";
+import { withLiteralClass } from "./toolMessageShared";
+import { streamingStructuredMarkdownStyles as styles } from "./streamingStructuredMarkdownStyles";
 import {
   SafeLink,
   TextBlockRenderer,
@@ -11,7 +13,9 @@ type StreamingStructuredMarkdownProps = {
   renderText: (content: string) => React.ReactNode;
   cursor: React.ReactNode;
   isStreaming?: boolean;
+  plainCodeBlocks?: boolean;
 };
+
 
 function isTextNode(node: any): node is { text: string } {
   return typeof node?.text === "string";
@@ -67,17 +71,19 @@ function renderNodes(
   nodes: any[],
   path: string,
   renderText: (content: string) => React.ReactNode,
-  isStreaming = false
+  isStreaming = false,
+  plainCodeBlocks = false
 ): React.ReactNode[] {
   return nodes.map((node, index) =>
-    renderNode(node, `${path}-${index}`, renderText, isStreaming)
+    renderNode(node, `${path}-${index}`, renderText, isStreaming, plainCodeBlocks)
   );
 }
 
 function renderListItem(
   node: any,
   key: string,
-  renderText: (content: string) => React.ReactNode
+  renderText: (content: string) => React.ReactNode,
+  plainCodeBlocks = false
 ) {
   const isTaskItem = node.checked !== undefined;
   const isCompleted = node.checked === true;
@@ -88,7 +94,7 @@ function renderListItem(
   ]
     .filter(Boolean)
     .join(" ");
-  const content = renderNodes(node.children || [], key, renderText);
+  const content = renderNodes(node.children || [], key, renderText, false, plainCodeBlocks);
 
   if (!isTaskItem) {
     return (
@@ -115,8 +121,21 @@ function renderListItem(
   );
 }
 
-function renderCodeBlock(node: any, key: string, isStreaming: boolean) {
+function renderCodeBlock(
+  node: any,
+  key: string,
+  isStreaming: boolean,
+  plainCodeBlocks: boolean
+) {
   const content = getNodeText(node.children || []).replace(/\n$/, "");
+
+  if (plainCodeBlocks) {
+    return (
+      <pre key={key} {...withLiteralClass("code-content", styles.plainCode)}>
+        <code>{content}</code>
+      </pre>
+    );
+  }
 
   // 复用 render 包的完整 CodeBlock：复制按钮、折叠、全屏、mermaid 预览。
   // 流式期间只展示源码（CodeBlock 内部按 isStreaming 延迟预览），
@@ -136,7 +155,8 @@ function renderCodeBlock(node: any, key: string, isStreaming: boolean) {
 function renderTable(
   node: any,
   key: string,
-  renderText: (content: string) => React.ReactNode
+  renderText: (content: string) => React.ReactNode,
+  plainCodeBlocks = false
 ) {
   const rows = Array.isArray(node.children) ? node.children : [];
   const headerRow = rows[0];
@@ -156,7 +176,9 @@ function renderTable(
                   {renderNodes(
                     cell.children || [],
                     `${key}-head-${index}`,
-                    renderText
+                    renderText,
+                    false,
+                    plainCodeBlocks
                   )}
                 </th>
               ))}
@@ -171,7 +193,9 @@ function renderTable(
                   {renderNodes(
                     cell.children || [],
                     `${key}-cell-${rowIndex}-${cellIndex}`,
-                    renderText
+                    renderText,
+                    false,
+                    plainCodeBlocks
                   )}
                 </td>
               ))}
@@ -187,7 +211,8 @@ function renderNode(
   node: any,
   key: string,
   renderText: (content: string) => React.ReactNode,
-  isStreaming = false
+  isStreaming = false,
+  plainCodeBlocks = false
 ): React.ReactNode {
   if (isTextNode(node)) {
     return renderTextLeaf(node, key, renderText);
@@ -205,21 +230,21 @@ function renderNode(
     case "thematic-break":
       return (
         <TextBlockRenderer key={key} attributes={{}} element={node}>
-          {renderNodes(node.children || [], key, renderText)}
+          {renderNodes(node.children || [], key, renderText, false, plainCodeBlocks)}
         </TextBlockRenderer>
       );
 
     case "link":
       return (
         <SafeLink key={key} href={node.url} className="streaming-markdown-link">
-          {renderNodes(node.children || [], key, renderText)}
+          {renderNodes(node.children || [], key, renderText, false, plainCodeBlocks)}
         </SafeLink>
       );
 
     case "code-inline":
       return (
         <code key={key} className="inline-code">
-          {renderNodes(node.children || [], key, renderText)}
+          {renderNodes(node.children || [], key, renderText, false, plainCodeBlocks)}
         </code>
       );
 
@@ -227,42 +252,42 @@ function renderNode(
       return (
         <List key={key} attributes={{}} element={node}>
           {(node.children || []).map((child: any, index: number) =>
-            renderListItem(child, `${key}-${index}`, renderText)
+            renderListItem(child, `${key}-${index}`, renderText, plainCodeBlocks)
           )}
         </List>
       );
 
     case "list-item":
-      return renderListItem(node, key, renderText);
+      return renderListItem(node, key, renderText, plainCodeBlocks);
 
     case "code-block":
-      return renderCodeBlock(node, key, isStreaming);
+      return renderCodeBlock(node, key, isStreaming, plainCodeBlocks);
 
     case "table":
-      return renderTable(node, key, renderText);
+      return renderTable(node, key, renderText, plainCodeBlocks);
 
     case "table-row":
     case "table-cell":
     case "code-line":
       return (
         <React.Fragment key={key}>
-          {renderNodes(node.children || [], key, renderText)}
+          {renderNodes(node.children || [], key, renderText, false, plainCodeBlocks)}
         </React.Fragment>
       );
 
     default:
       return (
         <div key={key}>
-          {renderNodes(node.children || [], key, renderText)}
+          {renderNodes(node.children || [], key, renderText, false, plainCodeBlocks)}
         </div>
       );
   }
 }
 
 export const StreamingStructuredMarkdown = memo(
-  ({ nodes, renderText, cursor, isStreaming = false }: StreamingStructuredMarkdownProps) => (
+  ({ nodes, renderText, cursor, isStreaming = false, plainCodeBlocks = false }: StreamingStructuredMarkdownProps) => (
     <div className="streaming-markdown-body ReadOnlyMarkdownContent__body">
-      {renderNodes(nodes, "root", renderText, isStreaming)}
+      {renderNodes(nodes, "root", renderText, isStreaming, plainCodeBlocks)}
       {cursor}
     </div>
   )

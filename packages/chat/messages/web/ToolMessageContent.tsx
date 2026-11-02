@@ -35,6 +35,7 @@ import CreateAgentToolCard from "./CreateAgentToolCard";
 import PrepareAgentDraftToolCard from "./PrepareAgentDraftToolCard";
 import UpdateAgentToolCard from "./UpdateAgentToolCard";
 import AppDeployCard from "./AppDeployCard";
+import { HtmlArtifactResultCard } from "./HtmlArtifactResultCard";
 import MediaJobToolCard from "./MediaJobToolCard";
 import MediaStepCard from "./MediaStepCard";
 import ApplyLineEditsPreviewViewer from "./ApplyLineEditsPreviewViewer";
@@ -1677,6 +1678,9 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
   updateSelf: (props) => <UpdateAgentToolCard {...props} />,
   updateAgent: (props) => <UpdateAgentToolCard {...props} />,
   appDeploy: (props) => <AppDeployCard {...props} />,
+  createHtmlArtifact: (props) => <HtmlArtifactResultCard toolName="createHtmlArtifact" {...props} />,
+  readHtmlArtifact: (props) => <HtmlArtifactResultCard toolName="readHtmlArtifact" {...props} />,
+  updateHtmlArtifact: (props) => <HtmlArtifactResultCard toolName="updateHtmlArtifact" {...props} />,
   geminiFlashImage: (props) => <GeminiGallery {...props} />,
   openAIGptImage: (props) => <GeminiGallery {...props} />,
   openAIGptImageGenerate: (props) => <GeminiGallery {...props} />,

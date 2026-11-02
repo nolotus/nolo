@@ -1,4 +1,21 @@
 
+## 0.203.0-alpha.1 (2026-11-02)
+
+### Features
+
+* **workbench:** persist and reopen single-file HTML artifacts ([33099b3](https://github.com/nolotus/bun-nolo/commit/33099b3fec56ba35b0ea16170907ff19bb4de6e6))
+
+### Bug Fixes
+
+* **cli:** agent create --verify 按端点声明的 native wire 探活 ([c48832f](https://github.com/nolotus/bun-nolo/commit/c48832f27dee7469c55d0ddb43aea0df7893ca82))
+* **cli:** owner OAuth 流透传完整性证据，健康流不再被误判截断 ([8120513](https://github.com/nolotus/bun-nolo/commit/8120513c45c8bdc5c3cecc879a31c402e2b802dd))
+* **workbench:** keep StyleX styles out of component modules ([2454076](https://github.com/nolotus/bun-nolo/commit/2454076aa5ce59b4ef875e0fe4f42967de4f9439))
+
+### Performance Improvements
+
+* **chat:** 思考区代码块改纯文本渲染，降低渲染负载 ([9da089d](https://github.com/nolotus/bun-nolo/commit/9da089de400cf5b04b75e1d76cf18ebaeb88597b))
+
+
 ## 0.202.0-alpha.3 (2026-11-02)
 
 ### Bug Fixes

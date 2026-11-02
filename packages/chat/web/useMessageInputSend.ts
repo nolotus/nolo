@@ -40,6 +40,9 @@ import {
 } from "render/canvas/canvasEditContext";
 import {
   clearSelectedNode,
+  getPreviewOpen,
+  getPreviewTarget,
+  type PreviewTarget,
 } from "app/appInspector/appInspectorStore";
 import { buildLocalPreviewEditingTarget } from "app/appInspector/buildLocalPreviewEditingTarget";
 import type { ImageUiConfig, ImageProfileOption } from "./messageInputAgentUi";
@@ -140,6 +143,52 @@ export const hydrateMediaJobDurations = async <
       : ({ ...file, durationSec } as T);
   });
 };
+
+/**
+ * 依据工作台打开状态与当前活跃对话，解析是否应当向模型注入 HTML 成品编辑身份。
+ *
+ * 核心契约：
+ * 1. 只有工作台处于打开状态（previewOpen === true）时才注入。工作台关闭但 target 留存时绝不注入，
+ *    避免用户关闭工作台后发起的其他请求被静默绑定到上一次查看的成品并覆盖其 ID。
+ * 2. 只有同 dialog 且拥有稳定非空 artifactId 时才注入。跨对话或缺少稳定标识时不注入。
+ */
+export function resolveArtifactEditingTarget(params: {
+  previewOpen: boolean;
+  previewTarget: PreviewTarget | null | undefined;
+  currentDialogKey?: string | null;
+}): AgentRuntimeOptions["editingTarget"] | undefined {
+  const { previewOpen, previewTarget, currentDialogKey } = params;
+  if (!previewOpen) {
+    return undefined;
+  }
+  if (!previewTarget || previewTarget.kind !== "artifact") {
+    return undefined;
+  }
+  const artifactId = previewTarget.artifactId;
+  if (typeof artifactId !== "string" || !artifactId.trim()) {
+    return undefined;
+  }
+  if (
+    !previewTarget.dialogKey ||
+    !currentDialogKey ||
+    previewTarget.dialogKey !== currentDialogKey
+  ) {
+    return undefined;
+  }
+
+  return {
+    kind: "artifact",
+    key: artifactId,
+    title: previewTarget.title,
+    artifactId,
+    dialogKey: previewTarget.dialogKey,
+    metadata: {
+      artifactId,
+      dialogKey: previewTarget.dialogKey,
+      title: previewTarget.title,
+    },
+  };
+}
 
 export type UseMessageInputSendArgs = {
   text: string;
@@ -523,6 +572,12 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
         }
       : snap.runtimeOptions;
     const base = effectiveRuntimeOptionsBase ?? {};
+    const artifactEditingTarget = resolveArtifactEditingTarget({
+      previewOpen: getPreviewOpen(),
+      previewTarget: getPreviewTarget(),
+      currentDialogKey: snap.currentDialogKey,
+    });
+
     const effectiveRuntimeOptions = snap.canvasEditSelection
       ? {
           ...base,
@@ -533,7 +588,12 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
             ...base,
             editingTarget: buildLocalPreviewEditingTarget(snap.appSelectedNode),
           }
-        : base;
+        : !base.editingTarget && artifactEditingTarget
+          ? {
+              ...base,
+              editingTarget: artifactEditingTarget,
+            }
+          : base;
 
     const effectiveRuntimeOptionsWithTools = effectiveRuntimeOptions;
 

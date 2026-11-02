@@ -153,6 +153,15 @@ export interface AgentRuntimeResult {
    * 收到收尾帧即证明流走完了，此时空轮应判为 empty_completion。
    */
   stream_complete?: boolean;
+  /**
+   * 流确实在吐完部分正文后断掉（干净 EOF 但既无 finish_reason、也无收尾帧）。
+   *
+   * 与 `stream_complete` 互斥（reader 侧 `streamTruncated = !streamComplete`）。
+   * 目前结算层不直接消费它——判定走 `finishReason` / `streamComplete`
+   * （见 emptyAssistantRepair）——它作为**流完整性证据**原样透传，供诊断与
+   * 后续消费者区分「健康流」与「真截断」，避免靠 `!stream_complete` 反推。
+   */
+  stream_truncated?: boolean;
   /** 本次请求工具定义（name+schema）短哈希，仅供缓存遥测。 */
   toolsHash?: string;
   /**

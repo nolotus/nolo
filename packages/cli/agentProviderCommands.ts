@@ -1,4 +1,8 @@
 import { toErrorMessage } from "core/errorMessage";
+import {
+  customNativeAuthHeaders,
+  detectDeclaredCustomNativeWire,
+} from "agent-runtime/customNativeWire";
 import type { AgentCommandDeps } from "./agentCommandSupport";
 import { readOption, resolveAuthToken, resolveServerUrl } from "./cliEnvHelpers";
 import type { CliFetchImpl } from "./cliFetch";
@@ -316,10 +320,52 @@ export async function runAgentModelsCommand(
   }
 }
 
+/** Shallow shape of the three probe replies `verifyCustomProvider` may receive. */
+type VerifyProbeResponse = {
+  choices?: { message?: { content?: string; reasoning_content?: string } }[];
+  output_text?: string;
+  output?: { content?: { text?: string }[] }[];
+  content?: { text?: string }[];
+};
+
+/**
+ * Pull the assistant text out of any of the three wire shapes: chat/completions
+ * (`choices[].message`), Responses (`output_text` or `output[].content[].text`),
+ * Anthropic Messages (`content[].text`). Empty string means "no text", which the
+ * caller reports as `ok` but blank — not a failure (thinking models can spend the
+ * whole token budget on reasoning).
+ */
+function extractVerifyReply(data: VerifyProbeResponse | null): string {
+  if (!data) return "";
+  const chatMessage = data?.choices?.[0]?.message;
+  const chatReply = (chatMessage?.content ?? chatMessage?.reasoning_content ?? "").trim();
+  if (chatReply) return chatReply;
+  if (typeof data.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+  const responsesReply = (data.output ?? [])
+    .flatMap((item) => item?.content ?? [])
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+  if (responsesReply) return responsesReply;
+  return (data.content ?? [])
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+}
+
 /**
  * Send a minimal chat-completion probe to an OpenAI-compatible endpoint.
  * Used by `nolo agent create --verify` to prove the key + endpoint + model work
  * end-to-end right after creating a custom-provider agent. Never logs the key.
+ *
+ * `--custom-provider-url` 允许直接写成某条 native wire 的目标路径
+ * （`…/responses`、`…/messages`，见 `agentCallPlan#resolveCustomUpstreamWire` 规则 2 与
+ * `detectDeclaredCustomNativeWire`）。对这种端点再拼 `/chat/completions` 会得到
+ * `…/responses/chat/completions` 的 404，把「探活路径不支持」伪装成
+ * 「模型名 / 端点 / Key 有一个错了」——所以路径与 body 都按声明的 wire 选。
+ * 未声明 wire 时仍是 chat/completions 契约，行为不变。
  */
 export async function verifyCustomProvider(options: {
   providerUrl: string | undefined;
@@ -350,23 +396,37 @@ export async function verifyCustomProvider(options: {
   }
 
   try {
-    const res = await fetchImpl(joinBase(provider, "/chat/completions"), {
+    const declaredWire = detectDeclaredCustomNativeWire(provider);
+    const targetUrl = declaredWire ? provider : joinBase(provider, "/chat/completions");
+    // 声明的 wire 用通道自己的鉴权真源：anthropic 的凭据头是 `x-api-key`（不是
+    // `Authorization: Bearer`），`anthropic-version` 也由它补齐。手写一份会立刻
+    // 漂移成「探活 401、用户以为是 key 错了」。未声明 wire 时仍是既有的 OpenAI
+    // 兼容头，显式 `apiKeyHeader` 的替换语义不变。
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(declaredWire
+        ? customNativeAuthHeaders(declaredWire, apiKey, options.apiKeyHeader)
+        : {
+            [options.apiKeyHeader || "Authorization"]:
+              options.apiKeyHeader && options.apiKeyHeader.toLowerCase() !== "authorization"
+                ? apiKey
+                : `Bearer ${apiKey}`,
+          }),
+    };
+    const probeBody =
+      declaredWire === "openai-responses"
+        ? { model, input: prompt, max_output_tokens: 40 }
+        : declaredWire === "anthropic-messages"
+          ? { model, max_tokens: 40, messages: [{ role: "user", content: prompt }] }
+          : { model, messages: [{ role: "user", content: prompt }], max_tokens: 40 };
+
+    const res = await fetchImpl(targetUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        [options.apiKeyHeader || "Authorization"]: options.apiKeyHeader && options.apiKeyHeader.toLowerCase() !== "authorization" ? apiKey : `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 40,
-      }),
+      headers,
+      body: JSON.stringify(probeBody),
     });
-    const data = (await res.json().catch(() => null)) as
-      | { choices?: { message?: { content?: string; reasoning_content?: string } }[] }
-      | null;
-    const message = data?.choices?.[0]?.message;
-    const reply = (message?.content ?? message?.reasoning_content ?? "").trim();
+    const data = (await res.json().catch(() => null)) as VerifyProbeResponse | null;
+    const reply = extractVerifyReply(data);
     return { ok: res.ok, status: res.status, providerUrl: provider, model, reply };
   } catch (error) {
     return { ok: false, providerUrl: provider, model, reason: toErrorMessage(error) };

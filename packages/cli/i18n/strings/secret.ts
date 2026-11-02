@@ -14,6 +14,7 @@ export const secretStrings = {
   nolo secret set <name> <value|json>      Set a secret via argv (legacy; discouraged: exposes secrets in shell history and process list)
   nolo secret delete <name>                Delete a secret
   nolo secret run --with <names> -- <cmd>  Safely inject secret environment variables and run a command
+                                           Env var name = secret name upper-cased, non-alphanumerics -> _ (my_api_key -> MY_API_KEY)
   nolo secret bind <alias> <ref> [--env <ENV_NAME>]  Bind a managed credential reference to an alias
   nolo secret list-bindings                List configured secret alias bindings
   nolo secret unbind <alias>               Remove a secret alias binding
@@ -26,6 +27,7 @@ export const secretStrings = {
   nolo secret set <name> <value|json>      通过命令行参数设置 secret（兼容旧语法；不推荐：凭据会暴露在进程列表与 shell 历史中）
   nolo secret delete <name>                删除指定的 secret
   nolo secret run --with <names> -- <cmd>  安全注入 secret 环境变量并执行子命令
+                                           环境变量名 = 秘钥名全大写、非字母数字替换为 _（my_api_key -> MY_API_KEY）
   nolo secret bind <alias> <ref> [--env <ENV_NAME>]  将受控凭据引用绑定到别名
   nolo secret list-bindings                列出已配置的 secret 别名绑定
   nolo secret unbind <alias>               解除指定的 secret 别名绑定

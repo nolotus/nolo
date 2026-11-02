@@ -43,6 +43,14 @@ export interface AgentRuntimeOptions {
          */
         tableId?: string;
         /**
+         * 可选：HTML 成品 ID（显式 execution identity）
+         */
+        artifactId?: string;
+        /**
+         * 可选：HTML 成品归属对话 Key
+         */
+        dialogKey?: string;
+        /**
          * 可选：与当前编辑目标相关的轻量元数据。
          * 例如应用的 framework、url、fileNames 等。
          */

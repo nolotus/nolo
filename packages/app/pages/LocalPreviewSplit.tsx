@@ -9,6 +9,8 @@ import {
   useWorkbenchPreference,
 } from "app/layout/workbenchLayoutPreference";
 import { useLocalPreviewOpen } from "app/appInspector/appInspectorStore";
+import { useDialogHtmlArtifactRecovery } from "app/appInspector/useDialogHtmlArtifactRecovery";
+import { useCurrentDialogKey } from "chat/dialog/dialogRuntimeStore";
 import "./LocalPreviewSplit.css";
 
 const LocalPreviewPanel = lazy(() => import("./LocalPreviewPanel"));
@@ -26,6 +28,8 @@ const PREVIEW_MIN_SIZE = 320;
 export default function LocalPreviewSplit({ children }: { children: React.ReactNode }) {
   const previewOpen = useLocalPreviewOpen();
   const preference = useWorkbenchPreference();
+  const currentDialogKey = useCurrentDialogKey();
+  useDialogHtmlArtifactRecovery(currentDialogKey);
   const [activeSurface, setActiveSurface] = React.useState<"primary" | "secondary">("primary");
   const prevPreviewOpenRef = React.useRef(previewOpen);
 
