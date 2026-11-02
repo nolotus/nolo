@@ -1,4 +1,15 @@
 
+## 0.221.0-alpha.1 (2026-11-02)
+
+### Features
+
+* **agent-run:** run HTML artifact tools on the server-owned web plane ([9f8f186](https://github.com/nolotus/bun-nolo/commit/9f8f186a0e244989fb1bd1219b65b52cb9306717))
+
+### Bug Fixes
+
+* **cli:** custom 端点以 /responses 结尾时本地也走 Responses wire ([7326b63](https://github.com/nolotus/bun-nolo/commit/7326b63fbe4c6b87af621decd56c9d51c711eefb))
+
+
 ## 0.220.0-alpha.1 (2026-11-02)
 
 ### Features

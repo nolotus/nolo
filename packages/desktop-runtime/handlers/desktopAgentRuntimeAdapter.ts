@@ -29,6 +29,7 @@ import {
 } from "agent-runtime";
 import { resolveAgentCallPlan, type AgentCallPlan, type WireFormat } from "agent-runtime/agentCallPlan";
 import { createCustomNativeProvider, type CustomNativeWire } from "agent-runtime/customNativeProvider";
+import { detectDeclaredCustomNativeWire } from "agent-runtime/customNativeWire";
 import { fetchAntigravityCloudCodeCompletion } from "agent-runtime/antigravityCloudCodeProvider";
 import { fetchAnthropicMessagesCompletion } from "agent-runtime/anthropicMessagesProvider";
 import { fetchCodexResponsesCompletion } from "agent-runtime/codexResponsesProvider";
@@ -571,12 +572,13 @@ export function resolveDesktopAgentRuntimeServerFallbacks(args: {
  *    URL 的 agent 不进 native 通道）。
  * 2. plan 的 `upstreamWire` 已是 `custom-*` 时以 plan 为准（单一事实来源：plan 与
  *    runtime 用同一个目录判据，没必要在这里再判一次）。
- * 3. plan 说 `"responses"` 时不进 native：那是 `/responses` 结尾端点的既有直连形状
- *    （`resolveCustomProviderEndpoint` 原样保留它），转成 native 执行器会把路径拼成
- *    `.../responses/responses`。CLI 在这一点上会误拼，桌面不继承该行为。
- * 4. 其余情况回落到与 CLI 同构的目录判据
- *    （`findModelConfig(provider, model)?.nativeProtocol`），以容忍 plan 缺省/非
- *    custom 分支。
+ * 3. plan 说 `"responses"`（未注目录、仅端点以 `/responses` 结尾的直连形状）时同样进
+ *    native responses：`resolveCustomNativeEndpoint` 是幂等的，不会拼成
+ *    `.../responses/responses` —— 旧注释说会拼，那是幂等修复之前的行为。
+ * 4. 其余情况回落到与 CLI 同构的判据：**先目录 `nativeProtocol`**（同一网关按模型
+ *    分协议，目录更具体），目录静默时才用端点自身声明的 wire，且**只认
+ *    `openai-responses`** —— 与服务端代理（`agentCallPlan#resolveCustomUpstreamWire`
+ *    规则 2）保持同一口径，避免「本地走 messages、网页走 chat.completions」的分裂。
  */
 function resolveDesktopCustomNativeWire(args: {
   callPlan: AgentCallPlan;
@@ -585,13 +587,15 @@ function resolveDesktopCustomNativeWire(args: {
   if (!args.agentConfig.customProviderUrl) return null;
   const fromPlan = customNativeWireFromUpstreamWire(args.callPlan.upstreamWire);
   if (fromPlan) return fromPlan;
-  if (args.callPlan.upstreamWire === "responses") return null;
-  return customNativeWireFromNativeProtocol(
+  const fromCatalog = customNativeWireFromNativeProtocol(
     findModelConfig(
       args.agentConfig.provider ?? "",
       args.agentConfig.model ?? "",
     )?.nativeProtocol,
   );
+  if (fromCatalog) return fromCatalog;
+  const declared = detectDeclaredCustomNativeWire(args.agentConfig.customProviderUrl);
+  return declared === "openai-responses" ? declared : null;
 }
 
 /** plan 的 `custom-*` wire → 本地 native wire；非 `custom-*` 返回 null。 */
