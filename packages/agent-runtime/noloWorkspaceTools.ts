@@ -148,6 +148,9 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
     publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
     showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
     verbose: { type: "boolean", description: "Return full safe-summary details when supported." },
+    compact: { type: "boolean", description: "Return compact projection retaining admission evidence while omitting verbose text." },
+    limit: { type: "number", description: "Maximum number of agents to return for pagination." },
+    offset: { type: "number", description: "Pagination offset." },
     space: stringToolParam("Optional space id or URL."),
   });
   add("readAgent", "Read one agent's full config by exact agentKey returned by listAgents (agent-<userId>-<id> or agent-pub-<id>); do not use the display name.", {
@@ -165,9 +168,18 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
   add("readSkillDoc", "Read one skill doc in the Nolo workspace.", {
     doc: stringToolParam("Skill doc/page key."),
   }, ["doc"]);
-  add("loadSkill", "Load a skill by name (.agents/skills/<name>/SKILL.md) and return its full instructions inline. Returns available skills if not found.", {
-    name: stringToolParam("Skill name advertised in skill discovery."),
-  }, ["name"]);
+  add("loadSkill", "Load a skill and return its full instructions inline. Use legacy name alone (returns available skills if not found), or an exact reference without name: source=space + dbKey, source=builtin + slug, or source=project + projectBinding + relativePath. Do not mix selectors. Server execution supports space/builtin; local CLI/desktop execution supports builtin/project, not space.", {
+    name: stringToolParam("Legacy skill name advertised in skill discovery. Use without exact-reference fields."),
+    source: {
+      type: "string",
+      enum: ["space", "builtin", "project"],
+      description: "Exact skill source. Requires dbKey for space, slug for builtin, or projectBinding and relativePath for project. Omit name.",
+    },
+    dbKey: stringToolParam("Exact skill document dbKey; use only with source=space (server execution)."),
+    slug: stringToolParam("Exact builtin skill slug; use only with source=builtin."),
+    projectBinding: stringToolParam("Authorized project root as an absolute path matching the executor cwd; use only with source=project (local execution)."),
+    relativePath: stringToolParam("Project-relative path to SKILL.md within the authorized project's .agents/skills/ directory; use only with source=project (local execution)."),
+  });
   add("listTables", "List tables in the current user scope or an optional space scope.", {
     limit: { type: "integer", description: "Maximum tables to return." },
     space: stringToolParam("Optional space id or URL."),
@@ -614,6 +626,29 @@ export function buildNoloWorkspaceCommandArgs(call: { name: string; arguments: s
       if (args.publicOnly === true) cliArgs.push("--public-only");
       if (args.showUnavailable === true) cliArgs.push("--show-unavailable");
       if (args.verbose === true) cliArgs.push("--verbose");
+      if (args.compact === true) cliArgs.push("--compact");
+      const limitVal = args.limit;
+      if (limitVal !== undefined && limitVal !== null && limitVal !== "") {
+        if (typeof limitVal === "boolean") {
+          throw new Error(`Invalid limit '${limitVal}': must be a positive integer.`);
+        }
+        const parsed = Number(limitVal);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          throw new Error(`Invalid limit '${limitVal}': must be a positive integer.`);
+        }
+        cliArgs.push("--limit", String(parsed));
+      }
+      const offsetVal = args.offset;
+      if (offsetVal !== undefined && offsetVal !== null && offsetVal !== "") {
+        if (typeof offsetVal === "boolean") {
+          throw new Error(`Invalid offset '${offsetVal}': must be a non-negative integer.`);
+        }
+        const parsed = Number(offsetVal);
+        if (!Number.isInteger(parsed) || parsed < 0) {
+          throw new Error(`Invalid offset '${offsetVal}': must be a non-negative integer.`);
+        }
+        cliArgs.push("--offset", String(parsed));
+      }
       cliArgs.push("--json", "--safe");
       return cliArgs;
     }

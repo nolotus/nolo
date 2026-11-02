@@ -9,7 +9,9 @@ export const secretStrings = {
     en: `Usage:
   nolo secret list [--json]                List saved secret names (without values; --json outputs machine-readable list)
   nolo secret get <name>                   Print the value of a secret (for debugging; agents must not read)
-  nolo secret set <name> <value|json>      Set a secret (string, or JSON starting with { / [)
+  nolo secret set <name> --prompt          Set a secret via hidden interactive prompt (TTY only; does not echo secret)
+  nolo secret set <name> --stdin           Set a secret securely from stdin (recommended; prevents leaking secrets in argv)
+  nolo secret set <name> <value|json>      Set a secret via argv (legacy; discouraged: exposes secrets in shell history and process list)
   nolo secret delete <name>                Delete a secret
   nolo secret run --with <names> -- <cmd>  Safely inject secret environment variables and run a command
   nolo secret bind <alias> <ref> [--env <ENV_NAME>]  Bind a managed credential reference to an alias
@@ -19,7 +21,9 @@ export const secretStrings = {
     zh: `用法:
   nolo secret list [--json]                列出已保存的 secret 名称（不显示值；--json 输出机器可读清单）
   nolo secret get <name>                   打印指定 secret 的值（供调试；Agent 不得读取）
-  nolo secret set <name> <value|json>      设置 secret（字符串，或以 { / [ 开头的 JSON）
+  nolo secret set <name> --prompt          通过隐藏输入交互设置 secret（仅限 TTY，不回显凭据）
+  nolo secret set <name> --stdin           从 stdin 安全设置 secret（推荐；避免通过命令行参数泄露凭据）
+  nolo secret set <name> <value|json>      通过命令行参数设置 secret（兼容旧语法；不推荐：凭据会暴露在进程列表与 shell 历史中）
   nolo secret delete <name>                删除指定的 secret
   nolo secret run --with <names> -- <cmd>  安全注入 secret 环境变量并执行子命令
   nolo secret bind <alias> <ref> [--env <ENV_NAME>]  将受控凭据引用绑定到别名
@@ -134,5 +138,73 @@ export const secretStrings = {
   "secret.jsonScalar": {
     en: "JSON values must be an object or an array, not a scalar",
     zh: "JSON 值必须是对象或数组，不能是标量",
+  },
+  "secret.setNameRequired": {
+    en: "Error: Please provide a secret name. Example: nolo secret set <name> --stdin",
+    zh: "错误: 请提供 secret 名称。例如: nolo secret set <name> --stdin",
+  },
+  "secret.stdinDuplicateFlag": {
+    en: "Error: Duplicate --stdin flag",
+    zh: "错误: --stdin 参数重复",
+  },
+  "secret.stdinMixedWithValue": {
+    en: "Error: Cannot mix --stdin with value arguments. Pass value via stream only",
+    zh: "错误: 不能将 --stdin 与值参数混用。请仅通过流输入提供值",
+  },
+  "secret.stdinTtyNotSupported": {
+    en: "Error: Interactive terminal (TTY) detected. --stdin is not an interactive prompt; please pipe input via stdin (e.g. pass show secret | nolo secret set <name> --stdin)",
+    zh: "错误: 检测到交互式终端 (TTY)。--stdin 不是交互式隐藏提示符；请通过管道提供输入（例如: pass show secret | nolo secret set <name> --stdin）",
+  },
+  "secret.stdinEmpty": {
+    en: "Error: Secret input from stdin cannot be empty or pure whitespace",
+    zh: "错误: 来自 stdin 的 secret 输入不能为空或纯空白",
+  },
+  "secret.stdinTooLarge": {
+    en: "Error: Secret input from stdin exceeds maximum limit (64 KiB)",
+    zh: "错误: 来自 stdin 的 secret 输入超过最大限制 (64 KiB)",
+  },
+  "secret.stdinTimeout": {
+    en: "Error: Timed out waiting for stdin input (10s limit)",
+    zh: "错误: 等待 stdin 输入超时（限制 10 秒）",
+  },
+  "secret.stdinReadError": {
+    en: "Error: Failed to read secret from stdin",
+    zh: "错误: 从 stdin 读取 secret 失败",
+  },
+  "secret.promptDuplicateFlag": {
+    en: "Error: Duplicate --prompt flag",
+    zh: "错误: --prompt 参数重复",
+  },
+  "secret.cannotMixStdinAndPrompt": {
+    en: "Error: Cannot mix --stdin and --prompt flags",
+    zh: "错误: 不能同时使用 --stdin 和 --prompt 参数",
+  },
+  "secret.promptMixedWithValue": {
+    en: "Error: Cannot mix --prompt with value arguments. Pass value via interactive prompt only",
+    zh: "错误: 不能将 --prompt 与值参数混用。请仅通过交互提示符提供值",
+  },
+  "secret.promptNameRequired": {
+    en: "Error: Please provide a secret name. Example: nolo secret set <name> --prompt",
+    zh: "错误: 请提供 secret 名称。例如: nolo secret set <name> --prompt",
+  },
+  "secret.promptNonTtyNotSupported": {
+    en: "Error: Interactive terminal (TTY) required for --prompt. For automated pipelines use --stdin",
+    zh: "错误: --prompt 需要交互式终端 (TTY)。自动化流水线请使用 --stdin",
+  },
+  "secret.promptEmpty": {
+    en: "Error: Secret input from prompt cannot be empty or pure whitespace",
+    zh: "错误: 来自提示符的 secret 输入不能为空或纯空白",
+  },
+  "secret.promptAborted": {
+    en: "Secret input cancelled",
+    zh: "用户取消了 secret 输入",
+  },
+  "secret.promptLabel": {
+    en: 'Enter secret value for "{0}": ',
+    zh: '请输入 "{0}" 的 secret 值（输入内容已隐藏）: ',
+  },
+  "secret.promptReadError": {
+    en: "Error: Failed to read secret from prompt",
+    zh: "错误: 从交互提示符读取 secret 失败",
   },
 } as const;

@@ -572,7 +572,8 @@ function sanitizeGeminiSchemaNodeInner(
     if (typeof firstNonNull === "string") out.type = firstNonNull;
     out.nullable = true;
   } else if (typeof src.type === "string") {
-    out.type = src.type;
+    out.type = src.type === "null" ? "string" : src.type;
+    if (src.type === "null") out.nullable = true;
   }
 
   if (typeof src.description === "string") out.description = src.description;
@@ -588,64 +589,258 @@ function sanitizeGeminiSchemaNodeInner(
     applyGeminiEnum(out, geminiEnumFields(enumValues, baseDescription));
   }
 
-  // oneOf/anyOf → 各分支 properties 并集 + required 交集（宽松归并）
+  if (src.type === "null") {
+    out.description = [out.description, "null only"].filter(Boolean).join("\n");
+  }
+
+  // oneOf/anyOf：标量联合放宽冲突约束；对象变体保持既有归并行为
   const variantBranches = [
     ...(Array.isArray(src.oneOf) ? src.oneOf : []),
     ...(Array.isArray(src.anyOf) ? src.anyOf : []),
   ];
   if (variantBranches.length > 0) {
-    const mergedProperties: Record<string, unknown> = {};
-    let requiredIntersection: string[] | undefined;
-    for (const branch of variantBranches) {
-      const sanitized = sanitizeGeminiSchemaNode(branch, seen);
-      const branchProperties = (sanitized.properties as Record<string, unknown>) ?? {};
-      for (const [key, value] of Object.entries(branchProperties)) {
-        const previous = mergedProperties[key];
-        // 同名属性：enum 收并集（典型：各分支用 const 区分变体），其余后者覆盖
-        const prevMeta = enumMetaOf(previous);
-        const nextMeta = enumMetaOf(value);
-        if (prevMeta && nextMeta) {
-          // 同一规则：原始取值取并集后重新规范化（非字符串取值 → description 标注）
-          const values = [...prevMeta.values, ...nextMeta.values];
-          const baseDescription =
-            nextMeta.baseDescription ?? prevMeta.baseDescription;
-          const node: Record<string, unknown> = {
-            ...(value as Record<string, unknown>),
-          };
-          delete node.enum;
-          delete node.description;
-          applyGeminiEnum(node, geminiEnumFields(values, baseDescription));
-          enumMetaByNode.set(node, { values, baseDescription });
-          mergedProperties[key] = node;
-        } else {
-          mergedProperties[key] = value;
+    const rawBranches = variantBranches.map((branch): Record<string, unknown> =>
+      branch && typeof branch === "object" && !Array.isArray(branch) ? branch : {},
+    );
+    const allSanitized = variantBranches.map((branch) =>
+      sanitizeGeminiSchemaNode(branch, seen),
+    );
+    // null 必须先于标量/对象分流摘除，且两条路径都传播 nullable。
+    if (rawBranches.some((branch, index) =>
+      branch.type === "null" || allSanitized[index]?.nullable === true ||
+      rawEnumValues(branch)?.includes(null),
+    )) out.nullable = true;
+    const nonNullIndices = rawBranches.flatMap((branch, index) =>
+      branch.type === "null" ? [] : [index],
+    );
+    const branches = nonNullIndices.map((index) => rawBranches[index]!);
+    const sanitizedBranches = nonNullIndices.map((index) => allSanitized[index]!);
+    const inferType = (branch: Record<string, unknown>): string | undefined => {
+      if (typeof branch.type === "string") return branch.type;
+      const values = rawEnumValues(branch)?.filter((value) => value !== null);
+      if (!values?.length) return undefined;
+      if (values.every((value) => typeof value === "number")) {
+        return values.every((value) => Number.isInteger(value)) ? "integer" : "number";
+      }
+      if (values.every((value) => typeof value === "boolean")) return "boolean";
+      if (values.every((value) => typeof value === "string")) return "string";
+      return undefined;
+    };
+    const candidateTypes = (branch: Record<string, unknown>, active = new Set<object>()): string[] => {
+      if (active.has(branch)) return [];
+      active.add(branch);
+      const nested = [branch.oneOf, branch.anyOf].flatMap((value) => Array.isArray(value) ? value : []);
+      const type = inferType(branch);
+      const types = [
+        ...(type && type !== "null" ? [type] : []),
+        ...nested.flatMap((value) => value && typeof value === "object"
+          ? candidateTypes(value, active) : []),
+      ];
+      active.delete(branch);
+      return types;
+    };
+    const unconstrainedBranch = branches.some((branch) =>
+      branch.type === undefined && rawEnumValues(branch) === undefined &&
+      branch.properties === undefined && branch.oneOf === undefined &&
+      branch.anyOf === undefined && branch.allOf === undefined && branch.$ref === undefined,
+    );
+    if (sanitizedBranches.every((branch) =>
+      branch.properties === undefined && branch.required === undefined,
+    )) {
+      const types = [...new Set(branches.flatMap((branch) => candidateTypes(branch)))];
+      const first = sanitizedBranches[0] ?? {};
+      const baseDescription = typeof out.description === "string"
+        ? out.description
+        : typeof branches[0]?.description === "string" ? branches[0].description : undefined;
+      // Gemini 没有联合类型：混合类型仍选首个候选并在 description 列出全部类型。
+      // 单一 type 必然排除另一支，但拒绝转换会让整个工具不可用，代价更大。
+      const scalar: Record<string, unknown> = {
+        ...first,
+        type: types.length > 0 && types.every((type) => type === "integer" || type === "number")
+          ? (types.includes("number") ? "number" : "integer")
+          : types[0] ?? "string",
+        ...out,
+      };
+      delete scalar.description;
+      if (baseDescription !== undefined) scalar.description = baseDescription;
+      // 父节点 enum 是联合之外的独立约束，不可被分支候选替换。
+      if (!enumValues) {
+        delete scalar.enum;
+        const values = branches.flatMap((branch, index) =>
+          rawEnumValues(branch) ?? enumMetaOf(sanitizedBranches[index])?.values ?? [],
+        );
+        const allEnum = branches.length > 0 && branches.every((branch, index) =>
+          rawEnumValues(branch) !== undefined || enumMetaOf(sanitizedBranches[index]) !== undefined,
+        );
+        if (values.length > 0) {
+          if (allEnum) {
+            if (typeof out.type !== "string") {
+              scalar.type = inferType({ enum: values }) ?? "string";
+            }
+            applyGeminiEnum(scalar, geminiEnumFields(values, baseDescription));
+            enumMetaByNode.set(out, { values, baseDescription });
+          } else {
+            scalar.description = [baseDescription,
+              `Candidates: ${[...new Set(values.map(geminiEnumLiteral))].join(", ")}`,
+            ].filter(Boolean).join("\n");
+          }
         }
       }
-      const branchRequired = Array.isArray(sanitized.required)
-        ? (sanitized.required as string[])
-        : [];
-      requiredIntersection =
-        requiredIntersection === undefined
-          ? [...branchRequired]
-          : requiredIntersection.filter((r) => branchRequired.includes(r));
+      const conflictingRanges: Record<string, unknown>[] = [];
+      for (const key of ["minimum", "maximum", "minLength", "maxLength"]) {
+        if (typeof src[key] === "number") {
+          scalar[key] = src[key];
+          continue;
+        }
+        const values = branches.map((branch) => branch[key]).filter((value) => typeof value === "number");
+        if (values.length !== branches.length || new Set(values).size > 1) {
+          delete scalar[key];
+          if (values.length > 0 && conflictingRanges.length === 0) {
+            conflictingRanges.push(...branches.map((branch) => Object.fromEntries(
+              ["minimum", "maximum", "minLength", "maxLength"].flatMap((name) =>
+                typeof branch[name] === "number" ? [[name, branch[name]]] : [],
+              ),
+            )));
+          }
+        } else if (values.length > 0) scalar[key] = values[0];
+      }
+      if (conflictingRanges.length > 0) {
+        scalar.description = [scalar.description,
+          `Original ranges: ${conflictingRanges.map((range) => JSON.stringify(range)).join(" | ")}`,
+        ].filter(Boolean).join("\n");
+      }
+      // items 必须在所有分支中深度相等；比较原始 schema，避免 sanitize 抹去差异。
+      const stableValue = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(stableValue);
+        if (value && typeof value === "object") return Object.fromEntries(
+          Object.keys(value).sort().map((key) => [key, stableValue((value as Record<string, unknown>)[key])]),
+        );
+        return value;
+      };
+      if (src.items === undefined && branches.some((branch) => branch.items !== undefined)) {
+        const firstItems = branches[0]?.items;
+        const sameItems = firstItems !== undefined && branches.every((branch) =>
+          branch.items !== undefined &&
+          JSON.stringify(stableValue(branch.items)) === JSON.stringify(stableValue(firstItems)),
+        );
+        if (!sameItems) {
+          const itemTypes = branches.map((branch) => {
+            const items = branch.items;
+            return items && typeof items === "object" && !Array.isArray(items)
+              ? (items as Record<string, unknown>).type : undefined;
+          });
+          const commonType = itemTypes[0];
+          const fallbackType = typeof commonType === "string" &&
+            ["string", "integer", "number", "boolean", "object", "array"].includes(commonType) &&
+            itemTypes.every((type) => type === commonType) ? commonType : "string";
+          scalar.items = fallbackType === "array"
+            ? { type: "array", items: { type: "string" } } : { type: fallbackType };
+          scalar.description = [scalar.description,
+            `Original items: ${branches.map((branch) => branch.items === undefined
+              ? "unconstrained" : geminiEnumLiteral(branch.items)).join(" | ")}`,
+          ].filter(Boolean).join("\n");
+        }
+      }
+      // pattern/format 尚不在输出白名单；即使各分支相同，也必须留下原值和来源。
+      const originalConstraints = branches.map((branch) => Object.fromEntries(
+        ["pattern", "format"].flatMap((key) => branch[key] !== undefined ? [[key, branch[key]]] : []),
+      ));
+      if (originalConstraints.some((constraints) => Object.keys(constraints).length > 0)) {
+        scalar.description = [scalar.description,
+          `Original constraints: ${originalConstraints.map((value) => JSON.stringify(value)).join(" | ")}`,
+        ].filter(Boolean).join("\n");
+      }
+      // 嵌套联合的降级说明不能随外层首分支 description 的重建而消失。
+      for (let index = 0; index < branches.length; index++) {
+        if ((branches[index]!.oneOf || branches[index]!.anyOf) && sanitizedBranches[index]!.description) {
+          scalar.description = [scalar.description,
+            `Branch ${index + 1}: ${sanitizedBranches[index]!.description}`,
+          ].filter(Boolean).join("\n");
+        }
+      }
+      if (types.length > 1) {
+        scalar.description = [scalar.description, `One of: ${types.join(" | ")}`]
+          .filter(Boolean).join("\n");
+      }
+      if (branches.length === 0) {
+        scalar.description = [scalar.description, "null only"].filter(Boolean).join("\n");
+      } else if (branches.some((branch) => inferType(branch) === undefined && rawEnumValues(branch)?.some((value) => value !== null))) {
+        scalar.description = [scalar.description, "Mixed enum types; using a fallback type"]
+          .filter(Boolean).join("\n");
+      }
+      Object.assign(out, scalar);
+    } else {
+      const mergedProperties: Record<string, unknown> = {};
+      let requiredIntersection: string[] | undefined;
+      for (const sanitized of sanitizedBranches) {
+        const branchProperties = (sanitized.properties as Record<string, unknown>) ?? {};
+        for (const [key, value] of Object.entries(branchProperties)) {
+          const previous = mergedProperties[key];
+          // 同名属性：enum 收并集（典型：各分支用 const 区分变体），其余后者覆盖
+          const prevMeta = enumMetaOf(previous);
+          const nextMeta = enumMetaOf(value);
+          if (prevMeta && nextMeta) {
+            // 同一规则：原始取值取并集后重新规范化（非字符串取值 → description 标注）
+            const values = [...prevMeta.values, ...nextMeta.values];
+            const baseDescription =
+              nextMeta.baseDescription ?? prevMeta.baseDescription;
+            const node: Record<string, unknown> = {
+              ...(value as Record<string, unknown>),
+            };
+            delete node.enum;
+            delete node.description;
+            applyGeminiEnum(node, geminiEnumFields(values, baseDescription));
+            enumMetaByNode.set(node, { values, baseDescription });
+            mergedProperties[key] = node;
+          } else {
+            mergedProperties[key] = value;
+          }
+        }
+        const branchRequired = Array.isArray(sanitized.required)
+          ? (sanitized.required as string[])
+          : [];
+        requiredIntersection =
+          requiredIntersection === undefined
+            ? [...branchRequired]
+            : requiredIntersection.filter((r) => branchRequired.includes(r));
+      }
+      out.properties = {
+        ...((out.properties as Record<string, unknown>) ?? {}),
+        ...mergedProperties,
+      };
+      if (requiredIntersection !== undefined && requiredIntersection.length > 0) {
+        out.required = requiredIntersection;
+      }
+      if (typeof out.type !== "string") out.type = "object";
+      // 纯对象变体保持原输出；只有混入非对象候选时才补充有损降级说明。
+      if (sanitizedBranches.some((branch) => branch.properties === undefined)) {
+        const types = [...new Set(branches.flatMap((branch) =>
+          branch.properties !== undefined ? ["object"] : candidateTypes(branch),
+        ))].sort();
+        if (rawBranches.some((branch) => branch.type === "null")) types.push("null");
+        out.description = [out.description,
+          `One of: ${types.join(" | ")}. This declaration represents only one branch of the union; other candidates are not structurally represented.`,
+        ].filter(Boolean).join("\n");
+      }
     }
-    out.properties = {
-      ...((out.properties as Record<string, unknown>) ?? {}),
-      ...mergedProperties,
-    };
-    if (requiredIntersection !== undefined && requiredIntersection.length > 0) {
-      out.required = requiredIntersection;
+    if (unconstrainedBranch) {
+      out.description = [out.description,
+        "An unconstrained branch accepts any JSON value (any value, including null). This declaration uses a fallback type and cannot express the full union.",
+      ].filter(Boolean).join("\n");
+      if (src.type === undefined) out.nullable = true;
     }
-    if (typeof out.type !== "string") out.type = "object";
   }
   // allOf → 浅合并（后者覆盖前者：同名属性/嵌套节点整体替换），required 并集
   if (Array.isArray(src.allOf)) {
     for (const branch of src.allOf) {
       const sanitized = sanitizeGeminiSchemaNode(branch, seen);
-      out.properties = {
-        ...((out.properties as Record<string, unknown>) ?? {}),
-        ...((sanitized.properties as Record<string, unknown>) ?? {}),
-      };
+      // 标量 allOf 不应凭空生成 properties；对象路径维持既有行为。
+      if (out.type === undefined || out.type === "object" || out.properties || sanitized.properties) {
+        out.properties = {
+          ...((out.properties as Record<string, unknown>) ?? {}),
+          ...((sanitized.properties as Record<string, unknown>) ?? {}),
+        };
+      }
       if (Array.isArray(sanitized.required)) {
         out.required = [
           ...new Set([
@@ -680,6 +875,17 @@ function sanitizeGeminiSchemaNodeInner(
     if (typeof out.type !== "string") out.type = "array";
   }
   if (typeof out.type !== "string") out.type = "object";
+  // 2026-11-01: Gemini 真机对缺少 items 的 array 返回 400 INVALID_ARGUMENT。
+  if (out.type === "array" && !out.items) out.items = { type: "string" };
+  // object 缺少 properties 是否会被 Gemini 拒绝尚未验证，维持既有行为。
+  if (out.type !== "object" && !out.properties) {
+    const dropped = Object.fromEntries(["minLength", "maxLength", "pattern", "format"].flatMap((key) =>
+      src[key] !== undefined && out[key] === undefined ? [[key, src[key]]] : [],
+    ));
+    if (Object.keys(dropped).length > 0) out.description = [out.description,
+      `Original constraints: ${JSON.stringify(dropped)}`,
+    ].filter(Boolean).join("\n");
+  }
   return out;
 }
 

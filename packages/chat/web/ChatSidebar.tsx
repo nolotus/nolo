@@ -47,6 +47,7 @@ import { useSidebarToggleContext } from "render/layout/SidebarToggleContext";
 import "render/layout/sidebarContextToggle.css";
 import { ExploreCategoryNav } from "./ExploreCategoryNav";
 import { type HomeView, resolveHomeView, resolveRailView } from "./navigationRailView";
+import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import { DesktopFolderProjects } from "./DesktopFolderProjectsSection";
 import { projectHomeItems, type HomeScope } from "./homeScopeProjection";
 import { parseLocalDialogProjectBindings } from "./homeLocalProjectDialogs";
@@ -114,11 +115,18 @@ const ShellWithRail: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               aria-expanded={isOpen}
               data-hook="sidebar-context-toggle-button"
             >
-              {isOpen ? (
-                <LuPanelLeftClose size={16} aria-hidden="true" />
-              ) : (
-                <LuPanelLeftOpen size={16} aria-hidden="true" />
-              )}
+              {/* 默认显示品牌 logo；hover/focus 时交叉淡出为收起/展开箭头
+                  （ChatGPT 式形态：静置是标识，移动上去才暴露成按钮）。 */}
+              <span className="sidebar-context-toggle__logo" aria-hidden="true">
+                <NoloHeadMark size={18} />
+              </span>
+              <span className="sidebar-context-toggle__glyph" aria-hidden="true">
+                {isOpen ? (
+                  <LuPanelLeftClose size={16} aria-hidden="true" />
+                ) : (
+                  <LuPanelLeftOpen size={16} aria-hidden="true" />
+                )}
+              </span>
             </button>
           ) : null
         }

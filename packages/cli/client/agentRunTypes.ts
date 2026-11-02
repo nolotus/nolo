@@ -312,6 +312,8 @@ export type RunAgentTurnOptions = {
   abortSignal?: AbortSignal;
   /** Local loop lifecycle events; used by the CLI runner to write heartbeat activity to the registry. */
   onLoopEvent?: (event: LocalAgentLoopEvent) => void;
+  /** Non-reasoning text evidence for durable local run checkpoints. */
+  onPartialText?: (chunk: string) => void;
   /**
    * 回合内注入收件箱 drain（TUI 后台 run 终态唤醒直投当前 loop）。
    * 直接透传给 local loop input.drainInjections；server 模式不支持，忽略。

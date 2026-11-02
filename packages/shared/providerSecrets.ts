@@ -20,6 +20,8 @@ export const PROVIDER_KEY_PRESET_IDS = new Set([
   "qwen-api",
   // LithosAI 按量计费 API（api.lithosai.cloud，默认 DeepSeek-V4.1-Flash）。
   "lithosai-api",
+  // LongCat 官方 API（api.longcat.chat，默认 LongCat-2.5）。
+  "longcat-api",
   // MiMo 官方按量计费 API（与 token-plan 订阅 Key 不同通道）。
   "mimo-api",
   "kimi-api",

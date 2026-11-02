@@ -24,6 +24,12 @@ import {
   type UserChoiceResult,
 } from "../client/localRuntimeAdapter";
 import { resolveSkillReference, buildSkillContextBlocks } from "../agentRunPrompts";
+import {
+  parseSkillSlashReference,
+  resolveSkillSlashUserPrompt,
+} from "../../agent-runtime/skillSlashReference";
+import { buildLoadSkillExecutor } from "../../agent-runtime";
+import { parseExternalSkillMarkdown } from "../../ai/skills/skillDocProtocol";
 import { buildSkillDiscoveryContextLayer } from "../../agent-runtime/skillDiscovery";
 import { buildHostEnvironmentLayer } from "../../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
@@ -245,6 +251,82 @@ async function runAgentChat(
   let effectiveMessage = message;
   let skillAllowedTools: string[] | undefined;
   let skillContextBlocks: string[] | undefined;
+
+  // 行首 /skill@ 精确引用的首轮预加载：
+  // 1. 复用 parseSkillSlashReference 解析行首定位；
+  // 2. 复用 buildLoadSkillExecutor 执行项目绑定与路径验证；
+  // 3. 验证失败阻止发送模型（抛出异常中断执行）；
+  // 4. 保留原用户参数与工具授权，不添加持续会话挂载（不修改 state.attachedSkills）。
+  const parsedSlashSkill = parseSkillSlashReference(message);
+  let slashSkillPreloadResult:
+    | {
+        content: string;
+        allowedTools?: string[];
+      }
+    | undefined;
+
+  if (parsedSlashSkill) {
+    const executor = buildLoadSkillExecutor({ cwd: state.cwd });
+    let loadArgs: Record<string, unknown>;
+    if (parsedSlashSkill.reference.source === "builtin") {
+      loadArgs = { source: "builtin", slug: parsedSlashSkill.reference.id };
+    } else if (parsedSlashSkill.reference.source === "project") {
+      loadArgs = {
+        source: "project",
+        projectBinding: parsedSlashSkill.reference.projectBinding,
+        relativePath: parsedSlashSkill.reference.relativePath,
+      };
+    } else {
+      loadArgs = {
+        source: "space",
+        dbKey: (parsedSlashSkill.reference as { dbKey: string }).dbKey,
+      };
+    }
+    const loadResult = await executor({
+      name: "loadSkill",
+      arguments: JSON.stringify(loadArgs),
+    });
+    if (!loadResult.metadata?.resolved) {
+      output.write(`[nolo] skill preload failed: ${loadResult.content}\n`);
+      throw new Error(`Skill preload failed: ${loadResult.content}`);
+    }
+
+    effectiveMessage = resolveSkillSlashUserPrompt(parsedSlashSkill.args);
+
+    let preloadTools: string[] | undefined;
+    if (
+      Array.isArray(loadResult.metadata?.toolNames) &&
+      loadResult.metadata.toolNames.length > 0
+    ) {
+      preloadTools = (loadResult.metadata.toolNames as unknown[]).filter(
+        (t): t is string => typeof t === "string" && t.length > 0,
+      );
+    }
+    let skillMarkdown = loadResult.content;
+    const inlinePrefix = /^Skill\s+"[^"]*"\s+loaded inline\.\s+Follow its instructions\.\s*\n+/i;
+    if (inlinePrefix.test(skillMarkdown)) {
+      skillMarkdown = skillMarkdown.replace(inlinePrefix, "");
+    } else {
+      const frontmatterIndex = skillMarkdown.search(/(?:^|\n)---\s*\n/);
+      if (frontmatterIndex !== -1) {
+        const dashIndex = skillMarkdown.indexOf("---", frontmatterIndex);
+        if (dashIndex !== -1) {
+          skillMarkdown = skillMarkdown.slice(dashIndex);
+        }
+      }
+    }
+    const external = parseExternalSkillMarkdown(skillMarkdown);
+    if (external.allowedTools && external.allowedTools.length > 0) {
+      preloadTools = preloadTools
+        ? preloadTools.filter((t) => external.allowedTools!.includes(t))
+        : external.allowedTools;
+    }
+
+    slashSkillPreloadResult = {
+      content: loadResult.content,
+      allowedTools: preloadTools,
+    };
+  }
   // 记忆召回只依赖此刻已固定的 agent 与用户输入（`effectiveMessage` 之后不再
   // 改写），而 attached-skill 解析是与之相互独立的等待；因此在这里就发起召回，
   // 让两条 I/O 重叠，再在首次模型请求前 await 同一个 promise。远端优先 /
@@ -302,6 +384,30 @@ async function runAgentChat(
         if (skillAllowedTools.length === 0) {
           output.write(`[nolo] warning: attached skills declare incompatible allowed-tools; no tool restriction enforced\n`);
         }
+      }
+    }
+  }
+  if (slashSkillPreloadResult) {
+    skillContextBlocks = [
+      ...(skillContextBlocks ?? []),
+      slashSkillPreloadResult.content,
+    ];
+    if (
+      slashSkillPreloadResult.allowedTools &&
+      slashSkillPreloadResult.allowedTools.length > 0
+    ) {
+      if (skillAllowedTools !== undefined) {
+        const intersected = skillAllowedTools.filter((t) =>
+          slashSkillPreloadResult!.allowedTools!.includes(t),
+        );
+        if (intersected.length === 0) {
+          throw new Error(
+            "Cannot preserve skill tool authorization: incompatible tool restrictions",
+          );
+        }
+        skillAllowedTools = intersected;
+      } else {
+        skillAllowedTools = slashSkillPreloadResult.allowedTools;
       }
     }
   }

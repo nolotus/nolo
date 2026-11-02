@@ -21,7 +21,7 @@ export type LocalCliExecutor = (
     timeout?: number;
     cwd?: string;
     yolo?: boolean;
-    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   }
 ) => Promise<{ text: string; raw?: string; elapsed?: number }>;
 

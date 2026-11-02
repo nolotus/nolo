@@ -404,7 +404,9 @@ export const validateAccessAndBalance = (
     const userBalance = selectIdentityUserBalance(state);
     const currentUserId = selectIdentityUserId(state);
 
-    const isCustomApi = agentConfig.apiSource === "custom";
+    const isCustomApi =
+        agentConfig.apiSource === "custom" ||
+        Boolean(agentConfig.customProviderUrl);
     const isCliApi = agentConfig.apiSource === "cli";
     // M3: device-local owner when logged out; account match when logged in.
     const isDeviceLocalOwner =

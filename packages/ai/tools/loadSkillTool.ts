@@ -19,17 +19,25 @@ import {
   isAgentSkillDisabled,
   type AgentSkillConfigSource,
 } from "./agentSkillConfig";
+import type { ToolExecutorContext } from "./index";
 
 export interface LoadSkillToolArgs {
-  name: string;
+  name?: string;
+  source?: "space" | "builtin" | "project";
+  dbKey?: string;
+  slug?: string;
+  projectBinding?: string;
+  relativePath?: string;
 }
 
 export const loadSkillFunctionSchema = {
   name: "loadSkill",
   description: [
-    "按名称加载一个已保存的 skill 文档，返回其完整指令正文。",
+    "按名称或精确引用加载一个 skill 文档，返回其完整指令正文。",
     "name 使用 skill 保存时写入 skill-config 的 name（也接受 skillId）。",
-    "找不到对应 skill 时返回当前可用的 skill 名称列表（不报错）。",
+    "精确引用不传 name：source=space + dbKey，source=builtin + slug，或 source=project + projectBinding + relativePath；各组字段互斥，不混用。",
+    "执行器支持范围：服务端支持 space/builtin，本地 CLI/desktop 支持 builtin/project；Web 客户端支持 name 与 space/builtin 精确引用，不支持 project。",
+    "找不到对应 skill 时返回当前可用的 skill 名称列表（不报错）；精确引用不回退到同名 skill。",
     "系统内置写代码技能：对话转向写代码时用 loadSkill(\"coding\") 载入写代码能力与代码审查纪律（含 review 角色切割）。",
     "系统内置专职技能：feedback（反馈收集）/ agent-creator（创建 Agent）/ app-builder（应用构建），同样可直接 loadSkill 载入。",
   ].join("\n"),
@@ -38,10 +46,30 @@ export const loadSkillFunctionSchema = {
     properties: {
       name: {
         type: "string",
-        description: "要加载的 skill 名称。",
+        description: "旧版 skill 名称；不与精确引用字段混用。",
+      },
+      source: {
+        type: "string",
+        enum: ["space", "builtin", "project"],
+        description: "精确来源：space 需 dbKey，builtin 需 slug，project 需 projectBinding 与 relativePath；不传 name。Web 客户端支持 space/builtin，不支持 project。",
+      },
+      dbKey: {
+        type: "string",
+        description: "精确 skill 文档 dbKey，仅用于 source=space；必须在当前用户 membership 可见的 Space Skill 索引中（服务端或 Web 客户端执行）。",
+      },
+      slug: {
+        type: "string",
+        description: "精确内置 skill slug，仅用于 source=builtin。",
+      },
+      projectBinding: {
+        type: "string",
+        description: "与执行器授权 cwd 匹配的项目根目录绝对路径，仅用于 source=project（本地执行）。",
+      },
+      relativePath: {
+        type: "string",
+        description: "项目 .agents/skills/ 内 SKILL.md 的项目相对路径，仅用于 source=project（本地执行）。",
       },
     },
-    required: ["name"],
   },
 } as const;
 
@@ -255,14 +283,48 @@ const readCurrentAgentSkillSource = async (
 
 export async function loadSkillFunc(
   args: LoadSkillToolArgs,
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolExecutorContext
 ): Promise<{ rawData: unknown; displayData: string }> {
-  const requestedName = asTrimmedString(args?.name);
+  // Validate field presence, not truthiness: empty or undefined mixed selectors
+  // must not silently fall back to the legacy name path.
+  const hasArg = (key: keyof LoadSkillToolArgs) =>
+    Object.prototype.hasOwnProperty.call(args ?? {}, key);
+  const exact = (["source", "dbKey", "slug", "projectBinding", "relativePath"] as const)
+    .some(hasArg);
+  const source = args?.source;
+  if (exact) {
+    const validSpace = source === "space" &&
+      typeof args.dbKey === "string" && !!args.dbKey.trim() &&
+      !hasArg("slug") && !hasArg("projectBinding") && !hasArg("relativePath");
+    const validBuiltin = source === "builtin" &&
+      typeof args.slug === "string" && !!args.slug.trim() &&
+      !hasArg("dbKey") && !hasArg("projectBinding") && !hasArg("relativePath");
+    if (hasArg("name") || (!validSpace && !validBuiltin)) {
+      throw new Error(source === "project"
+        ? "loadSkill: source=project is not supported by the Web client."
+        : "loadSkill: use name, source=space + dbKey, or source=builtin + slug exclusively.");
+    }
+  }
+  let requestedName = asTrimmedString(exact
+    ? source === "space" ? args.dbKey : args.slug
+    : args?.name);
   if (!requestedName) throw new Error("loadSkill 需要提供 name。");
 
   const candidates = await listSkillCandidates(thunkApi);
-  const resolution = resolveWebSkill(candidates, requestedName);
+  // Exact references never enter name/skillId/title alias resolution.
+  let resolution: WebSkillResolution;
+  if (!exact) {
+    resolution = resolveWebSkill(candidates, requestedName);
+  } else if (source === "space") {
+    const candidate = candidates.find((entry) => entry.dbKey === requestedName);
+    resolution = candidate ? { kind: "space", candidate } : null;
+  } else {
+    const entry = listBuiltinSkills().find((entry) => entry.slug === requestedName);
+    resolution = entry ? { kind: "builtin", entry } : null;
+  }
   const matched = resolution?.kind === "space" ? resolution.candidate : undefined;
+  if (exact && matched) requestedName = matched.name;
 
   // 系统内置 skill 回退：space 索引找不到时查内置注册表（coding /
   // coding-review-* / feedback / agent-creator / app-builder / code-planning …）。
@@ -300,7 +362,9 @@ export async function loadSkillFunc(
     const body = builtinEntry.content;
     // 用 slug 作为引用键：稳定、与 userId 无关，且注册表认得。
     const dbKey = builtinEntry.slug;
-    await persistLoadedSkillReference(thunkApi, dbKey, requestedName);
+    if (context?.skipSkillReferencePersist !== true) {
+      await persistLoadedSkillReference(thunkApi, dbKey, requestedName);
+    }
     return {
       rawData: {
         success: true,
@@ -333,13 +397,21 @@ export async function loadSkillFunc(
     token: runtime?.currentToken,
     dbKey: matched.dbKey,
   });
+  if (exact && !page) {
+    return {
+      rawData: { success: false, name: requestedName, dbKey: matched.dbKey },
+      displayData: `Skill "${requestedName}" could not be read.`,
+    };
+  }
   const body = extractSkillBody(page);
 
   // 载入 skill 后，把该 skill 的 reference 追加到当前 dialog 的 extraReferences，
   // 让后续 turn 的工具面自动扩展出该 skill 声明的工具（跨 turn 生效）。
   // 这是「agent 在对话中自主载入 coding 能力」的核心机制：普通用户对话不
   // loadSkill coding → 不挂 code 工具；一旦载入 → 本对话后续 turn 有 code 工具。
-  await persistLoadedSkillReference(thunkApi, matched.dbKey, requestedName);
+  if (context?.skipSkillReferencePersist !== true) {
+    await persistLoadedSkillReference(thunkApi, matched.dbKey, requestedName);
+  }
 
   return {
     rawData: {

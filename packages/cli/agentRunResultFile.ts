@@ -8,6 +8,7 @@ import {
   resolveRuntimeAuthToken,
   resolveRuntimeServerUrl,
 } from "./client/localRuntimeHelpers";
+import type { CacheRunUsageSummary } from "../ai/token/cacheRunSummary";
 
 export type ResultFrontMatterInput = {
   runId: string;
@@ -26,6 +27,13 @@ export type ResultFrontMatterInput = {
   cwd?: string;
   /** append/continue 产生的新 run 指向的原 runId；拿不到则省略。 */
   continuedFrom?: string;
+  /**
+   * 本 run 的缓存命中汇总（见 ai/token/cacheRunSummary）。缺省 = 没有可用
+   * usage（该 run 没发生 provider 调用，或该路径不回报 usage 明细），此时
+   * 三个 cache 字段一并省略——「没数据」与「未知」都按缺省处理，绝不写 0 冒充。
+   * 展开为三行，语义见下方 entries 注释。
+   */
+  cacheUsage?: CacheRunUsageSummary;
 };
 
 /**
@@ -97,13 +105,14 @@ export function serverOriginForDialog(serverUrl: string | undefined): string {
 }
 
 /** 字符串统一用 JSON 双引号形式（是合法的 YAML 双引号标量），避免转义问题。 */
-function yamlScalar(value: string | number): string {
+function yamlScalar(value: string | number | null): string {
+  if (value === null) return "null";
   return typeof value === "number" ? String(value) : JSON.stringify(value);
 }
 
 /** 生成 front matter 块（含首尾 `---` 与结尾换行）。缺省字段省略。 */
 export function buildResultFrontMatter(input: ResultFrontMatterInput): string {
-  const entries: Array<[string, string | number | undefined]> = [
+  const entries: Array<[string, string | number | null | undefined]> = [
     ["runId", input.runId],
     ["status", input.status],
     ["agentName", input.agentName],
@@ -112,6 +121,15 @@ export function buildResultFrontMatter(input: ResultFrontMatterInput): string {
     ["endedAt", input.endedAt],
     ["durationMs", input.durationMs],
     ["toolCallCount", input.toolCallCount],
+    // 缓存命中观测（见 ai/token/cacheRunSummary）：
+    // - cacheInputTokens：本 run 输入 token 总量（各次调用相加，含命中部分）
+    // - cacheCachedTokens：其中命中缓存被复用的量；**null = 未知**（provider
+    //   未提供 cached 字段），0 才是「确实命中 0」——两者不可混
+    // - cacheHitRatio：派生的 cached/input（4 位小数）；input=0 时为 0，
+    //   cached 未知时为 null
+    ["cacheInputTokens", input.cacheUsage?.input_tokens],
+    ["cacheCachedTokens", input.cacheUsage?.cached_tokens],
+    ["cacheHitRatio", input.cacheUsage?.cache_hit_ratio],
     ["dialogId", input.dialogId],
     ["server", input.server],
     ["serverSync", input.serverSync],
@@ -120,7 +138,7 @@ export function buildResultFrontMatter(input: ResultFrontMatterInput): string {
   ];
   const lines = entries
     .filter(([, v]) => v !== undefined && v !== "")
-    .map(([k, v]) => `${k}: ${yamlScalar(v as string | number)}`);
+    .map(([k, v]) => `${k}: ${yamlScalar(v as string | number | null)}`);
   return `---\n${lines.join("\n")}\n---\n`;
 }
 

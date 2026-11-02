@@ -14,8 +14,13 @@ import {
     canRunServerOwnedWebForegroundTurn,
     runServerOwnedWebForegroundTurn,
 } from "ai/agent/serverOwnedWebForegroundTurn";
+import {
+  parseSkillSlashReference,
+  resolveSkillSlashUserPrompt,
+} from "../../../agent-runtime/skillSlashReference";
+import { loadSkillFunc, type LoadSkillToolArgs } from "../../../ai/tools/loadSkillTool";
 import { readAndWait, selectById } from "database/dbSlice";
-import type { DialogConfig } from "app/types";
+import type { DialogConfig, ReferenceItem } from "app/types";
 import { createDialogMessageKeyAndId } from "database/keys";
 import { extractCustomId } from "core/prefix";
 import { waitForAbortableDelay } from "core/abortableDelay";
@@ -47,6 +52,7 @@ interface HandleSendMessageThunkApi {
     dispatch: any;
     getState: () => RootState;
     rejectWithValue: (value: unknown) => unknown;
+    extra?: unknown;
 }
 
 const getDialogConfig = (
@@ -236,8 +242,9 @@ const finalizeSendFailureInDialog = async (
  */
 export const handleSendMessageAction = async (
     args: HandleSendMessageArgs,
-    { dispatch, getState, rejectWithValue }: HandleSendMessageThunkApi
+    thunkApi: HandleSendMessageThunkApi
 ) => {
+    const { dispatch, getState, rejectWithValue } = thunkApi;
     // 提升到 try 外声明，catch 分支需要读取（用于把失败写进对话流）。
     let dialogConfig: DialogConfig | null = null;
     let agentKeyToUse: string | undefined;
@@ -377,9 +384,54 @@ export const handleSendMessageAction = async (
             return;
         }
 
+        // Web 客户端回退路径（不经服务端 loop）：支持行首 /skill@ 精确引用预加载
+        let strippedUserInput = effectiveRawUserInput;
+        let ephemeralReferences: ReferenceItem[] | undefined;
+        const parsedSlashSkill = typeof effectiveRawUserInput === "string"
+            ? parseSkillSlashReference(effectiveRawUserInput)
+            : null;
+
+        if (parsedSlashSkill) {
+            if (parsedSlashSkill.reference.source === "project") {
+                throw new Error("loadSkill: project skill source is not supported on web client");
+            }
+
+            const loadArgs: LoadSkillToolArgs = parsedSlashSkill.reference.source === "builtin"
+                ? { source: "builtin" as const, slug: parsedSlashSkill.reference.id }
+                : { source: "space" as const, dbKey: parsedSlashSkill.reference.dbKey };
+
+            const loadResult = await loadSkillFunc(loadArgs, thunkApi, {
+                skipSkillReferencePersist: true,
+            });
+
+            if (!loadResult || (loadResult.rawData as any)?.success === false) {
+                const failMsg = (loadResult?.rawData as any)?.disabled
+                    ? loadResult.displayData
+                    : (loadResult?.displayData || "Failed to load skill");
+                throw new Error(failMsg);
+            }
+
+            const rawData = loadResult.rawData as { dbKey?: string; name?: string } | undefined;
+            if (rawData?.dbKey) {
+                ephemeralReferences = [
+                    {
+                        dbKey: rawData.dbKey,
+                        title: rawData.name ?? "",
+                        type: "instruction",
+                    },
+                ];
+            }
+
+            strippedUserInput = resolveSkillSlashUserPrompt(parsedSlashSkill.args);
+            const reloadedDialog = getDialogConfig(getState(), dialogConfig.dbKey);
+            if (reloadedDialog) {
+                dialogConfig = reloadedDialog;
+            }
+        }
+
         const effectiveUserInput = browseContextPrefix
-            ? `${browseContextPrefix}\n\n${userInputText}`
-            : (effectiveRawUserInput ?? "");
+            ? `${browseContextPrefix}\n\n${typeof strippedUserInput === "string" ? strippedUserInput : ""}`
+            : (strippedUserInput ?? "");
 
         // Legacy client-owned fallback：启动阶段对瞬态网络/超时错误自动退避重试 1 次。
         let streamResult: any;
@@ -396,6 +448,7 @@ export const handleSendMessageAction = async (
                         parentMessageId: undefined,
                         runtimeOptions: effectiveRuntimeOptions,
                         quickChatPerfStartedAt: args.quickChatPerfStartedAt,
+                        ...(ephemeralReferences ? { ephemeralReferences } : {}),
                     })
                 ).unwrap();
                 // streamAgentChatTurn 返回 { aborted: true } 表示用户在流中已取消，静默退出

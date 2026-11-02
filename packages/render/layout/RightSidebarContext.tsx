@@ -17,6 +17,12 @@ export interface RightSidebarOptions {
 export interface RightSidebarApi {
   open: (content: React.ReactNode, options?: RightSidebarOptions) => void;
   close: () => void;
+  openSlot: (
+    id: string,
+    content: React.ReactNode,
+    options?: RightSidebarOptions
+  ) => void;
+  closeSlot: (id: string) => void;
   isOpen: boolean;
   currentId?: string;
 }
@@ -32,5 +38,12 @@ export const useRightSidebar = (): RightSidebarApi => {
   }
   return ctx;
 };
+
+/**
+ * 可选读取：不在 MainLayout 内部（独立渲染的页面、SSR、组件测试）时返回 null。
+ * 供「有就占用一个槽位、没有就什么都不做」这类可选面板使用，避免整页抛错。
+ */
+export const useRightSidebarOptional = (): RightSidebarApi | null =>
+  useContext(RightSidebarContext);
 
 export default RightSidebarContext;

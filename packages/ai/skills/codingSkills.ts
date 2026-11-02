@@ -137,7 +137,7 @@ export const CODING_SKILL_SEEDS: readonly CodingSkillSeedDef[] = [
       "# Review 通用流程（完整版）",
       "",
       "**你是 reviewer。** 本文件是你这一轮的全部规则；spec 只补任务特定内容。",
-      "**你不派发、不做候选选择、不改文件。** 只审 spec 给你的 diff，产出 finding 或 `Clean review`。",
+      "**作为实际 reviewer 时，你不派发、不做候选选择、不改文件（reviewer 不派发仅限实际 reviewer 角色，不约束编排者加载规范）。** 只审 spec 给你的 diff，产出 finding 或 `Clean review`。",
       "",
       "## Review Dispatch Contract（规划者派发前读取）",
       "- reviewer 不得是产出该 diff 的同一 agent；规划者亲自实现的 diff 也必须交给另一个 reviewer。",

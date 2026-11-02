@@ -116,6 +116,7 @@ function getReasoningEffortSelectOptions(
     { id: "high", label: t(`${prefix}high`) },
     { id: "xhigh", label: t(`${prefix}xhigh`) },
     { id: "max", label: t(`${prefix}max`) },
+    { id: "ultra", label: t(`${prefix}ultra`) },
   ];
 }
 

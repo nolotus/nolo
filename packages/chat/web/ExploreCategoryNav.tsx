@@ -18,8 +18,20 @@ const FALLBACK: Record<ExploreCategory, string> = {
   "my-shares": "我的分享",
 };
 
+/**
+ * Where the category switcher is rendered.
+ * - `column`（默认）：Navigation V2 Context 列里的纵向列表；
+ * - `bar`：内容区顶部的横向滚动条，窄视口下替代被折叠的 Context 列。
+ * 两者是同一份分类真值，只有排布方式不同（见 AgentExplore.css）。
+ */
+export type ExploreCategoryNavVariant = "column" | "bar";
+
 /** Explore category switcher rendered in the Navigation V2 Context column. */
-export function ExploreCategoryNav() {
+export function ExploreCategoryNav({
+  variant = "column",
+}: {
+  variant?: ExploreCategoryNavVariant;
+} = {}) {
   const { t } = useTranslation("space");
   const location = useLocation();
   const current = resolveExploreCategory(location.search);
@@ -27,7 +39,11 @@ export function ExploreCategoryNav() {
   return (
     <nav
       aria-label={t("explorePage.categories", "探索分类")}
-      className="navigation-v2-explore-categories"
+      className={
+        variant === "bar"
+          ? "navigation-v2-explore-categories navigation-v2-explore-categories--bar"
+          : "navigation-v2-explore-categories"
+      }
     >
       {EXPLORE_CATEGORIES.map((category) => (
         <NavLink

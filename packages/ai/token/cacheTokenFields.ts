@@ -62,14 +62,55 @@ const nested =
   (usage: unknown): number | undefined =>
     readNested(usage, path);
 
+/**
+ * 与 {@link firstPositive} 同样按别名顺序取数，但把「provider 没给这个字段」
+ * 和「provider 给了且等于 0」区分开：
+ *
+ * - 全部别名都缺失 → `null`（未知：这个 provider 根本不报缓存指标）
+ * - 有别名给了非 0 值 → 该值（与 firstPositive 同一偏袒口径）
+ * - 别名都在、且都是 0 → `0`（真实的「命中 0」）
+ *
+ * 为什么需要它：`readCacheReadInputTokens` 把「未知」和「命中 0」都压成 0，
+ * 汇总报表里两者含义天差地别——0 是「这次真没命中」，null 是「不知道」。
+ * 只做观测读取，不参与任何记账/计费；记账口径继续走 readCacheReadInputTokens。
+ */
+const firstPresentAsNumber = (
+  usage: unknown,
+  readers: ReadonlyArray<(usage: unknown) => number | undefined>,
+): number | null => {
+  let sawField = false;
+  for (const read of readers) {
+    const value = read(usage);
+    if (value === undefined) continue;
+    sawField = true;
+    if (value !== 0) return value;
+  }
+  return sawField ? 0 : null;
+};
+
+const CACHE_READ_READERS: ReadonlyArray<(usage: unknown) => number | undefined> = [
+  topLevel("cache_read_input_tokens"),
+  topLevel("prompt_cache_hit_tokens"),
+  nested(["input_tokens_details", "cached_tokens"]),
+  nested(["prompt_tokens_details", "cached_tokens"]),
+];
+
+const CACHE_CREATION_READERS: ReadonlyArray<(usage: unknown) => number | undefined> = [
+  topLevel("cache_creation_input_tokens"),
+  topLevel("prompt_cache_miss_tokens"),
+  nested(["input_tokens_details", "cache_write_tokens"]),
+];
+
 /** 命中缓存被复用的 prompt token 数。 */
 export const readCacheReadInputTokens = (usage: unknown): number =>
-  firstPositive(usage, [
-    topLevel("cache_read_input_tokens"),
-    topLevel("prompt_cache_hit_tokens"),
-    nested(["input_tokens_details", "cached_tokens"]),
-    nested(["prompt_tokens_details", "cached_tokens"]),
-  ]);
+  firstPositive(usage, CACHE_READ_READERS);
+
+/**
+ * 同 {@link readCacheReadInputTokens}，但缺失时返回 `null` 而不是 0。
+ * 仅供 run 级观测汇总使用（见 ai/token/cacheRunSummary）。
+ */
+export const readCacheReadInputTokensOrNull = (usage: unknown): number | null =>
+  firstPresentAsNumber(usage, CACHE_READ_READERS);
 
 /**
  * 本次写入缓存（未命中）的 prompt token 数。
@@ -80,8 +121,4 @@ export const readCacheReadInputTokens = (usage: unknown): number =>
  * 调用（首次发送即全量写缓存，cached_tokens=0）会读成 0，写入侧缓存不可观测。
  */
 export const readCacheCreationInputTokens = (usage: unknown): number =>
-  firstPositive(usage, [
-    topLevel("cache_creation_input_tokens"),
-    topLevel("prompt_cache_miss_tokens"),
-    nested(["input_tokens_details", "cache_write_tokens"]),
-  ]);
+  firstPositive(usage, CACHE_CREATION_READERS);

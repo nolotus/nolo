@@ -814,6 +814,10 @@ export async function buildCreatedAgentRecord(args: {
     args.parsed.updates.prompt = promptBody;
   }
 
+  if (args.parsed.updates.customProviderUrl && !args.parsed.updates.apiSource) {
+    args.parsed.updates.apiSource = "custom";
+  }
+
   const nextRecord = {
     ...args.parsed.updates,
     dbKey: agentKey,
@@ -903,6 +907,9 @@ export async function buildUpdatedAgentRecord(args: {
   const nextRecord = {
     ...currentRecord,
     ...args.parsed.updates,
+    ...(args.parsed.updates.customProviderUrl && !args.parsed.updates.apiSource
+      ? { apiSource: "custom" }
+      : {}),
     updatedAt: Date.now(),
   };
 

@@ -46,7 +46,8 @@ export const resolveCliProviderTransport: ProviderResolver = async (ctx) => {
             reasoningEffortRaw === "medium" ||
             reasoningEffortRaw === "high" ||
             reasoningEffortRaw === "xhigh" ||
-            reasoningEffortRaw === "max"
+            reasoningEffortRaw === "max" ||
+            reasoningEffortRaw === "ultra"
               ? reasoningEffortRaw
               : undefined;
           const cliOptions: CliExecuteOptions = {

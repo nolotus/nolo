@@ -11,8 +11,7 @@ import type {
 } from "../agentRuntimeLocal";
 import { resolveLocalProvider } from "./providerResolution/resolveLocalProvider";
 import type { ProviderResolutionContext } from "./providerResolution/providerResolutionContext";
-import { dirname, extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveLocalRuntimePaths } from "./localRuntimePaths";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeProvider,
@@ -430,27 +429,16 @@ export type LocalCliExecutor = (
     cwd?: string;
     yolo?: boolean;
     env?: Record<string, string | undefined>;
-    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+    reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
     imageInputs?: CliImageInput[];
   },
 ) => Promise<CliExecuteResult>;
 
 // Max wait for remote dialog-evidence sync fetches (POST write / GET read)
 // before aborting, so an unreachable/hung server cannot stall a turn.
-const currentMetaFile = fileURLToPath(import.meta.url);
-const isJsBundle = extname(currentMetaFile) === ".js";
-const SOURCE_CLI_DIR = isJsBundle
-  ? dirname(currentMetaFile)
-  : dirname(dirname(currentMetaFile));
-const CLI_DIR = isCompiledBinary() ? dirname(process.execPath) : SOURCE_CLI_DIR;
-// Mirror the source/compiled extension so workspace tools can re-launch the
-// same CLI entrypoint in both repo development (bun + .ts) and published
-// packages (node + .js). Using a hardcoded .ts breaks installed packages.
-const CLI_ENTRYPOINT = isCompiledBinary()
-  ? process.execPath
-  : isJsBundle
-    ? currentMetaFile
-    : join(SOURCE_CLI_DIR, "index.ts");
+const { cliDir: CLI_DIR, cliEntrypoint: CLI_ENTRYPOINT } = resolveLocalRuntimePaths(
+  import.meta.url, isCompiledBinary(), process.execPath,
+);
 
 export {
   normalizeRuntimeCacheCwd,

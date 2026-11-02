@@ -164,6 +164,12 @@ export interface ProcessLaunchInfo {
   pid: number;
   label: string;
   command: string;
+  /**
+   * 进程注册表里的任务 id（ptask-…）。desktop runtime 会在 tool-result 里回传，
+   * 用于向宿主注册表核对「这条进程是否真的还活着」——pid 会跨会话复用/失效，
+   * 只有 taskId 能在重开对话后判定幽灵条目。
+   */
+  taskId?: string;
   status: "running" | "stopped" | "exited" | "failed";
   startedAt?: number;
   exitCode?: number;

@@ -11,7 +11,7 @@ type CliChatRequestBase = {
   cliProvider?: CliProvider;
   model?: string;
   systemPrompt?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   temperature?: number;
   topP?: number;
   frequencyPenalty?: number;

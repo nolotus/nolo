@@ -37,9 +37,46 @@
 }
 
 .sidebar-context-toggle--rail {
+  position: relative;
   width: 40px;
   height: 32px;
   flex: 0 0 32px;
+}
+
+/* 静置是 logo，hover / 键盘聚焦时换成收起-展开箭头（交叉淡变，尺寸不变所以不跳）。 */
+.sidebar-context-toggle__logo,
+.sidebar-context-toggle__glyph {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-context-toggle__logo {
+  opacity: 1;
+}
+
+.sidebar-context-toggle__glyph {
+  opacity: 0;
+}
+
+.sidebar-context-toggle:hover .sidebar-context-toggle__logo,
+.sidebar-context-toggle:focus-visible .sidebar-context-toggle__logo {
+  opacity: 0;
+}
+
+.sidebar-context-toggle:hover .sidebar-context-toggle__glyph,
+.sidebar-context-toggle:focus-visible .sidebar-context-toggle__glyph {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-context-toggle__logo,
+  .sidebar-context-toggle__glyph {
+    transition: none;
+  }
 }
 
 @media (min-width: 769px) {

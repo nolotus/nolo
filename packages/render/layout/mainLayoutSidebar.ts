@@ -71,3 +71,43 @@ export const shouldShowTopbarHomeButton = ({
   return !canPathHostChatSidebarHome(pathname);
 };
 
+
+/**
+ * Explore 的分类入口在窄视口下从 Context 列挪到内容区顶部横条
+ * （AgentExplore.tsx 的 .agent-explore-category-bar），列本身自动折叠成 Rail，
+ * 把横向空间让给卡片网格。
+ *
+ * 这条阈值必须与 AgentExplore.css 里 `.agent-explore-category-bar` 的 @media
+ * 断点**同源**：一个管折叠列、一个管显示横条，两边不一致就会出现
+ * 「列还在 + 顶部也有」（重复入口）或「两处都没有」（分类不可达）的空档。
+ */
+export const EXPLORE_COMPACT_CATEGORY_BAR_MAX_WIDTH = 1200;
+
+/** Whether the Explore category switcher should live in the content-top bar. */
+export const shouldRenderExploreCategoryBar = ({
+  pathname,
+  isCompactViewport,
+}: {
+  pathname: string;
+  isCompactViewport: boolean;
+}): boolean => {
+  if (!isCompactViewport) return false;
+  return pathname === "/explore" || pathname.startsWith("/explore/");
+};
+
+/**
+ * Whether the Explore Context column should be folded down to the Rail so the
+ * category bar can take its horizontal space. Mobile is excluded: there the
+ * sidebar is already a closed-by-default drawer (MainLayout 的 768 断点逻辑管),
+ * 再叠一层自动折叠只会和抽屉状态打架。
+ */
+export const shouldFoldExploreContextColumn = ({
+  pathname,
+  isCompactViewport,
+  isMobile,
+}: {
+  pathname: string;
+  isCompactViewport: boolean;
+  isMobile: boolean;
+}): boolean =>
+  !isMobile && shouldRenderExploreCategoryBar({ pathname, isCompactViewport });

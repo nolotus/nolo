@@ -19,6 +19,7 @@ import {
 } from "./desktopTurnSegments";
 
 import type { RootState } from "app/store";
+import type { ReferenceItem } from "app/types";
 import { patch, read, selectById, write } from "database/dbSlice";
 import { generateRequestBody } from "ai/llm/generateRequestBody";
 import {
@@ -465,6 +466,7 @@ export interface StreamAgentChatTurnArgs {
     parentMessageId?: string;
     runtimeOptions?: AgentRuntimeOptions;
     quickChatPerfStartedAt?: number;
+    ephemeralReferences?: ReferenceItem[];
 }
 
 export const streamAgentChatTurnHandler = async (
@@ -479,6 +481,7 @@ export const streamAgentChatTurnHandler = async (
         parentMessageId,
         runtimeOptions,
         quickChatPerfStartedAt,
+        ephemeralReferences,
     } = args;
     const { getState, dispatch, rejectWithValue } = thunkApi;
     const state = getState() as RootState;
@@ -2079,6 +2082,7 @@ export const streamAgentChatTurnHandler = async (
             state,
             dispatch,
             runtimeOptions,
+            ephemeralReferences,
         });
 
         const mentionedTools = turnToolContext.mentionedToolNames;

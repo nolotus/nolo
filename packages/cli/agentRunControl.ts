@@ -6,6 +6,7 @@ import { attachShellApprovalHost, type ShellApprovalHost } from "./client/origin
 // simple (one json file + one log file per run) so it can be inspected
 // with ordinary shell tools.
 
+import { redactLogLines, REDACTED_CREDENTIAL } from "../core/redactLogLines";
 import { normalizeRunTitle } from "../ai/tools/agent/runTitle";
 import { homedir as nodeHomedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -21,6 +22,7 @@ import {
 } from "./client/hostMemory";
 import { reserveHostMemory, type HostMemoryReservationFs, type MemoryReservationHandle } from "./client/hostMemoryReservation";
 import { buildResultFileContent } from "./agentRunResultFile";
+import type { CacheRunUsageSummary } from "../ai/token/cacheRunSummary";
 import { isAgentRunTerminalStatus as sharedIsAgentRunTerminalStatus } from "../ai/tools/agent/agentRunDisplayHelpers";
 import {
   classifyRunFailure,
@@ -35,6 +37,8 @@ export type { LocalAgentLoopEvent };
 
 export type RunActivity = {
   lastEventAt: string;
+  // Historical run records may not include this field.
+  lastProgressAt?: string;
   inFlight: { kind: "llm" | "tool"; name: string; sinceMs: number } | null;
   counters: { llmCalls: number; toolCalls: number; fileEdits: number };
   updatedAt: string;
@@ -91,6 +95,18 @@ export type RunRecord = {
    * 只留 2000 字摘要；长报告读这个文件，不要解析带 ANSI 的 .log。
    */
   resultFile?: string;
+  /** Bounded observation evidence, never a successful/final result. */
+  partialCheckpoint?: {
+    final: false;
+    source: "local-run.text-delta";
+    updatedAt: string;
+    /** Text belongs to this LLM round, not necessarily activity.inFlight. */
+    sourceRound?: number;
+    currentLlmRound?: number;
+    text: string;
+    truncated: boolean;
+    redacted: number;
+  };
   /**
    * 本次 run 实际消耗的平台积分（本地进程收尾时自报，sumPlatformCredits 口径，
    * 只含 billing_unit === "credits" 的平台计费轮）。缺省 = 该 run 没有平台计费
@@ -816,10 +832,120 @@ type InFlightState = {
 
 export type RunActivityTracker = {
   onLoopEvent: (event: LocalAgentLoopEvent) => void;
+  onPartialText: (chunk: string) => void;
   getActivity: () => RunActivity;
   flush: () => void;
   dispose: () => void;
 };
+
+// Credential markers are redacted without a minimum length: a quoted or
+// space-containing value must not escape through a suffix that survives on a
+// following line. Mirrors the server-side checkpoint redactor.
+const CREDENTIAL_ASSIGNMENT_PATTERN = /(["']?\b[A-Za-z0-9_-]*(?:token|secret|password|passwd|credential|api[_-]?key|machine[_-]?lease|workspace[_-]?lease)[A-Za-z0-9_-]*["']?\s*[:=]\s*)[\s\S]*$/gi;
+const BEARER_PATTERN = /\bBearer\s+[\s\S]*$/gi;
+const GITHUB_TOKEN_PATTERN = /\b(?:ghp|gho|ghu|ghs|ghr)_[\s\S]*/g;
+
+function stripCredentialMarkers(text: string): { masked: string; credential: boolean } {
+  const masked = text
+    .replace(CREDENTIAL_ASSIGNMENT_PATTERN, "$1[REDACTED_CREDENTIAL]")
+    .replace(BEARER_PATTERN, "Bearer [REDACTED_TOKEN]")
+    .replace(GITHUB_TOKEN_PATTERN, "[REDACTED_TOKEN]");
+  return { masked, credential: masked !== text };
+}
+
+function createCredentialScanner() {
+  let identTail = "";           // 当前 [A-Za-z0-9_-] 运行段的尾部（保留约 40 字符）
+  let identRunLength = 0;       // 运行段真实长度，不受尾部截断影响
+  let identHasKeyword = false;  // 该运行段是否含凭据关键词
+  let pendingSeparator = false; // 关键词段已结束，正处于 \s* 间隙、等待 [:=]
+  const KEYWORD = /token|secret|password|passwd|credential|api[_-]?key|machine[_-]?lease|workspace[_-]?lease/i;
+  const GH = /(?:ghp|gho|ghu|ghs|ghr)_/gi;
+
+  // 原正则的 \b 条件：匹配起点前必须是流开头，或一个非单词字符。
+  // 注意 - 属标识符字符但不是单词字符（\w = [A-Za-z0-9_]），所以 foo-bearer
+  // 合法命中，而 mybearer 不命中。尾部被截断且起点落在第 0 位时无法证明
+  // 边界存在，按不成立处理（与原正则一致）。
+  function startsAtWordBoundary(run: string, index: number, runLength: number): boolean {
+    if (index > 0) return !/[A-Za-z0-9_]/.test(run[index - 1]);
+    return runLength === run.length;
+  }
+
+  // 返回本次 feed 中「凭据值起始」的下标（即 [:=] 之后或 Bearer 空白之后），无命中返回 -1
+  function feed(text: string): number {
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (/[A-Za-z0-9_-]/.test(ch)) {
+        if (pendingSeparator) {
+          // 间隙被标识符打断：这不是分隔符，开始一个全新的运行段。
+          pendingSeparator = false;
+          identTail = "";
+          identRunLength = 0;
+          identHasKeyword = false;
+        }
+        identTail = (identTail + ch).slice(-40);
+        identRunLength += 1;
+        if (KEYWORD.test(identTail)) {
+          identHasKeyword = true;
+        }
+        GH.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = GH.exec(identTail)) !== null) {
+          if (startsAtWordBoundary(identTail, m.index, identRunLength)) {
+            reset();
+            return i + 1;
+          }
+        }
+      } else {
+        // Bearer is checked before the keyword branch: a run such as
+        // `secret-bearer` carries both a credential keyword and a legitimate,
+        // word-boundary `Bearer`, and letting the keyword branch run first
+        // would swallow the Bearer match and persist the token value.
+        if (
+          identTail.toLowerCase().endsWith("bearer") &&
+          /\s/.test(ch) &&
+          startsAtWordBoundary(identTail, identTail.length - 6, identRunLength)
+        ) {
+          reset();
+          return i + 1;
+        }
+        if (pendingSeparator) {
+          if (ch === ":" || ch === "=") {
+            reset();
+            return i + 1;
+          }
+          if (/\s/.test(ch) || ch === '"' || ch === "'") {
+            // keep pendingSeparator
+          } else {
+            reset();
+          }
+        } else if (identHasKeyword) {
+          if (ch === ":" || ch === "=") {
+            reset();
+            return i + 1;
+          }
+          if (/\s/.test(ch) || ch === '"' || ch === "'") {
+            pendingSeparator = true;
+          }
+          identTail = "";
+          identRunLength = 0;
+          identHasKeyword = false;
+        } else {
+          reset();
+        }
+      }
+    }
+    return -1;
+  }
+
+  function reset() {
+    identTail = "";
+    identRunLength = 0;
+    identHasKeyword = false;
+    pendingSeparator = false;
+  }
+
+  return { feed, reset };
+}
 
 export function createRunActivityTracker(
   runId: string,
@@ -840,16 +966,91 @@ export function createRunActivityTracker(
   let disposed = false;
 
   let lastEventAt = now().toISOString();
+  let lastProgressAt = now().toISOString();
   let inFlight: InFlightState | null = null;
   const counters = { llmCalls: 0, toolCalls: 0, fileEdits: 0 };
   let writeTimer: ReturnType<typeof setTimeout> | undefined;
   let lastWriteAt = 0;
+  // Only closed lines enter the durable observation. An interrupted trailing
+  // line may still be a credential prefix (even before a regex minimum length).
+  let partialText = "";
+  let pendingLine = "";
+  let droppingLine = false;
+  // A credential value may continue on the next lines (values may contain
+  // newlines). Once a credential marker is seen, the remainder of the round
+  // is withheld from the checkpoint: the server-side redactor swallows
+  // everything after the assignment, so per-line persistence must do the same
+  // or a value suffix escapes as ordinary text.
+  let droppingCredential = false;
+  const scanner = createCredentialScanner();
+  let lineCredentialHit = false;
+  let partialTruncated = false;
+  let partialRedacted = 0;
+  let partialUpdatedAt: string | undefined;
+  let sourceRound: number | undefined;
+  let currentLlmRound: number | undefined;
+  const PARTIAL_LIMIT = 32_000;
+  const OMITTED_LINE = "[checkpoint: overlong line omitted]";
+  const OMITTED_CREDENTIAL = "[checkpoint: credential content omitted]";
+
+  function closeLine() {
+    if (droppingCredential) {
+      // Withheld: the credential value may still be arriving on later lines.
+      partialTruncated = true;
+    } else if (lineCredentialHit) {
+      const safe = redactLogLines([stripCredentialMarkers(pendingLine).masked]);
+      // One credential, one count: the prefix already carries the synthesized
+      // marker, so a redaction the length-based redactor reports here is the
+      // same credential, not an additional one.
+      partialRedacted += Math.max(1, safe.redacted);
+      let maskedPrefix = safe.lines[0];
+      if (!maskedPrefix.endsWith(REDACTED_CREDENTIAL) && !maskedPrefix.endsWith("[REDACTED_TOKEN]")) {
+        maskedPrefix += REDACTED_CREDENTIAL;
+      }
+      if (partialText.length < 4000) {
+        partialText += maskedPrefix + "\n";
+      } else {
+        partialTruncated = true;
+      }
+      if (partialText.length > 4000) partialTruncated = true;
+      droppingCredential = true;
+      partialTruncated = true;
+    } else {
+      const safe = redactLogLines([pendingLine]);
+      partialRedacted += safe.redacted;
+      if (partialText.length < 4000) {
+        partialText += (droppingLine ? OMITTED_LINE : safe.lines[0]) + "\n";
+      } else {
+        partialTruncated = true;
+      }
+      if (partialText.length > 4000 || droppingLine) partialTruncated = true;
+    }
+    partialText = partialText.slice(0, 4000);
+    pendingLine = "";
+    droppingLine = false;
+    lineCredentialHit = false;
+  }
+
+  function checkpoint(): RunRecord["partialCheckpoint"] {
+    if (!partialUpdatedAt) return undefined;
+    // A marker is evidence of omitted text, not the incomplete text itself.
+    const text = partialText
+      || (droppingLine ? OMITTED_LINE : droppingCredential ? OMITTED_CREDENTIAL : "");
+    if (!text) return undefined;
+    return {
+      final: false, source: "local-run.text-delta", updatedAt: partialUpdatedAt,
+      sourceRound, currentLlmRound, text,
+      truncated: partialTruncated || droppingLine || droppingCredential,
+      redacted: partialRedacted,
+    };
+  }
 
   function serializeActivity(): RunActivity {
     const nowDate = now();
     const nowMs = nowDate.getTime();
     return {
       lastEventAt,
+      lastProgressAt,
       inFlight: inFlight
         ? {
             kind: inFlight.kind,
@@ -875,9 +1076,12 @@ export function createRunActivityTracker(
       deps,
       () => {
         const record = readRunRecord(runId, deps);
-        if (!record) return;
+        if (!record || isRunTerminalStatus(record.status)) return;
         const activity = serializeActivity();
-        writeRunRecord({ ...record, activity }, deps);
+        const partialCheckpoint = checkpoint();
+        writeRunRecord({ ...record, activity,
+          ...(partialCheckpoint ? { partialCheckpoint } : {}),
+        }, deps);
         lastWriteAt = now().getTime();
       },
       { strict: true },
@@ -903,14 +1107,37 @@ export function createRunActivityTracker(
     writeTimer = setTimeout(doWrite, delay);
   }
 
+  let partialRoundStarted = false;
   function onLoopEvent(event: LocalAgentLoopEvent) {
     if (disposed) return;
     lastEventAt = new Date(event.atMs).toISOString();
+    lastProgressAt = lastEventAt;
     switch (event.kind) {
       case "llm-start":
+        // Retain recoverable old evidence, but explicitly identify its round.
+        currentLlmRound = event.round;
+        partialRoundStarted = true;
+        // The credential drop state belongs to the round that produced the
+        // credential value; a new round starts clean.
+        droppingCredential = false;
+        scanner.reset();
+        lineCredentialHit = false;
         inFlight = { kind: "llm", name: "llm", startMs: event.atMs };
         break;
       case "llm-end":
+        if (!partialRoundStarted && event.ok && (pendingLine || droppingLine)) {
+          if (sourceRound !== currentLlmRound) {
+            partialText = "";
+            partialTruncated = false;
+            partialRedacted = 0;
+            sourceRound = currentLlmRound;
+            droppingCredential = false;
+            scanner.reset();
+            lineCredentialHit = false;
+          }
+          closeLine();
+          partialUpdatedAt = now().toISOString();
+        }
         inFlight = null;
         counters.llmCalls += 1;
         break;
@@ -930,6 +1157,87 @@ export function createRunActivityTracker(
         }
         break;
     }
+    // Failed requests must flush before command settlement/disposal.
+    if (event.kind === "llm-end" && !event.ok) doWrite();
+    else scheduleWrite();
+  }
+
+  function onPartialText(chunk: string) {
+    if (disposed || !chunk) return;
+    lastProgressAt = now().toISOString();
+    if (partialRoundStarted) {
+      // Do not replace recoverable old evidence until the new round has a
+      // closed line (or an explicit omission marker).
+      // A new round starts clean: the credential drop state belongs to the
+      // round that produced the credential value.
+      droppingCredential = false;
+      pendingLine = "";
+      droppingLine = false;
+      scanner.reset();
+      lineCredentialHit = false;
+      partialRoundStarted = false;
+    }
+    for (let start = 0; start < chunk.length;) {
+      const newline = chunk.indexOf("\n", start);
+      const end = newline < 0 ? chunk.length : newline;
+      const segment = chunk.slice(start, end);
+      const hit = scanner.feed(segment);
+
+      if (hit >= 0 && !droppingCredential && !lineCredentialHit) {
+        lineCredentialHit = true;
+        if (droppingLine || pendingLine.length + segment.length > PARTIAL_LIMIT) {
+          droppingLine = true;
+          pendingLine = "";
+          droppingCredential = true;
+          partialTruncated = true;
+          partialRedacted += 1;
+        } else {
+          pendingLine += segment.slice(0, hit);
+        }
+      } else if (!lineCredentialHit && !droppingLine) {
+        if (pendingLine.length + segment.length > PARTIAL_LIMIT) {
+          pendingLine = "";
+          droppingLine = true;
+        } else {
+          pendingLine += segment;
+        }
+      } else if (lineCredentialHit && !droppingLine) {
+        if (pendingLine.length + segment.length > PARTIAL_LIMIT) {
+          droppingLine = true;
+          pendingLine = "";
+          droppingCredential = true;
+          partialTruncated = true;
+          partialRedacted += 1;
+        }
+      }
+
+      if (newline >= 0) {
+        const nlHit = scanner.feed("\n");
+        if (nlHit >= 0 && !droppingCredential && !lineCredentialHit) {
+          lineCredentialHit = true;
+          if (droppingLine) {
+            droppingCredential = true;
+            partialTruncated = true;
+            partialRedacted += 1;
+          }
+        }
+      }
+
+      if (newline >= 0 || droppingLine) {
+        if (sourceRound !== currentLlmRound) {
+          partialText = "";
+          partialTruncated = false;
+          partialRedacted = 0;
+          sourceRound = currentLlmRound;
+          // A new round starts clean: the credential drop state belongs to
+          // the round that produced the credential value.
+          droppingCredential = false;
+        }
+        if (newline >= 0) closeLine();
+      }
+      start = end + 1;
+    }
+    if (sourceRound === currentLlmRound) partialUpdatedAt = now().toISOString();
     scheduleWrite();
   }
 
@@ -949,7 +1257,7 @@ export function createRunActivityTracker(
     }
   }
 
-  return { onLoopEvent, getActivity, flush, dispose };
+  return { onLoopEvent, onPartialText, getActivity, flush, dispose };
 }
 
 export function readRunRecord(runId: string, deps: AgentRunControlDeps = {}): RunRecord | null {
@@ -1828,6 +2136,8 @@ export function transitionRunToTerminal(
     model?: string;
     dialogServer?: string;
     serverSync?: "awaited" | "best-effort" | "none";
+    /** run 级缓存命中汇总：只进 .result.md 的 front matter，不改 record。 */
+    cacheUsage?: CacheRunUsageSummary;
   },
   deps: AgentRunControlDeps = {},
   options: { allowOverOrphaned?: boolean } = {},
@@ -1915,6 +2225,7 @@ export function transitionRunToTerminal(
             serverSync: update.serverSync,
             cwd: record.cwd,
             continuedFrom: record.continuedFrom,
+            ...(update.cacheUsage ? { cacheUsage: update.cacheUsage } : {}),
           },
           update.lastAssistantText,
         );
@@ -1984,6 +2295,8 @@ export async function settleRunTerminalAuthoritatively(
     model?: string;
     dialogServer?: string;
     serverSync?: "awaited" | "best-effort" | "none";
+    /** run 级缓存命中汇总：只进 .result.md 的 front matter，不改 record。 */
+    cacheUsage?: CacheRunUsageSummary;
   },
   deps: AgentRunControlDeps = {},
   transition: typeof transitionRunToTerminal = transitionRunToTerminal,
@@ -2441,9 +2754,12 @@ export async function runAgentStatusCommand(
   args: string[],
   deps: AgentRunControlDeps & { output: OutputLike }
 ): Promise<number> {
-  const { target, json, watch, intervalMs } = parseStatusArgs(args);
+  const includeCheckpoint = args.includes("--include-checkpoint");
+  const { target, json, watch, intervalMs } = parseStatusArgs(
+    args.filter((arg) => arg !== "--include-checkpoint"),
+  );
   if (!target) {
-    deps.output.write("Usage: nolo agent status <runId|pid> [--json] [--watch] [--interval-ms N]\n");
+    deps.output.write("Usage: nolo agent status <runId|pid> [--json] [--include-checkpoint] [--watch] [--interval-ms N]\n");
     return 1;
   }
   const initial = findRunRecord(target, deps);
@@ -2457,10 +2773,21 @@ export async function runAgentStatusCommand(
 
   if (json) {
     const record = readRunRecord(reconciled.runId, deps) ?? reconciled;
-    deps.output.write(JSON.stringify(record) + "\n");
+    const { partialCheckpoint, ...summary } = record;
+    deps.output.write(JSON.stringify({ ...summary,
+      ...(includeCheckpoint ? { checkpoint: partialCheckpoint
+        ? { ...partialCheckpoint, available: true }
+        : { available: false, final: false, reason: "checkpoint_missing" } } : {}),
+    }) + "\n");
     return 0;
   }
 
+  if (includeCheckpoint) {
+    const record = readRunRecord(reconciled.runId, deps) ?? reconciled;
+    deps.output.write(record.partialCheckpoint
+      ? `Partial checkpoint (not final; source LLM round: ${record.partialCheckpoint.sourceRound ?? "unknown"}; current LLM round: ${record.partialCheckpoint.currentLlmRound ?? "unknown"}):\n${record.partialCheckpoint.text}\n`
+      : "Partial checkpoint unavailable.\n");
+  }
   if (!watch) {
     const record = readRunRecord(reconciled.runId, deps) ?? reconciled;
     return printStatusOnce(record, deps);

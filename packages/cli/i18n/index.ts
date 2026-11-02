@@ -221,8 +221,8 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     zh: "列出活跃与近期的本地智能体运行（--json 输出机器可读格式）",
   },
   "agent status": {
-    en: "Show status of a local agent run (--json, --watch, --interval-ms N)",
-    zh: "查看本地智能体运行状态（--json、--watch、--interval-ms N）",
+    en: "Show status of a local agent run (--json, --include-checkpoint, --watch, --interval-ms N)",
+    zh: "查看本地智能体运行状态（--json、--include-checkpoint、--watch、--interval-ms N）",
   },
   "agent logs": {
     en: "Show logs of a local agent run",

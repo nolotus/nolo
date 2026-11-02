@@ -592,33 +592,37 @@ export function sortSafeAgentSummaries<T extends AgentSelectionCandidate>(agents
  * 为 null 的字段在截断预算里是纯噪音，默认剔除。verbose 模式拿回完整字段集。
  */
 export const COMPACT_AGENT_SUMMARY_FIELDS = [
+  // —— 派发决策必需（短字段，必须排最前）——
+  // agentKey 是唯一不可推导、必须逐字复制的字段；截断时它首先被保住。
   "agentKey",
   "name",
   "model",
   // 能力档弱先验（unknown = 模型名没给出信号，不推断强弱）。
   "tier",
-  "provider",
-  "apiSource",
   "billingSource",
+  "availabilityStatus",
+  "credentialGroup",
   "isFavorite",
   "isOAuth",
   "isOwned",
   "isPublic",
-  "tools",
-  // Phase 2A economics 快照（period/multipliers/changesAt 等小对象）。
-  // 只对 DeepSeek API / BigModel GLM Coding Plan 存在；不含完整 policy/windows。
-  "economics",
+  // —— 次要身份/来源字段（仍很短）——
+  "provider",
+  "apiSource",
+  "credentialKind",
+  "credentialed",
   // 仅限流中的 agent 才会带（可用 agent 上不存在）。对"现在能不能选它"是
   // 决策信息（CLI --show-unavailable 场景）；默认列表已把这类 agent 过滤掉，
   // 所以通常根本不占字节。
   "nextAvailableAt",
-  // 额度快照：只有上游真上报过窗口的 agent 才带（通常是小对象）。
-  "quota",
-  "availabilityStatus",
   "availabilityReason",
-  "credentialGroup",
-  "credentialKind",
-  "credentialed",
+  // —— 体积大的说明性字段（排在每条记录最后，截断时先牺牲它们）——
+  // Phase 2A economics 快照（period/multipliers/changesAt 等小对象）。
+  // 只对 DeepSeek API / BigModel GLM Coding Plan 存在；不含完整 policy/windows。
+  "economics",
+  "tools",
+  // 额度快照（windows 数组，体积最大）：只有上游真上报过窗口的 agent 才带。
+  "quota",
 ] as const;
 
 export type CompactSafeAgentSummary = Pick<
@@ -657,6 +661,56 @@ export function toCompactAgentSummary(
     }
   }
   return compact as CompactSafeAgentSummary;
+}
+
+/**
+ * 显式紧凑模式（compact: true）输出投影：
+ * 当调用方受极端 token 预算限制时，保留选人派发与准入所必需的核心字段与证据
+ * （agentKey、name、model、tier、billingSource、availabilityStatus、credentialGroup、
+ * isFavorite、isOAuth、isOwned、isPublic、nextAvailableAt、availabilityReason、
+ * tools、provider、apiSource、credentialKind、credentialed、economics、quota），
+ * 同时剔除次要长文本说明与非准入元数据（如 introduction、modelAbility、greeting、prompt 等）。
+ */
+export const ULTRA_COMPACT_AGENT_SUMMARY_FIELDS = [
+  // —— 派发决策与关键准入语义（必须保留，不能宣称安全但丢证据）——
+  "agentKey",
+  "name",
+  "model",
+  "tier",
+  "billingSource",
+  "availabilityStatus",
+  "credentialGroup",
+  "isFavorite",
+  "isOAuth",
+  "isOwned",
+  "isPublic",
+  "provider",
+  "apiSource",
+  "credentialKind",
+  "credentialed",
+  "nextAvailableAt",
+  "availabilityReason",
+  "economics",
+  "tools",
+  "quota",
+] as const;
+
+export type UltraCompactSafeAgentSummary = Pick<
+  SafeAgentSummary,
+  (typeof ULTRA_COMPACT_AGENT_SUMMARY_FIELDS)[number]
+>;
+
+export function toUltraCompactAgentSummary(
+  summary: SafeAgentSummary
+): UltraCompactSafeAgentSummary {
+  const compact: Record<string, unknown> = {};
+  for (const field of ULTRA_COMPACT_AGENT_SUMMARY_FIELDS) {
+    const value = summary[field];
+    if (value !== null && value !== undefined) {
+      compact[field] = value;
+    }
+  }
+  return compact as UltraCompactSafeAgentSummary;
 }
 
 export const UNAVAILABLE_AGENT_SUMMARY_FIELDS = [

@@ -337,8 +337,55 @@ function isToolSingleLine(line: string): boolean {
   return TOOL_SINGLE_RE.test(plainToolLine(line));
 }
 
-function isToolGroupBoundary(cur: string, next: string): boolean {
-  return isToolTreeLeafLine(cur) && isToolTreeHeaderLine(next);
+/**
+ * 顶层工具行的分组键。
+ *
+ * flat 行（▸ <label> · <gist>  ✓）→ "flat:<label>"；树头（• <Label> (n)）→
+ * "tree:<Label>"。树叶（├── …）没有自己的键（属于上一条树头所在的树）。
+ * ×N 折叠后缀（"Edit ×8"）不是分组身份的一部分，比对前剥掉。
+ *
+ * flat 与 tree 用不同命名空间：同一工具的 flat 行与它的树块仍然是两个分组。
+ */
+function toolGroupKeyOf(line: string): string | null {
+  const plain = plainToolLine(line);
+  const flat = plain.match(TOOL_SINGLE_RE);
+  if (flat) {
+    const label = (flat[1] ?? "").replace(/\s*×\d+$/, "").trim();
+    return label ? `flat:${label}` : null;
+  }
+  const header = toolTreeHeaderMatch(plain);
+  if (header) {
+    const label = (header[1] ?? "").replace(/\s*×\d+$/, "").trim();
+    return label ? `tree:${label}` : null;
+  }
+  return null;
+}
+
+/**
+ * 「工具行 ↔ 工具行」相邻对的分组边界判定。
+ *
+ * 返回 true = 两行之间插一个呼吸空行（不同分组）；false = 保持紧贴（同一组）；
+ * null = 这不是工具行相邻对，交回通用的列表/散文规则。
+ *
+ * 同一组：同一棵树的树头与其树叶、同一 label 的连续 flat 行（含同组失败行）。
+ * 不同组：树叶之后接新的工具行（树结束）、树头之间换了 label、flat 行换了 label。
+ */
+function toolRowBoundary(cur: string, next: string): boolean | null {
+  const curLeaf = isToolTreeLeafLine(cur);
+  const curHeader = isToolTreeHeaderLine(cur);
+  const nextLeaf = isToolTreeLeafLine(next);
+  const curKey = toolGroupKeyOf(cur);
+  const nextKey = toolGroupKeyOf(next);
+  if (curKey === null && !curLeaf) return null;
+  if (nextKey === null && !nextLeaf) return null;
+
+  // 树叶：同树的叶子连续 → 紧贴；叶子后面接别的工具行 → 树结束，换组。
+  if (curLeaf) return !nextLeaf;
+  // 树头 → 自己的树叶：同一棵树，紧贴。
+  if (curHeader && nextLeaf) return false;
+
+  if (curKey !== null && nextKey !== null) return curKey !== nextKey;
+  return true;
 }
 
 function statusColorSeq(marker: string, brightness: TuiBrightness): string {
@@ -451,7 +498,10 @@ export function polishBreathInsertsBlankBetween(cur: string, next: string): bool
   if (isPolishHeadingLine(cur) || isPolishHeadingLine(next)) return false;
   // 代码/mermaid 围栏进出各 1 行（空围栏的两个标记之间不插）。
   if (isCodeFenceLine(cur) !== isCodeFenceLine(next)) return true;
-  if (isToolGroupBoundary(cur, next)) return true;
+  // 工具分组边界优先于通用列表/散文规则：同一组的工具行紧贴，不同组之间
+  // 留一行呼吸（flat 行换 label、树叶之后接新的工具行）。
+  const toolBoundary = toolRowBoundary(cur, next);
+  if (toolBoundary !== null) return toolBoundary;
   return isPolishListLikeLine(cur) !== isPolishListLikeLine(next);
 }
 
@@ -927,6 +977,10 @@ function classifyStreamLine(line: string): StreamLineKind {
   return "prose";
 }
 
+function isStreamToolKind(kind: StreamLineKind | null): boolean {
+  return kind === "tool-header" || kind === "tool-leaf" || kind === "tool";
+}
+
 function isStreamListLike(kind: StreamLineKind): boolean {
   return kind === "list" || kind === "tool-header" || kind === "tool-leaf" || kind === "tool";
 }
@@ -935,6 +989,7 @@ function needsListProseBreath(
   prev: StreamLineKind | null,
   next: StreamLineKind,
   prevLine = "",
+  nextLine = "",
 ): boolean {
   if (prev === null || prev === "blank" || next === "blank") return false;
   // 标题：上方 1 行；H1/H2 下方再补 1 行，H3-H6 贴紧自己的正文。
@@ -945,7 +1000,13 @@ function needsListProseBreath(
   if ((prev === "fence") !== (next === "fence")) return true;
   // 引导句（"…："）直接引出列表：贴紧，不插呼吸空行。
   if (isStreamListLike(next) && isPolishIntroLine(prevLine)) return false;
-  if (prev === "tool-leaf" && next === "tool-header") return true;
+  // 工具行之间的分组边界与整段 polish 共用同一判定（toolRowBoundary）：
+  // 同一分组紧贴，不同分组之间留一行呼吸。两条路径必须一致，否则实时渲染
+  // 与定稿渲染会在工具组之间出现漂移。
+  if (isStreamToolKind(prev) && isStreamToolKind(next)) {
+    const boundary = toolRowBoundary(prevLine, nextLine);
+    if (boundary !== null) return boundary;
+  }
   // Tool work behaves like a structured list for spacing: dense inside the
   // group, one blank row when entering/leaving prose.
   return isStreamListLike(prev) !== isStreamListLike(next);
@@ -974,14 +1035,14 @@ export function createRenderAwareStreamWriter(args: {
   // below; this is only a safe, whitespace-boundary fallback for prose.
   const PARTIAL_FLUSH_THRESHOLD = 48;
 
-  const emitBreathIfNeeded = (nextKind: StreamLineKind) => {
+  const emitBreathIfNeeded = (nextKind: StreamLineKind, nextLine = "") => {
     if (pendingBlankRow) {
       args.write("\n");
       pendingBlankRow = false;
       // The row is already there: the pair rules must not add a second one.
       lastKind = "blank";
     }
-    if (needsListProseBreath(lastKind, nextKind, lastLine)) args.write("\n");
+    if (needsListProseBreath(lastKind, nextKind, lastLine, nextLine)) args.write("\n");
   };
 
   const flushPartialProse = () => {
@@ -1165,7 +1226,7 @@ export function createRenderAwareStreamWriter(args: {
         buffer = lines.slice(1).join("\n");
         continue;
       }
-      emitBreathIfNeeded(kind);
+      emitBreathIfNeeded(kind, firstLine);
       emitFormattedAssistantBlock(args.write, firstLine, true);
       lastKind = kind;
       lastLine = firstLine;
@@ -1197,6 +1258,11 @@ export function createRenderAwareStreamWriter(args: {
       if (tracker.isInFence()) {
         args.write(buffer);
       } else {
+        // 收尾的未完行也要走一次与完整行相同的呼吸判定：否则末行没有结尾
+        // 换行时，流式渲染会少一行整段 polish 会插的呼吸空行（既有缺口，
+        // 工具组规则只是沿用了同一条路径）。判据与整段 polish 共用
+        // needsListProseBreath，两条路径不能漂移。
+        emitBreathIfNeeded(classifyStreamLine(buffer), buffer);
         emitFormattedAssistantBlock(args.write, buffer);
       }
       buffer = "";

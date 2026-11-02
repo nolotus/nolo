@@ -13,6 +13,7 @@ import type { Model } from "./types";
 import type { Agent } from "app/types";
 import { fireworksModels } from "./fireworks";
 import { platformHostedModels } from "./platformHosted";
+import { resolvePlatformEffectiveModel } from "./platformHostedRoutingTable";
 import {
   cloudflareModels,
   getCloudflareWorkersAiChatCompletionsUrl,
@@ -259,6 +260,21 @@ const findOpenRouterUpstreamModel = (name: string): Model | null => {
 export function findModelConfig(provider: string, name: string): Model | null {
   const normalizedProvider = normalizeLookupProvider(provider);
   if (!normalizedProvider) return null;
+
+  // 平台托管的「同家族旧代 id」透明重定向（owner 2026-11-01）：
+  // 旧 id（如 gpt-6-sol / gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna）透明落到
+  // 家族最新代（PLATFORM_MODEL_ALIASES），路由到新上游、按新模型价目计费——
+  // 与既有 gpt-5.6-sol → gpt-6.1-sol 的先例一致（旧价目常量只做历史只读重放）。
+  // 必须**先于**直查：gpt-5.6-terra / gpt-5.6-luna 在目录里仍有条目（历史兼容用），
+  // 直查先命中就会继续按旧价计费，与「按新模型计费」的决定冲突。
+  // 只在平台托管 provider 上生效，不改变其它 provider 的查找语义。
+  if (normalizedProvider === "nolo") {
+    const effective = resolvePlatformEffectiveModel(name);
+    if (effective && effective !== name) {
+      const aliased = findCandidateInProvider(normalizedProvider, effective);
+      if (aliased) return aliased;
+    }
+  }
 
   const direct = findCandidateInProvider(normalizedProvider, name);
   if (direct) return direct;

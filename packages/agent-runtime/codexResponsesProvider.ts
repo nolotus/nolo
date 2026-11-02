@@ -30,8 +30,21 @@ import {
   codexStreamFailureStatus,
   type CodexStreamFailure,
 } from "./responsesSseStream";
+import {
+  CODEX_OAUTH_MODEL_ALIASES,
+  resolveCodexOAuthEffectiveModel,
+  resolveCodexOAuthModelAlias,
+  type CodexOAuthModelAlias,
+} from "./codexOAuthModelAliases";
 
-export { codexStreamFailureStatus, type CodexStreamFailure };
+export {
+  codexStreamFailureStatus,
+  type CodexStreamFailure,
+  CODEX_OAUTH_MODEL_ALIASES,
+  resolveCodexOAuthEffectiveModel,
+  resolveCodexOAuthModelAlias,
+  type CodexOAuthModelAlias,
+};
 
 /**
  * ChatGPT Codex (subscription OAuth) provider.
@@ -264,18 +277,19 @@ export function buildCodexRequestBody(
     const role = m && typeof m === "object" ? String((m as { role?: unknown }).role) : "";
     return role !== "system" && role !== "developer";
   });
+  const rawModel =
+    asOptionalTrimmedString(args.openAiBody.model) ??
+    asOptionalTrimmedString(args.agentConfig.model) ??
+    "gpt-5.5";
+  const model = resolveCodexOAuthEffectiveModel(rawModel) ?? rawModel;
   const input = convertMessagesToCodexInput(nonSystem as any, resolveToolImagePolicy({
     ...args.agentConfig,
-    model: typeof args.openAiBody.model === "string" ? args.openAiBody.model : args.agentConfig.model,
+    model,
     routeKind: "codex/responses",
     legacySupportsToolImages: false,
   }));
   const instructions = collectInstructions(rawMessages, args.agentConfig.prompt);
   const stableInstructions = collectStablePromptPrefix(rawMessages, args.agentConfig.prompt);
-  const model =
-    asOptionalTrimmedString(args.openAiBody.model) ??
-    asOptionalTrimmedString(args.agentConfig.model) ??
-    "gpt-5.5";
   const tools = toResponsesTools(
     Array.isArray(args.openAiBody.tools) ? (args.openAiBody.tools as any[]) : undefined,
   );

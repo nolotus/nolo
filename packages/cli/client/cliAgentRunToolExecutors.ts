@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { normalizeContinueDialogId } from "../../ai/tools/agent/continueDialogId";
 import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // packages/cli/client/cliAgentRunToolExecutors.ts
@@ -277,7 +279,7 @@ const ACK_LEASE_GRACE_MS = 60_000;
 function buildRunStatusPayload(
   reconciled: RunRecord,
   deps: CliAgentRunToolExecutorDeps,
-  opts: { logTail?: string } = {},
+  opts: { logTail?: string; includeCheckpoint?: boolean } = {},
 ): { content: string; metadata?: Record<string, unknown> } {
   const logLines = opts.logTail ? opts.logTail.split("\n") : undefined;
   const name = resolveRunLabel(reconciled);
@@ -286,6 +288,9 @@ function buildRunStatusPayload(
     content: JSON.stringify({
       runId: reconciled.runId,
       found: true,
+      ...(opts.includeCheckpoint === true ? { checkpoint: reconciled.partialCheckpoint
+        ? { ...reconciled.partialCheckpoint, available: true, final: false }
+        : { available: false, final: false, reason: "checkpoint_missing" } } : {}),
       status: reconciled.status,
       pid: reconciled.pid ?? null,
       agentKey: reconciled.agentKey,
@@ -526,6 +531,31 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     // "write access" depending on phrasing.
     const isReadOnlyTask = args.readOnly === true;
 
+    const instaboxArgs: string[] = [];
+    const instaboxFields = ["instaboxWorkspace", "instaboxManifest", "instaboxArtifactDir", "instaboxAllowRemoteRelease", "instaboxAllowPaid"];
+    if (dispatch.runtimeKey !== "instabox" && instaboxFields.some(key => args[key] !== undefined)) {
+      throw new Error("instabox 参数仅适用于 runtimeKey=instabox");
+    }
+    if (dispatch.runtimeKey === "instabox") {
+      const workspace = args.instaboxWorkspace ?? "empty";
+      if (workspace !== "empty" && workspace !== "snapshot") throw new Error("instaboxWorkspace 必须为 empty|snapshot");
+      const manifest = typeof args.instaboxManifest === "string" ? args.instaboxManifest.trim() : "";
+      if (workspace === "snapshot" && !manifest) throw new Error("instaboxWorkspace=snapshot 必须提供 instaboxManifest");
+      if (workspace === "empty" && args.instaboxManifest !== undefined) throw new Error("instaboxWorkspace=empty 不得提供 instaboxManifest");
+      const artifactDir = args.instaboxArtifactDir ?? join(
+        resolveRunsDir(deps.env, deps.homedir), "instabox-artifacts", randomUUID(),
+      );
+      if (typeof artifactDir !== "string" || !artifactDir.startsWith("/") || artifactDir.includes("\0") || artifactDir.split("/").includes("..")) {
+        throw new Error("instaboxArtifactDir 必须为合法绝对路径，不能包含 .. 或空字符");
+      }
+      for (const key of ["instaboxAllowRemoteRelease", "instaboxAllowPaid"]) {
+        if (args[key] !== undefined && typeof args[key] !== "boolean") throw new Error(`${key} 必须为 boolean`);
+      }
+      instaboxArgs.push("--instabox-workspace", workspace, "--instabox-artifact-dir", artifactDir);
+      if (manifest) instaboxArgs.push("--instabox-manifest", manifest);
+      if (args.instaboxAllowRemoteRelease === true) instaboxArgs.push("--instabox-allow-remote-release");
+      if (args.instaboxAllowPaid === true) instaboxArgs.push("--instabox-allow-paid");
+    }
     const rawArgs = [
       "--agent",
       agentKey,
@@ -541,6 +571,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // 执行后端（默认 docker 沙盒；只读派发留宿主）：唯一产出 `--runtime-key`
       // 的地方，成对不变式在 buildCliLocalRuntimeForwardArgs 内机械断言。
       ...buildCliLocalRuntimeForwardArgs(dispatch),
+      ...instaboxArgs,
     ];
 
     const agentName =
@@ -1042,7 +1073,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
           ? tailFile(record.logPath, tailLines, resolveFs(deps))
           : undefined;
       // Q 接线：读到失败终态时回填熔断表（幂等；status/wait 共用同一实现）。
-      return buildRunStatusPayload(reconciled, deps, { logTail });
+      return buildRunStatusPayload(reconciled, deps, { logTail, includeCheckpoint: args.includeCheckpoint === true });
     }
 
     // ── W 接线：action="wait" 轮询本地 run 记录直到终态 ───────────────

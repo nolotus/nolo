@@ -27,6 +27,7 @@ import {
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
   PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
   PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
+  PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL,
   PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
   PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
   PLATFORM_HOSTED_GLM_53_MODEL,
@@ -223,8 +224,9 @@ export const PLATFORM_HOSTED_CLAUDE_SONNET_5_5_PRICE = {
  * （types.ts 定义、calculatePrice / ratingResult 已在按 `usage.input_tokens` 选档），
  * tiers 只列长档，`minContext = PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS`
  * （272_001 ⇒ 272_000 及以下仍按基础价，272_001 起整笔请求进长档）。
- * 逐模型官方页核查结论见各价目常量注释；只有 astra / 6.1 sol / 6 luna 三者在 CF
- * 官方模型页上**列了长上下文档**，terra / 5.6 sol / 5.6 luna 的官方页只有单档。
+ * 逐模型官方页核查结论见各价目常量注释；只有 astra / 6.1 sol / 6.1 terra / 6 luna
+ * 四者在 CF 官方模型页上**列了长上下文档**，5.6 terra / 5.6 sol / 5.6 luna 的官方页
+ * 只有单档。
  */
 export const PLATFORM_HOSTED_GPT_6_ASTRA_PRICE = {
   input: toPlatformCredits(10), // 80 credits
@@ -355,6 +357,35 @@ export const PLATFORM_HOSTED_GPT_6_1_SOL_LONG_CONTEXT_PRICE = {
   cachingRead: toPlatformCredits(0.2), // 1.6 credits（CF 官方长档 cached in）
   cachingWrite: toPlatformCredits(5), // 40 credits（CF 官方长档 cache write）
   output: toPlatformCredits(15), // 120 credits
+} as const;
+
+/**
+ * GPT-6.1 Terra（2026-11-01 收进广场）：与 6.1 Sol 同代同通道，官方价约为 Sol 的一半
+ * （效率档）。事实仅取 CF 官方模型页
+ * developers.cloudflare.com/ai/models/openai/gpt-6.1-terra/（2026-11-01 核对）：
+ * 口径与 6.1 Sol 完全一致：input/output 基数不加 5% 通道费、两个缓存桶均显式入价目
+ * （计费侧 4 桶路径据此生效）；长上下文档见
+ * PLATFORM_HOSTED_GPT_6_1_TERRA_LONG_CONTEXT_PRICE。
+ */
+export const PLATFORM_HOSTED_GPT_6_1_TERRA_PRICE = {
+  input: toPlatformCredits(1), // 8 credits
+  inputCacheHit: toPlatformCredits(0.05), // 0.4 credits
+  cachingRead: toPlatformCredits(0.05), // 0.4 credits（CF 官方短档 cached in）
+  cachingWrite: toPlatformCredits(1.25), // 10 credits（CF 官方短档 cache write）
+  output: toPlatformCredits(5), // 40 credits
+} as const;
+
+/**
+ * GPT-6.1 Terra 长上下文档（CF 官方模型页 2026-11-01 核对）：
+ * × 8 → 16 / 0.8 / 20 / 60 credits（2x input&cache、1.5x output，与 272K 官方规则
+ * 及 6.1 Sol 的档位结构一致）。
+ */
+export const PLATFORM_HOSTED_GPT_6_1_TERRA_LONG_CONTEXT_PRICE = {
+  input: toPlatformCredits(2), // 16 credits
+  inputCacheHit: toPlatformCredits(0.1), // 0.8 credits
+  cachingRead: toPlatformCredits(0.1), // 0.8 credits（CF 官方长档 cached in）
+  cachingWrite: toPlatformCredits(2.5), // 20 credits（CF 官方长档 cache write）
+  output: toPlatformCredits(7.5), // 60 credits
 } as const;
 
 /**
@@ -1055,6 +1086,35 @@ export const platformHostedModels: Model[] = [
     },
     // 2026-10-13 收进广场（= 平台上架日；出处：PLATFORM_HOSTED_GPT_6_1_SOL_PRICE 注释）。
     releasedAtMs: catalogReleasedAt(2026, 10, 13),
+    contextWindow: 1_050_000,
+    supportsReasoningEffort: true,
+  },
+  {
+    // GPT-6.1 Terra（2026-11-01 收进广场，上游 Cloudflare AI Responses）：
+    // 事实仅取 CF 官方模型页（developers.cloudflare.com/ai/models/openai/gpt-6.1-terra/，
+    // 2026-11-01 核对）：上下文 1,050,000 tokens；请求格式 Responses / Chat Completions；
+    // 官方示例使用 reasoning.effort（→ supportsReasoningEffort）；价格见
+    // PLATFORM_HOSTED_GPT_6_1_TERRA_PRICE。
+    // hasVision：官方页模型描述明写「visual reasoning」「match product photos to catalog
+    // entries / interpret technical drawings」= 官方声明了图像理解，故为 true（有文字依据，
+    // 不是猜测；与 6.1 Sol 的 false 是按同一口径——Sol 页无任何视觉声明）。
+    // 同 6.1 Sol：官方页无模型级 tools 能力与 max output 声明 → 不声明 supportsTool、
+    // 不填 maxOutputTokens（沿用缺省，不猜数值）。
+    name: PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL,
+    displayName: "GPT-6.1 Terra",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GPT_6_1_TERRA_PRICE },
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS,
+          price: { ...PLATFORM_HOSTED_GPT_6_1_TERRA_LONG_CONTEXT_PRICE },
+        },
+      ],
+    },
+    // 2026-11-01 收进广场（= 平台上架日）：CF 官方页未给发布日，故不冒称发布日。
+    releasedAtMs: catalogReleasedAt(2026, 11, 1),
     contextWindow: 1_050_000,
     supportsReasoningEffort: true,
   },

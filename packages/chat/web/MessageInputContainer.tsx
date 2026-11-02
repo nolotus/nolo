@@ -48,6 +48,7 @@ import {
   type MessageInputHandle,
 } from "./MessageInputCore";
 import type { AgentPickerControlProps } from "./AgentPickerControl";
+import { useSkillCandidates } from "./skillCandidates";
 
 export type { MessageInputHandle };
 
@@ -137,6 +138,7 @@ const MessageInputContainer = forwardRef<
   }, [activeAgent, activeAgentId, dispatch]);
 
   const resolvedActiveAgent = activeAgent ?? loadedActiveAgent;
+  const skillCandidates = useSkillCandidates(resolvedActiveAgent);
 
   // agent 还没加载出来时传 null 即可：resolveMessageInputAgentUi 自己会退化成
   // 无 modelConfig 的 custom 能力集。
@@ -273,6 +275,7 @@ const MessageInputContainer = forwardRef<
       runtimeOptions={runtimeOptions}
       imageUiConfig={imageUiConfig}
       agentPicker={resolvedAgentPicker}
+      skillCandidates={skillCandidates}
     />
   );
 });

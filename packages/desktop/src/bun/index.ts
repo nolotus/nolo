@@ -816,6 +816,12 @@ type DesktopWindowFrame = {
 // console/diagnostics. Window chrome (minimize/maximize/close/borders) is
 // owned by the native titlebar on every platform, so there is deliberately
 // no window-action handling here.
+// webview 是不可信输入源：右栏进程对账请求必须有硬上限，否则高频大数组会把
+// 宿主的注册表遍历 + pid 探活放大成 CPU/系统调用压力。
+const MAX_PROCESS_QUERY_TASK_IDS = 50;
+const MAX_PROCESS_QUERY_TASK_ID_CHARS = 200;
+const MAX_PROCESS_QUERY_RAW_ENTRIES = 200;
+
 const attachDesktopHostMessageBridge = (
   mainWindow: DesktopBrowserWindow,
 ) => {
@@ -883,6 +889,72 @@ const attachDesktopHostMessageBridge = (
     if ((detail as any).type === "nolo-desktop-diagnostic") {
       const { event, payload } = detail as any;
       console.log(`[webview diagnostic] ${event}`, payload ?? {});
+      return;
+    }
+
+    if ((detail as any).type === "nolo-desktop-process-query") {
+      // 右栏「运行中进程」面板的存活对账：消息元数据里的 status:"running"
+      // 会跨会话残留（进程早已退出），注册表里的记录也可能是持久化恢复出来的
+      // 旧任务，所以这里既查注册表又用 signal 0 探活 pid，只有真正还活着才算。
+      // webview 无法反向调用宿主，所以按 executeJavascript 回灌快照（与
+      // __noloSetDesktopPreview 同一模式）。只回传 taskId。
+      const requested = (detail as any).taskIds;
+      // requestId 原样回传：响应不带它会和上一轮查询的答案混在一起，前端就可能
+      // 用旧集合的结果把仍然存活的进程过滤掉（见 web 侧批次账本）。
+      const requestId =
+        typeof (detail as any).requestId === "number" &&
+        Number.isFinite((detail as any).requestId)
+          ? (detail as any).requestId
+          : null;
+      // 上限是硬要求：webview 是不可信输入源。先对原始数组做有界截断，再做
+      // 过滤/去重——否则不可信的大数组仍会造成全量扫描与中间集合分配。
+      const rawRequested = Array.isArray(requested)
+        ? requested.slice(0, MAX_PROCESS_QUERY_RAW_ENTRIES)
+        : [];
+      const taskIds = Array.from(
+        new Set(
+          rawRequested.filter(
+            (id: unknown): id is string =>
+              typeof id === "string" &&
+              id.length > 0 &&
+              id.length <= MAX_PROCESS_QUERY_TASK_ID_CHARS
+          )
+        )
+      ).slice(0, MAX_PROCESS_QUERY_TASK_IDS);
+      const wanted = new Set(taskIds);
+      const isPidAlive = (pid: number) => {
+        if (!Number.isInteger(pid) || pid <= 0) return false;
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch (err) {
+          // 只有 ESRCH 能证明「确实不存在」。EPERM（别人的进程）以及其它
+          // 偶发错误都按「未知」处理：宁可保留一条待确认的条目，也不要把
+          // 真实运行的进程隐藏掉。
+          return (err as { code?: string })?.code !== "ESRCH";
+        }
+      };
+      try {
+        const { getProcessRegistry } = await import(
+          "../../../../packages/agent-runtime/processRegistry"
+        );
+        const alive = getProcessRegistry()
+          .listBackground()
+          .filter(
+            (proc) =>
+              proc.status === "running" &&
+              wanted.has(proc.taskId) &&
+              isPidAlive(proc.pid)
+          )
+          .map((proc) => proc.taskId);
+        mainWindow.webview.executeJavascript(
+          `globalThis.__noloSetDesktopProcesses?.(${
+            requestId === null ? "null" : requestId
+          }, ${JSON.stringify(alive)}, ${JSON.stringify(taskIds)});`,
+        );
+      } catch (err) {
+        console.error("[nolo-desktop-process-query] failed:", err);
+      }
       return;
     }
 

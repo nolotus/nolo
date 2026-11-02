@@ -58,6 +58,8 @@ export type OutboundReasoningEffort =
   | "medium"
   | "high"
   | "xhigh"
+  | "max"
+  | "ultra"
   | "unspecified"
   | "other";
 
@@ -196,6 +198,8 @@ const REASONING_EFFORT_VALUES: ReadonlySet<string> = new Set([
   "medium",
   "high",
   "xhigh",
+  "max",
+  "ultra",
   "unspecified",
   "other",
 ]);

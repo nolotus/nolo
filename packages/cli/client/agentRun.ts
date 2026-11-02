@@ -1568,7 +1568,21 @@ export function describeLocalRunFailure(
     "code" in rawError &&
     (rawError as { code?: unknown }).code === "PLATFORM_STREAM_INTERRUPTED"
   ) {
-    return "[nolo] The platform LLM stream was interrupted before the turn completed. Your conversation was preserved. Send another message to continue.\n";
+    const detail = rawError as {
+      phase?: unknown;
+      failedTurnPersistence?: { status?: unknown };
+    };
+    const phaseMessage = detail.phase === "pre-headers"
+      ? "The platform LLM request failed before response headers arrived."
+      : detail.phase === "streaming"
+        ? "The platform LLM stream was interrupted before the turn completed."
+        : "The platform LLM request was interrupted before the turn completed.";
+    const saveMessage = detail.failedTurnPersistence?.status === "saved"
+      ? "The failed turn was saved. Send another message to continue."
+      : detail.failedTurnPersistence?.status === "failed"
+        ? "The failed turn could not be saved. Check your conversation before continuing."
+        : "Saving the failed turn could not be confirmed. Check your conversation before continuing.";
+    return `[nolo] ${phaseMessage} ${saveMessage}\n`;
   }
 
   // 客户端版本闸门拒绝（本地 self-check 在 providerResolution 抛错，Error 上带
@@ -2379,6 +2393,9 @@ async function executeLocalAgentTurnForCliWithAdapter(
       ...(options.actionGateHandler
         ? { onActionGate: options.actionGateHandler }
         : {}),
+      ...(options.onPartialText ? { onObservationEvent: (event: import("../../agent-runtime/observationStream").LocalLoopObservationEvent) => {
+        if (event.kind === "text-delta") options.onPartialText?.(event.chunk);
+      } } : {}),
       onLoopEvent: (event) => {
         if (event.kind === "llm-start") {
           turnOutput.showWorking();

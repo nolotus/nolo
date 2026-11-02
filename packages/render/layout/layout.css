@@ -150,6 +150,22 @@ html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
   container-type: inline-size;
   container-name: right-panel;
 }
+.MainLayout__sidebarSlot {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 100%;
+}
+.MainLayout__sidebarSlot[data-slot-id]:not([data-slot-id="running-processes"]) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.MainLayout__sidebarSlot[data-slot-id="running-processes"] {
+  flex: 0 0 auto;
+}
+.MainLayout__sidebarSlot:empty {
+  display: none !important;
+}
 .MainLayout__sidebarContent::-webkit-scrollbar {
   width: var(--scrollbar-size-thin);
 }

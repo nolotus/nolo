@@ -1524,10 +1524,16 @@ async function editFileTool(args: {
   });
   if (replacementCount !== expectedReplacements) {
     const hint = replacementCount === 0 ? findClosestEditSnippet(content, oldText) : null;
+    // 失败信息要说清两件调用方真正需要的事：文件没被改，以及实际处数就是下次
+    // 可直接用的参数。只报「期望 1 实际 N」时，调用方常退回 shell 脚本改文件
+    // （2026-11-01 实测），而多一步重试就能完成。
     throw new Error(
       `editFile expected ${expectedReplacements} ${pluralizeReplacement(expectedReplacements)} ` +
-        `but found ${replacementCount} in ${requestedPath} ` +
-        `(matched after EOL normalization; verify the exact text).` +
+        `but found ${replacementCount} in ${requestedPath}; the file was NOT modified. ` +
+        `(matched after EOL normalization; verify the exact text)` +
+        (replacementCount === 0
+          ? "."
+          : `, then retry with expectedReplacements: ${replacementCount}.`) +
         (hint ? `\n\n${hint}` : "")
     );
   }

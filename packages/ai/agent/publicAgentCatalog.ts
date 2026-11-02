@@ -32,6 +32,7 @@ export interface PublicAgentFilterOptions {
 
 export interface PublicAgentListOptions {
   limit?: number;
+  offset?: number;
   sortBy?: PublicAgentSortBy;
   summary?: boolean;
 }

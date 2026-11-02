@@ -20,6 +20,7 @@
  */
 import { MODEL_LOOKUP_MAP } from "./providers";
 import { isPlatformManagedProvider } from "./kimi";
+import { resolvePlatformEffectiveModel } from "./platformHostedRoutingTable";
 import { ALL_MODELS, type ModelWithProvider } from "./models";
 import type { Model } from "./types";
 
@@ -31,7 +32,7 @@ export const DEFAULT_CONTEXT_WINDOW = 256_000;
 // fuzzy 字符串勿删勿改名，否则该源码断言失败。注意：测试并未 import 这两个具名常量。
 const QWEN_3_6_CONTEXT_WINDOW = 262_144;
 const GLM_5_2_CONTEXT_WINDOW = 1_000_000;
-// GPT-6.1 Sol：Codex OAuth 通道实时 context_window = 500000（client 0.159.2 / 0.161.0 均返回 500k，
+// GPT-6.1 Sol：Codex OAuth 通道实时 context_window = 500000（client 0.159.2 / 0.161.0 / 0.162.1 均实测返回 500k，
 // max_context_window 872000 仅为上限参考，不作默认值）。
 const GPT_6_1_SOL_CONTEXT_WINDOW = 500_000;
 // 边界匹配：允许 provider 前缀（如 openai/gpt-6.1-sol）、effort 后缀（如 -medium）与显示名
@@ -39,16 +40,28 @@ const GPT_6_1_SOL_CONTEXT_WINDOW = 500_000;
 // 不得改成裸 includes("gpt-6.1")，以免误伤 astra / luna。
 const GPT_6_1_SOL_PATTERN = /(^|\/)gpt-6\.1[- ]sol(?![a-z])/;
 
+// GPT-6.1 家族（Sol / Terra）：Codex OAuth 通道实时 context_window = 500000（client 0.162.1 实测）。
+const GPT_6_1_PINNED_PATTERN = /(^|\/)gpt-6\.1[- ](sol|terra)(?![a-z0-9])/;
+
+// GPT-6 / GPT-5.6 家族（Astra / Luna / Sol / Terra）：Codex OAuth 通道实时 context_window = 272000（client 0.162.1 实测）。
+// 必须精确覆盖各代成员，不得用裸 includes("gpt-6")（避免误伤 gpt-6.1 / solar 等）或裸 includes("gpt-5")（避免误伤 5.6 之外）。
+const GPT_272K_PINNED_PATTERN =
+  /(^|\/)(gpt-6[- ](astra|luna|sol)|gpt-5\.6[- ](sol|terra|luna))(?![a-z0-9])/;
+const GPT_272K_CONTEXT_WINDOW = 272_000;
+
 /**
  * 通道专属窗口：同一个 id 在不同通道上窗口不同，这是**通道事实而非厂商能力**。
- *   gpt-6.1-sol —— Codex OAuth 订阅通道实测 500,000
- *     （client 0.159.2 / 0.161.0，见 GPT_6_1_SOL_CONTEXT_WINDOW）；
- *     CF 平台托管通道 1,050,000（CF 官方模型页，见 platformHosted 的目录条目）。
+ *   gpt-6.1-sol / gpt-6.1-terra —— Codex OAuth 订阅通道实测 500,000
+ *     （client 0.159.2 / 0.162.1，见 GPT_6_1_SOL_CONTEXT_WINDOW）；
+ *   gpt-6-astra / gpt-6-luna / gpt-6-sol / gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna
+ *     —— Codex OAuth 订阅通道实测 272,000；
+ *   CF 平台托管通道 1,050,000（CF 官方模型页，见 platformHosted 的目录条目）。
  * 裸名 / 未知通道取通道真值；显式声明平台通道（provider 命中平台托管）时取平台
  * 目录值。既不全局取大、也不为了「保守」给平台通道设上限。
  */
 function channelPinnedContextWindow(normalizedName: string): number | undefined {
-  if (GPT_6_1_SOL_PATTERN.test(normalizedName)) return GPT_6_1_SOL_CONTEXT_WINDOW;
+  if (GPT_6_1_PINNED_PATTERN.test(normalizedName)) return GPT_6_1_SOL_CONTEXT_WINDOW;
+  if (GPT_272K_PINNED_PATTERN.test(normalizedName)) return GPT_272K_CONTEXT_WINDOW;
   return undefined;
 }
 
@@ -149,6 +162,8 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
   if (normalizedName.includes("glm-5.2") || normalizedName.includes("glm5.2")) return GLM_5_2_CONTEXT_WINDOW;
   if (normalizedName.includes("deepseek")) return 1_000_000;
   if (GPT_6_1_SOL_PATTERN.test(normalizedName)) return GPT_6_1_SOL_CONTEXT_WINDOW;
+  const channelPinned = channelPinnedContextWindow(normalizedName);
+  if (channelPinned !== undefined) return channelPinned;
   if (normalizedName.includes("gpt-5") || normalizedName.includes("gpt-4.1")) return 1_047_576;
   // Cursor OAuth 模型（providerRegistry cursor-oauth preset，id 以 Cursor GetUsableModels 为准）。
   // Grok 4.5 / Claude 4.6 / Gemini 3.1 Pro 在 Cursor 内均为 1M 级上下文；claude-4.6-* 必须先于
@@ -309,12 +324,12 @@ export const findModelContextWindow = (
   for (const candidate of candidates) {
     const model = map.get(candidate);
     if (model?.contextWindow) {
-      // 通道碰撞：平台目录条目对「通道专属 id」是平台通道真值，裸名 / 其它通道
+      // 通道碰撞：目录条目对「通道专属 id」可能含平台通道真值，裸名 / 其它通道
       // 不得使用（否则 Codex OAuth 侧被放大到 1.05M）；继续往下取通道真值。
       if (
         !onPlatformChannel &&
-        isPlatformManagedProvider(model.provider, model.name) &&
-        channelPinnedContextWindow(model.name.toLowerCase()) !== undefined
+        (channelPinnedContextWindow(model.name.toLowerCase()) !== undefined ||
+          channelPinnedContextWindow(candidate.toLowerCase()) !== undefined)
       ) {
         continue;
       }
@@ -324,9 +339,26 @@ export const findModelContextWindow = (
     }
   }
 
+  // 平台通道：旧代 id（别名）本身没有目录条目，但它的**别名目标**有——按目标模型的
+  // 平台真值取窗口（如 gpt-6-sol → gpt-6.1-sol → 1,050,000）。
+  // 不做这一步会落到 OAuth 的 pinned 值（272k），造成平台侧窗口低估、提前裁剪。
+  if (onPlatformChannel) {
+    const effective = resolvePlatformEffectiveModel(normalizedName);
+    if (effective && effective !== normalizedName) {
+      const aliased = map.get(effective);
+      if (aliased?.contextWindow) {
+        return typeof aliased.contextWindow === "number"
+          ? aliased.contextWindow
+          : undefined;
+      }
+    }
+  }
+
   if (!onPlatformChannel) {
-    const pinned = channelPinnedContextWindow(normalizedName);
-    if (pinned !== undefined) return pinned;
+    for (const candidate of candidates) {
+      const pinned = channelPinnedContextWindow(candidate.toLowerCase());
+      if (pinned !== undefined) return pinned;
+    }
   }
 
   return fuzzyContextWindow(normalizedName);

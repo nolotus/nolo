@@ -69,6 +69,10 @@ import {
   type RunFailureReason,
 } from "./agentRunControl";
 import { getRunResultHeaderMeta } from "./agentRunResultFile";
+import {
+  mergeCacheUsageSummaries,
+  summarizeCacheUsageRecords,
+} from "../ai/token/cacheRunSummary";
 import { runDoDCommands, type DoDCommandResult } from "./agentRunDoD";
 import {
   normalizeCliImageInput,
@@ -441,21 +445,20 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     stallTimer = setInterval(async () => {
       if (timedOut || stalled) return;
       const activity = activityTracker?.getActivity();
-      const lastEventAtMs = activity
-        ? new Date(activity.lastEventAt).getTime()
-        : nowMs();
-      const elapsedSinceEvent = nowMs() - lastEventAtMs;
       // Long-running tools (e.g. compilation) are allowed to exceed the stall
       // timeout; only declare a stall when nothing is in flight.
       if (activity?.inFlight?.kind === "tool") {
         return;
       }
+      // Text deltas count as progress even without another loop event.
+      const lastProgressAt = activity?.lastProgressAt ?? activity?.lastEventAt;
+      const lastProgressAtMs = lastProgressAt
+        ? new Date(lastProgressAt).getTime()
+        : nowMs();
+      const elapsedSinceProgress = nowMs() - lastProgressAtMs;
       // An LLM request that hangs without completing is the stall scenario we
       // want to catch, even though it is technically "in flight".
-      if (activity?.inFlight?.kind === "llm" && elapsedSinceEvent < stallTimeoutMs) {
-        return;
-      }
-      if (elapsedSinceEvent >= stallTimeoutMs) {
+      if (elapsedSinceProgress >= stallTimeoutMs) {
         stalled = true;
         clearWatchdogs();
         const note = `stalled: no progress for ${stallTimeoutMs}ms`;
@@ -951,7 +954,10 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         : {}),
     ...(parsed.blockedToolNames?.length ? { blockedToolNames: parsed.blockedToolNames } : {}),
     ...(machineShellOverride ? { runtimeToolPolicyOverride: machineShellOverride } : {}),
-    ...(activityTracker ? { onLoopEvent: activityTracker.onLoopEvent } : {}),
+    ...(activityTracker ? {
+      onLoopEvent: activityTracker.onLoopEvent,
+      onPartialText: activityTracker.onPartialText,
+    } : {}),
     background: parsed.background,
     noStream: parsed.noStream,
     ephemeral: parsed.ephemeral,
@@ -978,6 +984,9 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // 最终 result.turnCredits 会少记前面各轮。turnCredits undefined = 该轮无
   // 平台计费（自有 API），跳过不造 0。
   let runCreditsTotal: number | undefined = result.turnCredits;
+  // run 级缓存命中汇总（同样跨 fallback / drain 轮累计）。undefined = 该轮
+  // 没回报逐次 usage 明细，不造 0。见 ai/token/cacheRunSummary。
+  let runCacheUsage = summarizeCacheUsageRecords(result.usageRecords);
 
   // Quota auto-fallback: when a run fails because the provider reports a
   // quota/limit (HTTP 429 or CliProviderQuotaError, or an error message that
@@ -1006,6 +1015,11 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     if (fallbackResult.turnCredits !== undefined) {
       runCreditsTotal = (runCreditsTotal ?? 0) + fallbackResult.turnCredits;
     }
+    // 缓存汇总同样跨轮累计（result 被整体替换，不累计就丢）。
+    runCacheUsage = mergeCacheUsageSummaries(
+      runCacheUsage,
+      summarizeCacheUsageRecords(fallbackResult.usageRecords),
+    );
     if (fallbackResult.exitCode !== 0) {
       // Fallback also failed: report the fallback failure normally and keep
       // the fallback's error for downstream surfacing. Prefer whichever
@@ -1063,6 +1077,10 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         if (turnResult.turnCredits !== undefined) {
           runCreditsTotal = (runCreditsTotal ?? 0) + turnResult.turnCredits;
         }
+        runCacheUsage = mergeCacheUsageSummaries(
+          runCacheUsage,
+          summarizeCacheUsageRecords(turnResult.usageRecords),
+        );
         if (result.exitCode !== 0) {
           break;
         }
@@ -1200,6 +1218,9 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       // run 级累计的平台积分（主轮 + fallback + drain 轮）：dock 行据此显示
       // 「⚡ x.xx」，让派发任务的消耗可见。undefined = 全程无平台计费。
       ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
+      // run 级缓存命中汇总：只进 .result.md 的 front matter（cached_tokens
+      // 为 null 表示 provider 未报缓存指标，与「命中 0」严格区分）。
+      ...(runCacheUsage ? { cacheUsage: runCacheUsage } : {}),
       ...(failureReason ? { failureReason } : {}),
       ...(toolCallCount !== undefined ? { toolCallCount } : {}),
       ...(result.finalText ? { lastAssistantText: result.finalText } : {}),

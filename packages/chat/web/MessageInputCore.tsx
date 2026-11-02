@@ -70,6 +70,7 @@ import {
   type MentionState,
 } from "./messageInputMention";
 import {
+  buildComposerSlashSuggestions,
   clampSuggestionHighlightIndex,
   createInactiveComposerSuggestionState,
   moveSuggestionHighlightIndex,
@@ -79,7 +80,7 @@ import {
 } from "./composerSuggestions";
 import {
   buildSlashCommandInsertion,
-  filterSlashCommandsByQuery,
+  type SkillCandidate,
   type SlashCommandTriggerState,
 } from "./messageSlashCommands";
 import {
@@ -106,7 +107,6 @@ import {
   MessageInputChip,
   MessageInputConfirmPanel,
   MessageInputImageConfigPanel,
-  RunningProcessesPanel,
 } from "./MessageInputContextPanels";
 import { QueueBadge } from "./QueueBadge";
 import {
@@ -135,12 +135,15 @@ interface MessageInputProps {
   imageUiConfig?: ImageUiConfig | null;
   /** 可选：对象助手面板的 composer agent 切换器；不传则 composer 无变化。 */
   agentPicker?: AgentPickerControlProps;
+  /** Caller-owned catalog; selecting a skill only fills its exact token. */
+  skillCandidates?: readonly SkillCandidate[];
 }
 
 export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
   runtimeOptions,
   imageUiConfig,
   agentPicker,
+  skillCandidates,
 }, ref) => {
   const dispatch = useAppDispatch();
   const { t } = useTranslation("chat");
@@ -604,8 +607,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     if (!suggestionState.active || suggestionState.kind !== "slash-command") {
       return [];
     }
-    return filterSlashCommandsByQuery(suggestionState.query);
-  }, [suggestionState]);
+    return buildComposerSlashSuggestions(suggestionState.query, skillCandidates, t);
+  }, [suggestionState, skillCandidates, t]);
 
   /**
    * 在当前光标位置插入 @AgentName，并记录本轮目标 Agent
@@ -853,14 +856,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
       }));
     }
     if (suggestionState.kind === "slash-command") {
-      return filteredSlashCommands.map((command) => ({
-        key: `command:${command.command}`,
-        label: command.command,
-        description: t(command.descriptionKey, command.descriptionFallback),
-      }));
+      return filteredSlashCommands;
     }
     return [];
-  }, [suggestionState, filteredFavoriteAgents, filteredSlashCommands, t]);
+  }, [suggestionState, filteredFavoriteAgents, filteredSlashCommands]);
 
   const suggestionMenuVisible =
     suggestionState.active && suggestionItems.length > 0;
@@ -1162,8 +1161,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
             isActive={isLoopRunning || hasStreamingMessage}
             agentRunScope={currentUserId && currentDialogId ? { userId: currentUserId, dialogId: currentDialogId } : undefined}
           />
-
-          <RunningProcessesPanel messages={currentMessages} />
 
           {/* QueueBadge 只负责 queue：count===0 不渲染；
               「正在进行」由 ConversationActivity 单一主 working signal 表达。 */}

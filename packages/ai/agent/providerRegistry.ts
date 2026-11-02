@@ -345,13 +345,17 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
     defaultModel: "gpt-6-astra",
     defaultReasoningEffort: "medium",
     modelOptions: [
+      // 只列每个家族的最新代（owner 2026-11-01 决定）：旧代 id 不再作为独立选项，
+      // 存量 agent 记录里的旧 model id 由 OAuth 通道的家族别名表透明重定向到对应
+      // 最新代（sol 系→6.1 Sol、terra 系→6.1 Terra、luna 系→6 Luna），不丢对话。
       { id: "gpt-6-astra", label: "GPT-6 Astra", hasVision: true, recommended: true },
       // GPT-6.1 Sol 已列入 Codex 订阅通道选型指南，但按账号灰度（"when available
       // to your account and client"），未开通的账号选它会 400，不影响其他选项。
       { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", hasVision: true },
-      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", hasVision: true },
-      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", hasVision: true },
-      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", hasVision: true },
+      // GPT-6.1 Terra 上游已实测返回元数据，同样按账号级白名单灰度，未开通的账号选它会 400，不影响其他选项。
+      { id: "gpt-6.1-terra", label: "GPT-6.1 Terra", hasVision: true },
+      // GPT-6 Luna 是 luna 家族的上游最新代（无 6.1-luna）；更老的 gpt-5.6-luna 重定向到它。
+      { id: "gpt-6-luna", label: "GPT-6 Luna", hasVision: true },
     ],
   },
   {
@@ -468,8 +472,9 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
       { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", hasVision: true },
       { id: "gpt-6-astra-medium", label: "GPT-6 Astra Medium", hasVision: true },
       { id: "gpt-6-astra-high", label: "GPT-6 Astra High", hasVision: true },
-      // GPT-6 Sol/Luna 已随上游上线（medium/high 档实测可调）；chatgpt OAuth
-      // 的 Codex 后端目前只放出 gpt-6-astra，Sol/Luna 在该通道仍 400。
+      // GPT-6 Sol/Luna 已随上游上线（medium/high 档实测可调）。注：2026-11-01 实测
+      // chatgpt OAuth 的 Codex 后端已放出 gpt-6-sol / gpt-6-luna（responses 返回 200），
+      // 该通道「Sol/Luna 仍 400」的旧结论已过时。
       { id: "gpt-6-sol-medium", label: "GPT-6 Sol Medium", hasVision: true },
       { id: "gpt-6-sol-high", label: "GPT-6 Sol High", hasVision: true },
       { id: "gpt-6-luna-medium", label: "GPT-6 Luna Medium", hasVision: true },
@@ -823,6 +828,25 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     provider: "lithosai",
     baseUrl: "https://api.lithosai.cloud/v1",
     defaultModel: "deepseek-ai/DeepSeek-V4.1-Flash",
+    commercialKind: "api",
+    accessVariant: "metered_key",
+  },
+  // LongCat 官方 API（longcat.chat / longcat.ai）：高性能 Agentic 模型，
+  // 1M 上下文、最大输出 256K tokens，OpenAI 兼容格式。
+  {
+    kind: "api_key_template",
+    id: "longcat-api",
+    label: "LongCat API",
+    description: "LongCat 官方开放平台（高性能 Agentic 模型，1M 上下文，OpenAI 兼容）",
+    provider: "longcat",
+    baseUrl: "https://api.longcat.chat/openai/v1",
+    defaultModel: "LongCat-2.5",
+    modelOptions: [
+      { id: "LongCat-2.5", label: "LongCat 2.5", recommended: true },
+      { id: "LongCat-2.5-Preview", label: "LongCat 2.5 Preview" },
+      { id: "LongCat-2.0", label: "LongCat 2.0" },
+    ],
+    keyFormatHint: "在 longcat.chat 控制台 API Keys 获取（形如 ak_…）。",
     commercialKind: "api",
     accessVariant: "metered_key",
   },

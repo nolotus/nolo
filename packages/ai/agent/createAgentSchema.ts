@@ -55,7 +55,7 @@ export const DEFAULT_REASONING_EFFORT = "medium";
  * 推理强度选项，覆盖 OpenAI 完整的 reasoning_effort 枚举。
  * 不同 provider 实际支持的子集不同，发送链路负责做 provider-aware clamp。
  *
- * OpenAI:      none / minimal / low / medium / high / xhigh / max（全支持）
+ * OpenAI:      none / minimal / low / medium / high / xhigh / max / ultra（全支持）
  * xAI Grok:    low / medium / high（默认 high，不可关闭推理）
  * DeepSeek:    none / low / medium / high（OpenAI 兼容格式）
  * Anthropic:   不走 reasoning_effort，走 thinking.budget_tokens（见 enableThinking + thinkingBudget）
@@ -70,6 +70,7 @@ export const REASONING_EFFORT_OPTIONS = [
   "high",
   "xhigh",
   "max",
+  "ultra",
 ] as const;
 
 export type ReasoningEffort = (typeof REASONING_EFFORT_OPTIONS)[number];
@@ -78,7 +79,7 @@ export type ReasoningEffort = (typeof REASONING_EFFORT_OPTIONS)[number];
  * 各 provider 实际支持的 reasoning_effort 值（精确集合，非上限）。
  * 用于 UI 动态过滤和发送链路 clamp。
  *
- * OpenAI:           none / minimal / low / medium / high / xhigh / max
+ * OpenAI:           none / minimal / low / medium / high / xhigh / max / ultra
  * DeepSeek V4:      low / high / max（跳过 medium、xhigh）
  * Kimi K3/Moonshot: none / low / high / max（可关思考；默认 max；跳过 medium、xhigh）
  *                   注意：kimi-code proxy 对 max 原样透传，仅把 xhigh 折到 high，见 enhanceKimiCodeBody
@@ -86,8 +87,8 @@ export type ReasoningEffort = (typeof REASONING_EFFORT_OPTIONS)[number];
  * Anthropic/Google: 不走 reasoning_effort 通道
  */
 export const PROVIDER_REASONING_EFFORT_VALUES: Record<string, ReasoningEffort[]> = {
-  openai: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
-  openrouter: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+  openai: ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+  openrouter: ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
   deepseek: ["low", "high", "max"],
   // nolo (Ollama Cloud) 支持 DeepSeek/Kimi/GLM 等 thinking 模型，
   // reasoning_effort 通过 OpenAI 兼容端点透传到 Ollama Cloud。

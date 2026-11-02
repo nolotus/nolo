@@ -8,8 +8,9 @@
 // server (`loadDialogHistoryForDisplay` → `readDialogSnapshot`).
 //
 // This loader keeps the local-first behaviour (a *verified complete* local
-// history never hits the network) and otherwise fetches the full message list
-// from the current server.
+// history never hits the network). Strict continuation also accepts unmarked
+// local history; only empty local history triggers remote recovery. Non-strict
+// callers otherwise fetch the full message list from the current server.
 //
 // - Auth / base URL reuse the existing CLI helpers (`cliEnvHelpers`) — no new
 //   configuration.
@@ -129,7 +130,7 @@ function isChatRole(value: unknown): boolean {
  *
  * Returns the messages plus the source so the caller can distinguish a real
  * local/remote load from a degraded one:
- *   `local`   — local history known to cover the remote prefix (no network).
+ *   `local`   — accepted local history (no network).
  *   `remote`  — full remote history fetched, written locally and verified, with
  *               no damage found in the source records.
  *   `partial` — history returned but not a clean full restore (damaged or
@@ -149,12 +150,20 @@ export async function loadCliDialogHistoryWithSource(args: {
   const localMessages = await readDialogMessages({ store, dialogId });
   const localState = await readCliDialogHistoryState({ store, dialogId });
 
+  // Strict continuation trusts local history unless it is known incomplete.
+  if (args.strictContinueHistory && localMessages.length > 0) {
+    if (localState?.complete === false || localState?.reason === "remote-damaged") {
+      throw new Error(`Strict continuation history load failed for ${dialogId}: local history incomplete (${localState.reason}${localState.reason === "remote-damaged" ? `; damaged remote records, ${localState.issueCount ?? 0} finding(s)` : ""})`);
+    }
+    return { messages: localMessages, source: "local" };
+  }
+
   // Local-first: only a local history *known* to cover the remote prefix keeps
   // working offline without a network round trip. "Local has messages" is
   // explicitly not enough — that is exactly the state a resumed-on-another-
   // machine dialog is left in after a failed fallback (see
   // `cliDialogHistoryState` for the marker semantics).
-  if ((localMessages.length > 0 || args.strictContinueHistory) && localState?.complete === true) {
+  if (localMessages.length > 0 && localState?.complete === true) {
     if (localState.reason === "remote-damaged") {
       // Coverage holds, but the restored source history was already damaged /
       // truncated. Re-fetching cannot repair it, so keep working from the local
@@ -189,6 +198,7 @@ export async function loadCliDialogHistoryWithSource(args: {
   }
 
   let analysis: RemoteDialogHistoryAnalysis | null = null;
+  let remoteError: unknown;
   try {
     const records = await fetchRemoteDialogMessageRecords({
       base,
@@ -199,6 +209,7 @@ export async function loadCliDialogHistoryWithSource(args: {
     });
     analysis = analyzeRemoteDialogRecords({ records, dialogId });
   } catch (error) {
+    remoteError = error;
     // Falling back is best-effort: a network error, a missing permission or a
     // 404 means "no history available here", not "abort the turn".
     args.log?.(
@@ -210,7 +221,18 @@ export async function loadCliDialogHistoryWithSource(args: {
     return { messages: [], source: "remote" };
   }
   if (args.strictContinueHistory && (!analysis || !analysis.complete)) {
-    throw new Error(`Strict continuation history load failed for ${dialogId}`);
+    // Preserve the incomplete verdict if a failed turn later saves messages.
+    if ((analysis && !analysis.complete) || (isRecord(remoteError) && remoteError.historyDamaged === true)) {
+      await writeCliDialogHistoryState({ store, dialogId, state: {
+        complete: false, reason: "remote-damaged", issueCount: analysis?.issues.length ?? 1, updatedAt: Date.now(),
+      } });
+    } else {
+      await persistIncompleteState({ store, dialogId, log: args.log });
+    }
+    const reason = analysis
+      ? `remote history incomplete: ${describeIssues(analysis.issues)}`
+      : toErrorMessage(remoteError);
+    throw new Error(`Strict continuation history load failed for ${dialogId}: ${reason}`);
   }
   if (!analysis || analysis.messages.length === 0) {
     if (analysis && analysis.issues.length > 0) {
@@ -595,8 +617,13 @@ async function fetchRemoteDialogMessageRecords(args: {
       status: res.status,
     });
   }
-  const data = await res.json();
-  if (!Array.isArray(data)) throw new Error("getConvMsgs returned invalid history payload");
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch (error) {
+    throw Object.assign(new Error(`getConvMsgs returned invalid JSON: ${toErrorMessage(error)}`), { historyDamaged: true });
+  }
+  if (!Array.isArray(data)) throw Object.assign(new Error("getConvMsgs returned invalid history payload"), { historyDamaged: true });
   return data;
 }
 

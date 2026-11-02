@@ -79,6 +79,16 @@ export const fetchMessages = async (
     let count = 0;
     for await (const [key, value] of iterator) {
       count++;
+      // 显式让出：每处理 32 条消息让出一次事件循环，防止长对话批量反序列化卡死单线程事件循环
+      if (count % 32 === 0) {
+        await new Promise<void>((resolve) => {
+          if (typeof setImmediate === "function") {
+            setImmediate(resolve);
+          } else {
+            setTimeout(resolve, 0);
+          }
+        });
+      }
       if (!includeDeleted && isTombstoneRecord(value)) {
         continue;
       }

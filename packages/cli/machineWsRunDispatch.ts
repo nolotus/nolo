@@ -283,7 +283,7 @@ export async function handleConnectorRunMessage(
         timeout,
         cwd,
         yolo: true,
-        ...(reasoningEffort ? { reasoningEffort: reasoningEffort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
+        ...(reasoningEffort ? { reasoningEffort: reasoningEffort as "low" | "medium" | "high" | "xhigh" | "max" | "ultra" } : {}),
         env: {
           NOLO_SERVER:
             effectiveRuntimeEnv.NOLO_SERVER ||

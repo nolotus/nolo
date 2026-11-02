@@ -311,7 +311,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
         <div
           ref={menuContainerRef}
           {...withLiteralClass(railCompact ? "navigation-v2-rail-account__profile" : "", sidebarStyles.sidebarUserSectionCardWrap)}
-          style={{ flex: 1, minWidth: 0 }}
+          style={railCompact ? undefined : { flex: 1, minWidth: 0 }}
         >
           <Tooltip
             content={railCompact ? t("openAccountMenu", "账号菜单") : t("goToProfile", "个人主页")}

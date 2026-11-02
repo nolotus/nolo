@@ -9,7 +9,11 @@ import {
   resolveAgentMentionState,
   moveMentionHighlightIndex,
 } from "./messageInputMention";
-import { resolveSlashCommandTriggerState } from "./messageSlashCommands";
+import {
+  filterSlashCommandsByQuery,
+  resolveSlashCommandTriggerState,
+  type SkillCandidate,
+} from "./messageSlashCommands";
 
 export type ComposerSuggestionKind = "agent" | "slash-command";
 
@@ -66,3 +70,35 @@ export interface ComposerSuggestionItem {
   label: string;
   description?: string;
 }
+
+export interface ComposerSlashSuggestion extends ComposerSuggestionItem {
+  /** Exact insertion text, never an executable callback. */
+  command: string;
+}
+
+/** Built-ins and caller-supplied skills share one ordered keyboard/menu list. */
+export const buildComposerSlashSuggestions = (
+  query: string,
+  skillCandidates: readonly SkillCandidate[] = [],
+  translate: (key: string, fallback: string) => string = (_key, fallback) => fallback
+): ComposerSlashSuggestion[] => {
+  const normalizedQuery = query.trim().toLowerCase();
+  const commands = filterSlashCommandsByQuery(query).map((command) => ({
+    key: `command:${command.command}`,
+    label: command.command,
+    command: command.command,
+    description: translate(command.descriptionKey, command.descriptionFallback),
+  }));
+  const skills = skillCandidates
+    .filter((skill) =>
+      skill.name.toLowerCase().startsWith(normalizedQuery) ||
+      skill.token.toLowerCase().startsWith(`/${normalizedQuery}`)
+    )
+    .map((skill) => ({
+      key: `skill:${JSON.stringify([skill.source, skill.token])}`,
+      label: `/${skill.name} (${skill.source})`,
+      command: skill.token,
+      description: skill.description,
+    }));
+  return [...commands, ...skills];
+};

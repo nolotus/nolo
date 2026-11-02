@@ -55,6 +55,7 @@ const STREAM_USAGE_PROVIDERS = new Set([
   "opendesign",
   "opencode",
   "opencode-go",
+  "longcat",
 ]);
 
 // Kimi Code endpoint marker for user-configured custom providers.
@@ -76,11 +77,18 @@ const isMiniMaxEndpoint = (endpoint: string): boolean => {
   return host === "api.minimaxi.com" || host === "api.minimax.chat";
 };
 
+/** 严格校验 LongCat 官方端点 host，避免伪后缀或 query 参数误放行 */
+const isLongCatEndpoint = (endpoint: string): boolean => {
+  const host = extractHostname(endpoint);
+  return host === "api.longcat.chat" || host === "api.longcat.ai";
+};
+
 const isSupportedCustomEndpoint = (endpoint?: string | null): boolean => {
   if (typeof endpoint !== "string") return false;
   const ep = endpoint.toLowerCase();
   return (
     isMiniMaxEndpoint(endpoint) ||
+    isLongCatEndpoint(endpoint) ||
     ep.includes(KIMI_CODE_ENDPOINT_MARKER) ||
     ep.includes("open-design.ai") ||
     ep.includes("opencode.ai") ||

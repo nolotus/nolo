@@ -6,6 +6,7 @@ import {
 import type {
   SafeAgentSummary,
   CompactSafeAgentSummary,
+  UltraCompactSafeAgentSummary,
   UnavailableAgentSummary,
   CredentialGroupSummary,
   SafeAgentSummaryOptions,
@@ -13,6 +14,7 @@ import type {
 import {
   sortSafeAgentSummaries,
   toCompactAgentSummary,
+  toUltraCompactAgentSummary,
   toSafeAgentSummary,
   toUnavailableAgentSummary,
   omitNullishAgentSummaryFields,
@@ -144,7 +146,74 @@ export interface BuildAgentDiscoveryResultOptions<T extends SafeAgentSummary> {
   publicOnly?: boolean;
   showUnavailable?: boolean;
   verbose?: boolean;
+  compact?: boolean;
+  limit?: number | string;
+  offset?: number | string;
   now?: number;
+  upstreamTruncated?: boolean;
+  upstreamTotal?: number;
+}
+
+export function resolvePaginationArgs(args?: {
+  limit?: unknown;
+  offset?: unknown;
+}): { limit?: number; offset?: number } {
+  let limit: number | undefined;
+  let offset: number | undefined;
+
+  if (args?.limit !== undefined && args?.limit !== null) {
+    const raw = args.limit;
+    if (typeof raw === "boolean") {
+      throw new Error(`Invalid limit '${raw}': must be a positive integer.`);
+    }
+    if (typeof raw === "number") {
+      if (!Number.isInteger(raw) || raw <= 0) {
+        throw new Error(`Invalid limit '${raw}': must be a positive integer.`);
+      }
+      limit = Math.min(raw, 500);
+    } else if (typeof raw === "string") {
+      if (raw.trim() !== "") {
+        if (!/^\d+$/.test(raw.trim())) {
+          throw new Error(`Invalid limit '${raw}': must be a positive integer.`);
+        }
+        const parsed = Number(raw.trim());
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          throw new Error(`Invalid limit '${raw}': must be a positive integer.`);
+        }
+        limit = Math.min(parsed, 500);
+      }
+    } else {
+      throw new Error(`Invalid limit '${String(raw)}': must be a positive integer.`);
+    }
+  }
+
+  if (args?.offset !== undefined && args?.offset !== null) {
+    const raw = args.offset;
+    if (typeof raw === "boolean") {
+      throw new Error(`Invalid offset '${raw}': must be a non-negative integer.`);
+    }
+    if (typeof raw === "number") {
+      if (!Number.isInteger(raw) || raw < 0) {
+        throw new Error(`Invalid offset '${raw}': must be a non-negative integer.`);
+      }
+      offset = raw;
+    } else if (typeof raw === "string") {
+      if (raw.trim() !== "") {
+        if (!/^\d+$/.test(raw.trim())) {
+          throw new Error(`Invalid offset '${raw}': must be a non-negative integer.`);
+        }
+        const parsed = Number(raw.trim());
+        if (!Number.isInteger(parsed) || parsed < 0) {
+          throw new Error(`Invalid offset '${raw}': must be a non-negative integer.`);
+        }
+        offset = parsed;
+      }
+    } else {
+      throw new Error(`Invalid offset '${String(raw)}': must be a non-negative integer.`);
+    }
+  }
+
+  return { limit, offset };
 }
 
 export function matchesAgentQuery(agent: SafeAgentSummary, query?: string): boolean {
@@ -165,12 +234,22 @@ export function matchesAgentQuery(agent: SafeAgentSummary, query?: string): bool
   return candidates.some((text) => typeof text === "string" && text.toLowerCase().includes(q));
 }
 
+/**
+ * listAgents 结果形状。**字段顺序是契约的一部分**（不是排版问题）：
+ * host 按字节截断超长工具输出时保留头尾，派发唯一必需的 `agents`
+ * （内含必须逐字复制的 agentKey）必须排在最前，凭证分组/限流清单这类
+ * 大块说明性数据排在最后。历史事故：agents 在最末 + 顶层大块在前，
+ * 截断后每个候选的 agentKey/tier/billingSource 全部落在被砍掉的中段。
+ */
 export interface AgentDiscoveryResult {
   total: number;
+  offset?: number;
+  limit?: number;
+  truncated?: boolean;
   unavailableCount: number;
-  unavailableAgents: UnavailableAgentSummary[];
+  agents: (CompactSafeAgentSummary | UltraCompactSafeAgentSummary | SafeAgentSummary)[];
   credentialGroups: CredentialGroupSummary[];
-  agents: (CompactSafeAgentSummary | SafeAgentSummary)[];
+  unavailableAgents: UnavailableAgentSummary[];
 }
 
 /**
@@ -228,18 +307,82 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     scopedAgents = scopedAgents.filter((a) => !isAgentUnavailableNow(a, now));
   }
 
+  const pagination = resolvePaginationArgs({
+    limit: options.limit,
+    offset: options.offset,
+  });
+  const offset = pagination.offset;
+  const limit = pagination.limit;
+
   const sortedAgents = sortSafeAgentSummaries(scopedAgents);
+  const hasQuery = Boolean(options.query && typeof options.query === "string" && options.query.trim());
+  const hasFilteredCandidates = sortedAgents.length < options.agents.length;
+
+  let total: number;
+  if (hasQuery) {
+    // 带 query 搜索时，在匹配集上反映实际命中总数，不可用未过滤的 upstreamTotal 覆盖。
+    total = sortedAgents.length;
+  } else if (hasFilteredCandidates) {
+    // 候选池经过了 scope 或 availability 本地过滤，未过滤的 upstreamTotal 不再代表真实总数
+    total = sortedAgents.length;
+  } else if (scope === "public") {
+    // scope=public 时，真实总数即公共上游总数（若可用且大于已拉取数）。
+    total = typeof options.upstreamTotal === "number" && options.upstreamTotal > sortedAgents.length
+      ? options.upstreamTotal
+      : sortedAgents.length;
+  } else if (scope === "all") {
+    // scope=all 混合私有与公共：真实去重后不编造 total。
+    // 只有非 public 的纯私有 agent 才需要与公共上游总数相加（避免收藏的公共 agent 重复计数）。
+    const privateOnlyCount = scopedAgents.filter((a) => isPreferredAgent(a) && a.isPublic !== true).length;
+    const publicPulledCount = scopedAgents.filter((a) => a.isPublic === true).length;
+    const effectivePublicTotal =
+      typeof options.upstreamTotal === "number" && options.upstreamTotal > publicPulledCount
+        ? options.upstreamTotal
+        : publicPulledCount;
+    // 若公共上游未截断（已完整拉取），真实去重总数即为 sortedAgents.length，绝不虚增
+    total = options.upstreamTruncated === true
+      ? privateOnlyCount + effectivePublicTotal
+      : sortedAgents.length;
+  } else {
+    // 默认或 preferred scope，在候选池未被本地过滤且上游标记截断时，如实反映上游总数
+    total = typeof options.upstreamTotal === "number" && options.upstreamTotal > sortedAgents.length
+      ? options.upstreamTotal
+      : sortedAgents.length;
+  }
+
+  // 截断仅反映候选池是否未完整拉取：
+  // 1. 上游明确标记截断（upstreamTruncated === true）
+  // 2. 无过滤且上游总数确实大于拉取到的候选数
+  const isTruncated =
+    options.upstreamTruncated === true ||
+    (!hasQuery && !hasFilteredCandidates && typeof options.upstreamTotal === "number" && options.upstreamTotal > sortedAgents.length);
+
+  const pagedAgents =
+    typeof limit === "number" || typeof offset === "number"
+      ? sortedAgents.slice(
+          offset ?? 0,
+          (offset ?? 0) + (limit ?? sortedAgents.length),
+        )
+      : sortedAgents;
+
   const projectedAgents =
     options.verbose === true
-      ? sortedAgents.map(omitNullishAgentSummaryFields)
-      : sortedAgents.map(toCompactAgentSummary);
+      ? pagedAgents.map(omitNullishAgentSummaryFields)
+      : options.compact === true
+        ? pagedAgents.map(toUltraCompactAgentSummary)
+        : pagedAgents.map(toCompactAgentSummary);
 
+  // 键插入顺序即 JSON.stringify 的输出顺序：把 agents 放在最前，
+  // credentialGroups / unavailableAgents 放到最后（见 AgentDiscoveryResult）。
   return {
-    total: projectedAgents.length,
+    total,
+    ...(typeof offset === "number" ? { offset } : {}),
+    ...(typeof limit === "number" ? { limit } : {}),
+    ...(isTruncated ? { truncated: true } : {}),
     unavailableCount,
-    unavailableAgents,
-    credentialGroups,
     agents: projectedAgents,
+    credentialGroups,
+    unavailableAgents,
   };
 }
 

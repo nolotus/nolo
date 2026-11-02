@@ -474,6 +474,8 @@ export type ToolExecutorContext = {
   toolRunId?: string;
   agentKey?: string;
   userInput?: string;
+  /** 运行时注入、模型不可见，用于 slash 单轮预加载 */
+  skipSkillReferencePersist?: boolean;
   /**
    * 当前来源对话 id（watchCompletion 这类「终态订阅」工具用它定位唤醒目标）。
    * 由运行时注入，模型不可见、不可传 —— 没有对话上下文的宿主留空，工具会把
