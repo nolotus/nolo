@@ -629,6 +629,9 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(batchId ? { batchId } : {}),
         ...(credentialGroup ? { credentialGroup } : {}),
         ...(parentDialogId ? { parentDialogId } : {}),
+        // 续跑目标对话：spawn 时落盘，让"开着这条对话的 TUI"在 running 期间就能
+        // 看到另一边在跑（dock 按 dialogId 也能匹配到这条 run）。
+        ...(continueDialogId ? { dialogId: continueDialogId } : {}),
         ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
         cwd: requestedCwd ?? deps.cwd ?? process.cwd(),
         message,
@@ -755,6 +758,8 @@ async function spawnContinuationRun(
       ...(agentName ? { agentName } : {}),
       ...(continuedTitle ? { title: continuedTitle } : {}),
       ...(reconciled.batchId ? { batchId: reconciled.batchId } : {}),
+      // 续跑也要在 running 阶段就带上目标对话，否则"开着那条对话的 TUI"看不到它。
+      ...(reconciled.dialogId ? { dialogId: reconciled.dialogId } : {}),
       ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
       // 续跑继承原 run 的凭证组（同一 agent），供并发扇出守卫判定。
       ...(reconciled.credentialGroup ? { credentialGroup: reconciled.credentialGroup } : {}),

@@ -34,11 +34,13 @@ type OutputLike = { write(chunk: string): unknown };
 
 import type { LocalAgentLoopEvent } from "../agent-runtime/localLoop";
 export type { LocalAgentLoopEvent };
+import { findPowerShellExecutable } from "agent-runtime/workspaceShell";
 
 export type RunActivity = {
   lastEventAt: string;
   // Historical run records may not include this field.
   lastProgressAt?: string;
+  lastToolNames?: string[];
   inFlight: { kind: "llm" | "tool"; name: string; sinceMs: number } | null;
   counters: { llmCalls: number; toolCalls: number; fileEdits: number };
   updatedAt: string;
@@ -248,6 +250,10 @@ export type AgentRunControlDeps = {
   platform?: NodeJS.Platform;
   /** 本机内存快照读取（缺省读真实 /proc/meminfo）。 */
   readHostMemory?: () => HostMemorySnapshot | null;
+  /**
+   * PowerShell 可执行文件解析器（win32 进程探针使用）；缺省走 findPowerShellExecutable。
+   */
+  resolvePowerShellExecutable?: () => string | null;
 };
 
 export function resolveNoloHome(env?: EnvLike, homedir = nodeHomedir): string {
@@ -969,6 +975,7 @@ export function createRunActivityTracker(
   let lastProgressAt = now().toISOString();
   let inFlight: InFlightState | null = null;
   const counters = { llmCalls: 0, toolCalls: 0, fileEdits: 0 };
+  const lastToolNames: string[] = [];
   let writeTimer: ReturnType<typeof setTimeout> | undefined;
   let lastWriteAt = 0;
   // Only closed lines enter the durable observation. An interrupted trailing
@@ -1051,6 +1058,7 @@ export function createRunActivityTracker(
     return {
       lastEventAt,
       lastProgressAt,
+      ...(lastToolNames.length > 0 ? { lastToolNames: [...lastToolNames] } : {}),
       inFlight: inFlight
         ? {
             kind: inFlight.kind,
@@ -1154,6 +1162,17 @@ export function createRunActivityTracker(
         const toolEndName = event.toolName ?? (event as { name?: string }).name;
         if (toolEndName && FILE_EDIT_TOOL_NAMES.has(toolEndName)) {
           counters.fileEdits += 1;
+        }
+        if (toolEndName) {
+          // 维护最近使用的工具名列表：重复出现移到末尾以体现最近使用顺序，上限保留 5 个。
+          const existingIdx = lastToolNames.indexOf(toolEndName);
+          if (existingIdx >= 0) {
+            lastToolNames.splice(existingIdx, 1);
+          }
+          lastToolNames.push(toolEndName);
+          if (lastToolNames.length > 5) {
+            lastToolNames.splice(0, lastToolNames.length - 5);
+          }
         }
         break;
     }
@@ -1752,6 +1771,12 @@ export async function spawnLocalBackgroundRun(
      * Persisted on the run record so TUI can filter runs by conversation.
      */
     parentDialogId?: string;
+    /**
+     * 续跑目标对话（continueDialogId）。与 parentDialogId 不同：parent 是发起方
+     * 的对话，dialog 是这条 run 正在写的那条对话。必须在 spawn 时就落盘——否则
+     * 用户在自己开着该对话的 TUI 里，整段 running 期间都看不到「另一边在跑」。
+     */
+    dialogId?: string;
     dodCommands?: string[];
     ephemeral?: boolean;
     /** 父进程解析出的凭证组（写进 run 记录，供并发扇出守卫判定）。 */
@@ -1846,6 +1871,9 @@ export async function spawnLocalBackgroundRun(
       : {}),
     ...(typeof input.parentDialogId === "string" && input.parentDialogId.trim()
       ? { parentDialogId: input.parentDialogId.trim() }
+      : {}),
+    ...(typeof input.dialogId === "string" && input.dialogId.trim()
+      ? { dialogId: input.dialogId.trim() }
       : {}),
     ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
     ...(spawnHead ? { spawnHead } : {}),
@@ -2385,16 +2413,25 @@ export function isPidGone(pid: number, deps: AgentRunControlDeps = {}): boolean 
  */
 export function defaultGetProcessStartTime(
   pid: number,
-  deps: Pick<AgentRunControlDeps, "platform" | "execFileSync" | "env"> = {},
+  deps: Pick<
+    AgentRunControlDeps,
+    "platform" | "execFileSync" | "env" | "resolvePowerShellExecutable"
+  > = {},
 ): Date | null {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
     const execFileSync = deps.execFileSync ?? nodeExecFileSync;
     if ((deps.platform ?? process.platform) === "win32") {
+      // 优先使用共享的 PowerShell 可执行文件探测结果（覆盖 pwsh 及 Store 别名），
+      // 拿不到时保留对 SystemRoot 及 powershell.exe 的兜底逻辑。
+      const resolvePowerShell =
+        deps.resolvePowerShellExecutable ?? findPowerShellExecutable;
       const systemRoot = (deps.env ?? process.env).SystemRoot;
-      const shell = systemRoot
-        ? join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-        : "powershell.exe";
+      const shell =
+        resolvePowerShell() ??
+        (systemRoot
+          ? join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+          : "powershell.exe");
       const output = execFileSync(shell, [
         "-NoProfile", "-NonInteractive", "-Command",
         `$ErrorActionPreference='Stop'; (Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
