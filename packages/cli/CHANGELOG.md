@@ -1,4 +1,11 @@
 
+## 0.202.0-alpha.3 (2026-11-02)
+
+### Bug Fixes
+
+* **cli:** 修正发布包 level 依赖的过时断言 ([4568bea](https://github.com/nolotus/bun-nolo/commit/4568bea97d639298721ac45a05e8686051ac5ece))
+
+
 ## 0.202.0-alpha.2 (2026-11-02)
 
 ### Bug Fixes
