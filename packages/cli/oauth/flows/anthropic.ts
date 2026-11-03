@@ -3,15 +3,20 @@ import { createInterface } from "node:readline/promises";
 
 import {
   ANTHROPIC_ACCESS_TOKEN_CLIENT_SKEW_MS,
+  ANTHROPIC_BOOTSTRAP_URL,
   ANTHROPIC_OAUTH_AUTHORIZE_URL,
   ANTHROPIC_OAUTH_CALLBACK_PORT,
   ANTHROPIC_OAUTH_CLIENT_ID,
+  ANTHROPIC_OAUTH_GRANT_TTL_MS,
   ANTHROPIC_OAUTH_REDIRECT_URI,
   ANTHROPIC_OAUTH_SCOPES,
   ANTHROPIC_OAUTH_TOKEN_URL,
+  anthropicGrantRemainingMs,
   anthropicRefresh,
+  fetchAnthropicBootstrapIdentity,
   normalizeAnthropicTokenPayload,
   refreshAnthropicToken,
+  type AnthropicBootstrapIdentity,
   type AnthropicTokenPayload,
 } from "../../../agent-runtime/anthropicOAuth";
 import { startCallbackServer } from "../callback-server";
@@ -20,15 +25,20 @@ import type { OAuthCredential, OAuthFlowDeps } from "../types";
 
 export {
   ANTHROPIC_ACCESS_TOKEN_CLIENT_SKEW_MS,
+  ANTHROPIC_BOOTSTRAP_URL,
   ANTHROPIC_OAUTH_AUTHORIZE_URL,
   ANTHROPIC_OAUTH_CALLBACK_PORT,
   ANTHROPIC_OAUTH_CLIENT_ID,
+  ANTHROPIC_OAUTH_GRANT_TTL_MS,
   ANTHROPIC_OAUTH_REDIRECT_URI,
   ANTHROPIC_OAUTH_SCOPES,
   ANTHROPIC_OAUTH_TOKEN_URL,
+  anthropicGrantRemainingMs,
   anthropicRefresh,
+  fetchAnthropicBootstrapIdentity,
   refreshAnthropicToken,
 };
+export type { AnthropicBootstrapIdentity };
 
 export function buildAnthropicAuthorizeUrl(args: {
   state: string;
@@ -113,10 +123,50 @@ export async function exchangeAnthropicAuthorizationCode(args: {
     throw new Error("Claude OAuth token exchange response missing access_token.");
   }
 
+  // 登录路径：token 响应缺 accountId/email/orgId 时用 bootstrap 补齐并落库
+  const hasAccountId =
+    typeof payload.account?.uuid === "string" && Boolean(payload.account.uuid.trim());
+  const hasEmail =
+    typeof payload.account?.email_address === "string" && Boolean(payload.account.email_address.trim());
+  const hasOrgId =
+    typeof payload.organization?.uuid === "string" && Boolean(payload.organization.uuid.trim());
+
+  if (!hasAccountId || !hasEmail || !hasOrgId) {
+    const bootstrap = await fetchAnthropicBootstrapIdentity(payload.access_token, fetchImpl);
+    if (!hasAccountId && bootstrap.accountId) {
+      payload.account = {
+        ...payload.account,
+        uuid: bootstrap.accountId,
+      };
+    }
+    if (!hasEmail && bootstrap.email) {
+      payload.account = {
+        ...payload.account,
+        email_address: bootstrap.email,
+      };
+    }
+    if (!hasOrgId && bootstrap.orgId) {
+      payload.organization = {
+        ...payload.organization,
+        uuid: bootstrap.orgId,
+        ...(bootstrap.orgName && !payload.organization?.name ? { name: bootstrap.orgName } : {}),
+      };
+    } else if (bootstrap.orgName && !payload.organization?.name) {
+      payload.organization = {
+        ...payload.organization,
+        name: bootstrap.orgName,
+      };
+    }
+  }
+
   const now = args.now?.() ?? Date.now();
   return normalizeAnthropicTokenPayload({
     payload,
     now,
+    // 显式声明：这条路径就是交互式登录（grant 起点）。不靠「有没有 baseCredential」
+    // 隐式推断——将来若有调用方在登录路径上传了 baseCredential，grantedAt 会被
+    // 悄悄错当成「刷新」而不写，30 天前瞻就整个失效。
+    isInitialLogin: true,
   });
 }
 

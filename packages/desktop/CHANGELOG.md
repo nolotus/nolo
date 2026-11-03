@@ -1,12 +1,14 @@
 
-## 0.222.0 (2026-11-03)
+## 0.223.0 (2026-11-03)
 
 ### Features
 
 * **agent-run:** run HTML artifact tools on the server-owned web plane ([9f8f186](https://github.com/nolotus/bun-nolo/commit/9f8f186a0e244989fb1bd1219b65b52cb9306717))
 * **agent:** durable non-final run evidence and agent discovery summaries ([fa7d671](https://github.com/nolotus/bun-nolo/commit/fa7d67104a252e23ce6a2fb5817c507bcadd82c0))
+* **chat:** support cross-device continuation across TUI, desktop and RN ([a54f16a](https://github.com/nolotus/bun-nolo/commit/a54f16a0c90acab6a95783749b2375a21f942d2e))
 * **cli:** TUI 停靠区能看到别的会话对本对话的续跑 ([88b7696](https://github.com/nolotus/bun-nolo/commit/88b7696ca824d34406c95959397185a3d4a6218b))
 * **cli:** 后台 run 在 TUI 里显示最近用过的工具名 ([b721b0d](https://github.com/nolotus/bun-nolo/commit/b721b0da775d19d38f1c2fba6e3fb14c0449e1cd))
+* **oauth:** Claude Code 版本自愈、grant 30 天前瞻、身份回填与请求侧分层 ([f08c260](https://github.com/nolotus/bun-nolo/commit/f08c260c1ca6af74d36e2c4b8470e1fca300be0e))
 * **observability:** record prompt cache usage in run results ([7d14c9f](https://github.com/nolotus/bun-nolo/commit/7d14c9fd85d02eb79daca396a2175d3804635d57))
 * **skills:** add android-adb methodology skill ([869de62](https://github.com/nolotus/bun-nolo/commit/869de62427009e891647f798b6f1b3d1dbfc0e3b))
 * **workbench:** persist and reopen single-file HTML artifacts ([33099b3](https://github.com/nolotus/bun-nolo/commit/33099b3fec56ba35b0ea16170907ff19bb4de6e6))
@@ -36,6 +38,18 @@
 
 * **chat:** yield event loop every 32 items during long dialog message iteration ([257efde](https://github.com/nolotus/bun-nolo/commit/257efdef213d5abd6088d6dfb67244c6457d7523))
 * **chat:** 思考区代码块改纯文本渲染，降低渲染负载 ([9da089d](https://github.com/nolotus/bun-nolo/commit/9da089de400cf5b04b75e1d76cf18ebaeb88597b))
+
+
+## 0.222.0-alpha.1 (2026-11-03)
+
+### Features
+
+* **chat:** support cross-device continuation across TUI, desktop and RN ([a54f16a](https://github.com/nolotus/bun-nolo/commit/a54f16a0c90acab6a95783749b2375a21f942d2e))
+* **oauth:** Claude Code 版本自愈、grant 30 天前瞻、身份回填与请求侧分层 ([f08c260](https://github.com/nolotus/bun-nolo/commit/f08c260c1ca6af74d36e2c4b8470e1fca300be0e))
+
+### Bug Fixes
+
+* **agent-runtime:** responses wire 透传单次 max_tokens 与 reasoning_effort ([94dc22e](https://github.com/nolotus/bun-nolo/commit/94dc22e93449142ee2282dfe7daa69f4bdb87544))
 
 
 ## 0.221.0-alpha.3 (2026-11-03)

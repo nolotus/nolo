@@ -976,6 +976,46 @@ function buildAuthFailure(ctx: FailureCtx): string {
     );
   }
 
+  // owner OAuth unavailable (HTTP 403 owner_oauth_unavailable): the
+  // owner-required proxy failed because the agent owner's OAuth credential
+  // is unavailable on the server. The credential belongs to the agent owner,
+  // not this machine — telling the caller to "fix the local credential" or
+  // log in again locally will not fix it. Running with --server also cannot
+  // bypass this because the server route still requires the owner's OAuth token.
+  if (
+    ctx.status === 403 &&
+    ctx.message.includes("owner-required proxy failed") &&
+    /"code"\s*:\s*"owner_oauth_unavailable"/i.test(ctx.message)
+  ) {
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, the agent owner's OAuth credential is unavailable on the server — 分享者（agent 所有者）的 OAuth 凭据在服务端不可用; owner_oauth_unavailable).` +
+      `\n    · Ask the agent owner to run \`nolo auth <provider> --sync-to-server\` (or re-authenticate) / 请 owner 执行 \`nolo auth <provider> --sync-to-server\`（或重新授权）` +
+      `\n    · Re-logging in on your local machine will not resolve this (the credential belongs to the agent owner, not this machine) / 你本机重新登录不会解决` +
+      `\n    · Running with --server will not bypass this (server runs also require the owner's credential) / --server 也绕不过（服务端路径同样要用 owner 凭据）` +
+      `\n  Detail: ${ctx.message} ` +
+      `${NO_FALLBACK} ${SERVER_FALLBACK_HINT}\n`
+    );
+  }
+
+  // owner grant denied or revoked (HTTP 403/401 owner_grant_denied / owner_grant_revoked):
+  // the caller does not have a valid grant for this agent (sharing inactive or revoked).
+  // The caller must ask the agent owner to grant or re-share access.
+  if (
+    (ctx.status === 403 || ctx.status === 401) &&
+    ctx.message.includes("owner-required proxy failed") &&
+    /"code"\s*:\s*"(?:owner_grant_denied|owner_grant_revoked)"/i.test(ctx.message)
+  ) {
+    const codeMatch = /"code"\s*:\s*"(owner_grant_(?:denied|revoked))"/i.exec(ctx.message);
+    const code = codeMatch ? codeMatch[1].toLowerCase() : "owner_grant_denied";
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, no valid grant for this agent — 你对这个 agent 没有有效授权（分享未生效或已被撤销）; ${code}).` +
+      `\n    · Ask the agent owner to re-share or grant access to this agent / 请联系 owner 重新分享或授权` +
+      `\n    · Re-logging in on your local machine will not resolve this (the grant must come from the agent owner) / 你本机重新登录不会解决` +
+      `\n  Detail: ${ctx.message} ` +
+      `${NO_FALLBACK} ${SERVER_FALLBACK_HINT}\n`
+    );
+  }
+
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, auth rejected).` +
     ` Detail: ${ctx.message} ` +

@@ -49,6 +49,7 @@ import {
   resolveConfirmedDialogDeletionTargets,
   type DeleteDialogsMatchMode,
 } from "./deleteDialogsToolModel";
+import { loadWorkspaceCredentialCooldowns } from "./workspaceCooldownHelper";
 
 type ToolResult = {
   rawData: unknown;
@@ -723,18 +724,7 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   const now = typeof args?.now === "number" ? args.now : Date.now();
   const env = (args?.env ?? process.env) as NodeJS.ProcessEnv;
 
-  let localCooldowns: Record<string, number> = {};
-  let resolveCooldownFn: ((key: string | undefined, map: Record<string, number>, now?: number) => number | undefined) | undefined;
-  try {
-    const credModulePath = "../../agent-runtime/credentialAvailability";
-    const credMod: any = await import(credModulePath);
-    if (credMod?.readCredentialAvailability && credMod?.resolveEffectiveCredentialCooldown) {
-      localCooldowns = await credMod.readCredentialAvailability(env, now).catch(() => ({}));
-      resolveCooldownFn = credMod.resolveEffectiveCredentialCooldown;
-    }
-  } catch {
-    // 浏览器环境或 import 失败时跳过合并，保持 fail-open（以云端记录为准）
-  }
+  const { localCooldowns, resolveCooldownFn } = await loadWorkspaceCredentialCooldowns(env, now);
 
   // NOTE: We intentionally do NOT pass publicRecordExists for plain records.
   // record.isPublic is a flag on the private record; it does NOT prove the
