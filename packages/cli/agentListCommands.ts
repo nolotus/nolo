@@ -261,7 +261,7 @@ export async function runAgentListCommand(
           const key = resolveCredentialKeyWithFallback(agent);
           if (!key) continue;
           const entry = await readEffectiveCredentialEntry(key, env);
-          if (entry && shouldClearCooldownFromQuota(entry, quota, now)) {
+          if (entry && shouldClearCooldownFromQuota(entry, quota, now, { model: agent.model })) {
             const candidatesToClear =
               entry.candidates && entry.candidates.length > 0
                 ? entry.candidates

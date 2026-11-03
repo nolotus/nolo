@@ -1,4 +1,11 @@
 
+## 0.205.0-alpha.2 (2026-11-03)
+
+### Bug Fixes
+
+* **agent-availability:** 冷却解除按模型族与周期窗口判定额度 ([07352d9](https://github.com/nolotus/bun-nolo/commit/07352d9f178f4787b6c7f07a25736ffb95bd083e))
+
+
 ## 0.205.0-alpha.1 (2026-11-03)
 
 ### Features
