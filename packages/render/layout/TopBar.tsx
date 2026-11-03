@@ -80,6 +80,12 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen, hasRail }
   // Under the folded-sidebar state on space-bound pages, we also hide it from the topbar
   // per the user request ("折叠之后不需要显示选择空间切换器"), so we disable it entirely in the TopBar.
   const showTopbarSpaceSwitcher = false;
+  // 真壳判据：只认宿主注入的 data-nolo-desktop（entry.tsx 在 `__NOLO_DESKTOP__`
+  // 或 `?noloDesktop=1` 时写入）。**有意不跟随 `?desktop=1` 外观预览**——
+  // 它门控的是原生 titlebar 的历史导航控件与浏览器前进/后退箭头的互斥
+  // （`noloDesktopTitlebar=native`），浏览器预览没有原生 titlebar，跟随预览
+  // 反而会显示并不存在的窗口控件。是否走桌面骨架由 MainLayout 的
+  // getIsDesktopUiPreview() 负责，两者刻意使用不同判据。
   const isDesktopShell = useMemo(
     () =>
       typeof document !== "undefined" &&

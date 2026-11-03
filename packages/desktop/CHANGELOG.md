@@ -1,17 +1,9 @@
 
-## 0.228.0 (2026-11-03)
-
-### Features
-
-* **agent:** 新增「先验证，再下结论」系统固定块 ([d09af0d](https://github.com/nolotus/bun-nolo/commit/d09af0d23bf6736c6c0046a1b0435fa3e4f8c789))
-* **desktop:** scope project-side creation to the active project and add optional project instructions ([fab1624](https://github.com/nolotus/bun-nolo/commit/fab16241f4b69dbf10631ed5243d6516e50d0d1d))
-* **desktop:** 重构项目主页排版为极简流式布局与切视图默认选定 ([d229513](https://github.com/nolotus/bun-nolo/commit/d229513c288a04afc236dbaa30204cf7f299955a))
+## 0.227.0-alpha.2 (2026-11-03)
 
 ### Bug Fixes
 
-* **desktop:** refresh dev assets and stabilize folder picker ([26f0318](https://github.com/nolotus/bun-nolo/commit/26f031896b1f79092017bd4ad188947dcf7ef79c))
-* **desktop:** 修复项目作用域与上下文注入的四处缺陷（[#209](https://github.com/nolotus/bun-nolo/issues/209) 复审） ([a94c9a7](https://github.com/nolotus/bun-nolo/commit/a94c9a7820f6f99ce20da78ddf81518a58442dae))
-* **quota:** 四端额度显示收敛到同一窗口集合（剔过期 + 按模型族） ([2d3a0dc](https://github.com/nolotus/bun-nolo/commit/2d3a0dcbc6b2ba2647cfddb065e3f12741ddeafb))
+* **desktop:** 发布器改用「结构 + 等长」判据，根治体积下限误拦 ([7c7984a](https://github.com/nolotus/bun-nolo/commit/7c7984a0818067a59720196079de1f03add6e7ed))
 * **web:** netease 加解密模块加浏览器 stub，web bundle 恢复可构建 ([becb440](https://github.com/nolotus/bun-nolo/commit/becb440cdb90ee171ef9b85e73566de54489bd6b))
 
 
