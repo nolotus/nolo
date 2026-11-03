@@ -420,6 +420,7 @@ export const SLASH_COMMANDS = [
   "/skill",
   "/customize",
   "/login",
+  "/auth",
   "/profile",
   "/update",
   "/version",

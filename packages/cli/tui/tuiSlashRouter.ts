@@ -53,6 +53,9 @@ import {
 } from "./tuiHistory";
 import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
 import { runTuiLogin } from "./tuiLogin";
+import { runTuiAuth } from "./tuiAuth";
+import { runSelectDialog } from "./selectDialog";
+import { renderDialogTitle } from "./dialogFrame";
 import { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
 import { mergeAttachedImages, resolveAttachmentImageUrls } from "./pasteImage";
 import { transcribeMediaFile, formatTranscriptForModel, describeMediaError } from "./mediaAttachment";
@@ -889,6 +892,19 @@ export async function runSubmittedSlashLine(
       env.AUTH_TOKEN = outcome.token;
       host.state = { ...host.state, showAuthGuidance: false };
     }
+  }
+
+  if (result.action?.type === "auth") {
+    await runTuiAuth(
+      result.action.args ?? [],
+      (text) => emitCommandOutput(text),
+      {
+        fetchImpl: host.fetchImpl,
+        dialogHost: host.dialogHost,
+        input: host.input as any,
+        output: host.output as any,
+      },
+    );
   }
 
   if (result.action?.type === "chat") {

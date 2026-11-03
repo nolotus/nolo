@@ -16,6 +16,7 @@ import {
   type CliProvider,
   CLI_CAPABILITY_BY_PROVIDER,
   CLI_PROVIDER_DISPLAY_LABELS,
+  DEFAULT_CLI_PROVIDER,
   type MachineSummary,
 } from "ai/agent/cliProviders";
 import {
@@ -161,7 +162,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
   const isPlatformApi = apiSource === "platform";
   const selectedCliProvider =
     (values.cliProvider as CliProvider | "") ||
-    "copilot";
+    DEFAULT_CLI_PROVIDER;
   const selectedMachineId = (values.machineId as string | undefined) || "";
   const modelValue = values.model as string | undefined;
   const apiKeyRefValue = values.apiKeyRef as string | undefined;
@@ -324,8 +325,10 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
     if (next !== "cli") {
       set("cliProvider", "");
     }
-    if (next === "cli" && !selectedCliProvider) {
-      set("cliProvider", "copilot");
+    // 用 values.cliProvider 判空：selectedCliProvider 带默认值，恒非空，
+    // 用它做守卫会永远为 false，切到 CLI 时 cliProvider 留空 → 保存校验失败。
+    if (next === "cli" && !(values.cliProvider as string | undefined)) {
+      set("cliProvider", DEFAULT_CLI_PROVIDER);
     }
     if (next === "platform") {
       set("model", "");
@@ -699,7 +702,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                 <FormField label="CLI 工具" {...common}>
                   <Select
                     className={stylex.props(modelStyles.cliSelect).className}
-                    selectedKey={(values.cliProvider as string) || "copilot"}
+                    selectedKey={(values.cliProvider as string) || DEFAULT_CLI_PROVIDER}
                     onSelectionChange={(key) => {
                       const v = String(key ?? "");
                       set("cliProvider", v as any);
@@ -709,27 +712,37 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                   >
                     {(
                       [
-                        {
-                          value: "copilot",
-                          label: "GitHub Copilot CLI（gh copilot）",
-                        },
-                        { value: "gemini", label: "Gemini CLI（gemini）" },
+                        { value: "claude", label: "Claude CLI（claude）" },
                         {
                           value: "codex",
                           label: "OpenAI Codex CLI（codex exec）",
                         },
-                        { value: "claude", label: "Claude CLI（claude）" },
                         {
                           value: "agy",
                           label: "Google Antigravity CLI（agy）",
                         },
-                        { value: "qoder", label: "Qoder CLI（qoder）" },
                         {
                           value: "opencode",
                           label: "OpenCode CLI（opencode）",
                         },
+                        {
+                          value: "copilot",
+                          label: "GitHub Copilot CLI（gh copilot）",
+                        },
+                        { value: "qoder", label: "Qoder CLI（qoder）" },
                         { value: "grok", label: "Grok CLI（grok）" },
                         { value: "kimi", label: "Kimi Code CLI（kimi）" },
+                        // 已停用项（Google 2026-06-18 起对 Pro/Ultra/免费用户关闭
+                        // Gemini CLI）。仅当这条 agent 本来就选的它才渲染，避免
+                        // 编辑存量 agent 时下拉里没有当前值 → 值被静默清空。
+                        ...(selectedCliProvider === "gemini"
+                          ? [
+                              {
+                                value: "gemini",
+                                label: "Gemini CLI（gemini，已停用）",
+                              } as const,
+                            ]
+                          : []),
                       ] as const
                     ).map((opt) => (
                       <SelectItem

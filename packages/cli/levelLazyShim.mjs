@@ -20,6 +20,11 @@ function ensureLevel() {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class Level {
+  /** `Level` 就是 classic-level 的 ClassicLevel，静态 repair 同样要懒加载。 */
+  static repair(location) {
+    return ensureLevel().repair(location);
+  }
+
   constructor(...args) {
     const RealLevel = ensureLevel();
     // 返回真实实例会替换 this（JS 构造器语义）

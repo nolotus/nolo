@@ -16,7 +16,13 @@ import type { ShellApprovalSession } from "../client/originShellApprovalTranspor
  * 由调用方 runTuiWorkspace 装配，本模块不做任何模块级可变单例。
  */
 import type { createInterface } from "node:readline";
-import { runAgentTurn, type RunAgentTurnResult } from "../client/agentRun";
+import {
+  runAgentTurn,
+  OWNER_OAUTH_UNAVAILABLE_HINT,
+  isOwnerOAuthUnavailableError,
+  isInvalidGrantError,
+  type RunAgentTurnResult,
+} from "../client/agentRun";
 import { appendTurnBillingAudit } from "../client/turnBillingAudit";
 import {
   createCliLocalRuntimeAdapter,
@@ -1678,7 +1684,16 @@ export async function runOneAgentTurn(
     // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
     // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。
     if (!wasAborted && runResult.exitCode !== 0) {
-      if (isBalanceExhaustedError(runResult.localError) && runResult.dialogId) {
+      if (isOwnerOAuthUnavailableError(runResult.localError)) {
+        ctx.emitCommandOutput(OWNER_OAUTH_UNAVAILABLE_HINT);
+      } else if (isInvalidGrantError(runResult.localError)) {
+        const provider = "claude";
+        ctx.emitCommandOutput(t("auth.grantExpiredHint", provider));
+        ctx.state = {
+          ...ctx.state,
+          suggestedAuthCommand: `/auth ${provider}`,
+        };
+      } else if (isBalanceExhaustedError(runResult.localError) && runResult.dialogId) {
         ctx.emitCommandOutput(t("balanceExhaustedHint"));
       } else if (isQuotaExhaustedError(runResult.localError)) {
         ctx.emitCommandOutput(t("quotaExhaustedHint"));

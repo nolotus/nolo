@@ -4,6 +4,14 @@ import { createServer, type AddressInfo, type Server, type Socket } from "node:n
 import { toErrorMessage } from "core/errorMessage";
 
 import type { AuthorityStore } from "./authorityStoreTypes";
+import {
+  isLevelCorruptionError,
+  recoverCorruptedLevelDb,
+} from "./levelDbCorruptionRecovery";
+import {
+  acquireLevelDbOwnershipLock,
+  type LevelDbOwnershipLock,
+} from "./levelDbOwnershipLock";
 import type {
   CliAuthorityBrokerIteratorPage,
   CliAuthorityBrokerRequest,
@@ -169,12 +177,72 @@ export async function dispatchCliAuthorityBrokerRequest(
   }
 }
 
+async function openAuthorityStoreWithCorruptionRecovery(
+  options: CliAuthorityBrokerServerOptions,
+  track: (store: AuthorityStore | undefined) => void
+): Promise<AuthorityStore> {
+  let attemptStore: AuthorityStore | undefined;
+  try {
+    attemptStore = await options.createStore();
+    track(attemptStore);
+    await attemptStore.open();
+    return attemptStore;
+  } catch (error) {
+    // 没有 dbPath（内存 store / 测试）时绝不碰磁盘。corruption 也绝不按锁错误
+    // 重试：重试会再构造一个 native owner，把损坏扩大。
+    if (!options.dbPath || !isLevelCorruptionError(error)) throw error;
+
+    if (attemptStore) {
+      // 必须先关掉失败的 native 句柄，否则 rename/repair 会撞上仍被占用的
+      // LOCK/表文件；关不掉就停下，绝不改磁盘。
+      try {
+        await attemptStore.close();
+      } catch (closeError) {
+        throw Object.assign(
+          new Error(
+            `LevelDB corruption detected at ${options.dbPath}, but the failed database handle could not be closed; ` +
+              `on-disk files were left untouched. Stop every Nolo process and retry: ${toErrorMessage(closeError)}`,
+            { cause: closeError }
+          ),
+          { code: "LEVEL_CORRUPTION" }
+        );
+      }
+      track(undefined);
+      attemptStore = undefined;
+    }
+
+    const { backupPath } = await recoverCorruptedLevelDb({
+      dbPath: options.dbPath,
+      now: options.now,
+    });
+
+    try {
+      attemptStore = await options.createStore();
+      track(attemptStore);
+      await attemptStore.open();
+      return attemptStore;
+    } catch (retryError) {
+      throw Object.assign(
+        new Error(
+          `Local database corruption at ${options.dbPath} was preserved at ${backupPath}, ` +
+            `but reopening the repaired copy failed: ${toErrorMessage(retryError)}. ` +
+            `Do not reinstall Nolo and do not delete ${path.join(options.dbPath, "LOCK")}; ` +
+            `the preserved original database is at ${backupPath}.`,
+          { cause: retryError }
+        ),
+        { code: "LEVEL_CORRUPTION", backupPath }
+      );
+    }
+  }
+}
+
 async function createBrokerHandle(
   options: CliAuthorityBrokerServerOptions
 ): Promise<CliAuthorityBrokerServerHandle> {
   const target = resolveBrokerListenTarget(options.endpoint);
   const socketMode = (options.transportMode ?? "socket") === "socket";
   let store: AuthorityStore | undefined;
+  let ownershipLock: LevelDbOwnershipLock | undefined;
   const sockets = new Set<Socket>();
   const server = createServer((socket) => {
     sockets.add(socket);
@@ -206,8 +274,14 @@ async function createBrokerHandle(
       });
       server.unref();
     }
-    store = await options.createStore();
-    await store.open();
+    if (options.dbPath) {
+      // 端口已经属于本进程之后才碰 db 目录：抢不到端口时连锁文件都不创建。
+      // 这是进程内 databaseOwners 之外的跨进程单写者闸门，native open 之前生效。
+      ownershipLock = acquireLevelDbOwnershipLock(options.dbPath);
+    }
+    store = await openAuthorityStoreWithCorruptionRecovery(options, (created) => {
+      store = created;
+    });
     storeReady = true;
     const readyStore = store;
 
@@ -248,6 +322,10 @@ async function createBrokerHandle(
           await readyStore.close();
           brokerRegistry.delete(options.endpoint);
           releaseDatabaseOwnership(options);
+          // 原生 store 关闭之后才放手应用级锁：反过来的话，新 owner 会在旧
+          // native 句柄还开着时抢到锁并 open。
+          ownershipLock?.release();
+          ownershipLock = undefined;
           removeFileIfPresent(options.metadataPath);
           removeFileIfPresent(options.healthPath);
         })().catch((error) => {
@@ -273,6 +351,9 @@ async function createBrokerHandle(
         throw Object.assign(new AggregateError([error, closeError], "Broker startup failed and the native authority store could not close"), { retainAuthorityOwnership: true });
       }
     }
+    // 只有本 handle 真正拿到锁时才释放（acquire 失败时 ownershipLock 仍是 undefined）。
+    // 上面的 close 失败会提前抛出，锁文件按「保留归属」语义留在原处。
+    ownershipLock?.release();
     throw error;
   }
 }

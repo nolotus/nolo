@@ -232,4 +232,105 @@ export const authStrings = {
     en: "[nolo] Claude OAuth grant valid for about {0} day(s).",
     zh: "[nolo] Claude OAuth grant 预计还剩约 {0} 天有效。",
   },
+  // ── TUI /auth commands ────────────────────────────────────────────────────
+  "auth.statusTitle": {
+    en: "Provider OAuth Status",
+    zh: "Provider OAuth 授权状态",
+  },
+  "auth.statusColProvider": {
+    en: "Provider",
+    zh: "服务商",
+  },
+  "auth.statusColLocalStatus": {
+    en: "Local Status",
+    zh: "本机状态",
+  },
+  "auth.statusColGrantRemaining": {
+    en: "Grant Remaining",
+    zh: "Grant 剩余",
+  },
+  "auth.statusColServerSync": {
+    en: "Server Sync",
+    zh: "云端同步",
+  },
+  "auth.statusUnauthenticated": {
+    en: "Unauthenticated",
+    zh: "未认证",
+  },
+  "auth.statusAuthenticated": {
+    en: "Authenticated",
+    zh: "已认证",
+  },
+  "auth.statusExpired": {
+    en: "Access expired",
+    zh: "access 已过期",
+  },
+  "auth.grantExpired": {
+    en: "Expired",
+    zh: "已过期",
+  },
+  "auth.syncStatusSynced": {
+    en: "Synced",
+    zh: "已同步",
+  },
+  "auth.syncStatusNotSynced": {
+    en: "Not synced",
+    zh: "未同步",
+  },
+  "auth.statusBottomHint": {
+    en: "Type /auth <provider> to authorize (e.g. /auth claude)",
+    zh: "输入 /auth <provider> 开始授权（例如 /auth claude）",
+  },
+  "auth.pickerTitle": {
+    en: "Use ↑/↓ to choose a provider, press Enter to authorize",
+    zh: "上下键选一个，回车开始授权",
+  },
+  "auth.pasteCallbackPrompt": {
+    en: "Please paste the full callback URL from your browser address bar (or authorization code): ",
+    zh: "请在此粘贴浏览器地址栏里的完整回调 URL（或授权码）：",
+  },
+  "auth.unknownProvider": {
+    en: "[nolo] Unknown provider: {0}. Supported providers: {1}",
+    zh: "[nolo] 未知的 provider: {0}。支持的 provider：{1}",
+  },
+  "auth.logoutSuccess": {
+    en: "[nolo] Deleted local {0} credential.",
+    zh: "[nolo] 已删除本地 {0} 凭据。",
+  },
+  "auth.logoutLocalWithServerNotice": {
+    en: "[nolo] Deleted local {0} credential. Note: server-managed credentials were not removed from the server.",
+    zh: "[nolo] 已删除本地 {0} 凭据。注意：服务端托管的凭据未删除，如需在服务端删除请在控制台处理。",
+  },
+  "auth.syncPromptQuestion": {
+    en: "Sync to server {0}? (y/N): ",
+    zh: "同步到服务端 {0}？(y/N): ",
+  },
+  "auth.syncOptionNo": {
+    en: "No (default)",
+    zh: "否 (默认)",
+  },
+  "auth.syncOptionYes": {
+    en: "Yes",
+    zh: "是",
+  },
+  "auth.errorStateMismatch": {
+    en: "[nolo] OAuth state verification failed. This usually happens if the callback was interrupted or expired; please run /auth {0} again.",
+    zh: "[nolo] 授权 state 校验失败。这通常是由于回调被中断或过期的重定向引起，请重新执行 /auth {0}。",
+  },
+  "auth.errorCancelled": {
+    en: "[nolo] Authorization was cancelled or denied. You can run /auth {0} again when ready.",
+    zh: "[nolo] 授权被取消或拒绝。你可以随时重新执行 /auth {0} 开始授权。",
+  },
+  "auth.errorGrantExpired": {
+    en: "[nolo] OAuth grant has expired or been revoked. Please complete /auth {0} authorization in your browser again.",
+    zh: "[nolo] 授权 grant 已过期或已失效。请重新在浏览器中完成 /auth {0} 授权。",
+  },
+  "auth.errorNetwork": {
+    en: "[nolo] Network error: could not reach the authorization server. Check your connection or proxy settings and retry.",
+    zh: "[nolo] 网络连接失败：无法访问授权服务器。请检查你的网络连接或代理设置后重试。",
+  },
+  "auth.grantExpiredHint": {
+    en: "Grant may have exceeded 30 days and requires re-authorization. Press Enter to run /auth {0}",
+    zh: "grant 可能已超过 30 天，需重新授权。按 Enter 运行 /auth {0}",
+  },
 } as const;

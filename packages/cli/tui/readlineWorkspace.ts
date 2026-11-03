@@ -252,6 +252,7 @@ import {
   type SlashDispatchHost,
 } from "./tuiSlashRouter";
 import { runTuiLogin } from "./tuiLogin";
+import { runTuiAuth } from "./tuiAuth";
 export {
   type FixedInputController,
   createNoopFixedInput,
@@ -2277,6 +2278,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           env.AUTH_TOKEN = outcome.token;
           state = { ...state, showAuthGuidance: false };
         }
+      } else if (res.action?.type === "auth") {
+        state = res.nextState;
+        await runTuiAuth(res.action.args ?? [], (text) => {
+          output.write(`${text}\n`);
+        }, {
+          fetchImpl: options.fetchImpl ?? fetch,
+          // 与空闲路径一致：选择器/粘贴码交互要接同一套弹窗宿主与输入输出，
+          // 否则 busy 期间 /auth 会拿不到键盘输入，表现为"卡住没反应"。
+          dialogHost,
+          input: input as any,
+          output: output as any,
+        });
       } else if (res.action?.type === "transcribe") {
         // /transcribe 要等当前回复结束再跑：转写产物挂在 pendingTranscripts
         // 上、随下一条消息发出，busy 期间执行没有意义（等回复完再发）。
@@ -2749,6 +2762,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/skill" ||
             busySlashCommand === "/customize" ||
             busySlashCommand === "/login" ||
+            busySlashCommand === "/auth" ||
             busySlashCommand === "/profile" ||
             busySlashCommand === "/paste" ||
             busySlashCommand === "/version" ||
@@ -2823,6 +2837,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // turn. Reuses the same runOneAgentTurn + notifyTurnEnd path as a
         // direct send so the queue core stays consistent. Non-empty drafts
         // fall through to runSubmittedLine as before.
+        if (!submittedText.trim() && state.suggestedAuthCommand) {
+          const authCmd = state.suggestedAuthCommand;
+          state = { ...state, suggestedAuthCommand: undefined };
+          buffer = "";
+          cursorPos = 0;
+          bumpDraftEpoch();
+          await runSubmittedLine(authCmd, host, runOneAgentTurn);
+          return;
+        }
+        if (state.suggestedAuthCommand) {
+          state = { ...state, suggestedAuthCommand: undefined };
+        }
         if (!submittedText.trim() && chatQueueBinding && chatQueueBinding.queueLength() > 0) {
           const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
           const manualBinding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);

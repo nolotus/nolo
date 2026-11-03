@@ -346,10 +346,10 @@ function markCredentialServerManaged(
   }
 }
 
-async function syncCredentialToServer(
+export async function syncCredentialToServer(
   provider: OAuthProvider,
   credential: OAuthCredential,
-  deps: AuthProviderCommandDeps
+  deps: AuthProviderCommandDeps = {}
 ): Promise<"ok" | "sync_failed" | "mark_failed"> {
   const output = deps.output ?? console;
   const fetchImpl = deps.fetchImpl ?? fetch;

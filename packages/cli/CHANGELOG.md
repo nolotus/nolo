@@ -1,8 +1,18 @@
 
-## 0.205.0-alpha.3 (2026-11-03)
+## 0.206.0-alpha.1 (2026-11-03)
+
+### Features
+
+* **agent:** provider 排序按实际使用率、停用 gemini 新建入口、默认值收敛 ([3578749](https://github.com/nolotus/bun-nolo/commit/3578749ef157fc95cc2246a0786ddf61ce8662ea))
+* **agent:** 派发选人规则升级为系统固定块（可用性重扫 / 速度口径 / 长任务避坑） ([09a961f](https://github.com/nolotus/bun-nolo/commit/09a961f669ea9d9218ddaf49da24c38ab35c444d))
+* **app:** 桌面端创建 agent 改用「同步状态 + 立即同步」，去掉云同步开关 ([03e2b65](https://github.com/nolotus/bun-nolo/commit/03e2b655d6aaa1d9c9ee8c37886f03e2b5a0373c))
+* **database:** introduce leveldb ownership lock and corruption self-healing ([76e4c33](https://github.com/nolotus/bun-nolo/commit/76e4c33f184f9c0c3f88033b7e167b29691067a0))
+* **music:** 桌面端自研网易云客户端与侧栏播放条 ([c872a98](https://github.com/nolotus/bun-nolo/commit/c872a987bd23bff2d1a0a598cc5b6e4cc94fc821))
+* **tui:** /auth 全流程交互（状态面板 + 选择器 + 授权 + 同步询问） ([a1a97c9](https://github.com/nolotus/bun-nolo/commit/a1a97c9b37837b9df1b2f7c4736f170abe5bbf05))
 
 ### Bug Fixes
 
+* **agent-availability:** 额度探测对齐推理 host，过期窗口不再当当前余量 ([311c105](https://github.com/nolotus/bun-nolo/commit/311c105de4dd1d24c4cc72f9d43466138b923e4b))
 * **agent-runtime:** 补齐搜索路径的 windowsHide，修 Windows 后台 run 闪窗 ([a0195ed](https://github.com/nolotus/bun-nolo/commit/a0195ed6f5495ef26d91a97c93376cf2e6498853))
 * **agent:** 移除 aa 速度数据，速度排序只认本用户实测 ([4d9dff2](https://github.com/nolotus/bun-nolo/commit/4d9dff2e953aa251575243acb5dc8d461f99339c))
 * **cli:** hide Windows console windows for background-run child processes ([56dedbd](https://github.com/nolotus/bun-nolo/commit/56dedbd26ad92e8b17188d4e0c5d7bbb05154ae5))

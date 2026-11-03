@@ -20,6 +20,7 @@ import { DELETE_SAFETY_RED_LINE } from "../../agent-runtime/deleteSafety";
 import { CREDENTIAL_HYGIENE_RULE } from "../../agent-runtime/credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "../../agent-runtime/parallelDispatchDefault";
 import { DISPATCH_BACKEND_POLICY } from "../../agent-runtime/dispatchBackendPolicy";
+import { DISPATCH_CANDIDATE_POLICY } from "../../agent-runtime/dispatchCandidatePolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "../../agent-runtime/platformRiskControl";
 import { buildConsultationModeBlock } from "../../agent-runtime/consultationMode";
 import {
@@ -147,6 +148,7 @@ export function buildCliEstimateSystemText(
     CREDENTIAL_HYGIENE_RULE,
     PARALLEL_DISPATCH_DEFAULT_RULE,
     DISPATCH_BACKEND_POLICY,
+    DISPATCH_CANDIDATE_POLICY,
     PLATFORM_RISK_CONTROL_RULE,
     buildConsultationModeBlock(),
     prompt,

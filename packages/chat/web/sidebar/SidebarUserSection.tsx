@@ -63,6 +63,7 @@ import * as stylex from "@stylexjs/stylex";
 import { sidebarStyles } from "../sidebarStyles";
 import { withLiteralClass } from "../withLiteralClass";
 import { SidebarUpdateButton } from "./SidebarUpdateButton";
+import { SidebarMusicButton } from "./MusicWidget";
 import "../chatStylexEscapeHatch.css";
 import "./railAccountMenu.css";
 
@@ -530,6 +531,8 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
       <div
         {...withLiteralClass(railCompact ? "navigation-v2-rail-account__actions" : "", sidebarStyles.sidebarUserSectionActions)}
       >
+        {/* 音乐（desktop only） */}
+        <SidebarMusicButton />
         {/* 更新（desktop only） */}
         <SidebarUpdateButton />
         {/* 设置 */}
