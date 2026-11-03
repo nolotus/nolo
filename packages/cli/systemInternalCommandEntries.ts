@@ -14,6 +14,10 @@ export function getSystemInternalCommandEntries(renderHelpText: () => string): C
       const { runDialogUsageCommand } = await import("./dialogUsageCommand");
       return runDialogUsageCommand(args, { env: ctx.env });
     }),
+    createContextCommand(["usage"], "Summarize local token usage by day/provider/model/agent (reads DayStats via LevelDB iterator)", async (args, ctx) => {
+      const { runUsageCommand } = await import("./usageCommand");
+      return runUsageCommand(args, { env: ctx.env });
+    }),
     createContextCommand(["auth", "cooldown"], "List / clear credential availability cooldowns", async (_args, ctx) => {
       const { runAuthCooldownCommand } = await import("./cooldownCommands");
       return runAuthCooldownCommand(_args, ctx.env);

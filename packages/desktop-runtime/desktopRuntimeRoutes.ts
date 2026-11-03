@@ -46,4 +46,9 @@ export const desktopRuntimeRoutes: Record<string, any> = createApiRouteFamily([
   { path: "/api/desktop/music/audio", enableCors: false, handlers: { GET: d("handleDesktopMusicAudioGet") } },
   { path: "/api/desktop/music/lyric", enableCors: false, handlers: { GET: d("handleDesktopMusicLyricGet") } },
   { path: "/api/desktop/music/logout", enableCors: false, handlers: { POST: d("handleDesktopMusicLogoutPost") } },
+  { path: "/api/desktop/music/local/status", enableCors: false, handlers: { GET: d("handleDesktopLocalMusicStatusGet") } },
+  { path: "/api/desktop/music/local/roots", enableCors: false, handlers: { POST: d("handleDesktopLocalMusicRootsPost") } },
+  { path: "/api/desktop/music/local/scan", enableCors: false, handlers: { POST: d("handleDesktopLocalMusicScanPost") } },
+  { path: "/api/desktop/music/local/search", enableCors: false, handlers: { POST: d("handleDesktopLocalMusicSearchPost") } },
+  { path: "/api/desktop/music/file", enableCors: false, handlers: { GET: d("handleDesktopLocalMusicFileGet") } },
 ]);

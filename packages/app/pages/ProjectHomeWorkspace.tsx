@@ -11,6 +11,7 @@ import {
 import { dialogsForLocalProject, parseLocalDialogProjectBindings } from "chat/web/homeLocalProjectDialogs";
 import { requestPickFolderPath } from "chat/web/desktopFolderProjectsPicker";
 import QuickChat from "./QuickChat";
+import { LocalMusicLibraryPanel } from "app/music/LocalMusicLibraryPanel";
 import "./ProjectHomeWorkspace.css";
 
 export interface ProjectHomeWorkspaceProps {
@@ -39,7 +40,7 @@ export function ProjectHomeWorkspace({
   const [nameInput, setNameInput] = useState(project.name);
   const [folderBusy, setFolderBusy] = useState(false);
   const [showAllDialogs, setShowAllDialogs] = useState(false);
-  const [activeDrawer, setActiveDrawer] = useState<"references" | "outcomes" | null>(null);
+  const [activeDrawer, setActiveDrawer] = useState<"references" | "outcomes" | "music" | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -322,6 +323,16 @@ export function ProjectHomeWorkspace({
           📦 阶段成果 ({outcomeKeys.length})
         </button>
 
+        <button
+          type="button"
+          className={`project-workspace__pill-btn ${activeDrawer === "music" ? "is-active" : ""}`}
+          onClick={() => setActiveDrawer(activeDrawer === "music" ? null : "music")}
+          data-hook="project-music-pill"
+          aria-expanded={activeDrawer === "music"}
+        >
+          🎵 音乐
+        </button>
+
         {archivePath ? (
           <NavLink
             to={archivePath}
@@ -353,6 +364,16 @@ export function ProjectHomeWorkspace({
           </label>
         )}
       </section>
+
+      {/* 展开的本地音乐库抽屉：音乐库属于项目，不放在全局设置里 */}
+      {activeDrawer === "music" && (
+        <div className="project-workspace__drawer" data-hook="project-music-drawer">
+          <div className="project-workspace__drawer-header">
+            <span>本地音乐</span>
+          </div>
+          <LocalMusicLibraryPanel project={project} />
+        </div>
+      )}
 
       {/* 展开的参考资料抽屉 */}
       {activeDrawer === "references" && (

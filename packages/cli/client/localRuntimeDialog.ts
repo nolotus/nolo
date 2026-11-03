@@ -339,6 +339,15 @@ export async function writeLocalTokenRecord(args: {
         input_tokens: prepared.usage.input_tokens,
         output_tokens: prepared.usage.output_tokens,
         cost: prepared.tokenData.cost,
+        // Cache counters are parsed by normalizeUsage already; dropping them
+        // here made every CLI-local day bucket report cacheRead=0 even when the
+        // provider did report hits (the detail records carried the real value).
+        cache_read_input_tokens: prepared.usage.cache_read_input_tokens,
+        cache_creation_input_tokens: prepared.usage.cache_creation_input_tokens,
+        // DayStats.agents exists and every other writer feeds it; the CLI-local
+        // path was the only one leaving every agent bucket empty.
+        agentId: prepared.tokenData.agentId,
+        entry_path: prepared.tokenData.entry_path,
         billingCategory: (prepared.tokenData.billable ?? false) ? "platform" : "subscription",
       });
       const statsRecord = { ...newStats, id: statsKey, type: "token" as const };

@@ -1,4 +1,5 @@
 import { mergeSharedHistoryItems } from "./sharedHistoryMerge";
+import { isAgentRowUnread } from "./sidebar/agentUnread";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation } from "app/routing";
 import { toTimestamp, type MyContentListItem } from "app/utils/myContentItems";
@@ -31,17 +32,17 @@ const ignoreMenuToggle = (_key: string | null): void => {};
 const AUTO_LOAD_MIN_INTERVAL_MS = 1000;
 
 export function WorkDialogGroupsPreview({
-  items, userId, homeScope = { kind: "all" }, includeNonDialogs = false, paginationOwner = false, ownedPages,
-}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; includeNonDialogs?: boolean; paginationOwner?: boolean; ownedPages?: { error: string | null; loading: boolean; hasMore: boolean; loadMore: () => Promise<void> } }) {
+  items, userId, homeScope = { kind: "all" }, includeNonDialogs = false, paginationOwner = false, ownedPages, unreadAgentKeys,
+}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; includeNonDialogs?: boolean; paginationOwner?: boolean; ownedPages?: { error: string | null; loading: boolean; hasMore: boolean; loadMore: () => Promise<void> }; unreadAgentKeys?: Set<string> }) {
   if (!userId) return null;
   return (
     <section aria-label="工作状态" data-hook="work-dialog-groups">
-      <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} includeNonDialogs={includeNonDialogs} paginationOwner={paginationOwner} ownedPages={ownedPages} />
+      <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} includeNonDialogs={includeNonDialogs} paginationOwner={paginationOwner} ownedPages={ownedPages} unreadAgentKeys={unreadAgentKeys} />
     </section>
   );
 }
 
-function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs, paginationOwner, ownedPages }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope; includeNonDialogs: boolean; paginationOwner: boolean; ownedPages?: { error: string | null; loading: boolean; hasMore: boolean; loadMore: () => Promise<void> } }) {
+function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs, paginationOwner, ownedPages, unreadAgentKeys }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope; includeNonDialogs: boolean; paginationOwner: boolean; ownedPages?: { error: string | null; loading: boolean; hasMore: boolean; loadMore: () => Promise<void> }; unreadAgentKeys?: Set<string> }) {
   // This subscription hydrates run state on mount/focus; per-dialog lookup retains ownership scope.
   const { coverage, snapshot } = useWorkRunListCoverage(userId);
   const dialogStatuses = useDialogStatuses();
@@ -301,6 +302,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
                     onMenuAnchorChange={handleMenuAnchorChange}
                     editSignal={editRequest?.key === item.contentKey ? editRequest.nonce : undefined}
                     pinned={Boolean(item.pinned)}
+                    hasUnread={type === "agent" ? isAgentRowUnread(unreadAgentKeys, item.contentKey, userId) : undefined}
                   />
                 </div>;
               }

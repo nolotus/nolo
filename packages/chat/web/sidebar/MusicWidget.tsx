@@ -16,10 +16,20 @@ import { Tooltip } from "render/web/ui/Tooltip";
 import { getIsDesktopApp } from "app/utils/env";
 import { desktopMusicClient } from "app/utils/desktopMusicClient";
 import {
+  ensureAppMusicSourcesRegistered,
+  getMusicSourceCapabilities,
+  getMusicSourceDisplayName,
   musicActions,
   useMusicStore,
 } from "app/music/musicStore";
-import { usePlaybackHistory } from "app/music/musicHistoryStore";
+import {
+  setHistoryProjectScope,
+  usePlaybackHistory,
+} from "app/music/musicHistoryStore";
+import {
+  DESKTOP_FOLDER_SELECTION_EVENT,
+  readSelectedDesktopFolderProject,
+} from "chat/web/desktopFolderProjects";
 
 export function formatMusicTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
@@ -56,6 +66,18 @@ export function getSongCover(song: any): string | undefined {
   );
 }
 
+/**
+ * 当前曲目与候选曲目是否同一首：按能力判定身份字段。
+ * local-file 源用 ref.id（内容指纹），其它源用 song.id。
+ */
+function isSameTrack(current: any, candidate: any): boolean {
+  const caps = getMusicSourceCapabilities(current?.ref?.source);
+  if (caps?.playback === "local-file") {
+    return current?.ref?.id != null && current.ref.id === candidate?.ref?.id;
+  }
+  return current?.id != null && current.id === candidate?.id;
+}
+
 const PLAYBACK_ERROR_TEXT: Record<string, string> = {
   "vip-required": "这首歌需要会员才能播放",
   "region-blocked": "该地区不可播放",
@@ -68,6 +90,130 @@ export function formatPlaybackError(errorMessage?: string): string {
   const key = errorMessage?.trim();
   if (!key) return "暂时无法播放";
   return PLAYBACK_ERROR_TEXT[key] ?? "暂时无法播放";
+}
+
+export type LocalSearchResult = {
+  ok: boolean;
+  tracks: any[];
+  total: number;
+  reason?: string;
+  message?: string;
+};
+
+export type LocalMusicStats = {
+  roots: number;
+  tracks: number;
+  unavailable: number;
+  lastScannedAt?: number;
+};
+
+export type LocalMusicStatusResult = {
+  ok: boolean;
+  stats?: LocalMusicStats;
+  roots?: any[];
+};
+
+type FetchLike = (input: RequestInfo | URL | string, init?: RequestInit) => Promise<Response>;
+
+let localMusicFetchImpl: FetchLike | undefined;
+
+export function setLocalMusicFetchImpl(fn?: FetchLike): void {
+  localMusicFetchImpl = fn;
+}
+
+function getLocalFetch(): FetchLike {
+  return localMusicFetchImpl ?? globalThis.fetch;
+}
+
+/** 当前选中项目的 id；未绑定项目时返回 null（此时不发任何 local 请求）。 */
+function readCurrentProjectId(): string | null {
+  try {
+    if (typeof localStorage === "undefined" || !localStorage) return null;
+    return readSelectedDesktopFolderProject(localStorage)?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function searchLocal(
+  keyword: string,
+  projectId?: string | null,
+): Promise<LocalSearchResult> {
+  const trimmed = keyword.trim();
+  if (!trimmed) {
+    return { ok: true, tracks: [], total: 0 };
+  }
+  if (!projectId) {
+    return {
+      ok: false,
+      tracks: [],
+      total: 0,
+      reason: "no-project",
+      message: "本地音乐需要绑定项目",
+    };
+  }
+  try {
+    const fetchFn = getLocalFetch();
+    const res = await fetchFn("/api/desktop/music/local/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ projectId, keyword: trimmed, limit: 10, offset: 0 }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.ok === false) {
+      const reasonText = data?.reason ? formatPlaybackError(data.reason) : undefined;
+      const msg =
+        data?.message ||
+        reasonText ||
+        (res.status >= 500 ? "本地搜索服务异常" : "搜索本地音乐失败");
+      return {
+        ok: false,
+        tracks: [],
+        total: 0,
+        reason: data?.reason,
+        message: msg,
+      };
+    }
+
+    return {
+      ok: true,
+      tracks: Array.isArray(data.tracks) ? data.tracks : [],
+      total: typeof data.total === "number" ? data.total : (data.tracks?.length ?? 0),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      tracks: [],
+      total: 0,
+      message: err instanceof Error ? err.message : "搜索本地音乐失败",
+    };
+  }
+}
+
+export async function fetchLocalStatus(
+  projectId?: string | null,
+): Promise<LocalMusicStatusResult | null> {
+  if (!projectId) return null;
+  try {
+    const fetchFn = getLocalFetch();
+    const res = await fetchFn(
+      `/api/desktop/music/local/status?projectId=${encodeURIComponent(projectId)}`,
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      },
+    );
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    if (!data || data.ok === false) return null;
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 export type MusicWidgetProps = {
@@ -95,10 +241,47 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
   const [loginErrorMsg, setLoginErrorMsg] = useState<string>("");
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // 本地库状态（按项目隔离）
+  const [localStatus, setLocalStatus] = useState<LocalMusicStatusResult | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(() => readCurrentProjectId());
+
+  useEffect(() => {
+    const update = () => setProjectId(readCurrentProjectId());
+    update();
+    const win = typeof window !== "undefined" ? window : null;
+    win?.addEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
+    return () => {
+      win?.removeEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
+    };
+  }, []);
+
+  // 历史按项目隔离：项目切换时切换历史作用域
+  useEffect(() => {
+    setHistoryProjectScope(projectId);
+  }, [projectId]);
+
+  const refreshLocalStatus = useCallback(async () => {
+    if (!projectId) {
+      setLocalStatus(null);
+      return;
+    }
+    const res = await fetchLocalStatus(projectId);
+    if (res?.ok) {
+      setLocalStatus(res);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    // 面板首次挂载：确保内置音乐源已注册（幂等）。
+    ensureAppMusicSourcesRegistered();
+    void refreshLocalStatus();
+  }, [refreshLocalStatus]);
+
   // 搜歌状态
   const [keyword, setKeyword] = useState<string>("");
   const [searching, setSearching] = useState<boolean>(false);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [localResults, setLocalResults] = useState<any[]>([]);
+  const [cloudResults, setCloudResults] = useState<any[]>([]);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   /** 搜索失败的人话原因：优先于「未找到匹配歌曲」呈现，避免把"登录失效"说成"没搜到" */
   const [searchError, setSearchError] = useState<string | undefined>(undefined);
@@ -182,22 +365,62 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
     setSearching(true);
     setHasSearched(true);
     setSearchError(undefined);
+
     try {
-      const res = await desktopMusicClient.searchSongs(trimmed, 10);
-      if (res.ok && Array.isArray(res.songs)) {
-        setSearchResults(res.songs);
-      } else {
-        setSearchResults([]);
-        // 失败原因必须如实呈现（例如登录失效），不能退化成「未找到匹配歌曲」
-        setSearchError(res.message || formatPlaybackError(res.reason));
+      // 仅在已绑定项目时搜索本地
+      const localPromise = projectId ? searchLocal(trimmed, projectId) : Promise.resolve(null);
+      // 仅在 connected 时搜索网易云
+      const cloudPromise = connected
+        ? desktopMusicClient.searchSongs(trimmed, 10)
+        : Promise.resolve(null);
+
+      const [localRes, cloudRes] = await Promise.all([localPromise, cloudPromise]);
+
+      let hasAnySuccess = false;
+      const nextLocal: any[] = [];
+      const nextCloud: any[] = [];
+      let foundError: string | undefined = undefined;
+
+      if (localRes) {
+        if (localRes.ok) {
+          hasAnySuccess = true;
+          nextLocal.push(...localRes.tracks);
+        } else {
+          foundError = localRes.message || "本地搜索失败";
+        }
+      }
+
+      if (cloudRes) {
+        if (cloudRes.ok && Array.isArray(cloudRes.songs)) {
+          hasAnySuccess = true;
+          nextCloud.push(...cloudRes.songs);
+        } else {
+          // 如果网易云失败，且还没记录错误
+          const cloudError =
+            cloudRes.message || formatPlaybackError(cloudRes.reason) || cloudRes.error;
+          if (!foundError) {
+            foundError = cloudError;
+          }
+        }
+      }
+
+      setLocalResults(nextLocal);
+      setCloudResults(nextCloud);
+
+      // 如果完全没有成功的搜索源，或者没有找到任何歌曲且有报错
+      if (!hasAnySuccess && foundError) {
+        setSearchError(foundError);
+      } else if (nextLocal.length === 0 && nextCloud.length === 0 && foundError) {
+        setSearchError(foundError);
       }
     } catch (err) {
-      setSearchResults([]);
+      setLocalResults([]);
+      setCloudResults([]);
       setSearchError(err instanceof Error ? err.message : "搜索失败，请稍后再试");
     } finally {
       setSearching(false);
     }
-  }, [keyword]);
+  }, [keyword, connected, projectId]);
 
   // 播放/暂停切换
   const handleTogglePlay = useCallback(() => {
@@ -210,6 +433,17 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
     }
   }, [playbackStatus, currentSong]);
 
+  // 播放：本地曲目带上 projectId，供 musicStore 后续补 URL 参数（本轮不改 musicStore）
+  const playTrack = useCallback(
+    (song: any) => {
+      const caps = getMusicSourceCapabilities(song?.ref?.source);
+      const withProject =
+        caps?.playback === "local-file" && projectId ? { ...song, projectId } : song;
+      void musicActions.playSong(withProject);
+    },
+    [projectId],
+  );
+
   const currentTitle = getSongTitle(currentSong);
   const currentArtist = getSongArtist(currentSong);
   const currentCover = getSongCover(currentSong);
@@ -220,7 +454,7 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
       <div className="music-widget-header">
         <div className="music-widget-header__title-row">
           <LuMusic className="music-widget-header__icon" size={18} />
-          <span className="music-widget-header__title">网易云音乐</span>
+          <span className="music-widget-header__title">音乐</span>
           {connected && (
             <span className="music-widget-header__user" title={nickname || "已连接"}>
               {nickname || "已连接"}
@@ -255,294 +489,219 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
 
       {/* 主体内容 */}
       <div className="music-widget-body">
-        {!connected ? (
-          /* 未连接引导 */
-          <div className="music-widget-login" data-testid="music-login-guide">
-            <div className="music-widget-login__intro">
-              <LuDisc className="music-widget-login__icon spin-slow" size={40} />
-              <p className="music-widget-login__desc">扫码连接网易云音乐，畅享桌面点播与同步播放</p>
+        <div className="music-widget-connected" data-testid="music-player-panel">
+          {/* 本地音乐库状态条 */}
+          {!projectId ? (
+            <div className="music-widget-local-status" data-testid="music-local-status">
+              <span>本地音乐需要绑定项目：先在项目里选择一个文件夹</span>
             </div>
-
-            {loginState === "idle" && (
-              <button
-                type="button"
-                className="music-widget-primary-btn"
-                onClick={handleStartLogin}
-                data-testid="get-qr-btn"
-              >
-                点击获取二维码
-              </button>
-            )}
-
-            {loginState === "loading" && (
-              <div className="music-widget-status-msg">
-                <LuRefreshCw className="spin" size={16} />
-                <span>正在生成登录二维码…</span>
-              </div>
-            )}
-
-            {(loginState === "qrcode" || loginState === "polling") && loginQrUrl && (
-              <div className="music-widget-qr-box" data-testid="music-qr-container">
-                <div className="music-widget-qr-wrapper">
-                  <img
-                    src={
-                      loginQrUrl.startsWith("data:") ||
-                      loginQrUrl.endsWith(".png") ||
-                      loginQrUrl.endsWith(".jpg")
-                        ? loginQrUrl
-                        : `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(loginQrUrl)}`
-                    }
-                    alt="网易云扫码登录"
-                    className="music-widget-qr-image"
-                  />
+          ) : localStatus?.stats ? (
+            <div className="music-widget-local-status" data-testid="music-local-status">
+              {localStatus.stats.tracks === 0 ? (
+                <div className="music-widget-local-empty">
+                  <span>还没有本地音乐，添加音乐文件夹开始扫描</span>
                 </div>
-                <p className="music-widget-qr-hint">请使用网易云音乐 APP 扫码登录</p>
-                <a
-                  href={loginQrUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="music-widget-qr-link"
-                >
-                  若无法扫码，点击在浏览器中打开二维码
-                </a>
-              </div>
-            )}
+              ) : (
+                <div className="music-widget-local-count">
+                  <span>本地曲目 {localStatus.stats.tracks} 首</span>
+                </div>
+              )}
+            </div>
+          ) : null}
 
-            {loginState === "expired" && (
-              <div className="music-widget-expired-box">
-                <p className="music-widget-warning-text">二维码已失效，请重新获取</p>
-                <button
-                  type="button"
-                  className="music-widget-primary-btn"
-                  onClick={handleStartLogin}
-                >
-                  重新获取二维码
-                </button>
-              </div>
-            )}
+          {/* 当前播放曲目卡片 */}
+          <div className="music-widget-current-card">
+            {currentSong ? (
+              <>
+                <div className="music-widget-song-info">
+                  <div className="music-widget-cover">
+                    {currentCover ? (
+                      <img
+                        src={currentCover}
+                        alt={currentTitle}
+                        className="music-widget-cover-img"
+                      />
+                    ) : (
+                      <div className="music-widget-cover-placeholder">
+                        <LuMusic size={22} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="music-widget-meta">
+                    <div className="music-widget-song-title" title={currentTitle}>
+                      {currentTitle}
+                    </div>
+                    <div className="music-widget-song-artist" title={currentArtist}>
+                      {currentArtist}
+                    </div>
+                  </div>
+                </div>
 
-            {loginState === "error" && (
-              <div className="music-widget-error-box">
-                <LuCircleAlert size={16} className="music-widget-error-icon" />
-                <span className="music-widget-error-text">
-                  {loginErrorMsg || "获取二维码失败"}
-                </span>
-                <button
-                  type="button"
-                  className="music-widget-secondary-btn"
-                  onClick={handleStartLogin}
-                >
-                  重试
-                </button>
-              </div>
-            )}
+                {/* 异常状态提示 */}
+                {playbackStatus === "error" && (
+                  <div className="music-widget-error-banner" data-testid="playback-error">
+                    <LuCircleAlert size={14} />
+                    <span>{formatPlaybackError(errorMessage)}</span>
+                  </div>
+                )}
 
-            {loginState === "success" && (
-              <div className="music-widget-success-box">
-                <span className="music-widget-success-text">已连接成功！</span>
+                {/* 进度条与时间 */}
+                <div className="music-widget-progress-row">
+                  <span className="music-widget-time-text">
+                    {formatMusicTime(currentTime)}
+                  </span>
+                  <input
+                    type="range"
+                    className="music-widget-progress-slider"
+                    min={0}
+                    max={duration > 0 ? duration : 100}
+                    step={0.5}
+                    value={currentTime}
+                    onChange={(e) => musicActions.seek(Number(e.target.value))}
+                    aria-label="进度调节"
+                  />
+                  <span className="music-widget-time-text">
+                    {formatMusicTime(duration)}
+                  </span>
+                </div>
+
+                {/* 播控组 */}
+                <div className="music-widget-controls-row">
+                  <button
+                    type="button"
+                    className="music-widget-play-toggle-btn"
+                    onClick={handleTogglePlay}
+                    aria-label={playbackStatus === "playing" ? "暂停" : "播放"}
+                    data-testid="music-play-pause-btn"
+                  >
+                    {playbackStatus === "playing" ? (
+                      <LuPause size={20} />
+                    ) : (
+                      <LuPlay size={20} style={{ marginLeft: "2px" }} />
+                    )}
+                  </button>
+
+                  {/* 音量调节 */}
+                  <div className="music-widget-volume-row">
+                    {volume <= 0 ? (
+                      <LuVolumeX size={16} className="music-widget-volume-icon" />
+                    ) : (
+                      <LuVolume2 size={16} className="music-widget-volume-icon" />
+                    )}
+                    <input
+                      type="range"
+                      className="music-widget-volume-slider"
+                      min={0}
+                      max={1}
+                      step={0.02}
+                      value={volume}
+                      onChange={(e) => musicActions.setVolume(Number(e.target.value))}
+                      aria-label="音量调节"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="music-widget-no-song" data-testid="music-no-song">
+                <LuDisc size={28} className="music-widget-no-song-icon" />
+                <p>暂无播放曲目，在下方快速搜索点播</p>
               </div>
             )}
           </div>
-        ) : (
-          /* 已连接状态 */
-          <div className="music-widget-connected" data-testid="music-player-panel">
-            {/* 当前播放曲目卡片 */}
-            <div className="music-widget-current-card">
-              {currentSong ? (
-                <>
-                  <div className="music-widget-song-info">
-                    <div className="music-widget-cover">
-                      {currentCover ? (
-                        <img
-                          src={currentCover}
-                          alt={currentTitle}
-                          className="music-widget-cover-img"
-                        />
-                      ) : (
-                        <div className="music-widget-cover-placeholder">
-                          <LuMusic size={22} />
-                        </div>
-                      )}
-                    </div>
-                    <div className="music-widget-meta">
-                      <div className="music-widget-song-title" title={currentTitle}>
-                        {currentTitle}
-                      </div>
-                      <div className="music-widget-song-artist" title={currentArtist}>
-                        {currentArtist}
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* 异常状态提示 */}
-                  {playbackStatus === "error" && (
-                    <div className="music-widget-error-banner" data-testid="playback-error">
-                      <LuCircleAlert size={14} />
-                      <span>{formatPlaybackError(errorMessage)}</span>
-                    </div>
-                  )}
-
-                  {/* 进度条与时间 */}
-                  <div className="music-widget-progress-row">
-                    <span className="music-widget-time-text">
-                      {formatMusicTime(currentTime)}
-                    </span>
-                    <input
-                      type="range"
-                      className="music-widget-progress-slider"
-                      min={0}
-                      max={duration > 0 ? duration : 100}
-                      step={0.5}
-                      value={currentTime}
-                      onChange={(e) => musicActions.seek(Number(e.target.value))}
-                      aria-label="进度调节"
-                    />
-                    <span className="music-widget-time-text">
-                      {formatMusicTime(duration)}
-                    </span>
-                  </div>
-
-                  {/* 播控组 */}
-                  <div className="music-widget-controls-row">
-                    <button
-                      type="button"
-                      className="music-widget-play-toggle-btn"
-                      onClick={handleTogglePlay}
-                      aria-label={playbackStatus === "playing" ? "暂停" : "播放"}
-                      data-testid="music-play-pause-btn"
-                    >
-                      {playbackStatus === "playing" ? (
-                        <LuPause size={20} />
-                      ) : (
-                        <LuPlay size={20} style={{ marginLeft: "2px" }} />
-                      )}
-                    </button>
-
-                    {/* 音量调节 */}
-                    <div className="music-widget-volume-row">
-                      {volume <= 0 ? (
-                        <LuVolumeX size={16} className="music-widget-volume-icon" />
-                      ) : (
-                        <LuVolume2 size={16} className="music-widget-volume-icon" />
-                      )}
-                      <input
-                        type="range"
-                        className="music-widget-volume-slider"
-                        min={0}
-                        max={1}
-                        step={0.02}
-                        value={volume}
-                        onChange={(e) => musicActions.setVolume(Number(e.target.value))}
-                        aria-label="音量调节"
-                      />
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="music-widget-no-song" data-testid="music-no-song">
-                  <LuDisc size={28} className="music-widget-no-song-icon" />
-                  <p>暂无播放曲目，在下方快速搜索点播</p>
-                </div>
-              )}
+          {/* 快速搜索与点播 */}
+          <div className="music-widget-search-section">
+            <div className="music-widget-search-input-wrap">
+              <input
+                type="text"
+                className="music-widget-search-input"
+                placeholder="搜索歌曲 / 歌手…"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleSearch();
+                }}
+                data-testid="music-search-input"
+              />
+              <button
+                type="button"
+                className="music-widget-search-btn"
+                onClick={() => void handleSearch()}
+                disabled={searching}
+                aria-label="搜索"
+                data-testid="music-search-submit"
+              >
+                {searching ? (
+                  <LuRefreshCw className="spin" size={14} />
+                ) : (
+                  <LuSearch size={14} />
+                )}
+              </button>
             </div>
 
-            {/* 快速搜索与点播 */}
-            <div className="music-widget-search-section">
-              <div className="music-widget-search-input-wrap">
-                <input
-                  type="text"
-                  className="music-widget-search-input"
-                  placeholder="搜索歌曲 / 歌手…"
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void handleSearch();
-                  }}
-                  data-testid="music-search-input"
-                />
-                <button
-                  type="button"
-                  className="music-widget-search-btn"
-                  onClick={() => void handleSearch()}
-                  disabled={searching}
-                  aria-label="搜索"
-                  data-testid="music-search-submit"
-                >
-                  {searching ? (
-                    <LuRefreshCw className="spin" size={14} />
-                  ) : (
-                    <LuSearch size={14} />
-                  )}
-                </button>
-              </div>
-
-              {/* 搜索结果列表 */}
-              {searchResults.length > 0 && (
-                <div className="music-widget-search-results" data-testid="music-search-results">
-                  {searchResults.slice(0, 10).map((song) => {
-                    const title = getSongTitle(song);
-                    const artist = getSongArtist(song);
-                    const isCur = currentSong?.id === song.id;
-                    return (
-                      <div
-                        key={song.id}
-                        className={`music-widget-result-item ${isCur ? "is-current" : ""}`}
-                      >
-                        <div className="music-widget-result-meta">
-                          <span className="music-widget-result-title" title={title}>
-                            {title}
-                          </span>
-                          <span className="music-widget-result-artist" title={artist}>
-                            {artist}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          className="music-widget-result-play-btn"
-                          onClick={() => void musicActions.playSong(song)}
-                          aria-label={`播放 ${title}`}
-                          title={`播放 ${title}`}
-                          data-testid={`play-song-${song.id}`}
-                        >
-                          <LuPlay size={14} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {hasSearched && !searching && searchError && (
-                <div className="music-widget-search-empty" data-testid="music-search-error">
-                  <span>{searchError}</span>
-                </div>
-              )}
-
-              {hasSearched && !searching && !searchError && searchResults.length === 0 && (
-                <div className="music-widget-search-empty">
-                  <span>未找到匹配歌曲</span>
-                </div>
-              )}
-
-              {/* 最近播放 */}
-              {historyList.length > 0 && (
-                <div className="music-widget-history-section" data-testid="music-history-section">
-                  <div className="music-widget-history-header">
-                    <span className="music-widget-history-title">最近播放</span>
-                  </div>
-                  <div className="music-widget-history-list" data-testid="music-history-list">
-                    {historyList.slice(0, 10).map((song) => {
+            {/* 搜索结果列表 */}
+            {(localResults.length > 0 || cloudResults.length > 0) && (
+              <div className="music-widget-search-results" data-testid="music-search-results">
+                {/* 本地音乐分组 */}
+                {localResults.length > 0 && (
+                  <div className="music-widget-search-group" data-testid="search-group-local">
+                    <div className="music-widget-search-group-header">
+                      <span className="music-widget-search-group-title">本地音乐</span>
+                    </div>
+                    {localResults.slice(0, 10).map((song) => {
                       const title = getSongTitle(song);
                       const artist = getSongArtist(song);
-                      const isCur = currentSong?.id === song.id;
+                      const key = song.ref?.id || song.id || title;
+                      const isCur = isSameTrack(currentSong, song);
+                      return (
+                        <div
+                          key={key}
+                          className={`music-widget-result-item ${isCur ? "is-current" : ""}`}
+                          data-testid={`local-track-${key}`}
+                        >
+                          <div className="music-widget-result-meta">
+                            <div className="music-widget-result-title-row">
+                              <span className="music-widget-result-title" title={title}>
+                                {title}
+                              </span>
+                              <span className="music-widget-source-badge">
+                                {getMusicSourceDisplayName(song.ref?.source) ?? "在线"}
+                              </span>
+                            </div>
+                            <span className="music-widget-result-artist" title={artist}>
+                              {artist}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="music-widget-result-play-btn"
+                            onClick={() => playTrack(song)}
+                            aria-label={`播放 ${title}`}
+                            title={`播放 ${title}`}
+                            data-testid={`play-song-${song.ref?.id || song.id}`}
+                          >
+                            <LuPlay size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* 网易云音乐分组 */}
+                {cloudResults.length > 0 && (
+                  <div className="music-widget-search-group" data-testid="search-group-netease">
+                    <div className="music-widget-search-group-header">
+                      <span className="music-widget-search-group-title">网易云音乐</span>
+                    </div>
+                    {cloudResults.slice(0, 10).map((song) => {
+                      const title = getSongTitle(song);
+                      const artist = getSongArtist(song);
+                      const isCur = isSameTrack(currentSong, song);
                       return (
                         <div
                           key={song.id}
                           className={`music-widget-result-item ${isCur ? "is-current" : ""}`}
-                          onClick={() => void musicActions.playSong(song)}
-                          data-testid={`music-history-item-${song.id}`}
-                          role="button"
-                          tabIndex={0}
                         >
                           <div className="music-widget-result-meta">
                             <span className="music-widget-result-title" title={title}>
@@ -555,12 +714,10 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
                           <button
                             type="button"
                             className="music-widget-result-play-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void musicActions.playSong(song);
-                            }}
+                            onClick={() => playTrack(song)}
                             aria-label={`播放 ${title}`}
                             title={`播放 ${title}`}
+                            data-testid={`play-song-${song.id}`}
                           >
                             <LuPlay size={14} />
                           </button>
@@ -568,11 +725,164 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
                       );
                     })}
                   </div>
+                )}
+              </div>
+            )}
+
+            {hasSearched && !searching && searchError && (
+              <div className="music-widget-search-empty" data-testid="music-search-error">
+                <span>{searchError}</span>
+              </div>
+            )}
+
+            {hasSearched &&
+              !searching &&
+              !searchError &&
+              localResults.length === 0 &&
+              cloudResults.length === 0 && (
+                <div className="music-widget-search-empty">
+                  <span>未找到匹配歌曲</span>
+                </div>
+              )}
+
+            {/* 最近播放 */}
+            {historyList.length > 0 && (
+              <div className="music-widget-history-section" data-testid="music-history-section">
+                <div className="music-widget-history-header">
+                  <span className="music-widget-history-title">最近播放</span>
+                </div>
+                <div className="music-widget-history-list" data-testid="music-history-list">
+                  {historyList.slice(0, 10).map((song) => {
+                    const title = getSongTitle(song);
+                    const artist = getSongArtist(song);
+                    const isCur = isSameTrack(currentSong, song);
+                    return (
+                      <div
+                        key={song.id}
+                        className={`music-widget-result-item ${isCur ? "is-current" : ""}`}
+                        onClick={() => playTrack(song)}
+                        data-testid={`music-history-item-${song.id}`}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div className="music-widget-result-meta">
+                          <span className="music-widget-result-title" title={title}>
+                            {title}
+                          </span>
+                          <span className="music-widget-result-artist" title={artist}>
+                            {artist}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="music-widget-result-play-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playTrack(song);
+                          }}
+                          aria-label={`播放 ${title}`}
+                          title={`播放 ${title}`}
+                        >
+                          <LuPlay size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 未连接网易云时的扫码登录引导区块 */}
+          {!connected && (
+            <div className="music-widget-login" data-testid="music-login-guide">
+              <div className="music-widget-login__intro">
+                <LuDisc className="music-widget-login__icon spin-slow" size={40} />
+                <p className="music-widget-login__desc">扫码连接网易云音乐，畅享桌面点播与同步播放</p>
+              </div>
+
+              {loginState === "idle" && (
+                <button
+                  type="button"
+                  className="music-widget-primary-btn"
+                  onClick={handleStartLogin}
+                  data-testid="get-qr-btn"
+                >
+                  点击获取二维码
+                </button>
+              )}
+
+              {loginState === "loading" && (
+                <div className="music-widget-status-msg">
+                  <LuRefreshCw className="spin" size={16} />
+                  <span>正在生成登录二维码…</span>
+                </div>
+              )}
+
+              {(loginState === "qrcode" || loginState === "polling") && loginQrUrl && (
+                <div className="music-widget-qr-box" data-testid="music-qr-container">
+                  <div className="music-widget-qr-wrapper">
+                    <img
+                      src={
+                        loginQrUrl.startsWith("data:") ||
+                        loginQrUrl.endsWith(".png") ||
+                        loginQrUrl.endsWith(".jpg")
+                          ? loginQrUrl
+                          : `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(loginQrUrl)}`
+                      }
+                      alt="网易云扫码登录"
+                      className="music-widget-qr-image"
+                    />
+                  </div>
+                  <p className="music-widget-qr-hint">请使用网易云音乐 APP 扫码登录</p>
+                  <a
+                    href={loginQrUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="music-widget-qr-link"
+                  >
+                    若无法扫码，点击在浏览器中打开二维码
+                  </a>
+                </div>
+              )}
+
+              {loginState === "expired" && (
+                <div className="music-widget-expired-box">
+                  <p className="music-widget-warning-text">二维码已失效，请重新获取</p>
+                  <button
+                    type="button"
+                    className="music-widget-primary-btn"
+                    onClick={handleStartLogin}
+                  >
+                    重新获取二维码
+                  </button>
+                </div>
+              )}
+
+              {loginState === "error" && (
+                <div className="music-widget-error-box">
+                  <LuCircleAlert size={16} className="music-widget-error-icon" />
+                  <span className="music-widget-error-text">
+                    {loginErrorMsg || "获取二维码失败"}
+                  </span>
+                  <button
+                    type="button"
+                    className="music-widget-secondary-btn"
+                    onClick={handleStartLogin}
+                  >
+                    重试
+                  </button>
+                </div>
+              )}
+
+              {loginState === "success" && (
+                <div className="music-widget-success-box">
+                  <span className="music-widget-success-text">已连接成功！</span>
                 </div>
               )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <style>{`
@@ -952,6 +1262,59 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
         .music-widget-search-btn:hover {
           color: #ef4444;
         }
+        .music-widget-local-status {
+          background: var(--surface, #f8fafc);
+          border: 1px dashed var(--border, #e2e8f0);
+          border-radius: 6px;
+          padding: 6px 10px;
+          font-size: 11px;
+          color: var(--muted, #64748b);
+          margin-bottom: 8px;
+        }
+        .music-widget-local-empty {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 6px;
+        }
+        .music-widget-local-settings-tip {
+          color: #ef4444;
+          font-weight: 500;
+          cursor: pointer;
+        }
+        .music-widget-local-count {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .music-widget-search-group {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          margin-bottom: 6px;
+        }
+        .music-widget-search-group-header {
+          padding: 4px 6px 2px;
+        }
+        .music-widget-search-group-title {
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--muted, #64748b);
+        }
+        .music-widget-result-title-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .music-widget-source-badge {
+          font-size: 10px;
+          padding: 1px 4px;
+          border-radius: 3px;
+          background: rgba(15, 23, 42, 0.06);
+          color: var(--muted, #64748b);
+          font-weight: normal;
+          flex-shrink: 0;
+        }
         .music-widget-search-results {
           display: flex;
           flex-direction: column;
@@ -1082,7 +1445,7 @@ export const MusicButton: React.FC<MusicButtonProps> = ({ forceShow }) => {
 
   const isPlaying = playbackStatus === "playing";
   const songTitle = getSongTitle(currentSong);
-  const tooltipText = isPlaying && songTitle ? `正在播放：${songTitle}` : "网易云音乐";
+  const tooltipText = isPlaying && songTitle ? `正在播放：${songTitle}` : "音乐";
 
   // 点击外部关闭
   useEffect(() => {

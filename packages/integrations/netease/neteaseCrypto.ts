@@ -1,3 +1,24 @@
+/**
+ * 网易云 web 协议（weapi / eapi）的请求加密。
+ *
+ * 为什么用 `node:crypto` 而不是复用仓库已有实现
+ * ---------------------------------------------------------------
+ * - `packages/core/crypto.ts` 只有 tweetnacl 的 Ed25519 签名/验签，**不含 AES 也不含 RSA**，
+ *   tweetnacl 本身也不提供 RSA。
+ * - 仓库里用到 AES/RSA 的地方都是各自就地用 `node:crypto`
+ *   （`packages/server/payments/waffo/waffoSignedRequest.ts` 的 RSA-SHA256、
+ *   `packages/cli/dist/server/oauth/oauthCredentialCrypto.ts` 的 AES 加解密）——
+ *   说明 `node:crypto` 是本项目既定惯例，且它是运行时内置模块，不新增依赖。
+ * - 这套协议要的是 AES-128-CBC / AES-128-ECB + RSA(**PKCS#1 v1.5**) 配固定 modulus：
+ *   WebCrypto 只支持 RSA-OAEP，`RSAES-PKCS1-v1_5` 已被标准废弃（Bun 下实测
+ *   `NotSupportedError`），因此浏览器/标准 API 路线走不通，只能走 node 兼容层。
+ *
+ * ⚠️ 构建边界（2026-11-03 踩过）：本文件顶层 `import "node:crypto"` 会让
+ * **web bundle 直接构建失败**（`Could not resolve "node:crypto"`，因为 web 入口
+ * 经 desktop-runtime 会走到这里）。所以浏览器侧由
+ * `neteaseCrypto.browser.stub.ts` + esbuild `onResolve` 重定向接管（fail-closed，
+ * 调用即抛错）；改本文件时不要假设"只有桌面端会加载我"。
+ */
 import crypto from "node:crypto";
 
 export type NeteaseEncryptedPayload = {

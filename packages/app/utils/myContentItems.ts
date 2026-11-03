@@ -305,10 +305,10 @@ export function pinnedFirst(
 
 export function buildMyContentItemsFromUserData(
   records: UserContentRecord[],
-  currentServer: string,
-  spaceNameById: Map<string, string>,
-  myAppsLabel: string,
-  fallbackSpaceLabel: string
+  currentServer: string = "",
+  spaceNameById: Map<string, string> = new Map(),
+  myAppsLabel: string = "",
+  fallbackSpaceLabel: string = ""
 ): MyContentListItem[] {
   const items = records.flatMap((record): MyContentListItem[] => {
     const contentKey = resolveUserContentRecordKey(record);
@@ -383,7 +383,13 @@ export function buildMyContentItemsFromUserData(
             ? record.serverOrigin
             : undefined,
         cybots: (record as any).cybots,
-        primaryAgentKey: (record as any).primaryAgentKey || (record as any).primaryCybotKey,
+        primaryAgentKey:
+          (record as any).primaryAgentKey ||
+          (record as any).primaryCybotKey ||
+          (record as any).runtimeBinding?.agentKey ||
+          (Array.isArray((record as any).cybots) && (record as any).cybots.length > 0
+            ? (record as any).cybots[0]
+            : undefined),
       },
     ];
   });

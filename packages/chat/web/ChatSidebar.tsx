@@ -59,6 +59,9 @@ import { useFavoriteSidebarItems } from "app/favorite/useFavoriteSidebarItems";
 import { SidebarCommandPalette } from "./sidebar/SidebarCommandPalette";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { useViewMode } from "create/space/spaceCurrentStore";
+import { useAgentUnreadSummaryLifecycle } from "./sidebar/useAgentUnreadSummary";
+import { selectRuntimeSnapshot } from "app/stateViews/runtime";
+import { selectRemoteServer } from "app/settings/settingSlice";
 
 const SIDEBAR_FILTER_STORAGE_KEY = "space-sidebar-type-filter";
 
@@ -241,6 +244,15 @@ const ChatSidebar: React.FC = () => {
   }, [groupedData]);
 
   const { items: allContentItems } = useMyContentItems();
+  const identityUserId = useAppSelector(selectIdentityUserId);
+  const runtimeSnapshot = useAppSelector(selectRuntimeSnapshot);
+  const currentServer = useAppSelector(selectRemoteServer);
+  const { unreadAgentKeys, unreadSummaryState } = useAgentUnreadSummaryLifecycle({
+    userId: identityUserId,
+    authToken: runtimeSnapshot.currentToken,
+    serverOrigin: currentServer,
+    items: allContentItems,
+  });
 
   const favoritesCollapsed = useFavoritesCollapsed();
 
@@ -370,7 +382,6 @@ const ChatSidebar: React.FC = () => {
 
   // §10.1 跨对话任务全局入口：user 级 scope（不带 dialogId）⇒ 切换对话不消失；
   // 零任务时组件自身返回 null（attention-first，默认不占位不打断）。
-  const identityUserId = useAppSelector(selectIdentityUserId);
   const lastScopeOwner = useRef(identityUserId);
   useEffect(() => {
     if (lastScopeOwner.current === identityUserId) return;
@@ -567,12 +578,15 @@ const ChatSidebar: React.FC = () => {
     return (
       <ShellWithRail projectScopeId={currentProjectScopeId}>
         <div data-hook="chat-esc-sidebar"
+          data-unread-summary-status={unreadSummaryState.status}
+          data-unread-summary-error={unreadSummaryState.error ?? undefined}
           {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}>
           {railView === "favorites" && (
             <>
               {favoriteItems.length > 0 ? (
                 <SidebarPinnedBlock items={favoriteItems} activeMenuKey={activeMenuKey}
-                  onToggleMenu={handleToggleMenu} blockId="favorites" className="AllViewSidebar__favorites-block" />
+                  onToggleMenu={handleToggleMenu} blockId="favorites" className="AllViewSidebar__favorites-block"
+                  unreadAgentKeys={unreadAgentKeys} />
               ) : <p>{t("allView.noFavorites", "暂无收藏")}</p>}
             </>
           )}
@@ -587,6 +601,8 @@ const ChatSidebar: React.FC = () => {
     return (
       <ShellWithRail projectScopeId={currentProjectScopeId}>
         <div data-hook="chat-esc-sidebar"
+          data-unread-summary-status={unreadSummaryState.status}
+          data-unread-summary-error={unreadSummaryState.error ?? undefined}
           {...withLiteralClass("ChatSidebar navigation-v2-context navigation-v2-context--fixed", sidebarStyles.chatSidebar)}>
           <div className="navigation-v2-context-controls">
             {spaceSwitcherHeader}
@@ -599,10 +615,10 @@ const ChatSidebar: React.FC = () => {
               {typeFilter === "all" || typeFilter === "dialog" ? (
                 <>
                   {homeScope.kind === "all" && remoteTasksGlobalEntry}
-                  <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} includeNonDialogs={typeFilter === "all"} />
+                  <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} includeNonDialogs={typeFilter === "all"} unreadAgentKeys={unreadAgentKeys} />
                 </>
               ) : rendersAllViewSidebar ? (
-                <AllViewSidebar typeFilter={typeFilter} />
+                <AllViewSidebar typeFilter={typeFilter} unreadAgentKeys={unreadAgentKeys} />
               ) : (
                 <p role="status">{t("allView.projectDialogOnly", "当前项目仅包含已关联的对话")}</p>
               )}
@@ -627,6 +643,8 @@ const ChatSidebar: React.FC = () => {
     <ShellWithRail projectScopeId={currentProjectScopeId}>
       <div
       data-hook="chat-esc-sidebar"
+      data-unread-summary-status={unreadSummaryState.status}
+      data-unread-summary-error={unreadSummaryState.error ?? undefined}
       ref={columnRef}
       onDragOver={handleDragOverEdgeScroll}
       {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}
@@ -664,6 +682,7 @@ const ChatSidebar: React.FC = () => {
         onToggleMenu={handleToggleMenu}
         blockId="pinned"
         className="ChatSidebar__pinned-block"
+        unreadAgentKeys={unreadAgentKeys}
       />
 
       <div

@@ -17,6 +17,8 @@ export interface SpaceDialogState {
   dialogTitles: Record<string, string>;
   /** 第一层网页体验：后台完成/失败后给侧边栏一个未读提示点，进入该对话即清除 */
   unreadDialogIds: Record<string, boolean>;
+  /** dialogId -> 本 session 标记已读的时间戳（毫秒），用于统一抑制已读对话被旧持久化 unreadAt 误复活 */
+  clearedDialogTimestamps: Record<string, number>;
 }
 
 const createInitialState = (): SpaceDialogState => ({
@@ -24,6 +26,7 @@ const createInitialState = (): SpaceDialogState => ({
   dialogEventTimestamps: {},
   dialogTitles: {},
   unreadDialogIds: {},
+  clearedDialogTimestamps: {},
 });
 
 let state: SpaceDialogState = createInitialState();
@@ -136,21 +139,33 @@ export function applySpaceEventDialog(
 
   if (ev.type === "dialog.done" && ev.dialogId) {
     const ts = nextDialogEventTimestamp(state.dialogEventTimestamps[ev.dialogId], now);
+    let nextCleared = state.clearedDialogTimestamps;
+    if (nextCleared[ev.dialogId] !== undefined) {
+      nextCleared = { ...nextCleared };
+      delete nextCleared[ev.dialogId];
+    }
     state = {
       ...state,
       dialogStatuses: { ...state.dialogStatuses, [ev.dialogId]: "done" },
       dialogEventTimestamps: { ...state.dialogEventTimestamps, [ev.dialogId]: ts },
       unreadDialogIds: { ...state.unreadDialogIds, [ev.dialogId]: true },
+      clearedDialogTimestamps: nextCleared,
     };
   }
 
   if (ev.type === "dialog.failed" && ev.dialogId) {
     const ts = nextDialogEventTimestamp(state.dialogEventTimestamps[ev.dialogId], now);
+    let nextCleared = state.clearedDialogTimestamps;
+    if (nextCleared[ev.dialogId] !== undefined) {
+      nextCleared = { ...nextCleared };
+      delete nextCleared[ev.dialogId];
+    }
     state = {
       ...state,
       dialogStatuses: { ...state.dialogStatuses, [ev.dialogId]: "failed" },
       dialogEventTimestamps: { ...state.dialogEventTimestamps, [ev.dialogId]: ts },
       unreadDialogIds: { ...state.unreadDialogIds, [ev.dialogId]: true },
+      clearedDialogTimestamps: nextCleared,
     };
   }
 
@@ -159,12 +174,17 @@ export function applySpaceEventDialog(
 
 /**
  * 清除某 dialog 的未读状态（markDialogRead 调用）。
+ * 无论是否来自 SSE，只要被清读，必须统一记录 clearedDialogTimestamps，
+ * 彻底防止 recentItems 或旧 summary 的持久化 unreadAt 误复活红点。
  */
-export function clearDialogUnread(dialogId: string): void {
-  if (state.unreadDialogIds[dialogId] === undefined) return;
-  const next = { ...state.unreadDialogIds };
-  delete next[dialogId];
-  state = { ...state, unreadDialogIds: next };
+export function clearDialogUnread(dialogId: string, now: number = Date.now()): void {
+  const nextUnread = { ...state.unreadDialogIds };
+  delete nextUnread[dialogId];
+  state = {
+    ...state,
+    unreadDialogIds: nextUnread,
+    clearedDialogTimestamps: { ...state.clearedDialogTimestamps, [dialogId]: now },
+  };
   notify();
 }
 
@@ -178,6 +198,15 @@ export function resetSpaceDialogState(): void {
 
 // ===== React hooks =====
 
+export function getClearedDialogTimestamps(): Readonly<Record<string, number>> {
+  return state.clearedDialogTimestamps;
+}
+
+export function useClearedDialogTimestamps(): Readonly<Record<string, number>> {
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return state.clearedDialogTimestamps;
+}
+
 export function useDialogStatus(dialogId: string | null): string | undefined {
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return dialogId ? state.dialogStatuses[dialogId] : undefined;
@@ -186,6 +215,11 @@ export function useDialogStatus(dialogId: string | null): string | undefined {
 export function useIsDialogUnread(dialogId: string | null): boolean {
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return dialogId ? state.unreadDialogIds[dialogId] === true : false;
+}
+
+export function useUnreadDialogIds(): Readonly<Record<string, boolean>> {
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return state.unreadDialogIds;
 }
 // Wave E: 原 spaceSlice.applySpaceEvent reducer，逻辑照抄。
 // 调用形态从 dispatch(applySpaceEvent(ev)) 变为 applySpaceEvent(ev)。

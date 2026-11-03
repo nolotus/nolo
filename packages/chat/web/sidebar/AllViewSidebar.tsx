@@ -62,6 +62,17 @@ import {
 } from "create/space/content/contentThunks";
 import { runPinnedToggleWithTransition } from "create/space/content/optimisticPinnedUpdate";
 import { useFavoriteSidebarItems } from "app/favorite/useFavoriteSidebarItems";
+import { useUnreadDialogIds, useClearedDialogTimestamps } from "create/space/spaceDialogStore";
+import { collectAgentUnreadKeys, isAgentRowUnread } from "./agentUnread";
+import {
+  useDialogUnreadSummary,
+  refreshDialogUnreadSummary,
+  setupVisibilityRefresh,
+  registerTerminalDialogEvent,
+} from "./dialogUnreadSummaryStore";
+import { selectRuntimeSnapshot } from "app/stateViews/runtime";
+import { selectRemoteServer } from "app/settings/settingSlice";
+import { useAppSelector } from "app/store";
 import { SidebarPinnedBlock } from "./SidebarPinnedBlock";
 import { SidebarVirtualizedList } from "./SidebarVirtualizedList";
 import { isRoutableContentActive, buildRoutableContentPath } from "create/space/contentKeyUtils";
@@ -160,6 +171,7 @@ const RecentVirtualList: React.FC<{
   currentUserId?: string | null;
   activePageKey?: string;
   currentPath: string;
+  unreadAgentKeys?: Set<string>;
 }> = ({
   items,
   onAction,
@@ -168,6 +180,7 @@ const RecentVirtualList: React.FC<{
   currentUserId,
   activePageKey,
   currentPath,
+  unreadAgentKeys,
 }) => {
   const { t } = useTranslation("space");
   const dispatch = useAppDispatch();
@@ -223,6 +236,7 @@ const RecentVirtualList: React.FC<{
           activePageKey,
           currentPath,
           activeMenuKey,
+          unreadAgentKeys,
         ]}
         scrollToIndex={activeIndex}
         onItemContextMenu={(item, anchor) => {
@@ -243,6 +257,7 @@ const RecentVirtualList: React.FC<{
               sourceServerOrigin={item.serverOrigin}
               summaryStatus={"status" in item ? item.status : undefined}
               summaryUnreadAt={"unreadAt" in item ? item.unreadAt : undefined}
+              hasUnread={normalizedType === "agent" ? isAgentRowUnread(unreadAgentKeys, item.contentKey, currentUserId) : undefined}
               disableDrag
               isActive={isRoutableContentActive({
                 contentKey: item.contentKey,
@@ -336,13 +351,15 @@ const AllViewSidebar: React.FC<{
   searchQuery?: string;
   header?: React.ReactNode;
   navHeader?: React.ReactNode;
-  /**
-   * Active type filter owned by the parent sidebar (ChatSidebar renders the
-   * shared `SidebarTypeFilter`). Drives the recent list query + client filter.
-   * Falls back to the locally stored preference when not provided.
-   */
   typeFilter?: SidebarTypeFilterId;
-}> = ({ searchQuery = "", header, navHeader, typeFilter }) => {
+  unreadAgentKeys?: Set<string>;
+}> = ({
+  searchQuery = "",
+  header,
+  navHeader,
+  typeFilter,
+  unreadAgentKeys: incomingUnreadAgentKeys,
+}) => {
   const { t } = useTranslation("space");
   const location = useLocation();
   // Agent sub-routes (e.g. `:agentPageKey/inbox`) name the route param
@@ -352,6 +369,34 @@ const AllViewSidebar: React.FC<{
   const navigate = useNavigate();
 
   const currentUserId = useUserId();
+  const currentToken = useAppSelector(selectRuntimeSnapshot).currentToken;
+  const currentServer = useAppSelector(selectRemoteServer);
+
+  const unreadSummaryState = useDialogUnreadSummary();
+  const shouldManageLifecycle = incomingUnreadAgentKeys === undefined;
+
+  // 1. 冷启动 / 用户登录或切换 / 登出 / serverOrigin 切换：仅当未由父级管理时运行
+  React.useEffect(() => {
+    if (!shouldManageLifecycle) return;
+    void refreshDialogUnreadSummary({
+      userId: currentUserId ?? null,
+      authToken: currentToken,
+      serverOrigin: currentServer,
+    });
+  }, [shouldManageLifecycle, currentUserId, currentToken, currentServer]);
+
+  // 2. 回到前台（visibilitychange）失效重拉（节流 >= 2s，无定时器轮询）
+  React.useEffect(() => {
+    if (!shouldManageLifecycle || !currentUserId) return;
+    return setupVisibilityRefresh(() => {
+      void refreshDialogUnreadSummary({
+        userId: currentUserId,
+        authToken: currentToken,
+        serverOrigin: currentServer,
+      });
+    });
+  }, [shouldManageLifecycle, currentUserId, currentToken, currentServer]);
+
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
   // Filter is owned by the parent sidebar; fall back to the stored preference
@@ -362,6 +407,63 @@ const AllViewSidebar: React.FC<{
   // useMyContentItems 不传 filterTypes 时按类型并行拉取（每类型独立 limit 200），
   // 各类型远端到达时间不同，先到先注入——天然的流水式渐进显示。
   const { items: recentItems, loading: recentLoading } = useMyContentItems();
+  const unreadDialogIds = useUnreadDialogIds();
+  const clearedDialogTimestamps = useClearedDialogTimestamps();
+
+  // 3. 处理 unknown dialog 实时未读：仅在 dialog 首次变为 true 时增量处理，避免重放旧 map 误清已读抑制
+  const prevHandledUnreadDialogIdsRef = React.useRef<Record<string, boolean>>({});
+  React.useEffect(() => {
+    if (!shouldManageLifecycle) return;
+    const prev = prevHandledUnreadDialogIdsRef.current;
+    let hasNewlyUnreadUnknown = false;
+
+    for (const [dialogId, isUnread] of Object.entries(unreadDialogIds)) {
+      if (isUnread && !prev[dialogId]) {
+        const needsRefresh = registerTerminalDialogEvent(dialogId);
+        if (needsRefresh) {
+          hasNewlyUnreadUnknown = true;
+        }
+      }
+    }
+    prevHandledUnreadDialogIdsRef.current = { ...unreadDialogIds };
+
+    if (hasNewlyUnreadUnknown && currentUserId) {
+      void refreshDialogUnreadSummary({
+        userId: currentUserId,
+        authToken: currentToken,
+        serverOrigin: currentServer,
+      });
+    }
+  }, [shouldManageLifecycle, unreadDialogIds, currentUserId, currentToken, currentServer]);
+
+  // 4. Render 层严格 scope 隔离：只有当 summary 的 userId 与 serverOrigin 与当前完全匹配时才消费
+  const isSummaryScoped =
+    unreadSummaryState.status === "ok" &&
+    unreadSummaryState.userId === currentUserId &&
+    (unreadSummaryState.serverOrigin ?? "") === (currentServer ?? "");
+
+  const scopedSummaryDialogs = isSummaryScoped
+    ? unreadSummaryState.unreadDialogs
+    : null;
+
+  const fallbackUnreadAgentKeys = useMemo(
+    () =>
+      collectAgentUnreadKeys(
+        recentItems,
+        unreadDialogIds,
+        currentUserId,
+        scopedSummaryDialogs,
+        clearedDialogTimestamps
+      ),
+    [
+      recentItems,
+      unreadDialogIds,
+      currentUserId,
+      scopedSummaryDialogs,
+      clearedDialogTimestamps,
+    ]
+  );
+  const unreadAgentKeys = incomingUnreadAgentKeys ?? fallbackUnreadAgentKeys;
   const normalizedSearchQuery = asTrimmedLowercaseString(searchQuery);
   const currentPath = `${location.pathname}${location.search}`;
   // Unscoped dialog image attachments are hidden from the default "all" view
@@ -464,6 +566,8 @@ const AllViewSidebar: React.FC<{
     return (
       <div
         className={`AllViewSidebar ${stylex.props(sidebarStyles.allViewSidebar).className ?? ""}`}
+        data-unread-summary-status={unreadSummaryState.status}
+        data-unread-summary-error={unreadSummaryState.error ?? undefined}
       >
         <div
           className={`AllViewSidebar__scroll-area ${stylex.props(sidebarStyles.scrollArea).className ?? ""}`}
@@ -537,6 +641,7 @@ const AllViewSidebar: React.FC<{
                         currentUserId={currentUserId}
                         activePageKey={activePageKey}
                         currentPath={currentPath}
+                        unreadAgentKeys={unreadAgentKeys}
                       />
                     </div>
                   ) : null}
@@ -555,6 +660,8 @@ const AllViewSidebar: React.FC<{
   return (
     <div
       className={`AllViewSidebar ${stylex.props(sidebarStyles.allViewSidebar).className ?? ""}`}
+      data-unread-summary-status={unreadSummaryState.status}
+      data-unread-summary-error={unreadSummaryState.error ?? undefined}
     >
       {navHeader}
       {header}
@@ -566,6 +673,7 @@ const AllViewSidebar: React.FC<{
           onToggleMenu={setActiveMenuKey}
           blockId="pinned"
           className="AllViewSidebar__pinned-block"
+          unreadAgentKeys={unreadAgentKeys}
         />
       )}
 
@@ -596,6 +704,7 @@ const AllViewSidebar: React.FC<{
               onToggleMenu={setActiveMenuKey}
               blockId="favorites"
               className="AllViewSidebar__favorites-block"
+              unreadAgentKeys={unreadAgentKeys}
             />
           </div>
         )}
@@ -640,6 +749,7 @@ const AllViewSidebar: React.FC<{
               currentUserId={currentUserId}
               activePageKey={activePageKey}
               currentPath={currentPath}
+              unreadAgentKeys={unreadAgentKeys}
             />
           )}
         </div>
