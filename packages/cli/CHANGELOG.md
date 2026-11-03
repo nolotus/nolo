@@ -1,4 +1,11 @@
 
+## 0.204.0-alpha.4 (2026-11-03)
+
+### Bug Fixes
+
+* **agent-runtime:** responses wire 透传单次 max_tokens 与 reasoning_effort ([94dc22e](https://github.com/nolotus/bun-nolo/commit/94dc22e93449142ee2282dfe7daa69f4bdb87544))
+
+
 ## 0.204.0-alpha.3 (2026-11-03)
 
 ### Bug Fixes

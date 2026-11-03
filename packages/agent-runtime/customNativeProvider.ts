@@ -290,11 +290,20 @@ function buildOpenAiResponsesCustomNativeProvider(p: ResolvedCustomNative): Agen
     model,
     complete: async (messages, options) => {
       const responsesTools = toResponsesTools(tools as any[]);
+      const maxOutputTokens =
+        typeof options?.max_tokens === "number"
+          ? options.max_tokens
+          : typeof agentConfig.max_tokens === "number"
+          ? agentConfig.max_tokens
+          : undefined;
+      const reasoningEffort =
+        (options as any)?.reasoning_effort ?? agentConfig.reasoning_effort;
       const body = {
         model,
         input: convertMessagesToResponsesInput(messages as any),
         stream: true,
-        ...(typeof agentConfig.max_tokens === "number" ? { max_output_tokens: agentConfig.max_tokens } : {}),
+        ...(maxOutputTokens !== undefined ? { max_output_tokens: maxOutputTokens } : {}),
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         ...(responsesTools?.length ? { tools: responsesTools, tool_choice: "auto" } : {}),
       };
       log("provider.request.start", {
