@@ -10,7 +10,10 @@ import {
   BUILTIN_NOLO_AGENT_MODEL,
   BUILTIN_NOLO_AGENT_NAME,
 } from "core/builtinAgents";
-import { resolveToolGuidedSections } from "../../ai/agent/toolGuidedSections";
+import {
+  resolveToolGuidedSections,
+  TOOL_GUIDED_SECTION_ORDER,
+} from "../../ai/agent/toolGuidedSections";
 import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import { estimateMessagesTokens } from "../../ai/context/contextOccupancy";
 import { prepareTools } from "../../ai/tools/prepareTools";
@@ -165,7 +168,10 @@ export function buildCliEstimateSystemText(
     guidance.startupProtocol,
     guidance.contextLayerContract,
     guidance.emailRegistrationWorkflow,
-    ...Object.values(toolSections),
+    // 工具段的顺序以 TOOL_GUIDED_SECTION_ORDER 为准（localLoop 按它注入；
+    // buildSystemPrompt 仍是手写层列表，需人工保持同序）；用 Object.values
+    // 自行定序会与运行时装配分叉。
+    ...TOOL_GUIDED_SECTION_ORDER.map((id) => toolSections[id] ?? ""),
     responseGuidelines.behavior,
     responseGuidelines.presentation,
     readAgentsMd(cwd),
