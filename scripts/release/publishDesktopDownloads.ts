@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { assertWindowsInstallerLooksRunnable } from "./windowsInstallerIntegrity";
 import {
   createDesktopReleaseArtifact,
   desktopReleaseManifestFileName,
@@ -239,9 +240,20 @@ const plan = await resolveDesktopReleaseUploadPlan({
 
 for (const target of plan.primary) {
   const size = Bun.file(target.sourcePath).size;
+  if (size < 1) {
+    fail(`${target.platform} artifact is empty: ${target.sourcePath}`);
+  }
+  if (target.platform === "windows") {
+    // 硬判据：是不是一个合法的 PE 镜像。体积只是参考——包可以合法地瘦身，
+    // 也可以被截断而体积仍大于阈值，字节下限两头都会误判（见
+    // scripts/helpers/windowsInstallerIntegrity.ts 的历史说明）。
+    await assertWindowsInstallerLooksRunnable(target.sourcePath);
+  }
   if (size < target.minBytes) {
-    fail(
-      `${target.platform} artifact is too small: ${target.sourcePath} (${size} bytes < ${target.minBytes} bytes)`,
+    console.warn(
+      `[publish-desktop] ${target.platform} artifact smaller than the advisory floor: ` +
+        `${target.sourcePath} (${size} bytes < ${target.minBytes} bytes) — ` +
+        `structural validation passed, continuing.`,
     );
   }
 }
@@ -344,11 +356,25 @@ for (const target of plan.primary) {
       config,
       uploadName: target.uploadName,
       minBytes: target.minBytes,
+      advisorySizeFloor: target.platform === "windows",
+      // S3 侧只验「非空 + 与本地等长」。注意等长**不等于**内容相同：它抓的是
+      // 截断与尺寸不符，不是"远端就是同一份合法安装包"的证明；内容一致性由
+      // 签名上传链路 + payload SHA-256 提供保障，合法 PE 由发布前的本地校验提供。
+      // 远端不复刻 PE 探针：S3 需要 SigV4 签名，未签名探针对私有 bucket 会 403，
+      // 把正常产物误报成坏包（误拦比不验更糟）。
+      ...(target.platform === "windows"
+        ? { expectExactBytes: Bun.file(target.sourcePath).size }
+        : {}),
     });
   } else {
     const url = `${config.publicBase}/${encodeURIComponent(target.uploadName)}`;
     console.log(`[publish-desktop] Verifying primary ${url}`);
-    await verifyPublishedUrl(url, target.minBytes);
+    await verifyPublishedUrl(url, target.minBytes, {
+      advisorySizeFloor: target.platform === "windows",
+      expectPeHeader: target.platform === "windows",
+      // 本地这份就是构建期跑过安装冒烟的产物，远端必须与它等长。
+      expectExactBytes: target.platform === "windows" ? Bun.file(target.sourcePath).size : undefined,
+    });
   }
 }
 
@@ -408,11 +434,22 @@ for (const target of [...plan.primary, ...plan.optional]) {
       config,
       uploadName: target.aliasUploadName,
       minBytes: target.minBytes,
+      advisorySizeFloor: target.platform === "windows",
+      ...(target.platform === "windows"
+        ? { expectExactBytes: Bun.file(target.sourcePath).size }
+        : {}),
     });
   } else {
     const aliasUrl = `${config.publicBase}/${encodeURIComponent(target.aliasUploadName)}`;
     console.log(`[publish-desktop] Verifying legacy alias ${aliasUrl}`);
-    await verifyPublishedUrl(aliasUrl, target.minBytes);
+    await verifyPublishedUrl(aliasUrl, target.minBytes, {
+      advisorySizeFloor: target.platform === "windows",
+      // Windows alias 是同一份安装包的另一种命名：同样要验 MZ 与等长。
+      expectPeHeader: target.platform === "windows",
+      ...(target.platform === "windows"
+        ? { expectExactBytes: Bun.file(target.sourcePath).size }
+        : {}),
+    });
   }
 }
 

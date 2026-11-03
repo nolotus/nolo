@@ -67,6 +67,20 @@ export type DesktopPublishS3Config = {
 export type DesktopPublishConfig = DesktopPublishSshConfig | DesktopPublishS3Config;
 
 export type PublishedUrlVerificationOptions = {
+  /**
+   * 体积下限降级为告警（而不是硬失败）。历史上这道绝对字节阈值咬过两次：
+   * 阈值按 zip 主件标定，换成 .exe 后拦死正确产物；2026-11-03 安装包降到
+   * ~42.95 MB 后又连挂十几次构建。完整性改由结构判据承担。
+   */
+  advisorySizeFloor?: boolean;
+  /** 远端对象必须是 PE 镜像（Windows 安装包）：读前两字节验 MZ 头。 */
+  expectPeHeader?: boolean;
+  /**
+   * 远端对象必须与本地那份**逐字节等长**。本地那份就是构建期通过了安装冒烟的
+   * 产物，所以"等长"比任何体积下限都强：截断、错传、传了别的文件都会被抓到，
+   * 而产物合法瘦身时不受任何魔法数字影响。
+   */
+  expectExactBytes?: number;
   fetchFn?: typeof fetch;
   sleepFn?: (ms: number) => Promise<unknown>;
   maxAttempts?: number;
@@ -74,12 +88,69 @@ export type PublishedUrlVerificationOptions = {
 };
 
 const LEGACY_MANIFEST_NAME = basename(DESKTOP_RELEASE_MANIFEST_PUBLIC_PATH);
-// 主件是 Inno Setup 单文件安装器（实测 ~48.6 MB）。旧值 50 MB 是按 zip 主件
-// （≥50 MB）标定的，换成 .exe 后会把完全正确的产物以 "too small" 拦死；1.6 MB
-// 的自解压 stub 仍远低于本阈值，stub 冒充 primary 的 fail-loud 语义不受影响。
-// 生产 workflow 另传 MIN_WIN_INSTALLER_BYTES=47000000 收紧。
-const DEFAULT_MIN_WIN_INSTALLER_BYTES = 40000000;
+// 主件是 Inno Setup 单文件安装器。
+//
+// 这道阈值历史上咬过两次：旧值 50 MB 是按 zip 主件（≥50 MB）标定的，换成 .exe
+// （实测 ~48.6 MB）后把完全正确的产物以 "too small" 拦死；2026-11-03 安装包降到
+// ~42.95 MB（压缩/内容变动，三次独立构建仅差约 3 KB），workflow 传的 47 MB 又拦死
+// 一次，Desktop Build 连挂十几次。
+//
+// 现在统一为一个**远低于真实产物、远高于 stub** 的硬下限：30 MB。它只负责拦
+// "空/几乎空的产物"；真正的完整性判据是结构与内容（本地：合法 PE 镜像；
+// 远端：MZ 头 + 非空；安装后：runtime marker / launcher / healthcheck）。
+// 生产 workflow 传的 MIN_WIN_INSTALLER_BYTES 只作**告警参考**——那是按某次产物
+// 体积标定的数字，产物一瘦身就会再次拦死正确产物。
+const DEFAULT_MIN_WIN_INSTALLER_BYTES = 30000000;
 const ALPHA_MACOS_APP_TARBALL_NAME = "canary-macos-arm64-NoloDesktop-canary.app.tar.zst";
+
+import { looksLikePeHeader } from "./windowsInstallerIntegrity";
+
+/** 从 HEAD 长度或 range 的 Content-Range 解析对象总字节数；都拿不到时返回 NaN。 */
+async function resolveObjectTotalBytes(args: {
+  fetchFn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  url: string;
+  headLength: number;
+  /** HEAD 响应的 Content-Encoding；非 identity 时其长度不可与本地原文件比较。 */
+  headEncoding?: string;
+  identityHeaders: Record<string, string>;
+}): Promise<number> {
+  const headEncoding = (args.headEncoding ?? "").toLowerCase();
+  const headTrustworthy = headEncoding === "" || headEncoding === "identity";
+  if (headTrustworthy && Number.isFinite(args.headLength) && args.headLength > 0) {
+    return args.headLength;
+  }
+  const rangeResponse = await args.fetchFn(args.url, {
+    method: "GET",
+    cache: "no-store",
+    headers: { Range: "bytes=0-0", ...args.identityHeaders },
+  });
+  const contentRange = rangeResponse.headers.get("content-range") ?? "";
+  const contentLength = Number(rangeResponse.headers.get("content-length") ?? Number.NaN);
+  const encoding = (rangeResponse.headers.get("content-encoding") ?? "").toLowerCase();
+  if (rangeResponse.body) {
+    await rangeResponse.body.cancel().catch(() => undefined);
+  }
+
+  // 非 2xx 一律不信：403/404 的响应体也可能带 Content-Range，按它判成功等于
+  // 让"取不到长度"伪装成"长度正确"。
+  if (!rangeResponse.ok) return Number.NaN;
+  // 压缩表示的字节数与本地原文件不可比，不能拿来当长度。
+  if (encoding && encoding !== "identity") return Number.NaN;
+
+  if (rangeResponse.status === 206) {
+    // 严格形态：bytes <start>-<end>/<total>，且必须是从 0 开始的单字节范围。
+    const match = contentRange.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
+    if (!match) return Number.NaN;
+    const [start, end, total] = [Number(match[1]), Number(match[2]), Number(match[3])];
+    if (start !== 0 || end < start || total <= end) return Number.NaN;
+    return total;
+  }
+  if (rangeResponse.status === 200) {
+    // 服务端忽略了 Range：用完整响应长度（identity 前提下与原文件可比）。
+    return Number.isFinite(contentLength) && contentLength > 0 ? contentLength : Number.NaN;
+  }
+  return Number.NaN;
+}
 
 export async function verifyPublishedUrl(
   url: string,
@@ -97,41 +168,151 @@ export async function verifyPublishedUrl(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
+      // 显式请求 identity：压缩表示的 Content-Length 与原文件字节数不可比，
+      // 直接比较会把正常产物误判成"不等长"。
+      const identityHeaders = { "Accept-Encoding": "identity" } as const;
       const headResponse = await fetchFn(url, {
         method: "HEAD",
         cache: "no-store",
+        headers: identityHeaders,
       });
       if (!headResponse.ok) {
         lastError = new Error(`HEAD ${url} failed with ${headResponse.status}`);
       } else {
         const headLengthHeader = headResponse.headers.get("content-length");
         const headLength = headLengthHeader === null ? Number.NaN : Number(headLengthHeader);
-        if (Number.isFinite(headLength) && headLength >= minBytes) return;
+        const headIsEmpty = Number.isFinite(headLength) && headLength <= 0;
 
-        const rangeResponse = await fetchFn(url, {
-          method: "GET",
-          cache: "no-store",
-          headers: { Range: "bytes=0-0" },
-        });
-        const contentRange = rangeResponse.headers.get("content-range") ?? "";
-        const rangeTotalMatch = contentRange.match(/\/(\d+)$/);
-        const rangeTotal = rangeTotalMatch ? Number(rangeTotalMatch[1]) : Number.NaN;
-        const fullGetLength =
-          rangeResponse.status === 200
-            ? Number(rangeResponse.headers.get("content-length") ?? Number.NaN)
-            : Number.NaN;
-        const confirmedLength = Number.isFinite(rangeTotal) ? rangeTotal : fullGetLength;
-        if (rangeResponse.body) {
-          await rangeResponse.body.cancel().catch(() => undefined);
-        }
-
-        if (rangeResponse.ok && Number.isFinite(confirmedLength) && confirmedLength >= minBytes) {
+        // PE 校验必须无条件执行：只在"体积不达标"时才验，会让一个体积够大但内容
+        // 损坏（HTML 错误页、非 PE 垃圾）的远端对象被直接放行。
+        if (options.expectPeHeader) {
+          const probe = await fetchFn(url, {
+            method: "GET",
+            cache: "no-store",
+            headers: { Range: "bytes=0-1", ...identityHeaders },
+          });
+          if (!probe.ok) {
+            lastError = new Error(
+              `PE header probe failed for ${url}: HTTP ${probe.status}`,
+            );
+          } else {
+            const bytes = new Uint8Array(
+              await probe.arrayBuffer().catch(() => new ArrayBuffer(0)),
+            );
+            if (!looksLikePeHeader(bytes)) {
+              lastError = new Error(
+                `Published artifact is not a valid PE image: ${url} ` +
+                  `(first bytes do not carry the MZ header)`,
+              );
+            } else if (headIsEmpty) {
+              lastError = new Error(`Published artifact is empty: ${url}`);
+            } else {
+              if (options.expectExactBytes !== undefined) {
+                // 长度可能只在 Range 的 Content-Range 里（CDN 动态压缩时 HEAD 无长度）。
+                // 拿不到长度就必须失败——否则"等长"退化成"头部是 MZ 就放行"，
+                // 截断的包会照样通过。
+                const resolved = await resolveObjectTotalBytes({
+                  fetchFn,
+                  url,
+                  headLength,
+                  headEncoding: headResponse.headers.get("content-encoding") ?? "",
+                  identityHeaders,
+                });
+                if (!Number.isFinite(resolved)) {
+                  lastError = new Error(
+                    `Published artifact size is unavailable, cannot verify against the locally ` +
+                      `verified artifact (${options.expectExactBytes} bytes): ${url}`,
+                  );
+                  throw lastError;
+                }
+                if (resolved !== options.expectExactBytes) {
+                  lastError = new Error(
+                    `Published artifact size ${resolved} does not match the locally verified artifact ` +
+                      `(${options.expectExactBytes} bytes): ${url}`,
+                  );
+                  throw lastError;
+                }
+              }
+              if (
+                options.advisorySizeFloor &&
+                Number.isFinite(headLength) &&
+                headLength < minBytes
+              ) {
+                console.warn(
+                  `[publish-desktop] published artifact is below the advisory floor but has a valid PE header: ` +
+                    `${url} (size ${headLength}, minimum ${minBytes} bytes)`,
+                );
+              }
+              return;
+            }
+          }
+        } else if (options.expectExactBytes !== undefined) {
+          // 等长判据**独立于** PE 分支：只要调用方要求等长，就必须比较，
+          // 不能因为没开 PE 校验就退化成"HEAD 够大即通过"（那会放行长度不符的
+          // 旧包/错包/非 PE 文件）。
+          const headEncoding = (headResponse.headers.get("content-encoding") ?? "").toLowerCase();
+          const resolved = await resolveObjectTotalBytes({
+            fetchFn,
+            url,
+            headLength,
+            headEncoding,
+            identityHeaders,
+          });
+          if (!Number.isFinite(resolved)) {
+            lastError = new Error(
+              `Published artifact size is unavailable, cannot verify against the locally ` +
+                `verified artifact (${options.expectExactBytes} bytes): ${url}`,
+            );
+          } else if (resolved !== options.expectExactBytes) {
+            lastError = new Error(
+              `Published artifact size ${resolved} does not match the locally verified artifact ` +
+                `(${options.expectExactBytes} bytes): ${url}`,
+            );
+          } else {
+            return;
+          }
+        } else if (Number.isFinite(headLength) && headLength >= minBytes) {
+          // 快路径：HEAD 已给出足够长度，且调用方没要求等长/PE 校验。
           return;
+        } else {
+          const rangeResponse = await fetchFn(url, {
+            method: "GET",
+            cache: "no-store",
+            headers: { Range: "bytes=0-0" },
+          });
+          const contentRange = rangeResponse.headers.get("content-range") ?? "";
+          const rangeTotalMatch = contentRange.match(/\/(\d+)$/);
+          const rangeTotal = rangeTotalMatch ? Number(rangeTotalMatch[1]) : Number.NaN;
+          const fullGetLength =
+            rangeResponse.status === 200
+              ? Number(rangeResponse.headers.get("content-length") ?? Number.NaN)
+              : Number.NaN;
+          const confirmedLength = Number.isFinite(rangeTotal) ? rangeTotal : fullGetLength;
+          if (rangeResponse.body) {
+            await rangeResponse.body.cancel().catch(() => undefined);
+          }
+
+          if (rangeResponse.ok && Number.isFinite(confirmedLength) && confirmedLength <= 0) {
+            lastError = new Error(`Published artifact is empty: ${url}`);
+          } else if (
+            rangeResponse.ok &&
+            Number.isFinite(confirmedLength) &&
+            confirmedLength >= minBytes
+          ) {
+            return;
+          } else if (options.advisorySizeFloor && rangeResponse.ok && Number.isFinite(confirmedLength)) {
+            console.warn(
+              `[publish-desktop] published artifact is below the advisory floor: ${url} ` +
+                `(size ${confirmedLength}, minimum ${minBytes} bytes) — continuing.`,
+            );
+            return;
+          } else {
+            lastError = new Error(
+              `Published artifact is too small or its size is unavailable: ${url} ` +
+                `(HEAD ${headLengthHeader ?? "missing"}, range ${contentRange || "missing"}, minimum ${minBytes} bytes)`,
+            );
+          }
         }
-        lastError = new Error(
-          `Published artifact is too small or its size is unavailable: ${url} ` +
-            `(HEAD ${headLengthHeader ?? "missing"}, range ${contentRange || "missing"}, minimum ${minBytes} bytes)`,
-        );
       }
     } catch (error) {
       lastError = error;
@@ -139,7 +320,10 @@ export async function verifyPublishedUrl(
 
     if (attempt < maxAttempts) await sleepFn(baseDelayMs * attempt);
   }
-  throw lastError;
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to verify published artifact: ${url}`);
 }
 
 export function desktopReleaseManifestFileName(channel?: DesktopReleaseChannel) {
@@ -875,6 +1059,10 @@ export async function verifyPublishedS3Object(
     config: DesktopPublishS3Config;
     uploadName: string;
     minBytes: number;
+    /** 与本地那份（构建期已过安装冒烟）逐字节等长——硬判据。 */
+    expectExactBytes?: number;
+    /** 体积下限降级为告警。 */
+    advisorySizeFloor?: boolean;
   },
   options: PublishedS3VerificationOptions = {},
 ) {
@@ -918,12 +1106,29 @@ export async function verifyPublishedS3Object(
       // 404，所以它属于「值得再等一次」而不是立即失败——但仍要走到重试预算
       // 耗尽才 fail-closed。
       lastError = new Error(`Published S3 artifact not found: ${args.uploadName} (status 404)`);
-    } else if (!Number.isFinite(size) || size < args.minBytes) {
-      // 大小不符是**确定性**结论：对象已在，大小不会再变。重试无意义，
-      // 立即失败，避免把「已上传但产物不对」拖成 15 秒后才报。
+    } else if (!Number.isFinite(size)) {
+      // 长度拿不到 = 无法验证。确定性结论，重试无意义。
       throw new Error(
-        `Published S3 artifact is too small or its size is unavailable: ${args.uploadName} ` +
-          `(GET Range size ${Number.isFinite(size) ? size : "missing"}, minimum ${args.minBytes} bytes)`,
+        `Published S3 artifact size is unavailable: ${args.uploadName}`,
+      );
+    } else if (size <= 0) {
+      throw new Error(`Published S3 artifact is empty: ${args.uploadName}`);
+    } else if (args.expectExactBytes !== undefined && size !== args.expectExactBytes) {
+      // 与本地那份（构建期已过安装冒烟）逐字节等长：抓截断/错传/传错文件，
+      // 且不受产物合法瘦身影响。
+      throw new Error(
+        `Published S3 artifact size ${size} does not match the locally verified artifact ` +
+          `(${args.expectExactBytes} bytes): ${args.uploadName}`,
+      );
+    } else if (args.advisorySizeFloor && size < args.minBytes) {
+      console.warn(
+        `[publish-desktop] published S3 artifact is below the advisory floor: ${args.uploadName} ` +
+          `(size ${size}, minimum ${args.minBytes} bytes) — continuing.`,
+      );
+      return size;
+    } else if (size < args.minBytes) {
+      throw new Error(
+        `Published S3 artifact is too small: ${args.uploadName} (size ${size}, minimum ${args.minBytes} bytes)`,
       );
     } else {
       return size;

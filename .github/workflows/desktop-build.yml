@@ -335,7 +335,6 @@ jobs:
           DESKTOP_DOWNLOAD_S3_SECRET_ACCESS_KEY: ${{ secrets.DESKTOP_DOWNLOAD_S3_SECRET_ACCESS_KEY }}
           DESKTOP_DOWNLOAD_PUBLIC_BASE: ${{ secrets.DESKTOP_DOWNLOAD_PUBLIC_BASE }}
           NOLO_DESKTOP_REQUIRE_LINUX_PACKAGES: "1"
-          MIN_WIN_INSTALLER_BYTES: "47000000"
         run: |
           # 显式传平台，不依赖发布器的 --platform auto：gate 的 present 判据是「产物目录
           # 存在」，发布器 auto 的判据是「source 可解析」；两者脱节时 auto 会**静默跳过**

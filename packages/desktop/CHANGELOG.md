@@ -1,4 +1,11 @@
 
+## 0.225.1 (2026-11-03)
+
+### Bug Fixes
+
+* **desktop:** 发布器改用「结构 + 等长」判据，根治体积下限误拦 ([7c7984a](https://github.com/nolotus/bun-nolo/commit/7c7984a0818067a59720196079de1f03add6e7ed))
+
+
 ## 0.225.0 (2026-11-03)
 
 ### Features
