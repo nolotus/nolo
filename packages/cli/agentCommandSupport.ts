@@ -44,6 +44,25 @@ export type AgentCommandDeps = {
   output?: OutputLike;
   error?: OutputLike;
   db?: CliKvDb;
+  /**
+   * 凭据 broker 注入（测试用）。生产缺省走严格宿主安全存储
+   * （`createStrictHostCredentialBroker`），不回退明文文件。
+   */
+  credentialBroker?: import("agent-runtime/credentialBroker").CredentialBroker;
+  /**
+   * 宿主可信确认通道（TUI / desktop 注入）。返回值只能由宿主产生；
+   * CLI 批处理模式不提供 → 拿不到 grant，本机凭据一律不外发。
+   */
+  confirmCredentialUse?: (
+    gate: import("agent-runtime/actionGate").ActionGate,
+  ) => Promise<import("agent-runtime/actionGate").ActionGateResult>;
+  /** 当前设备 id（写进 grant，模型不可提供）。 */
+  deviceId?: string;
+  /**
+   * 宿主在**真实批准之后**传入的批准事件（`ActionGate.id`）。
+   * 只有宿主进程内调用链能提供；CLI 独立进程没有它 → 本机凭据一律不外发。
+   */
+  hostApproval?: { gateId: string };
   fetchImpl?: CliFetchImpl;
   fallbackFetchImpl?: CliFetchImpl;
   machineInfo?: () => MachineHeartbeat;

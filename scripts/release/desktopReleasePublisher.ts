@@ -81,7 +81,7 @@ export type PublishedUrlVerificationOptions = {
    * 而产物合法瘦身时不受任何魔法数字影响。
    */
   expectExactBytes?: number;
-  fetchFn?: typeof fetch;
+  fetchFn?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   sleepFn?: (ms: number) => Promise<unknown>;
   maxAttempts?: number;
   baseDelayMs?: number;
@@ -1044,7 +1044,7 @@ export function assertTripleConsistency(result: DesktopTripleConsistencyResult) 
 }
 
 export type PublishedS3VerificationOptions = {
-  fetchFn?: typeof fetch;
+  fetchFn?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   sleepFn?: (ms: number) => Promise<unknown>;
   maxAttempts?: number;
   baseDelayMs?: number;
@@ -1152,7 +1152,7 @@ export async function verifyPublishedS3TripleConsistency(args: {
   updateJsonUploadName: string;
   updateJsonSourcePath: string;
   manifestArtifactVersion?: string;
-  fetchFn?: typeof fetch;
+  fetchFn?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   sleepFn?: (ms: number) => Promise<unknown>;
 }): Promise<DesktopTripleConsistencyResult> {
   const raw = await readS3Object({

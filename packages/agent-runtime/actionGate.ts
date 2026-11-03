@@ -1,3 +1,4 @@
+import type { AgentRuntimeToolResult } from "./hostAdapter";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 
@@ -93,3 +94,19 @@ function readTitleParams(
   if (entries.length === 0) return undefined;
   return Object.fromEntries(entries);
 }
+
+/**
+ * 执行前确认回调的返回契约（宿主确认 + 可选代执行）。
+ *
+ * - `true`：用户批准，按原路径执行；
+ * - `false`：拒绝，调用方必须抛错/不执行；
+ * - `{ approved, hostResult? }`：批准且宿主已代为执行该操作——`hostResult` 是真实
+ *   工具结果，调用方必须直接采用它、**不得再执行原操作**。
+ *
+ * 放在本模块的理由：`PermissionRequest` / `ActionGate` 已是执行前确认的公共契约，
+ * capability / localToolPolicy / cli client / tui 都从这里取类型，避免两套定义漂移。
+ * 注意：这是**流程内**的批准事实，不是密码学保证（同 UID 的 shell 进程不被它挡住）。
+ */
+export type HostConfirmDecision =
+  | boolean
+  | { approved: boolean; hostResult?: AgentRuntimeToolResult };

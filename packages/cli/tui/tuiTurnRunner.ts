@@ -16,6 +16,7 @@ import type { ShellApprovalSession } from "../client/originShellApprovalTranspor
  * 由调用方 runTuiWorkspace 装配，本模块不做任何模块级可变单例。
  */
 import type { createInterface } from "node:readline";
+import { scrubSecrets } from "agent-runtime/secretScrubber";
 import {
   runAgentTurn,
   OWNER_OAUTH_UNAVAILABLE_HINT,
@@ -203,7 +204,9 @@ async function runAgentChat(
      */
     localAttachmentPaths?: readonly string[];
     actionGateHandler?: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
-    confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+    confirmDestructiveAction?: (
+      request: PermissionRequest,
+    ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>;
     requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
     abortSignal?: AbortSignal;
     pastedTextStore?: CollapsedPasteStore;
@@ -1030,6 +1033,19 @@ export async function resolveActionGate(
      * by callers that must keep a per-call decision.
      */
     onApprove?: () => void;
+    /**
+     * 用户在该 `confirm` gate 上确认之后调用（宿主侧物化授权，例如签发凭据使用
+     * grant）。只在 approved 分支触发。**返回结果即视为宿主已代为执行**：
+     * 该结果会替换本次工具结果、且原工具不再执行；抛错则明确判 failed。
+     * 宿主不处理时必须能返回 `null` / `undefined`（既有语义：交回原流程）。
+     */
+    onApproved?: (
+      gate: LocalAgentActionGate,
+    ) =>
+      | import("agent-runtime/actionGate").HostConfirmDecision
+      | null
+      | void
+      | Promise<import("agent-runtime/actionGate").HostConfirmDecision | null | void>;
   },
 ): Promise<AgentRuntimeToolResult> {
   if (gate.kind === "confirm") {
@@ -1042,6 +1058,36 @@ export async function resolveActionGate(
         ...anchor,
       }),
     );
+    if (approved && deps.onApproved) {
+      // 不再吞错：宿主执行失败必须是 failed，而不是伪装成"已确认"再跑一遍原工具。
+      let decision: import("agent-runtime/actionGate").HostConfirmDecision | null | void;
+      try {
+        decision = await deps.onApproved(gate);
+      } catch (error) {
+        // 失败原因必须真实透出（否则只剩 gate 标题，排障和断言都无据），
+        // 但先过 scrubSecrets：错误文案不能成为凭据泄露通道。
+        const reason = scrubSecrets(
+          `host execution failed: ${String((error as Error)?.message ?? error)}`,
+        ).cleaned;
+        return {
+          content: `action gate failed: ${gate.title} — ${reason}`,
+          metadata: {
+            exitCode: 1,
+            actionGateResult: { gateId: gate.id, status: "failed", output: reason },
+          },
+        };
+      }
+      // 宿主动作的结果（HostConfirmDecision）在这里落成 resolvable 的工具结果：
+      // 带 hostResult → 直接替换；显式 approved:false → 视为取消；其余落到确认结果。
+      if (decision && typeof decision === "object") {
+        if (decision.hostResult) return decision.hostResult;
+        if (decision.approved === false) {
+          return buildGateCancelledResult(gate, "host action declined");
+        }
+      } else if (decision === false) {
+        return buildGateCancelledResult(gate, "host action declined");
+      }
+    }
     return approved
       ? buildGateConfirmedResult(gate)
       : buildGateCancelledResult(gate, "confirmation declined");
@@ -1163,7 +1209,9 @@ export async function runOneAgentTurn(
   inputMsg: TurnRequest | InternalTurnEvent | string,
   imageUrls: string[],
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  confirmDestructiveAction?: (
+    request: PermissionRequest,
+  ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
   /**
    * 本机原件路径（图片 / 音视频）：client 侧转成安全附件卡（只含 name/mime/size/kind），
    * 不把 path / machineId 发给 provider。缺省 = 无附件卡（行为不变）。
@@ -1293,11 +1341,29 @@ export async function runOneAgentTurn(
   // （emitTerminalProgramStatus 自己也有同一条 isTTY 闸门），转发的回调保持原样。
   const confirmDestructiveActionWithStatus =
     confirmDestructiveAction && ctx.output.isTTY === true
-      ? async (request: PermissionRequest): Promise<boolean> => {
+      ? async (
+          request: PermissionRequest,
+        ): Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }> => {
           if (ctx.state.permissionGrants?.local === true) return await confirmDestructiveAction(request);
           emitStatusUnlessForceStopped({ state: "blocked", kind: "permission" });
           try {
-            return await confirmDestructiveAction(request);
+            const approved = await confirmDestructiveAction(request);
+            if (!approved) return false;
+            // 执行前确认点：用户批准后，若这条命令属于「贴入 key 建 agent」的受限
+            // 场景，由宿主进程内执行并把真实结果带回，spawn 侧会跳过原命令。
+            // 必须走 runApprovedCredentialCommand（内含命令哈希幂等去重 + 失败可重试），
+            // 否则同一已批准命令重复进入回调会二次 create / 二次向固定 origin 探活。
+            const commandText = typeof request.command === "string" ? request.command : "";
+            if (commandText) {
+              const { runApprovedCredentialCommand } = await import("./hostCredentialCreate");
+              const hostResult = await runApprovedCredentialCommand({
+                commandText,
+                approvalEventId: request.id,
+                env: (process.env ?? {}) as Record<string, string | undefined>,
+              });
+              if (hostResult) return { approved: true, hostResult };
+            }
+            return true;
           } finally {
             emitStatusUnlessForceStopped({ state: "working" });
           }
@@ -1757,7 +1823,9 @@ export async function runDrainedQueueTurn(
   ctx: AgentTurnContext,
   req: TurnRequest,
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  confirmDestructiveAction?: (
+    request: PermissionRequest,
+  ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
   /** 测试注入点：缺省即 runOneAgentTurn。 */
   runTurn: typeof runOneAgentTurn = runOneAgentTurn,
 ): Promise<{ ok: boolean; aborted: boolean }> {
@@ -1850,7 +1918,9 @@ export async function runDrainedQueueTurn(
 export function ensureChatQueueBinding(
   ctx: AgentTurnContext,
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  confirmDestructiveAction?: (
+    request: PermissionRequest,
+  ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
 ): ChatQueueTuiBinding {
   if (ctx.chatQueueBinding) return ctx.chatQueueBinding;
   ctx.chatQueueBinding = createChatQueueTuiBinding(async (req) => {

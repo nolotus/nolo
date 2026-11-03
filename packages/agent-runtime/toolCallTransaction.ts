@@ -411,7 +411,12 @@ export async function executeToolCall(args: {
           `${toolName} confirmation`,
         );
         const gateResult = replacement?.metadata?.actionGateResult;
-        if (
+        const hostExecuted = replacement?.metadata?.hostExecuted === true;
+        if (replacement !== undefined && hostExecuted) {
+          // 宿主已代为执行这次操作（例如凭据 create 的受限执行）：直接采用宿主
+          // 返回的真实工具结果，**不再执行原工具**，避免同一动作跑两遍。
+          toolResult = replacement;
+        } else if (
           replacement !== undefined &&
           isCompletedActionGateResult(gateResult)
         ) {
@@ -497,6 +502,8 @@ export async function executeToolCall(args: {
       if (replacement) {
         // truthy 检查不剔除 void（TS 窄化规则），这里断言回工具结果类型；
         // 运行时 truthy 即真实对象，与拆分前隐式 any 行为一致。
+        // 宿主代为执行（hostExecuted）时同样采用其真实结果，不再让原工具的结果
+        // 覆盖宿主结论——否则 execShell 路径会出现"宿主 create + 原命令再跑一次"。
         toolResult = replacement as AgentRuntimeToolResult;
       }
     }

@@ -89,7 +89,7 @@ export type CliLocalRuntimeAdapterDeps = {
   /** 重试进度上报（TUI 活动行显示「自动重试 N/M」）。透传给 fetchWithTransientRetry.onRetry。 */
   activityReporter?: (label: string | null) => void;
   buildProviderOpenAiTools?: typeof buildOpenAiTools;
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../../agent-runtime/actionGate").HostConfirmDecision>;
   requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
   pastedTextStore?: CollapsedPasteStore;
   /**

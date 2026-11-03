@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import {
   shouldStripReasoningContentForOutbound,
+  resolveReasoningReplayOptions,
   toOpenAiCompatibleMessages,
 } from "./openAiCompatibleMessages";
 import { sanitizeForOutbound } from "./outboundHistorySanitize";
@@ -282,9 +283,15 @@ export function buildPlatformChatCompletionRequest(args: {
   const requestOptions = usesResponsesApi
     ? toResponsesRequestOptions(args.providerConfig.requestOptions)
     : args.providerConfig.requestOptions;
-  const shouldStripReasoning = shouldStripReasoningContentForOutbound(
+  // Responses accepts reasoning items; only Chat Completions strips strings.
+  const shouldStripReasoning = !usesResponsesApi && shouldStripReasoningContentForOutbound(
     args.providerConfig.provider,
     args.providerConfig.model,
+  );
+  const reasoningReplayOptions = resolveReasoningReplayOptions(
+    args.providerConfig.provider,
+    args.providerConfig.model,
+    shouldStripReasoning,
   );
   // Sanitize cross-wire history BEFORE the wire-specific converter turns it
   // into the request body: pair tool_calls with results, and downgrade
@@ -313,7 +320,14 @@ export function buildPlatformChatCompletionRequest(args: {
                 customProviderUrl: args.providerConfig.endpoint,
                 hasVision: args.providerConfig.hasVision,
               }),
+              // 占位必须在**这一层**注入，不能只交给 responsesHelpers：
+              // `toOpenAiCompatibleMessages` 会用 preserveAgentStateFields 重建对象，
+              // 而非枚举 Symbol 标记（DOWNGRADED_TOOL_TURN_ORIGIN）不会跟着走，
+              // 所以「整体降级成纯文本的工具轮」到了 Responses 转换器那里已经认不出来。
+              // 在这里注入后，转换器只需读非空 reasoning_content 这条既有真值路径。
+              ...reasoningReplayOptions,
             }) as any,
+            reasoningReplayOptions,
           ),
         }
       : {

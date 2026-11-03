@@ -129,7 +129,7 @@ export async function readS3Object(args: {
   uploadName: string;
   /** 重试退避基数（毫秒）。默认与写入路径一致；测试可传 0 以免拖慢。 */
   retryBaseMs?: number;
-  fetchFn?: typeof fetch;
+  fetchFn?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   sleepFn?: (ms: number) => Promise<unknown>;
 }): Promise<string | null> {
   const url = buildS3ObjectUrl(args.config, args.uploadName);
@@ -201,7 +201,7 @@ export async function getS3ObjectSizeByRange(args: {
   uploadName: string;
   /** 重试退避基数（毫秒）。默认与写入路径一致；测试可传 0 以免拖慢。 */
   retryBaseMs?: number;
-  fetchFn?: typeof fetch;
+  fetchFn?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   sleepFn?: (ms: number) => Promise<unknown>;
 }): Promise<number | null> {
   const url = buildS3ObjectUrl(args.config, args.uploadName);
@@ -284,7 +284,7 @@ export async function verifyS3Object(args: {
   uploadName: string;
   minBytes?: number;
   retryBaseMs?: number;
-  fetchFn?: typeof fetch;
+  fetchFn?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   sleepFn?: (ms: number) => Promise<unknown>;
 }): Promise<number> {
   const size = await getS3ObjectSizeByRange({

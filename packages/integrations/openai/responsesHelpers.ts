@@ -174,7 +174,7 @@ export const convertMessagesToResponsesInput = (
     | (Pick<Message, "role" | "content" | "tool_calls" | "tool_call_id"> & { reasoning_content?: unknown })
     | { role: string; content?: any; tool_calls?: any; tool_call_id?: string; reasoning_content?: unknown }
   >,
-  options?: { stripReasoningContent?: boolean; supportsToolImages?: boolean; maxImagesPerRequest?: number },
+  options?: { stripReasoningContent?: boolean; replayReasoningPlaceholder?: string; supportsToolImages?: boolean; maxImagesPerRequest?: number },
 ): ResponseInputItem[] => {
   const input: ResponseInputItem[] = [];
   const imageBudget = createToolImageBudget(options?.maxImagesPerRequest);
@@ -242,19 +242,26 @@ export const convertMessagesToResponsesInput = (
     }
 
     const role = message.role as ResponseInputMessage["role"];
-    if (
-      role === "assistant" &&
-      !options?.stripReasoningContent &&
-      typeof message.reasoning_content === "string" &&
-      message.reasoning_content
-    ) {
+    // 注意：不要在这里判断「整体降级成纯文本的工具轮」——那个标记是非枚举 Symbol，
+    // 而本函数的上游（platformChatProvider）会先用 toOpenAiCompatibleMessages 重建
+    // 对象，标记到不了这里（2026-11-03 复审实测：直接喂标记消息出 1 个 reasoning item，
+    // 走真实重建链路出 0 个）。降级轮的占位统一在那一层注入，这里只认
+    // 「非空 reasoning_content」这条既有真值路径。
+    const hasReplayableToolCalls =
+      Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+    const reasoningText = typeof message.reasoning_content === "string" && message.reasoning_content.trim()
+      ? message.reasoning_content
+      : hasReplayableToolCalls && options?.replayReasoningPlaceholder?.trim()
+        ? options.replayReasoningPlaceholder
+        : undefined;
+    if (role === "assistant" && !options?.stripReasoningContent && reasoningText) {
       // 数组 content（reasoning_text parts）是 OpenAI 官方与 DeepSeek 官方
       // Responses API 都接受的格式；字符串 content 会被 DeepSeek 拒绝
       // （serde "expected a sequence"，实测 400）。
       input.push({
         type: "reasoning",
         content: [
-          { type: "reasoning_text", text: message.reasoning_content },
+          { type: "reasoning_text", text: reasoningText },
         ],
       });
     }

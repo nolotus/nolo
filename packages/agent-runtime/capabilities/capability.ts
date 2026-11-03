@@ -35,7 +35,7 @@ export interface CapabilityExecutionContext {
   /** Whether the destructive shell guard is enabled (defaults to true) */
   enableDestructiveShellGuard?: boolean;
   /** Optional interactive confirmation callback for destructive actions */
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../actionGate").HostConfirmDecision>;
   /**
    * Behavior when a destructive action is detected but confirmDestructiveAction is absent:
    * - true: reject and throw destructive_action_requires_confirmation error (e.g. desktop turn service)

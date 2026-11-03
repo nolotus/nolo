@@ -2112,7 +2112,7 @@ async function execShellTool(args: {
   detachMs?: number;
   confirmed?: boolean;
   enableDestructiveShellGuard?: boolean;
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("./actionGate").HostConfirmDecision>;
   blockDestructiveWithoutConfirmation?: boolean;
   onInvoke?: (capability: string, input: unknown) => void | Promise<void>;
 }): Promise<AgentRuntimeToolResult> {
@@ -2679,7 +2679,7 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
         detachMs?: number;
         confirmed?: boolean;
         enableDestructiveShellGuard?: boolean;
-        confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+        confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("./actionGate").HostConfirmDecision>;
         blockDestructiveWithoutConfirmation?: boolean;
         onInvoke?: (capability: string, input: unknown) => void | Promise<void>;
       },

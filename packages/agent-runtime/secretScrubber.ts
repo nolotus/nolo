@@ -36,6 +36,14 @@ export const SECRET_PATTERNS: SecretPattern[] = [
     placeholder: "[REDACTED:API_KEY]",
     regex: /\bsk-[a-zA-Z0-9_\-]{24,}\b/g,
   },
+  // 3b. BigModel / 智谱（GLM）API Key：32 位 hex + "." + 16 位字母数字
+  //     （2026-11 实证：这类 key 没有任何可辨识前缀，此前漏在清洗与入路隔离之外，
+  //     用户贴进对话后明文直接进了 prompt / 历史 / 工具日志。）
+  {
+    kind: "BIGMODEL_KEY",
+    placeholder: "[REDACTED:BIGMODEL_KEY]",
+    regex: /\b[0-9a-fA-F]{32}\.[A-Za-z0-9]{16}\b/g,
+  },
   // 4. GitHub 访问令牌 (ghp_..., gho_..., github_pat_...)
   {
     kind: "GITHUB_TOKEN",
@@ -74,12 +82,17 @@ const QUICK_PROBE_SUBSTRINGS = [
   "SECRET_KEY",
 ];
 
+// 无前缀形态（BigModel / 智谱 `<32 hex>.<16 alnum>`）没有可用的子串探针，
+// 用一条自带边界的预检正则兜底；它在普通文本上首字符即失败，比跑完整流水线便宜得多。
+const UNPREFIXED_PROBE_REGEX = /\b[0-9a-fA-F]{32}\.[A-Za-z0-9]{16}\b/;
+
 /**
  * 快速判断文本是否可能包含敏感信息。
  */
 export function hasPotentialSecrets(text: string): boolean {
   if (typeof text !== "string" || text.length === 0) return false;
-  return QUICK_PROBE_SUBSTRINGS.some((probe) => text.includes(probe));
+  if (QUICK_PROBE_SUBSTRINGS.some((probe) => text.includes(probe))) return true;
+  return UNPREFIXED_PROBE_REGEX.test(text);
 }
 
 /**

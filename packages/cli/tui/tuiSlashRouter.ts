@@ -167,7 +167,7 @@ export async function runSubmittedSlashLine(
   line: string,
   host: SlashDispatchHost,
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../../agent-runtime/actionGate").HostConfirmDecision>,
 ): Promise<boolean> {
   const {
     history,

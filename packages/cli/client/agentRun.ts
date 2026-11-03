@@ -814,6 +814,7 @@ const HISTORY_REPLAY_REJECTION_RE = /invalid\s+tool\s+call\s+arguments?/i;
 /**
  * Detect the DeepSeek-style thinking-mode replay contract rejection:
  * `The reasoning_content in the thinking mode must be passed back to the API.`
+ * `The reasoning_text in the thinking mode must be passed back to the API.`
  * Upstream thinking models require every replayed assistant tool-call turn to
  * carry `reasoning_content`; Nolo can persist one without it when the gateway
  * omits reasoning on that round or the history came from a different model.
@@ -821,7 +822,7 @@ const HISTORY_REPLAY_REJECTION_RE = /invalid\s+tool\s+call\s+arguments?/i;
  * carries `invalid_request_error`-shaped text that used to fall into the
  * generic history-replay hint and mis-attribute the cause.
  */
-const REASONING_REPLAY_CONTRACT_RE = /reasoning_content[^.]*must be passed back/i;
+const REASONING_REPLAY_CONTRACT_RE = /reasoning_(?:content|text)[^.]*must be passed back/i;
 
 /**
  * Shared framing for the five non-402 local-run failure builders below.

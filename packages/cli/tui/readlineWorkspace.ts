@@ -1565,7 +1565,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   const runSubmittedLine = async (
     line: string,
     actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-    confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+    confirmDestructiveAction?: (
+      request: PermissionRequest,
+    ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
   ): Promise<boolean> => {
     // /shell-revoke（块 D）：空闲路径直撤——即时翻转 granted 位，不走
     // handleTuiInput（纯函数拿不到 grant）；下一次 shell 调用重新弹确认。
@@ -1791,6 +1793,20 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
             resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
             onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
+            onApproved: async (approvedGate) => {
+              // 贴入 key 的 create：用户真实批准后由宿主**进程内**执行受限
+              // create/verify（不落授权文件、不经 shell 持 grant 自授权）。
+              // 宿主不处理（null）→ 返回 null，交回原流程（既有语义）。
+              if (approvedGate.kind !== "confirm") return null;
+              const { executeApprovedCredentialCreate } = await import("./hostCredentialCreate");
+              const hostResult = await executeApprovedCredentialCreate({
+                gate: approvedGate,
+                approvalGateId: approvedGate.id,
+                env: effectiveEnv as Record<string, string | undefined>,
+              });
+              if (!hostResult) return null;
+              return { approved: true, hostResult };
+            },
           }),
         );
       };

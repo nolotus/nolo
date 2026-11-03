@@ -1,4 +1,5 @@
 import { toErrorMessage } from "core/errorMessage";
+import { normalizeOrigin } from "agent-runtime/credentialUseGrant";
 import {
   customNativeAuthHeaders,
   detectDeclaredCustomNativeWire,
@@ -367,6 +368,16 @@ function extractVerifyReply(data: VerifyProbeResponse | null): string {
  * 「模型名 / 端点 / Key 有一个错了」——所以路径与 body 都按声明的 wire 选。
  * 未声明 wire 时仍是 chat/completions 契约，行为不变。
  */
+/**
+ * verify 的失败原因会原样进 CLI 输出（JSON `verify.reason`），所以必须先把
+ * 密钥从错误文案里去掉——上游或 fetch 实现可能把请求头/URL 带进 message。
+ */
+function redactVerifyReason(error: unknown, apiKey: string | undefined): string {
+  const raw = toErrorMessage(error);
+  if (!apiKey) return raw;
+  return raw.split(apiKey).join("[REDACTED:SECRET]");
+}
+
 export async function verifyCustomProvider(options: {
   providerUrl: string | undefined;
   apiKey: string | undefined;
@@ -374,6 +385,11 @@ export async function verifyCustomProvider(options: {
   model: string | undefined;
   prompt?: string;
   fetchImpl?: CliFetchImpl;
+  /**
+   * 允许的目标 origin（来自可信 grant）。设置后：请求目标必须与它完全一致，
+   * 且禁止跟随重定向（3xx 直接判失败），防止凭据被带往别的 origin。
+   */
+  allowedOrigin?: string;
 }): Promise<{
   ok: boolean;
   status?: number;
@@ -385,6 +401,19 @@ export async function verifyCustomProvider(options: {
   const { providerUrl, apiKey, model, prompt = "只回复 OK" } = options;
   const fetchImpl = options.fetchImpl ?? fetch;
   const provider = providerUrl?.replace(/\/+$/, "") ?? "";
+
+  // 目标授权：有 grant 时只允许固定 origin，且不允许重定向漂移。
+  if (options.allowedOrigin) {
+    const origin = normalizeOrigin(provider);
+    if (!origin || origin !== options.allowedOrigin) {
+      return {
+        ok: false,
+        providerUrl: provider,
+        model,
+        reason: "blocked-cross-origin: request target is not the authorized provider origin",
+      };
+    }
+  }
 
   if (!provider || !apiKey || !model) {
     return {
@@ -424,12 +453,23 @@ export async function verifyCustomProvider(options: {
       method: "POST",
       headers,
       body: JSON.stringify(probeBody),
+      ...(options.allowedOrigin ? { redirect: "manual" as const } : {}),
     });
+    if (options.allowedOrigin && res.status >= 300 && res.status < 400) {
+      // 未跟随重定向：明确判失败，避免凭据被带去别的 origin。
+      return {
+        ok: false,
+        status: res.status,
+        providerUrl: provider,
+        model,
+        reason: "blocked-redirect: provider answered with a redirect",
+      };
+    }
     const data = (await res.json().catch(() => null)) as VerifyProbeResponse | null;
     const reply = extractVerifyReply(data);
     return { ok: res.ok, status: res.status, providerUrl: provider, model, reply };
   } catch (error) {
-    return { ok: false, providerUrl: provider, model, reason: toErrorMessage(error) };
+    return { ok: false, providerUrl: provider, model, reason: redactVerifyReason(error, apiKey) };
   }
 }
 

@@ -434,6 +434,10 @@ const USAGE_TEXT = [
   "  --all-users          合并本机所有账号的统计（默认只看当前登录账号）",
   "  --json               输出 JSON",
   "  -h, --help           显示本帮助",
+  "",
+  "子命令:",
+  "  rebuild              从明细重建日聚合（补回 cache / agents 维度，默认 dry-run）",
+  "                       见 `nolo usage rebuild --help`",
 ].join("\n");
 
 /**
@@ -454,6 +458,14 @@ export async function runUsageCommand(
 ): Promise<number> {
   const output = deps.output ?? process.stdout;
   const errorOutput = deps.errorOutput ?? process.stderr;
+
+  // 子命令分发：`nolo usage rebuild …`（从明细重建日聚合）。
+  // 必须放在 usage 自己的 help / 参数解析之前：rebuild 的 `--from/--apply/--force`
+  // 与 usage 的过滤项语义不同，先走 usage 的解析器会把它们按 usage 的规则判成非法组合。
+  if (args[0] === "rebuild") {
+    const { runUsageRebuildCommand } = await import("./usageRebuildCommand");
+    return runUsageRebuildCommand(args.slice(1), deps);
+  }
 
   if (hasFlag(args, "-h") || hasFlag(args, "--help")) {
     output.write(`${USAGE_TEXT}\n`);

@@ -284,7 +284,18 @@ import { readOAuthCredential } from "../../agent-runtime/oauthTokenStore";
 import { getDefaultCliLocalRuntimeDb } from "../localRuntimeDb";
 import { resolveAgentRuntimeConfigFromRecord } from "./agentConfigResolver";
 import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
+import {
+  createHostCredentialBrokerChain,
+  createStrictHostCredentialBroker,
+} from "../../agent-runtime/desktopHostCredentialBroker";
+import { getSharedSessionCredentialBroker } from "../../agent-runtime/sessionCredentialBroker";
+import { CREDENTIAL_STORE_SESSION_FALLBACK_WARNING } from "../agentRecordHelpers";
 import { createFileCredentialBroker } from "../../agent-runtime/fileCredentialBroker";
+
+/** 遗留只读回退提示按 ref 去重，避免每次取用都刷屏。 */
+const legacyHitNotified = new Set<string>();
+/** 会话内存回退提示每进程一次。 */
+let sessionFallbackNotified = false;
 import { fetchServerSyncedCredential } from "../../ai/chat/agentCredentialSyncClient";
 import { getServerProviderSecret } from "../../ai/agent/providerSecrets";
 import { createOAuthApiKeyRefResolver } from "../oauth/apiKeyRefResolver";
@@ -1288,11 +1299,35 @@ export function createCliLocalRuntimeAdapter(
   let localToolExecutors = buildCurrentToolExecutors();
 
   // 凭据保管库：同一个实例既供 provider 解析密钥，也暴露给 localLoop 做输入隔离
-  // 与执行边界解包（adapter.credentialBroker）。此前只有 provider 那条路建 broker，
-  // adapter 上没有这个字段 → 隔离路径恒不激活，用户粘贴的密钥只会被正则脱敏成
-  // 不可用的 [REDACTED:…] 标记，而不是模型能安全消费的引用。
-  const credentialBroker = createFileCredentialBroker({
-    migration: { enableLegacyMigration: true },
+  // 与执行边界解包（adapter.credentialBroker）。
+  //
+  // 严格档：只用操作系统安全区（Linux = Secret Service / `secret-tool`），没有
+  // 明文文件回退。安全区不可用时拿到的是「关闭态」broker（读写即抛
+  // `credential_store_*`），入路隔离会随之 fail closed，不会把贴入的明文写进
+  // 任何文件；也刻意不做 legacy 迁移读取，因此不会动用户既有的凭据文件。
+  const credentialBroker = createHostCredentialBrokerChain({
+    strict: createStrictHostCredentialBroker(),
+    // 会话内存：无钥匙串时贴 key 仍可用（本进程有效，不落盘）。
+    session: getSharedSessionCredentialBroker(),
+    // 读旧只读回退：既有 agent 的凭据还在旧 file broker 里，只读命中即可用，不迁移。
+    legacy: createFileCredentialBroker({
+      migration: { enableLegacyMigration: true },
+    }),
+    notifySessionFallback: () => {
+      if (sessionFallbackNotified) return;
+      sessionFallbackNotified = true;
+      process.stderr.write(
+        `[nolo] Warning: ${CREDENTIAL_STORE_SESSION_FALLBACK_WARNING}\n`,
+      );
+    },
+    notifyLegacyHit: (ref) => {
+      const key = `legacy-hit:${ref}`;
+      if (legacyHitNotified.has(key)) return;
+      legacyHitNotified.add(key);
+      process.stderr.write(
+        `[nolo] Warning: 凭据 "${ref}" 来自遗留本地明文存储（只读回退）。建议重新录入该 API key 以迁入系统安全区。\n`,
+      );
+    },
   });
 
   const adapterBase = {

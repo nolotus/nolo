@@ -283,9 +283,9 @@ export function shouldStripReasoningContentForOutbound(
  * Covers catalog `deepseek-v4-flash`/`deepseek-v4-pro` and custom model ids
  * like `deepseek-v4.1-flash` (substring match on the lowercased model).
  *
- * Mutually exclusive with `shouldStripReasoningContentForOutbound` by
- * construction: the strip predicate only fires for provider `deepseek`/`nolo`,
- * this one only for the OpenCode channel. `opencode` is an alias of
+ * Also covers the exact `deepseek`/`nolo` model ids recognized by the strip
+ * predicate: Responses replays reasoning items, while Chat Completions must
+ * still strip string reasoning_content. `opencode` is an alias of
  * `opencode-go`, not a different channel: `packages/ai/llm/providers.ts`
  * (`MODEL_LOOKUP_MAP`) maps both ids to the same `opencodeGoModels` catalog,
  * so both reach the same upstream and share this replay contract.
@@ -316,7 +316,8 @@ export function shouldReplayReasoningContentForOutbound(
   const p = provider?.trim().toLowerCase();
   const m = model?.trim().toLowerCase();
   if (!p || !m) return false;
-  return (p === "opencode-go" || p === "opencode") && m.includes("deepseek");
+  return shouldStripReasoningContentForOutbound(p, m) ||
+    ((p === "opencode-go" || p === "opencode") && m.includes("deepseek"));
 }
 
 /**
@@ -326,8 +327,9 @@ export function shouldReplayReasoningContentForOutbound(
  * Every live outbound seam must spread this result into
  * `preserveAgentStateFields` options instead of re-assembling the
  * `stripReasoningContent` / `shouldReplayReasoningContentForOutbound()` /
- * `REASONING_REPLAY_PLACEHOLDER` triple itself. The three current callers:
+ * `REASONING_REPLAY_PLACEHOLDER` triple itself. The current callers:
  *  - `packages/agent-runtime/openAiCompatibleProvider.ts` (local/desktop chat-completions wire)
+ *  - `packages/agent-runtime/platformChatProvider.ts` (platform Responses wire)
  *  - `packages/server/handlers/agentRun/loopMessageSanitize.ts` (server agent loop)
  *  - `packages/integrations/openai/generateOpenAIRequestBody.ts` (client body, forwarded verbatim by the server proxy)
  *
@@ -337,8 +339,9 @@ export function shouldReplayReasoningContentForOutbound(
  * the check is a bug waiting to happen; `reasoningReplaySeamParity.test.ts`
  * guards the seams that exist today.
  *
- * `stripReasoningContent` wins when both apply: a provider that rejects a
- * string `reasoning_content` would reject the placeholder too.
+ * `stripReasoningContent` wins when both apply: Chat Completions must return
+ * `{}` and never inject a placeholder on the strip path. Responses callers
+ * pass their wire-specific strip decision (false for reasoning item replay).
  */
 export function resolveReasoningReplayOptions(
   provider?: string,
