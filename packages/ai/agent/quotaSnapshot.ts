@@ -241,9 +241,13 @@ export function isSubscriptionQuotaScope(scope: string): boolean {
  * 不同，前者维持原有口径，后者才必须排除。
  */
 /**
- * 额度窗口的模型族。antigravity 按模型族把窗口拆成两套
- * （`gemini-5h`/`gemini-7d` 与 `3p-5h`/`3p-7d`，3p = 第三方模型），
- * 同一条凭证下两族额度互不相干。
+ * 额度窗口的模型族。antigravity 的额度接口把窗口分成**两族**，桶名是上游给的
+ * 字面量：`gemini-5h`/`gemini-7d` 与 `3p-5h`/`3p-7d`。
+ *
+ * ⚠️ `3p` 具体对应哪些模型**没有上游文档依据**（仓库内也无记载），只确认它是
+ * 与 gemini 族并列的另一族额度桶；不要在注释或对外文案里把它写成「第三方模型」
+ * 之类的确定语义。可验证的只有：生产接口只回 3p 族，泛用接口只回 gemini 族（且
+ * 其 gemini 族自 2026-10-22 起不再更新）。
  */
 export type QuotaWindowFamily = "gemini" | "3p";
 
@@ -264,9 +268,13 @@ export function parseQuotaWindowScope(scope: string): {
 }
 
 /**
- * agent 的模型 → 该看哪一族额度窗口。antigravity 只有两族：模型名含 gemini 的走
- * `gemini-*` 桶，其余（claude/gpt 等第三方模型）走 `3p-*` 桶。只有完全拿不到
- * model（undefined 或空串）时才返回 undefined，表示「两族都算数」（保守退化）。
+ * agent 的模型 → 该看哪一族额度窗口：模型名含 gemini 的走 `gemini-*` 族，其余走
+ * `3p-*` 族。只有完全拿不到 model（undefined 或空串）时才返回 undefined，表示
+ * 「两族都算数」（保守退化）。
+ *
+ * 该映射的适用范围：带族前缀的窗口只有 antigravity 会产出，而 antigravity 在本仓
+ * 库只跑 Gemini 模型（wire id 形如 `gemini-*-tiered` / `gemini-*-low`），因此
+ * antigravity agent 实际恒走 gemini 族。其它 provider 的窗口无族前缀，映射对它们恒等。
  */
 export function resolveQuotaWindowFamily(
   model?: string | null,

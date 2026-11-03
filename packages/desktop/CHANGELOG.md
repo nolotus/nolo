@@ -1,5 +1,17 @@
 
-## 0.225.0-alpha.1 (2026-11-03)
+## 0.226.0-alpha.1 (2026-11-03)
+
+### Features
+
+* **agent:** 新增「先验证，再下结论」系统固定块 ([d09af0d](https://github.com/nolotus/bun-nolo/commit/d09af0d23bf6736c6c0046a1b0435fa3e4f8c789))
+
+### Bug Fixes
+
+* **desktop:** refresh dev assets and stabilize folder picker ([26f0318](https://github.com/nolotus/bun-nolo/commit/26f031896b1f79092017bd4ad188947dcf7ef79c))
+* **quota:** 四端额度显示收敛到同一窗口集合（剔过期 + 按模型族） ([2d3a0dc](https://github.com/nolotus/bun-nolo/commit/2d3a0dcbc6b2ba2647cfddb065e3f12741ddeafb))
+
+
+## 0.225.0 (2026-11-03)
 
 ### Features
 
@@ -7,8 +19,7 @@
 
 ### Bug Fixes
 
-* **desktop:** refresh dev assets and stabilize folder picker ([26f0318](https://github.com/nolotus/bun-nolo/commit/26f031896b1f79092017bd4ad188947dcf7ef79c))
-* **quota:** 四端额度显示收敛到同一窗口集合（剔过期 + 按模型族） ([2d3a0dc](https://github.com/nolotus/bun-nolo/commit/2d3a0dcbc6b2ba2647cfddb065e3f12741ddeafb))
+* **desktop:** Windows 冒烟改用 PE 结构判据，去掉 45MB 体积下限 ([739643e](https://github.com/nolotus/bun-nolo/commit/739643e30e3fd28e78315ff027027b8bddae1905))
 
 
 ## 0.224.0 (2026-11-03)

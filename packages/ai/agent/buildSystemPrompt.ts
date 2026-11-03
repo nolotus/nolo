@@ -18,6 +18,7 @@ import { CREDENTIAL_HYGIENE_RULE } from "agent-runtime/credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDefault";
 // 派发落点是「并行是默认」的下一层（派到哪个后端执行），紧随其后注入。
 import { DISPATCH_BACKEND_POLICY } from "agent-runtime/dispatchBackendPolicy";
+import { VERIFY_BEFORE_CONCLUDING_RULE } from "agent-runtime/verifyBeforeConcluding";
 import { DISPATCH_CANDIDATE_POLICY } from "agent-runtime/dispatchCandidatePolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "agent-runtime/platformRiskControl";
 import { buildConsultationModeBlock } from "agent-runtime/consultationMode";
@@ -295,6 +296,13 @@ export const buildSystemPromptContext = (options: {
       owner: "platform",
       cacheScope: "static",
       content: CREDENTIAL_HYGIENE_RULE,
+    },
+    // 先验证再下结论：一切动作的前提，紧随凭据纪律、先于并行/派发/发布规则。
+    {
+      id: "verify-before-concluding",
+      owner: "platform",
+      cacheScope: "static",
+      content: VERIFY_BEFORE_CONCLUDING_RULE,
     },
     // 并行是默认：系统层固定块，紧随红线（同为无条件前缀，不随工具/轮次变化）。
     {

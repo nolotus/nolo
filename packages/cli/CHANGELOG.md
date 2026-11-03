@@ -1,13 +1,20 @@
 
-## 0.208.0-alpha.1 (2026-11-03)
+## 0.209.0-alpha.1 (2026-11-03)
 
 ### Features
 
-* **agent:** 创建表单信息层级、凭据状态显性化与高级项折叠 ([d3ae190](https://github.com/nolotus/bun-nolo/commit/d3ae190f49582959acaae635f38cd6fbacaa66de))
+* **agent:** 新增「先验证，再下结论」系统固定块 ([d09af0d](https://github.com/nolotus/bun-nolo/commit/d09af0d23bf6736c6c0046a1b0435fa3e4f8c789))
 
 ### Bug Fixes
 
 * **quota:** 四端额度显示收敛到同一窗口集合（剔过期 + 按模型族） ([2d3a0dc](https://github.com/nolotus/bun-nolo/commit/2d3a0dcbc6b2ba2647cfddb065e3f12741ddeafb))
+
+
+## 0.208.0 (2026-11-03)
+
+### Features
+
+* **agent:** 创建表单信息层级、凭据状态显性化与高级项折叠 ([d3ae190](https://github.com/nolotus/bun-nolo/commit/d3ae190f49582959acaae635f38cd6fbacaa66de))
 
 
 ## 0.207.0 (2026-11-03)

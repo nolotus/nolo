@@ -19,6 +19,7 @@ import { buildIdentityBlock } from "../../agent-runtime/identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "../../agent-runtime/deleteSafety";
 import { CREDENTIAL_HYGIENE_RULE } from "../../agent-runtime/credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "../../agent-runtime/parallelDispatchDefault";
+import { VERIFY_BEFORE_CONCLUDING_RULE } from "../../agent-runtime/verifyBeforeConcluding";
 import { DISPATCH_BACKEND_POLICY } from "../../agent-runtime/dispatchBackendPolicy";
 import { DISPATCH_CANDIDATE_POLICY } from "../../agent-runtime/dispatchCandidatePolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "../../agent-runtime/platformRiskControl";
@@ -146,6 +147,7 @@ export function buildCliEstimateSystemText(
     // 与实际装配线一致：删除安全红线是系统提示词的最顶层块。
     DELETE_SAFETY_RED_LINE,
     CREDENTIAL_HYGIENE_RULE,
+    VERIFY_BEFORE_CONCLUDING_RULE,
     PARALLEL_DISPATCH_DEFAULT_RULE,
     DISPATCH_BACKEND_POLICY,
     DISPATCH_CANDIDATE_POLICY,

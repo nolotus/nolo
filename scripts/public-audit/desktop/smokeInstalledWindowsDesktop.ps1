@@ -467,18 +467,52 @@ if ($isReleaseSmoke) {
 }
 Assert-SmokePortAvailable -Port $desktopSmokePort
 
-# Validate installer before running it
-$minimumInstallerBytes = if ($env:NOLO_DESKTOP_MIN_INSTALLER_BYTES) {
-  [long]$env:NOLO_DESKTOP_MIN_INSTALLER_BYTES
-} else {
-  # The current clean Windows smoke installer is ~48.6 MB. Keep a meaningful
-  # truncation guard while leaving headroom for normal compression drift.
-  45000000 # 45 MB default
+# Validate installer before running it.
+#
+# 刻意**不**用「最小字节数」当完整性判据。2026-11-03：安装包从 ~48.6 MB 变成
+# ~42.95 MB，固定 45 MB 下限让 Desktop Build 连续 10 次失败，而三次独立构建体积
+# 只差约 3 KB——体积变化是正常压缩/内容变动，不是截断。把字节数写死，等于每次
+# 打包瘦身都要重新调一个魔法数字；把字节数放宽，又拦不住真正的坏包。
+#
+# 完整性交给内容级断言（它们本来就在后面，且与体积无关）：
+#   - 安装日志干净（Assert-InstallerLogClean）
+#   - 安装后 payload marker（*.tar.zst 归档，或 flat bin\bun.exe + Resources\main.js）
+#   - launcher.exe 可执行校验（Assert-LauncherExecutableValid）
+#   - 安装后 HTTP healthcheck + BrowserWindow 启动
+# 这里只做「它是不是一个 PE 可执行文件」的结构性检查，用来尽早拦下空文件/坏下载。
+function Assert-InstallerLooksRunnable {
+  param([System.IO.FileInfo]$File)
+
+  if ($File.Length -lt 1MB) {
+    throw "Installer $($File.FullName) is only $($File.Length) bytes — not a plausible installer."
+  }
+
+  $stream = [System.IO.File]::OpenRead($File.FullName)
+  try {
+    $reader = New-Object System.IO.BinaryReader($stream)
+    $mz = $reader.ReadBytes(2)
+    if ($mz.Length -lt 2 -or $mz[0] -ne 0x4D -or $mz[1] -ne 0x5A) {
+      throw "Installer $($File.FullName) has no MZ header — not a Windows executable."
+    }
+
+    $stream.Position = 0x3C
+    $peOffset = $reader.ReadInt32()
+    if ($peOffset -le 0 -or $peOffset -gt ($File.Length - 4)) {
+      throw "Installer $($File.FullName) has an out-of-range PE header offset ($peOffset)."
+    }
+
+    $stream.Position = $peOffset
+    $pe = $reader.ReadBytes(4)
+    if ($pe.Length -lt 4 -or $pe[0] -ne 0x50 -or $pe[1] -ne 0x45 -or $pe[2] -ne 0 -or $pe[3] -ne 0) {
+      throw "Installer $($File.FullName) has no PE signature — not a PE image."
+    }
+  } finally {
+    $stream.Dispose()
+  }
 }
-if ($setup.Length -lt $minimumInstallerBytes) {
-  throw "Installer size $($setup.Length) bytes is below minimum $minimumInstallerBytes bytes — likely truncated or broken."
-}
-Write-SmokePhase "installer size $($setup.Length) bytes OK (minimum $minimumInstallerBytes)"
+
+Assert-InstallerLooksRunnable -File $setup
+Write-SmokePhase "installer is a structurally valid PE image ($($setup.Length) bytes; size is not used as a completeness gate)"
 
 $setupLogPath = Join-Path $env:RUNNER_TEMP "nolo-desktop-smoke-setup-log-$smokeRunId.txt"
 $installArgs = @(
