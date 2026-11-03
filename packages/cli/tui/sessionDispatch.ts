@@ -834,6 +834,13 @@ export function handleTuiInput(
         action: { type: "login", args: rest },
       };
     }
+    case "/auth": {
+      return {
+        nextState: state,
+        output: "",
+        action: { type: "auth", args: rest },
+      };
+    }
     case "/profile":
       return {
         nextState: state,

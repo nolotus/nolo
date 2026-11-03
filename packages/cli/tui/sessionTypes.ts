@@ -95,6 +95,11 @@ export type TuiState = {
    * 立即自成一个 turn 会打断节奏。
    */
   pendingTranscripts?: string[];
+  /**
+   * 聊天失败就地引导推荐的 /auth 命令（例如 `/auth claude`）。
+   * 用户在 composer 空回车时触发执行；输入任何其他内容即清除。
+   */
+  suggestedAuthCommand?: string;
   runtimeMode: AgentRuntimeRequestedMode;
   /**
    * 显示在状态栏里的模式标签,默认等于 runtimeMode。
@@ -237,6 +242,11 @@ export type TuiAction =
       /** /login：TUI 内发起浏览器 device-code 登录，成功后热写 env.AUTH_TOKEN。 */
       type: "login";
       /** /login 后的原始参数（如 ["--server", "https://..."]），交由执行器校验。 */
+      args?: string[];
+    }
+  | {
+      /** /auth：TUI 内 provider OAuth 查看状态、授权与注销。 */
+      type: "auth";
       args?: string[];
     }
   | {

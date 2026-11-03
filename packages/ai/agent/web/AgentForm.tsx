@@ -13,7 +13,7 @@ import {
 } from "../hooks/useAgentFormValidation";
 import { normalizeReferences } from "../createAgentSchema";
 import { isVoiceModel } from "../isVoiceModel";
-import { isCliProvider } from "../cliProviders";
+import { DEFAULT_CLI_PROVIDER, isCliProvider } from "../cliProviders";
 import { type ApiSourceType } from "./PersonaSection";
 import PersonaSection from "./PersonaSection";
 import KnowledgeToolsSection from "./KnowledgeToolsSection";
@@ -183,10 +183,10 @@ const AgentForm: React.FC<AgentFormProps> = ({
     const source = searchParams.get("apiSource");
     if (source !== "cli") return;
 
-    const cliProvider = searchParams.get("cliProvider") || "copilot";
+    const cliProvider = searchParams.get("cliProvider") || DEFAULT_CLI_PROVIDER;
     const machineId = searchParams.get("machineId") || "";
     const machineName = searchParams.get("machineName") || "";
-    const validCliProvider = isCliProvider(cliProvider) ? cliProvider : "copilot";
+    const validCliProvider = isCliProvider(cliProvider) ? cliProvider : DEFAULT_CLI_PROVIDER;
 
     setApiSource("cli");
     setCreateSourceCommitted(true);

@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type FormEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -12,7 +13,9 @@ import { useNavigate, useSearchParams } from "app/routing";
 import {
   LuArrowLeft,
   LuArrowRight,
+  LuCheck,
   LuClock,
+  LuCloudUpload,
   LuKey,
   LuShield,
   LuSparkles,
@@ -22,6 +25,13 @@ import Button from "render/web/ui/Button";
 import { useAppDispatch, type RootState } from "app/store";
 import { useUserId } from "identity";
 import { createAgent } from "ai/agent/agentSlice";
+import { runSyncStandaloneAgentToAccount } from "ai/agent/runSyncStandaloneAgentToAccount";
+import {
+  ensureSyncMappingsHydrated,
+  getSyncMapping,
+  getSyncMappingVersion,
+  subscribeSyncMappingVersion,
+} from "database/sync/syncMapping";
 import {
   getAgentSourceDescriptor,
   listAgentSourceDescriptors,
@@ -150,7 +160,9 @@ const LocalQuickCreateAgent = () => {
   const store = useStore<RootState>();
   const { createNewDialog } = useCreateDialog();
   const accountUserId = useUserId();
-  const ownerUserId = asOptionalTrimmedString(accountUserId) ?? "local";
+  // 创建永远落在本机：云同步是创建之后由用户显式触发的独立动作。
+  const ownerUserId = "local";
+  const hasAccount = Boolean(accountUserId && accountUserId !== "local");
 
   const initialPath = parsePath(searchParams.get("path"));
   const initialAccess = parseMembershipAccess(searchParams.get("access"));
@@ -166,6 +178,15 @@ const LocalQuickCreateAgent = () => {
   const [showEndpointFields, setShowEndpointFields] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 创建成功后的本机 Agent（dbKey + 展示名），用于显式云同步与开始聊天。 */
+  const [createdAgent, setCreatedAgent] = useState<{
+    dbKey: string;
+    name: string;
+  } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+  const [startingChat, setStartingChat] = useState(false);
   const [installedClis, setInstalledClis] = useState<CliProvider[]>([]);
   const [cliScanBusy, setCliScanBusy] = useState(false);
   /** The wizard's step surface — the element that slides on a step change. */
@@ -226,6 +247,24 @@ const LocalQuickCreateAgent = () => {
     () => (sourceKey ? getAgentSourceDescriptor(sourceKey) : undefined),
     [sourceKey],
   );
+
+  // 显式云同步状态：以 durable mapping 为唯一真源，冷启动先 hydrate 再判状态。
+  const mappingVersion = useSyncExternalStore(
+    subscribeSyncMappingVersion,
+    getSyncMappingVersion,
+    () => 0,
+  );
+  const syncedToCloud = useMemo(() => {
+    if (!createdAgent || !hasAccount || !accountUserId) return false;
+    return Boolean(getSyncMapping(createdAgent.dbKey, accountUserId));
+  }, [createdAgent, accountUserId, hasAccount, mappingVersion]);
+
+  useEffect(() => {
+    if (!createdAgent) return;
+    void ensureSyncMappingsHydrated().catch(() => {
+      /* best-effort cold hydrate for honest mapped status */
+    });
+  }, [createdAgent]);
 
   /**
    * Every step move goes through here: the runner slides the step surface in
@@ -307,6 +346,14 @@ const LocalQuickCreateAgent = () => {
   );
 
   const goBack = useCallback(() => {
+    // 创建成功后的面板：返回只是收起它，回到表单，不改变 wizard 步骤。
+    if (createdAgent) {
+      setCreatedAgent(null);
+      setSyncError(null);
+      setSyncSuccess(null);
+      setError(null);
+      return;
+    }
     // Boundary: the first step has nothing behind it, so nothing moves.
     const target = quickCreateBackTarget(step, path);
     if (!target) return;
@@ -329,7 +376,7 @@ const LocalQuickCreateAgent = () => {
         setPath(null);
       }
     });
-  }, [goToStep, step, path]);
+  }, [createdAgent, goToStep, step, path]);
 
   const displayName = useMemo(() => {
     const trimmed = name.trim();
@@ -357,6 +404,7 @@ const LocalQuickCreateAgent = () => {
       if (busy || !sourceKey || !selected) return;
       setBusy(true);
       setError(null);
+
       localFirstLog("quickCreate.submit", {
         path: path || "",
         sourceKey,
@@ -377,6 +425,7 @@ const LocalQuickCreateAgent = () => {
           model,
           customProviderUrl: baseUrl,
         });
+        // 创建永远落在本机（owner="local"）；云同步是创建之后显式触发的独立动作。
         const agent = await dispatch(
           createAgent({
             userId: ownerUserId,
@@ -405,7 +454,8 @@ const LocalQuickCreateAgent = () => {
         }
         // Web create path: flash agent row in sidebar (dialog marked in useCreateDialog).
         markRecentlyCreated(agentDbKey);
-        await createNewDialog({ agents: [agentDbKey] });
+        // 不在这里自动建对话/跳转：先展示创建成功面板与显式云同步入口。
+        setCreatedAgent({ dbKey: agentDbKey, name: displayName });
       } catch (err) {
         const message =
           err instanceof Error
@@ -429,10 +479,72 @@ const LocalQuickCreateAgent = () => {
       model,
       baseUrl,
       dispatch,
-      createNewDialog,
       t,
     ],
   );
+
+  /**
+   * 显式云同步：直接复用生产适配器（内部调用 syncStandaloneAgentToAccount，
+   * 走 durable mapping + 默认 job registry，不重写上传逻辑）。
+   * 失败语义按契约处理：抛错即如实展示，不谎报成功。
+   */
+  const onSyncNow = useCallback(async () => {
+    if (!createdAgent || !hasAccount || !accountUserId || syncing) return;
+    setSyncing(true);
+    setSyncError(null);
+    setSyncSuccess(null);
+    localFirstLog("quickCreate.sync.start", { key: createdAgent.dbKey });
+    try {
+      const result = await runSyncStandaloneAgentToAccount(
+        {
+          accountUserId,
+          localAgentKey: createdAgent.dbKey,
+        },
+        dispatch as {
+          (action: unknown): { unwrap: () => Promise<unknown> };
+        },
+      );
+      localFirstLog("quickCreate.sync.done", {
+        key: createdAgent.dbKey,
+        remoteDbKey: result.remoteDbKey,
+        reused: result.reused,
+      });
+      setSyncSuccess(
+        result.reused
+          ? t(
+              "localFirst.quickCreate.syncReused",
+              "已同步到云端（快照）：已存在云端副本，本次未重复创建。",
+            )
+          : t("localFirst.quickCreate.syncSuccess", "已同步到云端（快照）。"),
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : t("localFirst.quickCreate.syncFailed", "同步失败，请稍后重试。");
+      setSyncError(message);
+      localFirstLog("quickCreate.sync.error", { message: message.slice(0, 120) });
+    } finally {
+      setSyncing(false);
+    }
+  }, [createdAgent, hasAccount, accountUserId, syncing, dispatch, t]);
+
+  const onStartChat = useCallback(async () => {
+    if (!createdAgent || startingChat) return;
+    setStartingChat(true);
+    setError(null);
+    try {
+      await createNewDialog({ agents: [createdAgent.dbKey] });
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : t("localFirst.quickCreate.failed", "创建失败，请重试");
+      setError(message);
+    } finally {
+      setStartingChat(false);
+    }
+  }, [createdAgent, startingChat, createNewDialog, t]);
 
   return (
     <div className="local-quick-create" data-testid="local-quick-create">
@@ -454,21 +566,23 @@ const LocalQuickCreateAgent = () => {
             </button>
           ) : null}
           <h1 className="local-quick-create__title">
-            {step === "path"
-              ? t("localFirst.quickCreate.titlePath", "怎么开始？")
-              : step === "membership"
-                ? t(
-                    "localFirst.quickCreate.titleMembership",
-                    "你的会员怎么连进来？",
-                  )
-                : step === "source"
-                  ? path === "byo"
-                    ? t(
-                        "localFirst.quickCreate.titleSourceByo",
-                        "填 Key 或本地地址",
-                      )
-                    : t("localFirst.quickCreate.titleSource", "用哪一家？")
-                  : t("localFirst.quickCreate.titleForm", "差不多好了")}
+            {createdAgent
+              ? t("localFirst.quickCreate.titleCreated", "已创建")
+              : step === "path"
+                ? t("localFirst.quickCreate.titlePath", "怎么开始？")
+                : step === "membership"
+                  ? t(
+                      "localFirst.quickCreate.titleMembership",
+                      "你的会员怎么连进来？",
+                    )
+                  : step === "source"
+                    ? path === "byo"
+                      ? t(
+                          "localFirst.quickCreate.titleSourceByo",
+                          "填 Key 或本地地址",
+                        )
+                      : t("localFirst.quickCreate.titleSource", "用哪一家？")
+                    : t("localFirst.quickCreate.titleForm", "差不多好了")}
           </h1>
           {step === "path" ? (
             <p className="local-quick-create__desc">
@@ -497,6 +611,14 @@ const LocalQuickCreateAgent = () => {
                     "localFirst.quickCreate.descSource",
                     "点一下就能继续，后面还能改。",
                   )}
+            </p>
+          ) : null}
+          {createdAgent ? (
+            <p className="local-quick-create__desc">
+              {t(
+                "localFirst.quickCreate.descCreated",
+                "助手已建好，可以开始聊天；需要的话再手动同步到云端。",
+              )}
             </p>
           ) : null}
         </header>
@@ -685,7 +807,7 @@ const LocalQuickCreateAgent = () => {
         ) : null}
 
         {/* ── Step: form ── */}
-        {step === "form" && selected ? (
+        {step === "form" && selected && !createdAgent ? (
           <form className="local-quick-create__form" onSubmit={onSubmit}>
             <label className="local-quick-create__field">
               <span className="local-quick-create__label">
@@ -803,6 +925,110 @@ const LocalQuickCreateAgent = () => {
               </Button>
             </div>
           </form>
+        ) : null}
+
+        {/* ── 创建成功面板：显式云同步状态 + 手动触发 ── */}
+        {createdAgent ? (
+          <div
+            className="local-quick-create__created"
+            data-testid="local-quick-create-created"
+          >
+            <p
+              className="local-quick-create__chosen"
+              data-testid="local-quick-create-created-name"
+            >
+              {createdAgent.name}
+            </p>
+
+            <div className="local-quick-create__sync-row">
+              <span className="local-quick-create__sync-text">
+                <span
+                  className="local-quick-create__sync-title"
+                  data-testid="local-quick-create-sync-status"
+                >
+                  {syncedToCloud
+                    ? t(
+                        "localFirst.quickCreate.syncStatusSynced",
+                        "已同步到云端（快照）",
+                      )
+                    : t(
+                        "localFirst.quickCreate.syncStatusLocal",
+                        "未同步到云端",
+                      )}
+                </span>
+                <span
+                  className="local-quick-create__sync-note"
+                  data-testid="local-quick-create-sync-note"
+                >
+                  {t(
+                    "localFirst.quickCreate.syncNote",
+                    "同步会创建一份云端副本；本机记录保持不变；之后不会自动持续同步。",
+                  )}
+                </span>
+              </span>
+              {syncedToCloud ? <LuCheck size={18} aria-hidden /> : null}
+            </div>
+
+            {!hasAccount ? (
+              <p
+                className="local-quick-create__sync-warning"
+                data-testid="local-quick-create-sync-login-hint"
+              >
+                {t(
+                  "localFirst.quickCreate.syncRequiresLogin",
+                  "需登录 Nolo 账号才能同步到云端",
+                )}
+              </p>
+            ) : null}
+
+            {syncSuccess ? (
+              <p
+                className="local-quick-create__sync-success"
+                data-testid="local-quick-create-sync-success"
+              >
+                {syncSuccess}
+              </p>
+            ) : null}
+
+            {syncError ? (
+              <p
+                className="local-quick-create__error"
+                data-testid="local-quick-create-sync-error"
+                role="alert"
+              >
+                {syncError}
+              </p>
+            ) : null}
+
+            <div className="local-quick-create__actions">
+              <Button
+                type="button"
+                variant="primary"
+                size="large"
+                block
+                onClick={onStartChat}
+                disabled={startingChat}
+                icon={<LuArrowRight size={18} />}
+                data-testid="local-quick-create-start-chat"
+              >
+                {t("localFirst.quickCreate.startChat", "开始聊天")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="large"
+                block
+                onClick={onSyncNow}
+                disabled={!hasAccount || syncing}
+                icon={<LuCloudUpload size={18} />}
+                data-testid="local-quick-create-sync-now"
+              >
+                {syncing
+                  ? t("localFirst.quickCreate.syncing", "同步中…")
+                  : t("localFirst.quickCreate.syncNow", "立即同步到云端")}
+              </Button>
+            </div>
+          </div>
         ) : null}
 
         {step === "path" ? (

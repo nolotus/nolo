@@ -29,3 +29,13 @@ export {
   handleDesktopOAuthStartPost,
   handleDesktopOAuthStatusGet,
 } from "./desktopOAuthHandler";
+export {
+  handleDesktopMusicStatusGet,
+  handleDesktopMusicLoginPost,
+  handleDesktopMusicLoginStatusGet,
+  handleDesktopMusicSearchPost,
+  handleDesktopMusicPlayUrlPost,
+  handleDesktopMusicAudioGet,
+  handleDesktopMusicLyricGet,
+  handleDesktopMusicLogoutPost,
+} from "./desktopMusicHandler";

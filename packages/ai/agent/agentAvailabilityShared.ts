@@ -14,7 +14,7 @@
  * 「周额度耗尽」修复只落在 CLI 一侧，server 侧同一个 bug continued to ship。
  */
 import { parseResetsInMs } from "../tools/agent/quotaCircuitBreaker";
-import type { AgentQuota } from "./quotaSnapshot";
+import { isQuotaWindowExpired, type AgentQuota } from "./quotaSnapshot";
 
 /** 无法从上游响应解析出复位时刻时使用的保守冷却窗口。 */
 export const DEFAULT_PROVIDER_RETRY_MS = 5 * 60 * 1000;
@@ -130,13 +130,22 @@ export function shouldClearCooldownFromQuota(
   // 用字面 `"5h"`/`"7d"` 比较会让 subscriptionWindows 恒为空 → 该 provider
   // 的冷却永远无法按额度证据提前解除（2026-11-03 实测：额度 4%、网页显示
   // quota_ok，本地却锁满 24h）。
+  //
+  // 已过 resetAt 的窗口只是历史读数（额度早该复位、上游也没再报），不能拿来
+  // 放行冷却——否则一次 12 天前的 4% 就能把刚撞上的 429 解除掉。
   const family = resolveQuotaWindowFamily(options?.model);
   const relevantWindows = quota.windows.filter((window) =>
     isWindowRelevantToFamily(window.scope, family),
   );
   const subscriptionWindows = relevantWindows.filter(isSubscriptionPeriodWindow);
   if (subscriptionWindows.length === 0) return false;
-  if (relevantWindows.some((window) => !isSubscriptionPeriodWindow(window) && isExhaustedWindow(window))) return false;
+  // 否决守卫对**所有**相关窗口生效，与活性无关：一个窗口写着「已耗尽」
+  // （哪怕它的 resetAt 刚过、新周期读数还没到）就不放行。先按活性过滤再
+  // 否决，等于让一个过期耗尽窗口失去否决权——review HIGH finding。
+  if (relevantWindows.some(isExhaustedWindow)) return false;
+  // 证据完备：订阅窗口必须都还处在进行中的周期里。存在已过 resetAt 的窗口
+  // 说明这批读数滞后（可能是 12 天前冻结的值），不足以为「提前解除」背书。
+  if (subscriptionWindows.some((window) => isQuotaWindowExpired(window, now))) return false;
   return subscriptionWindows.every((window) => {
     const hasUtilization = typeof window.utilization === "number";
     const hasRemaining = typeof window.remaining === "number";
@@ -309,6 +318,16 @@ export function resolveAgentAvailability(
     return {
       status: "unverified",
       reason: "stale_quota_snapshot",
+    };
+  }
+
+  // 4b. 证据不足：所有窗口的复位时刻都已过去 —— 这些读数属于已结束的周期，
+  // 不能据此判「有余量」。2026-11-03 实测：antigravity 的 gemini 两格冻结在
+  // 10-22 的 4%，被判 quota_ok，而推理端一直 429 QUOTA_EXHAUSTED。
+  if (!relevantWindows.some((window) => !isQuotaWindowExpired(window, now))) {
+    return {
+      status: "unverified",
+      reason: "quota_window_reset",
     };
   }
 

@@ -13,7 +13,8 @@
  */
 
 import type { FormData as AgentFormData } from "./createAgentSchema";
-import { CLI_PROVIDER_VALUES, type CliProvider } from "./cliProviders";
+import { CLI_PROVIDER_VALUES,
+  CREATABLE_CLI_PROVIDERS, type CliProvider } from "./cliProviders";
 import {
   CUSTOM_API_KEY_TEMPLATES,
   SUBSCRIPTION_OAUTH_PROVIDERS,
@@ -328,7 +329,9 @@ export function listAgentSourceDescriptors(): AgentSourceDescriptor[] {
     ...tokenPlan,
     ...SUBSCRIPTION_OAUTH_PROVIDERS.map(oauthDescriptor),
     ...metered,
-    ...CLI_PROVIDER_VALUES.map(cliDescriptor),
+    // 新建入口只列可新建的 provider：已停用项（gemini）留在枚举里供存量 agent 运行，
+    // 但桌面端 / RN 的创建面板不该再出现它。
+    ...CREATABLE_CLI_PROVIDERS.map(cliDescriptor),
     ollamaDescriptor(),
     lmStudioDescriptor(),
     laterDescriptor(),

@@ -230,6 +230,27 @@ export function isSubscriptionQuotaScope(scope: string): boolean {
 }
 
 /**
+ * 窗口的复位时刻是否已经过去 —— 这类读数属于**已结束的周期**，不能当作
+ * 「当前余量」的证据（既不能用来判可用，也不能用来解除 429 冷却）。
+ *
+ * 2026-11-03 实测：antigravity 的 gemini 两格自 2026-10-22 起冻结在
+ * 4%/0%，resetAt 已过期 12 天，却被当成当前读数判 `quota_ok`，而同期推理对
+ * `gemini-3.8-flash-tiered` 一直 429 QUOTA_EXHAUSTED。
+ *
+ * 缺 resetAt（未知）**不算**过期：语义上「不知道周期边界」与「周期已结束」
+ * 不同，前者维持原有口径，后者才必须排除。
+ */
+export function isQuotaWindowExpired(
+  window: { resetAt?: number } | null | undefined,
+  now: number,
+): boolean {
+  const resetAt = window?.resetAt;
+  return (
+    typeof resetAt === "number" && Number.isFinite(resetAt) && resetAt <= now
+  );
+}
+
+/**
  * 旧版 Codex 窗口分类器会把长度直接拼进 scope（`3h` / `1d` / `window`），
  * 现在只产出 5h / 7d。这类 scope 是历史残留：同一指标会在快照里留两条记录。
  *

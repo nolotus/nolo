@@ -988,7 +988,7 @@ function buildAuthFailure(ctx: FailureCtx): string {
     /"code"\s*:\s*"owner_oauth_unavailable"/i.test(ctx.message)
   ) {
     return (
-      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, the agent owner's OAuth credential is unavailable on the server — 分享者（agent 所有者）的 OAuth 凭据在服务端不可用; owner_oauth_unavailable).` +
+      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, the agent owner's OAuth credential is unavailable on the server — ${OWNER_OAUTH_UNAVAILABLE_HINT}; owner_oauth_unavailable).` +
       `\n    · Ask the agent owner to run \`nolo auth <provider> --sync-to-server\` (or re-authenticate) / 请 owner 执行 \`nolo auth <provider> --sync-to-server\`（或重新授权）` +
       `\n    · Re-logging in on your local machine will not resolve this (the credential belongs to the agent owner, not this machine) / 你本机重新登录不会解决` +
       `\n    · Running with --server will not bypass this (server runs also require the owner's credential) / --server 也绕不过（服务端路径同样要用 owner 凭据）` +
@@ -1016,11 +1016,34 @@ function buildAuthFailure(ctx: FailureCtx): string {
     );
   }
 
+  // invalid_grant（Claude grant 30 天到期最常见形态）：给出可执行的重授权指引，
+  // 文案与 TUI 的就地引导共用同一句，避免两处漂移。
+  if (/invalid_grant/i.test(ctx.message)) {
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status ?? 401}, invalid_grant).` +
+      `\n  Claude grant 可能已超过 30 天，需重新授权（在 TUI 里可直接按回车运行 /auth claude）` +
+      ` Detail: ${ctx.message} ` +
+      `${NO_FALLBACK} ${SERVER_FALLBACK_HINT}\n`
+    );
+  }
+
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, auth rejected).` +
     ` Detail: ${ctx.message} ` +
     `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}\n`
   );
+}
+
+export const OWNER_OAUTH_UNAVAILABLE_HINT = "是 agent 所有者的凭据问题，你本机重登无效";
+
+export function isOwnerOAuthUnavailableError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return /owner_oauth_unavailable/i.test(msg);
+}
+
+export function isInvalidGrantError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return /invalid_grant/i.test(msg);
 }
 
 /**
