@@ -34,7 +34,13 @@ const pathOf = (to: string): string => to.split(/[?#]/)[0];
  * space switcher's "全部" action, so leaving a Space never leaves the
  * sidebar rendering a stale Space scope.
  */
-export function NavigationRail({ headerSlot }: { headerSlot?: React.ReactNode } = {}): React.JSX.Element {
+export function NavigationRail({
+  headerSlot,
+  projectScopeId,
+}: {
+  headerSlot?: React.ReactNode;
+  projectScopeId?: string | null;
+} = {}): React.JSX.Element {
   const { t } = useTranslation("space");
   const isLoggedIn = useIsLoggedIn();
   const location = useLocation();
@@ -118,7 +124,11 @@ export function NavigationRail({ headerSlot }: { headerSlot?: React.ReactNode } 
       className="navigation-v2-rail"
     >
       {headerSlot}
-      {isLoggedIn && <div className="navigation-v2-rail__create"><CreateMenuButton variant="sidebar" showLabel={false} /></div>}
+      {isLoggedIn && (
+        <div className="navigation-v2-rail__create">
+          <CreateMenuButton variant="sidebar" showLabel={false} projectScopeId={projectScopeId} />
+        </div>
+      )}
       <button type="button" className="navigation-v2-rail__item" title={t("common:search", "搜索")}
         aria-label={t("common:search", "搜索")} onClick={() => window.dispatchEvent(new Event("nolo:navigation-search"))}>
         <span className="navigation-v2-rail__icon"><LuSearch size={17} aria-hidden="true" /></span>

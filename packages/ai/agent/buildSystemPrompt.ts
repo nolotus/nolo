@@ -277,6 +277,13 @@ export const buildSystemPromptContext = (options: {
   const skillGuidanceSection = buildSkillGuidanceBlock(agentConfig);
   const referenceMaterialsSection = buildReferenceMaterialsBlock(contexts);
 
+  // 请求级上下文块（项目上下文 / 浏览上下文等）：调用方在发送时组装，
+  // 只进本轮 system prompt 的 turn-scope 尾巴，永不写进用户消息。
+  const requestContextBlocksSection = (contexts.requestContextBlocks ?? [])
+    .map((block) => (typeof block === "string" ? block.trim() : ""))
+    .filter((block) => block.length > 0)
+    .join("\n\n");
+
   const dialogSummarySection = contexts.dialogSummary?.trim()
     ? `--- 历史对话摘要 ---\n${wrapHistoricalSummaryWithReplayGuard(contexts.dialogSummary)}`
     : "";
@@ -362,6 +369,12 @@ export const buildSystemPromptContext = (options: {
     { id: "space-context", owner: "runtime", cacheScope: "session", content: spaceContextSection },
     { id: "memory-use-guidance", owner: "platform", cacheScope: "session", content: memoryUseGuidanceSection },
     { id: "reference-materials", owner: "agent", cacheScope: "turn", content: referenceMaterialsSection },
+    {
+      id: "request-context-blocks",
+      owner: "runtime",
+      cacheScope: "turn",
+      content: requestContextBlocksSection,
+    },
     { id: "memory-overlay", owner: "runtime", cacheScope: "turn", content: memoryOverlaySection },
     { id: "app-working-memory", owner: "runtime", cacheScope: "turn", content: appWorkingMemorySection },
     { id: "dialog-summary", owner: "runtime", cacheScope: "turn", content: dialogSummarySection },

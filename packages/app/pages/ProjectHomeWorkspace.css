@@ -1,0 +1,379 @@
+.project-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: min(760px, var(--home-content-max-width, 1040px));
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 16px 20px;
+  color: inherit;
+}
+
+/* 顶部/编辑框外上沿：项目名、文件夹横排，左对齐 */
+.project-workspace__composer {
+  width: 100%;
+}
+
+.project-workspace__header {
+  padding: 0;
+  margin: 0 0 8px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  width: 100%;
+}
+
+.project-workspace__header-top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.project-workspace__title-wrapper {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.project-workspace__title {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 4px 8px 4px 0;
+  margin: 0;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-workspace__title:hover,
+.project-workspace__context-button:hover {
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.project-workspace__name-input {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(136, 136, 136, 0.4));
+  background: transparent;
+  color: inherit;
+}
+
+.project-workspace__context-button {
+  min-width: 0;
+  max-width: 50%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-workspace__btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(136, 136, 136, 0.3));
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.project-workspace__btn:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+/* 主编辑框正下方轻量胶囊收纳条（Pill Bar） */
+.project-workspace__pill-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2px 0;
+}
+
+.project-workspace__pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-color, rgba(136, 136, 136, 0.25));
+  background: var(--surface-color, rgba(128, 128, 128, 0.04));
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.project-workspace__pill-btn:hover {
+  background: var(--surface-color-hover, rgba(128, 128, 128, 0.1));
+}
+
+.project-workspace__pill-btn.is-active {
+  background: var(--surface-color-active, rgba(128, 128, 128, 0.16));
+  border-color: var(--border-color-active, rgba(136, 136, 136, 0.45));
+  font-weight: 500;
+}
+
+.project-workspace__pill-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  color: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.project-workspace__pill-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.project-workspace__pill-link.is-disabled {
+  opacity: 0.5;
+  cursor: default;
+  text-decoration: none;
+}
+
+.project-workspace__agent-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.project-workspace__agent-select select {
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(136, 136, 136, 0.3));
+  background: transparent;
+  color: inherit;
+}
+
+/* 展开的抽屉（Drawer） */
+.project-workspace__drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(136, 136, 136, 0.2));
+  background: var(--surface-color, rgba(128, 128, 128, 0.03));
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.project-workspace__drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-workspace__drawer-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.project-workspace__drawer-actions select {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(136, 136, 136, 0.3));
+  background: transparent;
+  color: inherit;
+}
+
+.project-workspace__card-hint {
+  font-size: 12px;
+  opacity: 0.65;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.project-workspace__items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.project-workspace__empty-hint {
+  font-size: 12px;
+  opacity: 0.5;
+  margin: 6px 0;
+}
+
+.project-workspace__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface-color, rgba(128, 128, 128, 0.05));
+  font-size: 13px;
+}
+
+.project-workspace__item-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.project-workspace__item-link {
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-workspace__item-badge {
+  font-size: 11px;
+  opacity: 0.55;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.project-workspace__remove-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.5;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.project-workspace__remove-btn:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.15);
+}
+
+/* 下方「最近项目对话」与输入框同宽、左对齐，去除每个 item 的多余方框，保持干净的列表 */
+.project-workspace__dialogs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.project-workspace__dialogs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project-workspace__dialogs-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.project-workspace__dialogs-toggle {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.project-workspace__dialogs-toggle:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.project-workspace__dialogs-list {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0;
+}
+
+.project-workspace__dialog-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 4px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-color, rgba(136, 136, 136, 0.12));
+  text-decoration: none;
+  color: inherit;
+  font-size: 13px;
+  transition: background 0.15s ease;
+}
+
+.project-workspace__dialog-item:hover {
+  background: rgba(128, 128, 128, 0.05);
+}
+
+.project-workspace__dialog-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.project-workspace__dialog-time {
+  font-size: 11px;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+
+/* QuickChat 内部微调 */
+.project-workspace__composer .quick-chat-workspace-indicator {
+  display: none;
+}
+
+.project-workspace__composer .quick-chat-container {
+  margin-top: 0;
+  padding-top: 0;
+  width: 100%;
+  max-width: 100%;
+}

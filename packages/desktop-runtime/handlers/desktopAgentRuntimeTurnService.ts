@@ -99,6 +99,7 @@ import {
   buildSkillDiscoveryLayer,
   partitionScopedBlocks,
   renderTurnContextBlocksWithScope,
+  buildRequestContextLayer,
   buildMemoryUseGuidanceLayer,
   spaceRecordKey,
 } from "agent-runtime/turnContext";
@@ -177,6 +178,12 @@ type DesktopAgentRuntimeBaseTurnInput = {
    * 仅对三个通用档内置 agent 生效，其他 agent 忽略。
    */
   workspaceToolsHint?: boolean;
+  /**
+   * Request-scoped context blocks (project context, browse context…) sent by
+   * the caller. Rendered as turn-scope system-prompt layers so the model sees
+   * them without them ever entering `input` (i.e. the persisted user message).
+   */
+  contextBlocks?: string[];
   /**
    * Request-scoped authoritative agent config from the webview (IndexedDB).
    * Prefer over empty host LevelDB for logged-out local agents. Never written
@@ -1498,6 +1505,7 @@ export async function runDesktopAgentRuntimeTurn(
   const contextBlockScopes = partitionScopedBlocks(
     renderTurnContextBlocksWithScope([
       agentsMdLayer,
+      buildRequestContextLayer(input.contextBlocks),
       userGlobalPromptLayer,
       userResponseLanguageLayer,
       spaceContextLayer,

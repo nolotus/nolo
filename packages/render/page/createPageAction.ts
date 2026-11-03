@@ -20,6 +20,7 @@ import { slateToRenderMarkdown } from "create/editor/transforms/slateToRenderMar
 import { parseSkillDocProtocol } from "ai/skills/skillDocProtocol";
 import { buildSkillSummaryMarker } from "ai/skills/skillSummaryMarker";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { resolveCreationSpaceId } from "create/space/resolveCreationSpaceId";
 
 /**
  * 归一化 / 过滤 categoryId
@@ -78,7 +79,9 @@ export const createPageAction = async (
   // This action must preserve explicit caller intent:
   // - if `spaceId` is provided, use it;
   // - otherwise only fall back to the current selected space.
-  const spaceId = customSpaceId ?? getCurrentSpaceId();
+  // 空串表示「显式无 space」：必须与 undefined（回退当前 space）区分开，
+  // 否则没有 space 的项目会把页面落进当前选中的 space。
+  const spaceId = resolveCreationSpaceId(customSpaceId, getCurrentSpaceId());
   const { dbKey, id } = createPageKey.create(userId);
 
   const now = new Date();

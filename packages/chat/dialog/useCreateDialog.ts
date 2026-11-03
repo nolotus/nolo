@@ -8,6 +8,15 @@ import type { DialogRuntimeBinding } from "app/types";
 import { createDialog } from "./dialogSlice";
 import { buildDialogUrl } from "./dialogUrl";
 
+export interface CreateDialogCreatedPayload {
+  dbKey: string;
+  spaceId?: string | null;
+}
+
+export interface UseCreateDialogOptions {
+  onCreated?: (dialog: CreateDialogCreatedPayload) => void | Promise<void>;
+}
+
 export interface CreateDialogParams {
   agents?: string[];
   agentMode?: "auto" | "fixed";
@@ -15,6 +24,7 @@ export interface CreateDialogParams {
   preferredServerOrigin?: string | null;
   category?: string;
   runtimeBinding?: DialogRuntimeBinding;
+  onCreated?: (dialog: CreateDialogCreatedPayload) => void | Promise<void>;
 }
 
 interface UseCreateDialogResult {
@@ -23,7 +33,7 @@ interface UseCreateDialogResult {
   isSuccess: boolean;
 }
 
-export const useCreateDialog = (): UseCreateDialogResult => {
+export const useCreateDialog = (options?: UseCreateDialogOptions): UseCreateDialogResult => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
 
@@ -37,6 +47,7 @@ export const useCreateDialog = (): UseCreateDialogResult => {
     preferredServerOrigin,
     category,
     runtimeBinding,
+    onCreated,
   }: CreateDialogParams) => {
     setIsLoading(true);
     setIsSuccess(false);
@@ -55,9 +66,19 @@ export const useCreateDialog = (): UseCreateDialogResult => {
           runtimeBinding,
         })
       ).unwrap();
-      if (result?.dbKey) {
-        markRecentlyCreated(result.dbKey);
+
+      if (!result?.dbKey || typeof result.dbKey !== "string" || !result.dbKey.trim()) {
+        throw new Error("Dialog creation failed: invalid or missing dbKey");
       }
+
+      markRecentlyCreated(result.dbKey);
+
+      const createdPayload: CreateDialogCreatedPayload = {
+        dbKey: result.dbKey,
+        spaceId: result.spaceId ?? null,
+      };
+      await onCreated?.(createdPayload);
+      await options?.onCreated?.(createdPayload);
       navigate(buildDialogUrl(result.dbKey, result.spaceId), {
         state: { isNew: true },
       });

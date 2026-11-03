@@ -28,6 +28,12 @@ const DESKTOP_TURN_FORBIDDEN_ERROR =
 type DesktopAgentRuntimeTurnBody = {
   agentRef: string;
   input: AgentRuntimeMessageContent;
+  /**
+   * Request-scoped context blocks (project context, browse context…). Applied as
+   * turn-scope system-prompt layers by the turn service; never appended to
+   * `input`, so they are never persisted as the user message.
+   */
+  contextBlocks?: string[];
   runtimeContext?: Record<string, any> | null;
   continueDialogId?: string;
   /** Exact parent dialog dbKey from the client; see DesktopAgentRuntimeTurnInput. */
@@ -165,6 +171,13 @@ export function parseDesktopAgentRuntimeTurnBody(body: unknown): ParseDesktopAge
       ...(record.restrictShellToWorkspace === true
         ? { restrictShellToWorkspace: true }
         : {}),
+      ...(Array.isArray(record.contextBlocks)
+        ? {
+            contextBlocks: record.contextBlocks.filter(
+              (block): block is string => typeof block === "string" && block.trim().length > 0
+            ),
+          }
+        : {}),
       ...(record.workspaceToolsHint === true
         ? { workspaceToolsHint: true }
         : {}),
@@ -269,6 +282,7 @@ export async function handleDesktopAgentRuntimeTurnPost(
             cwd: body.cwd,
             restrictShellToWorkspace: body.restrictShellToWorkspace,
             workspaceToolsHint: body.workspaceToolsHint,
+            contextBlocks: body.contextBlocks,
             agentConfigSnapshot: body.agentConfigSnapshot,
             dialogHistorySnapshot: body.dialogHistorySnapshot,
             fetchImpl: deps.fetchImpl,

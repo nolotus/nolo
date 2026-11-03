@@ -8,12 +8,13 @@ import { createTable, addRow } from "./tableStore";
 import { buildScopedPagePath } from "create/space/contentKeyUtils";
 
 interface UseCreateTableOptions {
-    onSuccess?: () => void;
+    onSuccess?: (dbKey?: string) => void;
 }
 
 interface CreateNewTableParams {
     spaceId?: string;
     categoryId?: string;
+    onCreated?: (dbKey: string) => void | Promise<void>;
 }
 
 export const useCreateTable = (options?: UseCreateTableOptions) => {
@@ -24,7 +25,7 @@ export const useCreateTable = (options?: UseCreateTableOptions) => {
     const userId = useUserId();
     const [isCreating, setIsCreating] = useState(false);
 
-    const createNewTable = useCallback(async ({ spaceId, categoryId }: CreateNewTableParams = {}) => {
+    const createNewTable = useCallback(async ({ spaceId, categoryId, onCreated }: CreateNewTableParams = {}) => {
         if (!userId) {
             toast.error(t("space:userNotFound", "未找到用户信息，无法创建表格"));
             return;
@@ -55,8 +56,11 @@ export const useCreateTable = (options?: UseCreateTableOptions) => {
                 })
             ).unwrap();
 
-            // 3. 成功回调（关闭菜单等）
-            onSuccess?.();
+            // 3. 成功与创建回调（关闭菜单、关联项目等）
+            if (onCreated) {
+                await onCreated(dbKey);
+            }
+            onSuccess?.(dbKey);
 
             // 4. 导航（带 space 前缀，保持空间上下文）
             const tablePath = `${buildScopedPagePath(dbKey, spaceId)}?edit=true`;

@@ -302,6 +302,8 @@ class QuickChatChunkErrorBoundary extends React.Component<
 export type QuickChatSurface = "default" | "home-primary" | "space-home-compact";
 
 interface QuickChatProps {
+  beforeComposer?: React.ReactNode;
+  projectAgentId?: string | null;
   surface?: QuickChatSurface;
   isEmptyState?: boolean;
   /** Route-authoritative Space context; when set, wins over Redux for createDialog. */
@@ -315,6 +317,8 @@ const QuickChat: React.FC<QuickChatProps> = ({
   isEmptyState = false,
   spaceId,
   launch = null,
+  projectAgentId = null,
+  beforeComposer,
 }) => {
   const { t, i18n } = useTranslation();
   const dispatch = useAppDispatch();
@@ -540,6 +544,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
             {t("quickChat.greeting", "今天一起做什么？")}
           </h1>
         )}
+        {beforeComposer}
         <QuickChatChunkErrorBoundary
           onRetry={retryRuntimeChunk}
           retryLabel={t("quickChat.retryLoad", "重试加载")}
@@ -568,7 +573,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
           }>
             <RuntimeComponent
               initialText={draft}
-              initialAgentId={initialAgentId}
+              initialAgentId={initialAgentId || projectAgentId}
               surface={surface}
               spaceId={spaceId}
               autoSend={autoSend}
@@ -593,6 +598,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
           {t("quickChat.greeting", "今天一起做什么？")}
         </h1>
       )}
+      {beforeComposer}
       <QuickChatShell
         draft={draft}
         placeholder={placeholder}

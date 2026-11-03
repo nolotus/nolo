@@ -1076,6 +1076,10 @@ export default {
         spaceHomeLabel: "Quick chat",
       },
       chat: {
+        projectMissingForCreate:
+          "The project no longer exists, so nothing was created.",
+        createdButNotLinkedToProject:
+          "Created, but it could not be linked to the project.",
         title: "Chat Settings",
         animationSet: {
           title: "AI Response Animation",
@@ -3459,6 +3463,8 @@ export default {
         spaceHomeLabel: "快速对话",
       },
       chat: {
+        projectMissingForCreate: "项目已不存在，未创建任何内容。",
+        createdButNotLinkedToProject: "已创建，但未能关联到项目。",
         title: "对话设置",
         animationSet: {
           title: "AI 响应动画",
@@ -5841,6 +5847,8 @@ quickChat: {
         spaceHomeLabel: "快速對話",
       },
       chat: {
+        projectMissingForCreate: "專案已不存在，未建立任何內容。",
+        createdButNotLinkedToProject: "已建立，但未能連結到專案。",
         title: "對話設定",
         animationSet: {
           title: "AI 回應動畫",
@@ -8241,6 +8249,10 @@ quickChat: {
         spaceHomeLabel: "クイックチャット",
       },
       chat: {
+        projectMissingForCreate:
+          "プロジェクトは存在しないため、何も作成されませんでした。",
+        createdButNotLinkedToProject:
+          "作成しましたが、プロジェクトにリンクできませんでした。",
         title: "チャット設定",
         animationSet: {
           title: "AI応答アニメーション",

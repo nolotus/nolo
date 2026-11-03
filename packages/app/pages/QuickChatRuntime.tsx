@@ -28,8 +28,9 @@ import * as stylex from "@stylexjs/stylex";
 import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
 import "chat/web/chatStylexEscapeHatch.css";
 import { getIsDesktopApp } from "app/utils/env";
-import { readSelectedDesktopFolderPath, DESKTOP_FOLDER_SELECTION_EVENT, bindSelectedProjectToDialog, readDesktopDefaultWorkspacePath } from "chat/web/desktopFolderProjects";
+import { readSelectedDesktopFolderPath, DESKTOP_FOLDER_SELECTION_EVENT, readDesktopDefaultWorkspacePath } from "chat/web/desktopFolderProjects";
 import { noloAgentId } from "core/init";
+import { bindDialogToProject, readSelectedDesktopFolderProject } from "chat/web/desktopFolderProjects";
 import { asTrimmedString } from "core/trimmedString";
 import type { Agent } from "app/types";
 import { useChatInput } from "chat/hooks/useChatInput";
@@ -412,6 +413,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       return;
     }
 
+    const launchProject = getIsDesktopApp() ? readSelectedDesktopFolderProject(window.localStorage) : null;
     isStartingRef.current = true;
     setIsSending(true);
     logQuickChatPerf("start", startedAt, {
@@ -500,7 +502,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] createDialog dispatch", {
           agentMode: dialogAgentMode,
           cybots: selectedAgentId ? [effectiveAgentId] : [],
-          spaceId: currentSpaceId,
+          spaceId: launchProject?.spaceId || currentSpaceId,
           title: dialogTitle,
           ...(runtimeBinding ? { runtimeBinding } : {}),
         });
@@ -511,7 +513,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
             skipGreeting: true,
             skipAgentConfigRead: true,
             optimisticReturnBeforeWrite: true,
-            spaceId: currentSpaceId,
+            spaceId: launchProject?.spaceId || currentSpaceId,
             title: dialogTitle,
             ...(runtimeBinding ? { runtimeBinding } : {}),
           })
@@ -544,9 +546,10 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       // which silently skipped the binding and made every reopened Dialog lose its cwd.
       if (getIsDesktopApp() && typeof window !== "undefined") {
         try {
-          bindSelectedProjectToDialog(window.localStorage, dialogKey);
+          if (launchProject) bindDialogToProject(window.localStorage, dialogKey, launchProject.id);
         } catch (error) {
-          console.warn("[QuickChat] local project association could not be saved", error);
+          notifyStartupError("createDialogFailed", error);
+          return;
         }
       }
 
@@ -615,7 +618,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         try { selectedFolder = readSelectedDesktopFolderPath(window.localStorage); }
         catch { selectedFolder = null; }
       }
-      const effectiveCwd = selectedFolder || desktopCwd;
+      const effectiveCwd = launchProject ? launchProject.localPath || null : selectedFolder || desktopCwd;
       const runtimeOptions: AgentRuntimeOptions = {
         ...(getIsDesktopApp() ? { workspaceToolsHint: true } : {}),
         ...(getIsDesktopApp() && effectiveCwd ? { cwd: effectiveCwd } : {}),

@@ -43,7 +43,8 @@ export interface TurnContextLayer {
     | "user-response-language"
     | "memory-overlay"
     | "memory-use-guidance"
-    | "dialog-summary";
+    | "dialog-summary"
+    | "request-context";
   owner: "runtime";
   /** session = stable across turns in the same dialog; turn = may change each turn. */
   cacheScope: "turn" | "session";
@@ -66,6 +67,24 @@ const makeLayer = (
   content: string,
   cacheScope: TurnContextLayer["cacheScope"] = "turn",
 ): TurnContextLayer => ({ id, owner: "runtime", cacheScope, content });
+
+/**
+ * 调用方传入的请求级上下文块（项目上下文、浏览上下文…）。
+ *
+ * turn-scope：每轮重新组装，只进本轮 system prompt，绝不写进用户消息——
+ * 历史实现把它们拼进用户输入，于是 `<project_context>` 落库、显示在用户气泡里，
+ * 且每轮重算的时效断言会在历史里累积成互相矛盾的多份。
+ * 空/纯空白块被丢弃，因此「本轮没有项目上下文」不会多出一个空层。
+ */
+export const buildRequestContextLayer = (
+  blocks?: ReadonlyArray<string> | null,
+): TurnContextLayer | null => {
+  const content = (Array.isArray(blocks) ? blocks : [])
+    .map((block) => (typeof block === "string" ? block.trim() : ""))
+    .filter((block) => block.length > 0)
+    .join("\n\n");
+  return content ? makeLayer("request-context", content) : null;
+};
 
 interface SpaceCategoryLike {
   name?: unknown;

@@ -50,6 +50,16 @@ export interface Contexts {
   /** 对话增量摘要：已压缩的历史消息概要 */
   dialogSummary?: string | null;
 
+  /**
+   * 请求级上下文块（项目上下文、浏览上下文等）：只拼进本轮 system prompt，
+   * 永远不写进用户消息文本。
+   *
+   * 与 `currentInputContext` 的区别是来源：这里的内容由调用方在发送时组装，
+   * 不对应用户说过的话；历史上它们被字符串拼进 userInput，于是
+   * `<project_context>` 落库并显示在用户气泡里（PR #209 复审 HIGH-1）。
+   */
+  requestContextBlocks?: string[] | null;
+
   /** 压缩消息中提取的引用 Key */
   referenceKeys?: string[];
 

@@ -1,4 +1,16 @@
 
+## 0.210.0-alpha.1 (2026-11-03)
+
+### Features
+
+* **desktop:** scope project-side creation to the active project and add optional project instructions ([fab1624](https://github.com/nolotus/bun-nolo/commit/fab16241f4b69dbf10631ed5243d6516e50d0d1d))
+* **desktop:** 重构项目主页排版为极简流式布局与切视图默认选定 ([d229513](https://github.com/nolotus/bun-nolo/commit/d229513c288a04afc236dbaa30204cf7f299955a))
+
+### Bug Fixes
+
+* **desktop:** 修复项目作用域与上下文注入的四处缺陷（[#209](https://github.com/nolotus/bun-nolo/issues/209) 复审） ([a94c9a7](https://github.com/nolotus/bun-nolo/commit/a94c9a7820f6f99ce20da78ddf81518a58442dae))
+
+
 ## 0.209.0-alpha.1 (2026-11-03)
 
 ### Features

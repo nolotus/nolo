@@ -761,6 +761,26 @@ export const mergeContexts = (
     referenceKeys: dynamicCtx.referenceKeys,
 });
 
+/**
+ * 把调用方传入的请求级上下文块挂到本轮 `Contexts` 上。
+ *
+ * 这些块只进本轮 system prompt（turn-scope 层，见 buildSystemPrompt），
+ * 绝不写进用户消息——这正是不再把它们拼进 `userInput` 的原因。
+ */
+export const withRequestContextBlocks = (
+    contexts: Contexts,
+    blocks?: ReadonlyArray<string> | null,
+): Contexts => {
+    const cleaned = (Array.isArray(blocks) ? blocks : [])
+        .map((block) => (typeof block === "string" ? block.trim() : ""))
+        .filter((block) => block.length > 0);
+    if (cleaned.length === 0) return contexts;
+    return {
+        ...contexts,
+        requestContextBlocks: [...(contexts.requestContextBlocks ?? []), ...cleaned],
+    };
+};
+
 /** 合并 Agent.tools + Context Page Tools + Mentioned Tools + runtimeOptions.extraTools */
 export const mergeAgentToolsWithRuntime = (
     agentConfig: Agent,

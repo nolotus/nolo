@@ -21,6 +21,7 @@ import type {
   TablePublicIntakeConfig,
 } from "./types";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { resolveCreationSpaceId } from "create/space/resolveCreationSpaceId";
 
 /**
  * 创建表时的输入参数：
@@ -197,7 +198,7 @@ export const createTableAction = async (
   // This action preserves explicit caller intent:
   // - prefer `spaceId` when a caller passes it;
   // - otherwise fall back to the current selected space only.
-  const spaceId = customSpaceId ?? getCurrentSpaceId();
+  const spaceId = resolveCreationSpaceId(customSpaceId, getCurrentSpaceId());
 
   const tableId = ulid();
 

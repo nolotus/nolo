@@ -30,6 +30,12 @@ export type DesktopAgentRuntimeTurnResult =
 type RunDesktopAgentRuntimeTurnArgs = {
   agentRef: string;
   input: AgentRuntimeMessageContent;
+  /**
+   * Request-scoped context blocks (project context, browse context…). Reach the
+   * model as system-prompt layers on the host; never become part of `input`, so
+   * they are never persisted as the user message.
+   */
+  contextBlocks?: string[];
   runtimeContext?: Record<string, any> | null;
   continueDialogId?: string;
   /**
@@ -101,6 +107,9 @@ export function buildDesktopAgentRuntimeTurnBody(args: RunDesktopAgentRuntimeTur
   const body = {
     agentRef: args.agentRef,
     input: args.input,
+    ...(Array.isArray(args.contextBlocks) && args.contextBlocks.length > 0
+      ? { contextBlocks: args.contextBlocks }
+      : {}),
     ...(args.runtimeContext ? { runtimeContext: args.runtimeContext } : {}),
     ...(continueDialogId ? { continueDialogId } : {}),
     ...(continueDialogId && asTrimmedString(args.dialogKey)
