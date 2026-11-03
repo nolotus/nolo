@@ -83,8 +83,10 @@ export function resolveAgentBadgeMeta(agent: AgentBadgeSource): AgentBadgeMeta {
   const showVisionBadge = !!agent?.hasVision;
   const showRuntimeBadge = isCliAgent || isMachineBoundLocalCustomAgent;
   const rawQuota = agent?.quota;
-  const quotaText = formatQuotaSummary(rawQuota);
-  const quotaTooltip = formatQuotaTooltip(rawQuota);
+  const quotaText = formatQuotaSummary(rawQuota, Date.now(), { model: (agent as { model?: string | null } | undefined)?.model });
+  const quotaTooltip = formatQuotaTooltip(rawQuota, Date.now(), {
+    model: (agent as { model?: string | null } | undefined)?.model,
+  });
 
   return {
     isCliAgent,

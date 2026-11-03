@@ -240,6 +240,83 @@ export function isSubscriptionQuotaScope(scope: string): boolean {
  * 缺 resetAt（未知）**不算**过期：语义上「不知道周期边界」与「周期已结束」
  * 不同，前者维持原有口径，后者才必须排除。
  */
+/**
+ * 额度窗口的模型族。antigravity 的额度接口把窗口分成**两族**，桶名是上游给的
+ * 字面量：`gemini-5h`/`gemini-7d` 与 `3p-5h`/`3p-7d`。
+ *
+ * `3p` 的语义有上游自述依据（2026-11-03 实测 `retrieveUserQuotaSummary` 原始响应）：
+ * 该 group 的 `displayName` 是 `Claude and GPT models`，`description` 是
+ * `Models within this group: Claude Opus, Claude Sonnet, GPT-OSS` —— 即 3p 是
+ * **Claude/GPT 那一族**，与 Gemini 模型无关。
+ *
+ * 同一响应里**没有** Gemini 组（生产档只回 3p 组），因此 gemini agent 的额度上游
+ * 不提供；泛用接口虽回 gemini 族，但其读数自 2026-10-22 起冻结（resetAt 已过期），
+ * 不能当当前余量。展示层据此显示「无额度数据」而不是编造数字。
+ */
+export type QuotaWindowFamily = "gemini" | "3p";
+
+/**
+ * 拆解 scope 的「模型族 + 窗口周期」。
+ *
+ * 无家族前缀的 scope（claude/codex/kimi/glm 的 `5h`/`7d`、devin 的
+ * `daily`/`weekly`、cursor 的 `monthly`）family 为 undefined，period 即 scope 本身。
+ */
+export function parseQuotaWindowScope(scope: string): {
+  family?: QuotaWindowFamily;
+  period: string;
+} {
+  const matched = /^(gemini|3p)-(.+)$/.exec(scope);
+  return matched
+    ? { family: matched[1] as QuotaWindowFamily, period: matched[2]! }
+    : { period: scope };
+}
+
+/**
+ * agent 的模型 → 该看哪一族额度窗口：模型名含 gemini 的走 `gemini-*` 族，其余走
+ * `3p-*` 族。只有完全拿不到 model（undefined 或空串）时才返回 undefined，表示
+ * 「两族都算数」（保守退化）。
+ *
+ * 该映射的适用范围：带族前缀的窗口只有 antigravity 会产出，而 antigravity 在本仓
+ * 库只跑 Gemini 模型（wire id 形如 `gemini-*-tiered` / `gemini-*-low`），因此
+ * antigravity agent 实际恒走 gemini 族。其它 provider 的窗口无族前缀，映射对它们恒等。
+ */
+export function resolveQuotaWindowFamily(
+  model?: string | null,
+): QuotaWindowFamily | undefined {
+  if (typeof model !== "string" || !model.trim()) return undefined;
+  return /gemini/i.test(model) ? "gemini" : "3p";
+}
+
+/** 一个窗口是否属于该模型族（无前缀窗口、无 scope 的窗口与未知家族一律算数）。 */
+export function isQuotaWindowRelevantToFamily(
+  scope: string | undefined,
+  family: QuotaWindowFamily | undefined,
+): boolean {
+  if (typeof scope !== "string") return true;
+  const scopeFamily = parseQuotaWindowScope(scope).family;
+  return scopeFamily === undefined || family === undefined || scopeFamily === family;
+}
+
+/**
+ * 展示/判定用窗口集合的**唯一**入口：剔除已过复位时刻的窗口（历史读数），
+ * 再按 agent 的模型族过滤。展示（徽章/面板/TUI/RN）与可用性判定必须都走这里，
+ * 否则同一份快照在不同端会得出不同结论（2026-11-03：泛域残留的 gemini 4%
+ * 在四个端同时冒充「当前余量」）。
+ */
+export function selectQuotaWindowsForModel(
+  quota: AgentQuota | undefined,
+  now: number,
+  model?: string | null,
+): QuotaWindow[] {
+  if (!quota || !Array.isArray(quota.windows)) return [];
+  const family = resolveQuotaWindowFamily(model);
+  return quota.windows.filter(
+    (window) =>
+      !isQuotaWindowExpired(window, now) &&
+      isQuotaWindowRelevantToFamily(window?.scope, family),
+  );
+}
+
 export function isQuotaWindowExpired(
   window: { resetAt?: number } | null | undefined,
   now: number,
@@ -651,14 +728,16 @@ export function extractQuotaSnapshot(
 export function findTightestQuotaWindow(
   quota: AgentQuota | undefined,
   now = Date.now(),
+  options?: { model?: string | null },
 ): QuotaWindow | undefined {
-  if (!quota || !Array.isArray(quota.windows) || quota.windows.length === 0) {
-    return undefined;
-  }
+  // 过期窗口（resetAt 已过）只是历史读数，不能拿来代表「当前余量」；
+  // 通报口径与可用性判定共用 selectQuotaWindowsForModel，避免各端各算一套。
+  const windows = selectQuotaWindowsForModel(quota, now, options?.model);
+  if (windows.length === 0) return undefined;
   let best: QuotaWindow | undefined;
   let bestScore = -Infinity;
 
-  for (const w of quota.windows) {
+  for (const w of windows) {
     let score = 0;
     if (typeof w.utilization === "number" && w.utilization >= 0) {
       // 0..1 归一化值，utilization 越高 score 越大
@@ -677,7 +756,7 @@ export function findTightestQuotaWindow(
       best = w;
     }
   }
-  return best ?? quota.windows[0];
+  return best ?? windows[0];
 }
 
 /**
@@ -691,13 +770,13 @@ export function findTightestQuotaWindow(
 export function formatQuotaSummary(
   quota: AgentQuota | undefined,
   now = Date.now(),
-  options?: { compact?: boolean },
+  options?: { compact?: boolean; model?: string | null },
 ): string | undefined {
   const compact = options?.compact === true;
   const planText = formatPlanLabel(quota?.plan);
   const planName =
     typeof quota?.plan?.name === "string" ? quota.plan.name.trim() : "";
-  const tightest = findTightestQuotaWindow(quota, now);
+  const tightest = findTightestQuotaWindow(quota, now, { model: options?.model });
   // 套餐身份可以单独成立（上游只报套餐、不报窗口时仍要显示，如 Mistral）。
   if (!tightest) return compact ? planName || undefined : planText;
 
@@ -775,13 +854,17 @@ export function formatPlanLabel(plan: AgentPlan | undefined): string | undefined
 export function formatQuotaTooltip(
   quota: AgentQuota | undefined,
   now = Date.now(),
+  options?: { model?: string | null },
 ): string | undefined {
   const planText = formatPlanLabel(quota?.plan);
-  if (!quota || !Array.isArray(quota.windows) || quota.windows.length === 0) {
+  // 与徽章/面板同一份窗口集合：过期读数与异族窗口都不该出现在提示里
+  // （否则徽章已经不显示的 12 天前读数会在悬浮提示里复活）。
+  const windows = selectQuotaWindowsForModel(quota, now, options?.model);
+  if (windows.length === 0) {
     return planText ? `套餐：${planText}` : undefined;
   }
   const lines: string[] = planText ? [`套餐：${planText}`] : [];
-  for (const w of quota.windows) {
+  for (const w of windows) {
     const parts: string[] = [];
     if (typeof w.utilization === "number") {
       parts.push(`${Math.round(w.utilization * 100)}%已用`);

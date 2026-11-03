@@ -3,7 +3,7 @@
 
 import React, { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "app/routing";
+import { useNavigate, useLocation } from "app/routing";
 import { toast } from "app/utils/toast";
 import { useAppDispatch } from "app/store";
 import { useHoverCapable } from "app/hooks/useHoverCapable";
@@ -11,6 +11,21 @@ import type { TypedThunkDispatch } from "app/store";
 import { useStore } from "react-redux";
 import { useCreateMenuOpenCount, incrementCreateMenuOpenCount } from "./createMenuOpenCountStore";
 import { useCreateDialog } from "chat/dialog/useCreateDialog";
+import {
+  resolveActiveProjectScope,
+  extractProjectIdFromLocation,
+  extractDialogKeyFromLocation,
+  linkContentToProject,
+} from "chat/web/projectCreationScope";
+import {
+  resolveProjectCreationTarget,
+  tryLinkToProject,
+  projectStillExists,
+  isRequestedProjectMissing,
+} from "chat/web/projectScopedCreation";
+import {
+  bindDialogToProject,
+} from "chat/web/desktopFolderProjects";
 import { noloAgentId } from "core/init";
 import { createDocState } from "render/page/docStore";
 import { APP_TEMPLATES } from "app/constants/appTemplates";
@@ -65,6 +80,7 @@ interface CreateMenuButtonContainerProps {
   showLabel?: boolean;
   categoryId?: string;
   title?: string;
+  projectScopeId?: string | null;
   onUploadClick?: () => void;
   onOpenMenu?: () => void;
   onOpenChange?: (open: boolean) => void;
@@ -76,6 +92,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   showLabel,
   categoryId,
   title,
+  projectScopeId,
   onUploadClick,
   onOpenMenu,
   onOpenChange,
@@ -84,6 +101,8 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   const dispatch = useAppDispatch() as unknown as TypedThunkDispatch;
   const store = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
+
   const { createNewDialog } = useCreateDialog();
   const isDesktop = typeof document !== "undefined" && document.documentElement.dataset.noloDesktop === "1";
 
@@ -103,6 +122,9 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     onSuccess: () => setIsOpen(false),
   });
 
+  // 无项目时使用当前真实空间规则
+  const effectiveSpaceId = currentSpaceId ?? currentSpace?.id ?? null;
+
   const sidebarScopedSpaceId =
     variant === "sidebar"
       ? viewMode === "all"
@@ -110,7 +132,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
         : currentSpaceId ?? currentSpace?.id ?? null
       : undefined;
 
-  const pageCreateSpaceId = currentSpaceId ?? currentSpace?.id ?? null;
+  const pageCreateSpaceId = effectiveSpaceId;
 
   // 计数副作用只在 count=true 分支触发；hover 预览 count=false 不递增
   // createMenuOpenCount（该计数超阈值会让「新建」引导标签永久消失）。
@@ -151,22 +173,98 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
 
   const isRail = variant === "sidebar" && !shouldShowLabel;
 
+  /**
+   * 关联失败（内容已创建、但没能挂到项目上）时统一提示。
+   * 绝不能伪装成「创建失败」：用户会再点一次，造成重复创建。
+   */
+  const reportUnlinked = useCallback(
+    (error: unknown) => {
+      console.error("[createMenu] 内容已创建，但未能关联到项目", error);
+      toast.info(
+        t("chat:createdButNotLinkedToProject", "已创建，但未能关联到项目"),
+      );
+    },
+    [t],
+  );
+
+  /**
+   * 解析本次创建的落点：项目 + space。
+   * - 项目已被删除（或 storage 不可用）时返回 null，调用方必须在创建前中止，
+   *   否则会留下既无法关联、也无法回收的无主数据。
+   * - 项目没有 space 时，spaceId 是空串（显式「无 space」），
+   *   不能传 undefined——undefined 会被 action 回退成当前选中的 space。
+   */
+  const resolveCreationTarget = useCallback(
+    (fallbackSpaceId?: string | null) => {
+      const project = resolveActiveProjectScope({ location, projectScopeId });
+      let storage: Pick<Storage, "getItem"> | null = null;
+      try {
+        storage = typeof window !== "undefined" ? window.localStorage : null;
+      } catch {
+        storage = null;
+      }
+      // 首页 query 优先；侧栏筛选仅在非全局排除、非空间、非对话路由生效。
+      // 对话路由保留 resolveActiveProjectScope 的绑定结果，不被残留 prop 覆盖。
+      const { pathname, search } = location;
+      const canUseSidebarScope = pathname !== "/favorites"
+        && pathname !== "/explore"
+        && pathname !== "/space"
+        && !pathname.startsWith("/space/")
+        && !extractDialogKeyFromLocation(pathname, search);
+      const requestedProjectId = extractProjectIdFromLocation(pathname, search)
+        ?? (canUseSidebarScope ? projectScopeId : null);
+      // 调用方明确要求在某个项目内创建，但该项目记录已经没了（项目被删除）：
+      // 提前失败，不创建任何内容，也不把内容默默落进当前 space。
+      if (isRequestedProjectMissing({ storage, projectScopeId: requestedProjectId })) {
+        toast.error(
+          t("chat:projectMissingForCreate", "项目已不存在，未创建任何内容"),
+        );
+        return null;
+      }
+      const target = resolveProjectCreationTarget({
+        storage,
+        project,
+        requestedProjectId,
+        fallbackSpaceId,
+      });
+      if (!target.ok) {
+        toast.error(
+          t("chat:projectMissingForCreate", "项目已不存在，未创建任何内容"),
+        );
+        return null;
+      }
+      return target;
+    },
+    [location, projectScopeId, t],
+  );
+
   const createNewPageAndClose = useCallback(async () => {
+    const target = resolveCreationTarget(pageCreateSpaceId);
+    // 项目已被删除：什么都不创建，避免留下无主数据。
+    if (!target) return;
+    const projectId = target.projectId;
     setIsCreatingPage(true);
     try {
       const key = await createDocState(
         {
-          spaceId: pageCreateSpaceId ?? undefined,
+          spaceId: target.spaceId,
           categoryId,
         },
         { dispatch, getState: store.getState }
       );
       if (!key) throw new Error("Unexpected createDoc result");
+      if (projectId) {
+        const link = tryLinkToProject(projectId, () =>
+          linkContentToProject(window.localStorage, projectId, key),
+        );
+        // 关联失败：内容已创建，继续导航并明确告知用户。
+        if (!link.linked) reportUnlinked(link.error);
+      }
       closeMenu();
       const path = buildRoutableContentPath({
         contentKey: key,
         type: DataType.DOC,
-        spaceId: pageCreateSpaceId,
+        spaceId: target.spaceId || null,
       });
       navigate(`${path}?edit=true`);
     } catch {
@@ -175,7 +273,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     } finally {
       setIsCreatingPage(false);
     }
-  }, [closeMenu, dispatch, navigate, pageCreateSpaceId, categoryId, t]);
+  }, [closeMenu, dispatch, navigate, reportUnlinked, resolveCreationTarget, categoryId, t, store]);
 
   const handleManualCreateAgent = useCallback(() => {
     closeMenu();
@@ -211,10 +309,31 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
       }
 
       switch (key) {
-        case "new-chat":
+        case "new-chat": {
+          // 创建时同步快照
+          const target = resolveCreationTarget(sidebarScopedSpaceId);
+          // 项目已被删除：什么都不创建，避免留下无主数据。
+          if (!target) break;
+          const projectId = target.projectId;
           closeMenu();
-          void createNewDialog({ agents: [noloAgentId] }).catch(() => toast.error(t("chat:createDialogFailed", "新建对话失败")));
+          void createNewDialog({
+            agents: [noloAgentId],
+            spaceId: target.spaceId,
+            onCreated: ({ dbKey }) => {
+              if (!projectId) return;
+              const link = tryLinkToProject(projectId, () => {
+                // 关联前再确认一次：项目可能在创建期间刚好被删除。
+                if (!projectStillExists(window.localStorage, projectId)) {
+                  throw new Error(`项目不存在，关联失败: ${projectId}`);
+                }
+                bindDialogToProject(window.localStorage, dbKey, projectId);
+              });
+              // 关联失败：对话已创建，继续导航并明确告知用户。
+              if (!link.linked) reportUnlinked(link.error);
+            },
+          }).catch(() => toast.error(t("chat:createDialogFailed", "新建对话失败")));
           break;
+        }
         case "new-project":
           closeMenu();
           navigate("/?createProject=1");
@@ -222,12 +341,25 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
         case "new-page":
           void createNewPageAndClose();
           break;
-        case "new-table":
+        case "new-table": {
+          const target = resolveCreationTarget(sidebarScopedSpaceId);
+          // 项目已被删除：什么都不创建，避免留下无主数据。
+          if (!target) break;
+          const projectId = target.projectId;
           createNewTable({
-            spaceId: sidebarScopedSpaceId ?? undefined,
+            spaceId: target.spaceId,
             categoryId,
+            onCreated: (dbKey) => {
+              if (!projectId) return;
+              const link = tryLinkToProject(projectId, () =>
+                linkContentToProject(window.localStorage, projectId, dbKey),
+              );
+              // 关联失败：表格已创建，useCreateTable 仍会导航过去，并明确告知用户。
+              if (!link.linked) reportUnlinked(link.error);
+            },
           });
           break;
+        }
         case "create-agent-manual":
           handleManualCreateAgent();
           break;
@@ -253,6 +385,10 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
       handleCreateTask,
       handleUploadClick,
       navigate,
+      location,
+      projectScopeId,
+      resolveCreationTarget,
+      reportUnlinked,
     ]
   );
 

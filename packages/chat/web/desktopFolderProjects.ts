@@ -1,11 +1,52 @@
+export interface DesktopFolderProjectGroup {
+  id: string;
+  name: string;
+  contentKeys: string[];
+}
+
 /** Device-local desktop folder list, separate from Space and cloud Project data. */
 export interface DesktopFolderProject {
   id: string;
   name: string;
   localPath: string;
+  spaceId?: string | null;
+  linkedContentLabels?: Record<string, string>;
+  linkedContentKeys?: string[];
+  archiveKey?: string;
+  outcomeKeys?: string[];
+  groups?: DesktopFolderProjectGroup[];
+  instructions?: string;
 }
 
 export const DESKTOP_FOLDER_PROJECTS_KEY = "nolo:desktop-folder-projects:v1";
+
+export function updateDesktopProject(
+  storage: Pick<Storage, "getItem" | "setItem">,
+  projectId: string,
+  patch: Partial<Pick<DesktopFolderProject, "name" | "localPath" | "spaceId" | "linkedContentKeys" | "linkedContentLabels" | "archiveKey" | "outcomeKeys" | "groups" | "instructions">>,
+): DesktopFolderProject {
+  const raw = storage.getItem(DESKTOP_FOLDER_PROJECTS_KEY);
+  if (raw && !Array.isArray(JSON.parse(raw))) throw new Error("项目记录无法读取");
+  const projects = readDesktopFolderProjects(raw);
+  if (raw && JSON.parse(raw).length !== projects.length) throw new Error("项目记录包含无效或重复项，未覆盖原记录");
+  const current = projects.find((p) => p.id === projectId);
+  if (!current) throw new Error("项目不存在");
+  if (patch.instructions !== undefined && typeof patch.instructions !== "string") {
+    throw new Error("项目指令格式错误");
+  }
+  const updated = { ...current, ...patch, id: current.id };
+  if (!updated.name.trim()) throw new Error("请填写项目名称");
+  storage.setItem(DESKTOP_FOLDER_PROJECTS_KEY, JSON.stringify(projects.map((p) => p.id === projectId ? updated : p)));
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(DESKTOP_FOLDER_SELECTION_EVENT));
+  return updated;
+}
+
+export function selectDesktopProject(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">, projectId: string | null): void {
+  if (projectId && !readDesktopFolderProjects(storage.getItem(DESKTOP_FOLDER_PROJECTS_KEY)).some((p) => p.id === projectId)) throw new Error("项目不存在");
+  if (projectId) storage.setItem(DESKTOP_SELECTED_FOLDER_PROJECT_KEY, projectId);
+  else storage.removeItem(DESKTOP_SELECTED_FOLDER_PROJECT_KEY);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(DESKTOP_FOLDER_SELECTION_EVENT));
+}
 
 export function readDesktopFolderProjects(raw: string | null): DesktopFolderProject[] {
   if (!raw) return [];
@@ -13,13 +54,32 @@ export function readDesktopFolderProjects(raw: string | null): DesktopFolderProj
     const value: unknown = JSON.parse(raw);
     if (!Array.isArray(value)) return [];
     const seen = new Set<string>();
+    const ids = new Set<string>();
     return value.filter((item): item is DesktopFolderProject =>
       !!item && typeof item === "object" && typeof item.id === "string" &&
       !!item.id.trim() && typeof item.name === "string" && !!item.name.trim() &&
-      typeof item.localPath === "string" && !!item.localPath.trim())
+      typeof item.localPath === "string" &&
+      (item.linkedContentKeys === undefined || (Array.isArray(item.linkedContentKeys) && item.linkedContentKeys.every((key: unknown) => typeof key === "string"))) &&
+      (item.outcomeKeys === undefined || (Array.isArray(item.outcomeKeys) && item.outcomeKeys.every((key: unknown) => typeof key === "string"))) &&
+      (item.archiveKey === undefined || typeof item.archiveKey === "string") &&
+      (item.groups === undefined || (Array.isArray(item.groups) && item.groups.every((g: unknown) =>
+        !!g && typeof g === "object" &&
+        typeof (g as any).id === "string" && !!(g as any).id.trim() &&
+        typeof (g as any).name === "string" && !!(g as any).name.trim() &&
+        Array.isArray((g as any).contentKeys) && (g as any).contentKeys.every((k: unknown) => typeof k === "string")
+      ))))
+      .map((item) => {
+        if (item.instructions !== undefined && typeof item.instructions !== "string") {
+          const { instructions: _bad, ...rest } = item;
+          return rest as DesktopFolderProject;
+        }
+        return item;
+      })
       .filter((item) => {
-        if (seen.has(item.localPath)) return false;
-        seen.add(item.localPath);
+        const key = item.localPath.trim() ? `path:${item.localPath}` : `id:${item.id}`;
+        if (seen.has(key) || ids.has(item.id)) return false;
+        ids.add(item.id);
+        seen.add(key);
         return true;
       });
   } catch {
@@ -27,12 +87,58 @@ export function readDesktopFolderProjects(raw: string | null): DesktopFolderProj
   }
 }
 
+export function createDesktopProjectGroup(
+  storage: Pick<Storage, "getItem" | "setItem">,
+  projectId: string,
+  name: string,
+): DesktopFolderProject {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("请填写分组名称");
+  const raw = storage.getItem(DESKTOP_FOLDER_PROJECTS_KEY);
+  const projects = readDesktopFolderProjects(raw);
+  const current = projects.find((p) => p.id === projectId);
+  if (!current) throw new Error("项目不存在");
+  const existingGroups = current.groups ?? [];
+  const newGroup: DesktopFolderProjectGroup = {
+    id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: trimmed,
+    contentKeys: [],
+  };
+  return updateDesktopProject(storage, projectId, {
+    groups: [...existingGroups, newGroup],
+  });
+}
+
+export function assignDesktopProjectContentGroup(
+  storage: Pick<Storage, "getItem" | "setItem">,
+  projectId: string,
+  contentKey: string,
+  groupId: string | null,
+): DesktopFolderProject {
+  const raw = storage.getItem(DESKTOP_FOLDER_PROJECTS_KEY);
+  const projects = readDesktopFolderProjects(raw);
+  const current = projects.find((p) => p.id === projectId);
+  if (!current) throw new Error("项目不存在");
+  const groups = current.groups ?? [];
+  if (groupId !== null && !groups.some((g) => g.id === groupId)) {
+    throw new Error("分组不存在");
+  }
+  const nextGroups = groups.map((g) => {
+    const filteredKeys = g.contentKeys.filter((k) => k !== contentKey);
+    if (g.id === groupId) {
+      return { ...g, contentKeys: [...filteredKeys, contentKey] };
+    }
+    return { ...g, contentKeys: filteredKeys };
+  });
+  return updateDesktopProject(storage, projectId, { groups: nextGroups });
+}
+
 /** Duplicate folder selection is idempotent; never replace IDs used by existing dialogs. */
 export function addDesktopFolderProject(
   current: readonly DesktopFolderProject[], next: DesktopFolderProject,
 ): DesktopFolderProject[] {
-  if (!next.localPath.trim() || !next.id.trim() || !next.name.trim()) return [...current];
-  if (current.some((p) => p.localPath === next.localPath || p.id === next.id)) return [...current];
+  if (!next.id.trim() || !next.name.trim()) return [...current];
+  if (current.some((p) => (!!next.localPath.trim() && p.localPath === next.localPath) || p.id === next.id)) return [...current];
   return [...current, next];
 }
 
@@ -144,7 +250,8 @@ export function resolveDialogWorkspaceFolder(
       )?.localPath ?? null
     : null;
   if (projectId) {
-    return { cwd: projectPath, projectId, missing: projectPath === null };
+    const exists = readDesktopFolderProjects(storage.getItem(DESKTOP_FOLDER_PROJECTS_KEY)).some((p) => p.id === projectId);
+    return { cwd: projectPath || null, projectId, missing: !exists };
   }
   return { cwd: readDesktopDefaultWorkspacePath(), projectId: null, missing: false };
 }

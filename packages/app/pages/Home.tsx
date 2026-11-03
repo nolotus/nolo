@@ -1,6 +1,9 @@
 // 文件路径: packages/app/pages/Home.tsx
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "app/routing";
+import { selectDesktopProject } from "chat/web/desktopFolderProjects";
+import { DESKTOP_FOLDER_SELECTION_EVENT, readSelectedDesktopFolderProject } from "chat/web/desktopFolderProjects";
 
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
@@ -10,7 +13,10 @@ import { useMyContentItems } from "app/hooks/useMyContentItems";
 import HomeLanding from "./HomeLanding";
 import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
 import QuickChat from "./QuickChat";
+import ProjectHomeWorkspace from "./ProjectHomeWorkspace";
 import { getIsDesktopApp } from "app/utils/env";
+import { getIsDesktopPreview } from "app/utils/env";
+import { getIsDesktopUiPreview } from "app/utils/env";
 import {
   readLocalFirstOnboardingDismissed,
   writeLocalFirstOnboardingDismissed,
@@ -24,7 +30,32 @@ import "./Home.css";
 
 const Home = () => {
   const hasMounted = useHasMounted();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const projectId = new URLSearchParams(location.search).get("project");
+  const [projectAgentId, setProjectAgentId] = useState("");
+  const [project, setProject] = useState<ReturnType<typeof readSelectedDesktopFolderProject>>(null);
+  useEffect(() => {
+    const sync = () => {
+      try {
+        if (!getIsDesktopApp() || !projectId) {
+          setProject(null);
+          return;
+        }
+        // Respect an explicit exit: never choose a project or seed demo records here.
+        const selected = readSelectedDesktopFolderProject(window.localStorage);
+        setProject(selected?.id === projectId ? selected : null);
+        setProjectAgentId("");
+      } catch {
+        setProject(null);
+      }
+    };
+    sync();
+    window.addEventListener(DESKTOP_FOLDER_SELECTION_EVENT, sync);
+    return () => window.removeEventListener(DESKTOP_FOLDER_SELECTION_EVENT, sync);
+  }, [projectId]);
   const isLoggedIn = useIsLoggedIn();
+  const linkedAgents = (project?.linkedContentKeys ?? []).filter((key) => key.startsWith("agent-"));
   const currentUser = useCurrentUser();
   const token = useToken();
   // Local User remains the authenticated home owner for local data/widgets.
@@ -32,7 +63,11 @@ const Home = () => {
   // but the local home must stay the anonymous entry — currentUser carries the
   // Local User fallback, a token only distinguishes a real cloud account when
   // deciding whether the Desktop first-run guide still needs to be shown.
-  const showAuthedHome = hasMounted && !!currentUser;
+  const isDesktopApp = getIsDesktopApp();
+  // 渲染面判据：真桌面壳，或 loopback 开发下的 `?desktop=1` 外观预览。
+  // 只决定「渲染哪套布局」；项目绑定、cwd、工具挂载等能力面仍看 isDesktopApp。
+  const isDesktopUi = getIsDesktopUiPreview();
+  const showAuthedHome = hasMounted && (!!currentUser || isDesktopUi);
   const pageMeta = useStaticPageMeta(showAuthedHome ? "default" : "home");
   const { items: myContentItems, loading: myContentLoading } = useMyContentItems();
   const isEmptyState = showAuthedHome && !myContentLoading && myContentItems.length === 0;
@@ -41,13 +76,11 @@ const Home = () => {
   // matching RN: login/signup/local paths/skip all complete onboarding. Not account-scoped
   // and not synced; logout must not bring the guide back. Public web never shows it.
   // Lazy-init from localStorage avoids a post-mount flash of onboarding when already dismissed.
-  const [onboardingDismissed, setOnboardingDismissed] = useState(() =>
-    typeof window === "undefined"
-      ? false
-      : readLocalFirstOnboardingDismissed(window.localStorage)
-  );
-  // Runtime check (not module-load const) so ?noloDesktop=1 / injected flag works in preview.
-  const isDesktopApp = getIsDesktopApp();
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    if (getIsDesktopPreview()) return true;
+    return readLocalFirstOnboardingDismissed(window.localStorage);
+  });
   const hasCloudAccount = Boolean(token);
   const showDesktopOnboarding =
     isDesktopApp && !hasCloudAccount && !onboardingDismissed;
@@ -75,14 +108,26 @@ const Home = () => {
             "home-main",
             homeStyles.homeMain,
             showAuthedHome && homeStyles.homeMainAuthed,
-            !showDesktopOnboarding && !showAuthedHome && !isDesktopApp && homeStyles.homeMainGuestLanding
+            !showDesktopOnboarding && !showAuthedHome && !isDesktopUi && homeStyles.homeMainGuestLanding
           )}
         >
           {showDesktopOnboarding ? (
             <DesktopAgentOnboarding onDismiss={handleDismissOnboarding} />
           ) : showAuthedHome ? (
-            <>
-              {/* 核心主交互：输入框在宽屏下垂直居中展示，敲回车发送时平滑过渡 */}
+            project ? (
+              <ProjectHomeWorkspace
+                project={project}
+                items={myContentItems}
+                userId={currentUser?.userId || ""}
+                projectAgentId={projectAgentId}
+                onSelectProjectAgentId={setProjectAgentId}
+                onExitProject={() => {
+                  selectDesktopProject(window.localStorage, null);
+                  navigate("/");
+                  setProjectAgentId("");
+                }}
+              />
+            ) : (
               <section {...stylex.props(homeStyles.homeBottomChatShell)}>
                 <div
                   {...withLiteralClass(
@@ -94,10 +139,10 @@ const Home = () => {
                   <QuickChat surface="home-primary" isEmptyState={isEmptyState} />
                 </div>
               </section>
-            </>
+            )
           ) : (
             <>
-              {!isDesktopApp && <HomeLanding />}
+              {!isDesktopUi && <HomeLanding />}
 
             </>
           )}

@@ -21,6 +21,8 @@ import {
 import { loadSkillFunc, type LoadSkillToolArgs } from "../../../ai/tools/loadSkillTool";
 import { readAndWait, selectById } from "database/dbSlice";
 import type { DialogConfig, ReferenceItem } from "app/types";
+import { readDialogProjectId } from "chat/web/desktopFolderProjects";
+import { projectContextForDialog } from "chat/web/projectContext";
 import { createDialogMessageKeyAndId } from "database/keys";
 import { extractCustomId } from "core/prefix";
 import { waitForAbortableDelay } from "core/abortableDelay";
@@ -343,9 +345,26 @@ export const handleSendMessageAction = async (
             typeof window !== "undefined" &&
             typeof location !== "undefined" &&
             (location.hostname === "127.0.0.1" || location.hostname === "localhost");
-        const browseContextPrefix = isDesktopContext
+        const browserContext = isDesktopContext
             ? await resolveBrowseContextPrefix(userInputText)
             : "";
+        // 对话还没落库时 dbKey 可能为空：没有对话键就没有项目绑定可查，
+        // 也就没有项目上下文可注入。这里按真实语义判空，不用 `as string` 强转掩盖。
+        const dialogKey = dialogConfig.dbKey;
+        const projectId = isDesktopContext && dialogKey
+            ? readDialogProjectId(window.localStorage, dialogKey)
+            : null;
+        if (projectId) {
+            const { ensureProjectArchive } = await import("chat/web/projectArchive");
+            const { DESKTOP_FOLDER_PROJECTS_KEY, readDesktopFolderProjects } = await import("chat/web/desktopFolderProjects");
+            const project = readDesktopFolderProjects(window.localStorage.getItem(DESKTOP_FOLDER_PROJECTS_KEY)).find((entry) => entry.id === projectId);
+            if (!project) throw new Error("项目已不存在，请重新选择项目");
+            await ensureProjectArchive(project, userInputText || "首次对话包含附件，请结合对话明确目标。", { dispatch, getState });
+        }
+        const projectContext = isDesktopContext && dialogKey
+            ? projectContextForDialog(dialogKey, projectId)
+            : "";
+        const browseContextPrefix = [projectContext, browserContext].filter(Boolean).join("\n\n");
 
         // 普通同服务器 Web turn 迁到 /api/agent/run server-owned execution plane。
         // 用户行仍先按旧契约落库，保证点击发送后立刻刷新也不会丢输入；server
@@ -429,9 +448,12 @@ export const handleSendMessageAction = async (
             }
         }
 
-        const effectiveUserInput = browseContextPrefix
-            ? `${browseContextPrefix}\n\n${typeof strippedUserInput === "string" ? strippedUserInput : ""}`
-            : (strippedUserInput ?? "");
+        // 项目/浏览上下文走 out-of-band（`contextBlocks`）：它只随本轮请求进入
+        // 模型的 system prompt，不拼进用户消息文本。此前拼进 userInput 会让
+        // `<project_context>` 落库、显示在用户气泡里，而且每轮重算的时效断言
+        //（如「项目档案尚未创建」）会在历史里累积成互相矛盾的注入块。
+        const effectiveContextBlocks = browseContextPrefix ? [browseContextPrefix] : undefined;
+        const effectiveUserInput = strippedUserInput ?? "";
 
         // Legacy client-owned fallback：启动阶段对瞬态网络/超时错误自动退避重试 1 次。
         let streamResult: any;
@@ -448,6 +470,7 @@ export const handleSendMessageAction = async (
                         parentMessageId: undefined,
                         runtimeOptions: effectiveRuntimeOptions,
                         quickChatPerfStartedAt: args.quickChatPerfStartedAt,
+                        ...(effectiveContextBlocks ? { contextBlocks: effectiveContextBlocks } : {}),
                         ...(ephemeralReferences ? { ephemeralReferences } : {}),
                     })
                 ).unwrap();

@@ -85,6 +85,7 @@ import {
     compressOldToolResults,
     buildDynamicContexts,
     mergeContexts,
+    withRequestContextBlocks,
     hasImageInMessages,
     mergeAgentToolsWithRuntime,
     resolveImageGenerationStreamingState,
@@ -472,6 +473,13 @@ export interface StreamAgentChatTurnArgs {
     runtimeOptions?: AgentRuntimeOptions;
     quickChatPerfStartedAt?: number;
     ephemeralReferences?: ReferenceItem[];
+    /**
+     * 请求级上下文块（项目上下文、浏览上下文等）。只进本轮 system prompt：
+     * web 两条分支挂在 `Contexts.requestContextBlocks`（turn-scope 层），桌面
+     * 本地 runtime 走请求体 `contextBlocks`。绝不拼进 `userInput`——拼进去就会
+     * 作为用户消息落库并显示在用户气泡里（PR #209 复审 HIGH-1）。
+     */
+    contextBlocks?: string[];
 }
 
 export const streamAgentChatTurnHandler = async (
@@ -487,6 +495,7 @@ export const streamAgentChatTurnHandler = async (
         runtimeOptions,
         quickChatPerfStartedAt,
         ephemeralReferences,
+        contextBlocks,
     } = args;
     const { getState, dispatch, rejectWithValue } = thunkApi;
     const state = getState() as RootState;
@@ -661,7 +670,14 @@ export const streamAgentChatTurnHandler = async (
 
             const userText = extractAgentRunUserText(userInput);
 
-            const prompt = buildCliPrompt(agentConfig.prompt, userText);
+            // 上下文块进 CLI 的 system prompt，而不是拼进用户任务文本——
+            // 后者会随 turn 一起落进对话历史。
+            const prompt = buildCliPrompt(
+                [agentConfig.prompt, ...(contextBlocks ?? [])]
+                    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+                    .join("\n\n"),
+                userText,
+            );
 
             // 生成消息 key
             const dialogConfig =
@@ -748,6 +764,9 @@ export const streamAgentChatTurnHandler = async (
                     body: JSON.stringify({
                         agentKey,
                         userInput: agentRunUserInput,
+                        ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
+                            ? { contextBlocks }
+                            : {}),
                         messages: cleanedMessages,
                         stream: true,
                         persistDialog: false,
@@ -1297,6 +1316,9 @@ export const streamAgentChatTurnHandler = async (
                 const eventStream = runDesktopAgentRuntimeTurnStream({
                     agentRef: desktopAgentRef,
                     input: userInput,
+                    ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
+                        ? { contextBlocks }
+                        : {}),
                     continueDialogId: dialogId,
                     dialogKey,
                     cwd: runtimeOptions?.cwd,
@@ -1907,6 +1929,9 @@ export const streamAgentChatTurnHandler = async (
                 const remoteRequestBody = JSON.stringify({
                     agentKey,
                     userInput: agentRunUserInput,
+                    ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
+                        ? { contextBlocks }
+                        : {}),
                     messages: cleanedMessages,
                     stream: true,
                     persistDialog: false,
@@ -2304,7 +2329,10 @@ export const streamAgentChatTurnHandler = async (
                 logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-dynamic-context-ready", {
                     responseApi: true,
                 });
-                const contexts = mergeContexts(staticContexts, dynamicContexts);
+                const contexts = withRequestContextBlocks(
+                    mergeContexts(staticContexts, dynamicContexts),
+                    contextBlocks,
+                );
 
                 const rawMessages = selectAllMsgs(loopState, dialogId);
                 let visibleMessages = buildAgentViewMessages(
@@ -2628,7 +2656,10 @@ export const streamAgentChatTurnHandler = async (
             });
 
             // 合并静态和动态上下文
-            const contexts = mergeContexts(staticContexts, dynamicContexts);
+            const contexts = withRequestContextBlocks(
+                mergeContexts(staticContexts, dynamicContexts),
+                contextBlocks,
+            );
 
             const rawMessages = selectAllMsgs(loopState, dialogId);
             let visibleMessages = buildAgentViewMessages(

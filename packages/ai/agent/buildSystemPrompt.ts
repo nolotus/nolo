@@ -18,6 +18,7 @@ import { CREDENTIAL_HYGIENE_RULE } from "agent-runtime/credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDefault";
 // 派发落点是「并行是默认」的下一层（派到哪个后端执行），紧随其后注入。
 import { DISPATCH_BACKEND_POLICY } from "agent-runtime/dispatchBackendPolicy";
+import { VERIFY_BEFORE_CONCLUDING_RULE } from "agent-runtime/verifyBeforeConcluding";
 import { DISPATCH_CANDIDATE_POLICY } from "agent-runtime/dispatchCandidatePolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "agent-runtime/platformRiskControl";
 import { buildConsultationModeBlock } from "agent-runtime/consultationMode";
@@ -276,6 +277,13 @@ export const buildSystemPromptContext = (options: {
   const skillGuidanceSection = buildSkillGuidanceBlock(agentConfig);
   const referenceMaterialsSection = buildReferenceMaterialsBlock(contexts);
 
+  // 请求级上下文块（项目上下文 / 浏览上下文等）：调用方在发送时组装，
+  // 只进本轮 system prompt 的 turn-scope 尾巴，永不写进用户消息。
+  const requestContextBlocksSection = (contexts.requestContextBlocks ?? [])
+    .map((block) => (typeof block === "string" ? block.trim() : ""))
+    .filter((block) => block.length > 0)
+    .join("\n\n");
+
   const dialogSummarySection = contexts.dialogSummary?.trim()
     ? `--- 历史对话摘要 ---\n${wrapHistoricalSummaryWithReplayGuard(contexts.dialogSummary)}`
     : "";
@@ -295,6 +303,13 @@ export const buildSystemPromptContext = (options: {
       owner: "platform",
       cacheScope: "static",
       content: CREDENTIAL_HYGIENE_RULE,
+    },
+    // 先验证再下结论：一切动作的前提，紧随凭据纪律、先于并行/派发/发布规则。
+    {
+      id: "verify-before-concluding",
+      owner: "platform",
+      cacheScope: "static",
+      content: VERIFY_BEFORE_CONCLUDING_RULE,
     },
     // 并行是默认：系统层固定块，紧随红线（同为无条件前缀，不随工具/轮次变化）。
     {
@@ -354,6 +369,12 @@ export const buildSystemPromptContext = (options: {
     { id: "space-context", owner: "runtime", cacheScope: "session", content: spaceContextSection },
     { id: "memory-use-guidance", owner: "platform", cacheScope: "session", content: memoryUseGuidanceSection },
     { id: "reference-materials", owner: "agent", cacheScope: "turn", content: referenceMaterialsSection },
+    {
+      id: "request-context-blocks",
+      owner: "runtime",
+      cacheScope: "turn",
+      content: requestContextBlocksSection,
+    },
     { id: "memory-overlay", owner: "runtime", cacheScope: "turn", content: memoryOverlaySection },
     { id: "app-working-memory", owner: "runtime", cacheScope: "turn", content: appWorkingMemorySection },
     { id: "dialog-summary", owner: "runtime", cacheScope: "turn", content: dialogSummarySection },

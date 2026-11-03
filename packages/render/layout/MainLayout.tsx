@@ -54,7 +54,7 @@ import {
   shouldForceCategoriesViewMode,
 } from "./mainLayoutViewMode";
 import { MobileDownloadBanner } from "./MobileDownloadBanner";
-import { getIsDesktopApp } from "app/utils/env";
+import { getIsDesktopUiPreview } from "app/utils/env";
 import { getGuestNaturePage } from "./guestNaturePages";
 import { SidebarToggleContext } from "./SidebarToggleContext";
 import "./layout.css";
@@ -274,7 +274,9 @@ const MainLayout: React.FC = () => {
   const useAllViewSidebar = isAllViewRoutePath(location.pathname);
   const isSpaceRoute = isSpaceRoutePath(location.pathname);
   const isLifeRoute = location.pathname.startsWith("/life");
-  const isDesktopApp = getIsDesktopApp();
+  // 纯渲染/布局判据：真桌面壳与 `?desktop=1` 外观预览都要呈现桌面骨架。
+  // 这里只决定 guest 页样式与侧栏是否渲染，不授予任何原生能力。
+  const isDesktopApp = getIsDesktopUiPreview();
   // 登录后首页是工作区视图，不渲染页脚（法务入口在侧栏用户菜单）。
   const renderSiteFooter = shouldRenderSiteFooter(location.pathname, {
     isLoggedIn,

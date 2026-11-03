@@ -51,7 +51,7 @@ import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import { DesktopFolderProjects } from "./DesktopFolderProjectsSection";
 import { projectHomeItems, type HomeScope } from "./homeScopeProjection";
 import { parseLocalDialogProjectBindings } from "./homeLocalProjectDialogs";
-import { DESKTOP_DIALOG_PROJECTS_KEY } from "./desktopFolderProjects";
+import { selectDesktopProject, readDesktopFolderProjects, DESKTOP_DIALOG_PROJECTS_KEY, DESKTOP_FOLDER_PROJECTS_KEY } from "./desktopFolderProjects";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { SidebarPinnedBlock } from "./sidebar/SidebarPinnedBlock";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
@@ -89,7 +89,10 @@ const writeStoredSidebarFilter = (filter: SidebarTypeFilterId) => {
  * 降级成 static、内容已退出有限高度链，--fixed 列却仍 overflow: hidden，超出列底的内容滚轮
  * 滚不到。三条降级规则因此写进同一个 @container（见 navigationRail.css）。
  */
-const ShellWithRail: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const ShellWithRail: React.FC<{ children: React.ReactNode; projectScopeId?: string | null }> = ({
+  children,
+  projectScopeId,
+}) => {
   const { t } = useTranslation("space");
   const sidebarToggle = useSidebarToggleContext();
   const isDesktop = sidebarToggle?.isDesktop ?? false;
@@ -104,6 +107,7 @@ const ShellWithRail: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       className={`navigation-v2-shell ${isOpen ? "is-expanded" : "is-collapsed"}`}
     >
       <NavigationRail
+        projectScopeId={projectScopeId}
         headerSlot={
           showToggle ? (
             <button
@@ -161,7 +165,26 @@ const ChatSidebar: React.FC = () => {
   const showProjects = useCallback(() => setHomeViewState("projects"), []);
   const createProjectRequest = useCreateProjectNavigation(isDesktop, showProjects);
   const homeView = isDesktop ? resolveHomeView(homeViewState) : "work";
-  const selectHomeView = (view: HomeView) => setHomeViewState(resolveHomeView(view));
+  const selectHomeView = (view: HomeView) => {
+    const nextView = resolveHomeView(view);
+    setHomeViewState(nextView);
+    if (nextView === "work") {
+      selectDesktopProject(window.localStorage, null);
+      navigate("/");
+    } else if (nextView === "projects") {
+      try {
+        const storage = window.localStorage;
+        const projects = readDesktopFolderProjects(storage.getItem(DESKTOP_FOLDER_PROJECTS_KEY));
+        if (projects.length > 0) {
+          const first = projects[0];
+          selectDesktopProject(storage, first.id);
+          navigate(`/?project=${encodeURIComponent(first.id)}`);
+        }
+      } catch {
+        // 如果没有项目则不报错
+      }
+    }
+  };
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
   useEffect(() => {
     const openPalette = () => setCommandPaletteOpen(true);
@@ -538,9 +561,11 @@ const ChatSidebar: React.FC = () => {
   // rendering Home's Work/Projects content — and above all must not keep
   // rendering a stale Space scope under a non-Space destination.
   // Nothing here mutates Space, cwd or a running Agent.
+  const currentProjectScopeId = homeScope.kind === "project" ? homeScope.projectId : null;
+
   if (railView !== "home") {
     return (
-      <ShellWithRail>
+      <ShellWithRail projectScopeId={currentProjectScopeId}>
         <div data-hook="chat-esc-sidebar"
           {...withLiteralClass("ChatSidebar navigation-v2-context", sidebarStyles.chatSidebar)}>
           {railView === "favorites" && (
@@ -560,7 +585,7 @@ const ChatSidebar: React.FC = () => {
 
   if (viewMode === "all" || !space || (isDesktop && homeView === "projects")) {
     return (
-      <ShellWithRail>
+      <ShellWithRail projectScopeId={currentProjectScopeId}>
         <div data-hook="chat-esc-sidebar"
           {...withLiteralClass("ChatSidebar navigation-v2-context navigation-v2-context--fixed", sidebarStyles.chatSidebar)}>
           <div className="navigation-v2-context-controls">
@@ -583,7 +608,7 @@ const ChatSidebar: React.FC = () => {
               )}
             </div>
             <div style={{ display: homeView === "projects" ? "contents" : "none" }}>
-              <DesktopFolderProjects createRequest={createProjectRequest} items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} />
+              <DesktopFolderProjects createRequest={createProjectRequest} items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} spaceId={space?.id || null} onOpenProject={(project) => navigate("/?project=" + encodeURIComponent(project.id))} />
             </div>
           </div>
           {commandPalette}
@@ -599,7 +624,7 @@ const ChatSidebar: React.FC = () => {
     1;
 
   return (
-    <ShellWithRail>
+    <ShellWithRail projectScopeId={currentProjectScopeId}>
       <div
       data-hook="chat-esc-sidebar"
       ref={columnRef}

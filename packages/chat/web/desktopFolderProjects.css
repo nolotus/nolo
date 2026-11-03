@@ -1,0 +1,69 @@
+.desktop-folder-projects{padding:8px;display:flex;flex-direction:column;gap:12px}.desktop-folder-projects header,.desktop-folder-projects footer{display:flex;align-items:center;justify-content:space-between;gap:8px}.desktop-folder-projects button{border:1px solid var(--border-color,#8884);background:var(--surface-color,transparent);border-radius:7px;padding:6px 9px;color:inherit;text-align:left;cursor:pointer}.desktop-folder-projects button:disabled{opacity:.5;cursor:default}.desktop-folder-projects form{display:flex;flex-direction:column;gap:12px;padding:10px;border:1px solid #8884;border-radius:9px}.desktop-folder-projects form>label{display:flex;flex-direction:column;gap:6px}.desktop-folder-projects input:not([type=checkbox]),.desktop-folder-projects textarea{min-width:0;width:100%;box-sizing:border-box;padding:8px;border:1px solid #8886;border-radius:6px;color:inherit;background:transparent}.desktop-folder-projects textarea{font:inherit;line-height:1.4;resize:vertical;min-height:72px;max-width:100%}.desktop-folder-projects summary{cursor:pointer;padding:6px 0}.desktop-folder-projects small{display:block;opacity:.65;font-size:11px;overflow-wrap:anywhere}.desktop-folder-projects__picker{max-height:220px;overflow:auto}.desktop-folder-projects__picker label{display:flex;align-items:center;gap:7px;padding:5px}.desktop-folder-projects__name{width:100%;font-weight:600}.desktop-folder-projects__name[aria-pressed=true]{background:#8882}.desktop-folder-projects__children{margin:5px 0 0 10px;border-left:1px solid #8883;padding-left:9px;display:flex;flex-direction:column;gap:3px}.desktop-folder-projects__children>a,.desktop-folder-projects__outcomes>a{display:block;padding:6px 8px;color:inherit;text-decoration:none;border-radius:5px;overflow-wrap:anywhere}.desktop-folder-projects__children>a:hover{background:#8882}.desktop-folder-projects__children>button{border-color:transparent}.desktop-folder-projects__children>button span{display:block;font-size:10px;opacity:.55}.desktop-folder-projects__outcomes{display:flex;flex-direction:column;gap:3px;margin-top:8px}.desktop-folder-projects__outcomes>strong{font-size:11px;opacity:.6;padding:4px 8px}
+
+.desktop-folder-projects__folder {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.desktop-folder-projects__folder-path {
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.desktop-folder-projects footer.desktop-folder-projects__actions {
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color, #8884);
+  justify-content: flex-end;
+}
+.desktop-folder-projects button.desktop-folder-projects__submit {
+  background: var(--primary-color, #2563eb);
+  color: #fff;
+  border-color: transparent;
+  font-weight: 600;
+  text-align: center;
+  padding: 9px 16px;
+}
+
+
+.desktop-folder-projects__project-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  border-radius: 7px;
+}
+.desktop-folder-projects__project-heading:hover,
+.desktop-folder-projects__project-heading:has([aria-pressed="true"]) { background: #8882; }
+.desktop-folder-projects .desktop-folder-projects__project-heading > .desktop-folder-projects__name {
+  min-width: 0;
+  width: auto;
+  border: 0;
+  background: transparent;
+  padding: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-folder-projects button.desktop-folder-projects__more-button {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border: 0;
+  background: transparent; color: inherit; font-size: 20px; line-height: 1; border-radius: 5px;
+}
+.desktop-folder-projects__content-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.desktop-folder-projects__content-row > a { flex: 1; min-width: 0; color: inherit; text-decoration: none; padding: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-folder-projects__content-row > select { max-width: 85px; background: transparent; color: inherit; border: 1px solid #8884; border-radius: 5px; font-size: 11px; }
+.desktop-folder-projects__group { padding-left: 6px; }
+
+.desktop-folder-projects__group-draft { display: flex; align-items: center; gap: 5px; padding: 6px; }
+.desktop-folder-projects input.desktop-folder-projects__group-title-input { flex: 1; min-width: 0; width: auto; border: 0; border-radius: 0; padding: 2px 0; background: transparent; color: inherit; font: inherit; font-weight: 600; outline: none; }
+.desktop-folder-projects input.desktop-folder-projects__group-title-input:focus { box-shadow: 0 1px 0 var(--primary-color, #2563eb); }
