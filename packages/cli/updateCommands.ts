@@ -132,7 +132,32 @@ export function resolveStandaloneBundleRepoBase(channel: CliReleaseChannel): str
  */
 export function buildStandaloneManualUpdateHint(channel: CliReleaseChannel): string {
   const repoBase = resolveStandaloneBundleRepoBase(channel);
+  if (channel === "alpha") {
+    // 主站只把 install-nolo.sh 这个别名对外提供，脚本本身与渠道无关：
+    // alpha 必须靠 env 显式选择，否则拿到的是 stable 固定对象。
+    return `curl -fsSL ${repoBase}/install-nolo.sh | NOLO_INSTALL_CHANNEL=alpha sh`;
+  }
   return `curl -fsSL ${repoBase}/install-nolo.sh | sh`;
+}
+
+/**
+ * Fixed tarball name for a release channel. Mirrors install-nolo.sh's
+ * NOLO_INSTALL_CHANNEL: latest → nolo-<platform>.tar.gz, alpha →
+ * nolo-<platform>-alpha.tar.gz. The two names are disjoint on purpose: a
+ * failed alpha download must never fall back onto a stable bundle (or the
+ * other way round). Versioned copies keep the release's original name, which
+ * already carries `-alpha.N`, so they are not suffixed here.
+ */
+export function buildStandaloneBundleTarballName(
+  tarballName: string,
+  channel: CliReleaseChannel,
+): string {
+  if (channel !== "alpha") return tarballName;
+  const suffix = ".tar.gz";
+  const stem = tarballName.endsWith(suffix)
+    ? tarballName.slice(0, -suffix.length)
+    : tarballName;
+  return `${stem}-alpha.tar.gz`;
 }
 
 /**
@@ -496,8 +521,11 @@ export async function runStandaloneBundleUpdate(
 
   const { tarballName, extractSubdir } = platform;
   const repoBase = resolveStandaloneBundleRepoBase(channel);
-  const tarballUrl = `${repoBase}/public/downloads/${tarballName}`;
-  const fallbackUrl = `https://nolo.chat/public/downloads/${tarballName}`;
+  // Channel-specific fixed name: the mirror fallback reuses the very same name,
+  // so a failed download can only ever retry the same channel.
+  const bundleName = buildStandaloneBundleTarballName(tarballName, channel);
+  const tarballUrl = `${repoBase}/public/downloads/${bundleName}`;
+  const fallbackUrl = `https://nolo.chat/public/downloads/${bundleName}`;
 
   const extractDir = join(homedir(), ".nolo", extractSubdir);
   const installDir = resolveStandaloneInstallDir();

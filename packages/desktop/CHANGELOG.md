@@ -1,4 +1,29 @@
 
+## 0.229.0-alpha.1 (2026-11-03)
+
+### Features
+
+* **agent-runtime:** 仓库 AGENTS.md 改为按需加载以降低首轮上下文 ([3e34769](https://github.com/nolotus/bun-nolo/commit/3e34769b005481b10d5c738844fdce28dcf1d19d))
+* **agent-runtime:** 精简回复行为准则并让已授权工作持续推进 ([c23b03e](https://github.com/nolotus/bun-nolo/commit/c23b03e4c2edd37abfd2904f5ceb73c007687f20))
+* **cli:** nolo usage rebuild，从明细重建日聚合统计 ([fbf9b73](https://github.com/nolotus/bun-nolo/commit/fbf9b734d98263e90b6eca89618bba84b9f10ce2))
+* **cli:** 新增 nolo usage，并修复日统计丢失缓存与 agent 维度 ([813c4d3](https://github.com/nolotus/bun-nolo/commit/813c4d39a84b64d609d6ff46689b9e214108c5dd))
+* **credential:** 支持粘贴凭据直接建 agent 并接入系统安全存储 ([7212371](https://github.com/nolotus/bun-nolo/commit/72123714379e079fb8aadfde2185768a660ae9f2))
+* **music:** 本地音乐源与多源抽象接线 ([47247e2](https://github.com/nolotus/bun-nolo/commit/47247e22be47d9f430a066a2b43eaa175f990832))
+* **web:** 侧边栏 Agent 行按未读对话点亮红点 ([aa39550](https://github.com/nolotus/bun-nolo/commit/aa39550f66a25ddd89a824f1b3f2ec794da8940f))
+
+### Bug Fixes
+
+* **agent-runtime:** 恢复请教模式顾问档的既有文案契约 ([0fd27dd](https://github.com/nolotus/bun-nolo/commit/0fd27dde87898b3f92fe18a3d013c50817a53eca))
+* **agent-runtime:** 降级后的工具轮在 Responses 线上重新带回 reasoning 占位 ([8d9be71](https://github.com/nolotus/bun-nolo/commit/8d9be71b59d5ef03e9093605470a7df01638f3cc))
+* **billing:** 审计复核交易缺失，消掉跨扫描误报 ([18afda3](https://github.com/nolotus/bun-nolo/commit/18afda3c08ab2b0b66242d21e9ef250f437265a2))
+* **credential:** 恢复既有可用性：读旧写新、会话内存回退、按来源收窄严格路径 ([a416603](https://github.com/nolotus/bun-nolo/commit/a416603bf2e96171c40919f176c84de8f7c3237c))
+* **dispatch:** 修复速度快照过期后不刷新且不完整样本被丢弃 ([9c4ff8f](https://github.com/nolotus/bun-nolo/commit/9c4ff8fe6e52b0d3c179216cd47a250e53e27a6d))
+* **downloads:** 隔离 CLI 渠道并收紧流式代理边界 ([1db57e7](https://github.com/nolotus/bun-nolo/commit/1db57e780949414cc15f8dbed71dbc4ca41dbacb))
+* **release:** 对齐 alpha 组件版本到已发布基线 ([15c5d30](https://github.com/nolotus/bun-nolo/commit/15c5d30917449705f1fe711277eb776939ba6dc1))
+* **typecheck:** scripts 门禁改为 fail-closed，并补进程级回归网 ([dcff13c](https://github.com/nolotus/bun-nolo/commit/dcff13ca7c33dd7e4e40b6116ae143e8e191b64c))
+* **web:** netease 加解密模块加浏览器 stub，web bundle 恢复可构建 ([f3745da](https://github.com/nolotus/bun-nolo/commit/f3745da2959ce0087d30359819bdd79e033174ec))
+
+
 ## 0.227.0-alpha.2 (2026-11-03)
 
 ### Bug Fixes
