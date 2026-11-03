@@ -1,4 +1,13 @@
 
+## 0.223.1 (2026-11-03)
+
+### Bug Fixes
+
+* **agent-availability:** 冷却解除按模型族与周期窗口判定额度 ([07352d9](https://github.com/nolotus/bun-nolo/commit/07352d9f178f4787b6c7f07a25736ffb95bd083e))
+* **agent-runtime:** 补齐搜索路径的 windowsHide，修 Windows 后台 run 闪窗 ([a0195ed](https://github.com/nolotus/bun-nolo/commit/a0195ed6f5495ef26d91a97c93376cf2e6498853))
+* **cli:** hide Windows console windows for background-run child processes ([56dedbd](https://github.com/nolotus/bun-nolo/commit/56dedbd26ad92e8b17188d4e0c5d7bbb05154ae5))
+
+
 ## 0.223.0 (2026-11-03)
 
 ### Features

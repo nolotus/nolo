@@ -46,25 +46,97 @@ function clampCooldownDeadline(at: number, now: number): number {
 }
 
 /**
- * 共享的「agent 当前是否临时不可用」判据（429 限流中）。
- *
- * 判据：agent 记录的 nextAvailableAt 是有限数值且 > now，视为 429 限流冷却中，
- * 此刻不可用。nextAvailableAt 等于 now 视为已恢复。
+ * 额度窗口的模型族。antigravity 按模型族把窗口拆成两套
+ * （`gemini-5h`/`gemini-7d` 与 `3p-5h`/`3p-7d`，3p = 第三方模型），
+ * 同一条凭证下两族额度互不相干。
  */
+export type QuotaWindowFamily = "gemini" | "3p";
+
+/**
+ * 拆解 scope 的「模型族 + 窗口周期」。
+ *
+ * 无家族前缀的 scope（claude/codex/kimi/glm 的 `5h`/`7d`、devin 的
+ * `daily`/`weekly`、cursor 的 `monthly`）family 为 undefined，period 即 scope 本身。
+ */
+export function parseQuotaWindowScope(scope: string): {
+  family?: QuotaWindowFamily;
+  period: string;
+} {
+  const matched = /^(gemini|3p)-(.+)$/.exec(scope);
+  return matched
+    ? { family: matched[1] as QuotaWindowFamily, period: matched[2]! }
+    : { period: scope };
+}
+
+/**
+ * agent 的模型 → 该看哪一族额度窗口。antigravity 只有两族：模型名含 gemini 的走
+ * `gemini-*` 桶，其余（claude/gpt 等第三方模型）走 `3p-*` 桶。只有完全拿不到
+ * model（undefined 或空串）时才返回 undefined，表示「两族都算数」（保守退化）。
+ *
+ * antigravity 之外的 provider 只有无前缀窗口，家族过滤对它们恒等。
+ */
+export function resolveQuotaWindowFamily(
+  model?: string | null,
+): QuotaWindowFamily | undefined {
+  if (typeof model !== "string" || !model.trim()) return undefined;
+  return /gemini/i.test(model) ? "gemini" : "3p";
+}
+
+/** 一个窗口是否属于该模型族（无前缀窗口、无 scope 的窗口与未知家族一律算数）。 */
+function isWindowRelevantToFamily(
+  scope: string | undefined,
+  family: QuotaWindowFamily | undefined,
+): boolean {
+  if (typeof scope !== "string") return true;
+  const scopeFamily = parseQuotaWindowScope(scope).family;
+  return scopeFamily === undefined || family === undefined || scopeFamily === family;
+}
+
+/**
+ * 周期额度窗口的周期名：5h / 7d（含 `gemini-`/`3p-` 前缀）与套餐周期
+ * `daily` / `weekly` / `monthly`（devin、cursor 的订阅窗口就叫这些名字）。
+ * `requests`/`tokens`/`credits`/`mcp`/`extra-usage` 不是周期窗口。
+ */
+const SUBSCRIPTION_PERIODS = new Set(["5h", "7d", "daily", "weekly", "monthly"]);
+
+export function isSubscriptionPeriodWindow(window: { scope: string }): boolean {
+  const { period } = parseQuotaWindowScope(window.scope);
+  return SUBSCRIPTION_PERIODS.has(period.trim().toLowerCase());
+}
+
+function isExhaustedWindow(window: {
+  remaining?: number;
+  utilization?: number;
+}): boolean {
+  return (
+    window.remaining === 0 ||
+    (typeof window.utilization === "number" && window.utilization >= 0.95)
+  );
+}
+
 export function shouldClearCooldownFromQuota(
   entry: { nextAvailableAt?: number; markedAt?: number },
   quota: AgentQuota | undefined,
   now: number,
+  options?: { model?: string | null },
 ): boolean {
   if (!(typeof entry.nextAvailableAt === "number" && entry.nextAvailableAt > now)) return false;
   if (typeof entry.markedAt !== "number" || !Number.isFinite(entry.markedAt)) return false;
   if (!quota || !(quota.observedAt > entry.markedAt)) return false;
   // 启发式恢复：仅在订阅额度窗口有余量且无其它窗口明确耗尽时提前解除。
   // 429 来自并发/模型级等未上报维度时仍可能误清；代价是下次请求再撞 429 并重新 mark。
-  const subscriptionWindows = quota.windows.filter((window) => window.scope === "5h" || window.scope === "7d");
+  //
+  // scope 必须归一化后再比较：antigravity 的窗口叫 `gemini-7d` / `3p-5h`，
+  // 用字面 `"5h"`/`"7d"` 比较会让 subscriptionWindows 恒为空 → 该 provider
+  // 的冷却永远无法按额度证据提前解除（2026-11-03 实测：额度 4%、网页显示
+  // quota_ok，本地却锁满 24h）。
+  const family = resolveQuotaWindowFamily(options?.model);
+  const relevantWindows = quota.windows.filter((window) =>
+    isWindowRelevantToFamily(window.scope, family),
+  );
+  const subscriptionWindows = relevantWindows.filter(isSubscriptionPeriodWindow);
   if (subscriptionWindows.length === 0) return false;
-  if (quota.windows.some((window) => window.scope !== "5h" && window.scope !== "7d" &&
-    (window.remaining === 0 || (typeof window.utilization === "number" && window.utilization >= 0.95)))) return false;
+  if (relevantWindows.some((window) => !isSubscriptionPeriodWindow(window) && isExhaustedWindow(window))) return false;
   return subscriptionWindows.every((window) => {
     const hasUtilization = typeof window.utilization === "number";
     const hasRemaining = typeof window.remaining === "number";
@@ -136,10 +208,19 @@ export interface AgentAvailabilityDecision {
  * 4. 缺少额度快照或无有效窗口 → unverified (no_quota_snapshot)
  * 5. 额度快照超过 2 小时未更新 → unverified (stale_quota_snapshot)
  * 6. 额度快照新鲜且余量充足 → available (quota_ok)
+ *
+ * 窗口按 `agent.model` 的模型族过滤（antigravity 的 `gemini-*` vs `3p-*`）：
+ * 淘汰 `3p-*` 桶不该把 gemini agent 判成耗尽（2026-11-03 实测：额度 4%、
+ * 网页 quota_ok，本地锁满 24h）。`model` 缺失时不过滤，行为与改动前一致。
  */
 export function resolveAgentAvailability(
   agent:
-    | { nextAvailableAt?: number; quota?: AgentQuota; quotaExhaustion?: { observedAt: number } }
+    | {
+        nextAvailableAt?: number;
+        quota?: AgentQuota;
+        quotaExhaustion?: { observedAt: number };
+        model?: string | null;
+      }
     | null
     | undefined,
   now = Date.now(),
@@ -155,9 +236,11 @@ export function resolveAgentAvailability(
     Boolean(quota) &&
     typeof quota?.observedAt === "number" &&
     Number.isFinite(quota.observedAt);
-  const hasWindows = Boolean(
-    quota && Array.isArray(quota.windows) && quota.windows.length > 0,
+  const family = resolveQuotaWindowFamily(agent?.model);
+  const relevantWindows = (quota?.windows ?? []).filter((window) =>
+    isWindowRelevantToFamily(window?.scope, family),
   );
+  const hasWindows = relevantWindows.length > 0;
   const hasValidQuota = isAdmissible && hasWindows;
 
   // 1. 检查额度耗尽（新鲜快照）
@@ -167,7 +250,7 @@ export function resolveAgentAvailability(
     let hasWindowResetPending = false;
     let maxResetAt: number | undefined;
 
-    for (const w of quota!.windows) {
+    for (const w of relevantWindows) {
       const inspected = inspectQuotaWindowExhaustion(w, now);
       if (!inspected) continue;
 

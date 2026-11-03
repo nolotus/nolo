@@ -41,6 +41,7 @@ export function spawnProcess(options: SpawnProcessOptions): SpawnedProcess {
     child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
+      windowsHide: true,
       stdio: [
         options.stdin ?? "pipe",
         options.stdout ?? "pipe",

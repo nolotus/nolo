@@ -978,6 +978,9 @@ export async function runWorkspaceCommand(args: {
       "pipe",
     ],
     detached,
+    // Windows: a child spawned from a console-less parent (e.g. a detached run) would
+    // otherwise get its own flashing console window per command.
+    windowsHide: true,
   });
   if (args.stdin !== undefined && proc.stdin) {
     proc.stdin.write(args.stdin);
