@@ -936,6 +936,7 @@ async function runWorkspaceCommandLimitedLines(args: {
     cwd: resolve(args.workspaceRoot),
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
+    windowsHide: true,
   });
   const exitSettled = waitForNodeProcessExit(proc).then(
     (code) => ({ ok: true as const, code }),
@@ -2266,6 +2267,7 @@ async function launchProcessTool(args: {
     cwd: resolve(args.workspaceRoot),
     stdio: ["ignore", "pipe", "pipe"],
     detached,
+    windowsHide: true,
   });
 
   // P1 wake-safety backpressure fix: drain both pipes continuously from spawn

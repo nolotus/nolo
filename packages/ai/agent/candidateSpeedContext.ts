@@ -8,8 +8,9 @@
 //      callDurationMs / output_tokens), resolved by ai/token/observedSpeedResolver
 //      (which already drops implausible burst-arrival TPS samples). Used when the
 //      model has at least MIN_OBSERVED_FIRST_OUTPUT_SAMPLES first-output samples.
-//   2. aa — the Artificial Analysis snapshot in ai/llm/modelAbility.ts
-//      (outputSpeedTps / firstAnswerTokenS, with measuredAt), only as fallback.
+//   2. REMOVED: aa (Artificial Analysis) fallback. Its numbers are
+//      cross-account averages that misrank this user's own channels; a wrong
+//      ordering is worse than no ordering, so only observed data is rendered.
 //   Neither source → no line (missing is missing, not slow).
 //
 // Deliberately NOT done here: no speed × quality composite score, no ranking,
@@ -18,7 +19,6 @@
 // the listAgents result unchanged; this module never throws to the caller.
 
 import { createTokenKey, createKey } from "database/keys";
-import { getModelAbility } from "../llm/modelAbility";
 import {
   readSpeedSamplesCache,
   writeSpeedSamplesCache,
@@ -34,22 +34,12 @@ import {
 
 /** Most recent records per model fed to the resolver. */
 export const OBSERVED_SPEED_WINDOW = 50;
-/** Fewer first-output samples than this → observed is too thin, fall back to AA. */
+/** Fewer first-output samples than this → observed is too thin, model is omitted. */
 export const MIN_OBSERVED_FIRST_OUTPUT_SAMPLES = 5;
 /** Per-user cache TTL for the token scan (keys are not time-sortable → full user scan). */
 export const SPEED_SAMPLES_CACHE_TTL_MS = 5 * 60_000;
 /** Max users kept in the module-level samples cache; oldest entries are evicted beyond this. */
 export const SPEED_SAMPLES_CACHE_MAX_ENTRIES = 500;
-/**
- * AA firstAnswerTokenS above this is treated as untrustworthy and not rendered.
- * AA's first-answer figure includes thinking time measured on AA's own prompts;
- * values of minutes (e.g. claude-sonnet-5 ≈150s) are sampling/methodology
- * artifacts rather than what a user's channel delivers, and a single outlier
- * would otherwise dominate routing. Same spirit as the TPS plausibility filter
- * in observedSpeedResolver.
- */
-export const MAX_PLAUSIBLE_AA_FIRST_ANSWER_S = 60;
-
 export type SpeedSample = ObservedSpeedRecordInput;
 
 /** normalized model name → samples, newest first. */
@@ -57,15 +47,12 @@ export type SpeedSamplesByModel = ReadonlyMap<string, readonly SpeedSample[]>;
 
 export interface CandidateSpeedFact {
   model: string;
-  source: "observed" | "aa";
+  source: "observed";
   /** observed: median first meaningful output (ms). */
   firstOutputMs?: number;
-  /** aa: median first answer token (seconds; includes thinking time). */
-  firstAnswerTokenS?: number;
   outputTps?: number;
   firstOutputSamples?: number;
   tpsSamples?: number;
-  measuredAt?: string;
 }
 
 /** Lightweight normalization: trim, lowercase, drop provider prefix (`deepseek/x` → `x`). */
@@ -80,7 +67,7 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 /**
  * Reasoning-tier suffixes a candidate name may carry on top of the name the
- * samples / AA snapshot are recorded under (`claude-opus-5-5-medium` →
+ * samples are recorded under (`claude-opus-5-5-medium` →
  * `claude-opus-5-5`). `max` is deliberately absent: `swe-2-max` is a model name,
  * not a reasoning tier, and stripping it would invent a different model.
  */
@@ -116,22 +103,10 @@ function resolveOneBare(
     };
   }
 
-  const aa = getModelAbility(model)?.aaSnapshot;
-  if (!aa) return null;
-  const firstAnswerTokenS =
-    isFiniteNumber(aa.firstAnswerTokenS) &&
-    aa.firstAnswerTokenS <= MAX_PLAUSIBLE_AA_FIRST_ANSWER_S
-      ? aa.firstAnswerTokenS
-      : undefined;
-  if (!isFiniteNumber(aa.outputSpeedTps) && firstAnswerTokenS === undefined) {
-    return null;
-  }
-  return {
-    source: "aa",
-    ...(firstAnswerTokenS !== undefined ? { firstAnswerTokenS } : {}),
-    ...(isFiniteNumber(aa.outputSpeedTps) ? { outputTps: aa.outputSpeedTps } : {}),
-    measuredAt: aa.measuredAt,
-  };
+  // 只认**本用户真实调用**的中位数；不再回落到 Artificial Analysis 的通用快照。
+  // aa 的口径（含思考时间的首答、跨账号平均）与我们要挑的"这个用户这条通道多快"不是一回事，
+  // 实测多次证明它会给出误导排序——错误的排序比没有排序更糟。
+  return null;
 }
 
 /**
@@ -173,19 +148,13 @@ const formatSeconds = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
 const formatTps = (tps: number): string => String(Math.round(tps));
 
 export const SPEED_CONTEXT_HEADER =
-  "speed (observed=本用户最近调用中位数, firstOutput 含推理输出; aa=Artificial Analysis 快照, firstAnswer 含思考时间, 两源不可直接比较; observed tps=generation（不含端到端口径）, tps=n/a 表示无可信吞吐样本):";
+  "speed (observed=本用户最近调用中位数, firstOutput 含推理输出; tps=generation（不含端到端口径）, tps=n/a 表示无可信吞吐样本。未列出的 model 表示没有实测样本，不代表慢):";
 
 export function formatCandidateSpeedFacts(facts: readonly CandidateSpeedFact[]): string | null {
   if (facts.length === 0) return null;
   const lines = facts.map((fact) => {
-    if (fact.source === "observed") {
-      const tps = fact.outputTps !== undefined ? formatTps(fact.outputTps) : "n/a";
-      return `  ${fact.model}: firstOutput=${formatSeconds(fact.firstOutputMs ?? 0)} tps=${tps} [observed n=${fact.firstOutputSamples ?? 0} tpsN=${fact.tpsSamples ?? 0}]`;
-    }
-    const parts: string[] = [];
-    if (fact.firstAnswerTokenS !== undefined) parts.push(`firstAnswer=${fact.firstAnswerTokenS.toFixed(1)}s`);
-    parts.push(`tps=${fact.outputTps !== undefined ? formatTps(fact.outputTps) : "n/a"}`);
-    return `  ${fact.model}: ${parts.join(" ")} [aa measuredAt=${fact.measuredAt}]`;
+    const tps = fact.outputTps !== undefined ? formatTps(fact.outputTps) : "n/a";
+    return `  ${fact.model}: firstOutput=${formatSeconds(fact.firstOutputMs ?? 0)} tps=${tps} [observed n=${fact.firstOutputSamples ?? 0} tpsN=${fact.tpsSamples ?? 0}]`;
   });
   return `${SPEED_CONTEXT_HEADER}\n${lines.join("\n")}`;
 }
@@ -446,7 +415,7 @@ export interface InjectSpeedContextOptions {
 
 /**
  * Add `speedContext` to a listAgents JSON result. Observed data needs db+userId;
- * without them (or on any read failure) it falls back to AA-only facts. Invalid /
+ * without observed samples it injects nothing — there is no fallback source. Invalid /
  * non-list results and "no data at all" return the input byte-for-byte.
  */
 export async function injectSpeedContextIntoListAgentsResult(

@@ -48,6 +48,7 @@ export function executeDoDCommand(
   try {
     const res = spawnSync(cmd, {
       shell: true,
+      windowsHide: true,
       cwd: cwd || process.cwd(),
       timeout: DOD_COMMAND_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024,

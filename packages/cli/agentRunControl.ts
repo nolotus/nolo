@@ -1934,6 +1934,8 @@ export async function spawnLocalBackgroundRun(
     });
     proc = spawn(execPath, childArgs, {
       cwd: input.cwd, env: childEnv, detached: true,
+      // Detached on Windows means no console; hide the one its children would create.
+      windowsHide: true,
       stdio: deps.shellApprovalHost ? ["ignore", logFd, logFd, "ipc"] : ["ignore", logFd, logFd],
     });
   } catch (error) {

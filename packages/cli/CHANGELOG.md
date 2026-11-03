@@ -1,4 +1,13 @@
 
+## 0.205.0-alpha.3 (2026-11-03)
+
+### Bug Fixes
+
+* **agent-runtime:** 补齐搜索路径的 windowsHide，修 Windows 后台 run 闪窗 ([a0195ed](https://github.com/nolotus/bun-nolo/commit/a0195ed6f5495ef26d91a97c93376cf2e6498853))
+* **agent:** 移除 aa 速度数据，速度排序只认本用户实测 ([4d9dff2](https://github.com/nolotus/bun-nolo/commit/4d9dff2e953aa251575243acb5dc8d461f99339c))
+* **cli:** hide Windows console windows for background-run child processes ([56dedbd](https://github.com/nolotus/bun-nolo/commit/56dedbd26ad92e8b17188d4e0c5d7bbb05154ae5))
+
+
 ## 0.205.0-alpha.2 (2026-11-03)
 
 ### Bug Fixes

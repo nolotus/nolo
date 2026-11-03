@@ -76,7 +76,9 @@ async function runCommand(binary: string, args: string[], cwd: string, maxResult
   return await new Promise((done) => {
     let stdout = "", stderr = "", recordCount = 0, stopped = false;
     try {
-      const child = spawnChildProcess(binary, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+      // Windows: a console-less parent (a detached background run) would otherwise get a
+      // flashing console window for every grep/rg search.
+      const child = spawnChildProcess(binary, args, { cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
       child.stdout.on("data", (chunk: Buffer) => {
         stdout += chunk.toString();
         recordCount = parseMatches(cwd, stdout).length;
