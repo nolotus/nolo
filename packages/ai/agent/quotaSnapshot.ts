@@ -244,10 +244,14 @@ export function isSubscriptionQuotaScope(scope: string): boolean {
  * 额度窗口的模型族。antigravity 的额度接口把窗口分成**两族**，桶名是上游给的
  * 字面量：`gemini-5h`/`gemini-7d` 与 `3p-5h`/`3p-7d`。
  *
- * ⚠️ `3p` 具体对应哪些模型**没有上游文档依据**（仓库内也无记载），只确认它是
- * 与 gemini 族并列的另一族额度桶；不要在注释或对外文案里把它写成「第三方模型」
- * 之类的确定语义。可验证的只有：生产接口只回 3p 族，泛用接口只回 gemini 族（且
- * 其 gemini 族自 2026-10-22 起不再更新）。
+ * `3p` 的语义有上游自述依据（2026-11-03 实测 `retrieveUserQuotaSummary` 原始响应）：
+ * 该 group 的 `displayName` 是 `Claude and GPT models`，`description` 是
+ * `Models within this group: Claude Opus, Claude Sonnet, GPT-OSS` —— 即 3p 是
+ * **Claude/GPT 那一族**，与 Gemini 模型无关。
+ *
+ * 同一响应里**没有** Gemini 组（生产档只回 3p 组），因此 gemini agent 的额度上游
+ * 不提供；泛用接口虽回 gemini 族，但其读数自 2026-10-22 起冻结（resetAt 已过期），
+ * 不能当当前余量。展示层据此显示「无额度数据」而不是编造数字。
  */
 export type QuotaWindowFamily = "gemini" | "3p";
 
