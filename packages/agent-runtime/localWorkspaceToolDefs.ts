@@ -381,7 +381,8 @@ function buildTaskStopTool(): OpenAiCompatibleTool {
       description:
         "Stop a background task: SIGTERM to its process group, then SIGKILL if it is still alive after a short grace window. "
         + "Returns {outcome, status, signal, escalated}: outcome \"stopped\" with status \"stopped\" on success, "
-        + "or outcome \"not-stoppable\" (already finished, or a foreground command that is not a background task) or \"not-found\". Never reports success without signalling.",
+        + "or outcome \"not-stoppable\" (already finished, or a foreground command that is not a background task) or \"not-found\". Never reports success without signalling. "
+        + "Note: taskId is the handle returned by launchProcess or a detached execShell result (e.g. \"ptask-...\"). To stop an agent run, use controlAgentRun(action: \"stop\", runId: \"...\") instead; do not pass runId or empty strings to taskStop.",
       parameters: {
         type: "object",
         properties: {
