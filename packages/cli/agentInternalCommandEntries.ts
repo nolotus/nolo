@@ -49,7 +49,7 @@ export function getAgentInternalCommandEntries(): CommandEntry[] {
       const { runAgentPsCommand } = await import("./agentRunControl");
       return runAgentPsCommand(_args, { ...deps, output: process.stdout });
     }),
-    createEnvCommand(["agent", "status"], "Show status of a local agent run (--json, --watch, --interval-ms N)", async (args, deps) => {
+    createEnvCommand(["agent", "status"], "Show status of a local agent run (--json, --include-checkpoint, --watch, --interval-ms N)", async (args, deps) => {
       const { runAgentStatusCommand } = await import("./agentRunControl");
       return runAgentStatusCommand(args, { ...deps, output: process.stdout });
     }),

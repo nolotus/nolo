@@ -41,7 +41,11 @@ export type ToolExecutionInteraction =
  */
 export type ToolConcurrencySemantics = "safe" | "exclusive";
 
-export type DurableWebForegroundClass = "read-only" | "interactive" | false;
+export type DurableWebForegroundClass =
+  | "read-only"
+  | "interactive"
+  | "mutating"
+  | false;
 
 export type ToolExecutionContract = {
   replay: ToolReplaySemantics;
@@ -241,6 +245,23 @@ export const TOOL_EXECUTION_CONTRACT: Readonly<
     concurrency: "exclusive",
     durableWebForeground: false,
   },
+  createHtmlArtifact: {
+    replay: "unsafe",
+    sideEffects: "mutation",
+    locality: "server",
+    interaction: "none",
+    concurrency: "exclusive",
+    durableWebForeground: "mutating",
+  },
+  readHtmlArtifact: serverPureRead("read-only"),
+  updateHtmlArtifact: {
+    replay: "unsafe",
+    sideEffects: "mutation",
+    locality: "server",
+    interaction: "none",
+    concurrency: "exclusive",
+    durableWebForeground: "mutating",
+  },
   deleteDialogs: {
     replay: "unsafe",
     sideEffects: "mutation",
@@ -293,9 +314,13 @@ export const DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES =
 export const DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES =
   collectDurableWebToolNames("interactive");
 
+export const DURABLE_WEB_FOREGROUND_MUTATING_TOOL_NAMES =
+  collectDurableWebToolNames("mutating");
+
 export const DURABLE_WEB_FOREGROUND_TOOL_NAMES: ReadonlySet<string> = new Set([
   ...DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES,
   ...DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES,
+  ...DURABLE_WEB_FOREGROUND_MUTATING_TOOL_NAMES,
 ]);
 
 export function isDurableWebForegroundToolName(toolName: unknown): boolean {
@@ -350,6 +375,17 @@ export function hasProvenServerReadOnlySemantics(toolName: unknown): boolean {
   );
 }
 
+export function hasProvenServerMutatingSemantics(toolName: unknown): boolean {
+  const contract = resolveToolExecutionContract(toolName);
+  return (
+    contract.durableWebForeground === "mutating" &&
+    (contract.replay === "unsafe" || contract.replay === "deduplicated") &&
+    contract.sideEffects === "mutation" &&
+    contract.locality === "server" &&
+    contract.interaction === "none"
+  );
+}
+
 export function hasProvenDurableWebForegroundSemantics(
   toolName: unknown,
 ): boolean {
@@ -363,6 +399,9 @@ export function hasProvenDurableWebForegroundSemantics(
       contract.interaction === "blocking" &&
       contract.sideEffects === "observable"
     );
+  }
+  if (contract.durableWebForeground === "mutating") {
+    return hasProvenServerMutatingSemantics(toolName);
   }
   return false;
 }

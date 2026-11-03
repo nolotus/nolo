@@ -178,6 +178,7 @@ export const ThinkingSection = memo(
                       renderText={renderText}
                       cursor={null}
                       isStreaming={thinkingLive}
+                      plainCodeBlocks
                     />
                   </div>
                 </div>

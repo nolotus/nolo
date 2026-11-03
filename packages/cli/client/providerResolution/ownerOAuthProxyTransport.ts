@@ -539,7 +539,17 @@ export const resolveOwnerOAuthProxyTransport: ProviderResolver = async (ctx) => 
             ...(streamed.reasoning_content
               ? { reasoning_content: streamed.reasoning_content }
               : {}),
-            // owner_required 不上报 usage：N1 约束，客户端不产生可计费 token 记录。
+            ...(streamed.finish_reason
+              ? { finish_reason: streamed.finish_reason }
+              : {}),
+            ...(streamed.stream_complete
+              ? { stream_complete: true }
+              : {}),
+            ...(streamed.streamTruncated
+              ? { stream_truncated: true }
+              : {}),
+            // owner_required 不上报 usage：N1 约束，客户端不产生可计费 token 记录；
+            // 流完整性证据（finish_reason / stream_complete / stream_truncated）与计费无关，必须透传。
           };
         }
         const raw = await res.text().catch(() => "");

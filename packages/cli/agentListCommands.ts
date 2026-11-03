@@ -9,6 +9,7 @@ import { resolveNoloHome } from "../database-engine/dbPath";
 import {
   buildAgentDiscoveryResult,
   matchesAgentQuery,
+  resolvePaginationArgs,
   toDiscoverySafeAgentSummary,
 } from "ai/agent/agentDiscovery";
 import { getReadableCliDb, type AgentCommandDeps, type OutputLike } from "./agentCommandSupport";
@@ -81,7 +82,7 @@ export async function runAgentListCommand(
 ) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
-  const { wantJson, wantSafe, publicOnly, scope: requestedScope, idsOnly, showUnavailable, verbose, query } = parseAgentListArgs(args);
+  const { wantJson, wantSafe, publicOnly, scope: requestedScope, idsOnly, showUnavailable, verbose, compact, limit, offset, query } = parseAgentListArgs(args);
   if (requestedScope && !["preferred", "public", "all"].includes(requestedScope)) {
     throw new Error(`Invalid scope '${requestedScope}'`);
   }
@@ -144,11 +145,29 @@ export async function runAgentListCommand(
       }
     }
 
+    const pagination = resolvePaginationArgs({ limit, offset });
+    const hasQuery = Boolean(query && typeof query === "string" && query.trim());
+    const MAX_UPSTREAM_CEILING = 2000;
+    const upstreamLimit = Math.min(
+      MAX_UPSTREAM_CEILING,
+      hasQuery
+        ? MAX_UPSTREAM_CEILING
+        : Math.max(500, (pagination.offset ?? 0) + (pagination.limit ?? 100))
+    );
+    let cliUpstreamTruncated = false;
+    let cliUpstreamTotal: number | undefined;
+
     if (scope !== "preferred") {
-      const publicAgents = await Promise.all(serverUrls.map((url) => listRemotePublicAgents({
-        authToken, fetchImpl, serverUrl: url, limit: 500,
+      const publicResults = await Promise.all(serverUrls.map((url) => listRemotePublicAgents({
+        authToken, fetchImpl, serverUrl: url, limit: upstreamLimit, query: hasQuery ? query : undefined,
       })));
-      agents = publicAgents.flat();
+      agents = publicResults.flatMap((r) => r.agents);
+      for (const r of publicResults) {
+        if (r.truncated) cliUpstreamTruncated = true;
+        if (typeof r.total === "number") {
+          cliUpstreamTotal = Math.max(cliUpstreamTotal ?? 0, r.total);
+        }
+      }
       if (scope === "all") {
         const preferred = await listRemoteAgentsAcrossServers({
           authToken, fallbackFetchImpl, fetchImpl, serverUrls, userId,
@@ -287,8 +306,17 @@ export async function runAgentListCommand(
       }
     }
 
+    const totalCount = agentsForOutput.length;
+    const pagedAgents =
+      typeof pagination.limit === "number" || typeof pagination.offset === "number"
+        ? agentsForOutput.slice(
+            pagination.offset ?? 0,
+            (pagination.offset ?? 0) + (pagination.limit ?? agentsForOutput.length)
+          )
+        : agentsForOutput;
+
     if (idsOnly) {
-      output.write(`${agentsForOutput.map((agent) => agent.id).join("\n")}\n`);
+      output.write(`${pagedAgents.map((agent) => agent.id).join("\n")}\n`);
       return 0;
     }
 
@@ -371,10 +399,15 @@ export async function runAgentListCommand(
         .filter((agent) => (publicOnly ? agent.isPublic === true : true));
       const discovery = buildAgentDiscoveryResult({
         agents: safeRecords,
-        scope: "all",
+        scope: requestedScope ?? (publicOnly ? "public" : "all"),
         query,
         showUnavailable,
         verbose,
+        compact,
+        limit,
+        offset,
+        upstreamTruncated: cliUpstreamTruncated,
+        upstreamTotal: cliUpstreamTotal,
       });
 
       const listResult = JSON.stringify({
@@ -382,6 +415,9 @@ export async function runAgentListCommand(
         userId,
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
         total: discovery.total,
+        ...(typeof discovery.offset === "number" ? { offset: discovery.offset } : {}),
+        ...(typeof discovery.limit === "number" ? { limit: discovery.limit } : {}),
+        ...(discovery.truncated ? { truncated: true } : {}),
         unavailableCount: discovery.unavailableCount,
         // agents 在最前：host 截断长输出时保头保尾，派发所需的 agentKey
         // 必须落在头部；凭证分组/限流清单是说明性大块，放最后。
@@ -403,16 +439,18 @@ export async function runAgentListCommand(
     }
 
     if (wantJson) {
-      const credentialGroups = summarizeCredentialGroups(agentsForOutput);
+      const credentialGroups = summarizeCredentialGroups(pagedAgents);
       output.write(JSON.stringify({
         userId,
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
         targetServers: serverUrls,
         ...(serverFailures.length ? { serverFailures } : {}),
-        total: agentsForOutput.length,
+        total: totalCount,
+        ...(typeof pagination.offset === "number" ? { offset: pagination.offset } : {}),
+        ...(typeof pagination.limit === "number" ? { limit: pagination.limit } : {}),
         publicCount: agentsForOutput.filter((agent) => agent.publicRecordExists).length,
         unavailableCount,
-        agents: agentsForOutput,
+        agents: pagedAgents,
         source,
         credentialGroups,
       }, null, 2));
@@ -428,7 +466,7 @@ export async function runAgentListCommand(
     if (serverFailures.length) {
       output.write(`serverFailures: ${serverFailures.length}\n`);
     }
-    output.write(`total agents: ${agentsForOutput.length}\n`);
+    output.write(`total agents: ${totalCount}\n`);
     output.write(`public agents: ${agentsForOutput.filter((agent) => agent.publicRecordExists).length}\n`);
     if (unavailableCount > 0 && !showUnavailable) {
       output.write(t("agent.unavailableHidden", String(unavailableCount)));
@@ -443,11 +481,11 @@ export async function runAgentListCommand(
       }
     }
     output.write(`source: ${source}\n`);
-    if (agentsForOutput.length === 0) {
+    if (pagedAgents.length === 0) {
       output.write("\n(no agents found)\n");
       return 0;
     }
-    for (const agent of agentsForOutput) {
+    for (const agent of pagedAgents) {
       const status = agent.publicRecordExists ? "public" : "private";
       const flagMismatch = agent.isPublicFlag !== agent.publicRecordExists
         ? ` flag=${agent.isPublicFlag}`

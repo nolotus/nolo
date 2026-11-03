@@ -81,7 +81,7 @@ export type ResponsesStreamAggregation = {
  * 不得凭空补 0：那会把一次调用落成 0 计费（“没有 usage”必须是未知，不是 0）。
  */
 /** message item 的 output_text 拼接（与 server loop 的同名语义一致）。 */
-function extractOutputTextFromItem(item: Record<string, unknown>): string {
+export function extractOutputTextFromItem(item: Record<string, unknown>): string {
   const parts = item.content;
   if (!Array.isArray(parts)) return "";
   return parts

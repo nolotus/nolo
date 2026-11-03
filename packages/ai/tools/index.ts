@@ -40,6 +40,14 @@ import { updateAgentToolFunctionSchema } from "./agent/updateAgentTool";
 // 内容管理
 import { createDocFunctionSchema, createDocFunc } from "./createDocTool";
 import {
+  createHtmlArtifactFunctionSchema,
+  createHtmlArtifactFunc,
+  readHtmlArtifactFunctionSchema,
+  readHtmlArtifactFunc,
+  updateHtmlArtifactFunctionSchema,
+  updateHtmlArtifactFunc,
+} from "./htmlArtifactTool";
+import {
   createSkillDocFunctionSchema,
   createSkillDocFunc,
 } from "./createSkillDocTool";
@@ -834,6 +842,54 @@ const baseToolDefinitions: ToolDefinition[] = [
   },
 
   // --- 内容管理 ---
+  {
+    id: "createHtmlArtifact",
+    schema: createHtmlArtifactFunctionSchema,
+    executor: createHtmlArtifactFunc,
+    description: {
+      name: "createHtmlArtifact",
+      description: "创建并持久化保存单文件 HTML 网页成品",
+      category: "内容管理",
+    },
+    behavior: "action",
+    uiGroup: "content",
+    capability: "knowledge_capture",
+    riskLevel: "low",
+    costLevel: "low",
+    defaultConsent: "auto",
+  },
+  {
+    id: "readHtmlArtifact",
+    schema: readHtmlArtifactFunctionSchema,
+    executor: readHtmlArtifactFunc,
+    description: {
+      name: "readHtmlArtifact",
+      description: "读取指定 ID 的 HTML 网页成品信息与源码",
+      category: "内容管理",
+    },
+    behavior: "data",
+    uiGroup: "content",
+    capability: "knowledge_capture",
+    riskLevel: "low",
+    costLevel: "low",
+    defaultConsent: "auto",
+  },
+  {
+    id: "updateHtmlArtifact",
+    schema: updateHtmlArtifactFunctionSchema,
+    executor: updateHtmlArtifactFunc,
+    description: {
+      name: "updateHtmlArtifact",
+      description: "更新指定 ID 的 HTML 网页成品内容与标题",
+      category: "内容管理",
+    },
+    behavior: "action",
+    uiGroup: "content",
+    capability: "knowledge_capture",
+    riskLevel: "low",
+    costLevel: "low",
+    defaultConsent: "auto",
+  },
   {
     id: "createDoc",
     schema: createDocFunctionSchema,

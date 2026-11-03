@@ -91,6 +91,62 @@
           animation: agentExploreFadeIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.05s forwards;
         }
 
+        /* ── 窄视口分类条 ────────────────────────────────────────────────
+           宽视口：分类只在 Navigation V2 Context 列里出现，这条隐藏。
+           窄视口（≤1200px，与 MainLayout 折叠 Context 列的阈值同源）：
+           Context 列自动收成 Rail，这里接管分类入口。
+           两边必须同一个阈值，否则会出现「列还在 + 顶部也有」或「两处都没有」的空档。 */
+        .agent-explore-category-bar {
+          display: none;
+          min-width: 0;
+        }
+
+        .agent-explore-category-bar .navigation-v2-explore-categories {
+          display: flex;
+          flex-direction: row;
+          flex-wrap: nowrap;
+          gap: 6px;
+          padding: 0;
+          margin: 0;
+          min-width: 0;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+
+        .agent-explore-category-bar .navigation-v2-explore-categories::-webkit-scrollbar {
+          display: none;
+        }
+
+        .agent-explore-category-bar .navigation-v2-explore-category {
+          flex: 0 0 auto;
+          white-space: nowrap;
+          padding: 6px 12px;
+          border-radius: 999px;
+          border: 1px solid var(--borderSubtle, var(--border, #e4e4e7));
+          font-size: var(--fontSize-sm, 0.875rem);
+          line-height: 1.35;
+          color: var(--textSecondary, #71717a);
+        }
+
+        .agent-explore-category-bar .navigation-v2-explore-category:hover {
+          background: var(--surfaceInteractive, rgba(127, 127, 127, 0.09));
+          color: var(--text, #18181b);
+        }
+
+        .agent-explore-category-bar .navigation-v2-explore-category[data-active="true"] {
+          background: var(--primaryGhost, rgba(127, 127, 127, 0.14));
+          border-color: color-mix(in srgb, var(--primary, #1677ff) 35%, transparent);
+          color: var(--primary, #1677ff);
+          font-weight: 600;
+        }
+
+        @media (max-width: 1200px) {
+          .agent-explore-category-bar {
+            display: block;
+          }
+        }
+
         .agent-explore-content .public-agents {
           max-width: none;
           margin: 0;

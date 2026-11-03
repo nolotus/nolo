@@ -1486,6 +1486,7 @@ export function createCliLocalRuntimeAdapter(
     loadDialogHistoryWithSource: async (dialogId, options) =>
       loadCliDialogHistoryWithSource({
         strictContinueHistory: options?.strictContinueHistory,
+        freshDialog: options?.freshDialog,
         dialogId,
         store: await getOrCreateSharedStore(deps),
         env: deps.env,

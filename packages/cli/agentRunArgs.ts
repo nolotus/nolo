@@ -49,6 +49,7 @@ export type ParsedAgentRunArgs = {
   instaboxAllowPaid?: boolean;
   continueDialogId?: string;
   strictContinueHistory?: boolean;
+  freshDialog?: boolean;
   spaceId?: string;
   category?: string;
   inheritedFromDialogKey?: string;
@@ -397,7 +398,19 @@ export function parseAgentRunArgs(
     }
   }
   const runtimeMode = runtimeModeFromArgs(args);
-  const continueDialogId = readFlagValue(args, "--continue") ?? readFlagValue(args, "--dialog");
+  const explicitContinueDialogId = readFlagValue(args, "--continue");
+  const continueDialogId = explicitContinueDialogId ?? readFlagValue(args, "--dialog");
+  const freshDialog = args.includes("--fresh") || args.includes("--fresh-dialog");
+  const strictContinueHistory = args.includes("--strict-continue-history");
+
+  if (freshDialog) {
+    if (strictContinueHistory) {
+      throw new Error("Cannot combine --fresh with --strict-continue-history");
+    }
+    if (continueDialogId) {
+      throw new Error("Cannot combine --fresh with --continue or --dialog");
+    }
+  }
   const spaceId = readFlagValue(args, "--space");
   const category = readFlagValue(args, "--category");
   const inheritedFromDialog = readFlagValue(args, "--inherit-from-dialog");
@@ -491,7 +504,8 @@ export function parseAgentRunArgs(
     noStream: args.includes("--no-stream"),
     machineShell: args.includes("--machine-shell"),
     ...(continueDialogId ? { continueDialogId } : {}),
-    ...(args.includes("--strict-continue-history") ? { strictContinueHistory: true } : {}),
+    ...(strictContinueHistory ? { strictContinueHistory: true } : {}),
+    ...(freshDialog ? { freshDialog: true } : {}),
     ...(!continueDialogId && spaceId ? { spaceId } : {}),
     ...(category ? { category } : {}),
     ...(inheritedRef?.dialogKey ? { inheritedFromDialogKey: inheritedRef.dialogKey } : {}),

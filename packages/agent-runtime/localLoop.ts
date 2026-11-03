@@ -773,13 +773,13 @@ function attachFailedTurnPersistence(error: unknown, status: "saved" | "failed")
 async function loadAdapterDialogHistory(
   adapter: AgentRuntimeHostAdapter,
   dialogId: string,
-  strictContinueHistory?: boolean,
+  options?: { strictContinueHistory?: boolean; freshDialog?: boolean },
 ): Promise<{
   messages: AgentRuntimeChatMessage[];
   source?: AgentRuntimeDialogHistorySource;
 }> {
   if (adapter.loadDialogHistoryWithSource) {
-    return await adapter.loadDialogHistoryWithSource(dialogId, { strictContinueHistory });
+    return await adapter.loadDialogHistoryWithSource(dialogId, options);
   }
   return { messages: await adapter.loadDialogHistory(dialogId) };
 }
@@ -946,8 +946,14 @@ export async function runLocalAgentTurn(
       const loaded = await loadAdapterDialogHistory(
         input.adapter,
         input.continueDialogId,
-        input.strictContinueHistory,
+        {
+          strictContinueHistory: input.strictContinueHistory,
+          freshDialog: input.freshDialog,
+        },
       );
+      if (input.freshDialog && loaded.messages.length > 0) {
+        throw new Error("Fresh dialog already has history");
+      }
       if (input.strictContinueHistory && (loaded.source === "none" || loaded.source === "partial")) {
         throw new Error(`Strict continuation history unavailable: ${loaded.source}`);
       }
@@ -955,7 +961,7 @@ export async function runLocalAgentTurn(
       dialogHistorySource = loaded.source;
     }
   } catch (error) {
-    if (input.strictContinueHistory) throw error;
+    if (input.strictContinueHistory || input.freshDialog) throw error;
     // History load failed mid-continue: still park the user's message on the
     // existing dialog so the next "继续" keeps the same pointer.
     const dialogId = await persistFailedLocalTurn({
@@ -970,7 +976,7 @@ export async function runLocalAgentTurn(
     throw error;
   }
   loopTiming.mark("loadDialogHistory", 0);
-  if (input.continueDialogId && history.length === 0 && dialogHistorySource === "none") {
+  if (input.continueDialogId && !input.freshDialog && history.length === 0 && dialogHistorySource === "none") {
     // Explicit "history not loaded" signal instead of silently treating a
     // resumed dialog as brand-new: the remote fallback failed (network /
     // unauthenticated / 404), so this turn runs without prior context.

@@ -148,18 +148,16 @@
 
 /* ── 卡片网格 ───────────────────────────────────────────── */
 
+/* 列宽由「内容区可用宽度」决定，不用固定断点：Explore 的内容区宽度受左侧 Context 列
+   拖拽 / 折叠影响，与 viewport 宽度没有稳定对应关系。min(100%, 320px) 让单列永远不会
+   撑出容器（旧规则在 <320px 容器里会横向溢出），auto-fill 在窄容器里自动退化成 1 列，
+   因此不再需要 640px 的单列断点。 */
 .skill-explore__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 16px;
   width: 100%;
   align-items: start;
-}
-
-@media (max-width: 640px) {
-  .skill-explore__grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ── 单个 Skill 卡片（精简版） ───────────────────────────── */
@@ -178,6 +176,9 @@
   min-height: 140px;
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  /* 卡片自身的宽度才是内部排版的判据（同一张卡片可能出现在 320px 或 480px 的格子里） */
+  container-type: inline-size;
+  container-name: skill-card;
 }
 
 .skill-card:hover {
@@ -198,11 +199,15 @@
   border-left: 3px solid var(--primary, #1677ff);
 }
 
+/* 徽章组按 max-content 参与 flex 分配，只要它的宽度够大（三枚徽章 ≈ 240px）就会把
+   标题区挤到十几个像素，标题于是逐字竖排（真实工单现象）。改成：标题区有最小基准宽度，
+   一行放不下时整组徽章换到下一行——标题永远拿得到可读宽度，徽章也不会被压变形。 */
 .skill-card__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-3, 12px);
+  flex-wrap: wrap;
+  gap: 8px var(--space-3, 12px);
   min-width: 0;
 }
 
@@ -211,7 +216,7 @@
   align-items: center;
   gap: var(--space-3, 12px);
   min-width: 0;
-  flex: 1;
+  flex: 1 1 200px;
 }
 
 .skill-card__header-badges {
@@ -220,6 +225,8 @@
   gap: 6px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
 }
 
 .skill-card__icon {
@@ -269,7 +276,9 @@
 .skill-card__title-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .skill-card__title {
@@ -279,6 +288,8 @@
   color: var(--text, #18181b);
   line-height: var(--leading-snug, 1.3);
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .skill-card__slug {
@@ -388,6 +399,24 @@
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* 窄卡片（≈320px 的格子）里徽章组必然换行：显式让标题区独占首行、徽章另起一行左对齐，
+   避免「标题缩在左边一小条、徽章满行」的参差观感。查询对象是卡片自身宽度（container-type
+   在 .skill-card 上），与 viewport 无关——侧栏拖宽拖窄、三列变两列都能命中。 */
+@container skill-card (max-width: 380px) {
+  .skill-card__header {
+    gap: 6px 10px;
+  }
+
+  .skill-card__header-left {
+    flex-basis: 100%;
+  }
+
+  .skill-card__header-badges {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
 }
 
 .skill-card__action-switch-wrap {

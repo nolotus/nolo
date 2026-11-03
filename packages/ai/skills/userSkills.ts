@@ -27,6 +27,7 @@ export const SUPPORTED_USER_SKILL_SLUGS = [
   "code-planning",
   "coding",
   "coding-review",
+  "android-adb",
 ] as const;
 
 export type SupportedUserSkillSlug =

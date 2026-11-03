@@ -11,26 +11,12 @@
 // own persisted state, not an inference from `messages.length > 0`.
 //
 // Semantics of `complete`:
-//   true  — the local store is known to cover the remote prefix (the messages
-//           the server has). Only two writers may set it:
-//             * the loader, after the full remote history was written locally
-//               AND read back (verified coverage; `reason: "remote-verified"`,
-//               `coversRemoteUpTo` = newest covered remote message id);
-//             * the local writer, when the write *creates* the dialog record
-//               (`reason: "local-origin"`) — a dialog born on this machine has
-//               no earlier remote prefix.
-//   false — the local history is known/assumed incomplete: a remote fallback
-//           failed, was unauthenticated/404'd, or the write-back could not be
-//           verified by reading the store back. The next resume must keep trying
-//           the remote fallback instead of trusting whatever messages the failed
-//           turn happened to save.
-//           Note that a *damaged* source history (see `reason: "remote-damaged"`)
-//           still counts as covered: everything the server has was written
-//           locally, so re-fetching cannot repair it — the damage is reported on
-//           the load result (`source: "partial"`) instead.
-//   absent — nothing was ever recorded: treated as "not verified complete" so
-//           pre-existing dialogs get one verifying fallback pass, and never as
-//           evidence of completeness.
+//   true — remote history was written locally and coverage verified.
+//   false — a fallback failed or could not be verified; strict continuation
+//           refuses local messages carrying this state.
+//   absent — strict continuation accepts local messages without a network read.
+// `remote-damaged` always blocks strict continuation, even if coverage holds.
+// Non-strict callers still require verified coverage before skipping recovery.
 //
 // The record is written with the local-only keyspace below and never synced to
 // a server (it describes *this* machine's store). It deliberately does not use
@@ -48,8 +34,7 @@ import type { HybridRecordStore } from "./hybridRecordStore";
 export type CliDialogHistoryStateReason =
   | "remote-verified"
   | "remote-damaged"
-  | "remote-unavailable"
-  | "local-origin";
+  | "remote-unavailable";
 
 export type CliDialogHistoryState = {
   /**
@@ -143,36 +128,4 @@ export async function writeCliDialogHistoryState(args: {
   } catch {
     return false;
   }
-}
-
-/**
- * Mark a dialog *created by this write* as locally complete.
- *
- * Refuses to touch an existing state: once a state exists, this dialog went
- * through the remote-restore path and the loader owns the verdict (in
- * particular a `complete: false` left by a failed fallback must not be upgraded
- * by the fact that the turn afterwards saved its own messages).
- */
-export async function markLocalDialogHistoryOriginComplete(args: {
-  store: HybridRecordStore;
-  dialogId: string;
-  messageCount?: number;
-}): Promise<boolean> {
-  const existing = await readCliDialogHistoryState({
-    store: args.store,
-    dialogId: args.dialogId,
-  });
-  if (existing) return false;
-  return await writeCliDialogHistoryState({
-    store: args.store,
-    dialogId: args.dialogId,
-    state: {
-      complete: true,
-      reason: "local-origin",
-      ...(typeof args.messageCount === "number"
-        ? { messageCount: args.messageCount }
-        : {}),
-      updatedAt: Date.now(),
-    },
-  });
 }

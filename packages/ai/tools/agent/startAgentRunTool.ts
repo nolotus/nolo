@@ -144,7 +144,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             // 与 server 透传保持不动，探活/烟测仍走 CLI 侧。
             continueDialogId: {
                 type: "string",
-                description: "可选。续跑当前用户已有的 dialog（不存在或不属于当前用户时显式报错，不新建）。适用于同一子任务的定向闭合，核验上一轮 finding 是否修好；禁用于评审类任务的独立判断，续跑会带入之前的结论、破坏独立性。2026-10-19 review 机制约定：full 审查用新 dialog（不传本参数），closure 用续跑。",
+                description: "可选。续跑当前用户已有的 dialog（不存在或不属于当前用户时显式报错，不新建）。适用于同一子任务的定向闭合，核验上一轮 finding 是否修好；禁用于评审类任务的独立判断，续跑会带入之前的结论、破坏独立性。2026-10-19 review 机制约定：full 审查用新 dialog（不传本参数），closure 用续跑。续跑时必须显式传该对话原本的 agentKey（对话的 primaryAgentKey）：省略 agentKey 不会沿用原 agent，而是回落到当前编排者自己，等于换模型并把这份对话的 prompt 缓存全部作废；确需换模型（原 agent 不可用/配额耗尽）才传新 key，并在 task 里说明理由。",
             },
             batchId: {
                 type: "string",
@@ -231,6 +231,14 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     "填了就只在那个位置执行；key 非法 / 运行时未配置 / 机器离线或非本人所有时会显式报错，" +
                     "不会悄悄改在本机或服务端执行。不填 = 沿用当前宿主默认位置。",
             },
+            instaboxWorkspace: {
+                type: "string", enum: ["empty", "snapshot"],
+                description: "仅 runtimeKey=instabox。仅本机 CLI 执行器支持这些参数；其他通道显式拒绝。默认 empty（无宿主 cwd 的沙盒任务）；snapshot 必须提供 instaboxManifest。沙盒不兑现宿主 cwd，cwd + instabox 一律拒绝。",
+            },
+            instaboxManifest: { type: "string", description: "snapshot 工作区的 manifest 文件路径；empty 不得提供。" },
+            instaboxArtifactDir: { type: "string", description: "宿主产物接收绝对路径；默认在本机 runs 目录下为每次派发创建独立 instabox-artifacts 目录。不是沙盒 cwd。" },
+            instaboxAllowRemoteRelease: { type: "boolean", description: "显式允许远端释放；默认 false，不自动授权。" },
+            instaboxAllowPaid: { type: "boolean", description: "显式允许付费建机；默认 false，保留免费额度门禁。" },
             allowHostWrites: {
                 type: "boolean",
                 description:
@@ -282,6 +290,11 @@ interface StartAgentRunArgs {
      * 省略 = 沿用宿主默认位置。
      */
     runtimeKey?: string;
+    instaboxWorkspace?: "empty" | "snapshot";
+    instaboxManifest?: string;
+    instaboxArtifactDir?: string;
+    instaboxAllowRemoteRelease?: boolean;
+    instaboxAllowPaid?: boolean;
     /**
      * 显式确认「这次 run 可以在宿主文件系统上写代码」。只有 `runtimeKey: "local"`
      * 需要它；其他位置（docker / server / machine / 云后端）与省略 runtimeKey 的
@@ -337,6 +350,13 @@ export async function startAgentRunFunc(
         throw new Error(
             "startAgentRun 的 runtimeKey 必须是非空的 listRuntimes key（local | server | machine:<machineId> | docker:<runtimeId> | instabox | gcp）；要沿用默认位置请省略该参数"
         );
+    }
+    // The server run transport has no instabox workspace/permission contract.
+    // Do not silently discard these fields or fall back to host execution.
+    if (runtimeKey === "instabox" || [args.instaboxWorkspace, args.instaboxManifest,
+        args.instaboxArtifactDir, args.instaboxAllowRemoteRelease, args.instaboxAllowPaid]
+        .some(value => value !== undefined)) {
+        throw new Error("startAgentRun: instabox workspace 合同目前仅由本机 CLI 执行器兑现；本服务端派发通道不支持，已拒绝（不会回落宿主）。请使用 nolo CLI 本机派发。");
     }
     const resultMode = args.resultMode ?? "full";
     const { dispatch } = thunkApi;
@@ -455,7 +475,9 @@ export async function startAgentRunFunc(
               )({
                   agentKey: effectiveAgentKey,
                   userInput: content,
-                  ...(continueDialogId ? { continueDialogId, strictContinueHistory: true } : {}),
+                  ...(continueDialogId
+                      ? { continueDialogId, strictContinueHistory: true }
+                      : { freshDialog: true }),
                   waitForCompletion: wait === true,
                   runKind: "subtask",
                   runTitle: title,

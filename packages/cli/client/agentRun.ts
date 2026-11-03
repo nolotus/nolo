@@ -2393,6 +2393,9 @@ async function executeLocalAgentTurnForCliWithAdapter(
       ...(options.actionGateHandler
         ? { onActionGate: options.actionGateHandler }
         : {}),
+      ...(options.onPartialText ? { onObservationEvent: (event: import("../../agent-runtime/observationStream").LocalLoopObservationEvent) => {
+        if (event.kind === "text-delta") options.onPartialText?.(event.chunk);
+      } } : {}),
       onLoopEvent: (event) => {
         if (event.kind === "llm-start") {
           turnOutput.showWorking();

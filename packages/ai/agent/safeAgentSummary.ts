@@ -663,6 +663,56 @@ export function toCompactAgentSummary(
   return compact as CompactSafeAgentSummary;
 }
 
+/**
+ * 显式紧凑模式（compact: true）输出投影：
+ * 当调用方受极端 token 预算限制时，保留选人派发与准入所必需的核心字段与证据
+ * （agentKey、name、model、tier、billingSource、availabilityStatus、credentialGroup、
+ * isFavorite、isOAuth、isOwned、isPublic、nextAvailableAt、availabilityReason、
+ * tools、provider、apiSource、credentialKind、credentialed、economics、quota），
+ * 同时剔除次要长文本说明与非准入元数据（如 introduction、modelAbility、greeting、prompt 等）。
+ */
+export const ULTRA_COMPACT_AGENT_SUMMARY_FIELDS = [
+  // —— 派发决策与关键准入语义（必须保留，不能宣称安全但丢证据）——
+  "agentKey",
+  "name",
+  "model",
+  "tier",
+  "billingSource",
+  "availabilityStatus",
+  "credentialGroup",
+  "isFavorite",
+  "isOAuth",
+  "isOwned",
+  "isPublic",
+  "provider",
+  "apiSource",
+  "credentialKind",
+  "credentialed",
+  "nextAvailableAt",
+  "availabilityReason",
+  "economics",
+  "tools",
+  "quota",
+] as const;
+
+export type UltraCompactSafeAgentSummary = Pick<
+  SafeAgentSummary,
+  (typeof ULTRA_COMPACT_AGENT_SUMMARY_FIELDS)[number]
+>;
+
+export function toUltraCompactAgentSummary(
+  summary: SafeAgentSummary
+): UltraCompactSafeAgentSummary {
+  const compact: Record<string, unknown> = {};
+  for (const field of ULTRA_COMPACT_AGENT_SUMMARY_FIELDS) {
+    const value = summary[field];
+    if (value !== null && value !== undefined) {
+      compact[field] = value;
+    }
+  }
+  return compact as UltraCompactSafeAgentSummary;
+}
+
 export const UNAVAILABLE_AGENT_SUMMARY_FIELDS = [
   "agentKey",
   "name",

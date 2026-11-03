@@ -519,6 +519,47 @@ export const buildEditingContextSummary = (
         return buildCanvasNodeEditingContextSummary(runtimeOptions);
     }
 
+    if (targetKind === "artifact" || targetKind === "html_artifact") {
+        const editingTarget = runtimeOptions?.editingTarget;
+        const metadata = editingTarget?.metadata;
+        const artifactId =
+            typeof editingTarget?.key === "string" && editingTarget.key
+                ? editingTarget.key
+                : typeof metadata?.artifactId === "string"
+                  ? metadata.artifactId
+                  : typeof (editingTarget as any)?.artifactId === "string"
+                    ? (editingTarget as any).artifactId
+                    : null;
+        const title =
+            editingTarget?.title ??
+            (typeof metadata?.title === "string" ? metadata.title : "HTML 网页成品");
+        const dialogKey =
+            typeof metadata?.dialogKey === "string"
+                ? metadata.dialogKey
+                : typeof (editingTarget as any)?.dialogKey === "string"
+                  ? (editingTarget as any).dialogKey
+                  : null;
+
+        return [
+            "当前编辑目标：单文件 HTML 网页成品（Editing HTML Artifact）。",
+            ...(artifactId ? [`- 成品 ID (artifactId): ${artifactId}`] : ["- 成品 ID: (新建中或未指定)"]),
+            `- 标题: ${title}`,
+            ...(dialogKey ? [`- 所属对话: ${dialogKey}`] : []),
+            "",
+            "【给 AI 的操作指南 / 非用户原话】",
+            artifactId
+                ? `1. 当前对话已存在并正在查看 HTML 成品（ID: ${artifactId}）。如果用户要求修改、调整样式、完善功能或迭代当前网页，**必须先使用 readHtmlArtifact(id: "${artifactId}") 读取现有源码（如需），再调用 updateHtmlArtifact(id: "${artifactId}", html: "...") 更新同一个 ID**，保持原成品 ID 稳定。`
+                : "1. 如果用户要求生成全新网页，使用 createHtmlArtifact 创建新成品。",
+            ...(artifactId
+                ? [
+                    `2. **严禁无条件调用 createHtmlArtifact 创建新副本**来替代对现有成品的修改；只有用户明确表达要另外'新建一个独立网页'时才调用 createHtmlArtifact。`,
+                    "3. 系统不会静默把 create 转换为 update，调用错误会导致产生分叉副本。",
+                  ]
+                : []),
+            "4. 生成/更新网页请使用 createHtmlArtifact / updateHtmlArtifact，不要使用 createDoc 或普通文档工具；普通文档工具仅用于知识库与文章。",
+        ].join("\n");
+    }
+
     // 其它 kind 以后按需扩展
     return null;
 };

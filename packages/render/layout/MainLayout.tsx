@@ -42,7 +42,11 @@ import { pointerXToNavigationWidth } from "./navigationGeometry";
 import { useIsMobile } from "app/hooks/useIsMobile";
 import { RechargeCreditWatcher } from "app/pages/RechargeCreditWatcher";
 import { useHasMounted } from "app/hooks/useHasMounted";
-import { shouldRenderChatSidebar } from "./mainLayoutSidebar";
+import {
+  shouldRenderChatSidebar,
+  shouldFoldExploreContextColumn,
+  EXPLORE_COMPACT_CATEGORY_BAR_MAX_WIDTH,
+} from "./mainLayoutSidebar";
 import { shouldRenderSiteFooter } from "./siteFooterRoutes";
 import {
   isAllViewRoutePath,
@@ -105,6 +109,16 @@ const MainLayout: React.FC = () => {
   const isMobile = useIsMobile(768);
   // Keep the first client render identical to SSR; media-query behavior starts after mount.
   const shouldRenderMobileLayout = hasMounted && isMobile;
+
+  // Explore 窄视口：分类入口挪到内容区顶部横条，Context 列折叠成 Rail。
+  const isCompactExploreViewport = useIsMobile(EXPLORE_COMPACT_CATEGORY_BAR_MAX_WIDTH);
+  const shouldFoldExploreContext = shouldFoldExploreContextColumn({
+    pathname: location.pathname,
+    isCompactViewport: isCompactExploreViewport,
+    isMobile,
+  });
+  // 用户在窄视口里手动展开过：本地覆盖，不改持久化宽度。离开 explore / 视口变宽时复位。
+  const [exploreContextExpanded, setExploreContextExpanded] = useState(false);
 
   const sidebarRef = useRef<HTMLElement | null>(null);
   const mainLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -316,12 +330,29 @@ const MainLayout: React.FC = () => {
 
   const hasSidebar = sidebarContent !== null;
   const hasRail = !isMobile && renderChatSidebar && mainSidebar.content === null;
-  const railOnly = hasRail && sidebarWidth <= 0;
+  // Explore 窄视口把 Context 列折叠成 Rail —— **只派生，不写 sidebarWidth**。
+  // sidebarWidth 是服务端持久化的用户偏好（settingPersistence 的 appearance keys）；
+  // 自动折叠若写进去，下次在宽窗口打开 Explore 会继承折叠态，而宽视口不显示顶部横条，
+  // 结果是分类入口两处都看不见。派生值同时修掉了「跨断点连续 resize 时恢复被覆盖」的竞态。
+  const exploreContextFolded =
+    shouldFoldExploreContext && !exploreContextExpanded && sidebarWidth > 0;
+  const effectiveSidebarWidth = exploreContextFolded ? 0 : sidebarWidth;
+  const railOnly = hasRail && effectiveSidebarWidth <= 0;
 
   const toggleSidebar = useCallback(() => {
-    // 用 pending 宽度判断方向：宽度被推迟一帧提交，连续点击时方向才不会算错。
-    const currentWidth = pendingSidebarWidthRef.current ?? sidebarWidth;
+    // Explore 窄视口下「点一次就必须展开」有两种起点，两者都要覆盖：
+    // ① store 宽度 > 0、但被派生折叠 —— 只要撤销本地覆盖，不动持久化宽度；
+    // ② store 宽度本来就是 0（用户此前自己收起过）—— 派生折叠此时不成立，必须同时
+    //    写回宽度；漏掉本地覆盖会立刻被下一次渲染派生折叠回去，表现为要点两次。
+    const currentWidth =
+      pendingSidebarWidthRef.current ?? (exploreContextFolded ? 0 : sidebarWidth);
     const isOpening = currentWidth <= 0;
+    if (shouldFoldExploreContext) {
+      setExploreContextExpanded(isOpening);
+    }
+    if (exploreContextFolded) {
+      return;
+    }
     mobileUserOpenedRef.current = isOpening;
     const newWidth = isOpening ? lastWidthRef.current || 280 : 0;
     userCollapsedRef.current = !isOpening;
@@ -363,7 +394,7 @@ const MainLayout: React.FC = () => {
     }
 
     dispatch(setSidebarWidth(newWidth));
-  }, [dispatch, isMobile, hasRail, sidebarWidth, finishSidebarTransition]);
+  }, [dispatch, isMobile, hasRail, sidebarWidth, finishSidebarTransition, shouldFoldExploreContext, exploreContextFolded]);
 
   const openRightSidebar = useCallback(
     (content: React.ReactNode, options?: RightSidebarOptions) => {
@@ -614,6 +645,11 @@ const MainLayout: React.FC = () => {
     }
   }, [isMobile, sidebarWidth, dispatch]);
 
+  // 离开 explore 或视口变宽后，本地展开覆盖作废：下次进窄视口 explore 重新折叠。
+  useEffect(() => {
+    if (!shouldFoldExploreContext) setExploreContextExpanded(false);
+  }, [shouldFoldExploreContext]);
+
   // 路由切换时，如有需要自动关闭右侧栏；若处于侧栏动画中，立即收敛并清理
   useEffect(() => {
     if (isSidebarTransitioningRef.current) {
@@ -663,11 +699,11 @@ const MainLayout: React.FC = () => {
   const sidebarToggleValue = useMemo(
     () => ({
       toggleSidebar,
-      isOpen: hasSidebar ? isOpen : false,
+      isOpen: hasSidebar ? isOpen && !exploreContextFolded : false,
       isDesktop,
       hasRail,
     }),
-    [toggleSidebar, hasSidebar, isOpen, isDesktop, hasRail]
+    [toggleSidebar, hasSidebar, isOpen, isDesktop, hasRail, exploreContextFolded]
   );
 
   return (
@@ -702,7 +738,7 @@ const MainLayout: React.FC = () => {
               shouldRenderMobileLayout
                 ? undefined
                 : {
-                    width: railOnly ? 52 : sidebarWidth,
+                    width: railOnly ? 52 : effectiveSidebarWidth,
                     ["--sidebar-shell-width" as any]: `${lastWidthRef.current || 280}px`,
                   }
             }

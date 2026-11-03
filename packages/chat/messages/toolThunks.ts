@@ -21,6 +21,7 @@ import type { Message, ToolPayload, ToolErrorPayload } from "./types";
 import { toolResultNeedsUserConfirmation } from "./toolPresentation";
 import { addToolMessage, updateToolMessage } from "./messageSlice";
 import { persistToolMessage } from "./persistToolMessage";
+import { deliverHtmlArtifactToolResult } from "./web/htmlArtifactEventChannel";
 import { dialogMessageKey } from "database/keys";
 import {
   CONFIRMATION_INPUT_KEYS,
@@ -568,6 +569,9 @@ export const handleToolCalls = createAsyncThunk(
         const toolName = result.toolName;
         let rawResult = result.rawResult;
         let toolPayload = result.toolPayload;
+        if (toolPayload?.status === "succeeded") {
+          deliverHtmlArtifactToolResult(toolName, rawResult, dialogKey);
+        }
 
         if (toolName) {
           const completedToolMessage = {

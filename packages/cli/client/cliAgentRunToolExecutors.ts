@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { normalizeContinueDialogId } from "../../ai/tools/agent/continueDialogId";
 import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // packages/cli/client/cliAgentRunToolExecutors.ts
@@ -277,7 +279,7 @@ const ACK_LEASE_GRACE_MS = 60_000;
 function buildRunStatusPayload(
   reconciled: RunRecord,
   deps: CliAgentRunToolExecutorDeps,
-  opts: { logTail?: string } = {},
+  opts: { logTail?: string; includeCheckpoint?: boolean } = {},
 ): { content: string; metadata?: Record<string, unknown> } {
   const logLines = opts.logTail ? opts.logTail.split("\n") : undefined;
   const name = resolveRunLabel(reconciled);
@@ -286,6 +288,9 @@ function buildRunStatusPayload(
     content: JSON.stringify({
       runId: reconciled.runId,
       found: true,
+      ...(opts.includeCheckpoint === true ? { checkpoint: reconciled.partialCheckpoint
+        ? { ...reconciled.partialCheckpoint, available: true, final: false }
+        : { available: false, final: false, reason: "checkpoint_missing" } } : {}),
       status: reconciled.status,
       pid: reconciled.pid ?? null,
       agentKey: reconciled.agentKey,
@@ -526,13 +531,40 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     // "write access" depending on phrasing.
     const isReadOnlyTask = args.readOnly === true;
 
+    const instaboxArgs: string[] = [];
+    const instaboxFields = ["instaboxWorkspace", "instaboxManifest", "instaboxArtifactDir", "instaboxAllowRemoteRelease", "instaboxAllowPaid"];
+    if (dispatch.runtimeKey !== "instabox" && instaboxFields.some(key => args[key] !== undefined)) {
+      throw new Error("instabox 参数仅适用于 runtimeKey=instabox");
+    }
+    if (dispatch.runtimeKey === "instabox") {
+      const workspace = args.instaboxWorkspace ?? "empty";
+      if (workspace !== "empty" && workspace !== "snapshot") throw new Error("instaboxWorkspace 必须为 empty|snapshot");
+      const manifest = typeof args.instaboxManifest === "string" ? args.instaboxManifest.trim() : "";
+      if (workspace === "snapshot" && !manifest) throw new Error("instaboxWorkspace=snapshot 必须提供 instaboxManifest");
+      if (workspace === "empty" && args.instaboxManifest !== undefined) throw new Error("instaboxWorkspace=empty 不得提供 instaboxManifest");
+      const artifactDir = args.instaboxArtifactDir ?? join(
+        resolveRunsDir(deps.env, deps.homedir), "instabox-artifacts", randomUUID(),
+      );
+      if (typeof artifactDir !== "string" || !artifactDir.startsWith("/") || artifactDir.includes("\0") || artifactDir.split("/").includes("..")) {
+        throw new Error("instaboxArtifactDir 必须为合法绝对路径，不能包含 .. 或空字符");
+      }
+      for (const key of ["instaboxAllowRemoteRelease", "instaboxAllowPaid"]) {
+        if (args[key] !== undefined && typeof args[key] !== "boolean") throw new Error(`${key} 必须为 boolean`);
+      }
+      instaboxArgs.push("--instabox-workspace", workspace, "--instabox-artifact-dir", artifactDir);
+      if (manifest) instaboxArgs.push("--instabox-manifest", manifest);
+      if (args.instaboxAllowRemoteRelease === true) instaboxArgs.push("--instabox-allow-remote-release");
+      if (args.instaboxAllowPaid === true) instaboxArgs.push("--instabox-allow-paid");
+    }
     const rawArgs = [
       "--agent",
       agentKey,
       "--msg-file",
       "PLACEHOLDER",
       "--bg",
-      ...(continueDialogId ? ["--continue", continueDialogId, "--strict-continue-history"] : []),
+      ...(continueDialogId
+        ? ["--continue", continueDialogId, "--strict-continue-history"]
+        : ["--fresh"]),
       // 非持久化派发（review 等一次性任务）：透传 --ephemeral，run 完成后不留
       // dialog 记录。与 web 端 runAgentBackground 的 ephemeral: true 对齐。
       ...(args.ephemeral === true ? ["--ephemeral"] : []),
@@ -541,6 +573,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // 执行后端（默认 docker 沙盒；只读派发留宿主）：唯一产出 `--runtime-key`
       // 的地方，成对不变式在 buildCliLocalRuntimeForwardArgs 内机械断言。
       ...buildCliLocalRuntimeForwardArgs(dispatch),
+      ...instaboxArgs,
     ];
 
     const agentName =
@@ -598,6 +631,9 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(batchId ? { batchId } : {}),
         ...(credentialGroup ? { credentialGroup } : {}),
         ...(parentDialogId ? { parentDialogId } : {}),
+        // 续跑目标对话：spawn 时落盘，让"开着这条对话的 TUI"在 running 期间就能
+        // 看到另一边在跑（dock 按 dialogId 也能匹配到这条 run）。
+        ...(continueDialogId ? { dialogId: continueDialogId } : {}),
         ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
         cwd: requestedCwd ?? deps.cwd ?? process.cwd(),
         message,
@@ -724,6 +760,8 @@ async function spawnContinuationRun(
       ...(agentName ? { agentName } : {}),
       ...(continuedTitle ? { title: continuedTitle } : {}),
       ...(reconciled.batchId ? { batchId: reconciled.batchId } : {}),
+      // 续跑也要在 running 阶段就带上目标对话，否则"开着那条对话的 TUI"看不到它。
+      ...(reconciled.dialogId ? { dialogId: reconciled.dialogId } : {}),
       ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
       // 续跑继承原 run 的凭证组（同一 agent），供并发扇出守卫判定。
       ...(reconciled.credentialGroup ? { credentialGroup: reconciled.credentialGroup } : {}),
@@ -1042,7 +1080,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
           ? tailFile(record.logPath, tailLines, resolveFs(deps))
           : undefined;
       // Q 接线：读到失败终态时回填熔断表（幂等；status/wait 共用同一实现）。
-      return buildRunStatusPayload(reconciled, deps, { logTail });
+      return buildRunStatusPayload(reconciled, deps, { logTail, includeCheckpoint: args.includeCheckpoint === true });
     }
 
     // ── W 接线：action="wait" 轮询本地 run 记录直到终态 ───────────────

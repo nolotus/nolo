@@ -148,6 +148,9 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
     publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
     showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
     verbose: { type: "boolean", description: "Return full safe-summary details when supported." },
+    compact: { type: "boolean", description: "Return compact projection retaining admission evidence while omitting verbose text." },
+    limit: { type: "number", description: "Maximum number of agents to return for pagination." },
+    offset: { type: "number", description: "Pagination offset." },
     space: stringToolParam("Optional space id or URL."),
   });
   add("readAgent", "Read one agent's full config by exact agentKey returned by listAgents (agent-<userId>-<id> or agent-pub-<id>); do not use the display name.", {
@@ -623,6 +626,29 @@ export function buildNoloWorkspaceCommandArgs(call: { name: string; arguments: s
       if (args.publicOnly === true) cliArgs.push("--public-only");
       if (args.showUnavailable === true) cliArgs.push("--show-unavailable");
       if (args.verbose === true) cliArgs.push("--verbose");
+      if (args.compact === true) cliArgs.push("--compact");
+      const limitVal = args.limit;
+      if (limitVal !== undefined && limitVal !== null && limitVal !== "") {
+        if (typeof limitVal === "boolean") {
+          throw new Error(`Invalid limit '${limitVal}': must be a positive integer.`);
+        }
+        const parsed = Number(limitVal);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          throw new Error(`Invalid limit '${limitVal}': must be a positive integer.`);
+        }
+        cliArgs.push("--limit", String(parsed));
+      }
+      const offsetVal = args.offset;
+      if (offsetVal !== undefined && offsetVal !== null && offsetVal !== "") {
+        if (typeof offsetVal === "boolean") {
+          throw new Error(`Invalid offset '${offsetVal}': must be a non-negative integer.`);
+        }
+        const parsed = Number(offsetVal);
+        if (!Number.isInteger(parsed) || parsed < 0) {
+          throw new Error(`Invalid offset '${offsetVal}': must be a non-negative integer.`);
+        }
+        cliArgs.push("--offset", String(parsed));
+      }
       cliArgs.push("--json", "--safe");
       return cliArgs;
     }

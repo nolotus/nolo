@@ -203,8 +203,12 @@ export function sortListedAgents(agents: ListedAgent[]) {
 
 function readArgValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
+  if (index === -1) return undefined;
   const value = index >= 0 ? args[index + 1] : undefined;
-  return value && !value.startsWith("--") ? value : undefined;
+  if (!value || value.startsWith("--")) {
+    throw new Error(`Missing value for flag '${flag}'`);
+  }
+  return value;
 }
 
 export function parseAgentListArgs(args: string[]) {
@@ -219,6 +223,9 @@ export function parseAgentListArgs(args: string[]) {
     // --safe 默认输出精简投影（与 server listAgents 一致，防大列表被截断）；
     // --verbose 拿回完整字段集排障。
     verbose: args.includes("--verbose"),
+    compact: args.includes("--compact"),
+    limit: readArgValue(args, "--limit") ?? undefined,
+    offset: readArgValue(args, "--offset") ?? undefined,
   };
 }
 
@@ -286,22 +293,87 @@ export async function listRemotePublicAgents(args: {
   fetchImpl: CliFetchImpl;
   serverUrl: string;
   limit?: number;
-}) {
-  const response = await args.fetchImpl(`${args.serverUrl}/rpc/getPublicAgents`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${args.authToken}` },
-    body: JSON.stringify({ limit: Math.min(args.limit ?? 500, 500), summary: true }),
-  });
-  if (!response.ok) throw new Error(`Public agent catalog request failed (${response.status})`);
-  const payload: any = await response.json();
-  const records = Array.isArray(payload?.data?.data)
-    ? payload.data.data
-    : Array.isArray(payload?.data) ? payload.data : [];
-  return records
+  query?: string;
+}): Promise<{ agents: ListedAgent[]; total: number; hasMore: boolean; truncated: boolean }> {
+  const MAX_CEILING = 2000;
+  const targetLimit = typeof args.limit === "number"
+    ? Math.min(Math.max(1, args.limit), MAX_CEILING)
+    : args.query
+      ? MAX_CEILING
+      : 500;
+  let currentOffset = 0;
+  let accumulated: any[] = [];
+  let upstreamTotal = 0;
+  let upstreamHasMore = false;
+  let isTruncated = false;
+  const batchLimit = 100;
+  let iteration = 0;
+  const seenIds = new Set<string>();
+  const searchName = args.query && typeof args.query === "string" && args.query.trim()
+    ? args.query.trim()
+    : undefined;
+
+  while (accumulated.length < targetLimit && iteration < 20) {
+    iteration++;
+    const toFetch = Math.min(batchLimit, targetLimit - accumulated.length);
+    try {
+      const response = await args.fetchImpl(`${args.serverUrl}/rpc/getPublicAgents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${args.authToken}` },
+        body: JSON.stringify({
+          limit: toFetch,
+          offset: currentOffset,
+          summary: true,
+          ...(searchName ? { searchName } : {}),
+        }),
+      });
+      if (!response.ok) {
+        // 弹性降级 (fail-open)：上游请求失败时标记截断并保留已拉取数据
+        isTruncated = true;
+        break;
+      }
+      const payload: any = await response.json();
+      const resultObj = payload?.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+        ? payload.data
+        : payload;
+      const records = Array.isArray(resultObj?.data)
+        ? resultObj.data
+        : Array.isArray(payload?.data) ? payload.data : [];
+
+      let newBatchCount = 0;
+      for (const item of records) {
+        const id = item?.id ?? item?.dbKey;
+        if (!id || !seenIds.has(id)) {
+          if (id) seenIds.add(id);
+          accumulated.push(item);
+          newBatchCount++;
+        }
+      }
+
+      upstreamTotal = typeof resultObj?.total === "number" ? resultObj.total : accumulated.length;
+      upstreamHasMore = Boolean(resultObj?.hasMore ?? (currentOffset + records.length < upstreamTotal));
+
+      if (!upstreamHasMore || records.length === 0 || newBatchCount === 0) break;
+      currentOffset += records.length;
+    } catch {
+      // 网络抖动/异常弹性降级
+      isTruncated = true;
+      break;
+    }
+  }
+
+  const agents = accumulated
     .filter((record: any) => record?.isPublic === true)
     .map((record: any) => normalizeListedAgent({ ...record, userId: record?.userId || "system" }))
     .filter((agent: ListedAgent | null): agent is ListedAgent => agent != null)
     .map((agent: ListedAgent) => ({ ...agent, publicRecordExists: true }));
+
+  return {
+    agents,
+    total: upstreamTotal,
+    hasMore: upstreamHasMore,
+    truncated: isTruncated || (upstreamHasMore && accumulated.length < upstreamTotal),
+  };
 }
 
 export async function listRemoteAgents(args: {

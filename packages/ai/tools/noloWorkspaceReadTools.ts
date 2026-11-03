@@ -4,6 +4,7 @@ import {
   assembleAgentDiscoveryResult,
   buildAgentDiscoveryResult,
   resolveDiscoveryScope,
+  resolvePaginationArgs,
   toDiscoverySafeAgentSummary,
 } from "../agent/agentDiscovery";
 import {
@@ -644,23 +645,40 @@ export const listAgentsFunctionSchema = {
           "Optional case-insensitive search substring matching agent name, model, provider, handle, or agentKey. Use to locate specific candidates like 'opus', 'devin', or 'claude'.",
       },
       verbose: { type: "boolean", description: "Return the full safe-summary field set (prices, introduction, modelAbility, timestamps) for troubleshooting. Default false returns the compact agent-selection projection." },
+      compact: { type: "boolean", description: "Explicit compact projection mode. Retains essential agent-selection and admission evidence (agentKey, name, model, tier, billingSource, availabilityStatus, credentialGroup, tools, apiSource, credentialed, quota, economics) while omitting non-admission verbose text like introduction and modelAbility." },
+      offset: { type: "integer", description: "Optional pagination offset for agent candidates. Default 0." },
     },
   },
 } as const;
 
 export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResult> {
-  const limit = clampNoloPositiveInteger(args?.limit, 100, 500);
-  const userRecords = await queryBestRecords(thunkApi, DataType.AGENT, limit);
+  const pagination = resolvePaginationArgs({ limit: args?.limit, offset: args?.offset });
+  const hasQuery = Boolean(args?.query && typeof args?.query === "string" && args?.query.trim());
+  const upstreamFetchLimit = hasQuery
+    ? Number.POSITIVE_INFINITY
+    : Math.max(500, (pagination.offset ?? 0) + (pagination.limit ?? 100));
+  const userRecords = await queryBestRecords(
+    thunkApi,
+    DataType.AGENT,
+    Number.isFinite(upstreamFetchLimit) ? upstreamFetchLimit : 500
+  );
   const favoritesMap = await fetchUserFavoriteAgentMap(thunkApi);
   const runtime = getRuntime(thunkApi);
   const scope = resolveDiscoveryScope({ scope: args?.scope, publicOnly: args?.publicOnly });
-  const publicRecords = scope === "preferred"
-    ? []
-    : await fetchPublicAgentsForDiscovery({
-        serverBase: runtime?.currentServer ?? "",
-        token: runtime?.currentToken,
-        limit,
-      });
+  let publicRecords: any[] = [];
+  let upstreamTruncated = false;
+  let upstreamTotal: number | undefined;
+
+  if (scope !== "preferred") {
+    const discoveryRes = await fetchPublicAgentsForDiscovery({
+      serverBase: runtime?.currentServer ?? "",
+      token: runtime?.currentToken,
+      limit: upstreamFetchLimit,
+    });
+    publicRecords = discoveryRes.agents;
+    upstreamTruncated = discoveryRes.truncated;
+    upstreamTotal = discoveryRes.total;
+  }
 
   const recordsMap = new Map<string, any>();
   for (const record of userRecords) {
@@ -782,6 +800,11 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
     publicOnly: args?.publicOnly,
     showUnavailable: args?.showUnavailable,
     verbose: args?.verbose,
+    compact: args?.compact,
+    limit: args?.limit,
+    offset: args?.offset,
+    upstreamTruncated,
+    upstreamTotal,
     now,
   });
 
@@ -789,6 +812,9 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
     rawData: {
       success: true,
       total: discovery.total,
+      ...(typeof discovery.offset === "number" ? { offset: discovery.offset } : {}),
+      ...(typeof discovery.limit === "number" ? { limit: discovery.limit } : {}),
+      ...(discovery.truncated ? { truncated: true } : {}),
       unavailableCount: discovery.unavailableCount,
       // 顺序即序列化顺序：agents 在前（派发必需），大块说明字段在后。
       agents: discovery.agents,

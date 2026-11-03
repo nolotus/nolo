@@ -39,7 +39,6 @@ import {
   localTurnHasSubjectRefs,
 } from "./cliAgentConfigHelpers";
 import { buildLocalDialogWritePlan } from "./localDialogRecords";
-import { markLocalDialogHistoryOriginComplete } from "./cliDialogHistoryState";
 import { syncLocalDialogEvidenceToRemote } from "./cliRemoteDialogSync";
 import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
 import { buildDialogFallbackTitleFromUserInput } from "../../chat/dialog/dialogTitle";
@@ -501,26 +500,6 @@ export async function writeDialog(args: {
   }
 
   await args.store.batch(plan.ops);
-
-  // 本机首次创建这条 dialog（没有 continueDialogId，即这一轮就是它的第一轮）：
-  // 它的历史在本机是完整的（不存在更早的远端前缀），显式落一条完整性标记，
-  // 后续续聊才能走「本地已确知完整」的快路径——否则每一轮都会去联网回退，离线/
-  // 未登录时还会被误判成「历史不完整」而反复告警。
-  //
-  // 只在没有任何标记时写：已有标记说明这条对话走过远端恢复路径，完整性由加载器
-  // 判定（一次失败的回退留下的 complete:false 绝不能被「本轮把消息存下来了」升级）。
-  if (!args.input.continueDialogId) {
-    const marked = await markLocalDialogHistoryOriginComplete({
-      store: args.store,
-      dialogId: plan.dialogId,
-      messageCount: args.input.messages.length,
-    });
-    if (!marked) {
-      diagLog.info(
-        `dialog-history: local-origin completeness not recorded for ${plan.dialogId} (existing state or write failure)`,
-      );
-    }
-  }
 
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);

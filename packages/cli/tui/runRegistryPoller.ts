@@ -230,6 +230,9 @@ export function snapshotFromRunRecord(
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(endedAt !== undefined ? { finishedAt: endedAt } : {}),
     ...(typeof counters?.toolCalls === "number" ? { toolCallCount: counters.toolCalls } : {}),
+    ...(Array.isArray(activity?.lastToolNames) && activity.lastToolNames.length > 0
+      ? { lastToolNames: activity.lastToolNames }
+      : {}),
     // 纯推理 run（0 次工具调用）的心跳：模型调用次数 + 最后一次事件时刻。
     // 两者都来自记录里已有的字段，不新增任何采集。
     ...(typeof counters?.llmCalls === "number" ? { llmCallCount: counters.llmCalls } : {}),
@@ -365,7 +368,14 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
     // effect on the next tick.
     const belongsToCurrentDialog = (record: RunRecord) =>
       !deps.getCurrentDialogId ||
-      (currentDialogId !== null && record.parentDialogId === currentDialogId);
+      (currentDialogId !== null &&
+        (record.parentDialogId === currentDialogId ||
+          // 另一个会话用 continueDialogId 往「本条对话」续写时，子 run 自己的
+          // dialogId 就是当前对话，而 parentDialogId 指的是发起方的对话。
+          // 这类 run 也必须进 dock——否则用户在 TUI 里完全看不到「另一边正在
+          // 这条对话上干活」。fresh run 的 dialogId 是瞬时 id 或 undefined，
+          // 不会误命中。
+          record.dialogId === currentDialogId));
     const discoveredActive = discovered.filter((record) =>
       record.runId &&
       !dockedIds.has(record.runId) &&

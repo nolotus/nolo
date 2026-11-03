@@ -187,7 +187,7 @@ export function resolveCliLocalRuntimeKeyCapability(
       // 那种形态由下面的 runtime-v1 分支放行。
       acceptedByCliArgs: isBareInstabox,
       note: isBareInstabox
-        ? "Instabox 云沙盒：可由本机 CLI 本地通道直接兑现（需 INSTABOX_API_KEY 凭据），执行 execShell 远程命令。"
+        ? "Instabox 云沙盒：可由本机 CLI 本地通道直接兑现（需 INSTABOX_API_KEY 凭据），默认 empty 工作区，snapshot 需 manifest；沙盒不兑现宿主 cwd，cwd + instabox 必须拒绝。执行 execShell 远程命令。"
         : "instabox 暂无细分子运行时；请使用裸 `instabox`。",
     };
   }

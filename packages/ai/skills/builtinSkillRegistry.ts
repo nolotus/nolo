@@ -132,6 +132,13 @@ import {
   buildAgentProviderSetupSkillId,
   buildAgentProviderSetupSkillPageKey,
 } from "./agentProviderSetupSkill";
+import {
+  ANDROID_ADB_SKILL_SLUGS,
+  buildAndroidAdbSkillConfig,
+  buildAndroidAdbSkillContentBySlug,
+  buildAndroidAdbSkillId,
+  buildAndroidAdbSkillPageKey,
+} from "./androidAdbSkill";
 
 export type BuiltinSkillEntry = {
   slug: string;
@@ -288,6 +295,13 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildAgentProviderSetupSkillPageKey,
     buildConfig: buildAgentProviderSetupSkillConfig,
     buildContent: buildAgentProviderSetupSkillContentBySlug,
+  },
+  {
+    slugs: ANDROID_ADB_SKILL_SLUGS,
+    buildSkillId: buildAndroidAdbSkillId,
+    buildPageKey: buildAndroidAdbSkillPageKey,
+    buildConfig: buildAndroidAdbSkillConfig,
+    buildContent: buildAndroidAdbSkillContentBySlug,
   },
 ];
 

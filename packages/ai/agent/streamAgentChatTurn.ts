@@ -42,6 +42,7 @@ import {
     updateToolMessage,
 } from "chat/messages/messageSlice";
 import { persistToolMessages } from "chat/messages/persistToolMessage";
+import { deliverHtmlArtifactToolResult } from "chat/messages/web/htmlArtifactEventChannel";
 import {
     selectMaxExecutionTime,
 } from "app/settings/fieldSelectors";
@@ -252,11 +253,12 @@ export function classifyLocalTurnStreamError(errorText: string): LocalTurnErrorI
  * onPayload 内部调用。
  */
 function createRemoteToolEventHandlers(opts: {
+    dialogKey: string;
     dialogId: string;
     dispatch: (action: any) => any;
     messageMetadata: Record<string, unknown>;
 }) {
-    const { dialogId, dispatch, messageMetadata } = opts;
+    const { dialogId, dialogKey, dispatch, messageMetadata } = opts;
     const activeToolMessages = new Map<string, any>();
 
     const handleToolPayload = (payload: any) => {
@@ -318,6 +320,9 @@ function createRemoteToolEventHandlers(opts: {
                 metadata: mergedMeta ?? undefined,
             });
             const resultStatus: "succeeded" | "failed" = isToolError ? "failed" : "succeeded";
+            if (!isToolError) {
+                deliverHtmlArtifactToolResult(toolName, payload.content, dialogKey);
+            }
             if (existing) {
                 const updatedMsg = {
                     ...existing,
@@ -702,6 +707,7 @@ export const streamAgentChatTurnHandler = async (
 
                 // 服务器端 SSE 工具事件 → 前端 tool 卡片（与桌面 local runtime 分支同构）
                 const remoteToolHandlers = createRemoteToolEventHandlers({
+                    dialogKey,
                     dialogId,
                     dispatch,
                     messageMetadata: cliMessageMetadata,
@@ -1419,6 +1425,10 @@ export const streamAgentChatTurnHandler = async (
                                 };
                                 activeToolMessages.set(callId, toolResultMsg);
                                 dispatch(messageStreaming(toolResultMsg));
+                                const resultToolName = toolEvent.toolName || existing.toolName;
+                                if (!isError) {
+                                    deliverHtmlArtifactToolResult(resultToolName, toolEvent.content, dialogKey);
+                                }
                             }
                         }
                     } else if (event.type === "status") {
@@ -1861,6 +1871,7 @@ export const streamAgentChatTurnHandler = async (
 
                 // 服务器端 SSE 工具事件 → 前端 tool 卡片（与桌面 local runtime 分支同构）
                 const remoteToolHandlers = createRemoteToolEventHandlers({
+                    dialogKey,
                     dialogId,
                     dispatch,
                     messageMetadata: remoteMessageMetadata,

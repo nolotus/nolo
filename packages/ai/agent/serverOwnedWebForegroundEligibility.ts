@@ -2,9 +2,11 @@ import type { EffectiveToolSurface } from "ai/tools/effectiveToolSurface";
 import { resolveEffectiveToolSurface } from "ai/tools/effectiveToolSurface";
 import {
   DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES,
+  DURABLE_WEB_FOREGROUND_MUTATING_TOOL_NAMES,
   DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES,
   DURABLE_WEB_FOREGROUND_TOOL_NAMES,
   hasProvenDurableWebForegroundSemantics,
+  hasProvenServerMutatingSemantics,
   hasProvenServerReadOnlySemantics,
 } from "ai/tools/toolExecutionSemantics";
 import { canonicalizeToolName } from "ai/tools/toolNameAliases";
@@ -34,6 +36,7 @@ export type ServerOwnedWebForegroundEligibilityInput = {
 // in this module; add/remove durable tools in toolExecutionSemantics.ts.
 export {
   DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES,
+  DURABLE_WEB_FOREGROUND_MUTATING_TOOL_NAMES,
   DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES,
   DURABLE_WEB_FOREGROUND_TOOL_NAMES,
 };
@@ -51,6 +54,9 @@ export const AUDITED_WEB_FOREGROUND_HOST_BASELINE_TOOL_NAMES = new Set([
   "readFile",
   "createDoc",
   "updateDoc",
+  "createHtmlArtifact",
+  "readHtmlArtifact",
+  "updateHtmlArtifact",
   "search_workspace",
   "updateSelf",
   "ask_user",
@@ -85,6 +91,9 @@ export function hasConsistentDurableWebForegroundSemantics(): boolean {
   }
   for (const name of DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES) {
     if (!hasProvenDurableWebForegroundSemantics(name)) return false;
+  }
+  for (const name of DURABLE_WEB_FOREGROUND_MUTATING_TOOL_NAMES) {
+    if (!hasProvenServerMutatingSemantics(name)) return false;
   }
   return true;
 }

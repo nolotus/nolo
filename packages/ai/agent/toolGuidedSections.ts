@@ -20,11 +20,12 @@ import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority"
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
 用 startAgentRun 启动子 Agent（异步 fork+exec 返回 runId），用 controlAgentRun 控制/诊断。何时派发见「多 Agent 协作」段；本段只讲派发之后的盯梢与排错。
 
-1. 盯梢：**异步派发后先推进独立已授权工作，只有无可推进工作才结束等待终态。** 对用户承诺「会通知你」之前，必须先确认这个等待任务在**失败**时也会以终态唤醒（tracked background、有界超时、失败即退出），不能只在成功路径上有通知；发布等待只能使用 \`scripts/ci/pushAndAwaitLive.ts\`，禁止手写「push + 轮询」的命令链。串行依赖不是阻塞对话的理由。等待方式按环境分三种：① controlAgentRun 有 wait action → 用它阻塞到终态（仅限预计 <100s 且马上要用结果的场景，或用户明确要求同步等待）；② 无 wait action 但宿主有 terminal wake → 无其他可推进工作时结束本轮回复，run 到终态时宿主自动把父对话接回来，不需要任何主动等待；③ 无 wait action 且无 terminal wake → 无其他可推进工作时同样结束本轮回复，run 结束时不会被自动接回来，这是宿主限制，应在回复中如实告知用户「run 已在后台运行，结果需手动查询」，而不是用 execShell sleep 轮询绕过。**execShell sleep 永远不是等待 agent run 的正确方式**：以 \`sleep N\` 开头且 N>5s 的命令会被**立即 detach**（\`IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS\`，与 execShell 工具描述同源、由一致性测试锁定）；其余命令则超过 \`NOLO_EXEC_SHELL_DETACH_MS\`（默认 120s）才 detach。两条路径都会让每个完成产生一条通知，形成噪音且完全无效。
+1. 盯梢：**异步派发后先推进独立已授权工作，只有无可推进工作才结束等待终态。** 对用户承诺「会通知你」之前，必须先确认这个等待任务在**失败**时也会以终态唤醒（tracked background、有界超时、失败即退出），不能只在成功路径上有通知；发布等待只能使用 \`scripts/ci/pushAndAwaitLive.ts\`，禁止手写「push + 轮询」的命令链。串行依赖不是阻塞对话的理由。等待方式按环境分三种：① controlAgentRun 有 wait action → 用它阻塞到终态（仅限预计 <100s 且马上要用结果的场景，或用户明确要求同步等待）；② 无 wait action 但宿主有 terminal wake → 无其他可推进工作时结束本轮回复，run 到终态时宿主自动把父对话接回来，不需要任何主动等待；③ 无 wait action 且无 terminal wake → 无其他可推进工作时同样结束本轮回复，run 结束时不会被自动接回来，这是宿主限制，应在回复中如实告知用户「run 已在后台运行，结果需手动查询」，而不是用 execShell sleep 轮询绕过。**execShell sleep 永远不是等待任何事物（无论 agent run、后台进程、git hook 还是外部服务）的正确方式**：以 \`sleep N\` 开头且 N>5s 的命令会被**立即 detach**（\`IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS\`，与 execShell 工具描述同源、由一致性测试锁定）；其余命令则超过 \`NOLO_EXEC_SHELL_DETACH_MS\`（默认 120s）才 detach。两条路径都会让每个完成产生一条通知，形成噪音且完全无效。等待外部系统请使用有具体探测退出的有限轮询任务或专用 wait 脚本。
 2. 禁止轮询、禁空转、别复述 status；语义以工具描述为准。status 仅用于异常诊断——怀疑卡死、failed 后看详情/日志、用户明确询问执行细节（tailLines:0 只看摘要）；它不是 stop 前的 preflight。并行派发纪律（默认并行 / 只有真实依赖才串行 / 禁止的串行借口）由系统层固定块「并行是默认 · 派发纪律」（agent-runtime/parallelDispatchDefault.ts，四条装配线无条件注入）承载——本段不重复，避免两处真值。
 3. 排错先分诊：agentKey 没照抄 listAgents 就先修 key（不算通道故障）；报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；同一已验证 key 仍失败且错误明确指向通道（429、鉴权失败、machine offline）才记为通道故障。判定「派发通道整体不可用」需 ≥2 个不同候选各自完成「已验证 key + 一次真实派发」且失败，候选不足就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。**orphaned 或进程立即退出（0 tool calls）时，第一步必须看 logTail 的 stderr**，先排除语法错误、依赖缺失与构建崩溃——CLI 启动失败时请求根本未发出，表现易被误判为通道故障，盲目重派无法解决。
-4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志。**终态 run 的结论读 status 里的 resultFile（readFile 原文），不要拿带 ANSI 的 .log 或 2000 字 lastAssistantText 摘要代替结论**；resultFile 缺失 = 该 run 确实没产出正文（killed / 空回复 / 用户 Esc 中断），按「无结论」处理而不是回头啃日志；缺失本身不是工具故障——中断 run 的正文只留在 .log 与 dialog 里。append 可直接调用——not found/已终态/运行中入队由 executor 自证；stop 可直接调用，not found/已终态/运行中由控制平面自行处理（已终态原样返回、不会被覆盖）。
-5. 派发一律用 \`startAgentRun\` / \`controlAgentRun\`，**不要用 \`execShell\` 调 \`nolo agent run\`**：那条路径绕过运行面板与终态回收，用户看不到进度，状态只能靠文件推断。需要指定工作目录时用 \`startAgentRun\` 的 \`cwd\` 参数（绝对路径，目录必须已存在）。`;
+4. 仅 status=failed、超时或 progress 长期无动静（疑似卡死）才拉 tailLines:30 看日志。**终态 run 结论必读 status 里的 resultFile（readFile 原文），禁止用带 ANSI 的 .log 或 2000 字 lastAssistantText 摘要代替**；中断 run 正文可能留 dialog/.log，但 resultFile 缺失按「无结论」处理且不属工具故障，不擅断用户中断，亦不要回头啃日志。append 可直接调用——not found/已终态/运行中入队由 executor 自证；stop 可直接调用，not found/运行中/已终态由控制平面处理（已终态原样返回、不覆盖）。
+5. 派发一律用 \`startAgentRun\` / \`controlAgentRun\`，**不要用 \`execShell\` 调 \`nolo agent run\`**：那条路径绕过运行面板与终态回收，用户看不到进度，状态只能靠文件推断。需要指定工作目录时用 \`startAgentRun\` 的 \`cwd\` 参数（绝对路径，目录必须已存在）。
+6. 续跑已有 dialog（\`continueDialogId\`）时要**显式传该对话原本的 agent**（dialog 的 \`primaryAgentKey\`）：\`省略 agentKey 不会自动沿用原 agent，而是回落到当前编排者自己\`——那等于把对话偷换成你在跑，prompt 缓存（以及结论风格）全丢。这条是「选人」纪律的特例：closure/定向闭合为保住缓存优先沿用原 agent，不必重新扫候选池比价。只有确需换模型（原 agent 不可用/配额耗尽等）才传新 agentKey，并在 task 里说明理由。`;
 
 // ============================================================================
 // 多 Agent 协作 - 计划/派发/审查 方法论纪律（命中编排工具时注入）
@@ -112,7 +113,8 @@ const AGENT_COMMIT_REVIEW_GATE = `**commit 前硬门（阶段划分与独立审�
 const AGENT_CONFIRM_BOUNDARY = `--- 确认边界 ---
 - 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易）或高成本动作（大规模重构/长时运行/大量 token）时，优先预览或向用户确认；工具返回"预览/待确认"时暂停，等明确确认再继续，未确认前不连续发多次破坏性修改。
 - 收到「子对话禁止再创建孙对话」＝你已是子对话，禁止再派发，把结果返回父对话即可。
-- **目标范围控制**：发现原交付物不能实现，不得自行缩成文案/手动退路后宣称完成；陈述已证实限制、原目标差距、推荐替代及影响，缩减用户可见能力需明确确认；同范围技术细节不需问，已授权不变范围继续推进，防变成事事确认。`;
+- **目标范围控制**：发现原交付物不能实现，不得自行缩成文案/手动退路后宣称完成；陈述已证实限制、原目标差距、推荐替代及影响，缩减用户可见能力需明确确认；同范围技术细节不需问，已授权不变范围继续推进，防变成事事确认。
+- **合并与部署确认**：在一次合并范围选择中明确远端目标与可能部署；已明确批准同一后果不重复询问，保留所有安全闸门。`;
 
 const AGENT_COLLABORATION_MIN_DISPATCH = `--- 多 Agent 派发（最小协议） ---
 - startAgentRun 启动子 Agent：省略 agentKey（或传 'self'）自动派发自身执行细分子任务；派其他 Agent 时 agentKey 必须原样照抄 listAgents 返回的 agentKey 字段（不拼接/不推断/不换格式/不传 name）；异步返回 runId，派发后先推进独立已授权工作，只有无可推进工作才结束等待终态，禁止轮询；并行派发用同一 batchId 归组。
@@ -193,7 +195,7 @@ const WEBPAGE_ACCESS_INSTRUCTIONS = `--- 网页访问能力 (Web Access) ---
 const KNOWLEDGE_MANAGEMENT_INSTRUCTIONS = `--- 知识管理 ---
 - references：Agent 配置里每次对话自动注入（type=instruction 进 prompt 顶部做行为规则；type=knowledge 作参考资料；page 里的 @mention 只展开元信息（标题+dbKey），不递归展开内容）。
 - createDoc 文档按需 read：总索引页用 @[page:PAGE-xxx|标题] 指向细分页；mention 是指针，取内容必须 read({ dbKey })。读取路径：prompt/references 有 → 直接用；没有 → read 索引页找细分页 dbKey → read 细分页取完整内容。
-- 沉淀时机：用户给了可复用信息 / 完成有价值调研 → createDoc（并 updateAgent 加入 references）；索引缺入口 → updateDoc 补 @mention。不要把一次性内容写成知识页。`;
+- 沉淀时机与落位判定：信息落位严格遵循「知识存储约定」（区分个人偏好进 memory、项目决策/真值进 repo 文档、运行时保障进代码+test；不一律 createDoc 或 updateAgent）。仅当沉淀跨 dialog 共读的平台页面级知识、且具备 createDoc 工具时按需创建；索引缺入口用 updateDoc 补 @mention。无对应工具严禁声称已创建或生效。不要把一次性内容写成知识页。`;
 
 // ============================================================================
 // 长期记忆（有 rememberMemory 工具时注入）

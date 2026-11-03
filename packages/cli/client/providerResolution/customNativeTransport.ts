@@ -31,6 +31,7 @@
  * / `anthropicMessagesCustomTransport.test.ts`，按新导出名指向本文件）。
  */
 import { findModelConfig } from "../../../ai/llm/providers";
+import { detectDeclaredCustomNativeWire } from "agent-runtime/customNativeWire";
 import {
   createCustomNativeProvider,
   TRANSPORT_LABEL,
@@ -52,7 +53,19 @@ import type { ProviderResolver } from "./providerResolutionContext";
 export const resolveCustomNativeTransport: ProviderResolver = async (ctx) => {
   const { agentConfig, deps, apiKeyRefResolver, credentialBroker, syncFetcher, fetchImpl, recordLocalAvailability, buildProviderOpenAiTools, additionalToolNames } = ctx;
   if (!agentConfig.customProviderUrl) return null;
-  const wire = findModelConfig(agentConfig.provider ?? "", agentConfig.model ?? "")?.nativeProtocol;
+  // 目录的 `nativeProtocol` 是最具体的判据（同一网关按模型分协议）；目录没声明时，
+  // 退回「端点自身声明的 wire」（`…/responses`、`…/messages`）。没有这一层回退，
+  // 同一个配置会「服务端代理走 responses、本地走 chat/completions」，用户看到的就是
+  // 「网页能用、CLI/TUI 404」——而端点后缀本来就是 `customProviderUrl` 的既有语义
+  // （`agentCallPlan#resolveCustomUpstreamWire` 规则 2 一直这么判）。
+  // 端点后缀回退**只认 `openai-responses`**：服务端代理的规则 2 也只对 `/responses`
+  // 做无目录回退（`agentCallPlan#resolveCustomUpstreamWire`），`/messages` 必须靠目录
+  // 声明。若本地比服务端宽，就会制造「本地走 messages 协议、网页走 chat.completions」
+  // 的镜像分裂，还会误伤以 `/messages` 结尾的 OpenAI 兼容反代。
+  const declaredWire = detectDeclaredCustomNativeWire(agentConfig.customProviderUrl);
+  const wire =
+    findModelConfig(agentConfig.provider ?? "", agentConfig.model ?? "")?.nativeProtocol ??
+    (declaredWire === "openai-responses" ? declaredWire : null);
   if (!wire) return null;
   const config = await resolveCliOpenAiProviderConfig({ agentConfig, env: deps.env, apiKeyRefResolver, credentialBroker, syncFetcher });
   if (!config.apiKey) return null;

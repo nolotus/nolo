@@ -138,6 +138,10 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                           },
                       }
                     : {}),
+                includeCheckpoint: {
+                    type: "boolean",
+                    description: "可选。仅 action=status 且显式 true 时返回脱敏、有界的阶段 checkpoint；默认不返回。checkpoint 不是最终结论，不改变 run 终态。",
+                },
                 tailLines: {
                     type: "number",
                     description:
@@ -192,6 +196,7 @@ interface ControlAgentRunArgs {
     userInput?: string;
     mode?: "enqueue" | "continue";
     tailLines?: number;
+    includeCheckpoint?: boolean;
     timeoutMs?: number;
     batchId?: string;
     status?: string;
@@ -229,7 +234,7 @@ export async function controlAgentRunFunc(
         if (!runId) {
             throw new Error("controlAgentRun(status): runId is required");
         }
-        return handleStatus(thunkApi, { runId, tailLines: tailLines ?? 0 });
+        return handleStatus(thunkApi, { runId, tailLines: tailLines ?? 0, includeCheckpoint: args.includeCheckpoint === true });
     }
 
     if (action === "stop") {
@@ -331,13 +336,14 @@ async function handleTodo(
 
 async function handleStatus(
     thunkApi: any,
-    opts: { runId: string; tailLines: number }
+    opts: { runId: string; tailLines: number; includeCheckpoint?: boolean }
 ): Promise<{ rawData: any; displayData: string }> {
     try {
         const data = await callToolApi(
             thunkApi,
             "/api/agent/runs/control",
-            { action: "status", runId: opts.runId, tailLines: opts.tailLines },
+            { action: "status", runId: opts.runId, tailLines: opts.tailLines,
+              ...(opts.includeCheckpoint === true ? { includeCheckpoint: true } : {}) },
             { withAuth: true }
         );
 
@@ -354,7 +360,12 @@ async function handleStatus(
         const name = resolveRunLabel(run);
 
         return {
-            rawData: { found: true, ...run, ...(logLines ? { logLines } : {}) },
+            rawData: {
+                found: true,
+                ...run,
+                ...(opts.includeCheckpoint === true && resData.checkpoint ? { checkpoint: resData.checkpoint } : {}),
+                ...(logLines ? { logLines } : {}),
+            },
             displayData: formatStatusRunCard(name, run.status, {
                 runId: opts.runId,
                 title: normalizeRunTitle(run.title),
