@@ -976,6 +976,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   let result: RunAgentTurnResult = await raceWithWatchdog(
     runner({
       ...buildRunOptions(effectiveAgentKey),
+      ...(parsed.freshDialog ? { freshDialog: true } : {}),
       ...(modelOverride ? { modelOverride } : {}),
     }),
   );

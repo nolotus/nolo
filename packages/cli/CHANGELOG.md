@@ -1,4 +1,11 @@
 
+## 0.204.0-alpha.2 (2026-11-03)
+
+### Bug Fixes
+
+* **cli:** 新建子对话不再污染历史完整性标记，续跑可恢复 ([e1d8655](https://github.com/nolotus/bun-nolo/commit/e1d86558e4dd62a209563d6ba478d26c4c082445))
+
+
 ## 0.204.0-alpha.1 (2026-11-02)
 
 ### Features

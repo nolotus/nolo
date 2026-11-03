@@ -475,7 +475,9 @@ export async function startAgentRunFunc(
               )({
                   agentKey: effectiveAgentKey,
                   userInput: content,
-                  ...(continueDialogId ? { continueDialogId, strictContinueHistory: true } : {}),
+                  ...(continueDialogId
+                      ? { continueDialogId, strictContinueHistory: true }
+                      : { freshDialog: true }),
                   waitForCompletion: wait === true,
                   runKind: "subtask",
                   runTitle: title,

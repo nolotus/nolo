@@ -562,7 +562,9 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       "--msg-file",
       "PLACEHOLDER",
       "--bg",
-      ...(continueDialogId ? ["--continue", continueDialogId, "--strict-continue-history"] : []),
+      ...(continueDialogId
+        ? ["--continue", continueDialogId, "--strict-continue-history"]
+        : ["--fresh"]),
       // 非持久化派发（review 等一次性任务）：透传 --ephemeral，run 完成后不留
       // dialog 记录。与 web 端 runAgentBackground 的 ephemeral: true 对齐。
       ...(args.ephemeral === true ? ["--ephemeral"] : []),

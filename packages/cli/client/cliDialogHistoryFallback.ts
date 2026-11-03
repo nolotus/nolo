@@ -142,6 +142,7 @@ export async function loadCliDialogHistoryWithSource(args: {
   dialogId: string;
   env: EnvLike;
   strictContinueHistory?: boolean;
+  freshDialog?: boolean;
   fetchImpl?: CliFetchImpl;
   /** Diagnostic sink (best-effort; never affects the result). */
   log?: (message: string) => void;
@@ -150,12 +151,30 @@ export async function loadCliDialogHistoryWithSource(args: {
   const localMessages = await readDialogMessages({ store, dialogId });
   const localState = await readCliDialogHistoryState({ store, dialogId });
 
+  // A brand-new dialog created in this session has no remote history to recover;
+  // never hit the network and never record an incomplete state.
+  if (args.freshDialog) {
+    if (localState || localMessages.length > 0) {
+      throw new Error(`Fresh dialog already has history or recovery state: ${dialogId}`);
+    }
+    return { messages: [], source: "local" };
+  }
+
+  if (args.strictContinueHistory && localState?.reason === "remote-damaged") {
+    throw new Error(`Strict continuation history load failed for ${dialogId}: local history incomplete (remote-damaged; damaged remote records)`);
+  }
+
   // Strict continuation trusts local history unless it is known incomplete.
   if (args.strictContinueHistory && localMessages.length > 0) {
-    if (localState?.complete === false || localState?.reason === "remote-damaged") {
-      throw new Error(`Strict continuation history load failed for ${dialogId}: local history incomplete (${localState.reason}${localState.reason === "remote-damaged" ? `; damaged remote records, ${localState.issueCount ?? 0} finding(s)` : ""})`);
+    if (localState?.reason === "remote-damaged") {
+      throw new Error(`Strict continuation history load failed for ${dialogId}: local history incomplete (${localState.reason}; damaged remote records, ${localState.issueCount ?? 0} finding(s))`);
     }
-    return { messages: localMessages, source: "local" };
+    if (localState?.complete === false) {
+      // Local history is incomplete because remote was unavailable previously.
+      // Do not throw immediately; proceed to remote fallback to attempt recovery.
+    } else {
+      return { messages: localMessages, source: "local" };
+    }
   }
 
   // Local-first: only a local history *known* to cover the remote prefix keeps
@@ -182,6 +201,11 @@ export async function loadCliDialogHistoryWithSource(args: {
   const authToken = resolveAuthToken(args.env);
   const base = resolveServerUrl(args.env);
   if (!authToken || !base) {
+    if (args.strictContinueHistory) {
+      throw new Error(
+        `Strict continuation history load failed for ${dialogId}: local history incomplete (${localState?.reason ?? "remote-unavailable"})`,
+      );
+    }
     if (localMessages.length > 0) {
       return {
         messages: localMessages,
@@ -234,6 +258,10 @@ export async function loadCliDialogHistoryWithSource(args: {
       : toErrorMessage(remoteError);
     throw new Error(`Strict continuation history load failed for ${dialogId}: ${reason}`);
   }
+  if (args.strictContinueHistory && analysis && analysis.messages.length === 0 && localMessages.length > 0) {
+    await persistIncompleteState({ store, dialogId, log: args.log });
+    throw new Error(`Strict continuation history load failed for ${dialogId}: remote history empty while local messages exist`);
+  }
   if (!analysis || analysis.messages.length === 0) {
     if (analysis && analysis.issues.length > 0) {
       args.log?.(
@@ -256,12 +284,16 @@ export async function loadCliDialogHistoryWithSource(args: {
     return { messages: [], source: "none" };
   }
 
-  return await restoreRemoteHistory({
+  const restored = await restoreRemoteHistory({
     store,
     dialogId,
     analysis,
     log: args.log,
   });
+  if (args.strictContinueHistory && restored.source !== "remote") {
+    throw new Error(`Strict continuation history load failed for ${dialogId}: restored history is not clean (source: ${restored.source})`);
+  }
+  return restored;
 }
 
 /**

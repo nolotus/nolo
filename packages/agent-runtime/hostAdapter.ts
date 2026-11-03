@@ -273,7 +273,7 @@ export type AgentRuntimeHostAdapter = {
    */
   loadDialogHistoryWithSource?(
     dialogId: string,
-    options?: { strictContinueHistory?: boolean },
+    options?: { strictContinueHistory?: boolean; freshDialog?: boolean },
   ): Promise<AgentRuntimeDialogHistoryLoadResult>;
   saveTurn(input: AgentRuntimeSaveTurnInput): Promise<{
     dialogId: string;
