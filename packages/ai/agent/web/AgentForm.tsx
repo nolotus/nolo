@@ -717,6 +717,15 @@ const AgentForm: React.FC<AgentFormProps> = ({
                 <span>
                   {t("createAgent.runMode.heading", "运行方式")}：
                   <strong {...stylex.props(afs.runModeBannerLabel)}>{runModeBannerLabel}</strong>
+                  {formValues.model ? (
+                    <span style={{ opacity: 0.85, marginLeft: 8 }}>
+                      · {formValues.model}
+                    </span>
+                  ) : formValues.cliProvider ? (
+                    <span style={{ opacity: 0.85, marginLeft: 8 }}>
+                      · {formValues.cliProvider}
+                    </span>
+                  ) : null}
                 </span>
                 <button
                   type="button"

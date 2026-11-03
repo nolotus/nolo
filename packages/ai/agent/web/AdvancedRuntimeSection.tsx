@@ -5,7 +5,7 @@
  * 自研 useForm：value/onChange 直连，无 Controller/useWatch。
  */
 
-import React from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FormField } from "render/web/form/FormField";
 import { Slider } from "render/web/form/Slider";
@@ -69,9 +69,39 @@ const AdvancedRuntimeSection: React.FC<AdvancedRuntimeSectionProps> = ({
   const isMachineBoundLocalCustomProvider =
     isCustomApi && isLocalCustomProviderUrl(customProviderUrl);
   const showHostedExecRuntimeControl = !isCliApi && !isMachineBoundLocalCustomProvider;
+  // 是否已有自定义运行时配置：只决定**初始**展开状态。
+  const hasCustomRuntimeSettings =
+    values.useServerProxy === false ||
+    Boolean(values.enableThinking) ||
+    allowHostedExec;
+  // 受控展开状态 + 自己处理 summary 点击。
+  // 为什么不用 <details defaultOpen>：React 19 不支持该 prop（实测不设 open 属性，
+  // 会退化成永远折叠）。为什么不靠 onToggle：测试 DOM 不实现 <details> 的原生折叠，
+  // onToggle 永不触发，真实浏览器能过、测试永远红。
+  // preventDefault 阻止原生再翻一次，避免与 state 双重翻转。
+  const [runtimeSectionOpen, setRuntimeSectionOpen] = useState(hasCustomRuntimeSettings);
 
   return (
     <section className="adv-settings__group">
+      <details open={runtimeSectionOpen} style={{ border: "none", padding: 0 }}>
+        <summary
+          onClick={(event) => {
+            event.preventDefault();
+            setRuntimeSectionOpen((open) => !open);
+          }}
+          style={{
+            cursor: "pointer",
+            fontWeight: 600,
+            fontSize: "var(--fontSize-sm)",
+            color: "var(--textSecondary)",
+            userSelect: "none",
+            marginBottom: runtimeSectionOpen ? 12 : 0,
+          }}
+        >
+          {hasCustomRuntimeSettings
+            ? "高级运行时配置（缓存代理 / 思考预算 / 托管授权 · 已自定义）"
+            : "高级运行时配置（缓存代理、思考预算、托管执行授权）"}
+        </summary>
       <FormField
         label={t("form.useServerProxy")}
         helperText={t("help.proxy")}
@@ -135,6 +165,7 @@ const AdvancedRuntimeSection: React.FC<AdvancedRuntimeSectionProps> = ({
           </p>
         </FormField>
       )}
+      </details>
     </section>
   );
 };

@@ -16,6 +16,8 @@ import {
   type CliProvider,
   CLI_CAPABILITY_BY_PROVIDER,
   CLI_PROVIDER_DISPLAY_LABELS,
+  CLI_PROVIDER_GROUPS,
+  CREATABLE_CLI_PROVIDERS,
   DEFAULT_CLI_PROVIDER,
   type MachineSummary,
 } from "ai/agent/cliProviders";
@@ -121,6 +123,18 @@ const AGY_CLI_MODELS = [
   { value: "", label: "默认" },
 ];
 
+const CLI_LOGIN_COMMANDS: Record<CliProvider, string> = {
+  copilot: "gh auth login",
+  claude: "claude login",
+  codex: "codex login",
+  gemini: "gemini auth login",
+  agy: "agy auth login",
+  qoder: "qoder login",
+  opencode: "opencode auth",
+  grok: "grok login",
+  kimi: "kimi login",
+};
+
 const API_SOURCE_LABELS: Record<ApiSourceType, string> = {
   platform: "平台 API",
   custom: "自定义 API",
@@ -156,6 +170,16 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
   const [machines, setMachines] = useState<MachineSummary[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string>("manual");
   const [machinesError, setMachinesError] = useState<string | null>(null);
+  // React 19 不支持 <details defaultOpen>；用本地 state 复现"仅初始展开"语义：
+  // 初始值由 machineId 派生，之后只跟随用户的折叠/展开，不被内部状态顶开。
+  const [machineBindOpen, setMachineBindOpen] = useState(Boolean(values.machineId));
+  const [cliMachineOpen, setCliMachineOpen] = useState(Boolean(values.machineId));
+  // 进入编辑时的 provider 快照：存量已停用项（gemini）要一直留在列表里，
+  // 否则用户一旦切到别的 provider，selectedCliProvider 变化会让该选项被卸载，
+  // 再也选不回来（只能刷新页面）。
+  const [initialCliProvider] = useState(
+    () => (values.cliProvider as string | undefined) ?? "",
+  );
   const common = { horizontal: true, labelWidth: "160px" };
   const isCustomApi = apiSource === "custom";
   const isCliApi = apiSource === "cli";
@@ -471,50 +495,30 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
               </div>
             </FormField>
 
-            {!isCustomApi && (
+            {!isCustomApi && !isCliApi && (
               <FormField label={t("form.model")} required error={errors.model} {...common}>
-                {isCliApi ? (
-                  <Select
-                    className={stylex.props(modelStyles.cliSelect).className}
-                    selectedKey={(values.model as string) || ""}
-                    onSelectionChange={(key) =>
-                      set("model", String(key ?? ""))
+                <AllModelsSelector
+                  value={((values.model as string) ?? null) as any}
+                  onChange={(selected: ModelWithProvider | null) => {
+                    if (selected) {
+                      set("model", selected.name);
+                      set("provider", selected.provider);
+                      set("hasVision", Boolean(selected.hasVision));
+                      set(
+                        "defaultInteractionMode",
+                        isVoiceModel(selected.name, selected.provider)
+                          ? "live_audio"
+                          : "text",
+                      );
+                    } else {
+                      set("model", "");
+                      set("provider", "");
+                      set("hasVision", false);
+                      set("defaultInteractionMode", "text");
                     }
-                  >
-                    {cliModels.map((opt) => (
-                      <SelectItem
-                        key={opt.value}
-                        id={opt.value}
-                        textValue={opt.label}
-                      >
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </Select>
-                ) : (
-                  <AllModelsSelector
-                    value={((values.model as string) ?? null) as any}
-                    onChange={(selected: ModelWithProvider | null) => {
-                      if (selected) {
-                        set("model", selected.name);
-                        set("provider", selected.provider);
-                        set("hasVision", Boolean(selected.hasVision));
-                        set(
-                          "defaultInteractionMode",
-                          isVoiceModel(selected.name, selected.provider)
-                            ? "live_audio"
-                            : "text",
-                        );
-                      } else {
-                        set("model", "");
-                        set("provider", "");
-                        set("hasVision", false);
-                        set("defaultInteractionMode", "text");
-                      }
-                    }}
-                    error={!!errors.model}
-                  />
-                )}
+                  }}
+                  error={!!errors.model}
+                />
               </FormField>
             )}
 
@@ -576,13 +580,30 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                     </Popover>
                   </SelectRoot>
                 </FormField>
-                {isOAuthPreset && (
+                {isOAuthPreset ? (
                   <OAuthStatusBox
                     providerId={selectedPresetFields.apiKeyRef}
                     serverOrigin={serverOrigin}
                     authToken={authToken}
                   />
+                ) : (
+                  <FormField label={t("form.apiKey")} error={errors.apiKey} {...common}>
+                    <PasswordInput value={(values.apiKey as string) ?? ""} onChange={(e) => set("apiKey", e.target.value)} placeholder={t("form.apiKeyPlaceholder")} />
+                    {hasBrokeredKey && (
+                      <span style={{ fontSize: "var(--fontSize-xs)", color: "var(--text-muted, #888)", display: "block", marginTop: 4 }}>
+                        {usesProviderKey
+                          ? t("form.apiKeyProviderShared", "✓ 使用共享的 {{presetId}} 密钥（跨 Agent 复用）。如需更换请在上方填写新 Key。", { presetId: providerKeyPresetId })
+                          : `✓ ${t("form.apiKeyConfigured", "API Key 已配置（已安全存储）。如需更换请在上方填写新 Key。")}`}
+                      </span>
+                    )}
+                    {selectedPresetFields.keyFormatHint && (
+                      <span style={{ fontSize: "var(--fontSize-xs)", color: "var(--text-muted, #888)", display: "block", marginTop: 4 }}>
+                        {selectedPresetFields.keyFormatHint}
+                      </span>
+                    )}
+                  </FormField>
                 )}
+
                 <FormField label={t("form.model")} required error={errors.model} {...common}>
                   {selectedModelOptions.length > 0 ? (
                     <Select
@@ -621,27 +642,37 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                     disabled={isTemplatePreset}
                   />
                 </FormField>
-                {!isOAuthPreset && (
-                  <FormField label={t("form.apiKey")} error={errors.apiKey} {...common}>
-                    <PasswordInput value={(values.apiKey as string) ?? ""} onChange={(e) => set("apiKey", e.target.value)} placeholder={t("form.apiKeyPlaceholder")} />
-                    {hasBrokeredKey && (
-                      <span style={{ fontSize: 12, color: "var(--text-muted, #888)", display: "block", marginTop: 4 }}>
-                        {usesProviderKey
-                          ? t("form.apiKeyProviderShared", "✓ 使用共享的 {{presetId}} 密钥（跨 Agent 复用）。如需更换请在上方填写新 Key。", { presetId: providerKeyPresetId })
-                          : `✓ ${t("form.apiKeyConfigured", "API Key 已配置（已安全存储）。如需更换请在上方填写新 Key。")}`}
-                      </span>
-                    )}
-                    {selectedPresetFields.keyFormatHint && (
-                      <span style={{ fontSize: 12, color: "var(--text-muted, #888)", display: "block", marginTop: 4 }}>
-                        {selectedPresetFields.keyFormatHint}
-                      </span>
-                    )}
-                  </FormField>
-                )}
-
 
                 {isMachineBoundLocalCustomProvider && (
-                  <>
+                  <details
+                    open={machineBindOpen}
+                    style={{
+                      border: "1px solid var(--borderLight, var(--border))",
+                      borderRadius: "var(--radius-sm)",
+                      padding: "8px 12px",
+                      backgroundColor: "var(--backgroundSecondary)",
+                      marginTop: 4,
+                    }}
+                  >
+                    <summary
+                    onClick={(event) => {
+                      // 不依赖 <details> 原生折叠：受控 open + 自己翻转，真实浏览器与测试 DOM 行为一致。
+                      event.preventDefault();
+                      setMachineBindOpen((v) => !v);
+                    }}
+                      style={{
+                        cursor: "pointer",
+                        fontWeight: 600,
+                        fontSize: "var(--fontSize-sm)",
+                        color: "var(--textSecondary)",
+                        userSelect: "none",
+                        marginBottom: 8,
+                      }}
+                    >
+                      {values.machineId
+                        ? `高级选项：已绑定运行电脑 (${selectedMachine?.name ?? values.machineId})`
+                        : "高级选项：指定运行电脑（默认当前设备本地直连）"}
+                    </summary>
                     <FormField label="运行位置" {...common}>
                       <Select
                         className={stylex.props(modelStyles.cliSelect).className}
@@ -690,7 +721,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                         <li>这是 machine binding 路径，不需要公开模型域名。</li>
                       </ul>
                     </div>
-                  </>
+                  </details>
                 )}
               </div>
             )}
@@ -710,41 +741,82 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                       set("model", "");
                     }}
                   >
-                    {(
-                      [
-                        { value: "claude", label: "Claude CLI（claude）" },
-                        {
-                          value: "codex",
-                          label: "OpenAI Codex CLI（codex exec）",
-                        },
-                        {
-                          value: "agy",
-                          label: "Google Antigravity CLI（agy）",
-                        },
-                        {
-                          value: "opencode",
-                          label: "OpenCode CLI（opencode）",
-                        },
-                        {
-                          value: "copilot",
-                          label: "GitHub Copilot CLI（gh copilot）",
-                        },
-                        { value: "qoder", label: "Qoder CLI（qoder）" },
-                        { value: "grok", label: "Grok CLI（grok）" },
-                        { value: "kimi", label: "Kimi Code CLI（kimi）" },
-                        // 已停用项（Google 2026-06-18 起对 Pro/Ultra/免费用户关闭
-                        // Gemini CLI）。仅当这条 agent 本来就选的它才渲染，避免
-                        // 编辑存量 agent 时下拉里没有当前值 → 值被静默清空。
-                        ...(selectedCliProvider === "gemini"
-                          ? [
-                              {
-                                value: "gemini",
-                                label: "Gemini CLI（gemini，已停用）",
-                              } as const,
-                            ]
-                          : []),
-                      ] as const
-                    ).map((opt) => (
+                    {CLI_PROVIDER_GROUPS.map((group) => (
+                      <SelectGroup key={group.id}>
+                        <SelectGroupLabel className="nolo-select-group-label">
+                          {group.label}
+                        </SelectGroupLabel>
+                        {/* 新建只列可新建的 provider（已停用的 gemini 不在其中）；
+                            存量 gemini agent 由下方条件项兜住，避免编辑时值被清空。 */}
+                        {group.items
+                          .filter((opt) =>
+                            CREATABLE_CLI_PROVIDERS.includes(opt.value),
+                          )
+                          .map((opt) => (
+                          <SelectItem
+                            key={opt.value}
+                            id={opt.value}
+                            textValue={opt.label}
+                          >
+                            {opt.label}
+                          </SelectItem>
+                          ))}
+                      </SelectGroup>
+                    ))}
+                    {initialCliProvider === "gemini" ? (
+                      <SelectGroup>
+                        <SelectGroupLabel className="nolo-select-group-label">
+                          已停用（仅存量）
+                        </SelectGroupLabel>
+                        <SelectItem
+                          id="gemini"
+                          textValue="Gemini CLI（gemini，已停用）"
+                        >
+                          Gemini CLI（gemini，已停用）
+                        </SelectItem>
+                      </SelectGroup>
+                    ) : null}
+                  </Select>
+                </FormField>
+
+                <FormField label="凭据状态" {...common}>
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      border: "1px solid var(--border)",
+                      backgroundColor: "var(--backgroundTertiary, var(--backgroundSecondary))",
+                      fontSize: "var(--fontSize-sm)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          backgroundColor: "var(--warning, #f59e0b)",
+                        }}
+                      />
+                      <strong style={{ color: "var(--text)" }}>未验证（需在本机登录）</strong>
+                    </div>
+                    <p style={{ margin: "4px 0 0", fontSize: "var(--fontSize-xs)", color: "var(--textSecondary)", lineHeight: 1.45 }}>
+                      机器在线具备执行能力不等于 CLI 已认证。请确保在目标机器终端已运行登录命令（如 <code>{CLI_LOGIN_COMMANDS[selectedCliProvider] ?? "登录命令"}</code>）。
+                    </p>
+                  </div>
+                </FormField>
+
+                <FormField label={t("form.model")} required error={errors.model} {...common}>
+                  <Select
+                    className={stylex.props(modelStyles.cliSelect).className}
+                    selectedKey={(values.model as string) || ""}
+                    onSelectionChange={(key) =>
+                      set("model", String(key ?? ""))
+                    }
+                  >
+                    {cliModels.map((opt) => (
+
                       <SelectItem
                         key={opt.value}
                         id={opt.value}
@@ -756,45 +828,74 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                   </Select>
                 </FormField>
 
-                <FormField label="运行位置" {...common}>
-                  <Select
-                    className={stylex.props(modelStyles.cliSelect).className}
-                    selectedKey={(values.machineId as string) || ""}
-                    onSelectionChange={(key) =>
-                      set("machineId", String(key ?? ""))
-                    }
+                <details
+                  open={cliMachineOpen}
+                  style={{
+                    border: "1px solid var(--borderLight, var(--border))",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "8px 12px",
+                    backgroundColor: "var(--backgroundSecondary)",
+                  }}
+                >
+                  <summary
+                    onClick={(event) => {
+                      // 不依赖 <details> 原生折叠：受控 open + 自己翻转，真实浏览器与测试 DOM 行为一致。
+                      event.preventDefault();
+                      setCliMachineOpen((v) => !v);
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      fontSize: "var(--fontSize-sm)",
+                      color: "var(--textSecondary)",
+                      userSelect: "none",
+                      marginBottom: 8,
+                    }}
                   >
-                    <SelectItem id="" textValue="本地/服务器默认 CLI 环境">
-                      本地/服务器默认 CLI 环境
-                    </SelectItem>
-                    {machineOptionsWithSelection.map((machine) => {
-                      const label =
-                        machine.platform && machine.arch
-                          ? `${machine.name} (${machine.platform}/${machine.arch})`
-                          : `${machine.name} (${machine.machineId})`;
-                      return (
-                        <SelectItem
-                          key={machine.machineId}
-                          id={machine.machineId}
-                          textValue={label}
-                        >
-                          {label}
-                        </SelectItem>
-                      );
-                    })}
-                  </Select>
-                  {machinesError ? (
-                    <p className="cli-info-box__hint">{machinesError}</p>
-                  ) : machineOptions.length === 0 ? (
-                    <p className="cli-info-box__hint">
-                      没有检测到支持当前 CLI 的在线电脑。可以先到设置里的“电脑”连接，或继续使用默认 CLI 环境。
-                    </p>
-                  ) : (
-                    <p className="cli-info-box__hint">
-                      选择电脑后，这个 Agent 会通过那台电脑上的 CLI 执行。
-                    </p>
-                  )}
-                </FormField>
+                    {values.machineId
+                      ? `高级选项：已绑定运行电脑 (${selectedMachine?.name ?? values.machineId})`
+                      : "高级选项：指定运行机器（默认使用本地/默认 CLI 环境）"}
+                  </summary>
+                  <FormField label="运行位置" {...common}>
+                    <Select
+                      className={stylex.props(modelStyles.cliSelect).className}
+                      selectedKey={(values.machineId as string) || ""}
+                      onSelectionChange={(key) =>
+                        set("machineId", String(key ?? ""))
+                      }
+                    >
+                      <SelectItem id="" textValue="本地/服务器默认 CLI 环境">
+                        本地/服务器默认 CLI 环境
+                      </SelectItem>
+                      {machineOptionsWithSelection.map((machine) => {
+                        const label =
+                          machine.platform && machine.arch
+                            ? `${machine.name} (${machine.platform}/${machine.arch})`
+                            : `${machine.name} (${machine.machineId})`;
+                        return (
+                          <SelectItem
+                            key={machine.machineId}
+                            id={machine.machineId}
+                            textValue={label}
+                          >
+                            {label}
+                          </SelectItem>
+                        );
+                      })}
+                    </Select>
+                    {machinesError ? (
+                      <p className="cli-info-box__hint">{machinesError}</p>
+                    ) : machineOptions.length === 0 ? (
+                      <p className="cli-info-box__hint">
+                        没有检测到支持当前 CLI 的在线电脑。可以先到设置里的“电脑”连接，或继续使用默认 CLI 环境。
+                      </p>
+                    ) : (
+                      <p className="cli-info-box__hint">
+                        选择电脑后，这个 Agent 会通过那台电脑上的 CLI 执行。
+                      </p>
+                    )}
+                  </FormField>
+                </details>
 
                 <div {...stylex.props(modelStyles.cliInfoBox)}>
                   <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>ℹ️ 使用前提</p>
@@ -806,7 +907,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                           默认使用 <code>agy --print</code> 执行任务；模型和权限以当前 Antigravity 账号配置为准
                         </li>
                       </>
-                    ) : selectedCliProvider === "gemini" ? (
+                    ) : initialCliProvider === "gemini" ? (
                       <>
                         <li>已安装 <code>gemini</code> CLI 并完成本机登录</li>
                         <li>
