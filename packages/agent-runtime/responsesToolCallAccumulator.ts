@@ -50,7 +50,7 @@ function shortFingerprint(value: string): string {
 }
 
 /** 该字符串是否已是可解析的 JSON 对象（用于冲突时的可信度判定）。 */
-function parsesAsJsonObject(value: string): boolean {
+export function parsesAsJsonObject(value: string): boolean {
   try {
     const parsed: unknown = JSON.parse(value);
     return parsed !== null && typeof parsed === "object";

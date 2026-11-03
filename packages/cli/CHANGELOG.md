@@ -1,4 +1,11 @@
 
+## 0.204.0-alpha.3 (2026-11-03)
+
+### Bug Fixes
+
+* **chat-proxy:** Responses 上游对 chat 形状客户端补反向流适配 ([034d4a4](https://github.com/nolotus/bun-nolo/commit/034d4a4b55ef8eecd80b7ea86b889d8e403d6744))
+
+
 ## 0.204.0-alpha.2 (2026-11-03)
 
 ### Bug Fixes

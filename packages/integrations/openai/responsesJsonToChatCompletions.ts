@@ -95,7 +95,7 @@ const asTokenCount = (value: unknown): number | undefined =>
  * （`null` / `"31"` / `NaN` …）用同义字段的有限值替换，没有同义值时原样保留。
  * 传入非对象 → 返回 null（调用方整体不落 usage）。
  */
-const projectChatUsage = (raw: unknown): ResponsesChatUsage | null => {
+export const projectChatUsage = (raw: unknown): ResponsesChatUsage | null => {
   if (!isRecord(raw)) return null;
 
   const usage: ResponsesChatUsage = { ...raw };
