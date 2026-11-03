@@ -1,4 +1,11 @@
 
+## 0.208.0 (2026-11-03)
+
+### Features
+
+* **agent:** 创建表单信息层级、凭据状态显性化与高级项折叠 ([d3ae190](https://github.com/nolotus/bun-nolo/commit/d3ae190f49582959acaae635f38cd6fbacaa66de))
+
+
 ## 0.207.0 (2026-11-03)
 
 ### Features

@@ -85,7 +85,7 @@ export const agentFormStyles = stylex.create({
     bottom: 0,
     zIndex: 20,
     flexShrink: 0,
-    padding: "10px 12px",
+    padding: "8px 12px",
     margin: "0 -24px",
     backgroundColor: agentThemeTokens.surfaceGlassFooter,
     backdropFilter: "blur(12px)",
@@ -108,7 +108,7 @@ export const agentFormStyles = stylex.create({
     minHeight: "var(--control-sm)",
     "@media (max-width: 640px)": {
       flexDirection: "column-reverse",
-      gap: "10px",
+      gap: "8px",
     },
   },
   // 原 footer 操作按钮规则（@media 640）→ 挂到 footer 内每个 <Button>
@@ -121,7 +121,7 @@ export const agentFormStyles = stylex.create({
   },
   nextSteps: {
     maxWidth: "720px",
-    margin: "0 auto 6px",
+    margin: "0 auto 8px",
     color: "var(--textSecondary)",
     fontSize: "var(--fontSize-xs)",
     lineHeight: 1.45,
@@ -137,7 +137,7 @@ export const agentFormStyles = stylex.create({
     gap: "12px",
     maxWidth: "720px",
     margin: "0 auto 8px",
-    padding: "10px 12px",
+    padding: "8px 12px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--borderLight, var(--border))",
@@ -155,7 +155,7 @@ export const agentFormStyles = stylex.create({
   },
   runModeBannerChange: {
     flexShrink: 0,
-    padding: "4px 10px",
+    padding: "4px 12px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--border)",
@@ -182,9 +182,9 @@ export const agentFormStyles = stylex.create({
     textAlign: "center",
   },
   createSourceStepHeading: {
-    margin: "0 0 6px",
+    margin: "0 0 8px",
     fontSize: "var(--fontSize-xl, 1.25rem)",
-    fontWeight: 650,
+    fontWeight: 600,
     color: "var(--text)",
   },
   createSourceStepSub: {
@@ -196,7 +196,7 @@ export const agentFormStyles = stylex.create({
   createSourceStepCards: {
     display: "grid",
     gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-    gap: "clamp(10px, 1.2vw, 16px)",
+    gap: "clamp(12px, 1.2vw, 16px)",
     "@media (max-width: 760px)": {
       gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     },
@@ -209,12 +209,12 @@ export const agentFormStyles = stylex.create({
     flexDirection: "column",
     alignItems: "flex-start",
     gap: "8px",
-    padding: "16px 14px",
+    padding: "16px 12px",
     textAlign: "left",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--border)",
-    borderRadius: "var(--radius-md, 10px)",
+    borderRadius: "var(--radius-md)",
     backgroundColor: "var(--backgroundElevated, var(--backgroundSecondary))",
     color: "var(--text)",
     cursor: "pointer",
@@ -242,7 +242,7 @@ export const agentFormStyles = stylex.create({
   },
   createSourceCardTitle: {
     fontSize: "var(--fontSize-base)",
-    fontWeight: 650,
+    fontWeight: 600,
     color: "var(--text)",
   },
   createSourceCardTitleActive: {
@@ -250,9 +250,9 @@ export const agentFormStyles = stylex.create({
   },
   createSourceCardBadge: {
     marginLeft: "auto",
-    fontSize: "11px",
+    fontSize: "var(--fontSize-xs)",
     fontWeight: 600,
-    padding: "2px 6px",
+    padding: "2px 8px",
     borderRadius: "999px",
     color: "var(--primary)",
     backgroundColor: "var(--primaryGhost, rgba(99, 102, 241, 0.12))",
@@ -281,7 +281,7 @@ export const agentFormStyles = stylex.create({
     color: "var(--textSecondary)",
   },
   createSourceStepMoreBody: {
-    marginTop: "10px",
+    marginTop: "12px",
     fontSize: "var(--fontSize-sm)",
     color: "var(--textSecondary)",
     lineHeight: 1.5,
@@ -304,19 +304,19 @@ export const agentFormStyles = stylex.create({
   createSourcePanel: {
     display: "flex",
     flexDirection: "column",
-    gap: "14px",
+    gap: "12px",
     padding: "16px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--border)",
-    borderRadius: "var(--radius-md, 10px)",
+    borderRadius: "var(--radius-md)",
     backgroundColor: "var(--backgroundElevated, var(--backgroundSecondary))",
   },
   createSourcePanelActions: {
     display: "flex",
     justifyContent: "flex-end",
     alignItems: "center",
-    gap: "10px",
+    gap: "8px",
     paddingTop: "4px",
   },
   // 原 panel 操作按钮规则（@media 480）→ 挂到面板内每个 <Button>
@@ -328,7 +328,7 @@ export const agentFormStyles = stylex.create({
   createSourcePanelDesktopTitle: {
     margin: 0,
     fontSize: "var(--fontSize-base)",
-    fontWeight: 650,
+    fontWeight: 600,
     color: "var(--text)",
   },
   createSourcePanelDesktopBody: {
@@ -340,7 +340,7 @@ export const agentFormStyles = stylex.create({
   createSourceField: {
     display: "flex",
     flexDirection: "column",
-    gap: "6px",
+    gap: "8px",
   },
   createSourceFieldLabel: {
     fontSize: "var(--fontSize-sm)",
@@ -350,7 +350,7 @@ export const agentFormStyles = stylex.create({
   createSourceFieldInput: {
     width: "100%",
     boxSizing: "border-box",
-    padding: "10px 12px",
+    padding: "12px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--border)",
@@ -373,7 +373,7 @@ export const agentFormStyles = stylex.create({
   createSourceFieldTextarea: {
     width: "100%",
     boxSizing: "border-box",
-    padding: "10px 12px",
+    padding: "12px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--border)",

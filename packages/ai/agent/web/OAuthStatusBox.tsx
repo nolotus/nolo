@@ -215,9 +215,27 @@ export const OAuthStatusBox = ({
     const expiringSoon =
       expiresIn !== undefined && expiresIn <= EXPIRING_SOON_MINUTES;
     const label = state.email || state.accountId || providerId;
+    // 只断言状态接口能确证的事实：是否有可用凭据、是否需要重新授权。
+    // 不断言凭据"在本机"还是"已同步到云端"——那取决于运行环境，不是同步字段。
+    const statusText = state.needsReauth ? "需要重新授权" : "已连接";
+    const dotColor = state.needsReauth
+      ? "var(--warning, #f59e0b)"
+      : "var(--success, #10b981)";
     return (
       <div {...stylex.props(modelStyles.cliInfoBox)}>
-        <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>Signed in as {label}</p>
+        <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>
+          <span
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              backgroundColor: dotColor,
+              marginRight: 8,
+            }}
+          />
+          {statusText} · Signed in as {label}
+        </p>
         {state.needsReauth ? (
           <p {...stylex.props(modelStyles.cliInfoBoxHint)}>
             ⚠️ {state.refreshErrorMessage || "服务端无法自动续期"}（运行 nolo auth {providerId} --sync-to-server）
@@ -229,6 +247,11 @@ export const OAuthStatusBox = ({
               : `Token expires in ${expiresIn} min.`}
           </p>
         )}
+        {isDesktop && !state.needsReauth ? (
+          <p {...stylex.props(modelStyles.cliInfoBoxHint)}>
+            如需在网页端使用，请在终端运行 nolo auth {providerId} --sync-to-server 同步到服务端。
+          </p>
+        ) : null}
         <p>
           <a
             href="#"
@@ -236,7 +259,7 @@ export const OAuthStatusBox = ({
               e.preventDefault();
               void disconnect();
             }}
-            style={{ fontSize: 12 }}
+            style={{ fontSize: "var(--fontSize-xs)" }}
           >
             Disconnect
           </a>
@@ -250,6 +273,19 @@ export const OAuthStatusBox = ({
   if (isDesktop) {
     return (
       <div {...stylex.props(modelStyles.cliInfoBox)}>
+        <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>
+          <span
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              backgroundColor: "var(--warning, #f59e0b)",
+              marginRight: 8,
+            }}
+          />
+          本机未认证
+        </p>
         {errorMessage ? <p {...stylex.props(modelStyles.cliInfoBoxHint)}>{errorMessage}</p> : null}
         <p {...stylex.props(modelStyles.cliInfoBoxHint)}>
           OAuth 将在系统浏览器中完成，凭据由 Nolo Desktop 保存在本机。
@@ -264,6 +300,19 @@ export const OAuthStatusBox = ({
   return (
     <>
       <div {...stylex.props(modelStyles.cliInfoBox)}>
+        <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>
+          <span
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              backgroundColor: "var(--warning, #f59e0b)",
+              marginRight: 8,
+            }}
+          />
+          云端未同步
+        </p>
         {errorMessage && (
           <p
             {...stylex.props(modelStyles.cliInfoBoxHint)}
@@ -323,7 +372,7 @@ export const OAuthStatusBox = ({
               position: "relative",
               background: "var(--surface-card, #fff)",
               padding: 24,
-              borderRadius: 8,
+              borderRadius: "var(--radius-sm)",
               maxWidth: 560,
               width: "90%",
               margin: 0,
@@ -336,14 +385,14 @@ export const OAuthStatusBox = ({
               style={{
                 background: "var(--surface-code, #f4f4f4)",
                 padding: 12,
-                borderRadius: 4,
+                borderRadius: "var(--radius-xs)",
                 overflowX: "auto",
                 userSelect: "all",
               }}
             >
               <code>nolo auth {providerId} --sync-to-server</code>
             </pre>
-            <p style={{ fontSize: 12, color: "var(--text-muted, #666)" }}>
+            <p style={{ fontSize: "var(--fontSize-xs)", color: "var(--text-muted, #666)" }}>
               It opens a browser, completes the OAuth flow, then uploads the
               token to this server.
             </p>

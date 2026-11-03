@@ -1,17 +1,19 @@
 // 路径: ai/agent/web/AgentCreateSourceStep.tsx
 // Web 手动创建：四卡内联快速创建（平台 / 订阅 / API / CLI）。
 
-import React from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useNavigate } from "app/routing";
 import Button from "render/web/ui/Button";
 import { Select, SelectItem } from "render/web/ui/Select";
+import { SelectGroup, SelectGroupLabel } from "render/web/ui/Select";
 import { ModelOptionLabel } from "./ModelOptionLabel";
 import { ProviderPresetOptionLabel } from "./ProviderPresetOptionLabel";
 import { PasswordInput } from "render/web/form/Input";
 import { Checkbox } from "render/web/form/Checkbox";
 import { MANUAL_PROVIDER_PRESET_ID } from "../providerPresetApply";
+import { CLI_PROVIDER_GROUPS } from "ai/agent/cliProviders";
 import {
   CREATE_RUN_MODE_LABELS,
   PLATFORM_QUICK_CREATE_MODEL,
@@ -566,7 +568,7 @@ const AgentCreateApiPanel: React.FC<{
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
           {modelReasoning.loading ? (
-            <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.65, fontWeight: "normal" }}>
+            <span style={{ marginLeft: 8, fontSize: "var(--fontSize-xs)", opacity: 0.65, fontWeight: "normal" }}>
               (正在探测模型推理支持...)
             </span>
           ) : null}
@@ -737,30 +739,43 @@ const AgentCreateSubscriptionPanel: React.FC<{
         <>
           <p {...stylex.props(afs.createSourcePanelDesktopTitle)}>
             {oauth.connection.kind === "connected"
-              ? t("createAgent.quickCreate.oauthConnected", "OAuth 已连接")
+              ? t("createAgent.quickCreate.oauthConnected", "凭据：已连接")
               : oauth.isDesktop
-                ? t("createAgent.quickCreate.oauthDesktopTitle", "在 Nolo Desktop 登录订阅账号")
-                : t("createAgent.quickCreate.subscriptionDesktopTitle", "该订阅需在桌面端完成 OAuth 登录")}
+                ? t("createAgent.quickCreate.oauthDesktopTitle", "凭据：未连接（在 Nolo Desktop 登录订阅账号）")
+                : t("createAgent.quickCreate.subscriptionDesktopTitle", "凭据：未连接（该订阅需在桌面端完成 OAuth 登录）")}
           </p>
           <p {...stylex.props(afs.createSourcePanelDesktopBody)}>
             {oauth.connection.kind === "connected"
-              ? t(
-                  "createAgent.quickCreate.oauthConnectedAs",
-                  "已连接账号：{{account}}。凭据保存在本机，不会传给页面。",
-                  {
-                    account:
-                      oauth.connection.email ||
-                      oauth.connection.accountId ||
-                      subPresetId,
-                  },
-                )
+              ? oauth.isDesktop
+                ? t(
+                    "createAgent.quickCreate.oauthConnectedAs",
+                    "已连接账号：{{account}}。如需在网页端使用，请在终端运行 nolo auth {{provider}} --sync-to-server 同步到服务端。",
+                    {
+                      account:
+                        oauth.connection.email ||
+                        oauth.connection.accountId ||
+                        subPresetId,
+                      provider: activePresetFields.provider || subPresetId,
+                    },
+                  )
+                : t(
+                    "createAgent.quickCreate.oauthConnectedAs",
+                    "已连接账号：{{account}}。",
+                    {
+                      account:
+                        oauth.connection.email ||
+                        oauth.connection.accountId ||
+                        subPresetId,
+                    },
+                  )
               : oauth.connection.kind === "connecting"
                 ? t("createAgent.quickCreate.oauthWaiting", "浏览器已打开，完成授权后此处会自动更新。")
                 : oauth.isDesktop
                   ? t("createAgent.quickCreate.oauthDesktopBody", "点击登录后会打开系统浏览器；授权凭据由桌面端安全保存。")
                   : t(
                       "createAgent.quickCreate.subscriptionDesktopBody",
-                      "请在 Nolo Desktop 完成 OAuth 登录后创建和使用该订阅 Agent。",
+                      "请在 Nolo Desktop 完成 OAuth 登录，或在终端运行 nolo auth {{provider}} --sync-to-server 同步至云端后使用。",
+                      { provider: activePresetFields.provider || subPresetId },
                     )}
           </p>
           {oauth.connection.kind === "error" ? (
@@ -969,12 +984,11 @@ const AgentCreateSubscriptionPanel: React.FC<{
   );
 };
 
-const AgentCreateCliPanel: React.FC<{
+export const AgentCreateCliPanel: React.FC<{
   prompt: string;
   setPrompt: (v: string) => void;
   cliProvider: string;
   setCliProvider: (v: string) => void;
-  cliProviderOptions: ReadonlyArray<{ value: string; label: string }>;
   cliMachineId: string;
   setCliMachineId: (v: string) => void;
   cliMachineOptions: ReadonlyArray<{
@@ -996,7 +1010,6 @@ const AgentCreateCliPanel: React.FC<{
   setPrompt,
   cliProvider,
   setCliProvider,
-  cliProviderOptions,
   cliMachineId,
   setCliMachineId,
   cliMachineOptions,
@@ -1010,6 +1023,10 @@ const AgentCreateCliPanel: React.FC<{
   onCreate,
 }) => {
   const { t } = useTranslation("ai");
+  // React 19 不支持 <details defaultOpen>；用本地 state 复现"仅初始展开"语义：
+  // 初始值由 cliMachineId 派生，之后只跟随用户的折叠/展开。
+  const [cliMachineOpen, setCliMachineOpen] = useState(Boolean(cliMachineId));
+
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="cli">
       <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
@@ -1020,65 +1037,133 @@ const AgentCreateCliPanel: React.FC<{
           isDisabled={busy}
           onSelectionChange={(key) => setCliProvider(String(key ?? ""))}
         >
-          {cliProviderOptions.map((opt) => (
-            <SelectItem key={opt.value} id={opt.value} textValue={opt.label}>
-              {opt.label}
-            </SelectItem>
+          {CLI_PROVIDER_GROUPS.map((group) => (
+            <SelectGroup key={group.id}>
+              <SelectGroupLabel className="nolo-select-group-label">
+                {group.label}
+              </SelectGroupLabel>
+              {group.items.map((opt) => (
+                <SelectItem key={opt.value} id={opt.value} textValue={opt.label}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           ))}
         </Select>
       </div>
+
       <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-        <Select
-          className="agent-create-esc-source-select"
-          label={t("createAgent.quickCreate.runLocation", "运行位置")}
-          selectedKey={cliMachineId}
-          isDisabled={busy}
-          onSelectionChange={(key) => setCliMachineId(String(key ?? ""))}
-          description={t(
-            "createAgent.quickCreate.cliMachineHint",
-            "留空使用本地/服务器默认 CLI 环境；选择电脑后通过该电脑运行",
-          )}
+        <span {...stylex.props(afs.createSourceFieldLabel)}>
+          {t("createAgent.quickCreate.cliCredentialStatus", "凭据状态")}
+        </span>
+        <div
+          style={{
+            padding: "8px 12px",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border)",
+            backgroundColor: "var(--backgroundTertiary, var(--backgroundSecondary))",
+            fontSize: "var(--fontSize-sm)",
+          }}
         >
-          <SelectItem id="" textValue={t("createAgent.quickCreate.cliDefaultMachine", "默认环境（不绑定电脑）")}>
-            {t("createAgent.quickCreate.cliDefaultMachine", "默认环境（不绑定电脑）")}
-          </SelectItem>
-          {cliMachineOptions.map((machine) => {
-            const label =
-              machine.platform && machine.arch
-                ? `${machine.name} (${machine.platform}/${machine.arch})`
-                : `${machine.name} (${machine.machineId})`;
-            return (
-              <SelectItem key={machine.machineId} id={machine.machineId} textValue={label}>
-                {label}
-              </SelectItem>
-            );
-          })}
-        </Select>
-        <p>
-          {cliMachinesError ? (
-            cliMachinesError
-          ) : cliMachineOptions.length === 0 ? (
-            t(
-              "createAgent.quickCreate.cliNoMachine",
-              "没有检测到支持当前 CLI 的在线电脑。可先到设置-电脑连接，或使用默认 CLI 环境。",
-            )
-          ) : (
-            t(
-              "createAgent.quickCreate.cliMachineSelectedHint",
-              "选择电脑后，这个 Agent 会通过那台电脑上的 CLI 执行。",
-            )
-          )}
-        </p>
-        {!cliLoggedIn ? (
-          <button
-            type="button"
-            {...stylex.props(afs.createSourceStepMoreLink)}
-            onClick={() => navigate("/downloads")}
-          >
-            {t("createAgent.quickCreate.openDownloads", "打开桌面端下载")}
-          </button>
-        ) : null}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                backgroundColor: "var(--warning, #f59e0b)",
+              }}
+            />
+            <strong style={{ color: "var(--text)" }}>未验证（需在本机登录）</strong>
+          </div>
+          <p style={{ margin: "4px 0 0", fontSize: "var(--fontSize-xs)", color: "var(--textSecondary)", lineHeight: 1.45 }}>
+            机器在线具备执行能力不等于 CLI 已认证。请确保在目标机器终端已运行对应登录命令。
+          </p>
+        </div>
       </div>
+
+      <details
+        open={cliMachineOpen}
+        style={{
+          border: "1px solid var(--borderLight, var(--border))",
+          borderRadius: "var(--radius-sm)",
+          padding: "8px 12px",
+          backgroundColor: "var(--backgroundSecondary)",
+        }}
+      >
+        <summary
+                    onClick={(event) => {
+                      // 不依赖 <details> 原生折叠：受控 open + 自己翻转，真实浏览器与测试 DOM 行为一致。
+                      event.preventDefault();
+                      setCliMachineOpen((v) => !v);
+                    }}
+          style={{
+            cursor: "pointer",
+            fontWeight: 600,
+            fontSize: "var(--fontSize-sm)",
+            color: "var(--textSecondary)",
+            userSelect: "none",
+            marginBottom: 8,
+          }}
+        >
+          {cliMachineId
+            ? t("createAgent.quickCreate.runLocationBound", "高级选项：已绑定运行电脑")
+            : t("createAgent.quickCreate.runLocationAdvanced", "高级选项：指定运行机器（默认使用本地/默认环境）")}
+        </summary>
+        <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
+          <Select
+            className="agent-create-esc-source-select"
+            label={t("createAgent.quickCreate.runLocation", "运行位置")}
+            selectedKey={cliMachineId}
+            isDisabled={busy}
+            onSelectionChange={(key) => setCliMachineId(String(key ?? ""))}
+            description={t(
+              "createAgent.quickCreate.cliMachineHint",
+              "留空使用本地/服务器默认 CLI 环境；选择电脑后通过该电脑运行",
+            )}
+          >
+            <SelectItem id="" textValue={t("createAgent.quickCreate.cliDefaultMachine", "默认环境（不绑定电脑）")}>
+              {t("createAgent.quickCreate.cliDefaultMachine", "默认环境（不绑定电脑）")}
+            </SelectItem>
+            {cliMachineOptions.map((machine) => {
+              const label =
+                machine.platform && machine.arch
+                  ? `${machine.name} (${machine.platform}/${machine.arch})`
+                  : `${machine.name} (${machine.machineId})`;
+              return (
+                <SelectItem key={machine.machineId} id={machine.machineId} textValue={label}>
+                  {label}
+                </SelectItem>
+              );
+            })}
+          </Select>
+          <p>
+            {cliMachinesError ? (
+              cliMachinesError
+            ) : cliMachineOptions.length === 0 ? (
+              t(
+                "createAgent.quickCreate.cliNoMachine",
+                "没有检测到支持当前 CLI 的在线电脑。可先到设置-电脑连接，或使用默认 CLI 环境。",
+              )
+            ) : (
+              t(
+                "createAgent.quickCreate.cliMachineSelectedHint",
+                "选择电脑后，这个 Agent 会通过那台电脑上的 CLI 执行。",
+              )
+            )}
+          </p>
+          {!cliLoggedIn ? (
+            <button
+              type="button"
+              {...stylex.props(afs.createSourceStepMoreLink)}
+              onClick={() => navigate("/downloads")}
+            >
+              {t("createAgent.quickCreate.openDownloads", "打开桌面端下载")}
+            </button>
+          ) : null}
+        </div>
+      </details>
       <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.prompt", "系统提示词")}
@@ -1165,7 +1250,6 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
     cliMachinesError,
     cliMachines,
     cliLoggedIn,
-    cliProviderOptions,
   } = useAgentCreateSourceState({
     selected,
     onAdvancedEdit,
@@ -1267,7 +1351,6 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
           setPrompt={setPrompt}
           cliProvider={cliProvider}
           setCliProvider={setCliProvider}
-          cliProviderOptions={cliProviderOptions}
           cliMachineId={cliMachineId}
           setCliMachineId={setCliMachineId}
           cliMachineOptions={cliMachineOptions}

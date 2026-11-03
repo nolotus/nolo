@@ -86,6 +86,37 @@ export const CLI_PROVIDER_DISPLAY_LABELS: Record<CliProvider, string> = {
 };
 
 /**
+ * Grouped CLI provider options — the single source of truth for the provider
+ * dropdown in both the quick-create CLI panel and AdvancedSettingsTab.
+ * Labels are derived from CLI_PROVIDER_DISPLAY_LABELS so the two surfaces can
+ * never drift; add a provider here, not in either component.
+ */
+export const CLI_PROVIDER_GROUPS: ReadonlyArray<{
+  id: string;
+  label: string;
+  items: ReadonlyArray<{ value: CliProvider; label: string }>;
+}> = [
+  {
+    id: "coding",
+    label: "代码与工程协同 CLI",
+    items: (
+      ["copilot", "claude", "codex", "qoder", "opencode"] as const
+    ).map((value) => ({
+      value,
+      label: CLI_PROVIDER_DISPLAY_LABELS[value],
+    })),
+  },
+  {
+    id: "multimodal",
+    label: "推理与通用多模态 CLI",
+    items: (["gemini", "grok", "kimi", "agy"] as const).map((value) => ({
+      value,
+      label: CLI_PROVIDER_DISPLAY_LABELS[value],
+    })),
+  },
+];
+
+/**
  * Machine summary returned by GET /api/machines. Shared shape so the
  * quick-create CLI panel and AdvancedSettingsTab parse the same response.
  */

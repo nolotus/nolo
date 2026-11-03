@@ -107,7 +107,7 @@
 /* .agent-create-source-field .agent-create-source-select .nolo-select-trigger
    —— AgentCreateSourceStep.tsx */
 .agent-create-esc-source-field .agent-create-esc-source-select .nolo-select-trigger {
-  padding: 10px 12px;
+  padding: 12px;
   border-radius: var(--radius-sm);
   font-size: var(--fontSize-sm);
   background: var(--background, #0f1115);
@@ -128,7 +128,7 @@
 /* .cli-select（挂在 render/web/ui SelectTrigger 上时）—— ModelSourceSection.tsx */
 .nolo-select-trigger.agent-create-esc-cli-select {
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: var(--fontSize-base);
@@ -157,7 +157,7 @@
 /* .cli-info-box__list code —— ModelSourceSection.tsx */
 .agent-create-esc-cli-info-list code {
   background: var(--backgroundSecondary);
-  padding: 1px 5px;
+  padding: 1px 4px;
   border-radius: var(--radius-sm);
   font-family: monospace;
   font-size: var(--fontSize-xs);

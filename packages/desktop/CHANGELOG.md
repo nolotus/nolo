@@ -1,4 +1,15 @@
 
+## 0.225.0 (2026-11-03)
+
+### Features
+
+* **agent:** 创建表单信息层级、凭据状态显性化与高级项折叠 ([d3ae190](https://github.com/nolotus/bun-nolo/commit/d3ae190f49582959acaae635f38cd6fbacaa66de))
+
+### Bug Fixes
+
+* **desktop:** Windows 冒烟改用 PE 结构判据，去掉 45MB 体积下限 ([739643e](https://github.com/nolotus/bun-nolo/commit/739643e30e3fd28e78315ff027027b8bddae1905))
+
+
 ## 0.224.0 (2026-11-03)
 
 ### Features
