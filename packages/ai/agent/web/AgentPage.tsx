@@ -1835,6 +1835,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                     serverOrigin={String(server).replace(/\/+$/, "")}
                     authToken={currentToken}
                     initialQuota={(item as { quota?: AgentQuota }).quota}
+                    model={(item as { model?: string | null }).model}
                   />
                 ) : null}
                 {/* Ability proof and developer specs */}

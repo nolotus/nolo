@@ -61,8 +61,9 @@ const serializeInlineJson = (value: unknown): string =>
 // Assets are fixed at build time; read the manifest once and reuse it for the
 // lifetime of the server instead of hitting the filesystem on every request.
 let shellAssetsCache: DesktopShellAssets | null = null;
+const isDesktopDev = (): boolean => process.env.NOLO_DESKTOP_CHANNEL === "dev";
 const getShellAssets = (): DesktopShellAssets =>
-  shellAssetsCache ?? (shellAssetsCache = readShellAssets());
+  isDesktopDev() ? readShellAssets() : shellAssetsCache ?? (shellAssetsCache = readShellAssets());
 
 const renderDesktopShellHtml = (): string => {
   const assets = getShellAssets();
@@ -110,6 +111,8 @@ export const bootstrapServer = async (): Promise<void> => {
     httpServer = serve({
       port: HTTP_PORT,
       hostname: HTTP_HOST,
+      // Native dialogs wait for human input; Bun's default 10s disconnects the browser first.
+      idleTimeout: 120,
       routes,
       fetch: async (req: Request) => {
         const url = new URL(req.url);
@@ -148,7 +151,7 @@ export const bootstrapServer = async (): Promise<void> => {
             // Same cache contract as the legacy publicRequestHandler; assets are
             // content-hashed so a long max-age is safe across app updates.
             return new Response(file, {
-              headers: { "Cache-Control": "max-age=3600" },
+              headers: { "Cache-Control": isDesktopDev() ? "no-store" : "max-age=3600" },
             });
           }
         }
@@ -156,7 +159,7 @@ export const bootstrapServer = async (): Promise<void> => {
         // SPA fallback: the app is a client-rendered SPA — serve the generated
         // HTML shell for any non-file route (including "/").
         return new Response(renderDesktopShellHtml(), {
-          headers: { "Content-Type": "text/html; charset=utf-8" },
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
         });
       },
     });

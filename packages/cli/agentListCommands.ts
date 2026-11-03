@@ -473,7 +473,7 @@ export async function runAgentListCommand(
       const unavailableList = agents.filter((agent) => isAgentUnavailableNow(agent));
       for (const unavail of unavailableList) {
         const remainingSec = Math.max(0, Math.ceil(((unavail.nextAvailableAt ?? 0) - Date.now()) / 1000));
-        const quotaSummary = formatQuotaSummary(unavail.quota);
+        const quotaSummary = formatQuotaSummary(unavail.quota, Date.now(), { model: unavail.model });
         const quotaText = quotaSummary ? ` (${quotaSummary})` : "";
         output.write(
           t("agent.rateLimitedRecovery", unavail.name, unavail.id, String(remainingSec), quotaText),
@@ -499,7 +499,7 @@ export async function runAgentListCommand(
         typeof agent.nextAvailableAt === "number" && agent.nextAvailableAt > Date.now()
           ? `nextAvailableAt=${new Date(agent.nextAvailableAt).toISOString()}`
           : "nextAvailableAt=now";
-      const quotaSummary = formatQuotaSummary(agent.quota);
+      const quotaSummary = formatQuotaSummary(agent.quota, Date.now(), { model: agent.model });
       const quotaLine = `quota=${quotaSummary ?? "-"}`;
       output.write(
         [

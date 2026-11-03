@@ -24,7 +24,7 @@ export function toAgentPickerItems(entries: AgentCatalogEntry[]): AgentPickerIte
   return entries.map((entry) => {
     // compact：picker 行宽敏感（超 80 列物理换行会破坏 anchored 帧的按行清屏），
     // 只显示容量段；完整窗口与重置时间在 `nolo agent list` / catalog 列表里看。
-    const quota = formatQuotaSummary(entry.quota, Date.now(), { compact: true });
+    const quota = formatQuotaSummary(entry.quota, Date.now(), { compact: true, model: entry.model });
     return {
       label: entry.name,
       detail: `${entry.favoritedAt ? "★ " : ""}${entry.model}  ${formatAgentSourceLabel(entry)}${quota ? `  [${quota}]` : ""}`,

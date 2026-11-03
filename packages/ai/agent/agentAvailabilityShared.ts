@@ -14,7 +14,18 @@
  * 「周额度耗尽」修复只落在 CLI 一侧，server 侧同一个 bug continued to ship。
  */
 import { parseResetsInMs } from "../tools/agent/quotaCircuitBreaker";
-import { isQuotaWindowExpired, type AgentQuota } from "./quotaSnapshot";
+import {
+  isQuotaWindowExpired,
+  isQuotaWindowRelevantToFamily,
+  parseQuotaWindowScope,
+  resolveQuotaWindowFamily,
+  type AgentQuota,
+  type QuotaWindowFamily,
+} from "./quotaSnapshot";
+
+// 兼容既有导入面（测试与其它模块从这里取）：唯一实现已下沉到 quotaSnapshot。
+export { parseQuotaWindowScope, resolveQuotaWindowFamily };
+export type { QuotaWindowFamily };
 
 /** 无法从上游响应解析出复位时刻时使用的保守冷却窗口。 */
 export const DEFAULT_PROVIDER_RETRY_MS = 5 * 60 * 1000;
@@ -43,53 +54,6 @@ function clampCooldownDeadline(at: number, now: number): number {
   const min = now;
   const max = now + MAX_COOLDOWN_MS;
   return Math.min(Math.max(at, min), max);
-}
-
-/**
- * 额度窗口的模型族。antigravity 按模型族把窗口拆成两套
- * （`gemini-5h`/`gemini-7d` 与 `3p-5h`/`3p-7d`，3p = 第三方模型），
- * 同一条凭证下两族额度互不相干。
- */
-export type QuotaWindowFamily = "gemini" | "3p";
-
-/**
- * 拆解 scope 的「模型族 + 窗口周期」。
- *
- * 无家族前缀的 scope（claude/codex/kimi/glm 的 `5h`/`7d`、devin 的
- * `daily`/`weekly`、cursor 的 `monthly`）family 为 undefined，period 即 scope 本身。
- */
-export function parseQuotaWindowScope(scope: string): {
-  family?: QuotaWindowFamily;
-  period: string;
-} {
-  const matched = /^(gemini|3p)-(.+)$/.exec(scope);
-  return matched
-    ? { family: matched[1] as QuotaWindowFamily, period: matched[2]! }
-    : { period: scope };
-}
-
-/**
- * agent 的模型 → 该看哪一族额度窗口。antigravity 只有两族：模型名含 gemini 的走
- * `gemini-*` 桶，其余（claude/gpt 等第三方模型）走 `3p-*` 桶。只有完全拿不到
- * model（undefined 或空串）时才返回 undefined，表示「两族都算数」（保守退化）。
- *
- * antigravity 之外的 provider 只有无前缀窗口，家族过滤对它们恒等。
- */
-export function resolveQuotaWindowFamily(
-  model?: string | null,
-): QuotaWindowFamily | undefined {
-  if (typeof model !== "string" || !model.trim()) return undefined;
-  return /gemini/i.test(model) ? "gemini" : "3p";
-}
-
-/** 一个窗口是否属于该模型族（无前缀窗口、无 scope 的窗口与未知家族一律算数）。 */
-function isWindowRelevantToFamily(
-  scope: string | undefined,
-  family: QuotaWindowFamily | undefined,
-): boolean {
-  if (typeof scope !== "string") return true;
-  const scopeFamily = parseQuotaWindowScope(scope).family;
-  return scopeFamily === undefined || family === undefined || scopeFamily === family;
 }
 
 /**
@@ -135,7 +99,7 @@ export function shouldClearCooldownFromQuota(
   // 放行冷却——否则一次 12 天前的 4% 就能把刚撞上的 429 解除掉。
   const family = resolveQuotaWindowFamily(options?.model);
   const relevantWindows = quota.windows.filter((window) =>
-    isWindowRelevantToFamily(window.scope, family),
+    isQuotaWindowRelevantToFamily(window.scope, family),
   );
   const subscriptionWindows = relevantWindows.filter(isSubscriptionPeriodWindow);
   if (subscriptionWindows.length === 0) return false;
@@ -247,7 +211,7 @@ export function resolveAgentAvailability(
     Number.isFinite(quota.observedAt);
   const family = resolveQuotaWindowFamily(agent?.model);
   const relevantWindows = (quota?.windows ?? []).filter((window) =>
-    isWindowRelevantToFamily(window?.scope, family),
+    isQuotaWindowRelevantToFamily(window?.scope, family),
   );
   const hasWindows = relevantWindows.length > 0;
   const hasValidQuota = isAdmissible && hasWindows;

@@ -14,8 +14,10 @@ const json = (data: unknown, status = 200) =>
 
 async function spawnAndRead(args: string[]): Promise<string> {
   const proc = Bun.spawn(args, { stdio: ["ignore", "pipe", "pipe"] });
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
     throw new Error(stderr.trim() || `Folder picker exited with code ${exitCode}`);
@@ -40,6 +42,8 @@ async function pickFolderNative(): Promise<string | null> {
 
   if (process.platform === "win32") {
     const psScript = `
+      [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+      $OutputEncoding = [Console]::OutputEncoding
       Add-Type -AssemblyName System.Windows.Forms
       $browser = New-Object System.Windows.Forms.FolderBrowserDialog
       $browser.Description = "选择要绑定的文件夹"
@@ -49,14 +53,12 @@ async function pickFolderNative(): Promise<string | null> {
         Write-Output $browser.SelectedPath
       }
     `;
-    const psArgs = ["-NoProfile", "-NonInteractive", "-Command", psScript];
-    // Try PowerShell Core (pwsh) first, then fallback to Windows PowerShell
-    const pwsh = Bun.which("pwsh");
-    if (pwsh) {
-      const result = await spawnAndRead([pwsh, ...psArgs]);
-      return result || null;
-    }
-    const result = await spawnAndRead(["powershell", ...psArgs]);
+    const psArgs = ["-NoProfile", "-STA", "-NonInteractive", "-Command", psScript];
+    // Prefer the OS executable: WindowsApps pwsh aliases can exit before opening any UI.
+    const systemPowerShell = resolve(process.env.SystemRoot || "C:\\Windows", "System32/WindowsPowerShell/v1.0/powershell.exe");
+    const executable = existsSync(systemPowerShell) ? systemPowerShell : Bun.which("powershell") || Bun.which("pwsh");
+    if (!executable) throw new Error("No PowerShell executable available for the folder picker.");
+    const result = await spawnAndRead([executable, ...psArgs]);
     return result || null;
   }
 

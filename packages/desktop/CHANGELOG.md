@@ -1,10 +1,21 @@
 
-## 0.224.0-alpha.1 (2026-11-03)
+## 0.225.0-alpha.1 (2026-11-03)
+
+### Features
+
+* **agent:** 创建表单信息层级、凭据状态显性化与高级项折叠 ([d3ae190](https://github.com/nolotus/bun-nolo/commit/d3ae190f49582959acaae635f38cd6fbacaa66de))
+
+### Bug Fixes
+
+* **desktop:** refresh dev assets and stabilize folder picker ([26f0318](https://github.com/nolotus/bun-nolo/commit/26f031896b1f79092017bd4ad188947dcf7ef79c))
+* **quota:** 四端额度显示收敛到同一窗口集合（剔过期 + 按模型族） ([2d3a0dc](https://github.com/nolotus/bun-nolo/commit/2d3a0dcbc6b2ba2647cfddb065e3f12741ddeafb))
+
+
+## 0.224.0 (2026-11-03)
 
 ### Features
 
 * **agent:** provider 排序按实际使用率、停用 gemini 新建入口、默认值收敛 ([3578749](https://github.com/nolotus/bun-nolo/commit/3578749ef157fc95cc2246a0786ddf61ce8662ea))
-* **agent:** 创建表单信息层级、凭据状态显性化与高级项折叠 ([d3ae190](https://github.com/nolotus/bun-nolo/commit/d3ae190f49582959acaae635f38cd6fbacaa66de))
 * **agent:** 派发选人规则升级为系统固定块（可用性重扫 / 速度口径 / 长任务避坑） ([09a961f](https://github.com/nolotus/bun-nolo/commit/09a961f669ea9d9218ddaf49da24c38ab35c444d))
 * **app:** 桌面端创建 agent 改用「同步状态 + 立即同步」，去掉云同步开关 ([03e2b65](https://github.com/nolotus/bun-nolo/commit/03e2b655d6aaa1d9c9ee8c37886f03e2b5a0373c))
 * **database:** introduce leveldb ownership lock and corruption self-healing ([76e4c33](https://github.com/nolotus/bun-nolo/commit/76e4c33f184f9c0c3f88033b7e167b29691067a0))

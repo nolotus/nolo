@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import * as stylex from "@stylexjs/stylex";
 import { LuGauge } from "react-icons/lu";
-import type { AgentQuota, QuotaWindow } from "ai/agent/quotaSnapshot";
+import { selectQuotaWindowsForModel, type AgentQuota, type QuotaWindow } from "ai/agent/quotaSnapshot";
 import { agentPageStyles as styles } from "./agentPageStyles";
 // 口径来源标签：面板显示的是「我们探测到的上游接口」，不是官方用量页面的镜像。
 // 两者刷新时机/统计窗口/是否含子功能额度都可能不同，直接对比会误判成"显示错误"。
@@ -23,6 +23,8 @@ type Props = {
   serverOrigin: string;
   authToken: string;
   initialQuota?: AgentQuota;
+  /** 用于按模型族挑窗口（antigravity 的 gemini 族与 3p 族是两套额度）。 */
+  model?: string | null;
 };
 
 const WINDOW_LABELS: Array<{ match: (scope: string) => boolean; label: string }> = [
@@ -35,11 +37,16 @@ export { describeQuotaProvenance, formatProbeAge };
 
 export function pickDisplayWindows(
   quota: AgentQuota | undefined,
+  now = Date.now(),
+  model?: string | null,
 ): Array<{ label: string; window: QuotaWindow }> {
-  if (!quota || !Array.isArray(quota.windows)) return [];
+  // 与徽章/TUI/RN 共用同一个窗口选择（剔过期 + 按模型族），避免同一份快照
+  // 在面板里显示另一个端已经不再显示的历史读数。
+  const windows = selectQuotaWindowsForModel(quota, now, model);
+  if (windows.length === 0) return [];
   const out: Array<{ label: string; window: QuotaWindow }> = [];
   for (const { match, label } of WINDOW_LABELS) {
-    const window = quota.windows.find(
+    const window = windows.find(
       (w) => match(w.scope) && typeof w.utilization === "number",
     );
     if (window) out.push({ label, window });
@@ -52,6 +59,7 @@ export function AgentQuotaPanel({
   serverOrigin,
   authToken,
   initialQuota,
+  model,
 }: Props) {
   const [quota, setQuota] = useState<AgentQuota | undefined>(initialQuota);
   const [now, setNow] = useState(() => Date.now());
@@ -84,7 +92,7 @@ export function AgentQuotaPanel({
     return () => ctrl.abort();
   }, [agentKey, serverOrigin, authToken]);
 
-  const rows = pickDisplayWindows(quota);
+  const rows = pickDisplayWindows(quota, now, model);
   // 只有「尚未到期」的复位时刻才需要走表：已过期的 resetAt 不该让定时器一直空转
   // 重渲染（review MEDIUM，2026-10-09）。
   const hasActiveResetClock = rows.some(

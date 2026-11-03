@@ -844,7 +844,7 @@ export function renderAgentCatalogList(
     const detail = entry.description ? ` — ${entry.description}` : "";
     // 额度和 description 互斥：有额度时额度信息优先（更能影响选人决策），
     // 否则回退平台条目的 description（nolo 默认条目没有 quota）。
-    const quota = formatQuotaSummary(entry.quota);
+    const quota = formatQuotaSummary(entry.quota, Date.now(), { model: entry.model });
     const trailing = quota ? ` [${quota}]` : detail;
     lines.push(
       `  ${String(index + 1).padStart(2)}  ${entry.name.padEnd(18)} ${entry.model.padEnd(14)} ${formatAgentSourceLabel(entry)}${favorite}${trailing}${current}`
