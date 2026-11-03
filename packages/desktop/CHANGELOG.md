@@ -1,4 +1,12 @@
 
+## 0.227.0-alpha.2 (2026-11-03)
+
+### Bug Fixes
+
+* **desktop:** 发布器改用「结构 + 等长」判据，根治体积下限误拦 ([7c7984a](https://github.com/nolotus/bun-nolo/commit/7c7984a0818067a59720196079de1f03add6e7ed))
+* **web:** netease 加解密模块加浏览器 stub，web bundle 恢复可构建 ([becb440](https://github.com/nolotus/bun-nolo/commit/becb440cdb90ee171ef9b85e73566de54489bd6b))
+
+
 ## 0.227.0-alpha.1 (2026-11-03)
 
 ### Features

@@ -28,6 +28,10 @@ const scopedOAuthTokenStoreBrowserStub = join(
   configDir,
   "../../packages/agent-runtime/scopedOAuthTokenStore.browser.stub.ts",
 );
+const neteaseCryptoBrowserStub = join(
+  configDir,
+  "../../packages/integrations/netease/neteaseCrypto.browser.stub.ts",
+);
 const clipHeadAndTailBrowserStub = join(
   configDir,
   "../../packages/core/clipHeadAndTail.browser.stub.ts",
@@ -112,6 +116,14 @@ const agentRuntimeBrowserCompatPlugin = {
       if (args.kind === "entry-point") return;
       if (args.path.includes("scopedOAuthTokenStore.browser.stub")) return;
       return { path: scopedOAuthTokenStoreBrowserStub };
+    });
+    // netease 加解密用 node:crypto：只有桌面端音乐功能需要，但 web 依赖图会经
+    // desktop-runtime 走到它 —— 不重定向就整条 web bundle 构建失败
+    // （2026-11-03 实测：Could not resolve "node:crypto"）。浏览器侧 stub 显式抛错。
+    build.onResolve({ filter: /neteaseCrypto(\.ts)?$/ }, (args) => {
+      if (args.kind === "entry-point") return;
+      if (args.path.includes("neteaseCrypto.browser.stub")) return;
+      return { path: neteaseCryptoBrowserStub };
     });
     // clipHeadAndTail 用 node:fs/path/os 落盘临时日志，不能进 web 构建；
     // 重定向到浏览器 stub（裁剪语义一致，仅去掉临时落盘）。

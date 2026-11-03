@@ -137,6 +137,10 @@
       "role": "release"
     },
     {
+      "path": "scripts/release/windowsInstallerIntegrity.ts",
+      "role": "build"
+    },
+    {
       "path": "scripts/release/s3Upload.ts",
       "role": "release"
     },

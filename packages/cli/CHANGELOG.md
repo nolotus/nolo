@@ -1,4 +1,11 @@
 
+## 0.210.0-alpha.2 (2026-11-03)
+
+### Bug Fixes
+
+* **web:** netease 加解密模块加浏览器 stub，web bundle 恢复可构建 ([becb440](https://github.com/nolotus/bun-nolo/commit/becb440cdb90ee171ef9b85e73566de54489bd6b))
+
+
 ## 0.210.0-alpha.1 (2026-11-03)
 
 ### Features
