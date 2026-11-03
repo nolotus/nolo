@@ -50,6 +50,10 @@ export const ANTIGRAVITY_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.profile",
   "https://www.googleapis.com/auth/cclog",
   "https://www.googleapis.com/auth/experimentsandconfigs",
+  // Antigravity 的「附加模型」（Claude / GPT-OSS 经其代理）需要这个 scope；
+  // 对齐 oh-my-pi 的 google-antigravity 授权范围。只影响**新登录**：老凭据没有它
+  // 也能继续用 Gemini，不强制重新授权。
+  "https://www.googleapis.com/auth/aicode",
 ];
 
 export const ANTIGRAVITY_ACCESS_TOKEN_CLIENT_SKEW_MS = 5 * 60 * 1000;

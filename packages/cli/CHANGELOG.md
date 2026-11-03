@@ -1,5 +1,10 @@
 
-## 0.204.0-alpha.4 (2026-11-03)
+## 0.205.0-alpha.1 (2026-11-03)
+
+### Features
+
+* **chat:** support cross-device continuation across TUI, desktop and RN ([a54f16a](https://github.com/nolotus/bun-nolo/commit/a54f16a0c90acab6a95783749b2375a21f942d2e))
+* **oauth:** Claude Code 版本自愈、grant 30 天前瞻、身份回填与请求侧分层 ([f08c260](https://github.com/nolotus/bun-nolo/commit/f08c260c1ca6af74d36e2c4b8470e1fca300be0e))
 
 ### Bug Fixes
 

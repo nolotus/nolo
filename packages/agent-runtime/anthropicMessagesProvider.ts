@@ -14,37 +14,60 @@ import {
 import { aggregateAnthropicMessageStream } from "./anthropicMessagesStream";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 
+import {
+  resolveClaudeCodeVersion,
+  getClaudeCodeUserAgent,
+  adoptRequiredClaudeCodeVersion,
+} from "./anthropicClaudeCodeFingerprint";
+
 export const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 export const ANTHROPIC_API_VERSION = "2023-06-01";
 export const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
 
-/**
- * Minimal Claude Code-compatible OAuth fingerprint.
- * Live-validated 2026-08-04: UA/betas alone still 429 Sonnet/Opus; identity
- * system block is required. Billing header / cch / Stainless / tool prefixes
- * are intentionally out of scope for this pass.
- *
- * 2026-09-29 实测门禁：Opus 5.5 上线后 Anthropic 上游硬门禁抛出：
- * "HTTP 400 Claude Code 2.1.220 does not support this model; version 2.1.280 or newer is required."
- * 2026-10-08 对齐官方 Claude Code 最新发布版本 2.1.294（支持 Claude Haiku 5.5），并提供 NOLO_CLAUDE_CODE_VERSION 动态覆盖。
- */
-function resolveClaudeCodeVersion(rawEnv?: string): string {
-  const DEFAULT_VERSION = "2.1.294";
-  if (!rawEnv) return DEFAULT_VERSION;
-  const trimmed = rawEnv.trim();
-  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(trimmed)) {
-    return trimmed;
-  }
-  return DEFAULT_VERSION;
-}
-
-export const CLAUDE_CODE_VERSION = resolveClaudeCodeVersion(
-  process.env.NOLO_CLAUDE_CODE_VERSION || process.env.CLAUDE_CODE_VERSION
-);
-export const CLAUDE_CODE_USER_AGENT =
-  `claude-cli/${CLAUDE_CODE_VERSION} (external, local-agent, agent-sdk/0.1.0)`;
+export const CLAUDE_CODE_VERSION = resolveClaudeCodeVersion();
+export const CLAUDE_CODE_USER_AGENT = getClaudeCodeUserAgent();
 export const ANTHROPIC_OAUTH_BETA_HEADER =
   `claude-code-20250219,${ANTHROPIC_OAUTH_BETA}`;
+
+/**
+ * Anthropic OAuth beta 请求头分层。
+ *
+ * 只宣告我们真正实现、且**已在真实上游验证过**的能力。Anthropic 对未知 beta
+ * 名返回 400，所以"猜一个应该能用"= 让所有 Claude 请求全挂。
+ *
+ * 现在放进去的：
+ * - claude-code-20250219: 仅 agent 档（请求带 tools）携带；Claude Code 身份与工具
+ *   绑定该 beta。这是改动前就在用的组合，线上已验证。
+ * - oauth-2025-04-20: OAuth 凭据必需。
+ *
+ * 已知但暂时不放进去的（都要先拿到真实 200 再开）：
+ * - effort-2025-11-24: 我们确实发 output_config.effort，理论上需要它才不被静默忽略。
+ *   名字取自 oh-my-pi 的生产实现，但我们自己没实测过 → 见 ANTHROPIC_EFFORT_BETA
+ *   注释里的验证步骤，验证通过后加回下面的数组即可。
+ * - interleaved-thinking-2025-05-14: 需要跨 tool_use 回传带 signature 的 thinking
+ *   块，而 toAnthropicContent 不回传 thinking 块，硬加会在带工具的多轮对话中 400。
+ * - structured-outputs / context-management / mid-conversation-system: 无实现。
+ * - context-1m: 订阅凭据会硬 429（无长上下文额度）。
+ */
+export function buildAnthropicBetaHeader({ agentRequest }: { agentRequest: boolean }): string {
+  // 两档都无重复项且顺序固定，直接 join；加 Set 只会掩盖将来引入重复的失误。
+  return (agentRequest
+    ? ["claude-code-20250219", ANTHROPIC_OAUTH_BETA]
+    : [ANTHROPIC_OAUTH_BETA]
+  ).join(",");
+}
+
+/**
+ * 待验证的 effort beta 名（当前未启用）。
+ *
+ * 启用前必须做一次真实上游验证，步骤：拿一条可用的 Claude OAuth access token，
+ * 发一条最小请求（`max_tokens: 16`、单条短消息、`output_config: { effort: "low" }`），
+ * 把本常量放进 `anthropic-beta` 头：
+ * - 200 → 可以启用（同时更新单测里的期望字符串）
+ * - 400 且报文提到 unsupported/unexpected beta → 名字不对，别再试，去查上游当前值
+ * 不要用多组变体并发试探，一次一条。
+ */
+export const ANTHROPIC_EFFORT_BETA_UNVERIFIED = "effort-2025-11-24";
 export const CLAUDE_CODE_SYSTEM_INSTRUCTION =
   "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 /** Legacy Claude Code identity phrases kept for dedupe only. */
@@ -745,21 +768,42 @@ export async function fetchAnthropicMessagesCompletion(args: {
     args.upstreamStream ?? resolveAnthropicUpstreamStream(process.env.NOLO_ANTHROPIC_STREAM);
   const requestBody = buildAnthropicMessagesBody(args);
   if (upstreamStream) requestBody.stream = true;
-  const response = await (args.fetchImpl ?? fetch)(ANTHROPIC_MESSAGES_URL, {
+
+  const isAgentRequest = Array.isArray(requestBody.tools) && requestBody.tools.length > 0;
+  const buildHeaders = () => ({
+    Authorization: `Bearer ${args.accessToken}`,
+    "Content-Type": "application/json",
+    Accept: upstreamStream ? "text/event-stream" : "application/json",
+    "anthropic-version": ANTHROPIC_API_VERSION,
+    "anthropic-beta": buildAnthropicBetaHeader({ agentRequest: isAgentRequest }),
+    "User-Agent": getClaudeCodeUserAgent(),
+    "x-app": "cli",
+  });
+
+  let response = await (args.fetchImpl ?? fetch)(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${args.accessToken}`,
-      "Content-Type": "application/json",
-      Accept: upstreamStream ? "text/event-stream" : "application/json",
-      "anthropic-version": ANTHROPIC_API_VERSION,
-      "anthropic-beta": ANTHROPIC_OAUTH_BETA_HEADER,
-      "User-Agent": CLAUDE_CODE_USER_AGENT,
-      "x-app": "cli",
-    },
+    headers: buildHeaders(),
     body: JSON.stringify(requestBody),
     signal: args.signal,
   });
+
   let payload: JsonRecord;
+  if (response.status === 400) {
+    const errorBody = (await response.json().catch(async () => ({
+      error: { message: await response.text().catch(() => response.statusText) },
+    }))) as JsonRecord;
+    if (adoptRequiredClaudeCodeVersion(errorBody)) {
+      response = await (args.fetchImpl ?? fetch)(ANTHROPIC_MESSAGES_URL, {
+        method: "POST",
+        headers: buildHeaders(),
+        body: JSON.stringify(requestBody),
+        signal: args.signal,
+      });
+    } else {
+      return { status: response.status, body: errorBody, headers: response.headers };
+    }
+  }
+
   if (upstreamStream && response.ok) {
     // We asked for stream:true, so a 2xx body is aggregated as SSE regardless of
     // content-type (intermediaries may drop/rewrite the header). A body that is

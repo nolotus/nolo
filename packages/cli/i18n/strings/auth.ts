@@ -220,4 +220,16 @@ export const authStrings = {
     en: "[nolo] Updated {0} with CLOUDFLARE_EMAIL_ROUTING_API_TOKEN.",
     zh: "[nolo] 已更新 {0} 里的 CLOUDFLARE_EMAIL_ROUTING_API_TOKEN。",
   },
+  "auth.claudeGrantExpired": {
+    en: "[nolo] Claude OAuth grant has expired. Interactive login is required (run: nolo auth claude).",
+    zh: "[nolo] Claude OAuth grant 已过期，必须重新交互式登录（运行：nolo auth claude）。",
+  },
+  "auth.claudeGrantExpiringSoon": {
+    en: "[nolo] Claude OAuth grant expires in {0} day(s). Re-authenticate soon with: nolo auth claude.",
+    zh: "[nolo] Claude OAuth grant 将在 {0} 天内过期，请尽快重新登录：nolo auth claude。",
+  },
+  "auth.claudeGrantValidDays": {
+    en: "[nolo] Claude OAuth grant valid for about {0} day(s).",
+    zh: "[nolo] Claude OAuth grant 预计还剩约 {0} 天有效。",
+  },
 } as const;

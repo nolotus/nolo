@@ -4,7 +4,10 @@ import {
 } from "./flows/cloudflare";
 import { runAntigravityOAuthLogin } from "./flows/antigravity";
 import { runXaiOAuthDeviceCode, runXaiOAuthLogin } from "./flows/xai";
-import { runAnthropicOAuthLogin } from "./flows/anthropic";
+import {
+  anthropicGrantRemainingMs,
+  runAnthropicOAuthLogin,
+} from "./flows/anthropic";
 import { runCursorOAuthLogin } from "./flows/cursor";
 import { runDevinOAuthLogin } from "./flows/devin";
 
@@ -683,6 +686,25 @@ export async function runAuthProviderCommand(
         accountLabel ? t("auth.authorizationSavedForAccount", accountLabel) : "",
       )
     );
+
+    if (provider === "claude") {
+      const remainingMs = anthropicGrantRemainingMs(
+        credential,
+        deps.now?.() ?? Date.now()
+      );
+      if (remainingMs !== undefined) {
+        if (remainingMs <= 0) {
+          output.log(t("auth.claudeGrantExpired"));
+        } else {
+          const days = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+          if (days < 7) {
+            output.log(t("auth.claudeGrantExpiringSoon", String(days)));
+          } else {
+            output.log(t("auth.claudeGrantValidDays", String(days)));
+          }
+        }
+      }
+    }
 
     const hasExplicitNoSync = args.includes("--no-sync-to-server");
     const hasExplicitSync = args.includes("--sync-to-server");
