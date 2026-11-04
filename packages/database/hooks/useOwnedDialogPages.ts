@@ -9,7 +9,8 @@ export interface OwnedDialogPagesState {
   loading: boolean;
   error: string | null;
   hasMore: boolean;
-  loadMore: () => Promise<void>;
+  pendingSourceCount: number;
+  loadMore: (opts?: { retryFailed?: boolean }) => Promise<void>;
 }
 /** Owned-account remote history only. Never treat this as a complete Work listing. */
 export function useOwnedDialogPages(enabled: boolean): OwnedDialogPagesState {
@@ -21,73 +22,99 @@ export function useOwnedDialogPages(enabled: boolean): OwnedDialogPagesState {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [pendingSourceCount, setPendingSourceCount] = useState(0);
   const generation = useRef(0);
-  const inFlight = useRef(false);
+  const inFlight = useRef(new Set<string>());
   const failed = useRef(new Set<string>());
   const cursors = useRef<Map<string, string | null>>(new Map());
+  const attempts = useRef(new Map<string, number>());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
     generation.current += 1;
-    inFlight.current = false;
+    inFlight.current = new Set();
     cursors.current = new Map();
-    failed.current.clear();
+    failed.current = new Set();
+    attempts.current = new Map();
+    timers.current = new Map();
     setPageState({ identityKey, records: [] });
     setError(null);
-    setHasMore(enabled && !!currentUserId && !!currentToken && servers.length > 0);
+    const count = enabled && currentUserId && currentToken ? servers.length : 0;
+    setPendingSourceCount(count);
+    setHasMore(count > 0);
     setLoading(false);
     const effectGeneration = generation.current;
     return () => {
       if (generation.current === effectGeneration) generation.current += 1;
-      inFlight.current = false;
+      for (const timer of timers.current.values()) clearTimeout(timer);
+      timers.current.clear();
     };
   }, [enabled, currentUserId, currentToken, originsKey]);
 
-  const loadMore = useCallback(async () => {
-    if (!enabled || !currentUserId || !currentToken || servers.length === 0 || inFlight.current) return;
+  const loadMore = useCallback(async (opts?: { retryFailed?: boolean }) => {
+    if (!enabled || !currentUserId || !currentToken || servers.length === 0) return;
     const run = generation.current;
-    inFlight.current = true;
-    setLoading(true);
-    setError(null);
-    try {
-      // A retry round never advances a healthy source.
-      const origins = [...servers].sort().filter((server) => failed.current.size ? failed.current.has(server) : cursors.current.get(server) !== null);
-      const settled = await Promise.allSettled(origins.map(async (server) => {
-        const cursor = cursors.current.get(server);
-        if (cursor === null) return { server, records: [] as OwnedDialogSummary[], nextCursor: null };
+    const updateStatus = () => {
+      const count = servers.filter((server) => !failed.current.has(server) && cursors.current.get(server) !== null).length;
+      setPendingSourceCount(count);
+      setHasMore(count > 0 || failed.current.size > 0);
+      setError(failed.current.size ? `${failed.current.size} 个服务器的历史查询失败，可点击下方加载按钮重试。` : null);
+      setLoading(inFlight.current.size > 0);
+    };
+    const fetchSource = async (server: string): Promise<void> => {
+      if (run !== generation.current || inFlight.current.has(server)) return;
+      inFlight.current.add(server);
+      updateStatus();
+      try {
         const page = await fetchOwnedDialogPage({
-          server, userId: currentUserId, authToken: currentToken, cursor: cursor ?? null, limit: 100,
+          server, userId: currentUserId, authToken: currentToken, cursor: cursors.current.get(server) ?? null, limit: 100,
         });
-        return { server, ...page };
-      }));
-      if (run !== generation.current) return;
-      settled.forEach((outcome, index) => {
-        if (outcome.status === "rejected") failed.current.add(origins[index]!);
-        else failed.current.delete(origins[index]!);
-      });
-      const pages = settled.flatMap((outcome) => outcome.status === "fulfilled" ? [outcome.value] : []);
-      // Failed origins keep their existing cursor. Never advance them past missing history.
-      for (const page of pages) cursors.current.set(page.server, page.nextCursor);
-      if (pages.length > 0) {
-        setPageState((previousState) => {
-          if (previousState.identityKey !== identityKey) return previousState;
-          // Preserve every source/page candidate, including deletion and restore evidence.
-          return { identityKey, records: [...previousState.records, ...pages.flatMap((p) => p.records)] };
-        });
+        if (run !== generation.current) return;
+        failed.current.delete(server);
+        attempts.current.delete(server);
+        const timer = timers.current.get(server);
+        if (timer !== undefined) clearTimeout(timer);
+        timers.current.delete(server);
+        cursors.current.set(server, page.nextCursor);
+        setPageState((previousState) => previousState.identityKey !== identityKey ? previousState :
+          { identityKey, records: [...previousState.records, ...page.records] });
+      } catch {
+        if (run !== generation.current) return;
+        failed.current.add(server);
+        const count = attempts.current.get(server) ?? 0;
+        if (count < 2 && !timers.current.has(server)) {
+          const timer = setTimeout(() => {
+            timers.current.delete(server);
+            if (run !== generation.current || !failed.current.has(server)) return;
+            attempts.current.set(server, count + 1);
+            void fetchSource(server);
+          }, count === 0 ? 2000 : 4000);
+          timers.current.set(server, timer);
+        }
+      } finally {
+        if (run === generation.current) {
+          inFlight.current.delete(server);
+          updateStatus();
+        }
       }
-      const failures = settled.filter((outcome) => outcome.status === "rejected").length;
-      setError(failures > 0 ? `${failures} 个服务器的历史查询失败，点击下方加载按钮仅重试失败来源；成功后可继续加载下一页。` : null);
-      setHasMore(failures > 0 || servers.some((server) => cursors.current.get(server) !== null));
-
-    } catch (cause) {
-      if (run === generation.current) setError(cause instanceof Error ? cause.message : "历史查询失败");
-    } finally {
-      if (run === generation.current) { inFlight.current = false; setLoading(false); }
+    };
+    const origins = [...servers].sort().filter((server) =>
+      !inFlight.current.has(server) && (failed.current.has(server) ? opts?.retryFailed !== false : cursors.current.get(server) !== null));
+    for (const server of origins) {
+      if (failed.current.has(server)) {
+        const timer = timers.current.get(server);
+        if (timer !== undefined) clearTimeout(timer);
+        timers.current.delete(server);
+        attempts.current.delete(server);
+      }
     }
+    await Promise.all(origins.map(fetchSource));
   }, [enabled, currentUserId, currentToken, originsKey]);
   useEffect(() => {
     if (enabled && currentUserId && currentToken) void loadMore();
   }, [enabled, currentUserId, currentToken, originsKey, loadMore]);
   const sameIdentity = pageState.identityKey === identityKey;
   return { identityKey, records: sameIdentity ? pageState.records : [], error: sameIdentity ? error : null,
-    loading: sameIdentity && loading, hasMore: sameIdentity && hasMore, loadMore };
+    loading: sameIdentity && loading, hasMore: sameIdentity && hasMore,
+    pendingSourceCount: sameIdentity ? pendingSourceCount : 0, loadMore };
 }

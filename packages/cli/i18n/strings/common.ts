@@ -222,10 +222,12 @@ export const commonStrings = {
     zh: "（上游约 {0}后复位）",
   },
   // 第 2 行：{0} = 冷却截止（本地时间，当天 HH:MM / 跨天 MM-DD HH:MM），
-  // {1} = 复位提示或空串，{2} = 自动探测间隔（分钟）。无 cooldownUntil 时整行省略。
+  // {1} = 复位提示或空串。无 cooldownUntil 时整行省略。
+  // 冷却只作参考：额度信息不再有否决权，请求不会被本地拦下，故文案不得承诺
+  // 「每 N 分钟自动试探一次」——那套 gate 节流已随否决权一并拆除。
   localRunRateLimitCooldown: {
-    en: " Cooldown until {0}{1}; auto-probing every {2} min meanwhile (the upstream may not be restored by then).",
-    zh: " 冷却至 {0}{1}；期间每 {2} 分钟自动试探一次（上游未必届时恢复）。",
+    en: " Cooldown until {0}{1}; requests are not blocked locally by this timestamp — it is only a reference for when the upstream may recover (it may not have recovered by then).",
+    zh: " 冷却至 {0}{1}；本地不据此拦截请求，该时刻仅作参考（上游未必届时恢复）。",
   },
   // 第 3 行：三个出口（换 agent / 强制走服务器 / 已充值清冷却）。
   localRunRateLimitExits: {
@@ -268,6 +270,14 @@ export const commonStrings = {
   usedSkillLabel: {
     en: "Used Skill",
     zh: "已加载技能",
+  },
+  loadSkillLabel: {
+    en: "Load Skill",
+    zh: "加载技能",
+  },
+  unnamedSkillReference: {
+    en: "unknown reference",
+    zh: "未知引用",
   },
   // Background-process rows in the same zone (`❯ npm run dev · 已运行 3m · pid 123`).
   // The pid is how the user targets /stop, so it is a fact, not decoration.

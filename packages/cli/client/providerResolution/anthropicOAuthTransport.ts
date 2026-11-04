@@ -42,6 +42,8 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
         const result = await fetchAnthropicMessagesCompletion({
           agentConfig,
           accessToken,
+          signal: options?.signal,
+          ...(options?.noRetries ? { noRetries: true as const } : {}),
           openAiBody: {
             model: agentConfig.model || "claude-sonnet-5",
             messages,
@@ -52,6 +54,7 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
             fetchWithTransientRetry(fetchImpl, url, init, {
               sleep: deps.sleep,
               loopbackRequest,
+              ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
             })) as unknown as typeof fetch,
         });
         await recordLocalAvailability(result.status, result.body);

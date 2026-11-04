@@ -7,10 +7,25 @@ export type HistorySong = {
   album: { id: number; name: string; coverUrl?: string };
   durationMs?: number;
   playedAt: number;
+  /**
+   * 来源身份：历史项要能重放，就必须带上 TrackRef。
+   * 本地曲目没有数字 id，靠 `ref.id`（内容指纹）定位文件；网易云曲目也可带上，便于将来多源。
+   */
+  ref?: { source: string; id: string };
 };
 
-const STORAGE_KEY = "nolo:music:playback-history";
+const BASE_STORAGE_KEY = "nolo:music:playback-history";
 const MAX_HISTORY_LENGTH = 100;
+
+/**
+ * 历史按项目隔离：有 projectId 时写入带后缀的 key，避免不同项目的播放记录串味。
+ * 无 projectId 时退回旧 key（不带后缀），向后兼容，旧数据仍可读。
+ */
+let historyProjectScope: string | null = null;
+
+function resolveStorageKey(): string {
+  return historyProjectScope ? `${BASE_STORAGE_KEY}:${historyProjectScope}` : BASE_STORAGE_KEY;
+}
 
 function safeGetLocalStorage(): Storage | null {
   try {
@@ -30,7 +45,7 @@ function loadInitialHistory(): HistorySong[] {
   const storage = safeGetLocalStorage();
   if (!storage) return [];
   try {
-    const raw = storage.getItem(STORAGE_KEY);
+    const raw = storage.getItem(resolveStorageKey());
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
@@ -46,7 +61,7 @@ function persistHistory(items: HistorySong[]): void {
   const storage = safeGetLocalStorage();
   if (!storage) return;
   try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(items));
+    storage.setItem(resolveStorageKey(), JSON.stringify(items));
   } catch {
     // Ignore storage write or quota errors
   }
@@ -78,6 +93,18 @@ export function getPlaybackHistory(): HistorySong[] {
 
 export function usePlaybackHistory(): HistorySong[] {
   return useSyncExternalStore(subscribePlaybackHistory, getPlaybackHistory, getPlaybackHistory);
+}
+
+/**
+ * 切换历史作用域（面板 / 音乐组件在项目切换时调用）。
+ * 切换后立即重载对应项目的历史并通知订阅者；同作用域重复调用是 no-op。
+ */
+export function setHistoryProjectScope(projectId: string | null): void {
+  const normalized = typeof projectId === "string" && projectId.trim() ? projectId : null;
+  if (normalized === historyProjectScope) return;
+  historyProjectScope = normalized;
+  history = loadInitialHistory();
+  notify();
 }
 
 export function addPlaybackHistory(song: any): void {
@@ -144,6 +171,10 @@ export function addPlaybackHistory(song: any): void {
     album,
     ...(durationMs !== undefined ? { durationMs } : {}),
     playedAt,
+    // 保留来源身份，否则本地曲目从历史里点开只能走网易云链路并失败
+    ...(song?.ref && typeof song.ref.id === "string" && typeof song.ref.source === "string"
+      ? { ref: { source: song.ref.source, id: song.ref.id } }
+      : {}),
   };
 
   const filtered = history.filter((item) => item.id !== id);
@@ -158,7 +189,7 @@ export function clearPlaybackHistory(): void {
   const storage = safeGetLocalStorage();
   if (storage) {
     try {
-      storage.removeItem(STORAGE_KEY);
+      storage.removeItem(resolveStorageKey());
     } catch {
       // Ignore
     }
@@ -167,5 +198,6 @@ export function clearPlaybackHistory(): void {
 }
 
 export function resetPlaybackHistoryForTests(): void {
+  historyProjectScope = null;
   clearPlaybackHistory();
 }

@@ -22,6 +22,7 @@ import {
 } from "./tuiTurnRunner";
 import type { LocalAgentActionGate } from "../../agent-runtime/localLoop";
 import type { PermissionRequest } from "../../agent-runtime/actionGate";
+import { runTaskSlashCommand, type TaskActionView } from "./taskActions";
 import type { AgentRuntimeToolResult } from "../agentRuntimeLocal";
 import { resolvePlatformAuthToken } from "../../agent-runtime/providerResolution";
 import { deleteDbRecord } from "../agentRecordHelpers";
@@ -93,6 +94,8 @@ export interface SlashDispatchHost {
   readonly input: NodeJS.ReadableStream;
   readonly output: NodeJS.WritableStream;
   readonly options: WorkspaceOptions;
+  readonly taskEnv?: Record<string, string | undefined>;
+  readonly confirmTaskStop?: (view: TaskActionView) => Promise<boolean>;
   readonly fetchImpl: typeof fetch;
   readonly turnCtx: AgentTurnContext;
 
@@ -167,7 +170,7 @@ export async function runSubmittedSlashLine(
   line: string,
   host: SlashDispatchHost,
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../../agent-runtime/actionGate").HostConfirmDecision>,
 ): Promise<boolean> {
   const {
     history,
@@ -191,10 +194,15 @@ export async function runSubmittedSlashLine(
     spawnRunner,
     installAltScreenRestoreHandlers,
   } = host;
+  const taskOutput = await runTaskSlashCommand(line, { getDialogId: () => host.state.dialogId, env: host.taskEnv ?? process.env, confirm: host.confirmTaskStop });
+  if (taskOutput !== null) {
+    emitCommandOutput(taskOutput, line.trim());
+    return false;
+  }
   // history is forwarded so /links can read the transcript: it lives in the
   // workspace-scoped TurnHistory rather than in TuiState, and copying it into
   // state would put transcript data in front of every command's inputs.
-  const result = handleTuiInput(line, host.state, collectConversationTurns(host.history));
+  const result = handleTuiInput(line, host.state, collectConversationTurns(host.history), { env: host.taskEnv });
   const previousState = host.state;
   const previousAgentKey = host.state.agentKey;
   host.state = result.nextState;

@@ -10,7 +10,8 @@ import {
   formatListRunsCard,
   formatNotFoundRunCard,
   formatFinishedRunCard,
-  formatStartRunCard,
+  formatIdentityRow,
+  getAgentRunStatusIcon,
   formatStatusRunCard,
   formatStopRunCard,
   isAgentRunTerminalStatus,
@@ -45,7 +46,7 @@ function clip(value: string, max = 72) {
 export function formatConservativeActiveToolLabel(
   event: Pick<LocalAgentToolEvent, "toolName" | "argumentsPreview">
 ) {
-  return toolLabel(event.toolName || "tool");
+  return event.toolName === "startAgentRun" ? t("agentStartingLabel") : toolLabel(event.toolName || "tool");
 }
 
 function isRunToolName(name?: string): boolean {
@@ -412,11 +413,12 @@ function recoverOrchestrationCard(
   if (toolName === "listAgents") {
     try {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
+      if (parsed.success === false || !Array.isArray(parsed.agents)) return null;
+      const agents = parsed.agents;
       // The shared card body stays as-is (raw rows are never rewritten); only
       // its header (`Agents (2)`) is a display label this process owns, so it
       // is relabeled under the active locale.
-      const card = formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0]);
+      const card = formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0], 8, new Date(), !safe);
       const lines = card.split("\n");
       lines[0] = t("agentsListLabel", String(agents.length));
       return lines.join("\n");
@@ -451,12 +453,21 @@ function recoverOrchestrationCard(
     const name = safe ? cleanUserText(snapshot.agentName ?? "agent") : (snapshot.agentName ?? "agent");
     const task = snapshot.taskPreview ? (safe ? cleanUserText(snapshot.taskPreview) : snapshot.taskPreview) : snapshot.taskPreview;
     const title = snapshot.title ? (safe ? cleanUserText(snapshot.title) : snapshot.title) : snapshot.title;
-    return formatStartRunCard(name, snapshot.status, {
-      task,
-      runId: snapshot.runId,
-      ...(title ? { title } : {}),
-      labels,
+    const identity = formatIdentityRow(name, snapshot.runId, {
+      title, unnamedAgent: labels.unnamedAgent,
     });
+    const status = `${getAgentRunStatusIcon(snapshot.status)} ${labels.statusWord(snapshot.status)}`;
+    const oneLine = identity ? `${identity} · ${status}` : status;
+    // Break at the semantic boundary instead of clipping either field. Very
+    // long individual fields still wrap naturally at the terminal edge.
+    const columns = process.stdout.columns || 80;
+    const secondary = formatIdentityRow(name, snapshot.runId, { title, titleOnOwnLine: true, unnamedAgent: labels.unnamedAgent });
+    const rows = identity && title && displayWidth(`  ${oneLine}`) > columns
+      ? [title, `  ${secondary ? `${secondary} · ` : ""}${status}`]
+      : [oneLine];
+    if (task && !title) rows.push(`  ${labels.rows.task}${task}`);
+    if (snapshot.errorMessage) rows.push(`  ${labels.rows.error}${redactSecrets(cleanUserText(snapshot.errorMessage.split("\n")[0]))}`);
+    return rows.join("\n");
   }
   if (kind === "gone") return formatNotFoundRunCard(labels);
   if (kind === "stop") return formatStopRunCard(snapshot.status, labels);
@@ -477,20 +488,31 @@ function formatOrchestrationCardBlock(
       : "";
   // Client render first (see recoverOrchestrationCard); the server-baked card
   // and then the raw content are fallbacks for payloads we cannot rebuild.
-  const rawDataStr =
-    recoverOrchestrationCard(event, toolName, { safe }) ||
-    bakedCard ||
-    (typeof event.content === "string" ? event.content : "");
+  let listPayload: Record<string, unknown> | undefined;
+  if (toolName === "listAgents" && typeof event.content === "string") {
+    try {
+      const value: unknown = JSON.parse(event.content);
+      if (value && typeof value === "object" && !Array.isArray(value)) listPayload = value as Record<string, unknown>;
+    } catch { /* Legacy plain text. */ }
+  }
+  const listFailed = listPayload?.success === false;
+  const rawDataStr = listFailed
+    ? (typeof listPayload?.error === "string" ? listPayload.error : event.content || bakedCard)
+    : recoverOrchestrationCard(event, toolName, { safe }) ||
+      bakedCard ||
+      (typeof event.content === "string" ? event.content : "");
   const failed =
     event.type === "tool-error" ||
     isFailedToolResult(event) ||
     Boolean(event.metadata?.failed) ||
+    listFailed ||
     /^Error:/i.test(rawDataStr.trim());
 
   if (failed) {
     // 失败要说为什么（2026-09-01 owner 定调）：normal 模式同样显示清洗后的
     // 首行原因；无界续行（堆栈/头/进程输出）仍不上屏。
-    const firstLine = stripAnsi(rawDataStr.trim().split("\n")[0] || event.summary || event.message || t("toolFailed"));
+    const failureSnapshot = toolName === "startAgentRun" ? parseAgentRunEvent(event)?.snapshot : undefined;
+    const firstLine = stripAnsi(failureSnapshot?.errorMessage || rawDataStr.trim().split("\n")[0] || event.summary || event.message || t("toolFailed"));
     const message = clip(redactSecrets(firstLine), 96);
     if (!colorEnabled) {
       return `✗ ${rawLabel}  ${message}\n`;
@@ -501,15 +523,47 @@ function formatOrchestrationCardBlock(
     return `${cross} ${labelPart}  ${msgPart}\n`;
   }
 
+  const parsedStart = toolName === "startAgentRun" ? parseAgentRunEvent(event) : null;
+  const startFailed = parsedStart && ["failed", "timeout", "orphaned", "cancelled", "killed"].includes(parsedStart.snapshot.status);
+  // A legacy unstructured card cannot reliably establish launch success.
+  let heading = parsedStart ? t(startFailed ? "agentStartFailedLabel" : "agentStartedLabel") : rawLabel;
   const displayData = rawDataStr.trim();
   // A server from an older build may bake a multiline error into displayData.
   // In safe mode remove the error row and its indented continuation lines until
   // the next card label (or blank line), rather than filtering only its first line.
   const lines = displayData ? displayData.split("\n") : [];
-  const projected = safe ? sanitizeRunCardForNormal(lines) : lines;
+  // Older servers supplied this redundant header as part of displayData.
+  if (toolName === "startAgentRun" && ["Run started", "运行已启动"].includes(lines[0]?.trim())) lines.shift();
+  let projected = safe ? sanitizeRunCardForNormal(lines) : lines;
+  if (safe && toolName === "listAgents") {
+    if (Array.isArray(listPayload?.agents)) {
+      const count = listPayload.agents.length;
+      const total = typeof listPayload.total === "number" && Number.isSafeInteger(listPayload.total) && listPayload.total >= count
+        ? listPayload.total : count;
+      heading = t("agentsCompactCount", String(total));
+      if (total !== count) heading += ` · ${t("agentsPageCount", String(count))}`;
+      if (listPayload.truncated === true) heading += ` · ${t("agentsTruncated")}`;
+      // Recovery can fail on malformed entries and fall back to displayData,
+      // whose first line need not be a header.
+      if (/^(?:Agents|智能体)\s*\(\d+\)$/.test(projected[0]?.trim() ?? "")) {
+        projected = projected.slice(1);
+      }
+    }
+    // Recovery failures also fall back to legacy rows, so sanitize both paths.
+    projected = projected.map((line) => line.replace(/\s{2,}(?:agent-pub-[a-z0-9]+|agent-system-[a-z0-9]+|agent-[0-9a-f]{6,}-[a-z0-9-]+|\(agentKey unavailable\))\s*$/i, ""));
+  }
+  if (safe && toolName === "controlAgentRun" && projected.length > 0) {
+    const first = projected[0].trim();
+    const recognized = ["Run status", "运行状态", "Run finished", "运行已结束", "Run stopped", "运行已停止"];
+    const merged = `${heading} · ${first}`;
+    if (recognized.includes(first) && displayWidth(`● ${merged}`) <= (process.stdout.columns || 80)) {
+      heading = merged;
+      projected = projected.slice(1);
+    }
+  }
 
   if (!colorEnabled) {
-    let out = `● ${rawLabel}\n`;
+    let out = `● ${heading}\n`;
     for (const line of projected) {
       out += `  ${line}\n`;
     }
@@ -517,7 +571,7 @@ function formatOrchestrationCardBlock(
   }
 
   const bullet = themeText("●", "success", true);
-  const labelPart = themeText(rawLabel, "muted", true);
+  const labelPart = themeText(heading, "muted", true);
   let out = `${bullet} ${labelPart}\n`;
   for (const line of projected) {
     out += `  ${themeText(line, "muted", true)}\n`;
@@ -985,7 +1039,7 @@ function formatNormalToolLine(
     return formatOrchestrationCardBlock(event, toolName, colorEnabled, { safe: true });
   }
   if (event.type === "tool-result" && toolName === "loadSkill") {
-    return formatLoadSkillBlock(event, colorEnabled, { safe: true }) ?? "";
+    return formatLoadSkillBlock({ ...event, argumentsPreview: event.argumentsPreview || pending?.argumentsPreview }, colorEnabled, { safe: true }) ?? "";
   }
   if (event.type === "tool-result" && toolName === "show_interaction") {
     return formatShowInteractionBlock(event, colorEnabled);
@@ -1052,22 +1106,40 @@ function toolFailureReason(event: LocalAgentToolEvent): string {
   return reasonLine ? clip(redactSecrets(stripAnsi(reasonLine)), 96) : "";
 }
 
-/**
- * Resolve the skill name for a loadSkill tool event. The tool contract puts
- * `{ name }` in the input; the success result content starts with
- * `Skill "<name>" loaded inline.`. Prefer the explicit metadata/arg name,
- * then fall back to extracting it from the result content so the renderer
- * stays correct even when only `content` is populated.
- */
+/** Select a short human-readable identity from a result or its reference. */
 function resolveLoadSkillName(event: LocalAgentToolEvent): string {
-  const metaName = typeof event.metadata?.name === "string" ? event.metadata.name : undefined;
-  if (metaName) return metaName;
-  const argName = event.argumentsPreview?.trim();
-  if (argName && !argName.startsWith("{")) return argName;
   const content = typeof event.content === "string" ? event.content : "";
-  const match = content.match(/Skill "([^"]+)" loaded inline/);
-  if (match?.[1]) return match[1];
-  return argName || "skill";
+  let result: Record<string, unknown> | undefined;
+  try {
+    const value: unknown = JSON.parse(content);
+    if (value && typeof value === "object" && !Array.isArray(value)) result = value as Record<string, unknown>;
+  } catch { /* Local executors return plain text. */ }
+  const preview = event.argumentsPreview?.trim() ?? "";
+  let args: Record<string, unknown> = {};
+  if (preview.startsWith("{")) {
+    try {
+      const value: unknown = JSON.parse(preview);
+      if (value && typeof value === "object" && !Array.isArray(value)) args = value as Record<string, unknown>;
+    } catch { /* A truncated preview is not a reliable reference. */ }
+  } else if (/^(?:name|source|slug|dbKey|projectBinding|relativePath)=/.test(preview)) {
+    for (const match of preview.matchAll(/(?:^|\s)(name|source|slug|dbKey|projectBinding|relativePath)=([^\s]+)/g)) args[match[1]] = match[2];
+  } else if (preview) {
+    args.name = preview;
+  }
+  const textName = content.match(/^Skill "([^"\n]+)" loaded inline\./)?.[1];
+  const name = result?.name ?? textName ?? event.metadata?.name ?? args.name;
+  const source = result?.source ?? event.metadata?.source ?? args.source;
+  const slug = result?.slug ?? event.metadata?.slug ?? args.slug;
+  const dbKey = result?.dbKey ?? event.metadata?.dbKey ?? args.dbKey;
+  const relativePath = result?.relativePath ?? event.metadata?.relativePath ?? args.relativePath;
+  const shortReference = (value: unknown): string | undefined => {
+    if (typeof value !== "string" || !value.trim()) return undefined;
+    const normalized = value.trim().replace(/\\/g, "/");
+    const parts = normalized.split("/").filter(Boolean);
+    return parts.at(-1) === "SKILL.md" && parts.length > 1 ? parts.at(-2) : parts.at(-1);
+  };
+  const candidate = shortReference(name) ?? shortReference(slug) ?? shortReference(dbKey) ?? shortReference(relativePath) ?? shortReference(source) ?? t("unnamedSkillReference");
+  return clip(redactSecrets(cleanUserText(candidate)), 80);
 }
 
 /**
@@ -1089,9 +1161,17 @@ function formatLoadSkillBlock(
   if (event.type !== "tool-result" || event.toolName !== "loadSkill") return null;
   const skillName = resolveLoadSkillName(event);
   const content = typeof event.content === "string" ? event.content : "";
+  let result: Record<string, unknown> | undefined;
+  try {
+    const value: unknown = JSON.parse(content);
+    if (value && typeof value === "object" && !Array.isArray(value)) result = value as Record<string, unknown>;
+  } catch { /* Local executors return plain text. */ }
   const failed =
-    /^Skill\s+"[^"]*"\s+not found/.test(content) || isFailedToolResult(event);
-  const labelText = t("usedSkillLabel");
+    /^Skill\s+"[^"]*"\s+not found/i.test(content) ||
+    /^Skill reference rejected:/i.test(content) ||
+    event.metadata?.resolved === false || Boolean(event.metadata?.failed) ||
+    result?.success === false || isFailedToolResult(event);
+  const labelText = t(failed ? "loadSkillLabel" : "usedSkillLabel");
   if (failed) {
     const message = opts?.safe === true
       ? t("toolFailed")

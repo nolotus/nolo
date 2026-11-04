@@ -167,7 +167,7 @@ export type LocalAgentTurnInput = {
    * 硬预算上限：**只对 runKind === "subtask" 生效**，交互式会话不受影响。
    *
    * 与 roundBudgetWarningThreshold（软提醒，靠模型自觉收尾）是两回事：
-   * 这里到限即**不再发起**新的模型调用与工具调用，并把当前成果作为
+   * 工具到限即停止工具调用，仅可进行一次无工具总结，并把当前成果作为
    * 「中间结论」交回父方。详见 ./subtaskBudget。
    */
   subtaskMaxToolCalls?: number;
@@ -810,8 +810,8 @@ export async function runLocalAgentTurn(
   const loopTiming = createLoopTiming();
 
   // ── 硬预算（只对子任务生效）───────────────────────────────────────────
-  // 不依赖模型自觉的强制终止：到限后不再发起新的模型调用与工具调用，
-  // 而是把已完成的工作作为「中间结论」交回父方（不是 provider 报错）。
+  // 不依赖模型自觉的强制终止：工具到限后不再发起工具调用，仅允许一次无工具总结；
+  // 已完成的工作作为「中间结论」交回父方（不是 provider 报错）。
   // 只在 runKind === "subtask" 时创建 tracker——交互式会话（用户在 TUI
   // 里跑长任务）完全不受影响。
   const subtaskBudgetClock = input.subtaskBudgetNow ?? (() => Date.now());
@@ -1112,6 +1112,24 @@ export async function runLocalAgentTurn(
     return resolvedProvider;
   };
 
+  // 摘要调用专用 provider：**独立实例、空工具面、不带 agent 人设**。
+  //
+  // 摘要是纯文本补全（压缩 system prompt 明确禁止调工具），没有理由带上
+  // 整份工具 schema 与 agent prompt——实测工具面 15 个 ≈ 13.3k token、全量
+  // 注册表 157 个 ≈ 66k token，叠加在 ~30k token 的摘要 prompt 上会把 gpt-6.x
+  // 的摘要延迟推到 60s 超时边缘（2026-11-03 本机日志）。host 未实现解析覆盖时
+  // （如 desktop）该调用退化为与主循环同一形状，行为与今天一致。
+  let resolvedSummaryProvider: AgentRuntimeProvider | undefined;
+  const resolveSummaryProviderOnce = async (): Promise<AgentRuntimeProvider> => {
+    if (!resolvedSummaryProvider) {
+      resolvedSummaryProvider = await input.adapter.resolveProvider(agentConfig, {
+        toolNames: [],
+        prompt: "",
+      });
+    }
+    return resolvedSummaryProvider;
+  };
+
   // 获取该 dialog 上一次 provider 调用的真实 input tokens（方案 a）：
   // 轮开始兜底判定的真实遥测读取（loadLastContextUsage）已迁入 controller。
   const contextWindow = resolveAgentContextWindow(agentConfig);
@@ -1128,7 +1146,7 @@ export async function runLocalAgentTurn(
     adapter: input.adapter,
     continueDialogId: input.continueDialogId,
     model: agentConfig.model,
-    resolveProvider: resolveProviderOnce,
+    resolveProvider: resolveSummaryProviderOnce,
     contextWindow,
     compressionTriggerRatio,
     abortSignal: input.abortSignal,
@@ -1346,6 +1364,7 @@ export async function runLocalAgentTurn(
     };
     const newDialogTelemetryKey = `new:${crypto.randomUUID()}`;
     let roundBudgetWarningInjected = false;
+    let subtaskToolBudgetWarningInjected = false;
     const roundWarningThreshold = input.roundBudgetWarningThreshold ?? DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD;
     while (true) {
       partialContent = "";
@@ -1366,6 +1385,14 @@ export async function runLocalAgentTurn(
         const prompt = buildRoundBudgetWarningPrompt(roundWarningThreshold);
         transcript.push({ role: "user", content: prompt });
         roundBudgetWarningInjected = true;
+      }
+      // 提醒仅追加到易变 transcript 尾部一次，不改稳定 prompt 或既有前缀。
+      if (subtaskBudgetTracker && !subtaskToolBudgetWarningInjected &&
+          subtaskBudgetTracker.toolCallsExecuted > 0 &&
+          subtaskBudgetTracker.remainingToolCalls() > 0 &&
+          subtaskBudgetTracker.remainingToolCalls() <= Math.max(1, Math.ceil(subtaskBudgetTracker.limits.maxToolCalls * 0.1))) {
+        transcript.push({ role: "user", content: `子任务工具预算即将用尽（剩余 ${subtaskBudgetTracker.remainingToolCalls()} 次）。请优先收尾并给出可读的阶段结果。` });
+        subtaskToolBudgetWarningInjected = true;
       }
       // 空轮修复：把 repair user message 追加到本轮请求末尾重试一次（系统消息放在末尾会被大部分 Provider API 拒收或返回空消息）。
       const preparedMessages = prepareMessagesForProviderCall(transcript.working());
@@ -1796,7 +1823,7 @@ export async function runLocalAgentTurn(
         });
       }
       if (budgetExhaustion) {
-        // 硬预算到限：不再发起下一轮模型调用（优雅终止，不是报错）。
+        // 硬预算到限：退出常规循环，必要时进入一次无工具收尾。
         break;
       }
       // 熔断保护：检查工具调用序列与返回结果是否陷入无进展停滞死循环
@@ -1824,7 +1851,7 @@ export async function runLocalAgentTurn(
       // contextUsage 在手时按真实遥测判定；缺失时每轮走估算兜底——
       // 「不报 usage 的上游」与「新对话首轮（无 dialogId）」都不再有零保护窗口。
       await compaction.maybeCompactInLoop();
-      // 硬预算准入闸门（子任务）：到限后不再发起下一轮模型调用（优雅终止，非报错）。
+      // 硬预算准入闸门（子任务）：到限后不再发起常规模型调用。
       // 与「启动模型调用之前」那处是同一套判断（compaction 之后的下一轮同样被覆盖）。
       if (!budgetAdmissionGate()) {
         break;
@@ -1836,15 +1863,94 @@ export async function runLocalAgentTurn(
     loopError = error;
   }
 
+  // 工具额度耗尽后最多一次独立的、无工具收尾；不在墙钟到限或取消后启动。
+  // textOnly 是宿主显式担保，未实现的宿主 fail closed。时间包括解析 provider。
+  const finalBudgetExhaustion = budgetExhaustion as SubtaskBudgetExhaustion | null;
+  let budgetWrapupFailure: string | undefined;
+  let budgetWrapupSucceeded = false;
+  if (!loopError && finalBudgetExhaustion && subtaskBudgetTracker &&
+      finalBudgetExhaustion.limit === "max-tool-calls" && !input.abortSignal?.aborted &&
+      subtaskBudgetTracker.elapsedMs() < subtaskBudgetTracker.limits.maxWallClockMs) {
+    const remainingMs = subtaskBudgetTracker.limits.maxWallClockMs - subtaskBudgetTracker.elapsedMs();
+    const timeoutMs = Math.min(30_000, remainingMs);
+    const controller = new AbortController();
+    let rejectCancelled: (error: Error) => void = () => {};
+    const cancelled = new Promise<never>((_, reject) => { rejectCancelled = reject; });
+    const onAbort = () => { controller.abort(); rejectCancelled(buildAbortedError()); };
+    input.abortSignal?.addEventListener("abort", onAbort, { once: true });
+    if (input.abortSignal?.aborted) onAbort();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let wrapRequestStarted = false;
+    let wrapUsageCaptured = false;
+    let wrapOutcomeReceived = false;
+    try {
+      const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(new Error("budget wrap-up timed out")); }, timeoutMs);
+      });
+      const work = async () => {
+        const wrapProvider = await input.adapter.resolveProvider(agentConfig, { toolNames: [], prompt: "", textOnly: true });
+        if (!wrapProvider.textOnly) throw new Error(`host ${input.adapter.host} does not support isolated text-only provider`);
+        if (controller.signal.aborted || input.abortSignal?.aborted ||
+            subtaskBudgetTracker.elapsedMs() >= subtaskBudgetTracker.limits.maxWallClockMs) throw new Error("budget wrap-up cancelled or deadline reached");
+        const wrapMessages = [
+          ...filterImagePartsFromMessages(prepareMessagesForProviderCall(transcript.working()).messages, supportsImages),
+          { role: "user" as const, content: "工具预算已耗尽。不要调用工具；仅基于已完成内容，简述结果、证据与未完成事项。" },
+        ];
+        const startedAt = Date.now();
+        const telemetry = buildRequestTelemetry({ dialogKey: input.continueDialogId || `budget:${crypto.randomUUID()}`, messages: wrapMessages, toolsHash: safeToolNamesHash([]) });
+        wrapRequestStarted = true;
+        const summary = await runCompleteWithTimeout({
+          provider: wrapProvider, messages: wrapMessages,
+          options: { max_tokens: 1024, noRetries: true, timeoutMs, signal: controller.signal, ...(input.continueDialogId ? { dialogId: input.continueDialogId } : {}) },
+          timeoutMs, round, input, boundary: observationBoundary, providerName: agentConfig.provider, model: wrapProvider.model,
+        });
+        return { summary, telemetry: finalizeCallTelemetry(telemetry, summary, round, startedAt) };
+      };
+      const { summary, telemetry } = await Promise.race([work(), deadline, cancelled]);
+      wrapOutcomeReceived = true;
+      usageLedger.recordProviderCall({ usage: summary.usage, model: summary.model, provider: summary.provider, telemetry });
+      wrapUsageCaptured = Boolean(summary.usage);
+      if (summary.tool_calls?.length || summary.output?.some((block) => block.type === "toolCall")) throw new Error("text-only provider returned a tool call");
+      if (summary.error || typeof summary.content !== "string" || !summary.content.trim()) throw new Error("text-only provider returned no usable summary");
+      if (input.abortSignal?.aborted) throw buildAbortedError();
+      result = { ...result, content: summary.content.trim().slice(0, 12_000) };
+      budgetWrapupSucceeded = true;
+    } catch (error) {
+      if (input.abortSignal?.aborted) {
+        const aborted = buildAbortedError();
+        if (wrapRequestStarted && !wrapUsageCaptured) {
+          aborted.message += "（无工具总结请求可能已计费，未返回的用量未知）";
+          (aborted as Error & { usageUnavailable?: boolean }).usageUnavailable = true;
+        }
+        loopError = aborted;
+      } else {
+        const detail = error instanceof Error ? error.message : "unknown error";
+        budgetWrapupFailure = scrubSecrets(detail).cleaned.slice(0, 300);
+        if (wrapRequestStarted && !wrapOutcomeReceived) budgetWrapupFailure += "；请求可能已计费，未返回的用量未知";
+      }
+      // 不掩盖已有成果；下方固定 fallback 明示预算终止。
+    } finally {
+      if (timer) clearTimeout(timer);
+      controller.abort();
+      input.abortSignal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  if (!loopError && input.abortSignal?.aborted) loopError = buildAbortedError();
+
   // 硬预算终止（只对子任务生效）：把结果改写成明确的「中间结论」——
   // 含「已达预算上限 / 这是中间结论 / 当前完成到哪一步」，
   // 并且**不**标记为 provider error 或崩溃。
   if (budgetExhaustion) {
+    if (!budgetWrapupSucceeded && !budgetWrapupFailure) {
+      budgetWrapupFailure = input.abortSignal?.aborted ? "用户已取消" : "墙钟预算已耗尽，未发起总结请求";
+    }
     const previousContent = typeof result?.content === "string" ? result.content.trim() : "";
     result = {
       ...result,
       content: [
         previousContent,
+        ...(budgetWrapupFailure ? [`无工具总结未完成（${budgetWrapupFailure}）；以下是保留的已有内容和预算状态。`] : []),
         buildSubtaskBudgetExhaustedContent({
           exhaustion: budgetExhaustion,
           roundsCompleted: round,

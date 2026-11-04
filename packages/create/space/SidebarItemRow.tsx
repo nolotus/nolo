@@ -139,6 +139,8 @@ export interface SidebarItemRowProps {
   onToggleChildCollapse?: () => void;
   /** 当为 true 时，此行作为子对话渲染（缩进 + 子样式）。 */
   isChildRow?: boolean;
+  /** 显式未读指示（如 agent 行聚合其关联 dialog 的未读状态）。 */
+  hasUnread?: boolean;
 }
 
 function SidebarItemRow({
@@ -169,6 +171,7 @@ function SidebarItemRow({
   isChildCollapsed = true,
   onToggleChildCollapse,
   isChildRow,
+  hasUnread,
 }: SidebarItemRowProps) {
   const { t } = useTranslation("space");
   const dispatch = useAppDispatch();
@@ -253,7 +256,10 @@ function SidebarItemRow({
     type === "dialog" && dialogStatus === "done" && !isLiveGenerating;
   const isFailedDialog =
     type === "dialog" && dialogStatus === "failed" && !isLiveGenerating;
-  const showUnreadDot = type === "dialog" && isUnread && !isActive;
+  const isAgentUnread = type === "agent" && !readOnly && Boolean(hasUnread);
+  const showUnreadDot =
+    (type === "dialog" && isUnread && !isActive) ||
+    (isAgentUnread && !isActive);
   // 终态未读时，用居中状态点替换原数据类型 icon（running 用 spinner，done=蓝点，failed=红点）。
   // 已读恢复原 icon——不渲染此标记。
   const showStatusMark =

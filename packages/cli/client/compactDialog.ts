@@ -10,14 +10,12 @@ import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
 import type { CliFetchImpl } from "../cliFetch";
 import type { Message } from "../../chat/messages/types";
 import { planCompression } from "../../ai/context/planCompression";
-import { getModelContextWindow, DEFAULT_CONTEXT_WINDOW } from "../../ai/llm/getModelContextWindow";
+import { getModelContextWindow, findModelContextWindow, DEFAULT_CONTEXT_WINDOW } from "../../ai/llm/getModelContextWindow";
+import { BUILTIN_DIALOG_LLM_FALLBACK_MODEL, BUILTIN_SUMMARY_LLM_CONFIG } from "../../chat/dialog/actions/builtinDialogLlm";
 import { extractReferenceKeysFromMessage } from "../../chat/dialog/actions/extractReferenceKeys";
 import {
-  COMPACTION_SUMMARY_SYSTEM_PROMPT,
   computeSummarySourceMetadata,
-  formatMessagesForSummaryWithTruncation,
-  formatFileOperationsFromMessages,
-  buildCompactionUserContent,
+  buildBoundedCompactionRequest,
   buildCompactionMetricsFromPlan,
   formatCompactionMetricsLog,
 } from "../../ai/context/compactionShared";
@@ -230,9 +228,14 @@ export type CompactDialogResult = {
  * platform chat proxy. Mirrors the dependency-injection pattern from
  * `generateLocalDialogTitle`.
  */
-export type SummaryLlmCaller = (content: string) => Promise<string | null>;
+export type SummaryLlmCaller = (content: string, options?: { maxOutputTokens?: number }) => Promise<string | null>;
 
-// formatMessagesForSummary 已迁移到 compactionShared.formatMessagesForSummaryWithTruncation
+// Unknown summary model windows use a conservative boundary, not the dialog model window.
+const SUMMARY_CONTEXT_WINDOW = Math.min(
+  32_768,
+  findModelContextWindow(BUILTIN_SUMMARY_LLM_CONFIG.model) ?? 32_768,
+  findModelContextWindow(BUILTIN_DIALOG_LLM_FALLBACK_MODEL) ?? 32_768,
+);
 
 /**
  * Resolve the agent's context window from the dialog's cybots[0] agent record.
@@ -345,78 +348,82 @@ export async function compactDialog(
       });
 
       if (plan.shouldCompress && plan.msgsToCompress.length > 0) {
-        options.onProgress?.("summarizing");
         const previousSummary = (current.summary as string) || "";
-        const messagesText = formatMessagesForSummaryWithTruncation(plan.msgsToCompress);
-        const fileOpsText = formatFileOperationsFromMessages(
-          plan.msgsToCompress,
-          (name) => name, // CLI 端无 tool alias 系统，直接用原始名
-        );
-        const promptContent = buildCompactionUserContent({
+        const request = buildBoundedCompactionRequest({
+          msgsToCompress: plan.msgsToCompress,
           previousSummary,
-          messagesText,
-          fileOpsText,
+          contextWindow: SUMMARY_CONTEXT_WINDOW,
         });
 
-        try {
-          const newSummary = await options.summaryLlmCaller(promptContent);
+        if (request.status === "blocked") {
+          console.warn(`[nolo] compact: summary blocked: ${request.reason}`);
+        } else {
+          options.onProgress?.("summarizing");
+          try {
+            const newSummary = await options.summaryLlmCaller(request.promptContent, {
+              maxOutputTokens: request.outputTokenBudget,
+            });
 
-          if (newSummary && newSummary.trim()) {
-            const compressionCount =
-              (current.compressionCount as number) || 0;
+            if (newSummary && newSummary.trim()) {
+              const compressionCount =
+                (current.compressionCount as number) || 0;
 
-            // Extract reference keys: start with existing keys, then collect
-            // new keys from the messages being compressed into the summary.
-            // This prevents page/dialog/table keys from being permanently lost
-            // when their source messages are folded into the summary.
-            const extractedKeys = new Set(
-              Array.isArray(current.referenceKeys)
-                ? (current.referenceKeys as string[])
-                : []
-            );
-            for (const msg of plan.msgsToCompress) {
-              for (const key of extractReferenceKeysFromMessage(msg)) {
-                extractedKeys.add(key);
+              // Extract reference keys: start with existing keys, then collect
+              // new keys from the messages being compressed into the summary.
+              // This prevents page/dialog/table keys from being permanently lost
+              // when their source messages are folded into the summary.
+              const extractedKeys = new Set(
+                Array.isArray(current.referenceKeys)
+                  ? (current.referenceKeys as string[])
+                  : []
+              );
+              for (const msg of request.coveredMessages) {
+                for (const key of extractReferenceKeysFromMessage(msg)) {
+                  extractedKeys.add(key);
+                }
               }
+
+              const sourceMeta = await computeSummarySourceMetadata(
+                allMsgs,
+                request.summarizedBeforeId,
+              );
+
+              // referenceKeys participate in the fork carry (FORKED_CARRY_FIELDS);
+              // summary/summarizedBeforeId/compressionCount stay dialog-local and
+              // are deliberately NOT mirrored onto `current` for the fork.
+              await patchDialog(fetchImpl, options.serverUrl, options.authToken, dialogKey, {
+                summary: newSummary.trim(),
+                summarizedBeforeId: request.summarizedBeforeId,
+                compressionCount: compressionCount + 1,
+                referenceKeys: Array.from(extractedKeys),
+                ...(sourceMeta ? {
+                  sourceHash: sourceMeta.sourceHash,
+                  sourceCount: sourceMeta.sourceCount,
+                  schemaVersion: sourceMeta.schemaVersion,
+                } : {}),
+              });
+
+              current.referenceKeys = Array.from(extractedKeys);
+
+              summaryGenerated = true;
+              generatedSummary = newSummary.trim();
+              compactedMessageCount = request.coveredMessages.length;
+              // P1-8 压缩埋点
+              const metrics = buildCompactionMetricsFromPlan({
+                reason: "manual",
+                previousSummary: (current.summary as string) || "",
+                plan: {
+                  msgsToCompress: request.coveredMessages,
+                  msgsToKeep: [...plan.msgsToCompress.slice(request.coveredMessages.length), ...plan.msgsToKeep],
+                },
+                newSummary: newSummary.trim(),
+              });
+              console.log(formatCompactionMetricsLog(metrics));
             }
-
-            const sourceMeta = await computeSummarySourceMetadata(
-              allMsgs,
-              plan.newSummarizedBeforeId,
-            );
-
-            // referenceKeys participate in the fork carry (FORKED_CARRY_FIELDS);
-            // summary/summarizedBeforeId/compressionCount stay dialog-local and
-            // are deliberately NOT mirrored onto `current` for the fork.
-            await patchDialog(fetchImpl, options.serverUrl, options.authToken, dialogKey, {
-              summary: newSummary.trim(),
-              summarizedBeforeId: plan.newSummarizedBeforeId,
-              compressionCount: compressionCount + 1,
-              referenceKeys: Array.from(extractedKeys),
-              ...(sourceMeta ? {
-                sourceHash: sourceMeta.sourceHash,
-                sourceCount: sourceMeta.sourceCount,
-                schemaVersion: sourceMeta.schemaVersion,
-              } : {}),
-            });
-
-            current.referenceKeys = Array.from(extractedKeys);
-
-            summaryGenerated = true;
-            generatedSummary = newSummary.trim();
-            compactedMessageCount = plan.compressCount;
-            // P1-8 压缩埋点
-            const metrics = buildCompactionMetricsFromPlan({
-              reason: "manual",
-              previousSummary: (current.summary as string) || "",
-              plan,
-              newSummary: newSummary.trim(),
-            });
-            console.log(formatCompactionMetricsLog(metrics));
+          } catch (error) {
+            // Summary generation failed — continue with fork without compression.
+            console.warn(`[nolo] compact: summary generation failed: ${error}`);
           }
-        } catch (error) {
-          // Summary generation failed — continue with fork without compression.
-          console.warn(`[nolo] compact: summary generation failed: ${error}`);
         }
       }
     }

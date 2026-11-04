@@ -1,5 +1,5 @@
 /**
- * Platform-owned `auto-review` builtin skill. Explicitly opt-in, not recommended by default.
+ * Platform-owned `auto-review` builtin skill. Explicitly opt-in and recommended for discovery; recommendation never enables it.
  * Shared lifecycle semantics live here; projects add only their local gates and conventions.
  */
 
@@ -43,7 +43,7 @@ export function buildAutoReviewSkillConfig(
     name: "自动审查合并（auto-review）",
     triggerMode: "explicit",
     description:
-      "显式开启后，在用户指定的任务、当前对话或项目作用域持续执行独立 review、修复、提交与本地集成分支合并；不默认推荐。push 是独立权限。触发词：auto-review、自动审查、review 后自动合并、审完直接提交合并、auto review。只读任务不适用。",
+      "此技能可被推荐用于发现，但必须由用户显式开启后，才在用户指定的任务、当前对话或项目作用域持续执行独立 review、修复、提交与本地集成分支合并；推荐不代表启用。push 是独立权限。触发词：auto-review、自动审查、review 后自动合并、审完直接提交合并、auto review。只读任务不适用。",
   };
 }
 
@@ -52,9 +52,9 @@ const BODY = [
   "",
   "## 启用与权限边界",
   "- 用户可指定任务、当前对话或项目作用域。单次覆盖、暂停或关闭优先；收到 stop/停止立即停止，不重新规划既定方向。",
-  "- 作用域持续不代表平台已经持久保存配置。未验证持久配置能力前，不得声称跨对话自动保存或生效；项目启用持久能力以现有项目配置已加载为前提，不新造配置系统。保持显式 opt-in，不默认推荐或自动启用于所有项目。",
+  "- 作用域持续不代表平台已经持久保存配置。未验证持久配置能力前，不得声称跨对话自动保存或生效；项目启用持久能力以现有项目配置已加载为前提，不新造配置系统。保持显式 opt-in；推荐仅用于发现，不自动启用于任何任务或项目。",
   "- push 是独立权限，默认未授权；符合上层规则的当次明确授权后，可在本地合并后继续验收、证据预检与 push。不得声称 skill 或仓库规则授予持续 push 权。main/production 合并、发布、回滚另需当次批准。",
-  "- 需用户亲自验收的改动（如 UI/体验）：先交付可测试产物；用户明确准备提交后再进入最终 review。",
+  "- 需用户亲自验收的改动（如 UI/体验）：先交付可测试产物并等待用户验收；等待验收不重复询问已获持续授权的 review。auto-review 仍在当前作用域且用户验收通过后，持续授权继续最终 review、修复、提交与本地集成，不再重复询问准备提交确认。stop/暂停/单次覆盖优先，push、main/production 合并、发布与回滚仍独立授权。",
   "",
   "## 流程",
   "1. **隔离**：改动应在独立 worktree/分支中进行；不在就按项目既有流程建立。",

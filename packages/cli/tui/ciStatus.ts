@@ -34,25 +34,36 @@ export type CiJob = {
 // CI 宿主：nolo-ci 常驻的 GCP 实例（与 alpha 测试服已完全隔离，只保留 CI→alpha 的
 // SSH 部署一跳）。旧机 45.77.5.10 与 alpha 上的 127.0.0.1:3900 都已不再是 CI 入口。
 // 仍可被 NOLO_CI_SSH_HOST / NOLO_CI_RAW_HOST / NOLO_CI_SSH_USER 覆盖。
-const DEFAULT_SSH_HOST = "nolotus@136.67.147.177";
-const DEFAULT_CI_PORT = "3900";
+export const DEFAULT_SSH_HOST = "nolotus@136.67.147.177";
+export const DEFAULT_CI_PORT = "3900";
+export type CiStatusEnv = Record<string, string | undefined>;
+
+export function resolveCiSshTarget(env: CiStatusEnv = process.env): string {
+  const override = env.NOLO_CI_SSH_HOST?.trim();
+  if (override) return override;
+  const raw = env.NOLO_CI_RAW_HOST?.trim() ?? env.NOLO_ALPHA_RAW_HOST?.trim();
+  if (raw) return `${env.NOLO_CI_SSH_USER?.trim() ?? env.NOLO_ALPHA_SSH_USER?.trim() ?? "nolotus"}@${raw}`;
+  return env.NOLO_ALPHA_SSH_CONFIG_HOST?.trim() || DEFAULT_SSH_HOST;
+}
+
+function resolveCiPort(env: CiStatusEnv = process.env): string {
+  const raw = env.NOLO_CI_PORT?.trim() ?? "";
+  return /^\d{1,5}$/.test(raw) && Number(raw) > 0 && Number(raw) <= 65535 ? raw : DEFAULT_CI_PORT;
+}
+
+export function buildCiStatusCommand(limit: number, env: CiStatusEnv = process.env): string {
+  const safeLimit = Math.max(1, Math.min(20, Math.trunc(limit) || 5));
+  return `curl -s -m 3 "http://127.0.0.1:${resolveCiPort(env)}/status?limit=${safeLimit}"`;
+}
+
+export function fetchCiStatusPayload(limit = 5, timeoutMs = 4000, env: CiStatusEnv = process.env, signal?: AbortSignal, execFileImpl: typeof execFile = execFile): Promise<unknown | undefined> {
+  return fetchCiPayload(buildCiStatusCommand(limit, env), (stdout) => {
+    try { return JSON.parse(stdout) as unknown; } catch { return undefined; }
+  }, timeoutMs, resolveCiSshTarget(env), signal, execFileImpl);
+}
 
 function resolveSshTarget(): string {
-  const override = process.env.NOLO_CI_SSH_HOST?.trim();
-  if (override) return override;
-  const raw =
-    process.env.NOLO_CI_RAW_HOST?.trim() ?? process.env.NOLO_ALPHA_RAW_HOST?.trim();
-  if (raw) {
-    const user =
-      process.env.NOLO_CI_SSH_USER?.trim() ??
-      process.env.NOLO_ALPHA_SSH_USER?.trim() ??
-      "nolotus";
-    return `${user}@${raw}`;
-  }
-  // 旧名保留：老脚本/老文档里仍可能设置它，别名指向哪台就仍按它走。
-  const legacyAlias = process.env.NOLO_ALPHA_SSH_CONFIG_HOST?.trim();
-  if (legacyAlias) return legacyAlias;
-  return DEFAULT_SSH_HOST;
+  return resolveCiSshTarget();
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -118,19 +129,8 @@ export function parseCiStatusPayload(raw: string): CiJob[] | undefined {
   return single ? [single] : undefined;
 }
 
-function resolveCiPort(): string {
-  // port 来自 env，直接拼进「在 CI 宿主上执行的 shell 命令」等于把注入面交给环境变量。
-  // 只接受纯数字且落在合法端口区间；其余一律回退默认值。
-  const rawPort = process.env.NOLO_CI_PORT?.trim() ?? "";
-  return /^\d{1,5}$/.test(rawPort) && Number(rawPort) > 0 && Number(rawPort) <= 65535
-    ? rawPort
-    : DEFAULT_CI_PORT;
-}
-
 export function buildRemoteCommand(limit: number): string {
-  const port = resolveCiPort();
-  const safeLimit = Math.max(1, Math.min(20, Math.trunc(limit) || 5));
-  return `curl -s -m 3 "http://127.0.0.1:${port}/status?limit=${safeLimit}"`;
+  return buildCiStatusCommand(limit);
 }
 
 /**
@@ -138,11 +138,11 @@ export function buildRemoteCommand(limit: number): string {
  *
  * @param timeoutMs 整体超时。远小于调用方（TUI 首屏）能容忍的等待。
  */
-export function fetchCiStatus(limit = 5, timeoutMs = 4000): Promise<CiJob[] | undefined> {
-  return fetchCiPayload(buildRemoteCommand(limit), parseCiStatusPayload, timeoutMs);
+export function fetchCiStatus(limit = 5, timeoutMs = 4000, signal?: AbortSignal): Promise<CiJob[] | undefined> {
+  return fetchCiPayload(buildRemoteCommand(limit), parseCiStatusPayload, timeoutMs, resolveSshTarget(), signal);
 }
 
-function fetchCiPayload<T>(command: string, parse: (stdout: string) => T | undefined, timeoutMs: number): Promise<T | undefined> {
+function fetchCiPayload<T>(command: string, parse: (stdout: string) => T | undefined, timeoutMs: number, sshTarget: string, signal?: AbortSignal, execFileImpl: typeof execFile = execFile): Promise<T | undefined> {
   return new Promise((resolve) => {
     let settled = false;
     let guard: ReturnType<typeof setTimeout> | undefined;
@@ -150,17 +150,21 @@ function fetchCiPayload<T>(command: string, parse: (stdout: string) => T | undef
       if (settled) return;
       settled = true;
       if (guard) clearTimeout(guard);
+      signal?.removeEventListener("abort", onAbort);
       resolve(value);
     };
+    const onAbort = () => finish(undefined);
+    if (signal?.aborted) { finish(undefined); return; }
+    signal?.addEventListener("abort", onAbort, { once: true });
     // execFile 的 timeout 依赖 SIGTERM；远端会话可能不响应 TERM，这里再加一层
     // Promise 层的硬兜底，保证调用方（TUI 首屏）永远不会被拖住。
     guard = setTimeout(() => finish(undefined), timeoutMs + 500);
     guard.unref?.();
     try {
-      execFile(
+      execFileImpl(
         "ssh",
-        ["-o", "BatchMode=yes", "-o", `ConnectTimeout=3`, resolveSshTarget(), command],
-        { timeout: timeoutMs, encoding: "utf8", maxBuffer: 1024 * 1024 },
+        ["-o", "BatchMode=yes", "-o", `ConnectTimeout=3`, sshTarget, command],
+        { timeout: timeoutMs, signal, encoding: "utf8", maxBuffer: 1024 * 1024 },
         (error, stdout) => {
           if (error) {
             finish(undefined);
@@ -207,7 +211,7 @@ export function buildCancelCommand(jobId: string): string {
 // 取消曾是「远端 cancel + 最多 10 次终态查询」的有界过程（alphaRemote.cancelAlphaRemote，已随
 // 2026-11-02 旧 alpha 机销毁退役）。服务端现在没有远端进程可撤销，blocked alpha job 的取消会
 // 立刻返回 false；保留这个宽松的 CLI 超时只作为网络/服务端抖动的安全余量，不表示服务端还会慢。
-export function fetchCiCancel(jobId: string, timeoutMs = 120000): Promise<boolean | undefined> {
+export function fetchCiCancel(jobId: string, timeoutMs = 120000, execFileImpl: typeof execFile = execFile): Promise<boolean | undefined> {
   return fetchCiPayload(
     buildCancelCommand(jobId),
     stdout => {
@@ -215,5 +219,8 @@ export function fetchCiCancel(jobId: string, timeoutMs = 120000): Promise<boolea
       return response?.ok === true && response?.cancelled === true && response?.jobId === jobId ? true : false;
     },
     timeoutMs,
+    resolveSshTarget(),
+    undefined,
+    execFileImpl,
   );
 }

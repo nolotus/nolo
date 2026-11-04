@@ -89,6 +89,7 @@ export function handleTuiInput(
   input: string,
   state: TuiState,
   historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
+  deps?: { env?: Record<string, string | undefined> },
 ): TuiInputResult {
   const trimmed = input.trim();
 
@@ -120,7 +121,7 @@ export function handleTuiInput(
     return { nextState: state, output: "", action: { type: "learn-history", limit: Number(value) } };
   }
 
-  const result = handleBaseTuiInput(input, state, historyTurns);
+  const result = handleBaseTuiInput(input, state, historyTurns, deps);
   const switchMatch = trimmed.match(/^\/(?:switch|agent)\s+(.+)$/s);
   if (switchMatch && !["list", "current", "show"].includes(switchMatch[1]!)) {
     const target = switchMatch[1]!;

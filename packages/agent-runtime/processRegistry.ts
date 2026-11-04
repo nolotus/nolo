@@ -34,6 +34,8 @@ export type RegisteredProcess = {
   startedAt: number;
   status: ProcessTaskStatus;
   exitCode?: number;
+  /** Time of the terminal transition, including stops and ambient exits. */
+  endedAt?: number;
   persist: boolean;
   /** True once the envelope has been promoted to a background task (detach). */
   promoted: boolean;
@@ -180,6 +182,7 @@ export class ProcessRegistry {
   private byTaskId = new Map<string, number>();
   private eventLog: ProcessTaskEventLog;
   private terminalListeners = new Set<ProcessTerminalListener>();
+  private backgroundListeners = new Set<() => void>();
 
   constructor(eventLogOptions?: ProcessTaskEventLogOptions) {
     this.eventLog = new ProcessTaskEventLog(eventLogOptions);
@@ -203,6 +206,18 @@ export class ProcessRegistry {
     return () => {
       this.terminalListeners.delete(listener);
     };
+  }
+
+  /** Payload-free invalidation for the listBackground() view; no replay. */
+  onBackgroundChange(listener: () => void): () => void {
+    this.backgroundListeners.add(listener);
+    return () => { this.backgroundListeners.delete(listener); };
+  }
+
+  private emitBackgroundChange(): void {
+    for (const listener of [...this.backgroundListeners]) {
+      try { listener(); } catch { /* A UI listener must not break process lifecycle. */ }
+    }
   }
 
   /** Emit a terminal notice synchronously; listener errors must not break registry callers. */
@@ -237,6 +252,7 @@ export class ProcessRegistry {
     this.processes.set(proc.pid, record);
     this.byTaskId.set(record.taskId, proc.pid);
     this.eventLog.append({ taskId: record.taskId, pid: proc.pid, type: "started" });
+    if (!record.transient) this.emitBackgroundChange();
     return { ...record };
   }
 
@@ -299,11 +315,13 @@ export class ProcessRegistry {
     const item = this.processes.get(pid);
     if (!item) return undefined;
     if (!item.promoted) {
+      const wasTransient = item.transient;
       item.promoted = true;
       // Detached to background: from now on the user sees (and can stop) this
       // envelope as a background task, so drop the transient marker.
       item.transient = false;
       this.eventLog.append({ taskId: item.taskId, pid, type: "promoted" });
+      if (wasTransient) this.emitBackgroundChange();
     }
     return { ...item };
   }
@@ -337,6 +355,8 @@ export class ProcessRegistry {
         }
       }
       item.status = "stopped";
+      item.endedAt = Date.now();
+      if (!item.transient) this.emitBackgroundChange();
       this.eventLog.append({ taskId: item.taskId, pid, type: "killed" });
       // User-initiated terminal transition — notify on the same instant (once:
       // guarded by the "running" check, further kill() calls see "stopped").
@@ -379,6 +399,8 @@ export class ProcessRegistry {
           }
         }
         item.status = "stopped";
+        item.endedAt = Date.now();
+        if (!item.transient) this.emitBackgroundChange();
         this.eventLog.append({ taskId: item.taskId, pid: item.pid, type: "killed" });
         this.emitTerminal({
           taskId: item.taskId,
@@ -402,6 +424,8 @@ export class ProcessRegistry {
       item.exitCode = exitCode;
       if (resultCapsule) item.resultCapsule = resultCapsule;
       item.status = exitCode === 0 ? "exited" : "failed";
+      item.endedAt = Date.now();
+      if (!item.transient) this.emitBackgroundChange();
       this.eventLog.append({
         taskId: item.taskId,
         pid,
@@ -446,6 +470,7 @@ export class ProcessRegistry {
     if (!item) return false;
     this.processes.delete(pid);
     this.byTaskId.delete(item.taskId);
+    if (!item.transient) this.emitBackgroundChange();
     return true;
   }
 
@@ -456,6 +481,7 @@ export class ProcessRegistry {
     // Registry teardown (tests / workspace reuse in-process) must not leave
     // listeners subscribed to a different lifecycle's envelopes.
     this.terminalListeners.clear();
+    this.backgroundListeners.clear();
   }
 }
 

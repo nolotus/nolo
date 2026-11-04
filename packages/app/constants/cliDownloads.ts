@@ -32,7 +32,12 @@ export const getCurlCliInstallCommand = (origin?: string | null) => {
   const channel = getClientDownloadChannel(origin);
   const base =
     channel === "alpha" ? "https://us.nolo.chat" : "https://nolo.chat";
-  return `curl -fsSL ${base}/install-nolo.sh | sh`;
+  // 主站对外只有 install-nolo.sh 这一个安装脚本别名（脚本本身与渠道无关），
+  // 渠道由 env 选择：alpha 必须显式带上 NOLO_INSTALL_CHANNEL=alpha，否则装到的是
+  // stable 固定对象。这与 CLI 的 doctor 提示逐字一致。
+  return channel === "alpha"
+    ? `curl -fsSL ${base}/install-nolo.sh | NOLO_INSTALL_CHANNEL=alpha sh`
+    : `curl -fsSL ${base}/install-nolo.sh | sh`;
 };
 
 export const getCliDownloadMeta = (): string => `v${NOLO_CLI_VERSION}`;

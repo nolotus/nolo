@@ -11,6 +11,8 @@ export type AgentRunCompletionShape = {
   exitCode?: number;
   parentDialogId?: string;
   dialogId?: string;
+  /** Local full-result path, when the runtime can read it directly. */
+  resultFile?: string;
   ephemeral?: boolean;
   startedAt?: string | number;
   endedAt?: string | number;
@@ -60,6 +62,8 @@ export type UserTurnEvent = {
  */
 export type BackgroundTaskCompletedTurnEvent = {
   kind: "background-task-completed";
+  /** Host-only causal depth; never part of event text. */
+  processCausalDepth?: number;
   taskId: string;
   status: "stopped" | "exited" | "failed";
   exitCode?: number;
@@ -110,6 +114,7 @@ export function normalizeRunCompletionShape(
     ...(typeof record.exitCode === "number" ? { exitCode: record.exitCode } : {}),
     ...(typeof record.parentDialogId === "string" ? { parentDialogId: record.parentDialogId } : {}),
     ...(typeof record.dialogId === "string" ? { dialogId: record.dialogId } : {}),
+    ...(typeof record.resultFile === "string" ? { resultFile: record.resultFile } : {}),
     ...(typeof record.ephemeral === "boolean" ? { ephemeral: record.ephemeral } : {}),
     ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
     ...(record.endedAt !== undefined ? { endedAt: record.endedAt } : {}),

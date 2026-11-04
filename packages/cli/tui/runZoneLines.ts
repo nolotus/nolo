@@ -47,10 +47,8 @@ import type { RemoteTaskView } from "../../core/remoteTaskView";
  */
 export const RUN_ZONE_MAX_ROWS = 3;
 
-/**
- * 运行中的 lead 图标：spec 要的是 `⚙`（沿用旧 running chip 的机器/齿轮语义），
- * 终态 run 仍用状态图标——`⚙` 挂在一个已经 done/failed 的 run 上是误导。
- */
+/** 活动 subagent 的稳定单宽标记；明确的文字类型负责说明它是 agent run。 */
+export const RUN_ZONE_ICON = "↳";
 /**
  * 远程任务证据的载体（契约 §10.2 / M3）。
  *
@@ -171,7 +169,7 @@ export function runZoneLeadIcon(status: string, carrier?: RemoteTaskCarrier): st
   if (!isAgentRunTerminalStatus(status)) {
     // 远程任务失去证据时不摆「正在跑」的转轮：那是我们唯一确定不知道的事。
     if (carrier?.remoteTask && !remoteTaskIsActive(carrier)) return REMOTE_UNKNOWN_GLYPH;
-    return "⚙";
+    return RUN_ZONE_ICON;
   }
   switch (status) {
     case "done":
@@ -339,6 +337,9 @@ export function formatRunZoneLines(
     const clock = remoteTaskClock(carrier, now);
     const icon = runZoneLeadIcon(snapshot.status, carrier);
     const label = runZoneLabel(snapshot, duplicateTitles);
+    const typedLabel = isAgentRunTerminalStatus(snapshot.status)
+      ? label
+      : `${t("runZoneAgentType")} ${label}`;
     const { time, rest, stalled } = runZoneFacts(snapshot, clock ?? now);
     const remoteFacts = remoteTaskFacts(carrier, now);
     // 远端费用显式未知时不显示积分 chip——「未知」不是「0」。
@@ -353,18 +354,18 @@ export function formatRunZoneLines(
       ...base,
       ...remoteFacts,
     ];
-    let shownLabel = label;
+    let shownLabel = typedLabel;
     if (columns !== undefined) {
       const fixed = (l: string, f: string[]) =>
         visibleWidth(`${icon} ${l}${f.length ? ` · ${f.join(" · ")}` : ""}`);
       // 1) 丢次要事实（从末尾），耗时与停滞提示永远留在 factList 头部。
       const keep = (time && clock !== null ? 1 : 0) + (stalled ? 1 : 0);
-      while (factList.length > keep && fixed(label, factList) > columns) factList.pop();
+      while (factList.length > keep && fixed(typedLabel, factList) > columns) factList.pop();
       // 2) 还放不下：截断标题/agent，时间不动。
-      if (fixed(label, factList) > columns) {
+      if (fixed(typedLabel, factList) > columns) {
         const tail = factList.length ? ` · ${factList.join(" · ")}` : "";
         const room = columns - visibleWidth(`${icon} `) - visibleWidth(tail);
-        shownLabel = fitAnsiLine(label, Math.max(1, room));
+        shownLabel = fitAnsiLine(typedLabel, Math.max(1, room));
       }
     }
     const factsPart = factList.length > 0 ? ` · ${factList.join(" · ")}` : "";
@@ -412,7 +413,7 @@ export type RunZoneProc = {
 };
 
 /**
- * 进程行图标：与 run 行的 `⚙` 刻意不同。两批东西现在排在同一块面板里，
+ * 进程行图标：与 run 行的 `↳` 刻意不同。两批东西现在排在同一块面板里，
  * 「这行是 shell 任务还是 agent 运行」必须一眼看得出，否则用户会把
  * `npm run dev` 当成一个还在跑的子 agent。
  */

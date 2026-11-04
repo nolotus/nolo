@@ -5,6 +5,7 @@ import {
 } from "core/builtinAgents";
 import { API_REPORTED_COST_MULTIPLIER } from "../../ai/token/calculatePrice";
 import { findModelConfig } from "../../ai/llm/providers";
+import { findCodexOAuthPinnedContextWindow } from "../../ai/llm/getModelContextWindow";
 import { resolveAgentContextWindow as resolveSharedAgentContextWindow } from "../../ai/context/agentContextWindow";
 import {
   estimateMessagesTokens,
@@ -176,6 +177,14 @@ export function mergeUsageRecords(
 export function resolveContextWindow(model?: string): number | undefined {
   const raw = model?.trim();
   if (!raw) return undefined;
+
+  // Codex OAuth（ChatGPT 订阅）通道对同一 id 的窗口与公共目录里的平台值不同
+  // （gpt-6-astra：OAuth 272k / 平台 1.05M）。CLI 状态栏的入参只有模型名、没有
+  // provider **也没有 agent/通道信息**，所以这里只用「通道 pin」这个确定事实：
+  // 不用账号目录值——目录是按账号播种的，同进程里平台托管的同名模型会被误套
+  // （高估余量），比低估危险。
+  const oauthPinned = findCodexOAuthPinnedContextWindow(raw);
+  if (oauthPinned !== undefined) return oauthPinned;
 
   for (const provider of PROVIDER_LOOKUP_ORDER) {
     const config = findModelConfig(provider, raw);

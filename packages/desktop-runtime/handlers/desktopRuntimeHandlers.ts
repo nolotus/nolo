@@ -39,3 +39,11 @@ export {
   handleDesktopMusicLyricGet,
   handleDesktopMusicLogoutPost,
 } from "./desktopMusicHandler";
+export {
+  handleDesktopLocalMusicStatusGet,
+  handleDesktopLocalMusicRootsPost,
+  handleDesktopLocalMusicScanPost,
+  handleDesktopLocalMusicSearchPost,
+  handleDesktopLocalMusicFileGet,
+} from "./desktopLocalMusicHandler";
+

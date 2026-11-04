@@ -21,6 +21,16 @@ import { cliSurfaceStrings } from "./strings/cliSurface";
 import { dialogCommandStrings } from "./strings/dialogCommands";
 import { commonStrings } from "./strings/common";
 
+export const controlMessageStrings = {
+  controlQueued: { en: "queued", zh: "已入队" },
+  controlEnqueued: { en: "[enqueued {0}]", zh: "[已入队 {0}]" },
+  controlContinued: { en: "continued", zh: "已续跑" },
+  controlConsumed: { en: "consumed", zh: "已消费" },
+  controlRun: { en: "run", zh: "任务" },
+  controlTarget: { en: "target", zh: "目标" },
+  controlMessage: { en: "message", zh: "消息" },
+} as const;
+
 export const STRINGS = {
   ...turnStrings,
   ...sessionStrings,
@@ -34,6 +44,7 @@ export const STRINGS = {
   ...cliSurfaceStrings,
   ...dialogCommandStrings,
   ...commonStrings,
+  ...controlMessageStrings,
 } as const;
 
 export type { CliLocale };
@@ -588,6 +599,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     en: "Evaluate JS in a tab, user-approved per call (--tab <id> --expr <js> [--await] [--timeout-ms N]) (Compatibility alias of `nolo browser eval`)",
     zh: "在标签页中执行 JS，每次调用需用户批准（--tab <id> --expr <js> [--await] [--timeout-ms N]）（`nolo browser eval` 的兼容别名）",
   },
+  "ci cancel": {
+    en: "Cancel an alpha deploy job",
+    zh: "取消 alpha 部署任务",
+  },
   "ci status": {
     en: "Show recent nolo-ci deploy jobs (alpha / main)",
     zh: "查看最近的 nolo-ci 部署任务（alpha / main）",
@@ -595,6 +610,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
   "dialog usage": {
     en: "Show dialog tokens, recorded duration and speed by basis",
     zh: "显示对话的 token 数、记录时长与按基准计算的速度",
+  },
+  "usage": {
+    en: "Summarize local token usage by day/provider/model/agent (reads DayStats via LevelDB iterator)",
+    zh: "按日、提供商、模型和智能体汇总本地 token 用量（通过 LevelDB 迭代器读取 DayStats）",
   },
   "login": {
     en: "Log in to Nolo",
@@ -759,6 +778,7 @@ export function agentRunStatusWord(status: string): string {
 
 /** Labels injected into `packages/ai` agent-run card helpers (no cli→ai reverse dep). */
 export function agentRunCardLabels(): {
+  controlMessage: { queued: string; enqueued: (count: number) => string; continued: string; consumed: string; run: string; target: string; message: string };
   runStatus: string;
   runStarted: string;
   runStopped: string;
@@ -779,6 +799,11 @@ export function agentRunCardLabels(): {
   };
 } {
   return {
+    controlMessage: {
+      queued: t("controlQueued"), enqueued: (count) => t("controlEnqueued", String(count)),
+      continued: t("controlContinued"), consumed: t("controlConsumed"),
+      run: t("controlRun"), target: t("controlTarget"), message: t("controlMessage"),
+    },
     runStatus: t("runStatusLabel"),
     runStarted: t("runStartedLabel"),
     runStopped: t("runStoppedLabel"),

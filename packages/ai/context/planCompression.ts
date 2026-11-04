@@ -11,7 +11,6 @@
 import type { Message } from "../../chat/messages/types";
 import { estimateTokenCount } from "./tokenUtils";
 import { serializeMessageContent } from "core/chat/messageContentSerialize";
-import { ConversationLoad, planContextUsage } from "ai/context/retention";
 import { resolveCompressionTriggerRatio } from "./toolOutputCap";
 
 // --- 常量 ---
@@ -72,11 +71,11 @@ export interface CompressionInput {
   reason?: CompressionReason;
   realContextUsagePercent?: number;
   /**
-   * 冷恢复：距上次活动超过 provider 缓存 TTL，缓存反正已冷，
-   * 全价发送时更小的上下文 = 更便宜。此时只要有足量新内容可折叠
-   * 即触发压缩（门槛见 MIN_TRIGGER_PENDING_COUNT）。
+   * 冷恢复标记保留用于兼容；默认不单独触发压缩。
    */
   coldResume?: boolean;
+  /** Caller must re-inject the newest covered user message verbatim when projecting. */
+  preserveLatestUserByProjection?: boolean;
 }
 
 export interface CompressionPlan {
@@ -162,28 +161,6 @@ const hasOpenEndedToolCall = (msg: Message | undefined): boolean =>
   Array.isArray((msg as any).tool_calls) &&
   (msg as any).tool_calls.length > 0;
 
-const classifyConversationLoad = (msgs: Message[]): ConversationLoad => {
-  const N = 20;
-  if (!Array.isArray(msgs) || msgs.length === 0) return "light";
-
-  const tail = msgs.slice(-N);
-  const tokenSamples = tail.map(getMessageTokenCount);
-  if (tokenSamples.length === 0) return "light";
-
-  const sum = tokenSamples.reduce((acc, v) => acc + v, 0);
-  const avg = sum / tokenSamples.length;
-  const sorted = [...tokenSamples].sort((a, b) => a - b);
-  const p95 = sorted[Math.floor((sorted.length - 1) * 0.95)];
-
-  if (p95 < 200 && avg < 120) {
-    return "light";
-  }
-  if (p95 > 2000 || avg > 1200) {
-    return "heavy";
-  }
-  return "medium";
-};
-
 /**
  * Accept either a ratio (0..1) or a percentage (0..100), but reject invalid
  * values so bad provider telemetry falls back to the legacy estimate path.
@@ -229,19 +206,15 @@ function findPendingMessages(
  *
  * 触发真值只有一条线：provider 上报的真实占用 ≥ 触发线（见
  * resolveCompressionTriggerRatio，随窗口留足单轮灌水余量）。
- * 估算超预算只在遥测缺失时兜底。cold_resume / manual 是两条独立的
- * 主动路径，不参与占用判定。
+ * 估算超预算只在遥测缺失时兜底；手动可强制触发，冷恢复不单独触发。
  */
 function shouldTriggerCompaction(args: {
-  pendingMsgCount: number;
   totalUsed: number;
   historyBudget: number;
   triggerRatio: number;
   force: boolean;
   reason?: CompressionReason;
   realContextUsagePercent?: number;
-  coldResume?: boolean;
-  lastMsg?: Message;
 }): {
   trigger: boolean;
   triggeredByRealUsage: boolean;
@@ -249,8 +222,8 @@ function shouldTriggerCompaction(args: {
   triggeredByColdResume: boolean;
 } {
   const {
-    pendingMsgCount, totalUsed, historyBudget, triggerRatio,
-    force, reason, realContextUsagePercent, coldResume, lastMsg,
+    totalUsed, historyBudget, triggerRatio,
+    force, reason, realContextUsagePercent,
   } = args;
 
   const usageRatio = normalizeContextUsageRatio(realContextUsagePercent);
@@ -261,13 +234,9 @@ function shouldTriggerCompaction(args: {
   const triggeredByEstimate =
     usageRatio === undefined && totalUsed >= historyBudget;
 
-  const shouldRunActiveSummary =
-    force &&
-    reason === "manual" &&
-    (pendingMsgCount < MIN_TRIGGER_PENDING_COUNT || !hasOpenEndedToolCall(lastMsg));
+  const shouldRunActiveSummary = force && reason === "manual";
 
-  const triggeredByColdResume =
-    coldResume === true && pendingMsgCount >= MIN_TRIGGER_PENDING_COUNT;
+  const triggeredByColdResume = false;
 
   return {
     trigger:
@@ -287,14 +256,7 @@ function shouldTriggerCompaction(args: {
 function calculateCompressCount(
   pendingMsgs: Message[],
   rawMessageBudget: number,
-  opts: { keepTailCount: boolean; totalUsed: number; historyBudget: number },
 ): number {
-  const { keepTailCount, totalUsed, historyBudget } = opts;
-
-  if (keepTailCount && totalUsed < historyBudget) {
-    return Math.max(0, pendingMsgs.length - ACTIVE_SUMMARY_TAIL_KEEP_COUNT);
-  }
-
   let tokensToKeep = 0;
   let keepCount = 0;
   for (let i = pendingMsgs.length - 1; i >= 0; i--) {
@@ -351,27 +313,21 @@ export function resolveEffectiveCompactionBudgets(args: {
   };
 }
 
-/**
- * 保护 tool chain 边界：不切断 assistant(tool_calls) → tool(result) 配对。
- *
- * 若切点落在 tool 消息上，将 tool 消息向后推进压缩集，使整组 tool chain
- * 在压缩集内闭环归档，同时防止向前倒退导致保留尾部超出预算、再次打爆触发线。
- */
-function guardToolChainBoundary(pendingMsgs: Message[], compressCount: number): number {
-  let count = compressCount;
-  // 不让保留的第一条是 tool（它的 assistant 已被压缩，若留在保留集会成孤儿 tool 报 400；
-  // 将其一并纳入压缩集，既配对又保证保留集不超预算）
-  while (count < pendingMsgs.length && pendingMsgs[count].role === "tool") {
-    count++;
-  }
-  // 最后一条被压缩的不能是带 tool_calls 的 assistant（若其 tool 结果还在保留集，则将 tool 结果也推进压缩集）
-  while (count > 0 && hasOpenEndedToolCall(pendingMsgs[count - 1])) {
-    if (count < pendingMsgs.length && pendingMsgs[count].role === "tool") {
-      count++;
-    } else {
-      count--;
-      break;
+/** Never split a tool chain. Without projection support, retain latest user in the suffix. */
+function guardToolChainBoundary(pendingMsgs: Message[], compressCount: number, preserveByProjection: boolean): number {
+  let safeLimit = Math.max(0, pendingMsgs.length - 1);
+  if (!preserveByProjection) {
+    for (let i = pendingMsgs.length - 1; i >= 0; i--) {
+      if (pendingMsgs[i].role === "user") {
+        safeLimit = i;
+        break;
+      }
     }
+  }
+  let count = Math.min(compressCount, safeLimit);
+  while (count > 0 &&
+    (pendingMsgs[count]?.role === "tool" || hasOpenEndedToolCall(pendingMsgs[count - 1]))) {
+    count--;
   }
   return count;
 }
@@ -379,7 +335,7 @@ function guardToolChainBoundary(pendingMsgs: Message[], compressCount: number): 
 export function planCompression(input: CompressionInput): CompressionPlan {
   const {
     allMsgs, summarizedBeforeId, summary, contextWindow,
-    force = false, reason, realContextUsagePercent, coldResume,
+    force = false, reason, realContextUsagePercent, preserveLatestUserByProjection = false,
   } = input;
 
   // 1. 找待处理消息
@@ -402,13 +358,17 @@ export function planCompression(input: CompressionInput): CompressionPlan {
   // 2. 算 token 开销 + 预算
   const summaryTokens = estimateTokenCount(summary || "");
   const pendingTokens = pendingMsgs.reduce((sum, msg) => sum + getMessageTokenCount(msg), 0);
-  const totalUsed = summaryTokens + pendingTokens;
-  const adjustedSummaryTokens = Math.max(summaryTokens, 1000);
-  const recentLoad = classifyConversationLoad(pendingMsgs);
-  const { historyBudget, rawMessageBudget } = planContextUsage({
-    contextWindow, summaryTokens: adjustedSummaryTokens, recentLoad,
-  });
+  let coveredUserTokens = 0;
+  if (preserveLatestUserByProjection && summary && startIndex > 0) {
+    for (let i = startIndex - 1; i >= 0; i--) {
+      if (allMsgs[i].role === "user") { coveredUserTokens = getMessageTokenCount(allMsgs[i]); break; }
+    }
+  }
+  const totalUsed = summaryTokens + coveredUserTokens + pendingTokens;
   const triggerRatio = resolveCompressionTriggerRatio(contextWindow);
+  // 压缩专用预算不改变 retention 的其他调用者。
+  const historyBudget = Math.floor(contextWindow * triggerRatio);
+  const rawMessageBudget = Math.max(0, historyBudget - summaryTokens);
 
   // 3. 判断是否触发
   const {
@@ -417,10 +377,8 @@ export function planCompression(input: CompressionInput): CompressionPlan {
     shouldRunActiveSummary,
     triggeredByColdResume,
   } = shouldTriggerCompaction({
-    pendingMsgCount: pendingMsgs.length,
     totalUsed, historyBudget, triggerRatio,
-    force, reason, realContextUsagePercent, coldResume,
-    lastMsg: pendingMsgs[pendingMsgs.length - 1],
+    force, reason, realContextUsagePercent,
   });
   const diagnostics: CompressionPlanDiagnostics = {
     pendingMsgCount: pendingMsgs.length,
@@ -442,57 +400,37 @@ export function planCompression(input: CompressionInput): CompressionPlan {
     });
   }
 
-  // 4. 算压缩条数 + 保护 tool chain
-  // 主动路径（手动 / 真实占用超线 / 冷恢复）折叠到只留尾部原文；
-  // 估算兜底路径按预算从后往前保留。
-  // 注意：保留上限必须钳制到触发线以下（留足 cushion 距离），
-  // 消除「触发即贴线、贴线又触发」的锯齿与前缀缓存打爆。
-  const { effectiveHistoryBudget, effectiveRawMessageBudget } =
-    resolveEffectiveCompactionBudgets({
-      contextWindow,
-      triggerRatio,
-      historyBudget,
-      rawMessageBudget,
-      summaryTokens,
-    });
-  let compressCount = calculateCompressCount(
-    pendingMsgs,
-    effectiveRawMessageBudget,
-    {
-      keepTailCount:
-        shouldRunActiveSummary || triggeredByRealUsage || triggeredByColdResume,
-      totalUsed,
-      historyBudget: effectiveHistoryBudget,
-    },
+  // 所有触发共用 token 尾部预算；预算内也留出有意义的前缀，
+  // 以支持手动触发及真实占用高于本地估算的场景。
+  const { effectiveRawMessageBudget } = resolveEffectiveCompactionBudgets({
+    contextWindow, triggerRatio, historyBudget, rawMessageBudget,
+    summaryTokens: Math.max(summaryTokens, Math.min(1000, Math.floor(contextWindow * 0.1))),
+  });
+  const minimumPrefixTokens = Math.min(1000, Math.floor(contextWindow * 0.1));
+  const tailBudget = Math.min(effectiveRawMessageBudget, Math.max(0, pendingTokens - minimumPrefixTokens));
+  let compressCount = guardToolChainBoundary(
+    pendingMsgs, calculateCompressCount(pendingMsgs, tailBudget), preserveLatestUserByProjection,
   );
-  compressCount = guardToolChainBoundary(pendingMsgs, compressCount);
-
-  // 仅手动/预算路径允许少量大消息；task_completed 保持原有条数门槛。
-  const allowSmallPrefix = reason !== "task_completed" &&
-    (shouldRunActiveSummary || triggeredByRealUsage || diagnostics.triggeredByEstimate);
-  if (allowSmallPrefix &&
-    (compressCount < MIN_COMPRESS_COUNT || pendingMsgs.length < MIN_TRIGGER_PENDING_COUNT)) {
-    // 保留最新用户意图及其后完整执行链，至少留下最后一条原文。
-    let safeLimit = pendingMsgs.length - 1;
+  // A user message that moves across the cursor is still emitted verbatim by
+  // the caller. Reserve its cost in the retained budget before choosing a cut.
+  if (preserveLatestUserByProjection) {
+    let latestUser = -1;
     for (let i = pendingMsgs.length - 1; i >= 0; i--) {
-      if (pendingMsgs[i].role === "user") {
-        safeLimit = i;
-        break;
-      }
+      if (pendingMsgs[i].role === "user") { latestUser = i; break; }
     }
-    compressCount = Math.min(compressCount, safeLimit);
-    // 此处不能向前推进跨过受保护尾部，只能回退完整工具组。
-    while (compressCount > 0 &&
-      (pendingMsgs[compressCount]?.role === "tool" ||
-        hasOpenEndedToolCall(pendingMsgs[compressCount - 1]))) {
-      compressCount--;
-    }
-    if (compressCount === 0) {
-      return emptyPlan(startIndex, {
-        ...diagnostics, compressCount, emptyReason: "no-safe-prefix",
-      });
+    const preservedTokens = latestUser >= 0 && latestUser < compressCount
+      ? getMessageTokenCount(pendingMsgs[latestUser])
+      : latestUser < 0 ? coveredUserTokens : 0;
+    if (preservedTokens > 0) {
+      compressCount = guardToolChainBoundary(pendingMsgs,
+        calculateCompressCount(pendingMsgs, Math.max(0, tailBudget - preservedTokens)), true);
     }
   }
+  if (compressCount === 0) {
+    return emptyPlan(startIndex, { ...diagnostics, compressCount, emptyReason: "no-safe-prefix" });
+  }
+  const allowSmallPrefix = reason !== "task_completed" &&
+    (shouldRunActiveSummary || triggeredByRealUsage || diagnostics.triggeredByEstimate);
   const compressibleTokens = pendingMsgs.slice(0, compressCount)
     .reduce((sum, msg) => sum + getMessageTokenCount(msg), 0);
   // 与摘要预算既有的 1k token 预留一致，短前缀不因手动触发而无意义压缩。

@@ -16,7 +16,7 @@
  * - 已经被 wait:true 消费或 marked ack 的 runId 绝不重复唤醒。
  * - 首次见到即终态的 run，只有 startedAt >= watcher 创建时刻才唤醒。
  * - dialog 切换时跳过并不污染状态，恢复当前 dialog 后可正确 drain 唤醒。
- * - ephemeral 或结果缺失的 run 提供 fallback 说明，防止 readDialog 坍塌。
+ * - ephemeral 或结果缺失的 run 明确标为无结果，不回读日志。
  */
 
 import {
@@ -77,12 +77,15 @@ export function describeRun(
     })}`,
     `status: ${record.status}`,
   ];
-  // 正常完成的 run 不报 exitCode / 活动计数：那是诊断信息，成功时模型要
-  // 的只是「谁干完了、结果去哪取」。「结果去哪取」（childDialogId /
-  // ephemeral）任何状态都要给，否则模型会去 readDialog 一个不存在的对话。
+  // 正常完成的 run 不报 exitCode / 活动计数；只给完整结果的唯一读取入口。
   const verbose = isFailureStatus(record.status);
   if (verbose && typeof record.exitCode === "number") {
     lines.push(`exitCode: ${record.exitCode}`);
+  }
+  if (record.resultFile) {
+    lines.push(`resultFile: ${record.resultFile} (用 readFile 读取)`);
+  } else {
+    lines.push(`result: unavailable (no resultFile; do not read logs)`);
   }
   if (record.ephemeral) {
     lines.push(`ephemeral: true (no persisted child dialog)`);
@@ -192,8 +195,12 @@ function buildRunElement(
   if (verbose && typeof record.exitCode === "number") {
     attrs.push(`exitCode="${record.exitCode}"`);
   }
-  // 「结果去哪取」（ephemeral / childDialogId）任何状态都要给，否则模型会
-  // 去 readDialog 一个不存在的对话（同 describeRun 的取舍）。
+  // 本地缺失 resultFile 表示无结论；childDialogId 仅作为实际存在的远端证据入口。
+  if (record.resultFile) {
+    attrs.push(`resultFile="${escapeXmlAttribute(record.resultFile)}"`);
+  } else {
+    attrs.push(`result="unavailable"`);
+  }
   if (record.ephemeral) {
     attrs.push(`ephemeral="true"`);
   } else if (record.dialogId) {
@@ -234,7 +241,7 @@ function renderWakeMessage(elements: string[], count: number): string {
   return [
     `<background_run_completion count="${count}">`,
     ...elements,
-    `需要完整输出/失败详情时: controlAgentRun(action: "status", runId, tailLines: 30)`,
+    `有 resultFile 时用 readFile；本地缺失即无结论，不读日志。终态只表示 run 结束。`,
     `</background_run_completion>`,
   ].join("\n");
 }
@@ -293,10 +300,13 @@ export function buildWakeDisplayText(
     const mark = isFailureStatus(record.status) ? "✗" : "✓";
     const duration = runDuration(record, nowMs);
     const label = resolveRunLabel(record as any);
-    const status = isFailureStatus(record.status) ? ` ${record.status}` : "";
-    return `${mark} ${label}${status}${duration ? ` · ${duration}` : ""}`;
+    const taskName = typeof (record as any).title === "string" && (record as any).title.trim()
+      ? `「${(record as any).title.trim()}」`
+      : label;
+    const status = String(record.status);
+    return `${mark} ${taskName} [${status}]${duration ? ` · ${duration}` : ""}`;
   });
-  return `${finished.length} 条后台 run 已完成 · ${parts.join(" · ")}`;
+  return `${finished.length} 条后台 run 已结束 · ${parts.join(" · ")}`;
 }
 
 /**

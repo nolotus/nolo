@@ -38,7 +38,7 @@ export function getCiInternalCommandEntries(): CommandEntry[] {
   return [
     {
       path: ["ci", "cancel"],
-      description: "取消 alpha 部署任务",
+      description: "Cancel an alpha deploy job",
       kind: "internal",
       handler: async (args) => {
         const jobId = args[0]?.trim();

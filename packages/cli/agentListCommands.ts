@@ -1,5 +1,5 @@
+import { t } from "./i18n";
 import { toErrorMessage } from "core/errorMessage";
-import { t } from "./tui/i18n";
 
 import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import { summarizeCredentialGroups } from "ai/agent/safeAgentSummary";
@@ -62,6 +62,18 @@ import { readLiveDbRecordAfterTombstoneMerge } from "./globalRecordOperations";
  */
 const discardOutput: OutputLike = { write: () => undefined };
 
+/** 与 client/agentRun.ts 的 formatCooldownUntilLocal 同口径；避免引入 client 依赖。 */
+function formatCooldownUntilLocal(at: Date, now: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const sameDay =
+    at.getFullYear() === now.getFullYear() &&
+    at.getMonth() === now.getMonth() &&
+    at.getDate() === now.getDate();
+  return sameDay ? time : `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`;
+}
+
+
 /**
  * Disk cache for the observed speed samples: every `nolo agent list` is a fresh
  * process, so the in-process samples cache in ai/agent/candidateSpeedContext
@@ -91,7 +103,9 @@ export async function runAgentListCommand(
   }
   // Keep the legacy CLI --public-only path on its existing companion-proof
   // filtering; explicit --scope=public uses the marketplace datasource.
-  const scope = requestedScope ?? "preferred";
+  // 默认 scope 与共享 resolver（resolveDiscoveryScope）一致为 "all"：一次
+  // listAgents 同时给出自有/收藏 + 公开目录；--scope=preferred 仍可显式只看自有。
+  const scope = requestedScope ?? "all";
   const spaceInput = readOption(args, "--space") ?? readOption(args, "--space-id");
 
   const authToken = resolveAuthToken(args, env);
@@ -161,18 +175,36 @@ export async function runAgentListCommand(
       const publicResults = await Promise.all(serverUrls.map((url) => listRemotePublicAgents({
         authToken, fetchImpl, serverUrl: url, limit: upstreamLimit, query: hasQuery ? query : undefined,
       })));
-      agents = publicResults.flatMap((r) => r.agents);
+      const publicAgents = publicResults.flatMap((r) => r.agents);
       for (const r of publicResults) {
+        // 目录不完整必须如实报告：上游标记截断（含 fail-open 空结果）即置位。
         if (r.truncated) cliUpstreamTruncated = true;
         if (typeof r.total === "number") {
           cliUpstreamTotal = Math.max(cliUpstreamTotal ?? 0, r.total);
         }
       }
+      // scope=public：只要公开目录；scope=all：自有在前、公开目录追加在后。
+      // 自有来自本函数前面的 fetch 链（global-cache → local-cache → remote-cache
+      // 任一 fallback 命中），这里只做合并，不再重复请求 listRemoteAgentsAcrossServers，
+      // 也不覆盖前面已经拿到的自有结果（新用户自有为空时仍能只靠公开目录出结果）。
+      // 按 publicKey 去重：同一 agent 的自有记录与其公开记录是同一条 agent，
+      // 保留信息更全的自有那条。
       if (scope === "all") {
-        const preferred = await listRemoteAgentsAcrossServers({
-          authToken, fallbackFetchImpl, fetchImpl, serverUrls, userId,
-        });
-        agents = [...preferred.agents, ...agents];
+        const seenPublicKeys = new Set<string>();
+        for (const agent of agents) {
+          if (agent.publicKey) seenPublicKeys.add(agent.publicKey);
+        }
+        agents = [
+          ...agents,
+          ...publicAgents.filter((agent) => {
+            if (!agent.publicKey) return true;
+            if (seenPublicKeys.has(agent.publicKey)) return false;
+            seenPublicKeys.add(agent.publicKey);
+            return true;
+          }),
+        ];
+      } else {
+        agents = publicAgents;
       }
     }
 
@@ -222,19 +254,19 @@ export async function runAgentListCommand(
       await readCredentialAvailability(env).catch(() => ({})),
     );
 
-    // 429 限流中（nextAvailableAt 在未来）的 agent 默认不列出，避免误选到
-    // 打不了的 agent。--show-unavailable 可见全量（脚本/排障需要）。
+    // 429 限流中（nextAvailableAt 在未来）的 agent 也照常列出：额度/冷却是
+    // 参考信息而非可用性断言（owner 决策 2026-11-03），每条展示带
+    // availability / nextAvailableAt 标注。--show-unavailable 保留解析但不再
+    // 改变结果（兼容既有脚本 / agent-runtime 调用）。
     // 在 space/publicOnly 过滤之后计算总数，避免把无关排除的 agent 计入。
     let unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
-    let agentsForOutput = showUnavailable
-      ? agents
-      : agents.filter((agent) => !isAgentUnavailableNow(agent));
+    let agentsForOutput = agents;
     if (query && typeof query === "string" && query.trim()) {
       agentsForOutput = agentsForOutput.filter((agent) => matchesAgentQuery(agent as any, query));
     }
 
-    // 除本来要展示的 agent 外，冷却中的 probeable agent 也仅为额度刷新参与；
-    // 若未能证明恢复，仍维持原过滤结果。其他过滤条件（query/space/public）不变。
+    // 冷却中的 probeable agent 也参与额度刷新；若未能证明恢复，维持其冷却标注。
+    // 其他过滤条件（query/space/public）不变。
     const refreshCandidates = !idsOnly
       ? [...new Set([...agentsForOutput, ...agents.filter((agent) =>
           !agentsForOutput.includes(agent) && isAgentUnavailableNow(agent) && agent.credentialConfigured === true &&
@@ -298,12 +330,6 @@ export async function runAgentListCommand(
         }
       }
       unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
-      if (!showUnavailable) {
-        agentsForOutput = agents.filter((agent) => !isAgentUnavailableNow(agent));
-        if (query && typeof query === "string" && query.trim()) {
-          agentsForOutput = agentsForOutput.filter((agent) => matchesAgentQuery(agent as any, query));
-        }
-      }
     }
 
     const totalCount = agentsForOutput.length;
@@ -420,10 +446,11 @@ export async function runAgentListCommand(
         ...(discovery.truncated ? { truncated: true } : {}),
         unavailableCount: discovery.unavailableCount,
         // agents 在最前：host 截断长输出时保头保尾，派发所需的 agentKey
-        // 必须落在头部；凭证分组/限流清单是说明性大块，放最后。
+        // 必须落在头部；凭证分组是说明性大块，放最后。
+        // 限流 agent 已合入 agents（带 availabilityStatus / nextAvailableAt
+        // 参考标注），不再单列 unavailableAgents，避免两套真相。
         agents: discovery.agents,
         credentialGroups: discovery.credentialGroups,
-        unavailableAgents: discovery.unavailableAgents,
       }, null, 2);
       // Observed speed data needs the local db; the call is disk-cached with a
       // scan budget and degrades to AA-only on any failure (it never throws), so
@@ -468,17 +495,8 @@ export async function runAgentListCommand(
     }
     output.write(`total agents: ${totalCount}\n`);
     output.write(`public agents: ${agentsForOutput.filter((agent) => agent.publicRecordExists).length}\n`);
-    if (unavailableCount > 0 && !showUnavailable) {
-      output.write(t("agent.unavailableHidden", String(unavailableCount)));
-      const unavailableList = agents.filter((agent) => isAgentUnavailableNow(agent));
-      for (const unavail of unavailableList) {
-        const remainingSec = Math.max(0, Math.ceil(((unavail.nextAvailableAt ?? 0) - Date.now()) / 1000));
-        const quotaSummary = formatQuotaSummary(unavail.quota, Date.now(), { model: unavail.model });
-        const quotaText = quotaSummary ? ` (${quotaSummary})` : "";
-        output.write(
-          t("agent.rateLimitedRecovery", unavail.name, unavail.id, String(remainingSec), quotaText),
-        );
-      }
+    if (unavailableCount > 0) {
+      output.write(t("agent.rateLimitedSummary", String(unavailableCount)));
     }
     output.write(`source: ${source}\n`);
     if (pagedAgents.length === 0) {
@@ -497,10 +515,21 @@ export async function runAgentListCommand(
       const availabilityStatusLine = `availability=${availDecision.status} (${availDecision.reason})`;
       const availabilityLine =
         typeof agent.nextAvailableAt === "number" && agent.nextAvailableAt > Date.now()
-          ? `nextAvailableAt=${new Date(agent.nextAvailableAt).toISOString()}`
+          ? `nextAvailableAt=${new Date(agent.nextAvailableAt).toISOString()} (reference info, not a dispatch gate)`
           : "nextAvailableAt=now";
       const quotaSummary = formatQuotaSummary(agent.quota, Date.now(), { model: agent.model });
       const quotaLine = `quota=${quotaSummary ?? "-"}`;
+      if (isAgentUnavailableNow(agent)) {
+        const recoveryAt = agent.nextAvailableAt;
+        output.write(t(
+          "agent.rateLimitedRecovery",
+          agent.name,
+          agent.id,
+          String(typeof recoveryAt === "number" ? Math.max(0, Math.ceil((recoveryAt - Date.now()) / 1000)) : 0),
+          quotaSummary ? ` quota=${quotaSummary}` : "",
+          typeof recoveryAt === "number" ? formatCooldownUntilLocal(new Date(recoveryAt)) : "-",
+        ));
+      }
       output.write(
         [
           `\n[${status}] ${agent.name}`,

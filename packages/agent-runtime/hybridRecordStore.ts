@@ -11,7 +11,7 @@ export type HybridRecordKvDb = {
 };
 
 export type HybridRecordStore = {
-  read(dbKey: string, options?: { preferredServerOrigin?: string | null; remote?: boolean }): Promise<any>;
+  read(dbKey: string, options?: { preferredServerOrigin?: string | null; remote?: boolean; onRemoteUnavailable?: () => void }): Promise<any>;
   write(dbKey: string, record: any): Promise<any>;
   batch(ops: Array<{ type: "put"; key: string; value: any }>): Promise<unknown>;
   iterator(options: { gte: string; lte?: string; lt?: string; reverse?: boolean; limit?: number }): AsyncIterable<[string, any]>;
@@ -103,6 +103,7 @@ async function fetchHybridRemoteRecord(args: {
   authToken?: string;
   fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   signal?: AbortSignal;
+  onUnavailable?: () => void;
 }) {
   const response = await args.fetchImpl(
     `${args.server}/api/v1/db/read/${encodeURIComponent(args.dbKey)}`,
@@ -114,9 +115,24 @@ async function fetchHybridRemoteRecord(args: {
       ...(args.signal ? { signal: args.signal } : {}),
     }
   );
-  if (!response.ok) return null;
-  const payload = await response.json().catch(() => null);
-  return normalizeHybridRecord(args.dbKey, payload?.data ?? payload, args.server);
+  if (!response.ok) {
+    if (response.status !== 404) args.onUnavailable?.();
+    return null;
+  }
+  let payload: any;
+  try {
+    payload = await response.json();
+  } catch {
+    args.onUnavailable?.();
+    return null;
+  }
+  const record = payload && typeof payload === "object" && "data" in payload
+    ? payload.data : payload;
+  if (record !== null && (!record || typeof record !== "object" || Array.isArray(record))) {
+    args.onUnavailable?.();
+    return null;
+  }
+  return normalizeHybridRecord(args.dbKey, record, args.server);
 }
 
 export function shouldCacheHybridRemoteRecord(remoteRecord: any, localRecord: any) {
@@ -179,7 +195,10 @@ export function createHybridRecordStore(
           fallbackDeadlineMs === null
             ? null
             : fallbackDeadlineMs - Date.now();
-        if (remainingMs !== null && remainingMs <= 0) break;
+        if (remainingMs !== null && remainingMs <= 0) {
+          options?.onRemoteUnavailable?.();
+          break;
+        }
 
         let remoteRecord = null;
         try {
@@ -188,11 +207,13 @@ export function createHybridRecordStore(
             server,
             authToken: deps.authToken,
             fetchImpl,
+            onUnavailable: options?.onRemoteUnavailable,
             ...(remainingMs !== null
               ? { signal: AbortSignal.timeout(remainingMs) }
               : {}),
           });
         } catch {
+          options?.onRemoteUnavailable?.();
           // network error or timeout: advance to the next server sequentially
           continue;
         }

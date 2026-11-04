@@ -1,3 +1,4 @@
+import { extractQuotaSnapshot } from "../../ai/agent/quotaSnapshot";
 import { resolveUserSkillRuntime } from "../../ai/skills/userSkillRuntime";
 import {
   resolveUserEnabledSkills,
@@ -7,9 +8,11 @@ import { resolveRequestToolSurface } from "../../agent-runtime/runtimeToolSurfac
 import type {
   AgentRuntimeAgentConfig,
   AgentRuntimeHostAdapter,
+  AgentRuntimeProviderResolveOptions,
   AgentRuntimeSaveTurnInput,
 } from "../agentRuntimeLocal";
 import { resolveLocalProvider } from "./providerResolution/resolveLocalProvider";
+import { resolveProviderResolveOverrides } from "./providerResolveOverrides";
 import type { ProviderResolutionContext } from "./providerResolution/providerResolutionContext";
 import { resolveLocalRuntimePaths } from "./localRuntimePaths";
 import type {
@@ -264,7 +267,6 @@ import {
   isCapacitySaturatedRateLimit,
   mergeAvailabilityDeadline,
   resolveAvailabilityAction,
-  resolveCooldownGate,
 } from "ai/agent/agentAvailabilityShared";
 import { deriveCredentialGroup, deriveCustomProviderCredentialGroup } from "ai/agent/safeAgentSummary";
 import {
@@ -272,8 +274,6 @@ import {
   markCredentialUnavailable,
   readCredentialAvailability,
   readCredentialEntry,
-  readEffectiveCredentialEntry,
-  recordCredentialProbe,
   resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
 import {
@@ -284,7 +284,18 @@ import { readOAuthCredential } from "../../agent-runtime/oauthTokenStore";
 import { getDefaultCliLocalRuntimeDb } from "../localRuntimeDb";
 import { resolveAgentRuntimeConfigFromRecord } from "./agentConfigResolver";
 import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
+import {
+  createHostCredentialBrokerChain,
+  createStrictHostCredentialBroker,
+} from "../../agent-runtime/desktopHostCredentialBroker";
+import { getSharedSessionCredentialBroker } from "../../agent-runtime/sessionCredentialBroker";
+import { CREDENTIAL_STORE_SESSION_FALLBACK_WARNING } from "../agentRecordHelpers";
 import { createFileCredentialBroker } from "../../agent-runtime/fileCredentialBroker";
+
+/** 遗留只读回退提示按 ref 去重，避免每次取用都刷屏。 */
+const legacyHitNotified = new Set<string>();
+/** 会话内存回退提示每进程一次。 */
+let sessionFallbackNotified = false;
 import { fetchServerSyncedCredential } from "../../ai/chat/agentCredentialSyncClient";
 import { getServerProviderSecret } from "../../ai/agent/providerSecrets";
 import { createOAuthApiKeyRefResolver } from "../oauth/apiKeyRefResolver";
@@ -699,8 +710,6 @@ export async function recordLocalAvailabilityForAgent(args: {
       : action.nextAvailableAt;
   }
   const record = current as Record<string, unknown>;
-  // 无 deadline 时的 clear 是空操作，跳过可避免每次成功响应都写一次库。
-  if (action.kind === "clear" && !("nextAvailableAt" in record)) return undefined;
   const next = { ...record };
   let effectiveNextAvailableAt: number | undefined;
   if (action.kind === "mark") {
@@ -712,7 +721,39 @@ export async function recordLocalAvailabilityForAgent(args: {
     next.nextAvailableAt = merged;
     effectiveNextAvailableAt = merged;
   } else {
+    // 成功响应只证明「可用」，不携带余额事实。因此这里的 clear 是**有条件写**：
+    // 只在真有内容要落盘时才写 agent 记录——
+    //   ① 记录里还挂着冷却（`nextAvailableAt` 存在），必须删掉它；
+    //   ② 响应 body 里带真实额度信号（extractQuotaSnapshot 命中窗口）。
+    // 仅仅为了刷新 quota.observedAt 而写库是写放大：每次 2xx 都落一次盘，
+    // 而 observedAt 本身不是额度事实，没有新窗口时刷新它没有任何读者受益
+    // （消费方都拿它跟 markedAt 比先后，不拿它当读数）。429 的 mark 路径不受影响。
+    const hadCooldown = "nextAvailableAt" in record;
     delete next.nextAvailableAt;
+    const observedAt = now();
+    const snapshot = extractQuotaSnapshot(
+      typeof agentConfig?.provider === "string" ? agentConfig.provider : undefined,
+      status, undefined, args.body, observedAt,
+    );
+    const previous = record.quota && typeof record.quota === "object"
+      ? record.quota as { observedAt?: number; windows?: import("../../ai/agent/quotaSnapshot").QuotaWindow[] }
+      : undefined;
+    const hasFreshSnapshot = Boolean(snapshot) &&
+      (!previous?.observedAt || previous.observedAt <= observedAt);
+    if (!hadCooldown && !hasFreshSnapshot) return undefined;
+    if (hasFreshSnapshot) {
+      const windows = new Map(
+        (Array.isArray(previous?.windows) ? previous.windows : []).map(window => [window.scope, window]),
+      );
+      for (const window of snapshot?.windows ?? []) windows.set(window.scope, window);
+      // 不写 quota.availabilityStatus：可用性结论由 resolveAgentAvailability 另行
+      // 计算，这个快照字段全仓没有读取方，写进去只是一个会漂移的死字段。
+      next.quota = {
+        ...previous,
+        windows: [...windows.values()],
+        observedAt,
+      };
+    }
   }
   await store.write(key, next).catch(() => undefined);
 
@@ -1240,6 +1281,7 @@ export function createCliLocalRuntimeAdapter(
   const buildCurrentToolExecutors = (agentKey?: string | null) =>
     buildLocalToolExecutors({
       workspaceRoot,
+      sourceParentDialogId: deps.parentDialogId,
       env: deps.env,
       fetchImpl,
       ...(deps.chromeConnectorClient
@@ -1288,13 +1330,40 @@ export function createCliLocalRuntimeAdapter(
   let localToolExecutors = buildCurrentToolExecutors();
 
   // 凭据保管库：同一个实例既供 provider 解析密钥，也暴露给 localLoop 做输入隔离
-  // 与执行边界解包（adapter.credentialBroker）。此前只有 provider 那条路建 broker，
-  // adapter 上没有这个字段 → 隔离路径恒不激活，用户粘贴的密钥只会被正则脱敏成
-  // 不可用的 [REDACTED:…] 标记，而不是模型能安全消费的引用。
-  const credentialBroker = createFileCredentialBroker({
-    migration: { enableLegacyMigration: true },
+  // 与执行边界解包（adapter.credentialBroker）。
+  //
+  // 严格档：只用操作系统安全区（Linux = Secret Service / `secret-tool`），没有
+  // 明文文件回退。安全区不可用时拿到的是「关闭态」broker（读写即抛
+  // `credential_store_*`），入路隔离会随之 fail closed，不会把贴入的明文写进
+  // 任何文件；也刻意不做 legacy 迁移读取，因此不会动用户既有的凭据文件。
+  const credentialBroker = createHostCredentialBrokerChain({
+    strict: createStrictHostCredentialBroker(),
+    // 会话内存：无钥匙串时贴 key 仍可用（本进程有效，不落盘）。
+    session: getSharedSessionCredentialBroker(),
+    // 读旧只读回退：既有 agent 的凭据还在旧 file broker 里，只读命中即可用，不迁移。
+    legacy: createFileCredentialBroker({
+      migration: { enableLegacyMigration: true },
+    }),
+    notifySessionFallback: () => {
+      if (sessionFallbackNotified) return;
+      sessionFallbackNotified = true;
+      process.stderr.write(
+        `[nolo] Warning: ${CREDENTIAL_STORE_SESSION_FALLBACK_WARNING}\n`,
+      );
+    },
+    notifyLegacyHit: (ref) => {
+      const key = `legacy-hit:${ref}`;
+      if (legacyHitNotified.has(key)) return;
+      legacyHitNotified.add(key);
+      process.stderr.write(
+        `[nolo] Warning: 凭据 "${ref}" 来自遗留本地明文存储（只读回退）。建议重新录入该 API key 以迁入系统安全区。\n`,
+      );
+    },
   });
 
+  // Missing or unavailable settings are retried, but not on every turn.
+  let nextSettingsRemoteAttempt = 0;
+  let settingsDiagnosticEmitted = false;
   const adapterBase = {
     host: "cli",
     capabilities: [
@@ -1312,10 +1381,20 @@ export function createCliLocalRuntimeAdapter(
       const sharedStore = await getOrCreateSharedStore(deps);
       if (userId) {
         try {
-          const settingsRecord = await sharedStore.read(
-            createUserKey.settings(userId),
-            { remote: false },
-          );
+          const settingsKey = createUserKey.settings(userId);
+          let settingsRecord = await sharedStore.read(settingsKey, { remote: false });
+          if (!settingsRecord && Date.now() >= nextSettingsRemoteAttempt) {
+            nextSettingsRemoteAttempt = Date.now() + 30_000;
+            let unavailable = false;
+            settingsRecord = await sharedStore.read(settingsKey, {
+              onRemoteUnavailable: () => { unavailable = true; },
+            });
+            if (!settingsRecord && !settingsDiagnosticEmitted) {
+              process.stderr.write(`[nolo] Account skill settings ${unavailable ? "unavailable" : "not found"}; preferences unknown, retrying on a later load.\n`);
+              settingsDiagnosticEmitted = true;
+            }
+          }
+          if (settingsRecord) settingsDiagnosticEmitted = false;
           if (settingsRecord && typeof settingsRecord === "object") {
             // Preserve absence: own enabledSkills (even undefined) overrides legacy.
             skillPreferences = {
@@ -1330,6 +1409,10 @@ export function createCliLocalRuntimeAdapter(
               ? (settingsRecord as any).systemBuiltinSkills ?? null
               : null;
         } catch {
+          if (!settingsDiagnosticEmitted) {
+            process.stderr.write("[nolo] Account skill settings unavailable; preferences unknown, retrying on a later load.\n");
+            settingsDiagnosticEmitted = true;
+          }
           // Tool defaults stay enabled; account prompt preferences fail closed.
         }
       }
@@ -1546,8 +1629,7 @@ export function createCliLocalRuntimeAdapter(
           loopbackRequest,
         }),
       }),
-    resolveProviderBase: async (agentConfig) => {
-      const nowMs = now();
+    resolveProviderBase: async (agentConfig, options) => {
       const serverUrl = asOptionalTrimmedString(deps.env.NOLO_SERVER) ?? "https://us.nolo.chat";
       const authToken = asOptionalTrimmedString(deps.env.AUTH_TOKEN);
       // owner-required 派发契约：分享者 OAuth agent（本机用户 ≠ credential
@@ -1556,10 +1638,10 @@ export function createCliLocalRuntimeAdapter(
       // OAuth 引用 / antigravity OAuth agent，且 rawRecord.userId ≠ 本机 userId）。
       // 不满足任一条件即 undefined → 所有既有 transport 逐字不变。
       //
-      // 判定必须在**任何本机 credential availability 读/写之前**完成：分享者
-      // agent 的 apiKeyRef（如 "claude"）与发起者自己的 agent 共用同一 credential
-      // key，若先做冷却门控，发起者该凭据的冷却会阻断 owner dispatch（owner
-      // 订阅健康也被拦），probe 还会写发起者 lastProbeAt 污染本机状态。
+      // 判定必须在**任何本机 credential 读/写之前**完成：分享者 agent 的
+      // apiKeyRef（如 "claude"）与发起者自己的 agent 共用同一 credential key，
+      // owner-route 短路保证 owner-required 派发永不落到发起者本机凭据上（冷却
+      // 只作参考、不拦请求，probe 记录也已随额度否决权拆除）。
       let ownerOriginExecution: OwnerOriginExecution | undefined;
       {
         const rawRecord =
@@ -1708,31 +1790,12 @@ export function createCliLocalRuntimeAdapter(
       // 绕开 resolveLocalProvider 契约检查的新路径，外层单例仍正确。
 
       if (!ownerOriginExecution) {
-      // 冷却检查放在派发点：loadAgentConfig 只负责加载配置，不应因冷却失败
-      // （冷却 ≠ 配置错误，listAgents/预览等读配置路径不能被误伤）。
-      // owner-required 路径已在上文短路，不读/写本机 credential availability——
-      // 发起者的冷却/probe 状态与 owner 订阅无关，不能被分享调用消耗或污染。
-      const credentialKeyForGate = resolveCredentialKeyWithFallback(
-        agentConfig as unknown as Record<string, unknown>,
-      );
-      // H2: 统一使用共享层候选 key 读取入口，精确 key 与旧格式 key 行为一致
-      const gateEntry = credentialKeyForGate
-        ? await readEffectiveCredentialEntry(credentialKeyForGate, deps.env, nowMs).catch(
-            () => undefined,
-          )
-        : undefined;
-      const credentialCooldownAt = gateEntry?.nextAvailableAt;
-      // agent 级（含旧数据）与 credential 级取更晚者，升级后旧冷却不失效。
-      const agentLevelNextAvailableAt = (
-        agentConfig as { nextAvailableAt?: number }
-      ).nextAvailableAt;
-      const effectiveNextAvailableAt =
-        typeof credentialCooldownAt === "number"
-          ? mergeAvailabilityDeadline(
-              agentLevelNextAvailableAt,
-              credentialCooldownAt,
-            )
-          : agentLevelNextAvailableAt;
+      // 冷却只作参考：额度信息没有否决权，任何请求都直达上游，因此这里**不读**
+      // 本机 credential availability 做门控（不据冷却拦请求）。写路径保留：上游
+      // 响应经 recordLocalAvailabilityForAgent 落盘（429 一律 mark；2xx 只在有
+      // 冷却要清或有真实额度信号时才 clear 写盘，避免每次成功响应都写一次库），
+      // 供 listAgents 与失败文案展示参考信息。owner-required 路径已在上文短路，
+      // 与发起者的冷却状态彻底隔离。
       recordLocalAvailability = (status: number, body?: unknown): Promise<void> =>
         recordLocalAvailabilityForAgent({
           deps,
@@ -1741,42 +1804,6 @@ export function createCliLocalRuntimeAdapter(
           body,
           now,
         }).then(() => undefined);
-
-      // 冷却门控：deadline 已过 → 放行；未过但距上次探测超间隔 → probe（放行一次真实
-      // 请求去试探上游是否已恢复）；刚探测过 → blocked（照旧 throw）。probe 由本次
-      // 请求自己完成试探，成功后会在 recordLocalAvailability（2xx → clear）里清除冷却。
-      // lastProbeAt 必须一并读出：缺省时 resolveCooldownGate 一律判 "probe"，
-      // 会让 "blocked" 永不可达、冷却完全失效（每次派发都放行 → 反复撞 429）。
-      const gateDecision = resolveCooldownGate(
-        {
-          nextAvailableAt: effectiveNextAvailableAt,
-          lastProbeAt: gateEntry?.lastProbeAt,
-        },
-        nowMs,
-      );
-      if (gateDecision === "blocked") {
-        throw new Error(
-          `agent temporarily unavailable until ${new Date(Number(effectiveNextAvailableAt)).toISOString()}`,
-        );
-      }
-      // probe 态：放行本次真实请求，并在发出前记录探测时间，避免 10 分钟间隔内
-      // 反复重试。
-      //
-      // 冷却与探测时间都记在 credential entry 上。无 apiKeyRef/credentialRef 的
-      // custom-provider agent（如 Ollama cloud 直连）经 resolveCredentialKeyWithFallback
-      // 派生 fallback key（custom-endpoint:<origin> / custom-agent:<key>）后与
-      // 其它 agent 共用同一套 mark / gate / probe 机制。其中 endpoint 级分组比
-      // credential 粒度粗——同一 endpoint 下账号 A 耗尽会连带挡住正常的账号 B：
-      // 冷却期内 B 只能等这里每 PROBE_INTERVAL_MS 放行一次 probe，直到某次 probe
-      // 拿到 2xx 才清除冷却，并非「延迟一个窗口即恢复」。刻意取舍：这仍远优于
-      // 反向故障——冷却落不了盘导致每次派发都撞 429；且 MAX_COOLDOWN_MS 保证
-      // 任何冷却最长 24h 自然过期。
-      const activeKeyForGate = gateEntry?.matchedKey || credentialKeyForGate;
-      if (gateDecision === "probe" && activeKeyForGate) {
-        await recordCredentialProbe(activeKeyForGate, deps.env, nowMs).catch(
-          () => undefined,
-        );
-      }
 
       // Local-first: OAuth resolver + file credential broker (metered API keys).
       // Broker is preferred inside buildProviderExecutionPlan when both are present.
@@ -1818,14 +1845,23 @@ export function createCliLocalRuntimeAdapter(
         : undefined;
 
 
+      // Provider 解析覆盖（见 AgentRuntimeProviderResolveOptions）：摘要这类
+      // 纯文本补全用 `toolNames: []` + 空 prompt 解析独立实例，避免把整份
+      // 工具 schema 与 agent 人设注入上游请求。覆盖只作用于**本次解析**，
+      // 不改传入的 agentConfig，主对话轮的工具面逐字不变。
+      const resolvedAgentConfig = resolveProviderResolveOverrides(agentConfig, options?.textOnly ? { ...options, toolNames: [] } : options);
       return resolveLocalProvider({
-        agentConfig,
+        agentConfig: resolvedAgentConfig,
         deps,
         fetchImpl,
         loopbackRequest,
         now,
         workspaceRoot,
-        additionalToolNames,
+        ...(options?.textOnly ? { textOnly: true as const } : {}),
+        // 请求空工具面时连 host 追加项（readPastedText）也一并去掉，
+        // 否则 `toolNames: []` 的契约会被 additionalToolNames 刺破。
+        additionalToolNames:
+          options?.textOnly || options?.toolNames !== undefined ? [] : additionalToolNames,
         activeAgentToolNames,
         localToolExecutors,
         buildProviderOpenAiTools,
@@ -2164,10 +2200,15 @@ export function createCliLocalRuntimeAdapter(
     get compactionSummaryFallback() {
       return cliAutoCompactionSummaryFallback;
     },
-    resolveProvider: async (agentConfig: AgentRuntimeAgentConfig) => {
+    resolveProvider: async (
+      agentConfig: AgentRuntimeAgentConfig,
+      options?: AgentRuntimeProviderResolveOptions,
+    ) => {
       const provider = (await adapterBase.resolveProviderBase(
         agentConfig,
+        options,
       )) as AgentRuntimeProvider;
+      if (options?.textOnly) return { ...provider, textOnly: true as const };
       return shouldUsePlatformChatProvider(deps.env, agentConfig)
         ? withProviderStreamRetry(provider, {
             ...deps,

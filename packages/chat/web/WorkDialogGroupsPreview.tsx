@@ -1,13 +1,10 @@
 import { mergeSharedHistoryItems } from "./sharedHistoryMerge";
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { isAgentRowUnread } from "./sidebar/agentUnread";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "app/routing";
 import { toTimestamp, type MyContentListItem } from "app/utils/myContentItems";
-import { useWorkRunListCoverage } from "./useWorkRunListCoverage";
-import { getAgentRuns, getAgentRunsVersion, getRemoteTasks, subscribeAgentRuns } from "./agentRunStore";
 import { parseDialogKey } from "database/dialogKey";
-import { useDialogStatuses, useDialogEventTimestamps } from "create/space/spaceDialogStore";
-import { projectWorkDialogData } from "./workDialogDataProjection";
-import { resolveWorkLiveness, type WorkStoreRun } from "./workRunLiveness";
+import { useDialogEventTimestamps } from "create/space/spaceDialogStore";
 import { isRoutableContentActive } from "create/space/contentKeyUtils";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
@@ -19,32 +16,28 @@ import { normalizeSpaceId } from "database-engine/spaceLinkAccess";
 import SidebarItemRow from "create/space/SidebarItemRow";
 import { SidebarItemMoreMenu } from "create/space/SidebarItemMoreMenu";
 import { MenuPopover } from "render/web/ui/MenuPopover";
-import type { WorkRunListCoverage, WorkRunListSnapshot } from "./workRunListCoverage";
-import { sortWorkDialogTimeline, type WorkRunSignal, type GroupedWorkItem } from "app/navigation/workDialogProjection";
 
 const ignoreMenuToggle = (_key: string | null): void => {};
-
-/**
- * 自动续页的最小间隔。不能「间隔不够就直接丢掉这次机会」——observer 只在可见性
- * 变化时通知，被丢掉的那次之后哨兵一直可见就再也不会通知，续页会永久停住。
- */
 const AUTO_LOAD_MIN_INTERVAL_MS = 1000;
 
+type DialogPages = {
+  error: string | null;
+  loading: boolean;
+  hasMore: boolean;
+  pendingSourceCount?: number;
+  loadMore: (options?: { retryFailed?: boolean }) => Promise<void>;
+};
+
 export function WorkDialogGroupsPreview({
-  items, userId, homeScope = { kind: "all" }, includeNonDialogs = false, paginationOwner = false, ownedPages,
-}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; includeNonDialogs?: boolean; paginationOwner?: boolean; ownedPages?: { error: string | null; loading: boolean; hasMore: boolean; loadMore: () => Promise<void> } }) {
+  items, userId, homeScope = { kind: "all" }, includeNonDialogs = false, paginationOwner = false, ownedPages, unreadAgentKeys,
+}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; includeNonDialogs?: boolean; paginationOwner?: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
   if (!userId) return null;
-  return (
-    <section aria-label="工作状态" data-hook="work-dialog-groups">
-      <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} includeNonDialogs={includeNonDialogs} paginationOwner={paginationOwner} ownedPages={ownedPages} />
-    </section>
-  );
+  return <section aria-label="工作状态" data-hook="work-dialog-groups">
+    <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} includeNonDialogs={includeNonDialogs} paginationOwner={paginationOwner} ownedPages={ownedPages} unreadAgentKeys={unreadAgentKeys} />
+  </section>;
 }
 
-function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs, paginationOwner, ownedPages }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope; includeNonDialogs: boolean; paginationOwner: boolean; ownedPages?: { error: string | null; loading: boolean; hasMore: boolean; loadMore: () => Promise<void> } }) {
-  // This subscription hydrates run state on mount/focus; per-dialog lookup retains ownership scope.
-  const { coverage, snapshot } = useWorkRunListCoverage(userId);
-  const dialogStatuses = useDialogStatuses();
+function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs, paginationOwner, ownedPages, unreadAgentKeys }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope; includeNonDialogs: boolean; paginationOwner: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
   const dialogEventTimestamps = useDialogEventTimestamps();
   const location = useLocation();
   const currentSpaceId = useCurrentSpaceId();
@@ -59,7 +52,6 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
     token: runtime.currentToken ?? "",
     origins: runtime.syncServers,
   });
-  // memberSpaces 的 spaceId 可能带 `space-` 前缀，而服务端记录的 spaceId 是裸形态：两边都归一化再比。
   const memberSpaceIds = useMemo(() => new Set(memberSpaces
     .map((space) => normalizeSpaceId(space.spaceId))
     .filter((spaceId): spaceId is string => Boolean(spaceId))), [memberSpaces]);
@@ -68,138 +60,83 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
     parseDialogKey(record.contentKey)?.userId === record.ownerUserId &&
     memberSpaceIds.has(normalizeSpaceId(record.spaceId) ?? "")
   )) : [], [sharedEnabled, sharedPages.records, userId, memberSpaceIds]);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(id);
-  }, []);
-  // 直接订阅 store 版本：memo 依赖才是反应式的（裸读版本号会静默失效）。
-  const storeVersion = useSyncExternalStore(subscribeAgentRuns, getAgentRunsVersion, getAgentRunsVersion);
-  const tasks = useMemo(() => getRemoteTasks({ userId }, now), [userId, storeVersion, now]);
-  const storeRuns = useMemo<WorkStoreRun[]>(() => {
-    const out: WorkStoreRun[] = [];
-    for (const item of items) {
-      if (item.type !== "dialog") continue;
-      const parsed = parseDialogKey(item.contentKey);
-      if (!parsed || parsed.userId !== userId) continue;
-      for (const run of getAgentRuns({ userId, dialogId: parsed.dialogId })) {
-        if (run.status !== "running") continue;
-        out.push({ runId: run.runId, dialogId: parsed.dialogId, startedAt: run.startedAt });
-      }
-    }
-    return out;
-  }, [items, userId, storeVersion]);
-  // Preserve real events after terminal presentation snapshots expire. Account
-  // changes reset the cache; ticking the store never creates a new timestamp.
-  const runActivityRef = useRef<{ userId: string; timestamps: Record<string, number> }>({ userId, timestamps: {} });
-  const runActivityTimestamps = useMemo(() => {
-    const timestamps = runActivityRef.current.userId === userId
-      ? { ...runActivityRef.current.timestamps } : {};
-    for (const item of items) {
-      if (item.type !== "dialog") continue;
-      const parsed = parseDialogKey(item.contentKey);
-      if (!parsed || parsed.userId !== userId) continue;
-      for (const run of getAgentRuns({ userId, dialogId: parsed.dialogId })) {
-        for (const at of [run.startedAt, run.finishedAt]) {
-          if (typeof at === "number" && Number.isFinite(at)) {
-            timestamps[parsed.dialogId] = Math.max(timestamps[parsed.dialogId] ?? 0, at);
-          }
-        }
-      }
-    }
-    runActivityRef.current = { userId, timestamps };
-    return timestamps;
-  }, [items, userId, storeVersion]);
-  const liveness = useMemo(
-    () => resolveWorkLiveness({ now, snapshot, storeRuns }),
-    [now, snapshot, storeRuns],
-  );
-  // V2-B 预览尚未接入「agent 正在等用户回答」的权威来源（waitingUserByDialogKey
-  // 在生产侧不接线）：「需要我处理」当前由「需处置 / 状态未知」触发，不代表一定在等你。
-  const groups = useMemo(() => projectWorkDialogData(items, tasks, {
-    sharedItems,
-    userId, dialogStatuses, dialogEventTimestamps, runActivityTimestamps, now,
-    liveDialogIds: liveness.liveDialogIds,
-    uncertainDialogIds: liveness.uncertainDialogIds,
-  }), [items, tasks, userId, sharedItems, dialogStatuses, dialogEventTimestamps, runActivityTimestamps, now, liveness]);
-  const titles = useMemo(() => new Map([...items.map((item) => [item.contentKey, item.title] as const), ...sharedItems.map((item) => [item.contentKey, item.title] as const)]), [items, sharedItems]);
   const sharedKeys = useMemo(() => new Set(sharedItems.map((item) => item.contentKey)), [sharedItems]);
-  const pinnedByKey = useMemo(
-    () => new Map(items.map((item) => [item.contentKey, Boolean(item.pinned)])),
-    [items],
-  );
-  const timeline = useMemo(() => sortWorkDialogTimeline(groups), [groups]);
   const contentByKey = useMemo(() => new Map(items.map((item) => [item.contentKey, item])), [items]);
-  // The authorized dialog projection stays authoritative for dialog membership,
-  // activity and status. Only the already-scoped non-dialog window is mixed in.
-  const mixedTimeline = useMemo(() => {
-    const rows: Array<
-      | { key: string; updatedAt: number; dialog: GroupedWorkItem; item?: undefined }
-      | { key: string; updatedAt: number; dialog?: undefined; item: MyContentListItem }
-    > = timeline.map((dialog) => ({ key: dialog.dialogKey, updatedAt: dialog.updatedAt, dialog }));
-    if (includeNonDialogs && homeScope.kind === "all") {
-      const seen = new Set(rows.map((row) => row.key));
-      for (const item of items) {
-        if (item.type === "dialog" || seen.has(item.contentKey)) continue;
-        seen.add(item.contentKey);
-        const at = toTimestamp(item.updatedAt);
-        rows.push({ key: item.contentKey, updatedAt: Number.isFinite(at) ? at : 0, item });
-      }
-    }
-    return rows.sort((a, b) => b.updatedAt - a.updatedAt || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  }, [timeline, items, includeNonDialogs, homeScope.kind]);
-  const total = mixedTimeline.length;
-  // 共享历史只是补充：失败只做一处收敛提示，不按 Space 平铺按钮、也不暴露裸 spaceId。
-  const failedSharedSources = sharedPages.failedSourceCount ?? 0;
-  const deferredSharedSources = sharedPages.deferredSourceCount ?? 0;
-  const pendingSharedSources = sharedPages.pendingSourceCount ?? 0;
-  // 单次点击同时重试失败来源、推进健康且未加载完的来源（hook 的 loadMore 无参语义）。
-  // 文案必须说清这次点击会做什么：只有失败 → 重试；两类都有 → 重试并加载更多。
-  const sharedIncomplete = sharedEnabled && (deferredSharedSources > 0 || failedSharedSources > 0 || pendingSharedSources > 0 || sharedPages.hasMoreSpaces.length > 0);
-  const sharedActionable = sharedIncomplete && (sharedPages.actionableSourceCount === undefined || sharedPages.actionableSourceCount > 0);
-  const sharedLoading = sharedPages.loadingSpaces.length > 0;
-  const combinedActionable = sharedIncomplete || Boolean(ownedPages && (ownedPages.error || ownedPages.hasMore));
-  const ownedActionable = Boolean(ownedPages && !ownedPages.loading && (ownedPages.error || ownedPages.hasMore));
-  const canLoadMore = sharedActionable || ownedActionable;
-  const loadingOnly = !canLoadMore && (sharedLoading || Boolean(ownedPages?.loading));
-  const coolingDown = deferredSharedSources > 0 && !sharedActionable && !ownedActionable;
-  const loadCombined = () => {
-    if (!canLoadMore) return;
+  const titles = useMemo(() => new Map([...items, ...sharedItems].map((item) => [item.contentKey, item.title] as const)), [items, sharedItems]);
+  const pinnedByKey = useMemo(() => new Map(items.map((item) => [item.contentKey, Boolean(item.pinned)])), [items]);
+
+  const rows = useMemo(() => {
+    const byKey = new Map<string, { key: string; updatedAt: number; item: MyContentListItem | (typeof sharedItems)[number]; shared: boolean }>();
+    const add = (item: MyContentListItem | (typeof sharedItems)[number], shared: boolean) => {
+      const parsed = item.type === "dialog" ? parseDialogKey(item.contentKey) : null;
+      if (item.type === "dialog") {
+        if (!parsed || (!shared && parsed.userId !== userId && parsed.userId !== "local")) return;
+      } else if (!includeNonDialogs || homeScope.kind === "project") return;
+      const now = Date.now();
+      const eventAt = !shared && parsed?.userId === userId ? dialogEventTimestamps[parsed.dialogId] : undefined;
+      const sourceAt = toTimestamp(item.updatedAt);
+      const updatedAt = Math.max(Number.isFinite(sourceAt) && sourceAt <= now ? sourceAt : 0,
+        typeof eventAt === "number" && Number.isFinite(eventAt) && eventAt <= now ? eventAt : 0);
+      const previous = byKey.get(item.contentKey);
+      if (!previous || updatedAt > previous.updatedAt) byKey.set(item.contentKey, { key: item.contentKey, updatedAt, item, shared });
+    };
+    items.forEach((item) => add(item, false));
+    sharedItems.forEach((item) => add(item, true));
+    return [...byKey.values()].sort((a, b) => b.updatedAt - a.updatedAt || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  }, [items, sharedItems, userId, dialogEventTimestamps, includeNonDialogs, homeScope.kind]);
+  const total = rows.length;
+  const sharedPagesView = sharedPages as typeof sharedPages & { deferredSourceCount?: number; actionableSourceCount?: number };
+  const sharedDeferred = sharedEnabled ? (sharedPagesView.deferredSourceCount ?? 0) : 0;
+  const sharedFailedCount = sharedEnabled ? (sharedPages.failedSourceCount ?? 0) : 0;
+  const ownedFailed = Boolean(ownedPages?.error);
+  const ownedBusy = Boolean(ownedPages?.loading);
+  const hardFailure = ownedFailed || sharedFailedCount > 0;
+  const partialFailure = hardFailure || sharedDeferred > 0;
+  const sharedActionable = sharedEnabled && (sharedPagesView.actionableSourceCount === undefined
+    ? (sharedPages.hasMoreSpaces.length > 0 || sharedFailedCount > 0)
+    : sharedPagesView.actionableSourceCount > 0);
+  // loading is aggregate: a slow origin must not block another origin's next page.
+  // B1 owns per-origin in-flight exclusion; legacy callers retain the busy fallback.
+  const ownedHealthyPending = Boolean(ownedPages && ownedPages.hasMore &&
+    (ownedPages.pendingSourceCount ?? (!ownedBusy && !ownedFailed ? 1 : 0)) > 0);
+  const ownedActionable = ownedHealthyPending || Boolean(ownedPages && !ownedBusy && ownedFailed);
+  const sharedHealthyPending = sharedEnabled && sharedActionable &&
+    (sharedPages.pendingSourceCount ?? (sharedFailedCount > 0 ? 0 : sharedPages.hasMoreSpaces.length)) > 0;
+  const loading = (ownedBusy || (sharedEnabled && sharedPages.loadingSpaces.length > 0)) && !ownedActionable && !sharedActionable;
+  const canLoadMore = ownedActionable || sharedActionable || partialFailure || loading;
+  const failed = hardFailure;
+  const controlLabel = loading ? "正在加载对话…" : failed ? "重试加载" : (ownedActionable || sharedActionable) ? "加载更多对话" : "稍后重试";
+  const controlDisabled = loading || !(ownedActionable || sharedActionable || (sharedFailedCount > 0 && sharedPages.loadingSpaces.length === 0));
+  const [autoLoadStalled, setAutoLoadStalled] = useState(false);
+  const autoLoadActive = typeof IntersectionObserver !== "undefined" && !autoLoadStalled && (ownedHealthyPending || sharedHealthyPending);
+
+  const loadCombined = (manual = false) => {
     const tasks: Promise<unknown>[] = [];
-    if (ownedPages && ownedActionable) tasks.push(ownedPages.loadMore());
-    if (sharedActionable) tasks.push(sharedPages.loadMore());
+    if (ownedPages && (manual ? ownedActionable : ownedHealthyPending)) {
+      tasks.push(ownedPages.loadMore({ retryFailed: manual && ownedFailed }));
+    }
+    if (sharedEnabled && (manual ? (sharedActionable || (sharedFailedCount > 0 && sharedPages.loadingSpaces.length === 0)) : sharedHealthyPending)) {
+      tasks.push((sharedPages.loadMore as (spaceId?: string, options?: { retryFailed?: boolean }) => Promise<void>)(undefined, { retryFailed: manual && sharedFailedCount > 0 }));
+    }
     void Promise.allSettled(tasks);
   };
-
-  // ── 底部自动续页 ──────────────────────────────────────────────────
-  // 「加载更多对话」这件事本身没有需要人判断的地方：还有下一页就续上。所以列表
-  // 底部改成哨兵，进入可视区（含 240px 预取）就自动续页；只有「失败 / 冷却 /
-  // 连续两页拿不回新行」时才退回成手动按钮，避免自动续页静默卡死。
-  const loadNeedsRetry = failedSharedSources > 0 || deferredSharedSources > 0 || Boolean(ownedPages?.error);
-  const [autoLoadStalled, setAutoLoadStalled] = useState(false);
   const autoLoadSentinelRef = useRef<HTMLDivElement | null>(null);
-  // 触发器走 ref：observer 不能因为 loadCombined 每次渲染换身份而反复重订阅。
+  const autoLoadVisibleRef = useRef(false);
   const autoLoadTriggerRef = useRef(loadCombined);
-  // 上一轮续页发起时的条目数：下一轮发起时如果条目没增长，说明上一轮没拿回新行。
   const autoLoadFromTotalRef = useRef<number | null>(null);
   const autoLoadEmptyRoundsRef = useRef(0);
   const autoLoadLastTriggerAtRef = useRef(0);
-  // 哨兵当前可见性 + 最新可加载状态：定时器到期时要重新确认，不能盲发。
-  const autoLoadVisibleRef = useRef(false);
   const autoLoadCanLoadMoreRef = useRef(canLoadMore);
   const autoLoadTotalRef = useRef(total);
-  const autoLoadActive = typeof IntersectionObserver !== "undefined" && !loadNeedsRetry && !autoLoadStalled;
   autoLoadTriggerRef.current = loadCombined;
   autoLoadCanLoadMoreRef.current = canLoadMore;
   autoLoadTotalRef.current = total;
-
   useEffect(() => {
-    if (!autoLoadActive || !combinedActionable || !canLoadMore) return;
+    if (!autoLoadActive) return;
     const node = autoLoadSentinelRef.current;
     if (!node) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
-
     const flush = () => {
       timer = undefined;
       if (disposed || !autoLoadVisibleRef.current || !autoLoadCanLoadMoreRef.current) return;
@@ -209,7 +146,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
       if (from !== null && current <= from) {
         autoLoadEmptyRoundsRef.current += 1;
         if (autoLoadEmptyRoundsRef.current >= 2) {
-          // 连续两轮拿不回新行：停手，让渲染分支退回手动按钮。
+          // 连续两轮拿不回新行：停手，让渲染分支退回手动按钮，不再无限自动重试。
           setAutoLoadStalled(true);
           return;
         }
@@ -223,18 +160,14 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
       // observer 通知，链条会在这里断掉，stall 计数也永远累计不到 2。
       schedule();
     };
-
-    // 关键：节流不能「直接 return 丢掉这次机会」。observer 只在可见性变化时通知，
+    // 节流不能「直接 return 丢掉这次机会」：observer 只在可见性变化时通知，
     // 一页若在闸门窗口内加载完，重订阅后的首次通知会被丢掉、哨兵又一直可见，
     // 自动续页就永久停住且没有手动入口。这里改成「到期后再确认一次」。
     const schedule = () => {
       if (timer !== undefined || disposed) return;
       const wait = Math.max(0, AUTO_LOAD_MIN_INTERVAL_MS - (Date.now() - autoLoadLastTriggerAtRef.current));
-      timer = setTimeout(() => {
-        flush();
-      }, wait);
+      timer = setTimeout(() => { flush(); }, wait);
     };
-
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.some((entry) => entry.isIntersecting);
       autoLoadVisibleRef.current = visible;
@@ -246,171 +179,39 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
       if (timer !== undefined) clearTimeout(timer);
       observer.disconnect();
     };
-  }, [autoLoadActive, combinedActionable, canLoadMore, total]);
+  }, [autoLoadActive, total]);
 
-  // 侧栏条目的「更多」菜单挂在 row 之外（RAC Menu 不能嵌在 ListBox 里），
-  // 与 CategorySection 同一套约定：row 上报锚点，这里渲染 MenuPopover。
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
   const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);
   const menuAnchorKeyRef = useRef<string | null>(null);
   const [editRequest, setEditRequest] = useState<{ key: string; nonce: number } | null>(null);
-
   const handleMenuAnchorChange = useCallback((key: string, el: HTMLElement | null) => {
-    if (el) {
-      menuAnchorKeyRef.current = key;
-      setMenuAnchorEl(el);
-      return;
-    }
-    if (menuAnchorKeyRef.current === key) {
-      menuAnchorKeyRef.current = null;
-      setMenuAnchorEl(null);
-    }
+    if (el) { menuAnchorKeyRef.current = key; setMenuAnchorEl(el); return; }
+    if (menuAnchorKeyRef.current === key) { menuAnchorKeyRef.current = null; setMenuAnchorEl(null); }
   }, []);
-
-  const closeMenu = useCallback(() => {
-    setActiveMenuKey(null);
-    menuAnchorKeyRef.current = null;
-    setMenuAnchorEl(null);
-  }, []);
-
-  const covText = coverageText(coverage, snapshot);
+  const closeMenu = useCallback(() => { setActiveMenuKey(null); menuAnchorKeyRef.current = null; setMenuAnchorEl(null); }, []);
   const activeItem = activeMenuKey ? contentByKey.get(activeMenuKey) : undefined;
 
-  return (
-    <div data-hook="home-work-dialog-list" className="home-work-dialog-list">
-      {covText && <p role="status">{covText}</p>}
-      {(paginationOwner || sharedIncomplete) && (failedSharedSources > 0 || deferredSharedSources > 0 || ownedPages?.error) && (
-        <p role="status">部分对话暂时未能加载，已显示的对话仍可打开。</p>
-      )}
-      {total === 0 ? (
-        <p>{includeNonDialogs ? "暂无已加载的内容。" : "暂无已加载的对话。"}</p>
-      ) : (
-          <div aria-label={includeNonDialogs ? "最近活动内容" : "最近活动对话"}>
-            {mixedTimeline.map(({ dialog, item }) => {
-              if (item) {
-                const type = item.type.toLowerCase();
-                return <div key={item.contentKey}>
-                  <SidebarItemRow
-                    contentKey={item.contentKey}
-                    sourceServerOrigin={item.serverOrigin}
-                    type={type}
-                    title={item.title || item.contentKey}
-                    isActive={isRoutableContentActive({ contentKey: item.contentKey, type, userId, spaceId: currentSpaceId, currentPath: location.pathname })}
-                    isMenuOpen={activeMenuKey === item.contentKey}
-                    onToggleMenu={setActiveMenuKey}
-                    onMenuAnchorChange={handleMenuAnchorChange}
-                    editSignal={editRequest?.key === item.contentKey ? editRequest.nonce : undefined}
-                    pinned={Boolean(item.pinned)}
-                  />
-                </div>;
-              }
-              const title = titles.get(dialog.dialogKey) || dialog.dialogKey;
-              const status = statusLabel(dialog.runs, dialog.needsUserAction);
-              const content = contentByKey.get(dialog.dialogKey);
-              const ownerId = parseDialogKey(dialog.dialogKey)?.userId;
-              // Account summaries are never evidence for another owner's shared row.
-              const summary = !sharedKeys.has(dialog.dialogKey) && content?.type === "dialog" &&
-                (ownerId === userId || ownerId === "local") ? content : undefined;
-              // 与行自身的链接同源：侧栏条目会带上当前 Space 前缀，并容忍尾斜杠/子路由，
-              // 所以不能拿 pathname 做严格相等。
-              const isActive = isRoutableContentActive({
-                contentKey: dialog.dialogKey,
-                type: "dialog",
-                userId,
-                spaceId: currentSpaceId,
-                currentPath: location.pathname,
-              });
-              return (
-                <div
-                  key={dialog.dialogKey}
-                  title={status}
-                >
-                  <SidebarItemRow
-                    contentKey={dialog.dialogKey}
-                    type="dialog"
-                    title={title}
-                    disableAutoRead
-                    summaryStatus={summary && "status" in summary ? summary.status : undefined}
-                    summaryUnreadAt={summary && "unreadAt" in summary ? summary.unreadAt : undefined}
-                    isActive={isActive}
-                    isMenuOpen={!sharedKeys.has(dialog.dialogKey) && activeMenuKey === dialog.dialogKey}
-                    readOnly={sharedKeys.has(dialog.dialogKey)}
-                    onToggleMenu={sharedKeys.has(dialog.dialogKey) ? ignoreMenuToggle : setActiveMenuKey}
-                    onMenuAnchorChange={sharedKeys.has(dialog.dialogKey) ? undefined : handleMenuAnchorChange}
-                    editSignal={sharedKeys.has(dialog.dialogKey) ? undefined : editRequest?.key === dialog.dialogKey ? editRequest.nonce : undefined}
-                    pinned={sharedKeys.has(dialog.dialogKey) ? false : pinnedByKey.get(dialog.dialogKey) ?? false}
-                  />
-                  {status && <small data-hook="work-dialog-status" style={{ color: "var(--text-secondary)", paddingInlineStart: 12 }}>
-                    {status}
-                  </small>}
-                </div>
-              );
-            })}
-          </div>
-      )}
-      {/* 分页控制必须挂在列表**之后**：哨兵要随列表增长被推下去，滚到底部附近才续页。
-          放到列表上方会在页面一打开就可见，等于一进来就连续翻页，而用户滚到底部时
-          哨兵早已离开视口，该加载时反而不加载。 */}
-      {(paginationOwner || sharedIncomplete) && combinedActionable && (
-        autoLoadActive && canLoadMore ? (
-          <div
-            ref={autoLoadSentinelRef}
-            data-hook="work-dialog-autoload-sentinel"
-            aria-hidden="true"
-          />
-        ) : (
-          <button type="button" disabled={!canLoadMore} onClick={loadCombined}>
-            {loadingOnly ? "正在加载对话…" : coolingDown ? "稍后重试" : failedSharedSources > 0 || ownedPages?.error ? "重试加载" : "加载更多对话"}
-          </button>
-        )
-      )}
-      {activeMenuKey && !sharedKeys.has(activeMenuKey) && menuAnchorEl && (
-        <MenuPopover
-          triggerRef={{ current: menuAnchorEl }}
-          isOpen
-          onOpenChange={(open) => { if (!open) closeMenu(); }}
-          placement="bottom end"
-        >
-          <SidebarItemMoreMenu
-            contentKey={activeMenuKey}
-            title={titles.get(activeMenuKey) || activeMenuKey}
-            type={activeItem?.type ?? "dialog"}
-            fileCategory={(activeItem as { fileCategory?: string | null } | undefined)?.fileCategory ?? null}
-            sourceServerOrigin={activeItem?.serverOrigin}
-            spaceId={currentSpaceId}
-            canEditInSpace={Boolean(currentSpaceId) && !sharedKeys.has(activeMenuKey)}
-            canMoveToSpace={!sharedKeys.has(activeMenuKey)}
-            showDownloadAction={false}
-            menuAnchorEl={menuAnchorEl}
-            onEditTitle={() => {
-              setEditRequest({ key: activeMenuKey, nonce: Date.now() });
-              closeMenu();
-            }}
-            onClose={closeMenu}
-          />
-        </MenuPopover>
-      )}
-    </div>
-  );
-}
-
-function statusLabel(runs: readonly WorkRunSignal[] | undefined, needsUserAction?: boolean): string | undefined {
-  if (needsUserAction) return "等你处置";
-  if (!runs || runs.length === 0) return undefined;
-  if (runs.includes("requires-action")) return "需处置";
-  if (runs.includes("unknown")) return "状态未知";
-  if (runs.includes("waiting-user")) return "待你处理";
-  if (runs.includes("live")) return "运行中";
-  // Completed/stopped records are history, not an action prompt.
-  return undefined;
-}
-
-function coverageText(coverage: WorkRunListCoverage, snapshot?: WorkRunListSnapshot): string | null {
-  if (coverage.status === "loading" || coverage.status === "complete") return null;
-  if (coverage.status === "error") return "部分对话的最新进展暂时查不到，稍后会自动更新";
-  if (coverage.status === "partial") {
-    // 不暴露内部计数，也不承诺完整：只说明有一部分对话的进展暂时无法确定。
-    return "有些对话的最新进展暂时看不到，还不能确定是否已结束。";
-  }
-  return null;
+  return <div data-hook="home-work-dialog-list" className="home-work-dialog-list">
+    {total === 0 ? <p role={partialFailure ? "alert" : undefined}>{partialFailure ? "加载失败，请稍后重试。" : includeNonDialogs ? "暂无已加载的内容。" : "暂无已加载的对话。"}</p> : <div aria-label={includeNonDialogs ? "最近活动内容" : "最近活动对话"}>
+      {rows.map(({ key, item, shared }) => {
+        const isActive = isRoutableContentActive({ contentKey: key, type: item.type.toLowerCase(), userId, spaceId: currentSpaceId, currentPath: location.pathname });
+        if (item.type !== "dialog") return <div key={key}><SidebarItemRow contentKey={key} sourceServerOrigin={"serverOrigin" in item ? item.serverOrigin : undefined} type={item.type.toLowerCase()} title={item.title || key} isActive={isActive} isMenuOpen={activeMenuKey === key} onToggleMenu={setActiveMenuKey} onMenuAnchorChange={handleMenuAnchorChange} editSignal={editRequest?.key === key ? editRequest.nonce : undefined} pinned={"pinned" in item && Boolean(item.pinned)} hasUnread={item.type.toLowerCase() === "agent" ? isAgentRowUnread(unreadAgentKeys, key, userId) : undefined} /></div>;
+        const content = contentByKey.get(key);
+        const ownerId = parseDialogKey(key)?.userId;
+        const summary = !shared && content?.type === "dialog" && (ownerId === userId || ownerId === "local") ? content : undefined;
+        return <div key={key}>
+          <SidebarItemRow contentKey={key} type="dialog" title={titles.get(key) || key} disableAutoRead summaryStatus={summary && "status" in summary ? summary.status : undefined} summaryUnreadAt={summary && "unreadAt" in summary ? summary.unreadAt : undefined} isActive={isActive} isMenuOpen={!shared && activeMenuKey === key} readOnly={shared} onToggleMenu={shared ? ignoreMenuToggle : setActiveMenuKey} onMenuAnchorChange={shared ? undefined : handleMenuAnchorChange} editSignal={shared ? undefined : editRequest?.key === key ? editRequest.nonce : undefined} pinned={shared ? false : pinnedByKey.get(key) ?? false} />
+        </div>;
+      })}
+    </div>}
+    {partialFailure && <p role="status">部分对话暂时未能加载，已显示的对话仍可打开。</p>}
+    {canLoadMore && <>
+      {autoLoadActive && <div ref={autoLoadSentinelRef} data-hook="work-dialog-autoload-sentinel" aria-hidden="true" />}
+      {(!autoLoadActive || partialFailure) && <button type="button" disabled={controlDisabled} onClick={() => loadCombined(true)}>{controlLabel}</button>}
+    </>}
+    {activeMenuKey && !sharedKeys.has(activeMenuKey) && menuAnchorEl && <MenuPopover triggerRef={{ current: menuAnchorEl }} isOpen onOpenChange={(open) => { if (!open) closeMenu(); }} placement="bottom end">
+      <SidebarItemMoreMenu contentKey={activeMenuKey} title={titles.get(activeMenuKey) || activeMenuKey} type={activeItem?.type ?? "dialog"} fileCategory={(activeItem as { fileCategory?: string | null } | undefined)?.fileCategory ?? null} sourceServerOrigin={activeItem?.serverOrigin} spaceId={currentSpaceId} canEditInSpace={Boolean(currentSpaceId) && !sharedKeys.has(activeMenuKey)} canMoveToSpace={!sharedKeys.has(activeMenuKey)} showDownloadAction={false} menuAnchorEl={menuAnchorEl} onEditTitle={() => { setEditRequest({ key: activeMenuKey, nonce: Date.now() }); closeMenu(); }} onClose={closeMenu} />
+    </MenuPopover>}
+  </div>;
 }

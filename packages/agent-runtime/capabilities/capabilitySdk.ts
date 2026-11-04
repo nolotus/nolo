@@ -31,7 +31,11 @@ export async function invokeCapability<I = unknown, O = AgentRuntimeToolResult>(
   const confirm = ctx.confirmDestructiveAction;
 
   // 2. Capability Policy Evaluation
-  await evaluateCapabilityPolicy(capability, normalizedInput, ctx);
+  const hostExecutedResult = await evaluateCapabilityPolicy(capability, normalizedInput, ctx);
+  if (hostExecutedResult) {
+    // 宿主已在确认回调里代为执行该命令：直接返回它的真实结果，不再 spawn。
+    return hostExecutedResult as O;
+  }
 
   // 3. Audit / hook (invoked only after policy approval and before execution)
   if (ctx.onInvoke) {

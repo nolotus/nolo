@@ -438,6 +438,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
   signal?: AbortSignal;
+  noRetries?: true;
   /** Stable conversation id (dialogId, else agent key) for endpoints requiring a session header. */
   sessionId?: string;
   /**
@@ -524,7 +525,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   }
 
   // token 可能在服务端被提前失效，或在本轮请求发出前刚好过期。强刷一次重试一次。
-  if (res.status === 401 && args.resolveApiKey) {
+  if (res.status === 401 && args.resolveApiKey && !args.noRetries) {
     const refreshed = await args.resolveApiKey({ force: true });
     if (refreshed && refreshed !== apiKey) {
       // 被刷新的那次 attempt 独立留痕：401 不能被最终 200 覆盖。

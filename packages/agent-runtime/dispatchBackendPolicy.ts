@@ -2,7 +2,7 @@
  * 派发落点：执行后端硬规则（系统层固定块，四条装配线无条件注入）。
  *
  * 背景（2026-10-23 事故）：派发的子 run 默认落本机 docker 沙盒，而沙盒
- * **不兑现宿主的 `cwd`**（见 `dockerSandboxExecutionBackend.ts:787` 的 fail-closed 段：
+ * **不兑现宿主的 `cwd`**（见 `dockerSandboxExecutionBackend.ts:807` 的 fail-closed 段：
  * 「本后端不兑现 env / stdin / cwd」），也**不自动继承宿主凭据**；工具与网络能力
  * 取决于就绪环境（不是基础镜像的静态清单）。于是「改这个 worktree」「连上去查线上」
  * 这类任务派进沙盒后，改动落不到调用方的 worktree，宿主凭据也带不过去。

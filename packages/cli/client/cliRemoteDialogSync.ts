@@ -92,7 +92,7 @@ export function buildLocalWakeDisplayText(args: {
   const duration = typeof args.durationMs === "number" && args.durationMs >= 0
     ? ` · ${Math.floor(args.durationMs / 60000)}m${Math.floor(args.durationMs / 1000) % 60}s`
     : "";
-  return `1 条后台 run 已完成 · ${failed ? "✗" : "✓"} ${args.label || "后台 run"}${failed ? ` ${args.terminalStatus}` : ""}${duration}`;
+  return `1 条后台 run 已结束 · ${failed ? "✗" : "✓"} ${args.label || "后台 run"} [${args.terminalStatus}]${duration}`;
 }
 
 function buildLocalParentWakeMessage(args: {

@@ -1,4 +1,9 @@
 import type { AgentQuota } from "ai/agent/quotaSnapshot";
+import {
+  BIGMODEL_PROVIDER_TARGET,
+  buildCredentialUseGrant,
+  verifyCredentialUseGrant,
+} from "agent-runtime/credentialUseGrant";
 import { refreshSubscriptionQuotas } from "./subscriptionQuotaRefresh";
 import { resolveCliAgentKeyInput } from "./agentAliases";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
@@ -7,6 +12,7 @@ import {
   buildCreatedAgentRecord,
   normalizeAgentRecordForOutput,
   parseAgentUpdateArgs,
+  readBoundAgentCredential,
   refreshAgentRecordCache,
   resolveAgentRecordFromHybridStore,
   sanitizeAgentRecordForCliOutput,
@@ -160,6 +166,8 @@ export async function runAgentUpdateCommand(
       fetchImpl,
       fallbackFetchImpl,
       authToken,
+      credentialBroker: deps.credentialBroker,
+      hostApproval: deps.hostApproval,
     });
 
     await writeAgentRecord({
@@ -170,6 +178,7 @@ export async function runAgentUpdateCommand(
       serverUrl: built.serverUrl,
       userId,
       record: built.nextRecord,
+      remoteIncludeApiKey: !deps.hostApproval?.gateId,
     });
     await refreshAgentRecordCache({
       db,
@@ -245,6 +254,8 @@ export async function runAgentCreateCommand(
       fetchImpl,
       fallbackFetchImpl,
       authToken,
+      credentialBroker: deps.credentialBroker,
+      hostApproval: deps.hostApproval,
     });
 
     await writeAgentRecord({
@@ -255,6 +266,7 @@ export async function runAgentCreateCommand(
       serverUrl: built.serverUrl,
       userId,
       record: built.nextRecord,
+      remoteIncludeApiKey: !deps.hostApproval?.gateId,
     });
     await db.put(built.agentKey, {
       ...built.nextRecord,
@@ -278,17 +290,147 @@ export async function runAgentCreateCommand(
         const rec = built.nextRecord as {
           customProviderUrl?: string;
           apiKey?: string;
+          apiKeyRef?: string;
+          credentialRef?: string;
           apiKeyHeader?: string;
           model?: string;
         };
-        verifyResult = await verifyCustomProvider({
-          providerUrl: rec.customProviderUrl,
-          apiKey: rec.apiKey,
-          apiKeyHeader: rec.apiKeyHeader,
-          model: rec.model,
-          prompt: parsed.verifyPrompt,
-          fetchImpl,
-        });
+        // 凭据在进程内按 ref 取用，作用域限定在用户显式指定的 provider 目标上；
+        // 明文只活在这一个调用里，不进 argv / 记录 / 日志。
+        const verifyCredentialRef =
+          typeof rec.credentialRef === "string" && rec.credentialRef.trim()
+            ? rec.credentialRef.trim()
+            : "";
+        if (verifyCredentialRef) {
+          // 凭据 → 目标 的授权只能来自宿主可信确认通道（ActionGate）。
+          // 模型自填的 URL / 参数不构成授权；CLI 批处理没有该通道＝不外发。
+          const providerUrl = rec.customProviderUrl ?? "";
+          const hostGateId = (deps.hostApproval?.gateId ?? "").trim();
+          const confirmCredentialUse = hostGateId ? undefined : deps.confirmCredentialUse;
+          let grantReason = "host-grant-unavailable: no in-process host approval in this entry point; credential not sent";
+          let grantedOrigin: string | undefined;
+          if (hostGateId) {
+            // 宿主在真实批准后传进来的 gate id：批准事实来自宿主调用栈，不由模型提供。
+            const gate = {
+              id: hostGateId,
+              kind: "confirm" as const,
+              title: "Use pasted API key for this agent?",
+              body: `Target: ${providerUrl}`,
+              payload: { agentKey: built.agentKey, credentialRef: verifyCredentialRef },
+            };
+            const builtGrant = buildCredentialUseGrant({
+              gate,
+              result: { gateId: hostGateId, status: "completed", output: "confirmed" },
+              credentialRef: verifyCredentialRef,
+              agentKey: built.agentKey,
+              deviceId: deps.deviceId ?? "",
+              providerId: BIGMODEL_PROVIDER_TARGET.providerId,
+              providerUrl,
+              operations: ["verify"],
+              persistence: "os-store",
+            });
+            if (builtGrant.ok) {
+              const granted = verifyCredentialUseGrant({
+                grant: builtGrant.grant,
+                credentialRef: verifyCredentialRef,
+                agentKey: built.agentKey,
+                requestUrl: providerUrl,
+                operation: "verify",
+              });
+              if (granted.ok) {
+                grantedOrigin = builtGrant.grant.allowedOrigin;
+              } else {
+                grantReason = `host-grant-rejected: ${granted.reason}; credential not sent`;
+              }
+            } else {
+              grantReason = `host-grant-rejected: ${builtGrant.reason}; credential not sent`;
+            }
+          }
+          if (confirmCredentialUse) {
+            const gate = {
+              id: `credential-use-${built.agentKey}`,
+              kind: "confirm" as const,
+              title: "Use pasted API key for this agent?",
+              body: `Target: ${providerUrl}`,
+              payload: { agentKey: built.agentKey, credentialRef: verifyCredentialRef },
+            };
+            const gateResult = await confirmCredentialUse(gate);
+            const builtGrant = buildCredentialUseGrant({
+              gate,
+              result: gateResult,
+              credentialRef: verifyCredentialRef,
+              agentKey: built.agentKey,
+              deviceId: deps.deviceId ?? "",
+              providerId: BIGMODEL_PROVIDER_TARGET.providerId,
+              providerUrl,
+              operations: ["verify"],
+              persistence: "os-store",
+            });
+            if (builtGrant.ok) {
+              const granted = verifyCredentialUseGrant({
+                grant: builtGrant.grant,
+                credentialRef: verifyCredentialRef,
+                agentKey: built.agentKey,
+                requestUrl: providerUrl,
+                operation: "verify",
+              });
+              if (granted.ok) {
+                grantedOrigin = builtGrant.grant.allowedOrigin;
+              } else {
+                grantReason = `host-grant-rejected: ${granted.reason}; credential not sent`;
+              }
+            } else {
+              grantReason = `host-grant-rejected: ${builtGrant.reason}; credential not sent`;
+            }
+          }
+          if (!grantedOrigin) {
+            // 不再从可写的授权文件里读"已批准"：批准事实只存在于宿主进程内（见
+            // hostCredentialCreate），CLI 侧没有可信来源就必须 fail closed。
+            if (grantReason.startsWith("host-grant-unavailable")) {
+              grantReason =
+                "host-grant-unavailable: no in-process host approval for this credential/target in this entry point; credential not sent";
+            }
+          }
+          if (!grantedOrigin) {
+            verifyResult = {
+              ok: false,
+              providerUrl,
+              model: rec.model,
+              reason: grantReason,
+            };
+          } else {
+            const secret = await readBoundAgentCredential(
+              verifyCredentialRef,
+              deps.credentialBroker,
+            );
+            verifyResult = secret
+              ? await verifyCustomProvider({
+                  providerUrl,
+                  apiKey: secret,
+                  apiKeyHeader: rec.apiKeyHeader,
+                  model: rec.model,
+                  prompt: parsed.verifyPrompt,
+                  fetchImpl,
+                  // 实际请求目标必须等于授权的 origin；重定向一律拒绝。
+                  allowedOrigin: grantedOrigin,
+                })
+              : {
+                  ok: false,
+                  providerUrl,
+                  model: rec.model,
+                  reason: "host-grant-ok but credential is not readable from the OS store",
+                };
+          }
+        } else {
+          verifyResult = await verifyCustomProvider({
+            providerUrl: rec.customProviderUrl,
+            apiKey: rec.apiKey,
+            apiKeyHeader: rec.apiKeyHeader,
+            model: rec.model,
+            prompt: parsed.verifyPrompt,
+            fetchImpl,
+          });
+        }
       } catch (error) {
         verifyResult = {
           ok: false,

@@ -19,6 +19,7 @@ import type { ProviderResolver } from "./providerResolutionContext";
 export const resolveCliProviderTransport: ProviderResolver = async (ctx) => {
   const { agentConfig, deps, workspaceRoot } = ctx;
   if (isCliProviderAgent(agentConfig)) {
+    if (ctx.textOnly) throw new Error("local CLI subprocess does not support isolated text-only mode");
     const provider = resolveCliProviderName(agentConfig);
     logLocalRuntimeDiagnostic("provider.selected", {
       agentKey: agentConfig.key,

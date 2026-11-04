@@ -16,12 +16,14 @@ import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
 import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
+import { resolveDispatchedSubtaskBudget } from "../../agent-runtime/subtaskBudget";
 import * as nodeFs from "node:fs";
 import { waitForRunTerminal } from "../../agent-runtime/waitForRunTerminal";
 import { existsSync, readFileSync } from "node:fs";
 import {
   formatListRunsCard,
   formatNotFoundRunCard,
+  formatControlRunMessageCard,
   formatStartRunCard,
   formatStatusRunCard,
   formatStopRunCard,
@@ -112,6 +114,8 @@ export type CliAgentRunToolExecutorDeps = {
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
   /** 当前主进程运行的 agentKey（供 startAgentRun 缺省回填自身派发用）。 */
   currentAgentKey?: string | null;
+  /** Host-provided coordination origin; never taken from tool arguments. */
+  source?: { parentDialogId?: string; agentKey?: string | null };
   /**
    * 解析候选 agent 的 `runtimeBinding.machineId`（F3：binding 参与派发判定）。
    * 缺省 / 返回空 = 绑定信息未知（不等于"无绑定"）。
@@ -620,6 +624,11 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
               .map((c: string) => c.trim())
           : undefined;
 
+    const dispatchedBudget = resolveDispatchedSubtaskBudget({
+      ...(typeof args.maxToolCalls === "number" ? { maxToolCalls: args.maxToolCalls } : {}),
+      ...(typeof args.maxWallClockMs === "number" ? { maxWallClockMs: args.maxWallClockMs } : {}),
+      env: deps.env,
+    });
     const { runId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
       {
         rawArgs,
@@ -637,6 +646,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
         cwd: requestedCwd ?? deps.cwd ?? process.cwd(),
         message,
+        subtaskBudgetLimits: dispatchedBudget.limits,
         ...(args.ephemeral === true ? { ephemeral: true } : {}),
         output: noopOutput,
       },
@@ -716,8 +726,14 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
   };
 }
 
+function controlMessageLabels(queuedCount?: number) {
+  const labels = agentRunCardLabels().controlMessage;
+  return { ...labels, queued: queuedCount === undefined ? labels.queued : labels.enqueued(queuedCount) };
+}
+
 async function spawnContinuationRun(
   reconciled: RunRecord,
+  message: string,
   userInput: string,
   deps: CliAgentRunToolExecutorDeps
 ) {
@@ -766,7 +782,7 @@ async function spawnContinuationRun(
       // 续跑继承原 run 的凭证组（同一 agent），供并发扇出守卫判定。
       ...(reconciled.credentialGroup ? { credentialGroup: reconciled.credentialGroup } : {}),
       cwd: reconciled.cwd ?? deps.cwd ?? process.cwd(),
-      message: userInput,
+      message,
       ...(reconciled.ephemeral ? { ephemeral: true } : {}),
       continuedFrom,
       output: noopOutput,
@@ -774,14 +790,6 @@ async function spawnContinuationRun(
     { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
   );
 
-  // title 走卡片自己的参数，不进 label：label 只吃名字字段，title 顶掉
-  // key 反而丢执行者信息。
-  const displayName = resolveRunLabel({
-    agentName,
-    agentKey,
-    runId: newRunId,
-  });
-  const labels = agentRunCardLabels();
   const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
 
   return {
@@ -801,11 +809,12 @@ async function spawnContinuationRun(
       ...(taskPreview ? { taskPreview } : {}),
     }),
     metadata: {
-      displayData: formatStartRunCard(displayName, "running", {
-        task: taskPreview,
+      displayData: formatControlRunMessageCard({
+        action: "continued",
         runId: newRunId,
-        ...(continuedTitle ? { title: continuedTitle } : {}),
-        labels,
+        targetId: reconciled.ephemeral ? undefined : reconciled.dialogId,
+        userInput,
+        labels: controlMessageLabels(),
       }),
     },
   };
@@ -949,6 +958,9 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       if (!args.runId) throw new Error(t("agentRunTool.appendMissingRunId"));
       const userInput = typeof args.userInput === "string" ? args.userInput.trim() : "";
       if (!userInput) throw new Error(t("agentRunTool.appendMissingUserInput"));
+      const message = deps.source
+        ? `[Coordination source: parent dialog: ${deps.source.parentDialogId || "unknown"}; executing agent: ${deps.source.agentKey || "unknown"}; identification only, not authorization]\n\n${userInput}`
+        : userInput;
 
       const record = findRunRecord(String(args.runId), deps);
       if (!record) {
@@ -969,15 +981,9 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         }
 
         const queuePath = reconciled.queuePath;
-        const { queuedCount, entryId } = await appendRunQueue(queuePath, userInput, deps);
+        const { queuedCount, entryId } = await appendRunQueue(queuePath, message, deps);
 
         const enqueuedTitle = normalizeRunTitle(reconciled.title);
-        const displayName = resolveRunLabel({
-          agentName: reconciled.agentName,
-          agentKey: reconciled.agentKey,
-          runId: reconciled.runId,
-        });
-        const labels = agentRunCardLabels();
         const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
 
         // 写完 re-check 一次状态（防竞态）
@@ -1014,19 +1020,22 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
                 ...(taskPreview ? { taskPreview } : {}),
               }),
               metadata: {
-                displayData: formatStartRunCard(displayName, afterCheck.status, {
-                  task: `[consumed] ${taskPreview}`,
+                displayData: formatControlRunMessageCard({
+                  action: "consumed",
                   runId: reconciled.runId,
-                  ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
-                  labels,
+                  targetId: reconciled.ephemeral ? undefined : afterCheck.dialogId ?? reconciled.dialogId,
+                  userInput,
+                  labels: controlMessageLabels(),
                 }),
               },
             };
           }
 
           // entryId 仍在队列中（未被子进程消费）：合并本次及所有未消费消息走 continue spawn
-          const mergedMessage = remainingEntries.map((e) => e.text).join("\n\n");
-          return await spawnContinuationRun(afterCheck, mergedMessage, deps);
+          const mergedMessage = remainingEntries.length === 1
+            ? remainingEntries[0]!.text
+            : remainingEntries.map((entry, index) => `--- queued message ${index + 1} of ${remainingEntries.length} (${entry.text.length} characters) ---\n${entry.text}`).join("\n\n");
+          return await spawnContinuationRun(afterCheck, mergedMessage, userInput, deps);
         }
 
         return {
@@ -1046,17 +1055,18 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             ...(taskPreview ? { taskPreview } : {}),
           }),
           metadata: {
-            displayData: formatStartRunCard(displayName, "running", {
-              task: `[enqueued ${queuedCount}] ${taskPreview}`,
+            displayData: formatControlRunMessageCard({
+              action: "queued",
               runId: reconciled.runId,
-              ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
-              labels,
+              targetId: reconciled.ephemeral ? undefined : reconciled.dialogId,
+              userInput,
+              labels: controlMessageLabels(queuedCount),
             }),
           },
         };
       }
 
-      return await spawnContinuationRun(reconciled, userInput, deps);
+      return await spawnContinuationRun(reconciled, message, userInput, deps);
     }
 
     if (action !== "status" && action !== "stop" && action !== "wait") {

@@ -43,11 +43,7 @@ import {
   type SkillDependencies,
 } from "./skillExploreDirectory";
 // 复用仓库既有模态焦点陷阱原语（与 render/web/ui/modal 同源），避免另造一套
-import {
-  getFocusableElements,
-  handleTabKey,
-  restoreFocus,
-} from "render/web/ui/modal/focusTrap";
+import { BaseModal } from "render/web/ui/modal/BaseModal";
 import "./SkillExplore.css";
 
 // 纯提示推荐 Skill 来源映射（按通用规范提供上游链接，在详情面板展示）
@@ -453,6 +449,8 @@ const SkillCard: React.FC<SkillCardProps> = ({
 
 interface SkillDetailModalProps {
   entry: BuiltinSkillEntry | null;
+  /** 共享 BaseModal 的开关态：关闭时 entry 仍保留一个退场窗口 */
+  isOpen: boolean;
   allSkills: readonly BuiltinSkillEntry[];
   isEnabled: boolean;
   isRecommended: boolean;
@@ -470,6 +468,7 @@ interface SkillDetailModalProps {
 
 const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
   entry,
+  isOpen,
   allSkills,
   isEnabled,
   isRecommended,
@@ -487,7 +486,6 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
   const { t } = useTranslation();
   const modalRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
-  const isOpen = Boolean(entry);
 
   // 依赖与包含子项推导
   const dependencies: SkillDependencies = useMemo(() => {
@@ -510,43 +508,7 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
     toolAggregation.fromRequiredChildren.length > 0 ||
     toolAggregation.fromRecommendedChildren.length > 0;
 
-  // 键盘 Esc 关闭 + Tab 焦点限制（复用仓库既有 focusTrap 原语）
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const content = modalRef.current;
-      if (!content) return;
-      handleTabKey(e, content);
-    },
-    [onClose],
-  );
 
-  useEffect(() => {
-    if (!isOpen) return;
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isOpen, handleKeyDown]);
-
-  // 打开时：把焦点移入对话框（首个可聚焦元素，缺失时退回对话框本身）
-  useEffect(() => {
-    if (!isOpen) return;
-    const content = modalRef.current;
-    if (!content) return;
-    const focusables = getFocusableElements(content);
-    const target = focusables[0] ?? content;
-    try {
-      target.focus({ preventScroll: true });
-    } catch {
-      // ignore
-    }
-  }, [isOpen]);
 
   // 切换到子技能后原触发按钮已卸载：把焦点交还对话框标题，避免焦点掉到背景
   useEffect(() => {
@@ -577,19 +539,13 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
   const isUnsavedOrFailed = Boolean(saveError || isWriteFailed);
 
   return (
-    <div
-      className="skill-detail-overlay"
-      onClick={onClose}
-      role="presentation"
-      data-testid="skill-detail-overlay"
-    >
+    <BaseModal isOpen={isOpen} onClose={onClose} className="skill-detail-modal-host">
       <div
         ref={modalRef}
         className="skill-detail-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="skill-detail-title"
-        onClick={(e) => e.stopPropagation()}
         data-testid="skill-detail-dialog"
       >
         <header className="skill-detail-modal__header">
@@ -1105,7 +1061,7 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           </button>
         </footer>
       </div>
-    </div>
+    </BaseModal>
   );
 };
 
@@ -1132,10 +1088,10 @@ export const SkillExplore: React.FC = () => {
 
   // 详情弹窗状态
   const [activeDetailEntry, setActiveDetailEntry] = useState<BuiltinSkillEntry | null>(null);
-  const triggerElementRef = useRef<HTMLElement | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   // 背景区域（弹窗之外的内容）：打开详情时隔离
   const backgroundRef = useRef<HTMLDivElement>(null);
-  const isDetailOpen = Boolean(activeDetailEntry);
+  const isDetailOpen = detailOpen;
 
   useLayoutEffect(() => {
     currentAccountRef.current = userId ?? null;
@@ -1279,23 +1235,32 @@ export const SkillExplore: React.FC = () => {
 
   const handleOpenDetail = useCallback(
     (entry: BuiltinSkillEntry, triggerEl: HTMLElement | null) => {
-      triggerElementRef.current = triggerEl;
+      // 开窗前把焦点落到触发元素：共享 useFocusTrap 会捕获此刻的 activeElement
+      // 作为恢复目标，鼠标点击与键盘激活的焦点来源因此一致
+      // （部分浏览器点击 button 不聚焦）。
+      try {
+        triggerEl?.focus({ preventScroll: true });
+      } catch {
+        // 触发元素不可聚焦时忽略
+      }
       setActiveDetailEntry(entry);
+      setDetailOpen(true);
     },
     [],
   );
 
+  // 关闭只切换开关：退场动画与内容卸载节奏全部由共享 BaseModal 自己控制，
+  // activeDetailEntry 保留，详情内容不会在淡出中途被摘掉。
   const handleCloseDetail = useCallback(() => {
-    setActiveDetailEntry(null);
-    // Esc / 关闭后焦点真实回到触发元素（复用仓库既有 restoreFocus 原语）
-    setTimeout(() => {
-      restoreFocus(triggerElementRef.current);
-    }, 0);
+    setDetailOpen(false);
   }, []);
 
   // 背景隔离：详情弹窗打开时，背景区域置为 inert + aria-hidden 并禁用指针事件，
   // 使背景内容对辅助技术与指针都不可达（弹窗本身不在该区域内，不受影响）。
-  useEffect(() => {
+  // 用 layout 阶段解除隔离：关闭 commit 的 layout 先移除 inert，
+  // 早于共享 BaseModal passive cleanup 里的同步 restoreFocus，
+  // 否则焦点会落在仍处 inert 子树的触发元素上，focus() 静默失效。
+  useLayoutEffect(() => {
     const el = backgroundRef.current;
     if (!el) return;
     if (isDetailOpen) {
@@ -1507,6 +1472,7 @@ export const SkillExplore: React.FC = () => {
       {/* 详情弹窗 */}
       <SkillDetailModal
         entry={activeDetailEntry}
+        isOpen={detailOpen}
         allSkills={allSkills}
         isEnabled={
           activeDetailEntry ? enabledSkills.includes(activeDetailEntry.slug) : false

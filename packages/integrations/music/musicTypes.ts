@@ -45,6 +45,10 @@ export type SourceCapabilities = {
 
 export type MusicSourceAdapter = {
   id: MusicSourceId;
+  /**
+   * 展示用标签（如「本地」「网易云」）。UI 只读这个字段，不按 id 硬编码分支。
+   */
+  label?: string;
   capabilities: SourceCapabilities;
   searchTracks?(q: { keyword: string; limit?: number; offset?: number }): Promise<{ tracks: Track[]; total: number }>;
   resolvePlayback(ref: TrackRef, opts?: { quality?: string }): Promise<PlaybackTarget>;

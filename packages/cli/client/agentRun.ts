@@ -1,3 +1,4 @@
+import { resolveSubtaskBudgetLimits } from "../../agent-runtime/subtaskBudget";
 import {
   LOCAL_AGENT_CONFIG_MISSING_CODE,
   LOCAL_TURN_ABORTED_CODE,
@@ -93,18 +94,14 @@ import {
   clearCredentialAvailability,
   readCredentialEntry,
   readEffectiveCredentialEntry,
-  recordCredentialProbe,
   resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
 import {
   classifyFailureSubclass,
   isCapacitySaturatedRateLimit,
   isQuotaExhaustedText,
-  mergeAvailabilityDeadline,
-  PROBE_INTERVAL_MS,
-  resolveCooldownGate,
+  resolveAvailabilityAction,
   resolveCredentialCandidateKeys,
-  type AgentRunFailureSubclass,
 } from "../../ai/agent/agentAvailabilityShared";
 import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
 import {
@@ -814,6 +811,7 @@ const HISTORY_REPLAY_REJECTION_RE = /invalid\s+tool\s+call\s+arguments?/i;
 /**
  * Detect the DeepSeek-style thinking-mode replay contract rejection:
  * `The reasoning_content in the thinking mode must be passed back to the API.`
+ * `The reasoning_text in the thinking mode must be passed back to the API.`
  * Upstream thinking models require every replayed assistant tool-call turn to
  * carry `reasoning_content`; Nolo can persist one without it when the gateway
  * omits reasoning on that round or the history came from a different model.
@@ -821,7 +819,7 @@ const HISTORY_REPLAY_REJECTION_RE = /invalid\s+tool\s+call\s+arguments?/i;
  * carries `invalid_request_error`-shaped text that used to fall into the
  * generic history-replay hint and mis-attribute the cause.
  */
-const REASONING_REPLAY_CONTRACT_RE = /reasoning_content[^.]*must be passed back/i;
+const REASONING_REPLAY_CONTRACT_RE = /reasoning_(?:content|text)[^.]*must be passed back/i;
 
 /**
  * Shared framing for the five non-402 local-run failure builders below.
@@ -1375,8 +1373,8 @@ function formatRateLimitResetHint(
  * 429/限流：跟随 locale 的紧凑 3 行块（zh/en 同结构）。旧文案是一条巨长英文 +
  * 结尾拼接中文冷却说明，既冗长又把「不是本地凭证问题」重复三遍。
  *   · 第 1 行 = 上游额度已用尽 / 上游限流（上游 tag）：清洗后的上游原文；
- *   · 第 2 行 = 冷却截止（本地时间）+ 上游复位 hint + 自动探测间隔；无
- *     cooldownUntil 时整行省略；
+ *   · 第 2 行 = 冷却截止（本地时间；仅作参考，本地不据此拦请求）+ 上游复位
+ *     hint；无 cooldownUntil 时整行省略；
  *   · 第 3 行 = 出口（换 agent / 强制走服务器 / 已充值清冷却）。
  * 文案不声称上游真的返回了 HTTP 429：headline 根本不带状态码，status 只是本地
  * 分类用的语义等价码。
@@ -1407,7 +1405,6 @@ function buildRateLimitFailure(ctx: FailureCtx): string {
         "localRunRateLimitCooldown",
         formatCooldownUntilLocal(cooldownUntil),
         resetValue ? t("localRunRateLimitResetNote", resetValue) : "",
-        String(Math.round(PROBE_INTERVAL_MS / 60000)),
       ),
     );
   }
@@ -1817,8 +1814,9 @@ export function describeLocalRunFailure(
  * 窗口（DEFAULT_PROVIDER_RETRY_MS），不新发明数值。
  *
  * 返回最终生效的冷却截止 ISO（agent 级与 credential 级取更晚者），供失败文案
- * 「已暂停该凭证的派发，最晚 <ISO> 自动解除」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
- * 一律返回 undefined（文案退回原样，退出码与退出路径不变）。
+ * 渲染「冷却至 <本地时间>；本地不据此拦截请求，该时刻仅作参考」（见
+ * localRunRateLimitCooldown）；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
+ * 一律返回 undefined（不追加冷却提示，退出码与退出路径不变）。
  */
 async function markStartupRateLimitCooldown(
   options: RunAgentTurnOptions,
@@ -1948,10 +1946,19 @@ async function readAgentRunFailureMetadata(
   };
 }
 
+/**
+ * 一次 HTTP turn 汇报给调用方的真实上游结论。
+ *
+ * 冷却判定不能把「HTTP 派发没报错」当成成功：2xx 的 body 里也可能带配额错误码
+ * （MiniMax 的 HTTP 200 + code 2056 这类，resolveAvailabilityAction 专门识别）。
+ * 因此这里透传真实 status 与解析后的 body，由共享纯函数自己判 mark/clear。
+ */
+type HttpTurnOutcome = { status: number; body?: unknown };
+
 async function runHttpAgentTurn(
   options: RunAgentTurnOptions,
   authToken: string,
-): Promise<RunAgentTurnResult> {
+): Promise<RunAgentTurnResult & { httpOutcome?: HttpTurnOutcome }> {
   const spinner = new Spinner(
     options.output,
     `${options.agentName} -> working`,
@@ -2099,7 +2106,8 @@ async function runHttpAgentTurn(
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("text/event-stream") && res.body) {
     const result = await readStreamingAgentRun(options, res, spinner);
-    return result;
+    // SSE 的 body 已被流式消费，只能带回 status；有 status 就不必再猜「成功」。
+    return { ...result, httpOutcome: { status: res.status } };
   }
 
   spinner.stop();
@@ -2187,7 +2195,8 @@ async function runHttpAgentTurn(
     model: typeof data?.model === "string" ? data.model : undefined,
     dialogServer: serverOriginForDialog(options.serverUrl),
   });
-  return serverResult;
+  // 冷却判定用真实 status + body（见 HttpTurnOutcome 注释）：本地据此判 mark/clear。
+  return { ...serverResult, httpOutcome: { status: res.status, body: data } };
 }
 
 async function runInjectedLocalAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
@@ -2353,6 +2362,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
     ...(runtimeContext ?? {}),
     dialogId: currentDialogId,
     turnId,
+    getProcessCausalDepth: options.getProcessCausalDepth,
   };
 
   const adapter = baseAdapter;
@@ -2438,6 +2448,9 @@ async function executeLocalAgentTurnForCliWithAdapter(
       parentDialogId: options.parentDialogId,
       runtimeContext: runtimeContextWithOwnership,
       runKind: options.env.NOLO_AGENT_RUN_CHILD === "1" ? "subtask" : "interactive",
+      ...(options.env.NOLO_AGENT_RUN_CHILD === "1"
+        ? { subtaskBudgetLimits: resolveSubtaskBudgetLimits({ env: options.env }) }
+        : {}),
       // 展示能力由宿主声明（TUI=narrow），非交互 CLI/后台留空 → unknown；
       // 排版段只在能力已知时由 localLoop 注入，server 线不读该字段。
       ...(options.responseViewport
@@ -2632,22 +2645,14 @@ async function executeLocalAgentTurnForCliWithAdapter(
   }
 }
 
-/**
- * HTTP/server 派发前的本地冷却预检。
- *
- * server 端 admission guard 只读 server KV 的 agent 记录，而 CLI 本地 runtime
- * 的 429 冷却按设计只落本地（credential-availability.json + 本地 agent store，
- * 见 localRuntimeAdapter 的 mark/gate）——本地限流的 agent 经 HTTP 派发时
- * server guard 看不到标记，会放行 run 再在执行期失败。
- *
- * 这里在发起 POST 前用同一套共享判据（resolveCooldownGate）预检本地冷却：
- * - "blocked" → 直接报错返回（附恢复时刻），不发请求。
- * - "probe" → 放行并记录探测时间（与执行期 gate 同语义，冷却自愈依赖它）。
- * - 本地无 agent 配置 / 无 credential key → 无法判定，放行（server 端 guard 负责）。
- */
-async function checkLocalAvailabilityBeforeHttpDispatch(
+/** Resolve local credential keys for success cleanup (cooldown is reference-only). */
+async function resolveLocalCredentialKeysForDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode?: 1; credentialKey?: string; failureSubclass?: AgentRunFailureSubclass } | null> {
+): Promise<{
+  credentialKey?: string;
+  matchedKey?: string;
+  recordSuccess?: (status: number, body?: unknown) => Promise<unknown>;
+} | null> {
   // 云后端 runtimeKey（gcp / instabox / machine:*）的 run 由服务端通道执行，
   // 本地 adapter 不参与：这里若照旧构造它，本地通道的 fail-closed 闸门
   // （assertRuntimeKeyLocalFulfillable）会错误地打死一次合法的 server 派发
@@ -2677,9 +2682,7 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
   );
   // 外来 OAuth agent（resolveOAuthChannelOwnerSkip 命中）的 run 走所有者通道，
   // 不使用本机凭据——本机 credential 级冷却条目对其是 false positive（收藏者
-  // 自己的历史 429 会把走所有者通道的 run 拦到窗口重置）。排除之；agent 级
-  // nextAvailableAt（server 记录，反映所有者通道可用性）仍然生效，probe 亦跳过
-  // （不写本机凭据的探测时间）。
+  // 自己的历史 429 与 owner 通道无关）。跳过本机成功回写。
   if (
     credentialKey &&
     resolveOAuthChannelOwnerSkip(
@@ -2687,56 +2690,30 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
       options,
     )
   ) {
-    credentialKey = undefined;
-  }
-  const agentLevelAt = (baseRecord as { nextAvailableAt?: unknown }).nextAvailableAt;
-  const agentLevelNextAvailableAt =
-    typeof agentLevelAt === "number" && Number.isFinite(agentLevelAt)
-      ? agentLevelAt
-      : undefined;
-  if (!credentialKey && agentLevelNextAvailableAt === undefined) {
-    return { credentialKey };
+    return null;
   }
   const env = options.env as NodeJS.ProcessEnv;
   const now = Date.now();
-  let entry: { nextAvailableAt: number; lastProbeAt?: number } | undefined;
-  let matchedKey: string | undefined;
-  if (credentialKey) {
-    const effective = await readEffectiveCredentialEntry(credentialKey, env, now).catch(() => undefined);
-    if (effective) {
-      entry = effective;
-      matchedKey = effective.matchedKey;
-    }
-  }
-  const entryAt = entry?.nextAvailableAt;
-  const effectiveNextAvailableAt =
-    typeof entryAt === "number"
-      ? mergeAvailabilityDeadline(agentLevelNextAvailableAt, entryAt)
-      : agentLevelNextAvailableAt;
-  const activeKey = matchedKey || credentialKey;
-  if (typeof effectiveNextAvailableAt !== "number") {
-    return { credentialKey: credentialKey || activeKey, matchedKey };
-  }
-  const gateDecision = resolveCooldownGate(
-    { nextAvailableAt: effectiveNextAvailableAt, lastProbeAt: entry?.lastProbeAt },
-    now,
-  );
-  if (gateDecision === "probe" && activeKey) {
-    // 与执行期 gate 同语义：放行本次真实请求前记录探测时间，避免间隔内反复重试。
-    await recordCredentialProbe(activeKey, env, now).catch(() => undefined);
-    return { credentialKey: credentialKey || activeKey, matchedKey };
-  }
-  if (gateDecision !== "blocked") return { credentialKey: credentialKey || activeKey, matchedKey };
-  options.output.write(
-    `${t(
-      "agentCooldownBlocked",
-      options.agentName || options.agentKey,
-      formatCooldownUntilLocal(
-        new Date(Number(effectiveNextAvailableAt)).toISOString(),
-      ),
-    )}\n`,
-  );
-  return { exitCode: 1, failureSubclass: "rate_limit" };
+  const entry = credentialKey
+    ? await readEffectiveCredentialEntry(credentialKey, env, now).catch(() => undefined)
+    : undefined;
+  const recorder = adapter as AgentRuntimeHostAdapter & {
+    recordStartupAvailabilityForAgent?(
+      agentRef: string,
+      status: number,
+      body?: unknown,
+    ): Promise<unknown>;
+  };
+  return {
+    credentialKey,
+    matchedKey: entry?.matchedKey,
+    // 真实 status/body 由调用方透传（不再固定 200 无 body）：HTTP 2xx 的 body 里
+    // 也可能带配额错误码，固定成功的判定会把这类响应当成恢复而清掉冷却。
+    recordSuccess: recorder.recordStartupAvailabilityForAgent
+      ? (status: number, body?: unknown) =>
+          recorder.recordStartupAvailabilityForAgent!(options.agentKey, status, body)
+      : undefined,
+  };
 }
 
 /**
@@ -2921,28 +2898,38 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   // 服务端据此跳过 dialog 持久化），与本地 wrapAdapterEphemeral 一致。
   // 无需在此警告"仅 local 生效"——那是修复前的过时语义。
 
-  // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
-  const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
-  if (localAvailability?.exitCode) {
-    return {
-      exitCode: localAvailability.exitCode,
-      failureSubclass: localAvailability.failureSubclass ?? "rate_limit",
-    };
-  }
-
-  const httpResult = await runHttpAgentTurn(options, authToken);
+  // Read advisory cooldown state; never veto HTTP dispatch.
+  const localAvailability = await resolveLocalCredentialKeysForDispatch(options);
+  // httpOutcome 只是本函数判可用性的内部管道（见 HttpTurnOutcome），不进入对外的
+  // RunAgentTurnResult：解构掉再返回，公开结果形状保持不变。
+  const { httpOutcome, ...httpResult } = await runHttpAgentTurn(options, authToken);
   // 流中断（exitCode 0 + streamInterrupted，见 runHttpAgentTurn 内 abort 分支）
   // 不代表 HTTP 派发成功，不能据此清冷却。
   if (
     httpResult.exitCode === 0 &&
     !httpResult.streamInterrupted &&
-    (localAvailability?.credentialKey || localAvailability?.matchedKey)
+    localAvailability
   ) {
-    const keyToClear = localAvailability.credentialKey || localAvailability.matchedKey!;
-    await clearCredentialAvailability(
-      keyToClear,
-      options.env as NodeJS.ProcessEnv,
-    ).catch(() => undefined);
+    // 用上游真实 status + body 判（共享纯函数识别「2xx 但 body 带配额错误码」）；
+    // 拿不到 outcome 时不猜成功，跳过这次可用性回写。
+    const action = httpOutcome
+      ? resolveAvailabilityAction(httpOutcome.status, httpOutcome.body, Date.now())
+      : undefined;
+    if (action?.kind === "clear") {
+      const keyToClear = localAvailability.credentialKey || localAvailability.matchedKey;
+      if (keyToClear) {
+        await clearCredentialAvailability(
+          keyToClear,
+          options.env as NodeJS.ProcessEnv,
+        ).catch(() => undefined);
+      }
+    }
+    if (httpOutcome) {
+      // action 为 mark 时这里落冷却（不再被上面的直接 clear 抹掉）。
+      await localAvailability
+        .recordSuccess?.(httpOutcome.status, httpOutcome.body)
+        .catch(() => undefined);
+    }
   }
   return httpResult;
 }

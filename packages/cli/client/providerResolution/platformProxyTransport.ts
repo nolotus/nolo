@@ -112,6 +112,7 @@ export const resolvePlatformProxyTransport: ProviderResolver = async (ctx) => {
             {
               sleep: deps.sleep,
               loopbackRequest,
+              ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
               // A chat POST is not safe to replay after an ambiguous network or
               // gateway failure: the server/provider may already have accepted
               // it. The client only waits through the server's explicit pre-

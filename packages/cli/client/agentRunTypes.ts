@@ -174,6 +174,7 @@ export type TaskEvidenceInput = {
 };
 
 export type RunAgentTurnOptions = {
+  getProcessCausalDepth?: () => number;
   agentName: string;
   agentKey: string;
   serverUrl: string;
@@ -305,7 +306,7 @@ export type RunAgentTurnOptions = {
   actionGateHandler?: (
     gate: LocalAgentActionGate,
   ) => Promise<AgentRuntimeToolResult | void>;
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../../agent-runtime/actionGate").HostConfirmDecision>;
   /** Interactive ask_user dialog; absent in headless/CI mode. */
   requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
   /** Cooperative stop (TUI Esc): aborted turns return exitCode 0 + streamInterrupted. */

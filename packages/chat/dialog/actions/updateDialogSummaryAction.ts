@@ -20,9 +20,7 @@ import { extractReferenceKeysFromMessage } from "./extractReferenceKeys";
 import {
     COMPACTION_SUMMARY_SYSTEM_PROMPT,
     computeSummarySourceMetadata,
-    formatMessagesForSummaryWithTruncation,
-    formatFileOperationsFromMessages,
-    buildCompactionUserContent,
+    buildBoundedCompactionRequest,
     buildCompactionMetricsFromPlan,
     formatCompactionMetricsLog,
 } from "../../../ai/context/compactionShared";
@@ -133,31 +131,29 @@ export const updateDialogSummaryAction = async (
 
         if (!plan.shouldCompress) return;
 
-        const { msgsToCompress, newSummarizedBeforeId } = plan;
-
-        // 4. 提取引用 Keys 并保存
-        // 这一步非常重要：因为这些消息即将从 context 中消失，必须把 key 留下来。
-        // 统一用 extractReferenceKeysFromMessage 覆盖 content / tool_calls / toolPayload
-        // 三个来源，避免 tool 调用参数里引用的 page/dialog/table key 在压缩后永久丢失。
-        const extractedKeys = new Set(dialogConfig.referenceKeys || []);
-        for (const msg of msgsToCompress) {
-            for (const key of extractReferenceKeysFromMessage(msg)) {
-                extractedKeys.add(key);
-            }
-        }
-
-        // 5. 生成新 Summary（统一用共享模块的三段式 prompt + 截断 + 文件操作清单）
         const previousSummary = dialogConfig.summary || "";
-        const messagesText = formatMessagesForSummaryWithTruncation(msgsToCompress);
-        const fileOpsText = formatFileOperationsFromMessages(
-            msgsToCompress,
-            identityCanonicalName,
+        // The same request is retried on the fallback model. Bound it against
+        // both summary models, never against the dialog agent's larger window.
+        // Unknown model windows use a conservative 32k boundary.
+        const summaryWindow = Math.min(
+            resolveAgentContextWindow({ model: BUILTIN_SUMMARY_LLM_CONFIG.model, provider: BUILTIN_SUMMARY_LLM_CONFIG.provider }) ?? 32_768,
+            resolveAgentContextWindow({ model: BUILTIN_DIALOG_LLM_FALLBACK_MODEL, provider: BUILTIN_SUMMARY_LLM_CONFIG.provider }) ?? 32_768,
         );
-        const promptContent = buildCompactionUserContent({
+        const request = buildBoundedCompactionRequest({
+            msgsToCompress: plan.msgsToCompress,
             previousSummary,
-            messagesText,
-            fileOpsText,
+            contextWindow: summaryWindow,
+            canonicalizeToolName: identityCanonicalName,
         });
+        if (request.status === "blocked") {
+            notifyCompressionFailure(new Error(`摘要请求无法安全构建（${request.reason}），原历史保持不变`));
+            return;
+        }
+        const { coveredMessages, summarizedBeforeId: newSummarizedBeforeId, promptContent, outputTokenBudget } = request;
+        const extractedKeys = new Set(dialogConfig.referenceKeys || []);
+        for (const msg of coveredMessages) {
+            for (const key of extractReferenceKeysFromMessage(msg)) extractedKeys.add(key);
+        }
 
         try {
             // 调用内置 Summary LLM，用统一的 system prompt 覆盖原 BUILTIN_SUMMARY_LLM_CONFIG.prompt
@@ -168,6 +164,7 @@ export const updateDialogSummaryAction = async (
                             ...BUILTIN_SUMMARY_LLM_CONFIG,
                             ...(model ? { model } : {}),
                             prompt: COMPACTION_SUMMARY_SYSTEM_PROMPT,
+                            max_tokens: outputTokenBudget,
                         },
                         content: promptContent,
                         billingDialogKey: dialogKey,
@@ -228,7 +225,10 @@ export const updateDialogSummaryAction = async (
                 const metrics = buildCompactionMetricsFromPlan({
                     reason: args.reason || "context_budget",
                     previousSummary: dialogConfig.summary || "",
-                    plan,
+                    plan: {
+                        msgsToCompress: coveredMessages,
+                        msgsToKeep: [...plan.msgsToCompress.slice(coveredMessages.length), ...plan.msgsToKeep],
+                    },
                     newSummary: newSummary.trim(),
                     // web 端 runLlm 只返回摘要字符串，不含 usage。
                     // summaryUsage 需要 runLlm 改造才能获取，当前留空。

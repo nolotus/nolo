@@ -45,6 +45,8 @@ export {
 export type {
   AgentRuntimeAgentConfig,
   AgentRuntimeHostAdapter,
+  AgentRuntimeProvider,
+  AgentRuntimeProviderResolveOptions,
   AgentRuntimeRequestedMode,
   AgentRuntimeSaveTurnInput,
   AgentRuntimeToolResult,

@@ -648,6 +648,33 @@ export const createTokenStatsAppliedKey = Object.assign(
 );
 
 /**
+ * 日聚合重建的**原值备份**：`usage-backup-<userId>-<dateKey>-<unixMs>`。
+ *
+ * 写方：`nolo usage rebuild --apply` 覆盖某日 DayStats 前把原值整体存一份（值就是原 DayStats）。
+ * 读方：只有人工回滚（把值写回 `token-stats-day-user-<userId>-<dateKey>`），没有任何自动读取路径。
+ *
+ * 命名刻意落在 `token-*` 命名空间之外（`usage-` 在字典序上大于 `token-…\uffff`），否则备份会被
+ * 日/月统计扫描当成一条真实统计再累加一次（月成本翻倍）。代价与 `token-charge-stats` 完全相同：
+ * 「不在统计范围里」也意味着删号不会顺带清掉它 → 必须由删号链路显式按用户清理。
+ *
+ * ⚠️ userId 段同样没有边界编码，范围 `[usage-backup-u- , usage-backup-u-\uffff]` 会圈住
+ * `usage-backup-u-next-…`（公共前缀之后 `-` < `n` < `\uffff`）。
+ * 调用方必须再用 `value.userId === userId` 精确筛选后才删：备份值就是原 DayStats，带 userId；
+ * 缺 userId 或值是别人的记录一律不删（宁可留下可人工清理的残留，也不能误删他人）。
+ */
+export const createUsageBackupKey = Object.assign(
+  (userId: string, dateKey: string, nowMs: number) =>
+    createKey("usage", "backup", userId, dateKey, nowMs),
+  {
+    /** 某个用户的全部日聚合备份范围：usage-backup-<userId>-* */
+    rangeOfUser: (userId: string) => ({
+      start: createKey("usage", "backup", userId, ""),
+      end: createKey("usage", "backup", userId, "\uffff"),
+    }),
+  }
+);
+
+/**
  * 判断一个 dbKey 是否是 Token Stats 的 key
  * 形如：token-stats-day-user-{userId}-{dateKey} 或任何 token-stats-* 统计 key
  */

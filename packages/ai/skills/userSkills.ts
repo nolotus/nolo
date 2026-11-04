@@ -40,7 +40,7 @@ const SUPPORTED_USER_SKILL_SLUG_SET: ReadonlySet<string> = new Set<string>(
 /**
  * 推荐用户 Skill slug 清单（供 UI 推荐排序与展示，推荐与可启用互相独立）。
  */
-export const RECOMMENDED_USER_SKILL_SLUGS = ["ub-mode"] as const;
+export const RECOMMENDED_USER_SKILL_SLUGS = ["ub-mode", "auto-review"] as const;
 
 export type RecommendedUserSkillSlug =
   (typeof RECOMMENDED_USER_SKILL_SLUGS)[number];

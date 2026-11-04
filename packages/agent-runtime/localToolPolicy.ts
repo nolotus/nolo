@@ -209,7 +209,7 @@ export async function runExecShellGates(args: {
   detachMs?: number;
   confirmed?: boolean;
   enableDestructiveShellGuard?: boolean;
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("./actionGate").HostConfirmDecision>;
   blockDestructiveWithoutConfirmation?: boolean;
 }): Promise<ExecShellGateOutcome> {
   const opts: Record<string, unknown> = {
@@ -248,7 +248,11 @@ export async function runExecShellGates(args: {
       parsedInput = { command: parsedInput };
     }
   }
-  await evaluateExecShellDestructiveGuard(parsedInput, opts as any);
+  // 宿主可能在确认阶段代为执行（hostResult）：非空即返回 handled，原命令不再 spawn。
+  const hostExecutedResult = await evaluateExecShellDestructiveGuard(parsedInput, opts as any);
+  if (hostExecutedResult) {
+    return { kind: "handled", result: hostExecutedResult };
+  }
   opts.confirmed = true;
   return { kind: "pass", opts };
 }
@@ -283,7 +287,7 @@ export async function executeLocalToolWithPolicy(args: {
    * channel only stalled the agent turn for minutes while the model
    * retried the same `rm`.
    */
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("./actionGate").HostConfirmDecision>;
   /**
    * Whether to enforce the destructive-shell-command guard. Defaults to true.
    * Kept for callers that still gate the guard via a separate flag; when false,

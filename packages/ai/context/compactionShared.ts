@@ -243,6 +243,175 @@ export function formatFileOperationsFromMessages(
   return allOps.map((op) => `- ${typeLabelMap[op.type]}: ${op.path}`).join("\n");
 }
 
+/** A bounded request is a lossy projection; the original messages remain in history. */
+export type CompactionRequestMessage = {
+  id: string;
+  role: string;
+  content: unknown;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id?: string;
+    function?: { name?: string; arguments?: unknown };
+    name?: string;
+  }>;
+};
+
+export type BoundedCompactionRequest<T extends CompactionRequestMessage> =
+  | { status: "ready"; promptContent: string; coveredMessages: T[];
+      summarizedBeforeId: string; inputTokens: number; outputTokenBudget: number; partial: boolean }
+  | { status: "blocked"; reason: "invalid-window" | "empty-input" | "no-budget" | "no-safe-group" | "group-too-large" };
+
+/** Head, evidence and tail are selected from the original, never from an
+ * already truncated projection. This is intentionally separate from the
+ * legacy formatter, whose no-evidence branch preserves its old head-only form. */
+function makeBoundedExcerpt(content: string): (maxChars: number) => string {
+  const evidence = selectEvidenceLines(content.split("\n"));
+  return (maxChars) => {
+    if (content.length <= maxChars) return content;
+    const marker = `\n[... ${content.length} chars projected ...]\n`;
+    const available = maxChars - marker.length;
+    if (available < 3) return marker.trim();
+    const evidenceCap = Math.floor(available * 0.2);
+    const selected: string[] = [];
+    let evidenceLength = 0;
+    for (const line of evidence) {
+      const cost = line.length + 1;
+      if (evidenceLength + cost > evidenceCap) continue;
+      selected.push(line);
+      evidenceLength += cost;
+    }
+    const remainder = available - evidenceLength;
+    const headLength = Math.ceil(remainder / 2);
+    const tailLength = Math.floor(remainder / 2);
+    return content.slice(0, headLength) + marker +
+      (selected.length ? selected.join("\n") + "\n" : "") +
+      (tailLength ? content.slice(-tailLength) : "");
+  };
+}
+
+/**
+ * Project the entire safe plan, retaining every message's role and id. Input
+ * counts use the shared estimator, not the provider's tokenizer. Original
+ * messages stay in history; projected assistant/tool text can be lossy.
+ */
+export function buildBoundedCompactionRequest<T extends CompactionRequestMessage>(args: {
+  msgsToCompress: T[];
+  previousSummary: string;
+  contextWindow: number;
+  canonicalizeToolName?: (name: string) => string;
+}): BoundedCompactionRequest<T> {
+  const { msgsToCompress: msgs, previousSummary, contextWindow } = args;
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return { status: "blocked", reason: "invalid-window" };
+  if (!msgs.length) return { status: "blocked", reason: "empty-input" };
+  const window = Math.floor(contextWindow);
+  const outputTokenBudget = Math.min(8192, Math.max(1, Math.floor(window / 4)));
+  const cap = Math.min(computeSummaryInputTokenCap(contextWindow), window - outputTokenBudget);
+  const systemTokens = estimateTokenCount(COMPACTION_SUMMARY_SYSTEM_PROMPT);
+
+  // Require the whole input to consist of closed tool groups, not just a safe prefix.
+  for (let i = 0; i < msgs.length;) {
+    const msg = msgs[i];
+    if (msg.role === "tool") return { status: "blocked", reason: "no-safe-group" };
+    const calls = msg.role === "assistant" && Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    if (!calls.length) {
+      i++;
+      continue;
+    }
+    const ids = calls.map((call) => call.id);
+    const hasIds = ids.every((id) => typeof id === "string" && id.length > 0);
+    // Legacy positional pairing is allowed only when every call and result
+    // omits its ID. Empty or mixed IDs are not a valid pairing mode.
+    if ((!hasIds && ids.some((id) => id !== undefined)) || (hasIds && new Set(ids).size !== ids.length)) {
+      return { status: "blocked", reason: "no-safe-group" };
+    }
+    const remaining = new Set(ids);
+    let count = 0;
+    i++;
+    while (i < msgs.length && msgs[i].role === "tool") {
+      const id = msgs[i].tool_call_id;
+      if (hasIds ? (!id || !remaining.delete(id)) : id !== undefined) {
+        return { status: "blocked", reason: "no-safe-group" };
+      }
+      count++;
+      i++;
+    }
+    if (count !== calls.length || (hasIds && remaining.size)) return { status: "blocked", reason: "no-safe-group" };
+  }
+
+  const canonicalize = args.canonicalizeToolName ?? ((name: string) => name);
+  const operations = new Map<string, FileOperation>();
+  for (const msg of msgs) {
+    if (!Array.isArray(msg.tool_calls)) continue;
+    for (const op of extractFileOperationsFromCalls(msg.tool_calls, canonicalize)) {
+      operations.set(JSON.stringify([op.type, op.path]), op);
+    }
+  }
+  const labelsByOperation = { read: "读取", write: "写入", edit: "编辑" };
+  const fileOpsText = [...operations.values()].map((op) => `- ${labelsByOperation[op.type]}: ${op.path}`).join("\n") || "无";
+  const note = "以下是有损投影，部分消息可能被截取；原文仍存历史。";
+  const omitted = "[... 内容已截取 ...]";
+  const contents = msgs.map((msg) => serializeMessageContent(msg.content) || formatMessageContentFallback(msg));
+  const excerpts = contents.map((content, i) => msgs[i].role === "user" ? undefined : makeBoundedExcerpt(content));
+  const raw = contents.map((content, i) => msgs[i].role === "tool" ? excerpts[i]!(TOOL_RESULT_TRUNCATE_CHARS) : content);
+  const labels = msgs.map((msg) => `${msg.role} [id=${JSON.stringify(msg.id)}]: `);
+  const projected = msgs.map((msg, i) => msg.role === "user" ? raw[i] : omitted);
+  const makePrompt = () => buildCompactionUserContent({
+    previousSummary, fileOpsText,
+    messagesText: `${note}\n${labels.map((label, i) => label + projected[i]).join("\n")}`,
+  });
+  const base = makePrompt();
+  const baseTokens = systemTokens + estimateTokenCount(base);
+  if (baseTokens > cap) return { status: "blocked", reason: "no-budget" };
+
+  // Allocate remaining tokens fairly, with assistant content weighted twice as
+  // highly as tool content; short messages return their unused share. Estimating
+  // each addition separately rounds upward and therefore cannot exceed the cap.
+  const remaining = cap - baseTokens;
+  const demands = raw.map((text, i) => msgs[i].role === "user" ? 0 : estimateTokenCount(text));
+  const weights = msgs.map((msg) => msg.role === "assistant" ? 2 : 1);
+  let low = 0;
+  let high = remaining + 1;
+  while (low + 1 < high) {
+    const mid = Math.floor((low + high) / 2);
+    const used = demands.reduce((sum, demand, i) => sum + Math.min(demand, mid * weights[i]), 0);
+    if (used <= remaining) low = mid;
+    else high = mid;
+  }
+  let extra = remaining - demands.reduce((sum, demand, i) => sum + Math.min(demand, low * weights[i]), 0);
+  for (let i = 0; i < msgs.length; i++) {
+    if (msgs[i].role === "user") continue;
+    let allowance = Math.min(demands[i], low * weights[i]);
+    const bonus = Math.min(extra, demands[i] - allowance);
+    allowance += bonus;
+    extra -= bonus;
+    if (demands[i] <= allowance) {
+      projected[i] = raw[i];
+      continue;
+    }
+    // Search against the original content; count the actual marker and excerpt.
+    let lo = 0;
+    let hi = Math.min(contents[i].length, msgs[i].role === "tool" ? TOOL_RESULT_TRUNCATE_CHARS : contents[i].length);
+    let best = omitted;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const candidate = excerpts[i]!(mid);
+      if (estimateTokenCount(candidate) <= allowance) {
+        best = candidate;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    projected[i] = best;
+  }
+  const promptContent = makePrompt();
+  const inputTokens = systemTokens + estimateTokenCount(promptContent);
+  // Defensive check: never send a request exceeding the estimated budget.
+  if (inputTokens > cap) return { status: "blocked", reason: "no-budget" };
+  return { status: "ready", promptContent, coveredMessages: msgs.slice(),
+    summarizedBeforeId: msgs[msgs.length - 1].id, inputTokens, outputTokenBudget, partial: false };
+}
+
 // --- 工具结果截断（P0-2，学 Pi） ---
 
 /**

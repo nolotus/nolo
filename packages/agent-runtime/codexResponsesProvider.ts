@@ -5,7 +5,6 @@ import { deriveStableUuid, isStableSessionIdentityEnabled } from "./sessionIdent
 import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
 import { randomUUID } from "node:crypto";
 import { asOptionalTrimmedString } from "core/optionalString";
-import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import {
   createProviderCallTimingTracker,
   finalizeProviderCallTiming,
@@ -310,6 +309,8 @@ export function buildCodexRequestBody(
         : stablePromptCacheKey([model, stableInstructions, tools ?? []], "nolo-codex"),
     client_metadata: identity.clientMetadata,
   };
+  const reasoningEffort = args.openAiBody.reasoning_effort;
+  if (reasoningEffort === "low") body.reasoning = { effort: reasoningEffort };
   if (instructions) body.instructions = instructions;
   if (tools && tools.length > 0) {
     body.tools = tools;
@@ -544,14 +545,14 @@ export async function fetchCodexResponsesCompletion(
   return result;
 }
 
-/** Detects a ChatGPT Codex OAuth agent (apiKeyRef "chatgpt"). */
-export function isCodexOAuthAgent(
-  agentConfig: Pick<AgentRuntimeAgentConfig, "apiKeyRef" | "provider"> | null | undefined,
-): boolean {
-  if (!agentConfig) return false;
-  const apiKeyRef = asTrimmedLowercaseString(agentConfig.apiKeyRef);
-  return apiKeyRef === "chatgpt";
-}
+/**
+ * Detects a ChatGPT Codex OAuth agent (apiKeyRef "chatgpt").
+ *
+ * 判据本体已抽到纯模块 codexOAuthPure.ts（不 import node:crypto，浏览器图可引用：
+ * devin/devinChannelWindows.ts 的 resolveAgentContextWindow 需要它）。这里 re-export
+ * 保持公开 API 不变，调用方不需要改 import 路径。
+ */
+export { isCodexOAuthAgent } from "./codexOAuthPure";
 
 /** 发起 ChatGPT Codex Responses 上游原生请求，直接返回原始 Response（用于客户端原生直通）。 */
 export async function sendCodexResponsesRequest(args: {

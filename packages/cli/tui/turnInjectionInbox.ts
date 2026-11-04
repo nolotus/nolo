@@ -32,7 +32,7 @@ export interface TurnInjectionInbox<TFallback = unknown> {
    */
   push: (entry: TurnInjectionEntry<TFallback>) => boolean;
   /** 取走并清空全部待注入文本；供 local loop 的 drainInjections 回调使用。 */
-  drain: () => string[];
+  drain: (onEntry?: (entry: TurnInjectionEntry<TFallback>) => void) => string[];
   /** 关闭收件箱并返回尚未被 loop 消化的残留条目，供 finally 兜底重投。 */
   close: () => TurnInjectionEntry<TFallback>[];
   /** 当前待注入条目数（测试与诊断用）。 */
@@ -99,11 +99,11 @@ export function createTurnInjectionInbox<
       pending.push(entry);
       return true;
     },
-    drain() {
+    drain(onEntry) {
       if (pending.length === 0) return [];
       const taken = pending;
       pending = [];
-      return taken.map((entry) => entry.text);
+      return taken.map((entry) => { onEntry?.(entry); return entry.text; });
     },
     close() {
       closed = true;

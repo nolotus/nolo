@@ -431,14 +431,8 @@ export const resolveOwnerOAuthProxyTransport: ProviderResolver = async (ctx) => 
               retryNetworkErrors: false,
               // 内层预算按「剩余总额度」裁剪：普通可重试状态码 ≤ 3 次、503
               // core_draining 排空窗口 ≤ 30 次，且都不超过剩余总额度。
-              maxAttempts: Math.min(
-                OWNER_PROXY_GENERIC_MAX_ATTEMPTS,
-                remaining,
-              ),
-              coreDrainingMaxAttempts: Math.min(
-                OWNER_PROXY_CORE_DRAINING_MAX_ATTEMPTS,
-                remaining,
-              ),
+              maxAttempts: options?.noRetries ? 1 : Math.min(OWNER_PROXY_GENERIC_MAX_ATTEMPTS, remaining),
+              coreDrainingMaxAttempts: options?.noRetries ? 1 : Math.min(OWNER_PROXY_CORE_DRAINING_MAX_ATTEMPTS, remaining),
               // 注意：计数必须**无条件**挂在 onRetry 上——若只在有 activityReporter
               // 时才挂，innerRetries / usedAttempts 会漏计，重试预算就形同虚设。
               onRetry: ({ attempt, maxAttempts, delayMs }) => {
@@ -456,7 +450,7 @@ export const resolveOwnerOAuthProxyTransport: ProviderResolver = async (ctx) => 
         };
         // 403 owner_origin_mismatch 的有界重试放在 core helper 之外：它需要的是
         // 「等连接器 WS 重连」的秒级窗口，而不是 core 的 attempt*250ms 退避。
-        const res = await sendWithOwnerOriginMismatchRetry(
+        const res = options?.noRetries ? (await send()).response : await sendWithOwnerOriginMismatchRetry(
           send,
           init.signal ?? undefined,
           deps.activityReporter

@@ -227,7 +227,9 @@ export function parseProjectionReleaseMetadata(raw: string): ProjectionReleaseMe
       `[projection-release-metadata] metadata file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const fail = (message: string): never => {
+  // 显式类型注解是必要的：TS 只对「有显式声明类型」的 never 返回函数做控制流分析，
+  // 推断类型的 const 箭头函数不会让后续分支被判定为不可达，窄化也就保不住。
+  const fail: (message: string) => never = (message) => {
     throw new Error(`[projection-release-metadata] ${message}`);
   };
   if (typeof json !== "object" || json === null) fail("metadata root must be a JSON object");
@@ -268,16 +270,20 @@ export function parseProjectionReleaseMetadata(raw: string): ProjectionReleaseMe
   ) as ProjectionReleaseMetadata["components"];
   if (typeof meta.provenance !== "object" || meta.provenance === null) fail("provenance must be an object");
   const provenance = meta.provenance as Record<string, unknown>;
-  if (typeof provenance.sourceSha !== "string" || !/^[0-9a-f]{40}$/.test(provenance.sourceSha)) {
-    fail(`provenance.sourceSha must be a 40-hex commit SHA, got ${JSON.stringify(provenance.sourceSha)}`);
+  // Index-signature 属性（Record<string, unknown>.x）的窄化不会跨语句保留，
+  // 所以先落到局部 const 再判，避免返回值里又退回 unknown。
+  const sourceSha = provenance.sourceSha;
+  if (typeof sourceSha !== "string" || !/^[0-9a-f]{40}$/.test(sourceSha)) {
+    fail(`provenance.sourceSha must be a 40-hex commit SHA, got ${JSON.stringify(sourceSha)}`);
   }
-  if (provenance.sourceBranch !== null && (typeof provenance.sourceBranch !== "string" || provenance.sourceBranch.length === 0)) {
+  const sourceBranch = provenance.sourceBranch;
+  if (sourceBranch !== null && (typeof sourceBranch !== "string" || sourceBranch.length === 0)) {
     fail("provenance.sourceBranch must be a non-empty string or null");
   }
   return {
     schemaVersion: PROJECTION_RELEASE_METADATA_SCHEMA_VERSION,
     components,
-    provenance: { sourceSha: provenance.sourceSha, sourceBranch: provenance.sourceBranch },
+    provenance: { sourceSha, sourceBranch },
   };
 }
 

@@ -299,7 +299,7 @@ function isAgentKeyShapedName(agentName: string): boolean {
  * (formatStartRunCard): the row keeps `name  #id` rather than composing
  * `title · name` again.
  */
-function formatIdentityRow(
+export function formatIdentityRow(
   agentName: string,
   runId?: string,
   opts?: { title?: string; titleOnOwnLine?: boolean; unnamedAgent?: string }
@@ -420,6 +420,19 @@ export function formatStartRunCard(
     lines.push(`  ${L.rows.task}${clipText(task, TASK_PREVIEW_MAX)}`);
   }
   return lines.join("\n");
+}
+
+export function formatControlRunMessageCard(opts: {
+  action: "queued" | "continued" | "consumed";
+  runId: string;
+  targetId?: string;
+  userInput: string;
+  labels?: Partial<{ queued: string; continued: string; consumed: string; run: string; target: string; message: string }>;
+}): string {
+  const action = opts.labels?.[opts.action] ?? opts.action;
+  const target = opts.targetId ? `\n  ${opts.labels?.target ?? "target"}  ${opts.targetId}` : "";
+  const message = opts.userInput.replace(/[\r\t]/g, " ").replace(/\u001b\[[0-?]*[ -/]*[@-~]|[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
+  return `${action}\n  ${opts.labels?.run ?? "run"}     ${opts.runId}${target}\n  ${opts.labels?.message ?? "message"}  ${message}`;
 }
 
 /** Card rows stay one terminal line; long text is clipped, never wrapped. */
@@ -644,9 +657,11 @@ export function isAgentRunTerminalStatus(status: string | undefined): boolean {
  * 从 ai/tools/noloWorkspaceReadTools.ts 迁入：CLI 显示层（cli/client/toolOutput.ts）
  * 只需要这段格式化逻辑，不应为此静态依赖整个 workspace 工具模块。
  *
- * 语义与迁出前逐字一致。
+ * 额度/冷却只作参考展示，不影响候选展示或派发。
  */
 export interface SafeAgentSummaryForCard {
+  availabilityStatus?: string;
+  nextAvailableAt?: number;
   name?: string | null;
   model?: string | null;
   provider?: string | null;
@@ -661,7 +676,12 @@ export interface SafeAgentSummaryForCard {
   id?: string | null;
 }
 
-export function formatAgentListCard(agents: SafeAgentSummaryForCard[], maxDisplay = 8): string {
+export function formatAgentListCard(
+  agents: SafeAgentSummaryForCard[],
+  maxDisplay = 8,
+  now: Date = new Date(),
+  includeKeys = true,
+): string {
   const total = agents.length;
   const lines: string[] = [`Agents (${total})`];
   const visible = agents.slice(0, maxDisplay);
@@ -672,10 +692,40 @@ export function formatAgentListCard(agents: SafeAgentSummaryForCard[], maxDispla
     const model = agent.model || "—";
     const source = agent.apiSource || agent.provider || agent.cliProvider || "—";
     const key = agent.agentKey || "(agentKey unavailable)";
-    lines.push(`${star}${own} ${name}  ${model}  ${source}  ${key}`);
+    lines.push(`${star}${own} ${name}  ${model}  ${source}${includeKeys ? `  ${key}` : ""}`);
+    if (agent.availabilityStatus === "rate_limited" || agent.availabilityStatus === "quota_exhausted") {
+      const until = typeof agent.nextAvailableAt === "number"
+        ? formatLocalClockUntil(agent.nextAvailableAt, now)
+        : undefined;
+      lines.push(
+        until
+          ? `  额度受限至 ${until}（参考信息，不限制派发）`
+          : "  额度受限（恢复时间未知）（参考信息，不限制派发）",
+      );
+    }
   }
   if (total > maxDisplay) {
     lines.push(`… +${total - maxDisplay} more`);
   }
   return lines.join("\n");
+}
+
+/**
+ * epoch-ms → 本地时间文案：当天 `HH:MM`，跨天 `MM-DD HH:MM`。
+ *
+ * 与 CLI 其它冷却文案（`formatCooldownUntilLocal`，packages/cli/client/agentRun.ts）
+ * 同一口径：秒级 ISO（`2026-11-03T12:00:00.000Z`）是 UTC，用户看到的却是本地时间，
+ * 两者混在同一份输出里必然读错。本层不能依赖 packages/cli，故就地实现同一规则。
+ * 非法时刻返回 undefined（调用方据此显示「恢复时间未知」）。
+ */
+function formatLocalClockUntil(atMs: number, now: Date): string | undefined {
+  const at = new Date(atMs);
+  if (!Number.isFinite(at.getTime())) return undefined;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const sameDay =
+    at.getFullYear() === now.getFullYear() &&
+    at.getMonth() === now.getMonth() &&
+    at.getDate() === now.getDate();
+  return sameDay ? time : `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`;
 }

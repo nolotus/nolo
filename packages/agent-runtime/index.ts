@@ -351,6 +351,7 @@ export type {
   AgentRuntimeHostAdapter,
   AgentRuntimeCompleteOptions,
   AgentRuntimeProvider,
+  AgentRuntimeProviderResolveOptions,
   AgentRuntimeSaveTurnInput,
   AgentRuntimeToolCallInput,
   AgentRuntimeToolResult,

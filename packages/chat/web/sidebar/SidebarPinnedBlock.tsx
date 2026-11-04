@@ -62,6 +62,7 @@ interface SidebarPinnedBlockProps {
   isSelectionMode?: boolean;
   selectedKeys?: Set<string>;
   onToggleSelectKey?: (key: string) => void;
+  unreadAgentKeys?: Set<string>;
 }
 
 export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
@@ -73,6 +74,7 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
   isSelectionMode = false,
   selectedKeys,
   onToggleSelectKey,
+  unreadAgentKeys,
 }) => {
   const { t } = useTranslation("space");
   const location = useLocation();
@@ -147,6 +149,7 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
               avatarFileId={item.avatarFileId}
               summaryStatus={"status" in item ? item.status : undefined}
               summaryUnreadAt={"unreadAt" in item ? item.unreadAt : undefined}
+              hasUnread={item.type === "agent" ? unreadAgentKeys?.has(item.contentKey) : undefined}
               disableDrag
               isActive={isRoutableContentActive({
                 contentKey: item.contentKey,

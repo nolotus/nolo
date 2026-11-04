@@ -611,9 +611,9 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "apiSource",
   "credentialKind",
   "credentialed",
-  // 仅限流中的 agent 才会带（可用 agent 上不存在）。对"现在能不能选它"是
-  // 决策信息（CLI --show-unavailable 场景）；默认列表已把这类 agent 过滤掉，
-  // 所以通常根本不占字节。
+  // 仅限流中的 agent 才会带（可用 agent 上不存在）。额度/冷却只作参考信息，
+  // 不参与派发门控：这类 agent 同样在 agents 主列表里（带标注），不做过滤，
+  // 所以这两个字段只在确实限流时才占字节。
   "nextAvailableAt",
   "availabilityReason",
   // —— 体积大的说明性字段（排在每条记录最后，截断时先牺牲它们）——
@@ -711,60 +711,4 @@ export function toUltraCompactAgentSummary(
     }
   }
   return compact as UltraCompactSafeAgentSummary;
-}
-
-export const UNAVAILABLE_AGENT_SUMMARY_FIELDS = [
-  "agentKey",
-  "name",
-  "model",
-  "provider",
-  "apiSource",
-  "isFavorite",
-  "isOAuth",
-  "isOwned",
-  "nextAvailableAt",
-  "availabilityStatus",
-  "availabilityReason",
-  "quota",
-  "favoritedAt",
-  "updatedAt",
-] as const;
-
-export type UnavailableAgentSummary = {
-  agentKey?: string;
-  name: string;
-  model?: string;
-  provider?: string;
-  apiSource?: string;
-  isFavorite: boolean;
-  isOAuth: boolean;
-  isOwned: boolean;
-  nextAvailableAt?: number;
-  availabilityStatus?: AgentAvailabilityStatus;
-  availabilityReason?: AgentAvailabilityReason;
-  quota?: AgentQuota;
-  favoritedAt?: number | string;
-  updatedAt?: number | string;
-};
-
-/**
- * 429 限流不可用 Agent 的精简摘要投影（供 listAgents 的 unavailableAgents 字段消费）。
- * 包含选人和知情权决策所需的关键标识（agentKey、isOAuth、isOwned、isFavorite 等）及复位时间戳（nextAvailableAt）。
- */
-export function toUnavailableAgentSummary(
-  summary: SafeAgentSummary
-): UnavailableAgentSummary {
-  const item: Record<string, unknown> = {
-    name: summary.name,
-    isFavorite: summary.isFavorite,
-    isOAuth: summary.isOAuth,
-    isOwned: summary.isOwned,
-  };
-  for (const field of UNAVAILABLE_AGENT_SUMMARY_FIELDS) {
-    const value = summary[field];
-    if (value !== null && value !== undefined) {
-      item[field] = value;
-    }
-  }
-  return item as UnavailableAgentSummary;
 }

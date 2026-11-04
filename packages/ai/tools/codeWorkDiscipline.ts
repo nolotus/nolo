@@ -29,8 +29,8 @@ export const CODE_WORK_DISCIPLINE_BODY = `## 效率优先（省 token）
 - **建议汇报**：交付时把过程中发现的**任何值得用户知道的事**都列出来（预存无关改动、既有测试隔离问题、潜在风险、后续可优化点、需用户决策的事项），不要只报「做完了」。
 
 ## Review 纪律（commit 前硬门）
-- **阶段划分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端及其他需用户验收的任务，在实现阶段不得触发或等待最终独立 review，应先交付可测试产物等待用户反馈。
-- 最终 review 仅在用户明确确认准备提交/合并时进行（除非调用方明确说「只改不审」或用户明确跳过）。除 ≤2 步零逻辑风险的机械改动（错别字/格式/CSS 微调）外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review 工作区 diff（\`git diff\`，未提交的改动）。reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」，跨家族优先非强制）。无 review 不 commit——这是硬门，不是建议。
+- **阶段划分**：默认严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。若用户已显式启用且当前任务在 auto-review 作用域内，review、修复、提交与本地集成持续授权，不重复询问；未启用不得自动授权，stop/暂停/单次覆盖立即生效。UI/前端及其他需用户验收的任务，先交付可测试产物并等待用户验收；验收通过且 auto-review 授权仍适用时直接进入最终 review；否则须用户确认准备提交。push、main/production 合并、发布与回滚仍独立授权。
+- 最终 review 默认仅在用户明确确认准备提交/合并时进行；auto-review 作用域内依持续授权执行。除 ≤2 步零逻辑风险的机械改动（错别字/格式/CSS 微调）外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review 工作区 diff（\`git diff\`，未提交的改动）。reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」，跨家族优先非强制）。无 review 不 commit——这是硬门，不是建议。
 - 派发走 \`startAgentRun(agentKey, task)\`（web/桌面端没有 nolo CLI，所有 host 都有这个工具）。
 - task 里必须写明审查对象（\`git diff\` 看工作区改动，或 \`git diff alpha...HEAD\` 看已提交改动），否则 reviewer 不知道审什么。
 - 按角色加载对应 skill：reviewer 先 \`loadSkill("coding-review")\` 拿通用流程，再按角色 \`loadSkill("coding-review-<role>")\` 拿检查项。角色清单：code-quality（**必跑**）/ architecture（**单独派发**，中级以上问题）/ security（按需 + 安全敏感触发必跑）/ frontend-ux（涉及 UI 时）/ backend-data（涉及 server 时）。角色切割的目的是注意力隔离——每个角色只盯自己的检查面，按需启用，避免一个 reviewer 背所有角色导致注意力稀释。

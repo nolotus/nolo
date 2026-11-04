@@ -11,6 +11,8 @@ import type {
   LocalAgentTurnResult,
 } from "agent-runtime";
 import type { LocalAgentLoopEvent, LocalAgentToolEvent } from "agent-runtime/localLoop";
+import type { ApiKeyRefResolver } from "agent-runtime/providerResolution";
+import type { OAuthTokenStore } from "agent-runtime/oauthTokenStore";
 import {
   projectToolExecutionLocation,
   type ToolExecutionLocation,
@@ -900,12 +902,16 @@ export function createDesktopTextOnlyAgentRuntimeActions(args: {
     store: args.store,
     now: args.now,
     createId: args.createId,
-    resolveProvider: (agentConfig) => Promise.resolve(resolveDesktopTextOnlyAgentRuntimeProvider({
+    resolveProvider: async (agentConfig, options) => ({ ...(await resolveDesktopTextOnlyAgentRuntimeProvider({
       env: args.env,
-      agentConfig,
+      // text-only provider 本身不带工具，这里只需应用 prompt 覆盖（摘要不带
+      // agent 人设）；覆盖只作用于本次解析副本。
+      agentConfig: options?.prompt !== undefined
+        ? { ...agentConfig, prompt: options.prompt }
+        : agentConfig,
       fetchImpl: args.fetchImpl,
       requestTimeoutMs: DESKTOP_REMOTE_REQUEST_TIMEOUT_MS,
-    })),
+    })), ...(options?.textOnly ? { textOnly: true as const } : {}) }),
     executeTool: rejectDesktopTextOnlyAgentRuntimeToolCall,
   });
 }
@@ -960,6 +966,9 @@ export function createDesktopAgentRuntimeActions(args: {
   runtimeContext?: Record<string, any> | null;
   parentAgentRef?: string;
   runChildDesktopTurn?: DesktopStartAgentRunChildRunner;
+  /** 凭据解析注入（与 CLI adapter 同构）：生产用默认值，测试可注入 mock。 */
+  apiKeyRefResolver?: ApiKeyRefResolver;
+  oauthTokenStore?: OAuthTokenStore;
 }): DesktopAgentRuntimeActions {
   let activeAgentToolNames: string[] = [];
   let activeEnv = args.env;
@@ -995,7 +1004,7 @@ export function createDesktopAgentRuntimeActions(args: {
     createId: args.createId,
     getWorkspaceRoot: () => workspaceRoot,
     getWorkspaceAuthorized: () => workspaceAuthority.kind === "authorized",
-    resolveProvider: async (agentConfig) => {
+    resolveProvider: async (agentConfig, options) => {
       const currentRunPolicy = resolveCurrentRunRuntimeToolPolicy(agentConfig);
       activeEnv = resolveLocalRuntimeEnvFromPolicy(args.env, currentRunPolicy);
 
@@ -1108,7 +1117,26 @@ export function createDesktopAgentRuntimeActions(args: {
         },
       ).finalToolNames;
 
-      activeAgentToolNames = buildDesktopLocalPolicyToolNames({
+      // Provider 解析覆盖（AgentRuntimeProviderResolveOptions）：摘要这类纯文本
+      // 补全请求空工具面时，在这里收口——上面的默认工具面扩展（默认本机/联网
+      // 工具、能力包、disabledTools、runtimeContext 约束）全部跑完之后直接覆盖，
+      // 避免任何一道下游加工把工具补回来。
+      //
+      // `useDeclaredToolNamesOnly` 必须置 **true**（不是复位成 false）：它为 false
+      // 时 buildDesktopLocalWorkspaceToolset 会走历史默认扩展，把刚清空的工作区
+      // 工具又加回来——这正是「覆盖写了但请求里仍有工具」的成因。
+      if (options?.textOnly || options?.toolNames !== undefined) {
+        requestedToolNames = options?.textOnly ? [] : options!.toolNames!;
+        useDeclaredToolNamesOnly = true;
+      }
+
+      const executionLimits = resolveLocalWorkspaceExecutorOptionsFromPolicy(currentRunPolicy);
+      // 请求级执行状态：摘要等纯文本补全的覆盖解析（toolNames: []）只作用于
+      // 本次请求，不能更新主循环共享的 activeAgentToolNames / executors——
+      // 否则轮内压缩后主循环的工具调用会被 localToolPolicy 以「outside the
+      // final run tool surface」拒绝（实测：普通解析后 execShell 成功，摘要
+      // 解析后再调用同一工具即失败）。
+      const requestActiveToolNames = buildDesktopLocalPolicyToolNames({
         toolNames: requestedToolNames,
         env: activeEnv,
         useDeclaredToolNamesOnly:
@@ -1116,8 +1144,7 @@ export function createDesktopAgentRuntimeActions(args: {
           args.runtimeContext?.allowedToolNames !== undefined ||
           args.runtimeContext?.blockedToolNames !== undefined,
       });
-      const executionLimits = resolveLocalWorkspaceExecutorOptionsFromPolicy(currentRunPolicy);
-      executors = buildDesktopLocalToolExecutors({
+      const requestExecutors = buildDesktopLocalToolExecutors({
         toolNames: requestedToolNames,
         env: activeEnv,
         store: args.store,
@@ -1133,11 +1160,24 @@ export function createDesktopAgentRuntimeActions(args: {
         createId: args.createId,
         runChildDesktopTurn: args.runChildDesktopTurn,
       });
-      return resolveDesktopConfiguredProvider({
+      // 普通解析：更新共享执行状态，供主循环后续工具调用与 actions.executeTool
+      // 使用；覆盖解析：保持共享状态逐字不变（主轮配置不被改动）。
+      if (!options?.textOnly && options?.toolNames === undefined) {
+        activeAgentToolNames = requestActiveToolNames;
+        executors = requestExecutors;
+      }
+      // prompt 覆盖只作用于本次解析副本（摘要不带 agent 人设）；工具面推导与
+      // 执行器装配用请求级状态，主轮配置不被改动。
+      const resolvedAgentConfig = options?.prompt !== undefined
+        ? { ...agentConfig, prompt: options.prompt }
+        : agentConfig;
+      const resolvedProvider = await resolveDesktopConfiguredProvider({
         env: args.env,
-        agentConfig,
+        agentConfig: resolvedAgentConfig,
         fetchImpl: args.fetchImpl,
         requestTimeoutMs: DESKTOP_REMOTE_REQUEST_TIMEOUT_MS,
+        ...(args.apiKeyRefResolver ? { apiKeyRefResolver: args.apiKeyRefResolver } : {}),
+        ...(args.oauthTokenStore ? { oauthTokenStore: args.oauthTokenStore } : {}),
         tools: buildDesktopOpenAiTools({
           toolNames: requestedToolNames,
           env: activeEnv,
@@ -1145,18 +1185,19 @@ export function createDesktopAgentRuntimeActions(args: {
         }),
         // Cursor drives its own inline exec loop, so hand it the same tool
         // executor the host adapter uses. Other providers ignore this field.
-        executeTool: (call) => executeLocalToolWithPolicy({
+        ...(options?.textOnly ? {} : { executeTool: (call: AgentRuntimeToolCallInput) => executeLocalToolWithPolicy({
           blockDestructiveWithoutConfirmation: true,
           env: activeEnv,
-          agentToolNames: activeAgentToolNames,
-          runToolNames: activeAgentToolNames,
+          agentToolNames: requestActiveToolNames,
+          runToolNames: requestActiveToolNames,
           call,
           executors,
           // 分发前参数闸门：只覆盖 agent-runtime 工具族（workspace + nolo
           // workspace）；registry 工具有各自的前置 guard 语义，不在此拦截。
           toolParametersIndex: getAgentRuntimeToolParametersIndex(),
-        }),
+        }) }),
       });
+      return options?.textOnly ? { ...resolvedProvider, textOnly: true as const } : resolvedProvider;
     },
     executeTool: (call) => executeLocalToolWithPolicy({
       // 用户面前的运行时：确认通道没接上不等于用户默许破坏性命令。

@@ -578,6 +578,7 @@
 
 /* ── 详情弹窗面板（Modal / Dialog） ───────────────────────── */
 
+/* 已废弃：详情弹窗改用共享 BaseModal（.modal 遮罩），此规则不再被引用 */
 .skill-detail-overlay {
   position: fixed;
   inset: 0;
@@ -973,4 +974,17 @@ button.skill-chip {
 button.skill-chip:disabled {
   cursor: default;
   opacity: 0.65;
+}
+
+/* 详情弹窗复用共享 BaseModal（Portal 挂到 body，不再受祖先 transform 建立的包含块影响）：
+   共享 .modal 负责遮罩、滚动锁与焦点陷阱，此处仅做内容容器桥接——
+   背景/圆角/阴影由 .skill-detail-modal 自己绘制，宽度保持与原实现一致（680px），
+   避免 flex fit-content 把详情面板压窄。选择器比 modal.css 的 .modal__content 更具体，与样式表顺序无关。 */
+.modal__content.skill-detail-modal-host {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  width: 100%;
+  max-width: 680px;
 }

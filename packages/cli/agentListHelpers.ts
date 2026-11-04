@@ -229,8 +229,6 @@ export function parseAgentListArgs(args: string[]) {
   };
 }
 
-/** 429 限流中（nextAvailableAt 在未来）的 agent 是否仍可见。 */
-
 export async function listLocalCachedAgents(args: {
   db: CliKvDb;
   userId: string;

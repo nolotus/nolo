@@ -250,6 +250,7 @@ export function buildCliWorkspaceToolExecutors(args: {
 
 export function buildLocalToolExecutors(args: {
   workspaceRoot: string;
+  sourceParentDialogId?: string;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
   env: EnvLike;
   fetchImpl: CliFetchImpl;
@@ -262,7 +263,7 @@ export function buildLocalToolExecutors(args: {
   commandTimeoutMs?: number;
   commandOutputLimit?: number;
   /** Reused for external-file-access prompts (same PermissionRequest shape). */
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../../agent-runtime/actionGate").HostConfirmDecision>;
   /** Interactive choice dialog for ask_user; absent in headless/CI mode. */
   requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
   pastedTextStore?: CollapsedPasteStore;
@@ -297,7 +298,14 @@ export function buildLocalToolExecutors(args: {
       commandTimeoutMs: args.commandTimeoutMs,
       commandOutputLimit: args.commandOutputLimit,
       ...(args.confirmDestructiveAction
-        ? { confirmExternalFileAccess: args.confirmDestructiveAction }
+        ? {
+            // 边界换算：文件访问确认只关心「批没批」，宿主代执行（hostResult）
+            // 由 execShell 的 capability 通道消费。类型仍取共享契约，不另写 union。
+            confirmExternalFileAccess: async (request: PermissionRequest) => {
+              const decision = await args.confirmDestructiveAction!(request);
+              return typeof decision === "boolean" ? decision : decision.approved === true;
+            },
+          }
         : {}),
     }),
     ...buildServerPlatformToolExecutors({
@@ -473,6 +481,7 @@ export function buildLocalToolExecutors(args: {
       currentAgentKey: args.agentKey,
     }),
     controlAgentRun: createCliControlAgentRunExecutor({
+      source: { parentDialogId: args.sourceParentDialogId, agentKey: args.agentKey },
       shellApprovalHostForAgent: args.shellApprovalHostForAgent,
       cwd: args.workspaceRoot,
       cliEntrypoint: args.cliEntrypoint,

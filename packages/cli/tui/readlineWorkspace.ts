@@ -28,6 +28,7 @@ import {
 } from "../updateCommands";
 import { resolveDefaultSpawn, spawnProcess } from "../processSpawn";
 import { runConfirmDialog } from "./confirmDialog";
+import { runTaskSlashCommand, type TaskActionView } from "./taskActions";
 import { type SelectDialogItem } from "./selectDialog";
 import { createDialogHost } from "./dialogHost";
 import {
@@ -1356,11 +1357,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 终态唤醒直投这里注入正在跑的 loop，不再走 chat 队列。见 turnInjectionInbox.ts。
   let turnInjectionInbox: AgentTurnContext["turnInjectionInbox"] = null;
 
-  // 「用户自己发了一轮」的提示钩子（进程任务自动续跑的链深清零用）。实现在交互区
-  // 里（需要 processTerminalResumer），这里先占位，语义与 turnInjectionInbox 同：
-  // 外层可变绑定 + ctx 转发，保证 turn 侧读到的永远是最新那个。
-  let noteUserTurnHook: (() => void) | null = null;
-
   // ── S2：turnCtx 装配（通过 getter/setter 严格保持可变引用语义） ──────────
   // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例。确认走既有
   // runConfirmDialog + dialogHost 通道；撤销经 shellGrant.revoke() 立即生效
@@ -1450,7 +1446,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     set chatQueueBinding(v) { chatQueueBinding = v; },
     get turnInjectionInbox() { return turnInjectionInbox; },
     set turnInjectionInbox(v) { turnInjectionInbox = v; },
-    noteUserTurn: () => noteUserTurnHook?.(),
     onUserTurnFinalized: (turn, imageUrls) => {
       const preview = imageCache.preview(`turn-${turnIdentity++}`, imageUrls.map((dataUrl) => ({
         dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(";")), filename: "image", sizeBytes: 0, sourcePath: "",
@@ -1523,6 +1518,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // （runSubmittedSlashLine）。此处仅装配 host：可变绑定（state / buffer /
   // cursorPos / fixedInput）以 getter/setter 直通保持可变引用语义（禁止快照），
   // 稳定实例与编排回调按原引用注入。本文件调用点与函数签名保持不变。
+  const confirmTaskStop = async (view: TaskActionView): Promise<boolean> => {
+    if (!isInteractiveInput(input)) return false;
+    return runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+      dialogHost.run(anchor => runConfirmDialog({
+        request: { id: `task-stop-${view.id}`, tool: "taskStop", action: "task-stop", title: "Stop task?", body: view.title, command: view.id },
+        fullCommand: true, input: input as any, output: output as any, ...anchor,
+      })),
+    );
+  };
   const slashHost: SlashDispatchHost = {
     get state() {
       return state;
@@ -1546,6 +1550,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     input,
     output,
     options,
+    taskEnv: effectiveEnv,
+    confirmTaskStop,
     fetchImpl,
     turnCtx,
     emitCommandOutput,
@@ -1565,7 +1571,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   const runSubmittedLine = async (
     line: string,
     actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-    confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+    confirmDestructiveAction?: (
+      request: PermissionRequest,
+    ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
   ): Promise<boolean> => {
     // /shell-revoke（块 D）：空闲路径直撤——即时翻转 granted 位，不走
     // handleTuiInput（纯函数拿不到 grant）；下一次 shell 调用重新弹确认。
@@ -1791,6 +1799,20 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
             resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
             onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
+            onApproved: async (approvedGate) => {
+              // 贴入 key 的 create：用户真实批准后由宿主**进程内**执行受限
+              // create/verify（不落授权文件、不经 shell 持 grant 自授权）。
+              // 宿主不处理（null）→ 返回 null，交回原流程（既有语义）。
+              if (approvedGate.kind !== "confirm") return null;
+              const { executeApprovedCredentialCreate } = await import("./hostCredentialCreate");
+              const hostResult = await executeApprovedCredentialCreate({
+                gate: approvedGate,
+                approvalGateId: approvedGate.id,
+                env: effectiveEnv as Record<string, string | undefined>,
+              });
+              if (!hostResult) return null;
+              return { approved: true, hostResult };
+            },
           }),
         );
       };
@@ -1827,16 +1849,29 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       getCurrentDialogId: () => state.dialogId ?? null,
       isTurnActive: () => busy || fixedInput.isPaused(),
       canDeliver: () => !sessionEnded && !done && runWakeHandler !== null,
+      onDecision: (decision) => {
+        const owner = getProcessRegistry().getByTaskId(decision.taskId)?.owner;
+        try {
+          // notice-only 是用户可见的结论（任务终态但没人能接回对话），要留 warn 痕迹；
+          // 其余只是内部调度细节，留在 debug。字段只允许 id / 枚举 / 计数，
+          // 不得写入命令输出、用户内容或凭据。
+          const resumeLogger = getDiagnostics()?.logger.child({ component: "process-terminal-resume" });
+          const fields = {
+            taskId: decision.taskId, kind: decision.kind,
+            reason: decision.kind === "notice-only" ? decision.reason : undefined,
+            ownerDialogId: owner?.dialogId, currentDialogId: state.dialogId ?? null,
+            depth: owner?.processCausalDepth ?? 0,
+          };
+          if (decision.kind === "notice-only") resumeLogger?.warn("process terminal decision: notice-only", fields);
+          else resumeLogger?.debug("process terminal decision", fields);
+        } catch { /* Diagnostics must not disrupt delivery. */ }
+      },
     });
-    noteUserTurnHook = () => processTerminalResumer.noteUserTurn();
     // 空闲时把一段文本作为新 turn 直接跑。两个调用方：Enter 键的空闲手动
     // drain（空 Enter / Ctrl+S 落到这里的队首）和 run 终态唤醒。busy 标志、
     // enterOutputMode、notifyTurnEnd、失败时 emitCommandOutput(turnFailed)
     // 与直接发送路径保持同一份实现，不复制漂移。调用方必须保证当前空闲。
     const runIdleTextTurn = async (inputMsg: TurnRequest | InternalTurnEvent | string): Promise<void> => {
-      // 「用户回来了」的链深清零不在这里做：runOneAgentTurn 才是所有 turn 的
-      // 唯一入口（busy 期间排队的用户消息由队列 drain 直接进那里），清零钩子
-      // 挂在 ctx.noteUserTurn 上，见 tuiTurnRunner。
       const req = createTurnRequest(inputMsg);
       const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
       const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
@@ -1982,8 +2017,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 进程任务终态投递体（订阅在构造早期已装上，这里补上真正的投递）：
     //   - notice-only：无归属 / dialog 不匹配 / 重复 / 链深触顶 / 无通道 →
     //     维持既有 pending 行（下一轮 context block 让模型知情），不续跑；
-    //   - 续跑：同一事实不再进 pendingProcessNotices（投递本身已经到位：busy 直投
-    //     收件箱、空闲起 completion turn），否则模型会在 inbox 文本之外又从下一轮
+    //   - 续跑：同一事实不再进 pendingProcessNotices（busy 尝试直投
+    //     收件箱、空闲尝试起 completion turn；决策 claim 不保证实际投递成功），否则模型会在 inbox 文本之外又从下一轮
     //     context block 看到同一行。屏幕上仍留一行 dim 记录。
     deliverProcessTerminalNotice = (notice: ProcessTerminalNotice) => {
       if (done || sessionEnded) return;
@@ -1997,7 +2032,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // 两行相同 dim 行（前者由 runWakeHandler 的 injected 分支印、后者由
       // tuiTurnRunner 写 transcript）。inbox 不可用时的 enqueue 兜底同样不打印，
       // 那与 run 终态唤醒共用分支、且队列 UI 已呈现排队事实（见 runWakeHandler）。
-      runWakeHandler?.(buildProcessTaskCompletedTurnEvent(notice));
+      runWakeHandler?.({ ...buildProcessTaskCompletedTurnEvent(notice), processCausalDepth: (decision.owner.processCausalDepth ?? 0) + 1 });
       if (fixedInput.active && !fixedInput.isPaused()) {
         fixedInput.repaint(buffer, cursorPos);
       }
@@ -2224,8 +2259,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       cursorPos = 0;
       if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
 
+      const taskOutput = await runTaskSlashCommand(submittedText, { getDialogId: () => state.dialogId, env: effectiveEnv, confirm: confirmTaskStop });
+      if (taskOutput !== null) {
+        output.write(`${taskOutput}\n`);
+        return;
+      }
       const beforeAgentKey = state.agentKey;
-      const res = handleTuiInput(submittedText, state, collectConversationTurns(history));
+      const res = handleTuiInput(submittedText, state, collectConversationTurns(history), { env: effectiveEnv });
       if (res.action?.type === "paste-clipboard") {
         // turn 运行中也能 /paste：草稿本来就在 busy 期间保持可编辑，写入草稿安全
         // （不触碰 history 状态机，不排队）。与空闲路径共用同一份读取流程。

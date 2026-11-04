@@ -24,7 +24,12 @@ export interface SharedSpaceDialogPagesState {
   actionableSourceCount: number;
   loadingSpaces: string[];
   hasMoreSpaces: string[];
-  loadMore: (spaceId?: string) => Promise<void>;
+  /**
+   * 手动加载。
+   * - `retryFailed: false`：只推进健康来源，失败来源的自动重试额度保持不变（不清预算）。
+   * - 默认 / `retryFailed: true`：手动尝试所有未耗尽来源（含失败来源），并重新开启失败来源的自动重试额度。
+   */
+  loadMore: (spaceId?: string, opts?: { retryFailed?: boolean }) => Promise<void>;
 }
 export type SharedSpaceDialogPagesOptions = { enabled: boolean; spaceIds: string[]; account: string; token: string; origins: string[] };
 type CodedError = Error & { status?: number; code?: string };
@@ -66,6 +71,31 @@ const isRevoked = (error: unknown) => statusOf(error) === 403;
 const normalizeSpaceIds = (spaceIds: readonly string[]): string[] =>
   [...new Set(spaceIds.map((spaceId) => normalizeSpaceId(spaceId)).filter((spaceId): spaceId is string => Boolean(spaceId)))].sort();
 
+/**
+ * 自动重试的节奏：故障后第 2s 与第 4s 各一次，最多两次，之后只能手动重试。
+ * 用 performance.now() 做锚点，避免被 Date.now() 的替换（测试里的假时钟）扭曲。
+ */
+const AUTO_RETRY_OFFSETS_MS = [2000, 4000];
+/** 自动恢复轮次上限：来源之间反复恢复-再失败时，不允许无界自动翻页。 */
+const MAX_AUTO_ROUNDS = 3;
+/** 来源正忙时的推迟间隔与次数上限。 */
+const AUTO_RETRY_POSTPONE_MS = 200;
+const MAX_AUTO_POSTPONES = 10;
+const nowMs = () => (typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now());
+
+/** 每个 origin 的自动重试账本：额度、时间锚点、待恢复的失败项。 */
+interface AutoRetryRecord {
+  /** 已消耗的自动重试次数（上限 = AUTO_RETRY_OFFSETS_MS.length）。 */
+  attempts: number;
+  /** 首次故障的单调时刻，用来把两次自动重试锚定在 2s / 4s。 */
+  since: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  /** 因来源正忙而推迟的次数，避免与在途请求抢同一个 origin。 */
+  postponed: number;
+  /** 该来源上待恢复的失败项（`${space}\n${origin}`）。 */
+  keys: Set<string>;
+}
+
 export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, origins }: SharedSpaceDialogPagesOptions): SharedSpaceDialogPagesState {
   const sortedSpaces = normalizeSpaceIds(spaceIds);
   const sortedOrigins = [...new Set(origins)].sort();
@@ -83,6 +113,14 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
   /** 需要「重置游标并整体重拉」的来源：上一轮因游标非法失败，保留的数据等这一轮替换。 */
   const restarting = useRef(new Set<string>());
   const cursors = useRef(new Map<string, string | null | undefined>());
+  /** 有界自动重试账本（按 origin）；手动重试可以重新开启额度。 */
+  const autoRetry = useRef(new Map<string, AutoRetryRecord>());
+  /** 自动恢复轮次计数（按 origin），只被手动加载重置，用来给自动恢复封顶。 */
+  const autoRounds = useRef(new Map<string, number>());
+  /** 已经发出过请求的 (space, origin)：用来识别「从未请求过」的 deferred 空间。 */
+  const issued = useRef(new Set<string>());
+  /** 自动恢复入口：runLoad 与 scheduleAutoRetry 互相引用，用 ref 打断循环依赖。 */
+  const autoRecoveryRef = useRef<(origin: string, run: number) => void>(() => {});
   const [state, setState] = useState<{ key: string; sources: Record<string, SharedSpaceDialogSummary[]>; errors: Record<string, string | null>; failedSources: number; loading: string[] }>({ key: identityKey, sources: {}, errors: {}, failedSources: 0, loading: [] });
 
   useEffect(() => {
@@ -95,6 +133,10 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
     nextSpaces.current.clear();
     for (const timer of wakeups.current) clearTimeout(timer);
     wakeups.current.clear();
+    for (const record of autoRetry.current.values()) if (record.timer) clearTimeout(record.timer);
+    autoRetry.current.clear();
+    autoRounds.current.clear();
+    issued.current.clear();
     failed.current.clear();
     succeeded.current.clear();
     unauthorizedOrigins.current.clear();
@@ -108,22 +150,90 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
       busy.current.clear();
       for (const timer of wakeups.current) clearTimeout(timer);
       wakeups.current.clear();
+      // 身份变化/卸载：旧的自动重试计时器必须失效，否则会对新身份继续发请求。
+      for (const record of autoRetry.current.values()) if (record.timer) clearTimeout(record.timer);
+      autoRetry.current.clear();
     };
   }, [identityKey]);
 
+  /** 故障来源登记自动重试：只登记失败来源，健康来源完全不受影响。 */
+  const scheduleAutoRetry = useCallback((origin: string, key: string, run: number) => {
+    if (unauthorizedOrigins.current.has(origin)) return;
+    let entry = autoRetry.current.get(origin);
+    if (!entry) {
+      entry = { attempts: 0, since: nowMs(), timer: null, postponed: 0, keys: new Set<string>() };
+      autoRetry.current.set(origin, entry);
+    }
+    const record = entry;
+    record.keys.add(key);
+    if (record.timer || record.attempts >= AUTO_RETRY_OFFSETS_MS.length) return;
+    const offset = AUTO_RETRY_OFFSETS_MS[record.attempts] ?? AUTO_RETRY_OFFSETS_MS[AUTO_RETRY_OFFSETS_MS.length - 1];
+    record.attempts += 1;
+    const arm = (delay: number) => {
+      record.timer = setTimeout(() => {
+        record.timer = null;
+        if (run !== generation.current) return;
+        if (busy.current.has(origin)) {
+          // 来源正忙：推迟而不是抢占，保持 origin 串行。
+          if (record.postponed < MAX_AUTO_POSTPONES) { record.postponed += 1; arm(AUTO_RETRY_POSTPONE_MS); }
+          return;
+        }
+        autoRecoveryRef.current(origin, run);
+      }, Math.max(0, delay));
+    };
+    arm(offset - (nowMs() - record.since));
+  }, []);
+
+  /** 失败来源恢复（或进入终态）后清掉它的计时器与额度。 */
+  const clearAutoRetry = useCallback((origin: string, key?: string) => {
+    const record = autoRetry.current.get(origin);
+    if (!record) return;
+    if (key !== undefined) record.keys.delete(key);
+    if (record.keys.size) return;
+    if (record.timer) clearTimeout(record.timer);
+    autoRetry.current.delete(origin);
+  }, []);
+
   /** Each origin advances independently, with a single in-flight request and fair recovery. */
-  const loadMore = useCallback(async (requested?: string) => {
+  const runLoad = useCallback(async (
+    requested: string | null,
+    opts: { retryFailed: boolean; origin?: string; scope?: (key: string) => boolean },
+  ) => {
     if (!enabled || !account || !token || sortedOrigins.length === 0) return;
     const run = generation.current;
-    const requestedSpace = requested === undefined ? null : normalizeSpaceId(requested);
-    const originsToLoad = sortedOrigins.filter((origin) => !busy.current.has(origin) &&
-      !unauthorizedOrigins.current.has(origin) && (cooldowns.current.get(origin) ?? 0) <= Date.now());
+    const originsToLoad = sortedOrigins.filter((origin) => {
+      if (opts.origin && origin !== opts.origin) return false;
+      if (busy.current.has(origin) || unauthorizedOrigins.current.has(origin)) return false;
+      // 自动恢复不受冷却门控：它只针对已登记的失败项，不是新的翻页。
+      if (opts.scope) return true;
+      return (cooldowns.current.get(origin) ?? 0) <= Date.now();
+    });
+    if (!opts.scope && opts.retryFailed) {
+      // 手动重试：真正被触达的失败来源重新开启自动重试额度（下一轮故障又能自动重试两次）。
+      // 没被触达的来源（例如还在冷却里）保留原有计时器与额度。
+      for (const origin of originsToLoad) {
+        const record = autoRetry.current.get(origin);
+        if (!record) continue;
+        record.attempts = 0;
+        record.since = nowMs();
+        record.postponed = 0;
+        if (record.timer) { clearTimeout(record.timer); record.timer = null; }
+        autoRounds.current.delete(origin);
+      }
+    }
     // Claim all gates synchronously: repeated clicks cannot create a second in-flight request.
     for (const origin of originsToLoad) busy.current.add(origin);
     await Promise.all(originsToLoad.map(async (server) => {
       const start = nextSpaces.current.get(server) ?? 0;
       const ordered = [...sortedSpaces.slice(start), ...sortedSpaces.slice(0, start)];
-      const targets = ordered.filter((space) => (!requestedSpace || requestedSpace === space) && cursors.current.get(`${space}\n${server}`) !== null);
+      const targets = ordered.filter((space) => {
+        if (requested !== null && requested !== space) return false;
+        const key = `${space}\n${server}`;
+        if (opts.scope) return opts.scope(key);
+        // 手动：默认连失败来源一起重试；retryFailed=false 时只推进健康来源。
+        if (!opts.retryFailed && failed.current.has(key)) return false;
+        return cursors.current.get(key) !== null;
+      });
       if (!targets.length) { busy.current.delete(server); return; }
       setState((current) => current.key === identityKey ? { ...current, loading: [...new Set([...current.loading, ...targets])] } : current);
       for (const spaceId of targets) {
@@ -131,6 +241,7 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
         const key = `${spaceId}\n${server}`;
         const cursor = cursors.current.get(key);
         const restart = restarting.current.has(key);
+        issued.current.add(key);
         const controller = new AbortController();
         controllers.current.add(controller);
         const item = await (async () => {
@@ -148,6 +259,28 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
             if (run === generation.current) setState((current) => ({ ...current }));
           }, ORIGIN_COOLDOWN_MS);
           wakeups.current.add(timer);
+        }
+        const failureError = "error" in item ? item.error : undefined;
+        const unauthorized = failureError !== undefined && statusOf(failureError) === 401;
+        const terminal = failureError !== undefined && !unauthorized && (isRevoked(failureError) || isInvalidSpaceId(failureError));
+        if (unauthorized) {
+          // 401：整个 origin 停用，它的自动重试计时器一并作废。
+          unauthorizedOrigins.current.add(server);
+          const record = autoRetry.current.get(server);
+          if (record?.timer) clearTimeout(record.timer);
+          autoRetry.current.delete(server);
+        } else if (terminal) {
+          // 403 撤权 / 非法 spaceId：不可自愈，退出自动重试集合。
+          clearAutoRetry(server, key);
+        } else if (failureError !== undefined) {
+          scheduleAutoRetry(server, key, run);
+        } else {
+          // 失败来源恢复：清掉它的自动重试计时器。
+          clearAutoRetry(server, key);
+        }
+        // 失败集合同步维护：健康来源判定（retryFailed:false）不能等 React 状态刷新。
+        if (!unauthorized && !terminal) {
+          if (failureError !== undefined) failed.current.add(key); else failed.current.delete(key);
         }
         const settled = [{ spaceId, pages: [item] }];
         const unauthorizedServers = new Set(settled.flatMap(({ pages }) => pages.filter((item) => "error" in item && statusOf(item.error) === 401).map((item) => item.server)));
@@ -210,6 +343,32 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
       setState((current) => current.key === identityKey ? { ...current, loading: busy.current.size ? current.loading : [] } : current);
     }));
   }, [enabled, account, token, identityKey]);
+
+  /**
+   * 自动恢复：只针对已登记的失败来源。
+   * 阶段一重试失败项；阶段二在来源恢复后推进「从未请求过」的 deferred 空间（每空间一页）。
+   * 已加载的健康页不会被自动继续翻页。
+   */
+  const runAutoRecovery = useCallback(async (origin: string, run: number) => {
+    if (run !== generation.current) return;
+    const record = autoRetry.current.get(origin);
+    if (!record) return;
+    const rounds = autoRounds.current.get(origin) ?? 0;
+    if (rounds >= MAX_AUTO_ROUNDS) return;
+    autoRounds.current.set(origin, rounds + 1);
+    const keys = record.keys;
+    await runLoad(null, { retryFailed: false, origin, scope: (key) => keys.has(key) });
+    if (run !== generation.current) return;
+    const current = autoRetry.current.get(origin);
+    if (current && current.keys.size > 0) return;
+    await runLoad(null, { retryFailed: false, origin, scope: (key) => !issued.current.has(key) && !keys.has(key) });
+  }, [runLoad]);
+  autoRecoveryRef.current = (origin: string, run: number) => { void runAutoRecovery(origin, run); };
+
+  const loadMore = useCallback(async (requested?: string, options?: { retryFailed?: boolean }) => {
+    const retryFailed = options?.retryFailed ?? true;
+    await runLoad(requested === undefined ? null : normalizeSpaceId(requested), { retryFailed });
+  }, [runLoad]);
   useEffect(() => { if (enabled) void loadMore(); }, [loadMore, enabled, identityKey]);
   const valid = state.key === identityKey;
   const recordsBySpace: Record<string, SharedSpaceDialogSummary[]> = valid

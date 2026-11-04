@@ -10,7 +10,7 @@ export const markDialogRead = createAsyncThunk(
     payload: { dialogId: string; dialogKey?: string },
     thunkAPI: any
   ) => {
-    // pending 副作用：立即清除未读，不等待 patch 往返。
+    // pending 副作用：立即清除未读，并统一记录 clearedDialogTimestamps，彻底抑制旧 unreadAt。
     clearDialogUnread(payload.dialogId);
 
     if (payload.dialogKey) {

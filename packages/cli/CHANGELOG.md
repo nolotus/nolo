@@ -1,4 +1,86 @@
 
+## 0.213.0 (2026-11-04)
+
+### Features
+
+* **agent-runtime:** 仓库 AGENTS.md 改为按需加载以降低首轮上下文 ([3e34769](https://github.com/nolotus/bun-nolo/commit/3e34769b005481b10d5c738844fdce28dcf1d19d))
+* **agent-runtime:** 精简回复行为准则并让已授权工作持续推进 ([c23b03e](https://github.com/nolotus/bun-nolo/commit/c23b03e4c2edd37abfd2904f5ceb73c007687f20))
+* **ai:** Codex OAuth 窗口改按凭证读上游目录，静态 pin 降级为兜底 ([1f6e6d9](https://github.com/nolotus/bun-nolo/commit/1f6e6d93ff4250a50646b0ef46fed51d7201d3d5))
+* **cli:** nolo usage rebuild，从明细重建日聚合统计 ([fbf9b73](https://github.com/nolotus/bun-nolo/commit/fbf9b734d98263e90b6eca89618bba84b9f10ce2))
+* **cli:** 新增 nolo usage，并修复日统计丢失缓存与 agent 维度 ([813c4d3](https://github.com/nolotus/bun-nolo/commit/813c4d39a84b64d609d6ff46689b9e214108c5dd))
+* **credential:** 支持粘贴凭据直接建 agent 并接入系统安全存储 ([7212371](https://github.com/nolotus/bun-nolo/commit/72123714379e079fb8aadfde2185768a660ae9f2))
+* **music:** 本地音乐源与多源抽象接线 ([47247e2](https://github.com/nolotus/bun-nolo/commit/47247e22be47d9f430a066a2b43eaa175f990832))
+* **release:** alpha版本与二进制发布前执行变更测试门 ([ed2a0fc](https://github.com/nolotus/bun-nolo/commit/ed2a0fce3d23dc48c444be5da31594278134bca5))
+* **runtime:** allow callers to forbid Instabox deletion ([e07a898](https://github.com/nolotus/bun-nolo/commit/e07a898d491769a8dbfaaa0d0b23a2c96ebbd6af))
+* **runtime:** integrate confirmed stop with forbidden deletion ([deee46d](https://github.com/nolotus/bun-nolo/commit/deee46d6a0602cdc9722e49c9f48fef2b608f379))
+* **runtime:** persist Instabox create intent and restore stop-only leases ([9dda66f](https://github.com/nolotus/bun-nolo/commit/9dda66f3c37a8ae31fbb14562a10a103e37fa531))
+* **runtime:** upload lease-bound files using verified Instabox grants ([a843916](https://github.com/nolotus/bun-nolo/commit/a84391623b7b995b530283336e219547480da99d))
+* **web:** 侧边栏 Agent 行按未读对话点亮红点 ([aa39550](https://github.com/nolotus/bun-nolo/commit/aa39550f66a25ddd89a824f1b3f2ec794da8940f))
+
+### Bug Fixes
+
+* **agent-availability:** pre-push 门拦下的三处回归（写放大 / 提示词预算 / 旧契约） ([274be42](https://github.com/nolotus/bun-nolo/commit/274be423f6f3c2c78a1848d8dab1f4b27fb0591f))
+* **agent-availability:** 额度冷却不再否决派发，降级为参考信息 ([66b73dd](https://github.com/nolotus/bun-nolo/commit/66b73dd8e387d6e011b27200f3625f96cb0f9520))
+* **agent-runtime:** allow bounded tool-free budget wrap-up ([7425fd0](https://github.com/nolotus/bun-nolo/commit/7425fd064227f8ed67a02c3ff10864d98ed0dae9))
+* **agent-runtime:** preserve optional skill selectors in Responses ([1afab1a](https://github.com/nolotus/bun-nolo/commit/1afab1a601719ba3b1c660f7333abd62f4969412))
+* **agent-runtime:** 恢复请教模式顾问档的既有文案契约 ([0fd27dd](https://github.com/nolotus/bun-nolo/commit/0fd27dde87898b3f92fe18a3d013c50817a53eca))
+* **agent-runtime:** 降级后的工具轮在 Responses 线上重新带回 reasoning 占位 ([8d9be71](https://github.com/nolotus/bun-nolo/commit/8d9be71b59d5ef03e9093605470a7df01638f3cc))
+* **agents:** 默认发现公开候选并限制匿名访问 ([8098262](https://github.com/nolotus/bun-nolo/commit/80982621409d0a4a657e74045861607e79413569))
+* **ai:** honor auto-review authorization and recommend the skill ([c3fb164](https://github.com/nolotus/bun-nolo/commit/c3fb1640b3372fee4f40276f96bf744cb0f74442))
+* **billing:** 审计复核交易缺失，消掉跨扫描误报 ([18afda3](https://github.com/nolotus/bun-nolo/commit/18afda3c08ab2b0b66242d21e9ef250f437265a2))
+* **chat:** 简化侧栏时间列表并隔离本人历史分页来源 ([40c00b8](https://github.com/nolotus/bun-nolo/commit/40c00b808d7b233f9bfb3b682380f824c61ec9c5))
+* **ci:** bound deployment status failures with a dedicated SSH budget ([c1bb080](https://github.com/nolotus/bun-nolo/commit/c1bb080f921c25a49a205911d5a8c8c891436aa1))
+* **ci:** prepare Chromium with bounded fail-closed build admission ([325c9f0](https://github.com/nolotus/bun-nolo/commit/325c9f0beceb2a0f216fdb7f2c41865523aa793e))
+* **ci:** query deployment status over shared SSH transport ([25aef80](https://github.com/nolotus/bun-nolo/commit/25aef8006fb4063a04629b57c4b2861fc4ed7e1a))
+* **cli:** CLI 状态栏按 Codex OAuth 通道 pin 显示 gpt 家族窗口 ([fcac595](https://github.com/nolotus/bun-nolo/commit/fcac5959f3ba60cff7b29f2bc3983a9dab52bafb))
+* **cli:** compact agent cards and show loaded skill names ([b21c4cd](https://github.com/nolotus/bun-nolo/commit/b21c4cde6d48c690d42e01bcbadf84a2f7a12324))
+* **cli:** complete command descriptions and align agent start assertions ([ddddc0a](https://github.com/nolotus/bun-nolo/commit/ddddc0ae6cf720c37a2e1b7b648b1d9cbd520013))
+* **cli:** preserve summary operation stage in timeout diagnostics ([68bcdcf](https://github.com/nolotus/bun-nolo/commit/68bcdcfed600cccf84a3b3aeb8ef21250e0ff2ab))
+* **cli:** read completion results without redundant status queries ([f2a65c3](https://github.com/nolotus/bun-nolo/commit/f2a65c3d9b4f313efe7d4ac717d48071b0117333))
+* **cli:** recover missing account skill settings ([2c5763e](https://github.com/nolotus/bun-nolo/commit/2c5763ee1606b444de87bf0ee0576fa45233b6b3))
+* **cli:** restore explicitly recreated agents across tombstones ([39237e2](https://github.com/nolotus/bun-nolo/commit/39237e29d0d4d7ca882e469ab339b44852662b5e))
+* **cli:** show coordination messages and host origin ([0fc6823](https://github.com/nolotus/bun-nolo/commit/0fc6823809839d3aba253f2b93bb578e7490b216))
+* **cli:** 按任务因果深度限制后台完成自动续跑 ([64883ae](https://github.com/nolotus/bun-nolo/commit/64883aeb86a49694a1107ec594dbfbded25b61ec))
+* **codex:** forward explicit low reasoning effort for summary calls ([a03932f](https://github.com/nolotus/bun-nolo/commit/a03932f20dc213454545c2c05eda7a00fb9971a4))
+* **context:** bound full-range compaction and preserve critical history ([ae02009](https://github.com/nolotus/bun-nolo/commit/ae0200903e8cab6603547c6c862e89bcbd62baba))
+* **credential:** 恢复既有可用性：读旧写新、会话内存回退、按来源收窄严格路径 ([a416603](https://github.com/nolotus/bun-nolo/commit/a416603bf2e96171c40919f176c84de8f7c3237c))
+* **database:** 为共享对话历史增加有界自动恢复 ([4696e92](https://github.com/nolotus/bun-nolo/commit/4696e924ec825694012dc8589649432050d97bab))
+* **dispatch:** 修复速度快照过期后不刷新且不完整样本被丢弃 ([9c4ff8f](https://github.com/nolotus/bun-nolo/commit/9c4ff8fe6e52b0d3c179216cd47a250e53e27a6d))
+* **downloads:** 隔离 CLI 渠道并收紧流式代理边界 ([1db57e7](https://github.com/nolotus/bun-nolo/commit/1db57e780949414cc15f8dbed71dbc4ca41dbacb))
+* **explore:** reuse shared modal for skill details ([f776bfe](https://github.com/nolotus/bun-nolo/commit/f776bfe67535772c11dc4c12806419ce237dbd87))
+* **release:** 对齐 alpha 组件版本到已发布基线 ([15c5d30](https://github.com/nolotus/bun-nolo/commit/15c5d30917449705f1fe711277eb776939ba6dc1))
+* **runtime:** enforce child budgets and preserve background command deadlines ([e8cc011](https://github.com/nolotus/bun-nolo/commit/e8cc0117476e6ee55e7b45bd25d5b78cd4fd6ee3))
+* **runtime:** forward lifecycle stop confirmation settings to Docker backend ([8999980](https://github.com/nolotus/bun-nolo/commit/89999802e6fe31a8728eda37e6fd4c0b52a9f4aa))
+* **runtime:** normalize Cursor permission decisions and release test types ([a300ed5](https://github.com/nolotus/bun-nolo/commit/a300ed54a2ee78a929aba69150fe01580d71e08c))
+* **summary:** 摘要调用改用 tool-free provider 解析 ([b9bb45f](https://github.com/nolotus/bun-nolo/commit/b9bb45f58a44eb0686c6431b8deb2a9ad9e1f193))
+* **tui:** keep background activity visible and wire task controls ([82c49d1](https://github.com/nolotus/bun-nolo/commit/82c49d16dabc44471c64d17a7e60716cc99b5b6a))
+* **web:** netease 加解密模块加浏览器 stub，web bundle 恢复可构建 ([f3745da](https://github.com/nolotus/bun-nolo/commit/f3745da2959ce0087d30359819bdd79e033174ec))
+
+
+## 0.212.0-alpha.1 (2026-11-03)
+
+### Features
+
+* **agent-runtime:** 仓库 AGENTS.md 改为按需加载以降低首轮上下文 ([3e34769](https://github.com/nolotus/bun-nolo/commit/3e34769b005481b10d5c738844fdce28dcf1d19d))
+* **agent-runtime:** 精简回复行为准则并让已授权工作持续推进 ([c23b03e](https://github.com/nolotus/bun-nolo/commit/c23b03e4c2edd37abfd2904f5ceb73c007687f20))
+* **cli:** nolo usage rebuild，从明细重建日聚合统计 ([fbf9b73](https://github.com/nolotus/bun-nolo/commit/fbf9b734d98263e90b6eca89618bba84b9f10ce2))
+* **cli:** 新增 nolo usage，并修复日统计丢失缓存与 agent 维度 ([813c4d3](https://github.com/nolotus/bun-nolo/commit/813c4d39a84b64d609d6ff46689b9e214108c5dd))
+* **credential:** 支持粘贴凭据直接建 agent 并接入系统安全存储 ([7212371](https://github.com/nolotus/bun-nolo/commit/72123714379e079fb8aadfde2185768a660ae9f2))
+* **music:** 本地音乐源与多源抽象接线 ([47247e2](https://github.com/nolotus/bun-nolo/commit/47247e22be47d9f430a066a2b43eaa175f990832))
+* **web:** 侧边栏 Agent 行按未读对话点亮红点 ([aa39550](https://github.com/nolotus/bun-nolo/commit/aa39550f66a25ddd89a824f1b3f2ec794da8940f))
+
+### Bug Fixes
+
+* **agent-runtime:** 恢复请教模式顾问档的既有文案契约 ([0fd27dd](https://github.com/nolotus/bun-nolo/commit/0fd27dde87898b3f92fe18a3d013c50817a53eca))
+* **agent-runtime:** 降级后的工具轮在 Responses 线上重新带回 reasoning 占位 ([8d9be71](https://github.com/nolotus/bun-nolo/commit/8d9be71b59d5ef03e9093605470a7df01638f3cc))
+* **billing:** 审计复核交易缺失，消掉跨扫描误报 ([18afda3](https://github.com/nolotus/bun-nolo/commit/18afda3c08ab2b0b66242d21e9ef250f437265a2))
+* **credential:** 恢复既有可用性：读旧写新、会话内存回退、按来源收窄严格路径 ([a416603](https://github.com/nolotus/bun-nolo/commit/a416603bf2e96171c40919f176c84de8f7c3237c))
+* **dispatch:** 修复速度快照过期后不刷新且不完整样本被丢弃 ([9c4ff8f](https://github.com/nolotus/bun-nolo/commit/9c4ff8fe6e52b0d3c179216cd47a250e53e27a6d))
+* **downloads:** 隔离 CLI 渠道并收紧流式代理边界 ([1db57e7](https://github.com/nolotus/bun-nolo/commit/1db57e780949414cc15f8dbed71dbc4ca41dbacb))
+* **release:** 对齐 alpha 组件版本到已发布基线 ([15c5d30](https://github.com/nolotus/bun-nolo/commit/15c5d30917449705f1fe711277eb776939ba6dc1))
+* **web:** netease 加解密模块加浏览器 stub，web bundle 恢复可构建 ([f3745da](https://github.com/nolotus/bun-nolo/commit/f3745da2959ce0087d30359819bdd79e033174ec))
+
+
 ## 0.210.0-alpha.2 (2026-11-03)
 
 ### Bug Fixes

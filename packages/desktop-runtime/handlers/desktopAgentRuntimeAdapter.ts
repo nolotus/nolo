@@ -5,6 +5,7 @@ import type {
   AgentRuntimeChatMessage,
   AgentRuntimeHostAdapter,
   AgentRuntimeProvider,
+  AgentRuntimeProviderResolveOptions,
   AgentRuntimeSaveTurnInput,
   AgentRuntimeToolCallInput,
   AgentRuntimeToolResult,
@@ -67,7 +68,10 @@ export type DesktopAgentRuntimeActions = {
   loadAgentConfig(agentRef: string): Promise<AgentRuntimeAgentConfig | null>;
   loadDialogHistory(dialogId: string): Promise<AgentRuntimeChatMessage[]>;
   saveTurn(input: AgentRuntimeSaveTurnInput): Promise<{ dialogId: string; title?: string }>;
-  resolveProvider(agentConfig: AgentRuntimeAgentConfig): Promise<AgentRuntimeProvider>;
+  resolveProvider(
+    agentConfig: AgentRuntimeAgentConfig,
+    options?: AgentRuntimeProviderResolveOptions,
+  ): Promise<AgentRuntimeProvider>;
   executeTool(call: AgentRuntimeToolCallInput): Promise<AgentRuntimeToolResult>;
 };
 
@@ -386,7 +390,7 @@ export function createDesktopAgentRuntimeRequestScopedActions(args: {
       }
       return args.base.saveTurn(input);
     },
-    resolveProvider: (agentConfig) => args.base.resolveProvider(agentConfig),
+    resolveProvider: (agentConfig, options) => args.base.resolveProvider(agentConfig, options),
     executeTool: (call) => args.base.executeTool(call),
   };
 }
@@ -700,10 +704,12 @@ export async function resolveDesktopOpenAiCompatibleProvider(args: {
     model: providerConfig.model,
     complete: async (messages, options) =>
       executeOpenAiCompatibleChatCompletion({
-        providerConfig,
+        providerConfig: options?.max_tokens !== undefined ? { ...providerConfig, requestOptions: { ...providerConfig.requestOptions, max_tokens: options.max_tokens } } : providerConfig,
         messages,
         tools: args.tools as any,
         fetchImpl,
+        ...(options?.signal ? { signal: options.signal } : {}),
+        ...(options?.noRetries ? { noRetries: true as const } : {}),
         // 透传 onReasoningDelta（与 platformChatProvider 双回调条件对齐）：
         // 实时 thinking SSE 在生产链路才会触发。
         stream: Boolean(options?.onTextDelta || options?.onReasoningDelta),
@@ -746,7 +752,8 @@ export async function resolveDesktopPlatformChatProvider(args: {
         messages,
         tools: args.tools as any,
         fetchImpl,
-        serverUrls: [providerConfig.serverUrl, ...fallbackServers],
+        serverUrls: options?.noRetries ? [providerConfig.serverUrl] : [providerConfig.serverUrl, ...fallbackServers],
+        ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.dialogId ? { dialogId: options.dialogId } : {}),
         ...(args.requestTimeoutMs ? { requestTimeoutMs: args.requestTimeoutMs } : {}),
         // 双回调条件对齐 platformChatProvider：onReasoningDelta 也要触发流式。
@@ -824,6 +831,8 @@ export async function resolveDesktopConfiguredProvider(args: {
         model,
         complete: async (messages, options) => {
           const result = await fetchAnthropicMessagesCompletion({
+            signal: options?.signal,
+            ...(options?.noRetries ? { noRetries: true as const } : {}),
             agentConfig: args.agentConfig,
             accessToken,
             openAiBody: openAiBody(messages),
@@ -845,6 +854,8 @@ export async function resolveDesktopConfiguredProvider(args: {
         model,
         complete: async (messages, options) => {
           const result = await fetchCodexResponsesCompletion({
+            ...(options?.noRetries ? { maxAttempts: 1 } : {}),
+            signal: options?.signal,
             agentConfig: args.agentConfig,
             accessToken,
             accountId: credential?.accountId,
@@ -868,6 +879,7 @@ export async function resolveDesktopConfiguredProvider(args: {
         model,
         complete: async (messages, options) => {
           const result = await fetchAntigravityCloudCodeCompletion({
+            signal: options?.signal,
             agentConfig: args.agentConfig,
             accessToken,
             metadata: credential?.metadata ?? null,
@@ -963,6 +975,8 @@ export async function resolveDesktopConfiguredProvider(args: {
         messages,
         tools: tools as any,
         fetchImpl,
+        ...(options?.signal ? { signal: options.signal } : {}),
+        ...(options?.noRetries ? { noRetries: true as const } : {}),
         // 透传 onReasoningDelta，保持与上面两处 complete 包装器一致。
         stream: Boolean(options?.onTextDelta || options?.onReasoningDelta),
         ...(options?.onTextDelta ? { onTextDelta: options.onTextDelta } : {}),
@@ -1031,8 +1045,9 @@ export async function saveDesktopAgentRuntimeTurn(args: {
 export async function resolveDesktopAgentRuntimeProvider(args: {
   actions: Pick<DesktopAgentRuntimeActions, "resolveProvider">;
   agentConfig: AgentRuntimeAgentConfig;
+  options?: AgentRuntimeProviderResolveOptions;
 }) {
-  return args.actions.resolveProvider(args.agentConfig);
+  return args.actions.resolveProvider(args.agentConfig, args.options);
 }
 
 export async function executeDesktopAgentRuntimeToolCall(args: {
@@ -1073,9 +1088,10 @@ export function createDesktopAgentRuntimeAdapter(args: {
       actions: args.actions,
       input,
     }),
-    resolveProvider: (agentConfig) => resolveDesktopAgentRuntimeProvider({
+    resolveProvider: (agentConfig, options) => resolveDesktopAgentRuntimeProvider({
       actions: args.actions,
       agentConfig,
+      options,
     }),
     executeTool: (call) => executeDesktopAgentRuntimeToolCall({
       actions: args.actions,

@@ -7,6 +7,7 @@
 import { resolveSessionKey } from "../../../agent-runtime/sessionIdentity";
 import type { AgentRuntimeResult } from "../../../agent-runtime";
 import { fetchCodexResponsesCompletion, isCodexOAuthAgent } from "../../../agent-runtime/codexResponsesProvider";
+import { ensureCodexOAuthModelCatalog } from "../../../agent-runtime/codexOAuthModelCatalog";
 import { readOAuthCredential } from "../../../agent-runtime/oauthTokenStore";
 import { logLocalRuntimeDiagnostic } from "../localRuntimeDiagnostics";
 import { fetchWithTransientRetry } from "../localRuntimeFetchRetry";
@@ -161,7 +162,15 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
           trace.log("headers", { attempt, status: res.status });
           return res;
         };
+        // 目录播种：命中 TTL 时立即返回（一次上游请求/小时/账号）。**不 await**——
+        // 本轮窗口在这之前已按 pin 定型，等它只会给首轮加最多 4s 延迟；播种服务的是
+        // 随后的轮次。ensure 内部 fail-open，永不抛。
+        if (!options?.noRetries) void ensureCodexOAuthModelCatalog({
+          accessToken,
+          ...(accountId ? { accountId } : {}),
+        });
         const result = await fetchCodexResponsesCompletion({
+          ...(options?.noRetries ? { maxAttempts: 1 } : {}),
           agentConfig,
           accessToken,
           ...(accountId ? { accountId } : {}),
@@ -170,6 +179,7 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
             messages,
             stream: false,
             ...(tools.length > 0 ? { tools } : {}),
+            ...(options?.reasoning_effort ? { reasoning_effort: options.reasoning_effort } : {}),
           },
           sessionKey: resolveSessionKey({ dialogId: options?.dialogId }),
           signal: options?.signal,
@@ -181,6 +191,7 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
               sleep: (ms) =>
                 abortableSleep(deps.sleep, ms, init?.signal ?? options?.signal),
               loopbackRequest,
+              ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
             })) as unknown as typeof fetch,
         });
         await recordLocalAvailability(result.status, result.body);

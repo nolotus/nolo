@@ -18,13 +18,7 @@
 import type { ProcessOwner } from "./processOwnership";
 import type { ProcessTerminalNotice } from "./processRegistry";
 
-/**
- * 同一 dialog 在两次用户 turn 之间，最多自动开几个 completion turn。
- *
- * 这是防「completion turn 自己又派任务、任务又终态、又唤醒」无界自唤醒链的最小策略：
- * 链深只增不减地累计，任何一个用户 turn（`event.kind === "user"`）把计数清零；
- * 触顶后仍进 pendingProcessNotices（模型下轮仍知情），只是不再自动开 turn。
- */
+/** Maximum causal completion depth, independent of sibling tasks. */
 export const DEFAULT_MAX_CHAINED_COMPLETION_TURNS = 3;
 
 export type ProcessTerminalResumeReason =
@@ -57,29 +51,17 @@ export type ProcessTerminalResumeDecision =
     };
 
 /**
- * 决策台账：once-only 的 taskId 集合 + 每 dialog 的链深。
+ * 决策台账：once-only 的 taskId 集合。
  *
  * 显式传入而非模块级单例：TUI 每会话一份，测试可造任意份，registry 单例问题不传染。
  */
 export type ProcessTerminalResumeState = {
-  /** 已经续跑过的 taskId（inbox / completion turn 都算）。 */
+  /** 已作出续跑决策的 taskId；claim 先于宿主实际投递，不代表投递成功。 */
   claimedTaskIds: Set<string>;
-  /** dialogId → 自上次用户 turn 起自动开的 completion turn 数。 */
-  chainDepthByDialog: Map<string, number>;
-  /** 用户 turn 开始：链清零（用户回来了，后续终态可以正常唤醒）。 */
-  noteUserTurn(): void;
 };
 
 export function createProcessTerminalResumeState(): ProcessTerminalResumeState {
-  const claimedTaskIds = new Set<string>();
-  const chainDepthByDialog = new Map<string, number>();
-  return {
-    claimedTaskIds,
-    chainDepthByDialog,
-    noteUserTurn() {
-      chainDepthByDialog.clear();
-    },
-  };
+  return { claimedTaskIds: new Set<string>() };
 }
 
 export type ProcessTerminalResumeInput = {
@@ -106,10 +88,8 @@ const resolveCap = (value: number | undefined): number => {
 /**
  * 单条终态通知 → 投递决策。
  *
- * 副作用（有意为之，台账语义）：`inject-turn` / `completion-turn` 分支会 claim 该
- * taskId，`completion-turn` 还会把该 dialog 的链深 +1。notice-only 分支不改台账——
- * 尤其是 dialog-mismatch / chain-cap：那些任务只是「这次没法投」，用户切回来或链清零后
- * 同一 taskId 仍可能被后续（唯一一次）通知续跑。
+ * 决定投递时先 claim taskId（实际投递发生在调用方）；链深由任务归属携带。
+ * 既有限制：投递失败或宿主退出后不会回滚 claim；这里不保证可靠提交/重试。
  */
 export function decideProcessTerminalResume(
   input: ProcessTerminalResumeInput,
@@ -132,17 +112,15 @@ export function decideProcessTerminalResume(
   if (currentDialogId !== dialogId) {
     return { kind: "notice-only", reason: "dialog-mismatch", taskId };
   }
-  if (input.turnActive) {
-    input.state.claimedTaskIds.add(taskId);
-    return { kind: "inject-turn", taskId, owner: input.owner, notice: input.notice };
-  }
   const cap = resolveCap(input.maxChainedCompletionTurns);
-  const depth = input.state.chainDepthByDialog.get(dialogId) ?? 0;
+  const depth = input.owner.processCausalDepth ?? 0;
   if (depth >= cap) {
     return { kind: "notice-only", reason: "chain-cap", taskId };
   }
   input.state.claimedTaskIds.add(taskId);
-  input.state.chainDepthByDialog.set(dialogId, depth + 1);
+  if (input.turnActive) {
+    return { kind: "inject-turn", taskId, owner: input.owner, notice: input.notice };
+  }
   return { kind: "completion-turn", taskId, owner: input.owner, notice: input.notice };
 }
 
@@ -167,7 +145,6 @@ export type ProcessTerminalAutoResumeDeps = {
 
 export type ProcessTerminalAutoResumer = {
   decide: (notice: ProcessTerminalNotice) => ProcessTerminalResumeDecision;
-  noteUserTurn: () => void;
   readonly state: ProcessTerminalResumeState;
 };
 
@@ -177,7 +154,6 @@ export function createProcessTerminalAutoResumer(
   const state = createProcessTerminalResumeState();
   return {
     state,
-    noteUserTurn: () => state.noteUserTurn(),
     decide: (notice) => {
       const promoted = notice.promoted ?? deps.isPromoted?.(notice.taskId) ?? false;
       const effectiveNotice = notice.promoted === promoted ? notice : { ...notice, promoted };

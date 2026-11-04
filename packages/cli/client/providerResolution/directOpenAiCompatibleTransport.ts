@@ -118,6 +118,7 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
           fetchWithTransientRetry(fetchImpl, url, init, {
             sleep: deps.sleep,
             loopbackRequest,
+            ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
           }),
         stream,
         sessionId:
@@ -126,6 +127,7 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
         onTextDelta: options?.onTextDelta,
         onReasoningDelta: options?.onReasoningDelta,
         signal: options?.signal,
+        ...(options?.noRetries ? { noRetries: true as const } : {}),
         outboundDiagnostics: options?.requestId
           ? { callId: options.requestId }
           : undefined,

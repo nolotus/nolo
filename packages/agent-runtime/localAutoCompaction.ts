@@ -12,7 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { sha256Hex } from "../core/sha256";
 
-import { planCompression } from "../ai/context/planCompression";
+import { planCompression, getMessageTokenCount, resolveEffectiveCompactionBudgets } from "../ai/context/planCompression";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { canonicalizeToolName } from "./toolNameAliases";
@@ -20,11 +20,7 @@ import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   COMPACTION_SUMMARY_SCHEMA_VERSION,
   computeSummarySourceMetadata,
-  formatMessagesForSummaryWithTruncation,
-  TOOL_RESULT_TRUNCATE_CHARS,
-  computeSummaryInputTokenCap,
-  formatFileOperationsFromMessages,
-  buildCompactionUserContent,
+  buildBoundedCompactionRequest,
   buildCompactionMetricsFromPlan,
   formatCompactionMetricsLog,
   type CompactionMetrics,
@@ -49,6 +45,7 @@ export type PlanCompressionBridgeMessage = {
   role: AgentRuntimeChatMessage["role"];
   content: AgentRuntimeChatMessage["content"];
   tool_calls?: AgentRuntimeChatMessage["tool_calls"];
+  tool_call_id?: string;
 };
 
 /**
@@ -70,6 +67,7 @@ export function toPlanCompressionMessages(
     id: typeof message.id === "string" && message.id.length > 0 ? message.id : `local-${index}`,
     role: message.role,
     content: message.content ?? "",
+    ...(typeof message.tool_call_id === "string" ? { tool_call_id: message.tool_call_id } : {}),
     ...(Array.isArray(message.tool_calls)
       ? { tool_calls: message.tool_calls }
       : {}),
@@ -102,9 +100,10 @@ export function hashSummarySourceSlice(
   const found = findSummaryAnchorIndex(bridged, summarizedBeforeId);
   if (found === -1) return undefined;
   const slice = bridged.slice(0, found + 1).map((message, index) => ({
-    ...message,
     id: `local-${index}`,
+    role: message.role,
     content: message.content ?? "",
+    ...(Array.isArray(message.tool_calls) ? { tool_calls: message.tool_calls } : {}),
   }));
   return sha256Hex(JSON.stringify(slice));
 }
@@ -190,12 +189,20 @@ export function projectHistoryWithSummary(args: {
   }
 
   const projected = args.history.slice(startIndex);
+  // Re-inject only the latest user message in the entire history, and only
+  // when the cursor covers it. A newer user in the suffix supersedes it.
+  let latestUser = -1;
+  for (let i = args.history.length - 1; i >= 0; i--) {
+    if (args.history[i].role === "user") { latestUser = i; break; }
+  }
+  const preservedUser = latestUser >= 0 && latestUser < startIndex
+    ? [args.history[latestUser]] : [];
 
   const summaryMsg =
     args.summary.trim().length > 0
       ? [buildLocalSummaryHistoryMessage(args.summary)]
       : [];
-  return [...summaryMsg, ...projected];
+  return [...summaryMsg, ...preservedUser, ...projected];
 }
 
 /**
@@ -234,6 +241,7 @@ export type LocalCompactionSummaryFallbackOptions = {
   signal?: AbortSignal;
   deadlineMs?: number;
   attemptId?: string;
+  maxOutputTokens?: number;
 };
 
 /** One optional argument preserves compatibility with existing one-parameter callers. */
@@ -255,6 +263,7 @@ async function runSummaryFallback(
 ): Promise<{ summary: string | null; error?: string }> {
   try {
     const text = await fallback(content, options);
+    if (text === null) return { summary: null, error: "no summary" };
     if (typeof text !== "string") return { summary: null, error: "non-string output" };
     const trimmed = text.trim();
     return trimmed.length > 0 ? { summary: trimmed } : { summary: null, error: "empty summary" };
@@ -329,6 +338,8 @@ export type LocalAutoCompactionResult = {
   usage?: Record<string, unknown>;
   /** P1-8: 压缩 metrics（仅在 summaryGenerated=true 时有值） */
   metrics?: CompactionMetrics;
+  /** Estimated from the actual projected history; not a provider token guarantee. */
+  withinSafetyBudget?: boolean;
   /**
    * 压缩观测事件字段（可选，能映射就映射、拿不到就不给，禁止为凑数重计算）。
    * 全部复用已有 CompactionMetrics 口径，与 executionObservation
@@ -376,7 +387,9 @@ export type LocalCompactionSkipReason =
   /** 触发且调用了摘要模型，但返回空摘要。 */
   | "summary-empty"
   /** 上一次摘要失败后的退避窗口内，本轮不再重试摘要（没有发起请求，不是新失败）。 */
-  | "retry-backoff";
+  | "retry-backoff"
+  | "bounded-request-blocked"
+  | "unsafe-projection";
 
 export type LocalCompactionDecision =
   | {
@@ -396,6 +409,7 @@ export type LocalCompactionDecision =
   | {
       outcome: "skipped";
       skipReason: LocalCompactionSkipReason;
+      detail?: string;
       estimatedTokens?: number;
       historyBudget?: number;
       realUsageRatio?: number;
@@ -408,7 +422,7 @@ export type LocalCompactionDecision =
 export async function maybeAutoCompactLocalHistory(args: {
   adapter: AgentRuntimeHostAdapter;
   dialogId?: string;
-  /** 可注入的当前时间，供 cold-resume 判定使用；测试用来保持确定性。 */
+  /** 可注入的退避时钟，供测试保持确定性。 */
   now?: () => number;
   history: AgentRuntimeChatMessage[];
   model?: string;
@@ -542,22 +556,12 @@ export async function maybeAutoCompactLocalHistory(args: {
       : getModelContextWindow(args.model ?? "");
 
   const allMsgs = toPlanCompressionMessages(history);
-  // Cold-resume 判定：距上次活动很久再继续的对话，provider 前缀缓存必然已过期，
-  // 这一轮无论如何都要全量重发整个上下文。那正是压缩最划算的时刻——反正要付
-  // 全量未命中的钱，不如让重发的那份小一点，且后续每一轮都跟着受益。
-  //
-  // 阈值方向必须保守：若缓存其实还热却误触发，新摘要会改变前缀、把热缓存毁掉。
-  // 所以取一个明显高于常见 provider TTL 的值，宁可漏判也不误判。
-  const coldResume = isColdResume(history, args.now?.() ?? Date.now());
-
   const plan = planCompression({
     allMsgs: allMsgs as any,
     summarizedBeforeId: planAnchorId,
     summary: existingSummary,
     contextWindow,
-    ...(coldResume
-      ? { coldResume: true, reason: "cold_resume" as const }
-      : {}),
+    preserveLatestUserByProjection: true,
     ...(args.realContextUsagePercent !== undefined
       ? { realContextUsagePercent: args.realContextUsagePercent }
       : {}),
@@ -636,6 +640,22 @@ export async function maybeAutoCompactLocalHistory(args: {
     };
   }
 
+  const msgsToCompress = plan.msgsToCompress as PlanCompressionBridgeMessage[];
+  const bounded = buildBoundedCompactionRequest({
+    msgsToCompress,
+    previousSummary: existingSummary,
+    contextWindow,
+    canonicalizeToolName,
+  });
+  if (bounded.status === "blocked") {
+    const detail = `bounded compaction blocked: ${bounded.reason}`;
+    console.warn(`[localLoop] ${detail}`);
+    return {
+      ...projectExisting(),
+      decision: { outcome: "skipped", skipReason: "bounded-request-blocked", detail },
+    };
+  }
+
   emitPhase({ kind: "compaction-start" });
   // 压缩观测（**仅日志**）：attemptId 把 compaction attempt 关联到
   // provider/transport 的 requestId；primary/fallback/save 分段耗时用于区分
@@ -690,27 +710,11 @@ export async function maybeAutoCompactLocalHistory(args: {
     if (args.abortSignal?.aborted) {
       throw Object.assign(new Error("auto-compaction aborted"), { compactionReason: "aborted" as const });
     }
-    const msgsToCompress =
-      plan.msgsToCompress as PlanCompressionBridgeMessage[];
-    // 用共享模块的截断版格式化，避免大工具结果撑爆摘要请求（P0-2）。
-    const messagesText = formatMessagesForSummaryWithTruncation(
-      msgsToCompress,
-      TOOL_RESULT_TRUNCATE_CHARS,
-      computeSummaryInputTokenCap(contextWindow),
-    );
-    const fileOpsText = formatFileOperationsFromMessages(
-      msgsToCompress,
-      canonicalizeToolName,
-    );
-    const promptContent = buildCompactionUserContent({
-      previousSummary: existingSummary,
-      messagesText,
-      fileOpsText,
-    });
+    const promptContent = bounded.promptContent;
     emitPhase({ kind: "waiting-provider" });
     // 只记估算源（惰性求值见 logCompactionTiming 注释）：不在计时起点之前消耗
     // CPU，保证成功路径 elapsedMs 与改动前同口径。
-    compactionInputSource = messagesText;
+    compactionInputSource = promptContent;
     compactionPrevSummarySource = existingSummary;
     // 主通道计时起点（旧 elapsedMs 的起点，原义不变）。
     compactionT0 = Date.now();
@@ -728,7 +732,7 @@ export async function maybeAutoCompactLocalHistory(args: {
         // 服务端 x-request-id 可对上，用于关联请求级证据。不进 prompt/摘要/持久化。
         requestId: compactionAttemptId,
         // Room for factual handoff, exact commands and file operations.
-        max_tokens: 8192,
+        max_tokens: bounded.outputTokenBudget,
         reasoning_effort: "low",
       },
     ).then(
@@ -785,6 +789,7 @@ export async function maybeAutoCompactLocalHistory(args: {
           signal: args.abortSignal,
           deadlineMs: Date.now() + 30_000,
           attemptId: compactionAttemptId,
+          maxOutputTokens: bounded.outputTokenBudget,
         },
       );
       fallbackElapsedMs = Date.now() - fallbackT0;
@@ -850,15 +855,70 @@ export async function maybeAutoCompactLocalHistory(args: {
       });
     }
 
+    // P1-8 压缩埋点：记录 metrics 并日志
+    // 原因优先级：校验失效触发的重压缩 > context_budget，与
+    // localLoop 构造 compaction 事件 / buildCompactionMetricsFromPlan 同口径。
+    const metricsReason: "invalid_summary" | "cold_resume" | "context_budget" =
+      invalidSummary ? "invalid_summary" : "context_budget";
+    const metrics = buildCompactionMetricsFromPlan({
+      reason: metricsReason,
+      previousSummary: existingSummary,
+      plan: {
+        msgsToCompress: bounded.coveredMessages,
+        msgsToKeep: [...msgsToCompress.slice(bounded.coveredMessages.length), ...plan.msgsToKeep],
+      },
+      newSummary,
+      summaryUsage: result?.usage as Record<string, unknown> | undefined,
+    });
+    const projectedHistory = projectHistoryWithSummary({ history, summary: newSummary,
+      summarizedBeforeId: bounded.summarizedBeforeId });
+    // Metrics and safety diagnostics count the actual projected user message too.
+    const projectedMessages = toPlanCompressionMessages(projectedHistory);
+    const projectedTokens = projectedMessages.reduce((sum, message) => sum + getMessageTokenCount(message as any), 0);
+    const projectedRetained = projectedMessages.slice(1);
+    metrics.retainedTokens = projectedRetained.reduce((sum, message) => sum + getMessageTokenCount(message as any), 0);
+    metrics.retainedCount = projectedRetained.length;
+    const { effectiveHistoryBudget } = resolveEffectiveCompactionBudgets({
+      contextWindow, triggerRatio: plan.diagnostics!.triggerRatio,
+      historyBudget: plan.diagnostics!.historyBudget,
+      rawMessageBudget: plan.diagnostics!.historyBudget,
+      summaryTokens: 0,
+    });
+    const withinSafetyBudget = projectedTokens <= effectiveHistoryBudget;
+    if (!withinSafetyBudget) {
+      console.warn("[localLoop] compaction projection remains above safety budget", {
+        projectedTokens, effectiveHistoryBudget,
+      });
+    }
+    const oldProjection = projectExisting();
+    const beforeProjectedTokens = toPlanCompressionMessages(oldProjection.history)
+      .reduce((sum, message) => sum + getMessageTokenCount(message as any), 0);
+    const historyBudget = plan.diagnostics!.historyBudget;
+    if (projectedTokens >= beforeProjectedTokens || projectedTokens >= historyBudget) {
+      const failureMessage = `compaction candidate rejected: ${projectedTokens >= beforeProjectedTokens ? "no token reduction" : "above history budget"} (before=${beforeProjectedTokens}, after=${projectedTokens}, budget=${historyBudget})`;
+      console.warn(`[localLoop] ${failureMessage}`);
+      recordCompactionFailure(dialogId, args.now?.() ?? Date.now());
+      logCompactionTiming("empty", {});
+      emitPhase({ kind: "compaction-end" });
+      return {
+        ...oldProjection,
+        failureMessage,
+        ...(result?.usage ? { usage: result.usage as Record<string, unknown> } : {}),
+        decision: { outcome: "skipped", skipReason: "unsafe-projection", detail: failureMessage },
+      };
+    }
     const sourceMeta = await computeSummarySourceMetadata(
       toPlanCompressionMessages(history),
-      plan.newSummarizedBeforeId,
+      bounded.summarizedBeforeId,
     );
+    if (args.abortSignal?.aborted) {
+      throw Object.assign(new Error("auto-compaction aborted"), { compactionReason: "aborted" as const });
+    }
     const saveT0 = Date.now();
     await adapter.saveDialogSummary({
       dialogId,
       summary: newSummary,
-      summarizedBeforeId: plan.newSummarizedBeforeId,
+      summarizedBeforeId: bounded.summarizedBeforeId,
       // 内容寻址失效检测：存锚点切片哈希与长度，供下轮载入校验。
       sourceHash: sourceMeta?.sourceHash,
       sourceCount: sourceMeta?.sourceCount ?? 0,
@@ -872,22 +932,6 @@ export async function maybeAutoCompactLocalHistory(args: {
     });
     saveElapsedMs = Date.now() - saveT0;
 
-    // P1-8 压缩埋点：记录 metrics 并日志
-    // 原因优先级：校验失效触发的重压缩 > cold_resume > context_budget，与
-    // localLoop 构造 compaction 事件 / buildCompactionMetricsFromPlan 同口径。
-    const metricsReason: "invalid_summary" | "cold_resume" | "context_budget" =
-      invalidSummary
-        ? "invalid_summary"
-        : coldResume
-          ? "cold_resume"
-          : "context_budget";
-    const metrics = buildCompactionMetricsFromPlan({
-      reason: metricsReason,
-      previousSummary: existingSummary,
-      plan,
-      newSummary,
-      summaryUsage: result?.usage as Record<string, unknown> | undefined,
-    });
     console.log(formatCompactionMetricsLog(metrics));
     // Opus B′ 诊断：只记数字与 model，不记内容——用于判断绝对上限是否合适、
     // 瓶颈在输入(prefill)还是输出(generation)，自然触发收集后驱动 timeout/上限调整。
@@ -898,26 +942,21 @@ export async function maybeAutoCompactLocalHistory(args: {
 
     emitPhase({ kind: "compaction-end" });
     return {
-      history: projectHistoryWithSummary({
-        history,
-        summary: newSummary,
-        summarizedBeforeId: plan.newSummarizedBeforeId,
-      }),
+      history: projectedHistory,
       compressed: true,
       summaryGenerated: true,
       reason: metricsReason,
       beforeTokens:
-        metrics.previousSummaryTokens + metrics.compressedTokens,
-      afterTokens: metrics.newSummaryTokens + metrics.retainedTokens,
+        beforeProjectedTokens,
+      afterTokens: projectedTokens,
+      withinSafetyBudget,
       ...(result?.usage ? { usage: result.usage as Record<string, unknown> } : {}),
       metrics,
       decision: {
         outcome: "compressed",
         trigger: invalidSummary
           ? "invalid-summary"
-          : coldResume
-            ? "cold-resume"
-            : plan.diagnostics?.triggeredByRealUsage
+          : plan.diagnostics?.triggeredByRealUsage
               ? "real-usage"
               : "estimate",
         ...(plan.diagnostics
@@ -993,6 +1032,8 @@ function emitCompactionObservationEvent(
   const decision = compacted.decision;
   if (decision?.outcome === "skipped") {
     const isProtectionGap =
+      decision.skipReason === "bounded-request-blocked" ||
+      decision.skipReason === "unsafe-projection" ||
       decision.skipReason === "adapter-missing-summary-methods" ||
       decision.skipReason === "load-summary-failed";
     const approachingBudget =
@@ -1007,13 +1048,14 @@ function emitCompactionObservationEvent(
     kind: "compaction",
     atMs: Date.now(),
     ...(compacted.reason ? { reason: compacted.reason } : {}),
+    ...(compacted.withinSafetyBudget === false ? { detail: "Estimated projected history remains above the compaction safety budget" } : {}),
     summaryGenerated: compacted.summaryGenerated,
     compressed: compacted.compressed,
     ...(compacted.failureMessage
       ? { failed: true, detail: compacted.failureMessage }
       : {}),
     ...(decision?.outcome === "skipped"
-      ? { skipped: true, skipReason: decision.skipReason }
+      ? { skipped: true, skipReason: decision.skipReason, ...(decision.detail ? { detail: decision.detail } : {}) }
       : {}),
     ...(decision && "trigger" in decision && decision.trigger
       ? { trigger: decision.trigger }

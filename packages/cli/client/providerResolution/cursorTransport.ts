@@ -12,6 +12,7 @@ import type {
   CursorListWorkspaceEntriesArgs,
 } from "../../../agent-runtime/cursor/cursorProvider";
 import { isCursorOAuthAgent } from "../../../agent-runtime/cursor/isCursorOAuthAgent";
+import type { PermissionRequest } from "../../../agent-runtime/actionGate";
 import {
   internalSearchWorkspace,
   internalListWorkspaceEntries,
@@ -78,7 +79,19 @@ export const resolveCursorTransport: ProviderResolver = async (ctx) => {
         },
       };
     };
-    const confirmExternalFileAccess = deps.confirmDestructiveAction;
+    // Cursor 的 workspace 工具（search / list）用宿主确认回调做「工作区外文件
+    // 访问」确认；宿主契约是 HostConfirmDecision（boolean | { approved,
+    // hostResult }），而 workspace 工具只接受 boolean。边界换算与
+    // cliLocalToolExecutors 的文件访问通道同口径：拒绝语义原样保留，对象形态
+    // 按 approved 解释；宿主代执行（hostResult）由 execShell 的 capability
+    // 通道消费，与只读 workspace 工具无关。
+    const hostConfirm = deps.confirmDestructiveAction;
+    const confirmExternalFileAccess = hostConfirm
+      ? async (request: PermissionRequest): Promise<boolean> => {
+          const decision = await hostConfirm(request);
+          return typeof decision === "boolean" ? decision : decision.approved === true;
+        }
+      : undefined;
     const cursorSearchWorkspace = (args: CursorSearchWorkspaceArgs) =>
       internalSearchWorkspace({
         workspaceRoot,
@@ -102,9 +115,11 @@ export const resolveCursorTransport: ProviderResolver = async (ctx) => {
       model: agentConfig.model || "cursor-default",
       systemPrompt: agentConfig.prompt?.trim() || undefined,
       tools,
-      executeTool: cursorExecuteTool,
-      searchWorkspace: cursorSearchWorkspace,
-      listWorkspaceEntries: cursorListWorkspaceEntries,
+      ...(ctx.textOnly ? {} : {
+        executeTool: cursorExecuteTool,
+        searchWorkspace: cursorSearchWorkspace,
+        listWorkspaceEntries: cursorListWorkspaceEntries,
+      }),
     });
     // cursorProvider.complete already returns AgentRuntimeResult; wrap to
     // attach tool surface diagnostics for parity with other providers.

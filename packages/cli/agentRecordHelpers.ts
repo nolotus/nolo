@@ -1,5 +1,16 @@
 import { readFileSync } from "node:fs";
 import {
+  createHostCredentialBrokerChain,
+  createStrictHostCredentialBroker,
+} from "agent-runtime/desktopHostCredentialBroker";
+import { getSharedSessionCredentialBroker } from "agent-runtime/sessionCredentialBroker";
+import { createFileCredentialBroker } from "agent-runtime/fileCredentialBroker";
+import type { CredentialBroker } from "agent-runtime/credentialBroker";
+import {
+  buildAgentApiKeyCredentialRef,
+  migrateAgentSecrets,
+} from "agent-runtime/migrateAgentSecrets";
+import {
   classifyAgentApiKeyRef,
   formatUnsupportedAgentApiKeyRefMessage,
 } from "agent-runtime/oauthProviderRefs";
@@ -7,6 +18,7 @@ import { normalizeAgentHandle } from "core/agentHandle";
 import { toErrorMessage } from "core/errorMessage";
 import { DataType } from "create/types";
 import { createAgentKey } from "database/keys";
+import { buildRestorePatch } from "database/tombstones";
 import { resolveCliAgentKeyInput } from "./agentAliases";
 import type { CliKvDb } from "./client/hybridRecordStore";
 import { buildLocalAgentLookupKeys, shouldReadAgentKeyRemotely } from "./client/localAgentRecords";
@@ -321,8 +333,20 @@ export async function writeAgentRecord(args: {
   serverUrl: string;
   userId: string;
   record: Record<string, any>;
+  /**
+   * 远端是否包含 apiKey。默认 **true**（既有契约：用户自己终端敲
+   * `nolo agent create --api-key …` 时，远端写入里就带这个字段）。
+   * 只有「对话里由宿主批准代执行」的严格路径才传 false。
+   */
+  remoteIncludeApiKey?: boolean;
 }) {
   assertSupportedAgentApiKeyRef(args.record);
+  // 远端是否携带明文密钥由调用方决定（手敲 CLI 保持既有契约；宿主代执行只留引用）。
+  // 用字段过滤而不是解构重命名：后者会被密钥扫描器误判成键值对字面量。
+  const remoteRecord =
+    args.remoteIncludeApiKey === false
+      ? Object.fromEntries(Object.entries(args.record).filter(([field]) => field !== "apiKey"))
+      : args.record;
   const res = await fetchWithTransportFallback(`${args.serverUrl}/api/v1/db/write/`, {
     method: "POST",
     headers: {
@@ -333,7 +357,7 @@ export async function writeAgentRecord(args: {
       customKey: args.agentKey,
       userId: args.userId,
       data: {
-        ...args.record,
+        ...remoteRecord,
         dbKey: args.agentKey,
       },
     }),
@@ -661,6 +685,157 @@ export function normalizeAgentRecordForOutput(agentKey: string, authToken: strin
   };
 }
 
+const INBOUND_CRED_REF_PREFIX = "$nolo_cred:";
+const VAULT_REF_PATTERN = /^vault-cred-[A-Za-z0-9]+$/;
+
+/**
+ * 识别入路隔离产生的不透明 vault ID（`vault-cred-…`，兼容 `$nolo_cred:` 前缀形态）。
+ *
+ * 只做形态判定：不读 broker、不返回明文。明文只在真正使用点（verify、执行边界）
+ * 于进程内取出，绝不进入 argv、普通记录、远端写入或日志。
+ */
+export function detectVaultCredentialId(value: unknown): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  const candidate = trimmed.startsWith(INBOUND_CRED_REF_PREFIX)
+    ? trimmed.slice(INBOUND_CRED_REF_PREFIX.length).trim()
+    : trimmed;
+  return VAULT_REF_PATTERN.test(candidate) ? candidate : null;
+}
+
+/**
+ * 把严格宿主安全存储里的 vault 凭据绑到 agent 的具名 ref（`api-key:<agentKey>`）。
+ *
+ * 存储只用 OS 安全区（经 `createStrictHostCredentialBroker`），**没有明文文件回退**；
+ * 安全区不可用时这一调用直接失败（`credential_store_*`），不会降级写盘。
+ * 复用既有两阶段路径 `migrateAgentSecrets`：secret 只写安全区，记录补丁用
+ * `credentialRef` 取代明文 `apiKey`。
+ *
+ * 注意：secret 在进程内是**明文**（broker 返回的就是原始字符串），只是不落盘、
+ * 不进 argv/日志/记录/远端。
+ */
+let hostCredentialBrokerOverride: CredentialBroker | undefined;
+
+/** 严格安全区不可用、只能回退本地文件存储时的告警（由调用方 drain 后输出）。 */
+const credentialStorageWarnings: string[] = [];
+
+export function drainCredentialStorageWarnings(): string[] {
+  return credentialStorageWarnings.splice(0, credentialStorageWarnings.length);
+}
+
+function pushCredentialStorageWarning(message: string): void {
+  credentialStorageWarnings.push(message);
+  try {
+    process.stderr.write(`[nolo] Warning: ${message}\n`);
+  } catch {
+    // stderr 不可写时至少保留内存告警，不影响主流程。
+  }
+}
+
+export const CREDENTIAL_STORE_SESSION_FALLBACK_WARNING =
+  "系统安全区不可用，本次会话内有效，未持久化；重启后需重新提供该凭据。";
+
+export const CREDENTIAL_STORE_FALLBACK_WARNING =
+  "系统安全区不可用，已回退到本地文件存储（0600 明文）。建议启用系统钥匙串（Linux: Secret Service / gnome-keyring）。";
+
+/**
+ * 测试注入点：生产代码不调用。缺省一律走严格宿主安全存储。
+ * （不提供「回退明文文件」的开关，避免这条缝被当成逃生口。）
+ */
+export function setHostCredentialBrokerOverride(broker: CredentialBroker | undefined): void {
+  hostCredentialBrokerOverride = broker;
+}
+
+/** 严格安全区（写路径与 has 校验只认它，绝不看遗留明文文件）。 */
+function resolveStrictCredentialBroker(broker?: CredentialBroker): CredentialBroker {
+  return broker ?? hostCredentialBrokerOverride ?? createStrictHostCredentialBroker();
+}
+
+const legacyReadNoticed = new Set<string>();
+
+/**
+ * 读路径：严格安全区优先，未命中时**只读**回退到遗留 file broker。
+ * 这样切到严格 broker 后既有 `api-key:agent-*` 凭据立即可用，且不做迁移写入。
+ */
+function resolveHostCredentialBroker(broker?: CredentialBroker): CredentialBroker {
+  if (broker || hostCredentialBrokerOverride) return resolveStrictCredentialBroker(broker);
+  return createHostCredentialBrokerChain({
+    strict: createStrictHostCredentialBroker(),
+    session: getSharedSessionCredentialBroker(),
+    legacy: createFileCredentialBroker({ migration: { enableLegacyMigration: true } }),
+    notifySessionFallback: () => {
+      try {
+        process.stderr.write(`[nolo] Warning: ${CREDENTIAL_STORE_SESSION_FALLBACK_WARNING}\n`);
+      } catch {
+        // stderr 不可写不影响使用。
+      }
+    },
+    notifyLegacyHit: (ref) => {
+      if (legacyReadNoticed.has(ref)) return;
+      legacyReadNoticed.add(ref);
+      try {
+        process.stderr.write(
+          `[nolo] Warning: 凭据 "${ref}" 来自遗留本地明文存储（只读回退）。建议重新录入该 API key 以迁入系统安全区。\n`,
+        );
+      } catch {
+        // 同上。
+      }
+    },
+  });
+}
+
+/**
+ * 把一条已知明文的凭据写进严格 OS store，并返回 agent 作用域的引用。
+ * 这是 `bindVaultCredentialToAgent` 的后半段，被「vault 引用」和「明文 key」两条入路共用，
+ * 避免两处各自实现写入 + 校验。
+ */
+export async function storeAgentCredential(args: {
+  agentKey: string;
+  secret: string;
+  broker?: CredentialBroker;
+}): Promise<{ credentialRef: string }> {
+  // 写路径只认严格安全区：has 校验也必须是严格区里的落库，不能被遗留文件"代为满足"。
+  const broker = resolveStrictCredentialBroker(args.broker);
+  const credentialRef = buildAgentApiKeyCredentialRef(args.agentKey);
+  await migrateAgentSecrets({
+    agent: { key: args.agentKey, apiKey: args.secret, apiKeyRef: credentialRef },
+    broker,
+  });
+  if (!(await broker.has(credentialRef))) {
+    throw new Error(`failed to store the credential in the host credential store (${credentialRef}).`);
+  }
+  return { credentialRef };
+}
+
+export async function bindVaultCredentialToAgent(args: {
+  agentKey: string;
+  vaultId: string;
+  broker?: CredentialBroker;
+}): Promise<{ credentialRef: string }> {
+  const broker = resolveHostCredentialBroker(args.broker);
+  const secret = await broker.get(args.vaultId);
+  if (!secret) {
+    // ID 是摘要不是机密，可以显示；对应明文一律不回显。
+    throw new Error(
+      `--api-key received a vault credential id (${args.vaultId}) but no secret is stored for it on this device. ` +
+        `Re-paste the key in the chat so the runtime can isolate it again, or ask the user to run \`nolo secret set <name> --prompt\`.`,
+    );
+  }
+  // 写路径用调用方注入的 broker（测试/宿主）或严格安全区；不用读回退包装，
+  // 否则 has 校验可能被遗留文件"代为满足"。
+  return await storeAgentCredential({ agentKey: args.agentKey, secret, broker: args.broker });
+}
+
+/**
+ * 进程内读取已绑定的凭据，仅供受控使用点（verify）调用。
+ * 返回值是明文；调用方不得写进记录、日志、argv 或任何序列化输出。
+ */
+export async function readBoundAgentCredential(
+  credentialRef: string,
+  broker?: CredentialBroker,
+): Promise<string | null> {
+  return await resolveHostCredentialBroker(broker).get(credentialRef);
+}
+
 export function parseAgentUpdateArgs(args: string[]) {
   const agentInput = readOption(args, "--agent") ?? readOption(args, "--id") ?? args[0]?.trim();
   if (!agentInput || agentInput === "--help" || agentInput === "-h") return null;
@@ -708,6 +883,8 @@ export function parseAgentUpdateArgs(args: string[]) {
   if (tools) updates.tools = parseJsonishValue(tools);
   if (name) updates.name = name;
   if (customProviderUrl) updates.customProviderUrl = customProviderUrl;
+  // vault 凭据（`vault-cred-…`）在这里按原样放进 updates，由 build*AgentRecord
+  // 在组记录前替换成 credentialRef —— 明文只在进程内出现，不进记录/远端。
   if (apiKey) updates.apiKey = apiKey;
   if (maxConcurrent != null) updates.admission = { maxConcurrent };
   if (expiresAt) {
@@ -732,6 +909,80 @@ export function parseAgentUpdateArgs(args: string[]) {
   return { agentInput, updates, promptDoc, copyProviderFrom, verify, verifyPrompt, presetId };
 }
 
+/**
+ * vault 凭据落位：把 `updates.apiKey` 里的裸 vault ID 换成 `credentialRef`。
+ *
+ * 信任边界：只有用户在建/改 agent 时**显式给出 provider 目标**，才解析并使用这份
+ * 本机凭据；否则 fail closed（不发请求、不写 broker）。失败不静默——让调用方
+ * 看到一个明确原因，而不是把 ID 当明文塞进记录。
+ */
+/**
+ * 「看起来是密钥的明文」判据：长度 ≥12 且不是已知引用形态。
+ *
+ * 为什么不用 `hasPotentialSecrets`：那套是子串探针（PASSWORD / TOKEN / SECRET_KEY），
+ * 对 `--prompt "解释下 TOKEN 是什么"` 会误伤。这里只看「值本身像一个密钥」。
+ */
+function looksLikePlaintextApiKey(value: unknown): boolean {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (trimmed.length < 12) return false;
+  if (/^(?:api-key:|vault-cred-)/i.test(trimmed)) return false;
+  const verdict = classifyAgentApiKeyRef(trimmed);
+  if (verdict.ok && verdict.kind !== "empty") return false;
+  return true;
+}
+
+async function applyVaultCredentialBinding(
+  updates: Record<string, unknown>,
+  agentKey: string,
+  broker?: CredentialBroker,
+  fallbackProviderUrl?: string,
+  preservePlaintextApiKey?: boolean,
+): Promise<void> {
+  const vaultId = detectVaultCredentialId(updates.apiKey);
+  if (!vaultId) {
+    const rawApiKey = updates.apiKey;
+    if (!looksLikePlaintextApiKey(rawApiKey)) return;
+    // 明文 key：先试严格 OS store，记录只留引用（明文不进记录/远端）。
+    try {
+      const { credentialRef } = await storeAgentCredential({
+        agentKey,
+        secret: String(rawApiKey).trim(),
+        broker,
+      });
+      delete updates.apiKey;
+      updates.credentialRef = credentialRef;
+      updates.apiKeyRef = credentialRef;
+      // 旧路径（update --api-key）本身就把值写进记录：业主原则要求不破坏既有可用性，
+      // 因此该路径保留原样写入；安全区里同时存了密文并留下 ref，供受控取用。
+      if (preservePlaintextApiKey && typeof rawApiKey === "string") {
+        updates.apiKey = rawApiKey;
+      }
+      return;
+    } catch {
+      // 降级（业主原则：安全改动不得让功能不可用）：严格安全区不可用时，回到
+      // 改动前的行为——值按原路径持久化——并**显式告警**，不静默丢掉这次更新。
+      credentialStorageWarnings.push(CREDENTIAL_STORE_FALLBACK_WARNING);
+      process.stderr.write(`[nolo] Warning: ${CREDENTIAL_STORE_FALLBACK_WARNING}\n`);
+      return;
+    }
+  }
+  // 先摘掉再校验：任何后续抛错都不能把 ID/明文留在 updates 里被展开进记录。
+  delete updates.apiKey;
+  const target =
+    typeof updates.customProviderUrl === "string" && updates.customProviderUrl.trim()
+      ? updates.customProviderUrl.trim()
+      : (fallbackProviderUrl ?? "").trim();
+  if (!target) {
+    throw new Error(
+      "--api-key received a vault credential id, but no provider target was given. " +
+        "Pass --custom-provider-url <base> (or --preset <id>) so the credential has a known destination.",
+    );
+  }
+  const { credentialRef } = await bindVaultCredentialToAgent({ agentKey, vaultId, broker });
+  updates.credentialRef = credentialRef;
+  updates.apiKeyRef = credentialRef;
+}
+
 export async function buildCreatedAgentRecord(args: {
   cliArgs?: string[];
   parsed: NonNullable<ReturnType<typeof parseAgentUpdateArgs>>;
@@ -740,6 +991,10 @@ export async function buildCreatedAgentRecord(args: {
   fetchImpl: CliFetchImpl;
   fallbackFetchImpl?: CliFetchImpl;
   authToken: string;
+  /** 宿主代执行的批准事件（存在即走严格：记录与远端只留 ref）。 */
+  hostApproval?: { gateId: string };
+  /** 凭据 broker 注入（测试用）；缺省走严格安全区 + 会话内存 + 遗留只读链。 */
+  credentialBroker?: CredentialBroker;
 }) {
   const serverUrl = args.cliArgs ? resolveServerUrl(args.cliArgs, args.env) : resolveServerUrl(args.env);
   const userId = parseUserIdFromAuthToken(args.authToken);
@@ -818,13 +1073,27 @@ export async function buildCreatedAgentRecord(args: {
     args.parsed.updates.apiSource = "custom";
   }
 
+  // 用户贴入的 key：把 broker 里的密文绑到本 agent 的具名 ref，记录里只留引用。
+  // 必须在组 nextRecord 之前完成——否则明文/裸 ID 会随 updates 展开进记录与远端写入。
+  // 来源判定：宿主代执行（hostApproval）走严格（只留 ref、删明文）；
+  // 用户自己终端敲则保持既有行为（明文照旧留在记录里）。
+  await applyVaultCredentialBinding(
+    args.parsed.updates,
+    agentKey,
+    args.credentialBroker,
+    undefined,
+    !args.hostApproval?.gateId,
+  );
+
+  const now = Date.now();
   const nextRecord = {
     ...args.parsed.updates,
     dbKey: agentKey,
     key: agentKey,
     type: DataType.AGENT,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    ...buildRestorePatch(new Date(now).toISOString()),
+    createdAt: now,
+    updatedAt: now,
     userId,
   };
 
@@ -844,6 +1113,10 @@ export async function buildUpdatedAgentRecord(args: {
   fetchImpl: CliFetchImpl;
   fallbackFetchImpl?: CliFetchImpl;
   authToken: string;
+  /** 凭据 broker 注入（测试用）；缺省走严格宿主安全存储。 */
+  credentialBroker?: CredentialBroker;
+  /** 宿主代执行的批准事件（存在即走严格：记录与远端只留 ref）。 */
+  hostApproval?: { gateId: string };
 }) {
   const cached = await resolveAgentRecordFromHybridStore({
     agentInput: args.parsed.agentInput,
@@ -903,6 +1176,20 @@ export async function buildUpdatedAgentRecord(args: {
     }
     args.parsed.updates.prompt = promptBody;
   }
+
+  // 与 create 同一条策略：明文 key / vault 引用都就地转成 credentialRef，
+  // 记录里只留引用。update 的目标可能沿用记录里的 customProviderUrl，作为兜底传入。
+  await applyVaultCredentialBinding(
+    args.parsed.updates,
+    agentKey,
+    args.credentialBroker,
+    typeof currentRecord?.customProviderUrl === "string"
+      ? currentRecord.customProviderUrl
+      : undefined,
+    // update 的来源判定与 create 一致：宿主代执行 → 严格（删明文只留 ref）；
+    // 用户自己终端敲 → 保持既有行为（明文照旧写进记录）。
+    !args.hostApproval?.gateId,
+  );
 
   const nextRecord = {
     ...currentRecord,

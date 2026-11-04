@@ -93,6 +93,8 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
       function: {
         name,
         description,
+        // Responses otherwise normalizes optional selectors into required fields.
+        ...(name === "loadSkill" ? { strict: false } : {}),
         parameters: {
           type: "object",
           properties,
@@ -142,11 +144,11 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
       description: "Confirmed dialog ids or dbKeys to delete.",
     },
   }, ["query"]);
-  add("listAgents", "List agents for delegation. Default scope='preferred' returns the user's favorites, owned, OAuth, custom API, and local agents only; scope='public' discovers shared/marketplace agents; scope='all' returns their deduplicated union. Public agents may consume platform credits. Copy the agentKey verbatim; use the runnable agentKey exactly and do not infer it from the display name. publicOnly is deprecated compatibility for scope='public'. Rate-limited agents are hidden unless showUnavailable is true.", {
+  add("listAgents", "List agents for delegation. Default scope='all' returns the user's favorites, owned, OAuth, custom API, and local agents plus the public marketplace; scope='public' discovers shared/marketplace agents only. Public agents may consume platform credits. Copy the agentKey verbatim; use the runnable agentKey exactly and do not infer it from the display name. publicOnly is deprecated compatibility for scope='public'. All agents in the selected scope are listed; cooldown and quota status are advisory annotations, not dispatch gates.", {
     query: stringToolParam("Optional case-insensitive search substring matching agent name, model, provider, handle, or agentKey."),
-    scope: { type: "string", enum: ["preferred", "public", "all"], description: "Discovery scope; preferred is the default and does not load the public marketplace." },
+    scope: { type: "string", enum: ["all", "public"], description: "Discovery scope; all is the default and includes the public marketplace." },
     publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
-    showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
+    showUnavailable: { type: "boolean", description: "Deprecated no-op. Agents are always listed regardless of cooldown; availability annotations are advisory only." },
     verbose: { type: "boolean", description: "Return full safe-summary details when supported." },
     compact: { type: "boolean", description: "Return compact projection retaining admission evidence while omitting verbose text." },
     limit: { type: "number", description: "Maximum number of agents to return for pagination." },
@@ -624,7 +626,10 @@ export function buildNoloWorkspaceCommandArgs(call: { name: string; arguments: s
       const scope = noloStringArg(args.scope);
       if (scope) cliArgs.push("--scope", scope);
       if (args.publicOnly === true) cliArgs.push("--public-only");
-      if (args.showUnavailable === true) cliArgs.push("--show-unavailable");
+      // showUnavailable 仅保留为兼容入参（见参数描述里的 deprecated no-op），
+      // 不再转成 `--show-unavailable`：agent list 恒列出全部 agent（含限流），
+      // 转发这个旗标只会让读代码的人以为它还改变结果。
+
       if (args.verbose === true) cliArgs.push("--verbose");
       if (args.compact === true) cliArgs.push("--compact");
       const limitVal = args.limit;

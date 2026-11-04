@@ -46,6 +46,13 @@ import type {
   ExecutionTicket,
 } from "./executionBackend";
 
+import type {
+  InstaboxRecoveryAuthority, InstaboxRecoveryContext, InstaboxRecoveryRecord,
+  InstaboxRecoveryStore,
+} from "./instaboxRecovery";
+export type { InstaboxRecoveryAuthority, InstaboxRecoveryContext, InstaboxRecoveryRecord,
+  InstaboxRecoveryStore } from "./instaboxRecovery";
+
 export const INSTABOX_BACKEND_ID = "instabox";
 export const INSTABOX_DEFAULT_BASE_URL = "https://api.instabox.sh/v1";
 
@@ -59,19 +66,27 @@ export const INSTABOX_MAX_EXEC_SECONDS = 600;
 export const INSTABOX_MAX_STDIN_BYTES = 1024 * 1024;
 
 export type InstaboxFailureCode =
+  | "instabox_recovery_failed"
+  | "instabox_recovery_unknown"
   | "instabox_invalid_config"
   | "instabox_invalid_ticket"
   | "instabox_unsupported_request"
   | "instabox_lease_not_found"
   | "instabox_lease_mismatch"
   | "instabox_lease_released"
+  | "instabox_lease_stopping"
   | "instabox_create_failed"
   | "instabox_create_unconfirmed"
+  | "instabox_upload_failed"
   | "instabox_exec_failed"
-  | "instabox_cleanup_pending";
+  | "instabox_cleanup_pending"
+  | "instabox_delete_forbidden";
 
 /** 对外只允许固定安全文案；detail 只放状态码/operation 态，绝不带 API key 或 header。 */
 const SAFE_MESSAGE: Record<InstaboxFailureCode, string> = {
+  instabox_upload_failed: "Instabox file upload failed",
+  instabox_recovery_failed: "Instabox recovery persistence or authority validation failed",
+  instabox_recovery_unknown: "Instabox machine identity is unknown; manual reconciliation required",
   "instabox_invalid_config":
     "Rejected: instabox backend needs an apiKey and a templateId",
   "instabox_invalid_ticket":
@@ -81,10 +96,13 @@ const SAFE_MESSAGE: Record<InstaboxFailureCode, string> = {
   "instabox_lease_not_found": "Unknown execution lease",
   "instabox_lease_mismatch": "Lease does not match this backend or ticket",
   "instabox_lease_released": "Lease was already released",
+  "instabox_lease_stopping": "Lease stop was requested; execution is fenced",
   "instabox_create_failed": "Instabox machine create failed",
   "instabox_create_unconfirmed":
     "Instabox machine create could not be confirmed",
   "instabox_exec_failed": "Instabox exec could not be completed",
+  "instabox_delete_forbidden":
+    "Instabox machine deletion is forbidden; machine was not cleaned up",
   "instabox_cleanup_pending":
     "Instabox machine delete could not be confirmed; cleanup is pending",
 };
@@ -101,6 +119,7 @@ export class InstaboxBackendError extends Error {
     cleanupPending = false,
     readonly machineId?: string,
     upstreamErrorCode?: string,
+    readonly recovery?: InstaboxRecoveryContext,
   ) {
     super(detail ? `${SAFE_MESSAGE[code]} (${detail})` : SAFE_MESSAGE[code]);
     this.name = "InstaboxBackendError";
@@ -115,12 +134,17 @@ export type InstaboxResponseLike = {
   ok: boolean;
   status: number;
   json(): Promise<unknown>;
+  redirected?: boolean;
 };
 
 export type InstaboxFetchRequest = {
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "DELETE" | "PUT";
   headers: Record<string, string>;
   body?: string;
+  /** Raw upload body; the default transport passes this byte view without copying. */
+  rawBody?: Uint8Array;
+  signal?: AbortSignal;
+  redirect?: "error";
 };
 
 export type InstaboxFetchImpl = (
@@ -148,7 +172,23 @@ export type InstaboxReleaseOutcome = {
   providerUsageMs?: number;
 };
 
+/** Only a GET of this machine with state=stopped establishes success. */
+export type InstaboxStopOutcome = {
+  ok: boolean;
+  state: "stopped" | "pending" | "unknown";
+  machineId: string;
+};
+
+export type InstaboxFileUpload = {
+  path: string; bytes: Uint8Array; signal: AbortSignal; deadlineAt: number;
+};
+/** Official PUT /machines/{id}/files limit: 5 GiB. */
+export const INSTABOX_MAX_UPLOAD_BYTES = 5 * 1024 ** 3;
+
 export type InstaboxExecutionBackend = Omit<ExecutionBackend, "release"> & {
+  uploadFile(lease: ExecutionLease, input: InstaboxFileUpload): Promise<void>;
+  stop(lease: ExecutionLease): Promise<InstaboxStopOutcome>;
+  restoreForStop(recordId: string, authority: InstaboxRecoveryAuthority): Promise<ExecutionLease>;
   release(
     lease: ExecutionLease,
     reason: ExecutionReleaseReason,
@@ -171,6 +211,8 @@ export type InstaboxFreeOrgObservation = {
   allowedSpecs: { vcpus: number; memMiB: number; persistentDiskGiB: number }[];
 };
 
+export type InstaboxDeletionPolicy = "legacy" | "forbid";
+
 export type InstaboxBackendOptions = {
   apiKey: string;
   templateId: string;
@@ -182,6 +224,10 @@ export type InstaboxBackendOptions = {
   testOnlyAllowLegacyNoPlan?: boolean;
   freeOrgObservation?: InstaboxFreeOrgObservation;
   billingPolicy?: InstaboxBillingPolicy;
+  /** 缺省 legacy 保留既有清理行为；forbid 拒绝自动清理和 release 删除。 */
+  deletionPolicy?: InstaboxDeletionPolicy;
+  /** Trusted host only. Atomic durable writes are required; never a client supplied store. */
+  recovery?: { store: InstaboxRecoveryStore; accountId: string; authority: InstaboxRecoveryAuthority };
   deleteMachineImpl?: (machineId: string) => Promise<void>;
   baseUrl?: string;
   /** 注入时钟（毫秒）。 */
@@ -196,6 +242,8 @@ export type InstaboxBackendOptions = {
   createTimeoutMs?: number;
   /** 删除轮询上界，默认 120s。 */
   deleteTimeoutMs?: number;
+  /** Total stop observation budget, including HTTP calls; default 120s. */
+  stopTimeoutMs?: number;
   /** 长轮询窗口（秒），默认 20。 */
   operationWaitSeconds?: number;
   /** 两次轮询之间的等待，默认 1000ms。 */
@@ -231,6 +279,7 @@ export const INSTABOX_CAPABILITIES: ExecutionBackendDescriptor["capabilities"] =
   };
 
 type LeaseEntry = {
+  recovery?: InstaboxRecoveryRecord;
   machineId: string;
   ticketId: string;
   grantId: string;
@@ -242,6 +291,9 @@ type LeaseEntry = {
   releasedAt: number | null;
   releaseReason?: ExecutionReleaseReason;
   releaseOutcome: InstaboxReleaseOutcome | null;
+  stopState: InstaboxStopOutcome["state"] | null;
+  stopAccepted: boolean;
+  stopTask?: Promise<InstaboxStopOutcome>;
 };
 
 type CallResult = {
@@ -337,6 +389,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
   readonly #machineTimeoutSeconds: number;
   readonly #createTimeoutMs: number;
   readonly #deleteTimeoutMs: number;
+  readonly #stopTimeoutMs: number;
   readonly #operationWaitSeconds: number;
   readonly #pollIntervalMs: number;
   readonly #maxPollAttempts: number;
@@ -345,10 +398,28 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
   readonly #creationPlan?: InstaboxCreationPlan;
   readonly #freeOrgObservation?: InstaboxFreeOrgObservation;
   readonly #billingPolicy: InstaboxBillingPolicy;
+  readonly #deletionPolicy: InstaboxDeletionPolicy;
   readonly #deleteMachineImpl?: (machineId: string) => Promise<void>;
+  readonly #recovery?: InstaboxBackendOptions["recovery"];
   readonly #leases = new Map<string, LeaseEntry>();
+  readonly #recoveryWrites = new WeakMap<InstaboxRecoveryRecord, Promise<void>>();
 
   constructor(options: InstaboxBackendOptions) {
+    if (options.deletionPolicy !== undefined &&
+        options.deletionPolicy !== "legacy" && options.deletionPolicy !== "forbid") {
+      throw new InstaboxBackendError("instabox_invalid_config", "invalid deletion policy");
+    }
+    this.#deletionPolicy = options.deletionPolicy ?? "legacy";
+    if (options.recovery) {
+      const a = options.recovery.authority;
+      if (this.#deletionPolicy !== "forbid" || !options.creationPlan ||
+          !options.recovery.accountId?.trim() || !a?.ownerUserId?.trim() ||
+          !a.ticketId?.trim() || !a.grantId?.trim() ||
+          !Number.isSafeInteger(a.generation) || a.generation < 0) {
+        throw new InstaboxBackendError("instabox_invalid_config", "invalid recovery binding");
+      }
+      this.#recovery = { ...options.recovery, authority: structuredClone(a) };
+    }
     const apiKey = options.apiKey?.trim() ?? "";
     const templateId = options.templateId?.trim() ?? "";
     if (!apiKey || !templateId) {
@@ -378,14 +449,21 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     this.#now = options.now ?? Date.now;
     this.#fetch =
       options.fetchImpl ??
-      ((url, init) =>
-        (globalThis.fetch as unknown as InstaboxFetchImpl)(url, init));
+      ((url, init) => {
+        const { rawBody, ...request } = init;
+        return globalThis.fetch(url, { ...request,
+          ...(rawBody === undefined ? {} : { body: rawBody as BodyInit }) });
+      });
     this.#sleep =
       options.sleepImpl ??
       ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     this.#machineTimeoutSeconds = options.machineTimeoutSeconds ?? 1_800;
     this.#createTimeoutMs = options.createTimeoutMs ?? 180_000;
     this.#deleteTimeoutMs = options.deleteTimeoutMs ?? 120_000;
+    this.#stopTimeoutMs = options.stopTimeoutMs ?? 120_000;
+    if (!Number.isFinite(this.#stopTimeoutMs) || this.#stopTimeoutMs <= 0) {
+      throw new InstaboxBackendError("instabox_invalid_config");
+    }
     this.#operationWaitSeconds =
       options.operationWaitSeconds ?? DEFAULT_OPERATION_WAIT_SECONDS;
     this.#pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -411,6 +489,16 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
    * 成功时刻（不采信 202 响应时间，那是「已受理」不是「可用」）。
    */
   async prepare(ticket: ExecutionTicket): Promise<ExecutionLease> {
+    const context: { record?: InstaboxRecoveryRecord } = {};
+    try {
+      return await this.#prepare(ticket, context);
+    } catch (error) {
+      if (context.record) throw this.#withRecovery(error, context.record);
+      throw error;
+    }
+  }
+
+  async #prepare(ticket: ExecutionTicket, context: { record?: InstaboxRecoveryRecord }): Promise<ExecutionLease> {
     if (ticket.version !== 1 || !ticket.ticketId || !ticket.grantId) {
       throw new InstaboxBackendError("instabox_invalid_ticket");
     }
@@ -437,20 +525,43 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     }
     const machineName = plan?.name ?? buildInstaboxMachineName(ticket.ticketId, ticket.agentKey);
 
+    const createBody = plan ? {
+      name: plan.name, templateId: plan.templateId, orgId: plan.orgId,
+      vcpus: plan.vcpus, memMiB: plan.memMiB,
+    } : {
+      name: machineName, templateId: this.#templateId,
+      timeoutSeconds: this.#machineTimeoutSeconds,
+    };
+    const createKey = buildInstaboxCreateIdempotencyKey(ticket.ticketId);
+    if (this.#recovery && plan) {
+      const authority = this.#recovery.authority;
+      if (ticket.ticketId !== authority.ticketId || ticket.grantId !== authority.grantId ||
+          ticket.callerUserId !== authority.ownerUserId) {
+        throw new InstaboxBackendError("instabox_recovery_failed");
+      }
+      const expectedSpec = this.#freeOrgObservation!.allowedSpecs.find(
+        s => s.vcpus === plan.vcpus && s.memMiB === plan.memMiB)!;
+      context.record = {
+        version: 1, recordId: crypto.randomUUID(), revision: 0,
+        ...authority, accountId: this.#recovery.accountId, provider: "instabox",
+        baseUrl: this.#baseUrl, plan: structuredClone(plan),
+        billingPolicy: this.#billingPolicy, persistentDiskGiB: expectedSpec.persistentDiskGiB,
+        create: { method: "POST", path: "/machines", body: JSON.stringify(createBody),
+          idempotencyKey: createKey, requestedAt, state: "submitted-unknown" },
+        stop: { intent: false, accepted: false },
+      };
+      await this.#saveRecovery(context.record);
+    }
     const created = await this.#call({
-      method: "POST",
-      path: "/machines",
-      idempotencyKey: buildInstaboxCreateIdempotencyKey(ticket.ticketId),
-      body: plan ? {
-        name: plan.name, templateId: plan.templateId, orgId: plan.orgId,
-        vcpus: plan.vcpus, memMiB: plan.memMiB,
-        // Ordinary API keys cannot change free maxRunMinutes. Do not send it.
-      } : {
-        name: machineName,
-        templateId: this.#templateId,
-        timeoutSeconds: this.#machineTimeoutSeconds,
-      },
+      method: "POST", path: "/machines", idempotencyKey: createKey, body: createBody,
     });
+    // Persist every known identity, including malformed/non-success responses, before polling.
+    if (context.record) {
+      context.record.machineId = readString(asRecord(created.payload)?.machineId) ?? undefined;
+      context.record.createOperationId = readString(asRecord(created.payload)?.id) ?? undefined;
+      if (isSuccess(created.status)) context.record.create.state = "responded";
+      await this.#saveRecovery(context.record);
+    }
     if (!isSuccess(created.status)) {
       const upstreamCode = extractInstaboxErrorCode(created.payload);
       let detail = `create HTTP ${created.status}`;
@@ -527,6 +638,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       if (this.#billingPolicy === "free-only" && machine.maxRunMinutes !== 480) mismatches.push("maxRunMinutes mismatch");
       if (mismatches.length > 0) {
         const reason = mismatches.join("; ");
+        this.#assertDeletionAllowed(machineId, reason);
         try {
           if (this.#deleteMachineImpl) {
             await this.#deleteMachineImpl(machineId);
@@ -570,6 +682,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
 
     const leaseId = `${machineId}:${ticket.ticketId}`;
     this.#leases.set(leaseId, {
+      recovery: context.record,
       machineId,
       ticketId: ticket.ticketId,
       grantId: ticket.grantId,
@@ -579,6 +692,8 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       usageBaselineRunningMs,
       releasedAt: null,
       releaseOutcome: null,
+      stopState: null,
+      stopAccepted: false,
     });
 
     return {
@@ -590,6 +705,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       readableRoots: [...ticket.filesystem.readableRoots],
       writableRoots: [...ticket.filesystem.writableRoots],
       metadata: {
+        ...(context.record ? { recoveryRecordId: context.record.recordId } : {}),
         machineId,
         machineName,
         templateId: this.#templateId,
@@ -601,6 +717,85 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     };
   }
 
+  /** Official OpenAPI: upload-url is on the API's own origin, then PUT raw
+   * bytes with the signed token and NO API credential. No redirect is followed.
+   * Caller retains ownership of bytes and must not mutate them until completion.
+   * Provider follows target symlinks: lexical /workspace validation is not an OS
+   * containment guarantee. Deliver source before executing untrusted code. */
+  async uploadFile(lease: ExecutionLease, input: InstaboxFileUpload): Promise<void> {
+    const entry = this.#requireEntry(lease);
+    const checkLease = () => {
+      if (entry.releasedAt !== null) throw new InstaboxBackendError("instabox_lease_released");
+      if (entry.stopState !== null) throw new InstaboxBackendError("instabox_lease_stopping");
+    };
+    const fail = () => new InstaboxBackendError("instabox_upload_failed");
+    checkLease();
+    if (!input || typeof input.path !== "string" || !input.path.startsWith("/workspace/") ||
+        input.path.endsWith("/") || input.path.split("/").some((p, i) => i > 0 && (!p || p === "." || p === "..")) ||
+        /[\\\x00-\x1f\x7f]/.test(input.path) || !(input.bytes instanceof Uint8Array) ||
+        input.bytes.byteLength > INSTABOX_MAX_UPLOAD_BYTES || !input.signal ||
+        !Number.isFinite(input.deadlineAt)) throw fail();
+    let base: URL;
+    try { base = new URL(this.#baseUrl); } catch { throw fail(); }
+    if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash) throw fail();
+    const controller = new AbortController();
+    const remaining = input.deadlineAt - this.#now();
+    if (input.signal.aborted || remaining <= 0) throw fail();
+    const started = performance.now();
+    const timeLeft = () => Math.min(input.deadlineAt - this.#now(), remaining - (performance.now() - started));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
+    const interrupted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => { controller.abort(); reject(fail()); };
+      input.signal.addEventListener("abort", onAbort, { once: true });
+      // Re-arm for very long deadlines instead of overflowing the JS timer.
+      const tick = () => {
+        const left = timeLeft();
+        if (left <= 0) onAbort!();
+        else timer = setTimeout(tick, Math.min(left, 2_147_483_647));
+      };
+      tick();
+    });
+    const check = () => {
+      checkLease();
+      if (input.signal.aborted || controller.signal.aborted || timeLeft() <= 0) throw fail();
+    };
+    try {
+      check();
+      const response = await Promise.race([this.#call({ method: "POST",
+        path: `/machines/${encodeURIComponent(entry.machineId)}/files/upload-url`,
+        body: { path: input.path, parents: true }, signal: controller.signal, redirect: "error",
+      }), interrupted]);
+      check();
+      const payload = asRecord(response.payload);
+      if (response.status !== 201 || !payload || payload.method !== "PUT" || payload.path !== input.path ||
+          typeof payload.url !== "string" || typeof payload.expiresAt !== "string" ||
+          !Number.isSafeInteger(payload.maxBytes) || (payload.maxBytes as number) < input.bytes.byteLength ||
+          (payload.maxBytes as number) > INSTABOX_MAX_UPLOAD_BYTES ||
+          !Number.isFinite(Date.parse(payload.expiresAt)) || Date.parse(payload.expiresAt) <= this.#now()) throw fail();
+      const url = new URL(payload.url);
+      // OpenAPI says API's own origin, not an arbitrary object-storage host.
+      if (url.protocol !== "https:" || url.origin !== base.origin || url.username || url.password || url.hash ||
+          url.pathname !== `${base.pathname}/machines/${encodeURIComponent(entry.machineId)}/files` ||
+          !url.searchParams.get("token")) throw fail();
+      check();
+      const uploaded = await Promise.race([this.#fetch(url.href, {
+        method: "PUT", headers: { "Content-Type": "application/octet-stream" },
+        rawBody: input.bytes, signal: controller.signal, redirect: "error",
+      }), interrupted]);
+      check();
+      if (uploaded.redirected || !isSuccess(uploaded.status)) throw fail();
+    } catch (error) {
+      checkLease();
+      // Never expose a signed URL, raw transport error, response body or credential.
+      throw fail();
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (onAbort) input.signal.removeEventListener("abort", onAbort);
+      controller.abort();
+    }
+  }
+
   async execute(
     lease: ExecutionLease,
     request: ExecutionRequest,
@@ -609,6 +804,11 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     const entry = this.#requireEntry(lease);
     if (entry.releasedAt !== null) {
       throw new InstaboxBackendError("instabox_lease_released");
+    }
+    if (entry.stopState !== null) {
+      throw entry.recovery
+        ? this.#withRecovery(new InstaboxBackendError("instabox_lease_stopping"), entry.recovery)
+        : new InstaboxBackendError("instabox_lease_stopping");
     }
     if (request.kind !== "command") {
       throw new InstaboxBackendError(
@@ -631,12 +831,23 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     const executionId = `${entry.machineId}:${this.#now().toString(36)}`;
     const startedAt = this.#now();
     onEvent?.({ type: "started", executionId, at: startedAt });
+    if (entry.stopState !== null) {
+      throw entry.recovery
+        ? this.#withRecovery(new InstaboxBackendError("instabox_lease_stopping"), entry.recovery)
+        : new InstaboxBackendError("instabox_lease_stopping");
+    }
 
     const response = await this.#call({
       method: "POST",
       path: `/machines/${encodeURIComponent(entry.machineId)}/exec`,
       body: { cmd, timeoutSeconds, ...(stdin === undefined ? {} : { stdin }) },
     });
+    // A stop can race the pending exec. Never publish a late success or output.
+    if (entry.stopState !== null) {
+      throw entry.recovery
+        ? this.#withRecovery(new InstaboxBackendError("instabox_lease_stopping"), entry.recovery)
+        : new InstaboxBackendError("instabox_lease_stopping");
+    }
     if (!isSuccess(response.status)) {
       throw new InstaboxBackendError(
         "instabox_exec_failed",
@@ -675,6 +886,12 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     });
     onEvent?.({ type: "exited", executionId, exitCode });
 
+    // Event callbacks may synchronously initiate stop as well.
+    if (entry.stopState !== null) {
+      throw entry.recovery
+        ? this.#withRecovery(new InstaboxBackendError("instabox_lease_stopping"), entry.recovery)
+        : new InstaboxBackendError("instabox_lease_stopping");
+    }
     // 非零退出是有效结果：ok=false，但 stdout/stderr 一个都不能丢。
     return {
       executionId,
@@ -690,6 +907,118 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
   }
 
   /**
+   * Official contract verified from https://api.instabox.sh/v1/openapi.json:
+   * POST /v1/machines/{id}/stop -> 202 Operation (not a Machine).
+   * GET /v1/machines/{id} -> Machine; only state=stopped confirms shutdown.
+   * No release/delete, and no inference from operation success, 404 or desiredState.
+   * State is process-local. Restart recovery requires a durable lease/machine binding,
+   * stop intent, idempotency key and reconciliation API owned by the caller.
+   * A caller publishing an already-resolved execute result must also fence its
+   * own run generation/cancellation state: this backend cannot revoke that result.
+   * The request deadline bounds observation, not transport cancellation; an HTTP
+   * request may settle late, so retries keep the same stop idempotency key.
+   */
+  async stop(lease: ExecutionLease): Promise<InstaboxStopOutcome> {
+    const entry = this.#requireEntry(lease);
+    if (entry.releasedAt !== null) {
+      throw new InstaboxBackendError("instabox_lease_released");
+    }
+    if (entry.stopState === "stopped") {
+      return { ok: true, state: "stopped", machineId: entry.machineId };
+    }
+    if (entry.stopTask) return entry.stopTask;
+    // Fence synchronously, before any I/O (including the first observation).
+    entry.stopState = "unknown";
+    const task = this.#stopEntry(entry);
+    entry.stopTask = task;
+    try {
+      return await task;
+    } catch (error) {
+      if (entry.recovery) throw this.#withRecovery(error, entry.recovery);
+      throw error;
+    } finally {
+      entry.stopTask = undefined;
+    }
+  }
+
+  async #stopEntry(entry: LeaseEntry): Promise<InstaboxStopOutcome> {
+    const startedAt = this.#now();
+    const wallStartedAt = Date.now();
+    const remaining = () => this.#stopTimeoutMs - Math.max(
+      this.#now() - startedAt, Date.now() - wallStartedAt,
+    );
+    if (entry.recovery) {
+      entry.recovery.stop.intent = true;
+      entry.recovery.stop.idempotencyKey ??= `nolo-stop-${entry.machineId}`;
+      await this.#saveRecovery(entry.recovery);
+    }
+    const result = async (state: InstaboxStopOutcome["state"]): Promise<InstaboxStopOutcome> => {
+      if (entry.recovery) {
+        entry.recovery.stop.lastObservedState = state;
+        await this.#saveRecovery(entry.recovery);
+      }
+      // Do not cache success before its durable observation has been committed.
+      entry.stopState = state;
+      return { ok: state === "stopped", state, machineId: entry.machineId };
+    };
+    const path = `/machines/${encodeURIComponent(entry.machineId)}`;
+    let state: InstaboxStopOutcome["state"] = "unknown";
+    for (let attempt = 0; attempt < this.#maxPollAttempts && remaining() > 0; attempt += 1) {
+      const observed = await this.#call({ method: "GET", path, timeoutMs: remaining() });
+      const machine = observed.status === 200 ? asRecord(observed.payload) : null;
+      if (machine?.id !== entry.machineId || typeof machine.state !== "string") {
+        return result("unknown");
+      }
+      if (machine.state === "stopped") return result("stopped");
+      if (machine.state !== "running" && machine.state !== "stopping") {
+        return result("unknown");
+      }
+      state = entry.stopAccepted || machine.state === "stopping" ? "pending" : "unknown";
+      if (!entry.stopAccepted && machine.state === "running" && remaining() > 0) {
+        const accepted = await this.#call({
+          method: "POST", path: `${path}/stop`,
+          idempotencyKey: entry.recovery?.stop.idempotencyKey ?? `nolo-stop-${entry.machineId}`,
+          timeoutMs: remaining(),
+          // Runs even when the HTTP response arrives after the observation deadline.
+          onResult: entry.recovery ? async response => {
+            if (response.status === 202) {
+              entry.stopAccepted = true;
+              entry.recovery!.stop.accepted = true;
+              const operation = asRecord(response.payload);
+              // 202 acceptance prevents blind replay even with a malformed body,
+              // but only a bound stop operation may replace the recorded identity.
+              if (this.#isStopOperation(operation, entry)) {
+                entry.recovery!.stop.operationId = readString(operation?.id)!;
+              }
+              await this.#saveRecovery(entry.recovery!);
+            }
+          } : undefined,
+        });
+        // Never replay an accepted mutation, even if its payload was malformed.
+        if (accepted.status === 202) entry.stopAccepted = true;
+        const operation = asRecord(accepted.payload);
+        if (accepted.status !== 202 || !this.#isStopOperation(operation, entry)) {
+          return result("unknown");
+        }
+        state = "pending";
+      }
+      if (attempt + 1 < this.#maxPollAttempts && remaining() > 0 && this.#pollIntervalMs > 0) {
+        // Bound even an injected sleep implementation that never settles.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            this.#sleep(Math.min(this.#pollIntervalMs, remaining())),
+            new Promise<void>(resolve => { timer = setTimeout(resolve, remaining()); }),
+          ]);
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+      }
+    }
+    return result(state);
+  }
+
+  /**
    * DELETE 只是「已受理」；必须轮询 delete operation 到 `succeeded` 才算清理完成。
    * 未确认一律抛 `instabox_cleanup_pending`（`cleanupPending: true`），lease 保持可重试。
    * 已确认的 lease 再调 release 直接回缓存结果（幂等）。
@@ -699,6 +1028,11 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     reason: ExecutionReleaseReason,
   ): Promise<InstaboxReleaseOutcome> {
     const entry = this.#requireEntry(lease);
+    try { this.#assertDeletionAllowed(entry.machineId); }
+    catch (error) {
+      if (entry.recovery) throw this.#withRecovery(error, entry.recovery);
+      throw error;
+    }
     if (entry.releasedAt !== null) {
       return entry.releaseOutcome ?? { ok: true };
     }
@@ -756,6 +1090,132 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       cleanupPendingOnFailure: true,
     });
     return this.#confirmRelease(entry, providerUsageMs);
+  }
+
+  #assertDeletionAllowed(machineId: string, detail?: string): void {
+    if (this.#deletionPolicy === "forbid") {
+      throw new InstaboxBackendError("instabox_delete_forbidden", detail, true, machineId);
+    }
+  }
+
+  #isStopOperation(operation: Record<string, unknown> | null, entry: LeaseEntry): boolean {
+    const id = readString(operation?.id);
+    const knownId = entry.recovery?.stop.operationId;
+    return id !== null && operation?.machineId === entry.machineId &&
+      (!entry.recovery || operation.type === "stop") &&
+      ["queued", "running", "succeeded", "failed"].includes(String(operation.state)) &&
+      (knownId === undefined || knownId === id);
+  }
+
+  #withRecovery(error: unknown, record: InstaboxRecoveryRecord): InstaboxBackendError {
+    const known = error instanceof InstaboxBackendError ? error : undefined;
+    return new InstaboxBackendError(known?.code ?? "instabox_recovery_failed", undefined,
+      true, record.machineId, known?.upstreamErrorCode, {
+        recordId: record.recordId, machineId: record.machineId,
+        createOperationId: record.createOperationId, stopOperationId: record.stop.operationId,
+        machineState: record.machineId ? "known" : "unknown",
+      });
+  }
+
+  async #saveRecovery(record: InstaboxRecoveryRecord): Promise<void> {
+    // A late HTTP acceptance can race the timeout observation write. Serialize only
+    // this record's writes; store CAS still rejects stale backend instances.
+    const previous = this.#recoveryWrites.get(record) ?? Promise.resolve();
+    // A failed write poisons this loaded record. Only explicit restore/load into a
+    // fresh record may resume; never silently retry a stale/uncertain snapshot.
+    const task = previous.then(async () => {
+      const revision = record.revision;
+      const next = structuredClone({ ...record, revision: revision + 1 });
+      try {
+        await this.#recovery!.store.save(next, revision);
+        record.revision = next.revision;
+      } catch {
+        throw this.#withRecovery(new InstaboxBackendError("instabox_recovery_failed"), record);
+      }
+    });
+    this.#recoveryWrites.set(record, task);
+    await task;
+  }
+
+  /** Authority must come from authenticated host context, never from a request body. */
+  async restoreForStop(recordId: string, authority: InstaboxRecoveryAuthority): Promise<ExecutionLease> {
+    if (typeof recordId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(recordId)) {
+      throw new InstaboxBackendError("instabox_recovery_failed");
+    }
+    try { return await this.#restoreForStop(recordId, authority); }
+    catch (error) {
+      if (error instanceof InstaboxBackendError && error.recovery) throw error;
+      throw new InstaboxBackendError("instabox_recovery_failed", undefined, true, undefined,
+        undefined, { recordId, machineState: "unknown" });
+    }
+  }
+
+  async #restoreForStop(recordId: string, authority: InstaboxRecoveryAuthority): Promise<ExecutionLease> {
+    const binding = this.#recovery;
+    if (!binding || !/^[a-zA-Z0-9_-]{1,128}$/.test(recordId)) {
+      throw new InstaboxBackendError("instabox_recovery_failed");
+    }
+    let record: InstaboxRecoveryRecord | null;
+    try { record = await binding.store.load(recordId); }
+    catch { throw new InstaboxBackendError("instabox_recovery_failed"); }
+    // Treat store contents as untrusted data until all durable binding fields match.
+    if (!record || record.version !== 1 || record.recordId !== recordId ||
+        !Number.isSafeInteger(record.revision) || record.revision < 1 ||
+        record.provider !== "instabox" || record.accountId !== binding.accountId ||
+        record.baseUrl !== this.#baseUrl ||
+        ![authority, binding.authority].every(a => a.ticketId === record!.ticketId &&
+          a.grantId === record!.grantId && a.generation === record!.generation &&
+          a.ownerUserId === record!.ownerUserId) ||
+        !record.plan || !this.#creationPlan ||
+        !["orgId", "name", "templateId", "vcpus", "memMiB", "maxRunMinutes",
+          "snapshotId", "persistentDiskGiB", "rootDiskGiB"].every(
+          key => record!.plan[key as keyof InstaboxCreationPlan] === this.#creationPlan![key as keyof InstaboxCreationPlan]) ||
+        record.billingPolicy !== this.#billingPolicy ||
+        !Number.isSafeInteger(record.persistentDiskGiB) || record.persistentDiskGiB < 0 ||
+        record.create?.method !== "POST" || record.create.path !== "/machines" ||
+        record.create.idempotencyKey !== buildInstaboxCreateIdempotencyKey(record.ticketId) ||
+        !Number.isFinite(record.create.requestedAt) ||
+        !["submitted-unknown", "responded"].includes(record.create.state) ||
+        typeof record.stop?.intent !== "boolean" || typeof record.stop.accepted !== "boolean" ||
+        (record.stop.accepted && !record.stop.intent) ||
+        (record.stop.intent && record.stop.idempotencyKey !== `nolo-stop-${record.machineId}`)) {
+      throw new InstaboxBackendError("instabox_recovery_failed");
+    }
+    const plan = this.#creationPlan!;
+    const expectedSpec = this.#freeOrgObservation?.allowedSpecs.filter(
+      spec => spec.vcpus === plan.vcpus && spec.memMiB === plan.memMiB);
+    if (expectedSpec?.length !== 1 || expectedSpec[0]!.persistentDiskGiB !== record.persistentDiskGiB) {
+      throw new InstaboxBackendError("instabox_recovery_failed");
+    }
+    const body = JSON.stringify({ name: plan.name, templateId: plan.templateId,
+      orgId: plan.orgId, vcpus: plan.vcpus, memMiB: plan.memMiB });
+    if (record.create.body !== body) throw new InstaboxBackendError("instabox_recovery_failed");
+    if (!readString(record.machineId)) {
+      throw this.#withRecovery(new InstaboxBackendError("instabox_recovery_unknown"), record);
+    }
+    const machineId = record.machineId!;
+    const response = await this.#call({ method: "GET", path: `/machines/${encodeURIComponent(machineId)}` });
+    const machine = asRecord(response.payload);
+    const spec = asRecord(machine?.spec);
+    if (response.status !== 200 || machine?.id !== machineId || machine.orgId !== plan.orgId ||
+        machine.name !== plan.name || asRecord(machine.template)?.id !== plan.templateId ||
+        spec?.vcpus !== plan.vcpus || spec?.memMiB !== plan.memMiB ||
+        spec?.persistentDiskGiB !== record.persistentDiskGiB ||
+        typeof machine.free !== "boolean" ||
+        (record.billingPolicy === "free-only" && (machine.free !== true || machine.maxRunMinutes !== plan.maxRunMinutes))) {
+      throw this.#withRecovery(new InstaboxBackendError("instabox_recovery_failed"), record);
+    }
+    const leaseId = `${machineId}:${record.ticketId}`;
+    if (this.#leases.has(leaseId)) throw this.#withRecovery(new InstaboxBackendError("instabox_lease_mismatch"), record);
+    this.#leases.set(leaseId, {
+      recovery: structuredClone(record), machineId, ticketId: record.ticketId, grantId: record.grantId,
+      requestedAt: record.create.requestedAt, readyAt: this.#now(),
+      createOperationId: record.createOperationId ?? "", usageBaselineRunningMs: null,
+      releasedAt: null, releaseOutcome: null, stopState: "unknown", stopAccepted: record.stop.accepted,
+    });
+    return { leaseId, backendId: INSTABOX_BACKEND_ID, ticketId: record.ticketId,
+      grantId: record.grantId, createdAt: this.#now(), readableRoots: [], writableRoots: [],
+      metadata: { machineId, recoveryRecordId: recordId, stopOnly: true } };
   }
 
   #confirmRelease(
@@ -857,7 +1317,30 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     path: string;
     body?: unknown;
     idempotencyKey?: string;
+    timeoutMs?: number;
+    onResult?: (response: CallResult) => Promise<void>;
+    signal?: AbortSignal;
+    redirect?: "error";
   }): Promise<CallResult> {
+    if (args.timeoutMs !== undefined) {
+      if (args.timeoutMs <= 0) return { status: 0, payload: null, transportError: "Timeout" };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          this.#call({ ...args, timeoutMs: undefined }),
+          new Promise<CallResult>(resolve => {
+            timer = setTimeout(() => resolve({ status: 0, payload: null, transportError: "Timeout" }), args.timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+    if (args.onResult) {
+      const response = await this.#call({ ...args, onResult: undefined });
+      await args.onResult(response);
+      return response;
+    }
     const headers: Record<string, string> = {
       "X-API-Key": this.#apiKey,
       Accept: "application/json",
@@ -868,10 +1351,13 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       const response = await this.#fetch(`${this.#baseUrl}${args.path}`, {
         method: args.method,
         headers,
+        ...(args.signal ? { signal: args.signal } : {}),
+        ...(args.redirect ? { redirect: args.redirect } : {}),
         ...(args.body !== undefined
           ? { body: JSON.stringify(args.body) }
           : {}),
       });
+      if (args.redirect === "error" && response.redirected) return { status: 0, payload: null };
       let payload: unknown = null;
       if (typeof response?.json === "function") {
         try {

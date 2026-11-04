@@ -80,6 +80,11 @@ export function hasMusicSource(id: MusicSourceId): boolean {
   return sources.has(id);
 }
 
+/** 展示用标签（如「本地」「网易云」）；未注册或未声明时返回 undefined。 */
+export function getMusicSourceLabel(id: MusicSourceId): string | undefined {
+  return sources.get(id)?.label;
+}
+
 export function __resetMusicSourcesForTests(): void {
   sources.clear();
 }

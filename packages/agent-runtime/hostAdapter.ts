@@ -70,6 +70,8 @@ export type AgentRuntimeAgentConfig = {
 };
 
 export type AgentRuntimeCompleteOptions = {
+  /** Do not replay a provider request (budget wrap-up). */
+  noRetries?: true;
   /** Provider deadline; implementations should enforce it at transport level. */
   timeoutMs?: number;
   /**
@@ -132,10 +134,41 @@ export type AgentRuntimeCompleteOptions = {
 
 export type AgentRuntimeProvider = {
   model: string;
+  /** Host attests that this instance cannot execute tools or access workspace callbacks. */
+  textOnly?: true;
   complete(
     messages: AgentRuntimeChatMessage[],
     options?: AgentRuntimeCompleteOptions
   ): Promise<AgentRuntimeResult>;
+};
+
+/**
+ * Provider 解析覆盖项。
+ *
+ * 存在的理由：自动上下文压缩的摘要调用是**纯文本补全**（system prompt 明确
+ * 禁止调工具），却复用了主对话那个「带完整工具面」的 provider 实例。工具
+ * schema 会被无条件注入上游请求——实测 15 个工具 ≈ 13.3k token、全量注册表
+ * 157 个 ≈ 66k token（prepareTools JSON 实测），叠加在已经 ~30k token 的摘要
+ * prompt 上，把 gpt-6.x（ChatGPT 后端）的摘要延迟推到 60s 超时边缘
+ * （2026-11-03 本机日志：一次 59.4s 成功 / 其余 20+ 次全部 60s 超时）。
+ *
+ * 摘要调用应改用 `toolNames: []` 解析独立的 provider 实例；`prompt` 供
+ * Codex 这类把 agent 人设并进 `instructions` 的通道省掉整份 agent prompt。
+ */
+export type AgentRuntimeProviderResolveOptions = {
+  /** Strict text-only isolation, including provider-internal execution and workspace callbacks. */
+  textOnly?: true;
+  /**
+   * 覆盖本次解析的工具面。传 `[]` = 纯文本补全，上游请求不带任何工具 schema。
+   * 不传 = 沿用 agent 的完整工具面（主对话轮的默认行为，逐字不变）。
+   */
+  toolNames?: string[];
+  /**
+   * 覆盖 agentConfig.prompt（agent 人设）。摘要等工具无关的补全传空串即可，
+   * 避免把整份 agent prompt 注入上游请求。仅对会把 prompt 并进请求的通道
+   * （如 Codex 的 instructions）有实际效果；其余通道本就只在消息里带 system。
+   */
+  prompt?: string;
 };
 
 export type AgentRuntimeToolCallInput = {
@@ -285,7 +318,10 @@ export type AgentRuntimeHostAdapter = {
      */
     titlePatchPromise?: Promise<string | null>;
   }>;
-  resolveProvider(agentConfig: AgentRuntimeAgentConfig): Promise<AgentRuntimeProvider>;
+  resolveProvider(
+    agentConfig: AgentRuntimeAgentConfig,
+    options?: AgentRuntimeProviderResolveOptions,
+  ): Promise<AgentRuntimeProvider>;
   /** Optional local-first credential broker for JIT unwrap of opaque credentials. */
   credentialBroker?: import("./credentialBroker").CredentialBroker;
   executeTool(

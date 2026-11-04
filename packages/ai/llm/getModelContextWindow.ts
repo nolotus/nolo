@@ -32,29 +32,51 @@ export const DEFAULT_CONTEXT_WINDOW = 256_000;
 // fuzzy 字符串勿删勿改名，否则该源码断言失败。注意：测试并未 import 这两个具名常量。
 const QWEN_3_6_CONTEXT_WINDOW = 262_144;
 const GLM_5_2_CONTEXT_WINDOW = 1_000_000;
-// GPT-6.1 Sol：Codex OAuth 通道实时 context_window = 500000（client 0.159.2 / 0.161.0 / 0.162.1 均实测返回 500k，
-// max_context_window 872000 仅为上限参考，不作默认值）。
+// GPT-6.1 Sol：**兜底基线**，不是真值。Codex OAuth 通道的窗口真值按账号从上游
+// 目录取（GET /backend-api/codex/models，见 agent-runtime/codexOAuthModelCatalog.ts）；
+// 这里留 500000 的用途只有两处：目录不可用（离线 / 401 / 坏 JSON）时兜底，以及
+// 进程启动后**第一轮**——目录播种发生在真正发请求的那一刻，那一轮的窗口解析
+// 仍落在 pin 上，随后按目录。2026-11-03 实测（client 0.162.1，plan=prolite）：
+// gpt-6.1-sol / gpt-6.1-terra context_window = 500000，max_context_window = 872000，
+// effective_context_window_percent = 95。max_context_window 只作证据：
+// nolo 没实现 experimental context 的请求侧开关，按 872000 算窗口会被上游拒。
 const GPT_6_1_SOL_CONTEXT_WINDOW = 500_000;
 // 边界匹配：允许 provider 前缀（如 openai/gpt-6.1-sol）、effort 后缀（如 -medium）与显示名
 // 空格分隔（"GPT-6.1 Sol" 小写后为 "gpt-6.1 sol"）；拒绝 gpt-6.1-solar 等无关前缀；
 // 不得改成裸 includes("gpt-6.1")，以免误伤 astra / luna。
 const GPT_6_1_SOL_PATTERN = /(^|\/)gpt-6\.1[- ]sol(?![a-z])/;
 
-// GPT-6.1 家族（Sol / Terra）：Codex OAuth 通道实时 context_window = 500000（client 0.162.1 实测）。
+// GPT-6.1 家族（Sol / Terra）：目录不可用 / 尚未播种时的兜底基线 = 500000
+// （2026-11-03 实测，plan=prolite；目录优先，见 codexOAuthModelCatalog.ts）。
 const GPT_6_1_PINNED_PATTERN = /(^|\/)gpt-6\.1[- ](sol|terra)(?![a-z0-9])/;
 
-// GPT-6 / GPT-5.6 家族（Astra / Luna / Sol / Terra）：Codex OAuth 通道实时 context_window = 272000（client 0.162.1 实测）。
+// GPT-6 / GPT-5.6 家族（Astra / Luna / Sol / Terra）：兜底基线 = 272000
+// （2026-11-03 实测，plan=prolite；目录优先）。
 // 必须精确覆盖各代成员，不得用裸 includes("gpt-6")（避免误伤 gpt-6.1 / solar 等）或裸 includes("gpt-5")（避免误伤 5.6 之外）。
 const GPT_272K_PINNED_PATTERN =
   /(^|\/)(gpt-6[- ](astra|luna|sol)|gpt-5\.6[- ](sol|terra|luna))(?![a-z0-9])/;
 const GPT_272K_CONTEXT_WINDOW = 272_000;
 
 /**
- * 通道专属窗口：同一个 id 在不同通道上窗口不同，这是**通道事实而非厂商能力**。
- *   gpt-6.1-sol / gpt-6.1-terra —— Codex OAuth 订阅通道实测 500,000
- *     （client 0.159.2 / 0.162.1，见 GPT_6_1_SOL_CONTEXT_WINDOW）；
+ * 通道专属窗口（**兜底基线**）：同一个 id 在不同通道上窗口不同，这是通道事实而非
+ * 厂商能力；而这些数值本身还会随**账号档位**变——所以它们只是「问不到上游目录时」
+ * 的基线，不是真值。
+ *
+ * 真值链路：Codex OAuth agent 的窗口解析在
+ * devin/devinChannelWindows.ts:resolveAgentContextWindow 里先查
+ * codexOAuthCatalogWindow(model)（上游目录，按 accountId 分桶、1h TTL，
+ * 见 agent-runtime/codexOAuthModelCatalog.ts），只在目录不可用 / 进程启动后尚未
+ * 播种时回落到本文件的 pin。因此「启动后第一轮走 pin，随后按目录」是刻意保守：
+ * 目录播种发生在真正发请求的那一刻，早于它的解析不猜。
+ *
+ * 2026-11-03 实测（client 0.162.1，plan=prolite）：
+ *   gpt-6.1-sol / gpt-6.1-terra —— Codex OAuth 订阅通道 500,000
+ *     （目录 context_window，见 GPT_6_1_SOL_CONTEXT_WINDOW）；
  *   gpt-6-astra / gpt-6-luna / gpt-6-sol / gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna
- *     —— Codex OAuth 订阅通道实测 272,000；
+ *     —— Codex OAuth 订阅通道 272,000；
+ *   全部 max_context_window = 872000、effective_context_window_percent = 95——只作证据，
+ *   **不自动启用**：nolo 没有实现 experimental context 的请求侧开关，按 872000 填窗口
+ *   会被上游按真实窗口拒。
  *   CF 平台托管通道 1,050,000（CF 官方模型页，见 platformHosted 的目录条目）。
  * 裸名 / 未知通道取通道真值；显式声明平台通道（provider 命中平台托管）时取平台
  * 目录值。既不全局取大、也不为了「保守」给平台通道设上限。
@@ -272,6 +294,26 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
   }
   return undefined;
 }
+
+/**
+ * Codex OAuth 通道的 pin 值（只对通道专属窗口表覆盖的 gpt 家族命中）。
+ *
+ * 供**拿不到 provider** 的调用点使用：同一个 id 在 OAuth 与平台托管通道上的窗口
+ * 不同（gpt-6-astra：OAuth 272k / 平台 1.05M），CLI 状态栏这类只有模型名的调用点
+ * 若直接查公共目录，会把平台值当成真实余量显示（高估 4 倍）。
+ *
+ * 命中返回 pin；未命中返回 undefined，调用方继续走原解析链。
+ * 语义刻意保守：只按通道 pin 取，不取平台目录值——平台托管 agent 在 CLI 侧会因此
+ * 显示偏小的余量，比把 272k 显示成 1.05M 安全。
+ */
+export const findCodexOAuthPinnedContextWindow = (
+  modelName: string,
+  provider?: string | null,
+): number | undefined => {
+  if (!modelName) return undefined;
+  if (isPlatformManagedProvider(provider, modelName)) return undefined;
+  return channelPinnedContextWindow(modelName.toLowerCase());
+};
 
 /**
  * 解析模型名称的 Context Window，**不套 DEFAULT 兜底**。

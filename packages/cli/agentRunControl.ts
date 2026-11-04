@@ -1760,6 +1760,8 @@ export async function spawnLocalBackgroundRun(
     /** 已解析的任务内容；提供时会快照进 runs 目录并让子进程读快照而非原始文件。 */
     message?: string;
     timeoutMs?: number;
+    /** Parsed subtask budget, forwarded via the existing local-runtime env contract. */
+    subtaskBudgetLimits?: { maxToolCalls: number; maxWallClockMs: number };
     /**
      * Optional batch id to group this run with siblings. When omitted a new
      * batch id is generated so every run carries one, letting callers filter
@@ -1904,6 +1906,12 @@ export async function spawnLocalBackgroundRun(
     ...env,
     NOLO_AGENT_RUN_CHILD: "1",
     NOLO_AGENT_RUN_ID: runId,
+    ...(input.subtaskBudgetLimits
+      ? {
+          NOLO_SUBTASK_MAX_TOOL_CALLS: String(input.subtaskBudgetLimits.maxToolCalls),
+          NOLO_SUBTASK_MAX_WALL_CLOCK_MS: String(input.subtaskBudgetLimits.maxWallClockMs),
+        }
+      : {}),
   };
 
   let hostMemory: HostMemorySnapshot | null = null;

@@ -637,47 +637,6 @@ export function mergeAvailabilityDeadline(
 }
 
 /**
- * 冷却期内自动重试探针的间隔。到点后放行一次真实请求去试探上游是否已恢复，
- * 失败则按响应重新 mark，成功则 clear。太短会频繁打上游，太长会拉长自锁死窗口。
- */
-export const PROBE_INTERVAL_MS = 10 * 60 * 1000;
-
-export type CooldownGateDecision = "open" | "blocked" | "probe";
-
-/**
- * 派发前的冷却门控决策（纯函数）。
- *
- * 打破「冷却自锁死」：旧逻辑冷却期内 gate 直接 throw、请求根本不发出，而冷却又只由
- * 200 响应清除 → 永远拿不到 200 → 永远被锁。这里在冷却期内周期性放行一次真实请求
- * （"probe"）去试探上游：
- * - deadline 已过（nextAvailableAt <= now）→ "open"（放行）。
- * - deadline 未过、距上次探测超过 PROBE_INTERVAL_MS → "probe"（放行一次真实请求，
- *   失败按响应重新 mark，成功则 clear）。
- * - deadline 未过、刚探测过（lastProbeAt 距今未到间隔）→ "blocked"（照旧 throw）。
- *
- * 不读系统时钟；`now` 由入参传入。`lastProbeAt` 缺省（undefined）时视为「从未探测」，
- * 立即进入 probe，这既兼容旧格式文件，也确保冷启动/旧坏条目不会因永远等不到探针而锁死。
- */
-export function resolveCooldownGate(
-  input: { nextAvailableAt?: number; lastProbeAt?: number },
-  now: number,
-): CooldownGateDecision {
-  const nextAvailableAt = input.nextAvailableAt;
-  if (
-    typeof nextAvailableAt !== "number" ||
-    !Number.isFinite(nextAvailableAt) ||
-    nextAvailableAt <= now
-  ) {
-    return "open";
-  }
-  const lastProbeAt = input.lastProbeAt;
-  if (typeof lastProbeAt !== "number" || !Number.isFinite(lastProbeAt)) {
-    return "probe";
-  }
-  return now - lastProbeAt >= PROBE_INTERVAL_MS ? "probe" : "blocked";
-}
-
-/**
  * 从 agent 记录推导冷却应记在哪个 credential 上。
  *
  * `apiKeyRef` 是权威来源：OAuth agent 上是 `chatgpt` / `claude` / `antigravity`
@@ -820,11 +779,11 @@ export function resolveCredentialKey(
  * 2. 否则 → `custom-agent:<agentConfig.key>`。
  *
  * 已知误差（有意接受）：endpoint 级分组比 credential 粒度粗——同一 endpoint 下
- * 的不同账号共享同一份冷却。账号 A 耗尽会连带挡住同 endpoint 下正常的账号 B：
- * 冷却期内 B 只能等共享层 gate 每 `PROBE_INTERVAL_MS` 放行一次 probe，且要等
- * 某次 probe 拿到 2xx 才清除冷却——B 并非「延迟一个窗口就恢复」，而是退化成
- * 低频探测直到命中成功响应。刻意取舍：换取的是无 ref 的 agent 冷却必落盘、
- * 不再每次派发都撞 429，且 `MAX_COOLDOWN_MS` 保证最长 24h 自然过期。
+ * 的不同账号共享同一条冷却记录。冷却如今只是**参考信息、不拦请求**（见
+ * docs/plans/2026-11-03-credential-cooldown-selfheal.md），所以账号 A 的 429
+ * 落盘不会挡住同 endpoint 下正常的账号 B 的实际请求；代价只是 B 的列表/提示里
+ * 可能带上一个与其自身额度无关的冷却时刻。刻意取舍：换取的是无 ref 的 agent
+ * 冷却必落盘，且 `MAX_COOLDOWN_MS` 保证最长 24h 自然过期。
  */
 export function resolveCredentialKeyWithFallback(
   agent: Record<string, unknown> | null | undefined,

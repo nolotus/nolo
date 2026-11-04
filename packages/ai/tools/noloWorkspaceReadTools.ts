@@ -627,19 +627,19 @@ export type { SafeAgentSummaryForCard };
 export const listAgentsFunctionSchema = {
   name: "listAgents",
   description:
-    "List Nolo agents available for delegation as safe summaries. By default (scope='preferred'), returns the user's preferred agents (favorites, self-owned, OAuth subscriptions, custom API, and local agents). Note: favorited public agents stay in preferred and may still consume platform credits - check each agent's billingSource before dispatching. If no suitable preferred candidate is found or the user explicitly asks to explore public/shared agents, call with scope='public' (public agents may consume platform credits). scope='all' returns the deduplicated union for troubleshooting/management. listAgents does not automatically fallback to public agents. The payload returns `credentialGroups` summarizing independent credential capacities (credentialGroup, credentialKind, agentCount, and availableAt recovery timestamps). Orchestration discipline: Never fan out parallel runs on one credential; fan out only across distinct credentialGroups. A channel verdict is valid for the current dispatch attempt only; always re-read availability before dispatching, and never reuse a failure verdict from an earlier attempt. On config_unresolved-class errors, retry once before degrading. Reserve the strongest private channels for review; execution should use cheap channels. The `agents` array carries a compact agent-selection projection per agent: runnable `agentKey` (agent-<userId>-<id> owned, agent-pub-<id> public), name, model, provider, apiSource, billingSource ('user_subscription' | 'owner_subscription' | 'user_api' | 'platform_credits' | 'local'), tools, isFavorite, isOAuth, isOwned, isPublic, credentialGroup, credentialKind. Copy `agentKey` verbatim into startAgentRun. Rate-limited agents (429, nextAvailableAt in the future) are hidden by default; unavailableCount and unavailableAgents carry their nextAvailableAt recovery timestamps; pass `showUnavailable: true` to include them. Set `verbose: true` for full safe summary details.",
+    "List Nolo agents available for delegation as safe summaries. By default (scope='all') returns the deduplicated union of the user's own/favorite agents and public/shared agents. scope='public' returns only public/shared agents. Public agents may consume platform credits - check each agent's billingSource before dispatching. The payload returns `credentialGroups` summarizing independent credential capacities (credentialGroup, credentialKind, agentCount, and availableAt recovery timestamps). Orchestration discipline: Never fan out parallel runs on one credential; fan out only across distinct credentialGroups. A channel verdict is valid for the current dispatch attempt only; always re-read availability before dispatching, and never reuse a failure verdict from an earlier attempt. On config_unresolved-class errors, retry once before degrading. Reserve the strongest private channels for review; execution should use cheap channels. The `agents` array carries a compact agent-selection projection per agent: runnable `agentKey` (agent-<userId>-<id> owned, agent-pub-<id> public), name, model, provider, apiSource, billingSource ('user_subscription' | 'owner_subscription' | 'user_api' | 'platform_credits' | 'local'), tools, isFavorite, isOAuth, isOwned, isPublic, credentialGroup, credentialKind. Copy `agentKey` verbatim into startAgentRun. All agents are listed, including rate-limited (429) ones: cooldown agents carry `availabilityStatus` / `availabilityReason` / `nextAvailableAt` as reference info, not a dispatch gate (quota is informational; requests are still sent and upstream results are reported as-is). `unavailableCount` reports how many agents are currently rate-limited. `showUnavailable` is deprecated and has no effect (kept for compatibility). Set `verbose: true` for full safe summary details.",
   parameters: {
     type: "object",
     properties: {
       limit: { type: "integer", description: "Maximum agents to return. Default 100, max 500." },
       scope: {
         type: "string",
-        enum: ["preferred", "public", "all"],
+        enum: ["all", "public"],
         description:
-          "Discovery scope. 'preferred' (default): user's favorites, owned, OAuth, custom API, and local agents. 'public': shared/marketplace agents not in preferred (may use platform credits). 'all': deduplicated union for inspection.",
+          "Discovery scope. 'all' (default): deduplicated union of the user's own/favorite agents and public/shared agents. 'public': only shared/marketplace agents (may use platform credits).",
       },
       publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
-      showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
+      showUnavailable: { type: "boolean", description: "Deprecated no-op: rate-limited agents are always included now (reference info, not a gate). Kept for compatibility." },
       query: {
         type: "string",
         description:
@@ -653,6 +653,21 @@ export const listAgentsFunctionSchema = {
 } as const;
 
 export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResult> {
+  const runtime = getRuntime(thunkApi);
+  // 匿名（缺 currentUserId / currentToken）：既无法确定自有收藏，也无法认证公开目录请求。
+  // 直接返回空结果，且不向公开目录发请求（默认 scope='all' 也不拉公共目录）。
+  if (!runtime?.currentUserId || !runtime?.currentToken) {
+    return {
+      rawData: {
+        success: true,
+        total: 0,
+        unavailableCount: 0,
+        agents: [],
+        credentialGroups: [],
+      },
+      displayData: formatAgentListCard([] as any),
+    };
+  }
   const pagination = resolvePaginationArgs({ limit: args?.limit, offset: args?.offset });
   const hasQuery = Boolean(args?.query && typeof args?.query === "string" && args?.query.trim());
   const upstreamFetchLimit = hasQuery
@@ -664,7 +679,6 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
     Number.isFinite(upstreamFetchLimit) ? upstreamFetchLimit : 500
   );
   const favoritesMap = await fetchUserFavoriteAgentMap(thunkApi);
-  const runtime = getRuntime(thunkApi);
   const scope = resolveDiscoveryScope({ scope: args?.scope, publicOnly: args?.publicOnly });
   let publicRecords: any[] = [];
   let upstreamTruncated = false;
@@ -788,6 +802,7 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
     scope: args?.scope,
     query: args?.query,
     publicOnly: args?.publicOnly,
+    // showUnavailable 已无过滤语义（保留兼容入参，见 BuildAgentDiscoveryResultOptions）。
     showUnavailable: args?.showUnavailable,
     verbose: args?.verbose,
     compact: args?.compact,
@@ -807,9 +822,10 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
       ...(discovery.truncated ? { truncated: true } : {}),
       unavailableCount: discovery.unavailableCount,
       // 顺序即序列化顺序：agents 在前（派发必需），大块说明字段在后。
+      // 限流 agent 已合入 agents（带 availabilityStatus / nextAvailableAt
+      // 参考标注），不再单列 unavailableAgents，避免两套真相。
       agents: discovery.agents,
       credentialGroups: discovery.credentialGroups,
-      unavailableAgents: discovery.unavailableAgents,
     },
     displayData: formatAgentListCard(discovery.agents as any),
   };

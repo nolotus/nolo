@@ -191,7 +191,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 type: "number",
                 description:
                     "可选。这次子任务的工具调用授权额度（硬上限）。不传则用 runtime 默认 200。" +
-                    "到限即停止启动新的工具与模型调用、有界收尾，返回中间结论并标记 budget-exhausted（不算 provider 错误）。" +
+                    "到限即停止启动新工具；工具额度到限时可有一次无工具总结，墙钟到限或取消后不再请求模型，返回中间结论并标记 budget-exhausted（不算 provider 错误）。" +
                     "应按任务意图收紧：改一个常量给 10~20，单文件修复给 40，审查给 60。" +
                     "注意默认 200 只用来兜无界损失，不是失控识别——跑到上限不代表任务正常。",
             },
