@@ -51,6 +51,9 @@ import {
 } from "app/utils/myContentItems";
 import { useUserId } from "identity";
 import SidebarItemRow from "create/space/SidebarItemRow";
+import { buildHierarchyRows, buildHierarchyDisplayRows, isSectionHeader, type HierarchyRow } from "./sidebarHierarchyRows";
+import { aggregateRunningAgentKeys, aggregateRunningAncestors, type AggregationItem } from "./runningDialogAggregation";
+import { useDialogStatuses } from "create/space/spaceDialogStore";
 import {
   SidebarAppDeleteDialog,
   type SidebarAppDeleteRequest,
@@ -83,6 +86,7 @@ import {
 import {
   isSidebarTypeFilterId,
   matchesTypeFilter,
+  DEFAULT_SIDEBAR_TYPE_FILTER,
   type SidebarTypeFilterId,
 } from "./SidebarTypeFilter";
 import { runSidebarViewTransition } from "./sidebarViewTransitions";
@@ -96,12 +100,13 @@ const RECENT_FILTER_STORAGE_KEY = "allview-recent-type-filter";
 
 const readStoredRecentFilter = (): SidebarTypeFilterId => {
   try {
-    if (typeof window === "undefined") return "all";
+    // SSR 与客户端 fallback 同一默认真源；已明确选择过的偏好原样保留
+    if (typeof window === "undefined") return DEFAULT_SIDEBAR_TYPE_FILTER;
     const stored = window.localStorage.getItem(RECENT_FILTER_STORAGE_KEY);
     if (stored === "image") return "attachment";
-    return isSidebarTypeFilterId(stored) ? stored : "all";
+    return isSidebarTypeFilterId(stored) ? stored : DEFAULT_SIDEBAR_TYPE_FILTER;
   } catch {
-    return "all";
+    return DEFAULT_SIDEBAR_TYPE_FILTER;
   }
 };
 
@@ -172,6 +177,10 @@ const RecentVirtualList: React.FC<{
   activePageKey?: string;
   currentPath: string;
   unreadAgentKeys?: Set<string>;
+  hierarchyMode?: "agent" | "dialog";
+  excludedKeys?: ReadonlySet<string>;
+  expandedKeys?: ReadonlySet<string>;
+  onToggleExpand?: (key: string) => void;
 }> = ({
   items,
   onAction,
@@ -181,9 +190,37 @@ const RecentVirtualList: React.FC<{
   activePageKey,
   currentPath,
   unreadAgentKeys,
+  hierarchyMode,
+  excludedKeys,
+  expandedKeys = new Set<string>(),
+  onToggleExpand,
 }) => {
   const { t } = useTranslation("space");
   const dispatch = useAppDispatch();
+  const toggleExpanded = (key: string) => onToggleExpand?.(key);
+  const dialogStatuses = useDialogStatuses();
+  // 祖先汇总：运行中的子对话把 root（agent 的主对话）也标记为运行。
+  const aggregatedRunningDialogKeys = useMemo(
+    () => new Set(aggregateRunningAncestors(items as unknown as AggregationItem[], dialogStatuses).keys()),
+    [items, dialogStatuses],
+  );
+  const runningAgentKeys = useMemo(
+    () => aggregateRunningAgentKeys(items, dialogStatuses),
+    [items, dialogStatuses],
+  );
+  const virtualItems = useMemo(() => {
+    if (!hierarchyMode) return items.map((item) => ({ ...item, hierarchyRow: undefined as HierarchyRow | undefined, section: undefined as string | undefined, actionKey: undefined as string | undefined }));
+    const hierarchy = buildHierarchyRows(items, expandedKeys, Date.now(), hierarchyMode, aggregatedRunningDialogKeys);
+    // The fixed blocks own excluded parent rows; their buttons control these
+    // same descendants in the sole recent virtual list.
+    const rows = hierarchy.rows;
+    const groups = hierarchy.groups;
+    return buildHierarchyDisplayRows(rows, groups).map((row) => isSectionHeader(row)
+      ? { ...items[0], contentKey: row.id, title: row.labelKey, section: row.groupId, hierarchyRow: undefined, actionKey: undefined }
+      : row.kind === "more"
+        ? { ...row.item, contentKey: `hierarchy-more:${row.item.contentKey}`, title: expandedKeys.has(row.item.contentKey) ? "收起更多对话" : `更多对话（${row.loadedChildCount}）`, hierarchyRow: row, section: undefined, actionKey: row.item.contentKey }
+        : { ...row.item, hierarchyRow: row, section: undefined, actionKey: undefined });
+  }, [items, hierarchyMode, expandedKeys, excludedKeys, aggregatedRunningDialogKeys]);
   const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);
   const menuAnchorKeyRef = useRef<string | null>(null);
   const [editSignal, setEditSignal] = useState<{ key: string; nonce: number } | null>(null);
@@ -209,11 +246,11 @@ const RecentVirtualList: React.FC<{
 
   const activeItem =
     activeMenuKey && menuAnchorEl
-      ? items.find((item) => item.contentKey === activeMenuKey) ?? null
+      ? virtualItems.find((item) => !item.section && !item.actionKey && item.contentKey === activeMenuKey) ?? null
       : null;
   const activeIndex = React.useMemo(
     () =>
-      items.findIndex((item) =>
+      virtualItems.findIndex((item) => !item.section && !item.actionKey &&
         isRoutableContentActive({
           contentKey: item.contentKey,
           type: item.type,
@@ -223,20 +260,23 @@ const RecentVirtualList: React.FC<{
           currentPath,
         })
       ),
-    [items, currentUserId, activePageKey, currentPath]
+    [virtualItems, currentUserId, activePageKey, currentPath]
   );
   return (
     <div
       {...stylex.props(sidebarStyles.allViewRecentList)}
     >
       <SidebarVirtualizedList
-        items={items}
+        items={virtualItems}
+        isItemDisabled={(item) => Boolean(item.section)}
+        isItemAction={(item) => Boolean(item.actionKey)}
         onAction={onAction}
         dependencies={[
           activePageKey,
           currentPath,
           activeMenuKey,
           unreadAgentKeys,
+          expandedKeys,
         ]}
         scrollToIndex={activeIndex}
         onItemContextMenu={(item, anchor) => {
@@ -246,6 +286,12 @@ const RecentVirtualList: React.FC<{
         onItemRename={(item) => setEditSignal({ key: item.contentKey, nonce: Date.now() })}
       >
         {(item) => {
+          if (item.actionKey) return <button type="button" style={{ marginInlineStart: 22 }} onClick={(event) => { event.preventDefault(); event.stopPropagation(); toggleExpanded(item.actionKey!); }}>{item.title}</button>;
+          if (item.section) {
+            const labels: Record<string, string> = { today: "今天", yesterday: "昨天", last7: "近7天", last30: "近30天", earlier: "更早" };
+            return <div role="heading" aria-level={3} style={{ padding: "8px", fontSize: 12, opacity: 0.65 }}>{t(item.title, labels[item.section] ?? item.section)}</div>;
+          }
+          const row = item.hierarchyRow;
           const normalizedType = normalizeSidebarItemType(item.type);
           return (
             <SidebarItemRow
@@ -257,8 +303,17 @@ const RecentVirtualList: React.FC<{
               sourceServerOrigin={item.serverOrigin}
               summaryStatus={"status" in item ? item.status : undefined}
               summaryUnreadAt={"unreadAt" in item ? item.unreadAt : undefined}
+              mimeType={"mimeType" in item ? item.mimeType : undefined}
+              fileCategory={"fileCategory" in item ? item.fileCategory : undefined}
+              originalName={"originalName" in item ? item.originalName : undefined}
               hasUnread={normalizedType === "agent" ? isAgentRowUnread(unreadAgentKeys, item.contentKey, currentUserId) : undefined}
+              aggregatedRunning={runningAgentKeys.has(item.contentKey)}
               disableDrag
+              depth={row ? Math.min(2, row.depth) as 0 | 1 | 2 : undefined}
+              childCount={row?.kind === "agent" ? 0 : row?.loadedChildCount}
+              isChildRow={row?.isChildRow}
+              isChildCollapsed={!expandedKeys.has(item.contentKey)}
+              onToggleChildCollapse={row?.loadedChildCount ? () => toggleExpanded(item.contentKey) : undefined}
               isActive={isRoutableContentActive({
                 contentKey: item.contentKey,
                 type: item.type,
@@ -399,6 +454,13 @@ const AllViewSidebar: React.FC<{
 
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = useCallback((key: string) => setExpandedKeys((previous) => {
+    const next = new Set(previous);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  }), []);
+
   // Filter is owned by the parent sidebar; fall back to the stored preference
   // only when no prop is passed (e.g. standalone/test rendering).
   const recentFilter: SidebarTypeFilterId = typeFilter ?? readStoredRecentFilter();
@@ -488,6 +550,9 @@ const AllViewSidebar: React.FC<{
       (a.contentKey < b.contentKey ? -1 : a.contentKey > b.contentKey ? 1 : 0),
   ), [filteredRecentItems]);
 
+  const hierarchyItems = useMemo(() => sidebarRecentItems.filter((item) =>
+    recentFilter === "agent" ? item.type === "agent" || item.type === "dialog" : item.type === "dialog"
+  ), [sidebarRecentItems, recentFilter]);
   const favoriteItems = useFavoriteSidebarItems(recentItems);
 
   const favoriteKeysSet = useMemo(
@@ -509,6 +574,24 @@ const AllViewSidebar: React.FC<{
         .filter((item) => !pinnedKeys.has(item.contentKey)),
     [favoriteItems, recentFilter, pinnedKeys]
   );
+
+  const hierarchySourceItems = useMemo(() => {
+    const byKey = new Map(hierarchyItems.map((item) => [item.contentKey, item]));
+    for (const item of favoriteItems) {
+      if ((item.type === "agent" && recentFilter === "agent" || item.type === "dialog" && recentFilter === "dialog") && !byKey.has(item.contentKey)) byKey.set(item.contentKey, item);
+    }
+    return [...byKey.values()].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || Number(favoriteKeysSet.has(b.contentKey)) - Number(favoriteKeysSet.has(a.contentKey)));
+  }, [hierarchyItems, favoriteItems, recentFilter, favoriteKeysSet]);
+  const hierarchyChildCounts = useMemo(() => {
+    if (recentFilter !== "agent" && recentFilter !== "dialog") return undefined;
+    const allExpanded = new Set(hierarchySourceItems.map((item) => item.contentKey));
+    return new Map(buildHierarchyRows(hierarchySourceItems, allExpanded, Date.now(), recentFilter).rows.map((row) => [row.item.contentKey, row.loadedChildCount]));
+  }, [hierarchySourceItems, recentFilter]);
+
+  const hierarchyExcludedKeys = useMemo(() => new Set([
+    ...favoriteKeysSet,
+    ...sidebarRecentItems.filter((item) => item.pinned).map((item) => item.contentKey),
+  ]), [favoriteKeysSet, sidebarRecentItems]);
 
   // ── perf: mark mount ──
   React.useEffect(() => {
@@ -666,11 +749,14 @@ const AllViewSidebar: React.FC<{
       {navHeader}
       {header}
 
-      {stableRecentItems.some((i) => i.pinned) && (
+      {recentFilter !== "agent" && recentFilter !== "dialog" && stableRecentItems.some((i) => i.pinned) && (
         <SidebarPinnedBlock
           items={stableRecentItems.filter((i) => i.pinned)}
           activeMenuKey={activeMenuKey}
           onToggleMenu={setActiveMenuKey}
+          childCounts={hierarchyChildCounts}
+          expandedKeys={expandedKeys}
+          onToggleExpand={toggleExpanded}
           blockId="pinned"
           className="AllViewSidebar__pinned-block"
           unreadAgentKeys={unreadAgentKeys}
@@ -692,7 +778,7 @@ const AllViewSidebar: React.FC<{
             scroll area already insets by `--sidebar-gutter` and the recent content insets once more.
             Without the wrapper the favorites rows sat 8px left of every recent row. Consequence: the
             favorites block now scrolls with the list, while the pinned block above stays fixed. */}
-        {filteredFavoriteItems.length > 0 && (
+        {recentFilter !== "agent" && recentFilter !== "dialog" && filteredFavoriteItems.length > 0 && (
           <div
             className={`AllViewSidebar__favorites-content ${
               stylex.props(sidebarStyles.allViewFavoritesContent).className ?? ""
@@ -702,6 +788,9 @@ const AllViewSidebar: React.FC<{
               items={filteredFavoriteItems}
               activeMenuKey={activeMenuKey}
               onToggleMenu={setActiveMenuKey}
+              childCounts={hierarchyChildCounts}
+              expandedKeys={expandedKeys}
+              onToggleExpand={toggleExpanded}
               blockId="favorites"
               className="AllViewSidebar__favorites-block"
               unreadAgentKeys={unreadAgentKeys}
@@ -716,7 +805,7 @@ const AllViewSidebar: React.FC<{
         >
           {recentLoading && sidebarRecentItems.length === 0 ? (
             <SidebarSkeleton itemsCount={4} />
-          ) : stableRecentItems.length === 0 ? (
+          ) : (recentFilter === "agent" || recentFilter === "dialog" ? hierarchySourceItems.length : stableRecentItems.length) === 0 ? (
             <div
               className={`AllViewSidebar__empty-state ${
                 stylex.props(sidebarStyles.allViewEmptyState).className ?? ""
@@ -742,7 +831,11 @@ const AllViewSidebar: React.FC<{
             </div>
           ) : (
             <RecentVirtualList
-              items={stableRecentItems.filter((i) => !i.pinned && !favoriteKeysSet.has(i.contentKey))}
+              items={recentFilter === "agent" || recentFilter === "dialog" ? hierarchySourceItems : stableRecentItems.filter((i) => !i.pinned && !favoriteKeysSet.has(i.contentKey))}
+              hierarchyMode={recentFilter === "agent" || recentFilter === "dialog" ? recentFilter : undefined}
+              excludedKeys={hierarchyExcludedKeys}
+              expandedKeys={expandedKeys}
+              onToggleExpand={toggleExpanded}
               onAction={handleRecentItemAction}
               activeMenuKey={activeMenuKey}
               onToggleMenu={setActiveMenuKey}

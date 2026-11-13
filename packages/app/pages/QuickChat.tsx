@@ -41,6 +41,7 @@ import {
   type QuickChatMode,
 } from "./quickChatFlow";
 import { shouldDeferEnterForIme } from "app/utils/ime";
+import { useSmoothTextareaHeight } from "app/hooks/useSmoothTextareaHeight";
 import * as stylex from "@stylexjs/stylex";
 import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
 import "chat/web/chatStylexEscapeHatch.css";
@@ -652,6 +653,9 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
     enabled: surface === "home-primary",
   });
   const placeholderFileInputRef = useRef<HTMLInputElement | null>(null);
+  // 占位壳与 runtime composer 共用同一套高度策略：field-sizing 自量 + wrapper 过渡。
+  const { wrapRef: composerWrapRef, textareaRef: composerAreaRef } =
+    useSmoothTextareaHeight({ value: draft });
 
   // 占位上传按钮：整个手势内同步触发真实 <input type=file>.click()，
   // 不依赖 runtime 异步挂载后的程序化 click。
@@ -678,9 +682,14 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
         {...cardStyleProps}
         className={[cardStyleProps.className, "quick-chat-box"].filter(Boolean).join(" ")}
       >
-        <TextField className="message-input__textarea-wrap" aria-label={placeholder || "Quick chat"}>
+        <TextField
+          className="message-input__textarea-wrap"
+          ref={composerWrapRef}
+          aria-label={placeholder || "Quick chat"}
+        >
           <TextArea
             className="message-input__textarea"
+            ref={composerAreaRef as React.RefObject<HTMLTextAreaElement>}
             data-testid="quick-chat-input"
             placeholder={placeholder}
             value={draft}

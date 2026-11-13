@@ -8,7 +8,7 @@
 
 import type { TuiInputResult, TuiState } from "./sessionTypes";
 import { handleTuiInput as handleBaseTuiInput } from "./sessionDispatch";
-import { TUI_LEARN_REVIEW_PROMPT } from "./learnPrompt";
+import { resolveTuiLearnReviewPrompt } from "./learnPrompt";
 import { resolveAgentContextWindow } from "../client/tokenUsage";
 import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
 import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
@@ -59,6 +59,8 @@ export {
 } from "./sessionRender";
 
 const LEARN_COMMAND = "/learn" as const;
+const LEARN_USAGE = "Usage: /learn or /learn <1-100>";
+const LEARN_NOTHING_TO_REVIEW = "Nothing to review yet. Finish at least one chat turn first.";
 
 // Input handling
 export {
@@ -84,11 +86,21 @@ export {
  * That keeps provider/context cache reuse possible and gives the current agent
  * access to the work it just did. It never creates a new dialog and never
  * mutates Evolution state by itself.
+ *
+ * `/learn` has a single entry: the review flavor follows the authenticated
+ * operator (developer review for the platform operator, plain-user review for
+ * everyone else, plain review when the identity is unknown).
+ * `/learn <1-100>` keeps the Evolution history triage.
  */
 export function handleTuiInput(
   input: string,
   state: TuiState,
   historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
+  deps?: {
+    env?: Record<string, string | undefined>;
+    /** Live env for identity resolution (the post-`/login` token lives here). */
+    authEnv?: Record<string, string | undefined>;
+  },
 ): TuiInputResult {
   const trimmed = input.trim();
 
@@ -96,7 +108,7 @@ export function handleTuiInput(
     if (!state.dialogId) {
       return {
         nextState: state,
-        output: "Nothing to review yet. Finish at least one chat turn first.",
+        output: LEARN_NOTHING_TO_REVIEW,
       };
     }
     return {
@@ -104,7 +116,10 @@ export function handleTuiInput(
       output: "",
       action: {
         type: "chat",
-        message: TUI_LEARN_REVIEW_PROMPT,
+        // The review flavor follows the authenticated operator, not the agent.
+        // `deps.env` is the startup snapshot; `deps.authEnv` carries the live
+        // login token.
+        message: resolveTuiLearnReviewPrompt(deps?.env ?? process.env, deps?.authEnv),
         agentKey: state.agentKey,
         runtimeMode: state.runtimeMode,
         continueDialogId: state.dialogId,
@@ -115,12 +130,12 @@ export function handleTuiInput(
   if (trimmed.match(new RegExp(`^${LEARN_COMMAND}(?:\\s|$)`)) && trimmed !== LEARN_COMMAND) {
     const value = trimmed.slice(LEARN_COMMAND.length).trim();
     if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 100) {
-      return { nextState: state, output: "Usage: /learn or /learn <1-100>" };
+      return { nextState: state, output: LEARN_USAGE };
     }
     return { nextState: state, output: "", action: { type: "learn-history", limit: Number(value) } };
   }
 
-  const result = handleBaseTuiInput(input, state, historyTurns);
+  const result = handleBaseTuiInput(input, state, historyTurns, deps);
   const switchMatch = trimmed.match(/^\/(?:switch|agent)\s+(.+)$/s);
   if (switchMatch && !["list", "current", "show"].includes(switchMatch[1]!)) {
     const target = switchMatch[1]!;

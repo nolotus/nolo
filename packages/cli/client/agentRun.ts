@@ -1,3 +1,12 @@
+import { contextRefusalDiagnostics, describeContextRefusal } from "./contextRefusal";
+import { isHistoryIntegrityFailure } from "../../ai/tools/agent/runFailureClass";
+import { getOrCreateSharedStore } from "./localRuntimeDialog";
+import { markCliUserBatchPhase } from "./localDialogRecords";
+import { cliBatchPhaseFailure, resolveCliBatchIdentity, type CliBatchPhaseFailure } from "./cliBatchIdentity";
+import { resolve as resolveHostReviewPath } from "node:path";
+import { bindHostTask } from "./hostTaskBinding";
+import { createHostAuthorExecution, withHostReviewDispatch, settleHostReviewsForScope, matchesHostReviewDispatch, type HostReviewDispatchContext } from "./hostReviewDispatch";
+import { wrapLocalCommandWorkspaceObservation, observeLocalCommandResult, type LocalCommandObservation } from "../agentRunLocalWorkspace";
 import {
   LOCAL_AGENT_CONFIG_MISSING_CODE,
   LOCAL_TURN_ABORTED_CODE,
@@ -93,18 +102,14 @@ import {
   clearCredentialAvailability,
   readCredentialEntry,
   readEffectiveCredentialEntry,
-  recordCredentialProbe,
   resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
 import {
   classifyFailureSubclass,
   isCapacitySaturatedRateLimit,
   isQuotaExhaustedText,
-  mergeAvailabilityDeadline,
-  PROBE_INTERVAL_MS,
-  resolveCooldownGate,
+  resolveAvailabilityAction,
   resolveCredentialCandidateKeys,
-  type AgentRunFailureSubclass,
 } from "../../ai/agent/agentAvailabilityShared";
 import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
 import {
@@ -114,6 +119,8 @@ import {
   stripZeroWidthChars,
 } from "./balanceErrorPatterns";
 import { getCliLocale, t } from "../tui/i18n";
+import { hostTaskEventsRoot, readHostTask } from "./hostTaskEvents";
+import { assessHostTaskWorkspace, resolveCurrentHostTaskReference } from "./hostTaskWorkspaceAssessment";
 import type { CliLocale } from "../tui/i18n";
 
 /** Local loop is heavy; load only when a local turn actually runs. */
@@ -639,6 +646,7 @@ type ProviderTransport = "local" | "platform";
 
 type LocalRunErrorClass =
   | { kind: "generic" }
+  | { kind: "history_integrity" }
   | {
       kind:
         | "auth"
@@ -732,6 +740,7 @@ const BARE_UPSTREAM_5XX_RE =
  *                        (genuinely local config/runtime — "fix local credential")
  */
 export function classifyLocalRunError(message: string): LocalRunErrorClass {
+  if (isHistoryIntegrityFailure(message)) return { kind: "history_integrity" };
   const m = message.match(PROVIDER_HTTP_FAILED_RE);
   if (m) {
     const status = Number(m[2]);
@@ -1376,8 +1385,8 @@ function formatRateLimitResetHint(
  * 429/限流：跟随 locale 的紧凑 3 行块（zh/en 同结构）。旧文案是一条巨长英文 +
  * 结尾拼接中文冷却说明，既冗长又把「不是本地凭证问题」重复三遍。
  *   · 第 1 行 = 上游额度已用尽 / 上游限流（上游 tag）：清洗后的上游原文；
- *   · 第 2 行 = 冷却截止（本地时间）+ 上游复位 hint + 自动探测间隔；无
- *     cooldownUntil 时整行省略；
+ *   · 第 2 行 = 冷却截止（本地时间；仅作参考，本地不据此拦请求）+ 上游复位
+ *     hint；无 cooldownUntil 时整行省略；
  *   · 第 3 行 = 出口（换 agent / 强制走服务器 / 已充值清冷却）。
  * 文案不声称上游真的返回了 HTTP 429：headline 根本不带状态码，status 只是本地
  * 分类用的语义等价码。
@@ -1408,7 +1417,6 @@ function buildRateLimitFailure(ctx: FailureCtx): string {
         "localRunRateLimitCooldown",
         formatCooldownUntilLocal(cooldownUntil),
         resetValue ? t("localRunRateLimitResetNote", resetValue) : "",
-        String(Math.round(PROBE_INTERVAL_MS / 60000)),
       ),
     );
   }
@@ -1567,8 +1575,91 @@ function buildUpstreamFailure(ctx: FailureCtx): string {
  * 「消息已保留」这个关键事实不可见。映射为单条可操作文案（带 deadline 换算
  * 与三个出口）；其余错误保持原有行不变。
  */
+function describeHistoryIntegrityFailure(message: string): string {
+  // Whitelist pairing identifiers only: never echo stored message bodies or keys.
+  const ids = [...new Set(message.match(/\bcall_[A-Za-z0-9_-]+\b/g) ?? [])];
+  const pairing = ids.length ? ` Missing tool result pairing: ${ids.join(", ")}.` : "";
+  return `[nolo] history_integrity: Strict continuation history could not be verified.${pairing} Restore verified complete history from the original host or finish verified history recovery before retrying. No history was discarded or fabricated; blind retry will not repair coverage.\n`;
+}
+
+/**
+ * 上下文预算保护拒发（agent-runtime 的 LocalContextCoverageError）：历史已装不进
+ * 当前模型窗口，本轮主 provider 一次请求都没发，历史与待发输入都没被保存或删除。
+ * 提示保留当前会话与待发输入（重试或 /compact）；落进 generic 分支只会把人
+ * 引去查凭证，而那与真实原因无关。
+ */
+const LOCAL_CONTEXT_COVERAGE_TEXT =
+  "Context protection: history cannot fit without losing messages";
+
+export function isLocalContextCoverageFailure(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "LOCAL_CONTEXT_COVERAGE_REQUIRED" ||
+    toErrorMessage(error).includes(LOCAL_CONTEXT_COVERAGE_TEXT);
+}
+
+/**
+ * 队列批次缺受理回执（localDialogRecords 里 markCliUserBatchPhase
+ * 的守卫）：批次没被持久化承认，本轮不发，消息保留。这是本地队列状态问题，
+ * 不是凭据/配置问题——落进 generic 分支只会把人引去查凭据。
+ */
+const BATCH_RECEIPT_MISSING_TEXT = "Missing durable batch receipt";
+
+function isMissingBatchReceiptFailure(message: string): boolean {
+  return message.includes(BATCH_RECEIPT_MISSING_TEXT);
+}
+
+function describeMissingBatchReceipt(): string {
+  // 同一个守卫既在发送前、也在发送后的完成标记阶段抛错，静态判据无法证明
+  // 「这轮没发出去」；因此文案不给「直接重发」的保证，只说明回执缺失、
+  // 发送状态需自行核实（避免重复请求导致重复计费）。
+  return (
+    "this turn's queued message batch has no durable admission receipt in this dialog, so the " +
+    "send state cannot be verified from local records. Your messages are kept. Re-send only if " +
+    "the previous reply never arrived; if it repeats, restart the TUI to restore the queue. " +
+    "This is not a credential or config problem"
+  );
+}
+
+/**
+ * Render the structured batch failure for the user.
+ *
+ * `requestStarted` is the authoritative flag: `false` means this attempt never
+ * invoked the provider (pre-send block), `true` means the provider ran but the
+ * reply/completion evidence was not confirmed persisted. `replyPersisted:false`
+ * alone must NOT be read as "the model was never called".
+ *
+ * "already requested" means a previous attempt may have been sent and billed, so
+ * the copy never claims "never sent / never billed" and never encourages an
+ * immediate re-send.
+ */
+function describeCliBatchPhaseFailure(error: CliBatchPhaseFailure): string {
+  const cause = error.cause instanceof Error ? error.cause.message : String(error.cause ?? "");
+  if (!error.requestStarted) {
+    if (/already requested/i.test(cause)) {
+      return `[nolo] queued batch ${error.batchId} was already requested; this attempt was blocked and not re-sent. ` +
+        `The earlier attempt may have been sent and billed — check the dialog history before resending.\n`;
+    }
+    return `[nolo] queued batch ${error.batchId} was blocked before the model was called; this attempt was not sent and was not re-sent. ` +
+      `The prior send state is unknown. ${cause} Your messages are kept.\n`;
+  }
+  return `[nolo] queued batch ${error.batchId}: the model was called but the reply/completion evidence was not confirmed saved. ` +
+    `It was not re-sent. Check the dialog history before resending. ${cause}\n`;
+}
+
+function isCliBatchPhaseFailure(error: unknown): error is CliBatchPhaseFailure {
+  return (error as { code?: unknown } | null)?.code === "cli_batch_phase_failed";
+}
+
 export function formatLocalTurnFailureLine(error: unknown): string {
   const message = toErrorMessage(error);
+  if (isCliBatchPhaseFailure(error)) {
+    return describeCliBatchPhaseFailure(error);
+  }
+  if (isLocalContextCoverageFailure(error)) {
+    return `[nolo] ${describeContextRefusal(contextRefusalDiagnostics(error))}\n`;
+  }
+  if (isMissingBatchReceiptFailure(message)) {
+    return `[nolo] ${describeMissingBatchReceipt()}.\n`;
+  }
   if ((error as { code?: unknown })?.code === "LLM_REQUEST_TIMEOUT") {
     const msMatch = /after (\d+)ms/.exec(message);
     const deadline =
@@ -1580,6 +1671,7 @@ export function formatLocalTurnFailureLine(error: unknown): string {
   // 429/限流：与 auto 路径 describeLocalRunFailure 共用同一套紧凑 3 行渲染
   // （where = local provider），不再把上游原文裸串成 "Local agent run failed: …"。
   const cls = classifyLocalRunError(message);
+  if (cls.kind === "history_integrity") return describeHistoryIntegrityFailure(message);
   if (cls.kind === "rate-limit") {
     const rawCooldownUntil =
       error && typeof error === "object"
@@ -1604,7 +1696,7 @@ export function formatLocalTurnFailureLine(error: unknown): string {
  * their builder, so the table is a flat lookup.
  */
 const FAILURE_BUILDERS: Record<
-  Exclude<LocalRunErrorClass, { kind: "generic" }>["kind"],
+  Exclude<LocalRunErrorClass, { kind: "generic" | "history_integrity" }>["kind"],
   (ctx: FailureCtx) => string
 > = {
   auth: buildAuthFailure,
@@ -1760,7 +1852,17 @@ export function describeLocalRunFailure(
     );
   }
 
+  if (isCliBatchPhaseFailure(rawError)) {
+    return describeCliBatchPhaseFailure(rawError);
+  }
+  if (isLocalContextCoverageFailure(rawError ?? message)) {
+    return `[nolo] ${describeContextRefusal(contextRefusalDiagnostics(rawError))}\n`;
+  }
+  if (isMissingBatchReceiptFailure(message)) {
+    return `[nolo] ${describeMissingBatchReceipt()}.\n`;
+  }
   const cls = classifyLocalRunError(message);
+  if (cls.kind === "history_integrity") return describeHistoryIntegrityFailure(message);
   if (cls.kind === "generic") {
     if (/owner-required route not acknowledged/i.test(message)) {
       return (
@@ -1818,8 +1920,9 @@ export function describeLocalRunFailure(
  * 窗口（DEFAULT_PROVIDER_RETRY_MS），不新发明数值。
  *
  * 返回最终生效的冷却截止 ISO（agent 级与 credential 级取更晚者），供失败文案
- * 「已暂停该凭证的派发，最晚 <ISO> 自动解除」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
- * 一律返回 undefined（文案退回原样，退出码与退出路径不变）。
+ * 渲染「冷却至 <本地时间>；本地不据此拦截请求，该时刻仅作参考」（见
+ * localRunRateLimitCooldown）；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
+ * 一律返回 undefined（不追加冷却提示，退出码与退出路径不变）。
  */
 async function markStartupRateLimitCooldown(
   options: RunAgentTurnOptions,
@@ -1949,10 +2052,19 @@ async function readAgentRunFailureMetadata(
   };
 }
 
+/**
+ * 一次 HTTP turn 汇报给调用方的真实上游结论。
+ *
+ * 冷却判定不能把「HTTP 派发没报错」当成成功：2xx 的 body 里也可能带配额错误码
+ * （MiniMax 的 HTTP 200 + code 2056 这类，resolveAvailabilityAction 专门识别）。
+ * 因此这里透传真实 status 与解析后的 body，由共享纯函数自己判 mark/clear。
+ */
+type HttpTurnOutcome = { status: number; body?: unknown };
+
 async function runHttpAgentTurn(
   options: RunAgentTurnOptions,
   authToken: string,
-): Promise<RunAgentTurnResult> {
+): Promise<RunAgentTurnResult & { httpOutcome?: HttpTurnOutcome }> {
   const spinner = new Spinner(
     options.output,
     `${options.agentName} -> working`,
@@ -1974,9 +2086,9 @@ async function runHttpAgentTurn(
     name.trim(),
   );
   const shouldStream = !options.noStream && !options.background;
-  const expandedMessage = options.pastedTextStore?.items.size
+  const expandedMessage = (options.pastedTextStore?.items.size
     ? expandCollapsedPastes(options.message, options.pastedTextStore)
-    : options.message;
+    : options.message);
   // Server path: pass context blocks as canonical contextBlockScopes request
   // field instead of prepending to userInput. Prefer the already-scoped
   // representation; fall back to converting plain extraContextBlocks to
@@ -2100,7 +2212,8 @@ async function runHttpAgentTurn(
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("text/event-stream") && res.body) {
     const result = await readStreamingAgentRun(options, res, spinner);
-    return result;
+    // SSE 的 body 已被流式消费，只能带回 status；有 status 就不必再猜「成功」。
+    return { ...result, httpOutcome: { status: res.status } };
   }
 
   spinner.stop();
@@ -2188,7 +2301,8 @@ async function runHttpAgentTurn(
     model: typeof data?.model === "string" ? data.model : undefined,
     dialogServer: serverOriginForDialog(options.serverUrl),
   });
-  return serverResult;
+  // 冷却判定用真实 status + body（见 HttpTurnOutcome 注释）：本地据此判 mark/clear。
+  return { ...serverResult, httpOutcome: { status: res.status, body: data } };
 }
 
 async function runInjectedLocalAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
@@ -2342,6 +2456,12 @@ async function executeLocalAgentTurnForCliWithAdapter(
       : undefined;
   const currentDialogId = options.continueDialogId ?? ulid();
   const freshDialog = options.freshDialog ?? !options.continueDialogId;
+  // Use the same current-turn identity for review binding, completion and workspace gates.
+  options = { ...options, hostTaskRef: resolveCurrentHostTaskReference({
+    reference: options.hostTaskRef, workspace: options.localRuntimeCwd ?? process.cwd(),
+    dialogId: currentDialogId, env: options.env,
+  }) };
+
 
   // Ownership stamp for workspace tools invoked inside this turn — background
   // processes (launchProcess / auto-detached execShell) capture it at spawn
@@ -2354,13 +2474,198 @@ async function executeLocalAgentTurnForCliWithAdapter(
     ...(runtimeContext ?? {}),
     dialogId: currentDialogId,
     turnId,
+    getProcessCausalDepth: options.getProcessCausalDepth,
   };
 
-  const adapter = baseAdapter;
-  const expandedMessage = options.pastedTextStore?.items.size
-    ? expandCollapsedPastes(options.message, options.pastedTextStore)
-    : options.message;
+  // Legacy task-start/path evidence must not gate ordinary chat or tools.
+  // Only the host turn binds identity/scope; neither tool JSON nor account skill
+  // declarations can manufacture this execution binding.
+  const installReviewHost = (baseAdapter as AgentRuntimeHostAdapter & { installTaskReviewHost?: (host: import("./taskReviewTools").TaskReviewHost) => void }).installTaskReviewHost;
+  if (options.hostTaskRef && installReviewHost) {
+    const scope = structuredClone(options.hostTaskRef);
+    const authorExecutionId = createHostAuthorExecution(options.env, scope, turnId);
+    installReviewHost({ scope, authorExecutionId, authorize: async () => {
+      if (!scope.taskId?.trim() || !scope.workspace?.trim() || !scope.dialogId?.trim() ||
+          scope.dialogId !== currentDialogId || resolveHostReviewPath(scope.workspace) !== resolveHostReviewPath(options.localRuntimeCwd ?? process.cwd())) throw new Error("task_review_host_scope_mismatch");
+    } });
+  }
 
+  let reviewContext: HostReviewDispatchContext | undefined;
+  const requestedReview = options.hostReviewDispatch;
+  if (requestedReview && options.hostTaskRef &&
+      requestedReview.scope.taskId === options.hostTaskRef.taskId &&
+      requestedReview.scope.dialogId === currentDialogId &&
+      resolveHostReviewPath(requestedReview.scope.workspace) === resolveHostReviewPath(options.hostTaskRef.workspace)) {
+    reviewContext = { ...requestedReview, authorExecutionId: createHostAuthorExecution(options.env, options.hostTaskRef, turnId) };
+  }
+  const commandVersionBindings = new Map<string, Pick<LocalCommandObservation, "versionBinding" | "executionWorkspace">>();
+  const commandAdapter = !options.runtimeKey || options.runtimeKey === "local"
+    ? wrapLocalCommandWorkspaceObservation(baseAdapter, options.localRuntimeCwd ?? process.cwd(), commandVersionBindings, undefined, options.abortSignal)
+    : baseAdapter;
+  const reviewAdapter: AgentRuntimeHostAdapter = {
+    ...commandAdapter,
+    executeTool: async (call, opts) => {
+      let args: Record<string, unknown> = {};
+      try { args = typeof call.arguments === "string" ? JSON.parse(call.arguments) : call.arguments ?? {}; } catch { /* ordinary executor owns malformed args */ }
+      const matched = call.name === "startAgentRun" && matchesHostReviewDispatch(reviewContext, call, args);
+      const result = await withHostReviewDispatch(matched ? reviewContext : undefined, () => commandAdapter.executeTool(call, opts));
+      return result;
+    },
+  };
+  // Stale references on ordinary chat are not an explicit completion scope.
+  // Host-only test producer seam; no production completion producer is installed.
+  const completionEvidenceProvider = options.hostTaskRef ? options.hostTaskCompletionEvidenceProvider : undefined;
+  let hostTask = bindHostTask({
+    adapter: reviewAdapter,
+    reference: options.hostTaskRef,
+    workspace: options.localRuntimeCwd ?? process.cwd(),
+    dialogId: currentDialogId,
+    env: options.env,
+    signal: options.abortSignal,
+    completionEvidenceProvider,
+  });
+  // Workspace evidence is opt-in for an active explicit task, never a chat/startTask gate.
+  if (options.hostTaskRef && options.hostTaskWorkspaceEvidence !== undefined &&
+      readHostTask(hostTaskEventsRoot(options.env), options.hostTaskRef).authorization === "active") {
+    const blocker = await assessHostTaskWorkspace({ reference: options.hostTaskRef,
+      workspace: options.localRuntimeCwd ?? process.cwd(), dialogId: currentDialogId,
+      env: options.env, evidence: options.hostTaskWorkspaceEvidence });
+    if (blocker) {
+      options.output.write(`[auto-review] blocked: ${blocker.hostTaskWorkspaceBlocker}\n`);
+      // Save this pre-provider assessment unchanged; a completion producer cannot replace it.
+      try {
+        const saved = await reviewAdapter.saveTurn({ agentKey: options.agentKey,
+          messages: [{ role: "user", content: options.message }], continueDialogId: currentDialogId,
+          runtimeContext: runtimeContextWithOwnership,
+          result: { model: "host-workspace-assessment", content: "", error: true,
+            businessCompletion: blocker.businessCompletion } });
+        return { ...blocker, hostTaskRef: options.hostTaskRef, dialogId: saved.dialogId,
+          taskAuthorization: readHostTask(hostTaskEventsRoot(options.env), options.hostTaskRef).authorization };
+      } catch (localError) {
+        return { ...blocker, hostTaskRef: options.hostTaskRef, localError };
+      }
+    }
+  }
+  let usedReviewTool = false;
+  let batchProviderStarted = false;
+  let mainProviderStarted = false;
+  let refusalModel = "";
+  let turnPersisted = false;
+  // Explicit, validated batch identity (see cliBatchIdentity.ts). Undefined =
+  // ordinary turn: never infer a batch from `userMessages` alone. A mismatch is
+  // a pre-send block: fail the turn before the provider is invoked, with the
+  // structured error preserved as `localError`.
+  let batchIdentity: ReturnType<typeof resolveCliBatchIdentity>;
+  try {
+    batchIdentity = resolveCliBatchIdentity(options);
+  } catch (error) {
+    options.output.write(`[nolo] ${error instanceof Error ? error.message : String(error)}\n`);
+    return { exitCode: 1, localError: error };
+  }
+  const markBatch = async (phase: "requested" | "completed") => {
+    if (!batchIdentity) return;
+    const store = await getOrCreateSharedStore({ env: options.env, cwd: options.localRuntimeCwd, fetchImpl: options.fetchImpl });
+    try {
+      await markCliUserBatchPhase(store, currentDialogId, batchIdentity.batchId, phase, batchIdentity.messageIds, phase === "requested" ? options.userMessages : undefined);
+    } catch (error) {
+      // `requested` is a pre-send gate: the provider was never invoked, so the
+      // reply is not persisted. `completed` is handled atomically in saveTurn
+      // (see cliBatchCompletion), never here.
+      throw cliBatchPhaseFailure({ phase, batchId: batchIdentity.batchId, requestStarted: false, replyPersisted: false, cause: error });
+    }
+  };
+  const adapter: AgentRuntimeHostAdapter = {
+    ...hostTask.adapter,
+    resolveProvider: async (...args) => {
+      const provider = await hostTask.adapter.resolveProvider(...args);
+      // Summary/compaction calls are not the main request and must not consume pending input.
+      const isTextOnly = Boolean(args[1]?.textOnly);
+      if (!isTextOnly) refusalModel = provider.model;
+      return {
+        ...provider,
+        complete: async (...completeArgs) => {
+          if (!isTextOnly) {
+            mainProviderStarted = true;
+          }
+          if (batchIdentity && !isTextOnly && !batchProviderStarted) {
+            await markBatch("requested");
+            batchProviderStarted = true;
+          }
+          return provider.complete(...completeArgs);
+        },
+      };
+    },
+    executeTool: async (call, opts) => {
+      const protectedReview = call.name === "requestTaskReview" || call.name === "recordTaskReviewDecision";
+      if (!protectedReview) return reviewAdapter.executeTool(call, opts);
+      usedReviewTool = true;
+      if (options.hostTaskRef?.taskInstanceId) {
+        const authorize = (baseAdapter as AgentRuntimeHostAdapter & { authorizeAccountTask?: (scope: import("./hostTaskEvents").HostTaskReference) => Promise<void> }).authorizeAccountTask;
+        if (!authorize) throw new Error("task_review_account_authorization_unavailable");
+        await authorize(options.hostTaskRef);
+      }
+      // A typed local task operation is the host-recognized task boundary.
+      // Ordinary chat never creates task records from account preferences.
+      if (!options.hostTaskRef && ["requestTaskReview", "recordTaskReviewDecision"].includes(call.name)) {
+        const admit = (baseAdapter as AgentRuntimeHostAdapter & { admitAccountReviewTurn?: (dialogId: string, turnId: string) => Promise<import("./hostTaskEvents").HostTaskReference> }).admitAccountReviewTurn;
+        if (!admit) throw new Error("task_review_account_admission_unavailable");
+        const reference = await admit(currentDialogId, turnId);
+        options = { ...options, hostTaskRef: reference };
+        hostTask = bindHostTask({ adapter: reviewAdapter, reference, workspace: options.localRuntimeCwd ?? process.cwd(), dialogId: currentDialogId, env: options.env, signal: options.abortSignal });
+      }
+      return hostTask.adapter.executeTool(call, opts);
+    },
+    saveTurn: async input => {
+      if (usedReviewTool && options.hostTaskRef) await settleHostReviewsForScope(options.hostTaskRef, options.env, options.hostReviewContentAcceptance);
+      // Attach the completion evidence to the SAME store.batch as the reply save
+      // (see writeDialog/cliBatchCompletion). Success persists both; a failure
+      // leaves the reply unpersisted and the tail at `requested`, so recovery
+      // stays unknown instead of showing a persisted reply as a send failure.
+      const completeBatch = Boolean(batchIdentity && batchProviderStarted && !input.result.error);
+      // Mid-turn injected user batches share the SAME atomic completion. Their
+      // durable pending records already carry the message body, so they are
+      // excluded from the reply writes; only the tail receipt is updated. On a
+      // failed/aborted turn nothing is marked completed — the tail stays
+      // `requested` and recovery keeps reporting the provider outcome unknown.
+      const injectedBatches = options.drainInjectedBatches ?? [];
+      const injectedMessageIds = new Set(injectedBatches.flatMap(batch => batch.messageIds));
+      const completeBatchIds = [
+        ...(completeBatch ? [batchIdentity!.batchId] : []),
+        ...(!input.result.error ? injectedBatches.map(batch => batch.batchId) : []),
+      ];
+      try {
+        const saved = await hostTask.adapter.saveTurn({ ...input,
+          messages: input.messages.filter(message => {
+            const cliMessageId = (message as any).cliMessageId;
+            if (!cliMessageId) return true;
+            if (options.userMessages?.some(user => user.cliMessageId === cliMessageId)) return false;
+            if (injectedMessageIds.has(cliMessageId)) return false;
+            return true;
+          }),
+          ...(completeBatchIds.length ? { cliBatchCompletion: { batchIds: completeBatchIds } } : {}),
+        });
+        turnPersisted = true;
+        return saved;
+      } catch (error) {
+        // The provider ran, but the reply/completion evidence was not confirmed
+        // persisted. `requestStarted: true` keeps this distinct from a pre-send
+        // block; never report it as "the model was never called".
+        if (batchIdentity && batchProviderStarted) {
+          throw cliBatchPhaseFailure({ phase: "completed", batchId: batchIdentity.batchId, requestStarted: true, replyPersisted: false, cause: error });
+        }
+        throw error;
+      }
+    },
+  };
+  const expandedMessage = (options.pastedTextStore?.items.size
+    ? expandCollapsedPastes(options.message, options.pastedTextStore)
+    : options.message);
+
+  const commandObservations: LocalCommandObservation[] = [];
+  const retainCommandObservations = (result: RunAgentTurnResult): RunAgentTurnResult => {
+    recordRunResultHeaderMeta(result, { commandObservations });
+    return result;
+  };
   const workingLabel = `${options.agentName} -> working locally`;
   const turnOutput = createCliTurnOutput({
     options,
@@ -2398,9 +2703,11 @@ async function executeLocalAgentTurnForCliWithAdapter(
     const runLocalAgentTurn = await loadRunLocalAgentTurn();
     const result = await runLocalAgentTurn({
       adapter,
+      ...(hostTask.contract ? { taskExecutionContract: hostTask.contract } : {}),
       agentRef: options.agentKey,
       userLanguage: options.userLanguage ?? options.env.NOLO_LANG ?? null,
       input: buildUserInputContent(messageForLocal, options.imageUrls),
+      userMessages: options.userMessages,
       ...(expandedMessage !== options.message || localAttachmentCard !== ""
         ? {
             persistedInput: hasDurableAttachments
@@ -2472,18 +2779,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
         if (event.kind === "turn-phase") {
           turnOutput.showPhase(event.phase);
         }
-        if (event.kind === "compaction-start") {
-          turnOutput.showPhase("compacting");
-        }
-        if (
-          event.kind === "compaction-end" ||
-          // 压缩失败（timeout/provider-error）时 localLoop 按失败原子性语义
-          // 带着裁剪后的历史继续本轮，切回等待模型文案；aborted 时 turn 随即
-          // 结束，不再切文案（终态由 abort 路径收尾）。
-          (event.kind === "compaction-failed" && event.reason !== "aborted")
-        ) {
-          turnOutput.showPhase("waiting-provider");
-        }
+        turnOutput.handleCompactionActivity(event);
         if (event.kind === "image-downgraded") {
           // 第 4 级降级提示：模型不支持图片，已用占位文本替代；给用户 escape hatch。
           // 不阻断当前轮——agent 拿到的是 [Image content omitted...] 占位文本，能继续跑。
@@ -2503,6 +2799,8 @@ async function executeLocalAgentTurnForCliWithAdapter(
       // tool-gist-fold 后 onToolEvent 无条件挂载（不再受 traceLocalTools 开关
       // 控制，显示模式合并为单一 gist/折叠通道）——保留 alpha 的新形态。
       onToolEvent: (event) => {
+        const observation = observeLocalCommandResult(event, options.localRuntimeCwd ?? process.cwd());
+        if (observation) commandObservations.push({ ...observation, ...commandVersionBindings.get(event.toolCallId) });
         turnOutput.handleToolEvent(event);
       },
       ...(!options.noStream
@@ -2517,23 +2815,35 @@ async function executeLocalAgentTurnForCliWithAdapter(
         : {}),
     });
     turnOutput.finish(result.content);
+    // Provenance-only records are persisted by the runtime, but are not CLI
+    // usage results. Keep the terminal result shape stable when a provider did
+    // not report usage, while retaining real usage (including explicit zeros).
+    const usageRecords = result.usageRecords?.filter(
+      (record) => Object.keys(record.usage ?? {}).length > 0,
+    );
     const turnCredits = sumPlatformCredits(result.usageRecords);
+    const turnTokens = withTurnCredits(buildTurnTokenUsage(result.usage, result.model), turnCredits);
     const turnResult: RunAgentTurnResult = {
+      savedTurnPersisted: turnPersisted,
+      mainProviderAttempted: mainProviderStarted,
       exitCode: 0,
+      stopReason: result.stopReason,
+      ...hostTask.result(),
+      ...(options.hostTaskRef ? { hostTaskRef: options.hostTaskRef } : {}),
       dialogId: result.dialogId,
       ...(typeof result.content === "string" && result.content.trim()
         ? { finalText: result.content }
         : {}),
-      title: result.title,
+      ...(result.title !== undefined ? { title: result.title } : {}),
       ...(result.titlePatchPromise ? { titlePatchPromise: result.titlePatchPromise } : {}),
       ...pickEmptyAssistantFlags(result),
       // 积分口径按「全轮」而非「最后一次调用」：result.usage 只是收尾那次
       // provider 调用的 usage，本轮前面 N-1 次工具循环调用（以及自动压缩摘要）
       // 的 cost 都只存在于 usageRecords 里。token 字段仍取 result.usage——
       // 上下文占用本来就该看最后一次调用的累计输入，不是各次相加。
-      turnTokens: withTurnCredits(buildTurnTokenUsage(result.usage, result.model), turnCredits),
+      ...(turnTokens !== undefined ? { turnTokens } : {}),
       ...(turnCredits !== undefined ? { turnCredits } : {}),
-      ...(result.usageRecords?.length ? { usageRecords: result.usageRecords } : {}),
+      ...(usageRecords?.length ? { usageRecords } : {}),
     };
     // 头元数据走旁路（不改结果对象形状）：见 agentRunResultFile.ts。
     // server/serverSync 与 writeDialog 远端同步共用同一判定（见 resolveResultServerMeta）。
@@ -2543,6 +2853,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
       hasSubjectRefs: (buildSubjectRefs(options)?.length ?? 0) > 0,
     });
     recordRunResultHeaderMeta(turnResult, {
+      commandObservations,
       model: result.model,
       dialogServer: serverMeta.server,
       serverSync: serverMeta.serverSync,
@@ -2578,21 +2889,23 @@ async function executeLocalAgentTurnForCliWithAdapter(
       // its name (error.pendingToolName) so the caller can tell the user the
       // tool may still finish in the background.
       //
-      // 载体约定（owner 2026-10-07 决定，保持现行为）：被 Esc 中断的 run 不把
-      // 「用户叫停」当正常结论——本分支不产出 finalText，结算点因此不写
-      // `.result.md`，已生成的部分正文只留在 .log / dialog 里。读端看到
-      // status 无 resultFile 且 streamInterrupted 时应读作「被中断」，而不是
-      // 「工具坏了 / 结论丢了」（同语义也写进 controlAgentRun 的 status 描述）。
+      // A user stop still produces no finalText or invented assistant conclusion.
+      // Completed command observations survive through the metadata side-channel;
+      // settlement may persist a header-only receipt, not partial assistant prose.
       const pendingToolName = (error as { pendingToolName?: string })
         ?.pendingToolName;
-      return {
+      return retainCommandObservations({
         exitCode: 0,
+        ...hostTask.result(),
+        savedTurnPersisted: turnPersisted,
+        mainProviderAttempted: mainProviderStarted,
+        ...(options.hostTaskRef ? { hostTaskRef: options.hostTaskRef } : {}),
         streamInterrupted: true,
         ...(savedDialogId ? { dialogId: savedDialogId } : {}),
         ...(pendingToolName ? { pendingToolName } : {}),
         ...(abortedTurnCredits !== undefined ? { turnCredits: abortedTurnCredits } : {}),
         ...(abortedUsageRecords?.length ? { usageRecords: abortedUsageRecords } : {}),
-      };
+      });
     }
     // 启动期 429 兜底：分类命中 rate-limit 时与 run 中途同语义落冷却（幂等）。
     // 冷却截止沿用 localLoop 把 dialogId 挂错误上的既有模式挂在错误对象上，
@@ -2612,43 +2925,70 @@ async function executeLocalAgentTurnForCliWithAdapter(
       // 的可操作映射（含「消息已保留 + 重试/切换/compact」出口），其余错误保留
       // 原始 failed 行。非交互模式（stdout 可能是管道/脚本）把失败行写 stderr，
       // 让 stdout 只承载回合输出；TUI/测试注入的 output 无 writeErr 时回退 write。
-      const failureLine = formatLocalTurnFailureLine(error);
-      if (typeof options.output.writeErr === "function") {
-        options.output.writeErr(failureLine);
-      } else {
-        options.output.write(failureLine);
+      //
+      // 交互宿主去重：options.interactiveHost 为 true 且是 localContextCoverageFailure 时，
+      // 错误由结构化 preflightBlocked 交由宿主（如 tuiTurnRunner）统一通过系统提示呈现，
+      // 底层不再向 output 写入 [nolo] contextPreflightBlockedHint，避免双重输出。
+      const suppressOutput = options.interactiveHost && isLocalContextCoverageFailure(error);
+      if (!suppressOutput) {
+        const failureLine = formatLocalTurnFailureLine(error);
+        if (typeof options.output.writeErr === "function") {
+          options.output.writeErr(failureLine);
+        } else {
+          options.output.write(failureLine);
+        }
       }
     }
-    return {
+    const isCoverage = isLocalContextCoverageFailure(error);
+    const persisted = turnPersisted;
+    const isTruePreflight = isCoverage && !persisted && !mainProviderStarted;
+    const refusal = isCoverage ? contextRefusalDiagnostics(error) : undefined;
+    if (isCoverage) {
+      // Terminal failure boundary: once per turn, not per compaction/provider attempt.
+      console.warn(`[nolo] context-refusal ${JSON.stringify({
+        dialogId: savedDialogId ?? currentDialogId,
+        agentKey: options.agentKey,
+        model: refusalModel,
+        reason: refusal?.reason ?? "unknown",
+        historyTokens: refusal?.historyTokens ?? -1,
+        budget: refusal?.budget ?? -1,
+        largestMessageTokens: refusal?.largestMessageTokens ?? -1,
+        droppedCount: refusal?.droppedCount ?? 0,
+        detail: refusal?.detail ?? "diagnostics-unavailable",
+      })}`);
+    }
+
+    return retainCommandObservations({
       exitCode: 1,
+      ...hostTask.result(),
       localError: error,
+      savedTurnPersisted: persisted,
+      mainProviderAttempted: mainProviderStarted,
       failureSubclass: classifyFailureSubclass({
         message: toErrorMessage(error),
         body: error,
       }),
-      ...(savedDialogId ? { dialogId: savedDialogId } : {}),
+      ...(savedDialogId ? { dialogId: savedDialogId } :
+        isCoverage ? { dialogId: currentDialogId } : {}),
+      ...(isTruePreflight ? {
+        preflightBlocked: { code: "LOCAL_CONTEXT_COVERAGE_REQUIRED" as const, phase: "preflight" as const,
+          retryable: true as const, mainRequestSent: false as const,
+          ...(refusal ? { refusal } : {}) },
+      } : {}),
       ...(abortedTurnCredits !== undefined ? { turnCredits: abortedTurnCredits } : {}),
       ...(abortedUsageRecords?.length ? { usageRecords: abortedUsageRecords } : {}),
-    };
+    });
   }
 }
 
-/**
- * HTTP/server 派发前的本地冷却预检。
- *
- * server 端 admission guard 只读 server KV 的 agent 记录，而 CLI 本地 runtime
- * 的 429 冷却按设计只落本地（credential-availability.json + 本地 agent store，
- * 见 localRuntimeAdapter 的 mark/gate）——本地限流的 agent 经 HTTP 派发时
- * server guard 看不到标记，会放行 run 再在执行期失败。
- *
- * 这里在发起 POST 前用同一套共享判据（resolveCooldownGate）预检本地冷却：
- * - "blocked" → 直接报错返回（附恢复时刻），不发请求。
- * - "probe" → 放行并记录探测时间（与执行期 gate 同语义，冷却自愈依赖它）。
- * - 本地无 agent 配置 / 无 credential key → 无法判定，放行（server 端 guard 负责）。
- */
-async function checkLocalAvailabilityBeforeHttpDispatch(
+/** Resolve local credential keys for success cleanup (cooldown is reference-only). */
+async function resolveLocalCredentialKeysForDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode?: 1; credentialKey?: string; failureSubclass?: AgentRunFailureSubclass } | null> {
+): Promise<{
+  credentialKey?: string;
+  matchedKey?: string;
+  recordSuccess?: (status: number, body?: unknown) => Promise<unknown>;
+} | null> {
   // 云后端 runtimeKey（gcp / instabox / machine:*）的 run 由服务端通道执行，
   // 本地 adapter 不参与：这里若照旧构造它，本地通道的 fail-closed 闸门
   // （assertRuntimeKeyLocalFulfillable）会错误地打死一次合法的 server 派发
@@ -2678,9 +3018,7 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
   );
   // 外来 OAuth agent（resolveOAuthChannelOwnerSkip 命中）的 run 走所有者通道，
   // 不使用本机凭据——本机 credential 级冷却条目对其是 false positive（收藏者
-  // 自己的历史 429 会把走所有者通道的 run 拦到窗口重置）。排除之；agent 级
-  // nextAvailableAt（server 记录，反映所有者通道可用性）仍然生效，probe 亦跳过
-  // （不写本机凭据的探测时间）。
+  // 自己的历史 429 与 owner 通道无关）。跳过本机成功回写。
   if (
     credentialKey &&
     resolveOAuthChannelOwnerSkip(
@@ -2688,56 +3026,41 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
       options,
     )
   ) {
-    credentialKey = undefined;
-  }
-  const agentLevelAt = (baseRecord as { nextAvailableAt?: unknown }).nextAvailableAt;
-  const agentLevelNextAvailableAt =
-    typeof agentLevelAt === "number" && Number.isFinite(agentLevelAt)
-      ? agentLevelAt
-      : undefined;
-  if (!credentialKey && agentLevelNextAvailableAt === undefined) {
-    return { credentialKey };
+    return null;
   }
   const env = options.env as NodeJS.ProcessEnv;
   const now = Date.now();
-  let entry: { nextAvailableAt: number; lastProbeAt?: number } | undefined;
-  let matchedKey: string | undefined;
-  if (credentialKey) {
-    const effective = await readEffectiveCredentialEntry(credentialKey, env, now).catch(() => undefined);
-    if (effective) {
-      entry = effective;
-      matchedKey = effective.matchedKey;
-    }
-  }
-  const entryAt = entry?.nextAvailableAt;
-  const effectiveNextAvailableAt =
-    typeof entryAt === "number"
-      ? mergeAvailabilityDeadline(agentLevelNextAvailableAt, entryAt)
-      : agentLevelNextAvailableAt;
-  const activeKey = matchedKey || credentialKey;
-  if (typeof effectiveNextAvailableAt !== "number") {
-    return { credentialKey: credentialKey || activeKey, matchedKey };
-  }
-  const gateDecision = resolveCooldownGate(
-    { nextAvailableAt: effectiveNextAvailableAt, lastProbeAt: entry?.lastProbeAt },
-    now,
-  );
-  if (gateDecision === "probe" && activeKey) {
-    // 与执行期 gate 同语义：放行本次真实请求前记录探测时间，避免间隔内反复重试。
-    await recordCredentialProbe(activeKey, env, now).catch(() => undefined);
-    return { credentialKey: credentialKey || activeKey, matchedKey };
-  }
-  if (gateDecision !== "blocked") return { credentialKey: credentialKey || activeKey, matchedKey };
-  options.output.write(
-    `${t(
-      "agentCooldownBlocked",
-      options.agentName || options.agentKey,
-      formatCooldownUntilLocal(
-        new Date(Number(effectiveNextAvailableAt)).toISOString(),
-      ),
-    )}\n`,
-  );
-  return { exitCode: 1, failureSubclass: "rate_limit" };
+  const entry = credentialKey
+    ? await readEffectiveCredentialEntry(credentialKey, env, now).catch(() => undefined)
+    : undefined;
+  const recorder = adapter as AgentRuntimeHostAdapter & {
+    recordStartupAvailabilityForAgent?(
+      agentRef: string,
+      status: number,
+      body?: unknown,
+    ): Promise<unknown>;
+  };
+  return {
+    credentialKey,
+    matchedKey: entry?.matchedKey,
+    // 真实 status/body 由调用方透传（不再固定 200 无 body）：HTTP 2xx 的 body 里
+    // 也可能带配额错误码，固定成功的判定会把这类响应当成恢复而清掉冷却。
+    recordSuccess: recorder.recordStartupAvailabilityForAgent
+      ? (status: number, body?: unknown) =>
+          recorder.recordStartupAvailabilityForAgent!(options.agentKey, status, body)
+      : undefined,
+  };
+}
+
+/** Explicit facts shared by successful/aborted folds and failed auto turns; preserve false. */
+function projectLocalTurnFacts(result: RunAgentTurnResult): Pick<RunAgentTurnResult,
+  "savedTurnPersisted" | "mainProviderAttempted" | "preflightBlocked" | "localError"> {
+  return {
+    ...(result.savedTurnPersisted !== undefined ? { savedTurnPersisted: result.savedTurnPersisted } : {}),
+    ...(result.mainProviderAttempted !== undefined ? { mainProviderAttempted: result.mainProviderAttempted } : {}),
+    ...(result.preflightBlocked !== undefined ? { preflightBlocked: result.preflightBlocked } : {}),
+    ...(result.localError !== undefined ? { localError: result.localError } : {}),
+  };
 }
 
 /**
@@ -2754,6 +3077,8 @@ export function foldLocalResultForTui(
 ): RunAgentTurnResult {
   const folded: RunAgentTurnResult = {
     exitCode: localResult.exitCode,
+    ...projectLocalTurnFacts(localResult),
+    ...(localResult.hostTaskRef ? { hostTaskRef: localResult.hostTaskRef } : {}),
     ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
     title: localResult.title,
     ...(localResult.titlePatchPromise
@@ -2851,7 +3176,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
     }
     const skipLocal = await shouldSkipAutoLocalForServerPlatformTools(options);
     if (!skipLocal) {
-      const localResult = await runLocalAgentTurnForCli(options, {
+      let localResult = await runLocalAgentTurnForCli(options, {
         reportFailure: false,
       });
       if (localResult.exitCode === 0) {
@@ -2871,6 +3196,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
             const retriedLocalResult = await runLocalAgentTurnForCli(options, {
               reportFailure: false,
             });
+            localResult = retriedLocalResult;
             if (retriedLocalResult.exitCode === 0) {
               return foldLocalResultForTui(retriedLocalResult);
             }
@@ -2890,23 +3216,41 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
           message: localErrorMessage,
           body: localResult.localError,
         });
-      options.output.write(describeLocalRunFailure(localErrorMessage, localResult.localError));
-      return {
+      const suppressAutoFailureOutput =
+        options.interactiveHost &&
+        Boolean(localResult.preflightBlocked || isLocalContextCoverageFailure(localResult.localError));
+      if (!suppressAutoFailureOutput) {
+        options.output.write(describeLocalRunFailure(localErrorMessage, localResult.localError));
+      }
+      // 与中断出口同源：救援摘要用量并入逐帧明细（每条出口只记一次）。
+      const failureCoverageUsage = (
+        localResult.localError as { compactionUsage?: Record<string, unknown> } | null | undefined
+      )?.compactionUsage;
+      const failureUsageRecords: RunAgentTurnResult["usageRecords"] = failureCoverageUsage
+        ? [...(localResult.usageRecords ?? []), {
+          // 形状对齐逐帧明细：callId 必填且本轮只有这一条救援摘要，
+          // model 用固定标签（摘要走平台托管或当前 provider，无法从错误取得）。
+          callId: "compaction-rescue",
+          usage: failureCoverageUsage,
+          model: "context-compaction",
+        }]
+        : localResult.usageRecords;
+      const failedResult: RunAgentTurnResult = {
         exitCode: 1,
+        ...projectLocalTurnFacts(localResult),
         failureSubclass,
         ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
-        // Keep localError so TUI can show balance/quota/dialog-preserved hints
-        // instead of only the raw auto-runtime line.
-        ...(localResult.localError ? { localError: localResult.localError } : {}),
         // 失败轮同样可能已发生平台计费（abort/失败照样扣费）：turnCredits 与
         // 逐帧明细一起随行，否则审计日志在 auto 失败路径上缺账。
         ...(localResult.turnCredits !== undefined
           ? { turnCredits: localResult.turnCredits }
           : {}),
-        ...(localResult.usageRecords?.length
-          ? { usageRecords: localResult.usageRecords }
+        ...(failureUsageRecords?.length
+          ? { usageRecords: failureUsageRecords }
           : {}),
       };
+      recordRunResultHeaderMeta(failedResult, getRunResultHeaderMeta(localResult));
+      return failedResult;
     }
   }
 
@@ -2922,28 +3266,38 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   // 服务端据此跳过 dialog 持久化），与本地 wrapAdapterEphemeral 一致。
   // 无需在此警告"仅 local 生效"——那是修复前的过时语义。
 
-  // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
-  const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
-  if (localAvailability?.exitCode) {
-    return {
-      exitCode: localAvailability.exitCode,
-      failureSubclass: localAvailability.failureSubclass ?? "rate_limit",
-    };
-  }
-
-  const httpResult = await runHttpAgentTurn(options, authToken);
+  // Read advisory cooldown state; never veto HTTP dispatch.
+  const localAvailability = await resolveLocalCredentialKeysForDispatch(options);
+  // httpOutcome 只是本函数判可用性的内部管道（见 HttpTurnOutcome），不进入对外的
+  // RunAgentTurnResult：解构掉再返回，公开结果形状保持不变。
+  const { httpOutcome, ...httpResult } = await runHttpAgentTurn(options, authToken);
   // 流中断（exitCode 0 + streamInterrupted，见 runHttpAgentTurn 内 abort 分支）
   // 不代表 HTTP 派发成功，不能据此清冷却。
   if (
     httpResult.exitCode === 0 &&
     !httpResult.streamInterrupted &&
-    (localAvailability?.credentialKey || localAvailability?.matchedKey)
+    localAvailability
   ) {
-    const keyToClear = localAvailability.credentialKey || localAvailability.matchedKey!;
-    await clearCredentialAvailability(
-      keyToClear,
-      options.env as NodeJS.ProcessEnv,
-    ).catch(() => undefined);
+    // 用上游真实 status + body 判（共享纯函数识别「2xx 但 body 带配额错误码」）；
+    // 拿不到 outcome 时不猜成功，跳过这次可用性回写。
+    const action = httpOutcome
+      ? resolveAvailabilityAction(httpOutcome.status, httpOutcome.body, Date.now())
+      : undefined;
+    if (action?.kind === "clear") {
+      const keyToClear = localAvailability.credentialKey || localAvailability.matchedKey;
+      if (keyToClear) {
+        await clearCredentialAvailability(
+          keyToClear,
+          options.env as NodeJS.ProcessEnv,
+        ).catch(() => undefined);
+      }
+    }
+    if (httpOutcome) {
+      // action 为 mark 时这里落冷却（不再被上面的直接 clear 抹掉）。
+      await localAvailability
+        .recordSuccess?.(httpOutcome.status, httpOutcome.body)
+        .catch(() => undefined);
+    }
   }
   return httpResult;
 }

@@ -78,15 +78,15 @@ import { resolveExecutableOnPath } from "./runtimeCompat";
 
 const require = createRequire(import.meta.url);
 export function visualRendererCapability() {
-  if (process.env.NOLO_VISUAL_RENDERER_DISABLED === "1") return { available: false as const, reason: "Platform renderer disabled by NOLO_VISUAL_RENDERER_DISABLED=1 on this runtime host." };
+  if (process.env.NOLO_VISUAL_RENDERER_DISABLED === "1") return { available: false as const, reasonCode: "disabled" as const, reason: "Platform renderer disabled by NOLO_VISUAL_RENDERER_DISABLED=1 on this runtime host." };
   try {
     const { chromium } = require("playwright") as typeof import("playwright");
     const executablePath = [chromium.executablePath(), resolveExecutableOnPath("google-chrome"), resolveExecutableOnPath("chromium"), resolveExecutableOnPath("chromium-browser")]
       .find((path): path is string => !!path && existsSync(path));
-    if (!executablePath) return { available: false as const, reason: "No Chromium renderer installed. Install Playwright Chromium (playwright install chromium) or system Chromium/Google Chrome on the runtime host." };
+    if (!executablePath) return { available: false as const, reasonCode: "missing-browser" as const, reason: "No Chromium renderer installed. Install Playwright Chromium (playwright install chromium) or system Chromium/Google Chrome on the runtime host." };
     return { available: true as const, chromium, executablePath };
   } catch {
-    return { available: false as const, reason: "Platform renderer unavailable: install the platform Playwright dependency and Chromium on the runtime host (not a workspace npm script)." };
+    return { available: false as const, reasonCode: "dependency-unavailable" as const, reason: "Platform renderer unavailable: install the platform Playwright dependency and Chromium on the runtime host (not a workspace npm script)." };
   }
 }
 

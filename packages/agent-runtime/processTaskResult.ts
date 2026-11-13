@@ -1,3 +1,7 @@
+import { openSync, readSync, closeSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { isSpilledToolOutput } from "./toolOutputSpillProjection";
 // packages/agent-runtime/processTaskResult.ts
 //
 // Bounded stdout/stderr result capsule for promoted (timeout-detach) execShell
@@ -56,7 +60,7 @@ export type ProcessTaskStreamProvenance = {
   totalLines: number;
 };
 
-/** Where the full output lives when the capsule only carries a tail. */
+/** Recovery path and output counters (capsule.spill aggregates separate streamSpills). */
 export type ProcessTaskResultSpillRef = {
   displayPath: string;
   totalChars: number;
@@ -80,12 +84,35 @@ export type ProcessTaskResultCapsule = {
   captureError?: string;
   /** Present when the full output was spilled to the tool spill store. */
   spill?: ProcessTaskResultSpillRef;
+  /** Separate original streams when capture already published spill files. */
+  streamSpills?: { stdout?: ProcessTaskResultSpillRef; stderr?: ProcessTaskResultSpillRef };
 };
 
 /** Keep only the last `maxChars` chars, reporting whether anything was cut. */
 function tailText(value: string, maxChars: number): { text: string; truncated: boolean } {
   if (value.length <= maxChars) return { text: value, truncated: false };
   return { text: value.slice(-maxChars), truncated: true };
+}
+
+/** Read counters from the existing file, never from its bounded preview. */
+function reuseStreamSpill(text: string, workspaceRoot?: string): ProcessTaskResultSpillRef | undefined {
+  const displayPath = /Full output saved to ([^\n]+?)\]/.exec(text)?.[1];
+  if (!displayPath) return undefined;
+  const path = isAbsolute(displayPath) ? displayPath : workspaceRoot ? resolve(workspaceRoot, displayPath) : undefined;
+  if (!path) return undefined;
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(64 * 1024);
+    const decoder = new StringDecoder("utf8");
+    let totalChars = 0, newlines = 0;
+    const count = (chunk: string) => {
+      totalChars += chunk.length;
+      for (let i = chunk.indexOf("\n"); i >= 0; i = chunk.indexOf("\n", i + 1)) newlines++;
+    };
+    for (let bytes; (bytes = readSync(fd, buffer, 0, buffer.length, null)) > 0;) count(decoder.write(buffer.subarray(0, bytes)));
+    count(decoder.end());
+    return { displayPath, totalChars, totalLines: totalChars ? newlines + 1 : 0 };
+  } finally { closeSync(fd); }
 }
 
 function formatCapsuleStream(name: string, value: string): string {
@@ -161,11 +188,33 @@ export function buildProcessTaskResultCapsule(args: {
   // A ring eviction is direct evidence that the inline tails are not the
   // complete streams — independent of how the buffered text compares to the
   // tail cap.
-  const truncated = inlineTruncated || ringEvicted || Boolean(captureError);
+  const truncated = inlineTruncated || ringEvicted || Boolean(captureError) || isSpilledToolOutput(stdout) || isSpilledToolOutput(stderr);
   const shouldSpill = truncated || inlineSize > spillThresholdChars;
 
   let spill: ProcessTaskResultSpillRef | undefined;
-  if (shouldSpill) {
+  let streamSpills: ProcessTaskResultCapsule["streamSpills"];
+  if (isSpilledToolOutput(stdout) || isSpilledToolOutput(stderr)) {
+    streamSpills = {};
+    for (const [name, text] of [["stdout", stdout], ["stderr", stderr]] as const) {
+      if (!text) continue;
+      try {
+        if (isSpilledToolOutput(text)) {
+          streamSpills[name] = reuseStreamSpill(text, args.workspaceRoot);
+        } else {
+          const result = spillToolOutput({ content: text, toolName: "execShell", workspaceRoot: args.workspaceRoot });
+          streamSpills[name] = { displayPath: result.displayPath, totalChars: result.totalChars, totalLines: result.totalLines };
+        }
+      } catch { /* Preserve the inline pointer if the original file cannot be read. */ }
+    }
+    const primary = streamSpills.stdout ?? streamSpills.stderr;
+    if (primary) {
+      spill = {
+        displayPath: primary.displayPath,
+        totalChars: (streamSpills.stdout?.totalChars ?? 0) + (streamSpills.stderr?.totalChars ?? 0),
+        totalLines: (streamSpills.stdout?.totalLines ?? 0) + (streamSpills.stderr?.totalLines ?? 0),
+      };
+    }
+  } else if (shouldSpill) {
     try {
       const result = spillToolOutput({
         content: [
@@ -202,5 +251,6 @@ export function buildProcessTaskResultCapsule(args: {
     ...(captureError ? { captureError } : {}),
     truncated,
     ...(spill ? { spill } : {}),
+    ...(streamSpills ? { streamSpills } : {}),
   };
 }

@@ -1,3 +1,7 @@
+import {
+  resolveAgentRunStatusKind,
+  type AgentRunStatusKind,
+} from "core/agentRunStatusKind";
 import { clipCompactText } from "core/clipCompactText";
 import { isMediaToolConfirmation } from "ai/lecture/mediaToolConfirm";
 import { isRecord } from "core/isRecord";
@@ -89,9 +93,23 @@ export type AgentRunPresentation = {
   countText?: string;
 };
 
-const AGENT_RUN_STATUS_I18N: Record<string, { key: string; fallback: string }> = {
+/**
+ * run 生命周期状态的**展示标签**（i18n 属展示层，留在 chat）。业务分类
+ * （active / succeeded / abnormal / unknown）的唯一真值在
+ * `core/agentRunStatusKind`——CLI 与 Web 都消费那一张表，本文件不再维护第二份
+ * 生命周期状态语义，也**不从 i18n 标签反推业务语义**。
+ *
+ * 文案按状态给：同一 kind 内文案并不相同（failed/timeout → 失败、
+ * killed/cancelled/cancelling → 已停止、orphaned → 已失联），所以状态 → 文案的
+ * 映射必须逐状态登记；未登记状态按 core 给出的 kind 兜底。
+ */
+const AGENT_RUN_STATUS_LABELS: Record<
+  string,
+  { key: string; fallback: string }
+> = {
   pending: { key: "agentRun.statusPending", fallback: "等待中" },
   queued: { key: "agentRun.statusPending", fallback: "等待中" },
+  started: { key: "agentRun.statusRunning", fallback: "运行中" },
   running: { key: "agentRun.statusRunning", fallback: "运行中" },
   done: { key: "agentRun.statusDone", fallback: "已完成" },
   completed: { key: "agentRun.statusDone", fallback: "已完成" },
@@ -105,11 +123,25 @@ const AGENT_RUN_STATUS_I18N: Record<string, { key: string; fallback: string }> =
   unknown: { key: "agentRun.statusUnknown", fallback: "未知" },
 };
 
+/** 未登记状态按 core 的 kind 兜底：还在跑 / 已完成，其余一律「未知」。 */
+const AGENT_RUN_STATUS_KIND_LABELS: Record<
+  AgentRunStatusKind,
+  { key: string; fallback: string }
+> = {
+  active: { key: "agentRun.statusRunning", fallback: "运行中" },
+  succeeded: { key: "agentRun.statusDone", fallback: "已完成" },
+  abnormal: { key: "agentRun.statusUnknown", fallback: "未知" },
+  unknown: { key: "agentRun.statusUnknown", fallback: "未知" },
+};
+
 export function resolveAgentRunStatusLabel(
   status: string | undefined,
   translate?: AgentRunToolTranslate,
 ): string {
-  const entry = AGENT_RUN_STATUS_I18N[asTrimmedString(status)] ?? AGENT_RUN_STATUS_I18N.unknown;
+  const key = asTrimmedString(status);
+  const entry =
+    AGENT_RUN_STATUS_LABELS[key] ??
+    AGENT_RUN_STATUS_KIND_LABELS[resolveAgentRunStatusKind(key)];
   const t = translate ?? ((_k, fb) => fb);
   const value = asOptionalTrimmedString(t(entry.key, entry.fallback));
   return value && value !== entry.key ? value : entry.fallback;

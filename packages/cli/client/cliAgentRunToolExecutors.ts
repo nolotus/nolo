@@ -1,6 +1,9 @@
-import { join } from "node:path";
+import { assertDispatchSelectionAdmission } from "../../ai/agent/dispatchSelectionPolicy";
+import { parseAgentRunArgs } from "../agentRunArgs";
+import { parseUserIdFromAuthToken, resolveAuthToken, resolveServerUrl } from "../cliEnvHelpers";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { normalizeContinueDialogId } from "../../ai/tools/agent/continueDialogId";
+import { normalizeContinueDialogId, resolveRunContextFacts } from "../../ai/tools/agent/continueDialogId";
 import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // packages/cli/client/cliAgentRunToolExecutors.ts
 //
@@ -15,6 +18,7 @@ import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // 返回格式与 web 端 executor 一致：{ content: JSON(rawData), metadata.displayData }，
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
+import { currentHostReviewDispatch, matchesHostReviewDispatch, consumeHostReviewDispatch, validateHostReviewDispatch, bindHostReviewRun, type HostReviewDispatchContext } from "./hostReviewDispatch";
 import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import * as nodeFs from "node:fs";
 import { waitForRunTerminal } from "../../agent-runtime/waitForRunTerminal";
@@ -22,6 +26,7 @@ import { existsSync, readFileSync } from "node:fs";
 import {
   formatListRunsCard,
   formatNotFoundRunCard,
+  formatControlRunMessageCard,
   formatStartRunCard,
   formatStatusRunCard,
   formatStopRunCard,
@@ -46,17 +51,27 @@ import {
   transitionRunToTerminal,
   findRunRecord,
   gcRunRecords,
-  popAllQueueEntries,
+  _readQueueEntriesLocked,
   popQueueMessages,
   serializeQueueEntries,
   withQueueLock,
   queryRunRecords,
+  listRunRecords,
   resolveRunsDir,
   spawnLocalBackgroundRun,
+  resolveLocalContinuation,
+  localWriterRecovery,
+  revokePreparedWriterLaunch,
   terminateRunProcess,
+  finalizeRunRecord,
+  writeRunRecord,
+  readRunRecord,
   isRunTerminalStatus,
 } from "../agentRunControl";
 import { readTimestamp } from "./agentRunSnapshot";
+import { resolveLocalUserId } from "./cliAgentConfigHelpers";
+import { deliverDialogNotification } from "../dialogNotifyCommand";
+import { DialogNotifyError, sha256Hex } from "../dialogNotifyMailbox";
 import { agentRunCardLabels, t } from "../tui/i18n";
 import {
   aggregateBatch,
@@ -92,8 +107,10 @@ type OutputLike = { write(chunk: string): unknown };
  - now：缺省 Date.now()。CLI 适配层允许取时钟。
  */
 export type CliAgentRunToolExecutorDeps = {
+  /** Host-only typed-review scope; tool arguments cannot supply this. */
+  reviewDispatchContext?: HostReviewDispatchContext;
   /** Read only the current user's dialog namespace; absence fails closed. */
-  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean>;
+  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
   env?: EnvLike;
   /** CLI entrypoint path（spawn 子进程重启动用）。 */
@@ -107,11 +124,14 @@ export type CliAgentRunToolExecutorDeps = {
   terminateRunProcess?: typeof terminateRunProcess;
   /**
    * 解析候选 agent 的 credentialGroup（父进程侧，供并发扇出守卫判定）。
-   * 缺省或返回 undefined = 凭证归属**未知**（守卫按未知处理，不是「独立」）。
+   * 已注入时，返回 undefined / 抛错 = 凭证归属**未知**，不得用调用方组名覆盖。
+   * 未注入时才兼容调用方传入的 credentialGroup。
    */
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
   /** 当前主进程运行的 agentKey（供 startAgentRun 缺省回填自身派发用）。 */
   currentAgentKey?: string | null;
+  /** Host-provided coordination origin; never taken from tool arguments. */
+  source?: { parentDialogId?: string; agentKey?: string | null };
   /**
    * 解析候选 agent 的 `runtimeBinding.machineId`（F3：binding 参与派发判定）。
    * 缺省 / 返回空 = 绑定信息未知（不等于"无绑定"）。
@@ -121,6 +141,7 @@ export type CliAgentRunToolExecutorDeps = {
    * 解析候选 agent 的展示名（写进 run 记录，供卡片/列表显示）。
    * 调用方通常只给 agentKey 不传 agentName；缺省时卡片只能退回通用「子智能体」。
    */
+  resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   /**
    * 本机 machineId（判定「绑定机就是本机」用）。未知 = 无法证明，binding 判定
@@ -293,6 +314,7 @@ function buildRunStatusPayload(
         : { available: false, final: false, reason: "checkpoint_missing" } } : {}),
       status: reconciled.status,
       pid: reconciled.pid ?? null,
+      ...(localWriterRecovery(reconciled) ? { writerRecovery: localWriterRecovery(reconciled) } : {}),
       agentKey: reconciled.agentKey,
       ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
       // Title rides along so transcript re-render (toolOutput) and the run
@@ -383,15 +405,15 @@ async function assertCredentialFanoutAllowed(
     agentKey: string;
     batchId?: string;
     parentDialogId?: string;
-    /** 调用方（模型）照抄 listAgents 的 credentialGroup；解析器失败时的兜底。 */
+    /** 调用方（模型）照抄 listAgents 的 credentialGroup；仅无权威解析器时兼容。 */
     credentialGroup?: string;
     allowUnknownCredential?: boolean;
     /** 显式禁止同一 credentialGroup 的并发（默认允许）。 */
     allowCredentialConcurrency?: boolean;
   }
 ): Promise<string | undefined> {
-  // 凭证组解析优先显式解析器（读本地 agent 记录，最可靠），模型透传值兜底；
-  // 都拿不到 = 凭证归属未知（守卫按未知处理，不静默放行）。
+  // 已注入的权威解析器是唯一身份来源；未知/失败仍为未知，模型声明不得补成已知。
+  // 仅无解析器时兼容模型透传值；显式未知放行也不改变记录中的身份。
   let candidateGroup: string | undefined;
   if (deps.resolveAgentCredentialGroup) {
     try {
@@ -399,8 +421,7 @@ async function assertCredentialFanoutAllowed(
     } catch {
       candidateGroup = undefined;
     }
-  }
-  if (!candidateGroup && typeof args.credentialGroup === "string" && args.credentialGroup.trim()) {
+  } else if (typeof args.credentialGroup === "string" && args.credentialGroup.trim()) {
     candidateGroup = args.credentialGroup.trim();
   }
 
@@ -437,9 +458,85 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
     const continueDialogId = normalizeContinueDialogId(args.continueDialogId);
-    if (continueDialogId && !(await deps.dialogExistsForCurrentUser?.(continueDialogId))) {
+    const continuedRecord = continueDialogId ? await deps.dialogExistsForCurrentUser?.(continueDialogId) : undefined;
+    if (continueDialogId && !continuedRecord) {
       throw new Error(`startAgentRun: dialog 不存在或不属于当前用户，无法续跑: ${continueDialogId}`);
     }
+    // Host identity only: never accept an evidence scope from tool arguments.
+    // Unknown identity and unscoped legacy records must not supply historical evidence.
+    const dispatchUserId = parseUserIdFromAuthToken(resolveAuthToken(deps.env ?? process.env));
+    let serverOrigin: string | undefined;
+    try {
+      const server = new URL(resolveServerUrl(deps.env ?? process.env));
+      if (server.protocol === "https:" || server.protocol === "http:") serverOrigin = server.origin;
+    } catch { /* Unknown server identity supplies no historical evidence. */ }
+    const evidenceScope = dispatchUserId && serverOrigin ? { userId: dispatchUserId, serverOrigin } : undefined;
+    // Evidence only: rejudge difficulty; switching models loses cache reuse.
+    // Never inherit this selection or alter selection_reason_required admission.
+    const previousRecord = continueDialogId
+      ? listRunRecords(deps).find(record => record.dialogId === continueDialogId &&
+          evidenceScope !== undefined && record.evidenceScope?.userId === evidenceScope.userId &&
+          record.evidenceScope?.serverOrigin === evidenceScope.serverOrigin)
+      : undefined; // Read before spawning, so this run cannot select itself.
+    let previousCacheHitRatio = previousRecord?.cacheHitRatio;
+    if (previousRecord && previousCacheHitRatio === undefined && previousRecord.resultFile) {
+      try {
+        const fs = deps.fs ?? nodeFs;
+        const runsDir = resolve(resolveRunsDir(deps.env, deps.homedir));
+        const expected = resolve(runsDir, `${previousRecord.runId}.result.md`);
+        // Exact owned basename, canonical containment and no symlinks. Missing
+        // filesystem proof is not permission to read a registry-supplied path.
+        if (previousRecord.runId.includes("/") || previousRecord.runId.includes("\\") ||
+            resolve(previousRecord.resultFile) !== expected ||
+            !fs.realpathSync || !fs.lstatSync) throw new Error("Unverified result path");
+        const stat = fs.lstatSync(expected);
+        if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Non-regular result file");
+        const canonicalDir = String(fs.realpathSync(runsDir));
+        if (String(fs.realpathSync(expected)) !== join(canonicalDir, `${previousRecord.runId}.result.md`)) throw new Error("Result escapes runs directory");
+        // Anchor the directory too: O_NOFOLLOW alone only protects the final
+        // component, not a parent swapped between validation and open.
+        // Other platforms omit optional cache evidence until equivalent fd
+        // ownership proof is available. Never fall back to reopening a path.
+        if ((deps.platform ?? process.platform) !== "linux" || !fs.fstatSync || !fs.readSync || !fs.closeSync ||
+            !nodeFs.constants.O_NOFOLLOW || !nodeFs.constants.O_DIRECTORY) throw new Error("FD proof unavailable");
+        let dirFd: number | undefined;
+        let resultFd: number | undefined;
+        let text = "";
+        try {
+          dirFd = fs.openSync(runsDir, nodeFs.constants.O_RDONLY | nodeFs.constants.O_DIRECTORY | nodeFs.constants.O_NOFOLLOW);
+          if (!fs.fstatSync(dirFd).isDirectory() || String(fs.realpathSync(`/proc/self/fd/${dirFd}`)) !== canonicalDir) throw new Error("Unverified directory fd");
+          // A FIFO substituted after the path checks must not block before fstat.
+          resultFd = fs.openSync(`/proc/self/fd/${dirFd}/${previousRecord.runId}.result.md`, nodeFs.constants.O_RDONLY | nodeFs.constants.O_NOFOLLOW | nodeFs.constants.O_NONBLOCK);
+          if (!fs.fstatSync(resultFd).isFile() || String(fs.realpathSync(`/proc/self/fd/${resultFd}`)) !== join(canonicalDir, `${previousRecord.runId}.result.md`)) throw new Error("Unverified result fd");
+          // Only the small machine header is needed; avoid reading an unbounded
+          // result body. readSync uses this exact verified fd, never its pathname.
+          const bytes = Buffer.alloc(16 * 1024);
+          let offset = 0;
+          while (offset < bytes.length) {
+            const count = fs.readSync(resultFd, bytes, offset, bytes.length - offset, offset);
+            if (count === 0) break;
+            offset += count;
+          }
+          text = bytes.subarray(0, offset).toString("utf8");
+        } finally {
+          try { if (resultFd !== undefined) fs.closeSync(resultFd); }
+          finally { if (dirFd !== undefined) fs.closeSync(dirFd); }
+        }
+        const header = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1];
+        const raw = header?.match(/^cacheHitRatio: (null|[0-9]+(?:\.[0-9]+)?)\r?$/m)?.[1];
+        if (raw === "null") previousCacheHitRatio = null;
+        else if (raw !== undefined && Number.isFinite(Number(raw)) && Number(raw) <= 1) previousCacheHitRatio = Number(raw);
+      } catch { /* Old/missing results are not an admission failure. */ }
+    }
+    const continuationEvidence = continueDialogId ? {
+      difficultyRecheckRequired: true,
+      ...(previousRecord ? { previousRun: {
+        agentKey: previousRecord.agentKey,
+        ...(previousRecord.selectionCheck?.difficulty !== undefined ? { difficulty: previousRecord.selectionCheck.difficulty } : {}),
+        ...(previousRecord.selectionCheck?.modelTier !== undefined ? { modelTier: previousRecord.selectionCheck.modelTier } : {}),
+        ...(previousCacheHitRatio !== undefined ? { cacheHitRatio: previousCacheHitRatio } : {}),
+      } } : {}),
+    } : {};
     // runtimeKey 的判定必须在任何副作用之前，且分成两件事：
     //   1) 宿主能不能兑现（guard：本机只有 local 与 docker 可兑现，其它后端派发前拒绝）；
     //   2) 转发 —— 归一化后的 key 进 rawArgs 的 `--runtime-key <key>`，子进程自己
@@ -461,6 +558,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     //      （唯一产出 `--runtime-key` 的地方，返回前跑 F11 成对不变式）。
     // 默认落点政策见 resolveCliLocalSpawnDispatch：不传 key 的**写型**派发默认落
     // docker 沙盒；只读派发留宿主（它写不了文件，起沙盒是纯浪费）。
+    const contextFacts = resolveRunContextFacts(continuedRecord ? (typeof continuedRecord === "object" ? continuedRecord : {}) : undefined, agentKey);
     const bindingMachineId =
       agentKey && deps.resolveAgentRuntimeBindingMachineId
         ? await deps.resolveAgentRuntimeBindingMachineId(agentKey)
@@ -517,6 +615,18 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     // 仓库/worktree 上动手。
     const requestedCwd = resolveStartAgentRunCwd(args.cwd, probeRunCwd(deps));
     const nowMs = resolveNowMs(deps);
+
+    // 准入闸门：已知跨档且没有 selectionReason → 在任何副作用（预约并发、消耗 review
+    // 上下文、spawn 子 run）之前拒绝。档位按最终真实模型解析（agent 记录里的 model，
+    // 解析失败即未知档位，不拦）。续跑沿用既有身份逻辑：按生效的 agentKey 解析模型。
+    let selectedModel: string | undefined;
+    try { selectedModel = await deps.resolveAgentModel?.(agentKey); } catch { /* 解析不到模型 = 未知档位，不构成拒绝理由。 */ }
+    const selectionCheck = assertDispatchSelectionAdmission({
+      dimension: args.dimension,
+      difficulty: args.difficulty,
+      model: selectedModel,
+      selectionReason: args.selectionReason,
+    });
 
     const effectiveAllowCredentialConcurrency =
       args.allowCredentialConcurrency ?? true;
@@ -620,8 +730,21 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
               .map((c: string) => c.trim())
           : undefined;
 
+    const candidateReview = deps.reviewDispatchContext ?? currentHostReviewDispatch();
+    const reviewContext = matchesHostReviewDispatch(candidateReview, call, args) ? candidateReview : undefined;
+    if (reviewContext) {
+      if (continueDialogId || args.readOnly !== true) throw new Error("Typed review requires a fresh readOnly run");
+      await validateHostReviewDispatch(reviewContext, deps.env ?? process.env, requestedCwd ?? deps.cwd ?? process.cwd());
+      consumeHostReviewDispatch(reviewContext, deps.env ?? process.env);
+    }
+    const childPolicy = parseAgentRunArgs(rawArgs, { readTextFile: () => message });
     const { runId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
       {
+        selectionCheck,
+        ...(evidenceScope ? { evidenceScope } : {}),
+        ...(dispatchUserId ? { dispatchSpeedProvenance: {
+          version: 1 as const, source: "cli-startAgentRun" as const, userId: dispatchUserId,
+        } } : {}),
         rawArgs,
         commandPath: ["agent", "run"],
         cliEntrypointPath: deps.cliEntrypoint,
@@ -636,12 +759,35 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(continueDialogId ? { dialogId: continueDialogId } : {}),
         ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
         cwd: requestedCwd ?? deps.cwd ?? process.cwd(),
+        ...(dispatch.runtimeKey === "local" && !isReadOnlyTask ? { claimLocalWrites: true } : {}),
+        ...(dispatch.target === "host" ? { localExecution: {
+          runtimeKey: "local" as const, hostWritesAuthorized: args.allowHostWrites === true,
+          readOnly: isReadOnlyTask,
+          ...(childPolicy?.allowedToolNames ? { allowedToolNames: childPolicy.allowedToolNames } : {}),
+          ...(childPolicy?.blockedToolNames ? { blockedToolNames: childPolicy.blockedToolNames } : {}),
+          provenance: "cli-tool-dispatch-authorized" as const,
+        } } : {}),
         message,
         ...(args.ephemeral === true ? { ephemeral: true } : {}),
         output: noopOutput,
       },
       { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
     );
+
+    if (reviewContext) {
+      try { await bindHostReviewRun(reviewContext, runId, deps.env ?? process.env); }
+      catch (error) {
+        const record = readRunRecord(runId, deps);
+        let stopped = false;
+        try { if (record) stopped = await (deps.terminateRunProcess ?? terminateRunProcess)(record, "SIGTERM", deps); } catch { /* unconfirmed cancellation is not success */ }
+        if (stopped) finalizeRunRecord(runId, { status: "killed", note: "Host review binding failed; newly created run cancelled" }, deps);
+        else {
+          const latest = readRunRecord(runId, deps);
+          if (latest) writeRunRecord({ ...latest, note: "Host review binding failed; cancellation unconfirmed" }, deps);
+        }
+        throw new Error(`Host review binding failed for ${runId}; cancellation=${stopped ? "confirmed" : "unconfirmed"}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
 
     // title 走卡片自己的参数，不进 label：它是显示行不是名字，进了 label 会
     // 把 key 顶掉、又让 identity 行与 title 行重复。
@@ -693,6 +839,9 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         runId,
         agentKey,
         status: "running",
+        selectionCheck,
+        ...contextFacts,
+        ...continuationEvidence,
         // batchId is always returned so the caller can later filter by it —
         // even when the caller didn't supply one, a fresh id was generated.
         batchId: resolvedBatchId,
@@ -716,8 +865,14 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
   };
 }
 
+function controlMessageLabels(queuedCount?: number) {
+  const labels = agentRunCardLabels().controlMessage;
+  return { ...labels, queued: queuedCount === undefined ? labels.queued : labels.enqueued(queuedCount) };
+}
+
 async function spawnContinuationRun(
   reconciled: RunRecord,
+  message: string,
   userInput: string,
   deps: CliAgentRunToolExecutorDeps
 ) {
@@ -727,6 +882,7 @@ async function spawnContinuationRun(
     throw new Error(t("agentRunTool.noDialogToContinue"));
   }
 
+  const continuation = resolveLocalContinuation(reconciled, deps);
   const agentKey = reconciled.agentKey;
   const agentName = reconciled.agentName;
   const rawArgs = [
@@ -742,6 +898,7 @@ async function spawnContinuationRun(
     "PLACEHOLDER",
     "--bg",
     ...(reconciled.ephemeral ? ["--ephemeral"] : []),
+    ...continuation.rawArgs,
   ];
   // 续跑产生的新 run 记录原 runId（写进 record 与 .result.md 头 continuedFrom）。
   const continuedFrom = reconciled.runId;
@@ -765,8 +922,10 @@ async function spawnContinuationRun(
       ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
       // 续跑继承原 run 的凭证组（同一 agent），供并发扇出守卫判定。
       ...(reconciled.credentialGroup ? { credentialGroup: reconciled.credentialGroup } : {}),
-      cwd: reconciled.cwd ?? deps.cwd ?? process.cwd(),
-      message: userInput,
+      cwd: continuation.cwd,
+      localExecution: continuation.policy,
+      ...(!continuation.policy.readOnly ? { claimLocalWrites: true } : {}),
+      message,
       ...(reconciled.ephemeral ? { ephemeral: true } : {}),
       continuedFrom,
       output: noopOutput,
@@ -774,14 +933,6 @@ async function spawnContinuationRun(
     { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
   );
 
-  // title 走卡片自己的参数，不进 label：label 只吃名字字段，title 顶掉
-  // key 反而丢执行者信息。
-  const displayName = resolveRunLabel({
-    agentName,
-    agentKey,
-    runId: newRunId,
-  });
-  const labels = agentRunCardLabels();
   const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
 
   return {
@@ -801,14 +952,101 @@ async function spawnContinuationRun(
       ...(taskPreview ? { taskPreview } : {}),
     }),
     metadata: {
-      displayData: formatStartRunCard(displayName, "running", {
-        task: taskPreview,
+      displayData: formatControlRunMessageCard({
+        action: "continued",
         runId: newRunId,
-        ...(continuedTitle ? { title: continuedTitle } : {}),
-        labels,
+        targetId: reconciled.ephemeral ? undefined : reconciled.dialogId,
+        userInput,
+        labels: controlMessageLabels(),
       }),
     },
   };
+}
+
+/**
+ * `controlAgentRun(action:"append", dialogKey)` **without** a runId: deliver one
+ * notification to a live ordinary CLI dialog owned by the same local user.
+ *
+ * Hard boundaries (the reason this is not the run path):
+ *   - no run record is looked up and no writer/run is started; the target
+ *     dialog's own process admits the text through its existing chat queue,
+ *   - nothing is written when the target has no live receiver: the caller gets
+ *     an explicit `unsupported`/`offline` code instead of a silent drop,
+ *   - `mode:"continue"` (start a fresh run) is not available here and says so.
+ */
+async function appendToDialogNotifyTarget(args: {
+  dialogKey: string;
+  userInput: string;
+  mode?: string;
+  deps: CliAgentRunToolExecutorDeps;
+}): Promise<{ content: string; metadata?: Record<string, unknown> }> {
+  const { dialogKey, userInput, deps } = args;
+  const mode = args.mode?.trim() || "enqueue";
+  if (mode !== "enqueue") {
+    return {
+      content: JSON.stringify({
+        ok: false,
+        action: "append",
+        dialogKey,
+        code: "unsupported",
+        detail: `mode "${mode}" needs a runId; a dialog notification only enqueues (mode:"enqueue") and never starts a run`,
+      }),
+    };
+  }
+  const env = deps.env ?? process.env;
+  const actorUserId = resolveLocalUserId(env);
+  // Deterministic per (target, origin, text): a retried identical append is an
+  // idempotent replay reported as `duplicate`, never a second queued message.
+  const idempotencyKey = `tool-append:${sha256Hex(
+    `${dialogKey}\n${deps.source?.parentDialogId ?? ""}\n${userInput}`,
+  )}`;
+  try {
+    const receipt = await deliverDialogNotification({
+      dialogRef: dialogKey,
+      actorUserId,
+      message: userInput,
+      idempotencyKey,
+      env,
+    });
+    return {
+      content: JSON.stringify({
+        action: "append",
+        mode,
+        ...receipt,
+        // `failed` arrives on the normal return path, not as a throw, so `ok` has
+        // to be derived from the receipt: reporting `ok:true` next to
+        // `state:"failed"` is how a refused delivery reaches the model as a
+        // success. Must come AFTER the spread — `NotifyReceipt` carries its own
+        // `ok: true`.
+        ok: receipt.state !== "failed",
+        ...(receipt.state === "failed"
+          ? {
+              code: "failed",
+              detail:
+                receipt.note ??
+                "the target dialog refused or could not take the notification",
+            }
+          : {}),
+        note:
+          receipt.note ??
+          "queued in the target dialog's own queue (notification, not a run)",
+      }),
+    };
+  } catch (error) {
+    if (error instanceof DialogNotifyError) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          action: "append",
+          dialogKey,
+          code: error.code,
+          detail: error.message,
+          idempotencyKey,
+        }),
+      };
+    }
+    throw error;
+  }
 }
 
 /** controlAgentRun：list / status / wait / stop / todo / append，映射到本地 ~/.nolo/runs/ 注册表。wait 轮询记录直到终态。 */
@@ -823,6 +1061,12 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     const args = parseCallArgs(call);
     const abortSignal = opts?.abortSignal;
     const action = typeof args.action === "string" ? args.action : "";
+    if (action === "recoverPreparedWriter") {
+      const runId = typeof args.runId === "string" ? args.runId : "";
+      const attemptId = typeof args.attemptId === "string" ? args.attemptId : "";
+      const outcome = revokePreparedWriterLaunch(runId, attemptId, deps);
+      return { content: JSON.stringify({ runId, attemptId, action, outcome }) };
+    }
     const tailLines = typeof args.tailLines === "number" ? args.tailLines : 0;
 
     if (action === "list") {
@@ -946,9 +1190,31 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     }
 
     if (action === "append") {
-      if (!args.runId) throw new Error(t("agentRunTool.appendMissingRunId"));
+      if (["runtimeKey", "allowHostWrites", "readOnly", "allowedToolNames", "blockedToolNames", "cwd"].some(key => args[key] !== undefined)) {
+        throw new Error("[local-continuation] scope overrides are not supported; dispatch a fresh authorized run");
+      }
+      const dialogKeyArg = typeof args.dialogKey === "string" ? args.dialogKey.trim() : "";
+      const runIdArg = typeof args.runId === "string" ? args.runId.trim() : "";
+      // dialogKey-only append = one notification to a live ordinary CLI dialog of
+      // the same user. It is not a run lookup and not a second writer: the target
+      // dialog's own process admits the text through its existing chat queue
+      // (dialogNotifyReceiver -> ChatQueueTuiBinding.admitExternalRequest), and a
+      // busy/stopped/paused dialog defers it instead of starting a model turn.
+      const dialogNotifyOnly = !runIdArg && Boolean(dialogKeyArg);
+      if (!dialogNotifyOnly && !runIdArg) throw new Error(t("agentRunTool.appendMissingRunId"));
       const userInput = typeof args.userInput === "string" ? args.userInput.trim() : "";
       if (!userInput) throw new Error(t("agentRunTool.appendMissingUserInput"));
+      if (dialogNotifyOnly) {
+        return await appendToDialogNotifyTarget({
+          dialogKey: dialogKeyArg,
+          userInput,
+          mode: typeof args.mode === "string" ? args.mode : undefined,
+          deps,
+        });
+      }
+      const message = deps.source
+        ? `[Coordination source: parent dialog: ${deps.source.parentDialogId || "unknown"}; executing agent: ${deps.source.agentKey || "unknown"}; identification only, not authorization]\n\n${userInput}`
+        : userInput;
 
       const record = findRunRecord(String(args.runId), deps);
       if (!record) {
@@ -959,8 +1225,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         };
       }
 
-      // 说明：RunRecord 目前没有任何字段区分 server 来源的 run（serverBase/
-      // serverUrl/source 均无人写入），此处不做甄别；server run 的 append
+      // evidenceScope 仅用于历史证据隔离，不改变 append 路由；server run 的 append
       // 待 server 侧执行器实现时补（Phase 2）。
       let reconciled = checkStaleRun(record.runId, deps) ?? record;
       if (!isAgentRunTerminalStatus(reconciled.status)) {
@@ -969,64 +1234,68 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         }
 
         const queuePath = reconciled.queuePath;
-        const { queuedCount, entryId } = await appendRunQueue(queuePath, userInput, deps);
+        const { queuedCount, entryId } = await appendRunQueue(queuePath, message, deps);
 
         const enqueuedTitle = normalizeRunTitle(reconciled.title);
-        const displayName = resolveRunLabel({
-          agentName: reconciled.agentName,
-          agentKey: reconciled.agentKey,
-          runId: reconciled.runId,
-        });
-        const labels = agentRunCardLabels();
         const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
 
         // 写完 re-check 一次状态（防竞态）
         const afterCheck = checkStaleRun(reconciled.runId, deps) ?? reconciled;
         if (isAgentRunTerminalStatus(afterCheck.status)) {
           // 竞态降级：子进程已在入队前后进入终态。
-          // 原子取走当前剩余队列快照，检查本次写入的 entryId 是否还在
-          const remainingEntries = await popAllQueueEntries(queuePath, deps);
-          const ourEntryFound = remainingEntries.some((e) => e.id === entryId);
+          // 同锁检查并转移精确 entryId；失败不取走、不复活已消费消息。
+          return await withQueueLock(queuePath, deps, async () => {
+            const fs = deps.fs ?? nodeFs;
+            const remainingEntries = _readQueueEntriesLocked(queuePath, fs);
+            const ourEntryFound = remainingEntries.some((e) => e.id === entryId);
 
-          if (!ourEntryFound) {
-            // entryId 已被子进程在退出前消费完：不再重复 spawn，安全写回其他可能存在的并发 entry
-            if (remainingEntries.length > 0) {
-              await withQueueLock(queuePath, deps, () => {
-                const fs = deps.fs ?? nodeFs;
-                const existing = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, "utf8") : "";
-                fs.writeFileSync(queuePath, serializeQueueEntries(remainingEntries) + existing, "utf8");
-              });
-            }
-            return {
-              content: JSON.stringify({
-                runId: reconciled.runId,
-                // ephemeral 不外泄合成 dialogId；非 ephemeral 保持原 dialogId 透出。
-                ...(reconciled.ephemeral
-                  ? { ephemeral: true }
-                  : afterCheck.dialogId || reconciled.dialogId
-                    ? { dialogId: afterCheck.dialogId ?? reconciled.dialogId }
-                    : {}),
-                mode: "enqueue",
-                consumed: true,
-                status: afterCheck.status,
-                ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
-                ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
-                ...(taskPreview ? { taskPreview } : {}),
-              }),
-              metadata: {
-                displayData: formatStartRunCard(displayName, afterCheck.status, {
-                  task: `[consumed] ${taskPreview}`,
+            if (!ourEntryFound) {
+              // Exact ID already consumed; leave every other pending entry untouched.
+              return {
+                content: JSON.stringify({
                   runId: reconciled.runId,
+                  // ephemeral 不外泄合成 dialogId；非 ephemeral 保持原 dialogId 透出。
+                  ...(reconciled.ephemeral
+                    ? { ephemeral: true }
+                    : afterCheck.dialogId || reconciled.dialogId
+                      ? { dialogId: afterCheck.dialogId ?? reconciled.dialogId }
+                      : {}),
+                  mode: "enqueue",
+                  consumed: true,
+                  status: afterCheck.status,
+                  ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
                   ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
-                  labels,
+                  ...(taskPreview ? { taskPreview } : {}),
                 }),
-              },
-            };
-          }
+                metadata: {
+                  displayData: formatControlRunMessageCard({
+                    action: "consumed",
+                    runId: reconciled.runId,
+                    targetId: reconciled.ephemeral ? undefined : afterCheck.dialogId ?? reconciled.dialogId,
+                    userInput,
+                    labels: controlMessageLabels(),
+                  }),
+                },
+              };
+            }
 
-          // entryId 仍在队列中（未被子进程消费）：合并本次及所有未消费消息走 continue spawn
-          const mergedMessage = remainingEntries.map((e) => e.text).join("\n\n");
-          return await spawnContinuationRun(afterCheck, mergedMessage, deps);
+            // entryId 仍在队列中（未被子进程消费）：合并本次及所有未消费消息走 continue spawn
+            const mergedMessage = remainingEntries.length === 1
+              ? remainingEntries[0]!.text
+              : remainingEntries.map((entry, index) => `--- queued message ${index + 1} of ${remainingEntries.length} (${entry.text.length} characters) ---\n${entry.text}`).join("\n\n");
+            // Keep entries owned by this lock until dispatch succeeds. Failure leaves
+            // the original queue intact, with no replay/rollback by text or snapshot.
+            const result = await spawnContinuationRun(afterCheck, mergedMessage, userInput, deps);
+            const transferred = new Set(remainingEntries.map(entry => entry.id));
+            const current = _readQueueEntriesLocked(queuePath, fs);
+            if (typeof fs.renameSync !== "function") throw new Error("atomic queue replacement requires renameSync");
+            const pendingQueue = `${queuePath}.${randomUUID()}.tmp`;
+            // Same-directory atomic replacement under the queue lock. On failure
+            // keep the original queue and staging bytes; never truncate/fallback.
+            fs.writeFileSync(pendingQueue, serializeQueueEntries(current.filter(entry => !transferred.has(entry.id))), { encoding: "utf8", flag: "wx" });
+            fs.renameSync(pendingQueue, queuePath);
+            return result;
+          });
         }
 
         return {
@@ -1046,17 +1315,18 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             ...(taskPreview ? { taskPreview } : {}),
           }),
           metadata: {
-            displayData: formatStartRunCard(displayName, "running", {
-              task: `[enqueued ${queuedCount}] ${taskPreview}`,
+            displayData: formatControlRunMessageCard({
+              action: "queued",
               runId: reconciled.runId,
-              ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
-              labels,
+              targetId: reconciled.ephemeral ? undefined : reconciled.dialogId,
+              userInput,
+              labels: controlMessageLabels(queuedCount),
             }),
           },
         };
       }
 
-      return await spawnContinuationRun(reconciled, userInput, deps);
+      return await spawnContinuationRun(reconciled, message, userInput, deps);
     }
 
     if (action !== "status" && action !== "stop" && action !== "wait") {

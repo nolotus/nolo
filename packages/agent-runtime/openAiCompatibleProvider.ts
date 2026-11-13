@@ -1,3 +1,4 @@
+import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 /**
  * OpenAI 兼容协议 Provider 适配器（Inference Compatibility Seam）。
@@ -438,6 +439,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
   signal?: AbortSignal;
+  noRetries?: true;
   /** Stable conversation id (dialogId, else agent key) for endpoints requiring a session header. */
   sessionId?: string;
   /**
@@ -524,7 +526,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   }
 
   // token 可能在服务端被提前失效，或在本轮请求发出前刚好过期。强刷一次重试一次。
-  if (res.status === 401 && args.resolveApiKey) {
+  if (res.status === 401 && args.resolveApiKey && !args.noRetries) {
     const refreshed = await args.resolveApiKey({ force: true });
     if (refreshed && refreshed !== apiKey) {
       // 被刷新的那次 attempt 独立留痕：401 不能被最终 200 覆盖。
@@ -606,6 +608,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
           ...(streamed.usage ? { usage: streamed.usage } : {}),
           ...(streamed.stream_complete ? { stream_complete: true } : {}),
           ...(streamed.finish_reason ? { finish_reason: streamed.finish_reason } : {}),
+          ...(streamed.leaked_protocol_intercepted ? { leaked_protocol_intercepted: true } : {}),
           trace: args.messages,
         });
       }
@@ -657,4 +660,22 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
     );
     throw error;
   }
+}
+
+
+/** Budget facts from the same final builder used for dispatch, never model metadata. */
+export function describeOpenAiCompatibleRequestBudget(args: {
+  providerConfig: OpenAiCompatibleProviderConfig;
+  tools?: OpenAiCompatibleTool[];
+}): import("./hostAdapter").AgentRuntimeRequestBudget {
+  const request = buildOpenAiCompatibleChatCompletionRequest({ ...args, messages: [] });
+  const body = JSON.parse(request.init.body);
+  const cap = body.max_completion_tokens ?? body.max_output_tokens ?? body.max_tokens;
+  return {
+    toolSchemaTokens: estimateTokenCount(JSON.stringify(body.tools ?? [])),
+    // Explicit wire allowance is conservatively reserved. Omitted provider defaults are unknown.
+    output: typeof cap === "number" && Number.isFinite(cap) && cap > 0
+      ? { semantics: "shared-window", finalWireCapTokens: cap }
+      : { semantics: "unknown", fallbackReserveTokens: 8192 },
+  };
 }

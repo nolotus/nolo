@@ -29,6 +29,9 @@
  */
 
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
+// 档位真值放在 core：写入口（database/server 的 patch/write、CLI 的 agent
+// update）也要用同一份清单校验，两边口径必须一致。
+import { AGENT_SKILL_MODES, isAgentSkillMode } from "core/agentSkillModes";
 // 无环：builtinSkillRegistry 引 ai/tools/toolPacks，但不引本模块。
 import {
   resolveBuiltinCapability,
@@ -47,11 +50,7 @@ export type AgentSkillMode = "required" | "recommended" | "disabled";
  */
 export type AgentSkillConfig = Record<string, AgentSkillMode>;
 
-const MODES: readonly AgentSkillMode[] = [
-  "required",
-  "recommended",
-  "disabled",
-];
+const MODES: readonly AgentSkillMode[] = AGENT_SKILL_MODES;
 
 /**
  * 平台默认「相关技能」提示名单：这些内置 slug 在 agent **未显式配置**时，
@@ -65,7 +64,9 @@ const MODES: readonly AgentSkillMode[] = [
  * 新增默认提示技能时改这里，并在 builtinSkillRegistry 注册对应 slug。
  */
 export const DEFAULT_RECOMMENDED_SKILL_SLUGS: readonly string[] = [
-  "worktree-isolation",
+  // `worktree-isolation` 已上移为系统层固定前置（agent-runtime/worktreeIsolationPrelude），
+  // 不再依赖「相关技能」提示行被发现，也不再是用户可关项——见 skillExploreDirectory 的
+  // PLATFORM_CORE_SKILL_SLUGS。注册表解析与 legacy 读取保留。
   "systematic-investigation",
   "show-me",
   // 凭据管理：仓库已有 nolo secret（set/list/run/bind），但技能发现只扫
@@ -113,6 +114,58 @@ export const resolveAgentSkillConfig = (
     out[slug] = "required";
   }
   return out;
+};
+
+/**
+ * 一条被**丢弃**的 skill 配置条目。
+ *
+ * `reason`：
+ * - `invalid-mode`：档位不是 `required` / `recommended` / `disabled`
+ *   （真实事故：`{"auto-review":"explicit"}`——`explicit` 是 skill 定义里的
+ *   `triggerMode`，被误写进了 agent 记录）。
+ * - `invalid-slug`：slug trim 后为空。
+ * - `invalid-skills-field`：`skills` 字段根本不是对象（字符串/数字/数组），
+ *   读路径会整个忽略它并回退到 legacy `enabledPacks`。
+ */
+export type AgentSkillConfigIssue = {
+  /** 原始 slug（未 trim——诊断要能看到原始输入）。 */
+  slug: string;
+  /** 原始值。 */
+  value: unknown;
+  reason: "invalid-mode" | "invalid-slug" | "invalid-skills-field";
+};
+
+/**
+ * 收集 `resolveAgentSkillConfig` **丢弃掉**的条目。
+ *
+ * 纯函数、无副作用，**不改变** `resolveAgentSkillConfig` 的任何行为——那
+ * 条读路径的语义（畸形值一律丢弃而不是抛错）由既有回归测试守着，本函数
+ * 只是把「丢了什么」显式化，供诊断与写入口校验使用。
+ *
+ * 判定口径必须与 `resolveAgentSkillConfig` 逐条对齐：同一条脏记录，两个
+ * 函数看到的「丢弃集合」必须一致，否则诊断会说谎。
+ */
+export const collectAgentSkillConfigIssues = (
+  source: AgentSkillConfigSource | null | undefined,
+): AgentSkillConfigIssue[] => {
+  const issues: AgentSkillConfigIssue[] = [];
+  const skills = source?.skills;
+  if (skills === undefined || skills === null) return issues;
+  if (typeof skills !== "object" || Array.isArray(skills)) {
+    issues.push({ slug: "", value: skills, reason: "invalid-skills-field" });
+    return issues;
+  }
+  for (const [rawSlug, rawMode] of Object.entries(skills as Record<string, unknown>)) {
+    const slug = rawSlug.trim();
+    if (!slug) {
+      issues.push({ slug: rawSlug, value: rawMode, reason: "invalid-slug" });
+      continue;
+    }
+    if (!isAgentSkillMode(rawMode)) {
+      issues.push({ slug, value: rawMode, reason: "invalid-mode" });
+    }
+  }
+  return issues;
 };
 
 /** 某个 slug 在这个 agent 上的档位；禁用返回 null。 */

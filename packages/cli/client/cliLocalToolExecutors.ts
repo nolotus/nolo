@@ -1,3 +1,7 @@
+import { registerLocalShellLifecycle } from "../../agent-runtime/localToolPolicy";
+import { withBrowserShellApproval } from "./browserShellApprovalHost";
+import { createTaskReviewExecutors, type TaskReviewHost } from "./taskReviewTools";
+import type { AgentSkillConfigSource } from "../../ai/tools/agentSkillConfig";
 import type { AgentRuntimeToolResult } from "../../agent-runtime/hostAdapter";
 import type { ShellApprovalHost } from "./originShellApprovalTransport";
 /**
@@ -217,7 +221,8 @@ export function createReadPastedTextExecutor(store: CollapsedPasteStore) {
  */
 export function pickAgentRunResolverDeps(args: {
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
-  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean>;
+  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
+  resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
   resolveLocalMachineId?: () => Promise<string | undefined>;
@@ -227,6 +232,7 @@ export function pickAgentRunResolverDeps(args: {
       ? { resolveAgentCredentialGroup: args.resolveAgentCredentialGroup }
       : {}),
     ...(args.dialogExistsForCurrentUser ? { dialogExistsForCurrentUser: args.dialogExistsForCurrentUser } : {}),
+    ...(args.resolveAgentModel ? { resolveAgentModel: args.resolveAgentModel } : {}),
     ...(args.resolveAgentDisplayName
       ? { resolveAgentDisplayName: args.resolveAgentDisplayName }
       : {}),
@@ -249,7 +255,13 @@ export function buildCliWorkspaceToolExecutors(args: {
 }
 
 export function buildLocalToolExecutors(args: {
+  taskReviewHost?: TaskReviewHost;
+  reviewDispatchContext?: import("./hostReviewDispatch").HostReviewDispatchContext;
+  /** Current agent policy supplied by the host, not by model tool arguments. */
+  agentSkillSource?: AgentSkillConfigSource | null;
+  resolveAgentSkillSource?: () => Promise<AgentSkillConfigSource | null>;
   workspaceRoot: string;
+  sourceParentDialogId?: string;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
   env: EnvLike;
   fetchImpl: CliFetchImpl;
@@ -279,7 +291,8 @@ export function buildLocalToolExecutors(args: {
    */
   resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
   /** 解析候选 agent 的展示名（调用方只给 agentKey 时回填 run 记录的 agentName）。 */
-  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean>;
+  dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
+  resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   /** 本机 machineId（判定「绑定机就是本机」用；未知 → binding 判定 fail-closed）。 */
   resolveLocalMachineId?: () => Promise<string | undefined>;
@@ -291,7 +304,7 @@ export function buildLocalToolExecutors(args: {
    */
   chromeConnectorClient?: ChromeConnectorClient;
 }) {
-  return {
+  const executors = {
     ...createLocalWorkspaceToolExecutors({
       workspaceRoot: args.workspaceRoot,
       commandTimeoutMs: args.commandTimeoutMs,
@@ -319,7 +332,7 @@ export function buildLocalToolExecutors(args: {
     // loadSkill resolves SKILL.md from the agent's workspace root (local-fs,
     // no `nolo` CLI subcommand), so it is wired here instead of inside
     // buildCliWorkspaceToolExecutors.
-    loadSkill: buildLoadSkillExecutor({ cwd: args.workspaceRoot }),
+    loadSkill: buildLoadSkillExecutor({ cwd: args.workspaceRoot, agentSkillSource: args.agentSkillSource, resolveAgentSkillSource: args.resolveAgentSkillSource }),
     read_x_post: async (call: any) => {
       const parsedArgs = (() => {
         try {
@@ -469,6 +482,16 @@ export function buildLocalToolExecutors(args: {
         metadata: { uiAskChoice: true },
       };
     },
+    ...createTaskReviewExecutors({
+      env: args.env,
+      host: args.taskReviewHost,
+      start: createCliStartAgentRunExecutor({
+        shellApprovalHostForAgent: args.shellApprovalHostForAgent,
+        ...pickAgentRunResolverDeps(args), env: args.env,
+        cliEntrypoint: args.cliEntrypoint, cwd: args.workspaceRoot,
+        currentAgentKey: args.agentKey,
+      }),
+    }),
     // agent-orchestration 能力包：startAgentRun / controlAgentRun 本地 --bg 执行器
     // （复用 ~/.nolo/runs/ 注册表，MED-1 修复）。
     startAgentRun: createCliStartAgentRunExecutor({
@@ -477,9 +500,11 @@ export function buildLocalToolExecutors(args: {
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
       cwd: args.workspaceRoot,
+      reviewDispatchContext: args.reviewDispatchContext,
       currentAgentKey: args.agentKey,
     }),
     controlAgentRun: createCliControlAgentRunExecutor({
+      source: { parentDialogId: args.sourceParentDialogId, agentKey: args.agentKey },
       shellApprovalHostForAgent: args.shellApprovalHostForAgent,
       cwd: args.workspaceRoot,
       cliEntrypoint: args.cliEntrypoint,
@@ -496,4 +521,11 @@ export function buildLocalToolExecutors(args: {
     ),
     ...(args.localToolExecutors ?? {}),
   };
+  const execShell = executors.execShell;
+  const lifecycle = (run: () => Promise<AgentRuntimeToolResult>, signal?: AbortSignal) => withBrowserShellApproval({
+    requestUserChoice: args.requestUserChoice, client: args.chromeConnectorClient, signal,
+  }, run);
+  executors.execShell = (call: any, opts?: any) => lifecycle(() => execShell(call, opts), opts?.abortSignal);
+  registerLocalShellLifecycle(executors.execShell, lifecycle);
+  return executors;
 }

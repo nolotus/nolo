@@ -755,6 +755,7 @@ export async function fetchAnthropicMessagesCompletion(args: {
   accessToken: string;
   openAiBody: JsonRecord;
   signal?: AbortSignal;
+  noRetries?: true;
   fetchImpl?: typeof fetch;
   /** 覆盖上游是否流式；缺省按 NOLO_ANTHROPIC_STREAM（默认流式）。 */
   upstreamStream?: boolean;
@@ -792,7 +793,7 @@ export async function fetchAnthropicMessagesCompletion(args: {
     const errorBody = (await response.json().catch(async () => ({
       error: { message: await response.text().catch(() => response.statusText) },
     }))) as JsonRecord;
-    if (adoptRequiredClaudeCodeVersion(errorBody)) {
+    if (!args.noRetries && adoptRequiredClaudeCodeVersion(errorBody)) {
       response = await (args.fetchImpl ?? fetch)(ANTHROPIC_MESSAGES_URL, {
         method: "POST",
         headers: buildHeaders(),

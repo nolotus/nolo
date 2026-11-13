@@ -1,9 +1,11 @@
 // chat/web/MessageInput/FileUploadButton.tsx
 import React, { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { LuUpload } from "react-icons/lu";
+import { LuPlus, LuUpload } from "react-icons/lu";
 
 export interface FileUploadButtonProps {
+  /** "round"：胶囊输入框最左的圆形 + 按钮（附件选择逻辑不变）。 */
+  variant?: "default" | "round";
   /** 文件选中后回调 */
   onFilesSelected: (files: FileList | null) => void;
   /** 是否禁用 */
@@ -112,6 +114,17 @@ export const DEFAULT_ACCEPT = [
 
 /** 按钮样式：提升到组件外，方便维护与复用 */
 const FILE_UPLOAD_BUTTON_STYLES = `
+.upload-button--round {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
   .upload-button {
     --button-size: 36px;
     width: var(--button-size);
@@ -169,6 +182,7 @@ const FileUploadButton: React.FC<FileUploadButtonProps> = ({
   disabled = false,
   accept = DEFAULT_ACCEPT,
   multiple = true,
+  variant = "default",
 }) => {
   const { t } = useTranslation("chat");
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -194,13 +208,17 @@ const FileUploadButton: React.FC<FileUploadButtonProps> = ({
 
       <button
         type="button"
-        className="upload-button"
+        className={variant === "round" ? "upload-button upload-button--round" : "upload-button"}
         onClick={handleButtonClick}
         title={t("uploadFile", "上传文件")}
         aria-label={t("uploadFile", "上传文件")}
         disabled={disabled}
       >
-        <LuUpload size={20} aria-hidden="true" />
+        {variant === "round" ? (
+          <LuPlus size={18} aria-hidden="true" />
+        ) : (
+          <LuUpload size={20} aria-hidden="true" />
+        )}
       </button>
 
       <input

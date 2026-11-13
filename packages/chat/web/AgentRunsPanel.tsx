@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from "react";
+import React, { memo, useEffect, useMemo } from "react";
 import { useToken } from "identity";
 import { useAppSelector } from "app/store";
 import { selectCurrentServer } from "app/settings/settingSlice";
@@ -12,9 +12,17 @@ import {
   type AgentRunScope,
   type RemoteTaskCard,
 } from "./agentRunStore";
+import {
+  AGENT_RUN_FIXED_AREA_VISIBLE_ROWS,
+  registerAgentRunFixedArea,
+} from "./agentRunFixedArea";
+// 机器人身份图标复用自有品牌标记，与侧边栏类型切换（./sidebar/SidebarTypeFilter.tsx）同源
+import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import "./chatStylexEscapeHatch.css";
 
 function shortId(id: string) { return id.length > 8 ? id.slice(0, 8) : id; }
+// 机器人图标容器：仅做垂直对齐，不引入新样式规则
+const AGENT_ICON_STYLE = { display: "inline-flex", alignItems: "center" } as const;
 function terminalLabel(status: string) {
   if (status === "done") return "✓ 完成";
   if (status === "failed") return "✗ 失败";
@@ -47,6 +55,9 @@ export const RemoteTaskRow = memo(function RemoteTaskRow({ card }: { card: Remot
       {remoteTaskCardUseSpinner(card.activity) && (
         <span className="agent-runs-panel__spin" aria-hidden="true">⟳</span>
       )}
+      <span aria-hidden="true" style={AGENT_ICON_STYLE}>
+        <NoloHeadMark size={12} />
+      </span>
       <span className="agent-runs-panel__name">{shortId(card.runId)}</span>
       <span aria-hidden="true"> · </span>
       <span className="agent-runs-panel__detail">{formatRemoteTaskActivityLabel(card.activity)}</span>
@@ -84,8 +95,20 @@ export const AgentRunsPanel = memo(function AgentRunsPanel({ scope }: { scope: A
     server: streamServer ? String(streamServer) : null,
     token: streamToken ?? null,
   });
-  const visibleRuns = useMemo(() => runs.slice(0, 3), [runs]);
-  const visibleRemoteTasks = useMemo(() => remoteTasks.slice(0, 3), [remoteTasks]);
+  // 登记「本 scope 有固定运行区」：消息流据此判定 startAgentRun 回执是否与
+  // 此处重复（见 ./agentRunFixedArea）。卸载即注销，未挂载时读侧拿不到覆盖。
+  useEffect(() => {
+    if (!scope.userId) return undefined;
+    return registerAgentRunFixedArea(scope);
+  }, [scope.userId, scope.dialogId, scope.workspaceId]);
+  const visibleRuns = useMemo(
+    () => runs.slice(0, AGENT_RUN_FIXED_AREA_VISIBLE_ROWS),
+    [runs],
+  );
+  const visibleRemoteTasks = useMemo(
+    () => remoteTasks.slice(0, AGENT_RUN_FIXED_AREA_VISIBLE_ROWS),
+    [remoteTasks],
+  );
   if (runs.length === 0 && remoteTasks.length === 0) return null;
   return (
     <div className="agent-runs-panel" aria-label="正在运行的子任务">
@@ -96,6 +119,9 @@ export const AgentRunsPanel = memo(function AgentRunsPanel({ scope }: { scope: A
         return (
           <div className="agent-runs-panel__row" key={run.runId}>
             <span aria-hidden="true">{terminal ? terminalIcon(run.status) : "⚙"}</span>
+            <span aria-hidden="true" style={AGENT_ICON_STYLE}>
+              <NoloHeadMark size={12} />
+            </span>
             <span className="agent-runs-panel__name">{name}</span>
             {(run.agentName && run.title) && <><span aria-hidden="true"> · </span><span className="agent-runs-panel__detail">{run.agentName}</span></>}
             <span aria-hidden="true"> · </span><span className="agent-runs-panel__elapsed">{terminal ? `${terminalLabel(run.status)} · 用时 ${formatAgentRunElapsed(run.elapsedMs)}` : `已运行 ${formatAgentRunElapsed(run.elapsedMs)}`}</span>
@@ -103,8 +129,16 @@ export const AgentRunsPanel = memo(function AgentRunsPanel({ scope }: { scope: A
           </div>
         );
       })}
-      {runs.length > 3 && <div className="agent-runs-panel__more">+{runs.length - 3}</div>}
-      {remoteTasks.length > 3 && <div className="agent-runs-panel__more">+{remoteTasks.length - 3}</div>}
+      {runs.length > AGENT_RUN_FIXED_AREA_VISIBLE_ROWS && (
+        <div className="agent-runs-panel__more">
+          +{runs.length - AGENT_RUN_FIXED_AREA_VISIBLE_ROWS}
+        </div>
+      )}
+      {remoteTasks.length > AGENT_RUN_FIXED_AREA_VISIBLE_ROWS && (
+        <div className="agent-runs-panel__more">
+          +{remoteTasks.length - AGENT_RUN_FIXED_AREA_VISIBLE_ROWS}
+        </div>
+      )}
     </div>
   );
 });

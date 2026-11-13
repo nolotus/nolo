@@ -19,7 +19,7 @@ const ChatConfig: React.FC = () => {
   const autoApproveSelfUpdateFields = useAppSelector(
     selectAutoApproveSelfUpdateFields
   );
-  const { showScrollToTopButton, showScrollToBottomButton } = useAccountChatDisplayPreferences();
+  const { showScrollToTopButton, showScrollToBottomButton, showNewFileDiff, showShellTreeOutput } = useAccountChatDisplayPreferences();
 
   return (
     <>
@@ -36,6 +36,14 @@ const ChatConfig: React.FC = () => {
           aiRecentContentLimit={aiRecentContentLimit}
           onAiRecentContentLimitChange={(value) =>
             dispatch(setAiRecentContentLimit(value))
+          }
+          showNewFileDiff={showNewFileDiff}
+          onShowNewFileDiffChange={(value) =>
+            dispatch(setAccountChatDisplayPreferences({ showNewFileDiff: value }))
+          }
+          showShellTreeOutput={showShellTreeOutput}
+          onShowShellTreeOutputChange={(value) =>
+            dispatch(setAccountChatDisplayPreferences({ showShellTreeOutput: value }))
           }
           showScrollToTopButton={showScrollToTopButton}
           onShowScrollToTopButtonChange={(value) =>

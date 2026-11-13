@@ -1,12 +1,22 @@
 // packages/chat/web/AgentPickerControl.tsx
 // 首页 QuickChat 与对话页 composer 共用的 agent 切换器：
 // trigger 显示当前 agent 名，popover 列出可选 agent，点击切换。
-// 支持 candidate 级元信息（收藏/自己创建/广场），用 badge 区分来源层。
+// 来源层只用一个 18px 图标 badge（收藏★ / 我的 / 广场），不写文字；计费按
+// ai/agent/agentBilling 的 resolveBillingSource 判定，会扣平台积分的行只在行尾
+// 加一个无文字金币图标（见 ./agentPickerBilling.ts）。
 // 首页可通过 defaultOption 提供「默认/自动」清空项。
 
 import React, { memo, useMemo, useState } from "react";
 import { DialogTrigger, Button as RACButton } from "react-aria-components";
-import { LuBot, LuCheck, LuChevronDown, LuStar, LuUser, LuZap } from "react-icons/lu";
+import {
+  LuBot,
+  LuCheck,
+  LuChevronDown,
+  LuCoins,
+  LuStar,
+  LuUser,
+  LuZap,
+} from "react-icons/lu";
 import { useTranslation } from "react-i18next";
 import { Popover } from "render/web/ui/Popover";
 import { useAppSelector } from "app/store";
@@ -17,6 +27,7 @@ import type { AgentPickerCandidate } from "../hooks/useAgentPickerCandidates";
 import { applyBuiltinAgentRuntimeOverride } from "agent-runtime/builtinPlatformAgentConfigs";
 import * as stylex from "@stylexjs/stylex";
 import { agentPickerControlStyles as apStyles } from "./agentPickerControlStyles";
+import { resolvePickerBillingChip } from "./agentPickerBilling";
 import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 
@@ -28,6 +39,8 @@ export type AgentPickerDefaultOption = {
 };
 
 export type AgentPickerControlProps = {
+  /** 弹层底部附加内容（对话页把上下文用量收进这里）。 */
+  panelExtra?: React.ReactNode;
   /** 有序候选列表（收藏 → 自己 → 广场），由 useAgentPickerCandidates 聚合。 */
   candidates: AgentPickerCandidate[];
   /** 当前选中；null/空串表示未选（配合 defaultOption 显示默认项）。 */
@@ -105,6 +118,20 @@ const AgentPickerItem: React.FC<{
       <LuBot size={11} />
     </span>
   );
+  // 计费只看 resolveBillingSource（agent 未加载 → null，不先猜）
+  const billingChip = resolvePickerBillingChip(candidate, agent);
+  const billingLabel = t("chat:pickerPlatformCredits", "平台积分");
+  const billingTitle = `${billingLabel}：${t(
+    "chat:pickerPlatformCreditsTitle",
+    "按 token 从你的平台积分扣费"
+  )}${
+    billingChip?.outputPriceText
+      ? ` · ${t("ai:priceShortOutput", "出")} ${billingChip.outputPriceText} ${t(
+          "ai:credits",
+          "积分"
+        )} / 1M`
+      : ""
+  }`;
   return (
     <li
       aria-current={isActive || undefined}
@@ -125,6 +152,16 @@ const AgentPickerItem: React.FC<{
             </span>
           )}
         </span>
+        {billingChip?.isPlatformCredits && (
+          <span
+            {...stylex.props(apStyles.billingCoin)}
+            role="img"
+            aria-label={billingTitle}
+            title={billingTitle}
+          >
+            <LuCoins size={12} aria-hidden="true" />
+          </span>
+        )}
         {isActive && (
           <span {...stylex.props(apStyles.itemCheck)} aria-hidden="true">
             <LuCheck size={14} />
@@ -144,6 +181,7 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
   placeholderLabel,
   ariaLabel,
   className,
+  panelExtra,
 }) => {
   const { t } = useTranslation(["chat", "ai"]);
   const [open, setOpen] = useState(false);
@@ -223,6 +261,9 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
           style={{ width: 280, padding: 0 }}
         >
           {hint && <div {...stylex.props(apStyles.hint)}>{hint}</div>}
+          {panelExtra && (
+            <div {...stylex.props(apStyles.hint)}>{panelExtra}</div>
+          )}
           <ul {...stylex.props(apStyles.list)}>
             {defaultOption && (
               <li
@@ -274,6 +315,12 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
               {t("chat:noAvailableAgents", "暂无可用 Agent")}
             </div>
           )}
+          <div {...stylex.props(apStyles.billingNote)}>
+            {t(
+              "chat:pickerBillingNote",
+              "标「平台积分」的 agent 按 token 从你的平台积分扣费；其余用你自己配置的通道。"
+            )}
+          </div>
         </Popover>
       </DialogTrigger>
     </div>

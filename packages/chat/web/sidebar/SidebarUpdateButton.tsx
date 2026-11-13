@@ -7,6 +7,7 @@ import {
 } from "react-icons/lu";
 import { Tooltip } from "render/web/ui/Tooltip";
 import { isDesktopApp } from "app/utils/env";
+import { describeDesktopUpdaterText } from "core/desktop/desktopUpdaterMessages";
 import type {
   DesktopUpdaterSnapshot,
   DesktopUpdaterOperation,
@@ -56,9 +57,53 @@ const phaseLabel = (phase?: string): string => {
     case "applying": return "正在安装更新";
     case "update_available": return "有新版本可下载";
     case "up_to_date": return "已是最新版本";
-    case "error": return "更新检查失败";
+    case "error": return "更新失败";
     default: return "检查更新";
   }
+};
+
+/**
+ * error 状态本身不带操作类型（检查 / 下载 / 安装都会落到同一个 phase），
+ * 直接写「检查失败」会把下载、安装失败误报成检查失败。这里从 statusHistory
+ * 里 error 之前最近的一条状态反推当前处于哪个阶段。
+ */
+const FAILURE_STAGE_BY_STATUS: Record<string, "check" | "download" | "install"> = {
+  checking: "check",
+  "download-starting": "download",
+  "downloading-full-bundle": "download",
+  "download-progress": "download",
+  "extracting-version": "download",
+  "patch-applied": "download",
+  "patch-chain-complete": "download",
+  decompressing: "download",
+  "download-complete": "download",
+  applying: "install",
+  "launching-new-version": "install",
+  complete: "install",
+  "quit-handoff-failed": "install",
+};
+
+const FAILURE_STAGE_LABEL: Record<"check" | "download" | "install", string> = {
+  check: "检查更新失败",
+  download: "下载更新失败",
+  install: "安装更新失败",
+};
+
+const resolveFailureStage = (
+  snapshot: DesktopUpdaterSnapshot | null,
+): "check" | "download" | "install" | null => {
+  const history = snapshot?.statusHistory ?? [];
+  const last = history[history.length - 1];
+  if (last?.status === "error") {
+    for (let i = history.length - 2; i >= 0; i -= 1) {
+      const stage = FAILURE_STAGE_BY_STATUS[history[i].status];
+      if (stage) return stage;
+    }
+    // 没有可识别的前置状态时，不猜测失败阶段。
+    return snapshot?.updateInfo?.error ? "check" : null;
+  }
+  // phase=error 但历史最后一条不是 error：updateInfo.error 由检查写入。
+  return snapshot?.updateInfo?.error ? "check" : null;
 };
 
 export const SidebarUpdateButton: React.FC = () => {
@@ -83,7 +128,8 @@ export const SidebarUpdateButton: React.FC = () => {
   }, [refresh, snapshot?.activeOperation]);
 
   const handleClick = useCallback(async () => {
-    const action = snapshot?.summary?.primaryAction;
+    const action =
+      snapshot?.summary?.primaryAction ?? snapshot?.summary?.retryAction;
     if (!action) { await refresh(); return; }
     setSubmitting(true);
     try {
@@ -103,12 +149,14 @@ export const SidebarUpdateButton: React.FC = () => {
 
   if (!isDesktopApp) return null;
 
-  const showButton = snapshot?.summary?.showToolbarButton !== false;
+  const phase = snapshot?.summary?.phase;
+  // 失败态也要露出按钮：否则用户看不到「检查/下载/安装失败」的区分文案。
+  const showButton =
+    snapshot?.summary?.showToolbarButton === true;
   if (!showButton) return null;
 
-  const phase = snapshot?.summary?.phase;
   const isBusy = Boolean(snapshot?.activeOperation) || submitting;
-  const primaryAction = snapshot?.summary?.primaryAction;
+  const primaryAction = snapshot?.summary?.primaryAction ?? snapshot?.summary?.retryAction;
   const progress = snapshot?.latestStatus?.details?.progress;
   const bytesDone = snapshot?.latestStatus?.details?.bytesDownloaded;
   const bytesTotal = snapshot?.latestStatus?.details?.totalBytes;
@@ -123,14 +171,23 @@ export const SidebarUpdateButton: React.FC = () => {
     <LuRefreshCw size={16} aria-hidden="true" />
   );
 
-  const label = phaseLabel(phase);
+  const failureStage = phase === "error" ? resolveFailureStage(snapshot) : null;
+  const label = phase === "error"
+    ? (failureStage ? FAILURE_STAGE_LABEL[failureStage] : "更新失败")
+    : phaseLabel(phase);
   const hasUpdate = phase === "update_available" || phase === "downloading" || phase === "ready_to_install";
 
   return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
     <Tooltip
       content={
         <div style={{ maxWidth: 220 }}>
           <div>{label}</div>
+          {phase === "error" && snapshot?.summary?.statusMessage && (
+            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
+              {describeDesktopUpdaterText(snapshot.summary.statusMessage)}
+            </div>
+          )}
           {typeof progress === "number" && (
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
               {progress}% — {formatBytes(bytesDone)} / {formatBytes(bytesTotal)}
@@ -148,7 +205,7 @@ export const SidebarUpdateButton: React.FC = () => {
       <button
         type="button"
         onClick={() => void handleClick()}
-        disabled={isBusy}
+        disabled={isBusy || !primaryAction}
         aria-label={label}
         className={`sidebar-update-btn${hasUpdate ? " sidebar-update-btn--has-update" : ""}${isBusy ? " sidebar-update-btn--busy" : ""}`}
       >
@@ -201,6 +258,12 @@ export const SidebarUpdateButton: React.FC = () => {
         `}</style>
       </button>
     </Tooltip>
+    {phase === "downloading" && typeof progress === "number" && Number.isFinite(progress) && (
+      <span role="status" aria-label={`下载进度 ${progress}%`} style={{ fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+        {progress}%
+      </span>
+    )}
+    </span>
   );
 };
 

@@ -105,6 +105,7 @@ export function withProviderStreamRetry(
   },
 ): AgentRuntimeProvider {
   return {
+    ...provider,
     model: provider.model,
     complete: async (
       messages: AgentRuntimeChatMessage[],

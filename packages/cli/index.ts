@@ -1,3 +1,4 @@
+import { runCliCommandWithSyncDrain } from "./client/cliExitSync";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -91,19 +92,15 @@ async function launchTuiWorkspace(args: { scriptDir: string; env: NodeJS.Process
   const { setCliAutoCompactionSummaryFallback } = await import(
     "./client/localRuntimeAdapter"
   );
-  // 自动上下文压缩的摘要 fallback：复用 /compact 那条平台摘要通道，但**预算独立
-  // 且更短**。不能直接复用下面 90s 的那个实例——自动压缩是后台补注（主通道已经
-  // 超时一次），把一个 90s deadline 接到它后面会把「反复长等待」原样搬过来，而
-  // 单次 fallback 有 30s（caller 默认）上限、总等待可预期。
-  // 未登录 / 无平台通道时 caller 返回 null，自动压缩保持既有 fail-open 行为。
+  // 自动压缩：已登录且余额为正先走平台默认 Flash；否则用当前 text-only provider。
+  // 仅明确用户平台余额不足允许 current 一次；上游失败/超时/空摘要不切换。
+  // 不覆盖共享自动 60s 总预算；与手动 /compact 的 120s 实例独立。
   setCliAutoCompactionSummaryFallback(
-    createTuiSummaryLlmCaller(args.env, { timeoutMs: 30_000 }),
+    createTuiSummaryLlmCaller(args.env, { platformPrimary: true }),
   );
   return startTuiWorkspace({
     ...args,
-    // Big dialogs produce ~300KB+ summary prompts that routinely take 25–30s+;
-    // the old 30s abort made manual /compact silently degrade to fork-only.
-    summaryLlmCaller: createTuiSummaryLlmCaller(args.env, { timeoutMs: 90_000 }),
+    // Manual /compact owns the same routed policy, including current text-only fallback.
   });
 }
 
@@ -155,10 +152,11 @@ async function main(): Promise<never> {
     process.exit(1);
   }
 
-  const exitCode = await runResolvedCommand(command, commandArgs, runtimeContext, {
-    runScript,
-  });
-  process.exit(exitCode);
+  await runCliCommandWithSyncDrain(
+    () => runResolvedCommand(command, commandArgs, runtimeContext, { runScript }),
+    { exit: (code) => process.exit(code), output: process.stderr },
+  );
+  throw new Error("CLI exit unexpectedly returned");
 }
 
 main().catch((error) => {

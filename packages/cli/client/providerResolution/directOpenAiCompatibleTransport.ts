@@ -1,3 +1,4 @@
+import { describeOpenAiCompatibleRequestBudget } from "../../../agent-runtime/openAiCompatibleProvider";
 /**
  * transport 分支：直连 OpenAI-compatible endpoint —— 所有分支都未命中时的兜底通道
  *
@@ -55,7 +56,9 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
     additionalToolNames,
   );
   return {
+    transport: "direct-openai-compatible",
     model: providerConfig.model,
+    requestBudget: describeOpenAiCompatibleRequestBudget({ providerConfig, tools }),
     complete: async (messages, options) => {
       const stream = Boolean(options?.onTextDelta);
       const inlinedMessages = (
@@ -118,6 +121,7 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
           fetchWithTransientRetry(fetchImpl, url, init, {
             sleep: deps.sleep,
             loopbackRequest,
+            ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
           }),
         stream,
         sessionId:
@@ -126,6 +130,7 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
         onTextDelta: options?.onTextDelta,
         onReasoningDelta: options?.onReasoningDelta,
         signal: options?.signal,
+        ...(options?.noRetries ? { noRetries: true as const } : {}),
         outboundDiagnostics: options?.requestId
           ? { callId: options.requestId }
           : undefined,

@@ -154,7 +154,8 @@
   overscroll-behavior: contain;
   scrollbar-width: none;
   border-right: 0;
-  background: var(--background, #fff);
+  /* 与左侧列表同色：Rail + 侧栏构成一块连续的「导航域」，主内容区才用 --background。 */
+  background: var(--backgroundSecondary);
 }
 
 .navigation-v2-rail::-webkit-scrollbar { display: none; }
@@ -208,6 +209,12 @@
   cursor: pointer;
   box-sizing: border-box;
   transition: color 0.15s ease;
+}
+
+/* 导航组首项（主页）与上方动作组（新建/搜索）之间的 8px 分组间隔；
+   不新增包裹 div，保持 rail 的扁平 flex 子项。 */
+.navigation-v2-rail__item--group-start {
+  margin-top: 8px;
 }
 
 .navigation-v2-rail__item:has(.navigation-v2-rail__label) {
@@ -437,6 +444,11 @@
     background: var(--surfaceInteractive, rgba(127,127,127,0.035));
   }
 
+    /* 横向 rail 不需要纵向分组间隔。 */
+  .navigation-v2-rail__item--group-start {
+    margin-top: 0;
+  }
+
   .navigation-v2-rail__item:has(.navigation-v2-rail__label) {
     min-width: 52px;
     height: 48px;
@@ -457,9 +469,10 @@
   position: sticky;
   bottom: 0;
   z-index: 1;
-  /* 与 Rail 同色：以前这里是 backgroundSecondary 混出的偏深色带，底部会长出
-     一块比 Rail 窄、颜色又不一样的补丁；同色后滚动内容也不会从后面透出来。 */
-  background: var(--background, #fff);
+  /* 与 Rail 同色：Rail 用 --backgroundSecondary，这里必须跟着用同一个变量，
+     否则页脚会在灰底 Rail 上长出一块更亮的补丁（2026-11-04 实测用户反馈）。
+     保持不透明：sticky 页脚要能挡住滚到下面的图标。 */
+  background: var(--backgroundSecondary, #fff);
 }
 .navigation-v2-rail-account {
   /* 0 左右内边距：账号列与上面的导航项同宽（52 - 4*2 = 44），

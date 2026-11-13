@@ -1,3 +1,5 @@
+import { buildAnthropicMessagesBody } from "../../../agent-runtime/anthropicMessagesProvider";
+import { estimateTokenCount } from "../../../ai/context/tokenUtils";
 /**
  * transport 分支：Anthropic OAuth —— /v1/messages 原生 wire
  *
@@ -36,12 +38,18 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
       model: agentConfig.model ?? "claude-sonnet-5",
       hasApiKey: true,
     });
+    const budgetBody = buildAnthropicMessagesBody({ agentConfig,
+      openAiBody: { model: agentConfig.model, messages: [], tools } });
     return {
+      requestBudget: { toolSchemaTokens: estimateTokenCount(JSON.stringify(budgetBody.tools ?? [])),
+        output: { semantics: "unknown", fallbackReserveTokens: 8192 } },
       model: agentConfig.model || "claude-sonnet-5",
       complete: async (messages, options) => {
         const result = await fetchAnthropicMessagesCompletion({
           agentConfig,
           accessToken,
+          signal: options?.signal,
+          ...(options?.noRetries ? { noRetries: true as const } : {}),
           openAiBody: {
             model: agentConfig.model || "claude-sonnet-5",
             messages,
@@ -52,6 +60,7 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
             fetchWithTransientRetry(fetchImpl, url, init, {
               sleep: deps.sleep,
               loopbackRequest,
+              ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
             })) as unknown as typeof fetch,
         });
         await recordLocalAvailability(result.status, result.body);

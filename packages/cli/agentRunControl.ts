@@ -1,3 +1,6 @@
+import type { SelectionCheck } from "../ai/agent/dispatchSelectionPolicy";
+import type { DispatchSpeedProvenance } from "../ai/agent/dispatchSpeedProvenance";
+import type { LocalRunAcceptance } from "./agentRunLocalWorkspace";
 import { attachShellApprovalHost, type ShellApprovalHost } from "./client/originShellApprovalTransport";
 // Local background agent run control plane.
 //
@@ -8,11 +11,12 @@ import { attachShellApprovalHost, type ShellApprovalHost } from "./client/origin
 
 import { redactLogLines, REDACTED_CREDENTIAL } from "../core/redactLogLines";
 import { normalizeRunTitle } from "../ai/tools/agent/runTitle";
-import { homedir as nodeHomedir } from "node:os";
+import { hostname as nodeHostname, homedir as nodeHomedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import * as nodeFs from "node:fs";
+import { randomUUID, createHash } from "node:crypto";
 import { execFileSync as nodeExecFileSync, spawn as nodeSpawn } from "node:child_process";
 import { isCompiledBinary, resolveCliEntrypointPath } from "./cliEnvHelpers";
 import {
@@ -51,13 +55,41 @@ import type { DoDCommandResult } from "./agentRunDoD";
 export type RunStatus = "running" | "done" | "failed" | "timeout" | "killed" | "orphaned";
 
 export type RunFailureReason =
+  | "history_integrity"
   | "stalled"
   | "provider_rate_limited"
   | "provider_error"
   | "config_unresolved"
   | "cancelled";
 
+/** Host adapter facts only. Missing/unknown facts never authorize adoption or continuation. */
+export type LocalExecutionRequest = {
+  runtimeKey: "local";
+  hostWritesAuthorized: boolean;
+  readOnly: boolean;
+  allowedToolNames?: string[];
+  blockedToolNames?: string[];
+  provenance: "cli-command-authorized" | "cli-tool-dispatch-authorized";
+};
+export type RunExecution = { state: "unknown"; reason: "missing-host-facts" } | {
+  state: "known";
+  kind: "host-local";
+  runtimeKey: "local";
+  device: { kind: "localhost"; hostname: string; platform: NodeJS.Platform };
+  canonicalCwd: string;
+  worktree?: { root: string; gitDir: string; commonDir: string };
+  permissions: { hostWritesAuthorized: boolean; readOnly: boolean; allowedToolNames?: string[]; blockedToolNames?: string[] };
+  provenance: LocalExecutionRequest["provenance"];
+  owner: { state: "unknown" } | {
+    state: "verified"; pid: number; startedAt: string; source: "parent-native";
+    linux?: { bootId: string; startTicks: string };
+  };
+};
+
 export type RunRecord = {
+  /** Host-derived identity scope for read-only continuation evidence; absent on legacy records. */
+  evidenceScope?: { userId: string; serverOrigin: string };
+  dispatchSpeedProvenance?: DispatchSpeedProvenance;
   runId: string;
   pid?: number;
   agentKey: string;
@@ -65,6 +97,14 @@ export type RunRecord = {
   /** 派发时调用方给的短标题（展示用）；缺省 = 没有，绝不从任务正文猜。 */
   title?: string;
   cwd?: string;
+  /** Host-derived local writer claim; terminal status alone never releases it. */
+  execution?: RunExecution;
+  writerLaunch?: { protocol: "fenced-launch-v1"; attemptId: string; phase: "prepared" | "granted" | "revoked" };
+  /** Parent-native publication intent, not a child/env assertion. */
+  ownerPublication?: { state: "pending" | "complete"; parent: Extract<Extract<RunExecution, { state: "known" }>["owner"], { state: "verified" }> };
+  /** Same-lock confirmed death evidence retained before PID is cleared. */
+  ownerDeath?: { pid: number; processStartedAt?: string; processIdentity?: RunRecord["processIdentity"]; executionOwner?: Extract<RunExecution, { state: "known" }>["owner"]; confirmedAt: string };
+  localWriterClaim?: { cwd: string; worktree?: { root: string; gitDir: string }; state: "held" | "released" };
   msgFile?: string;
   startedAt: string;
   timeoutMs?: number;
@@ -74,7 +114,7 @@ export type RunRecord = {
   /** High-level typed failure cause on terminal failure / stall / cancel. */
   failureReason?: RunFailureReason;
   /**
-   * 结构化失败分类（rate_limited / provider_error / stalled / tool_error /
+   * 结构化失败分类（history_integrity / rate_limited / provider_error / stalled / tool_error /
    * unknown），终态写入时由 classifyRunFailure 推导；编排者据此决定换通道 /
    * 冷却重试 / 调整 brief，不再肉读 logTail。取消类终态（killed）无此字段。
    */
@@ -97,6 +137,15 @@ export type RunRecord = {
    * 只留 2000 字摘要；长报告读这个文件，不要解析带 ANSI 的 .log。
    */
   resultFile?: string;
+  /** Exact publisher-owned files; no directory scan or arbitrary-path GC. */
+  resultArtifacts?: Array<{
+    publisher: "run-result-v1";
+    path: string;
+    kind: "pending" | "bak";
+    dev: string;
+    ino: string;
+    sha256: string;
+  }>;
   /** Bounded observation evidence, never a successful/final result. */
   partialCheckpoint?: {
     final: false;
@@ -129,6 +178,10 @@ export type RunRecord = {
   note?: string;
   /** Batch id for grouping related runs; auto-generated when not supplied. */
   batchId?: string;
+  /** Dispatch evidence only; never inherited as continuation admission. */
+  cacheHitRatio?: number | null;
+  cacheCachedTokens?: number | null;
+  selectionCheck?: SelectionCheck;
   /** Timestamp the record was reconciled to a terminal status (orphaned). */
   reconciledAt?: string;
   /** OS-reported start time of the spawned process, when the platform exposes it. */
@@ -204,6 +257,8 @@ export type FsLike = {
   existsSync: typeof nodeFs.existsSync;
   openSync: typeof nodeFs.openSync;
   closeSync?: typeof nodeFs.closeSync;
+  fstatSync?: typeof nodeFs.fstatSync;
+  readSync?: typeof nodeFs.readSync;
   unlinkSync: typeof nodeFs.unlinkSync;
   /** Optional: enables directory removal for lock release when present. */
   rmdirSync?: typeof nodeFs.rmdirSync;
@@ -215,6 +270,8 @@ export type FsLike = {
   renameSync?: typeof nodeFs.renameSync;
   /** Optional: enables stale lock/temporary detection when present. */
   statSync?: typeof nodeFs.statSync;
+  lstatSync?: typeof nodeFs.lstatSync;
+  realpathSync?: typeof nodeFs.realpathSync;
 };
 
 export type SpawnLike = (
@@ -737,7 +794,7 @@ export function withRunRecordLock<T>(
   runId: string,
   deps: AgentRunControlDeps,
   fn: () => T,
-  opts: { strict?: boolean } = {},
+  opts: { strict?: boolean; requireDeadOwner?: boolean } = {},
 ): T | undefined {
   const fs = deps.fs ?? nodeFs;
   const now = deps.now ?? (() => new Date());
@@ -757,7 +814,9 @@ export function withRunRecordLock<T>(
       try {
         const stat = fs.statSync?.(lockPath);
         const ageMs = stat ? now().getTime() - stat.mtimeMs : Number.POSITIVE_INFINITY;
-        if (ageMs > LOCK_STALE_MS) {
+        const ownerPid = opts.requireDeadOwner ? Number(String(fs.readFileSync(lockPath, "utf8"))) : undefined;
+        const ownerGone = !opts.requireDeadOwner || (Number.isSafeInteger(ownerPid) && ownerPid! > 0 && isPidGone(ownerPid!, deps));
+        if (ageMs > LOCK_STALE_MS && ownerGone) {
           fs.unlinkSync(lockPath);
           fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
           held = true;
@@ -803,14 +862,12 @@ export function writeRunRecord(record: RunRecord, deps: AgentRunControlDeps = {}
       fs.writeFileSync(tmp, payload);
       fs.renameSync(tmp, path);
       return;
-    } catch {
-      try {
-        fs.unlinkSync(tmp);
-      } catch {
-        // best effort
-      }
+    } catch (error) {
+      try { fs.unlinkSync(tmp); } catch { /* best effort temporary only */ }
+      if (record.writerLaunch) throw error;
     }
   }
+  if (record.writerLaunch) throw new Error("[local-writer-resource] fenced launch requires atomic rename");
   fs.writeFileSync(path, payload);
 }
 
@@ -1513,6 +1570,11 @@ export async function gcRunRecords(
 
   for (const record of records) {
     if (!isRunTerminalStatus(record.status)) continue;
+    if (localWriterStillOwns(record, deps)) continue;
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(record.runId) || record.runId === "." || record.runId === "..") {
+      failedIds.push(record.runId);
+      continue;
+    }
 
     // Use the most recent terminal timestamp: reconciled orphans carry
     // reconciledAt; normally-ended runs carry endedAt. Fall back to startedAt
@@ -1522,6 +1584,12 @@ export async function gcRunRecords(
     const ageMs = nowMs - new Date(ts).getTime();
     if (!Number.isFinite(ageMs) || ageMs < retentionMs) continue;
 
+    // A publisher holding this lock may still be creating/renaming artifacts.
+    // Do not break its lock or sweep any of this run's files.
+    if (fs.existsSync(`${resolveRunRecordPath(record.runId, deps.env, deps.homedir)}.lock`)) {
+      failedIds.push(record.runId);
+      continue;
+    }
     const jsonPath = resolveRunRecordPath(record.runId, deps.env, deps.homedir);
     const logPath = resolveRunLogPath(record.runId, deps.env, deps.homedir);
     const queuePath = record.queuePath ?? resolveRunQueuePath(record.runId, deps.env, deps.homedir);
@@ -1547,11 +1615,40 @@ export async function gcRunRecords(
     tryUnlinkFile(fs, join(runsDirForLegacy, `${record.runId}.report.md`));
     tryUnlinkFile(fs, join(runsDirForLegacy, `${record.runId}.report.json`));
     // 终态完整报告（finalize 写入；摘要在 record.lastAssistantText），随 run 一起回收。
-    tryUnlinkFile(fs, record.resultFile ?? join(runsDirForLegacy, `${record.runId}.result.md`));
+    // Never follow an arbitrary resultFile supplied by a registry record.
+    let resultOk = false;
+    let artifactsOk = true;
+    const artifactSweep = withRunRecordLock(record.runId, deps, () => {
+      resultOk = tryUnlinkFile(fs, join(runsDirForLegacy, `${record.runId}.result.md`));
+      for (const artifact of record.resultArtifacts ?? []) {
+        try {
+          const prefix = `${record.runId}.result.md.`;
+          const name = artifact.path.slice(join(runsDirForLegacy, prefix).length);
+          const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+          if (artifact.publisher !== "run-result-v1" || !/^[A-Za-z0-9._-]+$/.test(record.runId) ||
+              !["pending", "bak"].includes(artifact.kind) ||
+              !new RegExp(`^${uuid}\\.${artifact.kind}$`).test(name) ||
+              artifact.path !== join(runsDirForLegacy, prefix + name)) throw new Error("unsafe artifact ownership");
+          if (!fs.existsSync(artifact.path)) continue;
+          const stat = fs.lstatSync?.(artifact.path);
+          if (!stat || !stat.isFile() || stat.isSymbolicLink() ||
+              fs.realpathSync?.(artifact.path) !== resolve(artifact.path) ||
+              String(stat.dev) !== artifact.dev || String(stat.ino) !== artifact.ino ||
+              createHash("sha256").update(fs.readFileSync(artifact.path)).digest("hex") !== artifact.sha256) {
+            throw new Error("artifact identity changed");
+          }
+          if (!tryUnlinkFile(fs, artifact.path)) artifactsOk = false;
+        } catch {
+          artifactsOk = false;
+        }
+      }
+      return true;
+    }, { strict: true });
+    if (!artifactSweep) artifactsOk = false;
 
     // 2. If any auxiliary file failed to delete, KEEP the .json index file
     // so future GC passes can discover and retry sweeping this run.
-    if (!logOk || !msgOk || !queueOk) {
+    if (!logOk || !msgOk || !queueOk || !resultOk || !artifactsOk) {
       failedIds.push(record.runId);
       continue;
     }
@@ -1746,8 +1843,286 @@ function emitHostMemoryNotice(
   return notice;
 }
 
+function trustedLocalWorktree(cwd: string, deps: AgentRunControlDeps): { root: string; gitDir: string; commonDir: string } | undefined {
+  const fs = deps.fs ?? nodeFs;
+    try {
+      const env = { ...process.env, ...deps.env };
+      for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
+      const exec = deps.execFileSync ?? nodeExecFileSync;
+      const git = (args: string[]) => exec("git", args, {
+        cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000,
+      }).trim();
+      const real = (path: string) => String((fs.realpathSync ?? nodeFs.realpathSync)(path));
+      const [dir, top, common] = git(["rev-parse", "--path-format=absolute", "--git-dir", "--show-toplevel", "--git-common-dir"]).split("\n");
+      if (!dir || !top || !common || ![dir, top, common].every(isAbsolute)) return;
+      const root = real(top), gitDir = real(dir), commonDir = real(common);
+      const marker = join(root, ".git");
+      const stat = (path: string) => (fs.lstatSync ?? nodeFs.lstatSync)(path);
+      if (stat(marker).isSymbolicLink() || stat(commonDir).isSymbolicLink()) return;
+      if (gitDir === commonDir) {
+        // Main worktree: its own physical .git directory, not a redirect gitfile.
+        if (!stat(marker).isDirectory() || real(marker) !== commonDir) return;
+      } else {
+        const registry = join(commonDir, "worktrees");
+        if (stat(registry).isSymbolicLink() || dirname(gitDir) !== real(registry) ||
+            !stat(gitDir).isDirectory() || stat(gitDir).isSymbolicLink() || !stat(marker).isFile()) return;
+        const text = String(fs.readFileSync(marker, "utf8")).trim();
+        if (!text.startsWith("gitdir: ") || real(resolve(root, text.slice(8))) !== gitDir) return;
+        // Check BOTH backlinks, not merely a gitfile pointing at somebody else's repo.
+        const back = String(fs.readFileSync(join(gitDir, "gitdir"), "utf8")).trim();
+        const commonBack = String(fs.readFileSync(join(gitDir, "commondir"), "utf8")).trim();
+        if (real(resolve(gitDir, back)) !== real(marker) || real(resolve(gitDir, commonBack)) !== commonDir) return;
+      }
+      const registered = git(["worktree", "list", "--porcelain"]).split("\n")
+        .filter(line => line.startsWith("worktree ")).map(line => line.slice(9));
+      if (!registered.some(path => real(path) === root)) return;
+      // Establish ownership of commonDir by the registered main worktree too.
+      const mainMarker = registered[0] && join(registered[0], ".git");
+      if (!mainMarker || stat(mainMarker).isSymbolicLink() || !stat(mainMarker).isDirectory() ||
+          real(mainMarker) !== commonDir) return;
+      return { root, gitDir, commonDir };
+    } catch { return; } // Untrusted worktree metadata is never recorded as a claim scope.
+  }
+
+/** Diagnostic only: absence of a published PID is never absence of a child. */
+export function localWriterRecovery(record: RunRecord): {
+  state: "required"; reason: "owner-unpublished"; automaticReleaseAllowed: false;
+  runId: string; canonicalCwd: string; requiredEvidence: string;
+} | undefined {
+  if (record.localWriterClaim?.state !== "held" || (typeof record.pid === "number" && record.pid > 0)) return;
+  return { state: "required", reason: "owner-unpublished", automaticReleaseAllowed: false,
+    runId: record.runId, canonicalCwd: record.localWriterClaim.cwd,
+    requiredEvidence: "native launch receipt proving no live child; parent death/timeouts/process-name search are insufficient" };
+}
+
+/** Explicit fencing, not death inference. prepared can NEVER run, even after late spawn. */
+export function revokePreparedWriterLaunch(runId: string, attemptId: string, deps: AgentRunControlDeps = {}): "revoked" | "already-revoked" | "blocked" {
+  if (!/^[A-Za-z0-9_-]+$/.test(runId) || !attemptId) return "blocked";
+  return withRunRecordLock("local-writer-admission", deps, () => {
+    const snapshot = readRunRecord(runId, deps);
+    if (!snapshot) return "blocked" as const;
+    return withRunRecordLock(runId, deps, () => {
+      const latest = readRunRecord(runId, deps);
+      if (!latest || JSON.stringify(latest) !== JSON.stringify(snapshot)) return "blocked" as const;
+      const launch = latest.writerLaunch;
+      if (launch?.protocol !== "fenced-launch-v1" || launch.attemptId !== attemptId) return "blocked" as const;
+      if (launch.phase === "revoked") return latest.localWriterClaim?.state === "released" ? "already-revoked" as const : "blocked" as const;
+      if (launch.phase !== "prepared" || latest.localWriterClaim?.state !== "held" ||
+          latest.execution?.state !== "known" || latest.execution.owner.state !== "unknown" ||
+          latest.execution.canonicalCwd !== latest.localWriterClaim.cwd || latest.pid !== undefined ||
+          latest.cwd !== latest.localWriterClaim.cwd || latest.execution.kind !== "host-local" ||
+          latest.execution.permissions.readOnly || !latest.execution.permissions.hostWritesAuthorized) return "blocked" as const;
+      launch.phase = "revoked";
+      latest.localWriterClaim.state = "released";
+      writeRunRecord(latest, deps);
+      return "revoked" as const;
+    }, { strict: true, requireDeadOwner: true }) ?? "blocked";
+  }, { strict: true, requireDeadOwner: true }) ?? "blocked";
+}
+
+function localWriterStillOwns(record: RunRecord, deps: AgentRunControlDeps): boolean {
+  if (record.localWriterClaim?.state !== "held") return false;
+  if (typeof record.pid !== "number" || record.pid <= 0) return true;
+  const e = record.execution;
+  const observed = e?.state === "known" && e.owner.state === "verified" ? nativeOwner(record.pid, deps) : undefined;
+  const reused = observed?.state === "verified" && e?.state === "known" && e.owner.state === "verified" &&
+    (observed.startedAt !== e.owner.startedAt || (observed.linux?.bootId !== e.owner.linux?.bootId || observed.linux?.startTicks !== e.owner.linux?.startTicks));
+  if (!isPidGone(record.pid, deps) && !reused) return true;
+  const snapshot = JSON.stringify(record);
+  const released = withRunRecordLock(record.runId, deps, () => {
+    const latest = readRunRecord(record.runId, deps);
+    if (!latest || JSON.stringify(latest) !== snapshot) return false;
+    latest.localWriterClaim!.state = "released";
+    writeRunRecord(latest, deps);
+    return true;
+  }, { strict: true });
+  return released !== true;
+}
+
+function acquireLocalWriterClaim(runId: string, cwd: string, deps: AgentRunControlDeps): string {
+  const fs = deps.fs ?? nodeFs;
+  // No fallback to a lexical/model-provided identity if canonicalization fails.
+  const canonical = String((fs.realpathSync ?? nodeFs.realpathSync)(cwd));
+  // Git's environment and arbitrary repository gitfiles are not ownership evidence.
+  const worktree = trustedLocalWorktree(canonical, deps);
+  const acquired = withRunRecordLock("local-writer-admission", deps, () => {
+    const updated = withRunRecordLock(runId, deps, () => {
+      const record = readRunRecord(runId, deps);
+      if (!record) throw new Error(`[local-writer-resource] missing run ${runId}`);
+      if (record.writerLaunch?.phase === "revoked") throw new Error("[local-writer-resource] claim attempt revoked");
+      record.localWriterClaim = { cwd: canonical, ...(worktree ? { worktree } : {}), state: "held" };
+      if (record.writerLaunch && record.execution?.state === "known" && record.execution.owner.state === "verified" && record.pid === process.pid) {
+        record.writerLaunch.phase = "granted";
+      }
+      writeRunRecord(record, deps);
+      return true;
+    }, { strict: true });
+    if (!updated) throw new Error(`[local-writer-resource] run lock busy: ${runId}`);
+    return true;
+  }, { strict: true, requireDeadOwner: true });
+  if (!acquired) throw new Error("[local-writer-resource] admission lock busy; no child spawned");
+  return canonical;
+}
+
+/** Native identity only: no environment or self-reported registry fields. */
+function nativeOwner(pid: number, deps: AgentRunControlDeps): Extract<RunExecution, { state: "known" }>["owner"] {
+  const first = probeProcessStartTime(pid, deps);
+  let linux: { bootId: string; startTicks: string } | undefined;
+  if ((deps.platform ?? process.platform) === "linux") {
+    try {
+      const stat = nodeFs.readFileSync(`/proc/${pid}/stat`, "utf8");
+      const startTicks = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/)[19];
+      const bootId = nodeFs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+      if (/^\d+$/.test(startTicks) && bootId) linux = { startTicks, bootId };
+    } catch { return { state: "unknown" }; }
+  }
+  const second = probeProcessStartTime(pid, deps);
+  if (!first || !second || first.getTime() !== second.getTime() || isPidGone(pid, deps) ||
+      ((deps.platform ?? process.platform) === "linux" && !linux)) return { state: "unknown" };
+  return { state: "verified", pid, startedAt: first.toISOString(), source: "parent-native", ...(linux ? { linux } : {}) };
+}
+
+/** Child validation is read-only and precedes all identity publication/activity writes. */
+export function validateLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}): void {
+  const fail = (reason = "facts"): never => { throw new Error(`[local-writer-resource] child binding unknown or mismatched: ${reason}`); };
+  if (!/^[A-Za-z0-9_-]+$/.test(runId)) fail();
+  const validated = withRunRecordLock(runId, deps, () => {
+    const r = readRunRecord(runId, deps), e = r?.execution;
+    const launch = r?.writerLaunch;
+    if (launch && (launch.protocol !== "fenced-launch-v1" || launch.phase !== "granted" ||
+        launch.attemptId !== deps.env?.NOLO_WRITER_LAUNCH_ATTEMPT)) fail("launch grant missing/revoked");
+    const native = nativeOwner(process.pid, deps);
+    const real = String((deps.fs?.realpathSync ?? nodeFs.realpathSync)(cwd));
+    if (!r || r.runId !== runId || r.pid !== process.pid || r.status !== "running" || e?.state !== "known" ||
+        e.kind !== "host-local" || e.runtimeKey !== "local" || e.device.kind !== "localhost" ||
+        e.device.hostname !== nodeHostname() || e.device.platform !== process.platform ||
+        !["cli-command-authorized", "cli-tool-dispatch-authorized"].includes(e.provenance) ||
+        e.owner.state !== "verified" || native.state !== "verified" || e.owner.pid !== process.pid ||
+        e.owner.startedAt !== native.startedAt || (e.owner.linux?.bootId !== native.linux?.bootId || e.owner.linux?.startTicks !== native.linux?.startTicks) ||
+        r.processIdentity !== "verified" || r.processStartedAt !== e.owner.startedAt ||
+        e.canonicalCwd !== real || r.cwd !== real ||
+        e.permissions.hostWritesAuthorized !== policy.hostWritesAuthorized || e.permissions.readOnly !== policy.readOnly) fail("native identity/authorization");
+    if (e?.state !== "known") return fail();
+    const set = (v?: string[]) => JSON.stringify(v === undefined ? null : [...new Set(v)].sort());
+    if (set(e.permissions.allowedToolNames) !== set(policy.allowedToolNames) ||
+        set(e.permissions.blockedToolNames) !== set(policy.blockedToolNames) ||
+        JSON.stringify(e.worktree) !== JSON.stringify(trustedLocalWorktree(real, deps))) fail("scope/worktree");
+    if (!policy.readOnly && (!policy.hostWritesAuthorized || r?.localWriterClaim?.state !== "held" ||
+        r.localWriterClaim.cwd !== real ||
+        (e.worktree && (r.localWriterClaim.worktree?.root !== e.worktree.root || r.localWriterClaim.worktree.gitDir !== e.worktree.gitDir)))) fail();
+    return true;
+  }, { strict: true, requireDeadOwner: true });
+  if (!validated) fail("registry lock busy");
+}
+
+/** Only a native-live publishing parent justifies bounded synchronization. */
+export async function awaitLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}): Promise<void> {
+  if (!/^[A-Za-z0-9_-]+$/.test(runId)) throw new Error("[local-writer-resource] child binding invalid id");
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    const r = readRunRecord(runId, deps);
+    const publication = r?.ownerPublication;
+    if (r?.writerLaunch && (r.writerLaunch.phase === "revoked" || r.writerLaunch.attemptId !== deps.env?.NOLO_WRITER_LAUNCH_ATTEMPT)) {
+      throw new Error("[local-writer-resource] child binding launch revoked/mismatched");
+    }
+    const native = publication ? nativeOwner(publication.parent.pid, deps) : { state: "unknown" as const };
+    const parentLive = publication && native.state === "verified" && publication.parent.startedAt === native.startedAt &&
+      publication.parent.linux?.bootId === native.linux?.bootId && publication.parent.linux?.startTicks === native.linux?.startTicks;
+    try {
+      validateLocalWriterChild(runId, cwd, policy, deps);
+      return;
+    } catch (error) {
+      const lockBusy = String(error).includes("registry lock busy");
+      const pending = publication?.state === "pending" && r?.execution?.state === "known" && r.execution.owner.state === "unknown";
+      if (!parentLive || (!pending && !lockBusy) || Date.now() >= deadline) throw error;
+      // Timer only bounds waiting. It never releases a claim or fabricates identity.
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  }
+}
+
+/** Resolve immutable local continuation facts; never recover permissions from today's cwd/env. */
+export function resolveLocalContinuation(record: RunRecord, deps: AgentRunControlDeps = {}): { cwd: string; policy: LocalExecutionRequest; rawArgs: string[] } {
+  const fail = (why: string): never => { throw new Error(`[local-continuation] ${why}; dispatch a fresh explicitly authorized run`); };
+  const e = record.execution;
+  if (e?.state !== "known" || e.kind !== "host-local" || e.runtimeKey !== "local" ||
+      e.device?.kind !== "localhost" || e.device.hostname !== nodeHostname() || e.device.platform !== process.platform ||
+      !["cli-command-authorized", "cli-tool-dispatch-authorized"].includes(e.provenance) ||
+      typeof e.permissions?.readOnly !== "boolean" || typeof e.permissions.hostWritesAuthorized !== "boolean" ||
+      (!e.permissions.readOnly && !e.permissions.hostWritesAuthorized)) return fail("execution unknown or unsupported");
+  const lists = [e.permissions.allowedToolNames, e.permissions.blockedToolNames];
+  if (lists.some(v => v !== undefined && (!Array.isArray(v) || v.some(t => typeof t !== "string" || !t || t.startsWith("--"))))) return fail("tool scope invalid");
+  let cwd: string;
+  try {
+    if (!e.canonicalCwd || !isAbsolute(e.canonicalCwd) || record.cwd !== e.canonicalCwd) return fail("cwd identity missing");
+    const fs = deps.fs ?? nodeFs;
+    cwd = String((fs.realpathSync ?? nodeFs.realpathSync)(e.canonicalCwd));
+    if (cwd !== e.canonicalCwd || !(fs.statSync ?? nodeFs.statSync)(cwd).isDirectory()) return fail("cwd drift");
+    if (JSON.stringify(e.worktree) !== JSON.stringify(trustedLocalWorktree(cwd, deps))) return fail("cwd worktree changed");
+  } catch { return fail("cwd missing or moved"); }
+  // Read-only owners also cannot be continued while their process might still execute.
+  const death = record.ownerDeath;
+  const hasDeath = !record.pid && death && death.pid > 0 &&
+    JSON.stringify(death.executionOwner) === JSON.stringify(e.owner) &&
+    (!record.localWriterClaim || record.localWriterClaim.state === "released");
+  if (!hasDeath && (typeof record.pid !== "number" || record.pid <= 0)) return fail("old owner unknown");
+  const current = hasDeath ? { state: "unknown" as const } : nativeOwner(record.pid!, deps);
+  const old = e.owner;
+  const reused = old?.state === "verified" && current.state === "verified" &&
+    (old.pid !== current.pid || old.startedAt !== current.startedAt || old.linux?.bootId !== current.linux?.bootId || old.linux?.startTicks !== current.linux?.startTicks);
+  if (!hasDeath && !isPidGone(record.pid!, deps) && !reused) return fail("old owner live or unknown");
+  if (!e.permissions.readOnly && (record.localWriterClaim?.cwd !== cwd ||
+      !["held", "released"].includes(record.localWriterClaim.state))) return fail("writer claim unknown");
+  const policy: LocalExecutionRequest = { runtimeKey: "local", ...e.permissions, provenance: "cli-tool-dispatch-authorized" };
+  const rawArgs = ["--runtime-key", "local", ...(policy.hostWritesAuthorized ? ["--allow-host-writes"] : []),
+    ...(policy.readOnly ? ["--read-only"] : []),
+    ...(policy.allowedToolNames ?? []).flatMap(t => ["--allowed-tool", t]),
+    ...(policy.blockedToolNames ?? []).flatMap(t => ["--blocked-tool", t])];
+  return { cwd, policy, rawArgs };
+}
+
+/** True foreground uses the existing registry and exact same admission lock. */
+export function registerLocalForegroundWriter(cwd: string, policy: LocalExecutionRequest, agentKey: string, deps: AgentRunControlDeps = {}): string {
+  const fs = deps.fs ?? nodeFs;
+  const canonical = String((fs.realpathSync ?? nodeFs.realpathSync)(cwd));
+  const owner = nativeOwner(process.pid, deps);
+  if (owner.state !== "verified" || policy.readOnly || !policy.hostWritesAuthorized) {
+    throw new Error("[local-writer-resource] foreground native identity/authorization unknown");
+  }
+  const runId = defaultGenerateRunId();
+  fs.mkdirSync(resolveRunsDir(deps.env, deps.homedir), { recursive: true });
+  const worktree = trustedLocalWorktree(canonical, deps);
+  const record: RunRecord = { runId, agentKey, writerLaunch: { protocol: "fenced-launch-v1", attemptId: randomUUID(), phase: "prepared" }, cwd: canonical, startedAt: (deps.now?.() ?? new Date()).toISOString(),
+    status: "running", logPath: resolveRunLogPath(runId, deps.env, deps.homedir), pid: process.pid, processStartedAt: owner.startedAt, processIdentity: "verified",
+    execution: { state: "known", kind: "host-local", runtimeKey: "local", canonicalCwd: canonical,
+      device: { kind: "localhost", hostname: nodeHostname(), platform: process.platform },
+      ...(worktree ? { worktree } : {}), permissions: { hostWritesAuthorized: policy.hostWritesAuthorized, readOnly: policy.readOnly,
+        ...(policy.allowedToolNames ? { allowedToolNames: [...policy.allowedToolNames] } : {}),
+        ...(policy.blockedToolNames ? { blockedToolNames: [...policy.blockedToolNames] } : {}) }, provenance: policy.provenance, owner } };
+  writeRunRecord(record, deps);
+  try { acquireLocalWriterClaim(runId, canonical, deps); }
+  catch (error) { finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, deps); throw error; }
+  return runId;
+}
+
+function releaseUnspawnedLocalWriterClaim(runId: string, deps: AgentRunControlDeps): void {
+  const released = withRunRecordLock(runId, deps, () => {
+    const record = readRunRecord(runId, deps);
+    if (record?.localWriterClaim) {
+      if (record.writerLaunch?.phase === "prepared") record.writerLaunch.phase = "revoked";
+      record.localWriterClaim.state = "released";
+      writeRunRecord(record, deps);
+    }
+    return true;
+  }, { strict: true });
+  if (!released) throw new Error(`[local-writer-resource] release lock busy: ${runId}`);
+}
+
 export async function spawnLocalBackgroundRun(
   input: {
+    /** Host adapter only; not a CLI option or tool argument. */
+    evidenceScope?: RunRecord["evidenceScope"];
+    dispatchSpeedProvenance?: DispatchSpeedProvenance;
     rawArgs: string[];
     commandPath?: string[];
     cliEntrypointPath?: string;
@@ -1766,6 +2141,7 @@ export async function spawnLocalBackgroundRun(
      * by batch on the read path. Persisted on the run record.
      */
     batchId?: string;
+    selectionCheck?: SelectionCheck;
     /**
      * Parent dialog id (the orchestrator's dialog) that spawns this run.
      * Persisted on the run record so TUI can filter runs by conversation.
@@ -1783,6 +2159,10 @@ export async function spawnLocalBackgroundRun(
     credentialGroup?: string;
     /** 续跑时原 run 的 runId（写进新 run 记录与 .result.md 头）。 */
     continuedFrom?: string;
+    /** Host adapter only: explicit local + allowHostWrites, not a model resource id. */
+    claimLocalWrites?: boolean;
+    /** Internal authorized adapter input, never raw model/env metadata. */
+    localExecution?: LocalExecutionRequest;
     output: OutputLike;
   },
   deps: AgentRunControlDeps = {}
@@ -1852,13 +2232,37 @@ export async function spawnLocalBackgroundRun(
     // git rev-parse 失败留空
   }
 
+  const executionRequest = input.localExecution;
+  if (executionRequest && (executionRequest.runtimeKey !== "local" ||
+      typeof executionRequest.readOnly !== "boolean" || typeof executionRequest.hostWritesAuthorized !== "boolean" ||
+      (!executionRequest.readOnly && !executionRequest.hostWritesAuthorized))) {
+    throw new Error("Invalid authorized local execution facts");
+  }
+  const canonicalCwd = executionRequest
+    ? String((fs.realpathSync ?? nodeFs.realpathSync)(targetCwd)) : undefined;
+  const executionWorktree = canonicalCwd ? trustedLocalWorktree(canonicalCwd, resolvedDeps) : undefined;
+  const execution: RunExecution = executionRequest ? {
+    state: "known", kind: "host-local", runtimeKey: "local",
+    device: { kind: "localhost", hostname: nodeHostname(), platform: deps.platform ?? process.platform },
+    canonicalCwd: canonicalCwd!,
+    ...(executionWorktree ? { worktree: executionWorktree } : {}),
+    permissions: { hostWritesAuthorized: executionRequest.hostWritesAuthorized, readOnly: executionRequest.readOnly,
+      ...(executionRequest.allowedToolNames ? { allowedToolNames: [...executionRequest.allowedToolNames] } : {}),
+      ...(executionRequest.blockedToolNames ? { blockedToolNames: [...executionRequest.blockedToolNames] } : {}) },
+    provenance: executionRequest.provenance, owner: { state: "unknown" },
+  } : { state: "unknown", reason: "missing-host-facts" };
   const title = normalizeRunTitle(input.title);
   const record: RunRecord = {
+    ...(input.evidenceScope ? { evidenceScope: input.evidenceScope } : {}),
+    ...(input.dispatchSpeedProvenance ? { dispatchSpeedProvenance: input.dispatchSpeedProvenance } : {}),
     runId,
     agentKey: input.agentKey,
     ...(typeof input.agentName === "string" && input.agentName.trim() ? { agentName: input.agentName.trim() } : {}),
     ...(title ? { title } : {}),
-    cwd: input.cwd,
+    cwd: canonicalCwd ?? input.cwd,
+    execution,
+    ...(executionRequest ? { writerLaunch: { protocol: "fenced-launch-v1" as const, attemptId: randomUUID(), phase: "prepared" as const } } : {}),
+    ...(executionRequest ? (() => { const parent = nativeOwner(process.pid, resolvedDeps); return parent.state === "verified" ? { ownerPublication: { state: "pending" as const, parent } } : {}; })() : {}),
     ...(messagePath ? { msgFile: messagePath } : input.msgFile ? { msgFile: input.msgFile } : {}),
     startedAt: now().toISOString(),
     ...(typeof input.timeoutMs === "number" ? { timeoutMs: input.timeoutMs } : {}),
@@ -1866,6 +2270,7 @@ export async function spawnLocalBackgroundRun(
     logPath,
     queuePath,
     batchId,
+    ...(input.selectionCheck ? { selectionCheck: input.selectionCheck } : {}),
     ...(typeof input.credentialGroup === "string" && input.credentialGroup.trim()
       ? { credentialGroup: input.credentialGroup.trim() }
       : {}),
@@ -1904,7 +2309,13 @@ export async function spawnLocalBackgroundRun(
     ...env,
     NOLO_AGENT_RUN_CHILD: "1",
     NOLO_AGENT_RUN_ID: runId,
+    ...(record.writerLaunch ? { NOLO_WRITER_LAUNCH_ATTEMPT: record.writerLaunch.attemptId } : {}),
   };
+
+  // Do not propagate retired cumulative budgets, including inherited legacy env.
+  if (!record.writerLaunch) delete childEnv.NOLO_WRITER_LAUNCH_ATTEMPT;
+  delete childEnv.NOLO_SUBTASK_MAX_TOOL_CALLS;
+  delete childEnv.NOLO_SUBTASK_MAX_WALL_CLOCK_MS;
 
   let hostMemory: HostMemorySnapshot | null = null;
   let reservation: MemoryReservationHandle | undefined;
@@ -1924,6 +2335,8 @@ export async function spawnLocalBackgroundRun(
       : {}),
   };
   let proc: ChildProcess;
+  let preparedScope: string | undefined;
+  const launchScope = (r: RunRecord) => JSON.stringify({ cwd: r.cwd, execution: r.execution, claim: r.localWriterClaim, publication: r.ownerPublication });
   try {
     reservation = reserveHostMemory({
       runsDir, runId, fs: reservationFs, now: resolvedDeps.now,
@@ -1932,8 +2345,15 @@ export async function spawnLocalBackgroundRun(
       getProcessStartTime: () => null,
       withLock: (id, fn, opts) => withRunRecordLock(id, resolvedDeps, fn, opts),
     });
+    const spawnCwd = input.claimLocalWrites
+      ? acquireLocalWriterClaim(runId, input.cwd ?? process.cwd(), resolvedDeps) : canonicalCwd ?? input.cwd;
+    if (record.writerLaunch) {
+      const prepared = readRunRecord(runId, resolvedDeps);
+      if (!prepared || prepared.writerLaunch?.phase !== "prepared" || prepared.writerLaunch.attemptId !== record.writerLaunch.attemptId) throw new Error("[local-writer-resource] launch attempt revoked before spawn");
+      preparedScope = launchScope(prepared);
+    }
     proc = spawn(execPath, childArgs, {
-      cwd: input.cwd, env: childEnv, detached: true,
+      cwd: spawnCwd, env: childEnv, detached: true,
       // Detached on Windows means no console; hide the one its children would create.
       windowsHide: true,
       stdio: deps.shellApprovalHost ? ["ignore", logFd, logFd, "ipc"] : ["ignore", logFd, logFd],
@@ -1941,6 +2361,7 @@ export async function spawnLocalBackgroundRun(
   } catch (error) {
     try {
       reservation?.release("spawn_sync_failed");
+      if (input.claimLocalWrites) releaseUnspawnedLocalWriterClaim(runId, resolvedDeps);
     } finally {
       finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, resolvedDeps);
     }
@@ -1951,6 +2372,8 @@ export async function spawnLocalBackgroundRun(
   proc.once?.("error", (error) => {
     try {
       reservation!.release("child_error");
+      // An asynchronous error (even without a PID) is not death confirmation.
+      // Retain the writer claim; the registry exposes unknown ownership for diagnosis.
     } catch (releaseError) {
       // Keep the failed reservation on disk; do not crash the parent from an
       // EventEmitter callback or silently claim the budget was released.
@@ -1965,19 +2388,60 @@ export async function spawnLocalBackgroundRun(
   const hostMemoryNotice = emitHostMemoryNotice(hostMemory, input.output);
 
   if (typeof proc.pid === "number") {
+    // Only the spawning parent probes native identity. Never accept child/env history as proof.
+    const nativeStartedAt = executionRequest ? probeProcessStartTime(proc.pid, resolvedDeps) : null;
+    let linuxIdentity: { bootId: string; startTicks: string } | undefined;
+    if (executionRequest && (deps.platform ?? process.platform) === "linux") {
+      try {
+        const stat = String(nodeFs.readFileSync(`/proc/${proc.pid}/stat`, "utf8"));
+        const startTicks = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/)[19];
+        const bootId = nodeFs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+        if (/^\d+$/.test(startTicks) && bootId) linuxIdentity = { bootId, startTicks };
+      } catch { /* Missing/inaccessible native process is unknown, never self-reported. */ }
+    }
+    const confirmedStart = executionRequest ? probeProcessStartTime(proc.pid, resolvedDeps) : null;
+    const stableNativeIdentity = nativeStartedAt && confirmedStart &&
+      nativeStartedAt.getTime() === confirmedStart.getTime() && !isPidGone(proc.pid, resolvedDeps);
     // 必须持锁并在锁内重读：子进程此刻已经在跑，它的创建即心跳（keepAlive）
     // 随时可能落盘。无锁的读-改-写会把 pid/processStartedAt 整段丢掉的旧快照
     // rename 回去——pid 一丢，stop 直接拒绝、checkStaleRun 永远提前返回，
     // 真死的子进程会留下永远 running 的幽灵记录；反向交错则抹掉 activity，
     // 重新开出本批要修的那个「无心跳窗口」。
-    withRunRecordLock(runId, resolvedDeps, () => {
-      const latest = readRunRecord(runId, resolvedDeps) ?? record;
+    const publishOwner = () => withRunRecordLock(runId, resolvedDeps, () => {
+      const latest = readRunRecord(runId, resolvedDeps);
+      if (!latest) throw new Error("[local-writer-resource] publication record missing");
+      if (record.writerLaunch) {
+        const launch = latest.writerLaunch;
+        if (launch?.protocol !== "fenced-launch-v1" || launch.attemptId !== record.writerLaunch.attemptId ||
+            launch.phase !== "prepared") {
+          throw new Error("[local-writer-resource] publication attempt revoked/mismatched");
+        }
+        if (launchScope(latest) !== preparedScope) throw new Error("[local-writer-resource] publication scope changed");
+      }
       latest.pid = proc.pid;
-      // Preserve a baseline already self-reported by the child. Never probe at spawn.
-      latest.processIdentity ??= "unverified";
+      if (latest.execution?.state === "known") {
+        const verified = stableNativeIdentity && ((deps.platform ?? process.platform) !== "linux" || linuxIdentity);
+        latest.execution.owner = verified ? {
+          state: "verified", pid: proc.pid!, startedAt: nativeStartedAt!.toISOString(), source: "parent-native",
+          ...(linuxIdentity ? { linux: linuxIdentity } : {}),
+        } : { state: "unknown" };
+        latest.processIdentity = verified ? "verified" : "unverified";
+        latest.processStartedAt = verified ? nativeStartedAt!.toISOString() : undefined;
+      } else {
+        latest.processIdentity ??= "unverified";
+      }
+      if (latest.writerLaunch && latest.execution?.state === "known" && latest.execution.owner.state === "verified") {
+        latest.writerLaunch.phase = "granted";
+      }
+      if (latest.ownerPublication) latest.ownerPublication.state = "complete";
       writeRunRecord(latest, resolvedDeps);
       return true;
-    }, { strict: true });
+    }, { strict: true, requireDeadOwner: true });
+    const publicationDeadline = Date.now() + 2000;
+    while (!publishOwner()) {
+      if (Date.now() >= publicationDeadline) throw new Error("[local-writer-resource] parent owner publication lock busy");
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
     try {
       const persisted = readRunRecord(runId, resolvedDeps);
       reservation!.associate({ runId, pid: proc.pid, processStartedAt: persisted?.processStartedAt });
@@ -2005,6 +2469,7 @@ export async function spawnLocalBackgroundRun(
     logPath,
     queuePath,
     batchId,
+    ...(input.selectionCheck ? { selectionCheck: input.selectionCheck } : {}),
     ...(hostMemoryNotice ? { hostMemoryNotice } : {}),
   };
 }
@@ -2161,6 +2626,7 @@ export function transitionRunToTerminal(
     dodResults?: DoDCommandResult[];
     failureReason?: RunFailureReason;
     toolCallCount?: number;
+    acceptance?: LocalRunAcceptance;
     lastAssistantText?: string;
     /** 结果头元数据（只写进 .result.md 的 front matter，不改 record）。 */
     model?: string;
@@ -2228,11 +2694,31 @@ export function transitionRunToTerminal(
     if (typeof update.lastAssistantText === "string" && update.lastAssistantText) {
       record.lastAssistantText = update.lastAssistantText.slice(0, 2000);
     }
+    if (update.cacheUsage) {
+      record.cacheHitRatio = update.cacheUsage.cache_hit_ratio;
+      record.cacheCachedTokens = update.cacheUsage.cached_tokens;
+    }
     record.endedAt = now().toISOString();
-    // 完整正文落文件：摘要会截断，长报告不能只活在 .log 里。运行时自动加
-    // YAML 头（不依赖模型自觉）；正文原样跟在头后。必须在 endedAt/status
+    let resultWriteFailed = false;
+    let pendingResultFile: string | undefined;
+    let stagingComplete = false;
+    let backupFile: string | undefined;
+    let backupVerified = false;
+    const registerArtifact = (path: string, kind: "pending" | "bak") => {
+      const fs = deps.fs ?? nodeFs;
+      // Without no-follow identity support, retain rather than authorize GC.
+      const stat = fs.lstatSync?.(path);
+      if (!stat || !stat.isFile() || stat.isSymbolicLink()) return;
+      const artifact = { publisher: "run-result-v1" as const, path, kind,
+        dev: String(stat.dev), ino: String(stat.ino),
+        sha256: createHash("sha256").update(fs.readFileSync(path)).digest("hex") };
+      record.resultArtifacts = [...(record.resultArtifacts ?? []).filter(a => a.path !== path), artifact];
+    };
+    // 完整正文或 runtime 命令 receipt 落文件；没有正文时只写机器头，
+    // 不把命令证据伪造成 assistant 结论。必须在 endedAt/status
     // 落定之后写，头里的状态/结束时间才与 record 一致。
-    if (typeof update.lastAssistantText === "string" && update.lastAssistantText) {
+    if ((typeof update.lastAssistantText === "string" && update.lastAssistantText) ||
+        update.acceptance?.checks.observations?.length) {
       try {
         const fs = deps.fs ?? nodeFs;
         const resultFile = join(resolveRunsDir(deps.env, deps.homedir), `${runId}.result.md`);
@@ -2241,6 +2727,7 @@ export function transitionRunToTerminal(
         const content = buildResultFileContent(
           {
             runId,
+            acceptance: update.acceptance,
             status: record.status,
             agentName: record.agentName,
             model: update.model,
@@ -2257,16 +2744,67 @@ export function transitionRunToTerminal(
             continuedFrom: record.continuedFrom,
             ...(update.cacheUsage ? { cacheUsage: update.cacheUsage } : {}),
           },
-          update.lastAssistantText,
+          update.lastAssistantText ?? "",
         );
-        fs.writeFileSync(resultFile, content, "utf8");
+        if (typeof fs.renameSync !== "function") throw new Error("atomic result publication requires renameSync");
+        // Keep failed staging writes recoverable, outside the generic .tmp GC.
+        // Do not fall back to writing the public path after a rename failure.
+        pendingResultFile = `${resultFile}.${randomUUID()}.pending`;
+        try {
+          fs.writeFileSync(pendingResultFile, content, { encoding: "utf8", flag: "wx" });
+          stagingComplete = true;
+        } finally {
+          if (fs.existsSync(pendingResultFile)) registerArtifact(pendingResultFile, "pending");
+        }
+        // Keep canonical continuously readable. Under the record lock, preserve
+        // and verify a complete byte-for-byte history copy before replacement.
+        // Never move the old report away or delete a failed backup/staging file.
+        if (fs.existsSync(resultFile)) {
+          const previous = fs.readFileSync(resultFile);
+          const backup = `${resultFile}.${randomUUID()}.bak`;
+          backupFile = backup;
+          try {
+            fs.writeFileSync(backup, previous, { flag: "wx" });
+          } finally {
+            if (fs.existsSync(backup)) registerArtifact(backup, "bak");
+          }
+          const sameBytes = (a: unknown, b: unknown) => Buffer.from(a as Uint8Array).equals(Buffer.from(b as Uint8Array));
+          if (!sameBytes(previous, fs.readFileSync(backup)) ||
+              !sameBytes(previous, fs.readFileSync(resultFile))) {
+            throw new Error("previous result backup verification failed");
+          }
+          backupVerified = true;
+        }
+        fs.renameSync(pendingResultFile, resultFile);
+        record.resultArtifacts = record.resultArtifacts?.filter(a => a.path !== pendingResultFile);
+        pendingResultFile = undefined;
         record.resultFile = resultFile;
       } catch {
-        // 落盘失败不阻断终态结算；摘要仍在 record 上。
+        // A short registry preview is not a durable replacement for the report.
+        // Settle once as failed; do not retry generation or claim a stale file.
+        resultWriteFailed = true;
+        delete record.resultFile;
+        if (record.status === "done") {
+          record.status = "failed";
+          record.exitCode = 1;
+        }
       }
     }
     if (typeof update.note === "string" && update.note.trim()) {
       record.note = update.note.trim();
+    }
+    if (resultWriteFailed) {
+      if (record.note?.startsWith("orphaned:")) record.note = undefined;
+      const fs = deps.fs ?? nodeFs;
+      const stagingNote = pendingResultFile
+        ? fs.existsSync(pendingResultFile)
+          ? `${stagingComplete ? "complete staging copy" : "incomplete staging fragment"}: ${pendingResultFile}`
+          : `staging not created: ${pendingResultFile}`
+        : "staging not created";
+      const backupNote = backupFile
+        ? `${fs.existsSync(backupFile) ? backupVerified ? "full verified backup" : "partial backup" : "backup not created"}: ${backupFile}`
+        : "backup not created";
+      record.note = [record.note, `result file write failed; complete final report was not saved; ${stagingNote}; ${backupNote}`].filter(Boolean).join("; ");
     }
     // A self-reported terminal status is ground truth; drop any orphan verdict.
     if (record.note?.startsWith("orphaned:")) record.note = undefined;
@@ -2321,6 +2859,7 @@ export async function settleRunTerminalAuthoritatively(
     dodResults?: DoDCommandResult[];
     failureReason?: RunFailureReason;
     toolCallCount?: number;
+    acceptance?: LocalRunAcceptance;
     lastAssistantText?: string;
     model?: string;
     dialogServer?: string;
@@ -2379,6 +2918,7 @@ export function finalizeRunRecord(
     dodResults?: DoDCommandResult[];
     failureReason?: RunFailureReason;
     toolCallCount?: number;
+    acceptance?: LocalRunAcceptance;
     lastAssistantText?: string;
     model?: string;
     dialogServer?: string;
@@ -2455,10 +2995,10 @@ export function defaultGetProcessStartTime(
       // 这会让 isPidReused 的结论依赖调用者环境：同一条 run 记录在英文
       // locale 下被判 pid reused → orphaned，中文 locale 下不判。强制 C
       // locale 让输出恒为可解析的英文格式，结果与 locale 无关。
-      env: { ...process.env, LC_ALL: "C", LANG: "C" },
+      env: { ...process.env, LC_ALL: "C", LANG: "C", TZ: "UTC" },
     }).trim();
     if (!output) return null;
-    const d = new Date(output);
+    const d = new Date(output.endsWith("Z") || /[+-]\d\d:\d\d$/.test(output) ? output : `${output} UTC`);
     return isNaN(d.getTime()) ? null : d;
   } catch {
     return null;
@@ -2596,6 +3136,9 @@ export function checkStaleRun(
     const latest = readRunRecord(runId, deps);
     if (!latest) return record;
     if (latest.status !== "running") return latest;
+    // Death evidence belongs to this exact owner snapshot, not a replacement PID.
+    if (latest.pid !== record.pid || latest.processStartedAt !== record.processStartedAt ||
+        latest.processIdentity !== record.processIdentity) return latest;
     if (latest.activity?.updatedAt !== record.activity?.updatedAt) return latest;
 
     const at = now().toISOString();
@@ -2619,6 +3162,14 @@ export function checkStaleRun(
     // process. Keeping it would let a future read-path reconcile mistake the
     // recycled pid for a still-alive run (false "running"). Clearing pins the
     // terminal status.
+    // This branch is reached only with confirmed ESRCH / verified PID reuse,
+    // never merely a terminal status or elapsed heartbeat. Persist before losing PID.
+    if ((pidGone || pidReused) && latest.localWriterClaim?.state === "held") {
+      latest.localWriterClaim.state = "released";
+    }
+    latest.ownerDeath = { pid: latest.pid!, processStartedAt: latest.processStartedAt,
+      processIdentity: latest.processIdentity,
+      ...(latest.execution?.state === "known" ? { executionOwner: latest.execution.owner } : {}), confirmedAt: at };
     latest.pid = undefined;
     writeRunRecord(latest, deps);
     return latest;
@@ -2814,6 +3365,7 @@ export async function runAgentStatusCommand(
     const record = readRunRecord(reconciled.runId, deps) ?? reconciled;
     const { partialCheckpoint, ...summary } = record;
     deps.output.write(JSON.stringify({ ...summary,
+      ...(localWriterRecovery(record) ? { writerRecovery: localWriterRecovery(record) } : {}),
       ...(includeCheckpoint ? { checkpoint: partialCheckpoint
         ? { ...partialCheckpoint, available: true }
         : { available: false, final: false, reason: "checkpoint_missing" } } : {}),
@@ -2852,6 +3404,8 @@ function printStatusOnce(record: RunRecord, deps: AgentRunControlDeps & { output
   deps.output.write(`runId:    ${record.runId}\n`);
   deps.output.write(`status:   ${record.status}\n`);
   deps.output.write(`pid:      ${record.pid ?? "-"}\n`);
+  const recovery = localWriterRecovery(record);
+  if (recovery) deps.output.write(`writerRecovery: required (${recovery.reason}); automatic release forbidden; native launch evidence required\n`);
   deps.output.write(`agent:    ${record.agentKey}\n`);
   deps.output.write(`cwd:      ${record.cwd ?? "-"}\n`);
   deps.output.write(`started:  ${record.startedAt}\n`);
@@ -3160,4 +3714,20 @@ export async function runAgentKillCommand(
   deps: AgentRunControlDeps & { output: OutputLike }
 ): Promise<number> {
   return runSignalCommand(args, "SIGKILL", "kill", deps);
+}
+
+/** Explicit local control entry; never infers the target attempt from env. */
+export async function runAgentRecoverPreparedWriterCommand(
+  args: string[],
+  deps: AgentRunControlDeps & { output: OutputLike },
+): Promise<number> {
+  if (args.length !== 3 || args[1] !== "--attempt-id" ||
+      !/^[A-Za-z0-9_-]+$/.test(args[0] ?? "") || !args[2] || args[2].startsWith("-")) {
+    deps.output.write("Usage: nolo agent recover-prepared-writer <runId> --attempt-id <attemptId>\n");
+    return 1;
+  }
+  const [runId, , attemptId] = args;
+  const outcome = revokePreparedWriterLaunch(runId, attemptId, deps);
+  deps.output.write(JSON.stringify({ action: "recoverPreparedWriter", runId, attemptId, outcome }) + "\n");
+  return outcome === "blocked" ? 1 : 0;
 }

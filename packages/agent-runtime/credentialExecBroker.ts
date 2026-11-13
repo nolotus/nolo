@@ -178,6 +178,36 @@ const readRequestLine = (socket: Socket): Promise<string> =>
     socket.on("error", onError);
   });
 
+/** Only ESRCH proves absence: EPERM and failed observation must not release shutdown. */
+export function probeCredentialExecGroup(
+  pgid: number,
+  kill: typeof process.kill = process.kill,
+): "gone" | "alive" | "unknown" {
+  try {
+    kill(-pgid, 0);
+    return "alive";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH" ? "gone" : "unknown";
+  }
+}
+
+/** Bounded group observation after child close, not an overall close() deadline.
+ * Zombies still require their parent/reaper; escaped pipe holders can delay child close.
+ */
+export async function waitForCredentialExecGroup(
+  pgid: number,
+  probe: (pgid: number) => "gone" | "alive" | "unknown" = probeCredentialExecGroup,
+): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  for (;;) {
+    const state = probe(pgid);
+    if (state === "gone") return;
+    if (state === "unknown") throw new Error("process_group_state_unknown");
+    if (Date.now() >= deadline) throw new Error("process_group_reap_timeout");
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 export async function startCredentialExecBroker(
   options: CredentialExecBrokerOptions,
 ): Promise<CredentialExecBrokerHandle> {
@@ -199,6 +229,7 @@ export async function startCredentialExecBroker(
   const cancels = new Set<() => void>();
   /** 已启动的子进程回收 promise：close() 要等它们真的结束。 */
   const runningChildren = new Set<Promise<void>>();
+  const reapErrors: unknown[] = [];
   let closing = false;
 
   const server: Server = createServer((socket) => {
@@ -360,7 +391,12 @@ export async function startCredentialExecBroker(
         });
         const done = new Promise<void>((resolveDone) => {
           child.once("close", () => resolveDone());
-        });
+        }).then(async () => {
+          // A leader can exit with descendants still alive (even with closed pipes).
+          // Its close event is not evidence that the owned process group is gone.
+          killGroup();
+          if (child.pid) await waitForCredentialExecGroup(child.pid);
+        }).catch((error: unknown) => { reapErrors.push(error); });
         runningChildren.add(done);
         void done.finally(() => runningChildren.delete(done));
 
@@ -403,6 +439,7 @@ export async function startCredentialExecBroker(
       cancels.clear();
       await Promise.allSettled([...runningChildren]);
       await closed;
+      if (reapErrors.length) throw new AggregateError(reapErrors, "process_group_reap_failed");
     },
   };
 }

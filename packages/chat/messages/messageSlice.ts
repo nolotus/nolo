@@ -1,3 +1,10 @@
+import { snapshotUserBatchInput, assertUserBatchInput, type UserBatchInputSnapshot } from "./userBatchExecution";
+import type { UserBatchExecution } from "./userBatchExecution";
+import { isLocalUserBatch, userBatchControl, readClientReceipt } from "./pendingUserBatchControl";
+import { normalizeTimeFields } from "database/actions/common";
+import { writeStoreOps } from "database-engine/storeBatchCompat";
+import { admitPersistedUserBatch } from "chat/queue/chatQueueReduxAdapter";
+import { createTurnRequest } from "core/chat/internalTurnEvent";
 // 文件路径: chat/messages/messageSlice.ts
 
 /*
@@ -15,6 +22,7 @@ import {
   type EntityState,
 } from "@reduxjs/toolkit";
 import { addReferenceKeysAction } from "chat/dialog/actions/addReferenceKeysAction";
+import { selectPendingUserMessages } from "./pendingUserMessages";
 import { DataType } from "create/types";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { remove, write, patch, selectById as selectDbRecordById } from "database/dbSlice";
@@ -554,7 +562,7 @@ export const messageSlice = createSliceWithThunks({
         }
 
         const dialogKey = dialogConfig.dbKey || dialogConfig.id;
-        const dialogId = extractCustomId(dialogKey);
+        const dialogId = dialogConfig.id ?? extractCustomId(dialogKey);
         const currentAccountUserId =
           (selectIdentityUserId(state) as string | null | undefined) ?? null;
         const dialogConfigUserId = (dialogConfig as { userId?: unknown })
@@ -598,7 +606,7 @@ export const messageSlice = createSliceWithThunks({
 
     prepareAndPersistUserMessage: create.asyncThunk(
       async (
-        args: { userInput: string; dialogConfig: DialogConfig },
+        args: { userInput: Message["content"]; dialogConfig: DialogConfig; pending?: boolean },
         thunkApi
       ) => {
         const { userInput, dialogConfig } = args;
@@ -609,10 +617,202 @@ export const messageSlice = createSliceWithThunks({
             message: {
               role: "user",
               content: userInput,
+              ...(args.pending ? { metadata: { queueState: "pending", source: "web" } } : {}),
             },
             dialogConfig,
           })
         ).unwrap();
+      }
+    ),
+
+    admitPendingUserMessages: create.asyncThunk(
+      async (args: { dialogKey: string; signal?: AbortSignal; resumeUnrequested?: boolean }, { dispatch, getState, extra }) => {
+        const dialogId = extractCustomId(args.dialogKey);
+        const pending = selectAllMsgs(getState() as any, dialogId).filter(message =>
+          selectPendingUserMessages([message]).length > 0 || (args.resumeUnrequested
+            && message.role === "user" && message.metadata?.userBatchPhase === "admitted"));
+        if (!pending.length || args.signal?.aborted) return [] as Message[];
+        if (!isLocalUserBatch(args.dialogKey)) {
+          const control = userBatchControl(getState(), args.dialogKey);
+          const durable = await Promise.all(pending.map(message => (extra as any).db.get(message.dbKey)));
+          if (durable.some(row => !row || row.role !== "user")) throw new Error("Missing durable pending user message");
+          // Always recover an admitted receipt separately from new pending rows.
+          const existing = durable.find(row => row.metadata?.userBatchReceipt)?.metadata.userBatchReceipt;
+          const batch = existing ? durable.filter(row => existing.messageIds.includes(row.id)) : durable;
+          for (const row of batch) {
+            if (args.signal?.aborted) return [];
+            await control.publish(row);
+          }
+          if (args.signal?.aborted) return [];
+          const result = await control.call({ action: "claim", messageIds: batch.map(row => row.id) });
+          if (!result.authorized) throw new Error("User batch owned by another plane; automatic resubmission blocked");
+          const receipt = readClientReceipt(result.receipt, batch.map(row => row.id));
+          if (receipt.phase !== "admitted") throw new Error("User batch provider outcome is unknown; automatic resubmission blocked");
+          // Mirror only a server response to local storage. Never PATCH authority fields.
+          const accepted = receipt.messageIds.map(id => batch.find(row => row.id === id)!).map(row => ({ ...row, metadata: { ...row.metadata,
+            queueState: "accepted", acceptedUserBatchId: receipt.batchId, userBatchOwner: receipt.owner,
+            userBatchPhase: receipt.phase, userBatchReceipt: receipt } }));
+          await writeStoreOps((extra as any).db, accepted.map(row => ({ type: "put", key: row.dbKey, value: row })));
+          for (const row of accepted) dispatch(messageActions.addUserMessage({ ...row, dialogId }));
+          return args.signal?.aborted ? [] : accepted;
+        }
+        const batchId = pending.map(message => message.id).join(":");
+        const admitted = await admitPersistedUserBatch({
+          requests: pending.map(message => ({ ...createTurnRequest(
+            typeof message.content === "string" ? message.content : "",
+          ), messageId: message.id, source: "web" })),
+          signal: args.signal,
+          persist: async () => {
+            const db = (extra as any).db;
+            // Redux is a display projection, not a complete durable record.
+            // Patch the authoritative rows so timestamps, type/index fields and
+            // metadata absent from the projection cannot be overwritten.
+            const accepted = await Promise.all(pending.map(async projected => {
+              const stored = await db.get(projected.dbKey);
+              if (!stored || stored.id !== projected.id || stored.role !== "user") {
+                throw new Error(`Missing durable pending user message ${projected.id}`);
+              }
+              if (stored.metadata?.queueState !== "pending") return stored;
+              return normalizeTimeFields({ ...stored, metadata: { ...stored.metadata,
+                queueState: "accepted", acceptedUserBatchId: batchId, userBatchPhase: "admitted",
+              } });
+            }));
+            if (args.signal?.aborted) return;
+            await writeStoreOps(db, accepted.map(message => ({ type: "put", key: message.dbKey, value: message })));
+            for (const message of accepted) {
+              // Replicate accepted state through the existing writer as well;
+              // otherwise a stale server pending row wins on page refresh.
+              await dispatch(patch({ dbKey: message.dbKey, changes: { metadata: message.metadata } })).unwrap();
+              dispatch(messageActions.addUserMessage({ ...message, dialogId }));
+            }
+          },
+        });
+        return admitted.length ? pending : [];
+      }
+    ),
+
+    runPendingUserBatchRequest: create.asyncThunk(
+      async (args: { dialogKey: string; signal?: AbortSignal; owns?: () => boolean; execution?: UserBatchExecution; requestUserInput: UserBatchInputSnapshot; start: () => unknown }, { dispatch, getState, extra }) => {
+        const dialogId = extractCustomId(args.dialogKey);
+        const db = (extra as any).db;
+        const valid = () => !args.signal?.aborted && (args.owns?.() ?? true) && (args.execution?.valid() ?? true);
+        const assertInput = (expected: UserBatchInputSnapshot, actual: UserBatchInputSnapshot, ids: string[]) => {
+          try { assertUserBatchInput(expected, actual, ids); }
+          catch (error) { args.execution?.dispose(); throw error; }
+        };
+        if (!isLocalUserBatch(args.dialogKey)) {
+          if (!Array.isArray(args.requestUserInput)) throw new Error("Missing controlled user batch request input; blocked");
+          if (args.execution && !args.execution.valid()) throw new Error("User batch execution expired; blocked");
+          if (!valid()) return undefined;
+          const control = userBatchControl(getState(), args.dialogKey);
+          // Initial sends predate queueState=pending. Publish/claim their durable
+          // original too; never let the legacy no-batch path bypass authority.
+          const history = selectAllMsgs(getState() as any, dialogId).filter(message => message.role === "user");
+          const latest = history[history.length - 1];
+          if (latest?.metadata?.queueState === "pending") {
+            if (args.execution?.hasGrant()) throw new Error("New user batch requires its own claim; blocked");
+            await dispatch(messageActions.admitPendingUserMessages({ dialogKey: args.dialogKey, signal: args.signal, resumeUnrequested: true })).unwrap();
+          }
+          if (latest) {
+            const original = await db.get(latest.dbKey);
+            if (original && original.metadata?.queueState !== "pending" && !original.metadata?.userBatchPhase && !original.metadata?.userBatchReceipt) {
+              if (args.execution?.hasGrant()) throw new Error("New user batch requires its own claim; blocked");
+              const published = await control.publish(original);
+              dispatch(messageActions.addUserMessage({ ...published, dialogId }));
+              await dispatch(messageActions.admitPendingUserMessages({ dialogKey: args.dialogKey, signal: args.signal, resumeUnrequested: true })).unwrap();
+            }
+          }
+          const users = selectAllMsgs(getState() as any, dialogId).filter(message => message.role === "user");
+          const durable = await Promise.all(users.map(message => db.get(message.dbKey)));
+          // Select a fixed batch using the latest real user. Tool messages never
+          // introduce a user or broaden permission to a later pending input.
+          const last = durable[durable.length - 1];
+          if (args.execution && last?.metadata?.userBatchReceipt) {
+            const receipt = last.metadata.userBatchReceipt;
+            const batchRows = durable.filter(row => receipt.messageIds.includes(row?.id));
+            const checked = readClientReceipt(receipt, batchRows.map(row => row.id));
+            if (args.execution.has(args.dialogKey, checked)) {
+              if (durable.some(row => row?.metadata?.queueState === "pending" && !checked.messageIds.includes(row.id))) {
+                throw new Error("New user batch requires its own claim; blocked");
+              }
+              if (!valid()) { args.execution.dispose(); return undefined; }
+              userBatchControl(getState(), args.dialogKey);
+              const input = snapshotUserBatchInput(batchRows);
+              assertInput(input, snapshotUserBatchInput(users), checked.messageIds);
+              assertInput(input, args.requestUserInput, checked.messageIds);
+              return args.execution.start(args.dialogKey, checked, input, args.start);
+            }
+          }
+          const admitted = durable.filter(row => row?.metadata?.userBatchPhase === "admitted");
+          if (!admitted.length) {
+            if (durable.some(row => row?.metadata?.queueState === "pending" || row?.metadata?.userBatchPhase)) {
+              throw new Error("No admitted authority receipt; automatic resubmission blocked");
+            }
+            throw new Error("Missing user batch receipt; automatic resubmission blocked");
+          }
+          const receipt = readClientReceipt(admitted[0].metadata.userBatchReceipt,
+            admitted.filter(row => row.metadata?.acceptedUserBatchId === admitted[0].metadata.acceptedUserBatchId).map(row => row.id));
+          if (receipt.phase !== "admitted") throw new Error("User batch already requested; automatic resubmission blocked");
+          if (!valid()) return undefined;
+          // Recheck account after every asynchronous admission boundary.
+          userBatchControl(getState(), args.dialogKey);
+          const result = await control.call({ action: "requested", batchId: receipt.batchId, token: receipt.token });
+          if (result.authorized && result.receipt?.phase !== "requested") throw new Error("Missing requested authority receipt; automatic resubmission blocked");
+          if (result.receipt) {
+            const returned = readClientReceipt(result.receipt, receipt.messageIds, true);
+            if (returned.batchId !== receipt.batchId || returned.token !== receipt.token) throw new Error("Mismatched user batch receipt");
+            const records = admitted.filter(row => receipt.messageIds.includes(row.id)).map(row => ({ ...row,
+              metadata: { ...row.metadata, userBatchPhase: returned.phase, userBatchReceipt: returned } }));
+            await writeStoreOps(db, records.map(row => ({ type: "put", key: row.dbKey, value: row })));
+            for (const row of records) dispatch(messageActions.addUserMessage({ ...row, dialogId }));
+          }
+          // Even cancellation after requested must not roll back server authority.
+          if (!result.authorized) throw new Error("User batch provider outcome is unknown; automatic resubmission blocked");
+          if (!valid()) return undefined;
+          userBatchControl(getState(), args.dialogKey);
+          // requested supplies the authoritative ordered payload, not merely IDs.
+          if (!Array.isArray(result.messages) || result.messages.length !== receipt.messageIds.length ||
+              result.messages.some((row: any, i: number) => row?.id !== receipt.messageIds[i] || row.role !== "user")) {
+            throw new Error("Invalid ordered authorized user messages; blocked");
+          }
+          const input = snapshotUserBatchInput(result.messages);
+          const current = await Promise.all(receipt.messageIds.map(id => db.get(admitted.find(row => row.id === id)!.dbKey)));
+          assertInput(input, snapshotUserBatchInput(current), receipt.messageIds);
+          assertInput(input, snapshotUserBatchInput(selectAllMsgs(getState() as any, dialogId)), receipt.messageIds);
+          assertInput(input, args.requestUserInput, receipt.messageIds);
+          if (!valid()) return undefined;
+          if (args.execution) {
+            args.execution.authorize(args.dialogKey, result.receipt, input);
+            return args.execution.start(args.dialogKey, result.receipt, input, args.start);
+          }
+          return args.start();
+        }
+        const claimed = selectAllMsgs(getState() as any, dialogId).filter(message =>
+          message.role === "user" && message.metadata?.userBatchPhase === "admitted");
+        const authoritative = await Promise.all(claimed.map(message => db.get(message.dbKey)));
+        if (authoritative.some(row => row?.metadata?.userBatchPhase === "requested")) {
+          throw new Error("User batch provider outcome is unknown; automatic resubmission blocked");
+        }
+        const rows = authoritative.filter(row => row?.metadata?.userBatchPhase === "admitted");
+        const phaseRows = (phase: string) => rows.map(row => ({ ...row,
+          metadata: { ...row.metadata, userBatchPhase: phase },
+        }));
+        const persist = async (phase: string) => {
+          const records = phaseRows(phase);
+          await writeStoreOps(db, records.map(row => ({ type: "put", key: row.dbKey, value: row })));
+          for (const row of records) dispatch(messageActions.addUserMessage({ ...row, dialogId }));
+        };
+        if (!valid()) return undefined;
+        if (rows.length) await persist("requested");
+        if (!valid()) {
+          // No provider has been invoked in this closure: rollback only the
+          // phase, retaining the durable receipt and original identity/time.
+          if (rows.length) await persist("admitted");
+          return undefined;
+        }
+        // No await between final ownership check and invocation. Once invoked,
+        // failures/unknown outcomes stay requested and cannot auto-resubmit.
+        return args.start();
       }
     ),
 
@@ -1026,7 +1226,7 @@ export const messageSlice = createSliceWithThunks({
      * 一条流式回复结束
      */
     messageStreamEnd: create.asyncThunk(
-      async (payload: MessageStreamEndPayload, { dispatch, getState }: any) => {
+      async (payload: MessageStreamEndPayload, { dispatch, getState, extra, signal }: any) => {
         const {
           finalContentBuffer,
           totalUsage,
@@ -1204,7 +1404,7 @@ export const messageSlice = createSliceWithThunks({
               lastRealInputTokens:
                 lastInputTokensFromRecords(billingUsageRecords),
             },
-            { dispatch, getState }
+            { dispatch, getState, extra, signal }
           )
             .catch(err => console.error("Summary update failed:", err));
 
@@ -1525,6 +1725,8 @@ export const {
   finalizeTransientMessageOnError,
   prepareAndPersistMessage,
   prepareAndPersistUserMessage,
+  admitPendingUserMessages,
+  runPendingUserBatchRequest,
   initMsgs,
   loadOlderMessages,
   messageStreamEnd,

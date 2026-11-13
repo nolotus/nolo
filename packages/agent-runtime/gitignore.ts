@@ -21,9 +21,22 @@ import { resolve } from "node:path";
  * Callers combine these patterns with their own glob matcher and must pass
  * `includeIgnored` through: when true, ignore filtering is skipped entirely.
  */
+function isIgnorableFsError(err: unknown): boolean {
+  if (err && typeof err === "object" && "code" in err) {
+    const code = (err as { code?: string }).code;
+    return code === "ENOENT" || code === "ENOTDIR";
+  }
+  return false;
+}
+
 export async function readRootGitignorePatterns(workspaceRoot: string): Promise<string[]> {
-  const content = await readFile(resolve(workspaceRoot, ".gitignore"), "utf8").catch(() => null);
-  if (content === null) return [];
+  let content: string;
+  try {
+    content = await readFile(resolve(workspaceRoot, ".gitignore"), "utf8");
+  } catch (err) {
+    if (isIgnorableFsError(err)) return [];
+    throw err;
+  }
   return content
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -45,7 +58,8 @@ export async function hasRootGitignore(workspaceRoot: string): Promise<boolean> 
   try {
     await stat(resolve(workspaceRoot, ".gitignore"));
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if (isIgnorableFsError(err)) return false;
+    throw err;
   }
 }

@@ -1,5 +1,6 @@
 // 文件路径: database/actions/readAndWait.ts
 
+import { readProtectedPage } from "./protectedPageRead";
 import type { DbThunkApi } from "database/thunkApiTypes";
 import { fetchFromClientDb, fetchFromServer } from "./common";
 import { readRequestManager } from "./readRequestManager";
@@ -172,6 +173,15 @@ export const readAndWaitAction = async (
   const executeReadAndWait = async (): Promise<any> => {
     // 1. 准备所有需要访问的远程服务器（带去重 + 离线检测）
     // 2. 首先，尝试从本地数据库获取数据（可能为 null）
+    if (dbKey.startsWith("page-") && currentUserId && currentToken && typeof db.batch === "function") {
+      const protectedData = await readProtectedPage({ db, actorId: currentUserId, dbKey,
+        servers: preferredServerOrigin ? [preferredServerOrigin, ...allServers] : allServers,
+        token: currentToken, fetch, getCurrentAccess: () => {
+          const context = getRuntimeServerContext(thunkApi.getState() as import("app/store").RootState);
+          return { actorId: context.currentUserId, token: context.currentToken, servers: context.remoteServers };
+        } });
+      if (protectedData !== undefined) return { ...protectedData, dbKey };
+    }
     const localData = await fetchFromClientDb(db, dbKey);
     const authority = resolveRecordAuthority({
       dbKey,

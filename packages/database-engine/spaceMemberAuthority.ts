@@ -45,7 +45,15 @@ export const canWriteSpaceMemberRecord = async ({
   }
 
   const space = await loadSpaceRecord(parsed.spaceId);
-  return Array.isArray(space?.members) && space.members.includes(actionUserId);
+  if (!space) {
+    return false;
+  }
+
+  if (typeof space.ownerId === "string" && space.ownerId === actionUserId) {
+    return true;
+  }
+
+  return Array.isArray(space.members) && space.members.includes(actionUserId);
 };
 
 export const canDeleteSpaceMemberRecord = async ({

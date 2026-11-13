@@ -27,7 +27,7 @@ import {
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import { createRunDock, type RunDock } from "./runDock";
-import { getProcessRegistry } from "../../agent-runtime/processRegistry";
+import { getProcessRegistry, type ProcessRegistry } from "../../agent-runtime/processRegistry";
 import { t } from "./i18n";
 import { themeText } from "./theme";
 
@@ -35,6 +35,21 @@ export const ACTIVITY_FRAMES = ["·", "~", "≈", "∿", "≈", "~"];
 export const ACTIVITY_FRAME_INTERVAL_MS = 150;
 /** 无可见输出超过此时长（且 turn 仍活跃）时，补一行 working fallback。 */
 export const ACTIVITY_FALLBACK_DELAY_MS = 1200;
+
+function isThinkingLabel(label: string): boolean {
+  return /^(Thinking|思考中)[：:…]/i.test(label) || label === "Thinking" || label === "思考中";
+}
+
+function isRetryLabel(label: string): boolean {
+  return /^(自动重试|服务器紧张|上游流中断|Retry|Retrying)/i.test(label);
+}
+
+function isSamePhase(prev: string, next: string): boolean {
+  if (prev === next) return true;
+  if (isThinkingLabel(prev) && isThinkingLabel(next)) return true;
+  if (isRetryLabel(prev) && isRetryLabel(next)) return true;
+  return false;
+}
 
 export type ActivityIndicatorView = {
   frame: string;
@@ -64,6 +79,8 @@ export type ActivityIndicatorDeps = {
   clearIntervalFn?: (handle: unknown) => void;
   /** 注入停靠区（测试用）；默认自建一个，共用同一套 now/timer 依赖。 */
   runDock?: RunDock;
+  /** Optional isolated registry for rendering tests. */
+  processRegistry?: ProcessRegistry;
 };
 
 export type ActivityIndicator = {
@@ -75,6 +92,8 @@ export type ActivityIndicator = {
   clearAgentRun(): void;
   /** 停靠区里的全部 run，活跃在前。 */
   getAgentRuns(): AgentRunStatusSnapshot[];
+  /** 固定运行区此刻逐行可见的 runId（行预算 + `+N` 折叠后的真实结果）。 */
+  getVisibleRunIds(): ReadonlySet<string>;
   /** 当前应渲染的活动行数据；explicit 优先，其次 fallback，都没有返回 null。 */
   getView(): ActivityIndicatorView | null;
   /** 获取全套活动 Panel 渲染行（含基础活动行及贴在输入区上方的 Agent Run 状态面板）。 */
@@ -106,6 +125,8 @@ export function createActivityIndicator(
     deps.clearIntervalFn ??
     ((handle) => clearInterval(handle as ReturnType<typeof setInterval>));
 
+  let disposed = false;
+  const repaint = () => { if (!disposed) deps.onRepaint(); };
   let explicitLabel: string | null = null;
   let explicitStartedAt = 0;
   let fallbackActive = false;
@@ -117,10 +138,6 @@ export function createActivityIndicator(
   // 第二次 Esc 据此判定强制停止。stop() 必须清掉它，否则下一轮 turn 一开始
   // 就显示"停止中"。
   let stopping = false;
-  // 本轮起点：首个 report 时记下，stop() 清零。活动行显示的是整轮累计耗时，
-  // 而不是「当前这一段标签」的耗时——后者每次工具切换都归零，用户看不出
-  // 这一轮到底跑了多久。
-  let turnStartedAt = 0;
 
   const elapsedSecFrom = (startedAt: number) =>
     startedAt > 0 ? Math.max(0, Math.floor((now() - startedAt) / 1000)) : 0;
@@ -129,7 +146,7 @@ export function createActivityIndicator(
     // 停止中：冻结 frame，只重绘（让停止中文案持续显示但不闪动）。
     // 不推进看门狗，因为用户已发起停止，无需再补 working fallback。
     if (stopping) {
-      deps.onRepaint();
+      repaint();
       return;
     }
     frameIndex += 1;
@@ -143,9 +160,9 @@ export function createActivityIndicator(
       now() - lastActivityAt >= fallbackDelayMs
     ) {
       fallbackActive = true;
-      fallbackStartedAt = now();
+      fallbackStartedAt = lastActivityAt;
     }
-    deps.onRepaint();
+    repaint();
   };
 
   const ensureTimer = () => {
@@ -156,10 +173,11 @@ export function createActivityIndicator(
 
   const report = (label: string | null) => {
     lastActivityAt = now();
-    if (turnStartedAt === 0) turnStartedAt = lastActivityAt;
     if (label !== null) {
+      if (explicitLabel === null || !isSamePhase(explicitLabel, label)) {
+        explicitStartedAt = lastActivityAt;
+      }
       explicitLabel = label;
-      if (explicitStartedAt === 0) explicitStartedAt = lastActivityAt;
       fallbackActive = false;
       fallbackStartedAt = 0;
     } else {
@@ -171,7 +189,7 @@ export function createActivityIndicator(
     // timer 贯穿整个 turn（直到 stop()），看门狗靠它探测静默空窗。
     ensureTimer();
     // 立即重绘一次，让标签的出现/消失不必等下一个 150ms 帧。
-    deps.onRepaint();
+    repaint();
   };
 
   const markStopping = () => {
@@ -179,7 +197,7 @@ export function createActivityIndicator(
     // 不改 frameIndex：冻结在当前帧，让活动行不闪。
     // 不清 explicitLabel/fallbackActive：它们在 stop() 时统一清。
     // 立即重绘一帧让停止中文案显示出来，不必等下一个 150ms tick。
-    deps.onRepaint();
+    repaint();
   };
 
   const isStopping = () => stopping;
@@ -200,25 +218,26 @@ export function createActivityIndicator(
       return {
         frame,
         label: explicitLabel,
-        elapsedSec: elapsedSecFrom(turnStartedAt || explicitStartedAt),
+        elapsedSec: elapsedSecFrom(explicitStartedAt),
       };
     }
     if (fallbackActive) {
       return {
         frame,
         label: deps.fallbackLabel(),
-        elapsedSec: elapsedSecFrom(turnStartedAt || fallbackStartedAt),
+        elapsedSec: elapsedSecFrom(fallbackStartedAt),
       };
     }
     return null;
   };
 
+  const processRegistry = deps.processRegistry ?? getProcessRegistry();
   // 停靠区自带 timer，和上面那个 turn-scoped 的 frame timer 各转各的：
   // 活动行只在 turn 内有意义，后台 run 跨 turn 存在。
   const runDock =
     deps.runDock ??
     createRunDock({
-      onRepaint: deps.onRepaint,
+      onRepaint: repaint,
       now,
       setIntervalFn,
       clearIntervalFn,
@@ -226,15 +245,15 @@ export function createActivityIndicator(
       // 的 listBackground()（transient 前台 grace 包络不算后台），这里只把
       // 渲染需要的四个字段投影过去，registry 记录本身不进 UI 层。
       listProcs: (): RunZoneProc[] => {
-        const nowMs = Date.now();
-        return getProcessRegistry()
+        const nowMs = now();
+        return processRegistry
           .listBackground()
           .filter((proc) => {
             if (proc.status === "running") return true;
             // 残留窗口：成功留 3s、失败留 10s。退出时刻用 registry 记的
-            // durationMs 推算，没有就按 startedAt 兜底——不猜更细的时间。
-            const endedAt = proc.startedAt + (proc.resultCapsule?.durationMs ?? 0);
-            const failed = proc.status === "killed" || (proc.exitCode ?? 0) !== 0;
+            // endedAt 为准；旧记录再用 durationMs 或 startedAt 兜底。
+            const endedAt = proc.endedAt ?? proc.startedAt + (proc.resultCapsule?.durationMs ?? 0);
+            const failed = proc.status === "stopped" || proc.status === "failed" || (proc.exitCode ?? 0) !== 0;
             const window = failed ? PROC_LINGER_FAILURE_MS : PROC_LINGER_SUCCESS_MS;
             return nowMs - endedAt <= window;
           })
@@ -243,12 +262,14 @@ export function createActivityIndicator(
             label: proc.label,
             command: proc.command,
             startedAt: proc.startedAt,
-            status: proc.status,
+            status: proc.status === "stopped" ? "killed" : proc.status,
             exitCode: proc.exitCode,
-            durationMs: proc.resultCapsule?.durationMs,
+            durationMs: proc.resultCapsule?.durationMs ?? (proc.endedAt !== undefined ? proc.endedAt - proc.startedAt : undefined),
           }));
       },
     });
+
+  const unsubscribeBackground = processRegistry.onBackgroundChange(repaint);
 
   const updateAgentRun = (snapshot: AgentRunStatusSnapshot) => {
     runDock.update(snapshot);
@@ -308,7 +329,6 @@ export function createActivityIndicator(
     fallbackActive = false;
     fallbackStartedAt = 0;
     lastActivityAt = 0;
-    turnStartedAt = 0;
     stopping = false;
     // runDock 不清：后台 run 不随 turn 结束而结束。
   };
@@ -318,12 +338,16 @@ export function createActivityIndicator(
     updateAgentRun,
     clearAgentRun,
     getAgentRuns,
+    /** 固定运行区此刻逐行可见的 runId（见 runDock.visibleRunIds）。 */
+    getVisibleRunIds: (): ReadonlySet<string> => runDock.visibleRunIds(),
     getView,
     getActivityLines,
     markStopping,
     isStopping,
     stop,
     dispose() {
+      disposed = true;
+      unsubscribeBackground();
       stop();
       runDock.dispose();
     },

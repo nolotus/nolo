@@ -3,6 +3,7 @@
 
 import type { AgentRuntimeAgentConfig, AgentRuntimeMessageContent, AgentRuntimeToolCallInput, AgentRuntimeToolResult } from "agent-runtime";
 import { resolvePlatformAuthToken } from "agent-runtime/providerResolution";
+import { monotonicFactory } from "ulid";
 import type { DesktopAgentRuntimeActions } from "./desktopAgentRuntimeAdapter";
 import { inferCaptureIntent } from "ai/policy/runtimePolicy";
 import { parseNoloWorkspaceToolArguments } from "agent-runtime/noloWorkspaceTools";
@@ -214,8 +215,17 @@ export function resolveDesktopAgentRuntimeAuthToken(env: DesktopAgentRuntimeEnv)
   return resolvePlatformAuthToken(env);
 }
 
+// Desktop-local factory: Web Crypto supplies unbiased [0, 1) samples from
+// uint32 values for ULID's 80-bit random suffix, never Math.random. The factory
+// increments that suffix for equal/regressed timestamps, preserving strict
+// lexical order within this process; successive same-ms IDs are not independent
+// secrets. Leave the shared database ULID factory and its sorting contract alone.
+const desktopDialogUlid = monotonicFactory(() =>
+  crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000
+);
+
 export function createDesktopAgentRuntimeDialogId() {
-  return crypto.randomUUID();
+  return desktopDialogUlid();
 }
 
 export function filterDesktopServerWebToolNames(toolNames?: string[]) {
@@ -327,6 +337,12 @@ export function buildDesktopOpenAiTools(args: {
     ...buildDesktopChromeConnectorOpenAiTools({
       toolNames: args.toolNames,
     }),
+    // secret-request 只定义在 packages/ai/tools 的 baseToolDefinitions，此前
+    // 桌面装配路径没有任何投影点 → agent 声明了也进不了 provider 工具面。
+    // 与 CLI 的 CLI_DEFAULT_TOOLS 不同，桌面端不默认注入：显式声明才装配。
+    ...((args.toolNames ?? []).includes("secret-request")
+      ? prepareTools(["secret-request"])
+      : []),
     ...buildDesktopServerPlatformOpenAiTools({ toolNames: args.toolNames }),
     ...buildNoloWorkspaceOpenAiTools({
       toolNames: args.toolNames ? filterClientNoloWorkspaceToolNames(args.toolNames) : undefined,
@@ -394,6 +410,9 @@ export function buildDesktopLocalPolicyToolNames(args: {
     ...filterDesktopServerWebToolNames(args.toolNames),
     ...(hasDesktopStartAgentRunTool(args.toolNames) ? [DESKTOP_SERVER_START_AGENT_RUN_TOOL_NAME] : []),
     ...filterNoloWorkspaceToolNames(args.toolNames),
+    // secret-request 与 buildDesktopOpenAiTools 同步放行：声明了就要同时进
+    // policy 面，否则模型调用会被「outside the final run tool surface」拦死。
+    ...((args.toolNames ?? []).includes("secret-request") ? ["secret-request"] : []),
     // 与 buildDesktopOpenAiTools 同一道闸门：数据源工具在桌面端未放行时，
     // 连「声明了所以允许调用」的 policy 面也不能留下它们。
     ...filterExternalToolNamesForDesktop(args.toolNames),

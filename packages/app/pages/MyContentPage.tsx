@@ -1,5 +1,5 @@
 import "./MyContentPage.css";
-import React from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "app/routing";
 import { LuPlus } from "react-icons/lu";
@@ -13,6 +13,7 @@ import {
 import { useAgentDialog } from "ai/agent/hooks/useAgentDialog";
 import { APP_BUILDER_PUBLIC_AGENT_KEY } from "app/constants/appEditor";
 import Button from "render/web/ui/Button";
+import SearchInput from "render/web/ui/SearchInput";
 
 import MyContentCollection from "./MyContentCollection";
 
@@ -26,10 +27,13 @@ const MyContentPage: React.FC<MyContentPageProps> = ({ sectionId = "all" }) => {
   const section = getMyRouteSection(sectionId);
   const activeTab = section.tab ?? "all";
   const { startDialog: startAppBuilder } = useAgentDialog(APP_BUILDER_PUBLIC_AGENT_KEY);
+  // /apps 是作品库：搜索与创建收在同一行（紧凑），不再另起一整行工具条。
+  const isAppsSection = sectionId === "apps";
+  const [appSearch, setAppSearch] = useState("");
 
   return (
     <RequireSignedIn>
-      <div className="MyContentPage">
+      <div className={`MyContentPage${isAppsSection ? " MyContentPage--apps" : ""}`}>
         <div className="MyContentPage__header">
           <div className="MyContentPage__header-row">
             <div>
@@ -43,20 +47,33 @@ const MyContentPage: React.FC<MyContentPageProps> = ({ sectionId = "all" }) => {
                     )}
               </p>
             </div>
-            {sectionId === "apps" && (
-              <Button
-                onClick={() => startAppBuilder()}
-                icon={<LuPlus size={15} />}
-                size="medium"
-              >
-                {t("myApps_create", "创建应用")}
-              </Button>
+            {isAppsSection && (
+              <div className="MyContentPage__tools">
+                <SearchInput
+                  value={appSearch}
+                  onChange={setAppSearch}
+                  onSearch={() => {}}
+                  onClear={() => setAppSearch("")}
+                  placeholder={t("myApps_search_placeholder", "搜索应用…")}
+                  className="MyContentPage__search"
+                  size="small"
+                />
+                <Button
+                  onClick={() => startAppBuilder()}
+                  icon={<LuPlus size={15} />}
+                  size="medium"
+                >
+                  {t("myApps_create", "创建应用")}
+                </Button>
+              </div>
             )}
           </div>
         </div>
 
         <MyContentCollection
-          showSearch
+          showSearch={!isAppsSection}
+          searchQuery={isAppsSection ? appSearch : undefined}
+          onSearchQueryChange={isAppsSection ? setAppSearch : undefined}
           activeTab={activeTab}
           onTabChange={(tab) => navigate(getMyRoutePathForTab(tab))}
         />

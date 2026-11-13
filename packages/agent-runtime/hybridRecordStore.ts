@@ -11,7 +11,14 @@ export type HybridRecordKvDb = {
 };
 
 export type HybridRecordStore = {
-  read(dbKey: string, options?: { preferredServerOrigin?: string | null; remote?: boolean }): Promise<any>;
+  /**
+   * `timeoutMs`：**按这一次调用**覆盖远端 fallback 的整体预算（ms）。
+   * 只接受有限正数；缺省 / 非法值（0、负数、NaN、Infinity）一律回退到 store
+   * 级别的 `requestTimeoutMs`（默认 250ms），因此不传就是原有行为，其它调用方不受影响。
+   * 目的是给个别「必须跟服务器对齐」的关键读单独放宽预算（例如账号 settings 同步，
+   * 实测服务器往返 600ms+，而默认 250ms 必然超时），而不是全局调大所有 hybrid 读的预算。
+   */
+  read(dbKey: string, options?: { preferredServerOrigin?: string | null; remote?: boolean; onRemoteUnavailable?: () => void; timeoutMs?: number }): Promise<any>;
   write(dbKey: string, record: any): Promise<any>;
   batch(ops: Array<{ type: "put"; key: string; value: any }>): Promise<unknown>;
   iterator(options: { gte: string; lte?: string; lt?: string; reverse?: boolean; limit?: number }): AsyncIterable<[string, any]>;
@@ -103,6 +110,7 @@ async function fetchHybridRemoteRecord(args: {
   authToken?: string;
   fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   signal?: AbortSignal;
+  onUnavailable?: () => void;
 }) {
   const response = await args.fetchImpl(
     `${args.server}/api/v1/db/read/${encodeURIComponent(args.dbKey)}`,
@@ -114,9 +122,24 @@ async function fetchHybridRemoteRecord(args: {
       ...(args.signal ? { signal: args.signal } : {}),
     }
   );
-  if (!response.ok) return null;
-  const payload = await response.json().catch(() => null);
-  return normalizeHybridRecord(args.dbKey, payload?.data ?? payload, args.server);
+  if (!response.ok) {
+    if (response.status !== 404) args.onUnavailable?.();
+    return null;
+  }
+  let payload: any;
+  try {
+    payload = await response.json();
+  } catch {
+    args.onUnavailable?.();
+    return null;
+  }
+  const record = payload && typeof payload === "object" && "data" in payload
+    ? payload.data : payload;
+  if (record !== null && (!record || typeof record !== "object" || Array.isArray(record))) {
+    args.onUnavailable?.();
+    return null;
+  }
+  return normalizeHybridRecord(args.dbKey, record, args.server);
 }
 
 export function shouldCacheHybridRemoteRecord(remoteRecord: any, localRecord: any) {
@@ -167,8 +190,16 @@ export function createHybridRecordStore(
       // 超时/失败沿用既有 miss 语义（进 catch → 下一个 server / 返回本地），
       // 不新增重试；预算耗尽后不再发起新的远端请求，按 miss 返回本地结果。
       // requestTimeoutMs <= 0 → 关闭超时（保持历史行为）。
+      // 单次调用可用 options.timeoutMs 覆盖本次预算（仅接受有限正数，见类型注释），
+      // 未覆盖时沿用 store 级预算——其它调用方行为不变。
+      const effectiveTimeoutMs =
+        typeof options?.timeoutMs === "number" &&
+        Number.isFinite(options.timeoutMs) &&
+        options.timeoutMs > 0
+          ? options.timeoutMs
+          : requestTimeoutMs;
       const fallbackDeadlineMs =
-        requestTimeoutMs > 0 ? Date.now() + requestTimeoutMs : null;
+        effectiveTimeoutMs > 0 ? Date.now() + effectiveTimeoutMs : null;
 
       for (const server of resolveHybridServers(
         deps.defaultServer,
@@ -179,7 +210,10 @@ export function createHybridRecordStore(
           fallbackDeadlineMs === null
             ? null
             : fallbackDeadlineMs - Date.now();
-        if (remainingMs !== null && remainingMs <= 0) break;
+        if (remainingMs !== null && remainingMs <= 0) {
+          options?.onRemoteUnavailable?.();
+          break;
+        }
 
         let remoteRecord = null;
         try {
@@ -188,11 +222,13 @@ export function createHybridRecordStore(
             server,
             authToken: deps.authToken,
             fetchImpl,
+            onUnavailable: options?.onRemoteUnavailable,
             ...(remainingMs !== null
               ? { signal: AbortSignal.timeout(remainingMs) }
               : {}),
           });
         } catch {
+          options?.onRemoteUnavailable?.();
           // network error or timeout: advance to the next server sequentially
           continue;
         }

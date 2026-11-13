@@ -100,6 +100,32 @@ async function runCommand(binary: string, args: string[], cwd: string, maxResult
 // Argument builders
 // ───────────────────────────────────────────────────────────────────────────
 
+/**
+ * A caller exclude pattern is expressible by grep's `--exclude-dir` if and only
+ * if it explicitly specifies a directory (ending in `/**`, `/*`, or `/`) and the
+ * resulting directory name is a single bare name without path separators or
+ * wildcard characters (e.g. `node_modules/**`, `.git/**`, `coverage/`).
+ *
+ * Bare names without trailing slashes (e.g. `secret`, `.env`, `credentials`, `id_rsa`)
+ * could refer to files. Since grep `--exclude-dir` only skips directories, treating
+ * bare names as directories would leak matching files.
+ *
+ * Leading/trailing whitespace is preserved as-is so callers with whitespace
+ * in folder names are handled consistently without silent mismatch.
+ */
+export function extractGrepExcludeDir(pattern: string): string | null {
+  const p = pattern.replaceAll("\\", "/");
+  if (!p) return null;
+  if (!/\/(\*{1,2})?$/.test(p)) return null;
+  const clean = p.replace(/\/(\*{1,2})?$/, "");
+  if (!clean || clean.includes("/") || /[*?{}[\]]/.test(clean)) return null;
+  return clean;
+}
+
+export function isGrepExpressibleExclude(pattern: string): boolean {
+  return extractGrepExcludeDir(pattern) !== null;
+}
+
 function commandArgs(o: FileTextSearchOptions, binary: "rg" | "grep", target: string): string[] {
   const args = binary === "rg" ? ["--line-number", "--no-heading", "--color", "never", "--null"] : ["-RIn", "--binary-files=without-match", "--null"];
   // Workspace roots are often plain directories without .git (spills, app
@@ -117,13 +143,11 @@ function commandArgs(o: FileTextSearchOptions, binary: "rg" | "grep", target: st
     for (const x of o.exclude ?? []) args.push("--glob", `!${x}`);
     if (o.include) args.push("--glob", o.include);
   } else {
-    // grep is a lexical fallback with a limited CLI: it cannot express path
-    // globs, so only bare directory names translate to --exclude-dir. Caller
-    // patterns grep cannot express are simply not enforced by this engine;
-    // rg remains the full-semantics source of gitignore + exclusions.
+    // grep is only invoked when canGrepFulfillOptions(o) confirms every exclude
+    // can be fulfilled via --exclude-dir and include is a safe basename pattern.
     for (const x of o.exclude ?? []) {
-      const clean = x.replace(/\/\*\*$/, "");
-      if (clean && !clean.includes("/")) args.push("--exclude-dir", clean);
+      const clean = extractGrepExcludeDir(x);
+      if (clean) args.push("--exclude-dir", clean);
     }
     if (o.include) args.push("--include", o.include);
   }
@@ -262,6 +286,55 @@ async function jsSearch(o: FileTextSearchOptions, targetPath: string): Promise<F
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Grep capability guard
+//
+// Grep is a lexical fallback with limited CLI options. It only participates
+// when it can completely fulfill caller options. If caller requests gitignore
+// parity while a root .gitignore has patterns, or passes path-based includes
+// or complex/nested excludes (e.g. ALWAYS_EXCLUDED_GLOBS), grep steps aside
+// immediately in favor of the best-effort JS fallback (which enforces caller
+// globs and root .gitignore parity).
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function canGrepFulfillOptions(o: FileTextSearchOptions): Promise<boolean> {
+  // 1. Gitignore parity: grep has no gitignore engine.
+  // When includeIgnored is false/unset, if root .gitignore exists and is active,
+  // grep cannot fulfill ignore semantics. If .gitignore exists but cannot be read
+  // (e.g. EACCES), readRootGitignorePatterns throws rather than fail-open.
+  if (!o.includeIgnored) {
+    const gitignorePatterns = await readRootGitignorePatterns(o.root);
+    if (gitignorePatterns.length > 0) return false;
+  }
+
+  // 2. Include pattern:
+  // grep --include only matches file basenames. Path separators ('/' or '\\'),
+  // globstars ('**'), and character classes/braces ('[', ']', '{', '}') cannot be
+  // safely fulfilled by grep due to semantic mismatches with JS glob matching.
+  if (o.include) {
+    if (
+      o.include.includes("/") ||
+      o.include.includes("\\") ||
+      o.include.includes("**") ||
+      /[{}[\]]/.test(o.include)
+    ) {
+      return false;
+    }
+  }
+
+  // 3. Exclude patterns:
+  // Every caller exclude pattern must be strictly expressible as a bare --exclude-dir.
+  // Any pattern targeting files or nested paths (e.g. bare 'secret', '.env', 'public/assets/**')
+  // cannot be fulfilled by grep and would leak files; grep must step aside.
+  if (o.exclude && o.exclude.length > 0) {
+    for (const pattern of o.exclude) {
+      if (!isGrepExpressibleExclude(pattern)) return false;
+    }
+  }
+
+  return true;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Main entry (rg → grep → js)
 //
 // Truncation contract: the command is launched with maxResults + 1 record
@@ -283,6 +356,7 @@ export async function searchFileTextMatches(o: FileTextSearchOptions): Promise<F
 
   const run = o.runCommand ?? runCommand, max = o.maxResults;
   for (const entry of COMMAND_ENGINES) {
+    if (entry.engine === "grep" && !(await canGrepFulfillOptions(o))) continue;
     const injectedResolver = o[entry.binaryOption];
     const binary = injectedResolver ? injectedResolver() : resolveExecutableOnPath(entry.binaryName);
     if (!binary) continue;

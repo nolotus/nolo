@@ -34,6 +34,7 @@ import {
 import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
 import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
+import { listRunRecords } from "../agentRunControl";
 import { ulid } from "ulid";
 import { formatElapsedSeconds, renderContextPanel, renderCreditsDebug, renderKnownAgents, renderTuiHelp } from "./sessionRender";
 import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
@@ -196,6 +197,7 @@ export function handleTuiInput(
   input: string,
   state: TuiState,
   historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
+  deps?: { env?: EnvLike },
 ): TuiInputResult {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -465,7 +467,21 @@ export function handleTuiInput(
       }
       return { nextState: state, output: `${stateLine()}\n${t("autoUsage")}` };
     }
-    case "/tasks":
+    case "/tasks": {
+      const runs = state.dialogId
+        ? listRunRecords({ env: deps?.env ?? process.env }).filter(run => run.parentDialogId === state.dialogId)
+        : [];
+      const processes = getProcessRegistry().listBackground();
+      const lines = [
+        ...runs.map(run => `agent  ${run.title || run.agentName || run.agentKey}  ${run.status}  ${run.runId}`),
+        ...processes.map(p => {
+          // A derived label can be a token of the command, including secrets.
+          const title = p.label && p.command && !p.command.includes(p.label) ? p.label : "background process";
+          return `process  ${title}  ${p.status}  ${p.taskId}`;
+        }),
+      ];
+      return { nextState: state, output: `${lines.length ? lines.join("\n") : t("tasksNone")}\n/tasks show <id> | /tasks stop <id>` };
+    }
     case "/jobs":
     case "/procs": {
       const registry = getProcessRegistry();

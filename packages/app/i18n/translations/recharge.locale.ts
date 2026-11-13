@@ -449,4 +449,234 @@ export default {
       },
     },
   },
+  de: {
+    translation: {
+      recharge_page: {
+        title: "Aufladen",
+        viewPricing: "Preise anzeigen",
+        channel: { online: "Online-Zahlung", transfer: "Manuelle Überweisung" },
+        loading: "Verfügbare Zahlungsmethoden werden geladen...",
+        noOnlineChannel:
+          "Derzeit ist keine Online-Zahlungsmethode verfügbar. Bitte zahlen Sie per WeChat- / Alipay-QR-Überweisung.",
+        amountLabel: "Betrag",
+        credits: "{{count}} Punkte",
+        custom: "Benutzerdefiniert",
+        recommended: "Beliebt",
+        customPlaceholder:
+          "Geben Sie eine ganze Zahl zwischen {{min}} und {{max}} Punkten ein",
+        rateHint:
+          "{{min}}-{{max}} ganzzahlige Punkte pro Bestellung. Jeder Punkt entspricht CNY 1 Nennwert; Kartengebühren werden separat ausgewiesen. Steuern und Bankwechselkurse können an der Kasse hinzukommen.",
+        neverExpire: "Punkte verfallen nie.",
+        unlockPro: "Noch {{n}} Punkte schalten Pro frei – Echtzeit-Websuche und Batch-Dateianalyse.",
+        bestValue: "Bester Wert",
+        receipt: {
+          principal: "Nennbetrag",
+          fee: "Bearbeitungsgebühr",
+          total: "Gesamt",
+          cnyTotal: "Gesamt ¥{{totalCny}} (inkl. 3,9 % Gebühr ¥{{feeCny}})",
+          usdTotal: "Nennbetrag ${{principalUsd}} + Gebühr ≈${{feeUsd}} = ${{totalUsd}}",
+          fixedFeeNote: "Die Gebühr enthält einen festen Anteil von $0.50 – höhere Aufladungen sind wirtschaftlicher.",
+        },
+        tierMinHint: "Mindestbetrag bei Kartenzahlung beträgt {{min}} Punkte (inkl. $0.50 fester Gebühr)",
+        waffoTrust:
+          "Zahlungen werden von Waffo Pancake unter PCI-DSS verarbeitet. Punkte werden nach Bestätigung der Zahlung automatisch gutgeschrieben.",
+        refundNotice:
+          "Digitale Güter: Verbrauchte Punkte können nicht erstattet werden. Jede Erstattung versteht sich abzüglich der bereits angefallenen Kanalgebühr zuzüglich einer Erstattungsgebühr von $1.00.",
+        transferRefundNotice:
+          "Manuelle Aufladungen können vollständig erstattet werden, solange die Punkte ungenutzt bleiben.",
+        methodLabel: "Zahlungsmethode",
+        methods: {
+          waffo: { name: "Globale Zahlung", desc: "Visa / MasterCard / Apple Pay" },
+          cnyWechat: { name: "WeChat Pay (CNY)", desc: "In RMB über WeChat bezahlen; 1 Punkt = CNY 1 Nennbetrag + 3,9 % Bearbeitungsgebühr" },
+          wechat: { name: "WeChat Pay", desc: "QR-Überweisung" },
+          alipay: { name: "Alipay", desc: "QR-Überweisung" },
+          cryptoDesc: "{{network}}-Netzwerk",
+        },
+        submit: {
+          pay: "Jetzt bezahlen",
+          paying: "Bestellung wird erstellt...",
+          getAddress: "Meine {{token}}-Einzahlungsadresse abrufen",
+          gettingAddress: "Wird geladen...",
+        },
+        account: "Punkte gehen an Ihr aktuelles Konto ({{username}})",
+        accountWithBalance:
+          "Punkte gehen an Ihr aktuelles Konto ({{username}}) · Guthaben {{balance}} Punkte",
+        balanceBadge: "Guthaben: {{balance}} Punkte",
+        notLoggedIn: "nicht angemeldet",
+        cryptoHint:
+          "Nur offizielle {{token}} im {{network}}-Netzwerk. Punkte werden aus dem tatsächlich eingegangenen Betrag umgerechnet: 1 {{token}} = {{rate}} Punkte, Mindesteinzahlung für automatische Gutschrift: {{min}} Punkte{{confirmations}}. Die Adresse ist an Ihr Konto gebunden und wiederverwendbar.",
+        cryptoConfirmations: ", Gutschrift nach {{count}} On-Chain-Bestätigungen",
+        addressLabel: "{{network}} {{token}} Einzahlungsadresse",
+        copyAddress: "Adresse kopieren",
+        transferRate:
+          "CNY 1 = 1 Punkt. Überweisen Sie einen beliebigen Betrag – die entsprechende Punktzahl wird gutgeschrieben.",
+        noticePrefix: "Bitte geben Sie Ihren Benutzernamen im Verwendungszweck an:",
+        noticeWarning:
+          "Dieser Kanal wird manuell gutgeschrieben. Der Verwendungszweck ist der einzige Nachweis über den Absender – ohne diesen können wir Ihre Überweisung nicht zuordnen.",
+        qrTip: "Öffnen Sie {{name}} und scannen Sie den Code zum Bezahlen",
+        qrLoading: "Wird sicher geladen...",
+        qrAlt: "{{name}}-Zahlungs-QR-Code",
+        returnMessage: {
+          success:
+            "Zahlung übermittelt. Punkte werden nach Bestätigung der Rückmeldung automatisch gutgeschrieben.",
+          failed: "Zahlung wurde nicht abgeschlossen. Bitte versuchen Sie es erneut.",
+          cancel: "Diese Zahlung wurde abgebrochen.",
+        },
+        orderState: {
+          awaitingPayment:
+            "Kasse in einem neuen Fenster geöffnet · diese Seite wird nach Abschluss der Zahlung aktualisiert",
+          reopenCheckout: "Nicht geöffnet? Kasse erneut öffnen",
+          confirming: "Zahlung erhalten — Guthaben wird bestätigt…",
+          credited: "+{{delta}} Punkte gutgeschrieben · Guthaben {{balance}}",
+          delayed: "Zahlungsbestätigung verzögert sich — Punkte treffen normalerweise innerhalb von 1 Minute ein",
+          refreshBalance: "Guthaben aktualisieren",
+          failedTitle: "Zahlung nicht abgeschlossen",
+          retry: "Wiederholen",
+          switchToManual: "Stattdessen manuelle Überweisung nutzen (gebührenfrei)",
+          cancelTitle: "Zahlung abgebrochen",
+          contactSupport: "Support kontaktieren",
+          viewUsage: "Nutzung anzeigen",
+        },
+        copyUsername: "Benutzernamen kopieren",
+        copiedUsername: "Kopiert – im Verwendungszweck einfügen",
+        transferDone: "Ich habe die Überweisung abgeschlossen",
+        transferWaiting:
+          "Erfasst – die Gutschrift erfolgt in der Regel innerhalb von 1–30 Min. (an Feiertagen evtl. länger). Das Guthaben aktualisiert sich automatisch; Sie müssen nicht auf dieser Seite bleiben.",
+        transferWaitingExpired: "Nach 30 Minuten immer noch nicht gutgeschrieben?",
+        suggestAmount: "Vorschlag: ¥{{amount}}",
+        errors: {
+          invalidAmount:
+            "Geben Sie eine ganze Zahl zwischen {{min}} und {{max}} Punkten ein",
+          loginRequired: "Bitte vor dem Aufladen anmelden",
+          serverUnavailable: "Der Server ist nicht erreichbar. Bitte versuchen Sie es später erneut.",
+          createOrder: "Zahlungsauftrag konnte nicht erstellt werden",
+          createAddress: "{{token}}-Adresse konnte nicht abgerufen werden",
+          methodUnavailable:
+            "Diese Zahlungsmethode ist derzeit nicht verfügbar. Bitte wählen Sie eine andere.",
+        },
+        notesTitle: "Hinweise",
+        notes: [
+          `Punkte werden nach tatsächlichem Token-Verbrauch abgerechnet und verfallen nie. Ein Guthaben von ${ADVANCED_FEATURE_MIN_BALANCE} Punkten schaltet Pro frei (Echtzeit-Websuche, Batch-Dateianalyse und mehr).`,
+          `Eine einmalige Aufladung von mindestens ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} Punkten schaltet Advanced frei (GPT Pro, Claude Opus, Kimi K3 und ähnliche Modelle). Jeder Zahlungsweg zählt.`,
+          "Online-Zahlungen werden automatisch gutgeschrieben, sobald der Anbieter die Rückmeldung bestätigt. WeChat- / Alipay-Überweisungen werden manuell gutgeschrieben, normalerweise innerhalb von 1–30 Minuten, an Feiertagen möglicherweise mit Verzögerung.",
+          "Selbst gekaufte Punkte, die zu 100 % ungenutzt sind, können innerhalb von 7 Tagen vollständig erstattet werden. Für Erstattungen und weitere Fragen kontaktieren Sie {{email}}.",
+        ],
+      },
+    },
+  },
+  es: {
+    translation: {
+      recharge_page: {
+        title: "Recargar",
+        viewPricing: "Ver precios",
+        channel: { online: "Pago online", transfer: "Pago manual" },
+        loading: "Cargando métodos de pago disponibles...",
+        noOnlineChannel:
+          "No hay ningún método de pago online disponible en este momento. Por favor, paga mediante transferencia por código QR de WeChat / Alipay.",
+        amountLabel: "Importe",
+        credits: "{{count}} puntos",
+        custom: "Personalizado",
+        recommended: "Popular",
+        customPlaceholder:
+          "Introduce un número entero entre {{min}} y {{max}} puntos",
+        rateHint:
+          "{{min}}-{{max}} créditos enteros por pedido. Cada crédito tiene un valor nominal de CNY 1; las comisiones de procesamiento de tarjeta se muestran por separado. Es posible que se agreguen impuestos y comisiones por cambio de divisa al finalizar la compra.",
+        neverExpire: "Los puntos nunca caducan.",
+        unlockPro: "{{n}} puntos más desbloquean Pro: búsqueda web en tiempo real y análisis de archivos por lotes.",
+        bestValue: "Mejor valor",
+        receipt: {
+          principal: "Principal",
+          fee: "Comisión de procesamiento",
+          total: "Total",
+          cnyTotal: "Total ¥{{totalCny}} (incluye comisión del 3,9% ¥{{feeCny}})",
+          usdTotal: "Principal ${{principalUsd}} + comisión ≈${{feeUsd}} = ${{totalUsd}}",
+          fixedFeeNote: "La comisión incluye una parte fija de $0.50; las recargas mayores son más rentables.",
+        },
+        tierMinHint: "El mínimo para pago con tarjeta es de {{min}} puntos (incluye comisión fija de $0.50)",
+        waffoTrust:
+          "Los pagos son procesados por Waffo Pancake bajo PCI-DSS. Los puntos se acreditan automáticamente tras confirmarse el pago.",
+        refundNotice:
+          "Bienes digitales: los créditos consumidos no son reembolsables, y cualquier reembolso es neto de la comisión del canal ya incurrida más una tarifa de procesamiento de reembolso de $1.00.",
+        transferRefundNotice:
+          "Las recargas manuales se pueden reembolsar íntegramente mientras los créditos permanezcan sin usar.",
+        methodLabel: "Método de pago",
+        methods: {
+          waffo: { name: "Pago global", desc: "Visa / MasterCard / Apple Pay" },
+          cnyWechat: { name: "WeChat Pay (CNY)", desc: "Paga en RMB con WeChat; 1 crédito = CNY 1 principal + comisión del 3,9%" },
+          wechat: { name: "WeChat Pay", desc: "Transferencia QR" },
+          alipay: { name: "Alipay", desc: "Transferencia QR" },
+          cryptoDesc: "Red {{network}}",
+        },
+        submit: {
+          pay: "Pagar ahora",
+          paying: "Creando pedido...",
+          getAddress: "Obtener mi dirección de depósito {{token}}",
+          gettingAddress: "Cargando...",
+        },
+        account: "Los puntos van a tu cuenta actual ({{username}})",
+        accountWithBalance:
+          "Los puntos van a tu cuenta actual ({{username}}) · saldo {{balance}} puntos",
+        balanceBadge: "Saldo: {{balance}} puntos",
+        notLoggedIn: "no has iniciado sesión",
+        cryptoHint:
+          "Solo {{token}} oficial en {{network}}. Los puntos se convierten a partir de la cantidad realmente recibida: 1 {{token}} = {{rate}} puntos, mínimo {{min}} puntos para acreditación automática{{confirmations}}. La dirección está vinculada a tu cuenta y se puede reutilizar.",
+        cryptoConfirmations: ", acreditado tras {{count}} confirmaciones en cadena",
+        addressLabel: "Dirección de depósito {{network}} {{token}}",
+        copyAddress: "Copiar dirección",
+        transferRate:
+          "CNY 1 = 1 punto. Transfiere cualquier importe: se acreditará la misma cantidad de puntos.",
+        noticePrefix: "Por favor, introduce tu nombre de usuario en el concepto de la transferencia:",
+        noticeWarning:
+          "Este canal se acredita manualmente. El concepto es el único comprobante de quién realizó el pago; sin él no podemos asociar tu transferencia.",
+        qrTip: "Abre {{name}} y escanea el código para pagar",
+        qrLoading: "Cargando de forma segura...",
+        qrAlt: "Código QR de pago con {{name}}",
+        returnMessage: {
+          success:
+            "Pago enviado. Los puntos se acreditan automáticamente una vez confirmada la respuesta.",
+          failed: "El pago no se completó. Por favor, inténtalo de nuevo.",
+          cancel: "Este pago fue cancelado.",
+        },
+        orderState: {
+          awaitingPayment:
+            "Pasarela abierta en una nueva ventana · esta página se actualizará tras completar el pago",
+          reopenCheckout: "¿No se abrió? Volver a abrir la pasarela",
+          confirming: "Pago recibido: confirmando tu saldo…",
+          credited: "+{{delta}} puntos acreditados · saldo {{balance}}",
+          delayed: "La confirmación del pago se ha retrasado: los puntos suelen llegar en 1 minuto",
+          refreshBalance: "Actualizar saldo",
+          failedTitle: "Pago no completado",
+          retry: "Reintentar",
+          switchToManual: "Usar pago manual en su lugar (sin comisiones)",
+          cancelTitle: "Pago cancelado",
+          contactSupport: "Contactar con soporte",
+          viewUsage: "Ver uso",
+        },
+        copyUsername: "Copiar nombre de usuario",
+        copiedUsername: "Copiado: pégalo en el concepto de la transferencia",
+        transferDone: "He completado la transferencia",
+        transferWaiting:
+          "Anotado: suele acreditarse en 1–30 min (puede tardar más en festivos). El saldo se actualiza automáticamente; no necesitas permanecer en esta página.",
+        transferWaitingExpired: "¿Todavía no se ha acreditado tras 30 min?",
+        suggestAmount: "Sugerir ¥{{amount}}",
+        errors: {
+          invalidAmount:
+            "Introduce un número entero entre {{min}} y {{max}} puntos",
+          loginRequired: "Por favor, inicia sesión antes de recargar",
+          serverUnavailable: "El servidor no está disponible. Por favor, inténtalo de nuevo más tarde.",
+          createOrder: "No se pudo crear el pedido de pago",
+          createAddress: "No se pudo obtener la dirección de {{token}}",
+          methodUnavailable:
+            "Este método de pago no está disponible actualmente. Por favor, elige otro.",
+        },
+        notesTitle: "Notas",
+        notes: [
+          `Los puntos se facturan según el uso real de tokens y nunca caducan. Un saldo de ${ADVANCED_FEATURE_MIN_BALANCE} puntos desbloquea Pro (búsqueda web en tiempo real, análisis de archivos por lotes y más).`,
+          `Una recarga única de ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} puntos o más desbloquea Advanced (GPT Pro, Claude Opus, Kimi K3 y modelos similares). Todos los canales de pago son válidos.`,
+          "Los pagos online se acreditan automáticamente tras la confirmación del proveedor. Las transferencias de WeChat / Alipay se procesan manualmente, generalmente en un plazo de 1 a 30 minutos, con posibles demoras en días festivos.",
+          "Los puntos comprados que estén 100% sin usar se pueden reembolsar íntegramente en un plazo de 7 días. Para reembolsos y otras consultas, contacta con {{email}}.",
+        ],
+      },
+    },
+  },
 };

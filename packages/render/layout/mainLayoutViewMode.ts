@@ -15,6 +15,7 @@ export interface SpaceRouteContext {
   spaceId: string | null;
   routeSection:
     | "root"
+    | "contents"
     | "files"
     | "ai"
     | "members"
@@ -69,7 +70,9 @@ export function getSpaceRouteContext(pathname: string): SpaceRouteContext {
   let routeSection: SpaceRouteContext["routeSection"] = "root";
   if (descendantPath) {
     const sectionSegment = descendantPath.split("/")[0];
-    if (["files", "ai", "members", "settings"].includes(sectionSegment)) {
+    // "contents" 是空间「全部内容」页（原空间首页的内容浏览器），与 files/ai 一样
+    // 属于空间子区段而不是内容 key，否则会被当成 content 页渲染错的顶栏/壳。
+    if (["contents", "files", "ai", "members", "settings"].includes(sectionSegment)) {
       routeSection = sectionSegment as any;
     } else {
       routeSection = "content";
@@ -117,7 +120,8 @@ export function getRouteDescriptor(pathname: string): RouteDescriptor {
       };
     } else {
       let topbarMode: TopBarMode = "space-root";
-      if (section === "files") topbarMode = "space-files";
+      if (section === "contents") topbarMode = "space-root";
+      else if (section === "files") topbarMode = "space-files";
       else if (section === "ai") topbarMode = "space-ai";
       else if (section === "members") topbarMode = "space-members";
       else if (section === "settings") topbarMode = "space-settings";
@@ -168,4 +172,23 @@ export function shouldForceCategoriesViewMode(
   viewMode: string
 ): boolean {
   return isSpaceRoutePath(pathname) && viewMode !== "categories";
+}
+
+/**
+ * Whether the ChatSidebar should keep the multi-space workspace for a route.
+ *
+ * Object detail routes (top-level single-segment content keys: agent/cybot/
+ * dialog/page/meta/app/image/file/task) and Space routes (root or nested
+ * subpages) must not fall back to the single-space category sidebar just
+ * because the entity resolves to a space or the persisted viewMode is
+ * "categories" — the sidebar scope is a route decision, not an entity one.
+ *
+ * Favorites / Explore are Rail destinations handled before this predicate;
+ * Life / account / profile / recharge keep their dedicated layouts and are
+ * not content routes, so they stay out.
+ */
+export function shouldUseMultiSpaceWorkspace(pathname: string): boolean {
+  if (isSpaceRoutePath(pathname)) return true;
+  const descriptor = getRouteDescriptor(pathname);
+  return descriptor.routeKind === "global" && descriptor.routeSection === "content";
 }

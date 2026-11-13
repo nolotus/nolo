@@ -37,6 +37,7 @@ export const desktopRuntimeRoutes: Record<string, any> = createApiRouteFamily([
   { path: "/api/desktop/oauth/:provider/start", enableCors: false, handlers: { POST: d("handleDesktopOAuthStartPost") } },
   { path: "/api/desktop/oauth/:provider", enableCors: false, handlers: { DELETE: d("handleDesktopOAuthDelete") } },
   { path: "/api/desktop/agent-runtime/turn", enableCors: false, handlers: { POST: d("handleDesktopAgentRuntimeTurnPost") } },
+  { path: "/api/desktop/agent-runtime/action-gate/:gateId", enableCors: false, handlers: { POST: d("handleDesktopAgentRuntimeActionGatePost") } },
   { path: "/api/desktop/local-connector/start", handlers: { POST: lazyHandler(loadDesktopLocalConnector, "handleDesktopLocalConnectorStart") } },
   { path: "/api/desktop/music/status", enableCors: false, handlers: { GET: d("handleDesktopMusicStatusGet") } },
   { path: "/api/desktop/music/login", enableCors: false, handlers: { POST: d("handleDesktopMusicLoginPost") } },

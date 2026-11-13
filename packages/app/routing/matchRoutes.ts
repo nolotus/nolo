@@ -5,6 +5,8 @@ export type RouteObject = {
   index?: boolean;
   element?: React.ReactNode;
   children?: RouteObject[];
+  /** 可选路由标识。服务端用它识别 catch-all 404 路由（见 app/web/routes.tsx）。 */
+  id?: string;
 };
 
 export type RouteMatch = {

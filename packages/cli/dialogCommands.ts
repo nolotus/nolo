@@ -24,6 +24,12 @@ import {
 import { createClientLogger } from "core/clientLogger";
 import { toErrorMessage } from "core/errorMessage";
 import { isRecord } from "core/isRecord";
+import {
+  dialogIdFromKey,
+  isSupportedDialogId,
+  parseDialogPathIdentity,
+  splitDialogKeyIdentity,
+} from "core/dialogKeyIdentity";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { DEFAULT_LOCAL_API_ORIGIN } from "../core/localOrigins";
 import { existsSync, realpathSync } from "node:fs";
@@ -74,8 +80,6 @@ export type ListedDialog = {
   cybots: string[];
 };
 
-const DIALOG_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
-const DIALOG_PATH_RE = /^\/(?:space\/([^/]+)\/)?dialog-(.+)-([0-9A-HJKMNP-TV-Z]{26})\/?$/i;
 const DEFAULT_DIALOG_LIST_LIMIT = 50;
 const DEFAULT_DIALOG_QUERY_LIMIT = 50;
 const UNBOUNDED_DIALOG_CAP = 100_000;
@@ -220,38 +224,37 @@ function writeJsonlStream(output: { write(chunk: string): unknown }, items: unkn
 }
 
 function getDialogIdFromKey(dbKey: string) {
-  const index = dbKey.lastIndexOf("-");
-  return index >= 0 ? dbKey.slice(index + 1) : dbKey;
+  return dialogIdFromKey(dbKey);
 }
 
 function resolveDialogInput(rawInput: string, userId: string) {
   const raw = rawInput.trim();
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
     const url = new URL(raw);
-    const match = url.pathname.match(DIALOG_PATH_RE);
-    if (!match) {
+    const identity = parseDialogPathIdentity(url.pathname);
+    if (!identity) {
       throw new Error(`Unsupported dialog URL path: ${url.pathname}`);
     }
-    const [, spaceId, ownerId, dialogId] = match;
     return {
-      dbKey: `dialog-${ownerId}-${dialogId}`,
-      dialogId,
-      ownerId,
-      spaceId: spaceId ? decodeURIComponent(spaceId) : null,
+      dbKey: `dialog-${identity.ownerId}-${identity.dialogId}`,
+      dialogId: identity.dialogId,
+      ownerId: identity.ownerId,
+      spaceId: identity.spaceId,
     };
   }
 
   if (raw.startsWith("dialog-")) {
-    const dialogId = getDialogIdFromKey(raw);
+    const identity = splitDialogKeyIdentity(raw);
+    if (!identity) throw new Error(`Unsupported dialog key: ${raw}`);
     return {
       dbKey: raw,
-      dialogId,
-      ownerId: raw.slice("dialog-".length, Math.max("dialog-".length, raw.length - dialogId.length - 1)),
+      dialogId: identity.dialogId,
+      ownerId: identity.userId,
       spaceId: null,
     };
   }
 
-  if (!DIALOG_ID_RE.test(raw)) {
+  if (!isSupportedDialogId(raw)) {
     throw new Error(`Unsupported dialog id: ${raw}`);
   }
 
@@ -511,31 +514,30 @@ function resolveDialogReadTarget(args: string[], env: Record<string, string | un
   const raw = rawInput.trim();
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
     const url = new URL(raw);
-    const match = url.pathname.match(DIALOG_PATH_RE);
-    if (!match) throw new Error(`Unsupported dialog URL path: ${url.pathname}`);
-    const [, spaceId, ownerId, dialogId] = match;
+    const identity = parseDialogPathIdentity(url.pathname);
+    if (!identity) throw new Error(`Unsupported dialog URL path: ${url.pathname}`);
     const base = preferredServer ?? env.READ_DIALOG_BASE ?? url.origin;
     return {
       base,
-      dialogId,
-      dialogKey: `dialog-${ownerId}-${dialogId}`,
-      userId: ownerId,
-      spaceId: spaceId ? decodeURIComponent(spaceId) : undefined,
+      dialogId: identity.dialogId,
+      dialogKey: `dialog-${identity.ownerId}-${identity.dialogId}`,
+      userId: identity.ownerId,
+      spaceId: identity.spaceId ?? undefined,
     };
   }
 
   if (raw.startsWith("dialog-")) {
-    const dialogId = getDialogIdFromKey(raw);
-    const ownerId = raw.slice("dialog-".length, Math.max("dialog-".length, raw.length - dialogId.length - 1));
+    const identity = splitDialogKeyIdentity(raw);
+    if (!identity) throw new Error(`Unsupported dialog key: ${raw}`);
     return {
       base: preferredServer ?? env.READ_DIALOG_BASE ?? resolveServerUrl(args, env),
-      dialogId,
+      dialogId: identity.dialogId,
       dialogKey: raw,
-      userId: ownerId || ownerFallback,
+      userId: identity.userId,
     };
   }
 
-  if (!DIALOG_ID_RE.test(raw)) {
+  if (!isSupportedDialogId(raw)) {
     throw new Error(`Unsupported dialog id: ${raw}`);
   }
 

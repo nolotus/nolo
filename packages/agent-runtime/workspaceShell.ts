@@ -1,3 +1,9 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+const shellChildEnvironment = new AsyncLocalStorage<Record<string, string>>();
+/** Host-only per-call child environment; never mutates process.env. */
+export function withShellChildEnvironment<T>(env: Record<string, string>, run: () => T): T {
+  return shellChildEnvironment.run(env, run);
+}
 // packages/agent-runtime/workspaceShell.ts
 //
 // Neutral low-level primitives for workspace shell execution, command building,
@@ -26,6 +32,7 @@ import {
 import { getProcessRegistry } from "./processRegistry";
 import type { ProcessOwner } from "./processOwnership";
 import { buildProcessTaskResultCapsule, type ProcessTaskResultCapsule } from "./processTaskResult";
+import { formatSpilledToolOutput, TOOL_OUTPUT_SPILL_BYTES, TOOL_OUTPUT_SPILL_LINES, isSpilledToolOutput } from "./toolOutputSpillProjection";
 import { promoteToolSpillFile, spillToolOutput } from "./toolSpillStore";
 
 export const EXEC_SHELL_TIMEOUT_ENV = "NOLO_EXEC_SHELL_TIMEOUT_MS";
@@ -475,20 +482,55 @@ export function truncateToolOutput(
   limit = 20_000,
   options?: { toolName?: string; workspaceRoot?: string },
 ): string {
+  if (isSpilledToolOutput(value)) return value;
   if (value.length <= limit) return value;
   let spillNote = "";
+  let spillPathOnly = "";
   try {
     const spill = spillToolOutput({
       content: value,
       toolName: options?.toolName ?? "execShell",
       workspaceRoot: options?.workspaceRoot,
     });
-    spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}`;
+    spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}; hint=read a range, not the whole spill (readFile lines=A-B or sed -n 'A,Bp'); a full read re-injects ${spill.totalChars} chars`;
+    spillPathOnly = `; spillFile=${spill.displayPath}`;
   } catch {
     // Fail-open: ignore spill errors to prevent breaking execution
   }
   const approxMarkerLen = 40 + spillNote.length;
-  if (limit <= approxMarkerLen) return value.slice(0, limit);
+  if (limit <= approxMarkerLen) {
+    // limit 装不下「标记 + 正文」时，**不允许静默截断**：旧实现直接
+    // `value.slice(0, limit)` 返回原文前缀，调用方看到的内容像是完整的，
+    // 无从判断已被砍掉（2026-11-10 实测：desktop runtimeToolPolicy 的
+    // shell.maxOutputBytes=120 正好落进这个分支）。
+    //
+    // 该分支按信息重要性从高到低填预算，容量不足时宁可舍弃次要信息：
+    //   1) 「已被截断 + 省略了多少」——必须保住，否则等于静默截断；
+    //   2) spill 路径——只在放得下时附加；放不下时明确说标记本身也被压缩了，
+    //      不假装给出了可用的全文位置。
+    const notice = `[... truncated ${value.length} chars]`;
+    const withFullNote = `[... truncated ${value.length} chars${spillNote} ...]`;
+    if (withFullNote.length <= limit) return withFullNote;
+    // 完整标记放不下，但路径本身通常放得下：保留路径比保留 hint 更有用。
+    const withPath = `[... truncated ${value.length} chars${spillPathOnly} ...]`;
+    if (withPath.length <= limit) return withPath;
+    if (notice.length <= limit) {
+      // 放得下告知、放不下路径：保留告知并标注路径省略，避免误以为没有更多内容。
+      const pathOmitted = " [... path omitted]";
+      return notice.length + pathOmitted.length <= limit ? notice + pathOmitted : notice;
+    }
+    // 连告知都放不下：这是极小预算（limit < notice.length，约 25 字符）。
+    //
+    // 契约在这里**必须收窄**，因为字符串预算存在数学上的固有限制：任何固定长度的
+    // 前缀（包括标记、省略号）都必然与某一段原文的前缀相同，无法在纯字符串返回值里
+    // 构造出「永不与原文碰撞」的标记。审查已用 `"…"+"x".repeat(600)` 与
+    // `"[".repeat(600)` 两种原文分别击穿 `"…"` 与 `"["` 方案。
+    //
+    // 因此该分支只承诺：**不返回原文内容**（不泄漏被截断的正文），使用省略号占位。
+    // 调用方若需要区分，应提高 limit 至 >= notice.length（约 25 字符），
+    // 此时一定会得到带 `truncated N chars` 的显式标记。
+    return limit <= 0 ? "" : "…";
+  }
   const remaining = limit - approxMarkerLen;
   const headSize = Math.floor(remaining * 0.3);
   const tailSize = remaining - headSize;
@@ -510,6 +552,8 @@ function removeSpillFile(path: string): void {
 }
 
 export interface ReadNodeStreamOptions {
+  /** Source-level line threshold; enabled for command output capture. */
+  maxLines?: number;
   /** In-memory retention cap (default DEFAULT_MAX_STREAM_BUFFER_BYTES). */
   maxBytes?: number;
   /** When set, the complete output (retained head + every later chunk) is
@@ -555,6 +599,13 @@ type SpillState = "disabled" | "idle" | "open" | "ok" | "failed";
 export function readNodeStream(
   stream: NodeJS.ReadableStream | null,
   maxBytesOrOptions: number | ReadNodeStreamOptions = DEFAULT_MAX_STREAM_BUFFER_BYTES,
+  /** Internal capture cutoff: leave the source flowing, freeze only retention. */
+  capture?: {
+    stopSignal: AbortSignal;
+    onIncomplete: (reason: string) => void;
+    /** Internal test seam for a controllably delayed retention operation. */
+    promoteSpill?: typeof promoteToolSpillFile;
+  },
 ): Promise<string> {
   if (!stream) return Promise.resolve("");
   const options: ReadNodeStreamOptions =
@@ -573,7 +624,17 @@ export function readNodeStream(
   return new Promise<string>((resolveStream, rejectStream) => {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
+    let observedBytes = 0;
+    let observedLines = 1;
+    let tail = Buffer.alloc(0);
     let settled = false;
+    let captureResolved = false;
+    const resolveCapture = (text: string) => {
+      if (captureResolved) return;
+      captureResolved = true;
+      capture?.stopSignal.removeEventListener("abort", stopCapture);
+      resolveStream(text);
+    };
     let truncated = false;
 
     let spillState: SpillState = spillPath ? "idle" : "disabled";
@@ -586,6 +647,9 @@ export function readNodeStream(
     let spillSink: NodeJS.WritableStream | null = null;
     let sourcePausedForSpill = false;
     let sinkFinished = false;
+    // Once retention owns the file, no cutoff or late sink event may mutate
+    // its state or start another cleanup while promotion is reading it.
+    let spillSettlement: Promise<void> | undefined;
 
     const formatLimit =
       maxBytes >= 1024 * 1024
@@ -606,7 +670,7 @@ export function readNodeStream(
      *  the sink (closing its fd) and let the source flow again so a broken
      *  spill can never stall the capture. */
     const markSpillFailed = (error: unknown) => {
-      if (spillState === "failed") return;
+      if (spillSettlement || spillState === "failed") return;
       spillState = "failed";
       if (!spillError) {
         spillError = toErrorMessage(error);
@@ -692,31 +756,36 @@ export function readNodeStream(
      *  deletes it. Runs on every terminal path — normal end, source error,
      *  timeout, abort — so a spill file never outlives the command that
      *  produced it. */
-    const settleSpillRetention = async () => {
-      if (!spillPath || spillRetention === "keep") {
-        if (spillPath && spillRetention === "keep" && spillState === "ok") {
-          spillRetainedPath = spillPath;
-        }
-        return;
-      }
-      // 只有「source 真读到 end」才可能宣称完整：close 可能在没有 end 的情况下
-      // 先到（下游提前关闭），此时文件里只是已收到的字节，不能当完整输出搬运出去。
-      if (spillRetention === "promote" && spillState === "ok" && sourceEnded) {
-        const promoted = await promoteToolSpillFile(spillPath, {
-          workspaceRoot: options.spillWorkspaceRoot,
-        });
-        if (promoted.ok) {
-          spillRetainedPath = promoted.displayPath;
+    const settleSpillRetention = (): Promise<void> => {
+      if (spillSettlement) return spillSettlement;
+      // Publish ownership before running any retention side effect.
+      spillSettlement = Promise.resolve().then(async () => {
+        if (!spillPath || spillRetention === "keep") {
+          if (spillPath && spillRetention === "keep" && spillState === "ok") {
+            spillRetainedPath = spillPath;
+          }
           return;
         }
-        if (promoted.preservedPath) {
-          // 完整内容还在磁盘上（发布失败）：不许删，也不要对外宣称完整输出。
-          return;
+        // 只有「source 真读到 end」才可能宣称完整：close 可能在没有 end 的情况下
+        // 先到（下游提前关闭），此时文件里只是已收到的字节，不能当完整输出搬运出去。
+        if (spillRetention === "promote" && spillState === "ok" && sourceEnded) {
+          const promoted = await (capture?.promoteSpill ?? promoteToolSpillFile)(spillPath, {
+            workspaceRoot: options.spillWorkspaceRoot,
+          });
+          if (promoted.ok) {
+            spillRetainedPath = promoted.displayPath;
+            return;
+          }
+          if (promoted.preservedPath) {
+            // 完整内容还在磁盘上（发布失败）：不许删，也不要对外宣称完整输出。
+            return;
+          }
         }
-      }
-      // Nothing worth keeping (never opened, incomplete, or promotion
-      // failed): drop the temp file instead of leaking it.
-      removeSpillFile(spillPath);
+        // Nothing worth keeping (never opened, incomplete, or promotion
+        // failed): drop the temp file instead of leaking it.
+        removeSpillFile(spillPath);
+      });
+      return spillSettlement;
     };
 
     const finalize = (wasTruncated: boolean) => {
@@ -726,8 +795,17 @@ export function readNodeStream(
       const baseText = Buffer.concat(chunks).toString("utf8");
 
       const done = async () => {
+        if (captureResolved) return;
         await settleSpillRetention();
+        if (captureResolved) return;
         let text = baseText;
+        if (truncatedNow && spillRetainedPath && sourceEnded && options.maxLines !== undefined) {
+          resolveCapture(formatSpilledToolOutput({
+            head: baseText, tail: tail.toString("utf8"), totalLines: observedLines,
+            byteLength: observedBytes, displayPath: spillRetainedPath,
+          }));
+          return;
+        }
         if (truncatedNow) {
           const notes = [`output exceeded ${formatLimit} buffer limit`];
           if (spillRetainedPath && sourceEnded) {
@@ -743,7 +821,8 @@ export function readNodeStream(
           }
           text += `\n\n[stream pipe truncated: ${notes.join("; ")}]`;
         }
-        resolveStream(text);
+        chunks.length = 0;
+        resolveCapture(text);
       };
 
       const sink = spillSink;
@@ -782,16 +861,43 @@ export function readNodeStream(
       }
     };
 
+    const stopCapture = () => {
+      if (captureResolved) return;
+      // Never close/pause the source: descendants may still be writing to it.
+      // Keep the data listener in flowing discard mode until their pipes close.
+      settled = true;
+      const reason = "capture incomplete: post-exit drain grace exceeded";
+      const snapshot = Buffer.concat(chunks).toString("utf8");
+      chunks.length = 0;
+      capture?.onIncomplete(reason);
+      // If retention already owns a finished spill, let it save that complete
+      // file. The bounded return must not invalidate/delete its only source.
+      if (!spillSettlement) {
+        markSpillFailed(new Error(reason));
+        void settleSpillRetention();
+      }
+      resolveCapture(`${snapshot}\n\n[${reason}]`);
+    };
+    capture?.stopSignal.addEventListener("abort", stopCapture, { once: true });
+    if (capture?.stopSignal.aborted) stopCapture();
+
     stream.on("data", (chunk) => {
       if (settled) return;
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      observedBytes += buf.length;
+      for (const byte of buf) if (byte === 10) observedLines++;
+      // Keep enough bytes for the final 50 ordinary log lines; pathological
+      // lines are independently bounded by the preview formatter.
+      if (options.maxLines !== undefined) {
+        tail = Buffer.concat([tail, buf.subarray(Math.max(0, buf.length - maxBytes))]).subarray(-maxBytes);
+      }
       if (truncated) {
         // Over the memory cap: drop from memory, but keep draining so the
         // child never blocks on a full pipe / dies of SIGPIPE.
         writeToSink(buf);
         return;
       }
-      if (totalBytes + buf.length >= maxBytes) {
+      if (totalBytes + buf.length >= maxBytes || observedLines > (options.maxLines ?? Infinity)) {
         const remaining = Math.max(0, maxBytes - totalBytes);
         const headChunks = chunks.slice();
         if (remaining > 0) {
@@ -832,6 +938,9 @@ export function readNodeStream(
       // The spill never completed: settle it here too, otherwise a partial
       // file would stay behind in the temp dir.
       void settleSpillRetention();
+      captureResolved = true;
+      capture?.stopSignal.removeEventListener("abort", stopCapture);
+      chunks.length = 0;
       rejectStream(error);
     });
 
@@ -970,8 +1079,10 @@ export async function runWorkspaceCommand(args: {
     ...(args.commandPrefix ?? []),
     ...args.command,
   ];
+  const spawnedAt = Date.now();
   const proc = spawnChildProcess(command[0] ?? "", command.slice(1), {
     cwd: resolve(args.workspaceRoot),
+    env: { ...process.env, ...shellChildEnvironment.getStore() },
     stdio: [
       args.stdin === undefined ? "ignore" : "pipe",
       "pipe",
@@ -1008,7 +1119,11 @@ export async function runWorkspaceCommand(args: {
       owner: args.owner ?? null,
     });
   }
-  const exitPromise = waitForNodeProcessExit(proc);
+  // Real process exit is independent of descendants retaining inherited stdio.
+  const processExitPromise = new Promise<number>((resolveExit, rejectExit) => {
+    proc.once("exit", (code) => resolveExit(code ?? 0));
+    proc.once("error", rejectExit);
+  });
   const cleanupChildOnHostSignal: NodeJS.SignalsListener = (signal) => {
     if (typeof proc.pid === "number") {
       try { process.kill(-proc.pid, signal); } catch { /* already exited */ }
@@ -1025,7 +1140,6 @@ export async function runWorkspaceCommand(args: {
     (process as any).removeListener("SIGTERM", cleanupChildOnHostSignal);
     (process as any).removeListener("SIGINT", cleanupChildOnHostSignal);
   };
-  exitPromise.then(detachSignalCleanup, detachSignalCleanup);
   // Attach rejection handlers immediately: detached streams may reject before
   // the process close event, and Node otherwise reports an unhandled rejection.
   // A spill path keeps the full output inspectable when it exceeds the 5MB
@@ -1034,20 +1148,53 @@ export async function runWorkspaceCommand(args: {
   // spill store (quota + TTL cleaned) as soon as the stream settles, and
   // dropped when it is incomplete — the system temp dir must not accumulate
   // one file per command.
+  const captureCutoff = new AbortController();
+  let stdoutIncomplete: string | undefined;
+  let stderrIncomplete: string | undefined;
   const stdoutCapture = stdoutPromiseResult(
     readNodeStream(proc.stdout, {
+      maxBytes: TOOL_OUTPUT_SPILL_BYTES,
+      maxLines: TOOL_OUTPUT_SPILL_LINES,
       spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}.log`),
       spillRetention: "promote",
       spillWorkspaceRoot: args.workspaceRoot,
+    }, {
+      stopSignal: captureCutoff.signal,
+      onIncomplete: (reason) => { stdoutIncomplete = reason; },
     }),
-  );
+  ).then((result) => ({ ...result, error: result.error || stdoutIncomplete }));
   const stderrCapture = stdoutPromiseResult(
     readNodeStream(proc.stderr, {
+      maxBytes: TOOL_OUTPUT_SPILL_BYTES,
+      maxLines: TOOL_OUTPUT_SPILL_LINES,
       spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}-stderr.log`),
       spillRetention: "promote",
       spillWorkspaceRoot: args.workspaceRoot,
+    }, {
+      stopSignal: captureCutoff.signal,
+      onIncomplete: (reason) => { stderrIncomplete = reason; },
     }),
-  );
+  ).then((result) => ({ ...result, error: result.error || stderrIncomplete }));
+  // A fixed post-exit grace preserves short inherited-pipe drains (including
+  // the 600ms regression) without imposing a runtime limit on a live process.
+  // This is the single completion gate for foreground and detached results.
+  const exitPromise = processExitPromise.then(async (code) => {
+    const drainTimer = setTimeout(() => captureCutoff.abort(), 2000);
+    try {
+      await Promise.all([stdoutCapture, stderrCapture]);
+      return code;
+    } finally {
+      clearTimeout(drainTimer);
+    }
+  });
+  let processExited = false;
+  let terminationReason: "timeout" | "abort" | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  const cleanupTerminationTimers = () => {
+    if (timeout) clearTimeout(timeout);
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+  };
   const killChild = (signal: NodeJS.Signals) => {
     if (detached && typeof proc.pid === "number") {
       try {
@@ -1063,8 +1210,24 @@ export async function runWorkspaceCommand(args: {
       // The command may have exited after the race winner was decided.
     }
   };
-
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+  // Clear execution timers on real exit, not on capture/drain completion.
+  // A descendant holding a pipe open must not turn a natural exit into a timeout.
+  const onProcessExit = () => {
+    processExited = true;
+    cleanupTerminationTimers();
+    detachSignalCleanup();
+  };
+  proc.once("exit", onProcessExit);
+  proc.once("error", onProcessExit);
+  const terminate = (reason: "timeout" | "abort") => {
+    if (processExited || terminationReason) return;
+    terminationReason = reason;
+    if (timeout) clearTimeout(timeout);
+    killChild("SIGTERM");
+    forceKillTimer = setTimeout(() => {
+      if (!processExited) killChild("SIGKILL");
+    }, 500);
+  };
   let detachTimer: ReturnType<typeof setTimeout> | undefined;
   const timeoutResult = Symbol("timeout");
   const abortResult = Symbol("abort");
@@ -1077,7 +1240,10 @@ export async function runWorkspaceCommand(args: {
           resolveAbort(abortResult);
           return;
         }
-        abortListener = () => resolveAbort(abortResult);
+        abortListener = () => {
+          terminate("abort");
+          resolveAbort(abortResult);
+        };
         args.abortSignal!.addEventListener("abort", abortListener, { once: true });
       })
     : null;
@@ -1087,11 +1253,18 @@ export async function runWorkspaceCommand(args: {
     detachTimer = setTimeout(() => resolveDetach(detachResult), effectiveDetachMs);
   });
 
+  // One deadline from spawn, retained across detach. It owns termination;
+  // the foreground race only selects the return shape, never sends a second TERM.
   const exitOrTimeoutPromise = timeoutMs
     ? Promise.race([
         exitPromise,
-        new Promise<typeof timeoutResult>((resolveTimeout) => {
-          timeout = setTimeout(() => resolveTimeout(timeoutResult), timeoutMs);
+        new Promise<typeof timeoutResult | typeof abortResult>((resolveTimeout) => {
+          timeout = setTimeout(() => {
+            if (processExited) return;
+            const aborted = args.abortSignal?.aborted === true;
+            terminate(aborted ? "abort" : "timeout");
+            resolveTimeout(aborted ? abortResult : timeoutResult);
+          }, Math.max(0, timeoutMs - (Date.now() - spawnedAt)));
         }),
       ])
     : exitPromise;
@@ -1108,7 +1281,7 @@ export async function runWorkspaceCommand(args: {
   try {
     raceWinner = await Promise.race(raceCandidates);
   } catch (error) {
-    if (timeout) clearTimeout(timeout);
+    cleanupTerminationTimers();
     if (detachTimer) clearTimeout(detachTimer);
     if (abortListener && args.abortSignal) {
       args.abortSignal.removeEventListener("abort", abortListener);
@@ -1124,27 +1297,25 @@ export async function runWorkspaceCommand(args: {
     }
     throw error;
   }
-  if (timeout) clearTimeout(timeout);
   if (detachTimer) clearTimeout(detachTimer);
   if (abortListener && args.abortSignal) {
     args.abortSignal.removeEventListener("abort", abortListener);
   }
 
-  const timedOut = raceWinner === timeoutResult;
-  const aborted = raceWinner === abortResult;
+  const aborted = raceWinner === abortResult || (
+    raceWinner === timeoutResult && args.abortSignal?.aborted === true
+  );
+  const timedOut = raceWinner === timeoutResult && !aborted;
   const detachedProcess = raceWinner === detachResult;
 
   if (timedOut || aborted) {
-    killChild("SIGTERM");
-    const forceKillTimer = setTimeout(() => {
-      killChild("SIGKILL");
-    }, 500);
+    terminate(aborted ? "abort" : "timeout");
     try {
       await exitPromise;
     } catch {
       // The error is handled via the timedOut / aborted return shape.
     } finally {
-      clearTimeout(forceKillTimer);
+      cleanupTerminationTimers();
     }
   }
 
@@ -1169,15 +1340,12 @@ export async function runWorkspaceCommand(args: {
         owner: args.owner ?? null,
       });
     const taskId = envelope.taskId;
-    // Result capsule ordering (detached close → capsule → markExited/wake):
-    // the detached process keeps its stdio pipes attached to us, so at close
-    // we can still drain the buffered output and build the bounded capsule
-    // BEFORE the terminal event/notice fires — the wake must already carry
-    // the result, because taskLogs cannot serve stdout/stderr and the
-    // lifecycle event log stays started/promoted/exited/killed only.
-    proc.on("close", (code) => {
+    // Capture completes on EOF or the post-exit grace cutoff. Late close cannot
+    // publish again or mutate the frozen capsule; the gate settles exactly once.
+    void exitPromise.then(() => {
       detachSignalCleanup();
-      const exitCode = code ?? 1;
+      const exitCode = terminationReason === "abort" ? 130
+        : terminationReason === "timeout" ? 124 : (proc.exitCode ?? 1);
       void (async () => {
         const [stdoutResult, stderrResult] = await Promise.all([
           stdoutCapture,
@@ -1186,10 +1354,15 @@ export async function runWorkspaceCommand(args: {
         const stdout = stdoutResult.value;
         const stderr = stderrResult.value;
         let capsule: ProcessTaskResultCapsule | undefined;
+        const terminalStderr = terminationReason === "abort"
+          ? `${stderr.trim() ? `${stderr.trim()}\n` : ""}command aborted by signal\n`
+          : terminationReason === "timeout"
+            ? `${stderr.trim() ? `${stderr.trim()}\n` : ""}command timed out after ${timeoutMs}ms\n`
+            : stderr;
         try {
           capsule = buildProcessTaskResultCapsule({
             stdout,
-            stderr,
+            stderr: terminalStderr,
             exitCode,
             // Duration is measured from the registry envelope's startedAt
             // (spawn moment), not from the detach moment.
@@ -1204,7 +1377,7 @@ export async function runWorkspaceCommand(args: {
         }
         registry.markExited(pid, exitCode, capsule);
       })();
-    });
+    }, () => {});
     const immediate = effectiveDetachMs === 0;
     const reason = immediate
       ? `command looks long-running; moved to background immediately (pid=${pid}, label=${label})`
@@ -1234,10 +1407,12 @@ export async function runWorkspaceCommand(args: {
     stderrCapture,
   ]);
   const stdout = stdoutCaptureResult.value;
-  const rawStderr = stderrCaptureResult.value;
   const streamCaptureError = [stdoutCaptureResult.error, stderrCaptureResult.error]
     .filter(Boolean)
     .join("; ");
+  const rawStderr = streamCaptureError
+    ? `${stderrCaptureResult.value}\n[${streamCaptureError}]\n`
+    : stderrCaptureResult.value;
   const exitCode = aborted ? 130 : timedOut ? 124 : Number(raceWinner);
   // Grace GC: the command ended before detach promotion, so drop the
   // pre-registered envelope ("不留痕是结果"). No-op after promotion; the

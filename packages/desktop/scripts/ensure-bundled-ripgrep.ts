@@ -87,7 +87,7 @@ async function extractTarGz(archivePath: string, destDir: string) {
   await mkdir(destDir, { recursive: true });
   // Prefer system tar for reliability across environments
   const proc = Bun.spawn(["tar", "-xzf", archivePath, "-C", destDir], {
-    stdout: "inherit",
+    stdout: Bun.stderr,
     stderr: "inherit",
   });
   const code = await proc.exited;
@@ -106,14 +106,14 @@ async function extractZip(archivePath: string, destDir: string) {
         "-Command",
         `Expand-Archive -Path "${archivePath}" -DestinationPath "${destDir}" -Force`,
       ],
-      { stdout: "inherit", stderr: "inherit" },
+      { stdout: Bun.stderr, stderr: "inherit" },
     );
     const code = await proc.exited;
     if (code !== 0) throw new Error(`Expand-Archive failed for ${archivePath}`);
     return;
   }
   const proc = Bun.spawn(["unzip", "-o", archivePath, "-d", destDir], {
-    stdout: "inherit",
+    stdout: Bun.stderr,
     stderr: "inherit",
   });
   const code = await proc.exited;
@@ -190,7 +190,7 @@ export async function ensureBundledRipgrep(options?: {
   const archivePath = join(cacheDir, target.asset);
   const extractDir = join(cacheDir, `extract-${targetKey}`);
 
-  console.log(`[bundled-rg] fetching ${url}`);
+  console.error(`[bundled-rg] fetching ${url}`);
   await downloadToFile(url, archivePath);
 
   await rm(extractDir, { recursive: true, force: true });
@@ -224,7 +224,7 @@ export async function ensureBundledRipgrep(options?: {
     chmodSync(stagedPath, 0o755);
   }
 
-  console.log(`[bundled-rg] staged ${stagedPath}`);
+  console.error(`[bundled-rg] staged ${stagedPath}`);
   return { binaryPath, stagedPath };
 }
 
@@ -238,9 +238,9 @@ if (isMain) {
   try {
     const result = await ensureBundledRipgrep();
     if (result.skipped) {
-      console.log("[bundled-rg] skipped (NOLO_DESKTOP_SKIP_BUNDLED_RG=1)");
+      console.error("[bundled-rg] skipped (NOLO_DESKTOP_SKIP_BUNDLED_RG=1)");
     } else {
-      console.log(`[bundled-rg] ready: ${result.stagedPath}`);
+      console.error(`[bundled-rg] ready: ${result.stagedPath}`);
     }
   } catch (error) {
     console.error("[bundled-rg] failed:", error);

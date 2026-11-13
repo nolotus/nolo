@@ -31,6 +31,7 @@ import {
 } from "chat/dialog/dialogRuntimeStore";
 import { createChatQueueRuntime, type ChatQueueRuntime } from "core/chat/chatQueueRuntime";
 import { createTurnRequest } from "core/chat/internalTurnEvent";
+import type { TurnRequest } from "core/chat/internalTurnEvent";
 import type { ChatQueueState } from "core/chat/chatQueueMachine";
 
 export type ChatQueueReduxAdapterOptions = {
@@ -206,4 +207,38 @@ export class ChatQueueReduxAdapter {
     if (paused) rt.send({ type: "pause-drain" });
     else rt.send({ type: "resume-drain" });
   }
+}
+/** Durable consumers claim a snapshot through the shared user-batch machine.
+ * Persist is the admission gate, not model completion. No turn is launched here.
+ * A stopped caller must still reconcile a successful write, but never restart. */
+export async function admitPersistedUserBatch(args: {
+  requests: readonly TurnRequest[];
+  signal?: AbortSignal;
+  persist: (requests: readonly TurnRequest[]) => Promise<void>;
+}): Promise<readonly TurnRequest[]> {
+  if (args.signal?.aborted || !args.requests.length) return [];
+  const runtime = createChatQueueRuntime({
+    running: true, queue: [...args.requests], drainPaused: false,
+    lastDrainError: null, drainMode: "user-batch",
+  });
+  let admission: Promise<readonly TurnRequest[]> = Promise.resolve([]);
+  const abort = () => runtime.send({ type: "turn-end", ok: false, aborted: true });
+  args.signal?.addEventListener("abort", abort, { once: true });
+  runtime.on("drain-batch-ready", ({ batch }) => {
+    admission = (async () => {
+      try {
+        if (args.signal?.aborted) return [];
+        await args.persist(batch.requests);
+        runtime.send({ type: "batch-accepted", batchId: batch.id });
+        return batch.requests;
+      } catch (error) {
+        runtime.send({ type: "batch-failed", batchId: batch.id,
+          message: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+    })();
+  });
+  runtime.send({ type: "turn-end", ok: true, aborted: false });
+  try { return await admission; }
+  finally { args.signal?.removeEventListener("abort", abort); }
 }

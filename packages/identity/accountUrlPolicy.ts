@@ -32,13 +32,14 @@ const ALLOWED_URLS: ReadonlySet<string> = new Set(
 );
 
 /**
- * Exact-allowlist check: only the fixed https nolo.chat `/login` and `/life`
- * URLs pass. Anything else — http, lookalike hosts, other paths, ports,
- * credentials, query or fragment injection, non-string values — is rejected.
+ * Exact-allowlist check: fixed account pages and the strict browser
+ * authorization URL pass. Anything else — http, lookalike hosts, other paths, ports,
+ * credentials, extra query or fragment injection, non-string values — is rejected.
  * The exact-string set membership is deliberately strict (no normalization):
  * a URL that is not byte-for-byte an allowlist entry never passes.
  */
 export function isAllowlistedAccountUrl(url: unknown): url is string {
+  if (isDesktopAuthorizationUrl(url)) return true;
   if (typeof url !== "string" || !ALLOWED_URLS.has(url)) return false;
   try {
     const parsed = new URL(url);
@@ -60,4 +61,9 @@ export function buildDesktopBrowserActionMessage(
   return isAllowlistedAccountUrl(url)
     ? { type: "nolo-desktop-browser-action", action: "open", url }
     : null;
+}
+
+/** Fixed origin, exact path and one non-credential user code and a fixed display marker; no URL normalization. */
+export function isDesktopAuthorizationUrl(url: unknown): url is string {
+  return typeof url === "string" && /^https:\/\/nolo\.chat\/cli\/authorize\?code=[A-Z0-9]{8}&client=desktop(?![\s\S])/.test(url);
 }

@@ -464,5 +464,235 @@ export default {
         ]
       }
     }
+  },
+  de: {
+    translation: {
+      pricing: {
+        title: "Nutzungsbasierte Abrechnung",
+        subtitle: `Abrechnung nach tatsächlichem Token-Verbrauch. Punkte verfallen nie.\nPro wird ab ${ADVANCED_FEATURE_MIN_BALANCE} Punkten freigeschaltet. Keine Abo-Bindung.`,
+        headerTrust: ["Kein Abonnement", "Zahlung nach Verbrauch", "Punkte verfallen nie"],
+        free: "Kostenlos",
+        points: "{{num}} Punkte",
+        tiers: {
+          starter: {
+            name: "Starter",
+            meta: "Kostenlos bei Registrierung",
+            bestFor: "Zum Ausprobieren",
+            price: "Kostenlos",
+            priceValue: "Kostenlos",
+            priceDetail: "Keine Aufladung erforderlich",
+            features: [
+              "Standard-LLM-Modelle",
+              "Zusammenarbeit mehrerer Agenten",
+              "Einzelfeilanalyse",
+              "Dauerhafter Chat-Verlauf"
+            ]
+          },
+          pro: {
+            name: "Pro",
+            meta: `Guthaben ab ${ADVANCED_FEATURE_MIN_BALANCE} Punkten`,
+            bestFor: "Täglicher Standard",
+            price: `Freischaltung ab ${ADVANCED_FEATURE_MIN_BALANCE} Punkten`,
+            priceValue: `${ADVANCED_FEATURE_MIN_BALANCE}`,
+            priceDetail: "Guthaben zur Freischaltung",
+            features: [
+              "Batch-Dateianalyse",
+              "Echtzeit-Websuche",
+              "Priorisierte Verarbeitungswarteschlange",
+              "Google Scholar Akademische Suche"
+            ]
+          },
+          advanced: {
+            name: "Advanced",
+            meta: `Einmalige Aufladung ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} Punkte`,
+            bestFor: "Sehr anspruchsvolle Aufgaben",
+            price: `Freischaltung ab einer Aufladung von ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} Punkten`,
+            priceValue: `${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}`,
+            priceDetail: "Punkteaufladung zur Freischaltung",
+            features: [
+              "Fortgeschrittene Reasoning-Modelle",
+              "Zugriff auf Claude Opus",
+              "Zugriff auf Kimi K3",
+              "Dedizierte VM-Laufzeitumgebung",
+              "Isolierte Rechenressourcen",
+              "Ausführung langlebiger Workloads"
+            ]
+          }
+        },
+        cta: {
+          titleLoggedIn: "Flexible Aufladung",
+          titleLoggedOut: "Kostenlos testen",
+          descLoggedIn: `Punkte werden sofort gutgeschrieben. Pro wird ab ${ADVANCED_FEATURE_MIN_BALANCE} Punkten freigeschaltet; Advanced ab einer Aufladung von ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} Punkten.`,
+          descLoggedOut: "Registrieren Sie sich und starten Sie mit dem kostenlosen Kontingent vor einer Aufladung.",
+          btnRecharge: "Punkte aufladen",
+          btnFreeStart: "Kostenlos starten",
+          btnDirectRecharge: "Direkt aufladen",
+          trustLoggedIn: "Jederzeit erstattungsfähig • Abrechnung nach Verbrauch • Verfällt nie",
+          trustLoggedOut: "Keine Kreditkarte erforderlich • Sofortiger Zugriff • Keine Abo-Bindung"
+        },
+        searchPlaceholder: "Modelle nach Namen suchen...",
+        recommend: "Empfohlen",
+        unknown: "Unbekannt",
+        comparisonTitle: "Modellpreisvergleich (Punkte)",
+        noModelsFound: "Keine passenden Modelle gefunden",
+        visionYes: "Unterstützt",
+        visionNo: "Nicht unterstützt",
+        tableHeader: {
+          name: "Modellname",
+          input: "Eingabe / 1M Punkte",
+          output: "Ausgabe / 1M Punkte",
+          cache: "Cache-Treffer / 1M Punkte",
+          vision: "Visuelle Erkennung"
+        },
+        cacheNote: "Cache-Treffer: Wiederholte identische Eingabepräfixe werden zu einem günstigeren Cache-Preis abgerechnet. „—“ bedeutet, dass das Modell keine Cache-Preise hat.",
+        faqTitle: "Häufig gestellte Fragen",
+        faqSubtitle: "Haben Sie Fragen? Schauen Sie zuerst hier nach",
+        faq: [
+          {
+            q: "Was sind Punkte?",
+            a: "Punkte sind die Nutzungseinheit von Nolo. Jeder Modellaufruf zieht Punkte basierend auf dem tatsächlichen Token-Verbrauch ab, sodass die Kosten an die reale Nutzung gebunden bleiben."
+          },
+          {
+            q: "Wie lade ich auf?",
+            a: "Wählen Sie einen beliebigen Betrag auf der Aufladeseite. Punkte werden sofort gutgeschrieben und sind an kein Abonnementpaket gebunden."
+          },
+          {
+            q: "Verfallen Punkte?",
+            a: "Nein. Aufgeladene Punkte bleiben dauerhaft gültig."
+          },
+          {
+            q: "Kann ich nach dem Aufladen eine Erstattung erhalten?",
+            a: "Ja, jedoch nur für selbst gekaufte Punkte; Bonus- oder Aktionspunkte sind nicht erstattungsfähig. Erstattungen decken den ungenutzten Teil der gekauften Punkte ab – verbrauchte und geschenkte Punkte werden nicht erstattet. Digitale Güter: Verbrauchte Punkte können nicht erstattet werden. Jede Erstattung versteht sich abzüglich der bereits angefallenen Kanalgebühr zuzüglich einer Erstattungsgebühr von $1.00."
+          },
+          {
+            q: `Erlischt Pro, wenn mein Guthaben unter ${ADVANCED_FEATURE_MIN_BALANCE} Punkte fällt?`,
+            a: `Pro richtet sich in Echtzeit nach Ihrem aktuellen Guthaben: Es wird ab ${ADVANCED_FEATURE_MIN_BALANCE} Punkten freigeschaltet und fällt auf Starter zurück, wenn das Guthaben darunter sinkt, und wird bei der nächsten Aufladung wiederhergestellt. Bereits genutzte Funktionen sind davon nicht betroffen.`
+          },
+          {
+            q: "Welche Modelle schaltet die Stufe Advanced frei?",
+            a: `Sie schaltet höherwertige Modelle wie die GPT Pro-Serie, Claude Opus und Kimi K3 frei, sowie eine isolierte VM-Laufzeitumgebung und Unterstützung für langlebige Aufgaben. Eine einmalige Aufladung von ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} Punkten aktiviert sie.`
+          },
+          {
+            q: "Wie werden Punkte abgezogen?",
+            a: "Bei jedem Aufruf wird der Einzelpreis des Modells mit den tatsächlich verbrauchten Eingabe-/Ausgabe-Tokens multipliziert; zwischengespeicherte wiederholte Eingaben werden zum günstigeren Cache-Tarif berechnet. Die Einzelpreise jedes Modells finden Sie in der Vergleichstabelle unten."
+          }
+        ]
+      }
+    }
+  },
+  es: {
+    translation: {
+      pricing: {
+        title: "Pago por uso",
+        subtitle: `Facturado según el uso real de tokens. Los puntos nunca caducan.\nPro se desbloquea con ${ADVANCED_FEATURE_MIN_BALANCE} puntos. Sin permanencia ni suscripción.`,
+        headerTrust: ["Sin suscripción", "Pago por uso", "Los puntos nunca caducan"],
+        free: "Gratis",
+        points: "{{num}} puntos",
+        tiers: {
+          starter: {
+            name: "Starter",
+            meta: "Gratis al registrarse",
+            bestFor: "Para explorar",
+            price: "Gratis",
+            priceValue: "Gratis",
+            priceDetail: "No requiere recarga",
+            features: [
+              "Modelos LLM estándar",
+              "Colaboración multi-agent",
+              "Análisis de archivos individuales",
+              "Historial de chat permanente"
+            ]
+          },
+          pro: {
+            name: "Pro",
+            meta: `Saldo a partir de ${ADVANCED_FEATURE_MIN_BALANCE} puntos`,
+            bestFor: "Uso diario principal",
+            price: `Desbloquea con ${ADVANCED_FEATURE_MIN_BALANCE} puntos`,
+            priceValue: `${ADVANCED_FEATURE_MIN_BALANCE}`,
+            priceDetail: "Saldo de puntos para desbloquear",
+            features: [
+              "Análisis de archivos por lotes",
+              "Búsqueda web en tiempo real",
+              "Cola de procesamiento prioritario",
+              "Búsqueda académica en Google Scholar"
+            ]
+          },
+          advanced: {
+            name: "Advanced",
+            meta: `Recarga única ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} puntos`,
+            bestFor: "Tareas pesadas",
+            price: `Desbloquea con una recarga de ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} puntos`,
+            priceValue: `${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}`,
+            priceDetail: "Recarga de puntos para desbloquear",
+            features: [
+              "Modelos avanzados de razonamiento",
+              "Acceso a Claude Opus",
+              "Acceso a Kimi K3",
+              "Entorno de ejecución en máquina virtual dedicada",
+              "Recursos de computación aislados",
+              "Ejecución de cargas de trabajo de larga duración"
+            ]
+          }
+        },
+        cta: {
+          titleLoggedIn: "Recarga flexible",
+          titleLoggedOut: "Prueba gratis",
+          descLoggedIn: `Los puntos se abonan al instante. Pro se desbloquea con ${ADVANCED_FEATURE_MIN_BALANCE} puntos; Advanced se desbloquea con una recarga de ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} puntos.`,
+          descLoggedOut: "Regístrate y comienza con el nivel gratuito antes de recargar.",
+          btnRecharge: "Recargar puntos",
+          btnFreeStart: "Empezar gratis",
+          btnDirectRecharge: "Recargar directamente",
+          trustLoggedIn: "Reembolsable en cualquier momento • Facturado por uso • No caduca",
+          trustLoggedOut: "Sin tarjeta de crédito • Acceso instantáneo • Sin suscripción obligatoria"
+        },
+        searchPlaceholder: "Buscar modelos por nombre...",
+        recommend: "Recomendado",
+        unknown: "Desconocido",
+        comparisonTitle: "Comparación de precios de modelos (puntos)",
+        noModelsFound: "No se encontraron modelos coincidentes",
+        visionYes: "Compatible",
+        visionNo: "No compatible",
+        tableHeader: {
+          name: "Nombre del modelo",
+          input: "Entrada / 1M puntos",
+          output: "Salida / 1M puntos",
+          cache: "Acierto de caché / 1M puntos",
+          vision: "Visión"
+        },
+        cacheNote: "Acierto de caché: los prefijos de entrada idénticos y repetidos se facturan a una tarifa de caché más económica. «—» indica que el modelo no dispone de tarifa de caché.",
+        faqTitle: "Preguntas frecuentes",
+        faqSubtitle: "¿Tienes dudas? Consulta aquí primero",
+        faq: [
+          {
+            q: "¿Qué son los puntos?",
+            a: "Los puntos son la unidad de uso de Nolo. Cada llamada al modelo deduce puntos según el consumo real de tokens, manteniendo los costes vinculados al uso real."
+          },
+          {
+            q: "¿Cómo recargo?",
+            a: "Elige cualquier importe en la página de recarga. Los puntos se acreditan inmediatamente y no están vinculados a ningún paquete de suscripción."
+          },
+          {
+            q: "¿Caducan los puntos?",
+            a: "No. Los puntos recargados siguen siendo válidos permanentemente."
+          },
+          {
+            q: "¿Puedo obtener un reembolso tras recargar?",
+            a: "Sí, pero solo por los puntos que hayas comprado tú mismo; los puntos de regalo o promocionales no son reembolsables. Los reembolsos cubren la parte no utilizada de los puntos comprados; los puntos consumidos o regalados no se reembolsan. Bienes digitales: los créditos consumidos no son reembolsables, y cualquier reembolso es neto de la comisión del canal ya incurrida más una tarifa de procesamiento de reembolso de $1.00."
+          },
+          {
+            q: `¿Caduca Pro si mi saldo baja de ${ADVANCED_FEATURE_MIN_BALANCE} puntos?`,
+            a: `Pro se determina en tiempo real según tu saldo actual: se desbloquea con ${ADVANCED_FEATURE_MIN_BALANCE} puntos y vuelve a Starter si el saldo baja de esa cifra, restaurándose con tu próxima recarga. Nada de lo que ya hayas utilizado se verá afectado.`
+          },
+          {
+            q: "¿Qué modelos desbloquea el nivel Advanced?",
+            a: `Desbloquea modelos de gama alta como la serie GPT Pro, Claude Opus y Kimi K3, además de un entorno de ejecución en máquina virtual aislada y soporte para tareas de larga duración. Se activa con una recarga única de ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} puntos.`
+          },
+          {
+            q: "¿Cómo se deducen los puntos?",
+            a: "Cada llamada deduce el precio unitario del modelo multiplicado por los tokens reales de entrada/salida consumidos; las entradas repetidas en caché se facturan a una tarifa de caché reducida. Consulta la tabla de comparación inferior para ver el precio unitario de cada modelo."
+          }
+        ]
+      }
+    }
   }
 };

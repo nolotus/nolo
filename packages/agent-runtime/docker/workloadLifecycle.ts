@@ -191,6 +191,7 @@ export class DockerWorkloadLifecycle {
         try {
             backend = createDockerSandboxExecutionBackend({ ...deps, owner: binding.authorizedOwner,
                 dockerAccount: binding.dockerAccount, sandboxName: row.sandbox,
+                stopConfirm: deps.stopConfirm ?? this.options.stopConfirm,
                 ...(typeof deps.quotaVerify === "boolean" ? { quotaVerify: deps.quotaVerify }
                     : typeof this.options.quotaVerify === "boolean" ? { quotaVerify: this.options.quotaVerify } : {}),
                 maxActiveSandboxesPerAccount: deps.maxActiveSandboxesPerAccount

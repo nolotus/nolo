@@ -310,6 +310,10 @@ import {
   chatgptWebImageGenerateFunc,
 } from "./chatgptWebImageTool";
 import { uiAskChoiceFunc, uiAskChoiceFunctionSchema } from "./uiAskChoiceTool";
+import {
+  secretRequestFunc,
+  secretRequestFunctionSchema,
+} from "./secretRequestTool";
 import { showInteractionFunc, showInteractionFunctionSchema } from "./uiCardTool";
 import {
   rememberMemoryFunc,
@@ -644,6 +648,17 @@ export async function toolQueryFunc(args: any): Promise<{
 // 这里保留“非 Agent / 非代码”的工具定义，
 // Agent 工具在 agentTools.ts，代码相关工具在 codeTools.ts。
 const baseToolDefinitions: ToolDefinition[] = [
+  {
+    id: "secretRequest",
+    schema: secretRequestFunctionSchema,
+    executor: secretRequestFunc,
+    description: {
+      name: "secret-request",
+      description:
+        "向用户请求具名凭据，宿主面板输入后写入本机 secret store；值不进对话。",
+      category: "interaction",
+    },
+  },
   {
     id: "uiAskChoice",
     schema: uiAskChoiceFunctionSchema,

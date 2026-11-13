@@ -38,21 +38,21 @@
     <xhtml:link rel="alternate" hreflang="ko" href="https://nolo.chat/share/community?lang=ko"/>
   </url>
   <url>
-    <loc>https://nolo.chat/about</loc>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://nolo.chat/about"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://nolo.chat/about"/>
-    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://nolo.chat/about?lang=zh-CN"/>
-    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://nolo.chat/about?lang=zh-Hant"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://nolo.chat/about?lang=ja"/>
-    <xhtml:link rel="alternate" hreflang="ko" href="https://nolo.chat/about?lang=ko"/>
+    <loc>https://nolo.chat/terms</loc>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://nolo.chat/terms"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://nolo.chat/terms"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://nolo.chat/terms?lang=zh-CN"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://nolo.chat/terms?lang=zh-Hant"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://nolo.chat/terms?lang=ja"/>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://nolo.chat/terms?lang=ko"/>
   </url>
   <url>
-    <loc>https://nolo.chat/contact</loc>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://nolo.chat/contact"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://nolo.chat/contact"/>
-    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://nolo.chat/contact?lang=zh-CN"/>
-    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://nolo.chat/contact?lang=zh-Hant"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://nolo.chat/contact?lang=ja"/>
-    <xhtml:link rel="alternate" hreflang="ko" href="https://nolo.chat/contact?lang=ko"/>
+    <loc>https://nolo.chat/privacy</loc>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://nolo.chat/privacy"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://nolo.chat/privacy"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://nolo.chat/privacy?lang=zh-CN"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hant" href="https://nolo.chat/privacy?lang=zh-Hant"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://nolo.chat/privacy?lang=ja"/>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://nolo.chat/privacy?lang=ko"/>
   </url>
 </urlset>

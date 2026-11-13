@@ -1,4 +1,5 @@
 import { resolveUserEnabledSkills } from "../../ai/skills/userSkills";
+import { normalizeEnabledPromptSkills } from "../../ai/skills/userPromptSkills";
 import type { AgentRuntimeToolResult } from "../../agent-runtime/hostAdapter";
 import type { ShellApprovalSession } from "./originShellApprovalTransport";
 import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
@@ -31,6 +32,7 @@ export type LocalCliStreamingExecutor = (
 ) => Promise<CliExecuteResult>;
 
 export type CliLocalRuntimeAdapterDeps = {
+  taskReviewHost?: import("./taskReviewTools").TaskReviewHost;
   env: EnvLike;
   db?: CliLocalRuntimeDb;
   store?: HybridRecordStore;
@@ -149,6 +151,8 @@ export type CliLocalRuntimeAdapterDeps = {
 };
 
 export type PreparedAgentRuntime = {
+  /** Canonical explicit Agent skill policy used to prepare this runtime. */
+  localAgentSkillFingerprint?: string;
   agentConfig: AgentRuntimeAgentConfig;
   activeAgentToolNames: string[];
   runtimeToolExecutionLimits: Record<string, unknown>;
@@ -193,6 +197,14 @@ export function buildPreparedAgentCacheKey(args: {
   // Shared normalization preserves own-field precedence and legacy fallback.
   // Sorting makes equivalent account sets byte-identical across rounds.
   const userSkillsKey = JSON.stringify(resolveUserEnabledSkills(args).sort());
+  // Prompt-skill preferences are a separate settings field. When the record
+  // carries its own `enabledSkills`, resolveUserEnabledSkills ignores the
+  // legacy prompt field — so the prompt preference has to enter the key on
+  // its own, otherwise a settings refresh that changes only
+  // enabledPromptSkills would keep serving the stale prepared runtime.
+  const promptSkillsKey = JSON.stringify(
+    normalizeEnabledPromptSkills(args.enabledPromptSkills).sort(),
+  );
   const wakeKey = args.wake !== undefined ? (args.wake ? "wake:1" : "wake:0") : "";
   // Include every env selector consumed by profile expansion / local policy.
   // Values, not secrets: only these explicit non-credential policy keys enter it.
@@ -204,7 +216,7 @@ export function buildPreparedAgentCacheKey(args: {
     args.env?.NOLO_LOCAL_ALLOWED_TOOLS ?? "",
     args.env?.NOLO_LOCAL_ALLOW_UNDECLARED_TOOLS ?? "",
   ]);
-  return `${policyKey}\0${args.userId}\0${args.agentRef}\0${args.cwd}\0${systemBuiltinSkillsKey}\0${userSkillsKey}${wakeKey ? `\0${wakeKey}` : ""}`;
+  return `${policyKey}\0${args.userId}\0${args.agentRef}\0${args.cwd}\0${systemBuiltinSkillsKey}\0${userSkillsKey}\0${promptSkillsKey}${wakeKey ? `\0${wakeKey}` : ""}`;
 }
 
 export function clearCliLocalRuntimePreparedAgentCache() {

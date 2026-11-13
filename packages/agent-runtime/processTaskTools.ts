@@ -106,6 +106,8 @@ export type TaskLogsResult =
       events: ProcessTaskEvent[];
       status: ProcessTaskStatus;
       terminal: boolean;
+      /** 空页且仍在运行时给出「别继续轮询」的明确提示（见 runTaskLogs）。 */
+      hint?: string;
     }
   | { outcome: "not-found"; taskId: string; detail: string }
   | {
@@ -401,6 +403,12 @@ export function runTaskLogs(args: {
     : record
       ? statusOf(record)
       : "running";
+  // 空页 + 任务仍在跑：这是「轮询了一轮但什么都没变」的唯一可判据形态。
+  // 不提示，模型就会反复 re-read 同一游标，每次都是一次完整请求。
+  // 文本只依赖输入（cursor/status），不引入时变量，保持前缀稳定。
+  const hint = events.length === 0 && !isProcessTaskTerminalStatus(status)
+    ? `no new events since cursor ${cursor}; the task is still running and there is nothing more to read right now. Don't re-read the same cursor immediately: later events are returned once they exist. Where the host reports completions, wait for that signal; otherwise use taskWait with an explicit budget.`
+    : undefined;
   return {
     outcome: "ok",
     taskId,
@@ -408,6 +416,7 @@ export function runTaskLogs(args: {
     events,
     status,
     terminal: isProcessTaskTerminalStatus(status),
+    ...(hint ? { hint } : {}),
   };
 }
 

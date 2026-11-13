@@ -1,3 +1,7 @@
+import {
+  isAgentRunStartFailureStatus,
+  isAgentRunStatusNormal,
+} from "core/agentRunStatusKind";
 import { clipCompactText } from "core/clipCompactText";
 import { clipHeadAndTail } from "core/clipHeadAndTail";
 export { clipHeadAndTail };
@@ -10,7 +14,8 @@ import {
   formatListRunsCard,
   formatNotFoundRunCard,
   formatFinishedRunCard,
-  formatStartRunCard,
+  formatIdentityRow,
+  getAgentRunStatusIcon,
   formatStatusRunCard,
   formatStopRunCard,
   isAgentRunTerminalStatus,
@@ -19,6 +24,7 @@ import {
 import { type AgentRunSnapshot, parseAgentRunEvent } from "./agentRunSnapshot";
 import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyles";
 import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor } from "../tui/theme";
+import { resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
 import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
 import { redactSecrets } from "../tui/redactSecrets";
 import { safeAskText, withholdIfSecretLike } from "../tui/askTextSanitize";
@@ -45,7 +51,7 @@ function clip(value: string, max = 72) {
 export function formatConservativeActiveToolLabel(
   event: Pick<LocalAgentToolEvent, "toolName" | "argumentsPreview">
 ) {
-  return toolLabel(event.toolName || "tool");
+  return event.toolName === "startAgentRun" ? t("agentStartingLabel") : toolLabel(event.toolName || "tool");
 }
 
 function isRunToolName(name?: string): boolean {
@@ -320,6 +326,7 @@ function formatToolTraceLine(text: string, colorEnabled: boolean, accent: "none"
 // safe（normal）投影通用清洗：剥 ANSI/OSC（含剪贴板写、超链接）、折叠换行。
 // 供 renderRunCard（客户端重建）与 recoverOrchestrationCard 的 start 卡共用，
 // 与 dock 侧 sanitizeRunSnapshotForNormal 的 clean 同语义。
+
 const cleanUserText = (value: string) =>
   stripAnsi(value).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -412,11 +419,12 @@ function recoverOrchestrationCard(
   if (toolName === "listAgents") {
     try {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
+      if (parsed.success === false || !Array.isArray(parsed.agents)) return null;
+      const agents = parsed.agents;
       // The shared card body stays as-is (raw rows are never rewritten); only
       // its header (`Agents (2)`) is a display label this process owns, so it
       // is relabeled under the active locale.
-      const card = formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0]);
+      const card = formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0], 8, new Date(), !safe);
       const lines = card.split("\n");
       lines[0] = t("agentsListLabel", String(agents.length));
       return lines.join("\n");
@@ -451,12 +459,21 @@ function recoverOrchestrationCard(
     const name = safe ? cleanUserText(snapshot.agentName ?? "agent") : (snapshot.agentName ?? "agent");
     const task = snapshot.taskPreview ? (safe ? cleanUserText(snapshot.taskPreview) : snapshot.taskPreview) : snapshot.taskPreview;
     const title = snapshot.title ? (safe ? cleanUserText(snapshot.title) : snapshot.title) : snapshot.title;
-    return formatStartRunCard(name, snapshot.status, {
-      task,
-      runId: snapshot.runId,
-      ...(title ? { title } : {}),
-      labels,
+    const identity = formatIdentityRow(name, snapshot.runId, {
+      title, unnamedAgent: labels.unnamedAgent,
     });
+    const status = `${getAgentRunStatusIcon(snapshot.status)} ${labels.statusWord(snapshot.status)}`;
+    const oneLine = identity ? `${identity} · ${status}` : status;
+    // Break at the semantic boundary instead of clipping either field. Very
+    // long individual fields still wrap naturally at the terminal edge.
+    const columns = process.stdout.columns || 80;
+    const secondary = formatIdentityRow(name, snapshot.runId, { title, titleOnOwnLine: true, unnamedAgent: labels.unnamedAgent });
+    const rows = identity && title && displayWidth(`  ${oneLine}`) > columns
+      ? [title, `  ${secondary ? `${secondary} · ` : ""}${status}`]
+      : [oneLine];
+    if (task && !title) rows.push(`  ${labels.rows.task}${task}`);
+    if (snapshot.errorMessage) rows.push(`  ${labels.rows.error}${redactSecrets(cleanUserText(snapshot.errorMessage.split("\n")[0]))}`);
+    return rows.join("\n");
   }
   if (kind === "gone") return formatNotFoundRunCard(labels);
   if (kind === "stop") return formatStopRunCard(snapshot.status, labels);
@@ -467,7 +484,7 @@ function formatOrchestrationCardBlock(
   event: LocalAgentToolEvent,
   toolName: string,
   colorEnabled: boolean,
-  opts?: { safe?: boolean }
+  opts?: { safe?: boolean; visibleRunIds?: () => ReadonlySet<string> }
 ): string {
   const safe = opts?.safe === true;
   const rawLabel = toolLabel(toolName);
@@ -477,20 +494,31 @@ function formatOrchestrationCardBlock(
       : "";
   // Client render first (see recoverOrchestrationCard); the server-baked card
   // and then the raw content are fallbacks for payloads we cannot rebuild.
-  const rawDataStr =
-    recoverOrchestrationCard(event, toolName, { safe }) ||
-    bakedCard ||
-    (typeof event.content === "string" ? event.content : "");
+  let listPayload: Record<string, unknown> | undefined;
+  if (toolName === "listAgents" && typeof event.content === "string") {
+    try {
+      const value: unknown = JSON.parse(event.content);
+      if (value && typeof value === "object" && !Array.isArray(value)) listPayload = value as Record<string, unknown>;
+    } catch { /* Legacy plain text. */ }
+  }
+  const listFailed = listPayload?.success === false;
+  const rawDataStr = listFailed
+    ? (typeof listPayload?.error === "string" ? listPayload.error : event.content || bakedCard)
+    : recoverOrchestrationCard(event, toolName, { safe }) ||
+      bakedCard ||
+      (typeof event.content === "string" ? event.content : "");
   const failed =
     event.type === "tool-error" ||
     isFailedToolResult(event) ||
     Boolean(event.metadata?.failed) ||
+    listFailed ||
     /^Error:/i.test(rawDataStr.trim());
 
   if (failed) {
     // 失败要说为什么（2026-09-01 owner 定调）：normal 模式同样显示清洗后的
     // 首行原因；无界续行（堆栈/头/进程输出）仍不上屏。
-    const firstLine = stripAnsi(rawDataStr.trim().split("\n")[0] || event.summary || event.message || t("toolFailed"));
+    const failureSnapshot = toolName === "startAgentRun" ? parseAgentRunEvent(event)?.snapshot : undefined;
+    const firstLine = stripAnsi(failureSnapshot?.errorMessage || rawDataStr.trim().split("\n")[0] || event.summary || event.message || t("toolFailed"));
     const message = clip(redactSecrets(firstLine), 96);
     if (!colorEnabled) {
       return `✗ ${rawLabel}  ${message}\n`;
@@ -501,15 +529,96 @@ function formatOrchestrationCardBlock(
     return `${cross} ${labelPart}  ${msgPart}\n`;
   }
 
+  // 固定运行区（TUI 顶部 run dock）**逐行画着**这条 run 时，启动成功的「已启动」
+  // 卡片在聊天里才是重复反馈。判定依据是真实可见的 runId 集合，不是「支持固定区」：
+  // 宿主没提供查询（bare CLI / headless）、查询抛错、该 run 被降级/`+N` 折叠/被
+  // 进程行挤掉，一律保留回执。
+  if (opts?.visibleRunIds && toolName === "startAgentRun") {
+    // 省略回执的两个前提，缺一不可：
+    // ① 这是**成功**的启动 —— 有 start 快照与 runId、没有 errorMessage、状态属
+    //    core 分类里的「明确正常」一侧（`isAgentRunStatusNormal`：active /
+    //    succeeded，与 Web 同一张表）。abnormal / unknown / 未登记状态都不算成功
+    //    → 保留回执。
+    // ② 这条 run **真的逐行画在固定运行区里** —— 短终端降级、`+N` 折叠、后台进程
+    //    占用行预算时它可能不在屏上。查询失败或集合不含它，就保留回执：宁可重复
+    //    一次，也不能让用户对一条看不见的 run 一无所知。
+    const started = parseAgentRunEvent(event);
+    const runId = started?.snapshot.runId;
+    const startedStatus = started?.snapshot.status;
+    if (
+      started?.kind === "start" &&
+      typeof runId === "string" &&
+      runId.length > 0 &&
+      !started.snapshot.errorMessage &&
+      // 只认 core 定义的已知正常态。unknown/cancelling/not_found/未来新增状态
+      // 都不算正常 → 保留回执。
+      isAgentRunStatusNormal(startedStatus)
+    ) {
+      let visible: ReadonlySet<string> | undefined;
+      try {
+        visible = opts.visibleRunIds();
+      } catch {
+        // 宿主查询抛错 = 没有可见证据 → 保留回执。
+        visible = undefined;
+      }
+      if (visible?.has(runId)) return "";
+    }
+  }
+
+  const parsedStart = toolName === "startAgentRun" ? parseAgentRunEvent(event) : null;
+  const startFailed = parsedStart && isAgentRunStartFailureStatus(parsedStart.snapshot.status);
+  // A legacy unstructured card cannot reliably establish launch success.
+  let heading = parsedStart ? t(startFailed ? "agentStartFailedLabel" : "agentStartedLabel") : rawLabel;
   const displayData = rawDataStr.trim();
   // A server from an older build may bake a multiline error into displayData.
   // In safe mode remove the error row and its indented continuation lines until
   // the next card label (or blank line), rather than filtering only its first line.
   const lines = displayData ? displayData.split("\n") : [];
-  const projected = safe ? sanitizeRunCardForNormal(lines) : lines;
+  // Older servers supplied this redundant header as part of displayData.
+  if (toolName === "startAgentRun" && ["Run started", "运行已启动"].includes(lines[0]?.trim())) lines.shift();
+  let projected = safe ? sanitizeRunCardForNormal(lines) : lines;
+  if (safe && toolName === "listAgents") {
+    if (Array.isArray(listPayload?.agents)) {
+      const count = listPayload.agents.length;
+      const total = typeof listPayload.total === "number" && Number.isSafeInteger(listPayload.total) && listPayload.total >= count
+        ? listPayload.total : count;
+      heading = t("agentsCompactCount", String(total));
+      if (total !== count) heading += ` · ${t("agentsPageCount", String(count))}`;
+      if (listPayload.truncated === true) heading += ` · ${t("agentsTruncated")}`;
+      // Recovery can fail on malformed entries and fall back to displayData,
+      // whose first line need not be a header.
+      // Legacy builds baked the card header in either locale; the current build
+      // bakes the 🤖 marker. Whichever it is, the compact heading above already
+      // carries the count, so drop that duplicated first row.
+      if (/^(?:Agents|智能体|🤖)\s*\(\d+\)$/.test(projected[0]?.trim() ?? "")) {
+        projected = projected.slice(1);
+      }
+    } else {
+      // No structured payload: a baked card header is the only count source we
+      // have. Recognize it and relabel it the same way, so the old wording does
+      // not survive on this fallback path. An unrecognized first row is left
+      // alone — it may be an agent row, not a header.
+      const bakedHeader = /^(?:Agents|智能体|🤖)\s*\((\d+)\)$/.exec(projected[0]?.trim() ?? "");
+      if (bakedHeader) {
+        heading = t("agentsCompactCount", bakedHeader[1]);
+        projected = projected.slice(1);
+      }
+    }
+    // Recovery failures also fall back to legacy rows, so sanitize both paths.
+    projected = projected.map((line) => line.replace(/\s{2,}(?:agent-pub-[a-z0-9]+|agent-system-[a-z0-9]+|agent-[0-9a-f]{6,}-[a-z0-9-]+|\(agentKey unavailable\))\s*$/i, ""));
+  }
+  if (safe && toolName === "controlAgentRun" && projected.length > 0) {
+    const first = projected[0].trim();
+    const recognized = ["Run status", "运行状态", "Run finished", "运行已结束", "Run stopped", "运行已停止"];
+    const merged = `${heading} · ${first}`;
+    if (recognized.includes(first) && displayWidth(`● ${merged}`) <= (process.stdout.columns || 80)) {
+      heading = merged;
+      projected = projected.slice(1);
+    }
+  }
 
   if (!colorEnabled) {
-    let out = `● ${rawLabel}\n`;
+    let out = `● ${heading}\n`;
     for (const line of projected) {
       out += `  ${line}\n`;
     }
@@ -517,7 +626,7 @@ function formatOrchestrationCardBlock(
   }
 
   const bullet = themeText("●", "success", true);
-  const labelPart = themeText(rawLabel, "muted", true);
+  const labelPart = themeText(heading, "muted", true);
   let out = `${bullet} ${labelPart}\n`;
   for (const line of projected) {
     out += `  ${themeText(line, "muted", true)}\n`;
@@ -965,6 +1074,7 @@ function formatNormalToolLine(
   event: LocalAgentToolEvent,
   pending: { toolName: string; argumentsPreview?: string } | undefined,
   colorEnabled: boolean,
+  opts?: { visibleRunIds?: () => ReadonlySet<string> },
 ) {
   if (event.type === "tool-call") return "";
   const toolName = event.toolName || pending?.toolName || "tool";
@@ -982,10 +1092,13 @@ function formatNormalToolLine(
   ) {
     // Safe projection: normal mode keeps status/outcome/counts but never the
     // raw errorMessage/logLines of a failed run — those belong to pro/verbose.
-    return formatOrchestrationCardBlock(event, toolName, colorEnabled, { safe: true });
+    return formatOrchestrationCardBlock(event, toolName, colorEnabled, {
+      safe: true,
+      visibleRunIds: opts?.visibleRunIds,
+    });
   }
   if (event.type === "tool-result" && toolName === "loadSkill") {
-    return formatLoadSkillBlock(event, colorEnabled, { safe: true }) ?? "";
+    return formatLoadSkillBlock({ ...event, argumentsPreview: event.argumentsPreview || pending?.argumentsPreview }, colorEnabled, { safe: true }) ?? "";
   }
   if (event.type === "tool-result" && toolName === "show_interaction") {
     return formatShowInteractionBlock(event, colorEnabled);
@@ -1052,22 +1165,40 @@ function toolFailureReason(event: LocalAgentToolEvent): string {
   return reasonLine ? clip(redactSecrets(stripAnsi(reasonLine)), 96) : "";
 }
 
-/**
- * Resolve the skill name for a loadSkill tool event. The tool contract puts
- * `{ name }` in the input; the success result content starts with
- * `Skill "<name>" loaded inline.`. Prefer the explicit metadata/arg name,
- * then fall back to extracting it from the result content so the renderer
- * stays correct even when only `content` is populated.
- */
+/** Select a short human-readable identity from a result or its reference. */
 function resolveLoadSkillName(event: LocalAgentToolEvent): string {
-  const metaName = typeof event.metadata?.name === "string" ? event.metadata.name : undefined;
-  if (metaName) return metaName;
-  const argName = event.argumentsPreview?.trim();
-  if (argName && !argName.startsWith("{")) return argName;
   const content = typeof event.content === "string" ? event.content : "";
-  const match = content.match(/Skill "([^"]+)" loaded inline/);
-  if (match?.[1]) return match[1];
-  return argName || "skill";
+  let result: Record<string, unknown> | undefined;
+  try {
+    const value: unknown = JSON.parse(content);
+    if (value && typeof value === "object" && !Array.isArray(value)) result = value as Record<string, unknown>;
+  } catch { /* Local executors return plain text. */ }
+  const preview = event.argumentsPreview?.trim() ?? "";
+  let args: Record<string, unknown> = {};
+  if (preview.startsWith("{")) {
+    try {
+      const value: unknown = JSON.parse(preview);
+      if (value && typeof value === "object" && !Array.isArray(value)) args = value as Record<string, unknown>;
+    } catch { /* A truncated preview is not a reliable reference. */ }
+  } else if (/^(?:name|source|slug|dbKey|projectBinding|relativePath)=/.test(preview)) {
+    for (const match of preview.matchAll(/(?:^|\s)(name|source|slug|dbKey|projectBinding|relativePath)=([^\s]+)/g)) args[match[1]] = match[2];
+  } else if (preview) {
+    args.name = preview;
+  }
+  const textName = content.match(/^Skill "([^"\n]+)" loaded inline\./)?.[1];
+  const name = result?.name ?? textName ?? event.metadata?.name ?? args.name;
+  const source = result?.source ?? event.metadata?.source ?? args.source;
+  const slug = result?.slug ?? event.metadata?.slug ?? args.slug;
+  const dbKey = result?.dbKey ?? event.metadata?.dbKey ?? args.dbKey;
+  const relativePath = result?.relativePath ?? event.metadata?.relativePath ?? args.relativePath;
+  const shortReference = (value: unknown): string | undefined => {
+    if (typeof value !== "string" || !value.trim()) return undefined;
+    const normalized = value.trim().replace(/\\/g, "/");
+    const parts = normalized.split("/").filter(Boolean);
+    return parts.at(-1) === "SKILL.md" && parts.length > 1 ? parts.at(-2) : parts.at(-1);
+  };
+  const candidate = shortReference(name) ?? shortReference(slug) ?? shortReference(dbKey) ?? shortReference(relativePath) ?? shortReference(source) ?? t("unnamedSkillReference");
+  return clip(redactSecrets(cleanUserText(candidate)), 80);
 }
 
 /**
@@ -1089,9 +1220,17 @@ function formatLoadSkillBlock(
   if (event.type !== "tool-result" || event.toolName !== "loadSkill") return null;
   const skillName = resolveLoadSkillName(event);
   const content = typeof event.content === "string" ? event.content : "";
+  let result: Record<string, unknown> | undefined;
+  try {
+    const value: unknown = JSON.parse(content);
+    if (value && typeof value === "object" && !Array.isArray(value)) result = value as Record<string, unknown>;
+  } catch { /* Local executors return plain text. */ }
   const failed =
-    /^Skill\s+"[^"]*"\s+not found/.test(content) || isFailedToolResult(event);
-  const labelText = t("usedSkillLabel");
+    /^Skill\s+"[^"]*"\s+not found/i.test(content) ||
+    /^Skill reference rejected:/i.test(content) ||
+    event.metadata?.resolved === false || Boolean(event.metadata?.failed) ||
+    result?.success === false || isFailedToolResult(event);
+  const labelText = t(failed ? "loadSkillLabel" : "usedSkillLabel");
   if (failed) {
     const message = opts?.safe === true
       ? t("toolFailed")
@@ -1109,6 +1248,14 @@ function formatLoadSkillBlock(
 
 export const TUI_TREE_MARKER = "\u0001TUI_TREE\n";
 export const TUI_TREE_END = "\u0002";
+export const TUI_TREE_TOOLS = {
+  Run: ["execShell", "runCommand", "launchProcess"],
+  Read: ["readFile"],
+  Search: ["exa_search"],
+  Fetch: ["fetchWebpage"],
+} as const;
+export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;
+export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string };
 
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
@@ -1118,15 +1265,32 @@ export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
 
 export function createToolEventFormatter(
   colorEnabled = resolveCliColorEnabled(),
-  opts: { tuiTrees?: boolean } = {},
+  opts: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> } = {},
 ): ToolEventFormatter {
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
-  let tree: { kind: "Run" | "Read" | "Search" | "Fetch"; items: string[] } | null = null;
-  const treeKind = (name: string): "Run" | "Read" | "Search" | "Fetch" | null =>
-    isRunToolName(name) ? "Run" : isReadToolName(name) ? "Read" : name === "exa_search" ? "Search" : name === "fetchWebpage" ? "Fetch" : null;
-  const treeLine = (kind: "Run" | "Read" | "Search" | "Fetch", items: string[]) => {
+  let tree: { kind: TuiTreeKind; items: string[] } | null = null;
+  const treeKind = (name: string): TuiTreeKind | null =>
+    (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
+      (TUI_TREE_TOOLS[kind] as readonly string[]).includes(name)) ?? null;
+  const treeLine = (kind: TuiTreeKind, items: string[], fallback: string) => {
     const label = kind === "Run" ? toolLabel("execShell") : kind === "Read" ? toolLabel("readFile") : kind === "Fetch" ? toolLabel("fetchWebpage") : toolLabel("exa_search");
-    return `${TUI_TREE_MARKER}${label} (${items.length})\n${items.map((item, i) => `${i === items.length - 1 ? "└── " : "├── "}${item}  ✓`).join("\n")}${TUI_TREE_END}\n`;
+    const header = `${label} (${items.length}) · `;
+    // Summary rows receive the assistant's "◈ " anchor (measured display width).
+    const columns = resolveHistoryLayoutGeometry(process.stdout.columns).contentWidth - displayWidth("◈ ");
+    let shown = 1; // Even an over-wide first item must remain intact.
+    for (let count = 2; count <= items.length; count++) {
+      const omitted = items.length - count;
+      const suffix = omitted ? `, … +${omitted}` : "";
+      if (displayWidth(`• ${header}${items.slice(0, count).join(", ")}${suffix}  ✓`) > columns) break;
+      shown = count;
+    }
+    const omitted = items.length - shown;
+    const payload: TuiTreePayload = {
+      kind,
+      summary: `${header}${items.slice(0, shown).join(", ")}${omitted ? `, … +${omitted}` : ""}  ✓`,
+      fallback,
+    };
+    return `${TUI_TREE_MARKER}${JSON.stringify(payload)}${TUI_TREE_END}\n`;
   };
 
   const formatTreeEvent = (event: LocalAgentToolEvent, call: { toolName: string; argumentsPreview?: string } | undefined): string | null => {
@@ -1157,8 +1321,8 @@ export function createToolEventFormatter(
     tree.items.push(item);
     // Keep the first call visible immediately; the second result replaces this
     // tail row with the complete tree in the TUI history.
-    if (tree.items.length < 2) return formatNormalToolLine(event, call, colorEnabled);
-    return treeLine(kind, tree.items);
+    if (tree.items.length < 2) return formatNormalToolLine(event, call, colorEnabled, opts);
+    return treeLine(kind, tree.items, formatNormalToolLine(event, call, colorEnabled, opts));
   };
   const format = ((event: LocalAgentToolEvent): string => {
     if (event.type === "tool-call") {
@@ -1172,7 +1336,7 @@ export function createToolEventFormatter(
     pending.delete(event.toolCallId);
     const treeOutput = formatTreeEvent(event, call);
     if (treeOutput !== null) return treeOutput;
-    return formatNormalToolLine(event, call, colorEnabled);
+    return formatNormalToolLine(event, call, colorEnabled, opts);
   }) as ToolEventFormatter;
   format.reset = () => { tree = null; };
   format.consume = (event: LocalAgentToolEvent) => {

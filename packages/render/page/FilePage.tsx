@@ -14,6 +14,7 @@ import { readFileContent, read } from "database/dbSlice";
 
 import PageLoading from "render/web/ui/PageLoading";
 import { LuDownload, LuInfo, LuFile } from "react-icons/lu";
+import PageObjectActions from "./PageObjectActions";
 
 interface FilePageProps {
   pageKey: string;
@@ -143,6 +144,7 @@ const FilePage: React.FC<FilePageProps> = ({ pageKey }) => {
   return (
     <div className="FilePage">
       <div className="FilePage__content">
+        <PageObjectActions />
         {contentLoading && !fileUrl ?
         <PageLoading
           message={`正在读取${isImage ? "图片" : isPdf ? "PDF" : isVideo ? "视频" : isAudio ? "音频" : "文件"}内容...`} /> :

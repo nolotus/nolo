@@ -127,6 +127,16 @@ export type MachineWsRunDispatchDeps = {
 };
 
 export type ConnectorLocalRunResult = {
+  /** Authoritative host-loop termination; absence is not completion. */
+  stopReason?: string;
+  pending?: unknown;
+  hasPendingInteraction?: unknown;
+  handoff?: unknown;
+  error?: unknown;
+  errorMessage?: unknown;
+  runtimeProviderFailure?: unknown;
+  emptyAssistantFallbackReason?: unknown;
+  usage?: unknown;
   content: string;
   model: string;
   trace?: unknown[];

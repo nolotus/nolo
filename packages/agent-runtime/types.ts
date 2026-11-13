@@ -1,4 +1,5 @@
 import type { EmptyAssistantFallbackReason } from "./emptyAssistantRepair";
+import type { BusinessCompletion } from "./taskExecutionContract";
 
 export type AgentRuntimeMode = "local" | "server";
 export type AgentRuntimeHost = "cli" | "desktop" | "web" | "server";
@@ -78,6 +79,27 @@ export interface AgentRuntimeChatMessage {
 }
 
 /**
+ * Turn-boundary injection payload: legacy plain text (internal wakeups), a
+ * structured user message (queued user batches admitted mid-turn), or a
+ * deferred-commit user message. The `cliMessageId` lets the save path keep the
+ * durable pending record instead of writing a duplicate message.
+ *
+ * The deferred-commit variant carries the receipt write (`commit`) and its
+ * inverse (`rollback`). The loop only commits at the request boundary, after
+ * the final abort check and immediately before the provider dispatch, so an
+ * abort before that point leaves the message retained in the queue with no
+ * receipt (re-sendable) instead of a false `requested` marker.
+ */
+export type LocalTurnInjection =
+  | string
+  | (AgentRuntimeChatMessage & { cliMessageId?: string })
+  | {
+      messages: Array<AgentRuntimeChatMessage & { cliMessageId?: string }>;
+      commit: () => Promise<void>;
+      rollback: () => Promise<void>;
+    };
+
+/**
  * Durable continuation identity for the OpenAI Responses wire.
  *
  * This is deliberately separate from usage.audit `provider_response_ids`:
@@ -110,6 +132,10 @@ export type RuntimeProviderFailure = {
 };
 
 export interface AgentRuntimeResult {
+  /** Host loop termination, not provider finish_reason. Missing means unknown. */
+  stopReason?: "done" | "pending" | "handoff" | "timeout" | "error" | "aborted";
+  /** Host-contract assessment, distinct from provider stop and process success. */
+  businessCompletion?: BusinessCompletion;
   content: string;
   model: string;
   provider?: string;
@@ -162,6 +188,11 @@ export interface AgentRuntimeResult {
    * 后续消费者区分「健康流」与「真截断」，避免靠 `!stream_complete` 反推。
    */
   stream_truncated?: boolean;
+  /**
+   * 模型输出流中检测并拦截了伪造/泄露的内部工具协议片段（如 ChatML / to=functions）。
+   * 仅用于遥测与状态标识，模型正常正文保留，伪协议未执行。
+   */
+  leaked_protocol_intercepted?: boolean;
   /** 本次请求工具定义（name+schema）短哈希，仅供缓存遥测。 */
   toolsHash?: string;
   /**

@@ -1,3 +1,9 @@
+import { canConsumeChildCompletion } from "./childRunConsumption";
+import { createRunWakeHandler, deliverChildCompletion } from "./runWakeDelivery";
+import { traceChildRunWake } from "./runWakeDiagnostics";
+import { hostTaskEventsRoot, readHostTask } from "../client/hostTaskEvents";
+import { bindAutoReviewTurnEnd, createAutoReviewContinuationWake } from "./autoReviewContinuationWake";
+import { onAutoReviewAcceptance, currentAutoReviewTask } from "./autoReviewControl";
 import { createShellApprovalSession } from "./shellApprovalSession";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
@@ -28,6 +34,7 @@ import {
 } from "../updateCommands";
 import { resolveDefaultSpawn, spawnProcess } from "../processSpawn";
 import { runConfirmDialog } from "./confirmDialog";
+import { runTaskSlashCommand, type TaskActionView } from "./taskActions";
 import { type SelectDialogItem } from "./selectDialog";
 import { createDialogHost } from "./dialogHost";
 import {
@@ -113,6 +120,7 @@ import {
 import { toErrorMessage } from "core/errorMessage";
 import { collectConversationTurns } from "./conversationLinks";
 import { getCliLocale, initCliLocale, t } from "./i18n";
+import { resolveTuiIdentityEnv } from "./learnPrompt";
 import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { appendStreamSafeNotice } from "./turnInjectionInbox";
 import {
@@ -241,7 +249,7 @@ import { createTuiRender } from "./tuiRender";
 import { createTerminalGraphicsRuntime } from "./terminalGraphicsRuntime";
 import { createImageAttachmentCache } from "./tuiImageAttachments";
 import { createTuiImageRenderer } from "./tuiImageRenderer";
-import { randomInt } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { createScrollAnimator } from "./tuiScrollAnimation";
 import { resolveHistoryViewportHeight, resolveHistoryLayoutGeometry } from "./tuiLayout";
 // S5 迁移：runSubmittedLine 的 slash 命令 bus 分发（runSubmittedSlashLine /
@@ -251,7 +259,7 @@ import {
   runSubmittedSlashLine,
   type SlashDispatchHost,
 } from "./tuiSlashRouter";
-import { runTuiLogin } from "./tuiLogin";
+import { createTuiLoginSession } from "./tuiLogin";
 import { runTuiAuth } from "./tuiAuth";
 export {
   type FixedInputController,
@@ -733,6 +741,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // stay for the current dialog so later local turns can page them through
   // readPastedText. /new and process shutdown clear the store.
   const pasteStore = createCollapsedPasteStore();
+  // Login cancellation is owned separately from the in-flight chat turn.
+  const loginSession = createTuiLoginSession();
   // Cooperative stop for the in-flight agent turn (Esc while busy).
   let activeTurnAbort: AbortController | null = null;
   // 本轮已强制收尾标志：第二次 Esc 直接把 UI 交还用户后置 true。
@@ -777,10 +787,43 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 转变被合并成一条唤醒消息。投递策略（turn 进行中就排队、空闲就直接开
   // 新 turn）由交互层在下方通过 runWakeHandler 注入；非交互模式没有投递
   // 通道，runWakeHandler 保持 null，消息丢弃。
-  let runWakeHandler: ((event: InternalTurnEvent | string) => void) | null = null;
+  let runWakeHandler: ReturnType<typeof createRunWakeHandler> | null = null;
+  const reconcileAutoReviewWake = createAutoReviewContinuationWake({
+    getState: () => state, env: options.env ? { ...process.env, ...options.env } : process.env,
+    wake: (event) => {
+      const expected = currentAutoReviewTask(state, options.env ? { ...process.env, ...options.env } : process.env);
+      setImmediate(() => {
+        const env = options.env ? { ...process.env, ...options.env } : process.env;
+        const current = currentAutoReviewTask(state, env);
+        if (!sessionEnded && expected && JSON.stringify(current) === JSON.stringify(expected)) {
+          // Reconcile re-reads authority immediately before delivery too: a
+          // pause/off between the terminal microtask and this tick must win.
+          const task = readHostTask(hostTaskEventsRoot(env), expected);
+          if (task.authorization === "active") runWakeHandler?.(event);
+        }
+      });
+    },
+  });
+  const unsubscribeAutoReviewAcceptance = onAutoReviewAcceptance((reference, sequence) => {
+    const current = currentAutoReviewTask(state, effectiveEnv);
+    if (current?.taskId !== reference.taskId || current.dialogId !== reference.dialogId) return;
+    runCompletionWatcher.resumePendingDelivery();
+    reconcileAutoReviewWake({ kind: "acceptance", eventKey: `acceptance:${reference.taskId}:${sequence}` });
+  });
   const runCompletionWatcher = createRunCompletionWatcher({
+    env: options.env ? { ...process.env, ...options.env } : process.env,
     getCurrentDialogId: () => state.dialogId ?? null,
-    onWake: (text) => runWakeHandler?.(text),
+    onWake: (event) => {
+      traceChildRunWake("watcher-delivery", event, state.dialogId ?? null, { handlerInstalled: !!runWakeHandler, autoReviewRoute: !!currentAutoReviewTask(state, effectiveEnv) });
+      // Child result admission is independent of reconciliation's deferred wake:
+      // the latter can be cancelled by an authorization/scope change.
+      if (!canConsumeChildCompletion(state, effectiveEnv)) return false;
+      return deliverChildCompletion(event, runWakeHandler, () => {
+        if (typeof event !== "string" && event.kind === "child-run-completed" && currentAutoReviewTask(state, effectiveEnv)) {
+          reconcileAutoReviewWake({ kind: "review-terminal", eventKey: `runs:${event.runs.map((r) => `${r.runId}:${r.status}`).sort().join(",")}` });
+        }
+      });
+    },
   });
   // 「部署完成」SSE 订阅的退出开关：只在交互式分支里赋值（见 deployWake.ts），
   // 非交互路径永远是 null，teardown 里调用也是空操作。
@@ -1356,11 +1399,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 终态唤醒直投这里注入正在跑的 loop，不再走 chat 队列。见 turnInjectionInbox.ts。
   let turnInjectionInbox: AgentTurnContext["turnInjectionInbox"] = null;
 
-  // 「用户自己发了一轮」的提示钩子（进程任务自动续跑的链深清零用）。实现在交互区
-  // 里（需要 processTerminalResumer），这里先占位，语义与 turnInjectionInbox 同：
-  // 外层可变绑定 + ctx 转发，保证 turn 侧读到的永远是最新那个。
-  let noteUserTurnHook: (() => void) | null = null;
-
   // ── S2：turnCtx 装配（通过 getter/setter 严格保持可变引用语义） ──────────
   // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例。确认走既有
   // runConfirmDialog + dialogHost 通道；撤销经 shellGrant.revoke() 立即生效
@@ -1447,10 +1485,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     get activeTurnEpoch() { return activeTurnEpoch; },
     set activeTurnEpoch(v) { activeTurnEpoch = v; },
     get chatQueueBinding() { return chatQueueBinding; },
-    set chatQueueBinding(v) { chatQueueBinding = v; },
+    set chatQueueBinding(v) {
+      chatQueueBinding = v ? bindAutoReviewTurnEnd(v, {
+        getScope: () => currentAutoReviewTask(state, effectiveEnv),
+        getContext: () => ({ dialogId: state.dialogId, workspace: state.cwd }),
+        reconcile: reconcileAutoReviewWake,
+        nextEventKey: () => `turn:${randomUUID()}`,
+      }) : null;
+    },
     get turnInjectionInbox() { return turnInjectionInbox; },
     set turnInjectionInbox(v) { turnInjectionInbox = v; },
-    noteUserTurn: () => noteUserTurnHook?.(),
     onUserTurnFinalized: (turn, imageUrls) => {
       const preview = imageCache.preview(`turn-${turnIdentity++}`, imageUrls.map((dataUrl) => ({
         dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(";")), filename: "image", sizeBytes: 0, sourcePath: "",
@@ -1523,6 +1567,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // （runSubmittedSlashLine）。此处仅装配 host：可变绑定（state / buffer /
   // cursorPos / fixedInput）以 getter/setter 直通保持可变引用语义（禁止快照），
   // 稳定实例与编排回调按原引用注入。本文件调用点与函数签名保持不变。
+  const confirmTaskStop = async (view: TaskActionView): Promise<boolean> => {
+    if (!isInteractiveInput(input)) return false;
+    return runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+      dialogHost.run(anchor => runConfirmDialog({
+        request: { id: `task-stop-${view.id}`, tool: "taskStop", action: "task-stop", title: "Stop task?", body: view.title, command: view.id },
+        fullCommand: true, input: input as any, output: output as any, ...anchor,
+      })),
+    );
+  };
   const slashHost: SlashDispatchHost = {
     get state() {
       return state;
@@ -1546,6 +1599,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     input,
     output,
     options,
+    taskEnv: effectiveEnv,
+    confirmTaskStop,
+    runLogin: (args, emit) => loginSession.run(args, emit, { fetchImpl }),
     fetchImpl,
     turnCtx,
     emitCommandOutput,
@@ -1568,7 +1624,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     confirmDestructiveAction?: (
       request: PermissionRequest,
     ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
+    directUserSubmission = false,
   ): Promise<boolean> => {
+    if (line.trim().split(/\s+/)[0]?.toLowerCase() === "/pending") {
+      const [, action, batchId, ...extra] = line.trim().split(/\s+/);
+      try {
+        if (extra.length || (action && action !== "continue-without-resend")) throw new Error("Usage: /pending [continue-without-resend <batchId>]");
+        const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
+        emitCommandOutput(await binding.handlePendingCommand(action ? "continue-without-resend" : "show", batchId));
+      } catch (error) { emitCommandOutput(`[nolo] ${error instanceof Error ? error.message : String(error)}`); }
+      return false;
+    }
     // /shell-revoke（块 D）：空闲路径直撤——即时翻转 granted 位，不走
     // handleTuiInput（纯函数拿不到 grant）；下一次 shell 调用重新弹确认。
     // 与 busy 分支同一份 grant 单例。
@@ -1591,7 +1657,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       );
       return false;
     }
-    return runSubmittedSlashLine(line, slashHost, actionGateHandler, confirmDestructiveAction);
+    const exit = await runSubmittedSlashLine(line, slashHost, actionGateHandler, confirmDestructiveAction, directUserSubmission);
+    // Rebind whenever a submitted *command* actually changed the dialog identity
+    // (/compact forks a new dialog; /resume, /new, /clear and the dialog picker
+    // switch it). Queued user messages are persisted under the binding's dialog
+    // while the turn executes — and writes its provider receipt — under the
+    // current one, so a stale binding would save follow-ups into the dialog the
+    // session just left. Compare identities rather than command names: any
+    // future identity switch is covered without extending a command list.
+    // Plain chat lines are excluded on purpose: a turn that reports a different
+    // dialog id than the reserved one is healed lazily by ensureChatQueueBinding
+    // on the next queue interaction, so the turn's own tail stays free of the
+    // extra binding/store work (and its output).
+    if (chatQueueBinding && line.trim().startsWith("/") && turnCtx.chatQueueBindingDialogId !== state.dialogId) {
+      await ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction).restorePending();
+    }
+    runCompletionWatcher.resumePendingDelivery();
+    return exit;
   };
 
   if (isInteractiveInput(input)) {
@@ -1599,6 +1681,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     output.write("\x1b[?2004h");
     let busy = false;
     let done = false;
+    let unknownReminderShown = false;
+    // A provider-outcome unknown batch is retained and never auto-resent, but
+    // it must NOT block normal chat. Surface it once in plain language; /pending
+    // stays available for diagnostics without being required.
+    const maybeShowUnknownReminder = (binding: ChatQueueTuiBinding) => {
+      if (unknownReminderShown) return;
+      const recovery = binding.getRecovery();
+      if (recovery.status !== "unknown") return;
+      unknownReminderShown = true;
+      emitCommandOutput("[nolo] 有一条较早的回复批次结果未知，已保留但不会自动重发；你可以继续正常聊天，或运行 /pending 查看详情。");
+    };
     let resolveDone: (() => void) | null = null;
     let graphicsRuntime: ReturnType<typeof createTerminalGraphicsRuntime> | undefined;
     let onGraphicsData: ((chunk: Buffer | string) => void) | undefined;
@@ -1620,7 +1713,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       getActivityLines: (layout) =>
         activityIndicator.getActivityLines(resolveCliColorEnabled(), layout),
       getQueueLines: () => {
-        if (!chatQueueBinding || chatQueueBinding.queueLength() === 0) return [];
+        if (!chatQueueBinding) return [];
+        const queueStatus = chatQueueBinding.getStatus();
+        const errorLines = queueStatus.lastDrainError
+          ? [`  ⚠ ${queueStatus.lastDrainError.replace(/\r?\n/g, " ")}`] : [];
         const colorEnabled = resolveCliColorEnabled();
         // queuePreview is the shared projection: up to 3 entries, each already
         // truncated to 40 chars. Render each as a dim "⤷ <text>" line so the
@@ -1628,12 +1724,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // queued paste must be collapsed to a single-line marker: each entry is
         // one `sections` row, and an embedded "\n" would emit extra physical
         // lines that headerRows doesn't count, drifting the input cursor.
-        return chatQueueBinding
-          .getStatus()
-          .queuePreview.map((text, i) => {
+        return [...errorLines, ...queueStatus.queuePreview.map((text, i) => {
             const oneLine = text.replace(/\r?\n/g, " ⏎ ");
             return dimCliText(`  ⤷ ${i + 1}. ${oneLine}`, colorEnabled);
-          });
+          })];
       },
       getAttachmentLine: () => {
         // 附件条：Ctrl+V 贴图成功后实时显示当前草稿的附件列表（≤2 张全列，
@@ -1657,6 +1751,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       repaint(draft, cursorPos) {
         syncWindowTitle();
         return baseFixedInput.repaint(draft, cursorPos);
+      },
+      resumeFromDialog() {
+        baseFixedInput.resumeFromDialog();
+        setImmediate(() => { void runWakeHandler?.resumeAfterInputPause().catch(() => {}); });
+      },
+      resumeFromSubprocess() {
+        baseFixedInput.resumeFromSubprocess();
+        setImmediate(() => { void runWakeHandler?.resumeAfterInputPause().catch(() => {}); });
       },
       pause() {
         clearSelection();
@@ -1713,6 +1815,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     };
     resizeTarget.on?.("resize", onResize);
     const finish = () => {
+      loginSession.cancel();
       if (done) return;
       done = true;
       // 会话收尾：注销审批渲染器并放掉仍在等的卡片（一律按拒绝结算，避免工具调用挂死）。
@@ -1843,16 +1946,29 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       getCurrentDialogId: () => state.dialogId ?? null,
       isTurnActive: () => busy || fixedInput.isPaused(),
       canDeliver: () => !sessionEnded && !done && runWakeHandler !== null,
+      onDecision: (decision) => {
+        const owner = getProcessRegistry().getByTaskId(decision.taskId)?.owner;
+        try {
+          // notice-only 是用户可见的结论（任务终态但没人能接回对话），要留 warn 痕迹；
+          // 其余只是内部调度细节，留在 debug。字段只允许 id / 枚举 / 计数，
+          // 不得写入命令输出、用户内容或凭据。
+          const resumeLogger = getDiagnostics()?.logger.child({ component: "process-terminal-resume" });
+          const fields = {
+            taskId: decision.taskId, kind: decision.kind,
+            reason: decision.kind === "notice-only" ? decision.reason : undefined,
+            ownerDialogId: owner?.dialogId, currentDialogId: state.dialogId ?? null,
+            depth: owner?.processCausalDepth ?? 0,
+          };
+          if (decision.kind === "notice-only") resumeLogger?.warn("process terminal decision: notice-only", fields);
+          else resumeLogger?.debug("process terminal decision", fields);
+        } catch { /* Diagnostics must not disrupt delivery. */ }
+      },
     });
-    noteUserTurnHook = () => processTerminalResumer.noteUserTurn();
     // 空闲时把一段文本作为新 turn 直接跑。两个调用方：Enter 键的空闲手动
     // drain（空 Enter / Ctrl+S 落到这里的队首）和 run 终态唤醒。busy 标志、
     // enterOutputMode、notifyTurnEnd、失败时 emitCommandOutput(turnFailed)
     // 与直接发送路径保持同一份实现，不复制漂移。调用方必须保证当前空闲。
     const runIdleTextTurn = async (inputMsg: TurnRequest | InternalTurnEvent | string): Promise<void> => {
-      // 「用户回来了」的链深清零不在这里做：runOneAgentTurn 才是所有 turn 的
-      // 唯一入口（busy 期间排队的用户消息由队列 drain 直接进那里），清零钩子
-      // 挂在 ctx.noteUserTurn 上，见 tuiTurnRunner。
       const req = createTurnRequest(inputMsg);
       const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
       const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
@@ -1949,57 +2065,35 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         deployWakeLifecycle.dispose = () => deployStream.dispose();
       }
     }
-    runWakeHandler = (event: InternalTurnEvent | string) => {
-      if (done) return;
-      if (busy || fixedInput.isPaused()) {
-        // 直投当前进行中的 agent loop：唤醒不再挂进 chat 消息队列等整个 turn
-        // 跑完，而是作为 user 消息在下一轮 provider 调用注入本 turn，模型当场
-        // 消化。收件箱不可用（无进行中 turn / 已关闭）时才落回 chat 队列。
-        const text = typeof event === "string" ? event : event.text;
-        const injected =
-          !!turnInjectionInbox && turnInjectionInbox.push({ text, fallback: event });
-        if (injected) {
-          // 立即在 transcript 印一行紧凑 dim 状态行，让用户马上看到唤醒已被
-          // 本轮吸收（不再出现在队列 UI）。
-          //
-          // 注意：这里不能用 emitCommandOutput。它走 appendLocalTurn，而
-          // appendLocalTurn 会 finalizeCurrentTurn 把 currentRole 置 null；
-          // createHistoryOutputStream.write 只调 applyOutputChunkToCurrentTurn，
-          // 不会把 currentRole 设回 assistant —— 注入发生在流式输出中途时，
-          // 之后模型继续流出的文本会被静默吞掉（不保存也不渲染）。
-          // appendStreamSafeNotice 会在插入状态行后重开 assistant 流式段。
-          // 显示文案优先用 displayText（系统事件的紧凑单行）；string 事件只有 text。
-          const displayText =
-            typeof event === "string"
-              ? event
-              : event.kind === "user"
-                ? event.text
-                : (event.displayText ?? event.text);
-          printInternalEventLine(displayText);
-        } else {
-          const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
-          ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction)
-            .enqueue(event);
-          // 这里刻意不补打印：inbox 不可用时的兜底与 run 终态唤醒共用本分支，
-          // 排队事实已经由 composer 的队列 UI 呈现；在此额外印 transcript 行会
-          // 让 run wake 的既有显示语义跟着变化，也会与队列 UI 重复。
-        }
-        if (fixedInput.active && !fixedInput.isPaused()) {
-          fixedInput.repaint(buffer, cursorPos);
-        }
-        return;
-      }
-      void runIdleTextTurn(event).catch((err) => {
-        emitCommandOutput(
-          `${t("turnFailed")}${err instanceof Error && err.message ? `\n${err.message}` : ""}`,
-        );
-      });
-    };
+    runWakeHandler = createRunWakeHandler({
+      canConsume: () => canConsumeChildCompletion(state, effectiveEnv),
+      isDone: () => done,
+      isBusy: () => busy,
+      getDialogId: () => state.dialogId ?? null,
+      fixedInput,
+      getInbox: () => turnInjectionInbox,
+      getQueueStatus: () => chatQueueBinding?.getStatus(),
+      enqueue: (event) => {
+        const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
+        return ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction).enqueue(event);
+      },
+      printLine: printInternalEventLine,
+      repaint: () => fixedInput.repaint(buffer, cursorPos),
+      runIdle: runIdleTextTurn,
+      drainQueue: async () => {
+        if (!chatQueueBinding || busy || fixedInput.isPaused()) return;
+        const binding = chatQueueBinding;
+        busy = true;
+        try { await binding.resumeInternalCompletions(state.dialogId ?? null); }
+        finally { busy = false; }
+      },
+      onError: (err) => emitCommandOutput(`${t("turnFailed")}${err instanceof Error && err.message ? `\n${err.message}` : ""}`),
+    });
     // 进程任务终态投递体（订阅在构造早期已装上，这里补上真正的投递）：
     //   - notice-only：无归属 / dialog 不匹配 / 重复 / 链深触顶 / 无通道 →
     //     维持既有 pending 行（下一轮 context block 让模型知情），不续跑；
-    //   - 续跑：同一事实不再进 pendingProcessNotices（投递本身已经到位：busy 直投
-    //     收件箱、空闲起 completion turn），否则模型会在 inbox 文本之外又从下一轮
+    //   - 续跑：同一事实不再进 pendingProcessNotices（busy 尝试直投
+    //     收件箱、空闲尝试起 completion turn；决策 claim 不保证实际投递成功），否则模型会在 inbox 文本之外又从下一轮
     //     context block 看到同一行。屏幕上仍留一行 dim 记录。
     deliverProcessTerminalNotice = (notice: ProcessTerminalNotice) => {
       if (done || sessionEnded) return;
@@ -2013,7 +2107,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // 两行相同 dim 行（前者由 runWakeHandler 的 injected 分支印、后者由
       // tuiTurnRunner 写 transcript）。inbox 不可用时的 enqueue 兜底同样不打印，
       // 那与 run 终态唤醒共用分支、且队列 UI 已呈现排队事实（见 runWakeHandler）。
-      runWakeHandler?.(buildProcessTaskCompletedTurnEvent(notice));
+      runWakeHandler?.({ ...buildProcessTaskCompletedTurnEvent(notice), processCausalDepth: (decision.owner.processCausalDepth ?? 0) + 1 });
       if (fixedInput.active && !fixedInput.isPaused()) {
         fixedInput.repaint(buffer, cursorPos);
       }
@@ -2151,6 +2245,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     };
 
     const handleCtrlCKey = async (busyLock: boolean): Promise<void> => {
+      if (!hasNonEmptySelection() && loginSession.cancel()) return;
       // Ctrl+C（\u0003）：防误退。必须放在 generic clearSelection() 之前，
       // 否则会先清掉鼠标选区，导致"Ctrl+C 提取选区"失效。
       // - Busy + 有鼠标选区：只复制选区（用户生成中拖选按 Ctrl+C 的意图是
@@ -2166,7 +2261,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         }
         // 中止当前 Turn（保持原有行为）：与 Esc 的协作停止一致。
         const stopBinding = chatQueueBinding;
-        if (stopBinding && stopBinding.queueLength() > 0) {
+        if (stopBinding) {
           stopBinding.preemptForStop();
         }
         activityIndicator.markStopping();
@@ -2206,6 +2301,43 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 原内联于 handleInputToken 的 `if (isBusyLocalSlash) { ... }` 整块。该分支
     // 在 turn 进行中把 /context /switch 等本地命令经 handleTuiInput 走瞬时渲染
     // 通道（见下），搬移不改逻辑与输出字节序列。
+    const stopActiveTurn = (): void => {
+      if (loginSession.cancel()) return;
+      if (!activeTurnAbort) {
+        chatQueueBinding?.preemptForStop();
+        return;
+      }
+      if (activeTurnAbort) {
+        if (activityIndicator.isStopping()) {
+          // 第二次 Esc = 强制收尾。
+          forcedStop = true;
+          forcedStopEpoch = activeTurnEpoch;
+          activityIndicator.stop();
+          activeTurnAbort.abort();
+          activeTurnAbort = null;
+          activeTurnEpoch = 0;
+          busy = false;
+          // 强制收尾 = 用户已经把 UI 拿回去了：不等迟到的 runAgentChat 返回，
+          // 立刻报 idle（旧 turn 的 done/error 被 epoch 守卫挡掉，见
+          // tuiTurnRunner 的 emitStatusIfCurrentTurn）。
+          emitTerminalProgramStatus(output, { state: "idle" });
+          emitCommandOutput(t("forceStopped"));
+          flushPendingRender();
+          renderHistoryToOutput();
+          if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+          return;
+        }
+        // 第一次 Esc = 协作停止 + 即时反馈。
+        const stopBinding = chatQueueBinding;
+        if (stopBinding) {
+          stopBinding.preemptForStop();
+        }
+        activityIndicator.markStopping();
+        activeTurnAbort.abort();
+        return;
+      }
+    };
+
     const handleBusyLocalSlash = async (
       submittedText: string,
       busySlashCommand: string,
@@ -2240,8 +2372,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       cursorPos = 0;
       if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
 
+      const taskOutput = await runTaskSlashCommand(submittedText, { getDialogId: () => state.dialogId, env: effectiveEnv, confirm: confirmTaskStop });
+      if (taskOutput !== null) {
+        output.write(`${taskOutput}\n`);
+        return;
+      }
       const beforeAgentKey = state.agentKey;
-      const res = handleTuiInput(submittedText, state, collectConversationTurns(history));
+      const res = handleTuiInput(submittedText, state, collectConversationTurns(history), {
+        env: effectiveEnv,
+        // Identity only: `effectiveEnv` is the startup snapshot, `options.env`
+        // is where a `/login` in this session writes its token.
+        authEnv: resolveTuiIdentityEnv(effectiveEnv, options.env ?? process.env),
+      });
       if (res.action?.type === "paste-clipboard") {
         // turn 运行中也能 /paste：草稿本来就在 busy 期间保持可编辑，写入草稿安全
         // （不触碰 history 状态机，不排队）。与空闲路径共用同一份读取流程。
@@ -2287,9 +2429,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // 登录是长等待操作，做完后 token 热写进 env，下一 turn 立即生效。
         const env = options.env ?? process.env;
         state = res.nextState;
-        const outcome = await runTuiLogin(res.action.args ?? [], (text) => {
+        const outcome = await loginSession.run(res.action.args ?? [], (text) => {
           output.write(`${text}\n`);
-        });
+        }, { fetchImpl });
         if (outcome.status === "success") {
           env.AUTH_TOKEN = outcome.token;
           state = { ...state, showAuthGuidance: false };
@@ -2415,26 +2557,37 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           return;
         }
         const flushCount = chatQueueBinding.queueLength();
-        const flushed = chatQueueBinding.snapshotAndClearQueueWithImages();
-        if (!flushed) return;
-        const merged = flushed.text;
-        // Idle: fold the composer draft into the merge so "Ctrl+S = send
-        // everything pending right now" holds even when the user is mid-type.
+        // Idle: fold the composer draft into the flush as one more queued
+        // message. The queue keeps every message's own text/attachments and
+        // the drain sends them all in one provider round — no text merge.
         // Busy keeps the draft (the turn owns the screen; the draft is
         // preserved and editable once the turn ends).
         const draftIncluded = !busy && buffer.trim() !== "";
-        const fullText = draftIncluded ? `${buffer}\n${merged}` : merged;
-        const flushedMedia = flushed.mediaPaths ?? [];
-        chatQueueBinding.enqueue(
-          flushed.imagePaths.length > 0 || flushedMedia.length > 0
-            ? {
-                event: { kind: "user", text: fullText },
-                text: fullText,
-                ...(flushed.imagePaths.length > 0 ? { imagePaths: flushed.imagePaths } : {}),
-                ...(flushedMedia.length > 0 ? { mediaPaths: flushedMedia } : {}),
-              }
-            : fullText,
-        );
+        if (draftIncluded) {
+          const draftImages = detectSubmittedImagePaths(buffer, state.cwd);
+          const draftMedia = detectSubmittedMediaPaths(draftImages.message, state.cwd);
+          try {
+            if (draftImages.imagePaths.length > 0 || draftMedia.mediaPaths.length > 0) {
+              const message = draftMedia.message.trim() || draftImages.message.trim();
+              await chatQueueBinding.submitPending({
+                event: { kind: "user", text: message },
+                text: message,
+                ...(draftImages.imagePaths.length > 0 ? { imagePaths: draftImages.imagePaths } : {}),
+                ...(draftMedia.mediaPaths.length > 0 ? { mediaPaths: draftMedia.mediaPaths } : {}),
+              });
+            } else {
+              await chatQueueBinding.submitPending(buffer);
+            }
+          } catch (error) {
+            emitCommandOutput(`[nolo] Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Ctrl+S`);
+            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+            return;
+          }
+          bumpDraftEpoch();
+          buffer = "";
+          cursorPos = 0;
+          if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+        }
         // Use a busy-aware message so the busy path does not contradict the
         // subsequent "Stopped this reply." line (review finding: two
         // contradictory toasts). The idle path is plain "flushed N as one".
@@ -2443,15 +2596,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           t(busy ? "flushQueuedBusyHint" : "flushQueuedIdleHint", String(totalCount)),
         );
         if (busy) {
+          // Stop the in-flight reply; the drain cascade then sends the queued
+          // messages as one batch (one provider round, original order/text/
+          // attachments). Messages typed during that round queue for the next.
           preemptAndAbortForDrain(chatQueueBinding, activeTurnAbort);
           return;
         }
-        // Idle: clear the now-merged draft, then reuse the empty-Enter
-        // manual-drain path below to send it as a fresh turn.
-        buffer = "";
-        cursorPos = 0;
-        if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-        return handleInputToken("\r");
+        // Idle: drain the queued messages as one batch now.
+        busy = true;
+        try { await chatQueueBinding.resumePending(); }
+        finally { busy = false; if (fixedInput.active) fixedInput.repaint(buffer, cursorPos); }
+        return;
       }
       const busyLock = busy;
 
@@ -2628,6 +2783,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         paintFrame(buffer);
         return;
       }
+      if (sequence === "\x1b" && loginSession.cancel()) return;
+
       // Esc while a turn is running = cooperative stop. A lone \x1b token is
       // only produced for a real Esc press (arrow keys arrive as full CSI
       // sequences), so this cannot swallow other keys. When the queue has
@@ -2643,33 +2800,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       //    activityIndicator.stop()、forcedStop=true、activeTurnAbort=null、
       //    打印 forceStopped 提示、busyLock 解除、重绘 composer。迟到的
       //    runAgentChat 返回值由 runOneAgentTurn 里的 forcedStop 分支丢弃。
-      if (busyLock && sequence === "\x1b" && activeTurnAbort) {
-        if (activityIndicator.isStopping()) {
-          // 第二次 Esc = 强制收尾。
-          forcedStop = true;
-          forcedStopEpoch = activeTurnEpoch;
-          activityIndicator.stop();
-          activeTurnAbort.abort();
-          activeTurnAbort = null;
-          activeTurnEpoch = 0;
-          busy = false;
-          // 强制收尾 = 用户已经把 UI 拿回去了：不等迟到的 runAgentChat 返回，
-          // 立刻报 idle（旧 turn 的 done/error 被 epoch 守卫挡掉，见
-          // tuiTurnRunner 的 emitStatusIfCurrentTurn）。
-          emitTerminalProgramStatus(output, { state: "idle" });
-          emitCommandOutput(t("forceStopped"));
-          flushPendingRender();
-          renderHistoryToOutput();
-          if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-          return;
-        }
-        // 第一次 Esc = 协作停止 + 即时反馈。
-        const stopBinding = chatQueueBinding;
-        if (stopBinding && stopBinding.queueLength() > 0) {
-          stopBinding.preemptForStop();
-        }
-        activityIndicator.markStopping();
-        activeTurnAbort.abort();
+      if (busyLock && sequence === "\x1b") {
+        stopActiveTurn();
         return;
       }
       // 粘贴来源识别（三条入口，语义不同但共用下方同一个读取流程）：
@@ -2761,6 +2893,48 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // and write straight to the output stream. The next streaming
           // repaint overwrites it, which is fine for an ephemeral notice.
           const busySlashCommand = trimmedText.split(/\s+/)[0]?.toLowerCase();
+          if (busySlashCommand === "/stop" || busySlashCommand === "/pending") {
+            const [, ...args] = trimmedText.split(/\s+/);
+            if (busySlashCommand === "/stop" && args.length === 0) {
+              stopActiveTurn();
+            } else if (busySlashCommand === "/pending") {
+              if (args.length > 0) {
+                output.write("\n[nolo] Cannot resolve pending batches while a turn is active; stop the turn first, then use /pending.\n");
+              } else {
+                const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
+                const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
+                try {
+                  output.write(`\n${await binding.handlePendingCommand("show")}\n`);
+                } catch (error) {
+                  output.write(`\n[nolo] ${error instanceof Error ? error.message : String(error)}\n`);
+                }
+              }
+            } else {
+              // Targeted /stop retains the existing background job/PID router.
+              await handleBusyLocalSlash(submittedText, busySlashCommand);
+              return;
+            }
+            bumpDraftEpoch();
+            buffer = "";
+            cursorPos = 0;
+            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+            return;
+          }
+          if (busySlashCommand === "/auto-review") {
+            // Direct composer submission only. Do not enqueue a control as model
+            // text or alter the assistant-owned history while a turn is active.
+            await runSubmittedSlashLine(trimmedText, {
+              ...slashHost,
+              get state() { return state; },
+              set state(next) { state = next; },
+              emitCommandOutput: (text) => { output.write(`\n${text}\n`); },
+            }, async () => {}, undefined, true);
+            bumpDraftEpoch();
+            buffer = "";
+            cursorPos = 0;
+            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+            return;
+          }
           const isBusyLocalSlash =
             busySlashCommand === "/context" ||
             busySlashCommand === "/ctx" ||
@@ -2806,17 +2980,24 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             attachmentCount: state.attachedImages.length,
           });
           if (decision.kind === "queue-text") {
+            try {
             if (busyImages.imagePaths.length > 0 || busyMedia.mediaPaths.length > 0) {
               const message = busyMedia.message.trim() || busyImages.message.trim();
-              binding.enqueue({
+              await binding.submitPending({
                 event: { kind: "user", text: message },
                 text: message,
                 ...(busyImages.imagePaths.length > 0 ? { imagePaths: busyImages.imagePaths } : {}),
                 ...(busyMedia.mediaPaths.length > 0 ? { mediaPaths: busyMedia.mediaPaths } : {}),
               });
             } else {
-              binding.enqueue(decision.text);
+              await binding.submitPending(decision.text);
             }
+            } catch (error) {
+              emitCommandOutput(`[nolo] Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Enter`);
+              if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+              return;
+            }
+            bumpDraftEpoch();
             buffer = "";
             cursorPos = 0;
             fixedInput.repaint(buffer, cursorPos);
@@ -2829,20 +3010,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               );
               if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
             }
-          } else if (
-            decision.kind === "noop" &&
-            !submittedText.trim() &&
-            binding.queueLength() > 0
-          ) {
-            // Empty Enter while busy with a non-empty queue: preempt the
-            // in-flight turn so the queued head drains immediately instead
-            // of waiting for the turn to finish. Arm the binding's preempt
-            // flag (so the upcoming aborted turn-end is reinterpreted as a
-            // clean end and drains rather than clearing the queue), then
-            // abort the current turn. The turn's own finally will call
-            // notifyTurnEnd, which drives the drain cascade.
-            preemptAndAbortForDrain(binding, activeTurnAbort);
           }
+          // Empty Enter is not permission to interrupt the active reply.
+          // Explicit stop/flush controls retain their existing handlers.
           // arm-fresh-dialog / compact-blocked / noop / multi-image-blocked
           // are all intentionally no-ops while busy: the draft is preserved
           // and the user can act on it once the turn completes.
@@ -2859,26 +3029,46 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           buffer = "";
           cursorPos = 0;
           bumpDraftEpoch();
-          await runSubmittedLine(authCmd, host, runOneAgentTurn);
+          // 与下方手工 drain / 正常提交同一来源的交互 handler：authCmd 是
+          // slash 命令，这些 handler 在 /auth 分支不会被调用，但签名必须
+          // 对齐（此前误传 (host, runOneAgentTurn)，类型不符且语义错位）。
+          const { actionGateHandler } = buildInteractiveTurnHandlers();
+          await runSubmittedLine(authCmd, actionGateHandler);
           return;
         }
         if (state.suggestedAuthCommand) {
           state = { ...state, suggestedAuthCommand: undefined };
         }
-        if (!submittedText.trim() && chatQueueBinding && chatQueueBinding.queueLength() > 0) {
+        if (!submittedText.trim()) {
           const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
-          const manualBinding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
-          const drainedText = manualBinding.drainHeadForManualTurn();
-          if (drainedText !== null) {
-            // 空 Enter 进来的，草稿本来就是空的/纯空白，清掉再进 output 模式。
-            // turn 执行本体走共享的 runIdleTextTurn（与 run 终态唤醒同一份）。
-            buffer = "";
-            cursorPos = 0;
-            // 空 Enter 把队列头拉成新 turn：草稿换了世代，在途粘贴结果作废。
-            bumpDraftEpoch();
-            await runIdleTextTurn(drainedText);
+          const pending = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
+          await pending.restorePending();
+          maybeShowUnknownReminder(pending);
+          if (pending.queueLength() > 0) {
+            busy = true;
+            try { await pending.resumePending(); }
+            finally { busy = false; if (fixedInput.active) fixedInput.repaint(buffer, cursorPos); }
             return;
           }
+        }
+        // A real user send explicitly resumes recovered pending inputs in order.
+        if (startsChatTurn && state.attachedImages.length === 0 && chatQueueBinding && (chatQueueBinding.queueLength() > 0 || chatQueueBinding.isRecoveryBlocked())) {
+          const images = detectSubmittedImagePaths(submittedText, state.cwd);
+          const media = detectSubmittedMediaPaths(images.message, state.cwd);
+          try {
+            await chatQueueBinding.submitPending({ text: media.message, event: { kind: "user", text: media.message },
+              imagePaths: images.imagePaths, mediaPaths: media.mediaPaths });
+          } catch (error) {
+            emitCommandOutput(`[nolo] Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Enter`);
+            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+            return;
+          }
+          bumpDraftEpoch(); buffer = ""; cursorPos = 0;
+          busy = true;
+          try { await chatQueueBinding.resumePending(); }
+          finally { busy = false; if (fixedInput.active) fixedInput.repaint(buffer, cursorPos); }
+          maybeShowUnknownReminder(chatQueueBinding);
+          return;
         }
         // Stale-running recovery (batch 3): the workspace is idle (busy ===
         // false) but the queue binding can still report a running turn when a
@@ -2912,6 +3102,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             submittedText,
             actionGateHandler,
             confirmDestructiveAction,
+            true,
           );
         } finally {
           busy = false;
@@ -3036,6 +3227,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             rl.resume();
           }
         },
+        true,
       );
       if (shouldExit) break;
       if (shouldRenderPrompt) {
@@ -3048,6 +3240,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const registry = getProcessRegistry();
     // 会话退出：摘掉终态订阅，registry 单例继续服务下个生命周期。
     unsubscribeProcessTerminal();
+    unsubscribeAutoReviewAcceptance();
     // Full-truth list() is correct here: only launchProcess registrations ever
     // set persist, and transient foreground envelopes (workspaceShell
     // pre-registration) always have persist=false, so they can't inflate this

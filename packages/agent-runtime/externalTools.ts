@@ -2,6 +2,7 @@ import { YAHOO_FINANCE_TOOLS_SCHEMA, getYahooFinanceQuote, getYahooFinanceHistor
 import { ARXIV_TOOLS_SCHEMA, searchArxivPapers } from "../integrations/arxiv";
 import { WORLD_BANK_TOOLS_SCHEMA, getWorldBankIndicator } from "../integrations/world-bank";
 import { SERPAPI_TOOLS_SCHEMA, searchGoogleScholar, searchGoogleWeb } from "../integrations/serpapi";
+import { WECHAT_SEARCH_TOOLS_SCHEMA, searchWechatArticles } from "../integrations/wechat-search";
 import type { AgentRuntimeToolCallInput, AgentRuntimeToolResult } from "./hostAdapter";
 import { filterExternalToolNamesByDataSourcePlugins } from "./dataSourcePluginSpecs";
 
@@ -12,6 +13,7 @@ export const EXTERNAL_TOOL_NAMES = [
   "getWorldBankIndicator",
   "searchGoogleScholar",
   "searchGoogleWeb",
+  "searchWechatArticles",
 ] as const;
 
 export type ExternalToolName = typeof EXTERNAL_TOOL_NAMES[number];
@@ -57,6 +59,8 @@ export function buildExternalOpenAiTools(args: { toolNames?: string[], authentic
     ...YAHOO_FINANCE_TOOLS_SCHEMA,
     ...ARXIV_TOOLS_SCHEMA,
     ...WORLD_BANK_TOOLS_SCHEMA,
+    // 微信文章搜索无凭据、无外部费用，与 yahoo/arxiv/world-bank 同档：不需要计费上下文。
+    ...WECHAT_SEARCH_TOOLS_SCHEMA,
   ];
   if (args.authenticatedBillingContext) {
     allSchemas.push(...SERPAPI_TOOLS_SCHEMA);
@@ -127,6 +131,22 @@ export function buildExternalToolExecutors(args?: {
       try {
         const { countryCode, indicatorCode } = JSON.parse(call.arguments);
         const data = await getWorldBankIndicator(countryCode, indicatorCode);
+        return {
+          id: call.id,
+          name: call.name,
+          content: JSON.stringify(data, null, 2),
+        };
+      } catch (e: any) {
+        return { id: call.id, name: call.name, content: `Error: ${e.message}`, isError: true };
+      }
+    };
+  }
+
+  if (!toolNames || toolNames.includes("searchWechatArticles")) {
+    executors.searchWechatArticles = async (call) => {
+      try {
+        const { query, num } = JSON.parse(call.arguments);
+        const data = await searchWechatArticles(query, num);
         return {
           id: call.id,
           name: call.name,

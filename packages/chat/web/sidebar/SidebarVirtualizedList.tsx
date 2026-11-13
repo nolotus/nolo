@@ -64,6 +64,10 @@ export interface SidebarItemShape {
 interface SidebarVirtualizedListProps<T extends SidebarItemShape> {
   /** Flat list of items to render */
   items: T[];
+  /** Non-content rows must not activate, rename or open a context menu. */
+  isItemDisabled?: (item: T) => boolean;
+  /** Inline action rows stay keyboard reachable but have no content activation/menu. */
+  isItemAction?: (item: T) => boolean;
   /** Render function for each item. RAC ListBox only passes the item (not index). */
   children: (item: T) => React.ReactNode;
   /** Callback when an item is activated (click / Enter / Space). */
@@ -115,6 +119,8 @@ interface SidebarVirtualizedListProps<T extends SidebarItemShape> {
 
 export function SidebarVirtualizedList<T extends SidebarItemShape>({
   items,
+  isItemDisabled,
+  isItemAction,
   children,
   onAction,
   height = "100%",
@@ -152,7 +158,11 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
         data-hook="chat-esc-sidebar-scroller"
         items={items}
         dependencies={dependencies}
-        onAction={onAction}
+        disabledKeys={items.filter((item) => isItemDisabled?.(item)).map((item) => item.contentKey)}
+        onAction={(key) => {
+          const item = items.find((entry) => entry.contentKey === key);
+          if (item && !isItemDisabled?.(item) && !isItemAction?.(item)) onAction?.(key);
+        }}
         selectionMode={selectionMode}
         selectionBehavior={selectionBehavior}
         selectedKeys={selectedKeys as any}
@@ -180,6 +190,7 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
               // SidebarItemRow 的 handleRowContextMenu 处理并 stopPropagation 了;
               // 而 SidebarItemRow 在重命名态会早退且不 stopPropagation,那种情况
               // 必须让原生文本菜单弹出,绝不能在这里劫持。
+              if (isItemDisabled?.(item) || isItemAction?.(item)) return;
               if (event.target !== event.currentTarget) return;
               event.preventDefault();
               onItemContextMenu?.(item, event.currentTarget as HTMLElement);
@@ -187,6 +198,7 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
             onKeyDown={(event) => {
               // F2 走同一条 editSignal 通路。其他按键原样放过 —— ListBox 的方向键
               // 导航和 Enter 激活必须照常工作,不得 preventDefault/stopPropagation。
+              if (isItemDisabled?.(item) || isItemAction?.(item)) return;
               if (event.key !== "F2") return;
               event.preventDefault();
               event.stopPropagation();

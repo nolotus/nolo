@@ -1,3 +1,4 @@
+import { resolveModelTier, type ModelTier } from "./dispatchSelectionPolicy";
 import { fnv1a32Hex } from "core/fnv1a32";
 import { getModelAbility, type ModelAbility } from "../llm/modelAbility";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
@@ -15,10 +16,6 @@ import {
 import type { AgentEconomicsSnapshot } from "../economics/economicsSnapshot";
 import { resolveEconomicsSnapshot } from "../economics/economicsSnapshot";
 import type { AgentQuota } from "./quotaSnapshot";
-import {
-  resolveDefaultAgentTier,
-  type AgentTier,
-} from "./agentTier";
 import {
   resolveAgentAvailability,
   type AgentAvailabilityStatus,
@@ -193,12 +190,7 @@ export interface SafeAgentSummary {
   handle: string | null;
   introduction: string | null;
   model: string | null;
-  /**
-   * 能力档弱先验（fast/balanced/top/unknown），由 model 名解析（见 ./agentTier）。
-   * 不代表领域能力；unknown = 模型名没给出信号。这是对所有用户的通用默认值；用户偏好（记忆/当次指令）的覆盖由编排提示词
-   * 处理，不在摘要层。
-   */
-  tier: AgentTier;
+  modelTier: ModelTier;
   provider: string | null;
   apiSource: string | null;
   cliProvider: string | null;
@@ -533,9 +525,6 @@ export function toSafeAgentSummary(
   const credentialGroup = record?.credentialGroup ?? credInfo?.credentialGroup;
   const credentialKind = record?.credentialKind ?? credInfo?.credentialKind;
 
-  // 默认档位：纯函数按 model 名解析，不读用户偏好（覆盖由编排提示词负责）。
-  const { tier } = resolveDefaultAgentTier(record?.model);
-
   const availability = resolveAgentAvailability(
     { nextAvailableAt, quota, quotaExhaustion },
     options?.now ?? Date.now(),
@@ -549,7 +538,7 @@ export function toSafeAgentSummary(
     handle,
     introduction,
     model,
-    tier,
+    modelTier: resolveModelTier(model),
     provider,
     apiSource,
     cliProvider,
@@ -597,8 +586,7 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "agentKey",
   "name",
   "model",
-  // 能力档弱先验（unknown = 模型名没给出信号，不推断强弱）。
-  "tier",
+  "modelTier",
   "billingSource",
   "availabilityStatus",
   "credentialGroup",
@@ -611,9 +599,9 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "apiSource",
   "credentialKind",
   "credentialed",
-  // 仅限流中的 agent 才会带（可用 agent 上不存在）。对"现在能不能选它"是
-  // 决策信息（CLI --show-unavailable 场景）；默认列表已把这类 agent 过滤掉，
-  // 所以通常根本不占字节。
+  // 仅限流中的 agent 才会带（可用 agent 上不存在）。额度/冷却只作参考信息，
+  // 不参与派发门控：这类 agent 同样在 agents 主列表里（带标注），不做过滤，
+  // 所以这两个字段只在确实限流时才占字节。
   "nextAvailableAt",
   "availabilityReason",
   // —— 体积大的说明性字段（排在每条记录最后，截断时先牺牲它们）——
@@ -666,7 +654,7 @@ export function toCompactAgentSummary(
 /**
  * 显式紧凑模式（compact: true）输出投影：
  * 当调用方受极端 token 预算限制时，保留选人派发与准入所必需的核心字段与证据
- * （agentKey、name、model、tier、billingSource、availabilityStatus、credentialGroup、
+ * （agentKey、name、model、billingSource、availabilityStatus、credentialGroup、
  * isFavorite、isOAuth、isOwned、isPublic、nextAvailableAt、availabilityReason、
  * tools、provider、apiSource、credentialKind、credentialed、economics、quota），
  * 同时剔除次要长文本说明与非准入元数据（如 introduction、modelAbility、greeting、prompt 等）。
@@ -676,7 +664,7 @@ export const ULTRA_COMPACT_AGENT_SUMMARY_FIELDS = [
   "agentKey",
   "name",
   "model",
-  "tier",
+  "modelTier",
   "billingSource",
   "availabilityStatus",
   "credentialGroup",
@@ -711,60 +699,4 @@ export function toUltraCompactAgentSummary(
     }
   }
   return compact as UltraCompactSafeAgentSummary;
-}
-
-export const UNAVAILABLE_AGENT_SUMMARY_FIELDS = [
-  "agentKey",
-  "name",
-  "model",
-  "provider",
-  "apiSource",
-  "isFavorite",
-  "isOAuth",
-  "isOwned",
-  "nextAvailableAt",
-  "availabilityStatus",
-  "availabilityReason",
-  "quota",
-  "favoritedAt",
-  "updatedAt",
-] as const;
-
-export type UnavailableAgentSummary = {
-  agentKey?: string;
-  name: string;
-  model?: string;
-  provider?: string;
-  apiSource?: string;
-  isFavorite: boolean;
-  isOAuth: boolean;
-  isOwned: boolean;
-  nextAvailableAt?: number;
-  availabilityStatus?: AgentAvailabilityStatus;
-  availabilityReason?: AgentAvailabilityReason;
-  quota?: AgentQuota;
-  favoritedAt?: number | string;
-  updatedAt?: number | string;
-};
-
-/**
- * 429 限流不可用 Agent 的精简摘要投影（供 listAgents 的 unavailableAgents 字段消费）。
- * 包含选人和知情权决策所需的关键标识（agentKey、isOAuth、isOwned、isFavorite 等）及复位时间戳（nextAvailableAt）。
- */
-export function toUnavailableAgentSummary(
-  summary: SafeAgentSummary
-): UnavailableAgentSummary {
-  const item: Record<string, unknown> = {
-    name: summary.name,
-    isFavorite: summary.isFavorite,
-    isOAuth: summary.isOAuth,
-    isOwned: summary.isOwned,
-  };
-  for (const field of UNAVAILABLE_AGENT_SUMMARY_FIELDS) {
-    const value = summary[field];
-    if (value !== null && value !== undefined) {
-      item[field] = value;
-    }
-  }
-  return item as UnavailableAgentSummary;
 }

@@ -158,6 +158,64 @@ const parseAgentsMdItem = (body: string): { label: string; rest: string } => {
   };
 };
 
+/**
+ * 可执行命令令牌：硬门锚点常常就是命令本身（如 `bun run test:heavy -- <paths>`），
+ * 而它可能落在条目的第 n 个句子里——只留首句会让锚点整条消失（实测：真实
+ * AGENTS.md 的「测试命令」条目被改写后命令落到后面的句子，首句 + 字符上限
+ * 装不下，索引里就再也找不到 `bun run test:heavy`）。
+ *
+ * 只认行内代码里以命令前缀开头**且带参数**的片段：文档路径（`docs/workflow.md`）、
+ * 锁文件（`bun.lock`）与普通名词不是命令，不进令牌列表。
+ */
+const AGENTS_MD_COMMAND_TOKEN_PREFIX =
+  /^(bunx?|npx|node|npm|pnpm|yarn|git|gh|tsc|deno)\b\s/;
+
+/** 从条目正文里抽出命令令牌（保留原文形态，去重、按出现顺序）。 */
+const extractAgentsMdCommandTokens = (body: string): string[] => {
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  for (const match of body.matchAll(/`([^`\n]+)`/g)) {
+    const raw = match[1];
+    if (!AGENTS_MD_COMMAND_TOKEN_PREFIX.test(raw)) continue;
+    if (seen.has(raw)) continue;
+    seen.add(raw);
+    tokens.push(raw);
+  }
+  return tokens;
+};
+
+/**
+ * 条目 gist：首句 + 保留命令令牌。
+ *
+ * 字符预算仍是 AGENTS_MD_SUMMARY_ITEM_MAX_CHARS：命令令牌优先占位，首句按剩余
+ * 空间裁剪（省略号与分隔空格一并计入），因此「命令进得来」不以超预算为代价。
+ */
+const buildAgentsMdItemGist = (
+  firstSentence: string,
+  bulletBody: string,
+): string => {
+  const max = AGENTS_MD_SUMMARY_ITEM_MAX_CHARS;
+  const clipped = clipToChars(firstSentence, max);
+  const missing = extractAgentsMdCommandTokens(bulletBody).filter(
+    (token) => !clipped.includes(token),
+  );
+  if (missing.length === 0) return clipped;
+
+  // 命令令牌按出现顺序塞进字符预算；装不下的整条丢弃（不切半条命令）
+  let tail = "";
+  for (const token of missing) {
+    const candidate = tail ? `${tail} \`${token}\`` : `\`${token}\``;
+    if (candidate.length > max) continue;
+    tail = candidate;
+  }
+  if (!tail) return clipped;
+
+  // room 扣掉分隔空格与首句裁剪时的省略号，保证总长不超字符上限
+  const room = max - tail.length - 2;
+  const head = room > 0 ? clipToChars(firstSentence, room) : "";
+  return head ? `${head} ${tail}` : tail;
+};
+
 const priorityOf = (label: string): number => {
   const lowered = label.toLowerCase();
   for (let i = 0; i < AGENTS_MD_SUMMARY_PRIORITY_KEYWORDS.length; i += 1) {
@@ -202,7 +260,7 @@ const collectAgentsMdSummaryItems = (content: string): AgentsMdSummaryItem[] => 
     items.push({
       section,
       label,
-      gist: clipToChars(firstSentence, AGENTS_MD_SUMMARY_ITEM_MAX_CHARS),
+      gist: buildAgentsMdItemGist(firstSentence, bullet[1]),
       priority: priorityOf(label),
     });
   }
@@ -251,8 +309,11 @@ export function buildAgentsMdSummaryBody(
     ...items.filter((item) => item.priority < 0),
   ];
 
-  const note = "…（索引已截断，其余锚点见完整文件）";
-  const noteBytes = Buffer.byteLength(note, "utf8");
+  // 截断说明的实际成本是「换行 + 说明」：说明必须另起一行才能不被当成最后一条
+  // 索引的后缀。预留时只算说明本身的字节会让「装填正好顶到边界」的那一档多出
+  // 1 字节（真仓库短绝对路径实测：正文 3038 > 正文预算 3037，注入 3073 > 3072）。
+  const noteBlock = `\n…（索引已截断，其余锚点见完整文件）`;
+  const noteBytes = Buffer.byteLength(noteBlock, "utf8");
   // 截断说明随时可能追加，因此始终为它预留预算（宁可少装一条，也不超预算）
   let used = Buffer.byteLength(head, "utf8");
   const admitted: AgentsMdSummaryItem[] = [];
@@ -295,7 +356,7 @@ export function buildAgentsMdSummaryBody(
   // 一条都装不下时退回 null，让调用方走截断路径，而不是只给一句「已截断」
   if (admitted.length === 0) return null;
 
-  return `${head}${renderSummarySections(frozen)}${truncated ? `\n${note}` : ""}`;
+  return `${head}${renderSummarySections(frozen)}${truncated ? noteBlock : ""}`;
 }
 
 /** 按小节聚合渲染，小节标题只在首次出现时输出一次。 */

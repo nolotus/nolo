@@ -14,6 +14,7 @@ import {
   type DockerRuntimeReadinessSource,
 } from "../../../agent-runtime/dockerReadiness.stub";
 import { selectIdentityUserId } from "identity/selectors";
+import type { ToolExecutorContext } from "../index";
 
 export const listRuntimesFunctionSchema = {
   name: "listRuntimes",
@@ -50,7 +51,7 @@ export function formatRuntimeSummaryCard(runtimes: RuntimeSummary[]): string {
   return `Available Runtimes:\n${lines.join("\n")}`;
 }
 
-export type ListRuntimesTrustedContext = Partial<RuntimeCatalogDeps> & {
+export type ListRuntimesTrustedContext = Partial<RuntimeCatalogDeps> & ToolExecutorContext & {
   /**
    * 生产接线：docker 就绪探测的**单例源**（`createDefaultDockerRuntimeReadinessSource`）。
    * 传源 = 每次真正探测；传 `dockerReadiness`（快照）= 只消费既有结论。

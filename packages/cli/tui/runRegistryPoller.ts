@@ -682,7 +682,12 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
       ensureRunning();
     },
     endHold() {
-      if (holdCount > 0) holdCount -= 1;
+      if (holdCount > 0) {
+        holdCount -= 1;
+        // A run can be created after the last discovery tick but before the
+        // turn ends. Force discovery on the next tick before deciding to stop.
+        if (holdCount === 0) tickCount = 0;
+      }
     },
     poll,
     requestLogTail,

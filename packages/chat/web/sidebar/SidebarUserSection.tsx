@@ -334,6 +334,15 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
                 shape="full"
                 src={avatarUrl || undefined}
               />
+              {/* railCompact：通知合并到头像，未读角标贴在头像右上角 */}
+              {railCompact && unreadCount > 0 && (
+                <span
+                  className="navigation-v2-rail-account__avatar-badge"
+                  aria-hidden="true"
+                >
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
               <span
                 title={authUser.email || authUser.username}
                 {...withLiteralClass(railCompact ? "navigation-v2-rail-account__username" : "", sidebarStyles.sidebarUserSectionUsername)}
@@ -409,6 +418,28 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
           <div className="topbar-user-menu__divider" />
 
           <div className="topbar-user-menu__list">
+            {/* railCompact：独立铃铛已隐藏，通知列表入口移到账号菜单 */}
+            {railCompact && (
+              <button
+                type="button"
+                className="topbar-user-menu__item topbar-user-menu__item--notification"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setBellOpen(true);
+                }}
+              >
+                <LuBell size={14} aria-hidden="true" />
+                <span>{t("notifications.title", "通知")}</span>
+                {unreadCount > 0 && (
+                  <span
+                    className="topbar-user-menu__notification-count"
+                    aria-hidden="true"
+                  >
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               type="button"
               className="topbar-user-menu__item"
@@ -553,6 +584,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
           ref={bellContainerRef}
           {...stylex.props(sidebarStyles.sidebarUserSectionToolWrap)}
         >
+          <span className={railCompact ? "navigation-v2-rail-account__bell" : undefined}>
           <Tooltip content={t("notifications.title", "通知")} placement="top" disabled={isMobile}>
             <button
               type="button"
@@ -583,6 +615,7 @@ export const SidebarUserSection: React.FC<{ railCompact?: boolean }> = ({ railCo
               )}
             </button>
           </Tooltip>
+          </span>
 
           {/* 通知弹窗 - 向上展开 */}
           <PortalDropdown isOpen={bellOpen} anchorRef={sectionRef as React.RefObject<HTMLElement>} role="menu" compact={railCompact}>

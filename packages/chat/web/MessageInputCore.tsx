@@ -94,7 +94,7 @@ import { extractCustomId } from "core/prefix";
 import { stopForegroundTurnOnServer } from "./stopForegroundTurnOnServer";
 import { useAppSelectedNode } from "app/appInspector/appInspectorStore";
 import { MessageInputComposer } from "./MessageInputComposer";
-import { MessageInputControlsBar } from "./MessageInputControlsBar";
+import { MessageInputAttachButton, MessageInputControlsBar } from "./MessageInputControlsBar";
 import {
   BrowseContextIndicator,
   useBrowseContext,
@@ -150,7 +150,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
 
   // stylex.props() returns { className } which would clobber the handwritten
   // "message-input__box" hook class if spread after it; merge explicitly instead.
-  const cardStyleProps = stylex.props(chatInputCardStyles.card);
+  const cardStyleProps = stylex.props(chatInputCardStyles.card, chatInputCardStyles.cardCapsule);
 
   const currentDialogKey = useCurrentDialogKey();
   const pendingFiles = usePendingFiles(currentDialogKey) as any[];
@@ -1192,7 +1192,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
             <div
               {...withLiteralClass(
                 "message-input__resize-handle",
-                messageInputStyles.resizeHandle
+                messageInputStyles.resizeHandleOverlay
               )}
               onPointerDown={handleResizePointerDown}
               onDoubleClick={handleResetManualHeight}
@@ -1265,6 +1265,26 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               </div>
             )}
 
+            {/* ── Input Row (Claude 式单行)：输入区在左，工具与发送在右 ── */}
+            <div
+              {...withLiteralClass(
+                "message-input__composer-row",
+                messageInputStyles.composerRow
+              )}
+            >
+            {/* ── 左侧 + 按钮（胶囊最左端） ── */}
+            <div
+              {...withLiteralClass(
+                "message-input__controls-left",
+                messageInputStyles.controlsLeft
+              )}
+            >
+              <MessageInputAttachButton
+                fileUploadDisabled={fileUploadDisabled}
+                onFilesSelected={processFiles}
+              />
+            </div>
+
             {/* ── Input Area ── */}
             <MessageInputComposer
               areaRef={areaRef}
@@ -1299,6 +1319,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               agentPicker={agentPicker}
               usageSlot={<DialogUsageTrigger />}
             />
+            </div>
           </div>
 
           {showIndicator && (

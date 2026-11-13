@@ -8,6 +8,8 @@ import type { PermissionGrants } from "../client/profileConfig";
 export type ThinkingDisplayMode = "show" | "hide";
 
 export type TuiState = {
+  /** Task-only control; never serialized as an account-wide permission. */
+  autoReviewTask?: { userId: string; reference: import("../client/hostTaskEvents").HostTaskReference };
   agentKey: string;
   agentName: string;
   dialogId?: string;
@@ -72,6 +74,13 @@ export type TuiState = {
    * 通知会一直累积到下一个 turn 被读取。
    */
   pendingProcessNotices?: string[];
+  /**
+   * 后台子 agent run 终态通知的 pending 承接：
+   * 未取得成功落盘回执时保留；按 parentDialogId 隔离，在后续 turn 作为
+   * turn-scope context block 注入。只有 saveTurn 成功才 settle；发送尝试、
+   * dialogId 与退出码均不证明已落盘。
+   */
+  pendingChildRunNotices?: import("./runCompletionWatcher").AgentRunCompletionShape[];
   attachedDocs: string[];
   /**
    * Skill refs attached to the workspace via /skill attach.

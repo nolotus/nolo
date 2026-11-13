@@ -16,6 +16,8 @@ import {
 } from "create/space/content/contentThunks";
 import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { read, remove, selectById } from "database/dbSlice";
+import { selectIdentityUserId } from "identity/selectors";
+import { resolveDeleteOwnershipGuard } from "./deleteOwnershipGuard";
 import { removeFavoriteLocally } from "app/favorite/favoriteStore";
 import { resolveDeletedFavoriteProjectionRemoval } from "app/favorite/deletedFavoriteProjection";
 import { asNonEmptyStringArray } from "core/stringArray";
@@ -270,7 +272,7 @@ const normalizeDeleteError = (error: unknown): Error => {
  * 根据 db key 删除对应资源，并同步移除 space 中的引用
  */
 export const deleteDbKey =
-    (input: DeleteDbKeyInput, spaceId?: string | null) =>
+    (input: DeleteDbKeyInput, spaceId?: string | null, options?: { requireOwnership?: boolean }) =>
         async (dispatch: AppDispatch, getState: () => RootState): Promise<boolean> => {
             try {
                 const {
@@ -279,6 +281,36 @@ export const deleteDbKey =
                     inputSpaceId,
                     includeAttachments,
                 } = resolveDeleteInput(input);
+                // 执行端归属复核（opt-in，侧栏行删除路径启用）：UI 门控不是权限边界，
+                // 这里再用实际实体 owner 复核一次——空间管理员不得经此删除他人实体。
+                if (options?.requireOwnership) {
+                    const state = getState();
+                    let ownedRecord: any = selectById(state as any, contentKey);
+                    if (!ownedRecord) {
+                        try {
+                            ownedRecord = await (dispatch as any)(
+                                read({ dbKey: contentKey, preferredServerOrigin })
+                            ).unwrap();
+                        } catch {
+                            // 读不到记录即归属未知，严格路径不放行删除；允许稍后重试。
+                            ownedRecord = null;
+                        }
+                    }
+                    const verdict = resolveDeleteOwnershipGuard({
+                        ownerId:
+                            ownedRecord?.userId ?? ownedRecord?.ownerId,
+                        actorUserId: selectIdentityUserId(state as any),
+                        recordLoaded: Boolean(ownedRecord),
+                    });
+                    if (verdict === "deny") {
+                        throw new Error("无权删除他人内容");
+                    }
+                    // 严格路径：只有正证据（allow）才允许删除本体；读失败/归属未知
+                    // 一律拒绝并保持可重试，绝不因为「没查到」而放行。
+                    if (verdict !== "allow") {
+                        throw new Error("无法验证内容所有权，未删除（可稍后重试）");
+                    }
+                }
                 const effectiveSpaceId =
                     typeof spaceId === "string" && spaceId.trim().length > 0
                         ? spaceId

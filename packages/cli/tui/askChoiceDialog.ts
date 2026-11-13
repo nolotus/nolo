@@ -57,7 +57,6 @@ import {
   DIALOG_CURSOR,
   DIALOG_UNCHECKED,
   renderDialogRow,
-  renderDialogTitle,
   renderOverflowAbove,
   renderOverflowBelow,
 } from "./dialogFrame";
@@ -80,7 +79,7 @@ import {
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import { themeColorSequence, themeText } from "./theme";
 import { displayWidth } from "./tuiAnsi";
-import { safeAskText } from "./askTextSanitize";
+import { safeAskText, safeApprovalMultilineText } from "./askTextSanitize";
 import { SGR_MOUSE_REGEX, parseScrollAction } from "./tuiScrollbar";
 import type { UserChoiceRequest, UserChoiceResult } from "../client/localRuntimeAdapterTypes";
 
@@ -170,15 +169,43 @@ function resolveAskChoiceActionRow(
 }
 
 function renderFooter(
+  state: AskChoiceUiState,
   actionRow: ReturnType<typeof resolveAskChoiceActionRow>,
   colorEnabled: boolean,
+  options?: { wheelScrollsTranscript?: boolean; maxWidth?: number },
 ): string {
-  const hints =
-    actionRow?.kind === "skip"
-      ? t("askChoiceFooterSkip")
-      : actionRow?.kind === "submit"
-        ? t("askChoiceFooterMulti")
-        : t("askChoiceFooterSingle");
+  const q = state.questions[state.activeIndex];
+  // One compact line, in reading order. `drop` is the order in which a
+  // segment is sacrificed when the terminal is too narrow (1 = dropped
+  // first); the move / pick / Esc segments are always kept.
+  const segments: Array<{ text: string; drop?: number }> = [
+    { text: t("askChoiceHintMove") },
+    { text: q?.multiSelect ? t("askChoiceHintToggle") : t("askChoiceHintPick") },
+    ...(actionRow?.kind === "skip" ? [{ text: t("askChoiceHintSkip"), drop: 3 }] : []),
+    ...(actionRow?.kind === "submit" ? [{ text: t("askChoiceHintSend"), drop: 2 }] : []),
+    ...(q?.allowOther ? [{ text: t("askChoiceHintOther"), drop: 1 }] : []),
+    ...(state.questions.length > 1 ? [{ text: t("askChoiceHintTab"), drop: 5 }] : []),
+    { text: t("askChoiceHintCancel") },
+    {
+      // The wheel segment states what the wheel ACTUALLY does in this
+      // session: the transcript when the host routes it there, the option
+      // list otherwise. Never claims a modifier that is not implemented.
+      text: options?.wheelScrollsTranscript
+        ? t("askChoiceHintWheelHistory")
+        : t("askChoiceHintWheelSelect"),
+      drop: 4,
+    },
+  ];
+  const budget = Math.max(24, (options?.maxWidth ?? 80) - 4);
+  const kept = [...segments];
+  while (displayWidth(kept.map((seg) => seg.text).join(" · ")) > budget) {
+    const victim = kept
+      .filter((seg) => seg.drop !== undefined)
+      .sort((a, b) => (a.drop ?? 99) - (b.drop ?? 99))[0];
+    if (!victim) break;
+    kept.splice(kept.indexOf(victim), 1);
+  }
+  const hints = kept.map((seg) => seg.text).join(" · ");
   return colorEnabled ? themeText(`  ${hints}`, "chrome", colorEnabled) : `  ${hints}`;
 }
 
@@ -191,7 +218,7 @@ function otherRowPrefix(index: number): string {
 
 export function renderAskChoiceFrame(
   state: AskChoiceUiState,
-  options?: { bottomAnchored?: boolean; submitFocused?: boolean },
+  options?: { bottomAnchored?: boolean; submitFocused?: boolean; approvalDisplay?: UserChoiceRequest["approvalDisplay"]; wheelScrollsTranscript?: boolean; maxWidth?: number },
 ): AskChoiceFrame {
   const colorEnabled = resolveCliColorEnabled();
   const submitFocused = options?.submitFocused === true;
@@ -200,17 +227,6 @@ export function renderAskChoiceFrame(
   const actionRow = resolveAskChoiceActionRow(state);
   const lines: string[] = [];
   let otherCursor: AskChoiceCursor | null = null;
-
-  // Title
-  lines.push(renderDialogTitle(t("askChoiceTitle")));
-  if (options?.bottomAnchored) {
-    lines.push(
-      colorEnabled
-        ? themeText(`  ${t("askChoiceScrollHint")}`, "muted", colorEnabled)
-        : `  ${t("askChoiceScrollHint")}`,
-    );
-  }
-  lines.push("");
 
   // Tab bar (only when multiple questions)
   if (state.questions.length > 1) {
@@ -237,26 +253,10 @@ export function renderAskChoiceFrame(
       : `? ${safeAskText(q.question)}`,
   );
 
-  if (q.multiSelect) {
-    lines.push(
-      colorEnabled
-        ? themeText(`  ${t("askChoiceHintMulti")}`, "muted", colorEnabled)
-        : `  ${t("askChoiceHintMulti")}`,
-    );
-  } else if (actionRow?.kind === "skip") {
-    lines.push(
-      colorEnabled
-        ? themeText(`  ${t("askChoiceHintOptional")}`, "muted", colorEnabled)
-        : `  ${t("askChoiceHintOptional")}`,
-    );
-  } else {
-    lines.push(
-      colorEnabled
-        ? themeText(`  ${t("askChoiceHintSingle")}`, "muted", colorEnabled)
-        : `  ${t("askChoiceHintSingle")}`,
-    );
+  if (options?.approvalDisplay?.kind === "browser-approval") {
+    // Push physical lines, not one embedded multiline string: painter geometry stays accurate.
+    lines.push(...safeApprovalMultilineText(options.approvalDisplay.text).split("\n"));
   }
-  lines.push("");
 
   // Choice rows
   const totalRows = q.choices.length + (q.allowOther ? 1 : 0);
@@ -330,8 +330,7 @@ export function renderAskChoiceFrame(
     );
   }
 
-  lines.push("");
-  lines.push(renderFooter(actionRow, colorEnabled));
+  lines.push(renderFooter(state, actionRow, colorEnabled, { wheelScrollsTranscript: options?.wheelScrollsTranscript, maxWidth: options?.maxWidth }));
 
   return { text: lines.join("\n"), otherCursor };
 }
@@ -387,10 +386,13 @@ export async function runAskChoiceDialog(args: {
         : args.bottomRow ?? 0,
     );
 
+  // Frame width drives the footer budget: a narrow terminal drops the
+  // optional hint segments instead of wrapping the line.
   const painter = createDialogFramePainter({
     output,
     render: () => {
-      const frame = renderAskChoiceFrame(state, { bottomAnchored, submitFocused });
+      const frameWidth = (output as unknown as { columns?: number }).columns ?? 80;
+      const frame = renderAskChoiceFrame(state, { bottomAnchored, submitFocused, approvalDisplay: request.approvalDisplay, wheelScrollsTranscript, maxWidth: frameWidth });
       return {
         text: frame.text,
         cursor: frame.otherCursor,
@@ -409,6 +411,14 @@ export async function runAskChoiceDialog(args: {
   const onOutputResize = () => paint();
   args.registerForegroundRepaint?.(paint);
 
+  // Wheel ownership: "transcript" hands the wheel to the workspace history
+  // (hosted ask_user). A "transcript" policy WITHOUT a transcript callback
+  // keeps the wheel as this list's own navigation — a dialog that cannot
+  // route the wheel must never swallow it.
+  const wheelRoute = args.inputPolicy?.wheel ?? "modal";
+  const wheelScrollsTranscript =
+    wheelRoute === "transcript" && typeof args.onTranscriptScroll === "function";
+
   try {
     // Mouse reporting for the dialog window is session-owned: the hosted
     // session re-enables what the composer paused; the standalone session
@@ -422,7 +432,12 @@ export async function runAskChoiceDialog(args: {
     paint();
 
     while (state.phase === "active") {
-      const sequence = await readKey();
+      const sequence = await new Promise<string | typeof STREAM_CLOSED>((resolve, reject) => {
+        const abort = () => resolve(STREAM_CLOSED);
+        if (request.signal?.aborted) return abort();
+        request.signal?.addEventListener("abort", abort, { once: true });
+        Promise.resolve(readKey()).then(resolve, reject).finally(() => request.signal?.removeEventListener("abort", abort));
+      });
       if (sequence === STREAM_CLOSED) {
         state = askChoiceReducer(state, { type: "CANCEL" });
         break;
@@ -431,16 +446,19 @@ export async function runAskChoiceDialog(args: {
       // Mouse wheel scrolls the choice list (batch-throttled so a single
       // gesture's dozens of reports don't send the cursor flying).
       const scrollAction = parseScrollAction(sequence);
-      if ((scrollAction === "wheel-up" || scrollAction === "wheel-down") && (args.inputPolicy?.wheel ?? "modal") === "transcript") {
-        args.onTranscriptScroll?.(scrollAction);
-        continue;
-      }
       if (scrollAction && scrollAction !== "wheel-up" && scrollAction !== "wheel-down" && (args.inputPolicy?.pageKeys ?? "modal") === "transcript") {
         args.onTranscriptScroll?.(scrollAction);
         continue;
       }
       if (scrollAction === "wheel-up" || scrollAction === "wheel-down") {
-        if ((args.inputPolicy?.wheel ?? "modal") === "ignore") {
+        if (wheelRoute === "ignore") {
+          continue;
+        }
+        // Hosted ask_user: the wheel belongs to the transcript above the
+        // dialog. Standalone (no transcript callback) keeps the wheel as
+        // list navigation.
+        if (wheelScrollsTranscript) {
+          args.onTranscriptScroll?.(scrollAction);
           continue;
         }
         const direction: 1 | -1 = scrollAction === "wheel-up" ? -1 : 1;

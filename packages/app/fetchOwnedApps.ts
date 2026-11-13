@@ -24,6 +24,10 @@ export type CachedOwnedAppRecord = {
   appKey?: string;
   name: string;
   customUrl?: string | null;
+  /** 服务端下发的访问地址：有就保留，不丢。 */
+  url?: string | null;
+  /** 服务端下发的原部署 server。 */
+  versionServerOrigin?: string;
   visibility?: "private" | "unlisted" | "public";
   deployMode?: "platform";
   spaceId?: string | null;
@@ -214,6 +218,10 @@ const fetchRemoteOwnedApps = async (
                   userId,
                   name: worker.userFriendlyName ?? worker.name,
                   customUrl: worker.customUrl,
+                  // 服务端下发的访问地址与原部署 server 保留下来；serverOrigin
+                  // 只表示这条记录是从哪台机器读到的（副本来源）。
+                  url: worker.url,
+                  versionServerOrigin: worker.versionServerOrigin,
                   visibility: worker.visibility,
                   deployMode: worker.deployMode ?? "platform",
                   spaceId: worker.spaceId ?? null,

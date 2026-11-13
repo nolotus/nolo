@@ -45,7 +45,7 @@ import {
   findMonorepoRoot,
 } from "./runtimePaths";
 import { ensureLinuxDesktopEntry } from "./linuxDesktopEntry";
-import { reviewDesktopBrowserAction } from "./desktopAccountActionGuard";
+import { reviewDesktopBrowserAction, resolveDesktopBrowserOpenPlan } from "./desktopAccountActionGuard";
 import {
   acquireDesktopInstanceLock,
   DESKTOP_SECOND_INSTANCE_EXIT_CODE,
@@ -584,6 +584,7 @@ if (process.platform === "win32") {
   }
 }
 
+const electrobunApi = await import("electrobun/bun");
 const {
   default: Electrobun,
   ApplicationMenu,
@@ -591,7 +592,7 @@ const {
   PATHS,
   Screen,
   Updater,
-} = await import("electrobun/bun");
+} = electrobunApi;
 
 // 必须在首次 `Updater.localInfo.channel()` 之前预热安装元数据（打包版 cwd 是
 // $HOME，electrobun 读不到 `../Resources/version.json`；细节见
@@ -1292,7 +1293,45 @@ setupDesktopNavigationMenu(mainWindow as any);
 attachDesktopHostMessageBridge(mainWindow as any);
 installDesktopApiRequestBridge(mainWindow as any);
 
-openDesktopBrowser = (targetUrl?: string) => {
+openDesktopBrowser = async (targetUrl?: string) => {
+  // Both receiver paths validate first; keep a final check at the opening boundary.
+  const action = { type: "nolo-desktop-browser-action", action: "open", url: targetUrl };
+  // Electrobun 2.x 的主入口只把 openExternal 放在 `Utils` 命名空间下
+  // （api/sdks/main/index.ts 导出 Utils；core/Utils.ts 定义 openExternal），
+  // 没有顶层同名导出。两种形态都读，避免 SDK 形态变化时静默回退。
+  const electrobunExternal = electrobunApi as unknown as {
+    openExternal?: (url: string) => boolean | Promise<boolean>;
+    Utils?: { openExternal?: (url: string) => boolean | Promise<boolean> };
+  };
+  const openExternal =
+    typeof electrobunExternal.openExternal === "function"
+      ? electrobunExternal.openExternal
+      : typeof electrobunExternal.Utils?.openExternal === "function"
+        ? electrobunExternal.Utils.openExternal
+        : undefined;
+  let plan = resolveDesktopBrowserOpenPlan(action, typeof openExternal === "function" ? "available" : "unavailable");
+  if (plan.kind === "reject" || plan.kind === "not-browser-action") {
+    console.error("[desktop] browser open rejected", plan);
+    return;
+  }
+  if (plan.kind === "system-browser") {
+    try {
+      if (await openExternal!(plan.url) !== false) return;
+      console.error("[desktop] openExternal returned false; falling back to Nolo Browser");
+    } catch (error) {
+      console.error("[desktop] openExternal failed; falling back to Nolo Browser", error);
+    }
+    plan = resolveDesktopBrowserOpenPlan(action, "failed");
+  }
+  if (plan.kind !== "internal-browser") return;
+  if (plan.externalFailure) {
+    desktopDiag("browser:external-fallback", "System browser unavailable; opening Nolo Browser", {
+      level: "error",
+      reason: plan.externalFailure,
+    });
+    console.error(`[desktop] system browser ${plan.externalFailure}; opening Nolo Browser`);
+  }
+  targetUrl = plan.url;
   if (browserWindow) {
     browserWindow.show();
     if (targetUrl && browserWindow.webview.loadURL) {

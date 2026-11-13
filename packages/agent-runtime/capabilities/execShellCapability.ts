@@ -41,14 +41,20 @@ export interface ExecShellInput {
   [key: string]: unknown;
 }
 
+/** Windows 专属说明只在 win32 注入：Linux/macOS 上这段不可执行，每轮都在为用不上的环境付费。
+ *  平台是会话期常量，不会破坏前缀缓存的逐字节稳定性。 */
+const WINDOWS_SHELL_NOTE = process.platform === "win32"
+  ? ` On Windows the runtime prefers pwsh (PowerShell 7+): it is resolved first (PATH, then the WindowsApps alias), and powershell.exe 5.1 is only a fallback when pwsh is absent. Read metadata.shellKind from the result — "pwsh" supports '&&'/'||' and $PSStyle, "powershell5" does not (join with ';' or split calls). Match the syntax to the kind you actually got; never assume the version.`
+  : "";
+
 export function buildExecShellToolDefinition(toolName = "execShell"): OpenAiCompatibleTool {
   return {
     type: "function",
     function: {
       name: toolName,
       description:
-        `Execute a shell command from the workspace root. Prefer one compound command (e.g. 'git status && git diff --stat') to perform complete verification in one step instead of multiple small roundtrips. Do not cd into guessed paths; commands already run from the workspace root. Commands block until exit. Long-running commands (sleep over ${IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS}s, dev servers, watchers) automatically detach to background returning {detached: true, pid, label}; for persistent services, prefer launchProcess. On Windows the resolved shell may be Windows PowerShell 5.1 (metadata.shellKind="powershell5"): it does not support '&&'/'||' or $PSStyle — join commands with ';' or split into multiple calls. metadata.shellKind="pwsh" means PowerShell 7+ with full syntax. Read resolvedShell/shellKind from any execShell result before writing Windows-specific syntax. ` +
-        `LIFECYCLE CONTRACT (misreading this contract silenced a real dialog for 10 hours): (1) A normal command waits synchronously for at most 120 seconds; if it ends inside that window the call IS finished — a result containing exitCode means the command has already completed, never "still running"; parse it immediately (no later event will remind you). (2) Only a result with metadata.detached === true AND a taskId represents a tracked background task that may trigger completion wake-up (terminal completion turn carrying a bounded result capsule); that handle produces a completion notification when finished; to read its output without waiting for the wake-up, read the result file for that taskId with readFile (a launchProcess taskId only yields a notice on your next real turn, never a new turn). Note that sleep commands exceeding the detach threshold will detach and trigger a completion wake-up upon exit — do not run standalone sleep commands purely to pause execution. (3) Text the command itself prints (LAUNCHED, STARTED, BACKGROUND, ...) is plain stdout with zero lifecycle meaning — never read it as a platform receipt. (4) Shell-level backgrounding (\`&\`, nohup, disown, setsid, self-daemonizing scripts, PowerShell Start-Process) is NOT tracked: those descendants produce no completion notification, and the outer shell finishing tells you nothing about them. Use background: true to turn a finite job into a tracked background task immediately. When a synchronous result's core output was redirected to a file, read that file in the SAME turn ("read it later" means it is lost) — never end the turn promising a later automatic report without a taskId.`,
+        `Execute a shell command from the workspace root. Prefer one compound command (e.g. 'git status && git diff --stat') to perform complete verification in one step instead of multiple small roundtrips. Do not cd into guessed paths; commands already run from the workspace root. Commands block until exit. Long-running commands (sleep over ${IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS}s, dev servers, watchers) automatically detach to background returning {detached: true, pid, label}; for persistent services, prefer launchProcess.${WINDOWS_SHELL_NOTE} ` +
+        `LIFECYCLE CONTRACT: (1) A normal command waits synchronously for at most 120 seconds; if it ends inside that window the call IS finished — a result carrying exitCode means the command has already completed: parse it immediately, never read it as "still running" (no later event will remind you). (2) Only a result with metadata.detached === true AND a taskId can deliver an automatic completion turn; that taskId is an opaque handle, NOT a file path and NOT a result file — never search for, guess or readFile a path from it, and never rerun the command just to obtain its output. That terminal turn delivers the result inline as a bounded capsule; when the capsule was truncated it also carries a real full-output path in its overflow marker — read that actual path with readFile only when it is present. While waiting for that terminal notification, continue independent work on other parts of the task. A launchProcess taskId is a tracked task too, but it only yields a notice on your next real turn. (3) Text the command itself prints (LAUNCHED, STARTED, ...) is plain stdout with zero lifecycle meaning — never read it as a platform receipt. (4) Shell-level backgrounding (&, nohup, disown, setsid, self-daemonizing scripts, PowerShell Start-Process) is NOT tracked: those descendants produce no completion notification, and the outer shell finishing tells you nothing about them. Use background: true to turn a finite job into a tracked background task. Do not run standalone sleep commands purely to pause execution. When a synchronous result's core output was redirected to a file, read that file in the SAME turn ("read it later" means it is lost) — never end the turn promising a later automatic report without a taskId.`,
       parameters: {
         type: "object",
         properties: {
@@ -68,7 +74,7 @@ export function buildExecShellToolDefinition(toolName = "execShell"): OpenAiComp
           label: {
             type: "string",
             description:
-              "Optional human-readable label for the resulting background task, shown in the task list and completion notices. Defaults to the command's last token, which is unhelpful for pipelines (e.g. '| tail -25' yields '-25').",
+              "Optional human-readable label for the resulting background task, shown in task lists and completion notices. Defaults to the last token.",
           },
         },
       },

@@ -7,13 +7,18 @@
 // 重试、该不该换通道」只能肉读 logTail。本模块把终态映射为结构化的
 // failureClass + retryable：
 //
-//   failureClass: rate_limited / provider_error / stalled / tool_error / unknown
+//   failureClass: history_integrity / balance_exhausted / auth / rate_limited / provider_error / stalled / tool_error / unknown
 //   retryable:    盲目重试（不改 brief、不换通道）是否有意义
 //
-// 判定优先级：显式 failureReason > 错误文本模式 > status 兜底。
+// 判定优先级：history integrity > 明确余额/鉴权证据细化 provider 原因 > 显式 failureReason > 错误文本 > status。
 // 取消类终态（killed/cancelled）不算失败，返回 undefined。
 
+import { AUTH_ERROR_PATTERNS } from "./quotaCircuitBreaker";
+
 export type RunFailureClass =
+  | "history_integrity"
+  | "balance_exhausted"
+  | "auth"
   | "rate_limited"
   | "provider_error"
   | "stalled"
@@ -30,12 +35,19 @@ export type RunFailureClassifyInput = {
   status?: string;
   /** 终态记录上的 failureReason（若已归类）。 */
   failureReason?: string | null;
-  /** 错误文本（note / error message），用于无 failureReason 时的模式归类。 */
+  /** 错误文本（note / error message），用于细化 provider 原因或在无原因时归类。 */
   errorMessage?: string | null;
 };
 
+/** History loading failed before provider execution; do not infer auth from its text. */
+export function isHistoryIntegrityFailure(message: string): boolean {
+  return /^Strict continuation history load failed for [^\r\n]+:/i.test(message.trim());
+}
+
+const BALANCE_PATTERN =
+  /\bUPSTREAM_402\b|\b402\b|insufficient[_\s-]+balance|余额不足|wallet\s+balance\s+is\s+insufficient|top\s+up\s+your\s+wallet|payment[_ ]required/i;
 const RATE_LIMIT_PATTERN =
-  /429|rate.?limit|quota|insufficient.?balance|UPSTREAM_402|cooling|冷却/i;
+  /429|rate.?limit|quota|cooling|冷却/i;
 const PROVIDER_ERROR_PATTERN =
   /provider|upstream|5\d\d|bad.?gateway|service.?unavailable|overloaded/i;
 const MALFORMED_PATTERN =
@@ -51,12 +63,13 @@ const TOOL_ERROR_PATTERN = /tool.?error|tool.?fail|工具/i;
  * - 完全没有任何信号（status 也不是终态失败）——调用方不应分类。
  *
  * retryable 语义（编排者据此决定是否自动重试）：
+ * - balance_exhausted / auth: false —— 余额或凭证需处理，冷却不会修复。
  * - rate_limited: true  —— 冷却后可重试（配合 nextAvailableAt / cooling 时间）。
  * - provider_error: true —— 瞬态 provider 故障可重试；但 MALFORMED_FUNCTION_CALL
  *   这类确定性输入错误重试无意义，判 false。
  * - stalled: false —— 无进展卡死多为任务/提示词层面问题，盲目重试大概率复现，
  *   应先调整 brief 或换通道。
- * - tool_error / unknown: false。
+ * - history_integrity / tool_error / unknown: false。
  */
 export function classifyRunFailure(
   input: RunFailureClassifyInput
@@ -72,7 +85,25 @@ export function classifyRunFailure(
   const message =
     typeof input.errorMessage === "string" ? input.errorMessage : "";
 
-  // ── 1. 显式 failureReason 优先 ─────────────────────────────────────────
+  // Older CLI versions persisted this pre-provider failure as provider_error.
+  if (reason === "history_integrity" || isHistoryIntegrityFailure(message)) {
+    return { failureClass: "history_integrity", retryable: false };
+  }
+
+  // Provider 原因可能已经把 402/401 粗归为限流或 provider_error；明确证据优先细化。
+  if (!reason || reason === "provider_rate_limited" || reason === "provider_error") {
+    if (BALANCE_PATTERN.test(message)) {
+      return { failureClass: "balance_exhausted", retryable: false };
+    }
+    if (AUTH_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+      return { failureClass: "auth", retryable: false };
+    }
+    if (reason === "provider_error" && RATE_LIMIT_PATTERN.test(message)) {
+      return { failureClass: "rate_limited", retryable: true };
+    }
+  }
+
+  // ── 1. 显式 failureReason ─────────────────────────────────────────────
   switch (reason) {
     case "provider_rate_limited":
       return { failureClass: "rate_limited", retryable: true };

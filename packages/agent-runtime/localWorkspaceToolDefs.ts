@@ -88,6 +88,10 @@ function buildReadWorkspaceParameters() {
       path,
       lines,
       force,
+      raw: {
+        type: "boolean",
+        description: "Read original bytes including full runtime acceptance observations in *.result.md. Default compacts only machine observations; report text and physical line numbers are unchanged.",
+      },
     },
     required: ["path"],
   };

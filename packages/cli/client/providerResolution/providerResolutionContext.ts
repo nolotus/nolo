@@ -37,6 +37,7 @@ export interface ProviderResolutionContext {
   /** 单调时钟入口（测试可注入）。 */
   now: () => number;
   workspaceRoot: string;
+  textOnly?: true;
   /** 除 agent 声明外额外注入的工具名（如 readPastedText）。 */
   additionalToolNames: string[];
   /** 本轮 agent 实际启用的工具名，由 loadAgentConfig 阶段算好。 */

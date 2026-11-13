@@ -7,7 +7,6 @@ import type {
   SafeAgentSummary,
   CompactSafeAgentSummary,
   UltraCompactSafeAgentSummary,
-  UnavailableAgentSummary,
   CredentialGroupSummary,
   SafeAgentSummaryOptions,
 } from "./safeAgentSummary";
@@ -16,7 +15,6 @@ import {
   toCompactAgentSummary,
   toUltraCompactAgentSummary,
   toSafeAgentSummary,
-  toUnavailableAgentSummary,
   omitNullishAgentSummaryFields,
   summarizeCredentialGroups,
 } from "./safeAgentSummary";
@@ -66,6 +64,9 @@ export function isPublicDiscoveryAgent(agent: SafeAgentSummary): boolean {
 /**
  * Resolve discovery scope from tool arguments.
  * Handles legacy publicOnly backwards compatibility and rejects conflicting combinations.
+ * Default is 'all': the user's own/favorite agents plus the public catalog, so one
+ * listAgents call covers both. Explicit 'preferred' stays accepted for backwards
+ * compatibility even though the public schema no longer advertises it.
  */
 export function resolveDiscoveryScope(args?: {
   scope?: unknown;
@@ -100,7 +101,7 @@ export function resolveDiscoveryScope(args?: {
     return "public";
   }
 
-  return "preferred";
+  return "all";
 }
 
 /**
@@ -144,6 +145,11 @@ export interface BuildAgentDiscoveryResultOptions<T extends SafeAgentSummary> {
   scope?: DiscoveryScope | string;
   query?: string;
   publicOnly?: boolean;
+  /**
+   * @deprecated 已无过滤语义：冷却/限流中的 agent 现在默认也列出（额度是参考信息）。
+   * 保留该入参仅为兼容既有调用方（CLI `--show-unavailable` / server listAgents），
+   * 传任何值都不再改变结果。
+   */
   showUnavailable?: boolean;
   verbose?: boolean;
   compact?: boolean;
@@ -237,7 +243,7 @@ export function matchesAgentQuery(agent: SafeAgentSummary, query?: string): bool
 /**
  * listAgents 结果形状。**字段顺序是契约的一部分**（不是排版问题）：
  * host 按字节截断超长工具输出时保留头尾，派发唯一必需的 `agents`
- * （内含必须逐字复制的 agentKey）必须排在最前，凭证分组/限流清单这类
+ * （内含必须逐字复制的 agentKey）必须排在最前，凭证分组这类
  * 大块说明性数据排在最后。历史事故：agents 在最末 + 顶层大块在前，
  * 截断后每个候选的 agentKey/tier/billingSource 全部落在被砍掉的中段。
  */
@@ -249,14 +255,14 @@ export interface AgentDiscoveryResult {
   unavailableCount: number;
   agents: (CompactSafeAgentSummary | UltraCompactSafeAgentSummary | SafeAgentSummary)[];
   credentialGroups: CredentialGroupSummary[];
-  unavailableAgents: UnavailableAgentSummary[];
 }
 
 /**
  * Shared pipeline for agent discovery across web and server runtimes:
  * 1. Resolves scope and filters agents.
- * 2. Collects unavailable agents (429 rate limit cooldowns) without falling back to public.
- * 3. Applies availability filtering if requested.
+ * 2. Annotates unavailable agents (429 rate limit cooldowns) without falling back to public.
+ * 3. Keeps every agent in the result; cooldown entries carry availabilityStatus /
+ *    availabilityReason / nextAvailableAt as reference info (not a dispatch gate).
  * 4. Sorts according to priority.
  * 5. Applies compact or verbose projection.
  */
@@ -298,14 +304,11 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     };
   });
 
-  const unavailableList = scopedAgents.filter((a) => isAgentUnavailableNow(a, now));
-  const unavailableCount = unavailableList.length;
-  const unavailableAgents = sortSafeAgentSummaries(unavailableList).map(toUnavailableAgentSummary);
+  // 冷却/限流中的 agent 也照常列出：额度/冷却是参考信息，不是可用性断言
+  // （owner 决策 2026-11-03）。unavailableCount 仅作汇总标注，
+  // 不构成过滤——agents 是主列表的唯一真源，避免两套并存制造重复真相。
+  const unavailableCount = scopedAgents.filter((a) => isAgentUnavailableNow(a, now)).length;
   const credentialGroups = summarizeCredentialGroups(scopedAgents, now);
-
-  if (options.showUnavailable !== true) {
-    scopedAgents = scopedAgents.filter((a) => !isAgentUnavailableNow(a, now));
-  }
 
   const pagination = resolvePaginationArgs({
     limit: options.limit,
@@ -373,7 +376,7 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
         : pagedAgents.map(toCompactAgentSummary);
 
   // 键插入顺序即 JSON.stringify 的输出顺序：把 agents 放在最前，
-  // credentialGroups / unavailableAgents 放到最后（见 AgentDiscoveryResult）。
+  // credentialGroups 放到最后（见 AgentDiscoveryResult）。
   return {
     total,
     ...(typeof offset === "number" ? { offset } : {}),
@@ -382,7 +385,6 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     unavailableCount,
     agents: projectedAgents,
     credentialGroups,
-    unavailableAgents,
   };
 }
 
@@ -421,9 +423,9 @@ export interface AssembleAgentDiscoveryOptions<TRecord = any>
 /**
  * 三端（server listAgents / client listAgentsFunc / CLI --safe）共用的唯一装配
  * 契约：record 集合 → toSafeAgentSummary → buildAgentDiscoveryResult（scope、
- * query、429 过滤、credentialGroups 归纳、compact/verbose 投影）。禁止任何一端
+ * query、429 标注、credentialGroups 归纳、compact/verbose 投影）。禁止任何一端
  * 再手写 matchesAgentQuery / isAgentUnavailableNow / sortSafeAgentSummaries /
- * toUnavailableAgentSummary / summarizeCredentialGroups 样板。
+ * summarizeCredentialGroups 样板。
  */
 export function assembleAgentDiscoveryResult<TRecord = any>(
   options: AssembleAgentDiscoveryOptions<TRecord>

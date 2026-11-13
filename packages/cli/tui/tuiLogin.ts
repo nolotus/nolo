@@ -1,3 +1,4 @@
+import { createDeviceAuthorizationProtocol } from 'core/deviceAuthorization';
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { getDefaultProfileConfigPath } from "../client/profileConfig";
 import { DEFAULT_NOLO_SERVER_URL } from "../defaultServer";
@@ -21,6 +22,7 @@ import { t } from "./i18n";
  */
 
 export type TuiLoginDeps = {
+  signal?: AbortSignal;
   /** 覆盖默认 fetch（测试注入假 server）。 */
   fetchImpl?: CliFetchImpl;
   /** 覆盖浏览器打开（测试记录 URL；返回 false 模拟打开失败）。 */
@@ -36,18 +38,33 @@ export type TuiLoginDeps = {
 export type TuiLoginOutcome =
   | { status: "success"; token: string }
   | { status: "failed"; reason: string }
-  | { status: "timeout" };
+  | { status: "timeout" }
+  | { status: "cancelled" };
 
-const postJson = async (
-  fetchImpl: CliFetchImpl,
-  url: string,
-  body: Record<string, unknown>
-) =>
-  fetchImpl(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+/** One workspace owns this session; never borrow the chat turn controller. */
+export function createTuiLoginSession() {
+  let active: AbortController | undefined;
+  return {
+    cancel(): boolean {
+      if (!active) return false;
+      active.abort();
+      return true;
+    },
+    async run(args: string[], emit: (text: string) => void, deps: TuiLoginDeps = {}): Promise<TuiLoginOutcome> {
+      if (active) {
+        emit(t("loginAlreadyRunning"));
+        return { status: "failed", reason: "already-running" };
+      }
+      const controller = new AbortController();
+      active = controller;
+      try {
+        return await runTuiLogin(args, emit, { ...deps, signal: controller.signal });
+      } finally {
+        active = undefined;
+      }
+    },
+  };
+}
 
 export function formatLoginDuration(ms: number) {
   const totalSec = Math.max(0, Math.ceil(ms / 1000));
@@ -101,51 +118,33 @@ export async function runTuiLogin(
 
   const fetchImpl = deps.fetchImpl ?? fetch;
   const openBrowser = deps.openBrowser ?? defaultOpenBrowser;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const signal = deps.signal;
+  const sleep = deps.sleep;
   const now = deps.now ?? Date.now;
   const configPath = deps.configPath ?? getDefaultProfileConfigPath();
   const serverUrl = normalizeServerOrigin(parsed.serverUrl);
 
-  // 取消语义未接 TUI 热键（当前 /login 期间 Ctrl+C 走 TUI 既有 turn-abort
-  // 通道，不触达这里），轮询由服务端 expiresIn 兜底超时；将来接热键时再把
-  // cancelled 标志挂进来。
-
   try {
-    const startResponse = await postJson(
-      fetchImpl,
-      `${serverUrl}/api/v1/users/cli-login/start`,
-      { clientName: "nolo-cli" }
-    );
-    const start = (await startResponse.json().catch(() => ({} as any))) as any;
-    if (!startResponse.ok || !start?.deviceCode || !start?.verificationUriComplete) {
-      const reason = `HTTP ${startResponse.status}`;
-      emit(t("loginFailed", reason));
-      return { status: "failed", reason };
-    }
+    const protocol = createDeviceAuthorizationProtocol({ origin: serverUrl, fetch: fetchImpl, signal, sleep, now });
+    const start = await protocol.start('nolo-cli');
 
     emit(
       t("loginStarted", start.verificationUriComplete as string, start.userCode as string)
     );
-    const opened = await openBrowser(start.verificationUriComplete as string);
+    const opened = await protocol.run(() => Promise.resolve(openBrowser(start.verificationUriComplete)), 15000);
     if (!opened) emit(t("loginBrowserFailed"));
 
-    const intervalMs = Math.max(1, Number(start.interval) || 2) * 1000;
-    const timeoutMs = Math.max(1, Number(start.expiresIn) || 600) * 1000;
-    const deadline = now() + timeoutMs;
+    const deadline = protocol.deadline;
+    const timeoutMs = deadline - now();
     const statusLogIntervalMs = 15_000;
     let lastStatusLogAt = 0;
 
     emit(t("loginWaiting", formatLoginDuration(timeoutMs)));
 
     while (now() <= deadline) {
-      const pollResponse = await postJson(
-        fetchImpl,
-        `${serverUrl}/api/v1/users/cli-login/poll`,
-        { deviceCode: start.deviceCode }
-      );
-      const poll = (await pollResponse.json().catch(() => ({} as any))) as any;
+      const poll = await protocol.poll(start.deviceCode);
 
-      if (pollResponse.status === 202) {
+      if (poll.status === 'pending') {
         const currentTime = now();
         if (
           lastStatusLogAt > 0 &&
@@ -157,18 +156,17 @@ export async function runTuiLogin(
         } else if (lastStatusLogAt === 0) {
           lastStatusLogAt = currentTime;
         }
-        await sleep(intervalMs);
+        await protocol.wait(start.interval);
         continue;
       }
 
-      if (pollResponse.ok && poll?.token) {
-        const approvedServer =
-          typeof poll.serverUrl === "string" && poll.serverUrl.trim()
-            ? normalizeServerOrigin(poll.serverUrl)
-            : serverUrl;
+      if (poll.status === 'approved') {
+        const approvedServer = poll.serverUrl;
         // saveTokenLogin 用 console.log/error 输出；在 TUI 里经由捕获 shim
         // 转发到 emit（history 通道），避免 raw write 打穿 alternate screen。
         // 记忆 rekey 的报错也转发（best-effort，不阻塞登录成功语义）。
+        // Commit boundary: saveTokenLogin writes the profile synchronously before rekey.
+        protocol.check();
         const exitCode = await saveTokenLogin({
           configPath,
           serverUrl: approvedServer,
@@ -183,15 +181,19 @@ export async function runTuiLogin(
         emit(t("loginSuccess"));
         return { status: "success", token: poll.token as string };
       }
-
-      const reason = poll?.error || `HTTP ${pollResponse.status}`;
-      emit(t("loginFailed", String(reason)));
-      return { status: "failed", reason: String(reason) };
     }
 
     emit(t("loginTimeout"));
     return { status: "timeout" };
   } catch (error) {
+    if (signal?.aborted) {
+      emit(t("loginCancelled"));
+      return { status: "cancelled" };
+    }
+    if (error instanceof Error && error.message === "expired") {
+      emit(t("loginTimeout"));
+      return { status: "timeout" };
+    }
     const reason = error instanceof Error ? error.message : String(error);
     emit(t("loginFailed", reason));
     return { status: "failed", reason };

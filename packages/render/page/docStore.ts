@@ -550,6 +550,7 @@ export async function saveDocState(
     await dispatch(
       patch({
         dbKey: pageKey,
+        requireServerConfirmation: true,
         changes: {
           updatedAt,
           slateData,
@@ -589,6 +590,11 @@ export async function saveDocState(
       window.dispatchEvent(new Event("nolo-user-data-updated"));
     }
 
+    // A response for an earlier document/save must not mark newer edits saved.
+    if (state.pageKey !== pageKey || state.slateData !== slateData || state.title !== current.title || state.icon !== icon) {
+      if (state.pageKey === pageKey) setState((prev) => ({ ...prev, isSaving: false, justSaved: false }));
+      return;
+    }
     // fulfilled — NOTE: does NOT bump externalUpdateSeq (cursor bug fix).
     setState((prev) => ({
       ...prev,

@@ -370,11 +370,14 @@ export async function runServerOwnedWebForegroundTurn(
       host: "browser",
       runtime: "react",
       entrypoint: "chat-dialog-server-owned",
+      userMessageId: (selectAllMsgs(thunk.getState() as any, dialogId) as any[])
+        .filter(message => message.role === "user" && message.metadata?.queueState !== "pending").at(-1)?.id,
       capabilities: [
         "streaming",
         "dialog-ui",
         "durable-foreground",
         "client-user-prepersisted",
+        "durable-user-batch",
         "durable-tool-cards",
       ],
       // This is the exact post-filter surface produced during admission, not a

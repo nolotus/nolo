@@ -1,3 +1,15 @@
+import { contextRefusalDiagnostics, describeContextRefusal } from "../client/contextRefusal";
+import { prepareChildRunConsumption, canConsumeChildCompletion } from "./childRunConsumption";
+import { traceChildRunWake, queueWakeFields } from "./runWakeDiagnostics";
+import { getOrCreateSharedStore } from "../client/localRuntimeDialog";
+import { saveCliPendingUserMessages, readCliPendingUserMessages, resolveCliUnknownBatchWithoutResend, markCliUserBatchPhase, rollbackCliUserBatchPhase } from "../client/localDialogRecords";
+import { resolveLocalUserId } from "../client/cliAgentConfigHelpers";
+import { hostTaskEventsRoot, readHostTask } from "../client/hostTaskEvents";
+import { runAutoReviewDrainedTurn, isHostAutoReviewContinuationEvent } from "./autoReviewContinuationWake";
+import { resolveTuiLearnOperatorUserId } from "./learnPrompt";
+import { randomUUID as mintTaskUserMessageId, createHash as hashTaskUserMessage } from "node:crypto";
+import { collectHostTaskWorkspace } from "../client/hostTaskWorkspace";
+import { currentAutoReviewTask } from "./autoReviewControl";
 import type { ShellApprovalSession } from "../client/originShellApprovalTransport";
 /**
  * tuiTurnRunner — TUI turn 执行与队列 drain 的独立模块（S3 迁移）。
@@ -17,8 +29,11 @@ import type { ShellApprovalSession } from "../client/originShellApprovalTranspor
  */
 import type { createInterface } from "node:readline";
 import { scrubSecrets } from "agent-runtime/secretScrubber";
+import { setSecret } from "core/secretsStore";
+import { defaultPromptReader } from "../secretCommands";
 import {
   runAgentTurn,
+  isLocalContextCoverageFailure,
   OWNER_OAUTH_UNAVAILABLE_HINT,
   isOwnerOAuthUnavailableError,
   isInvalidGrantError,
@@ -61,6 +76,7 @@ import {
   platformCreditsFromUsage,
   resolveAgentModelIdentity,
   computeBaselineContextTokens,
+  preserveContextUsageWithoutReceipt,
   resolveAuthorityTurnCount,
 } from "../client/tokenUsage";
 import { createLiveTurnTracker } from "./liveTurnTracker";
@@ -86,9 +102,7 @@ import { runConfirmDialog } from "./confirmDialog";
 import type { ActivityIndicator, AgentRunStatusSnapshot } from "./activityIndicator";
 import type { RemoteTaskSource, RunRegistryPoller } from "./runRegistryPoller";
 import {
-  filterUnclaimedChildRuns,
   buildWakeMessage,
-  buildWakeDisplayText,
   type RunCompletionWatcher,
 } from "./runCompletionWatcher";
 import { matchContextualFragment } from "../../chat/messages/contextualFragment";
@@ -106,19 +120,28 @@ import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
 import type { AttachedImage } from "./pasteImage";
 import type { ClipboardImageDeps } from "./clipboardImage";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
+import {
+  buildNoticeTasksFromRuns,
+  mergeNoticeGroup,
+  setTurnNoticeMeta,
+} from "./completionNoticeDisplay";
 import type { CollapsedPasteStore } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
 import { t } from "./i18n";
 import { createChatQueueTuiBinding, type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
-import { resolveAttachmentImageUrls } from "./pasteImage";
-import { transcribeMediaFile, formatTranscriptForModel, describeMediaError } from "./mediaAttachment";
-import { createTrimRequester, resolveTranscribeTrim } from "./transcribePreflight";
+import { attachDialogNotifyReceiver, type DialogNotifyReceiver } from "./dialogNotifyReceiver";
+import { prepareQueuedUserRequest } from "./queuedUserAttachments";
+// 附件延迟解析的旧导出面保持不变（实现已迁至 ./queuedUserAttachments）。
+export { prepareQueuedUserRequest };
 import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
 import {
   annotatePendingProcessNoticeOrigin,
   buildProcessTerminalTurnMessage,
   parsePendingProcessNoticeLine,
+  serializePendingProcessNotice,
+  type ProcessTerminalNotice,
 } from "./processTerminalNotice";
+import type { AgentRunCompletionShape } from "./runCompletionWatcher";
 import { emitTerminalProgramStatus } from "../client/terminalProgramStatus";
 import {
   isRunResultStalledOrTruncated,
@@ -197,6 +220,11 @@ async function runAgentChat(
   output: NodeJS.WritableStream,
   agentRunner: typeof runAgentTurn = runAgentTurn,
   options: {
+    freshDialog?: boolean;
+    userMessages?: import("../client/agentRunTypes").RunAgentTurnOptions["userMessages"];
+    /** Explicit stable queued-batch tail id; forwarded to agentRunner. */
+    cliBatchId?: string;
+    accountTaskUserSource?: { messageId: string; contentSha256: string; originalText: string };
     imageUrls?: string[];
     /**
      * 本机原件路径（图片 / 音视频）→ 只产出给模型的安全附件卡（name/mime/size/kind），
@@ -220,8 +248,14 @@ async function runAgentChat(
     /**
      * 回合内注入收件箱 drain（后台 run 终态唤醒直投当前 loop）。
      * 原样透传给 agentRunner → runAgentTurn → local loop。
+     * 兼容同步 string[] 与结构化 user 消息（排队批次），可返回 Promise。
      */
-    drainInjections?: () => string[];
+    drainInjections?: () =>
+      | import("../../agent-runtime").LocalTurnInjection[]
+      | Promise<import("../../agent-runtime").LocalTurnInjection[]>;
+    /** 本轮注入的用户批次收集器；由注入回调写入，saveTurn 原子标 completed。 */
+    drainInjectedBatches?: Array<{ batchId: string; messageIds: string[] }>;
+    getProcessCausalDepth?: () => number;
     /**
      * 轮内实时平台计费帧：每次 provider 调用结束（llm-end 带平台 billing
      * usage）回调一次，参数为该帧折算的积分。实现方负责累加进
@@ -490,6 +524,17 @@ async function runAgentChat(
         }]
       : [];
 
+  const injectedChildRunNoticeItems = (canConsumeChildCompletion(state, env) ? state.pendingChildRunNotices ?? [] : []).filter(
+    (r) => !!r.parentDialogId && r.parentDialogId === state.dialogId,
+  );
+  const childRunNoticeBlocks =
+    injectedChildRunNoticeItems.length > 0
+      ? [{
+          content: buildWakeMessage(injectedChildRunNoticeItems, Date.now()),
+          cacheScope: "turn" as const,
+        }]
+      : [];
+
   const contextBlockScopes: ContextBlockScope[] = partitionScopedBlocks([
     ...renderTurnContextBlocksWithScope(layers),
     ...renderTurnContextBlocksWithScope([memoryUseGuidanceLayer]),
@@ -503,17 +548,35 @@ async function runAgentChat(
     ...renderTurnContextBlocksWithScope([memoryOverlayLayer]),
     ...cwdNoticeBlocks,
     ...processNoticeBlocks,
+    ...childRunNoticeBlocks,
   ]);
   // 新会话首轮 state.dialogId 尚未生成（turn 结束后才从 result 回填），
   // 该轮派发的后台 run 无法注入 parentDialogId——adapter 通过
   // onBackgroundRunSpawned 把这些 runId 报到这里，turn 结束统一回填归属。
   const spawnedRunsMissingParent: string[] = [];
+  const taskRef = currentAutoReviewTask(state, env);
+  const taskWorkspaceEvidence = taskRef ? await collectHostTaskWorkspace(taskRef, env) : undefined;
+  // Evidence production is distinct from selecting a typed-review dispatch.
+  // Do NOT set hostReviewDispatch here: that would classify all children as review.
+  const taskEvidenceInput = taskWorkspaceEvidence ? { hostTaskWorkspaceEvidence: taskWorkspaceEvidence } : {};
+  if (taskWorkspaceEvidence?.status === "blocked") output.write(`[auto-review] blocked：${taskWorkspaceEvidence.reason}\n`);
   const result: RunAgentTurnResult = await agentRunner({
+    ...taskEvidenceInput,
+    interactiveHost: true,
     agentName: effectiveAgentName,
     agentKey: effectiveAgentKey,
     serverUrl: state.serverUrl,
     message: effectiveMessage,
+    getProcessCausalDepth: options.getProcessCausalDepth,
     continueDialogId: state.dialogId,
+    freshDialog: options.freshDialog,
+    hostTaskRef: currentAutoReviewTask(state, env),
+    userMessages: options.userMessages,
+    ...(options.cliBatchId ? { cliBatchId: options.cliBatchId } : {}),
+    accountTaskUserSource: options.accountTaskUserSource ? {
+      ...options.accountTaskUserSource,
+      projectedContentSha256: hashTaskUserMessage("sha256").update(effectiveMessage).digest("hex"),
+    } : undefined,
     ...(state.dialogId ? { parentDialogId: state.dialogId } : {}),
     // 显式注入 TUI 真实会话身份（createInitialTuiState mint、跨轮稳定），
     // owner-required 契约不再从 parentDialogId/workspaceRoot 派生会话身份。
@@ -622,6 +685,7 @@ async function runAgentChat(
     // transcript 的进展卡片；dock 本身也靠它接收模型轮询带回来的快照。
     ...(options.onAgentRunStatus ? { onAgentRunStatus: options.onAgentRunStatus } : {}),
     ...(options.drainInjections ? { drainInjections: options.drainInjections } : {}),
+    ...(options.drainInjectedBatches ? { drainInjectedBatches: options.drainInjectedBatches } : {}),
     // 轮内实时积分：llm-end 带原始 usage 时按平台计费口径逐帧折算上报。
     // 口径与轮末 sumPlatformCredits 同源（platformCreditsFromUsage），
     // 只认 billing_unit === "credits" 的帧；非平台计费不产生回调。
@@ -986,6 +1050,38 @@ export function isAutoConfirmableFileWriteGate(gate: LocalAgentActionGate): bool
 }
 
 /**
+ * Confirm gates whose approval must NOT persist as a session-wide permission
+ * grant. `runConfirmDialog`'s `onApprove` callback is wired (at
+ * `readlineWorkspace.ts`) to `createSnapshotGuardedApproval(...)` ->
+ * `createPermissionGrantEnabler`, which does `setGrants({ local: true })` and
+ * `saveProfilePermissionGrant` — i.e. approving any confirm gate currently
+ * persists the local bucket and later short-circuits
+ * `confirmDestructiveAction`. That is fine for gates whose dialog copy admits
+ * the scope ("always for this session"), but the credential gate
+ * (`action: "credential_unwrap_tool_use"`, built by
+ * `buildCredentialSinkPermissionRequest`) promises "this call only" — persisting
+ * the grant would silently contradict that contract. We deliberately do NOT
+ * fold it into `confirmDialog.ts`'s `localRunClass` copy groups: relabeling the
+ * dialog to admit session-wide persistence would acknowledge the spill, not
+ * remove it. Instead `resolveActionGate` simply omits `onApprove` for these
+ * gates, so the approval stays call-scoped. `handoff`/`input` gates are never
+ * permission confirms and always return false; a confirm gate with no readable
+ * `action` also returns false — meaning it is treated as persistable. The real
+ * invariant is an explicit allowlist: ONLY actions registered in
+ * `NON_PERSISTING_APPROVAL_GATE_ACTIONS` keep their approval call-scoped;
+ * any newly added call-scoped confirm gate MUST be registered here, otherwise
+ * `onApprove` is passed through and the approval is persisted by default.
+ */
+export const NON_PERSISTING_APPROVAL_GATE_ACTIONS: ReadonlySet<string> = new Set([
+  "credential_unwrap_tool_use",
+]);
+
+export function isNonPersistingApprovalGate(gate: LocalAgentActionGate): boolean {
+  if (gate.kind !== "confirm") return false;
+  return NON_PERSISTING_APPROVAL_GATE_ACTIONS.has(asConfirmPermissionRequest(gate).action ?? "");
+}
+
+/**
  * 交互式 (raw TTY) action gate 的统一入口。
  *
  * 根因（见 docs/plans/2026-08-31-action-gate-invisible.md）：`confirm` 类 gate
@@ -1046,15 +1142,28 @@ export async function resolveActionGate(
       | null
       | void
       | Promise<import("agent-runtime/actionGate").HostConfirmDecision | null | void>;
+    /**
+     * Reads the secret value for an `input` gate with
+     * `payload.action === "secret_request"`. Defaults to `defaultPromptReader`
+     * (TTY-only masked prompt; non-TTY throws `secret.promptNonTtyNotSupported`).
+     * Injectable so tests never need a real TTY — and so the plaintext value
+     * exists only in this one call path, never in tool results or logs.
+     */
+    readSecretValue?: (label: string) => Promise<string>;
   },
 ): Promise<AgentRuntimeToolResult> {
   if (gate.kind === "confirm") {
+    // Credential gates (and future members of NON_PERSISTING_APPROVAL_GATE_ACTIONS)
+    // promise call-scoped approval; `deps.onApprove` persists the local permission
+    // bucket, so it must not be handed to the dialog for these gates. All other
+    // confirm gates keep the existing behavior unchanged.
+    const omitOnApprove = isNonPersistingApprovalGate(gate);
     const approved = await deps.dialogHost.run((anchor) =>
       runConfirmDialog({
         request: asConfirmPermissionRequest(gate),
         input: deps.input as NodeJS.ReadStream,
         output: deps.output,
-        onApprove: deps.onApprove,
+        onApprove: omitOnApprove ? undefined : deps.onApprove,
         ...anchor,
       }),
     );
@@ -1092,6 +1201,59 @@ export async function resolveActionGate(
       ? buildGateConfirmedResult(gate)
       : buildGateCancelledResult(gate, "confirmation declined");
   }
+  if (gate.kind === "input") {
+    // Fail closed: an `input` gate only has a host implementation for the
+    // secret-request payload. Anything else must NOT fall through to the
+    // handoff branch below — that would misroute an unknown input gate into
+    // terminal takeover (`waitForRawActionGate`). Return a structured cancel
+    // instead. (Read `action`/`name` from `gate.payload` only: `readActionGate`
+    // drops top-level custom fields.)
+    const payload = gate.payload;
+    const fields =
+      typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
+    if (fields.action !== "secret_request") {
+      return buildGateCancelledResult(
+        gate,
+        "input gate has no host implementation for this action; use `nolo secret set` instead",
+      );
+    }
+    const secretName = typeof fields.name === "string" ? fields.name : "";
+    if (!secretName) {
+      return buildGateCancelledResult(
+        gate,
+        "secret_request input gate is missing a secret name; use `nolo secret set` instead",
+      );
+    }
+    // Same keyboard claim + composer pause/resume contract as the handoff
+    // branch: the masked prompt must exclusively own the terminal. No
+    // `onApprove` here — an `input` gate is not a permission confirm and must
+    // never persist an approval bucket. The plaintext value lives only in the
+    // `setSecret` argument; it never enters the tool result, transcript, or
+    // logs (error copy is scrubbed before it lands in the result).
+    return deps.dialogHost.withKeyboard(async () => {
+      deps.pauseComposer();
+      try {
+        const label = typeof fields.prompt === "string" ? fields.prompt : secretName;
+        const value = await (deps.readSecretValue ?? defaultPromptReader)(label);
+        setSecret(secretName, value);
+        return {
+          content: `action gate completed: ${gate.title}`,
+          metadata: {
+            actionGateResult: { gateId: gate.id, status: "completed", output: "stored" },
+            stored: true,
+            name: secretName,
+          },
+        };
+      } catch (error) {
+        const reason = scrubSecrets(
+          `secret input failed: ${String((error as Error)?.message ?? error)}`,
+        ).cleaned;
+        return buildGateCancelledResult(gate, reason);
+      } finally {
+        deps.resumeComposerFromDialog();
+      }
+    });
+  }
   // handoff gate: no dialog frame, so `dialogHost.run()` doesn't apply — but
   // it still needs the same keyboard claim + drain-on-close guarantee `run()`
   // gives framed dialogs, so it goes through `withKeyboard()` instead.
@@ -1128,6 +1290,8 @@ export async function resolveActionGate(
  * 绝不进行单向展开拷贝或传值快照。
  */
 export interface AgentTurnContext {
+  /** Identity reserved by this host, not an existing history continuation. */
+  pendingFreshDialogId?: string;
   // ── 可变引用语义字段（通过 getter/setter 代理到 runTuiWorkspace 闭包中的原始 let 绑定） ──
   state: TuiState;
   forcedStop: boolean;
@@ -1137,18 +1301,28 @@ export interface AgentTurnContext {
   activeTurnEpoch: number;
   chatQueueBinding: ChatQueueTuiBinding | null;
   /**
+   * Dialog identity the current `chatQueueBinding` persists against (set by
+   * `ensureChatQueueBinding` right before it installs the binding). Pending user
+   * messages are saved under this id while the turn writes its provider receipt
+   * under `state.dialogId`; the two must be the same dialog, so a recorded id
+   * that no longer matches `state.dialogId` means the binding is stale and has
+   * to be replaced. Undefined = unknown (host-supplied binding), treated as
+   * "reuse" so pre-wired hosts keep their binding.
+   */
+  chatQueueBindingDialogId?: string;
+  /**
+   * `nolo dialog notify` receiver for the dialog this workspace currently has
+   * open. Bound to the same lifetime as `chatQueueBinding`: it admits external
+   * notifications through that binding's queue and nothing else. Null until the
+   * binding exists, and stopped+cleared when the bound dialog changes.
+   */
+  dialogNotifyReceiver?: DialogNotifyReceiver | null;
+  /**
    * 当前进行中 turn 的注入收件箱。runOneAgentTurn 开始时创建、结束时关闭清空；
    * 非 null 即表示「有 turn 正在跑，可直投当前 loop」。
    * 见 turnInjectionInbox.ts。
    */
   turnInjectionInbox: TurnInjectionInbox<TurnRequest | InternalTurnEvent | string> | null;
-  /**
-   * 「这一轮是用户自己发的」提示（内部唤醒事件不调用）。进程任务终态自动续跑
-   * 用它把「同 dialog 连续 completion turn」计数清零，是防无界自唤醒链的一半
-   * 策略（见 agent-runtime/processTerminalResume.ts）。宿主未接线时为 undefined，
-   * 计数只增不减（仍然有上限，只是更保守）。
-   */
-  noteUserTurn?: () => void;
   /** 用户 turn 已准确建档；仅宿主可附加 TUI 展示元数据。 */
   onUserTurnFinalized?: (turn: import("./tuiHistory").Turn, imageUrls: readonly string[]) => void;
 
@@ -1244,45 +1418,33 @@ export async function runOneAgentTurn(
       });
   };
   let req = createTurnRequest(inputMsg);
+  if (req.event.kind === "auto-review-continuation") {
+    const scope = currentAutoReviewTask(ctx.state, ctx.effectiveEnv);
+    if (!isHostAutoReviewContinuationEvent(req.event) || JSON.stringify(scope) !== JSON.stringify(req.event.scope)) return { ok: false, aborted: true };
+    const task = readHostTask(hostTaskEventsRoot(ctx.effectiveEnv), scope!);
+    if (task.authorization !== "active" || task.contract.acceptance === "pending" || task.contract.acceptance === "unknown") return { ok: false, aborted: true };
+  }
+  if (req.event.kind === "child-run-completed" && !canConsumeChildCompletion(ctx.state, ctx.effectiveEnv)) {
+    const existing = new Set((ctx.state.pendingChildRunNotices ?? []).map(run => run.runId));
+    ctx.state = { ...ctx.state, pendingChildRunNotices: [...(ctx.state.pendingChildRunNotices ?? []), ...req.event.runs.filter(run => !existing.has(run.runId))] };
+    // The notification was safely retained; waiting for acceptance is not a
+    // failed provider turn and must not poison the queue's recovery state.
+    return { ok: true, aborted: false };
+  }
   if (req.event.kind === "child-run-completed") {
-    const nowMs = Date.now();
-    const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(
-      req.event.runs,
-      { env: ctx.effectiveEnv, now: () => nowMs },
-    );
-    for (const runId of claimedRunIds) {
-      ctx.runCompletionWatcher.markAcknowledged(runId);
-    }
-    if (remainingRuns.length === 0) {
-      for (const r of req.event.runs) {
-        ctx.runCompletionWatcher.markAcknowledged(r.runId);
-      }
-      return { ok: true, aborted: false };
-    }
-    for (const r of remainingRuns) {
-      ctx.runCompletionWatcher.markAcknowledged(r.runId);
-    }
-    if (remainingRuns.length !== req.event.runs.length) {
-      const text = buildWakeMessage(remainingRuns, nowMs);
-      const displayText = buildWakeDisplayText(remainingRuns, nowMs);
-      const updatedEvent: ChildRunCompletedTurnEvent = {
-        kind: "child-run-completed",
-        runs: remainingRuns,
-        text,
-        displayText,
-      };
-      req = {
-        text,
-        event: updatedEvent,
-      };
-    }
+    traceChildRunWake("turn-consume", req.event, ctx.state.dialogId ?? null, queueWakeFields(ctx.chatQueueBinding?.getStatus?.()));
+    const event = prepareChildRunConsumption(req.event, {
+      env: ctx.effectiveEnv, currentDialogId: ctx.state.dialogId ?? null,
+      deferRuns: runs => ctx.runCompletionWatcher?.deferRuns?.(runs),
+    });
+    if (!event) return { ok: true, aborted: false };
+    req = { ...req, text: event.text, event };
   }
   const message = req.text;
-  // 用户自己发的轮次 = 「用户回来了」：进程任务自动续跑的链深清零（防循环策略
-  // 的一半）。放在这里而不是 runIdleTextTurn：busy 期间排队的用户消息由队列
-  // drain 直接进本函数，不会经过 runIdleTextTurn。内部唤醒事件（后台 run /
-  // 进程任务终态）不清零，否则 completion turn 自己就能把计数刷回去。
-  if (req.event.kind === "user") ctx.noteUserTurn?.();
+  // Allocate before the first provider call so busy submissions share this turn's dialog.
+  const freshDialog = !ctx.state.dialogId || ctx.pendingFreshDialogId === ctx.state.dialogId;
+  ctx.pendingFreshDialogId = undefined;
+  if (!ctx.state.dialogId) ctx.state = { ...ctx.state, dialogId: mintTaskUserMessageId() };
   // 每轮 turn 开始时重置强制收尾标志，确保上一轮的强制停止不会泄漏到本轮。
   ctx.forcedStop = false;
   ctx.turnEpoch += 1;
@@ -1340,7 +1502,10 @@ export async function runOneAgentTurn(
   // 输出不是 TTY（管道 / 日志 / JSON）时连包装都不做：状态根本发不出去
   // （emitTerminalProgramStatus 自己也有同一条 isTTY 闸门），转发的回调保持原样。
   const confirmDestructiveActionWithStatus =
-    confirmDestructiveAction && ctx.output.isTTY === true
+    // 真实流（process.stdout 等）在运行期带可选 isTTY 旗标，但
+    // NodeJS.WritableStream 类型不声明它（terminalProgramStatus.ts 的
+    // TerminalProgramStatusOutput 同一口径）——这里只做类型收窄，不改值。
+    confirmDestructiveAction && (ctx.output as NodeJS.WritableStream & { isTTY?: boolean }).isTTY === true
       ? async (
           request: PermissionRequest,
         ): Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }> => {
@@ -1377,22 +1542,64 @@ export async function runOneAgentTurn(
   // 标记化后格式来源单一，这里不再自行猜文本形态。
   const isInternalEvent = req.event.kind !== "user";
   const isContextualFragment = matchContextualFragment(message) !== null;
-  const transcriptText =
+  // Keep image bytes out of visible history; use the direct-send attachment callback.
+  const batchDisplay = (req as TuiBatchTurnRequest).userMessages?.map(user => ({
+    text: typeof user.content === "string" ? user.content : (user.content ?? [])
+      .filter(part => part.type === "text").map(part => part.text).join("\n"),
+    imageUrls: typeof user.content === "string" ? [] : (user.content ?? [])
+      .filter(part => part.type === "image_url").map(part => part.image_url.url),
+  }));
+  const batchLast = batchDisplay?.at(-1);
+  const transcriptText = batchLast ? batchLast.text : req.event.kind === "auto-review-continuation" ? req.event.displayText :
     isContextualFragment
     && (req.event.kind === "child-run-completed" || req.event.kind === "background-task-completed")
       ? (req.event.displayText ?? req.event.text)
       : message;
-  startTurn(ctx.history, isInternalEvent ? "assistant" : "user");
-  appendToCurrentTurn(
-    ctx.history,
-    isInternalEvent
-      ? dimCliText(transcriptText, resolveCliColorEnabled())
-      : transcriptText,
-  );
-  finalizeCurrentTurn(ctx.history);
+  // 跨事件相邻的后台完成通知在屏幕上是**一个通知组**：一个组头 + 每条任务
+  // 一行完整标题与耗时。纯显示层的事——模型消息 / 持久消息 / ack / 调度 /
+  // 事件顺序都不动，wake 也不因此延后。
+  // 任务数据来自结构化终态（run 记录 + 共享展示模型），不解析格式化文案。
+  const noticeTasks =
+    req.event.kind === "child-run-completed"
+      ? buildNoticeTasksFromRuns(req.event.runs, Date.now())
+      : null;
+  // 先收掉进行中的流式轮（口径与 startTurn 一致）：它吐出的可见输出
+  // 应当准确打断通知组。
+  if (ctx.history.currentRole !== null && ctx.history.currentContent) {
+    finalizeCurrentTurn(ctx.history);
+  }
+  // 并入上一条通知轮：命中则屏幕上是「一个组头 + 每条任务一行」的通知组，
+  // 没命中就按原样新建一轮。
+  const merged = noticeTasks
+    ? mergeNoticeGroup(ctx.history.turns, noticeTasks, (text) =>
+        dimCliText(text, resolveCliColorEnabled()),
+      )
+    : null;
+  if (!merged) {
+    for (const prior of batchDisplay?.slice(0, -1) ?? []) {
+      startTurn(ctx.history, "user");
+      appendToCurrentTurn(ctx.history, prior.text);
+      finalizeCurrentTurn(ctx.history);
+      const turn = ctx.history.turns[ctx.history.turns.length - 1];
+      if (turn?.role === "user") ctx.onUserTurnFinalized?.(turn, prior.imageUrls);
+    }
+    startTurn(ctx.history, isInternalEvent ? "assistant" : "user");
+    appendToCurrentTurn(
+      ctx.history,
+      isInternalEvent
+        ? dimCliText(transcriptText, resolveCliColorEnabled())
+        : transcriptText,
+    );
+    finalizeCurrentTurn(ctx.history);
+    if (noticeTasks) {
+      setTurnNoticeMeta(ctx.history.turns[ctx.history.turns.length - 1]!, {
+        tasks: noticeTasks,
+      });
+    }
+  }
   const finalizedUserTurn = ctx.history.turns[ctx.history.turns.length - 1];
   if (!isInternalEvent && finalizedUserTurn?.role === "user" && finalizedUserTurn.content === transcriptText) {
-    ctx.onUserTurnFinalized?.(finalizedUserTurn, imageUrls);
+    ctx.onUserTurnFinalized?.(finalizedUserTurn, batchLast?.imageUrls ?? imageUrls);
   }
   ctx.renderHistoryToOutput();
   if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
@@ -1401,6 +1608,7 @@ export async function runOneAgentTurn(
   // turn 开始时用共享 estimateMessagesTokens 估出新增内容并入基线，并清空上一轮的 turnTokens（避免
   // 上下文 chip 残留上一轮未包含回答的 provider input）。
   // 分支判定：只有当存在真实权威 input 且 authTurnCount 有效时才走切片分支；无真权威时必须走估算分支。
+  const previousContextUsage = { turnTokens: ctx.state.turnTokens, lastAuthorityTurnCount: ctx.state.lastAuthorityTurnCount };
   const nextBaseline = computeBaselineContextTokens({
     authoritativeInput: ctx.state.turnTokens?.input,
     lastAuthorityTurnCount: ctx.state.lastAuthorityTurnCount,
@@ -1442,6 +1650,8 @@ export async function runOneAgentTurn(
           };
         }
         ctx.scheduleRender();
+      }, {
+        visibleRunIds: () => ctx.activityIndicator.getVisibleRunIds?.() ?? new Set<string>(),
       })
     : ctx.output;
   // Interactive ask_user: dock an arrow-key select dialog above the
@@ -1480,6 +1690,9 @@ export async function runOneAgentTurn(
                     input: ctx.input as NodeJS.ReadStream,
                     output: ctx.output as NodeJS.WritableStream,
                     ...anchor,
+                    // ask_user hosted: the wheel scrolls the transcript above the
+                    // dialog; the option list is navigated with ↑↓ only.
+                    inputPolicy: { ...anchor.inputPolicy, wheel: "transcript" },
                   }),
                 );
               } catch {
@@ -1497,12 +1710,16 @@ export async function runOneAgentTurn(
     TurnRequest | InternalTurnEvent | string
   >();
   ctx.turnInjectionInbox = injectionInbox;
+  // 本轮通过 drainInjections 接入的用户批次：saveTurn 在同一 store.batch 里
+  // 标 completed（见 agentRun.ts / writeDialog cliBatchCompletion）。
+  const drainInjectedBatches: Array<{ batchId: string; messageIds: string[] }> = [];
+  let processCausalDepth = req.event.kind === "background-task-completed" ? (req.event.processCausalDepth ?? 0) : 0;
   // 后台进程任务终态通知：组装前先快照本轮要注入的行，消费点只清掉快照里的行。
   const injectedProcessNoticeLines = ctx.state.pendingProcessNotices
     ? [...ctx.state.pendingProcessNotices]
     : [];
-  const consumeInjectedProcessNotices = (): string[] => {
-    if (injectedProcessNoticeLines.length === 0) {
+  const consumeInjectedProcessNotices = (keepAll = false): string[] => {
+    if (keepAll || injectedProcessNoticeLines.length === 0) {
       return ctx.state.pendingProcessNotices ?? [];
     }
     const injected = new Set(injectedProcessNoticeLines);
@@ -1510,6 +1727,62 @@ export async function runOneAgentTurn(
       (line) => !injected.has(line),
     );
   };
+  // 后台子 agent run 终态通知：组装前快照本轮要注入的条目，消费点只清掉快照里的条目。
+  const injectedChildRunNoticeItems = (canConsumeChildCompletion(ctx.state, ctx.effectiveEnv) ? ctx.state.pendingChildRunNotices ?? [] : []).filter(r => !!r.parentDialogId && r.parentDialogId === ctx.state.dialogId);
+  const consumeInjectedChildRunNotices = (keepAll = false): AgentRunCompletionShape[] => {
+    if (keepAll || injectedChildRunNoticeItems.length === 0) {
+      return ctx.state.pendingChildRunNotices ?? [];
+    }
+    const injectedIds = new Set(injectedChildRunNoticeItems.map((r) => r.runId));
+    return (ctx.state.pendingChildRunNotices ?? []).filter(
+      (r) => !injectedIds.has(r.runId),
+    );
+  };
+  const originDialogId = ctx.state.dialogId;
+  const terminalEvents: InternalTurnEvent[] = [req.event];
+  const settleNotices = (persisted: boolean) => {
+    const keepPending = !persisted;
+    if (persisted) {
+      for (const run of injectedChildRunNoticeItems) ctx.runCompletionWatcher?.markAcknowledged(run.runId);
+      for (const event of terminalEvents) {
+        if (event.kind === "child-run-completed") for (const run of event.runs) ctx.runCompletionWatcher?.markAcknowledged(run.runId);
+      }
+    }
+    for (const event of terminalEvents) traceChildRunWake("turn-notice-settle", event, ctx.state.dialogId ?? null, { persisted, ...queueWakeFields(ctx.chatQueueBinding?.getStatus?.()) });
+    let nextProcessNotices = consumeInjectedProcessNotices(keepPending);
+    let nextChildRunNotices = consumeInjectedChildRunNotices(keepPending);
+    for (const event of terminalEvents) {
+      if (keepPending && event.kind === "background-task-completed") {
+        const ownerDialogId = originDialogId ?? null;
+        const noticeToStore: ProcessTerminalNotice = event.notice ?? {
+          taskId: event.taskId,
+          pid: 0,
+          label: event.text,
+          command: event.taskId,
+          status: event.status,
+          exitCode: event.exitCode,
+        };
+        const line = serializePendingProcessNotice(noticeToStore, ownerDialogId);
+        if (!nextProcessNotices.includes(line)) {
+          nextProcessNotices = [...nextProcessNotices, line];
+        }
+      }
+      if (keepPending && event.kind === "child-run-completed" && event.runs.length > 0) {
+        const existingIds = new Set(nextChildRunNotices.map((r) => r.runId));
+        const newItems = event.runs
+          .filter((r) => !existingIds.has(r.runId))
+          .map((r) => ({ ...r }));
+        if (newItems.length > 0) {
+          nextChildRunNotices = [...nextChildRunNotices, ...newItems];
+        }
+      }
+    }
+    return {
+      pendingProcessNotices: nextProcessNotices.length ? nextProcessNotices : undefined,
+      pendingChildRunNotices: nextChildRunNotices.length ? nextChildRunNotices : undefined,
+    };
+  };
+  let turnOutcomeSettled = false;
   try {
     ctx.activeTurnAbort = new AbortController();
     ctx.activeTurnEpoch = myEpoch;
@@ -1522,6 +1795,18 @@ export async function runOneAgentTurn(
       agentOutput,
       ctx.options.agentRunner,
       {
+        freshDialog,
+        userMessages: (req as TuiBatchTurnRequest).userMessages,
+        ...((req as TuiBatchTurnRequest).cliBatchId
+          ? { cliBatchId: (req as TuiBatchTurnRequest).cliBatchId }
+          : {}),
+        ...(req.event.kind === "user" ? { accountTaskUserSource: {
+          ...((req as TuiBatchTurnRequest).batchUserSource ?? {
+            messageId: req.messageId ?? mintTaskUserMessageId(),
+            originalText: message,
+            contentSha256: hashTaskUserMessage("sha256").update(message).digest("hex"),
+          }),
+        } } : {}),
         ...(imageUrls.length > 0 ? { imageUrls } : {}),
         ...(localAttachmentPaths && localAttachmentPaths.length > 0
           ? { localAttachmentPaths }
@@ -1532,7 +1817,119 @@ export async function runOneAgentTurn(
           : {}),
         ...(requestUserChoice ? { requestUserChoice } : {}),
         abortSignal: ctx.activeTurnAbort.signal,
-        drainInjections: () => injectionInbox.drain(),
+        getProcessCausalDepth: () => processCausalDepth,
+        drainInjections: async () => {
+          const entries: import("../../agent-runtime").LocalTurnInjection[] = [];
+          // 1) 内部通知（后台 run 终态唤醒）：保持既有行为，逐条转文本。
+          for (const text of injectionInbox.drain(({ fallback }) => {
+            let event = typeof fallback === "object" && fallback !== null && "event" in fallback ? fallback.event : fallback;
+            if (typeof event === "object" && event !== null && event.kind === "child-run-completed") {
+              if (!canConsumeChildCompletion(ctx.state, ctx.effectiveEnv)) {
+                const existing = new Set((ctx.state.pendingChildRunNotices ?? []).map(run => run.runId));
+                ctx.state = { ...ctx.state, pendingChildRunNotices: [...(ctx.state.pendingChildRunNotices ?? []), ...event.runs.filter(run => !existing.has(run.runId))] };
+                return false;
+              }
+              const prepared = prepareChildRunConsumption(event, { env: ctx.effectiveEnv, currentDialogId: ctx.state.dialogId ?? null, deferRuns: runs => ctx.runCompletionWatcher?.deferRuns?.(runs) });
+              if (!prepared) return false;
+              event = prepared;
+            }
+            if (typeof event === "object" && event !== null && (event.kind === "background-task-completed" || event.kind === "child-run-completed")) {
+              traceChildRunWake("inbox-drain", event, ctx.state.dialogId ?? null, queueWakeFields(ctx.chatQueueBinding?.getStatus?.()));
+              terminalEvents.push(event);
+            }
+            if (typeof event === "object" && event !== null && event.kind === "background-task-completed") {
+              processCausalDepth = Math.max(processCausalDepth, event.processCausalDepth ?? 0);
+            }
+            if (typeof event === "object" && event !== null && event.kind === "child-run-completed") return event.text;
+          })) {
+            entries.push(text);
+          }
+          // 2) 排队用户批次：在当前模型响应/工具组安全结束后、下一次 provider
+          //    调用前集中接入。这里只 claim + 准备附件，真正的 requested 回执由
+          //    localLoop 在请求边界（provider dispatch 前）提交：abort/失败时
+          //    回滚为 pending 并留队，绝不留下「已 requested 但从未发送」的假戳。
+          const binding = ctx.chatQueueBinding;
+          const claimed = binding?.claimBatchForInjection?.() ?? null;
+          if (claimed) {
+            const dialogId = ctx.state.dialogId;
+            const batchId = claimed.requests.at(-1)?.messageId;
+            const messageIds = claimed.requests.map(request => request.messageId).filter((id): id is string => Boolean(id));
+            let store: any;
+            try {
+              if (!dialogId) throw new Error("Cannot inject queued user batch without a dialog id");
+              if (!batchId) throw new Error("Queued user batch requires a stable tail messageId");
+              store = await getOrCreateSharedStore({ env: ctx.effectiveEnv, cwd: ctx.state.cwd, fetchImpl: ctx.options.fetchImpl });
+              // 与 runQueuedUserBatch 同构（含 cliSource/cliImagePaths 等扩展字段）。
+              const userMessages: any[] = [];
+              const displayMessages: Array<{ text: string; imageUrls: string[] }> = [];
+              for (const original of claimed.requests) {
+                if (!original.messageId) throw new Error("Queued user batch requires stable message ids");
+                const { request, imageUrls } = await prepareQueuedUserRequest(ctx, original);
+                displayMessages.push({ text: request.text, imageUrls });
+                userMessages.push({ role: "user", cliMessageId: original.messageId,
+                  cliSource: original.source, cliImagePaths: original.imagePaths, cliMediaPaths: original.mediaPaths,
+                  content: imageUrls.length ? [{ type: "text" as const, text: request.text },
+                    ...imageUrls.map(url => ({ type: "image_url" as const, image_url: { url } }))] : request.text });
+                if (ctx.activeTurnAbort?.signal.aborted) throw new Error("Turn aborted during injection preparation");
+              }
+              // The loop normally commits once, but a repeated commit must not
+              // accept the claim or append visible user messages a second time.
+              let commitPromise: Promise<void> | undefined;
+              let rolledBack = false;
+              const displayedTurns: typeof ctx.history.turns = [];
+              entries.push({
+                messages: userMessages,
+                commit: () => commitPromise ??= (async () => {
+                  if (rolledBack) return;
+                  await markCliUserBatchPhase(store, dialogId, batchId, "requested", messageIds, userMessages);
+                  if (rolledBack) return;
+                  binding!.acceptClaimedBatch(claimed.batchId);
+                  drainInjectedBatches.push({ batchId, messageIds });
+                  // Split the live assistant at this boundary, then resume it
+                  // after the original user messages (never their image bytes).
+                  ctx.history.followBottom = true;
+                  for (const user of displayMessages) {
+                    startTurn(ctx.history, "user");
+                    appendToCurrentTurn(ctx.history, user.text);
+                    finalizeCurrentTurn(ctx.history);
+                    const turn = ctx.history.turns[ctx.history.turns.length - 1]!;
+                    displayedTurns.push(turn);
+                    ctx.onUserTurnFinalized?.(turn, user.imageUrls);
+                  }
+                  startTurn(ctx.history, "assistant");
+                  ctx.renderHistoryToOutput();
+                  if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
+                })(),
+                rollback: async () => {
+                  rolledBack = true;
+                  // Serialize a rollback with an in-progress receipt write.
+                  // A failed commit still needs its durable/visible rollback.
+                  await commitPromise?.catch(() => {});
+                  await rollbackCliUserBatchPhase(store, dialogId, batchId, messageIds);
+                  binding!.rollbackClaimedBatch(claimed.batchId, claimed.requests);
+                  // Abort may land during the receipt write, after commit has
+                  // painted. Remove only this transaction's visible user turns.
+                  for (const turn of displayedTurns) {
+                    const index = ctx.history.turns.indexOf(turn);
+                    if (index >= 0) ctx.history.turns.splice(index, 1);
+                  }
+                  if (displayedTurns.length > 0) {
+                    ctx.renderHistoryToOutput();
+                    if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
+                  }
+                  // Never let a rolled-back batch reach the completion path.
+                  const index = drainInjectedBatches.findIndex(batch => batch.batchId === batchId);
+                  if (index >= 0) drainInjectedBatches.splice(index, 1);
+                },
+              });
+            } catch (error) {
+              binding!.rollbackClaimedBatch(claimed.batchId, claimed.requests);
+              throw error;
+            }
+          }
+          return entries;
+        },
+        drainInjectedBatches,
         pastedTextStore: ctx.pasteStore,
         activityReporter: ctx.activityReporter,
         // 分享 OAuth agent 的 shell 会话授权（块 D）：宿主装配的会话级对象；
@@ -1576,6 +1973,12 @@ export async function runOneAgentTurn(
     // forcedStop：强制停止后用户可能已发起新 turn 并重置 forcedStop=false，
     // 旧 turn 靠 myEpoch === forcedStopEpoch 识别自己被强制过。
     // dialogId/turnTokens 的状态折叠仍可安全执行（纯数据，不碰 UI 锁）。
+    if (runResult.hostTaskRef) {
+      ctx.state = { ...ctx.state, autoReviewTask: {
+        userId: resolveTuiLearnOperatorUserId(ctx.effectiveEnv) ?? "local",
+        reference: runResult.hostTaskRef,
+      } };
+    }
     const wasForceStopped = ctx.forcedStopEpoch === myEpoch;
     if (wasForceStopped) {
       emitStatusIfCurrentTurn({ state: "idle" });
@@ -1610,15 +2013,14 @@ export async function runOneAgentTurn(
                 liveTurnEstimatedTokens: assistantDelta > 0 ? assistantDelta : undefined,
               };
             })()
-          : {
-              liveTurnEstimatedTokens: undefined,
-            }),
+          : preserveContextUsageWithoutReceipt(previousContextUsage, nextBaseline)),
         ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-        // 本轮已发起 agent 调用（消息已注入），消费切换通知与进程终态通知。
+        // Cwd notices are independent; terminal notices require a save receipt.
         pendingCwdNotice: undefined,
         // 只移除本轮注入过的行（见 processNoticeBlocks 的快照注释）。
-        pendingProcessNotices: consumeInjectedProcessNotices(),
+        ...settleNotices(runResult.savedTurnPersisted === true),
       };
+      turnOutcomeSettled = true;
       // 记账不挂在「有 dialogId / turnTokens」这个条件上：中断的 turn 常常
       // 两者都没有，但前面已经跑掉的 provider 调用照样扣了费。
       ctx.accumulateSessionCredits(runResult.turnCredits);
@@ -1632,6 +2034,11 @@ export async function runOneAgentTurn(
       return { ok: false, aborted: true };
     }
     const wasAborted = ctx.activeTurnAbort.signal.aborted;
+    if (runResult.businessCompletion) {
+      const completion = runResult.businessCompletion;
+      const label = { completed: "任务完成", incomplete: "任务未完整完成", blocked: "任务受阻", waiting: "等待用户验收" }[completion.status];
+      ctx.emitCommandOutput(`[auto-review] ${label}${completion.reasons.length ? `：${completion.reasons.join(", ")}` : ""}`);
+    }
     ctx.activeTurnAbort = null;
     // turn-completed attention 只对「跑了足够久的成功长任务」响：300ms 的
     // 普通聊天每句都响会非常烦（门槛见 TURN_COMPLETION_ATTENTION_THRESHOLD_MS）。
@@ -1667,6 +2074,11 @@ export async function runOneAgentTurn(
       state: resolveTerminalProgramStatusState({
         exitCode: runResult.exitCode,
         interrupted: wasAborted || runResult.streamInterrupted === true,
+        // Business completion is a task-scoped outcome, not a runtime fault: an
+        // unfinished or still-pending task must not fabricate a stalled/truncated
+        // signal (and therefore not an error terminal state). The task status is
+        // reported on its own line above; runtime faults stay with
+        // isRunResultStalledOrTruncated, which the one-shot CLI settlement shares.
         stalledOrTruncated: isRunResultStalledOrTruncated(runResult),
       }),
     });
@@ -1686,6 +2098,7 @@ export async function runOneAgentTurn(
           ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
           : undefined
       : ctx.state.dialogKey;
+    const { pendingProcessNotices: nextProcessNotices, pendingChildRunNotices: nextChildRunNotices } = settleNotices(runResult.savedTurnPersisted === true);
     ctx.state = {
       ...ctx.state,
       ...(runResult.dialogId
@@ -1716,7 +2129,9 @@ export async function runOneAgentTurn(
               liveTurnEstimatedTokens: assistantDelta > 0 ? assistantDelta : undefined,
             };
           })()
-        : {
+        : previousContextUsage.turnTokens
+          ? preserveContextUsageWithoutReceipt(previousContextUsage, nextBaseline)
+          : {
             estimatedContextTokens: estimateDefaultCliContextTokens({
               cwd: ctx.state.cwd,
               agentKey: ctx.state.agentKey,
@@ -1733,9 +2148,14 @@ export async function runOneAgentTurn(
       // 消费掉，避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实
       // turn、而非纯 child-run-completed 事件短路）时才清除。
       pendingCwdNotice: undefined,
-      // 只移除本轮注入过的行（见 processNoticeBlocks 的快照注释）。
-      pendingProcessNotices: consumeInjectedProcessNotices(),
+      // 若本轮因 preflightBlocked 拒发（如上下文超限），主请求未送出，模型
+      // 尚未消费后台事件，通知保留在 pending 中；当主请求成功发出且未被拦截时，
+      // 才消费掉本轮注入项（settle）。若本轮直接作为 completion turn 拒发，则将事件
+      // 沉淀进 pending，供用户紧接着发起的下一个 turn 注入，防止丢失与重复重放。
+      pendingProcessNotices: nextProcessNotices,
+      pendingChildRunNotices: (nextChildRunNotices?.length ?? 0) > 0 ? nextChildRunNotices : undefined,
     };
+    turnOutcomeSettled = true;
     // 同上：失败 / 中断的 turn 也要计进会话累计。
     ctx.accumulateSessionCredits(runResult.turnCredits);
     appendTurnBillingAudit({
@@ -1750,7 +2170,10 @@ export async function runOneAgentTurn(
     // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
     // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。
     if (!wasAborted && runResult.exitCode !== 0) {
-      if (isOwnerOAuthUnavailableError(runResult.localError)) {
+      if (runResult.preflightBlocked || isLocalContextCoverageFailure(runResult.localError)) {
+        ctx.emitCommandOutput(describeContextRefusal(runResult.preflightBlocked?.refusal
+          ?? contextRefusalDiagnostics(runResult.localError)));
+      } else if (isOwnerOAuthUnavailableError(runResult.localError)) {
         ctx.emitCommandOutput(OWNER_OAUTH_UNAVAILABLE_HINT);
       } else if (isInvalidGrantError(runResult.localError)) {
         const provider = "claude";
@@ -1781,16 +2204,14 @@ export async function runOneAgentTurn(
     ctx.idleHeapReleaser.schedule();
     ctx.activityIndicator.stop();
     ctx.activeTurnAbort = null;
-    // 生命周期红线（与 pendingCwdNotice 的无条件清空同款）：turn 的任何
-    // 终态——成功/失败/取消/无 dialogId 异常——都必须消费掉本轮已注入的
-    // 通知，否则它们会在下一个 turn 重复注入。state 折叠的两处
-    // （forceStop / 正常路径）只覆盖「runAgentChat 正常返回」的走向；这里
-    // 的 finally 兜底抛异常路径。注意清空按快照差集进行：turn 运行期间新
-    // 到达、还没注入过的通知必须保留（见 processNoticeBlocks 的注释）。
-    ctx.state = {
-      ...ctx.state,
-      pendingProcessNotices: consumeInjectedProcessNotices(),
-    };
+    // Without a successful save receipt, preserve both the injected snapshot and
+    // this terminal event. A thrown runner is not proof of persistence.
+    if (!turnOutcomeSettled) {
+      ctx.state = {
+        ...ctx.state,
+        ...settleNotices(false),
+      };
+    }
     // 兜底不丢唤醒：turn 结束（正常/abort/异常/preemptAndAbortForDrain）时，
     // 收件箱里还有 loop 没来得及消化的条目，就逐条落回 chat 队列，走既有的
     // 排队 + markAcknowledged 过滤路径，在下一个 turn 被消费。
@@ -1805,8 +2226,12 @@ export async function runOneAgentTurn(
       );
       for (const entry of leftover) {
         try {
-          binding.enqueue(entry.fallback);
+          const status = binding.enqueue(entry.fallback);
+          const event = typeof entry.fallback === "object" && "event" in entry.fallback ? entry.fallback.event : entry.fallback;
+          traceChildRunWake("inbox-leftover-queue", event, ctx.state.dialogId ?? null, queueWakeFields(status));
         } catch {
+          const event = typeof entry.fallback === "object" && "event" in entry.fallback ? entry.fallback.event : entry.fallback;
+          traceChildRunWake("inbox-leftover-enqueue-failed", event, ctx.state.dialogId ?? null);
           // 队列已关闭等极端情况：吞掉，避免 finally 抛出盖掉真实 turn 结果。
         }
       }
@@ -1814,11 +2239,9 @@ export async function runOneAgentTurn(
   }
 }
 
-/**
- * drain 一条排队请求：若携带 imagePaths，在**此刻**才读成 dataURL（入队时不读：
- * 排队期间文件可能变，且不让大 base64 挂在队列里）。读不到的路径只打一行
- * `image skipped:`（与 direct 路径同语义）并继续执行该轮，绝不抛错。
- */
+// 排队消息的附件延迟解析（图片 dataURL / 音视频 transcript）已迁至
+// ./queuedUserAttachments：纯职责搬移，签名与失败语义不变。
+
 export async function runDrainedQueueTurn(
   ctx: AgentTurnContext,
   req: TurnRequest,
@@ -1829,85 +2252,9 @@ export async function runDrainedQueueTurn(
   /** 测试注入点：缺省即 runOneAgentTurn。 */
   runTurn: typeof runOneAgentTurn = runOneAgentTurn,
 ): Promise<{ ok: boolean; aborted: boolean }> {
-  let imageUrls: string[] = [];
-  if (req.imagePaths && req.imagePaths.length > 0) {
-    try {
-      ({ imageUrls } = await resolveAttachmentImageUrls({
-        actionImagePaths: req.imagePaths,
-        attachedImages: [],
-        onFailure: (_path, err) =>
-          ctx.output.write(`[nolo] image skipped: ${err.message}\n`),
-      }));
-    } catch (err) {
-      ctx.output.write(
-        `[nolo] image skipped: ${err instanceof Error ? err.message : String(err)}\n`,
-      );
-      imageUrls = [];
-    }
-  }
-  // 排队消息携带的音视频路径：drain 时才跑转写（与图片延迟读同思路，
-  // 排队期间文件可能变 + 转写产物不应常驻队列）。transcript 块并入
-  // req.text 发给模型；失败输出错误行，消息本体照发（模型拿不到内容
-  // 但有失败说明，路径文本已被剥离）。
-  const mediaPaths = req.mediaPaths ?? [];
-  if (mediaPaths.length > 0) {
-    const authToken = resolvePlatformAuthToken(ctx.effectiveEnv);
-    const blocks: string[] = [];
-    for (const mediaPath of mediaPaths) {
-      const base = mediaPath.split(/[/\\]/).pop() ?? mediaPath;
-      try {
-        // T5：排队消息 drain 时同样先检查尾部静音。ctx.dialogHost 为空
-        // （非交互/无宿主）时 requestChoice 为 null → 只提示不裁剪。
-        const trim = await resolveTranscribeTrim({
-          path: mediaPath,
-          onNotice: ctx.emitCommandOutput,
-          onScanStart: (p) =>
-            ctx.emitCommandOutput(t("mediaSilenceTrimScanning", p.split(/[/\\]/).pop() ?? p)),
-          requestChoice: createTrimRequester({
-            dialogHost: ctx.dialogHost,
-            input: ctx.input,
-            output: ctx.output,
-          }),
-        });
-        ctx.emitCommandOutput(t("mediaPreprocessStart", base));
-        const transcript = await transcribeMediaFile({
-          path: mediaPath,
-          serverUrl: ctx.state.serverUrl,
-          authToken,
-          dialogId: ctx.state.dialogId,
-          fromSec: trim.fromSec,
-          toSec: trim.toSec,
-          fetchImpl: ctx.options.fetchImpl,
-          onProgress: (info) => {
-            const label = info.message ?? info.stage ?? "";
-            if (label) ctx.emitCommandOutput(t("mediaTranscribeProgress", base, label));
-          },
-        });
-        ctx.emitCommandOutput(t("mediaTranscribeDone", base, transcript.txtPath));
-        blocks.push(formatTranscriptForModel(transcript, mediaPath));
-      } catch (err) {
-        const msg = describeMediaError(err).message;
-        ctx.emitCommandOutput(
-          `[nolo] ${t("mediaTranscribeFailed", base, msg)}`,
-        );
-        blocks.push(`[media transcription failed for ${mediaPath}: ${msg}]`);
-      }
-    }
-    if (blocks.length > 0) {
-      const mergedText = req.text
-        ? `${blocks.join("\n\n")}\n\n${req.text}`
-        : blocks.join("\n\n");
-      req = { ...req, text: mergedText, event: { kind: "user", text: mergedText } };
-    }
-  }
-  return runTurn(
-    ctx,
-    req,
-    imageUrls,
-    actionGateHandler,
-    confirmDestructiveAction,
-    [...(req.imagePaths ?? []), ...(req.mediaPaths ?? [])],
-  );
+  const prepared = await prepareQueuedUserRequest(ctx, req);
+  return runTurn(ctx, prepared.request, prepared.imageUrls, actionGateHandler, confirmDestructiveAction,
+    [...(req.imagePaths ?? []), ...(req.mediaPaths ?? [])]);
 }
 
 /**
@@ -1915,6 +2262,13 @@ export async function runDrainedQueueTurn(
  *
  * 获取或延迟初始化 TUI chat 队列绑定，并把 drain 执行委托给 runOneAgentTurn。
  */
+type TuiBatchTurnRequest = TurnRequest & {
+  batchUserSource?: { messageId: string; originalText: string; contentSha256: string };
+  userMessages?: import("../client/agentRunTypes").RunAgentTurnOptions["userMessages"];
+  /** Explicit stable tail message id; validated centrally in agentRun.ts. */
+  cliBatchId?: string;
+};
+
 export function ensureChatQueueBinding(
   ctx: AgentTurnContext,
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
@@ -1922,10 +2276,96 @@ export function ensureChatQueueBinding(
     request: PermissionRequest,
   ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
 ): ChatQueueTuiBinding {
-  if (ctx.chatQueueBinding) return ctx.chatQueueBinding;
-  ctx.chatQueueBinding = createChatQueueTuiBinding(async (req) => {
-    return runDrainedQueueTurn(ctx, req, actionGateHandler, confirmDestructiveAction);
+  if (ctx.chatQueueBinding) {
+    const dialogIdentityHeld = ctx.chatQueueBindingDialogId === undefined
+      || ctx.chatQueueBindingDialogId === ctx.state.dialogId;
+    if (dialogIdentityHeld) return ctx.chatQueueBinding;
+    // The dialog id is the durable key for queued user messages: `savePending`
+    // writes them under the bound dialog, while the turn writes its provider
+    // receipt under the *current* dialog (/compact forks a new dialog, /resume,
+    // /new and /clear switch it). A binding left over from the previous dialog
+    // would persist follow-ups into a dialog the turn never runs in — the
+    // receipt lookup then fails ("Missing durable batch receipt") and the
+    // message is stranded in the dialog the session already left. Replace the
+    // binding instead; the previous dialog's pending rows stay durable, neither
+    // migrated nor resent.
+    const stale = ctx.chatQueueBinding;
+    ctx.chatQueueBinding = null;
+    ctx.dialogNotifyReceiver?.stop();
+    ctx.dialogNotifyReceiver = null;
+    stale.dispose();
+  }
+  const getStore = () => getOrCreateSharedStore({ env: ctx.effectiveEnv, cwd: ctx.state.cwd, fetchImpl: ctx.options.fetchImpl });
+  // Reserve on the shared workspace state BEFORE either the first turn or
+  // async pending storage starts. The binding must never mint a second id
+  // from an undefined snapshot captured before runOneAgentTurn allocates it.
+  const boundDialogId = ctx.state.dialogId ?? mintTaskUserMessageId();
+  if (!ctx.state.dialogId) {
+    ctx.pendingFreshDialogId = boundDialogId;
+    ctx.state = { ...ctx.state, dialogId: boundDialogId };
+  }
+  ctx.chatQueueBindingDialogId = boundDialogId;
+  const dialogId = () => boundDialogId;
+  const run = (req: TurnRequest) => runAutoReviewDrainedTurn(ctx.chatQueueBinding!, () => runDrainedQueueTurn(ctx, req, actionGateHandler, confirmDestructiveAction));
+  ctx.chatQueueBinding = createChatQueueTuiBinding(run, {
+    savePending: async (requests) => saveCliPendingUserMessages({ store: await getStore(),
+      userId: resolveLocalUserId(ctx.effectiveEnv), dialogId: dialogId(),
+      agentKey: ctx.state.agentKey ?? "nolo", requests }),
+    // Required named result preserves recovery evidence across host boundaries.
+    loadPending: async () => readCliPendingUserMessages(await getStore(), boundDialogId),
+    resolveUnknownWithoutResend: async batchId => resolveCliUnknownBatchWithoutResend(await getStore(), boundDialogId, batchId),
+    runBatch: async (requests, canStart) => runQueuedUserBatch(ctx, requests, actionGateHandler, confirmDestructiveAction, runOneAgentTurn, canStart),
   });
+  void ctx.chatQueueBinding.restorePending().catch(error => ctx.emitCommandOutput(`[nolo] pending restore failed: ${String(error)}`));
+  // The notify receiver lives exactly as long as this binding: it is the only
+  // process allowed to admit externally delivered messages into this dialog's
+  // queue, and it disappears when the dialog identity changes or the workspace
+  // disposes. Attach is best-effort: an unavailable mailbox (or a second live
+  // receiver for the same dialog) disables delivery, it never blocks the turn.
+  ctx.dialogNotifyReceiver?.stop();
+  ctx.dialogNotifyReceiver = attachDialogNotifyReceiver({
+    binding: ctx.chatQueueBinding,
+    userId: resolveLocalUserId(ctx.effectiveEnv),
+    dialogId: boundDialogId,
+    env: ctx.effectiveEnv,
+    resolveAdmittedState: async (messageId) => {
+      // `requested`/`completed` is written by the turn runner when the batch is
+      // dispatched to the provider — the exact point the queue consumed it.
+      const record: any = await (await getStore()).read(
+        `dialog-${boundDialogId}-msg-${messageId}`,
+        { remote: false },
+      );
+      const phase = record?.metadata?.cliBatchPhase;
+      return phase === "requested" || phase === "completed" ? "consumed" : "queued";
+    },
+    // The durable row is written by `admitExternalRequest` BEFORE the enqueue, so
+    // its presence proves the message was already admitted. Without this check a
+    // retried admission (receipt write failure, crash before the receipt) would
+    // enqueue a second identical user turn in this dialog.
+    isMessagePersisted: async (messageId) => {
+      const record = await (await getStore()).read(
+        `dialog-${boundDialogId}-msg-${messageId}`,
+        { remote: false },
+      );
+      return Boolean(record);
+    },
+    onEvent: (event) => {
+      if (event.type === "failed") {
+        ctx.emitCommandOutput(`[nolo] dialog notify failed: ${event.error}`);
+      } else if (event.type === "ack-write-failed") {
+        // Delivery succeeded; only the receipt is missing. Say so, so this is
+        // not read as a lost notification.
+        ctx.emitCommandOutput(`[nolo] dialog notify delivered, receipt not written: ${event.error}`);
+      }
+    },
+  });
+  // Attach is best-effort, but a silent disable leaves the sender with
+  // `unsupported`/`offline` and the user with no explanation of why.
+  if (!ctx.dialogNotifyReceiver.active) {
+    ctx.emitCommandOutput(
+      `[nolo] dialog notify disabled for this dialog: ${ctx.dialogNotifyReceiver.reason ?? "unknown reason"}`,
+    );
+  }
   return ctx.chatQueueBinding;
 }
 
@@ -1941,4 +2381,38 @@ export function preemptAndAbortForDrain(
   if (binding.preemptForDrain() && activeTurnAbort) {
     activeTurnAbort.abort();
   }
+}
+
+export async function runQueuedUserBatch(
+  ctx: AgentTurnContext, requests: readonly TurnRequest[],
+  actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
+  confirmDestructiveAction?: Parameters<typeof runOneAgentTurn>[4],
+  runTurn: typeof runOneAgentTurn = runOneAgentTurn,
+  canStart: () => boolean = () => true,
+): Promise<{ ok: boolean; aborted: boolean }> {
+  const batchId = requests.at(-1)?.messageId;
+  if (!batchId) throw new Error("Queued user batch requires a stable tail messageId");
+  const userMessages = [];
+  for (const original of requests) {
+    if (!original.messageId) throw new Error("Queued user batch requires stable message ids");
+    const { request, imageUrls } = await prepareQueuedUserRequest(ctx, original);
+    userMessages.push({ role: "user" as const, cliMessageId: original.messageId,
+      cliSource: original.source, cliImagePaths: original.imagePaths, cliMediaPaths: original.mediaPaths,
+      content: imageUrls.length ? [{ type: "text" as const, text: request.text },
+        ...imageUrls.map(url => ({ type: "image_url" as const, image_url: { url } }))] : request.text });
+  }
+  if (!canStart()) return { ok: false, aborted: true };
+  // Reuse the single-source dedupe contract with an ordered batch source.
+  // Include every ID and payload, but digest image bytes rather than copying
+  // base64 into task-source evidence. Provider userMessages remain untouched.
+  const originalText = JSON.stringify(userMessages.map(user => ({
+    ...user,
+    content: typeof user.content === "string" ? user.content : user.content.map(part =>
+      part.type === "image_url" ? { type: part.type, sha256: hashTaskUserMessage("sha256").update(part.image_url.url).digest("hex") } : part),
+  })));
+  const contentSha256 = hashTaskUserMessage("sha256").update(originalText).digest("hex");
+  const request: TuiBatchTurnRequest = { ...requests[0]!, userMessages, cliBatchId: batchId,
+    batchUserSource: { messageId: `user-batch-${contentSha256}`, originalText, contentSha256 } };
+  return runAutoReviewDrainedTurn(ctx.chatQueueBinding!, () => runTurn(ctx, request, [], actionGateHandler,
+    confirmDestructiveAction, requests.flatMap(request => [...request.imagePaths ?? [], ...request.mediaPaths ?? []])));
 }

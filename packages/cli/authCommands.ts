@@ -1,3 +1,4 @@
+import { createDeviceAuthorizationProtocol } from 'core/deviceAuthorization';
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { spawn } from "node:child_process";
@@ -93,17 +94,6 @@ type LoginCommandDeps = {
   error?: Pick<Console, "error">;
 };
 
-const postJson = async (
-  fetchImpl: CliFetchImpl,
-  url: string,
-  body: Record<string, unknown>
-) =>
-  fetchImpl(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
 const defaultSleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -190,88 +180,72 @@ async function runWebLogin(args: {
   error: Pick<Console, "error">;
   noBrowser: boolean;
 }) {
-  const startResponse = await postJson(
-    args.fetchImpl,
-    `${args.serverUrl}/api/v1/users/cli-login/start`,
-    { clientName: "nolo-cli" }
-  );
-  const start = await startResponse.json().catch(() => ({} as any));
-  if (!startResponse.ok || !start?.deviceCode || !start?.verificationUriComplete) {
-    args.error.error(
-      `Failed to start web login (${startResponse.status}). Use --token to paste a token manually.`
-    );
-    return 1;
-  }
+  try {
+    const protocol = createDeviceAuthorizationProtocol({ origin: args.serverUrl, fetch: args.fetchImpl, now: args.now, sleep: args.sleep });
+    const start = await protocol.start('nolo-cli');
 
-  args.output.log("Open this URL to authorize nolo-cli:");
-  args.output.log(start.verificationUriComplete);
-  args.output.log(`Code: ${start.userCode}`);
+    args.output.log("Open this URL to authorize nolo-cli:");
+    args.output.log(start.verificationUriComplete);
+    args.output.log(`Code: ${start.userCode}`);
 
-  if (!args.noBrowser) {
-    const opened = await args.openBrowser(start.verificationUriComplete);
-    if (!opened) {
-      args.output.log("Could not open a browser automatically. Paste the URL above.");
-    }
-  }
-
-  const intervalMs = Math.max(1, Number(start.interval) || 2) * 1000;
-  const timeoutMs = Math.max(1, Number(start.expiresIn) || 600) * 1000;
-  const deadline = args.now() + timeoutMs;
-  const statusLogIntervalMs = 15_000;
-  let lastStatusLogAt = 0;
-
-  args.output.log(
-    `[nolo] Waiting for browser authorization (${formatDuration(timeoutMs)} remaining)...`
-  );
-
-  while (args.now() <= deadline) {
-    const pollResponse = await postJson(
-      args.fetchImpl,
-      `${args.serverUrl}/api/v1/users/cli-login/poll`,
-      { deviceCode: start.deviceCode }
-    );
-    const poll = await pollResponse.json().catch(() => ({} as any));
-
-    if (pollResponse.status === 202) {
-      const currentTime = args.now();
-      if (
-        lastStatusLogAt > 0 &&
-        currentTime - lastStatusLogAt >= statusLogIntervalMs
-      ) {
-        const remainingMs = Math.max(0, deadline - currentTime);
-        args.output.log(
-          `[nolo] Still waiting... (${formatDuration(remainingMs)} remaining)`
-        );
-        lastStatusLogAt = currentTime;
-      } else if (lastStatusLogAt === 0) {
-        lastStatusLogAt = currentTime;
+    if (!args.noBrowser) {
+      const opened = await protocol.run(() => Promise.resolve(args.openBrowser(start.verificationUriComplete)), 15000);
+      if (!opened) {
+        args.output.log("Could not open a browser automatically. Paste the URL above.");
       }
-      await args.sleep(intervalMs);
-      continue;
     }
 
-    if (pollResponse.ok && poll?.token) {
-      const approvedServer =
-        typeof poll.serverUrl === "string" && poll.serverUrl.trim()
-          ? normalizeServerOrigin(poll.serverUrl)
-          : args.serverUrl;
-      return saveTokenLogin({
-        configPath: args.configPath,
-        serverUrl: approvedServer,
-        authToken: poll.token,
-        output: args.output,
-        error: args.error,
-      });
-    }
+    const deadline = protocol.deadline;
+    const timeoutMs = deadline - args.now();
+    const statusLogIntervalMs = 15_000;
+    let lastStatusLogAt = 0;
 
-    args.error.error(
-      `Web login failed: ${poll?.error || `HTTP ${pollResponse.status}`}. Use --token to paste a token manually.`
+    args.output.log(
+      `[nolo] Waiting for browser authorization (${formatDuration(timeoutMs)} remaining)...`
     );
+
+    while (args.now() <= deadline) {
+      const poll = await protocol.poll(start.deviceCode);
+
+      if (poll.status === 'pending') {
+        const currentTime = args.now();
+        if (
+          lastStatusLogAt > 0 &&
+          currentTime - lastStatusLogAt >= statusLogIntervalMs
+        ) {
+          const remainingMs = Math.max(0, deadline - currentTime);
+          args.output.log(
+            `[nolo] Still waiting... (${formatDuration(remainingMs)} remaining)`
+          );
+          lastStatusLogAt = currentTime;
+        } else if (lastStatusLogAt === 0) {
+          lastStatusLogAt = currentTime;
+        }
+        await protocol.wait(start.interval);
+        continue;
+      }
+
+      if (poll.status === 'approved') {
+        const approvedServer = poll.serverUrl;
+        protocol.check();
+        return saveTokenLogin({
+          configPath: args.configPath,
+          serverUrl: approvedServer,
+          authToken: poll.token,
+          output: args.output,
+          error: args.error,
+        });
+      }
+    }
+
+    args.error.error("Web login timed out. Run `nolo login` again or use --token.");
+    return 1;
+  } catch (error) {
+    args.error.error(error instanceof Error && error.message === 'expired'
+      ? 'Web login timed out. Run `nolo login` again or use --token.'
+      : `Web login failed: ${error instanceof Error ? error.message : 'authorization_failed'}. Use --token to paste a token manually.`);
     return 1;
   }
-
-  args.error.error("Web login timed out. Run `nolo login` again or use --token.");
-  return 1;
 }
 
 export async function runLoginCommand(args: string[], deps: LoginCommandDeps = {}) {

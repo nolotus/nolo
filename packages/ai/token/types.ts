@@ -62,6 +62,8 @@ export interface RawUsageType1 extends BillingUsageMetadata {
   cache_read_input_tokens?: number;
   input_tokens_details?: {
     cached_tokens?: number;
+    /** CF canonical usage reports the first-write (non-read) cache subset. */
+    cache_write_tokens?: number;
   };
 }
 

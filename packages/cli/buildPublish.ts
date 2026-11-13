@@ -61,6 +61,7 @@ export const CLI_PUBLISH_DEPENDENCY_ALLOWLIST = [
   "pino",
   "rambda",
   "zod",
+  "sharp",
 ];
 
 export function isDeniedCliDependency(depName: string): boolean {
@@ -209,6 +210,7 @@ export async function buildPublishArtifactBundled(
     "clipboardy",      // 虽然只被 TUI 粘贴流 await import，但它带着 CJS 依赖簇（fs/path/os/child_process…）一起 inline 后全是 __require("fs") 这类 shim 调用，一旦触发即同一类崩溃
     "crypto-js",       // UMD 里 hasBinary 分支 require("crypto")，inline 进 ESM chunk 即变成 __require("crypto") 的 Dynamic require 崩溃
     "detect-libc",     // sharp/lightningcss 的传递依赖，CJS 里 require("fs")/require("child_process")，同上
+    "sharp",           // 原生可选依赖（@img/sharp-<platform>）不能 inline；Windows 靠安装侧解析 @img/sharp-win32-x64
     "react-native",
     "react-native/*",
   ];
@@ -241,7 +243,7 @@ export async function buildPublishArtifactBundled(
 
   const publishVersionMap = buildPublishVersionMap(sourceDir);
   const keptDeps: Record<string, string> = {};
-  for (const name of ["level", "ulid", "tweetnacl", "pino", "clipboardy", "crypto-js", "detect-libc"]) {
+  for (const name of ["level", "ulid", "tweetnacl", "pino", "clipboardy", "crypto-js", "detect-libc", "sharp"]) {
     if (!emittedExternalDeps.has(name)) continue;
     const declaredVersion = distPkg.dependencies?.[name] ?? publishVersionMap[name];
     if (declaredVersion) {

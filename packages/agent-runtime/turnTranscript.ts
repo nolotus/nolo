@@ -19,6 +19,7 @@ import type {
   AgentRuntimeChatMessage,
   AgentRuntimeMessageContent,
 } from "./types";
+import type { ToolImageMessage } from "./toolImages";
 
 /**
  * 把本轮消息的持久化形态算出来：首条 user 消息替换为 persistedInput 展开
@@ -58,9 +59,14 @@ export type TurnTranscript = {
   /** 追加一条消息：发送视图与持久化原文两本账同步。 */
   push(msg: AgentRuntimeChatMessage): void;
   /** 追加工具消息：先经 capTool（单条输出硬上限）裁剪，再两本账同步。 */
-  pushTool(msg: AgentRuntimeChatMessage): void;
+  pushTool(msg: ToolImageMessage): void;
   /** 撤回最后一次追加（两本账同步各弹一条），返回发送视图弹出的消息。 */
   popLast(): AgentRuntimeChatMessage | undefined;
+  /**
+   * 按身份移除指定消息（两本账同步）。用于回退一次未发送的注入：预算警告、
+   * 内部通知等其它条目不受影响，避免按栈顶数量弹出造成错位。
+   */
+  retract(predicate: (msg: AgentRuntimeChatMessage) => boolean): void;
   /** 持久化形态：raw 原文 + persistedInput 展开（不改内部状态）。 */
   persisted(
     persistedInput: AgentRuntimeMessageContent | undefined,
@@ -84,10 +90,19 @@ export function createTurnTranscript(args: {
   // 本轮产出消息的原始记录（持久化用）。轮内压缩会把工作视图换成
   // 「摘要 + 保留尾部」投影；持久化不能跟投影走（否则丢本轮原始消息、且与
   // 持久化锚点的 canonical 坐标系错位），所以从首轮起独立累计原始消息。
-  const raw: AgentRuntimeChatMessage[] = args.initialWorking.slice(
+  let raw: AgentRuntimeChatMessage[] = args.initialWorking.slice(
     args.prefixCount + args.historyCount,
   );
   const cap = args.capToolMessage ?? ((msg: AgentRuntimeChatMessage) => msg);
+  // Remove specific messages by identity (e.g. a rolled-back injection),
+  // leaving unrelated entries (budget warnings, internal notices) in place.
+  // Count-based popLast would corrupt the stack when the budget warning was
+  // pushed after the injection.
+  function retract(callback: (msg: AgentRuntimeChatMessage) => boolean): void {
+    const predicate = callback;
+    working = working.filter((msg) => !predicate(msg));
+    raw = raw.filter((msg) => !predicate(msg));
+  }
   return {
     working: () => working,
     replaceWorkingHistory: (nextWorkingView) => {
@@ -106,7 +121,17 @@ export function createTurnTranscript(args: {
       raw.pop();
       return working.pop();
     },
-    persisted: (persistedInput, persistedInputReference) =>
-      applyPersistedTurnInput(raw.map(withoutToolImages), persistedInput, persistedInputReference),
+    retract,
+    persisted: (persistedInput, persistedInputReference) => {
+      // 批次消息（含轮边界注入的排队消息）自带完整 content，不需要 paste 展开；
+      // 但判定必须看「首条 user 消息」本身——否则一次轮边界注入会让普通直发
+      // 轮的 paste 展开也被跳过（首条仍是未展开的原始输入）。
+      const firstUser = raw.find(
+        (message) => message.role === "user",
+      ) as (AgentRuntimeChatMessage & { cliMessageId?: string }) | undefined;
+      return firstUser?.cliMessageId
+        ? raw.map(withoutToolImages)
+        : applyPersistedTurnInput(raw.map(withoutToolImages), persistedInput, persistedInputReference);
+    },
   };
 }

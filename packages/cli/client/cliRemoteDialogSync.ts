@@ -25,6 +25,8 @@ import {
 } from "./localRuntimeHelpers";
 import { fetchWithTransientRetry } from "./localRuntimeFetchRetry";
 import { clipCompactText } from "core/clipCompactText";
+import { formatDuration } from "../../ai/tools/agent/agentRunDisplayHelpers";
+import { buildCliNoticeText } from "../tui/completionNoticeDisplay";
 import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime";
 
 // ── helpers ──────────────────────────────────────────────────────────────
@@ -88,11 +90,16 @@ export function buildLocalWakeDisplayText(args: {
   terminalStatus: string;
   durationMs?: number;
 }) {
-  const failed = args.terminalStatus !== "done";
-  const duration = typeof args.durationMs === "number" && args.durationMs >= 0
-    ? ` · ${Math.floor(args.durationMs / 60000)}m${Math.floor(args.durationMs / 1000) % 60}s`
-    : "";
-  return `1 条后台 run 已完成 · ${failed ? "✗" : "✓"} ${args.label || "后台 run"}${failed ? ` ${args.terminalStatus}` : ""}${duration}`;
+  const title = typeof args.label === "string" ? args.label.trim() : "";
+  const duration =
+    typeof args.durationMs === "number" && args.durationMs >= 0
+      ? formatDuration(args.durationMs)
+      : "";
+  // 展示措辞与本地 run 终态唤醒同源（共享展示模型 + CLI 后台任务通知），
+  // 屏幕上不再出现 run / [done] 这类机器词。
+  return buildCliNoticeText([
+    { title, status: args.terminalStatus, duration },
+  ]);
 }
 
 function buildLocalParentWakeMessage(args: {

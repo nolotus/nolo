@@ -1,6 +1,7 @@
 import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
 import { asTrimmedString } from "core/trimmedString";
+import type { LocalAgentTurnInput } from "../../agent-runtime/localLoop";
 import type { AgentRuntimeMessageContent } from "../../agent-runtime/types";
 import type {
   DesktopAgentRuntimeAgentConfigSnapshot,
@@ -30,6 +31,7 @@ export type DesktopAgentRuntimeTurnResult =
 type RunDesktopAgentRuntimeTurnArgs = {
   agentRef: string;
   input: AgentRuntimeMessageContent;
+  userMessages?: LocalAgentTurnInput["userMessages"];
   /**
    * Request-scoped context blocks (project context, browse context…). Reach the
    * model as system-prompt layers on the host; never become part of `input`, so
@@ -99,14 +101,17 @@ export function buildDesktopAgentRuntimeTurnBody(args: RunDesktopAgentRuntimeTur
     dialogHistorySnapshot =
       buildDesktopAgentRuntimeDialogHistorySnapshot({
         dialogId: continueDialogId,
-        messages: args.dialogMessages,
-        currentInput: args.input,
+        messages: args.userMessages?.length
+          ? args.dialogMessages.filter((message: any) => !args.userMessages!.some(user => user.cliMessageId === message.id))
+          : args.dialogMessages,
+        currentInput: args.userMessages?.length ? undefined : args.input,
       }) ?? undefined;
   }
 
   const body = {
     agentRef: args.agentRef,
     input: args.input,
+    ...(args.userMessages?.length ? { userMessages: args.userMessages } : {}),
     ...(Array.isArray(args.contextBlocks) && args.contextBlocks.length > 0
       ? { contextBlocks: args.contextBlocks }
       : {}),
@@ -153,6 +158,22 @@ export type DesktopStreamEvent =
    * is an explicit honest value, not missing data.
    */
   | { type: "execution_location"; location: unknown }
+  /**
+   * Block 3b: pending action gate pushed by the desktop runtime host
+   * (confirm / handoff / input). Carries only id/kind/title/body/payload —
+   * never credential material. Routed to the in-memory gate channel, not to
+   * the transcript.
+   */
+  | {
+      type: "action_gate";
+      gate: {
+        id: string;
+        kind: "confirm" | "handoff" | "input";
+        title: string;
+        body?: string;
+        payload?: unknown;
+      };
+    }
   | { type: "done"; result: LocalAgentTurnResult }
   | { type: "error"; error: string };
 

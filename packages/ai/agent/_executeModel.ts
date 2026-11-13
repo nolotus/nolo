@@ -1,3 +1,4 @@
+import { classifySummaryError } from "ai/context/summaryRouting";
 import type { RootState } from "app/store";
 import { Agent, Message } from "app/types";
 import { selectCurrentDialogConfig } from "chat/dialog/dialogSlice";
@@ -79,6 +80,7 @@ export const _executeModel = async (
     agentConfigOverrides?: Record<string, any>;
   },
   args: {
+    summaryCompletion?: boolean;
     llmConfig?: Partial<Agent> & Pick<Agent, "provider" | "model">;
     agentKey?: string;
     agentConfig?: Partial<Agent> & Pick<Agent, "provider" | "model">;
@@ -159,6 +161,8 @@ export const _executeModel = async (
         agentConfig: resolvedAgentConfig,
         api: getApiEndpoint(resolvedAgentConfig),
         bodyData: sanitizedBodyData,
+        signal: thunkApi.signal,
+        preserveStructuredError: args.summaryCompletion,
         currentServer: selectCurrentServer(state),
         token: selectIdentityToken(state) ?? "",
         dialogId:
@@ -167,8 +171,10 @@ export const _executeModel = async (
       });
       if (!response.ok) {
         let message = `Model request failed with HTTP ${response.status}`;
+        let structuredBody: any;
         try {
           const errorBody = await response.json();
+          structuredBody = errorBody;
           const upstreamMessage =
             typeof errorBody?.error?.message === "string"
               ? errorBody.error.message
@@ -179,6 +185,7 @@ export const _executeModel = async (
         } catch {
           // Keep the status-based message when the response body is not JSON.
         }
+        if (args.summaryCompletion) throw { ...structuredBody, status: response.status };
         throw new Error(message);
       }
       const rawResult = await response.json();
@@ -214,9 +221,20 @@ export const _executeModel = async (
           thunkApi
         );
       }
+      if (args.summaryCompletion) {
+        const finishReason = result?.choices?.[0]?.finish_reason;
+        return { text: content, finishReason, truncated: finishReason === "length" || rawResult?.status === "incomplete" };
+      }
       return content;
     }
   } catch (error: any) {
+    if (args.summaryCompletion) {
+      // Preserve machine-readable failure fields across Redux serialization.
+      const failure = classifySummaryError(error);
+      return rejectWithValue({ ...failure, type: failure.errorType,
+        name: failure.category === "timeout" ? "TimeoutError" : failure.category === "cancelled" ? "AbortError" : "SummaryError",
+      });
+    }
     console.error(`_executeModel failed`, error);
     return rejectWithValue(error.message);
   }

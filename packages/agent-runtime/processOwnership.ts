@@ -22,6 +22,8 @@
 export type ProcessOwner = {
   /** 派发该任务的 turn 所属 dialog。 */
   dialogId: string;
+  /** Host-owned causal depth at task dispatch. */
+  processCausalDepth?: number;
   /** 该 turn 的一次性身份；host 未提供时缺省。 */
   turnId?: string;
   /** 可选：用户维度。 */
@@ -51,8 +53,11 @@ export function readProcessOwner(
   if (!dialogId) return null;
   const turnId = asNonEmptyString(runtimeContext.turnId);
   const ownerId = asNonEmptyString(runtimeContext.ownerId);
+  const getDepth = runtimeContext.getProcessCausalDepth;
+  const depth = typeof getDepth === "function" ? getDepth() : runtimeContext.processCausalDepth;
   return {
     dialogId,
+    ...(typeof depth === "number" && Number.isSafeInteger(depth) && depth >= 0 ? { processCausalDepth: depth } : {}),
     ...(turnId ? { turnId } : {}),
     ...(ownerId ? { ownerId } : {}),
   };

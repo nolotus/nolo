@@ -99,7 +99,10 @@ const summarizeAppKeys = (items: BaseItem[]): string[] => {
     .filter((candidate): candidate is string => typeof candidate === "string");
 };
 
-const __udPerf = typeof window !== "undefined" && localStorage.getItem("debugPerf") === "1"
+const __udPerf =
+  typeof window !== "undefined" &&
+  typeof window.localStorage !== "undefined" &&
+  window.localStorage.getItem("debugPerf") === "1"
   ? ((window as any).__userDataPerf ??= {
       marks: {} as Record<string, number>,
       start(label: string) { this.marks[label] = performance.now(); },

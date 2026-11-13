@@ -71,6 +71,30 @@ export const commonStrings = {
     en: "This turn failed, but the dialog is kept. Send another message (or say \"continue\") to keep going in the same conversation.",
     zh: "本轮失败了，但对话已保留。直接再说一句（或说「继续」）即可在同一对话里接着聊。",
   },
+  contextRefusalBudgetDetail: {
+    en: "History {0} / budget {1}. ",
+    zh: "历史 {0} / 预算 {1}，",
+  },
+  contextRefusalSummaryBusy: {
+    en: "Not sent: summary channel busy. {0}Retry in about 30 seconds.",
+    zh: "没发出去：摘要通道忙。{0}约 30 秒后重试即可。",
+  },
+  contextRefusalSummaryFailed: {
+    en: "Not sent: summary compaction failed. {0}Retry, or run /compact first.",
+    zh: "没发出去：摘要压缩失败。{0}可重试，或先 /compact。",
+  },
+  contextRefusalNoCompactableContent: {
+    en: "Not sent: history cannot shrink further. Run /compact, or switch to a model with a larger context window.",
+    zh: "没发出去：历史压不动了。先 /compact，或换更大窗口的模型。",
+  },
+  contextRefusalSingleMessageTooLarge: {
+    en: "Not sent: this message alone is {0}, meeting or exceeding the {1} budget. Split it, or use a model with a larger context window.",
+    zh: "没发出去：这条消息本身 {0}，达到或超过可用预算 {1}。拆开发送，或换更大窗口的模型。",
+  },
+  contextPreflightBlockedHint: {
+    en: "Not sent: the context does not fit. Your input is kept; retry or run /compact.",
+    zh: "没发出去：上下文装不下。你的话已保留，重试或 /compact。",
+  },
   dialogNotSavedHint: {
     en: "This turn did not create a dialog. Your next message will start a new conversation — restate what you need.",
     zh: "本轮没有建成对话。下一句会是新对话——请把你想做的事再说一遍。",
@@ -181,6 +205,10 @@ export const commonStrings = {
     en: "Compacting history… (Esc/Ctrl+C to cancel)",
     zh: "正在压缩历史记录…（Esc/Ctrl+C 取消）",
   },
+  contextCompactingRetry: {
+    en: "Compacting history… (summary channel busy, retry {0}/{1}) (Esc/Ctrl+C to cancel)",
+    zh: "正在压缩历史记录…（摘要通道忙，重试 {0}/{1}）（Esc/Ctrl+C 取消）",
+  },
   waitingForModel: {
     en: "Waiting for the model…",
     zh: "正在等待模型响应…",
@@ -222,10 +250,12 @@ export const commonStrings = {
     zh: "（上游约 {0}后复位）",
   },
   // 第 2 行：{0} = 冷却截止（本地时间，当天 HH:MM / 跨天 MM-DD HH:MM），
-  // {1} = 复位提示或空串，{2} = 自动探测间隔（分钟）。无 cooldownUntil 时整行省略。
+  // {1} = 复位提示或空串。无 cooldownUntil 时整行省略。
+  // 冷却只作参考：额度信息不再有否决权，请求不会被本地拦下，故文案不得承诺
+  // 「每 N 分钟自动试探一次」——那套 gate 节流已随否决权一并拆除。
   localRunRateLimitCooldown: {
-    en: " Cooldown until {0}{1}; auto-probing every {2} min meanwhile (the upstream may not be restored by then).",
-    zh: " 冷却至 {0}{1}；期间每 {2} 分钟自动试探一次（上游未必届时恢复）。",
+    en: " Cooldown until {0}{1}; requests are not blocked locally by this timestamp — it is only a reference for when the upstream may recover (it may not have recovered by then).",
+    zh: " 冷却至 {0}{1}；本地不据此拦截请求，该时刻仅作参考（上游未必届时恢复）。",
   },
   // 第 3 行：三个出口（换 agent / 强制走服务器 / 已充值清冷却）。
   localRunRateLimitExits: {
@@ -268,6 +298,14 @@ export const commonStrings = {
   usedSkillLabel: {
     en: "Used Skill",
     zh: "已加载技能",
+  },
+  loadSkillLabel: {
+    en: "Load Skill",
+    zh: "加载技能",
+  },
+  unnamedSkillReference: {
+    en: "unknown reference",
+    zh: "未知引用",
   },
   // Background-process rows in the same zone (`❯ npm run dev · 已运行 3m · pid 123`).
   // The pid is how the user targets /stop, so it is a fact, not decoration.

@@ -214,6 +214,12 @@ export async function runAgentFavoriteCommand(
   const primaryServerUrl = resolveServerUrl(args, env);
   const serverUrls = resolveServerCandidates(args, env, primaryServerUrl);
 
+  // 收藏时间戳只有一个真值：本机在写入这一刻生成，随请求发给各服务器，
+  // 同时也作为命令输出里的 favoritedAt（服务端 setFavorite 契约不回传该字段）。
+  // 同一批写入共享同一次 Date.now()：list 合并多服务器时按 favoritedAt 取最新，
+  // 各自取时间会让各服务器错开毫秒级。
+  const favoritedAt = Date.now();
+
   try {
     const attempts = await setFavoriteAcrossServers({
       serverUrls,
@@ -221,9 +227,7 @@ export async function runAgentFavoriteCommand(
       fetchImpl: deps.fetchImpl ?? fetch,
       agentKey,
       isFavorite,
-      // 同一批写入共享同一个收藏时间戳：list 合并多服务器时按 favoritedAt 取最新，
-      // 各自取 Date.now() 会让各服务器时间错开毫秒级。
-      favoritedAt: Date.now(),
+      favoritedAt,
     });
 
     const failures = attempts.filter((attempt) => !attempt.ok);
@@ -242,7 +246,7 @@ export async function runAgentFavoriteCommand(
             targetType: "agent",
             targetKey: agentKey,
             isFavorite,
-            favoritedAt: attempts[0]?.response?.favoritedAt ?? null,
+            favoritedAt,
             servers: attempts,
           },
           null,

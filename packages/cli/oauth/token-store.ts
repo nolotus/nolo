@@ -9,3 +9,9 @@ export {
   resolveFreshAccessToken,
   writeOAuthCredential,
 } from "../../agent-runtime/oauthTokenStore";
+// re-export 层必须同步透传类型：tuiAuth 等消费方只 import 这一层。
+export type {
+  OAuthCredential,
+  OAuthProvider,
+  OAuthTokenStore,
+} from "../../agent-runtime/oauthTokenStore";

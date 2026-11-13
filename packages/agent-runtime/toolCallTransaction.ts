@@ -37,7 +37,36 @@ import { buildToolArgumentsFingerprint } from "./toolArgumentsFingerprint";
 import type { AgentExecutionObservationEvent } from "./executionObservation";
 import type { LocalAgentActionGate, LocalAgentTurnInput } from "./localLoop";
 import { unwrapToolArguments } from "./inboundCredentialVault";
-import { isCommandExecutingTool } from "./localToolPolicy";
+import {
+  buildCredentialSinkPermissionRequest,
+  classifyCredentialRefSink,
+} from "./credentialSinkPolicy";
+
+/** 结构化拒绝结果：不抛异常，指引受控通道（fail closed，但不打断本轮循环）。
+ *  有 gate 的路径（用户拒绝）带 gateId 便于 UI/审计对回；无确认通道的路径本来就没有 gate，不编造 id。 */
+function buildCredentialSinkRefusal(
+  toolName: string,
+  gateId?: string,
+): AgentRuntimeToolResult {
+  return {
+    content: `需要用户确认才能把凭据用于 ${toolName}。可改走受控通道：nolo secret run --with <name> -- <cmd>。`,
+    metadata: {
+      cancelled: true,
+      actionGateResult: {
+        status: "cancelled",
+        ...(gateId ? { gateId } : {}),
+      },
+    },
+  };
+}
+
+/**
+ * [H1] 凭据确认 gate 按 turn input 串行化：localLoop 会把同一轮里相邻的只读工具
+ * 用 Promise.all 并发执行，而只读工具也可能触发 confirm gate；不加互斥会同时弹出
+ * 多个确认框、终端交互互相踩。按 input（每轮唯一对象）排队，同一时刻只出现一个确认框。
+ * 前一个 gate 抛错不污染后续队列（catch 吞掉再接）；finally 清理队尾避免无限累积。
+ */
+const credentialGateQueues = new WeakMap<object, Promise<unknown>>();
 
 type LocalAgentLoopEvent = AgentExecutionObservationEvent;
 
@@ -441,46 +470,93 @@ export async function executeToolCall(args: {
         rawArguments.includes("$nolo_cred:") &&
         input.adapter.credentialBroker
       ) {
-        // [Security F1] 任何能执行命令的工具都不许在命令行里展明文：间接注入
-        // 只要能把 `$nolo_cred:` 塞进命令行，就能借 broker 的手把密钥送到任意
-        // 目标。判据与派发器共用同一套归一化（见 isCommandExecutingTool）。
-        if (isCommandExecutingTool(toolName)) {
+        // [Security F1] 汇点三分类（见 credentialSinkPolicy）：命令类硬拒绝；
+        // 其余工具需一次宿主确认才解包（仅本次调用，不落跨调用状态）；
+        // 拿不到确认通道或用户拒绝时返回结构化拒绝结果（不抛异常），指引受控通道。
+        // 命令类判据与派发器共用同一套归一化（isCommandExecutingTool）。
+        const sink = classifyCredentialRefSink(toolName);
+        if (sink === "command") {
           throw new Error(
             `[security] 拒绝在 ${toolName} 命令行中直接解包凭证引用 ($nolo_cred:)，以防御提示词注入外泄风险。请使用受控认证通道。`,
           );
         }
-        unwrappedArguments = await unwrapToolArguments(rawArguments, input.adapter.credentialBroker);
+        if (sink === "confirm") {
+          if (input.onActionGate) {
+            const permissionRequest = buildCredentialSinkPermissionRequest(toolName);
+            const gate: LocalAgentActionGate = {
+              ...permissionRequest,
+              // [M1] id 带上 toolCall.id，避免同一轮同一工具两次请求 id 碰撞（对齐既有 ask 分支约定）。
+              id: `${permissionRequest.id}-${toolCall.id}`,
+              kind: "confirm",
+              toolName,
+              toolCallId: toolCall.id,
+            };
+            // [H1] 同一 turn input 上的确认框串行化：前一个 gate 抛错不污染队列。
+            const onActionGate = input.onActionGate;
+            const prev = credentialGateQueues.get(input) ?? Promise.resolve();
+            const next = prev.catch(() => undefined).then(() =>
+              runAbortableToolTask(
+                input,
+                onActionGate(gate),
+                `${toolName} credential confirmation`,
+              ),
+            );
+            credentialGateQueues.set(input, next);
+            const replacement = await next.finally(() => {
+              if (credentialGateQueues.get(input) === next) {
+                credentialGateQueues.delete(input);
+              }
+            });
+            if (
+              replacement !== undefined &&
+              isCompletedActionGateResult(replacement?.metadata?.actionGateResult)
+            ) {
+              // 仅本次调用解包；批准不写任何会话/跨调用批准状态。
+              unwrappedArguments = await unwrapToolArguments(rawArguments, input.adapter.credentialBroker);
+            } else {
+              toolResult = buildCredentialSinkRefusal(toolName, gate.id);
+            }
+          } else {
+            toolResult = buildCredentialSinkRefusal(toolName);
+          }
+        }
+        // sink === "allow"：受控白名单通道（当前为空集，注入扩展用），无需确认、直接解包。
+        if (sink === "allow") {
+          unwrappedArguments = await unwrapToolArguments(rawArguments, input.adapter.credentialBroker);
+        }
       }
 
-      const executePromise = input.adapter.executeTool({
-        id: toolCall.id,
-        name: toolName,
-        arguments: unwrappedArguments,
-        ...(userInputText ? { userInput: userInputText } : {}),
-        ...(input.runtimeContext
-          ? { runtimeContext: input.runtimeContext }
-          : {}),
-        ...(args.runToolNames
-          ? { runToolNames: args.runToolNames }
-          : {}),
-        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-        // 定档信号：来源只由 turn 输入推导，不让模型/参数层参与。
-        // 三级判据见 plan §10——后台运行优先于子 run（后台派发的子 run 仍是
-        // 无人值守的，按 automation 报更保守）。
-        origin: input.background
-          ? "automation"
-          : input.runKind === "subtask"
-            ? "agent"
-            : "chat",
-      }, {
-        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-        ...(input.runtimeContext
-          ? { runtimeContext: input.runtimeContext }
-          : {}),
-      });
-      const execStartedAtMs = Date.now();
-      toolResult = await runAbortableToolTask(input, executePromise, toolName);
-      toolExecMs = Date.now() - execStartedAtMs;
+      if (!toolResult) {
+        const executePromise = input.adapter.executeTool({
+          id: toolCall.id,
+          name: toolName,
+          arguments: unwrappedArguments,
+          ...(userInputText ? { userInput: userInputText } : {}),
+          ...(input.runtimeContext
+            ? { runtimeContext: input.runtimeContext }
+            : {}),
+          ...(args.runToolNames
+            ? { runToolNames: args.runToolNames }
+            : {}),
+          ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+          // 定档信号：来源只由 turn 输入推导，不让模型/参数层参与。
+          // 三级判据见 plan §10——后台运行优先于子 run（后台派发的子 run 仍是
+          // 无人值守的，按 automation 报更保守）。
+          origin: input.background
+            ? "automation"
+            : input.runKind === "subtask"
+              ? "agent"
+              : "chat",
+        }, {
+          ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+          ...(input.runtimeContext
+            ? { runtimeContext: input.runtimeContext }
+            : {}),
+        });
+        const execStartedAtMs = Date.now();
+        toolResult = await runAbortableToolTask(input, executePromise, toolName);
+        toolExecMs = Date.now() - execStartedAtMs;
+      }
     }
     if (tailDropNotice) {
       toolResult = {
@@ -497,6 +573,20 @@ export async function executeToolCall(args: {
       toolCallId: toolCall.id,
       metadata: toolResult.metadata,
     });
+    // [H1] 无交互通道的宿主不能把 input gate 的兜底文案（工具自述「已请求用户」）
+    // 原样交给模型——那是没发生的事。只拦 kind === "input"：confirm/handoff 在没有
+    // onActionGate 时的现有行为保持不变（桌面端无 onActionGate，改它们会放大影响面）。
+    if (actionGate && !input.onActionGate && actionGate.kind === "input") {
+      toolResult = {
+        content:
+          "本宿主没有交互面板，无法展示凭据输入界面，该请求未送达用户。请改走终端通道：" +
+          "让用户执行 nolo secret set <NAME> --prompt 保存凭据，再用 nolo secret run --with <NAME> -- <cmd> 消费。",
+        metadata: {
+          cancelled: true,
+          actionGateResult: { gateId: actionGate.id, status: "cancelled" },
+        },
+      };
+    }
     if (actionGate && input.onActionGate) {
       const replacement = await runAbortableToolTask(input, input.onActionGate(actionGate), `${toolName} action gate`);
       if (replacement) {

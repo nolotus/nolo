@@ -62,6 +62,13 @@ export type QueriedContentItem = {
   serverOrigin?: string;
   cybots?: string[];
   primaryAgentKey?: string;
+  /** Validated dialog identity; key encoding alone is ambiguous with hyphens. */
+  userId?: string;
+  dialogId?: string;
+  /** multi-agent: 父对话裸 id（不含 dialog-<userId>- 前缀）；树按 owner+origin 匹配 */
+  parentDialogId?: string;
+  /** multi-agent: 该对话树的根对话裸 id */
+  rootDialogId?: string;
 };
 
 export type MyContentListItem = QueriedContentItem | OwnedAppContentItem;
@@ -97,6 +104,12 @@ export type UserContentRecord = Partial<AppSummaryRecord> & {
   pinned?: boolean;
   spaceId?: string | null;
   serverOrigin?: string;
+  primaryAgentKey?: string;
+  primaryCybotKey?: string;
+  cybots?: string[];
+  runtimeBinding?: { agentKey?: string } | null;
+  parentDialogId?: string | null;
+  rootDialogId?: string | null;
 };
 
 const normalizeText = (value: unknown): string => asTrimmedString(value);
@@ -171,6 +184,12 @@ export const toTimestamp = (value: string | number) =>
 
 const normalizeSpaceId = (spaceId: unknown): string | null => {
   return asOptionalTrimmedString(spaceId) ?? null;
+};
+
+const normalizeTrimmedOrUndefined = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 };
 
 const resolveRecordTimestamp = (record: UserContentRecord): string | number =>
@@ -371,6 +390,9 @@ export function buildMyContentItemsFromUserData(
             : undefined,
         contentKey,
         ...(record.type === "dialog" ? { status: dialogSummaryStatus(record.status), unreadAt: dialogSummaryUnreadAt(record.unreadAt) } : {}),
+        ...(contentType === "dialog" && typeof record.userId === "string" && record.userId.trim() && contentKey.startsWith(`dialog-${record.userId.trim()}-`) && contentKey.length > `dialog-${record.userId.trim()}-`.length
+          ? { userId: record.userId.trim(), dialogId: contentKey.slice(`dialog-${record.userId.trim()}-`.length) }
+          : {}),
         pinned: Boolean(record.pinned),
         createdAt: record.createdAt ?? record.created ?? 0,
         updatedAt: timestamp,
@@ -382,14 +404,18 @@ export function buildMyContentItemsFromUserData(
           typeof record.serverOrigin === "string" && record.serverOrigin.trim().length > 0
             ? record.serverOrigin
             : undefined,
-        cybots: (record as any).cybots,
+        cybots: Array.isArray(record.cybots)
+          ? record.cybots.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+          : undefined,
         primaryAgentKey:
-          (record as any).primaryAgentKey ||
-          (record as any).primaryCybotKey ||
-          (record as any).runtimeBinding?.agentKey ||
-          (Array.isArray((record as any).cybots) && (record as any).cybots.length > 0
-            ? (record as any).cybots[0]
+          record.primaryAgentKey ||
+          record.primaryCybotKey ||
+          record.runtimeBinding?.agentKey ||
+          (Array.isArray(record.cybots) && record.cybots.length > 0
+            ? record.cybots[0]
             : undefined),
+        parentDialogId: normalizeTrimmedOrUndefined(record.parentDialogId),
+        rootDialogId: normalizeTrimmedOrUndefined(record.rootDialogId),
       },
     ];
   });

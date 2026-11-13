@@ -1,3 +1,4 @@
+import { estimateTokenCount } from "../../../ai/context/tokenUtils";
 /**
  * transport 分支：Gemini 3 + tools 的 native generateContent 路由（platform proxy 传不了 thought_signature）
  *
@@ -56,7 +57,14 @@ export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) =>
         model: providerConfig.model,
         hasApiKey: Boolean(providerConfig.apiKey),
       });
+      const budgetBody = buildGeminiGenerateContentRequest({ messages: [], tools: tools as unknown[],
+        maxTokens: typeof agentConfig.max_tokens === "number" ? agentConfig.max_tokens : undefined,
+        attachSkipThoughtSignature: resolveGeminiModelQuirks(providerConfig.model).allowsThoughtSignatureSentinel });
       return {
+        requestBudget: { toolSchemaTokens: estimateTokenCount(JSON.stringify(budgetBody.tools ?? [])),
+          output: typeof agentConfig.max_tokens === "number" && agentConfig.max_tokens > 0
+            ? { semantics: "shared-window", finalWireCapTokens: agentConfig.max_tokens }
+            : { semantics: "unknown", fallbackReserveTokens: 8192 } },
         model: providerConfig.model,
         complete: async (messages, options) => {
           // 实际上游模型名 = providerConfig.model（下面 URL 里那个）。

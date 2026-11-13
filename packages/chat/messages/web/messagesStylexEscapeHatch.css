@@ -243,6 +243,24 @@
   line-height: inherit;
 }
 
+/* 对话内 markdown 表格整体收一档：通用 .data-table 是表格页/定价页在用的，
+   这里只在消息体内覆盖——字号跟小号正文、宽度按内容自适应、上下留白收紧、
+   单元格给紧凑内边距（裸 th/td 原本没有规则，会贴得很挤）。 */
+[data-hook~="messages-esc-msg-body"] .streaming-markdown-table {
+  margin: var(--space-3) 0;
+}
+
+[data-hook~="messages-esc-msg-body"] .streaming-markdown-table .data-table {
+  width: auto;
+  max-width: 100%;
+  font-size: var(--fontSize-sm);
+}
+
+[data-hook~="messages-esc-msg-body"] .streaming-markdown-table .data-table th,
+[data-hook~="messages-esc-msg-body"] .streaming-markdown-table .data-table td {
+  padding: 6px 10px;
+}
+
 [data-hook~="messages-esc-msg-body"] .text-heading-one,
 [data-hook~="messages-esc-msg-body"] .text-heading-two,
 [data-hook~="messages-esc-msg-body"] .text-heading-three,

@@ -1,5 +1,8 @@
 // 文件路径: chat/messages/web/ToolMessageContent.tsx
 
+import { useAccountChatDisplayPreferences } from "app/settings/accountChatDisplayOwner";
+import { isTreeListingCommand } from "./shellTreeCommand";
+
 import * as stylex from "@stylexjs/stylex";
 import React, { useState, useEffect, useMemo } from "react";
 import {
@@ -296,7 +299,15 @@ const CodePreviewViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
 
 /* --- 代码修改预览（用于 applyLineEdits / writeFile：最终文件 + 可选 diff） --- */
 
+export function isNewFileCodeChange(
+  rawData: { response?: { created?: unknown }; created?: unknown } | null | undefined,
+): boolean {
+  // 只认显式创建信号：纯新增 diff 也可能是既有文件追加，缺少元数据时保留原渲染。
+  return rawData?.response?.created === true || rawData?.created === true;
+}
+
 const CodeChangeViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
+  const { showNewFileDiff } = useAccountChatDisplayPreferences();
   const [view, setView] = useState<"final" | "diff">("final");
 
   const path =
@@ -341,6 +352,7 @@ const CodeChangeViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
   const isLong = shouldPreviewToolText(newContent);
 
   const hasDiff = diffPieces.length > 0;
+  const hideNewFileBody = isNewFileCodeChange(rawData) && !showNewFileDiff;
 
   return (
     <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block code-change-widget", contentStyles.contentBlock)}>
@@ -349,7 +361,7 @@ const CodeChangeViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
           <LuFileText size={14} {...withLiteralClass("u-dim", contentStyles.dimText)} aria-hidden="true" />
           <span  {...withLiteralClass("cp-path", contentStyles.cpPath)}>{path}</span>
         </div>
-        <div  {...withLiteralClass("cc-toggle", contentStyles.toggle)}>
+        {!hideNewFileBody && <div  {...withLiteralClass("cc-toggle", contentStyles.toggle)}>
           <button
             type="button"
             className={view === "final" ? "on" : ""}
@@ -365,10 +377,10 @@ const CodeChangeViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
           >
             {t("codeEdit.viewDiff") || "Diff"}
           </button>
-        </div>
+        </div>}
       </div>
 
-      {view === "diff" ? (
+      {!hideNewFileBody && (view === "diff" ? (
         <DiffViewer parts={diffPieces} filePath={path} />
       ) : isLong ? (
         <div  {...withLiteralClass("editor-scroller compact", contentStyles.editorScroller, contentStyles.editorCompact)}>
@@ -378,7 +390,7 @@ const CodeChangeViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
         <div  {...withLiteralClass("editor-scroller compact", contentStyles.editorScroller, contentStyles.editorCompact)}>
           <NoloEditor initialValue={finalSlateValue} readOnly />
         </div>
-      )}
+      ))}
     </div>
   );
 };
@@ -427,6 +439,7 @@ const ExecShellViewer: React.FC<ToolProps> = ({
   t,
   presentation = "default",
 }) => {
+  const { showShellTreeOutput } = useAccountChatDisplayPreferences();
   const dispatch = useAppDispatch();
   if (isError || !rawData) return null;
 
@@ -498,7 +511,12 @@ const ExecShellViewer: React.FC<ToolProps> = ({
   }
 
   const statusColor = exitCode === 0 ? "var(--success)" : exitCode === undefined ? "var(--textQuaternary)" : "var(--error)";
-  const outputBody = (
+  const hideTreeOutput = isTreeListingCommand(command) && !showShellTreeOutput;
+  const outputBody = hideTreeOutput ? (
+    <div {...withLiteralClass("u-dim u-text-xs", contentStyles.dimText)}>
+      {t("chat.toolCards.shellTreeHidden", "目录树输出已隐藏，可在对话设置中开启。")}
+    </div>
+  ) : (
     <>
       {stdout ? <CollapsibleToolText text={String(stdout)}  {...withLiteralClass("term-out", contentStyles.termOut)} /> : null}
       {stderr ? <CollapsibleToolText text={String(stderr)}  {...withLiteralClass("term-err", contentStyles.termErr)} /> : null}

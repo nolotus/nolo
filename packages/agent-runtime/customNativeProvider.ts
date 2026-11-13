@@ -1,3 +1,4 @@
+import { estimateTokenCount } from "../ai/context/tokenUtils";
 /**
  * packages/agent-runtime/customNativeProvider.ts
  *
@@ -232,7 +233,14 @@ export function createCustomNativeProvider(
 
 function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeProvider {
   const { model, endpoint, nativeEndpoint, apiKey, apiKeyHeader, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, serverUrl, authToken, transport, log, recordAvailability } = p;
+  const budgetBody = buildGeminiGenerateContentRequest({ messages: [], tools: tools as unknown[],
+    attachSkipThoughtSignature: resolveGeminiModelQuirks(model).allowsThoughtSignatureSentinel,
+    maxTokens: typeof agentConfig.max_tokens === "number" ? agentConfig.max_tokens : undefined });
   return {
+    requestBudget: { toolSchemaTokens: estimateTokenCount(JSON.stringify(budgetBody.tools ?? [])),
+      output: typeof agentConfig.max_tokens === "number" && agentConfig.max_tokens > 0
+        ? { semantics: "shared-window", finalWireCapTokens: agentConfig.max_tokens }
+        : { semantics: "unknown", fallbackReserveTokens: 8192 } },
     model,
     complete: async (messages, options) => {
       const inlineResult = await inlineImageUrlsForCustomProvider({ messages }, {
@@ -287,6 +295,10 @@ function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeP
 function buildOpenAiResponsesCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeProvider {
   const { model, endpoint, nativeEndpoint, apiKey, apiKeyHeader, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, transport, log, recordAvailability } = p;
   return {
+    requestBudget: { toolSchemaTokens: estimateTokenCount(JSON.stringify(toResponsesTools(tools as any[]) ?? [])),
+      output: typeof agentConfig.max_tokens === "number" && agentConfig.max_tokens > 0
+        ? { semantics: "shared-window", finalWireCapTokens: agentConfig.max_tokens }
+        : { semantics: "unknown", fallbackReserveTokens: 8192 } },
     model,
     complete: async (messages, options) => {
       const responsesTools = toResponsesTools(tools as any[]);
@@ -427,7 +439,11 @@ function buildOpenAiResponsesCustomNativeProvider(p: ResolvedCustomNative): Agen
 
 function buildAnthropicMessagesCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeProvider {
   const { model, endpoint, nativeEndpoint, apiKey, apiKeyHeader, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, transport, log, recordAvailability } = p;
+  const budgetBody = buildAnthropicMessagesBody({ agentConfig, openAiBody: { model, messages: [], tools, max_tokens: agentConfig.max_tokens } });
   return {
+    requestBudget: { toolSchemaTokens: estimateTokenCount(JSON.stringify(budgetBody.tools ?? [])),
+      // Anthropic overflow acceptance differs by model/beta. Do not claim universal joint admission.
+      output: { semantics: "unknown", fallbackReserveTokens: 8192 } },
     model,
     complete: async (messages, options) => {
       const body = buildAnthropicMessagesBody({ agentConfig, openAiBody: { model, messages, tools, max_tokens: agentConfig.max_tokens } });

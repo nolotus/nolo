@@ -35,6 +35,18 @@ const readFiniteNumberField = (
   return asOptionalFiniteNumber(candidate);
 };
 
+/** Observed output evidence without normalizeUsage's billing default of zero.
+ * Nullish primary fields allow the completion alias; invalid non-nullish
+ * primary fields remain unknown rather than trusting a conflicting alias.
+ */
+export const readOptionalOutputTokens = (usage: unknown): number | undefined => {
+  if (!usage || typeof usage !== "object") return undefined;
+  const field = "output_tokens" in usage && usage.output_tokens != null
+    ? "output_tokens"
+    : "completion_tokens";
+  return readFiniteNumberField(usage, field);
+};
+
 const readCostInUsdTicks = (usage: unknown): number | undefined =>
   readFiniteNumberField(usage, "cost_in_usd_ticks");
 

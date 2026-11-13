@@ -23,31 +23,25 @@ import {
   useFloating,
   useInteractions,
 } from "@floating-ui/react";
-import {
-  LuMessageSquare,
-  LuFileText,
-  LuImage,
-  LuBook,
-  LuFileCode,
-  LuFile,
-  LuBot,
-  LuLayoutGrid,
-  LuCalendarClock,
-  LuGrid2X2,
-} from "react-icons/lu";
+import { LuFileCode, LuCalendarClock } from "react-icons/lu";
+import { SIDEBAR_TYPE_OUTLINE_ICONS } from "render/web/ui/sidebarTypeIcons";
 
 export const ICON_SIZE = 16 as const;
 
+// Content-type icons. A row's type identity must match the type switch
+// (packages/chat/web/sidebar/SidebarTypeFilter.tsx), so the icons come from the
+// shared source in `render/web/ui/sidebarTypeIcons` instead of a local icon
+// set. `code` / `task` have no type-switch entry and keep their own meaning.
 export const ITEM_ICONS = {
-  dialog: LuMessageSquare,
-  page: LuFileText,
-  image: LuImage,
-  doc: LuBook,
+  dialog: SIDEBAR_TYPE_OUTLINE_ICONS.dialog,
+  page: SIDEBAR_TYPE_OUTLINE_ICONS.page,
+  image: SIDEBAR_TYPE_OUTLINE_ICONS.attachment,
+  doc: SIDEBAR_TYPE_OUTLINE_ICONS.attachment,
   code: LuFileCode,
-  file: LuFile,
-  table: LuGrid2X2,
-  agent: LuBot,
-  app: LuLayoutGrid,
+  file: SIDEBAR_TYPE_OUTLINE_ICONS.attachment,
+  table: SIDEBAR_TYPE_OUTLINE_ICONS.table,
+  agent: SIDEBAR_TYPE_OUTLINE_ICONS.agent,
+  app: SIDEBAR_TYPE_OUTLINE_ICONS.app,
   task: LuCalendarClock,
 } as const;
 

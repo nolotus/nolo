@@ -54,6 +54,13 @@ import { AppRoutePaths } from "app/constants/routePaths";
 import { useLoopStopReason } from "./useLoopStopReason";
 import { LoopStopBadge } from "./LoopStopBadge";
 import { isHiddenOrchestratorToolMessage } from "../toolPresentation";
+import { isDuplicatedAgentRunStartReceipt } from "./agentRunStartReceipt";
+import { useAgentRunFixedAreaCoveredIds } from "chat/web/useAgentRunFixedAreaCoverage";
+import {
+  groupContextualNotices,
+  type ContextualNoticeGroup,
+} from "../contextualFragment";
+import { extractTextFromContent } from "../extractTextFromContent";
 import { toolMessageNeedsDefaultExpansion } from "../toolPresentation";
 import {
   hasVisibleAssistantContent,
@@ -126,7 +133,8 @@ class MessageRowErrorBoundary extends Component<
 type RenderableMessage = any;
 
 const buildMessageRenderEntries = (
-  messages: RenderableMessage[]
+  messages: RenderableMessage[],
+  coveredAgentRunIds?: ReadonlySet<string>
 ): GroupedRenderEntry[] => {
   const entries: GroupedRenderEntry[] = [];
 
@@ -134,6 +142,10 @@ const buildMessageRenderEntries = (
     const msg = messages[i];
     if (!msg || typeof msg.id !== "string") continue;
     if (isHiddenOrchestratorToolMessage(msg)) continue;
+    // Web 端去重：同一 run 已被 composer 上方固定运行区逐行展示时，成功的
+    // startAgentRun 回执不再重复占一行（失败/pending/未覆盖一律保留）。
+    // 过滤发生在分组之前，组内条数（`N tools`）与相邻分组一并收敛，不留空壳。
+    if (isDuplicatedAgentRunStartReceipt(msg, coveredAgentRunIds)) continue;
     if (isAssistantToolStub(msg)) continue;
 
     // An empty assistant row at the start of a tool loop is only a transport
@@ -178,6 +190,14 @@ const MessagesList: React.FC<MessagesListProps> = ({
   const messages = useAppSelector((state) => selectAllMsgs(state, dialogId));
   const location = useLocation();
   const currentUserId = useUserId();
+  // 固定运行区（composer 上方 AgentRunsPanel）的覆盖范围：与 MessageInputCore
+  // 传 `agentRunScope` 的条件一致（有登录用户 + 当前对话）。固定区未挂载时
+  // 集合为空 → 回执全部保留。
+  const agentRunScope =
+    currentUserId && dialogId
+      ? { userId: currentUserId, dialogId }
+      : undefined;
+  const coveredAgentRunIds = useAgentRunFixedAreaCoveredIds(agentRunScope);
   // 快速对话跳转过来时，首条用户消息是异步落库的，会晚于 AI 流出现。
   // 用路由携带的文本先渲染一条乐观 user 气泡，真实消息落库后（store 里出现
   // 任一 user 消息）自动撤下，避免"先看到 AI，我的消息才补上"的错序闪烁。
@@ -572,11 +592,22 @@ const MessagesList: React.FC<MessagesListProps> = ({
   const renderEntries = useMemo(
     () =>
       mergeWakeEventsIntoEntries(
-        groupConsecutiveToolEntries(buildMessageRenderEntries(renderMessages)),
+        groupConsecutiveToolEntries(buildMessageRenderEntries(renderMessages, coveredAgentRunIds)),
         (currentDialogConfig as any)?.wakeEvents
       ),
-    [renderMessages, currentDialogConfig]
+    [renderMessages, coveredAgentRunIds, currentDialogConfig]
   );
+
+  // 相邻后台完成消息在展示层合组（普通消息准确打断）：只算分组，
+  // 不合并持久消息、不改模型输入；组内每条仍是一条消息、各自保留详情。
+  const contextualGroups = useMemo(() => {
+    const texts = renderEntries.map((entry) =>
+      entry.type === "single"
+        ? extractTextFromContent(entry.message?.content)
+        : null
+    );
+    return groupContextualNotices(texts);
+  }, [renderEntries]);
 
   // 单一主 working signal：activity 是既有 runtime facts 的纯 projection。
   // 本组件已持有全部订阅（activeControllers / streamingMessageId / 消息尾部
@@ -619,7 +650,9 @@ const MessagesList: React.FC<MessagesListProps> = ({
             return (
               <React.Fragment key={entry.key}>
                 <div
-                  className="chat-messages__item-wrapper"
+                  /* 与 assistant 内容同一左偏移：否则系统行会贴到内容区最左边，
+                     和「N 个调用」等工具行差两档缩进（2026-11-04 对齐修复）。 */
+                  className="chat-messages__item-wrapper chat-messages__item-wrapper--narration"
                   data-spacing={messageRowSpacing(renderEntries, entryIndex) ?? undefined}
                 >
                   <MessageRowErrorBoundary>
@@ -720,6 +753,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
                       canBranch={canBranch}
                       enableActions={enableActions}
                       isStreaming={hasStreamingMessage && msg.id === lastAssistantMessageId}
+                      contextualGroup={contextualGroups[entryIndex] ?? undefined}
                     />
                   )}
                 </MessageRowErrorBoundary>

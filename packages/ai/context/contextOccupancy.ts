@@ -1,4 +1,6 @@
 import { devinChannelContextWindow } from "../../agent-runtime/devin/devinChannelWindows";
+import { isCodexOAuthAgent } from "../../agent-runtime/codexOAuthPure";
+import { codexOAuthCatalogWindow } from "../../agent-runtime/codexOAuthModelCatalogWindow";
 import { isDevinOAuthAgent } from "../../agent-runtime/devinOAuthPure";
 import { findModelContextWindow } from "../llm/getModelContextWindow";
 import { estimateTokenCount } from "./tokenUtils";
@@ -55,11 +57,22 @@ export function resolveOccupancy(input: {
   };
 }
 
-/** 未知窗口保持未知，避免默认值被误认为模型的真实能力。 */
+/**
+ * 未知窗口保持未知，避免默认值被误认为模型的真实能力。
+ *
+ * 通道优先级与 agent-runtime/devin/devinChannelWindows.ts:resolveAgentContextWindow
+ * 逐字一致（devin 通道表 → Codex OAuth 目录 → 全局表/pin）——这个值同时是循环里的
+ * 压缩预算与 UI/状态栏的占用分母，两处解析顺序一旦分叉，分母与预算就会互相打架。
+ */
 export function resolveOccupancyWindow(ref: OccupancyModelRef): number | undefined {
   if (!ref.model) return undefined;
   if (isDevinOAuthAgent(ref)) {
     return devinChannelContextWindow(ref.model) ?? findModelContextWindow(ref.model, ref.provider);
+  }
+  if (isCodexOAuthAgent(ref)) {
+    // Codex OAuth：上游目录是账号维度真值（plan 档位不同窗口不同），pin 只兜
+    // 「目录不可用 / 进程启动后尚未播种」。未命中时回落全局表即回落 pin。
+    return codexOAuthCatalogWindow(ref.model) ?? findModelContextWindow(ref.model, ref.provider);
   }
   return findModelContextWindow(ref.model, ref.provider);
 }

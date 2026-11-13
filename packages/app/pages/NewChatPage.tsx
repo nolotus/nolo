@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "app/routing";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import QuickChat from "./QuickChat";
+import SpaceContextBadge from "chat/dialog/SpaceContextBadge";
 import "./NewChatPage.css";
 
 const NewChatPage: React.FC = () => {
@@ -22,6 +23,7 @@ const NewChatPage: React.FC = () => {
         className="new-chat-page__content"
         aria-label={t("chat:newchat", "新对话")}
       >
+        <SpaceContextBadge spaceId={spaceId} />
         <QuickChat
           surface="home-primary"
           spaceId={spaceId}

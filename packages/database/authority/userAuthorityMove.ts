@@ -1,3 +1,4 @@
+import { withProtectedRecordLock } from "../server/protectedRecordCoordinator";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { createUserKey, createUserPreferenceKey } from "../keys";
@@ -264,32 +265,55 @@ export const importUserAuthorityMoveRecords = async ({
   }
   assertUserAuthorityMoveRecordsAreMoveable({ userId, records });
 
-  for (const { dbKey, record } of records) {
-    await targetStore.put(
-      dbKey,
-      stampMovedAuthorityRecord({
-        dbKey,
-        record,
-        moveId,
-        sourceServer,
-        targetServer: normalizedTarget,
-        movedAt,
-      })
-    );
-  }
-
   const authorityHomeKey = createUserPreferenceKey.authorityHome(userId);
-  await targetStore.put(
-    authorityHomeKey,
-    buildAuthorityHomePreferenceRegisterRecord({
-      userId,
-      authorityServer: normalizedTarget,
-    })
-  );
+  return withProtectedRecordLock(targetStore, authorityHomeKey, async () => {
+    const home = await prepareAuthorityHome(targetStore, userId, normalizedTarget, moveId);
+    for (const { dbKey, record } of records) {
+      await targetStore.put(
+        dbKey,
+        stampMovedAuthorityRecord({
+          dbKey,
+          record,
+          moveId,
+          sourceServer,
+          targetServer: normalizedTarget,
+          movedAt,
+        })
+      );
+    }
 
+    await targetStore.put(authorityHomeKey, home);
+    return { importedCount: records.length, authorityHomeKey };
+  });
+};
+
+// Only controlled writes create epochs. Reads never upgrade legacy records.
+const prepareAuthorityHome = async (
+  store: AuthorityStore, userId: string, authorityServer: string, moveId?: string
+) => {
+  const key = createUserPreferenceKey.authorityHome(userId);
+  let previous: any;
+  try { previous = await store.get(key); }
+  catch (error) {
+    if (!(error && typeof error === "object" &&
+      ((error as any).notFound === true || (error as any).code === "LEVEL_NOT_FOUND"))) throw error;
+  }
+  if (moveId !== undefined && (!moveId.trim() || moveId !== moveId.trim())) {
+    throw new Error("moveId must be a non-empty trimmed string");
+  }
+  const targets: Record<string, string> = { ...previous?.authorityMoveTargets };
+  if (moveId && Object.hasOwn(targets, moveId) && targets[moveId] !== authorityServer) {
+    throw new Error("moveId already used with a different target");
+  }
+  const authorityEpoch = moveId ? `authority-move-v1:${JSON.stringify([userId, moveId])}` : undefined;
+  if (authorityEpoch && previous?.authorityEpoch === authorityEpoch && previous?.value === authorityServer) {
+    return previous;
+  }
   return {
-    importedCount: records.length,
-    authorityHomeKey,
+    ...buildAuthorityHomePreferenceRegisterRecord({ userId, authorityServer, previousRecord: previous, authorityEpoch }),
+    ...(moveId || previous?.authorityMoveTargets ? {
+      authorityMoveTargets: { ...targets, ...(moveId ? { [moveId]: authorityServer } : {}) },
+    } : {}),
   };
 };
 
@@ -297,10 +321,12 @@ export const writeUserAuthorityHomeCutover = async ({
   store,
   userId,
   authorityServer,
+  moveId,
 }: {
   store: AuthorityStore;
   userId: string;
   authorityServer: string;
+  moveId?: string;
 }): Promise<{ authorityHomeKey: string }> => {
   const normalizedAuthority = normalizeAuthorityServerOrigin(authorityServer);
   if (!normalizedAuthority) {
@@ -308,15 +334,11 @@ export const writeUserAuthorityHomeCutover = async ({
   }
 
   const authorityHomeKey = createUserPreferenceKey.authorityHome(userId);
-  await store.put(
-    authorityHomeKey,
-    buildAuthorityHomePreferenceRegisterRecord({
-      userId,
-      authorityServer: normalizedAuthority,
-    })
-  );
-
-  return { authorityHomeKey };
+  return withProtectedRecordLock(store, authorityHomeKey, async () => {
+    const home = await prepareAuthorityHome(store, userId, normalizedAuthority, moveId);
+    await store.put(authorityHomeKey, home);
+    return { authorityHomeKey };
+  });
 };
 
 export const runUserAuthorityMovePipeline = async ({
@@ -389,6 +411,7 @@ export const runUserAuthorityMovePipeline = async ({
         store: sourceStore,
         userId: plan.userId,
         authorityServer: normalizedTarget,
+        moveId,
       });
       sourceAuthorityHomeKey = cutoverResult.authorityHomeKey;
     }

@@ -61,7 +61,7 @@ export function formatCompactionSummaryLine(
   if (!event) return "";
   if (event.failed) {
     const reason = event.detail ? `：${event.detail}` : "";
-    return `${STYLE.dim}自动上下文压缩失败${reason}，本轮以未压缩上下文继续。若反复出现可手动 /compact。${STYLE.reset}\n`;
+    return `${STYLE.dim}自动上下文压缩失败${reason}，保留已有历史；超出请求预算时将停止发送。可手动 /compact 重试。${STYLE.reset}\n`;
   }
   if (event.skipped) {
     if (
@@ -156,6 +156,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
 
   const formatToolEvent = createToolEventFormatter(undefined, {
     tuiTrees: options.output.tuiTrees === true,
+    visibleRunIds: options.output.visibleRunIds,
   });
   const eventMode = resolveAgentEventMode(options);
   const assistantLabelManaged = options.output.assistantLabelManaged === true;
@@ -440,8 +441,20 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
           : phase === "compacting"
             ? t("contextCompacting")
             : t("waitingForModel");
-      spinner.show(label);
-      options.activityReporter?.(label);
+      this.showWorking(label);
+    },
+    handleCompactionActivity(event: AgentExecutionObservationEvent) {
+      if (event.kind === "compaction-retry") {
+        this.showWorking(t("contextCompactingRetry", String(event.attempt), String(event.maxAttempts)));
+      } else if (event.kind === "compaction-start") {
+        this.showPhase("compacting");
+      } else if (
+        event.kind === "compaction-end" ||
+        // Failed compaction continues with trimmed history; abort owns its terminal cleanup.
+        (event.kind === "compaction-failed" && event.reason !== "aborted")
+      ) {
+        this.showPhase("waiting-provider");
+      }
     },
     finish(fallbackContent?: string) {
       const flushedThink = flushThinkParser(thinkState);

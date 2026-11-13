@@ -35,6 +35,9 @@ export const TOOL_PACKS = {
     "updateSelf",
     "ask_user",
     "show_interaction",
+    // 凭据请求：web 服务端经 secret gate 面板闭环（Block 2a）；subtask 由
+    // INTERACTION_REQUIRED_TOOL_NAMES 剥离，desktop 无通道宿主同样剥离。
+    "secret-request",
     "createAgentAutomation",
     "updateAgentAutomation",
     "deleteAgentAutomation",

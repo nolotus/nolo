@@ -22,12 +22,16 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  /* 窄屏：标题与工具条换行，避免固定宽度搜索框把内容挤出视口。 */
+  flex-wrap: wrap;
 }
 
-.MyContentPage__header-row > div {
+/* 只作用于标题块：工具条 div 有自己的行布局，不能被这条列布局规则盖掉。 */
+.MyContentPage__header-row > div:not(.MyContentPage__tools) {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .MyContentPage__header-row > button {
@@ -45,4 +49,55 @@
   margin: 0;
   color: var(--textSecondary);
   line-height: var(--leading-relaxed);
+}
+
+/* ── /apps 作品库：更宽的画布 + 紧凑工具条 ─────────────── */
+
+.MyContentPage--apps {
+  max-width: 1440px;
+}
+
+.MyContentPage--apps .MyContentPage__header h1 {
+  font-size: 1.35rem;
+}
+
+.MyContentPage--apps .MyContentPage__header p {
+  font-size: 0.875rem;
+}
+
+.MyContentPage__tools {
+  display: flex;
+  /* 明确行布局：搜索与「创建应用」同一行，不被标题块的列布局规则覆盖。 */
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  margin-top: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.MyContentPage__search {
+  /* 可收缩：窄屏时先让搜索框变窄，再让整条工具条换行。 */
+  flex: 0 1 200px;
+  width: 200px;
+  max-width: 100%;
+  min-width: 140px;
+}
+
+.MyContentPage__search > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 极窄屏：工具条独占一行，搜索框吃掉剩余宽度。 */
+@media (max-width: 560px) {
+  .MyContentPage--apps .MyContentPage__header-row > .MyContentPage__tools {
+    width: 100%;
+  }
+  .MyContentPage__search {
+    flex: 1 1 140px;
+    width: auto;
+  }
 }

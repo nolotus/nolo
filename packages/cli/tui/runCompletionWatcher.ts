@@ -1,3 +1,4 @@
+import { traceRunWake } from "./runWakeDiagnostics";
 /**
  * run 终态唤醒观察器——「run 干完后对话自动继续」的检测半边。
  *
@@ -16,7 +17,7 @@
  * - 已经被 wait:true 消费或 marked ack 的 runId 绝不重复唤醒。
  * - 首次见到即终态的 run，只有 startedAt >= watcher 创建时刻才唤醒。
  * - dialog 切换时跳过并不污染状态，恢复当前 dialog 后可正确 drain 唤醒。
- * - ephemeral 或结果缺失的 run 提供 fallback 说明，防止 readDialog 坍塌。
+ * - ephemeral 或结果缺失的 run 明确标为无结果，不回读日志。
  */
 
 import {
@@ -39,6 +40,12 @@ import {
   type ChildRunCompletedTurnEvent,
   type InternalTurnEvent,
 } from "core/chat/internalTurnEvent";
+export type { AgentRunCompletionShape };
+import {
+  buildCliNoticeText,
+  resolveNoticeTitle,
+  type CliNoticeTask,
+} from "./completionNoticeDisplay";
 
 /** 每条 run 的 note 摘要在唤醒消息里的截断长度。 */
 const WAKE_NOTE_MAX_CHARS = 300;
@@ -77,12 +84,15 @@ export function describeRun(
     })}`,
     `status: ${record.status}`,
   ];
-  // 正常完成的 run 不报 exitCode / 活动计数：那是诊断信息，成功时模型要
-  // 的只是「谁干完了、结果去哪取」。「结果去哪取」（childDialogId /
-  // ephemeral）任何状态都要给，否则模型会去 readDialog 一个不存在的对话。
+  // 正常完成的 run 不报 exitCode / 活动计数；只给完整结果的唯一读取入口。
   const verbose = isFailureStatus(record.status);
   if (verbose && typeof record.exitCode === "number") {
     lines.push(`exitCode: ${record.exitCode}`);
+  }
+  if (record.resultFile) {
+    lines.push(`resultFile: ${record.resultFile} (用 readFile 读取)`);
+  } else {
+    lines.push(`result: unavailable (no resultFile; do not read logs)`);
   }
   if (record.ephemeral) {
     lines.push(`ephemeral: true (no persisted child dialog)`);
@@ -188,12 +198,23 @@ function buildRunElement(
     )}"`,
     `status="${escapeXmlAttribute(String(record.status))}"`,
   ];
+  // 完整任务标题（展示用）：通知模型文本新增字段——解析端按 title 优先取
+  // 真实任务标题，agent 属性仍保留 agentKey 关联，两者不互相替代。
+  // 旧数据没有该属性时按缺省处理（legacy 兼容）。
+  const rawTitle = (record as { title?: unknown }).title;
+  if (typeof rawTitle === "string" && rawTitle.trim()) {
+    attrs.push(`title="${escapeXmlAttribute(rawTitle.trim())}"`);
+  }
   const verbose = isFailureStatus(record.status);
   if (verbose && typeof record.exitCode === "number") {
     attrs.push(`exitCode="${record.exitCode}"`);
   }
-  // 「结果去哪取」（ephemeral / childDialogId）任何状态都要给，否则模型会
-  // 去 readDialog 一个不存在的对话（同 describeRun 的取舍）。
+  // 本地缺失 resultFile 表示无结论；childDialogId 仅作为实际存在的远端证据入口。
+  if (record.resultFile) {
+    attrs.push(`resultFile="${escapeXmlAttribute(record.resultFile)}"`);
+  } else {
+    attrs.push(`result="unavailable"`);
+  }
   if (record.ephemeral) {
     attrs.push(`ephemeral="true"`);
   } else if (record.dialogId) {
@@ -234,7 +255,7 @@ function renderWakeMessage(elements: string[], count: number): string {
   return [
     `<background_run_completion count="${count}">`,
     ...elements,
-    `需要完整输出/失败详情时: controlAgentRun(action: "status", runId, tailLines: 30)`,
+    `有 resultFile 时用 readFile；本地缺失即无结论，不读日志。终态只表示 run 结束；摘要不是完整 review，验收与版本信息以完整结果中的 runtime acceptance 为准。`,
     `</background_run_completion>`,
   ].join("\n");
 }
@@ -278,26 +299,39 @@ export function buildWakeMessage(
 }
 
 /**
- * 屏幕上那一行。
+ * 屏幕上那段通知（不再是原始字段）。
  *
- * 终态唤醒不是用户说的话，却一直被当成 user message 整段印进 transcript
- * （runId/exitCode/childDialogId/activity 全文），还得在文案里自辩「这是系
- * 统内部事件」——那句自辩本身就是渲染漏了一层的证据。这里给 UI 一行紧凑
- * 摘要，详情留在 dock 面板和子 dialog。
+ * 完整摘要只进模型上下文，屏幕上给的是这一段：多任务时一行组标题 +
+ * 每个任务一行，标题取完整 title，耗时与退出码是次要信息。文案与图标
+ * 由 completionNoticeDisplay（共享展示模型）给出。
+ *
+ * 纯展示 helper 的实现在 completionNoticeDisplay.ts：那里不 import 控制 /
+ * 存储链，client 侧也能用同一份措辞。
  */
 export function buildWakeDisplayText(
   finished: (RunRecord | AgentRunCompletionShape)[],
   nowMs: number = Date.now()
 ): string {
-  const parts = finished.map((record) => {
-    const mark = isFailureStatus(record.status) ? "✗" : "✓";
-    const duration = runDuration(record, nowMs);
-    const label = resolveRunLabel(record as any);
-    const status = isFailureStatus(record.status) ? ` ${record.status}` : "";
-    return `${mark} ${label}${status}${duration ? ` · ${duration}` : ""}`;
-  });
-  return `${finished.length} 条后台 run 已完成 · ${parts.join(" · ")}`;
+  const tasks: CliNoticeTask[] = finished.map((record) => ({
+    title: resolveNoticeTitle({
+      runId: record.runId,
+      agentKey: (record as any).agentKey,
+      agentName: (record as any).agentName,
+      title: (record as any).title,
+    }),
+    status: String(record.status),
+    duration: runDuration(record, nowMs),
+  }));
+  return buildCliNoticeText(tasks);
 }
+
+// 兼容再导出：这些 helper 上一轮在 watcher 上，调用方保持不变。
+export {
+  buildCliNoticeText,
+  buildWakeNoticeFragment,
+  resolveNoticeTitle,
+  type CliNoticeTask,
+} from "./completionNoticeDisplay";
 
 /**
  * 投递时刻唤醒事件 ack 复核。
@@ -335,13 +369,18 @@ export type RunCompletionWatcherDeps = {
   /** 当前打开的 dialogId；只有属于当前对话的 run 才唤醒（用户切走了就跳过）。 */
   getCurrentDialogId: () => string | null;
   /** 投递唤醒事件。支持结构化 InternalTurnEvent 或文本 fallback。 */
-  onWake: (event: InternalTurnEvent | string) => void;
+  onWake: (event: InternalTurnEvent | string) => boolean;
   now?: () => number;
+  env?: Record<string, string | undefined>;
 };
 
 export type RunCompletionWatcher = {
   /** 喂入本 tick 读到的全部记录；对任何单条坏记录免疫。 */
   observe(records: (RunRecord | AgentRunCompletionShape | Record<string, any>)[]): void;
+  /** Explicit user/authority recovery reactivates retained, unacknowledged delivery. */
+  resumePendingDelivery(): void;
+  /** Return accepted but undelivered runs to the dialog-scoped delivery queue. */
+  deferRuns(runs: AgentRunCompletionShape[]): void;
   /** 标记 runId 已被消费（如 wait:true），防重复唤醒。 */
   markAcknowledged(runId: string): void;
   /** 查询 runId 是否已 ack。 */
@@ -357,56 +396,88 @@ export function createRunCompletionWatcher(
   const createdAt = now();
   const lastStatusByRunId = new Map<string, string>();
   const notifiedRunIds = new Set<string>();
+  const acknowledgedRunIds = new Set<string>();
+  const pendingDelivery = new Map<string, RunRecord | AgentRunCompletionShape>();
+  let retryAt = 0;
+  let retryDelay = 1000;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
+  let retryAttempts = 0;
+  let retryParked = false;
+  let idleRetryTicks = 0;
+  // One entry per run, log only decision transitions, never each poll tick.
+  const diagnosticDecisions = new Map<string, string>();
+  const traceDecision = (record: RunRecord, currentDialogId: string | null, reason: string) => {
+    const key = JSON.stringify([record.status, record.parentDialogId ?? null, currentDialogId, reason]);
+    if (diagnosticDecisions.get(record.runId) === key) return;
+    diagnosticDecisions.set(record.runId, key);
+    traceRunWake("watcher-decision", { runId: record.runId, status: record.status,
+      parentDialogId: record.parentDialogId ?? null, currentDialogId, reason });
+  };
 
-  return {
+  const scheduleRetry = () => {
+    if (disposed || retryParked || retryTimer || !pendingDelivery.size) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      const records = [...pendingDelivery.values()].map(run => {
+        try { return readRunRecord(run.runId, { env: deps.env }) ?? run; } catch { return run; }
+      });
+      watcher.observe(records);
+      if (!retryParked && ++idleRetryTicks >= 6) {
+        retryParked = true;
+        traceRunWake("delivery-parked", { count: pendingDelivery.size });
+      }
+      scheduleRetry();
+    }, Math.max(1, retryAt - now(), retryDelay));
+    retryTimer.unref?.();
+  };
+  const watcher: RunCompletionWatcher = {
     observe(records: (RunRecord | AgentRunCompletionShape | Record<string, any>)[]): void {
+      if (disposed) return;
+      if (retryParked) {
+        // Retain new terminal facts without restarting IO/timers or acknowledging.
+        for (const run of records) {
+          if (run && typeof run.runId === "string" && isAgentRunTerminalStatus(run.status)
+              && !notifiedRunIds.has(run.runId)) pendingDelivery.set(run.runId, run as RunRecord);
+        }
+        return;
+      }
       const finished: (RunRecord | AgentRunCompletionShape)[] = [];
       const currentDialogId = deps.getCurrentDialogId();
-      for (const rawRecord of records) {
+      const candidates = new Map([...pendingDelivery.values(), ...records].filter(run => run && typeof run.runId === "string").map(run => [run.runId, run]));
+      for (const rawRecord of candidates.values()) {
         try {
           if (!rawRecord || typeof rawRecord.runId !== "string" || !rawRecord.runId) continue;
           const record = rawRecord as RunRecord;
-          if (notifiedRunIds.has(record.runId)) continue;
+          if (notifiedRunIds.has(record.runId)) { traceDecision(record, currentDialogId, "already-notified"); continue; }
           const status = record.status;
           if (typeof status !== "string") continue;
-          if (!(record.parentDialogId === currentDialogId || !record.parentDialogId)) continue;
+          // Unowned runs remain discoverable in the persisted registry via `nolo agent ps`;
+          // never infer ownership from whichever dialog is currently open.
+          if (!record.parentDialogId || record.parentDialogId !== currentDialogId) { traceDecision(record, currentDialogId, "other-dialog"); continue; }
           if (isRunRecordClaimed(record, now())) {
-            // claim 生效中：有同步消费者（wait）盯着这条 run，唤醒通道让路。
-            // 「有效」很关键——过期的租约（持有者进程已被杀）不算数，否则这
-            // 条 run 的完成永远没人来收。
-            //
-            // 关键：已终态 + 仍在租约期内【不得】提前写入 notifiedRunIds，
-            // 且【不得】把 status 记录为终态。
-            //
-            // 为什么不能记录为终态：若在此处把 lastStatus 记为 "done"，租约
-            // 释放后的下一次 tick 读到的 previous 也是 "done"（即终态→终态），
-            // 下方 `isAgentRunTerminalStatus(previous)` 会判定「已处理过」并
-            // 直接 continue 跳过——结果仍然是永久静默！
-            //
-            // 只有当这次观察真正进入下方消费流程时，lastStatus 才能被推进到
-            // 终态。在租约生效期间，lastStatus 最多停留在它进入租约之前的状
-            // 态（或未定义）。
+            traceDecision(record, currentDialogId, "claimed");
+            // A claimed terminal remains eligible when its lease expires.
             if (!isAgentRunTerminalStatus(status)) {
               lastStatusByRunId.set(record.runId, status);
             }
             continue;
           }
           const previous = lastStatusByRunId.get(record.runId);
-          lastStatusByRunId.set(record.runId, status);
-          if (!isAgentRunTerminalStatus(status)) continue;
+          if (!isAgentRunTerminalStatus(status)) lastStatusByRunId.set(record.runId, status);
+          if (!isAgentRunTerminalStatus(status)) { traceDecision(record, currentDialogId, "nonterminal"); continue; }
           if (previous === undefined) {
             const startedMs = readTimestamp(record.startedAt as any);
-            if (startedMs === undefined || startedMs < createdAt) continue;
-          } else if (isAgentRunTerminalStatus(previous)) {
-            continue;
+            if (startedMs === undefined || startedMs < createdAt) { traceDecision(record, currentDialogId, "predates-watcher"); continue; }
           }
-          notifiedRunIds.add(record.runId);
-          finished.push(record);
+          traceDecision(record, currentDialogId, "wake");
+          pendingDelivery.set(record.runId, record);
+          if (!finished.some(run => run.runId === record.runId)) finished.push(record);
         } catch {
           continue;
         }
       }
-      if (finished.length === 0) return;
+      if (finished.length === 0 || now() < retryAt) return;
 
       const shapes = finished.map((r) => normalizeRunCompletionShape(r));
       const summaryText = buildWakeMessage(finished, now());
@@ -417,17 +488,61 @@ export function createRunCompletionWatcher(
         displayText: buildWakeDisplayText(finished, now()),
       };
 
-      deps.onWake(event);
+      if (++retryAttempts > 6) {
+        retryParked = true;
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = null;
+        traceRunWake("delivery-parked", { count: pendingDelivery.size, attempts: retryAttempts - 1 });
+        return;
+      }
+      let accepted = false;
+      try { accepted = deps.onWake(event) === true; } catch { /* Receiver unavailable: retain for retry. */ }
+      if (accepted) {
+        for (const run of finished) { notifiedRunIds.add(run.runId); pendingDelivery.delete(run.runId); }
+        retryAt = 0;
+        retryAttempts = 0;
+        idleRetryTicks = 0;
+        retryDelay = 1000;
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+        scheduleRetry();
+      } else {
+        retryAt = now() + retryDelay;
+        traceRunWake("delivery-rejected", { count: finished.length });
+        scheduleRetry();
+        retryDelay = Math.min(retryDelay * 2, 30000);
+      }
+    },
+    resumePendingDelivery(): void {
+      retryParked = false;
+      idleRetryTicks = 0;
+      retryAttempts = 0;
+      retryAt = 0;
+      retryDelay = 1000;
+      watcher.observe([]);
+    },
+    deferRuns(runs): void {
+      for (const run of runs) {
+        if (acknowledgedRunIds.has(run.runId)) continue;
+        notifiedRunIds.delete(run.runId);
+        pendingDelivery.set(run.runId, run);
+      }
     },
     markAcknowledged(runId: string): void {
-      if (runId) notifiedRunIds.add(runId);
+      if (runId) { acknowledgedRunIds.add(runId); notifiedRunIds.add(runId); pendingDelivery.delete(runId); }
     },
     isAcknowledged(runId: string): boolean {
-      return Boolean(runId && notifiedRunIds.has(runId));
+      return Boolean(runId && acknowledgedRunIds.has(runId));
     },
     dispose(): void {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
       lastStatusByRunId.clear();
       notifiedRunIds.clear();
+      acknowledgedRunIds.clear();
+      diagnosticDecisions.clear();
+      pendingDelivery.clear();
     },
   };
+  return watcher;
 }

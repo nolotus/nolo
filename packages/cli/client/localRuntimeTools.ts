@@ -42,6 +42,10 @@ import {
   buildControlAgentRunFunctionSchema,
 } from "../../ai/tools/agent/controlAgentRunTool";
 import { buildStartAgentRunFunctionSchema } from "../../ai/tools/agent/startAgentRunTool";
+import {
+  requestTaskReviewFunctionSchema,
+  recordTaskReviewDecisionFunctionSchema,
+} from "../../ai/tools/agent/taskReviewTools";
 import { canonicalizeToolNames } from "../../ai/tools/toolNameAliases";
 import {
   buildNoloWorkspaceOpenAiTools,
@@ -195,13 +199,24 @@ function buildOrchestrationOpenAiTools(args: {
   const names = ["startAgentRun", "controlAgentRun"].filter((name) =>
     args.toolNameSet.has(name),
   );
-  if (names.length === 0) return [];
+  // typed review 工具已从默认注册/能力包撤下；旧 host 显式执行器路径仍要求
+  // 「显式声明即可用」。schema 直接从 taskReviewTools 取，不经过 toolRegistry，
+  // 因此不会因未注册而丢 schema，也不会回到默认面。
+  const reviewTools = [
+    ...(args.toolNameSet.has("requestTaskReview")
+      ? [{ type: "function" as const, function: requestTaskReviewFunctionSchema }]
+      : []),
+    ...(args.toolNameSet.has("recordTaskReviewDecision")
+      ? [{ type: "function" as const, function: recordTaskReviewDecisionFunctionSchema }]
+      : []),
+  ];
+  if (names.length === 0) return reviewTools;
   const waitCapableActions = CONTROL_AGENT_RUN_ACTIONS.filter(
     (action) => action !== "wait",
   );
   const wakeChannel = hasRunWakeChannel(args.env);
   const controlSchema = buildControlAgentRunFunctionSchema({
-    ...(wakeChannel ? { actions: waitCapableActions } : {}),
+    actions: [...(wakeChannel ? waitCapableActions : CONTROL_AGENT_RUN_ACTIONS), "recoverPreparedWriter"],
     wakeEnabled: wakeChannel,
   });
   const startSchema = buildStartAgentRunFunctionSchema({
@@ -209,21 +224,26 @@ function buildOrchestrationOpenAiTools(args: {
     wakeEnabled: wakeChannel,
   });
   // prepareTools 的返回值与其内部缓存共享对象，只能替换不能就地改写。
-  return prepareTools(names).map((tool: any) => {
-    if (tool?.function?.name === "controlAgentRun") {
-      return { ...tool, function: controlSchema };
-    }
-    if (tool?.function?.name === "startAgentRun") {
-      return { ...tool, function: startSchema };
-    }
-    return tool;
-  });
+  return [
+    ...reviewTools,
+    ...prepareTools(names).map((tool: any) => {
+      if (tool?.function?.name === "controlAgentRun") {
+        return { ...tool, function: controlSchema };
+      }
+      if (tool?.function?.name === "startAgentRun") {
+        return { ...tool, function: startSchema };
+      }
+      return tool;
+    }),
+  ];
 }
 
 const CLI_DEFAULT_TOOLS = [
   "exa_search",
   "fetchWebpage",
   "ask_user",
+  // 凭据请求面板（Block 1a）：抬 kind:"input" gate，宿主面板输入后在宿主进程内写 store。
+  "secret-request",
   // 非阻塞展示型交互（与 ask_user 的阻塞提问区分）
   "show_interaction",
 ] as const;

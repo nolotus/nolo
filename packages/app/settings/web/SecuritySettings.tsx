@@ -11,10 +11,7 @@ import Button from "render/web/ui/Button";
 import { Dialog } from "render/web/ui/modal/Dialog";
 import { parseToken } from "core/authToken";
 import { buildRecentAccessFlags } from "./userSecurityUtils";
-import { hashPasswordV1 } from "core/password";
-import { generateKeyPairFromSeedV1 } from "core/generateKeyPairFromSeedV1";
-import { asOptionalFiniteNumber } from "core/optionalNumber";
-import { buildPersistentAuthTokenPayload, signToken } from "core/authToken";
+import { executeRevokeSessionsFlow } from "identity/revokeSessionsClient";
 
 type RecentAccessEntry = {
   timestamp: number;
@@ -153,73 +150,15 @@ const SecuritySettings: React.FC = () => {
 
     setIsRevokingSessions(true);
     try {
-      const encryptionKey = await hashPasswordV1(revokePassword);
-      const { publicKey, secretKey } = generateKeyPairFromSeedV1(
-        user.username + encryptionKey + locale
-      );
-      const currentTokenPayload = parseToken(currentToken);
-
-      if (securityInfo.publicKey && securityInfo.publicKey !== publicKey) {
-        throw new Error("wrong_password");
-      }
-
-      const verificationToken = signToken(
-        buildPersistentAuthTokenPayload(
-          {
-            userId,
-            username: user.username,
-            publicKey,
-            tokenVersion:
-              typeof currentTokenPayload?.tokenVersion === "number"
-                ? Math.max(0, Math.floor(currentTokenPayload.tokenVersion))
-                : 0,
-          },
-          Math.floor(Date.now() / 1000)
-        ),
-        secretKey
-      );
-
-      const response = await fetch(
-        `${currentServer}${authRoutes.users.sessionRevoke.createPath()}`,
-        {
-          method: authRoutes.users.sessionRevoke.method,
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${currentToken}`,
-          },
-          body: JSON.stringify({ verificationToken }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(response.status === 403 ? "wrong_password" : "revoke_failed");
-      }
-
-      const data = await response.json();
-      const nextToken = signToken(
-        buildPersistentAuthTokenPayload(
-          {
-            userId,
-            username: user.username,
-            publicKey,
-            tokenVersion: Math.max(
-              0,
-              Math.floor(asOptionalFiniteNumber(data?.tokenVersion) ?? 0)
-            ),
-          },
-          Math.floor(Date.now() / 1000)
-        ),
-        secretKey
-      );
-
-      try {
-        if (!accountSession) {
-          throw new Error("replace_token_failed");
-        }
-        await accountSession.replaceActiveToken(nextToken);
-      } catch {
-        throw new Error("replace_token_failed");
-      }
+      await executeRevokeSessionsFlow({
+        password: revokePassword,
+        user: { userId, username: user.username },
+        locale,
+        currentToken,
+        server: currentServer,
+        expectedPublicKey: securityInfo.publicKey,
+        accountSession,
+      });
 
       setRevokePassword("");
       setIsRevokeModalOpen(false);

@@ -23,6 +23,26 @@ export type MessageInputControlsBarProps = {
   usageSlot?: React.ReactNode;
 };
 
+
+/**
+ * 对话页胶囊输入框最左侧的圆形「+」按钮（附件选择逻辑与 FileUploadButton 完全一致）。
+ */
+export const MessageInputAttachButton = memo(function MessageInputAttachButton({
+  fileUploadDisabled,
+  onFilesSelected,
+}: {
+  fileUploadDisabled?: boolean;
+  onFilesSelected: (files: FileList | null) => void;
+}) {
+  return (
+    <FileUploadButton
+      variant="round"
+      disabled={fileUploadDisabled}
+      onFilesSelected={onFilesSelected}
+    />
+  );
+});
+
 export const MessageInputControlsBar = memo(function MessageInputControlsBar({
   fileUploadDisabled,
   onFilesSelected,
@@ -51,12 +71,12 @@ export const MessageInputControlsBar = memo(function MessageInputControlsBar({
           .filter(Boolean)
           .join(" ")}
       >
-        <FileUploadButton
-          disabled={fileUploadDisabled}
-          onFilesSelected={onFilesSelected}
-        />
-
-        {agentPicker && <AgentPickerControl {...agentPicker} />}
+        {agentPicker && (
+          <AgentPickerControl
+            {...agentPicker}
+            panelExtra={usageSlot}
+          />
+        )}
       </div>
 
       <div
@@ -67,7 +87,6 @@ export const MessageInputControlsBar = memo(function MessageInputControlsBar({
           .filter(Boolean)
           .join(" ")}
       >
-        {usageSlot}
         {showVoiceInput ? (
           <VoiceInputButton
             onTranscribed={onTranscribed}

@@ -300,6 +300,20 @@ function shouldSkipBillingForUserAbort(error: unknown, totalUsage: unknown): boo
   return !(hasTokenField || hasCost);
 }
 
+/** Same adapted request used by Web/RN admission and the transport. */
+export function buildFinalCompletionsRequestBody(bodyData: any, agentConfig: any, disableTools: boolean): any {
+  return normalizeChatCompletionsBodyForProvider({
+    body: buildRequestBodyWithTools(bodyData, agentConfig, disableTools),
+    provider: agentConfig.provider ?? "",
+    model: agentConfig.model,
+  });
+}
+
+/** Include the existing one-shot empty completion repair in preflight. */
+export function buildEmptyCompletionRepairBody(body: any): any {
+  return { ...body, messages: [...(body.messages ?? []), { role: "user", content: EMPTY_ASSISTANT_REPAIR_PROMPT }] };
+}
+
 /**
  * 根据 tools 配置生成本次请求体（不改动外部传入的 bodyData）
  */
@@ -1056,11 +1070,7 @@ export const sendOpenAICompletionsRequest = async ({
   dispatch(addActiveController({ messageId, controller, dialogKey }));
 
   const requestBody: any = await inlineImageUrlsForCustomProvider(
-    normalizeChatCompletionsBodyForProvider({
-      body: buildRequestBodyWithTools(bodyData, agentConfig, disableToolsForThisRequest),
-      provider: agentConfig.provider ?? "",
-      model: agentConfig.model,
-    }),
+    buildFinalCompletionsRequestBody(bodyData, agentConfig, disableToolsForThisRequest),
     {
       shouldInline: shouldInlineImageUrlsForAgent(agentConfig),
     },
@@ -1357,13 +1367,7 @@ export const sendOpenAICompletionsRequest = async ({
           // 首轮 2xx 但零产出 = 业务流失败：先给 attempt 1 收尾（stream-error），再开
           // 第二次真实请求。两次各自留痕，绝不压成一次、也不覆盖前一次的编号。
           closeDiagnosticAttempt(diagnosticCurrentAttempt, "stream-error");
-          const repairRequestBody = {
-            ...requestBody,
-            messages: [
-              ...(requestBody.messages ?? []),
-              { role: "user", content: EMPTY_ASSISTANT_REPAIR_PROMPT },
-            ],
-          };
+          const repairRequestBody = buildEmptyCompletionRepairBody(requestBody);
           const repairAttempt = beginDiagnosticAttempt(repairRequestBody);
           const retryResponse = await performFetchRequest({
             agentConfig,

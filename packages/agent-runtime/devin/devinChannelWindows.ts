@@ -1,6 +1,8 @@
 // agent-runtime/devin/devinChannelWindows.ts
 
 import { getModelContextWindow } from "../../ai/llm/getModelContextWindow";
+import { isCodexOAuthAgent } from "../codexOAuthPure";
+import { codexOAuthCatalogWindow } from "../codexOAuthModelCatalogWindow";
 import { isDevinOAuthAgent } from "../devinOAuthPure";
 
 /**
@@ -71,13 +73,21 @@ export const devinChannelContextWindow = (
 
 /**
  * 通道感知的 context window 解析：devin 通道用通道真值表（未登记 id 回落
- * 全局表），其余通道一律全局表。窗口解析不必在每个调用点重复判断通道。
+ * 全局表），Codex OAuth 通道优先用上游目录真值（未播种/未命中回落静态 pin），
+ * 其余通道一律全局表。窗口解析不必在每个调用点重复判断通道。
  *
- * 通道判据直接用 devinOAuth.isDevinOAuthAgent（trim + 小写归一），
- * 不在这里维护第二份近亲复写。
+ * 通道判据直接用纯模块 devinOAuthPure.isDevinOAuthAgent / codexOAuthPure.isCodexOAuthAgent
+ * （trim + 小写归一），不在这里维护第二份近亲复写；两者都不 import node 内建，
+ * 本文件因此可以留在 web 图里（见 packages/ai/context/contextOccupancy.ts）。
+ *
+ * Codex OAuth 的顺序是「目录 → pin」：目录是账号维度真值（plan 档位不同窗口不同，
+ * 2026-11-03 实测 plus/prolite 就分叉），pin 只兜「目录不可用 / 进程启动后尚未
+ * 播种」的第一轮——播种发生在真正发请求的那一刻（见 codexOAuthModelCatalog），
+ * 所以那一轮 body 与窗口展示仍按 pin，随后按目录。
  */
 export const resolveAgentContextWindow = (agent: AgentChannelRef): number =>
   (isDevinOAuthAgent(agent) ? devinChannelContextWindow(agent.model) : undefined) ??
+  (isCodexOAuthAgent(agent) ? codexOAuthCatalogWindow(agent.model) : undefined) ??
   // provider 透传给全局解析：平台托管通道（CF）与 Codex OAuth 等通道对同一 id
   // 窗口不同，按通道取真值，不做全局取大/取小。
   getModelContextWindow(agent.model ?? "", agent.provider);

@@ -19,10 +19,6 @@ import { createDialogKey } from "database/keys";
 import format from "date-fns/format";
 import formatISO from "date-fns/formatISO";
 import { prepareAndPersistMessage } from "chat/messages/messageSlice";
-import {
-  alignBuiltinObjectAssistantRecord,
-  buildBuiltinObjectAssistantAgentFromKey,
-} from "../objectAssistantRegistry";
 
 import type { Agent, DialogConfig } from "app/types";
 import { isDevelopment } from "app/utils/env";
@@ -165,6 +161,8 @@ export const createDialogAction = async (
 
   const readAgentConfig = async () => {
     if (!agentKey) return null;
+    // 历史 objectAssistant-* 对话仍按原样读取已有 agent 记录；
+    // 不再现场修复 / 重建预置对象助手 agent（面板已改用用户自己的 agent）。
     const existing = (await dispatch(
       readAndWait({
         dbKey: agentKey,
@@ -173,38 +171,7 @@ export const createDialogAction = async (
     ).unwrap().catch(() => null)) as
       | (Agent & { greeting?: string | AgentGreetingConfig })
       | null;
-    if (existing) {
-      const repaired = alignBuiltinObjectAssistantRecord(existing);
-      if (!repaired) return existing;
-
-      await dispatch(
-        write({
-          data: repaired,
-          customKey: existing.dbKey,
-          userId,
-        })
-      ).unwrap();
-      return repaired;
-    }
-
-    const recoveredBuiltinAgent = buildBuiltinObjectAssistantAgentFromKey(
-      agentKey,
-      userId
-    ) as (Agent & { greeting?: string | AgentGreetingConfig }) | null;
-
-    if (!recoveredBuiltinAgent) {
-      return null;
-    }
-
-    await dispatch(
-      write({
-        data: recoveredBuiltinAgent,
-        customKey: recoveredBuiltinAgent.dbKey,
-        userId,
-      })
-    ).unwrap();
-
-    return recoveredBuiltinAgent;
+    return existing;
   };
 
   const canSkipAgentConfigRead =

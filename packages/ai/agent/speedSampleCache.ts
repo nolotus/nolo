@@ -30,11 +30,15 @@ export const SPEED_SAMPLE_DISK_CACHE_TTL_MS = 10 * 60_000;
  * result ever carried speed data.
  */
 export const SPEED_SAMPLE_SCAN_BUDGET_MS = 2_500;
-/** Current layout version. 2 adds the incremental `cursor` / `complete` pair;
- *  version 1 files were only ever written by a completed scan, so they still
- *  read as complete windows. Other versions are ignored.
- *  Bump when the file layout below changes. */
-export const SPEED_SAMPLE_CACHE_VERSION = 2;
+/**
+ * v4 = explicit trusted dispatch facts: every cached sample was proven to come from a
+ * dispatched agent run (see candidateSpeedContext's dispatch provenance gate).
+ * v1/v2 caches were scanned from *all* of the user's token records (chat +
+ * dispatch mixed) and are therefore rejected — a mixed window must never be
+ * served as a dispatch speed signal. v3 inferred provenance from generic run
+ * metadata and is also rejected.
+ */
+export const SPEED_SAMPLE_CACHE_VERSION = 4;
 /** Legacy complete-window-only layout (no cursor). */
 export const SPEED_SAMPLE_LEGACY_CACHE_VERSION = 1;
 
@@ -111,7 +115,7 @@ async function parseCacheFile(
     const parsed = JSON.parse(raw) as Partial<SpeedSampleCacheFile> | null;
     if (!parsed || typeof parsed !== "object") return null;
     const version = parsed.version;
-    if (version !== SPEED_SAMPLE_CACHE_VERSION && version !== SPEED_SAMPLE_LEGACY_CACHE_VERSION) {
+    if (version !== SPEED_SAMPLE_CACHE_VERSION) {
       return null;
     }
     if (parsed.userId !== userId) return null;
@@ -129,7 +133,7 @@ async function parseCacheFile(
       samples.set(model, cleaned);
     }
     const complete =
-      version === SPEED_SAMPLE_LEGACY_CACHE_VERSION ? true : parsed.complete === true;
+      parsed.complete === true;
     const cursor =
       typeof parsed.cursor === "string" && parsed.cursor.length > 0 ? parsed.cursor : undefined;
     return { samples, at: parsed.at, complete, cursor: complete ? undefined : cursor };

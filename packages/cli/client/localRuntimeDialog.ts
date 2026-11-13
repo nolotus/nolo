@@ -1,3 +1,6 @@
+import { registerDialogOwner } from "database-engine/dialogOwner";
+import { dialogIdFromKey } from "core/dialogKeyIdentity";
+import { classifyDialogSyncFailure, startOwnedDialogSync } from "./cliExitSync";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeSaveTurnInput,
@@ -38,7 +41,7 @@ import {
   extractLastUserText,
   localTurnHasSubjectRefs,
 } from "./cliAgentConfigHelpers";
-import { buildLocalDialogWritePlan } from "./localDialogRecords";
+import { buildLocalDialogWritePlan, buildCliBatchCompletionOp } from "./localDialogRecords";
 import { syncLocalDialogEvidenceToRemote } from "./cliRemoteDialogSync";
 import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
 import { buildDialogFallbackTitleFromUserInput } from "../../chat/dialog/dialogTitle";
@@ -397,6 +400,13 @@ export async function writeDialog(args: {
   fetchImpl: CliFetchImpl;
   output?: { write(chunk: string): unknown };
   cwd?: string;
+  /**
+   * Atomic batch completion evidence: when present, the tail message's
+   * `cliBatchPhase:"completed"` op is appended to the SAME `store.batch` as the
+   * reply save. A batch failure therefore leaves the reply unpersisted and the
+   * tail at `requested` (recovery stays unknown); a success persists both.
+   */
+  cliBatchCompletion?: { batchIds: string[] };
   titleGenerator?: ((input: {
     messages: AgentRuntimeChatMessage[];
     fallbackTitle: string;
@@ -508,6 +518,15 @@ export async function writeDialog(args: {
     }
   }
 
+  await registerDialogOwner({
+    store: { get: (key) => args.store.read(key, { remote: false }), put: (key, value) => args.store.write(key, value) },
+    dialogId: plan.dialogId, ownerId: args.userId, spaceId: args.input.spaceId, source: "cli-local",
+  });
+  if (args.cliBatchCompletion) {
+    for (const batchId of args.cliBatchCompletion.batchIds) {
+      plan.ops.push(await buildCliBatchCompletionOp(args.store, plan.dialogId, batchId));
+    }
+  }
   await args.store.batch(plan.ops);
 
   if (__perfEnabled) {
@@ -563,19 +582,17 @@ export async function writeDialog(args: {
     } else {
       // PERF: 非 subjectRef 场景的 remote-sync 改为 fire-and-forget。实测
       // 每轮 1-1.9 秒网络 I/O，是后续轮次"最后一句话后等待"的主要原因。
-      // sync 结果不进 writeDialog 返回值，只用于远端备份——不值得阻塞 turn。
+      // 不阻塞 turn；CLI 命令退出边界会有界 drain 本命令拥有的同步。
       // 失败时只提示用户，不 throw。
-      remoteSyncPromise = syncLocalDialogEvidenceToRemote({
+      remoteSyncPromise = startOwnedDialogSync(args.fetchImpl, (fetchImpl) => syncLocalDialogEvidenceToRemote({
         env: args.env,
-        fetchImpl: args.fetchImpl,
+        fetchImpl,
         input: args.input,
         ops: [...plan.ops, ...tokenOps],
         output: args.output,
         userId: args.userId,
-      }).catch((error) => {
-        args.output?.write(
-          `[nolo] Remote dialog evidence sync failed; local dialog only: ${toErrorMessage(error)}\n`,
-        );
+      })).catch((error) => {
+        args.output?.write(`[nolo] Remote dialog evidence sync failed; class=${classifyDialogSyncFailure(error)}; local history retained; remote sync incomplete.\n`);
       });
     }
   }
@@ -689,16 +706,23 @@ export async function saveCliDialogSummary(args: {
 }): Promise<void> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
   const existing = (await args.store.read(dialogKey)) ?? {};
+  // 身份口径：existing.id 优先（既有语义），缺失时按共享 dialogKeyIdentity 从 key 取裸
+  // id——不能再按「最后一个 '-'」切，否则 UUID dialogId 会被截成 `2245777f3ec3` 并
+  // 同时写进记录 id 与 ownership registry（dialogown-<dialogId>）。
   const bareId =
     typeof (existing as any).id === "string" && (existing as any).id
       ? (existing as any).id
       : args.dialogId.startsWith("dialog-")
-        ? args.dialogId.slice(args.dialogId.lastIndexOf("-") + 1)
+        ? dialogIdFromKey(dialogKey)
         : args.dialogId;
   const compressionCount =
     typeof (existing as any).compressionCount === "number"
       ? (existing as any).compressionCount + 1
       : 1;
+  await registerDialogOwner({
+    store: { get: (key) => args.store.read(key, { remote: false }), put: (key, value) => args.store.write(key, value) },
+    dialogId: bareId, ownerId: args.userId, source: "cli-summary",
+  });
   await args.store.write(dialogKey, {
     ...existing,
     id: bareId,

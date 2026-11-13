@@ -63,6 +63,9 @@ interface SidebarPinnedBlockProps {
   selectedKeys?: Set<string>;
   onToggleSelectKey?: (key: string) => void;
   unreadAgentKeys?: Set<string>;
+  childCounts?: ReadonlyMap<string, number>;
+  expandedKeys?: ReadonlySet<string>;
+  onToggleExpand?: (key: string) => void;
 }
 
 export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
@@ -75,6 +78,9 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
   selectedKeys,
   onToggleSelectKey,
   unreadAgentKeys,
+  childCounts,
+  expandedKeys,
+  onToggleExpand,
 }) => {
   const { t } = useTranslation("space");
   const location = useLocation();
@@ -150,6 +156,10 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
               summaryStatus={"status" in item ? item.status : undefined}
               summaryUnreadAt={"unreadAt" in item ? item.unreadAt : undefined}
               hasUnread={item.type === "agent" ? unreadAgentKeys?.has(item.contentKey) : undefined}
+              childCount={childCounts?.get(item.contentKey)}
+              isChildCollapsed={!expandedKeys?.has(item.contentKey)}
+              onToggleChildCollapse={childCounts?.get(item.contentKey) ? () => onToggleExpand?.(item.contentKey) : undefined}
+              depth={childCounts ? 0 : undefined}
               disableDrag
               isActive={isRoutableContentActive({
                 contentKey: item.contentKey,
@@ -236,7 +246,7 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
                 onMove: direction => moveQuickFavorite(currentUserId, activeItem.contentKey, direction),
                 onToggle: () => {
                   const path = activeItem.type === "app"
-                    ? buildAppDetailPath(normalizeAppRouteId(activeItem.contentKey), activeItemSpaceId, activeItem.serverOrigin)
+                    ? buildAppDetailPath(normalizeAppRouteId(activeItem.contentKey), undefined, activeItem.serverOrigin)
                     : buildRoutableContentPath({ contentKey: activeItem.contentKey, type: activeItem.type,
                         userId: currentUserId, spaceId: activeItemSpaceId });
                   setQuickFavorite(currentUserId, { key: activeItem.contentKey,

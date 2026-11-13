@@ -1,4 +1,31 @@
+# 私有/登录态路径与 app/seo/pageMeta.ts 的 PRIVATE_PATH_PREFIXES 保持同源
+# （这些路径在服务端已输出 robots: noindex，这里再挡一层，减少无谓抓取）。
 User-agent: *
 Allow: /
+Disallow: /api/
+
+Disallow: /settings/
+Disallow: /dialog/
+Disallow: /dialogs/
+Disallow: /chat/
+Disallow: /space/
+Disallow: /content/
+Disallow: /docs/
+Disallow: /tables/
+Disallow: /images/
+Disallow: /attachments/
+Disallow: /videos/
+Disallow: /audios/
+Disallow: /files/
+Disallow: /agents/
+Disallow: /apps/
+Disallow: /favorites/
+Disallow: /create/
+Disallow: /life/
+Disallow: /admin/
+Disallow: /lab/
+Disallow: /media-jobs/
+Disallow: /notifications/
+Disallow: /recharge/
 
 Sitemap: https://nolo.chat/sitemap.xml

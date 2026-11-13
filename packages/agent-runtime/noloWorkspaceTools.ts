@@ -3,6 +3,12 @@ import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import { asNonEmptyStringArray } from "core/stringArray";
+import {
+  dialogIdFromKey,
+  isSupportedDialogId,
+  parseDialogPathIdentity,
+  splitDialogKeyIdentity,
+} from "core/dialogKeyIdentity";
 import { DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS } from "./dialogReadProjection";
 
 export const NOLO_WORKSPACE_TOOL_NAMES = [
@@ -68,9 +74,6 @@ const CLOSED_OBJECT_SCHEMA_TOOL_NAMES = new Set<string>([
   "cloud_probe",
   "cloud_exec",
 ]);
-const DIALOG_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
-const DIALOG_PATH_RE = /^\/(?:space\/([^/]+)\/)?dialog-(.+)-([0-9A-HJKMNP-TV-Z]{26})\/?$/i;
-
 function stringToolParam(description: string) {
   return { type: "string", description };
 }
@@ -93,6 +96,8 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
       function: {
         name,
         description,
+        // Responses otherwise normalizes optional selectors into required fields.
+        ...(name === "loadSkill" ? { strict: false } : {}),
         parameters: {
           type: "object",
           properties,
@@ -142,11 +147,11 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
       description: "Confirmed dialog ids or dbKeys to delete.",
     },
   }, ["query"]);
-  add("listAgents", "List agents for delegation. Default scope='preferred' returns the user's favorites, owned, OAuth, custom API, and local agents only; scope='public' discovers shared/marketplace agents; scope='all' returns their deduplicated union. Public agents may consume platform credits. Copy the agentKey verbatim; use the runnable agentKey exactly and do not infer it from the display name. publicOnly is deprecated compatibility for scope='public'. Rate-limited agents are hidden unless showUnavailable is true.", {
+  add("listAgents", "List agents for delegation. Default scope='all' returns the user's favorites, owned, OAuth, custom API, and local agents plus the public marketplace; scope='public' discovers shared/marketplace agents only. Public agents may consume platform credits. Copy the agentKey verbatim; use the runnable agentKey exactly and do not infer it from the display name. publicOnly is deprecated compatibility for scope='public'. All agents in the selected scope are listed; cooldown and quota status are advisory annotations, not dispatch gates.", {
     query: stringToolParam("Optional case-insensitive search substring matching agent name, model, provider, handle, or agentKey."),
-    scope: { type: "string", enum: ["preferred", "public", "all"], description: "Discovery scope; preferred is the default and does not load the public marketplace." },
+    scope: { type: "string", enum: ["all", "public"], description: "Discovery scope; all is the default and includes the public marketplace." },
     publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
-    showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
+    showUnavailable: { type: "boolean", description: "Deprecated no-op. Agents are always listed regardless of cooldown; availability annotations are advisory only." },
     verbose: { type: "boolean", description: "Return full safe-summary details when supported." },
     compact: { type: "boolean", description: "Return compact projection retaining admission evidence while omitting verbose text." },
     limit: { type: "number", description: "Maximum number of agents to return for pagination." },
@@ -254,34 +259,33 @@ export function clampNoloPositiveInteger(value: unknown, fallback: number, max =
 }
 
 export function getNoloDialogIdFromKey(dbKey: string) {
-  const index = dbKey.lastIndexOf("-");
-  return index >= 0 ? dbKey.slice(index + 1) : dbKey;
+  return dialogIdFromKey(dbKey);
 }
 
 export function resolveNoloDialogInput(rawInput: string, userId: string) {
   const raw = rawInput.trim();
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
     const url = new URL(raw);
-    const match = url.pathname.match(DIALOG_PATH_RE);
-    if (!match) throw new Error(`Unsupported dialog URL path: ${url.pathname}`);
-    const [, spaceId, ownerId, dialogId] = match;
+    const identity = parseDialogPathIdentity(url.pathname);
+    if (!identity) throw new Error(`Unsupported dialog URL path: ${url.pathname}`);
     return {
-      dbKey: `dialog-${ownerId}-${dialogId}`,
-      dialogId,
-      ownerId,
-      spaceId: spaceId ? decodeURIComponent(spaceId) : null,
+      dbKey: `dialog-${identity.ownerId}-${identity.dialogId}`,
+      dialogId: identity.dialogId,
+      ownerId: identity.ownerId,
+      spaceId: identity.spaceId,
     };
   }
   if (raw.startsWith("dialog-")) {
-    const dialogId = getNoloDialogIdFromKey(raw);
+    const identity = splitDialogKeyIdentity(raw);
+    if (!identity) throw new Error(`Unsupported dialog key: ${raw}`);
     return {
       dbKey: raw,
-      dialogId,
-      ownerId: raw.slice("dialog-".length, Math.max("dialog-".length, raw.length - dialogId.length - 1)),
+      dialogId: identity.dialogId,
+      ownerId: identity.userId,
       spaceId: null,
     };
   }
-  if (!DIALOG_ID_RE.test(raw)) {
+  if (!isSupportedDialogId(raw)) {
     throw new Error(`Unsupported dialog id: ${raw}`);
   }
   return {
@@ -624,7 +628,10 @@ export function buildNoloWorkspaceCommandArgs(call: { name: string; arguments: s
       const scope = noloStringArg(args.scope);
       if (scope) cliArgs.push("--scope", scope);
       if (args.publicOnly === true) cliArgs.push("--public-only");
-      if (args.showUnavailable === true) cliArgs.push("--show-unavailable");
+      // showUnavailable 仅保留为兼容入参（见参数描述里的 deprecated no-op），
+      // 不再转成 `--show-unavailable`：agent list 恒列出全部 agent（含限流），
+      // 转发这个旗标只会让读代码的人以为它还改变结果。
+
       if (args.verbose === true) cliArgs.push("--verbose");
       if (args.compact === true) cliArgs.push("--compact");
       const limitVal = args.limit;

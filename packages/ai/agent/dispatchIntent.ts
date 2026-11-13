@@ -59,9 +59,19 @@ const DISPATCH_TOOL_NAMES = new Set(["startAgentRun", "controlAgentRun"]);
  */
 export function detectDispatchIntent(text: string | null | undefined): boolean {
   if (typeof text !== "string" || !text.trim()) return false;
-  if (DISPATCH_INTENT_PATTERN.test(text)) return true;
+  // 只屏蔽独立分句中的明确禁派指令，不解释任意否定句或删掉整个分句。
+  // 起止边界避免把「不是不要派发」「不要派发是不对的」当成禁派；
+  // 保留其它分句，让先否定后肯定及原多执行者组合仍可触发。
+  const intentText = text.replace(
+    /(^|[，,。.!！?？;；：:\n])\s*(?:请\s*)?(?:不要|别|禁止|无需|不需要)\s*(?:(?:并行|并发)?派发|派单|派给\s*(?:助手|agent))(?=\s*(?:[，,。.!！?？;；：:\n]|$))/gi,
+    "$1"
+  );
+  if (DISPATCH_INTENT_PATTERN.test(intentText)) return true;
+  // 新增兜底只认分句起始的明确指令，不从转述或否定句内部截取「派给」。
+  // 仅放行常见的显式时序前缀，不推断任意自然语言修饰关系。
+  if (/(^|[，,。.!！?？;；：:\n])\s*(?:(?:现在|改完后)\s*)?(?:请\s*)?派给\s*(?:助手|agent\b)/i.test(intentText)) return true;
   // 上下文约束组合：多执行者数量短语 **且** 协作动作词，二者缺一不命中。
-  return MULTI_EXECUTOR_PATTERN.test(text) && COLLAB_ACTION_PATTERN.test(text);
+  return MULTI_EXECUTOR_PATTERN.test(intentText) && COLLAB_ACTION_PATTERN.test(intentText);
 }
 
 type DispatchIntentMessage = {

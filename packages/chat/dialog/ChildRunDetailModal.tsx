@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ClientAgentThread } from "ai/agent/web/agentDisplayUtils";
 import { useToken } from "identity";
+import { useLocation, useNavigate } from "app/routing";
+import { buildDialogUrl } from "./dialogUrl";
+import { useAuthorizedDialogSummary } from "./DialogRelation";
 import { selectCurrentServer } from "app/settings/settingSlice";
 import { useAppSelector } from "app/store";
 import { isAbortError } from "core/abortError";
@@ -47,6 +50,11 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
 }) => {
   const { t } = useTranslation("chat");
   const token = useToken();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { data: childSummary } = useAuthorizedDialogSummary(
+    isOpen && thread ? resolveChildDialogKey(thread) ?? null : null,
+  );
   const server = useAppSelector(selectCurrentServer);
 
   const statusLabels = useMemo<ChildRunStatusLabels>(
@@ -173,6 +181,14 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
       showClose
       bodyClassName="ChildRunDetailModal__body"
     >
+      {childSummary?.dialogKey ? (
+        <button type="button" data-hook="child-run-open-dialog" onClick={() => {
+          onClose();
+          navigate(`${buildDialogUrl(childSummary.dialogKey!, childSummary.spaceId)}${location.search || ""}`);
+        }}>
+          {t("childRunObserver.openDialog", "进入子对话")}
+        </button>
+      ) : null}
       <div {...stylex.props(croStyles.modalMeta)}>
         <span>
           {t("childRunObserver.detailStatus")} <strong {...stylex.props(croStyles.modalMetaStrong)}>{statusLabel}</strong>

@@ -40,9 +40,10 @@ export type CredentialAvailabilityEntry = {
   /** 本次冷却标记时间；旧条目缺失时不允许凭额度快照自动清除。 */
   markedAt?: number;
   /**
-   * 最近一次「冷却期自动重试探测」发生的时间（epoch-ms），用于共享层的
-   * `resolveCooldownGate` 判定是否到了再放行一次真实请求的间隔。
-   * 可选：旧格式文件缺该字段仍能正常读（视为从未探测），不因结构变化让现存文件失效。
+   * 历史遗留字段：旧版本记录的「冷却期自动重试探测」时间（epoch-ms）。
+   * 额度不再有否决权后已无人写入、也无人据此决策；这里只为读得懂既有文件而保留
+   * （写方 `recordCredentialProbe` 与门控 `resolveCooldownGate` 均已随否决权拆除）。
+   * 可选：旧格式文件缺该字段仍能正常读，不因结构变化让现存文件失效。
    */
   lastProbeAt?: number;
 };
@@ -134,9 +135,7 @@ function normalizeEntry(entry: unknown): CredentialAvailabilityEntry | undefined
   if (!entry || typeof entry !== "object") return undefined;
   const at = (entry as { nextAvailableAt?: unknown }).nextAvailableAt;
   if (typeof at !== "number" || !Number.isFinite(at)) return undefined;
-  // 区分「字段缺失」与「字段存在但非法」：缺失是合法的旧格式（视为从未探测），
-  // 而 lastProbeAt 存在却不是有限数说明记录已损坏——此时连同 deadline 一起丢弃，
-  // 否则会把损坏记录解释成「从未探测」而放行一次 probe，与字段校验约定不符。
+  // 区分「字段缺失」与「字段存在但非法」：缺失是合法的旧格式（视为从未探测）。
   // markedAt 是可选的辅助字段（凭额度快照自动解除冷却的依据），非法值只丢弃该字段、
   // 保留冷却本身：丢掉它的唯一后果是这条冷却不能被额度快照提前解除，仍按原机制恢复。
   const marked = (entry as { markedAt?: unknown }).markedAt;
@@ -144,8 +143,15 @@ function normalizeEntry(entry: unknown): CredentialAvailabilityEntry | undefined
     typeof marked === "number" && Number.isFinite(marked) ? { markedAt: marked } : {};
   if ("lastProbeAt" in entry) {
     const probe = (entry as { lastProbeAt?: unknown }).lastProbeAt;
-    if (typeof probe !== "number" || !Number.isFinite(probe)) return undefined;
-    return { nextAvailableAt: at, ...markedAt, lastProbeAt: probe };
+    // lastProbeAt 是历史遗留字段（探测式自动重试已随否决权拆除），没有任何决策
+    // 消费方，读它只为不因未知字段让整条记录失效。值非法时同样只丢这个字段、
+    // 保留 nextAvailableAt——为一个没人消费的字段丢掉整条冷却，等于把用户刚撞
+    // 出来的 429 忘掉，下一个请求立刻再撞一次。
+    const probeAt =
+      typeof probe === "number" && Number.isFinite(probe)
+        ? { lastProbeAt: probe }
+        : {};
+    return { nextAvailableAt: at, ...markedAt, ...probeAt };
   }
   return { nextAvailableAt: at, ...markedAt };
 }
@@ -241,9 +247,8 @@ export function resolveEffectiveCredentialCooldown(
 }
 
 /**
- * 读取单个凭证的冷却 entry（含 lastProbeAt）。无冷却/已过期返回 undefined。
- * 供派发 gate 读取探测时间；旧格式文件缺 lastProbeAt 字段时该值为 undefined，
- * 由共享层 `resolveCooldownGate` 按「从未探测」处理（立即 probe）。
+ * 读取单个凭证的冷却 entry（含历史遗留的 lastProbeAt）。无冷却/已过期返回 undefined。
+ * 冷却只作参考、不再拦请求：lastProbeAt 无任何读取方据此决策，仅随旧文件读入保留。
  */
 export async function readCredentialEntry(
   credentialKey: string,
@@ -273,7 +278,8 @@ async function writeCredentialAvailability(
 
 /**
  * 标记某凭证冷却到 `nextAvailableAt`。取更晚者：短冷却（如 5xx 的 5 分钟）
- * 不得抹掉已落盘的长冷却（如周额度耗尽）。冷却更新时保留既有 lastProbeAt。
+ * 不得抹掉已落盘的长冷却（如周额度耗尽）。冷却更新时若旧条目带有历史遗留的
+ * lastProbeAt 则原样保留，避免重写把旧文件字段抹掉（该字段已无读取方）。
  */
 export async function markCredentialUnavailable(
   credentialKey: string,
@@ -326,32 +332,6 @@ export async function clearCredentialAvailability(
     }
   }
   if (!changed) return;
-  await writeCredentialAvailability(live, env);
-}
-
-/**
- * 记录一次「冷却期自动重试探测」：把 lastProbeAt 更新为 `now`。
- * 由派发点在做 probe 放行时调用，供下次 `resolveCooldownGate` 判断是否又到间隔。
- * 无冷却 / 冷却已过期时是空操作，不写盘。
- * 贯穿候选 key：精确 key 不在 live 时回退匹配生效中的候选 key。
- */
-export async function recordCredentialProbe(
-  credentialKey: string,
-  env: NodeJS.ProcessEnv = process.env,
-  now = Date.now(),
-): Promise<void> {
-  if (!credentialKey) return;
-  const live = await readCredentialEntries(env, now);
-  let targetKey = credentialKey;
-  if (!(targetKey in live)) {
-    const candidates = resolveCredentialCandidateKeys(credentialKey);
-    const found = candidates.find((k) => k in live);
-    if (!found) return;
-    targetKey = found;
-  }
-  const existing = live[targetKey];
-  if (!existing) return;
-  live[targetKey] = { ...existing, lastProbeAt: now };
   await writeCredentialAvailability(live, env);
 }
 

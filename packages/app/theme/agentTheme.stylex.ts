@@ -23,7 +23,7 @@ export const agentThemeTokens = stylex.defineVars({
   "shadowCardEmpty": "none",
   "surfaceOverlayFaint": "#E4E4E7",
   "surfaceOverlayNote": "#FFFFFFF0",
-  "borderOverlayNote": "#71717A",
+  "borderOverlayNote": "#6E6E77",
   "surfaceOverlaySoft": "#F4F4F5",
   "borderOverlaySoft": "#F4F4F5",
   "surfaceOverlaySkill": "#FFFFFFF0",
@@ -31,7 +31,7 @@ export const agentThemeTokens = stylex.defineVars({
   "borderOverlayStrong": "#F4F4F5",
   "chipText": "#52525B",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const neutralLight = stylex.createTheme(agentThemeTokens, {
@@ -51,7 +51,7 @@ export const neutralLight = stylex.createTheme(agentThemeTokens, {
   "shadowCardEmpty": "none",
   "surfaceOverlayFaint": "#E4E4E7",
   "surfaceOverlayNote": "#FFFFFFF0",
-  "borderOverlayNote": "#71717A",
+  "borderOverlayNote": "#6E6E77",
   "surfaceOverlaySoft": "#F4F4F5",
   "borderOverlaySoft": "#F4F4F5",
   "surfaceOverlaySkill": "#FFFFFFF0",
@@ -59,7 +59,7 @@ export const neutralLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#F4F4F5",
   "chipText": "#52525B",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const neutralDark = stylex.createTheme(agentThemeTokens, {
@@ -107,7 +107,7 @@ export const oceanLight = stylex.createTheme(agentThemeTokens, {
   "shadowCardEmpty": "none",
   "surfaceOverlayFaint": "#EBF0F4",
   "surfaceOverlayNote": "#FFFFFFF0",
-  "borderOverlayNote": "#6E7781",
+  "borderOverlayNote": "#69727C",
   "surfaceOverlaySoft": "#F6F8FA",
   "borderOverlaySoft": "#F6F8FA",
   "surfaceOverlaySkill": "#FFFFFFF0",
@@ -115,7 +115,7 @@ export const oceanLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#F6F8FA",
   "chipText": "#57606A",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const oceanDark = stylex.createTheme(agentThemeTokens, {
@@ -163,7 +163,7 @@ export const forestLight = stylex.createTheme(agentThemeTokens, {
   "shadowCardEmpty": "none",
   "surfaceOverlayFaint": "#DDF0DB",
   "surfaceOverlayNote": "#F6FAF6F0",
-  "borderOverlayNote": "#5C8A58",
+  "borderOverlayNote": "#4F784B",
   "surfaceOverlaySoft": "#EDF5EC",
   "borderOverlaySoft": "#EDF5EC",
   "surfaceOverlaySkill": "#F6FAF6F0",
@@ -171,7 +171,7 @@ export const forestLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#EDF5EC",
   "chipText": "#3D6B3A",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const forestDark = stylex.createTheme(agentThemeTokens, {
@@ -227,7 +227,7 @@ export const trailLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#EEF2F6",
   "chipText": "#5C6775",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const trailDark = stylex.createTheme(agentThemeTokens, {
@@ -283,7 +283,7 @@ export const waveLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#ECEAE3",
   "chipText": "#3D3B4F",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const waveDark = stylex.createTheme(agentThemeTokens, {
@@ -339,7 +339,7 @@ export const irisLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#F2F2F7",
   "chipText": "#4E4B6B",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const irisDark = stylex.createTheme(agentThemeTokens, {
@@ -395,7 +395,7 @@ export const roseLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#F2E9E1",
   "chipText": "#6E6A86",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const roseDark = stylex.createTheme(agentThemeTokens, {
@@ -451,7 +451,7 @@ export const monoLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#F1F2F4",
   "chipText": "#57616B",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const monoDark = stylex.createTheme(agentThemeTokens, {
@@ -507,7 +507,7 @@ export const catppuccinLight = stylex.createTheme(agentThemeTokens, {
   "borderOverlayStrong": "#D8DEE4",
   "chipText": "#57606A",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const catppuccinDark = stylex.createTheme(agentThemeTokens, {
@@ -544,7 +544,7 @@ export const natureLight = stylex.createTheme(agentThemeTokens, {
   "surfaceGlassFooter": "color-mix(in srgb, #FAF8F4 85%, transparent)",
   "borderGlassFooter": "#EBE9E7",
   "shadowFooterUpward": "0 -4px 20px rgba(120, 90, 60, 0.05)",
-  "surfaceGroup": "#F3F0EA",
+  "surfaceGroup": "#F6F4EF",
   "shadowCardRaised": "0 4px 20px rgba(120, 90, 60, 0.08)",
   "surfaceOverlayHairline": "#EBE7DF",
   "borderOverlayHairline": "#EBE9E7",
@@ -556,14 +556,14 @@ export const natureLight = stylex.createTheme(agentThemeTokens, {
   "surfaceOverlayFaint": "#EBE7DF",
   "surfaceOverlayNote": "#FFFEFB",
   "borderOverlayNote": "#CACAC9",
-  "surfaceOverlaySoft": "#F3F0EA",
+  "surfaceOverlaySoft": "#F6F4EF",
   "borderOverlaySoft": "#EBE9E7",
   "surfaceOverlaySkill": "#FFFEFB",
   "surfaceOverlayStrong": "#EBE7DF",
   "borderOverlayStrong": "#EBE9E7",
   "chipText": "#5B6472",
   "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
-  "chatInputCardBackground": "var(--surfaceInset, var(--surfaceRaised, var(--background)))"
+  "chatInputCardBackground": "var(--backgroundElevated, var(--surfaceInset, var(--surfaceRaised, var(--background))))"
 });
 
 export const natureDark = stylex.createTheme(agentThemeTokens, {

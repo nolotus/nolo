@@ -124,8 +124,9 @@ const APPROVAL_DECISION_MESSAGE_TYPE = "browser_consent_decision";
 const APPROVAL_PAGE_PATH = "approve.html";
 
 const approvalPendingMessage =
-  "A confirmation request has been opened for the user in the browser. Ask the user to click \"Allow once\" in the " +
-  "Nolo window, then retry this exact action with this approvalId before it expires. Nothing has been performed yet.";
+  "Awaiting the user's decision in the current host conversation. Without a host approval UI, this action " +
+  "remains blocked until expiry. No browser window is opened and nothing has been performed. " +
+  "Only after a real user approval may the host retry this exact action with this approvalId.";
 const approvalDeniedMessage =
   "The user did not allow this action, so nothing was performed. Name the control and ask the user to activate it " +
   "themselves; do not retry the same request hoping for a different answer.";
@@ -494,20 +495,8 @@ async function resolveSelectApprovalSummary({ action, tabId, payload, target }) 
   }
 }
 
-/**
- * Opens the approval window and returns a pending verdict. Fails closed to `USER_APPROVAL_DENIED`
- * when this runtime has no `chrome.windows` (Firefox builds, bare test stubs, a rejected create): a
- * pending record nobody can ever approve is worse than a plain refusal.
- */
+/** Creates pending host consent; unavailable host UI never opens a browser fallback. */
 async function requestUserApproval({ action, tabId, payload, target, refusal }) {
-  // The host (TUI/desktop) renders the approval card itself, so there is no browser window to open
-  // and no `chrome.windows` to need: its absence is not a refusal on this path. The decision arrives
-  // through `decideApprovalFromHost`, and `windowId` stays null.
-  const hostApproval = payload?.hostApproval === true;
-  if (!hostApproval && (typeof chrome === "undefined" || typeof chrome?.windows?.create !== "function")) {
-    return approvalVerdict(APPROVAL_DENIED_CODE, approvalDeniedMessage, { action });
-  }
-
   const computed = await computeApprovalFingerprint({ action, tabId, payload, target });
   if (!computed.ok) return computed.verdict;
 
@@ -579,41 +568,6 @@ async function requestUserApproval({ action, tabId, payload, target, refusal }) 
   };
   approvalRecords.set(approvalId, record);
 
-  let windowId = null;
-  try {
-    const base =
-      typeof chrome?.runtime?.getURL === "function" ? chrome.runtime.getURL(APPROVAL_PAGE_PATH) : APPROVAL_PAGE_PATH;
-    const params = new URLSearchParams({
-      approvalId,
-      nonce,
-      action: String(action),
-      target: targetName,
-      // Origin only: a query string can carry a token, and this URL is visible in the popup.
-      // No title: the page controls its title, so it must not be able to put text next to the origin.
-      origin: site,
-    });
-    // The item the action would set, for a select: only the option label.
-    // Nothing else of the request travels — no payload, and never the text a `type` action typed.
-    if (summary) {
-      params.set("summary", JSON.stringify({ label: summary.label }));
-    }
-    if (!hostApproval) {
-      const created = await chrome.windows.create({
-        url: `${base}?${params.toString()}`,
-        type: "popup",
-        width: 820,
-        height: 680,
-        focused: true,
-      });
-      windowId = Number(created?.id);
-      if (!Number.isFinite(windowId)) throw new Error("chrome.windows.create returned no window id");
-    }
-  } catch (error) {
-    approvalRecords.delete(approvalId);
-    return approvalVerdict(APPROVAL_DENIED_CODE, `${approvalDeniedMessage} (${toMessage(error)})`, { action });
-  }
-
-  record.windowId = windowId;
   await persistApprovalRecord(record);
   // The request bound a debugger attachment to identify the document; release the banner on the
   // idle timer like any other debugger-backed action instead of holding it while the user decides.
@@ -3915,6 +3869,7 @@ async function handleAction(action, payload = {}) {
           action: String(record.action ?? ""),
           tabId: String(record.tabId ?? ""),
           origin: String(record.origin ?? ""),
+          target: String(record.target?.name ?? ""),
           summary: typeof record.summary?.label === "string" ? record.summary.label : "",
           expiresAt: Number(record.expiresAt),
         }));

@@ -29,25 +29,22 @@ import {
   selectLastWriteFailure,
   setSettings,
 } from "app/settings/settingSlice";
+import { isAccountOnDemandWorkflowSkill } from "ai/skills/userSkills";
 import type { BuiltinSkillEntry } from "ai/skills/builtinSkillRegistry";
 import {
   filterBuiltinSkills,
   getBuiltinSkillDirectory,
-  getRecommendedPromptSkillEntries,
   getVisibleSkillDirectory,
   getSkillDependencies,
   getContainedSkillEntries,
   isCompositeSkill,
   isRecommendedPromptSkill,
+  isMarketListedSkill,
   isUserSkillToggleable,
   type SkillDependencies,
 } from "./skillExploreDirectory";
 // 复用仓库既有模态焦点陷阱原语（与 render/web/ui/modal 同源），避免另造一套
-import {
-  getFocusableElements,
-  handleTabKey,
-  restoreFocus,
-} from "render/web/ui/modal/focusTrap";
+import { BaseModal } from "render/web/ui/modal/BaseModal";
 import "./SkillExplore.css";
 
 // 纯提示推荐 Skill 来源映射（按通用规范提供上游链接，在详情面板展示）
@@ -353,6 +350,15 @@ const SkillCard: React.FC<SkillCardProps> = ({
         {description}
       </p>
 
+      {isAccountOnDemandWorkflowSkill(entry.slug) && (
+        <div className="skill-card__notice-summary">
+          {t(
+            "explorePage.skill.accountOnDemandNotice",
+            "新注册账号默认按需推荐，不预挂全文；关闭仅停止账户推荐，Agent 显式配置或任务引用仍独立生效。",
+          )}
+        </div>
+      )}
+
       {/* 若有适配说明摘要，紧凑呈现 */}
       {meta?.noticeSummary && (
         <div
@@ -453,6 +459,8 @@ const SkillCard: React.FC<SkillCardProps> = ({
 
 interface SkillDetailModalProps {
   entry: BuiltinSkillEntry | null;
+  /** 共享 BaseModal 的开关态：关闭时 entry 仍保留一个退场窗口 */
+  isOpen: boolean;
   allSkills: readonly BuiltinSkillEntry[];
   isEnabled: boolean;
   isRecommended: boolean;
@@ -470,6 +478,7 @@ interface SkillDetailModalProps {
 
 const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
   entry,
+  isOpen,
   allSkills,
   isEnabled,
   isRecommended,
@@ -487,7 +496,6 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
   const { t } = useTranslation();
   const modalRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
-  const isOpen = Boolean(entry);
 
   // 依赖与包含子项推导
   const dependencies: SkillDependencies = useMemo(() => {
@@ -510,43 +518,7 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
     toolAggregation.fromRequiredChildren.length > 0 ||
     toolAggregation.fromRecommendedChildren.length > 0;
 
-  // 键盘 Esc 关闭 + Tab 焦点限制（复用仓库既有 focusTrap 原语）
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const content = modalRef.current;
-      if (!content) return;
-      handleTabKey(e, content);
-    },
-    [onClose],
-  );
 
-  useEffect(() => {
-    if (!isOpen) return;
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isOpen, handleKeyDown]);
-
-  // 打开时：把焦点移入对话框（首个可聚焦元素，缺失时退回对话框本身）
-  useEffect(() => {
-    if (!isOpen) return;
-    const content = modalRef.current;
-    if (!content) return;
-    const focusables = getFocusableElements(content);
-    const target = focusables[0] ?? content;
-    try {
-      target.focus({ preventScroll: true });
-    } catch {
-      // ignore
-    }
-  }, [isOpen]);
 
   // 切换到子技能后原触发按钮已卸载：把焦点交还对话框标题，避免焦点掉到背景
   useEffect(() => {
@@ -577,19 +549,13 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
   const isUnsavedOrFailed = Boolean(saveError || isWriteFailed);
 
   return (
-    <div
-      className="skill-detail-overlay"
-      onClick={onClose}
-      role="presentation"
-      data-testid="skill-detail-overlay"
-    >
+    <BaseModal isOpen={isOpen} onClose={onClose} className="skill-detail-modal-host">
       <div
         ref={modalRef}
         className="skill-detail-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="skill-detail-title"
-        onClick={(e) => e.stopPropagation()}
         data-testid="skill-detail-dialog"
       >
         <header className="skill-detail-modal__header">
@@ -715,6 +681,16 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                         "explorePage.skill.guestHint",
                         "需登录账号后持久化保存。未登录状态下的变更不会同步至云端偏好。",
                       )
+                    : isAccountOnDemandWorkflowSkill(entry.slug)
+                    ? isEnabled
+                      ? t(
+                          "explorePage.skill.accountOnDemandEnabledDesc",
+                          "账户已开启按需推荐：相关任务可发现并加载此纯指导 Skill，不预挂全文，不增加工具权限。关闭仅停止账户推荐；Agent 显式配置或任务显式引用独立生效，Agent disabled 仍禁止加载。",
+                        )
+                      : t(
+                          "explorePage.skill.accountOnDemandDisabledDesc",
+                          "账户推荐已关闭，不是全局禁令：Agent 显式 required/recommended 配置或任务显式引用仍可生效，Agent disabled 仍禁止加载。此 Skill 仅提供指导，不增加工具权限。",
+                        )
                     : isEnabled
                     ? t(
                         "explorePage.skill.accountEnabledDescFull",
@@ -1105,7 +1081,7 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           </button>
         </footer>
       </div>
-    </div>
+    </BaseModal>
   );
 };
 
@@ -1132,10 +1108,10 @@ export const SkillExplore: React.FC = () => {
 
   // 详情弹窗状态
   const [activeDetailEntry, setActiveDetailEntry] = useState<BuiltinSkillEntry | null>(null);
-  const triggerElementRef = useRef<HTMLElement | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   // 背景区域（弹窗之外的内容）：打开详情时隔离
   const backgroundRef = useRef<HTMLDivElement>(null);
-  const isDetailOpen = Boolean(activeDetailEntry);
+  const isDetailOpen = detailOpen;
 
   useLayoutEffect(() => {
     currentAccountRef.current = userId ?? null;
@@ -1160,22 +1136,32 @@ export const SkillExplore: React.FC = () => {
   // 全部真实内置技能
   const allSkills = useMemo(() => getBuiltinSkillDirectory(), []);
 
-  // 推荐技能（仅用于展示与排序，不决定可启用性）
-  const recommendedSkills = useMemo(
-    () => getRecommendedPromptSkillEntries(allSkills),
-    [allSkills],
-  );
-
   // 可见目录（无搜索时隐藏已被父项收拢的子项，搜索时全部可见）
   const visibleSkills = useMemo(
     () => getVisibleSkillDirectory(allSkills, query),
     [allSkills, query],
   );
 
-  // 全目录区技能条目：无搜索时排除推荐区已展示的条目，避免 ub-mode 卡片在两处重复出现
+  // 可选技能区：展示全部账号级可开关 Skill。
+  // 取自 allSkills 而非 visibleSkills——被组合父项收拢的可开关子项（如 code-style）
+  // 在总览目录里被隐藏，但仍必须出现在可选区，否则用户无从启停。
+  // 排序：推荐项在前，组内保持注册表原顺序（Array.prototype.sort 稳定）。
+  const optionalSkills = useMemo(() => {
+    const toggleable = allSkills.filter(
+      (entry) =>
+        isUserSkillToggleable(entry.slug) && isMarketListedSkill(entry.slug),
+    );
+    return [...toggleable].sort(
+      (a, b) =>
+        (isRecommendedPromptSkill(a.slug) ? 0 : 1) -
+        (isRecommendedPromptSkill(b.slug) ? 0 : 1),
+    );
+  }, [allSkills]);
+
+  // 平台内置区：无搜索时只展示不可开关的条目；搜索时沿用全量检索结果
   const catalogSkills = useMemo(() => {
     if (query.trim()) return visibleSkills;
-    return visibleSkills.filter((s) => !isRecommendedPromptSkill(s.slug));
+    return visibleSkills.filter((entry) => !isUserSkillToggleable(entry.slug));
   }, [visibleSkills, query]);
 
   // 切换 Skill 启用/停用状态
@@ -1279,23 +1265,32 @@ export const SkillExplore: React.FC = () => {
 
   const handleOpenDetail = useCallback(
     (entry: BuiltinSkillEntry, triggerEl: HTMLElement | null) => {
-      triggerElementRef.current = triggerEl;
+      // 开窗前把焦点落到触发元素：共享 useFocusTrap 会捕获此刻的 activeElement
+      // 作为恢复目标，鼠标点击与键盘激活的焦点来源因此一致
+      // （部分浏览器点击 button 不聚焦）。
+      try {
+        triggerEl?.focus({ preventScroll: true });
+      } catch {
+        // 触发元素不可聚焦时忽略
+      }
       setActiveDetailEntry(entry);
+      setDetailOpen(true);
     },
     [],
   );
 
+  // 关闭只切换开关：退场动画与内容卸载节奏全部由共享 BaseModal 自己控制，
+  // activeDetailEntry 保留，详情内容不会在淡出中途被摘掉。
   const handleCloseDetail = useCallback(() => {
-    setActiveDetailEntry(null);
-    // Esc / 关闭后焦点真实回到触发元素（复用仓库既有 restoreFocus 原语）
-    setTimeout(() => {
-      restoreFocus(triggerElementRef.current);
-    }, 0);
+    setDetailOpen(false);
   }, []);
 
   // 背景隔离：详情弹窗打开时，背景区域置为 inert + aria-hidden 并禁用指针事件，
   // 使背景内容对辅助技术与指针都不可达（弹窗本身不在该区域内，不受影响）。
-  useEffect(() => {
+  // 用 layout 阶段解除隔离：关闭 commit 的 layout 先移除 inert，
+  // 早于共享 BaseModal passive cleanup 里的同步 restoreFocus，
+  // 否则焦点会落在仍处 inert 子树的触发元素上，focus() 静默失效。
+  useLayoutEffect(() => {
     const el = backgroundRef.current;
     if (!el) return;
     if (isDetailOpen) {
@@ -1378,33 +1373,33 @@ export const SkillExplore: React.FC = () => {
         )}
       </div>
 
-      {/* 推荐区域：仅在无搜索词时作为快捷发现呈现 */}
-      {!query && recommendedSkills.length > 0 && (
+      {/* 可选技能区：仅在无搜索词时呈现，展示全部账号级可开关 Skill（推荐项排在前面） */}
+      {!query && optionalSkills.length > 0 && (
         <div
-          className="skill-explore__recommended-section"
-          data-testid="skill-explore-recommended-section"
+          className="skill-explore__optional-section"
+          data-testid="skill-explore-optional-section"
         >
           <div className="skill-explore__section-header">
             <div className="skill-explore__section-title-wrap">
-              <LuStar
+              <LuLayers
                 className="skill-explore__section-icon"
                 size={16}
                 aria-hidden="true"
               />
               <h3 className="skill-explore__section-title">
-                {t("explorePage.skill.recommendedSectionTitle", "精选推荐")}
+                {t("explorePage.skill.optionalSectionTitle", "可选技能")}
               </h3>
             </div>
             <span className="skill-explore__section-hint">
               {t(
-                "explorePage.skill.recommendedSectionHint",
-                "开箱即用的优质工作原则，账号级启用后自动注入新会话上下文",
+                "explorePage.skill.optionalSectionModesHint",
+                "账号级开关；生效方式见各技能说明，推荐项已排在前面",
               )}
             </span>
           </div>
 
           <div className="skill-explore__grid">
-            {recommendedSkills.map((entry) => {
+            {optionalSkills.map((entry) => {
               const isEnabled = enabledSkills.includes(entry.slug);
               // 重试语义：重新持久化界面当前显示的目标，不得取反；remount 后仍从 Redux 乐观值恢复同一目标
               const targetOnRetry =
@@ -1415,9 +1410,9 @@ export const SkillExplore: React.FC = () => {
                 <SkillCard
                   key={entry.slug}
                   entry={entry}
-                  isRecommended={true}
+                  isRecommended={isRecommendedPromptSkill(entry.slug)}
                   isComposite={isCompositeSkill(entry, allSkills)}
-                  isToggleable={isUserSkillToggleable(entry.slug)}
+                  isToggleable={true}
                   isEnabled={isEnabled}
                   userId={userId}
                   onToggleSkill={handleToggleSkill}
@@ -1444,14 +1439,14 @@ export const SkillExplore: React.FC = () => {
           <h3 className="skill-explore__section-title">
             {query
               ? t("explorePage.skill.searchResultsTitle", "检索结果")
-              : t("explorePage.skill.allSkillsTitle", "技能目录")}
+              : t("explorePage.skill.builtinSectionTitle", "平台内置")}
           </h3>
           <span className="skill-explore__section-hint">
             {query
               ? t("explorePage.skill.searchResultsHint", "包含匹配条件的全部顶层技能与组合子项")
               : t(
-                  "explorePage.skill.allSkillsHint",
-                  "包含工程编码、调查定位、环境隔离等能力，子技能已收拢至组合项内",
+                  "explorePage.skill.builtinSectionHint",
+                  "随平台版本生效，不可开关；组合技能的子项已收拢",
                 )}
           </span>
         </div>
@@ -1507,6 +1502,7 @@ export const SkillExplore: React.FC = () => {
       {/* 详情弹窗 */}
       <SkillDetailModal
         entry={activeDetailEntry}
+        isOpen={detailOpen}
         allSkills={allSkills}
         isEnabled={
           activeDetailEntry ? enabledSkills.includes(activeDetailEntry.slug) : false

@@ -61,6 +61,10 @@ export const getNoloKey = (
     // 端点侧早已改成「未识别模型返回 undefined，让上层显式报错」
     // （platformProviderEndpoints.ts），key 侧现在与之对齐：宁可没有 key，
     // 也不要一把打不开正确的门、却能被送出去的钥匙。
+    //
+    // Ollama Cloud 订阅（provider "ollama-cloud"）**不在这里**返回 key：这条兜底路径
+    // loopUpstream.getApiKey 里、且端点确实属于 ollama 域时才取用（服务端托管
+    // ollama-cloud agent 的唯一入口），本函数保持「没有自己的 key」的语义。
     case "cloudflare":
       return env.CLOUDFLARE_API_TOKEN;
     case "gmi":

@@ -426,8 +426,6 @@ export const SLASH_COMMANDS = [
   "/version",
   "/logs",
   "/tasks",
-  "/jobs",
-  "/procs",
   "/stop",
   "/exit",
   "/quit",

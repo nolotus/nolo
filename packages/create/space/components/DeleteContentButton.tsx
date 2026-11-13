@@ -70,7 +70,9 @@ function DeleteContentButton({
             contentKey,
             serverOrigin: sourceServerOrigin,
           },
-          effectiveSpaceId
+          effectiveSpaceId,
+          // 侧栏行删除路径：执行端按实体 owner 复核一次，不只依赖 UI 门控。
+          { requireOwnership: true }
         )
       );
       toast.success(t("deleteMovedToTrash", { title: safeTitle }));
@@ -83,7 +85,7 @@ function DeleteContentButton({
             routeSpaceId: effectiveSpaceId,
           }) ??
           (effectiveSpaceId
-            ? `/space/${normalizeSpaceId(effectiveSpaceId)}`
+            ? `/space/${normalizeSpaceId(effectiveSpaceId)}/contents`
             : undefined);
         if (redirect) {
           navigate(redirect, { replace: true });
@@ -102,7 +104,10 @@ function DeleteContentButton({
 
   const hasCustomChildren = children != null;
   const deleteLabel = t("common:delete");
-  const { onAction: _onAction, isDisabled: _isDisabled, textValue: _textValue, ...safeRest } = rest as DeleteContentButtonProps & Record<string, unknown>;
+  // `title`/`htmlTitle` are destructured props, so they never reach `rest`: spread the
+  // leftover attributes as a permissive record instead of re-widening to the full prop
+  // type, which would make TS read `...safeRest` as overwriting the explicit `title`.
+  const { onAction: _onAction, isDisabled: _isDisabled, textValue: _textValue, ...safeRest } = rest as Record<string, unknown>;
   const nativeProps = {
     className: `DeleteButton ${className || ""}`.trim(),
     // MenuItem surfaces its own onAction contract; plain <button> uses onClick.

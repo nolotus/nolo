@@ -35,6 +35,8 @@ export type DelegatedPayloadMetrics = {
 
 export type AgentExecutionObservationEvent =
   | { kind: "turn-phase"; phase: "validating-context" | "compacting" | "waiting-provider"; atMs: number; compactionScope?: "initial" | "in-loop" }
+  /** Upcoming 1-based physical request ordinal (2/3), matching that request's compaction-timing attempt. */
+  | { kind: "compaction-retry"; atMs: number; scope: "initial" | "in-loop"; attempt: number; maxAttempts: number }
   | { kind: "compaction-start"; atMs: number; scope: "initial" | "in-loop" }
   | { kind: "compaction-end"; atMs: number; scope: "initial" | "in-loop" }
   | { kind: "compaction-failed"; atMs: number; scope: "initial" | "in-loop"; reason: "timeout" | "aborted" | "provider-error"; detail?: string }
@@ -103,28 +105,6 @@ export type AgentExecutionObservationEvent =
     }
   | { kind: "image-downgraded"; reason: "no-vision"; atMs: number }
   | {
-      /**
-       * 派发子任务触达**硬预算上限**（工具调用数 / 墙钟），run 被优雅终止。
-       *
-       * 语义：这是「有界结果（bounded result）」的信号——父方/UI 据此知道
-       * 本次子任务是**中间结论**而非失败或 provider 报错。绝不与 provider
-       * error 混用。
-       */
-      kind: "budget-exhausted";
-      /** 触发的上限种类。 */
-      limit: "max-tool-calls" | "max-wall-clock-ms";
-      atMs: number;
-      /** 生效的上限值。 */
-      maxToolCalls: number;
-      maxWallClockMs: number;
-      /** 已实际执行的工具调用数。 */
-      toolCallsExecuted: number;
-      /** 从 run 开始到触发的墙钟耗时（毫秒）。 */
-      elapsedMs: number;
-      round?: number;
-      detail?: string;
-    }
-  | {
       kind: "loop-stalled";
       reason: string;
       atMs: number;
@@ -167,4 +147,8 @@ export type AgentExecutionObservationEvent =
       triggerRatio?: number;
       /** 触发依据（compressed 时给出）。 */
       trigger?: string;
+      itemCount?: number;
+      maxInputItems?: number;
+      triggeredByItemLimit?: boolean;
+      projectedItemCount?: number;
     };

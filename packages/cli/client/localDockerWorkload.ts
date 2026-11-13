@@ -358,7 +358,9 @@ export async function createLocalDockerWorkload(args: {
       throw new LocalWorkspaceDeliveryError("delivery_cancelled", "run 已取消，放弃工作区投送。");
     }
     try {
-      await phase("delivery", () => applyDelivery(runtime, prepared.selection));
+      await phase("delivery", async () => {
+        await applyDelivery(runtime, prepared.selection);
+      });
     } catch (error) {
       const code = isDockerWorkspaceDeliveryError(error) ? error.code : "delivery_failed";
       throw new LocalWorkspaceDeliveryError(

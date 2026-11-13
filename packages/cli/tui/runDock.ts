@@ -32,7 +32,7 @@ import {
   runProgressStalled,
 } from "./runProgressHeartbeat";
 import { t } from "./i18n";
-import { formatProcZoneLines, formatRunZoneLines, PROC_LINGER_MAX_ROWS, procZoneFinished, remoteTaskUnsettled, resolveRunZoneMaxRows, type RemoteTaskCarrier, type RunZoneLayout, type RunZoneProc } from "./runZoneLines";
+import { formatProcZoneLines, formatRunZoneLines, planRunZoneRows, PROC_LINGER_MAX_ROWS, procZoneFinished, remoteTaskUnsettled, resolveRunZoneMaxRows, runZoneRunRowBudget, type RemoteTaskCarrier, type RunZoneLayout, type RunZoneProc } from "./runZoneLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
@@ -82,6 +82,11 @@ export type RunDock = {
   getRuns(): AgentRunSnapshot[];
   /** 渲染行；空面板返回 []。 */
   getLines(colorEnabled: boolean, layout?: RunZoneLayout): string[];
+  /**
+   * 最近一帧真正逐行画出来的 runId（行预算 + 进程预留 + `+N` 折叠后）。
+   * 聊天层只在这条 run 确实可见时才省略 startAgentRun 启动回执。
+   */
+  visibleRunIds(): ReadonlySet<string>;
   /** 会话结束时调用：停 timer 并清空。 */
   dispose(): void;
 };
@@ -150,6 +155,15 @@ export function createRunDock(deps: RunDockDeps): RunDock {
   const clearIntervalFn =
     deps.clearIntervalFn ??
     ((handle) => clearInterval(handle as ReturnType<typeof setInterval>));
+
+  /**
+   * 「这一帧没有任何 run 被确认可见」。
+   *
+   * 可见集合只在**刚刚真的画出的那一帧**内有效：状态一变、面板清空、或根本没
+   * 重绘，旧的 runId 就不再是证据。携带过期值会让迟到的启动回执在一条已经消失
+   * 的 run 上被静默吞掉——所以这类路径一律回退到这个空集，宁可多打一次回执。
+   */
+  const EMPTY_VISIBLE_RUN_IDS: ReadonlySet<string> = new Set();
 
   const entries = new Map<string, DockEntry>();
   /**
@@ -224,6 +238,8 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     // 会话已经退出：迟到的 tool-result 不该把 dock 复活，更不该重开一个往
     // 已经不归自己管的终端上重绘的 timer。
     if (disposed) return;
+    // 上一帧的可见证据在状态变化这一刻就作废；重绘会把新的一帧写回来。
+    lastVisibleRunIds = EMPTY_VISIBLE_RUN_IDS;
     const runId = snapshot.runId;
     // 没有 runId 就无法合并也无法去重；这种事件对面板没有意义。
     if (!runId) return;
@@ -272,6 +288,7 @@ export function createRunDock(deps: RunDockDeps): RunDock {
   };
 
   const remove = (runId: string) => {
+    lastVisibleRunIds = EMPTY_VISIBLE_RUN_IDS;
     if (!entries.delete(runId)) return;
     // 判停条件必须和 prune 保持一致：还有后台进程时表要继续转（进程行在走秒），
     // 否则这里停表、紧接着 onRepaint 同步调 getLines 又立刻重启一次，每摘一个
@@ -281,6 +298,7 @@ export function createRunDock(deps: RunDockDeps): RunDock {
   };
 
   const clear = () => {
+    lastVisibleRunIds = EMPTY_VISIBLE_RUN_IDS;
     if (entries.size === 0) return;
     entries.clear();
     // clear 只清 run 面板，不代表后台进程也没了：进程行还需要秒表。
@@ -299,7 +317,19 @@ export function createRunDock(deps: RunDockDeps): RunDock {
 
   const getRuns = () => orderedEntries().map((entry) => entry.snapshot);
 
+  /**
+   * 最近一帧真正逐行画出来的 runId 集合（rows 预算 + 进程预留 + `+N` 折叠后）。
+   *
+   * 聊天层的 startAgentRun 回执只在这条 run 已经可见时才省略：查询不到
+   * （面板还没画过一帧、dock 里还没有这条 run）一律返回空集 → 回执保留。
+   * 宁可重复一次，也不静默丢掉看不见的 run 的启动回执。
+   */
+  let lastVisibleRunIds: ReadonlySet<string> = EMPTY_VISIBLE_RUN_IDS;
+
   const getLines = (colorEnabled: boolean, layout?: RunZoneLayout): string[] => {
+    // 这一帧还没画出来之前，上一帧的可见集合不算证据：先作废，再由下面的
+    // 行计划写回真实结果。中途 return（空面板/无 run）就停在空集上。
+    lastVisibleRunIds = EMPTY_VISIBLE_RUN_IDS;
     // 读也顺手 prune：终端可能在两次 tick 之间就要重绘（比如按键），
     // 这时不该把一条已经该消失的 run 再画一帧。
     prune();
@@ -335,21 +365,21 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     // 进程行与 run 行共用这块高度预算，run 优先；活跃进程非空时给它们留一条——
     // 这一条原本在状态行是常驻可见的，搬过来不能反而被几个并发 run 挤成不可见。
     // 残留不参与 reserve：它们是「刚过去的事」，不该抢活跃项的位置。
-    const procReserve = activeProcs.length > 0 && totalRows > 1 ? 1 : 0;
+    const runBudget = runZoneRunRowBudget(totalRows, activeProcs.length);
 
     // 固定运行区（顶部，每条一行 `⚙ title · agent · 已耗时 · tools`）。单/多
     // run 走同一个格式化器——运行区就是一张可扫的列表，不是「单条细看 / 多条
     // 汇总」两种形态。normal 模式剥 ANSI/OSC、隐 raw error/log 的 safe 投影
     // 由 formatRunZoneLines 内部兜底完成。
+    const runSnapshots = ordered.map((entry) => entry.snapshot);
+    lastVisibleRunIds = new Set(
+      planRunZoneRows(runSnapshots, runBudget, layout)
+        .shown.filter((snapshot) => typeof snapshot.runId === "string" && snapshot.runId.length > 0)
+        .map((snapshot) => snapshot.runId)
+    );
     const runLines =
-      ordered.length > 0
-        ? formatRunZoneLines(
-            ordered.map((entry) => entry.snapshot),
-            colorEnabled,
-            at,
-            Math.max(1, totalRows - procReserve),
-            layout
-          )
+      runSnapshots.length > 0
+        ? formatRunZoneLines(runSnapshots, colorEnabled, at, runBudget, layout)
         : [];
 
     // 剩余预算按 run 的**实际**行数扣（含它那行折叠标记），不按计划条目数扣：
@@ -384,11 +414,13 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     clear,
     getRuns,
     getLines,
+    visibleRunIds: (): ReadonlySet<string> => lastVisibleRunIds,
     dispose() {
       disposed = true;
       entries.clear();
       retired.clear();
       stopTimer();
+      lastVisibleRunIds = EMPTY_VISIBLE_RUN_IDS;
     },
   };
 }

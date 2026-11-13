@@ -212,11 +212,26 @@ export type SpeedSampleIteratorOptions = {
 
 export interface SpeedSampleDb {
   iterator(options: SpeedSampleIteratorOptions): AsyncIterable<[string, unknown]>;
+  /** Verifies token path against persisted server run metadata or local spawn registry.
+   * Missing or ambiguous evidence is unknown, never a fallback to all conversations. */
+  isDispatchRun?: DispatchRunResolver;
 }
+
+/** Server token path; cli-local additionally requires a matching local spawn record. */
+export const DISPATCH_ENTRY_PATH = "agent-run";
+
+/** Consumer verifies persisted run provenance for the token entry path; unknown is false. */
+export type DispatchRunResolver = (runId: string, entryPath: string) => Promise<boolean>;
 
 export type SpeedSampleLoadOptions = {
   /** Keys per page (default SPEED_SAMPLE_PAGE_SIZE). */
   pageSize?: number;
+  /**
+   * Dispatch provenance resolver. Without it no sample can be proven to come
+   * from a dispatched run, so the scan returns nothing (it never falls back to
+   * "all conversations for this user").
+   */
+  isDispatchRun?: DispatchRunResolver;
   /** Wall-clock budget for the whole scan. When exceeded the walk stops after
    *  the last complete page and `budgetExhausted` is reported together with
    *  `nextCursor` — the partial result is never a window, it is resume state. */
@@ -311,6 +326,31 @@ export async function collectRecentSpeedSamples(
     : Number.POSITIVE_INFINITY;
   const { start, end } = createTokenKey.rangeOfUser(userId);
   const failedPrefix = createKey("token", userId, "failed-call", "");
+  // One provenance lookup per run id, not per token record.
+  const dispatchRunCache = new Map<string, boolean>();
+  // Token path and persisted run evidence must agree; missing evidence is unknown.
+  const isDispatchSampleRecord = async (
+    record: Record<string, unknown>,
+    resolver: DispatchRunResolver | undefined,
+    cache: Map<string, boolean>,
+  ): Promise<boolean> => {
+    if (record.entry_path !== DISPATCH_ENTRY_PATH && record.entry_path !== "cli-local") return false;
+    const runId = typeof record.dialogId === "string" ? record.dialogId.trim() : "";
+    if (!runId) return false;
+    const cacheKey = `${record.entry_path}:${runId}`;
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return cached;
+    let dispatch = false;
+    if (resolver) {
+      try {
+        dispatch = (await resolver(runId, record.entry_path as string)) === true;
+      } catch {
+        dispatch = false;
+      }
+    }
+    cache.set(cacheKey, dispatch);
+    return dispatch;
+  };
   const collected = new Map<string, Array<SpeedSample & { t: number }>>();
   const startedAt = Date.now();
   let lastKey: string | undefined = options.startAfter;
@@ -337,7 +377,17 @@ export async function collectRecentSpeedSamples(
       newestKey = key;
       if (key.startsWith(failedPrefix)) continue;
       if (!raw || typeof raw !== "object") continue;
-      collectSample(collected, raw as Record<string, unknown>);
+      const record = raw as Record<string, unknown>;
+      const resolver = options.isDispatchRun ?? db.isDispatchRun;
+      if (
+        !(await isDispatchSampleRecord(
+          record,
+          resolver ? (runId: string, entryPath: string) => resolver.call(db, runId, entryPath) : undefined,
+          dispatchRunCache,
+        ))
+      )
+        continue;
+      collectSample(collected, record);
     }
     if (accepted === 0 || accepted < pageSize) break;
     lastKey = newestKey;

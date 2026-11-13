@@ -637,7 +637,7 @@ const FavoritesCollection = memo(() => {
   const filterOptions = useMemo(
     () =>
       buildFavoriteFilterOptions({
-        t,
+        t: (key: string, fallback?: string) => t(key, { defaultValue: fallback ?? key }),
         totalFavorites,
         agentCount: agentKeys.length,
         contentKindCounts,

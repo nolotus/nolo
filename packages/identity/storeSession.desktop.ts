@@ -5,13 +5,11 @@
 // the cloud edition uses — no second session abstraction — while the
 // credential authority is the read-only /api/desktop/auth/session bootstrap
 // (see session/desktopTokenManager.ts) and password sign-in fails closed
-// (desktop sign-in is an external browser action, wired by a later
-// workstream). Anonymous initialization yields an initialized empty session —
+// (desktop sign-in uses the browser authorization controller). Anonymous initialization yields an initialized empty session —
 // never a hard failure and never a fabricated cloud login.
 import {
   composeAccountSessionRuntime,
   createAccountSessionCore,
-  type AccountSessionRuntimeComposition,
 } from "core/accountSession";
 import type { TokenManager } from "identity/authTypes";
 import type {
@@ -22,6 +20,7 @@ import {
   registerStoreSessionBridge,
   unregisterStoreSessionBridge,
 } from "identity/session/accountSessionStore";
+import { createDesktopBrowserAuthorization } from "./desktopBrowserAuthorization";
 import { desktopTokenManager } from "./session/desktopTokenManager";
 
 export interface AccountSessionCore {
@@ -32,16 +31,10 @@ export interface AccountSessionCore {
 export type { AccountSessionService };
 
 /**
- * Public desktop ships no password authentication implementation. Any
- * accidental password sign-in path fails loudly instead of silently
- * degrading; sign-in/switch happens through the trusted external browser
- * bridge (account-actions workstream).
+ * Public desktop uses browser authorization through the normal session
+ * service. The controller owns the authenticator capability; arbitrary
+ * password sign-in remains unavailable.
  */
-const externalSignInOnly: AccountSessionRuntimeComposition["authenticate"] =
-  async () => {
-    throw new Error("desktop_sign_in_is_external");
-  };
-
 export function createStoreSessionCore(): AccountSessionCore | undefined {
   // Desktop runs the web bundle inside its webview, but a plain browser tab
   // loading a desktop-edition bundle still gets a real core and simply stays
@@ -59,20 +52,28 @@ export function bindStoreSessionRuntime(input: {
   const { store, extra, sessionCore } = input;
   if (!sessionCore) return;
 
+  const browserAuthorization = createDesktopBrowserAuthorization({
+    signIn: (credentials) => {
+      if (!runtime.service) throw new Error("account_session_unavailable");
+      return runtime.service.signIn(credentials);
+    },
+  });
   const runtime = composeAccountSessionRuntime({
     core: sessionCore as any,
     // Desktop edition always has a token authority: the webview localStorage
     // list, bootstrapped once from the trusted local session endpoint.
     tokenManager: input.tokenManager ?? desktopTokenManager,
-    authenticate: externalSignInOnly,
+    authenticate: browserAuthorization.authenticate,
   });
 
   if (runtime.service) {
     extra.accountSession = runtime.service;
     store.accountSession = runtime.service;
   }
+  store.desktopBrowserAuthorization = browserAuthorization;
   store.accountSessionRuntime = runtime;
   store.disposeAccountSession = () => {
+    browserAuthorization.dispose();
     unregisterStoreSessionBridge(store);
     runtime.dispose();
   };

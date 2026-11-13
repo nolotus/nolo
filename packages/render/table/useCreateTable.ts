@@ -5,7 +5,7 @@ import { toast } from "app/utils/toast"
 import { useAppDispatch } from "app/store";
 import { useUserId } from "identity";
 import { createTable, addRow } from "./tableStore";
-import { buildScopedPagePath } from "create/space/contentKeyUtils";
+import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 
 interface UseCreateTableOptions {
     onSuccess?: (dbKey?: string) => void;
@@ -62,8 +62,8 @@ export const useCreateTable = (options?: UseCreateTableOptions) => {
             }
             onSuccess?.(dbKey);
 
-            // 4. 导航（带 space 前缀，保持空间上下文）
-            const tablePath = `${buildScopedPagePath(dbKey, spaceId)}?edit=true`;
+            // 4. 导航到内容的规范路径；所属空间保留在表格记录中
+            const tablePath = `${buildRoutableContentPath({ contentKey: dbKey, spaceId })}?edit=true`;
             navigate(tablePath);
         } catch (error) {
             console.error("Failed to create table:", error);

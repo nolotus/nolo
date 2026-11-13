@@ -20,7 +20,8 @@ export default {
           core: "Providing and maintaining our digital AI computing and multi-agent workspace services.",
           map: "Processing points recharge orders and fulfilling accounting obligations.",
           analysis: "Ensuring platform stability, security, and preventing malicious activity.",
-          attribution: "Ad attribution: when you arrive via an ad or campaign link, we store a first-party cookie (nolo_attr, 30 days) containing the campaign parameters and click ID from that link, the landing page, the referring site and the time, so we can tell which channel brought you when you sign up. We load no third-party tracking pixels and do not sell this data. Page-view statistics on our public pages are provided by Cloudflare Web Analytics (static.cloudflareinsights.com), the only third-party script we load there: it reports aggregated page views without cross-site tracking cookies."
+          attribution: "Ad attribution: when you arrive via an ad or campaign link, we store a first-party cookie (nolo_attr, 30 days) containing the campaign parameters and click ID from that link, the landing page, the referring site and the time, so we can tell which channel brought you when you sign up. We load no third-party tracking pixels and do not sell this data. Page-view statistics on our public pages are provided by Cloudflare Web Analytics (static.cloudflareinsights.com), the only third-party script we load there: it reports aggregated page views without cross-site tracking cookies.",
+          preferences: "Language preference: we store a first-party cookie (nolo_language, 1 year) that remembers the interface language you choose. It is a functional preference only — it is not used for tracking, advertising, or shared with third parties, and no personal data is collected through it."
         },
         section3: {
           title: "3. Information Sharing & Third Parties",
@@ -71,7 +72,8 @@ export default {
           core: "提供、维护并结算基于积分的数字 AI 计算与智能体协作服务。",
           map: "处理积分充值订单并履行必要的账单审计义务。",
           analysis: "保障服务稳定与安全风控，防御恶意滥用。",
-          attribution: "广告来源归因：当您通过广告或推广链接访问时，我们会写入一个第一方 Cookie（nolo_attr，有效期 30 天），记录链接中的推广参数与点击 ID、落地页面、来源网站及时间，仅用于在您注册时识别带来访问的渠道。我们不加载任何第三方追踪像素，也不出售这些数据。公开页面的访问量统计由 Cloudflare Web Analytics（static.cloudflareinsights.com）提供——它是这些页面上唯一加载的第三方脚本，不使用跨站追踪 Cookie，只做聚合计数。"
+          attribution: "广告来源归因：当您通过广告或推广链接访问时，我们会写入一个第一方 Cookie（nolo_attr，有效期 30 天），记录链接中的推广参数与点击 ID、落地页面、来源网站及时间，仅用于在您注册时识别带来访问的渠道。我们不加载任何第三方追踪像素，也不出售这些数据。公开页面的访问量统计由 Cloudflare Web Analytics（static.cloudflareinsights.com）提供——它是这些页面上唯一加载的第三方脚本，不使用跨站追踪 Cookie，只做聚合计数。",
+          preferences: "语言偏好：我们会存储一个一方 Cookie（nolo_language，有效期 1 年），用于记住您选择的界面语言。它仅属于功能偏好——不用于追踪、广告或共享给第三方，也不通过它收集任何个人数据。"
         },
         section3: {
           title: "3. 信息共享与第三方处理方",
@@ -122,7 +124,8 @@ export default {
           core: "提供、維護並結算基於積分的數位 AI 計算與智能體協作服務。",
           map: "處理積分充值訂單並履行必要的帳單審計義務。",
           analysis: "保障服務穩定與安全風控，防禦惡意濫用。",
-          attribution: "廣告來源歸因：當您透過廣告或推廣連結造訪時，我們會寫入一個第一方 Cookie（nolo_attr，有效期 30 天），記錄連結中的推廣參數與點擊 ID、到達頁面、來源網站及時間，僅用於在您註冊時識別帶來造訪的管道。我們不載入任何第三方追蹤像素，也不出售這些資料。公開頁面的訪問量統計由 Cloudflare Web Analytics（static.cloudflareinsights.com）提供——它是這些頁面上唯一載入的第三方腳本，不使用跨站追蹤 Cookie，只做聚合計數。"
+          attribution: "廣告來源歸因：當您透過廣告或推廣連結造訪時，我們會寫入一個第一方 Cookie（nolo_attr，有效期 30 天），記錄連結中的推廣參數與點擊 ID、到達頁面、來源網站及時間，僅用於在您註冊時識別帶來造訪的管道。我們不載入任何第三方追蹤像素，也不出售這些資料。公開頁面的訪問量統計由 Cloudflare Web Analytics（static.cloudflareinsights.com）提供——它是這些頁面上唯一載入的第三方腳本，不使用跨站追蹤 Cookie，只做聚合計數。",
+          preferences: "語言偏好：我們會儲存一個第一方 Cookie（nolo_language，有效期 1 年），用於記住您選擇的介面語言。它僅屬於功能偏好——不用於追蹤、廣告或共享給第三方，也不透過它收集任何個人資料。"
         },
         section3: {
           title: "3. 資訊共享與第三方處理方",
@@ -173,7 +176,8 @@ export default {
           core: "コアサービスの提供",
           map: "取引処理および請求",
           analysis: "セキュリティおよび不正防止",
-          attribution: "広告流入の計測：広告やキャンペーンのリンクから訪問された場合、リンク内のキャンペーンパラメータとクリック ID、到達ページ、参照元サイト、日時を記録するファーストパーティ Cookie（nolo_attr、有効期間 30 日）を保存し、登録時にどの経路から来られたかの把握にのみ使用します。第三者のトラッキングピクセルは読み込まず、このデータを販売することもありません。公開ページのアクセス解析は Cloudflare Web Analytics（static.cloudflareinsights.com）が提供します——これはそれらのページで唯一読み込む第三者スクリプトで、クロスサイト追跡 Cookie を使わず集計のみを行います。"
+          attribution: "広告流入の計測：広告やキャンペーンのリンクから訪問された場合、リンク内のキャンペーンパラメータとクリック ID、到達ページ、参照元サイト、日時を記録するファーストパーティ Cookie（nolo_attr、有効期間 30 日）を保存し、登録時にどの経路から来られたかの把握にのみ使用します。第三者のトラッキングピクセルは読み込まず、このデータを販売することもありません。公開ページのアクセス解析は Cloudflare Web Analytics（static.cloudflareinsights.com）が提供します——これはそれらのページで唯一読み込む第三者スクリプトで、クロスサイト追跡 Cookie を使わず集計のみを行います。",
+          preferences: "言語設定：お客様が選択した界面言語を記憶するため、ファーストパーティ Cookie（nolo_language、有効期間 1 年）を保存します。これは機能上の設定のみで、トラッキング、広告、第三者との共有には使われず、個人データも収集しません。"
         },
         section3: {
           title: "3. 第三者への開示と提供",

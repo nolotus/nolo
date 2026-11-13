@@ -10,6 +10,8 @@ export const i18nBaseConfig = {
     "zh-TW": [Language.ZH_HANT],
     "zh-HK": [Language.ZH_HANT],
     "zh-MO": [Language.ZH_HANT],
+    de: [Language.DE, Language.EN],
+    es: [Language.ES, Language.EN],
     default: [Language.EN],
   },
 };

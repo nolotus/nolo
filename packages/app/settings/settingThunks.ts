@@ -1,3 +1,4 @@
+import { ACCOUNT_CHAT_DISPLAY_PREFERENCE_KEYS } from "./accountChatDisplayOwner";
 // packages/app/settings/settingThunks.ts
 //
 // 单一职责:settings slice 的所有 async thunk(getSettings / setSettings /
@@ -369,7 +370,7 @@ export const setAccountChatDisplayPreferences = createAsyncThunk(
 export const setSettings = createAsyncThunk(
   "settings/setSettings",
   async (changes: Partial<SettingState>, { dispatch }) => {
-    const forbidden = ["showThinking", "showScrollToTopButton", "showScrollToBottomButton"];
+    const forbidden = ACCOUNT_CHAT_DISPLAY_PREFERENCE_KEYS;
     if (forbidden.some((key) => Object.prototype.hasOwnProperty.call(changes, key))) {
       throw new Error("Chat display preferences must use setAccountChatDisplayPreferences.");
     }

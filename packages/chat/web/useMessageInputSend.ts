@@ -1,3 +1,7 @@
+import { waitForWriteAck } from "database/actions/writeAck";
+import { extractCustomId } from "core/prefix";
+import { readAndWait } from "database/dbSlice";
+import { readFileAsDataURL } from "app/utils/fileReaders";
 // packages/chat/web/useMessageInputSend.ts
 // Send / queue / slash-command (/new, /compact) path for the message composer.
 // Keeps MessageInputContainer as an assembly layer while preserving existing
@@ -32,6 +36,7 @@ import {
   isFreshDialogSlashCommand,
 } from "./messageSlashCommands";
 import { resolveMessageInputSendDecision } from "./messageInputSendResolver";
+import { prepareAndPersistUserMessage } from "chat/messages/messageSlice";
 import { editUserMessageAndReplay } from "chat/messages/messageSlice";
 import {
   buildCanvasNodeEditingTarget,
@@ -507,28 +512,44 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
         );
         return;
       case "queue-text":
-        dispatch(
-          enqueueUserInput({
-            text: decision.text,
-            dialogKey: snap.currentDialogKey ?? undefined,
-          })
-        );
-        clearState();
-        toast.success(
-          t("queuedText", "消息已排队，将在当前轮次结束后发送。"),
-          {
-            duration: 2000,
+      case "queue-blocked": {
+        if (!snap.currentDialogKey) return;
+        try {
+          const dialogConfig = await dispatch(readAndWait(snap.currentDialogKey)).unwrap();
+          const attachmentParts = await preparePendingAttachmentParts(snap.pendingFiles, {
+            currentServer: snap.currentServer, currentUserId: snap.currentUserId,
+            resolveImageUrl: imageUrl => resolveBrowserModelImageUrl(imageUrl, { authToken: snap.token }),
+          });
+          const images = await Promise.all(Array.from(snap.imageFiles.values()).map(file => readFileAsDataURL(file)));
+          const parts: any[] = [
+            ...(liveText.trim() ? [{ type: "text", text: liveText.trim() }] : []),
+            ...images.map(url => ({ type: "image_url", image_url: { url } })),
+            ...attachmentParts,
+          ];
+          const saved = await dispatch(prepareAndPersistUserMessage({
+            dialogConfig, userInput: parts.length === 1 && parts[0].type === "text" ? liveText.trim() : parts,
+            pending: true,
+          })).unwrap();
+          // Local durability already succeeded. Never leave this submitted draft
+          // armed for a second identity when remote publication reports failure.
+          clearState();
+          if (snap.currentServer && snap.token) {
+            // Drain the original replication first: a late pending replica must
+            // not overwrite the server's accepted metadata after publication.
+            const ack = await waitForWriteAck(saved.dbKey, { targetServer: snap.currentServer, timeoutMs: 10000 });
+            if (ack.timedOut || ack.outcome.status !== "acked") throw new Error("Pending message saved locally; server replication is not confirmed");
+            const response = await fetch(`${snap.currentServer.replace(/\/$/, "")}/api/agent/turns/control`, {
+              method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${snap.token}` },
+              body: JSON.stringify({ action: "enqueue", dialogId: dialogConfig.id ?? extractCustomId(snap.currentDialogKey), message: saved }),
+            });
+            if (!response.ok) throw new Error(`Pending message saved locally; server admission failed (${response.status})`);
           }
-        );
+          toast.success(t("queuedText", "消息已保存，将在下一轮接纳。"));
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : String(error));
+        }
         return;
-      case "queue-blocked":
-        toast.error(
-          t(
-            "queuedAttachmentBlocked",
-            "当前轮次仍在运行。含附件或多图的消息不会排队，请等待完成后再发送。"
-          )
-        );
-        return;
+      }
       case "send":
         break;
     }

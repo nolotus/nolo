@@ -3,7 +3,7 @@
  * No heavy external renderers (KaTeX/MathJax) — pure Unicode transcription.
  */
 
-import { visibleWidth } from "../tui/tuiAnsi";
+import { boxGlyphs, resolveBoxCharset, visibleWidth } from "../tui/tuiAnsi";
 
 let mathRenderingEnabled = true;
 
@@ -510,7 +510,9 @@ export function renderMathBlock(
     // If long or complex, render 3-line fraction
     if (num.length > 8 || den.length > 8 || num.includes("+") || den.includes("+") || num.includes("-") || den.includes("-")) {
       const width = Math.max(visibleWidth(num), visibleWidth(den)) + 2;
-      const bar = "─".repeat(width);
+      // 横线按「列」补格：wide 约定下 `─` 每字符 2 列，repeat(width) 会变 2*width 格，
+      // 与按列算出的分子/分母居中量对不上 → 字形跟 resolveBoxCharset（wide 下退化为 `-`）。
+      const bar = boxGlyphs(resolveBoxCharset()).h.repeat(width);
       const padNum = " ".repeat(Math.max(0, Math.floor((width - visibleWidth(num)) / 2)));
       const padDen = " ".repeat(Math.max(0, Math.floor((width - visibleWidth(den)) / 2)));
 

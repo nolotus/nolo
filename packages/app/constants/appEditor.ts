@@ -1,4 +1,3 @@
-import { normalizeSpaceId } from "create/space/spaceKeys";
 import { BUILTIN_APP_BUILDER_AGENT_KEY } from "core/builtinAgents";
 import { normalizeServerOrigin } from "core/serverOrigin";
 
@@ -65,10 +64,9 @@ export const readAppServerOrigin = (
   return normalizeAppServerOrigin(params.get(APP_SERVER_SEARCH_PARAM)) ?? undefined;
 };
 
-const buildAppBasePath = (appKey: string, spaceId?: string | null) => {
-  if (!spaceId) return `/${appKey}`;
-  return `/space/${normalizeSpaceId(spaceId)}/${appKey}`;
-};
+// App keys identify the record; browsing space is not part of its canonical URL.
+// Retain the argument for existing callers; server origin remains a separate query.
+const buildAppBasePath = (appKey: string, _spaceId?: string | null) => `/${appKey}`;
 
 export const buildAppDetailPath = (
   appKey: string,

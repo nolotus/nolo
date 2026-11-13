@@ -118,7 +118,7 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
             agentConfig,
             resolveCredential: resolveLocalCredential,
             // 非 OAuth（api-key ref）不重试：metered key 没有 refresh 语义。
-            supportsAuthRetry: !isApiKeyRef,
+            supportsAuthRetry: !isApiKeyRef && !options?.noRetries,
             openAiBody,
             ...(options?.signal ? { signal: options.signal } : {}),
             // whole-invocation timeout 透传：seam 最外层 timeoutOption 统一 interrupt
@@ -130,6 +130,7 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
               fetchWithTransientRetry(fetchImpl, url, init, {
                 sleep: deps.sleep,
                 loopbackRequest,
+                ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
               })) as unknown as typeof fetch,
           });
         } catch (error) {

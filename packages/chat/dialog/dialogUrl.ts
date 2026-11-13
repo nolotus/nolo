@@ -1,6 +1,6 @@
-import { buildScopedPagePath } from "create/space/contentKeyUtils";
+import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 
 export const buildDialogUrl = (
   dialogKey: string,
   spaceId?: string | null
-): string => buildScopedPagePath(dialogKey, spaceId);
+): string => buildRoutableContentPath({ contentKey: dialogKey, spaceId });

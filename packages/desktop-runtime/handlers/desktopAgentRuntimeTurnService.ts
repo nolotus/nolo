@@ -1,3 +1,5 @@
+import { registerDialogOwner } from "database-engine/dialogOwner";
+import type { LocalAgentTurnInput } from "agent-runtime/localLoop";
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { detectMachineInfo } from "connector-experimental/machineInfo";
@@ -10,7 +12,13 @@ import type {
   AgentRuntimeToolResult,
   LocalAgentTurnResult,
 } from "agent-runtime";
-import type { LocalAgentLoopEvent, LocalAgentToolEvent } from "agent-runtime/localLoop";
+import type {
+  LocalAgentActionGate,
+  LocalAgentLoopEvent,
+  LocalAgentToolEvent,
+} from "agent-runtime/localLoop";
+import type { ApiKeyRefResolver } from "agent-runtime/providerResolution";
+import type { OAuthTokenStore } from "agent-runtime/oauthTokenStore";
 import {
   projectToolExecutionLocation,
   type ToolExecutionLocation,
@@ -74,13 +82,14 @@ import {
 import type { DesktopAgentRuntimeEnv } from "./desktopAgentRuntimeHostFacts";
 import { readXPostFunc, readXPostFunctionSchema } from "ai/tools/readXPostTool";
 import { readXhsProfileFunc, readXhsProfileFunctionSchema } from "ai/tools/readXhsProfileTool";
+import { secretRequestFunc } from "ai/tools/secretRequestTool";
 import { TOOL_PACKS, FORCED_TOOLS, applyDisabledTools, expandEnabledPacks, resolveEffectiveEnabledPacks, applySystemBuiltinSkillFilter } from "ai/tools/toolPacks";
 import { applyToolSurfaceConstraints } from "agent-runtime";
 import { resolveAgentRequiredPackIds } from "ai/tools/agentSkillConfig";
 import { prepareTools } from "ai/tools/prepareTools";
 import { inferCaptureIntent } from "ai/policy/runtimePolicy";
 import { parseNoloWorkspaceToolArguments } from "agent-runtime/noloWorkspaceTools";
-import { INTERACTION_REQUIRED_TOOL_NAMES } from "agent-runtime/agentRunIsolation";
+
 import { RUN_TITLE_MAX, normalizeRunTitle } from "ai/tools/agent/runTitle";
 
 /**
@@ -155,12 +164,14 @@ import {
   DESKTOP_CHROME_CONNECTOR_TOOL_NAME_SET,
   BUILTIN_NOLO_AGENT_ID,
 } from "./desktopAgentRuntimeToolBuilders";
+import { readDesktopAccountSettings } from "./desktopAccountSettings";
 
 type DesktopAgentRuntimeBaseTurnInput = {
   env: DesktopAgentRuntimeEnv;
   store: DesktopAgentRuntimeRecordStore;
   agentRef: string;
   input: AgentRuntimeMessageContent;
+  userMessages?: LocalAgentTurnInput["userMessages"];
   runtimeContext?: Record<string, any> | null;
   continueDialogId?: string;
   /**
@@ -240,6 +251,12 @@ type DesktopAgentRuntimeBaseTurnInput = {
    */
   onLoopEvent?: (event: LocalAgentLoopEvent) => void;
   /**
+   * 执行前确认 / 输入 gate 通道（Block 3a）。handler 构造实现：把 gate 经 SSE
+   * `action_gate` 事件推给 webview，等待用户决定后回填最终工具结果。service
+   * 层原样透传给 runLocalAgentTurn，不做任何语义加工。
+   */
+  onActionGate?: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
+  /**
    * User stop / dialog disconnect abort. Forwarded to runLocalAgentTurn as
    * `abortSignal` so an unbounded compaction/LLM wait is cancellable — Stop
    * must reach the compaction provider call, not only the main request.
@@ -291,7 +308,7 @@ type DesktopAgentRuntimeHybridRecordStoreArgs = {
 const resolveDesktopCliEntrypoint = resolveDesktopRuntimeEntrypoint;
 
 async function persistDesktopPendingChildDialog(args: {
-  store: Pick<DesktopAgentRuntimeRecordStore, "batch">;
+  store: Pick<DesktopAgentRuntimeRecordStore, "read" | "batch">;
   userId: string;
   dialogId: string;
   agentKey: string;
@@ -335,6 +352,10 @@ async function persistDesktopPendingChildDialog(args: {
   if (!args.store.batch) {
     throw new Error("Desktop agent runtime record store cannot save pending child dialogs without batch support.");
   }
+  await registerDialogOwner({
+    store: { get: (key) => args.store.read(key, { remote: false }), put: (key, value) => args.store.batch!([{ type: "put", key, value }]) },
+    dialogId: args.dialogId, ownerId: args.userId, spaceId: args.spaceId, source: "desktop-pending-child",
+  });
   await args.store.batch([{ type: "put", key: dialogKey, value: record }]);
 }
 
@@ -763,6 +784,15 @@ function buildDesktopLocalToolExecutors(args: {
         },
       };
     },
+    // secret-request：抬 kind:"input" gate，宿主面板回填后经 toolCallTransaction
+    // 走 onActionGate 通道（Block 3a）。仅在声明了 secret-request 的请求里被
+    // allowedNames 过滤保留；未声明时工具面/策略都不放行，模型到不了这里。
+    "secret-request": async (call: any) => {
+      const parsedArgs = (() => {
+        try { return JSON.parse(call.arguments || "{}"); } catch { return {}; }
+      })();
+      return secretRequestFunc(parsedArgs);
+    },
   };
   return allowedNames
     ? {
@@ -900,12 +930,16 @@ export function createDesktopTextOnlyAgentRuntimeActions(args: {
     store: args.store,
     now: args.now,
     createId: args.createId,
-    resolveProvider: (agentConfig) => Promise.resolve(resolveDesktopTextOnlyAgentRuntimeProvider({
+    resolveProvider: async (agentConfig, options) => ({ ...(await resolveDesktopTextOnlyAgentRuntimeProvider({
       env: args.env,
-      agentConfig,
+      // text-only provider 本身不带工具，这里只需应用 prompt 覆盖（摘要不带
+      // agent 人设）；覆盖只作用于本次解析副本。
+      agentConfig: options?.prompt !== undefined
+        ? { ...agentConfig, prompt: options.prompt }
+        : agentConfig,
       fetchImpl: args.fetchImpl,
       requestTimeoutMs: DESKTOP_REMOTE_REQUEST_TIMEOUT_MS,
-    })),
+    })), ...(options?.textOnly ? { textOnly: true as const } : {}) }),
     executeTool: rejectDesktopTextOnlyAgentRuntimeToolCall,
   });
 }
@@ -960,6 +994,9 @@ export function createDesktopAgentRuntimeActions(args: {
   runtimeContext?: Record<string, any> | null;
   parentAgentRef?: string;
   runChildDesktopTurn?: DesktopStartAgentRunChildRunner;
+  /** 凭据解析注入（与 CLI adapter 同构）：生产用默认值，测试可注入 mock。 */
+  apiKeyRefResolver?: ApiKeyRefResolver;
+  oauthTokenStore?: OAuthTokenStore;
 }): DesktopAgentRuntimeActions {
   let activeAgentToolNames: string[] = [];
   let activeEnv = args.env;
@@ -995,7 +1032,7 @@ export function createDesktopAgentRuntimeActions(args: {
     createId: args.createId,
     getWorkspaceRoot: () => workspaceRoot,
     getWorkspaceAuthorized: () => workspaceAuthority.kind === "authorized",
-    resolveProvider: async (agentConfig) => {
+    resolveProvider: async (agentConfig, options) => {
       const currentRunPolicy = resolveCurrentRunRuntimeToolPolicy(agentConfig);
       activeEnv = resolveLocalRuntimeEnvFromPolicy(args.env, currentRunPolicy);
 
@@ -1060,28 +1097,29 @@ export function createDesktopAgentRuntimeActions(args: {
       // 强制工具层（当前为空）跨所有环境、所有模式注入。
       // declared-only / 默认 agent 空工具的分支也能拿到 FORCED 层。
       requestedToolNames = [...new Set([...requestedToolNames, ...FORCED_TOOLS])];
-      // ask_user 在桌面端不支持：desktop-runtime 没有 requestUserChoice 交互
-      // 通道，也没有 AskChoice 面板渲染（Web/TUI 默认注入，桌面端剥离）。
-      // 复用 INTERACTION_REQUIRED_TOOL_NAMES
-      // （与子任务剥离共用同一集合，见 agentRunIsolation.ts）：
-      // ① 避免「声明了但调用即错」；② 避免 chrome-only agent 声明 ask_user 后
-      // 把 nonForcedNames 判定翻转成全工作区模式（意外暴露 shell 工具）。
+      // 桌面本地剥离集合（Block 3b）：桌面现在有 action gate 通道
+      // （SSE `action_gate` 帧 + /api/desktop/agent-runtime/action-gate/:gateId），
+      // `secret-request` 可以走面板，只有 `ask_user` 仍无宿主渲染（AskChoice
+      // 面板仅 Web/TUI 有）。此处用桌面本地常量，不改共享的
+      // INTERACTION_REQUIRED_TOOL_NAMES 本身（subtask 剥离见
+      // agent-runtime/agentRunIsolation.ts，保持两者都剥，不动）。
+      const desktopStrippedInteractionTools = new Set(["ask_user"]);
       requestedToolNames = requestedToolNames.filter(
-        (name) => !INTERACTION_REQUIRED_TOOL_NAMES.has(name),
+        (name) => !desktopStrippedInteractionTools.has(name),
       );
       // 系统内置 Skill 全局开关：用户在设置页关闭「联网搜索」等内置 skill 后，
-      // 从工具面过滤掉对应 pack 的工具。桌面端从本地 settings record 读
+      // 从工具面过滤掉对应 pack 的工具。桌面端从账号 settings record 读
       // systemBuiltinSkills，与 Web/CLI 端行为统一。best-effort，读失败默认全开。
+      // 读取走 desktopAccountSettings：按 TTL 与服务器对齐（本地副本不再永久陈旧）。
       try {
         const userId = resolveDesktopAgentRuntimeUserId(args.env);
-        const settingsRecord = await args.store.read(
-          createUserKey.settings(userId),
-          { remote: false },
-        );
-        const systemBuiltinSkills =
-          settingsRecord && typeof settingsRecord === "object"
-            ? (settingsRecord as any).systemBuiltinSkills ?? null
-            : null;
+        const settingsRecord = await readDesktopAccountSettings({
+          store: args.store,
+          userId,
+        });
+        const systemBuiltinSkills = settingsRecord
+          ? (settingsRecord as any).systemBuiltinSkills ?? null
+          : null;
         requestedToolNames = applySystemBuiltinSkillFilter(
           requestedToolNames,
           systemBuiltinSkills,
@@ -1108,7 +1146,26 @@ export function createDesktopAgentRuntimeActions(args: {
         },
       ).finalToolNames;
 
-      activeAgentToolNames = buildDesktopLocalPolicyToolNames({
+      // Provider 解析覆盖（AgentRuntimeProviderResolveOptions）：摘要这类纯文本
+      // 补全请求空工具面时，在这里收口——上面的默认工具面扩展（默认本机/联网
+      // 工具、能力包、disabledTools、runtimeContext 约束）全部跑完之后直接覆盖，
+      // 避免任何一道下游加工把工具补回来。
+      //
+      // `useDeclaredToolNamesOnly` 必须置 **true**（不是复位成 false）：它为 false
+      // 时 buildDesktopLocalWorkspaceToolset 会走历史默认扩展，把刚清空的工作区
+      // 工具又加回来——这正是「覆盖写了但请求里仍有工具」的成因。
+      if (options?.textOnly || options?.toolNames !== undefined) {
+        requestedToolNames = options?.textOnly ? [] : options!.toolNames!;
+        useDeclaredToolNamesOnly = true;
+      }
+
+      const executionLimits = resolveLocalWorkspaceExecutorOptionsFromPolicy(currentRunPolicy);
+      // 请求级执行状态：摘要等纯文本补全的覆盖解析（toolNames: []）只作用于
+      // 本次请求，不能更新主循环共享的 activeAgentToolNames / executors——
+      // 否则轮内压缩后主循环的工具调用会被 localToolPolicy 以「outside the
+      // final run tool surface」拒绝（实测：普通解析后 execShell 成功，摘要
+      // 解析后再调用同一工具即失败）。
+      const requestActiveToolNames = buildDesktopLocalPolicyToolNames({
         toolNames: requestedToolNames,
         env: activeEnv,
         useDeclaredToolNamesOnly:
@@ -1116,8 +1173,7 @@ export function createDesktopAgentRuntimeActions(args: {
           args.runtimeContext?.allowedToolNames !== undefined ||
           args.runtimeContext?.blockedToolNames !== undefined,
       });
-      const executionLimits = resolveLocalWorkspaceExecutorOptionsFromPolicy(currentRunPolicy);
-      executors = buildDesktopLocalToolExecutors({
+      const requestExecutors = buildDesktopLocalToolExecutors({
         toolNames: requestedToolNames,
         env: activeEnv,
         store: args.store,
@@ -1133,11 +1189,24 @@ export function createDesktopAgentRuntimeActions(args: {
         createId: args.createId,
         runChildDesktopTurn: args.runChildDesktopTurn,
       });
-      return resolveDesktopConfiguredProvider({
+      // 普通解析：更新共享执行状态，供主循环后续工具调用与 actions.executeTool
+      // 使用；覆盖解析：保持共享状态逐字不变（主轮配置不被改动）。
+      if (!options?.textOnly && options?.toolNames === undefined) {
+        activeAgentToolNames = requestActiveToolNames;
+        executors = requestExecutors;
+      }
+      // prompt 覆盖只作用于本次解析副本（摘要不带 agent 人设）；工具面推导与
+      // 执行器装配用请求级状态，主轮配置不被改动。
+      const resolvedAgentConfig = options?.prompt !== undefined
+        ? { ...agentConfig, prompt: options.prompt }
+        : agentConfig;
+      const resolvedProvider = await resolveDesktopConfiguredProvider({
         env: args.env,
-        agentConfig,
+        agentConfig: resolvedAgentConfig,
         fetchImpl: args.fetchImpl,
         requestTimeoutMs: DESKTOP_REMOTE_REQUEST_TIMEOUT_MS,
+        ...(args.apiKeyRefResolver ? { apiKeyRefResolver: args.apiKeyRefResolver } : {}),
+        ...(args.oauthTokenStore ? { oauthTokenStore: args.oauthTokenStore } : {}),
         tools: buildDesktopOpenAiTools({
           toolNames: requestedToolNames,
           env: activeEnv,
@@ -1145,18 +1214,19 @@ export function createDesktopAgentRuntimeActions(args: {
         }),
         // Cursor drives its own inline exec loop, so hand it the same tool
         // executor the host adapter uses. Other providers ignore this field.
-        executeTool: (call) => executeLocalToolWithPolicy({
+        ...(options?.textOnly ? {} : { executeTool: (call: AgentRuntimeToolCallInput) => executeLocalToolWithPolicy({
           blockDestructiveWithoutConfirmation: true,
           env: activeEnv,
-          agentToolNames: activeAgentToolNames,
-          runToolNames: activeAgentToolNames,
+          agentToolNames: requestActiveToolNames,
+          runToolNames: requestActiveToolNames,
           call,
           executors,
           // 分发前参数闸门：只覆盖 agent-runtime 工具族（workspace + nolo
           // workspace）；registry 工具有各自的前置 guard 语义，不在此拦截。
           toolParametersIndex: getAgentRuntimeToolParametersIndex(),
-        }),
+        }) }),
       });
+      return options?.textOnly ? { ...resolvedProvider, textOnly: true as const } : resolvedProvider;
     },
     executeTool: (call) => executeLocalToolWithPolicy({
       // 用户面前的运行时：确认通道没接上不等于用户默许破坏性命令。
@@ -1210,12 +1280,14 @@ export async function runDesktopTextOnlyAgentRuntimeTurn(
     adapter,
     agentRef: input.agentRef,
     input: input.input,
+    userMessages: input.userMessages,
     runtimeContext: input.runtimeContext,
     continueDialogId: input.continueDialogId,
     onTextDelta: input.onTextDelta,
     onToolEvent: input.onToolEvent,
     onReasoningDelta: input.onReasoningDelta,
     onLoopEvent: input.onLoopEvent,
+    ...(input.onActionGate ? { onActionGate: input.onActionGate } : {}),
     abortSignal: input.signal,
     compactionTimeoutMs: input.compactionTimeoutMs,
   });
@@ -1380,12 +1452,27 @@ export async function runDesktopAgentRuntimeTurn(
 
   const turnSpaceId = input.spaceId ?? parentSpaceId;
   const turnContextReadSource = {
-    readRecord: async (dbKey: string) =>
-      cachedSpaceRecord !== undefined &&
-      turnSpaceId &&
-      dbKey === spaceRecordKey(turnSpaceId)
-        ? cachedSpaceRecord
-        : readRemoteRecord(dbKey),
+    readRecord: async (dbKey: string) => {
+      if (
+        cachedSpaceRecord !== undefined &&
+        turnSpaceId &&
+        dbKey === spaceRecordKey(turnSpaceId)
+      ) {
+        return cachedSpaceRecord;
+      }
+      // 账号级 settings（globalPrompt / 响应语言偏好）走 desktopAccountSettings：
+      // 按 TTL 与服务器对齐，本地副本不再永久陈旧；远端不可用则回退本地副本。
+      if (
+        dialogRecordUserId &&
+        dbKey === createUserKey.settings(dialogRecordUserId)
+      ) {
+        return (await readDesktopAccountSettings({
+          store: input.store,
+          userId: dialogRecordUserId,
+        })) as Record<string, unknown> | null;
+      }
+      return readRemoteRecord(dbKey);
+    },
   };
   const spaceContextLayer = await buildSpaceContextLayer({
     source: turnContextReadSource,
@@ -1616,6 +1703,7 @@ export async function runDesktopAgentRuntimeTurn(
     adapter,
     agentRef: input.agentRef,
     input: input.input,
+    userMessages: input.userMessages,
     runtimeContext: input.runtimeContext,
     continueDialogId: input.continueDialogId,
     spaceId: turnSpaceId,
@@ -1625,6 +1713,7 @@ export async function runDesktopAgentRuntimeTurn(
     onToolEvent: input.onToolEvent,
     onReasoningDelta,
     onLoopEvent: input.onLoopEvent,
+    ...(input.onActionGate ? { onActionGate: input.onActionGate } : {}),
     abortSignal: input.signal,
     compactionTimeoutMs: input.compactionTimeoutMs,
   });

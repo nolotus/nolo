@@ -73,6 +73,8 @@ export interface DialogSubjectRef {
 }
 
 export interface DialogConfig {
+  /** Written only after trusted startAgentRun dispatch; generic lineage is not proof. */
+  dispatchSpeedProvenance?: import("../ai/agent/dispatchSpeedProvenance").DispatchSpeedProvenance;
   id: string; // 对话的唯一标识符/路径
   type: DataType.DIALOG; // 数据类型标记
   title: string; // 对话标题
@@ -91,6 +93,11 @@ export interface DialogConfig {
   createdAt: string; // 创建时间戳
   updatedAt: string; // 最后更新时间戳
   dbKey?: string;
+  /**
+   * 记录所有者：写入路径落库的 userId（见 chat/dialog/actions/createDialogAction）。
+   * owner 与 dialogId 都可能含连字符，key 解析不可靠时以此字段为准。
+   */
+  userId?: string;
   /** 对话级临时挂载的引用（skill/instruction/knowledge），与 agent.references 同语义，随对话生效 */
   extraReferences?: ReferenceItem[];
   spaceId?: string;
@@ -292,7 +299,8 @@ export interface Agent {
   reasoning_effort?: string;
   enableThinking?: boolean;
   thinkingBudget?: number;
-  updatedAt: string;
+  /** 最后更新时间：运行时写入 Date.now() 毫秒数（agentSlice），历史与服务端投影里也存在 ISO 字符串。 */
+  updatedAt: number | string;
   createdAt: number;
   categoryId?: string;
   spaceId?: string;

@@ -1,3 +1,4 @@
+import { describePlatformRequestBudget } from "../../../agent-runtime/platformChatProvider";
 /**
  * transport 分支：平台代理（nolo server 中转）
  *
@@ -63,6 +64,7 @@ export const resolvePlatformProxyTransport: ProviderResolver = async (ctx) => {
     );
     return {
       model: providerConfig.model,
+      requestBudget: describePlatformRequestBudget({ providerConfig, tools }),
       complete: async (messages, options) => {
         // 调用方可提供 requestId 做日志/服务端归因关联（compaction attempt
         // 走这条）；缺省仍是每次调用一个随机 id，行为不变。
@@ -112,6 +114,7 @@ export const resolvePlatformProxyTransport: ProviderResolver = async (ctx) => {
             {
               sleep: deps.sleep,
               loopbackRequest,
+              ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
               // A chat POST is not safe to replay after an ambiguous network or
               // gateway failure: the server/provider may already have accepted
               // it. The client only waits through the server's explicit pre-

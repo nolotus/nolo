@@ -45,6 +45,13 @@ export type ChatQueueRuntime = {
 /**
  * Create a chat queue runtime. Optionally seed an initial state (useful for
  * tests or for hydrating from persisted Redux state during the migration).
+ * Opt into user batching with `{ ...initialChatQueueState, drainMode: "user-batch" }`.
+ * `drain-batch-ready` is a claim, not consumption: acknowledge with
+ * `batch-accepted` only after durable admission to ONE turn. On admission failure,
+ * send `batch-failed`; all requests remain queued and draining pauses.
+ * The runtime has no persistence. Hosts must save message identities/payloads
+ * before enqueue, restore pending requests on reload, and reconcile any in-flight
+ * claim against durable turn admission before retrying it.
  */
 export function createChatQueueRuntime(
   initialState: ChatQueueState = initialChatQueueState

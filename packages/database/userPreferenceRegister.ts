@@ -19,6 +19,7 @@ export interface UserPreferenceRegisterRecord<T = unknown> {
   schemaVersion: 1;
   userId: string;
   value: T | null;
+  authorityEpoch?: string;
   opId: string;
   createdAt: number;
   updatedAt: number;
@@ -94,15 +95,19 @@ export const buildAuthorityHomePreferenceRegisterRecord = ({
   userId,
   authorityServer,
   previousRecord,
+  authorityEpoch,
 }: {
   userId: string;
   authorityServer: string | null;
+  authorityEpoch?: string;
   previousRecord?: Partial<UserPreferenceRegisterRecord<string>> | null;
-}) =>
-  buildUserPreferenceRegisterRecord<string>({
+}): UserPreferenceRegisterRecord<string> => ({
+  ...buildUserPreferenceRegisterRecord<string>({
     userId,
     preferenceName: USER_PREFERENCE_NAMES.AUTHORITY_HOME,
     value: normalizeAuthorityServer(authorityServer),
     previousRecord,
-  });
+  }),
+  ...(authorityEpoch ? { authorityEpoch } : {}),
+});
 

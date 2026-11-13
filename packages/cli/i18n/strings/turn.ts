@@ -31,13 +31,45 @@ export const turnStrings = {
     zh: "输出 {0}",
   },
   // --- Ask choice (ask_user) ------------------------------------------
-  askChoiceTitle: {
-    en: "question",
-    zh: "问题",
+  askChoiceHintMove: {
+    en: "↑↓ select",
+    zh: "↑↓ 选择",
   },
-  askChoiceScrollHint: {
-    en: "↑ Shift+wheel scrolls back terminal history",
-    zh: "↑ Shift+滚轮可回看上方消息",
+  askChoiceHintPick: {
+    en: "Enter pick",
+    zh: "Enter 选择",
+  },
+  askChoiceHintToggle: {
+    en: "Enter toggle",
+    zh: "Enter 切换",
+  },
+  askChoiceHintSkip: {
+    en: "skip",
+    zh: "可跳过",
+  },
+  askChoiceHintSend: {
+    en: "↓ Done sends",
+    zh: "↓ 完成发送",
+  },
+  askChoiceHintOther: {
+    en: "Other: text",
+    zh: "其他可输入",
+  },
+  askChoiceHintTab: {
+    en: "Tab",
+    zh: "Tab 切换",
+  },
+  askChoiceHintCancel: {
+    en: "Esc cancels",
+    zh: "Esc 取消",
+  },
+  askChoiceHintWheelHistory: {
+    en: "wheel: history",
+    zh: "滚轮看上文",
+  },
+  askChoiceHintWheelSelect: {
+    en: "wheel: list",
+    zh: "滚轮选择",
   },
   askChoiceSubmit: {
     en: "submit ↓",
@@ -54,30 +86,6 @@ export const turnStrings = {
   askChoiceOtherLabel: {
     en: "Other",
     zh: "其他",
-  },
-  askChoiceHintSingle: {
-    en: "Enter/Space picks · single question sends · multi-question jumps to the next unanswered · Enter in Other confirms and continues",
-    zh: "Enter/空格 选择：单题直接发送、多题跳到下一未答题 · 其他输入后 Enter 确认并继续",
-  },
-  askChoiceHintOptional: {
-    en: "Optional question — Enter/Space picks (one step) · skip if you don't want to answer",
-    zh: "可选题 — Enter/空格 选择即完成 · 不想回答可跳过",
-  },
-  askChoiceHintMulti: {
-    en: "Enter/Space toggles · ↓ to Done row, Enter sends",
-    zh: "Enter/空格 切换选中 · ↓ 到完成行 Enter 发送",
-  },
-  askChoiceFooterSingle: {
-    en: "↵ pick/send · tab switch · esc cancel",
-    zh: "↵ 选择/发送 · tab 切换 · esc 取消",
-  },
-  askChoiceFooterSkip: {
-    en: "↵ pick/send · ↓ skip row ↵ skip · tab switch · esc cancel",
-    zh: "↵ 选择/发送 · ↓ 跳过行 ↵ 跳过 · tab 切换 · esc 取消",
-  },
-  askChoiceFooterMulti: {
-    en: "↵ toggle · ↓ done row ↵ send · ctrl+s send · tab switch · esc cancel",
-    zh: "↵ 切换 · ↓ 完成行 ↵ 发送 · ctrl+s 发送 · tab 切换 · esc 取消",
   },
   askChoiceValidationRequired: {
     en: "Required questions are unanswered — jumped to the first one.",

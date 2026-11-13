@@ -16,13 +16,24 @@ export type AccountChatDisplayPreferences = Readonly<{
   showThinking: boolean;
   showScrollToTopButton: boolean;
   showScrollToBottomButton: boolean;
+  // 默认关闭以降噪：新建文件仅显示路径，不展示正文和 Diff 切换。
+  showNewFileDiff: boolean;
+  // 默认关闭以降噪：tree 保留命令和退出码，输出区显示隐藏提示。
+  showShellTreeOutput: boolean;
 }>;
+
+export const ACCOUNT_CHAT_DISPLAY_PREFERENCE_KEYS = [
+  "showThinking", "showScrollToTopButton", "showScrollToBottomButton",
+  "showNewFileDiff", "showShellTreeOutput",
+] as const satisfies readonly (keyof AccountChatDisplayPreferences)[];
 
 export const DEFAULT_ACCOUNT_CHAT_DISPLAY_PREFERENCES: AccountChatDisplayPreferences =
   Object.freeze({
     showThinking: true,
     showScrollToTopButton: false,
     showScrollToBottomButton: false,
+    showNewFileDiff: false,
+    showShellTreeOutput: false,
   });
 
 export const createAccountChatDisplayOwner = () => {
@@ -50,9 +61,7 @@ export const createAccountChatDisplayOwner = () => {
       if (!expectedAccountId || expectedAccountId !== accountId) return false;
       const next = { ...snapshot, ...changes };
       if (
-        next.showThinking === snapshot.showThinking &&
-        next.showScrollToTopButton === snapshot.showScrollToTopButton &&
-        next.showScrollToBottomButton === snapshot.showScrollToBottomButton
+        ACCOUNT_CHAT_DISPLAY_PREFERENCE_KEYS.every((key) => next[key] === snapshot[key])
       ) return true;
       snapshot = Object.freeze(next);
       emit();
@@ -84,7 +93,7 @@ export function getAccountChatDisplayOwner(getState: Function): AccountChatDispl
 
 export function pickAccountChatDisplayPreferences(value: Record<string, unknown>): Partial<AccountChatDisplayPreferences> {
   const result: Partial<Record<keyof AccountChatDisplayPreferences, boolean>> = {};
-  for (const key of ["showThinking", "showScrollToTopButton", "showScrollToBottomButton"] as const) {
+  for (const key of ACCOUNT_CHAT_DISPLAY_PREFERENCE_KEYS) {
     if (typeof value[key] === "boolean") result[key] = value[key] as boolean;
   }
   return result;
@@ -132,6 +141,7 @@ export function useAccountChatDisplayPreferences(): AccountChatDisplayPreference
 
 /** Keep legacy server records readable, but never return chat keys to Redux. */
 export const omitAccountChatDisplayPreferences = <T extends object>(value: T): Omit<T, keyof AccountChatDisplayPreferences> => {
-  const { showThinking: _thinking, showScrollToTopButton: _top, showScrollToBottomButton: _bottom, ...rest } = value as Record<string, unknown>;
+  const rest = { ...value } as Record<string, unknown>;
+  for (const key of ACCOUNT_CHAT_DISPLAY_PREFERENCE_KEYS) delete rest[key];
   return rest as Omit<T, keyof AccountChatDisplayPreferences>;
 };

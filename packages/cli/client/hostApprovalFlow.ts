@@ -66,6 +66,8 @@ export type HostApprovalCard = {
   approvalId: string;
   /** Connector action name (`click`, `type`, `eval_script`, …) — shown verbatim. */
   actionLabel: string;
+  /** Connector-sanitized control name; never the typed input value. */
+  target?: string;
   /** Tab origin the action targets. Empty string when the connector could not resolve one. */
   origin: string;
   /** Connector-provided summary/script, passed through as-is (see clipApprovalSummary). */
@@ -149,6 +151,7 @@ function normalizePendingApproval(raw: unknown): PendingHostApproval | null {
   return {
     approvalId,
     actionLabel: asTrimmedString(raw.action) || "unknown",
+    ...(asTrimmedString(raw.target) ? { target: asTrimmedString(raw.target) } : {}),
     origin: asTrimmedString(raw.origin),
     // Passed through verbatim (the connector's preview already has the identity line, the head and
     // the stated tail); only an upper-bound guard may touch it, see clipApprovalSummary.
@@ -235,9 +238,8 @@ export function withApprovalId(
  *
  * The extension reads `hostApproval: true` on an `eval_script`/click/type request and, instead of
  * opening `approve.html`, only creates the pending record — the host then answers it in the
- * conversation. Set it only when a renderer is actually installed: with no renderer there is nobody
- * to ask, so the window has to stay the way it is (and a pending record nobody answers would just
- * burn the 60 s window).
+ * conversation. Keep it set even without a renderer: with no renderer there is nobody
+ * to ask, so the request stays pending until expiry without any browser fallback.
  */
 export function withHostApprovalRequest(
   call: AgentRuntimeToolCallInput,
@@ -307,7 +309,7 @@ function approvalFailure(
  *
  * Contract pins that the tests lock down:
  *  - no `awaitHostApproval` injected (non-TTY, old host) ⇒ the original `USER_APPROVAL_PENDING`
- *    result is returned untouched, so the browser popup fallback still works;
+ *    result is returned untouched, without executing or opening any browser fallback;
  *  - `allow_once` ⇒ submit, then re-run the *same* call with `approvalId` exactly once. A second
  *    pending verdict is returned as-is — no loop, no escalation;
  *  - `deny` ⇒ submit the denial and answer `USER_APPROVAL_DENIED`; the action is never retried;
@@ -325,9 +327,9 @@ export async function runConnectorToolWithHostApproval(args: {
 }): Promise<AgentRuntimeToolResult> {
   // With a host renderer installed the answer is taken in the conversation, so the connector must
   // not also open a browser window: `hostApproval: true` makes it create the pending record only.
-  // No renderer ⇒ the request goes out untouched ⇒ the window stays the fallback it always was.
+  // No renderer ⇒ pending only. The flag also suppresses popups on older connectors.
   const first = await args.execute(
-    args.awaitHostApproval ? withHostApprovalRequest(args.call) : args.call,
+    withHostApprovalRequest(args.call),
   );
   const pending = parsePendingApprovalResult(first);
   if (!pending || !args.awaitHostApproval) return first;
@@ -445,7 +447,7 @@ export function createHostApprovalCardQueue() {
  * The chrome tool table is built deep inside the local runtime, long before (and far away from) the
  * TUI's composer/output plumbing, so the TUI registers its renderer here once per session and the
  * executor reads it *per call*. No renderer registered ⇒ `undefined` ⇒ the executor behaves exactly
- * as before (pending verdict returned, browser popup is still the fallback).
+ * safely (pending verdict returned, no browser fallback).
  */
 export type HostApprovalRenderer = (
   card: HostApprovalCard,

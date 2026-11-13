@@ -30,7 +30,7 @@ export type AgentThreadAdmissionDecision =
     }
   | {
       allowed: false;
-      reason: "max_concurrent_reached" | "agent_temporarily_unavailable" | "credential_concurrency_exhausted" | "admission_store_unavailable";
+      reason: "max_concurrent_reached" | "credential_concurrency_exhausted" | "admission_store_unavailable";
       activeThreadCount: number;
       maxConcurrent: number;
     };

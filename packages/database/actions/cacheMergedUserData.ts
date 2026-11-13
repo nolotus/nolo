@@ -5,6 +5,7 @@ import { asTrimmedString } from "core/trimmedString";
 
 import { fetchFromClientDb } from "./common";
 import { isTombstoneRecord, prepareTombstoneRecordForCache, shouldReplaceWithNextRecord } from "../tombstones";
+import { isPageBodyDowngrade } from "./readResolution";
 
 type CacheableUserDataRecord = {
   dbKey?: string;
@@ -22,6 +23,13 @@ export const shouldUpdateLocalUserDataCache = (
 
   if (!localRecord || typeof localRecord !== "object") {
     return true;
+  }
+
+  // 页面元数据投影（summary：无 slateData / content）不得覆盖已缓存的完整正文，
+  // 也不得把较新的 summary 时间盖到旧正文上冒充"已确认的新正文"。
+  // 列表展示仍消费 summary —— 这里只跳过正文降级的缓存写入。
+  if (isPageBodyDowngrade(nextRecord, localRecord)) {
+    return false;
   }
 
   if (shouldReplaceWithNextRecord(nextRecord, localRecord)) {

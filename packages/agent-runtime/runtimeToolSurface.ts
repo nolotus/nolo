@@ -89,6 +89,8 @@ export const HIGH_RISK_MUTATION_TOOL_NAMES = [
   // 编排副作用：startAgentRun 会另起一次 run（子 run 的只读与否由调用方参数决定），
   // controlAgentRun 能追加指令/停止它；只读 run 不应拿到这两个（review A-1）。
   "startAgentRun",
+  "requestTaskReview",
+  "recordTaskReviewDecision",
   "controlAgentRun",
   // 受控云端执行：在用户拥有的云资源上跑任意命令，不可重放、副作用在云端。
   // 硬边界：它永不进 DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS（见该清单注释），

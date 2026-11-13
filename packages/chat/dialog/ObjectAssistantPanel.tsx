@@ -1,9 +1,9 @@
-import React, { memo, useEffect, useMemo, useState } from "react";
+import React, { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { LuBot } from "react-icons/lu";
-import { useAppDispatch, useAppSelector } from "app/store";
+import { useAppSelector } from "app/store";
 import { useCurrentUser } from "identity";
-import { readAndWait, write, selectById } from "database/dbSlice";
+import { selectById } from "database/dbSlice";
 import { useDocState, getDocState } from "render/page/docStore";
 import {
   useCurrentTable,
@@ -21,8 +21,6 @@ import * as stylex from "@stylexjs/stylex";
 import { dialogPageStyles } from "./dialogPageStyles";
 import "./dialogStylexEscapeHatch.css";
 import {
-  alignBuiltinObjectAssistantRecord,
-  buildBuiltinObjectAssistantAgent,
   buildObjectAssistantRuntimeOptions,
   getObjectAssistantUiConfig,
   getPreferredObjectAssistantKey,
@@ -63,7 +61,6 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
   contentKey,
 }) => {
   const { t } = useTranslation(["chat"]);
-  const dispatch = useAppDispatch();
   const currentUser = useCurrentUser();
   // doc state now lives in the standalone docStore (peeled out of Redux).
   const doc = useDocState();
@@ -89,10 +86,10 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
     }
   );
 
-  const [preferredAgentKeys, setPreferredAgentKeys] = useState<string[]>(
-    kind === "app" ? getPreferredObjectAssistantKey(kind, currentUser?.userId) : []
-  );
-  const [isPreparingPreferredAgent, setIsPreparingPreferredAgent] = useState(false);
+  // app 分支保持原有预置 agent 逻辑不变；page/table/image/file 改用用户自己的
+  // agent（收藏 / 默认逻辑），不再现场创建 objectAssistant-<kind> 预置记录。
+  const preferredAgentKeys =
+    kind === "app" ? getPreferredObjectAssistantKey(kind, currentUser?.userId) : [];
   const ui = getObjectAssistantUiConfig(kind);
 
   // page/table/image/file 的对象技能作为对话级引用挂载：composer 切换到用户自己的 agent 后，
@@ -101,53 +98,6 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
     if (!currentUser?.userId || kind === "app") return undefined;
     return [buildBuiltinObjectSkillReference(OBJECT_ASSISTANT_TO_SKILL[kind], currentUser.userId)];
   }, [kind, currentUser?.userId]);
-
-  useEffect(() => {
-    if (kind === "app") {
-      setPreferredAgentKeys(getPreferredObjectAssistantKey(kind, currentUser?.userId));
-      setIsPreparingPreferredAgent(false);
-      return;
-    }
-    if (!currentUser?.userId) {
-      setPreferredAgentKeys([]);
-      setIsPreparingPreferredAgent(false);
-      return;
-    }
-
-    const agent = buildBuiltinObjectAssistantAgent(kind, currentUser.userId);
-    let cancelled = false;
-    setIsPreparingPreferredAgent(true);
-
-    void (async () => {
-      try {
-        const existing = await dispatch(readAndWait(agent.dbKey)).unwrap().catch(() => null);
-        if (!existing) {
-          await dispatch(write({ data: agent, customKey: agent.dbKey })).unwrap();
-        } else {
-          const repaired = alignBuiltinObjectAssistantRecord(existing);
-          if (repaired) {
-            await dispatch(write({ data: repaired, customKey: agent.dbKey })).unwrap();
-          }
-        }
-        if (!cancelled) {
-          setPreferredAgentKeys([agent.dbKey]);
-        }
-      } catch (error) {
-        console.error("Failed to prepare object assistant agent:", error);
-        if (!cancelled) {
-          setPreferredAgentKeys([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsPreparingPreferredAgent(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser?.userId, dispatch, kind]);
 
   const runtimeOptions: AgentRuntimeOptions | undefined = useMemo(() => {
     if (kind === "app") {
@@ -274,15 +224,6 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
           "chat:appAssistantNeedsRecovery",
           "这版应用目前还不适合直接做小范围修改。我可以先按当前页面整理成可继续编辑的版本，再继续帮你改。"
         )}
-      />
-    );
-  }
-
-  if (kind !== "app" && isPreparingPreferredAgent && preferredAgentKeys.length === 0) {
-    return (
-      <ObjectAssistantShell
-        message={t(`chat:${kind}AssistantPreparing`, `正在准备${ui.panelTitle}…`)}
-        loading
       />
     );
   }

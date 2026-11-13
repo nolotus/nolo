@@ -64,6 +64,8 @@ export type RemoteTaskState = {
   /** `null` = 显式未知（未知 ≠ 缺失，§8.2） */
   cost?: RemoteTaskCostView;
   cleanup?: RemoteTaskCleanupView;
+  /** 兼容 core 顶层 TTL 投影；当前服务端仅上报 cleanup TTL，不生产此顶层字段。 */
+  ttlExpiresAt?: RemoteTaskView["ttlExpiresAt"];
   logs?: RemoteTaskLogsMeta;
 };
 
@@ -623,8 +625,7 @@ export function getRemoteTaskTtlExpiresAt(runId: string, now = clock()): number 
   if (!record) return undefined;
   const rawExpiresAt =
     record.task.cleanup?.ttlExpiresAt ??
-    record.task.ttlExpiresAt ??
-    (record.task as { ttlExpiresAt?: unknown }).ttlExpiresAt;
+    record.task.ttlExpiresAt;
   if (rawExpiresAt) {
     const parsed = typeof rawExpiresAt === "number"
       ? rawExpiresAt

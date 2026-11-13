@@ -92,7 +92,7 @@ export const COMPACTION_SUMMARY_SYSTEM_PROMPT = `你是对话上下文压缩器�
    - 「卡点与需用户决定」：阻塞项卡在哪、需要用户提供什么（授权 / 凭据 / 决定），写清楚，不得含糊。
    - 「输入未覆盖」：压缩范围内查不到的关键信息（如初始原话、指定 id），必须写"输入中未见"，禁止脑补。
 3) 对话进展与待办以第一人称续作笔记的口吻写（"我做了…""用户要求…""下一步我需要…"），不要写成第三方观察报告。先极简概括旧上下文，再更详细记录最近进展、结论、分歧与下一步。对于声称已完成但尚未验证的工作（如工具调用返回成功但结果未人工确认），明确标注"（待验证）"——不要默认信任工具返回值。
-4) 文件操作清单：列出本次压缩范围内读取、写入、编辑过的文件路径及操作类型（如: - 读取: path/to/file；若未涉及文件操作写"无"）。
+4) 文件操作清单：按读取、写入、编辑列出路径（如: - 读取: path/to/file；未涉及则写"无"）。有长度约束时合并旧操作，省略无关读取。
 5) 忽略寒暄、重复尝试和无价值废话；**已放弃的方案/尝试**可以省略，但用户当初的意图与理由不可省略（见第 2 条）。
 6) 不要编造未出现的信息；不要开场白、结束语、markdown 代码块或额外章节；不要调用任何工具。`;
 
@@ -142,8 +142,19 @@ export function buildCompactionUserContent(args: {
   previousSummary: string;
   messagesText: string;
   fileOpsText?: string;
+  /** Request-local generation target, distinct from the transport hard cap. */
+  outputTokenBudget?: number;
 }): string {
-  const parts = [`【现有记忆】：\n${args.previousSummary || "(无)"}`];
+  const parts: string[] = [];
+  if (args.outputTokenBudget !== undefined) {
+    const budget = args.outputTokenBudget;
+    if (!Number.isFinite(budget) || budget < 1) throw new RangeError("Invalid summary output budget");
+    const limit = Math.floor(budget);
+    // Risk mitigation only, not evidence that output capacity caused a failure.
+    const target = Math.max(1, Math.min(2000, Math.floor(limit / 2)));
+    parts.push(`Summary target: ${target} tokens; hard output limit: ${limit} tokens. Complete 3 sections; merge old progress/files.`);
+  }
+  parts.push(`【现有记忆】：\n${args.previousSummary || "(无)"}`);
   if (args.fileOpsText !== undefined) {
     parts.push(`【文件操作清单】：\n${args.fileOpsText || "无"}`);
   }
@@ -241,6 +252,178 @@ export function formatFileOperationsFromMessages(
     edit: "编辑",
   };
   return allOps.map((op) => `- ${typeLabelMap[op.type]}: ${op.path}`).join("\n");
+}
+
+/** A bounded request is a lossy projection; the original messages remain in history. */
+export type CompactionRequestMessage = {
+  id: string;
+  role: string;
+  content: unknown;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id?: string;
+    function?: { name?: string; arguments?: unknown };
+    name?: string;
+  }>;
+};
+
+export type BoundedCompactionRequest<T extends CompactionRequestMessage> =
+  | { status: "ready"; promptContent: string; coveredMessages: T[];
+      summarizedBeforeId: string; inputTokens: number; outputTokenBudget: number; partial: boolean }
+  | { status: "blocked"; reason: "invalid-window" | "empty-input" | "no-budget" | "no-safe-group" | "group-too-large" };
+
+/** Head, evidence and tail are selected from the original, never from an
+ * already truncated projection. This is intentionally separate from the
+ * legacy formatter, whose no-evidence branch preserves its old head-only form. */
+function makeBoundedExcerpt(content: string): (maxChars: number) => string {
+  const evidence = selectEvidenceLines(content.split("\n"));
+  return (maxChars) => {
+    if (content.length <= maxChars) return content;
+    const marker = `\n[... ${content.length} chars projected ...]\n`;
+    const available = maxChars - marker.length;
+    if (available < 3) return marker.trim();
+    const evidenceCap = Math.floor(available * 0.2);
+    const selected: string[] = [];
+    let evidenceLength = 0;
+    for (const line of evidence) {
+      const cost = line.length + 1;
+      if (evidenceLength + cost > evidenceCap) continue;
+      selected.push(line);
+      evidenceLength += cost;
+    }
+    const remainder = available - evidenceLength;
+    const headLength = Math.ceil(remainder / 2);
+    const tailLength = Math.floor(remainder / 2);
+    return content.slice(0, headLength) + marker +
+      (selected.length ? selected.join("\n") + "\n" : "") +
+      (tailLength ? content.slice(-tailLength) : "");
+  };
+}
+
+/**
+ * Project the entire safe plan, retaining every message's role and order. Input
+ * counts use the shared estimator, not the provider's tokenizer. Original
+ * messages stay in history; projected message text (including user text) can be lossy.
+ */
+export function buildBoundedCompactionRequest<T extends CompactionRequestMessage>(args: {
+  msgsToCompress: T[];
+  previousSummary: string;
+  contextWindow: number;
+  canonicalizeToolName?: (name: string) => string;
+}): BoundedCompactionRequest<T> {
+  const { msgsToCompress: msgs, previousSummary, contextWindow } = args;
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return { status: "blocked", reason: "invalid-window" };
+  if (!msgs.length) return { status: "blocked", reason: "empty-input" };
+  const window = Math.floor(contextWindow);
+  const outputTokenBudget = Math.min(8192, Math.max(1, Math.floor(window / 4)));
+  const cap = Math.min(computeSummaryInputTokenCap(contextWindow), window - outputTokenBudget);
+  const systemTokens = estimateTokenCount(COMPACTION_SUMMARY_SYSTEM_PROMPT);
+
+  // Require the whole input to consist of closed tool groups, not just a safe prefix.
+  for (let i = 0; i < msgs.length;) {
+    const msg = msgs[i];
+    if (msg.role === "tool") return { status: "blocked", reason: "no-safe-group" };
+    const calls = msg.role === "assistant" && Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    if (!calls.length) {
+      i++;
+      continue;
+    }
+    const ids = calls.map((call) => call.id);
+    const hasIds = ids.every((id) => typeof id === "string" && id.length > 0);
+    // Legacy positional pairing is allowed only when every call and result
+    // omits its ID. Empty or mixed IDs are not a valid pairing mode.
+    if ((!hasIds && ids.some((id) => id !== undefined)) || (hasIds && new Set(ids).size !== ids.length)) {
+      return { status: "blocked", reason: "no-safe-group" };
+    }
+    const remaining = new Set(ids);
+    let count = 0;
+    i++;
+    while (i < msgs.length && msgs[i].role === "tool") {
+      const id = msgs[i].tool_call_id;
+      if (hasIds ? (!id || !remaining.delete(id)) : id !== undefined) {
+        return { status: "blocked", reason: "no-safe-group" };
+      }
+      count++;
+      i++;
+    }
+    if (count !== calls.length || (hasIds && remaining.size)) return { status: "blocked", reason: "no-safe-group" };
+  }
+
+  const canonicalize = args.canonicalizeToolName ?? ((name: string) => name);
+  const operations = new Map<string, FileOperation>();
+  for (const msg of msgs) {
+    if (!Array.isArray(msg.tool_calls)) continue;
+    for (const op of extractFileOperationsFromCalls(msg.tool_calls, canonicalize)) {
+      operations.set(JSON.stringify([op.type, op.path]), op);
+    }
+  }
+  const labelsByOperation = { read: "读取", write: "写入", edit: "编辑" };
+  const fileOpsText = [...operations.values()].map((op) => `- ${labelsByOperation[op.type]}: ${op.path}`).join("\n") || "无";
+  const note = "以下是有损投影，部分消息可能被截取；原文仍存历史。";
+  const omitted = "[... 内容已截取 ...]";
+  const contents = msgs.map((msg) => serializeMessageContent(msg.content) || formatMessageContentFallback(msg));
+  const excerpts = contents.map((content) => makeBoundedExcerpt(content));
+  const raw = contents.map((content, i) => msgs[i].role === "tool" ? excerpts[i]!(TOOL_RESULT_TRUNCATE_CHARS) : content);
+  // Anchors use coveredMessages, not prompt labels. Repeating long IDs here
+  // consumes the budget needed for actual content in thousand-message plans.
+  const labels = msgs.map((msg) => `${msg.role}: `);
+  const projected = msgs.map(() => omitted);
+  const makePrompt = () => buildCompactionUserContent({
+    previousSummary, fileOpsText, outputTokenBudget,
+    messagesText: `${note}\n${labels.map((label, i) => label + projected[i]).join("\n")}`,
+  });
+  const base = makePrompt();
+  const baseTokens = systemTokens + estimateTokenCount(base);
+  if (baseTokens > cap) return { status: "blocked", reason: "no-budget" };
+
+  // Allocate remaining tokens fairly: user intent gets weight 4, assistant 2,
+  // tool output 1. User text must also be projectable, or large requests make
+  // the mandatory base permanently exceed the cap. Short messages return
+  // their unused share. Estimating
+  // each addition separately rounds upward and therefore cannot exceed the cap.
+  const remaining = cap - baseTokens;
+  const demands = raw.map((text) => estimateTokenCount(text));
+  const weights = msgs.map((msg) => msg.role === "user" ? 4 : msg.role === "assistant" ? 2 : 1);
+  let low = 0;
+  let high = remaining + 1;
+  while (low + 1 < high) {
+    const mid = Math.floor((low + high) / 2);
+    const used = demands.reduce((sum, demand, i) => sum + Math.min(demand, mid * weights[i]), 0);
+    if (used <= remaining) low = mid;
+    else high = mid;
+  }
+  let extra = remaining - demands.reduce((sum, demand, i) => sum + Math.min(demand, low * weights[i]), 0);
+  for (let i = 0; i < msgs.length; i++) {
+    let allowance = Math.min(demands[i], low * weights[i]);
+    const bonus = Math.min(extra, demands[i] - allowance);
+    allowance += bonus;
+    extra -= bonus;
+    if (demands[i] <= allowance) {
+      projected[i] = raw[i];
+      continue;
+    }
+    // Search against the original content; count the actual marker and excerpt.
+    let lo = 0;
+    let hi = Math.min(contents[i].length, msgs[i].role === "tool" ? TOOL_RESULT_TRUNCATE_CHARS : contents[i].length);
+    let best = omitted;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const candidate = excerpts[i]!(mid);
+      if (estimateTokenCount(candidate) <= allowance) {
+        best = candidate;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    projected[i] = best;
+  }
+  const promptContent = makePrompt();
+  const inputTokens = systemTokens + estimateTokenCount(promptContent);
+  // Defensive check: never send a request exceeding the estimated budget.
+  if (inputTokens > cap) return { status: "blocked", reason: "no-budget" };
+  return { status: "ready", promptContent, coveredMessages: msgs.slice(),
+    summarizedBeforeId: msgs[msgs.length - 1].id, inputTokens, outputTokenBudget, partial: false };
 }
 
 // --- 工具结果截断（P0-2，学 Pi） ---
@@ -655,11 +838,10 @@ export type SummarySourceMetadata = {
 };
 
 export type SummarySourceMessageInput = {
-  id: string;
+  id?: string;
   role?: string;
   content?: unknown;
   tool_calls?: unknown;
-  [key: string]: unknown;
 };
 
 /**

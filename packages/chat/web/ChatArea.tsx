@@ -22,6 +22,8 @@ interface ChatAreaProps {
   runtimeOptions?: AgentRuntimeOptions;
   composerBlockedReason?: string;
   messagesClassName?: string;
+  /** 悬浮在消息列表容器内的覆盖层（对话页右上角动作菜单）。 */
+  messagesOverlay?: React.ReactNode;
   /** 可选：对象助手面板的 composer agent 切换器；不传则 composer 无变化。 */
   agentPicker?: AgentPickerControlProps;
 }
@@ -32,6 +34,7 @@ const ChatAreaComponent: React.FC<ChatAreaProps> = ({
   runtimeOptions,
   composerBlockedReason,
   messagesClassName,
+  messagesOverlay,
   agentPicker,
 }) => {
   const messageInputRef = useRef<MessageInputHandle>(null);
@@ -51,6 +54,7 @@ const ChatAreaComponent: React.FC<ChatAreaProps> = ({
         className={messagesClassName}
         style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}
       >
+        {messagesOverlay}
         <ChatErrorBoundary fallbackMessage="消息列表加载出错">
           <MessagesList
             dialogId={dialogId}

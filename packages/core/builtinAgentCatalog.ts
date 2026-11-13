@@ -113,7 +113,10 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01ECOMMERCEAG00000001PYQ2J",
     group: "builtin",
     name: "电商商品参数助手",
-    provider: "openai",
+    // provider 必须是 "nolo"（平台托管命名空间）：平台价只注册在 nolo 下，
+    // 写上游名 "openai" 会落零价虚拟模型（gpt-6-luna 在此口径下 cost=0 →
+    // 该 agent 的调用永久不计费）。同 01GPT56LUNPB 的既定约定。
+    provider: "nolo",
     model: "gpt-6-luna",
   },
   {

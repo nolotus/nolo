@@ -10,6 +10,7 @@
  * Only Node hosts (CLI localRuntimeAdapter, desktop turn service) import from
  * this module. The pure argument-parsing helpers stay in `noloWorkspaceTools.ts`.
  */
+import { isAgentSkillDisabled, type AgentSkillConfigSource } from "../ai/tools/agentSkillConfig";
 import { dialogMessageRange } from "../database/keys";
 import { localDialogMessageRecordToRuntimeMessage } from "../cli/client/localDialogRecords";
 import {
@@ -229,7 +230,13 @@ const nodeSpawnFallback: NoloSpawn = (options) => {
  * executor map alongside `buildNoloWorkspaceCliToolExecutors` — that wiring
  * lives outside this package per the agent-runtime boundary.
  */
-export function buildLoadSkillExecutor(args: { cwd: string }) {
+export function buildLoadSkillExecutor(args: {
+  cwd: string;
+  /** Trusted host configuration only; never read policy from tool arguments. */
+  agentSkillSource?: AgentSkillConfigSource | null;
+  /** Fresh local host policy. null or failure means unavailable, not unconfigured. */
+  resolveAgentSkillSource?: () => Promise<AgentSkillConfigSource | null>;
+}) {
   return async (call: { name: string; arguments: string }): Promise<{
     content: string;
     metadata?: Record<string, unknown>;
@@ -238,7 +245,7 @@ export function buildLoadSkillExecutor(args: { cwd: string }) {
     // A precise reference must never fall through to legacy name resolution.
     const referenceKeys = ["source", "slug", "projectBinding", "relativePath", "dbKey", "id", "skillId"];
     if (referenceKeys.some((key) => Object.hasOwn(parsed, key))) {
-      return loadPreciseSkill(args.cwd, parsed);
+      return loadPreciseSkill(args.cwd, parsed, args.agentSkillSource, args.resolveAgentSkillSource);
     }
     const name = noloStringArg(parsed.name ?? parsed.skillName ?? parsed.skill);
     if (!name) {
@@ -261,6 +268,8 @@ export function buildLoadSkillExecutor(args: { cwd: string }) {
       );
       const builtin = resolveBuiltinSkillByName(name);
       if (builtin) {
+        const denied = await rejectDisabledBuiltin(args.agentSkillSource, builtin.slug, name, args.resolveAgentSkillSource);
+        if (denied) return denied;
         return {
           content: `Skill "${name}" loaded inline. Follow its instructions.\n\n${builtin.content}`,
           // toolNames 进 metadata：回退面已扩到全注册表，其中授工具型 skill
@@ -299,7 +308,23 @@ export function buildLoadSkillExecutor(args: { cwd: string }) {
   };
 }
 
-async function loadPreciseSkill(cwd: string, parsed: Record<string, unknown>) {
+async function rejectDisabledBuiltin(source: AgentSkillConfigSource | null | undefined, slug: string, requestedName: string,
+  resolveSource?: () => Promise<AgentSkillConfigSource | null>) {
+  if (resolveSource) {
+    try { source = await resolveSource(); } catch { source = null; }
+    if (!source) return {
+      content: `Skill "${requestedName}" cannot be loaded: current agent policy is unavailable.`,
+      metadata: { loadSkill: true, resolved: false, builtin: true, policyUnavailable: true, slug, name: requestedName, requestedName },
+    };
+  }
+  if (!isAgentSkillDisabled(source, slug)) return null;
+  return {
+    content: `Skill "${requestedName}" 已被禁用：该能力在此 agent 上不可用，无法加载。`,
+    metadata: { loadSkill: true, resolved: false, builtin: true, disabled: true, slug, name: requestedName, requestedName },
+  };
+}
+
+async function loadPreciseSkill(cwd: string, parsed: Record<string, unknown>, agentSkillSource?: AgentSkillConfigSource | null, resolveAgentSkillSource?: () => Promise<AgentSkillConfigSource | null>) {
   const source = parsed.source;
   const has = (key: string) => Object.hasOwn(parsed, key);
   const reject = (reason: string) => ({
@@ -320,6 +345,8 @@ async function loadPreciseSkill(cwd: string, parsed: Record<string, unknown>) {
     const { listBuiltinSkills } = await import("ai/skills/builtinSkillRegistry");
     const builtin = listBuiltinSkills().find((entry) => entry.slug === parsed.slug);
     if (!builtin) return reject("builtin slug not found.");
+    const denied = await rejectDisabledBuiltin(agentSkillSource, builtin.slug, builtin.slug, resolveAgentSkillSource);
+    if (denied) return { ...denied, metadata: { ...denied.metadata, source } };
     return {
       content: `Skill "${builtin.slug}" loaded inline. Follow its instructions.\n\n${builtin.content}`,
       metadata: {

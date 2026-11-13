@@ -136,6 +136,10 @@ export const resolveBuiltinObjectAssistantKindByKey = (
   return null;
 };
 
+/**
+ * @deprecated 面板已改用用户自己的 agent，不再现场创建预置对象助手 agent。
+ * 历史对话按原样读取旧记录，不经过本函数；除测试外无调用方。
+ */
 export const buildBuiltinObjectAssistantAgent = (
   kind: BuiltinObjectAssistantKind,
   userId: string,
@@ -227,6 +231,10 @@ export const buildBuiltinObjectAssistantAgent = (
  * 自愈 D1/D4 价格政策：修复旧的内置对象助手价格快照。
  * provider/model 双守卫保证用户改过模型的记录不会被误清。
  */
+/**
+ * @deprecated 不再由面板 / createDialogAction 修复预置记录。历史对话按原样读取，
+ * 不经过本函数；除测试外无调用方。
+ */
 export const alignBuiltinObjectAssistantRecord = (record: Agent): Agent | null => {
   const isBuiltinObjectAssistant = Object.values(BUILTIN_OBJECT_ASSISTANT_IDS).includes(record.id);
   if (
@@ -241,6 +249,10 @@ export const alignBuiltinObjectAssistantRecord = (record: Agent): Agent | null =
   return { ...record, inputPrice: 0, outputPrice: 0 };
 };
 
+/**
+ * @deprecated 不再由 createDialogAction 重建预置记录。历史对话按原样读取，
+ * 不经过本函数；除测试外无调用方。
+ */
 export const buildBuiltinObjectAssistantAgentFromKey = (
   agentKey?: string | null,
   userId?: string | null,

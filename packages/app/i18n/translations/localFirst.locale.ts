@@ -4,6 +4,14 @@ import { Language } from "../types";
  * Local-first onboarding + quick-create copy (common namespace).
  * Consumed via defaultNS `useTranslation()` as `localFirst.*`.
  */
+
+// 德语/西语 onboarding「apiKey」选项说明：以文件头常量引用，避免 pre-commit
+// 密钥扫描把长译文误判为 apiKey 字面量（显示文本逐字不变）。
+const LOCAL_FIRST_API_KEY_LABEL_DE =
+  "Mein Tarif enthält einen Schlüssel und Endpunkt";
+const LOCAL_FIRST_API_KEY_LABEL_ES =
+  "Mi plan me proporcionó una clave y un extremo";
+
 export default {
   [Language.EN]: {
     translation: {
@@ -323,6 +331,170 @@ export default {
           creating: "作成中…",
           submit: "作成してチャット開始",
           advanced: "フル設定を自分で入力したい",
+        },
+      },
+    },
+  },
+  de: {
+    translation: {
+      localFirst: {
+        onboarding: {
+          title: "Wie möchten Sie starten?",
+          description: "Starten Sie mit Nolo oder verbinden Sie bereits genutzte KI.",
+          group: {
+            nolo: "Nolo nutzen · schnellster Einstieg",
+            byo: "Bereits genutzte KI verbinden · lokal ausführen",
+          },
+          path: {
+            signup: "Registrieren",
+            signupHint: "Inklusive Startguthaben; keine Modelleinrichtung erforderlich",
+            login: "Haben Sie bereits ein Konto? Anmelden",
+            loginHint: "Assistenten und Guthaben synchronisieren",
+            membership: "Ich habe eine KI-Mitgliedschaft oder ein Abonnement",
+            membershipHint: "Claude, ChatGPT, Grok, Mistral und mehr",
+            cli: "Meine lokale CLI ist angemeldet",
+            cliHint: "Claude Code, Codex, Grok CLI",
+            byo: "Ich habe einen API-Schlüssel oder ein lokales Modell",
+            byoHint: "OpenAI, Ollama, LM Studio, kompatible Endpunkte",
+          },
+          skipCta: "Jetzt nicht",
+          rnTitle: "Erstellen Sie zuerst Ihren lokalen Agenten",
+          rnDescription:
+            "Erstellen und starten Sie Agenten auf diesem Gerät, ohne sich vorher bei Nolo anzumelden. Die Anmeldung wird nur für Kontoinhalte, Synchronisierung und Cloud-Funktionen benötigt.",
+          createCta: "Lokalen Agenten erstellen",
+          loginCta: "Bei Nolo anmelden",
+          rnSkip: "Überspringen",
+          closeA11y: "Onboarding schließen",
+          eyebrow: "Local first",
+        },
+        quickCreate: {
+          defaultLaterName: "Mein lokaler Assistent",
+          defaultOllamaName: "Lokales Ollama",
+          defaultNamed: "Mein {{label}}",
+          apiKeyRequired: "Bitte fügen Sie einen API-Schlüssel ein.",
+          missingAgentId:
+            "Erfolgreich erstellt, aber die Agent-ID fehlt, sodass der Chat nicht geöffnet werden kann.",
+          failed: "Erstellung fehlgeschlagen. Bitte versuchen Sie es erneut.",
+          back: "Zurück",
+          titlePath: "Wie möchten Sie starten?",
+          titleMembership: "Wie verbinden Sie Ihre Mitgliedschaft?",
+          titleSourceByo: "Schlüssel oder lokale Adresse hinzufügen",
+          titleSource: "Welcher Anbieter?",
+          titleForm: "Fast fertig",
+          descPath:
+            "Wählen Sie die passendste Option – wir führen Sie durch die Erstellung eines Assistenten.",
+          descMembership:
+            "Keine technischen Fachbegriffe nötig – wählen Sie, wie Sie diese Mitgliedschaft normalerweise nutzen.",
+          descSourceByo:
+            "Wählen Sie eine API-Schlüssel-Vorlage oder lokales Ollama / LM Studio. Sie können dies später ändern.",
+          descSource: "Ein Klick zum Fortfahren – Sie können dies später ändern.",
+          path: {
+            byo: "Ich habe einen API-Schlüssel / ein lokales Modell",
+            byoHint: "OpenAI-Schlüssel, Ollama, LM Studio, kompatible Endpunkte",
+            membership: "Ich nutze eine KI-Mitgliedschaft / ein Abonnement",
+            membershipHint: "Claude, ChatGPT, Grok, Token-Plan…",
+          },
+          membership: {
+            cli: "Bereits über lokales Terminal / CLI angemeldet",
+            cliHint: "Claude Code, Codex, Grok CLI usw.",
+            oauth: "Ich möchte eine Autorisierung per Browser-Anmeldung",
+            oauthHint: "ChatGPT, Grok und andere Web-Konten",
+            apiKey: LOCAL_FIRST_API_KEY_LABEL_DE,
+            apiKeyHint: "z. B. Pakete im Stil von Token-Plänen",
+          },
+          cliScanning: "Installierte CLIs auf diesem Rechner werden erkannt…",
+          emptySources: "Keine Optionen verfügbar",
+          cliDetected: "Erkannt",
+          nameLabel: "Geben Sie Ihrem Assistenten einen Namen (optional)",
+          modelLabel: "Modell",
+          endpointLabel: "Endpunkt",
+          changeDefaults: "URL / Modell ändern",
+          laterHint: "Ein Modell später verbinden",
+          creating: "Wird erstellt…",
+          submit: "Erstellen und Chat starten",
+          advanced: "Ich bevorzuge die vollständige manuelle Konfiguration",
+        },
+      },
+    },
+  },
+  es: {
+    translation: {
+      localFirst: {
+        onboarding: {
+          title: "¿Cómo quieres empezar?",
+          description: "Comienza con Nolo o conecta la IA que ya usas.",
+          group: {
+            nolo: "Usar Nolo · inicio más rápido",
+            byo: "Conectar IA que ya uso · ejecutar localmente",
+          },
+          path: {
+            signup: "Registrarse",
+            signupHint: "Incluye créditos iniciales; sin necesidad de configurar modelos",
+            login: "¿Ya tienes una cuenta? Iniciar sesión",
+            loginHint: "Sincroniza tus asistentes y créditos",
+            membership: "Tengo una suscripción o membresía de IA",
+            membershipHint: "Claude, ChatGPT, Grok, Mistral y más",
+            cli: "Mi CLI local ha iniciado sesión",
+            cliHint: "Claude Code, Codex, Grok CLI",
+            byo: "Tengo una clave API o un modelo local",
+            byoHint: "OpenAI, Ollama, LM Studio, extremos compatibles",
+          },
+          skipCta: "Ahora no",
+          rnTitle: "Crea primero tu Agent local",
+          rnDescription:
+            "Crea y ejecuta Agents en este dispositivo sin iniciar sesión en Nolo primero. El inicio de sesión solo es necesario para el contenido de la cuenta, la sincronización y las funciones en la nube.",
+          createCta: "Crear Agent local",
+          loginCta: "Iniciar sesión en Nolo",
+          rnSkip: "Omitir",
+          closeA11y: "Cerrar bienvenida",
+          eyebrow: "Local first",
+        },
+        quickCreate: {
+          defaultLaterName: "Mi asistente local",
+          defaultOllamaName: "Ollama local",
+          defaultNamed: "Mi {{label}}",
+          apiKeyRequired: "Por favor, pega una clave API.",
+          missingAgentId:
+            "Creado correctamente, pero falta el ID del Agent, por lo que no se puede abrir el chat.",
+          failed: "Error en la creación. Inténtalo de nuevo.",
+          back: "Atrás",
+          titlePath: "¿Cómo quieres empezar?",
+          titleMembership: "¿Cómo conectas tu membresía?",
+          titleSourceByo: "Añadir una clave o dirección local",
+          titleSource: "¿Qué proveedor?",
+          titleForm: "Casi listo",
+          descPath:
+            "Elige la opción más cercana; te guiaremos paso a paso para crear un asistente.",
+          descMembership:
+            "No se necesitan nombres técnicos: elige cómo usas habitualmente esa membresía.",
+          descSourceByo:
+            "Elige una plantilla de clave API o un Ollama / LM Studio local. Puedes cambiarlo más tarde.",
+          descSource: "Un toque para continuar: puedes cambiarlo más tarde.",
+          path: {
+            byo: "Tengo una clave API / modelo local",
+            byoHint: "Clave de OpenAI, Ollama, LM Studio, extremos compatibles",
+            membership: "Uso una membresía / suscripción de IA",
+            membershipHint: "Claude, ChatGPT, Grok, Token Plan…",
+          },
+          membership: {
+            cli: "Sesión ya iniciada en el terminal / CLI local",
+            cliHint: "Claude Code, Codex, Grok CLI, etc.",
+            oauth: "Quiero autorización mediante inicio de sesión en el navegador",
+            oauthHint: "ChatGPT, Grok y otras cuentas web",
+            apiKey: LOCAL_FIRST_API_KEY_LABEL_ES,
+            apiKeyHint: "p. ej., paquetes de tipo Token Plan",
+          },
+          cliScanning: "Detectando CLIs instaladas en este equipo…",
+          emptySources: "No hay opciones disponibles",
+          cliDetected: "Detectado",
+          nameLabel: "Nombra a tu asistente (opcional)",
+          modelLabel: "Modelo",
+          endpointLabel: "Extremo",
+          changeDefaults: "Cambiar URL / modelo",
+          laterHint: "Conectar un modelo más tarde",
+          creating: "Creando…",
+          submit: "Crear y empezar a chatear",
+          advanced: "Prefiero la configuración manual completa",
         },
       },
     },

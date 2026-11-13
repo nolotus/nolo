@@ -9,6 +9,7 @@ import { useNavigate } from "app/routing";
 import { useAppDispatch } from "app/store";
 import { deleteDbKey, getDeleteErrorMessage } from "app/hooks/deleteDbKey";
 import { isDialogKey } from "database/keys";
+import { resolveDeleteSuccessPath } from "./deleteBehavior";
 
 interface TopbarDeleteButtonProps {
   contentKey?: string;
@@ -61,7 +62,14 @@ const TopbarDeleteButton: React.FC<TopbarDeleteButtonProps> = ({
         if (redirectTo) {
           navigate(redirectTo, { replace: true });
         } else {
-          navigate(-1);
+          const dialogRedirect = isDialogDelete
+            ? resolveDeleteSuccessPath({ contentKey, routeSpaceId: spaceId })
+            : undefined;
+          if (dialogRedirect) {
+            navigate(dialogRedirect, { replace: true });
+          } else {
+            navigate(-1);
+          }
         }
       } catch (err) {
         const message = getDeleteErrorMessage(err, t("deleteFailed"));

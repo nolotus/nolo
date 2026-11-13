@@ -15,11 +15,6 @@ export const agentStrings = {
     en: "⚠ {0} favorite(s) unavailable right now",
     zh: "⚠ {0} 个收藏项暂时不可用",
   },
-  // 派发前的本地冷却拦截（原两行英文 → 本地化单行压缩）。
-  agentCooldownBlocked: {
-    en: "[nolo] Agent {0} is in 429 cooldown until {1}. This dispatch was not sent — pick another agent, or retry after the cooldown.",
-    zh: "[nolo] Agent {0} 冷却中，至 {1}。本次派发未发出——换一个 agent，或到点后重试。",
-  },
   // --- Agent-run orchestration cards (injected into packages/ai helpers) ---
   runStatusLabel: {
     en: "Run status",
@@ -29,6 +24,9 @@ export const agentStrings = {
     en: "Run started",
     zh: "运行已启动",
   },
+  agentStartingLabel: { en: "Starting agent", zh: "正在启动智能体" },
+  agentStartedLabel: { en: "Agent started", zh: "智能体已启动" },
+  agentStartFailedLabel: { en: "Agent start failed", zh: "智能体启动失败" },
   runStoppedLabel: {
     en: "Run stopped",
     zh: "运行已停止",
@@ -61,13 +59,21 @@ export const agentStrings = {
   runRowNote: { en: "note", zh: "备注" },
   runRowError: { en: "error", zh: "错误" },
   runRowTask: { en: "task", zh: "任务" },
-  // listAgents card header (`Agents (3)` / `智能体 (3)`). The shared ai
-  // renderer keeps the English default; the CLI relabels the header line.
-  agentsListLabel: { en: "Agents ({0})", zh: "智能体 ({0})" },
+  // listAgents card header (`🤖 (3)` / `🤖 · 3 个`). The 🤖 marker replaces the
+  // stiff type word ("Agents" / "智能体"), the same way the run zone labels an
+  // agent run; the count stays a plain number. The shared ai renderer keeps the
+  // English default; the CLI relabels the header line.
+  agentsListLabel: { en: "🤖 ({0})", zh: "🤖 ({0})" },
+  agentsCompactCount: { en: "🤖 · {0}", zh: "🤖 · {0} 个" },
+  agentsPageCount: { en: "{0} on this page", zh: "本页 {0} 个" },
+  agentsTruncated: { en: "incomplete", zh: "结果不完整" },
   // Fallback identity for auto-generated agent ids (run zone / dock / panel).
   subAgentName: {
-    en: "Sub-agent",
-    zh: "子智能体",
+    // Type marker for an agent row without a real name. The emoji replaces the
+    // stiff type words ("Sub-agent" / "智能体"); real names, titles and
+    // status keep their own slots.
+    en: "🤖",
+    zh: "🤖",
   },
   // Status vocabulary the fixed run zone does not label (running shows only its
   // elapsed time there). `en` must stay equal to the raw store status so a
@@ -89,13 +95,14 @@ export const agentStrings = {
     zh: "{0}（待对账）",
   },
   // --- Fixed run zone (top of composer, replaces the ⚙ running status chip) --
-  // Each active run renders as `⚙ <title> · <agent> · <elapsed> · N tools`.
+  // Each active run renders as `↳ agent <title> · <agent> · <elapsed> · N tools`.
   // runZoneFor is the elapsed-time fact for a *running* run (`for 1m23s` /
   // `已运行 1m23s`); terminal runs print `<status> <age>` instead and don't use it.
   runZoneFor: {
     en: "for {0}",
     zh: "已运行 {0}",
   },
+  runZoneAgentType: { en: "🤖", zh: "🤖" },
   // Terminal linger line: `✓ <run> · done · took 12m03s`.
   runZoneDone: { en: "done", zh: "完成" },
   runZoneFailed: { en: "failed", zh: "失败" },
@@ -155,13 +162,13 @@ export const agentStrings = {
     zh: "API",
   },
   // ── Non-TUI CLI output: nolo agent / nolo run ─────────────────────────────
-  "agent.unavailableHidden": {
-    en: "⛔ {0} agent(s) temporarily unavailable (429) hidden. Use --show-unavailable to list them.\n",
-    zh: "⛔ 已隐藏 {0} 个暂时不可用的 agent（429）。用 --show-unavailable 列出它们。\n",
+  "agent.rateLimitedSummary": {
+    en: "[nolo] {0} agent(s) have quota/cooldown restrictions (reference info; dispatch is not restricted).\n",
+    zh: "[nolo] {0} 个 agent 有额度/冷却受限记录（参考信息，不限制派发）。\n",
   },
   "agent.rateLimitedRecovery": {
-    en: "   - [429 rate-limited] {0} (id: {1}) recovers in {2}s{3}\n",
-    zh: "   - [429 限流] {0} (id: {1}) 预计 {2} 秒后恢复{3}\n",
+    en: "   - {0} (id: {1}) quota-limited until {4} ({2}s remaining; reference info, dispatch is not restricted){3}\n",
+    zh: "   - {0} (id: {1}) 额度受限至 {4}（剩余 {2} 秒；参考信息，不限制派发）{3}\n",
   },
   "agentRun.autoRouteOverrideFailed": {
     en: "[nolo] auto-route: could not read the source agent, running the selected agent as-is.\n",

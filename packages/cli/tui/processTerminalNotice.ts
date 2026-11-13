@@ -11,9 +11,11 @@
 // remains runtime-internal; model wake carries terminal facts directly.
 
 import type { ProcessTerminalNotice } from "../../agent-runtime/processRegistry";
+export type { ProcessTerminalNotice };
 import type { ProcessTaskResultCapsule } from "../../agent-runtime/processTaskResult";
 import { formatToolOverflowMarker } from "../../agent-runtime/toolSpillStore";
 import type { BackgroundTaskCompletedTurnEvent } from "core/chat/internalTurnEvent";
+import { renderCliNotice } from "./completionNoticeDisplay";
 
 /**
  * 送进模型的通知全文（一条任务一段）。与 run wake 的 ContextualFragment
@@ -47,18 +49,24 @@ export function formatProcessResultCapsuleLines(
   const meta: string[] = [];
   if (capsule.durationMs !== undefined) meta.push(`duration=${capsule.durationMs}ms`);
   meta.push(capsule.truncated ? "tail-only" : "full");
-  const stream = (name: string, value: string) => [
+  const stream = (name: string, value?: string) => [
     `--- ${name} ---`,
-    ...(value.trim() ? value.replace(/\n+$/, "").split("\n") : ["(empty)"]),
+    ...(typeof value === "string" && value.trim() ? value.replace(/\n+$/, "").split("\n") : ["(empty)"]),
   ];
   const omittedChars = capsule.spill
-    ? Math.max(0, capsule.spill.totalChars - capsule.stdout.length - capsule.stderr.length)
+    ? Math.max(0, capsule.spill.totalChars - (capsule.stdout?.length ?? 0) - (capsule.stderr?.length ?? 0))
     : 0;
   return [
     `result capsule (${meta.join(", ")}):`,
     ...(capsule.captureError ? [`capture error: ${capsule.captureError}`] : []),
     ...stream("stdout", capsule.stdout),
     ...stream("stderr", capsule.stderr),
+    // A pre-spilled command can retain each stream in a different file.
+    // The aggregate marker below counts both; neither recovery path may hide.
+    ...(capsule.streamSpills?.stdout
+      ? [`stdout full output: ${capsule.streamSpills.stdout.displayPath}`] : []),
+    ...(capsule.streamSpills?.stderr
+      ? [`stderr full output: ${capsule.streamSpills.stderr.displayPath}`] : []),
     // Retrieval pointer reuses the tool-overflow convention: the model learns
     // one marker for "the tail above is not the whole story, full text lives
     // here", whether the truncation happened in a foreground tool result or in
@@ -93,21 +101,51 @@ export function formatProcessTerminalWakeLine(
 }
 
 /**
- * Screen-only line. Internal ids/status protocol stay out of the transcript;
- * users only need the outcome and a useful label. The full task facts still go
- * to the model through formatProcessTerminalWakeLine above.
+ * 屏幕上的通知（与 run 终态唤醒同一套展示格式）。
+ *
+ * 内部 id / 状态协议不进 transcript：共享展示模型只给出图标、标题、结果
+ * 与次要信息（耗时 / 退出码）；没有可读标题时给「后台任务」，不暴露 taskId。
+ * 完整任务事实仍由 formatProcessTerminalWakeMessage 送给模型。
  */
 export function formatProcessTerminalNoticeLine(
   notice: ProcessTerminalNotice,
 ): string {
+  return renderCliNotice(
+    buildProcessTerminalDisplayFragment([notice]),
+    [processNoticeDisplayTitle(notice)],
+  );
+}
+
+/**
+ * 展示用片段（只给 UI 解析，不进模型上下文）。
+ *
+ * 形状与送模型的 &lt;background_task_completion&gt; 一致：共享展示模型靠它
+ * 解析状态、退出码与耗时。任务行复用 formatProcessTerminalWakeLine（模型
+ * 侧同一份线格式），这里只补一行耗时元信息。
+ */
+function buildProcessTerminalDisplayFragment(
+  notices: ProcessTerminalNotice[],
+): string {
+  const lines = [`<background_task_completion count="${notices.length}">`];
+  for (const notice of notices) {
+    lines.push(formatProcessTerminalWakeLine(notice));
+    const durationMs = notice.resultCapsule?.durationMs;
+    if (durationMs !== undefined) {
+      // 只带耗时，不带 capsule 正文。
+      lines.push(`result capsule (duration=${durationMs}ms, display-only):`);
+    }
+  }
+  lines.push(`</background_task_completion>`);
+  return lines.join("\n");
+}
+
+/** 展示标题：label 有信息量就用它，否则不给标题（不暴露 taskId）。 */
+function processNoticeDisplayTitle(notice: ProcessTerminalNotice): string {
   const informative =
-    notice.label && notice.label.trim() !== "" && notice.label !== notice.command;
-  const label = informative ? notice.label.trim() : "background task";
-  const ok = notice.status === "exited" && (notice.exitCode === undefined || notice.exitCode === 0);
-  if (ok) return `✓ ${label}`;
-  if (notice.status === "stopped") return `■ ${label} · stopped`;
-  const exit = notice.exitCode !== undefined ? ` · exit ${notice.exitCode}` : "";
-  return `✗ ${label}${exit}`;
+    notice.label &&
+    notice.label.trim() !== "" &&
+    notice.label !== notice.command;
+  return informative ? notice.label.trim() : "";
 }
 
 /** 下一轮 turn 的注入文本（多条合并为一条事件消息）。 */
@@ -137,6 +175,7 @@ export function buildProcessTaskCompletedTurnEvent(
     ...(notice.exitCode !== undefined ? { exitCode: notice.exitCode } : {}),
     text: buildProcessTerminalTurnMessage([notice]),
     displayText: formatProcessTerminalNoticeLine(notice),
+    notice,
   };
 }
 

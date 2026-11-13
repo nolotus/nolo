@@ -19,7 +19,6 @@ import {
     updateCell,
     deleteColumn,
     renameColumnLabel,
-    renameTable,
     reorderColumn,
     updateColumnWidth,
     setTableFocusContext,
@@ -41,7 +40,7 @@ import SelectCellEditor, {
     type SelectCellEditorAnchor,
 } from "./SelectCellEditor";
 import { selectCurrentSpaceId } from "create/space/spaceCurrentSelectors";
-import { updateContentTitle } from "create/space/content/contentThunks";
+import { renameTableWithSpace } from "./renameTableWithSpace";
 import {
     findColumnByNameOrLabel,
     getColumnFilterOptions,
@@ -81,6 +80,7 @@ import { TableViewControls } from "./TableViewControls";
 import { KanbanBoard } from "./KanbanBoard";
 import { TableGridSection } from "./TableGridSection";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
+import PageObjectActions from "render/page/PageObjectActions";
 
 export interface TablePageProps {
     tableKey?: string;
@@ -703,29 +703,11 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
 
     const handleUpdateTitle = useCallback(
         (title: string) => {
-            if (!tenantId || !tableId) return;
-            const finalTitle = title.trim() || tableId;
-
-            void dispatch(
-                renameTable({
-                    tenantId,
-                    tableId,
-                    newName: finalTitle,
-                })
-            );
+            if (!tableMeta) return;
+            renameTableWithSpace(dispatch, tableMeta, title);
             setIsRenamingTable(false);
-
-            if (currentSpaceId) {
-                void dispatch(
-                    updateContentTitle({
-                        spaceId: currentSpaceId,
-                        contentKey: `meta-${tenantId}-${tableId}`,
-                        title: finalTitle,
-                    })
-                );
-            }
         },
-        [dispatch, tenantId, tableId, currentSpaceId]
+        [dispatch, tableMeta]
     );
 
     const handleUpdateIcon = useCallback(
@@ -879,6 +861,7 @@ const TablePageContent: React.FC<TablePageProps & { initialSearch: string }> = (
     return (
         <>
             <div className="table-page">
+      <PageObjectActions />
                 {error && (
                     <div
                         className="table-page__center-state table-page__center-state--error table-page__rows-error"

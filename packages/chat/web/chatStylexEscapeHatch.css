@@ -201,10 +201,10 @@
 .chat-input-card:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 [data-hook~="chat-esc-chat-input-card"]:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 .message-input__box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  border-color: color-mix(in srgb, var(--primary) 70%, var(--border, #e4e4e7));
+  border-color: color-mix(in srgb, var(--primary) 32%, var(--border, #e4e4e7));
   box-shadow:
-    0 0 0 2px var(--primary),
-    0 8px 24px -4px color-mix(in srgb, var(--primary) 25%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent),
+    0 2px 8px -4px color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 /* ═══ 自 LiveVoicePanel.css 迁出（LiveVoicePanel.tsx）═══ */
@@ -436,37 +436,8 @@
 /* ═══ 自 sidebar.css 迁出（ChatSidebar.tsx / AllViewSidebar.tsx / CategorySection.tsx / SidebarUserSection.tsx / DraggableContainer.tsx）═══ */
 
 /* ── 跨组件后代与伪元素规则 ──
- * 保留原因：侧边栏内的空间切换器、搜索框内部表单控件、滚动条 webkit 伪元素、
+ * 保留原因：搜索框内部表单控件、滚动条 webkit 伪元素、
  * 单一分区自适应高度链及动画 keyframes 无法用 StyleX 静态规则表达。 */
-
-/* 白名单保留：跨组件后代中和器（TopbarSpaceSwitcher 共享组件内部节点，
- * 侧边栏无法为其挂 stylex.props）——待共享组件原生 bare 变体后清理。
- * 另：render 包 sidebarSpaceSwitcherLayout.source.test.ts 断言此选择器存在。 */
-/* .ChatSidebar__scope-wrapper .TpSw--sidebar */
-[data-hook~="chat-esc-sidebar-scope-wrapper"] .TpSw--sidebar,
-.ChatSidebar__scope-wrapper .TpSw--sidebar {
-  width: 100%;
-}
-
-/* .ChatSidebar .TpSw--sidebar .TpSw__btnGroup */
-[data-hook~="chat-esc-sidebar"] .TpSw--sidebar .TpSw__btnGroup,
-.ChatSidebar .TpSw--sidebar .TpSw__btnGroup {
-  padding: 0 3px;
-}
-
-/* .ChatSidebar .TpSw--sidebar .TpSw__spaceLink */
-[data-hook~="chat-esc-sidebar"] .TpSw--sidebar .TpSw__spaceLink,
-.ChatSidebar .TpSw--sidebar .TpSw__spaceLink {
-  padding: 4px;
-  gap: var(--sidebar-gap-x);
-}
-
-/* .ChatSidebar .TpSw--sidebar .TpSw__icon */
-[data-hook~="chat-esc-sidebar"] .TpSw--sidebar .TpSw__icon,
-.ChatSidebar .TpSw--sidebar .TpSw__icon {
-  width: var(--sidebar-icon-size);
-  height: var(--sidebar-icon-size);
-}
 
 /* 白名单保留：跨组件后代中和器（search 共享组件内部结构），StyleX 无法表达
  * —— 待共享组件原生 bare 变体后清理。
@@ -1191,4 +1162,26 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
 
 [data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"][data-selected]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background-color: var(--primaryGhost);
+}
+
+/* 对话页右上角悬浮动作菜单：0 高度 sticky 容器，不占任何行高 */
+.dialog-page__actions-float {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding-right: var(--space-3);
+  pointer-events: none;
+}
+
+.dialog-page__actions-float > * {
+  pointer-events: auto;
+}
+
+/* 首条消息顶部留出空间，避免被右上角动作菜单遮挡 */
+.DialogPage__messages {
+  padding-top: var(--space-8, 32px);
 }

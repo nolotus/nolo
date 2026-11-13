@@ -351,6 +351,7 @@ export type {
   AgentRuntimeHostAdapter,
   AgentRuntimeCompleteOptions,
   AgentRuntimeProvider,
+  AgentRuntimeProviderResolveOptions,
   AgentRuntimeSaveTurnInput,
   AgentRuntimeToolCallInput,
   AgentRuntimeToolResult,
@@ -412,6 +413,7 @@ export type {
   AgentRuntimeToolPolicy,
   AgentRuntimeToolCall,
   AgentRuntimeWorkspaceMode,
+  LocalTurnInjection,
   RuntimeProviderFailure,
 } from "./types";
 export type {

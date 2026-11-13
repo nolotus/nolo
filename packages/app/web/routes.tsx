@@ -15,6 +15,8 @@ import {
 import { legacySettingRoutes, settingRoutes } from "app/settings/routes";
 import ShareImportPage from "app/pages/ShareImportPage";
 import NewChatPage from "app/pages/NewChatPage";
+import NotFoundPage from "app/pages/NotFoundPage";
+import { NOT_FOUND_ROUTE_ID, PAGE_KEY_ROUTE_ID } from "app/constants/routePaths";
 // Keep the dialog/editor/tool graph off unrelated URLs. The existing route
 // Suspense boundary is also used by streaming SSR, so matched pages still render
 // fully; Home and NewChatPage remain eager rather than delaying their first paint.
@@ -127,7 +129,11 @@ const commonRoutes = [
     path: ":agentPageKey/inbox",
     element: withSuspense(<AgentInboxPage />, "Agent 收件箱"),
   },
-  { path: ":pageKey", element: withSuspense(<PageLoader />, "页面内容") },
+  {
+    path: ":pageKey",
+    id: PAGE_KEY_ROUTE_ID,
+    element: withSuspense(<PageLoader />, "页面内容"),
+  },
 ];
 
 // Browser spike 探针路由只在 dev/test 构建注册，production 路由表完全不包含它们。
@@ -234,6 +240,14 @@ export const routes = () => [
             },
           ]
         : []),
+      // 主路由树最终 catch-all：未匹配任何真实路由时渲染 404 页。
+      // 注意 `:pageKey` 仍优先兜住单段未知路径（page/dialog/agent 等对象 key
+      // 无法在不查库的情况下区分），多段未知路径落到这里。
+      {
+        path: "*",
+        id: NOT_FOUND_ROUTE_ID,
+        element: <NotFoundPage />,
+      },
     ],
   },
 ];

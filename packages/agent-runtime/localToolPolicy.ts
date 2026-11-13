@@ -9,6 +9,16 @@ import { canonicalizeToolName } from "../ai/tools/toolNameAliases";
 import { evaluateExecShellDestructiveGuard } from "./capabilities/capabilityPolicy";
 import { validateToolArguments } from "./toolArgumentGate";
 
+/** Host-registered lifecycle wrappers; never read from model arguments or executor properties. */
+export type LocalShellLifecycle = (run: () => Promise<AgentRuntimeToolResult>, signal?: AbortSignal) => Promise<AgentRuntimeToolResult>;
+const shellLifecycles = new WeakMap<object, LocalShellLifecycle>();
+export function registerLocalShellLifecycle(executor: object, lifecycle: LocalShellLifecycle): void {
+  shellLifecycles.set(executor, lifecycle);
+}
+export function getLocalShellLifecycle(executor: object | undefined): LocalShellLifecycle | undefined {
+  return executor ? shellLifecycles.get(executor) : undefined;
+}
+
 type EnvLike = Record<string, string | undefined>;
 
 export type LocalToolPolicyDecision =
@@ -202,6 +212,7 @@ export type ExecShellGateOutcome =
 export async function runExecShellGates(args: {
   toolName: string;
   callArguments: unknown;
+  shellLifecycle?: LocalShellLifecycle;
   execShellApproval?: ExecShellApprovalAuthority;
   workspaceRoot?: string;
   commandOutputLimit?: number;
@@ -233,10 +244,11 @@ export async function runExecShellGates(args: {
 
   if (args.execShellApproval) {
     // Authority-bearing calls never enter an unverified custom executor.
-    const result = await invokeCapability("execShell", args.callArguments, {
+    const execute = () => invokeCapability("execShell", args.callArguments, {
       ...opts, workspaceRoot: args.workspaceRoot, commandOutputLimit: args.commandOutputLimit,
       execShellApproval: args.execShellApproval,
     });
+    const result = await (args.shellLifecycle ? args.shellLifecycle(execute, args.abortSignal) : execute());
     return { kind: "handled", result };
   }
 
@@ -349,6 +361,7 @@ export async function executeLocalToolWithPolicy(args: {
   const gate = await runExecShellGates({
     toolName: decision.toolName,
     callArguments: args.call.arguments,
+    shellLifecycle: getLocalShellLifecycle(executor),
     execShellApproval: args.execShellApproval,
     workspaceRoot: args.workspaceRoot,
     commandOutputLimit: args.commandOutputLimit,

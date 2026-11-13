@@ -111,7 +111,7 @@ function OtherContentGroupsList({
   );
 
   // 「更多」菜单挂在 row 之外（RAC Menu 不能嵌在 ListBox 里），与
-  // WorkDialogGroupsPreview / CategorySection 同一套约定：row 上报锚点，
+  // WorkDialogGroupsPreview 同一套约定：row 上报锚点，
   // 这里渲染 MenuPopover。
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
   const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);

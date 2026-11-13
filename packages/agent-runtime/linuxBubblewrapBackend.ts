@@ -74,13 +74,24 @@ function openRootHandle(path: string): { fd: number; identity: RootIdentity } {
 }
 
 /**
+ * Prefix of the private directory that holds the seccomp program file during a
+ * spawn. Exported because a test asserting "no leftovers" must name the SAME
+ * string the code uses: the review found a test that asserted on
+ * `nolo-rosandbox-seccomp-` (invented) while the code created
+ * `nolo-bwrap-seccomp-` (real), which made the assertion unconditionally true
+ * and the "no temp directories survive" claim untested (fix M2). One exported
+ * constant removes the possibility of the two drifting apart again.
+ */
+export const SECCOMP_TEMP_DIR_PREFIX = "nolo-bwrap-seccomp-";
+
+/**
  * Materialize the seccomp program as a read-only fd for `bwrap --seccomp FD`.
  * The file lives in a fresh 0700 directory and is unlinked before spawn, so
  * only the returned fd references it. bwrap reads the program and closes the
  * fd before exec'ing the payload; the parent closes its copy after spawn.
  */
-function openSeccompFd(program: Uint8Array): number {
-  const dir = mkdtempSync(join(tmpdir(), "nolo-bwrap-seccomp-"));
+export function openSeccompFd(program: Uint8Array): number {
+  const dir = mkdtempSync(join(tmpdir(), SECCOMP_TEMP_DIR_PREFIX));
   const file = join(dir, "filter.bpf");
   let writer = -1;
   let reader = -1;

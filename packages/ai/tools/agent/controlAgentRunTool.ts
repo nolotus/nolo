@@ -35,10 +35,11 @@ export const CONTROL_AGENT_RUN_ACTIONS = [
     "append",
 ] as const;
 
-export type ControlAgentRunAction = (typeof CONTROL_AGENT_RUN_ACTIONS)[number];
+export type ControlAgentRunAction = (typeof CONTROL_AGENT_RUN_ACTIONS)[number] | "recoverPreparedWriter";
 
 /** 每个 action 在 `action` 参数描述里的那一句（顺序由调用方给的 actions 决定）。 */
 const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
+    recoverPreparedWriter: "recoverPreparedWriter=仅本地：显式撤销同一 attemptId 的 fenced-launch-v1 prepared writer 并释放 claim；granted、legacy、unknown 或 attempt 不匹配均拒绝；不终止进程、不提供 force",
     list: "list=列出 run（省略 runId）",
     status: "status=查单条 run 状态 + 可选日志；终态 run 的完整结论在返回的 resultFile（用 readFile 读原文；lastAssistantText 只是 2000 字摘要，不存在时读 resultFile）；resultFile 缺失可能是 run 被用户中断，按「无结论」处理，不据此判工具故障",
     stop: "stop=取消 run",
@@ -64,8 +65,8 @@ const WAKE_STATUS_ACTION_DESCRIPTION =
  * 每一次超时都要在 transcript 上解释「我等超时了 ≠ 它失败了」，而这两件事在
  * 返回载荷里共用同一个 `status` 字段。删掉动作，那道解释题就不存在了。
  *
- * 契约：`actions` 只做减法，且必须是 CONTROL_AGENT_RUN_ACTIONS 的子集；缺省
- * 给全集（服务端 / 无唤醒宿主原样保留 wait）。`wakeEnabled` 声明宿主有终态
+ * 契约：缺省仅给 CONTROL_AGENT_RUN_ACTIONS（服务端原样保留 wait）；本地宿主
+ * 可显式加入 recoverPreparedWriter，不向服务端默认暴露本地恢复。`wakeEnabled` 声明宿主有终态
  * 唤醒通道；缺省为 false，不从 actions 推导。actions 与 wakeEnabled 正交：
  * 前者是工具动作能力面，后者是宿主是否真的有 terminal wake。
  */
@@ -112,10 +113,14 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                     description:
                         "目标 run 的 ID（startAgentRun 返回的 runId）。action=list 时省略。",
                 },
+                ...(actions.includes("recoverPreparedWriter") ? { attemptId: {
+                    type: "string",
+                    description: "recoverPreparedWriter 必填：status 返回的 writerLaunch.attemptId；必须与目标 prepared attempt 完全相同。环境变量仅 locator，不授予恢复权限。",
+                } } : {}),
                 dialogKey: {
                     type: "string",
                     description:
-                        "可选。action=append 时目标 dialog 的 dbKey（如 dialog-user-xxx）。缺省时由 runId 推导。",
+                        "可选。action=append 时目标 dialog 的 dbKey（如 dialog-user-xxx）。给了 runId 时由 runId 推导；本地 CLI 宿主上只给 dialogKey = 向同用户活着的普通 CLI dialog 投递一条通知（进它现有队列排队，不启动 run/模型，等待确认或 stop 时只 defer；目标离线或无接收器时明确返回 unsupported/offline，不静默落库）。",
                 },
                 userInput: {
                     type: "string",
@@ -126,7 +131,7 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                     type: "string",
                     enum: ["enqueue", "continue"],
                     description:
-                        "可选。action=append 时的追加模式：enqueue=加入队列供下一轮消费；continue=终态续跑。缺省时自动根据 run 状态适配。",
+                        "可选。action=append 时的追加模式：enqueue=加入队列供下一轮消费；continue=终态续跑（需要 runId；本地 CLI 宿主上只给 dialogKey 时仅支持 enqueue）。缺省时自动根据 run 状态适配。",
                 },
                 ...(hasWait
                     ? {

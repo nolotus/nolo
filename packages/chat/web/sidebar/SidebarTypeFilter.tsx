@@ -5,16 +5,10 @@ import { withLiteralClass } from "../withLiteralClass";
 import "../chatStylexEscapeHatch.css";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "render/web/ui/Tooltip";
-import {
-  PiSquaresFour, PiSquaresFourFill,
-  PiChatCircle, PiChatCircleFill,
-  PiRobot, PiRobotFill,
-  PiFileText, PiFileTextFill,
-  PiTable, PiTableFill,
-  PiPaperclip, PiPaperclipFill,
-  PiAppWindow, PiAppWindowFill,
-} from "react-icons/pi";
+import { PiSquaresFour, PiSquaresFourFill } from "react-icons/pi";
+import { SIDEBAR_TYPE_ICONS } from "render/web/ui/sidebarTypeIcons";
 import type { IconType } from "react-icons";
+import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import type { SidebarVisibleType } from "create/space/sidebarVisibleTypes";
 import {
   resolveMyContentTab,
@@ -29,6 +23,12 @@ export type SidebarTypeFilterId =
   | "table"
   | "agent"
   | "attachment";
+
+/**
+ * 默认真源：没有明确偏好（首次访问 / 本地存储缺失或非法）时的侧边栏类型视图。
+ * SSR 与客户端 fallback 都用它，避免首屏与 hydration 后视图跳变。
+ */
+export const DEFAULT_SIDEBAR_TYPE_FILTER: SidebarTypeFilterId = "agent";
 
 export const isSidebarTypeFilterId = (value: string | null | undefined): value is SidebarTypeFilterId =>
   value === "all" ||
@@ -94,16 +94,17 @@ export const SidebarTypeFilter: React.FC<{
   const items: Array<{
     id: SidebarTypeFilterId;
     label: string;
-    Icon: IconType;
-    ActiveIcon: IconType;
+    // null = 该类型用自有图标（NoloHeadMark），不走 react-icons 的填充/线性两态
+    Icon: IconType | null;
+    ActiveIcon: IconType | null;
   }> = [
     { id: "all", label: t("all", "全部"), Icon: PiSquaresFour, ActiveIcon: PiSquaresFourFill },
-    { id: "dialog", label: t("sidebarTypes.dialog", "对话"), Icon: PiChatCircle, ActiveIcon: PiChatCircleFill },
-    { id: "agent", label: t("sidebarTypes.agent", "AI"), Icon: PiRobot, ActiveIcon: PiRobotFill },
-    { id: "page", label: t("sidebarTypes.page", "页面"), Icon: PiFileText, ActiveIcon: PiFileTextFill },
-    { id: "table", label: t("sidebarTypes.table", "表格"), Icon: PiTable, ActiveIcon: PiTableFill },
-    { id: "attachment", label: t("attachments_toggle", "附件"), Icon: PiPaperclip, ActiveIcon: PiPaperclipFill },
-    { id: "app", label: t("sidebarTypes.app", "应用"), Icon: PiAppWindow, ActiveIcon: PiAppWindowFill },
+    { id: "agent", label: t("sidebarTypes.agent", "AI"), ...SIDEBAR_TYPE_ICONS.agent },
+    { id: "dialog", label: t("sidebarTypes.dialog", "对话"), ...SIDEBAR_TYPE_ICONS.dialog },
+    { id: "page", label: t("sidebarTypes.page", "页面"), ...SIDEBAR_TYPE_ICONS.page },
+    { id: "table", label: t("sidebarTypes.table", "表格"), ...SIDEBAR_TYPE_ICONS.table },
+    { id: "attachment", label: t("attachments_toggle", "附件"), ...SIDEBAR_TYPE_ICONS.attachment },
+    { id: "app", label: t("sidebarTypes.app", "应用"), ...SIDEBAR_TYPE_ICONS.app },
   ];
 
   return (
@@ -138,7 +139,7 @@ export const SidebarTypeFilter: React.FC<{
                 isActive && sidebarStyles.sidebarTypeFilterButtonActive
               )}
             >
-              <StateIcon size={15} aria-hidden="true" />
+              {StateIcon ? <StateIcon size={15} aria-hidden="true" /> : <NoloHeadMark size={15} />}
             </button>
           </Tooltip>
         );

@@ -21,7 +21,7 @@
   --hl-nav: #3a4350;
   --hl-paper: #faf8f4;
   --hl-surface: #fffefb;
-  --hl-surface-sub: #f3f0ea;
+  --hl-surface-sub: #f6f4ef;
   --hl-line: color-mix(in srgb, var(--hl-ink) 12%, transparent);
   --hl-ghost: rgba(255, 254, 250, 0.5);
   --hl-shadow: rgba(120, 90, 60, 0.08);

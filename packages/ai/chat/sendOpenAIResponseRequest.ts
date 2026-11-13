@@ -207,6 +207,65 @@ const shouldSkipBillingForUserAbort = (error: unknown, usage: unknown): boolean 
   return isAbortError(error) && !hasReportedTokenOrCostUsage(usage);
 };
 
+
+/** Shared by pre-send admission and the transport: estimate the adapted wire, not the registry. */
+export function buildResponsesRequestBodyWithTools(bodyData: any, agentConfig: any): any {
+  const functionTools = getModelInfo(agentConfig.model)?.hasImageOutput
+    ? []
+    : prepareTools(agentConfig.tools ?? [], { provider: agentConfig.provider });
+
+  const imageMode = getPublicImageAgentMode(agentConfig);
+  const imageProfile =
+    imageMode === "continuous"
+      ? getPublicImageAgentDefaultProfile("continuous")
+      : null;
+  // 官方推荐：主模型放顶层，图片模型写进 image_generation 工具的 model 字段。
+  // 不写的话上游会用它自己的默认图片模型，agent 上配的 imageModel 等于失效。
+  const imageGenerationModel = asOptionalTrimmedString(
+    (agentConfig as { imageModel?: string } | null)?.imageModel,
+  );
+
+  const tools = [
+    ...(toResponsesTools(functionTools) ?? []),
+    ...(shouldEnableBuiltInImageGeneration(agentConfig)
+      ? [
+          {
+            type: "image_generation" as const,
+            ...(imageGenerationModel ? { model: imageGenerationModel } : {}),
+          },
+        ]
+      : []),
+    ...(imageMode === "continuous"
+      ? [
+          {
+            type: "image_generation" as const,
+            action: "auto" as const,
+            ...(imageGenerationModel ? { model: imageGenerationModel } : {}),
+            quality: imageProfile?.quality,
+            output_format: imageProfile?.outputFormat,
+          },
+        ]
+      : []),
+  ];
+  // 防护 B：出站清洗。历史 input 里可能含被截断的 function_call
+  // （arguments 无法 JSON.parse），provider 会拒绝并让对话永久卡死。
+  // 这里清洗 input：替换坏 arguments 为 {"_invalid":true}，并为缺配对
+  // function_call_output 的 function_call 补占位输出，避免孤儿调用。
+  const sourceBodyData = bodyData;
+  const sanitizedInput = Array.isArray(sourceBodyData?.input)
+    ? sanitizeOutboundResponsesInput(sourceBodyData.input)
+    : sourceBodyData?.input;
+  const baseBodyData =
+    sanitizedInput !== sourceBodyData?.input
+      ? { ...sourceBodyData, input: sanitizedInput }
+      : sourceBodyData;
+  return {
+    ...baseBodyData,
+    ...(tools.length ? { tools, tool_choice: baseBodyData.tool_choice ?? "auto" } : {}),
+    stream: true,
+  };
+}
+
 export const sendOpenAIResponseRequest = async ({
   bodyData,
   agentConfig,
@@ -560,61 +619,7 @@ export const sendOpenAIResponseRequest = async ({
       );
     }
 
-    const functionTools = getModelInfo(agentConfig.model)?.hasImageOutput
-      ? []
-      : prepareTools(agentConfig.tools ?? [], { provider: agentConfig.provider });
-
-    const imageMode = getPublicImageAgentMode(agentConfig);
-    const imageProfile =
-      imageMode === "continuous"
-        ? getPublicImageAgentDefaultProfile("continuous")
-        : null;
-    // 官方推荐：主模型放顶层，图片模型写进 image_generation 工具的 model 字段。
-    // 不写的话上游会用它自己的默认图片模型，agent 上配的 imageModel 等于失效。
-    const imageGenerationModel = asOptionalTrimmedString(
-      (agentConfig as { imageModel?: string } | null)?.imageModel,
-    );
-
-    const tools = [
-      ...(toResponsesTools(functionTools) ?? []),
-      ...(shouldEnableBuiltInImageGeneration(agentConfig)
-        ? [
-            {
-              type: "image_generation" as const,
-              ...(imageGenerationModel ? { model: imageGenerationModel } : {}),
-            },
-          ]
-        : []),
-      ...(imageMode === "continuous"
-        ? [
-            {
-              type: "image_generation" as const,
-              action: "auto" as const,
-              ...(imageGenerationModel ? { model: imageGenerationModel } : {}),
-              quality: imageProfile?.quality,
-              output_format: imageProfile?.outputFormat,
-            },
-          ]
-        : []),
-    ];
-    // 防护 B：出站清洗。历史 input 里可能含被截断的 function_call
-    // （arguments 无法 JSON.parse），provider 会拒绝并让对话永久卡死。
-    // 这里清洗 input：替换坏 arguments 为 {"_invalid":true}，并为缺配对
-    // function_call_output 的 function_call 补占位输出，避免孤儿调用。
-    const buildRequestBody = (sourceBodyData: any) => {
-      const sanitizedInput = Array.isArray(sourceBodyData?.input)
-        ? sanitizeOutboundResponsesInput(sourceBodyData.input)
-        : sourceBodyData?.input;
-      const baseBodyData =
-        sanitizedInput !== sourceBodyData?.input
-          ? { ...sourceBodyData, input: sanitizedInput }
-          : sourceBodyData;
-      return {
-        ...baseBodyData,
-        ...(tools.length ? { tools, tool_choice: baseBodyData.tool_choice ?? "auto" } : {}),
-        stream: true,
-      };
-    };
+    const buildRequestBody = (body: any) => buildResponsesRequestBodyWithTools(body, agentConfig);
 
     let requestBody = buildRequestBody(bodyData);
     const fallbackRequestBody = fallbackBodyData

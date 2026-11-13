@@ -15,9 +15,16 @@ import {
   formatUnsupportedAgentApiKeyRefMessage,
 } from "agent-runtime/oauthProviderRefs";
 import { normalizeAgentHandle } from "core/agentHandle";
+import {
+  collectInvalidAgentSkillModes,
+  formatInvalidAgentSkillModeMessage,
+  formatInvalidAgentSkillModesFieldMessage,
+  isAgentSkillModesFieldShapeValid,
+} from "core/agentSkillModes";
 import { toErrorMessage } from "core/errorMessage";
 import { DataType } from "create/types";
 import { createAgentKey } from "database/keys";
+import { buildRestorePatch } from "database/tombstones";
 import { resolveCliAgentKeyInput } from "./agentAliases";
 import type { CliKvDb } from "./client/hybridRecordStore";
 import { buildLocalAgentLookupKeys, shouldReadAgentKeyRemotely } from "./client/localAgentRecords";
@@ -899,6 +906,21 @@ export function parseAgentUpdateArgs(args: string[]) {
     updates[entry.slice(0, index)] = parseJsonishValue(entry.slice(index + 1));
   }
 
+  // agent 级 skill 档位只允许 required / recommended / disabled。非法档位在
+  // 读路径会被静默丢弃（见 ai/tools/agentSkillConfig），落库后既不生效也不
+  // 报错——用户在错误方向上永远修不好。所以在 CLI 写入口就 fail-closed，
+  // 给出明确合法值，而不是等服务端回一个含糊的 400。
+  if (Object.prototype.hasOwnProperty.call(updates, "skills")) {
+    const skillsField = updates.skills;
+    if (!isAgentSkillModesFieldShapeValid(skillsField)) {
+      throw new Error(formatInvalidAgentSkillModesFieldMessage());
+    }
+    const invalidModes = collectInvalidAgentSkillModes(skillsField);
+    if (invalidModes.length > 0) {
+      throw new Error(formatInvalidAgentSkillModeMessage(invalidModes[0]));
+    }
+  }
+
   if (Object.keys(updates).length === 0) {
     if (!promptDoc && !copyProviderFrom && !presetId) {
       throw new Error("No updates provided. Use --model / --cli-provider / --api-source / --field key=value.");
@@ -1084,13 +1106,15 @@ export async function buildCreatedAgentRecord(args: {
     !args.hostApproval?.gateId,
   );
 
+  const now = Date.now();
   const nextRecord = {
     ...args.parsed.updates,
     dbKey: agentKey,
     key: agentKey,
     type: DataType.AGENT,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    ...buildRestorePatch(new Date(now).toISOString()),
+    createdAt: now,
+    updatedAt: now,
     userId,
   };
 

@@ -1,9 +1,7 @@
 /** Platform-owned response-language context shared by every runtime. */
 
 export type UserResponseLanguageInput = {
-  responseLanguage?: unknown;
   language?: unknown;
-  fallbackLanguage?: unknown;
 };
 
 export type ResolvedUserResponseLanguage = {
@@ -64,11 +62,7 @@ const normalizeLocale = (value: string): string => {
 export const resolveUserResponseLanguage = (
   input: UserResponseLanguageInput = {},
 ): ResolvedUserResponseLanguage => {
-  const raw =
-    asLocale(input.responseLanguage) ||
-    asLocale(input.language) ||
-    asLocale(input.fallbackLanguage) ||
-    "en-US";
+  const raw = asLocale(input.language) || "en-US";
   const locale = normalizeLocale(raw);
   return {
     locale,

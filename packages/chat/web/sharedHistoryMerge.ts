@@ -1,7 +1,7 @@
 import type { SharedSpaceDialogSummary } from "database/client/sharedSpaceDialogPage";
 import { dialogSummaryStatus, dialogSummaryUnreadAt } from "app/utils/myContentItems";
 import type { MyContentListItem } from "app/utils/myContentItems";
-import { parseDialogKey } from "database/dialogKey";
+import { buildDialogKey, parseDialogKey } from "database/dialogKey";
 import type { OwnedDialogSummary } from "database/client/ownedDialogPage";
 import {
   getRecordTimestamp,
@@ -103,7 +103,18 @@ export function mergeHistoryItems(
         spaceName: typeof summary.spaceName === "string" ? summary.spaceName : item?.spaceName ?? "",
       } as MyContentListItem;
     }
-    result.push({ ...item!, ...(restore ? { restoredAt: restore.restoredAt } : {}) });
+    const merged = { ...item!, ...(restore ? { restoredAt: restore.restoredAt } : {}) } as MyContentListItem;
+    // 显式身份（userId + dialogId）必须与 contentKey 自洽：远端 summary 与本地
+    // 缓存各带一半身份时，spread 会拼出矛盾的身份，侧栏层级会把这条记录整个
+    // 丢掉（既不能挂父，也不能作为父）。这里在合并后统一校正。
+    const mergedOwner = "userId" in merged && typeof merged.userId === "string" ? merged.userId.trim() : "";
+    const mergedDialogId = "dialogId" in merged && typeof merged.dialogId === "string" ? merged.dialogId.trim() : "";
+    const identityConsistent = !mergedOwner && !mergedDialogId
+      ? true
+      : Boolean(mergedOwner && mergedDialogId && buildDialogKey(mergedOwner, mergedDialogId) === merged.contentKey);
+    result.push(identityConsistent
+      ? merged
+      : ({ ...merged, userId: undefined, dialogId: undefined } as unknown as MyContentListItem));
   }
   return result;
 }

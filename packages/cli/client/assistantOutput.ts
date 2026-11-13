@@ -5,7 +5,7 @@ import {
   type TuiBrightness,
 } from "../tui/theme";
 import { toolLabelVariants } from "../tui/i18n";
-import { stripAnsi } from "../tui/tuiAnsi";
+import { boxGlyphs, resolveBoxCharset, stripAnsi } from "../tui/tuiAnsi";
 import { renderMermaidBlock } from "./mermaid";
 import {
   isTableRow,
@@ -296,8 +296,7 @@ function normalizeListLine(line: string): string {
   return line;
 }
 
-const TOOL_TREE_HEADER_RE = /^•\s+(.+?)\s+\((\d+)\)$/;
-const TOOL_TREE_LEAF_RE = /^([├└]──\s+)(.*?)\s{2}(✓|✗|!)(?:\s+(.*))?$/;
+const TOOL_TREE_HEADER_RE = /^•\s+(.+?)\s+\((\d+)\) · (.*?)  ✓$/;
 const TOOL_SINGLE_RE = /^▸\s+(.+?)(?:\s+·\s+(.*?))?(?:\s{2}(✓|✗|!)(?:\s+(.*))?)$/;
 
 function plainToolLine(line: string) {
@@ -329,10 +328,6 @@ function isToolTreeHeaderLine(line: string): boolean {
   return toolTreeHeaderMatch(line) !== null;
 }
 
-function isToolTreeLeafLine(line: string): boolean {
-  return TOOL_TREE_LEAF_RE.test(plainToolLine(line));
-}
-
 function isToolSingleLine(line: string): boolean {
   return TOOL_SINGLE_RE.test(plainToolLine(line));
 }
@@ -341,7 +336,7 @@ function isToolSingleLine(line: string): boolean {
  * 顶层工具行的分组键。
  *
  * flat 行（▸ <label> · <gist>  ✓）→ "flat:<label>"；树头（• <Label> (n)）→
- * "tree:<Label>"。树叶（├── …）没有自己的键（属于上一条树头所在的树）。
+ * "tree:<Label>"。摘要行携带完整的 item 列表。
  * ×N 折叠后缀（"Edit ×8"）不是分组身份的一部分，比对前剥掉。
  *
  * flat 与 tree 用不同命名空间：同一工具的 flat 行与它的树块仍然是两个分组。
@@ -367,25 +362,15 @@ function toolGroupKeyOf(line: string): string | null {
  * 返回 true = 两行之间插一个呼吸空行（不同分组）；false = 保持紧贴（同一组）；
  * null = 这不是工具行相邻对，交回通用的列表/散文规则。
  *
- * 同一组：同一棵树的树头与其树叶、同一 label 的连续 flat 行（含同组失败行）。
- * 不同组：树叶之后接新的工具行（树结束）、树头之间换了 label、flat 行换了 label。
+ * 同一组：同一 label 的连续 flat 行（含同组失败行）。
+ * 不同组：完整摘要与其他工具行、flat 行换了 label。
  */
 function toolRowBoundary(cur: string, next: string): boolean | null {
-  const curLeaf = isToolTreeLeafLine(cur);
-  const curHeader = isToolTreeHeaderLine(cur);
-  const nextLeaf = isToolTreeLeafLine(next);
   const curKey = toolGroupKeyOf(cur);
   const nextKey = toolGroupKeyOf(next);
-  if (curKey === null && !curLeaf) return null;
-  if (nextKey === null && !nextLeaf) return null;
-
-  // 树叶：同树的叶子连续 → 紧贴；叶子后面接别的工具行 → 树结束，换组。
-  if (curLeaf) return !nextLeaf;
-  // 树头 → 自己的树叶：同一棵树，紧贴。
-  if (curHeader && nextLeaf) return false;
-
-  if (curKey !== null && nextKey !== null) return curKey !== nextKey;
-  return true;
+  if (curKey === null || nextKey === null) return null;
+  // Each summary is a completed group, even when labels happen to match.
+  return isToolTreeHeaderLine(cur) || isToolTreeHeaderLine(next) || curKey !== nextKey;
 }
 
 function statusColorSeq(marker: string, brightness: TuiBrightness): string {
@@ -407,19 +392,7 @@ function styleTuiToolLine(line: string, brightness: TuiBrightness): string | nul
 
   const header = toolTreeHeaderMatch(plain);
   if (header) {
-    return `${chrome}•${STYLE.reset} ${STYLE.bold}${muted}${header[1]}${STYLE.reset} ${chrome}${STYLE.dim}(${header[2]})${STYLE.reset}`;
-  }
-
-  const leaf = plain.match(TOOL_TREE_LEAF_RE);
-  if (leaf) {
-    const [, connector, detail, marker, statusDetail] = leaf;
-    let rendered = `${chrome}${connector}${STYLE.reset}${chrome}${detail}${STYLE.reset}`;
-    rendered += `  ${statusColorSeq(marker, brightness)}${marker}${STYLE.reset}`;
-    if (statusDetail) {
-      const metaSeq = marker === "✓" ? chrome : statusColorSeq(marker, brightness);
-      rendered += ` ${metaSeq}${STYLE.dim}${statusDetail}${STYLE.reset}`;
-    }
-    return rendered;
+    return `${chrome}•${STYLE.reset} ${STYLE.bold}${muted}${header[1]}${STYLE.reset} ${chrome}${STYLE.dim}(${header[2]})${STYLE.reset} ${chrome}· ${header[3]}${STYLE.reset}  ${statusColorSeq("✓", brightness)}✓${STYLE.reset}`;
   }
 
   const single = plain.match(TOOL_SINGLE_RE);
@@ -621,7 +594,7 @@ export function polishAssistantStructure(
     .replace(/\n{3,}/g, "\n\n");
 
   // List/prose and tool/prose breathing: outside a work block, distance carries
-  // hierarchy. Sibling leaves stay dense; a completed tree followed by another
+  // hierarchy. A completed summary followed by another
   // tool group gets one separating row; tool work and assistant prose also get
   // one row so the final answer cannot visually merge into the activity log.
   const headingLines = afterHeading.split("\n");
@@ -686,9 +659,10 @@ function styleRichMarkdownLine(line: string, brightness: TuiBrightness) {
     const styled = styleInlineMarkdown(content, brightness);
     return `${border}│${STYLE.reset} ${STYLE.dim}${styled}${STYLE.reset}`;
   }
-  // Horizontal rule: elegant 36-char divider line with subtle chrome styling.
+  // Horizontal rule: elegant 36-cell divider line with subtle chrome styling.
+  // 字形跟 resolveBoxCharset（EA=A=wide 的终端下 `─` 占 2 列，36 字符会变成 72 格）。
   if (THEMATIC_BREAK_RE.test(line)) {
-    return `${colorSeq("chrome", brightness)}${STYLE.dim}${"─".repeat(36)}${STYLE.reset}`;
+    return `${colorSeq("chrome", brightness)}${STYLE.dim}${boxGlyphs(resolveBoxCharset()).h.repeat(36)}${STYLE.reset}`;
   }
   // List bullets: primary level uses accent '•', nested lists (indent >= 2)
   // use elegant open circle '◦' in chrome for rhythmic visual depth.
@@ -943,14 +917,12 @@ type StreamLineKind =
   | "heading"
   | "fence"
   | "tool-header"
-  | "tool-leaf"
   | "tool";
 
 function classifyStreamLine(line: string): StreamLineKind {
   if (line === "") return "blank";
   const plain = plainToolLine(line);
   if (isToolTreeHeaderLine(plain)) return "tool-header";
-  if (isToolTreeLeafLine(plain)) return "tool-leaf";
   if (isToolSingleLine(plain)) return "tool";
   // Raw markdown forms (stream input) plus already-normalized markers.
   if (
@@ -964,9 +936,8 @@ function classifyStreamLine(line: string): StreamLineKind {
   }
   // Anything else that the polish pass treats as list-shaped must breathe the
   // same way here, or the finalized render inserts a row the live stream never
-  // showed. Two shapes reach this point: prose that merely starts with the
-  // activity marker (`▸ note`), and box-drawing tree children without a status
-  // marker (`├── docs`). Both are list-shaped for polishAssistantStructure
+  // showed. Activity-like prose and user-written box-drawing lists are still
+  // list-shaped for polishAssistantStructure (not legacy tool tree output)
   // (isPolishListLikeLine) — single source of truth on purpose, so the two
   // paths cannot drift apart again.
   if (isPolishListLikeLine(plain)) return "list";
@@ -978,11 +949,11 @@ function classifyStreamLine(line: string): StreamLineKind {
 }
 
 function isStreamToolKind(kind: StreamLineKind | null): boolean {
-  return kind === "tool-header" || kind === "tool-leaf" || kind === "tool";
+  return kind === "tool-header" || kind === "tool";
 }
 
 function isStreamListLike(kind: StreamLineKind): boolean {
-  return kind === "list" || kind === "tool-header" || kind === "tool-leaf" || kind === "tool";
+  return kind === "list" || kind === "tool-header" || kind === "tool";
 }
 
 function needsListProseBreath(
