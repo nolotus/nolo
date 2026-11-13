@@ -21,13 +21,15 @@ import { traceChildRunWake } from "./runWakeDiagnostics";
 export function prepareChildRunConsumption(event: ChildRunCompletedTurnEvent, host: {
   env: Record<string, string | undefined>;
   currentDialogId: string | null;
-  markAcknowledged: (runId: string) => void;
+  deferRuns: (runs: ChildRunCompletedTurnEvent["runs"]) => void;
 }): ChildRunCompletedTurnEvent | null {
   const now = Date.now();
-  const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(event.runs, { env: host.env, now: () => now });
+  const ownedRuns = event.runs.filter(run => !!run.parentDialogId && run.parentDialogId === host.currentDialogId);
+  const deferredRuns = event.runs.filter(run => !run.parentDialogId || run.parentDialogId !== host.currentDialogId);
+  if (deferredRuns.length) host.deferRuns(deferredRuns);
+  const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(ownedRuns, { env: host.env, now: () => now });
   traceChildRunWake("consume-claim-filter", event, host.currentDialogId,
     { remainingCount: remainingRuns.length, claimedCount: claimedRunIds.length });
-  for (const run of event.runs) host.markAcknowledged(run.runId);
   if (!remainingRuns.length) return null;
   if (remainingRuns.length === event.runs.length) return event;
   return { ...event, runs: remainingRuns, text: buildWakeMessage(remainingRuns, now),

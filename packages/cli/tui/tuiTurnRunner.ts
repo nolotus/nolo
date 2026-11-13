@@ -525,7 +525,7 @@ async function runAgentChat(
       : [];
 
   const injectedChildRunNoticeItems = (canConsumeChildCompletion(state, env) ? state.pendingChildRunNotices ?? [] : []).filter(
-    (r) => !r.parentDialogId || r.parentDialogId === state.dialogId,
+    (r) => !!r.parentDialogId && r.parentDialogId === state.dialogId,
   );
   const childRunNoticeBlocks =
     injectedChildRunNoticeItems.length > 0
@@ -1435,7 +1435,7 @@ export async function runOneAgentTurn(
     traceChildRunWake("turn-consume", req.event, ctx.state.dialogId ?? null, queueWakeFields(ctx.chatQueueBinding?.getStatus?.()));
     const event = prepareChildRunConsumption(req.event, {
       env: ctx.effectiveEnv, currentDialogId: ctx.state.dialogId ?? null,
-      markAcknowledged: runId => ctx.runCompletionWatcher?.markAcknowledged(runId),
+      deferRuns: runs => ctx.runCompletionWatcher?.deferRuns?.(runs),
     });
     if (!event) return { ok: true, aborted: false };
     req = { ...req, text: event.text, event };
@@ -1728,7 +1728,7 @@ export async function runOneAgentTurn(
     );
   };
   // 后台子 agent run 终态通知：组装前快照本轮要注入的条目，消费点只清掉快照里的条目。
-  const injectedChildRunNoticeItems = (canConsumeChildCompletion(ctx.state, ctx.effectiveEnv) ? ctx.state.pendingChildRunNotices ?? [] : []).filter(r => !r.parentDialogId || r.parentDialogId === ctx.state.dialogId);
+  const injectedChildRunNoticeItems = (canConsumeChildCompletion(ctx.state, ctx.effectiveEnv) ? ctx.state.pendingChildRunNotices ?? [] : []).filter(r => !!r.parentDialogId && r.parentDialogId === ctx.state.dialogId);
   const consumeInjectedChildRunNotices = (keepAll = false): AgentRunCompletionShape[] => {
     if (keepAll || injectedChildRunNoticeItems.length === 0) {
       return ctx.state.pendingChildRunNotices ?? [];
@@ -1742,6 +1742,12 @@ export async function runOneAgentTurn(
   const terminalEvents: InternalTurnEvent[] = [req.event];
   const settleNotices = (persisted: boolean) => {
     const keepPending = !persisted;
+    if (persisted) {
+      for (const run of injectedChildRunNoticeItems) ctx.runCompletionWatcher?.markAcknowledged(run.runId);
+      for (const event of terminalEvents) {
+        if (event.kind === "child-run-completed") for (const run of event.runs) ctx.runCompletionWatcher?.markAcknowledged(run.runId);
+      }
+    }
     for (const event of terminalEvents) traceChildRunWake("turn-notice-settle", event, ctx.state.dialogId ?? null, { persisted, ...queueWakeFields(ctx.chatQueueBinding?.getStatus?.()) });
     let nextProcessNotices = consumeInjectedProcessNotices(keepPending);
     let nextChildRunNotices = consumeInjectedChildRunNotices(keepPending);
@@ -1765,10 +1771,7 @@ export async function runOneAgentTurn(
         const existingIds = new Set(nextChildRunNotices.map((r) => r.runId));
         const newItems = event.runs
           .filter((r) => !existingIds.has(r.runId))
-          .map((r) => ({
-            ...r,
-            parentDialogId: r.parentDialogId ?? originDialogId,
-          }));
+          .map((r) => ({ ...r }));
         if (newItems.length > 0) {
           nextChildRunNotices = [...nextChildRunNotices, ...newItems];
         }
@@ -1826,7 +1829,7 @@ export async function runOneAgentTurn(
                 ctx.state = { ...ctx.state, pendingChildRunNotices: [...(ctx.state.pendingChildRunNotices ?? []), ...event.runs.filter(run => !existing.has(run.runId))] };
                 return false;
               }
-              const prepared = prepareChildRunConsumption(event, { env: ctx.effectiveEnv, currentDialogId: ctx.state.dialogId ?? null, markAcknowledged: runId => ctx.runCompletionWatcher?.markAcknowledged(runId) });
+              const prepared = prepareChildRunConsumption(event, { env: ctx.effectiveEnv, currentDialogId: ctx.state.dialogId ?? null, deferRuns: runs => ctx.runCompletionWatcher?.deferRuns?.(runs) });
               if (!prepared) return false;
               event = prepared;
             }

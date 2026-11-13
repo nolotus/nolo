@@ -3,9 +3,8 @@
 // 部署状态取数：CLI 命令与 TUI 状态栏共用这一份真值。
 //
 // 为什么需要它：nolo-ci 的状态只在 CI 宿主的 http://127.0.0.1:3900/status 上。
-// 公网入口 https://ci.nolo.chat 经 Cloudflare 隧道转发，适合给 GitHub webhook 用，
-// 不适合 TUI 首屏取数（多一跳边缘网络）；已有的 TUI deployWake 只在实时 SSE 到达时
-// 响一次铃，事后查不到。用户「推了代码但看不到部署」的准确原因就是这个。
+// 旧公网入口 ci.nolo.chat 已不可达，新的公网入口待确认；此处通过 SSH 读取状态。
+// 已有的 TUI deployWake 只在实时 SSE 到达时响一次铃，事后查不到。
 //
 // 设计约束（三条都不是可选项）：
 //  1. **失败一律静默**：没有 ssh、超时、DNS 错、JSON 坏，全部返回 undefined，

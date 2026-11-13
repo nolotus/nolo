@@ -379,6 +379,8 @@ export type RunCompletionWatcher = {
   observe(records: (RunRecord | AgentRunCompletionShape | Record<string, any>)[]): void;
   /** Explicit user/authority recovery reactivates retained, unacknowledged delivery. */
   resumePendingDelivery(): void;
+  /** Return accepted but undelivered runs to the dialog-scoped delivery queue. */
+  deferRuns(runs: AgentRunCompletionShape[]): void;
   /** 标记 runId 已被消费（如 wait:true），防重复唤醒。 */
   markAcknowledged(runId: string): void;
   /** 查询 runId 是否已 ack。 */
@@ -394,6 +396,7 @@ export function createRunCompletionWatcher(
   const createdAt = now();
   const lastStatusByRunId = new Map<string, string>();
   const notifiedRunIds = new Set<string>();
+  const acknowledgedRunIds = new Set<string>();
   const pendingDelivery = new Map<string, RunRecord | AgentRunCompletionShape>();
   let retryAt = 0;
   let retryDelay = 1000;
@@ -449,7 +452,9 @@ export function createRunCompletionWatcher(
           if (notifiedRunIds.has(record.runId)) { traceDecision(record, currentDialogId, "already-notified"); continue; }
           const status = record.status;
           if (typeof status !== "string") continue;
-          if (!(record.parentDialogId === currentDialogId || !record.parentDialogId)) { traceDecision(record, currentDialogId, "other-dialog"); continue; }
+          // Unowned runs remain discoverable in the persisted registry via `nolo agent ps`;
+          // never infer ownership from whichever dialog is currently open.
+          if (!record.parentDialogId || record.parentDialogId !== currentDialogId) { traceDecision(record, currentDialogId, "other-dialog"); continue; }
           if (isRunRecordClaimed(record, now())) {
             traceDecision(record, currentDialogId, "claimed");
             // A claimed terminal remains eligible when its lease expires.
@@ -515,11 +520,18 @@ export function createRunCompletionWatcher(
       retryDelay = 1000;
       watcher.observe([]);
     },
+    deferRuns(runs): void {
+      for (const run of runs) {
+        if (acknowledgedRunIds.has(run.runId)) continue;
+        notifiedRunIds.delete(run.runId);
+        pendingDelivery.set(run.runId, run);
+      }
+    },
     markAcknowledged(runId: string): void {
-      if (runId) { notifiedRunIds.add(runId); pendingDelivery.delete(runId); }
+      if (runId) { acknowledgedRunIds.add(runId); notifiedRunIds.add(runId); pendingDelivery.delete(runId); }
     },
     isAcknowledged(runId: string): boolean {
-      return Boolean(runId && notifiedRunIds.has(runId));
+      return Boolean(runId && acknowledgedRunIds.has(runId));
     },
     dispose(): void {
       disposed = true;
@@ -527,6 +539,7 @@ export function createRunCompletionWatcher(
       retryTimer = null;
       lastStatusByRunId.clear();
       notifiedRunIds.clear();
+      acknowledgedRunIds.clear();
       diagnosticDecisions.clear();
       pendingDelivery.clear();
     },

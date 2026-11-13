@@ -1,4 +1,11 @@
 
+## 0.215.1 (2026-11-13)
+
+### Bug Fixes
+
+* **cli:** 后台 run 终态通知串到非派发对话，且切回原对话后不再丢投 ([e720e02](https://github.com/nolotus/bun-nolo/commit/e720e02701a8a4789753a3ecd527e04bc2f7b246))
+
+
 ## 0.215.0 (2026-11-13)
 
 ### Features
