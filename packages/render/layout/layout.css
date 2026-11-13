@@ -1,7 +1,7 @@
 /* =============================================================================
    Layout CSS — extracted from inline <style> tags
-   Covers: MainLayout, TopBar, TopbarUserMenu, SideDialogPanel,
-           DialogMenu, CreateMenuButton, TopbarSpaceSwitcher
+   Covers: MainLayout, page header chrome, SideDialogPanel,
+           DialogMenu, CreateMenuButton
    ============================================================================= */
 
 /* =============================================================================
@@ -13,8 +13,10 @@
   --sidebar-slide-ease: cubic-bezier(0.16, 1, 0.3, 1); /* Quartic Ease Out */
   --sidebar-slide-ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Shell chrome: single source of truth for TopBar height (CLS-safe) */
-  --topbar-height: 56px;
+  /* 桌面注入标题栏（原生标题栏隐藏）时 shell 预留的安全区高度；
+     普通网页没有全局条，恒为 0。 */
+  --shell-titlebar-height: 0px;
+
 
   /* 纤细滚动条（夜间模式依赖变量，不写死颜色） */
   --scrollbar-size-thin: 4px;
@@ -35,11 +37,15 @@
   timeline-scope: --main-scroll;
 }
 
+html[data-nolo-desktop-titlebar="hidden"] {
+  --shell-titlebar-height: 56px;
+}
+
 html[data-nolo-desktop-titlebar="hidden"] body::before {
   content: "";
   position: fixed;
   inset: 0 0 auto 0;
-  height: var(--topbar-height);
+  height: var(--shell-titlebar-height);
   z-index: 1000;
   background: color-mix(in srgb, var(--backgroundSecondary) 72%, var(--background) 28%);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 58%, transparent 42%);
@@ -47,8 +53,8 @@ html[data-nolo-desktop-titlebar="hidden"] body::before {
 }
 
 html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
-  height: calc(100dvh - var(--topbar-height));
-  margin-top: var(--topbar-height);
+  height: calc(100dvh - var(--shell-titlebar-height));
+  margin-top: var(--shell-titlebar-height);
 }
 
 .MainLayout.is-resizing {
@@ -77,24 +83,13 @@ html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
   min-height: 0;
   height: 100%;
   background: var(--background);
+  position: relative; /* shell 级侧边栏开关的定位上下文 */
 }
 
 .MainLayout--navigation-end .MainLayout__center {
   order: 1;
 }
 
-/* TopBar Suspense slot: same box as .topbar so lazy chunk resolve is 0px height jump */
-.MainLayout__topbarSlot {
-  height: var(--topbar-height);
-  min-height: var(--topbar-height);
-  flex: 0 0 var(--topbar-height);
-  width: 100%;
-  box-sizing: border-box;
-  /* Match sticky topbar paint so content doesn't flash a hard seam */
-  background: var(--background);
-  border-bottom: 1px solid transparent;
-  pointer-events: none;
-}
 
 /* TopBar 下方：Outlet + 右侧栏 */
 .MainLayout__contentRow {
@@ -419,7 +414,7 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   /* 左侧：移动端抽屉，从左滑入/滑出 */
   .MainLayout__sidebar {
     position: fixed;
-    top: var(--topbar-height);
+    top: 0; /* 全局条已删除，抽屉从内容区顶部开始 */
     bottom: 0;
     left: 0;
     width: 85% !important;
@@ -460,17 +455,17 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
     order: initial;
   }
 
-  /* 桌面端注入标题栏模式：MainLayout 整体下移了一个 --topbar-height，
-     fixed 定位的抽屉要同时让出注入标题栏 + TopBar，否则会盖住 TopBar */
+  /* 桌面端注入标题栏模式：MainLayout 整体下移了一个注入标题栏高度，
+     fixed 定位的抽屉要让出注入标题栏（全局条已删除，不再让第二段） */
   html[data-nolo-desktop-titlebar="hidden"] .MainLayout__sidebar,
   html[data-nolo-desktop-titlebar="hidden"] .MainLayout__rightSidebar {
-    top: calc(var(--topbar-height) * 2);
+    top: var(--shell-titlebar-height);
   }
 
   /* 右侧：移动端抽屉，从右滑入/滑出，只覆盖内容区部分（避开 TopBar） */
   .MainLayout__rightSidebar {
     position: fixed;
-    top: var(--topbar-height); /* 与 TopBar 高度对齐 */
+    top: 0; /* 全局条已删除 */
     bottom: 0;
     right: 0;
     z-index: var(--z-mobileDrawer, 70);
@@ -573,28 +568,6 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   background: var(--primaryGhost);
 }
 
-.topbar {
-  display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr) max-content;
-  align-items: center;
-  gap: var(--space-4);
-  position: sticky;
-  top: 0;
-  height: var(--topbar-height);
-  min-height: var(--topbar-height);
-  flex: 0 0 var(--topbar-height);
-  box-sizing: border-box;
-  padding: 0 var(--space-4);
-  z-index: var(--z-sticky, 100);
-  background: var(--background);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.2s ease-in-out, background 0.2s ease, box-shadow 0.2s ease;
-  flex-wrap: nowrap;
-  white-space: nowrap;
-  overflow: visible;
-}
 /* Bottom-blur extension — disabled */
 .topbar::after { content: none; }
 
@@ -825,66 +798,6 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   border-radius: 999px;
 }
 
-.topbar__history-group {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-.topbar__history-group--desktop-chrome {
-  position: static;
-  height: var(--control-sm);
-  gap: 2px;
-  color: var(--textSecondary);
-}
-
-.topbar__history-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-7);
-  height: var(--control-sm);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  color: var(--textSecondary);
-  transition: background 0.15s, color 0.15s;
-  flex-shrink: 0;
-}
-.topbar__history-btn:hover:not(:disabled) {
-  background: var(--backgroundSecondary);
-  color: var(--text);
-}
-.topbar__history-btn:disabled {
-  color: var(--textQuaternary);
-  cursor: default;
-  opacity: 0.52;
-}
-.topbar__history-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--focusRing);
-}
-
-.topbar__history-group--desktop-chrome .topbar__history-btn {
-  width: var(--space-8);
-  height: var(--control-sm);
-  border-radius: var(--radius-md);
-  color: var(--textSecondary);
-  opacity: 1;
-}
-
-.topbar__history-group--desktop-chrome .topbar__history-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 8%, transparent 92%);
-  color: var(--text);
-}
-
-.topbar__history-group--desktop-chrome .topbar__history-btn:disabled {
-  color: var(--textTertiary);
-  opacity: 0.45;
-}
-
 .topbar__button {
   display: flex;
   align-items: center;
@@ -1075,7 +988,6 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   }
   .topbar__actions { gap: var(--space-2); }
   .topbar__save-button { display: none; }
-  .topbar__history-btn { display: none; }
   .topbar__button--sidechat,
   .topbar__button--fileinfo { display: none; }
   .topbar__button {
@@ -1093,9 +1005,9 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
 }
 
 /* =============================================================================
-   TopbarUserMenu
+   User menu / notification panel（类名沿用 topbar-* 前缀，实际消费者是
+   SidebarUserSection 的侧栏用户菜单；原 TopbarUserMenu 组件已删除）
    ============================================================================= */
-.TopbarUserMenu { position: relative; display: flex; align-items: center; gap: var(--space-2); }
 
 .topbar-user-menu__avatar-button, .topbar-user-menu__btn-add {
   border: none; margin: 0; padding: 0; background: transparent;
@@ -1137,11 +1049,6 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
 .topbar-user-menu__toggle:hover { color: var(--text); }
 .topbar-user-menu__toggle.is-open { color: var(--primary); }
 
-.TopbarNotification {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
 
 .topbar-notification__button {
   position: relative;
@@ -1184,16 +1091,6 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
 /* Surface comes from `.topbar-dropdown`, which this element also carries; only
  * the notification-specific size and layout belong here. `padding: 0` is
  * deliberate — the header, list and footer run edge to edge and pad themselves. */
-.TopbarNotification .topbar-notification__popup {
-  width: 480px;
-  min-width: min(360px, calc(100vw - 32px));
-  max-width: min(520px, calc(100vw - 32px));
-  padding: 0;
-  box-sizing: border-box;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
 
 .topbar-notification__header {
   display: flex;
@@ -1712,15 +1609,10 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
 }
 
 @media (max-width: 768px) {
-  .TopbarUserMenu { gap: 2px; }
   .topbar-dropdown { right: -6px; min-width: 195px; }
   .topbar-user-menu__popup {
     width: min(292px, calc(100vw - 20px));
     max-width: calc(100vw - 20px);
-  }
-  .TopbarNotification .topbar-notification__popup {
-    width: auto;
-    min-width: min(320px, calc(100vw - 16px));
   }
   .topbar-notification__mark-all {
     margin-left: 0;
@@ -2020,516 +1912,6 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   .create-menu__button:hover::before { opacity: 0; }
 }
 
-/* =============================================================================
-   TopbarSpaceSwitcher
-   ============================================================================= */
-/* ===== 容器 ===== */
-.TpSw {
-  position: relative;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.TpSw--topbar {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.TpSw--sidebar {
-  width: 100%;
-}
-
-.TpSw__btnGroup {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-height: var(--space-8);
-  padding: 0 4px 0 6px;
-  border-radius: var(--radius-xs);
-  box-sizing: border-box;
-}
-
-.TpSw--topbar .TpSw__btnGroup {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.TpSw--sidebar .TpSw__btnGroup {
-  width: 100%;
-  min-width: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  box-shadow: none;
-  transition: background 0.15s ease;
-}
-
-.TpSw--sidebar .TpSw__btnGroup:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-/* 左侧：直接跳转链接 */
-.TpSw__spaceLink {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 4px;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--text);
-  text-decoration: none;
-  min-width: 0;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.TpSw--topbar .TpSw__spaceLink {
-  max-width: 100%;
-}
-
-.TpSw--sidebar .TpSw__spaceLink {
-  flex: 1;
-}
-
-.TpSw--sidebar .TpSw__name {
-  flex: 1;
-  min-width: 0;
-  max-width: none;
-}
-
-.TpSw__spaceLink:hover {
-  background: var(--surfaceInteractiveHover, var(--backgroundHover));
-}
-
-/* 右侧：开/关下拉箭头 */
-.TpSw__chevronBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-xs);
-  color: var(--textTertiary);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.TpSw__chevronBtn:hover {
-  background: var(--surfaceInteractiveHover, var(--backgroundHover));
-  color: var(--text);
-}
-
-.TpSw__chevronBtn[aria-expanded="true"] {
-  background: var(--surfaceInteractiveHover, var(--backgroundHover));
-  color: var(--text);
-}
-
-.TpSw__chevronBtn[aria-expanded="true"] .TpSw__arrow {
-  transform: rotate(180deg);
-}
-
-/* ===== 空间图标 ===== */
-.TpSw__icon {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-xs);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 700;
-  color: white;
-  letter-spacing: 0;
-  line-height: 1;
-  user-select: none;
-}
-
-/* ===== 名称 ===== */
-.TpSw__name {
-  font-size: var(--fontSize-sm);
-  font-weight: 500;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 132px;
-  line-height: 1;
-}
-
-.TpSw--topbar .TpSw__name {
-  max-width: min(132px, 12vw);
-}
-
-/* ===== 箭头：chevronBtn 内的旋转由上面处理 ===== */
-.TpSw__arrow {
-  flex-shrink: 0;
-  color: var(--textTertiary);
-  transition: transform 0.25s cubic-bezier(0.2, 0, 0.2, 1);
-}
-
-/* ===== 加载旋转 ===== */
-.TpSw__spinIcon {
-  animation: TpSwSpin 1s linear infinite;
-}
-
-/* ===== 面板 ===== */
-.TpSw__panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 232px;
-  box-sizing: border-box;
-  padding: var(--popover-pad);
-  background: var(--popover-bg);
-  border: 1px solid var(--popover-border);
-  border-radius: var(--popover-radius);
-  box-shadow: var(--popover-shadow);
-  z-index: var(--z-dropdown, 1000);
-  overflow: hidden;
-  backdrop-filter: blur(var(--popover-blur)) saturate(1.8);
-  -webkit-backdrop-filter: blur(var(--popover-blur)) saturate(1.8);
-  animation: TpSwIn var(--popover-duration) var(--popover-ease);
-}
-
-.TpSw__panel--sidebar {
-  min-width: 0;
-  box-sizing: border-box;
-}
-
-/* ===== 面板头部 ===== */
-.TpSw__panelHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px 8px;
-}
-
-.TpSw__panelTitle {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--textSecondary);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  min-width: 0;
-}
-
-/* Membership list freshness only — not a global app offline marker */
-.TpSw__offlineBadge {
-  flex-shrink: 0;
-  max-width: 55%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: 0.01em;
-  color: var(--warning, #b45309);
-  background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 28%, transparent);
-}
-
-/* ===== 空间列表（RAC ListBox） ===== */
-.TpSw__list {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 0 2px 0 0; /* room for overlay thumb without crowding row labels */
-  max-height: 260px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  outline: none;
-  border: none;
-  background: transparent;
-  overscroll-behavior: contain;
-  /* Theme-matched overlay scrollbar: quiet until hover. */
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-
-.TpSw__list:hover,
-.TpSw__list:focus-within {
-  scrollbar-color:
-    color-mix(in srgb, var(--textQuaternary, var(--textTertiary, var(--border))) 48%, transparent)
-    transparent;
-}
-
-/* Spaces group under the pinned "All" option */
-.TpSw__section {
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid color-mix(in srgb, var(--borderLight, var(--border)) 70%, transparent);
-}
-
-/* ===== 底部固定：新建空间（action，不在 ListBox 内） ===== */
-.TpSw__footer {
-  flex-shrink: 0;
-  margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px solid color-mix(in srgb, var(--borderLight, var(--border)) 70%, transparent);
-}
-
-.TpSw__createBtn {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 9px 10px;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--primary) 6%, transparent);
-  color: var(--text);
-  font-size: var(--fontSize-sm);
-  font-weight: 600;
-  cursor: pointer;
-  outline: none;
-  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
-}
-
-.TpSw__createBtn:hover {
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: var(--text);
-}
-
-.TpSw__createBtn:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 35%, transparent);
-}
-
-.TpSw__createIcon {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-xs);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
-  border: 1px dashed color-mix(in srgb, var(--primary) 40%, transparent);
-}
-
-.TpSw__createLabel {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.TpSw__list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.TpSw__list::-webkit-scrollbar-track {
-  background: transparent;
-  margin-block: 4px;
-}
-
-.TpSw__list::-webkit-scrollbar-thumb {
-  background-color: transparent;
-  border-radius: 999px;
-  border: 2px solid transparent; /* inset pill so thumb floats off edge */
-  background-clip: padding-box;
-  transition: background-color 0.16s ease;
-}
-
-.TpSw__list:hover::-webkit-scrollbar-thumb,
-.TpSw__list:focus-within::-webkit-scrollbar-thumb {
-  background-color: color-mix(
-    in srgb,
-    var(--textQuaternary, var(--textTertiary, var(--border))) 48%,
-    transparent
-  );
-}
-
-.TpSw__list::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--textTertiary, var(--textSecondary, var(--border))) 62%,
-    transparent
-  );
-}
-
-.TpSw__list::-webkit-scrollbar-thumb:active {
-  background-color: color-mix(
-    in srgb,
-    var(--textSecondary, var(--textTertiary, var(--border))) 72%,
-    transparent
-  );
-}
-
-.TpSw__list::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-/* ===== 空间列表项 ===== */
-.TpSw__item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius-xs);
-  text-decoration: none;
-  color: var(--textSecondary);
-  font-size: var(--fontSize-sm);
-  font-weight: 500;
-  transition: background 0.12s ease, color 0.12s ease;
-  outline: none;
-  cursor: pointer;
-  background: transparent;
-  border: none;
-  box-sizing: border-box;
-}
-
-.TpSw__item[data-hovered],
-.TpSw__item:hover {
-  background: var(--surfaceInteractiveHover, var(--backgroundHover));
-  color: var(--text);
-}
-
-.TpSw__item[data-focus-visible] {
-  background: var(--surfaceInteractiveHover, var(--backgroundHover));
-  color: var(--text);
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--primary) 45%, transparent);
-}
-
-.TpSw__item[data-selected],
-.TpSw__item.is-current {
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-  font-weight: 600;
-}
-
-.TpSw__item[data-selected][data-hovered],
-.TpSw__item[data-selected][data-focus-visible] {
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
-  color: var(--primary);
-}
-
-.TpSw__itemIcon {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-xs);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: white;
-  line-height: 1;
-  user-select: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
-}
-
-.TpSw__itemName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.TpSw__itemCheck {
-  flex-shrink: 0;
-  color: var(--primary);
-}
-
-/* Disabled empty/loading rows inside ListBox */
-.TpSw__emptyItem {
-  cursor: default;
-  outline: none;
-}
-
-.TpSw__emptyItem[data-disabled] {
-  opacity: 1;
-}
-
-/* ===== 空列表 ===== */
-.TpSw__empty {
-  padding: 12px 14px;
-  color: var(--textSecondary);
-  font-size: var(--fontSize-base);
-  text-align: center;
-}
-
-/* ===== 动画 ===== */
-@keyframes TpSwIn {
-  from { opacity: 0; transform: translateY(calc(var(--popover-travel) * -1)) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0)    scale(1); }
-}
-
-@keyframes TpSwSpin {
-  to { transform: rotate(360deg); }
-}
-
-/* ===== 移动端 ===== */
-@media (max-width: 768px) {
-  .TpSw--topbar {
-    display: none;
-  }
-  .TpSw__name { max-width: 90px; }
-  .TpSw__panel { min-width: 200px; }
-  .TpSw__btnGroup { min-height: var(--space-7); }
-  .TpSw--hideOnMobile {
-    display: none;
-  }
-  .TpSw--multi .TpSw__spaceLink {
-    width: 36px;
-    height: var(--control-md);
-    padding: 0;
-    justify-content: center;
-    border-radius: 999px;
-  }
-  .TpSw--multi .TpSw__name {
-    display: none;
-  }
-  .TpSw--multi .TpSw__chevronBtn {
-    display: none;
-  }
-  .TpSw--multi .TpSw__icon {
-    width: 22px;
-    height: 22px;
-    border-radius: 999px;
-  }
-  .TpSw--multi .TpSw__panel {
-    left: 0;
-  }
-  .TpSw--sidebar.TpSw--multi .TpSw__spaceLink {
-    flex: 1;
-    width: auto;
-    height: auto;
-    padding: 4px;
-    justify-content: flex-start;
-    border-radius: var(--radius-xs);
-  }
-  .TpSw--sidebar.TpSw--multi .TpSw__name {
-    display: inline;
-    max-width: none;
-  }
-  .TpSw--sidebar.TpSw--multi .TpSw__chevronBtn {
-    display: flex;
-  }
-  .TpSw--sidebar.TpSw--multi .TpSw__icon {
-    width: 18px;
-    height: 18px;
-    border-radius: var(--radius-xs);
-  }
-  .TpSw__panel--sidebar {
-    min-width: 0;
-  }
-}
 
 
 /* ── DevReloadBadge ──────────────────────────────────── */
@@ -3166,4 +2548,150 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
   .MainLayout__sidebar--rail-only .navigation-v2-context { display: none; }
   .MainLayout__sidebar--rail-only .navigation-v2-shell { width: var(--navigation-rail-width, 52px); min-width: 0; }
   .MainLayout__sidebar--rail-only .navigation-v2-rail { width: var(--navigation-rail-width, 52px); flex: 0 0 var(--navigation-rail-width, 52px); }
+}
+
+/* =============================================================================
+   页面对象头部（内容区顶部的对象动作条）
+   ========================================================================== */
+
+/* 吸顶：滚动容器是 MainLayout__main（本元素是它的直接子项）。 */
+
+
+
+
+/* 头部占掉一行后，内容区按剩余高度计算，避免多出一截空白滚动 */
+
+/* 页面头部两侧的全局 chrome：左侧导航簇 / 右侧用户簇 */
+.page-top-chrome__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.page-top-chrome__user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* 非内容对象页（游客首页 / 登录 / 定价 / 下载 / 法务页）没有内容页头部，
+   主题·语言·登录等入口悬浮在内容区右上角。 */
+.page-top-chrome__user--guest.is-floating {
+  position: fixed;
+  top: calc(var(--shell-titlebar-height) + var(--space-3));
+  right: var(--space-4);
+  z-index: 30;
+}
+
+/* shell 级侧边栏开关：MainLayout 渲染在内容区左上角，对所有路由生效。
+   Rail 模式下不渲染（Rail 自带开关），避免出现两个入口。 */
+.shell-sidebar-toggle {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-8, 32px);
+  height: var(--space-8, 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--textSecondary);
+  cursor: pointer;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.shell-sidebar-toggle:hover {
+  background: var(--backgroundHover);
+  color: var(--text);
+}
+
+.shell-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* 内容页头部左侧为 shell 开关留出的等宽空位（仅非 Rail 布局出现） */
+.page-top-chrome__shell-toggle-gap {
+  width: var(--space-8, 32px);
+  flex: 0 0 auto;
+}
+
+/* 减少动效偏好：移动端抽屉靠 transform 位移开关，这里必须显式关掉。
+   桌面宽度过渡的对应规则在 sidebarContextToggle.css（那边的动画规则带 !important，
+   所以它的禁用规则也必须同特异性，不能只写单个 class）。
+   Rail 侧由 sidebarContextToggle.css 的同特异性后置规则接管，
+   本文件这条只覆盖移动抽屉与非 Rail 侧栏。 */
+@media (prefers-reduced-motion: reduce) {
+  .MainLayout__sidebar,
+  .MainLayout__rightSidebar {
+    transition: none !important;
+  }
+}
+
+/* 内容对象页（表格 / App / 文件）顶部的轻量动作行：没有背景条、没有底边线，
+   只用页面自己的留白分区。 */
+.page-object-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-self: flex-start;
+  flex: 0 0 auto;
+  padding-block: var(--space-2);
+}
+
+/* Home Work owns a finite column height. Stretch the loaded list through its
+   wrappers; the workspace list scrolls inside the remaining space, not 60vh. */
+.ChatSidebar.navigation-v2-context--fixed .ChatSidebar__work-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ChatSidebar__work-content [data-hook="work-dialog-groups"],
+.ChatSidebar__work-content .home-work-dialog-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.ChatSidebar__work-content [data-hook="space-workspaces-scroll"] {
+  flex: 1 1 0;
+  min-height: 0;
+  /* Keep the final heading clear of the scroll edge and pagination footer. */
+  box-sizing: border-box;
+  padding-bottom: var(--space-3, 12px);
+  scroll-padding-bottom: var(--space-3, 12px);
+  /* Override the standalone 60vh fallback; the parent column bounds height. */
+  max-height: none !important;
+}
+.ChatSidebar__work-content .home-work-dialog-list > [aria-label="最近活动对话"] {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ChatSidebar__work-content .home-work-dialog-list > button,
+.ChatSidebar__work-content .home-work-dialog-list > p {
+  flex-shrink: 0;
+}
+.ChatSidebar__work-content .home-work-dialog-list > button {
+  /* A normal-flow footer, never an overlay on the independently scrolling rows. */
+  position: static;
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin-top: var(--space-2, 8px);
+  min-height: 32px;
+}
+/* A single space omits its outer group layer but categories still share the
+   finite list height; multi-space category blocks scroll with their space. */
+.ChatSidebar__work-content .home-work-dialog-list > [data-hook="work-dialog-categories"] {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--space-3, 12px);
 }

@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useFetchData } from "app/hooks";
 import { useHasMounted } from "app/hooks/useHasMounted";
-import { useIdentity, useToken } from "identity";
+import { useIdentity, useToken, useUserId } from "identity";
 import { selectCurrentServer } from "app/settings/settingSlice";
 import { useActiveControllers, useRecoveredForegroundTurn } from "chat/dialog/dialogSlice";
 import { useDialogBackgroundWake } from "chat/web/useDialogBackgroundWake";
@@ -24,7 +24,9 @@ import {
 } from "chat/dialog/dialogSlice";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { ChatArea } from "chat/web/ChatArea";
+import { SpaceContextBadge } from "./SpaceContextBadge";
 import { getIsDesktopApp } from "app/utils/env";
+import { subscribeSpaceWorkspaces } from "chat/web/spaceWorkspaces";
 import { resolveDialogWorkspaceFolder } from "chat/web/desktopFolderProjects";
 import { LiveVoicePanel } from "chat/web/LiveVoicePanel";
 import { useMediaJobContextInjection } from "../web/mediaJobContextInjection";
@@ -42,6 +44,7 @@ import {
 } from "chat/messages/messageSlice";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { extractCustomId } from "core/prefix";
+import { buildDialogKey, parseDialogKey } from "database/dialogKey";
 import PageLoading from "render/web/ui/PageLoading";
 import { ensureDialogSpaceAction } from "./ensureDialogSpaceAction";
 import { buildDialogUrl } from "./dialogUrl";
@@ -101,8 +104,11 @@ import {
 } from "chat/web/MessageInputContextPanels";
 import { AgentDraftPanel } from "./AgentDraftPanel";
 import { ChildRunObserverPanel } from "./ChildRunObserverPanel";
+import { DialogRelationSection } from "./DialogRelation";
 import { DialogRuntimeTargetBadge } from "./DialogRuntimeTargetBadge";
 import { resolveLatestAgentDraftSidePanelState } from "./agentDraftPanelState";
+import DialogMenu from "render/layout/DialogMenu";
+import { useTopBarStateContext } from "render/layout/TopBarStateContext";
 
 type DialogBootstrapDispatchResult = {
   unwrap: () => Promise<unknown>;
@@ -169,14 +175,20 @@ const DialogPage = ({
   const location = useLocation();
   const dialogId = pageKey ? extractCustomId(pageKey) : null;
   // An existing Dialog keeps its own folder binding, independent of sidebar selection.
-  // No binding → the desktop default workspace, which is exactly what the first
-  // message of /chat used; a bound-but-missing Project blocks instead of falling back.
+  // No binding → the Space's local folder, then the desktop default workspace;
+  // a bound-but-missing Project blocks instead of falling back.
+  const currentDialogConfig = useCurrentDialogConfig();
+  const workspaceUserId = useUserId();
+  const [, refreshWorkspace] = useState(0);
+  useEffect(() => subscribeSpaceWorkspaces(() => refreshWorkspace((revision) => revision + 1)), []);
   let dialogFolder: string | null = null;
+  let dialogProjectId: string | null = null;
   let projectFolderMissing = false;
   if (getIsDesktopApp() && pageKey && typeof window !== "undefined") {
     try {
-      const workspace = resolveDialogWorkspaceFolder(window.localStorage, pageKey);
+      const workspace = resolveDialogWorkspaceFolder(window.localStorage, pageKey, currentDialogConfig?.spaceId, workspaceUserId);
       dialogFolder = workspace.cwd;
+      dialogProjectId = workspace.projectId;
       projectFolderMissing = workspace.missing;
     } catch { projectFolderMissing = true; }
   }
@@ -200,7 +212,6 @@ const DialogPage = ({
         console.info(`[mediaJobContext] 笔记未能挂入对话（${status}），已忽略`);
     },
   });
-  const currentDialogConfig = useCurrentDialogConfig();
   const isDeviceLocalDialog = useMemo(() => {
     const config = currentDialogConfig as
       | {
@@ -836,6 +847,23 @@ const DialogPage = ({
     }
   }, [currentDialogConfig?.title, dialogId, lastAssistantMessage, pageKey]);
 
+  // Space context for this surface: an existing dialog uses its own record's
+  // spaceId; a new dialog shell uses the explicit route spaceId. The residual
+  // global current Space is deliberately not consulted, and an absent id
+  // renders nothing. `cwd` is only a separate segment when it is an explicit
+  // per-dialog override (a bound Project), never the Space binding itself.
+  const renderSpaceContextBadge = () => {
+    const spaceId = currentDialogConfig?.spaceId ?? routeSpaceId;
+    if (!spaceId) return null;
+    return (
+      <SpaceContextBadge
+        spaceId={spaceId}
+        cwd={dialogFolder}
+        cwdIsOverride={!!dialogProjectId}
+      />
+    );
+  };
+
   const renderInheritedContextBanner = () => {
     if (!inheritedContextBanner) return null;
 
@@ -912,6 +940,7 @@ const DialogPage = ({
       return (
         <>
           {renderInheritedContextBanner()}
+          {renderSpaceContextBadge()}
           <div
             style={{
               padding: "8px 16px",
@@ -930,6 +959,7 @@ const DialogPage = ({
             composerBlockedReason={projectFolderMissing ? "关联的本地项目目录不可用。请恢复项目文件夹后再发送消息，避免在错误目录执行。" : undefined}
             scrollContainerSelector=".DialogPage__messages"
             messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
+            messagesOverlay={<DialogActionsOverlay />}
           />
         </>
       );
@@ -951,12 +981,14 @@ const DialogPage = ({
       return (
         <>
           {renderInheritedContextBanner()}
+          {renderSpaceContextBadge()}
           <ChatArea
             dialogId={dialogId}
             runtimeOptions={dialogFolder ? { cwd: dialogFolder, workspaceToolsHint: true } : undefined}
             composerBlockedReason={projectFolderMissing ? "关联的本地项目目录不可用。请恢复项目文件夹后再发送消息，避免在错误目录执行。" : undefined}
             scrollContainerSelector=".DialogPage__messages"
             messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
+            messagesOverlay={<DialogActionsOverlay />}
           />
         </>
       );
@@ -965,6 +997,7 @@ const DialogPage = ({
     if (canRenderNewDialogShell && dialogId) {
       return (
         <>
+          {renderSpaceContextBadge()}
           {error && (
             <div
               style={{
@@ -986,6 +1019,7 @@ const DialogPage = ({
             composerBlockedReason={projectFolderMissing ? "关联的本地项目目录不可用。请恢复项目文件夹后再发送消息，避免在错误目录执行。" : undefined}
             scrollContainerSelector=".DialogPage__messages"
             messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
+            messagesOverlay={<DialogActionsOverlay />}
           />
         </>
       );
@@ -1032,6 +1066,19 @@ const DialogPage = ({
     );
   };
 
+  // Prefer the record's authoritative owner: both owner and dialog IDs may contain
+  // hyphens. Only use the legacy parser when the record has no owner evidence.
+  const dialogOwnerId = useMemo(() => {
+    if (!pageKey) return "";
+    const owner = typeof currentDialogConfig?.userId === "string" ? currentDialogConfig.userId.trim() : "";
+    if (owner) {
+      if (currentDialogConfig?.dbKey !== pageKey) return "";
+      const prefix = buildDialogKey(owner, "");
+      return pageKey.startsWith(prefix) && pageKey.length > prefix.length ? owner : "";
+    }
+    return parseDialogKey(pageKey)?.userId ?? "";
+  }, [pageKey, currentDialogConfig?.dbKey, currentDialogConfig?.userId]);
+
   const shouldShowChildRunObserver =
     isLoggedIn &&
     !!dialogId &&
@@ -1063,6 +1110,16 @@ const DialogPage = ({
                 ?.runtimeBinding
             }
           />
+          {currentDialogConfig && dialogId ? (
+            <DialogRelationSection
+              dialogId={dialogId}
+              ownerId={dialogOwnerId}
+              parentDialogId={
+                (currentDialogConfig as { parentDialogId?: string } | null)
+                  ?.parentDialogId ?? null
+              }
+            />
+          ) : null}
           {renderContent()}
         </div>
         {shouldShowDraftPanel && latestAgentDraft && (
@@ -1100,3 +1157,26 @@ const DialogPage = ({
 };
 
 export default DialogPage;
+
+/**
+ * 对话页右上角的悬浮动作菜单：0 高度 sticky 容器（不占行高），
+ * 菜单项与回调完全复用 DialogMenu 的现有实现。
+ */
+const DialogActionsOverlay: React.FC = () => {
+  const s = useTopBarStateContext();
+  const currentDialog = useCurrentDialogConfig();
+  if (!s || !currentDialog) return null;
+  return (
+    <div className="dialog-page__actions-float">
+      <DialogMenu
+        variant="actions"
+        currentDialog={currentDialog}
+        showShareButton={s.showShareButton}
+        canDelete={!!(s.deleteContext && s.deleteKey)}
+        showFavorite={false}
+        onShare={s.handleOpenShare}
+        onDelete={s.handleOpenDeleteConfirm}
+      />
+    </div>
+  );
+};

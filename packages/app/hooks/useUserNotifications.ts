@@ -105,7 +105,7 @@ export function useUserNotifications() {
   const { currentServer, currentToken, currentUserId } =
     useAppSelector(selectRuntimeSnapshot);
   const remoteServers = useAppSelector(selectRuntimeRemoteServers);
-  // 多个组件（TopbarNotificationBell + SidebarUserSection）会各自挂载此 hook，
+  // 多个入口（侧栏用户菜单、页面头部的通知入口）会各自挂载此 hook，
   // 用 hydrated flag 去重，避免重复远端拉取（3 server × 2 组件 = 6 次请求 → 3 次）。
   const hydrated = useNotificationsHydrated();
 

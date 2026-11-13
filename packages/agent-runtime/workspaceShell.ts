@@ -1,3 +1,9 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+const shellChildEnvironment = new AsyncLocalStorage<Record<string, string>>();
+/** Host-only per-call child environment; never mutates process.env. */
+export function withShellChildEnvironment<T>(env: Record<string, string>, run: () => T): T {
+  return shellChildEnvironment.run(env, run);
+}
 // packages/agent-runtime/workspaceShell.ts
 //
 // Neutral low-level primitives for workspace shell execution, command building,
@@ -26,6 +32,7 @@ import {
 import { getProcessRegistry } from "./processRegistry";
 import type { ProcessOwner } from "./processOwnership";
 import { buildProcessTaskResultCapsule, type ProcessTaskResultCapsule } from "./processTaskResult";
+import { formatSpilledToolOutput, TOOL_OUTPUT_SPILL_BYTES, TOOL_OUTPUT_SPILL_LINES, isSpilledToolOutput } from "./toolOutputSpillProjection";
 import { promoteToolSpillFile, spillToolOutput } from "./toolSpillStore";
 
 export const EXEC_SHELL_TIMEOUT_ENV = "NOLO_EXEC_SHELL_TIMEOUT_MS";
@@ -475,20 +482,55 @@ export function truncateToolOutput(
   limit = 20_000,
   options?: { toolName?: string; workspaceRoot?: string },
 ): string {
+  if (isSpilledToolOutput(value)) return value;
   if (value.length <= limit) return value;
   let spillNote = "";
+  let spillPathOnly = "";
   try {
     const spill = spillToolOutput({
       content: value,
       toolName: options?.toolName ?? "execShell",
       workspaceRoot: options?.workspaceRoot,
     });
-    spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}`;
+    spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}; hint=read a range, not the whole spill (readFile lines=A-B or sed -n 'A,Bp'); a full read re-injects ${spill.totalChars} chars`;
+    spillPathOnly = `; spillFile=${spill.displayPath}`;
   } catch {
     // Fail-open: ignore spill errors to prevent breaking execution
   }
   const approxMarkerLen = 40 + spillNote.length;
-  if (limit <= approxMarkerLen) return value.slice(0, limit);
+  if (limit <= approxMarkerLen) {
+    // limit 装不下「标记 + 正文」时，**不允许静默截断**：旧实现直接
+    // `value.slice(0, limit)` 返回原文前缀，调用方看到的内容像是完整的，
+    // 无从判断已被砍掉（2026-11-10 实测：desktop runtimeToolPolicy 的
+    // shell.maxOutputBytes=120 正好落进这个分支）。
+    //
+    // 该分支按信息重要性从高到低填预算，容量不足时宁可舍弃次要信息：
+    //   1) 「已被截断 + 省略了多少」——必须保住，否则等于静默截断；
+    //   2) spill 路径——只在放得下时附加；放不下时明确说标记本身也被压缩了，
+    //      不假装给出了可用的全文位置。
+    const notice = `[... truncated ${value.length} chars]`;
+    const withFullNote = `[... truncated ${value.length} chars${spillNote} ...]`;
+    if (withFullNote.length <= limit) return withFullNote;
+    // 完整标记放不下，但路径本身通常放得下：保留路径比保留 hint 更有用。
+    const withPath = `[... truncated ${value.length} chars${spillPathOnly} ...]`;
+    if (withPath.length <= limit) return withPath;
+    if (notice.length <= limit) {
+      // 放得下告知、放不下路径：保留告知并标注路径省略，避免误以为没有更多内容。
+      const pathOmitted = " [... path omitted]";
+      return notice.length + pathOmitted.length <= limit ? notice + pathOmitted : notice;
+    }
+    // 连告知都放不下：这是极小预算（limit < notice.length，约 25 字符）。
+    //
+    // 契约在这里**必须收窄**，因为字符串预算存在数学上的固有限制：任何固定长度的
+    // 前缀（包括标记、省略号）都必然与某一段原文的前缀相同，无法在纯字符串返回值里
+    // 构造出「永不与原文碰撞」的标记。审查已用 `"…"+"x".repeat(600)` 与
+    // `"[".repeat(600)` 两种原文分别击穿 `"…"` 与 `"["` 方案。
+    //
+    // 因此该分支只承诺：**不返回原文内容**（不泄漏被截断的正文），使用省略号占位。
+    // 调用方若需要区分，应提高 limit 至 >= notice.length（约 25 字符），
+    // 此时一定会得到带 `truncated N chars` 的显式标记。
+    return limit <= 0 ? "" : "…";
+  }
   const remaining = limit - approxMarkerLen;
   const headSize = Math.floor(remaining * 0.3);
   const tailSize = remaining - headSize;
@@ -510,6 +552,8 @@ function removeSpillFile(path: string): void {
 }
 
 export interface ReadNodeStreamOptions {
+  /** Source-level line threshold; enabled for command output capture. */
+  maxLines?: number;
   /** In-memory retention cap (default DEFAULT_MAX_STREAM_BUFFER_BYTES). */
   maxBytes?: number;
   /** When set, the complete output (retained head + every later chunk) is
@@ -580,6 +624,9 @@ export function readNodeStream(
   return new Promise<string>((resolveStream, rejectStream) => {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
+    let observedBytes = 0;
+    let observedLines = 1;
+    let tail = Buffer.alloc(0);
     let settled = false;
     let captureResolved = false;
     const resolveCapture = (text: string) => {
@@ -752,6 +799,13 @@ export function readNodeStream(
         await settleSpillRetention();
         if (captureResolved) return;
         let text = baseText;
+        if (truncatedNow && spillRetainedPath && sourceEnded && options.maxLines !== undefined) {
+          resolveCapture(formatSpilledToolOutput({
+            head: baseText, tail: tail.toString("utf8"), totalLines: observedLines,
+            byteLength: observedBytes, displayPath: spillRetainedPath,
+          }));
+          return;
+        }
         if (truncatedNow) {
           const notes = [`output exceeded ${formatLimit} buffer limit`];
           if (spillRetainedPath && sourceEnded) {
@@ -830,13 +884,20 @@ export function readNodeStream(
     stream.on("data", (chunk) => {
       if (settled) return;
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      observedBytes += buf.length;
+      for (const byte of buf) if (byte === 10) observedLines++;
+      // Keep enough bytes for the final 50 ordinary log lines; pathological
+      // lines are independently bounded by the preview formatter.
+      if (options.maxLines !== undefined) {
+        tail = Buffer.concat([tail, buf.subarray(Math.max(0, buf.length - maxBytes))]).subarray(-maxBytes);
+      }
       if (truncated) {
         // Over the memory cap: drop from memory, but keep draining so the
         // child never blocks on a full pipe / dies of SIGPIPE.
         writeToSink(buf);
         return;
       }
-      if (totalBytes + buf.length >= maxBytes) {
+      if (totalBytes + buf.length >= maxBytes || observedLines > (options.maxLines ?? Infinity)) {
         const remaining = Math.max(0, maxBytes - totalBytes);
         const headChunks = chunks.slice();
         if (remaining > 0) {
@@ -1021,6 +1082,7 @@ export async function runWorkspaceCommand(args: {
   const spawnedAt = Date.now();
   const proc = spawnChildProcess(command[0] ?? "", command.slice(1), {
     cwd: resolve(args.workspaceRoot),
+    env: { ...process.env, ...shellChildEnvironment.getStore() },
     stdio: [
       args.stdin === undefined ? "ignore" : "pipe",
       "pipe",
@@ -1091,6 +1153,8 @@ export async function runWorkspaceCommand(args: {
   let stderrIncomplete: string | undefined;
   const stdoutCapture = stdoutPromiseResult(
     readNodeStream(proc.stdout, {
+      maxBytes: TOOL_OUTPUT_SPILL_BYTES,
+      maxLines: TOOL_OUTPUT_SPILL_LINES,
       spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}.log`),
       spillRetention: "promote",
       spillWorkspaceRoot: args.workspaceRoot,
@@ -1101,6 +1165,8 @@ export async function runWorkspaceCommand(args: {
   ).then((result) => ({ ...result, error: result.error || stdoutIncomplete }));
   const stderrCapture = stdoutPromiseResult(
     readNodeStream(proc.stderr, {
+      maxBytes: TOOL_OUTPUT_SPILL_BYTES,
+      maxLines: TOOL_OUTPUT_SPILL_LINES,
       spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}-stderr.log`),
       spillRetention: "promote",
       spillWorkspaceRoot: args.workspaceRoot,

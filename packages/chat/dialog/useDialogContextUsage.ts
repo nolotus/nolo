@@ -24,6 +24,8 @@ export function useDialogContextUsage(agent?: Agent | null, summary?: string, op
   const contextWindow = resolveAgentContextWindow({
     model: agent?.model,
     provider: agent?.provider,
+    // 通道身份决定窗口（Codex OAuth 按账号走上游目录），漏传会静默回落到静态 pin。
+    apiKeyRef: agent?.apiKeyRef,
     agentKey: agent?.key ?? agent?.id,
     agentName: agent?.name,
   });

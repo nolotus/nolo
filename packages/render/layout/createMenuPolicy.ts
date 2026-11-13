@@ -2,6 +2,7 @@ export const CREATE_MENU_OPEN_COUNT_THRESHOLD = 3;
 
 export type CreateMenuItemId =
   | "new-chat"
+  | "create-space"
   | "new-page"
   | "new-project"
   | "new-table"
@@ -13,6 +14,7 @@ export type CreateMenuItemId =
 
 export const CREATE_MENU_ITEM_ORDER: readonly CreateMenuItemId[] = [
   "new-chat",
+  "create-space",
   "new-project",
   "new-page",
   "new-table",

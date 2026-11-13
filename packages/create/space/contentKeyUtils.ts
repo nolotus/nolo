@@ -71,17 +71,15 @@ export const buildRoutableContentPath = ({
   contentKey,
   type,
   userId,
-  spaceId,
 }: {
   contentKey: string;
   type?: string;
   userId?: string;
   spaceId?: string | null;
 }): string =>
-  buildScopedPagePath(
-    resolveRoutableContentKey(contentKey, type, userId),
-    spaceId
-  );
+  // Content keys identify their own records; URL scope must not override record space.
+  // Keep spaceId in the input for callers, and buildScopedPagePath for explicit scopes.
+  buildScopedPagePath(resolveRoutableContentKey(contentKey, type, userId));
 
 // Route segments that trail the content key instead of being it
 // (e.g. `/:agentPageKey/inbox`). When the last segment is one of these,
@@ -137,7 +135,10 @@ export const isRoutableContentActive = ({
     const appRouteId = normalizeAppRouteId(contentKey);
     return (
       currentPath === buildAppDetailPath(appRouteId, spaceId) ||
-      currentPath === buildAppEditorPath(appRouteId, spaceId)
+      currentPath === buildAppEditorPath(appRouteId, spaceId) ||
+      // Legacy scoped URLs remain valid and must retain sidebar highlighting.
+      currentPath === buildScopedPagePath(appRouteId, spaceId) ||
+      currentPath === `${buildScopedPagePath(appRouteId, spaceId)}?edit=true`
     );
   }
 

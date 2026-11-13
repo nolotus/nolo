@@ -4,6 +4,7 @@ import {
   LuArrowDown,
   LuArrowUp,
   LuDownload,
+  LuFolderMinus,
   LuPencil,
   LuPlus,
   LuStar,
@@ -52,6 +53,12 @@ export type SidebarItemMoreMenuProps = {
   fileCategory?: string | null;
   canEditInSpace: boolean;
   canMoveToSpace: boolean;
+  /** 是否可删除内容本体（自有内容）。他人内容不给该入口。 */
+  canDeleteContent?: boolean;
+  /** 是否可从当前空间移除引用（空间 owner/admin；不删除本体）。 */
+  canRemoveFromSpace?: boolean;
+  /** 触发「从空间移除」确认流程（由宿主渲染确认框）。 */
+  onRemoveFromSpace?: () => void;
   showDownloadAction: boolean;
   menuAnchorEl?: HTMLElement | null;
   sourceServerOrigin?: string;
@@ -78,6 +85,9 @@ export function SidebarItemMoreMenu({
   fileCategory,
   canEditInSpace,
   canMoveToSpace,
+  canDeleteContent = true,
+  canRemoveFromSpace = false,
+  onRemoveFromSpace,
   showDownloadAction,
   menuAnchorEl,
   onEditTitle,
@@ -140,6 +150,8 @@ export function SidebarItemMoreMenu({
           onEditTitle();
         } else if (key === "download" && showDownloadAction) {
           toast("Download coming soon");
+        } else if (key === "remove-from-space" && canRemoveFromSpace) {
+          onRemoveFromSpace?.();
         } else if (key === "delete-app" && type === "app") {
           onDeleteApp?.();
         }
@@ -194,7 +206,13 @@ export function SidebarItemMoreMenu({
           onMove={onClose}
         />
       )}
-      {type === "app" && (
+      {canRemoveFromSpace && (
+        <MenuItem id="remove-from-space" textValue={t("removeFromSpace", "从空间移除")}>
+          <LuFolderMinus size={ICON_SIZE} aria-hidden="true" />
+          <span slot="label">{t("removeFromSpace", "从空间移除")}</span>
+        </MenuItem>
+      )}
+      {type === "app" && canDeleteContent && (
         <MenuItem id="delete-app" textValue={t("interface:app_delete", "删除应用")}>
           <LuTrash2 size={ICON_SIZE} aria-hidden="true" />
           <span slot="label">{t("interface:app_delete", "删除应用")}</span>

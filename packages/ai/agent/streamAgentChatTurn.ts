@@ -1,3 +1,5 @@
+import { createUserBatchExecution, snapshotUserBatchInput } from "chat/messages/userBatchExecution";
+import { selectAdmittedMessages } from "chat/messages/pendingUserMessages";
 // 文件路径: packages/ai/agent/streamAgentChatTurn.ts
 import { isAbortError } from "core/abortError";
 import { isRecord } from "core/isRecord";
@@ -33,7 +35,7 @@ import {
     selectActiveControllers,
     updateTokens,
 } from "chat/dialog/dialogSlice";
-import { setDialogTurnPhase, clearDialogTurnPhase, claimDialogTurnPhase } from "chat/dialog/dialogRuntimeStore";
+import { setDialogTurnPhase, clearDialogTurnPhase, claimDialogTurnPhase, getDialogRuntimeState, subscribe as subscribeDialogRuntime } from "chat/dialog/dialogRuntimeStore";
 import { runChatQueueTurnEnd } from "chat/queue/chatQueueLifecycleActions";
 import {
     finalizeTransientMessageOnError,
@@ -70,15 +72,17 @@ import {
     updateResponsesConversationState,
 } from "../../agent-runtime/responsesConversationState";
 
-import { sendOpenAICompletionsRequest, type CompletionMeta } from "../chat/sendOpenAICompletionsRequest";
-import { sendOpenAIResponseRequest } from "../chat/sendOpenAIResponseRequest";
+import { sendOpenAICompletionsRequest, buildFinalCompletionsRequestBody, buildEmptyCompletionRepairBody, type CompletionMeta } from "../chat/sendOpenAICompletionsRequest";
+import { sendOpenAIResponseRequest, buildResponsesRequestBodyWithTools } from "../chat/sendOpenAIResponseRequest";
 import { isContextOverflowText } from "../chat/parseApiError";
 
 import type { AgentRuntimeOptions } from "./types";
 import { buildAgentViewMessages } from "./cleanAgentMessages";
 import { extractCategorizedMentions, type CategorizedMentions } from "create/editor/utils/slateUtils";
 import { mergeReferences, resolveReferenceAssets, resolveToolsFromKeys } from "./referenceUtils";
-import { estimateTokenCount } from "ai/context/tokenUtils";
+import { admitWebRequest, projectSummaryHistory } from "./requestAdmission";
+import { inlineImageUrlsForCustomProvider, shouldInlineImageUrlsForAgent } from "../chat/inlineImageUrlsForCustomProvider";
+import { updateDialogSummaryAction } from "chat/dialog/actions/updateDialogSummaryAction";
 import {
     applyImageConfigRuntimeOverride,
     buildStaticContexts,
@@ -89,7 +93,6 @@ import {
     hasImageInMessages,
     mergeAgentToolsWithRuntime,
     resolveImageGenerationStreamingState,
-    trimMessagesWithSummary,
     validateAccessAndBalance,
 } from "./streamAgentChatTurnUtils";
 import { resolveUserSkillRuntime } from "ai/skills/userSkillRuntime";
@@ -100,6 +103,8 @@ import {
     messageStreamEnd,
     messageStreaming,
     prepareAndPersistUserMessage,
+    admitPendingUserMessages,
+    runPendingUserBatchRequest,
 } from "chat/messages/messageSlice";
 import {
   selectIdentityToken,
@@ -117,6 +122,13 @@ import { buildForegroundTurnAdmissionFetchInit } from "./foregroundTurnAdmission
 import { normalizeServerOrigin } from "./serverOrigin";
 import { getIsDesktopApp } from "app/utils/env";
 import { runDesktopAgentRuntimeTurnStream } from "app/utils/desktopAgentRuntimeTurnClient";
+// Block 3b: desktop action gate channel — pending gates live in memory only,
+// Block 2c: submit target is picked per run kind (desktop local vs server run).
+import {
+  pushGate,
+  targetForRunKind,
+} from "app/utils/desktopActionGateChannel";
+// never in messages/transcript/persistence.
 import { prepareTools } from "../tools/prepareTools";
 
 // ── extracted pure modules ──────────────────────────────────────────────
@@ -513,6 +525,9 @@ export const streamAgentChatTurnHandler = async (
     // Minted in the desktop-runtime branch; carried into `finally` so cleanup is
     // turn-scoped too. `null` for paths that never project a turn phase.
     let turnPhaseTurnId: string | null = null;
+    const batchExecution = createUserBatchExecution(loopController.signal, () =>
+        !thunkApi.signal.aborted && (!turnPhaseTurnId || !runtimeDialogKey ||
+        getDialogRuntimeState(runtimeDialogKey).turnPhaseTurnId === turnPhaseTurnId));
     let remoteTransientMessageId: string | null = null;
     let remoteTransientMessageFinalized = false;
     let modelRequestStarted = false;
@@ -701,7 +716,7 @@ export const streamAgentChatTurnHandler = async (
             if (boundMachineId) {
                 const token = selectIdentityToken(currentState);
                 const authHeader = token ? `Bearer ${token}` : "";
-                const rawMessages = selectAllMsgs(currentState, dialogId);
+                const rawMessages = selectAdmittedMessages(selectAllMsgs(currentState, dialogId));
                 const visibleMessages = buildAgentViewMessages(
                     rawMessages as any,
                     agentConfig.dbKey,
@@ -769,15 +784,16 @@ export const streamAgentChatTurnHandler = async (
                             : {}),
                         messages: cleanedMessages,
                         stream: true,
-                        persistDialog: false,
-                        clientDialogId: dialogId,
+                        persistDialog: true,
+                        continueDialogId: dialogId,
                         ...(explicitTarget ? { runtimeTarget: explicitTarget } : {}),
                         runtimeContext: {
                             surface: "web",
                             host: "browser",
                             runtime: "react",
                             entrypoint: "chat-dialog",
-                            capabilities: ["streaming", "dialog-ui", "machine-bound-cli"],
+                            capabilities: ["streaming", "dialog-ui", "machine-bound-cli", "durable-user-batch", "client-user-prepersisted"],
+                            userMessageId: selectAdmittedMessages(selectAllMsgs(getState() as RootState, dialogId)).filter(message => message.role === "user").at(-1)?.id,
                         },
                         ...((dialogConfig as any)?.spaceId ? { spaceId: (dialogConfig as any).spaceId } : {}),
                     }),
@@ -827,6 +843,17 @@ export const streamAgentChatTurnHandler = async (
                         onPayload: (payload) => {
                             if (payload.type === "error") {
                                 return { reject: payload.message || "电脑端 Agent 执行失败" };
+                            }
+                            if (payload.type === "action_gate" && payload.gate) {
+                                // Block 2c: 服务端 run 的 gate → web 提交目标
+                                //（带 Bearer token）；无 token 时通道按终态失败处理。
+                                pushGate(
+                                    payload.gate,
+                                    targetForRunKind("server-run", {
+                                        server: currentServer,
+                                        token,
+                                    }),
+                                );
                             }
                             // 工具事件投影成 tool 卡片（assistant_tool_calls / tool_result）
                             remoteToolHandlers.handleToolPayload(payload);
@@ -1196,6 +1223,11 @@ export const streamAgentChatTurnHandler = async (
             dialogId,
         });
 
+        // All client loops share the same execution ownership fence; a new
+        // turn replaces it even when an older controller has not aborted yet.
+        turnPhaseTurnId = `turn-phase:${dialogId}:${crypto.randomUUID()}`;
+        claimDialogTurnPhase({ dialogKey, turnId: turnPhaseTurnId });
+
         if (shouldUseDesktopLocalRuntime(agentConfig, explicitTarget)) {
             const desktopMessageMetadata = buildMessageMetadata(agentConfig);
             const w =
@@ -1215,632 +1247,702 @@ export const streamAgentChatTurnHandler = async (
               .slice(2, 8)}`;
             claimDialogTurnPhase({ dialogKey, turnId: turnPhaseTurnId });
 
-            let currentContent = "";
-            // List of all assistant text messages created during this turn.
-            // Each entry records the segment's finalized content + ids. The last
-            // entry is the currently-streaming segment; when a tool call
-            // interrupts the stream we finalize it (stop appending deltas) and
-            // start a fresh segment so the new text lands *after* the tool card
-            // in message-record order. ULID ids are monotonically increasing,
-            // and the entity adapter sorts by `id` (`localeCompare`), so a
-            // newly created assistant message id is always greater than the
-            // preceding tool message id — preserving the true timeline.
-            const assistantSegments: DesktopAssistantSegment[] = [];
-            let assistantMessageKeys: { key: string; messageId: string } | null = null;
-            let streamResult: any = null;
-            let streamError: string | null = null;
-            // 累计桌面 SSE 的 thinking 事件内容（reasoning_content），供
-            // messageStreamEnd 持久化为 thinkContent（见 messageSlice）。
-            // 兜底用 streamResult.reasoning_content（provider 在 SSE 流内累计）。
-            let reasoningBuffer = "";
-            const activeToolMessages = new Map<string, any>();
-            // F2: 桌面本地 runtime 本机实际执行位置（handler 在 turn 开始时
-            // 投一条 execution_location 帧）。只进 tool 卡片 metadata，渲染层
-            // toolCallPresentation 已按「实际位置」展示；dialog 级
-            // runtimeBinding.target 是「意图」，两者必须区分。
-            let desktopToolExecutionLocation: unknown = undefined;
-            const ensureAssistantMessageKeys = () => {
-                if (!assistantMessageKeys) {
-                    assistantMessageKeys = createDialogMessageKeyAndId(dialogId);
-                    assistantSegments.push({
-                        key: assistantMessageKeys.key,
-                        messageId: assistantMessageKeys.messageId,
-                        content: "",
-                        finalized: false,
-                        toolCallIds: [],
-                    });
-                    remoteTransientMessageId = assistantMessageKeys.messageId;
+            const ownsDesktopTurn = () =>
+                !loopController.signal.aborted && !thunkApi.signal.aborted &&
+                getDialogRuntimeState(dialogKey).turnPhaseTurnId === turnPhaseTurnId;
+            const admitDesktopBatch = async () => {
+                const admission = new AbortController();
+                const checkOwner = () => { if (!ownsDesktopTurn()) admission.abort(); };
+                const unsubscribe = subscribeDialogRuntime(checkOwner);
+                loopController.signal.addEventListener("abort", checkOwner);
+                thunkApi.signal.addEventListener("abort", checkOwner);
+                checkOwner();
+                try {
+                    return await dispatch(admitPendingUserMessages({ dialogKey, signal: admission.signal })).unwrap();
+                } finally {
+                    unsubscribe();
+                    loopController.signal.removeEventListener("abort", checkOwner);
+                    thunkApi.signal.removeEventListener("abort", checkOwner);
                 }
-                return assistantMessageKeys;
             };
-            const streamDesktopAssistantUpsert = () => {
-                const { key: msgKey, messageId } = ensureAssistantMessageKeys();
-                const segment = assistantSegments[assistantSegments.length - 1];
-                segment.content = currentContent;
-                dispatch(messageStreaming({
-                    id: messageId,
-                    dialogId,
-                    dbKey: msgKey,
-                    content: currentContent,
-                    role: "assistant",
-                    isStreaming: true,
-                    thinkContent: reasoningBuffer,
-                    ...desktopMessageMetadata,
-                }));
-            };
-            const streamDesktopAssistantText = (text: string) => {
-                currentContent += text;
-                streamDesktopAssistantUpsert();
-            };
-            // When a tool call arrives, finalize the current assistant segment so the
-            // tool card renders in its true position: the running segment stops accepting deltas,
-            // and the next delta starts a brand-new assistant message (new id) whose
-            // record-order position follows the tool message.
-            const finalizeCurrentAssistantSegmentForTool = () => {
-                const segment = assistantSegments[assistantSegments.length - 1];
-                if (segment) {
-                    segment.content = currentContent;
-                    segment.finalized = true;
-                }
-                // Mark the just-streamed segment as no longer streaming so the UI
-                // stops showing the spinner on it; drop the reference so the next
-                // delta mints a new id. currentContent is reset for the next segment.
-                // Only dispatch the finalize message when there is streamed text —
-                // a tool-first turn produces an empty pre-tool segment that still
-                // needs to exist (to carry tool_calls at persist time) but must not
-                // be pushed to the store as a contentless bubble (isAssistantToolStub
-                // can't filter it without tool_calls).
-                if (
-                    assistantMessageKeys &&
-                    (currentContent.length > 0 || reasoningBuffer.length > 0)
-                ) {
-                    dispatch(updateToolMessage({
-                        id: assistantMessageKeys.messageId,
-                        dialogId,
-                        changes: {
-                            content: currentContent,
-                            thinkContent: reasoningBuffer,
-                            isStreaming: false,
-                        },
-                    }));
-                }
-                assistantMessageKeys = null;
-                currentContent = "";
-            };
-
-            try {
-                const desktopAgentRef = agentConfig.dbKey || agentKey;
-                // Request-scoped authoritative snapshot: webview IndexedDB is the
-                // truth for logged-out local agents; host LevelDB must not be a
-                // second copy. Credential material stays as credentialRef only.
-                const eventStream = runDesktopAgentRuntimeTurnStream({
-                    agentRef: desktopAgentRef,
-                    input: userInput,
-                    ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
-                        ? { contextBlocks }
-                        : {}),
-                    continueDialogId: dialogId,
-                    dialogKey,
-                    cwd: runtimeOptions?.cwd,
-                    restrictShellToWorkspace: runtimeOptions?.restrictShellToWorkspace === true,
-                    workspaceToolsHint: runtimeOptions?.workspaceToolsHint === true,
-                    agentConfigSnapshot: agentConfig as Record<string, unknown>,
-                    dialogMessages: selectAllMsgs(getState() as RootState, dialogId),
-                    signal: loopController.signal,
-                    // SSE 传输层兜底（review 修复 4）：此前本调用方从不传
-                    // noEventWatchdogMs，watchdog 永远关闭——「已有安全网」只是
-                    // 错觉，挂起点若在 provider.complete 之外（resolveProvider /
-                    // adapter 内部，runtime 没有任何 deadline）就会无限静默。
-                    // 量级必须大于 runtime 自己的 idle 窗（默认 10 分钟无新输出
-                    // 才放弃，见 localLoop.DEFAULT_LLM_REQUEST_TIMEOUT_MS），
-                    // 否则一个健康的慢思考轮次会被客户端提前判死，用户拿到的是
-                    // 未分类的 "stream stalled" 而不是 runtime 的
-                    // LLM_REQUEST_TIMEOUT 可操作文案。取 2× = 20 分钟：
-                    // 只兜「runtime 完全没 deadline」的真悬挂。
-                    noEventWatchdogMs: DESKTOP_SSE_NO_EVENT_WATCHDOG_MS,
-                });
-
-                for await (const event of eventStream) {
-                    if (loopController.signal.aborted || thunkApi.signal.aborted) {
-                        if (w) w.__LOOP_STOP_REASON__ = "aborted";
-                        break;
+            const sameInput = (content: unknown) => JSON.stringify(content) === JSON.stringify(userInput);
+            const initialMessages = selectAllMsgs(getState() as RootState, dialogId);
+            const initialUser = initialMessages.filter(message => message.role === "user" && sameInput(message.content)).at(-1);
+            // Internal completion wakes have no matching durable user row. They
+            // must not consume the user's pending queue.
+            const isUserTurn = !!initialUser && sameInput(initialUser.content);
+            let desktopBatch = isUserTurn && initialUser.metadata?.queueState === "pending"
+                ? await admitDesktopBatch()
+                : isUserTurn ? [...initialMessages.filter(message => message.role === "user"
+                    && message.id !== initialUser.id && message.metadata?.userBatchPhase === "admitted"), initialUser] : [];
+            if (!ownsDesktopTurn()) return { aborted: true };
+            while (ownsDesktopTurn()) {
+                const desktopRequestUserInput = snapshotUserBatchInput(desktopBatch.length ? desktopBatch : selectAllMsgs(getState() as RootState, dialogId));
+                const desktopInput = desktopBatch.length ? desktopBatch[desktopBatch.length - 1].content : userInput;
+                let currentContent = "";
+                // List of all assistant text messages created during this turn.
+                // Each entry records the segment's finalized content + ids. The last
+                // entry is the currently-streaming segment; when a tool call
+                // interrupts the stream we finalize it (stop appending deltas) and
+                // start a fresh segment so the new text lands *after* the tool card
+                // in message-record order. ULID ids are monotonically increasing,
+                // and the entity adapter sorts by `id` (`localeCompare`), so a
+                // newly created assistant message id is always greater than the
+                // preceding tool message id — preserving the true timeline.
+                const assistantSegments: DesktopAssistantSegment[] = [];
+                let assistantMessageKeys: { key: string; messageId: string } | null = null;
+                let streamResult: any = null;
+                let streamError: string | null = null;
+                // 累计桌面 SSE 的 thinking 事件内容（reasoning_content），供
+                // messageStreamEnd 持久化为 thinkContent（见 messageSlice）。
+                // 兜底用 streamResult.reasoning_content（provider 在 SSE 流内累计）。
+                let reasoningBuffer = "";
+                const activeToolMessages = new Map<string, any>();
+                // F2: 桌面本地 runtime 本机实际执行位置（handler 在 turn 开始时
+                // 投一条 execution_location 帧）。只进 tool 卡片 metadata，渲染层
+                // toolCallPresentation 已按「实际位置」展示；dialog 级
+                // runtimeBinding.target 是「意图」，两者必须区分。
+                let desktopToolExecutionLocation: unknown = undefined;
+                const ensureAssistantMessageKeys = () => {
+                    if (!assistantMessageKeys) {
+                        assistantMessageKeys = createDialogMessageKeyAndId(dialogId);
+                        assistantSegments.push({
+                            key: assistantMessageKeys.key,
+                            messageId: assistantMessageKeys.messageId,
+                            content: "",
+                            finalized: false,
+                            toolCallIds: [],
+                        });
+                        remoteTransientMessageId = assistantMessageKeys.messageId;
                     }
-                    if (event.type === "delta") {
-                        streamDesktopAssistantText(event.text);
-                    } else if (event.type === "thinking") {
-                        // B1 已在 localLoop/service/handler 链路打通 onReasoningDelta
-                        // → SSE {type:"thinking",content}。这里累计进 reasoningBuffer，
-                        // 在 messageStreamEnd 时传给 messageSlice 落成 thinkContent。
-                        if (typeof event.content === "string") {
-                            reasoningBuffer += event.content;
-                            // Mint the assistant row on the first reasoning delta so
-                            // ThinkingSection is visible before answer text arrives.
-                            streamDesktopAssistantUpsert();
-                        }
-                    } else if (event.type === "tool") {
-                        const toolEvent = event.event;
-                        const callId = toolEvent.toolCallId;
-                        if (!callId) continue;
+                    return assistantMessageKeys;
+                };
+                const streamDesktopAssistantUpsert = () => {
+                    const { key: msgKey, messageId } = ensureAssistantMessageKeys();
+                    const segment = assistantSegments[assistantSegments.length - 1];
+                    segment.content = currentContent;
+                    dispatch(messageStreaming({
+                        id: messageId,
+                        dialogId,
+                        dbKey: msgKey,
+                        content: currentContent,
+                        role: "assistant",
+                        isStreaming: true,
+                        thinkContent: reasoningBuffer,
+                        ...desktopMessageMetadata,
+                    }));
+                };
+                const streamDesktopAssistantText = (text: string) => {
+                    currentContent += text;
+                    streamDesktopAssistantUpsert();
+                };
+                // When a tool call arrives, finalize the current assistant segment so the
+                // tool card renders in its true position: the running segment stops accepting deltas,
+                // and the next delta starts a brand-new assistant message (new id) whose
+                // record-order position follows the tool message.
+                const finalizeCurrentAssistantSegmentForTool = () => {
+                    const segment = assistantSegments[assistantSegments.length - 1];
+                    if (segment) {
+                        segment.content = currentContent;
+                        segment.finalized = true;
+                    }
+                    // Mark the just-streamed segment as no longer streaming so the UI
+                    // stops showing the spinner on it; drop the reference so the next
+                    // delta mints a new id. currentContent is reset for the next segment.
+                    // Only dispatch the finalize message when there is streamed text —
+                    // a tool-first turn produces an empty pre-tool segment that still
+                    // needs to exist (to carry tool_calls at persist time) but must not
+                    // be pushed to the store as a contentless bubble (isAssistantToolStub
+                    // can't filter it without tool_calls).
+                    if (
+                        assistantMessageKeys &&
+                        (currentContent.length > 0 || reasoningBuffer.length > 0)
+                    ) {
+                        dispatch(updateToolMessage({
+                            id: assistantMessageKeys.messageId,
+                            dialogId,
+                            changes: {
+                                content: currentContent,
+                                thinkContent: reasoningBuffer,
+                                isStreaming: false,
+                            },
+                        }));
+                    }
+                    assistantMessageKeys = null;
+                    currentContent = "";
+                };
 
-                        if (toolEvent.type === "tool-call") {
-                            attachToolCallIdToSegment(assistantSegments, callId);
-                            finalizeCurrentAssistantSegmentForTool();
-                            const { key: dbKey, messageId: toolMsgId } = createDialogMessageKeyAndId(dialogId);
-                            const toolMsg = {
-                                id: toolMsgId,
-                                dialogId,
-                                dbKey,
-                                role: "tool" as const,
-                                content: "",
-                                isStreaming: true,
-                                toolName: toolEvent.toolName,
-                                toolCallId: callId,
-                                // F2: 实际执行位置（服务端/runtime 投影）挂到 tool
-                                // 卡片 metadata。优先事件自带 metadata（runtime
-                                // 投影层直接注入的同名字段），兜底用 turn 级
-                                // execution_location 帧。缺失/不合法时渲染层
-                                // projectToolExecutionLocation 收敛为 unknown。
-                                metadata: {
-                                    ...(isRecord(toolEvent.metadata) ? toolEvent.metadata : {}),
-                                    ...(desktopToolExecutionLocation !== undefined &&
-                                        !(isRecord(toolEvent.metadata) &&
-                                          toolEvent.metadata.executionLocation !== undefined)
-                                        ? { executionLocation: desktopToolExecutionLocation }
-                                        : {}),
+                try {
+                    const desktopAgentRef = agentConfig.dbKey || agentKey;
+                    // Request-scoped authoritative snapshot: webview IndexedDB is the
+                    // truth for logged-out local agents; host LevelDB must not be a
+                    // second copy. Credential material stays as credentialRef only.
+                    const eventStream = await dispatch(runPendingUserBatchRequest({
+                        dialogKey, signal: loopController.signal, execution: batchExecution, requestUserInput: desktopRequestUserInput, owns: ownsDesktopTurn,
+                        start: () => {
+                        const iterator = runDesktopAgentRuntimeTurnStream({
+                        agentRef: desktopAgentRef,
+                        input: desktopInput,
+                        ...(desktopBatch.length ? {
+                            userMessages: desktopBatch.map((message: any) => ({
+                                role: "user" as const, content: message.content, cliMessageId: message.id,
+                            })),
+                            runtimeContext: { userMessageId: desktopBatch[desktopBatch.length - 1].id },
+                        } : {}),
+                        ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
+                            ? { contextBlocks }
+                            : {}),
+                        continueDialogId: dialogId,
+                        dialogKey,
+                        cwd: runtimeOptions?.cwd,
+                        restrictShellToWorkspace: runtimeOptions?.restrictShellToWorkspace === true,
+                        workspaceToolsHint: runtimeOptions?.workspaceToolsHint === true,
+                        agentConfigSnapshot: agentConfig as Record<string, unknown>,
+                        dialogMessages: selectAdmittedMessages(selectAllMsgs(getState() as RootState, dialogId)),
+                        signal: loopController.signal,
+                        // SSE 传输层兜底（review 修复 4）：此前本调用方从不传
+                        // noEventWatchdogMs，watchdog 永远关闭——「已有安全网」只是
+                        // 错觉，挂起点若在 provider.complete 之外（resolveProvider /
+                        // adapter 内部，runtime 没有任何 deadline）就会无限静默。
+                        // 量级必须大于 runtime 自己的 idle 窗（默认 10 分钟无新输出
+                        // 才放弃，见 localLoop.DEFAULT_LLM_REQUEST_TIMEOUT_MS），
+                        // 否则一个健康的慢思考轮次会被客户端提前判死，用户拿到的是
+                        // 未分类的 "stream stalled" 而不是 runtime 的
+                        // LLM_REQUEST_TIMEOUT 可操作文案。取 2× = 20 分钟：
+                        // 只兜「runtime 完全没 deadline」的真悬挂。
+                        noEventWatchdogMs: DESKTOP_SSE_NO_EVENT_WATCHDOG_MS,
+                    });
+                        // Async generators are lazy: begin the first next() in
+                        // the guarded closure, not after returning to the caller.
+                        const first = iterator.next();
+                        return (async function* () {
+                            const event = await first;
+                            if (!event.done) yield event.value;
+                            yield* iterator;
+                        })();
+                    },
+                    })).unwrap();
+                    if (!eventStream || !ownsDesktopTurn()) break;
+
+                    for await (const event of eventStream) {
+                        if (loopController.signal.aborted || thunkApi.signal.aborted) {
+                            if (w) w.__LOOP_STOP_REASON__ = "aborted";
+                            break;
+                        }
+                        if (event.type === "delta") {
+                            streamDesktopAssistantText(event.text);
+                        } else if (event.type === "thinking") {
+                            // B1 已在 localLoop/service/handler 链路打通 onReasoningDelta
+                            // → SSE {type:"thinking",content}。这里累计进 reasoningBuffer，
+                            // 在 messageStreamEnd 时传给 messageSlice 落成 thinkContent。
+                            if (typeof event.content === "string") {
+                                reasoningBuffer += event.content;
+                                // Mint the assistant row on the first reasoning delta so
+                                // ThinkingSection is visible before answer text arrives.
+                                streamDesktopAssistantUpsert();
+                            }
+                        } else if (event.type === "tool") {
+                            const toolEvent = event.event;
+                            const callId = toolEvent.toolCallId;
+                            if (!callId) continue;
+
+                            if (toolEvent.type === "tool-call") {
+                                attachToolCallIdToSegment(assistantSegments, callId);
+                                finalizeCurrentAssistantSegmentForTool();
+                                const { key: dbKey, messageId: toolMsgId } = createDialogMessageKeyAndId(dialogId);
+                                const toolMsg = {
+                                    id: toolMsgId,
+                                    dialogId,
+                                    dbKey,
+                                    role: "tool" as const,
+                                    content: "",
+                                    isStreaming: true,
+                                    toolName: toolEvent.toolName,
+                                    toolCallId: callId,
+                                    // F2: 实际执行位置（服务端/runtime 投影）挂到 tool
+                                    // 卡片 metadata。优先事件自带 metadata（runtime
+                                    // 投影层直接注入的同名字段），兜底用 turn 级
+                                    // execution_location 帧。缺失/不合法时渲染层
+                                    // projectToolExecutionLocation 收敛为 unknown。
+                                    metadata: {
+                                        ...(isRecord(toolEvent.metadata) ? toolEvent.metadata : {}),
+                                        ...(desktopToolExecutionLocation !== undefined &&
+                                            !(isRecord(toolEvent.metadata) &&
+                                              toolEvent.metadata.executionLocation !== undefined)
+                                            ? { executionLocation: desktopToolExecutionLocation }
+                                            : {}),
+                                        ...(toolEvent.argumentsPreview
+                                            ? { argumentsPreview: toolEvent.argumentsPreview }
+                                            : {}),
+                                    },
                                     ...(toolEvent.argumentsPreview
-                                        ? { argumentsPreview: toolEvent.argumentsPreview }
-                                        : {}),
-                                },
-                                ...(toolEvent.argumentsPreview
-                                    ? {
-                                        toolPayload: {
-                                            input: {
-                                                command: toolEvent.argumentsPreview,
-                                                cmd: toolEvent.argumentsPreview,
+                                        ? {
+                                            toolPayload: {
+                                                input: {
+                                                    command: toolEvent.argumentsPreview,
+                                                    cmd: toolEvent.argumentsPreview,
+                                                },
                                             },
-                                        },
-                                    }
-                                    : {}),
-                            };
-                            activeToolMessages.set(callId, toolMsg);
-                            dispatch(messageStreaming(toolMsg));
-                        } else if (toolEvent.type === "tool-result" || toolEvent.type === "tool-error") {
-                            const existing = activeToolMessages.get(callId);
-                            if (existing) {
-                                const isError = toolEvent.type === "tool-error";
-                                const existingMeta = asRecordOrEmpty(existing.metadata);
-                                const existingInput = isRecord(existing.toolPayload?.input)
-                                    ? existing.toolPayload.input
-                                    : {};
-                                const mergedMeta: Record<string, unknown> = {
-                                    ...existingMeta,
-                                    ...toolEvent.metadata,
-                                    ...(isError ? { error: true, message: toolEvent.message } : {}),
-                                    // 服务端/runtime 已在事件 metadata 带
-                                    // executionLocation 时尊重之；tool-call 阶段
-                                    // 已写入的值由 existingMeta 保留；仅当两边都
-                                    // 没有且 turn 级 execution_location 帧存在时
-                                    // 兜底补上，绝不覆盖已有值。
-                                    ...(existingMeta.executionLocation === undefined &&
-                                        (!isRecord(toolEvent.metadata) ||
-                                         toolEvent.metadata.executionLocation === undefined) &&
-                                        desktopToolExecutionLocation !== undefined
-                                        ? { executionLocation: desktopToolExecutionLocation }
+                                        }
                                         : {}),
                                 };
-                                const toolResultMsg = {
-                                    ...existing,
-                                    isStreaming: false,
-                                    content: projectDesktopToolUiContent({
-                                        toolName: toolEvent.toolName || existing.toolName,
-                                        content: toolEvent.content,
-                                        summary: toolEvent.summary,
-                                        message: toolEvent.message,
+                                activeToolMessages.set(callId, toolMsg);
+                                dispatch(messageStreaming(toolMsg));
+                            } else if (toolEvent.type === "tool-result" || toolEvent.type === "tool-error") {
+                                const existing = activeToolMessages.get(callId);
+                                if (existing) {
+                                    const isError = toolEvent.type === "tool-error";
+                                    const existingMeta = asRecordOrEmpty(existing.metadata);
+                                    const existingInput = isRecord(existing.toolPayload?.input)
+                                        ? existing.toolPayload.input
+                                        : {};
+                                    const mergedMeta: Record<string, unknown> = {
+                                        ...existingMeta,
+                                        ...toolEvent.metadata,
+                                        ...(isError ? { error: true, message: toolEvent.message } : {}),
+                                        // 服务端/runtime 已在事件 metadata 带
+                                        // executionLocation 时尊重之；tool-call 阶段
+                                        // 已写入的值由 existingMeta 保留；仅当两边都
+                                        // 没有且 turn 级 execution_location 帧存在时
+                                        // 兜底补上，绝不覆盖已有值。
+                                        ...(existingMeta.executionLocation === undefined &&
+                                            (!isRecord(toolEvent.metadata) ||
+                                             toolEvent.metadata.executionLocation === undefined) &&
+                                            desktopToolExecutionLocation !== undefined
+                                            ? { executionLocation: desktopToolExecutionLocation }
+                                            : {}),
+                                    };
+                                    const toolResultMsg = {
+                                        ...existing,
+                                        isStreaming: false,
+                                        content: projectDesktopToolUiContent({
+                                            toolName: toolEvent.toolName || existing.toolName,
+                                            content: toolEvent.content,
+                                            summary: toolEvent.summary,
+                                            message: toolEvent.message,
+                                            metadata: mergedMeta,
+                                            argumentsPreview:
+                                                asOptionalTrimmedString(mergedMeta.argumentsPreview) ||
+                                                asOptionalTrimmedString(existingInput.command) ||
+                                                asOptionalTrimmedString(existingInput.cmd) ||
+                                                undefined,
+                                        }),
                                         metadata: mergedMeta,
-                                        argumentsPreview:
-                                            asOptionalTrimmedString(mergedMeta.argumentsPreview) ||
-                                            asOptionalTrimmedString(existingInput.command) ||
-                                            asOptionalTrimmedString(existingInput.cmd) ||
-                                            undefined,
-                                    }),
-                                    metadata: mergedMeta,
-                                };
-                                activeToolMessages.set(callId, toolResultMsg);
-                                dispatch(messageStreaming(toolResultMsg));
-                                const resultToolName = toolEvent.toolName || existing.toolName;
-                                if (!isError) {
-                                    deliverHtmlArtifactToolResult(resultToolName, toolEvent.content, dialogKey);
+                                    };
+                                    activeToolMessages.set(callId, toolResultMsg);
+                                    dispatch(messageStreaming(toolResultMsg));
+                                    const resultToolName = toolEvent.toolName || existing.toolName;
+                                    if (!isError) {
+                                        deliverHtmlArtifactToolResult(resultToolName, toolEvent.content, dialogKey);
+                                    }
                                 }
                             }
+                        } else if (event.type === "status") {
+                            // Desktop SSE pre-delta turn phase → dialog-scoped turn
+                            // state so the message list can show validating /
+                            // compacting / waiting-provider before the first delta
+                            // (the silent-no-feedback window). Runtime phase
+                            // "validating-context" maps to render phase "validating".
+                            const phase =
+                                event.phase === "validating-context" ? "validating" : event.phase;
+                            setDialogTurnPhase({ phase, dialogKey, turnId: turnPhaseTurnId ?? undefined });
+                        } else if (event.type === "execution_location") {
+                            // F2: 本机实际执行位置（runtime 已收敛）。存下后在每个
+                            // tool 卡片 metadata.executionLocation 上落地；渲染层
+                            // projectToolExecutionLocation 再校验一次，非法形状
+                            // （字段不全/相对路径）一律显示「执行位置未知」。
+                            desktopToolExecutionLocation = event.location;
+                        } else if (event.type === "action_gate") {
+                            // Block 3b: route pending gates to the in-memory channel
+                            // for the DesktopActionGateDialog. Deliberately NOT a tool
+                            // message: the gate (and any resolved value) must never
+                            // enter the transcript.
+                            // Block 2c: desktop local runtime run → desktop submit target.
+                            pushGate(
+                                event.gate,
+                                targetForRunKind("desktop-local"),
+                            );
+                        } else if (event.type === "done") {
+                            streamResult = event.result;
+                        } else if (event.type === "error") {
+                            streamError = event.error;
                         }
-                    } else if (event.type === "status") {
-                        // Desktop SSE pre-delta turn phase → dialog-scoped turn
-                        // state so the message list can show validating /
-                        // compacting / waiting-provider before the first delta
-                        // (the silent-no-feedback window). Runtime phase
-                        // "validating-context" maps to render phase "validating".
-                        const phase =
-                            event.phase === "validating-context" ? "validating" : event.phase;
-                        setDialogTurnPhase({ phase, dialogKey, turnId: turnPhaseTurnId ?? undefined });
-                    } else if (event.type === "execution_location") {
-                        // F2: 本机实际执行位置（runtime 已收敛）。存下后在每个
-                        // tool 卡片 metadata.executionLocation 上落地；渲染层
-                        // projectToolExecutionLocation 再校验一次，非法形状
-                        // （字段不全/相对路径）一律显示「执行位置未知」。
-                        desktopToolExecutionLocation = event.location;
-                    } else if (event.type === "done") {
-                        streamResult = event.result;
-                    } else if (event.type === "error") {
-                        streamError = event.error;
                     }
-                }
-            } catch (err: any) {
-                if (isAbortError(err) || loopController.signal.aborted || thunkApi.signal.aborted) {
-                    if (w) w.__LOOP_STOP_REASON__ = "aborted";
-                } else {
-                    streamError = err?.message || "Local turn read stream error";
-                }
-            }
-
-            // User stop: keep partial assistant/tool rows without treating abort as a hard error.
-            if (
-                loopController.signal.aborted ||
-                thunkApi.signal.aborted ||
-                (typeof streamError === "string" &&
-                    /operation was aborted/i.test(streamError))
-            ) {
-                if (w) w.__LOOP_STOP_REASON__ = "aborted";
-                // Keep the currently streaming segment content in the list for persist.
-                // Snapshot with explicit annotation: assistantMessageKeys is reassigned
-                // inside nested closures, which defeats TS control-flow narrowing here.
-                const stopKeys = assistantMessageKeys as
-                    | { key: string; messageId: string }
-                    | null;
-                if (stopKeys) {
-                    const last = assistantSegments[assistantSegments.length - 1];
-                    if (last && last.messageId === stopKeys.messageId) {
-                        last.content = currentContent;
-                    }
-                }
-                // Stop path: persist segments declaring tool_calls too, not
-                // just text. `desktopTurnMessages` is unavailable here (the
-                // stream broke before `done`, so `streamResult` is unset),
-                // so we cannot reuse `resolveSegmentToolCalls`. Build minimal
-                // tool_call objects from the known callIds + toolName (from
-                // activeToolMessages) instead. content-empty but toolCallIds-
-                // non-empty segments must NOT be removed — they own the
-                // tool_call declarations, deleting them would orphan the
-                // already-persisted tool rows and trigger empty replies next
-                // turn. We also cannot reuse `selectPersistableFinalizedSegments`
-                // because the last streaming segment is not yet `finalized`
-                // here; mirror its `content || toolCallIds` semantics inline.
-                // Only declare callIds whose tool row survives below (the
-                // durableTools loop drops content-empty rows via
-                // removeTransientMessage). Declaring a dropped row's id would
-                // leave a dangling tool_call — the mirror of the orphan bug.
-                const stopToolNameById = new Map<string, string>();
-                for (const [callId, toolMsg] of activeToolMessages) {
-                    if (!toolMessageWillPersist(toolMsg)) continue;
-                    const toolName = (toolMsg as any)?.toolName;
-                    stopToolNameById.set(
-                        callId,
-                        typeof toolName === "string" && toolName ? toolName : "tool",
-                    );
-                }
-                for (const segment of assistantSegments) {
-                    const hasContent = segment.content.trim().length > 0;
-                    const hasToolCalls =
-                        segment.toolCallIds && segment.toolCallIds.length > 0;
-                    if (hasContent || hasToolCalls) {
-                        const stopToolCalls = buildMinimalToolCallsFromIds(
-                            segment.toolCallIds,
-                            stopToolNameById
-                        );
-                        await persistMessageWithFixedId(dispatch, {
-                            dialogId,
-                            id: segment.messageId,
-                            dbKey: segment.key,
-                            role: "assistant",
-                            content: segment.content,
-                            ...(stopToolCalls.length > 0
-                                ? { tool_calls: stopToolCalls }
-                                : {}),
-                            ...desktopMessageMetadata,
-                            userId: selectIdentityUserId(getState() as RootState),
-                        });
+                } catch (err: any) {
+                    if (isAbortError(err) || loopController.signal.aborted || thunkApi.signal.aborted) {
+                        if (w) w.__LOOP_STOP_REASON__ = "aborted";
                     } else {
-                        dispatch(removeTransientMessage(segment.messageId));
+                        streamError = err?.message || "Local turn read stream error";
                     }
                 }
-                const durableTools: any[] = [];
-                for (const toolMsg of activeToolMessages.values()) {
-                    const content = (toolMsg as any)?.content;
-                    const hasContent =
-                        typeof content === "string"
-                            ? content.trim().length > 0
-                            : Array.isArray(content) && content.length > 0;
-                    if (!hasContent) {
-                        dispatch(removeTransientMessage((toolMsg as any).id));
-                        continue;
-                    }
-                    const stopped = { ...toolMsg, isStreaming: false };
-                    dispatch(messageStreaming(stopped));
-                    durableTools.push(stopped);
-                }
-                await persistToolMessages(dispatch, durableTools, {
-                    isStreaming: false,
-                    soft: true,
-                });
-                remoteTransientMessageFinalized = true;
-                // 用户取消:返回 abort 标记而非 undefined,quick-chat 才能把
-                // 「取消」和「启动失败」区分开(见外层 catch)。
-                return { aborted: true };
-            }
 
-            // On error, keep what the user already watched happen: finalize
-            // non-empty transients (assistant text + executed tool messages)
-            // with an error marker instead of wiping the whole trace down to a
-            // single error badge. Empty transients are still removed.
-            // Note: every assistant text segment created this turn must be
-            // finalized — earlier segments were already detached from the
-            // stream when their following tool call arrived, so they are still
-            // flagged isStreaming unless we finalize them here.
-            // Tool rows are also written to DB best-effort so a refresh still
-            // shows the partial trajectory (not only assistant narrations).
-            const finalizeDesktopTurnOnError = async (errorText: string) => {
-                // Error path: persist segments declaring tool_calls too, not
-                // just text. `desktopTurnMessages` is unavailable here (the
-                // stream errored before `done`, so `streamResult` is unset),
-                // so we cannot reuse `resolveSegmentToolCalls`. Build minimal
-                // tool_call objects from the known callIds + toolName (from
-                // activeToolMessages) instead. content-empty but toolCallIds-
-                // non-empty segments must NOT go through
-                // `finalizeTransientMessageOnError` alone — its reducer maps
-                // empty content to `kind:"remove"`, deleting the owning
-                // assistant and orphaning the already-persisted tool rows,
-                // which triggers empty replies next turn. Mirror
-                // `selectPersistableFinalizedSegments` `content || toolCallIds`
-                // semantics inline (the last streaming segment is not yet
-                // `finalized`, so we cannot call that helper directly).
-                // Same durability filter as the stop path: a tool row that the
-                // durableTools loop drops must not stay declared on the assistant.
-                const errorToolNameById = new Map<string, string>();
-                for (const [callId, toolMsg] of activeToolMessages) {
-                    if (!toolMessageWillPersist(toolMsg)) continue;
-                    const toolName = (toolMsg as any)?.toolName;
-                    errorToolNameById.set(
-                        callId,
-                        typeof toolName === "string" && toolName ? toolName : "tool",
-                    );
-                }
-                for (const segment of assistantSegments) {
-                    const hasContent = segment.content.trim().length > 0;
-                    const hasToolCalls =
-                        segment.toolCallIds && segment.toolCallIds.length > 0;
-                    if (hasContent || hasToolCalls) {
-                        // Persist with fixed id + tool_calls so the owning
-                        // assistant survives the error turn. Non-empty content
-                        // also still gets the error marker via the reducer
-                        // below for UI parity, but the DB row is authoritative.
-                        const errorToolCalls = buildMinimalToolCallsFromIds(
-                            segment.toolCallIds,
-                            errorToolNameById
+                // User stop: keep partial assistant/tool rows without treating abort as a hard error.
+                if (
+                    loopController.signal.aborted ||
+                    thunkApi.signal.aborted ||
+                    (typeof streamError === "string" &&
+                        /operation was aborted/i.test(streamError))
+                ) {
+                    if (w) w.__LOOP_STOP_REASON__ = "aborted";
+                    // Keep the currently streaming segment content in the list for persist.
+                    // Snapshot with explicit annotation: assistantMessageKeys is reassigned
+                    // inside nested closures, which defeats TS control-flow narrowing here.
+                    const stopKeys = assistantMessageKeys as
+                        | { key: string; messageId: string }
+                        | null;
+                    if (stopKeys) {
+                        const last = assistantSegments[assistantSegments.length - 1];
+                        if (last && last.messageId === stopKeys.messageId) {
+                            last.content = currentContent;
+                        }
+                    }
+                    // Stop path: persist segments declaring tool_calls too, not
+                    // just text. `desktopTurnMessages` is unavailable here (the
+                    // stream broke before `done`, so `streamResult` is unset),
+                    // so we cannot reuse `resolveSegmentToolCalls`. Build minimal
+                    // tool_call objects from the known callIds + toolName (from
+                    // activeToolMessages) instead. content-empty but toolCallIds-
+                    // non-empty segments must NOT be removed — they own the
+                    // tool_call declarations, deleting them would orphan the
+                    // already-persisted tool rows and trigger empty replies next
+                    // turn. We also cannot reuse `selectPersistableFinalizedSegments`
+                    // because the last streaming segment is not yet `finalized`
+                    // here; mirror its `content || toolCallIds` semantics inline.
+                    // Only declare callIds whose tool row survives below (the
+                    // durableTools loop drops content-empty rows via
+                    // removeTransientMessage). Declaring a dropped row's id would
+                    // leave a dangling tool_call — the mirror of the orphan bug.
+                    const stopToolNameById = new Map<string, string>();
+                    for (const [callId, toolMsg] of activeToolMessages) {
+                        if (!toolMessageWillPersist(toolMsg)) continue;
+                        const toolName = (toolMsg as any)?.toolName;
+                        stopToolNameById.set(
+                            callId,
+                            typeof toolName === "string" && toolName ? toolName : "tool",
                         );
-                        await persistMessageWithFixedId(dispatch, {
-                            dialogId,
-                            id: segment.messageId,
-                            dbKey: segment.key,
-                            role: "assistant",
-                            content: segment.content,
-                            ...(errorToolCalls.length > 0
-                                ? { tool_calls: errorToolCalls }
-                                : {}),
-                            ...desktopMessageMetadata,
-                            userId: selectIdentityUserId(getState() as RootState),
-                        });
-                        if (hasContent) {
+                    }
+                    for (const segment of assistantSegments) {
+                        const hasContent = segment.content.trim().length > 0;
+                        const hasToolCalls =
+                            segment.toolCallIds && segment.toolCallIds.length > 0;
+                        if (hasContent || hasToolCalls) {
+                            const stopToolCalls = buildMinimalToolCallsFromIds(
+                                segment.toolCallIds,
+                                stopToolNameById
+                            );
+                            await persistMessageWithFixedId(dispatch, {
+                                dialogId,
+                                id: segment.messageId,
+                                dbKey: segment.key,
+                                role: "assistant",
+                                content: segment.content,
+                                ...(stopToolCalls.length > 0
+                                    ? { tool_calls: stopToolCalls }
+                                    : {}),
+                                ...desktopMessageMetadata,
+                                userId: selectIdentityUserId(getState() as RootState),
+                            });
+                        } else {
+                            dispatch(removeTransientMessage(segment.messageId));
+                        }
+                    }
+                    const durableTools: any[] = [];
+                    for (const toolMsg of activeToolMessages.values()) {
+                        const content = (toolMsg as any)?.content;
+                        const hasContent =
+                            typeof content === "string"
+                                ? content.trim().length > 0
+                                : Array.isArray(content) && content.length > 0;
+                        if (!hasContent) {
+                            dispatch(removeTransientMessage((toolMsg as any).id));
+                            continue;
+                        }
+                        const stopped = { ...toolMsg, isStreaming: false };
+                        dispatch(messageStreaming(stopped));
+                        durableTools.push(stopped);
+                    }
+                    await persistToolMessages(dispatch, durableTools, {
+                        isStreaming: false,
+                        soft: true,
+                    });
+                    remoteTransientMessageFinalized = true;
+                    // 用户取消:返回 abort 标记而非 undefined,quick-chat 才能把
+                    // 「取消」和「启动失败」区分开(见外层 catch)。
+                    return { aborted: true };
+                }
+
+                // On error, keep what the user already watched happen: finalize
+                // non-empty transients (assistant text + executed tool messages)
+                // with an error marker instead of wiping the whole trace down to a
+                // single error badge. Empty transients are still removed.
+                // Note: every assistant text segment created this turn must be
+                // finalized — earlier segments were already detached from the
+                // stream when their following tool call arrived, so they are still
+                // flagged isStreaming unless we finalize them here.
+                // Tool rows are also written to DB best-effort so a refresh still
+                // shows the partial trajectory (not only assistant narrations).
+                const finalizeDesktopTurnOnError = async (errorText: string) => {
+                    // Error path: persist segments declaring tool_calls too, not
+                    // just text. `desktopTurnMessages` is unavailable here (the
+                    // stream errored before `done`, so `streamResult` is unset),
+                    // so we cannot reuse `resolveSegmentToolCalls`. Build minimal
+                    // tool_call objects from the known callIds + toolName (from
+                    // activeToolMessages) instead. content-empty but toolCallIds-
+                    // non-empty segments must NOT go through
+                    // `finalizeTransientMessageOnError` alone — its reducer maps
+                    // empty content to `kind:"remove"`, deleting the owning
+                    // assistant and orphaning the already-persisted tool rows,
+                    // which triggers empty replies next turn. Mirror
+                    // `selectPersistableFinalizedSegments` `content || toolCallIds`
+                    // semantics inline (the last streaming segment is not yet
+                    // `finalized`, so we cannot call that helper directly).
+                    // Same durability filter as the stop path: a tool row that the
+                    // durableTools loop drops must not stay declared on the assistant.
+                    const errorToolNameById = new Map<string, string>();
+                    for (const [callId, toolMsg] of activeToolMessages) {
+                        if (!toolMessageWillPersist(toolMsg)) continue;
+                        const toolName = (toolMsg as any)?.toolName;
+                        errorToolNameById.set(
+                            callId,
+                            typeof toolName === "string" && toolName ? toolName : "tool",
+                        );
+                    }
+                    for (const segment of assistantSegments) {
+                        const hasContent = segment.content.trim().length > 0;
+                        const hasToolCalls =
+                            segment.toolCallIds && segment.toolCallIds.length > 0;
+                        if (hasContent || hasToolCalls) {
+                            // Persist with fixed id + tool_calls so the owning
+                            // assistant survives the error turn. Non-empty content
+                            // also still gets the error marker via the reducer
+                            // below for UI parity, but the DB row is authoritative.
+                            const errorToolCalls = buildMinimalToolCallsFromIds(
+                                segment.toolCallIds,
+                                errorToolNameById
+                            );
+                            await persistMessageWithFixedId(dispatch, {
+                                dialogId,
+                                id: segment.messageId,
+                                dbKey: segment.key,
+                                role: "assistant",
+                                content: segment.content,
+                                ...(errorToolCalls.length > 0
+                                    ? { tool_calls: errorToolCalls }
+                                    : {}),
+                                ...desktopMessageMetadata,
+                                userId: selectIdentityUserId(getState() as RootState),
+                            });
+                            if (hasContent) {
+                                dispatch(finalizeTransientMessageOnError({
+                                    id: segment.messageId,
+                                    error: errorText,
+                                }));
+                            }
+                        } else {
                             dispatch(finalizeTransientMessageOnError({
                                 id: segment.messageId,
                                 error: errorText,
                             }));
                         }
-                    } else {
-                        dispatch(finalizeTransientMessageOnError({
-                            id: segment.messageId,
-                            error: errorText,
-                        }));
                     }
-                }
-                // Tools that already ran successfully must NOT get error stamps —
-                // only stop streaming so the trajectory stays truthful on refresh.
-                const durableTools: any[] = [];
-                for (const toolMsg of activeToolMessages.values()) {
-                    const content = (toolMsg as any)?.content;
-                    const hasContent = typeof content === "string"
-                        ? content.trim().length > 0
-                        : Array.isArray(content) && content.length > 0;
-                    if (!hasContent) {
-                        dispatch(removeTransientMessage((toolMsg as any).id));
-                        continue;
+                    // Tools that already ran successfully must NOT get error stamps —
+                    // only stop streaming so the trajectory stays truthful on refresh.
+                    const durableTools: any[] = [];
+                    for (const toolMsg of activeToolMessages.values()) {
+                        const content = (toolMsg as any)?.content;
+                        const hasContent = typeof content === "string"
+                            ? content.trim().length > 0
+                            : Array.isArray(content) && content.length > 0;
+                        if (!hasContent) {
+                            dispatch(removeTransientMessage((toolMsg as any).id));
+                            continue;
+                        }
+                        const stopped = { ...toolMsg, isStreaming: false };
+                        dispatch(messageStreaming(stopped));
+                        durableTools.push(stopped);
                     }
-                    const stopped = { ...toolMsg, isStreaming: false };
-                    dispatch(messageStreaming(stopped));
-                    durableTools.push(stopped);
-                }
-                // soft: turn already failed — write best-effort so a refresh
-                // still shows tool trajectory without rejecting the outer path.
-                await persistToolMessages(dispatch, durableTools, {
-                    isStreaming: false,
-                    soft: true,
-                });
-                remoteTransientMessageFinalized = true;
-                setLoopStopReason("error");
-            };
-
-            if (streamError) {
-                // Structured metadata: context overflow / compaction timeout get
-                // an actionable hint so the error card isn't a generic badge.
-                // Generic errors pass through unchanged (no enrichment).
-                const info = classifyLocalTurnStreamError(streamError);
-                const finalError = info.actionHint ? `${streamError}\n\n${info.actionHint}` : streamError;
-                await finalizeDesktopTurnOnError(finalError);
-                return rejectWithValue(finalError);
-            }
-
-            if (!streamResult) {
-                const message = "Local turn stream closed unexpectedly without result";
-                await finalizeDesktopTurnOnError(message);
-                return rejectWithValue(message);
-            }
-
-            const desktopTurnMessages = (streamResult as any).turnMessages || [];
-            // Done-only path: no tool events fired during the stream, so no segment
-            // recorded any callId. tool messages are projected below from
-            // turnMessages, but without a preceding assistant declaring those
-            // tool_call_ids the persisted history holds orphan tool rows — the next
-            // provider round sees tool messages with no owning assistant and replies
-            // with empty messages. Fix: mint the assistant segment (its ULID must be
-            // earlier than the tool messages projected right after) and attach the
-            // tool_call ids from turnMessages, then finalize so the final "Done."
-            // text starts a fresh segment. Mirrors the tool-event path's
-            // [assistant(tool_calls) → tool×N → assistant(text)] ordering.
-            const hasSegmentWithCallIds = assistantSegments.some(
-                (s) => s.toolCallIds.length > 0,
-            );
-            if (!hasSegmentWithCallIds) {
-                const doneOnlyAssistantCalls = desktopTurnMessages
-                    .filter(
-                        (m: any) =>
-                            m?.role === "assistant" &&
-                            Array.isArray(m.tool_calls) &&
-                            m.tool_calls.length > 0,
-                    )
-                    .flatMap((m: any) => m.tool_calls.map((tc: any) => tc?.id))
-                    .filter((id: any): id is string => typeof id === "string");
-                if (doneOnlyAssistantCalls.length > 0) {
-                    ensureAssistantMessageKeys();
-                    for (const callId of doneOnlyAssistantCalls) {
-                        attachToolCallIdToSegment(assistantSegments, callId);
-                    }
-                    // Conditional finalize to avoid duplicate/empty bubbles in mixed
-                    // streams (delta text already streamed but no tool event fired).
-                    // - currentContent.length === 0 (pure done-only, no streamed text):
-                    //   finalize so the trailing "Done." text starts a fresh segment.
-                    // - currentContent.length > 0 (mixed stream): do NOT finalize. The
-                    //   call ids are already attached to the current streaming segment;
-                    //   it is persisted later by messageStreamEnd together with
-                    //   lastSegmentToolCalls. Finalizing here would clear
-                    //   assistantMessageKeys/currentContent, causing
-                    //   ensureAssistantMessageKeys() to mint a second segment S2 whose
-                    //   content comes from streamResult.content (full content) → S1 and
-                    //   S2 duplicate, or an empty trailing bubble when that is empty.
-                    if (currentContent.length === 0) {
-                        finalizeCurrentAssistantSegmentForTool();
-                    }
-                }
-            }
-            if (activeToolMessages.size === 0) {
-                for (const toolMessage of buildDesktopRuntimeToolMessagesForUi({
-                    dialogId,
-                    turnMessages: desktopTurnMessages,
-                })) {
-                    dispatch(messageStreaming(toolMessage));
-                    activeToolMessages.set(
-                        asTrimmedString(toolMessage.toolCallId) || toolMessage.id,
-                        toolMessage,
-                    );
-                }
-            }
-
-            // Shared web+desktop durable write path (same as toolThunks).
-            // Without this, desktop only messageStreaming → refresh drops tools.
-            // soft: tools already executed; a write failure (or a single row
-            // missing dbKey) must not reject the whole successful turn.
-            await persistToolMessages(
-                dispatch,
-                activeToolMessages.values(),
-                { isStreaming: false, soft: true },
-            );
-
-            // Persist earlier assistant text segments that were finalized when
-            // their following tool call interrupted the stream. These are no
-            // longer streaming (marked isStreaming:false above) but were never
-            // written to the database, so persist them now with fixed ids so
-            // history reload preserves the [A, tool, B] ordering. The final
-            // segment is persisted below via messageStreamEnd.
-            const earlierFinalizedSegments = selectPersistableFinalizedSegments(assistantSegments);
-            for (const segment of earlierFinalizedSegments) {
-                const segmentToolCalls = resolveSegmentToolCalls(
-                    segment.toolCallIds,
-                    desktopTurnMessages,
-                );
-                dispatch(write({
-                    data: {
-                        id: segment.messageId,
-                        dbKey: segment.key,
-                        dialogId,
-                        content: segment.content,
-                        role: "assistant",
+                    // soft: turn already failed — write best-effort so a refresh
+                    // still shows tool trajectory without rejecting the outer path.
+                    await persistToolMessages(dispatch, durableTools, {
                         isStreaming: false,
-                        type: DataType.MSG,
-                        ...(segmentToolCalls.length > 0 ? { tool_calls: segmentToolCalls } : {}),
-                        ...desktopMessageMetadata,
-                    },
-                    customKey: segment.key,
+                        soft: true,
+                    });
+                    remoteTransientMessageFinalized = true;
+                    setLoopStopReason("error");
+                };
+
+                if (streamError) {
+                    // Structured metadata: context overflow / compaction timeout get
+                    // an actionable hint so the error card isn't a generic badge.
+                    // Generic errors pass through unchanged (no enrichment).
+                    const info = classifyLocalTurnStreamError(streamError);
+                    const finalError = info.actionHint ? `${streamError}\n\n${info.actionHint}` : streamError;
+                    await finalizeDesktopTurnOnError(finalError);
+                    return rejectWithValue(finalError);
+                }
+
+                if (!streamResult) {
+                    const message = "Local turn stream closed unexpectedly without result";
+                    await finalizeDesktopTurnOnError(message);
+                    return rejectWithValue(message);
+                }
+
+                const desktopTurnMessages = (streamResult as any).turnMessages || [];
+                // Done-only path: no tool events fired during the stream, so no segment
+                // recorded any callId. tool messages are projected below from
+                // turnMessages, but without a preceding assistant declaring those
+                // tool_call_ids the persisted history holds orphan tool rows — the next
+                // provider round sees tool messages with no owning assistant and replies
+                // with empty messages. Fix: mint the assistant segment (its ULID must be
+                // earlier than the tool messages projected right after) and attach the
+                // tool_call ids from turnMessages, then finalize so the final "Done."
+                // text starts a fresh segment. Mirrors the tool-event path's
+                // [assistant(tool_calls) → tool×N → assistant(text)] ordering.
+                const hasSegmentWithCallIds = assistantSegments.some(
+                    (s) => s.toolCallIds.length > 0,
+                );
+                if (!hasSegmentWithCallIds) {
+                    const doneOnlyAssistantCalls = desktopTurnMessages
+                        .filter(
+                            (m: any) =>
+                                m?.role === "assistant" &&
+                                Array.isArray(m.tool_calls) &&
+                                m.tool_calls.length > 0,
+                        )
+                        .flatMap((m: any) => m.tool_calls.map((tc: any) => tc?.id))
+                        .filter((id: any): id is string => typeof id === "string");
+                    if (doneOnlyAssistantCalls.length > 0) {
+                        ensureAssistantMessageKeys();
+                        for (const callId of doneOnlyAssistantCalls) {
+                            attachToolCallIdToSegment(assistantSegments, callId);
+                        }
+                        // Conditional finalize to avoid duplicate/empty bubbles in mixed
+                        // streams (delta text already streamed but no tool event fired).
+                        // - currentContent.length === 0 (pure done-only, no streamed text):
+                        //   finalize so the trailing "Done." text starts a fresh segment.
+                        // - currentContent.length > 0 (mixed stream): do NOT finalize. The
+                        //   call ids are already attached to the current streaming segment;
+                        //   it is persisted later by messageStreamEnd together with
+                        //   lastSegmentToolCalls. Finalizing here would clear
+                        //   assistantMessageKeys/currentContent, causing
+                        //   ensureAssistantMessageKeys() to mint a second segment S2 whose
+                        //   content comes from streamResult.content (full content) → S1 and
+                        //   S2 duplicate, or an empty trailing bubble when that is empty.
+                        if (currentContent.length === 0) {
+                            finalizeCurrentAssistantSegmentForTool();
+                        }
+                    }
+                }
+                if (activeToolMessages.size === 0) {
+                    for (const toolMessage of buildDesktopRuntimeToolMessagesForUi({
+                        dialogId,
+                        turnMessages: desktopTurnMessages,
+                    })) {
+                        dispatch(messageStreaming(toolMessage));
+                        activeToolMessages.set(
+                            asTrimmedString(toolMessage.toolCallId) || toolMessage.id,
+                            toolMessage,
+                        );
+                    }
+                }
+
+                // Shared web+desktop durable write path (same as toolThunks).
+                // Without this, desktop only messageStreaming → refresh drops tools.
+                // soft: tools already executed; a write failure (or a single row
+                // missing dbKey) must not reject the whole successful turn.
+                await persistToolMessages(
+                    dispatch,
+                    activeToolMessages.values(),
+                    { isStreaming: false, soft: true },
+                );
+
+                // Persist earlier assistant text segments that were finalized when
+                // their following tool call interrupted the stream. These are no
+                // longer streaming (marked isStreaming:false above) but were never
+                // written to the database, so persist them now with fixed ids so
+                // history reload preserves the [A, tool, B] ordering. The final
+                // segment is persisted below via messageStreamEnd.
+                const earlierFinalizedSegments = selectPersistableFinalizedSegments(assistantSegments);
+                for (const segment of earlierFinalizedSegments) {
+                    const segmentToolCalls = resolveSegmentToolCalls(
+                        segment.toolCallIds,
+                        desktopTurnMessages,
+                    );
+                    dispatch(write({
+                        data: {
+                            id: segment.messageId,
+                            dbKey: segment.key,
+                            dialogId,
+                            content: segment.content,
+                            role: "assistant",
+                            isStreaming: false,
+                            type: DataType.MSG,
+                            ...(segmentToolCalls.length > 0 ? { tool_calls: segmentToolCalls } : {}),
+                            ...desktopMessageMetadata,
+                        },
+                        customKey: segment.key,
+                    }));
+                }
+
+                const { key: msgKey, messageId } = ensureAssistantMessageKeys();
+                // 流内已执行工具的 provider（如 Cursor）：streaming 已通过 onTextDelta
+                // 分段渲染了所有文本，每个工具到达时 finalize 了前一段。done 事件不需要
+                // 用 result.content 覆盖——用 currentContent（最后一段的增量累积，可能
+                // 为空如果最后是工具调用）。常规 provider 用 result.content。
+                const lastSegmentContent = hasInlineExecutedToolCalls(streamResult)
+                    ? (currentContent || "")
+                    : (streamResult.content || currentContent || "");
+                const segment = assistantSegments[assistantSegments.length - 1];
+                segment.content = lastSegmentContent;
+                dispatch(messageStreaming({
+                    id: messageId,
+                    dialogId,
+                    dbKey: msgKey,
+                    content: lastSegmentContent,
+                    role: "assistant",
+                    isStreaming: false,
+                    ...desktopMessageMetadata,
                 }));
+
+                const lastSegmentToolCalls = segment
+                    ? resolveSegmentToolCalls(segment.toolCallIds, desktopTurnMessages)
+                    : [];
+
+                await dispatch(messageStreamEnd({
+                    finalContentBuffer: [
+                        {
+                            type: "text",
+                            text: lastSegmentContent,
+                        },
+                    ],
+                    totalUsage: streamResult.usage ?? undefined,
+                    billingUsageRecords: streamResult.usageRecords,
+                    messageId,
+                    msgKey,
+                    agentConfig,
+                    dialogId,
+                    dialogKey,
+                    // 优先用本 turn 累计的 thinking SSE；为空时兜底 streamResult.reasoning_content
+                    // （provider 在 SSE 流内累计返回的 reasoning_content）。
+                    reasoningBuffer: reasoningBuffer || (typeof streamResult?.reasoning_content === "string" ? streamResult.reasoning_content : ""),
+                    toolCalls: lastSegmentToolCalls,
+                    // 把 provider 报告的 finish_reason 透传给 messageStreamEnd，
+                    // 由 assembleFinalAssistantMessage 决定是否写进最终 Message。
+                    finishReason: streamResult.finish_reason ?? undefined,
+                    messageMetadata: desktopMessageMetadata,
+                })).unwrap();
+                remoteTransientMessageFinalized = true;
+                if (!isUserTurn || !ownsDesktopTurn() || streamResult.finish_reason !== "stop" ||
+                    (streamResult.stopReason && streamResult.stopReason !== "done") ||
+                    streamResult.pendingInteraction || streamResult.hasPendingInteraction || streamResult.error ||
+                    streamResult.emptyAssistantFallbackReason) {
+                    return { usage: streamResult.usage ?? undefined };
+                }
+                desktopBatch = await admitDesktopBatch();
+                if (!ownsDesktopTurn()) return { aborted: true };
+                if (!desktopBatch.length) return { usage: streamResult.usage ?? undefined };
             }
-
-            const { key: msgKey, messageId } = ensureAssistantMessageKeys();
-            // 流内已执行工具的 provider（如 Cursor）：streaming 已通过 onTextDelta
-            // 分段渲染了所有文本，每个工具到达时 finalize 了前一段。done 事件不需要
-            // 用 result.content 覆盖——用 currentContent（最后一段的增量累积，可能
-            // 为空如果最后是工具调用）。常规 provider 用 result.content。
-            const lastSegmentContent = hasInlineExecutedToolCalls(streamResult)
-                ? (currentContent || "")
-                : (streamResult.content || currentContent || "");
-            const segment = assistantSegments[assistantSegments.length - 1];
-            segment.content = lastSegmentContent;
-            dispatch(messageStreaming({
-                id: messageId,
-                dialogId,
-                dbKey: msgKey,
-                content: lastSegmentContent,
-                role: "assistant",
-                isStreaming: false,
-                ...desktopMessageMetadata,
-            }));
-
-            const lastSegmentToolCalls = segment
-                ? resolveSegmentToolCalls(segment.toolCallIds, desktopTurnMessages)
-                : [];
-
-            await dispatch(messageStreamEnd({
-                finalContentBuffer: [
-                    {
-                        type: "text",
-                        text: lastSegmentContent,
-                    },
-                ],
-                totalUsage: streamResult.usage ?? undefined,
-                billingUsageRecords: streamResult.usageRecords,
-                messageId,
-                msgKey,
-                agentConfig,
-                dialogId,
-                dialogKey,
-                // 优先用本 turn 累计的 thinking SSE；为空时兜底 streamResult.reasoning_content
-                // （provider 在 SSE 流内累计返回的 reasoning_content）。
-                reasoningBuffer: reasoningBuffer || (typeof streamResult?.reasoning_content === "string" ? streamResult.reasoning_content : ""),
-                toolCalls: lastSegmentToolCalls,
-                // 把 provider 报告的 finish_reason 透传给 messageStreamEnd，
-                // 由 assembleFinalAssistantMessage 决定是否写进最终 Message。
-                finishReason: streamResult.finish_reason ?? undefined,
-                messageMetadata: desktopMessageMetadata,
-            })).unwrap();
-            remoteTransientMessageFinalized = true;
-            return {
-                usage: streamResult.usage ?? undefined,
-            };
+            return { aborted: true };
         }
 
         const userInputText = extractAgentRunUserText(userInput);
@@ -1870,7 +1972,7 @@ export const streamAgentChatTurnHandler = async (
             } else {
                 const token = selectIdentityToken(state);
                 const authHeader = token ? `Bearer ${token}` : "";
-                const rawMessages = selectAllMsgs(state, dialogId);
+                const rawMessages = selectAdmittedMessages(selectAllMsgs(state, dialogId));
                 const visibleMessages = buildAgentViewMessages(
                     rawMessages as any,
                     agentConfig.dbKey,
@@ -2017,6 +2119,17 @@ export const streamAgentChatTurnHandler = async (
                             if (payload.type === "error") {
                                 return { reject: payload.message || "远端 Agent 执行失败" };
                             }
+                            if (payload.type === "action_gate" && payload.gate) {
+                                // Block 2c: 服务端 run 的 gate → web 提交目标
+                                //（带 Bearer token）；无 token 时通道按终态失败处理。
+                                pushGate(
+                                    payload.gate,
+                                    targetForRunKind("server-run", {
+                                        server: explicitServerBase,
+                                        token,
+                                    }),
+                                );
+                            }
                             if (payload.type === "agent_handoff") {
                                 await patchDialogThreadMetadata(
                                     dispatch,
@@ -2148,7 +2261,7 @@ export const streamAgentChatTurnHandler = async (
         };
 
         // --- [新增] 提取本次 Handler 启动前的稳定历史消息 ID 集合 ---
-        const initialRawMsgs = selectAllMsgs(state, dialogId);
+        const initialRawMsgs = selectAdmittedMessages(selectAllMsgs(state, dialogId));
         const initialHistoryIds = new Set(initialRawMsgs.map((m: any) => m.id));
 
         // 4. 合并工具 (Base + Default + Context + Mentioned + Runtime) + 图片配置
@@ -2334,7 +2447,7 @@ export const streamAgentChatTurnHandler = async (
                     contextBlocks,
                 );
 
-                const rawMessages = selectAllMsgs(loopState, dialogId);
+                const rawMessages = selectAdmittedMessages(selectAllMsgs(loopState, dialogId));
                 let visibleMessages = buildAgentViewMessages(
                     rawMessages as any,
                     agentConfigForCall.dbKey,
@@ -2367,12 +2480,10 @@ export const streamAgentChatTurnHandler = async (
                     }
                 }
 
+                const requestUserInput = snapshotUserBatchInput(selectAllMsgs(loopState, dialogId));
                 const cleanedMessages = filterAndCleanMessages(visibleMessages);
                 const ctxWindow =
                     resolveAgentContextWindow(agentConfigForCall);
-                const summaryTokenCount = contexts.dialogSummary
-                    ? estimateTokenCount(contexts.dialogSummary)
-                    : 0;
                 const messagesBeforeStrip = compressOldToolResults(cleanedMessages) as any[];
                 const preprocessedResult = await stripImagePartsForTextOnlyAgent(
                     messagesBeforeStrip,
@@ -2383,36 +2494,45 @@ export const streamAgentChatTurnHandler = async (
                     messagesBeforeStrip,
                     targetUserMessageId: activeTurnUserMessageId,
                 });
-                let processedMessages = trimMessagesWithSummary(
-                    preprocessedResult.messages as any,
-                    ctxWindow,
-                    summaryTokenCount,
-                );
-                let firstDynamicIdx = processedMessages.findIndex(
-                    (m) => m.id && !initialHistoryIds.has(m.id),
-                );
-                if (firstDynamicIdx === -1) firstDynamicIdx = processedMessages.length;
-                let stableMessages = processedMessages.slice(0, firstDynamicIdx);
-                let dynamicMessages = processedMessages.slice(firstDynamicIdx);
+                const { bodyData, fallbackBodyData, dynamicMessages, stableMessages } = await admitWebRequest({
+                    contextWindow: ctxWindow,
+                    signal: loopController.signal,
+                    rescue: (availableHistoryTokens) => updateDialogSummaryAction({
+                        dialogKey, force: true, reason: "budget_rescue", availableHistoryTokens,
+                        contextWindow: ctxWindow, preserveLatestUserByProjection: true,
+                    }, { ...thunkApi, signal: loopController.signal }),
+                    build: async () => {
+                        const summaryConfig = selectById(getState() as RootState, dialogKey) as DialogConfig | undefined;
+                        const refreshedContexts = { ...contexts, dialogSummary: summaryConfig?.summary || null };
+                        const processedMessages = projectSummaryHistory(preprocessedResult.messages as any[], summaryConfig?.summary, summaryConfig?.summarizedBeforeId);
+                        let firstDynamicIdx = processedMessages.findIndex(
+                            (m) => m.id && !initialHistoryIds.has(m.id),
+                        );
+                        if (firstDynamicIdx === -1) firstDynamicIdx = processedMessages.length;
+                        let stableMessages = processedMessages.slice(0, firstDynamicIdx);
+                        let dynamicMessages = processedMessages.slice(firstDynamicIdx);
 
-                const bodyData = generateRequestBody({
-                    agentConfig: effectiveAgentConfig,
-                    messages: dynamicMessages as any,
-                    stableMessages: stableMessages as any,
-                    userInput: userInputText,
-                    contexts,
-                    responsesState,
+                        const bodyData = generateRequestBody({
+                            agentConfig: effectiveAgentConfig,
+                            messages: dynamicMessages as any,
+                            stableMessages: stableMessages as any,
+                            userInput: userInputText,
+                            contexts: refreshedContexts,
+                            responsesState,
+                        });
+                        const fallbackBodyData = responsesState
+                            ? generateRequestBody({
+                                agentConfig: effectiveAgentConfig,
+                                messages: dynamicMessages as any,
+                                stableMessages: stableMessages as any,
+                                userInput: userInputText,
+                                contexts: refreshedContexts,
+                                responsesState: null,
+                            })
+                            : undefined;
+                        return { value: { bodyData, fallbackBodyData, dynamicMessages, stableMessages }, wireBodies: [buildResponsesRequestBodyWithTools(bodyData, agentConfigForCall), ...(fallbackBodyData ? [buildResponsesRequestBodyWithTools(fallbackBodyData, agentConfigForCall)] : [])] };
+                    },
                 });
-                const fallbackBodyData = responsesState
-                    ? generateRequestBody({
-                        agentConfig: effectiveAgentConfig,
-                        messages: dynamicMessages as any,
-                        stableMessages: stableMessages as any,
-                        userInput: userInputText,
-                        contexts,
-                        responsesState: null,
-                    })
-                    : undefined;
                 logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-model-request-starting", {
                     responseApi: true,
                     dynamicMessageCount: dynamicMessages.length,
@@ -2420,7 +2540,8 @@ export const streamAgentChatTurnHandler = async (
                 });
                 modelRequestStarted = true;
 
-                const meta: CompletionMeta = await sendOpenAIResponseRequest({
+                const meta: CompletionMeta = await dispatch(runPendingUserBatchRequest({
+                    dialogKey, signal: loopController.signal, execution: batchExecution, requestUserInput, start: () => sendOpenAIResponseRequest({
                     bodyData,
                     agentConfig: agentConfigForCall,
                     thunkApi,
@@ -2429,7 +2550,8 @@ export const streamAgentChatTurnHandler = async (
                     messageMetadata: streamingMessageMetadata,
                     quickChatPerfStartedAt,
                     fallbackBodyData,
-                });
+                }), })).unwrap();
+                if (!meta || loopController.signal.aborted || thunkApi.signal.aborted) break;
                 logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-model-request-finished", {
                     responseApi: true,
                     hasToolCalls: meta.hasToolCalls,
@@ -2481,6 +2603,17 @@ export const streamAgentChatTurnHandler = async (
                 if (meta.hasPendingInteraction) {
                     if (w) w.__LOOP_STOP_REASON__ = "pending";
                     break;
+                }
+
+                if (!loopController.signal.aborted && !thunkApi.signal.aborted) {
+                    const admitted = await dispatch(admitPendingUserMessages({
+                        dialogKey, signal: loopController.signal,
+                    })).unwrap();
+                    if (loopController.signal.aborted || thunkApi.signal.aborted) break;
+                    if (admitted.length) {
+                        activeTurnUserMessageId = admitted[admitted.length - 1].id;
+                        continue;
+                    }
                 }
 
                 const afterTurnState = getState() as RootState;
@@ -2661,7 +2794,7 @@ export const streamAgentChatTurnHandler = async (
                 contextBlocks,
             );
 
-            const rawMessages = selectAllMsgs(loopState, dialogId);
+            const rawMessages = selectAdmittedMessages(selectAllMsgs(loopState, dialogId));
             let visibleMessages = buildAgentViewMessages(
                 rawMessages as any,
                 agentConfigForCall.dbKey,
@@ -2694,12 +2827,10 @@ export const streamAgentChatTurnHandler = async (
                 }
             }
 
+            const requestUserInput = snapshotUserBatchInput(selectAllMsgs(loopState, dialogId));
             const cleanedMessages = filterAndCleanMessages(visibleMessages);
             const ctxWindow =
                 resolveAgentContextWindow(agentConfigForCall);
-            const summaryTokenCount = contexts.dialogSummary
-                ? estimateTokenCount(contexts.dialogSummary)
-                : 0;
 
             const messagesBeforeStrip = compressOldToolResults(cleanedMessages) as any[];
             const preprocessedResult = await stripImagePartsForTextOnlyAgent(
@@ -2711,24 +2842,40 @@ export const streamAgentChatTurnHandler = async (
                 messagesBeforeStrip,
                 targetUserMessageId: activeTurnUserMessageId,
             });
-            let processedMessages = trimMessagesWithSummary(
-                preprocessedResult.messages as any,
-                ctxWindow,
-                summaryTokenCount,
-            );
-            let firstDynamicIdx = processedMessages.findIndex(
-                (m) => m.id && !initialHistoryIds.has(m.id),
-            );
-            if (firstDynamicIdx === -1) firstDynamicIdx = processedMessages.length;
-            let stableMessages = processedMessages.slice(0, firstDynamicIdx);
-            let dynamicMessages = processedMessages.slice(firstDynamicIdx);
+            const { bodyData, dynamicMessages, stableMessages } = await admitWebRequest({
+                contextWindow: ctxWindow,
+                signal: loopController.signal,
+                rescue: (availableHistoryTokens) => updateDialogSummaryAction({
+                    dialogKey, force: true, reason: "budget_rescue", availableHistoryTokens,
+                    contextWindow: ctxWindow, preserveLatestUserByProjection: true,
+                }, { ...thunkApi, signal: loopController.signal }),
+                build: async () => {
+                    const summaryConfig = selectById(getState() as RootState, dialogKey) as DialogConfig | undefined;
+                    const refreshedContexts = { ...contexts, dialogSummary: summaryConfig?.summary || null };
+                    const processedMessages = projectSummaryHistory(preprocessedResult.messages as any[], summaryConfig?.summary, summaryConfig?.summarizedBeforeId);
+                    let firstDynamicIdx = processedMessages.findIndex(
+                        (m) => m.id && !initialHistoryIds.has(m.id),
+                    );
+                    if (firstDynamicIdx === -1) firstDynamicIdx = processedMessages.length;
+                    let stableMessages = processedMessages.slice(0, firstDynamicIdx);
+                    let dynamicMessages = processedMessages.slice(firstDynamicIdx);
 
-            const bodyData = generateRequestBody({
-                agentConfig: effectiveAgentConfig,
-                messages: dynamicMessages as any,
-                stableMessages: stableMessages as any,
-                userInput: userInputText,
-                contexts,
+                    const bodyData = generateRequestBody({
+                        agentConfig: effectiveAgentConfig,
+                        messages: dynamicMessages as any,
+                        stableMessages: stableMessages as any,
+                        userInput: userInputText,
+                        contexts: refreshedContexts,
+                    });
+                    // Inline custom-provider images before estimating; the transport's
+                    // identical pass is then a no-op for the resulting data URIs.
+                    const finalBody = await inlineImageUrlsForCustomProvider(
+                        buildFinalCompletionsRequestBody(bodyData, agentConfigForCall,
+                            shouldDisableQuickChatToolsForDirectAnswer(quickChatPerfStartedAt, userInput, runtimeOptions, currentDialog)),
+                        { shouldInline: shouldInlineImageUrlsForAgent(agentConfigForCall), signal: loopController.signal },
+                    );
+                    return { value: { bodyData: finalBody, dynamicMessages, stableMessages }, wireBodies: [buildEmptyCompletionRepairBody(finalBody)] };
+                },
             });
             logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-model-request-starting", {
                 responseApi: false,
@@ -2757,7 +2904,8 @@ export const streamAgentChatTurnHandler = async (
                 );
             }
 
-            const meta: CompletionMeta = await sendOpenAICompletionsRequest({
+            const meta: CompletionMeta = await dispatch(runPendingUserBatchRequest({
+                    dialogKey, signal: loopController.signal, execution: batchExecution, requestUserInput, start: () => sendOpenAICompletionsRequest({
                 bodyData,
                 agentConfig: agentConfigForCall,
                 thunkApi,
@@ -2766,7 +2914,8 @@ export const streamAgentChatTurnHandler = async (
                 messageMetadata: streamingMessageMetadata,
                 disableToolsForThisRequest,
                 quickChatPerfStartedAt,
-            });
+                }), })).unwrap();
+                if (!meta || loopController.signal.aborted || thunkApi.signal.aborted) break;
             logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-model-request-finished", {
                 responseApi: false,
                 hasToolCalls: meta.hasToolCalls,
@@ -2793,6 +2942,17 @@ export const streamAgentChatTurnHandler = async (
             }
 
             // 检查是否有用户在 loop 期间发送的排队消息
+            if (!loopController.signal.aborted && !thunkApi.signal.aborted) {
+                const admitted = await dispatch(admitPendingUserMessages({
+                    dialogKey, signal: loopController.signal,
+                })).unwrap();
+                if (loopController.signal.aborted || thunkApi.signal.aborted) break;
+                if (admitted.length) {
+                    activeTurnUserMessageId = admitted[admitted.length - 1].id;
+                    continue;
+                }
+            }
+
             const afterTurnState = getState() as RootState;
             const queuedMessages = selectPendingUserInputQueue(afterTurnState, dialogKey);
             if (queuedMessages.length > 0) {
@@ -2883,6 +3043,7 @@ export const streamAgentChatTurnHandler = async (
             "An unexpected error occurred in streamAgentChatTurn.",
         );
     } finally {
+        batchExecution.dispose();
         clearDialogTurnPhase({ dialogKey: runtimeDialogKey ?? undefined, turnId: turnPhaseTurnId ?? undefined });
         if (loopKey && runtimeDialogKey) {
             dispatch(removeActiveController({ messageId: loopKey, dialogKey: runtimeDialogKey }));

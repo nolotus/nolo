@@ -55,6 +55,9 @@ export interface AccountSessionSnapshot {
 }
 
 export interface AccountSessionService {
+  // Cloud/desktop services rotate through the shared Core; local-only services
+  // may not own persisted account credentials. Callers must check capability.
+  replaceActiveToken?(token: string): Promise<void>;
   deductBalance(cost: number): void;
   [key: string]: any;
 }

@@ -32,6 +32,8 @@ import type { ContentIcon as ContentIconValue } from "render/contentIcon/types";
 import { LuFileText, LuPencil } from "react-icons/lu";
 
 import { selectEditorWordCountEnabled } from "app/settings/settingSlice";
+import { useTopBarStateContext } from "render/layout/TopBarStateContext";
+import ContentActionBar from "render/layout/ContentActionBar";
 import {
   initDocState,
   saveDocState,
@@ -259,6 +261,7 @@ function PageSaveStatus() {
  * 文档渲染与编辑主组件
  */
 const RenderPage: React.FC<{ pageKey: string }> = ({ pageKey }) => {
+  const topBarState = useTopBarStateContext();
   const { t } = useTranslation();
   const [params] = useSearchParams();
   const dispatch = useAppDispatch();
@@ -484,6 +487,11 @@ const RenderPage: React.FC<{ pageKey: string }> = ({ pageKey }) => {
               ) : null}
             </div>
           </div>
+            <div className="RenderPage-title-actions">
+              {topBarState ? (
+                <ContentActionBar state={topBarState} />
+              ) : null}
+            </div>
           {isReadOnly && readOnlyMarkdown ? (
             <ReadOnlyMarkdownContent
               markdown={readOnlyMarkdown}

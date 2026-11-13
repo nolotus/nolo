@@ -75,11 +75,25 @@ export const parseOwnerUserIdFromDbKey = (
     return null;
   }
 
-  // Dialog message keys: dialog-{dialogId}-msg-{messageId}.
-  // dialogId is not the owner (align with server writeAuthority.resolveKeyOwnerId);
-  // callers must fall through to record.userId / candidate context.
-  if (parts[0] === "dialog" && parts[2] === "msg") {
-    return null;
+  if (prefix === "dialog") {
+    const messageSeparator = normalized.lastIndexOf("-msg-");
+    if (messageSeparator !== -1) {
+      // Canonical dialog-{dialogId}-msg-{messageId} keys carry no owner.
+      // Match writeAuthority.resolveKeyOwnerId: historical legacy owner prefixes
+      // are recognized only with a matching candidate; absent candidates yield
+      // null (record/context fallback), not the baseline first-segment owner/deny.
+      // Do not guess userId shapes: that would mistake UUID segments for owners.
+      // Current producers write canonical keys; owner-prefixed messages are historical.
+      // Use the last separator even if a historical messageId contains "-msg-".
+      const dialogPrefix = normalized.slice("dialog-".length, messageSeparator);
+      const candidateOwner = resolveCandidateOwnerFromKeyRemainder(
+        dialogPrefix,
+        options.candidateOwnerUserIds
+      );
+      return candidateOwner && dialogPrefix.length > candidateOwner.length + 1
+        ? candidateOwner
+        : null;
+    }
   }
 
   const ownerAndRest = normalized.slice(prefix.length + 1);

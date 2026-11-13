@@ -47,8 +47,11 @@ import type { RemoteTaskView } from "../../core/remoteTaskView";
  */
 export const RUN_ZONE_MAX_ROWS = 3;
 
-/** 活动 subagent 的稳定单宽标记；明确的文字类型负责说明它是 agent run。 */
-export const RUN_ZONE_ICON = "↳";
+/**
+ * 活动 agent run 的类型标记。用 🤖 取代生硬的「agent / 智能体」类型字样；
+ * emoji 是双宽字符，行宽一律走 visibleWidth（见 tuiAnsi），截断不会把它拆半。
+ */
+export const RUN_ZONE_ICON = "🤖";
 /**
  * 远程任务证据的载体（契约 §10.2 / M3）。
  *
@@ -208,16 +211,25 @@ function runZoneLabel(
   snapshot: AgentRunSnapshot,
   duplicateTitles: ReadonlySet<string>
 ): string {
-  const name = displayAgentName(snapshot);
+  // 运行中的行由前导 🤖 承担类型标记，标签里不再重复；终态行的前导位置是
+  // 状态图标，类型标记留在标签里（同一行里 🤖 只出现一次）。
+  const fallback = isAgentRunTerminalStatus(snapshot.status)
+    ? t("runZoneAgentType")
+    : "";
+  const name = displayAgentName(snapshot, { fallback });
   const short = shortRunId(snapshot.runId);
   const idSuffix = short ? ` #${short}` : "";
   const title = snapshot.title?.trim();
   if (title) {
-    return `${title}${duplicateTitles.has(title) ? idSuffix : ""} · ${name}`;
+    const head = `${title}${duplicateTitles.has(title) ? idSuffix : ""}`;
+    // 无真实名字时不留空的「· 」分隔符。
+    return name ? `${head} · ${name}` : head;
   }
   // 无 title：agent 名是主标识；displayAgentName 已把自动生成的内部身份折叠成
-  // "Sub-agent"，此时短 id 是区分多个 Sub-agent 的唯一手段。
-  return `${name}${idSuffix}`;
+  // 类型标记（无真实名字时为空），此时短 id 是区分多个 run 的唯一手段。
+  // 无真实名字时只剩短 id：id 自带的分隔空格要一起去掉，否则会渲染成
+  // 「🤖  #id」这样的双空格。
+  return name ? `${name}${idSuffix}` : short ? `#${short}` : "";
 }
 
 /**
@@ -296,6 +308,33 @@ export function resolveRunZoneMaxRows(maxRows: number, rows?: number): number {
 }
 
 /**
+ * run 侧行预算：面板总高减去「仍在跑的后台进程」预留的那一行。
+ *
+ * 进程与 run 共用同一块面板高度，所以进程在跑时 run 少一条可见行——这是
+ * 真实布局事实，不能按「面板里能放下几条」来估。
+ */
+export function runZoneRunRowBudget(totalRows: number, activeProcCount: number): number {
+  const procReserve = activeProcCount > 0 && totalRows > 1 ? 1 : 0;
+  return Math.max(1, totalRows - procReserve);
+}
+
+/**
+ * 固定运行区**真实逐行可见**的 run 计划：先按终端行预算降级，再按 maxRows
+ * 切片，切掉的进 `+N more`。渲染（formatRunZoneLines）、面板（runDock）与
+ * 「这张 run 是否已常驻可见」的查询共用这一份规则——三处各写一遍就会漂移，
+ * 而漂移的代价是聊天里静默丢掉一条看不见的 run 的启动回执。
+ */
+export function planRunZoneRows(
+  snapshots: AgentRunSnapshot[],
+  maxRows: number = RUN_ZONE_MAX_ROWS,
+  layout: RunZoneLayout = {}
+): { shown: AgentRunSnapshot[]; hidden: number } {
+  const budget = Math.max(1, resolveRunZoneMaxRows(maxRows, layout.rows));
+  const shown = snapshots.slice(0, budget);
+  return { shown, hidden: Math.max(0, snapshots.length - shown.length) };
+}
+
+/**
  * 渲染固定运行区：活跃 run 每条一行，超过 maxRows 折叠成 `+N more`。
  * 空列表返回 []——无 run 时运行区一行都不占。
  *
@@ -316,7 +355,7 @@ export function formatRunZoneLines(
     typeof layout.columns === "number" && layout.columns > 0 ? layout.columns : undefined;
 
   const display = snapshots.map(sanitizeRunSnapshotForNormal);
-  const shown = display.slice(0, Math.max(1, maxRows));
+  const { shown } = planRunZoneRows(display, maxRows, layout);
 
   // title 只在「唯一」时才能替代短 id 去区分 run；同名并发保留短 id。
   const titleCounts = new Map<string, number>();
@@ -337,9 +376,8 @@ export function formatRunZoneLines(
     const clock = remoteTaskClock(carrier, now);
     const icon = runZoneLeadIcon(snapshot.status, carrier);
     const label = runZoneLabel(snapshot, duplicateTitles);
-    const typedLabel = isAgentRunTerminalStatus(snapshot.status)
-      ? label
-      : `${t("runZoneAgentType")} ${label}`;
+    // 类型标记由前导图标承担（运行中是 🤖，终态是状态图标），标签里不再重复类型字。
+    const typedLabel = label;
     const { time, rest, stalled } = runZoneFacts(snapshot, clock ?? now);
     const remoteFacts = remoteTaskFacts(carrier, now);
     // 远端费用显式未知时不显示积分 chip——「未知」不是「0」。

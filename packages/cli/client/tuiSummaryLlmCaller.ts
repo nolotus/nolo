@@ -1,4 +1,11 @@
+import { isTruncatedCompletion, summaryCompletionTokens } from "../../ai/context/summaryContract";
+import { isAbortError } from "../../core/abortError";
 /** Fail-open platform summary caller. Both existing models share one deadline. */
+import { createSummaryBudget, classifySummaryError, selectSummaryRoute, type SummaryCompletion } from "../../ai/context/summaryRouting";
+import { PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL } from "../../ai/llm/platformHostedRoutingTable";
+import { fetchAccountProfile } from "../../core/accountSession/fetchAccountProfile";
+import { resolvePlatformAuthToken, resolvePlatformServerUrl } from "../../agent-runtime/providerResolution";
+import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
 import { randomUUID } from "node:crypto";
 import {
   resolvePlatformChatProviderConfig,
@@ -12,7 +19,8 @@ import {
   BUILTIN_DIALOG_LLM_FALLBACK_MODEL,
   BUILTIN_SUMMARY_LLM_CONFIG,
 } from "../../chat/dialog/actions/builtinDialogLlm";
-import type { AgentRuntimeChatMessage, EnvLike } from "../../agent-runtime/types";
+import type { AgentRuntimeChatMessage } from "../../agent-runtime/types";
+import type { EnvLike } from "./localRuntimeHelpers";
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -20,24 +28,32 @@ type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 // target length. Request-local only: ordinary chat defaults remain untouched.
 export const TUI_SUMMARY_MAX_OUTPUT_TOKENS = 8192;
 
+export type TuiSummaryLlmCaller = ((content: string, options?: LocalCompactionSummaryFallbackOptions) => Promise<string | null>) & {
+  preferPlatform: (options?: LocalCompactionSummaryFallbackOptions) => Promise<boolean>;
+  complete: (content: string, options?: LocalCompactionSummaryFallbackOptions) => Promise<SummaryCompletion>;
+};
+
 export function createTuiSummaryLlmCaller(
   env: EnvLike,
   options?: {
     fetchImpl?: FetchLike;
+    /** Automatic compaction: authenticated positive balance, default Flash, no paid retry. */
+    platformPrimary?: boolean;
     apiKeyRefResolver?: any;
     credentialBroker?: any;
     timeoutMs?: number;
     resolveProviderConfig?: typeof resolvePlatformChatProviderConfig;
   },
-): (content: string, callOptions?: LocalCompactionSummaryFallbackOptions & { maxOutputTokens?: number }) => Promise<string | null> {
+): TuiSummaryLlmCaller {
   const fetchImpl = options?.fetchImpl ?? fetch;
   const configuredTimeout = options?.timeoutMs;
   const timeoutMs = typeof configuredTimeout === "number" && Number.isFinite(configuredTimeout) && configuredTimeout > 0
     ? Math.min(configuredTimeout, 30_000) : 30_000;
   const resolveProviderConfig = options?.resolveProviderConfig ?? resolvePlatformChatProviderConfig;
 
-  return async (content, callOptions) => {
-    if (!canUsePlatformChatProvider(env) || callOptions?.signal?.aborted) return null;
+  const caller = async (content: string, callOptions?: LocalCompactionSummaryFallbackOptions & { maxOutputTokens?: number }): Promise<string | null> => {
+    if (callOptions?.signal?.aborted) throw new DOMException("Summary cancelled", "AbortError");
+    if (!canUsePlatformChatProvider(env)) return null;
     const requestedOutputTokens = callOptions?.maxOutputTokens;
     // Invalid supplied budgets must not silently expand into the default allowance.
     if (requestedOutputTokens !== undefined &&
@@ -116,7 +132,7 @@ export function createTuiSummaryLlmCaller(
           operationStage = "body";
           let responseText: string;
           try { responseText = await response.text(); }
-          catch { errorKind = "body"; throw new Error("body-read-failed"); }
+          catch (error) { if (isAbortError(error)) throw error; errorKind = "body"; throw new Error("body-read-failed"); }
           if (isStopped()) return null;
           operationStage = "parse";
           let data: any;
@@ -124,22 +140,33 @@ export function createTuiSummaryLlmCaller(
           catch { errorKind = "parse"; throw new Error("response-json-invalid"); }
           if (isStopped()) return null;
           stage = "parse";
-          // A capped/incomplete summary must not become authoritative history.
-          if (data?.choices?.[0]?.finish_reason === "length" || data?.status === "incomplete" || data?.incomplete_details) {
-            stage = "truncated";
-            return null;
-          }
           const parsed = parsePlatformChatCompletionResponse({ providerConfig, data, trace: [] });
+          if (isTruncatedCompletion({ finishReason: parsed.finish_reason, responseStatus: data?.status,
+            incompleteReason: data?.incomplete_details?.reason, truncated: !!data?.incomplete_details })) {
+            stage = "truncated";
+            throw { code: "SUMMARY_TRUNCATED", stage: "decode", finishReason: parsed.finish_reason,
+              responseStatus: data?.status, incompleteReason: data?.incomplete_details?.reason,
+              maxOutputTokens, completionTokens: summaryCompletionTokens(parsed.usage), outputChars: parsed.content?.length,
+              model, provider: "nolo", attemptId };
+          }
           const summary = parsed?.content?.trim() || null;
           stage = summary ? "done" : "empty";
           return summary;
-        } catch {
+        } catch (error) {
+          if (parentSignal?.aborted || (isAbortError(error) && !attemptSignal.aborted)) {
+            throw new DOMException("Summary cancelled", "AbortError");
+          }
+          if ((error as any)?.code === "SUMMARY_TRUNCATED") {
+            const safe = classifySummaryError(error);
+            throw Object.assign(new Error(safe.message), safe);
+          }
           if (errorKind === null) errorKind = operationStage === "resolve" ? "resolve" : operationStage === "http" ? "http" : null;
           return null;
         }
       };
       try {
         const result = await Promise.race([work(), stopped]);
+        if (parentSignal?.aborted) throw new DOMException("Summary cancelled", "AbortError");
         if (!result) console.warn("[tuiSummary] summary attempt failed", {
           attemptId, model,
           stage: parentSignal?.aborted ? "cancelled"
@@ -164,7 +191,8 @@ export function createTuiSummaryLlmCaller(
       // 而摘要 prompt 常有 ~30k token（mimo 实测 25–30s+），于是两个模型
       // 都必然在出结果前被自己的预算掐死——2026-11-03 日志里
       // stage 逐次是 "attempt-budget" 然后 "deadline"，fallback 等于永不可用。
-      const primary = await attempt(BUILTIN_SUMMARY_LLM_CONFIG.model, deadlineMs - Date.now());
+      const primary = await attempt(options?.platformPrimary ? PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL : BUILTIN_SUMMARY_LLM_CONFIG.model, deadlineMs - Date.now());
+      if (options?.platformPrimary) return primary;
       if (primary || signal.aborted || parentSignal?.aborted || Date.now() >= deadlineMs) return primary;
       return await attempt(BUILTIN_DIALOG_LLM_FALLBACK_MODEL, deadlineMs - Date.now());
     } finally {
@@ -172,4 +200,93 @@ export function createTuiSummaryLlmCaller(
       parentSignal?.removeEventListener("abort", onAbort);
     }
   };
+  return Object.assign(caller, {
+    complete: async (content: string, callOptions?: LocalCompactionSummaryFallbackOptions): Promise<SummaryCompletion> => {
+      const configured = typeof configuredTimeout === "number" && Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? Date.now() + configuredTimeout : Infinity;
+      const budget = createSummaryBudget({ mode: "manual", signal: callOptions?.signal,
+        deadlineMs: Math.min(callOptions?.deadlineMs ?? Date.now() + 60_000, configured) });
+      const model = PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL;
+      const attemptId = callOptions?.attemptId ?? randomUUID();
+      let stage = "resolve";
+      let httpStatus: number | undefined;
+      try {
+        return await budget.run(async ({ signal, deadlineMs }) => {
+          if (!canUsePlatformChatProvider(env)) throw { code: "PLATFORM_AUTH_UNAVAILABLE", stage: "auth" };
+          const requested = callOptions?.maxOutputTokens;
+          if (requested !== undefined && (!Number.isFinite(requested) || requested < 1)) throw { code: "INVALID_OUTPUT_BUDGET", stage: "build" };
+          const providerConfig = await resolveProviderConfig({
+            agentConfig: { ...BUILTIN_SUMMARY_LLM_CONFIG, model, key: BUILTIN_SUMMARY_LLM_CONFIG.id },
+            env, apiKeyRefResolver: options?.apiKeyRefResolver, credentialBroker: options?.credentialBroker,
+          });
+          if (signal.aborted) throw signal.reason;
+          if (!providerConfig?.authToken) throw { code: "PLATFORM_AUTH_UNAVAILABLE", stage: "auth" };
+          stage = "build";
+          const request = buildPlatformChatCompletionRequest({ providerConfig: { ...providerConfig,
+              requestOptions: { ...providerConfig.requestOptions, max_tokens: Math.min(TUI_SUMMARY_MAX_OUTPUT_TOKENS, Math.floor(requested ?? TUI_SUMMARY_MAX_OUTPUT_TOKENS)), reasoning_effort: "low" } },
+            messages: [{ role: "system", content: COMPACTION_SUMMARY_SYSTEM_PROMPT }, { role: "user", content }],
+            stream: false, requestId: attemptId,
+          });
+          stage = "http";
+          const response = await fetchImpl(request.url, { ...request.init, signal });
+          httpStatus = response.status;
+          stage = "body";
+          const body = await response.text();
+          if (!response.ok) {
+            let data: any;
+            try { data = JSON.parse(body); } catch { data = {}; }
+            // Keep only safe structured fields. Raw bodies/messages never leave this seam.
+            throw { status: response.status, code: data?.error?.code ?? data?.code,
+              type: data?.error?.type ?? data?.type, balanceSource: data?.balanceSource, stage: "http" };
+          }
+          stage = "decode";
+          let data: any;
+          try { data = JSON.parse(body); } catch { throw { code: "INVALID_SUMMARY_JSON" }; }
+          const parsed = parsePlatformChatCompletionResponse({ providerConfig, data, trace: [] });
+          return { text: parsed.content ?? "", finishReason: parsed.finish_reason,
+            responseStatus: data?.status, incompleteReason: data?.incomplete_details?.reason,
+            maxOutputTokens: Math.min(TUI_SUMMARY_MAX_OUTPUT_TOKENS, Math.floor(requested ?? TUI_SUMMARY_MAX_OUTPUT_TOKENS)),
+            completionTokens: summaryCompletionTokens(parsed.usage),
+            truncated: isTruncatedCompletion({ finishReason: parsed.finish_reason, responseStatus: data?.status, incompleteReason: data?.incomplete_details?.reason, truncated: !!data?.incomplete_details }) };
+        });
+      } catch (cause) {
+        const safe = classifySummaryError(budget.signal.aborted ? budget.signal.reason : cause,
+          { model, provider: "nolo", attemptId, stage });
+        if (httpStatus !== undefined && safe.status === undefined) safe.status = httpStatus;
+        throw Object.assign(new Error(safe.message), safe, { type: safe.errorType,
+          name: safe.category === "cancelled" ? "AbortError" : safe.category === "timeout" ? "TimeoutError" : "SummaryError" });
+      } finally { budget.dispose(); }
+    },
+    preferPlatform: async (callOptions?: LocalCompactionSummaryFallbackOptions): Promise<boolean> => {
+      if (callOptions?.signal?.aborted) throw new DOMException("Summary cancelled", "AbortError");
+      if (!options?.platformPrimary || !canUsePlatformChatProvider(env)) return false;
+      const token = resolvePlatformAuthToken(env);
+      const userId = parseUserIdFromAuthToken(token);
+      if (!userId || userId === "local" || userId === "guest") return false;
+      const controller = new AbortController();
+      const onAbort = () => controller.abort(callOptions?.signal?.reason);
+      callOptions?.signal?.addEventListener("abort", onAbort, { once: true });
+      if (callOptions?.signal?.aborted) onAbort();
+      const budget = Math.min(5000, (callOptions?.deadlineMs ?? Infinity) - Date.now());
+      const timer = setTimeout(() => controller.abort(), Math.max(0, budget));
+      try {
+        if (!(budget > 0)) throw new DOMException("Summary deadline exceeded", "TimeoutError");
+        const profile = await fetchAccountProfile({
+          serverUrl: resolvePlatformServerUrl(env), token, userId,
+          fetchImpl: (url, init) => fetchImpl(url, { ...init, signal: controller.signal }),
+        });
+        return selectSummaryRoute({ userId, authenticated: true,
+          platformAvailable: !controller.signal.aborted, credits: profile.balance }).kind === "platform";
+      } catch (error) {
+        if (callOptions?.signal?.aborted) throw callOptions.signal.reason ?? new DOMException("Summary cancelled", "AbortError");
+        if (Date.now() >= (callOptions?.deadlineMs ?? Infinity)) throw new DOMException("Summary deadline exceeded", "TimeoutError");
+        if ((isAbortError(error) && !controller.signal.aborted)) throw new DOMException("Summary cancelled", "AbortError");
+        return false;
+      }
+      finally {
+        clearTimeout(timer);
+        callOptions?.signal?.removeEventListener("abort", onAbort);
+      }
+    },
+  });
 }

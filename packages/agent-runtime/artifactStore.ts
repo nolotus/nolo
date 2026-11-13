@@ -34,7 +34,7 @@ export type ArtifactRef = {
 export interface ArtifactStore {
   put(
     key: string,
-    data: Uint8Array | string,
+    data: Uint8Array<ArrayBuffer> | string,
     opts?: { contentType?: string },
   ): Promise<ArtifactRef>;
   get(key: string): Promise<Uint8Array>;
@@ -97,7 +97,7 @@ export function assertArtifactKey(key: string): void {
   }
 }
 
-function toBytes(data: Uint8Array | string): Uint8Array {
+function toBytes(data: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> {
   return typeof data === "string" ? new TextEncoder().encode(data) : data;
 }
 
@@ -427,7 +427,7 @@ export function createR2ArtifactStore(options: R2ArtifactStoreOptions): Artifact
   const call = async (
     method: "PUT" | "GET" | "DELETE",
     key: string,
-    body: Uint8Array | undefined,
+    body: Uint8Array<ArrayBuffer> | undefined,
     contentType: string | undefined,
   ) => {
     const target = objectTarget(key);

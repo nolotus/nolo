@@ -1,0 +1,159 @@
+/* packages/app/settings/web/DataSourcePluginsConfig.css
+ *
+ * 数据源开关页。取值通道与同目录 SecretsConfig.css / settings.css 一致：
+ * 只用 --space-* / --fontSize-* / --radius-* 与 --text / --textSecondary /
+ * --border / --borderLight / --fill 这些既有 CSS 变量，不引入新的样式体系。
+ */
+
+.data-sources-page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.data-sources-page .page-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: 0;
+}
+
+.data-sources-page .page-description {
+  margin: 0;
+  color: var(--textSecondary);
+  font-size: var(--fontSize-base);
+  line-height: var(--leading-relaxed);
+}
+
+.data-sources-page__refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: var(--control-sm);
+  flex: 0 0 auto;
+  margin-top: var(--space-1);
+  border: 1px solid var(--borderLight);
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--textTertiary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.data-sources-page__refresh:hover:not(:disabled) {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.data-sources-page__refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.data-sources-state {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--borderLight);
+  border-radius: var(--radius-md);
+  background: var(--backgroundSecondary, var(--fill));
+  color: var(--textSecondary);
+  font-size: var(--fontSize-base);
+  line-height: var(--leading-normal);
+}
+
+.data-sources-state p {
+  margin: 0;
+}
+
+.data-sources-state--error {
+  border-color: color-mix(in srgb, var(--error) 35%, var(--borderLight));
+  color: var(--text);
+}
+
+.data-sources-state__retry {
+  margin-top: var(--space-2);
+  height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-1);
+  background: var(--background);
+  color: var(--text);
+  font-size: var(--fontSize-sm);
+  cursor: pointer;
+}
+
+.data-sources-state__retry:hover {
+  background: var(--fill);
+}
+
+.data-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.data-sources-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--borderLight);
+  border-radius: var(--radius-md);
+}
+
+.data-sources-item__copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.data-sources-item__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--text);
+  font-weight: 600;
+  line-height: var(--leading-normal);
+}
+
+.data-sources-item__badge {
+  padding: 1px var(--space-1);
+  border: 1px solid var(--borderLight);
+  border-radius: var(--radius-1);
+  background: var(--fill);
+  color: var(--textSecondary);
+  font-size: var(--fontSize-sm);
+  font-weight: 400;
+}
+
+.data-sources-item__note {
+  margin: var(--space-1) 0 0;
+  color: var(--textSecondary);
+  font-size: var(--fontSize-sm);
+  line-height: var(--leading-normal);
+}
+
+.data-sources-item__control {
+  flex: 0 0 auto;
+  padding-top: 2px;
+}
+
+@media (max-width: 640px) {
+  .data-sources-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .data-sources-item__control {
+    align-self: flex-start;
+  }
+}

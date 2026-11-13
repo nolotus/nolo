@@ -175,18 +175,19 @@
 .quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           background: var(--backgroundElevated, var(--surfaceRaised, var(--background)));
           transform: none;
-          /* 聚焦时物理描边提亮到 primary 70%，光环改为实色 2px + 浮起阴影，
-             亮/暗主题下聚焦反馈都清晰可见（2026-10-03 视觉修复）。
+          /* 克制的聚焦反馈：1px 低透明度主色描边 + 极淡浮起阴影。
+             早先用 primary 70% 描边 + 实色 2px 光环，用户反馈「active 太明显」
+             （2026-11-04，对话页与首页统一）。
 
              第三分支是裸 .quick-chat-box 兜底：message-input__box / 无
-             data-surface 容器也共享这张卡，默认表面聚焦同样需要强反馈。
+             data-surface 容器也共享这张卡，默认表面聚焦同样需要这份反馈。
              7 层 :not(#\#) 把特异性抬到 (0,10,0)——StyleX 伪态类（注入在
              entry.css 末尾）同属性竞争里，同级即被源码顺序反杀，必须严格
              高于对手才能稳定生效（见 stylexEscapeHatchCascade 闸门）。 */
-          border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
+          border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
           box-shadow:
-            0 0 0 2px var(--primary),
-            0 8px 24px -4px color-mix(in srgb, var(--primary) 25%, transparent);
+            0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent),
+            0 2px 8px -4px color-mix(in srgb, var(--primary) 12%, transparent);
         }
         /* 拖拽悬停反馈：surface 卡片规则带 5 层 :not(#\#)、聚焦兜底带 7 层，
            原先裸 .quick-chat-box.drag-over 特异性远低于它们，border/背景/阴影
@@ -218,10 +219,23 @@
           position: relative;
           width: 100%;
           display: flex;
+          /* 不把 textarea 拉伸到 wrapper 高度：`field-sizing: content` 量出来的
+             才是内容高度，一旦被 stretch 就会和 wrapper 的显式高度互相牵制。 */
+          align-items: flex-start;
+          /* 过渡期间裁掉溢出的新增行（文本顶端对齐，被裁的永远是底部新增部分）。 */
+          overflow: hidden;
+          /* 高度过渡只在这里生效：两端都是确定长度才插值得动；
+             textarea 自身高度是 intrinsic 的，transition 无效。 */
+          transition: height 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
         .quick-chat-box .message-input__textarea {
           flex: 1;
+          /* 高度由内容自己决定（配合 useSmoothTextareaHeight 同步到 wrapper）。 */
+          field-sizing: content;
+          height: auto;
+          min-width: 0;
           max-height: 360px;
+          overflow-y: auto;
           padding: 8px 0;
           font-size: var(--fontSize-base);
           line-height: var(--leading-relaxed);
@@ -233,7 +247,11 @@
           outline: none !important;
           box-shadow: none;
           font-family: inherit;
-          transition: height 0.15s ease-out, max-height 0.15s ease-out;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .quick-chat-box .message-input__textarea-wrap {
+            transition: none;
+          }
         }
 
         .quick-chat-container[data-surface="home-primary"] .message-input__textarea {

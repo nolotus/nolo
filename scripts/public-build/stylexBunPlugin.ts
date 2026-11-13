@@ -24,7 +24,7 @@
  *
  * 按需跳过（2026-09-13）：NOLO_TEST_NO_STYLEX=1 时完全不注册插件、
  * 完全不加载 @babel/core 模块图（实测挂载 +35MB/worker：68MB vs 33MB）。
- * 供 runLightTests.sh（纯逻辑包测试）使用；消费 StyleX 的包误用会
+ * 供统一入口的 `--preset light`（纯逻辑包测试）使用；消费 StyleX 的包误用会
  * fail loudly（stylex.create 运行时 throw），不会静默错译。
  * 注意必须用动态 import：顶层静态 import 会让跳过失效（ESM 静态解析
  * 协议强制提前求值 @babel/core，RSS 依旧 68MB——review 实证 2026-09-13）。

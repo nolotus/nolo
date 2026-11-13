@@ -23,7 +23,15 @@
  * 下游 styleRichMarkdownLine 对已无字面标记的行是幂等的（ANSI 原样保留，
  * 宽度经 stripAnsi 后不变），不会重复叠加。
  */
-import { displayWidth, tokenizeAnsiLine, type WrapToken } from "../tui/tuiAnsi";
+import {
+  boxGlyphs,
+  displayWidth,
+  resolveBoxCharset,
+  tokenizeAnsiLine,
+  type TuiBoxCharset,
+  type TuiBoxGlyphs,
+  type WrapToken,
+} from "../tui/tuiAnsi";
 import {
   resolveTuiBrightness,
   themeColorSequence,
@@ -47,6 +55,11 @@ export interface TableRenderOptions {
   brightness?: TuiBrightness;
   /** 表头主题色 token（不要硬编码 ANSI）。 */
   headerToken?: TuiThemeToken;
+  /**
+   * 框线字符集。缺省走 resolveBoxCharset（wide 宽度约定 → ascii）。
+   * 显式传入主要供测试与调用方确定性渲染。
+   */
+  boxCharset?: TuiBoxCharset;
 }
 
 // ─── 单元格解析 ─────────────────────────────────────────────────────────────
@@ -406,9 +419,15 @@ function makeStyle(
   return { header: paint, label: paint };
 }
 
-/** 框线行：┌─┬─┐ / ├─┼─┤ / └─┴─┘。 */
-function boxLine(left: string, mid: string, right: string, widths: number[]): string {
-  const seg = widths.map((w) => "─".repeat(w + 2));
+/** 框线行：┌─┬─┐ / ├─┼─┤ / └─┴─┘（charset=ascii 时换成 + - |）。 */
+function boxLine(
+  glyphs: TuiBoxGlyphs,
+  left: string,
+  mid: string,
+  right: string,
+  widths: number[],
+): string {
+  const seg = widths.map((w) => glyphs.h.repeat(w + 2));
   return `${left}${seg.join(mid)}${right}`;
 }
 
@@ -419,6 +438,7 @@ function dataRow(
   widths: number[],
   style: TableStyle,
   header: boolean,
+  glyphs: TuiBoxGlyphs,
 ): string {
   const parts = cells.map((cell, i) => {
     const width = widths[i] ?? 0;
@@ -429,9 +449,9 @@ function dataRow(
     // 把 code span 定界反引号转成 muted 高亮），故此处不再有 ZWSP 占位。
     const padded = padCell(cell, width, align);
     const styled = header ? style.header(padded) : padded;
-    return ` ${styled} │`;
+    return ` ${styled} ${glyphs.v}`;
   });
-  return `│${parts.join("")}`;
+  return `${glyphs.v}${parts.join("")}`;
 }
 
 /**
@@ -442,7 +462,9 @@ export function renderBoxTable(
   table: ParsedTable,
   width: number,
   style: TableStyle,
+  charset: TuiBoxCharset = resolveBoxCharset(),
 ): string {
+  const glyphs = boxGlyphs(charset);
   const colCount = table.headers.length;
   const widths = computeColumnWidths(table.headers, table.rows, width);
 
@@ -462,7 +484,7 @@ export function renderBoxTable(
   );
 
   const lines: string[] = [];
-  lines.push(boxLine("┌", "┬", "┐", widths));
+  lines.push(boxLine(glyphs, glyphs.tl, glyphs.tm, glyphs.tr, widths));
   for (let r = 0; r < headerDisplayRows; r += 1) {
     lines.push(
       dataRow(
@@ -471,14 +493,15 @@ export function renderBoxTable(
         widths,
         style,
         true,
+        glyphs,
       ),
     );
   }
-  lines.push(boxLine("├", "┼", "┤", widths));
+  lines.push(boxLine(glyphs, glyphs.ml, glyphs.mm, glyphs.mr, widths));
   const hasMultiLineRecord = bodyDisplayRows.some((rows) => rows > 1);
   bodyGrids.forEach((_, rec) => {
     if (hasMultiLineRecord && rec > 0) {
-      lines.push(boxLine("├", "┼", "┤", widths));
+      lines.push(boxLine(glyphs, glyphs.ml, glyphs.mm, glyphs.mr, widths));
     }
     for (let r = 0; r < bodyDisplayRows[rec]; r += 1) {
       lines.push(
@@ -491,11 +514,12 @@ export function renderBoxTable(
           widths,
           style,
           false,
+          glyphs,
         ),
       );
     }
   });
-  lines.push(boxLine("└", "┴", "┘", widths));
+  lines.push(boxLine(glyphs, glyphs.bl, glyphs.bm, glyphs.br, widths));
   return lines.join("\n");
 }
 
@@ -568,6 +592,11 @@ export function renderMarkdownTable(
   if (width < 40 || table.headers.length > 6) {
     return renderRecordCards(styledTable, width, style);
   }
-  return renderBoxTable(styledTable, width, style);
+  return renderBoxTable(
+    styledTable,
+    width,
+    style,
+    options.boxCharset ?? resolveBoxCharset(),
+  );
 }
 

@@ -74,6 +74,34 @@
     padding: 0 !important;
     gap: 0 !important;
   }
+
+  /* railCompact：隐藏独立铃铛，通知入口合并到头像与账号菜单 */
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__bell {
+    display: none !important;
+  }
+
+  /* 头像未读角标：贴在头像右上角，沿用 Rail 区域的同色 token */
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__profile button {
+    position: relative;
+  }
+  div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__avatar-badge {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 8px;
+    background: var(--primary, #3b9cff);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+    text-align: center;
+    pointer-events: none;
+    box-shadow: 0 0 0 2px var(--backgroundSecondary, var(--background, #fff));
+  }
 }
 
 /* 隐藏 compact 独立 chevron 但保留普通形态。
@@ -93,4 +121,23 @@ div.SidebarUserSection.navigation-v2-rail-account .navigation-v2-rail-account__u
 .SidebarUserSection__dropdown--compact {
   border-radius: 6px !important;
   border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08)) !important;
+}
+
+/* 账号菜单里的通知入口未读数（railCompact 专用） */
+.topbar-user-menu__item--notification {
+  position: relative;
+}
+.topbar-user-menu__notification-count {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 9px;
+  background: var(--primary, #3b9cff);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
 }

@@ -7,6 +7,31 @@ import {
   RECOMMENDED_USER_SKILL_SLUGS,
   isUserSkillToggleable,
 } from "ai/skills/userSkills";
+// 平台核心规程（仓库改动隔离）：已由系统层前置承载，退出用户可选市场目录。
+import { WORKTREE_SKILL_SLUGS } from "ai/skills/worktreeSkill";
+
+/**
+ * 已上移为系统层前置、不再进技能市场的平台核心规程 slug。
+ *
+ * 这些条目仍留在 builtinSkillRegistry 里：`resolveBuiltinSkillEntry` /
+ * `resolveDirectorySkill`（slug / skillId / page-key）与 legacy 引用读取照旧命中，
+ * 只是不出现在市场目录、不可作为用户开关——规程由系统提示词无条件注入，
+ * 配置成 `disabled` 也关不掉（见 agent-runtime/worktreeIsolationPrelude）。
+ */
+export const PLATFORM_CORE_SKILL_SLUGS: readonly string[] = [
+  ...WORKTREE_SKILL_SLUGS,
+];
+
+const PLATFORM_CORE_SKILL_SLUG_SET: ReadonlySet<string> = new Set<string>(
+  PLATFORM_CORE_SKILL_SLUGS,
+);
+
+/** 该 slug 是否属于可出现在技能市场目录里的技能。 */
+export function isMarketListedSkill(slug: string | null | undefined): boolean {
+  const raw = typeof slug === "string" ? slug.trim() : "";
+  if (!raw) return false;
+  return !PLATFORM_CORE_SKILL_SLUG_SET.has(raw);
+}
 
 export type SkillDirectoryFilter = {
   query?: string;
@@ -198,13 +223,14 @@ export function getVisibleSkillDirectory(
   skills: readonly BuiltinSkillEntry[],
   query = "",
 ): readonly BuiltinSkillEntry[] {
+  const marketListed = skills.filter((entry) => isMarketListedSkill(entry.slug));
   const raw = query.trim();
   if (raw) {
-    return filterBuiltinSkills(skills, { query: raw });
+    return filterBuiltinSkills(marketListed, { query: raw });
   }
 
-  const collapsed = getCollapsedChildSlugs(skills);
-  return skills.filter((entry) => !collapsed.has(entry.slug));
+  const collapsed = getCollapsedChildSlugs(marketListed);
+  return marketListed.filter((entry) => !collapsed.has(entry.slug));
 }
 
 export { isUserSkillToggleable };

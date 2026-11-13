@@ -1,3 +1,4 @@
+import { projectContextProvenance } from "../../agent-runtime/providerCallTelemetry";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -93,6 +94,9 @@ export function projectTelemetryForAudit(
   }
   const t = record.telemetry;
   if (t && typeof t === "object") {
+    if (["completed", "failed", "cancelled"].includes(t.requestState as string)) out.requestState = t.requestState;
+    const provenance = projectContextProvenance(t.provenance);
+    if (provenance) out.provenance = provenance;
     for (const key of TELEMETRY_NUMERIC_KEYS) {
       const v = t[key];
       if (typeof v === "number" && Number.isFinite(v)) out[key] = v;
@@ -109,7 +113,7 @@ export function projectTelemetryForAudit(
 }
 
 export function resolveTurnBillingAuditLogPath(
-  env: { NOLO_HOME?: string } = process.env
+  env: { NOLO_HOME?: string } = { NOLO_HOME: process.env.NOLO_HOME }
 ): string {
   const noloHome = env.NOLO_HOME?.trim() || join(homedir(), ".nolo");
   return join(noloHome, "logs", "turn-billing.jsonl");
@@ -124,8 +128,9 @@ export function appendTurnBillingAudit(input: TurnBillingAuditInput): void {
     if (process.env.NOLO_TURN_BILLING_AUDIT === "0") return;
     const calls = (input.usageRecords ?? [])
       .map((record) => {
-        const usage = projectUsageForAudit(record?.usage);
-        if (!usage) return null;
+        const usage = record?.telemetry?.requestState && Object.keys(record.usage ?? {}).length === 0
+          ? null : projectUsageForAudit(record?.usage);
+        if (!usage && !record?.telemetry?.requestState) return null;
         return {
           ...(record?.callId ? { callId: record.callId } : {}),
           ...(record?.model ? { model: record.model } : {}),

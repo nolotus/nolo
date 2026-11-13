@@ -170,6 +170,9 @@ interface MyContentCollectionProps {
   showSearch?: boolean;
   activeTab?: ContentTab;
   onTabChange?: (tab: ContentTab) => void;
+  /** 受控搜索词（/apps 把搜索框放在页面头部，与「创建」同一行）。 */
+  searchQuery?: string;
+  onSearchQueryChange?: (value: string) => void;
 }
 
 const buildFallbackAgent = (item: MyContentListItem): Agent => ({
@@ -323,6 +326,8 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
   showSearch = false,
   activeTab: controlledActiveTab,
   onTabChange,
+  searchQuery: controlledSearchQuery,
+  onSearchQueryChange,
 }) => {
   const { t } = useTranslation();
   const { t: tSpace } = useTranslation("space");
@@ -336,7 +341,13 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
   const [internalActiveTab, setInternalActiveTab] = useState<ContentTab>(
     controlledActiveTab ?? "all",
   );
-  const [searchQuery, setSearchQuery] = useState("");
+  const [internalSearchQuery, setInternalSearchQuery] = useState("");
+  // 搜索词可受控（/apps 头部搜索框）或内部自管（其余页面的工具条搜索）。
+  const searchQuery = controlledSearchQuery ?? internalSearchQuery;
+  const handleSearchQueryChange = (value: string) => {
+    setInternalSearchQuery(value);
+    onSearchQueryChange?.(value);
+  };
   const [showAttachmentTabs, setShowAttachmentTabs] = useState(
     controlledActiveTab
       ? controlledActiveTab === "attachment" ||
@@ -680,7 +691,7 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
             <input
               type="search"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) => handleSearchQueryChange(event.target.value)}
               placeholder={tSpace("search_placeholder", "搜索内容...")}
               className="MyContentCollection__search-input"
             />
@@ -747,7 +758,9 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
         </div>
       ) : null}
 
-      {/* Row 2: primary tabs; attachment chips hang under without an extra "island" */}
+      {/* Row 2: primary tabs; attachment chips hang under without an extra "island".
+          /apps 是作品库：全类型筛选留在别的入口，这里不再常驻。 */}
+      {!isAppsManageView && (
       <Tabs
         selectedKey={isAttachmentTabActive ? "attachment_toggle" : activeTab}
         onSelectionChange={(key) => {
@@ -811,6 +824,7 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
           </div>
         </div>
       </Tabs>
+      )}
 
       <ConfirmModal
         isOpen={isBatchDeleteModalOpen}
@@ -853,7 +867,10 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
         <Virtualizer
           layout={GridLayout}
           layoutOptions={
-            // Image cards are taller (preview + title + meta). Undersized cells
+            // /apps 作品库：格子要大到能放下真实预览（大图 + 名称/可见性/时间）。
+            isAppsManageView
+              ? { minItemSize: new Size(320, 336), minSpace: new Size(16, 16) }
+              : // Image cards are taller (preview + title + meta). Undersized cells
             // recycle as "ghost" meta-only strips when selection rings change size.
             activeTab === "image" ||
             activeTab === "attachment" ||
@@ -928,6 +945,7 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
                   <AppCard
                     app={managedApp ?? item.app}
                     mode={isAppsManageView ? "manage" : "browse"}
+                    gallery={isAppsManageView}
                     contextLabel={
                       isAppsManageView
                         ? undefined

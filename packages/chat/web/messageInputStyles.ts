@@ -613,11 +613,51 @@ export const messageInputStyles = stylex.create({
     display: "flex",
     flexDirection: "column",
   },
+  /* 对话页输入行（Claude 式单行）：输入区在左，工具与发送在右同一行。
+     首页 quick-chat 不使用这个容器（它走 .quick-chat-box / chatInputCardStyles.card），
+     因此这里的改动只影响对话页输入框。 */
+  composerRow: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: "var(--space-2)",
+    width: "100%",
+    minWidth: 0,
+    "@media (max-width: 768px)": {
+      // 控件排不下时允许折行，不出现横向溢出。
+      flexWrap: "wrap",
+      rowGap: "var(--space-2)",
+    },
+  },
+
+  /* 单行输入：拖拽手柄贴在卡片顶边（覆盖式），不再独占一行高度。
+     只用于对话页（MessageInputCore），首页 quick-chat 继续用原 resizeHandle。 */
+  resizeHandleOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 8,
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    cursor: "ns-resize",
+    touchAction: "none",
+    zIndex: 3,
+  },
+
   controls: {
     display: "flex",
-    justifyContent: "space-between",
+    // 单行输入：两组控件并排靠右（上传/助手切换 + 麦克风/发送）。
+    justifyContent: "flex-end",
     alignItems: "center",
-    width: "100%",
+    gap: "var(--space-3)",
+    width: "auto",
+    flexShrink: 0,
+    "@media (max-width: 768px)": {
+      // 窄屏放不下时整组控件换到下一行，避免横向溢出。
+      width: "100%",
+      justifyContent: "space-between",
+    },
   },
   controlsLeft: {
     display: "flex",
@@ -860,6 +900,10 @@ export const messageInputStyles = stylex.create({
   },
   textarea: {
     flex: 1,
+    fieldSizing: "content",
+    height: "auto",
+    width: "100%",
+    minWidth: 0,
     minHeight: "24px",
     maxHeight: "360px",
     padding: "4px 0",

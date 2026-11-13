@@ -3,6 +3,12 @@ import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import { asNonEmptyStringArray } from "core/stringArray";
+import {
+  dialogIdFromKey,
+  isSupportedDialogId,
+  parseDialogPathIdentity,
+  splitDialogKeyIdentity,
+} from "core/dialogKeyIdentity";
 import { DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS } from "./dialogReadProjection";
 
 export const NOLO_WORKSPACE_TOOL_NAMES = [
@@ -68,9 +74,6 @@ const CLOSED_OBJECT_SCHEMA_TOOL_NAMES = new Set<string>([
   "cloud_probe",
   "cloud_exec",
 ]);
-const DIALOG_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
-const DIALOG_PATH_RE = /^\/(?:space\/([^/]+)\/)?dialog-(.+)-([0-9A-HJKMNP-TV-Z]{26})\/?$/i;
-
 function stringToolParam(description: string) {
   return { type: "string", description };
 }
@@ -256,34 +259,33 @@ export function clampNoloPositiveInteger(value: unknown, fallback: number, max =
 }
 
 export function getNoloDialogIdFromKey(dbKey: string) {
-  const index = dbKey.lastIndexOf("-");
-  return index >= 0 ? dbKey.slice(index + 1) : dbKey;
+  return dialogIdFromKey(dbKey);
 }
 
 export function resolveNoloDialogInput(rawInput: string, userId: string) {
   const raw = rawInput.trim();
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
     const url = new URL(raw);
-    const match = url.pathname.match(DIALOG_PATH_RE);
-    if (!match) throw new Error(`Unsupported dialog URL path: ${url.pathname}`);
-    const [, spaceId, ownerId, dialogId] = match;
+    const identity = parseDialogPathIdentity(url.pathname);
+    if (!identity) throw new Error(`Unsupported dialog URL path: ${url.pathname}`);
     return {
-      dbKey: `dialog-${ownerId}-${dialogId}`,
-      dialogId,
-      ownerId,
-      spaceId: spaceId ? decodeURIComponent(spaceId) : null,
+      dbKey: `dialog-${identity.ownerId}-${identity.dialogId}`,
+      dialogId: identity.dialogId,
+      ownerId: identity.ownerId,
+      spaceId: identity.spaceId,
     };
   }
   if (raw.startsWith("dialog-")) {
-    const dialogId = getNoloDialogIdFromKey(raw);
+    const identity = splitDialogKeyIdentity(raw);
+    if (!identity) throw new Error(`Unsupported dialog key: ${raw}`);
     return {
       dbKey: raw,
-      dialogId,
-      ownerId: raw.slice("dialog-".length, Math.max("dialog-".length, raw.length - dialogId.length - 1)),
+      dialogId: identity.dialogId,
+      ownerId: identity.userId,
       spaceId: null,
     };
   }
-  if (!DIALOG_ID_RE.test(raw)) {
+  if (!isSupportedDialogId(raw)) {
     throw new Error(`Unsupported dialog id: ${raw}`);
   }
   return {

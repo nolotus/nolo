@@ -26,6 +26,7 @@ import { VERIFY_BEFORE_CONCLUDING_RULE } from "../../agent-runtime/verifyBeforeC
 import { DISPATCH_BACKEND_POLICY } from "../../agent-runtime/dispatchBackendPolicy";
 import { DISPATCH_CANDIDATE_POLICY } from "../../agent-runtime/dispatchCandidatePolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "../../agent-runtime/platformRiskControl";
+import { WORKTREE_ISOLATION_PRELUDE } from "../../agent-runtime/worktreeIsolationPrelude";
 import { buildConsultationModeBlock } from "../../agent-runtime/consultationMode";
 import {
   resolveResponseGuidelines,
@@ -156,6 +157,8 @@ export function buildCliEstimateSystemText(
     DISPATCH_CANDIDATE_POLICY,
     PLATFORM_RISK_CONTROL_RULE,
     buildConsultationModeBlock(),
+    // Git 任务隔离：与实际装配同集合、同序（请教模式之后、身份信息之前）。
+    WORKTREE_ISOLATION_PRELUDE,
     prompt,
     opts.userLanguage?.trim()
       ? buildUserResponseLanguageContext({ language: opts.userLanguage })

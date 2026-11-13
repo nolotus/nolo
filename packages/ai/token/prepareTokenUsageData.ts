@@ -1,6 +1,10 @@
 import { extractUserId } from "core/prefix";
 import { isBuiltinPlatformAgentKey } from "core/builtinAgents";
 import { calculatePrice } from "./calculatePrice";
+import {
+  hasUsableCatalogPrice,
+  isTrustedPlatformBillingIdentity,
+} from "./platformBillingGate";
 import { normalizeUsage } from "./normalizeUsage";
 import { resolveBillingTarget } from "./resolveBillingTarget";
 import type { EntryPath, RawUsage, TokenUsageData } from "./types";
@@ -8,6 +12,28 @@ import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
 import { LOCAL_USER_ID } from "./usageConstants";
 
 type SharingLevel = "default" | "split" | "full";
+
+/**
+ * 「计费目标查不到平台目录价 → 回落到 agent 自身身份」的告警去重表。
+ * 同一组映射只告警一次（否则每次调用都会刷一条，掩盖真正的新映射）。
+ */
+const warnedBillingTargetFallbacks = new Set<string>();
+
+function warnBillingTargetFallbackOnce(args: {
+  billedProvider?: string;
+  billedModel: string;
+  fallbackProvider: string;
+  fallbackModel: string;
+}): void {
+  const key = `${args.billedProvider ?? "?"}|${args.billedModel}->${args.fallbackProvider}|${args.fallbackModel}`;
+  if (warnedBillingTargetFallbacks.has(key)) return;
+  warnedBillingTargetFallbacks.add(key);
+  console.warn(
+    `[billing] billed target has no catalog price (provider=${args.billedProvider ?? "?"} model=${args.billedModel}); ` +
+      `falling back to agent identity (provider=${args.fallbackProvider} model=${args.fallbackModel}). ` +
+      "Fix the upstream billing alias — platform charges must never resolve to 0.",
+  );
+}
 
 export interface BillingAgentConfig {
   model: string;
@@ -106,6 +132,75 @@ export function resolveTokenUsagePricing(args: {
     sharingLevel: agentConfig.sharingLevel,
     nowMs,
   });
+
+  /**
+   * 平台计费目标查不到目录价时的兜底（2026-11-04 失效模式）。
+   *
+   * usage 里的 `billing_provider` / `billing_model` 是「实际上游」自报的身份，平台托管
+   * 上游会给出不属于平台目录的别名——例如 Cloudflare Claude 路由对外宣称
+   * `usageProvider: "cloudflare"` + `upstreamModelId: "anthropic/claude-sonnet-5.5"`。
+   * 一旦这组别名进了计费目标，`calculatePrice` 在平台目录里查不到价 → cost 0 →
+   * billable=false → **该调用永久免费**，而且没有任何告警。
+   *
+   * 两个闸门都必须精确：
+   * - 身份：与 resolveBillingTarget 同一套「可信平台身份」（apiSource=platform **或**
+   *   代码内置 agent 身份）。catalog 条目普遍不声明 apiSource，只看 apiSource 会让
+   *   这批内置平台 agent 漏掉兜底（review HIGH-1）。
+   * - 触发条件：只认「计费目标在目录里算不出钱」（缺条目，或条目价全是 0 的
+   *   零价幽灵条目），不认「这次算出来恰好是 0」——那会把有意免费的模型改收费
+   *   （review M-2）。而 agent 自身身份与计费目标一致时永不兜底，所以「平台有意
+   *   免费且无别名」的模型不受影响。
+   */
+  const agentIdentityModel =
+    typeof agentConfig.model === "string" ? agentConfig.model.trim() : "";
+  const agentIdentityProvider =
+    typeof agentConfig.provider === "string" && agentConfig.provider.trim()
+      ? agentConfig.provider.trim()
+      : undefined;
+  const isTrustedPlatformIdentity = isTrustedPlatformBillingIdentity({
+    provider: agentIdentityProvider,
+    model: agentIdentityModel,
+    apiSource: agentConfig.apiSource,
+    agentId: canonicalAgentId,
+  });
+  const sameTarget =
+    agentIdentityProvider === billedProvider && agentIdentityModel === billedModel;
+  if (
+    isTrustedPlatformIdentity &&
+    !hasUsableCatalogPrice(billedProvider, billedModel) &&
+    agentIdentityModel &&
+    !sameTarget &&
+    hasUsableCatalogPrice(agentIdentityProvider, agentIdentityModel)
+  ) {
+    const agentProvider = agentIdentityProvider;
+    const agentModel = agentIdentityModel;
+    const fallbackPrice = calculatePrice({
+      provider: agentProvider,
+      modelName: agentModel,
+      billingServiceTier: billedServiceTier,
+      usage,
+      externalPrice: undefined,
+      sharingLevel: agentConfig.sharingLevel,
+      nowMs,
+    });
+    if (typeof fallbackPrice.cost === "number" && fallbackPrice.cost > 0) {
+      warnBillingTargetFallbackOnce({
+        billedProvider,
+        billedModel,
+        fallbackProvider: agentProvider ?? "",
+        fallbackModel: agentModel,
+      });
+      return {
+        usage,
+        billedProvider: agentProvider,
+        billedModel: agentModel,
+        billedServiceTier,
+        cost: fallbackPrice.cost,
+        pay: fallbackPrice.pay,
+        hasExternalPrice,
+      };
+    }
+  }
 
   return {
     usage,

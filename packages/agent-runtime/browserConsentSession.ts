@@ -150,7 +150,7 @@ export class BrowserConsentSession {
           decision: result.decision,
           allowCandidate: result.allowCandidate,
           calibrated: result.calibrated,
-          confidence: result.confidence,
+          confidence: result.probabilities.intentConfidence,
           reasons: result.reasons,
           evidenceOnly: result.evidenceOnly,
         };

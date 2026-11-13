@@ -20,6 +20,8 @@ interface BodyData {
 }
 
 interface FetchParams {
+  /** Compact callers need the original timeout/cancellation/provider fields. */
+  preserveStructuredError?: boolean;
     agentConfig: Agent;
     api: string;
     bodyData: BodyData;
@@ -319,6 +321,7 @@ export const performFetchRequest = async (
             : await fetchDirectly(params);
     } catch (error: any) {
         console.error("[performFetchRequest] 请求过程中发生错误:", error);
+        if (params.preserveStructuredError) throw error;
         const friendlyMsg = formatFriendlyNetworkErrorMessage(error);
         throw new Error(
             friendlyMsg.startsWith("网络请求失败")

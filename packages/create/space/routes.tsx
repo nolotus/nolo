@@ -1,6 +1,7 @@
 // routes/space.tsx
 import React, { Suspense } from "react";
-import { useLocation } from "app/routing";
+import { Navigate, useLocation, useParams } from "app/routing";
+import { AppRoutePaths } from "app/constants/routePaths";
 import PageLoading from "render/web/ui/PageLoading";
 import PageContentErrorBoundary from "render/layout/PageContentErrorBoundary";
 import { lazyWithTimeout } from "web/lazyWithTimeout";
@@ -35,12 +36,33 @@ const withSuspense = (element: React.ReactNode) => (
   </RouteErrorBoundary>
 );
 
+// 空间首页 = 空间对话首页，不再承载内容浏览器：/space/:id 直接复用既有的
+// 空间对话页 /chat?spaceId=...（同一份聊天页面，不另造第二套）。原来的内容
+// 浏览（成员/设置/附件/AI/筛选等能力原样保留）搬到 /space/:id/contents。
+const SpaceHomeRedirect: React.FC = () => {
+  const { spaceId } = useParams<"spaceId">();
+  if (!spaceId) return <PageLoading message="加载中..." />;
+  return (
+    <Navigate
+      to={`${AppRoutePaths.CHAT}?spaceId=${encodeURIComponent(spaceId)}`}
+      replace
+    />
+  );
+};
+
 export const spaceRoutes = {
   path: "/space/:spaceId",
   element: withSuspense(<SpaceLayout />),
   children: [
     {
       index: true,
+      element: withSuspense(<SpaceHomeRedirect />),
+    },
+    {
+      // 全部内容：原 SpaceContent 的独立落点。静态段优先于下面的 :pageKey，
+      // 而真实内容 key 都以 dialog/page/app-/agent/meta-/file/image/task 开头，
+      // 不会被这里吞掉。
+      path: "contents",
       element: withSuspense(<SpaceContent />),
     },
     {

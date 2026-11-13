@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 import type { RouteObject, Location as RouterLocation } from "app/routing";
 import { useRoutes, useLocation } from "app/routing";
 import { MyToastRegion as Toaster } from "render/web/ui/Toast";
+import DesktopActionGateDialog from "app/components/DesktopActionGateDialog";
 
 import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
 import { isCloudEdition, useIdentity } from "identity";
@@ -315,6 +316,8 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
       <GlobalThemeController />
       <GlobalBaseStyles />
       <Toaster />
+      {/* Block 3b: desktop action gate panel — renders only while a gate is pending. */}
+      <DesktopActionGateDialog />
 
       {/* 背景主内容 */}
       {mainElement}

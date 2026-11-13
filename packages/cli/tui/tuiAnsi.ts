@@ -5,6 +5,7 @@
  * i18n 的 locale（displayWidth 对 CJK 全角引号按 locale 判宽度）。
  */
 import { getCliLocale } from "./i18n";
+import { detectWindowsTerminalAmbiguousWidth } from "./wtAmbiguousWidth";
 import ansiRegex from "ansi-regex";
 import stringWidth from "string-width";
 
@@ -124,15 +125,23 @@ export function applyTerminalOutputToText(existing: string, chunk: string): stri
 
 /**
  * East Asian Ambiguous（EA=A）宽度约定。
- * - narrow（默认）：符号一律按 1 列（纯 stringWidth 结果），适合 VSCode(unicode11)/iTerm2 等现代默认终端；
- * - wide：符号强制按 2 列计宽，适合 CJK 字体终端或 ambiguous=double 设置。
+ * - narrow（默认）：EA=A 一律按 1 列（纯 stringWidth 结果），适合 VSCode(unicode11)/iTerm2/
+ *   Windows Terminal（compatibility.ambiguousWidth 默认 narrow）等现代默认终端；
+ * - wide：EA=A 按完整 Unicode EA 表计 2 列（框线、几何符号、×、→、… 均含），
+ *   并额外把 CJK 字体渲染成全宽的杂项符号（★ ☑ 等）按 2 列，适合 CJK 字体终端或
+ *   ambiguous=double 设置。
  */
 export type TuiAmbiguousWidth = "narrow" | "wide";
 
 /**
  * 解析 EA=A 宽度约定：
- * 显式参数 > env NOLO_TUI_AMBIGUOUS_WIDTH > 默认 "narrow"。
- * 大小写不敏感，非法值静默回退默认 "narrow"。
+ * 显式参数 > env NOLO_TUI_AMBIGUOUS_WIDTH > Windows 上读 Windows Terminal
+ * 的 `compatibility.ambiguousWidth`（方案见 wtAmbiguousWidth.ts）> 默认 "narrow"。
+ * 大小写不敏感，非法值跳过该层继续往下判定。
+ *
+ * WT 一侧的策略只影响终端自己的渲染与 conhost 记账，不会告诉我们，
+ * 所以用户在 WT 里设了 wide 而我们不读配置的话，每个 EA=A 字符都会少算 1 列，
+ * 表格竖线逐列漂移。
  */
 export function resolveAmbiguousWidth(
   explicit?: TuiAmbiguousWidth,
@@ -145,43 +154,42 @@ export function resolveAmbiguousWidth(
     if (trimmed === "wide") return "wide";
     if (trimmed === "narrow") return "narrow";
   }
-  return "narrow";
+  return detectedWindowsTerminalAmbiguousWidth() ?? "narrow";
+}
+
+/** 进程内只探测一次：displayWidth 是热路径，不能每次去读 settings.json。 */
+let wtAmbiguousWidthCache: TuiAmbiguousWidth | null | undefined;
+
+function detectedWindowsTerminalAmbiguousWidth(): TuiAmbiguousWidth | null {
+  if (wtAmbiguousWidthCache === undefined) {
+    wtAmbiguousWidthCache = detectWindowsTerminalAmbiguousWidth();
+  }
+  return wtAmbiguousWidthCache;
+}
+
+/** 测试专用：清空 WT 策略探测缓存（非 Windows 上恒为 null）。 */
+export function __resetWtAmbiguousWidthCacheForTest(): void {
+  wtAmbiguousWidthCache = undefined;
 }
 
 /**
- * East Asian Ambiguous（EA=A）常见符号：stringWidth 按 1 列计，但在 wide 约定下按 2 列计宽。
- * 覆盖：
- * - 箭头：0x2190-0x2195 (←↑→↓↔↕), 0x21D0, 0x21D2, 0x21D4 (⇐⇒⇔)
- * - 数学与标点：0x00D7 (×), 0x00F7 (÷), 0x00B1 (±), 0x2022 (•), 0x00B7 (·)
- * - 补全 wide 名单：
- *   - 0x00B0 (°), 0x2103 (℃)
- *   - 0x2010-0x2015 (— – ‐ ‑ ‒ ―)
- *   - 0x2460-0x24FF (①②④⑤ 圈数字/括号序号等)
- *   - 0x231A-0x231B, 0x23E9-0x23FA (⏳⏰⏱⏸⏹ 等杂项技术符号)
+ * CJK 字体额外按全宽渲染的「杂项符号」区间：这些码点在 Unicode EA 表里是
+ * Neutral（不是 Ambiguous），wcwidth 与 string-width 都按 1 列算，但 CJK
+ * 字体（宋体、MS Gothic、更纱黑体等）常把它们画成全宽。wide 约定下额外 +1 补齐。
+ *
+ * 排除 0x2768-0x2775（❨❩❪❫ 类括号）：CJK 字体对它们仍按窄渲染。
+ *
+ * EA=A 的主体不在这里——那部分交给 string-width 的 ambiguousIsNarrow:false
+ * 用完整 EA 表处理（见 displayWidth 的决策记录）。手写区间表曾漏掉整块框线
+ * （U+2500-257F）、几何符号（U+25A0-25FF）与 U+2026，wide 约定下永远修不好。
  */
-function isAmbiguousWideSymbolCode(code: number): boolean {
-  return (
-    (code >= 0x2190 && code <= 0x2195) || // ←↑→↓↔↕
-    code === 0x21d0 || code === 0x21d2 || code === 0x21d4 || // ⇐⇒⇔
-    code === 0x00d7 || code === 0x00f7 || code === 0x00b1 || // ×÷±
-    code === 0x2022 || code === 0x00b7 || // • ·
-    code === 0x00b0 || code === 0x2103 || // ° ℃
-    (code >= 0x2010 && code <= 0x2015) || // ‐‑‒–—―
-    (code >= 0x2460 && code <= 0x24ff) || // ①②④⑤ 圈数字/括号序号
-    code === 0x231a || code === 0x231b || // ⌚ ⌛
-    (code >= 0x23e9 && code <= 0x23fa) // ⏳⏰⏱⏸⏹ 等
-  );
-}
-
-/**
- * 命中区间首码点判断：需要强制加宽的杂项符号 / emoji 区间。
- */
-function isForceWideSymbolCode(code: number): boolean {
+function isCjkFontWideSymbolCode(code: number): boolean {
   return (
     (code >= 0x2600 && code <= 0x27bf && !(code >= 0x2768 && code <= 0x2775)) ||
     (code >= 0x2b00 && code <= 0x2bff) ||
     (code >= 0x1f300 && code <= 0x1faff) ||
-    isAmbiguousWideSymbolCode(code)
+    (code >= 0x231a && code <= 0x231b) || // ⌚ ⌛
+    (code >= 0x23e9 && code <= 0x23fa) // ⏱⏸⏹ 等杂项技术符号（⏳⏰ 本身已是 EA=Wide，靠下面的复核去重）
   );
 }
 
@@ -191,18 +199,98 @@ function isCjkQuoteCode(code: number): boolean {
 }
 
 /**
+ * 框线字符集。unicode 用制表符（好看），ascii 用 `+ - |`。
+ *
+ * 为什么需要 ascii：制表符（U+2500-257F）是 EA=A，wide 约定下每个占 2 列，
+ * 而框线行的补格是用 `str.repeat(n)` 按**字符数**补的——`"─".repeat(5)` 是
+ * 10 格，表格内容行却按 displayWidth 补到 5 格，两张宽度体系对不上，表格必炸。
+ * ASCII 的 `+ - |` 在任何等宽字体下都是 1 格，是唯一能保证列对齐的框线。
+ * 故 wide 约定下自动切 ascii；`NOLO_TUI_BOX` 可显式覆盖。
+ */
+export type TuiBoxCharset = "ascii" | "unicode";
+
+export interface TuiBoxGlyphs {
+  h: string;
+  v: string;
+  tl: string;
+  tm: string;
+  tr: string;
+  ml: string;
+  mm: string;
+  mr: string;
+  bl: string;
+  bm: string;
+  br: string;
+}
+
+const UNICODE_BOX_GLYPHS: TuiBoxGlyphs = {
+  h: "─",
+  v: "│",
+  tl: "┌",
+  tm: "┬",
+  tr: "┐",
+  ml: "├",
+  mm: "┼",
+  mr: "┤",
+  bl: "└",
+  bm: "┴",
+  br: "┘",
+};
+
+const ASCII_BOX_GLYPHS: TuiBoxGlyphs = {
+  h: "-",
+  v: "|",
+  tl: "+",
+  tm: "+",
+  tr: "+",
+  ml: "+",
+  mm: "+",
+  mr: "+",
+  bl: "+",
+  bm: "+",
+  br: "+",
+};
+
+/**
+ * 解析框线字符集：显式参数 > env NOLO_TUI_BOX（ascii|unicode）> 宽度约定推导。
+ * wide 约定下推导为 ascii（理由见 TuiBoxCharset 注释），narrow 下保持 unicode。
+ */
+export function resolveBoxCharset(
+  ambiguousWidth: TuiAmbiguousWidth = resolveAmbiguousWidth(),
+  env: Record<string, string | undefined> = process.env,
+): TuiBoxCharset {
+  const raw = env.NOLO_TUI_BOX;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim().toLowerCase();
+    if (trimmed === "ascii") return "ascii";
+    if (trimmed === "unicode") return "unicode";
+  }
+  return ambiguousWidth === "wide" ? "ascii" : "unicode";
+}
+
+export function boxGlyphs(charset: TuiBoxCharset): TuiBoxGlyphs {
+  return charset === "ascii" ? ASCII_BOX_GLYPHS : UNICODE_BOX_GLYPHS;
+}
+
+/**
  * 单次遍历判定一行是否需要慢路径与是否命中加宽区间。
  *
  *  - hasNonAscii：是否存在非 ASCII 码点。
- *  - hasCandidate：是否存在可能触发强制加宽的码点。
- *    narrow 下符号区间不算 candidate（避免白跑慢路径），zh 引号 candidate 保留；
- *    wide 下 isForceWideSymbolCode 命中的符号算 candidate。
+ *  - hasCandidate：是否存在只有慢路径才能补宽的码点。
+ *    EA=A 不在此列（string-width 的 ambiguousIsNarrow:false 一次搞定，无需逐 cluster 复核）；
+ *    只有 CJK 字体加宽的杂项符号（wide 下）与 zh 全角引号需要逐 cluster +1。
  *
  * 【决策记录 · EA=A 宽度约定】
- * 默认 narrow 的依据：string-width、VSCode(unicode11)、iTerm2 等主流终端默认均按窄（1 列）渲染；
- * 若强制按 2 列计宽会导致 padCell 过 pad（终端实际渲染窄于计宽），进而导致表格竖线向左移位、逐列累加错位。
+ * 默认 narrow 的依据：string-width、VSCode(unicode11)、iTerm2、Windows Terminal
+ * （`compatibility.ambiguousWidth` 默认 narrow，实测见 microsoft/terminal#19864）
+ * 等主流终端默认均按窄（1 列）渲染；若强制按 2 列计宽会导致 padCell 过 pad
+ * （终端实际渲染窄于计宽），进而导致表格竖线向左移位、逐列累加错位。
  * 故宽度约定必须与终端一致，默认采用 narrow，并支持通过 NOLO_TUI_AMBIGUOUS_WIDTH=wide
  * 在 CJK 字体终端或 ambiguous=double 设置下开启宽渲染。
+ *
+ * wide 的 EA=A 判定委托给 string-width（`ambiguousIsNarrow: false` → 内部用
+ * get-east-asian-width 的完整 EA 表），不再手写码点区间：手写表会持续落后于
+ * Unicode，且曾漏掉框线/几何符号/省略号——那正是「开了 wide 竖线仍漂移」的成因。
  * zh locale 下的 CJK 全角引号（“”‘’）加宽行为独立于 EA=A 约定保持不变。
  */
 function scanWidthNeeds(
@@ -215,10 +303,6 @@ function scanWidthNeeds(
 
   for (let i = 0; i < plain.length; i++) {
     const cc = plain.charCodeAt(i);
-    // EA=A 符号部分在 U+2000 之下（如 ×÷±·°）。
-    if (isWideMode && isAmbiguousWideSymbolCode(cc)) {
-      return { hasNonAscii: true, hasCandidate: true };
-    }
     if (cc < 0x2000) {
       if (cc >= 0x80) hasNonAscii = true;
       continue;
@@ -232,7 +316,7 @@ function scanWidthNeeds(
         i += 1;
       }
     }
-    const isSymbolCandidate = isWideMode && isForceWideSymbolCode(code);
+    const isSymbolCandidate = isWideMode && isCjkFontWideSymbolCode(code);
     const isQuoteCandidate = locale === "zh" && isCjkQuoteCode(code);
     if (isSymbolCandidate || isQuoteCandidate) {
       return { hasNonAscii: true, hasCandidate: true };
@@ -268,13 +352,16 @@ export function displayWidth(
 ): number {
   const plain = stripAnsi(str);
   const locale = getCliLocale();
+  // EA=A 的宽度约定交给 string-width 的完整 EA 表：wide 时 ambiguousIsNarrow
+  // 关闭 → 框线(U+2500-257F)、几何符号(U+25A0-25FF)、×、→、…、圈数字等全部按 2 列。
+  const widthOptions = { ambiguousIsNarrow: ambiguousWidth !== "wide" };
 
-  // 单次廉价扫描：判定是否需要缓存（含非 ASCII）以及是否命中加宽区间。
+  // 单次廉价扫描：判定是否需要缓存（含非 ASCII）以及是否命中慢路径区间。
   const needs = scanWidthNeeds(plain, locale, ambiguousWidth);
 
   // 快路径：纯 ASCII 行绝无命中区间码点，直接返回，不缓存。
   if (!needs.hasNonAscii) {
-    return stringWidth(plain);
+    return stringWidth(plain, widthOptions);
   }
 
   // 非 ASCII 行：绝大多数调用方是重复渲染同一行内容（反复重绘同一可视窗口），
@@ -284,37 +371,35 @@ export function displayWidth(
   const cached = displayWidthCache.get(key);
   if (cached !== undefined) return cached;
 
-  const base = stringWidth(plain);
-
-  // 含非 ASCII 但不含命中区间码点的行（中文/日文等）：与逐 cluster 扫描结果一致，直接返回并缓存。
-  if (!needs.hasCandidate) {
+  const remember = (width: number): number => {
     if (displayWidthCache.size >= DISPLAY_WIDTH_CACHE_MAX) {
       const eldest = displayWidthCache.keys().next().value as string | undefined;
       if (eldest !== undefined) displayWidthCache.delete(eldest);
     }
-    displayWidthCache.set(key, base);
-    return base;
+    displayWidthCache.set(key, width);
+    return width;
+  };
+
+  const base = stringWidth(plain, widthOptions);
+
+  // 含非 ASCII 但不含慢路径码点的行（中文/日文等）：与逐 cluster 扫描结果一致，直接返回并缓存。
+  if (!needs.hasCandidate) {
+    return remember(base);
   }
 
-  // 慢路径：仅在码点落入命中区间时才调 stringWidth 校验。
-  // narrow 下仅 zh 引号加宽；wide 下符号与 zh 引号加宽。
+  // 慢路径：只有 CJK 字体加宽的杂项符号（wide）与 zh 全角引号需要逐 cluster +1。
+  // 复核宽度时用同一个 options，避免与 EA=A 的加宽重复叠加（★ 已是 2 列，不再 +1）。
   let width = base;
   const isWideMode = ambiguousWidth === "wide";
   for (const { segment } of graphemeSegmenter.segment(plain)) {
     const code = segment.codePointAt(0) ?? 0;
-    const isSymbol = isWideMode && isForceWideSymbolCode(code);
+    const isSymbol = isWideMode && isCjkFontWideSymbolCode(code);
     const isQuote = locale === "zh" && isCjkQuoteCode(code);
     if (isSymbol || isQuote) {
-      if (stringWidth(segment) === 1) width += 1;
+      if (stringWidth(segment, widthOptions) === 1) width += 1;
     }
   }
-
-  if (displayWidthCache.size >= DISPLAY_WIDTH_CACHE_MAX) {
-    const eldest = displayWidthCache.keys().next().value as string | undefined;
-    if (eldest !== undefined) displayWidthCache.delete(eldest);
-  }
-  displayWidthCache.set(key, width);
-  return width;
+  return remember(width);
 }
 
 /** Visible columns after stripping ANSI (status lines, borders, chips). */

@@ -2,7 +2,7 @@
    - Toggle button is permanently mounted at the top slot of NavigationRail.
    - Slot position & height remain identical across expanded/collapsed states (no jump).
    - Context content area does not render toggle buttons.
-   - Smooth 180-220ms decelerated transition on sidebar width (no 380ms squash).
+   - Smooth 260ms decelerated transition on sidebar width (no 380ms squash).
    - Context renders at a stable fixed width and is clipped (overflow: hidden), avoiding text re-wrapping per frame.
    - Rail stays fixed (52px) and unmoved throughout the transition.
 */
@@ -72,6 +72,17 @@
   opacity: 1;
 }
 
+/* 侧边栏展开时直接显示「收起」箭头，不再靠 hover 才暴露：
+   静置的品牌 logo 会让人以为那只是个标识，找不到收起入口（2026-11-04 用户反馈）。
+   折叠态仍保持 logo 静置 + hover 出展开箭头。 */
+.navigation-v2-shell.is-expanded .sidebar-context-toggle__logo {
+  opacity: 0;
+}
+
+.navigation-v2-shell.is-expanded .sidebar-context-toggle__glyph {
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar-context-toggle__logo,
   .sidebar-context-toggle__glyph {
@@ -80,13 +91,16 @@
 }
 
 @media (min-width: 769px) {
-  /* 侧栏宽度平滑减速过渡：约 200ms cubic-bezier(0, 0, 0.2, 1) */
+  /* 侧栏宽度平滑减速过渡：260ms cubic-bezier(0.4, 0, 0.2, 1)
+     —— 实测 16ms 仅走 0.6% 行程、速度峰值在 64ms，起步柔和无迟滞；
+     之前的 (0.32, 0.72, 0, 1) 首帧仍偏冲（16ms 已走 9.3%），
+     (0.76, 0, 0.24, 1) 前 64ms 仅 2.7%、会有「顿一下」观感，故不取 */
   /* Specificity must beat layout.css's `.MainLayout__sidebar` shorthand
      (same specificity, later in the bundle) — otherwise the legacy
-     `--sidebar-slide-duration` transition wins and the 200ms curve never
+     `--sidebar-slide-duration` transition wins and the 260ms curve never
      applies. */
   .MainLayout .MainLayout__sidebar--has-rail {
-    transition: width 200ms cubic-bezier(0, 0, 0.2, 1) !important;
+    transition: width 260ms cubic-bezier(0.4, 0, 0.2, 1) !important;
     will-change: width;
     overflow: hidden;
   }
@@ -107,7 +121,9 @@
 
   /* 动效减弱偏好 */
   @media (prefers-reduced-motion: reduce) {
-    .MainLayout__sidebar--has-rail {
+    /* 必须与上方动画规则同特异性（.MainLayout 前缀，0,2,0），否则同是
+       !important 时会被更具体的 width 过渡规则压过，禁用不生效 */
+    .MainLayout .MainLayout__sidebar--has-rail {
       transition: none !important;
     }
   }
@@ -156,6 +172,32 @@
   /* 动画完全结束后处于折叠状态时隐藏 context */
   .MainLayout__sidebar--rail-only:not(.is-transitioning) .navigation-v2-context {
     display: none !important;
+  }
+
+  /* 内容淡出/淡入：宽度裁剪边缘仍是硬切，加 opacity 过渡柔化。
+     不动下面的固定宽度逻辑——那是防逐帧换行的关键。
+     注意：.navigation-v2-context 同时挂 StyleX 的 chatSidebar 原子类
+     （见 packages/chat/web/sidebarStyles.ts），该原子类不声明 opacity/transition，
+     所以这里的普通 CSS 生效；将来 StyleX 若声明了这两个属性，规则须搬进 StyleX。 */
+  .MainLayout__sidebar--has-rail .navigation-v2-context {
+    opacity: 1;
+  }
+
+  /* 展开方向：内容 140ms ease-out 同步淡入（无延迟，避免「先滑空白再浮现」） */
+  .MainLayout__sidebar--has-rail:not(.MainLayout__sidebar--rail-only) .navigation-v2-context {
+    transition: opacity 140ms ease-out;
+  }
+
+  /* 收起方向：内容先 120ms ease-in 淡出，避免被裁剪边缘硬切 */
+  .MainLayout__sidebar--has-rail.MainLayout__sidebar--rail-only .navigation-v2-context {
+    opacity: 0;
+    transition: opacity 120ms ease-in;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .MainLayout__sidebar--has-rail .navigation-v2-context {
+      transition: none !important;
+    }
   }
 }
 

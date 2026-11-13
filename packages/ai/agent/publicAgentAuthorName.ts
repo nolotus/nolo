@@ -86,7 +86,7 @@ export async function readAuthorNameSnapshot(
 export function withAuthorNameSnapshot<T extends Record<string, unknown>>(
   record: T,
   authorName: string | undefined,
-): T {
+): T & { [AUTHOR_NAME_FIELD]?: string } {
   const name = asOptionalTrimmedString(authorName);
   if (!name) return record;
   return { ...record, [AUTHOR_NAME_FIELD]: name };

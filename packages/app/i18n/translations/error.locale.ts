@@ -243,4 +243,124 @@ export default {
       },
     },
   },
+  de: {
+    translation: {
+      // Authentifizierungsfehler
+      invalidCredentials: "Ungültiger Benutzername oder ungültiges Passwort",
+      userNotFound: "Benutzer nicht gefunden",
+      accountLocked: "Konto wurde gesperrt",
+      tooManyAttempts: "Zu viele Anmeldeversuche. Bitte versuchen Sie es später erneut",
+      sessionExpired: "Sitzung abgelaufen. Bitte melden Sie sich erneut an",
+
+      // Autorisierungsfehler
+      notAuthorized: "Keine Berechtigung zum Ausführen dieser Aktion",
+      invalidToken: "Ungültiges oder abgelaufenes Token",
+      insufficientPermissions: "Unzureichende Berechtigungen",
+
+      // Validierungsfehler
+      required: "Dieses Feld ist erforderlich",
+      invalidFormat: "Ungültiges Format",
+      validationError: "Validierung fehlgeschlagen",
+      passwordTooWeak: "Passwort ist zu schwach",
+      usernameTaken: "Benutzername ist bereits vergeben",
+      emailTaken: "E-Mail-Adresse ist bereits vergeben",
+
+      // Datenfehler
+      dataExists: "Daten mit der ID {{id}} sind bereits vorhanden",
+      dataNotFound: "Benutzerdaten wurden nicht gefunden",
+      duplicateEntry: "Doppelter Eintrag nicht zulässig",
+      missingFields: "Erforderliche Felder fehlen",
+      databaseError: "Datenbankfehler aufgetreten",
+      invalidUserData: "Ungültige Benutzerdaten",
+
+      // Dateifehler
+      fileNotFound: "Datei nicht gefunden",
+      uploadFailed: "Datei-Upload fehlgeschlagen",
+      invalidFileType: "Ungültiger Dateityp",
+      fileTooLarge: "Datei ist zu groß",
+
+      // Netzwerkfehler
+      networkError: "Netzwerkfehler. Bitte versuchen Sie es erneut",
+      serverError: "Serverfehler aufgetreten",
+      operationFailed: "Vorgang fehlgeschlagen",
+      timeoutError: "Zeitüberschreitung der Anforderung",
+      connectionError: "Verbindungsfehler",
+      errors: {
+        accountLocked: "Konto wurde gesperrt",
+        dataExists: "Daten mit der ID {{id}} sind bereits vorhanden",
+        dataNotFound: "Benutzerdaten wurden nicht gefunden",
+        databaseError: "Datenbankfehler aufgetreten",
+        internalServerError: "Interner Serverfehler",
+        invalidUserData: "Ungültige Benutzerdaten",
+        ipQuotaExceeded: "Zu viele Registrierungen aus diesem Netzwerk. Bitte versuchen Sie es später erneut.",
+        methodNotAllowed: "Methode nicht zulässig",
+        missingFields: "Erforderliche Felder fehlen",
+        requestBodyEmpty: "Anfragetext ist leer",
+        secretKeyMissing: "Geheimschlüssel fehlt",
+        tokenVerificationFailed: "Anmeldeüberprüfung fehlgeschlagen",
+        userNotFound: "Benutzer nicht gefunden",
+        wrongPassword: "Ungültiger Benutzername oder ungültiges Passwort",
+      },
+    },
+  },
+  es: {
+    translation: {
+      // Errores de autenticación
+      invalidCredentials: "Nombre de usuario o contraseña incorrectos",
+      userNotFound: "Usuario no encontrado",
+      accountLocked: "La cuenta ha sido bloqueada",
+      tooManyAttempts: "Demasiados intentos de inicio de sesión, inténtelo de nuevo más tarde",
+      sessionExpired: "La sesión ha caducado, inicie sesión de nuevo",
+
+      // Errores de autorización
+      notAuthorized: "No autorizado para realizar esta acción",
+      invalidToken: "Token no válido o caducado",
+      insufficientPermissions: "Permisos insuficientes",
+
+      // Errores de validación
+      required: "Este campo es obligatorio",
+      invalidFormat: "Formato no válido",
+      validationError: "Error de validación",
+      passwordTooWeak: "La contraseña es demasiado débil",
+      usernameTaken: "El nombre de usuario ya está en uso",
+      emailTaken: "El correo electrónico ya está en uso",
+
+      // Errores de datos
+      dataExists: "Ya existen datos con el ID {{id}}",
+      dataNotFound: "No se encontraron los datos del usuario",
+      duplicateEntry: "No se permiten entradas duplicadas",
+      missingFields: "Faltan campos obligatorios",
+      databaseError: "Se produjo un error en la base de datos",
+      invalidUserData: "Datos de usuario no válidos",
+
+      // Errores de archivos
+      fileNotFound: "Archivo no encontrado",
+      uploadFailed: "Error al subir el archivo",
+      invalidFileType: "Tipo de archivo no válido",
+      fileTooLarge: "El archivo es demasiado grande",
+
+      // Errores de red
+      networkError: "Error de red, inténtelo de nuevo",
+      serverError: "Se produjo un error en el servidor",
+      operationFailed: "Error en la operación",
+      timeoutError: "Tiempo de espera de la solicitud agotado",
+      connectionError: "Error de conexión",
+      errors: {
+        accountLocked: "La cuenta ha sido bloqueada",
+        dataExists: "Ya existen datos con el ID {{id}}",
+        dataNotFound: "No se encontraron los datos del usuario",
+        databaseError: "Se produjo un error en la base de datos",
+        internalServerError: "Error interno del servidor",
+        invalidUserData: "Datos de usuario no válidos",
+        ipQuotaExceeded: "Demasiados registros desde esta red. Inténtelo de nuevo más tarde.",
+        methodNotAllowed: "Método no permitido",
+        missingFields: "Faltan campos obligatorios",
+        requestBodyEmpty: "El cuerpo de la solicitud está vacío",
+        secretKeyMissing: "Falta la clave secreta",
+        tokenVerificationFailed: "Error en la verificación de inicio de sesión",
+        userNotFound: "Usuario no encontrado",
+        wrongPassword: "Nombre de usuario o contraseña incorrectos",
+      },
+    },
+  },
 };

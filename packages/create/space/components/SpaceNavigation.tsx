@@ -5,6 +5,7 @@ import {
   LuSettings,
   LuUsers,
   LuHouse,
+  LuLayoutGrid,
 } from "react-icons/lu";
 import { useAppSelector } from "app/store";
 import { useHasMounted } from "app/hooks/useHasMounted";
@@ -31,6 +32,16 @@ const SpaceNavigation: React.FC = () => {
         <span className="nav-item-content">
           <LuHouse size={16} className="nav-icon" aria-hidden="true" />
           首页
+        </span>
+      ),
+    },
+    {
+      id: "contents",
+      path: `/space/${spaceId}/contents`,
+      label: (
+        <span className="nav-item-content">
+          <LuLayoutGrid size={16} className="nav-icon" aria-hidden="true" />
+          全部内容
         </span>
       ),
     },

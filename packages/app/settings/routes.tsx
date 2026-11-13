@@ -15,6 +15,7 @@ const EditorConfig = lazy(() => import("./web/EditorConfig"));
 const ChatConfig = lazy(() => import("./web/ChatConfig"));
 const Productivity = lazy(() => import("./web/Productivity"));
 const SecretsConfig = lazy(() => import("./web/SecretsConfig"));
+const DataSourcePluginsConfig = lazy(() => import("./web/DataSourcePluginsConfig"));
 const MemoryConfig = lazy(() => import("./web/MemoryConfig"));
 const DesktopUpdates = lazy(() => import("./web/DesktopUpdates"));
 const DesktopMachines = lazy(() => import("./web/DesktopMachines"));
@@ -97,6 +98,10 @@ export const settingRoutes = {
       element: withSuspense(<SystemBuiltinSkills />),
     },
     { path: SettingRoutePaths.SETTING_SECRETS, element: withSuspense(<SecretsConfig />) },
+    {
+      path: SettingRoutePaths.SETTING_DATA_SOURCES,
+      element: withSuspense(<DataSourcePluginsConfig />),
+    },
     { path: SettingRoutePaths.SETTING_MEMORY, element: withSuspense(<MemoryConfig />) },
     {
       path: SettingRoutePaths.SETTING_MACHINES,

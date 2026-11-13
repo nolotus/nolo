@@ -98,6 +98,8 @@ interface AgentState {}
 
 /** runLlm 参数（通用 LLM 调用） */
 interface RunLlmArgs {
+  /** Opt-in compact contract; ordinary callers keep string results/errors. */
+  summaryCompletion?: boolean;
   /** 直接传入内置 llmConfig，完全不依赖 Agent 数据 */
   llmConfig?: Partial<Agent> & Pick<Agent, "provider" | "model">;
   agentKey?: string;

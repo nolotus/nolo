@@ -2,6 +2,8 @@ import React, { lazy, Suspense } from "react";
 import { useParams, useSearchParams } from "app/routing";
 import PageLoading from "render/web/ui/PageLoading";
 import NoMatch from "../NoMatch";
+import PageObjectHeader from "./PageObjectHeader";
+import { TopBarStateProvider } from "render/layout/TopBarStateProvider";
 
 // 核心对话页面：静态导入
 import DialogPage from "chat/dialog/DialogPage";
@@ -26,10 +28,16 @@ const PageLoader: React.FC = () => {
   // 1. 核心对话页面：无延迟直接渲染。外层的分栏容器常驻，只在打开本地预览时
   //    把对话收窄到右侧，不改变对话在树里的位置（否则会卸载重挂）。
   if (pageKey.startsWith("dialog")) {
+    // 对话页也带对象动作条（DialogMenu / 分享 / 收藏 / 删除）。分栏容器与对话
+    // 组件保持原有树结构与挂载位置：给两者加稳定 key，新增的兄弟节点不会让
+    // 对话被卸载重挂。
     return (
-      <LocalPreviewSplit>
-        <DialogPage key={pageKey} pageKey={pageKey} routeSpaceId={spaceId ?? null} />
-      </LocalPreviewSplit>
+      <TopBarStateProvider>
+        <PageObjectHeader key="page-object-header" />
+        <LocalPreviewSplit key="dialog-split">
+          <DialogPage key={pageKey} pageKey={pageKey} routeSpaceId={spaceId ?? null} />
+        </LocalPreviewSplit>
+      </TopBarStateProvider>
     );
   }
 
@@ -52,7 +60,12 @@ const PageLoader: React.FC = () => {
     return <NoMatch message={`无法识别的页面类型: ${pageKey}`} />;
   }
 
-  return <Suspense fallback={<PageLoading />}>{Component}</Suspense>;
+  return (
+    <TopBarStateProvider>
+      <PageObjectHeader key="page-object-header" />
+      <Suspense fallback={<PageLoading />}>{Component}</Suspense>
+    </TopBarStateProvider>
+  );
 };
 
 export default PageLoader;

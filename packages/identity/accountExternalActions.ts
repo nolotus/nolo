@@ -12,6 +12,7 @@
 // hosts, mutated paths, credentials-in-URL) never become a host message.
 
 import {
+  isDesktopAuthorizationUrl,
   DESKTOP_ACCOUNT_ALLOWLIST,
   buildDesktopBrowserActionMessage,
   isAllowlistedAccountUrl,
@@ -59,4 +60,15 @@ export function openDesktopAccountPage(target: DesktopAccountTarget): boolean {
     return true;
   }
   return false;
+}
+
+/** Open only a protocol-validated browser authorization URL. Host checks again. */
+export function openDesktopAuthorizationPage(url: unknown): boolean {
+  if (!isDesktopAuthorizationUrl(url)) return false;
+  const message = buildDesktopBrowserActionMessage(url);
+  if (!message) return false;
+  const send = resolveSendToHost();
+  if (send) { send(message); return true; }
+  if (typeof window === "undefined" || typeof window.open !== "function") return false;
+  return Boolean(window.open(url, "_blank", "noopener,noreferrer"));
 }

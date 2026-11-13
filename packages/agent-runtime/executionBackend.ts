@@ -71,6 +71,9 @@ export const EXECUTION_BACKEND_KINDS = [
   "cloud",
 ] as const;
 
+/** Named alias so type consumers can reference the vocabulary without re-deriving it. */
+export type ExecutionBackendKind = (typeof EXECUTION_BACKEND_KINDS)[number];
+
 export type ExecutionBackendDescriptor = {
   id: string;
   kind: (typeof EXECUTION_BACKEND_KINDS)[number];
@@ -102,6 +105,8 @@ export type ExecutionRequest =
       kind: "tool";
       toolName: string;
       input: unknown;
+      /** exec 上界（ms）；与 command 变体一致，只能收紧后端默认值。 */
+      timeoutMs?: number;
     };
 
 export type ExecutionEvent =

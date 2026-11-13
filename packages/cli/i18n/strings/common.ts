@@ -71,6 +71,30 @@ export const commonStrings = {
     en: "This turn failed, but the dialog is kept. Send another message (or say \"continue\") to keep going in the same conversation.",
     zh: "本轮失败了，但对话已保留。直接再说一句（或说「继续」）即可在同一对话里接着聊。",
   },
+  contextRefusalBudgetDetail: {
+    en: "History {0} / budget {1}. ",
+    zh: "历史 {0} / 预算 {1}，",
+  },
+  contextRefusalSummaryBusy: {
+    en: "Not sent: summary channel busy. {0}Retry in about 30 seconds.",
+    zh: "没发出去：摘要通道忙。{0}约 30 秒后重试即可。",
+  },
+  contextRefusalSummaryFailed: {
+    en: "Not sent: summary compaction failed. {0}Retry, or run /compact first.",
+    zh: "没发出去：摘要压缩失败。{0}可重试，或先 /compact。",
+  },
+  contextRefusalNoCompactableContent: {
+    en: "Not sent: history cannot shrink further. Run /compact, or switch to a model with a larger context window.",
+    zh: "没发出去：历史压不动了。先 /compact，或换更大窗口的模型。",
+  },
+  contextRefusalSingleMessageTooLarge: {
+    en: "Not sent: this message alone is {0}, meeting or exceeding the {1} budget. Split it, or use a model with a larger context window.",
+    zh: "没发出去：这条消息本身 {0}，达到或超过可用预算 {1}。拆开发送，或换更大窗口的模型。",
+  },
+  contextPreflightBlockedHint: {
+    en: "Not sent: the context does not fit. Your input is kept; retry or run /compact.",
+    zh: "没发出去：上下文装不下。你的话已保留，重试或 /compact。",
+  },
   dialogNotSavedHint: {
     en: "This turn did not create a dialog. Your next message will start a new conversation — restate what you need.",
     zh: "本轮没有建成对话。下一句会是新对话——请把你想做的事再说一遍。",
@@ -180,6 +204,10 @@ export const commonStrings = {
   contextCompacting: {
     en: "Compacting history… (Esc/Ctrl+C to cancel)",
     zh: "正在压缩历史记录…（Esc/Ctrl+C 取消）",
+  },
+  contextCompactingRetry: {
+    en: "Compacting history… (summary channel busy, retry {0}/{1}) (Esc/Ctrl+C to cancel)",
+    zh: "正在压缩历史记录…（摘要通道忙，重试 {0}/{1}）（Esc/Ctrl+C 取消）",
   },
   waitingForModel: {
     en: "Waiting for the model…",

@@ -1,3 +1,5 @@
+import { createSummaryBudget, classifySummaryError } from "../../ai/context/summaryRouting";
+import { isAbortError } from "../../core/abortError";
 // packages/cli/client/compactDialog.ts
 // HTTP-only compact helper for CLI TUI (no Redux store available).
 // Compares and forks: generate a summary of the old dialog, write it back
@@ -18,7 +20,12 @@ import {
   buildBoundedCompactionRequest,
   buildCompactionMetricsFromPlan,
   formatCompactionMetricsLog,
+  type SummarySourceMessageInput,
 } from "../../ai/context/compactionShared";
+
+import { createManualCompactionSummaryCaller } from "./manualCompactionSummary";
+import { getActiveDialogAgentId } from "../../chat/dialog/dialogAgents";
+import type { LocalCompactionSummaryFallbackOptions } from "../../agent-runtime/localAutoCompaction";
 
 const DB_PATH = "/api/v1/db";
 
@@ -228,7 +235,7 @@ export type CompactDialogResult = {
  * platform chat proxy. Mirrors the dependency-injection pattern from
  * `generateLocalDialogTitle`.
  */
-export type SummaryLlmCaller = (content: string, options?: { maxOutputTokens?: number }) => Promise<string | null>;
+export type SummaryLlmCaller = (content: string, options?: LocalCompactionSummaryFallbackOptions) => Promise<string | null>;
 
 // Unknown summary model windows use a conservative boundary, not the dialog model window.
 const SUMMARY_CONTEXT_WINDOW = Math.min(
@@ -271,6 +278,8 @@ export interface CompactDialogOptions {
   dialogId: string;
   userId?: string;
   fetchImpl?: CliFetchImpl;
+  signal?: AbortSignal;
+  env?: Record<string, string | undefined>;
   /** Injected LLM caller for summary generation. Production wires the platform chat proxy. */
   summaryLlmCaller?: SummaryLlmCaller;
   /** Progress phase callback (called at start of reading -> summarizing -> forking). */
@@ -303,6 +312,7 @@ export async function compactDialog(
     );
   }
 
+  if (options.signal?.aborted) throw new DOMException("summary aborted", "AbortError");
   options.onProgress?.("reading");
 
   const dialogKey = `dialog-${userId}-${options.dialogId}`;
@@ -318,7 +328,16 @@ export async function compactDialog(
   let compactedMessageCount = 0;
   let generatedSummary: string | undefined = undefined;
 
-  if (options.summaryLlmCaller) {
+  const summaryLlmCaller = options.summaryLlmCaller ?? (options.env ? createManualCompactionSummaryCaller({
+    env: { ...(options.env ?? {}), AUTH_TOKEN: options.authToken, NOLO_SERVER: options.serverUrl },
+    fetchImpl,
+    agentRef: getActiveDialogAgentId(current as any) ?? undefined,
+    loadAdapter: async () => {
+      const { createCliLocalRuntimeAdapter } = await import("./localRuntimeAdapter");
+      return createCliLocalRuntimeAdapter({ env: { ...(options.env ?? {}), AUTH_TOKEN: options.authToken, NOLO_SERVER: options.serverUrl }, fetchImpl });
+    },
+  }) : undefined);
+  if (summaryLlmCaller) {
     const allMsgs = await readDialogMessages(
       fetchImpl,
       options.serverUrl,
@@ -359,10 +378,12 @@ export async function compactDialog(
           console.warn(`[nolo] compact: summary blocked: ${request.reason}`);
         } else {
           options.onProgress?.("summarizing");
+          const summaryBudget = createSummaryBudget({ mode: "manual", signal: options.signal });
           try {
-            const newSummary = await options.summaryLlmCaller(request.promptContent, {
+            const newSummary = await summaryBudget.run(({ signal, deadlineMs }) => summaryLlmCaller(request.promptContent, {
+              signal, deadlineMs,
               maxOutputTokens: request.outputTokenBudget,
-            });
+            }));
 
             if (newSummary && newSummary.trim()) {
               const compressionCount =
@@ -383,11 +404,22 @@ export async function compactDialog(
                 }
               }
 
+              // Message 无 index signature，不能直接赋给 SummarySourceMessageInput；
+              // computeSummarySourceMetadata 只消费 id / role / content / tool_calls，
+              // 显式投影出这四个字段（值与原 message 完全一致）。
+              const summarySourceMsgs: SummarySourceMessageInput[] = allMsgs.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                ...(m.tool_calls !== undefined ? { tool_calls: m.tool_calls } : {}),
+              }));
               const sourceMeta = await computeSummarySourceMetadata(
-                allMsgs,
+                summarySourceMsgs,
                 request.summarizedBeforeId,
               );
 
+              if (options.signal?.aborted) throw new DOMException("summary aborted", "AbortError");
+              if (summaryBudget.remainingMs() <= 0) throw new DOMException("Summary deadline exceeded", "TimeoutError");
               // referenceKeys participate in the fork carry (FORKED_CARRY_FIELDS);
               // summary/summarizedBeforeId/compressionCount stay dialog-local and
               // are deliberately NOT mirrored onto `current` for the fork.
@@ -421,15 +453,17 @@ export async function compactDialog(
               console.log(formatCompactionMetricsLog(metrics));
             }
           } catch (error) {
+            if (options.signal?.aborted || isAbortError(error)) throw new DOMException("summary aborted", "AbortError");
             // Summary generation failed — continue with fork without compression.
-            console.warn(`[nolo] compact: summary generation failed: ${error}`);
-          }
+            console.warn("[nolo] compact: summary generation failed:", classifySummaryError(error));
+          } finally { summaryBudget.dispose(); }
         }
       }
     }
   }
 
   // --- Fork phase ---
+  if (options.signal?.aborted) throw new DOMException("summary aborted", "AbortError");
   options.onProgress?.("forking");
   const next = buildForkedDialogRecord(current, userId);
   await writeDialogRecord(fetchImpl, options.serverUrl, options.authToken, next);

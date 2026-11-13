@@ -64,6 +64,10 @@ export const FIREWORKS_KIMI_CURRENT_MODEL =
   "accounts/fireworks/models/kimi-k2p7-code";
 /** @deprecated */
 export const FIREWORKS_KIMI_K2P6_MODEL = "accounts/fireworks/models/kimi-k2p6";
+
+/** 2026-11-04：Kimi 只保留这一个模型，历史三条 legacy id 迁移到它。 */
+export const FIREWORKS_KIMI_K31_PRO_MODEL =
+  "accounts/fireworks/models/kimi-k3";
 /** @deprecated */
 export const DEEPINFRA_KIMI_FALLBACK_MODEL = "moonshotai/Kimi-K2.6";
 

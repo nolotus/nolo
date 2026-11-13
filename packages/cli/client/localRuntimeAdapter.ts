@@ -1,3 +1,16 @@
+import type { LocalCompactionSummaryFallback } from "../../agent-runtime/localAutoCompaction";
+import { createTuiSummaryLlmCaller } from "./tuiSummaryLlmCaller";
+import { getLocalShellLifecycle } from "../../agent-runtime/localToolPolicy";
+import { isSubtaskRun } from "../../agent-runtime/agentRunIsolation";
+import { createHostAuthorExecution } from "./hostReviewDispatch";
+import { createHash } from "node:crypto";
+import { resolve as resolveReviewWorkspace } from "node:path";
+import { resolveBuiltinSkillEntry } from "../../ai/skills/builtinSkillRegistry";
+import { buildAccountAutoReviewAuthorizationBlock } from "../../ai/skills/autoReviewSkill";
+import { createHostTaskController, readHostTask, hostTaskEventsRoot } from "./hostTaskEvents";
+import { admitHostTaskWorkspace, collectHostTaskWorkspace } from "./hostTaskWorkspace";
+import type { TaskReviewHost } from "./taskReviewTools";
+import { resolveAgentSkillConfig, type AgentSkillConfigSource } from "../../ai/tools/agentSkillConfig";
 import { extractQuotaSnapshot } from "../../ai/agent/quotaSnapshot";
 import { resolveUserSkillRuntime } from "../../ai/skills/userSkillRuntime";
 import {
@@ -50,6 +63,15 @@ import {
   recordLocalRunExecutionIsolation,
   resolveLocalRunExecutionIsolationFact,
 } from "./localRunExecutionIsolation";
+import { buildSettingsSyncMarkerKey } from "./localRuntimeSettingsFreshness";
+import {
+  buildSettingsSyncMarkerRecord,
+  didRemoteSettingsWinRefresh,
+  isSettingsSyncDue,
+  SETTINGS_REFRESH_RETRY_MS,
+  SETTINGS_REMOTE_MISS_RETRY_MS,
+  SETTINGS_REMOTE_READ_TIMEOUT_MS,
+} from "core/settingsSyncFreshness";
 import { createTokenKey, createUserKey, dialogMessageRange } from "../../database/keys";
 import { prepareTokenUsageData } from "../../ai/token/prepareTokenUsageData";
 import { inlineImageUrlsForCustomProvider } from "../../ai/chat/inlineImageUrlsForCustomProvider";
@@ -775,31 +797,29 @@ export async function recordLocalAvailabilityForAgent(args: {
 }
 
 /**
- * 会话级自动压缩摘要 fallback。
+ * 会话级自动压缩摘要通道选择器。
  *
- * 自动上下文压缩（localLoop → createTurnCompactionController）的主通道是 agent
- * 自己的 provider；它慢/失败时过去只报一次 failure 然后等下一轮（实测反复 60s
- * 超时且无进展）。这里把**已有的**平台摘要通道（CLI 入口用
+ * 自动上下文压缩（localLoop → createTurnCompactionController）在发送前选定唯一
+ * 通道：已登录、平台可用且余额为正时走平台 Flash，否则走当前 text-only provider，
+ * 且只发一次请求。这里把**已有的**平台摘要通道（CLI 入口用
  * createTuiSummaryLlmCaller 建的实例）以会话级单例形式交给本地 adapter，
- * 由 localLoop 读走并作为「最多一次」的 fallback。
+ * 由 localLoop 读走作为准入判定与平台通道。
  *
  * 放模块级而不是 deps：deps 类型在 localRuntimeDiagnostics（本次改动范围外），
  * 且一个 CLI 进程只有一条平台摘要通道，会话级单例正是需要的语义。未注入
- * （desktop、未登录、headless）→ adapter 不带该字段 → 不 fallback，行为与今天
- * 完全一致。
+ * （desktop、未登录、headless）→ adapter 不带该字段 → 自动压缩只用当前 provider，
+ * 行为与今天完全一致。
  */
-let cliAutoCompactionSummaryFallback:
-  | ((content: string) => Promise<string | null>)
-  | undefined;
+let cliAutoCompactionSummaryFallback: LocalCompactionSummaryFallback | undefined;
 
 /** CLI 入口在启动 TUI 时注入平台摘要 caller（与 /compact 复用同一条通道）。 */
 export function setCliAutoCompactionSummaryFallback(
-  caller: ((content: string) => Promise<string | null>) | undefined,
+  caller: LocalCompactionSummaryFallback | undefined,
 ): void {
   cliAutoCompactionSummaryFallback = caller;
 }
 
-/** 当前会话注入的摘要 fallback（未注入 → undefined）。 */
+/** 当前会话注入的摘要通道选择器（未注入 → undefined）。 */
 export function getCliAutoCompactionSummaryFallback():
   | ((content: string) => Promise<string | null>)
   | undefined {
@@ -826,9 +846,32 @@ const emitRunIsolationNotice = createLocalRunIsolationNoticeEmitter({
   },
 });
 
+/**
+ * 写「上次成功对齐服务器」的同步标记（只落本地库，不写服务器）。
+ *
+ * 标记写失败不影响本次运行：最坏情况是下一轮重新对齐一次。
+ */
+async function writeSettingsSyncMarker(
+  store: HybridRecordStore,
+  markerKey: string,
+  userId: string,
+): Promise<Record<string, unknown> | null> {
+  const record = buildSettingsSyncMarkerRecord(userId, Date.now());
+  try {
+    await store.write(markerKey, record);
+    return record;
+  } catch {
+    // 忽略：标记只是优化，不是真值来源。
+    return null;
+  }
+}
+
 export function createCliLocalRuntimeAdapter(
   deps: CliLocalRuntimeAdapterDeps,
 ): AgentRuntimeHostAdapter & {
+  authorizeAccountTask(scope: import("./hostTaskEvents").HostTaskReference): Promise<void>;
+  installTaskReviewHost(host: TaskReviewHost): void;
+  admitAccountReviewTurn(dialogId: string, turnId: string, taskStart?: import("./autoReviewContinuation").AccountTaskStart): Promise<import("./hostTaskEvents").HostTaskReference>;
   /**
    * 本机 OS 沙盒 lease 的收尾入口（CLI 专有，非 AgentRuntimeHostAdapter 接口
    * 成员）：run 结束时由宿主调用，释放 bwrap lease。幂等；未创建沙盒时 no-op。
@@ -842,12 +885,12 @@ export function createCliLocalRuntimeAdapter(
    */
   prepareLocalRuntimeWorkload(): Promise<void>;
   /**
-   * 自动上下文压缩的摘要 fallback（CLI 专有，非 AgentRuntimeHostAdapter 接口
-   * 成员）。localLoop 在主通道超时/失败时最多调用一次；形状与 CLI 的
-   * SummaryLlmCaller 一致。未注入 → undefined（见
+   * 自动上下文压缩的摘要通道选择器（CLI 专有，非 AgentRuntimeHostAdapter 接口
+   * 成员）。localLoop 在发送前按其 preferPlatform 准入结果选定唯一通道，且只发
+   * 一次请求；形状与 CLI 的 SummaryLlmCaller 一致。未注入 → undefined（见
    * setCliAutoCompactionSummaryFallback）。
    */
-  compactionSummaryFallback?: (content: string) => Promise<string | null>;
+  compactionSummaryFallback?: LocalCompactionSummaryFallback;
   /**
    * 启动期 429 冷却兜底落盘入口（CLI 本地 adapter 专有，非
    * AgentRuntimeHostAdapter 接口成员）。agentRun.ts 在 classifyLocalRunError
@@ -867,6 +910,7 @@ export function createCliLocalRuntimeAdapter(
   const now = deps.now ?? Date.now;
   const createId = deps.createId ?? createFallbackId;
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const defaultCompactionSummary = createTuiSummaryLlmCaller(deps.env, { fetchImpl, platformPrimary: true });
   const loopbackRequest =
     deps.loopbackRequest ??
     (deps.fetchImpl ? undefined : defaultLoopbackRequest);
@@ -917,6 +961,13 @@ export function createCliLocalRuntimeAdapter(
   // 缺名字时卡片只能显示通用「子智能体」。轻量读 agent 记录拿 name（同
   // resolveAgentCredentialGroup，不走 loadAgentConfig）；读不到返回 undefined，
   // 卡片保持原有 fallback，绝不伪造名字。
+  const resolveAgentModel = async (agentRef: string): Promise<string | undefined> => {
+    try {
+      const record = await readAgentFromStore({ agentRef, store: await getOrCreateSharedStore(deps), userId });
+      const model = (record as Record<string, unknown> | null)?.model;
+      return typeof model === "string" ? model : undefined;
+    } catch { return undefined; }
+  };
   const resolveAgentDisplayName = async (
     agentRef: string,
   ): Promise<string | undefined> => {
@@ -1277,9 +1328,62 @@ export function createCliLocalRuntimeAdapter(
   let runtimeToolExecutionLimits: ReturnType<
     typeof resolveLocalWorkspaceExecutorOptionsFromPolicy
   > = {};
+  // Only the policy fingerprint participates here: no credentials or whole-record
+  // serialization, and equivalent key ordering must preserve prepared identity.
+  const skillPolicyFingerprint = (source: AgentSkillConfigSource | null | undefined) =>
+    JSON.stringify(Object.entries(resolveAgentSkillConfig(source)).sort(([a], [b]) => a.localeCompare(b)));
   // Executor closures belong to this adapter; only prepared metadata is shared.
-  const buildCurrentToolExecutors = (agentKey?: string | null) =>
+  let installedTaskReviewHost: TaskReviewHost | undefined;
+  let reviewAgentConfig: any;
+  // Single canonical opt-in predicate: the account must admit the *builtin*
+  // auto-review entry (slug/id aliases and agent-level `disabled` excluded).
+  // Typed-tool admission and prompt injection both call this, so the model is
+  // never told it holds an authorization the adapter would refuse — and never
+  // left without one it would grant.
+  const isCanonicalAutoReviewAdmitted = (
+    visits: ReadonlyArray<
+      { dbKey?: string; meta?: { skillConfig?: { id?: string } } | null }
+    > | undefined,
+  ): boolean => {
+    const canonical = resolveBuiltinSkillEntry("auto-review");
+    if (!canonical || !visits) return false;
+    return visits.some(
+      (visit) =>
+        visit.dbKey === canonical.skillId &&
+        visit.meta?.skillConfig?.id === canonical.skillId,
+    );
+  };
+  const accountReviewScope = (dialogId: string, taskInstanceId?: string) => ({
+    taskId: `tui-local-alpha-v1-${createHash("sha256").update(JSON.stringify([userId, dialogId, resolveReviewWorkspace(workspaceRoot), "local-alpha-v1", ...(taskInstanceId ? [taskInstanceId] : [])])).digest("hex")}`,
+    dialogId, workspace: resolveReviewWorkspace(workspaceRoot), ...(taskInstanceId ? { taskInstanceId } : {}),
+  });
+  const requireAccountReview = async (scope: import("./hostTaskEvents").HostTaskReference) => {
+    if (!userId || userId === "local" || !scope.dialogId?.trim()) throw new Error("task_review_authenticated_user_missing");
+    if (scope.taskId !== accountReviewScope(scope.dialogId, scope.taskInstanceId).taskId || resolveReviewWorkspace(scope.workspace) !== resolveReviewWorkspace(workspaceRoot)) throw new Error("task_review_user_scope_mismatch");
+    const store = await getOrCreateSharedStore(deps);
+    const dialog = await store.read(`dialog-${userId}-${scope.dialogId}`);
+    // A brand-new dialog has no persisted record until saveTurn. Its id comes
+    // from the host turn, never tool args; a conflicting existing owner rejects.
+    if (dialog?.userId && dialog.userId !== userId) throw new Error("task_review_user_scope_mismatch");
+    const settings = await store.read(createUserKey.settings(userId));
+    const skills = await resolveUserSkillRuntime(reviewAgentConfig, settings && typeof settings === "object" ? settings : {});
+    if (!isCanonicalAutoReviewAdmitted(skills.visits)) throw new Error("task_review_account_optin_required");
+  };
+  const authorizedReviewHost = (): TaskReviewHost | undefined => {
+    const host = installedTaskReviewHost ?? deps.taskReviewHost;
+    if (!host) return undefined;
+    return { ...host, authorize: async () => {
+      await host.authorize();
+      await requireAccountReview(host.scope);
+      const task = readHostTask(hostTaskEventsRoot(deps.env), host.scope);
+      if (task.authorization !== "active") throw new Error(`task_review_authorization_${task.authorization}`);
+      const workspace = await collectHostTaskWorkspace(host.scope, deps.env);
+      if (workspace.status !== "ready") throw new Error(`task_review_workspace_unavailable: ${workspace.reason}`);
+    } };
+  };
+  const buildCurrentToolExecutors = (agentConfig?: AgentRuntimeAgentConfig | null) =>
     buildLocalToolExecutors({
+      taskReviewHost: authorizedReviewHost(),
       workspaceRoot,
       sourceParentDialogId: deps.parentDialogId,
       env: deps.env,
@@ -1293,9 +1397,11 @@ export function createCliLocalRuntimeAdapter(
       cliEntrypoint: CLI_ENTRYPOINT,
       resolveAgentCredentialGroup,
       resolveAgentDisplayName,
+      resolveAgentModel,
       dialogExistsForCurrentUser: async (dialogId: string) => {
         const store = await getOrCreateSharedStore(deps);
-        return !!(await store.read(`dialog-${userId}-${dialogId}`));
+        const record = await store.read(`dialog-${userId}-${dialogId}`);
+        return record ? { primaryAgentKey: (record as Record<string, unknown>).primaryAgentKey } : false;
       },
       resolveAgentRuntimeBindingMachineId,
       resolveLocalMachineId,
@@ -1324,7 +1430,13 @@ export function createCliLocalRuntimeAdapter(
       ...(deps.pastedTextStore
         ? { pastedTextStore: deps.pastedTextStore }
         : {}),
-      agentKey,
+      agentKey: agentConfig?.key,
+      agentSkillSource: agentConfig?.rawRecord,
+      ...(agentConfig ? { resolveAgentSkillSource: async () => {
+        const store = await getOrCreateSharedStore(deps);
+        // Local reads observe external record replacements without network IO.
+        return store.read(agentConfig.key, { remote: false });
+      } } : {}),
       ...runtimeToolExecutionLimits,
     });
   let localToolExecutors = buildCurrentToolExecutors();
@@ -1363,9 +1475,21 @@ export function createCliLocalRuntimeAdapter(
 
   // Missing or unavailable settings are retried, but not on every turn.
   let nextSettingsRemoteAttempt = 0;
+  // A local copy that is present but not aligned with the server yet is
+  // refreshed from the server, but not on every turn: one remote read per
+  // interval at most, and only when the persisted sync marker says so
+  // (see localRuntimeSettingsFreshness).
+  let nextSettingsRefreshAttempt = 0;
+  // 同步标记在进程内缓存：每个进程最多读一次本地库（标记本身是跨进程持久化
+  // 的，进程内缓存只省一次本地读，不改变 TTL 语义）。
+  let settingsSyncMarker: Record<string, unknown> | null | undefined;
   let settingsDiagnosticEmitted = false;
+  // Stale-refresh warning is one-shot per outage episode: reset once a
+  // refresh hands back a fresh (server-truth) copy.
+  let settingsRefreshDiagnosticEmitted = false;
   const adapterBase = {
     host: "cli",
+    workspaceRoot,
     capabilities: [
       "leveldb-agent-config",
       "local-provider",
@@ -1382,16 +1506,81 @@ export function createCliLocalRuntimeAdapter(
       if (userId) {
         try {
           const settingsKey = createUserKey.settings(userId);
+          const syncMarkerKey = buildSettingsSyncMarkerKey(userId);
           let settingsRecord = await sharedStore.read(settingsKey, { remote: false });
-          if (!settingsRecord && Date.now() >= nextSettingsRemoteAttempt) {
-            nextSettingsRemoteAttempt = Date.now() + 30_000;
-            let unavailable = false;
-            settingsRecord = await sharedStore.read(settingsKey, {
-              onRemoteUnavailable: () => { unavailable = true; },
-            });
-            if (!settingsRecord && !settingsDiagnosticEmitted) {
-              process.stderr.write(`[nolo] Account skill settings ${unavailable ? "unavailable" : "not found"}; preferences unknown, retrying on a later load.\n`);
-              settingsDiagnosticEmitted = true;
+          if (!settingsRecord) {
+            if (Date.now() >= nextSettingsRemoteAttempt) {
+              nextSettingsRemoteAttempt = Date.now() + SETTINGS_REMOTE_MISS_RETRY_MS;
+              let unavailable = false;
+              settingsRecord = await sharedStore.read(settingsKey, {
+                // 账号 settings 的远端读单独放宽预算（默认 250ms 必然超时）。
+                timeoutMs: SETTINGS_REMOTE_READ_TIMEOUT_MS,
+                onRemoteUnavailable: () => { unavailable = true; },
+              });
+              if (!settingsRecord && !settingsDiagnosticEmitted) {
+                process.stderr.write(`[nolo] Account skill settings ${unavailable ? "unavailable" : "not found"}; preferences unknown, retrying on a later load.\n`);
+                settingsDiagnosticEmitted = true;
+              }
+              if (settingsRecord && typeof settingsRecord === "object") {
+                // 拿到服务器副本 = 已对齐：落同步标记。
+                const written = await writeSettingsSyncMarker(sharedStore, syncMarkerKey, userId);
+                if (written) settingsSyncMarker = written;
+              }
+            }
+          } else {
+            // 本地有副本，但账号 skill 偏好的真值在服务器侧（用户在 Web 上改的）。
+            // 刷新前先留住本地副本快照：判断「远端是否赢下 LWW」要用它的时间戳。
+            const localSettingsSnapshot = settingsRecord;
+            // 是否该再问一次由**持久化的同步标记**决定（上次成功对齐的时刻），
+            // 不用记录自己的 updatedAt——那反映的是本地写入时刻，不是对齐时刻。
+            if (settingsSyncMarker === undefined) {
+              settingsSyncMarker = await sharedStore
+                .read(syncMarkerKey, { remote: false })
+                .catch(() => null);
+            }
+            if (
+              isSettingsSyncDue(settingsSyncMarker, Date.now()) &&
+              Date.now() >= nextSettingsRefreshAttempt
+            ) {
+              nextSettingsRefreshAttempt = Date.now() + SETTINGS_REFRESH_RETRY_MS;
+              let unavailable = false;
+              let refreshed: unknown = null;
+              try {
+                // remote:true = remote-first read. The hybrid store only replaces
+                // the local copy when the server record is newer (LWW on
+                // updatedAt), and falls back to the local record when the
+                // server is unreachable — so a failed refresh can never clear
+                // the preferences.
+                refreshed = await sharedStore.read(settingsKey, {
+                  remote: true,
+                  // 只给这一次读放宽预算（默认 250ms < 实测往返 600ms，会被判
+                  // unavailable 而永不刷新）。其它 hybrid 读仍是 250ms。
+                  timeoutMs: SETTINGS_REMOTE_READ_TIMEOUT_MS,
+                  onRemoteUnavailable: () => { unavailable = true; },
+                });
+              } catch {
+                refreshed = null;
+              }
+              if (refreshed && typeof refreshed === "object") {
+                settingsRecord = refreshed;
+              }
+              if (!unavailable && refreshed && typeof refreshed === "object") {
+                // 服务器应答了，但**应答 ≠ 已对齐**：hybrid store 在远端不比本地新
+                // 时（远端缺时间戳、或远端 updatedAt 更旧）会返回**本地副本**。
+                // 此时若照样落同步标记，就是「自以为已对齐」，最坏延迟一个 TTL
+                // 才收敛。所以只有远端真的赢下 LWW（远端时间戳 > 本地时间戳，
+                // 口径与 hybrid store 的 getHybridRecordTimestamp 一致）才写标记；
+                // 没赢下 → 不写标记（保持重试），也不报错、不打无谓日志。
+                if (didRemoteSettingsWinRefresh(localSettingsSnapshot, refreshed)) {
+                  const written = await writeSettingsSyncMarker(sharedStore, syncMarkerKey, userId);
+                  if (written) settingsSyncMarker = written;
+                }
+                settingsRefreshDiagnosticEmitted = false;
+              } else if (unavailable && !settingsRefreshDiagnosticEmitted) {
+                // 离线/服务器不可达：继续用本地副本，不抛错、不清空偏好。
+                process.stderr.write("[nolo] Account skill settings unavailable; using the local copy, retrying on a later load.\n");
+                settingsRefreshDiagnosticEmitted = true;
+              }
             }
           }
           if (settingsRecord) settingsDiagnosticEmitted = false;
@@ -1424,6 +1613,7 @@ export function createCliLocalRuntimeAdapter(
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
         enabledSkills,
+        enabledPromptSkills: skillPreferences.enabledPromptSkills,
         wake: hasRunWakeChannel(deps.env),
         env: deps.env,
       })}:${dockerRuntimeEnabled ? "docker" : instaboxRuntimeEnabled ? "instabox" : "host"}`;
@@ -1433,10 +1623,21 @@ export function createCliLocalRuntimeAdapter(
         ? undefined
         : preparedAgentRuntimeCache.get(cacheKey);
       if (cached) {
-        activeAgentToolNames = cached.activeAgentToolNames;
-        runtimeToolExecutionLimits = cached.runtimeToolExecutionLimits;
-        localToolExecutors = buildCurrentToolExecutors(cached.agentConfig.key);
-        return cached.agentConfig;
+        const localRecord = await sharedStore.read(cached.agentConfig.key, { remote: false }).catch(() => null);
+        // No fresh record: preserve the prepared snapshot, but loadSkill's local
+        // policy resolver fails closed. Never fall back to a remote stale record.
+        const unchanged = !localRecord || (
+          cached.localAgentSkillFingerprint !== undefined &&
+          cached.localAgentSkillFingerprint === skillPolicyFingerprint(localRecord)
+        );
+        if (!unchanged) preparedAgentRuntimeCache.delete(cacheKey);
+        if (unchanged) {
+          activeAgentToolNames = cached.activeAgentToolNames;
+          runtimeToolExecutionLimits = cached.runtimeToolExecutionLimits;
+          reviewAgentConfig = cached.agentConfig;
+          localToolExecutors = buildCurrentToolExecutors(cached.agentConfig);
+          return cached.agentConfig;
+        }
       }
 
       const storedAgentConfig = await readAgentFromStore({
@@ -1448,6 +1649,7 @@ export function createCliLocalRuntimeAdapter(
         ? null
         : resolveBuiltinLocalCliAgentConfig(agentRef, userId);
       const sourceAgentConfig = storedAgentConfig ?? fallbackLocalCliAgentConfig;
+      reviewAgentConfig = sourceAgentConfig;
       const userSkills = await resolveUserSkillRuntime(sourceAgentConfig, {
         enabledSkills,
         enabledPromptSkills: skillPreferences.enabledPromptSkills,
@@ -1471,7 +1673,23 @@ export function createCliLocalRuntimeAdapter(
       const packAgentConfig = baseAgentConfig
         ? withRuntimeEnabledPacksAndPrompt(baseAgentConfig)
         : baseAgentConfig;
-      const userPromptPatches = userSkills.skillPromptPatches;
+      // The static skill body can only describe the flow; it cannot state whether
+      // *this* account has the switch on right now. Inject that fact only when the
+      // canonical visit is genuinely admitted — the same predicate that admits the
+      // typed review tools — so the prompt never claims an authorization the
+      // adapter would refuse, and an un-opened account gets no authorization text.
+      // Cache safety: the prepared cache key already encodes the settings-derived
+      // `enabledSkills`, so flipping the switch lands on a different entry and the
+      // other state's block cannot survive the flip. The block itself is byte
+      // stable (no timestamps/per-turn values), keeping the prompt prefix cacheable.
+      const accountAutoReviewPrompt = isCanonicalAutoReviewAdmitted(
+        userSkills.visits,
+      )
+        ? buildAccountAutoReviewAuthorizationBlock()
+        : null;
+      const userPromptPatches = accountAutoReviewPrompt
+        ? [...userSkills.skillPromptPatches, accountAutoReviewPrompt]
+        : userSkills.skillPromptPatches;
       const agentConfig = packAgentConfig && userPromptPatches.length
         ? {
             ...packAgentConfig,
@@ -1520,7 +1738,7 @@ export function createCliLocalRuntimeAdapter(
         resolveLocalWorkspaceExecutorOptionsFromPolicy(
           resolveCurrentRunRuntimeToolPolicy(agentConfig),
         );
-      localToolExecutors = buildCurrentToolExecutors(agentConfig?.key);
+      localToolExecutors = buildCurrentToolExecutors(agentConfig);
       // Report the post-filter tool list so runtime guidance describes what the
       // model can actually call. The CLI drops declared names it has no
       // executor for (read/createDoc/...), and prompt blocks keyed off the
@@ -1549,6 +1767,7 @@ export function createCliLocalRuntimeAdapter(
       if (exposedAgentConfig && !deps.pastedTextStore) {
         preparedAgentRuntimeCache.set(cacheKey, {
           agentConfig: exposedAgentConfig,
+          localAgentSkillFingerprint: skillPolicyFingerprint(exposedAgentConfig.rawRecord),
           activeAgentToolNames,
           runtimeToolExecutionLimits,
         });
@@ -1610,10 +1829,15 @@ export function createCliLocalRuntimeAdapter(
       }
       return null;
     },
-    saveTurn: async (input) =>
-      writeDialog({
+    saveTurn: async (input) => {
+      // Batch completion evidence rides the same store.batch as the reply save
+      // (see writeDialog). Read from a CLI-local extension field so the shared
+      // AgentRuntimeSaveTurnInput type stays unchanged.
+      const cliBatchCompletion = (input as typeof input & { cliBatchCompletion?: { batchIds: string[] } }).cliBatchCompletion;
+      return writeDialog({
         store: await getOrCreateSharedStore(deps),
         input,
+        ...(cliBatchCompletion ? { cliBatchCompletion } : {}),
         userId,
         now,
         createId,
@@ -1628,7 +1852,8 @@ export function createCliLocalRuntimeAdapter(
           credentialBroker,
           loopbackRequest,
         }),
-      }),
+      });
+    },
     resolveProviderBase: async (agentConfig, options) => {
       const serverUrl = asOptionalTrimmedString(deps.env.NOLO_SERVER) ?? "https://us.nolo.chat";
       const authToken = asOptionalTrimmedString(deps.env.AUTH_TOKEN);
@@ -1655,22 +1880,27 @@ export function createCliLocalRuntimeAdapter(
           Boolean(apiKeyRef && isOAuthApiKeyRef(apiKeyRef)) ||
           isAntigravityOAuthAgent(agentConfig);
         if (ownerUserId && ownerUserId !== userId && isOAuthChannel) {
-          try {
-            const { detectMachineInfo } = await import(
-              "connector-experimental/machineInfo"
+          {
+            const machine = await (async () => {
+              try {
+                const { detectMachineInfo } = await import(
+                  "connector-experimental/machineInfo"
+                );
+                return await detectMachineInfo({ probeLaunchable: false });
+              } catch {
+                // 取不到本机机器信息不阻断派发：origin 快照只作执行位置标注，
+                // owner-required 的服务端授权门是空间成员 / 显式 grant
+                // （2026-11-09 决定，见 server/ownerRequiredModelAdmission）。
+                return null;
+              }
+            })();
+            const machineId =
+              asOptionalTrimmedString(machine?.machineId) || "origin-unverified";
+            // 探测失败时 machine 为 null：设备名必须 null-safe 读取，否则这条
+            // 兜底路径会以 TypeError 取代原来的 origin_unavailable。
+            const deviceName = asOptionalTrimmedString(
+              (machine as { name?: unknown } | null)?.name,
             );
-            const machine = await detectMachineInfo({ probeLaunchable: false });
-            const machineId = asOptionalTrimmedString(machine?.machineId);
-            if (!machineId) {
-              // 当前设备不可用 → 明确失败，不静默转其他机器/服务端工作区。
-              throw Object.assign(
-                new Error(
-                  "owner-required route unavailable: cannot resolve this device's machineId; " +
-                    "the origin host must be the device that runs local tools",
-                ),
-                { code: "origin_unavailable" },
-              );
-            }
             ownerAgentContext = {
               agentName:
                 asOptionalTrimmedString(
@@ -1679,13 +1909,7 @@ export function createCliLocalRuntimeAdapter(
               agentKey: agentConfig.key,
               ownerUserId,
               deviceId: machineId,
-              ...(asOptionalTrimmedString((machine as { name?: unknown }).name)
-                ? {
-                    deviceName: asOptionalTrimmedString(
-                      (machine as { name?: unknown }).name,
-                    )!,
-                  }
-                : {}),
+              ...(deviceName ? { deviceName } : {}),
             };
             ownerOriginExecution = {
               version: OWNER_ORIGIN_EXECUTION_VERSION,
@@ -1738,22 +1962,6 @@ export function createCliLocalRuntimeAdapter(
                 // 展示回调失败不影响派发；宿主拿到 unknown 也该继续跑。
               }
             }
-          } catch (error) {
-            if (
-              error &&
-              typeof error === "object" &&
-              (error as { code?: unknown }).code === "origin_unavailable"
-            ) {
-              throw error;
-            }
-            // detectMachineInfo 抛错视同不可用。
-            throw Object.assign(
-              new Error(
-                `owner-required route unavailable: ${toErrorMessage(error)}; ` +
-                  "the origin host must be the device that runs local tools",
-              ),
-              { code: "origin_unavailable" },
-            );
           }
         }
       }
@@ -2104,6 +2312,7 @@ export function createCliLocalRuntimeAdapter(
               // - gate 被拒时抛原错误（与普通路径同一错误语义）。
               const gate = await runExecShellGates({
                 toolName: "execShell",
+                shellLifecycle: getLocalShellLifecycle(localToolExecutors.execShell),
                 callArguments: injectedCall.arguments,
                 execShellApproval: deps.execShellApproval,
                 workspaceRoot,
@@ -2115,6 +2324,9 @@ export function createCliLocalRuntimeAdapter(
                   : {}),
               });
               if (gate.kind === "handled") return gate.result;
+              // Preserve the channel's original shell capability. A missing browser approval
+              // transport is handled by the connector's pending gate, not by preblocking shell.
+              // No host loopback credentials are passed to this channel.
               ensureLocalSandboxAbortWired(opts?.abortSignal);
               const sandboxOutput = await sandbox.workload.channel(
                 "execShell",
@@ -2193,12 +2405,43 @@ export function createCliLocalRuntimeAdapter(
   // pre-admission zero-cost attempts protected by abort/sawToolEvent guards.
   return {
     ...adapterBase,
+    async admitAccountReviewTurn(dialogId: string, turnId: string, taskStart?: import("./autoReviewContinuation").AccountTaskStart) {
+      if (taskStart && (taskStart.userId !== userId || !taskStart.taskInstanceId?.trim() || !taskStart.userMessageId?.trim() || !/^[a-f0-9]{64}$/.test(taskStart.contentSha256))) throw new Error("task_review_user_turn_source_invalid");
+      if (isSubtaskRun(deps.env) || !activeAgentToolNames.some(name => ["requestTaskReview", "recordTaskReviewDecision"].includes(name))) throw new Error("task_review_outside_final_run_surface");
+      const scope = accountReviewScope(dialogId, taskStart?.taskInstanceId);
+      await requireAccountReview(scope);
+      const root = hostTaskEventsRoot(deps.env);
+      const current = readHostTask(root, scope);
+      if (current.authorization !== "unknown" && taskStart && (current.taskStart?.taskInstanceId !== taskStart.taskInstanceId || current.taskStart?.userId !== taskStart.userId || current.taskStart?.userMessageId !== taskStart.userMessageId || current.taskStart?.contentSha256 !== taskStart.contentSha256)) throw new Error("task_review_user_turn_source_mismatch");
+      if (current.authorization === "unknown") {
+        if (current.reason !== "missing") throw new Error("task_review_task_history_invalid");
+        if (!taskStart) throw new Error("task_review_explicit_task_start_required");
+        const snapshot = admitHostTaskWorkspace(scope, deps.env);
+        if (snapshot.status !== "ready") throw new Error(`task_review_workspace_unavailable: ${snapshot.reason}`);
+        createHostTaskController(root, { kind: "trusted-host", actorId: userId, sourceId: taskStart ? `account-task-start:${taskStart.userMessageId}:${taskStart.contentSha256}` : `account-auto-review-admission:${turnId}` }).append(scope, 0, { type: "admitted", role: "owner", ...(taskStart ? { taskStart } : {}) });
+      } else if (current.authorization !== "active") throw new Error(`task_review_authorization_${current.authorization}`);
+      const workspace = await collectHostTaskWorkspace(scope, deps.env);
+      if (workspace.status !== "ready") throw new Error(`task_review_workspace_unavailable: ${workspace.reason}`);
+      const host: TaskReviewHost = { scope, authorExecutionId: createHostAuthorExecution(deps.env, scope, turnId), authorize: async () => {} };
+      installedTaskReviewHost = host;
+      localToolExecutors = buildCurrentToolExecutors(reviewAgentConfig);
+      return scope;
+    },
+    async authorizeAccountTask(scope: import("./hostTaskEvents").HostTaskReference) {
+      await requireAccountReview(scope);
+      const current = readHostTask(hostTaskEventsRoot(deps.env), scope);
+      if (current.authorization !== "active") throw new Error(`task_review_authorization_${current.authorization}`);
+    },
+    installTaskReviewHost(host: TaskReviewHost) {
+      installedTaskReviewHost = host;
+      localToolExecutors = buildCurrentToolExecutors(reviewAgentConfig);
+    },
     releaseLocalSandboxWorkload,
     prepareLocalRuntimeWorkload,
-    // 会话级摘要 fallback（未注入 → undefined）：getter 而非快照值，因为 adapter
-    // 可能被 prepared-runtime 缓存复用，而注入发生在 CLI 启动早期。
+    // Session override or host-owned default; headless receives the same paid admission.
+    // Getter preserves early TUI injection when prepared adapters are reused.
     get compactionSummaryFallback() {
-      return cliAutoCompactionSummaryFallback;
+      return cliAutoCompactionSummaryFallback ?? defaultCompactionSummary;
     },
     resolveProvider: async (
       agentConfig: AgentRuntimeAgentConfig,
@@ -2208,13 +2451,15 @@ export function createCliLocalRuntimeAdapter(
         agentConfig,
         options,
       )) as AgentRuntimeProvider;
-      if (options?.textOnly) return { ...provider, textOnly: true as const };
-      return shouldUsePlatformChatProvider(deps.env, agentConfig)
+      const retryingProvider = shouldUsePlatformChatProvider(deps.env, agentConfig)
         ? withProviderStreamRetry(provider, {
             ...deps,
             retryOnly: isBusyProviderStreamError,
           })
         : withProviderStreamRetry(provider, deps);
+      return options?.textOnly
+        ? { ...retryingProvider, textOnly: true as const }
+        : retryingProvider;
     },
     recordStartupAvailabilityForAgent: async (
       agentRef: string,

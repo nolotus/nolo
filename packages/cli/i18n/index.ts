@@ -227,6 +227,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     en: "Run an agent",
     zh: "运行智能体",
   },
+  "agent recover-prepared-writer": {
+    en: "Revoke an exact fenced-launch-v1 prepared writer attempt (--attempt-id required; no force)",
+    zh: "撤销某个精确匹配的 fenced-launch-v1 已准备写入者尝试（必须带 --attempt-id，不支持强制）",
+  },
   "agent ps": {
     en: "List active and recent local agent runs (--json for machine-readable output)",
     zh: "列出活跃与近期的本地智能体运行（--json 输出机器可读格式）",

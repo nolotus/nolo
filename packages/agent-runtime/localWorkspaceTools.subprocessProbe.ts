@@ -116,14 +116,34 @@ async function run() {
     {
       const root = createWorkspace();
       roots.push(root);
-      const executors = createLocalWorkspaceToolExecutors({ workspaceRoot: root });
+      // Only shell transport/help gating is under test, not an installed or authenticated gh.
+      const bin = join(root, "bin"); mkdirSync(bin);
+      const shim = join(bin, process.platform === "win32" ? "gh.cmd" : "gh");
+      writeFileSync(shim, process.platform === "win32"
+        ? '@echo off\r\nif not "%*"=="auth refresh --help" exit /b 64\r\necho USAGE: fixture gh auth refresh --help\r\n'
+        : '#!/bin/sh\n[ "$*" = "auth refresh --help" ] || exit 64\nprintf "USAGE: fixture gh auth refresh --help\\n"\n', { mode: 0o700 });
+      const launcher = join(root, "help-launcher.cjs");
+      writeFileSync(launcher, `const { spawnSync } = require("node:child_process");
+const result = spawnSync(process.argv[2], process.argv.slice(3), {
+  stdio: "inherit", env: ${JSON.stringify({
+    PATH: `${bin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+    HOME: root, USERPROFILE: root, GH_CONFIG_DIR: root,
+    ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+    ...(process.env.ComSpec ? { ComSpec: process.env.ComSpec } : {}),
+  })}
+});
+if (result.error) { console.error(result.error.message); process.exit(70); }
+process.exit(result.status ?? 70);
+`);
+      const executors = createLocalWorkspaceToolExecutors({ workspaceRoot: root, commandPrefix: [process.execPath, launcher] });
       const help = await executors.execShell({
         id: "call-shell-auth-help",
         name: "execShell",
         arguments: JSON.stringify({ command: "gh auth refresh --help" }),
       });
       assert(!help.metadata?.actionGate, "auth help should not require manual terminal action");
-      assertContains(help.content, "USAGE", "auth help content");
+      assertContains(help.content, "USAGE: fixture gh auth refresh --help", "auth help content");
+      assert(help.metadata?.exitCode === 0, "fixture gh help exitCode should be 0");
     }
 
     {
@@ -185,21 +205,9 @@ async function run() {
       assert(sandboxed.metadata?.exitCode === 0, "sandboxed command exitCode should be 0");
     }
 
-    {
-      const root = createWorkspace();
-      roots.push(root);
-      writeFileSync(join(root, "index.html"), '<main class="agent"><button class="agent__primary">开聊</button></main>');
-      writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { "probe:visual-review": "exit 99" } }));
-      const executors = createLocalWorkspaceToolExecutors({ workspaceRoot: root });
-      const capture = await executors.captureVisualState({
-        id: "call-capture", name: "captureVisualState",
-        arguments: JSON.stringify({ baseUrl: `file://${root}/`, path: "index.html", waitSelector: ".agent", focusSelector: ".agent__primary", expectText: "开聊", screenshotPath: "test-results/frontend-agent/after.png", metricsPath: "test-results/frontend-agent/metrics.json" }),
-      });
-      assertContains(capture.content, "screenshotPath: test-results/frontend-agent/after.png", "capture content");
-      assert(capture.metadata?.pageUrl === `file://${root}/index.html`, "capture should retain pageUrl");
-      assert(capture.metadata?.targetText === "开聊", "capture should retain targetText");
-      assert((capture.images?.length ?? 0) > 0, "platform capture must return images");
-    }
+    // 视觉捕获断言不在本探针里：它需要宿主装有渲染器（Chromium），
+    // 与「subprocess 工作区工具保留命令输出」这条契约无关。放在
+    // packages/agent-runtime/visualRenderer.test.ts（渲染器能力域）。
 
   } finally {
     for (const root of roots) {

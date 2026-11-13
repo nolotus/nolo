@@ -20,9 +20,27 @@ export interface SeoLocaleEntry {
     title: string;
     description: string;
   };
+  privacy: {
+    title: string;
+    description: string;
+  };
+  terms: {
+    title: string;
+    description: string;
+  };
+  notFound: {
+    title: string;
+    description: string;
+    heading: string;
+    message: string;
+    backHome: string;
+  };
 }
 
-const seoLocale: Record<Language, SeoLocaleEntry> = {
+// Partial: de/es currently inherit the English SEO entry (no dedicated block
+// yet); `resolveRequestLanguage` still serves them, so the map must not require
+// a key per enum member.
+const seoLocale: Partial<Record<Language, SeoLocaleEntry>> = {
   [Language.EN]: {
     title: "Nolo — Your AI team hands off the work",
     description:
@@ -46,6 +64,23 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       title: "Community Shares | See What People Build with Nolo.Chat",
       description:
         "Explore public chats, docs, apps, and shared outputs from the Nolo community to see how people use AI agents for real work.",
+    },
+    notFound: {
+      title: "Page Not Found | Nolo",
+      description: "This page does not exist. Head back to the Nolo home page.",
+      heading: "Page not found",
+      message: "The page you are looking for does not exist or has been moved.",
+      backHome: "Back to home",
+    },
+    privacy: {
+      title: "Privacy Policy | Nolo",
+      description:
+        "How Nolo collects, uses, and protects your personal information: account data, transaction records, technical logs, and first-party ad attribution.",
+    },
+    terms: {
+      title: "Terms of Service | Nolo",
+      description:
+        "The terms for using Nolo: pay-as-you-go points billing, payment processing, refunds, acceptable use, and content safety rules.",
     },
   },
   [Language.ZH_CN]: {
@@ -72,6 +107,23 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       description:
         "浏览社区公开分享的对话、文档、应用与成果，了解真实用户如何用 Nolo 完成研究、写作、开发与自动化任务。",
     },
+    notFound: {
+      title: "页面不存在 | Nolo",
+      description: "你访问的页面不存在。返回 Nolo 首页继续。",
+      heading: "页面不存在",
+      message: "你访问的页面不存在或已被移动。",
+      backHome: "返回首页",
+    },
+    privacy: {
+      title: "隐私政策 | Nolo",
+      description:
+        "Nolo 如何收集、使用与保护你的个人信息：账户数据、交易记录、技术日志与一方归因 cookie。",
+    },
+    terms: {
+      title: "服务条款 | Nolo",
+      description:
+        "使用 Nolo 的条款：积分按量计费、支付处理、退款政策、可接受使用与内容安全规则。",
+    },
   },
   [Language.ZH_HANT]: {
     title: "Nolo — 你的 AI 團隊，自己接力把活幹完",
@@ -96,6 +148,23 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       title: "Nolo 社群分享 | 看別人如何用 AI 把事做完",
       description:
         "瀏覽社群公開分享的對話、文件、應用與成果，了解真實使用者如何用 Nolo 完成研究、寫作、開發與自動化任務。",
+    },
+    notFound: {
+      title: "頁面不存在 | Nolo",
+      description: "你造訪的頁面不存在。返回 Nolo 首頁繼續。",
+      heading: "頁面不存在",
+      message: "你造訪的頁面不存在或已被移動。",
+      backHome: "返回首頁",
+    },
+    privacy: {
+      title: "隱私政策 | Nolo",
+      description:
+        "Nolo 如何收集、使用與保護你的個人資訊：帳戶資料、交易紀錄、技術日誌與一方歸因 cookie。",
+    },
+    terms: {
+      title: "服務條款 | Nolo",
+      description:
+        "使用 Nolo 的條款：積分按量計費、支付處理、退款政策、可接受使用與內容安全規則。",
     },
   },
   [Language.JA]: {
@@ -122,6 +191,23 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       description:
         "コミュニティが公開した対話、文書、アプリ、成果物を見ながら、Nolo が実務でどう使われているかを確認できます。",
     },
+    notFound: {
+      title: "ページが見つかりません | Nolo",
+      description: "お探しのページは存在しません。Nolo のホームへお戻りください。",
+      heading: "ページが見つかりません",
+      message: "お探しのページは存在しないか、移動されました。",
+      backHome: "ホームへ戻る",
+    },
+    privacy: {
+      title: "プライバシーポリシー | Nolo",
+      description:
+        "Nolo が個人情報をどのように収集・利用・保護するか：アカウントデータ、取引記録、技術ログ、ファーストパーティ归因 cookie。",
+    },
+    terms: {
+      title: "利用規約 | Nolo",
+      description:
+        "Nolo の利用規約：従量課金のクレジット、決済処理、返金ポリシー、許容される利用とコンテンツ安全ルール。",
+    },
   },
   [Language.KO]: {
     title: "Nolo — 당신의 AI 팀이 스스로 바통을 넘기며 일합니다",
@@ -146,6 +232,23 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       title: "커뮤니티 공유 | Nolo.Chat으로 완성된 실제 작업 사례",
       description:
         "Nolo 커뮤니티에서 공개 공유한 대화, 문서, 앱, 작업 결과물을 둘러보고 실제 업무에 AI를 활용하는 방법을 확인하세요.",
+    },
+    notFound: {
+      title: "페이지를 찾을 수 없음 | Nolo",
+      description: "찾으시는 페이지가 존재하지 않습니다. Nolo 홈으로 돌아가세요.",
+      heading: "페이지를 찾을 수 없습니다",
+      message: "찾으시는 페이지가 존재하지 않거나 이동되었습니다.",
+      backHome: "홈으로 돌아가기",
+    },
+    privacy: {
+      title: "개인정보 처리방침 | Nolo",
+      description:
+        "Nolo가 개인정보를 수집·이용·보호하는 방식: 계정 데이터, 거래 기록, 기술 로그, 퍼스트 파티 광고 귀속 쿠키.",
+    },
+    terms: {
+      title: "서비스 이용약관 | Nolo",
+      description:
+        "Nolo 이용 약관: 크레딧 종량제 과금, 결제 처리, 환불 정책, 허용 이용 및 콘텐츠 안전 규칙.",
     },
   },
 };

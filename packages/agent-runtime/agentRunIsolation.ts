@@ -50,6 +50,8 @@ export type RunIsolationEnvLike = Record<string, string | undefined>;
 export const ORCHESTRATION_TOOL_NAMES: ReadonlySet<string> = new Set([
   "startAgentRun",
   "controlAgentRun",
+  "requestTaskReview",
+  "recordTaskReviewDecision",
   "listAgents",
   "readAgent",
   "runStreamingAgent",
@@ -65,6 +67,8 @@ export const ORCHESTRATION_TOOL_NAMES: ReadonlySet<string> = new Set([
  */
 export const INTERACTION_REQUIRED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "ask_user",
+  // 凭据请求：需要宿主交互面板（Block 1a）；desktop 无通道时同 ask_user 剥离。
+  "secret-request",
 ]);
 
 /**

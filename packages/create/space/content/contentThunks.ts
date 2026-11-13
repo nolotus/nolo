@@ -9,6 +9,7 @@ import {
 } from "../spaceCurrentStore";
 import { addContentAction } from "./addContentAction";
 import { deleteContentFromSpaceAction } from "./deleteContentFromSpaceAction";
+import { unlinkSpaceContentAction } from "./unlinkSpaceContentAction";
 import { moveContentAction } from "./moveContentAction";
 import { updateContentTitleAction } from "./updateContentTitleAction";
 import { updateContentPinnedAction } from "./updateContentPinnedAction";
@@ -104,12 +105,31 @@ export const moveContentToSpace = createAsyncThunk(
     if (getCurrentSpaceIdRaw() === targetSpaceId && updatedTargetSpaceData) {
       updateCurrentSpaceIfMatch(targetSpaceId, updatedTargetSpaceData);
     }
+    // moveContentAction 把部分失败收进 payload.error；带着 error 的 payload 不能再
+    // 当成成功返回，否则 UI 会弹「已移动」而侧栏仍停在旧分组。
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
     return payload;
   }
 );
 
-export const deleteContentFromSpace = createAsyncThunk(
-  "space/deleteContentFromSpace",
+export const unlinkSpaceContent = createAsyncThunk(
+  "space/unlinkSpaceContent",
+  async (arg: any, thunkAPI: any) => {
+    const payload = await unlinkSpaceContentAction(arg, thunkAPI);
+    if (payload.updatedSpaceData && getCurrentSpaceIdRaw() === payload.spaceId) {
+      updateCurrentSpaceIfMatch(payload.spaceId, payload.updatedSpaceData);
+    }
+    // 引用已移除但实体对齐全失败时，错误必须真实返回，不能报成功。
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+    return payload;
+  }
+);
+
+export const deleteContentFromSpace = createAsyncThunk(  "space/deleteContentFromSpace",
   async (arg: any, thunkAPI: any) => {
     const payload = await deleteContentFromSpaceAction(arg, thunkAPI);
     syncCurrentSpaceIfNormalizedMatch(

@@ -58,6 +58,9 @@ export const sidebarItemStyles = stylex.create({
   unreadDot: { position: "absolute", top: "-1px", right: "-1px", width: "7px", height: "7px", borderRadius: 999, backgroundColor: "var(--primary)", boxShadow: "0 0 0 2px var(--background)" },
   statusMark: { display: "block", width: "8px", height: "8px", borderRadius: 999, backgroundColor: "var(--primary)" },
   statusFailed: { backgroundColor: "var(--error)" },
+  // 状态标记画在身份图标旁（不替换、不遮挡图标本身）。
+  statusBadge: { position: "absolute", right: "-4px", bottom: "-4px", display: "flex", alignItems: "center", justifyContent: "center", width: "12px", height: "12px", borderRadius: 999, backgroundColor: "var(--background)", boxShadow: "0 0 0 1.5px var(--background)", pointerEvents: "none" },
+  statusMarkOverlay: { position: "absolute", right: "-2px", bottom: "-2px", boxShadow: "0 0 0 2px var(--background)" },
   dragHandle: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, display: "grid", alignItems: "center", justifyContent: "center", color: "var(--textTertiary)", opacity: 0, transitionProperty: { default: "opacity", "@media (prefers-reduced-motion: reduce)": "none" }, transitionDuration: "0.2s", transitionTimingFunction: "ease", backgroundColor: "color-mix(in srgb, var(--background) 82%, transparent)", borderRadius: "var(--radius-sm)", borderWidth: "1px", borderStyle: "solid", borderColor: "color-mix(in srgb, var(--border) 50%, transparent)" },
   dragHidden: { opacity: 0, pointerEvents: "none" },
   dragVisible: { opacity: 0.9 },

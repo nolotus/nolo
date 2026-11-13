@@ -1,8 +1,11 @@
+import { isAbortError } from "core/abortError";
 // 文件路径: packages/chat/dialog/actions/updateDialogSummaryAction.ts
 
 import type { RootState } from "app/store";
 import { runLlm } from "ai/agent/agentSlice";
-import { BUILTIN_DIALOG_LLM_FALLBACK_MODEL, BUILTIN_SUMMARY_LLM_CONFIG } from "./builtinDialogLlm";
+import { BUILTIN_SUMMARY_LLM_CONFIG } from "./builtinDialogLlm";
+import { selectSummaryRoute, createSummaryBudget, runSummaryWithContract, classifySummaryError, type SummaryAttemptContext, type SummaryCompletion } from "ai/context/summaryRouting";
+import { PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL } from "ai/llm/platformHostedRoutingTable";
 import { patch, selectById } from "database/dbSlice";
 import { DialogConfig, Agent } from "app/types";
 import { DEFAULT_CONTEXT_WINDOW } from "ai/llm/getModelContextWindow";
@@ -49,12 +52,23 @@ const identityCanonicalName = (name: string): string => name;
 
 const summarizingDialogs = new Set<string>();
 
+export class BudgetRescueError extends Error {
+    constructor(readonly code: "busy" | "missing-dialog" | "no-compressible-history" | "no-summary-input" | "failed", detail: string) {
+        super(`budget_rescue ${code}: ${detail}; request not sent`);
+        this.name = "BudgetRescueError";
+    }
+}
+
 export const updateDialogSummaryAction = async (
     args: {
         dialogKey: string;
         preFetchedMessages?: Message[];
         force?: boolean;
-        reason?: "task_completed" | "context_budget" | "manual";
+        reason?: "task_completed" | "context_budget" | "manual" | "budget_rescue";
+        availableHistoryTokens?: number;
+        contextWindow?: number;
+        preserveLatestUserByProjection?: boolean;
+        deadlineMs?: number;
         /**
          * 本轮最后一次 provider 调用的真实 input_tokens。
          * 压缩触发只认这个真实遥测；缺失时 planCompression 落估算兜底。
@@ -68,18 +82,36 @@ export const updateDialogSummaryAction = async (
     const { dialogKey, preFetchedMessages, force = false } = args;
 
     // 0. 并发锁：避免同一个 Dialog 同时进行多个摘要任务
-    if (summarizingDialogs.has(dialogKey)) return;
+    if (summarizingDialogs.has(dialogKey)) {
+        if (args.reason === "budget_rescue") throw new BudgetRescueError("busy", "another summary is in progress");
+        return;
+    }
     summarizingDialogs.add(dialogKey);
 
-    const { dispatch, getState } = thunkApi;
+    const { dispatch, getState, signal } = thunkApi;
 
+    const budget = createSummaryBudget({ mode: args.reason === "manual" ? "manual" : "automatic", signal, deadlineMs: args.deadlineMs });
     try {
         const state = getState() as RootState;
         const dialogId = extractCustomId(dialogKey);
 
         const dialogConfig = selectById(state, dialogKey) as DialogConfig;
-        if (!dialogConfig) return;
+        if (!dialogConfig) {
+            if (args.reason === "budget_rescue") throw new BudgetRescueError("missing-dialog", "dialog record unavailable");
+            return;
+        }
 
+        const agentId = getActiveDialogAgentId(dialogConfig);
+        const currentAgent = agentId ? applyBuiltinAgentRuntimeOverride(
+            agentId, (selectById(state, agentId) as Agent | undefined) ?? { dbKey: agentId },
+        ) as Agent : undefined;
+        const session = thunkApi.extra?.accountSession?.getSnapshot();
+        const account = session?.accounts?.find((entry: { userId: string }) => entry.userId === session.activeAccountId);
+        const eligibility = { userId: session?.activeAccountId,
+            authenticated: !!session?.activeToken, platformAvailable: !!session?.activeToken,
+            credits: account?.balance };
+        const route = selectSummaryRoute(eligibility);
+        const currentAvailable = !!currentAgent?.model && !!currentAgent?.provider && currentAgent.apiSource !== "cli";
         let contextWindow = DEFAULT_CONTEXT_WINDOW;
         {
             // 选人必须与展示侧同一入口：activeAgentKey → primaryAgentKey → cybots[0]
@@ -105,6 +137,8 @@ export const updateDialogSummaryAction = async (
             }) ?? DEFAULT_CONTEXT_WINDOW;
         }
 
+        contextWindow = args.contextWindow ?? contextWindow;
+
         // 2. 获取消息
         const allMsgs =
             preFetchedMessages || getMessagesForDialogFromState(state, dialogId);
@@ -117,6 +151,8 @@ export const updateDialogSummaryAction = async (
             contextWindow,
             force,
             reason: args.reason,
+            availableHistoryTokens: args.availableHistoryTokens,
+            preserveLatestUserByProjection: args.preserveLatestUserByProjection,
             ...(typeof args.lastRealInputTokens === "number" &&
             args.lastRealInputTokens > 0 &&
             contextWindow > 0
@@ -129,15 +165,16 @@ export const updateDialogSummaryAction = async (
                 : {}),
         });
 
-        if (!plan.shouldCompress) return;
+        if (!plan.shouldCompress) {
+            if (args.reason === "budget_rescue") throw new BudgetRescueError("no-compressible-history", "summary plan cannot cover more history");
+            return;
+        }
 
         const previousSummary = dialogConfig.summary || "";
-        // The same request is retried on the fallback model. Bound it against
-        // both summary models, never against the dialog agent's larger window.
-        // Unknown model windows use a conservative 32k boundary.
+        // Bound both reachable models; unknown current windows remain conservative.
         const summaryWindow = Math.min(
-            resolveAgentContextWindow({ model: BUILTIN_SUMMARY_LLM_CONFIG.model, provider: BUILTIN_SUMMARY_LLM_CONFIG.provider }) ?? 32_768,
-            resolveAgentContextWindow({ model: BUILTIN_DIALOG_LLM_FALLBACK_MODEL, provider: BUILTIN_SUMMARY_LLM_CONFIG.provider }) ?? 32_768,
+            route.kind === "platform" ? resolveAgentContextWindow({ model: route.model, provider: "nolo" }) ?? 32_768 : Infinity,
+            currentAvailable ? resolveAgentContextWindow(currentAgent!) ?? 32_768 : route.kind === "platform" ? Infinity : 32_768,
         );
         const request = buildBoundedCompactionRequest({
             msgsToCompress: plan.msgsToCompress,
@@ -147,6 +184,7 @@ export const updateDialogSummaryAction = async (
         });
         if (request.status === "blocked") {
             notifyCompressionFailure(new Error(`摘要请求无法安全构建（${request.reason}），原历史保持不变`));
+            if (args.reason === "budget_rescue") throw new BudgetRescueError("no-summary-input", `bounded summary request blocked: ${request.reason}`);
             return;
         }
         const { coveredMessages, summarizedBeforeId: newSummarizedBeforeId, promptContent, outputTokenBudget } = request;
@@ -156,53 +194,53 @@ export const updateDialogSummaryAction = async (
         }
 
         try {
-            // 调用内置 Summary LLM，用统一的 system prompt 覆盖原 BUILTIN_SUMMARY_LLM_CONFIG.prompt
-            const runSummaryLlm = (model?: string) =>
-                dispatch(
-                    runLlm({
-                        llmConfig: {
-                            ...BUILTIN_SUMMARY_LLM_CONFIG,
-                            ...(model ? { model } : {}),
-                            prompt: COMPACTION_SUMMARY_SYSTEM_PROMPT,
-                            max_tokens: outputTokenBudget,
-                        },
-                        content: promptContent,
-                        billingDialogKey: dialogKey,
-                    })
-                ).unwrap();
-
-            const isUsableSummary = (value: unknown): value is string =>
-                typeof value === "string" && value.trim().length > 0;
-
-            // 主模型 mimo-v2.6-flash；请求失败（网络异常 / 非 2xx / 空结果）时用
-            // 同一份 content 换 deepseek-flash 重试一次（web 请求经 resolveClientWire
-            // 按模型选 wire，deepseek-flash 的 Responses 线可原样复用）。
-            // 两次都失败再抛错 → 外层 catch 走既有失败兜底（不更新摘要 + 失败通知）。
-            let newSummary: unknown = "";
-            let primaryError: unknown;
-            try {
-                newSummary = await runSummaryLlm();
-            } catch (error) {
-                primaryError = error;
-            }
-            if (!isUsableSummary(newSummary)) {
-                try {
-                    newSummary = await runSummaryLlm(BUILTIN_DIALOG_LLM_FALLBACK_MODEL);
-                } catch (fallbackError) {
-                    throw primaryError ?? fallbackError;
+            const runSummaryLlm = async (platform: boolean, context: SummaryAttemptContext): Promise<SummaryCompletion> => {
+                if (context.signal.aborted) throw context.signal.reason;
+                if (!platform && !currentAvailable) throw new Error("Current model textOnly summary channel unavailable");
+                const pending = dispatch(runLlm({
+                    llmConfig: {
+                        ...(platform ? { ...BUILTIN_SUMMARY_LLM_CONFIG, model: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL } : currentAgent!),
+                        prompt: COMPACTION_SUMMARY_SYSTEM_PROMPT,
+                        max_tokens: outputTokenBudget, tools: [],
+                    },
+                    toolsOverride: [], isStreaming: false, summaryCompletion: true,
+                    systemPromptOverride: COMPACTION_SUMMARY_SYSTEM_PROMPT,
+                    content: promptContent, billingDialogKey: dialogKey,
+                }));
+                const onAbort = () => pending.abort?.();
+                context.signal.addEventListener("abort", onAbort, { once: true });
+                if (context.signal.aborted) onAbort();
+                try { return await pending.unwrap(); }
+                finally { context.signal.removeEventListener("abort", onAbort); }
+            };
+            const result = await runSummaryWithContract({
+                eligibility, budget,
+                platform: { model: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL, provider: "nolo", run: context => runSummaryLlm(true, context) },
+                current: { model: currentAgent?.model, provider: currentAgent?.provider, run: context => runSummaryLlm(false, context) },
+            });
+            if (result.kind !== "success") {
+                if (args.reason === "budget_rescue" && result.kind === "cancelled") {
+                    const error = new Error("budget_rescue cancelled");
+                    error.name = "AbortError";
+                    throw error;
                 }
-                if (!isUsableSummary(newSummary) && primaryError) {
-                    // 回退返回空结果且主模型曾经抛错 → 仍按失败处理，保留失败通知语义。
-                    throw primaryError;
+                if (result.kind !== "cancelled") {
+                    notifyCompressionFailure(result.kind === "error" ? result.error : new Error(`Summary ${result.kind}`));
                 }
+                if (args.reason === "budget_rescue") throw new BudgetRescueError("failed", `summary outcome ${result.kind}`);
+                return result;
             }
-
+            const newSummary = result.text;
+            await budget.run(async () => undefined);
             if (newSummary && typeof newSummary === "string" && newSummary.trim()) {
                 const currentCount = dialogConfig.compressionCount || 0;
-                const sourceMeta = await computeSummarySourceMetadata(
+                const sourceMeta = await budget.run(async () => computeSummarySourceMetadata(
                     allMsgs,
                     newSummarizedBeforeId,
-                );
+                ));
+                // Hashing is asynchronous: cancellation can win after model completion.
+                // Never persist any part of that discarded candidate.
+                if (budget.signal.aborted) throw budget.signal.reason;
 
                 await dispatch(
                     patch({
@@ -230,7 +268,7 @@ export const updateDialogSummaryAction = async (
                         msgsToKeep: [...plan.msgsToCompress.slice(coveredMessages.length), ...plan.msgsToKeep],
                     },
                     newSummary: newSummary.trim(),
-                    // web 端 runLlm 只返回摘要字符串，不含 usage。
+                    // Compact completion retains finish metadata but does not return usage.
                     // summaryUsage 需要 runLlm 改造才能获取，当前留空。
                 });
                 console.log(formatCompactionMetricsLog(metrics));
@@ -243,12 +281,21 @@ export const updateDialogSummaryAction = async (
                 }
             }
         } catch (err) {
-            console.error("[ContextCompression] Failed:", err);
+            if (signal?.aborted || isAbortError(err)) {
+                if (args.reason === "budget_rescue") throw err;
+                return;
+            }
+            if (args.reason === "budget_rescue") {
+                if (!(err instanceof BudgetRescueError)) notifyCompressionFailure(classifySummaryError(err));
+                throw err instanceof BudgetRescueError ? err : new BudgetRescueError("failed", "summary operation failed");
+            }
+            console.error("[ContextCompression] Failed:", classifySummaryError(err));
             // 失败也要可见：此前只打 console，用户侧表现为
             // 「超限了也没自动压缩」且没有任何线索。
-            notifyCompressionFailure(err);
+            notifyCompressionFailure(classifySummaryError(err));
         }
     } finally {
+        budget.dispose();
         summarizingDialogs.delete(dialogKey);
     }
 };

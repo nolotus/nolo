@@ -1,4 +1,5 @@
 import { DataType } from "create/types";
+import { splitDialogKeyIdentity } from "core/dialogKeyIdentity";
 import { ulid } from "./utils/ulid";
 
 const SEPARATOR = "-";
@@ -8,19 +9,17 @@ const splitKey = (key: string) => key.split(SEPARATOR);
 export const buildDialogKey = (userId: string, dialogId: string): string =>
   createKey(DataType.DIALOG, userId, dialogId);
 
-/** userId may contain '-': dialogId is suffix after last dash */
+/**
+ * `dialog-<userId>-<dialogId>` → 身份。
+ * dialogId 形态（ULID / UUID）由 `core/dialogKeyIdentity` 统一判定：UUID 尾段
+ * 也带 '-'，按「最后一段即 dialogId」切会把 id 截断，故不再在此重复切法。
+ */
 export const parseDialogKey = (
   key: string,
 ): { userId: string; dialogId: string } | null => {
   const prefix = `${DataType.DIALOG}${SEPARATOR}`;
   if (typeof key !== "string" || !key.startsWith(prefix)) return null;
-  const rest = key.slice(prefix.length);
-  const lastDash = rest.lastIndexOf(SEPARATOR);
-  if (lastDash <= 0 || lastDash === rest.length - 1) return null;
-  return {
-    userId: rest.slice(0, lastDash),
-    dialogId: rest.slice(lastDash + 1),
-  };
+  return splitDialogKeyIdentity(key);
 };
 
 export const isDialogKey = (key: string): boolean => {

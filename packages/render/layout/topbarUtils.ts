@@ -78,6 +78,7 @@ export const getContentKeyType = (
   if (pageKey.startsWith("file")) return "file";
   if (pageKey.startsWith("image")) return "image";
   if (pageKey.startsWith("page")) return "page";
+  if (pageKey.startsWith("app-")) return "app";
   if (pageKey.startsWith("meta")) return "meta";
   if (pageKey.startsWith("dialog")) return "dialog";
   if (pageKey.startsWith("task")) return "task";

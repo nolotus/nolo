@@ -12,6 +12,10 @@ import {
 } from "../integrations/openai/responsesHelpers";
 import { parseSseDataLineObject } from "./sseDataLine";
 import { readSseFrames } from "./sseFrames";
+import {
+  createResponsesProtocolLeakSanitizer,
+  sanitizeResponsesProtocolLeakText,
+} from "./responsesProtocolLeakSanitizer";
 
 export type ResponsesStreamFailure = {
   code?: string;
@@ -59,6 +63,7 @@ export type ResponsesStreamAggregation = {
   usage?: Record<string, unknown>;
   finish_reason?: string;
   stream_complete?: boolean;
+  leaked_protocol_intercepted?: boolean;
   /**
    * 上游连接干净结束但**没有任何终局事件**（既无 response.completed，也无
    * response.incomplete / response.failed / error）。与 platformChatProvider 的
@@ -134,6 +139,8 @@ export function createResponsesStreamCollector(callbacks?: {
 }) {
   let content = "";
   let reasoning = "";
+  const textSanitizer = createResponsesProtocolLeakSanitizer(callbacks?.onTextDelta);
+  let sawNonEmptyOutputTextDelta = false;
   const toolCallsAcc = createResponsesToolAccumulator();
   let usage: Record<string, unknown> | undefined;
   let failure: ResponsesStreamFailure | undefined;
@@ -208,8 +215,8 @@ export function createResponsesStreamCollector(callbacks?: {
       return;
     }
     if (type === "response.output_text.delta" && typeof ev.delta === "string") {
-      content += ev.delta;
-      callbacks?.onTextDelta?.(ev.delta);
+      if (ev.delta.length > 0) sawNonEmptyOutputTextDelta = true;
+      textSanitizer.push(ev.delta);
       return;
     }
     if (
@@ -225,11 +232,11 @@ export function createResponsesStreamCollector(callbacks?: {
       // 任何 text delta 时作为正文（首写胜出），并经 onTextDelta 转发给客户端——
       // 否则「只发 output_item.done、不发 delta」的供应商会丢正文。
       const item = ev.item as Record<string, unknown> | undefined;
-      if (item?.type === "message" && !content) {
+      if (item?.type === "message" && !sawNonEmptyOutputTextDelta) {
         const itemText = extractOutputTextFromItem(item);
         if (itemText) {
-          content = itemText;
-          callbacks?.onTextDelta?.(itemText);
+          sawNonEmptyOutputTextDelta = true;
+          textSanitizer.push(itemText);
         }
       }
       applyResponsesToolEvent(toolCallsAcc, ev);
@@ -364,8 +371,16 @@ export function createResponsesStreamCollector(callbacks?: {
       // 权威策略下失败即零工具：即便调用方忽略 failure，也不执行任何工具。
       finalToolCalls = [];
     }
+    const sanitized = textSanitizer.finalize();
+    content = sanitized.content;
+    let intercepted = sanitized.intercepted;
     if (!content && completedResponse) {
-      content = extractTextFromResponseOutput(completedResponse);
+      const extracted = extractTextFromResponseOutput(completedResponse);
+      if (extracted) {
+        const sanitizedExtracted = sanitizeResponsesProtocolLeakText(extracted);
+        content = sanitizedExtracted.content;
+        if (sanitizedExtracted.intercepted) intercepted = true;
+      }
     }
     if (!reasoning && completedResponse) {
       reasoning = extractReasoningFromResponseOutput(completedResponse);
@@ -387,6 +402,7 @@ export function createResponsesStreamCollector(callbacks?: {
         : {}),
       ...(streamComplete ? { stream_complete: true } : {}),
       ...(streamTruncated ? { stream_truncated: true } : {}),
+      ...(intercepted ? { leaked_protocol_intercepted: true } : {}),
       ...(completedResponse ? { completed_response: completedResponse } : {}),
       ...(completedResponse && typeof completedResponse.id === "string"
         ? { response_id: completedResponse.id }

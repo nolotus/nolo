@@ -92,7 +92,7 @@ export const COMPACTION_SUMMARY_SYSTEM_PROMPT = `你是对话上下文压缩器�
    - 「卡点与需用户决定」：阻塞项卡在哪、需要用户提供什么（授权 / 凭据 / 决定），写清楚，不得含糊。
    - 「输入未覆盖」：压缩范围内查不到的关键信息（如初始原话、指定 id），必须写"输入中未见"，禁止脑补。
 3) 对话进展与待办以第一人称续作笔记的口吻写（"我做了…""用户要求…""下一步我需要…"），不要写成第三方观察报告。先极简概括旧上下文，再更详细记录最近进展、结论、分歧与下一步。对于声称已完成但尚未验证的工作（如工具调用返回成功但结果未人工确认），明确标注"（待验证）"——不要默认信任工具返回值。
-4) 文件操作清单：列出本次压缩范围内读取、写入、编辑过的文件路径及操作类型（如: - 读取: path/to/file；若未涉及文件操作写"无"）。
+4) 文件操作清单：按读取、写入、编辑列出路径（如: - 读取: path/to/file；未涉及则写"无"）。有长度约束时合并旧操作，省略无关读取。
 5) 忽略寒暄、重复尝试和无价值废话；**已放弃的方案/尝试**可以省略，但用户当初的意图与理由不可省略（见第 2 条）。
 6) 不要编造未出现的信息；不要开场白、结束语、markdown 代码块或额外章节；不要调用任何工具。`;
 
@@ -142,8 +142,19 @@ export function buildCompactionUserContent(args: {
   previousSummary: string;
   messagesText: string;
   fileOpsText?: string;
+  /** Request-local generation target, distinct from the transport hard cap. */
+  outputTokenBudget?: number;
 }): string {
-  const parts = [`【现有记忆】：\n${args.previousSummary || "(无)"}`];
+  const parts: string[] = [];
+  if (args.outputTokenBudget !== undefined) {
+    const budget = args.outputTokenBudget;
+    if (!Number.isFinite(budget) || budget < 1) throw new RangeError("Invalid summary output budget");
+    const limit = Math.floor(budget);
+    // Risk mitigation only, not evidence that output capacity caused a failure.
+    const target = Math.max(1, Math.min(2000, Math.floor(limit / 2)));
+    parts.push(`Summary target: ${target} tokens; hard output limit: ${limit} tokens. Complete 3 sections; merge old progress/files.`);
+  }
+  parts.push(`【现有记忆】：\n${args.previousSummary || "(无)"}`);
   if (args.fileOpsText !== undefined) {
     parts.push(`【文件操作清单】：\n${args.fileOpsText || "无"}`);
   }
@@ -290,9 +301,9 @@ function makeBoundedExcerpt(content: string): (maxChars: number) => string {
 }
 
 /**
- * Project the entire safe plan, retaining every message's role and id. Input
+ * Project the entire safe plan, retaining every message's role and order. Input
  * counts use the shared estimator, not the provider's tokenizer. Original
- * messages stay in history; projected assistant/tool text can be lossy.
+ * messages stay in history; projected message text (including user text) can be lossy.
  */
 export function buildBoundedCompactionRequest<T extends CompactionRequestMessage>(args: {
   msgsToCompress: T[];
@@ -351,24 +362,28 @@ export function buildBoundedCompactionRequest<T extends CompactionRequestMessage
   const note = "以下是有损投影，部分消息可能被截取；原文仍存历史。";
   const omitted = "[... 内容已截取 ...]";
   const contents = msgs.map((msg) => serializeMessageContent(msg.content) || formatMessageContentFallback(msg));
-  const excerpts = contents.map((content, i) => msgs[i].role === "user" ? undefined : makeBoundedExcerpt(content));
+  const excerpts = contents.map((content) => makeBoundedExcerpt(content));
   const raw = contents.map((content, i) => msgs[i].role === "tool" ? excerpts[i]!(TOOL_RESULT_TRUNCATE_CHARS) : content);
-  const labels = msgs.map((msg) => `${msg.role} [id=${JSON.stringify(msg.id)}]: `);
-  const projected = msgs.map((msg, i) => msg.role === "user" ? raw[i] : omitted);
+  // Anchors use coveredMessages, not prompt labels. Repeating long IDs here
+  // consumes the budget needed for actual content in thousand-message plans.
+  const labels = msgs.map((msg) => `${msg.role}: `);
+  const projected = msgs.map(() => omitted);
   const makePrompt = () => buildCompactionUserContent({
-    previousSummary, fileOpsText,
+    previousSummary, fileOpsText, outputTokenBudget,
     messagesText: `${note}\n${labels.map((label, i) => label + projected[i]).join("\n")}`,
   });
   const base = makePrompt();
   const baseTokens = systemTokens + estimateTokenCount(base);
   if (baseTokens > cap) return { status: "blocked", reason: "no-budget" };
 
-  // Allocate remaining tokens fairly, with assistant content weighted twice as
-  // highly as tool content; short messages return their unused share. Estimating
+  // Allocate remaining tokens fairly: user intent gets weight 4, assistant 2,
+  // tool output 1. User text must also be projectable, or large requests make
+  // the mandatory base permanently exceed the cap. Short messages return
+  // their unused share. Estimating
   // each addition separately rounds upward and therefore cannot exceed the cap.
   const remaining = cap - baseTokens;
-  const demands = raw.map((text, i) => msgs[i].role === "user" ? 0 : estimateTokenCount(text));
-  const weights = msgs.map((msg) => msg.role === "assistant" ? 2 : 1);
+  const demands = raw.map((text) => estimateTokenCount(text));
+  const weights = msgs.map((msg) => msg.role === "user" ? 4 : msg.role === "assistant" ? 2 : 1);
   let low = 0;
   let high = remaining + 1;
   while (low + 1 < high) {
@@ -379,7 +394,6 @@ export function buildBoundedCompactionRequest<T extends CompactionRequestMessage
   }
   let extra = remaining - demands.reduce((sum, demand, i) => sum + Math.min(demand, low * weights[i]), 0);
   for (let i = 0; i < msgs.length; i++) {
-    if (msgs[i].role === "user") continue;
     let allowance = Math.min(demands[i], low * weights[i]);
     const bonus = Math.min(extra, demands[i] - allowance);
     allowance += bonus;
@@ -824,11 +838,10 @@ export type SummarySourceMetadata = {
 };
 
 export type SummarySourceMessageInput = {
-  id: string;
+  id?: string;
   role?: string;
   content?: unknown;
   tool_calls?: unknown;
-  [key: string]: unknown;
 };
 
 /**

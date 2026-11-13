@@ -13,17 +13,20 @@ export function hadToolImages(message: object): boolean {
 export type ToolImage = NonNullable<AgentRuntimeToolResult["images"]>[number];
 // Symbol keys survive object spreads but never JSON serialization, logs or storage.
 export const TOOL_IMAGES: unique symbol = Symbol("runtime-only-tool-images");
-export type ToolImageMessage = AgentRuntimeChatMessage & { [TOOL_IMAGES]?: ToolImage[] };
+export type ToolImageMessage = AgentRuntimeChatMessage & {
+  [TOOL_IMAGES]?: ToolImage[];
+  [TOOL_IMAGE_NOTICES]?: ReturnType<typeof createToolImageNotices>;
+};
 export function toolImages(message: object): ToolImage[] {
   return (message as ToolImageMessage)[TOOL_IMAGES] ?? [];
 }
-export function withoutToolImages<T extends object>(message: T): T {
+export function withoutToolImages<T extends ToolImageMessage>(message: T): T {
   if (!(TOOL_IMAGES in message)) return message;
-  const { [TOOL_IMAGES]: _images, ...textOnly } = message as T & { [TOOL_IMAGES]?: ToolImage[] };
+  const { [TOOL_IMAGES]: _images, ...textOnly } = message;
   return (_images?.length ? {
     ...textOnly,
     tool_result_metadata: {
-      ...(message as AgentRuntimeChatMessage).tool_result_metadata,
+      ...message.tool_result_metadata,
       [TOOL_HAD_IMAGES]: true,
     },
   } : textOnly) as T;

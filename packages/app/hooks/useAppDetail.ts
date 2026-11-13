@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useToken, useUserId } from "identity";
+import { getAllServers } from "database/actions/common";
+import { selectRemoteSyncServers } from "app/settings/serverSelectors";
 import { selectRemoteServer } from "app/settings/settingSlice";
 import type { AppVisibility } from "app/types/appSummary";
 import { syncAppRecord } from "app/actions/syncAppRecord";
@@ -113,6 +115,8 @@ export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {})
   const token = useToken();
   const currentUserId = useUserId();
   const server = useAppSelector(selectRemoteServer);
+  const syncServers = useAppSelector(selectRemoteSyncServers);
+  const readServersKey = JSON.stringify(getAllServers(server, syncServers));
   const [app, setApp] = useState<AppDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,7 +134,7 @@ export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {})
     try {
       const requestPath = options.prepareEdit ? "/api/app/prepare-edit" : "/api/app/get";
       const candidateServers = [
-        ...new Set(asTrimmedNonEmptyStringArray([server, options.serverOrigin])),
+        ...new Set(asTrimmedNonEmptyStringArray([server, options.serverOrigin, ...JSON.parse(readServersKey)])),
       ];
 
       let lastError: Error | null = null;
@@ -157,7 +161,10 @@ export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {})
             fallbackApp = detail;
             continue;
           }
-          const syncRecord = index > 0 ? resolveSyncRecord(json as AppDetail, currentUserId) : null;
+          // Explicit source hints retain the existing repair behavior; automatic
+          // discovery is read-only and must not fan out remote records.
+          const syncRecord = index > 0 && targetServer === options.serverOrigin
+            ? resolveSyncRecord(json as AppDetail, currentUserId) : null;
           if (index > 0 && json?.appKey && syncRecord) {
             try {
               await dispatch(
@@ -203,7 +210,7 @@ export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {})
     } finally {
       setLoading(false);
     }
-  }, [appKey, currentUserId, dispatch, options.prepareEdit, options.serverOrigin, server, token]);
+  }, [appKey, currentUserId, dispatch, options.prepareEdit, options.serverOrigin, readServersKey, server, token]);
 
   useEffect(() => {
     void fetchApp();

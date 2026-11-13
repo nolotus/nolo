@@ -1,3 +1,4 @@
+import { requestBrowserShellAction } from "./client/browserShellApprovalClient";
 import { t } from "./i18n";
 /**
  * `nolo browser <op>` (legacy alias: `nolo chrome <op>`) — the operation half of the browser group:
@@ -503,12 +504,13 @@ export async function runChromeOpsCommand(
   let result: unknown;
   try {
     const env = deps.env ?? process.env;
+    let targetBrowser: "chrome" | "firefox" | undefined = browserFlag;
     let client: ChromeConnectorClient;
 
     if (deps.client) {
       client = deps.client;
     } else {
-      let targetBrowser: "chrome" | "firefox" | undefined = browserFlag;
+      targetBrowser = browserFlag;
 
       if (!targetBrowser && !env.NOLO_CHROME_CONNECTOR_RPC_URL) {
         const probe = deps.probeBrowser ?? defaultProbeBrowser;
@@ -596,7 +598,8 @@ export async function runChromeOpsCommand(
       payload.tabId = String(activeTab.id);
     }
 
-    result = await client.request(spec.action, payload);
+    result = await requestBrowserShellAction({ browser: targetBrowser ?? "chrome", action: spec.action, payload, env,
+      execute: (action, next) => client.request(action, next) });
   } catch (error) {
     const code =
       typeof (error as { code?: unknown })?.code === "string"

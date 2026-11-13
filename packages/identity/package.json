@@ -61,6 +61,12 @@
     },
     "./session/accountSessionStore": {
       "default": "./session/accountSessionStore.ts"
+    },
+    "./sessionRevokeProof": {
+      "default": "./sessionRevokeProof.ts"
+    },
+    "./revokeSessionsClient": {
+      "default": "./revokeSessionsClient.ts"
     }
   },
   "devDependencies": {

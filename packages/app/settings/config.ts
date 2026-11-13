@@ -32,6 +32,9 @@ export const SettingRoutePaths = {
   // 密钥管理
   SETTING_SECRETS: "secrets",
 
+  // 数据源插件开关
+  SETTING_DATA_SOURCES: "data-sources",
+
   // 桌面更新
   SETTING_UPDATES: "updates",
 

@@ -198,16 +198,33 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
   // 256k 档
   if (normalizedName.includes("qwen3.6") || normalizedName.includes("qwen3p6")) return QWEN_3_6_CONTEXT_WINDOW;
   if (normalizedName.includes("qwen3.7") || normalizedName.includes("qwen3p7")) return 262_144;
-  if (normalizedName.includes("minimax-m2") || normalizedName.includes("minimax_m2")) return 262_144;
+  // 必须按 token 边界匹配：`includes("minimax_m2")` 会把 minimax_m2.7 / m2.5 一类
+  // 新版本按前缀吞进 262k，而它们的真实窗口不同（实测 "minimax m2.7" 走精确表得
+  // 204800）。下划线形态由 :466 的回退归一化处理。
+  //
+  // `_` 仍保留在字符类里：回退归一化带大小写闸门，全大写裸拼法（`MINIMAX_M2`）
+  // 不会被归一化，少了它就会从 HEAD 的 262144 掉到默认 256k。仅影响大写拼法，
+  // 方向是缩小，但没必要平白制造差异。
+  if (/minimax[-_ ]m2(?![\d.])/.test(normalizedName)) return 262_144;
   // Mistral 现任家族（依据：GET api.mistral.ai/v1/models 的 max_context_length，
   // 2026-10-07 实测全量读取）。必须置于下方通用 "mistral" → 32k 规则之前；
   // 历史小模型（mistral:7b / mistral-nemo）不在此列，仍落 32k / 128k 档。
-  if (normalizedName.includes("mistral-large-4")) {
-    // mistral-large-4 / mistral-large-4-0 = 524288；要求 token 边界，避免命中假想的 -40b 之类。
-    // 边界字符刻意不含 "."：mistral-large-4.1 这类尚未存在的版本宁可落通用兜底（同"表外不扩"口径）。
-    const rest = normalizedName.slice(
-      normalizedName.indexOf("mistral-large-4") + "mistral-large-4".length,
-    );
+  //
+  // 连字符 / 空格 / 下划线三种书写都必须认：TUI / agent 显示名走的是空格形态
+  // （"Mistral Large 4"、"Ollama Mistral Large 4"），自定义通道也可能写下划线。
+  // 这条规则原先只写连字符，于是显示名掉到下面通用的 includes("mistral") → 32k，
+  // 把 512k 的模型显示成 32k（与 "ollama" 被 llama 规则吞掉同源）。
+  // 两处分隔符都要放宽：mistral↔large、large↔4。只放宽第一处不够
+  // （"Mistral Large 4" 小写后是 mistral large 4，两处都是空格）。
+  // 下划线同样接受：下划线是显示变体而非独立命名（精确表里 0 条带下划线）。
+  const MISTRAL_LARGE_4 = /mistral[-_ ]large[-_ ]4/;
+  const large4 = MISTRAL_LARGE_4.exec(normalizedName);
+  if (large4) {
+    // mistral-large-4 / mistral-large-4-0 / "Mistral Large 4" = 524288；
+    // 要求 token 边界，避免命中假想的 -40b / 4.1 之类。
+    // 边界字符刻意不含 "."：mistral-large-4.1 这类尚未存在的版本宁可落通用兜底
+    // （同"表外不扩"口径）。
+    const rest = normalizedName.slice(large4.index + large4[0].length);
     if (rest === "" || /^[-:_@/\s]/.test(rest)) return 524_288;
   }
   if (
@@ -284,12 +301,14 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
   ) {
     return 8_192;
   }
-  // 4k 档
-  if (
-    normalizedName.includes("llama2") ||
-    normalizedName.includes("llama-2") ||
-    normalizedName.includes("llama")
-  ) {
+  // 4k 档（首代 llama / llama:7b 这类裸名 + "Meta Llama 2" 这类展示名变体）。
+  //
+  // 必须按**词边界**匹配，不能用 `includes("llama")`：那会把 provider 名
+  // "ollama" 里的 `-llama` 当成模型族命中（"Ollama V4.1 Flash" / "Ollama
+  // Cloud" / 裸 "ollama" 全部落 4K），TUI 状态栏于是把 1M 窗口的模型显示成
+  // `ctx 100% · 658k/4k`。同理 "codellama" 要留给上面的 16K 档，不能被这条
+  // 4K 规则吞掉（它同样只在前一个字母边界内包含 llama）。
+  if (/(^|[^a-z])llama/.test(normalizedName)) {
     return 4_096;
   }
   return undefined;
@@ -330,6 +349,21 @@ export const findCodexOAuthPinnedContextWindow = (
 export const findModelContextWindow = (
   modelName: string,
   provider?: string | null,
+): number | undefined => findModelContextWindowImpl(modelName, provider, false);
+
+/**
+ * `allowHyphenRetry` 只允许由本函数的回退分支自己置位一次，防递归。
+ *
+ * 回退必须**重入完整解析链**而不是只再调一次 fuzzy：fuzzy 跳过精确表与通道
+ * pin，而精确表的窗口值是数据真值源、通常比家族模糊规则更准（实测
+ * "accounts/fireworks/models/minimax m3" 连字符形态在表内是 512000，只跑
+ * fuzzy 会按家族规则给到 1000000 —— 近 2 倍高估，正是本文件
+ * mimo-v2.6-pro 那段刻意避免的「无证据放大」）。
+ */
+const findModelContextWindowImpl = (
+  modelName: string,
+  provider: string | null | undefined,
+  allowHyphenRetry: boolean,
 ): number | undefined => {
   if (!modelName) return undefined;
 
@@ -403,8 +437,65 @@ export const findModelContextWindow = (
     }
   }
 
-  return fuzzyContextWindow(normalizedName);
+  const fuzzy = fuzzyContextWindow(normalizedName);
+  if (fuzzy !== undefined) return fuzzy;
+
+  // 空格形态的**最后一道**回退：显示名用空格分隔（"Mistral Large 4"、
+  // "Phi 3"），而本文件里若干具体规则写的是连字符。
+  //
+  // 生效范围要说准（否则会误导下一个维护者）：它只在**整条解析链没有任何规则
+  // 命中**时兜底。像 "Mistral Large 4" 那种「通用规则 includes("mistral") 已
+  // 命中、只是给出 32k 错值」的情形，B 不会介入——那类缺口只能逐条放宽规则
+  // （本 diff 的 A 就是），B 兜不住。
+  //
+  // 重入的是**完整解析链**，连同精确表与通道 pin：只重跑 fuzzy 会跳过数据真值
+  // 源，按更粗的家族规则放大窗口（实测近 2 倍高估）。
+  //
+  // 归一化同时处理空白与下划线——两者都是**显示变体**，不是独立命名：精确表里
+  // 没有任何一条带下划线的 name/displayName（实测 0 条），而仓库多处既有规则
+  // 也早就把 `minimax_m3` / `qwen3p8` 当别名。所以下划线不该有自己的语义。
+  //
+  // 但不能无条件替换：
+  //  1) `claude_4.6` 直接落 200000 是对的（Claude 系真实窗口），若先归一化成
+  //     `claude-4.6` 会命中 Cursor OAuth 的 1M 规则，属错误放大。
+  //  2) 全大写枚举 selector（`MODEL_GPT_5_2_MEDIUM`，devin 通道专用）归一化后会
+  //     撞上 `includes("gpt-5")` → 1.05M，把一个「表外不猜」的 id 放大 4 倍。
+  //     它的下划线是命名结构而非分隔符，故只把**在原始大小写里两侧都是小写或
+  //     数字**的下划线视作分隔符。判断必须用 modelName 而非 normalizedName——
+  //     后者已 toLowerCase，`MODEL_GPT_5_2_MEDIUM` 会变成 model_gpt_5_2_medium，
+  //     两侧看着都"小写"，判据就失效了。
+  //
+  // 生效范围要如实说（否则会高估它）：这是**落空填充**，不是「下划线等价于空格」。
+  // 宽家族规则在上面就先截住了，比如 `Claude_Opus_5.5` 被 includes("claude") 判成
+  // 200000（精确表真值 1M），回退根本不会触发。那属于「宽规则错命中」，只能逐条
+  // 收紧规则，本回退兜不住——别指望它统一下划线/空格/连字符三种拼法。
+  //
+  // 另外：调用方必须传**原始大小写**的 id。下游若先 toLowerCase 再传进来，枚举
+  // 保护会失效（MODEL_GPT_5_2_MEDIUM 会退化成可被 gpt-5 家族命中的形态）。
+  //
+  // 只在整链落空后回退，这条「不覆写已有判定」的性质按构造成真。
+  if (!allowHyphenRetry) {
+    const canonical = normalizeSeparators(modelName);
+    if (canonical.toLowerCase() !== normalizedName) {
+      return findModelContextWindowImpl(canonical, provider, true);
+    }
+  }
+
+  return undefined;
 };
+
+/**
+ * 把「显示变体」的分隔符统一成连字符：空白一律，下划线仅在**原始大小写**里两侧
+ * 都是小写字母或数字时（`phi_4` / `glm_5.3` 是变体，`MODEL_GPT_5_2_MEDIUM` 是标识符）。
+ *
+ * 刻意不动大写：`MODEL_GPT_5_2_MEDIUM` 的下划线是命名结构，改掉会让它在非 devin
+ * 通道上撞进 `includes("gpt-5")` 家族规则，把「表外不猜」的 id 放大到 1.05M。
+ */
+function normalizeSeparators(raw: string): string {
+  return raw
+    .replace(/\s+/g, "-")
+    .replace(/(?<=[a-z0-9])_(?=[a-z0-9])/g, "-");
+}
 
 /**
  * 根据模型名称获取 Context Window 大小（精确表与 fuzzy 都 miss 时落 256k）。

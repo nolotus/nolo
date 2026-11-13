@@ -5,6 +5,7 @@ import { isAbsolute, resolve } from "node:path";
 import { toErrorMessage } from "core/errorMessage";
 import { compressImage } from "./compressImage";
 import { themeText } from "./theme";
+import { boxGlyphs, resolveBoxCharset } from "./tuiAnsi";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import { stripImageTokens } from "./sessionInput";
 
@@ -518,12 +519,15 @@ export function summarizeAttachment(img: AttachedImage): string {
   const nameRaw = `Name: ${img.filename}`;
 
   const boxWidth = Math.max(40, titleRaw.length + 4, nameRaw.length + 4, sizeText.length + 4);
-  const border = "┌" + "─".repeat(boxWidth - 2) + "┐";
-  const bottom = "└" + "─".repeat(boxWidth - 2) + "┘";
+  // 框线字符跟 resolveBoxCharset：EA=A=wide 的终端下制表符占 2 列，
+  // repeat 按字符数补格对不上，故退化为 ascii（`+ - |`，任何等宽字体都是 1 格）。
+  const g = boxGlyphs(resolveBoxCharset());
+  const border = g.tl + g.h.repeat(boxWidth - 2) + g.tr;
+  const bottom = g.bl + g.h.repeat(boxWidth - 2) + g.br;
 
   const padLine = (content: string) => {
     const padded = content.padEnd(boxWidth - 4, " ");
-    return `│ ${padded} │`;
+    return `${g.v} ${padded} ${g.v}`;
   };
 
   const title = padLine(titleRaw);
@@ -566,8 +570,11 @@ export function summarizeAttachments(images: AttachedImage[]): string {
   );
   const innerWidth = boxWidth - 4;
 
-  const top = "┌─ " + titleText + " " + "─".repeat(Math.max(0, boxWidth - titleText.length - 5)) + "┐";
-  const bottom = "└" + "─".repeat(boxWidth - 2) + "┘";
+  // 同 summarizeAttachment：框线字形跟 resolveBoxCharset（wide 下退化为 ascii）。
+  const g = boxGlyphs(resolveBoxCharset());
+  const top =
+    g.tl + g.h + " " + titleText + " " + g.h.repeat(Math.max(0, boxWidth - titleText.length - 5)) + g.tr;
+  const bottom = g.bl + g.h.repeat(boxWidth - 2) + g.br;
 
   const rows = rowsData.map(({ num, size, filename }) => {
     const availableNameWidth = Math.max(10, innerWidth - num.length - size.length - 2);
@@ -576,7 +583,7 @@ export function summarizeAttachments(images: AttachedImage[]): string {
       name = name.slice(0, availableNameWidth - 3) + "...";
     }
     const gap = " ".repeat(Math.max(1, innerWidth - num.length - name.length - size.length));
-    return `│ ${num}${name}${gap}${size} │`;
+    return `${g.v} ${num}${name}${gap}${size} ${g.v}`;
   });
 
   const text = [top, ...rows, bottom].join("\n");

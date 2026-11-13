@@ -1,6 +1,6 @@
 // CategoryHeader.tsx
 import "./CategoryHeader.css";
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { ConfirmModal } from "render/web/ui/modal/ConfirmModal";
 import {
@@ -44,6 +44,10 @@ interface CategoryHeaderProps {
   categoryId: string;
   categoryName: string;
   itemCount?: number;
+  spaceId?: string;
+  canEdit?: boolean;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
   handleProps?: {
     onDragStart?: (e: React.DragEvent) => void;
     onDragEnd?: (e: React.DragEvent) => void;
@@ -54,6 +58,10 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
   categoryId,
   categoryName = "",
   itemCount,
+  spaceId: propSpaceId,
+  canEdit: propCanEdit,
+  isCollapsed: propIsCollapsed,
+  onToggleCollapse: propOnToggleCollapse,
   handleProps,
 }) => {
   const { t } = useTranslation("space");
@@ -62,36 +70,63 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
+  // Space captured when a multi-step flow (inline editor / delete confirm) starts.
+  // Submitting later must still target that same space, otherwise it is a write to
+  // whatever space the account switched to in the meantime.
+  const pendingEditSpaceId = useRef<string | null>(null);
+  const pendingDeleteSpaceId = useRef<string | null>(null);
 
-  const spaceId = useCurrentSpaceId();
+  const currentSpaceId = useCurrentSpaceId();
+  // Writes only ever target an explicitly provided spaceId. Falling back to the
+  // global current space would let a header rendered for another space mutate it.
+  const spaceId = propSpaceId;
   const isUncategorized = categoryId === UNCATEGORIZED_ID;
-  const isCollapsed = useIsCategoryCollapsed(categoryId);
+  const internalCollapsed = useIsCategoryCollapsed(categoryId);
+  const isCollapsed = propIsCollapsed !== undefined ? propIsCollapsed : internalCollapsed;
   const displayCategoryName = isUncategorized
     ? t("uncategorized")
     : categoryName;
 
   const handleSaveName = useCallback(
     (newName: string) => {
-      if (spaceId && !isUncategorized) {
+      // Re-check at submit time: props may have changed while the editor was open.
+      const stillSameSpace = pendingEditSpaceId.current === spaceId;
+      pendingEditSpaceId.current = null;
+      if (spaceId && !isUncategorized && propCanEdit === true && stillSameSpace) {
         dispatch(updateCategoryNameAction({ spaceId, categoryId, name: newName }));
       }
     },
-    [dispatch, spaceId, categoryId, isUncategorized]
+    [dispatch, spaceId, categoryId, isUncategorized, propCanEdit]
   );
 
   const { isEditing, startEditing, inputRef, inputProps } = useInlineEdit({
     initialValue: displayCategoryName,
     onSave: handleSaveName,
     placeholder: t("categoryNamePlaceholder"),
-    disabled: isUncategorized,
+    disabled: isUncategorized || propCanEdit !== true,
   });
 
-  const handleToggleCollapse = () =>
-    dispatch(toggleCategoryCollapseAction({ categoryId }));
+  const handleToggleCollapse = () => {
+    if (propOnToggleCollapse) {
+      propOnToggleCollapse();
+    } else {
+      dispatch(toggleCategoryCollapseAction({ categoryId }));
+    }
+  };
 
   const handleDelete = () => {
-    if (spaceId && !isUncategorized) {
-      dispatch(deleteCategoryAction({ spaceId, categoryId }));
+    const targetSpaceId = propSpaceId;
+    // Re-validate at submit time: permission or space may have changed while the
+    // confirm modal was open (account switch, revoked membership, space switched).
+    const confirmedSpaceId = pendingDeleteSpaceId.current;
+    pendingDeleteSpaceId.current = null;
+    if (
+      targetSpaceId &&
+      propCanEdit === true &&
+      !isUncategorized &&
+      confirmedSpaceId === targetSpaceId
+    ) {
+      dispatch(deleteCategoryAction({ spaceId: targetSpaceId, categoryId }));
     }
     setIsDeleteModalOpen(false);
   };
@@ -130,7 +165,7 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
     [handleProps]
   );
 
-  const canEdit = !isUncategorized && !isEditing;
+  const canEdit = !isUncategorized && !isEditing && propCanEdit === true && Boolean(spaceId);
   const canDrag = canEdit && !!handleProps;
 
   const nameProps = useMemo(
@@ -197,16 +232,21 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <CreateMenuButton
-              variant="header"
-              categoryId={categoryId}
-              className="CategoryHeader__action-btn"
-              title={t("newPage")}
-              onOpenChange={setIsCreateMenuOpen}
-            />
+            {(!propSpaceId || propSpaceId === currentSpaceId) && (
+              <CreateMenuButton
+                variant="header"
+                categoryId={categoryId}
+                className="CategoryHeader__action-btn"
+                title={t("newPage")}
+                onOpenChange={setIsCreateMenuOpen}
+              />
+            )}
             <button
               className="CategoryHeader__action-btn"
-              onClick={startEditing}
+              onClick={() => {
+                pendingEditSpaceId.current = propSpaceId ?? null;
+                startEditing();
+              }}
               title={t("editName")}
               aria-label={t("editName")}
               type="button"
@@ -215,7 +255,10 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
             </button>
             <button
               className="CategoryHeader__action-btn is-danger"
-              onClick={() => setIsDeleteModalOpen(true)}
+              onClick={() => {
+                pendingDeleteSpaceId.current = propSpaceId ?? null;
+                setIsDeleteModalOpen(true);
+              }}
               title={t("deleteCategory")}
               aria-label={t("deleteCategory")}
               type="button"

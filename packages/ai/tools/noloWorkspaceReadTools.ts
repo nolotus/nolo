@@ -1,4 +1,5 @@
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
+import { selectIdentityToken, selectIdentityUserId } from "identity/selectors";
 import { DataType } from "create/types";
 import {
   assembleAgentDiscoveryResult,
@@ -71,12 +72,13 @@ const getRuntime = (thunkApi: any) => {
       snapshot?.currentUserId ??
       state.currentUserId ??
       state.userId ??
-      state.auth?.userId ??
-      state.auth?.currentUser?.userId,
+      // 不再直接摸 state.auth.*：identity 迁移后 auth 切片是历史字段，
+      // 选中逻辑归 identity（各 edition 自己决定来源），此处只当最后兜底。
+      selectIdentityUserId(state),
     currentToken:
       snapshot?.currentToken ??
       state.currentToken ??
-      state.auth?.currentToken,
+      selectIdentityToken(state),
     currentServer:
       snapshot?.currentServer ??
       state.currentServer ??

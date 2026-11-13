@@ -125,7 +125,7 @@ export function getSystemInternalCommandEntries(renderHelpText: () => string): C
     createArgsCommand(["secret"], "Manage local developer secrets (~/.nolo/credentials/secrets.json)", async (args) => {
       const { runSecretCommand } = await import("./secretCommands");
       await runSecretCommand(args);
-      return process.exitCode ?? 0;
+      return Number(process.exitCode ?? 0);
     }),
     createContextCommand(["version"], "Show CLI version", async (_args, ctx) => {
       const { buildCliVersionText } = await import("./updateCommands");

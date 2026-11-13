@@ -10,6 +10,12 @@ export interface OwnedDialogPagesState {
   error: string | null;
   hasMore: boolean;
   pendingSourceCount: number;
+  /**
+   * 游标快照：任一笔源游标推进（含耗尽为 null）时变化。
+   * 展示层据此判断自动续页「这一轮是否真的往前走了」，
+   * 不能用过滤/去重后的行数——重复页、被过滤行都会让行数不动却仍在推进。
+   */
+  cursorKey: string;
   loadMore: (opts?: { retryFailed?: boolean }) => Promise<void>;
 }
 /** Owned-account remote history only. Never treat this as a complete Work listing. */
@@ -114,7 +120,10 @@ export function useOwnedDialogPages(enabled: boolean): OwnedDialogPagesState {
     if (enabled && currentUserId && currentToken) void loadMore();
   }, [enabled, currentUserId, currentToken, originsKey, loadMore]);
   const sameIdentity = pageState.identityKey === identityKey;
+  const cursorKey = sameIdentity
+    ? JSON.stringify([...cursors.current.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    : "";
   return { identityKey, records: sameIdentity ? pageState.records : [], error: sameIdentity ? error : null,
     loading: sameIdentity && loading, hasMore: sameIdentity && hasMore,
-    pendingSourceCount: sameIdentity ? pendingSourceCount : 0, loadMore };
+    pendingSourceCount: sameIdentity ? pendingSourceCount : 0, cursorKey, loadMore };
 }

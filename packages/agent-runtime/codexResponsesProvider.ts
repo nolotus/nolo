@@ -484,6 +484,7 @@ async function callCodexResponsesOnce(
           finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
         },
       ],
+      ...(streamed.leaked_protocol_intercepted ? { leaked_protocol_intercepted: true } : {}),
       ...(usageWithTiming ? { usage: usageWithTiming } : {}),
     },
   };

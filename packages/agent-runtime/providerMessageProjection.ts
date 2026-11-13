@@ -11,6 +11,7 @@
 //    落盘（(toolName, content) 纯函数，失败 fail-open 不影响投影文本）。
 //
 // runLocalAgentTurn 主状态机不在这里；这里只有消息形状变换。
+import { evaluateRequestBudget } from "../ai/context/requestBudget";
 import { IMAGE_OMITTED_PLACEHOLDER } from "../ai/agent/imagePreprocessing";
 import { TOOL_HAD_IMAGES, stripToolImages } from "./toolImages";
 import { clipCompactText } from "core/clipCompactText";
@@ -27,8 +28,9 @@ import {
   resolveToolOutputProfile,
 } from "../ai/agent/toolOutputPolicy";
 import { spillToolOutput } from "./toolSpillStore";
+import { isSpilledToolOutput, spillLargeToolOutput } from "./toolOutputSpillProjection";
 import { planContextUsage } from "../ai/context/retention";
-import { estimateTokenCount } from "../ai/context/tokenUtils";
+import { getMessageTokenCount } from "../ai/context/planCompression";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { stripImagePartsFromMessages } from "../ai/agent/imagePreprocessing";
 import {
@@ -71,10 +73,11 @@ export function formatToolMessageContent(args: {
   toolName: string;
   content: string;
   metadata?: Record<string, unknown>;
+  workspaceRoot?: string;
 }) {
   // 控制序列清洗要在脱敏之前：先删掉不可见序列，正则看到的是模型真正会看到的文本。
   const sanitizedContent = sanitizeToolOutputText(args.content ?? "");
-  const scrubbedContent = scrubSecrets(sanitizedContent).cleaned;
+  const scrubbedContent = spillLargeToolOutput(scrubSecrets(sanitizedContent).cleaned, args.toolName, args.workspaceRoot);
   if (
     (
       args.toolName !== "globFiles" &&
@@ -108,6 +111,7 @@ export function formatToolMessageContent(args: {
  */
 export function blocksToOpenAiMessages(
   blocks: AgentRuntimeOutputBlock[],
+  workspaceRoot?: string,
 ): AgentRuntimeChatMessage[] {
   const out: AgentRuntimeChatMessage[] = [];
   let text = "";
@@ -130,6 +134,7 @@ export function blocksToOpenAiMessages(
         role: "tool",
         content: formatToolMessageContent({
           toolName: tc.function.name,
+          workspaceRoot,
           content: res?.content ?? "",
           ...(res?.metadata ? { metadata: res.metadata } : {}),
         }),
@@ -219,8 +224,14 @@ export function trimHistoryToContextBudget(
   history: AgentRuntimeChatMessage[],
   model: string | undefined,
   contextWindowOverride?: number,
-): { history: AgentRuntimeChatMessage[]; droppedCount: number } {
-  if (history.length === 0) return { history, droppedCount: 0 };
+  projectedRequestView?: AgentRuntimeChatMessage[],
+): {
+  history: AgentRuntimeChatMessage[];
+  droppedCount: number;
+  /** The projected request (or keep-last fallback) exceeds its budget. */
+  overBudget?: boolean;
+} {
+  if (history.length === 0 && !projectedRequestView) return { history, droppedCount: 0 };
 
   const { rawMessageBudget } = planContextUsage({
     contextWindow: contextWindowOverride ?? getModelContextWindow(model ?? ""),
@@ -230,45 +241,44 @@ export function trimHistoryToContextBudget(
     recentLoad: "medium",
   });
 
-  // 必须用 estimateTokenCount：它是中文感知的（中文 1.5 tok/字，其他 0.25 tok/字符）。
-  // 平铺 chars/4 对中文低估约 6 倍，会导致中文会话该裁不裁、照旧撞窗口。
-  const messageTokens = (message: AgentRuntimeChatMessage): number => {
-    const toolCalls = (message as any).tool_calls;
-    return (
-      estimateTokenCount(contentAsText(message.content)) +
-      (Array.isArray(toolCalls) ? estimateTokenCount(JSON.stringify(toolCalls)) : 0)
-    );
-  };
+  // 与压缩决策共用同一口径：ai/context/planCompression 的 getMessageTokenCount
+  // （中文感知的 estimateTokenCount + tool_calls 的函数名/参数）。此前这里另算
+  // 一份「content 级」估算，与压缩的「message 级」口径差约 2-3%，于是出现
+  // 「压缩认为不用压、裁剪认为装不下」——历史明明没超压缩预算，裁到这里却非丢
+  // 不可，本轮直接拒发（2026-11-06 实测：gpt-6.1-sol 500k 窗口下误判丢 21 条）。
+  const messageTokens = (message: AgentRuntimeChatMessage): number =>
+    getMessageTokenCount(message as any);
 
+  // The optional full request includes stable prefix and current input. Never
+  // tail-trim this view: callers must compact canonical sources or reject.
+  if (projectedRequestView) {
+    const used = projectedRequestView.reduce((sum, message) => sum + messageTokens(message), 0);
+    // Reserve output/protocol room, rather than applying a second history-only
+    // retention ratio to a view that already includes system and pending input.
+    const requestBudget = Math.max(0, (contextWindowOverride ?? getModelContextWindow(model ?? "")) - 8192);
+    return { history, droppedCount: 0, ...(used > requestBudget ? { overBudget: true } : {}) };
+  }
+  const projectedHistory = prepareHistoryForNextTurn(history);
   let used = 0;
   let start = history.length;
   for (let i = history.length - 1; i >= 0; i -= 1) {
-    const cost = messageTokens(history[i]);
+    const cost = messageTokens(projectedHistory[i]);
     // 至少保留最后一条，否则预算极小时会裁成空历史
     if (used + cost > rawMessageBudget && start < history.length) break;
     used += cost;
     start = i;
   }
 
-  if (start === 0) return { history, droppedCount: 0 };
+  const overflow = used > rawMessageBudget ? { overBudget: true } : {};
+  if (start === 0) return { history, droppedCount: 0, ...overflow };
   return {
     history: sanitizeToolCallPairing(history.slice(start)),
     droppedCount: start,
+    ...overflow,
   };
 }
 
-/** 把结构化 content 摊平成文本，供中文感知的 estimateTokenCount 使用。 */
-function contentAsText(content: AgentRuntimeMessageContent): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) => {
-      if (part?.type === "text") return part.text;
-      if (part?.type === "image_url") return part.image_url.url;
-      return "";
-    })
-    .join("\n");
-}
+/** 把结构化 content 摊平成文本。 */
 
 export function contentCharCount(content: AgentRuntimeMessageContent): number {
   if (typeof content === "string") return content.length;
@@ -321,6 +331,7 @@ export function projectToolContentForProvider(args: {
     ? sanitizeToolOutputText(rawContent)
     : rawContent;
   if (typeof content !== "string") return content;
+  if (isSpilledToolOutput(content)) return content;
   const metadataText = compactToolMetadata(args.metadata);
   // Some tool formatters already append the full metadata JSON to the durable
   // content. Remove that provider-side duplicate and re-add the bounded
@@ -373,7 +384,7 @@ export function projectToolContentForProvider(args: {
         content: contentForProjection,
         toolName: args.toolName,
       });
-      spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}; hint=read full output via readFile`;
+      spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}; hint=read a range, not the whole spill (readFile lines=A-B or sed -n 'A,Bp'); a full read re-injects ${spill.totalChars} chars`;
     } catch {
       // Ignore spill write failures to prevent breaking prompt generation
     }
@@ -764,4 +775,48 @@ export function buildMessages(args: {
         }
       : {}),
   };
+}
+
+
+/** Estimate messages and final tools once in the same units used for calibration. */
+export function estimateLocalRequestInput(
+  messages: AgentRuntimeChatMessage[], toolSchemaTokens = 0,
+): number {
+  return messages.reduce((sum, message) => sum + getMessageTokenCount(message as any), 0)
+    + toolSchemaTokens;
+}
+
+/** Conservative heuristic, not a tokenizer upper bound. The most recent measured
+ * density applies to the entire rebuilt request, including newly appended content.
+ * Without telemetry use the unscaled estimate; tool schemas/system are not counted a second time.
+ */
+export function evaluateLocalRequestBudget(args: {
+  messages: AgentRuntimeChatMessage[];
+  contextWindow: number;
+  descriptor?: import("./hostAdapter").AgentRuntimeRequestBudget;
+  calibrationRatio?: number;
+}) {
+  const estimate = estimateLocalRequestInput(args.messages, args.descriptor?.toolSchemaTokens ?? 0);
+  const ratio = Math.max(1, args.calibrationRatio ?? 1);
+  const output = args.descriptor?.output ?? { semantics: "unknown" as const, fallbackReserveTokens: 8192 };
+  const boundedOutput = output.semantics === "unknown"
+    ? { ...output, fallbackReserveTokens: Math.min(output.fallbackReserveTokens,
+        Math.min(8192, Math.max(1, Math.floor(args.contextWindow / 4)))) }
+    : output; // An explicit final-wire cap is never silently reduced.
+  return evaluateRequestBudget({
+    contextWindow: args.contextWindow,
+    messageTokens: Math.ceil(estimate * ratio),
+    toolSchemaTokens: 0, // already included in the calibrated full-input estimate
+    protocolReserveTokens: 0,
+    output: boundedOutput,
+  });
+}
+
+
+/** Latest aligned main-call sample replaces stale density; missing telemetry retains
+ * the last usable sample. Minimum 1 prevents optimistic under-reservation.
+ */
+export function updateLocalRequestCalibration(previous: number, actual: number, estimated: number): number {
+  return Number.isFinite(actual) && actual > 0 && Number.isFinite(estimated) && estimated > 0
+    ? Math.max(1, actual / estimated) : previous;
 }

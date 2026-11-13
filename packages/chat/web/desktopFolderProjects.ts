@@ -1,3 +1,4 @@
+import { readSpaceWorkspaceFolder } from "./spaceWorkspaces";
 export interface DesktopFolderProjectGroup {
   id: string;
   name: string;
@@ -237,10 +238,10 @@ export function readDesktopDefaultWorkspacePath(): string | null {
  * - bound Project resolves → its local path;
  * - bound Project is gone → `missing: true`, never a fallback to another folder
  *   or the default workspace (the composer must block instead);
- * - no binding at all → the desktop default workspace, matching first-message cwd.
+ * - no binding → the Space's device-local folder, then the desktop default workspace.
  */
 export function resolveDialogWorkspaceFolder(
-  storage: Pick<Storage, "getItem">, dialogKey: string,
+  storage: Pick<Storage, "getItem">, dialogKey: string, spaceId?: string | null, userId?: string | null,
 ): { cwd: string | null; projectId: string | null; missing: boolean } {
   const projectId = readDialogProjectId(storage, dialogKey);
   const projectPath = projectId
@@ -253,5 +254,5 @@ export function resolveDialogWorkspaceFolder(
     const exists = readDesktopFolderProjects(storage.getItem(DESKTOP_FOLDER_PROJECTS_KEY)).some((p) => p.id === projectId);
     return { cwd: projectPath || null, projectId, missing: !exists };
   }
-  return { cwd: readDesktopDefaultWorkspacePath(), projectId: null, missing: false };
+  return { cwd: readSpaceWorkspaceFolder(storage, spaceId, userId) ?? readDesktopDefaultWorkspacePath(), projectId: null, missing: false };
 }

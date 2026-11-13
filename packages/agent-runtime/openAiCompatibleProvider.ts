@@ -1,3 +1,4 @@
+import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 /**
  * OpenAI 兼容协议 Provider 适配器（Inference Compatibility Seam）。
@@ -607,6 +608,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
           ...(streamed.usage ? { usage: streamed.usage } : {}),
           ...(streamed.stream_complete ? { stream_complete: true } : {}),
           ...(streamed.finish_reason ? { finish_reason: streamed.finish_reason } : {}),
+          ...(streamed.leaked_protocol_intercepted ? { leaked_protocol_intercepted: true } : {}),
           trace: args.messages,
         });
       }
@@ -658,4 +660,22 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
     );
     throw error;
   }
+}
+
+
+/** Budget facts from the same final builder used for dispatch, never model metadata. */
+export function describeOpenAiCompatibleRequestBudget(args: {
+  providerConfig: OpenAiCompatibleProviderConfig;
+  tools?: OpenAiCompatibleTool[];
+}): import("./hostAdapter").AgentRuntimeRequestBudget {
+  const request = buildOpenAiCompatibleChatCompletionRequest({ ...args, messages: [] });
+  const body = JSON.parse(request.init.body);
+  const cap = body.max_completion_tokens ?? body.max_output_tokens ?? body.max_tokens;
+  return {
+    toolSchemaTokens: estimateTokenCount(JSON.stringify(body.tools ?? [])),
+    // Explicit wire allowance is conservatively reserved. Omitted provider defaults are unknown.
+    output: typeof cap === "number" && Number.isFinite(cap) && cap > 0
+      ? { semantics: "shared-window", finalWireCapTokens: cap }
+      : { semantics: "unknown", fallbackReserveTokens: 8192 },
+  };
 }

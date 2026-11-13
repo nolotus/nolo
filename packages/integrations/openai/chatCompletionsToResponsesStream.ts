@@ -2,7 +2,7 @@ import { readSseFrames } from "../../agent-runtime/sseFrames";
 import { parseSseDataLineObject } from "../../agent-runtime/sseDataLine";
 
 type Obj = Record<string, any>;
-const record = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
+const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /** Protocol projection only: billing observes the original stream outside this adapter.
@@ -110,27 +110,29 @@ export function chatCompletionsToResponsesStream(
             started = true;
             yield { type: "response.created", response: { ...envelope("in_progress"), output: [] } };
           }
-          if (record(chunk.usage)) {
+          const chunkUsage = chunk.usage;
+          if (record(chunkUsage)) {
             // Snapshots, never increments. Keep cost/cache/provider extensions untouched.
-            usage = { ...usage, ...chunk.usage };
-            if (!finite(chunk.usage.input_tokens) && finite(chunk.usage.prompt_tokens)) usage.input_tokens = chunk.usage.prompt_tokens;
-            if (!finite(chunk.usage.output_tokens) && finite(chunk.usage.completion_tokens)) usage.output_tokens = chunk.usage.completion_tokens;
-            if (!finite(usage.total_tokens) && finite(usage.input_tokens) && finite(usage.output_tokens)) usage.total_tokens = usage.input_tokens + usage.output_tokens;
-            if (!record(usage.input_tokens_details) && record(usage.prompt_tokens_details)) usage.input_tokens_details = usage.prompt_tokens_details;
-            if (!record(usage.output_tokens_details) && record(usage.completion_tokens_details)) usage.output_tokens_details = usage.completion_tokens_details;
+            const nextUsage: Obj = { ...usage, ...chunkUsage };
+            if (!finite(chunkUsage.input_tokens) && finite(chunkUsage.prompt_tokens)) nextUsage.input_tokens = chunkUsage.prompt_tokens;
+            if (!finite(chunkUsage.output_tokens) && finite(chunkUsage.completion_tokens)) nextUsage.output_tokens = chunkUsage.completion_tokens;
+            if (!finite(nextUsage.total_tokens) && finite(nextUsage.input_tokens) && finite(nextUsage.output_tokens)) nextUsage.total_tokens = nextUsage.input_tokens + nextUsage.output_tokens;
+            if (!record(nextUsage.input_tokens_details) && record(nextUsage.prompt_tokens_details)) nextUsage.input_tokens_details = nextUsage.prompt_tokens_details;
+            if (!record(nextUsage.output_tokens_details) && record(nextUsage.completion_tokens_details)) nextUsage.output_tokens_details = nextUsage.completion_tokens_details;
+            usage = nextUsage;
           }
           // Proxy extension frames are independent of Chat choices. Identity-only
           // usage must remain visible to existing clients; token snapshots are held
           // for the terminal envelope so they are never emitted twice as increments.
           if (record(chunk.billing)) yield { billing: chunk.billing };
-          if (record(chunk.usage) && typeof chunk.usage.provider_call_id === "string") {
+          if (record(chunkUsage) && typeof chunkUsage.provider_call_id === "string") {
             const identity: Obj = {};
             for (const key of ["provider_call_id", "billing_provider", "billing_model"]) {
-              if (chunk.usage[key] !== undefined) identity[key] = chunk.usage[key];
+              if (chunkUsage[key] !== undefined) identity[key] = chunkUsage[key];
             }
             yield { usage: identity };
           }
-          if (chunk.choices === undefined && (record(chunk.usage) || record(chunk.billing))) continue;
+          if (chunk.choices === undefined && (record(chunkUsage) || record(chunk.billing))) continue;
           if (!Array.isArray(chunk.choices)) throw new Error("Chat SSE chunk is missing choices.");
           if (chunk.choices.length > 1) throw new Error("Multiple Chat choices cannot be projected into one Response.");
           for (const choice of chunk.choices) {
@@ -155,14 +157,15 @@ export function chatCompletionsToResponsesStream(
             if (delta.function_call) throw new Error("Legacy Chat function_call has no tool call id.");
             if (delta.tool_calls !== undefined && !Array.isArray(delta.tool_calls)) throw new Error("Invalid Chat tool_calls.");
             for (const part of delta.tool_calls ?? []) {
-              if (!record(part) || !Number.isInteger(part.index) || part.index < 0) throw new Error("Chat tool call is missing a valid index.");
+              if (!record(part) || typeof part.index !== "number" || !Number.isInteger(part.index) || part.index < 0) throw new Error("Chat tool call is missing a valid index.");
               let tool = tools.get(part.index);
               if (!tool) {
                 tool = { id: `chat-item-${output.length}`, type: "function_call", status: "in_progress", call_id: "", name: "", arguments: "" };
                 tools.set(part.index, tool);
                 output.push(tool);
               }
-              for (const [value, key] of [[part.id, "call_id"], [part.function?.name, "name"], [part.function?.arguments, "arguments"]] as const) {
+              const fn = record(part.function) ? part.function : undefined;
+              for (const [value, key] of [[part.id, "call_id"], [fn?.name, "name"], [fn?.arguments, "arguments"]] as const) {
                 if (value == null) continue;
                 if (typeof value !== "string") throw new Error(`Invalid Chat tool ${key}.`);
                 tool[key] += value;

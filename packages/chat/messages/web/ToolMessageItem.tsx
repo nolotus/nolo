@@ -9,6 +9,8 @@ import {
   LuCircle,
   LuArrowRight,
 } from "react-icons/lu";
+// 机器人身份图标复用自有品牌标记，与侧边栏类型切换（chat/web/sidebar/SidebarTypeFilter.tsx）同源
+import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
@@ -99,6 +101,9 @@ const TR_HEADER_TOGGLE_STYLE: React.CSSProperties = {
   border: "none",
   cursor: "pointer",
 };
+
+// 机器人图标容器：仅做垂直对齐，不引入新样式规则
+const AGENT_ICON_STYLE = { display: "inline-flex", alignItems: "center" } as const;
 
 export const ToolMessageItem = memo(
   ({ message, readOnly = false }: { message: any; readOnly?: boolean }) => {
@@ -551,6 +556,12 @@ export const ToolMessageItem = memo(
                   {...withLiteralClass(`tr-icon ${statusStr}`, toolStyles.icon, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.icon)}>
                   <StatusIcon status={statusStr} toolName={toolName} errorMessage={errorMessageText} />
                 </div>
+                {(toolName === "startAgentRun" || toolName === "controlAgentRun") && (
+                  // 智能体类工具的类型前缀用机器人图标标识，标题动词与 toolName 原样保留
+                  <span aria-hidden="true" style={AGENT_ICON_STYLE}>
+                    <NoloHeadMark size={12} />
+                  </span>
+                )}
                 <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.summary)}>{displaySummary}</span>
                 {!!durationText && (
                   <span data-hook="messages-esc-tr-duration" {...withLiteralClass("tr-duration", toolStyles.duration)}>
@@ -620,7 +631,15 @@ export const ToolMessageItem = memo(
                 <div {...withLiteralClass("agent-run-detail", toolStyles.handoffBody)} data-hook="messages-esc-agent-run-detail">
                   {agentRun.agentText ? (
                     <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                      <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{agentRun.agentLabel}</span>
+                      {/* 智能体类型标签改用机器人图标，类型文字留在 aria-label / title 上，屏幕阅读器与悬停信息不变 */}
+                      <span
+                        {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}
+                        aria-label={agentRun.agentLabel}
+                        title={agentRun.agentLabel}
+                        style={AGENT_ICON_STYLE}
+                      >
+                        <NoloHeadMark size={12} />
+                      </span>
                       <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>{agentRun.agentText}</span>
                     </div>
                   ) : null}

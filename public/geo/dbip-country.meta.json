@@ -1,0 +1,14 @@
+{
+  "source": "https://download.db-ip.com/free/dbip-country-lite-2026-11.mmdb.gz",
+  "filename": "dbip-country-lite-2026-11.mmdb.gz",
+  "month": "2026-11",
+  "databaseType": "DBIP-Country-Lite",
+  "ipVersion": 6,
+  "sha256": "145ce5dfb812d8de28547e6289bb5c5f8b3df2f1dea21d324d5b575e0431311f",
+  "bytes": 8515063,
+  "retrievedAt": "2026-11-07T22:00:36.903Z",
+  "license": "CC BY 4.0",
+  "licenseUrl": "https://db-ip.com/db/lite.php",
+  "attribution": "IP Geolocation by DB-IP",
+  "attributionUrl": "https://db-ip.com"
+}

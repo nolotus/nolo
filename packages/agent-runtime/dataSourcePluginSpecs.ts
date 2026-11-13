@@ -5,15 +5,18 @@
  * 这里只描述「哪些外部数据源工具属于哪个用户级开关」，零 I/O、零依赖，
  * 让 server（注入面 / 执行期强制 / API）、Web、Node 都能安全引用。
  *
- * 语义：数据源默认关闭（defaultEnabled: false）。用户没显式开启时，
- * 工具既不该进 agent 的工具面（surface），也不该被执行（执行期二次强制）。
+ * 语义：默认值写在注册表的 `defaultEnabled` 上——用户没有「显式偏好记录」时，
+ * 只有 defaultEnabled 为 true 的数据源（{@link DATA_SOURCE_DEFAULT_ENABLED_IDS}）进工具面并被允许执行；
+ * 读写偏好出错/记录损坏时同样回落到这一默认集（fail-closed 到「默认」，而不是「全开」）。
+ * 其余数据源默认关闭，用户显式开启后才进 agent 的工具面（surface）并被允许执行（执行期二次强制）。
  */
 
 export type DataSourcePluginId =
   | "yahoo-finance"
   | "arxiv"
   | "world-bank"
-  | "serpapi";
+  | "serpapi"
+  | "wechat-search";
 
 export type DataSourcePluginKind = "data-source";
 
@@ -26,8 +29,11 @@ export type DataSourcePluginSpec = {
    * 本轮只管开关，凭据本身仍由既有通道管理。
    */
   readonly requiresCredential: boolean;
-  /** 一律 false：任何未显式开启的数据源都视为关闭（fail-closed 的前提）。 */
-  readonly defaultEnabled: false;
+  /**
+   * 用户没有显式偏好记录时的默认开关状态。
+   * 只有零凭据、零边际成本的数据源才允许默认开启；需要凭据或会产生外部费用的数据源必须为 false。
+   */
+  readonly defaultEnabled: boolean;
   /** 归属该数据源的外部工具名（必须与 externalTools.ts 的 EXTERNAL_TOOL_NAMES 全覆盖对齐）。 */
   readonly toolNames: readonly string[];
 };
@@ -65,10 +71,28 @@ export const DATA_SOURCE_PLUGIN_SPECS: readonly DataSourcePluginSpec[] = Object.
     defaultEnabled: false,
     toolNames: Object.freeze(["searchGoogleScholar", "searchGoogleWeb"]),
   }),
+  // 唯一默认开启的数据源：无 API key、自有抓取、边际成本近零。
+  // 代价是搜狗反爬风险（见 integrations/wechat-search），所以有全局并发 1 + 请求间隔限制。
+  Object.freeze({
+    id: "wechat-search",
+    displayName: "微信公众号文章",
+    kind: "data-source",
+    requiresCredential: false,
+    defaultEnabled: true,
+    toolNames: Object.freeze(["searchWechatArticles"]),
+  }),
 ] as const);
 
 export const DATA_SOURCE_PLUGIN_IDS: readonly DataSourcePluginId[] = Object.freeze(
   DATA_SOURCE_PLUGIN_SPECS.map((spec) => spec.id),
+) as readonly DataSourcePluginId[];
+
+/**
+ * 没有用户偏好记录（或记录损坏、读取失败）时应生效的默认数据源集合，按注册表顺序。
+ * 只读快照，调用方需要可变副本时自行 `[...该数组]`。
+ */
+export const DATA_SOURCE_DEFAULT_ENABLED_IDS: readonly DataSourcePluginId[] = Object.freeze(
+  DATA_SOURCE_PLUGIN_SPECS.filter((spec) => spec.defaultEnabled).map((spec) => spec.id),
 ) as readonly DataSourcePluginId[];
 
 export function isDataSourcePluginId(value: unknown): value is DataSourcePluginId {

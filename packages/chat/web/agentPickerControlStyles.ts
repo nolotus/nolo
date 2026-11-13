@@ -149,6 +149,27 @@ export const agentPickerControlStyles = stylex.create({
     color: "var(--primary)",
     backgroundColor: "color-mix(in srgb, var(--primary) 12%, transparent)",
   },
+  /* 计费标记：会扣平台积分的行在行尾加一个无文字金币图标。
+   * 与 badge 同尺寸感但不是来源位 —— 刻意无背景方块、不上文字，避免压住名字。 */
+  billingCoin: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    width: "18px",
+    height: "18px",
+    color: "var(--warningText, var(--warning, #f5a623))",
+  },
+  /* 弹层底部常驻的计费口径说明 */
+  billingNote: {
+    padding: "var(--space-1, 4px) var(--space-3, 12px) var(--space-2, 8px)",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "var(--borderMuted, var(--borderLight))",
+    fontSize: "var(--fontSize-xs)",
+    color: "var(--textTertiary)",
+    lineHeight: 1.45,
+  },
   itemText: {
     display: "flex",
     flexDirection: "column",
@@ -156,12 +177,15 @@ export const agentPickerControlStyles = stylex.create({
     flex: 1,
   },
   itemName: {
+    minWidth: 0,
+    flexShrink: 1,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     fontWeight: 500,
   },
   itemIntro: {
+    minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",

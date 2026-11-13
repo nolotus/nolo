@@ -30,10 +30,12 @@ export const runCompactDialogAndForkAction = async (
     throw new Error("Cannot compact a dialog without a primary agent.");
   }
 
-  await updateDialogSummaryAction(
+  const summaryResult = await updateDialogSummaryAction(
     { dialogKey, preFetchedMessages, force: true, reason: "manual" },
     thunkApi
   );
+
+  if (thunkApi.signal?.aborted || summaryResult?.kind === "cancelled") throw new DOMException("Compact cancelled", "AbortError");
 
   return dispatch(
     createDialog({

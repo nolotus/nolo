@@ -10,7 +10,7 @@
 // 这里只做 re-export，不新增任何逻辑。handler 的真实实现仍在各自的原文件里。
 
 export { handleDesktopPickFolder } from "./desktopPickFolderHandler";
-export { handleDesktopAgentRuntimeTurnPost } from "./desktopAgentRuntimeTurnHandler";
+export { handleDesktopAgentRuntimeTurnPost, handleDesktopAgentRuntimeActionGatePost } from "./desktopAgentRuntimeTurnHandler";
 export {
   handleDesktopChromeConnectorInstallNativeHostPost,
   handleDesktopChromeConnectorSmokeTestPost,

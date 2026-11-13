@@ -1,3 +1,4 @@
+import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
 import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
@@ -1103,4 +1104,16 @@ export function shouldUsePlatformChatProvider(
       runtimeKind: "local",
     }),
   }).transport === "proxy";
+}
+
+
+/** Platform can change output policy downstream: only final client tools are known. */
+export function describePlatformRequestBudget(args: {
+  providerConfig: PlatformChatProviderConfig;
+  tools?: PlatformChatTool[];
+}): import("./hostAdapter").AgentRuntimeRequestBudget {
+  const request = buildPlatformChatCompletionRequest({ ...args, messages: [] });
+  const body = JSON.parse(request.init.body);
+  return { toolSchemaTokens: estimateTokenCount(JSON.stringify(body.tools ?? [])),
+    output: { semantics: "unknown", fallbackReserveTokens: 8192 } };
 }

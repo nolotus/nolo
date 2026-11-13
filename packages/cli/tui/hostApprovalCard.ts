@@ -25,6 +25,7 @@ import {
   formatApprovalRemaining,
   HOST_APPROVAL_SUMMARY_LIMIT,
 } from "../client/hostApprovalFlow";
+import { boxGlyphs, displayWidth, resolveBoxCharset } from "./tuiAnsi";
 
 const ALLOW_KEYS = new Set(["y", "Y"]);
 const DENY_KEYS = new Set(["n", "N"]);
@@ -40,32 +41,42 @@ const CONTENT_INDENT = LABEL_COLUMN + 1;
 const DETAIL_MAX_ROWS = 15;
 /** Share of those rows that goes to the head, where the length + sha256 identity line sits. */
 const DETAIL_HEAD_SHARE = 0.4;
-/** Wide (CJK) code points occupy two terminal columns; measuring by `.length` would wrap the frame. */
-const WIDE_CHAR = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;
+/**
+ * 单元格宽度一律走共享的 `tuiAnsi.displayWidth`：本模块曾自带一份宽度模型
+ * （`WIDE_CHAR` 正则只认 CJK/韩文/全角），与共享实现形成第二份真值——
+ * emoji（`😀`）在那份模型里算 1 列、实际 2 列，裁剪后的行会超出预算、
+ * 顶破卡片右边界并在终端折行；wide 约定（EA=A 占 2 列）下更是整卡错位。
+ *
+ * 按**字素簇**遍历（不是按码点）：`👨‍👩‍👧`、`👍🏽`、`⚠️` 这类组合序列必须整体计量，
+ * 逐码点切分会把 ZWJ 序列拆成两半、宽度算错。
+ */
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-function charWidth(char: string): number {
-  return WIDE_CHAR.test(char) ? 2 : 1;
+/** 按字素簇逐段回调，供裁剪/折行共用（宽度用共享 displayWidth 量）。 */
+function eachGrapheme(text: string, visit: (segment: string, cells: number) => boolean | void): void {
+  for (const { segment } of graphemeSegmenter.segment(text)) {
+    if (visit(segment, displayWidth(segment)) === false) return;
+  }
 }
 
-function displayWidth(text: string): number {
-  let width = 0;
-  for (const char of text) width += charWidth(char);
-  return width;
-}
+/** 裁剪时改用省略号收尾；它的宽度随约定变化（`…` 是 EA=A，wide 下 2 列），必须实测预留。 */
+const CLIP_ELLIPSIS = "…";
 
 /** Clip one frame row to `columns` columns so the border cannot wrap into a wall. */
 export function clipCardLine(text: string, columns: number): string {
   const budget = Math.max(8, columns - 1);
   if (displayWidth(text) <= budget) return text;
+  // 预留量按省略号的真实格数算：写死 1 列会在 wide 约定下（`…` 占 2 列）
+  // 让结果正好顶到 `columns`，突破本函数「不超过 columns - 1」的不变量。
+  const reserve = displayWidth(CLIP_ELLIPSIS);
   let kept = "";
   let width = 0;
-  for (const char of text) {
-    const charWidth = WIDE_CHAR.test(char) ? 2 : 1;
-    if (width + charWidth > budget - 1) break;
-    kept += char;
-    width += charWidth;
-  }
-  return `${kept}…`;
+  eachGrapheme(text, (segment, cells) => {
+    if (width + cells > budget - reserve) return false;
+    kept += segment;
+    width += cells;
+  });
+  return `${kept}${CLIP_ELLIPSIS}`;
 }
 
 /**
@@ -80,26 +91,30 @@ export function wrapCardLine(text: string, width: number): string[] {
   const rows: string[] = [];
   let row = "";
   let rowWidth = 0;
-  for (const char of text) {
-    const charCols = charWidth(char);
-    if (row && rowWidth + charCols > budget) {
+  eachGrapheme(text, (segment, cells) => {
+    if (row && rowWidth + cells > budget) {
       rows.push(row);
       row = "";
       rowWidth = 0;
     }
-    row += char;
-    rowWidth += charCols;
-  }
+    row += segment;
+    rowWidth += cells;
+  });
   rows.push(row);
   return rows;
 }
 
 /** One connector-supplied field: the label sits on the first row, wrapped rows stay aligned. */
-function fieldRows(label: string, text: string, contentWidth: number): string[] {
+function fieldRows(
+  label: string,
+  text: string,
+  contentWidth: number,
+  glyphs: ReturnType<typeof boxGlyphs>,
+): string[] {
   const first = ` ${label.padEnd(LABEL_COLUMN, " ")}`;
   const rest = " ".repeat(CONTENT_INDENT);
   return wrapCardLine(text, contentWidth).map(
-    (row, index) => `│${index === 0 ? first : rest}${row}`,
+    (row, index) => `${glyphs.v}${index === 0 ? first : rest}${row}`,
   );
 }
 
@@ -111,13 +126,17 @@ function fieldRows(label: string, text: string, contentWidth: number): string[] 
  * (identity line + start) and tail with a stated omission in between — the shape the connector's own
  * preview already uses, preserved here instead of being flattened into "first N lines".
  */
-function detailRows(summary: string, contentWidth: number): string[] {
+function detailRows(
+  summary: string,
+  contentWidth: number,
+  glyphs: ReturnType<typeof boxGlyphs>,
+): string[] {
   const text = summary && summary.trim() ? summary : "(no summary)";
   const rows = text.split("\n").flatMap((line) => wrapCardLine(line, contentWidth));
   const first = ` ${"detail".padEnd(LABEL_COLUMN, " ")}`;
   const rest = " ".repeat(CONTENT_INDENT);
   const withPrefix = (row: string, index: number) =>
-    `│${index === 0 ? first : rest}${row}`;
+    `${glyphs.v}${index === 0 ? first : rest}${row}`;
   if (rows.length <= DETAIL_MAX_ROWS) return rows.map(withPrefix);
 
   const omission = (hidden: number) => `…（中间 ${hidden} 行未显示，以下是脚本结尾）`;
@@ -152,12 +171,15 @@ export function renderHostApprovalCardLines(
   const expiryLabel = expired
     ? "expired — this action was not run and will not be retried"
     : `${formatApprovalRemaining(card.expiresAt, opts.now)} left`;
+  // 框线字形跟 resolveBoxCharset：EA=A=wide 的终端下制表符占 2 列，硬编码 `│`/`─`
+  // 会让整张卡逐行右移；ascii 模式（`+ - |`）任何字体都是 1 格。
+  const glyphs = boxGlyphs(resolveBoxCharset());
   const lines = [
-    "┌─ Browser action needs your approval ─────────────",
-    ...fieldRows("action", card.actionLabel, contentWidth),
-    ...fieldRows("site", card.origin || "(origin unknown)", contentWidth),
-    ...detailRows(card.summary, contentWidth),
-    ...fieldRows("expires", expiryLabel, contentWidth),
+    `${glyphs.tl}${glyphs.h} Browser action needs your approval ${glyphs.h.repeat(13)}`,
+    ...fieldRows("action", card.actionLabel, contentWidth, glyphs),
+    ...fieldRows("site", card.origin || "(origin unknown)", contentWidth, glyphs),
+    ...detailRows(card.summary, contentWidth, glyphs),
+    ...fieldRows("expires", expiryLabel, contentWidth, glyphs),
     // The precondition comes first so it reads before the options: with text in the composer, y/n
     // are ordinary letters and the card cannot be answered.
     ...fieldRows(
@@ -166,8 +188,9 @@ export function renderHostApprovalCardLines(
         ? "disabled (expired)"
         : "empty the input line first, then: y = allow once · n / Esc = deny",
       contentWidth,
+      glyphs,
     ),
-    "└──────────────────────────────────────────────────",
+    `${glyphs.bl}${glyphs.h.repeat(50)}`,
   ];
   return lines.map((line) => clipCardLine(line, columns));
 }

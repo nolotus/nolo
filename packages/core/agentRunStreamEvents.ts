@@ -274,6 +274,19 @@ export interface AgentRunStreamRemoteTaskEvent {
   };
 }
 
+/** action gate 帧：工具抬起的交互 gate（secret-request 等），宿主渲染面板。
+ *  gate 形状与桌面/TUI 的 LocalAgentActionGate 一致（kind: "input"）。 */
+export interface AgentRunStreamActionGateEvent {
+  type: "action_gate";
+  gate: {
+    id: string;
+    kind: "input";
+    title: string;
+    body: string;
+    payload: Record<string, unknown>;
+  };
+}
+
 /** SSE 事件 discriminated union */
 export type AgentRunStreamEvent =
   | AgentRunStreamTextEvent
@@ -291,7 +304,8 @@ export type AgentRunStreamEvent =
   | AgentRunStreamStatusEvent
   | AgentRunStreamTurnWarningEvent
   | AgentRunStreamAgentRunEvent
-  | AgentRunStreamRemoteTaskEvent;
+  | AgentRunStreamRemoteTaskEvent
+  | AgentRunStreamActionGateEvent;
 
 /** 窄化 helper：判断事件是否为指定 type */
 export function isAgentRunStreamEvent<T extends AgentRunStreamEvent["type"]>(

@@ -46,6 +46,37 @@ export const checkSpaceMembership = (
 };
 
 /**
+ * 空间内容管理权（用于「从空间移除引用」这类空间级动作）：
+ * 设备本地空间体放行；账号空间要求空间 owner（`ownerId`/`userId` 是本人）
+ * 或成员角色为 owner/admin。普通成员/guest 均不放行。
+ *
+ * 与 `checkSpaceMembership`（能否写这个空间）叠加使用：owner 同样必须先过成员检查。
+ */
+export const canManageSpaceContent = (
+  spaceData:
+    | {
+        userId?: string | null;
+        ownerId?: string | null;
+        members?: string[] | null;
+      }
+    | null
+    | undefined,
+  userId: string | null | undefined,
+  membership?: { role?: string | null } | null
+): boolean => {
+  if (!spaceData) return false;
+  if (isDeviceLocalSpaceBody(spaceData)) return true;
+  const actor = typeof userId === "string" ? userId.trim() : "";
+  if (!actor) return false;
+  const ownerValues = [spaceData.ownerId, spaceData.userId]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+  if (ownerValues.includes(actor)) return true;
+  const role = typeof membership?.role === "string" ? membership.role.trim() : "";
+  return role === "owner" || role === "admin";
+};
+
+/**
  * Fields to merge into Space body patch/write changes so replication authority
  * sees `userId === "local"` and plans zero remote servers.
  * No-op for account Spaces (must not rewrite account ownership stamps).

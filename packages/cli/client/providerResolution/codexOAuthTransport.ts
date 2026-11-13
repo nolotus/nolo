@@ -151,6 +151,7 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
       hasApiKey: true,
     });
     return {
+      transport: "codex-responses",
       model: agentConfig.model || "gpt-5.6-sol",
       complete: withCodexCallTrace(async (trace, messages, options) => {
         const observedFetch = async (
@@ -235,6 +236,7 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
           provider: "openai",
           ...(tool_calls ? { tool_calls } : {}),
           ...(reasoning_content ? { reasoning_content } : {}),
+          ...(result.body?.leaked_protocol_intercepted ? { leaked_protocol_intercepted: true } : {}),
           // fetchCodexResponsesCompletion 已把 codex responses 流聚合完毕并归一化成
           // OpenAI chat.completions 形状：choices[0].finish_reason（"stop"/"tool_calls"）
           // + usage（prompt/completion/total_tokens）。必须透传，否则 localLoop 把正常走完

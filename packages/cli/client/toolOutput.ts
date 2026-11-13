@@ -1,3 +1,7 @@
+import {
+  isAgentRunStartFailureStatus,
+  isAgentRunStatusNormal,
+} from "core/agentRunStatusKind";
 import { clipCompactText } from "core/clipCompactText";
 import { clipHeadAndTail } from "core/clipHeadAndTail";
 export { clipHeadAndTail };
@@ -20,6 +24,7 @@ import {
 import { type AgentRunSnapshot, parseAgentRunEvent } from "./agentRunSnapshot";
 import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyles";
 import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor } from "../tui/theme";
+import { resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
 import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
 import { redactSecrets } from "../tui/redactSecrets";
 import { safeAskText, withholdIfSecretLike } from "../tui/askTextSanitize";
@@ -321,6 +326,7 @@ function formatToolTraceLine(text: string, colorEnabled: boolean, accent: "none"
 // safe（normal）投影通用清洗：剥 ANSI/OSC（含剪贴板写、超链接）、折叠换行。
 // 供 renderRunCard（客户端重建）与 recoverOrchestrationCard 的 start 卡共用，
 // 与 dock 侧 sanitizeRunSnapshotForNormal 的 clean 同语义。
+
 const cleanUserText = (value: string) =>
   stripAnsi(value).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -478,7 +484,7 @@ function formatOrchestrationCardBlock(
   event: LocalAgentToolEvent,
   toolName: string,
   colorEnabled: boolean,
-  opts?: { safe?: boolean }
+  opts?: { safe?: boolean; visibleRunIds?: () => ReadonlySet<string> }
 ): string {
   const safe = opts?.safe === true;
   const rawLabel = toolLabel(toolName);
@@ -523,8 +529,44 @@ function formatOrchestrationCardBlock(
     return `${cross} ${labelPart}  ${msgPart}\n`;
   }
 
+  // 固定运行区（TUI 顶部 run dock）**逐行画着**这条 run 时，启动成功的「已启动」
+  // 卡片在聊天里才是重复反馈。判定依据是真实可见的 runId 集合，不是「支持固定区」：
+  // 宿主没提供查询（bare CLI / headless）、查询抛错、该 run 被降级/`+N` 折叠/被
+  // 进程行挤掉，一律保留回执。
+  if (opts?.visibleRunIds && toolName === "startAgentRun") {
+    // 省略回执的两个前提，缺一不可：
+    // ① 这是**成功**的启动 —— 有 start 快照与 runId、没有 errorMessage、状态属
+    //    core 分类里的「明确正常」一侧（`isAgentRunStatusNormal`：active /
+    //    succeeded，与 Web 同一张表）。abnormal / unknown / 未登记状态都不算成功
+    //    → 保留回执。
+    // ② 这条 run **真的逐行画在固定运行区里** —— 短终端降级、`+N` 折叠、后台进程
+    //    占用行预算时它可能不在屏上。查询失败或集合不含它，就保留回执：宁可重复
+    //    一次，也不能让用户对一条看不见的 run 一无所知。
+    const started = parseAgentRunEvent(event);
+    const runId = started?.snapshot.runId;
+    const startedStatus = started?.snapshot.status;
+    if (
+      started?.kind === "start" &&
+      typeof runId === "string" &&
+      runId.length > 0 &&
+      !started.snapshot.errorMessage &&
+      // 只认 core 定义的已知正常态。unknown/cancelling/not_found/未来新增状态
+      // 都不算正常 → 保留回执。
+      isAgentRunStatusNormal(startedStatus)
+    ) {
+      let visible: ReadonlySet<string> | undefined;
+      try {
+        visible = opts.visibleRunIds();
+      } catch {
+        // 宿主查询抛错 = 没有可见证据 → 保留回执。
+        visible = undefined;
+      }
+      if (visible?.has(runId)) return "";
+    }
+  }
+
   const parsedStart = toolName === "startAgentRun" ? parseAgentRunEvent(event) : null;
-  const startFailed = parsedStart && ["failed", "timeout", "orphaned", "cancelled", "killed"].includes(parsedStart.snapshot.status);
+  const startFailed = parsedStart && isAgentRunStartFailureStatus(parsedStart.snapshot.status);
   // A legacy unstructured card cannot reliably establish launch success.
   let heading = parsedStart ? t(startFailed ? "agentStartFailedLabel" : "agentStartedLabel") : rawLabel;
   const displayData = rawDataStr.trim();
@@ -545,7 +587,20 @@ function formatOrchestrationCardBlock(
       if (listPayload.truncated === true) heading += ` · ${t("agentsTruncated")}`;
       // Recovery can fail on malformed entries and fall back to displayData,
       // whose first line need not be a header.
-      if (/^(?:Agents|智能体)\s*\(\d+\)$/.test(projected[0]?.trim() ?? "")) {
+      // Legacy builds baked the card header in either locale; the current build
+      // bakes the 🤖 marker. Whichever it is, the compact heading above already
+      // carries the count, so drop that duplicated first row.
+      if (/^(?:Agents|智能体|🤖)\s*\(\d+\)$/.test(projected[0]?.trim() ?? "")) {
+        projected = projected.slice(1);
+      }
+    } else {
+      // No structured payload: a baked card header is the only count source we
+      // have. Recognize it and relabel it the same way, so the old wording does
+      // not survive on this fallback path. An unrecognized first row is left
+      // alone — it may be an agent row, not a header.
+      const bakedHeader = /^(?:Agents|智能体|🤖)\s*\((\d+)\)$/.exec(projected[0]?.trim() ?? "");
+      if (bakedHeader) {
+        heading = t("agentsCompactCount", bakedHeader[1]);
         projected = projected.slice(1);
       }
     }
@@ -1019,6 +1074,7 @@ function formatNormalToolLine(
   event: LocalAgentToolEvent,
   pending: { toolName: string; argumentsPreview?: string } | undefined,
   colorEnabled: boolean,
+  opts?: { visibleRunIds?: () => ReadonlySet<string> },
 ) {
   if (event.type === "tool-call") return "";
   const toolName = event.toolName || pending?.toolName || "tool";
@@ -1036,7 +1092,10 @@ function formatNormalToolLine(
   ) {
     // Safe projection: normal mode keeps status/outcome/counts but never the
     // raw errorMessage/logLines of a failed run — those belong to pro/verbose.
-    return formatOrchestrationCardBlock(event, toolName, colorEnabled, { safe: true });
+    return formatOrchestrationCardBlock(event, toolName, colorEnabled, {
+      safe: true,
+      visibleRunIds: opts?.visibleRunIds,
+    });
   }
   if (event.type === "tool-result" && toolName === "loadSkill") {
     return formatLoadSkillBlock({ ...event, argumentsPreview: event.argumentsPreview || pending?.argumentsPreview }, colorEnabled, { safe: true }) ?? "";
@@ -1189,6 +1248,14 @@ function formatLoadSkillBlock(
 
 export const TUI_TREE_MARKER = "\u0001TUI_TREE\n";
 export const TUI_TREE_END = "\u0002";
+export const TUI_TREE_TOOLS = {
+  Run: ["execShell", "runCommand", "launchProcess"],
+  Read: ["readFile"],
+  Search: ["exa_search"],
+  Fetch: ["fetchWebpage"],
+} as const;
+export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;
+export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string };
 
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
@@ -1198,15 +1265,32 @@ export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
 
 export function createToolEventFormatter(
   colorEnabled = resolveCliColorEnabled(),
-  opts: { tuiTrees?: boolean } = {},
+  opts: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> } = {},
 ): ToolEventFormatter {
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
-  let tree: { kind: "Run" | "Read" | "Search" | "Fetch"; items: string[] } | null = null;
-  const treeKind = (name: string): "Run" | "Read" | "Search" | "Fetch" | null =>
-    isRunToolName(name) ? "Run" : isReadToolName(name) ? "Read" : name === "exa_search" ? "Search" : name === "fetchWebpage" ? "Fetch" : null;
-  const treeLine = (kind: "Run" | "Read" | "Search" | "Fetch", items: string[]) => {
+  let tree: { kind: TuiTreeKind; items: string[] } | null = null;
+  const treeKind = (name: string): TuiTreeKind | null =>
+    (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
+      (TUI_TREE_TOOLS[kind] as readonly string[]).includes(name)) ?? null;
+  const treeLine = (kind: TuiTreeKind, items: string[], fallback: string) => {
     const label = kind === "Run" ? toolLabel("execShell") : kind === "Read" ? toolLabel("readFile") : kind === "Fetch" ? toolLabel("fetchWebpage") : toolLabel("exa_search");
-    return `${TUI_TREE_MARKER}${label} (${items.length})\n${items.map((item, i) => `${i === items.length - 1 ? "└── " : "├── "}${item}  ✓`).join("\n")}${TUI_TREE_END}\n`;
+    const header = `${label} (${items.length}) · `;
+    // Summary rows receive the assistant's "◈ " anchor (measured display width).
+    const columns = resolveHistoryLayoutGeometry(process.stdout.columns).contentWidth - displayWidth("◈ ");
+    let shown = 1; // Even an over-wide first item must remain intact.
+    for (let count = 2; count <= items.length; count++) {
+      const omitted = items.length - count;
+      const suffix = omitted ? `, … +${omitted}` : "";
+      if (displayWidth(`• ${header}${items.slice(0, count).join(", ")}${suffix}  ✓`) > columns) break;
+      shown = count;
+    }
+    const omitted = items.length - shown;
+    const payload: TuiTreePayload = {
+      kind,
+      summary: `${header}${items.slice(0, shown).join(", ")}${omitted ? `, … +${omitted}` : ""}  ✓`,
+      fallback,
+    };
+    return `${TUI_TREE_MARKER}${JSON.stringify(payload)}${TUI_TREE_END}\n`;
   };
 
   const formatTreeEvent = (event: LocalAgentToolEvent, call: { toolName: string; argumentsPreview?: string } | undefined): string | null => {
@@ -1237,8 +1321,8 @@ export function createToolEventFormatter(
     tree.items.push(item);
     // Keep the first call visible immediately; the second result replaces this
     // tail row with the complete tree in the TUI history.
-    if (tree.items.length < 2) return formatNormalToolLine(event, call, colorEnabled);
-    return treeLine(kind, tree.items);
+    if (tree.items.length < 2) return formatNormalToolLine(event, call, colorEnabled, opts);
+    return treeLine(kind, tree.items, formatNormalToolLine(event, call, colorEnabled, opts));
   };
   const format = ((event: LocalAgentToolEvent): string => {
     if (event.type === "tool-call") {
@@ -1252,7 +1336,7 @@ export function createToolEventFormatter(
     pending.delete(event.toolCallId);
     const treeOutput = formatTreeEvent(event, call);
     if (treeOutput !== null) return treeOutput;
-    return formatNormalToolLine(event, call, colorEnabled);
+    return formatNormalToolLine(event, call, colorEnabled, opts);
   }) as ToolEventFormatter;
   format.reset = () => { tree = null; };
   format.consume = (event: LocalAgentToolEvent) => {

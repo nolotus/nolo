@@ -26,6 +26,14 @@ import "./navigationRail.css";
 const pathOf = (to: string): string => to.split(/[?#]/)[0];
 
 /**
+ * Rail 导航组的渲染顺序真值（只含顺序，不含 i18n / Icon）。
+ * 动作组（新建、搜索）在上、位置稳定；导航组从「主页」出发：
+ * 探索（发现公共内容）排在收藏（个人库）之前，符合「发现→沉淀」的
+ * 使用方向；快捷收藏紧贴收藏，两者同属「我的内容」。
+ */
+export const RAIL_NAV_ORDER = ["home", "explore", "favorites"] as const;
+
+/**
  * Navigation V2 primary Rail.
  *
  * Every entry is a real route, so the highlighted item always matches the URL
@@ -86,36 +94,37 @@ export function NavigationRail({
     setViewMode("all");
   };
 
-  const items: Array<{
-    view: RailView;
-    to: string;
-    label: string;
-    Icon: React.ComponentType<{
-      size?: number;
-      "aria-hidden"?: React.AriaAttributes["aria-hidden"];
-    }>;
-  }> = [
+  // 每个 view 的文案 / 图标 / 目标：i18n 在渲染期调用，顺序真值来自 RAIL_NAV_ORDER。
+  const itemMeta: Record<
+    (typeof RAIL_NAV_ORDER)[number],
     {
-      view: "home",
+      to: string;
+      label: string;
+      Icon: React.ComponentType<{
+        size?: number;
+        "aria-hidden"?: React.AriaAttributes["aria-hidden"];
+      }>;
+    }
+  > = {
+    home: {
       to: RAIL_VIEW_PATHS.home,
       label: t("common:home", "主页"),
       Icon: LuHouse,
     },
-    {
-      view: "favorites",
-      to: RAIL_VIEW_PATHS.favorites,
-      // Rail 文案用 common 命名空间的既有「收藏」key（不再用 allView.favorites「我的收藏」），
-      // 避免改动侧栏其它位置共享的 allView.favorites。
-      label: t("common:favorite", "收藏"),
-      Icon: LuStar,
-    },
-    {
-      view: "explore",
+    explore: {
       to: RAIL_VIEW_PATHS.explore,
       label: t("common:explorePlaza", "探索"),
       Icon: LuCompass,
     },
-  ];
+    favorites: {
+      // Rail 文案用 common 命名空间的既有「收藏」key（不再用 allView.favorites「我的收藏」），
+      // 避免改动侧栏其它位置共享的 allView.favorites。
+      to: RAIL_VIEW_PATHS.favorites,
+      label: t("common:favorite", "收藏"),
+      Icon: LuStar,
+    },
+  };
+  const items = RAIL_NAV_ORDER.map((view) => ({ view, ...itemMeta[view] }));
 
   return (
     <nav
@@ -144,7 +153,7 @@ export function NavigationRail({
             aria-label={label}
             aria-current={isActive ? "page" : undefined}
             data-active={isActive ? "true" : undefined}
-            className="navigation-v2-rail__item"
+            className={`navigation-v2-rail__item${view === RAIL_NAV_ORDER[0] ? " navigation-v2-rail__item--group-start" : ""}`}
             onClick={view === "home" ? handleHomeClick : undefined}
           >
             <span className="navigation-v2-rail__icon"><Icon size={17} aria-hidden="true" /></span>

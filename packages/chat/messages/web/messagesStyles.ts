@@ -416,6 +416,76 @@ export const messagesStyles = stylex.create({
     whiteSpace: "nowrap",
   },
 
+  // ─── ContextualStatusRow（后台完成通知状态行）──────────
+  // 标题允许换行（长标题窄屏不截断），次要信息走弱化色；色调沿用 wakeEvent*。
+  contextualFragmentRow: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 2,
+  },
+  contextualFragmentHead: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  // 标题与次要信息竖排：标题优先占满剩余宽度（长标题只换行、不截断），
+  // 次要信息落到标题下一行，不再与标题挤成两列。
+  contextualFragmentHeadline: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 2,
+    minWidth: 0,
+    flexGrow: 1,
+  },
+  contextualFragmentTitle: {
+    minWidth: 0,
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+  },
+  contextualFragmentMeta: {
+    color: "var(--textTertiary)",
+    fontSize: "var(--fontSize-xs)",
+    whiteSpace: "normal",
+  },
+  contextualFragmentTasks: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    marginTop: 2,
+    paddingLeft: 14,
+  },
+  contextualFragmentTask: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  contextualFragmentDetail: {
+    alignSelf: "flex-start",
+    marginTop: 2,
+    paddingTop: 1,
+    paddingBottom: 1,
+    paddingLeft: 6,
+    paddingRight: 6,
+    borderRadius: "var(--radius-sm)",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight))",
+    backgroundColor: "transparent",
+    color: "var(--textTertiary)",
+    fontSize: "var(--fontSize-xs)",
+    cursor: "pointer",
+  },
+  contextualFragmentFull: {
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    marginTop: 4,
+    color: "var(--textTertiary)",
+  },
+  wakeEventStatusPartial: {
+    color: "var(--warning)",
+  },
+
   // ─── ApplyLineEditsPreviewViewer ─────────────────────────
   applyLineEditsContainer: {
     borderWidth: 1,

@@ -11,6 +11,8 @@ i18n.use(initReactI18next).init({
     [Language.ZH_CN]: [Language.ZH_CN, Language.EN],
     [Language.ZH_HANT]: [Language.ZH_HANT, Language.ZH_CN, Language.EN],
     [Language.JA]: [Language.JA, Language.EN],
+    [Language.DE]: [Language.DE, Language.EN],
+    [Language.ES]: [Language.ES, Language.EN],
     default: [Language.EN],
   },
   compatibilityJSON: "v3",

@@ -1,8 +1,10 @@
+import { NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS } from "ai/skills/userSkills";
 import { SETTINGS_RECORD_SCHEMA_VERSION } from "./settingsRecord";
 
 export function prepareUserSettings(locale: string) {
   return {
     schemaVersion: SETTINGS_RECORD_SCHEMA_VERSION,
+    enabledSkills: [...NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS],
     theme: "system",
     language: locale,
     createdAt: Date.now(),

@@ -4,6 +4,7 @@ import {
   renderDialogTitle,
 } from "./dialogFrame";
 import { t } from "./i18n";
+import { displayWidth } from "./tuiAnsi";
 import {
   runSelectDialog,
   type KeyReader,
@@ -23,20 +24,15 @@ type ConfirmDialogItem = SelectDialogItem & {
 const FALLBACK_TERMINAL_WIDTH = 80;
 
 /**
- * CJK ideographs, kana, Hangul and fullwidth forms occupy two terminal columns
- * each. `String.length` counts UTF-16 code units, so a path of Chinese
- * directory names measures roughly half its real width — enough to slip past a
- * length-based budget and wrap the frame it was supposed to fit inside.
+ * 宽度一律走共享的 `tuiAnsi.displayWidth`（emoji 2 列、EA=A 在 wide 约定下 2 列）。
+ * 本模块曾自带 `WIDE_CHAR` 正则 + 本地 displayWidth：它只认 CJK/韩文/全角，把 emoji
+ * 算 1 列、把 `…`/`→`/`×` 这类 EA=A 字符在 wide 终端下也算 1 列，于是「按列截断」的
+ * 预算算错——正是它要防的折行/撑破。宽度真值只留一份。
+ *
+ * 按**字素簇**遍历（不是码点）：`👨‍👩‍👧‍👦`、`👍🏽`、`⚠️` 必须整体计量，逐码点切会把
+ * ZWJ 序列拆成两半、宽度算错且截出半个表情。
  */
-const WIDE_CHAR = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]/;
-
-/** Terminal columns `text` occupies, counting wide characters as two. */
-function displayWidth(text: string): number {
-  let width = 0;
-  // Iterate by code point so astral chars (emoji in a path) count once.
-  for (const char of text) width += WIDE_CHAR.test(char) ? 2 : 1;
-  return width;
-}
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /**
  * Truncate a command to fit within `maxWidth` columns (accounting for the
@@ -50,14 +46,15 @@ function truncateCommand(command: string, maxWidth: number): string {
   const budget = Math.max(10, maxWidth - indent);
   if (displayWidth(command) <= budget) return command;
   const marker = ` ${t("dialogConfirmCommandTruncated")}`;
+  // 标记本身也是本地化文本（含 CJK 时每字 2 列），预算必须按列扣。
   const keep = Math.max(1, budget - displayWidth(marker));
   let kept = "";
   let width = 0;
-  for (const char of command) {
-    const charWidth = WIDE_CHAR.test(char) ? 2 : 1;
-    if (width + charWidth > keep) break;
-    kept += char;
-    width += charWidth;
+  for (const { segment } of graphemeSegmenter.segment(command)) {
+    const cells = displayWidth(segment);
+    if (width + cells > keep) break;
+    kept += segment;
+    width += cells;
   }
   return `${kept}${marker}`;
 }

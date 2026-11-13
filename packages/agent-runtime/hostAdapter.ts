@@ -132,8 +132,19 @@ export type AgentRuntimeCompleteOptions = {
   onActionGate?: (gate: import("./localLoop").LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
 };
 
+export type AgentRuntimeRequestBudget = {
+  /** Final selected/adapted schemas, not the registry. Omitted descriptor is unknown. */
+  toolSchemaTokens: number;
+  output: import("../ai/context/requestBudget").RequestBudgetInput["output"];
+};
+
 export type AgentRuntimeProvider = {
+  /** Transport-owned final-wire budget description; no model capability metadata. */
+  requestBudget?: AgentRuntimeRequestBudget;
+
   model: string;
+  /** Attested by the resolved transport, never inferred from model/provider names. */
+  transport?: import("./providerCallTelemetry").ContextProvenance["transport"];
   /** Host attests that this instance cannot execute tools or access workspace callbacks. */
   textOnly?: true;
   complete(
@@ -291,6 +302,8 @@ export type AgentRuntimeDialogHistoryLoadResult = {
 
 export type AgentRuntimeHostAdapter = {
   host: AgentRuntimeHost;
+  /** Host-owned root for tool output spill files. */
+  workspaceRoot?: string;
   capabilities: string[];
   loadAgentConfig(agentRef: string): Promise<AgentRuntimeAgentConfig | null>;
   loadDialogHistory(dialogId: string): Promise<AgentRuntimeChatMessage[]>;

@@ -511,14 +511,32 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     label: "Ollama Cloud",
     description: "Ollama Cloud 订阅（API Key + Base URL）",
     provider: "ollama-cloud",
-    baseUrl: "https://ollama.com/v1",
+    // Ollama Cloud 订阅（API Key + Base URL）。默认走 **Responses 线**
+    // （/v1/responses）：2026-11-10 实测 10 个现役模型在 /v1/responses 上逐个 200，
+    // function_call（工具调用）与 reasoning item 都正常，nolo 端到端跑通
+    // （agent 回复 PONG）。chat.completions（/v1）同样可用，保留为可切换的备选。
+    baseUrl: "https://ollama.com/v1/responses",
     keyFormatHint: "Key 形如 xxx.xxx（在 ollama.com/settings/api-keys 获取完整 Key，含点号后半段）",
-    defaultModel: "deepseek-v4-flash:cloud",
+    // 2026-11-10 按上游实拉清单（GET https://ollama.com/v1/models）+ 逐个 chat
+    // 探针校准：默认值与下拉都换成现役 id。旧的 deepseek-v4-flash:cloud 已被上游
+    // 下线（chat 返回 410 "deepseek-v4-flash:0731 was retired on September 25, 2026"），
+    // 留着它等于让新用户第一步就撞死模型。裸 id（deepseek-v4.1-flash）与带
+    // `:cloud` 后缀的别名当前都可用，这里统一用上游清单给出的裸 id。
+    // 探针记录（同一天、同一把 key、POST /v1/chat/completions、max_tokens=8）：
+    // 下面这 10 个 id **逐个原样请求**均返回 200（含无版本后缀的 deepseek-v4-pro）；
+    // 只有 deepseek-v4-flash:cloud 返回 410，因此从列表移除。
+    defaultModel: "deepseek-v4.1-flash",
     modelOptions: [
-      { id: "glm-5.2:cloud", label: "GLM 5.2" },
-      { id: "deepseek-v4-flash:cloud", label: "DeepSeek V4 Flash", recommended: true },
-      { id: "deepseek-v4-pro:cloud", label: "DeepSeek V4 Pro" },
-      { id: "kimi-k3:cloud", label: "Kimi K3" },
+      { id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash", recommended: true },
+      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
+      { id: "glm-5.3-flash", label: "GLM 5.3 Flash" },
+      { id: "glm-5.3", label: "GLM 5.3" },
+      { id: "kimi-k3.1-pro", label: "Kimi K3.1 Pro" },
+      { id: "kimi-k3", label: "Kimi K3" },
+      { id: "kimi-k2.7-code", label: "Kimi K2.7 Code" },
+      { id: "minimax-m3.1-flash", label: "MiniMax M3.1 Flash" },
+      { id: "mimo-v2.6-flash", label: "MiMo V2.6 Flash" },
+      { id: "mistral-large-4", label: "Mistral Large 4" },
     ],
     commercialKind: "subscription",
     accessVariant: "token_plan_endpoint",

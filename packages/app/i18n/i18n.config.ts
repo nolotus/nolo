@@ -20,6 +20,18 @@ import openAuditableLocale from "./translations/openAuditable.locale";
 import homeLandingLocale from "./translations/homeLanding.locale";
 import homeLandingV2Locale from "./translations/homeLandingV2.locale";
 
+/**
+ * Assemble one namespace for a language whose translation files may still be
+ * partially filled: start from the English base, then overlay whatever the
+ * language block already provides. Untranslated keys therefore inherit English
+ * instead of surfacing raw keys (de/es land here before the translation group
+ * finishes; the same helper keeps the assembly decision in one place).
+ */
+const withFallback = (locale: any, lng: Language): Record<string, unknown> => ({
+  ...(locale[Language.EN]?.translation ?? {}),
+  ...(locale[lng]?.translation ?? {}),
+});
+
 export const resources = {
   [Language.EN]: {
     common: {
@@ -130,6 +142,50 @@ export const resources = {
     space: (spaceLocale as any)[Language.KO]?.translation ?? spaceLocale[Language.EN].translation,
     ai: (aiLocale as any)[Language.KO]?.translation ?? aiLocale[Language.EN].translation,
     chat: (chatLocale as any)[Language.KO]?.translation ?? chatLocale[Language.EN].translation,
+  },
+  [Language.DE]: {
+    common: {
+      ...withFallback(interfaceLocale, Language.DE),
+      ...withFallback(errorLocale, Language.DE),
+      ...appBuilderLocale[Language.EN].translation,
+      ...withFallback(pricingLocale, Language.DE),
+      ...withFallback(rechargeLocale, Language.DE),
+      ...adminLocale[Language.EN].translation,
+      ...privacyLocale[Language.EN].translation,
+      ...termsLocale[Language.EN].translation,
+      ...aupLocale[Language.EN].translation,
+      ...footerLocale[Language.EN].translation,
+      ...withFallback(localFirstLocale, Language.DE),
+      ...openAuditableLocale[Language.EN].translation,
+      ...homeLandingLocale[Language.EN].translation,
+      ...homeLandingV2Locale[Language.EN]!.translation,
+      seo: seoLocale[Language.EN],
+    },
+    space: withFallback(spaceLocale, Language.DE),
+    ai: withFallback(aiLocale, Language.DE),
+    chat: withFallback(chatLocale, Language.DE),
+  },
+  [Language.ES]: {
+    common: {
+      ...withFallback(interfaceLocale, Language.ES),
+      ...withFallback(errorLocale, Language.ES),
+      ...appBuilderLocale[Language.EN].translation,
+      ...withFallback(pricingLocale, Language.ES),
+      ...withFallback(rechargeLocale, Language.ES),
+      ...adminLocale[Language.EN].translation,
+      ...privacyLocale[Language.EN].translation,
+      ...termsLocale[Language.EN].translation,
+      ...aupLocale[Language.EN].translation,
+      ...footerLocale[Language.EN].translation,
+      ...withFallback(localFirstLocale, Language.ES),
+      ...openAuditableLocale[Language.EN].translation,
+      ...homeLandingLocale[Language.EN].translation,
+      ...homeLandingV2Locale[Language.EN]!.translation,
+      seo: seoLocale[Language.EN],
+    },
+    space: withFallback(spaceLocale, Language.ES),
+    ai: withFallback(aiLocale, Language.ES),
+    chat: withFallback(chatLocale, Language.ES),
   },
 };
 

@@ -361,6 +361,19 @@ export type CfCredentialInputs = {
   allowWranglerOAuthToken?: boolean;
 };
 
+/**
+ * 凭据解析真正读取的字段子集（`resolveCfContainersCredentials` 的入参类型）。
+ * 此前签名直接吃整个 `CfContainersBackendOptions`，但函数只读凭据相关字段，
+ * 把 `execHeaders` 等 backend 专属必填项也强加给了只想解析凭据的调用方
+ * （cloudExecutionWorkload 的 cf 分支）——按实际读取面收窄。
+ */
+export type CfContainersCredentialResolutionInputs = CfCredentialInputs & {
+  credentials?: CfCredentials;
+  apiToken?: string;
+  accountId?: string;
+  now?: () => number;
+};
+
 export type CfContainersBackendOptions = CfCredentialInputs & {
   /** 显式凭据（优先于 env / 配置文件）。生产走 env 或 wrangler 配置。 */
   credentials?: CfCredentials;
@@ -1132,7 +1145,7 @@ export class CfContainersBackend implements ExecutionBackend {
  * 失败一律 fail-closed：抛错即「零网络调用」，且错误信息里绝不出现凭据内容。
  */
 export async function resolveCfContainersCredentials(
-  inputs: CfContainersBackendOptions,
+  inputs: CfContainersCredentialResolutionInputs,
 ): Promise<CfCredentials> {
   const env = inputs.env ?? process.env;
   if (inputs.credentials) {

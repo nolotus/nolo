@@ -1,5 +1,6 @@
 // 文件路径: database/actions/patch.ts
 
+import { patchProtectedPage } from "./protectedPagePatch";
 import type { DbThunkApi } from "database/thunkApiTypes";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { actionToast as toast } from "./actionToast";
@@ -79,7 +80,8 @@ export const patchAction = async (
     dbKey,
     changes,
     preferredServerOrigin,
-  }: { dbKey: string; changes: any; preferredServerOrigin?: string | null },
+    requireServerConfirmation,
+  }: { dbKey: string; changes: any; preferredServerOrigin?: string | null; requireServerConfirmation?: boolean },
   thunkApi: DbThunkApi
 ): Promise<any> => {
   // 1. 从 thunkApi.extra 中获取数据库实例
@@ -98,7 +100,7 @@ export const patchAction = async (
   }
 
   const state = thunkApi.getState() as import("app/store").RootState;
-  const { currentServer, syncServers: configuredSyncServers, currentToken } =
+  const { currentServer, syncServers: configuredSyncServers, currentToken, currentUserId } =
     getRuntimeServerContext(state);
 
   try {
@@ -138,6 +140,22 @@ export const patchAction = async (
     const newData = deepMerge(currentData, patchChanges);
     const persistedData =
       newData && typeof newData === "object" ? { ...newData, dbKey } : { dbKey };
+    if (dbKey.startsWith("page-") && currentUserId && typeof db.batch === "function") {
+      const protectedData = await patchProtectedPage({ db, actorId: currentUserId, dbKey,
+        data: persistedData, changes: patchChanges, requireServerConfirmation,
+        buildData: (latest) => ({ ...deepMerge(latest, patchChanges), dbKey }),
+        isAuthorityAllowed: (origin) => {
+          const context = getRuntimeServerContext(thunkApi.getState() as import("app/store").RootState);
+          return context.currentUserId === currentUserId && context.remoteServers.some((server) => {
+            try { return new URL(server).origin === origin; } catch { return false; }
+          });
+        },
+        token: async () => {
+          const context = getRuntimeServerContext(thunkApi.getState() as import("app/store").RootState);
+          return context.currentUserId === currentUserId ? context.currentToken ?? null : null;
+        }, fetch });
+      if (protectedData !== undefined) return protectedData;
+    }
     await db.put(dbKey, persistedData);
 
     // 5. 异步触发对远程服务器的同步（即发即忘）

@@ -17,7 +17,7 @@ import {
   COLLAPSED_PASTE_PLACEHOLDER_RE,
   shouldCollapsePaste,
 } from "core/collapsedPaste";
-import { displayWidth, fitAnsiLine, wrapTextToLines } from "./tuiAnsi";
+import { boxGlyphs, displayWidth, fitAnsiLine, resolveBoxCharset, wrapTextToLines } from "./tuiAnsi";
 import { consumeSgrMouseSequence } from "./tuiMouse";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import { composerSurfaceBackgroundSequence, themeColorSequence, themeText } from "./theme";
@@ -339,9 +339,12 @@ export function createFixedInput(
     // The composer rules follow the theme's chrome token rather than a
     // hardcoded bright-black, so /theme actually reaches the input area
     // instead of leaving it stuck on the terminal's default gray.
+    // 字形跟 resolveBoxCharset：EA=A=wide 的终端（WT `compatibility.ambiguousWidth: wide`）
+    // 下 `─` 占 2 列，`repeat(cols)` 会变成 2*cols 格把输入区撑破，故退化为 ascii `-`。
+    const ruleGlyph = boxGlyphs(resolveBoxCharset()).h;
     const rule = colorEnabled
-      ? `\x1b[2m${themeColorSequence("chrome")}${"─".repeat(cols)}\x1b[0m`
-      : "─".repeat(cols);
+      ? `\x1b[2m${themeColorSequence("chrome")}${ruleGlyph.repeat(cols)}\x1b[0m`
+      : ruleGlyph.repeat(cols);
     sections.push(rule);
 
     const titleLine = config.getTitleLine?.();

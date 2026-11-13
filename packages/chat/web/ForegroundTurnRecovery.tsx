@@ -5,6 +5,7 @@ import {
   clearForegroundExecutionClientState,
   observeForegroundExecutionPayload,
 } from "ai/agent/foregroundExecutionClientState";
+import { deriveIncompleteBrowserTurn } from "./incompleteBrowserTurn";
 import { selectCurrentServer } from "app/settings/settingSlice";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
@@ -70,8 +71,12 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
   const [sawForegroundLifecycle, setSawForegroundLifecycle] = useState(false);
   const [streamDropped, setStreamDropped] = useState(false);
   const [attachSettled, setAttachSettled] = useState(false);
-  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-  const replyMaybePending = lastMessage?.role === "user";
+  const replyMaybePending = Boolean(deriveIncompleteBrowserTurn({
+    messages,
+    isLoadingInitial: false,
+    hasLocalOwner: hasLocalForegroundOwner,
+    recoveredForegroundTurn: null,
+  }));
 
   useEffect(() => {
     setAttachHintElapsed(false);

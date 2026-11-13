@@ -17,6 +17,7 @@ import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { useUserId } from "identity";
 import { LuMessagesSquare, LuEllipsisVertical, LuHistory, LuTrash2 } from "react-icons/lu";
 import { useAppVersions } from "app/hooks/useAppVersions";
+import PageObjectActions from "render/page/PageObjectActions";
 
 
 const AppDetailPage: React.FC = () => {
@@ -69,6 +70,8 @@ const AppDetailPage: React.FC = () => {
             appId: app.appId,
             customUrl: app.customUrl,
             url: app.url,
+            versionServerOrigin: app.versionServerOrigin,
+            serverOrigin: app.serverOrigin,
           })
         : "",
     [app]
@@ -148,6 +151,7 @@ const AppDetailPage: React.FC = () => {
 
   return (
     <div className="AppDetailPage">
+      <PageObjectActions />
       {loading && !app ? (
         <div className="AppDetailPage__status">{t("loading", "加载中...")}</div>
       ) : error ? (

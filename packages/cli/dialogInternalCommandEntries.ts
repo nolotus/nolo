@@ -23,6 +23,10 @@ export function getDialogInternalCommandEntries(): CommandEntry[] {
       const { runDialogReadCommand } = await import("./dialogCommands");
       return runDialogReadCommand(args, deps);
     }),
+    createEnvCommand(["dialog", "notify"], "Deliver a notification into a live CLI dialog's existing queue (--message/--file, --idempotency-key; --status for the receipt)", async (args, deps) => {
+      const { runDialogNotifyCommand } = await import("./dialogNotifyCommand");
+      return runDialogNotifyCommand(args, deps);
+    }),
     createEnvCommand(["dialog", "status"], "Read compact dialog status", async (args, deps) => {
       const { runDialogStatusCommand } = await import("./dialogCommands");
       return runDialogStatusCommand(args, deps);

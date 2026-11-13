@@ -124,10 +124,10 @@ export function createTurnUsageLedger(args: {
     recordProviderCall: ({ usage, model, provider, telemetry }) => {
       turnUsage = mergeTurnUsage(turnUsage, usage);
       lastContextUsage = usage;
-      if (usage && Object.keys(usage).length > 0) {
+      if ((usage && Object.keys(usage).length > 0) || telemetry?.requestState) {
         providerRecords.push({
-          callId: resolveRecordCallId(usage),
-          usage,
+          callId: resolveRecordCallId(usage ?? {}),
+          usage: usage ?? {},
           model: model || args.model || "unknown",
           ...(provider || args.provider
             ? { provider: provider || args.provider }

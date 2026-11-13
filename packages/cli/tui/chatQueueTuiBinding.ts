@@ -1,3 +1,5 @@
+import { traceChildRunWake, queueWakeFields } from "./runWakeDiagnostics";
+import type { CliPendingResult, CliPendingRecovery } from "../client/localDialogRecords";
 // packages/cli/tui/chatQueueTuiBinding.ts
 //
 // TUI binding for the cross-platform chat queue core.
@@ -24,13 +26,41 @@ import {
   type ChatSendDecision,
 } from "core/chat/resolveChatSendDecision";
 import { projectChatQueueStatus, type ChatQueueStatus } from "core/chat/chatQueueStatus";
-import type { InternalTurnEvent, TurnRequest } from "core/chat/internalTurnEvent";
+import { createTurnRequest, type InternalTurnEvent, type TurnRequest } from "core/chat/internalTurnEvent";
+import { initialChatQueueState } from "core/chat/chatQueueMachine";
+import { monotonicFactory } from "ulid";
+// Pending user messages are keyed by messageId and recovery reads them in key
+// order, so the id must be monotonic: `${Date.now()}-${randomUUID()}` randomizes
+// the order of messages submitted within the same millisecond, which reorders
+// them on restart (violating "preserve original order").
+const mintPendingMessageId = monotonicFactory();
 
 export type RunDrainedTurn = (
   request: TurnRequest
 ) => Promise<{ ok: boolean; aborted: boolean }>;
 
 export type ChatQueueTuiBinding = {
+  submitPending(input: TurnRequest | InternalTurnEvent | string): Promise<void>;
+  /**
+   * Admit a message delivered from outside this process (`nolo dialog notify`)
+   * through the same durable-save + enqueue path a typed message uses.
+   *
+   * Never starts a turn on its own: if the dialog is busy, stopped
+   * (drain paused) or its recovery gate is closed, the request stays queued and
+   * the existing cascade picks it up later. Returns `consumed` when the existing
+   * drain cascade was triggered for it — that means the queue took it, not that
+   * the model has read or answered it. Throws when the durable save fails (the
+   * caller must keep the delivery pending) or when recovery is blocked.
+   */
+  admitExternalRequest(request: TurnRequest): Promise<"queued" | "consumed">;
+  restorePending(): Promise<void>;
+  isRecoveryBlocked(): boolean;
+  /** Current recovery snapshot (for a one-time plain-language reminder). */
+  getRecovery(): CliPendingRecovery;
+  handlePendingCommand(action: "show" | "continue-without-resend", batchId?: string): Promise<string>;
+  resumePending(): Promise<void>;
+  /** Drain only owned child completions after temporary screen ownership ends. Never clears stop/error/recovery gates. */
+  resumeInternalCompletions(dialogId: string | null): Promise<void>;
   /** Resolve what the composer should do with the current draft right now. */
   resolveSubmit(input: {
     text: string;
@@ -116,6 +146,23 @@ export type ChatQueueTuiBinding = {
    * returns false when the binding is already idle.
    */
   recoverStaleRunning(): boolean;
+  /**
+   * Claim the leading user batch for mid-turn injection without changing
+   * `running`. Returns null when nothing is claimable (empty queue, drain
+   * paused, recovery blocked, or a claim is already outstanding). The caller
+   * must consume the claim with `acceptClaimedBatch` / `failClaimedBatch`.
+   */
+  claimBatchForInjection(): { batchId: number; requests: readonly TurnRequest[] } | null;
+  /** Accept a claimed injection batch: removes it from the queue. */
+  acceptClaimedBatch(batchId: number): void;
+  /** Fail a claimed injection batch: keeps the queue, pauses the drain. */
+  failClaimedBatch(batchId: number, message: string): void;
+  /**
+   * Roll a claimed injection batch back after an abort before the provider was
+   * invoked: releases an outstanding claim, or restores an already-accepted
+   * batch to the queue head so the unsent message stays re-sendable.
+   */
+  rollbackClaimedBatch(batchId: number, requests: readonly TurnRequest[]): void;
   /** Current UI status snapshot. */
   getStatus(): ChatQueueStatus;
   /** Number of queued items (convenience for the status line). */
@@ -131,8 +178,27 @@ export type ChatQueueTuiBinding = {
  * an agent turn. It must resolve with `{ok, aborted}` so the binding can feed
  * the outcome back into the core and decide whether to keep draining.
  */
-export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTuiBinding {
-  const runtime: ChatQueueRuntime = createChatQueueRuntime();
+/**
+ * The host durably persists queued user messages and executes a claimed batch
+ * as one provider round. CLI production supplies dialog-backed storage and
+ * original-message turn input; the batch receipt (`requested`) is written by
+ * the turn runner before the provider is invoked, so no separate admission
+ * write is needed here.
+ */
+export type TuiUserBatchHost = {
+  savePending?(requests: readonly TurnRequest[]): Promise<void>;
+  loadPending?(): Promise<CliPendingResult>;
+  resolveUnknownWithoutResend?(batchId: string): Promise<void>;
+  runBatch(requests: readonly TurnRequest[], canStart: () => boolean): ReturnType<RunDrainedTurn>;
+};
+
+export function createChatQueueTuiBinding(
+  runTurn: RunDrainedTurn,
+  batchHost?: TuiUserBatchHost,
+): ChatQueueTuiBinding {
+  const runtime: ChatQueueRuntime = createChatQueueRuntime(
+    batchHost ? { ...initialChatQueueState, drainMode: "user-batch" } : undefined,
+  );
   // Armed by `preemptForDrain()` / `preemptForStop()`: when the caller
   // aborts the in-flight turn right after arming, the subsequent
   // `notifyTurnEnd({ aborted: true })` is reinterpreted so the queue is
@@ -167,14 +233,109 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
   };
 
   const enqueue = (input: TurnRequest | InternalTurnEvent | string) => {
-    runtime.send({ type: "enqueue", text: input as any });
+    const request = createTurnRequest(input);
+    runtime.send({ type: "enqueue", text: request.event.kind === "user"
+      ? { ...request, messageId: request.messageId ?? mintPendingMessageId(), source: request.source ?? "tui" }
+      : request });
     return projectChatQueueStatus({ state: runtime.getState() });
+  };
+
+  let pendingWrites: Promise<void> = Promise.resolve();
+  let stoppedGeneration = 0;
+  let internalResumeStopped = false;
+  let restore: Promise<void> | undefined;
+  let restoreComplete = false;
+  let recoveryBlocked = false;
+  let recovery: CliPendingRecovery = { status: "ready", messageIds: [] };
+  let writeError: string | undefined;
+  const unsaved = new Map<string, TurnRequest>();
+  const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+  const restorePending = (): Promise<void> => {
+    if (restoreComplete) {
+      if (recoveryBlocked) runtime.send({ type: "drain-error", message: `${recovery.message ?? "Pending restore failed"}; /pending to inspect` });
+      return Promise.resolve();
+    }
+    if (restore) return restore;
+    restore = (async () => {
+      try {
+        const recovered = await batchHost?.loadPending?.() ?? { pending: [], recovery: { status: "ready" as const, messageIds: [] } };
+        for (const request of recovered.pending) enqueue(request);
+        recovery = recovered.recovery;
+        // Only a real read failure blocks new messages. A provider-outcome
+        // "unknown" batch is retained and never auto-resent, but the user's
+        // explicit new messages must still send normally.
+        recoveryBlocked = recovery.status === "read-error";
+        if (recoveryBlocked) {
+          runtime.send({ type: "pause-drain" });
+          runtime.send({ type: "drain-error", message: `${recovery.message ?? "Pending restore failed"}; /pending to inspect` });
+        }
+        restoreComplete = true;
+      } catch (error) {
+        // Storage read failure is distinct from a provider-outcome unknown:
+        // the state is indeterminate, so draining stays paused.
+        recovery = { status: "read-error", messageIds: [], message: `Pending restore failed: ${errorText(error)}` };
+        recoveryBlocked = true;
+        runtime.send({ type: "pause-drain" });
+        runtime.send({ type: "drain-error", message: `${recovery.message}; /pending to inspect` });
+      } finally {
+        restore = undefined;
+      }
+    })();
+    return restore;
+  };
+  const handlePendingCommand = async (action: "show" | "continue-without-resend", batchId?: string) => {
+    // Explicit inspection refreshes evidence; ordinary sends reuse the cached result.
+    if (action === "show") restoreComplete = false;
+    await restorePending();
+    if (action === "show") return recovery.status === "unknown"
+      ? `${recovery.message}\n${(recovery.batches ?? []).map(batch => `Batch ${batch.batchId}\n${batch.messages.map(message => `${message.messageId}: ${message.text}`).join("\n")}`).join("\n")}\nTo retain this unknown batch without resending and continue later messages: /pending continue-without-resend <batchId>`
+      : "No unresolved provider batch. Pending messages remain available via Enter.";
+    if (!batchId || !recovery.messageIds.includes(batchId)) throw new Error("Use /pending, then /pending continue-without-resend <exact batchId>");
+    if (!batchHost?.resolveUnknownWithoutResend) throw new Error("Pending resolution unavailable");
+    await batchHost.resolveUnknownWithoutResend(batchId);
+    restoreComplete = false;
+    await restorePending();
+    if (!recoveryBlocked) { runtime.send({ type: "drain-error", message: "" }); await resumePending(); }
+    return `Recorded user decision for ${batchId}: no resend; original messages and receipt retained.`;
+  };
+
+  const submitPending = (input: TurnRequest | InternalTurnEvent | string): Promise<void> => {
+    const request = createTurnRequest(input);
+    const retryKey = JSON.stringify(request);
+    const durable = unsaved.get(retryKey) ?? { ...request,
+      messageId: request.messageId ?? mintPendingMessageId(), source: request.source ?? "tui" };
+    unsaved.set(retryKey, durable);
+    const write = pendingWrites.then(async () => {
+      try {
+        await batchHost?.savePending?.([durable]);
+        enqueue(durable);
+        unsaved.delete(retryKey);
+        if (writeError && !recoveryBlocked) runtime.send({ type: "drain-error", message: "" });
+        writeError = undefined;
+      } catch (error) {
+        writeError = `Pending save failed: ${errorText(error)}; draft retained, retry to save`;
+        runtime.send({ type: "drain-error", message: writeError });
+        throw error;
+      }
+    });
+    // Keep the write lane usable; the failure is retained above and returned
+    // to the composer, which must not clear the draft until this resolves.
+    pendingWrites = write.then(() => {}, () => {});
+    return write;
   };
 
   const enqueueAndMaybeRun = async (
     input: TurnRequest | InternalTurnEvent | string
   ): Promise<boolean> => {
-    enqueue(input);
+    const request = createTurnRequest(input);
+    if (request.event.kind === "user") {
+      await submitPending(request);
+    } else {
+      // Internal completion events are not durable user submissions. Admit
+      // synchronously so delivery remains FIFO before any turn-end can race it;
+      // never mint a user identity or pass them through savePending.
+      enqueue(request);
+    }
     const status = runtime.getState();
     if (!status.running && !status.drainPaused) {
       await notifyTurnEnd({ ok: true, aborted: false });
@@ -183,11 +344,45 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     return false;
   };
 
+  const admitExternalRequest = async (request: TurnRequest): Promise<"queued" | "consumed"> => {
+    // Settle the one-shot pending restore BEFORE writing: its snapshot must
+    // predate this admission, otherwise the restore pass would enqueue the same
+    // durable row a second time. The restore is memoized, so this is a no-op
+    // for every later delivery.
+    await restorePending();
+    // A blocked recovery means the store could not be read; taking a new message
+    // in that state would hide the unresolved batch. Leave it pending instead.
+    if (recoveryBlocked) throw new Error(recovery.message ?? "Pending recovery is unresolved");
+    await submitPending({ ...request, source: request.source ?? "dialog-notify" });
+    const status = runtime.getState();
+    if (status.running || status.drainPaused) return "queued";
+    // Reuse the ordinary turn-end cascade: it decides whether the head may run.
+    void notifyTurnEnd({ ok: true, aborted: false }).catch((error) => {
+      writeError = `Queued drain failed: ${errorText(error)}`;
+      runtime.send({ type: "drain-error", message: writeError });
+    });
+    return "consumed";
+  };
+
+  const resumePending = async () => {
+    await restorePending();
+    if (recoveryBlocked || writeError) return;
+    internalResumeStopped = false;
+    runtime.send({ type: "resume-drain" });
+    await notifyTurnEnd({ ok: true, aborted: false });
+  };
+
   const notifyTurnStart = () => {
     runtime.send({ type: "turn-start" });
   };
 
-  const notifyTurnEnd = async (outcome: { ok: boolean; aborted: boolean }) => {
+  const notifyTurnEnd = async (outcome: { ok: boolean; aborted: boolean }, internalDialog?: string | null) => {
+    if (batchHost?.loadPending) await restorePending();
+    if (batchHost?.savePending) await pendingWrites;
+    if (internalDialog !== undefined) {
+      const current = runtime.getState();
+      if (internalResumeStopped || recoveryBlocked || writeError || current.running || current.drainPaused || current.lastDrainError || current.drainBatch) return;
+    }
     // If a preempt was armed, reinterpret the aborted turn-end so the queue
     // is preserved instead of cleared. "drain" mode reinterprets as a clean
     // turn-end (cascade runs the head); "stop" mode reinterprets as a failed
@@ -216,6 +411,10 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     };
     const { outcome: effectiveOutcome, mode: consumedMode } = consumePreempt(outcome);
     runtime.send({ type: "turn-end", ...effectiveOutcome });
+    if (recoveryBlocked || writeError) {
+      runtime.send({ type: "pause-drain" });
+      return;
+    }
     // "stop" mode reinterprets abort as ok:false so the queue is kept and the
     // cascade does not drain — but ok:false also sets lastDrainError, which
     // would surface a spurious "previous turn failed" error for a deliberate
@@ -236,19 +435,33 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const status = runtime.getState();
-      if (!status.running && !status.drainPaused && status.queue.length > 0 && lastOk) {
+      if (internalDialog !== undefined) {
+        if (internalResumeStopped || recoveryBlocked || writeError) break;
+        const event = status.queue[0]?.event;
+        if (!event || event.kind !== "child-run-completed" || !event.runs.length
+            || event.runs.some(run => !internalDialog || run.parentDialogId !== internalDialog)) break;
+      }
+      if (!status.running && !status.drainPaused && status.queue.length > 0 && !status.lastDrainError && lastOk) {
+        const batch = status.drainBatch;
+        // A claimed batch is exactly one provider round: accept the claim
+        // (removing the prefix from the queue) and run every message in it
+        // together. The pre-provider receipt is written by the turn runner
+        // (`markCliUserBatchPhase`), so the binding neither persists nor
+        // "admits" here — queued messages are already durable from
+        // `submitPending`, and `enqueue` callers persist before queueing too.
+        if (batch && batchHost) {
+          runtime.send({ type: "batch-accepted", batchId: batch.id });
+        }
         const req = status.queue[0]!;
         runtime.send({ type: "turn-start" });
-        // Dequeue as soon as a message is consumed by the drain, before the
-        // turn runs. The queue machine contract treats "drain started" as
-        // "consumed": once a message has been fed to the agent turn it must
-        // leave the queue immediately, regardless of whether the turn later
-        // succeeds or fails. Dequeueing only on success left failed turns in
-        // the queue, so the next clean turn-end would resend them.
-        runtime.send({ type: "dequeue" });
+        if (!batch) runtime.send({ type: "dequeue" });
+        traceChildRunWake("queue-drain-start", req.event, null, queueWakeFields(getStatus()));
         let turnOutcome: { ok: boolean; aborted: boolean };
         try {
-          turnOutcome = await runTurn(req);
+          const generation = stoppedGeneration;
+          turnOutcome = batch && batchHost
+            ? await batchHost.runBatch(batch.requests, () => generation === stoppedGeneration)
+            : await runTurn(req);
         } catch {
           turnOutcome = { ok: false, aborted: false };
         }
@@ -257,6 +470,7 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
         const consumed = consumePreempt(turnOutcome);
         const effectiveTurnOutcome = consumed.outcome;
         runtime.send({ type: "turn-end", ...effectiveTurnOutcome });
+        traceChildRunWake("queue-drain-end", req.event, null, { ...queueWakeFields(getStatus()), ok: effectiveTurnOutcome.ok, aborted: effectiveTurnOutcome.aborted });
         if (consumed.mode === "stop") {
           runtime.send({ type: "drain-error", message: "" });
         }
@@ -267,9 +481,20 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     }
   };
 
+  const resumeInternalCompletions = async (dialogId: string | null) => {
+    await restorePending();
+    await pendingWrites;
+    const status = runtime.getState();
+    if (internalResumeStopped || recoveryBlocked || writeError || status.running || status.drainPaused || status.lastDrainError || status.drainBatch) return;
+    const event = status.queue[0]?.event;
+    if (!event || event.kind !== "child-run-completed" || !event.runs.length
+        || event.runs.some(run => !dialogId || run.parentDialogId !== dialogId)) return;
+    await notifyTurnEnd({ ok: true, aborted: false }, dialogId);
+  };
+
   const drainHeadForManualTurn = (): TurnRequest | null => {
     const status = runtime.getState();
-    if (status.running || status.queue.length === 0) return null;
+    if (batchHost || status.running || status.queue.length === 0) return null;
     const head = status.queue[0]!;
     runtime.send({ type: "turn-start" });
     runtime.send({ type: "dequeue" });
@@ -284,8 +509,10 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
   };
 
   const preemptForStop = (): boolean => {
+    internalResumeStopped = true;
     const status = runtime.getState();
-    if (!status.running) return false;
+    stoppedGeneration += 1;
+    if (!status.running) { runtime.send({ type: "pause-drain" }); return false; }
     preemptArmed = "stop";
     return true;
   };
@@ -329,7 +556,28 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     return true;
   };
 
+  const claimBatchForInjection = (): { batchId: number; requests: readonly TurnRequest[] } | null => {
+    if (runtime.getState().drainBatch) return null;
+    runtime.send({ type: "claim-batch" });
+    const after = runtime.getState();
+    return after.drainBatch ? { batchId: after.drainBatch.id, requests: after.drainBatch.requests } : null;
+  };
+
+  const acceptClaimedBatch = (batchId: number) => {
+    runtime.send({ type: "batch-accepted", batchId });
+  };
+
+  const failClaimedBatch = (batchId: number, message: string) => {
+    runtime.send({ type: "batch-failed", batchId, message });
+  };
+
+  const rollbackClaimedBatch = (batchId: number, requests: readonly TurnRequest[]) => {
+    runtime.send({ type: "rollback-batch", batchId, requests });
+  };
+
   const getStatus = () => projectChatQueueStatus({ state: runtime.getState() });
+
+  const getRecovery = () => recovery;
 
   const queueLength = () => runtime.getState().queue.length;
 
@@ -338,6 +586,14 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
   };
 
   return {
+    submitPending,
+    admitExternalRequest,
+    restorePending,
+    isRecoveryBlocked: () => recoveryBlocked,
+    getRecovery,
+    handlePendingCommand,
+    resumePending,
+    resumeInternalCompletions,
     resolveSubmit,
     enqueue,
     enqueueAndMaybeRun,
@@ -350,6 +606,10 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     snapshotAndClearQueueWithImages,
     clear,
     recoverStaleRunning,
+    claimBatchForInjection,
+    acceptClaimedBatch,
+    failClaimedBatch,
+    rollbackClaimedBatch,
     getStatus,
     queueLength,
     dispose,

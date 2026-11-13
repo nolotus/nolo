@@ -1,7 +1,8 @@
 // useSpaceData.ts
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { read, selectEntities } from "database/dbSlice";
+import { addCategory } from "create/space/category/categoryActions";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { createUserKey } from "database/keys";
 import { MemberRole, SpaceData } from "app/types";
@@ -181,4 +182,26 @@ export const useSpaceData = (spaceId: string) => {
     loading: spaceLoading || memberLoading,
     error: spaceDataWithMembers ? null : error,
   };
+};
+
+/**
+ * 空间分类写入的 domain 桥接。
+ *
+ * UI 只依赖本 hook，不再直接 import `app/store` 的 Redux consumer API
+ * （reduxBoundaryGuard：新 UI 必须经 domain hook/service 消费剩余域）。
+ * 真正写入仍由既有 `addCategory` thunk 完成，因此 `spaceId` 仍由调用方显式传入，
+ * 提交时的登录态与成员权限校验（`checkSpaceMembership`）也仍在 thunk 内执行一次。
+ * 失败语义与改造前一致：thunk 被拒绝时本函数不抛出（错误仍由调用方 catch 记录）。
+ */
+export const useAddCategory = (): ((input: {
+  spaceId: string;
+  name: string;
+}) => Promise<void>) => {
+  const dispatch = useAppDispatch();
+  return useCallback(
+    async (input: { spaceId: string; name: string }): Promise<void> => {
+      await (dispatch as (action: any) => any)(addCategory(input) as any);
+    },
+    [dispatch]
+  );
 };

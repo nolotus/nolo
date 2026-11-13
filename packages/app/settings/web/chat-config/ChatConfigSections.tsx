@@ -17,6 +17,10 @@ import {
 } from "ai/policy/selfUpdateFields";
 
 interface ChatConfigSectionsProps {
+  showNewFileDiff: boolean;
+  onShowNewFileDiffChange: (value: boolean) => void;
+  showShellTreeOutput: boolean;
+  onShowShellTreeOutputChange: (value: boolean) => void;
   autoApproveSelfUpdateFields: AgentUpdateField[];
   onToggleAutoApproveSelfUpdateField: (field: AgentUpdateField) => void;
   aiRecentContentLimit: number;
@@ -35,6 +39,10 @@ const HIGH_IMPACT_FIELD_SET = new Set<AgentUpdateField>(
 );
 
 const ChatConfigSections: React.FC<ChatConfigSectionsProps> = ({
+  showNewFileDiff,
+  onShowNewFileDiffChange,
+  showShellTreeOutput,
+  onShowShellTreeOutputChange,
   autoApproveSelfUpdateFields,
   onToggleAutoApproveSelfUpdateField,
   aiRecentContentLimit,
@@ -334,6 +342,24 @@ const ChatConfigSections: React.FC<ChatConfigSectionsProps> = ({
                 onShowScrollToBottomButtonChange(!showScrollToBottomButton)
               }
             />
+          </label>
+        </div>
+      </SettingSection>
+      <SettingSection title={t("chat.toolCards.title", "工具卡片")} description="">
+        <div className="ChatConfigSections__stack">
+          <label className="ChatConfigSections__subSetting">
+            <span className="ChatConfigSections__subSettingHeader">
+              <span className="ChatConfigSections__subSettingLabel">{t("chat.toolCards.newFileDiff", "新建文件的 Diff")}</span>
+              <span className="ChatConfigSections__subSettingDescription">{t("chat.toolCards.newFileDiffDesc", "默认只显示文件路径；开启后显示最终内容与 Diff 切换。")}</span>
+            </span>
+            <ToggleSwitch checked={showNewFileDiff} onChange={() => onShowNewFileDiffChange(!showNewFileDiff)} />
+          </label>
+          <label className="ChatConfigSections__subSetting">
+            <span className="ChatConfigSections__subSettingHeader">
+              <span className="ChatConfigSections__subSettingLabel">{t("chat.toolCards.shellTree", "执行 tree 的命令输出")}</span>
+              <span className="ChatConfigSections__subSettingDescription">{t("chat.toolCards.shellTreeDesc", "默认只显示命令与退出码；开启后显示目录树内容。")}</span>
+            </span>
+            <ToggleSwitch checked={showShellTreeOutput} onChange={() => onShowShellTreeOutputChange(!showShellTreeOutput)} />
           </label>
         </div>
       </SettingSection>

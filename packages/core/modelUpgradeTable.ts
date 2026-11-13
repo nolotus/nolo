@@ -137,8 +137,23 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
   },
   {
     from: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3" },
-    to: { provider: "nolo", model: "deepseek-flash" },
-    reason: "MiniMax M3 记录统一到 nolo DeepSeek Flash（fireworks 通道收敛）",
+    to: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3p1-flash" },
+    reason: "MiniMax M3 记录升级到 M3.1 Flash（2026-11-04 owner 决定：仍走 fireworks 通道）",
+  },
+  {
+    from: { provider: "fireworks", model: "accounts/fireworks/models/kimi-latest" },
+    to: { provider: "fireworks", model: "accounts/fireworks/models/kimi-k3" },
+    reason: "Kimi 历史 id 统一到 Kimi K3.1 Pro（2026-11-04 owner 决定：Kimi 只保留 3.1 Pro）",
+  },
+  {
+    from: { provider: "fireworks", model: "accounts/fireworks/models/kimi-k2p7-code" },
+    to: { provider: "fireworks", model: "accounts/fireworks/models/kimi-k3" },
+    reason: "Kimi 历史 id 统一到 Kimi K3.1 Pro",
+  },
+  {
+    from: { provider: "fireworks", model: "accounts/fireworks/models/kimi-k2p6" },
+    to: { provider: "fireworks", model: "accounts/fireworks/models/kimi-k3" },
+    reason: "Kimi 历史 id 统一到 Kimi K3.1 Pro",
   },
   {
     from: { provider: "xai", model: "grok-4.5" },

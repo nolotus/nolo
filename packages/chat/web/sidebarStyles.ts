@@ -96,10 +96,6 @@ export const sidebarStyles = stylex.create({
      the Context column, so a top border drew a stray horizontal line above it
      with nothing to separate. Separation below (view switch / type filter) is
      handled by their own spacing. */
-  headerWrapperSpace: {
-    marginTop: "4px",
-    paddingTop: "6px",
-  },
   createRow: {
     padding: "2px 8px 4px",
     display: "flex",
@@ -107,10 +103,6 @@ export const sidebarStyles = stylex.create({
     gap: "var(--space-2)",
     minWidth: 0,
     whiteSpace: "nowrap",
-  },
-  scopeWrapper: {
-    minWidth: 0,
-    overflow: "hidden",
   },
   searchWrapper: {
     boxSizing: "border-box",
@@ -158,72 +150,8 @@ export const sidebarStyles = stylex.create({
      overflowX 与 overflowY 必须**同时**是 visible：只要有一个轴是 hidden/scroll/auto，
      CSS 的 overflow 联动规则会把另一个轴的 visible 计算成 auto，列表又变回滚动容器。
      横向溢出由 Context 列自身的 overflow-x: hidden 兜住，不需要列表区自己裁。 */
-  scrollAreaFlow: {
-    flex: "0 0 auto",
-    minHeight: 0,
-    overflowX: "visible",
-    overflowY: "visible",
-  },
-  content: {
-    flex: "0 1 auto",
-    display: "flex",
-    flexDirection: "column",
-    gap: "var(--space-2)",
-    paddingBottom: "var(--space-3)",
-  },
-  contentSingleSection: {
-    flex: 1,
-    minHeight: 0,
-  },
-  section: {
-    display: "flex",
-    flexDirection: "column",
-    minHeight: 0,
-  },
-  sectionEmpty: {
-    opacity: 0.6,
-  },
-  draggableContainer: {
-    borderRadius: "var(--radius-sm)",
-    transition: "background-color 0.15s, box-shadow 0.15s",
-    display: "flex",
-    flexDirection: "column",
-    minHeight: 0,
-  },
-  draggableContainerDragOverCategory: {
-    backgroundColor: "var(--primaryGhost)",
-    outline: "2px dashed var(--primary)",
-  },
-  draggableContainerDragOverItem: {
-    backgroundColor: "var(--successGhost)",
-    outline: "2px dashed var(--success)",
-  },
 
-  /* ── CategorySection ── */
-  categorySection: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    minHeight: 0,
-  },
-  categoryContentWrapper: {
-    display: "grid",
-    gridTemplateRows: "1fr",
-    transition: "grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
-    overflow: "clip",
-    minHeight: 0,
-  },
-  categoryContentWrapperCollapsed: {
-    gridTemplateRows: "0fr",
-    flex: "0 0 0px",
-  },
-  categoryContentInner: {
-    minHeight: 0,
-    overflow: "hidden",
-    maxHeight: "min(420px, 55vh)",
-    display: "flex",
-    flexDirection: "column",
-  },
+  /* ── SidebarVirtualizedScroller ── */
   scroller: {
     display: "block",
     // Stacking context for the fluid-hover highlight layer (rendered with
@@ -513,53 +441,8 @@ export const sidebarStyles = stylex.create({
     borderBottomStyle: "solid",
     borderBottomColor: "color-mix(in srgb, var(--border) 55%, transparent)",
   },
-  addCategoryRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "var(--sidebar-gap-x)",
-    minHeight: "var(--sidebar-row-height)",
-    padding: "0 var(--sidebar-row-pad)",
-    margin: "6px var(--sidebar-gutter) 4px",
-    width: "calc(100% - var(--sidebar-gutter) * 2)",
-    boxSizing: "border-box",
-    borderWidth: "1px",
-    borderStyle: "dashed",
-    borderColor: "color-mix(in srgb, var(--primary) 35%, var(--border, #e4e4e7))",
-    borderRadius: "var(--radius-md)",
-    backgroundColor: "color-mix(in srgb, var(--primary) 4%, transparent)",
-    color: "var(--primary)",
-    fontSize: "var(--fontSize-sm)",
-    fontWeight: 600,
-    letterSpacing: "0.01em",
-    cursor: "pointer",
-    transition: "color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease",
-    ":hover": {
-      backgroundColor: "color-mix(in srgb, var(--primary) 12%, transparent)",
-      borderColor: "color-mix(in srgb, var(--primary) 70%, var(--border, #e4e4e7))",
-      color: "var(--primary)",
-      boxShadow: "0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent)",
-    },
-    ":active": {
-      backgroundColor: "color-mix(in srgb, var(--primary) 16%, transparent)",
-    },
-    ":focus-visible": {
-      outline: "2px solid color-mix(in srgb, var(--primary) 55%, transparent)",
-      outlineOffset: "2px",
-    },
-  },
 
   /* 自逃生舱 .ChatSidebar__add-category-row svg 迁入（2026-08-31） */
-  addCategoryRowIcon: {
-    flexShrink: 0,
-    color: "inherit",
-    paddingTop: "3px",
-    paddingRight: "3px",
-    paddingBottom: "3px",
-    paddingLeft: "3px",
-    borderRadius: "var(--radius-xs, 4px)",
-    backgroundColor: "color-mix(in srgb, var(--primary) 14%, transparent)",
-    boxSizing: "content-box",
-  },
 
   /* ── SidebarTypeFilter ── */
   sidebarTypeFilterShell: {

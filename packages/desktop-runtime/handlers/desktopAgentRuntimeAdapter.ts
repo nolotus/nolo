@@ -1,3 +1,4 @@
+import { registerDialogOwner } from "database-engine/dialogOwner";
 import { resolveSessionKey } from "../../agent-runtime/sessionIdentity";
 import { isSystemBuiltinTrustedAgentKey } from "core/builtinAgents";
 import type {
@@ -33,6 +34,7 @@ import { createCustomNativeProvider, type CustomNativeWire } from "agent-runtime
 import { detectDeclaredCustomNativeWire } from "agent-runtime/customNativeWire";
 import { fetchAntigravityCloudCodeCompletion } from "agent-runtime/antigravityCloudCodeProvider";
 import { fetchAnthropicMessagesCompletion } from "agent-runtime/anthropicMessagesProvider";
+import { ensureCodexOAuthModelCatalog } from "agent-runtime/codexOAuthModelCatalog";
 import { fetchCodexResponsesCompletion } from "agent-runtime/codexResponsesProvider";
 import type { ApiKeyRefResolver } from "agent-runtime/providerResolution";
 import { pickAgentRuntimeInferenceOptions } from "agent-runtime/agentConfigOptions";
@@ -57,7 +59,8 @@ import {
 import { findModelConfig } from "ai/llm/providers";
 import { CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES, CHROME_CONNECTOR_TOOL_NAMES } from "ai/tools/chromeConnectorTools";
 import { appendEnabledPackPromptPatches } from "ai/tools/toolPacks";
-import { createTokenKey, createTokenStatsKey, createUserKey, dialogMessageRange } from "database/keys";
+import { createTokenKey, createTokenStatsKey, dialogMessageRange } from "database/keys";
+import { readDesktopAccountSettings } from "./desktopAccountSettings";
 import { buildTokenDialogIndexOps } from "ai/token/tokenDialogIndex";
 import { prepareTokenUsageData } from "ai/token/prepareTokenUsageData";
 import { applyTokenUsageToDayStats } from "ai/token/applyTokenUsageToDayStats";
@@ -76,7 +79,20 @@ export type DesktopAgentRuntimeActions = {
 };
 
 export type DesktopAgentRuntimeRecordStore = {
-  read(dbKey: string, options?: { remote?: boolean }): Promise<unknown>;
+  /**
+   * `timeoutMs` / `onRemoteUnavailable` 与 hybrid store 的读选项对齐：
+   * 账号 settings 的远端读需要**按这一次调用**放宽预算（默认 250ms 必然超时），
+   * 并需要知道远端是否不可用（不可用 → 回退本地副本）。不传这两个字段时行为
+   * 与之前逐字不变。
+   */
+  read(
+    dbKey: string,
+    options?: {
+      remote?: boolean;
+      timeoutMs?: number;
+      onRemoteUnavailable?: () => void;
+    },
+  ): Promise<unknown>;
   batch?(ops: Array<{ type: "put"; key: string; value: Record<string, unknown> }>): Promise<unknown>;
   iterator?(options: { gte: string; lte?: string; lt?: string; reverse?: boolean; limit?: number }): AsyncIterable<[string, unknown]>;
 };
@@ -158,14 +174,13 @@ export async function loadDesktopChromeConnectorEnabledFromRecordStore(args: {
   env: DesktopAgentRuntimeEnv;
 }): Promise<boolean> {
   if (args.env.NOLO_DESKTOP !== "1") return false;
-  const record = await args.store
-    .read(createUserKey.settings(args.userId), { remote: false })
-    .catch(() => null);
-  return Boolean(
-    record &&
-      typeof record === "object" &&
-      (record as Record<string, unknown>).desktopChromeConnectorEnabled === true,
-  );
+  // 账号级 settings 走 desktopAccountSettings：按 TTL 与服务器对齐，
+  // 远端不可用时回退本地副本（不抛错、不清空偏好）。
+  const record = await readDesktopAccountSettings({
+    store: args.store,
+    userId: args.userId,
+  }).catch(() => null);
+  return Boolean(record && record.desktopChromeConnectorEnabled === true);
 }
 
 function applyDesktopChromeConnectorCapabilityPack(args: {
@@ -437,6 +452,8 @@ export async function saveDesktopAgentRuntimeTurnToRecordStore(args: {
   let stats: any = null;
   const usageRecords = args.input.usageRecords ?? [];
   for (const item of usageRecords) {
+    // Invocation evidence stays in usageRecords/audit; no usage means no token entry.
+    if (!item.usage || Object.keys(item.usage).length === 0) continue;
     const timestamp = args.now();
     const prepared = prepareTokenUsageData({
       rawUsage: item.usage,
@@ -505,6 +522,10 @@ export async function saveDesktopAgentRuntimeTurnToRecordStore(args: {
     if (existingStatsIndex >= 0) tokenOps[existingStatsIndex] = statsOp;
     else tokenOps.push(statsOp);
   }
+  await registerDialogOwner({
+    store: { get: (key) => args.store.read(key, { remote: false }), put: (key, value) => args.store.batch!([{ type: "put", key, value }]) },
+    dialogId: plan.dialogId, ownerId: args.userId, spaceId: args.input.spaceId, source: "desktop-runtime",
+  });
   await args.store.batch([...plan.ops, ...tokenOps]);
   return { dialogId: plan.dialogId, title: plan.title };
 }
@@ -853,6 +874,15 @@ export async function resolveDesktopConfiguredProvider(args: {
       return {
         model,
         complete: async (messages, options) => {
+          // 目录播种：与 CLI 的 codexOAuthTransport 同构。窗口真值属于「账号 × 模型」，
+          // 没有播种时 resolveAgentContextWindow 只能拿到静态 pin，压缩触发线与面板分母
+          // 都会按 pin 算。不 await——本轮窗口在此之前已定型，播种服务随后的轮次；
+          // ensure 内部 fail-open，永不抛。复用本通道的 fetchImpl，与 provider 调用同一出口。
+          if (!options?.noRetries) void ensureCodexOAuthModelCatalog({
+            accessToken,
+            fetchImpl,
+            ...(credential?.accountId ? { accountId: credential.accountId } : {}),
+          });
           const result = await fetchCodexResponsesCompletion({
             ...(options?.noRetries ? { maxAttempts: 1 } : {}),
             signal: options?.signal,

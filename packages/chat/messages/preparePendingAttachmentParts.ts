@@ -15,6 +15,7 @@ export const preparePendingAttachmentParts = async (
     if (file.fileKey) return file;
     try {
       const { job } = await getMediaJob(file.id);
+      if (!job) return { ...file, name: `[媒体附件不可用：${file.name}]`, ocrText: undefined };
       const owner = args.currentUserId?.trim();
       const isBareId = !job.fileId.includes(":") && !job.fileId.startsWith("file-");
       const fullFileKey = job.fileId.startsWith("file-")

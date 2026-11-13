@@ -14,6 +14,12 @@ import {
 } from "../utils/permissions";
 import { UNCATEGORIZED_ID } from "create/space/constants"; // 导入常量
 import { createClientLogger } from "core/clientLogger";
+import { isDeviceLocalSpaceBody } from "database/authority/deviceLocal";
+import {
+  syncContentRecordSpaceId,
+  notifyUserDataUpdated,
+  type ContentSpaceSyncOutcome,
+} from "./spaceContentPatch";
 
 const logger = createClientLogger("move-content");
 
@@ -31,6 +37,14 @@ interface MoveContentResult {
   updatedSourceSpaceData: SpaceData | null;
   targetSpaceId: SpaceId;
   updatedTargetSpaceData: SpaceData | null;
+  /** 内容实体记录 spaceId 的同步结果（missing = 实体记录不存在，未写入）。 */
+  contentSpaceSync?: ContentSpaceSyncOutcome;
+  /** 目标引用是否由本次写入（false 表示目标原本就有引用，未覆盖其分类/元数据）。 */
+  targetWritten?: boolean;
+  /** 源引用是否已清理（false = 源清理失败，可重试）。 */
+  sourcePruned?: boolean;
+  /** 是否按「目标已有、源已清理」的幂等续跑收敛。 */
+  resumedFromTarget?: boolean;
   error?: string; // 可选的错误信息传递
 }
 
@@ -39,7 +53,8 @@ interface MoveContentResult {
  * 它会：
  * 1. 从源 Space 的 `contents` 中移除引用 (通过 patch)。
  * 2. 将内容的引用添加到目标 Space 的 `contents` 中 (通过 patch)，并根据 targetCategoryId 更新分类。
- * 3. 不直接修改内容实体本身，假设实体数据在移动中保持不变，只改变引用位置和分类。
+ * 3. 同步内容实体记录的归属空间 (spaceId) —— 侧边栏分组/只读判定依赖它，
+ *    只改空间链接会让分组停留在旧空间。实体记录不存在时不写入残记录。
  * 4. 处理 categoryId 逻辑，使其与 addContentAction 一致（未分类则不存储 categoryId 属性）。
  */
 export const moveContentAction = async (
@@ -82,6 +97,13 @@ export const moveContentAction = async (
   let contentDataFromSource: SpaceContent | null = null; // 从源空间获取内容引用数据
   let finalSourceData: SpaceData | null = null;
   let finalTargetData: SpaceData | null = null;
+  let contentSpaceSync: ContentSpaceSyncOutcome | undefined = undefined;
+  /** 目标空间是否由本次写入（false = 目标已存在引用，未覆盖）。 */
+  let targetWritten = false;
+  /** 源引用是否已清理（false = 源清理失败，可重试收敛）。 */
+  let sourcePruned = false;
+  /** 是否以「目标已有引用、源已无引用」的幂等续跑方式完成。 */
+  let resumedFromTarget = false;
   let overallError: string | undefined = undefined;
 
   try {
@@ -132,88 +154,129 @@ export const moveContentAction = async (
     checkSpaceMembership(sourceSpaceData, userId); // 会在失败时抛出错误
     checkSpaceMembership(targetSpaceData, userId); // 会在失败时抛出错误
 
-    // --- 4. 检查内容是否存在于源空间 ---
-    if (!sourceSpaceData.contents || !sourceSpaceData.contents[contentKey]) {
-      logger.error(
-        { contentKey, sourceSpaceId },
-        "Content key not found in source space contents."
-      );
+    // --- 4. 两端状态判定（支持「目标已有、源已清理」的幂等续跑） ---
+    const sourceSpaceKeyForWrite = createSpaceKey.space(sourceSpaceId);
+    const targetSpaceKeyForWrite = createSpaceKey.space(targetSpaceId);
+    const sourceHasLink = Boolean(sourceSpaceData.contents?.[contentKey]);
+    const targetHasLink = Boolean(targetSpaceData.contents?.[contentKey]);
+    if (!sourceHasLink && !targetHasLink) {
+      // 任意「源里没有」都不能当成功：两个空间都没有引用就是真失败。
       throw new Error(
-        `内容 (${contentKey}) 不在源空间 (${sourceSpaceId}) 中。`
+        `内容 (${contentKey}) 既不在源空间 (${sourceSpaceId}) 也不在目标空间 (${targetSpaceId}) 中。`
       );
     }
-    contentDataFromSource = sourceSpaceData.contents[contentKey]; // 获取要移动的内容数据
-
-    // 可选：检查目标空间是否已存在同名 Key
-    if (targetSpaceData.contents && targetSpaceData.contents[contentKey]) {
-      logger.warn(
-        { contentKey, targetSpaceId },
-        "Content key already exists in target space. Overwriting."
+    contentDataFromSource = sourceSpaceData.contents?.[contentKey] ?? null;
+    resumedFromTarget = !sourceHasLink && targetHasLink;
+    if (resumedFromTarget) {
+      logger.info(
+        { contentKey, sourceSpaceId, targetSpaceId },
+        "Source link already pruned and target link exists; resuming convergence (no overwrite)."
       );
-      // 根据产品需求决定是报错还是覆盖，这里选择覆盖
     }
 
-    // --- 5. 确定最终用于目标存储的 categoryId (string | undefined) ---
+    // --- 5. 目标分类只在确实写入新引用时使用（绝不覆盖目标已有分类/元数据） ---
     let categoryIdForTargetStorage: string | undefined;
-    if (
-      rawTargetCategoryId &&
-      rawTargetCategoryId !== "" &&
-      rawTargetCategoryId !== UNCATEGORIZED_ID
-    ) {
-      // 验证目标分类 ID 是否在目标空间中有效
-      if (targetSpaceData.categories?.[rawTargetCategoryId]) {
-        categoryIdForTargetStorage = rawTargetCategoryId;
-      } else {
-        logger.warn(
-          `Target category ${rawTargetCategoryId} not found in target space ${targetSpaceId}. Content will be uncategorized.`
-        );
-        categoryIdForTargetStorage = undefined; // 无效则降级
+    if (!targetHasLink) {
+      if (
+        rawTargetCategoryId &&
+        rawTargetCategoryId !== "" &&
+        rawTargetCategoryId !== UNCATEGORIZED_ID
+      ) {
+        if (targetSpaceData.categories?.[rawTargetCategoryId]) {
+          categoryIdForTargetStorage = rawTargetCategoryId;
+        } else {
+          logger.warn(
+            `Target category ${rawTargetCategoryId} not found in target space ${targetSpaceId}. Content will be uncategorized.`
+          );
+          categoryIdForTargetStorage = undefined; // 无效则降级
+        }
       }
-    } else {
-      categoryIdForTargetStorage = undefined; // 空、null、undefined 或常量均视为未分类
     }
 
-    // --- 6. 构造添加到目标空间的内容引用对象 ---
-    // 继承源引用的属性，并更新 categoryId 和 updatedAt
-    const contentReferenceForTarget: SpaceContent = {
-      ...contentDataFromSource,
-      updatedAt: now,
-    };
-    // 先删除旧的 categoryId (无论是否存在)，再根据需要添加新的
-    delete (contentReferenceForTarget as Partial<SpaceContent>).categoryId;
-    if (categoryIdForTargetStorage !== undefined) {
-      contentReferenceForTarget.categoryId = categoryIdForTargetStorage;
+    // --- 6/7. 阶段 1：目标先就位（target-first）。失败时源空间未被触碰。 ---
+    if (!targetHasLink) {
+      if (!contentDataFromSource) {
+        throw new Error(`内容 (${contentKey}) 在源空间中没有可迁移的引用数据。`);
+      }
+      const contentReferenceForTarget: SpaceContent = {
+        ...contentDataFromSource,
+        updatedAt: now,
+      };
+      // 先删除旧的 categoryId (无论是否存在)，再根据需要添加新的
+      delete (contentReferenceForTarget as Partial<SpaceContent>).categoryId;
+      if (categoryIdForTargetStorage !== undefined) {
+        contentReferenceForTarget.categoryId = categoryIdForTargetStorage;
+      }
+      try {
+        await dispatch(
+          patch({
+            dbKey: targetSpaceKeyForWrite,
+            changes: {
+              contents: { [contentKey]: contentReferenceForTarget },
+              updatedAt: now,
+              ...localSpaceAuthorityPatchStamp(targetSpaceData),
+            },
+          })
+        ).unwrap();
+      } catch (targetPatchError: any) {
+        throw new Error(
+          `目标空间写入失败，源空间引用已保留（可重试）: ${
+            targetPatchError?.message || "未知错误"
+          }`
+        );
+      }
+      targetWritten = true;
+      logger.info("Target reference written (target-first).");
     }
 
-    // --- 7. 准备 Patch Changes ---
-    // Local Space patches stamp userId=local so replication plans [].
-    // Account Space patches must not rewrite ownership stamps.
-    const sourcePatchChanges = {
-      contents: {
-        [contentKey]: null, // 从源移除引用 (null value in patch typically means delete key)
-      },
-      updatedAt: now,
-      ...localSpaceAuthorityPatchStamp(sourceSpaceData),
-    };
-    const targetPatchChanges = {
-      contents: {
-        [contentKey]: contentReferenceForTarget, // 向目标添加（或覆盖）引用
-      },
-      updatedAt: now,
-      ...localSpaceAuthorityPatchStamp(targetSpaceData),
-    };
+    // --- 8. 阶段 2：实体 spaceId 同步（仅可靠 owner 且有权改写时） ---
+    try {
+      contentSpaceSync = await syncContentRecordSpaceId(
+        dispatch,
+        contentKey,
+        targetSpaceId,
+        "内容已迁移到目标空间，但同步内容记录的归属空间失败",
+        {
+          actorUserId: userId,
+          targetSpaceIsDeviceLocal: isDeviceLocalSpaceBody(sourceSpaceData) ||
+            isDeviceLocalSpaceBody(targetSpaceData),
+        }
+      );
+    } catch (entitySyncError: any) {
+      throw new Error(
+        `${entitySyncError?.message || "同步内容记录失败"}（目标空间已写入，源空间引用已保留，可重试）`
+      );
+    }
+    if (contentSpaceSync === "unreadable") {
+      // 读不到实体就无法确认归属同步，源引用保持不动，等待重试。
+      throw new Error(
+        "无法读取内容记录确认归属空间同步（目标空间已写入，源空间引用已保留，可重试）"
+      );
+    }
 
-    // --- 8. 并行执行两个 Patch 更新 ---
-    logger.info("Patching source and target space data.");
-    await Promise.all([
-      dispatch(
-        patch({ dbKey: sourceSpaceKey, changes: sourcePatchChanges })
-      ).unwrap(),
-      dispatch(
-        patch({ dbKey: targetSpaceKey, changes: targetPatchChanges })
-      ).unwrap(),
-    ]);
-    logger.info("Successfully patched both source and target spaces.");
+    // --- 9. 阶段 3：清理源引用（目标已就位后才执行；失败可重试收敛） ---
+    if (sourceHasLink) {
+      try {
+        await dispatch(
+          patch({
+            dbKey: sourceSpaceKeyForWrite,
+            changes: {
+              contents: { [contentKey]: null },
+              updatedAt: now,
+              ...localSpaceAuthorityPatchStamp(sourceSpaceData),
+            },
+          })
+        ).unwrap();
+      } catch (sourcePatchError: any) {
+        throw new Error(
+          `内容已写入目标空间，但从源空间移除引用失败（可重试）: ${
+            sourcePatchError?.message || "未知错误"
+          }`
+        );
+      }
+    }
+    sourcePruned = true;
+    logger.info("Source reference pruned; move converged.");
   } catch (error: any) {
     logger.error(
       { error: error.message, stack: error.stack },
@@ -260,9 +323,17 @@ export const moveContentAction = async (
         hasError: !!overallError,
         sourceReadSuccess: !!finalSourceData,
         targetReadSuccess: !!finalTargetData,
+        targetWritten,
+        sourcePruned,
+        resumedFromTarget,
+        contentSpaceSync,
       },
       "Move content action finished."
     );
+
+    // 成功或部分失败都必须刷新侧栏投影：失败时源/目标空间数据仍是真值，
+    // 不能因为抛错就让视图停留在旧分组。
+    notifyUserDataUpdated();
 
     // --- 10. 返回结果 ---
     const result: MoveContentResult = {
@@ -270,6 +341,10 @@ export const moveContentAction = async (
       updatedSourceSpaceData: finalSourceData,
       targetSpaceId,
       updatedTargetSpaceData: finalTargetData,
+      contentSpaceSync,
+      targetWritten,
+      sourcePruned,
+      resumedFromTarget,
       error: overallError, // 如果过程中有错误，则传递错误信息
     };
 

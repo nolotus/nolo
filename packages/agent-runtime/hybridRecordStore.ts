@@ -11,7 +11,14 @@ export type HybridRecordKvDb = {
 };
 
 export type HybridRecordStore = {
-  read(dbKey: string, options?: { preferredServerOrigin?: string | null; remote?: boolean; onRemoteUnavailable?: () => void }): Promise<any>;
+  /**
+   * `timeoutMs`：**按这一次调用**覆盖远端 fallback 的整体预算（ms）。
+   * 只接受有限正数；缺省 / 非法值（0、负数、NaN、Infinity）一律回退到 store
+   * 级别的 `requestTimeoutMs`（默认 250ms），因此不传就是原有行为，其它调用方不受影响。
+   * 目的是给个别「必须跟服务器对齐」的关键读单独放宽预算（例如账号 settings 同步，
+   * 实测服务器往返 600ms+，而默认 250ms 必然超时），而不是全局调大所有 hybrid 读的预算。
+   */
+  read(dbKey: string, options?: { preferredServerOrigin?: string | null; remote?: boolean; onRemoteUnavailable?: () => void; timeoutMs?: number }): Promise<any>;
   write(dbKey: string, record: any): Promise<any>;
   batch(ops: Array<{ type: "put"; key: string; value: any }>): Promise<unknown>;
   iterator(options: { gte: string; lte?: string; lt?: string; reverse?: boolean; limit?: number }): AsyncIterable<[string, any]>;
@@ -183,8 +190,16 @@ export function createHybridRecordStore(
       // 超时/失败沿用既有 miss 语义（进 catch → 下一个 server / 返回本地），
       // 不新增重试；预算耗尽后不再发起新的远端请求，按 miss 返回本地结果。
       // requestTimeoutMs <= 0 → 关闭超时（保持历史行为）。
+      // 单次调用可用 options.timeoutMs 覆盖本次预算（仅接受有限正数，见类型注释），
+      // 未覆盖时沿用 store 级预算——其它调用方行为不变。
+      const effectiveTimeoutMs =
+        typeof options?.timeoutMs === "number" &&
+        Number.isFinite(options.timeoutMs) &&
+        options.timeoutMs > 0
+          ? options.timeoutMs
+          : requestTimeoutMs;
       const fallbackDeadlineMs =
-        requestTimeoutMs > 0 ? Date.now() + requestTimeoutMs : null;
+        effectiveTimeoutMs > 0 ? Date.now() + effectiveTimeoutMs : null;
 
       for (const server of resolveHybridServers(
         deps.defaultServer,

@@ -3,9 +3,11 @@
  * the verification URL and the user code inside an ASCII box, with the code
  * additionally bolded when stdout is a TTY.
  *
- * Kept dependency-free (no color/theme imports) so every OAuth flow in this
- * folder can share it; callers pass plain lines to `deps.output.log`.
+ * Kept free of color/theme imports (only the width/box-glyph helpers from
+ * `../tui/tuiAnsi`) so every OAuth flow in this folder can share it; callers
+ * pass plain lines to `deps.output.log`.
  */
+import { boxGlyphs, resolveBoxCharset } from "../tui/tuiAnsi";
 
 const BOLD = "\u001b[1m";
 const RESET = "\u001b[0m";
@@ -50,14 +52,17 @@ export function renderDeviceCodeDisplay(args: DeviceCodeDisplayArgs): string[] {
   });
 
   const innerWidth = Math.max(...rows.map((row) => row.plain.length));
-  const top = `┌${"─".repeat(innerWidth)}┐`;
-  const bottom = `└${"─".repeat(innerWidth)}┘`;
+  // 框线字形跟 resolveBoxCharset：EA=A=wide 的终端下制表符占 2 列，字符数与列数
+  // 对不上会把框画歪，故退化为 ascii（`+ - |`）。这里只借宽度工具，不引主题/颜色依赖。
+  const g = boxGlyphs(resolveBoxCharset());
+  const top = `${g.tl}${g.h.repeat(innerWidth)}${g.tr}`;
+  const bottom = `${g.bl}${g.h.repeat(innerWidth)}${g.br}`;
 
   return [
     `Authorize nolo-cli for ${provider} (device code / headless):`,
     top,
     ...rows.map(
-      (row) => `│${row.rendered}${" ".repeat(innerWidth - row.plain.length)}│`
+      (row) => `${g.v}${row.rendered}${" ".repeat(innerWidth - row.plain.length)}${g.v}`
     ),
     bottom,
     ...notes,

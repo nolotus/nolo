@@ -3,6 +3,7 @@ import {
   LuBug,
   LuCode,
   LuCoins,
+  LuDatabase,
   LuDownload,
   LuGauge,
   LuKey,
@@ -65,6 +66,11 @@ export const buildSettingNavItems = (t: TranslateFn) => {
       path: SettingRoutePaths.SETTING_SECRETS,
       label: String(t("settings.nav.secrets", "密钥")),
       Icon: LuKey,
+    },
+    {
+      path: SettingRoutePaths.SETTING_DATA_SOURCES,
+      label: String(t("settings.nav.dataSources", "数据源")),
+      Icon: LuDatabase,
     },
     {
       path: SettingRoutePaths.SETTING_MEMORY,

@@ -108,7 +108,7 @@
 
 /* ── 专区划分 ───────────────────────────────────────────── */
 
-.skill-explore__recommended-section,
+.skill-explore__optional-section,
 .skill-explore__catalog-section {
   display: flex;
   flex-direction: column;

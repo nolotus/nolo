@@ -1,3 +1,7 @@
+import { exitCliFromWatchdog } from "./client/cliExitSync";
+import { isHistoryIntegrityFailure } from "../ai/tools/agent/runFailureClass";
+import { createHash } from "node:crypto";
+import { attachLocalCommandObservations, captureLocalRunBase, unknownLocalRunAcceptance } from "./agentRunLocalWorkspace";
 import { createShellApprovalChild } from "./client/originShellApprovalTransport";
 // Orchestration entry for `nolo agent run` and the related run/chat
 // shorthands. Pure CLI arg parsing lives in `./agentRunArgs`; prompt
@@ -57,6 +61,9 @@ import {
 import {
   createRunActivityTracker,
   reportRunProcessIdentity,
+  validateLocalWriterChild,
+  awaitLocalWriterChild,
+  registerLocalForegroundWriter,
   finalizeRunRecord,
   settleRunTerminalAuthoritatively,
   transitionRunToTerminal,
@@ -145,6 +152,8 @@ export type AgentRunCommandDeps = {
   runner?: typeof runAgentTurn;
   localRuntimeAdapterFactory?: (env: EnvLike, options?: { cwd?: string }) => AgentRuntimeHostAdapter;
   inspectLocalRunWorkspace?: typeof inspectLocalRunWorkspace;
+  captureLocalRunBase?: typeof captureLocalRunBase;
+  localRunBaseCaptureOptions?: Parameters<typeof captureLocalRunBase>[1];
   resolveWorkflowReference?: typeof resolveWorkflowReference;
   resolveAgentRunAgentKey?: typeof resolveAgentRunAgentKey;
   /**
@@ -308,7 +317,28 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     return 1;
   }
 
-  const runner = deps.runner ?? runAgentTurn;
+  const rawRunner = deps.runner ?? runAgentTurn;
+  const watchdogAbort = new AbortController();
+  let activeRunner: Promise<unknown> | undefined;
+  const runner: typeof runAgentTurn = (options) => {
+    activeRunner = Promise.resolve().then(() => rawRunner({...options, abortSignal: watchdogAbort.signal})).then(result => {
+      // A cooperative stop must not resume fallback/queue/settlement work.
+      watchdogAbort.signal.throwIfAborted();
+      return result;
+    });
+    return activeRunner as ReturnType<typeof runAgentTurn>;
+  };
+  const stopWatchdogRunner = async (): Promise<boolean> => {
+    watchdogAbort.abort(new Error("watchdog_stop"));
+    if (!activeRunner) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        activeRunner.then(() => true, () => true),
+        new Promise<boolean>(resolve => {timer = setTimeout(() => resolve(false), 100);}),
+      ]);
+    } finally {if (timer) clearTimeout(timer);}
+  };
 
   // Watchdogs: an overall --timeout-ms and a "no progress" stall timeout.
   //
@@ -321,9 +351,23 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // Background child runs (NOLO_AGENT_RUN_ID present) keep the existing
   // always-on stall watchdog — that default is unchanged.
   const nowMs = () => (deps.now ? deps.now().getTime() : Date.now());
-  const childRunId = env.NOLO_AGENT_RUN_ID;
-  const hasRegistry = typeof childRunId === "string" && childRunId.length > 0;
-  if (hasRegistry) reportRunProcessIdentity(childRunId, { env, homedir: deps.homedir, fs: deps.fs, now: deps.now });
+  let childRunId = env.NOLO_AGENT_RUN_ID;
+  let hasRegistry = typeof childRunId === "string" && childRunId.length > 0;
+  // Explicit local children must prove the parent's record BEFORE reporting identity.
+  const hostPolicy = () => ({ runtimeKey: "local" as const,
+    hostWritesAuthorized: args.includes("--allow-host-writes"), readOnly: args.includes("--read-only"),
+    ...(parsed!.allowedToolNames ? { allowedToolNames: parsed!.allowedToolNames } : {}),
+    ...(parsed!.blockedToolNames ? { blockedToolNames: parsed!.blockedToolNames } : {}),
+    provenance: "cli-command-authorized" as const });
+  const locatedExecution = hasRegistry ? readRunRecord(childRunId!, { env, homedir: deps.homedir, fs: deps.fs })?.execution : undefined;
+  if (hasRegistry && (parsed.runtimeKey?.trim() === "local" || locatedExecution?.state === "known")) {
+    // An omitted backend is host-local ONLY for a persisted read-only host dispatch.
+    const implicitReadonlyHost = !parsed.runtimeKey && args.includes("--read-only") &&
+      locatedExecution?.state === "known" && locatedExecution.runtimeKey === "local" && locatedExecution.permissions.readOnly;
+    if (parsed.runtimeKey?.trim() !== "local" && !implicitReadonlyHost) throw new Error("[local-writer-resource] child binding runtime mismatch");
+    await awaitLocalWriterChild(childRunId!, parsed.cwd ?? process.cwd(), hostPolicy(), { env, homedir: deps.homedir, fs: deps.fs });
+  }
+  if (hasRegistry && parsed.runtimeKey?.trim() !== "local" && locatedExecution?.state !== "known") reportRunProcessIdentity(childRunId!, { env, homedir: deps.homedir, fs: deps.fs, now: deps.now });
   const processExit = deps.processExit ?? ((code: number) => process.exit(code));
   const stallTimeoutMs = resolvePositiveMs(
     deps.stallTimeoutMs ?? env.NOLO_LOCAL_RUN_STALL_TIMEOUT_MS,
@@ -391,15 +435,14 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       throw error;
     });
   };
-  const exitFromWatchdog = (code: number) => {
+  const exitFromWatchdog = async (code: number) => {
     try {
-      processExit(code);
+      await exitCliFromWatchdog(code, processExit, stopWatchdogRunner);
     } catch {
-      // Test stubs may throw instead of exiting; the watchdogFailure rejection
-      // already carries the outcome, so swallow it here (a real process.exit
-      // never returns).
+      // Injected exits may throw; watchdogFailure still carries the nonzero outcome.
     }
   };
+
   // Foreground runs have no registry record to finalize (no childRunId); the
   // watchdog can still write a truthful process exit code, it just skips the
   // finalizeRunRecord call in that case.
@@ -473,8 +516,8 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
           failureReason: "stalled",
           toolCallCount: currentActivity?.counters?.toolCalls,
         });
+        await exitFromWatchdog(outcome.exitCode);
         rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
-        exitFromWatchdog(outcome.exitCode);
       }
     }, Math.min(stallTimeoutMs, 10_000));
   }
@@ -487,8 +530,8 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       terminalStatus.fail();
       const outcome = resolveRunOutcome({ kind: "timeout" });
       await finalizeWatchdogOutcome(outcome, note);
+      await exitFromWatchdog(outcome.exitCode);
       rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
-      exitFromWatchdog(outcome.exitCode);
     }, parsed.timeoutMs);
   }
 
@@ -514,11 +557,12 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // （`local_target_unsupported`，见 server/handlers/agentRun/runtimeTarget.ts），
   // 历史上「点名宿主执行 → 服务端 409 → 成果搁浅在 docker 副本」正是这条路。
   const hostRuntimeLocal =
-    typeof parsed.runtimeKey === "string" && parsed.runtimeKey.trim() === "local";
+    (typeof parsed.runtimeKey === "string" && parsed.runtimeKey.trim() === "local") ||
+    (!parsed.runtimeKey && args.includes("--read-only") && locatedExecution?.state === "known" && locatedExecution.runtimeKey === "local" && locatedExecution.permissions.readOnly);
   // 安全硬门（RV-F1 HIGH）：直接 CLI 入口也必须显式确认宿主写入。
   // 上层派发工具有 allowHostWrites 守卫，但 `nolo agent run --runtime-key local`
   // 绕过了那层；这里不校验就等于"任意 shell 都能在宿主改文件"。
-  if (hostRuntimeLocal && !args.includes("--allow-host-writes")) {
+  if (hostRuntimeLocal && !args.includes("--read-only") && !args.includes("--allow-host-writes")) {
     output.write(t("agentRun.hostWriteGuard"));
     return 1;
   }
@@ -713,6 +757,10 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   if (!localRuntimeCwd && (parsed.runtimeMode === "local" || hostRuntimeLocal)) {
     localRuntimeCwd = process.cwd();
   }
+  const acceptanceCwd = localRuntimeCwd && (parsed.runtimeMode === "local" || hostRuntimeLocal)
+    ? localRuntimeCwd : undefined;
+  const acceptanceBase = acceptanceCwd ? await (deps.captureLocalRunBase ?? captureLocalRunBase)(acceptanceCwd, deps.localRunBaseCaptureOptions) : null;
+  let finalWorkspaceInspection: LocalRunWorkspaceInspection | undefined;
 
   if (parsed.runtimeKey === "instabox") {
     try {
@@ -746,9 +794,19 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         cliEntrypointPath: deps.cliEntrypointPath,
         agentKey,
         cwd: localRuntimeCwd,
+        ...(hostRuntimeLocal ? { localExecution: {
+          runtimeKey: "local" as const, hostWritesAuthorized: args.includes("--allow-host-writes"),
+          readOnly: args.includes("--read-only"),
+          ...(parsed.allowedToolNames ? { allowedToolNames: parsed.allowedToolNames } : {}),
+          ...(parsed.blockedToolNames ? { blockedToolNames: parsed.blockedToolNames } : {}),
+          provenance: "cli-command-authorized" as const,
+        } } : {}),
+        // Explicit host target is authorized above; read-only retains its existing tool restrictions.
+        ...(hostRuntimeLocal && !args.includes("--read-only") ? { claimLocalWrites: true } : {}),
         msgFile: readFlagValue(args, "--msg-file"),
         message: parsed.message,
         timeoutMs: parsed.timeoutMs,
+        ...(parsed.ephemeral ? { ephemeral: true } : {}),
         ...(parsed.dodCommands?.length ? { dodCommands: parsed.dodCommands } : {}),
         output,
       },
@@ -786,6 +844,16 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // string-block fallback still accepted by the runner.
   const scopedLayers: Array<TurnContextLayer | null> = [];
   const skillContentBlocks: string[] = [];
+  if (hostRuntimeLocal && !parsed.background) {
+    const policy = { ...hostPolicy(), ...(skillAllowedToolOverride !== undefined ? { allowedToolNames: skillAllowedToolOverride } : {}) };
+    if (hasRegistry) {
+      await awaitLocalWriterChild(childRunId!, localRuntimeCwd!, policy, { env, homedir: deps.homedir, fs: deps.fs });
+    } else if (!policy.readOnly) {
+      childRunId = registerLocalForegroundWriter(localRuntimeCwd!, policy, agentKey, { env, homedir: deps.homedir, fs: deps.fs, now: deps.now });
+      hasRegistry = true;
+    }
+  }
+
   const extraContextBlocks: string[] = [];
   const contextBlockScopes: ContextBlockScope[] = [];
   let memoryPromptBlock: string | null = null;
@@ -981,6 +1049,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     }),
   );
   clearWatchdogs();
+  const runCommandObservations = [...(getRunResultHeaderMeta(result).commandObservations ?? [])];
   // run 级积分累计：quota fallback 与队列 drain 都会整体替换 result，只看
   // 最终 result.turnCredits 会少记前面各轮。turnCredits undefined = 该轮无
   // 平台计费（自有 API），跳过不造 0。
@@ -1009,6 +1078,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       }),
     );
     clearWatchdogs();
+    runCommandObservations.push(...(getRunResultHeaderMeta(fallbackResult).commandObservations ?? []));
     if (fallbackResult.exitCode === 0) {
       result = fallbackResult;
     }
@@ -1073,6 +1143,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
           })
         );
         clearWatchdogs();
+        runCommandObservations.push(...(getRunResultHeaderMeta(turnResult).commandObservations ?? []));
         result = turnResult;
         // drain 轮积分进 run 级累计（result 被整体替换，不累计就丢）。
         if (turnResult.turnCredits !== undefined) {
@@ -1103,13 +1174,6 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     }
   }
 
-  // 整次 run 的最终结果（quota fallback / queue drain 之后）：只在这里报终态。
-  terminalStatus.settle({
-    exitCode: result.exitCode,
-    streamInterrupted: result.streamInterrupted,
-    stalledOrTruncated: isRunResultStalledOrTruncated(result),
-  });
-
   if (result.dialogId) {
     if (parsed.background) {
       output.write(`\n[nolo] background dialog ${result.dialogId}\n`);
@@ -1118,11 +1182,12 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       output.write(`\n[nolo] dialog ${result.dialogId}\n`);
     }
   }
-  if (shouldPrintLocalRunSummary({ parsed, localRuntimeCwd })) {
+  if (acceptanceCwd || shouldPrintLocalRunSummary({ parsed, localRuntimeCwd })) {
     try {
       const inspect = deps.inspectLocalRunWorkspace ?? inspectLocalRunWorkspace;
-      const inspection = await inspect(localRuntimeCwd!);
-      output.write(formatLocalRunSummary({
+      const inspection = await inspect(localRuntimeCwd!, {}, acceptanceCwd ? acceptanceBase : undefined);
+      finalWorkspaceInspection = inspection;
+      if (shouldPrintLocalRunSummary({ parsed, localRuntimeCwd })) output.write(formatLocalRunSummary({
         dialogId: result.dialogId,
         inspection,
       }));
@@ -1151,7 +1216,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     // 真正没拿到输出的 fallback 共用 reason="stream_truncated"，若只看 reason
     // 就会把正常完成的轮次判成 failed：实测 review 子任务完整输出结论并给出
     // Verdict 后仍被结算为 failed/exitCode=1，导致「run 是否成功」对 CI 与
-    // 自动化闸门失去意义（本仓 pre-push 有 review 证据闸门）。
+    // 自动化闸门失去意义（本仓推送门在服务器端 nolo-ci G2）。
     // 正文可用时不算故障——编排者拿得到结论，无需重派。
     const isStalledOrTruncated = isRunResultStalledOrTruncated(result);
     // 正文可用的告警轮次不结算为 failed，但仍留 note 保持可观测
@@ -1187,6 +1252,8 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         result.emptyAssistantFallbackReason === "stagnant_tool_calls"
       ) {
         failureReason = "stalled";
+      } else if (result.localError && isHistoryIntegrityFailure(toErrorMessage(result.localError))) {
+        failureReason = "history_integrity";
       } else if (result.localError && isQuotaExhaustedError(result.localError)) {
         failureReason = "provider_rate_limited";
       } else if (result.localError) {
@@ -1211,35 +1278,76 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     // after, so a contended strict lock is retried (bounded) instead of
     // silently dropped. Orphan-correction authority preserved: only
     // orphaned → done/failed may pass; every other terminal stays put.
-    await settleRunTerminalAuthoritatively(childRunId, {
-      status: outcome.status,
-      exitCode: outcome.exitCode,
-      dialogId: result.dialogId,
-      ...(dodResults ? { dodResults } : {}),
-      // run 级累计的平台积分（主轮 + fallback + drain 轮）：dock 行据此显示
-      // 「⚡ x.xx」，让派发任务的消耗可见。undefined = 全程无平台计费。
-      ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
-      // run 级缓存命中汇总：只进 .result.md 的 front matter（cached_tokens
-      // 为 null 表示 provider 未报缓存指标，与「命中 0」严格区分）。
-      ...(runCacheUsage ? { cacheUsage: runCacheUsage } : {}),
-      ...(failureReason ? { failureReason } : {}),
-      ...(toolCallCount !== undefined ? { toolCallCount } : {}),
-      ...(result.finalText ? { lastAssistantText: result.finalText } : {}),
-      // 仅用于 .result.md 头（front matter）：旁路读取，不改 result 形状。
-      ...getRunResultHeaderMeta(result),
-      ...truncationNote,
-    },
-    {
-      env,
-      homedir: deps.homedir,
-      fs: deps.fs,
-      now: deps.now,
-      sleep: deps.sleep,
-    }, deps.transitionRunToTerminal);
+    const acceptance = acceptanceCwd ? (finalWorkspaceInspection?.acceptance
+      ?? unknownLocalRunAcceptance(acceptanceCwd, acceptanceBase)) : undefined;
+    if (acceptance && dodResults?.length) {
+      acceptance.checks.observations = dodResults.map((check, index) => ({
+        // Command lines/output can contain credentials. Persist only a digest
+        // here; the pre-existing registry is the execution evidence reference.
+        commandFingerprint: `sha256:${createHash("sha256").update(check.command).digest("hex")}`,
+        cwd: childRecordForDoD?.cwd || process.cwd(),
+        exitCode: check.exitCode,
+        evidence: `${childRunId}.json#/dodResults/${index}`,
+        versionBinding: "unknown" as const,
+      }));
+    }
+    if (acceptance) attachLocalCommandObservations(
+      acceptance, runCommandObservations, `${childRunId}.result.md`,
+    );
+    let settlement;
+    try {
+      settlement = await settleRunTerminalAuthoritatively(childRunId, {
+        status: outcome.status,
+        exitCode: outcome.exitCode,
+        dialogId: result.dialogId,
+        ...(dodResults ? { dodResults } : {}),
+        // run 级累计的平台积分（主轮 + fallback + drain 轮）：dock 行据此显示
+        // 「⚡ x.xx」，让派发任务的消耗可见。undefined = 全程无平台计费。
+        ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
+        // run 级缓存命中汇总：只进 .result.md 的 front matter（cached_tokens
+        // 为 null 表示 provider 未报缓存指标，与「命中 0」严格区分）。
+        ...(runCacheUsage ? { cacheUsage: runCacheUsage } : {}),
+        ...(failureReason ? { failureReason } : {}),
+        ...(toolCallCount !== undefined ? { toolCallCount } : {}),
+        ...(acceptance ? { acceptance } : {}),
+        ...(result.finalText ? { lastAssistantText: result.finalText } : {}),
+        // 仅用于 .result.md 头（front matter）：旁路读取，不改 result 形状。
+        ...getRunResultHeaderMeta(result),
+        ...truncationNote,
+      },
+      {
+        env,
+        homedir: deps.homedir,
+        fs: deps.fs,
+        now: deps.now,
+        sleep: deps.sleep,
+      }, deps.transitionRunToTerminal);
+    } catch (error) {
+      // Settlement may have partially persisted. Do not retry or overwrite an
+      // authoritative cancellation/terminal record; fail this command instead.
+      terminalStatus.fail();
+      output.write(`[nolo] terminal settlement failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+    // The durable settlement can fail even when generation succeeded (e.g. a
+    // result.md write failure). Never announce done before that decision.
+    if (settlement && (settlement.kind === "transitioned" || settlement.kind === "kept" || settlement.kind === "contended") &&
+        settlement.record.status !== "done" && result.exitCode === 0) {
+      result = { ...result, exitCode: settlement.record.exitCode || 1 };
+    }
 
   }
 
+  // Publish terminal UI state only after the full report and registry settle.
+  terminalStatus.settle({
+    exitCode: result.exitCode,
+    streamInterrupted: result.streamInterrupted,
+    stalledOrTruncated: isRunResultStalledOrTruncated(result),
+  });
   return result.exitCode;
+  } catch (error) {
+    terminalStatus.fail();
+    throw error;
   } finally {
     shellApprovalChild?.close();
     if (shellApprovalChild && process.connected) process.disconnect();

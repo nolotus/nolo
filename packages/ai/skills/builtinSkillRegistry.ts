@@ -139,6 +139,21 @@ import {
   buildAndroidAdbSkillId,
   buildAndroidAdbSkillPageKey,
 } from "./androidAdbSkill";
+import {
+  STOCK_QUOTES_SKILL_SLUGS,
+  buildStockQuotesSkillConfig,
+  buildStockQuotesSkillContentBySlug,
+  buildStockQuotesSkillId,
+  buildStockQuotesSkillPageKey,
+} from "./stockQuotesSkill";
+
+import {
+  WORKFLOW_GUIDANCE_SKILL_SLUGS,
+  buildWorkflowGuidanceSkillId,
+  buildWorkflowGuidanceSkillPageKey,
+  buildWorkflowGuidanceSkillConfig,
+  buildWorkflowGuidanceSkillContentBySlug,
+} from "./workflowGuidanceSkills";
 
 export type BuiltinSkillEntry = {
   slug: string;
@@ -190,6 +205,13 @@ const OBJECT_SKILL_KINDS = Object.keys(
 ) as BuiltinObjectSkillKind[];
 
 const SOURCES: BuiltinSkillSource[] = [
+  {
+    slugs: WORKFLOW_GUIDANCE_SKILL_SLUGS,
+    buildSkillId: buildWorkflowGuidanceSkillId,
+    buildPageKey: buildWorkflowGuidanceSkillPageKey,
+    buildConfig: buildWorkflowGuidanceSkillConfig,
+    buildContent: buildWorkflowGuidanceSkillContentBySlug,
+  },
   {
     slugs: OBJECT_SKILL_KINDS,
     buildSkillId: (kind: BuiltinObjectSkillKind) => BUILTIN_OBJECT_SKILL_IDS[kind],
@@ -302,6 +324,13 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildAndroidAdbSkillPageKey,
     buildConfig: buildAndroidAdbSkillConfig,
     buildContent: buildAndroidAdbSkillContentBySlug,
+  },
+  {
+    slugs: STOCK_QUOTES_SKILL_SLUGS,
+    buildSkillId: buildStockQuotesSkillId,
+    buildPageKey: buildStockQuotesSkillPageKey,
+    buildConfig: buildStockQuotesSkillConfig,
+    buildContent: buildStockQuotesSkillContentBySlug,
   },
 ];
 

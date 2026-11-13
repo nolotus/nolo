@@ -1,7 +1,9 @@
 import type { JudgmentBackend, JudgmentRequest, JudgmentResult, JudgmentQuestion } from "./types";
 import { budgetAbstain, DEFAULT_JUDGMENT_BUDGET, enterJudgmentCall, judgmentAbstain, judgmentDeadlineMs, type JudgmentBudget } from "./budget";
 import { redactJudgmentText } from "./redaction";
-export type JevBackendOptions = { apiKey: string; endpoint?: string; model?: string; fetchFn?: typeof fetch; budget?: JudgmentBudget };
+import type { SharedFetchImpl } from "core/fetchWithTransientRetry";
+
+export type JevBackendOptions = { apiKey: string; endpoint?: string; model?: string; fetchFn?: SharedFetchImpl; budget?: JudgmentBudget };
 type RawAnswer = { type?: string; choice?: string; score?: number; noul?: number; confidence?: number; probabilities?: Record<string, number> };
 export class JevBackend implements JudgmentBackend {
   constructor(private readonly options: JevBackendOptions) {}

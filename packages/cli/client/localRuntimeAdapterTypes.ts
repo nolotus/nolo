@@ -22,6 +22,10 @@ export type UserChoiceQuestion = {
 };
 
 export type UserChoiceRequest = {
+  /** Host-owned lifecycle cancellation, never a model-supplied approval. */
+  signal?: AbortSignal;
+  /** Host-only approval body; rendered as safe multiline text, never normalized as a question. */
+  approvalDisplay?: { kind: "browser-approval"; text: string };
   question: string;
   choices: UserChoiceOption[];
   blocking: boolean;

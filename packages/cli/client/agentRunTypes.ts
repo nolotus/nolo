@@ -1,3 +1,7 @@
+import type { HostTaskCompletionEvidenceProvider } from "./hostTaskBinding";
+import type { HostTaskReference } from "./hostTaskEvents";
+import type { BusinessCompletion } from "../../agent-runtime/taskExecutionContract";
+import type { ContextRefusalDiagnostics } from "../../agent-runtime/contextRefusal";
 import type { ShellApprovalSession } from "./originShellApprovalTransport";
 import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
 /**
@@ -32,6 +36,7 @@ import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter"
 import type { OriginShellGrant } from "./originShellGrant";
 import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecution";
 import type { AgentRuntimeToolPolicy } from "../../agent-runtime/types";
+import type { AgentRunFailureSubclass } from "../../ai/agent/agentAvailabilityShared";
 
 export type EnvLike = Record<string, string | undefined>;
 
@@ -55,6 +60,13 @@ export type OutputLike = {
   writeToolBlock?: (chunk: string) => boolean;
   /** TUI history capability: enable grouped tool trees. */
   tuiTrees?: boolean;
+  /**
+   * 查询「固定运行区此刻逐行可见的 runId」。**不是**「是否支持固定区」的能力位：
+   * 短终端降级（rows<16/<10 降到 1-2 条）、超过 maxRows 的 `+N`、后台进程占用行
+   * 预算时，run 依然不在屏上。只有 runId 确实落在集合里，聊天层才省略
+   * startAgentRun 启动回执；查询缺失或集合不含该 run 时一律保留回执。
+   */
+  visibleRunIds?: () => ReadonlySet<string>;
 };
 
 /**
@@ -174,6 +186,30 @@ export type TaskEvidenceInput = {
 };
 
 export type RunAgentTurnOptions = {
+  userMessages?: Array<import("../../agent-runtime").AgentRuntimeChatMessage & { cliMessageId?: string }>;
+  /**
+   * Explicit stable queued-batch identity (the tail user-message id), set only
+   * for queue-drained user batches. Absent = ordinary turn: never infer a
+   * batch from the presence of `userMessages`.
+   */
+  cliBatchId?: string;
+  /** Reference only. Authority is read from the host event store, never JSON supplied by the model. */
+  hostTaskRef?: HostTaskReference;
+  /** Trusted explicit task lifecycle only, bound to this actual user submission.
+   * Never populated from provider output, prompt parsing or runtimeContext. */
+  /** Host-minted real user submission only; absent for internal wakes. */
+  accountTaskUserSource?: { messageId: string; contentSha256: string; originalText?: string; projectedContentSha256?: string };
+  accountTaskStart?: import("./autoReviewContinuation").AccountTaskStart;
+  /** Trusted host-only completion producer; never populated from account review admission or model input. */
+  hostTaskCompletionEvidenceProvider?: HostTaskCompletionEvidenceProvider;
+  /** Trusted host-selected brief acceptance plan; never hydrate from tool JSON. */
+  hostTaskAcceptancePlan?: import("./hostTaskProgressProducer").HostTaskAcceptancePlan;
+  /** TUI-produced workspace evidence, revalidated by the host; grants no review authority.
+   * Typed review additionally requires authenticated account admission in the local adapter. */
+  hostTaskWorkspaceEvidence?: import("./hostTaskWorkspace").HostTaskWorkspaceEvidence;
+  /** Trusted host typed-review dispatch only; never populated from tool JSON. */
+  hostReviewContentAcceptance?: import("./hostReviewDispatch").HostReviewContentAcceptance;
+  hostReviewDispatch?: Omit<import("./hostReviewDispatch").HostReviewDispatchContext, "authorExecutionId">;
   getProcessCausalDepth?: () => number;
   agentName: string;
   agentKey: string;
@@ -318,8 +354,20 @@ export type RunAgentTurnOptions = {
   /**
    * 回合内注入收件箱 drain（TUI 后台 run 终态唤醒直投当前 loop）。
    * 直接透传给 local loop input.drainInjections；server 模式不支持，忽略。
+   * 兼容同步 `string[]`（内部唤醒）与结构化 user 消息（排队批次，带
+   * cliMessageId）；回调可返回 Promise。回调抛错会向上传播，调用方必须
+   * 先把批次留在队列里，不能吞错继续旧任务。
    */
-  drainInjections?: () => string[];
+  drainInjections?: () =>
+    | import("../../agent-runtime").LocalTurnInjection[]
+    | Promise<import("../../agent-runtime").LocalTurnInjection[]>;
+  /**
+   * 本轮通过 `drainInjections` 实际接入的用户批次（tail id + 成员 ids）。
+   * 注入回调写入；saveTurn 在同一 `store.batch` 里把这些批次标 `completed`，
+   * 并把它们从回复消息写入里排除（durable pending 记录已承载消息本体）。
+   * 仅在 `!input.result.error` 时完成，失败/abort 不谎称完成。
+   */
+  drainInjectedBatches?: Array<{ batchId: string; messageIds: string[] }>;
   /**
    * quick-chat 自动路由的「模型层覆盖」：分类路由落到通用档（tier agent）时，
    * 用用户选择的 agent 的 model 层替换档位 agent 的 model 层。
@@ -354,9 +402,34 @@ export type RunAgentTurnOptions = {
   activityReporter?: (label: string | null) => void;
   /** 后台子 Agent 运行状态快照更新接收者（TUI 用来在 composer 上方展示 docked 子 Agent 运行面板）。 */
   onAgentRunStatus?: (snapshot: import("../tui/activityIndicator").AgentRunStatusSnapshot | null) => void;
+  /**
+   * 交互式宿主（如 TUI）标记：为 true 时，preflightBlocked 类错误由宿主上层统一
+   * 通过系统提示呈现，底层 runner 不向 output 流直接写入 contextPreflightBlockedHint，
+   * 避免底层 assistant 气泡写入与宿主 emitCommandOutput 产生重复提示。
+   */
+  interactiveHost?: boolean;
 };
 
 export type RunAgentTurnResult = {
+  /** Adapter saveTurn resolved for this turn. Not proof of durable storage (ephemeral adapters may no-op). */
+  savedTurnPersisted?: boolean;
+  /** Main provider complete() was attempted; not proof of a wire send. Excludes summary calls. */
+  mainProviderAttempted?: boolean;
+  /** Recoverable coverage refusal before the main provider request. Pending input is not consumed. */
+  preflightBlocked?: {
+    code: "LOCAL_CONTEXT_COVERAGE_REQUIRED";
+    phase: "preflight";
+    retryable: true;
+    mainRequestSent: false;
+    refusal?: ContextRefusalDiagnostics;
+  };
+  stopReason?: import("../../agent-runtime/types").AgentRuntimeResult["stopReason"];
+  /** Host-admitted scope for subsequent user turns and internal wakes. */
+  hostTaskRef?: HostTaskReference;
+  /** Explicit workspace admission failure; businessCompletion remains blocked. */
+  hostTaskWorkspaceBlocker?: string;
+  taskAuthorization?: "unknown" | "active" | "paused" | "revoked";
+  businessCompletion?: BusinessCompletion;
   exitCode: number;
   dialogId?: string;
   /**
@@ -416,4 +489,9 @@ export type RunAgentTurnResult = {
   usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"];
   /** Resolved context window for the agent that actually ran (auto-route aware). */
   contextWindow?: number;
+  /**
+   * 本轮失败成因分类（classifyFailureSubclass 的透传；正常完成/unknown 不落）。
+   * 后台 run 结算据此区分配额、限流、鉴权等失败类别。
+   */
+  failureSubclass?: AgentRunFailureSubclass;
 };

@@ -90,7 +90,7 @@ export const MessageInputComposer = memo(function MessageInputComposer({
       )}
     >
       <TextField
-        style={{ flex: 1, display: "flex", width: "100%" }}
+        style={{ flex: 1, display: "flex", width: "100%", alignItems: "flex-start" }}
         aria-label={ariaLabel}
       >
         <TextArea

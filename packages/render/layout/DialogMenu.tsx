@@ -44,8 +44,13 @@ import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 const ICON_SIZE = 16 as const;
 
 // --- Main Component ---
+// variant 实际只有 "actions"（对话页右上角悬浮菜单）在跑：对象头部的
+// dialog 分支已改由 DialogPage 直接渲染，ContentActionBar 对 dialog/page
+// 提前 return。保留 "full" 是因为它仍是这个组件的完整形态实现，删掉会把
+// 标题行/动作菜单的耦合重新拆散；将来若要复用，直接传 variant="full"。
 const DialogMenu = ({
   currentDialog,
+  variant = "full",
   showShareButton = false,
   canDelete = false,
   showFavorite = false,
@@ -53,6 +58,8 @@ const DialogMenu = ({
   onDelete,
 }: {
   currentDialog: any;
+  /** "actions"：只渲染「⋯」动作菜单（对话页右上角悬浮用），不渲染标题行。 */
+  variant?: "full" | "actions";
   showShareButton?: boolean;
   canDelete?: boolean;
   showFavorite?: boolean;
@@ -125,6 +132,87 @@ const DialogMenu = ({
     ],
   );
 
+  const actionMenu = (
+<AriaMenuTrigger
+    isOpen={isActionMenuOpen}
+    onOpenChange={setIsActionMenuOpen}
+  >
+    <RacButton
+      className={`topbar__button ${isActionMenuOpen ? "is-active" : ""}`}
+      aria-label={t("more", "更多")}
+    >
+      <LuEllipsis size={ICON_SIZE} aria-hidden="true" />
+    </RacButton>
+    <Popover
+      className="app-menu-popover dialog-menu-popover"
+      placement="bottom end"
+      hideArrow
+      offset={8}
+    >
+      <Menu onAction={handleMenuAction} aria-label={t("more", "更多")}>
+        {showFavorite && (
+          <MenuItem
+            id="favorite"
+            textValue={
+              isFavorited
+                ? t("unfavoriteContent", "取消收藏")
+                : t("favoriteContent", "收藏")
+            }
+          >
+            <LuStar
+              size={ICON_SIZE}
+              style={{ fill: isFavorited ? "currentColor" : "none" }}
+              aria-hidden="true"
+            />
+            <span slot="label">
+              {isFavorited
+                ? t("unfavoriteContent", "取消收藏")
+                : t("favoriteContent", "收藏")}
+            </span>
+          </MenuItem>
+        )}
+        {showShareButton && (
+          <MenuItem
+            id="share"
+            textValue={t("share", "分享")}
+          >
+            <LuShare2 size={ICON_SIZE} aria-hidden="true" />
+            <span slot="label">{t("share", "分享")}</span>
+          </MenuItem>
+        )}
+        {showCopyDiagnostics && (
+          <MenuItem
+            id="copy-diagnostics"
+            textValue={t("chat:copyDiagnostics", "复制诊断信息")}
+          >
+            <LuClipboard size={ICON_SIZE} aria-hidden="true" />
+            <span slot="label">
+              {t("chat:copyDiagnostics", "复制诊断信息")}
+            </span>
+          </MenuItem>
+        )}
+        {canDelete && (
+          <>
+            {(showShareButton || showCopyDiagnostics) && <Separator />}
+            <MenuItem
+              id="delete"
+              className="dialog-menu__action-item--danger"
+              textValue={t("delete", "删除")}
+            >
+              <LuTrash2 size={ICON_SIZE} aria-hidden="true" />
+              <span slot="label">{t("delete", "删除")}</span>
+            </MenuItem>
+          </>
+        )}
+      </Menu>
+    </Popover>
+  </AriaMenuTrigger>
+  );
+
+  if (variant === "actions") {
+    return <div className="dialog-menu__actions-only">{actionMenu}</div>;
+  }
+
   return (
     <div className="dialog-menu">
       <div className="dialog-menu__header">
@@ -132,80 +220,7 @@ const DialogMenu = ({
           <h1 className="dialog-menu__title" title={currentDialog.title}>
             {titleWithSymbol}
           </h1>
-          <AriaMenuTrigger
-            isOpen={isActionMenuOpen}
-            onOpenChange={setIsActionMenuOpen}
-          >
-            <RacButton
-              className={`topbar__button ${isActionMenuOpen ? "is-active" : ""}`}
-              aria-label={t("more", "更多")}
-            >
-              <LuEllipsis size={ICON_SIZE} aria-hidden="true" />
-            </RacButton>
-            <Popover
-              className="app-menu-popover dialog-menu-popover"
-              placement="bottom end"
-              hideArrow
-              offset={8}
-            >
-              <Menu onAction={handleMenuAction} aria-label={t("more", "更多")}>
-                {showFavorite && (
-                  <MenuItem
-                    id="favorite"
-                    textValue={
-                      isFavorited
-                        ? t("unfavoriteContent", "取消收藏")
-                        : t("favoriteContent", "收藏")
-                    }
-                  >
-                    <LuStar
-                      size={ICON_SIZE}
-                      style={{ fill: isFavorited ? "currentColor" : "none" }}
-                      aria-hidden="true"
-                    />
-                    <span slot="label">
-                      {isFavorited
-                        ? t("unfavoriteContent", "取消收藏")
-                        : t("favoriteContent", "收藏")}
-                    </span>
-                  </MenuItem>
-                )}
-                {showShareButton && (
-                  <MenuItem
-                    id="share"
-                    textValue={t("share", "分享")}
-                  >
-                    <LuShare2 size={ICON_SIZE} aria-hidden="true" />
-                    <span slot="label">{t("share", "分享")}</span>
-                  </MenuItem>
-                )}
-                {showCopyDiagnostics && (
-                  <MenuItem
-                    id="copy-diagnostics"
-                    textValue={t("chat:copyDiagnostics", "复制诊断信息")}
-                  >
-                    <LuClipboard size={ICON_SIZE} aria-hidden="true" />
-                    <span slot="label">
-                      {t("chat:copyDiagnostics", "复制诊断信息")}
-                    </span>
-                  </MenuItem>
-                )}
-                {canDelete && (
-                  <>
-                    {(showShareButton || showCopyDiagnostics) && <Separator />}
-                    <MenuItem
-                      id="delete"
-                      className="dialog-menu__action-item--danger"
-                      textValue={t("delete", "删除")}
-                    >
-                      <LuTrash2 size={ICON_SIZE} aria-hidden="true" />
-                      <span slot="label">{t("delete", "删除")}</span>
-                    </MenuItem>
-                  </>
-                )}
-              </Menu>
-            </Popover>
-          </AriaMenuTrigger>
+          {actionMenu}
         </div>
         {subtitle && (
           <div className="dialog-menu__subtitle" title={subtitle}>

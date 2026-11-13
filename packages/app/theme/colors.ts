@@ -40,7 +40,7 @@ export const neutral = {
     primaryGradient: "linear-gradient(135deg, #71717A, #A1A1AA)",
     primaryGhost: "rgba(113,113,122,0.08)", primaryHover: "rgba(113,113,122,0.10)",
     borderAccent: "#D4D4D8", ...semantic.light,
-    ...mkLight("#FFFFFF", "#F4F4F5", "#E4E4E7", "#18181B", "#52525B", "#71717A", "#E4E4E7", "#F4F4F5"),
+    ...mkLight("#FFFFFF", "#F4F4F5", "#E4E4E7", "#18181B", "#52525B", "#6E6E77", "#E4E4E7", "#F4F4F5"),
   },
   dark: { primary: "#A1A1AA", primaryLight: "#D4D4D8", primaryDark: "#71717A",
     primaryGradient: "linear-gradient(135deg, #A1A1AA, #D4D4D8)",
@@ -58,14 +58,14 @@ export const ocean = {
     primaryGradient: "linear-gradient(135deg, #006EDC, #0874DC)",
     primaryGhost: "rgba(0,110,220,0.08)", primaryHover: "rgba(0,110,220,0.10)",
     borderAccent: "#73BEFF", ...semantic.light,
-    ...mkLight("#FFFFFF", "#F6F8FA", "#EBF0F4", "#1C2128", "#57606A", "#6E7781", "#D0D7DE", "#F6F8FA"),
+    ...mkLight("#FFFFFF", "#F6F8FA", "#EBF0F4", "#1C2128", "#57606A", "#69727C", "#D0D7DE", "#F6F8FA"),
   },
   dark: {
     primary: "#58A6FF", primaryLight: "#79C0FF", primaryDark: "#388BFD",
     primaryGradient: "linear-gradient(135deg, #58A6FF, #79C0FF)",
     primaryGhost: "rgba(88,166,255,0.10)", primaryHover: "rgba(88,166,255,0.12)",
     borderAccent: "#1F6FEB", ...semantic.dark,
-    ...mkDark("#0D1117", "#161B22", "#21262D", "#E6EDF3", "#8B949E", "#6E7681", "#30363D", "#161B22", "13,17,23"),
+    ...mkDark("#0D1117", "#161B22", "#21262D", "#E6EDF3", "#8B949E", "#7D848F", "#30363D", "#161B22", "13,17,23"),
     textHeading: "#E6EDF3",
     textOnPrimary: "#0D1117",
   },
@@ -101,7 +101,7 @@ export const iris = {
     textTertiary:        "#6E6A8A",
     textQuaternary:      "#9E9AB5",
     textLight:           "#C4C2D4",
-    placeholder:         "#9E9AB5",
+    placeholder:         "#8C88A2",
     border:              "#E4E4ED",
     borderHover:         "#CFCFD9",
     borderLight:         "#F2F2F7",
@@ -137,7 +137,7 @@ export const iris = {
     textTertiary:        "#938AA9",
     textQuaternary:      "#5A5772",
     textLight:           "#36334D",
-    placeholder:         "#5A5772",
+    placeholder:         "#6C6983",
     border:              "#272435",
     borderHover:         "#3A3650",
     borderLight:         "#16141F",
@@ -158,14 +158,14 @@ export const forest = {
     primaryGradient: "linear-gradient(135deg, #059669, #10B981)",
     primaryGhost: "rgba(5,150,105,0.08)", primaryHover: "rgba(5,150,105,0.10)",
     borderAccent: "#6EE7B7", ...semantic.light,
-    ...mkLight("#F6FAF6", "#EDF5EC", "#DDF0DB", "#1A2E18", "#3D6B3A", "#5C8A58", "#C3E0C0", "#EDF5EC"),
+    ...mkLight("#F6FAF6", "#EDF5EC", "#DDF0DB", "#1A2E18", "#3D6B3A", "#4F784B", "#C3E0C0", "#EDF5EC"),
   },
   dark: {
     primary: "#34D399", primaryLight: "#6EE7B7", primaryDark: "#10B981",
     primaryGradient: "linear-gradient(135deg, #34D399, #6EE7B7)",
     primaryGhost: "rgba(52,211,153,0.10)", primaryHover: "rgba(52,211,153,0.12)",
     borderAccent: "#059669", ...semantic.dark,
-    ...mkDark("#0C1209", "#121A0E", "#1A2416", "#E4F0E2", "#87A882", "#5E7A5A", "#1A2416", "#121A0E", "12,18,9"),
+    ...mkDark("#0C1209", "#121A0E", "#1A2416", "#E4F0E2", "#87A882", "#6E886B", "#1A2416", "#121A0E", "12,18,9"),
     success: "#4ADE80", textHeading: "#C8EEC4",
     textOnPrimary: "#0C1209",
   },
@@ -191,6 +191,7 @@ export const trail = {
     accentTrailGhost: "rgba(201, 146, 78, 0.10)",
     accentMossGhost: "rgba(122, 155, 110, 0.10)",
     background:          "#FAFBFC",
+    backgroundElevated:  "#FFFFFF", // trail light：输入框等浮起面（原本缺该字段，回落到 surfaceInset）
     backgroundSecondary: "#F4F7FA",
     backgroundTertiary:  "#E8EDF2",
     backgroundGhost:     "rgba(250, 251, 252, 0.94)",
@@ -198,10 +199,10 @@ export const trail = {
     backgroundSelected:  "#C8D4E0",
     text:                "#1C2430",
     textSecondary:       "#5C6775",
-    textTertiary:        "#7A8796",
+    textTertiary:        "#657180",
     textQuaternary:      "#A3B0BD",
     textLight:           "#C5CED8",
-    placeholder:         "#A3B0BD",
+    placeholder:         "#8A96A3",
     border:              "#D8E0E8",
     borderHover:         "#B8C5D4",
     borderLight:         "#EEF2F6",
@@ -230,6 +231,7 @@ export const trail = {
     accentTrailGhost: "rgba(212, 169, 106, 0.12)",
     accentMossGhost: "rgba(143, 184, 150, 0.12)",
     background:          "#0B1218",
+    backgroundElevated:  "#111A22", // trail dark：输入框等浮起面（原本缺该字段，回落到 surfaceInset）
     backgroundSecondary: "#111A22",
     backgroundTertiary:  "#1A2630",
     backgroundGhost:     "rgba(11, 18, 24, 0.94)",
@@ -271,6 +273,7 @@ export const wave = {
     error: "#C84053",
     // Surface overrides — Kanagawa Lotus palette
     background:          "#F5F4EF",
+    backgroundElevated:  "#FFFFFF", // wave light：输入框等浮起面（原本缺该字段，回落到 surfaceInset）
     backgroundSecondary: "#FFFFFF",
     backgroundTertiary:  "#ECEAE3",
     backgroundGhost:     "rgba(245, 244, 239, 0.94)",
@@ -281,7 +284,7 @@ export const wave = {
     textTertiary:        "#716E61",
     textQuaternary:      "#9E9B8E",
     textLight:           "#C3BBAA",
-    placeholder:         "#9E9B8E",
+    placeholder:         "#989589",
     border:              "#D8D5C8",
     borderHover:         "#C4C0B2",
     borderLight:         "#ECEAE3",
@@ -307,6 +310,7 @@ export const wave = {
     error: "#E82424",
     // Surface overrides — Kanagawa Wave palette
     background:          "#1F1F28",   // surumiBlack — 墨色
+    backgroundElevated:  "#2A2A37", // wave dark：输入框等浮起面（原本缺该字段，回落到 surfaceInset）
     backgroundSecondary: "#16161D",   // deeper ink
     backgroundTertiary:  "#2A2A37",   // waveBlue-dark
     backgroundGhost:     "rgba(22, 22, 29, 0.94)",
@@ -317,7 +321,7 @@ export const wave = {
     textTertiary:        "#938AA9",   // springViolet2 — 注释紫，Kanagawa 气质核心
     textQuaternary:      "#727169",   // fujiGray
     textLight:           "#54546D",
-    placeholder:         "#727169",
+    placeholder:         "#75746B",
     border:              "#2A2A37",
     borderHover:         "#54546D",
     borderLight:         "#1F1F28",
@@ -347,6 +351,7 @@ export const rose = {
     info: "#286983",
     error: "#B4637A",
     background:          "#FAF4ED",
+    backgroundElevated:  "#FFFFFF", // rose light：输入框等浮起面（原本缺该字段，回落到 surfaceInset）
     backgroundSecondary: "#FFFAF3",
     backgroundTertiary:  "#F2E9E1",
     backgroundGhost:     "rgba(250, 244, 237, 0.94)",
@@ -354,10 +359,10 @@ export const rose = {
     backgroundSelected:  "#DFD3C7",
     text:                "#575279",
     textSecondary:       "#6E6A86",
-    textTertiary:        "#797593",
+    textTertiary:        "#736F8F",
     textQuaternary:      "#9893A5",
     textLight:           "#CECACD",
-    placeholder:         "#9893A5",
+    placeholder:         "#9792A5",
     border:              "#DFDAD9",
     borderHover:         "#C5BFB3",
     borderLight:         "#F2E9E1",
@@ -382,6 +387,7 @@ export const rose = {
     info: "#C4A7E7",
     error: "#EB6F92",
     background:          "#191724",
+    backgroundElevated:  "#26233A", // rose dark：输入框等浮起面（原本缺该字段，回落到 surfaceInset）
     backgroundSecondary: "#1F1D2E",
     backgroundTertiary:  "#26233A",
     backgroundGhost:     "rgba(25, 23, 36, 0.94)",
@@ -392,7 +398,7 @@ export const rose = {
     textTertiary:        "#908CAA",
     textQuaternary:      "#6E6A86",
     textLight:           "#403D52",
-    placeholder:         "#6E6A86",
+    placeholder:         "#716D8A",
     border:              "#26233A",
     borderHover:         "#6E6A86",
     borderLight:         "#1F1D2E",
@@ -435,10 +441,10 @@ export const mono = {
     backgroundElevated:  "#FFFFFF",
     text:                "#292E32",  // gray-12
     textSecondary:       "#57616B",  // gray-10
-    textTertiary:        "#7B8793",  // gray-8
+    textTertiary:        "#69737E",  // gray-8
     textQuaternary:      "#9DA6AF",  // gray-7
     textLight:           "#C1C7CD",
-    placeholder:         "#9DA6AF",
+    placeholder:         "#899199",
     border:              "#E6E8EA",  // gray-4
     borderHover:         "#C1C7CD",
     borderLight:         "#F1F2F4",
@@ -479,7 +485,7 @@ export const mono = {
     textTertiary:        "#C1C7CD",  // gray-6
     textQuaternary:      "#7B8793",  // gray-8
     textLight:           "#3E454C",
-    placeholder:         "#7B8793",
+    placeholder:         "#8B95A0",
     // 边框必须比所在表面亮一档,否则夜间卡片/分割线全部融进背景
     border:              "#4A525A",
     borderHover:         "#6E7A87",
@@ -527,7 +533,7 @@ export const catppuccin = {
     backgroundElevated:  "#F6F8FA",
     text:                "#1F2328",
     textSecondary:       "#57606A",
-    textTertiary:        "#6E7781",
+    textTertiary:        "#69727B",
     textQuaternary:      "#8C959F",
     textLight:           "#D0D7DE",
     placeholder:         "#6E7781",
@@ -607,7 +613,7 @@ export const nature = {
     info: "#1A5FA4",
     error: "#B3361F", // --hl-danger 压暗（paper 5.48:1，surface-sub 4.98:1）
     background:          "#FAF8F4", // --hl-paper
-    backgroundSecondary: "#F3F0EA", // --hl-surface-sub
+    backgroundSecondary: "#F6F4EF", // --hl-surface-sub（与 paper 的色阶从 7/8/10 收窄到 4/4/5，整体更轻）
     backgroundTertiary:  "#EBE7DF",
     backgroundGhost:     "rgba(250,248,244,0.94)",
     backgroundHover:     "#EBE7DF",

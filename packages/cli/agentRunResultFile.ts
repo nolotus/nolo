@@ -1,3 +1,4 @@
+import type { LocalCommandObservation, LocalRunAcceptance } from "./agentRunLocalWorkspace";
 // `<runId>.result.md` 的机器可读头（YAML front matter）。
 //
 // 运行时在落盘正文前自动加头，不依赖模型自觉。头只放结构化元数据，正文保持
@@ -11,6 +12,7 @@ import {
 import type { CacheRunUsageSummary } from "../ai/token/cacheRunSummary";
 
 export type ResultFrontMatterInput = {
+  acceptance?: LocalRunAcceptance;
   runId: string;
   status: string;
   agentName?: string;
@@ -75,6 +77,7 @@ export function resolveResultServerMeta(input: {
  * 避免改动既有结果的 toEqual 契约。WeakMap 不影响 GC。
  */
 export type RunResultHeaderMeta = {
+  commandObservations?: LocalCommandObservation[];
   model?: string;
   dialogServer?: string;
   serverSync?: ServerSyncMode;
@@ -83,6 +86,7 @@ const resultHeaderMeta = new WeakMap<object, RunResultHeaderMeta>();
 
 export function recordRunResultHeaderMeta(result: object, meta: RunResultHeaderMeta): void {
   const clean: RunResultHeaderMeta = {};
+  if (meta.commandObservations?.length) clean.commandObservations = meta.commandObservations;
   if (meta.model) clean.model = meta.model;
   if (meta.dialogServer) clean.dialogServer = meta.dialogServer;
   if (meta.serverSync) clean.serverSync = meta.serverSync;
@@ -135,6 +139,7 @@ export function buildResultFrontMatter(input: ResultFrontMatterInput): string {
     ["serverSync", input.serverSync],
     ["cwd", input.cwd],
     ["continuedFrom", input.continuedFrom],
+    ["acceptance", input.acceptance ? JSON.stringify(input.acceptance) : undefined],
   ];
   const lines = entries
     .filter(([, v]) => v !== undefined && v !== "")

@@ -9,6 +9,16 @@
  */
 
 import { normalizeEnabledPromptSkills } from "./userPromptSkills";
+import { WORKFLOW_GUIDANCE_SKILL_SLUGS } from "./workflowGuidanceSkills";
+
+/** New-account initialization only; never a fallback for missing preferences. */
+export const NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS = WORKFLOW_GUIDANCE_SKILL_SLUGS;
+
+/** Closed policy set: historical account skills retain required semantics. */
+export function isAccountOnDemandWorkflowSkill(slug: string): boolean {
+  return typeof slug === "string" &&
+    NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS.some((candidate) => candidate === slug.trim());
+}
 
 /**
  * 平台已审定的账号级可选 Skill slug 清单。
@@ -28,6 +38,8 @@ export const SUPPORTED_USER_SKILL_SLUGS = [
   "coding",
   "coding-review",
   "android-adb",
+  "stock-quotes",
+  ...NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS,
 ] as const;
 
 export type SupportedUserSkillSlug =
@@ -40,7 +52,11 @@ const SUPPORTED_USER_SKILL_SLUG_SET: ReadonlySet<string> = new Set<string>(
 /**
  * 推荐用户 Skill slug 清单（供 UI 推荐排序与展示，推荐与可启用互相独立）。
  */
-export const RECOMMENDED_USER_SKILL_SLUGS = ["ub-mode", "auto-review"] as const;
+export const RECOMMENDED_USER_SKILL_SLUGS = [
+  "ub-mode",
+  "auto-review",
+  "stock-quotes",
+] as const;
 
 export type RecommendedUserSkillSlug =
   (typeof RECOMMENDED_USER_SKILL_SLUGS)[number];

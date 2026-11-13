@@ -3,6 +3,7 @@ export type IncompleteBrowserTurnMessage = {
   dbKey?: string;
   role?: string;
   content?: unknown;
+  metadata?: { queueState?: string; userBatchPhase?: string };
 };
 
 export type IncompleteBrowserTurnInput = {
@@ -39,7 +40,14 @@ export function deriveIncompleteBrowserTurn(
     if (message.role !== "user" && message.role !== "assistant" && message.role !== "tool") {
       continue;
     }
-    return message.role === "user" ? message : null;
+    if (message.role !== "user") return null;
+    // Queued input is durable, but is not evidence that a provider turn began.
+    // Do not scan past it: that could resurrect an older completed turn.
+    if (message.metadata?.queueState === "pending" &&
+        !["admitted", "requested"].includes(message.metadata?.userBatchPhase ?? "")) {
+      return null;
+    }
+    return message;
   }
 
   return null;

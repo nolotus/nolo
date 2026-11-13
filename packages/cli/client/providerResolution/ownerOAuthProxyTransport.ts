@@ -353,6 +353,7 @@ export const resolveOwnerOAuthProxyTransport: ProviderResolver = async (ctx) => 
     additionalToolNames,
   );
   return {
+    transport: "owner-oauth-proxy",
     model: providerConfig.model,
     complete: async (messages, options) => {
       const requestId = crypto.randomUUID();

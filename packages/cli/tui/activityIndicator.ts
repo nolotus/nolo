@@ -36,6 +36,21 @@ export const ACTIVITY_FRAME_INTERVAL_MS = 150;
 /** 无可见输出超过此时长（且 turn 仍活跃）时，补一行 working fallback。 */
 export const ACTIVITY_FALLBACK_DELAY_MS = 1200;
 
+function isThinkingLabel(label: string): boolean {
+  return /^(Thinking|思考中)[：:…]/i.test(label) || label === "Thinking" || label === "思考中";
+}
+
+function isRetryLabel(label: string): boolean {
+  return /^(自动重试|服务器紧张|上游流中断|Retry|Retrying)/i.test(label);
+}
+
+function isSamePhase(prev: string, next: string): boolean {
+  if (prev === next) return true;
+  if (isThinkingLabel(prev) && isThinkingLabel(next)) return true;
+  if (isRetryLabel(prev) && isRetryLabel(next)) return true;
+  return false;
+}
+
 export type ActivityIndicatorView = {
   frame: string;
   label: string;
@@ -77,6 +92,8 @@ export type ActivityIndicator = {
   clearAgentRun(): void;
   /** 停靠区里的全部 run，活跃在前。 */
   getAgentRuns(): AgentRunStatusSnapshot[];
+  /** 固定运行区此刻逐行可见的 runId（行预算 + `+N` 折叠后的真实结果）。 */
+  getVisibleRunIds(): ReadonlySet<string>;
   /** 当前应渲染的活动行数据；explicit 优先，其次 fallback，都没有返回 null。 */
   getView(): ActivityIndicatorView | null;
   /** 获取全套活动 Panel 渲染行（含基础活动行及贴在输入区上方的 Agent Run 状态面板）。 */
@@ -121,10 +138,6 @@ export function createActivityIndicator(
   // 第二次 Esc 据此判定强制停止。stop() 必须清掉它，否则下一轮 turn 一开始
   // 就显示"停止中"。
   let stopping = false;
-  // 本轮起点：首个 report 时记下，stop() 清零。活动行显示的是整轮累计耗时，
-  // 而不是「当前这一段标签」的耗时——后者每次工具切换都归零，用户看不出
-  // 这一轮到底跑了多久。
-  let turnStartedAt = 0;
 
   const elapsedSecFrom = (startedAt: number) =>
     startedAt > 0 ? Math.max(0, Math.floor((now() - startedAt) / 1000)) : 0;
@@ -147,7 +160,7 @@ export function createActivityIndicator(
       now() - lastActivityAt >= fallbackDelayMs
     ) {
       fallbackActive = true;
-      fallbackStartedAt = now();
+      fallbackStartedAt = lastActivityAt;
     }
     repaint();
   };
@@ -160,10 +173,11 @@ export function createActivityIndicator(
 
   const report = (label: string | null) => {
     lastActivityAt = now();
-    if (turnStartedAt === 0) turnStartedAt = lastActivityAt;
     if (label !== null) {
+      if (explicitLabel === null || !isSamePhase(explicitLabel, label)) {
+        explicitStartedAt = lastActivityAt;
+      }
       explicitLabel = label;
-      if (explicitStartedAt === 0) explicitStartedAt = lastActivityAt;
       fallbackActive = false;
       fallbackStartedAt = 0;
     } else {
@@ -204,14 +218,14 @@ export function createActivityIndicator(
       return {
         frame,
         label: explicitLabel,
-        elapsedSec: elapsedSecFrom(turnStartedAt || explicitStartedAt),
+        elapsedSec: elapsedSecFrom(explicitStartedAt),
       };
     }
     if (fallbackActive) {
       return {
         frame,
         label: deps.fallbackLabel(),
-        elapsedSec: elapsedSecFrom(turnStartedAt || fallbackStartedAt),
+        elapsedSec: elapsedSecFrom(fallbackStartedAt),
       };
     }
     return null;
@@ -315,7 +329,6 @@ export function createActivityIndicator(
     fallbackActive = false;
     fallbackStartedAt = 0;
     lastActivityAt = 0;
-    turnStartedAt = 0;
     stopping = false;
     // runDock 不清：后台 run 不随 turn 结束而结束。
   };
@@ -325,6 +338,8 @@ export function createActivityIndicator(
     updateAgentRun,
     clearAgentRun,
     getAgentRuns,
+    /** 固定运行区此刻逐行可见的 runId（见 runDock.visibleRunIds）。 */
+    getVisibleRunIds: (): ReadonlySet<string> => runDock.visibleRunIds(),
     getView,
     getActivityLines,
     markStopping,

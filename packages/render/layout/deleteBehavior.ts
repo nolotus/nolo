@@ -1,4 +1,6 @@
+import { AppRoutePaths } from "app/constants/routePaths";
 import { normalizeSpaceId } from "create/space/spaceKeys";
+import { isDialogKey } from "database/keys";
 
 type ResolveDeleteSpaceIdArgs = {
   contentKeyType: string;
@@ -36,7 +38,11 @@ export const resolveDeleteSpaceId = ({
 
 /**
  * Where to go after a successful delete.
- * - Space-scoped content → that space home (sidebar / topbar both)
+ * - Dialog → the dedicated new-dialog shell (/chat); never the space home and
+ *   never history.back (the deleted route is dead).
+ * - Space-scoped content → that space's all-content page (/space/:id/contents).
+ *   `/space/:id` is now the space *chat* home, so landing there would drop the
+ *   user out of the content list they were browsing.
  * - Standalone public agent → explore
  * - Otherwise → caller may fall back to history.back
  */
@@ -49,8 +55,12 @@ export const resolveDeleteSuccessPath = ({
 }): string | undefined => {
   if (!contentKey) return undefined;
 
+  if (isDialogKey(contentKey)) {
+    return AppRoutePaths.CHAT;
+  }
+
   if (routeSpaceId) {
-    return `/space/${normalizeSpaceId(routeSpaceId)}`;
+    return `/space/${normalizeSpaceId(routeSpaceId)}/contents`;
   }
 
   if (contentKey.startsWith("agent-pub-")) {

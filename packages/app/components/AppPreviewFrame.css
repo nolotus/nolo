@@ -1,0 +1,62 @@
+/* ── AppPreviewFrame（真实应用缩略图） ─────────────────── */
+
+.AppPreviewFrame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--backgroundSecondary, var(--background));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+}
+
+.AppPreviewFrame__frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 0;
+  transform-origin: top left;
+  /* 缩略图不接管点击与焦点：整张卡片才是可点的。 */
+  pointer-events: none;
+}
+
+.AppPreviewFrame__skeleton {
+  position: absolute;
+  inset: 0;
+  background: var(--backgroundSecondary, var(--background));
+  opacity: 0.6;
+  animation: AppPreviewFrame__pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes AppPreviewFrame__pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.AppPreviewFrame__notice {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  text-align: center;
+  color: var(--textSecondary);
+}
+
+.AppPreviewFrame__notice--error {
+  color: var(--textSecondary);
+}
+
+.AppPreviewFrame__notice-text {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}

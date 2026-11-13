@@ -15,6 +15,7 @@ import {
 } from "../dialogCommands";
 import { serializeMessageContent } from "core/chat/messageContentSerialize";
 import { clipCompactText } from "core/clipCompactText";
+import { renderCliNotice } from "./completionNoticeDisplay";
 import { t } from "./i18n";
 import { runSelectDialog, type KeyReader, type SelectDialogItem } from "./selectDialog";
 import { MAX_TUI_HISTORY_TURNS } from "./tuiHistory";
@@ -185,7 +186,18 @@ export async function loadDialogHistoryForDisplay(args: {
     const role = message?.role ?? message?.authorRole;
     if (role !== "user" && role !== "assistant") continue;
     const content = serializeMessageContent(message?.content, "[image]");
-    if (content) turns.push({ role, content });
+    if (!content) continue;
+    // 系统注入的上下文片段（后台 run / 进程任务终态唤醒等）在实时路径只渲染
+    // 紧凑状态行、不进用户气泡（tuiTurnRunner 的 isInternalEvent 分支）。
+    // resume 恢复必须复用同一识别与展示模型，否则完整模型正文会被当成用户
+    // 发言渲染。识别走共享注册表（renderCliNotice 内部经 describeContextualNotice），
+    // 不做文本猜测，避免误伤普通用户消息。
+    const notice = role === "user" ? renderCliNotice(content, []) : "";
+    if (notice) {
+      turns.push({ role: "assistant", content: notice });
+      continue;
+    }
+    turns.push({ role, content });
   }
   return turns;
 }

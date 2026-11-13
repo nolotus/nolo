@@ -23,20 +23,22 @@ export const CODE_WORK_DISCIPLINE_BODY = `## 效率优先（省 token）
 ## 代码修改纪律
 - 编辑前先 readFile 确认当前内容，避免 stale hash 错误。
 - 只碰任务书列出的文件；改完用 \`git status --short\` 自查，若改到清单外文件，如实报告。
-- 不要 \`git add\` / \`git commit\` / \`git push\` / \`git stash\` / \`git reset\` / \`git checkout\` / \`git clean\`——改动留在工作区，提交由调用方验收后处理。仓库常有多个会话共用一个 checkout，你一提交就会把别人的在途文件卷进来。
+- 未获调用方授权时，不要 \`git add\` / \`git commit\`——改动留在工作区，提交由调用方验收后处理。调用方已显式启用 auto-review 且本任务在其作用域内时，可按任务书执行 \`git add\` / \`git commit\`，但 push、main/production 合并、发布与回滚仍须独立授权。
+- 获授权提交时只暂存/提交本任务路径：\`git add <任务书路径>\` 逐个列出，禁止 \`git add -A\` / \`git add .\` / \`git commit -a\` 卷入他人在途改动；commit 前用 \`git status --short\` + \`git diff --cached --stat\` 核验暂存区只含本任务文件，发现清单外内容立即停下报告。
+- \`git stash\` / \`git reset\` / \`git restore\` / \`git checkout\`（含 \`--\` 恢复与切分支）/ \`git clean\` 默认一律禁止——仓库常有多个会话共用一个 checkout，这些操作会销毁他人在途改动；仅当用户在当次对话明确指示时才可执行，auto-review 授权不覆盖此默认禁令。
 - 只跑任务里列出的测试文件，不要跑 broader 测试（broaden 测试的失败是预存的，和你的改动无关）。
 - 只读任务相关的文件，不要 grep 整个 repo 查找规则或配置。
 - **建议汇报**：交付时把过程中发现的**任何值得用户知道的事**都列出来（预存无关改动、既有测试隔离问题、潜在风险、后续可优化点、需用户决策的事项），不要只报「做完了」。
 
 ## Review 纪律（commit 前硬门）
 - **阶段划分**：默认严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。若用户已显式启用且当前任务在 auto-review 作用域内，review、修复、提交与本地集成持续授权，不重复询问；未启用不得自动授权，stop/暂停/单次覆盖立即生效。UI/前端及其他需用户验收的任务，先交付可测试产物并等待用户验收；验收通过且 auto-review 授权仍适用时直接进入最终 review；否则须用户确认准备提交。push、main/production 合并、发布与回滚仍独立授权。
-- 最终 review 默认仅在用户明确确认准备提交/合并时进行；auto-review 作用域内依持续授权执行。除 ≤2 步零逻辑风险的机械改动（错别字/格式/CSS 微调）外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review 工作区 diff（\`git diff\`，未提交的改动）。reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」，跨家族优先非强制）。无 review 不 commit——这是硬门，不是建议。
+- 最终 review 默认仅在用户明确确认准备提交/合并时进行；auto-review 作用域内依持续授权执行。除 ≤2 步零逻辑风险的机械改动（错别字/格式/CSS 微调）外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review 工作区 diff（\`git diff\`，未提交的改动）。reviewer 不可是产出这份 diff 的那个实例：新开 dialog 的实例不共享上下文，因此**同模型、同家族、乃至编排者自身 agent 的新实例都算独立 reviewer**——同家族不构成排除理由，「跨家族」只是候选之间的偏好。候选池里没有其它合规可用的 agent 时，直接用同模型新实例审，不要为此卡住，也不要为凑异家族候选去消耗平台积分。无 review 不 commit——这是硬门，不是建议。
 - 派发走 \`startAgentRun(agentKey, task)\`（web/桌面端没有 nolo CLI，所有 host 都有这个工具）。
 - task 里必须写明审查对象（\`git diff\` 看工作区改动，或 \`git diff alpha...HEAD\` 看已提交改动），否则 reviewer 不知道审什么。
 - 按角色加载对应 skill：reviewer 先 \`loadSkill("coding-review")\` 拿通用流程，再按角色 \`loadSkill("coding-review-<role>")\` 拿检查项。角色清单：code-quality（**必跑**）/ architecture（**单独派发**，中级以上问题）/ security（按需 + 安全敏感触发必跑）/ frontend-ux（涉及 UI 时）/ backend-data（涉及 server 时）。角色切割的目的是注意力隔离——每个角色只盯自己的检查面，按需启用，避免一个 reviewer 背所有角色导致注意力稀释。
 - Verdict 标准：APPROVE（无 CRITICAL 或 HIGH）→ 可 commit；WARNING（仅 HIGH）→ 报告 owner 决定；BLOCK（有 CRITICAL）→ 必须先修。
 - review 是多轮收敛的：派 reviewer 审工作区 diff → 出 finding 就修 → 复审，直到 APPROVE 才提交。每轮 review 无上下文——reviewer 只看当前工作区 diff，不带上一轮 finding 记忆。**APPROVE 只覆盖被审的那一版**：此后任何改动（含采纳 nit、含只动注释 / 文档）都要重新过一轮 review，作者自评不构成复核（真源 docs/workflow.md）。
-- 若处于单 Agent 独占环境、其他 agent 不可达、或用户明确要求直接提交：不要补写或伪造 review 证据，也**不要用 [no-review: 原因] 这类写法**——它任何判据都解析不了，写了照样被拦。自有闸门认的形式是 Reviewed-by: <非空署名> 加 Review: 带结论（APPROVE / Approved / WARNING，占位符如 <pending> 不算），commit-msg 与 pre-push / pre-merge 都走这一条正则。pre-push / pre-merge **另**认一条 owner-only 豁免：正文写 No-Review: <原因> 且 commit author email 命中 packages/nolo-ci/core/src/mapping.ts 的 NO_REVIEW_OWNER_EMAILS 白名单——agent 身份（如 app-builder@nolo.local）不适用。真被卡住就如实上报卡点、由 owner 决定；git push --no-verify 仅限管理员/紧急恢复，服务端 G2 不可绕过。`;
+- 若处于单 Agent 独占环境、其他 agent 不可达、或用户明确要求直接提交：不要补写或伪造 review 证据，也**不要用 [no-review: 原因] 这类写法**——它任何判据都解析不了，写了照样被拦。自有闸门认的形式是 Reviewed-by: <非空署名> 加 Review: 带结论（APPROVE / Approved / WARNING，占位符如 <pending> 不算），commit-msg 与 pre-merge 都走这一条正则。pre-merge **另**认一条 owner-only 豁免：正文写 No-Review: <原因> 且 commit author email 命中 packages/nolo-ci/core/src/mapping.ts 的 NO_REVIEW_OWNER_EMAILS 白名单——agent 身份（如 app-builder@nolo.local）不适用。真被卡住就如实上报卡点、由 owner 决定；本地已无推送钩子（2026-11-09 移除 pre-push），服务端 G2 不可绕过。`;
 
 /** 带标题的完整段落。 */
 export const buildCodeWorkDiscipline = (heading: string): string =>

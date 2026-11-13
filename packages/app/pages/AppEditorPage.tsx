@@ -39,6 +39,7 @@ import { patch } from "database/dbSlice";
 import ContentIcon from "render/contentIcon/ContentIcon";
 import ContentIconPicker from "render/contentIcon/ContentIconPicker";
 import type { ContentIcon as ContentIconValue } from "render/contentIcon/types";
+import PageObjectActions from "render/page/PageObjectActions";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -399,6 +400,7 @@ const AppEditorPage: React.FC = () => {
 
   return (
     <div className="AppEditorPage">
+      <PageObjectActions />
       {loading && !app ? (
         <div className="AppEditorPage__status">{t("appEditor_loading", "正在加载应用…")}</div>
       ) : error ? (

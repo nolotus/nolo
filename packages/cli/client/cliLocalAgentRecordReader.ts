@@ -151,8 +151,9 @@ export async function readDialogMessages(args: {
   const messages: AgentRuntimeChatMessage[] = [];
   const entries = await readDialogMessageRecords(args);
   for (const entry of entries) {
+    if ((entry.record.metadata as any)?.queueState === "pending") continue;
     const message = localDialogMessageRecordToRuntimeMessage(entry.record);
-    if (message) messages.push(message);
+    if (message) messages.push({ ...message, cliMessageId: entry.messageId } as any);
   }
   return messages;
 }

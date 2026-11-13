@@ -118,6 +118,9 @@ export const replaceCurrentToken = (
   return async (_dispatch, _getState, extra) => {
     const service = resolveService(storeFromExtra(extra));
     if (!service) throw new Error(SERVICE_UNAVAILABLE);
+    if (typeof service.replaceActiveToken !== "function") {
+      throw new Error("account session token replacement unavailable");
+    }
     const token = typeof input === "string" ? input : input.token;
     return service.replaceActiveToken(token);
   };

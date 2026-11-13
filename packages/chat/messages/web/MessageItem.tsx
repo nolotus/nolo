@@ -1,3 +1,6 @@
+import { selectPendingUserMessages } from "../pendingUserMessages";
+import { selectAllMsgs as selectPendingHistory } from "../messageSlice";
+import { inferMessageDialogIdFromDbKey } from "../messageDialogIdentity";
 import React, {
   memo,
   useState,
@@ -21,6 +24,7 @@ import { resolveAvatarUrl } from "ai/agent/avatarUtils";
 import { resolveMessageAgentKey } from "../messageAgent";
 import { selectLastAssistantMessage } from "../messageSlice";
 import { matchContextualFragment } from "../contextualFragment";
+import type { ContextualNoticeGroup } from "../contextualFragment";
 import { extractTextFromContent } from "../extractTextFromContent";
 import ContextualStatusRow from "./ContextualStatusRow";
 import { handleSendMessage } from "../../dialog/dialogSlice";
@@ -48,6 +52,11 @@ export type MessageItemProps = {
    * authoritative signal from the session store (useHasStreamingMessage).
    */
   isStreaming?: boolean;
+  /**
+   * 相邻后台完成消息的分组信息（可选，由列表层按展示顺序算出）。
+   * size > 1 时本行按「组内条目」渲染：组头只由组首条目渲染一次。
+   */
+  contextualGroup?: ContextualNoticeGroup;
 };
 
 /**
@@ -94,7 +103,12 @@ function areMessageItemPropsEqual(
     prev.canBranch === next.canBranch &&
     prev.enableActions === next.enableActions &&
     prev.isStreaming === next.isStreaming &&
-    prev.message === next.message
+    prev.message === next.message &&
+    (prev.contextualGroup?.index === next.contextualGroup?.index &&
+      prev.contextualGroup?.size === next.contextualGroup?.size &&
+      prev.contextualGroup?.title === next.contextualGroup?.title &&
+      prev.contextualGroup?.meta === next.contextualGroup?.meta &&
+      prev.contextualGroup?.outcome === next.contextualGroup?.outcome)
   );
 }
 
@@ -107,6 +121,7 @@ export const MessageItem = memo(
     canBranch: canBranchProp,
     enableActions = true,
     isStreaming: isStreamingProp,
+    contextualGroup,
   }: MessageItemProps) => {
     const dispatch = useAppDispatch();
     const currentUserId = useUserId();
@@ -124,6 +139,9 @@ export const MessageItem = memo(
     // 列表层传入的 streaming 信号优先（session store 权威）；实体上的
     // isStreaming 极少被写入（messageSlice 不置 true），仅作兜底。
     const isStreaming = isStreamingProp ?? message?.isStreaming ?? false;
+    const queued = useAppSelector(state => selectPendingUserMessages(
+      selectPendingHistory(state, inferMessageDialogIdFromDbKey(message?.dbKey)),
+    ).some(entry => entry.id === message?.id));
     const messageAgentKey = resolveMessageAgentKey(message);
     const errorMeta = message?.errorMeta ?? message?.metadata?.errorMeta;
 
@@ -285,7 +303,13 @@ export const MessageItem = memo(
 
     // 命中片段 → 折叠状态行，不走 MessageLayout（无头像/气泡/操作栏）。
     if (fragmentKind) {
-      return <ContextualStatusRow text={contentText} kind={fragmentKind} />;
+      return (
+        <ContextualStatusRow
+          text={contentText}
+          kind={fragmentKind}
+          group={contextualGroup}
+        />
+      );
     }
 
     return (
@@ -304,6 +328,8 @@ export const MessageItem = memo(
           showActions={showActions}
           messageId={message?.id}
           content={
+            <>
+            {queued && <span role="status" aria-label="Pending user message">待下一轮接纳 · 未读</span>}
             <MessageContent
               content={content || ""}
               thinkContent={thinkContent || ""}
@@ -317,6 +343,7 @@ export const MessageItem = memo(
               onRetry={errorMeta?.retryable ? handleRetry : undefined}
               onAction={errorMeta?.actions?.length ? handleErrorAction : undefined}
             />
+            </>
           }
           actions={actionsNode}
           confirmBar={confirmBarNode}

@@ -165,3 +165,85 @@
           max-height: 60px;
           padding-top: 0;
         }
+
+        /* ── 作品库布局（gallery）：大图真实预览 + 元信息 + 更多菜单 ── */
+        .AppCard--gallery {
+          padding: 0;
+          gap: 0;
+          height: 100%;
+          overflow: hidden;
+          cursor: pointer;
+        }
+        .AppCard--gallery:focus-visible {
+          outline: none;
+          box-shadow: 0 0 0 3px var(--primaryGhost);
+        }
+        .AppCard__preview {
+          /* 固定高度（不依赖 height:100% 链）：预览盒自身有确定尺寸，
+             缩放比才能算准，卡片也不会塌成纯文字卡。 */
+          flex: 0 0 auto;
+          height: 200px;
+          background: var(--backgroundSecondary, var(--background));
+        }
+        .AppCard--gallery .AppPreviewFrame {
+          border: 0;
+          border-radius: 0;
+        }
+        .AppCard__galleryMeta {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          padding: 10px 12px 0;
+          min-width: 0;
+        }
+        .AppCard__galleryMeta .AppCard__name {
+          font-size: 0.9375rem;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .AppCard__galleryFoot {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 8px;
+          min-width: 0;
+        }
+        .AppCard__galleryFoot .AppCard__url {
+          font-size: 0.75rem;
+          color: var(--textSecondary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          word-break: normal;
+          max-width: 60%;
+        }
+        .AppCard__actions--gallery {
+          padding: 10px 12px 12px;
+          justify-content: space-between;
+          gap: 8px;
+          flex-wrap: nowrap;
+        }
+        .AppCard__actions--gallery .AppCard__btn {
+          min-width: 0;
+        }
+        .AppCard__moreBtn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 30px;
+          height: 30px;
+          border-radius: var(--radius-sm, 6px);
+          border: 1px solid var(--border);
+          background: var(--background);
+          color: var(--textSecondary);
+          cursor: pointer;
+        }
+        .AppCard__moreBtn:hover {
+          background: var(--backgroundSecondary);
+          color: var(--text);
+        }
+        .AppCard__moreBtn:focus-visible {
+          outline: none;
+          box-shadow: 0 0 0 3px var(--primaryGhost);
+        }

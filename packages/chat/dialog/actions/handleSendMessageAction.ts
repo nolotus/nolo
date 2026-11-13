@@ -1,3 +1,4 @@
+import { selectPendingUserMessages } from "chat/messages/pendingUserMessages";
 import { extractErrorDiagnostics } from "../../../ai/chat/errorDiagnostics";
 // 文件路径: chat/dialog/actions/handleSendMessageAction.ts
 
@@ -6,6 +7,7 @@ import type { AgentRuntimeOptions } from "ai/agent/types";
 import {
     messageStreamEnd,
     prepareAndPersistUserMessage,
+    admitPendingUserMessages,
     selectAllMsgs,
 } from "chat/messages/messageSlice";
 import type { MessageErrorMeta } from "chat/messages/types";
@@ -25,6 +27,7 @@ import { readDialogProjectId } from "chat/web/desktopFolderProjects";
 import { projectContextForDialog } from "chat/web/projectContext";
 import { createDialogMessageKeyAndId } from "database/keys";
 import { extractCustomId } from "core/prefix";
+import { isAbortError } from "core/abortError";
 import { waitForAbortableDelay } from "core/abortableDelay";
 import { resolveHandleSendMessageContext } from "./handleSendMessageResolver";
 import {
@@ -307,6 +310,12 @@ export const handleSendMessageAction = async (
                 return rejectWithValue("未找到可重试的用户输入");
             }
         } else {
+            // Explicit user send is also the recovery boundary after reload/stop.
+            // It admits saved pending identities without preparing them again.
+            const pendingHistory = selectAllMsgs(getState() as any, dialogConfig.id ?? extractCustomId(dialogConfig.dbKey ?? ""));
+            if (selectPendingUserMessages(pendingHistory ?? []).length || pendingHistory?.some(message => message.metadata?.userBatchPhase === "admitted")) {
+                await dispatch(admitPendingUserMessages({ dialogKey: dialogConfig.dbKey, resumeUnrequested: true })).unwrap();
+            }
             await dispatch(
                 prepareAndPersistUserMessage({
                     userInput: (args.userInput ?? "") as string,
@@ -480,6 +489,7 @@ export const handleSendMessageAction = async (
                 }
                 break;
             } catch (turnErr: any) {
+                if (isAbortError(turnErr)) return;
                 const parsed = parseSendError(turnErr);
                 if (
                     attempt < maxStartupAttempts &&
@@ -542,6 +552,7 @@ export const handleSendMessageAction = async (
 
         return;
     } catch (error: any) {
+        if (isAbortError(error)) return;
         console.error("handleSendMessage failed:", error);
         const errorMessage = error instanceof Error
             ? error.message

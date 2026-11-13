@@ -9,13 +9,15 @@ export const CONFIRMATION_INPUT_KEYS: Record<string, string> = {
 };
 
 /** Remove internal confirmation flags from untrusted model-supplied tool input. */
-export function stripModelConfirmationFlags<T>(value: T): T {
+export function stripModelConfirmationFlags<T extends object>(value: T): Partial<T>;
+export function stripModelConfirmationFlags<T>(value: T): T;
+export function stripModelConfirmationFlags(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).filter(
       ([key]) => !key.startsWith("__confirmed")
     )
-  ) as T;
+  );
 }
 
 /**
@@ -46,7 +48,9 @@ const TRUSTED_ONLY_MODEL_INPUT_KEYS = new Set(["confirmationToken", "expectedExe
  * tools that bind dialogs from trusted context only. Apply to the model's first-time input;
  * UI-side inputOverride (executeToolRun) is applied later and is not affected.
  */
-export function stripModelToolArgs<T>(canonicalToolName: string, value: T): T {
+export function stripModelToolArgs<T extends object>(canonicalToolName: string, value: T): Partial<T>;
+export function stripModelToolArgs<T>(canonicalToolName: string, value: T): T;
+export function stripModelToolArgs(canonicalToolName: string, value: unknown): unknown {
   const base = stripModelConfirmationFlags(value);
   if (!base || typeof base !== "object" || Array.isArray(base)) return base;
 
@@ -57,7 +61,7 @@ export function stripModelToolArgs<T>(canonicalToolName: string, value: T): T {
     Object.entries(base as Record<string, unknown>).filter(
       ([key]) => !TRUSTED_ONLY_MODEL_INPUT_KEYS.has(key)
     )
-  ) as T;
+  );
 
   if (!MODEL_DIALOG_BINDING_STRIPPED_TOOLS.has(canonicalToolName)) {
     return withoutTrustedOnlyKeys;
@@ -74,5 +78,5 @@ export function stripModelToolArgs<T>(canonicalToolName: string, value: T): T {
     Object.entries(withoutTrustedOnlyKeys as Record<string, unknown>).filter(
       ([key]) => key !== "dialogId" && key !== "autoApproveCredits"
     )
-  ) as T;
+  );
 }

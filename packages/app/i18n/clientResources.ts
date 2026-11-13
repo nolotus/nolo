@@ -1,13 +1,7 @@
 import type { i18n as I18nInstance } from "i18next";
-import { Language } from "app/i18n/types";
+import { Language, SUPPORTED_LANGUAGES } from "app/i18n/types";
 
-const supportedLanguages = new Set<string>([
-  Language.EN,
-  Language.ZH_CN,
-  Language.ZH_HANT,
-  Language.JA,
-  Language.KO,
-]);
+const supportedLanguages = SUPPORTED_LANGUAGES;
 
 const loadedLanguages = new Set<string>();
 
@@ -21,6 +15,8 @@ export const normalizeClientLanguage = (rawLanguage?: string) => {
   if (lower.startsWith("zh")) return Language.ZH_CN;
   if (lower.startsWith("ja")) return Language.JA;
   if (lower.startsWith("ko")) return Language.KO;
+  if (lower.startsWith("de")) return Language.DE;
+  if (lower.startsWith("es")) return Language.ES;
   return Language.EN;
 };
 
@@ -40,6 +36,14 @@ const fetchLanguageResources = async (language: string) => {
   return response.json();
 };
 
+/**
+ * 加载失败时的回退目标。de/es 按已确认契约回退英文（界面语言与缺失翻译一致，
+ * 不整体切中文）；既有语言保留历史 zh-CN 安全网（应用默认语言包恒在，
+ * zh-Hant/ja/ko 失败时不至于白屏）。回退目标自身的加载失败会原样抛出，不伪成功。
+ */
+const fallbackLanguageFor = (language: string): Language =>
+  language === Language.DE || language === Language.ES ? Language.EN : Language.ZH_CN;
+
 export const loadClientLanguage = async (
   i18n: I18nInstance,
   rawLanguage?: string
@@ -48,10 +52,11 @@ export const loadClientLanguage = async (
 
   if (!loadedLanguages.has(language)) {
     const resources = await fetchLanguageResources(language).catch(async (error) => {
-      if (language === Language.ZH_CN) throw error;
-      console.warn("[i18n] Falling back to zh-CN locale", error);
-      language = Language.ZH_CN;
-      return fetchLanguageResources(Language.ZH_CN);
+      const fallback = fallbackLanguageFor(language);
+      if (language === fallback) throw error;
+      console.warn(`[i18n] Falling back to ${fallback} locale`, error);
+      language = fallback;
+      return fetchLanguageResources(fallback);
     });
     for (const [namespace, bundle] of Object.entries(resources)) {
       i18n.addResourceBundle(language, namespace, bundle, true, true);

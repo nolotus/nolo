@@ -12,8 +12,12 @@ import {
   type ResolvedSkillGraph,
 } from "./referenceRuntime";
 import { parseSkillDocProtocol } from "./skillDocProtocol";
+import {
+  buildAgentSkillPreferenceDiagnostic,
+  reportAgentSkillPreferenceDiagnostic,
+} from "./agentSkillPreferenceDiagnostics";
 import type { PromptSkillConfigSource } from "./userPromptSkills";
-import { resolveUserEnabledSkills } from "./userSkills";
+import { isAccountOnDemandWorkflowSkill, resolveUserEnabledSkills } from "./userSkills";
 
 /** Account contributions only; callers merge these before tool admission. */
 export async function resolveUserSkillRuntime(
@@ -31,16 +35,37 @@ export async function resolveUserSkillRuntime(
   // Normalize identity aliases without changing the agent's persisted configuration.
   // Any explicit denial wins, including historical page keys and canonical ids.
   const disabledSlugs = new Set<string>();
-  for (const identifier of Object.keys(resolveAgentSkillConfig(effectiveConfig))) {
-    if (!isAgentSkillDisabled(effectiveConfig, identifier)) continue;
+  const requiredSlugs = new Set<string>();
+  for (const [identifier, mode] of Object.entries(resolveAgentSkillConfig(effectiveConfig))) {
     const entry = resolveBuiltinSkillEntry(identifier);
-    if (entry) disabledSlugs.add(entry.slug);
+    if (!entry) continue;
+    if (mode === "disabled") disabledSlugs.add(entry.slug);
+    if (mode === "required") requiredSlugs.add(entry.slug);
   }
 
+  // 账号级启用 skill 列表（解析口径见 ai/skills/userSkills）。
+  const enabledSkills = resolveUserEnabledSkills(preferences);
+
+  // 【诊断】偏好真正被消费的边界就在这里：打印偏好来源、实际解析出的启用
+  // skill 列表、agent 级档位，以及读路径丢弃掉的非法条目。非法档位在读
+  // 路径是被静默丢弃的（见 ai/tools/agentSkillConfig），没有这条诊断就
+  // 无法解释「账号记录写着 auto-review，实际 run 却注入了 ub-mode」。
+  // 只输出 slug / 档位值 / 计数，不含任何凭据或正文；同一进程内相同快照
+  // 只打印一次。
+  reportAgentSkillPreferenceDiagnostic(
+    buildAgentSkillPreferenceDiagnostic({
+      agentConfig: effectiveConfig,
+      preferences,
+      enabledSkills,
+    }),
+  );
+
   const graph = await resolveSkillGraphFromRoots({
-    roots: resolveUserEnabledSkills(preferences).map((identifier) => ({
+    roots: enabledSkills.map((identifier) => ({
       identifier,
-      mode: "required" as const,
+      mode: isAccountOnDemandWorkflowSkill(identifier) && !requiredSlugs.has(identifier)
+        ? "recommended" as const
+        : "required" as const,
     })),
     loadPage: async (identifier) => {
       const entry = resolveBuiltinSkillEntry(identifier);
@@ -67,7 +92,7 @@ export async function resolveUserSkillRuntime(
   const skillPromptPatches = new Set<string>();
   const seen = new Set<string>();
   for (const visit of graph.visits) {
-    if (seen.has(visit.dbKey)) continue;
+    if (visit.mode !== "required" || seen.has(visit.dbKey)) continue;
     seen.add(visit.dbKey);
     const page = contentByKey.get(visit.dbKey);
     const patch = (visit.meta?.skillConfig?.promptPatch ||

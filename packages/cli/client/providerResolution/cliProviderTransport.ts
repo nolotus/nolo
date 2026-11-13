@@ -30,6 +30,7 @@ export const resolveCliProviderTransport: ProviderResolver = async (ctx) => {
       cwd: workspaceRoot,
     });
     return {
+      transport: "local-cli",
       model: agentConfig.model || provider,
       complete: async (messages, options) => {
         const executeCli =

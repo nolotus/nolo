@@ -57,6 +57,11 @@ export type DesktopUpdaterSummary = {
   isBusy: boolean;
   hasChecked: boolean;
   primaryAction: "download" | "apply" | null;
+  /**
+   * error 态下由 core 裁决的可重试动作。UI 只触发它，不自行判断该重试什么。
+   * 非 error 态为 null；下载/安装仍受候选与安装位置安全门约束。
+   */
+  retryAction: DesktopUpdaterOperation | null;
   showToolbarButton: boolean;
   toolbarTitle: "Download update" | "Install update" | null;
   statusMessage: string | null;
@@ -125,13 +130,15 @@ export function deriveDesktopUpdaterSummary(
   });
 
   let phase: DesktopUpdaterSummaryPhase;
-  if (updateError || latestStatusCode === "error") {
-    phase = "error";
-  } else if (input.activeOperation === "apply") {
+  if (input.activeOperation === "apply") {
     phase = "applying";
   } else if (input.activeOperation === "download") {
     phase = "downloading";
-  } else if (input.activeOperation === "check" || latestStatusCode === "checking") {
+  } else if (input.activeOperation === "check") {
+    phase = "checking";
+  } else if (updateError || latestStatusCode === "error") {
+    phase = "error";
+  } else if (latestStatusCode === "checking") {
     phase = "checking";
   } else if (assessment.phase === "ahead_of_channel") {
     phase = "ahead_of_channel";
@@ -158,24 +165,41 @@ export function deriveDesktopUpdaterSummary(
 
   const primaryAction =
     phase === "ready_to_install" ? "apply" : phase === "update_available" ? "download" : null;
+
+  // 执行端仅在 primaryAction 放行时接受下载/安装；error 先检查重建候选，
+  // 随后仍由 assessment 与安装位置门决定是否开放下载/安装。
+  const retryAction: DesktopUpdaterOperation | null = phase === "error" ? "check" : null;
+
+  // 按钮显隐：可动作态、忙态（下载/安装中）、error 态都露出；
+  // 其余静止态（未检查/检查中/已最新/领先/无效/外部安装）保持隐藏。
+  const showToolbarButton =
+    Boolean(primaryAction) ||
+    phase === "downloading" ||
+    phase === "applying" ||
+    phase === "error";
+
   return {
     phase,
     tone: getSummaryTone(phase),
     isBusy,
     hasChecked: phase !== "not_checked",
     primaryAction,
-    showToolbarButton: Boolean(primaryAction),
+    retryAction,
+    showToolbarButton,
     toolbarTitle:
       primaryAction === "apply"
         ? "Install update"
         : primaryAction === "download"
           ? "Download update"
           : null,
+    // error 态优先展示 runtime 的失败原文，不再回落成 assessment 的「有新版本」文案。
     statusMessage:
-      updateError ??
+      (isBusy ? null : updateError) ??
       (phase === "external_install"
         ? EXTERNAL_INSTALL_MESSAGE
-        : assessment.message ?? input.latestStatus?.message ?? null),
+        : phase === "error"
+          ? input.latestStatus?.message ?? assessment.message ?? null
+          : assessment.message ?? input.latestStatus?.message ?? null),
   };
 }
 

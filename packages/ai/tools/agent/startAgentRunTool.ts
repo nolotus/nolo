@@ -1,3 +1,4 @@
+import { assertDispatchSelectionAdmission } from "../../agent/dispatchSelectionPolicy";
 import { normalizeContinueDialogId } from "./continueDialogId";
 // packages/ai/tools/agent/startAgentRunTool.ts
 //
@@ -27,7 +28,6 @@ import {
     HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE,
 } from "./runtimeKeyDispatchGuard";
 import { toErrorMessage } from "core/errorMessage";
-import { resolveDispatchedSubtaskBudget } from "agent-runtime/subtaskBudget";
 import {
     buildDelegatedTaskContent,
     calculateDelegatedPayloadMetrics,
@@ -40,35 +40,40 @@ import { extractCustomId } from "core/prefix";
 import { checkCredentialFanout } from "./credentialFanoutGuard";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import { selectById } from "database/dbSlice";
+import { deriveCredentialGroup } from "ai/agent/safeAgentSummary";
+import { callToolApi } from "../toolApiClient";
+import { AGENT_THREAD_ACTIVE_STATUSES, AGENT_THREAD_TERMINAL_STATUSES } from "agent-runtime/agentThread";
 
-// ── 并发扇出凭证隔离（web/server 路径的进程内批次注册表）─────────────────
-//
-// CLI 本地路径的守卫以 ~/.nolo/runs 磁盘注册表为活跃集（见
-// cliAgentRunToolExecutors.assertCredentialFanoutAllowed）；web/server 路径的
-// run 在服务端，客户端拿不到实时活跃集，这里用进程内注册表记录本进程派出的
-// run。作用域限定**显式 batchId**：未显式分批的派发每次生成新批次 id，互不
-// 干扰；显式同批 = 调用方在组织并发扇出，必须过凭证隔离检查。
-//
-// 条目按批次超时口径（30 分钟）过期：超过批次生命周期的记录不再占用凭证
-// 预算（顺序复用同一凭证永远合法）。
-
+// Same-tab creation reservations only. Server admission remains authoritative across
+// tabs/processes; this is neither a distributed lock nor workspace isolation.
 type BatchFanoutEntry = {
-  runId: string;
+  runId?: string;
   agentKey: string;
   credentialGroup?: string;
-  startedAtMs: number;
 };
-
-const BATCH_FANOUT_ENTRY_TTL_MS = 30 * 60 * 1000;
 const batchFanoutRegistry = new Map<string, BatchFanoutEntry[]>();
 
-function pruneBatchFanoutRegistry(nowMs: number): void {
-  for (const [batchId, entries] of batchFanoutRegistry) {
-    const alive = entries.filter(
-      (e) => nowMs - e.startedAtMs < BATCH_FANOUT_ENTRY_TTL_MS
-    );
-    if (alive.length === 0) batchFanoutRegistry.delete(batchId);
-    else batchFanoutRegistry.set(batchId, alive);
+async function refreshBatchFanout(entries: BatchFanoutEntry[], thunkApi: any): Promise<void> {
+  const snapshot = entries.filter((entry) => entry.runId);
+  if (!snapshot.length) return;
+  // The server list defaults to terminal-inclusive. Refuse an incomplete view;
+  // absence/unknown status is not evidence that a recorded run has finished.
+  const response = await callToolApi(thunkApi, "/api/agent/runs/control",
+    { action: "list", limit: 10000 }, { withAuth: true });
+  const data = response?.data ?? response;
+  if (!Array.isArray(data?.runs) || data.hasMore === true) {
+    throw new Error("batch admission: live list unavailable or incomplete; retry after recovery");
+  }
+  for (const entry of snapshot) {
+    const run = data.runs.find((run: any) => run.runId === entry.runId);
+    if (!run || (!(AGENT_THREAD_ACTIVE_STATUSES as readonly string[]).includes(run.status) &&
+        !(AGENT_THREAD_TERMINAL_STATUSES as readonly string[]).includes(run.status))) {
+      throw new Error(`batch admission: unknown live status for ${entry.runId}; retry after recovery`);
+    }
+    if ((AGENT_THREAD_TERMINAL_STATUSES as readonly string[]).includes(run.status)) {
+      const index = entries.indexOf(entry);
+      if (index >= 0) entries.splice(index, 1);
+    }
   }
 }
 
@@ -105,6 +110,9 @@ export function buildStartAgentRunFunctionSchema(opts?: {
     parameters: {
         type: "object",
         properties: {
+            dimension: { type: "string", enum: ["general", "design_frontend", "writing"], default: "general", description: "任务领域优先于档位；仅供选人参考，不改变准入。" },
+            difficulty: { type: "string", description: "easy / normal / complex / extreme；默认 normal。声明本次任务的难度档位；已知跨档（所选 Agent 的模型档位与本档位不一致）且未给出 selectionReason 时拒绝启动，同档或档位未知不拦。不自动换人、不取消已启动的 run。", default: "normal" },
+            selectionReason: { type: "string", description: "可选。跨档选择理由（自由文本）：所选 Agent 的模型档位与 difficulty 不一致时必须给出（如领域优势、用户明确指定）。只校验理由是否存在，不代表已核实理由真实性、用户授权或额度/费用权限。", },
             agentKey: {
                 type: "string",
                 description:
@@ -142,9 +150,11 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             // review findings 与子任务产出都必须可回读——把选项藏起来比写一条
             // 「不要用它」的克制指令更可靠（2026-09-14 owner 反馈）。CLI `--ephemeral`
             // 与 server 透传保持不动，探活/烟测仍走 CLI 侧。
+            // Returns previousRun evidence when available and difficultyRecheckRequired.
+            // Evidence never inherits a tier or bypasses selection_reason_required.
             continueDialogId: {
                 type: "string",
-                description: "可选。续跑当前用户已有的 dialog（不存在或不属于当前用户时显式报错，不新建）。适用于同一子任务的定向闭合，核验上一轮 finding 是否修好；禁用于评审类任务的独立判断，续跑会带入之前的结论、破坏独立性。2026-10-19 review 机制约定：full 审查用新 dialog（不传本参数），closure 用续跑。续跑时必须显式传该对话原本的 agentKey（对话的 primaryAgentKey）：省略 agentKey 不会沿用原 agent，而是回落到当前编排者自己，等于换模型并把这份对话的 prompt 缓存全部作废；确需换模型（原 agent 不可用/配额耗尽）才传新 key，并在 task 里说明理由。",
+                description: "可选。续跑当前用户已有的 dialog（不存在或不属于当前用户时显式报错，不新建）。适用于同一子任务的定向闭合，核验上一轮 finding 是否修好；禁用于评审类任务的独立判断，续跑会带入之前的结论、破坏独立性。2026-10-19 review 机制约定：full 审查用新 dialog（不传本参数），closure 用续跑。续跑时必须显式传该对话原本的 agentKey（对话的 primaryAgentKey）：省略 agentKey 不会沿用原 agent，而是回落到当前编排者自己，等于换模型并把这份对话的 prompt 缓存全部作废；确需换模型（原 agent 不可用/配额耗尽）才传新 key，并在 task 里说明理由。只有续跑才带此前对话历史：新建 run（不传本参数）没有任何此前对话历史，同一 agentKey 也不等于同一上下文。",
             },
             batchId: {
                 type: "string",
@@ -156,8 +166,8 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             credentialGroup: {
                 type: "string",
                 description:
-                    "可选。照抄 listAgents 返回的 credentialGroup 字段，用于同批次并发扇出的凭证隔离校验。" +
-                    "缺省/空值视为「未知」（不是「独立」）：与同 batch 内任何其他 run 并发都会被拒绝。",
+                    "可选。兼容 listAgents 返回的 credentialGroup 提示；不作为权威凭据身份。" +
+                    "Web 守卫从应用配置中的凭据 reference 解析，无法解析则为未知（不是独立）；服务端仍执行最终准入校验。",
             },
             allowUnknownCredential: {
                 type: "boolean",
@@ -186,21 +196,6 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     "可选。为 true 时本次 run 会被记录进 runtime todo（~/.nolo/todos.json）。" +
                     "传了 batchId 时默认即记录（每批对应一项 todo）。" +
                     "todo 状态由关联 run 状态 + review 结论推导，用 controlAgentRun(action:\"todo\") 查询。",
-            },
-            maxToolCalls: {
-                type: "number",
-                description:
-                    "可选。这次子任务的工具调用授权额度（硬上限）。不传则用 runtime 默认 200。" +
-                    "到限即停止启动新工具；工具额度到限时可有一次无工具总结，墙钟到限或取消后不再请求模型，返回中间结论并标记 budget-exhausted（不算 provider 错误）。" +
-                    "应按任务意图收紧：改一个常量给 10~20，单文件修复给 40，审查给 60。" +
-                    "注意默认 200 只用来兜无界损失，不是失控识别——跑到上限不代表任务正常。",
-            },
-            maxWallClockMs: {
-                type: "number",
-                description:
-                    "可选。这次子任务的墙钟硬上限（毫秒）。不传则用 runtime 默认 3600000（60 分钟）。" +
-                    "与 maxToolCalls 任一先到即终止。作用是兜住「单次调用里套循环」这类工具计数测不出耗时的场景，" +
-                    "例如一条 shell 里 `for i in 1 2 3` 反复跑同一套测试，调用数只有 1 但耗时很长。",
             },
             ...(supportsWait
                 ? {
@@ -262,7 +257,27 @@ export const startAgentRunFunctionSchema = buildStartAgentRunFunctionSchema();
 // 判定与文案在 agentRunCwd.ts（纯函数，CLI 执行器复用同一份）。本文件只负责
 // 把「服务端派发兑现不了本地目录」这件事说清楚——不静默忽略。
 
+/** Read-only previous-run evidence, not inherited admission or authorization.
+ * Rejudge difficulty; changing models loses cache reuse. selection_reason_required is unchanged.
+ * Absent historical fields stay absent (including legacy run records).
+ */
+export interface PreviousRunEvidence {
+    difficulty?: string;
+    agentKey: string;
+    modelTier?: string | null;
+    cacheHitRatio?: number | null;
+}
+
+export interface ContinuationRunEvidence {
+    previousRun?: PreviousRunEvidence;
+    difficultyRecheckRequired?: boolean;
+}
+
 interface StartAgentRunArgs {
+    dimension?: string;
+    difficulty?: string;
+    /** 跨档选择理由（自由文本）；已知跨档时必填，只校验是否存在。 */
+    selectionReason?: string;
     agentKey?: string;
     task: string;
     input?: any;
@@ -271,7 +286,7 @@ interface StartAgentRunArgs {
     title?: string;
     continueDialogId?: string;
     batchId?: string;
-    /** listAgents 返回的 credentialGroup；缺省视为未知（见 schema 描述）。 */
+    /** 非权威提示；Web 仅信任应用配置中的凭据 reference。 */
     credentialGroup?: string;
     /** 显式确认未知凭证并发风险后强制放行；默认 false。 */
     allowUnknownCredential?: boolean;
@@ -401,36 +416,7 @@ export async function startAgentRunFunc(
     const effectiveAllowCredentialConcurrency =
         args.allowCredentialConcurrency ?? true;
 
-    // 并发扇出凭证隔离：仅对**显式 batchId**（调用方在组织并发扇出）生效；
-    // 未显式分批的派发各自持有新批次 id，互不干扰。credentialGroup 缺省视为
-    // 未知——未知与任何条目并发都拒绝，不静默放行；
-    // 相同已知 credentialGroup 默认允许并发，仅显式 allowCredentialConcurrency: false 收紧拒绝。
-    if (explicitBatchId) {
-        const nowMs = Date.now();
-        pruneBatchFanoutRegistry(nowMs);
-        const active = batchFanoutRegistry.get(explicitBatchId) ?? [];
-        const verdict = checkCredentialFanout({
-            active,
-            candidate: { agentKey: effectiveAgentKey, credentialGroup: args.credentialGroup },
-            allowUnknownCredential: args.allowUnknownCredential === true,
-            allowCredentialConcurrency: effectiveAllowCredentialConcurrency,
-        });
-        if (!verdict.allowed) throw new Error(verdict.message);
-    }
-
     const content = buildDelegatedTaskContent(task, input);
-    // ── 硬预算：派发边界一次解析 ──────────────────────────────────────
-    // 显式参数 > 环境变量 > 默认值（200 次工具调用 / 60 分钟墙钟兜底）。
-    // 父子 run 处在不同执行环境时（父在 CLI、子在服务端），各自读 env 会得到
-    // 不同的授权额度——所以额度在这里定死，随 run 请求传给子 run；子 run 只消费。
-    const dispatchedSubtaskBudget = resolveDispatchedSubtaskBudget({
-        ...(typeof (args as { maxToolCalls?: number }).maxToolCalls === "number"
-            ? { maxToolCalls: (args as { maxToolCalls?: number }).maxToolCalls as number }
-            : {}),
-        ...(typeof (args as { maxWallClockMs?: number }).maxWallClockMs === "number"
-            ? { maxWallClockMs: (args as { maxWallClockMs?: number }).maxWallClockMs as number }
-            : {}),
-    });
     const payloadMetrics = calculateDelegatedPayloadMetrics(task, input, content);
 
     // 从入参或模块级单例取当前对话 key/id，提取 id 作为 parentDialogId 透传给服务端，
@@ -466,7 +452,46 @@ export async function startAgentRunFunc(
         }
     }
 
+    // Resolve identity from trusted application config/reference, never from the
+    // model-supplied credentialGroup label. Missing config remains unknown.
+    const state = thunkApi.getState();
+    const config = state?.db ? selectById(state, effectiveAgentKey) : undefined;
+    const credentialGroup = deriveCredentialGroup(config?.apiKeyRef ?? config?.credentialRef)?.credentialGroup;
+    // 准入闸门：已知跨档且没有 selectionReason → 在任何副作用（预约并发、起子 run、
+    // 消耗 review 上下文）之前拒绝。档位按最终真实模型解析（本地 agent 记录的 model）；
+    // 解析不到即未知档位，不拦（同档/未知都不拦）。
+    let selectionCheck = assertDispatchSelectionAdmission({
+        dimension: args.dimension,
+        difficulty: args.difficulty,
+        model: config?.model,
+        selectionReason: args.selectionReason,
+    });
+    let entries: BatchFanoutEntry[] | undefined;
+    let reservation: BatchFanoutEntry | undefined;
+    if (explicitBatchId) {
+        entries = batchFanoutRegistry.get(explicitBatchId);
+        if (!entries) {
+            entries = [];
+            batchFanoutRegistry.set(explicitBatchId, entries);
+        }
+        // No await between check and insertion: concurrent execute calls see
+        // pending reservations even while creation or live lookup is unresolved.
+        const verdict = checkCredentialFanout({ active: entries, candidate: { agentKey: effectiveAgentKey, credentialGroup },
+            allowUnknownCredential: args.allowUnknownCredential === true,
+            allowCredentialConcurrency: effectiveAllowCredentialConcurrency });
+        // Completed entries need a live refresh before they may reject a new run.
+        if (!verdict.allowed && entries.some((entry) => !entry.runId)) throw new Error(verdict.message);
+        reservation = { agentKey: effectiveAgentKey, credentialGroup };
+        entries.push(reservation);
+    }
     try {
+        if (entries && reservation) {
+            await refreshBatchFanout(entries, thunkApi);
+            const verdict = checkCredentialFanout({ active: entries.filter((entry) => entry !== reservation),
+                candidate: reservation, allowUnknownCredential: args.allowUnknownCredential === true,
+                allowCredentialConcurrency: effectiveAllowCredentialConcurrency });
+            if (!verdict.allowed) throw new Error(verdict.message);
+        }
         const bgResult = runtimeKey === "local"
             ? await (
                   hostAgentRunDispatcher as (
@@ -481,9 +506,8 @@ export async function startAgentRunFunc(
                   waitForCompletion: wait === true,
                   runKind: "subtask",
                   runTitle: title,
+                  selectionCheck,
                   runtimeKey: "local",
-                  // 已解析的硬预算（子 run 只消费，不再自行读 env）。
-                  subtaskBudgetLimits: dispatchedSubtaskBudget.limits,
                   allowHostWrites: true,
                   ...(args.readOnly === true ? { readOnly: true } : {}),
                   ...(parentDialogId ? { parentDialogId } : {}),
@@ -499,13 +523,20 @@ export async function startAgentRunFunc(
                 waitForCompletion: wait === true,
                 runKind: "subtask",
                 runTitle: title,
-                // 已解析的硬预算（子 run 只消费，不再自行读 env）。
-                subtaskBudgetLimits: dispatchedSubtaskBudget.limits,
+                selectionCheck,
                 ...(args.readOnly === true ? { readOnly: true } : {}),
                 ...(parentDialogId ? { parentDialogId } : {}),
                 ...(runtimeKey ? { runtimeKey } : {}),
             })
         ).unwrap();
+
+        selectionCheck = bgResult.selectionCheck ?? selectionCheck;
+        const contextFacts = bgResult.contextMode ? { contextMode: bgResult.contextMode, agentChanged: bgResult.agentChanged === true, ...(bgResult.contextNote ? { contextNote: bgResult.contextNote } : {}) } : {};
+
+        const continuationEvidence: ContinuationRunEvidence = continueDialogId ? {
+            difficultyRecheckRequired: true,
+            ...(bgResult.previousRun ? { previousRun: bgResult.previousRun as PreviousRunEvidence } : {}),
+        } : {};
 
         // wait=true 同步模式：直接返回子任务结果（content），不返回 runId 让
         // 调用方轮询（无 runId 可轮询，也无需 controlAgentRun）。abort 等异常
@@ -520,23 +551,17 @@ export async function startAgentRunFunc(
                 displayData: `✅ startAgentRun 同步完成，dialogId: ${bgResult.dialogId}${resultMode === "summary" ? "（summary）" : ""}`,
                 metadata: {
                     payloadMetrics,
+                    selectionCheck,
+                    ...contextFacts,
+                    ...continuationEvidence,
                 },
             };
         }
 
         const runId = bgResult.dialogId;
-        // 异步派发成功后登记进批次注册表，供同批后续并发派发的凭证隔离判定。
-        if (explicitBatchId) {
-            const entries = batchFanoutRegistry.get(explicitBatchId) ?? [];
-            entries.push({
-                runId,
-                agentKey: effectiveAgentKey,
-                ...(typeof args.credentialGroup === "string" && args.credentialGroup.trim()
-                    ? { credentialGroup: args.credentialGroup.trim() }
-                    : {}),
-                startedAtMs: Date.now(),
-            });
-            batchFanoutRegistry.set(explicitBatchId, entries);
+        if (reservation) {
+            if (typeof runId !== "string" || !runId) throw new Error("batch admission: creation returned no runId");
+            reservation.runId = runId;
         }
         const status = bgResult.status ?? "pending";
         // rawData carries only real identity fields; the display fallback chain
@@ -557,6 +582,8 @@ export async function startAgentRunFunc(
                 runId,
                 status,
                 agentKey,
+                ...contextFacts,
+                ...continuationEvidence,
                 // batchId is always returned — minted above when the caller didn't
                 // supply one — so controlAgentRun(list, batchId=...) works on every
                 // host. On the server path the id lives in the tool return; on the
@@ -566,6 +593,7 @@ export async function startAgentRunFunc(
                 ...(taskPreview ? { taskPreview } : {}),
                 ...(title ? { title } : {}),
                 payloadMetrics,
+                selectionCheck,
             },
             displayData: formatStartRunCard(resolveRunLabel(identity), status, {
                 task: taskPreview,
@@ -578,6 +606,12 @@ export async function startAgentRunFunc(
         };
     } catch (e: any) {
         throw new Error(`startAgentRun 启动 Agent [${agentKey}] 失败: ${toErrorMessage(e)}`);
+    } finally {
+        // Failed create/list/check and synchronous completion never retain a slot.
+        if (entries && reservation && !reservation.runId) {
+            const index = entries.indexOf(reservation);
+            if (index >= 0) entries.splice(index, 1);
+        }
     }
 }
 

@@ -413,6 +413,7 @@ export type {
   AgentRuntimeToolPolicy,
   AgentRuntimeToolCall,
   AgentRuntimeWorkspaceMode,
+  LocalTurnInjection,
   RuntimeProviderFailure,
 } from "./types";
 export type {

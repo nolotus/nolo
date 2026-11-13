@@ -273,10 +273,9 @@ export interface DiscoveredSkill {
  * stable prefix — leaving it in the dynamic suffix inflated the uncached
  * region (~1.5k tokens in this repo) for no benefit.
  *
- * Single-source catalogs render exactly the historical line format
- * (`- name: description`); the source tag / availability tag / conflict notes
- * only appear once more than one kind of source is in play, so adding the
- * catalog contract does not perturb the existing prompt prefix.
+ * Common source/path information is factored into the header. Nonstandard
+ * paths and content references remain explicit; descriptions are never cut
+ * here. The trigger label is abbreviated with a shared, reversible legend.
  *
  * Null when the catalog is empty (the caller resolved and found nothing).
  */
@@ -290,15 +289,25 @@ export const buildSkillDiscoveryCatalogLayer = (
   const multiSource = sources.length > 1;
   const lines = [
     "--- 可用技能（Skills）---",
-    multiSource
-      ? `共发现 ${catalog.entries.length} 个技能（来源：${sources.join(", ")}），模型可按需用 loadSkill 按名加载或 readFile 直接读取（路径规则 .agents/skills/<name>/SKILL.md）：`
-      : `工作区中发现了 ${catalog.entries.length} 个技能（SKILL.md），模型可按需用 loadSkill 按名加载或 readFile 直接读取（路径规则 .agents/skills/<name>/SKILL.md）：`,
+    `${catalog.entries.length} 技能；来源：${sources.join(", ")}。loadSkill 按名加载；本地 readFile：.agents/skills/<name>/SKILL.md（异路径另列）。→=触发词：`,
     ...catalog.entries.map((entry) => {
       const marks = [
         multiSource ? ` [${entry.source}]` : "",
         entry.available ? "" : ` [不可用：${entry.unavailableReason ?? "unknown"}]`,
       ].join("");
-      return `- ${entry.name}${marks}: ${entry.description}`;
+      const location = [
+        entry.relativePath &&
+        entry.relativePath !== `.agents/skills/${entry.name}/SKILL.md`
+          ? `path=${entry.relativePath}`
+          : "",
+        entry.contentRef && entry.contentRef !== entry.relativePath
+          ? `ref=${entry.contentRef}`
+          : "",
+      ].filter(Boolean).join("; ");
+      // Only abbreviate a leading label, never trim/truncate the actual trigger
+      // text or a trailing explicit-activation/safety restriction.
+      const description = entry.description.replace(/^触发词：/, "→");
+      return `- ${entry.name}${marks}: ${description}${location ? ` [${location}]` : ""}`;
     }),
   ];
   if (catalog.droppedEntries.length > 0) {
@@ -330,8 +339,7 @@ export const buildSkillDiscoveryCatalogLayer = (
 /**
  * Skill discovery layer from file-scan results (Node adapters and the desktop
  * runtime). Routes through the host-neutral catalog contract so the same
- * merge/priority/budget rules apply to every host; for a single local source
- * the rendered output is identical to the historical implementation.
+ * merge/priority/budget rules and compact display apply to every host.
  *
  * `_boundFolder` 在 HEAD 就已是不使用的参数（只保留签名兼容）：第 2 位参数
  * 至今没有任何渲染路径消费它，所以包装器这里也不引入新语义（LOW-2 复核结论）。

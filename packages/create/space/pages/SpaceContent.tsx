@@ -56,6 +56,7 @@ import {
   LuPaperclip,
 } from "react-icons/lu";
 import SpaceContentHeader from "./SpaceContentHeader";
+import SpaceWorkspaceFolder from "./SpaceWorkspaceFolder";
 import SpaceContentOverlays from "./SpaceContentOverlays";
 import QuickChat from "app/pages/QuickChat";
 import {
@@ -453,7 +454,8 @@ const SpaceContent: React.FC = () => {
       if (id === "all") {
         // "全部" = all content types (My Content style), leave /files if needed
         if (isFilesRoute && spaceId) {
-          navigate(`/space/${spaceId}`);
+          // 空间首页现在是空间对话首页，内容列表的落点是 /space/:id/contents。
+          navigate(`/space/${spaceId}/contents`);
         }
         applyVisibleTypes(SPACE_ALL_CONTENT_TYPES, SPACE_ALL_CONTENT_TYPES);
         setShowAttachmentTabs(false);
@@ -558,7 +560,7 @@ const SpaceContent: React.FC = () => {
   const buildContentRoute = useCallback(
     (item: Pick<SpaceContentType, "contentKey" | "type">) => {
       if (item.type?.toLowerCase() === ContentType.APP || item.contentKey.startsWith("app-")) {
-        return buildAppDetailPath(normalizeAppRouteId(item.contentKey), spaceId);
+        return buildAppDetailPath(normalizeAppRouteId(item.contentKey));
       }
       return buildRoutableContentPath({
         contentKey: item.contentKey,
@@ -809,6 +811,7 @@ const SpaceContent: React.FC = () => {
   return (
     <FileDropZone onFilesAdded={handleFilesAdded}>
       <div className="space-content">
+      {!isFilesRoute && !isAiRoute && spaceId && <SpaceWorkspaceFolder key={spaceId} spaceId={spaceId} />}
           <SpaceContentHeader
             ocrProgress={ocrProgress}
             isSelectionMode={isSelectionMode}

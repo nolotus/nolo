@@ -917,8 +917,8 @@ export function inspectQuotaWindowExhaustion(
     resetAt = w.resets_at >= 1e12 ? w.resets_at : w.resets_at * 1000;
   }
 
-  const hasResetAt = typeof resetAt === "number" && Number.isFinite(resetAt);
-  if (hasResetAt && resetAt <= now) {
+  const resetAtIsFinite = typeof resetAt === "number" && Number.isFinite(resetAt);
+  if (resetAtIsFinite && resetAt !== undefined && resetAt <= now) {
     return {
       isExhausted: true,
       isActive: false,
@@ -929,7 +929,7 @@ export function inspectQuotaWindowExhaustion(
       utilizationHigh: isHigh,
     };
   }
-  if (hasResetAt && resetAt > now) {
+  if (resetAtIsFinite && resetAt !== undefined && resetAt > now) {
     return {
       isExhausted: true,
       isActive: true,
@@ -1026,9 +1026,7 @@ export function classifyFailureSubclass(
     rawMessage =
       typeof rec.message === "string"
         ? rec.message
-        : typeof (rec as Error).message === "string"
-          ? (rec as Error).message
-          : "";
+        : "";
     body = rec.body ?? (("status" in rec || "message" in rec) ? undefined : input);
     headers = rec.headers as Headers | Record<string, string> | null | undefined;
     quota = rec.quota;

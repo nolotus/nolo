@@ -1,3 +1,5 @@
+import type { RunContextFacts } from "../tools/agent/continueDialogId";
+import type { SelectionCheck } from "./dispatchSelectionPolicy";
 // packages/ai/agent/runAgentBackground.ts
 // 后台运行 agent 并通过 SSE 监听结果
 //
@@ -27,7 +29,8 @@ import { createSSEParser } from "../chat/parseMultilineSSE";
 
 export type DialogStatus = "pending" | "running" | "done" | "failed" | "cancelled" | "reconnecting";
 
-export interface RunAgentBackgroundResult {
+export interface RunAgentBackgroundResult extends Partial<RunContextFacts> {
+    selectionCheck?: SelectionCheck;
     dialogId: string;
     content?: string;
     usage?: unknown;
@@ -35,8 +38,6 @@ export interface RunAgentBackgroundResult {
 }
 
 export interface RunAgentBackgroundArgs {
-    /** 已解析的子任务硬预算（派发边界产出）：随 run 请求传给子 run，子 run 只消费。 */
-    subtaskBudgetLimits?: { maxToolCalls: number; maxWallClockMs: number };
     continueDialogId?: string;
   strictContinueHistory?: boolean;
     agentKey: string;
@@ -81,6 +82,7 @@ export interface RunAgentBackgroundArgs {
     runKind?: "interactive" | "subtask";
     /** Short caller-supplied title for persisted background run presentation. */
     runTitle?: string;
+    selectionCheck?: SelectionCheck;
     /** Read-only run: strip mutation tools (same constraint as CLI `--read-only`). */
     readOnly?: boolean;
     /**
@@ -290,6 +292,10 @@ export const runAgentBackground = createAsyncThunk<
             dialogId: string;
             status: string;
             serverBase?: string;
+            selectionCheck?: SelectionCheck;
+            contextMode?: RunContextFacts["contextMode"];
+            agentChanged?: boolean;
+            contextNote?: string;
         }
         | null = null;
 
@@ -319,10 +325,10 @@ export const runAgentBackground = createAsyncThunk<
                     idempotencyKey,
                     ...(parentDialogId ? { parentDialogId } : {}),
                     ...(runtimeKey ? { runtimeKey } : {}),
-                    ...(args.subtaskBudgetLimits ? { subtaskBudgetLimits: args.subtaskBudgetLimits } : {}),
                     ...(ephemeral ? { ephemeral: true } : {}),
                     ...(runKind ? { runKind } : {}),
                     runtimeContext: {
+                        ...(args.selectionCheck ? { selectionCheck: args.selectionCheck } : {}),
                         ...(args.runTitle ? { runTitle: args.runTitle } : {}),
                         surface: "web",
                         host: "browser",
@@ -359,6 +365,7 @@ export const runAgentBackground = createAsyncThunk<
                 dialogId: string;
                 status: string;
                 serverBase?: string;
+                selectionCheck?: SelectionCheck;
             };
             break;
         }
@@ -401,8 +408,10 @@ export const runAgentBackground = createAsyncThunk<
     } = runResponse;
     onStatusChange?.("pending");
 
+    const contextFacts = runResponse.contextMode ? { contextMode: runResponse.contextMode, agentChanged: runResponse.agentChanged === true, ...(runResponse.contextNote ? { contextNote: runResponse.contextNote } : {}) } : {};
+
     if (args.waitForCompletion === false) {
-        return { dialogId, status: runResponse.status };
+        return { dialogId, status: runResponse.status, ...contextFacts, ...(runResponse.selectionCheck ? { selectionCheck: runResponse.selectionCheck } : {}) };
     }
 
     // ── Step 2: 订阅 SSE 事件流（含断线重连）───────────────────────────────────
@@ -417,10 +426,11 @@ export const runAgentBackground = createAsyncThunk<
 
     for (let attempt = 0; attempt <= maxSseRetries; attempt++) {
         try {
-            return await listenToDialogEvents(
+            const completed = await listenToDialogEvents(
                 dialogId, eventServer, authHeader, effectiveSignal,
                 onStatusChange, onDone, onFailed, cursor,
             );
+            return { ...completed, ...contextFacts, ...(runResponse.selectionCheck ? { selectionCheck: runResponse.selectionCheck } : {}) };
         } catch (e: any) {
             if (isAbortError(e)) throw e;          // 用户主动取消，不重试
             if (!e?.retryable || attempt >= maxSseRetries) throw e; // 非可重试错误或超限

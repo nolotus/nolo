@@ -29,16 +29,17 @@ import {
   selectLastWriteFailure,
   setSettings,
 } from "app/settings/settingSlice";
+import { isAccountOnDemandWorkflowSkill } from "ai/skills/userSkills";
 import type { BuiltinSkillEntry } from "ai/skills/builtinSkillRegistry";
 import {
   filterBuiltinSkills,
   getBuiltinSkillDirectory,
-  getRecommendedPromptSkillEntries,
   getVisibleSkillDirectory,
   getSkillDependencies,
   getContainedSkillEntries,
   isCompositeSkill,
   isRecommendedPromptSkill,
+  isMarketListedSkill,
   isUserSkillToggleable,
   type SkillDependencies,
 } from "./skillExploreDirectory";
@@ -348,6 +349,15 @@ const SkillCard: React.FC<SkillCardProps> = ({
       <p className="skill-card__desc" title={description}>
         {description}
       </p>
+
+      {isAccountOnDemandWorkflowSkill(entry.slug) && (
+        <div className="skill-card__notice-summary">
+          {t(
+            "explorePage.skill.accountOnDemandNotice",
+            "新注册账号默认按需推荐，不预挂全文；关闭仅停止账户推荐，Agent 显式配置或任务引用仍独立生效。",
+          )}
+        </div>
+      )}
 
       {/* 若有适配说明摘要，紧凑呈现 */}
       {meta?.noticeSummary && (
@@ -671,6 +681,16 @@ const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                         "explorePage.skill.guestHint",
                         "需登录账号后持久化保存。未登录状态下的变更不会同步至云端偏好。",
                       )
+                    : isAccountOnDemandWorkflowSkill(entry.slug)
+                    ? isEnabled
+                      ? t(
+                          "explorePage.skill.accountOnDemandEnabledDesc",
+                          "账户已开启按需推荐：相关任务可发现并加载此纯指导 Skill，不预挂全文，不增加工具权限。关闭仅停止账户推荐；Agent 显式配置或任务显式引用独立生效，Agent disabled 仍禁止加载。",
+                        )
+                      : t(
+                          "explorePage.skill.accountOnDemandDisabledDesc",
+                          "账户推荐已关闭，不是全局禁令：Agent 显式 required/recommended 配置或任务显式引用仍可生效，Agent disabled 仍禁止加载。此 Skill 仅提供指导，不增加工具权限。",
+                        )
                     : isEnabled
                     ? t(
                         "explorePage.skill.accountEnabledDescFull",
@@ -1116,22 +1136,32 @@ export const SkillExplore: React.FC = () => {
   // 全部真实内置技能
   const allSkills = useMemo(() => getBuiltinSkillDirectory(), []);
 
-  // 推荐技能（仅用于展示与排序，不决定可启用性）
-  const recommendedSkills = useMemo(
-    () => getRecommendedPromptSkillEntries(allSkills),
-    [allSkills],
-  );
-
   // 可见目录（无搜索时隐藏已被父项收拢的子项，搜索时全部可见）
   const visibleSkills = useMemo(
     () => getVisibleSkillDirectory(allSkills, query),
     [allSkills, query],
   );
 
-  // 全目录区技能条目：无搜索时排除推荐区已展示的条目，避免 ub-mode 卡片在两处重复出现
+  // 可选技能区：展示全部账号级可开关 Skill。
+  // 取自 allSkills 而非 visibleSkills——被组合父项收拢的可开关子项（如 code-style）
+  // 在总览目录里被隐藏，但仍必须出现在可选区，否则用户无从启停。
+  // 排序：推荐项在前，组内保持注册表原顺序（Array.prototype.sort 稳定）。
+  const optionalSkills = useMemo(() => {
+    const toggleable = allSkills.filter(
+      (entry) =>
+        isUserSkillToggleable(entry.slug) && isMarketListedSkill(entry.slug),
+    );
+    return [...toggleable].sort(
+      (a, b) =>
+        (isRecommendedPromptSkill(a.slug) ? 0 : 1) -
+        (isRecommendedPromptSkill(b.slug) ? 0 : 1),
+    );
+  }, [allSkills]);
+
+  // 平台内置区：无搜索时只展示不可开关的条目；搜索时沿用全量检索结果
   const catalogSkills = useMemo(() => {
     if (query.trim()) return visibleSkills;
-    return visibleSkills.filter((s) => !isRecommendedPromptSkill(s.slug));
+    return visibleSkills.filter((entry) => !isUserSkillToggleable(entry.slug));
   }, [visibleSkills, query]);
 
   // 切换 Skill 启用/停用状态
@@ -1343,33 +1373,33 @@ export const SkillExplore: React.FC = () => {
         )}
       </div>
 
-      {/* 推荐区域：仅在无搜索词时作为快捷发现呈现 */}
-      {!query && recommendedSkills.length > 0 && (
+      {/* 可选技能区：仅在无搜索词时呈现，展示全部账号级可开关 Skill（推荐项排在前面） */}
+      {!query && optionalSkills.length > 0 && (
         <div
-          className="skill-explore__recommended-section"
-          data-testid="skill-explore-recommended-section"
+          className="skill-explore__optional-section"
+          data-testid="skill-explore-optional-section"
         >
           <div className="skill-explore__section-header">
             <div className="skill-explore__section-title-wrap">
-              <LuStar
+              <LuLayers
                 className="skill-explore__section-icon"
                 size={16}
                 aria-hidden="true"
               />
               <h3 className="skill-explore__section-title">
-                {t("explorePage.skill.recommendedSectionTitle", "精选推荐")}
+                {t("explorePage.skill.optionalSectionTitle", "可选技能")}
               </h3>
             </div>
             <span className="skill-explore__section-hint">
               {t(
-                "explorePage.skill.recommendedSectionHint",
-                "开箱即用的优质工作原则，账号级启用后自动注入新会话上下文",
+                "explorePage.skill.optionalSectionModesHint",
+                "账号级开关；生效方式见各技能说明，推荐项已排在前面",
               )}
             </span>
           </div>
 
           <div className="skill-explore__grid">
-            {recommendedSkills.map((entry) => {
+            {optionalSkills.map((entry) => {
               const isEnabled = enabledSkills.includes(entry.slug);
               // 重试语义：重新持久化界面当前显示的目标，不得取反；remount 后仍从 Redux 乐观值恢复同一目标
               const targetOnRetry =
@@ -1380,9 +1410,9 @@ export const SkillExplore: React.FC = () => {
                 <SkillCard
                   key={entry.slug}
                   entry={entry}
-                  isRecommended={true}
+                  isRecommended={isRecommendedPromptSkill(entry.slug)}
                   isComposite={isCompositeSkill(entry, allSkills)}
-                  isToggleable={isUserSkillToggleable(entry.slug)}
+                  isToggleable={true}
                   isEnabled={isEnabled}
                   userId={userId}
                   onToggleSkill={handleToggleSkill}
@@ -1409,14 +1439,14 @@ export const SkillExplore: React.FC = () => {
           <h3 className="skill-explore__section-title">
             {query
               ? t("explorePage.skill.searchResultsTitle", "检索结果")
-              : t("explorePage.skill.allSkillsTitle", "技能目录")}
+              : t("explorePage.skill.builtinSectionTitle", "平台内置")}
           </h3>
           <span className="skill-explore__section-hint">
             {query
               ? t("explorePage.skill.searchResultsHint", "包含匹配条件的全部顶层技能与组合子项")
               : t(
-                  "explorePage.skill.allSkillsHint",
-                  "包含工程编码、调查定位、环境隔离等能力，子技能已收拢至组合项内",
+                  "explorePage.skill.builtinSectionHint",
+                  "随平台版本生效，不可开关；组合技能的子项已收拢",
                 )}
           </span>
         </div>

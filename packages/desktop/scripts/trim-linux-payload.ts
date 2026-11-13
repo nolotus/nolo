@@ -1,5 +1,5 @@
 import { mkdir, readdir, rm, symlink } from "node:fs/promises";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { withTempDir } from "./codesign-local";
 
@@ -7,7 +7,7 @@ import { withTempDir } from "./codesign-local";
  * Linux 打包载荷裁剪（postPackage 阶段，在 applyLinuxLauncherPreflight 之前
  * 对 artifacts/ 里的 *.tar.zst 成品归档做 extract → trim → repack）。
  *
- * 针对 canary Linux 载荷的四项实测冗余（installed ~731MB / 下载 ~244MB）：
+ * 针对 canary Linux 载荷的三项实测冗余（installed ~731MB / 下载 ~244MB）：
  *
  * 1. CEF 资源双份：tar 内 bin/cef/ 与 bin/ 顶层各有一套 locales/pak/dat，
  *    CEF 进程只消费 bin/ 顶层（--locales-dir-path=bin/locales），cef/ 内约
@@ -15,10 +15,7 @@ import { withTempDir } from "./codesign-local";
  *    指回顶层：既去重又保住按 cef/ 路径查找资源的兼容性。
  * 2. locales 全量 220 语言 ×（FEMININE/MASCULINE/NEUTER 变体）：产品只支持
  *    en/zh-CN/zh-TW/ja/ko（packages/app/i18n/types.ts），裁剪后省 ~95MB。
- * 3. updater 工具链 bspatch/zig-zstd：Linux 上 generatePatch 默认关闭
- *    （electrobun.config.ts — self-hosted runner 增量打包 OOM），没有运行时
- *    装机引用，~12.5MB。
- * 4. 名画资源：packages/app/pages/usePageArt.ts 无生产引用（Home 页
+ * 3. 名画资源：packages/app/pages/usePageArt.ts 无生产引用（Home 页
  *    source test 断言其不再使用），~6MB。
  *
  * fail closed：任何一步失败都让构建报错中止，宁可不发布也不要发出一个
@@ -54,8 +51,8 @@ export function isSupportedLocalePak(fileName: string): boolean {
   return (DESKTOP_SUPPORTED_LANGUAGES as readonly string[]).includes(lang);
 }
 
-/** Linux 无增量补丁链路（generatePatch off），这两个二进制无装机引用。 */
-export const UNUSED_UPDATER_BINARIES = ["bspatch", "zig-zstd"] as const;
+/** generatePatch 只控制补丁生成；SDK 全量解压仍执行 zig-zstd，补丁应用执行 bspatch。 */
+const REQUIRED_UPDATER_BINARIES = ["bspatch", "zig-zstd"] as const;
 
 /** 已无生产引用的页面名画（usePageArt.ts 是死代码）。hiroshige-rain.jpg 也
  * 是孤儿（usePageArt 未引用、无其他生产引用），一并收录。-900.jpg 响应式
@@ -92,6 +89,15 @@ export const trimLinuxAppRoot = async (
   const binDir = join(appRoot, "bin");
   const cefDir = join(binDir, "cef");
 
+  // 在任何裁剪前验证 SDK 运行时工具；SDK 拒绝软链，execFileSync 需要执行权限。
+  for (const name of REQUIRED_UPDATER_BINARIES) {
+    const path = join(binDir, name);
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (!stat?.isFile() || (stat.mode & 0o111) === 0) {
+      throw new Error(`[trim] required updater executable must be a regular executable file: ${path}`);
+    }
+  }
+
   // 1. cef/ 重复资源 → 相对软链回 bin/ 顶层（cef/x → ../x）
   for (const name of CEF_DUPLICATE_NAMES) {
     const cefPath = join(cefDir, name);
@@ -113,16 +119,7 @@ export const trimLinuxAppRoot = async (
     }
   }
 
-  // 3. updater 工具链
-  for (const name of UNUSED_UPDATER_BINARIES) {
-    const p = join(binDir, name);
-    if (existsSync(p)) {
-      await rm(p, { force: true });
-      report.toolsRemoved.push(`bin/${name}`);
-    }
-  }
-
-  // 4. 名画（含 -900 响应式变体）
+  // 3. 名画（含 -900 响应式变体）
   const publicDir = join(appRoot, "Resources", "app", "public");
   for (const name of [...UNUSED_PUBLIC_ART_FILES, ...UNUSED_PUBLIC_ART_900_VARIANTS]) {
     const p = join(publicDir, name);

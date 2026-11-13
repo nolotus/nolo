@@ -765,7 +765,7 @@
 
         .SettingsPage {
           width: 100%;
-          min-height: calc(100dvh - var(--topbar-height, 0px));
+          min-height: calc(100dvh - var(--shell-titlebar-height, 0px));
           display: flex;
           justify-content: center;
           padding: 24px;

@@ -1,3 +1,4 @@
+import { classifyContextRefusal, type ContextRefusalDiagnostics } from "./contextRefusal";
 /**
  * Agent 本地执行主循环（Local Execution Loop / Agent Harness Engine）。
  *
@@ -15,6 +16,8 @@
  *    - 工具调用与执行结果必须严格成对记录（`sanitizeToolCallPairing`）；
  *    - 每一轮推进通过 `hostAdapter.saveTurn` 沉淀权威日志。
  */
+import { normalizeUsage } from "../ai/token/normalizeUsage";
+import { resolveToolExecutionContract } from "../ai/tools/toolExecutionSemantics";
 import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";
 import { applyToolSurfaceConstraints } from "./runtimeToolSurface";
@@ -27,6 +30,7 @@ import {
   type LocalLoopObservationBoundaryOptions,
 } from "./observationStream";
 import { createLoopTiming } from "./loopTiming";
+import { isToolExecutionFailure } from "./toolExecutionFailure";
 import {
   TOOL_DURATION_METADATA_KEY,
   blocksToOpenAiMessages,
@@ -35,7 +39,11 @@ import {
   filterImagePartsFromMessages,
   formatToolMessageContent,
   prepareMessagesForProviderCall,
+  composeProviderMessages,
   trimHistoryToContextBudget,
+  updateLocalRequestCalibration,
+  estimateLocalRequestInput,
+  evaluateLocalRequestBudget,
 } from "./providerMessageProjection";
 import type { LocalAgentToolEvent } from "./localLoopContract";
 
@@ -53,11 +61,14 @@ import type {
   AgentRuntimeOutputBlock,
   AgentRuntimeResult,
   AgentRuntimeToolCall,
+  LocalTurnInjection,
 } from "./types";
 import {
+  LOCAL_TURN_ABORTED_CODE,
   buildAbortedError,
   emitLoopEvent,
   executeToolCall,
+  runAbortableToolTask,
   throwIfAborted,
 } from "./toolCallTransaction";
 export { LOCAL_TURN_ABORTED_CODE } from "./toolCallTransaction";
@@ -69,22 +80,16 @@ import { buildIdentityBlock } from "./identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
 import { CREDENTIAL_HYGIENE_RULE } from "./credentialHygiene";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
+import { WORKTREE_ISOLATION_PRELUDE } from "./worktreeIsolationPrelude";
 import { VERIFY_BEFORE_CONCLUDING_RULE } from "./verifyBeforeConcluding";
 // 派发落点：并行派发纪律的下一层，紧随其后（localLoop 无 static 作用域，session 占位）。
 import { DISPATCH_BACKEND_POLICY } from "./dispatchBackendPolicy";
 import { DISPATCH_CANDIDATE_POLICY } from "./dispatchCandidatePolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
-// 派发子任务的硬预算（不依赖模型自觉的强制终止）：见 ./subtaskBudget。
-import {
-  buildSubtaskBudgetExhaustedContent,
-  createSubtaskBudgetTracker,
-  DEFAULT_SUBTASK_MAX_TOOL_CALLS,
-  DEFAULT_SUBTASK_MAX_WALL_CLOCK_MS,
-  type SubtaskBudgetExhaustion,
-  type SubtaskBudgetLimits,
-} from "./subtaskBudget";
+import type { SubtaskBudgetLimits } from "./subtaskBudget";
 import { buildConsultationModeBlock } from "./consultationMode";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
+import { evaluateTaskExecutionContract, type TaskExecutionContract } from "./taskExecutionContract";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { hasImageInRuntimeMessages } from "../ai/agent/imagePreprocessing";
@@ -106,7 +111,7 @@ import { resolveAgentContextWindow } from "./devin/devinChannelWindows";
 import { createTurnCompactionController } from "./localAutoCompaction";
 import { isolateInboundContent } from "./inboundCredentialVault";
 import { scrubSecrets } from "./secretScrubber";
-import { buildRequestTelemetry, shortHash, type ProviderCallTelemetry } from "./providerCallTelemetry";
+import { contextPhase, buildRequestTelemetry, shortHash, type ProviderCallTelemetry } from "./providerCallTelemetry";
 import {
   resolveCompressionTriggerRatio,
   truncateToolOutputForContext,
@@ -118,12 +123,33 @@ import {
 // pollution when turns run concurrently).
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Recoverable pre-send failure: canonical history and the pending input remain untouched. */
+export class LocalContextCoverageError extends Error {
+  readonly code = "LOCAL_CONTEXT_COVERAGE_REQUIRED";
+  constructor(
+    readonly droppedCount: number,
+    /**
+     * 失败路径救援压缩已经发生的摘要用量。本轮没有 provider 结果可以承载它，
+     * 由宿主在失败结算时记录（TUI 的 turn billing audit），避免白花一次计费调用。
+     */
+    readonly compactionUsage?: Record<string, unknown>,
+    readonly diagnostics?: ContextRefusalDiagnostics,
+  ) {
+    super("Context protection: history cannot fit without losing messages not represented in the sending context. " +
+      "This pending provider request was not sent; canonical history and pending input are retained. " +
+      "Restore summary access/provider availability and retry this same input, or select a larger context window. " +
+      "An invalid summary must be rebuilt before retrying.");
+    this.name = "LocalContextCoverageError";
+  }
+}
+
 export type LocalAgentTurnInput = {
   adapter: AgentRuntimeHostAdapter;
   agentRef: string;
   /** Platform/user language, not an agent capability. */
   userLanguage?: string | null;
   input: AgentRuntimeMessageContent;
+  userMessages?: Array<AgentRuntimeChatMessage & { cliMessageId?: string }>;
   /**
    * Optional expanded input used only when persisting a runtime reference
    * (for example a TUI paste). Provider messages keep the compact reference;
@@ -163,27 +189,18 @@ export type LocalAgentTurnInput = {
   runtimeContext?: Record<string, any> | null;
   /** Dispatched leaf runs receive parent-facing final-response guidance. */
   runKind?: "interactive" | "subtask";
-  /**
-   * 硬预算上限：**只对 runKind === "subtask" 生效**，交互式会话不受影响。
-   *
-   * 与 roundBudgetWarningThreshold（软提醒，靠模型自觉收尾）是两回事：
-   * 工具到限即停止工具调用，仅可进行一次无工具总结，并把当前成果作为
-   * 「中间结论」交回父方。详见 ./subtaskBudget。
+  /** Host-owned task snapshot only; never inferred from prompt or model text.
+   * Hosts remain responsible for authorization provenance and verified evidence.
+   * Absent => legacy behavior, without an enforced business-completion claim.
    */
+  taskExecutionContract?: TaskExecutionContract;
+  /** @deprecated Accepted for older callers only; never limits execution. */
   subtaskMaxToolCalls?: number;
-  /** 硬预算墙钟上限（毫秒）：只对 runKind === "subtask" 生效。 */
+  /** @deprecated Accepted for older callers only; never limits execution. */
   subtaskMaxWallClockMs?: number;
-  /**
-   * **已解析**的硬预算上限：由**派发边界**（创建子 run 的入口）一次解析后传入
-   * （显式参数 > 环境变量 > 默认值，见 ./subtaskBudget 的
-   * resolveDispatchedSubtaskBudget）。
-   *
-   * localLoop **只消费**、**不再自行读 env**：父子 run 处在不同执行环境时
-   * （父在 CLI、子在服务端），各自读 env 会得到不同的授权解释——额度必须由
-   * 派发方一次定死，子 run 原样执行。
-   */
+  /** @deprecated Ignored. Cumulative tool/time budgets no longer stop runs. */
   subtaskBudgetLimits?: SubtaskBudgetLimits;
-  /** 墙钟时钟 seam（测试注入假时钟；默认 Date.now）。 */
+  /** @deprecated Ignored alongside the removed wall-clock budget. */
   subtaskBudgetNow?: () => number;
   /**
    * 宿主可确认的展示能力：narrow（窄屏终端/TUI）、wide（宽屏桌面）、
@@ -234,13 +251,13 @@ export type LocalAgentTurnInput = {
   /** Summary-provider deadline; runtime default is 60 seconds. */
   compactionTimeoutMs?: number;
   /**
-   * 自动上下文压缩的摘要 fallback（形状 = CLI /compact 的 SummaryLlmCaller）。
+   * 自动上下文压缩的摘要通道选择器（形状 = CLI /compact 的 SummaryLlmCaller）。
    *
    * 常规由 host adapter 会话级注入（CLI：localRuntimeAdapter 的
    * setCliAutoCompactionSummaryFallback ← index.ts 启动 TUI 时用
    * createTuiSummaryLlmCaller 建好）；这里也允许直接透传，供测试与显式调用方
-   * 覆盖。未注入 / desktop 无平台通道 → undefined → 自动压缩保持既有
-   * fail-open 行为（不 fallback）。
+   * 覆盖。未注入 / desktop 无平台通道 → undefined → 自动压缩只用当前 provider，
+   * 保持既有 fail-open 行为。
    */
   compactionSummaryFallback?: (content: string) => Promise<string | null>;
   /**
@@ -278,7 +295,7 @@ export type LocalAgentTurnInput = {
    *
    * 注入消息进入 `messages`，因此天然随 turnMessages 一起 saveTurn 持久化。
    */
-  drainInjections?: () => string[];
+  drainInjections?: () => LocalTurnInjection[] | Promise<LocalTurnInjection[]>;
   /**
    * [test seam] completion-boundary 缝隙：在「no-tool result 已确定、final
    * injection drain 尚未执行」处 await 调用。生产调用方不传——行为零变化；
@@ -337,6 +354,9 @@ export {
   TOOL_DURATION_METADATA_KEY,
   summarizeHistoricalToolContent,
   trimHistoryToContextBudget,
+  updateLocalRequestCalibration,
+  estimateLocalRequestInput,
+  evaluateLocalRequestBudget,
 } from "./providerMessageProjection";
 
 export type LocalAgentActionGate = ActionGate & {
@@ -416,7 +436,7 @@ export const DEFAULT_COMPACTION_TIMEOUT_MS = 60 * 1000;
 export const DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD = 25;
 
 export function buildRoundBudgetWarningPrompt(threshold: number): string {
-  return `[系统提示] 当前单次任务的连续工具调用已达 ${threshold} 轮，请进行进展与成本检查：若已授权目标未完成且持续有进展，应继续推进，不得仅因轮数交接；仅在目标已完成、遇到真实阻塞或触及硬预算时才收尾；若进展停滞，请及时更换策略。`;
+  return `[系统提示] 当前单次任务的连续工具调用已达 ${threshold} 轮，请进行进展与成本检查：若已授权目标未完成且持续有进展，应继续推进，不得仅因轮数交接；仅在目标已完成、遇到真实阻塞或用户明确停止时才收尾；若进展停滞，请及时更换策略。`;
 }
 
 export const ROUND_BUDGET_WARNING_PROMPT = buildRoundBudgetWarningPrompt(
@@ -424,11 +444,12 @@ export const ROUND_BUDGET_WARNING_PROMPT = buildRoundBudgetWarningPrompt(
 );
 
 /**
- * 安全的只读/幂等并发工具集合。
- * 在单轮工具调用中，相邻的只读工具使用 Promise.all 并行执行，
+ * 缺少执行元数据的既有只读工具兼容集合。
+ * 优先采用共享执行契约；子任务启动始终是调用屏障。
  * 遇到写操作或命令执行时切回严格串行；最终结果严格按模型原始 tool_calls 下标保序推入。
  */
-// list_cloud_resources and cloud_probe are server-only tools; excluded from localLoop concurrency set.
+// Legacy fallback only; registered tools use the shared execution contract below.
+// This schedules tools already admitted by the host; it does not expand its tool surface.
 export const CONCURRENT_READONLY_TOOLS: ReadonlySet<string> = new Set([
   "readFile",
   "read_image",
@@ -463,28 +484,33 @@ type ToolCallExecutionBatch = {
   calls: ToolCallWithIndex[];
 };
 
+// Dispatch arguments (readOnly/runtimeKey/credentialGroup) are not evidence of
+// isolation or authoritative admission. startAgentRun remains a call barrier;
+// its asynchronous children can still overlap after the call returns. Lifecycle
+// isolation and credential/cost admission must be enforced by the executor.
 export function partitionToolCallsIntoBatches(
   toolCalls: readonly AgentRuntimeToolCall[],
 ): ToolCallExecutionBatch[] {
   const batches: ToolCallExecutionBatch[] = [];
-  let currentReadBatch: ToolCallWithIndex[] = [];
-
-  for (let i = 0; i < toolCalls.length; i += 1) {
-    const toolCall = toolCalls[i];
-    const isReadOnly = CONCURRENT_READONLY_TOOLS.has(toolCall.function.name);
-    if (isReadOnly) {
-      currentReadBatch.push({ index: i, toolCall });
-    } else {
-      if (currentReadBatch.length > 0) {
-        batches.push({ isConcurrent: true, calls: currentReadBatch });
-        currentReadBatch = [];
-      }
-      batches.push({ isConcurrent: false, calls: [{ index: i, toolCall }] });
+  let currentBatch: ToolCallWithIndex[] = [];
+  const flush = () => {
+    if (currentBatch.length) batches.push({ isConcurrent: true, calls: currentBatch });
+    currentBatch = [];
+  };
+  for (let index = 0; index < toolCalls.length; index += 1) {
+    const toolCall = toolCalls[index];
+    const contract = resolveToolExecutionContract(toolCall.function.name);
+    const isReadOnly = contract.interaction === "none" && contract.concurrency === "safe";
+    const legacyRead = contract.concurrency === "exclusive" && contract.interaction === "unknown"
+      && CONCURRENT_READONLY_TOOLS.has(toolCall.function.name);
+    if (toolCall.function.name === "startAgentRun" || (!isReadOnly && !legacyRead)) {
+      flush();
+      batches.push({ isConcurrent: false, calls: [{ index, toolCall }] });
+      continue;
     }
+    currentBatch.push({ index, toolCall });
   }
-  if (currentReadBatch.length > 0) {
-    batches.push({ isConcurrent: true, calls: currentReadBatch });
-  }
+  flush();
   return batches;
 }
 
@@ -494,17 +520,17 @@ function resolveLlmRequestTimeoutMs(input: LocalAgentTurnInput): number {
 }
 function resolveCompactionTimeoutMs(input: LocalAgentTurnInput): number {
   const raw = input.compactionTimeoutMs;
-  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_COMPACTION_TIMEOUT_MS;
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? Math.min(raw, DEFAULT_COMPACTION_TIMEOUT_MS) : DEFAULT_COMPACTION_TIMEOUT_MS;
 }
 
 /**
- * Host adapter 侧会话级注入的自动压缩摘要 fallback。
+ * Host adapter 侧会话级注入的自动压缩摘要通道选择器。
  *
  * CLI 本地 adapter（localRuntimeAdapter.createCliLocalRuntimeAdapter）会带上
  * `compactionSummaryFallback` 这个非接口成员字段（由 CLI 入口启动时注入已登录的
- * 平台摘要 caller）；desktop / headless 不带 → undefined，即不 fallback。
- * 刻意不在 AgentRuntimeHostAdapter 接口上扩字段：它是跨 host 契约，CLI 专有接线
- * 不该让所有 host 都背上新成员。
+ * 平台摘要 caller）；desktop / headless 不带 → undefined，自动压缩只用当前
+ * provider。刻意不在 AgentRuntimeHostAdapter 接口上扩字段：它是跨 host 契约，
+ * CLI 专有接线不该让所有 host 都背上新成员。
  */
 function readHostCompactionSummaryFallback(
   adapter: AgentRuntimeHostAdapter,
@@ -713,6 +739,11 @@ async function persistFailedLocalTurn(args: {
   input: LocalAgentTurnInput;
 }): Promise<string | undefined> {
   const errorMessage = toErrorMessage(args.error);
+  const businessCompletion = evaluateTaskExecutionContract(args.input.taskExecutionContract, {
+    stopped: args.input.abortSignal?.aborted ||
+      (args.error instanceof Error && (args.error as Error & { code?: string }).code === LOCAL_TURN_ABORTED_CODE),
+    executionFailed: true,
+  });
   try {
     const saved = await args.adapter.saveTurn({
       agentKey: args.agentKey,
@@ -725,6 +756,7 @@ async function persistFailedLocalTurn(args: {
         toolCallCount: args.toolCallCount ?? 0,
         error: true,
         errorMessage,
+        ...(businessCompletion ? { businessCompletion } : {}),
         ...(args.usage ? { usage: args.usage } : {}),
       },
       ...(args.accountingUsage ? { accountingUsage: args.accountingUsage } : {}),
@@ -786,6 +818,19 @@ async function loadAdapterDialogHistory(
   return { messages: await adapter.loadDialogHistory(dialogId) };
 }
 
+function combineRollbackError(primary: unknown, rollbackError: unknown): Error {
+  const primaryError = primary instanceof Error ? primary : new Error(String(primary));
+  const rollbackErr = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+  const combined = new AggregateError(
+    [primaryError, rollbackErr],
+    `${primaryError.message} (additionally, injection rollback failed: ${rollbackErr.message})`,
+  );
+  if (primary && typeof primary === "object") {
+    Object.assign(combined, primary);
+  }
+  return combined;
+}
+
 export async function runLocalAgentTurn(
   input: LocalAgentTurnInput
 ): Promise<LocalAgentTurnResult> {
@@ -808,34 +853,6 @@ export async function runLocalAgentTurn(
   // 计时探针（NOLO_LOOP_TIMING=1）：per-turn 实例，并发 turn 互不污染；
   // 门控关闭时每个调用点仅一次布尔判断（见 ./loopTiming）。
   const loopTiming = createLoopTiming();
-
-  // ── 硬预算（只对子任务生效）───────────────────────────────────────────
-  // 不依赖模型自觉的强制终止：工具到限后不再发起工具调用，仅允许一次无工具总结；
-  // 已完成的工作作为「中间结论」交回父方（不是 provider 报错）。
-  // 只在 runKind === "subtask" 时创建 tracker——交互式会话（用户在 TUI
-  // 里跑长任务）完全不受影响。
-  const subtaskBudgetClock = input.subtaskBudgetNow ?? (() => Date.now());
-  // 硬预算上限**只消费**派发边界解析好的结果：显式入参 > 派发边界传入 > 默认值。
-  // 这里**不读 env**：agent-runtime 不解释 process.env，授权额度由派发方一次定死。
-  const subtaskBudgetLimits: SubtaskBudgetLimits = {
-    maxToolCalls:
-      input.subtaskMaxToolCalls ??
-      input.subtaskBudgetLimits?.maxToolCalls ??
-      DEFAULT_SUBTASK_MAX_TOOL_CALLS,
-    maxWallClockMs:
-      input.subtaskMaxWallClockMs ??
-      input.subtaskBudgetLimits?.maxWallClockMs ??
-      DEFAULT_SUBTASK_MAX_WALL_CLOCK_MS,
-  };
-  const subtaskBudgetTracker =
-    input.runKind === "subtask"
-      ? createSubtaskBudgetTracker({
-          limits: subtaskBudgetLimits,
-          now: subtaskBudgetClock,
-          // 墙钟从 run 开始计（含 provider 初始化与首轮前的准备）。
-          startedAtMs: subtaskBudgetClock(),
-        })
-      : null;
 
   try {
     // 入口先打点，覆盖 loadAgentConfig/loadDialogHistory 段。
@@ -959,7 +976,8 @@ export async function runLocalAgentTurn(
       if (input.strictContinueHistory && (loaded.source === "none" || loaded.source === "partial")) {
         throw new Error(`Strict continuation history unavailable: ${loaded.source}`);
       }
-      history = loaded.messages;
+      const currentIds = new Set(input.userMessages?.map(message => message.cliMessageId));
+      history = loaded.messages.filter(message => !currentIds.has((message as any).cliMessageId));
       dialogHistorySource = loaded.source;
     }
   } catch (error) {
@@ -1092,6 +1110,9 @@ export async function runLocalAgentTurn(
     // 平台风控纪律：无条件系统层块，沿用 session 占位约定。
     { content: PLATFORM_RISK_CONTROL_RULE, cacheScope: "session" as const },
     { content: buildConsultationModeBlock(), cacheScope: "session" as const },
+    // Git 任务隔离：系统层固定前置，四条装配线同序（请教模式之后、身份信息之前；
+    // skill 配置 disabled 也注入）。
+    { content: WORKTREE_ISOLATION_PRELUDE, cacheScope: "session" as const },
     { content: identityBlock, cacheScope: "session" as const },
     ...guidanceScopes,
     // 回复行为准则：local 线（CLI 非交互 / 桌面 / TUI）的唯一注入边界。
@@ -1117,15 +1138,21 @@ export async function runLocalAgentTurn(
   // 摘要是纯文本补全（压缩 system prompt 明确禁止调工具），没有理由带上
   // 整份工具 schema 与 agent prompt——实测工具面 15 个 ≈ 13.3k token、全量
   // 注册表 157 个 ≈ 66k token，叠加在 ~30k token 的摘要 prompt 上会把 gpt-6.x
-  // 的摘要延迟推到 60s 超时边缘（2026-11-03 本机日志）。host 未实现解析覆盖时
-  // （如 desktop）该调用退化为与主循环同一形状，行为与今天一致。
+  // 的摘要延迟推到 60s 超时边缘（2026-11-03 本机日志）。必须由 host 明确保证
+  // textOnly 隔离；不支持的 native CLI / host 在 complete 前失败，沿用压缩失败恢复，
+  // 不得退回带工具的主 provider（空 schema / prompt 本身不是执行隔离）。
   let resolvedSummaryProvider: AgentRuntimeProvider | undefined;
   const resolveSummaryProviderOnce = async (): Promise<AgentRuntimeProvider> => {
     if (!resolvedSummaryProvider) {
-      resolvedSummaryProvider = await input.adapter.resolveProvider(agentConfig, {
+      const provider = await input.adapter.resolveProvider(agentConfig, {
+        textOnly: true,
         toolNames: [],
         prompt: "",
       });
+      if (provider.textOnly !== true) {
+        throw new Error("auto-compaction requires an isolated text-only provider");
+      }
+      resolvedSummaryProvider = provider;
     }
     return resolvedSummaryProvider;
   };
@@ -1137,15 +1164,20 @@ export async function runLocalAgentTurn(
   // 轮开始与轮内 round 之间共用同一条线。
   const compressionTriggerRatio = resolveCompressionTriggerRatio(contextWindow);
 
-  // 自动上下文压缩（turn 级 controller，initial / in-loop 两入口，实现见
+  // 自动上下文压缩（turn 级 controller，统一发送前准入，实现见
   // localAutoCompaction.ts）：先于预算兜底。摘要持久化，压缩点之间前缀稳定
-  // 以保住缓存。失败只记日志（fail-open），绝不阻断本轮对话。
+  // 以保住缓存。失败可继续，但不得以未覆盖的尾部裁剪换取继续发送。
   // 摘要那次 LLM 调用是一次独立的计费调用，用量必须并入本轮 usage，
   // 否则只出现在 provider 账单上、我们自己的 token 记账看不到。
+  let selectedSummary: NonNullable<import("./providerCallTelemetry").ContextProvenance["summary"]> = { outcome: "unknown" };
+  let summaryProjectedPhase = contextPhase("summary-projected", history);
+  const historyLoadedPhase = contextPhase("history-loaded", history, { source: dialogHistorySource ?? "unknown" });
   const compaction = createTurnCompactionController({
     adapter: input.adapter,
     continueDialogId: input.continueDialogId,
     model: agentConfig.model,
+    provider: agentConfig.provider,
+    providerEndpoint: agentConfig.customProviderUrl,
     resolveProvider: resolveSummaryProviderOnce,
     contextWindow,
     compressionTriggerRatio,
@@ -1167,23 +1199,19 @@ export async function runLocalAgentTurn(
       ),
     ],
     getWorkingPrefix: () => transcript.working().slice(0, prefixCount),
-    replaceWorkingView: (next) => transcript.replaceWorkingHistory(next),
+    onSelectedSummary: (summary) => { selectedSummary = summary; },
+    replaceWorkingView: (next) => {
+      transcript.replaceWorkingHistory(next);
+      summaryProjectedPhase = contextPhase("summary-projected", next);
+    },
     contextReferenceResolver:
       input.adapter.host === "cli" ? input.contextReferenceResolver : undefined,
     onUsage: (usage) => usageLedger.addCompaction(usage),
   });
-  const initialCompaction = await compaction.runInitial(history);
-  history = initialCompaction.history;
-  // 首轮摘要用量先入暂存，账本（usageLedger）在 buildMessages 之后创建再入账。
-  const initialCompactionUsage = initialCompaction.usage;
-  loopTiming.mark("maybeAutoCompactLocalHistory", 0);
-
-  // 上下文预算兜底：必须在消息组装之前裁，否则投影与原始消息错位。
-  const trimmedHistory = trimHistoryToContextBudget(history, agentConfig.model, contextWindow);
-  if (trimmedHistory.droppedCount > 0) {
-    history = trimmedHistory.history;
-  }
-  loopTiming.mark("trimHistoryToContextBudget", 0);
+  // Already-cancelled initial turns must not enter failed-turn persistence.
+  throwIfAborted(input);
+  // Request admission runs after transcript/ledger initialization and all injections.
+  let budgetTrimPhase = contextPhase("budget-trim", history, { droppedCount: 0 });
 
   const builtMessages = buildMessages({
     prompt: agentConfig.prompt,
@@ -1249,6 +1277,13 @@ export async function runLocalAgentTurn(
           content: truncateToolOutputForContext(msg.content, contextWindow),
         }
       : msg;
+  if (input.userMessages?.length) {
+    const currentInputStart = builtMessages.prefixCount + history.length;
+    const sanitizedUsers = await Promise.all(input.userMessages.map(async message => ({
+      ...message, content: await sanitizeInbound(message.content),
+    })));
+    messages.splice(currentInputStart, messages.length - currentInputStart, ...sanitizedUsers);
+  }
   const acceptToolImages = createToolImageLedger();
   const transcript = createTurnTranscript({
     initialWorking: messages,
@@ -1265,7 +1300,9 @@ export async function runLocalAgentTurn(
   // 原因：provider 首轮就抛错时 result 从未被赋值，下游读 result.content 会直接崩，
   // TS 也会报 TS2454（used before being assigned）。有了初值，
   // 「还没有 provider 结果」这条路径也有稳定形态。
+  let requestCalibrationRatio = 1; // no-telemetry heuristic, not a tokenizer guarantee
   let result: AgentRuntimeResult = { content: "" } as unknown as AgentRuntimeResult;
+  let stopReason: AgentRuntimeResult["stopReason"];
   // 计费/用量账本：逐次调用证据（callId 优先 provider_call_id）+ 带外摘要
   // 用量 + 结算口径；成功与失败两条路径共用同一出口。
   const usageLedger = createTurnUsageLedger({
@@ -1278,35 +1315,9 @@ export async function runLocalAgentTurn(
         }
       : {}),
   });
-  if (initialCompactionUsage) usageLedger.addCompaction(initialCompactionUsage);
   let loopError: unknown;
+  let consumedInjectedMessages = false;
   let round = 0;
-  // 硬预算终止状态（只对子任务生效；未触发时恒为 null）。
-  let budgetExhaustion: SubtaskBudgetExhaustion | null = null;
-  // 已完成的工具名日志（供预算终止文案说明「当前完成到哪一步」）。
-  const executedToolNameLog: string[] = [];
-  /**
-   * 标记硬预算到限并发出观测事件（只发一次）。
-   *
-   * 事件 kind = "budget-exhausted"，让父方/UI 能识别这是「有界结果
-   * （中间结论）」而不是 provider 报错或崩溃。
-   */
-  const markBudgetExhausted = (): void => {
-    if (!subtaskBudgetTracker || budgetExhaustion) return;
-    const exhaustion = subtaskBudgetTracker.exhaustion();
-    if (!exhaustion) return;
-    budgetExhaustion = exhaustion;
-    emitLoopEvent(observationBoundary, {
-      kind: "budget-exhausted",
-      limit: exhaustion.limit,
-      atMs: exhaustion.atMs,
-      maxToolCalls: exhaustion.limits.maxToolCalls,
-      maxWallClockMs: exhaustion.limits.maxWallClockMs,
-      toolCallsExecuted: exhaustion.toolCallsExecuted,
-      elapsedMs: exhaustion.elapsedMs,
-      round,
-    });
-  };
   // 空轮修复状态（语义与 server loop 对齐）：
   //   repairPending  → 下一轮请求注入 repair system message
   //   repairUsed     → 已用过 repair，二次仍空则 fallback
@@ -1321,20 +1332,32 @@ export async function runLocalAgentTurn(
   // 供 loopError 分支在 saveTurn 时写入，避免中断时丢失已生成的部分回复。
   let partialContent = "";
   const progressGuard = createLocalLoopProgressGuard(input.progressGuardConfig);
-
-  /**
-   * 硬预算准入闸门（子任务）：在**启动**新的模型调用 / 工具调用之前判定。
-   *
-   * 语义：到限 → 标记终止（有界收尾），返回 false 表示「不要再启动新工作」。
-   * 所有启动点（首轮模型调用、每一轮模型调用、并发批次里的每个工具、
-   * compaction 之后的下一轮）都走这**同一套**判断，避免「某些启动点漏检」。
-   */
-  const budgetAdmissionGate = (): boolean => {
-    if (!subtaskBudgetTracker) return true;
-    if (!subtaskBudgetTracker.isExhausted()) return true;
-    markBudgetExhausted();
-    return false;
-  };
+  // Deferred mid-turn injection commits. Registered at the round boundary and
+  // committed only at the request boundary (immediately before the provider
+  // dispatch); rolled back if the turn aborts before that point so the unsent
+  // message stays re-sendable instead of being frozen at `requested`. Declared
+  // outside the try so the outer catch can roll back on any abort path.
+  let pendingInjectionCommits: Array<{
+    commit: () => Promise<void>;
+    rollback: () => Promise<void>;
+    messages: Array<AgentRuntimeChatMessage & { cliMessageId?: string }>;
+  }> = [];
+  // Active injection transactions currently in flight: committed at the
+  // request boundary, but retained until providerInvoked === true so any
+  // failure before the provider is actually called can roll them back.
+  let inFlightTransactions: Array<{
+    commit: () => Promise<void>;
+    rollback: () => Promise<void>;
+    messages: Array<AgentRuntimeChatMessage & { cliMessageId?: string }>;
+  }> = [];
+  // Assigned inside the try (it closes over `transcript`), but bound here so the
+  // outer catch can roll back on every abort path.
+  let rollbackInjectionCommits: (
+    transactions: Array<{
+      rollback: () => Promise<void>;
+      messages: Array<AgentRuntimeChatMessage & { cliMessageId?: string }>;
+    }>,
+  ) => Promise<void> = async () => {};
 
   try {
     // resolveProvider used to sit outside the try: credential / provider-init
@@ -1344,27 +1367,92 @@ export async function runLocalAgentTurn(
     const provider = await resolveProviderOnce();
     // 回合内注入：取走收件箱条目并作为 user 消息追加到当前上下文。
     // 返回是否真的注入了内容（供正常完成路径决定是否继续跑一轮）。
-    const applyPendingInjections = (): boolean => {
+    //
+    // 契约（见 LocalTurnInjection）：兼容旧的同步 `string[]`（内部唤醒文本），
+    // 也接受结构化 user 消息（排队用户批次，带 cliMessageId）与 Promise。
+    // 回调抛错（附件准备/持久化失败）必须向上传播：调用方已把批次留在队列里，
+    // 吞掉错误继续旧任务会让用户消息既不进模型也不再可见。
+    const applyPendingInjections = async (): Promise<boolean> => {
       if (!input.drainInjections) return false;
-      let pending: string[] = [];
-      try {
-        pending = input.drainInjections() ?? [];
-      } catch (error) {
-        console.warn("[localLoop] drainInjections failed:", error);
-        return false;
-      }
+      const pending = (await input.drainInjections()) ?? [];
       let injected = false;
-      for (const text of pending) {
-        if (typeof text !== "string" || !text.trim()) continue;
-        const safeText = scrubSecrets(text).cleaned;
-        transcript.push({ role: "user", content: safeText });
+      for (const entry of pending) {
+        if (typeof entry === "string") {
+          if (!entry.trim()) continue;
+          transcript.push({ role: "user", content: scrubSecrets(entry).cleaned });
+        } else if (entry && typeof entry === "object" && "messages" in entry) {
+          for (const message of entry.messages) {
+            const content = typeof message.content === "string"
+              ? scrubSecrets(message.content).cleaned
+              : Array.isArray(message.content)
+                ? message.content.map(part => part?.type === "text" && typeof part.text === "string"
+                    ? { ...part, text: scrubSecrets(part.text).cleaned }
+                    : part)
+                : message.content;
+            transcript.push({
+              role: "user",
+              content,
+              ...(message.cliMessageId ? { cliMessageId: message.cliMessageId } : {}),
+            });
+          }
+          pendingInjectionCommits.push({ commit: entry.commit, rollback: entry.rollback, messages: entry.messages });
+        } else if (entry && typeof entry === "object" && "content" in entry) {
+          const content = typeof entry.content === "string"
+            ? scrubSecrets(entry.content).cleaned
+            : Array.isArray(entry.content)
+              ? entry.content.map(part => part?.type === "text" && typeof part.text === "string"
+                  ? { ...part, text: scrubSecrets(part.text).cleaned }
+                  : part)
+              : entry.content;
+          transcript.push({
+            role: "user",
+            content,
+            ...(entry.cliMessageId ? { cliMessageId: entry.cliMessageId } : {}),
+          });
+        } else {
+          continue;
+        }
+        consumedInjectedMessages = true;
         injected = true;
       }
       return injected;
     };
+    rollbackInjectionCommits = async (
+      transactions: Array<{
+        rollback: () => Promise<void>;
+        messages: Array<AgentRuntimeChatMessage & { cliMessageId?: string }>;
+      }>,
+    ) => {
+      const errors: unknown[] = [];
+      for (const transaction of transactions.slice().reverse()) {
+        try {
+          await transaction.rollback();
+        } catch (rollbackError) {
+          errors.push(rollbackError);
+        }
+        // Remove exactly this transaction's messages by identity, leaving the
+        // budget warning / internal notices in place (count-based popLast would
+        // corrupt the stack when the budget warning was pushed after them).
+        const ids = new Set(
+          transaction.messages.map(message => message.cliMessageId).filter((id): id is string => Boolean(id)),
+        );
+        if (ids.size > 0) {
+          transcript.retract((msg) => {
+            const id = (msg as any).cliMessageId;
+            return typeof id === "string" && ids.has(id);
+          });
+        }
+      }
+      // Never swallow a rollback failure: an unrolled injection would leave an
+      // orphan `requested` and leak an unsent message into history.
+      if (errors.length > 0) {
+        throw new Error(
+          `injection rollback failed: ${errors.map(error => error instanceof Error ? error.message : String(error)).join("; ")}`,
+        );
+      }
+    };
     const newDialogTelemetryKey = `new:${crypto.randomUUID()}`;
     let roundBudgetWarningInjected = false;
-    let subtaskToolBudgetWarningInjected = false;
     const roundWarningThreshold = input.roundBudgetWarningThreshold ?? DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD;
     while (true) {
       partialContent = "";
@@ -1373,7 +1461,7 @@ export async function runLocalAgentTurn(
       // 注入放在 roundStart 标记之后：roundStart 记的是「上一相位结束到本轮开始」
       // 的边界耗时，注入的开销应计入随后的 prepareMessagesForProviderCall 相位，
       // 不污染边界读数。注入仍在构造请求消息之前，本轮 provider 调用即可见。
-      applyPendingInjections();
+      await applyPendingInjections();
       if (
         roundWarningThreshold > 0 &&
         round >= roundWarningThreshold &&
@@ -1386,15 +1474,38 @@ export async function runLocalAgentTurn(
         transcript.push({ role: "user", content: prompt });
         roundBudgetWarningInjected = true;
       }
-      // 提醒仅追加到易变 transcript 尾部一次，不改稳定 prompt 或既有前缀。
-      if (subtaskBudgetTracker && !subtaskToolBudgetWarningInjected &&
-          subtaskBudgetTracker.toolCallsExecuted > 0 &&
-          subtaskBudgetTracker.remainingToolCalls() > 0 &&
-          subtaskBudgetTracker.remainingToolCalls() <= Math.max(1, Math.ceil(subtaskBudgetTracker.limits.maxToolCalls * 0.1))) {
-        transcript.push({ role: "user", content: `子任务工具预算即将用尽（剩余 ${subtaskBudgetTracker.remainingToolCalls()} 次）。请优先收尾并给出可读的阶段结果。` });
-        subtaskToolBudgetWarningInjected = true;
-      }
       // 空轮修复：把 repair user message 追加到本轮请求末尾重试一次（系统消息放在末尾会被大部分 Provider API 拒收或返回空消息）。
+      const projectRequest = (source: AgentRuntimeChatMessage[]) => {
+        const prepared = prepareMessagesForProviderCall(source);
+        const base = filterImagePartsFromMessages(prepared.messages, supportsImages);
+        return emptyAssistantRepairPending
+          ? [...base, { role: "user" as const, content: EMPTY_ASSISTANT_REPAIR_PROMPT }]
+          : base;
+      };
+      // Resolve transport-owned schema/output facts before either admission check.
+      const admissionProvider = await resolveProviderOnce();
+      throwIfAborted(input);
+      const requestOverBudget = (messages: AgentRuntimeChatMessage[]) =>
+        !evaluateLocalRequestBudget({ messages, contextWindow,
+          descriptor: admissionProvider.requestBudget,
+          calibrationRatio: requestCalibrationRatio }).fitsEstimate;
+      const availableHistoryTokens = () => {
+        const decision = evaluateLocalRequestBudget({ messages: [], contextWindow,
+          descriptor: admissionProvider.requestBudget, calibrationRatio: requestCalibrationRatio });
+        const prefixTokens = estimateLocalRequestInput(projectRequest(transcript.working().slice(0, prefixCount)));
+        return Math.max(0, Math.floor(decision.availableInputTokens / requestCalibrationRatio)
+          - prefixTokens - (admissionProvider.requestBudget?.toolSchemaTokens ?? 0));
+      };
+      // Diagnostic snapshot uses the admission estimator and calibration, before compaction.
+      const historyTokensBeforeCompaction = Math.ceil(estimateLocalRequestInput(
+        projectRequest(transcript.working()).slice(prefixCount)) * requestCalibrationRatio);
+      await compaction.prepareRequest((source) => {
+        const projected = composeProviderMessages({ prefix: transcript.working().slice(0, prefixCount),
+          history: source, contextReferenceResolver:
+            input.adapter.host === "cli" ? input.contextReferenceResolver : undefined });
+        return requestOverBudget(projectRequest(projected.messages));
+      }, round === 0, availableHistoryTokens);
+      throwIfAborted(input);
       const preparedMessages = prepareMessagesForProviderCall(transcript.working());
       if (!supportsImages && hasImageInRuntimeMessages(preparedMessages.messages) && !imageDowngradeEmitted) {
         emitLoopEvent(observationBoundary, {
@@ -1404,13 +1515,22 @@ export async function runLocalAgentTurn(
         });
         imageDowngradeEmitted = true;
       }
-      const baseRequestMessages = filterImagePartsFromMessages(
-        preparedMessages.messages,
-        supportsImages,
-      );
-      const requestMessages: AgentRuntimeChatMessage[] = emptyAssistantRepairPending
-        ? [...baseRequestMessages, { role: "user", content: EMPTY_ASSISTANT_REPAIR_PROMPT }]
-        : baseRequestMessages;
+      const requestMessages = projectRequest(transcript.working());
+      // Enforce the same full projected request bound after every tool round,
+      // not only on history load. A failed compaction must never permit an
+      // oversized request to escape to the provider.
+      if (requestOverBudget(requestMessages)) {
+        const budget = evaluateLocalRequestBudget({ messages: requestMessages, contextWindow,
+          descriptor: admissionProvider.requestBudget, calibrationRatio: requestCalibrationRatio });
+        const largestMessageTokens = requestMessages.reduce((largest, message) => Math.max(largest,
+          Math.ceil(estimateLocalRequestInput([message]) * requestCalibrationRatio)), 0);
+        throw new LocalContextCoverageError(0, undefined, classifyContextRefusal({
+          outcome: compaction.getLastCompactionOutcome(),
+          historyTokens: historyTokensBeforeCompaction, budget: budget.availableInputTokens,
+          droppedCount: 0, largestMessageTokens,
+        }));
+      }
+      budgetTrimPhase = contextPhase("budget-trim", requestMessages, { droppedCount: 0 });
       const contextMetrics: LocalAgentContextMetrics = {
         ...preparedMessages.metrics,
         messageCount: requestMessages.length,
@@ -1445,19 +1565,50 @@ export async function runLocalAgentTurn(
         // 无 dialogId 的新对话用本 turn 唯一键，避免不同新对话共用一个槽误报漂移。
         dialogKey: input.continueDialogId || newDialogTelemetryKey,
         messages: requestMessages,
+        provenance: {
+          schemaVersion: 1, transport: provider.transport ?? "unknown",
+          phases: [historyLoadedPhase, summaryProjectedPhase, budgetTrimPhase, contextPhase("final-request", requestMessages)],
+          summary: selectedSummary,
+        },
         toolsHash: safeToolNamesHash(agentTools),
       });
-      // 硬预算准入闸门（子任务）：**启动模型调用之前**判定一次。
-      // 这一处覆盖首轮、每一轮，以及 compaction 之后回到循环顶部的下一轮——
-      // 循环尾部的检查只能拦「下一轮」，不能代替「启动前」这一层。
-      if (!budgetAdmissionGate()) {
-        // 到限即停止启动新工作：result 保留「已拿到的最后一份 provider 结果」，
-        // 若 provider 从未返回过则是初值（空内容）——由上面的初值保证。
-        break;
-      }
       resetToolImageDelivery(requestMessages.flatMap(toolImages));
+      // Request boundary: commit the round-boundary injections now that the
+      // request is admitted and the provider is about to be invoked. Before this
+      // point they are retained in the queue with no receipt, so an abort here
+      // leaves them re-sendable. If the abort lands during the commit's own
+      // store write, roll the receipt back and re-throw — never leave a
+      // `requested` marker for a request that was never sent.
+      if (pendingInjectionCommits.length > 0) {
+        inFlightTransactions = pendingInjectionCommits.splice(0);
+        try {
+          for (const transaction of inFlightTransactions) await transaction.commit();
+          if (input.abortSignal?.aborted) throw buildAbortedError();
+        } catch (error) {
+          // Keep the transaction list for rollback even when a commit throws:
+          // splice(0) already removed them, so the outer catch would see an
+          // empty list and leak the unsent messages + orphan `requested`.
+          const toRollback = inFlightTransactions;
+          inFlightTransactions = [];
+          try {
+            await rollbackInjectionCommits(toRollback);
+          } catch (rbErr) {
+            throw combineRollbackError(error, rbErr);
+          }
+          throw error;
+        }
+      }
+      let providerInvoked = false;
+      try {
       result = await runCompleteWithTimeout({
-        provider,
+        provider: { complete: (messages, options) => {
+          providerInvoked = true;
+          // Provider invoked: the request is dispatched and in flight with
+          // the model. The transactions belong to the completion boundary now
+          // and must not be rolled back to pending if the provider fails.
+          inFlightTransactions = [];
+          return provider.complete(messages, options);
+        } },
         messages: requestMessages,
         options: {
           timeoutMs: resolveLlmRequestTimeoutMs(input),
@@ -1507,6 +1658,27 @@ export async function runLocalAgentTurn(
         providerName: agentConfig.provider,
         model: provider.model,
       });
+      } catch (error) {
+        if (!providerInvoked && inFlightTransactions.length > 0) {
+          // Provider was never invoked (e.g. pre-dispatch timeout, abort, or
+          // provider-init failure): roll back the in-flight transactions so the
+          // messages return to pending and are retracted from the transcript.
+          const toRollback = inFlightTransactions;
+          inFlightTransactions = [];
+          try {
+            await rollbackInjectionCommits(toRollback);
+          } catch (rbErr) {
+            error = combineRollbackError(error, rbErr);
+          }
+        }
+        if (providerInvoked) usageLedger.recordProviderCall({
+          model: agentConfig.model,
+          telemetry: { ...requestTelemetry, round, endTs: Date.now(),
+            requestState: input.abortSignal?.aborted ? "cancelled" : "failed" },
+        });
+        throw error;
+      }
+
       acceptToolImages.discard(requestMessages.flatMap(toolImages).filter((image) => toolImageDelivery(image) === "impossible"));
       acceptToolImages.commit(
         requestMessages.flatMap(toolImages).filter((image) => toolImageDelivery(image) === "delivered"),
@@ -1518,13 +1690,26 @@ export async function runLocalAgentTurn(
         const pending = toolImages(message).filter((image) => supportsImages && !toolImageDelivery(image));
         return pending.length ? { ...message, [TOOL_IMAGES]: pending } : stripToolImages(message);
       }));
+      const actualInput = normalizeUsage(result.usage as any).input_tokens;
+      const estimatedInput = estimateLocalRequestInput(requestMessages,
+        admissionProvider.requestBudget?.toolSchemaTokens ?? 0);
+      requestCalibrationRatio = updateLocalRequestCalibration(requestCalibrationRatio, actualInput, estimatedInput);
       loopTiming.mark("llmCall", round);
       usageLedger.recordProviderCall({
         usage: result.usage,
         model: result.model,
         provider: result.provider,
-        telemetry: finalizeCallTelemetry(requestTelemetry, result, round, callStartedAt),
+        telemetry: { ...finalizeCallTelemetry(requestTelemetry, result, round, callStartedAt), requestState: "completed" },
       });
+      // Canonical text blocks can be the only final reply (flat content is empty).
+      // Preserve the full generated reply before empty-result handling and settlement.
+      if (!result.content && result.output?.some((block) => block.type === "text") &&
+          !result.output.some((block) => block.type === "toolCall")) {
+        result = {
+          ...result,
+          content: result.output.filter((block) => block.type === "text").map((block) => block.text).join(""),
+        };
+      }
       // 熔断保护：检查模型是否陷入重复复读输出/工具调用死循环
       const assistantGuardVerdict = progressGuard.observeAssistantResponse(result);
       if (assistantGuardVerdict.action === "stall") {
@@ -1543,11 +1728,11 @@ export async function runLocalAgentTurn(
         };
         break;
       }
-      if (result.runtimeProviderFailure) {
+      if (result.error || result.runtimeProviderFailure) {
         result = {
           ...result,
           error: true,
-          errorMessage: result.runtimeProviderFailure.message,
+          errorMessage: result.runtimeProviderFailure?.message ?? result.errorMessage,
         };
         break;
       }
@@ -1633,7 +1818,7 @@ export async function runLocalAgentTurn(
               : {}),
           };
           transcript.push(assistantMessage);
-          if (applyPendingInjections()) {
+          if (await applyPendingInjections()) {
             // 注入续跑也是一个完整回合的结束：补 roundEnd 标记，让 timing 探针
             // 的相位序列保持「每轮都有 roundEnd」的不变式（与工具调用路径一致），
             // 否则续跑轮在 JSONL 里会缺一行、相位配对错位。
@@ -1645,6 +1830,7 @@ export async function runLocalAgentTurn(
           // 的最终追加路径（skipFinalAppend 语义与 thinkContent 附加都在那里处理）。
           transcript.popLast();
         }
+        stopReason = "done";
         break;
       }
       // ── Canonical output blocks：provider（如 Cursor）返回有序 block 序列时，
@@ -1680,9 +1866,14 @@ export async function runLocalAgentTurn(
         if (hasInlineExecutedTools) {
           // Provider 流内已执行所有工具并推完文本（如 Cursor 流），
           // 消费完 outputBlocks 后直接 break 退出循环，单轮即终态，无多轮死循环风险。
-          for (const blockMsg of blocksToOpenAiMessages(outputBlocks)) {
+          for (const blockMsg of blocksToOpenAiMessages(outputBlocks, input.adapter.workspaceRoot)) {
             transcript.pushTool(blockMsg);
           }
+          const inlineResults = outputBlocks.flatMap(block => block.type === "toolCall" && block.result ? [block.result] : []);
+          // Inline execution is terminal, but completion must not erase a tool
+          // failure or an unresolved interaction already reported by the host.
+          stopReason = inlineResults.some(isToolExecutionFailure) ? "error" :
+            inlineResults.some(({ metadata }) => metadata?.uiAskChoice === true && metadata.resolved !== true) ? "pending" : "done";
           skipFinalAppend = true;
           break;
         }
@@ -1709,20 +1900,14 @@ export async function runLocalAgentTurn(
         toolExecMs?: number;
       }>(toolCalls.length);
 
-      const runSingleTool = async ({ index, toolCall }: ToolCallWithIndex) => {
-        throwIfAborted(input);
-        // 硬预算准入闸门（子任务）：到限后不再发起新的工具调用。
-        // 已完成的工具结果照常保留（commitSlot 不受影响）。
-        // 额度在**启动前**立即占用（不是执行完再计数），并发批次里的每个工具
-        // 各自过一次闸门、各自占一格。
-        if (!budgetAdmissionGate()) {
-          skippedToolCalls.push(toolCall);
-          return;
-        }
-        // 计数点：按**实际发起执行**的工具调用计（不是轮次）。
-        subtaskBudgetTracker?.recordToolCallExecuted();
+      const runSingleTool = async (
+        { index, toolCall }: ToolCallWithIndex,
+        executionInput = input,
+        isClosed = () => false,
+      ) => {
+        throwIfAborted(executionInput);
         const { toolResult, toolExecMs } = await executeToolCall({
-          input,
+          input: executionInput,
           toolCall,
           round,
           boundary: observationBoundary,
@@ -1735,12 +1920,14 @@ export async function runLocalAgentTurn(
             ...(result.finish_reason ? { finishReason: result.finish_reason } : {}),
           },
         });
+        // A non-cooperative adapter may finish after its batch was abandoned.
+        // Never mutate the saved transcript/evidence from that detached task.
+        if (isClosed()) return;
         slotResults[index] = {
           toolName: toolCall.function.name,
           toolResult,
           toolExecMs,
         };
-        executedToolNameLog.push(toolCall.function.name);
       };
 
       const commitSlot = (i: number) => {
@@ -1769,6 +1956,7 @@ export async function runLocalAgentTurn(
             toolName,
             content: toolResult.content,
             metadata: observedMetadata,
+            workspaceRoot: input.adapter.workspaceRoot,
           }),
           tool_call_id: toolCall.id,
           toolName,
@@ -1781,16 +1969,41 @@ export async function runLocalAgentTurn(
         });
       };
 
-      // 硬预算到限时被跳过的工具调用（未执行）：补一条显式结果，保持 tool_call/结果成对。
-      const skippedToolCalls: AgentRuntimeToolCall[] = [];
       const batches = partitionToolCallsIntoBatches(toolCalls);
       for (const batch of batches) {
         throwIfAborted(input);
         let batchError: unknown;
         try {
           if (batch.isConcurrent && batch.calls.length > 1) {
-            // 相邻只读工具并发执行（Promise.all），将多读取耗时由串行加总压平为单最慢耗时
-            await Promise.all(batch.calls.map(runSingleTool));
+            const controller = new AbortController();
+            const batchInput = {
+              ...input,
+              abortSignal: input.abortSignal
+                ? AbortSignal.any([input.abortSignal, controller.signal])
+                : controller.signal,
+            };
+            let closed = false;
+            let failed = false;
+            let firstError: unknown;
+            // Race the whole transaction, not just adapter execution: even an
+            // unresponsive pre-tool hook cannot keep batch shutdown waiting.
+            // A failure aborts sibling waiters; handlers observe late rejections.
+            const tasks = batch.calls.map((call) => runAbortableToolTask(
+              batchInput,
+              runSingleTool(call, batchInput, () => closed),
+              call.toolCall.function.name,
+            ).catch((error) => {
+              if (!failed) {
+                failed = true;
+                firstError = error;
+                closed = true;
+                controller.abort();
+              }
+              throw error;
+            }));
+            await Promise.allSettled(tasks);
+            closed = true;
+            if (failed) throw firstError;
           } else {
             for (const call of batch.calls) {
               await runSingleTool(call);
@@ -1811,19 +2024,19 @@ export async function runLocalAgentTurn(
         }
         if (batchError) throw batchError;
       }
-      // 硬预算到限：未执行的工具调用补一条显式结果（保持 tool_call/结果成对，
-      // 便于持久化与重放）；已完成的结果一条都不丢。
-      for (const skipped of skippedToolCalls) {
-        transcript.pushTool({
-          role: "tool",
-          content:
-            "[子任务预算上限已触发] 该工具调用未执行：已达子任务预算上限，本轮不再发起新的工具调用。",
-          tool_call_id: skipped.id,
-          toolName: skipped.function.name,
-        });
+      // Same tool-result handoff contract consumed by the server loop.
+      const handoff = executedToolResults.map(({ content }) => {
+        try { return typeof content === "string" ? JSON.parse(content) : null; }
+        catch { return null; }
+      }).find(value => value?.handoff && typeof value.content === "string" && value.content.trim());
+      if (handoff) {
+        result = { ...result, content: handoff.content };
+        stopReason = "handoff";
+        break;
       }
-      if (budgetExhaustion) {
-        // 硬预算到限：退出常规循环，必要时进入一次无工具收尾。
+      // Existing executor metadata is the authority for unresolved choices.
+      if (executedToolResults.some(({ metadata }) => metadata?.uiAskChoice === true && metadata.resolved !== true)) {
+        stopReason = "pending";
         break;
       }
       // 熔断保护：检查工具调用序列与返回结果是否陷入无进展停滞死循环
@@ -1850,120 +2063,39 @@ export async function runLocalAgentTurn(
       // 轮内压缩主防线：工具结果灌水之后、下一轮 provider 调用之前。
       // contextUsage 在手时按真实遥测判定；缺失时每轮走估算兜底——
       // 「不报 usage 的上游」与「新对话首轮（无 dialogId）」都不再有零保护窗口。
-      await compaction.maybeCompactInLoop();
-      // 硬预算准入闸门（子任务）：到限后不再发起常规模型调用。
-      // 与「启动模型调用之前」那处是同一套判断（compaction 之后的下一轮同样被覆盖）。
-      if (!budgetAdmissionGate()) {
-        break;
-      }
+      // The next request is admitted after all next-round injections.
       loopTiming.mark("roundEnd", round);
       round += 1;
     }
   } catch (error) {
-    loopError = error;
-  }
-
-  // 工具额度耗尽后最多一次独立的、无工具收尾；不在墙钟到限或取消后启动。
-  // textOnly 是宿主显式担保，未实现的宿主 fail closed。时间包括解析 provider。
-  const finalBudgetExhaustion = budgetExhaustion as SubtaskBudgetExhaustion | null;
-  let budgetWrapupFailure: string | undefined;
-  let budgetWrapupSucceeded = false;
-  if (!loopError && finalBudgetExhaustion && subtaskBudgetTracker &&
-      finalBudgetExhaustion.limit === "max-tool-calls" && !input.abortSignal?.aborted &&
-      subtaskBudgetTracker.elapsedMs() < subtaskBudgetTracker.limits.maxWallClockMs) {
-    const remainingMs = subtaskBudgetTracker.limits.maxWallClockMs - subtaskBudgetTracker.elapsedMs();
-    const timeoutMs = Math.min(30_000, remainingMs);
-    const controller = new AbortController();
-    let rejectCancelled: (error: Error) => void = () => {};
-    const cancelled = new Promise<never>((_, reject) => { rejectCancelled = reject; });
-    const onAbort = () => { controller.abort(); rejectCancelled(buildAbortedError()); };
-    input.abortSignal?.addEventListener("abort", onAbort, { once: true });
-    if (input.abortSignal?.aborted) onAbort();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let wrapRequestStarted = false;
-    let wrapUsageCaptured = false;
-    let wrapOutcomeReceived = false;
+    // The turn aborted/failed before the request boundary or before the provider
+    // was invoked: roll back any deferred injection commits so the unsent
+    // messages stay `pending` in the queue (re-sendable) and out of the
+    // persisted history.
+    const toRollback = [...pendingInjectionCommits.splice(0), ...inFlightTransactions];
+    inFlightTransactions = [];
+    let rollbackErr: unknown;
     try {
-      const deadline = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { controller.abort(); reject(new Error("budget wrap-up timed out")); }, timeoutMs);
-      });
-      const work = async () => {
-        const wrapProvider = await input.adapter.resolveProvider(agentConfig, { toolNames: [], prompt: "", textOnly: true });
-        if (!wrapProvider.textOnly) throw new Error(`host ${input.adapter.host} does not support isolated text-only provider`);
-        if (controller.signal.aborted || input.abortSignal?.aborted ||
-            subtaskBudgetTracker.elapsedMs() >= subtaskBudgetTracker.limits.maxWallClockMs) throw new Error("budget wrap-up cancelled or deadline reached");
-        const wrapMessages = [
-          ...filterImagePartsFromMessages(prepareMessagesForProviderCall(transcript.working()).messages, supportsImages),
-          { role: "user" as const, content: "工具预算已耗尽。不要调用工具；仅基于已完成内容，简述结果、证据与未完成事项。" },
-        ];
-        const startedAt = Date.now();
-        const telemetry = buildRequestTelemetry({ dialogKey: input.continueDialogId || `budget:${crypto.randomUUID()}`, messages: wrapMessages, toolsHash: safeToolNamesHash([]) });
-        wrapRequestStarted = true;
-        const summary = await runCompleteWithTimeout({
-          provider: wrapProvider, messages: wrapMessages,
-          options: { max_tokens: 1024, noRetries: true, timeoutMs, signal: controller.signal, ...(input.continueDialogId ? { dialogId: input.continueDialogId } : {}) },
-          timeoutMs, round, input, boundary: observationBoundary, providerName: agentConfig.provider, model: wrapProvider.model,
-        });
-        return { summary, telemetry: finalizeCallTelemetry(telemetry, summary, round, startedAt) };
-      };
-      const { summary, telemetry } = await Promise.race([work(), deadline, cancelled]);
-      wrapOutcomeReceived = true;
-      usageLedger.recordProviderCall({ usage: summary.usage, model: summary.model, provider: summary.provider, telemetry });
-      wrapUsageCaptured = Boolean(summary.usage);
-      if (summary.tool_calls?.length || summary.output?.some((block) => block.type === "toolCall")) throw new Error("text-only provider returned a tool call");
-      if (summary.error || typeof summary.content !== "string" || !summary.content.trim()) throw new Error("text-only provider returned no usable summary");
-      if (input.abortSignal?.aborted) throw buildAbortedError();
-      result = { ...result, content: summary.content.trim().slice(0, 12_000) };
-      budgetWrapupSucceeded = true;
-    } catch (error) {
-      if (input.abortSignal?.aborted) {
-        const aborted = buildAbortedError();
-        if (wrapRequestStarted && !wrapUsageCaptured) {
-          aborted.message += "（无工具总结请求可能已计费，未返回的用量未知）";
-          (aborted as Error & { usageUnavailable?: boolean }).usageUnavailable = true;
-        }
-        loopError = aborted;
-      } else {
-        const detail = error instanceof Error ? error.message : "unknown error";
-        budgetWrapupFailure = scrubSecrets(detail).cleaned.slice(0, 300);
-        if (wrapRequestStarted && !wrapOutcomeReceived) budgetWrapupFailure += "；请求可能已计费，未返回的用量未知";
-      }
-      // 不掩盖已有成果；下方固定 fallback 明示预算终止。
-    } finally {
-      if (timer) clearTimeout(timer);
-      controller.abort();
-      input.abortSignal?.removeEventListener("abort", onAbort);
+      await rollbackInjectionCommits(toRollback);
+    } catch (rbErr) {
+      rollbackErr = rbErr;
     }
+    loopError = rollbackErr ? combineRollbackError(error, rollbackErr) : error;
   }
 
   if (!loopError && input.abortSignal?.aborted) loopError = buildAbortedError();
 
-  // 硬预算终止（只对子任务生效）：把结果改写成明确的「中间结论」——
-  // 含「已达预算上限 / 这是中间结论 / 当前完成到哪一步」，
-  // 并且**不**标记为 provider error 或崩溃。
-  if (budgetExhaustion) {
-    if (!budgetWrapupSucceeded && !budgetWrapupFailure) {
-      budgetWrapupFailure = input.abortSignal?.aborted ? "用户已取消" : "墙钟预算已耗尽，未发起总结请求";
-    }
-    const previousContent = typeof result?.content === "string" ? result.content.trim() : "";
-    result = {
-      ...result,
-      content: [
-        previousContent,
-        ...(budgetWrapupFailure ? [`无工具总结未完成（${budgetWrapupFailure}）；以下是保留的已有内容和预算状态。`] : []),
-        buildSubtaskBudgetExhaustedContent({
-          exhaustion: budgetExhaustion,
-          roundsCompleted: round,
-          recentToolNames: executedToolNameLog,
-        }),
-      ]
-        .filter((part) => part.length > 0)
-        .join("\n\n"),
-    };
-  }
-
   // 即使 provider 循环失败（超时/额度/凭证等），也保存 dialog 以便续聊与复盘
   if (loopError) {
+    // Initial admission historically leaves pending input with the caller rather
+    // than appending an unsent user turn. Later-round failures must still save
+    // completed provider/tool work. Preserve both contracts after moving admission.
+    if (loopError instanceof LocalContextCoverageError && round === 0 && !consumedInjectedMessages) {
+      if (input.continueDialogId) attachDialogIdToError(loopError, input.continueDialogId);
+      attachUsageRecordsToError(loopError, usageLedger.records());
+      await loopTiming.flush();
+      throw loopError;
+    }
     const turnMessages = transcript.persisted(
       sanitizedPersistedInput,
       input.persistedInputReference,
@@ -1996,6 +2128,19 @@ export async function runLocalAgentTurn(
   }
 
   result = result!;
+  // A provider-supplied field is not business evidence. Only the explicit host
+  // snapshot may produce this assessment; no contract preserves legacy output.
+  result = { ...result, stopReason:
+    input.abortSignal?.aborted ? "aborted" :
+    result.error || result.runtimeProviderFailure || result.emptyAssistantFallbackReason ? "error" :
+    stopReason,
+  };
+  delete result.businessCompletion;
+  const businessCompletion = evaluateTaskExecutionContract(input.taskExecutionContract, {
+    stopped: input.abortSignal?.aborted,
+    executionFailed: result.error === true || !!result.runtimeProviderFailure || !!result.emptyAssistantFallbackReason,
+  });
+  if (businessCompletion) result.businessCompletion = businessCompletion;
   if (!skipFinalAppend) {
     // 截断类兜底/告警（length/stream）时提取 reasoning 尾部（带 marker），
     // 以 thinkContent 附加到最终 assistant 消息：web 思考折叠可读的落盘通道，

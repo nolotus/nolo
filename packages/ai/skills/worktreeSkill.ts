@@ -2,15 +2,23 @@
  * Platform-owned `worktree-isolation` built-in skill（仓库改动隔离）。
  *
  * 背景：worktree 隔离规程此前只存在于 bun-nolo 自己的 `.agents/skills/`
- * （nolo-plan 内），终态用户自建的项目里没有那份文件，文件系统发现层
+ * （当时的 nolo-plan skill 内；该 skill 已随 2026-11-06 文档迁移删除，仓库侧
+ * 规程改由 AGENTS.md 承载），终态用户自建的项目里没有那份文件，文件系统发现层
  * （`.agents/skills` 扫描）对他们恒为空——需要隔离的 agent 发现不了规程，
  * 不需要的 agent 也什么都不必带。
  *
  * 本模块把这份规程收编为平台内置 skill：内容全部来自代码，经
- * builtinSkillRegistry 暴露给运行时，不落 DB。默认档位
- * `recommended`（见 ai/tools/agentSkillConfig 的
- * DEFAULT_RECOMMENDED_SKILL_SLUGS）——所有 agent 的「相关技能」一行带它，
- * 任务命中才 loadSkill 拿全文；显式 `disabled` 可屏蔽。
+ * builtinSkillRegistry 暴露给运行时，不落 DB。
+ *
+ * 2026-11 起规程本体上移为系统层固定前置
+ * （`agent-runtime/worktreeIsolationPrelude.ts` 的 `WORKTREE_ISOLATION_PRELUDE`，
+ * 四条装配线无条件注入）：本 skill 的正文直接**引用该常量**，不再维护第二份口径。
+ * 相应地它退出了默认提示与市场目录——
+ * `ai/tools/agentSkillConfig.DEFAULT_RECOMMENDED_SKILL_SLUGS` 已不含本 slug，
+ * `ai/agent/web/skillExploreDirectory.PLATFORM_CORE_SKILL_SLUGS` 把它挡在市场目录
+ * （含搜索）之外，因此 agent 配置里的 `disabled` 也关不掉规程本身（规程由系统层
+ * 注入，不读 skill 配置）。注册表条目、slug / skillId / page-key 解析与 legacy
+ * 引用读取保持原样（loadSkill 仍能取回本 skill 内容）。
  *
  * 边界：纯方法论文档，不授予任何工具（无 toolNames）——默认提示只增加
  * 可发现性，不放宽权限。内容刻意保持 Git 通用语义，不绑定 bun-nolo 的
@@ -23,6 +31,8 @@ import {
   buildSkillDocMarkdown,
   type SkillDocConfig,
 } from "./skillDocProtocol";
+// 规程正文唯一真源：系统层固定前置（本 skill 正文直接引用它，不另写副本）。
+import { WORKTREE_ISOLATION_PRELUDE } from "../../agent-runtime/worktreeIsolationPrelude";
 
 export const WORKTREE_SKILL_SLUGS = ["worktree-isolation"] as const;
 
@@ -76,30 +86,15 @@ export const WORKTREE_SKILL_SEEDS: readonly WorktreeSkillSeedDef[] = [
     description:
       "改动 Git 仓库文件前的隔离规程：用 git worktree 建独立工作区，不在主检出切分支或就地改。触发词：worktree、.worktrees/、git worktree add、隔离、改动仓库文件、并行多任务、patch 隔离、清理工作区。不适用：只读查询、非 Git 目录、用户明确要求就地改。",
     body: [
-      "你是「仓库改动隔离」规程的使用者：任务要修改某个 Git 仓库里的已跟踪文件时，先建独立 worktree，再动手。",
+      "你是「仓库改动隔离」规程的使用者。本规程正文的唯一真源是系统层常量",
+      "`WORKTREE_ISOLATION_PRELUDE`（`packages/agent-runtime/worktreeIsolationPrelude.ts`），",
+      "下面直接引用它，不另写副本——两边口径必须一致时改那一处。",
       "",
-      "## 什么时候用",
-      "- 任何会修改仓库已跟踪文件的任务：改代码、跑会写文件的脚本、大规模重构。",
-      "- 同一仓库要并行推进多条任务线时——每条线一个 worktree，互不污染。",
-      "- 主检出有无关脏改动、又不能碰它时。",
+      WORKTREE_ISOLATION_PRELUDE,
       "",
-      "## 什么时候不用",
-      "- 只读操作：看状态、查日志、读 diff——不需要隔离。",
-      "- 目录不是 Git 仓库（用户自己的普通项目目录）——没有可隔离的对象。",
-      "- 用户明确要求就地改——照做，但在回复里说明跳过了隔离及原因。",
-      "",
-      "## 标准流程",
-      "1. `git worktree add <path> -b <branch> HEAD`（仓库无约定时，建议 `<path>` 用 `.worktrees/<name>`，名字拿不准就用任务主题）。",
-      "2. 所有改动只在 worktree 内进行；验证也在 worktree 内跑。",
-      "3. 传路径给子代理/工具时用 worktree 的绝对路径。",
-      "4. 完成后 `git worktree remove <path>`，并用 `git worktree list` 核对无残留。",
-      "",
-      "## 主检出有脏改动时",
-      "仍然从 HEAD 建 worktree，把本次的 diff/patch 应用过去；不碰主检出（main checkout）任何无关改动。",
-      "",
-      "## 边界",
-      "- worktree 是隔离手段，不是提交授权：合并、推送、发布仍按用户授权边界。",
-      "- 一个任务一个 worktree，不在同一个 worktree 里堆多条任务线。",
+      "## 本 skill 的补充（不与上面的正文冲突）",
+      "- 主检出有无关脏改动时：仍从 HEAD 建 worktree，把本次的 diff/patch 应用过去，不碰主检出的无关改动。",
+      "- 传路径给子代理/工具时用 worktree 的绝对路径。",
     ].join("\n"),
   },
 ];

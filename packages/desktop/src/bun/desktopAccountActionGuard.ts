@@ -6,7 +6,7 @@
 // never assumes the sender validated anything. A url-less open keeps the
 // pre-existing "open the default browser window" feature (no navigation
 // target is involved); any URL that is not an exact allowlist entry
-// (https://nolo.chat/login, https://nolo.chat/life) is rejected here, at the
+// (account pages and strict desktop authorization URLs) is rejected here, at the
 // last boundary before openDesktopBrowser.
 import { isAllowlistedAccountUrl } from "../../../../packages/identity/accountUrlPolicy";
 
@@ -40,4 +40,23 @@ export function reviewDesktopBrowserAction(
     };
   }
   return { kind: "open-url", url };
+}
+
+
+export type DesktopBrowserOpenPlan =
+  | Exclude<DesktopBrowserActionReview, { kind: "open-url" } | { kind: "open-default-browser" }>
+  | { kind: "system-browser"; url: string }
+  | { kind: "internal-browser"; url?: string; externalFailure?: "unavailable" | "failed" };
+
+/** Pure opening decision; always independently validate the untrusted request. */
+export function resolveDesktopBrowserOpenPlan(
+  detail: unknown,
+  externalState: "available" | "unavailable" | "failed",
+): DesktopBrowserOpenPlan {
+  const review = reviewDesktopBrowserAction(detail);
+  if (review.kind === "open-default-browser") return { kind: "internal-browser" };
+  if (review.kind !== "open-url") return review;
+  return externalState === "available"
+    ? { kind: "system-browser", url: review.url }
+    : { kind: "internal-browser", url: review.url, externalFailure: externalState };
 }

@@ -29,7 +29,21 @@ export const signToken = (payload: any, secretKey: string) => {
   return `${encodedPayload}.${signature}`;
 };
 
-export const verifyToken = (token: string, publicKey: string) => {
+export interface VerifyTokenOptions {
+  /**
+   * Expected token purpose.
+   * Defaults to "session" when omitted, which accepts standard session tokens
+   * (tokens without purpose, or with purpose === "session"), and rejects non-session purpose tokens.
+   * When set to a dedicated purpose (e.g. "revoke_sessions"), requires payload.purpose === expectedPurpose.
+   */
+  expectedPurpose?: string;
+}
+
+export const verifyToken = (
+  token: string,
+  publicKey: string,
+  options?: VerifyTokenOptions
+) => {
   const [encodedPayload, signature] = token.split(".");
 
   if (!verifyDetachedSignature(encodedPayload, signature, publicKey)) {
@@ -42,6 +56,17 @@ export const verifyToken = (token: string, publicKey: string) => {
   if (payload.exp && typeof payload.exp === "number") {
     if (Math.floor(Date.now() / 1000) > payload.exp) {
       throw new Error("Token has expired");
+    }
+  }
+
+  const expectedPurpose = options?.expectedPurpose ?? "session";
+  if (expectedPurpose === "session") {
+    if (payload.purpose && payload.purpose !== "session") {
+      throw new Error("Invalid token purpose");
+    }
+  } else {
+    if (payload.purpose !== expectedPurpose) {
+      throw new Error("Invalid token purpose");
     }
   }
 

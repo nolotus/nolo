@@ -10,8 +10,8 @@
 // 设计约束（三条都不是可选项）：
 //  1. **失败一律静默**：没有 ssh、超时、DNS 错、JSON 坏，全部返回 undefined，
 //     不抛、不写 stderr、不改变退出码。它是可观测性附庸，不能自己变成故障源。
-//  2. **默认地址来自可覆盖常量**：DEFAULT_SSH_HOST 是 CI 宿主
-//     `nolotus@136.67.147.177`（nolo-ci 常驻的 GCP 实例，与 alpha 测试服已完全隔离）。
+//  2. **默认地址来自可覆盖常量**：DEFAULT_SSH_HOST 是现役 CI 宿主（真源见
+//     .agents/skills/deployment/references/server-ops.md「CI 控制面宿主」）。
 //     可用 NOLO_CI_SSH_HOST（整条 ssh 目标）/ NOLO_CI_RAW_HOST + NOLO_CI_SSH_USER 覆盖；
 //     旧的 NOLO_ALPHA_SSH_CONFIG_HOST / NOLO_ALPHA_RAW_HOST 仍被识别，保证老脚本不突然失效。
 //     需要绑定网卡（如透明代理 Fake-IP 环境）时用 NOLO_CI_SSH_HOST 指定 ~/.ssh/config 别名。
@@ -31,10 +31,9 @@ export type CiJob = {
   failedPhase?: string;
 };
 
-// CI 宿主：nolo-ci 常驻的 GCP 实例（与 alpha 测试服已完全隔离，只保留 CI→alpha 的
-// SSH 部署一跳）。旧机 45.77.5.10 与 alpha 上的 127.0.0.1:3900 都已不再是 CI 入口。
+// 默认 CI SSH 目标；现役宿主真源见 .agents/skills/deployment/references/server-ops.md「CI 控制面宿主」。
 // 仍可被 NOLO_CI_SSH_HOST / NOLO_CI_RAW_HOST / NOLO_CI_SSH_USER 覆盖。
-export const DEFAULT_SSH_HOST = "nolotus@136.67.147.177";
+export const DEFAULT_SSH_HOST = "root@62.83.99.45";
 export const DEFAULT_CI_PORT = "3900";
 export type CiStatusEnv = Record<string, string | undefined>;
 
@@ -51,13 +50,38 @@ function resolveCiPort(env: CiStatusEnv = process.env): string {
   return /^\d{1,5}$/.test(raw) && Number(raw) > 0 && Number(raw) <= 65535 ? raw : DEFAULT_CI_PORT;
 }
 
+function compactStatusBeforeTransport(command: string): string {
+  // Legacy controllers return full webhook snapshots. Strip only transport data;
+  // keep candidate identity, failure details, and the stored evidence unchanged.
+  const projection = 'import json,sys; d=json.load(sys.stdin); jobs=d.get("jobs",[d]); [j.get("source",{}).pop("push",None) for j in jobs]; print(json.dumps(d,separators=(",",":")))';
+  return `${command} | python3 -c '${projection}'`;
+}
+
 export function buildCiStatusCommand(limit: number, env: CiStatusEnv = process.env): string {
   const safeLimit = Math.max(1, Math.min(20, Math.trunc(limit) || 5));
-  return `curl -s -m 3 "http://127.0.0.1:${resolveCiPort(env)}/status?limit=${safeLimit}"`;
+  return compactStatusBeforeTransport(`curl -s -m 3 "http://127.0.0.1:${resolveCiPort(env)}/status?limit=${safeLimit}"`);
 }
 
 export function fetchCiStatusPayload(limit = 5, timeoutMs = 4000, env: CiStatusEnv = process.env, signal?: AbortSignal, execFileImpl: typeof execFile = execFile): Promise<unknown | undefined> {
   return fetchCiPayload(buildCiStatusCommand(limit, env), (stdout) => {
+    try { return JSON.parse(stdout) as unknown; } catch { return undefined; }
+  }, timeoutMs, resolveCiSshTarget(env), signal, execFileImpl);
+}
+
+/**
+ * 单 job 查询命令：/status?jobId=<id> 返回**裸 job 对象**（不是 { jobs: [...] } 列表形态）。
+ * 用途：目标 job 早就入队时，按列表（最近 N 条）已经查不到它，只能按 id 单查。
+ * job id 只允许 [A-Za-z0-9_-]，其余字符会被剔除，避免把查询串拼坏。
+ */
+export function buildCiStatusJobCommand(jobId: string, env: CiStatusEnv = process.env): string {
+  const safeJobId = jobId.trim().replace(/[^A-Za-z0-9_-]/g, "");
+  if (!safeJobId) throw new Error("Invalid CI job id");
+  return compactStatusBeforeTransport(`curl -s -m 3 "http://127.0.0.1:${resolveCiPort(env)}/status?jobId=${safeJobId}"`);
+}
+
+/** 单 job 取数；任何失败都返回 undefined（与列表取数同一「失败一律静默」约定）。 */
+export function fetchCiStatusJobPayload(jobId: string, timeoutMs = 4000, env: CiStatusEnv = process.env, signal?: AbortSignal, execFileImpl: typeof execFile = execFile): Promise<unknown | undefined> {
+  return fetchCiPayload(buildCiStatusJobCommand(jobId, env), (stdout) => {
     try { return JSON.parse(stdout) as unknown; } catch { return undefined; }
   }, timeoutMs, resolveCiSshTarget(env), signal, execFileImpl);
 }
@@ -77,7 +101,7 @@ function asString(value: unknown): string | undefined {
 }
 
 /** 从 phaseTimings 里取第一个非零相位的名字——失败时最有用的一条信息。 */
-function extractFailedPhase(raw: unknown): string | undefined {
+export function extractFailedPhase(raw: unknown): string | undefined {
   if (!Array.isArray(raw)) return undefined;
   for (const entry of raw) {
     const timing = asRecord(entry);

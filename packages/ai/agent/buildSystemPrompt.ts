@@ -19,6 +19,8 @@ import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDe
 // 派发落点是「并行是默认」的下一层（派到哪个后端执行），紧随其后注入。
 import { DISPATCH_BACKEND_POLICY } from "agent-runtime/dispatchBackendPolicy";
 import { VERIFY_BEFORE_CONCLUDING_RULE } from "agent-runtime/verifyBeforeConcluding";
+// Git 任务隔离：系统层固定前置，不受 skill 配置（含 disabled）与可发现性影响。
+import { WORKTREE_ISOLATION_PRELUDE } from "agent-runtime/worktreeIsolationPrelude";
 import { DISPATCH_CANDIDATE_POLICY } from "agent-runtime/dispatchCandidatePolicy";
 import { PLATFORM_RISK_CONTROL_RULE } from "agent-runtime/platformRiskControl";
 import { buildConsultationModeBlock } from "agent-runtime/consultationMode";
@@ -340,6 +342,14 @@ export const buildSystemPromptContext = (options: {
       content: PLATFORM_RISK_CONTROL_RULE,
     },
     { id: "consultation-mode", owner: "platform", cacheScope: "static", content: buildConsultationModeBlock() },
+    // Git 任务隔离：仓库改动前置，系统层固定块（原 worktree-isolation skill 上移，
+    // 不受 skill 配置 disabled 影响）。排在既有平台块之后，不扰动其顺序契约。
+    {
+      id: "worktree-isolation-prelude",
+      owner: "platform",
+      cacheScope: "static",
+      content: WORKTREE_ISOLATION_PRELUDE,
+    },
     { id: "identity", owner: "platform", cacheScope: "session", content: identitySection },
     { id: "user-response-language", owner: "platform", cacheScope: "session", content: buildUserResponseLanguageContext({ language: safeLanguage }) },
     { id: "startup-protocol", owner: "platform", cacheScope: "static", content: startupProtocol },

@@ -20,6 +20,7 @@ import { getDb } from "database/client/db";
 import { detectSite, loadRoutes, type SiteId } from "app/web/siteRoutes";
 import i18n from "app/i18n/client";
 import { loadClientLanguage } from "app/i18n/clientResources";
+import { readStoredLanguage } from "app/i18n/languagePreference";
 import { isProduction } from "app/utils/env";
 import { resolveClientHydrateServer } from "app/settings/serverBootstrap";
 import { isCloudEdition } from "identity";
@@ -210,7 +211,14 @@ const preloadedState = {
   },
 };
 const hostname = window.location.hostname;
-const requestedLng = window.__SSR_LANG__ || window.navigator.language;
+// SSR injects the negotiated language (query > persisted cookie >
+// accept-language). The localStorage mirror is only a fallback for contexts
+// where the SSR language is absent; reading it ahead of hydration when SSR did
+// inject one would reintroduce a hydration mismatch.
+const requestedLng =
+  window.__SSR_LANG__ ||
+  readStoredLanguage(window.localStorage) ||
+  window.navigator.language;
 const desktopSearchParams = new URLSearchParams(window.location.search);
 // Desktop mode must survive location.reload(): the ?noloDesktop=1 query param
 // is stripped from the URL after first boot (below), so a reload would lose
@@ -469,8 +477,9 @@ const domNode = document.getElementById("root") as HTMLElement;
 
   // locale 与路由并行加载：两条线同时开始，且必须二者全部完成后才 hydrate
   //（Promise.all 是完成屏障）。lng 取 loadClientLanguage 的最终返回值——请求语言
-  // 加载失败时它已回退到 zh-CN 并返回该语言；任一 promise reject 都会让整条
-  // 启动链 reject → 不 hydrate（错误传播，不用半完成状态渲染，避免 mismatch）。
+  // 包不可用时它会回退（de/es → EN，既有语言 → zh-CN）并返回回退后的语言；任一
+  // promise reject 都会让整条启动链 reject → 不 hydrate（错误传播，不用半完成状态
+  // 渲染）。
   const [lng, initialRoutes] = await Promise.all([
     loadClientLanguage(i18n, requestedLng),
     loadRoutes(siteId, undefined),
@@ -486,7 +495,14 @@ const domNode = document.getElementById("root") as HTMLElement;
     </React.StrictMode>
   );
 
-  if (domNode.hasChildNodes()) {
+  // SSR 用 window.__SSR_LANG__ 渲染 HTML；若客户端因语言包不可用回退到别的语言，
+  // 最终语言与 SSR 语言分叉，hydrateRoot 会整树 mismatch。此时改为客户端渲染
+  //（createRoot），用最终语言重画，避免 hydration 报错与「URL 语言 ≠ 界面语言」。
+  // 不 reload、不重试：回退语言是已确认契约，直接渲染即可。
+  const ssrLang = window.__SSR_LANG__;
+  const languageDiverged = typeof ssrLang === "string" && lng !== ssrLang;
+
+  if (domNode.hasChildNodes() && !languageDiverged) {
     hydrateRoot(domNode, <AppRoot />);
   } else {
     createRoot(domNode).render(<AppRoot />);

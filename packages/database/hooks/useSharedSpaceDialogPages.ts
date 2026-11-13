@@ -22,6 +22,12 @@ export interface SharedSpaceDialogPagesState {
   /** 尚未查全且正受 origin 冷却门控的来源，不代表空页或撤权。 */
   deferredSourceCount: number;
   actionableSourceCount: number;
+  /**
+   * 游标快照：任一 (space, origin) 游标推进（含耗尽为 null）时变化。
+   * 与 owned 同源语义：展示层据此判断自动续页是否真的往前走了，
+   * 不受重复页 / 去重 / 类型过滤造成的行数不动影响。
+   */
+  cursorKey: string;
   loadingSpaces: string[];
   hasMoreSpaces: string[];
   /**
@@ -384,6 +390,9 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
     cursors.current.get(`${space}\n${origin}`) !== null && (cooldowns.current.get(origin) ?? 0) > Date.now()).length, 0) : 0;
   const actionableSourceCount = valid ? sortedSpaces.reduce((sum, space) => sum + sortedOrigins.filter((origin) =>
     cursors.current.get(`${space}\n${origin}`) !== null && !busy.current.has(origin) && (cooldowns.current.get(origin) ?? 0) <= Date.now()).length, 0) : 0;
+  const cursorKey = valid
+    ? JSON.stringify([...cursors.current.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    : "";
   return {
     identityKey,
     recordsBySpace,
@@ -393,6 +402,7 @@ export function useSharedSpaceDialogPages({ enabled, spaceIds, account, token, o
     pendingSourceCount,
     deferredSourceCount,
     actionableSourceCount,
+    cursorKey,
     loadingSpaces: valid && busy.current.size > 0 ? state.loading : [],
     hasMoreSpaces: valid ? sortedSpaces.filter((space) => sortedOrigins.some((origin) => cursors.current.get(`${space}\n${origin}`) !== null)) : [],
     loadMore,

@@ -389,6 +389,17 @@ export async function handleConnectorRunMessage(
         model: runModel,
         trace: runTrace,
         artifacts,
+        // Preserve host facts across the JSON transport. In particular do not
+        // turn missing stopReason into success for legacy local runtimes.
+        stopReason: result.stopReason,
+        pending: result.pending,
+        hasPendingInteraction: result.hasPendingInteraction,
+        handoff: result.handoff,
+        error: result.error,
+        errorMessage: result.errorMessage,
+        runtimeProviderFailure: result.runtimeProviderFailure,
+        emptyAssistantFallbackReason: result.emptyAssistantFallbackReason,
+        usage: result.usage,
       },
     }));
   } catch (error) {

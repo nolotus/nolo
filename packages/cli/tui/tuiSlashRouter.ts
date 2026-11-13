@@ -8,10 +8,13 @@
 // 快照），分支顺序、输出文本、错误处理路径零改动。
 // 依赖方向单向：本模块 → tuiTurnRunner / session / tuiHistory 等叶子模块；
 // 本模块禁止回指 readlineWorkspace.ts。
+import { applyAutoReviewControl } from "./autoReviewControl";
 import { loadAgentCatalog } from "./agentCatalog";
 import { resolveAgentSwitchTarget } from "./agentPicker";
+import type { CliFetchImpl } from "../cliFetch";
 import { collectConversationTurns } from "./conversationLinks";
 import { handleTuiInput, applyAgentSwitchState, type TuiState } from "./session";
+import { resolveTuiIdentityEnv } from "./learnPrompt";
 import {
   ensureChatQueueBinding,
   isInteractiveInput,
@@ -53,7 +56,7 @@ import {
   type TurnHistory,
 } from "./tuiHistory";
 import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
-import { runTuiLogin } from "./tuiLogin";
+import { runTuiLogin, type TuiLoginOutcome } from "./tuiLogin";
 import { runTuiAuth } from "./tuiAuth";
 import { runSelectDialog } from "./selectDialog";
 import { renderDialogTitle } from "./dialogFrame";
@@ -97,6 +100,10 @@ export interface SlashDispatchHost {
   readonly taskEnv?: Record<string, string | undefined>;
   readonly confirmTaskStop?: (view: TaskActionView) => Promise<boolean>;
   readonly fetchImpl: typeof fetch;
+  readonly runLogin?: (args: string[], emit: (text: string) => void) => Promise<TuiLoginOutcome>;
+  // loadAgentCatalog 的降级 fetch（见 agentCatalog.ts）：switch-agent 分支透传，
+  // 与 fetchImpl 同为宿主注入；可选 = 宿主未提供时 catalog 自己降级。
+  readonly fallbackFetchImpl?: CliFetchImpl;
   readonly turnCtx: AgentTurnContext;
 
   readonly revokeRemoteShellGrants?: () => void;
@@ -171,7 +178,18 @@ export async function runSubmittedSlashLine(
   host: SlashDispatchHost,
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../../agent-runtime/actionGate").HostConfirmDecision>,
+  directUserSubmission = false,
 ): Promise<boolean> {
+  if (line.trim().split(/\s+/)[0] === "/auto-review") {
+    if (!directUserSubmission) {
+      host.emitCommandOutput("auto-review：只接受用户直接提交的控制命令；未修改授权。", line);
+      return false;
+    }
+    const result = applyAutoReviewControl(line, host.state, resolveTuiIdentityEnv(host.taskEnv, host.options.env ?? process.env));
+    host.state = result.state;
+    host.emitCommandOutput(result.output, line);
+    return false;
+  }
   const {
     history,
     pasteStore,
@@ -202,7 +220,14 @@ export async function runSubmittedSlashLine(
   // history is forwarded so /links can read the transcript: it lives in the
   // workspace-scoped TurnHistory rather than in TuiState, and copying it into
   // state would put transcript data in front of every command's inputs.
-  const result = handleTuiInput(line, host.state, collectConversationTurns(host.history), { env: host.taskEnv });
+  // Identity env: taskEnv is the startup snapshot, options.env holds the live
+  // values (a `/login` in this session writes its token there). Only the
+  // identity read uses the merged env — the rest of the dispatch keeps the
+  // env it already had.
+  const result = handleTuiInput(line, host.state, collectConversationTurns(host.history), {
+    env: host.taskEnv,
+    authEnv: resolveTuiIdentityEnv(host.taskEnv, host.options.env ?? process.env),
+  });
   const previousState = host.state;
   const previousAgentKey = host.state.agentKey;
   host.state = result.nextState;
@@ -383,6 +408,7 @@ export async function runSubmittedSlashLine(
         authToken,
         dialogId: result.action.dialogId,
         summaryLlmCaller: options.summaryLlmCaller,
+        env: options.env ?? {},
         onProgress: (phase: string) => {
           const phaseText =
             phase === "reading"
@@ -893,7 +919,7 @@ export async function runSubmittedSlashLine(
     // 当前会话立即生效，无需重启；env 是 TUI 进程内的对象，会话级覆盖
     // 不影响父 shell。
     const env = host.options.env ?? process.env;
-    const outcome = await runTuiLogin(result.action.args ?? [], (text) =>
+    const outcome = await (host.runLogin ?? runTuiLogin)(result.action.args ?? [], (text) =>
       emitCommandOutput(text)
     );
     if (outcome.status === "success") {

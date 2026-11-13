@@ -31,8 +31,9 @@ import {
   tuiRenderThemeFingerprint,
   userSurfaceBackgroundSequence,
 } from "./theme";
+import { toolLabel } from "./i18n";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
-import { TUI_TREE_MARKER } from "../client/toolOutput";
+import { TUI_TREE_MARKER, TUI_TREE_TOOLS, type TuiTreePayload } from "../client/toolOutput";
 import {
   resolveHistoryViewportHeight,
   resolveHistoryLayoutGeometry,
@@ -369,10 +370,14 @@ export function appendLocalTurn(
  */
 const TOOL_SUCCESS_LINE_RE = /^(▸ .*?)(?: ×(\d+))?(  ✓)$/;
 
+function readTreePayload(chunk: string): TuiTreePayload {
+  return JSON.parse(chunk.slice(TUI_TREE_MARKER.length).replace(/\u0002\n?$/, ""));
+}
+
 function applyTreeRewrite(text: string, chunk: string): string | null {
   if (!chunk.startsWith(TUI_TREE_MARKER)) return null;
-  const payload = chunk.slice(TUI_TREE_MARKER.length).replace(/\u0002\n?$/, "");
-  const tree = `• ${payload}`;
+  const payload = readTreePayload(chunk);
+  const tree = `• ${payload.summary}`;
   const hadTrailingNewline = text.endsWith("\n");
   const body = hadTrailingNewline ? text.slice(0, -1) : text;
   const bodyLines = body.split("\n");
@@ -381,14 +386,12 @@ function applyTreeRewrite(text: string, chunk: string): string | null {
   // The second result replaces exactly the immediately preceding flat row.
   // Never scan past it: a failure/action row must remain visible and break the
   // group rather than being swallowed by a later tree.
-  let prefix: string;
-  if (tail.trimStart().startsWith("▸ ")) {
-    prefix = bodyLines.length < 2 ? "" : `${bodyLines.slice(0, -1).join("\n")}\n`;
-  } else if (tail.trimStart().startsWith("└── ")) {
-    const headerIndex = plainLines.findLastIndex((line) => line.trimStart().startsWith("• "));
-    if (headerIndex < 0) return null;
-    prefix = `${bodyLines.slice(0, headerIndex).join("\n")}${headerIndex > 0 ? "\n" : ""}`;
-  } else return null;
+  const labels = TUI_TREE_TOOLS[payload.kind].map(toolLabel);
+  // Success suffixes can carry timing and either historic ×N placement.
+  const flatLabel = tail.match(/^▸ (.+?)(?: · .*?)?(?: ×\d+)?  ✓(?: (?:\d+(?:\.\d+)?(?:ms|s)|×\d+))*$/)?.[1];
+  const summaryLabel = tail.match(/^• (.+?) \(\d+\) · .*  ✓$/)?.[1];
+  if (!labels.includes(flatLabel ?? "") && summaryLabel !== labels[0]) return null;
+  const prefix = bodyLines.length < 2 ? "" : `${bodyLines.slice(0, -1).join("\n")}\n`;
   return `${prefix}${tree}\n`;
 }
 
@@ -420,25 +423,18 @@ export function applyOutputChunkToCurrentTurn(
     if (chunk.startsWith(TUI_TREE_MARKER)) {
       const rewrittenTree = applyTreeRewrite(history.currentContent, chunk);
       if (rewrittenTree === null) {
-        // A protocol chunk must never fall through to the terminal parser:
-        // strip the private framing and expose only its newest leaf. This is
-        // also the reset boundary when assistant prose interrupted a group.
-        const safe = chunk.slice(TUI_TREE_MARKER.length).replace(/\u0002/g, "");
-        const leaves = safe.split("\n").filter((line) => /^(?:├── |└── )/.test(line));
-        const newest = leaves.at(-1)?.replace(/^(?:├── |└── )/, "▸ ") ?? "";
-        if (!newest) return false;
-        const flat = `${newest}\n`;
-        history.currentContent = applyTerminalOutputToText(history.currentContent, flat);
-        appendCurrentBlock(history, kind, flat);
+        // Only the newest result is new: earlier items are already visible.
+        // Return false to reset the formatter, independently of repainting.
+        const safe = readTreePayload(chunk).fallback;
+        history.currentContent = applyTerminalOutputToText(history.currentContent, safe);
+        appendCurrentBlock(history, kind, safe);
         return false;
       }
       const treeContent = rewrittenTree;
       history.currentContent = treeContent;
       const lastBlock = history.currentBlocks.at(-1);
-      const treeLines = treeContent.split("\n");
-      const treeHeaderIndex = treeLines.findIndex((line) => line.trimStart().startsWith("• "));
-      const treeBlock = treeHeaderIndex >= 0 ? treeLines.slice(treeHeaderIndex).join("\n") : treeContent;
-      if (lastBlock?.kind === "tool") lastBlock.content = lastBlock.content.replace(/[^\n]*$/, "") + treeBlock;
+      const treeBlock = `• ${readTreePayload(chunk).summary}\n`;
+      if (lastBlock?.kind === "tool") lastBlock.content = applyTreeRewrite(lastBlock.content, chunk) ?? `${lastBlock.content}${treeBlock}`;
       else history.currentBlocks.push({ kind: "tool", content: treeBlock });
       return true;
     }
@@ -473,11 +469,11 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
   const styledLines = rawLines.map((line) => {
     const plain = stripAnsi(line);
     if (!anchored && plain.trim().length > 0 && !plain.startsWith("[nolo]")) {
-      // 工具顶层行（●/▸/✦/✗）进入工具块，卡片续行与树分支属于工具块；正文首行退出工具块并挂载 ◈ 锚点
+      // 工具顶层行（●/▸/✦/✗）进入工具块，卡片续行属于工具块；正文首行退出工具块并挂载 ◈ 锚点
       if (/^[●▸✦✗]/.test(plain)) {
         inToolBlock = true;
-      } else if (inToolBlock && /^(?:\s+|├──|└──)/.test(plain)) {
-        // 工具卡片缩进详情或树形分支连线，保持在工具块中
+      } else if (inToolBlock && /^\s+/.test(plain)) {
+        // 工具卡片缩进详情，保持在工具块中
       } else {
         inToolBlock = false;
         anchored = true;
@@ -1973,12 +1969,20 @@ export function renderHistory(
 
 export function createHistoryOutputStream(
   history: TurnHistory,
-  onUpdate: () => void
+  onUpdate: () => void,
+  /**
+   * 固定运行区的真实逐行可见 runId 查询（runDock.visibleRunIds）。缺省时聊天
+   * 层拿不到可见证据 → 启动回执全部保留（宁可重复也不静默丢失）。
+   */
+  opts: { visibleRunIds?: () => ReadonlySet<string> } = {}
 ): NodeJS.WritableStream {
   const stream = {
     isTTY: true,
     assistantLabelManaged: true,
     tuiTrees: true,
+    // 固定运行区（runDock/runZoneLines）的真实逐行可见集合：只有确实画在
+    // 面板上的 run 才省略聊天里的启动回执。
+    visibleRunIds: opts.visibleRunIds,
     write(chunk: string | Buffer): boolean {
       const text = typeof chunk === "string" ? chunk : chunk.toString();
       if (applyOutputChunkToCurrentTurn(history, text)) {
@@ -1987,8 +1991,9 @@ export function createHistoryOutputStream(
       return true;
     },
     writeToolBlock(chunk: string): boolean {
+      const previousContent = history.currentContent;
       const applied = applyOutputChunkToCurrentTurn(history, chunk, "tool");
-      if (applied) onUpdate();
+      if (applied || history.currentContent !== previousContent) onUpdate();
       return applied;
     },
   };

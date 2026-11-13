@@ -3,16 +3,37 @@ import { toErrorMessage } from "core/errorMessage";
 
 import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import { summarizeCredentialGroups } from "ai/agent/safeAgentSummary";
-import { injectSpeedContextIntoListAgentsResult } from "ai/agent/candidateSpeedContext";
-import path from "node:path";
-import { resolveNoloHome } from "../database-engine/dbPath";
 import {
   buildAgentDiscoveryResult,
   matchesAgentQuery,
   resolvePaginationArgs,
   toDiscoverySafeAgentSummary,
 } from "ai/agent/agentDiscovery";
-import { getReadableCliDb, type AgentCommandDeps, type OutputLike } from "./agentCommandSupport";
+import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
+import { injectSpeedContextIntoListAgentsResult } from "ai/agent/candidateSpeedContext";
+
+import { isLocalDispatchSpeedSource, isServerDispatchSpeedSource } from "ai/agent/dispatchSpeedProvenance";
+import { listRunRecords } from "./agentRunControl";
+
+const createCliDispatchSampleDb = (db: any, userId: string, env: Record<string, string | undefined>) => {
+  // Lazy metadata-only registry scan: no logs, messages or credential records.
+  let localDialogs: Set<string> | undefined;
+  return {
+    iterator: (options: { gte?: string; lte?: string; gt?: string; limit?: number }) => db.iterator(options),
+    isDispatchRun: async (dialogId: string, entryPath: string): Promise<boolean> => {
+      if (entryPath === "cli-local") {
+        localDialogs ??= new Set(listRunRecords({ env }).filter(run =>
+          typeof run.dialogId === "string" && isLocalDispatchSpeedSource(run, run.dialogId, userId),
+        ).map(run => run.dialogId!));
+        return localDialogs.has(dialogId);
+      }
+      if (entryPath !== "agent-run") return false;
+      try {
+        return isServerDispatchSpeedSource(await db.get(`dialog-${userId}-${dialogId}`), dialogId, userId);
+      } catch { return false; }
+    },
+  };
+};
 import { refreshSubscriptionQuotas } from "./subscriptionQuotaRefresh";
 import {
   shouldClearCooldownFromQuota,
@@ -51,16 +72,8 @@ import {
   resolveAuthToken,
   resolveServerCandidates,
   resolveServerUrl,
-  type EnvLike,
 } from "./cliEnvHelpers";
 import { readLiveDbRecordAfterTombstoneMerge } from "./globalRecordOperations";
-
-/**
- * Diagnostics sink for the optional speed-sample read: `--json` output must stay
- * parseable, and a local db that cannot be opened simply means AA-only speed
- * data rather than a failed command.
- */
-const discardOutput: OutputLike = { write: () => undefined };
 
 /** 与 client/agentRun.ts 的 formatCooldownUntilLocal 同口径；避免引入 client 依赖。 */
 function formatCooldownUntilLocal(at: Date, now: Date = new Date()): string {
@@ -73,20 +86,6 @@ function formatCooldownUntilLocal(at: Date, now: Date = new Date()): string {
   return sameDay ? time : `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`;
 }
 
-
-/**
- * Disk cache for the observed speed samples: every `nolo agent list` is a fresh
- * process, so the in-process samples cache in ai/agent/candidateSpeedContext
- * never survives a call. Layout: `<NOLO_HOME>/cache/speed-samples-<userId>.json`.
- */
-export function resolveSpeedSamplesCachePath(env: EnvLike, userId: string): string {
-  const safeUserId = userId.replace(/[^A-Za-z0-9._-]/g, "_");
-  // NOLO_HOME is read from the process environment as well: callers pass a
-  // partial deps.env (tests), and a cache path that silently fell back to the
-  // developer's real ~/.nolo would defeat that isolation.
-  const mergedEnv = { ...process.env, ...env };
-  return path.join(resolveNoloHome({ env: mergedEnv }), "cache", `speed-samples-${safeUserId}.json`);
-}
 
 export async function runAgentListCommand(
   args: string[],
@@ -452,15 +451,18 @@ export async function runAgentListCommand(
         agents: discovery.agents,
         credentialGroups: discovery.credentialGroups,
       }, null, 2);
-      // Observed speed data needs the local db; the call is disk-cached with a
-      // scan budget and degrades to AA-only on any failure (it never throws), so
-      // `agent list` cannot fail because of speed context.
-      const withSpeedContext = await injectSpeedContextIntoListAgentsResult(listResult, {
-        db: deps.db ?? await getReadableCliDb(discardOutput),
+      // 速度上下文恢复（仅派发实测速度）：不恢复 qualityContext，也不引入自动 tier。
+      // 来源按共享契约验证：server 运行元数据 / local 注册记录，未知来源不计入。
+      const cliNoloHome =
+        env.NOLO_HOME?.trim() || (env.HOME?.trim() ? `${env.HOME.trim()}/.nolo` : "");
+      const speedAwareListResult = await injectSpeedContextIntoListAgentsResult(listResult, {
+        db: createCliDispatchSampleDb(deps.db ?? (await getReadableCliDb(output)), userId, env),
         userId,
-        diskCache: { cachePath: resolveSpeedSamplesCachePath(env, userId) },
+        ...(cliNoloHome
+          ? { diskCache: { cachePath: `${cliNoloHome}/cache/speed-samples-${userId}.json` } }
+          : {}),
       });
-      output.write(withSpeedContext);
+      output.write(speedAwareListResult);
       output.write("\n");
       return 0;
     }

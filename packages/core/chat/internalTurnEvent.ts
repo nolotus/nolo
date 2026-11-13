@@ -7,6 +7,14 @@ export type AgentRunCompletionShape = {
   runId: string;
   agentKey: string;
   agentName?: string;
+  /**
+   * 派发时调用方给的短标题（展示用）。
+   *
+   * 只做展示透传：归一化按白名单带上它，屏幕上的后台任务通知用它当标题
+   * （优先于 agent 标签），因此「部分 run 已被 claim 后重新显示」那条路径
+   * 也不会丢标题。缺省 = 没有，绝不从任务正文猜。
+   */
+  title?: string;
   status: string; // "done" | "failed" | "timeout" | "killed" | "orphaned" | etc.
   exitCode?: number;
   parentDialogId?: string;
@@ -71,14 +79,31 @@ export type BackgroundTaskCompletedTurnEvent = {
   text: string;
   /** 屏幕上要显示的紧凑单行（系统事件不套用户气泡）。 */
   displayText?: string;
+  /** 原始终态通知载荷（promoted execShell 含 resultCapsule、spill 路径、真实 pid/label 等）。 */
+  notice?: import("../../agent-runtime/processRegistry").ProcessTerminalNotice;
+};
+
+/** Host lifecycle signal, never a user submission or a fabricated child run. */
+export type AutoReviewContinuationTurnEvent = {
+  kind: "auto-review-continuation";
+  scope: { taskId: string; taskInstanceId?: string; dialogId: string; workspace: string };
+  eventKey: string;
+  action: "continue-author" | "request-review" | "decide-review" | "commit" | "local-merge";
+  text: string;
+  displayText: string;
 };
 
 export type InternalTurnEvent =
+  | AutoReviewContinuationTurnEvent
   | UserTurnEvent
   | ChildRunCompletedTurnEvent
   | BackgroundTaskCompletedTurnEvent;
 
 export type TurnRequest = {
+  /** Durable user-message identity; adapters reuse it on admission, send and reload. */
+  messageId?: string;
+  /** Original submission source, retained across queue/batch boundaries. */
+  source?: string;
   event: InternalTurnEvent;
   text: string;
   /**
@@ -110,6 +135,9 @@ export function normalizeRunCompletionShape(
     runId,
     agentKey,
     ...(typeof record.agentName === "string" ? { agentName: record.agentName } : {}),
+    ...(typeof record.title === "string" && record.title.trim()
+      ? { title: record.title.trim() }
+      : {}),
     status,
     ...(typeof record.exitCode === "number" ? { exitCode: record.exitCode } : {}),
     ...(typeof record.parentDialogId === "string" ? { parentDialogId: record.parentDialogId } : {}),

@@ -29,6 +29,12 @@ import {
   ITEM_ICONS,
   type ItemType,
 } from "./sidebarItemShared";
+import {
+  attachmentIconForKind,
+  attachmentMetaFromUnknown,
+  isAttachmentRowType,
+  resolveAttachmentIconKind,
+} from "render/web/ui/attachmentTypeIcons";
 
 import {
   LuLoaderCircle,
@@ -95,6 +101,13 @@ export interface SidebarItemRowProps {
    * 本地没有实体记录时用它画头像；没有则回退到类型图标。
    */
   avatarFileId?: string | null;
+  /**
+   * 附件元信息（仅文件行生效）：按 mime → fileCategory → 文件名扩展名解析
+   * 具体文件类型图标。摘要行没有 entity 记录时也靠这三个字段显示正确图标。
+   */
+  mimeType?: string | null;
+  fileCategory?: string | null;
+  originalName?: string | null;
   categoryId?: string;
   spaceIdOverride?: string | null;
   sourceServerOrigin?: string;
@@ -107,6 +120,12 @@ export interface SidebarItemRowProps {
   disableDrag?: boolean;
   /** Navigation-only row: no owner actions, editing, dragging or local visit/read writes. */
   readOnly?: boolean;
+  /**
+   * 是否可删除内容本体（自有内容）。默认与 `readOnly` 互补。
+   * 他人内容即便有空间管理角色也不得删除本体：`readOnly=false` 但本标志为 false，
+   * 行内删除按钮不渲染，「更多」菜单也只留非破坏动作。
+   */
+  canDeleteContent?: boolean;
   /** Compatibility flag: all summary rows now skip hydration; navigation still loads normally. */
   disableAutoRead?: boolean;
   /** style prop for outer div (e.g. height from ListLayout) */
@@ -139,8 +158,15 @@ export interface SidebarItemRowProps {
   onToggleChildCollapse?: () => void;
   /** 当为 true 时，此行作为子对话渲染（缩进 + 子样式）。 */
   isChildRow?: boolean;
+  /** Hierarchy indentation; legacy callers keep their existing child styling. */
+  depth?: 0 | 1 | 2;
   /** 显式未读指示（如 agent 行聚合其关联 dialog 的未读状态）。 */
   hasUnread?: boolean;
+  /**
+   * 汇总后代运行态：调用方把子对话 / 子 run 的运行中状态汇总到本行
+   * （父行、agent 行）。只影响「运行」标记，不参与失败 / 未读 / 终态判定。
+   */
+  aggregatedRunning?: boolean;
 }
 
 function SidebarItemRow({
@@ -149,6 +175,9 @@ function SidebarItemRow({
   title,
   detailMissing,
   avatarFileId,
+  mimeType,
+  fileCategory,
+  originalName,
   categoryId,
   spaceIdOverride,
   sourceServerOrigin,
@@ -160,10 +189,10 @@ function SidebarItemRow({
   onSelectItem,
   disableDrag,
   readOnly = false,
+  canDeleteContent,
   style,
   onMenuAnchorChange,
   editSignal,
-  pinned,
   pinAction,
   summaryStatus,
   summaryUnreadAt,
@@ -171,7 +200,9 @@ function SidebarItemRow({
   isChildCollapsed = true,
   onToggleChildCollapse,
   isChildRow,
+  depth,
   hasUnread,
+  aggregatedRunning = false,
 }: SidebarItemRowProps) {
   const { t } = useTranslation("space");
   const dispatch = useAppDispatch();
@@ -256,7 +287,7 @@ function SidebarItemRow({
     type === "dialog" && dialogStatus === "done" && !isLiveGenerating;
   const isFailedDialog =
     type === "dialog" && dialogStatus === "failed" && !isLiveGenerating;
-  const isAgentUnread = type === "agent" && !readOnly && Boolean(hasUnread);
+  const isAgentUnread = type === "agent" && Boolean(hasUnread);
   const showUnreadDot =
     (type === "dialog" && isUnread && !isActive) ||
     (isAgentUnread && !isActive);
@@ -271,8 +302,46 @@ function SidebarItemRow({
       : isDoneDialog
         ? "done"
         : undefined;
+  // 运行标记与身份图标并存：图标 / 头像不再被 spinner 替换，运行态画在图标旁的
+  // 独立标记上。aggregatedRunning 只影响运行标记，不参与失败 / 未读 / 终态判定。
+  const showRunningBadge = isRunningDialog || aggregatedRunning === true;
 
-  const Icon = ITEM_ICONS[type as ItemType] ?? LuFile;
+  // 文件行图标：props 里的元信息优先，其次已缓存的 entity 元信息
+  //（只读缓存，不触发 read），最后按行类型给通用语义。
+  const attachmentIcon = useMemo(() => {
+    if (!isAttachmentRowType(type)) return null;
+    const propKind = resolveAttachmentIconKind({ mimeType, fileCategory, originalName });
+    if (propKind !== "unknown") return attachmentIconForKind(propKind);
+    const entityKind = resolveAttachmentIconKind(attachmentMetaFromUnknown(entity));
+    if (entityKind !== "unknown") return attachmentIconForKind(entityKind);
+    // image 行没有元信息时仍是图片语义；其余文件行用通用文件图标。
+    return attachmentIconForKind(type === "image" ? "image" : "unknown");
+  }, [type, mimeType, fileCategory, originalName, entity]);
+  const Icon = attachmentIcon ?? ITEM_ICONS[type as ItemType] ?? LuFile;
+  // agent 行画「自己的头像」：AgentAvatar 内部按
+  // 「自定义头像 > model/provider 图标 > 默认头像」的完整优先链回落，
+  // 列表不再统一画 Nolo 头标（Nolo 头标只属于类型切换）。
+  // 未缓存的摘要行没有实体：保留收藏记录里已有的 avatarFileId，不额外 hydrate。
+  const entityAvatarFileId =
+    (entity as unknown as { avatarFileId?: string | null } | undefined)?.avatarFileId ?? null;
+  const agentAvatarFileId = entityAvatarFileId ?? avatarFileId ?? null;
+  const agentForAvatar = (
+    entity
+      ? {
+          ...(entity as unknown as Record<string, unknown>),
+          name: (entity as unknown as { name?: string }).name ?? title,
+          avatarFileId: agentAvatarFileId,
+        }
+      : { name: title, avatarFileId: agentAvatarFileId }
+  ) as {
+    name?: string;
+    avatarFileId?: string | null;
+    model?: string;
+    provider?: string;
+    cliProvider?: string;
+    authorityServer?: string | null;
+    originServer?: string | null;
+  };
   const displayTitle = title;
 
   // Route target for content Link (enables middle-click new-tab)
@@ -310,6 +379,8 @@ function SidebarItemRow({
 
   const showContextMenu = type !== "app";
   const showMoreMenu = showContextMenu || type === "app";
+  // 删除内容本体只对自有内容开放；他人内容即使可管理空间也不给这个入口。
+  const canDeleteOwnedContent = canDeleteContent ?? !readOnly;
   const canEditInSpace = Boolean(effectiveSpaceId);
   const canMoveToSpace = type !== "app";
   // 「加入对话」已移入「更多」菜单；行内改为置顶按钮，可见性改由 pinAction 决定。
@@ -425,7 +496,7 @@ function SidebarItemRow({
         ref={rowRef}
         {...stylex.props(styles.item, isFlash && styles.flash, isActive && styles.active, isSelected && styles.selected, isDragging && styles.dragging, isMenuOpen && styles.open)}
         {...dataAttrs}
-        style={style}
+        style={depth === undefined ? style : { ...style, paddingInlineStart: 8 + depth * 14 }}
         data-hook="create-space-sidebar-row"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -472,24 +543,11 @@ function SidebarItemRow({
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            {isRunningDialog ? (
-              <LuLoaderCircle
-                size={ICON_SIZE}
-                {...stylex.props(styles.icon, styles.spinning)}
-                aria-hidden="true"
-              />
-            ) : showStatusMark ? (
-              <span
-                {...stylex.props(styles.statusMark, dialogStatusTone === "failed" && styles.statusFailed)}
-                data-status={dialogStatusTone}
-                aria-hidden="true"
-              />
-            ) : pinned ? (
-              <LuPin size={ICON_SIZE} {...stylex.props(styles.icon, isActive && styles.iconActive)} aria-hidden="true" />
-            ) : type === "agent" && (entity || avatarFileId) ? (
+            {type === "agent" ? (
               <AgentAvatar
+                // agent 行始终画自己的头像（自定义 > model/provider > 默认头像）。
                 // 窗口外收藏没有本地实体时，用收藏关系记录里带来的头像 + 摘要标题。
-                agent={entity ?? { name: title, avatarFileId: avatarFileId ?? null }}
+                agent={agentForAvatar}
                 size={ICON_SIZE}
                 avatarSize="small"
                 {...stylex.props(styles.avatar)}
@@ -503,6 +561,29 @@ function SidebarItemRow({
               />
             ) : (
               <Icon size={ICON_SIZE} {...stylex.props(styles.icon, isActive && styles.iconActive)} aria-hidden="true" />
+            )}
+            {showRunningBadge && (
+              <span
+                {...stylex.props(styles.statusBadge)}
+                role="img"
+                aria-label={t("statusRunning", "运行中")}
+              >
+                <LuLoaderCircle size={10} {...stylex.props(styles.spinning)} aria-hidden="true" />
+              </span>
+            )}
+            {!showRunningBadge && showStatusMark && (
+              <span
+                {...stylex.props(
+                  styles.statusMark,
+                  styles.statusMarkOverlay,
+                  dialogStatusTone === "failed" && styles.statusFailed,
+                )}
+                data-status={dialogStatusTone}
+                role="img"
+                aria-label={
+                  dialogStatusTone === "failed" ? t("statusFailed", "运行失败") : t("statusDone", "已完成")
+                }
+              />
             )}
             {showUnreadDot && !showStatusMark && <span {...stylex.props(styles.unreadDot)} aria-hidden="true" />}
             <div {...stylex.props(styles.dragHandle, controlsRevealed && !disableDrag ? styles.dragVisible : styles.dragHidden)} aria-hidden="true">
@@ -598,7 +679,7 @@ function SidebarItemRow({
                 aria-pressed={pinAction.pinned}
               />
             )}
-            {showContextMenu && (
+            {showContextMenu && canDeleteOwnedContent && (
               <DeleteContentButton
                 contentKey={contentKey}
                 title={displayTitle}

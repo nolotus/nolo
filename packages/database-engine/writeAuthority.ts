@@ -82,8 +82,25 @@ export const resolveKeyOwnerId = (
     return parts[4] || null;
   }
 
-  if (parts[0] === "dialog" && parts[2] === "msg") {
-    return null;
+  if (parts[0] === "dialog") {
+    const messageSeparator = dbKey.lastIndexOf("-msg-");
+    if (messageSeparator !== -1) {
+      // Canonical dialog-{dialogId}-msg-{messageId} keys carry no owner.
+      // Match authority/ownerKey: recognize historical owner-prefixed messages
+      // only with a matching candidate. Without one, return null and allow the
+      // record/context fallback, unlike the baseline first-segment owner/deny.
+      // Guessing userId shapes would reintroduce UUID-segment false ownership.
+      // Current producers write canonical keys; owner-prefixed messages are historical.
+      // Use the last separator even if a historical messageId contains "-msg-".
+      const dialogPrefix = dbKey.slice("dialog-".length, messageSeparator);
+      const candidateOwner = resolveCandidateOwnerFromKeyRemainder(
+        dialogPrefix,
+        options.candidateOwnerUserIds
+      );
+      return candidateOwner && dialogPrefix.length > candidateOwner.length + 1
+        ? candidateOwner
+        : null;
+    }
   }
 
   if (parts[0] === "email" && parts.length >= 3) {

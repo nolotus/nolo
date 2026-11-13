@@ -1,7 +1,7 @@
 // Domain wiring for the create menu: state, dispatch actions, item handlers.
 // Presentation shell lives in CreateMenuButton.tsx; item policy in createMenuPolicy.ts.
 
-import React, { useState, useCallback } from "react";
+import React, { lazy, Suspense, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "app/routing";
 import { toast } from "app/utils/toast";
@@ -40,9 +40,14 @@ import {
   LuAppWindow,
   LuWaves,
   LuLayoutTemplate,
+  LuLayoutGrid,
 } from "react-icons/lu";
 import { useCreateTable } from "render/table/useCreateTable";
 import CreateTaskModal from "chat/web/CreateTaskModal";
+import { Dialog } from "render/web/ui/modal/Dialog";
+const CreateSpaceForm = lazy(() =>
+  import("create/space/CreateSpaceForm").then((module) => ({ default: module.CreateSpaceForm })),
+);
 import { selectCurrentSpace, selectCurrentSpaceId, selectViewMode } from "create/space/spaceCurrentSelectors";
 import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 import { DataType } from "create/types";
@@ -68,7 +73,7 @@ const RAIL_CREATE_APP_GROUP_ITEM_IDS: readonly CreateMenuItemId[] = [
 
 // 暂时隐藏「新建应用」及其模板分组，待产品方案成熟后再启用
 const RAIL_CREATE_MENU_GROUPS: readonly (readonly CreateMenuItemId[])[] = [
-  ["new-chat"],
+  ["new-chat", "create-space"],
   ["new-project", "new-page", "new-table"],
   ["create-agent-manual", "scheduled-task"],
   ["upload-file"],
@@ -117,6 +122,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [isCreatingPage, setIsCreatingPage] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [isCreateSpaceOpen, setIsCreateSpaceOpen] = useState(false);
 
   const { createNewTable, isCreating: isCreatingTable } = useCreateTable({
     onSuccess: () => setIsOpen(false),
@@ -334,6 +340,11 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
           }).catch(() => toast.error(t("chat:createDialogFailed", "新建对话失败")));
           break;
         }
+        case "create-space":
+          // 新建空间不依赖当前选中的 space：表单自行创建并切换到新空间。
+          closeMenu();
+          setIsCreateSpaceOpen(true);
+          break;
         case "new-project":
           closeMenu();
           navigate("/?createProject=1");
@@ -404,6 +415,17 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
               <span aria-hidden="true">✦</span>
             )}
             <span slot="label">{label}</span>
+          </MenuItem>
+        );
+      }
+      case "create-space": {
+        const label = t("space:create_new_space", "新建空间");
+        return (
+          <MenuItem key={id} id={id} textValue={label}>
+            <LuLayoutGrid size={16} aria-hidden="true" />
+            <span slot="label" title={label}>
+              {label}
+            </span>
           </MenuItem>
         );
       }
@@ -570,6 +592,14 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
         onClose={() => setIsCreateTaskOpen(false)}
         spaceId={sidebarScopedSpaceId}
       />
+      {isCreateSpaceOpen && <Dialog
+        isOpen={isCreateSpaceOpen}
+        onClose={() => setIsCreateSpaceOpen(false)}
+      >
+        <Suspense fallback={null}>
+          <CreateSpaceForm onClose={() => setIsCreateSpaceOpen(false)} />
+        </Suspense>
+      </Dialog>}
     </>
   );
 };

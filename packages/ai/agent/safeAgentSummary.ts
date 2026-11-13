@@ -1,3 +1,4 @@
+import { resolveModelTier, type ModelTier } from "./dispatchSelectionPolicy";
 import { fnv1a32Hex } from "core/fnv1a32";
 import { getModelAbility, type ModelAbility } from "../llm/modelAbility";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
@@ -15,10 +16,6 @@ import {
 import type { AgentEconomicsSnapshot } from "../economics/economicsSnapshot";
 import { resolveEconomicsSnapshot } from "../economics/economicsSnapshot";
 import type { AgentQuota } from "./quotaSnapshot";
-import {
-  resolveDefaultAgentTier,
-  type AgentTier,
-} from "./agentTier";
 import {
   resolveAgentAvailability,
   type AgentAvailabilityStatus,
@@ -193,12 +190,7 @@ export interface SafeAgentSummary {
   handle: string | null;
   introduction: string | null;
   model: string | null;
-  /**
-   * 能力档弱先验（fast/balanced/top/unknown），由 model 名解析（见 ./agentTier）。
-   * 不代表领域能力；unknown = 模型名没给出信号。这是对所有用户的通用默认值；用户偏好（记忆/当次指令）的覆盖由编排提示词
-   * 处理，不在摘要层。
-   */
-  tier: AgentTier;
+  modelTier: ModelTier;
   provider: string | null;
   apiSource: string | null;
   cliProvider: string | null;
@@ -533,9 +525,6 @@ export function toSafeAgentSummary(
   const credentialGroup = record?.credentialGroup ?? credInfo?.credentialGroup;
   const credentialKind = record?.credentialKind ?? credInfo?.credentialKind;
 
-  // 默认档位：纯函数按 model 名解析，不读用户偏好（覆盖由编排提示词负责）。
-  const { tier } = resolveDefaultAgentTier(record?.model);
-
   const availability = resolveAgentAvailability(
     { nextAvailableAt, quota, quotaExhaustion },
     options?.now ?? Date.now(),
@@ -549,7 +538,7 @@ export function toSafeAgentSummary(
     handle,
     introduction,
     model,
-    tier,
+    modelTier: resolveModelTier(model),
     provider,
     apiSource,
     cliProvider,
@@ -597,8 +586,7 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "agentKey",
   "name",
   "model",
-  // 能力档弱先验（unknown = 模型名没给出信号，不推断强弱）。
-  "tier",
+  "modelTier",
   "billingSource",
   "availabilityStatus",
   "credentialGroup",
@@ -666,7 +654,7 @@ export function toCompactAgentSummary(
 /**
  * 显式紧凑模式（compact: true）输出投影：
  * 当调用方受极端 token 预算限制时，保留选人派发与准入所必需的核心字段与证据
- * （agentKey、name、model、tier、billingSource、availabilityStatus、credentialGroup、
+ * （agentKey、name、model、billingSource、availabilityStatus、credentialGroup、
  * isFavorite、isOAuth、isOwned、isPublic、nextAvailableAt、availabilityReason、
  * tools、provider、apiSource、credentialKind、credentialed、economics、quota），
  * 同时剔除次要长文本说明与非准入元数据（如 introduction、modelAbility、greeting、prompt 等）。
@@ -676,7 +664,7 @@ export const ULTRA_COMPACT_AGENT_SUMMARY_FIELDS = [
   "agentKey",
   "name",
   "model",
-  "tier",
+  "modelTier",
   "billingSource",
   "availabilityStatus",
   "credentialGroup",

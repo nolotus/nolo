@@ -10,7 +10,7 @@ import { resolveCatalogPlatformAgents } from "./agentCatalog";
 import { renderDialogTitle } from "./dialogFrame";
 import { dailyWelcomeTip, t } from "./i18n";
 import { displayWidth } from "./readlineWorkspace";
-import { stripAnsi, visibleWidth } from "./tuiAnsi";
+import { boxGlyphs, resolveBoxCharset, stripAnsi, visibleWidth } from "./tuiAnsi";
 import {
   themeText,
   themeColorSequence,
@@ -740,7 +740,7 @@ export function renderContextPanel(
   const titleText = t("contextTitle");
   const heading = colorEnabled
     ? [renderDialogTitle(titleText, true)]
-    : [titleText, "─".repeat(displayWidth(titleText))];
+    : [titleText, boxGlyphs(resolveBoxCharset()).h.repeat(displayWidth(titleText))];
   return [
     ...heading,
     field(labels[0], `${state.agentName} (${state.agentKey})`),

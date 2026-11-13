@@ -59,16 +59,21 @@ export const agentStrings = {
   runRowNote: { en: "note", zh: "备注" },
   runRowError: { en: "error", zh: "错误" },
   runRowTask: { en: "task", zh: "任务" },
-  // listAgents card header (`Agents (3)` / `智能体 (3)`). The shared ai
-  // renderer keeps the English default; the CLI relabels the header line.
-  agentsListLabel: { en: "Agents ({0})", zh: "智能体 ({0})" },
-  agentsCompactCount: { en: "Agents · {0}", zh: "智能体 · {0} 个" },
+  // listAgents card header (`🤖 (3)` / `🤖 · 3 个`). The 🤖 marker replaces the
+  // stiff type word ("Agents" / "智能体"), the same way the run zone labels an
+  // agent run; the count stays a plain number. The shared ai renderer keeps the
+  // English default; the CLI relabels the header line.
+  agentsListLabel: { en: "🤖 ({0})", zh: "🤖 ({0})" },
+  agentsCompactCount: { en: "🤖 · {0}", zh: "🤖 · {0} 个" },
   agentsPageCount: { en: "{0} on this page", zh: "本页 {0} 个" },
   agentsTruncated: { en: "incomplete", zh: "结果不完整" },
   // Fallback identity for auto-generated agent ids (run zone / dock / panel).
   subAgentName: {
-    en: "Sub-agent",
-    zh: "智能体",
+    // Type marker for an agent row without a real name. The emoji replaces the
+    // stiff type words ("Sub-agent" / "智能体"); real names, titles and
+    // status keep their own slots.
+    en: "🤖",
+    zh: "🤖",
   },
   // Status vocabulary the fixed run zone does not label (running shows only its
   // elapsed time there). `en` must stay equal to the raw store status so a
@@ -97,7 +102,7 @@ export const agentStrings = {
     en: "for {0}",
     zh: "已运行 {0}",
   },
-  runZoneAgentType: { en: "agent", zh: "智能体" },
+  runZoneAgentType: { en: "🤖", zh: "🤖" },
   // Terminal linger line: `✓ <run> · done · took 12m03s`.
   runZoneDone: { en: "done", zh: "完成" },
   runZoneFailed: { en: "failed", zh: "失败" },

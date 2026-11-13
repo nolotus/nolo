@@ -34,12 +34,16 @@ export const authStrings = {
     zh: "登录成功。Token 已写入 profile，当前会话立即生效。",
   },
   loginFailed: {
-    en: "Login failed: {0}",
-    zh: "登录失败：{0}",
+    en: "Login failed: {0}. Run /login again.",
+    zh: "登录失败：{0}。请重新执行 /login。",
   },
   loginTimeout: {
-    en: "Login timed out. Run /login again, or use `nolo login --token <jwt>` in a shell.",
-    zh: "登录超时。请重新执行 /login，或在 shell 里用 nolo login --token <jwt>。",
+    en: "Login timed out. Run /login again.",
+    zh: "登录超时。请重新执行 /login。",
+  },
+  loginAlreadyRunning: {
+    en: "Login is already running. Press Esc or Ctrl+C to cancel it before retrying /login.",
+    zh: "登录正在进行。请先按 Esc 或 Ctrl+C 取消，再重新执行 /login。",
   },
   loginCancelled: {
     en: "Login cancelled.",

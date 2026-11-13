@@ -327,7 +327,6 @@ const AgentForm: React.FC<AgentFormProps> = ({
           model: sanitizedDraft.model || DEFAULT_MODEL.name,
           name: sanitizedDraft.name || "",
           prompt: sanitizedDraft.prompt || "",
-          description: sanitizedDraft.description || "",
           apiSource: sanitizedDraft.apiSource ?? "platform",
           tags: Array.isArray(sanitizedDraft.tags)
             ? sanitizedDraft.tags.join(", ")
@@ -335,6 +334,11 @@ const AgentForm: React.FC<AgentFormProps> = ({
           useServerProxy: sanitizedDraft.useServerProxy ?? true,
           isPublic: sanitizedDraft.isPublic ?? false,
           allowFork: sanitizedDraft.allowFork ?? false,
+          hasVision: sanitizedDraft.hasVision ?? false,
+          disabledTools: sanitizedDraft.disabledTools ?? [],
+          enabledPacks: sanitizedDraft.enabledPacks ?? [],
+          enableThinking: sanitizedDraft.enableThinking ?? false,
+          linkedSpaces: sanitizedDraft.linkedSpaces ?? [],
           temperature: sanitizedDraft.temperature,
           top_p: sanitizedDraft.top_p,
           max_tokens: sanitizedDraft.max_tokens,
@@ -609,7 +613,10 @@ const AgentForm: React.FC<AgentFormProps> = ({
     } catch (err: any) {
       // 提交失败时，给用户恰好一个分类错误提示（403 权限不足 / 409 冲突 / 网络或超时未确认 / 其它给安全说明）
       // 保留草稿（不重置表单）、不关对话框（不调 onClose）、不发成功后的快照请求
-      const message = resolveAgentSubmitErrorMessage(err, t);
+      const message = resolveAgentSubmitErrorMessage(err, (key: string, fallback?: string) => {
+        const value = t(key, { defaultValue: fallback ?? key });
+        return typeof value === "string" ? value : (fallback ?? key);
+      });
       toast.error(message);
     }
   };

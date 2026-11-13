@@ -393,6 +393,21 @@ export function computeBaselineContextTokens(
   return typeof fallbackEstimate === "function" ? fallbackEstimate() : fallbackEstimate;
 }
 
+/** A turn without a new provider receipt cannot invalidate the last authoritative snapshot. */
+export function preserveContextUsageWithoutReceipt(previous: {
+  turnTokens?: TurnTokenUsage;
+  lastAuthorityTurnCount?: number;
+}, estimatedContextTokens: number) {
+  return {
+    turnTokens: previous.turnTokens,
+    lastAuthorityTurnCount: previous.lastAuthorityTurnCount,
+    estimatedContextTokens,
+    liveTurnEstimatedTokens: previous.turnTokens && previous.turnTokens.input > 0
+      ? Math.max(0, estimatedContextTokens - previous.turnTokens.input) || undefined
+      : undefined,
+  };
+}
+
 export type ResolveContextUsageInput = {
   tokens?: TurnTokenUsage;
   fallbackContextWindow?: number;

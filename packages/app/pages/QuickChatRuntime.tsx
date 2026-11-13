@@ -28,7 +28,7 @@ import * as stylex from "@stylexjs/stylex";
 import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
 import "chat/web/chatStylexEscapeHatch.css";
 import { getIsDesktopApp } from "app/utils/env";
-import { readSelectedDesktopFolderPath, DESKTOP_FOLDER_SELECTION_EVENT, readDesktopDefaultWorkspacePath } from "chat/web/desktopFolderProjects";
+import { readSelectedDesktopFolderPath, DESKTOP_FOLDER_SELECTION_EVENT, resolveDialogWorkspaceFolder } from "chat/web/desktopFolderProjects";
 import { noloAgentId } from "core/init";
 import { bindDialogToProject, readSelectedDesktopFolderProject } from "chat/web/desktopFolderProjects";
 import { asTrimmedString } from "core/trimmedString";
@@ -52,7 +52,7 @@ import { BrowseContextIndicator } from "chat/web/BrowseContextIndicator";
 import FileUploadButton from "chat/web/FileUploadButton";
 import SendButton from "chat/web/SendButton";
 import VoiceInputButton from "chat/web/VoiceInputButton";
-import { useAutoResizeTextarea } from "app/hooks/useAutoResizeTextarea";
+import { useSmoothTextareaHeight } from "app/hooks/useSmoothTextareaHeight";
 import { useMessageInputFiles } from "chat/web/useMessageInputFiles";
 import {
   buildQuickChatExtraParts,
@@ -80,7 +80,10 @@ import { isLiveAudioOnlyAgent } from "ai/agent/isLiveAudioOnlyAgent";
 import { LuSettings2 } from "react-icons/lu";
 import QuickChatModeSelector from "./QuickChatModeSelector";
 import QuickChatRuntimeSelector from "chat/web/QuickChatRuntimeSelector";
-import type { DialogRuntimeBinding } from "app/types";
+import type {
+  DialogRuntimeBinding,
+  DialogRuntimeTargetSelection,
+} from "app/types";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 // 默认档路由出来的对话统一叫 nolo（而不是具体型号名），型号换代不改标题。
 const QUICK_CHAT_AGENT_TITLES: Record<string, string> = {
@@ -609,16 +612,15 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         extraPartCount: extraParts.length,
       });
 
-      // Same resolution as DialogPage: bound Project, else the desktop default
-      // workspace. First turn and later turns must never resolve to different roots.
-      const desktopCwd = readDesktopDefaultWorkspacePath() ?? undefined;
-      // Resolve at dispatch time: sidebar navigation never mutates an existing run.
-      let selectedFolder: string | null = null;
-      if (getIsDesktopApp() && typeof window !== "undefined") {
-        try { selectedFolder = readSelectedDesktopFolderPath(window.localStorage); }
-        catch { selectedFolder = null; }
+      // The Project binding is persisted above; all turns use the same resolver.
+      const workspace = getIsDesktopApp() && typeof window !== "undefined"
+        ? resolveDialogWorkspaceFolder(window.localStorage, dialogKey, dialogSpaceId, currentUserId)
+        : null;
+      if (workspace?.missing) {
+        toast.error("绑定的 Project 已不存在，请重新选择工作目录");
+        return;
       }
-      const effectiveCwd = launchProject ? launchProject.localPath || null : selectedFolder || desktopCwd;
+      const effectiveCwd = workspace?.cwd;
       const runtimeOptions: AgentRuntimeOptions = {
         ...(getIsDesktopApp() ? { workspaceToolsHint: true } : {}),
         ...(getIsDesktopApp() && effectiveCwd ? { cwd: effectiveCwd } : {}),
@@ -766,12 +768,14 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     handleQuickChatFileSelection,
   ]);
 
-  const { handleChange: autoResizeOnChange } = useAutoResizeTextarea({
-    maxHeight: 360,
-    onTextChange: setText,
-    value: text,
-    ref: areaRef,
-  });
+  // 高度由 CSS 的 field-sizing 自量 + wrapper 过渡（见 QuickChat.css）；hook 只负责
+  // 把量到的高度同步到 wrapper，并在不支持 field-sizing 的浏览器退回 px 高度。
+  const { handleChange: autoResizeOnChange, wrapRef: composerWrapRef } =
+    useSmoothTextareaHeight({
+      onTextChange: setText,
+      value: text,
+      ref: areaRef,
+    });
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -894,6 +898,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
 
           <TextField
             className="message-input__textarea-wrap"
+            ref={composerWrapRef}
             aria-label={inputPlaceholder}
             aria-busy={isSending || undefined}
           >

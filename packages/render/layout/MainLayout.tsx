@@ -57,11 +57,16 @@ import { MobileDownloadBanner } from "./MobileDownloadBanner";
 import { getIsDesktopUiPreview } from "app/utils/env";
 import { getGuestNaturePage } from "./guestNaturePages";
 import { SidebarToggleContext } from "./SidebarToggleContext";
+import { useTranslation } from "react-i18next";
+import { LuPanelLeftClose, LuPanelLeftOpen } from "react-icons/lu";
 import "./layout.css";
 import "./sidebarContextToggle.css";
 
-const TopBar = lazy(() => import("./TopBar"));
 // 页脚只出现在内容型路由，懒加载避免拖累工作区首屏
+// GuestPageChrome stays lazy-only: eager import races layout unit tests (mock.restore timing)
+const GuestPageChrome = lazy(() =>
+  import("./PageTopChrome").then((module) => ({ default: module.GuestPageChrome })),
+);
 const SiteFooter = lazy(() => import("./SiteFooter"));
 const chatSidebarImport = () => import("chat/web/ChatSidebar");
 const ChatSidebar = lazy(chatSidebarImport);
@@ -73,7 +78,6 @@ const SidebarUserSection = lazy(
 );
 
 // Warm the sidebar chunk as soon as the shell mounts so first open is not cold.
-// TopBar stays lazy-only: eager import races layout unit tests (mock.restore timing)
 // and the Suspense slot below already reserves full --topbar-height (0px height jump).
 if (typeof window !== "undefined") {
   void chatSidebarImport();
@@ -331,6 +335,7 @@ const MainLayout: React.FC = () => {
   const sidebarContent = mainSidebar.content ?? defaultSidebarContent;
 
   const hasSidebar = sidebarContent !== null;
+  const { t } = useTranslation();
   const hasRail = !isMobile && renderChatSidebar && mainSidebar.content === null;
   // Explore 窄视口把 Context 列折叠成 Rail —— **只派生，不写 sidebarWidth**。
   // sidebarWidth 是服务端持久化的用户偏好（settingPersistence 的 appearance keys）；
@@ -340,6 +345,12 @@ const MainLayout: React.FC = () => {
     shouldFoldExploreContext && !exploreContextExpanded && sidebarWidth > 0;
   const effectiveSidebarWidth = exploreContextFolded ? 0 : sidebarWidth;
   const railOnly = hasRail && effectiveSidebarWidth <= 0;
+  // 侧边栏开关是 shell 级控件（控制整个布局），不属于任何页面；
+  // Rail 模式下由 Rail 自带的开关负责，这里不重复渲染。
+  const showShellSidebarToggle = hasSidebar && !hasRail;
+  const sidebarToggleLabel = isOpen
+    ? t("collapseSidebar", "收起侧边栏")
+    : t("expandSidebar", "展开侧边栏");
 
   const toggleSidebar = useCallback(() => {
     // Explore 窄视口下「点一次就必须展开」有两种起点，两者都要覆盖：
@@ -371,10 +382,12 @@ const MainLayout: React.FC = () => {
       if (transitionTimerRef.current) {
         clearTimeout(transitionTimerRef.current);
       }
-      // 约 180-220ms 减速过渡，加少量裕量 240ms 兜底收敛
+      // 260ms 减速过渡 + 裕量，兜底收敛；兜底必须 > CSS 260ms；
+      // transitionend 被目标宽度比较吞掉时（宽度未落到本次目标）由本定时器收尾，
+      // 否则动画中途被摘掉 is-transitioning 会闪断
       transitionTimerRef.current = setTimeout(() => {
         finishSidebarTransition();
-      }, 240);
+      }, 340);
       // 先让浏览器提交一帧「带过渡属性」的样式，再改宽度。宽度与过渡在同一帧
       // 生效时浏览器没有旧值可比较，动画不会发生（折叠看起来就是硬切）。
       pendingSidebarWidthRef.current = newWidth;
@@ -761,21 +774,30 @@ const MainLayout: React.FC = () => {
           </aside>
         )}
 
-        {/* 中心区域：TopBar + (Outlet 内容 + 右侧栏) */}
+        {/* 中心区域：(Outlet 内容 + 右侧栏)；全局顶栏已删除 */}
         <div className="MainLayout__center">
-          <Suspense
-            fallback={
-              <div
-                className="MainLayout__topbarSlot"
-                aria-hidden="true"
-              />
-            }
-          >
-            <TopBar
-              toggleSidebar={hasSidebar ? toggleSidebar : undefined}
-              isSidebarOpen={hasSidebar ? isOpen : false}
-              hasRail={hasRail}
-            />
+          {/* shell 级侧边栏开关：内容区左上角，对所有路由生效 */}
+          {showShellSidebarToggle && (
+            <button
+              type="button"
+              className="shell-sidebar-toggle"
+              data-hook="shell-sidebar-toggle"
+              onClick={toggleSidebar}
+              aria-label={sidebarToggleLabel}
+              aria-pressed={isOpen}
+            >
+              {isOpen ? (
+                <LuPanelLeftClose size={16} aria-hidden="true" />
+              ) : (
+                <LuPanelLeftOpen size={16} aria-hidden="true" />
+              )}
+            </button>
+          )}
+
+          {/* 游客页（首页 / 登录 / 定价 / 下载 / 法务）没有内容页头部，
+              主题·语言·登录等全局入口由这里承载。 */}
+          <Suspense fallback={null}>
+            <GuestPageChrome />
           </Suspense>
 
           <div
@@ -796,7 +818,7 @@ const MainLayout: React.FC = () => {
               )}
             </main>
 
-            {/* 右侧临时侧边栏：只挤压 Outlet，不挤压 TopBar */}
+            {/* 右侧临时侧边栏：只挤压 Outlet */}
             <aside
               ref={rightSidebarRef}
               className={`MainLayout__rightSidebar ${isRightOpen ? "is-open" : ""} ${isRightResizing ? "is-right-resizing" : ""}`}

@@ -45,6 +45,10 @@ export function getAgentInternalCommandEntries(): CommandEntry[] {
       return runAgentReadCommand(args, deps);
     }),
     createAgentRunCommand(["agent", "run"], "Run an agent"),
+    createEnvCommand(["agent", "recover-prepared-writer"], "Revoke an exact fenced-launch-v1 prepared writer attempt (--attempt-id required; no force)", async (args, deps) => {
+      const { runAgentRecoverPreparedWriterCommand } = await import("./agentRunControl");
+      return runAgentRecoverPreparedWriterCommand(args, { ...deps, output: process.stdout });
+    }),
     createEnvCommand(["agent", "ps"], "List active and recent local agent runs (--json for machine-readable output)", async (_args, deps) => {
       const { runAgentPsCommand } = await import("./agentRunControl");
       return runAgentPsCommand(_args, { ...deps, output: process.stdout });

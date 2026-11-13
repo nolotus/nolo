@@ -10,6 +10,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawn as spawnChildProcess } from "node:child_process";
 
 import { toErrorMessage } from "core/errorMessage";
+import { projectRunResultRead } from "./runResultReadProjection";
 import { isRecord } from "core/isRecord";
 import {
   filterRetainedLedgerRecords,
@@ -177,6 +178,7 @@ export {
 };
 
 type WorkspaceFileArgs = {
+  raw?: unknown;
   force?: unknown;
   path?: unknown;
   file_path?: unknown;
@@ -445,6 +447,11 @@ function describeRejectedArgValue(value: unknown) {
   return `a value of type ${typeof value}`;
 }
 
+/** 标记里回显的原值必须限长：否则非法入参能重新撑出超大输出（review R1）。 */
+function clipMarkerValue(text: string, max = 60) {
+  return text.length <= max ? text : `${text.slice(0, max)}…(${text.length} chars)`;
+}
+
 /**
  * Pure: returns the accepted value or the reason it was rejected, never both,
  * and never throws. Callers decide what to do with the rejection.
@@ -569,18 +576,18 @@ function parseLinesArg(value: unknown): { slice?: ReadFileSlice; warning?: strin
  */
 function readFileSliceArgs(args: WorkspaceFileArgs) {
   const warnings: string[] = [];
-  const withFallback = (slice: ReadFileSlice) => {
+  const withFallback = (slice: ReadFileSlice, invalidLines: string) => {
     warnings.push(
       `No usable line range remained; returned the first ${READ_FILE_SLICE_FALLBACK_LINES} lines instead of the whole file.`,
     );
-    return { ...slice, maxLines: READ_FILE_SLICE_FALLBACK_LINES, warnings };
+    return { ...slice, maxLines: READ_FILE_SLICE_FALLBACK_LINES, warnings, invalidLines };
   };
 
-  if (isAbsentArg(args.lines)) return { warnings };
+  if (isAbsentArg(args.lines)) return { warnings, invalidLines: undefined };
 
   const { slice, warning } = parseLinesArg(args.lines);
   if (warning) warnings.push(warning);
-  return slice ? { ...slice, warnings } : withFallback({});
+  return slice ? { ...slice, warnings, invalidLines: undefined } : withFallback({}, describeRejectedArgValue(args.lines));
 }
 
 /**
@@ -1225,7 +1232,7 @@ async function readFileTool(args: {
 }): Promise<AgentRuntimeToolResult> {
   const parsed = parseWorkspaceToolArguments(args.call.arguments);
   const requestedPath = requireWorkspaceToolPath(parsed);
-  const { warnings, ...sliceArgs } = readFileSliceArgs(parsed);
+  const { warnings, invalidLines, ...sliceArgs } = readFileSliceArgs(parsed);
   const approval = await resolveLocalWorkspaceToolApproval({
     workspaceRoot: args.workspaceRoot,
     requestedPath,
@@ -1235,7 +1242,9 @@ async function readFileTool(args: {
       : {}),
   });
   const absolutePath = approval.path;
-  const content = await readGuardApprovedFile(approval);
+  const originalContent = await readGuardApprovedFile(approval);
+  const projection = projectRunResultRead(absolutePath, originalContent, parsed.raw === true);
+  const content = projection.content;
   const activity = extractActivity(parsed);
   const sliced = sliceReadFileContent({
     content,
@@ -1245,7 +1254,24 @@ async function readFileTool(args: {
     content: sliced.content,
     totalLines: sliced.totalLines,
   });
-  const isTruncated = sliced.truncated || truncatedRead.truncatedByCharLimit;
+  // 非法 lines 参数仍返回内容（避免盲重试），但标记必须放在**内容首行**：
+  // 只写进 metadata.warnings 时它落在内容之后，模型实际读不到。
+  // 标记先于 metadata/ledger 定稿：bytes、truncated 与 retained 长度都必须描述
+  // 最终返回内容，而不是标记追加之前的正文（review R1/R2）。
+  const invalidLinesMarker = invalidLines !== undefined
+    ? `[readFile] lines=${clipMarkerValue(invalidLines)} was rejected (only ONE range: ${LINES_ARG_SYNTAX}); returned lines ${sliced.startLine}-${sliced.endLine} instead. Fix the argument before relying on this window.\n`
+    : "";
+  const finalRead = invalidLinesMarker.length > 0
+    ? defensivelyTruncateReadFile({
+        content: truncatedRead.content,
+        totalLines: sliced.totalLines,
+        limit: Math.max(1, READ_FILE_MAX_CHAR_LIMIT - invalidLinesMarker.length),
+      })
+    : truncatedRead;
+  const finalContent = invalidLinesMarker + finalRead.content;
+  // 两次截断的 flag 必须取 OR：第二次截断的输入已是第一次的产物，它看不见第一次丢掉的内容。
+  const truncatedByCharLimit = truncatedRead.truncatedByCharLimit || finalRead.truncatedByCharLimit;
+  const isTruncated = sliced.truncated || truncatedByCharLimit;
   const relativePath = normalizeWorkspaceRelativePath({
     workspaceRoot: resolve(args.workspaceRoot),
     targetPath: absolutePath,
@@ -1262,7 +1288,9 @@ async function readFileTool(args: {
   const force = parsed.force === true;
   const ledger = args.readLedger;
   const requestRange = { startLine: sliced.startLine, endLine: sliced.endLine };
-  const fingerprint = createHash("sha1").update(content).digest("hex").slice(0, 20);
+  // Raw evidence and its reading projection must never deduplicate each other.
+  const fingerprint = createHash("sha1").update(originalContent)
+    .update(parsed.raw === true ? "\0raw" : "\0default").digest("hex").slice(0, 20);
   let entry = ledger?.get(relativePath);
   if (entry && entry.fingerprint !== fingerprint) {
     entry = undefined;
@@ -1297,13 +1325,18 @@ async function readFileTool(args: {
   }
   const metadata = {
     path: relativePath,
-    bytes: Buffer.byteLength(truncatedRead.content),
-    totalBytes: Buffer.byteLength(content),
+    bytes: Buffer.byteLength(finalContent),
+    totalBytes: Buffer.byteLength(originalContent),
+    ...(projection.projected ? {
+      projection: "run-result-observations",
+      projectedTotalBytes: Buffer.byteLength(content),
+      rawReadHint: "readFile raw:true reads original evidence; line numbers are unchanged.",
+    } : {}),
     startLine: sliced.startLine,
     endLine: sliced.endLine,
     totalLines: sliced.totalLines,
     truncated: isTruncated,
-    ...(truncatedRead.truncatedByCharLimit ? { truncatedByByteLimit: true, truncatedByCharLimit: true } : {}),
+    ...(truncatedByCharLimit ? { truncatedByByteLimit: true, truncatedByCharLimit: true } : {}),
     ...(sliceArgs.maxLines ? { maxLines: sliceArgs.maxLines } : {}),
     ...(sliceArgs.tailLines ? { tailLines: sliceArgs.tailLines } : {}),
     ...(warnings.length
@@ -1318,7 +1351,7 @@ async function readFileTool(args: {
     // whole string. Keeping the ledger in the same units makes the retention
     // gate match exactly what history still holds.
     const persistedChars =
-      truncatedRead.content.length +
+      finalContent.length +
       "\n\n[tool metadata]\n".length +
       JSON.stringify(metadata).length;
     const records = entry?.records ?? [];
@@ -1334,7 +1367,8 @@ async function readFileTool(args: {
       ledger.delete(oldestKey);
     }
   }
-  return { content: truncatedRead.content, metadata };
+  // 非法 lines 参数仍返回内容（避免盲重试），标记由上面的 finalContent 统一处理。
+  return { content: finalContent, metadata };
 }
 
 /**
@@ -2637,8 +2671,9 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
           paths.some((path) => typeof path !== "string" || !path.trim())) {
         throw new Error("read_image: paths must contain 1 to 4 non-empty string paths (maximum 4 images)");
       }
+      const imagePaths = paths.filter((path): path is string => typeof path === "string");
       // Return only after every image succeeds; never expose a partial batch.
-      const results = await Promise.all(paths.map(async (path: string) => {
+      const results = await Promise.all(imagePaths.map(async (path) => {
         try {
           const absolutePath = await resolveLocalWorkspaceToolPath({
             workspaceRoot: args.workspaceRoot,
