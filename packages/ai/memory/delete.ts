@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { _appendRetiredStateBatch, loadMemoryVNextCatalog } from "./vnext/store";
 import type { MemoryStateVNext } from "./vnext/types";
+import { deriveStateResident } from "./vnext/pureVNextRuntime";
 
 /**
  * Public id shape for a vNext current state, as projected by queryMemory.
@@ -43,7 +44,8 @@ const toVNextMemoryItem = (
   activationCount: 1,
   importance: 0.9,
   confidence: 0.9,
-  resident: state.facet === "preference" || state.facet === "style",
+  // 与其余三条合成路径共用同一判定（2026-11-15 收敛）。
+  resident: deriveStateResident(state, owner.ownerType),
 });
 
 /**

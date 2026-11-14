@@ -3,6 +3,7 @@ import { buildLegacyMemoryEvidence, resolveLegacyMemoryPrincipal } from "./legac
 import { currentStatesCitingEvidence, loadExistingContext } from "./lazyPromotion";
 import { loadMemoryVNextCatalog } from "./store";
 import { recallMemoryVNextLocal, type MemoryVNextLocalRecallHit } from "./localRecall";
+import { deriveStateResident } from "./pureVNextRuntime";
 import type { MemoryEntityVNext, MemoryStateVNext } from "./types";
 
 /**
@@ -77,8 +78,9 @@ const buildSynthesizedStateItem = (
   createdAt: state.createdAt,
   importance: 0.9,
   confidence: 0.9,
-  // Flag resident preferences so they flow into overlay's resident section.
-  resident: state.facet === "preference" || state.facet === "style",
+  // 与 pureVNextRuntime / queryMemoryHandler 共用同一判定，避免四条合成路径分裂
+  // （2026-11-15：这里原先各自写 facet，漏了 ownerType/长度约束）。
+  resident: deriveStateResident(state, ownerType),
   lastActivatedAt: state.createdAt,
   activationCount: 1,
 });

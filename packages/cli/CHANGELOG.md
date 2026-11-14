@@ -1,4 +1,11 @@
 
+## 0.224.0-alpha.2 (2026-11-14)
+
+### Bug Fixes
+
+* **memory:** 把 resident 守卫收敛到全部四条合成路径 ([6bc645d](https://github.com/nolotus/bun-nolo/commit/6bc645d2940a17f1048c5fa1b2a2c0832dd12628))
+
+
 ## 0.224.0-alpha.1 (2026-11-14)
 
 ### Features
