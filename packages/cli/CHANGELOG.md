@@ -1,4 +1,11 @@
 
+## 0.215.1-alpha.2 (2026-11-14)
+
+### Bug Fixes
+
+* **context:** 压缩摘要请求去掉逐条占位骨架，长会话不再永久 no-budget ([408e9f1](https://github.com/nolotus/bun-nolo/commit/408e9f17ffa6796840ad050f6f718108bb6def35))
+
+
 ## 0.215.1-alpha.1 (2026-11-13)
 
 ### Bug Fixes

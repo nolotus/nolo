@@ -267,10 +267,53 @@ export type CompactionRequestMessage = {
   }>;
 };
 
+/**
+ * blocked 请求的数值诊断——**一个对象、一份字段**：既回答「哪一项吃掉了预算」
+ * （`previousSummary` 本身超上限 / 骨架与文件操作清单 / 消息太多），也回答
+ * 「当时的预算口径是多少」。纯观测字段，不参与任何判定、也不改变任何预算数值。
+ *
+ * 契约（两条同时成立）：
+ * - **所有** blocked 返回都带 `diagnostics`（类型必填，不是可省略字段）；
+ * - 只含数值与计数：不含消息正文、不含摘要正文、不含文件路径内容
+ *   （`fileOpsCount` 只给条数）。
+ *
+ * 为什么需要：2026-11-13 22:35 起同一 dialog 反复 hash-mismatch → no-budget，
+ * 而日志只有 `bounded compaction blocked: no-budget` 一行，无法判断到底是哪一项
+ * 撑爆（旧摘要太长 / 文件操作清单太长 / 消息条数太多 / 窗口太小）。
+ */
+export type BoundedCompactionDiagnostics = {
+  /** 生效的上下文窗口；窗口非法时为 0（占位，不参与判定）。 */
+  contextWindow?: number;
+  /** 摘要输入上限（token）。 */
+  cap: number;
+  /** 输出预留：`Math.min(8192, Math.max(1, Math.floor(window / 4)))`。 */
+  outputTokenBudget: number;
+  /** 【现有记忆】（previousSummary）的估算 token；**不截断**，超限即失败。 */
+  previousSummaryTokens: number;
+  /** 待压缩消息条数。 */
+  messageCount: number;
+  /** system prompt 的估算 token（走到固定成本核算后才有）。 */
+  systemTokens?: number;
+  /** prompt 模板骨架 + 文件操作清单的估算 token。 */
+  templateTokens?: number;
+  /** 剩余可分配给消息内容的 token（`cap - 固定成本`），可能 ≤ 0。 */
+  availableTokens?: number;
+  /** 最终逐条展开的消息条数。 */
+  expandedMessages?: number;
+  /** 最终合并成省略段声明的消息条数。 */
+  omittedMessages?: number;
+  /** 骨架（模板 + 文件操作清单 + 空消息段）的估算 token；固定成本溢出时才有。 */
+  baseTokens?: number;
+  /** 文件操作清单的条数（**不含路径内容**）。 */
+  fileOpsCount?: number;
+};
+
 export type BoundedCompactionRequest<T extends CompactionRequestMessage> =
   | { status: "ready"; promptContent: string; coveredMessages: T[];
       summarizedBeforeId: string; inputTokens: number; outputTokenBudget: number; partial: boolean }
-  | { status: "blocked"; reason: "invalid-window" | "empty-input" | "no-budget" | "no-safe-group" | "group-too-large" };
+  | { status: "blocked"; reason: "invalid-window" | "empty-input" | "no-budget" | "no-safe-group" | "group-too-large";
+      /** 必填：所有 blocked 一律携带，见 `BoundedCompactionDiagnostics` 的契约。 */
+      diagnostics: BoundedCompactionDiagnostics };
 
 /** Head, evidence and tail are selected from the original, never from an
  * already truncated projection. This is intentionally separate from the
@@ -301,6 +344,47 @@ function makeBoundedExcerpt(content: string): (maxChars: number) => string {
 }
 
 /**
+ * 未展开消息的省略段声明里角色计数的固定顺序：同一输入产出稳定文本，
+ * 测试与日志可直接核对（范围 + 各角色条数必须完整覆盖被省略的区间）。
+ */
+const OMITTED_ROLE_ORDER = ["user", "assistant", "tool", "system"] as const;
+
+/**
+ * 逐条展开一行的最小内容额度（token）。低于它时该行只剩 `role: ` 加截取标记，
+ * 几乎不含信息，不如并进省略段声明——这正是千条历史每轮 `no-budget` 的来源：
+ * 旧实现为每条消息强制输出一行骨架（实测 12.3 token/条），3000 条即 37k token，
+ * 单是骨架就超过 `SUMMARY_INPUT_MAX_TOKENS`。
+ */
+const MIN_INLINE_CONTENT_TOKENS = 12;
+
+/** 把一段连续未展开消息渲染成一行声明（区间 1 起、含两端）。 */
+function formatOmittedRun(start: number, end: number, counts: Map<string, number>): string {
+  const ordered = [
+    ...OMITTED_ROLE_ORDER,
+    ...[...counts.keys()].filter((role) => !(OMITTED_ROLE_ORDER as readonly string[]).includes(role)),
+  ];
+  const parts = ordered
+    .filter((role) => (counts.get(role) ?? 0) > 0)
+    .map((role) => `${role} ${counts.get(role)}`);
+  const range = start === end ? `消息 ${start + 1}` : `消息 ${start + 1}–${end + 1}`;
+  return `[... ${range} 已省略：${parts.join("、")} ...]`;
+}
+
+/** 头部（最早消息，承载原始目标）拿到的预算份额。 */
+const SUMMARY_HEAD_SHARE = 0.4;
+/** 给「中间整段省略成一行」预留的 token，避免头部/尾部把预算吃光后无法声明。
+ * 实际值在极小预算下按 `min(该值, budget/4)` 收缩，否则一条消息都放不进会白白 blocked。 */
+const DECLARATION_RESERVE = 40;
+/** 中间区用户消息的重纳阈值（单条估算 token 上限）。只有用户消息能进：
+ * 它们承载意图/授权/反证/决定；tool 结果必须配 tool_calls 才有意义，
+ * assistant 长文按 token 单价最差，二者都不值得为它拆开省略段。 */
+const USER_MESSAGE_MAX_DEMAND = 600;
+/** 用户消息（意图/授权/反证/决定）在中间区可花的预算份额，与 head 份额独立。 */
+const SUMMARY_USER_SHARE = 0.2;
+/** 拆开一个已有省略段、改写成两段声明的最小额外成本。 */
+const DECLARATION_SPLIT_COST = 20;
+
+/**
  * Project the entire safe plan, retaining every message's role and order. Input
  * counts use the shared estimator, not the provider's tokenizer. Original
  * messages stay in history; projected message text (including user text) can be lossy.
@@ -312,17 +396,46 @@ export function buildBoundedCompactionRequest<T extends CompactionRequestMessage
   canonicalizeToolName?: (name: string) => string;
 }): BoundedCompactionRequest<T> {
   const { msgsToCompress: msgs, previousSummary, contextWindow } = args;
-  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return { status: "blocked", reason: "invalid-window" };
-  if (!msgs.length) return { status: "blocked", reason: "empty-input" };
-  const window = Math.floor(contextWindow);
-  const outputTokenBudget = Math.min(8192, Math.max(1, Math.floor(window / 4)));
-  const cap = Math.min(computeSummaryInputTokenCap(contextWindow), window - outputTokenBudget);
+  // 窗口/预算数值保持原有口径（`Math.min(8192, ...)` 一字未改）；只是提前算出，
+  // 好让 blocked 诊断能如实报告当时用的数值。窗口非法时用 0 占位。
+  const windowValid = Number.isFinite(contextWindow) && contextWindow > 0;
+  const window = windowValid ? Math.floor(contextWindow) : 0;
+  const outputTokenBudget = windowValid
+    ? Math.min(8192, Math.max(1, Math.floor(window / 4)))
+    : 0;
+  const cap = windowValid
+    ? Math.min(computeSummaryInputTokenCap(contextWindow), window - outputTokenBudget)
+    : 0;
+  /**
+   * blocked 一律带数值诊断（纯观测，不参与判定；`fileOpsCount` 只给条数，
+   * 不含路径内容）。分项按阶段补齐：固定成本核算之后才有的字段用 extra 传。
+   *
+   * `previousSummary` 的估算只在失败路径上做——健康路径不多付一次
+   * `estimateTokenCount`（旧摘要可达 24k+ 字符，那是热路径）。
+   */
+  const blocked = (
+    reason: "invalid-window" | "empty-input" | "no-budget" | "no-safe-group" | "group-too-large",
+    extra: Partial<BoundedCompactionDiagnostics> = {},
+  ): BoundedCompactionRequest<T> => ({
+    status: "blocked",
+    reason,
+    diagnostics: {
+      contextWindow: window,
+      cap,
+      outputTokenBudget,
+      previousSummaryTokens: estimateTokenCount(previousSummary ?? ""),
+      messageCount: msgs.length,
+      ...extra,
+    },
+  });
+  if (!windowValid) return blocked("invalid-window");
+  if (!msgs.length) return blocked("empty-input");
   const systemTokens = estimateTokenCount(COMPACTION_SUMMARY_SYSTEM_PROMPT);
 
   // Require the whole input to consist of closed tool groups, not just a safe prefix.
   for (let i = 0; i < msgs.length;) {
     const msg = msgs[i];
-    if (msg.role === "tool") return { status: "blocked", reason: "no-safe-group" };
+    if (msg.role === "tool") return blocked("no-safe-group");
     const calls = msg.role === "assistant" && Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
     if (!calls.length) {
       i++;
@@ -333,7 +446,7 @@ export function buildBoundedCompactionRequest<T extends CompactionRequestMessage
     // Legacy positional pairing is allowed only when every call and result
     // omits its ID. Empty or mixed IDs are not a valid pairing mode.
     if ((!hasIds && ids.some((id) => id !== undefined)) || (hasIds && new Set(ids).size !== ids.length)) {
-      return { status: "blocked", reason: "no-safe-group" };
+      return blocked("no-safe-group");
     }
     const remaining = new Set(ids);
     let count = 0;
@@ -341,12 +454,12 @@ export function buildBoundedCompactionRequest<T extends CompactionRequestMessage
     while (i < msgs.length && msgs[i].role === "tool") {
       const id = msgs[i].tool_call_id;
       if (hasIds ? (!id || !remaining.delete(id)) : id !== undefined) {
-        return { status: "blocked", reason: "no-safe-group" };
+        return blocked("no-safe-group");
       }
       count++;
       i++;
     }
-    if (count !== calls.length || (hasIds && remaining.size)) return { status: "blocked", reason: "no-safe-group" };
+    if (count !== calls.length || (hasIds && remaining.size)) return blocked("no-safe-group");
   }
 
   const canonicalize = args.canonicalizeToolName ?? ((name: string) => name);
@@ -359,50 +472,57 @@ export function buildBoundedCompactionRequest<T extends CompactionRequestMessage
   }
   const labelsByOperation = { read: "读取", write: "写入", edit: "编辑" };
   const fileOpsText = [...operations.values()].map((op) => `- ${labelsByOperation[op.type]}: ${op.path}`).join("\n") || "无";
-  const note = "以下是有损投影，部分消息可能被截取；原文仍存历史。";
+  const note = "以下是有损投影：部分消息被截取，连续省略的区间合并为一行 [...] 声明；原文仍存历史。";
   const omitted = "[... 内容已截取 ...]";
   const contents = msgs.map((msg) => serializeMessageContent(msg.content) || formatMessageContentFallback(msg));
   const excerpts = contents.map((content) => makeBoundedExcerpt(content));
   const raw = contents.map((content, i) => msgs[i].role === "tool" ? excerpts[i]!(TOOL_RESULT_TRUNCATE_CHARS) : content);
   // Anchors use coveredMessages, not prompt labels. Repeating long IDs here
   // consumes the budget needed for actual content in thousand-message plans.
-  const labels = msgs.map((msg) => `${msg.role}: `);
-  const projected = msgs.map(() => omitted);
-  const makePrompt = () => buildCompactionUserContent({
-    previousSummary, fileOpsText, outputTokenBudget,
-    messagesText: `${note}\n${labels.map((label, i) => label + projected[i]).join("\n")}`,
+  const promptFor = (messagesText: string) => buildCompactionUserContent({
+    previousSummary, fileOpsText, outputTokenBudget, messagesText,
   });
-  const base = makePrompt();
-  const baseTokens = systemTokens + estimateTokenCount(base);
-  if (baseTokens > cap) return { status: "blocked", reason: "no-budget" };
-
-  // Allocate remaining tokens fairly: user intent gets weight 4, assistant 2,
-  // tool output 1. User text must also be projectable, or large requests make
-  // the mandatory base permanently exceed the cap. Short messages return
-  // their unused share. Estimating
-  // each addition separately rounds upward and therefore cannot exceed the cap.
-  const remaining = cap - baseTokens;
   const demands = raw.map((text) => estimateTokenCount(text));
-  const weights = msgs.map((msg) => msg.role === "user" ? 4 : msg.role === "assistant" ? 2 : 1);
-  let low = 0;
-  let high = remaining + 1;
-  while (low + 1 < high) {
-    const mid = Math.floor((low + high) / 2);
-    const used = demands.reduce((sum, demand, i) => sum + Math.min(demand, mid * weights[i]), 0);
-    if (used <= remaining) low = mid;
-    else high = mid;
+  /** Per-line overhead of `role: ` + newline, charged before any content. */
+  const lineOverheads = msgs.map((msg) => estimateTokenCount(`${msg.role}: `) + 1);
+
+  // Fixed cost: system prompt + template skeleton (note, section headers, file
+  // ops) + previousSummary. previousSummary is never truncated — silently
+  // shrinking 【现有记忆】 would rewrite the facts carried over from earlier
+  // rounds, so an oversized one fails loudly instead.
+  const fixedTokens = systemTokens + estimateTokenCount(promptFor(`${note}\n`));
+  const availableTokens = cap - fixedTokens;
+  const diagnosticsOf = (
+    expandedMessages: number,
+    omittedMessages: number,
+  ): BoundedCompactionDiagnostics => {
+    // 诊断分项只在失败路径上算：健康路径不多付「旧摘要 + 空消息段骨架」的两次
+    // estimateTokenCount（旧摘要可达 24k+ 字符，那是压缩热路径）。
+    const previousSummaryTokens = estimateTokenCount(previousSummary ?? "");
+    const baseTokens = systemTokens + estimateTokenCount(promptFor(""));
+    return {
+      contextWindow: window,
+      cap,
+      outputTokenBudget,
+      previousSummaryTokens,
+      messageCount: msgs.length,
+      systemTokens,
+      templateTokens: fixedTokens - systemTokens - previousSummaryTokens,
+      availableTokens,
+      expandedMessages,
+      omittedMessages,
+      baseTokens,
+      fileOpsCount: operations.size,
+    };
+  };
+  if (availableTokens <= 0) {
+    return blocked("no-budget", diagnosticsOf(0, msgs.length));
   }
-  let extra = remaining - demands.reduce((sum, demand, i) => sum + Math.min(demand, low * weights[i]), 0);
-  for (let i = 0; i < msgs.length; i++) {
-    let allowance = Math.min(demands[i], low * weights[i]);
-    const bonus = Math.min(extra, demands[i] - allowance);
-    allowance += bonus;
-    extra -= bonus;
-    if (demands[i] <= allowance) {
-      projected[i] = raw[i];
-      continue;
-    }
-    // Search against the original content; count the actual marker and excerpt.
+
+  /** Fit an already-selected message into its allowance, keeping head, evidence
+   * lines and tail of the original (never of a previous projection). */
+  const projectContent = (i: number, allowance: number): string => {
+    if (demands[i] <= allowance) return raw[i];
     let lo = 0;
     let hi = Math.min(contents[i].length, msgs[i].role === "tool" ? TOOL_RESULT_TRUNCATE_CHARS : contents[i].length);
     let best = omitted;
@@ -416,14 +536,229 @@ export function buildBoundedCompactionRequest<T extends CompactionRequestMessage
         hi = mid - 1;
       }
     }
-    projected[i] = best;
+    return best;
+  };
+
+  /**
+   * Pick which messages are expanded into `role: content` lines.
+   *
+   * Expansion is positional, not size-ranked: a pure size threshold has no
+   * feasible partition when thousands of messages are the same size (measured:
+   * a level allocator keeps either all 3000 or none, so the request stayed
+   * blocked), and it also silently drops user intent while keeping assistant
+   * prose. Regions instead:
+   *  - head: contiguous oldest messages, which carry 原始目标;
+   *  - user messages in the middle (authorization, refutations, decisions) —
+   *    the highest value per token, admitted inside their own budget share;
+   *  - tail: contiguous newest messages, which carry current progress;
+   *  - middle: everything else, declared as one omission line per run.
+   */
+  const selectRegions = (budget: number) => {
+    const expanded = msgs.map(() => false);
+    const allowances = msgs.map(() => 0);
+    let used = 0;
+    // One declaration line must always fit, but on a tiny budget a fixed 40
+    // tokens would starve every message and block a request that has room.
+    const declarationReserve = Math.min(DECLARATION_RESERVE, Math.max(4, Math.floor(budget / 4)));
+    const room = () => budget - used - declarationReserve;
+    const takeFull = (i: number) => {
+      expanded[i] = true;
+      allowances[i] = demands[i];
+      used += lineOverheads[i] + demands[i];
+    };
+    const drop = (i: number) => {
+      if (!expanded[i]) return;
+      expanded[i] = false;
+      used -= lineOverheads[i] + allowances[i];
+      allowances[i] = 0;
+    };
+
+    // 1) Head: the oldest messages, which carry 原始目标. Bounded by its own
+    //    share so one huge earliest message cannot take the whole budget; when
+    //    even the first message does not fit that share, it still gets whatever
+    //    room exists rather than leaving the prompt empty.
+    const headBudget = Math.floor(budget * SUMMARY_HEAD_SHARE);
+    let headEnd = -1;
+    let headUsed = 0;
+    for (let i = 0; i < msgs.length; i++) {
+      const cost = lineOverheads[i] + demands[i];
+      const limit = i === 0 ? Math.max(headBudget, room()) : headBudget - headUsed;
+      if (cost > limit) break;
+      takeFull(i);
+      headUsed += cost;
+      headEnd = i;
+    }
+
+    // 2) User content: user messages carry intent, authorization, refutations and
+    //    decisions — the highest value per token in a summary request — so they are
+    //    admitted newest-first (a decision governs what happens next) up to their
+    //    own budget share. Long user texts stay for the boundary projection below.
+    //    Only runs of non-user messages are declared, so the number of omission
+    //    lines is bounded by the number of user turns, not by the message count.
+    const userBudget = Math.floor(budget * SUMMARY_USER_SHARE);
+    let userSpend = 0;
+    for (let i = msgs.length - 1; i > headEnd; i--) {
+      if (expanded[i] || msgs[i].role !== "user") continue;
+      if (demands[i] > USER_MESSAGE_MAX_DEMAND) continue;
+      const cost = lineOverheads[i] + demands[i] + DECLARATION_SPLIT_COST;
+      if (userSpend + cost > userBudget || cost > room()) continue;
+      takeFull(i);
+      userSpend += cost;
+    }
+
+    // 3) Tail: the newest messages, which carry current progress. Contiguous
+    //    from the end; a message that does not fit whole ends the region so the
+    //    tail stays one clean run.
+    let tailStart = msgs.length;
+    for (let i = msgs.length - 1; i > headEnd; i--) {
+      if (expanded[i]) {
+        tailStart = i;
+        continue;
+      }
+      if (lineOverheads[i] + demands[i] > room()) break;
+      takeFull(i);
+      tailStart = i;
+    }
+
+    // 4) Boundary projection: keep head, evidence lines and tail of the one
+    //    oversized message adjacent to each region. This is the only place
+    //    message text is truncated instead of declared omitted, and each side is
+    //    capped so one huge message cannot consume the other's share.
+    const boundaryCap = Math.floor(room() * 0.5);
+    const takeBoundary = (i: number) => {
+      const inline = Math.min(room(), boundaryCap) - lineOverheads[i];
+      if (inline < MIN_INLINE_CONTENT_TOKENS) return false;
+      expanded[i] = true;
+      allowances[i] = inline;
+      used += lineOverheads[i] + inline;
+      return true;
+    };
+    if (tailStart - 1 > headEnd && !expanded[tailStart - 1] && takeBoundary(tailStart - 1)) tailStart--;
+    if (headEnd + 1 < tailStart && !expanded[headEnd + 1] && takeBoundary(headEnd + 1)) headEnd++;
+
+    // 5) Contiguous fill: grow the existing regions (tail first — recent
+    //    progress outranks old context) while whole messages fit, instead of
+    //    punching more holes that each cost another declaration line.
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (let i = tailStart - 1; i > headEnd; i--) {
+        if (expanded[i]) {
+          tailStart = i;
+          continue;
+        }
+        if (lineOverheads[i] + demands[i] > room()) break;
+        takeFull(i);
+        tailStart = i;
+        grew = true;
+        break;
+      }
+      for (let i = headEnd + 1; i < tailStart; i++) {
+        if (expanded[i]) {
+          headEnd = i;
+          continue;
+        }
+        if (lineOverheads[i] + demands[i] > room()) break;
+        takeFull(i);
+        headEnd = i;
+        grew = true;
+        break;
+      }
+    }
+
+    // --- Tool group integrity: a call and its results are one unit ---
+    // Pair every result to the call it answers by `tool_call_id` (positional
+    // only when ids are absent everywhere, the same rule the safe-group
+    // validation above accepts). A single assistant message can own several
+    // results, so a `msgs[i - 1]` neighbour check cannot express this pairing.
+    const callOfResult = new Map<number, number>();
+    const resultsOfCall = new Map<number, number[]>();
+    for (let i = 0; i < msgs.length; i++) {
+      const msg = msgs[i];
+      const calls = msg.role === "assistant" && Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+      if (!calls.length) continue;
+      const ids = calls.map((call) => call.id);
+      const byId = ids.every((id) => typeof id === "string" && id.length > 0);
+      const results: number[] = [];
+      for (let j = i + 1; j < msgs.length && msgs[j].role === "tool"; j++) {
+        const id = msgs[j].tool_call_id;
+        if (!(byId ? typeof id === "string" && ids.includes(id) : id === undefined)) break;
+        results.push(j);
+        callOfResult.set(j, i);
+      }
+      resultsOfCall.set(i, results);
+    }
+    // Reverse direction: a call whose answered results did not all make it into
+    // the prompt becomes an omission declaration itself. Head/tail regions grow
+    // contiguously and can stop exactly on an `assistant(tool_calls)`, leaving
+    // the results behind — the reader would then see a call, then a declaration,
+    // and never the result. Degrading the call is unconditional and always
+    // affordable, while expanding the missing results could push the request
+    // past the cap; the group therefore degrades rather than overflows.
+    for (const [callIndex, results] of resultsOfCall) {
+      if (!expanded[callIndex] || !results.length) continue;
+      if (results.every((j) => expanded[j])) continue;
+      drop(callIndex);
+    }
+    // Forward direction: never leave a tool result in the prompt without the
+    // call it answers (also covers the results just orphaned by the pass above).
+    for (let i = 0; i < msgs.length; i++) {
+      if (!expanded[i] || msgs[i].role !== "tool") continue;
+      const callIndex = callOfResult.get(i);
+      if (callIndex === undefined || !expanded[callIndex]) drop(i);
+    }
+    return { expanded, allowances };
+  };
+
+  const render = (budget: number) => {
+    const { expanded, allowances } = selectRegions(budget);
+    const pieces: string[] = [];
+    let runStart = -1;
+    let runCounts = new Map<string, number>();
+    const flushRun = (end: number) => {
+      if (runStart < 0) return;
+      pieces.push(formatOmittedRun(runStart, end, runCounts));
+      runStart = -1;
+      runCounts = new Map();
+    };
+    let expandedCount = 0;
+    for (let i = 0; i < msgs.length; i++) {
+      if (!expanded[i]) {
+        if (runStart < 0) runStart = i;
+        runCounts.set(msgs[i].role, (runCounts.get(msgs[i].role) ?? 0) + 1);
+        continue;
+      }
+      flushRun(i - 1);
+      expandedCount++;
+      pieces.push(`${msgs[i].role}: ${projectContent(i, allowances[i])}`);
+    }
+    flushRun(msgs.length - 1);
+    const promptContent = promptFor(`${note}\n${pieces.join("\n")}`);
+    return {
+      promptContent,
+      inputTokens: systemTokens + estimateTokenCount(promptContent),
+      expandedCount,
+      omittedCount: msgs.length - expandedCount,
+    };
+  };
+
+  // Verification loop: the region estimates are approximations of the rendered
+  // prompt (declaration lines are counted by their real text), so the assembled
+  // text is re-measured and the budget shrunk until the request fits. Only a
+  // ready request is ever returned as fitting.
+  let budget = availableTokens;
+  let last = render(budget);
+  for (let attempt = 0; attempt < 12 && last.inputTokens > cap; attempt++) {
+    const overflow = last.inputTokens - cap;
+    budget = Math.max(0, Math.floor(budget - Math.max(overflow, Math.ceil(budget * 0.15))));
+    last = render(budget);
   }
-  const promptContent = makePrompt();
-  const inputTokens = systemTokens + estimateTokenCount(promptContent);
-  // Defensive check: never send a request exceeding the estimated budget.
-  if (inputTokens > cap) return { status: "blocked", reason: "no-budget" };
-  return { status: "ready", promptContent, coveredMessages: msgs.slice(),
-    summarizedBeforeId: msgs[msgs.length - 1].id, inputTokens, outputTokenBudget, partial: false };
+  if (last.inputTokens > cap || last.expandedCount === 0) {
+    return blocked("no-budget", diagnosticsOf(last.expandedCount, last.omittedCount));
+  }
+  return { status: "ready", promptContent: last.promptContent, coveredMessages: msgs.slice(),
+    summarizedBeforeId: msgs[msgs.length - 1].id, inputTokens: last.inputTokens,
+    outputTokenBudget, partial: false };
 }
 
 // --- 工具结果截断（P0-2，学 Pi） ---
@@ -550,7 +885,7 @@ export function selectEvidenceLines(lines: readonly string[]): string[] {
  * 头部/尾部均分、证据行拿剩余额度；单一巨型行按字符切片兜底。
  * 纯分数计算——同输入同输出，不依赖时间/随机/环境。
  */
-const HEAD_SHARE = 0.4;
+const EVIDENCE_HEAD_SHARE = 0.4;
 const TAIL_SHARE = 0.4;
 
 export function evidenceTruncateBudget(maxChars: number): {
@@ -562,7 +897,7 @@ export function evidenceTruncateBudget(maxChars: number): {
   // 标记 + 「已保留 N 条证据行」备注的最坏长度预留，保证含标记的总长严格 ≤ maxChars
   const markerReserve = 96;
   const usable = Math.max(0, maxChars - markerReserve);
-  const headCap = Math.floor(usable * HEAD_SHARE);
+  const headCap = Math.floor(usable * EVIDENCE_HEAD_SHARE);
   const tailCap = Math.floor(usable * TAIL_SHARE);
   return {
     markerReserve,
