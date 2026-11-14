@@ -1,4 +1,11 @@
 
+## 0.222.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **agent:** 打扰强度由默认档 + 记忆偏好共同决定 ([cd56712](https://github.com/nolotus/bun-nolo/commit/cd56712658f2788dd35b12c525ecec403609081d))
+
+
 ## 0.221.0-alpha.1 (2026-11-14)
 
 ### Features
