@@ -22,14 +22,13 @@ import {
   PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
+  PLATFORM_HOSTED_CLAUDE_FABLE_5_2_MODEL,
   PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
   PLATFORM_HOSTED_GROK_4_6_MODEL,
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
   PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
   PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
   PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL,
-  PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
-  PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
   PLATFORM_HOSTED_GLM_53_MODEL,
   PLATFORM_HOSTED_GLM_52_MODEL,
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
@@ -37,6 +36,8 @@ import {
   PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_25_PRO_MODEL,
   PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL,
+  PLATFORM_HOSTED_GEMINI_4_HYDROGEN_MODEL,
+  PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL,
   PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
@@ -202,6 +203,23 @@ export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE = {
   output: toPlatformCredits(50), // 400 credits
   cachingWrite: toPlatformCredits(12.5), // 100 credits
   cachingRead: toPlatformCredits(0.25), // 2 credits
+} as const;
+
+/**
+ * Claude Fable 5.2（2026-11-15 抓取实测）：
+ * Cloudflare 官方模型页：https://developers.cloudflare.com/ai/models/anthropic/claude-fable-5.2/
+ * 请求格式：Anthropic Messages。
+ * 按 toPlatformCredits（USD × 8）换算为平台积分：
+ * - input: toPlatformCredits(8) = 64 credits
+ * - output: toPlatformCredits(40) = 320 credits
+ * - cachingWrite: toPlatformCredits(10) = 80 credits
+ * - cachingRead: toPlatformCredits(0.2) = 1.6 credits
+ */
+export const PLATFORM_HOSTED_CLAUDE_FABLE_5_2_PRICE = {
+  input: toPlatformCredits(8), // 64 credits
+  output: toPlatformCredits(40), // 320 credits
+  cachingWrite: toPlatformCredits(10), // 80 credits
+  cachingRead: toPlatformCredits(0.2), // 1.6 credits
 } as const;
 
 /**
@@ -444,6 +462,33 @@ export const PLATFORM_HOSTED_GEMINI_25_PRO_PRICE = {
  * 仅隐式缓存，无单独缓存写入价，cachingWrite 与 cachingRead 同价。
  */
 export const PLATFORM_HOSTED_GEMINI_4_ARGON_PRICE = {
+  input: toPlatformCredits(2.0), // 16.0 credits
+  output: toPlatformCredits(10.0), // 80.0 credits
+  cachingWrite: toPlatformCredits(0.1), // 0.8 credits
+  cachingRead: toPlatformCredits(0.1), // 0.8 credits
+} as const;
+
+/**
+ * Gemini 4 Hydrogen（平台托管语义）：直连 Google 官方原生 API（gemini-4-hydrogen，
+ * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
+ * 价格来源：cloud.google.com/vertex-ai/generative-ai/pricing（核对日期 2026-11-15，Global 区域）。
+ * × 8 = 12.0 / 60.0 / 15.0 / 0.6 credits。
+ */
+export const PLATFORM_HOSTED_GEMINI_4_HYDROGEN_PRICE = {
+  input: toPlatformCredits(1.5), // 12.0 credits
+  output: toPlatformCredits(7.5), // 60.0 credits
+  cachingWrite: toPlatformCredits(1.875), // 15.0 credits
+  cachingRead: 0.42, // 0.6 credits
+} as const;
+
+/**
+ * Gemini 4 Carbon（平台托管语义）：直连 Google 官方原生 API（gemini-4-carbon，
+ * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
+ * 价格来源：cloud.google.com/vertex-ai/generative-ai/pricing（核对日期 2026-11-15，Global 区域）。
+ * × 8 = 16.0 / 80.0 / 0.8 credits。
+ * 仅隐式缓存，无单独缓存写入价，cachingWrite 与 cachingRead 同价。
+ */
+export const PLATFORM_HOSTED_GEMINI_4_CARBON_PRICE = {
   input: toPlatformCredits(2.0), // 16.0 credits
   output: toPlatformCredits(10.0), // 80.0 credits
   cachingWrite: toPlatformCredits(0.1), // 0.8 credits
@@ -885,6 +930,26 @@ export const platformHostedModels: Model[] = [
     supportsReasoningEffort: true,
   },
   {
+    name: PLATFORM_HOSTED_GEMINI_4_HYDROGEN_MODEL,
+    displayName: "Gemini 4 Hydrogen",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GEMINI_4_HYDROGEN_PRICE },
+    maxOutputTokens: 65536,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL,
+    displayName: "Gemini 4 Carbon",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GEMINI_4_CARBON_PRICE },
+    maxOutputTokens: 32768,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
     name: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
     displayName: "DeepSeek Flash",
     hasVision: true,
@@ -1006,6 +1071,20 @@ export const platformHostedModels: Model[] = [
     supportsTool: false,
   },
   {
+    // Claude Fable 5.2：CF 官方文档规格 1M 上下文、最高 128K 输出 tokens。
+    // https://developers.cloudflare.com/ai/models/anthropic/claude-fable-5.2/
+    name: PLATFORM_HOSTED_CLAUDE_FABLE_5_2_MODEL,
+    displayName: "Claude Fable 5.2",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_FABLE_5_2_PRICE },
+    // 2026-11-15：CF 官方文档未注明 Fable 5.2 的官方发布日，此值按当次抓取实测日暂填
+    // （照 5.1 做法标注来源不确定）。拿到官方日期后请以官方为准替换。
+    releasedAtMs: catalogReleasedAt(2026, 11, 15),
+    maxOutputTokens: 128_000,
+    contextWindow: 1_000_000,
+    supportsTool: false,
+  },
+  {
     // Claude Sonnet 5.5（2026-09-28 发布）：官方价与 Sonnet 5 相同
     name: PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
     displayName: "Claude Sonnet 5.5",
@@ -1118,29 +1197,10 @@ export const platformHostedModels: Model[] = [
     contextWindow: 1_050_000,
     supportsReasoningEffort: true,
   },
-  // gpt-5.6-sol（2026-10-13）：旧 id 是 gpt-6.1-sol 的兼容别名（PLATFORM_MODEL_ALIASES），
-  // 不再作为可选商品上架；平台托管请求透明落到 6.1 的上游与 6.1 目录价。
-  // 旧价目常量 PLATFORM_HOSTED_GPT_56_SOL_PRICE 保留给历史记录只读重放（不追溯）。
-  {
-    name: PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
-    displayName: "GPT-5.6 Terra",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_GPT_56_TERRA_PRICE },
-    maxOutputTokens: 128_000,
-    contextWindow: 1_050_000,
-    supportsTool: true,
-    supportsReasoningEffort: true,
-  },
-  {
-    name: PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
-    displayName: "GPT-5.6 Luna",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_GPT_56_LUNA_PRICE },
-    maxOutputTokens: 128_000,
-    contextWindow: 1_050_000,
-    supportsTool: true,
-    supportsReasoningEffort: true,
-  },
+  // gpt-5.6 系列（2026-11 全部下架）：旧 id 均已是指向 6.x 的兼容别名（PLATFORM_MODEL_ALIASES：
+  // gpt-5.6-sol → gpt-6.1-sol、gpt-5.6-terra → gpt-6.1-terra、gpt-5.6-luna → gpt-6-luna），
+  // 不再作为可选商品上架；平台托管请求透明落到 6.x 对应模型的上游与目录价。
+  // 旧价目常量 PLATFORM_HOSTED_GPT_56_*_PRICE 保留给历史记录只读重放（不追溯）。
   {
     name: PLATFORM_HOSTED_GROK_4_6_MODEL,
     displayName: "Grok 4.6",

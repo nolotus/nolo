@@ -1,4 +1,20 @@
 
+## 0.224.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **image:** GPT Image 2.5 → 2.6 换代（含已发布 agent 统一） ([97549ed](https://github.com/nolotus/bun-nolo/commit/97549ed9954d6661b69b28f2a176df4197d7ae47))
+* **models:** gpt-6.1-sol 切 OpenAI 官方直连，下掉 5.6 冗余条目 ([3a425dc](https://github.com/nolotus/bun-nolo/commit/3a425dcdc8e0c4c20fed676d2b56518279a6b6ac))
+* **models:** 接入 Claude Fable 5.2（换代降价） ([c6cb658](https://github.com/nolotus/bun-nolo/commit/c6cb658751b1bee47c78bb1f65c889ab8b066e4c))
+* **models:** 接入 Gemini 4 Hydrogen 与 4 Carbon（Google 官方） ([b17cbcc](https://github.com/nolotus/bun-nolo/commit/b17cbcc3b3292ae21468b7ef41fee34a1d00a8f5))
+
+### Bug Fixes
+
+* **billing:** OpenAI 官方直连也必须走 canonical 4 桶计费 ([c2413bd](https://github.com/nolotus/bun-nolo/commit/c2413bdf9d42ea6943003ee0e2160e850972149f))
+* **memory:** pure 读取模式下记忆写入完全停止 ([45dfe31](https://github.com/nolotus/bun-nolo/commit/45dfe3159f98cf08ac9b5b934164590bc3c27003))
+* **memory:** pure 路径的 resident 判定补上 ownerType 与长度约束 ([1ce3901](https://github.com/nolotus/bun-nolo/commit/1ce3901824b6b5035169f5e0682a5d96f79e1930))
+
+
 ## 0.223.0-alpha.1 (2026-11-14)
 
 ### Features

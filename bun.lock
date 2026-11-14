@@ -194,7 +194,7 @@
     },
     "packages/cli": {
       "name": "nolo-cli",
-      "version": "0.223.0-alpha.1",
+      "version": "0.224.0-alpha.1",
       "bin": {
         "nolo": "index.js",
       },
@@ -273,7 +273,7 @@
     },
     "packages/desktop": {
       "name": "desktop",
-      "version": "0.240.0-alpha.1",
+      "version": "0.241.0-alpha.1",
       "dependencies": {
         "electrobun": "^2.0.1",
         "rcedit": "^5.0.2",
@@ -3436,7 +3436,7 @@
 
     "system-architecture": ["system-architecture@0.1.0", "", {}, "sha512-ulAk51I9UVUyJgxlv9M6lFot2WP3e7t8Kz9+IS6D4rVba1tR9kON+Ey69f+1R4Q8cd45Lod6a4IcJIxnzGc/zA=="],
 
-    "tabbable": ["tabbable@6.5.1", "", {}, "sha512-dMCuwDUY6Noz3zVKLefBC4wq+aJV20yc7vWmM7uTNGwtQSFF5kX7OUIUsxuVajz/bdt5Xqdah3/0NLjth+cM5A=="],
+    "tabbable": ["tabbable@6.5.2", "", {}, "sha512-XgdnB1nGU6KU4VgMnZPaZCx7M1hBrLyEiZYau2G2gq9UT0d7d4FUBlNX7vvPlm/B1vk1PjrzJBx9Lbv4fsqS9g=="],
 
     "tagged-tag": ["tagged-tag@1.0.0", "", {}, "sha512-yEFYrVhod+hdNyx7g5Bnkkb0G6si8HJurOoOEgC8B/O0uXLHlaey/65KRv6cuWBNhBgHKAROVpc7QyYqE5gFng=="],
 

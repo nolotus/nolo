@@ -108,18 +108,23 @@ export function normalizePublicAgentPlatformPricing<T extends PublicAgentRecord>
   );
   const rawImageModel =
     asOptionalTrimmedString(agent.imageModel) ??
-    (usesOpenAIImageTool ? "gpt-image-2.5-flare" : "");
-  // 1.5 / 2 已弃用：存量 agent 记录读到旧 id 时统一映射到 2.5，
+    (usesOpenAIImageTool ? "gpt-image-2.6-flare" : "");
+  // 1.5 / 2 / 2.5 均已弃用：存量 agent 记录读到旧 id 时统一映射到 2.6，
   // 按工作流给出图档（flare）或改图档（sunburst），不静默降级。
+  // 2.5 于 2026-11-15 随 2.6 上线加入本表；它与更老的 1.5 / 2 走同一条映射，
+  // 因为两者共用 flare/sunburst 分工，映射规则完全相同。
   const legacyOpenAIImageModel =
-    rawImageModel === "gpt-image-1.5" || rawImageModel === "gpt-image-2";
+    rawImageModel === "gpt-image-1.5" ||
+    rawImageModel === "gpt-image-2" ||
+    rawImageModel === "gpt-image-2.5-flare" ||
+    rawImageModel === "gpt-image-2.5-sunburst";
   const imageModel = legacyOpenAIImageModel
     ? agent.imageWorkflow === "edit"
-      ? "gpt-image-2.5-sunburst"
-      : "gpt-image-2.5-flare"
+      ? "gpt-image-2.6-sunburst"
+      : "gpt-image-2.6-flare"
     : rawImageModel;
 
-  // 平台托管 GPT Image 系（含映射后的 2.5）：走 nolo 平台价
+  // 平台托管 GPT Image 系（含映射后的 2.6）：走 nolo 平台价
   if (
     usePlatformPricing &&
     (provider === "openai" || provider === "nolo") &&

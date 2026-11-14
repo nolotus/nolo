@@ -1,3 +1,6 @@
+// 我的内容集合视图（MyContentPage 的实现主体）。
+// ⚠️ 已弃用但保留：e2e/attachments.spec.ts 依赖本组件的 `.MyContentCollection` 类名做断言，
+// 删除前置条件见 MyContentPage.tsx 顶部注释。
 import "./MyContentCollection.css";
 import { Tabs, TabList, Tab } from "render/web/ui/Tabs";
 
