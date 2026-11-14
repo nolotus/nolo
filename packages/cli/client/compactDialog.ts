@@ -449,6 +449,16 @@ export async function compactDialog(
                   msgsToKeep: [...plan.msgsToCompress.slice(request.coveredMessages.length), ...plan.msgsToKeep],
                 },
                 newSummary: newSummary.trim(),
+                summaryInput: {
+                  inputTokens: request.inputTokens,
+                  capTokens: request.capTokens,
+                  expandedMessages: request.expandedMessages,
+                  omittedMessages: request.omittedMessages,
+                },
+                planCounts: {
+                  pendingMessageCount: plan.diagnostics?.pendingMsgCount,
+                  plannedCompressCount: plan.diagnostics?.compressCount,
+                },
               });
               console.log(formatCompactionMetricsLog(metrics));
             }

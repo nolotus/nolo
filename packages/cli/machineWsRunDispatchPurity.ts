@@ -46,7 +46,7 @@ export type LocalCliExecutor = (
     reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
     imageInputs?: Array<{ source: string; materializedPath?: string }>;
   }
-) => Promise<{ text: string; raw?: string; elapsed?: number }>;
+) => Promise<import("ai/agent/cliExecutor").CliExecuteResultLoose>;
 
 export type ConnectorRuntimePolicy = {
   runtimeTools?: string[];

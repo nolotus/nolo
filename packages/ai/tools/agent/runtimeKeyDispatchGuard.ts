@@ -193,7 +193,7 @@ export type CliLocalSpawnDispatchPlan = {
  * 上读写代码（可能完全没有隔离）。因此它必须有显式确认（调用方声明
  * `allowHostWrites: true`）——省略 / 写错 / 笔误一律不落宿主。
  * 省略 runtimeKey 时的默认位置**有且只有一个例外**：`readOnly: true` 的只读派发仍在
- * 宿主执行（写不了文件，起沙盒是纯浪费）；其余写型派发默认进本机 docker 沙盒。未声明时本机通道**显式拒绝**（零 spawn、零 run 记录），既不回落
+ * 宿主执行（`readOnly` 只移除 nolo 侧写工具，不限制进程或外部 CLI 的写能力，故不起沙盒）；其余写型派发默认进本机 docker 沙盒。未声明时本机通道**显式拒绝**（零 spawn、零 run 记录），既不回落
  * docker、也不静默落宿主。
  */
 export const HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE =
@@ -228,8 +228,9 @@ export const HOST_EXECUTOR_UNAVAILABLE_MESSAGE =
  *   1. 派发的子 run 默认落 **docker 沙盒**（本机 sbx）：不传 runtimeKey 时也默认
  *      `docker`。历史几百次「子 Agent 相对路径写进主 worktree」的事故全部发生在
  *      默认宿主路径上。
- *   2. **只读型**派发（调用方声明 readOnly）留在宿主执行：它写不了文件，起沙盒是
- *      纯浪费。
+ *   2. **只读型**派发（调用方声明 readOnly）留在宿主执行：`readOnly` 移除的是 nolo 侧的
+ *      专用写工具，不限制进程/外部 CLI 的写能力。沙盒能把写入限制在容器内（对宿主有
+ *      额外保护），但当前策略不为只读派发起沙盒——这里只陈述策略，不附加安全论证。
  *   3. 显式 runtimeKey 一律以它为计划；不可兑现即由守卫抛错（不回落宿主）。
  *   4. 交互式 `nolo agent run`（用户自己在终端敲）不走这里：本机执行是正当用法，
  *      但必须**显式**（`--local` / `--runtime-key`），不能是「忘了传参」的默认结果。

@@ -43,6 +43,8 @@ import { useTranslation } from "react-i18next";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 import { useAppDispatch } from "app/store";
+import { deleteDbKey } from "app/hooks/deleteDbKey";
+import type { DeleteContentCommand } from "create/space/components/useDeleteContentEntry";
 import { LuInbox } from "react-icons/lu";
 import {
   resolveMyContentTab,
@@ -227,7 +229,13 @@ const RecentVirtualList: React.FC<{
   const menuAnchorKeyRef = useRef<string | null>(null);
   const [editSignal, setEditSignal] = useState<{ key: string; nonce: number } | null>(null);
   const [appDeleteRequest, setAppDeleteRequest] = useState<SidebarAppDeleteRequest | null>(null);
-  const { deleteContent } = useDeleteContentEntry();
+  // 删除命令：本文件是既有 Redux 消费端，由它把 deleteDbKey thunk 与 dispatch 绑成
+  // 领域命令传给 useDeleteContentEntry（该 hook 自身不依赖 Redux）。
+  const runDelete = useCallback<DeleteContentCommand>(
+    (input, spaceId, options) => dispatch(deleteDbKey(input, spaceId, options)),
+    [dispatch]
+  );
+  const { deleteContent } = useDeleteContentEntry(runDelete);
 
   const handleMenuAnchorChange = useCallback((key: string, el: HTMLElement | null) => {
     if (el) {

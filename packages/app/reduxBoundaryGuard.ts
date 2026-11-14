@@ -35,7 +35,6 @@ export const WHITELISTED_REACT_REDUX_FILES: readonly string[] = [
   "packages/app/hooks/useUnifiedStore.ts",
   "packages/app/pages/LocalQuickCreateAgent.tsx",
   "packages/app/settings/accountChatDisplayOwner.ts",
-  "packages/app/settings/useAuthTargetServer.ts",
   "packages/app/store.ts",
   "packages/app/theme/storeDeviceAppearance.ts",
   "packages/auth/session/react.ts",
@@ -166,6 +165,11 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/app/pages/ShareImportPage.tsx",
   "packages/app/pages/share/DocImportView.tsx",
   "packages/app/settings/fieldSelectors.ts",
+  // 归位（2026-11-14）：本条目在 `4754d96fc` 搬目录（auth/web → app/settings）时被
+  // 错写成 react-redux 白名单条目（它 import 的是 app/store），旧路径删掉后没补新
+  // 路径 → 守卫误报 + react-redux 表 30→31 超上限。这里恢复消费白名单，react-redux
+  // 表里的错条目删除（净额：消费 +1 / react-redux -1，总条数不变）。
+  "packages/app/settings/useAuthTargetServer.ts",
   "packages/app/settings/serverSelectors.ts",
   "packages/app/settings/web/ChatConfig.tsx",
   "packages/app/settings/web/DesktopMachines.tsx",
@@ -182,7 +186,6 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/app/settings/web/chat-config/useAutoSaveGlobalPrompt.ts",
   "packages/app/stateViews/runtime.ts",
   "packages/app/theme/GlobalThemeController.tsx",
-  "packages/app/theme/index.ts",
   "packages/app/theme/useDeviceThemeTokens.ts",
   "packages/app/theme/useSystemTheme.ts",
   "packages/app/theme/web/DarkModeSwitch.tsx",
@@ -235,7 +238,6 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/chat/messages/web/MessageItem.tsx",
   "packages/chat/messages/web/MessageList.tsx",
   "packages/chat/messages/web/MessageToolConfirmBar.tsx",
-  "packages/chat/messages/web/ThinkingSection.tsx",
   "packages/chat/messages/web/ToolMessageContent.tsx",
   "packages/chat/messages/web/ToolMessageItem.tsx",
   "packages/chat/messages/web/UpdateAgentToolCard.tsx",
@@ -277,7 +279,6 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/create/space/addSpaceAction.ts",
   "packages/create/space/category/CategoryHeader.tsx",
   "packages/create/space/category/categoryActions.ts",
-  "packages/create/space/components/DeleteContentButton.tsx",
   "packages/create/space/components/ImagePreviewFetcher.tsx",
   "packages/create/space/components/SpaceContentList.tsx",
   "packages/create/space/components/SpaceLayout.tsx",

@@ -155,7 +155,13 @@ export function useAgentCreateSourceState({
     () =>
       subscriptionPresets.map((p) => ({
         value: p.id,
-        label: `${p.label}${p.requiresDesktopOAuth ? " · OAuth" : ""}`,
+        // 官方限制第三方登录的通道照常可选（产品决定 2026-11-14），只在标签上
+        // 明确标出来，让用户知道后果由自己承担。
+        label: `${p.label}${p.requiresDesktopOAuth ? " · OAuth" : ""}${
+          p.riskNotice
+            ? ` · ${t("providerPreset.officialRestricted", "官方限制第三方登录")}`
+            : ""
+        }`,
         provider: p.provider,
       })),
     [subscriptionPresets]

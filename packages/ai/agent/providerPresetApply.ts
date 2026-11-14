@@ -19,6 +19,18 @@ import type { ReasoningEffort } from "./createAgentSchema";
 /** Manual open-ended custom endpoint (not in registry). */
 export const MANUAL_PROVIDER_PRESET_ID = "manual" as const;
 
+/**
+ * Why a provider is not offered for new agents, or undefined when it is
+ * offered. Lets a surface explain the gap instead of silently hiding a brand.
+ */
+export function getOAuthProviderOfficialBan(
+  presetId: string | null | undefined,
+): OAuthProviderConfig["officialBan"] | undefined {
+  if (!presetId) return undefined;
+  return SUBSCRIPTION_OAUTH_PROVIDERS.find((provider) => provider.id === presetId)
+    ?.officialBan;
+}
+
 export type ProviderPresetId = string;
 
 export type ProviderPresetFieldBag = {
@@ -61,6 +73,11 @@ export type ProviderPresetListGroup = {
     description?: string;
     /** Registry provider key（如 deepseek / moonshot），供下拉项解析品牌 logo。 */
     provider?: string;
+    /**
+     * 厂商条款警示（目前是官方禁止第三方登录的 OAuth 通道）。
+     * 条目仍然可选——只把这个文案展示给用户，由用户决定要不要继续。
+     */
+    riskNotice?: string;
   }[];
 };
 
@@ -165,6 +182,7 @@ export function listProviderPresetGroups(): ProviderPresetListGroup[] {
         label: p.label,
         description: p.description,
         provider: p.provider,
+        riskNotice: p.officialBan?.reason,
       })),
     },
     {
@@ -218,6 +236,8 @@ export function listSubscriptionPresetOptions(): {
   requiresDesktopOAuth: boolean;
   /** Registry provider key，供下拉项解析品牌 logo。 */
   provider?: string;
+  /** 厂商条款警示；条目仍可选（见 listCreatableOAuthProviders）。 */
+  riskNotice?: string;
 }[] {
   const tokenPlans = CUSTOM_API_KEY_TEMPLATES.filter(
     (p) =>
@@ -237,6 +257,7 @@ export function listSubscriptionPresetOptions(): {
     description: p.description,
     requiresDesktopOAuth: true,
     provider: p.provider,
+    riskNotice: p.officialBan?.reason,
   }));
 
   return [...tokenPlans, ...oauth];

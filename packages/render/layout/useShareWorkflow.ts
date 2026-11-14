@@ -1,14 +1,11 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppDispatch, useAppSelector } from "app/store";
 import { copyTextToClipboard } from "app/utils/clipboard";
 import { toast } from "app/utils/toast";
-import { selectRuntimeSnapshot } from "app/stateViews/runtime";
-import {
-  currentWindowOrigin,
-  runShare,
-  type SharePayload,
-  type ShareVisibility,
+import type {
+  SharePayload,
+  ShareRunResult,
+  ShareVisibility,
 } from "./shareWorkflowCore";
 
 /**
@@ -23,12 +20,26 @@ import {
  * 没弹窗的一次性动作（`app/components/AppCard.tsx` 的「发布到社区」）直接复用它，
  * 不另写一份 dispatch。
  *
+ * **本文件不依赖 Redux**（不 import `app/store` / `react-redux` / RTK）：真正要
+ * 分发 thunk 与当前 server 的那一步由调用方以 `createShareLink` 命令传入
+ * （见 `CreateShareLink`）。调用点都是既有 Redux 消费端（属于遗留适配层，不是
+ * 本文件）；
+ *
  * 调用点：
  * - `render/layout/useTopBarState.tsx`（page / dialog / app 内容页顶栏）
  * - `app/pages/AppDetailPage.tsx`（app 详情页页头「分享」）
  */
 
 export type { SharePayload, ShareVisibility } from "./shareWorkflowCore";
+
+/**
+ * 建分享链接的领域命令（由调用方实现）：用谁的分发、指向哪台 server、
+ * 从哪个 origin 兜底，全在调用方决定；本文件只负责状态机与用户反馈。
+ */
+export type CreateShareLink = (
+  payload: SharePayload,
+  visibility: ShareVisibility
+) => Promise<ShareRunResult>;
 
 export interface ShareWorkflow {
   isShareModalOpen: boolean;
@@ -45,11 +56,10 @@ export interface ShareWorkflow {
 }
 
 export function useShareWorkflow(
-  buildPayload: (visibility: ShareVisibility) => SharePayload | null
+  buildPayload: (visibility: ShareVisibility) => SharePayload | null,
+  createShareLink: CreateShareLink
 ): ShareWorkflow {
-  const dispatch = useAppDispatch();
   const { t } = useTranslation();
-  const { currentServer: server } = useAppSelector(selectRuntimeSnapshot);
 
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareModalLink, setShareModalLink] = useState("");
@@ -68,13 +78,8 @@ export function useShareWorkflow(
       try {
         // 与 AppCard「发布到社区」同一个分发点（shareWorkflowCore.runShare）：
         // visibility 必须进 thunk —— private = 持有链接可见（分享页按 token 读取）。
-        const { webLink } = await runShare({
-          dispatch: dispatch as unknown as Parameters<typeof runShare>[0]["dispatch"],
-          payload,
-          visibility,
-          server,
-          windowOrigin: currentWindowOrigin(),
-        });
+        // dispatch / server / windowOrigin 由调用方在 createShareLink 里绑好。
+        const { webLink } = await createShareLink(payload, visibility);
 
         setShareModalLink(webLink);
         setShareModalVisibility(visibility);
@@ -104,7 +109,7 @@ export function useShareWorkflow(
         throw e;
       }
     },
-    [buildPayload, dispatch, server, t]
+    [buildPayload, createShareLink, t]
   );
 
   const handleOpenShare = useCallback(async () => {

@@ -18,6 +18,8 @@ import React, {
 } from "react";
 import { NavLink } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
+import { deleteDbKey } from "app/hooks/deleteDbKey";
+import type { DeleteContentCommand } from "./components/useDeleteContentEntry";
 import { useTranslation } from "react-i18next";
 import {
   getSnapshot as getRecentlyCreatedSnapshot,
@@ -207,6 +209,12 @@ function SidebarItemRow({
 }: SidebarItemRowProps) {
   const { t } = useTranslation("space");
   const dispatch = useAppDispatch();
+  // 删除命令：本文件是既有 Redux 消费端，由它把 deleteDbKey thunk 与 dispatch 绑成
+  // 领域命令下传（DeleteContentButton / useDeleteContentEntry 自身不碰 Redux）。
+  const runDelete = useCallback<DeleteContentCommand>(
+    (input, spaceId, options) => dispatch(deleteDbKey(input, spaceId, options)),
+    [dispatch]
+  );
   const currentUserId = useUserId();
   const currentSpaceId = useCurrentSpaceId();
 
@@ -686,6 +694,7 @@ function SidebarItemRow({
             )}
             {canDeleteOwnedContent && (
               <DeleteContentButton
+                runDelete={runDelete}
                 contentKey={contentKey}
                 title={displayTitle}
                 spaceIdOverride={effectiveSpaceId}

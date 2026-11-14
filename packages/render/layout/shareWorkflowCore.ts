@@ -67,7 +67,9 @@ export const announceShareCreated = (
   }
 };
 
-type ShareDispatcher = (action: unknown) => { unwrap: () => Promise<{ token: string }> };
+export type ShareDispatcher = (action: unknown) => {
+  unwrap: () => Promise<{ token: string }>;
+};
 
 export interface RunShareArgs {
   dispatch: ShareDispatcher;

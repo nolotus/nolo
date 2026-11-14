@@ -83,6 +83,7 @@ export default {
           cliScanning: "Detecting installed CLIs on this machine…",
           emptySources: "No options available",
           cliDetected: "Detected",
+          officialRestricted: "Third-party sign-in restricted by the vendor",
           nameLabel: "Name your assistant (optional)",
           modelLabel: "Model",
           endpointLabel: "Endpoint",

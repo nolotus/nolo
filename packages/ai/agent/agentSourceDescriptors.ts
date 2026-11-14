@@ -86,6 +86,13 @@ export type AgentSourceDescriptor = {
   registryPresetId?: string;
   /** CLI binary hint for setup copy (not a capability probe). */
   cliBinaryHint?: string;
+  /**
+   * OAuth only: 厂商条款明确禁止第三方登录时的封禁说明。
+   *
+   * 描述符本身仍保留（编辑存量 agent 需要按 sourceKey 解析回来），创建面板
+   * 通过 {@link listCreatableAgentSourceDescriptors} 把这些条目挡在外面。
+   */
+  officialBan?: OAuthProviderConfig["officialBan"];
 };
 
 export type ProjectAgentSourceFormInput = {
@@ -181,6 +188,7 @@ function oauthDescriptor(preset: OAuthProviderConfig): AgentSourceDescriptor {
     oauthApiKeyRef: preset.apiKeyRef,
     oauthAuthCommand: `nolo auth ${preset.apiKeyRef}`,
     requiresApiKey: false,
+    officialBan: preset.officialBan,
     form: {
       apiSource: "custom",
       useServerProxy: false,
@@ -327,6 +335,9 @@ export function listAgentSourceDescriptors(): AgentSourceDescriptor[] {
 
   return [
     ...tokenPlan,
+    // 全量投影：带 officialBan 的 OAuth 通道（antigravity）也在这里，因为编辑
+    // 存量 agent 时要按 sourceKey 解析回来。创建面板请用
+    // listCreatableAgentSourceDescriptors()。
     ...SUBSCRIPTION_OAUTH_PROVIDERS.map(oauthDescriptor),
     ...metered,
     // 新建入口只列可新建的 provider：已停用项（gemini）留在枚举里供存量 agent 运行，

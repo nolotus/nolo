@@ -36,6 +36,52 @@ function parseSecretValue(raw: string): unknown {
 }
 
 export type SecretPromptReader = (promptText?: string) => Promise<string>;
+export type SecretConfirmReader = (promptText: string) => Promise<boolean>;
+
+/**
+ * 形态对齐 secretScan.ts 的 redactedPreview (<redacted:规则 len=长度>)。
+ * 对字符串、JSON 对象与数组的值做脱敏，保留键名结构，绝不泄露值内容。
+ */
+export function formatRedactedSecretValue(val: unknown): unknown {
+  if (typeof val === "string") {
+    return `<redacted:secret len=${val.length}>`;
+  }
+  if (val === null) {
+    return "<redacted:secret>";
+  }
+  if (Array.isArray(val)) {
+    return val.map((item) => formatRedactedSecretValue(item));
+  }
+  if (typeof val === "object") {
+    const res: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      res[k] = formatRedactedSecretValue(v);
+    }
+    return res;
+  }
+  return `<redacted:secret len=${String(val).length}>`;
+}
+
+export async function defaultConfirmReader(
+  promptText: string,
+  input: NodeJS.ReadableStream = process.stdin,
+  output: NodeJS.WritableStream = process.stderr,
+): Promise<boolean> {
+  const readline = await import("node:readline/promises");
+  const rl = readline.createInterface({
+    input: input as any,
+    output: output as any,
+  });
+  try {
+    const answer = await rl.question(promptText);
+    const normalized = answer.trim().toLowerCase();
+    return normalized === "y" || normalized === "yes";
+  } catch {
+    return false;
+  } finally {
+    rl.close();
+  }
+}
 
 export interface RunSecretCommandOptions {
   broker?: CredentialBroker;
@@ -43,13 +89,20 @@ export interface RunSecretCommandOptions {
   stdinTimeoutMs?: number;
   stdinMaxBytes?: number;
   promptReader?: SecretPromptReader;
+  /**
+   * Non-TTY fallback host for `--prompt` (graphical password dialog).
+   * Injectable so tests never spawn a real zenity/kdialog/yad.
+   */
+  guiPromptHost?: GuiPromptHost;
   stdout?: NodeJS.WritableStream;
+  confirmReader?: SecretConfirmReader;
 }
 
 export class PromptReadError extends Error {
   constructor(
     readonly i18nKey:
       | "secret.promptNonTtyNotSupported"
+      | "secret.promptGuiUnavailable"
       | "secret.promptEmpty"
       | "secret.promptAborted"
       | "secret.promptReadError",
@@ -185,6 +238,196 @@ export async function defaultPromptReader(
       finish(new PromptReadError("secret.promptReadError"));
     }
   });
+}
+
+/** Drops one trailing line ending the dialog appends to the typed value. */
+function stripTrailingNewline(value: string): string {
+  if (value.endsWith("\r\n")) return value.slice(0, -2);
+  if (value.endsWith("\n")) return value.slice(0, -1);
+  return value;
+}
+
+/** Outcome of one graphical dialog invocation. */
+export interface GuiPromptSpawnResult {
+  /** Child exit code, or `null` when it was killed by a signal. */
+  exitCode: number | null;
+  /**
+   * Raw stdout. This is the only channel that carries the typed value, and it
+   * lives in memory only — never print it, log it or put it in an error.
+   */
+  stdout: string;
+}
+
+/**
+ * Runs one dialog binary. A rejection carrying `code === "ENOENT"` means
+ * "not installed" and makes the caller try the next candidate.
+ */
+export type GuiPromptSpawnFn = (
+  command: string,
+  args: string[],
+) => Promise<GuiPromptSpawnResult>;
+
+/** Injection seam for the graphical fallback (env + process spawner). */
+export interface GuiPromptHost {
+  spawnFn?: GuiPromptSpawnFn;
+  env?: NodeJS.ProcessEnv;
+}
+
+export type SecretGuiPromptReader = (promptText?: string) => Promise<string>;
+
+const GUI_PROMPT_TITLE = "nolo secret";
+
+interface GuiDialogTool {
+  readonly command: string;
+  /**
+   * Builds argv for a masked input dialog. Credentials never appear here: the
+   * user types the value into the dialog and it comes back on stdout.
+   */
+  buildArgs(promptText: string): string[];
+  /** Cancel/close exit codes of this tool (documented, per tool). */
+  isCancelExitCode(exitCode: number | null): boolean;
+}
+
+/**
+ * Probe order is fixed: zenity (GNOME/GTK) → kdialog (KDE) → yad (independent).
+ * Only "command not found" advances to the next candidate; a tool that does
+ * run and then fails is a real read failure, not a missing channel.
+ */
+const GUI_DIALOG_TOOLS: readonly GuiDialogTool[] = [
+  {
+    command: "zenity",
+    buildArgs: (promptText) => [
+      "--entry",
+      "--hide-text",
+      `--text=${promptText}`,
+      `--title=${GUI_PROMPT_TITLE}`,
+    ],
+    isCancelExitCode: (exitCode) => exitCode === 1 || exitCode === 5,
+  },
+  {
+    command: "kdialog",
+    buildArgs: (promptText) => ["--password", promptText, "--title", GUI_PROMPT_TITLE],
+    isCancelExitCode: (exitCode) => exitCode === 1,
+  },
+  {
+    command: "yad",
+    buildArgs: (promptText) => [
+      "--entry",
+      "--hide-text",
+      `--text=${promptText}`,
+      `--title=${GUI_PROMPT_TITLE}`,
+    ],
+    // yad exits 1 for the Cancel button, and 252 for the window close button
+    // (X) / Esc — both are "the user backed out", not a read failure.
+    isCancelExitCode: (exitCode) => exitCode === 1 || exitCode === 252,
+  },
+];
+
+function isMissingCommandError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
+/**
+ * Default dialog spawner. stdin is closed (no shell, no argv value) and stderr
+ * is discarded, so the dialog can only hand the value back through stdout and
+ * nothing it prints reaches our logs.
+ */
+const spawnGuiDialog: GuiPromptSpawnFn = (command, args) =>
+  new Promise<GuiPromptSpawnResult>((resolve, reject) => {
+    let settled = false;
+    let stdout = "";
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    child.on("close", (exitCode) => {
+      if (settled) return;
+      settled = true;
+      resolve({ exitCode, stdout });
+    });
+  });
+
+function hasGraphicalSession(env: NodeJS.ProcessEnv): boolean {
+  const has = (value: string | undefined) =>
+    typeof value === "string" && value.trim().length > 0;
+  return has(env.DISPLAY) || has(env.WAYLAND_DISPLAY);
+}
+
+/**
+ * Reads the secret from a graphical password dialog. Every candidate is probed
+ * for actual executability (spawn `ENOENT`), so a machine without any of them
+ * gets an actionable error instead of a silent hang or a fake prompt.
+ */
+export function createGuiPromptReader(host: GuiPromptHost = {}): SecretGuiPromptReader {
+  const spawnFn = host.spawnFn ?? spawnGuiDialog;
+  const env = host.env ?? process.env;
+
+  return async (promptText?: string) => {
+    const text = (promptText ?? "").trim();
+    if (!hasGraphicalSession(env)) {
+      throw new PromptReadError("secret.promptGuiUnavailable");
+    }
+
+    for (const tool of GUI_DIALOG_TOOLS) {
+      let result: GuiPromptSpawnResult;
+      try {
+        result = await spawnFn(tool.command, tool.buildArgs(text));
+      } catch (error) {
+        if (isMissingCommandError(error)) continue;
+        throw new PromptReadError("secret.promptReadError");
+      }
+      if (tool.isCancelExitCode(result.exitCode)) {
+        throw new PromptReadError("secret.promptAborted");
+      }
+      if (result.exitCode !== 0) {
+        throw new PromptReadError("secret.promptReadError");
+      }
+      return stripTrailingNewline(result.stdout);
+    }
+
+    throw new PromptReadError("secret.promptGuiUnavailable");
+  };
+}
+
+/**
+ * Reader behind `nolo secret set <name> --prompt`: masked TTY prompt when a
+ * terminal is attached, otherwise a graphical password dialog. When neither
+ * channel exists the error names both working alternatives (`--stdin`, or
+ * `--prompt` inside a terminal).
+ */
+export async function defaultSecretPromptReader(
+  promptText: string,
+  input: NodeJS.ReadStream = process.stdin,
+  output: NodeJS.WritableStream = process.stderr,
+  guiPromptHost: GuiPromptHost = {},
+): Promise<string> {
+  try {
+    return await defaultPromptReader(promptText, input, output);
+  } catch (error) {
+    if (
+      error instanceof PromptReadError &&
+      error.i18nKey === "secret.promptNonTtyNotSupported"
+    ) {
+      return createGuiPromptReader(guiPromptHost)(promptText);
+    }
+    throw error;
+  }
 }
 
 class StdinReadError extends Error {
@@ -337,7 +580,9 @@ export async function runSecretCommand(
       }
 
       case "get": {
-        const [name] = rest;
+        const reveal = rest.includes("--reveal");
+        const nonFlagArgs = rest.filter((arg) => arg !== "--reveal");
+        const [name] = nonFlagArgs;
         if (!name) {
           console.error(t("secret.getNameRequired"));
           process.exitCode = 1;
@@ -355,7 +600,51 @@ export async function runSecretCommand(
           process.exitCode = 1;
           return;
         }
-        console.log(typeof val === "object" ? JSON.stringify(val, null, 2) : String(val));
+
+        if (!reveal) {
+          const redacted = formatRedactedSecretValue(val);
+          console.log(
+            typeof redacted === "object" && redacted !== null
+              ? JSON.stringify(redacted, null, 2)
+              : String(redacted),
+          );
+          console.log(t("secret.getRevealHint", name));
+          return;
+        }
+
+        const input = (options.stdin as any) ?? process.stdin;
+        const output = (options.stdout as any) ?? process.stdout;
+        const isInteractive = Boolean(input?.isTTY) && Boolean(output?.isTTY);
+
+        if (!isInteractive) {
+          console.error(t("secret.getRevealNonTty"));
+          process.exitCode = 1;
+          return;
+        }
+
+        const promptText = t("secret.getRevealConfirmPrompt", name);
+        let confirmed = false;
+        try {
+          if (options.confirmReader) {
+            confirmed = await options.confirmReader(promptText);
+          } else {
+            confirmed = await defaultConfirmReader(
+              promptText,
+              input,
+              (options.stdout as any) ?? process.stderr,
+            );
+          }
+        } catch {
+          confirmed = false;
+        }
+
+        if (!confirmed) {
+          console.error(t("secret.getRevealCancelled"));
+          process.exitCode = 1;
+          return;
+        }
+
+        console.log(typeof val === "object" && val !== null ? JSON.stringify(val, null, 2) : String(val));
         return;
       }
 
@@ -445,10 +734,11 @@ export async function runSecretCommand(
             if (options.promptReader) {
               rawInput = await options.promptReader(t("secret.promptLabel", name));
             } else {
-              rawInput = await defaultPromptReader(
+              rawInput = await defaultSecretPromptReader(
                 t("secret.promptLabel", name),
                 (options.stdin as any) ?? process.stdin,
                 (options.stdout as any) ?? process.stderr,
+                options.guiPromptHost ?? {},
               );
             }
           } catch (err) {
@@ -461,12 +751,7 @@ export async function runSecretCommand(
             return;
           }
 
-          let val = rawInput;
-          if (val.endsWith("\r\n")) {
-            val = val.slice(0, -2);
-          } else if (val.endsWith("\n")) {
-            val = val.slice(0, -1);
-          }
+          let val = stripTrailingNewline(rawInput);
 
           if (val.length === 0 || /^\s*$/.test(val)) {
             console.error(t("secret.promptEmpty"));

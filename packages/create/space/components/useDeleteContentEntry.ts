@@ -1,10 +1,21 @@
+// packages/create/space/components/useDeleteContentEntry.ts
+//
+// 「删除内容条目」的 UI 编排（loading / toast / 跳转）。
+//
+// **不依赖 Redux**：本文件不 import `app/store` / `react-redux` / RTK，也不自己
+// dispatch。真正的删除动作由调用方以 `runDelete` 命令传入（`DeleteContentCommand`）：
+// 调用点都是既有的 Redux 消费端（顶栏/侧栏遗留适配层），由它们把 `deleteDbKey`
+// thunk 与自己的 dispatch 绑成命令；本 hook 只负责状态与用户反馈。
+
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "app/routing";
 import { normalizeSpaceId } from "create/space/spaceKeys";
-import { useAppDispatch } from "app/store";
 import { toast } from "app/utils/toast";
-import { deleteDbKey, getDeleteErrorMessage } from "app/hooks/deleteDbKey";
+import {
+  getDeleteErrorMessage,
+  type DeleteDbKeyInput,
+} from "app/hooks/deleteDbKey";
 import {
   isViewingDeletedContent,
   resolveDeleteSuccessPath,
@@ -18,9 +29,20 @@ export interface DeleteContentEntryTarget {
   sourceServerOrigin?: string;
 }
 
-export function useDeleteContentEntry() {
+/**
+ * 删除命令（由调用方实现）：执行一次权威删除，失败时抛出——错误文案由本 hook
+ * 统一翻译/toast，调用方不要自己吞异常。
+ */
+export interface DeleteContentCommand {
+  (
+    input: DeleteDbKeyInput,
+    spaceId?: string | null,
+    options?: { requireOwnership?: boolean }
+  ): Promise<unknown>;
+}
+
+export function useDeleteContentEntry(runDelete: DeleteContentCommand) {
   const { t } = useTranslation(["chat", "common"]);
-  const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
   const currentSpaceId = useCurrentSpaceId();
@@ -37,16 +59,14 @@ export function useDeleteContentEntry() {
 
       setIsDeleting(true);
       try {
-        await dispatch(
-          deleteDbKey(
-            {
-              contentKey,
-              serverOrigin: sourceServerOrigin,
-            },
-            effectiveSpaceId,
-            // 侧栏行删除路径：执行端按实体 owner 复核一次，不只依赖 UI 门控。
-            { requireOwnership: true }
-          )
+        await runDelete(
+          {
+            contentKey,
+            serverOrigin: sourceServerOrigin,
+          },
+          effectiveSpaceId,
+          // 侧栏行删除路径：执行端按实体 owner 复核一次，不只依赖 UI 门控。
+          { requireOwnership: true }
         );
         toast.success(t("deleteMovedToTrash", { title: safeTitle }));
 
@@ -76,7 +96,7 @@ export function useDeleteContentEntry() {
         setIsDeleting(false);
       }
     },
-    [dispatch, navigate, location.pathname, currentSpaceId, isDeleting, t]
+    [runDelete, navigate, location.pathname, currentSpaceId, isDeleting, t]
   );
 
   return { deleteContent, isDeleting };

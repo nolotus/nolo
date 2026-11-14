@@ -89,6 +89,8 @@ function filterByPath(
   path: LocalCreatePath,
   membershipAccess: MembershipAccess | null,
 ): AgentSourceDescriptor[] {
+  // 创建入口照常列出所有来源；带 officialBan 的 OAuth 通道只展示风险提示，
+  // 不挡用户选择（产品决定 2026-11-14）。
   const all = listAgentSourceDescriptors();
   if (path === "byo") {
     // API Key + local models (Ollama / LM Studio) + configure later.
@@ -790,6 +792,15 @@ const LocalQuickCreateAgent = () => {
                     <Icon size={16} aria-hidden />
                     <span className="local-quick-create__preset-label">
                       {d.label}
+                      {/* 官方限制第三方登录的通道照常可选，只做提示（产品决定 2026-11-14） */}
+                      {d.officialBan ? (
+                        <span className="local-quick-create__preset-badge">
+                          {t(
+                            "localFirst.quickCreate.officialRestricted",
+                            "官方限制第三方登录",
+                          )}
+                        </span>
+                      ) : null}
                       {detected ? (
                         <span className="local-quick-create__preset-badge">
                           {t(

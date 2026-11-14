@@ -542,7 +542,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     //   3) 转发 —— 归一化后的 key 经 buildCliLocalRuntimeForwardArgs 进 rawArgs
     //      （唯一产出 `--runtime-key` 的地方，返回前跑 F11 成对不变式）。
     // 默认落点政策见 resolveCliLocalSpawnDispatch：不传 key 的**写型**派发默认落
-    // docker 沙盒；只读派发留宿主（它写不了文件，起沙盒是纯浪费）。
+    // docker 沙盒；只读派发留宿主（readOnly 只移除 nolo 侧写工具，不是进程级只读）。
     const contextFacts = resolveRunContextFacts(continuedRecord ? (typeof continuedRecord === "object" ? continuedRecord : {}) : undefined, agentKey);
     const bindingMachineId =
       agentKey && deps.resolveAgentRuntimeBindingMachineId

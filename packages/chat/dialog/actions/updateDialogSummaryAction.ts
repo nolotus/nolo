@@ -268,6 +268,16 @@ export const updateDialogSummaryAction = async (
                         msgsToKeep: [...plan.msgsToCompress.slice(coveredMessages.length), ...plan.msgsToKeep],
                     },
                     newSummary: newSummary.trim(),
+                    summaryInput: {
+                        inputTokens: request.inputTokens,
+                        capTokens: request.capTokens,
+                        expandedMessages: request.expandedMessages,
+                        omittedMessages: request.omittedMessages,
+                    },
+                    planCounts: {
+                        pendingMessageCount: plan.diagnostics?.pendingMsgCount,
+                        plannedCompressCount: plan.diagnostics?.compressCount,
+                    },
                     // Compact completion retains finish metadata but does not return usage.
                     // summaryUsage 需要 runLlm 改造才能获取，当前留空。
                 });

@@ -31,7 +31,7 @@ import {
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { deleteServerSyncedCredential } from "../../ai/chat/agentCredentialSyncClient";
 
-type DeleteDbKeyInput =
+export type DeleteDbKeyInput =
     | string
     | {
         contentKey?: unknown;

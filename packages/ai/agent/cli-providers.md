@@ -30,7 +30,44 @@ agy \
 
 `--print`（简写别名：`-p`）以非交互式打印模式运行单个 prompt；默认打印超时为 5 分钟。`--dangerously-skip-permissions` 自动批准工具权限请求，适用于无人值守运行。
 
-不要通过 Nolo 传递 model 标志。本地 AGY 安装自身负责模型选择（观察到的默认值：`Gemini 3.5 Flash (Low)`）。
+**模型选择（2026-11-14 采集：本机 agy 1.5.9 + 当前登录账号）：**
+
+```bash
+agy models   # 列出当前账号可用模型
+```
+
+采集到的输出（**只代表采集时的那个账号与版本**，换账号/升级后可能变）：
+
+```
+gemini-3.8-flash-high    Gemini 3.8 Flash (High)
+gemini-3.8-flash-medium  Gemini 3.8 Flash (Medium)
+gemini-3.8-flash-low     Gemini 3.8 Flash (Low)
+claude-sonnet-4-6        Claude Sonnet 4.6 (Thinking)
+claude-opus-4-6-thinking Claude Opus 4.6 (Thinking)
+gpt-oss-120b-medium      GPT-OSS 120B (Medium)
+```
+
+Nolo **会**转发模型：agent 记录里有 `model` 时，`cliExecutor.ts` 的 agy 分支会追加
+`--model <id>`（同段还转发 `--effort`，取值 `low|medium|high|xhigh|max`）。旧版本本文曾写
+「不要通过 Nolo 传递 model 标志」，那是 agy 早期行为，已过时。
+
+取值口径（别把推断当结论）：
+
+- 想指定某个模型，请用 `agy models` 列出的**原始串**（带档位后缀那种）。
+- 列表外的串**不保证生效**：实测把 `gemini-3.8-flash`（不带 `-medium`）传进去时 agy 仍会跑完
+  并返回结果，但无法确认它实际用了哪个模型——也没有证据表明该值被拒。因此无法确认时，
+  以 `agy models` 的输出为准，不要把「能跑通」当成「按你指定的模型跑」。
+
+**ACP（可选，能拿到动态模型列表）：**
+
+```bash
+agy acp   # Start the Agent Client Protocol (ACP) stdio server
+```
+
+走 ACP 时不需要硬编码模型 id：`initialize` / `session/new` 会返回 agent 声明的
+configOptions（`category` 为 `model` / `model_config`），客户端用
+`session/set_config_option`（`sessionId` + `configId` + `value`）切换。代价是要实现
+JSON-RPC over stdio 与 fs/terminal 回调。
 
 **超时行为：**
 `--print-timeout` 控制 agy 等待会话完全空闲的时间。日志中出现 `Print mode: timed out ...` 表示 agy 在会话仍处于活跃状态时达到了截止时间。常见失败：`PlannerResponse without ModifiedResponse` —— agent 产生了 planner/tool 循环事件但从未发出最终的 modified response。这最常见于过长或过于宽泛的 prompt。

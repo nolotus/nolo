@@ -237,8 +237,11 @@ export function resolveLocalRunExecutionIsolationFact(args: {
       sandbox: "host",
       reason: "read-only-host",
       note:
-        "只读派发（调用方声明 readOnly，无写工具）：留在宿主执行且**无隔离**；" +
-        "它写不了文件，起沙盒是纯浪费。",
+        "只读派发（调用方声明 readOnly）：留在宿主执行且**无隔离**。" +
+        "readOnly 只保证 nolo 侧不提供专用写工具，**不限制进程本身的写能力**——" +
+        "外部 CLI 通道（agy / codex / claude 等）的工具与命令照常可写。" +
+        "要保护宿主文件请改用能覆盖目标操作的隔离执行面；注意**隔离不等于只读**" +
+        "（docker / instabox 执行面同样提供写工具）。",
       recordedAt,
     });
   }
@@ -301,7 +304,9 @@ function buildIsolationNotice(args: {
   platform: string;
   sandboxBackend: LocalRunSandboxBackendSupport;
 }): LocalRunExecutionIsolationNotice | null {
-  // 只读派发写不了文件，提示「命令作用于工作区」是纯噪音。
+  // 只读派发的 nolo 侧 agent 没有写工具，提示「命令作用于工作区」是纯噪音；
+  // 但外部 CLI 通道（agy/codex/claude 等）的工具不经 nolo，仍可写——该例外
+  // 由 fact.note 明确写出，不在这里重复提示（避免对绝大多数只读派发刷噪音）。
   if (args.fact.reason === "read-only-host") return null;
   if (args.fact.isolation !== "none") return null;
   if (args.sandboxBackend !== "none-on-platform" && args.sandboxBackend !== "unavailable") {

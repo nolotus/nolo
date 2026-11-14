@@ -1,4 +1,24 @@
 
+## 0.235.0 (2026-11-14)
+
+### Features
+
+* **ai:** 官方限制提示接入订阅入口与 i18n ([2ae00e3](https://github.com/nolotus/bun-nolo/commit/2ae00e3503dfab8f0fc6bbf96cb95512d0731724))
+* **ai:** 订阅 OAuth 通道标注官方禁用提示 ([a53dc29](https://github.com/nolotus/bun-nolo/commit/a53dc296fb719884014a246c18c5666bc350eb57))
+* **cli:** secret --prompt 在非 TTY 下自动降级到图形输入框 ([a6a7729](https://github.com/nolotus/bun-nolo/commit/a6a7729b6093ceaa661ac584d009b521a0c3d8b2))
+* **cli:** secret get 默认脱敏，--reveal 仅在交互式终端可用 ([065a158](https://github.com/nolotus/bun-nolo/commit/065a1582dadb262e65d0792c805b81c39cd4c632))
+* **server:** OpenDesign 接入实时模型发现 ([2cb7d74](https://github.com/nolotus/bun-nolo/commit/2cb7d7407ae16f25fc0969468b23c63efe762f7a))
+
+### Bug Fixes
+
+* **agent-runtime:** 稳定 antigravity 会话标识 ([9483c22](https://github.com/nolotus/bun-nolo/commit/9483c22d152cd3baba75d7af464c4fc1ce97e83d))
+* **agy:** 传 --effort 并解析真实 usage ([818a57d](https://github.com/nolotus/bun-nolo/commit/818a57dd271571191536511a506ad6c73af7d961))
+* **agy:** 非流式改用 json 输出；收敛重复的 CLI 结果契约 ([f8db8cf](https://github.com/nolotus/bun-nolo/commit/f8db8cf90eb9c5a690317d8d58434a1eab7ce946))
+* **ai:** 复位时刻解析补上单数 reset_at ([c289f50](https://github.com/nolotus/bun-nolo/commit/c289f50c9a017b6b0851acd9870c27fe52dc5c10))
+* **cli:** 对 Antigravity 的 Google 429 从严不重试 ([3bb871f](https://github.com/nolotus/bun-nolo/commit/3bb871f2e80547d34ff80083554fad3b2dc16a31))
+* **cli:** 对 Antigravity 的 Google 429 从严不重试 ([cbe33f9](https://github.com/nolotus/bun-nolo/commit/cbe33f92f06c9126a981fa3ff62938de787ff8f0))
+
+
 ## 0.234.0 (2026-11-14)
 
 ### Features

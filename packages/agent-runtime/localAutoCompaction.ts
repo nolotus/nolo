@@ -1095,6 +1095,16 @@ export async function maybeAutoCompactLocalHistory(args: {
       },
       newSummary,
       summaryUsage: result?.usage as Record<string, unknown> | undefined,
+      summaryInput: {
+        inputTokens: bounded.inputTokens,
+        capTokens: bounded.capTokens,
+        expandedMessages: bounded.expandedMessages,
+        omittedMessages: bounded.omittedMessages,
+      },
+      planCounts: {
+        pendingMessageCount: plan.diagnostics?.pendingMsgCount,
+        plannedCompressCount: plan.diagnostics?.compressCount,
+      },
     });
     const projectedHistory = projectHistoryWithSummary({ history, summary: newSummary,
       summarizedBeforeId: bounded.summarizedBeforeId });

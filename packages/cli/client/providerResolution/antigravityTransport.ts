@@ -14,6 +14,7 @@ import {
   resolveLocalAntigravityCredential,
 } from "../../../agent-runtime/antigravityCredential";
 import { readOAuthCredential } from "../../../agent-runtime/oauthTokenStore";
+import { isCapacitySaturatedRateLimit } from "../../../ai/agent/agentAvailabilityShared";
 import { logLocalRuntimeDiagnostic, summarizeOpenAiToolNames } from "../localRuntimeDiagnostics";
 import { fetchWithTransientRetry } from "../localRuntimeFetchRetry";
 import { resolveProviderOpenAiToolBundle } from "../localRuntimeTools";
@@ -22,6 +23,50 @@ import { summarizeEndpoint } from "core/summarizeEndpoint";
 import { resolveLocalUserId } from "../cliAgentConfigHelpers";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import type { ProviderResolver } from "./providerResolutionContext";
+
+/**
+ * Antigravity（Google OAuth 直连）本调用点的 429 响应重试闸门。
+ *
+ * 为什么从严：Google Cloud Code Assist 的 429 几乎都是**配额 / 额度信号**
+ * （`QUOTA_EXHAUSTED`、`Quota exceeded for quota metric ...`、
+ * `RESOURCE_EXHAUSTED`），不是网关侧的薄限流。重试对这类信号毫无用处——配额
+ * 不会在 250ms 后回来——却会让同一凭据在 1 秒内连打 3 次上游（core 默认
+ * 3 次预算、退避 250ms×attempt），把一次配额失败放大成一串无效请求。
+ * Antigravity 是单账号单凭据、结构上没有号池（见
+ * `docs/architecture/provider-runtime-boundaries.md`「Google OAuth 直连通道的
+ * 429 从严口径」），没有「换一条通道再来」的余地，所以默认不重试、立刻把
+ * 429 交给上层 mark 冷却分支才是正确动作。
+ *
+ * 判据与 owner-origin 代理路径**同一口径、同一真值**：直接复用
+ * `isCapacitySaturatedRateLimit`（`packages/ai/agent/agentAvailabilityShared.ts`），
+ * 只有「明确容量饱和且无复位信号」才放行一次重试；额度耗尽、显式复位
+ * （`Retry-After` 头 / body `retryAfter` / Google `RetryInfo.retryDelay` /
+ * `resets_at`）与任何未知 body 一律不重试。禁止在此另造第二套正则或词表。
+ *
+ * 只处理 429：503（含 `core_draining` 长预算）与网络错误的既有语义逐字不变。
+ * 因此非 429 一律返回 `true`——`shouldRetryResponse` 的 `true` 等于「本闸门无
+ * 意见」，交回 core 原有预算判定；返回 false 会把 503 重试整个关掉，那是本改动
+ * 明确不许碰的范围。
+ * 读 body 用 `response.clone()`，绝不消费调用方要用的响应体；json 失败退
+ * `text`，连 body 都读不出来时返回 false（从严）。
+ */
+export async function shouldRetryAntigravityResponse(
+  response: Response,
+): Promise<boolean> {
+  // 非 429：无意见，保持 core 既有语义（503 / core_draining / 网络错误不变）。
+  if (response.status !== 429) return true;
+  try {
+    let body: unknown;
+    try {
+      body = await response.clone().json();
+    } catch {
+      body = await response.clone().text();
+    }
+    return isCapacitySaturatedRateLimit(body, Date.now(), response.headers);
+  } catch {
+    return false;
+  }
+}
 
 export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
   const {
@@ -130,6 +175,10 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
               fetchWithTransientRetry(fetchImpl, url, init, {
                 sleep: deps.sleep,
                 loopbackRequest,
+                // 429 走与 owner-origin 代理同一口径：Google 的 429 几乎都是
+                // 配额/额度信号，重试无用且放大请求；仅明确容量饱和且无复位
+                // 信号才放行。503 / 网络错误 / core_draining 预算不受影响。
+                shouldRetryResponse: shouldRetryAntigravityResponse,
                 ...(options?.noRetries ? { maxAttempts: 1, coreDrainingMaxAttempts: 1 } : {}),
               })) as unknown as typeof fetch,
           });
