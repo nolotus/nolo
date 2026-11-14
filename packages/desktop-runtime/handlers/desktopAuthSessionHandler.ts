@@ -1,5 +1,7 @@
 import { getCurrentProfile, getProfileTokens, loadProfileConfig } from "../../cli/client/profileConfig";
-// authenticateToken moved to lazy import to avoid pulling private server deps into public build
+// token 校验走注入缝：私有侧（packages/server/routes.ts）注入 server/authenticateToken 的真实实现，
+// 公开/本地构建不注册 → no-op 允许。这样公开集不再静态/动态依赖硬拒绝包 server。
+import { validateDesktopProfileToken } from "../authTokenValidation";
 import { isTrustedDesktopSameOriginRequest } from "../desktopRequestTrust";
 
 const JSON_HEADERS = {
@@ -54,22 +56,7 @@ export async function handleDesktopAuthSessionGet(
     });
   }
 
-  const validateAuthToken = deps.validateAuthToken ?? (async (token: string) => {
-    // Lazy import: authenticateToken lives in packages/server (private) and is
-    // only available in the full cloud build. Public build skips token validation.
-    try {
-      const { authenticateToken } = await import("../../server/authenticateToken");
-      await authenticateToken(token);
-      return true;
-    } catch (err: any) {
-      // Only swallow module-not-found (public build lacks the private server module).
-      // Re-throw actual validation errors (invalid token, expired, revoked).
-      if (err instanceof Error && /Cannot find module|Failed to resolve/.test(err.message)) {
-        return true; // module not available — UI handles 401 from cloud API
-      }
-      throw err;
-    }
-  });
+  const validateAuthToken = deps.validateAuthToken ?? validateDesktopProfileToken;
   const isValidToken = await validateAuthToken(tokens[0]).catch(() => false);
   if (!isValidToken) {
     return new Response(JSON.stringify({

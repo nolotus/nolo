@@ -5,14 +5,14 @@
 // 解析 server/token。fetch 逻辑本身无副作用、可独立测试，之后 settings/auth 也
 // 脱离 redux 时只需改调用方解析方式，本文件零改动。
 //
-// 契约：见 packages/server/handlers/usageStatsHandler.ts 与 usageRecordsHandler.ts
-// （stats：UTC 日期区间聚合；records：UTC 毫秒窗口 + 不透明 cursor 分页，
-// 服务端每次请求全扫+排序，cursor 仅位置标记防 offset 漂移）。
+// 契约：类型定义在 ./usageContracts.ts（公开层，唯一真源；此前定义在 server handler 里，
+// 导致公开集包反向依赖硬拒绝包 server）。语义仍以服务端实现为准：
+// stats：UTC 日期区间聚合；records：UTC 毫秒窗口 + 不透明 cursor 分页，
+// 服务端每次请求全扫+排序，cursor 仅位置标记防 offset 漂移。
 
 import type { TokenRecord } from "./types";
 import type { QueryResult } from "./queryUserTokens";
-import type { UsageStatsResponse, UsageStatsDayItem } from "server/handlers/usageStatsHandler";
-import type { UsageRecordsResponse } from "server/handlers/usageRecordsHandler";
+import type { UsageStatsResponse, UsageStatsDayItem, UsageRecordsResponse } from "./usageContracts";
 import { ALL_MODELS } from "./usageConstants";
 
 export interface UsageApiDeps {

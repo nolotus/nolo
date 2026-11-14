@@ -335,6 +335,11 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     en: "Read compact dialog status",
     zh: "读取精简的对话状态",
   },
+  "dialog notify": {
+    // 与 dialogInternalCommandEntries 的 registry 描述逐字一致（门禁按字节比对）。
+    en: "Deliver a notification into a live CLI dialog's existing queue (--message/--file, --idempotency-key; --status for the receipt)",
+    zh: "向正在运行的 CLI 对话队列投递通知（--message/--file、--idempotency-key；--status 查投递回执）",
+  },
   "doc create": {
     en: "Create a normal doc",
     zh: "创建普通文档",

@@ -66,10 +66,13 @@ const inferFallbackAppRecord = (
   currentUserId?: string | null
 ): Record<string, any> | null => {
   if (!currentUserId || !detail.appId || !detail.appKey) return null;
-  // owner 只认服务端真值（review C1）：没有 ownerUserId 或与当前用户不符时，
-  // 绝不凭 appKey 前缀把查看者写成 owner —— 那会让本地记录/后续写操作以为
-  // 自己拥有别人的 app。
-  if (detail.ownerUserId !== currentUserId) return null;
+  // owner 只认服务端真值（review C1）：服务端**明确**给出别的 owner 时，绝不重建记录
+  // —— 那会让本地记录/后续写操作以为自己拥有别人的 app。
+  // 但「没给」不等于「不是 owner」：legacy 载荷（老版本 /api/app/get 与跨域回退）
+  // 根本没有 ownerUserId 字段，此时唯一可用的所有权信号是服务端签发的 appKey 前缀
+  // `app-<ownerUserId>-`（见下一行）。把缺字段也当成「不是 owner」会让 legacy 回退
+  // 整条重建 + dispatch 静默丢失（见 useAppDetail.test.tsx 的 legacy fallback 用例）。
+  if (detail.ownerUserId && detail.ownerUserId !== currentUserId) return null;
   if (!detail.appKey.startsWith(`app-${currentUserId}-`)) return null;
 
   const files = Array.isArray(detail.files) ? detail.files : undefined;
