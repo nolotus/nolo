@@ -1397,6 +1397,18 @@ export function createCliLocalRuntimeAdapter(
       cliEntrypoint: CLI_ENTRYPOINT,
       resolveAgentCredentialGroup,
       resolveAgentDisplayName,
+      // α：spawn 前从 agent 配置回读真实 name（resolveAgentRunName 的读取来源）。
+      // 记录已删除 / 读不到 → undefined，由 resolveAgentRunName 降级为短标识。
+      resolveAgentName: async (agentRef: string) => {
+        const record = await readAgentFromStore({
+          agentRef, store: await getOrCreateSharedStore(deps), userId,
+        });
+        const rec = record as Record<string, unknown> | undefined;
+        const deleted = Boolean(rec?.deletedAt || rec?.deleted || rec?.isDeleted);
+        return !deleted && typeof rec?.name === "string" && rec.name.trim()
+          ? rec.name.trim()
+          : undefined;
+      },
       resolveAgentModel,
       dialogExistsForCurrentUser: async (dialogId: string) => {
         const store = await getOrCreateSharedStore(deps);

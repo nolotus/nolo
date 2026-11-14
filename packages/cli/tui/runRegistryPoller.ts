@@ -224,6 +224,7 @@ export function snapshotFromRunRecord(
   return {
     runId: record.runId,
     status: record.status,
+    ...(record.agentKey ? { agentKey: record.agentKey } : {}),
     ...(!record.parentDialogId ? { unassigned: true } : {}),
     ...(isAgentNameFallback(label) ? {} : { agentName: label }),
     ...(title ? { title } : {}),

@@ -49,7 +49,7 @@ const AgentExplore: React.FC = () => {
             <PublicAgents limit={200} reloadMode="catalog" summary initialData={ssrAgents} />
           ) : category === "my-shares" ? (
             <MySharesPage />
-          ) : category === "dialog" || category === "article" ? (
+          ) : category === "dialog" || category === "article" || category === "app" ? (
             <ShareCommunityPreview key={category} contentCategory={category} />
           ) : category === "user" ? (
             <CreatorExplore />

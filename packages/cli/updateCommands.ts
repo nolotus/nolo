@@ -633,28 +633,45 @@ export type CliUpdateCheckOptions = {
 };
 
 /**
- * Best-effort check against the npm registry for a newer `nolo-cli` on the
- * channel implied by the server origin (us.nolo.chat → alpha, else latest).
- * Resolves to null when there is no newer version or the check cannot
- * complete — callers must treat null as "no prompt".
+ * 一次版本探测的三态结果。
+ *
+ * `current` 与 `unknown` 必须分开：只有确知"已是最新"才允许跳过安装；检查
+ * 失败（离线/超时/开关关闭）不得替用户否决一次正常操作（误判"不可用"才是
+ * 事故，误判"可用"只是多跑一次安装）。
  */
-export async function checkForCliUpdate(
+export type CliUpdateProbe =
+  | { kind: "available"; latestVersion: string; channel: CliReleaseChannel }
+  | { kind: "current"; channel: CliReleaseChannel }
+  | {
+      kind: "unknown";
+      reason: "disabled" | "unparsable-version" | "network" | "invalid-payload";
+    };
+
+/**
+ * Probe the npm registry for a newer `nolo-cli` on the channel implied by the
+ * server origin (us.nolo.chat → alpha, else latest).
+ *
+ * 与 checkForCliUpdate 的区别只有一处：把"确知已最新"和"无法判断"分开返回。
+ */
+export async function probeCliUpdate(
   currentVersion: string | undefined,
   serverUrl?: string | null,
   options: CliUpdateCheckOptions = {},
-): Promise<CliUpdateInfo | null> {
+): Promise<CliUpdateProbe> {
   const env = options.env ?? process.env;
   // per-key fallback 与 refreshGitStatus 的 kill switch 一致：显式 env 缺键时
   // 仍尊重进程级开关（workspace 测试常传 env: {}）。
   if (
     (env[NOLO_UPDATE_CHECK_KILL_SWITCH] ?? process.env[NOLO_UPDATE_CHECK_KILL_SWITCH]) === "1"
   ) {
-    return null;
+    return { kind: "unknown", reason: "disabled" };
   }
-  // 当前版本缺失或不可解析（本地开发/未知安装）时不提示，避免误报。
-  if (!currentVersion || !parseCliVersion(currentVersion)) return null;
-
   const channel = getCliInstallChannel(serverUrl);
+  // 当前版本缺失或不可解析（本地开发/未知安装）时不比较，避免误报。
+  if (!currentVersion || !parseCliVersion(currentVersion)) {
+    return { kind: "unknown", reason: "unparsable-version" };
+  }
+
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 2000;
 
@@ -666,23 +683,39 @@ export async function checkForCliUpdate(
         headers: { accept: "application/json" },
       },
     );
-    if (!res.ok) return null;
+    if (!res.ok) return { kind: "unknown", reason: "network" };
     const data = (await res.json()) as { version?: string };
     const latestVersion = data.version;
     // 两侧版本都必须可解析才比较：registry 返回非法版本（或恶意 payload）
     // 时不得进入字典序 fallback，否则可能把垃圾字符串当成"更新版本"误报。
-    if (
-      !latestVersion ||
-      !parseCliVersion(latestVersion) ||
-      compareCliVersions(latestVersion, currentVersion) <= 0
-    ) {
-      return null;
+    if (!latestVersion || !parseCliVersion(latestVersion)) {
+      return { kind: "unknown", reason: "invalid-payload" };
     }
-    return { latestVersion, channel };
+    if (compareCliVersions(latestVersion, currentVersion) <= 0) {
+      return { kind: "current", channel };
+    }
+    return { kind: "available", latestVersion, channel };
   } catch {
     // Offline / timeout / malformed payload: stay silent, never nag.
-    return null;
+    return { kind: "unknown", reason: "network" };
   }
+}
+
+/**
+ * Best-effort check against the npm registry for a newer `nolo-cli` on the
+ * channel implied by the server origin (us.nolo.chat → alpha, else latest).
+ * Resolves to null when there is no newer version or the check cannot
+ * complete — callers must treat null as "no prompt".
+ */
+export async function checkForCliUpdate(
+  currentVersion: string | undefined,
+  serverUrl?: string | null,
+  options: CliUpdateCheckOptions = {},
+): Promise<CliUpdateInfo | null> {
+  const probe = await probeCliUpdate(currentVersion, serverUrl, options);
+  return probe.kind === "available"
+    ? { latestVersion: probe.latestVersion, channel: probe.channel }
+    : null;
 }
 
 export async function runSelfUpdateDetailed(

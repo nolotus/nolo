@@ -1,4 +1,11 @@
-import { traceChildRunWake, queueWakeFields } from "./runWakeDiagnostics";
+import { traceChildRunWake, traceRunWake, queueWakeFields } from "./runWakeDiagnostics";
+import {
+  classifyInternalResumeGate,
+  classifyInternalResumeHeadGate,
+  classifyInternalResumeStateGate,
+  classifyInternalResumeStopGate,
+  type InternalResumeGate,
+} from "./internalResumeGate";
 import type { CliPendingResult, CliPendingRecovery } from "../client/localDialogRecords";
 // packages/cli/tui/chatQueueTuiBinding.ts
 //
@@ -39,6 +46,12 @@ export type RunDrainedTurn = (
   request: TurnRequest
 ) => Promise<{ ok: boolean; aborted: boolean }>;
 
+/** 自动续跑结果：drained=true 表示已交给 drain 级联；false 时 gate 是挡住它的具名门。 */
+export type InternalResumeResult = {
+  drained: boolean;
+  gate: InternalResumeGate | null;
+};
+
 export type ChatQueueTuiBinding = {
   submitPending(input: TurnRequest | InternalTurnEvent | string): Promise<void>;
   /**
@@ -59,8 +72,11 @@ export type ChatQueueTuiBinding = {
   getRecovery(): CliPendingRecovery;
   handlePendingCommand(action: "show" | "continue-without-resend", batchId?: string): Promise<string>;
   resumePending(): Promise<void>;
-  /** Drain only owned child completions after temporary screen ownership ends. Never clears stop/error/recovery gates. */
-  resumeInternalCompletions(dialogId: string | null): Promise<void>;
+  /**
+   * Drain only owned child completions after temporary screen ownership ends.
+   * Never clears stop/error/recovery gates; 被挡住时回传具名门，供诊断与 UI 提示。
+   */
+  resumeInternalCompletions(dialogId: string | null): Promise<InternalResumeResult>;
   /** Resolve what the composer should do with the current draft right now. */
   resolveSubmit(input: {
     text: string;
@@ -167,6 +183,8 @@ export type ChatQueueTuiBinding = {
   getStatus(): ChatQueueStatus;
   /** Number of queued items (convenience for the status line). */
   queueLength(): number;
+  /** Number of queued background completion events (child runs + background tasks). */
+  countQueuedBackgroundResults(): number;
   /** Tear down listeners. */
   dispose(): void;
 };
@@ -295,7 +313,7 @@ export function createChatQueueTuiBinding(
     await batchHost.resolveUnknownWithoutResend(batchId);
     restoreComplete = false;
     await restorePending();
-    if (!recoveryBlocked) { runtime.send({ type: "drain-error", message: "" }); await resumePending(); }
+    if (!recoveryBlocked) { runtime.send({ type: "clear-drain-error" }); await resumePending(); }
     return `Recorded user decision for ${batchId}: no resend; original messages and receipt retained.`;
   };
 
@@ -310,7 +328,7 @@ export function createChatQueueTuiBinding(
         await batchHost?.savePending?.([durable]);
         enqueue(durable);
         unsaved.delete(retryKey);
-        if (writeError && !recoveryBlocked) runtime.send({ type: "drain-error", message: "" });
+        if (writeError && !recoveryBlocked) runtime.send({ type: "clear-drain-error" });
         writeError = undefined;
       } catch (error) {
         writeError = `Pending save failed: ${errorText(error)}; draft retained, retry to save`;
@@ -381,7 +399,12 @@ export function createChatQueueTuiBinding(
     if (batchHost?.savePending) await pendingWrites;
     if (internalDialog !== undefined) {
       const current = runtime.getState();
-      if (internalResumeStopped || recoveryBlocked || writeError || current.running || current.drainPaused || current.lastDrainError || current.drainBatch) return;
+      if (classifyInternalResumeStateGate({
+        internalResumeStopped,
+        recoveryBlocked,
+        writeError,
+        status: current,
+      })) return;
     }
     // If a preempt was armed, reinterpret the aborted turn-end so the queue
     // is preserved instead of cleared. "drain" mode reinterprets as a clean
@@ -418,10 +441,9 @@ export function createChatQueueTuiBinding(
     // "stop" mode reinterprets abort as ok:false so the queue is kept and the
     // cascade does not drain — but ok:false also sets lastDrainError, which
     // would surface a spurious "previous turn failed" error for a deliberate
-    // Esc. Clear it: an empty drain-error message is falsy, so the status
-    // projection treats it as "no error".
+    // Esc. Clear it.
     if (consumedMode === "stop") {
-      runtime.send({ type: "drain-error", message: "" });
+      runtime.send({ type: "clear-drain-error" });
     }
 
     // Drain cascade: keep draining while the core says we should. Each drain
@@ -436,10 +458,8 @@ export function createChatQueueTuiBinding(
     while (true) {
       const status = runtime.getState();
       if (internalDialog !== undefined) {
-        if (internalResumeStopped || recoveryBlocked || writeError) break;
-        const event = status.queue[0]?.event;
-        if (!event || event.kind !== "child-run-completed" || !event.runs.length
-            || event.runs.some(run => !internalDialog || run.parentDialogId !== internalDialog)) break;
+        if (classifyInternalResumeStopGate({ internalResumeStopped, recoveryBlocked, writeError })) break;
+        if (classifyInternalResumeHeadGate(status.queue, internalDialog)) break;
       }
       if (!status.running && !status.drainPaused && status.queue.length > 0 && !status.lastDrainError && lastOk) {
         const batch = status.drainBatch;
@@ -472,7 +492,7 @@ export function createChatQueueTuiBinding(
         runtime.send({ type: "turn-end", ...effectiveTurnOutcome });
         traceChildRunWake("queue-drain-end", req.event, null, { ...queueWakeFields(getStatus()), ok: effectiveTurnOutcome.ok, aborted: effectiveTurnOutcome.aborted });
         if (consumed.mode === "stop") {
-          runtime.send({ type: "drain-error", message: "" });
+          runtime.send({ type: "clear-drain-error" });
         }
         lastOk = effectiveTurnOutcome.ok && !effectiveTurnOutcome.aborted;
       } else {
@@ -481,15 +501,30 @@ export function createChatQueueTuiBinding(
     }
   };
 
-  const resumeInternalCompletions = async (dialogId: string | null) => {
+  const resumeInternalCompletions = async (
+    dialogId: string | null
+  ): Promise<InternalResumeResult> => {
     await restorePending();
     await pendingWrites;
     const status = runtime.getState();
-    if (internalResumeStopped || recoveryBlocked || writeError || status.running || status.drainPaused || status.lastDrainError || status.drainBatch) return;
-    const event = status.queue[0]?.event;
-    if (!event || event.kind !== "child-run-completed" || !event.runs.length
-        || event.runs.some(run => !dialogId || run.parentDialogId !== dialogId)) return;
+    const gate = classifyInternalResumeGate({
+      internalResumeStopped,
+      recoveryBlocked,
+      writeError,
+      dialogId,
+      status,
+    });
+    if (gate) {
+      // 被挡住时只记「哪一门 + 队列规模」，不记队列内容：下次「为什么没
+      // 自动续跑」能直接定位，不必再从终态时间线反推。
+      traceRunWake("internal-resume-skip", {
+        gate,
+        ...queueWakeFields(projectChatQueueStatus({ state: status })),
+      });
+      return { drained: false, gate };
+    }
     await notifyTurnEnd({ ok: true, aborted: false }, dialogId);
+    return { drained: true, gate: null };
   };
 
   const drainHeadForManualTurn = (): TurnRequest | null => {
@@ -581,6 +616,18 @@ export function createChatQueueTuiBinding(
 
   const queueLength = () => runtime.getState().queue.length;
 
+  const countQueuedBackgroundResults = (): number => {
+    const queue = runtime.getState().queue;
+    let count = 0;
+    for (const item of queue) {
+      const kind = (item.event as { kind?: unknown } | undefined)?.kind;
+      if (kind === "child-run-completed" || kind === "background-task-completed") {
+        count += 1;
+      }
+    }
+    return count;
+  };
+
   const dispose = () => {
     runtime.dispose();
   };
@@ -612,6 +659,7 @@ export function createChatQueueTuiBinding(
     rollbackClaimedBatch,
     getStatus,
     queueLength,
+    countQueuedBackgroundResults,
     dispose,
   };
 }

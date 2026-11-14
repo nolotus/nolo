@@ -860,14 +860,45 @@ export function handleTuiInput(
     case "/profile":
       return {
         nextState: state,
-        output: `当前配置环境 (Profile): ${state.profileName}`,
+        output: t("profileCurrent", state.profileName),
       };
-    case "/update":
+    case "/update": {
+      // `/update` 的可见反馈全部由执行层在版本探测之后输出（见 tuiSlashRouter），
+      // 这样"正在检查"与"已是最新"不会同时出现在同一屏。
+      const arg = argText.trim().toLowerCase();
+      if (!arg) {
+        return {
+          nextState: state,
+          output: "",
+          action: { type: "self-update", checkFirst: true },
+        };
+      }
+      if (arg === "force" || arg === "--force" || arg === "-f") {
+        return {
+          nextState: state,
+          output: "",
+          action: { type: "self-update", checkFirst: false },
+        };
+      }
+      if (arg === "status") {
+        return {
+          nextState: state,
+          output: "",
+          action: { type: "self-update-status" },
+        };
+      }
+      if (arg === "help" || arg === "--help" || arg === "-h") {
+        return {
+          nextState: state,
+          output: t("updateTuiUsage"),
+        };
+      }
+      // 未知参数绝不静默升级：`/update status` 曾因此真的开始全局安装。
       return {
         nextState: state,
-        output: "Starting self-update...",
-        action: { type: "self-update" },
+        output: `${t("updateTuiUnknownArg", argText.trim())}\n${t("updateTuiUsage")}`,
       };
+    }
     case "/transcribe": {
       const parsed = parseTranscribeArgs(argText);
       if (!parsed.ok) {

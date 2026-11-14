@@ -16,6 +16,7 @@ import { useNavigate } from "app/routing";
 import {
   buildAppEditorPath,
 } from "app/constants/appEditor";
+import { useOpenAppEditorPanel } from "app/actions/openAppEditorPanel";
 import { resolveAppRouteKey } from "app/utils/appKeys";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -32,6 +33,7 @@ interface AppDeployCardProps {
 const AppDeployCard: React.FC<AppDeployCardProps> = ({ rawData, isError }) => {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
+  const openEditorPanel = useOpenAppEditorPanel();
   const { compactDeployCards } = useChatDisplayContext();
   const [iframeOpen, setIframeOpen] = useState(() => !isError && !compactDeployCards);
   const [frameState, setFrameState] = useState<"loading" | "loaded">("loading");
@@ -157,13 +159,28 @@ const AppDeployCard: React.FC<AppDeployCardProps> = ({ rawData, isError }) => {
               data-hook="messages-esc-adc-btn messages-esc-adc-btn-editor"
               {...withLiteralClass("adc-btn adc-btn--editor", styles.btn)}
               onClick={() =>
-                navigate(buildAppEditorPath(appRouteKey, undefined, appServerOrigin))
+                // 编辑 = 滑出右侧对象助手面板；没有右侧栏壳时退回整页编辑器。
+                openEditorPanel(appRouteKey, () =>
+                  navigate(buildAppEditorPath(appRouteKey, undefined, appServerOrigin))
+                )
               }
               title={t("appEditor_chatMode_title", "对话编辑")}
               type="button"
             >
               <LuBot size={13} aria-hidden="true" />
               <span>{t("appEditor_chatMode_title", "对话编辑")}</span>
+            </button>
+          )}
+          {appRouteKey && (
+            <button
+              data-hook="messages-esc-adc-btn messages-esc-adc-btn-full-editor"
+              {...withLiteralClass("adc-btn adc-btn--editor", styles.btn)}
+              onClick={() => navigate(buildAppEditorPath(appRouteKey, undefined, appServerOrigin))}
+              title={t("appEditor_openFullEditor", "打开完整编辑器")}
+              aria-label={t("appEditor_openFullEditor", "打开完整编辑器")}
+              type="button"
+            >
+              <LuExternalLink size={13} aria-hidden="true" />
             </button>
           )}
         </div>

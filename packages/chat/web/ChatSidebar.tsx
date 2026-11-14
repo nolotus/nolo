@@ -21,8 +21,8 @@ import "./chatStylexEscapeHatch.css";
 
 import { SidebarCoachmark } from "./sidebar/SidebarCoachmark";
 import { LuStar, LuChevronDown, LuSearch, LuPanelLeftClose, LuPanelLeftOpen } from "react-icons/lu";
-import { SidebarTypeFilter, isSidebarTypeFilterId, matchesTypeFilter, DEFAULT_SIDEBAR_TYPE_FILTER, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
-import { resolveEffectiveSidebarType, applySidebarTypeToParams } from "./sidebar/sidebarTypeQuery";
+import { SidebarTypeFilter, matchesTypeFilter, DEFAULT_SIDEBAR_TYPE_FILTER, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
+import { resolveEffectiveSidebarType, applySidebarTypeToParams, readStoredSidebarType, writeStoredSidebarType } from "./sidebar/sidebarTypeQuery";
 import { selectIdentityUserId } from "identity/selectors";
 import { RemoteTasksGlobalEntry } from "./RemoteTasksGlobalEntry";
 import { WorkDialogHistory } from "./WorkDialogHistory";
@@ -46,25 +46,10 @@ import { useAgentUnreadSummaryLifecycle } from "./sidebar/useAgentUnreadSummary"
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { selectRemoteServer } from "app/settings/settingSlice";
 
-const SIDEBAR_FILTER_STORAGE_KEY = "space-sidebar-type-filter";
-
-const readStoredSidebarFilter = (): SidebarTypeFilterId => {
-  try {
-    // SSR 与客户端 fallback 同一默认真源；已明确选择过的偏好原样保留
-    if (typeof window === "undefined") return DEFAULT_SIDEBAR_TYPE_FILTER;
-    const stored = window.localStorage.getItem(SIDEBAR_FILTER_STORAGE_KEY);
-    return isSidebarTypeFilterId(stored) ? stored : DEFAULT_SIDEBAR_TYPE_FILTER;
-  } catch {
-    return DEFAULT_SIDEBAR_TYPE_FILTER;
-  }
-};
-
-const writeStoredSidebarFilter = (filter: SidebarTypeFilterId) => {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(SIDEBAR_FILTER_STORAGE_KEY, filter);
-  } catch {}
-};
+// 侧栏类型筛选的本地偏好读取/写入真源在 sidebarTypeQuery（列表回落到同一份），
+// 这里只负责「首次默认真源」：没有偏好时用 DEFAULT_SIDEBAR_TYPE_FILTER。
+const readPreferredSidebarType = (): SidebarTypeFilterId =>
+  readStoredSidebarType() ?? DEFAULT_SIDEBAR_TYPE_FILTER;
 
 // --- 主侧边栏组件 ---
 /**
@@ -139,13 +124,15 @@ const ChatSidebar: React.FC = () => {
   // 类型筛选真源优先级：有效 URL query > 本地偏好 > 首次默认（agent）。
   // URL 是可分享、可前进后退/刷新恢复的真源，所以 typeFilter 直接从 URL 派生，
   // 不做「URL -> state」的 effect 回写（避免把显式 URL 覆盖掉）。
+  // 该值是**唯一**的有效筛选：chip 显隐与下方列表（typeFilter prop）都用它，
+  // 列表不再自己从 URL 重新推导（详情页 URL 归一化会丢掉 sidebarType，重推会与 chip 不一致）。
   const [searchParams, setSearchParams] = useSearchParams();
-  const [preferredTypeFilter, setPreferredTypeFilter] = useState<SidebarTypeFilterId>(readStoredSidebarFilter);
+  const [preferredTypeFilter, setPreferredTypeFilter] = useState<SidebarTypeFilterId>(readPreferredSidebarType);
   const typeFilter = resolveEffectiveSidebarType(searchParams.toString(), preferredTypeFilter);
 
   const handleTypeFilterChange = useCallback((filter: SidebarTypeFilterId) => {
     setPreferredTypeFilter(filter);
-    writeStoredSidebarFilter(filter);
+    writeStoredSidebarType(filter);
     setSearchParams((prev) => applySidebarTypeToParams(prev, filter));
   }, [setSearchParams]);
 
@@ -461,7 +448,7 @@ const ChatSidebar: React.FC = () => {
         <div className={contextContentClassName}>
           <div style={{ display: homeView === "work" ? "contents" : "none" }}>
             {homeScope.kind === "all" && remoteTasksGlobalEntry}
-            <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} includeNonDialogs={typeFilter !== "dialog"} unreadAgentKeys={unreadAgentKeys} />
+            <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} includeNonDialogs={typeFilter !== "dialog"} typeFilter={typeFilter} unreadAgentKeys={unreadAgentKeys} />
           </div>
           <div style={{ display: homeView === "projects" ? "contents" : "none" }}>
             <DesktopFolderProjects createRequest={createProjectRequest} items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} spaceId={space?.id || null} onOpenProject={(project) => navigate("/?project=" + encodeURIComponent(project.id))} />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useToken, useUserId } from "identity";
 import { getAllServers } from "database/actions/common";
@@ -37,6 +37,15 @@ export interface AppDetail {
   modifiedOn?: string;
   createdAt?: string;
   appRecord?: Record<string, any>;
+  /**
+   * 服务端下发的真实 owner（review C1）。以前客户端把「当前用户」当成 owner，
+   * 空间只读成员因此也能看到「分享/发布」按钮。
+   */
+  ownerUserId?: string;
+  /** 只有 owner 为 true：分享/发布到社区的唯一门控信号（服务端派生）。 */
+  canShare?: boolean;
+  /** 谁能打开这个应用（产品真值 A 轴）：分享面板文案按它分档，不在客户端重新推。 */
+  reachability?: "owner" | "space" | "link" | "public";
   icon?: ContentIcon | null;
 }
 
@@ -57,6 +66,10 @@ const inferFallbackAppRecord = (
   currentUserId?: string | null
 ): Record<string, any> | null => {
   if (!currentUserId || !detail.appId || !detail.appKey) return null;
+  // owner 只认服务端真值（review C1）：没有 ownerUserId 或与当前用户不符时，
+  // 绝不凭 appKey 前缀把查看者写成 owner —— 那会让本地记录/后续写操作以为
+  // 自己拥有别人的 app。
+  if (detail.ownerUserId !== currentUserId) return null;
   if (!detail.appKey.startsWith(`app-${currentUserId}-`)) return null;
 
   const files = Array.isArray(detail.files) ? detail.files : undefined;
@@ -81,7 +94,7 @@ const inferFallbackAppRecord = (
   return {
     appId: detail.appId,
     appKey: detail.appKey,
-    userId: currentUserId,
+    userId: detail.ownerUserId ?? currentUserId,
     name: detail.userFriendlyName,
     code: detail.code ?? "",
     framework: detail.framework ?? "worker",
@@ -110,6 +123,13 @@ const resolveSyncRecord = (
   return inferFallbackAppRecord(detail, currentUserId);
 };
 
+interface AppDetailState {
+  /** 下面这份 app / error 属于哪个 appKey（null 表示「没有 appKey 或还没加载」）。 */
+  appKey: string | null;
+  app: AppDetail | null;
+  error: string | null;
+}
+
 export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {}) {
   const dispatch = useAppDispatch();
   const token = useToken();
@@ -117,19 +137,37 @@ export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {})
   const server = useAppSelector(selectRemoteServer);
   const syncServers = useAppSelector(selectRemoteSyncServers);
   const readServersKey = JSON.stringify(getAllServers(server, syncServers));
-  const [app, setApp] = useState<AppDetail | null>(null);
+  // app 与 error 绑定在它们所属的 appKey 上：切换 appKey 后，新请求落地前调用方
+  // 只能看到「还没加载」，不会看到上一个应用的数据。
+  // 否则详情页会拿上一个应用的 appKey 去做 URL 归一化，把地址栏 replace 回
+  // 上一个 app（侧栏连续点两个 app 时地址栏来回跳）。
+  const [detail, setDetail] = useState<AppDetailState>({
+    appKey: null,
+    app: null,
+    error: null,
+  });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // 请求代号：每次发起请求自增，旧请求（切换 appKey / 并发 refetch）的应答一律丢弃，
+  // 不允许它覆盖当前 appKey 的状态。
+  const requestSeqRef = useRef(0);
+  const requestedAppKey = appKey ?? null;
 
   const fetchApp = useCallback(async () => {
-    if (!appKey || !token) {
-      setApp(null);
-      setError(null);
+    const requestAppKey = appKey ?? null;
+    const requestSeq = ++requestSeqRef.current;
+    const isCurrentRequest = () => requestSeq === requestSeqRef.current;
+
+    if (!requestAppKey || !token) {
+      setDetail({ appKey: requestAppKey, app: null, error: null });
+      setLoading(false);
       return;
     }
 
     setLoading(true);
-    setError(null);
+    // 同一个 appKey 的 refetch 保留已加载内容，只把上一次的错误清掉。
+    setDetail((current) =>
+      current.appKey === requestAppKey ? { ...current, error: null } : current
+    );
 
     try {
       const requestPath = options.prepareEdit ? "/api/app/prepare-edit" : "/api/app/get";
@@ -184,9 +222,14 @@ export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {})
               // Keep remote detail usable even if current-server self-heal fails.
             }
           }
-          setApp({
-            ...detail,
-            icon: detail.icon ?? detail.appRecord?.icon ?? null,
+          if (!isCurrentRequest()) return;
+          setDetail({
+            appKey: requestAppKey,
+            app: {
+              ...detail,
+              icon: detail.icon ?? detail.appRecord?.icon ?? null,
+            },
+            error: null,
           });
           return;
         }
@@ -201,14 +244,20 @@ export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {})
         throw lastError;
       }
       if (fallbackApp) {
-        setApp(fallbackApp);
+        if (!isCurrentRequest()) return;
+        setDetail({ appKey: requestAppKey, app: fallbackApp, error: null });
         return;
       }
       throw lastError ?? new Error("加载应用失败");
     } catch (err: any) {
-      setError(err?.message ?? "加载应用失败");
+      if (!isCurrentRequest()) return;
+      setDetail({
+        appKey: requestAppKey,
+        app: null,
+        error: err?.message ?? "加载应用失败",
+      });
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, [appKey, currentUserId, dispatch, options.prepareEdit, options.serverOrigin, readServersKey, server, token]);
 
@@ -216,5 +265,13 @@ export function useAppDetail(appKey?: string, options: UseAppDetailOptions = {})
     void fetchApp();
   }, [fetchApp]);
 
-  return { app, loading, error, refetch: fetchApp };
+  const detailForRequestedAppKey = detail.appKey === requestedAppKey ? detail : null;
+  return {
+    app: detailForRequestedAppKey?.app ?? null,
+    // 数据还没落到当前 appKey 上（刚切换 / 首个请求在途）：按加载中呈现，
+    // 不要把一个空预览当作新 app 的结论。
+    loading: loading || !detailForRequestedAppKey,
+    error: detailForRequestedAppKey?.error ?? null,
+    refetch: fetchApp,
+  };
 }

@@ -230,6 +230,14 @@ export type TuiAction =
     }
   | {
       type: "self-update";
+      /**
+       * true（缺省）= 先检查是否有新版本，确知已最新时直接告知并跳过安装；
+       * false = 跳过检查直接安装（/update force）。
+       */
+      checkFirst?: boolean;
+    }
+  | {
+      type: "self-update-status";
     }
   | {
       type: "theme-refresh";

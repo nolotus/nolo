@@ -1,5 +1,6 @@
 import { fetchAuthoritativeRemoteSpace } from "create/space/spaceAccess";
-import { isSidebarTypeFilterId, matchesTypeFilter } from "./sidebar/SidebarTypeFilter";
+import { matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
+import { resolveEffectiveSidebarType, readStoredSidebarType } from "./sidebar/sidebarTypeQuery";
 import { isAllViewDialogImageAttachment } from "./sidebar/allViewSearch";
 import { WorkDialogSpaceGroups, WorkDialogCategoryGroups } from "./WorkDialogSpaceGroups";
 import { WORK_SPACE_NAME_TTL_MS, createWorkSpaceRecordCache, projectWorkSpaceDirectories, groupWorkDialogsByCategory, type WorkSpaceRecord, groupWorkDialogsBySpace, canManageSpaceCategories, isSpaceManager, resolveRowOwnership, resolveContentRowCapability, type ContentRowCapability } from "./sidebar/workDialogSpaceGroups";
@@ -97,19 +98,25 @@ type DialogPages = {
 };
 
 export function WorkDialogGroupsPreview({
-  items, userId, homeScope = { kind: "all" }, includeNonDialogs = false, paginationOwner = false, ownedPages, unreadAgentKeys,
-}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; includeNonDialogs?: boolean; paginationOwner?: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
+  items, userId, homeScope = { kind: "all" }, includeNonDialogs = false, typeFilter, paginationOwner = false, ownedPages, unreadAgentKeys,
+}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; includeNonDialogs?: boolean; typeFilter?: SidebarTypeFilterId; paginationOwner?: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
   if (!userId) return null;
   return <section aria-label="工作状态" data-hook="work-dialog-groups">
-    <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} includeNonDialogs={includeNonDialogs} paginationOwner={paginationOwner} ownedPages={ownedPages} unreadAgentKeys={unreadAgentKeys} />
+    <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} includeNonDialogs={includeNonDialogs} typeFilter={typeFilter} paginationOwner={paginationOwner} ownedPages={ownedPages} unreadAgentKeys={unreadAgentKeys} />
   </section>;
 }
 
-function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs, paginationOwner, ownedPages, unreadAgentKeys }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope; includeNonDialogs: boolean; paginationOwner: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
+function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs, typeFilter: typeFilterProp, paginationOwner, ownedPages, unreadAgentKeys }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope; includeNonDialogs: boolean; typeFilter?: SidebarTypeFilterId; paginationOwner: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
   const dialogEventTimestamps = useDialogEventTimestamps();
   const location = useLocation();
-  const requestedType = new URLSearchParams(location.search).get("sidebarType");
-  const typeFilter = isSidebarTypeFilterId(requestedType) ? requestedType : includeNonDialogs ? "all" : "dialog";
+  // 有效类型筛选只能有一处解析：生产调用方（ChatSidebar）传入 chip 用的同一个值。
+  // 无 prop 的独立渲染（测试 / 其它调用方）走同一套解析（URL 覆盖本地偏好），
+  // 没有本地偏好时沿用各自历史默认（只看对话 / 不过滤）。
+  // 早期实现在这里另起一套「URL 否则 includeNonDialogs ? all : dialog」，
+  // 详情页 URL 归一化丢掉 sidebarType 后列表回落到 all，与 chip 的本地偏好分叉。
+  const legacyDefaultTypeFilter: SidebarTypeFilterId = includeNonDialogs ? "all" : "dialog";
+  const typeFilter = typeFilterProp ??
+    resolveEffectiveSidebarType(location.search, readStoredSidebarType() ?? legacyDefaultTypeFilter);
   const currentSpaceId = useCurrentSpaceId();
   const runtime = useAppSelector(selectRuntimeSnapshot);
   const memberSpaces = useAllMemberSpaces();

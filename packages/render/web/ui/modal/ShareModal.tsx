@@ -17,6 +17,15 @@ import { copyTextToClipboard } from "app/utils/clipboard";
 import { toast } from "app/utils/toast";
 import "./ShareModal.css";
 
+/**
+ * app 分享链接实际能到达谁（review H1 / HIGH-3）。由服务端下发的 `reachability` 决定：
+ * - `public`：谁都能打开；
+ * - `link`：持有链接的人能打开（不列出）；
+ * - `space`：属于空间，只有该空间的成员能打开；
+ * - `owner`：只有作者本人能打开。
+ */
+export type AppShareScope = "owner" | "space" | "link" | "public";
+
 export interface ShareModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -27,7 +36,12 @@ export interface ShareModalProps {
   initialCopied?: boolean;
   onPublishCommunity?: () => Promise<void> | void;
   messageCount?: number;
-  itemType?: "dialog" | "page";
+  itemType?: "dialog" | "page" | "app";
+  /** app 分享的可见范围（只有 itemType==="app" 时有意义） */
+  appScope?: AppShareScope;
+  /** 建链失败时的人话提示（显示在链接行下方，可重试） */
+  errorMessage?: string | null;
+  onRetry?: () => void | Promise<void>;
 }
 
 export const ShareModal: React.FC<ShareModalProps> = ({
@@ -40,6 +54,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   initialCopied = false,
   onPublishCommunity,
   itemType = "dialog",
+  appScope = "owner",
+  errorMessage = null,
+  onRetry,
 }) => {
   const { t } = useTranslation(["common", "chat"]);
   const [copied, setCopied] = useState(false);
@@ -107,9 +124,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   const modalTitle =
     title ||
-    (itemType === "dialog"
-      ? t("shareDialogTitle", "分享对话")
-      : t("sharePageTitle", "分享页面"));
+    (itemType === "app"
+      ? t("shareAppTitle", "分享应用")
+      : itemType === "dialog"
+        ? t("shareDialogTitle", "分享对话")
+        : t("sharePageTitle", "分享页面"));
 
   const actions = (
     <div className="share-modal__footer">
@@ -143,13 +162,41 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           <LuGlobe size={18} className="share-modal__permission-icon" aria-hidden="true" />
           <div className="share-modal__permission-text">
             <span className="share-modal__permission-title">
-              {t("anyoneWithLinkCanView", "拥有链接的人皆可查看")}
+              {itemType === "app"
+                ? appScope === "public"
+                  ? t("sharePermissionTitlePublic", "所有人都能打开")
+                  : appScope === "link"
+                    ? t("sharePermissionTitleLink", "拿到链接的人能打开")
+                    : appScope === "space"
+                      ? t("sharePermissionTitleSpace", "空间成员能打开")
+                      : t("sharePermissionTitleOwner", "只有你能打开")
+                : t("anyoneWithLinkCanView", "拥有链接的人皆可查看")}
             </span>
             <span className="share-modal__permission-desc">
-              {t(
-                "snapshotNotice",
-                "生成内容为当前时刻的只读快照，后续新对话或修改不会出现在此链接中。",
-              )}
+              {itemType === "app"
+                ? appScope === "public"
+                  ? t(
+                      "shareAppNoticePublic",
+                      "这个应用已经公开：拿到链接的任何人都能打开，无需登录；内容以当前部署版本为准。",
+                    )
+                  : appScope === "link"
+                    ? t(
+                        "shareAppNoticeLink",
+                        "持有链接的人可以打开这个应用（无需登录），但它不会出现在列表或搜索里。",
+                      )
+                    : appScope === "space"
+                      ? t(
+                          "shareAppNoticeSpace",
+                          "这个应用属于某个空间：只有该空间的成员能打开链接，其他人会看到无权访问的提示。",
+                        )
+                      : t(
+                          "shareAppNoticeOwner",
+                          "这个应用目前只有你能打开：链接给别人也打不开，要给别人看请先把应用设为公开或放进空间。",
+                        )
+                : t(
+                    "snapshotNotice",
+                    "生成内容为当前时刻的只读快照，后续新对话或修改不会出现在此链接中。",
+                  )}
             </span>
           </div>
         </div>
@@ -189,6 +236,23 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </Button>
           </div>
         </div>
+
+        {/* 建链失败：一句人话 + 重试（状态诚实，不把空链接当成功） */}
+        {errorMessage && (
+          <div className="share-modal__link-error">
+            <span>{errorMessage}</span>
+            {onRetry && (
+              <button
+                type="button"
+                className="share-modal__retry"
+                onClick={() => void onRetry()}
+                disabled={isLoading}
+              >
+                {t("retry", "重试")}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 社区广场卡片 */}
         {onPublishCommunity && (

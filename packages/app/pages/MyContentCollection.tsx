@@ -40,6 +40,7 @@ import {
   buildAppDetailPath,
   buildAppEditorPath,
 } from "app/constants/appEditor";
+import { useOpenAppEditorPanel } from "app/actions/openAppEditorPanel";
 import {
   MY_CONTENT_FILTERS,
   PRIMARY_CONTENT_FILTERS,
@@ -332,6 +333,7 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
   const { t } = useTranslation();
   const { t: tSpace } = useTranslation("space");
   const navigate = useNavigate();
+  const openEditorPanel = useOpenAppEditorPanel();
   const userId = useUserId();
   const { items: allItems, loading: itemsLoading } = useMyContentItems();
   const shouldDebugLog =
@@ -954,7 +956,11 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
                           : undefined
                     }
                     onOpenDetail={() => navigate(buildContentTarget(item))}
-                    onOpenEditor={() => navigate(buildAppEditorTarget(item))}
+                    onOpenEditor={() =>
+                      openEditorPanel(normalizeAppRouteId(item.contentKey), () =>
+                        navigate(buildAppEditorTarget(item)),
+                      )
+                    }
                     onDelete={
                       isAppsManageView
                         ? (app) => handleDeleteOwnedApp(app)

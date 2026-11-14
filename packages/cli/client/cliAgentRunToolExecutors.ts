@@ -19,6 +19,7 @@ import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
 import { currentHostReviewDispatch, matchesHostReviewDispatch, consumeHostReviewDispatch, validateHostReviewDispatch, bindHostReviewRun, type HostReviewDispatchContext } from "./hostReviewDispatch";
+import { resolveAgentRunName } from "../../ai/tools/agent/agentRunName";
 import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import * as nodeFs from "node:fs";
 import { waitForRunTerminal } from "../../agent-runtime/waitForRunTerminal";
@@ -127,6 +128,7 @@ export type CliAgentRunToolExecutorDeps = {
    * 已注入时，返回 undefined / 抛错 = 凭证归属**未知**，不得用调用方组名覆盖。
    * 未注入时才兼容调用方传入的 credentialGroup。
    */
+  resolveAgentName?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
   /** 当前主进程运行的 agentKey（供 startAgentRun 缺省回填自身派发用）。 */
   currentAgentKey?: string | null;
@@ -161,23 +163,6 @@ export type CliAgentRunToolExecutorDeps = {
   /** runs 目录（测试/环境注入；缺省时由 resolveRunsDir 解析）。 */
   runsDir?: string;
 } & AgentRunControlDeps;
-
-/**
- * 调用方只给 agentKey 时，从 agent 记录回填展示名。解析失败/无注入一律返回
- * undefined —— 卡片退回原有「子智能体」标签，不阻塞派发、不伪造名字。
- */
-async function resolveAgentDisplayNameFromDeps(
-  deps: CliAgentRunToolExecutorDeps,
-  agentKey: string | undefined,
-): Promise<string | undefined> {
-  if (!agentKey || !deps.resolveAgentDisplayName) return undefined;
-  try {
-    const name = await deps.resolveAgentDisplayName(agentKey);
-    return typeof name === "string" && name.trim() ? name.trim() : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 const noopOutput: OutputLike = { write: () => {} };
 
@@ -686,14 +671,15 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       ...instaboxArgs,
     ];
 
-    const agentName =
-      typeof args.agentName === "string" && args.agentName.trim()
-        ? args.agentName.trim()
-        : typeof args.name === "string" && args.name.trim()
-        ? args.name.trim()
-        : // 调用方没给名字就回填 agent 记录里的 name：否则 run 卡片只能显示
-          // 通用「子智能体」，而这个名字在派发侧本来就能读到。
-          await resolveAgentDisplayNameFromDeps(deps, agentKey);
+    // α：生产侧解析身份——显式 agentName 严格保留；省略时从 agent 配置回读；
+    // 完全解析不到时降级为 agentKey 尾部短标识，绝不退回通用「子智能体」标签。
+    const agentName = await resolveAgentRunName(
+      agentKey,
+      [args.agentName, args.name],
+      async (key) => ({
+        name: await (deps.resolveAgentName ?? deps.resolveAgentDisplayName)?.(key),
+      }),
+    );
 
     const batchId =
       typeof args.batchId === "string" && args.batchId.trim()

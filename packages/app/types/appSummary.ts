@@ -31,6 +31,8 @@ export interface AppSummary {
   visibility?: AppVisibility;
   deployMode?: AppDeployMode;
   icon?: ContentIcon | null;
+  /** 记录里的真实 owner（服务端字段）。卡片用它门控「发布到社区」，非 owner 不渲染。 */
+  ownerUserId?: string;
 }
 
 export interface AppSummaryRecord {
@@ -126,5 +128,11 @@ export function toAppSummary(
     visibility: record.visibility ?? "private",
     deployMode: record.deployMode ?? "platform",
     icon: record.icon ?? null,
+    // 记录里的真实 owner（服务端记录字段，不是客户端推测）。卡片上的
+    // 「发布到社区」用它门控：非 owner 不渲染，避免假按钮（review 假按钮）。
+    ownerUserId:
+      typeof record.userId === "string" && record.userId.trim().length > 0
+        ? record.userId.trim()
+        : undefined,
   };
 }

@@ -39,10 +39,11 @@ import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { extractCustomId } from "core/prefix";
 import { checkCredentialFanout } from "./credentialFanoutGuard";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
-import { selectById } from "database/dbSlice";
+import { read, selectById } from "database/dbSlice";
 import { deriveCredentialGroup } from "ai/agent/safeAgentSummary";
 import { callToolApi } from "../toolApiClient";
 import { AGENT_THREAD_ACTIVE_STATUSES, AGENT_THREAD_TERMINAL_STATUSES } from "agent-runtime/agentThread";
+import { resolveAgentRunName } from "./agentRunName";
 
 // Same-tab creation reservations only. Server admission remains authoritative across
 // tabs/processes; this is neither a distributed lock nor workspace isolation.
@@ -130,7 +131,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             },
             agentName: {
                 type: "string",
-                description: "可选。由 listAgents/readAgent 得到的可读 Agent 名称，用于 TUI 运行卡片展示。",
+                description: "可选。覆盖运行卡片的 Agent 展示名；省略时按 agentKey 自动读取配置中的 name。",
             },
             title: {
                 type: "string",
@@ -154,7 +155,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             // Evidence never inherits a tier or bypasses selection_reason_required.
             continueDialogId: {
                 type: "string",
-                description: "可选。续跑当前用户已有的 dialog（不存在或不属于当前用户时显式报错，不新建）。适用于同一子任务的定向闭合，核验上一轮 finding 是否修好；禁用于评审类任务的独立判断，续跑会带入之前的结论、破坏独立性。2026-10-19 review 机制约定：full 审查用新 dialog（不传本参数），closure 用续跑。续跑时必须显式传该对话原本的 agentKey（对话的 primaryAgentKey）：省略 agentKey 不会沿用原 agent，而是回落到当前编排者自己，等于换模型并把这份对话的 prompt 缓存全部作废；确需换模型（原 agent 不可用/配额耗尽）才传新 key，并在 task 里说明理由。只有续跑才带此前对话历史：新建 run（不传本参数）没有任何此前对话历史，同一 agentKey 也不等于同一上下文。",
+                description: "可选。续跑当前用户已有的 dialog（不存在或不属于当前用户时显式报错，不新建）。适用于同一子任务的定向闭合，核验上一轮 finding 是否修好；禁用于评审类任务的独立判断，续跑会带入之前的结论、破坏独立性。2026-10-19 review 机制约定：full 审查用新 dialog（不传本参数），closure 用续跑。续跑时必须显式传该对话原本的 agentKey（对话的 primaryAgentKey）：省略 agentKey 不会沿用原 agent，而是回落到当前编排者自己，等于换模型并把这份对话的 prompt 缓存全部作废；确需换模型（原 agent 不可用/配额耗尽）才传新 key，并在 task 里说明理由。只有续跑才带此前对话历史：新建 run（不传本参数）没有任何此前对话历史，同一 agentKey 也不等于同一上下文。续跑依赖本地 dialog 历史；历史不可用时该 run 会直接失败（报 Strict continuation history load failed）而不会退化为新建 dialog——此时若改以新 dialog 重派，等于一个没有此前历史的新任务，必须在 task 里补齐原 finding、必要上下文与核验标准；确实依赖原对话历史时应先恢复历史，不要假装仍在续跑。",
             },
             batchId: {
                 type: "string",
@@ -564,9 +565,12 @@ export async function startAgentRunFunc(
             reservation.runId = runId;
         }
         const status = bgResult.status ?? "pending";
-        // rawData carries only real identity fields; the display fallback chain
-        // lives in resolveRunLabel so a key never masquerades as a name.
-        const resolvedName = agentName?.trim() || bgResult.agentName || bgResult.name;
+        // Resolve identity at production time, not in the presentation fallback.
+        const resolvedName = await resolveAgentRunName(
+            effectiveAgentKey,
+            [agentName, bgResult.agentName, bgResult.name],
+            async (dbKey) => dispatch(read({ dbKey })).unwrap(),
+        );
         // The label is the NAME layer only — the title rides its own row on
         // the card, so letting it win here would leave the identity row empty
         // (and the same holds for any machine-side use of the same function).

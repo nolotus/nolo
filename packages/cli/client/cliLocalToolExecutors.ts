@@ -284,6 +284,7 @@ export function buildLocalToolExecutors(args: {
    * 解析候选 agent 的 credentialGroup（并发扇出守卫用，见
    * cliAgentRunToolExecutors.assertCredentialFanoutAllowed）。
    */
+  resolveAgentName?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
   /**
    * 解析候选 agent 的 `runtimeBinding.machineId`（F3：binding 参与派发判定）。
@@ -497,6 +498,8 @@ export function buildLocalToolExecutors(args: {
     startAgentRun: createCliStartAgentRunExecutor({
       shellApprovalHostForAgent: args.shellApprovalHostForAgent,
       ...pickAgentRunResolverDeps(args),
+      // α：展示名回读器——resolveAgentRunName 的读取来源（显式 agentName 优先，绝不覆盖）。
+      resolveAgentName: args.resolveAgentName,
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
       cwd: args.workspaceRoot,

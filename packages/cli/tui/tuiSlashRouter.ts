@@ -47,6 +47,7 @@ import {
   type CollapsedPasteStore,
 } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
+import { getCliInstallChannel, probeCliUpdate } from "../updateCommands";
 import { t } from "./i18n";
 import { stripAnsi } from "./tuiAnsi";
 import { detectGitStatusAsync } from "./gitStatus";
@@ -489,21 +490,62 @@ export async function runSubmittedSlashLine(
   }
 
   if (result.action?.type === "self-update") {
+    const checkFirst = result.action.checkFirst ?? true;
+    if (checkFirst) {
+      // 只在"确知已最新"时短路；离线/超时/开关关闭属于"无法判断"，如实说明
+      // 后照常安装——不确定的信息不得否决用户的正常操作。
+      emitCommandOutput(t("updateChecking"), line);
+      const probe = await probeCliUpdate(host.state.cliVersion, host.state.serverUrl, {
+        env: options.env ?? process.env,
+        fetchImpl,
+        timeoutMs: 2000,
+      });
+      if (probe.kind === "current") {
+        emitCommandOutput(
+          t("updateAlreadyLatest", host.state.cliVersion ?? t("versionUnknown")),
+          line,
+        );
+        return false;
+      }
+      if (probe.kind === "unknown") {
+        emitCommandOutput(t("updateCheckSkipped"), line);
+      }
+    }
     try {
       const update = await selfUpdater(output);
       if (update.exitCode === 0 && update.disposition === "scheduled") {
-        output.write("Update is ready. Nolo will now exit safely; installation starts after shutdown.\n");
+        emitCommandOutput(t("updateTuiScheduled"), line);
         return true;
       }
       if (update.exitCode === 0) {
-        output.write("Update finished. Restart nolo to use the new version.\n");
+        emitCommandOutput(t("updateTuiFinished"), line);
       } else {
-        output.write("Update failed. Check the error above, then run /update again or use nolo update.\n");
+        emitCommandOutput(t("updateTuiFailed"), line);
       }
     } catch (error) {
-      output.write(`${toErrorMessage(error)}\n`);
-      output.write("Update failed. Check the error above, then run /update again or use nolo update.\n");
+      emitCommandOutput(toErrorMessage(error), line);
+      emitCommandOutput(t("updateTuiFailed"), line);
     }
+  }
+
+  if (result.action?.type === "self-update-status") {
+    // 只读命令：绝不触发安装，也不退出会话。
+    const version = host.state.cliVersion ?? t("versionUnknown");
+    const channel = getCliInstallChannel(host.state.serverUrl);
+    const probe = await probeCliUpdate(host.state.cliVersion, host.state.serverUrl, {
+      env: options.env ?? process.env,
+      fetchImpl,
+      timeoutMs: 2000,
+    });
+    const lines = [t("updateTuiStatus", version, channel)];
+    if (probe.kind === "available") {
+      lines.push(t("updateAvailable", probe.latestVersion));
+    } else if (probe.kind === "current") {
+      lines.push(t("updateUpToDate"));
+    } else {
+      lines.push(t("updateCheckUnavailable"));
+    }
+    emitCommandOutput(lines.join("\n"), line);
   }
 
   if (result.action?.type === "theme-refresh") {

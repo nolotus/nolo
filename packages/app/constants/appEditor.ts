@@ -101,19 +101,5 @@ export const buildAppChatEditorPath = (
     serverOrigin
   );
 
-export const buildAppCodeEditorPath = (
-  appKey: string,
-  spaceId?: string | null,
-  serverOrigin?: string | null
-) =>
-  withAppQuery(
-    buildAppBasePath(appKey, spaceId),
-    {
-      [APP_EDIT_SEARCH_PARAM]: "true",
-      [APP_EDIT_MODE_SEARCH_PARAM]: "code",
-    },
-    serverOrigin
-  );
-
 export const buildAppAssistantSidebarId = (appKey: string) =>
   `objectAssistant:app:${appKey}`;

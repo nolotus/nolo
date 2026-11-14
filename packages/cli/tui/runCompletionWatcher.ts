@@ -328,7 +328,6 @@ export function buildWakeDisplayText(
 // 兼容再导出：这些 helper 上一轮在 watcher 上，调用方保持不变。
 export {
   buildCliNoticeText,
-  buildWakeNoticeFragment,
   resolveNoticeTitle,
   type CliNoticeTask,
 } from "./completionNoticeDisplay";
