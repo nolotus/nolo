@@ -8,6 +8,7 @@ import { buildProviderAuthHeaders } from "../../agent-runtime/providerResolution
 import { performServerProxyFetchWithRetry } from "./serverProxyRetry";
 import { resolveAgentCallPlan } from "../../agent-runtime/agentCallPlan";
 import { resolveDirectRequestApiKey } from "./resolveDirectRequestApiKey";
+import { DirectApiKeyResolutionError } from "./resolveDirectRequestApiKey";
 import { fetchServerSyncedCredential as fetchSyncedCredential } from "./agentCredentialSyncClient";
 import { getLocalProviderSecret } from "../agent/providerSecrets";
 
@@ -109,7 +110,12 @@ const fetchDirectly = async (params: FetchParams): Promise<Response> => {
       signal, // 可选参数，直接传递
     });
   } catch (error: any) {
-    console.error("[fetchDirectly] 网络请求失败:", error);
+    if (
+      !(error instanceof DirectApiKeyResolutionError) &&
+      (error as any)?.kind !== "credential_missing"
+    ) {
+      console.error("[fetchDirectly] 网络请求失败:", error);
+    }
     throw error; // 抛出错误，交给上层处理
   }
 };
@@ -179,6 +185,12 @@ export const performFetchRequest = async (
       ? await fetchWithServerProxy(params)
       : await fetchDirectly(params);
   } catch (error: any) {
+    if (
+      error instanceof DirectApiKeyResolutionError ||
+      (error as any)?.kind === "credential_missing"
+    ) {
+      throw error;
+    }
     console.error("[performFetchRequest] 请求过程中发生错误:", error);
     if (params.preserveStructuredError) throw error;
     const friendlyMsg = formatFriendlyNetworkErrorMessage(error);

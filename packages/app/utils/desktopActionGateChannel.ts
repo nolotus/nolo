@@ -46,7 +46,13 @@ export type DesktopActionGateListener = () => void;
  */
 export type ActionGateSubmitTarget =
   | { kind: "desktop" }
-  | { kind: "web"; server: string; token: string | null };
+  | { kind: "web"; server: string; token: string | null }
+  | {
+      kind: "local";
+      resolve?: (
+        options: DesktopActionGateResolveOptions,
+      ) => Promise<boolean> | boolean;
+    };
 
 export type ActionGateRunKind = "desktop-local" | "server-run";
 
@@ -158,6 +164,30 @@ export async function resolveGate(
   targetOverride?: ActionGateSubmitTarget,
 ): Promise<boolean> {
   const target = targetOverride ?? targets.get(gateId) ?? { kind: "desktop" };
+
+  if (target.kind === "local") {
+    try {
+      const ok = target.resolve ? await target.resolve(options) : true;
+      if (!ok) {
+        return false;
+      }
+      errors.delete(gateId);
+      gates.delete(gateId);
+      targets.delete(gateId);
+      invalidateSnapshot();
+      notify();
+      return true;
+    } catch (error) {
+      errors.set(
+        gateId,
+        error instanceof Error ? error.message : String(error),
+      );
+      invalidateSnapshot();
+      notify();
+      return false;
+    }
+  }
+
   const isWeb = target.kind === "web";
   const url = isWeb
     ? `${target.server.replace(/\/+$/, "")}/api/agent/secret-request/${encodeURIComponent(gateId)}`

@@ -21,12 +21,41 @@ import {
 import type { CredentialBroker } from "../../agent-runtime/credentialBroker";
 
 export const DIRECT_API_KEY_UNAVAILABLE_MESSAGE =
-  "无法加载本地 API 密钥。请在 Agent 设置中重新填写密钥，或确认本机凭据可用。";
+  "当前步骤需要提供 API 凭据，请重新提供密钥，或确认本机凭据可用。";
+
+export type DirectApiKeyResolutionErrorOptions = {
+  credentialRef?: string;
+  message?: string;
+};
 
 export class DirectApiKeyResolutionError extends Error {
-  constructor(message = DIRECT_API_KEY_UNAVAILABLE_MESSAGE) {
-    super(message);
+  readonly kind = "credential_missing" as const;
+  readonly credentialRef?: string;
+
+  constructor(
+    credentialRefOrOptions?: string | DirectApiKeyResolutionErrorOptions,
+    message = DIRECT_API_KEY_UNAVAILABLE_MESSAGE,
+  ) {
+    let resolvedRef: string | undefined;
+    let resolvedMessage = DIRECT_API_KEY_UNAVAILABLE_MESSAGE;
+
+    if (typeof credentialRefOrOptions === "string") {
+      resolvedRef = credentialRefOrOptions;
+      if (message !== DIRECT_API_KEY_UNAVAILABLE_MESSAGE) {
+        resolvedMessage = message;
+      }
+    } else if (
+      credentialRefOrOptions &&
+      typeof credentialRefOrOptions === "object"
+    ) {
+      resolvedRef = credentialRefOrOptions.credentialRef;
+      resolvedMessage =
+        credentialRefOrOptions.message ?? DIRECT_API_KEY_UNAVAILABLE_MESSAGE;
+    }
+
+    super(resolvedMessage);
     this.name = "DirectApiKeyResolutionError";
+    this.credentialRef = resolvedRef;
   }
 }
 
@@ -113,7 +142,7 @@ export async function resolveDirectRequestApiKey(
   }
 
   // No key anywhere — only throw if a credentialRef was expected to resolve.
-  throw new DirectApiKeyResolutionError();
+  throw new DirectApiKeyResolutionError(credentialRef);
 }
 
 async function safeBrokerGet(

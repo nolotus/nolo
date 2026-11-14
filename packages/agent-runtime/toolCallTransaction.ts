@@ -579,8 +579,9 @@ export async function executeToolCall(args: {
     if (actionGate && !input.onActionGate && actionGate.kind === "input") {
       toolResult = {
         content:
-          "本宿主没有交互面板，无法展示凭据输入界面，该请求未送达用户。请改走终端通道：" +
-          "让用户执行 nolo secret set <NAME> --prompt 保存凭据，再用 nolo secret run --with <NAME> -- <cmd> 消费。",
+          "当前运行环境没有交互输入面板，无法弹出凭据填写界面，该请求已被取消。" +
+          "请让用户在桌面端或 Web 端界面提供凭据，或直接在对话中发送凭据内容；" +
+          "凭据保存后用 nolo secret run --with <NAME> -- <cmd> 消费。",
         metadata: {
           cancelled: true,
           actionGateResult: { gateId: actionGate.id, status: "cancelled" },

@@ -1,4 +1,15 @@
 
+## 0.221.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **chat:** 凭据缺失时桌面端弹窗重填并自动重试一次 ([8ffb67d](https://github.com/nolotus/bun-nolo/commit/8ffb67d48619e661dbf56967221bac34ef099471))
+
+### Bug Fixes
+
+* **agent-runtime:** 凭据提示不再把用户引向 CLI，且不谎报弹窗状态 ([a700455](https://github.com/nolotus/bun-nolo/commit/a700455b77e99d61702600d4353cee2b37bc570c))
+
+
 ## 0.220.0-alpha.1 (2026-11-14)
 
 ### Features

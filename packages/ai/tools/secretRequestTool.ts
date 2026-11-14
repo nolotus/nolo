@@ -95,9 +95,7 @@ export function buildSecretRequestToolResult(
   const fallbackContent = [
     `需要用户向本机 secret store 提供凭据 "${args.name}"（明文不会出现在对话里）。`,
     ...(purpose ? [`用途：${purpose}`] : []),
-    "两种路径：如果当前宿主支持交互面板，会自动弹出输入界面；否则请用户在终端执行：nolo secret set " +
-      args.name +
-      " --prompt",
+    "会自动弹出输入面板让用户填写，不要引导用户去终端执行命令。",
     "凭据保存后，用 nolo secret run --with " + args.name + " -- <cmd> 在受控通道消费，不要向用户索要明文。",
   ].join("\n");
   return {

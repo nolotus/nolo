@@ -39,6 +39,11 @@ import {
     getActiveDialogKey,
     removeActiveController,
 } from "../dialogRuntimeStore";
+import {
+    isCredentialMissingError,
+    promptDesktopCredentialRefill,
+    resetPromptedCredentialRefsOnUserSend,
+} from "app/utils/desktopCredentialRefillGate";
 
 export interface HandleSendMessageArgs {
     userInput?: string | any[];
@@ -250,6 +255,9 @@ export const handleSendMessageAction = async (
     thunkApi: HandleSendMessageThunkApi
 ) => {
     const { dispatch, getState, rejectWithValue } = thunkApi;
+    // 用户主动发起新一轮消息 = 明确的「我要再试一次」信号。清空「已弹过」
+    // 记录，否则桌面端常驻进程里，用户误点一次取消后同一 ref 永久静默。
+    resetPromptedCredentialRefsOnUserSend();
     // 提升到 try 外声明，catch 分支需要读取（用于把失败写进对话流）。
     let dialogConfig: DialogConfig | null = null;
     let agentKeyToUse: string | undefined;
@@ -490,6 +498,15 @@ export const handleSendMessageAction = async (
                 break;
             } catch (turnErr: any) {
                 if (isAbortError(turnErr)) return;
+                if (
+                    attempt < maxStartupAttempts &&
+                    isCredentialMissingError(turnErr)
+                ) {
+                    const refilled = await promptDesktopCredentialRefill(turnErr);
+                    if (refilled) {
+                        continue;
+                    }
+                }
                 const parsed = parseSendError(turnErr);
                 if (
                     attempt < maxStartupAttempts &&

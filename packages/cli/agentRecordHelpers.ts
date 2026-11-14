@@ -823,7 +823,7 @@ export async function bindVaultCredentialToAgent(args: {
     // ID 是摘要不是机密，可以显示；对应明文一律不回显。
     throw new Error(
       `--api-key received a vault credential id (${args.vaultId}) but no secret is stored for it on this device. ` +
-        `Re-paste the key in the chat so the runtime can isolate it again, or ask the user to run \`nolo secret set <name> --prompt\`.`,
+        `Re-paste the key in the chat so the runtime can isolate it again.`,
     );
   }
   // 写路径用调用方注入的 broker（测试/宿主）或严格安全区；不用读回退包装，
