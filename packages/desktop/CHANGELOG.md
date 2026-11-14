@@ -1,4 +1,12 @@
 
+## 0.232.2 (2026-11-14)
+
+### Bug Fixes
+
+* **context:** 压缩摘要请求去掉逐条占位骨架，长会话不再永久 no-budget ([408e9f1](https://github.com/nolotus/bun-nolo/commit/408e9f17ffa6796840ad050f6f718108bb6def35))
+* **typecheck:** systemd 拒绝 scope 属性时降级为带 deadline 的执行 ([a969e77](https://github.com/nolotus/bun-nolo/commit/a969e77252a760fba6273412d25a3d1889d6d347))
+
+
 ## 0.232.1 (2026-11-13)
 
 ### Bug Fixes

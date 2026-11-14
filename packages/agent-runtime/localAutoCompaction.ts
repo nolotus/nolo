@@ -654,6 +654,23 @@ export async function maybeAutoCompactLocalHistory(args: {
     }
     console.warn(
       `[localLoop] invalidated dialog summary for ${dialogId} (${reason}); discarding and re-compressing`,
+      // 诊断分项（**仅加日志，不改任何哈希/校验/重锚语义**）：区分「历史真被改写」
+      // 与「保存/重算口径不一致」。只记长度、条数、消息 id 与哈希前 8 位；
+      // 消息正文与摘要正文一律不进日志。重算哈希只发生在失效分支内，
+      // 健康路径零额外开销。
+      {
+        reason,
+        historyLength: history.length,
+        storedSourceCount: typeof invalidStored?.sourceCount === "number" ? invalidStored.sourceCount : null,
+        summarizedBeforeId:
+          typeof invalidStored?.summarizedBeforeId === "string" ? invalidStored.summarizedBeforeId : null,
+        recomputedHashPrefix:
+          hashSummarySourceSlice(history, invalidStored?.summarizedBeforeId)?.slice(0, 8) ?? null,
+        storedHashPrefix:
+          typeof invalidStored?.sourceHash === "string" && invalidStored.sourceHash
+            ? invalidStored.sourceHash.slice(0, 8)
+            : null,
+      },
     );
     stored = null;
   }
@@ -800,7 +817,12 @@ export async function maybeAutoCompactLocalHistory(args: {
   });
   if (bounded.status === "blocked") {
     const detail = `bounded compaction blocked: ${bounded.reason}`;
-    console.warn(`[localLoop] ${detail}`);
+    // 数值分项只用于定位「哪一项撑爆」：不含消息正文，也不含路径内容
+    // （fileOps 只给条数）。detail 保持原样，诊断走日志第二参数。
+    console.warn(
+      `[localLoop] ${detail}`,
+      ...(bounded.diagnostics ? [bounded.diagnostics] : []),
+    );
     return {
       ...projectExisting(),
       decision: { outcome: "skipped", skipReason: "bounded-request-blocked", detail },
