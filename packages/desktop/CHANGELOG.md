@@ -1,4 +1,11 @@
 
+## 0.239.0-alpha.3 (2026-11-14)
+
+### Bug Fixes
+
+* **ci:** judge user session by env, not by bus file existence ([50c6837](https://github.com/nolotus/bun-nolo/commit/50c68379f67e7121b4262c3dc798d6df5943a42d))
+
+
 ## 0.239.0-alpha.2 (2026-11-14)
 
 ### Bug Fixes
