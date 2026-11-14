@@ -1,4 +1,11 @@
 
+## 0.239.0-alpha.2 (2026-11-14)
+
+### Bug Fixes
+
+* **ci:** detect user systemd bus, not /run/systemd/system ([93789d6](https://github.com/nolotus/bun-nolo/commit/93789d62fac8c9a0d2b9a7f3df6862b251b30d4d))
+
+
 ## 0.239.0-alpha.1 (2026-11-14)
 
 ### Features
