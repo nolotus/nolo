@@ -3,6 +3,7 @@
 
 ### Features
 
+* **agent:** 把 attention 分级接进共享工作原则 ([f6fccdd](https://github.com/nolotus/bun-nolo/commit/f6fccdd58d66d28a79a26d2e96b104ef589a1f6b))
 * **chat:** 凭据缺失时桌面端弹窗重填并自动重试一次 ([8ffb67d](https://github.com/nolotus/bun-nolo/commit/8ffb67d48619e661dbf56967221bac34ef099471))
 
 ### Bug Fixes
