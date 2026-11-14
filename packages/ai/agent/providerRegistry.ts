@@ -678,8 +678,9 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
   // OpenDesign 聚合网关（open-design.ai）：一个 Key 聚合 GPT / Claude / DeepSeek /
   // GLM / Kimi / MiMo，OpenAI 兼容。modelOptions 按「品牌知名度」排序（GPT > Claude >
   // DeepSeek > GLM > Kimi > MiMo，同品牌内按能力/成本排），快照取自 2026-10-11 的
-  // GET /v1/models；上游增删模型时以 `nolo agent models --url <baseUrl>`（或 `--preset opendesign`）实测为准，
-  // CLI 的 --model 仍可填列表外的 ID。
+  // GET /v1/models；上游增删模型时以 `nolo agent models --preset opendesign`（服务端
+  // 实时发现，需 --api-key；发现不可用时回退到本快照）实测为准，CLI 的 --model 仍可填
+  // 列表外的 ID。
   {
     kind: "api_key_template",
     id: "opendesign",

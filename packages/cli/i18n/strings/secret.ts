@@ -8,7 +8,7 @@ export const secretStrings = {
   "secret.help": {
     en: `Usage:
   nolo secret list [--json]                List saved secret names (without values; --json outputs machine-readable list)
-  nolo secret get <name>                   Print the value of a secret (for debugging; agents must not read)
+  nolo secret get <name> [--reveal]        Print masked secret preview (default masked; --reveal requires interactive TTY confirmation)
   nolo secret set <name> --prompt          Set a secret via hidden interactive prompt (masked TTY prompt; opens a graphical dialog when no TTY)
   nolo secret set <name> --stdin           Set a secret securely from stdin (recommended; prevents leaking secrets in argv)
   nolo secret set <name> <value|json>      Set a secret via argv (legacy; discouraged: exposes secrets in shell history and process list)
@@ -21,7 +21,7 @@ export const secretStrings = {
 `,
     zh: `用法:
   nolo secret list [--json]                列出已保存的 secret 名称（不显示值；--json 输出机器可读清单）
-  nolo secret get <name>                   打印指定 secret 的值（供调试；Agent 不得读取）
+  nolo secret get <name> [--reveal]        打印脱敏预览（默认脱敏；明文需在交互式 TTY 下使用 --reveal 并经确认）
   nolo secret set <name> --prompt          通过隐藏输入交互设置 secret（TTY 下为掩码输入；无 TTY 时弹出图形输入框）
   nolo secret set <name> --stdin           从 stdin 安全设置 secret（推荐；避免通过命令行参数泄露凭据）
   nolo secret set <name> <value|json>      通过命令行参数设置 secret（兼容旧语法；不推荐：凭据会暴露在进程列表与 shell 历史中）
@@ -52,6 +52,22 @@ export const secretStrings = {
   "secret.getNotFound": {
     en: 'Error: Secret "{0}" not found',
     zh: '错误: 未找到名为 "{0}" 的 secret',
+  },
+  "secret.getRevealHint": {
+    en: "To view plaintext, run 'nolo secret get {0} --reveal' in an interactive terminal",
+    zh: "如需查看明文，请在交互式终端中运行 'nolo secret get {0} --reveal'",
+  },
+  "secret.getRevealNonTty": {
+    en: "Error: --reveal requires an interactive terminal (TTY) and cannot be used in scripts or automated pipelines",
+    zh: "错误: --reveal 需要交互式终端 (TTY)，不得在脚本或自动化流程中使用",
+  },
+  "secret.getRevealConfirmPrompt": {
+    en: 'Reveal plaintext for secret "{0}"? (y/N) ',
+    zh: '确认显示 secret "{0}" 的明文内容？(y/N) ',
+  },
+  "secret.getRevealCancelled": {
+    en: "Aborted: secret plaintext was not revealed",
+    zh: "已取消: 未显示 secret 明文",
   },
   "secret.setNameAndValueRequired": {
     en: "Error: Please provide both secret name and value",

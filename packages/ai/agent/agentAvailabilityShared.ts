@@ -345,7 +345,27 @@ function readResetTimestamp(body: unknown, now: number): number | undefined {
     !Array.isArray(error.details) && error.details && typeof error.details === "object"
       ? (error.details as Record<string, unknown>)
       : undefined;
-  const raw = error.resets_at ?? error.resetsAt ?? details?.resets_at ?? details?.resetsAt;
+  // 候选键必须**同时**覆盖复数（resets_at/resetsAt）与单数（reset_at/resetAt），
+  // 并在 `error.*` 与 `error.details.*` 两个层级对称地找：
+  // - 复数形态是既有实装在用的：ChatGPT Codex / Claude 的 `usage_limit_reached`
+  //   报文只发 `resets_at`，删掉会把它们打回 5 分钟兜底（历史退化，见
+  //   packages/core/chat/upstreamErrorBody.ts 头部注释）。
+  // - 单数形态同样真实存在：OpenDesign（open-design.ai 聚合网关）的 402 报文（捕获于
+  //   2026-11-14，报文内 `reset_at` 指定的复位目标时间是 2026-11-17T11:44:56Z）
+  //   `{"error":{"code":"insufficient_balance","details":{"coding_plan_exhausted":true,
+  //   "reset_at":"2026-11-17T11:44:56Z"},"message":"… Coding Plan quota resets at
+  //   2026-11-17T11:44:56Z …"}}` 只在 `details` 里给**单数** `reset_at`。此前这里只读
+  //   复数键，实测（探针）读到 undefined → 冷却落到 DEFAULT_PROVIDER_RETRY_MS（5 分钟），
+  //   而真实复位在 68.7 小时后：额度没回来，agent 却每 5 分钟被放回派发再撞一次 402。
+  const raw =
+    error.resets_at ??
+    error.resetsAt ??
+    error.reset_at ??
+    error.resetAt ??
+    details?.resets_at ??
+    details?.resetsAt ??
+    details?.reset_at ??
+    details?.resetAt;
   if (typeof raw === "number" && Number.isFinite(raw)) {
     return raw > 1e12 ? raw : raw * 1000;
   }
@@ -529,7 +549,7 @@ export function isQuotaExhaustedText(body: unknown): boolean {
  * 仅「明确是容量抖动、且无显式复位/配额信号」的 429 才放行；默认从严。
  *
  * 判据顺序（每一项都是否决权，先命中先返回 false）：
- * 1) 有显式复位信号（Retry-After / resets_at / 周期额度文案 / 相对时长）→ 不是薄限流；
+ * 1) 有显式复位信号（Retry-After / resets_at·reset_at / 周期额度文案 / 相对时长）→ 不是薄限流；
  * 2) 命中额度耗尽文案 → 否决（重试无用）；
  * 3) 命中否定表述（`not at capacity`）→ 否决；
  * 4) 命中明确的容量饱和表述 → 才算。
@@ -565,7 +585,7 @@ export type AvailabilityAction =
 /**
  * 把一次上游 429 响应解析成绝对的 epoch-ms 可用时刻。
  *
- * 优先级：Retry-After 头 → body 里的 retryAfter → resets_at/resetsAt →
+ * 优先级：Retry-After 头 → body 里的 retryAfter → resets_at/resetsAt/reset_at/resetAt →
  * 文案里的绝对 "reset at" → 周期性硬配额文案 → 文案里的相对时长 → 默认窗口。
  */
 export function resolveNextAvailableAt(

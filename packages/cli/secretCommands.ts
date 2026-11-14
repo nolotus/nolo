@@ -36,6 +36,52 @@ function parseSecretValue(raw: string): unknown {
 }
 
 export type SecretPromptReader = (promptText?: string) => Promise<string>;
+export type SecretConfirmReader = (promptText: string) => Promise<boolean>;
+
+/**
+ * 形态对齐 secretScan.ts 的 redactedPreview (<redacted:规则 len=长度>)。
+ * 对字符串、JSON 对象与数组的值做脱敏，保留键名结构，绝不泄露值内容。
+ */
+export function formatRedactedSecretValue(val: unknown): unknown {
+  if (typeof val === "string") {
+    return `<redacted:secret len=${val.length}>`;
+  }
+  if (val === null) {
+    return "<redacted:secret>";
+  }
+  if (Array.isArray(val)) {
+    return val.map((item) => formatRedactedSecretValue(item));
+  }
+  if (typeof val === "object") {
+    const res: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      res[k] = formatRedactedSecretValue(v);
+    }
+    return res;
+  }
+  return `<redacted:secret len=${String(val).length}>`;
+}
+
+export async function defaultConfirmReader(
+  promptText: string,
+  input: NodeJS.ReadableStream = process.stdin,
+  output: NodeJS.WritableStream = process.stderr,
+): Promise<boolean> {
+  const readline = await import("node:readline/promises");
+  const rl = readline.createInterface({
+    input: input as any,
+    output: output as any,
+  });
+  try {
+    const answer = await rl.question(promptText);
+    const normalized = answer.trim().toLowerCase();
+    return normalized === "y" || normalized === "yes";
+  } catch {
+    return false;
+  } finally {
+    rl.close();
+  }
+}
 
 export interface RunSecretCommandOptions {
   broker?: CredentialBroker;
@@ -49,6 +95,7 @@ export interface RunSecretCommandOptions {
    */
   guiPromptHost?: GuiPromptHost;
   stdout?: NodeJS.WritableStream;
+  confirmReader?: SecretConfirmReader;
 }
 
 export class PromptReadError extends Error {
@@ -533,7 +580,9 @@ export async function runSecretCommand(
       }
 
       case "get": {
-        const [name] = rest;
+        const reveal = rest.includes("--reveal");
+        const nonFlagArgs = rest.filter((arg) => arg !== "--reveal");
+        const [name] = nonFlagArgs;
         if (!name) {
           console.error(t("secret.getNameRequired"));
           process.exitCode = 1;
@@ -551,7 +600,51 @@ export async function runSecretCommand(
           process.exitCode = 1;
           return;
         }
-        console.log(typeof val === "object" ? JSON.stringify(val, null, 2) : String(val));
+
+        if (!reveal) {
+          const redacted = formatRedactedSecretValue(val);
+          console.log(
+            typeof redacted === "object" && redacted !== null
+              ? JSON.stringify(redacted, null, 2)
+              : String(redacted),
+          );
+          console.log(t("secret.getRevealHint", name));
+          return;
+        }
+
+        const input = (options.stdin as any) ?? process.stdin;
+        const output = (options.stdout as any) ?? process.stdout;
+        const isInteractive = Boolean(input?.isTTY) && Boolean(output?.isTTY);
+
+        if (!isInteractive) {
+          console.error(t("secret.getRevealNonTty"));
+          process.exitCode = 1;
+          return;
+        }
+
+        const promptText = t("secret.getRevealConfirmPrompt", name);
+        let confirmed = false;
+        try {
+          if (options.confirmReader) {
+            confirmed = await options.confirmReader(promptText);
+          } else {
+            confirmed = await defaultConfirmReader(
+              promptText,
+              input,
+              (options.stdout as any) ?? process.stderr,
+            );
+          }
+        } catch {
+          confirmed = false;
+        }
+
+        if (!confirmed) {
+          console.error(t("secret.getRevealCancelled"));
+          process.exitCode = 1;
+          return;
+        }
+
+        console.log(typeof val === "object" && val !== null ? JSON.stringify(val, null, 2) : String(val));
         return;
       }
 

@@ -1,4 +1,17 @@
 
+## 0.237.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **cli:** secret get 默认脱敏，--reveal 仅在交互式终端可用 ([065a158](https://github.com/nolotus/bun-nolo/commit/065a1582dadb262e65d0792c805b81c39cd4c632))
+* **server:** OpenDesign 接入实时模型发现 ([2cb7d74](https://github.com/nolotus/bun-nolo/commit/2cb7d7407ae16f25fc0969468b23c63efe762f7a))
+
+### Bug Fixes
+
+* **ai:** 复位时刻解析补上单数 reset_at ([c289f50](https://github.com/nolotus/bun-nolo/commit/c289f50c9a017b6b0851acd9870c27fe52dc5c10))
+* **cli:** 对 Antigravity 的 Google 429 从严不重试 ([3bb871f](https://github.com/nolotus/bun-nolo/commit/3bb871f2e80547d34ff80083554fad3b2dc16a31))
+
+
 ## 0.236.0-alpha.3 (2026-11-14)
 
 ### Bug Fixes
