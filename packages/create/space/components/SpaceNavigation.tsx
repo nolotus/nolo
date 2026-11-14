@@ -12,16 +12,45 @@ import { useHasMounted } from "app/hooks/useHasMounted";
 import { useSpaceLoading } from "../spaceMembershipStore";
 import TabsNav from "render/web/ui/TabsNav";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
+import { getCurrentSpaceIdRaw } from "create/space/spaceCurrentStore";
+import { normalizeSpaceId } from "create/space/spaceKeys";
 
-const SpaceNavigation: React.FC = () => {
-  const { spaceId } = useParams<"spaceId">();
+export interface SpaceNavigationProps {
+  /**
+   * Explicit Space scope for the navigation.
+   *
+   * `SpaceLayout` renders under `/space/:spaceId` and can rely on the route
+   * param (the default). Surfaces that live outside `/space/*` — the Space
+   * home, which is `/chat?spaceId=…` — carry the Space in the query string
+   * instead, so they pass it here; the nav must never invent a Space id from
+   * the residual global current Space.
+   */
+  spaceId?: string;
+}
+
+const SpaceNavigation: React.FC<SpaceNavigationProps> = ({
+  spaceId: spaceIdProp,
+}) => {
+  const params = useParams<"spaceId">();
+  const routeSpaceId = params?.spaceId;
+  // An explicit prop wins; `SpaceLayout` (no prop) keeps using the route param.
+  const spaceId = spaceIdProp ?? routeSpaceId;
   const navigate = useNavigate();
   const location = useLocation();
   const hasMounted = useHasMounted();
   const currentSpace = useCurrentSpaceFromEntity();
   const loading = useSpaceLoading();
   const currentPath = location.pathname;
-  const showResolvedStats = hasMounted && !loading;
+  const currentSpaceIdRaw = getCurrentSpaceIdRaw();
+  // The member count can only come from the resolved global current Space. When
+  // the nav is pinned to an explicit `spaceId` (the `/chat?spaceId=` home) that
+  // differs from it, the number belongs to another Space — showing it would
+  // paint a wrong count, so it is withheld instead of invented.
+  const propSpaceMatchesCurrent =
+    !spaceIdProp ||
+    normalizeSpaceId(currentSpaceIdRaw ?? "") === normalizeSpaceId(spaceIdProp);
+  const showResolvedStats =
+    hasMounted && !loading && propSpaceMatchesCurrent;
 
   // 导航项配置
   const navItems = [
@@ -74,8 +103,18 @@ const SpaceNavigation: React.FC = () => {
     },
   ];
 
+  const spaceBasePath = spaceId ? `/space/${spaceId}` : null;
+  // `/space/:spaceId` 之外（空间首页 = `/chat?spaceId=…`）没有子路径可解析，
+  // 那里的落点就是「首页」（空间首页即该空间的对话），因此按 home 高亮。
+  const isInsideSpaceRoute =
+    !!spaceBasePath &&
+    (currentPath === spaceBasePath ||
+      currentPath.startsWith(`${spaceBasePath}/`));
+
   const getActiveTab = () => {
-    const currentPathWithoutBase = currentPath.replace(`/space/${spaceId}`, "");
+    if (!spaceBasePath) return "home";
+    if (!isInsideSpaceRoute) return "home";
+    const currentPathWithoutBase = currentPath.slice(spaceBasePath.length);
     if (currentPathWithoutBase === "" || currentPathWithoutBase === "/") {
       return "home";
     }

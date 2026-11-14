@@ -13,3 +13,14 @@
   width: min(100%, 880px);
   margin: auto 0;
 }
+
+/* 空间首页（`/chat?spaceId=`）顶部那排「首页 / 全部内容 / 成员 / 设置」。
+   尺寸与间距全部来自 SpaceNavigation.css 既有样式和既有 spacing token，这里只负责
+   「居中 + 与下方内容留出间距」，不重造一套导航外观。 */
+.new-chat-page__space-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}

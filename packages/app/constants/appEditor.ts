@@ -6,9 +6,9 @@ export const APP_BUILDER_PUBLIC_AGENT_KEY = BUILTIN_APP_BUILDER_AGENT_KEY;
 export const APP_SERVER_SEARCH_PARAM = "server";
 export const APP_EDIT_SEARCH_PARAM = "edit";
 export const APP_EDIT_MODE_SEARCH_PARAM = "mode";
-/** 编辑器左侧栏状态，读取方见 packages/app/pages/AppEditorPage.tsx */
+/** 编辑器左侧栏状态，读取方见 packages/app/pages/AppDetailPage.tsx */
 export const APP_EDITOR_SIDEBAR_SEARCH_PARAM = "sidebar";
-/** 编辑器标签页状态，读取方见 packages/app/pages/AppEditorPage.tsx */
+/** 编辑器标签页状态，读取方见 packages/app/pages/AppDetailPage.tsx */
 export const APP_EDITOR_TAB_SEARCH_PARAM = "tab";
 
 /**
@@ -16,7 +16,7 @@ export const APP_EDITOR_TAB_SEARCH_PARAM = "tab";
  *
  * 只收「这个 app 页面自己的状态」：
  * - server：从哪个 server 读这个 app（readAppServerOrigin 读取）
- * - edit / mode：PageLoader 与 AppEditorPage 据此决定是否进编辑器、进哪个模式
+ * - edit / mode：PageLoader 与 AppDetailPage 据此决定是否进编辑器、进哪个模式
  * - sidebar / tab：编辑器内的面板状态
  *
  * 来源页的参数（空间内容页的 types、列表页的 view/q 等）不属于详情页状态，

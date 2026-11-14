@@ -1,4 +1,16 @@
 
+## 0.234.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **app:** 详情页与完整编辑器合并为单一路由组件 ([afff302](https://github.com/nolotus/bun-nolo/commit/afff302d47f39f68ff6675fcc9117fd368ee35b9))
+* **space:** 空间首页显示四格空间导航 ([9934e7c](https://github.com/nolotus/bun-nolo/commit/9934e7c96b52210e1909833e539187f3ab7f56fd))
+
+### Bug Fixes
+
+* **space:** 全部内容页移除快速对话输入框 ([1e3684d](https://github.com/nolotus/bun-nolo/commit/1e3684d8dd32a65dead8c9c54c223b5da610c0e9))
+
+
 ## 0.233.0-alpha.1 (2026-11-14)
 
 ### Features
