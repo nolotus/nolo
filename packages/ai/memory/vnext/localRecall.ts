@@ -33,6 +33,19 @@ export const IDF_MIN_CORPUS = 20;
  */
 export const RARE_DF_RATIO = 0.05;
 
+/**
+ * 稀有词文档频率（df）的绝对上限条数。
+ *
+ * 为什么需要绝对上限：
+ * 单纯用百分比 `prepared.length * RARE_DF_RATIO` 会随语料线性放大。
+ * - main 生产库 871 条 State 时：871 * 0.05 = 43.55，稀有词带宽高达 43 条，单个泛 token
+ *   就能放行大量无关记忆，失去过滤意义；
+ * - alpha 规模（91 条）时：91 * 0.05 = 4.55（df <= 4），稀有带仅 4 条；
+ * - 取值依据：设定绝对封顶为 5，alpha 规模下 min(4.55, 5) = 4.55，现有 df <= 4 行为严格
+ *   保持不变；在大语料（如 main 871 条）下被封顶在 df <= 5，防止泛词放行。
+ */
+export const RARE_DF_MAX_DOCS = 5;
+
 export interface MemoryVNextLocalRecallHit {
   state: MemoryStateVNext;
   /** Distinct query tokens found in the State's searchable text. */
@@ -99,7 +112,7 @@ export const recallMemoryVNextLocal = (input: {
   // IDF 门控：为每个 query token 算文档频率，泛词降权。
   // 语料太小（< IDF_MIN_CORPUS）时统计无意义，跳过门控，行为与旧版一致。
   const useIdf = prepared.length >= IDF_MIN_CORPUS;
-  const rareCutoff = prepared.length * RARE_DF_RATIO;
+  const rareCutoff = Math.min(prepared.length * RARE_DF_RATIO, RARE_DF_MAX_DOCS);
   const rareTokens = new Set<string>();
   if (useIdf) {
     for (const token of queryTokens) {

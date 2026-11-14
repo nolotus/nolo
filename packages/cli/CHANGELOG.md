@@ -5,6 +5,10 @@
 
 * **models:** 其余 3 个 GPT 文本模型切 OpenAI 官方直连 ([bc27d55](https://github.com/nolotus/bun-nolo/commit/bc27d5589ec6329649121ac90fa707a6add86569))
 
+### Bug Fixes
+
+* **memory:** rare 词带宽加绝对上限，止住随语料线性缩放 ([5537e7a](https://github.com/nolotus/bun-nolo/commit/5537e7af3c1429ece692efee42125d5c925cac4b))
+
 
 ## 0.224.0-alpha.2 (2026-11-14)
 
