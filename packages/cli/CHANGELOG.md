@@ -1,4 +1,11 @@
 
+## 0.222.0-alpha.2 (2026-11-14)
+
+### Bug Fixes
+
+* **release:** stop the credentials glob from eating real source files ([8f04b53](https://github.com/nolotus/bun-nolo/commit/8f04b53e8a97bdd115e93f7233db1a412de21a58))
+
+
 ## 0.222.0-alpha.1 (2026-11-14)
 
 ### Features

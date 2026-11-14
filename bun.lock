@@ -194,7 +194,7 @@
     },
     "packages/cli": {
       "name": "nolo-cli",
-      "version": "0.222.0-alpha.1",
+      "version": "0.222.0-alpha.2",
       "bin": {
         "nolo": "index.js",
       },
