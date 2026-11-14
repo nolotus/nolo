@@ -1,4 +1,11 @@
 
+## 0.225.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **models:** 其余 3 个 GPT 文本模型切 OpenAI 官方直连 ([bc27d55](https://github.com/nolotus/bun-nolo/commit/bc27d5589ec6329649121ac90fa707a6add86569))
+
+
 ## 0.224.0-alpha.2 (2026-11-14)
 
 ### Bug Fixes

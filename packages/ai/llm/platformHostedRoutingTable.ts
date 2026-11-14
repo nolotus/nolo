@@ -145,7 +145,10 @@ export const CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID = "openai/gpt-6.1-terra"
 /**
  * OpenAI 官方 API 上游模型 ID。
  */
+export const OPENAI_GPT_6_ASTRA_UPSTREAM_MODEL_ID = "gpt-6-astra";
+export const OPENAI_GPT_6_LUNA_UPSTREAM_MODEL_ID = "gpt-6-luna";
 export const OPENAI_GPT_6_1_SOL_UPSTREAM_MODEL_ID = "gpt-6.1-sol";
+export const OPENAI_GPT_6_1_TERRA_UPSTREAM_MODEL_ID = "gpt-6.1-terra";
 
 /**
  * Cloudflare AI 统一 Responses 端点占位模板（GPT 文本系）。
@@ -471,19 +474,19 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
   // 集成块（2026-10-13）已为 server agentRun 加专用 wire 分支：这 6 条（含兼容别名 id）
   // 的 agentRunHosted 翻为 true，专用分支按该开关放行、token/账号缺一在任何 fetch 前显式失败；
   [PLATFORM_HOSTED_GPT_6_ASTRA_MODEL]: {
-    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
-    usageProvider: "cloudflare",
-    keyName: "cloudflare",
-    upstreamModelId: CLOUDFLARE_GPT_6_ASTRA_UPSTREAM_MODEL_ID,
+    endpoint: "https://api.openai.com/v1/responses",
+    usageProvider: "openai",
+    keyName: "openai",
+    upstreamModelId: OPENAI_GPT_6_ASTRA_UPSTREAM_MODEL_ID,
     wire: "responses",
     agentRunHosted: true,
   },
-  // GPT-6 Luna（2026-09-22 随 GPT-6 Sol/Luna 上线）：CF catalog id `openai/gpt-6-luna`。
+  // GPT-6 Luna（2026-09-22 随 GPT-6 Sol/Luna 上线）：官方直连 Responses 线。
   [PLATFORM_HOSTED_GPT_6_LUNA_MODEL]: {
-    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
-    usageProvider: "cloudflare",
-    keyName: "cloudflare",
-    upstreamModelId: CLOUDFLARE_GPT_6_LUNA_UPSTREAM_MODEL_ID,
+    endpoint: "https://api.openai.com/v1/responses",
+    usageProvider: "openai",
+    keyName: "openai",
+    upstreamModelId: OPENAI_GPT_6_LUNA_UPSTREAM_MODEL_ID,
     wire: "responses",
     agentRunHosted: true,
   },
@@ -500,14 +503,12 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "responses",
     agentRunHosted: true,
   },
-  // GPT-6.1 Terra（2026-11-01 新增）：与 6.1 Sol 同一条 Responses 线（CF 官方页同样
-  // 只声明「Responses, Chat Completions」与 reasoning.effort）；上游是独立 catalog id，
-  // 不得与 sol 混用。不是任何模型的别名 —— gpt-5.6-terra 仍指它自己的 5.6 上游。
+  // GPT-6.1 Terra（2026-11-01 新增）：官方直连 Responses 线。
   [PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL]: {
-    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
-    usageProvider: "cloudflare",
-    keyName: "cloudflare",
-    upstreamModelId: CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID,
+    endpoint: "https://api.openai.com/v1/responses",
+    usageProvider: "openai",
+    keyName: "openai",
+    upstreamModelId: OPENAI_GPT_6_1_TERRA_UPSTREAM_MODEL_ID,
     wire: "responses",
     agentRunHosted: true,
   },
