@@ -1,4 +1,11 @@
 
+## 0.218.0-alpha.2 (2026-11-14)
+
+### Bug Fixes
+
+* **agy:** 传 --effort 并解析真实 usage ([818a57d](https://github.com/nolotus/bun-nolo/commit/818a57dd271571191536511a506ad6c73af7d961))
+
+
 ## 0.218.0-alpha.1 (2026-11-14)
 
 ### Features

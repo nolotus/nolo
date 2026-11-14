@@ -113,6 +113,12 @@ export type CliExecuteResult = {
   text: string;
   raw?: string;
   elapsed?: number;
+  /**
+   * 与 ai/agent/cliExecutor.ts 的同名类型是两份独立定义（历史原因，未合并）：
+   * 这里必须同步保留 usage，否则 CLI 通道报告的 usage 会在 transport 层被类型挡掉
+   * 而静默丢弃。合并这两份定义是后续独立任务。
+   */
+  usage?: import("ai/token/types").RawUsage;
 };
 export type CliImageInput = { source: string };
 import type { ReadToolFn } from "./cliLocalToolExecutors";

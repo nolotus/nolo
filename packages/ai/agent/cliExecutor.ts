@@ -244,8 +244,52 @@ function supportsReasoningEffort(provider: CliProvider): boolean {
     provider === "copilot" ||
     provider === "qoder" ||
     provider === "opencode" ||
-    provider === "grok"
+    provider === "grok" ||
+    // agy 1.5.9 支持 --effort low|medium|high|xhigh|max（无 ultra，见 mapAgyEffort）
+    provider === "agy"
   );
+}
+
+/**
+ * agy 的 --effort 只接受 low|medium|high|xhigh|max。
+ * nolo 侧的 "ultra" 没有对应档，落到最高档 max（而不是静默丢弃）。
+ */
+function mapAgyEffort(
+  effort: NonNullable<CliExecuteOptions["reasoningEffort"]>,
+): string {
+  return effort === "ultra" ? "max" : effort;
+}
+
+/**
+ * agy 的 usage 字段名与 RawUsage 不同（`cache_read_tokens` 而非
+ * `cache_read_input_tokens`，另带 `thinking_tokens`）。这里只映射计费需要的字段：
+ * 全部缺失时返回 undefined，让调用方继续走 estimateMissingUsage 估算。
+ */
+function normalizeAgyUsage(
+  raw: unknown,
+): import("../token/types").RawUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const u = raw as Record<string, unknown>;
+  const num = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  const input = num(u.input_tokens);
+  const output = num(u.output_tokens);
+  const total = num(u.total_tokens);
+  const cacheRead = num(u.cache_read_tokens);
+  if (
+    input === undefined &&
+    output === undefined &&
+    total === undefined &&
+    cacheRead === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(input !== undefined ? { input_tokens: input } : {}),
+    ...(output !== undefined ? { output_tokens: output } : {}),
+    ...(total !== undefined ? { total_tokens: total } : {}),
+    ...(cacheRead !== undefined ? { cache_read_input_tokens: cacheRead } : {}),
+  } as import("../token/types").RawUsage;
 }
 
 function shouldPassClaudeModel(options: CliExecuteOptions): boolean {
@@ -1003,6 +1047,7 @@ function executeAgy(
     timeout = DEFAULT_AGY_TIMEOUT_MS,
     cwd = process.cwd(),
     yolo = true,
+    reasoningEffort,
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -1015,6 +1060,7 @@ function executeAgy(
       formatCliTimeout(timeout),
     ];
     if (options.model) args.push("--model", options.model);
+    if (reasoningEffort) args.push("--effort", mapAgyEffort(reasoningEffort));
     if (yolo) {
       args.push("--dangerously-skip-permissions");
     }
@@ -1104,6 +1150,7 @@ function executeAgyStreaming(
     timeout = DEFAULT_AGY_TIMEOUT_MS,
     yolo = true,
     model,
+    reasoningEffort,
     onChunk,
   } = options;
 
@@ -1115,6 +1162,7 @@ function executeAgyStreaming(
       "--print-timeout", formatCliTimeout(timeout),
     ];
     if (model) args.push("--model", model);
+    if (reasoningEffort) args.push("--effort", mapAgyEffort(reasoningEffort));
     if (yolo) args.push("--dangerously-skip-permissions");
 
     const start = Date.now();
@@ -1129,6 +1177,8 @@ function executeAgyStreaming(
     const stderr = createUtf8Collector();
     let pending = "";
     let answer = "";
+    /** agy 在 step_update（DONE）与 result 事件里都带 usage；取最新一次非空值。 */
+    let agyUsage: import("../token/types").RawUsage | undefined;
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // attachCliAbortSignal may synchronously report an already-aborted signal.
@@ -1164,6 +1214,14 @@ function executeAgyStreaming(
         // Ignore diagnostics and incomplete/non-JSON protocol lines, not callback errors.
         return;
       }
+      // usage 出现在两种事件里：step_update(agent_response, DONE) 与 result。
+      // 之前这里只挑 text_delta，usage 被整体丢弃，导致 agy 通道的账全靠字符估算。
+      const usageSource =
+        event?.event === "result" ? event.result?.usage
+        : event?.event === "step_update" ? event.step_update?.usage
+        : undefined;
+      const normalizedUsage = normalizeAgyUsage(usageSource);
+      if (normalizedUsage) agyUsage = normalizedUsage;
       if (event?.event !== "step_update" ||
           event.step_update?.step_type !== "agent_response" ||
           typeof event.step_update.text_delta !== "string") return;
@@ -1200,7 +1258,12 @@ function executeAgyStreaming(
           : new Error(`Antigravity CLI exited with ${signal ? `signal ${signal}` : `code ${code}`}\nstderr: ${stderrText}`)));
         return;
       }
-      finish(() => resolve({ text: answer.trim(), raw, elapsed: Date.now() - start }));
+      finish(() => resolve({
+        text: answer.trim(),
+        raw,
+        elapsed: Date.now() - start,
+        ...(agyUsage ? { usage: agyUsage } : {}),
+      }));
     });
     proc.on("error", (error) => fail(error));
   });

@@ -310,7 +310,13 @@ export type BoundedCompactionDiagnostics = {
 
 export type BoundedCompactionRequest<T extends CompactionRequestMessage> =
   | { status: "ready"; promptContent: string; coveredMessages: T[];
-      summarizedBeforeId: string; inputTokens: number; outputTokenBudget: number; partial: boolean }
+      summarizedBeforeId: string; inputTokens: number; outputTokenBudget: number; partial: boolean;
+      /** 摘要请求的 input 上限；超过它才有消息被合并成省略段声明。 */
+      capTokens: number;
+      /** 逐条展开进摘要请求的消息数。 */
+      expandedMessages: number;
+      /** 被合并成省略段声明的消息数（ready 分支的原生可观测值，不额外计算）。 */
+      omittedMessages: number }
   | { status: "blocked"; reason: "invalid-window" | "empty-input" | "no-budget" | "no-safe-group" | "group-too-large";
       /** 必填：所有 blocked 一律携带，见 `BoundedCompactionDiagnostics` 的契约。 */
       diagnostics: BoundedCompactionDiagnostics };
@@ -758,7 +764,8 @@ export function buildBoundedCompactionRequest<T extends CompactionRequestMessage
   }
   return { status: "ready", promptContent: last.promptContent, coveredMessages: msgs.slice(),
     summarizedBeforeId: msgs[msgs.length - 1].id, inputTokens: last.inputTokens,
-    outputTokenBudget, partial: false };
+    outputTokenBudget, partial: false, capTokens: cap,
+    expandedMessages: last.expandedCount, omittedMessages: last.omittedCount };
 }
 
 // --- 工具结果截断（P0-2，学 Pi） ---
@@ -1092,6 +1099,51 @@ export interface CompactionMetrics {
   summaryUsage?: Record<string, unknown>;
   /** 是否有前序摘要（用于判断首次压缩 vs 增量压缩） */
   hadPreviousSummary: boolean;
+  /**
+   * 本次折叠后**每轮常驻上下文**净减少的 token 数：
+   * `previousSummaryTokens + compressedTokens - newSummaryTokens`。
+   * 保留尾部不变故不计入。纯算术、不含价格假设——回本轮数需结合摘要调用的
+   * 真实用量自行计算（见 `summaryInputTokens` 与 `summaryUsage`）。
+   * 负值表示新摘要比旧摘要+被压缩内容还大。
+   */
+  residentReductionTokens: number;
+  /**
+   * 最终投影请求 input token 的**本地估算**（`estimateTokenCount`），
+   * 不是 provider 返回的 usage——真实摘要用量见 `summaryUsage`。
+   */
+  summaryInputTokens?: number;
+  /**
+   * 摘要请求的 input 上限。逼近它说明预算吃紧；是否有**整条消息**被省略，
+   * 看 `summaryOmittedMessages > 0`，不要仅凭本字段的使用率判断。
+   */
+  summaryInputCapTokens?: number;
+  /** 摘要请求里逐条展开的消息数。 */
+  summaryExpandedMessages?: number;
+  /** 摘要请求里被合并成省略段声明的消息数。 */
+  summaryOmittedMessages?: number;
+  /**
+   * 触发时锚点之后的待处理消息条数（`CompressionPlanDiagnostics.pendingMsgCount`）。
+   *
+   * 与 `compressedCount` 一起才能区分两种完全不同的情形：待处理本来就只有几条
+   * （正常的增量压缩），还是待处理很多但预算把可压范围卡到几条（空转）。
+   * 只看 `compressedCount` 无法分辨。
+   */
+  pendingMessageCount?: number;
+  /** 计划压缩条数（`CompressionPlanDiagnostics.compressCount`）。 */
+  plannedCompressCount?: number;
+}
+
+/**
+ * 摘要请求构建结果中与观测有关的部分。
+ *
+ * 来源：`buildBoundedCompactionRequest` 的 ready 分支。它才知道有损投影
+ * 到底省略了多少消息——`CompactionPlan` 只知道「计划压缩哪些」。
+ */
+export interface CompactionSummaryInput {
+  inputTokens: number;
+  capTokens?: number;
+  expandedMessages?: number;
+  omittedMessages?: number;
 }
 
 /**
@@ -1104,6 +1156,10 @@ export function buildCompactionMetrics(args: {
   msgsToKeep: TokenCountableMessage[];
   newSummary: string;
   summaryUsage?: Record<string, unknown>;
+  /** 摘要请求构建结果（ready 分支）的可观测部分；不传则投影字段全部缺省。 */
+  summaryInput?: CompactionSummaryInput;
+  /** 触发时的待处理与计划压缩条数（来自 `CompressionPlanDiagnostics`）。 */
+  planCounts?: { pendingMessageCount?: number; plannedCompressCount?: number };
   estimateTokens: (text: string) => number;
   estimateMessageTokens: (msg: TokenCountableMessage) => number;
 }): CompactionMetrics {
@@ -1111,16 +1167,36 @@ export function buildCompactionMetrics(args: {
     reason, previousSummary, msgsToCompress, msgsToKeep,
     newSummary, summaryUsage, estimateTokens, estimateMessageTokens,
   } = args;
+  const previousSummaryTokens = estimateTokens(previousSummary || "");
+  const compressedTokens = msgsToCompress.reduce((s, m) => s + estimateMessageTokens(m), 0);
+  const newSummaryTokens = estimateTokens(newSummary || "");
+  const summaryInput = args.summaryInput;
   return {
     reason,
-    previousSummaryTokens: estimateTokens(previousSummary || ""),
-    compressedTokens: msgsToCompress.reduce((s, m) => s + estimateMessageTokens(m), 0),
+    previousSummaryTokens,
+    compressedTokens,
     retainedTokens: msgsToKeep.reduce((s, m) => s + estimateMessageTokens(m), 0),
-    newSummaryTokens: estimateTokens(newSummary || ""),
+    newSummaryTokens,
     compressedCount: msgsToCompress.length,
     retainedCount: msgsToKeep.length,
     summaryUsage,
     hadPreviousSummary: previousSummary.trim().length > 0,
+    residentReductionTokens: previousSummaryTokens + compressedTokens - newSummaryTokens,
+    ...(summaryInput
+      ? {
+          summaryInputTokens: summaryInput.inputTokens,
+          ...(summaryInput.capTokens !== undefined
+            ? { summaryInputCapTokens: summaryInput.capTokens } : {}),
+          ...(summaryInput.expandedMessages !== undefined
+            ? { summaryExpandedMessages: summaryInput.expandedMessages } : {}),
+          ...(summaryInput.omittedMessages !== undefined
+            ? { summaryOmittedMessages: summaryInput.omittedMessages } : {}),
+        }
+      : {}),
+    ...(args.planCounts?.pendingMessageCount !== undefined
+      ? { pendingMessageCount: args.planCounts.pendingMessageCount } : {}),
+    ...(args.planCounts?.plannedCompressCount !== undefined
+      ? { plannedCompressCount: args.planCounts.plannedCompressCount } : {}),
   };
 }
 
@@ -1137,6 +1213,10 @@ export function buildCompactionMetricsFromPlan(args: {
   plan: { msgsToCompress: TokenCountableMessage[]; msgsToKeep: TokenCountableMessage[] };
   newSummary: string;
   summaryUsage?: Record<string, unknown>;
+  /** 摘要请求构建结果（ready 分支）；用于记录有损投影的估算幅度。 */
+  summaryInput?: CompactionSummaryInput;
+  /** 触发时的待处理与计划压缩条数（来自 `CompressionPlanDiagnostics`）。 */
+  planCounts?: { pendingMessageCount?: number; plannedCompressCount?: number };
 }): CompactionMetrics {
   return buildCompactionMetrics({
     reason: args.reason,
@@ -1145,6 +1225,8 @@ export function buildCompactionMetricsFromPlan(args: {
     msgsToKeep: args.plan.msgsToKeep,
     newSummary: args.newSummary,
     summaryUsage: args.summaryUsage,
+    ...(args.summaryInput ? { summaryInput: args.summaryInput } : {}),
+    ...(args.planCounts ? { planCounts: args.planCounts } : {}),
     estimateTokens: estimateTokenCount,
     estimateMessageTokens: getMessageTokenCount,
   });
@@ -1161,7 +1243,22 @@ export function formatCompactionMetricsLog(metrics: CompactionMetrics): string {
   const llmInfo = metrics.summaryUsage
     ? `, summary_llm_in=${metrics.summaryUsage.input_tokens ?? "?"} out=${metrics.summaryUsage.output_tokens ?? "?"}`
     : "";
-  return `[Compaction] reason=${metrics.reason} compressed=${metrics.compressedCount}->${metrics.retainedCount} msgs, tokens=${totalBefore}->${totalAfter} (ratio=${ratio})${llmInfo}`;
+  // 每轮常驻净减少量：回本判断的分子，恒存在（纯算术）。
+  const netInfo = `, net=${metrics.residentReductionTokens}`;
+  // 有损投影幅度：只在拿到了摘要请求的实测值时输出，缺省不改变旧格式。
+  const omittedTotal = (metrics.summaryExpandedMessages ?? 0) + (metrics.summaryOmittedMessages ?? 0);
+  const capSuffix = metrics.summaryInputCapTokens !== undefined ? `/${metrics.summaryInputCapTokens}` : "";
+  const omittedSuffix = metrics.summaryOmittedMessages !== undefined
+    ? ` omitted=${metrics.summaryOmittedMessages}/${omittedTotal}` : "";
+  const projectionInfo = metrics.summaryInputTokens !== undefined
+    ? `, summary_in=${metrics.summaryInputTokens}${capSuffix}${omittedSuffix}`
+    : "";
+  // 待处理条数决定 compressedCount 的可解释性：pending=3 fold=3/3 是正常增量折叠，
+  // pending=427 fold=3/427 才是空转。
+  const planInfo = metrics.pendingMessageCount !== undefined
+    ? `, pending=${metrics.pendingMessageCount}${metrics.plannedCompressCount !== undefined ? ` fold=${metrics.plannedCompressCount}/${metrics.pendingMessageCount}` : ""}`
+    : "";
+  return `[Compaction] reason=${metrics.reason} compressed=${metrics.compressedCount}->${metrics.retainedCount} msgs, tokens=${totalBefore}->${totalAfter} (ratio=${ratio})${llmInfo}${netInfo}${projectionInfo}${planInfo}`;
 }
 
 // --- 摘要锚点元数据（内容寻址哈希与失效检测） ---
