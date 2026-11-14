@@ -9,7 +9,7 @@ export const secretStrings = {
     en: `Usage:
   nolo secret list [--json]                List saved secret names (without values; --json outputs machine-readable list)
   nolo secret get <name>                   Print the value of a secret (for debugging; agents must not read)
-  nolo secret set <name> --prompt          Set a secret via hidden interactive prompt (TTY only; does not echo secret)
+  nolo secret set <name> --prompt          Set a secret via hidden interactive prompt (masked TTY prompt; opens a graphical dialog when no TTY)
   nolo secret set <name> --stdin           Set a secret securely from stdin (recommended; prevents leaking secrets in argv)
   nolo secret set <name> <value|json>      Set a secret via argv (legacy; discouraged: exposes secrets in shell history and process list)
   nolo secret delete <name>                Delete a secret
@@ -22,7 +22,7 @@ export const secretStrings = {
     zh: `用法:
   nolo secret list [--json]                列出已保存的 secret 名称（不显示值；--json 输出机器可读清单）
   nolo secret get <name>                   打印指定 secret 的值（供调试；Agent 不得读取）
-  nolo secret set <name> --prompt          通过隐藏输入交互设置 secret（仅限 TTY，不回显凭据）
+  nolo secret set <name> --prompt          通过隐藏输入交互设置 secret（TTY 下为掩码输入；无 TTY 时弹出图形输入框）
   nolo secret set <name> --stdin           从 stdin 安全设置 secret（推荐；避免通过命令行参数泄露凭据）
   nolo secret set <name> <value|json>      通过命令行参数设置 secret（兼容旧语法；不推荐：凭据会暴露在进程列表与 shell 历史中）
   nolo secret delete <name>                删除指定的 secret
@@ -192,6 +192,10 @@ export const secretStrings = {
   "secret.promptNonTtyNotSupported": {
     en: "Error: Interactive terminal (TTY) required for --prompt. For automated pipelines use --stdin",
     zh: "错误: --prompt 需要交互式终端 (TTY)。自动化流水线请使用 --stdin",
+  },
+  "secret.promptGuiUnavailable": {
+    en: "Error: --prompt has no input channel here: stdin is not a terminal and no graphical password dialog (zenity/kdialog/yad) is available in this environment. Pipe the value instead: nolo secret set <name> --stdin (recommended), or run --prompt inside an interactive terminal",
+    zh: "错误: --prompt 在当前环境没有可用的输入通道：stdin 不是终端，且没有可用的图形密码输入框（zenity/kdialog/yad）。请改用管道输入：nolo secret set <name> --stdin（推荐），或在交互式终端中运行 --prompt",
   },
   "secret.promptEmpty": {
     en: "Error: Secret input from prompt cannot be empty or pure whitespace",

@@ -1,4 +1,11 @@
 
+## 0.236.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **cli:** secret --prompt 在非 TTY 下自动降级到图形输入框 ([a6a7729](https://github.com/nolotus/bun-nolo/commit/a6a7729b6093ceaa661ac584d009b521a0c3d8b2))
+
+
 ## 0.235.0-alpha.2 (2026-11-14)
 
 ### Bug Fixes
