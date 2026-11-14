@@ -15,6 +15,7 @@ import { applyChatCompletionsStreamMode } from "integrations/openai/chatCompleti
 
 import { sendOpenAICompletionsRequest } from "../chat/sendOpenAICompletionsRequest";
 import { performFetchRequest } from "../chat/fetchUtils";
+import { DirectApiKeyResolutionError } from "../chat/resolveDirectRequestApiKey";
 import { sanitizeOutboundBody } from "../chat/toolCallArgumentGuard";
 import { updateAgentTokens } from "./updateAgentTokens";
 import {
@@ -233,6 +234,17 @@ export const _executeModel = async (
       const failure = classifySummaryError(error);
       return rejectWithValue({ ...failure, type: failure.errorType,
         name: failure.category === "timeout" ? "TimeoutError" : failure.category === "cancelled" ? "AbortError" : "SummaryError",
+      });
+    }
+    if (
+      error instanceof DirectApiKeyResolutionError ||
+      error?.kind === "credential_missing"
+    ) {
+      console.error("_executeModel failed: credential missing");
+      return rejectWithValue({
+        kind: "credential_missing",
+        credentialRef: error.credentialRef,
+        message: error.message,
       });
     }
     console.error(`_executeModel failed`, error);

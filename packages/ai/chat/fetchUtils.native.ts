@@ -10,6 +10,7 @@ import { buildProviderAuthHeaders } from "../../agent-runtime/providerResolution
 import { performServerProxyFetchWithRetry } from "./serverProxyRetry";
 import { resolveAgentCallPlan } from "../../agent-runtime/agentCallPlan";
 import { resolveDirectRequestApiKey } from "./resolveDirectRequestApiKey";
+import { DirectApiKeyResolutionError } from "./resolveDirectRequestApiKey";
 
 interface BodyData {
     model: string;
@@ -260,7 +261,12 @@ const fetchDirectly = async ({
             signal,
         });
     } catch (error: any) {
-        console.error("[fetchDirectly] 网络请求失败:", error);
+        if (
+            !(error instanceof DirectApiKeyResolutionError) &&
+            (error as any)?.kind !== "credential_missing"
+        ) {
+            console.error("[fetchDirectly] 网络请求失败:", error);
+        }
         throw error;
     }
 };
@@ -320,6 +326,12 @@ export const performFetchRequest = async (
             ? await fetchWithServerProxy(params)
             : await fetchDirectly(params);
     } catch (error: any) {
+        if (
+            error instanceof DirectApiKeyResolutionError ||
+            (error as any)?.kind === "credential_missing"
+        ) {
+            throw error;
+        }
         console.error("[performFetchRequest] 请求过程中发生错误:", error);
         if (params.preserveStructuredError) throw error;
         const friendlyMsg = formatFriendlyNetworkErrorMessage(error);

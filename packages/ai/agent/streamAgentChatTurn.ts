@@ -121,6 +121,7 @@ import { performServerProxyFetchWithRetry } from "../chat/serverProxyRetry";
 import { buildForegroundTurnAdmissionFetchInit } from "./foregroundTurnAdmissionFetch";
 import { normalizeServerOrigin } from "./serverOrigin";
 import { getIsDesktopApp } from "app/utils/env";
+import { DirectApiKeyResolutionError } from "../chat/resolveDirectRequestApiKey";
 import { runDesktopAgentRuntimeTurnStream } from "app/utils/desktopAgentRuntimeTurnClient";
 // Block 3b: desktop action gate channel — pending gates live in memory only,
 // Block 2c: submit target is picked per run kind (desktop local vs server run).
@@ -3036,6 +3037,17 @@ export const streamAgentChatTurnHandler = async (
             );
         } else if (!isTurnAborted(error)) {
             setLoopStopReason("error");
+        }
+
+        if (
+            error instanceof DirectApiKeyResolutionError ||
+            error?.kind === "credential_missing"
+        ) {
+            return rejectWithValue({
+                kind: "credential_missing",
+                credentialRef: error.credentialRef,
+                message: error.message,
+            });
         }
 
         return rejectWithValue(

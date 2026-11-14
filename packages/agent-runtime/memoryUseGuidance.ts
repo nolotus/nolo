@@ -20,4 +20,5 @@ export const MEMORY_USE_GUIDANCE = `--- 记忆使用方式 ---
 - 记忆含用户身份/称呼/关系/长期偏好/项目背景时，相关处自然体现（开场称呼、上下文确认、回答结构、取舍标准），不要每句机械称呼用户。
 - “上次/继续/这个项目”等指代优先按当前 dialog/space/project/agent/sourceDialog 等 KV 路径和时间线定位，不要只按语义相似度捞一条。
 - 推断型记忆（inferred）只用于把握语气、状态和未完成事项，不要说成“你明确告诉过我”或当成用户已授权保存的事实；冲突或场景不明时说明依据或简短确认，不要硬套。
-- 置信度（verified/stated/inferred）、召回上下文要求与降权/删除边界以记忆工具（rememberMemory / queryMemory / deleteMemory）schema 为准。`;
+- 置信度（verified/stated/inferred）、召回上下文要求与降权/删除边界以记忆工具（rememberMemory / queryMemory / deleteMemory）schema 为准。
+- 用户明确表达**跨会话**的打扰强度偏好时（如「以后都只报结果」「每次都给我看详细过程」，而非一次任务里的「这次别烦我」），用 rememberMemory 记为用户偏好；之后按它调整 ignore / FYI / important 的详略。记忆偏好绝不能取消 decision / blocked / failed 三类必须报的内容。`;

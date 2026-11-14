@@ -136,6 +136,13 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
     kind: "upgrade",
   },
   {
+    from: { provider: "nolo", model: "anthropic/claude-fable-5-1" },
+    to: { provider: "nolo", model: "anthropic/claude-fable-5-2" },
+    reason:
+      "Fable 5.1 升级为 Fable 5.2（2026-11-15 起的平台新一代）：换代降价——官方价 $10/$50 → $8/$40 每 1M，缓存写 $12.5 → $10，缓存读 $0.25 → $0.20",
+    kind: "upgrade",
+  },
+  {
     from: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3" },
     to: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3p1-flash" },
     reason: "MiniMax M3 记录升级到 M3.1 Flash（2026-11-04 owner 决定：仍走 fireworks 通道）",

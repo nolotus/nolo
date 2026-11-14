@@ -1,10 +1,11 @@
 /**
  * 分享动作的内核：载荷 → thunk → 链接 → 事件。
  *
- * 抽这一层的原因：`useShareWorkflow`（顶栏 / 详情页，带 ShareModal 状态机）与
- * `AppCard`「发布到社区」（一次性动作，没有弹窗）都需要「同一份载荷形状 + 同一个
- * thunk + 同一个 web 链接 + 同一个 `nolo:share-created` 事件」。以前 AppCard 自己
- * `dispatch(share({…}))` 拼一遍，字段一漂移，分享落地页就会读不到 `data.url`。
+ * 抽这一层的原因：`useShareWorkflow`（顶栏 / 详情页，带 ShareModal 状态机）需要
+ * 「同一份载荷形状 + 同一个 thunk + 同一个 web 链接 + 同一个 `nolo:share-created` 事件」。
+ * （历史上 AppCard 的「发布到社区」也走这里；该入口 2026-11-14 已随 AppCard
+ * 去管理化移除，发布到社区现在只在 app 页面的分享弹窗里。）
+ * 早期 AppCard 自己 `dispatch(share({…}))` 拼一遍，字段一漂移，分享落地页就会读不到 `data.url`。
  *
  * 这一层是纯函数：不碰 React、不碰 toast / 剪贴板（调用方各自决定怎么提示），
  * 因此可以在卡片、详情页、hook 三处共用，也能直接单测。

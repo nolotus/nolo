@@ -17,6 +17,7 @@ import {
   PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
+  PLATFORM_HOSTED_CLAUDE_FABLE_5_2_MODEL,
   PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_PRICE,
@@ -371,7 +372,7 @@ const calculateCacheBasedCost = (
  *   regular = max(0, total - write - read)
  * 不能照搬既有两条路径（都会把 write 重复计费或漏价）。
  *
- * 【整合说明】Claude 分支只保留「7 个平台托管 Claude id 白名单 + 显式 write/read
+ * 【整合说明】Claude 分支只保留「平台托管 Claude id 白名单（见下方数组，当前 9 个） + 显式 write/read
  * 单价」这一层 gate；4 桶算术的唯一实现是下方 calculateCanonicalInputTotalCost，
  * 不再各留一份同样加法（合并时按 gpt sibling 的约定收敛）。
  */
@@ -383,13 +384,14 @@ const PLATFORM_CLAUDE_CANONICAL_INPUT_TOTAL_MODELS = [
   PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
+  PLATFORM_HOSTED_CLAUDE_FABLE_5_2_MODEL,
   PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
 ] as const;
 
 /**
  * 闸门 + 计算（CF canonical 口径）：返回 null 表示「不适用」，调用方回退既有路径。
  * 两个条件同时成立才启用：
- *   1. 模型名在这 7 个平台托管 Claude id 白名单内（其它目录模型语义未必包含式）；
+ *   1. 模型名在下方平台托管 Claude id 白名单内（当前 9 个，其它目录模型语义未必包含式）；
  *   2. 目录**显式**声明了 cachingWrite + cachingRead —— 缺任一项都不启用。
  * 算术委托给唯一实现 calculateCanonicalInputTotalCost，不重复加法。
  */
@@ -482,15 +484,28 @@ export const calculateCanonicalInputTotalCost = (
 };
 
 /**
- * 闸门：模型在**中央路由表**里指向 Cloudflare 上游，且目录**显式**声明了
- * cachingWrite + cachingRead —— 两个条件同时成立才切 canonical 4 桶，否则返回 null，
- * 调用方回退既有路径（provider=nolo 的 inputCacheHit / simple 分支）。
+ * 闸门：模型在**中央路由表**里指向「usage 采用 canonical 总输入口径」的上游，
+ * 且目录**显式**声明了 cachingWrite + cachingRead —— 两个条件同时成立才切
+ * canonical 4 桶，否则返回 null，调用方回退既有路径（provider=nolo 的
+ * inputCacheHit / simple 分支）。
+ *
+ * 「canonical 总输入口径」= `input_tokens` 是**总输入**，cache write / cache read
+ * 是它的子集（regular = total - write - read）。当前符合该口径的上游有两个：
+ * - `cloudflare`（CF AI Gateway / Workers AI）
+ * - `openai`（OpenAI 官方 Responses）
+ *   2026-11-15 实测 gpt-6.1-sol 官方响应：
+ *   `input_tokens: 3213, details.cache_write_tokens: 3210, details.cached_tokens: 0`
+ *   —— 与 CF 完全同构，故 gpt-6.1-sol 切官方直连后必须继续走 4 桶，
+ *   否则 cache_write 会被当普通输入计价（该模型 input 16 vs write 20 credits/1M，
+ *   按 simple 路径会漏算 write 溢价）。
  *
  * 不另抄模型 id 白名单：platformHostedRoutingTable 的 PLATFORM_HOSTED_ROUTING_TABLE
  * 已是「平台托管模型走哪个上游」的单一真值源；缺任一缓存单价一律不启用；未登记 /
- * 未知模型自然落在回退路径上，作用域不放大。闸门只认「上游是 Cloudflare」这一事实，
+ * 未知模型自然落在回退路径上，作用域不放大。闸门认「上游的 usage 口径」，
  * **不认 wire**（GPT 系 responses、Claude 走 anthropic.messages 同样适用）。
  */
+const CANONICAL_INPUT_TOTAL_USAGE_PROVIDERS = new Set(["cloudflare", "openai"]);
+
 const resolvePlatformCloudflareCacheCost = (
   modelName: string | null | undefined,
   resolvedPrice: ModelPrice,
@@ -498,11 +513,13 @@ const resolvePlatformCloudflareCacheCost = (
   externalPrice?: ExternalPrice
 ): CostBreakdown | null => {
   const routing = resolvePlatformHostedRouting(modelName);
-  const isCloudflareUpstream = routing?.usageProvider === "cloudflare";
+  const usesCanonicalInputTotal =
+    typeof routing?.usageProvider === "string" &&
+    CANONICAL_INPUT_TOTAL_USAGE_PROVIDERS.has(routing.usageProvider);
   const hasExplicitCachingPrices =
     typeof resolvedPrice.cachingWrite === "number" &&
     typeof resolvedPrice.cachingRead === "number";
-  if (!isCloudflareUpstream || !hasExplicitCachingPrices) return null;
+  if (!usesCanonicalInputTotal || !hasExplicitCachingPrices) return null;
 
   return calculateCanonicalInputTotalCost(resolvedPrice, usage, externalPrice);
 };

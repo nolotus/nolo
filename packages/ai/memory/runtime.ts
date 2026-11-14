@@ -1,7 +1,7 @@
 import { touchMemoryItemsInDb } from "./storeShared";
 import { buildMemoryOverlay, DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET } from "./overlay";
 import { rankMemoryCandidates, type MemoryRankContext } from "./rank";
-import { chooseMemoryOwners, loadMemoryCandidatesFromDb } from "./queryShared";
+import { chooseMemoryOwners, loadMemoryCandidatesFromDb, loadOwnerItemsFromDb } from "./queryShared";
 import { buildMemorySubjectsForAgent, resolveAgentMemoryPolicy } from "./policy";
 import { EXPLICIT_REMEMBER_PREFIX_REGEX } from "./constants";
 import type { MemoryItem, MemoryRuntimeResolution } from "./types";
@@ -211,6 +211,16 @@ const selectRuntimeMemoryItems = (
   return selected;
 };
 
+export interface MemoryVNextPureReadObservation {
+  source: "vnext" | "none";
+  itemCount: number;
+  vnextItemCount: number;
+  vnextLatencyMs: number;
+  contextChars: number;
+  fallbackReason?: "no_vnext_context" | "vnext_error";
+  error?: string;
+}
+
 export const resolveMemoryRuntime = async (input: {
   db: any;
   userId?: string | null;
@@ -250,6 +260,11 @@ export const resolveMemoryRuntime = async (input: {
    * called when `NOLO_MEMORY_VNEXT_PRIMARY_READ` is on; must not throw.
    */
   primaryReadEmit?: (observation: MemoryVNextPrimaryReadObservation) => void;
+  /**
+   * M5-R pure vNext read: observation sink (defaults to console.info). Only
+   * called when `NOLO_MEMORY_VNEXT_PURE_READ` is on; must not throw.
+   */
+  pureReadEmit?: (observation: MemoryVNextPureReadObservation) => void;
 }): Promise<MemoryRuntimeResolution> => {
   const owners = chooseMemoryOwners({
     userId: input.userId,
@@ -261,14 +276,114 @@ export const resolveMemoryRuntime = async (input: {
 
   // M5-R Pure vNext Read (flag-gated by NOLO_MEMORY_VNEXT_PURE_READ=1)
   // When enabled, completely skips legacy candidate loading, ranking, decaying,
-  // touch writes and promotion, running 100% on vNext State recall.
+  // touch writes and synchronous promotion, running 100% on vNext State recall.
+  // Opportunistic promotion is fully detached so read latency remains unaffected.
   if (isMemoryVNextPureReadEnabled()) {
-    const pure = await resolvePureVNextRuntime({
-      db: input.db,
-      owners,
-      userInput: input.userInput,
-      maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET,
-    });
+    const pureStartedAt = performance.now();
+    let pure: { selectedItems: MemoryItem[]; promptBlock: string | null; recalledStateCount: number };
+    let pureError: unknown = null;
+    try {
+      pure = await resolvePureVNextRuntime({
+        db: input.db,
+        owners,
+        userInput: input.userInput,
+        maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET,
+      });
+    } catch (error) {
+      pureError = error;
+      pure = { selectedItems: [], promptBlock: null, recalledStateCount: 0 };
+    }
+    const pureLatencyMs = Math.round((performance.now() - pureStartedAt) * 10) / 10;
+
+    const emitPureRead = (observation: MemoryVNextPureReadObservation) => {
+      try {
+        if (input.pureReadEmit) {
+          input.pureReadEmit(observation);
+        } else if (input.primaryReadEmit) {
+          input.primaryReadEmit({
+            source: observation.source === "vnext" ? "vnext" : "none",
+            legacyHitCount: 0,
+            recalledStateCount: observation.vnextItemCount,
+            vnextLatencyMs: observation.vnextLatencyMs,
+            legacyLatencyMs: 0,
+            contextChars: observation.contextChars,
+            fallbackReason: observation.fallbackReason,
+            error: observation.error,
+          });
+        } else {
+          console.info("[memory] vnext pure read", {
+            event: "memory_vnext_pure_read",
+            ...observation,
+          });
+        }
+      } catch {
+        /* best-effort telemetry */
+      }
+    };
+
+    if (pureError != null) {
+      emitPureRead({
+        source: "none",
+        itemCount: 0,
+        vnextItemCount: 0,
+        vnextLatencyMs: pureLatencyMs,
+        contextChars: 0,
+        fallbackReason: "vnext_error",
+        error: pureError instanceof Error ? pureError.message : String(pureError),
+      });
+    } else if (pure.selectedItems.length === 0) {
+      emitPureRead({
+        source: "none",
+        itemCount: 0,
+        vnextItemCount: 0,
+        vnextLatencyMs: pureLatencyMs,
+        contextChars: 0,
+        fallbackReason: "no_vnext_context",
+      });
+    } else {
+      emitPureRead({
+        source: "vnext",
+        itemCount: pure.selectedItems.length,
+        vnextItemCount: pure.recalledStateCount,
+        vnextLatencyMs: pureLatencyMs,
+        contextChars: pure.promptBlock?.length ?? 0,
+      });
+    }
+
+    const lazyPromotionEnabled =
+      input.vNextShadowProvider != null && isMemoryVNextLazyPromotionEnabled();
+    if (lazyPromotionEnabled) {
+      void (async () => {
+        const ownerItems = await Promise.all(
+          owners.map((owner) =>
+            loadOwnerItemsFromDb(
+              input.db,
+              owner,
+              input.ownerLimit ?? DEFAULT_MEMORY_RUNTIME_OWNER_LIMIT
+            )
+          )
+        );
+        const legacyCandidates = ownerItems.flat();
+        if (legacyCandidates.length > 0) {
+          const promotionPick = await pickFirstUncoveredLazyPromotionItem(
+            input.db,
+            legacyCandidates
+          );
+          if (promotionPick) {
+            await runMemoryVNextLazyPromotion({
+              db: input.db,
+              item: promotionPick.item,
+              selectedIndex: promotionPick.selectedIndex,
+              skippedCoveredCount: promotionPick.skippedCoveredCount,
+              skippedNoOpCount: promotionPick.skippedNoOpCount,
+              provider: input.vNextShadowProvider!,
+              ...(input.lazyPromotionEmit ? { emit: input.lazyPromotionEmit } : {}),
+            });
+          }
+        }
+      })().catch(() => {});
+    }
+
     return {
       selectedItems: pure.selectedItems,
       promptBlock: pure.promptBlock,

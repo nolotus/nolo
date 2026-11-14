@@ -1,5 +1,5 @@
 // 用于 promotion 实测：无功能影响的注释变更（不改逻辑）
-import React, { useState } from "react";
+import React from "react";
 import {
   LuEllipsis,
   LuExternalLink,
@@ -8,26 +8,13 @@ import {
   LuLayoutGrid,
   LuLock,
   LuLink,
-  LuShare2,
-  LuTrash2,
 } from "react-icons/lu";
 import { useNavigate } from "app/routing";
 import { Button as RacButton } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { useAppDispatch, useAppSelector } from "app/store";
-import { useUserId } from "identity";
-import { toast } from "app/utils/toast";
-import { copyTextToClipboard } from "app/utils/clipboard";
-import { selectRuntimeSnapshot } from "app/stateViews/runtime";
-import { buildAppSharePayload } from "app/utils/appSharePayload";
-import {
-  currentWindowOrigin,
-  runShare,
-} from "render/layout/shareWorkflowCore";
 import Button from "render/web/ui/Button";
 import { Menu, MenuItem, MenuTrigger } from "render/web/ui/Menu";
-import { ConfirmModal } from "render/web/ui/modal/ConfirmModal";
-import type { AppSummary, AppVisibility, CustomDomain } from "app/types/appSummary";
+import type { AppSummary, AppVisibility } from "app/types/appSummary";
 import {
   buildAppDetailPath,
   buildAppEditorPath,
@@ -35,14 +22,20 @@ import {
 import { useOpenAppEditorPanel } from "app/actions/openAppEditorPanel";
 import { resolveAppRouteKey } from "app/utils/appKeys";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
-import { DomainBindingPanel } from "./DomainBindingPanel";
 import AppPreviewFrame from "./AppPreviewFrame";
 import ContentIcon from "render/contentIcon/ContentIcon";
 import "./AppCard.css";
 
+/**
+ * 卡片只负责「展示 + 打开」。
+ *
+ * 管理职责（可见性切换、自定义域名、发布到社区、删除）已迁到 app 自身页面
+ * （`app/pages/AppDetailPage.tsx` 的管理入口），这里不再接收也不再渲染任何
+ * 写操作入口：卡片不持有 onShare / onDelete / onBindDomain 之类回调，因此
+ * 也不可能出现「看起来能点、点了 403」的假按钮。
+ */
 interface AppCardProps {
   app: AppSummary;
-  mode?: "manage" | "browse";
   /**
    * 作品库布局（opt-in）：大图真实预览 + 名称/可见性/更新时间，次要操作收进
    * 「更多」菜单。默认关闭，既有调用方（列表视图）行为不变。
@@ -51,22 +44,6 @@ interface AppCardProps {
   contextLabel?: string;
   onOpenDetail?: () => void;
   onOpenEditor?: () => void;
-  onDelete?: (app: AppSummary) => Promise<boolean>;
-  onShare?: (app: AppSummary, visibility: AppVisibility) => Promise<boolean>;
-  onBindDomain?: (
-    app: AppSummary,
-    hostname: string
-  ) => Promise<{
-    ok: boolean;
-    url?: string;
-    error?: string;
-    code?: string;
-    mode?: string;
-    pendingDns?: boolean;
-    aRecords?: string[];
-  }>;
-  onUnbindDomain?: (app: AppSummary, hostname: string) => Promise<{ ok: boolean; error?: string }>;
-  onListDomains?: (app: AppSummary) => Promise<CustomDomain[]>;
 }
 
 function formatDate(iso?: string | number): string {
@@ -77,34 +54,20 @@ function formatDate(iso?: string | number): string {
 
 const AppCard: React.FC<AppCardProps> = ({
   app,
-  mode = "manage",
   gallery = false,
   contextLabel,
   onOpenDetail,
   onOpenEditor,
-  onDelete,
-  onShare,
-  onBindDomain,
-  onUnbindDomain,
-  onListDomains,
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const dispatch = useAppDispatch();
-  const { currentServer } = useAppSelector(selectRuntimeSnapshot);
-  const currentUserId = useUserId();
   const openEditorPanel = useOpenAppEditorPanel();
-  const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const [showDomainPanel, setShowDomainPanel] = useState(false);
 
-  const VISIBILITY_META: Record<AppVisibility, { icon: React.ReactNode; label: string; next: AppVisibility; tip: string }> = {
-    private: { icon: <LuLock size={13} aria-hidden="true" />, label: t("appCard_visibility_private_label"), next: "public", tip: t("appCard_visibility_private_tip") },
-    unlisted: { icon: <LuLink size={13} aria-hidden="true" />, label: t("appCard_visibility_unlisted_label"), next: "public", tip: t("appCard_visibility_unlisted_tip") },
-    public: { icon: <LuGlobe size={13} aria-hidden="true" />, label: t("appCard_visibility_public_label"), next: "private", tip: t("appCard_visibility_public_tip") },
+  // 可见性徽标只读展示（服务端记录里的值）。切换入口在 app 页面，卡片不提供改值。
+  const VISIBILITY_META: Record<AppVisibility, { icon: React.ReactNode; label: string; tip: string }> = {
+    private: { icon: <LuLock size={13} aria-hidden="true" />, label: t("appCard_visibility_private_label"), tip: t("appCard_visibility_private_tip") },
+    unlisted: { icon: <LuLink size={13} aria-hidden="true" />, label: t("appCard_visibility_unlisted_label"), tip: t("appCard_visibility_unlisted_tip") },
+    public: { icon: <LuGlobe size={13} aria-hidden="true" />, label: t("appCard_visibility_public_label"), tip: t("appCard_visibility_public_tip") },
   };
 
   const accessUrl = resolvePreferredAppRuntimeUrl({
@@ -117,17 +80,7 @@ const AppCard: React.FC<AppCardProps> = ({
   const appRouteKey = resolveAppRouteKey(app.appKey, app.appId);
   const vis = app.visibility ?? "private";
   const visInfo = VISIBILITY_META[vis];
-  const isManageMode = mode === "manage";
   const canOpenDetail = !!appRouteKey || !!onOpenDetail;
-  const canToggleVisibility = isManageMode && !!onShare && !!app.appId;
-  const canDelete = isManageMode && !!onDelete;
-  // 「发布到社区」只给 app 的 owner：owner 来自记录里的 userId（服务端真值，见
-  // app/types/appSummary.ts 的 toAppSummary），不是客户端推测。非 owner 直接不渲染，
-  // 不给「看起来能点、点了 403」的假按钮（review 假按钮）。
-  const isOwner = !!app.ownerUserId && app.ownerUserId === currentUserId;
-  const canPublish = isManageMode && isOwner && !!app.appId && !!accessUrl;
-  const canManageDomains =
-    isManageMode && !!app.appId && !!onBindDomain && !!onUnbindDomain && !!onListDomains;
 
   const handleOpenDetail = () => {
     if (onOpenDetail) {
@@ -168,89 +121,9 @@ const AppCard: React.FC<AppCardProps> = ({
     handleOpenDetail();
   };
 
-  const handleVisibilityClick = (event: React.MouseEvent<HTMLSpanElement>) => {
-    event.stopPropagation();
-    void handleShare();
-  };
-
-  const handleVisibilityKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
-    event.stopPropagation();
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    void handleShare();
-  };
-
-  const handleShare = async () => {
-    if (!onShare || !app.appId || sharing) return;
-    setSharing(true);
-    await onShare(app, visInfo.next);
-    setSharing(false);
-  };
-
-  const handleDelete = async () => {
-    if (!onDelete || deleting) return;
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 3000);
-      return;
-    }
-    setDeleting(true);
-    await onDelete(app);
-    setDeleting(false);
-    setConfirmDelete(false);
-  };
-
-  const handlePublish = async () => {
-    // 与详情页「分享」共用同一份载荷构造 + 同一个分发点（render/layout/shareWorkflowCore），
-    // 不再自己拼 share({...})：字段一漂移，分享落地页就读不到运行地址/appKey。
-    const payload = buildAppSharePayload({
-      appId: app.appId,
-      appKey: app.appKey,
-      name: app.name,
-      url: accessUrl,
-    });
-    if (!payload || publishing) return;
-    setPublishing(true);
-    try {
-      const { webLink } = await runShare({
-        dispatch: dispatch as unknown as Parameters<typeof runShare>[0]["dispatch"],
-        payload,
-        visibility: "community",
-        server: currentServer,
-        windowOrigin: currentWindowOrigin(),
-      });
-      // 与 useShareWorkflow 的 community 分支一致：链接进剪贴板 + 同一句成功提示。
-      try {
-        await copyTextToClipboard(webLink);
-        toast.success(t("sharePublished", "已分享到社区，链接已复制"));
-      } catch {
-        toast.success(
-          `${t("shareCopyFailed", "复制链接失败，请手动复制")}: ${webLink}`,
-          { duration: 8000 }
-        );
-      }
-    } catch {
-      toast.error(t("appCard_publish_failed"));
-    } finally {
-      setPublishing(false);
-    }
-  };
-
   const handleOpenExternal = () => {
     if (!accessUrl) return;
     window.open(accessUrl, "_blank", "noopener,noreferrer");
-  };
-
-  /** 「更多」菜单里的删除走显式二次确认弹窗（菜单项按下即关菜单，无法原地二次点击）。 */
-  const handleConfirmDeleteFromMenu = async () => {
-    if (!onDelete || deleting) return;
-    setDeleting(true);
-    try {
-      await onDelete(app);
-    } finally {
-      setDeleting(false);
-      setConfirmDeleteOpen(false);
-    }
   };
 
   const handleMenuAction = (key: React.Key) => {
@@ -260,15 +133,6 @@ const AppCard: React.FC<AppCardProps> = ({
         break;
       case "fullEditor":
         handleOpenFullEditor();
-        break;
-      case "publish":
-        void handlePublish();
-        break;
-      case "domains":
-        setShowDomainPanel((prev) => !prev);
-        break;
-      case "delete":
-        if (canDelete) setConfirmDeleteOpen(true);
         break;
       default:
         break;
@@ -303,12 +167,9 @@ const AppCard: React.FC<AppCardProps> = ({
               <span
                 className={`AppCard__vis AppCard__vis--${vis}`}
                 title={visInfo.tip}
-                onClick={canToggleVisibility ? handleVisibilityClick : undefined}
-                role={canToggleVisibility ? "button" : undefined}
-                tabIndex={canToggleVisibility ? 0 : undefined}
-                onKeyDown={canToggleVisibility ? handleVisibilityKeyDown : undefined}
+                data-visibility={vis}
               >
-                {sharing ? <span className="AppCard__vis-spin">⟳</span> : visInfo.icon}
+                {visInfo.icon}
                 {visInfo.label}
               </span>
             )}
@@ -359,46 +220,9 @@ const AppCard: React.FC<AppCardProps> = ({
               <MenuItem id="fullEditor">
                 {t("appEditor_openFullEditor", "打开完整编辑器")}
               </MenuItem>
-              {canPublish && (
-                <MenuItem id="publish">
-                  {publishing ? t("appCard_btn_publishing") : t("appCard_btn_publish")}
-                </MenuItem>
-              )}
-              {canManageDomains && (
-                <MenuItem id="domains">{t("appCard_btn_domains")}</MenuItem>
-              )}
-              {canDelete && (
-                <MenuItem id="delete">{t("appCard_btn_delete")}</MenuItem>
-              )}
             </Menu>
           </MenuTrigger>
         </div>
-
-        {showDomainPanel && app.appId && onBindDomain && onUnbindDomain && onListDomains && (
-          <div onClick={(event) => event.stopPropagation()}>
-            <DomainBindingPanel
-              appId={app.appId}
-              onBind={(_appId, hostname) => onBindDomain(app, hostname)}
-              onUnbind={(_appId, hostname) => onUnbindDomain(app, hostname)}
-              onList={() => onListDomains(app)}
-            />
-          </div>
-        )}
-
-        <ConfirmModal
-          isOpen={confirmDeleteOpen}
-          onClose={() => {
-            if (!deleting) setConfirmDeleteOpen(false);
-          }}
-          onConfirm={() => void handleConfirmDeleteFromMenu()}
-          title={t("appCard_btn_delete")}
-          message={t("appCard_delete_confirm", "确认删除该应用？删除后无法恢复。")}
-          confirmText={t("appCard_btn_confirm_delete")}
-          cancelText={t("myContentBatch.cancel", "取消")}
-          type="error"
-          loading={deleting}
-          allowCancelWhileLoading={false}
-        />
       </div>
     );
   }
@@ -427,12 +251,9 @@ const AppCard: React.FC<AppCardProps> = ({
               <span
                 className={`AppCard__vis AppCard__vis--${vis}`}
                 title={visInfo.tip}
-                onClick={canToggleVisibility ? handleVisibilityClick : undefined}
-                role={canToggleVisibility ? "button" : undefined}
-                tabIndex={canToggleVisibility ? 0 : undefined}
-                onKeyDown={canToggleVisibility ? handleVisibilityKeyDown : undefined}
+                data-visibility={vis}
               >
-                {sharing ? <span className="AppCard__vis-spin">⟳</span> : visInfo.icon}
+                {visInfo.icon}
                 {visInfo.label}
               </span>
             )}
@@ -455,7 +276,7 @@ const AppCard: React.FC<AppCardProps> = ({
         )}
       </div>
 
-      <div className={`AppCard__actions${!isManageMode ? " AppCard__actions--browse" : ""}`}>
+      <div className="AppCard__actions">
         {accessUrl && (
           <Button
             variant="primary"
@@ -484,55 +305,7 @@ const AppCard: React.FC<AppCardProps> = ({
           title={t("appEditor_openFullEditor", "打开完整编辑器")}
           aria-label={t("appEditor_openFullEditor", "打开完整编辑器")}
         />
-        {canPublish && (
-          <Button
-            variant="secondary"
-            className="AppCard__btn AppCard__btn--publish"
-            icon={<LuShare2 size={16} aria-hidden="true" />}
-            onClick={handlePublish}
-            loading={publishing}
-            title={t("appCard_btn_publish_tip")}
-          >
-            {publishing ? t("appCard_btn_publishing") : t("appCard_btn_publish")}
-          </Button>
-        )}
-        {canManageDomains && (
-          <Button
-            variant="secondary"
-            className={`AppCard__btn AppCard__btn--domains ${showDomainPanel ? "is-active" : ""}`}
-            icon={<LuGlobe size={14} aria-hidden="true" />}
-            onClick={() => setShowDomainPanel((prev) => !prev)}
-            title={t("domain_panel_title")}
-          >
-            {t("appCard_btn_domains")}
-          </Button>
-        )}
-        {canDelete && (
-          <Button
-            variant={confirmDelete ? "danger" : "secondary"}
-            className={`AppCard__btn AppCard__btn--delete ${confirmDelete ? "is-confirm" : ""}`}
-            icon={<LuTrash2 size={14} aria-hidden="true" />}
-            onClick={handleDelete}
-            disabled={deleting}
-          >
-            {deleting
-              ? t("appCard_btn_deleting")
-              : confirmDelete
-                ? t("appCard_btn_confirm_delete")
-                : t("appCard_btn_delete")}
-          </Button>
-        )}
       </div>
-
-      {showDomainPanel && app.appId && onBindDomain && onUnbindDomain && onListDomains && (
-        <DomainBindingPanel
-          appId={app.appId}
-          onBind={(_appId, hostname) => onBindDomain(app, hostname)}
-          onUnbind={(_appId, hostname) => onUnbindDomain(app, hostname)}
-          onList={() => onListDomains(app)}
-        />
-      )}
-
     </div>
   );
 };

@@ -1,4 +1,27 @@
 
+## 0.236.0 (2026-11-14)
+
+### Features
+
+* **agent:** 打扰强度由默认档 + 记忆偏好共同决定 ([cd56712](https://github.com/nolotus/bun-nolo/commit/cd56712658f2788dd35b12c525ecec403609081d))
+* **agent:** 把 attention 分级接进共享工作原则 ([f6fccdd](https://github.com/nolotus/bun-nolo/commit/f6fccdd58d66d28a79a26d2e96b104ef589a1f6b))
+* **app:** 域名与可见性入口迁到 app 页面，AppCard 去管理化 ([ce29645](https://github.com/nolotus/bun-nolo/commit/ce296457db686973004dcc2e21349b3e006d9ef6))
+* **chat:** 凭据缺失时桌面端弹窗重填并自动重试一次 ([8ffb67d](https://github.com/nolotus/bun-nolo/commit/8ffb67d48619e661dbf56967221bac34ef099471))
+* **image:** GPT Image 2.5 → 2.6 换代（含已发布 agent 统一） ([97549ed](https://github.com/nolotus/bun-nolo/commit/97549ed9954d6661b69b28f2a176df4197d7ae47))
+* **models:** gpt-6.1-sol 切 OpenAI 官方直连，下掉 5.6 冗余条目 ([3a425dc](https://github.com/nolotus/bun-nolo/commit/3a425dcdc8e0c4c20fed676d2b56518279a6b6ac))
+* **models:** 接入 Claude Fable 5.2（换代降价） ([c6cb658](https://github.com/nolotus/bun-nolo/commit/c6cb658751b1bee47c78bb1f65c889ab8b066e4c))
+* **models:** 接入 Gemini 4 Hydrogen 与 4 Carbon（Google 官方） ([b17cbcc](https://github.com/nolotus/bun-nolo/commit/b17cbcc3b3292ae21468b7ef41fee34a1d00a8f5))
+
+### Bug Fixes
+
+* **agent-runtime:** 凭据提示不再把用户引向 CLI，且不谎报弹窗状态 ([a700455](https://github.com/nolotus/bun-nolo/commit/a700455b77e99d61702600d4353cee2b37bc570c))
+* **billing:** OpenAI 官方直连也必须走 canonical 4 桶计费 ([c2413bd](https://github.com/nolotus/bun-nolo/commit/c2413bdf9d42ea6943003ee0e2160e850972149f))
+* **ci:** detect user systemd bus, not /run/systemd/system ([93789d6](https://github.com/nolotus/bun-nolo/commit/93789d62fac8c9a0d2b9a7f3df6862b251b30d4d))
+* **ci:** judge user session by env, not by bus file existence ([50c6837](https://github.com/nolotus/bun-nolo/commit/50c68379f67e7121b4262c3dc798d6df5943a42d))
+* **memory:** pure 读取模式下记忆写入完全停止 ([45dfe31](https://github.com/nolotus/bun-nolo/commit/45dfe3159f98cf08ac9b5b934164590bc3c27003))
+* **memory:** pure 路径的 resident 判定补上 ownerType 与长度约束 ([1ce3901](https://github.com/nolotus/bun-nolo/commit/1ce3901824b6b5035169f5e0682a5d96f79e1930))
+
+
 ## 0.235.0 (2026-11-14)
 
 ### Features

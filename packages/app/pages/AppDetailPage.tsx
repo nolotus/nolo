@@ -43,11 +43,15 @@ import {
   LuEllipsisVertical,
   LuExternalLink,
   LuFileCode2,
+  LuGlobe,
   LuLayoutGrid,
+  LuLink,
+  LuLock,
   LuMessagesSquare,
   LuMousePointerClick,
   LuRefreshCw,
   LuSave,
+  LuSettings2,
   LuShare2,
   LuTrash2,
   LuTriangleAlert,
@@ -60,6 +64,9 @@ import { currentWindowOrigin, runShare, type ShareDispatcher } from "render/layo
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import ShareModal, { type AppShareScope } from "render/web/ui/modal/ShareModal";
 import { ConfirmModal } from "render/web/ui/modal/ConfirmModal";
+import { Dialog } from "render/web/ui/modal/Dialog";
+import { DomainBindingPanel } from "app/components/DomainBindingPanel";
+import type { AppVisibility } from "app/types/appSummary";
 import {
   describeAppRuntimeFailure,
   readAppRuntimeErrorText,
@@ -94,6 +101,50 @@ interface DeployStatusResult {
 }
 
 type PendingConfirm = "leave" | "discardCode";
+
+/**
+ * 管理入口里的可见性选项。
+ *
+ * ⚠️ 文案**不能**复用 `sharePermissionTitle*`：那组文案描述的是服务端 reachability
+ * （谁能打开），而这个控件编辑的是原始 `visibility` 字段。两者在空间应用上不同：
+ * `private` + 有 spaceId ⇒ reachability = `space`（空间成员能打开），不是「只有你能打开」。
+ * 用错会在同一条 app 上让管理弹窗说「只有你能打开」、分享弹窗说「空间成员能打开」
+ * （docs/app-share-surfaces.md 记录的 HIGH-3 同型错位）。
+ * 所以这里用中性措辞描述**这个开关本身**，并在有 spaceId 时额外说明空间成员始终可访问。
+ */
+const VISIBILITY_OPTIONS: Array<{
+  value: AppVisibility;
+  icon: React.ReactNode;
+  labelKey: string;
+  labelFallback: string;
+  descKey: string;
+  descFallback: string;
+}> = [
+  {
+    value: "private",
+    icon: <LuLock size={15} aria-hidden="true" />,
+    labelKey: "appManage_visibility_private_label",
+    labelFallback: "不对外开放",
+    descKey: "appManage_visibility_private_desc",
+    descFallback: "除你自己之外不对外；应用若属于某个空间，该空间成员仍可访问。",
+  },
+  {
+    value: "unlisted",
+    icon: <LuLink size={15} aria-hidden="true" />,
+    labelKey: "appManage_visibility_unlisted_label",
+    labelFallback: "凭链接访问",
+    descKey: "appManage_visibility_unlisted_desc",
+    descFallback: "无需登录即可打开，但不会出现在列表或搜索里。",
+  },
+  {
+    value: "public",
+    icon: <LuGlobe size={15} aria-hidden="true" />,
+    labelKey: "appManage_visibility_public_label",
+    labelFallback: "完全公开",
+    descKey: "appManage_visibility_public_desc",
+    descFallback: "拿到链接的任何人都能打开，无需登录。",
+  },
+];
 
 /**
  * app 统一页面组件。
@@ -212,8 +263,23 @@ const AppDetailPage: React.FC = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
+  /** 可见性改完立刻反映到弹窗里的选中态：详情数据要等一次 refetch 才回来。 */
+  const [visibilityDraft, setVisibilityDraft] = useState<AppVisibility | null>(null);
+  const [savingVisibility, setSavingVisibility] = useState<AppVisibility | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const { deleteApp } = useMyAppActions({ setApps: () => {} });
+  // setApps 必须是**稳定引用**：useMyAppActions 内部的 useCallback 都依赖它，
+  // 传内联箭头会让 listDomains 等每次渲染换新身份 → DomainBindingPanel 的 refresh
+  // 变新 → 它挂着的 useEffect 反复 refetch（review 实测：父组件重渲染 3 次 = 4 次
+  // POST /api/app/domain/list）。详情页不用这个 setter 维护列表，空实现即可。
+  const noopSetApps = useMemo(() => () => {}, []);
+  const {
+    deleteApp,
+    shareApp,
+    bindDomain,
+    unbindDomain,
+    listDomains,
+  } = useMyAppActions({ setApps: noopSetApps });
 
   const searchParamsString = searchParams.toString();
   const buildDetailTarget = useCallback(
@@ -281,6 +347,69 @@ const AppDetailPage: React.FC = () => {
       navigate(buildAppChatEditorPath(routeAppKey, spaceId, routeServerOrigin));
     });
   }, [navigate, openEditorPanel, routeAppKey, routeServerOrigin, spaceId]);
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 管理入口（owner-only）：可见性切换 + 自定义域名
+  //
+  // 这两项以前只在「我的内容」卡片（AppCard）里；现在跟着 app 页面走。
+  // ⚠️ 别说那条链「已离线」：`/apps` 页面**有路由**（routes.tsx 的 MY_ROUTE_SECTIONS
+  // 映射 → mySections.tsx 的 path "/apps"），只是站内没有导航指向它。把它当离线页
+  // 会误判「去管理化没有代价」——2026-11-14 就是这么误判过一次。
+  // owner 判据与服务端一致：`canShare === true`（同一个信号也门控页头「分享」）。
+  // ──────────────────────────────────────────────────────────────────────────
+  const manageAppRef = useMemo(
+    () => (app?.appId ? { appId: app.appId, serverOrigin: app.serverOrigin } : null),
+    [app?.appId, app?.serverOrigin]
+  );
+  // 回调用 useCallback 固定身份：DomainBindingPanel 的 refresh 依赖 onList，
+  // 每次渲染换新函数会让它反复 refetch（自激循环）。
+  const handleListDomains = useCallback(
+    () => (manageAppRef ? listDomains(manageAppRef) : Promise.resolve([])),
+    [listDomains, manageAppRef]
+  );
+  const handleBindDomain = useCallback(
+    (_appId: string, hostname: string) =>
+      manageAppRef
+        ? bindDomain(manageAppRef, hostname)
+        : Promise.resolve({ ok: false, error: "缺少 appId" }),
+    [bindDomain, manageAppRef]
+  );
+  const handleUnbindDomain = useCallback(
+    (_appId: string, hostname: string) =>
+      manageAppRef
+        ? unbindDomain(manageAppRef, hostname)
+        : Promise.resolve({ ok: false, error: "缺少 appId" }),
+    [unbindDomain, manageAppRef]
+  );
+
+  const currentVisibility: AppVisibility = visibilityDraft ?? app?.visibility ?? "private";
+  // 切换 app 时必须清掉 draft：AppDetailPage 挂在 :pageKey 上，/app-A → /app-B
+  // 不重挂载只重取数据，残留的 draft 会让 B 的管理弹窗显示 A 改过的档位
+  // （review 实测：A 上设成 public 后切到 B，B 仍显示 public 选中）。
+  // 这是权限界面，显示错误的当前权限比样式问题严重。
+  const appIdForDraftReset = app?.appId ?? null;
+  useEffect(() => {
+    setVisibilityDraft(null);
+    setSavingVisibility(null);
+  }, [appIdForDraftReset]);
+  const handleSetVisibility = useCallback(
+    async (next: AppVisibility) => {
+      if (!manageAppRef || savingVisibility) return;
+      const previous = visibilityDraft;
+      setSavingVisibility(next);
+      setVisibilityDraft(next);
+      const ok = await shareApp(manageAppRef, next);
+      setSavingVisibility(null);
+      if (ok) {
+        toast.success(t("appManage_visibility_saved", "可见性已更新"));
+        void refetch();
+        return;
+      }
+      setVisibilityDraft(previous);
+      toast.error(t("appManage_visibility_failed", "可见性更新失败，请稍后重试"));
+    },
+    [manageAppRef, refetch, savingVisibility, shareApp, t, visibilityDraft]
+  );
 
   const awaitingApp = loading && !app;
   const titleText = app?.userFriendlyName ?? (awaitingApp ? "" : t("appDetail_titleFallback", "应用详情"));
@@ -1140,6 +1269,18 @@ const AppDetailPage: React.FC = () => {
               <span>{t("share", "分享")}</span>
             </button>
           )}
+          {canShare && app?.appId && (
+            <button
+              type="button"
+              className="AppDetailPage__secondaryBtn"
+              onClick={() => setManageOpen(true)}
+              aria-haspopup="dialog"
+              aria-label={t("appManage_open", "管理")}
+            >
+              <LuSettings2 size={16} aria-hidden="true" />
+              <span>{t("appManage_open", "管理")}</span>
+            </button>
+          )}
           {primaryUrl && !previewFailed ? (
             <a
               className="AppDetailPage__primaryBtn"
@@ -1303,6 +1444,85 @@ const AppDetailPage: React.FC = () => {
           itemType="app"
           appScope={appShareScope}
         />
+      )}
+
+      {/*
+        管理入口（owner-only，与「分享」同一个 canShare 门控）：
+        可见性切换 + 自定义域名。两项原来只在 AppCard 里，现在归这里。
+        （AppCard 仍被 /apps 页面使用；那个页面后续会退场，届时一并处理。）
+      */}
+      {canShare && app?.appId && (
+        <Dialog
+          isOpen={manageOpen}
+          onClose={() => setManageOpen(false)}
+          title={t("appManage_title", "管理应用")}
+          icon={<LuSettings2 size={18} aria-hidden="true" />}
+          width={520}
+        >
+          <div className="AppDetailPage__manage">
+            <section className="AppDetailPage__manageSection">
+              <h2 className="AppDetailPage__manageTitle">
+                {t("appDetail_visibility", "可见性")}
+              </h2>
+              <p className="AppDetailPage__manageHint">
+                {t(
+                  "appManage_visibility_hint",
+                  "谁可以打开这个应用。改完立刻对访问链接生效。"
+                )}
+              </p>
+              <div
+                className="AppDetailPage__visibilityGroup"
+                role="radiogroup"
+                aria-label={t("appDetail_visibility", "可见性")}
+              >
+                {VISIBILITY_OPTIONS.map((option) => {
+                  const selected = currentVisibility === option.value;
+                  const saving = savingVisibility === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={`AppDetailPage__visibilityOption${selected ? " is-selected" : ""}`}
+                      onClick={() => {
+                        if (selected || savingVisibility) return;
+                        void handleSetVisibility(option.value);
+                      }}
+                      disabled={Boolean(savingVisibility) && !saving}
+                    >
+                      <span className="AppDetailPage__visibilityIcon" aria-hidden="true">
+                        {option.icon}
+                      </span>
+                      <span className="AppDetailPage__visibilityText">
+                        <span className="AppDetailPage__visibilityLabel">
+                          {t(option.labelKey, option.labelFallback)}
+                        </span>
+                        <span className="AppDetailPage__visibilityDesc">
+                          {t(option.descKey, option.descFallback)}
+                        </span>
+                      </span>
+                      {saving && (
+                        <span className="AppDetailPage__visibilitySaving" aria-hidden="true">
+                          ⟳
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="AppDetailPage__manageSection">
+              <DomainBindingPanel
+                appId={app.appId}
+                onBind={handleBindDomain}
+                onUnbind={handleUnbindDomain}
+                onList={handleListDomains}
+              />
+            </section>
+          </div>
+        </Dialog>
       )}
     </div>
   );

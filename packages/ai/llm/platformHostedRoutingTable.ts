@@ -28,6 +28,7 @@ export const PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL = "anthropic/claude-haiku-5-5
 // 模型名同名（anthropic/claude-* 前缀是 DeepInfra 的官方 id 形态）。
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL = "anthropic/claude-opus-5-5";
 export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL = "anthropic/claude-fable-5-1";
+export const PLATFORM_HOSTED_CLAUDE_FABLE_5_2_MODEL = "anthropic/claude-fable-5-2";
 // Claude Sonnet 5.5（2026-09-28 发布）：与 Sonnet 5 同价，替换上一代 Sonnet 5 上架。
 export const PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL =
   "anthropic/claude-sonnet-5-5";
@@ -52,6 +53,8 @@ export const CLOUDFLARE_CLAUDE_OPUS_5_5_UPSTREAM_MODEL_ID =
   "anthropic/claude-opus-5.5";
 export const CLOUDFLARE_CLAUDE_FABLE_5_1_UPSTREAM_MODEL_ID =
   "anthropic/claude-fable-5.1";
+export const CLOUDFLARE_CLAUDE_FABLE_5_2_UPSTREAM_MODEL_ID =
+  "anthropic/claude-fable-5.2";
 export const CLOUDFLARE_CLAUDE_SONNET_5_5_UPSTREAM_MODEL_ID =
   "anthropic/claude-sonnet-5.5";
 
@@ -97,6 +100,8 @@ export const PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL = "gemini-3.8-flash";
 export const PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL = "gemini-3.7-flash";
 export const PLATFORM_HOSTED_GEMINI_25_PRO_MODEL = "gemini-2.5-pro";
 export const PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL = "gemini-4-argon";
+export const PLATFORM_HOSTED_GEMINI_4_HYDROGEN_MODEL = "gemini-4-hydrogen";
+export const PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL = "gemini-4-carbon";
 export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image";
 // Nano Banana 2.1（2026-10-06 GA，官方新代码默认档）：id 无 preview 后缀。
 export const PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL =
@@ -136,6 +141,11 @@ export const CLOUDFLARE_GPT_56_LUNA_UPSTREAM_MODEL_ID = "openai/gpt-5.6-luna";
 export const CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID = "openai/gpt-6.1-sol";
 // GPT-6.1 Terra：CF catalog id 与平台 id 不同名（点号保留、无下划线差异）。
 export const CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID = "openai/gpt-6.1-terra";
+
+/**
+ * OpenAI 官方 API 上游模型 ID。
+ */
+export const OPENAI_GPT_6_1_SOL_UPSTREAM_MODEL_ID = "gpt-6.1-sol";
 
 /**
  * Cloudflare AI 统一 Responses 端点占位模板（GPT 文本系）。
@@ -317,6 +327,24 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: true,
   },
+  // Gemini 4 Hydrogen -> Google official OpenAI-compatible endpoint
+  [PLATFORM_HOSTED_GEMINI_4_HYDROGEN_MODEL]: {
+    endpoint:
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    usageProvider: "google",
+    keyName: "google",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  // Gemini 4 Carbon -> Google official OpenAI-compatible endpoint
+  [PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL]: {
+    endpoint:
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    usageProvider: "google",
+    keyName: "google",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
   // Gemini Nano Banana 2.1（图片线唯一在售档）-> Google official OpenAI-compatible endpoint
   [PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL]: {
     endpoint:
@@ -411,6 +439,14 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "anthropic.messages",
     agentRunHosted: true,
   },
+  [PLATFORM_HOSTED_CLAUDE_FABLE_5_2_MODEL]: {
+    endpoint: CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE,
+    usageProvider: "cloudflare",
+    keyName: "cloudflare",
+    upstreamModelId: CLOUDFLARE_CLAUDE_FABLE_5_2_UPSTREAM_MODEL_ID,
+    wire: "anthropic.messages",
+    agentRunHosted: true,
+  },
   // Claude Sonnet 5.5（2026-09-28 发布，与 opus-5-5 同通道同协议）：
   // 目录侧它以新 id 上架，补齐这条路由；上一代 sonnet-5 的路由条目**保留**，
   // 供存量记录继续解析上游（下架 ≠ 删除）。
@@ -451,31 +487,16 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "responses",
     agentRunHosted: true,
   },
-  // gpt-5.6-sol 不再单独建条目：它是 gpt-6.1-sol 的兼容别名
-  // （PLATFORM_MODEL_ALIASES），resolvePlatformHostedRouting 解析到 6.1 的条目。
-  [PLATFORM_HOSTED_GPT_56_TERRA_MODEL]: {
-    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
-    usageProvider: "cloudflare",
-    keyName: "cloudflare",
-    upstreamModelId: CLOUDFLARE_GPT_56_TERRA_UPSTREAM_MODEL_ID,
-    wire: "responses",
-    agentRunHosted: true,
-  },
-  [PLATFORM_HOSTED_GPT_56_LUNA_MODEL]: {
-    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
-    usageProvider: "cloudflare",
-    keyName: "cloudflare",
-    upstreamModelId: CLOUDFLARE_GPT_56_LUNA_UPSTREAM_MODEL_ID,
-    wire: "responses",
-    agentRunHosted: true,
-  },
-  // GPT-6.1 Sol（2026-10-13 新增）：CF 官方页只声明「Responses, Chat Completions」
-  // 两种请求格式与 reasoning_effort；本表按 Responses 统一线走。
+  // gpt-5.6 系列旧条目已下掉：它们已全部是 6.x 的兼容别名
+  // （PLATFORM_MODEL_ALIASES：gpt-5.6-sol → gpt-6.1-sol、gpt-5.6-terra → gpt-6.1-terra、
+  // gpt-5.6-luna → gpt-6-luna），resolvePlatformHostedRouting 经别名透明解析到 6.x 条目。
+  // GPT-6.1 Sol（先行切 OpenAI 官方直连 Responses 线，2026-11）：
+  // 直连官方端点，裸模型 id（无 openai/ 前缀），usageProvider 与 keyName 均为 openai。
   [PLATFORM_HOSTED_GPT_6_1_SOL_MODEL]: {
-    endpoint: CLOUDFLARE_AI_RESPONSES_ENDPOINT_TEMPLATE,
-    usageProvider: "cloudflare",
-    keyName: "cloudflare",
-    upstreamModelId: CLOUDFLARE_GPT_6_1_SOL_UPSTREAM_MODEL_ID,
+    endpoint: "https://api.openai.com/v1/responses",
+    usageProvider: "openai",
+    keyName: "openai",
+    upstreamModelId: OPENAI_GPT_6_1_SOL_UPSTREAM_MODEL_ID,
     wire: "responses",
     agentRunHosted: true,
   },

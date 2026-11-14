@@ -1214,14 +1214,14 @@ export async function resolveActionGate(
     if (fields.action !== "secret_request") {
       return buildGateCancelledResult(
         gate,
-        "input gate has no host implementation for this action; use `nolo secret set` instead",
+        "input gate has no host implementation for this action",
       );
     }
     const secretName = typeof fields.name === "string" ? fields.name : "";
     if (!secretName) {
       return buildGateCancelledResult(
         gate,
-        "secret_request input gate is missing a secret name; use `nolo secret set` instead",
+        "secret_request input gate is missing a secret name",
       );
     }
     // Same keyboard claim + composer pause/resume contract as the handoff
