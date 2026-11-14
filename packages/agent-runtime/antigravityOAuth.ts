@@ -147,7 +147,25 @@ export type RefreshAntigravityTokenDeps = {
   now?: () => number;
 };
 
-/** 默认 hub 版本。2026-10-13: 2.23.1，来源 https://antigravity.google/docs/changelog（此前 2026-09-30 抄自 antigravity-hub 清单 latest-arm64-mac.yml 的 2.18.1）。可用 NOLO_ANTIGRAVITY_VERSION 覆盖。 */
+/**
+ * 默认 hub 版本。
+ *
+ * 2026-10-13: 2.23.1，来源 https://antigravity.google/docs/changelog（此前 2026-09-30
+ * 抄自 antigravity-hub 清单 latest-arm64-mac.yml 的 2.18.1）。可用
+ * NOLO_ANTIGRAVITY_VERSION 覆盖。
+ *
+ * 已知但**未启用**的推断（2026-11-14 复审后回退，见 review WARNING）：
+ * - oh-my-pi 的 DEFAULT_ANTIGRAVITY_VERSION 是 2.26.0，UA 形如
+ *   `antigravity/hub/2.26.0 (aidev_client; os_type=darwin; arch=arm64; cl=1005016104)`；
+ * - opencode-antigravity-auth 的 getAntigravityUserAgent() 也带 `(aidev_client; …; cl=…)` 段。
+ * 两处独立实现都带括号段，说明真实 hub 的 UA 可能就是括号形态；且 omp 记录后端会按版本
+ * gate 新模型，旧版本配 gemini-3.8-flash 本身不自洽。
+ *
+ * 但这些依据都来自第三方实现，没有官方客户端或服务端兼容性证据，改错可能直接影响线上
+ * 可用性。因此默认行为保持原样，验证方式：用真实凭据分别跑
+ *   NOLO_ANTIGRAVITY_VERSION=2.23.1 与 NOLO_ANTIGRAVITY_VERSION=2.26.0
+ * 对比 200/429/模型可用性，确认后再改默认值或补 NOLO_ANTIGRAVITY_UA_PROFILE 开关。
+ */
 export function getAntigravityUserAgent(): string {
   const version = process.env.NOLO_ANTIGRAVITY_VERSION || "2.23.1";
   const os = process.platform === "win32" ? "windows" : process.platform;

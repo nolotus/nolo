@@ -16,6 +16,8 @@ import { isRoutableContentActive } from "create/space/contentKeyUtils";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { useAppDispatch, useAppSelector } from "app/store";
+import { deleteDbKey } from "app/hooks/deleteDbKey";
+import type { DeleteContentCommand } from "create/space/components/useDeleteContentEntry";
 import { updateContentPinned } from "create/space/content/contentThunks";
 import { runPinnedToggleWithTransition } from "create/space/content/optimisticPinnedUpdate";
 import { runSidebarViewTransition } from "./sidebar/sidebarViewTransitions";
@@ -529,7 +531,13 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
   const spaceGroups = projectGroups(row => (row.item.type === "dialog" || includeNonDialogs) && matchesTypeFilter(row.item, typeFilter) && (typeFilter === "attachment" || !isAllViewDialogImageAttachment(row.item)));
   const showSpaceGroups = projectGroups().length > 1;
 
-  const { deleteContent } = useDeleteContentEntry();
+  // 删除命令：本文件是既有 Redux 消费端，由它把 deleteDbKey thunk 与 dispatch 绑成
+  // 领域命令传给 useDeleteContentEntry（该 hook 自身不依赖 Redux）。
+  const runDelete = useCallback<DeleteContentCommand>(
+    (input, spaceId, options) => dispatch(deleteDbKey(input, spaceId, options)),
+    [dispatch]
+  );
+  const { deleteContent } = useDeleteContentEntry(runDelete);
   const eligibleRowMap = useMemo(
     () => new Map(eligibleRows.map((r) => [r.key, r])),
     [eligibleRows]

@@ -1,4 +1,16 @@
 
+## 0.218.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **ai:** 官方限制提示接入订阅入口与 i18n ([2ae00e3](https://github.com/nolotus/bun-nolo/commit/2ae00e3503dfab8f0fc6bbf96cb95512d0731724))
+* **ai:** 订阅 OAuth 通道标注官方禁用提示 ([a53dc29](https://github.com/nolotus/bun-nolo/commit/a53dc296fb719884014a246c18c5666bc350eb57))
+
+### Bug Fixes
+
+* **agent-runtime:** 稳定 antigravity 会话标识 ([9483c22](https://github.com/nolotus/bun-nolo/commit/9483c22d152cd3baba75d7af464c4fc1ce97e83d))
+
+
 ## 0.217.0-alpha.1 (2026-11-14)
 
 ### Features

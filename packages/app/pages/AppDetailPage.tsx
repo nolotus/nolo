@@ -55,7 +55,9 @@ import {
 import { useOpenAppEditorPanel } from "app/actions/openAppEditorPanel";
 import { openObjectAssistantSidebar } from "chat/dialog/objectAssistantSidebar";
 import { useRightSidebarOptional } from "render/layout/RightSidebarContext";
-import { useShareWorkflow, type SharePayload, type ShareVisibility } from "render/layout/useShareWorkflow";
+import { useShareWorkflow, type CreateShareLink, type SharePayload, type ShareVisibility } from "render/layout/useShareWorkflow";
+import { currentWindowOrigin, runShare, type ShareDispatcher } from "render/layout/shareWorkflowCore";
+import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import ShareModal, { type AppShareScope } from "render/web/ui/modal/ShareModal";
 import { ConfirmModal } from "render/web/ui/modal/ConfirmModal";
 import {
@@ -323,6 +325,20 @@ const AppDetailPage: React.FC = () => {
       }),
     [app?.appId, app?.appKey, app?.userFriendlyName, primaryUrl, routeAppKey]
   );
+  // 分享命令：详情页是既有 Redux 消费端（遗留适配层），由它把 dispatch 与当前
+  // server 绑成领域命令传给 `useShareWorkflow`（该 hook 自身不依赖 Redux）。
+  const shareServer = useAppSelector(selectRuntimeSnapshot).currentServer;
+  const createShareLink = useCallback<CreateShareLink>(
+    (payload, visibility) =>
+      runShare({
+        dispatch: dispatch as unknown as ShareDispatcher,
+        payload,
+        visibility,
+        server: shareServer,
+        windowOrigin: currentWindowOrigin(),
+      }),
+    [dispatch, shareServer]
+  );
   const {
     isShareModalOpen,
     shareModalLink,
@@ -333,7 +349,7 @@ const AppDetailPage: React.FC = () => {
     setIsShareModalOpen,
     handleOpenShare,
     handlePublishCommunity,
-  } = useShareWorkflow(buildSharePayload);
+  } = useShareWorkflow(buildSharePayload, createShareLink);
 
   const appShareScope: AppShareScope = app?.reachability ?? "owner";
 

@@ -32,7 +32,8 @@ import {
 } from "./deleteBehavior";
 import { deleteDbKey, getDeleteErrorMessage } from "app/hooks/deleteDbKey";
 import { useRightSidebar } from "./RightSidebarContext";
-import { useShareWorkflow, type SharePayload } from "./useShareWorkflow";
+import { useShareWorkflow, type CreateShareLink, type SharePayload } from "./useShareWorkflow";
+import { currentWindowOrigin, runShare, type ShareDispatcher } from "./shareWorkflowCore";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { buildAppSharePayload } from "app/utils/appSharePayload";
 import { useAppDetail } from "app/hooks/useAppDetail";
@@ -472,6 +473,20 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
     ]
   );
 
+  // 分享命令：本文件是既有 Redux 消费端（遗留适配层），由它把 dispatch 与当前
+  // server 绑成领域命令传给 `useShareWorkflow`（该 hook 自身不依赖 Redux）。
+  const createShareLink = useCallback<CreateShareLink>(
+    (payload, visibility) =>
+      runShare({
+        dispatch: dispatch as unknown as ShareDispatcher,
+        payload,
+        visibility,
+        server,
+        windowOrigin: currentWindowOrigin(),
+      }),
+    [dispatch, server]
+  );
+
   const {
     isShareModalOpen,
     shareModalLink,
@@ -483,7 +498,7 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
     handleShare,
     handleOpenShare,
     handlePublishCommunity,
-  } = useShareWorkflow(buildSharePayload);
+  } = useShareWorkflow(buildSharePayload, createShareLink);
 
   const navigate = useNavigate();
 

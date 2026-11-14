@@ -5,6 +5,10 @@ const AI_API_KEY_LABEL_DE = "API-Schlüssel";
 export default {
   en: {
     translation: {
+      providerPreset: {
+        // 厂商官方限制第三方登录的订阅通道：照常可选，只做风险提示。
+        officialRestricted: "Third-party sign-in restricted by the vendor",
+      },
       // General Actions & Status
       cancel: "Cancel",
       update: "Update",

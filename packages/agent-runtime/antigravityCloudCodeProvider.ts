@@ -1,5 +1,5 @@
 import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
@@ -145,6 +145,59 @@ type AntigravityCloudCodeCallArgs = {
  * tool_call_id（见 geminiNativeShared.ts）。labels.used_claude 告诉网关
  * 目标模型是 Claude。
  */
+/** 首条 user 消息的文本指纹；取不到时返回空串。 */
+function firstUserText(messages: unknown[]): string {
+  for (const raw of messages) {
+    if (!raw || typeof raw !== "object") continue;
+    const message = raw as { role?: unknown; content?: unknown };
+    if (message.role !== "user") continue;
+    const content = message.content;
+    if (typeof content === "string") return content.trim();
+    if (Array.isArray(content)) {
+      return content
+        .map((part) =>
+          part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+            ? (part as { text: string }).text
+            : "",
+        )
+        .join("")
+        .trim();
+    }
+    return "";
+  }
+  return "";
+}
+
+/**
+ * Antigravity 的 `sessionId` 标识「一次对话」，官方客户端在同一段对话里复用同一个值。
+ *
+ * 此前每次请求都取随机数，等于告诉后端「这个账号每一轮都新开了一个会话」：
+ * 一方面不像真实客户端，另一方面服务端无法把多轮请求归并成一次会话，任何基于
+ * 「单会话行为」的判定看到的都是无数陌生会话。这里改成按首条 user 消息派生，
+ * 同一段对话稳定得到同一个值；取不到内容时退回随机（与旧行为一致）。
+ *
+ * 加盐的理由（2026-11-14 复审 WARNING）：不加盐的内容哈希对公开/低熵文本可被离线
+ * 枚举比对，等于把用户首句带进了请求体。盐是仓库内常量，足以阻断「拿候选文本逐个
+ * 试」的关联，同时保持同一对话稳定。局限：真正的稳定会话标识应当来自对话 id，
+ * 而 `args` 里只有 `openAiBody.messages`，所以首条消息被裁剪/压缩时 id 会漂移——
+ * 这比「每轮都换会话」更接近真实客户端行为。
+ *
+ * 负数前缀与取值形态沿用官方客户端的样式（形如 `-1234567890`）。
+ */
+const ANTIGRAVITY_SESSION_SALT = "nolo.antigravity.session.v1";
+
+export function antigravitySessionIdFor(messages: unknown[]): string {
+  const seed = firstUserText(messages);
+  if (!seed) return `-${Math.floor(Math.random() * 9e15)}`;
+  const digest = createHash("sha256")
+    .update(ANTIGRAVITY_SESSION_SALT)
+    .update("\u0000")
+    .update(seed)
+    .digest();
+  // 48 位足以避免碰撞，同时留在 JS 安全整数范围内。
+  return `-${digest.readUIntBE(0, 6)}`;
+}
+
 export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) {
   const projectId = readAntigravityProjectId(args.metadata);
   if (!projectId) {
@@ -227,7 +280,7 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
     labels.model_enum = profile.modelEnum;
   }
   request.labels = labels;
-  request.sessionId = `-${Math.floor(Math.random() * 9e15)}`;
+  request.sessionId = antigravitySessionIdFor(rawMessages);
 
   return {
     url: `${resolveAntigravityCloudCodeBaseUrl(args.agentConfig.customProviderUrl)}${STREAM_PATH}`,

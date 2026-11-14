@@ -6,15 +6,24 @@ import { LuTrash2 } from "react-icons/lu";
 import { useTranslation } from "react-i18next";
 import {
   useDeleteContentEntry,
+  type DeleteContentCommand,
   type DeleteContentEntryTarget,
 } from "./useDeleteContentEntry";
 
-export { useDeleteContentEntry, type DeleteContentEntryTarget };
+export {
+  useDeleteContentEntry,
+  type DeleteContentCommand,
+  type DeleteContentEntryTarget,
+};
 
 interface DeleteContentButtonProps
   extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> {
   contentKey: string;
   title: string;
+  /**
+   * 删除命令（由渲染方传入）：本组件不依赖 Redux，dispatch 由上层既有消费端绑定。
+   */
+  runDelete: DeleteContentCommand;
   /** HTML `title` attribute for the rendered button (tooltip). */
   htmlTitle?: string;
   className?: string;
@@ -33,6 +42,7 @@ function DeleteContentButton({
   className,
   spaceIdOverride,
   sourceServerOrigin,
+  runDelete,
   as: Component = "button",
   onClick: onPropClick,
   onAction: onPropAction,
@@ -40,7 +50,7 @@ function DeleteContentButton({
   ...rest
 }: DeleteContentButtonProps) {
   const { t } = useTranslation(["chat", "common"]);
-  const { deleteContent, isDeleting } = useDeleteContentEntry();
+  const { deleteContent, isDeleting } = useDeleteContentEntry(runDelete);
 
   const handleDelete = async (event?: React.MouseEvent) => {
     event?.preventDefault();

@@ -553,9 +553,17 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                               </SelectGroupLabel>
                             ) : null}
                             {group.items.map((item) => {
-                              const textValue = item.description
+                              const baseTextValue = item.description
                                 ? `${item.label} (${item.description})`
                                 : item.label;
+                              // 官方限制第三方登录的通道照常可选（产品决定 2026-11-14），
+                              // 只在选项文本上标出来，由用户自己承担后果。
+                              const textValue = item.riskNotice
+                                ? `${baseTextValue} · ${t(
+                                    "providerPreset.officialRestricted",
+                                    "官方限制第三方登录",
+                                  )}`
+                                : baseTextValue;
                               return (
                                 <SelectItem
                                   key={item.id}
