@@ -1,4 +1,11 @@
 
+## 0.219.0-alpha.2 (2026-11-14)
+
+### Bug Fixes
+
+* **cli:** 对 Antigravity 的 Google 429 从严不重试 ([cbe33f9](https://github.com/nolotus/bun-nolo/commit/cbe33f92f06c9126a981fa3ff62938de787ff8f0))
+
+
 ## 0.219.0-alpha.1 (2026-11-14)
 
 ### Features
