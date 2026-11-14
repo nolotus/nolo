@@ -1,4 +1,11 @@
 
+## 0.219.0-alpha.3 (2026-11-14)
+
+### Bug Fixes
+
+* **agy:** 非流式改用 json 输出；收敛重复的 CLI 结果契约 ([f8db8cf](https://github.com/nolotus/bun-nolo/commit/f8db8cf90eb9c5a690317d8d58434a1eab7ce946))
+
+
 ## 0.219.0-alpha.2 (2026-11-14)
 
 ### Bug Fixes

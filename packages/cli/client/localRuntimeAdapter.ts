@@ -109,17 +109,12 @@ import { summarizeEndpoint } from "core/summarizeEndpoint";
  * extension) for source-contract tests (e.g. fileCredentialBroker wiring).
  */
 
-export type CliExecuteResult = {
-  text: string;
-  raw?: string;
-  elapsed?: number;
-  /**
-   * 与 ai/agent/cliExecutor.ts 的同名类型是两份独立定义（历史原因，未合并）：
-   * 这里必须同步保留 usage，否则 CLI 通道报告的 usage 会在 transport 层被类型挡掉
-   * 而静默丢弃。合并这两份定义是后续独立任务。
-   */
-  usage?: import("ai/token/types").RawUsage;
-};
+/**
+ * 唯一真源见 `ai/agent/cliExecutor` 的 CliExecuteResult / CliExecuteResultLoose。
+ * 这里保留导出名以免改动调用方，但不再手写一份同形对象——历史上有三份重复定义，
+ * 其中两份漏掉了 usage，导致 CLI 通道报告的用量在类型层被静默丢弃。
+ */
+export type CliExecuteResult = import("ai/agent/cliExecutor").CliExecuteResultLoose;
 export type CliImageInput = { source: string };
 import type { ReadToolFn } from "./cliLocalToolExecutors";
 import {

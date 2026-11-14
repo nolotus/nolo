@@ -23,7 +23,7 @@ export type LocalCliExecutor = (
     yolo?: boolean;
     reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   }
-) => Promise<{ text: string; raw?: string; elapsed?: number }>;
+) => Promise<import("ai/agent/cliExecutor").CliExecuteResultLoose>;
 
 export type LocalRuntimeProbeResult = {
   ok: boolean;

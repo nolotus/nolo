@@ -82,14 +82,13 @@ export const resolveCliProviderTransport: ProviderResolver = async (ctx) => {
                 onChunk: options.onTextDelta,
               })
             : await executeCli(provider, prompt, cliOptions);
-          // usage 在多个包各有一份 CliExecuteResult 定义（见 localRuntimeAdapter.ts 的
-          // 同名类型注释），这里按最小面读取，避免为一次透传去合并全部重复定义。
-          const cliUsage = (result as { usage?: import("ai/token/types").RawUsage }).usage;
+          // usage 已在 CliExecuteResult 契约里（唯一真源见 ai/agent/cliExecutor），
+          // 直接透传，供上层替代 estimateMissingUsage 的估算。
           return {
             content: result.text,
             model: agentConfig.model || provider,
             raw: result.raw,
-            ...(cliUsage ? { usage: cliUsage } : {}),
+            ...(result.usage ? { usage: result.usage } : {}),
           };
         } catch (error) {
           // 保留配额限额错误，让上层（派发者 / supervisor / PM fallback）能快速识别并换另一个 agent 重派
