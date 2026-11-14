@@ -147,7 +147,7 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/app/hooks/useUnifiedStore.ts",
   "packages/app/hooks/useUserNotifications.ts",
   "packages/app/notifications/useNotificationActions.ts",
-  "packages/app/pages/AppEditorPage.tsx",
+  "packages/app/pages/AppDetailPage.tsx",
   "packages/app/pages/ClientDownloadsPage.tsx",
   "packages/app/pages/EmailAdmin.tsx",
   "packages/app/pages/Lab.tsx",

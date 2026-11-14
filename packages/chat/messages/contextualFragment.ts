@@ -22,8 +22,6 @@ export type ContextualFragmentKind =
   | "background_run_completion"
   /** 新格式：进程任务（launchProcess / detach 的 execShell）终态标记。 */
   | "background_task_completion"
-  /** server legacy：continueDialogContext 注入的历史 wake 摘要。 */
-  | "server_legacy_wake"
   /** TUI legacy：旧版 buildWakeMessage 的【后台 run 终态通知】格式。 */
   | "tui_legacy_wake"
   /** legacy：旧版 runtime 注入 user 消息头部的时间块（已移除，存量对话）。 */
@@ -36,20 +34,12 @@ const BACKGROUND_TASK_CLOSE = "</background_task_completion>";
 
 // —— legacy 标记常量（格式来源见注释；不得随意改动，存量数据靠它识别） ——
 
-/** server legacy 首行标记（continueDialogContext.ts）。 */
-const SERVER_LEGACY_PREFIX = "--- 后台 run 终态事件 ---";
 /** TUI legacy 首行前缀（旧版 buildWakeMessage）。 */
 const TUI_LEGACY_PREFIX = "【后台 run 终态通知】";
 /** legacy 时间块首行（已移除的 buildCurrentTimeBlock）。 */
 const TIME_BLOCK_PREFIX = "--- 当前时间 ---";
 
-/**
- * legacy 唤醒摘要的结构特征：正文必须有 key: value 结构行（server 端是
- * terminalStatus/childDialogId/text，TUI 端是 runId/status）。server 端正文
- * 会被 wrapHistoricalSummaryWithReplayGuard 包一层（首行是「【历史参考，
- * 非活指令】…」），所以结构行在任意正文行上找，不限定第二行。
- */
-const SERVER_LEGACY_STRUCTURE = /^\s*(terminalStatus|childDialogId|text|runId|status): /;
+/** legacy 唤醒摘要的结构特征：正文必须有 key: value 结构行（TUI 端是 runId/status）。 */
 const TUI_LEGACY_STRUCTURE = /^\s*runId: /m;
 /** 时间块结构特征：buildCurrentTimeBlock 的正文固定有「当前日期:」行。 */
 const TIME_BLOCK_STRUCTURE = /^\s*当前日期: /;
@@ -78,16 +68,6 @@ const registry: readonly FragmentMatcher[] = [
       return (
         trimmed.startsWith(BACKGROUND_TASK_OPEN) &&
         trimmed.endsWith(BACKGROUND_TASK_CLOSE)
-      );
-    },
-  },
-  {
-    kind: "server_legacy_wake",
-    match: (text) => {
-      const lines = text.split("\n");
-      return (
-        lines[0]?.trim() === SERVER_LEGACY_PREFIX &&
-        lines.slice(1).some((line) => SERVER_LEGACY_STRUCTURE.test(line))
       );
     },
   },
@@ -247,8 +227,8 @@ function runStatusOutcome(status: string): ContextualOutcome {
   return "failure";
 }
 
-/** 进程任务状态 → 语义（exited 且退出码 0=成功；非零退出码=失败；stopped=已取消）。 */
-function taskStatusOutcome(status: string, exitCode?: number): ContextualOutcome {
+/** 任务状态词与退出码 → 语义（exited 且退出码 0=成功；非零退出码=失败；stopped=已取消）。 */
+export function taskStatusOutcome(status: string, exitCode?: number): ContextualOutcome {
   const s = status.trim().toLowerCase();
   if (
     s === "stopped" ||
@@ -258,14 +238,20 @@ function taskStatusOutcome(status: string, exitCode?: number): ContextualOutcome
   ) {
     return "cancelled";
   }
-  if (s === "exited" || s === "done" || s === "success") {
+  if (
+    s === "exited" ||
+    s === "done" ||
+    s === "succeeded" ||
+    s === "success" ||
+    s === "ok"
+  ) {
     return exitCode !== undefined && exitCode !== 0 ? "failure" : "success";
   }
   return "failure";
 }
 
 /** 毫秒 → 人读耗时（次级信息）。 */
-function formatDurationMs(ms: number): string {
+export function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "";
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -386,12 +372,12 @@ function outcomeCountsMeta(tasks: ContextualTaskDisplay[]): string {
   return parts.join(" · ");
 }
 
-/** 组装展示模型（新格式：run / 进程任务）。 */
-function buildNotice(
+/** 组装展示模型（新格式：run / 进程任务 / TUI 结构化通知）。 */
+export function buildNoticeDisplay(
   kind: ContextualFragmentKind,
   subject: { label: string; countWord: string },
   tasks: ContextualTaskDisplay[],
-  fullText: string
+  fullText = ""
 ): ContextualNoticeDisplay {
   const outcome = combineOutcome(tasks);
   const isGroup = tasks.length > 1;
@@ -436,23 +422,6 @@ function buildLegacyDisplay(
       fullText: text,
     };
   }
-  if (kind === "server_legacy_wake") {
-    const status =
-      firstColonValue(text, "terminalStatus") || firstColonValue(text, "status");
-    const childDialogId = firstColonValue(text, "childDialogId");
-    const outcome = runStatusOutcome(status);
-    return {
-      kind,
-      subject: SUBJECT_RUN.label,
-      outcome,
-      outcomeLabel: OUTCOME_LABEL[outcome],
-      headline: `后台任务 终态${status ? ` · ${status}` : ""}${
-        childDialogId ? ` · ${childDialogId}` : ""
-      }`,
-      tasks: [],
-      fullText: text,
-    };
-  }
   const runId = firstColonValue(text, "runId");
   const status = firstColonValue(text, "status");
   const duration = firstColonValue(text, "duration");
@@ -482,10 +451,10 @@ export function describeContextualNotice(
   const kind = matchContextualFragment(text);
   if (!kind) return null;
   if (kind === "background_run_completion") {
-    return buildNotice(kind, SUBJECT_RUN, parseBackgroundRuns(text), text);
+    return buildNoticeDisplay(kind, SUBJECT_RUN, parseBackgroundRuns(text), text);
   }
   if (kind === "background_task_completion") {
-    return buildNotice(kind, SUBJECT_TASK, parseBackgroundTasks(text), text);
+    return buildNoticeDisplay(kind, SUBJECT_TASK, parseBackgroundTasks(text), text);
   }
   return buildLegacyDisplay(kind, text);
 }
@@ -581,7 +550,6 @@ export function describeContextualFragment(
 const GROUPABLE_KINDS: ReadonlySet<ContextualFragmentKind> = new Set([
   "background_run_completion",
   "background_task_completion",
-  "server_legacy_wake",
   "tui_legacy_wake",
 ]);
 

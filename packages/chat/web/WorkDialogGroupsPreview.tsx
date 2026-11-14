@@ -35,6 +35,9 @@ import SidebarItemRow from "create/space/SidebarItemRow";
 import { SidebarItemMoreMenu } from "create/space/SidebarItemMoreMenu";
 import { MenuPopover } from "render/web/ui/MenuPopover";
 import { useTranslation } from "react-i18next";
+import { canDeleteSidebarItem } from "create/space/canDeleteSidebarItem";
+import { useDeleteContentEntry } from "create/space/components/useDeleteContentEntry";
+import { useRovingRowKeyboard } from "./sidebar/useRovingRowKeyboard";
 import {
   buildWorkDialogHierarchyView,
   type WorkDialogFlatRow,
@@ -98,15 +101,15 @@ type DialogPages = {
 };
 
 export function WorkDialogGroupsPreview({
-  items, userId, homeScope = { kind: "all" }, includeNonDialogs = false, typeFilter, paginationOwner = false, ownedPages, unreadAgentKeys,
-}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; includeNonDialogs?: boolean; typeFilter?: SidebarTypeFilterId; paginationOwner?: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
+  items, userId, homeScope = { kind: "all" }, onSelectHomeScope, includeNonDialogs = false, typeFilter, paginationOwner = false, ownedPages, unreadAgentKeys,
+}: { items: readonly MyContentListItem[]; userId: string; homeScope?: HomeScope; onSelectHomeScope?: (scope: HomeScope) => void; includeNonDialogs?: boolean; typeFilter?: SidebarTypeFilterId; paginationOwner?: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
   if (!userId) return null;
   return <section aria-label="工作状态" data-hook="work-dialog-groups">
-    <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} includeNonDialogs={includeNonDialogs} typeFilter={typeFilter} paginationOwner={paginationOwner} ownedPages={ownedPages} unreadAgentKeys={unreadAgentKeys} />
+    <WorkDialogGroupsExpanded items={items} userId={userId} homeScope={homeScope} onSelectHomeScope={onSelectHomeScope} includeNonDialogs={includeNonDialogs} typeFilter={typeFilter} paginationOwner={paginationOwner} ownedPages={ownedPages} unreadAgentKeys={unreadAgentKeys} />
   </section>;
 }
 
-function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs, typeFilter: typeFilterProp, paginationOwner, ownedPages, unreadAgentKeys }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope; includeNonDialogs: boolean; typeFilter?: SidebarTypeFilterId; paginationOwner: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
+function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope, includeNonDialogs, typeFilter: typeFilterProp, paginationOwner, ownedPages, unreadAgentKeys }: { items: readonly MyContentListItem[]; userId: string; homeScope: HomeScope; onSelectHomeScope?: (scope: HomeScope) => void; includeNonDialogs: boolean; typeFilter?: SidebarTypeFilterId; paginationOwner: boolean; ownedPages?: DialogPages; unreadAgentKeys?: Set<string> }) {
   const dialogEventTimestamps = useDialogEventTimestamps();
   const location = useLocation();
   // 有效类型筛选只能有一处解析：生产调用方（ChatSidebar）传入 chip 用的同一个值。
@@ -134,7 +137,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
   dbEntitiesRef.current = dbEntities;
   const memberSpacesRef = useRef(memberSpaces);
   memberSpacesRef.current = memberSpaces;
-  const sharedEnabled = homeScope.kind !== "project" &&
+  const sharedEnabled = homeScope.kind === "all" &&
     Boolean(runtime.currentUserId && runtime.currentToken) && runtime.currentUserId === userId;
   const sharedPages = useSharedSpaceDialogPages({
     enabled: sharedEnabled,
@@ -402,7 +405,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
     const timer = setInterval(refresh, WORK_SPACE_NAME_TTL_MS);
     return () => { active = false; clearInterval(timer); };
   }, [nameScope, nameSpaceIds, sharedEnabled, userId]);
-  const labels = { other: t("workspace_other", "其他空间"), unassociated: t("workspace_unassociated", "未关联空间") };
+  const labels = { other: t("workspace_other", "其他空间"), unassociated: t("workspace_unassociated", "空间外") };
   const remoteRecords = sharedEnabled && resolvedRecords?.scope === nameScope ? resolvedRecords.records : undefined;
   const deviceLocalRecords = useMemo(() => {
     const candidateIds = new Set<string>();
@@ -526,6 +529,62 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
   const spaceGroups = projectGroups(row => (row.item.type === "dialog" || includeNonDialogs) && matchesTypeFilter(row.item, typeFilter) && (typeFilter === "attachment" || !isAllViewDialogImageAttachment(row.item)));
   const showSpaceGroups = projectGroups().length > 1;
 
+  const { deleteContent } = useDeleteContentEntry();
+  const eligibleRowMap = useMemo(
+    () => new Map(eligibleRows.map((r) => [r.key, r])),
+    [eligibleRows]
+  );
+  const defaultFocusedKey = useMemo(() => {
+    for (const row of eligibleRows) {
+      if (
+        isRoutableContentActive({
+          contentKey: row.key,
+          type: row.item.type.toLowerCase(),
+          userId,
+          spaceId: currentSpaceId,
+          currentPath: location.pathname,
+        })
+      ) {
+        return row.key;
+      }
+    }
+    return eligibleRows[0]?.key ?? null;
+  }, [eligibleRows, userId, currentSpaceId, location.pathname]);
+
+  const canDeleteRow = useCallback(
+    (key: string) => {
+      const row = eligibleRowMap.get(key);
+      if (!row) return false;
+      const capability = capabilityFor(key, row.item);
+      return canDeleteSidebarItem({
+        type: row.item.type,
+        readOnly: capability.readOnly,
+        canDeleteContent: capability.canDeleteContent,
+      });
+    },
+    [eligibleRowMap, capabilityFor]
+  );
+
+  const handleDeleteRow = useCallback(
+    (key: string) => {
+      const row = eligibleRowMap.get(key);
+      if (!row) return;
+      return deleteContent({
+        contentKey: row.key,
+        title: row.item.title || titles.get(row.key) || row.key,
+        spaceIdOverride: row.item.spaceId ?? null,
+        sourceServerOrigin: "serverOrigin" in row.item ? row.item.serverOrigin : undefined,
+      });
+    },
+    [eligibleRowMap, deleteContent, titles]
+  );
+
+  const { containerRef, containerProps, getRowProps } = useRovingRowKeyboard({
+    defaultFocusedKey,
+    canDeleteRow,
+    onDeleteRow: handleDeleteRow,
+  });
+
   const hierarchyView = useMemo(
     () => buildWorkDialogHierarchyView(flatRows, expandedDialogKeys, Date.now(), runningDialogKeys),
     [flatRows, expandedDialogKeys, runningDialogKeys],
@@ -553,13 +612,27 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
       pinned: isPinned,
       onToggle: () => handleTogglePinned(key, item, rowSpaceId || null),
     } : undefined;
-    if (item.type.toLowerCase() !== "dialog") return <div key={key}><SidebarItemRow spaceIdOverride={rowSpaceId} contentKey={key} sourceServerOrigin={"serverOrigin" in item ? item.serverOrigin : undefined} type={item.type.toLowerCase()} title={item.title || key} isActive={isActive} isMenuOpen={!rowReadOnly && activeMenuKey === key} readOnly={rowReadOnly} canDeleteContent={canDeleteOwnedContent} onToggleMenu={rowReadOnly ? ignoreMenuToggle : setActiveMenuKey} onMenuAnchorChange={rowReadOnly ? undefined : handleMenuAnchorChange} editSignal={rowReadOnly ? undefined : editRequest?.key === key ? editRequest.nonce : undefined} pinned={isPinned} pinAction={pinAction} hasUnread={item.type.toLowerCase() === "agent" ? isAgentRowUnread(unreadAgentKeys, key, userId) : undefined} /></div>;
+    const rowKeyboardProps = getRowProps(key);
+    if (item.type.toLowerCase() !== "dialog") {
+      return (
+        <div key={key} role="row" {...rowKeyboardProps}>
+          <SidebarItemRow spaceIdOverride={rowSpaceId} contentKey={key} sourceServerOrigin={"serverOrigin" in item ? item.serverOrigin : undefined} type={item.type.toLowerCase()} title={item.title || key} isActive={isActive} isMenuOpen={!rowReadOnly && activeMenuKey === key} readOnly={rowReadOnly} canDeleteContent={canDeleteOwnedContent} onToggleMenu={rowReadOnly ? ignoreMenuToggle : setActiveMenuKey} onMenuAnchorChange={rowReadOnly ? undefined : handleMenuAnchorChange} editSignal={rowReadOnly ? undefined : editRequest?.key === key ? editRequest.nonce : undefined} pinned={isPinned} pinAction={pinAction} hasUnread={item.type.toLowerCase() === "agent" ? isAgentRowUnread(unreadAgentKeys, key, userId) : undefined} />
+        </div>
+      );
+    }
     const content = contentByKey.get(key);
     const ownerId = parseDialogKey(key)?.userId;
     const summary = canDeleteOwnedContent && content?.type === "dialog" && (ownerId === userId || ownerId === "local") ? content : undefined;
-    return <div key={key} data-hook={isChildRow ? "work-dialog-child-row" : undefined}>
-      <SidebarItemRow spaceIdOverride={rowSpaceId} contentKey={key} type="dialog" title={item.title || titles.get(key) || key} disableAutoRead summaryStatus={summary && "status" in summary ? summary.status : undefined} summaryUnreadAt={summary && "unreadAt" in summary ? summary.unreadAt : undefined} isActive={isActive} isMenuOpen={!rowReadOnly && activeMenuKey === key} readOnly={rowReadOnly} canDeleteContent={canDeleteOwnedContent} onToggleMenu={rowReadOnly ? ignoreMenuToggle : setActiveMenuKey} onMenuAnchorChange={rowReadOnly ? undefined : handleMenuAnchorChange} editSignal={rowReadOnly ? undefined : editRequest?.key === key ? editRequest.nonce : undefined} pinned={isPinned} pinAction={pinAction} {...(loadedChildCount > 0 ? { childCount: loadedChildCount, isChildCollapsed: !expandedDialogKeys.has(key), onToggleChildCollapse: () => toggleDialogExpanded(key) } : {})} {...(isChildRow ? { isChildRow: true } : {})} depth={Math.min(depth, 2) as 0 | 1 | 2} aggregatedRunning={aggregatedRunningKeys.has(key)} />
-    </div>;
+    return (
+      <div
+        key={key}
+        role="row"
+        data-hook={isChildRow ? "work-dialog-child-row" : undefined}
+        {...rowKeyboardProps}
+      >
+        <SidebarItemRow spaceIdOverride={rowSpaceId} contentKey={key} type="dialog" title={item.title || titles.get(key) || key} disableAutoRead summaryStatus={summary && "status" in summary ? summary.status : undefined} summaryUnreadAt={summary && "unreadAt" in summary ? summary.unreadAt : undefined} isActive={isActive} isMenuOpen={!rowReadOnly && activeMenuKey === key} readOnly={rowReadOnly} canDeleteContent={canDeleteOwnedContent} onToggleMenu={rowReadOnly ? ignoreMenuToggle : setActiveMenuKey} onMenuAnchorChange={rowReadOnly ? undefined : handleMenuAnchorChange} editSignal={rowReadOnly ? undefined : editRequest?.key === key ? editRequest.nonce : undefined} pinned={isPinned} pinAction={pinAction} {...(loadedChildCount > 0 ? { childCount: loadedChildCount, isChildCollapsed: !expandedDialogKeys.has(key), onToggleChildCollapse: () => toggleDialogExpanded(key) } : {})} {...(isChildRow ? { isChildRow: true } : {})} depth={Math.min(depth, 2) as 0 | 1 | 2} aggregatedRunning={aggregatedRunningKeys.has(key)} />
+      </div>
+    );
   };
 
   const renderHierarchy = (view: ReturnType<typeof buildWorkDialogHierarchyView>) => (<div aria-label="最近活动对话">
@@ -638,9 +711,33 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, includeNonDialogs,
     })
   );
 
-  return <div data-hook="home-work-dialog-list" className="home-work-dialog-list">
-    {homeScope.kind === "all" && (!showSpaceGroups ? spaceGroups[0] ? renderSpace(spaceGroups[0]) : renderFlatHierarchy([]) : <WorkDialogSpaceGroups groups={spaceGroups} userId={userId} memberSpaces={memberSpaces} records={records}>{renderSpace}</WorkDialogSpaceGroups>)}
-    {(homeScope.kind === "all" ? spaceGroups.every(group => group.rows.length === 0) : total === 0) ? <p role={partialFailure ? "alert" : undefined}>{partialFailure ? "加载失败，请稍后重试。" : includeNonDialogs ? "暂无已加载的内容。" : "暂无已加载的对话。"}</p> : homeScope.kind !== "all" ? renderHierarchy(hierarchyView) : null}
+  const isNoSpace = homeScope.kind === "noSpace";
+  const emptyMessage = partialFailure
+    ? "加载失败，请稍后重试。"
+    : isNoSpace
+      ? t("workspace_unassociated_empty", "空间外还没有内容")
+      : includeNonDialogs
+        ? "暂无已加载的内容。"
+        : "暂无已加载的对话。";
+
+  return <div ref={containerRef} {...containerProps} data-hook="home-work-dialog-list" className="home-work-dialog-list">
+    {(homeScope.kind === "all" || isNoSpace) && (
+      !showSpaceGroups && !isNoSpace
+        ? (spaceGroups[0] ? renderSpace(spaceGroups[0]) : renderFlatHierarchy([]))
+        : (
+          <WorkDialogSpaceGroups
+            groups={spaceGroups}
+            userId={userId}
+            memberSpaces={memberSpaces}
+            records={records}
+            homeScope={homeScope}
+            onSelectHomeScope={onSelectHomeScope}
+          >
+            {renderSpace}
+          </WorkDialogSpaceGroups>
+        )
+    )}
+    {(homeScope.kind === "all" ? spaceGroups.every(group => group.rows.length === 0) : total === 0) ? <p role={partialFailure ? "alert" : undefined}>{emptyMessage}</p> : homeScope.kind === "project" ? renderHierarchy(hierarchyView) : null}
     {sharedEnabled && records && memberSpaces.some(member => { const id = normalizeSpaceId(member.spaceId); if (!id) return false; return !records.get(id)?.contents; }) && <p role="status">{t("workspace_directory_unavailable", "空间目录暂不可用，保留已加载内容")}</p>}
     {ownershipFailedKeys.size > 0 && <p role="status" data-hook="work-dialog-ownership-unverified">
       {`有 ${ownershipFailedKeys.size} 条内容的归属未能核实（暂时按不可删除处理，内容不受影响）。`}

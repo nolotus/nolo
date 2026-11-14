@@ -85,15 +85,6 @@
           animation: slideUp 0.3s cubic-bezier(0.23, 1, 0.32, 1);
         }
 
-        /* Compact automatic Quick Chat above “空间的数据” (Space Home only). */
-        .space-content__quick-chat {
-          display: flex;
-          flex-direction: column;
-          width: 100%;
-          /* Tighten follow-on gap so data section reads as the next block. */
-          margin-bottom: var(--space-3);
-        }
-
         .space-content__data-section {
           display: flex;
           flex-direction: column;

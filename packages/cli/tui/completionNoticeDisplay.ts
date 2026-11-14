@@ -21,11 +21,16 @@
 // 通知文案猜状态。
 
 import {
+  buildNoticeDisplay,
   describeContextualNotice,
   formatContextualNoticeMeta,
   formatContextualNoticeSummary,
+  formatContextualOutcomeLabel,
   formatContextualTaskLine,
+  formatDurationMs,
+  taskStatusOutcome,
   type ContextualNoticeDisplay,
+  type ContextualTaskDisplay,
 } from "../../chat/messages/contextualFragment";
 import {
   formatRunAge,
@@ -35,6 +40,7 @@ import {
 
 /** CLI 通知里的主体名词（run 终态与进程任务终态统一叫「后台任务」）。 */
 const CLI_NOTICE_SUBJECT = "后台任务";
+const CLI_NOTICE_SUBJECT_SPEC = { label: CLI_NOTICE_SUBJECT, countWord: "个" };
 
 /** 展示用的单条后台任务（只含展示字段）。 */
 export type CliNoticeTask = {
@@ -42,8 +48,10 @@ export type CliNoticeTask = {
   title: string;
   /** 终态状态词（done / failed / killed / exited / stopped / …）。 */
   status: string;
-  /** 耗时（次级信息，可空）。 */
-  duration?: string;
+  /** 耗时（次级信息，可空；支持格式化字符串或毫秒数）。 */
+  duration?: string | number;
+  /** 退出码（次级信息，可空）。 */
+  exitCode?: number;
 };
 
 /** 展示标题需要的 run 身份字段（只读）。 */
@@ -71,40 +79,56 @@ export type CliNoticeRunRecord = {
   finishedAt?: string | number;
 };
 
-/** XML 属性转义（标题 / 状态词理论上可能带引号或尖括号）。 */
-function escapeXmlAttribute(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/**
- * 展示用唤醒片段（只给 UI 解析，不进模型上下文）。
- *
- * 形状与送模型的 &lt;background_run_completion&gt; 一致——共享展示模型靠它
- * 解析状态与耗时，展示层因此不必自己再实现一遍状态语义。片段里的 agent
- * 属性只是解析占位，真正的标题由调用方给（见 renderCliNotice）。
- */
-export function buildWakeNoticeFragment(tasks: CliNoticeTask[]): string {
-  const lines = [`<background_run_completion count="${tasks.length}">`];
-  for (const task of tasks) {
-    const attrs = [
-      `agent="${escapeXmlAttribute(task.title)}"`,
-      `status="${escapeXmlAttribute(task.status)}"`,
-    ];
-    if (task.duration) {
-      attrs.push(`duration="${escapeXmlAttribute(task.duration)}"`);
-    }
-    lines.push(`<run ${attrs.join(" ")} />`);
+/** 把 ContextualNoticeDisplay 渲染成 CLI 纯文本单行/多行（复用共享展示模型）。 */
+function renderContextualNoticeDisplay(display: ContextualNoticeDisplay): string {
+  if (display.tasks.length === 0) return display.headline ?? display.subject;
+  if (display.tasks.length === 1) {
+    return formatContextualNoticeSummary(display);
   }
-  lines.push(`</background_run_completion>`);
-  return lines.join("\n");
+  const meta = formatContextualNoticeMeta(display);
+  const headline = display.headline ?? display.subject;
+  return [
+    `${headline}${meta ? ` · ${meta}` : ""}`,
+    ...display.tasks.map((task) => formatContextualTaskLine(task)),
+  ].join("\n");
 }
 
 /**
- * 把展示片段渲染成 CLI 通知文本。
+ * 直接吃结构化任务的渲染入口（不经过 XML 编解码 / describeContextualNotice）。
+ *
+ * 单条：一行说清主体、标题与结果；多条：一行组标题 + 每行一个任务。
+ * 语义与共享展示模型保持逐字节一致。
+ */
+export function renderNoticeElements({
+  tasks,
+}: {
+  tasks: CliNoticeTask[];
+}): string {
+  if (tasks.length === 0) return "";
+  const taskDisplays: ContextualTaskDisplay[] = tasks.map((task) => {
+    const outcome = taskStatusOutcome(task.status, task.exitCode);
+    const duration =
+      typeof task.duration === "number"
+        ? formatDurationMs(task.duration)
+        : task.duration?.trim() || undefined;
+    return {
+      title: task.title || CLI_NOTICE_SUBJECT_SPEC.label,
+      outcome,
+      outcomeLabel: formatContextualOutcomeLabel(outcome),
+      ...(duration ? { duration } : {}),
+      ...(task.exitCode !== undefined ? { exitCode: task.exitCode } : {}),
+    };
+  });
+  const display = buildNoticeDisplay(
+    "background_task_completion",
+    CLI_NOTICE_SUBJECT_SPEC,
+    taskDisplays,
+  );
+  return renderContextualNoticeDisplay(display);
+}
+
+/**
+ * 把展示片段渲染成 CLI 通知文本（历史消息文本反解路径，dialogPicker.ts 使用）。
  *
  * 单条：一行说清主体、标题与结果；多条：一行组标题 + 每行一个任务。
  * 耗时 / 退出码是次要信息；成功 / 失败 / 已取消的语义与文案来自共享展示模型。
@@ -115,38 +139,25 @@ export function buildWakeNoticeFragment(tasks: CliNoticeTask[]): string {
 export function renderCliNotice(fragment: string, titles: string[]): string {
   const display = describeContextualNotice(fragment);
   if (!display) return "";
+  if (display.tasks.length === 0) return display.headline ?? display.subject;
   const tasks = display.tasks.map((task, index) => ({
     ...task,
     // 调用方给的标题优先；给不出时用共享模型解析出的标题（主体名兜底），
     // 内部 taskId 不冒成标题。
     title: titles[index] || task.title,
   }));
-  if (tasks.length === 0) return display.headline ?? display.subject;
-  const cliDisplay: ContextualNoticeDisplay = {
-    ...display,
-    subject: CLI_NOTICE_SUBJECT,
-    // 组标题复用共享展示模型产出的 headline（不另存一份措辞真值）。
-    headline: display.headline,
+  const cliDisplay = buildNoticeDisplay(
+    display.kind,
+    CLI_NOTICE_SUBJECT_SPEC,
     tasks,
-  };
-  if (tasks.length === 1) {
-    return formatContextualNoticeSummary(cliDisplay);
-  }
-  const meta = formatContextualNoticeMeta(cliDisplay);
-  const headline = cliDisplay.headline ?? CLI_NOTICE_SUBJECT;
-  return [
-    `${headline}${meta ? ` · ${meta}` : ""}`,
-    ...tasks.map((task) => formatContextualTaskLine(task)),
-  ].join("\n");
+    display.fullText,
+  );
+  return renderContextualNoticeDisplay(cliDisplay);
 }
 
-/** 便捷入口：后台任务终态 → CLI 通知文本。 */
+/** 便捷入口：后台任务终态 → CLI 通知文本（直接走结构化渲染）。 */
 export function buildCliNoticeText(tasks: CliNoticeTask[]): string {
-  if (tasks.length === 0) return "";
-  return renderCliNotice(
-    buildWakeNoticeFragment(tasks),
-    tasks.map((task) => task.title),
-  );
+  return renderNoticeElements({ tasks });
 }
 
 /**

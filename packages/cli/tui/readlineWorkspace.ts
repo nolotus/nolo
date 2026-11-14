@@ -2065,6 +2065,28 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         deployWakeLifecycle.dispose = () => deployStream.dispose();
       }
     }
+    // 「后台结果已排队但没有自动续跑」的可见提示（仅停止态）。
+    // 停止之后的下一回合，界面上只剩 composer 上方一行 ⤷ 预览，用户不知道
+    // 队列里压着的是后台结果、也不知道怎么继续（2026-11-14 实测：停止后
+    // 3 分钟没有续跑，用户只看到「停在那」）。同一后台完成计数只提示一次（用 key 去重）；
+    // 自动续跑完成（drained: true）时清空 key。
+    let resumeSkipNoticeKey: string | null = null;
+    const reportInternalResumeSkip = (result: {
+      drained: boolean;
+      gate: string | null;
+    }): void => {
+      if (result.drained) {
+        resumeSkipNoticeKey = null;
+        return;
+      }
+      if (result.gate !== "resume-stopped") return;
+      const count = chatQueueBinding?.countQueuedBackgroundResults() ?? 0;
+      if (count === 0) return;
+      const key = `resume-stopped:${count}`;
+      if (resumeSkipNoticeKey === key) return;
+      resumeSkipNoticeKey = key;
+      emitCommandOutput(t("wakeQueuedWhileStopped", String(count)));
+    };
     runWakeHandler = createRunWakeHandler({
       canConsume: () => canConsumeChildCompletion(state, effectiveEnv),
       isDone: () => done,
@@ -2084,8 +2106,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         if (!chatQueueBinding || busy || fixedInput.isPaused()) return;
         const binding = chatQueueBinding;
         busy = true;
-        try { await binding.resumeInternalCompletions(state.dialogId ?? null); }
-        finally { busy = false; }
+        try {
+          reportInternalResumeSkip(
+            await binding.resumeInternalCompletions(state.dialogId ?? null)
+          );
+        } finally { busy = false; }
       },
       onError: (err) => emitCommandOutput(`${t("turnFailed")}${err instanceof Error && err.message ? `\n${err.message}` : ""}`),
     });

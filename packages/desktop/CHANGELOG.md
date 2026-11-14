@@ -1,4 +1,21 @@
 
+## 0.234.0 (2026-11-14)
+
+### Features
+
+* **agent-runtime:** 系统提示词补「表达通俗」准则 ([c0c855e](https://github.com/nolotus/bun-nolo/commit/c0c855ec30a6390f6a9f300899c2b792b0dc3cca))
+* **app:** 详情页与完整编辑器合并为单一路由组件 ([afff302](https://github.com/nolotus/bun-nolo/commit/afff302d47f39f68ff6675fcc9117fd368ee35b9))
+* **ci:** 给 packages/cli 加类型检查门禁（多重集基线差分） ([0f9b4e4](https://github.com/nolotus/bun-nolo/commit/0f9b4e49704e9a45ce63199023247cb30025111e))
+* **sidebar:** 空间分组侧边栏收敛新建分类入口、新增空间外作用域与行级键盘 ([6ac84a2](https://github.com/nolotus/bun-nolo/commit/6ac84a23d0100dd29e8053add624105b3cd477c7))
+* **space:** 空间首页显示四格空间导航 ([9934e7c](https://github.com/nolotus/bun-nolo/commit/9934e7c96b52210e1909833e539187f3ab7f56fd))
+
+### Bug Fixes
+
+* **app:** legacy 载荷缺 ownerUserId 时仍重建同步记录 ([269d831](https://github.com/nolotus/bun-nolo/commit/269d831a036964338e988c3a295e5c23b8510236))
+* **cli:** 补 dialog notify 的命令描述，修 i18n 覆盖门 ([6637399](https://github.com/nolotus/bun-nolo/commit/6637399e109ab987db8ae2fa5ca30137f3a43041))
+* **space:** 全部内容页移除快速对话输入框 ([1e3684d](https://github.com/nolotus/bun-nolo/commit/1e3684d8dd32a65dead8c9c54c223b5da610c0e9))
+
+
 ## 0.233.0 (2026-11-14)
 
 ### Features

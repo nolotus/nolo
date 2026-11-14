@@ -40,7 +40,8 @@ export type ChatQueueInEvent =
   | { type: "clear" }
   | { type: "pause-drain" }
   | { type: "resume-drain" }
-  | { type: "drain-error"; message: string };
+  | { type: "drain-error"; message: string }
+  | { type: "clear-drain-error" };
 
 export type ChatQueueOutEvent =
   | { type: "drain-batch-ready"; batch: ChatQueueBatch }
@@ -214,6 +215,13 @@ export function reduceChatQueue(
       return {
         ...state,
         lastDrainError: event.message || null,
+      };
+
+    case "clear-drain-error":
+      if (state.lastDrainError === null) return state;
+      return {
+        ...state,
+        lastDrainError: null,
       };
 
     default:

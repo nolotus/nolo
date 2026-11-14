@@ -58,7 +58,6 @@ import {
 import SpaceContentHeader from "./SpaceContentHeader";
 import SpaceWorkspaceFolder from "./SpaceWorkspaceFolder";
 import SpaceContentOverlays from "./SpaceContentOverlays";
-import QuickChat from "app/pages/QuickChat";
 import {
   areOnlySpaceAttachmentTypes,
   areSidebarVisibleTypesEqual,
@@ -117,10 +116,6 @@ const SpaceContent: React.FC = () => {
   const location = useLocation();
   const isFilesRoute = useMemo(() => location.pathname.endsWith("/files"), [location.pathname]);
   const isAiRoute = useMemo(() => location.pathname.endsWith("/ai"), [location.pathname]);
-  const isHomeRoute = useMemo(
-    () => !isFilesRoute && !isAiRoute,
-    [isFilesRoute, isAiRoute]
-  );
   const routeTypes = useMemo(
     () =>
       parseSidebarVisibleTypesSearchParam(
@@ -843,15 +838,6 @@ const SpaceContent: React.FC = () => {
               </div>
             </div>
           )}
-          {isHomeRoute && spaceId ? (
-            <section
-              className="space-content__quick-chat"
-              data-testid="space-home-quick-chat"
-              aria-label={t("quickChat.spaceHomeLabel", "快速对话")}
-            >
-              <QuickChat surface="space-home-compact" spaceId={spaceId} />
-            </section>
-          ) : null}
           {!isAiRoute && (
             <section className="space-content__data-section">
               <div className="space-content__data-section-header">

@@ -115,6 +115,15 @@ interface SidebarVirtualizedListProps<T extends SidebarItemShape> {
    * DOM 焦点在 ListBoxItem,事件只向上冒泡,挂在行上就是死代码。
    */
   onItemRename?: (item: T) => void;
+  /**
+   * Delete / Backspace 键删除入口:焦点在 ListBoxItem 上时按 Delete/Backspace 触发。
+   * 与 onItemRename 同样挂在 ListBoxItem 层的 onKeyDown。
+   */
+  onItemDelete?: (item: T) => void;
+  /**
+   * 判定 item 是否可被删除。返回 false 时 Delete/Backspace 不触发删除且不阻止默认行为。
+   */
+  canDeleteItem?: (item: T) => boolean;
 }
 
 export function SidebarVirtualizedList<T extends SidebarItemShape>({
@@ -133,6 +142,8 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
   scrollToIndex,
   onItemContextMenu,
   onItemRename,
+  onItemDelete,
+  canDeleteItem,
 }: SidebarVirtualizedListProps<T>) {
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const lastScrolledIndexRef = React.useRef(-1);
@@ -199,10 +210,29 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
               // F2 走同一条 editSignal 通路。其他按键原样放过 —— ListBox 的方向键
               // 导航和 Enter 激活必须照常工作,不得 preventDefault/stopPropagation。
               if (isItemDisabled?.(item) || isItemAction?.(item)) return;
-              if (event.key !== "F2") return;
-              event.preventDefault();
-              event.stopPropagation();
-              onItemRename?.(item);
+              if (event.key === "F2") {
+                event.preventDefault();
+                event.stopPropagation();
+                onItemRename?.(item);
+                return;
+              }
+              if (event.key === "Delete" || event.key === "Backspace") {
+                // 行内正在编辑（例如 input / textarea / contenteditable）时，
+                // Delete / Backspace 属于文本编辑，不得拦截。
+                const target = event.target as HTMLElement | null;
+                const isEditing = Boolean(
+                  target?.isContentEditable ||
+                    target?.closest?.(
+                      'input, textarea, [contenteditable="true"], [contenteditable=""]'
+                    )
+                );
+                if (isEditing) return;
+                if (onItemDelete && (canDeleteItem ? canDeleteItem(item) : true)) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onItemDelete(item);
+                }
+              }
             }}
           >
             {children(item)}

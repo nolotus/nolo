@@ -12,6 +12,7 @@
     "./apiRouteAdapter": "./apiRouteAdapter.ts",
     "./lazyLoader": "./lazyLoader.ts",
     "./desktopRequestTrust": "./desktopRequestTrust.ts",
+    "./authTokenValidation": "./authTokenValidation.ts",
     "./requestRemoteAddress": "./requestRemoteAddress.ts",
     "./sharedCors": "./sharedCors.ts"
   }

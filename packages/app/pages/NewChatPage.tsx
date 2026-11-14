@@ -4,6 +4,7 @@ import { useSearchParams } from "app/routing";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import QuickChat from "./QuickChat";
 import SpaceContextBadge from "chat/dialog/SpaceContextBadge";
+import SpaceNavigation from "create/space/components/SpaceNavigation";
 import "./NewChatPage.css";
 
 const NewChatPage: React.FC = () => {
@@ -23,7 +24,15 @@ const NewChatPage: React.FC = () => {
         className="new-chat-page__content"
         aria-label={t("chat:newchat", "新对话")}
       >
-        <SpaceContextBadge spaceId={spaceId} />
+        {/* 空间首页 = 该空间的对话页（`/space/:id` 重定向到 `/chat?spaceId=`），
+            所以「首页 / 全部内容 / 成员 / 设置」这排导航要跟着空间一起出现；
+            没有 spaceId 的普通新对话不渲染它，也绝不借用全局当前空间。 */}
+        {spaceId && (
+          <div className="new-chat-page__space-nav">
+            <SpaceContextBadge spaceId={spaceId} />
+            <SpaceNavigation spaceId={spaceId} />
+          </div>
+        )}
         <QuickChat
           surface="home-primary"
           spaceId={spaceId}

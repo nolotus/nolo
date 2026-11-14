@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from "react";
-import { useParams, useSearchParams } from "app/routing";
+import { useParams } from "app/routing";
 import PageLoading from "render/web/ui/PageLoading";
 import NoMatch from "../NoMatch";
 import PageObjectHeader from "./PageObjectHeader";
@@ -15,13 +15,10 @@ const AgentPage = lazy(() => import("ai/agent/web/AgentPage"));
 const TablePage = lazy(() => import("render/table/TablePage"));
 const FilePage = lazy(() => import("./FilePage"));
 const AppDetailPage = lazy(() => import("app/pages/AppDetailPage"));
-const AppEditorPage = lazy(() => import("app/pages/AppEditorPage"));
 const TaskPage = lazy(() => import("chat/task/TaskPage"));
 
 const PageLoader: React.FC = () => {
   const { pageKey, spaceId } = useParams<"pageKey" | "spaceId">();
-  const [params] = useSearchParams();
-  const isEditMode = params.get("edit") === "true";
 
   if (!pageKey) return <NoMatch message="请选择一个页面或对话。" />;
 
@@ -47,7 +44,7 @@ const PageLoader: React.FC = () => {
   if (pageKey.startsWith("page")) {
     Component = <RenderPage pageKey={pageKey} />;
   } else if (pageKey.startsWith("app-")) {
-    Component = isEditMode ? <AppEditorPage /> : <AppDetailPage />;
+    Component = <AppDetailPage />;
   } else if (pageKey.startsWith("agent")) {
     Component = <AgentPage agentKey={pageKey} />;
   } else if (pageKey.startsWith("meta-")) {

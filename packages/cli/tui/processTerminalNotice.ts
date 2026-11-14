@@ -15,7 +15,7 @@ export type { ProcessTerminalNotice };
 import type { ProcessTaskResultCapsule } from "../../agent-runtime/processTaskResult";
 import { formatToolOverflowMarker } from "../../agent-runtime/toolSpillStore";
 import type { BackgroundTaskCompletedTurnEvent } from "core/chat/internalTurnEvent";
-import { renderCliNotice } from "./completionNoticeDisplay";
+import { renderNoticeElements } from "./completionNoticeDisplay";
 
 /**
  * 送进模型的通知全文（一条任务一段）。与 run wake 的 ContextualFragment
@@ -110,33 +110,17 @@ export function formatProcessTerminalWakeLine(
 export function formatProcessTerminalNoticeLine(
   notice: ProcessTerminalNotice,
 ): string {
-  return renderCliNotice(
-    buildProcessTerminalDisplayFragment([notice]),
-    [processNoticeDisplayTitle(notice)],
-  );
-}
-
-/**
- * 展示用片段（只给 UI 解析，不进模型上下文）。
- *
- * 形状与送模型的 &lt;background_task_completion&gt; 一致：共享展示模型靠它
- * 解析状态、退出码与耗时。任务行复用 formatProcessTerminalWakeLine（模型
- * 侧同一份线格式），这里只补一行耗时元信息。
- */
-function buildProcessTerminalDisplayFragment(
-  notices: ProcessTerminalNotice[],
-): string {
-  const lines = [`<background_task_completion count="${notices.length}">`];
-  for (const notice of notices) {
-    lines.push(formatProcessTerminalWakeLine(notice));
-    const durationMs = notice.resultCapsule?.durationMs;
-    if (durationMs !== undefined) {
-      // 只带耗时，不带 capsule 正文。
-      lines.push(`result capsule (duration=${durationMs}ms, display-only):`);
-    }
-  }
-  lines.push(`</background_task_completion>`);
-  return lines.join("\n");
+  const durationMs = notice.resultCapsule?.durationMs;
+  return renderNoticeElements({
+    tasks: [
+      {
+        title: processNoticeDisplayTitle(notice),
+        status: notice.status,
+        ...(notice.exitCode !== undefined ? { exitCode: notice.exitCode } : {}),
+        ...(durationMs !== undefined ? { duration: durationMs } : {}),
+      },
+    ],
+  });
 }
 
 /** 展示标题：label 有信息量就用它，否则不给标题（不暴露 taskId）。 */

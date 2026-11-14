@@ -366,11 +366,28 @@ const ChatSidebar: React.FC = () => {
       window.removeEventListener("storage", refresh);
     };
   }, [homeScope]);
+
+  const isSpaceRoute = Boolean(space?.id || searchParams.get("spaceId") || location.pathname.startsWith("/space"));
+  useEffect(() => {
+    if (homeScope.kind !== "noSpace") return;
+    if (railView !== "home" || isSpaceRoute) {
+      setHomeScope({ kind: "all" });
+    }
+  }, [homeScope.kind, railView, isSpaceRoute]);
+
   const homeScopeIndicator = homeScope.kind === "project" ? (
     <button type="button" className="navigation-v2-home-scope" onClick={() => selectProjectScope(null)}
       title={t("allView.showAllProjects", "清除项目筛选，显示全部工作")}
       aria-label={t("allView.showAllProjects", "清除项目筛选，显示全部工作")}>
       <span>{homeScope.projectName || t("allView.projectFilterActive", "当前项目")}</span>
+      <span aria-hidden="true">×</span>
+    </button>
+  ) : homeScope.kind === "noSpace" ? (
+    <button type="button" className="navigation-v2-home-scope" onClick={() => setHomeScope({ kind: "all" })}
+      title={t("workspace_show_all", "清除空间外筛选，显示全部工作")}
+      aria-label={t("workspace_show_all", "清除空间外筛选，显示全部工作")}
+      data-hook="sidebar-no-space-clear">
+      <span>{t("workspace_unassociated", "空间外")}</span>
       <span aria-hidden="true">×</span>
     </button>
   ) : null;
@@ -448,7 +465,7 @@ const ChatSidebar: React.FC = () => {
         <div className={contextContentClassName}>
           <div style={{ display: homeView === "work" ? "contents" : "none" }}>
             {homeScope.kind === "all" && remoteTasksGlobalEntry}
-            <WorkDialogHistory homeScope={homeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind === "all"} includeNonDialogs={typeFilter !== "dialog"} typeFilter={typeFilter} unreadAgentKeys={unreadAgentKeys} />
+            <WorkDialogHistory homeScope={homeScope} onSelectHomeScope={setHomeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind !== "project"} includeNonDialogs={typeFilter !== "dialog"} typeFilter={typeFilter} unreadAgentKeys={unreadAgentKeys} />
           </div>
           <div style={{ display: homeView === "projects" ? "contents" : "none" }}>
             <DesktopFolderProjects createRequest={createProjectRequest} items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} spaceId={space?.id || null} onOpenProject={(project) => navigate("/?project=" + encodeURIComponent(project.id))} />
