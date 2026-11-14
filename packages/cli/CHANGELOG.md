@@ -1,4 +1,23 @@
 
+## 0.216.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **agent-runtime:** 系统提示词补「表达通俗」准则 ([c0c855e](https://github.com/nolotus/bun-nolo/commit/c0c855ec30a6390f6a9f300899c2b792b0dc3cca))
+* **app:** 详情页与编辑器重做，分享收敛为单一实现 ([0b437cd](https://github.com/nolotus/bun-nolo/commit/0b437cdb789b5b2a7e4f9d1cf71e2ec9176b1b0f))
+* **cli:** /update 补齐 i18n，支持 status/force 并在已最新时跳过安装 ([5d7c745](https://github.com/nolotus/bun-nolo/commit/5d7c7452f4143b8df28fd436e19a7ad1d5adccf0))
+* **explore:** 增加「应用」分类与公开应用落地页 ([73f923c](https://github.com/nolotus/bun-nolo/commit/73f923ccc499f49178040ead0f8d7822de2f66fc))
+* **sidebar:** 空间分组侧边栏收敛新建分类入口、新增空间外作用域与行级键盘 ([6ac84a2](https://github.com/nolotus/bun-nolo/commit/6ac84a23d0100dd29e8053add624105b3cd477c7))
+
+### Bug Fixes
+
+* **app:** legacy 载荷缺 ownerUserId 时仍重建同步记录 ([269d831](https://github.com/nolotus/bun-nolo/commit/269d831a036964338e988c3a295e5c23b8510236))
+* **cli:** auto-resolve agentName and eliminate subagent fallback for legacy records ([0b9f538](https://github.com/nolotus/bun-nolo/commit/0b9f5382c2a0ae2b9ffc5b0246818f18bbf20373))
+* **cli:** 补 dialog notify 的命令描述，修 i18n 覆盖门 ([6637399](https://github.com/nolotus/bun-nolo/commit/6637399e109ab987db8ae2fa5ca30137f3a43041))
+* **server:** 应用分享归属校验、可见性门禁与失败页收敛 ([0eed633](https://github.com/nolotus/bun-nolo/commit/0eed633e69796fea18678b7f2b586fbcdb1e5097))
+* **sidebar:** 类型筛选在内容页跳转后回落为全部 ([39e5ddf](https://github.com/nolotus/bun-nolo/commit/39e5ddfda5e84eba73da51bca9070e531a6bc808))
+
+
 ## 0.215.1-alpha.2 (2026-11-14)
 
 ### Bug Fixes
