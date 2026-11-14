@@ -13,6 +13,7 @@ import {
   LuPackage,
   LuTrash2,
   LuEllipsisVertical,
+  LuShare2,
 } from "react-icons/lu";
 import { useTranslation } from "react-i18next";
 import { useClickOutside } from "app/hooks/useClickOutside";
@@ -26,6 +27,11 @@ interface TopbarAppSlotProps {
   appPrimaryUrl: string;
   onShowVersionPanel: () => void;
   onDelete?: () => Promise<boolean>;
+  /**
+   * 分享入口：**只有 app 的 owner**（服务端下发 `app.canShare`）才渲染。
+   * 非 owner 不显示，避免「按钮在、点了没反应」的假按钮（review 假按钮）。
+   */
+  onShare?: () => void;
 }
 
 function formatDate(iso?: string): string {
@@ -43,6 +49,7 @@ const TopbarAppSlot: React.FC<TopbarAppSlotProps> = ({
   appPrimaryUrl,
   onShowVersionPanel,
   onDelete,
+  onShare,
 }) => {
   const { t } = useTranslation();
   const [showInfo, setShowInfo] = useState(false);
@@ -313,6 +320,17 @@ const TopbarAppSlot: React.FC<TopbarAppSlotProps> = ({
                     <LuExternalLink size={14} aria-hidden="true" />
                     {t("appEditor.openApp", "打开应用")}
                   </a>
+                )}
+                {onShare && app?.canShare && !!appPrimaryUrl && (
+                  <button
+                    type="button"
+                    className="topbar__app-menu-item"
+                    onClick={() => { setMenuOpen(false); onShare(); }}
+                    role="menuitem"
+                  >
+                    <LuShare2 size={14} aria-hidden="true" />
+                    {t("share", "分享")}
+                  </button>
                 )}
                 {onDelete && (
                   <button

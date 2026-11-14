@@ -42,4 +42,19 @@ export const updateStrings = {
   updateUsage: {"en": "Usage:\n  nolo update            Install the latest CLI\n  nolo update status     Show version, channel, and background-update state", "zh": "用法：\n  nolo update            安装最新 CLI\n  nolo update status     显示版本、channel 与后台更新状态"},
   updateNotifyFailed: {"en": "Update failed - see log: {0}", "zh": "更新失败，请查看日志：{0}"},
   updateVersionChanged: {"en": "▸ Nolo version changed: {0} → {1}", "zh": "▸ Nolo 版本变化：{0} → {1}"},
+  // ── /update 在 TUI 里的可见文案 ──────────────────────────────────────────
+  // 检查先于安装：确知已最新时直接告知并跳过安装，检查失败（离线/超时）如实
+  // 说明后照常安装——不确定的信息不得否决用户的正常操作。
+  updateChecking: { en: "▸ Checking for a newer version…", zh: "▸ 正在检查是否有新版本…" },
+  updateAlreadyLatest: { en: "✓ nolo {0} is already the latest version. Reinstall anyway with: /update force", zh: "✓ nolo {0} 已是最新版本。如需强制重装：/update force" },
+  updateCheckSkipped: { en: "▸ Could not check for a newer version (offline or timeout) — installing anyway.", zh: "▸ 无法检查最新版本（离线或超时），继续安装。" },
+  updateTuiScheduled: { en: "✓ Update is ready. Nolo now exits so the installer can replace this build.", zh: "✓ 更新已就绪。Nolo 现在退出，以便安装程序替换当前版本。" },
+  updateTuiFinished: { en: "✓ Update finished. Restart nolo to use the new version.", zh: "✓ 更新完成。重启 nolo 后生效。" },
+  updateTuiFailed: { en: "✗ Update failed. See the error above, then run /update again or `nolo update`.", zh: "✗ 更新失败。请查看上面的错误，然后重试 /update 或使用 `nolo update`。" },
+  updateTuiUsage: { en: "Usage:\n  /update          Check for a newer version and install it\n  /update status   Show version, channel, and whether a newer version exists\n  /update force    Reinstall even when already up to date", zh: "用法：\n  /update          检查并安装最新版本\n  /update status   显示版本、渠道，以及是否有新版本\n  /update force    即使已是最新也强制重装" },
+  updateTuiUnknownArg: { en: "✗ Unknown argument: {0}", zh: "✗ 未知参数：{0}" },
+  updateTuiStatus: { en: "nolo {0}\nchannel  {1}", zh: "nolo {0}\n渠道     {1}" },
+  updateUpToDate: { en: "✓ Already up to date", zh: "✓ 已是最新版本" },
+  updateCheckUnavailable: { en: "? Could not check for a newer version (offline or timeout)", zh: "? 无法检查最新版本（离线或超时）" },
+  profileCurrent: { en: "Profile: {0}", zh: "当前配置环境 (Profile)：{0}" },
 } as const;

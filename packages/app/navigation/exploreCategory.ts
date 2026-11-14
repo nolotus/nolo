@@ -3,6 +3,7 @@ export const EXPLORE_CATEGORIES = [
   "agent",
   "dialog",
   "article",
+  "app",
   "user",
   "plugin",
   "skill",

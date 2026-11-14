@@ -10,6 +10,7 @@ import { attachShellApprovalHost, type ShellApprovalHost } from "./client/origin
 // with ordinary shell tools.
 
 import { redactLogLines, REDACTED_CREDENTIAL } from "../core/redactLogLines";
+import { shortAgentKey } from "../ai/tools/agent/agentRunName";
 import { normalizeRunTitle } from "../ai/tools/agent/runTitle";
 import { hostname as nodeHostname, homedir as nodeHomedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -2172,6 +2173,8 @@ export async function spawnLocalBackgroundRun(
   logPath: string;
   queuePath: string;
   batchId: string;
+  /** 派发时解析并落盘的展示名（显式优先 → 配置回读 → agentKey 短标识）。 */
+  agentName: string;
   /** 派发时打到 output 上的那行本机内存文案（供上层展示/记录）；读不到则无。 */
   hostMemoryNotice?: string;
 }> {
@@ -2257,7 +2260,7 @@ export async function spawnLocalBackgroundRun(
     ...(input.dispatchSpeedProvenance ? { dispatchSpeedProvenance: input.dispatchSpeedProvenance } : {}),
     runId,
     agentKey: input.agentKey,
-    ...(typeof input.agentName === "string" && input.agentName.trim() ? { agentName: input.agentName.trim() } : {}),
+    agentName: input.agentName?.trim() || shortAgentKey(input.agentKey),
     ...(title ? { title } : {}),
     cwd: canonicalCwd ?? input.cwd,
     execution,
@@ -2469,6 +2472,7 @@ export async function spawnLocalBackgroundRun(
     logPath,
     queuePath,
     batchId,
+    agentName: record.agentName ?? shortAgentKey(input.agentKey),
     ...(input.selectionCheck ? { selectionCheck: input.selectionCheck } : {}),
     ...(hostMemoryNotice ? { hostMemoryNotice } : {}),
   };

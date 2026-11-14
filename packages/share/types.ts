@@ -74,6 +74,8 @@ export interface ShareSummary {
   lastReplicationError?: string;
   /** App URL — populated only for DataType.APP shares */
   url?: string;
+  /** 底层 appId（仅 APP 分享）：社区列表要靠它核对 owner 与 public（review C1） */
+  appId?: string;
   /** 被导入次数 */
   importCount?: number;
   /** 更新时间（毫秒时间戳） */

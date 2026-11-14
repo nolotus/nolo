@@ -2,33 +2,38 @@ import "./AppEditorPage.css";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "app/routing";
-import { toast } from "app/utils/toast"
+import { toast } from "app/utils/toast";
 import {
+  LuArrowLeft,
   LuBot,
-  LuFileCode2,
+  LuEllipsisVertical,
   LuExternalLink,
+  LuFileCode2,
   LuLayoutGrid,
+  LuMousePointerClick,
   LuRefreshCw,
   LuSave,
   LuTriangleAlert,
-  LuMousePointerClick,
 } from "react-icons/lu";
 import { useAppDetail } from "app/hooks/useAppDetail";
 import {
-  APP_EDIT_MODE_SEARCH_PARAM,
-  buildAppChatEditorPath,
-  buildAppCodeEditorPath,
+  buildAppAssistantSidebarId,
   buildAppDetailPath,
   buildAppEditorPath,
   readAppServerOrigin,
 } from "app/constants/appEditor";
+import { openObjectAssistantSidebar } from "chat/dialog/objectAssistantSidebar";
+import { useRightSidebarOptional } from "render/layout/RightSidebarContext";
+import { ConfirmModal } from "render/web/ui/modal/ConfirmModal";
+import {
+  DEFAULT_APP_EDITOR_VIEW,
+  resolveAppEditorEntry,
+  type AppEditorView,
+} from "./appEditorMode";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useToken } from "identity";
 import { selectRemoteServer } from "app/settings/settingSlice";
-import AppEditorWorkbench from "./AppEditorWorkbench";
-import ObjectAssistantPanel from "chat/dialog/ObjectAssistantPanel";
-
 import {
   setInspecting,
   setSelectedNode,
@@ -42,8 +47,6 @@ import type { ContentIcon as ContentIconValue } from "render/contentIcon/types";
 import PageObjectActions from "render/page/PageObjectActions";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-type WorkspaceMode = "chat" | "code";
 
 interface DeployStartResult {
   success: boolean;
@@ -66,6 +69,17 @@ interface DeployStatusResult {
   };
 }
 
+type PendingConfirm = "leave" | "discardCode";
+
+/**
+ * app 编辑页。目标群体是爱好者：一屏只回答「这个 app 现在长什么样、我要怎么改它」。
+ *
+ * - 主块永远是**预览**，吃满页头以下的剩余高度。
+ * - 改 app 的主要方式是**和助手对话**（右侧滑出面板，与 TopBar 的对象助手同一个）。
+ * - **代码编辑是急救通道**：入口藏在「更多」菜单里（「修复代码（高级）」），
+ *   不占首屏、不做并列视图、不记忆上次进过代码视图——进来永远是预览。
+ * - 每屏最多一个主按钮；其余是图标按钮或菜单项，文案用用户语言。
+ */
 const AppEditorPage: React.FC = () => {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
@@ -73,6 +87,7 @@ const AppEditorPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const currentToken = useToken();
   const currentServer = useAppSelector(selectRemoteServer);
+  const rightSidebar = useRightSidebarOptional();
   const {
     pageKey,
     appKey: legacyAppKey,
@@ -81,13 +96,11 @@ const AppEditorPage: React.FC = () => {
 
   const routeAppKey = pageKey?.startsWith("app-") ? pageKey : legacyAppKey;
   const routeServerOrigin = readAppServerOrigin(searchParams);
-  const requestedMode = searchParams.get(APP_EDIT_MODE_SEARCH_PARAM);
-  const effectiveMode: WorkspaceMode =
-    requestedMode === "chat" || requestedMode === "code"
-      ? requestedMode
-      : searchParams.get("sidebar") === "files" || searchParams.get("tab") === "source"
-        ? "code"
-        : "chat";
+
+  // 视图只活在本页面里：进入编辑器恒为预览，不读 URL、不记忆上次的代码视图。
+  const [view, setView] = useState<AppEditorView>(DEFAULT_APP_EDITOR_VIEW);
+  const searchKey = searchParams.toString();
+  const needsUrlCleanup = useMemo(() => resolveAppEditorEntry(searchKey), [searchKey]);
 
   const { app, loading, error, refetch } = useAppDetail(routeAppKey, {
     prepareEdit: true,
@@ -110,8 +123,36 @@ const AppEditorPage: React.FC = () => {
 
   const isInspecting = useAppInspecting();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const gutterRef = useRef<HTMLPreElement>(null);
   const unmountInspectorRef = useRef<(() => void) | null>(null);
   const [canInspect, setCanInspect] = useState(true);
+
+  // 换 app —— 或者重新进入编辑器 —— 都回到预览（不做视图记忆）。
+  useEffect(() => {
+    setView(DEFAULT_APP_EDITOR_VIEW);
+    setInspecting(false);
+    if (unmountInspectorRef.current) {
+      unmountInspectorRef.current();
+      unmountInspectorRef.current = null;
+    }
+  }, [routeAppKey]);
+
+  // 历史链接里的视图参数一律清掉，让地址栏和屏幕说同一件事。
+  useEffect(() => {
+    if (!needsUrlCleanup || !routeAppKey) return;
+    navigate(buildAppEditorPath(routeAppKey, spaceId, appServerOrigin), { replace: true });
+  }, [appServerOrigin, needsUrlCleanup, navigate, routeAppKey, spaceId]);
+
+  // 别名路由（/space/:spaceId/:appKey）与 dbKey 修正。
+  useEffect(() => {
+    if (legacyAppKey && !pageKey) {
+      navigate(buildAppEditorPath(legacyAppKey, spaceId, appServerOrigin), { replace: true });
+      return;
+    }
+    if (!app?.appKey || !routeAppKey || app.appKey === routeAppKey) return;
+    navigate(buildAppEditorPath(app.appKey, spaceId, appServerOrigin), { replace: true });
+  }, [app?.appKey, appServerOrigin, legacyAppKey, navigate, pageKey, routeAppKey, spaceId]);
 
   // Inspector setup/teardown logic
   const handleInspectToggle = useCallback(() => {
@@ -159,28 +200,6 @@ const AppEditorPage: React.FC = () => {
     };
   }, []);
 
-  const buildEditorTarget = useCallback(
-    (appKey: string, mode: WorkspaceMode) => {
-      if (mode === "chat") {
-        return buildAppChatEditorPath(appKey, spaceId, appServerOrigin);
-      }
-      if (mode === "code") {
-        return buildAppCodeEditorPath(appKey, spaceId, appServerOrigin);
-      }
-      return buildAppEditorPath(appKey, spaceId, appServerOrigin);
-    },
-    [appServerOrigin, spaceId]
-  );
-
-  useEffect(() => {
-    if (legacyAppKey && !pageKey) {
-      navigate(buildEditorTarget(legacyAppKey, effectiveMode), { replace: true });
-      return;
-    }
-    if (!app?.appKey || !routeAppKey || app.appKey === routeAppKey) return;
-    navigate(buildEditorTarget(app.appKey, effectiveMode), { replace: true });
-  }, [app?.appKey, buildEditorTarget, effectiveMode, legacyAppKey, navigate, pageKey, routeAppKey]);
-
   const sourceFiles = useMemo(() => {
     if (Array.isArray(app?.files) && app.files.length > 0) {
       return app.files.map((file) => ({ ...file }));
@@ -206,6 +225,9 @@ const AppEditorPage: React.FC = () => {
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setDraftFiles(sourceFiles);
@@ -230,13 +252,28 @@ const AppEditorPage: React.FC = () => {
     );
   }, [draftFiles, sourceFiles]);
 
-  const handleSelectedFileChange = useCallback((nextCode: string) => {
-    setDraftFiles((current) =>
-      current.map((file) =>
-        file.name === selectedFile?.name ? { ...file, code: nextCode } : file
-      )
-    );
-  }, [selectedFile?.name]);
+  const handleSelectedFileChange = useCallback(
+    (nextCode: string) => {
+      setDraftFiles((current) =>
+        current.map((file) =>
+          file.name === selectedFile?.name ? { ...file, code: nextCode } : file
+        )
+      );
+    },
+    [selectedFile?.name]
+  );
+
+  /** 代码区左侧行号：与 textarea 的字体/行高/内边距一致，滚动时同步。 */
+  const lineNumbers = useMemo(() => {
+    const count = (selectedFile?.code ?? "").split("\n").length;
+    return Array.from({ length: count }, (_, index) => String(index + 1)).join("\n");
+  }, [selectedFile?.code]);
+
+  const handleEditorScroll = useCallback(() => {
+    if (gutterRef.current && editorRef.current) {
+      gutterRef.current.scrollTop = editorRef.current.scrollTop;
+    }
+  }, []);
 
   const handleResetDrafts = useCallback(() => {
     setDraftFiles(sourceFiles);
@@ -264,6 +301,43 @@ const AppEditorPage: React.FC = () => {
       toast.error(t("appEditor_updateIconFailed", "更新应用图标失败"));
     }
   }, [appServerOrigin, dispatch, refetch, routeAppKey, t]);
+
+  useClickOutsideMenu(isMenuOpen, menuRef, () => setIsMenuOpen(false));
+
+  const assistantSidebarId = routeAppKey ? buildAppAssistantSidebarId(routeAppKey) : "";
+  const isAssistantOpen =
+    !!rightSidebar?.isOpen && !!assistantSidebarId && rightSidebar?.currentId === assistantSidebarId;
+
+  const handleToggleAssistant = useCallback(() => {
+    if (!rightSidebar || !routeAppKey) return;
+    if (isAssistantOpen) {
+      rightSidebar.close();
+      return;
+    }
+    openObjectAssistantSidebar(rightSidebar.open, {
+      kind: "app",
+      contentKey: routeAppKey,
+      sidebarId: assistantSidebarId,
+    });
+  }, [assistantSidebarId, isAssistantOpen, rightSidebar, routeAppKey]);
+
+  const goBackToDetail = useCallback(() => {
+    if (!routeAppKey) return;
+    navigate(buildAppDetailPath(routeAppKey, spaceId, appServerOrigin));
+  }, [appServerOrigin, navigate, routeAppKey, spaceId]);
+
+  // dirty 时不静默丢改动：先确认一次再离开。
+  const handleLeaveEditor = useCallback(() => {
+    if (hasDraftChanges) {
+      setPendingConfirm("leave");
+      return;
+    }
+    goBackToDetail();
+  }, [goBackToDetail, hasDraftChanges]);
+
+  const handleDiscardCode = useCallback(() => {
+    setPendingConfirm("discardCode");
+  }, []);
 
   const handleSaveCode = useCallback(async () => {
     if (!app?.appId) {
@@ -398,264 +472,373 @@ const AppEditorPage: React.FC = () => {
     );
   }
 
+  const isCodeView = view === "code";
+  const showPrimarySave = isCodeView || hasDraftChanges;
+
   return (
-    <div className="AppEditorPage">
+    <div className="AppEditorPage" data-view={view}>
       <PageObjectActions />
       {loading && !app ? (
         <div className="AppEditorPage__status">{t("appEditor_loading", "正在加载应用…")}</div>
       ) : error ? (
         <div className="AppEditorPage__status AppEditorPage__status--error">
           <span>{error}</span>
-          <button
-            type="button"
-            className="AppEditorPage__btn"
-            onClick={() => void refetch()}
-          >
+          <button type="button" className="AppEditorPage__back" onClick={() => void refetch()}>
             <LuRefreshCw size={16} aria-hidden="true" />
             <span>{t("appEditor_retry", "重试")}</span>
           </button>
         </div>
       ) : app ? (
         <>
-          <section className="AppEditorPage__hero">
-            <div className="AppEditorPage__iconAnchor">
+          {/* 一条页头：返回 / 图标+标题 / 一个主按钮 + 更多菜单。 */}
+          <header className="AppEditorPage__header">
+            {isCodeView ? (
               <button
                 type="button"
-                className="content-icon-button AppEditorPage__iconButton"
-                onClick={() => setIsIconPickerOpen((open) => !open)}
-                title={t("contentIcon.change", "Change icon")}
-                aria-label={t("contentIcon.change", "Change icon")}
+                className="AppEditorPage__back"
+                onClick={() => setView(DEFAULT_APP_EDITOR_VIEW)}
+                aria-label={t("appEditor_backToPreview", "返回预览")}
               >
-                <ContentIcon icon={app.icon} fallback={LuLayoutGrid} size={32} />
+                <LuArrowLeft size={16} aria-hidden="true" />
+                <span>{t("appEditor_backToPreview", "返回预览")}</span>
               </button>
-              <ContentIconPicker
-                open={isIconPickerOpen}
-                onClose={() => setIsIconPickerOpen(false)}
-                onSelect={handleAppIconSelect}
-              />
-            </div>
-            <div className="AppEditorPage__heroMain">
-              <div className="AppEditorPage__eyebrow">
+            ) : (
+              <button
+                type="button"
+                className="AppEditorPage__back"
+                onClick={handleLeaveEditor}
+                aria-label={t("appEditor_backToApp", "返回应用")}
+              >
+                <LuArrowLeft size={16} aria-hidden="true" />
+                <span>{t("appEditor_backToApp", "返回应用")}</span>
+              </button>
+            )}
+
+            <div className="AppEditorPage__titleGroup">
+              <span className="AppEditorPage__iconMark" aria-hidden="true">
+                <ContentIcon icon={app.icon} fallback={LuLayoutGrid} size={24} />
+              </span>
+              <h1 className="AppEditorPage__title" title={app.userFriendlyName}>
                 {app.userFriendlyName}
-              </div>
-              <h1 className="AppEditorPage__title">
-                {effectiveMode
-                  ? effectiveMode === "chat"
-                    ? t("appEditor_chatMode_title", "对话编辑")
-                    : t("appEditor_codeMode_title", "代码编辑")
-                  : t("appEditor_chatMode_title", "对话编辑")}
               </h1>
             </div>
 
-            <div className="AppEditorPage__heroActions">
+            <div className="AppEditorPage__headerActions">
               <button
                 type="button"
-                className="AppEditorPage__btn"
-                onClick={() =>
-                  navigate(buildAppDetailPath(routeAppKey, spaceId, appServerOrigin))
-                }
+                className="AppEditorPage__iconButton"
+                onClick={handleToggleAssistant}
+                aria-pressed={isAssistantOpen}
+                title={t("appEditor_talkToAssistant", "和助手对话，让它帮你改")}
+                aria-label={t("appEditor_talkToAssistant", "和助手对话，让它帮你改")}
               >
-                <span>{t("appDetail_preview", "实时预览")}</span>
+                <LuBot size={16} aria-hidden="true" />
               </button>
-              {effectiveMode === "chat" ? (
+
+              {showPrimarySave && (
                 <button
                   type="button"
-                  className="AppEditorPage__btn AppEditorPage__btn--subtle"
-                  onClick={() =>
-                    navigate(buildAppCodeEditorPath(routeAppKey, spaceId, appServerOrigin))
+                  className="AppEditorPage__primaryButton"
+                  onClick={() => void handleSaveCode()}
+                  disabled={!hasDraftChanges || isSaving}
+                  title={
+                    hasDraftChanges
+                      ? t("appEditor_saveCode", "保存")
+                      : t("appEditor_saveNothing", "还没有改动")
                   }
                 >
-                  <LuFileCode2 size={16} aria-hidden="true" />
-                  <span>{t("appEditor_switchToCode", "切换到代码编辑")}</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="AppEditorPage__btn AppEditorPage__btn--subtle"
-                  onClick={() =>
-                    navigate(buildAppChatEditorPath(routeAppKey, spaceId, appServerOrigin))
-                  }
-                >
-                  <LuBot size={16} aria-hidden="true" />
-                  <span>{t("appEditor_backToChat", "返回对话编辑")}</span>
+                  <LuSave size={16} aria-hidden="true" />
+                  <span>
+                    {isSaving
+                      ? t("appEditor_savingShort", "正在保存…")
+                      : t("appEditor_saveCode", "保存")}
+                  </span>
                 </button>
               )}
-            </div>
-          </section>
 
-          {effectiveMode === "chat" && (
-            <AppEditorWorkbench
-              primary={
-              <section className="AppEditorPage__chatMode">
-                  <div className="AppEditorPage__chatToolbar">
+              <div className="AppEditorPage__menuAnchor" ref={menuRef}>
+                <button
+                  type="button"
+                  className="AppEditorPage__iconButton"
+                  onClick={() => setIsMenuOpen((open) => !open)}
+                  aria-haspopup="menu"
+                  aria-expanded={isMenuOpen}
+                  title={t("appEditor_more", "更多")}
+                  aria-label={t("appEditor_more", "更多")}
+                >
+                  <LuEllipsisVertical size={16} aria-hidden="true" />
+                </button>
+                {isMenuOpen && (
+                  <div className="AppEditorPage__menu" role="menu">
+                    {previewUrl && (
+                      <a
+                        className="AppEditorPage__menuItem"
+                        role="menuitem"
+                        href={previewUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setIsMenuOpen(false)}
+                      >
+                        <LuExternalLink size={16} aria-hidden="true" />
+                        <span>{t("appEditor_openApp", "打开应用")}</span>
+                      </a>
+                    )}
                     <button
                       type="button"
-                      className={`AppEditorPage__btn AppEditorPage__btn--${isInspecting ? "primary" : "secondary"}`}
-                      onClick={handleInspectToggle}
-                      disabled={!canInspect}
-                      title={canInspect ? t("appEditor_chatMode_inspect", "选择元素") : t("appEditor_chatMode_inspect_disabled", "当前预览地址跨域，暂不支持点选")}
+                      className="AppEditorPage__menuItem"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        setIsIconPickerOpen(true);
+                      }}
                     >
-                      <LuMousePointerClick size={16} aria-hidden="true" />
-                      <span>{t("appEditor_chatMode_inspect", "选择元素")}</span>
+                      <LuLayoutGrid size={16} aria-hidden="true" />
+                      <span>{t("contentIcon.change", "更换图标")}</span>
                     </button>
-                  </div>
-
-                  <div className="AppEditorPage__previewCard">
-                    {previewUrl ? (
-                      <iframe
-                        key={iframeNonce}
-                        ref={iframeRef}
-                        onLoad={() => {
-                          if (isInspecting && app?.appKey) {
-                            // try to re-install if still inspecting
-                            const iframeDoc = iframeRef.current?.contentDocument;
-                            if (iframeDoc) {
-                               try {
-                                 if (!iframeDoc.body) throw new Error("no body");
-                                 if(unmountInspectorRef.current) {
-                                    unmountInspectorRef.current();
-                                 }
-                                 unmountInspectorRef.current = installInspector(iframeDoc, (node) => {
-                                    setSelectedNode({ appKey: app.appKey!, node });
-                                    setInspecting(false);
-                                    if (unmountInspectorRef.current) {
-                                      unmountInspectorRef.current();
-                                      unmountInspectorRef.current = null;
-                                    }
-                                 });
-                               } catch(e) {}
-                            }
-                          }
+                    {isCodeView ? (
+                      <button
+                        type="button"
+                        className="AppEditorPage__menuItem"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          handleDiscardCode();
                         }}
-                        src={
-                          iframeNonce > 0
-                            ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}_r=${iframeNonce}`
-                            : previewUrl
-                        }
-                        title={app.userFriendlyName}
-                        className="AppEditorPage__frame"
-                        sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-                      />
+                        disabled={!hasDraftChanges || isSaving}
+                      >
+                        <LuRefreshCw size={16} aria-hidden="true" />
+                        <span>{t("appEditor_discardCode", "撤销改动")}</span>
+                      </button>
                     ) : (
-                      <div className="AppEditorPage__status">
-                        {t("appEditor_missingUrl", "当前应用还没有可访问地址")}
-                      </div>
+                      <>
+                        <button
+                          type="button"
+                          className="AppEditorPage__menuItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setIsMenuOpen(false);
+                            handleInspectToggle();
+                          }}
+                          disabled={!canInspect}
+                          title={
+                            canInspect
+                              ? undefined
+                              : t(
+                                  "appEditor_pickTargetDisabled",
+                                  "这个应用暂时不支持点选（预览地址跨域）"
+                                )
+                          }
+                        >
+                          <LuMousePointerClick size={16} aria-hidden="true" />
+                          <span>{t("appEditor_pickTarget", "点选要改的地方")}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="AppEditorPage__menuItem"
+                          role="menuitem"
+                          onClick={() => {
+                            setIsMenuOpen(false);
+                            setView("code");
+                          }}
+                        >
+                          <LuFileCode2 size={16} aria-hidden="true" />
+                          <span>{t("appEditor_openCode", "修复代码（高级）")}</span>
+                        </button>
+                      </>
                     )}
                   </div>
-              </section>
-              }
-              secondary={
-              <section className="AppEditorPage__assistantPane">
-                <ObjectAssistantPanel kind="app" contentKey={routeAppKey} />
-              </section>
-              }
-            />
-          )}
-
-          {effectiveMode === "code" && (
-            <section className="AppEditorPage__codeMode">
-              <div className="AppEditorPage__warningBanner">
-                <LuTriangleAlert size={16} aria-hidden="true" />
-                <span>
-                  {t(
-                    "appEditor_codeMode_warning",
-                    "非技术用户请勿随意修改，错误改动可能导致应用无法运行。"
-                  )}
-                </span>
-              </div>
-
-              <div className="AppEditorPage__codeToolbar">
-                <div className="AppEditorPage__codeToolbarInfo">
-                  <div className="AppEditorPage__panelEyebrow">
-                    {t("appEditor_codeMode_title", "代码编辑")}
-                  </div>
-                  <div className="AppEditorPage__panelTitle">
-                    {t("appEditor_codeMode_heading", "直接修改源码并保存")}
-                  </div>
-                </div>
-
-                <div className="AppEditorPage__codeToolbarActions">
-                  <button
-                    type="button"
-                    className="AppEditorPage__btn"
-                    onClick={handleResetDrafts}
-                    disabled={!hasDraftChanges || isSaving}
-                  >
-                    <span>{t("appEditor_resetDrafts", "撤销未保存修改")}</span>
-                  </button>
-                  {previewUrl && (
-                    <a
-                      href={previewUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="AppEditorPage__btn"
-                    >
-                      <LuExternalLink size={16} aria-hidden="true" />
-                      <span>{t("appEditor_openApp", "打开应用")}</span>
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    className="AppEditorPage__btn AppEditorPage__btn--primary"
-                    onClick={() => void handleSaveCode()}
-                    disabled={!hasDraftChanges || isSaving}
-                  >
-                    <LuSave size={16} aria-hidden="true" />
-                    <span>
-                      {isSaving
-                        ? t("appEditor_codeMode_saving", "正在预检并保存源码…")
-                        : t("appEditor_saveCode", "保存代码")}
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {(saveMessage || saveError) && (
-                <div
-                  className={`AppEditorPage__saveNotice ${
-                    saveError ? "is-error" : "is-success"
-                  }`}
-                >
-                  {saveError ?? saveMessage}
-                </div>
-              )}
-
-              <div className="AppEditorPage__codeLayout">
-                <div className="AppEditorPage__fileList">
-                  {draftFiles.map((file) => (
-                    <button
-                      key={file.name}
-                      type="button"
-                      className={`AppEditorPage__fileItem ${
-                        selectedFile?.name === file.name ? "is-active" : ""
-                      }`}
-                      onClick={() => setSelectedFileName(file.name)}
-                    >
-                      <span>{file.name}</span>
-                      <small>{file.code.split("\n").length} lines</small>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="AppEditorPage__editorPanel">
-                  <div className="AppEditorPage__editorHeader">
-                    <span>{selectedFile?.name ?? "worker.ts"}</span>
-                  </div>
-                  <textarea
-                    className="AppEditorPage__editorTextarea"
-                    value={selectedFile?.code ?? ""}
-                    onChange={(event) => handleSelectedFileChange(event.target.value)}
-                    spellCheck={false}
-                    aria-label={selectedFile?.name ?? "worker.ts"}
+                )}
+                <div className="AppEditorPage__iconAnchor">
+                  <ContentIconPicker
+                    open={isIconPickerOpen}
+                    onClose={() => setIsIconPickerOpen(false)}
+                    onSelect={handleAppIconSelect}
                   />
                 </div>
               </div>
-            </section>
+            </div>
+          </header>
+
+          {(saveMessage || saveError) && (
+            <p
+              className={`AppEditorPage__notice AppEditorPage__notice--status ${
+                saveError ? "is-error" : "is-success"
+              }`}
+              role="status"
+            >
+              {saveError ?? saveMessage}
+            </p>
           )}
+
+          <div className="AppEditorPage__body">
+            {!isCodeView ? (
+              <section
+                className="AppEditorPage__previewPane"
+                aria-label={t("appEditor_viewPreview", "预览")}
+              >
+                <div className="AppEditorPage__previewCard">
+                  {previewUrl ? (
+                    <iframe
+                      key={iframeNonce}
+                      ref={iframeRef}
+                      onLoad={() => {
+                        if (isInspecting && app?.appKey) {
+                          // try to re-install if still inspecting
+                          const iframeDoc = iframeRef.current?.contentDocument;
+                          if (iframeDoc) {
+                            try {
+                              if (!iframeDoc.body) throw new Error("no body");
+                              if (unmountInspectorRef.current) {
+                                unmountInspectorRef.current();
+                              }
+                              unmountInspectorRef.current = installInspector(iframeDoc, (node) => {
+                                setSelectedNode({ appKey: app.appKey!, node });
+                                setInspecting(false);
+                                if (unmountInspectorRef.current) {
+                                  unmountInspectorRef.current();
+                                  unmountInspectorRef.current = null;
+                                }
+                              });
+                            } catch (e) {}
+                          }
+                        }
+                      }}
+                      src={
+                        iframeNonce > 0
+                          ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}_r=${iframeNonce}`
+                          : previewUrl
+                      }
+                      title={app.userFriendlyName}
+                      className="AppEditorPage__frame"
+                      sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+                    />
+                  ) : (
+                    <div className="AppEditorPage__status">
+                      {t("appEditor_missingUrl", "这个应用还没有可以打开的网址")}
+                    </div>
+                  )}
+                </div>
+              </section>
+            ) : (
+              <section
+                className="AppEditorPage__codePane"
+                aria-label={t("appEditor_viewCode", "代码")}
+              >
+                <p className="AppEditorPage__notice">
+                  <LuTriangleAlert size={14} aria-hidden="true" />
+                  <span>
+                    {t(
+                      "appEditor_codeMode_warning",
+                      "保存会直接替换正在用的版本，改坏了可以撤销改动或重新改回来。"
+                    )}
+                  </span>
+                </p>
+
+                <div className="AppEditorPage__codeLayout">
+                  <select
+                    className="AppEditorPage__fileSelect"
+                    aria-label={t("appEditor_fileList", "文件")}
+                    value={selectedFile?.name ?? ""}
+                    onChange={(event) => setSelectedFileName(event.target.value)}
+                  >
+                    {draftFiles.map((file) => (
+                      <option key={file.name} value={file.name}>
+                        {file.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div
+                    className="AppEditorPage__fileList"
+                    aria-label={t("appEditor_fileList", "文件")}
+                  >
+                    {draftFiles.map((file) => (
+                      <button
+                        key={file.name}
+                        type="button"
+                        className={`AppEditorPage__fileItem ${
+                          selectedFile?.name === file.name ? "is-active" : ""
+                        }`}
+                        onClick={() => setSelectedFileName(file.name)}
+                      >
+                        <span>{file.name}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="AppEditorPage__editorPanel">
+                    <div className="AppEditorPage__editorHeader">
+                      <span>{selectedFile?.name ?? "worker.ts"}</span>
+                    </div>
+                    <div className="AppEditorPage__editorBody">
+                      <pre className="AppEditorPage__gutter" ref={gutterRef} aria-hidden="true">
+                        {lineNumbers}
+                      </pre>
+                      <textarea
+                        ref={editorRef}
+                        className="AppEditorPage__editorTextarea"
+                        value={selectedFile?.code ?? ""}
+                        onChange={(event) => handleSelectedFileChange(event.target.value)}
+                        onScroll={handleEditorScroll}
+                        wrap="off"
+                        spellCheck={false}
+                        aria-label={selectedFile?.name ?? "worker.ts"}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+          </div>
         </>
       ) : null}
+
+      <ConfirmModal
+        isOpen={pendingConfirm !== null}
+        onClose={() => setPendingConfirm(null)}
+        onConfirm={() => {
+          const action = pendingConfirm;
+          setPendingConfirm(null);
+          if (action === "leave") goBackToDetail();
+          if (action === "discardCode") handleResetDrafts();
+        }}
+        title={
+          pendingConfirm === "discardCode"
+            ? t("appEditor_discardTitle", "撤销这些改动？")
+            : t("appEditor_leaveTitle", "先保存再离开？")
+        }
+        message={
+          pendingConfirm === "discardCode"
+            ? t("appEditor_discardMessage", "代码会回到上一次保存的样子，撤销后不能找回。")
+            : t("appEditor_leaveMessage", "还有没保存的改动，离开后会丢失。")
+        }
+        confirmText={
+          pendingConfirm === "discardCode"
+            ? t("appEditor_discardConfirm", "撤销改动")
+            : t("appEditor_leaveConfirm", "不保存，离开")
+        }
+        cancelText={t("appEditor_leaveCancel", "继续编辑")}
+        type="warning"
+      />
     </div>
   );
 };
+
+/** 点击菜单与图标选择器外侧关闭「更多」菜单（两者都挂在同一个锚点上）。 */
+function useClickOutsideMenu(
+  isOpen: boolean,
+  anchorRef: React.RefObject<HTMLElement | null>,
+  onClose: () => void
+) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (event: MouseEvent) => {
+      if (anchorRef.current?.contains(event.target as Node)) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [anchorRef, isOpen, onClose]);
+}
 
 export default AppEditorPage;

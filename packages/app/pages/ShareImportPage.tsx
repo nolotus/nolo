@@ -2,7 +2,7 @@ import "./ShareImportPage.css";
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, useNavigate, useParams } from "app/routing";
 import Avatar from "render/web/ui/Avatar";
-import { LuLayoutDashboard, LuTrash2 } from "react-icons/lu";
+import { LuTrash2 } from "react-icons/lu";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { useToken, useUserId } from "identity";
@@ -34,68 +34,7 @@ import type { TableMeta } from "render/table/types";
 
 const ShareDocView = lazy(() => import("./share/ShareDocView"));
 const ShareDialogRichView = lazy(() => import("./share/ShareDialogRichView"));
-
-const AppShareLanding: React.FC<{ shared: SharedObject }> = ({ shared }) => {
-  const url: string | undefined = (shared.data as any)?.url;
-  const title = shared.meta?.title || "应用";
-  const description = shared.meta?.description || "";
-  const coverImage: string | undefined = shared.meta?.coverImage || (shared.data as any)?.coverImage;
-  const authorName = normalizeAuthorName(shared.meta?.authorName);
-  const authorAvatar: string | undefined = shared.meta?.authorAvatar;
-  const shareDate =
-    toSafeTimestamp(shared.meta?.createdAt) ||
-    toSafeTimestamp(shared.updatedAt) ||
-    toSafeTimestamp(shared.createdAt);
-
-  useEffect(() => {
-    if (url) {
-      const timer = setTimeout(() => window.open(url, "_blank", "noopener,noreferrer"), 1200);
-      return () => clearTimeout(timer);
-    }
-  }, [url]);
-
-  return (
-    <div className="AppShareLanding-root">
-      <div className="AppShareLanding-card">
-        {coverImage ? (
-          <img src={coverImage} alt={title} className="AppShareLanding-cover" />
-        ) : (
-          <div className="AppShareLanding-coverFallback" aria-hidden="true">
-            <LuLayoutDashboard size={48} aria-hidden="true" />
-          </div>
-        )}
-        <div className="AppShareLanding-body">
-          <div className="AppShareLanding-meta">
-            {authorName && (
-              <div className="AppShareLanding-author">
-                <Avatar name={authorName} src={authorAvatar} size="small" />
-                <span className="AppShareLanding-authorName">{authorName}</span>
-                <span className="AppShareLanding-date">{formatShareTime(shareDate)}</span>
-              </div>
-            )}
-          </div>
-          <h1 className="AppShareLanding-title">{title}</h1>
-          {description && <p className="AppShareLanding-desc">{description}</p>}
-          {url ? (
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="AppShareLanding-openBtn"
-            >
-              打开应用
-            </a>
-          ) : (
-            <p className="AppShareLanding-noUrl">该应用分享缺少访问地址。</p>
-          )}
-          {url && <p className="AppShareLanding-hint">正在自动打开…</p>}
-        </div>
-      </div>
-
-
-    </div>
-  );
-};
+import AppSharePreview from "./share/AppSharePreview";
 
 // ─────────────────────────────────────────────────────────────────────
 
@@ -615,7 +554,7 @@ const ShareImportPage: React.FC = () => {
           <ShareDialogPreview messages={dialogMessages} />
         )
       ) : shared.type === DataType.APP ? (
-        <AppShareLanding shared={shared} />
+        <AppSharePreview shared={shared} />
       ) : shared.type === DataType.TABLE ? (
         <div className="ShareImportPage-table">
           <div className="ShareImportPage-tableCard">

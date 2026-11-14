@@ -939,3 +939,29 @@ export function findAgentCatalogEntry(
 
   return null;
 }
+
+export function lookupCachedAgentName(agentKey: string): string | undefined {
+  const trimmed = agentKey.trim();
+  if (!trimmed) return undefined;
+  const platform = PLATFORM_AGENTS.find(
+    (p) => p.key === trimmed || p.key.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (platform?.name) return platform.name;
+  const builtin = builtinAgentCatalogEntryById(
+    parseBuiltinPlatformAgentId(trimmed) ?? parsePublicAgentId(trimmed),
+  );
+  if (builtin?.name) return builtin.name;
+  if (agentCatalogCache?.entries) {
+    const direct = agentCatalogCache.entries.find(
+      (entry) => entry.key === trimmed || entry.key.toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (direct?.name) return direct.name;
+    const suffix = agentCatalogCache.entries.find(
+      (entry) =>
+        entry.key.toLowerCase().endsWith(`-${trimmed.toLowerCase()}`) ||
+        trimmed.toLowerCase().endsWith(`-${entry.key.toLowerCase()}`),
+    );
+    if (suffix?.name) return suffix.name;
+  }
+  return undefined;
+}

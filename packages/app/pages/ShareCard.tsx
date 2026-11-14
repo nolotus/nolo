@@ -218,7 +218,9 @@ export const ShareCard: React.FC<ShareCardProps> = ({ share, className = "" }) =
         {share.description && <p>{share.description}</p>}
         <p>{getShareTypeLabel(share.type)}</p>
         {isApp && (
-          <p>
+          <p className="ShareCard__appActions">
+            {/* 主操作：直接运行这个应用（探索 › 应用 → app 运行），不停在分享层；
+                `share.url` 是分享里带的运行地址（/apps/<appId>），拿不到才退回分享页。 */}
             <button
               type="button"
               className="ShareCard__openShare"
@@ -226,8 +228,11 @@ export const ShareCard: React.FC<ShareCardProps> = ({ share, className = "" }) =
                 window.open(share.url ?? share.path, "_blank", "noopener,noreferrer")
               }
             >
-              {t("open", "打开")}
+              {t("appShare_openApp", "打开应用")}
             </button>
+            <NavLink to={share.path} className="ShareCard__detailLink">
+              {t("appShare_viewSharePage", "查看应用页")}
+            </NavLink>
           </p>
         )}
       </MorphDialog>

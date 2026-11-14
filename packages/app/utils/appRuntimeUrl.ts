@@ -1,48 +1,20 @@
-const HTTP_PROTOCOLS = new Set(["http:", "https:"]);
+import {
+  buildAppRuntimeUrl,
+  normalizeAppHttpOrigin,
+  normalizeAppHttpUrl,
+} from "core/appHttpUrl";
+
+// 协议校验与运行地址构造只有一份实现（web/server 共用）；这里保持既有导入路径不变。
+export { buildAppRuntimeUrl, normalizeAppHttpUrl };
 
 const normalizeAbsoluteUrl = (value?: string | null): string | undefined => {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  return trimmed;
+  return trimmed || undefined;
 };
 
-// URL 解析验证：只有能被 URL 解析且协议为 http(s) 的绝对地址才算有效访问地址。
-// regex 前缀判断会把 "javascript:alert(1)"、"http://" 这类误判为可用地址。
-const parseHttpUrl = (value?: string | null): URL | undefined => {
-  const normalized = normalizeAbsoluteUrl(value);
-  if (!normalized) return undefined;
-  let parsed: URL;
-  try {
-    parsed = new URL(normalized);
-  } catch {
-    return undefined;
-  }
-  if (!HTTP_PROTOCOLS.has(parsed.protocol)) return undefined;
-  return parsed;
-};
-
-export const normalizeAppHttpUrl = (value?: string | null): string | undefined => {
-  const normalized = normalizeAbsoluteUrl(value);
-  if (!normalized || !parseHttpUrl(normalized)) return undefined;
-  return normalized;
-};
-
-const normalizeOrigin = (value?: string | null): string | undefined => {
-  const parsed = parseHttpUrl(value);
-  if (!parsed) return undefined;
-  return parsed.origin;
-};
-
-export const buildAppRuntimeUrl = (
-  appId?: string | null,
-  origin?: string | null
-): string | undefined => {
-  const normalizedAppId = normalizeAbsoluteUrl(appId);
-  const normalizedOrigin = normalizeOrigin(origin);
-  if (!normalizedAppId || !normalizedOrigin) return undefined;
-  return `${normalizedOrigin}/apps/${normalizedAppId}/`;
-};
+const normalizeOrigin = (value?: string | null): string | undefined =>
+  normalizeAppHttpOrigin(value);
 
 /**
  * 解析应用的访问地址。

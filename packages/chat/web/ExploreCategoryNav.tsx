@@ -12,6 +12,7 @@ const FALLBACK: Record<ExploreCategory, string> = {
   agent: "Agent",
   dialog: "对话",
   article: "文章",
+  app: "应用",
   user: "用户",
   plugin: "插件",
   skill: "Skill",

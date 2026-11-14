@@ -1,5 +1,6 @@
 import "./ShareCommunityPreview.css";
 import React, { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ShareSummary } from "share/types";
 import { DataType } from "create/types";
 import { createWebSharePath, shareApi } from "share/link";
@@ -8,7 +9,7 @@ import { useAppSelector } from "app/store";
 import { selectRemoteServer } from "app/settings/settingSlice";
 import { ShareCard, type ShareCardItem } from "./ShareCard";
 
-type ContentCategory = "dialog" | "article";
+type ContentCategory = "dialog" | "article" | "app";
 
 type ShareCommunityPreviewProps = {
   active?: boolean;
@@ -32,6 +33,17 @@ const mapSummary = (s: ShareSummary): ShareCardItem => ({
 });
 
 /**
+ * Single source of truth for the "category → share type" mapping.
+ * Both counting (paging stop condition) and the final filter read it, so the
+ * two can never drift apart.
+ */
+const CATEGORY_SHARE_TYPE: Record<ContentCategory, DataType> = {
+  dialog: DataType.DIALOG,
+  article: DataType.DOC,
+  app: DataType.APP,
+};
+
+/**
  * Single source of truth for "does this share belong to the category?".
  * Used both for counting (paging stop condition) and for the final filter,
  * so the two can never drift apart.
@@ -39,8 +51,7 @@ const mapSummary = (s: ShareSummary): ShareCardItem => ({
 const matchesCategory = (
   share: ShareCardItem,
   category: ContentCategory
-): boolean =>
-  category === "article" ? share.type === DataType.DOC : share.type === DataType.DIALOG;
+): boolean => share.type === CATEGORY_SHARE_TYPE[category];
 
 const countMatching = (items: ShareCardItem[], category: ContentCategory): number =>
   items.reduce((acc, item) => acc + (matchesCategory(item, category) ? 1 : 0), 0);
@@ -49,6 +60,7 @@ const ShareCommunityPreview: React.FC<ShareCommunityPreviewProps> = ({
   active = true,
   contentCategory,
 }) => {
+  const { t } = useTranslation();
   const ssrCommunityShares = useSSRCommunityShares();
   // Category mode filters client-side, so SSR data (unfiltered) would show the
   // wrong cards for a moment — start empty there instead.
@@ -139,7 +151,9 @@ const ShareCommunityPreview: React.FC<ShareCommunityPreviewProps> = ({
         </div>
       ) : (
         <div className="ShareCommunityPreview__empty">
-          {contentCategory ? "暂无该分类的公开分享。" : "暂无社区分享，先去文章或对话页点击\"社区分享\"。"}
+          {contentCategory
+            ? t(`explorePage.categoryEmpty.${contentCategory}`, "暂无该分类的公开分享。")
+            : "暂无社区分享，先去文章或对话页点击\"社区分享\"。"}
         </div>
       )}
 

@@ -1,215 +1,165 @@
-/* ── AppDetailPage ───────────────────────────────────── */
+/* ── AppDetailPage ─────────────────────────────────────
+   单个对象页（sparse 密度）：页头一行回答「这个 app 是什么」，预览吃掉页头之外
+   的全部高度，版本区是底部一条紧凑页脚。一条左边缘（24px 页面内边距）、一条右边缘；
+   不套居中容器、不画阴影，只有 1px 边框与 8px 圆角。
+
+   高度链（实际壳层，不是猜的）：`packages/render/layout/layout.css:182-196`
+   `.MainLayout__main` 是 `display:flex; flex-direction:column; height:100%; overflow-y:auto`
+   的滚动壳；本页是它的 flex item，用 `flex: 1 1 auto; min-height: 0` 吃掉剩余高度。
+   不写 `height: 100%`：那会把壳高算两遍，把页脚顶出视口。 */
 
 .AppDetailPage {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    padding: 16px 18px 22px;
-    gap: 14px;
-  }
-
-.AppDetailPage__previewSection {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .AppDetailPage__previewCard {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    border-radius: 22px;
-  }
-
-  .AppDetailPage__frameWrap {
-    position: relative;
-    height: 100%;
-    width: 100%;
-    min-width: 0;
-    overflow: hidden;
-    padding: 0;
-    display: flex;
-  }
-
-  /* 流式响应式：预览壳撑满容器，iframe 按真实容器宽度渲染（与编辑器一致），
-     不再用固定 1440px 桌面 mockup 缩放。 */
-  .AppDetailPage__browserShell {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    border-radius: 24px;
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    background: #0f172a;
-    box-shadow:
-      0 24px 80px rgba(15, 23, 42, 0.22),
-      0 2px 12px rgba(15, 23, 42, 0.10);
-  }
-
-  .AppDetailPage__browserBar {
-    height: 54px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
-  }
-
-  .AppDetailPage__browserDots {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-
-  .AppDetailPage__browserDots span {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.18);
-  }
-
-  .AppDetailPage__browserDots span:nth-child(1) {
-    background: #fb7185;
-  }
-
-  .AppDetailPage__browserDots span:nth-child(2) {
-    background: #fbbf24;
-  }
-
-  .AppDetailPage__browserDots span:nth-child(3) {
-    background: #34d399;
-  }
-
-  .AppDetailPage__browserUrl {
-    min-width: 0;
-    flex: 1;
-    padding: 9px 12px;
-    border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.78);
-    font-size: var(--fontSize-base);
-    line-height: var(--leading-tight);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .AppDetailPage__browserBadge {
-    flex-shrink: 0;
-    padding: 7px 10px;
-    border-radius: 999px;
-    background: rgba(96, 165, 250, 0.16);
-    color: #93c5fd;
-    font-size: var(--fontSize-sm);
-    font-weight: 700;
-    text-transform: lowercase;
-  }
-
-  .AppDetailPage__loadingOverlay {
-    position: absolute;
-    top: 70px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 2;
-    padding: 9px 12px;
-    border-radius: var(--radius-lg);
-    background: rgba(15, 23, 42, 0.74);
-    color: rgba(255, 255, 255, 0.92);
-    font-size: var(--fontSize-base);
-    font-weight: 600;
-    backdrop-filter: blur(6px);
-  }
-
-  .AppDetailPage__frame {
-    width: 100%;
-    flex: 1;
-    min-height: 0;
-    border: none;
-    background: #fff;
-    display: block;
-  }
-
-  .AppDetailPage__status {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 120px;
-    padding: 24px;
-    color: var(--textSecondary);
-    text-align: center;
-    line-height: var(--leading-relaxed);
-  }
-
-.AppDetailPage__status--error {
-    border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
-    background: color-mix(in srgb, var(--error) 8%, transparent);
-    color: var(--error);
-    border-radius: var(--radius-xl);
-    padding: 24px;
-    margin: 24px;
-  }
-
-  @media (max-width: 768px) {
-    .AppDetailPage {
-      padding: 10px 10px 14px;
-    }
-
-    .AppDetailPage__frameWrap {
-      padding: 10px;
-    }
-
-    .AppDetailPage__browserShell {
-      border-radius: 18px;
-    }
-
-    .AppDetailPage__browserBar {
-      padding: 0 12px;
-      gap: 8px;
-    }
-
-    .AppDetailPage__browserBadge {
-      display: none;
-    }
-  }
-
-
-/* ── Topbar 操作按钮 ───────────────────────────────────── */
-
-.AppDetailPage__topbarActions {
+  box-sizing: border-box;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  margin-left: auto;
+  flex-direction: column;
+  /* 静止态只有 iframe 内部滚动：本页不滚，外层壳也就没有溢出。 */
+  overflow: hidden;
+  /* 顶部只留 12px：桌面壳的侧栏已经承载导航/创建/账户入口，页内不再多一层。 */
+  padding: 12px 24px 16px;
 }
 
-.AppDetailPage__topbarBtn {
+/* ── 页头：h1 + 一行运行时信息 / 右侧操作 ─────────────── */
+
+.AppDetailPage__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  /* 页头越矮，预览越大：sparse 密度的下限 padding 已经在 .AppDetailPage 上。 */
+  margin-bottom: 8px;
+}
+
+/* 标题与运行时信息同一行：标题在前，12px muted 域名/框架跟在后面，过长各自 ellipsis。 */
+.AppDetailPage__headerText {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.AppDetailPage__title {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fontSize-2xl, 24px);
+  font-weight: 600;
+  line-height: 1.25;
+  /* 标题骨架条是 24px、正文行高是 30px —— 预留到正文高度，数据到达不跳。 */
+  min-height: 1.25em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.AppDetailPage__meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fontSize-xs, 12px);
+  line-height: 1.5;
+  color: var(--textSecondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.AppDetailPage__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.AppDetailPage__primaryBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--primary) 12%, var(--background));
+  color: var(--primary);
+  font-size: var(--fontSize-base);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.AppDetailPage__primaryBtn:hover {
+  background: color-mix(in srgb, var(--primary) 18%, var(--background));
+}
+
+/* 数据未到位时的占位：同尺寸，避免主按钮出现时挤动页头。 */
+.AppDetailPage__primaryBtn--placeholder {
+  width: 104px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  cursor: default;
+}
+
+/* 次级动作（分享）：实心主按钮只有一个（打开预览），这里用描边次级样式。 */
+.AppDetailPage__secondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--textSecondary);
+  font-size: var(--fontSize-base);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.AppDetailPage__secondaryBtn:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+
+/* 分享用的是三节点 glyph（三个小圆 + 两条连线）：14px + stroke 2 在 1x 下糊成一团，
+ * 看起来像坏字形。图标本身存在（react-icons/lu 的 LuShare2，仓库内 19 处同用），
+ * 所以只修可见度：16px + 略细的笔画。 */
+.AppDetailPage__secondaryBtn svg {
+  flex: 0 0 auto;
+  stroke-width: 1.75;
+}
+
+.AppDetailPage__secondaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.AppDetailPage__iconBtn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: none;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.78);
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--textSecondary);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 
-.AppDetailPage__topbarBtn:hover {
-  background: rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 1);
+.AppDetailPage__iconBtn:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
 }
 
-/* ── 三点菜单 ──────────────────────────────────────────── */
+/* ── 三点菜单（浮层：唯一允许带阴影的地方） ───────────── */
 
 .AppDetailPage__menuWrap {
   position: relative;
@@ -219,25 +169,25 @@
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 180px;
-  padding: 6px;
-  border-radius: var(--radius-xl);
-  background: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, var(--backgroundSecondary, #ffffff));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   z-index: 50;
 }
 
 .AppDetailPage__menuItem {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 6px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--text);
   font-size: var(--fontSize-base);
   text-align: left;
   cursor: pointer;
@@ -245,7 +195,7 @@
 }
 
 .AppDetailPage__menuItem:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .AppDetailPage__menuItem:disabled {
@@ -254,117 +204,312 @@
 }
 
 .AppDetailPage__menuItem--danger {
-  color: #f87171;
+  color: var(--error);
 }
 
 .AppDetailPage__menuItem--danger:hover {
-  background: rgba(248, 113, 113, 0.12);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
 }
 
-/* ── 版本管理弹窗 ──────────────────────────────────────── */
+/* ── 预览：吃掉页头之外的全部高度，滚动只发生在 iframe 内部 ── */
 
-.AppDetailPage__modalOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-}
-
-.AppDetailPage__modal {
-  width: 90%;
-  max-width: 520px;
-  max-height: 70vh;
+.AppDetailPage__preview {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  border-radius: var(--radius-xl);
-  background: var(--surface, #1e293b);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}
+
+.AppDetailPage__previewPanel {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
   overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--backgroundSecondary, #ffffff);
 }
 
-.AppDetailPage__modalHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.AppDetailPage__modalHeader h3 {
-  margin: 0;
-  font-size: var(--fontSize-lg);
-  font-weight: 700;
-}
-
-.AppDetailPage__modalClose {
-  display: flex;
+.AppDetailPage__previewPanel--notice {
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.AppDetailPage__previewNotice {
+  margin: 0;
+  font-size: var(--fontSize-base);
   color: var(--textSecondary);
-  font-size: 16px;
+}
+
+.AppDetailPage__textBtn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: var(--fontSize-base);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 
-.AppDetailPage__modalClose:hover {
-  background: rgba(255, 255, 255, 0.08);
+/* ── 预览失败态：人话 + 主操作 + 默认收起的技术详情 ───────── */
+
+.AppDetailPage__failure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 560px;
+  min-height: 0;
+}
+
+.AppDetailPage__failureActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 原始错误只在这里出现：默认收起，展开后自己滚，页面仍是单滚动条。
+ * 分区靠背景色差与留白，不加分割线。 */
+.AppDetailPage__techDetails {
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+.AppDetailPage__techDetailsToggle {
+  font-size: var(--fontSize-sm, 12px);
+  color: var(--textSecondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.AppDetailPage__techDetailsBody {
+  margin: 8px 0 0;
+  max-height: 150px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  color: var(--textSecondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fontSize-xs, 11px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.AppDetailPage__frameStatus {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 2;
+  font-size: var(--fontSize-xs, 12px);
+  color: var(--textSecondary);
+}
+
+.AppDetailPage__frame {
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  border: none;
+  background: #fff;
+  display: block;
+}
+
+/* ── 骨架：平灰条，真实尺寸，无 shimmer ────────────────── */
+
+.AppDetailPage__skeleton {
+  display: block;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.AppDetailPage__skeleton--title {
+  width: 180px;
+  height: 24px;
+}
+
+.AppDetailPage__skeleton--meta {
+  width: 220px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.AppDetailPage__skeleton--preview {
+  flex: 1;
+  margin: 12px;
+  border-radius: 6px;
+}
+
+/* ── 版本页脚条：静止态一行 48px，展开列表是浮层 ───────── */
+
+.AppDetailPage__versions {
+  position: relative; /* 展开面板的定位上下文 */
+  flex-shrink: 0;
+  margin-top: 12px;
+}
+
+.AppDetailPage__versionBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 12px;
+  /* 不用分割线：一层极浅底色 + 圆角把页脚条与上方预览分开（留白由 __versions 的 margin-top 给）。 */
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  font-size: var(--fontSize-xs, 12px);
+  color: var(--textSecondary);
+}
+
+.AppDetailPage__versionLabel {
+  flex-shrink: 0;
+  font-size: var(--fontSize-base);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.AppDetailPage__versionSummary {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: var(--fontSize-xs, 12px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.AppDetailPage__versionSummary--error {
+  color: var(--error);
+}
+
+.AppDetailPage__versionToggle {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--textSecondary);
+  font-size: var(--fontSize-xs, 12px);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.AppDetailPage__versionToggle:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+
+.AppDetailPage__versionPanel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  max-height: min(40vh, 320px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, var(--backgroundSecondary, #ffffff));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 40;
 }
 
 .AppDetailPage__versionList {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  /* 行与行之间用间距分开，不画线。 */
+  gap: 8px;
 }
 
 .AppDetailPage__versionItem {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  transition: background 0.12s;
-}
-
-.AppDetailPage__versionItem:hover {
-  background: rgba(255, 255, 255, 0.04);
+  min-height: 44px;
+  padding: 0 10px;
+  /* 每条版本是一块浅底圆角行：不靠 border-bottom 也能看出「一条一项」。 */
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
 }
 
 .AppDetailPage__versionInfo {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 100%;
+  min-width: 0;
 }
 
 .AppDetailPage__versionId {
   font-family: monospace;
-  font-size: var(--fontSize-sm);
-  color: var(--textSecondary);
+  font-size: var(--fontSize-base);
+  color: var(--text);
 }
 
 .AppDetailPage__versionDate {
-  font-size: var(--fontSize-sm);
+  font-size: var(--fontSize-xs, 12px);
   color: var(--textTertiary);
 }
 
 .AppDetailPage__versionPinned {
-  font-size: 14px;
+  font-size: 12px;
 }
 
-.AppDetailPage__versionStatus {
+/* ── 兜底状态（缺 appKey 等） ───────────────────────────── */
+
+.AppDetailPage__status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
   padding: 24px;
-  text-align: center;
   color: var(--textSecondary);
+  text-align: center;
+  line-height: var(--leading-relaxed);
 }
 
-.AppDetailPage__versionStatus--error {
-  color: var(--error);
+/* ── 窄/矮视口降级 ──────────────────────────────────────
+   宽度 < 720px 或高度 < 520px：iframe 撑满会吃掉浏览器自身的滚动体验，
+   回到「页面单滚动 + 预览固定 60vh」，展开的版本列表也不再浮层。 */
+
+@media (max-width: 719px), (max-height: 519px) {
+  .AppDetailPage {
+    padding: 16px 16px 20px;
+    overflow-y: auto;
+  }
+
+  .AppDetailPage__header {
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .AppDetailPage__preview {
+    flex: 0 0 auto;
+  }
+
+  .AppDetailPage__previewPanel {
+    flex: 0 0 auto;
+    height: 60vh;
+  }
+
+  .AppDetailPage__versionPanel {
+    position: static;
+    margin-top: 8px;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
 }

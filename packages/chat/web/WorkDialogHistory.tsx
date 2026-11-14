@@ -4,6 +4,7 @@ import { mergeOwnedHistoryItems } from "./mergeOwnedHistoryItems";
 import { useOwnedDialogPages } from "database/hooks/useOwnedDialogPages";
 import { WorkDialogGroupsPreview } from "./WorkDialogGroupsPreview";
 import type { HomeScope } from "./homeScopeProjection";
+import type { SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
 
 type Props = {
   homeScope?: HomeScope;
@@ -11,6 +12,8 @@ type Props = {
   userId: string;
   enabled?: boolean;
   includeNonDialogs?: boolean;
+  /** 有效类型筛选（由 ChatSidebar 用 chip 同一套解析算出的唯一真值）。 */
+  typeFilter?: SidebarTypeFilterId;
   unreadAgentKeys?: Set<string>;
 };
 
@@ -25,6 +28,7 @@ export function WorkDialogHistory({
   enabled = true,
   homeScope = { kind: "all" },
   includeNonDialogs = false,
+  typeFilter,
   unreadAgentKeys,
 }: Props) {
   const remoteEnabled = enabled && homeScope.kind !== "project";
@@ -37,9 +41,11 @@ export function WorkDialogHistory({
       userId={userId}
       homeScope={homeScope}
       includeNonDialogs={includeNonDialogs}
+      typeFilter={typeFilter}
       paginationOwner={remoteEnabled}
       ownedPages={pages}
       unreadAgentKeys={unreadAgentKeys}
     />
   </>;
 }
+

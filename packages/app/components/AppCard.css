@@ -137,6 +137,12 @@
         .AppCard__btn--publish.btn-secondary:hover:not(.btn-disabled) {
           background: #dcfce7;
         }
+        /* 三节点分享 glyph 在 14px + stroke 2 下糊成一团（看起来像坏字形），
+         * 图标本身存在（react-icons/lu LuShare2），只修可见度。 */
+        .AppCard__btn--publish svg {
+          flex: 0 0 auto;
+          stroke-width: 1.75;
+        }
         .AppCard__btn--delete.btn-secondary {
           background: #fff1f2;
           color: #be123c;

@@ -163,6 +163,40 @@
   margin-top: 2px;
 }
 
+/* 建链失败行：一句人话 + 重试，不用横幅 */
+.share-modal__link-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--error, #cf222e);
+}
+
+.share-modal__link-error span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.share-modal__retry {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.share-modal__retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* 底部操作 */
 .share-modal__footer {
   display: flex;

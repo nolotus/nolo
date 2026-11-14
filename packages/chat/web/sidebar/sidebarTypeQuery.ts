@@ -26,6 +26,34 @@ export const resolveSidebarTypeFromSearch = (
 };
 
 /**
+ * 侧边栏类型筛选的本地偏好 key：chip（ChatSidebar）写入，列表与 chip 共用同一份读取，
+ * 语义是「URL 覆盖本地偏好」（见 resolveEffectiveSidebarType）。
+ */
+export const SIDEBAR_TYPE_PREFERENCE_STORAGE_KEY = "space-sidebar-type-filter";
+
+/**
+ * 读本地偏好；没有有效存储值（首次访问 / 非法值 / SSR / 读写被拒）返回 null。
+ * 返回 null 而不是直接给默认值：「首次默认」由各调用方决定——chip 用
+ * DEFAULT_SIDEBAR_TYPE_FILTER（agent），独立渲染的列表沿用自身的历史默认。
+ */
+export const readStoredSidebarType = (): SidebarTypeFilterId | null => {
+  try {
+    if (typeof window === "undefined") return null;
+    const stored = window.localStorage.getItem(SIDEBAR_TYPE_PREFERENCE_STORAGE_KEY);
+    return isSidebarTypeFilterId(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+};
+
+export const writeStoredSidebarType = (filter: SidebarTypeFilterId): void => {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIDEBAR_TYPE_PREFERENCE_STORAGE_KEY, filter);
+  } catch {}
+};
+
+/**
  * 在保留其它 query 参数的前提下写入侧边栏类型筛选值（同名 key 覆盖，不产生重复 key）。
  */
 export const applySidebarTypeToParams = (

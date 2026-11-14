@@ -244,6 +244,21 @@
   cursor: pointer;
 }
 
+/* 应用分享卡：主操作「打开应用」+ 次操作「查看应用页」并排。 */
+.ShareCard__appActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.ShareCard__detailLink {
+  font-size: var(--type-small);
+  color: var(--textSecondary);
+  text-decoration: underline;
+}
+
 @media (max-width: 640px) {
   .ShareCard {
     padding: 16px;

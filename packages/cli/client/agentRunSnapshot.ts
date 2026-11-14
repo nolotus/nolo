@@ -41,6 +41,8 @@ export type AgentRunSnapshot = {
   status: string;
   /** Display label, or undefined when the run carries no usable identity. */
   agentName?: string;
+  /** Agent identity key, when known. */
+  agentKey?: string;
   /** Task the run was delegated, clipped by the producer. */
   taskPreview?: string;
   /** Caller-supplied short title (display only); absent = none, never inferred. */
@@ -134,6 +136,7 @@ function buildSnapshot(
     readString(parsed.runId) ??
     readString(event.metadata?.runId) ??
     "";
+  const agentKey = readString(parsed.agentKey);
   // runId is deliberately left out of the label chain: it is carried as its own
   // field and rendered as a `#abc12345` suffix, so resolving the label to it
   // would print the same id twice. `title` stays out too — it already renders
@@ -157,6 +160,7 @@ function buildSnapshot(
   return {
     runId,
     status: readString(parsed.status) ?? "running",
+    ...(agentKey ? { agentKey } : {}),
     // The literal `agent` fallback is dropped here rather than at each render
     // site: an unnamed run should render no name row, not the word "agent".
     ...(isAgentNameFallback(label) ? {} : { agentName: label }),

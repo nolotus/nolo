@@ -248,6 +248,7 @@ const ContentActionBar: React.FC<ContentActionBarProps> = ({
         appPrimaryUrl={s.appPrimaryUrl}
         onShowVersionPanel={() => s.setShowVersionPanel(true)}
         onDelete={s.handleDeleteApp}
+        onShare={s.handleOpenShare}
       />
     )}
 
@@ -330,6 +331,8 @@ const ContentActionBar: React.FC<ContentActionBarProps> = ({
           isCommunity={s.shareModalVisibility === "community"}
           initialCopied={s.shareModalCopied}
           onPublishCommunity={s.handlePublishCommunity}
+          errorMessage={s.shareError}
+          onRetry={s.handleOpenShare}
           itemType={s.contentKeyType === "dialog" ? "dialog" : "page"}
         />
       </Suspense>

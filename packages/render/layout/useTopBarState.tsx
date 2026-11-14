@@ -17,9 +17,8 @@ import {
 } from "render/page/docStore";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { selectAllMsgs } from "chat/messages/messageSlice";
-import { selectById, share } from "database/dbSlice";
+import { selectById } from "database/dbSlice";
 import { DataType } from "create/types";
-import { createShareLink, createWebSharePath } from "share/link";
 import { isSystemAdmin } from "core/init";
 import { useClickOutside } from "app/hooks/useClickOutside";
 import {
@@ -32,8 +31,10 @@ import {
   resolveDeleteSuccessPath,
 } from "./deleteBehavior";
 import { deleteDbKey, getDeleteErrorMessage } from "app/hooks/deleteDbKey";
-import { copyTextToClipboard } from "app/utils/clipboard";
 import { useRightSidebar } from "./RightSidebarContext";
+import { useShareWorkflow, type SharePayload } from "./useShareWorkflow";
+import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
+import { buildAppSharePayload } from "app/utils/appSharePayload";
 import { useAppDetail } from "app/hooks/useAppDetail";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import {
@@ -42,6 +43,7 @@ import {
 } from "./topbarUtils";
 import { getRouteDescriptor } from "./mainLayoutViewMode";
 import { openObjectAssistantSidebar } from "chat/dialog/objectAssistantSidebar";
+import { openAppEditorPanel } from "app/actions/openAppEditorPanel";
 import FileDetailsPanel from "render/page/FileDetailsPanel";
 import { useAgentFavorite } from "app/favorite/useAgentFavorite";
 import { useContentFavorite } from "app/favorite/useContentFavorite";
@@ -93,11 +95,6 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
     ? buildAppEditorPath(routeAppKey, routeSpaceId, routeAppServerOrigin)
     : "";
   const [showVersionPanel, setShowVersionPanel] = useState(false);
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [shareModalLink, setShareModalLink] = useState("");
-  const [shareModalVisibility, setShareModalVisibility] = useState<"private" | "community">("private");
-  const [isShareModalLoading, setIsShareModalLoading] = useState(false);
-  const [shareModalCopied, setShareModalCopied] = useState(false);
 
   // doc state now lives in the standalone docStore (peeled out of Redux).
   const page = useDocState();
@@ -400,13 +397,12 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
     }
   }, [dispatch, store, t, page, pageKey, server, token]);
 
-  const handleShare = useCallback(
-    async (visibility: "private" | "community" = "private") => {
-      let shareConfig: {
-        type: DataType.DOC | DataType.DIALOG;
-        data: any;
-        title: string;
-      } | null = null;
+  // 分享流程的唯一实现在 useShareWorkflow（render/layout/useShareWorkflow.ts）；
+  // 这里只负责「当前内容页要分享什么」。
+  const buildSharePayload = useCallback(
+    (visibility: "private" | "community"): SharePayload | null => {
+      void visibility;
+      let shareConfig: SharePayload | null = null;
 
       if (contentKeyType === "page" && pageEntity) {
         shareConfig = {
@@ -429,7 +425,7 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
           });
         if (hasRunningDialogMessages) {
           toast.error(t("shareDialogStillRunning", "对话仍在运行，完成后再分享"));
-          return;
+          return null;
         }
 
         const dialogMessagesSnapshot =
@@ -448,94 +444,48 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
               : dialogEntity,
           title: currentDialog?.title || "Shared Dialog",
         };
+      } else if (contentKeyType === "app") {
+        // 顶栏分享与详情页共用同一份载荷构造（app/utils/appSharePayload），
+        // 不再在这里拼第二份形状；没有运行地址就没有可分享内容。
+        // 门控与详情页一致：只有 owner（服务端下发的 canShare）能分享自己的应用。
+        shareConfig = appDetail?.canShare
+          ? buildAppSharePayload({
+              appId: appDetail.appId,
+              appKey: appDetail.appKey ?? routeAppKey,
+              name: appDetail.userFriendlyName,
+              url: resolvePreferredAppRuntimeUrl(appDetail),
+            })
+          : null;
       }
 
-      if (!shareConfig) return;
-
-      try {
-        const result = await (dispatch as any)(
-          share({
-            type: shareConfig.type,
-            data: shareConfig.data,
-            title: shareConfig.title,
-            visibility,
-          }),
-        ).unwrap();
-
-        const fallbackProtocolLink = createShareLink(result.token);
-        const webLink = server
-          ? `${server}${createWebSharePath(result.token)}`
-          : typeof window !== "undefined"
-            ? `${window.location.origin}${createWebSharePath(result.token)}`
-            : fallbackProtocolLink;
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(
-            new CustomEvent("nolo:share-created", {
-              detail: { token: result.token },
-            }),
-          );
-        }
-
-        setShareModalLink(webLink);
-        setShareModalVisibility(visibility);
-
-        try {
-          await copyTextToClipboard(webLink);
-          setShareModalCopied(true);
-          toast.success(
-            visibility === "community"
-              ? t("sharePublished", "已分享到社区，链接已复制")
-              : t("shareLinkCopied", "分享链接已复制"),
-          );
-        } catch (copyError) {
-          setShareModalCopied(false);
-          console.warn("Failed to copy share link:", copyError);
-          toast.success(
-            `${t("shareCopyFailed", "复制链接失败，请手动复制")}: ${webLink}`,
-            { duration: 8000 },
-          );
-        }
-        return webLink;
-      } catch (e: any) {
-        toast.error(
-          `${t("shareFailed", "分享失败")}${e?.message ? `: ${e.message}` : ""}`,
-        );
-        throw e;
-      }
+      return shareConfig;
     },
     [
+      appDetail,
       contentKeyType,
       currentDialog?.title,
       dialogEntity,
-      dispatch,
       page?.title,
       pageEntity,
-      server,
       store,
       t,
-    ],
+    ]
   );
 
-  const handleOpenShare = useCallback(async () => {
-    setIsShareModalOpen(true);
-    setIsShareModalLoading(true);
-    try {
-      await handleShare("private");
-    } catch {
-      // 错误已由 handleShare 弹出 toast
-    } finally {
-      setIsShareModalLoading(false);
-    }
-  }, [handleShare]);
+  const {
+    isShareModalOpen,
+    shareModalLink,
+    shareModalVisibility,
+    isShareModalLoading,
+    shareModalCopied,
+    shareError,
+    setIsShareModalOpen,
+    handleShare,
+    handleOpenShare,
+    handlePublishCommunity,
+  } = useShareWorkflow(buildSharePayload);
 
-  const handlePublishCommunity = useCallback(async () => {
-    setIsShareModalLoading(true);
-    try {
-      await handleShare("community");
-    } finally {
-      setIsShareModalLoading(false);
-    }
-  }, [handleShare]);
+  const navigate = useNavigate();
 
   const handleToggleObjectAssistant = useCallback(() => {
     if (!objectAssistantKind) return;
@@ -545,15 +495,31 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
       close();
       return;
     }
+    if (objectAssistantKind === "app") {
+      // app 的「对象助手」与详情页 / 卡片里的「编辑」共用同一个入口和同一个
+      // sidebar id（app/actions/openAppEditorPanel），同一 app 只有一个面板。
+      openAppEditorPanel({
+        open,
+        appKey: objectKey,
+        onFallback: () => navigate(appEditorUrl),
+      });
+      return;
+    }
     openObjectAssistantSidebar(open, {
       kind: objectAssistantKind,
       contentKey: objectKey,
-      sidebarId:
-        objectAssistantKind === "app"
-          ? buildAppAssistantSidebarId(objectKey)
-          : buildObjectAssistantSidebarId(objectAssistantKind, objectKey),
+      sidebarId: buildObjectAssistantSidebarId(objectAssistantKind, objectKey),
     });
-  }, [close, isObjectAssistantOpen, objectAssistantKind, open, pageKey, routeAppKey]);
+  }, [
+    appEditorUrl,
+    close,
+    isObjectAssistantOpen,
+    navigate,
+    objectAssistantKind,
+    open,
+    pageKey,
+    routeAppKey,
+  ]);
 
   const handleToggleFileDetails = useCallback(() => {
     if (!pageKey || !isFileContent) return;
@@ -567,8 +533,6 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
     });
   }, [pageKey, isFileContent, isFileDetailsOpen, open, close]);
 
-
-  const navigate = useNavigate();
 
   // ponytail: topbar 删除按钮直接走删除 + 回收站 toast，不再弹确认。
 const handleOpenDeleteConfirm = useCallback(async () => {
@@ -743,6 +707,7 @@ const handleOpenDeleteConfirm = useCallback(async () => {
     shareModalVisibility,
     shareModalCopied,
     isShareModalLoading,
+    shareError,
     handleOpenShare,
     handlePublishCommunity,
     handleToggleObjectAssistant,

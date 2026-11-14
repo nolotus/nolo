@@ -1,4 +1,19 @@
 
+## 0.233.0 (2026-11-14)
+
+### Features
+
+* **app:** 详情页与编辑器重做，分享收敛为单一实现 ([0b437cd](https://github.com/nolotus/bun-nolo/commit/0b437cdb789b5b2a7e4f9d1cf71e2ec9176b1b0f))
+* **cli:** /update 补齐 i18n，支持 status/force 并在已最新时跳过安装 ([5d7c745](https://github.com/nolotus/bun-nolo/commit/5d7c7452f4143b8df28fd436e19a7ad1d5adccf0))
+* **explore:** 增加「应用」分类与公开应用落地页 ([73f923c](https://github.com/nolotus/bun-nolo/commit/73f923ccc499f49178040ead0f8d7822de2f66fc))
+
+### Bug Fixes
+
+* **cli:** auto-resolve agentName and eliminate subagent fallback for legacy records ([0b9f538](https://github.com/nolotus/bun-nolo/commit/0b9f5382c2a0ae2b9ffc5b0246818f18bbf20373))
+* **server:** 应用分享归属校验、可见性门禁与失败页收敛 ([0eed633](https://github.com/nolotus/bun-nolo/commit/0eed633e69796fea18678b7f2b586fbcdb1e5097))
+* **sidebar:** 类型筛选在内容页跳转后回落为全部 ([39e5ddf](https://github.com/nolotus/bun-nolo/commit/39e5ddfda5e84eba73da51bca9070e531a6bc808))
+
+
 ## 0.232.2 (2026-11-14)
 
 ### Bug Fixes

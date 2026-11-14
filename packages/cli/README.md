@@ -39,6 +39,7 @@ nolo update
 
 ```text
 /update
+/update status
 ```
 
 发布的 npm 包在纯 Node.js 上运行（不需要 Bun）。打包入口是一个包含 `#!/usr/bin/env node` shebang 的单一 bundle `index.js`。
@@ -120,7 +121,7 @@ nolo whoami
 nolo agent list
 ```
 
-在 TUI 内部，`/update` 是全局 `nolo update` 命令的快捷方式。
+在 TUI 内部，`/update` 是全局 `nolo update` 命令的快捷方式：`/update` 先检查是否有新版本（确知已最新就不重复安装），`/update status` 只查看版本与渠道，`/update force` 跳过检查强制重装。
 
 ```bash
 nolo --help
@@ -235,7 +236,7 @@ nolo table add-column --table meta-<userId>-<tableId> --schema-write-ok --name "
 
 
 在当前 TUI 中，支持的斜杠命令包括：
-`/agent`、`/agents`、`/altscreen`（`<on|off>`）、`/clear`、`/compact`、`/context`（别名 `/ctx`）、`/copy`、`/customize`、`/doc`、`/exit`、`/help`、`/logs`、`/history`、`/jobs`、`/lang`、`/login`、`/mouse`、`/new`、`/procs`、`/profile`、`/quit`、`/resume`、`/runtime`、`/skill`、`/stop`、`/switch`、`/tasks`、`/theme`、`/update`（映射到 `nolo update`）、`/version`。
+`/agent`、`/agents`、`/altscreen`（`<on|off>`）、`/clear`、`/compact`、`/context`（别名 `/ctx`）、`/copy`、`/customize`、`/doc`、`/exit`、`/help`、`/logs`、`/history`、`/jobs`、`/lang`、`/login`、`/mouse`、`/new`、`/procs`、`/profile`、`/quit`、`/resume`、`/runtime`、`/skill`、`/stop`、`/switch`、`/tasks`、`/theme`、`/update`（映射到 `nolo update`，`/update status` 只查看、`/update force` 强制重装）、`/version`。
 
 以下为规划中的产品方向示例（尚未在 TUI 中实现）：
 

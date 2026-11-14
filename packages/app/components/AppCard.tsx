@@ -14,10 +14,16 @@ import {
 import { useNavigate } from "app/routing";
 import { Button as RacButton } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { useAppDispatch } from "app/store";
-import { share } from "database/dbSlice";
-import { DataType } from "create/types";
-import { toast } from "app/utils/toast"
+import { useAppDispatch, useAppSelector } from "app/store";
+import { useUserId } from "identity";
+import { toast } from "app/utils/toast";
+import { copyTextToClipboard } from "app/utils/clipboard";
+import { selectRuntimeSnapshot } from "app/stateViews/runtime";
+import { buildAppSharePayload } from "app/utils/appSharePayload";
+import {
+  currentWindowOrigin,
+  runShare,
+} from "render/layout/shareWorkflowCore";
 import Button from "render/web/ui/Button";
 import { Menu, MenuItem, MenuTrigger } from "render/web/ui/Menu";
 import { ConfirmModal } from "render/web/ui/modal/ConfirmModal";
@@ -26,6 +32,7 @@ import {
   buildAppDetailPath,
   buildAppEditorPath,
 } from "app/constants/appEditor";
+import { useOpenAppEditorPanel } from "app/actions/openAppEditorPanel";
 import { resolveAppRouteKey } from "app/utils/appKeys";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { DomainBindingPanel } from "./DomainBindingPanel";
@@ -84,6 +91,9 @@ const AppCard: React.FC<AppCardProps> = ({
   const navigate = useNavigate();
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
+  const { currentServer } = useAppSelector(selectRuntimeSnapshot);
+  const currentUserId = useUserId();
+  const openEditorPanel = useOpenAppEditorPanel();
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -111,7 +121,11 @@ const AppCard: React.FC<AppCardProps> = ({
   const canOpenDetail = !!appRouteKey || !!onOpenDetail;
   const canToggleVisibility = isManageMode && !!onShare && !!app.appId;
   const canDelete = isManageMode && !!onDelete;
-  const canPublish = isManageMode && !!app.appId && !!accessUrl;
+  // 「发布到社区」只给 app 的 owner：owner 来自记录里的 userId（服务端真值，见
+  // app/types/appSummary.ts 的 toAppSummary），不是客户端推测。非 owner 直接不渲染，
+  // 不给「看起来能点、点了 403」的假按钮（review 假按钮）。
+  const isOwner = !!app.ownerUserId && app.ownerUserId === currentUserId;
+  const canPublish = isManageMode && isOwner && !!app.appId && !!accessUrl;
   const canManageDomains =
     isManageMode && !!app.appId && !!onBindDomain && !!onUnbindDomain && !!onListDomains;
 
@@ -130,9 +144,18 @@ const AppCard: React.FC<AppCardProps> = ({
       onOpenEditor();
       return;
     }
-    if (appRouteKey) {
-      navigate(buildAppEditorPath(appRouteKey, app.spaceId, app.serverOrigin));
-    }
+    if (!appRouteKey) return;
+    // 编辑 = 滑出右侧对象助手面板（与详情页 / 顶栏对象助手同一个 sidebar id）；
+    // 卡片被渲染在没有右侧栏壳的环境时退回原来的整页编辑器路径。
+    openEditorPanel(appRouteKey, () =>
+      navigate(buildAppEditorPath(appRouteKey, app.spaceId, app.serverOrigin))
+    );
+  };
+
+  // 「完整编辑器」是显式退路（?edit=true&mode=chat，code 模式与 inspector 走它）。
+  const handleOpenFullEditor = () => {
+    if (!appRouteKey) return;
+    navigate(buildAppEditorPath(appRouteKey, app.spaceId, app.serverOrigin));
   };
 
   const handleBodyKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -178,18 +201,34 @@ const AppCard: React.FC<AppCardProps> = ({
   };
 
   const handlePublish = async () => {
-    if (!app.appId || !accessUrl || publishing) return;
+    // 与详情页「分享」共用同一份载荷构造 + 同一个分发点（render/layout/shareWorkflowCore），
+    // 不再自己拼 share({...})：字段一漂移，分享落地页就读不到运行地址/appKey。
+    const payload = buildAppSharePayload({
+      appId: app.appId,
+      appKey: app.appKey,
+      name: app.name,
+      url: accessUrl,
+    });
+    if (!payload || publishing) return;
     setPublishing(true);
     try {
-      await dispatch(
-        share({
-          type: DataType.APP,
-          data: { appId: app.appId, name: app.name, url: accessUrl },
-          title: app.name,
-          visibility: "community",
-        })
-      ).unwrap();
-      toast.success(t("appCard_publish_success"));
+      const { webLink } = await runShare({
+        dispatch: dispatch as unknown as Parameters<typeof runShare>[0]["dispatch"],
+        payload,
+        visibility: "community",
+        server: currentServer,
+        windowOrigin: currentWindowOrigin(),
+      });
+      // 与 useShareWorkflow 的 community 分支一致：链接进剪贴板 + 同一句成功提示。
+      try {
+        await copyTextToClipboard(webLink);
+        toast.success(t("sharePublished", "已分享到社区，链接已复制"));
+      } catch {
+        toast.success(
+          `${t("shareCopyFailed", "复制链接失败，请手动复制")}: ${webLink}`,
+          { duration: 8000 }
+        );
+      }
     } catch {
       toast.error(t("appCard_publish_failed"));
     } finally {
@@ -218,6 +257,9 @@ const AppCard: React.FC<AppCardProps> = ({
     switch (String(key)) {
       case "edit":
         handleOpenEditor();
+        break;
+      case "fullEditor":
+        handleOpenFullEditor();
         break;
       case "publish":
         void handlePublish();
@@ -313,6 +355,9 @@ const AppCard: React.FC<AppCardProps> = ({
             <Menu onAction={handleMenuAction}>
               <MenuItem id="edit">
                 {t("appEditor_chatMode_title", "对话编辑")}
+              </MenuItem>
+              <MenuItem id="fullEditor">
+                {t("appEditor_openFullEditor", "打开完整编辑器")}
               </MenuItem>
               {canPublish && (
                 <MenuItem id="publish">
@@ -430,11 +475,20 @@ const AppCard: React.FC<AppCardProps> = ({
         >
           {t("appEditor_chatMode_title", "对话编辑")}
         </Button>
+        <Button
+          variant="secondary"
+          className="AppCard__btn"
+          icon={<LuExternalLink size={14} aria-hidden="true" />}
+          onClick={handleOpenFullEditor}
+          disabled={!appRouteKey}
+          title={t("appEditor_openFullEditor", "打开完整编辑器")}
+          aria-label={t("appEditor_openFullEditor", "打开完整编辑器")}
+        />
         {canPublish && (
           <Button
             variant="secondary"
             className="AppCard__btn AppCard__btn--publish"
-            icon={<LuShare2 size={14} aria-hidden="true" />}
+            icon={<LuShare2 size={16} aria-hidden="true" />}
             onClick={handlePublish}
             loading={publishing}
             title={t("appCard_btn_publish_tip")}
