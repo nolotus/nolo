@@ -17,7 +17,8 @@ import type {
  * 事件、loading/错误状态）只有这一处。
  *
  * 「构造载荷 + 调 thunk + 生成链接」这一层在 `shareWorkflowCore.runShare`，
- * 没弹窗的一次性动作（`app/components/AppCard.tsx` 的「发布到社区」）直接复用它，
+ * 没弹窗的一次性动作直接复用它（历史上是 AppCard 的「发布到社区」，该入口已于
+ * 2026-11-14 随 AppCard 去管理化移除），
  * 不另写一份 dispatch。
  *
  * **本文件不依赖 Redux**（不 import `app/store` / `react-redux` / RTK）：真正要
@@ -76,7 +77,7 @@ export function useShareWorkflow(
       if (!payload) return null;
 
       try {
-        // 与 AppCard「发布到社区」同一个分发点（shareWorkflowCore.runShare）：
+        // 与 app 页面的「发布到社区」同一个分发点（shareWorkflowCore.runShare）：
         // visibility 必须进 thunk —— private = 持有链接可见（分享页按 token 读取）。
         // dispatch / server / windowOrigin 由调用方在 createShareLink 里绑好。
         const { webLink } = await createShareLink(payload, visibility);

@@ -66,8 +66,7 @@ import {
 } from "app/utils/myContentItems";
 import { getCompactFileMetaLabel } from "app/utils/fileUtils";
 import type { Agent } from "app/types";
-import type { AppSummary } from "app/types/appSummary";
-import { useMyAppActions, useMyAppListData } from "app/hooks/useMyApps";
+import { useMyAppListData } from "app/hooks/useMyApps";
 import { getSpaceContentTypeLabel } from "create/space/contentLabels";
 
 /** Space-style selection circle; toggle is also available via card onAction. */
@@ -388,12 +387,8 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
 
   const {
     apps: managedApps,
-    setApps: setManagedApps,
     loading: appsLoading,
   } = useMyAppListData(null, { enabled: isAppsManageView });
-
-  const { deleteApp, shareApp, bindDomain, unbindDomain, listDomains } =
-    useMyAppActions({ setApps: setManagedApps });
 
   const tabs = useMemo(
     () =>
@@ -539,11 +534,6 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
       ),
     [managedApps],
   );
-  const handleDeleteOwnedApp = async (app: AppSummary) => {
-    const deleted = await deleteApp(app);
-    if (!deleted) return false;
-    return true;
-  };
 
   const activeTabLabel = useMemo(
     () =>
@@ -946,7 +936,6 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
                 >
                   <AppCard
                     app={managedApp ?? item.app}
-                    mode={isAppsManageView ? "manage" : "browse"}
                     gallery={isAppsManageView}
                     contextLabel={
                       isAppsManageView
@@ -961,15 +950,6 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
                         navigate(buildAppEditorTarget(item)),
                       )
                     }
-                    onDelete={
-                      isAppsManageView
-                        ? (app) => handleDeleteOwnedApp(app)
-                        : undefined
-                    }
-                    onShare={isAppsManageView ? shareApp : undefined}
-                    onBindDomain={isAppsManageView ? bindDomain : undefined}
-                    onUnbindDomain={isAppsManageView ? unbindDomain : undefined}
-                    onListDomains={isAppsManageView ? listDomains : undefined}
                   />
                 </GridListItem>
               );

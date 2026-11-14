@@ -477,6 +477,109 @@
   line-height: var(--leading-relaxed);
 }
 
+/* ── 管理弹窗（owner-only）：可见性三档 + 自定义域名 ─────
+   内容全部走既有变量（--border / --text / --primary / --backgroundSecondary），
+   域名面板复用 DomainBindingPanel 自己的样式，不在这里重画。 */
+
+.AppDetailPage__manage {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.AppDetailPage__manageSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.AppDetailPage__manageTitle {
+  margin: 0;
+  font-size: var(--fontSize-base);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.AppDetailPage__manageHint {
+  margin: 0;
+  font-size: var(--fontSize-xs, 12px);
+  line-height: 1.5;
+  color: var(--textSecondary);
+}
+
+.AppDetailPage__visibilityGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.AppDetailPage__visibilityOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--backgroundSecondary, transparent);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.AppDetailPage__visibilityOption:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+}
+
+.AppDetailPage__visibilityOption.is-selected {
+  border-color: color-mix(in srgb, var(--primary) 60%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--backgroundSecondary, transparent));
+}
+
+.AppDetailPage__visibilityOption:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.AppDetailPage__visibilityIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  color: var(--textSecondary);
+}
+
+.AppDetailPage__visibilityOption.is-selected .AppDetailPage__visibilityIcon {
+  color: var(--primary);
+}
+
+.AppDetailPage__visibilityText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.AppDetailPage__visibilityLabel {
+  font-size: var(--fontSize-base);
+  font-weight: 500;
+}
+
+.AppDetailPage__visibilityDesc {
+  font-size: var(--fontSize-xs, 12px);
+  line-height: 1.5;
+  color: var(--textSecondary);
+}
+
+.AppDetailPage__visibilitySaving {
+  margin-left: auto;
+  color: var(--textSecondary);
+}
+
 /* ── 窄/矮视口降级 ──────────────────────────────────────
    宽度 < 720px 或高度 < 520px：iframe 撑满会吃掉浏览器自身的滚动体验，
    回到「页面单滚动 + 预览固定 60vh」，展开的版本列表也不再浮层。 */

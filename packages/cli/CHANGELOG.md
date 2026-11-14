@@ -1,4 +1,11 @@
 
+## 0.223.0-alpha.1 (2026-11-14)
+
+### Features
+
+* **app:** 域名与可见性入口迁到 app 页面，AppCard 去管理化 ([ce29645](https://github.com/nolotus/bun-nolo/commit/ce296457db686973004dcc2e21349b3e006d9ef6))
+
+
 ## 0.222.0-alpha.2 (2026-11-14)
 
 ### Bug Fixes

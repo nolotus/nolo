@@ -3,7 +3,8 @@
  *
  * 事实依据（2026-11 核对，勿凭记忆改）：
  * - 应用分享把 `{ appId, name, url, appKey? }` 写进 `share.data`（见
- *   `packages/app/components/AppCard.tsx` / `packages/app/components/AppSharePanel.tsx`），
+ *   `packages/app/components/AppSharePanel.tsx`；历史上 AppCard 也写过，
+ *   该入口 2026-11-14 随 AppCard 去管理化移除），
  *   服务端 `toShareSummary` 只把 `data.url` 透出为 `ShareSummary.url`，**没有** appKey 字段。
  * - `url` 是应用运行地址 `/apps/<appId>`（沙箱入口）。这层对访客是可打开的：
  *   `resolveSandboxRuntimeContext` 只在「有 spaceId 且 private」时拦空间成员。
