@@ -82,6 +82,7 @@ import AgentAvatar from "ai/agent/web/AgentAvatar";
 import ContentIcon from "render/contentIcon/ContentIcon";
 
 import DeleteContentButton from "./components/DeleteContentButton";
+import { canDeleteSidebarItem } from "./canDeleteSidebarItem";
 import { IconButton } from "./SidebarItemActions";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 
@@ -380,7 +381,11 @@ function SidebarItemRow({
   const showContextMenu = type !== "app";
   const showMoreMenu = showContextMenu || type === "app";
   // 删除内容本体只对自有内容开放；他人内容即使可管理空间也不给这个入口。
-  const canDeleteOwnedContent = canDeleteContent ?? !readOnly;
+  const canDeleteOwnedContent = canDeleteSidebarItem({
+    type,
+    readOnly,
+    canDeleteContent,
+  });
   const canEditInSpace = Boolean(effectiveSpaceId);
   const canMoveToSpace = type !== "app";
   // 「加入对话」已移入「更多」菜单；行内改为置顶按钮，可见性改由 pinAction 决定。
@@ -679,7 +684,7 @@ function SidebarItemRow({
                 aria-pressed={pinAction.pinned}
               />
             )}
-            {showContextMenu && canDeleteOwnedContent && (
+            {canDeleteOwnedContent && (
               <DeleteContentButton
                 contentKey={contentKey}
                 title={displayTitle}

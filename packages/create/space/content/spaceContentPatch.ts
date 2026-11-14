@@ -150,7 +150,7 @@ export const applyContentRecordSpaceId = async (
 /**
  * 内容实体记录的归属空间（`spaceId`）必须跟随空间链接一起变化。
  *
- * 侧边栏工作视图的分组依据是 `item.spaceId`（「其他空间 / 未关联空间」两组
+ * 侧边栏工作视图的分组依据是 `item.spaceId`（「其他空间 / 空间外」两组
  * 完全由它决定，见 chat/web/sidebar/workDialogSpaceGroups.ts），只改 space 记录
  * 的 contents 链接会造成「空间链接已迁移、实体记录还挂在旧空间」的双真值。
  *

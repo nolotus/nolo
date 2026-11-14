@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "app/routing";
+import { useLocation, useNavigate } from "app/routing";
 import { AppRoutePaths } from "app/constants/routePaths";
 import {
   LuEllipsis,
@@ -15,6 +15,7 @@ import { useAddCategory } from "create/space/hooks/useSpaceData";
 import { AddCategoryModal } from "create/space/category/AddCategoryModal";
 import CategoryHeader from "create/space/category/CategoryHeader";
 import { UNCATEGORIZED_ID } from "create/space/constants";
+import type { HomeScope } from "./homeScopeProjection";
 import {
   OTHER_SPACES_GROUP,
   canManageSpaceCategories,
@@ -25,14 +26,17 @@ import {
   type WorkSpaceRecord,
 } from "./sidebar/workDialogSpaceGroups";
 
-export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], records, children }: {
+export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], records, homeScope, onSelectHomeScope, children }: {
   groups: readonly WorkDialogSpaceGroup[];
   userId: string;
   memberSpaces?: readonly { spaceId: string; userId?: string; role?: string; ownerId?: string }[];
   records?: ReadonlyMap<string, WorkSpaceRecord>;
+  homeScope?: HomeScope;
+  onSelectHomeScope?: (scope: HomeScope) => void;
   children: (group: WorkDialogSpaceGroup) => React.ReactNode;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation("space");
   const addCategoryInSpace = useAddCategory();
   const [activeAddCategorySpaceId, setActiveAddCategorySpaceId] = useState<string | null>(null);
@@ -74,7 +78,8 @@ export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], recor
     style={{ maxHeight: "60vh", overflowY: "auto", overscrollBehavior: "contain", minHeight: 0 }}>
     {groups.map((group, index) => {
       const key = JSON.stringify(group.spaceId);
-      const expanded = isWorkDialogSpaceGroupExpanded(group.spaceId, index, activePreferences[key]);
+      const defaultExpanded = group.spaceId === null && homeScope?.kind === "noSpace";
+      const expanded = isWorkDialogSpaceGroupExpanded(group.spaceId, index, activePreferences[key] ?? (defaultExpanded ? true : undefined));
       const record = group.spaceId ? records?.get(group.spaceId) : undefined;
       const canManage = canManageSpaceCategories({ spaceId: group.spaceId, userId, memberSpaces, record });
       return <section key={key} data-hook="work-dialog-space-group" data-space-id={group.spaceId ?? ""}>
@@ -87,6 +92,19 @@ export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], recor
         {group.spaceId && group.spaceId !== OTHER_SPACES_GROUP ? <a data-hook="space-workspace-chat" data-workspace-navigation="true" href={`${AppRoutePaths.CHAT}?spaceId=${encodeURIComponent(group.spaceId)}`}
           onClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigate(`${AppRoutePaths.CHAT}?spaceId=${encodeURIComponent(group.spaceId!)}`); } }}
           style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "inherit", textDecoration: "none" }} title={group.label}>{group.label}</a>
+          : group.spaceId === null ? <button type="button" data-hook="space-workspace-no-space" data-workspace-navigation="true"
+            aria-current={homeScope?.kind === "noSpace" ? "true" : undefined}
+            onClick={() => {
+              const nextScope: HomeScope = homeScope?.kind === "noSpace" ? { kind: "all" } : { kind: "noSpace" };
+              onSelectHomeScope?.(nextScope);
+              if (nextScope.kind === "noSpace") {
+                if (location.pathname.startsWith("/space") || location.search.includes("spaceId=")) {
+                  navigate(AppRoutePaths.CHAT);
+                }
+              }
+            }}
+            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "inherit", textDecoration: "none", border: "none", background: "transparent", padding: 0, font: "inherit", textAlign: "left", cursor: "pointer" }}
+            title={group.label}>{group.label}</button>
           : <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={group.label}>{group.label}</span>}
         {group.spaceId && group.spaceId !== OTHER_SPACES_GROUP && <button type="button" data-hook="space-workspace-more"
           aria-haspopup="menu"
@@ -172,8 +190,7 @@ export function WorkDialogCategoryGroups({ groups, spaceId, userId, canEdit = fa
 }) {
   const { t } = useTranslation("space");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [addCategoryTarget, setAddCategoryTarget] = useState<string | null>(null);
-  const addCategoryInSpace = useAddCategory();
+  // 同一入口已收敛到空间标题行的更多菜单，列表底部重复入口多余。
   return <div data-hook="work-dialog-categories">{groups.map(group => {
     const key = JSON.stringify([userId, spaceId, group.id]);
     const closed = collapsed[key] ?? false;
@@ -191,33 +208,5 @@ export function WorkDialogCategoryGroups({ groups, spaceId, userId, canEdit = fa
       {!closed && <div style={{ paddingInlineStart: "var(--space-3)" }}>{children(group.rows)}</div>}
     </section>;
   })}
-  {canEdit && Boolean(spaceId && spaceId !== OTHER_SPACES_GROUP) && <button
-    type="button"
-    data-hook="work-dialog-add-category-button"
-    onClick={() => setAddCategoryTarget(spaceId)}
-    style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", width: "100%", padding: "var(--space-2) var(--space-3)", border: "none", background: "transparent", color: "var(--textSecondary, var(--text))", font: "inherit", fontSize: "var(--fontSize-sm)", fontWeight: 500, textAlign: "left", cursor: "pointer" }}
-  >
-    <LuFolderPlus size={14} aria-hidden="true" />
-    <span>{t("create_new_category", "新建分类")}</span>
-  </button>}
-  {addCategoryTarget && <AddCategoryModal
-    isOpen={Boolean(addCategoryTarget)}
-    onClose={() => setAddCategoryTarget(null)}
-    onAddCategory={async (name) => {
-      const target = addCategoryTarget;
-      // Re-validate at submit time: authority or the selected space may have changed
-      // while the modal was open (account switch, revoked membership, space switched).
-      if (!canEdit || !target || target !== spaceId || spaceId === OTHER_SPACES_GROUP) {
-        setAddCategoryTarget(null);
-        return;
-      }
-      try {
-        await addCategoryInSpace({ spaceId: target, name });
-        setAddCategoryTarget(null);
-      } catch (error) {
-        console.error("新建分类失败:", error);
-      }
-    }}
-  />}
   </div>;
 }

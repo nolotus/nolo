@@ -1,20 +1,15 @@
 // create/space/components/DeleteContentButton.tsx
 
 import "./DeleteContentButton.css";
-import React, { useState } from "react";
+import React from "react";
 import { LuTrash2 } from "react-icons/lu";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "app/routing";
-import { selectCurrentSpaceId } from "create/space/spaceCurrentSelectors";
-import { normalizeSpaceId } from "create/space/spaceKeys";
-import { useAppDispatch, useAppSelector } from "app/store";
-import { toast } from "app/utils/toast"
-import { deleteDbKey, getDeleteErrorMessage } from "app/hooks/deleteDbKey";
 import {
-  isViewingDeletedContent,
-  resolveDeleteSuccessPath,
-} from "render/layout/deleteBehavior";
-import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
+  useDeleteContentEntry,
+  type DeleteContentEntryTarget,
+} from "./useDeleteContentEntry";
+
+export { useDeleteContentEntry, type DeleteContentEntryTarget };
 
 interface DeleteContentButtonProps
   extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> {
@@ -45,16 +40,7 @@ function DeleteContentButton({
   ...rest
 }: DeleteContentButtonProps) {
   const { t } = useTranslation(["chat", "common"]);
-  const dispatch = useAppDispatch();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const currentSpaceId = useCurrentSpaceId();
-  const effectiveSpaceId =
-    spaceIdOverride === undefined ? currentSpaceId : spaceIdOverride;
-
-  const [isDeleting, setIsDeleting] = useState(false);
-  const safeTitle =
-    typeof title === "string" && title.trim().length > 0 ? title : contentKey;
+  const { deleteContent, isDeleting } = useDeleteContentEntry();
 
   const handleDelete = async (event?: React.MouseEvent) => {
     event?.preventDefault();
@@ -62,44 +48,12 @@ function DeleteContentButton({
     onPropClick?.(event as React.MouseEvent);
     onPropAction?.();
     if (isDeleting) return;
-    setIsDeleting(true);
-    try {
-      await dispatch(
-        deleteDbKey(
-          {
-            contentKey,
-            serverOrigin: sourceServerOrigin,
-          },
-          effectiveSpaceId,
-          // 侧栏行删除路径：执行端按实体 owner 复核一次，不只依赖 UI 门控。
-          { requireOwnership: true }
-        )
-      );
-      toast.success(t("deleteMovedToTrash", { title: safeTitle }));
-
-      // Sidebar delete while viewing that page/dialog: leave the dead route.
-      if (isViewingDeletedContent(location.pathname, contentKey)) {
-        const redirect =
-          resolveDeleteSuccessPath({
-            contentKey,
-            routeSpaceId: effectiveSpaceId,
-          }) ??
-          (effectiveSpaceId
-            ? `/space/${normalizeSpaceId(effectiveSpaceId)}/contents`
-            : undefined);
-        if (redirect) {
-          navigate(redirect, { replace: true });
-        } else {
-          navigate(-1);
-        }
-      }
-    } catch (error) {
-      const message = getDeleteErrorMessage(error, t("deleteFailed"));
-      console.error("Failed to delete content:", message, error);
-      toast.error(message === t("deleteFailed") ? message : `${t("deleteFailed")}: ${message}`);
-    } finally {
-      setIsDeleting(false);
-    }
+    await deleteContent({
+      contentKey,
+      title,
+      spaceIdOverride,
+      sourceServerOrigin,
+    });
   };
 
   const hasCustomChildren = children != null;

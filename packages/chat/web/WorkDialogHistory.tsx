@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import type { MyContentListItem } from "app/utils/myContentItems";
+import { normalizeSpaceId } from "database-engine/spaceLinkAccess";
 import { mergeOwnedHistoryItems } from "./mergeOwnedHistoryItems";
 import { useOwnedDialogPages } from "database/hooks/useOwnedDialogPages";
 import { WorkDialogGroupsPreview } from "./WorkDialogGroupsPreview";
@@ -8,6 +9,7 @@ import type { SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
 
 type Props = {
   homeScope?: HomeScope;
+  onSelectHomeScope?: (scope: HomeScope) => void;
   items: readonly MyContentListItem[];
   userId: string;
   enabled?: boolean;
@@ -27,6 +29,7 @@ export function WorkDialogHistory({
   userId,
   enabled = true,
   homeScope = { kind: "all" },
+  onSelectHomeScope,
   includeNonDialogs = false,
   typeFilter,
   unreadAgentKeys,
@@ -34,12 +37,19 @@ export function WorkDialogHistory({
   const remoteEnabled = enabled && homeScope.kind !== "project";
   const pages = useOwnedDialogPages(remoteEnabled && Boolean(userId));
   const merged = useMemo(() => mergeOwnedHistoryItems(items, remoteEnabled ? pages.records : [], userId), [items, pages.records, userId, remoteEnabled]);
+  const scopedMerged = useMemo(() => {
+    if (homeScope.kind === "noSpace") {
+      return merged.filter((item) => !normalizeSpaceId(item.spaceId));
+    }
+    return merged;
+  }, [merged, homeScope.kind]);
 
   return <>
     <WorkDialogGroupsPreview
-      items={merged}
+      items={scopedMerged}
       userId={userId}
       homeScope={homeScope}
+      onSelectHomeScope={onSelectHomeScope}
       includeNonDialogs={includeNonDialogs}
       typeFilter={typeFilter}
       paginationOwner={remoteEnabled}

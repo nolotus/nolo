@@ -14,6 +14,7 @@ export default {
       workspace_open: "Open space: {{name}}",
       workspace_other: "Other spaces",
       workspace_unassociated: "Unassociated space",
+      workspace_unassociated_empty: "No content outside spaces yet",
 
       // === 基础操作 ===
       create: "Create Space",
@@ -401,7 +402,8 @@ export default {
       workspace_new_dialog: "在{{name}}新建对话",
       workspace_open: "打开空间：{{name}}",
       workspace_other: "其他空间",
-      workspace_unassociated: "未关联空间",
+      workspace_unassociated: "空间外",
+      workspace_unassociated_empty: "空间外还没有内容",
 
       // === 基础操作 ===
       create: "创建空间",
@@ -779,7 +781,8 @@ export default {
       workspace_new_dialog: "在{{name}}新增對話",
       workspace_open: "開啟空間：{{name}}",
       workspace_other: "其他空間",
-      workspace_unassociated: "未關聯空間",
+      workspace_unassociated: "空間外",
+      workspace_unassociated_empty: "空間外還沒有內容",
 
       // === 基础操作 ===
       create: "創建空間",
@@ -1157,6 +1160,7 @@ export default {
       workspace_open: "スペースを開く：{{name}}",
       workspace_other: "その他のスペース",
       workspace_unassociated: "未関連のスペース",
+      workspace_unassociated_empty: "スペース外のコンテンツはまだありません",
 
       // === 基本操作 ===
       create: "スペースを作成",
@@ -1551,6 +1555,7 @@ export default {
       workspace_open: "Space öffnen: {{name}}",
       workspace_other: "Andere Spaces",
       workspace_unassociated: "Nicht zugeordneter Space",
+      workspace_unassociated_empty: "Noch keine Inhalte außerhalb von Spaces",
       create: "Space erstellen",
       name: "Space-Name",
       description: "Beschreibung",
@@ -1866,6 +1871,7 @@ export default {
       workspace_open: "Abrir espacio: {{name}}",
       workspace_other: "Otros espacios",
       workspace_unassociated: "Espacio no asociado",
+      workspace_unassociated_empty: "Aún no hay contenido fuera de los espacios",
       create: "Crear espacio",
       name: "Nombre del espacio",
       description: "Descripción",

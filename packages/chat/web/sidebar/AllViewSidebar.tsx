@@ -51,6 +51,8 @@ import {
 } from "app/utils/myContentItems";
 import { useUserId } from "identity";
 import SidebarItemRow from "create/space/SidebarItemRow";
+import { useDeleteContentEntry } from "create/space/components/useDeleteContentEntry";
+import { canDeleteSidebarItem } from "create/space/canDeleteSidebarItem";
 import { buildHierarchyRows, buildHierarchyDisplayRows, isSectionHeader, type HierarchyRow } from "./sidebarHierarchyRows";
 import { aggregateRunningAgentKeys, aggregateRunningAncestors, type AggregationItem } from "./runningDialogAggregation";
 import { useDialogStatuses } from "create/space/spaceDialogStore";
@@ -225,6 +227,7 @@ const RecentVirtualList: React.FC<{
   const menuAnchorKeyRef = useRef<string | null>(null);
   const [editSignal, setEditSignal] = useState<{ key: string; nonce: number } | null>(null);
   const [appDeleteRequest, setAppDeleteRequest] = useState<SidebarAppDeleteRequest | null>(null);
+  const { deleteContent } = useDeleteContentEntry();
 
   const handleMenuAnchorChange = useCallback((key: string, el: HTMLElement | null) => {
     if (el) {
@@ -284,6 +287,22 @@ const RecentVirtualList: React.FC<{
           onToggleMenu(item.contentKey);
         }}
         onItemRename={(item) => setEditSignal({ key: item.contentKey, nonce: Date.now() })}
+        canDeleteItem={(item) => {
+          if (item.section || item.actionKey) return false;
+          return canDeleteSidebarItem({
+            type: normalizeSidebarItemType(item.type),
+            readOnly: "readOnly" in item ? Boolean((item as any).readOnly) : false,
+            canDeleteContent: "canDeleteContent" in item ? (item as any).canDeleteContent : undefined,
+          });
+        }}
+        onItemDelete={(item) => {
+          deleteContent({
+            contentKey: item.contentKey,
+            title: item.title,
+            spaceIdOverride: item.spaceId,
+            sourceServerOrigin: item.serverOrigin,
+          });
+        }}
       >
         {(item) => {
           if (item.actionKey) return <button type="button" style={{ marginInlineStart: 22 }} onClick={(event) => { event.preventDefault(); event.stopPropagation(); toggleExpanded(item.actionKey!); }}>{item.title}</button>;
