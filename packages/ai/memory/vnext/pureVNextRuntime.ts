@@ -10,6 +10,7 @@ export interface PureVNextRuntimeInput {
   owners: MemoryOwnerRef[];
   userInput: string;
   maxTokens?: number;
+  injectionEmit?: import("../overlay").BuildMemoryOverlayOptions["injectionEmit"];
 }
 
 export interface PureVNextRuntimeResult {
@@ -76,7 +77,7 @@ export async function resolvePureVNextRuntime(
 ): Promise<PureVNextRuntimeResult> {
   const { db, owners, userInput } = input;
   if (owners.length === 0 || !userInput.trim()) {
-    return { selectedItems: [], promptBlock: null, recalledStateCount: 0 };
+    return { selectedItems: [], promptBlock: buildMemoryOverlay([], { injectionEmit: input.injectionEmit }), recalledStateCount: 0 };
   }
 
   const ownerIds = owners.map((o) => `${o.ownerType}:${encodeURIComponent(o.ownerId)}`);
@@ -108,12 +109,11 @@ export async function resolvePureVNextRuntime(
     }
   }
 
-  const promptBlock =
-    selectedItems.length === 0
-      ? null
-      : buildMemoryOverlay(selectedItems, {
-          maxTokens: input.maxTokens ?? DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET,
-        });
+  const promptBlock = buildMemoryOverlay(selectedItems, {
+    sources: new Map(selectedItems.map(item => [item, "vnext"] as const)),
+    injectionEmit: input.injectionEmit,
+    maxTokens: input.maxTokens ?? DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET,
+  });
 
   return {
     selectedItems,

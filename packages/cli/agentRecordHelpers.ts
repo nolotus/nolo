@@ -1,3 +1,4 @@
+import { resolveDefaultReasoningEffort } from "ai/agent/defaultReasoningEffort";
 import { readFileSync } from "node:fs";
 import {
   createHostCredentialBrokerChain,
@@ -1052,7 +1053,7 @@ export async function buildCreatedAgentRecord(args: {
     }
     if (!u.model && fields.model) u.model = fields.model;
     if (fields.defaultReasoningEffort && u.reasoning_effort == null) {
-      u.reasoning_effort = fields.defaultReasoningEffort;
+      u.reasoning_effort = resolveDefaultReasoningEffort({ provider: typeof u.provider === "string" ? u.provider : undefined, model: typeof u.model === "string" ? u.model : undefined, fallback: fields.defaultReasoningEffort });
     }
   }
 

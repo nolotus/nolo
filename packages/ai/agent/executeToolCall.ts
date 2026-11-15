@@ -28,6 +28,8 @@ export async function executeToolCall(
   context?: {
     parentMessageId?: string;
     agentKey?: string;
+    effectiveModel?: string;
+    runKind?: "interactive" | "subtask";
     /**
      * 以下为定档信号（可选，透传给 executor 的 context）。
      * 调用点拿不到就不传，工具层会按缺失处理（服务端跳过对应规则）。
@@ -56,6 +58,8 @@ export async function executeToolCall(
     const result = await toolDefinition.executor(toolArgs, thunkApi, {
       parentMessageId: context?.parentMessageId ?? "",
       agentKey: context?.agentKey,
+      effectiveModel: context?.effectiveModel,
+      runKind: context?.runKind,
       // 定档信号透传：缺省键一律不写入，避免给工具伪造默认值。
       ...(context?.dialogId ? { dialogId: context.dialogId } : {}),
       ...(typeof context?.priorSearches === "number"

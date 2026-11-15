@@ -1309,3 +1309,33 @@ export function computeSummarySourceMetadata(
     schemaVersion: COMPACTION_SUMMARY_SCHEMA_VERSION,
   };
 }
+
+/** Bounded, content-free source fingerprints. ID changes are separate from the
+ * content hash (runtime IDs are reassigned on persistence). canonicalHash is
+ * diagnostic only: nested key ordering MUST NOT weaken source validation. */
+export function buildSummarySourceDiagnostics(
+  messages: SummarySourceMessageInput[], anchor?: string,
+): { start: number; count: number; idHash: string; messageHash: string; canonicalHash: string }[] {
+  const end = anchor ? messages.findIndex(message => message.id === anchor) : -1;
+  if (end < 0) return [];
+  const width = Math.max(1, Math.ceil((end + 1) / 64));
+  const sorted = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sorted);
+    if (value && typeof value === "object") return Object.fromEntries(
+      Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([key, child]) => [key, sorted(child)]),
+    );
+    return value;
+  };
+  const rows = [];
+  for (let start = 0; start <= end; start += width) {
+    const group = messages.slice(start, Math.min(end + 1, start + width));
+    const content = group.map(message => ({ role: message.role, content: message.content ?? "",
+      ...(Array.isArray(message.tool_calls) ? { tool_calls: message.tool_calls } : {}) }));
+    rows.push({ start, count: group.length,
+      idHash: sha256Hex(JSON.stringify(group.map(message => message.id ?? null))).slice(0, 16),
+      messageHash: sha256Hex(JSON.stringify(content)).slice(0, 16),
+      canonicalHash: sha256Hex(JSON.stringify(sorted(content))).slice(0, 16) });
+  }
+  return rows;
+}

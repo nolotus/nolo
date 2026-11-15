@@ -72,6 +72,13 @@ export const THINKING_MECHANISM_PROVIDERS = new Set(["anthropic", "google"]);
  * 匹配规则：prefix 越长越优先；同长度按声明顺序。
  */
 const MODEL_REASONING_OVERRIDES: ModelReasoningOverride[] = [
+  // Platform GPT models accept medium even though the nolo provider fallback
+  // describes DeepSeek's narrower low/high/max scale.
+  ...["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-astra"].map((prefix) => ({
+    providers: ["openai"], prefix, exact: true,
+    efforts: ["none", "low", "medium", "high", "xhigh", "max"] as ReasoningEffort[],
+    note: "GPT-6 model-specific reasoning scale (platformHosted.ts model metadata)",
+  })),
   // ---- OpenAI ----
   {
     providers: ["openai"],

@@ -355,16 +355,26 @@ export function createRawKeyReader(input: NodeJS.ReadStream): KeyReader {
         return mouse;
       }
       if (mouse === undefined) return undefined; // incomplete report, wait
-      for (const candidate of [
-        KEY_ARROW_UP,
-        KEY_ARROW_DOWN,
-        KEY_ARROW_UP_APP,
-        KEY_ARROW_DOWN_APP,
-      ]) {
-        if (buffer.startsWith(candidate)) {
-          buffer = buffer.slice(candidate.length);
-          return candidate;
-        }
+      // Complete CSI sequences (arrows, PageUp/PageDown, Home/End, Shift+Tab,
+      // etc.) and SS3 sequences (application-mode arrows/Home/End). Recognizing
+      // the full CSI/SS3 grammar prevents PageUp/PageDown/Shift+Tab from
+      // having their leading ESC dropped as "garbage" and leaking "[5~"/"[Z"
+      // into Other free-text input.
+      const csi = /^\x1b\[[0-9;?]*[A-Za-z~]/.exec(buffer);
+      if (csi) {
+        buffer = buffer.slice(csi[0].length);
+        return csi[0];
+      }
+      const ss3 = /^\x1bO[A-Za-z]/.exec(buffer);
+      if (ss3) {
+        buffer = buffer.slice(ss3[0].length);
+        return ss3[0];
+      }
+      // Incomplete CSI / SS3 prefix (split across data chunks, e.g. "\x1b[5" + "~"
+      // or "\x1bO" + "A") — wait for the trailing bytes just like incomplete SGR
+      // mouse reports; drainClosed() discards incomplete tails at EOF.
+      if (/^\x1b\[[0-9;?]*$/.test(buffer) || buffer === "\x1bO") {
+        return undefined;
       }
       // Bare ESC — wait for bounded timer to disambiguate from ESC-prefixed
       // sequences that may arrive split across chunks.

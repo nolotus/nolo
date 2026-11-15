@@ -7,11 +7,6 @@ export type DesktopReleaseUpdateMeta = {
   size: number;
   version: string;
   hash: string;
-  /**
-   * 同一更新包的其它可信下载地址（主站直出时通常就是 CF 对象存储地址）。
-   * 可选的新增字段：旧客户端忽略未知字段，`url` 仍是首选源，语义不变。
-   */
-  mirrors?: string[];
 };
 
 export type DesktopReleaseArtifact = {
@@ -21,16 +16,8 @@ export type DesktopReleaseArtifact = {
   version?: string;
   buildSha?: string;
   publishedAt?: string;
-  /**
-   * 同一产物的其它可信下载地址（主站直出时通常就是 CF 对象存储地址）。
-   * 可选的新增字段：旧客户端忽略未知字段，`url` 仍是首选源，语义不变。
-   */
-  mirrors?: string[];
   updateMeta?: DesktopReleaseUpdateMeta;
 };
-
-/** mirrors 数量上限：manifest 可能来自上游存储，不信任其长度。 */
-export const MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS = 8;
 
 export type DesktopReleaseManifest = {
   schemaVersion: 1;
@@ -86,6 +73,30 @@ export const DESKTOP_RELEASE_PUBLIC_DOWNLOAD_BASES = {
   stable: "https://nolo.chat/public/downloads",
 } as const satisfies Record<DesktopReleaseChannel, string>;
 
+/**
+ * 读 manifest 用的**真源**基址，与上面「对外的下载基址」是两件事。
+ *
+ * 为什么不复用 DESKTOP_RELEASE_PUBLIC_DOWNLOAD_BASES：那两个主机名都是主站，
+ * 而主站的 `serveLocalDesktopDownload` 优先返回**磁盘上的本地副本**。alpha 的
+ * `/public/downloads/*` 还会先 302 回 nolo.chat，于是「远端读取」实际读到的是
+ * 主站磁盘上那份陈旧残留（2026-10-31 的 0.213.0-alpha.1），读取链路成环：
+ *
+ *   alpha 远端基址 us.nolo.chat → 302 → nolo.chat → 磁盘残留（陈旧）→ 返回
+ *
+ * 结果「先读远端」这道保护完全失效，alpha 客户端与下载页永远停在旧版本，
+ * 而真源（R2）上早就是 0.242.0-alpha.1。manifest 读取只认发布器唯一写入的
+ * 对象存储，不经过任何会回落到磁盘的主机名。
+ */
+export const DESKTOP_RELEASE_MANIFEST_TRUTH_BASE =
+  "https://downloads.nolo.chat" as const;
+
+/**
+ * manifest 读取专用的真源基址：R2 根路径直接暴露对象名（无 /public/downloads 前缀）。
+ */
+export function resolveDesktopManifestTruthBase(): string {
+  return DESKTOP_RELEASE_MANIFEST_TRUTH_BASE;
+}
+
 export function resolveDesktopReleasePublicBase(
   channel: DesktopReleaseChannel,
 ): string {
@@ -95,7 +106,9 @@ export function resolveDesktopReleasePublicBase(
 export function resolveDesktopReleaseManifestRemoteUrl(
   channel: DesktopReleaseChannel,
 ): string {
-  const base = resolveDesktopReleasePublicBase(channel).replace(/\/+$/, "");
+  // 读 manifest 走真源（R2 根路径），不走 DESKTOP_RELEASE_PUBLIC_DOWNLOAD_BASES：
+  // 后者是主站主机名，其 /public/downloads/* 可能返回磁盘陈旧副本或 302 回环。
+  const base = resolveDesktopManifestTruthBase().replace(/\/+$/, "");
   const fileName = desktopReleaseManifestPublicPath(channel).split("/").pop()!;
   return `${base}/${fileName}`;
 }
@@ -103,7 +116,7 @@ export function resolveDesktopReleaseManifestRemoteUrl(
 export function resolveLegacyDesktopReleaseManifestRemoteUrl(
   channel: DesktopReleaseChannel,
 ): string {
-  const base = resolveDesktopReleasePublicBase(channel).replace(/\/+$/, "");
+  const base = resolveDesktopManifestTruthBase().replace(/\/+$/, "");
   return `${base}/${DESKTOP_RELEASE_MANIFEST_PUBLIC_PATH.split("/").pop()!}`;
 }
 
@@ -144,38 +157,14 @@ export function normalizeDesktopReleaseManifest(
       typeof (rawUpdateMeta as Record<string, unknown>).hash === "string"
     ) {
       const meta = rawUpdateMeta as Record<string, unknown>;
-      // mirrors 是可选扩展字段：只保留非空字符串，按上限截断，顺序保留
-      // （发布端把首选镜像写在最前）。
-      const rawMetaMirrors = meta.mirrors;
-      const metaMirrors = Array.isArray(rawMetaMirrors)
-        ? rawMetaMirrors
-            .filter(
-              (entry): entry is string =>
-                typeof entry === "string" && entry.trim() !== "",
-            )
-            .slice(0, MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS)
-        : [];
       updateMeta = {
         url: meta.url as string,
         sha256: meta.sha256 as string,
         size: meta.size as number,
         version: meta.version as string,
         hash: meta.hash as string,
-        ...(metaMirrors.length ? { mirrors: metaMirrors } : {}),
       };
     }
-
-    // mirrors 同样是可选扩展字段：只有非空字符串才算数，长度按上限截断，
-    // 顺序保留（发布端把首选镜像写在最前）。
-    const rawMirrors = (artifact as Record<string, unknown>).mirrors;
-    const mirrors = Array.isArray(rawMirrors)
-      ? rawMirrors
-          .filter(
-            (entry): entry is string =>
-              typeof entry === "string" && entry.trim() !== "",
-          )
-          .slice(0, MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS)
-      : [];
 
     artifacts[platform] = {
       url: artifact.url,
@@ -184,7 +173,6 @@ export function normalizeDesktopReleaseManifest(
       ...(typeof artifact.version === "string" ? { version: artifact.version } : {}),
       ...(typeof artifact.buildSha === "string" ? { buildSha: artifact.buildSha } : {}),
       ...(typeof artifact.publishedAt === "string" ? { publishedAt: artifact.publishedAt } : {}),
-      ...(mirrors.length ? { mirrors } : {}),
       ...(updateMeta ? { updateMeta } : {}),
     };
   }

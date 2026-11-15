@@ -42,10 +42,6 @@ import {
   buildControlAgentRunFunctionSchema,
 } from "../../ai/tools/agent/controlAgentRunTool";
 import { buildStartAgentRunFunctionSchema } from "../../ai/tools/agent/startAgentRunTool";
-import {
-  requestTaskReviewFunctionSchema,
-  recordTaskReviewDecisionFunctionSchema,
-} from "../../ai/tools/agent/taskReviewTools";
 import { canonicalizeToolNames } from "../../ai/tools/toolNameAliases";
 import {
   buildNoloWorkspaceOpenAiTools,
@@ -199,18 +195,11 @@ function buildOrchestrationOpenAiTools(args: {
   const names = ["startAgentRun", "controlAgentRun"].filter((name) =>
     args.toolNameSet.has(name),
   );
-  // typed review 工具已从默认注册/能力包撤下；旧 host 显式执行器路径仍要求
-  // 「显式声明即可用」。schema 直接从 taskReviewTools 取，不经过 toolRegistry，
-  // 因此不会因未注册而丢 schema，也不会回到默认面。
-  const reviewTools = [
-    ...(args.toolNameSet.has("requestTaskReview")
-      ? [{ type: "function" as const, function: requestTaskReviewFunctionSchema }]
-      : []),
-    ...(args.toolNameSet.has("recordTaskReviewDecision")
-      ? [{ type: "function" as const, function: recordTaskReviewDecisionFunctionSchema }]
-      : []),
-  ];
-  if (names.length === 0) return reviewTools;
+  // typed review 工具（requestTaskReview / recordTaskReviewDecision）已整块移除
+  // （2026-11-15 owner 决定放弃 typed review）。它们此前已从默认注册与能力包
+  // 撤下，只剩一条需 hostTaskRef + scope 三重校验的显式通道；那条通道从未
+  // 接上生产完成度生产者，实际不可用，故连同 schema 一起删除。
+  if (names.length === 0) return [];
   const waitCapableActions = CONTROL_AGENT_RUN_ACTIONS.filter(
     (action) => action !== "wait",
   );
@@ -225,7 +214,6 @@ function buildOrchestrationOpenAiTools(args: {
   });
   // prepareTools 的返回值与其内部缓存共享对象，只能替换不能就地改写。
   return [
-    ...reviewTools,
     ...prepareTools(names).map((tool: any) => {
       if (tool?.function?.name === "controlAgentRun") {
         return { ...tool, function: controlSchema };

@@ -372,11 +372,12 @@ const switchWindowsShims = (shimDir, entrypoint) => {
       throw new Error("Refusing to downgrade " + payload.currentVersion + " to " + targetVersion);
     }
 
-    if (compare(targetVersion, payload.currentVersion) > 0) {
+    if (compare(targetVersion, payload.currentVersion) >= 0) {
     log("phase: install-target");
       const versionPrefix = join(payload.managedRoot, targetVersion + "-" + payload.updateId);
       uncommittedVersionPrefix = versionPrefix;
-      mkdirSync(versionPrefix, { recursive: true });
+      mkdirSync(payload.managedRoot, { recursive: true });
+      mkdirSync(versionPrefix);
       // Install the exact version resolved from the dist-tag above — never the
       // floating channel tag — so the staged package is the verified one.
       const install = runNpm(["install", "-g", "--prefix", versionPrefix, "nolo-cli@" + targetVersion, "--force", "--progress"]);
@@ -388,6 +389,13 @@ const switchWindowsShims = (shimDir, entrypoint) => {
       }
       const stagedEntrypoint = join(versionPrefix, "node_modules", "nolo-cli", "index.js");
       if (!existsSync(stagedEntrypoint)) throw new Error("Staged nolo entrypoint is missing");
+      const preflight = spawnSync(payload.nodePath, [stagedEntrypoint, "-v"], {
+        encoding: "utf8", windowsHide: true, env: process.env,
+        cwd: payload.updateDir, timeout: 30 * 1000,
+      });
+      if (preflight.error || preflight.status !== 0 || String(preflight.stdout || "").trim() !== "nolo-cli " + targetVersion) {
+        throw new Error("The staged CLI failed its pre-switch version check");
+      }
       assertLockOwnership();
     log("phase: switch-shims");
       const switchedShims = switchWindowsShims(prefix, stagedEntrypoint);

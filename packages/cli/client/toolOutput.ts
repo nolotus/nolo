@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   isAgentRunStartFailureStatus,
   isAgentRunStatusNormal,
@@ -27,7 +28,9 @@ import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resol
 import { resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
 import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
 import { redactSecrets } from "../tui/redactSecrets";
-import { safeAskText, withholdIfSecretLike } from "../tui/askTextSanitize";
+import { summarizeShellCommand } from "../../core/shellCommandGist";
+import { projectToolActivity, canCoalesceToolActivities, type ToolActivityProjection } from "../../core/toolActivityPresentation";
+import { safeAskText, safeApprovalMultilineText, withholdIfSecretLike } from "../tui/askTextSanitize";
 import { diffLines } from "diff";
 import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
 import { agentRunCardLabels, t, toolLabel } from "../tui/i18n";
@@ -62,11 +65,23 @@ function isReadToolName(name?: string): boolean {
   return name === "readFile";
 }
 
-function isFailedToolResult(event: LocalAgentToolEvent) {
-  const exitCode = event.metadata?.exitCode;
-  if (event.metadata?.actionGate) return false;
+function isFailedToolResult(event: LocalAgentToolEvent): boolean {
+  if (event.type === "tool-error") return true;
+  const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+  if (metadata.actionGate) return false;
+  const exitCode = metadata.exitCode;
   if (typeof exitCode === "number" && exitCode !== 0) return true;
-  return Boolean(event.metadata?.timedOut);
+  if (Boolean(metadata.timedOut) || Boolean(metadata.failed) || Boolean(event.metadata?.failed)) return true;
+  if (metadata.success === false) return true;
+  if (typeof metadata.error === "string" && metadata.error.trim().length > 0) return true;
+  if (typeof metadata.errorMessage === "string" && metadata.errorMessage.trim().length > 0) return true;
+
+  // 仅针对系统包装的明确失败 payload 进行结构化判断，绝不扫描用户数据文本（如 readFile 内容里的 Error: 等）
+  if (typeof event.content === "string") {
+    const trimmed = event.content.trim();
+    if (/^\[工具\s*"[^"]+"\s*执行失败:\s*[^\]]+\]$/.test(trimmed)) return true;
+  }
+  return false;
 }
 
 /**
@@ -147,9 +162,9 @@ function formatUiAskChoiceBlock(
 
   const questionText = safeAskText(parsed.question, 200);
   if (colorEnabled) {
-    lines.push(`${themeText("❓ ", "info", true)}${styleCliText(questionText, "cyan", true)}`);
+    lines.push(`${themeText("? ", "info", true)}${styleCliText(questionText, "cyan", true)}`);
   } else {
-    lines.push(`❓ ${questionText}`);
+    lines.push(`? ${questionText}`);
   }
 
   // Resolved: show what the user picked (or cancelled) instead of re-printing
@@ -806,6 +821,7 @@ function snippetLinesWithKind(
  * Clip a line to a display-width budget, appending "…" when it overflows.
  */
 function truncateByDisplayWidth(line: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
   if (displayWidth(line) <= maxWidth) return line;
   let width = 0;
   let kept = "";
@@ -1008,7 +1024,7 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
   // These fields are runtime-produced projections (not model-controlled
   // arguments), so they are safe to show in the compact TUI activity line.
   // Keep the same clipping rules as the expanded Read/Run/Fetch trees.
-  if (toolName === "readFile") {
+  if (toolName === "readFile" || toolName === "writeFile" || toolName === "editFile") {
     const path = typeof metadata.path === "string"
       ? metadata.path
       : typeof metadata.filePath === "string" ? metadata.filePath : "";
@@ -1028,9 +1044,22 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
   if (isRunToolName(toolName)) {
     const command = typeof metadata.command === "string" ? metadata.command : "";
     if (command) {
-      // 2026-09-02 owner 定调：Run 行改「全量安全投影」——整条命令脱敏后按
-      // 终端宽度上屏（替代旧的 24 字符 head，参数/路径在展开 Run 树里本来
-      // 可见）。密钥护栏：redactSecrets 打码 + 出口 withholdIfSecretLike 兜底。
+      // 2026-11-15 owner 定调：Run 行改「可读摘要」投影。此前是整条命令
+      // 平铺上屏（2026-09-02 的「全量安全投影」），多段 && 复合命令会占满
+      // 整行且读者必须自己解析 shell。现在默认显示意图摘要
+      // （`进入 xxx：建目录 palettes、复制 2 个文件`），需要审计原文时走
+      // 展开层（Run 树 / verbose），那里仍保留整条命令。
+      //
+      // 退化策略：summarizeShellCommand 识别不了（含破坏性动作、管道喂 shell
+      // 等危险形态）就返回 null，此时退回原文全量投影——宁可显示命令，
+      // 也不显示编造的摘要。
+      //
+      // 护栏（review M1/M5 后修正）：摘要同样要走宽度预算，否则 target 是
+      // 无 `/` 的长 token 时 baseName 原样返回，能渲染出 321 列的行；
+      // 同样要过 redactSecrets：摘要会带 target（如 `bun run` 的脚本名），
+      // 那是凭据的新出口。出口 withholdIfSecretLike 仍在。
+      const gist = summarizeShellCommand(command);
+      if (gist) return truncateByDisplayWidth(redactSecrets(gist.summary), normalRunGistMaxWidth());
       return commandFullGist(command, normalRunGistMaxWidth());
     }
   }
@@ -1045,7 +1074,11 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
   const path = typeof metadata.path === "string" ? metadata.path : "";
   if (path) return pathBasenameGist(path);
   const command = typeof metadata.command === "string" ? metadata.command : "";
-  if (command) return commandFullGist(command, normalRunGistMaxWidth());
+  if (command) {
+    const gist = summarizeShellCommand(command);
+    if (gist) return truncateByDisplayWidth(redactSecrets(gist.summary), normalRunGistMaxWidth());
+    return commandFullGist(command, normalRunGistMaxWidth());
+  }
   const query = typeof metadata.query === "string" ? metadata.query : "";
   if (query) return clipCompactText(query, 64, "…");
   return "";
@@ -1070,11 +1103,31 @@ function formatNormalToolDuration(elapsedMs: unknown): string {
  * its path and line range, Run gets its clipped command, and Fetch gets its
  * clipped URL. Other tools retain their derived basename/head gist.
  */
+// Only runtime-owned, typed result metadata may describe an outcome. Never infer
+// business success or result counts from arbitrary command stdout.
+function normalResultSummary(event: LocalAgentToolEvent): string {
+  const m = event.metadata ?? {};
+  const count = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  if (event.toolName === "readFile" && count(m.startLine) && count(m.endLine))
+    return `${Math.max(0, m.endLine - m.startLine + 1)} lines${m.truncated ? " · truncated" : ""}`;
+  if (event.toolName === "writeFile" && count(m.bytes)) return `${m.bytes} bytes written`;
+  if (event.toolName === "editFile" && count(m.replacements)) return `${m.replacements} replacements`;
+  if (event.toolName === "searchText" && count(m.matchCount)) return `${m.matchCount} matches${m.truncated ? " · truncated" : ""}`;
+  return "";
+}
+
+// Reserve the status first, then fit every other field, including the label.
+function fitNormalLine(head: string, tail: string, budget: number): string {
+  const status = budget === 1 ? tail.trimStart().slice(0, 1) : truncateByDisplayWidth(tail.trimStart(), budget);
+  const room = Math.max(0, budget - displayWidth(status) - 2);
+  return room ? `${truncateByDisplayWidth(head, room)}  ${status}` : status;
+}
+
 function formatNormalToolLine(
   event: LocalAgentToolEvent,
   pending: { toolName: string; argumentsPreview?: string } | undefined,
   colorEnabled: boolean,
-  opts?: { visibleRunIds?: () => ReadonlySet<string> },
+  opts?: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> },
 ) {
   if (event.type === "tool-call") return "";
   const toolName = event.toolName || pending?.toolName || "tool";
@@ -1105,19 +1158,27 @@ function formatNormalToolLine(
   }
 
   const label = toolLabel(toolName);
-  if (readActionGate(event.metadata?.actionGate)) {
-    return formatToolTraceLine(`▸ ${label}  ! ${t("toolNeedsAction")}`, colorEnabled, "error");
+  const cols =
+    typeof process !== "undefined" && typeof process.stdout?.columns === "number" && process.stdout.columns > 0
+      ? process.stdout.columns
+      : 80;
+  const totalBudget = Math.max(1, resolveHistoryLayoutGeometry(cols).contentWidth - displayWidth("◈ "));
+
+  if (readActionGate(event.metadata?.actionGate) || event.metadata?.permissionRequest) {
+    const gist = opts?.tuiTrees ? normalToolGist(event) : "";
+    const title = gist ? `${label} · ${gist}` : label;
+    return formatToolTraceLine(fitNormalLine(`▸ ${title}`, `! ${t("toolNeedsAction")}`, totalBudget), colorEnabled, "error");
   }
-  if (event.type === "tool-error") {
-    return formatToolTraceLine(`▸ ${label}  ✗ ${toolFailureReason(event) || t("toolFailed")}`, colorEnabled, "error");
+  if (event.type === "tool-error" || event.metadata?.timedOut || isFailedToolResult(event)) {
+    const reason = event.metadata?.timedOut
+      ? t("toolTimedOut")
+      : (toolFailureReason(event) || t("toolFailed"));
+    const gist = opts?.tuiTrees ? normalToolGist(event) : "";
+    const title = gist ? `${label} · ${gist}` : label;
+    return formatToolTraceLine(fitNormalLine(`▸ ${title}`, `✗ ${reason}`, totalBudget), colorEnabled, "error");
   }
-  if (event.metadata?.timedOut) {
-    return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolTimedOut")}`, colorEnabled, "error");
-  }
-  if (isFailedToolResult(event)) {
-    return formatToolTraceLine(`▸ ${label}  ✗ ${toolFailureReason(event) || t("toolFailed")}`, colorEnabled, "error");
-  }
-  const gist = normalToolGist(event);
+  const resultSummary = normalResultSummary(event);
+  const gist = [normalToolGist(event), resultSummary].filter(Boolean).join(" · ");
   // editFile：gist 行追加 (+a, -r) 统计 + 多行 diff 色带块（Zed-style），
   // 让用户不打开文件也能看到改了什么。多行 chunk 天然不参与 ×N 折叠。
   const hint = editFileResultHint(event);
@@ -1125,10 +1186,21 @@ function formatNormalToolLine(
   // >500ms 的工具耗时挂成功行尾部；短操作不显示（满屏 (0s) 是噪音）。
   const durationInline = formatNormalToolDuration(event.elapsedMs);
   const tail = durationInline ? `  ✓ ${durationInline}` : "  ✓";
-  const mainLine = formatToolTraceLine(
-    gist ? `▸ ${label} · ${gist}${statsInline}${tail}` : `▸ ${label}${statsInline}${tail}`,
-    colorEnabled,
-  );
+
+  let fittedGist = gist;
+  if (gist) {
+    const prefix = `▸ ${label} · `;
+    const suffix = `${statsInline}${tail}`;
+    const prefixWidth = displayWidth(prefix);
+    const suffixWidth = displayWidth(suffix);
+    const maxGistWidth = Math.max(0, totalBudget - prefixWidth - suffixWidth);
+    if (displayWidth(gist) > maxGistWidth) {
+      fittedGist = maxGistWidth > 0 ? truncateByDisplayWidth(gist, maxGistWidth) : "";
+    }
+  }
+
+  const lineContent = fittedGist ? `▸ ${label} · ${fittedGist}${statsInline}${tail}` : `▸ ${label}${statsInline}${tail}`;
+  const mainLine = formatToolTraceLine(fitNormalLine(lineContent.slice(0, -tail.length), tail, totalBudget), colorEnabled);
   if (hint?.detail?.length) {
     const filePath = typeof event.metadata?.path === "string" ? event.metadata.path : undefined;
     return `${mainLine}${formatEditDetailBlock(hint.detail, colorEnabled, filePath)}`;
@@ -1255,7 +1327,7 @@ export const TUI_TREE_TOOLS = {
   Fetch: ["fetchWebpage"],
 } as const;
 export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;
-export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string };
+export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string; previousRow?: string; appendOnly?: boolean; readOnly?: boolean; runIdentity?: string; details?: string };
 
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
@@ -1263,52 +1335,73 @@ export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   consume?: (event: LocalAgentToolEvent) => void;
 };
 
+function toolDetails(event: LocalAgentToolEvent, line: string): string {
+  const command = event.metadata?.command;
+  return isRunToolName(event.toolName) && typeof command === "string"
+    ? `${line}${safeApprovalMultilineText(command)}\n`
+    : line;
+}
+
 export function createToolEventFormatter(
   colorEnabled = resolveCliColorEnabled(),
   opts: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> } = {},
 ): ToolEventFormatter {
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
-  let tree: { kind: TuiTreeKind; items: string[] } | null = null;
+  let scope = 0;
+  let tree: { kind: TuiTreeKind; items: string[]; lastRow?: string; activity: ToolActivityProjection } | null = null;
   const treeKind = (name: string): TuiTreeKind | null =>
     (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
       (TUI_TREE_TOOLS[kind] as readonly string[]).includes(name)) ?? null;
-  const treeLine = (kind: TuiTreeKind, items: string[], fallback: string) => {
+  const treeLine = (kind: TuiTreeKind, items: string[], fallback: string, details: string) => {
     const label = kind === "Run" ? toolLabel("execShell") : kind === "Read" ? toolLabel("readFile") : kind === "Fetch" ? toolLabel("fetchWebpage") : toolLabel("exa_search");
     const header = `${label} (${items.length}) · `;
     // Summary rows receive the assistant's "◈ " anchor (measured display width).
     const columns = resolveHistoryLayoutGeometry(process.stdout.columns).contentWidth - displayWidth("◈ ");
-    let shown = 1; // Even an over-wide first item must remain intact.
+    const budget = Math.max(1, columns);
+    let shown = 1;
     for (let count = 2; count <= items.length; count++) {
-      const omitted = items.length - count;
-      const suffix = omitted ? `, … +${omitted}` : "";
-      if (displayWidth(`• ${header}${items.slice(0, count).join(", ")}${suffix}  ✓`) > columns) break;
+      const suffix = count < items.length ? ", …" : "";
+      if (displayWidth(`▸ ${header}${items.slice(0, count).join(", ")}${suffix}  ✓`) > budget) break;
       shown = count;
     }
-    const omitted = items.length - shown;
+    const summary = fitNormalLine(`${header}${items.slice(0, shown).join(", ")}${shown < items.length ? ", …" : ""}`, "✓", Math.max(1, budget - 2));
     const payload: TuiTreePayload = {
       kind,
-      summary: `${header}${items.slice(0, shown).join(", ")}${omitted ? `, … +${omitted}` : ""}  ✓`,
+      summary,
       fallback,
+      details,
+      previousRow: tree?.lastRow,
     };
+    if (tree) tree.lastRow = `▸ ${summary}`;
     return `${TUI_TREE_MARKER}${JSON.stringify(payload)}${TUI_TREE_END}\n`;
   };
 
   const formatTreeEvent = (event: LocalAgentToolEvent, call: { toolName: string; argumentsPreview?: string } | undefined): string | null => {
+    if (event.type === "tool-error") tree = null;
     if (!opts.tuiTrees || event.type !== "tool-result") return null;
-    if (isFailedToolResult(event) || event.metadata?.failed || event.metadata?.timedOut || readActionGate(event.metadata?.actionGate)) {
+    if (isFailedToolResult(event) || event.metadata?.failed || event.metadata?.timedOut || readActionGate(event.metadata?.actionGate) || event.metadata?.permissionRequest) {
       tree = null;
       return null;
     }
     const name = event.toolName || call?.toolName || "tool";
     const kind = treeKind(name);
     if (!kind) { tree = null; return null; }
+    const activity = projectToolActivity({
+      key: event.toolCallId, toolName: name, args: event.metadata,
+      state: "success", attention: [], mode: "ordinary",
+      // Formatter lifecycle/reset is the real assistant-output boundary;
+      // round comes from the execution stream, never from adjacent rows.
+      scopeKey: `assistant:${scope}`,
+      batchKey: Number.isInteger(event.round) && event.round >= 0 ? `round:${event.round}` : undefined,
+      evidenceKey: event.toolCallId,
+    });
     let item = "";
     const m = event.metadata ?? {};
     if (kind === "Run") {
-      const command = typeof m.command === "string" ? m.command : "";
-      // argumentsPreview is intentionally never promoted to a tree leaf: it is
-      // model-controlled. Only the runtime's safe command projection is used.
-      item = command ? formatRunItemCommand(command, typeof m.exitCode === "number" ? m.exitCode : undefined, Boolean(m.timedOut)) : "command";
+      item = activity.summary
+        ?? (activity.confidence === "raw-fallback"
+          ? clipCompactText(redactSecrets(activity.object ?? ""), 56, "…")
+          : [activity.action, activity.object].filter(Boolean).join(" "));
     }
     if (kind === "Read") item = formatReadItemPath(typeof m.path === "string" ? m.path : typeof m.filePath === "string" ? m.filePath : "file", m);
     if (kind === "Search") item = formatSearchItemQuery(typeof m.query === "string" ? m.query : typeof m.pattern === "string" ? m.pattern : "search", typeof m.path === "string" ? m.path : undefined);
@@ -1316,13 +1409,22 @@ export function createToolEventFormatter(
     // 折叠树叶子与单行 normal 共用 secret 出口护栏：URL/query/command 叶子
     // 携带密钥形态串时退回纯工具 label，不让 token 上屏（第二个及后续结果
     // 只走 treeLine，不经过 normalToolGist，必须在这里再包一次）。
-    item = withholdIfSecretLike(item) || toolLabel(name);
-    if (tree?.kind !== kind) tree = { kind, items: [] };
+    item = safeAskText(item) || toolLabel(name);
+    if (tree?.kind !== kind || !canCoalesceToolActivities(tree.activity, activity)) tree = { kind, items: [], activity };
     tree.items.push(item);
     // Keep the first call visible immediately; the second result replaces this
     // tail row with the complete tree in the TUI history.
-    if (tree.items.length < 2) return formatNormalToolLine(event, call, colorEnabled, opts);
-    return treeLine(kind, tree.items, formatNormalToolLine(event, call, colorEnabled, opts));
+    if (tree.items.length < 2) {
+      const line = formatNormalToolLine(event, call, colorEnabled, opts);
+      tree.lastRow = stripAnsi(line).trimEnd();
+      const rawCommand = typeof m.command === "string" ? m.command : "";
+      const runIdentity = kind === "Run" && activity.readOnly && rawCommand
+        ? createHash("sha256").update(rawCommand).digest("hex").slice(0, 16)
+        : undefined;
+      return `${TUI_TREE_MARKER}${JSON.stringify({ kind, summary: stripAnsi(line).trimEnd().replace(/^▸ /, ""), fallback: line, details: toolDetails(event, line), appendOnly: true, ...(runIdentity ? { readOnly: true, runIdentity } : {}) } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
+    }
+    const line = formatNormalToolLine(event, call, colorEnabled, opts);
+    return treeLine(kind, tree.items, line, toolDetails(event, line));
   };
   const format = ((event: LocalAgentToolEvent): string => {
     if (event.type === "tool-call") {
@@ -1336,9 +1438,13 @@ export function createToolEventFormatter(
     pending.delete(event.toolCallId);
     const treeOutput = formatTreeEvent(event, call);
     if (treeOutput !== null) return treeOutput;
-    return formatNormalToolLine(event, call, colorEnabled, opts);
+    const line = formatNormalToolLine(event, call, colorEnabled, opts);
+    if (opts.tuiTrees && line && isRunToolName(event.toolName)) {
+      return `${TUI_TREE_MARKER}${JSON.stringify({ kind: "Run", summary: "", fallback: line, details: toolDetails(event, line), appendOnly: true } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
+    }
+    return line;
   }) as ToolEventFormatter;
-  format.reset = () => { tree = null; };
+  format.reset = () => { tree = null; scope++; };
   format.consume = (event: LocalAgentToolEvent) => {
     if (event.type === "tool-call") {
       pending.set(event.toolCallId, {

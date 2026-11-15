@@ -206,6 +206,13 @@ export const routes = () => [
         element: withSuspense(<ClientDownloadsPage />, "客户端下载"),
       },
       {
+        // 单数 /download 曾是导航与外部链接里的常见手误，落进 SPA 兜底后只渲染
+        // 首页壳（200 但零张下载卡片），用户看到"有页面但没有下载内容"。
+        // 显式重定向到真正的下载页，消除这个假入口。
+        path: "download",
+        element: <Navigate to={AppRoutePaths.CLIENT_DOWNLOADS} replace />,
+      },
+      {
         path: AppRoutePaths.NOTIFICATIONS.slice(1),
         element: withSuspense(<NotificationsPage />, "通知中心"),
       },

@@ -6,7 +6,6 @@ import { traceChildRunWake, queueWakeFields } from "./runWakeDiagnostics";
 
 /** Workspace wake routing, extracted unchanged so pause/inbox boundaries use the real scheduler in tests. */
 export function createRunWakeHandler(deps: {
-  canConsume?: () => boolean;
   isDone: () => boolean;
   isBusy: () => boolean;
   getDialogId: () => string | null;
@@ -21,7 +20,6 @@ export function createRunWakeHandler(deps: {
   onError: (error: unknown) => void;
 }) {
   const handler = (event: InternalTurnEvent | string) => {
-    if (typeof event !== "string" && event.kind === "child-run-completed" && deps.canConsume && !deps.canConsume()) return false;
     if (deps.isDone()) { traceChildRunWake("delivery-done", event, deps.getDialogId()); return false; }
     const busy = deps.isBusy();
     const paused = deps.fixedInput.isPaused();
@@ -29,13 +27,8 @@ export function createRunWakeHandler(deps: {
     const fixedInput = deps.fixedInput;
     const trace = (stage: string, extra: Record<string, unknown> = {}) => traceChildRunWake(stage, event, deps.getDialogId(), { busy, paused, inboxPresent: !!turnInjectionInbox, ...queueWakeFields(deps.getQueueStatus()), ...extra });
     if (busy || paused) {
-      if (typeof event !== "string" && event.kind === "auto-review-continuation") {
-        // Preserve host event identity and execution-time authorization.
-        // Flattening it into the injection inbox would bypass runner checks.
-        const status = deps.enqueue(event);
-        trace("delivery-queue", { ...queueWakeFields(status), inboxPushResult: null });
-        return true;
-      }
+      // auto-review-continuation 的专用入队分支已移除：该事件类型随续跑
+      // 状态机下线，不再有生产者（2026-11-15）。
       // 直投当前进行中的 agent loop：唤醒不再挂进 chat 消息队列等整个 turn
       // 跑完，而是作为 user 消息在下一轮 provider 调用注入本 turn，模型当场
       // 消化。收件箱不可用（无进行中 turn / 已关闭）时才落回 chat 队列。
@@ -85,7 +78,7 @@ export function createRunWakeHandler(deps: {
   };
   return Object.assign(handler, {
     async resumeAfterInputPause() {
-      if ((deps.canConsume && !deps.canConsume()) || deps.isDone() || deps.isBusy() || deps.fixedInput.isPaused()) return;
+      if (deps.isDone() || deps.isBusy() || deps.fixedInput.isPaused()) return;
       await deps.drainQueue();
     },
   });

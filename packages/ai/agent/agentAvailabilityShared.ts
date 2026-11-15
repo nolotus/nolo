@@ -99,7 +99,7 @@ export function shouldClearCooldownFromQuota(
   // 放行冷却——否则一次 12 天前的 4% 就能把刚撞上的 429 解除掉。
   const family = resolveQuotaWindowFamily(options?.model);
   const relevantWindows = quota.windows.filter((window) =>
-    isQuotaWindowRelevantToFamily(window.scope, family),
+    isQuotaWindowRelevantToFamily(window.scope, family, window.source),
   );
   const subscriptionWindows = relevantWindows.filter(isSubscriptionPeriodWindow);
   if (subscriptionWindows.length === 0) return false;
@@ -211,7 +211,7 @@ export function resolveAgentAvailability(
     Number.isFinite(quota.observedAt);
   const family = resolveQuotaWindowFamily(agent?.model);
   const relevantWindows = (quota?.windows ?? []).filter((window) =>
-    isQuotaWindowRelevantToFamily(window?.scope, family),
+    isQuotaWindowRelevantToFamily(window?.scope, family, window?.source),
   );
   const hasWindows = relevantWindows.length > 0;
   const hasValidQuota = isAdmissible && hasWindows;
@@ -741,6 +741,8 @@ export function resolveCredentialCandidateKeys(key: string | undefined): string[
   if (!key) return [];
   const trimmed = key.trim();
   if (!trimmed) return [];
+  // Pool-scoped quota keys deliberately have no aggregate legacy fallback.
+  if (/\|quota:(?:gemini|3p|hydrogen|argon)$/.test(trimmed)) return [trimmed];
   const candidates = [trimmed];
   const atIndex = trimmed.lastIndexOf("@");
   if (atIndex > 0) {
@@ -810,7 +812,22 @@ export function resolveCredentialKeyWithFallback(
 ): string | undefined {
   if (isPublicOrSystemAgentRecord(agent)) return undefined;
   const byRef = resolveCredentialKey(agent);
-  if (byRef) return byRef;
+  if (byRef) {
+    // Only the quota/cooldown fallback API is scoped. resolveCredentialKey
+    // remains unchanged for scheduling concurrency and credentialGroup.
+    const ref = byRef.split("@")[0]?.trim().toLowerCase();
+    const provider = agent?.provider;
+    let cloudCode = false;
+    try {
+      const host = new URL(String(agent?.customProviderUrl ?? "")).hostname;
+      cloudCode = /^(?:daily-|daily-sandbox-)?cloudcode-pa\.googleapis\.com$/.test(host);
+    } catch { /* No endpoint identity. */ }
+    if (ref === "antigravity" || ref === "gemini" || provider === "google-antigravity" || cloudCode) {
+      const family = resolveQuotaWindowFamily(typeof agent?.model === "string" ? agent.model : undefined);
+      if (family) return `${byRef}|quota:${family}`;
+    }
+    return byRef;
+  }
   if (!agent || typeof agent !== "object") return undefined;
   const endpoint = agent.customProviderUrl;
   if (typeof endpoint === "string") {

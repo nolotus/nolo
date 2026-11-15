@@ -25,7 +25,8 @@ import MessageItem from "./MessageItem";
 import { ToolMessageItem } from "./ToolMessageItem";
 import ToolMessageGroup from "./ToolMessageGroup";
 import {
-  groupConsecutiveToolEntries,
+  createToolEntryGrouper,
+  createSettledToolMessagesProjector,
   type GroupedRenderEntry,
 } from "./groupToolEntries";
 import ChildRunEventRow, {
@@ -589,13 +590,15 @@ const MessagesList: React.FC<MessagesListProps> = ({
   // Memoize entry list so map work is skipped when only scroll chrome re-renders.
   // wakeEvents（dialog record 上的后台 run 终态事件）按 createdAt 归并进消息流；
   // 为空/undefined 时 mergeWakeEventsIntoEntries 原样返回 entries（零布局变化）。
+  const groupToolEntries = useMemo(() => createToolEntryGrouper(), []);
+  const settleToolMessages = useMemo(() => createSettledToolMessagesProjector(), []);
   const renderEntries = useMemo(
     () =>
       mergeWakeEventsIntoEntries(
-        groupConsecutiveToolEntries(buildMessageRenderEntries(renderMessages, coveredAgentRunIds)),
+        groupToolEntries(buildMessageRenderEntries(renderMessages, coveredAgentRunIds)),
         (currentDialogConfig as any)?.wakeEvents
       ),
-    [renderMessages, coveredAgentRunIds, currentDialogConfig]
+    [renderMessages, coveredAgentRunIds, currentDialogConfig, groupToolEntries]
   );
 
   // 相邻后台完成消息在展示层合组（普通消息准确打断）：只算分组，
@@ -684,14 +687,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
                   entry.messages.every((message) => !message?.isStreaming)));
             const settledMessages =
               canCollapse && !hasStreamingMessage
-                ? entry.messages.map((message) =>
-                    message?.toolPayload?.status === "running"
-                      ? {
-                          ...message,
-                          toolPayload: { ...message.toolPayload, status: "success" },
-                        }
-                      : message,
-                  )
+                ? settleToolMessages(entry.messages)
                 : entry.messages;
             return (
               <React.Fragment key={entry.key}>

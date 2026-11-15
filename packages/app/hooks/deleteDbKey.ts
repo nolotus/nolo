@@ -70,7 +70,10 @@ const performDirectDelete = async (
     }
 
     if (isTableMetaKey(contentKey)) {
-        await (dispatch as any)(deleteTable({ dbKey: contentKey })).unwrap();
+        // Table commands resolve to an action with unwrap; the dispatch Promise itself
+        // is not an RTK createAsyncThunk promise and has no unwrap method.
+        const result = await dispatch(deleteTable({ dbKey: contentKey }));
+        await result.unwrap();
         return;
     }
 

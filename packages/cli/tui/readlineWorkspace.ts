@@ -1,9 +1,7 @@
-import { canConsumeChildCompletion } from "./childRunConsumption";
+import { remoteTaskUnsettled, type RemoteTaskCarrier } from "./runZoneLines";
+import { loadDialogHistoryForDisplay } from "./dialogPicker";
 import { createRunWakeHandler, deliverChildCompletion } from "./runWakeDelivery";
 import { traceChildRunWake } from "./runWakeDiagnostics";
-import { hostTaskEventsRoot, readHostTask } from "../client/hostTaskEvents";
-import { bindAutoReviewTurnEnd, createAutoReviewContinuationWake } from "./autoReviewContinuationWake";
-import { onAutoReviewAcceptance, currentAutoReviewTask } from "./autoReviewControl";
 import { createShellApprovalSession } from "./shellApprovalSession";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
@@ -44,6 +42,7 @@ import {
 import { registerHostApprovalRenderer } from "../client/hostApprovalFlow";
 import {
   clearTerminalAttentionProgress,
+  emitTerminalAttention,
   runWithInputRequiredAttention,
 } from "./terminalNotification";
 import {
@@ -58,14 +57,15 @@ import {
   type InternalTurnEvent,
   type TurnRequest,
 } from "core/chat/internalTurnEvent";
-import { checkStaleRun, listRunRecords, readRunRecord } from "../agentRunControl";
+import { checkStaleRun, listRunRecordsAsync, readRunRecord } from "../agentRunControl";
 import { prefetchAgentCatalog } from "./agentCatalog";
 import {
   formatComposerAttachmentLine,
+  readImagePaths,
+  type AttachedImage,
   detectSubmittedImagePaths,
   mergeAttachedImages,
   popLastAttachedImage,
-  summarizeAttachment,
 } from "./pasteImage";
 import { detectSubmittedMediaPaths } from "./mediaAttachment";
 import {
@@ -101,7 +101,8 @@ import {
   type TuiState,
 } from "./session";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
-import { emitTerminalProgramStatus } from "../client/terminalProgramStatus";
+import { emitTerminalProgramStatus, type TerminalProgramStatusReport } from "../client/terminalProgramStatus";
+import { isAgentRunTerminalStatus } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import {
   themeColorSequence,
   themeText,
@@ -197,6 +198,7 @@ export {
 export { type ScrollAction, parseScrollAction } from "./tuiScrollbar";
 import {
   applyTerminalOutputToText,
+  takeDisplayWidth,
   buildWindowTitle,
   displayWidth,
   padOrTruncateToWidth,
@@ -241,6 +243,10 @@ import {
 // opener 只用 argv 数组 spawn，不拼 shell、不注入 OSC 8。
 import { openVisibleUrlAtScreen } from "./tuiLinkHit";
 import { openExternalUrl } from "./tuiUrlOpener";
+import { createRawKeyReader, runSelectDialog } from "./selectDialog";
+import { sanitizeImageLabel } from "./tuiImageLayout";
+import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
+import { viewLocalImage } from "./tuiImageActions";
 import { getDiagnostics } from "../diagnostics";
 // S4 迁移：渲染三件套（renderHistoryToOutput / paintSyncedFrame /
 // scheduleRender）与共享节流 flushPendingRender 已迁至 ./tuiRender。
@@ -304,6 +310,7 @@ import { createRendererSink } from "./rendererSink";
  */
 let altScreenRestoreOutput: NodeJS.WritableStream | null = null;
 let altScreenHandlersInstalled = false;
+let restoreWindowTitle: (() => void) | null = null;
 
 /**
  * Snapshot of pre-existing signal listeners captured at install time, for
@@ -335,6 +342,7 @@ const SIGNAL_EXIT_CODE: Partial<Record<NodeJS.Signals, number>> = {
  * write silently fails — the terminal is gone, nothing more to do.
  */
 const restoreAltScreen = () => {
+  restoreWindowTitle?.();
   try {
     if (altScreenRestoreOutput) {
       altScreenRestoreOutput.write("\x1b[?2004l\x1b[?25h\x1b[?2026l\x1b[?1002l\x1b[?1006l\x1b[r");
@@ -705,24 +713,56 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   }
 
   let lastSentTitle: string | null = null;
+  let terminalStatus: TerminalProgramStatusReport = { state: "idle" };
+  let readBackgroundWorking = () => false;
+  let lastProtocolReport = "";
+  const titleEnv = options.env ?? process.env;
+  const titleEnabled = (output as { isTTY?: boolean }).isTTY === true
+    && !["0", "false"].includes((titleEnv.NOLO_TUI_TITLE ?? "").trim().toLowerCase());
+  let titleRestored = false;
+  const restoreTitle = () => {
+    if (titleRestored) return;
+    titleRestored = true;
+    if (titleEnabled) {
+      try { output.write("\x1b[23;0t"); } catch { /* output already closed */ }
+    }
+    if (restoreWindowTitle === restoreTitle) restoreWindowTitle = null;
+  };
+  if (titleEnabled) {
+    output.write("\x1b[22;0t");
+    restoreWindowTitle = restoreTitle;
+  }
   const syncWindowTitle = () => {
-    if (!(output as { isTTY?: boolean }).isTTY) return;
-    const env = options.env ?? process.env;
-    const rawSetting = (env.NOLO_TUI_TITLE ?? "").trim().toLowerCase();
-    if (rawSetting === "0" || rawSetting === "false") return;
-
-    const currentTitle = state.dialogLabel?.trim() ?? "";
+    if (titleRestored) return;
+    const backgroundWorking = readBackgroundWorking();
+    const protocolReport = (terminalStatus.state === "done" || terminalStatus.state === "idle") && backgroundWorking
+      ? { state: "working" as const } : terminalStatus;
+    const protocolKey = `${protocolReport.state}:${protocolReport.kind ?? ""}`;
+    if (protocolKey !== lastProtocolReport) {
+      lastProtocolReport = protocolKey;
+      emitTerminalProgramStatus(output, protocolReport);
+    }
+    if (!titleEnabled) return;
+    const phase = terminalStatus.state;
+    const suffix = phase === "blocked" ? "·需接管·Nolo"
+      : phase === "error" ? "·失败需处理·Nolo"
+      : phase === "working" || backgroundWorking ? "·工作中·Nolo" : "·Nolo";
+    // Reserve the status suffix before clipping untrusted dialog text.
+    const label = stripAnsi(state.dialogLabel?.trim() || "new").replace(/[\x00-\x1f\x7f-\x9f]+/g, " ");
+    const currentTitle = takeDisplayWidth(label, 80 - displayWidth(suffix)).prefix + suffix;
     if (currentTitle === lastSentTitle) return;
     lastSentTitle = currentTitle;
     output.write(buildWindowTitle(currentTitle));
   };
-
+  const reportTerminalStatus = (report: TerminalProgramStatusReport) => {
+    const wasWaiting = terminalStatus.state === "blocked";
+    terminalStatus = report;
+    if (report.state === "blocked") emitTerminalAttention({ output, env: titleEnv, reason: "input-required" });
+    else if (wasWaiting) clearTerminalAttentionProgress({ output, env: titleEnv });
+    syncWindowTitle();
+  };
   syncWindowTitle();
-
-  // 会话启动的一条 OSC 7501 idle：turn 开头不再补发 idle（那会把上一轮还没被
-  // 用户看到的 done 抹掉），所以「闲置」这个初始事实只在这里报一次。
-  // 非 TTY / 管道 / 日志输出由 emitTerminalProgramStatus 自己的闸门挡掉。
-  emitTerminalProgramStatus(output, { state: "idle" });
+  reportTerminalStatus({ state: "idle" });
 
   let fixedInput: FixedInputController = createNoopFixedInput();
   // Composer draft buffer. Hoisted to this scope (rather than the
@@ -767,6 +807,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     fallbackLabel: () => t("workingFallback"),
     stoppingLabel: () => t("turnStopping"),
     onRepaint: () => {
+      syncWindowTitle();
       if (fixedInput.active && !fixedInput.isPaused()) {
         output.write("\x1b[?2026h\x1b[?25l");
         try {
@@ -777,6 +818,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }
     },
   });
+  readBackgroundWorking = () => activityIndicator.getAgentRuns().some((run) =>
+    !isAgentRunTerminalStatus(run.status) && run.status !== "not_found")
+    || getProcessRegistry().listBackground().some((task) => task.status === "running"
+      && !!state.dialogId && task.owner?.dialogId === state.dialogId);
+  const unsubscribeBackgroundTitle = getProcessRegistry().onBackgroundChange(syncWindowTitle);
   const activityReporter = (label: string | null) =>
     activityIndicator.report(label);
   // 停靠区的第二条数据来路：直接读 ~/.nolo/runs 的记录。不经过模型，所以
@@ -788,41 +834,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 新 turn）由交互层在下方通过 runWakeHandler 注入；非交互模式没有投递
   // 通道，runWakeHandler 保持 null，消息丢弃。
   let runWakeHandler: ReturnType<typeof createRunWakeHandler> | null = null;
-  const reconcileAutoReviewWake = createAutoReviewContinuationWake({
-    getState: () => state, env: options.env ? { ...process.env, ...options.env } : process.env,
-    wake: (event) => {
-      const expected = currentAutoReviewTask(state, options.env ? { ...process.env, ...options.env } : process.env);
-      setImmediate(() => {
-        const env = options.env ? { ...process.env, ...options.env } : process.env;
-        const current = currentAutoReviewTask(state, env);
-        if (!sessionEnded && expected && JSON.stringify(current) === JSON.stringify(expected)) {
-          // Reconcile re-reads authority immediately before delivery too: a
-          // pause/off between the terminal microtask and this tick must win.
-          const task = readHostTask(hostTaskEventsRoot(env), expected);
-          if (task.authorization === "active") runWakeHandler?.(event);
-        }
-      });
-    },
-  });
-  const unsubscribeAutoReviewAcceptance = onAutoReviewAcceptance((reference, sequence) => {
-    const current = currentAutoReviewTask(state, effectiveEnv);
-    if (current?.taskId !== reference.taskId || current.dialogId !== reference.dialogId) return;
-    runCompletionWatcher.resumePendingDelivery();
-    reconcileAutoReviewWake({ kind: "acceptance", eventKey: `acceptance:${reference.taskId}:${sequence}` });
-  });
+  // auto-review 续跑状态机已整体移除（2026-11-15 owner 决定）。
+  // 原 reconcileAutoReviewWake / onAutoReviewAcceptance 订阅随之删除：
+  // 那套「review 完成后自动推进 commit/local-merge」的状态机在任何机器上
+  // 都没有产生过运行记录（~/.nolo/auto-review-continuation/ 从未存在），
+  // 实际工作方式是 agent 自己派 review、自己判断、自己提交。
   const runCompletionWatcher = createRunCompletionWatcher({
     env: options.env ? { ...process.env, ...options.env } : process.env,
     getCurrentDialogId: () => state.dialogId ?? null,
     onWake: (event) => {
-      traceChildRunWake("watcher-delivery", event, state.dialogId ?? null, { handlerInstalled: !!runWakeHandler, autoReviewRoute: !!currentAutoReviewTask(state, effectiveEnv) });
-      // Child result admission is independent of reconciliation's deferred wake:
-      // the latter can be cancelled by an authorization/scope change.
-      if (!canConsumeChildCompletion(state, effectiveEnv)) return false;
-      return deliverChildCompletion(event, runWakeHandler, () => {
-        if (typeof event !== "string" && event.kind === "child-run-completed" && currentAutoReviewTask(state, effectiveEnv)) {
-          reconcileAutoReviewWake({ kind: "review-terminal", eventKey: `runs:${event.runs.map((r) => `${r.runId}:${r.status}`).sort().join(",")}` });
-        }
-      });
+      traceChildRunWake("watcher-delivery", event, state.dialogId ?? null, { handlerInstalled: !!runWakeHandler });
+      // 2026-11-15：删除 canConsumeChildCompletion 门（owner 决定）。
+      // 「子 run 跑完了」是客观事实，与 auto-review 的 acceptance 无关；
+      // 旧门在任务 paused 或 acceptance=unknown 时静默丢弃事件，导致对话
+      // 不自动接续。续跑状态机后续也整体下线，现在无额外准入判断。
+      return deliverChildCompletion(event, runWakeHandler, () => {});
     },
   });
   // 「部署完成」SSE 订阅的退出开关：只在交互式分支里赋值（见 deployWake.ts），
@@ -881,14 +907,39 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // ~/.nolo——设了 NOLO_HOME 的环境（dev、测试）会读错目录。run 记录读取
     // 与 reconcile 的调用点也是同样写法。
     readRecord: (runId) => readRunRecord(runId, { env: effectiveEnv }),
-    discoverRuns: () => listRunRecords({ env: effectiveEnv }),
+    discoverRuns: () => listRunRecordsAsync({ env: effectiveEnv }),
     getCurrentDialogId: () => state.dialogId ?? null,
     reconcile: (runId) => checkStaleRun(runId, { env: effectiveEnv }),
     onRecordsPolled: (records) => runCompletionWatcher.observe(records),
     remoteTasks,
   });
   const history = createTurnHistory();
+  if (runtimeEnv.NOLO_TUI_RESTART === "1") {
+    delete runtimeEnv.NOLO_TUI_RESTART;
+    delete process.env.NOLO_TUI_RESTART;
+    if (state.dialogId && !state.dialogKey) {
+      output.write("[nolo] 已保留对话 ID，但缺少可验证的属主/key，无法加载历史；请登录后通过 /history 选择对话。\n");
+    }
+    if (state.dialogId && state.dialogKey) {
+      try {
+        const turns = await (options.dialogHistoryLoader ?? loadDialogHistoryForDisplay)({
+          dialog: { id: state.dialogId, dbKey: state.dialogKey, title: state.dialogLabel,
+            status: null, updatedAt: null, createdAt: null, spaceId: null, triggerType: null,
+            parentDialogId: null, primaryAgentKey: state.agentKey, cybots: [] },
+          env: runtimeEnv,
+          fetchImpl,
+        });
+        history.turns.push(...turns);
+      } catch (error) {
+        output.write(`[nolo] 已恢复对话身份，但历史显示加载失败：${String(error)}\n`);
+      }
+    }
+  }
   const imageCache = createImageAttachmentCache();
+  // FIFO per payload preserves distinct filenames even for byte-identical images.
+  const preparedImages: AttachedImage[] = [];
+  let imageGraphicsSupported = false;
+  let imagePreviewRequested = false;
   let imageRenderer: ReturnType<typeof createTuiImageRenderer> | undefined;
   const renderNamespace = randomInt(1, 0x10000);
   // 对话框把滚轮/翻页路由回转录区时的统一入口。平滑滚动推进器依赖渲染集群
@@ -985,16 +1036,36 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       get imageRenderer() { return imageRenderer; },
     });
 
+  // 模态弹窗占屏期间的同步重绘：BSU/ESU 包裹 underlay（转录区 + 输入栏）与弹窗前景。
+  // 弹窗开启时 fixedInput.isPaused() 为 true，paintImmediate 会被拦截，因此
+  // 滚轮推进器与键盘翻页在弹窗活跃时必须走 dialogHost.repaint() 才能刷新内容区。
+  const paintSyncedModal = () => {
+    if (isRendererSuspended(output)) return;
+    output.write("\x1b[?2026h\x1b[?25l");
+    try {
+      dialogHost.repaint();
+    } finally {
+      output.write("\x1b[?25h\x1b[?2026l");
+    }
+  };
+
   // 平滑滚动推进器：滚轮报告只折算成目标位置，16ms/帧逼近（不再单帧瞬移）。
   // 默认按积压比例追赶（单条报告仍 5 行一帧；密集 burst 的单帧步长放大到
   // ≤20 行，缩短停手后的拖尾）；用户显式给 NOLO_TUI_SCROLL_MAX_STEP 时回到
-  // 固定限速语义。paintImmediate 内部自带「对话框占用屏幕」暂停判断与 BSU/ESU 包裹。
+  // 固定限速语义。paintImmediate 内部自带「非弹窗暂停」（如子进程）拦截与 BSU/ESU 包裹；
+  // 弹窗激活（dialogHost.isKeyboardClaimed()）时走 paintSyncedModal 重绘内容区与弹窗。
   const scrollAnimator = createScrollAnimator({
     history,
     output,
     getInputLines: () => fixedInput.getInputLines(),
     getReservedRows: () => dialogHost.getReservedRows(),
-    onPaint: () => paintImmediate(),
+    onPaint: () => {
+      if (dialogHost.isKeyboardClaimed()) {
+        paintSyncedModal();
+        return;
+      }
+      paintImmediate();
+    },
     env: effectiveEnv,
   });
   handleTranscriptScroll = (action) => {
@@ -1011,6 +1082,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       fixedInput.getInputLines(),
       dialogHost.getReservedRows(),
     );
+    if (dialogHost.isKeyboardClaimed()) {
+      paintSyncedModal();
+    } else {
+      paintImmediate();
+    }
   };
 
   const refreshGitStatus = (): void => {
@@ -1337,7 +1413,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         ...state,
         attachedImages: mergeAttachedImages(state.attachedImages, [outcome.image]),
       };
-      emitCommandOutput(summarizeAttachment(outcome.image));
+      // The draft attachment row is the single source of visible attachment state.
       if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
       return;
     }
@@ -1404,7 +1480,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // runConfirmDialog + dialogHost 通道；撤销经 shellGrant.revoke() 立即生效
   // （isGranted 同步翻转）。非 owner-required 场景 adapter 不触发该路径。
   const childShellApprovals = createShellApprovalSession(async (request, signal) =>
-    runWithInputRequiredAttention({ output, env: effectiveEnv }, () => {
+    runWithInputRequiredAttention({ output, env: effectiveEnv,
+      onWaiting: () => reportTerminalStatus({ state: "blocked", kind: "permission" }),
+      onResumed: () => reportTerminalStatus({ state: activeTurnAbort ? "working" : "idle" }),
+    }, () => {
       if (signal.aborted) return Promise.resolve(false);
       return dialogHost.run((anchor) => runConfirmDialog({
         request: { id: `child-shell-${crypto.randomUUID()}`, tool: "execShell", action: "shell-per-call",
@@ -1430,7 +1509,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // 重新逐次询问，不能因为曾经 auto 过就永久授权。这里的守卫兜住直接调用
       // requestGrant 的路径（正常路径下 adapter 连 requestGrant 都不会走到）。
       if (state.permissionGrants?.remote === true) return true;
-      return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+      return await runWithInputRequiredAttention({ output, env: effectiveEnv,
+      onWaiting: () => reportTerminalStatus({ state: "blocked", kind: "permission" }),
+      onResumed: () => reportTerminalStatus({ state: activeTurnAbort ? "working" : "idle" }),
+    }, () =>
         dialogHost.run((anchor) =>
           runConfirmDialog({
             request: {
@@ -1486,19 +1568,24 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     set activeTurnEpoch(v) { activeTurnEpoch = v; },
     get chatQueueBinding() { return chatQueueBinding; },
     set chatQueueBinding(v) {
-      chatQueueBinding = v ? bindAutoReviewTurnEnd(v, {
-        getScope: () => currentAutoReviewTask(state, effectiveEnv),
-        getContext: () => ({ dialogId: state.dialogId, workspace: state.cwd }),
-        reconcile: reconcileAutoReviewWake,
-        nextEventKey: () => `turn:${randomUUID()}`,
-      }) : null;
+      // auto-review turn-end 绑定已随续跑状态机移除：队列绑定回归朴素赋值。
+      chatQueueBinding = v;
     },
     get turnInjectionInbox() { return turnInjectionInbox; },
     set turnInjectionInbox(v) { turnInjectionInbox = v; },
+    onUserImagesPrepared: (images) => {
+      preparedImages.push(...images);
+      if (preparedImages.length > 64) preparedImages.splice(0, preparedImages.length - 64);
+    },
     onUserTurnFinalized: (turn, imageUrls) => {
-      const preview = imageCache.preview(`turn-${turnIdentity++}`, imageUrls.map((dataUrl) => ({
-        dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(";")), filename: "image", sizeBytes: 0, sourcePath: "",
-      })));
+      const attachments = imageUrls.map((dataUrl, index) => {
+        const prepared = preparedImages.findIndex(image => image.dataUrl === dataUrl);
+        const image = prepared >= 0 ? preparedImages.splice(prepared, 1)[0]! : {
+          dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(";")), filename: "名称未保留", sizeBytes: 0, sourcePath: "",
+        };
+        return { ...image, filename: `${index + 1} · ${image.filename}` };
+      });
+      const preview = imageCache.preview(`turn-${turnIdentity++}`, attachments);
       turn.images = preview.images;
       for (const fallback of preview.textFallbacks) turn.content += `\n[附件] ${fallback}`;
     },
@@ -1545,6 +1632,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     output,
 
     syncWindowTitle,
+    reportTerminalStatus,
     renderHistoryToOutput,
     scheduleRender,
     flushPendingRender,
@@ -1569,7 +1657,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 稳定实例与编排回调按原引用注入。本文件调用点与函数签名保持不变。
   const confirmTaskStop = async (view: TaskActionView): Promise<boolean> => {
     if (!isInteractiveInput(input)) return false;
-    return runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+    return runWithInputRequiredAttention({ output, env: effectiveEnv,
+      onWaiting: () => reportTerminalStatus({ state: "blocked", kind: "permission" }),
+      onResumed: () => reportTerminalStatus({ state: activeTurnAbort ? "working" : "idle" }),
+    }, () =>
       dialogHost.run(anchor => runConfirmDialog({
         request: { id: `task-stop-${view.id}`, tool: "taskStop", action: "task-stop", title: "Stop task?", body: view.title, command: view.id },
         fullCommand: true, input: input as any, output: output as any, ...anchor,
@@ -1618,6 +1709,46 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     installAltScreenRestoreHandlers,
   };
 
+  const manageDraftImages = async (confirmSend: boolean): Promise<boolean> => {
+    while (state.attachedImages.length > 0) {
+      const images = state.attachedImages;
+      const selected = await dialogHost.run(anchor => {
+        const rawKey = createRawKeyReader(input as NodeJS.ReadStream);
+        // A burst of Enter is one confirmation, not an unknown compound key.
+        const readKey = Object.assign(async () => {
+          const key = await rawKey();
+          return typeof key === "string" && /^[\r\n]+$/.test(key) ? "\r" : key;
+        }, { dispose: () => rawKey.dispose?.() });
+        return runSelectDialog({
+          ...anchor, input: input as NodeJS.ReadStream, output, readKey,
+          title: confirmSend ? "确认图片附件（尚未发送）" : "图片附件（尚未发送）",
+          titleLines: [confirmSend ? "确认图片附件（尚未发送）" : "图片附件（尚未发送）", ...images.map((image, index) =>
+            `${index + 1} · ${sanitizeImageLabel(image.filename)} (${image.sizeBytes} B)`)],
+          footerLines: ["移除仅取消附件，不删除本机文件。Esc 返回编辑。"],
+          items: [
+            { label: confirmSend ? `发送 ${images.length} 张图片` : "返回编辑", action: "done", index: -1 },
+            ...images.flatMap((image, index) => [
+              { label: `查看 ${index + 1} · ${sanitizeImageLabel(image.filename)}`, action: "view", index },
+              { label: `移除 ${index + 1} · ${sanitizeImageLabel(image.filename)}`, action: "remove", index },
+            ]),
+          ],
+        });
+      });
+      if (selected.kind !== "selected") return false;
+      if (selected.item.action === "done") return true;
+      const image = images[selected.item.index];
+      if (!image) continue;
+      if (selected.item.action === "remove") {
+        state = { ...state, attachedImages: images.filter((_, index) => index !== selected.item.index) };
+        fixedInput.repaint(buffer, cursorPos);
+      } else {
+        const result = await viewLocalImage(image.sourcePath, effectiveEnv);
+        emitCommandOutput(`[nolo] ${result}`);
+      }
+    }
+    return !confirmSend;
+  };
+
   const runSubmittedLine = async (
     line: string,
     actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
@@ -1626,6 +1757,57 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
     directUserSubmission = false,
   ): Promise<boolean> => {
+    if (line.trim() === "/tools") {
+      emitCommandOutput(history.toolDetails?.join("") || t("noToolDetails"));
+      return false;
+    }
+    if (line.trim().split(/\s+/)[0]?.toLowerCase() === "/restart") {
+      if (line.trim() !== "/restart") {
+        emitCommandOutput("Usage: /restart"); return false;
+      }
+      // Restore persisted pending input without draining/replaying it. An idle
+      // composer alone does not prove that the durable queue is empty.
+      if (state.dialogId) {
+        try {
+          await ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction).restorePending();
+        } catch (error) {
+          emitCommandOutput(`[nolo] 无法确认待处理消息，不能重启：${String(error)}`);
+          return false;
+        }
+      }
+      if ((chatQueueBinding && chatQueueBinding.getRecovery().status !== "ready") || chatQueueBinding?.getStatus().queueLength || chatQueueBinding?.getStatus().isRunning || chatQueueBinding?.getStatus().drainPaused ||
+          activityIndicator.getAgentRuns().some(run => run.status === "running" || remoteTaskUnsettled(run as typeof run & RemoteTaskCarrier))) {
+        emitCommandOutput("[nolo] 有排队消息或后台任务，不能重启；请先处理。");
+        return false;
+      }
+      try {
+        const remote = await remoteTasks.read(activityIndicator.getAgentRuns().map(run => run.runId), { strict: true });
+        if (remote.some(run => remoteTaskUnsettled(run))) {
+          emitCommandOutput("[nolo] 远端任务仍在运行或停止未确认，不能重启。");
+          return false;
+        }
+      } catch (error) {
+        emitCommandOutput(`[nolo] 无法确认远端任务状态，不能重启：${String(error)}`);
+        return false;
+      }
+    }
+    if (line.trim() === "/images preview") {
+      if (!imageGraphicsSupported) {
+        emitCommandOutput("[nolo] 当前终端未确认支持图片预览，保留图片名称文字。可用 /images 查看待发送附件。");
+        return false;
+      }
+      imagePreviewRequested = !imagePreviewRequested;
+      history.graphicsEnabled = imagePreviewRequested;
+      if (!imagePreviewRequested) imageRenderer?.suspend();
+      emitCommandOutput(`[nolo] 图片预览${imagePreviewRequested ? "已开启" : "已关闭"}。`);
+      renderHistoryToOutput();
+      return false;
+    }
+    if (line.trim() === "/images") {
+      if (state.attachedImages.length === 0) emitCommandOutput("[nolo] 无待发送图片。/images preview 按需切换消息图片预览（需终端能力确认）。");
+      await manageDraftImages(false);
+      return false;
+    }
     if (line.trim().split(/\s+/)[0]?.toLowerCase() === "/pending") {
       const [, action, batchId, ...extra] = line.trim().split(/\s+/);
       try {
@@ -1735,7 +1917,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // 派发层清零，/clear、/new 同样清零 → 返回 null → 行消失（高度回落
         // 走 onInputLinesChange 既有路径）。dim 以匹配 composer chrome。
         const line = formatComposerAttachmentLine(state.attachedImages);
-        return line ? dimCliText(line, resolveCliColorEnabled()) : null;
+        return line ? dimCliText(`${line} · 待发送 · /images 查看/移除`, resolveCliColorEnabled()) : null;
       },
       onInputLinesChange: () => {
         // composer 高度变化（活动行首次出现：3→4 行）时补一次历史重绘。
@@ -1818,6 +2000,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       loginSession.cancel();
       if (done) return;
       done = true;
+      restoreTitle();
+      unsubscribeBackgroundTitle();
       // 会话收尾：注销审批渲染器并放掉仍在等的卡片（一律按拒绝结算，避免工具调用挂死）。
       unregisterHostApprovalRenderer?.();
       unregisterHostApprovalRenderer = null;
@@ -1885,7 +2069,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // Agent 自主运行中被 gate 拦下等用户接管终端：input-required
         // attention。confirm / cancel / exception / Ctrl+C / turn abort 无论
         // 从哪条路退出，finally 都保证清掉 Windows Terminal progress。
-        return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+        return await runWithInputRequiredAttention({ output, env: effectiveEnv,
+      onWaiting: () => reportTerminalStatus({ state: "blocked", kind: "permission" }),
+      onResumed: () => reportTerminalStatus({ state: activeTurnAbort ? "working" : "idle" }),
+    }, () =>
           resolveActionGate(gate, {
             dialogHost,
             input,
@@ -1922,7 +2109,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         if (state.permissionGrants?.local === true) return true;
         // 破坏性操作确认同属「Agent 等用户决定」：立即提醒，任何应答路径
         // （approve / cancel / Esc / 异常）都由 finally 清掉 progress。
-        return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+        return await runWithInputRequiredAttention({ output, env: effectiveEnv,
+      onWaiting: () => reportTerminalStatus({ state: "blocked", kind: "permission" }),
+      onResumed: () => reportTerminalStatus({ state: activeTurnAbort ? "working" : "idle" }),
+    }, () =>
           dialogHost.run((anchor) =>
             runConfirmDialog({
               request,
@@ -2088,7 +2278,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       emitCommandOutput(t("wakeQueuedWhileStopped", String(count)));
     };
     runWakeHandler = createRunWakeHandler({
-      canConsume: () => canConsumeChildCompletion(state, effectiveEnv),
       isDone: () => done,
       isBusy: () => busy,
       getDialogId: () => state.dialogId ?? null,
@@ -2345,7 +2534,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // 强制收尾 = 用户已经把 UI 拿回去了：不等迟到的 runAgentChat 返回，
           // 立刻报 idle（旧 turn 的 done/error 被 epoch 守卫挡掉，见
           // tuiTurnRunner 的 emitStatusIfCurrentTurn）。
-          emitTerminalProgramStatus(output, { state: "idle" });
+          reportTerminalStatus({ state: "idle" });
           emitCommandOutput(t("forceStopped"));
           flushPendingRender();
           renderHistoryToOutput();
@@ -2536,6 +2725,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }
     };
 
+    let preparingImageSubmission = false;
     const handleInputToken = async (sequence: string) => {
       if (done) return;
       // While a modal (any dialogHost.run()/withKeyboard() caller — confirm,
@@ -2548,6 +2738,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         rawActionGateTokenHandler?.(sequence);
         return;
       }
+      // Async path reads must not allow a second Enter to start another send.
+      // Modal keys still belong to the dialog above, including its confirmation.
+      if (preparingImageSubmission) return;
       // 对话内审批卡：y/n/Esc 只在 composer 草稿为空时属于卡片（否则它们只是用户正在输入的字
       // 母）；Esc 在跑轮次时仍保留「停止本轮」的含义，卡片不抢。模态（dialogHost）优先，见上。
       if (hostApprovalPrompt?.handleKey(sequence, {
@@ -2882,7 +3075,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // Replace UI-only paste chips with compact model references. The full
         // body is expanded only at an HTTP/persistence boundary or on demand
         // through readPastedText, so every provider round avoids replaying it.
-        const submittedText = replaceCollapsedPastesWithReferences(
+        let submittedText = replaceCollapsedPastesWithReferences(
           result.submit,
           pasteStore,
         );
@@ -2891,8 +3084,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // commands (including /history) may await a picker or subprocess, but
         // they must not make a later /exit look like a queued chat message.
         const startsChatTurn =
-          submittedTrimmed.length > 0 &&
-          !submittedTrimmed.startsWith("/") &&
+          (submittedTrimmed.length > 0 || state.attachedImages.length > 0) &&
+          !isLikelySlashCommand(submittedTrimmed) &&
           !submittedTrimmed.startsWith("!");
         if (busyLock) {
           // While an agent turn is running, Enter does not start a new turn.
@@ -2918,6 +3111,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // and write straight to the output stream. The next streaming
           // repaint overwrites it, which is fine for an ephemeral notice.
           const busySlashCommand = trimmedText.split(/\s+/)[0]?.toLowerCase();
+          if (busySlashCommand === "/tools") {
+            printInternalEventLine(history.toolDetails?.join("") || t("noToolDetails"));
+            bumpDraftEpoch();
+            buffer = "";
+            cursorPos = 0;
+            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+            return;
+          }
+          if (busySlashCommand === "/restart") {
+            output.write("\n[nolo] 当前仍在执行任务，不能重启；请等待任务结束。\n");
+            return;
+          }
           if (busySlashCommand === "/stop" || busySlashCommand === "/pending") {
             const [, ...args] = trimmedText.split(/\s+/);
             if (busySlashCommand === "/stop" && args.length === 0) {
@@ -2939,21 +3144,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               await handleBusyLocalSlash(submittedText, busySlashCommand);
               return;
             }
-            bumpDraftEpoch();
-            buffer = "";
-            cursorPos = 0;
-            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-            return;
-          }
-          if (busySlashCommand === "/auto-review") {
-            // Direct composer submission only. Do not enqueue a control as model
-            // text or alter the assistant-owned history while a turn is active.
-            await runSubmittedSlashLine(trimmedText, {
-              ...slashHost,
-              get state() { return state; },
-              set state(next) { state = next; },
-              emitCommandOutput: (text) => { output.write(`\n${text}\n`); },
-            }, async () => {}, undefined, true);
             bumpDraftEpoch();
             buffer = "";
             cursorPos = 0;
@@ -3064,7 +3254,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         if (state.suggestedAuthCommand) {
           state = { ...state, suggestedAuthCommand: undefined };
         }
-        if (!submittedText.trim()) {
+        if (!submittedText.trim() && state.attachedImages.length === 0) {
           const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
           const pending = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
           await pending.restorePending();
@@ -3075,6 +3265,32 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             finally { busy = false; if (fixedInput.active) fixedInput.repaint(buffer, cursorPos); }
             return;
           }
+        }
+        // Resolve path attachments before consuming the draft. Failure never silently
+        // turns an image send into a text-only send; keep the original text for retry.
+        if (startsChatTurn) {
+          preparingImageSubmission = true;
+          try {
+            const detected = detectSubmittedImagePaths(submittedText, state.cwd);
+            if (detected.hints.length > 0) {
+              const read = await readImagePaths(detected.hints.map(hint => hint.resolvedPath), {
+                onFailure: (_path, error) => emitCommandOutput(`[nolo] 图片未添加: ${sanitizeImageLabel(error.message)}`),
+              });
+              state = { ...state, attachedImages: mergeAttachedImages(state.attachedImages, read.images) };
+              if (read.failures.length > 0) { fixedInput.repaint(buffer, cursorPos); return; }
+            }
+            if (state.attachedImages.length > 0) {
+              // Once staged, remove path tokens from the editor too: cancelling
+              // after Remove must not re-add that file on the next Enter.
+              if (detected.hints.length > 0) {
+                submittedText = stripImageTokens(submittedText, detected.hints);
+                buffer = stripImageTokens(buffer, detected.hints);
+                cursorPos = buffer.length;
+              }
+              if (!await manageDraftImages(true)) { fixedInput.repaint(buffer, cursorPos); return; }
+              submittedText ||= "请查看附件图片。";
+            }
+          } finally { preparingImageSubmission = false; }
         }
         // A real user send explicitly resumes recovered pending inputs in order.
         if (startsChatTurn && state.attachedImages.length === 0 && chatQueueBinding && (chatQueueBinding.queueLength() > 0 || chatQueueBinding.isRecoveryBlocked())) {
@@ -3163,7 +3379,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       onForwardInput: (data) => onData(data),
       onCapabilityChanged: (enabled) => {
         if (sessionEnded || done) return;
-        history.graphicsEnabled = enabled;
+        imageGraphicsSupported = enabled;
+        history.graphicsEnabled = enabled && imagePreviewRequested;
         if (enabled && !imageRenderer) imageRenderer = createTuiImageRenderer({ output, namespace: renderNamespace, graphicsEnabled: true, getPng: (key) => imageCache.getPng(key) });
         scheduleRender();
       },
@@ -3192,6 +3409,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // even when the interaction promise never gets a chance to settle.
       input.once("end", finish);
       input.once("close", finish);
+      if (history.turns.length) renderHistoryToOutput();
       fixedInput.repaint(buffer, cursorPos);
       refreshGitStatus();
       refreshCiStatus();
@@ -3265,7 +3483,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const registry = getProcessRegistry();
     // 会话退出：摘掉终态订阅，registry 单例继续服务下个生命周期。
     unsubscribeProcessTerminal();
-    unsubscribeAutoReviewAcceptance();
+    unsubscribeBackgroundTitle();
+    restoreTitle();
     // Full-truth list() is correct here: only launchProcess registrations ever
     // set persist, and transient foreground envelopes (workspaceShell
     // pre-registration) always have persist=false, so they can't inflate this

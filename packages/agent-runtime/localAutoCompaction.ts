@@ -28,6 +28,7 @@ import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   COMPACTION_SUMMARY_SCHEMA_VERSION,
   computeSummarySourceMetadata,
+  buildSummarySourceDiagnostics,
   buildBoundedCompactionRequest,
   buildCompactionMetricsFromPlan,
   formatCompactionMetricsLog,
@@ -97,6 +98,19 @@ function findSummaryAnchorIndex(
   if (!legacy) return -1;
   const index = Number(legacy[1]);
   return Number.isSafeInteger(index) && index < bridged.length ? index : -1;
+}
+
+// One bounded row per log entry avoids the diagnostic sink's line truncation.
+// No message IDs/content/tool arguments leave this boundary, only hashes/counts.
+function logSummarySourceDiagnostics(
+  phase: "saved" | "invalidated", dialogId: string,
+  history: AgentRuntimeChatMessage[], anchor?: string,
+): void {
+  const sourceHash = hashSummarySourceSlice(history, anchor)?.slice(0, 16);
+  const rows = buildSummarySourceDiagnostics(toPlanCompressionMessages(history), anchor);
+  for (const row of rows) console.log(`[compaction-source] ${JSON.stringify({
+    phase, dialogId, sourceHash, ...row,
+  })}`);
 }
 
 export function hashSummarySourceSlice(
@@ -672,6 +686,7 @@ export async function maybeAutoCompactLocalHistory(args: {
             : null,
       },
     );
+    logSummarySourceDiagnostics("invalidated", dialogId, history, invalidStored?.summarizedBeforeId);
     stored = null;
   }
 
@@ -1179,6 +1194,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       ),
     });
     saveElapsedMs = Date.now() - saveT0;
+    logSummarySourceDiagnostics("saved", dialogId, history, bounded.summarizedBeforeId);
 
     console.log(formatCompactionMetricsLog(metrics));
     // Opus B′ 诊断：只记数字与 model，不记内容——用于判断绝对上限是否合适、

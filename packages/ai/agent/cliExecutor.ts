@@ -13,12 +13,12 @@
   *   const result = await executeCli("copilot", prompt, { model: "claude-haiku-4.5" });
  */
 
-import { exec, spawn } from "child_process";
+import { execFile, spawn } from "child_process";
 import type { ChildProcessByStdio } from "child_process";
 import type { Readable } from "stream";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import { resolveLaunchableCodexCommand } from "connector-experimental/codexBinary";
@@ -585,24 +585,22 @@ function executeCopilot(
 
   return new Promise((resolve, reject) => {
     const args = [
-      "NO_COLOR=1",
-      "gh copilot --",
-      `-p ${JSON.stringify(prompt)}`,
+      "copilot", "--",
+      "-p", prompt,
       "--silent",
       "--disable-builtin-mcps",
-      "--stream off",
+      "--stream", "off",
       "--no-color",
     ];
-    if (model) args.push(`--model ${model}`);
-    if (reasoningEffort) args.push(`--reasoning-effort ${reasoningEffort}`);
+    if (model) args.push("--model", model);
+    if (reasoningEffort) args.push("--reasoning-effort", reasoningEffort);
     if (yolo) args.push("--yolo");
 
-    const cmd = args.join(" ");
     const start = Date.now();
 
-    exec(
-      cmd,
-      { timeout, cwd, env: buildCliProcessEnv(options.env) },
+    execFile(
+      "gh", args,
+      { timeout, cwd, env: { ...buildCliProcessEnv(options.env), NO_COLOR: "1" } },
       (error, stdout, stderr) => {
         if (error) {
           if (error.killed && (error as any).signal === "SIGTERM") {
@@ -675,6 +673,41 @@ function parseGeminiStreamJson(stdout: string): string {
   return parts.join("");
 }
 
+// npm's Windows batch shim cannot be launched with execFile. Resolve only the
+// adjacent installed package's declared bin; never interpret the shim as shell text.
+export function resolveGeminiCommand(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (platform !== "win32") return { command: "gemini", args: [] };
+  const path = Object.entries(env).find(([key]) => key.toLowerCase() === "path")?.[1] ?? "";
+  for (const directory of path.split(";")) {
+    if (!directory || !isAbsolute(directory)) continue;
+    if (existsSync(join(directory, "gemini.exe"))) {
+      return { command: join(directory, "gemini.exe"), args: [] };
+    }
+    if (!existsSync(join(directory, "gemini.cmd"))) continue;
+    try {
+      const root = realpathSync(join(directory, "node_modules", "@google", "gemini-cli"));
+      const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+      const bin = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.gemini;
+      if (manifest.name !== "@google/gemini-cli" || typeof bin !== "string" || !bin) {
+        throw new Error("missing package bin");
+      }
+      const entry = realpathSync(resolve(root, bin));
+      const withinPackage = relative(root, entry);
+      if (withinPackage.startsWith("..") || isAbsolute(withinPackage) || !/\.[cm]?js$/i.test(entry)) {
+        throw new Error("package bin is not a contained JavaScript entry");
+      }
+      const node = join(directory, "node.exe");
+      return { command: existsSync(node) ? node : "node", args: [entry] };
+    } catch (error) {
+      throw new Error(`Gemini npm entry could not be resolved: ${String(error)}`);
+    }
+  }
+  return { command: "gemini", args: [] };
+}
+
 function executeGemini(
   prompt: string,
   options: CliExecuteOptions
@@ -688,22 +721,20 @@ function executeGemini(
 
   return new Promise((resolve, reject) => {
     const args = [
-      "NO_COLOR=1",
-      "NODE_OPTIONS='--no-deprecation'",
-      "gemini",
-      `-p ${JSON.stringify(prompt)}`,
-      "--output-format stream-json",
-      `-m ${JSON.stringify(model)}`,
+      "-p", prompt,
+      "--output-format", "stream-json",
+      "-m", model,
     ];
     if (yolo) args.push("--yolo");
-    args.push("-e none");
+    args.push("-e", "none");
 
-    const cmd = args.join(" ");
     const start = Date.now();
 
-    exec(
-      cmd,
-      { timeout, cwd, env: buildCliProcessEnv(options.env) },
+    const env = { ...buildCliProcessEnv(options.env), NO_COLOR: "1", NODE_OPTIONS: "--no-deprecation" };
+    const launcher = resolveGeminiCommand(env);
+    execFile(
+      launcher.command, [...launcher.args, ...args],
+      { timeout, cwd, env },
       (error, stdout, stderr) => {
         if (error) {
           if (error.killed && (error as any).signal === "SIGTERM") {

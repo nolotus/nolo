@@ -19,9 +19,9 @@ export { ServerDbRoleViolationError };
 
 const DB_PATH = resolveServerDbPath();
 
-console.log("数据库配置:");
-console.log("- 当前工作目录:", process.cwd());
-console.log("- 数据库路径:", DB_PATH);
+process.stderr.write("数据库配置:\n");
+process.stderr.write(`- 当前工作目录: ${process.cwd()}\n`);
+process.stderr.write(`- 数据库路径: ${DB_PATH}\n`);
 
 /**
  * Walk cause / AggregateError chains and detect LevelDB lock/busy via the
@@ -71,7 +71,7 @@ const {
 }: { authorityStore: AuthorityStore; serverDb: LegacyServerDb } =
   getOrCreateServerStoreRuntime(DB_PATH);
 
-console.log("- LevelDB实际路径:", serverDb.location);
+process.stderr.write(`- LevelDB实际路径: ${serverDb.location}\n`);
 
 // ✅ 保留默认导出：兼容现有的 import serverDb from "./db"
 export default serverDb;
@@ -223,7 +223,7 @@ export async function ensureServerDbOpen(options?: ServerDbOpenRetryOptions) {
     try {
       await ensureDbOpen(authorityStore);
       if (status !== "opening" && !options?.quiet) {
-        console.log("✅ LevelDB 已打开");
+        console.error("✅ LevelDB 已打开");
       }
       return;
     } catch (err) {
@@ -286,7 +286,7 @@ export async function closeServerDb() {
 
   try {
     await authorityStore.close();
-    console.log("✅ LevelDB 已关闭");
+    console.error("✅ LevelDB 已关闭");
   } catch (err) {
     console.error("❌ 关闭 LevelDB 失败:", err);
   }

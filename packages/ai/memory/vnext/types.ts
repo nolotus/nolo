@@ -58,6 +58,12 @@ export interface MemoryEvidenceVNext {
   sourceRef?: string;
   confidence: number;
   createdAt: string;
+  /** Native source-event ledger, not an Agent partition or background job. */
+  nativeCapture?: {
+    sourceType: string;
+    agentKey?: string;
+    outcome?: "applied" | "no_op";
+  };
 }
 
 /**
@@ -90,6 +96,8 @@ export type MemoryReconciliationAction =
   | "ambiguous";
 
 export interface MemoryInterpreterMutation {
+  /** Internal native-capture receipt, committed atomically with State changes. */
+  nativeCaptureCompletion?: MemoryEvidenceVNext;
   evidence?: MemoryEvidenceVNext[];
   entities?: MemoryEntityVNext[];
   states?: MemoryStateVNext[];

@@ -1,3 +1,4 @@
+import { resolveDefaultReasoningEffort } from "ai/agent/defaultReasoningEffort";
 // 文件路径: ai/tools/agent/createAgentTool.ts
 
 import type { RootState } from "app/store";
@@ -413,7 +414,7 @@ const buildPlatformFormDataFromArgs = async (args: CreateAgentToolArgs): Promise
         frequency_penalty,
         presence_penalty,
         max_tokens,
-        reasoning_effort: reasoning_effort ?? "medium",
+        reasoning_effort: reasoning_effort ?? resolveDefaultReasoningEffort({ provider: trimmedProvider, model: trimmedModel, fallback: "medium" }),
 
         whitelist: [],
     };

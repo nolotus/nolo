@@ -75,7 +75,7 @@ function buildReadWorkspaceParameters() {
   const lines = {
     type: "string",
     description:
-      'Line slice: "40-120" (range, 1-based, inclusive), "120-" (from line to end), "-50" (tail N lines), "50" (head N lines). Omit to read full file.',
+      'Line slice: "40-120" (range, 1-based, inclusive), "120-" (from line to end), "-50" (tail N lines), "50" (head N lines). Omit to read from the start; large results return a bounded window. Continue from metadata endLine + 1.',
   };
   const force = {
     type: "boolean",

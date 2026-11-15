@@ -10,6 +10,8 @@ export function dialogMessageRecordToAgentRuntimeMessage(
   return {
     ...(typeof record.id === "string" ? { id: record.id } : {}),
     role: record.role,
+    ...(Number.isFinite(record.metadata?.cliHistoryOrder)
+      ? { cliHistoryOrder: record.metadata.cliHistoryOrder } : {}),
     content: record.content ?? "",
     ...(record.contextReference !== undefined
       ? { context_reference: record.contextReference }

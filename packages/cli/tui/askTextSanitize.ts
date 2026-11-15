@@ -13,34 +13,15 @@
  * 可选宽度上限 max 时按行宽 clip；不传 max 则不截断（弹窗正文不应被截）。
  */
 import { clipCompactText } from "core/clipCompactText";
-import { findPotentialSecrets } from "../secretScan";
-import { redactSecrets } from "./redactSecrets";
+import { redactSecrets, withholdIfSecretLike } from "./redactSecrets";
 import { stripAnsi } from "./tuiAnsi";
+
+export { withholdIfSecretLike };
 
 const ASK_SECRET_PLACEHOLDER = "⟨redacted⟩";
 
 // eslint-disable-next-line no-control-regex
 const C0_C1_CONTROL_REGEX = /[\x00-\x1f\x7f-\x9f]/g;
-
-/**
- * normal 档摘要出口的统一补充护栏：runtime 投影虽非模型直控，但 URL query、
- * 搜索词、命令行仍可能携带密钥形态串（?api_key=sk-…、Authorization: Bearer …、
- * ghp_/xox 系前缀）。secretScan 覆盖赋值形态，这里补令牌串形态；命中即整体
- * 放弃摘要退回纯 label——宁可少显示，不上屏可疑串（阶段 A 收敛，2026-09-02）。
- */
-const NORMAL_GIST_SECRET_PATTERNS: RegExp[] = [
-  /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/i,
-  /\bsk-(?:ant-)?(?:api)?[0-9a-zA-Z-]{10,}/,
-  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{10,}/,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
-];
-
-export function withholdIfSecretLike(gist: string): string {
-  if (!gist) return "";
-  if (findPotentialSecrets(gist).length > 0) return "";
-  if (NORMAL_GIST_SECRET_PATTERNS.some((pattern) => pattern.test(gist))) return "";
-  return gist;
-}
 
 /** 运行时防御：输入可能是 undefined / null / 数字等非字符串（线上 JSON）。 */
 function toText(value: unknown): string {

@@ -1,4 +1,6 @@
+import { getHostRuntimeExecutable, initializeHostRuntimeIdentity, isAgentRuntimeHostCommand } from "./agentRunProtocol";
 import { runCliCommandWithSyncDrain } from "./client/cliExitSync";
+import { exitCliAfterOutputDrain } from "./client/cliOutputDrain";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +15,7 @@ import { initCliLocale, t } from "./i18n";
 // 在任何应用模块顶层代码可能缓存 console 引用之前，完成模式判定 + console bridge。
 // 诊断初始化绝不抛（内部已降级），但要保证同步完成后再动 import 应用本体。
 const cliArgs = process.argv.slice(2);
+if (isAgentRuntimeHostCommand(cliArgs, Boolean(process.stdin.isTTY))) initializeHostRuntimeIdentity();
 const diagnostics = initializeDiagnostics(detectMode(cliArgs, process.env), process.env);
 const logger = diagnostics.logger;
 
@@ -49,7 +52,7 @@ if (process.platform === "win32") {
 initCliLocale(process.env, "en");
 
 const SOURCE_CLI_DIR = dirname(fileURLToPath(import.meta.url));
-const CLI_DIR = isCompiledBinary() ? dirname(process.execPath) : SOURCE_CLI_DIR;
+const CLI_DIR = isCompiledBinary() ? dirname(getHostRuntimeExecutable()) : SOURCE_CLI_DIR;
 const ROOT_DIR = join(CLI_DIR, "..", "..");
 const SCRIPT_DIR = join(ROOT_DIR, "scripts");
 const packageInfo = readPackageInfo();
@@ -98,10 +101,23 @@ async function launchTuiWorkspace(args: { scriptDir: string; env: NodeJS.Process
   setCliAutoCompactionSummaryFallback(
     createTuiSummaryLlmCaller(args.env, { platformPrimary: true }),
   );
-  return startTuiWorkspace({
+  const { buildRestartEnv, buildRestartArgv, replaceTuiProcess, captureRestartExecutable } = await import("./tui/tuiRestart");
+  const restartExecutable = isCompiledBinary()
+    ? captureRestartExecutable(process.execPath, process.argv0) : process.execPath;
+  let restartEnv: NodeJS.ProcessEnv | undefined;
+  await startTuiWorkspace({
     ...args,
+    requestRestart: state => { restartEnv = buildRestartEnv(args.env, state); },
     // Manual /compact owns the same routed policy, including current text-only fallback.
   });
+  if (restartEnv) {
+    const executable = restartExecutable;
+    const argv = buildRestartArgv({ executable, compiled: isCompiledBinary(),
+      execArgv: process.execArgv, entrypoint: fileURLToPath(import.meta.url) });
+    // Cleanup has restored the terminal; a failed replacement must never
+    // spawn another process or replay input.
+    replaceTuiProcess(executable, argv, restartEnv);
+  }
 }
 
 async function main(): Promise<never> {
@@ -119,7 +135,7 @@ async function main(): Promise<never> {
   const runtimeContext = createCliRuntimeContext({
     env: runtimeEnv,
     scriptDir: SCRIPT_DIR,
-    entrypointPath: isCompiledBinary() ? process.execPath : fileURLToPath(import.meta.url),
+    entrypointPath: isCompiledBinary() ? getHostRuntimeExecutable() : fileURLToPath(import.meta.url),
     packageInfo,
   });
 
@@ -154,7 +170,7 @@ async function main(): Promise<never> {
 
   await runCliCommandWithSyncDrain(
     () => runResolvedCommand(command, commandArgs, runtimeContext, { runScript }),
-    { exit: (code) => process.exit(code), output: process.stderr },
+    { exit: exitCliAfterOutputDrain, output: process.stderr },
   );
   throw new Error("CLI exit unexpectedly returned");
 }

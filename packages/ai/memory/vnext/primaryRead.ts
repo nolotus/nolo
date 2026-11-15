@@ -1,8 +1,10 @@
+import type { MemoryInjectionSource } from "../overlay";
 import type { MemoryItem } from "../types";
 import { buildLegacyMemoryEvidence, resolveLegacyMemoryPrincipal } from "./legacyMigration";
 import { currentStatesCitingEvidence, loadExistingContext } from "./lazyPromotion";
 import { loadMemoryVNextCatalog } from "./store";
 import { recallMemoryVNextLocal, type MemoryVNextLocalRecallHit } from "./localRecall";
+import { deriveStateResident } from "./pureVNextRuntime";
 import type { MemoryEntityVNext, MemoryStateVNext } from "./types";
 
 /**
@@ -55,6 +57,7 @@ export const isMemoryVNextPrimaryReadEnabled = (
 export interface MemoryVNextM4Selection {
   /** Combined items to pass to buildMemoryOverlay. */
   renderItems: MemoryItem[];
+  sources: ReadonlyMap<MemoryItem, MemoryInjectionSource>;
   recalledStateCount: number;
   uncoveredLegacyCount: number;
   coveredSuppressedCount: number;
@@ -77,8 +80,9 @@ const buildSynthesizedStateItem = (
   createdAt: state.createdAt,
   importance: 0.9,
   confidence: 0.9,
-  // Flag resident preferences so they flow into overlay's resident section.
-  resident: state.facet === "preference" || state.facet === "style",
+  // 与 pureVNextRuntime / queryMemoryHandler 共用同一判定，避免四条合成路径分裂
+  // （2026-11-15：这里原先各自写 facet，漏了 ownerType/长度约束）。
+  resident: deriveStateResident(state, ownerType),
   lastActivatedAt: state.createdAt,
   activationCount: 1,
 });
@@ -146,6 +150,10 @@ export const resolveMemoryVNextM4Selection = async (input: {
   const renderItems = [...recalledStates, ...uncoveredLegacy];
   return {
     renderItems,
+    sources: new Map<MemoryItem, MemoryInjectionSource>([
+      ...recalledStates.map(item => [item, "vnext"] as const),
+      ...uncoveredLegacy.map(item => [item, "legacy-uncovered"] as const),
+    ]),
     recalledStateCount: recalledStates.length,
     uncoveredLegacyCount: uncoveredLegacy.length,
     coveredSuppressedCount,

@@ -296,7 +296,7 @@ function normalizeListLine(line: string): string {
   return line;
 }
 
-const TOOL_TREE_HEADER_RE = /^•\s+(.+?)\s+\((\d+)\) · (.*?)  ✓$/;
+const TOOL_TREE_HEADER_RE = /^(?:▸|•)\s+(.+?)\s+\((\d+)\) · (.*?)  ✓$/;
 const TOOL_SINGLE_RE = /^▸\s+(.+?)(?:\s+·\s+(.*?))?(?:\s{2}(✓|✗|!)(?:\s+(.*))?)$/;
 
 function plainToolLine(line: string) {
@@ -385,25 +385,49 @@ function statusColorSeq(marker: string, brightness: TuiBrightness): string {
  * brightness for depth: group label > leaf/detail > metadata; only failures
  * and warnings are allowed to demand attention with status color.
  */
+function styleToolDetailSegments(
+  detail: string,
+  muted: string,
+  chrome: string,
+): string {
+  // Split trailing runtime stats (`· 19 lines`, `· 12 bytes written`, etc.)
+  // so the primary operand/summary stays clear in `muted` while metadata recedes.
+  const metaMatch = detail.match(/^(.*?)(\s+·\s+(?:\d+\s+(?:lines?|bytes?\s+written|replacements?|matches?)(?:\s+·\s+truncated)?|truncated))$/);
+  if (!metaMatch) {
+    return `${muted}${detail}${STYLE.reset}`;
+  }
+  return `${muted}${metaMatch[1]}${STYLE.reset}${chrome}${STYLE.dim}${metaMatch[2]}${STYLE.reset}`;
+}
+
 function styleTuiToolLine(line: string, brightness: TuiBrightness): string | null {
   const plain = plainToolLine(line);
   const chrome = colorSeq("chrome", brightness);
   const muted = colorSeq("muted", brightness);
+  const info = colorSeq("info", brightness);
+  const danger = colorSeq("danger", brightness);
 
   const header = toolTreeHeaderMatch(plain);
   if (header) {
-    return `${chrome}•${STYLE.reset} ${STYLE.bold}${muted}${header[1]}${STYLE.reset} ${chrome}${STYLE.dim}(${header[2]})${STYLE.reset} ${chrome}· ${header[3]}${STYLE.reset}  ${statusColorSeq("✓", brightness)}✓${STYLE.reset}`;
+    const glyph = plain.startsWith("•") ? "•" : "▸";
+    return `${chrome}${glyph}${STYLE.reset} ${STYLE.bold}${info}${header[1]}${STYLE.reset} ${chrome}${STYLE.dim}(${header[2]})${STYLE.reset} ${chrome}·${STYLE.reset} ${muted}${header[3]}${STYLE.reset}  ${statusColorSeq("✓", brightness)}✓${STYLE.reset}`;
   }
 
   const single = plain.match(TOOL_SINGLE_RE);
   if (single) {
     const [, label, detail, marker, statusDetail] = single;
-    let rendered = `${chrome}▸${STYLE.reset} ${STYLE.bold}${muted}${label}${STYLE.reset}`;
-    if (detail) rendered += ` ${chrome}· ${detail}${STYLE.reset}`;
+    const isError = marker === "✗";
+    const labelColor = isError ? danger : info;
+    let rendered = `${chrome}▸${STYLE.reset} ${STYLE.bold}${labelColor}${label}${STYLE.reset}`;
+    if (detail) {
+      rendered += ` ${chrome}·${STYLE.reset} ${styleToolDetailSegments(detail, muted, chrome)}`;
+    }
     rendered += `  ${statusColorSeq(marker, brightness)}${marker}${STYLE.reset}`;
     if (statusDetail) {
-      const metaSeq = marker === "✓" ? chrome : statusColorSeq(marker, brightness);
-      rendered += ` ${metaSeq}${STYLE.dim}${statusDetail}${STYLE.reset}`;
+      if (isError) {
+        rendered += ` ${danger}${statusDetail}${STYLE.reset}`;
+      } else {
+        rendered += ` ${chrome}${STYLE.dim}${statusDetail}${STYLE.reset}`;
+      }
     }
     return rendered;
   }

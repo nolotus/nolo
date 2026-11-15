@@ -1,5 +1,5 @@
 import { t } from "./i18n";
-import { existsSync, readFileSync, accessSync, constants } from "node:fs";
+import { existsSync, readFileSync, accessSync, constants, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +56,7 @@ function resolvePackageJsonPath(): string | null {
     // In a Bun-compiled binary, import.meta.url points into a virtual
     // bunfs root. Look for a package.json next to the real executable,
     // which native packages ship alongside the binary.
-    const execDir = dirname(process.execPath);
+    const execDir = dirname(realpathSync(process.execPath));
     const candidate = join(execDir, "package.json");
     if (existsSync(candidate)) return candidate;
     return null;
@@ -342,6 +342,36 @@ async function runShellScript(
   return exitCode;
 }
 
+/** POSIX npm bootstrap/update: retain the global package and all managed builds. */
+export function buildManagedNpmUpdateScript(channel: CliReleaseChannel): string {
+  return `set -eu
+PREFIX=$(npm prefix -g)
+ENTRY="$PREFIX/bin/nolo"
+ROOT="\${NOLO_HOME:-$HOME/.nolo}/cli/versions"
+mkdir -p "$ROOT" "\${ENTRY%/*}"
+STAGING=$(mktemp -d "$ROOT/npm.XXXXXXXX")
+# npm writes only into the newly reserved prefix, never the global package.
+npm install -g --prefix "$STAGING" ${shellQuote(`nolo-cli@${channel}`)} --progress
+PACKAGE="$STAGING/lib/node_modules/nolo-cli"
+node -e 'const p=require(process.argv[1]); if(p.name!=="nolo-cli" || !/^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?$/.test(p.version)) process.exit(1)' "$PACKAGE/package.json"
+VERSION_TEXT=$("$PACKAGE/index.js" -v)
+case "$VERSION_TEXT" in
+  "nolo-cli "*) ;;
+  *) echo "Error: invalid staged CLI version" >&2; exit 1 ;;
+esac
+# Fail before touching the live entry. Version is a health check, not identity:
+# every install has a unique permanent prefix, including same-version builds.
+EXPECTED=$(node -p 'require(process.argv[1]).version' "$PACKAGE/package.json")
+[ "$VERSION_TEXT" = "nolo-cli $EXPECTED" ]
+if [ -d "$ENTRY" ] || { [ -e "$ENTRY" ] && [ ! -L "$ENTRY" ]; }; then echo "Error: refusing non-symlink entrypoint; retain it and migrate explicitly" >&2; exit 1; fi
+LINK="$ENTRY.new.$$"
+if [ -e "$LINK" ] || [ -L "$LINK" ]; then exit 1; fi
+ln -s "$PACKAGE/index.js" "$LINK"
+mv -f "$LINK" "$ENTRY"
+echo "nolo updated to $ENTRY"
+`;
+}
+
 type StandaloneUpdateScriptArgs = {
   tarballUrl: string;
   fallbackUrl: string;
@@ -361,39 +391,19 @@ export function buildStandaloneUpdateScript(args: StandaloneUpdateScriptArgs): s
 EXTRACT_DIR=${shellQuote(args.extractDir)}
 ENTRY=${shellQuote(args.symlinkPath)}
 CURRENT_VERSION=${shellQuote(args.currentVersion)}
-STAGING="$EXTRACT_DIR.new.$$"
-BACKUP="$EXTRACT_DIR.old.$$"
-LINK="$ENTRY.new.$$"
-old_moved=0
-new_moved=0
-committed=0
-cleanup() {
-  status=$?
-  trap - 0 HUP INT TERM
-  if [ "$committed" = 0 ]; then
-    if [ "$new_moved" = 1 ] && [ -d "$EXTRACT_DIR" ]; then
-      mv "$EXTRACT_DIR" "$STAGING" || exit 1
-    fi
-    if [ "$old_moved" = 1 ] && [ -d "$BACKUP" ]; then
-      mv "$BACKUP" "$EXTRACT_DIR" || exit 1
-    fi
-  fi
-  rm -rf "$STAGING" || true
-  rm -f "$LINK" || true
-  exit "$status"
-}
-# Refuse collisions before installing cleanup: never remove somebody else's path.
-if [ -e "$STAGING" ] || [ -L "$STAGING" ] ||
-   [ -e "$BACKUP" ] || [ -L "$BACKUP" ] ||
-   [ -e "$LINK" ] || [ -L "$LINK" ]; then
-  echo "Error: update staging path already exists" >&2
+if [ -L "$EXTRACT_DIR" ]; then
+  echo "Error: refusing symlink bundle directory" >&2
   exit 1
 fi
-mkdir -p "\${EXTRACT_DIR%/*}"
-mkdir "$STAGING"
-trap cleanup 0
-trap 'exit 1' HUP INT TERM
-
+# mktemp reserves a fresh directory even for rebuilds of the same version.
+mkdir -p "$EXTRACT_DIR.versions"
+STAGING=$(mktemp -d "$EXTRACT_DIR.versions/build.XXXXXXXX")
+LINK="$ENTRY.new.$$"
+if [ -e "$LINK" ] || [ -L "$LINK" ]; then
+  echo "Error: update link staging path already exists" >&2
+  exit 1
+fi
+# Failed staged bundles are retained too; no old runtime is ever removed.
 echo ${shellQuote(`Downloading nolo from ${args.tarballUrl}...`)}
 if ! ${curl} ${shellQuote(args.tarballUrl)} -o "$STAGING/bundle.tar.gz"; then
   ${args.tarballUrl !== args.fallbackUrl
@@ -406,7 +416,6 @@ if ! ${curl} ${shellQuote(args.tarballUrl)} -o "$STAGING/bundle.tar.gz"; then
   exit 1`}
 fi
 tar -xzf "$STAGING/bundle.tar.gz" -C "$STAGING"
-rm -f "$STAGING/bundle.tar.gz"
 chmod +x "$STAGING/nolo"
 # A failing, empty or malformed version response must not touch the live install.
 VERSION_TEXT=$("$STAGING/nolo" -v)
@@ -463,32 +472,14 @@ if [ -n "$CUR_MAJOR" ] && [ -n "$CUR_MINOR" ] && [ -n "$CUR_PATCH" ]; then
       ;;
   esac
 fi
-if [ "$VERSION" = "$CURRENT_VERSION" ]; then
-  echo "✓ Already up to date (nolo-cli $VERSION)."
-  exit 10
-fi
 mkdir -p "\${ENTRY%/*}"
-# mv without -T is portable only when the destination is not a directory.
-if [ -d "$ENTRY" ] || [ -L "$EXTRACT_DIR" ]; then
-  echo "Error: refusing directory entrypoint or symlink bundle directory" >&2
+if [ -d "$ENTRY" ] || { [ -e "$ENTRY" ] && [ ! -L "$ENTRY" ]; }; then
+  echo "Error: refusing non-symlink entrypoint; retain it and migrate explicitly" >&2
   exit 1
 fi
-ln -s "$EXTRACT_DIR/nolo" "$LINK"
-if [ -e "$EXTRACT_DIR" ]; then
-  old_moved=1
-  mv "$EXTRACT_DIR" "$BACKUP"
-fi
-new_moved=1
-mv "$STAGING" "$EXTRACT_DIR"
+# The staged path becomes permanent. Never rename the running bundle.
+ln -s "$STAGING/nolo" "$LINK"
 mv -f "$LINK" "$ENTRY"
-committed=1
-# Retain only the newest recovery copy from this run; prune older backups.
-for old_copy in "$EXTRACT_DIR.old."*; do
-  if [ -d "$old_copy" ] && [ ! -L "$old_copy" ] && [ "$old_copy" != "$BACKUP" ]; then
-    rm -rf "$old_copy" || true
-  fi
-done
-# Retain the previous bundle as a recovery copy; never unlink the live entry.
 echo "nolo updated to $ENTRY"
 `;
 }
@@ -499,7 +490,7 @@ echo "nolo updated to $ENTRY"
  * installer. No npm/bun package manager involved — the bundle is a
  * self-contained binary fetched from the download host.
  *
- * Mirrors install-nolo.sh: download tarball → extract to ~/.nolo/<platform>/
+ * Mirrors install-nolo.sh: download tarball → extract to a fresh ~/.nolo/<platform>.versions/build.<unique>/
  * → atomically swap the symlink in the install dir.
  */
 export async function runStandaloneBundleUpdate(
@@ -528,7 +519,7 @@ export async function runStandaloneBundleUpdate(
   const fallbackUrl = `https://nolo.chat/public/downloads/${bundleName}`;
 
   const extractDir = join(homedir(), ".nolo", extractSubdir);
-  const installDir = resolveStandaloneInstallDir();
+  const installDir = env.NOLO_INSTALL_DIR || resolveStandaloneInstallDir();
   const symlinkPath = join(installDir, "nolo");
 
   const script = buildStandaloneUpdateScript({
@@ -783,36 +774,13 @@ export async function runSelfUpdateDetailed(
   output.write(`${t("updateNpmTarget", channel)}\n`);
   output.write(`${t("updateNpmDownloading")}\n`);
 
-  const useCustomSink = options.output !== undefined;
-  const proc: SpawnedProcess = spawn({
-    cmd: command,
-    // Capture mode (TUI sink): ignore stdin — see runShellScript.
-    stdin: useCustomSink ? "ignore" : "inherit",
-    stdout: useCustomSink ? "pipe" : "inherit",
-    stderr: useCustomSink ? "pipe" : "inherit",
-    env,
+  const exitCode = await runShellScript(buildManagedNpmUpdateScript(channel), {
+    output, spawn, env, useCustomSink: options.output !== undefined,
   });
-
-  if (!useCustomSink) {
-    const exitCode = await proc.exited;
-    if (exitCode === 0) {
-      output.write(`  ${renderProgressBar(100.0)}\n`);
-      output.write(`${t("updateCompleted")}\n\n`);
-    }
-    return { exitCode, disposition: "completed" };
-  }
-
-  const [exitCode] = await Promise.all([
-    proc.exited,
-    forwardSpawnOutput(proc.stdout, output),
-    forwardSpawnOutput(proc.stderr, output),
-  ]);
-
   if (exitCode === 0) {
     output.write(`  ${renderProgressBar(100.0)}\n`);
     output.write(`${t("updateCompleted")}\n\n`);
   }
-
   return { exitCode, disposition: "completed" };
 }
 

@@ -12,6 +12,13 @@ export const queryMemoryFunctionSchema = {
   parameters: {
     type: "object",
     properties: {
+      source: {
+        type: "string",
+        enum: ["archive"],
+        description: "显式查旧版历史时传 archive（纯只读，不代表当前结论）；省略保持默认查询。仅当前用户 archive，不支持 Space。",
+      },
+      limit: { type: "integer", minimum: 1, maximum: 100, description: "archive 每页最多返回条数，默认20；每页最多扫描100条索引。" },
+      cursor: { type: "string", description: "archive 上一页返回的 cursor；保持 query 不变。空结果也可能 truncated，继续翻页。不提供快照一致性。" },
       query: {
         type: "string",
         description: "要从长期记忆中检索的自然语言问题或关键词。",

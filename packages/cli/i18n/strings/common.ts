@@ -179,9 +179,21 @@ export const commonStrings = {
   // --- Tool trace copy ------------------------------------------------------
   // The compact trace shows only status, never timing or output size: a line
   // count told the user nothing actionable and the ms figure read as noise.
+  permissionGranted: { en: "⏵ approved", zh: "⏵ 已授权" },
+  permissionLocalGranted: { en: "⏵ local approved", zh: "⏵ 本地授权" },
+  permissionRemoteGranted: { en: "⏵ remote approved", zh: "⏵ 远端授权" },
+  runningInputHint: {
+    en: "Enter queues text · Esc stops this reply (again to force)",
+    zh: "Enter 排队发送 · Esc 停止当前回复（再按强制停止）",
+  },
+  noToolDetails: { en: "[nolo] No tool details in this session yet.", zh: "[nolo] 尚无工具详情。" },
+  generatingReply: {
+    en: "Generating reply…",
+    zh: "生成回复…",
+  },
   workingFallback: {
-    en: "Working…",
-    zh: "处理中…",
+    en: "Waiting for response…",
+    zh: "等待响应…",
   },
   thinkingActive: {
     en: "Thinking…",

@@ -1,3 +1,5 @@
+import { write as writeFd } from "node:fs";
+import { Writable } from "node:stream";
 import type { AgentCommandDeps } from "./agentCommandSupport";
 import type { CliFetchImpl } from "./cliFetch";
 import { fetchWithTransientRetry } from "./client/localRuntimeFetchRetry";
@@ -215,6 +217,74 @@ function writeJsonStream(output: { write(chunk: string): unknown }, value: unkno
     }
   }
   output.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+/** Bun's process.stdout callback/end can hide EPIPE; await native writes for machine exports. */
+async function writeDialogReadJson(output: { write(chunk: string): unknown }, json: string): Promise<void> {
+  const text = `${json}\n`;
+  if (output === process.stdout) {
+    const bytes = Buffer.from(text, "utf8");
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = await new Promise<number>((resolve, reject) => {
+        const attempt = () => writeFd(1, bytes, offset, Math.min(16_384, bytes.length - offset), null, (error, count) => {
+          // stdout is nonblocking in Bun. A full pipe is backpressure, not a failed export.
+          if (error?.code === "EAGAIN" || error?.code === "EWOULDBLOCK") {
+            setTimeout(attempt, 1);
+          } else if (error) reject(error);
+          else resolve(count);
+        });
+        attempt();
+      });
+      if (written <= 0) throw new Error("stdout write made no progress");
+      offset += written;
+    }
+  } else if (output instanceof Writable) {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let writeStarted = false;
+      let stateCheck: ReturnType<typeof setInterval> | undefined;
+      const cleanup = () => {
+        clearInterval(stateCheck);
+        output.off("error", onError);
+        output.off("close", checkState);
+        output.off("finish", checkState);
+      };
+      const settle = (error?: Error | null) => {
+        if (settled) return;
+        settled = true;
+        // A failed write callback precedes Writable's error event. Keep its listener
+        // through that turn, then remove every listener before returning failure.
+        if (error) setTimeout(() => { cleanup(); reject(error); }, 0);
+        else { cleanup(); resolve(); }
+      };
+      const onError = (error: Error) => settle(error);
+      const checkState = () => {
+        if (output.errored) settle(output.errored);
+        else if (output.destroyed || output.closed || output.writableFinished || (!writeStarted && output.writableEnded)) {
+          settle(new Error("stdout Writable closed before write completion"));
+        }
+      };
+      output.on("error", onError);
+      output.on("close", checkState);
+      output.on("finish", checkState);
+      checkState();
+      if (settled) return;
+      // emitClose:false permits asynchronous destroy with no event or write callback.
+      stateCheck = setInterval(checkState, 10);
+      try {
+        // end() after this point still flushes the accepted write; await its callback.
+        writeStarted = true;
+        output.write(text, (error) => settle(error));
+        checkState();
+      } catch (error) {
+        settle(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  } else {
+    // OutputLike only promises write(chunk), e.g. synchronous capture collectors.
+    output.write(text);
+  }
 }
 
 function writeJsonlStream(output: { write(chunk: string): unknown }, items: unknown[]): void {
@@ -1712,12 +1782,11 @@ export async function runDialogReadCommand(
         },
         options: { maxResponseChars: agentMaxResponseChars },
       });
-      output.write(built.serialized);
-      output.write("\n");
+      await writeDialogReadJson(output, built.serialized);
       return 0;
     }
 
-    output.write(JSON.stringify({
+    await writeDialogReadJson(output, JSON.stringify({
       source: read.source as ReadSource,
       base: read.resolvedBase,
       triedBases: read.candidateBases,
@@ -1766,10 +1835,11 @@ export async function runDialogReadCommand(
       lastAssistantMessage,
       messages: outputMsgs,
     }, null, 2));
-    output.write("\n");
     return 0;
   } catch (error) {
-    output.write(`${formatDialogReadFailure(error, target.dialogId)}\n`);
+    const diagnostic = `${formatDialogReadFailure(error, target.dialogId)}\n`;
+    // Do not write a failure back into the same broken Writable.
+    (deps.error ?? (output instanceof Writable ? process.stderr : output)).write(diagnostic);
     return 1;
   }
 }

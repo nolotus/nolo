@@ -1,3 +1,4 @@
+import { resolveModelTier, type ModelTier } from "./dispatchSelectionPolicy";
 import {
   resolveBillingSource,
   type AgentBillingCandidate,
@@ -140,8 +141,61 @@ export function filterAgentsByScope<T extends SafeAgentSummary>(
   return unique.filter((agent) => isPreferredAgent(agent) || agent.isPublic === true);
 }
 
+/** Host-owned identity, never taken from listAgents tool arguments. */
+export interface PlanningCaller {
+  agentKey?: string;
+  effectiveModel?: string;
+  runKind?: "interactive" | "subtask";
+}
+
+export interface PlanningRecommendation {
+  /** Conditional advice only: the model decides whether planning and domain fit apply. */
+  condition: "when_planning_needed_and_candidate_suitable";
+  action: "self" | "delegate";
+  reason: "bounded_subtask" | "caller_unknown" | "caller_tier_unknown" | "pool_incomplete"
+    | "higher_suitable_agent" | "no_higher_suitable_agent" | "paid_approval_required";
+  currentTier: ModelTier;
+  agentKey?: string;
+  recommendedTier?: ModelTier;
+  poolComplete: boolean;
+  requiresPaidApproval: boolean;
+}
+
+function recommendPlanning(
+  agents: SafeAgentSummary[], caller: PlanningCaller | undefined, poolComplete: boolean,
+): PlanningRecommendation {
+  const callerKey = typeof caller?.agentKey === "string" && caller.agentKey.trim()
+    ? caller.agentKey : undefined;
+  // Missing identities must not match a candidate whose runnable key is also absent.
+  const current = callerKey ? agents.find(a => a.agentKey === callerKey) : undefined;
+  const currentTier = callerKey ? resolveModelTier(caller?.effectiveModel ?? current?.model) : "unknown";
+  const base = {
+    condition: "when_planning_needed_and_candidate_suitable" as const,
+    action: "self" as const, currentTier, poolComplete, requiresPaidApproval: false,
+  };
+  if (caller?.runKind === "subtask") return { ...base, reason: "bounded_subtask" };
+  if (!callerKey) return { ...base, reason: "caller_unknown" };
+  if (currentTier === "unknown") return { ...base, reason: "caller_tier_unknown" };
+  if (!poolComplete) return { ...base, reason: "pool_incomplete" };
+  const ranks = { easy: 0, normal: 1, complex: 2, extreme: 3 };
+  // Tier is weak guidance, not a domain/quality score. Keep domain fit conditional.
+  // Availability annotations are advisory; do not turn stale quota/cooldown into gates.
+  const higher = agents.filter(a => a.agentKey && a.agentKey !== callerKey
+    && a.modelTier !== "unknown" && ranks[a.modelTier] > ranks[currentTier]);
+  const free = higher.filter(a => a.requiresPaidApproval === false);
+  free.sort((a, b) => ranks[b.modelTier as keyof typeof ranks] - ranks[a.modelTier as keyof typeof ranks]);
+  const best = free[0];
+  if (best) return { ...base, action: "delegate", reason: "higher_suitable_agent",
+    agentKey: best.agentKey, recommendedTier: best.modelTier };
+  if (higher.length) return { ...base, reason: "paid_approval_required", requiresPaidApproval: true };
+  return { ...base, reason: "no_higher_suitable_agent" };
+}
+
 export interface BuildAgentDiscoveryResultOptions<T extends SafeAgentSummary> {
   agents: T[];
+  caller?: PlanningCaller;
+  /** Host-side scope filtering (for example a space) makes the pool partial. */
+  poolRestricted?: boolean;
   scope?: DiscoveryScope | string;
   query?: string;
   publicOnly?: boolean;
@@ -248,6 +302,7 @@ export function matchesAgentQuery(agent: SafeAgentSummary, query?: string): bool
  * 截断后每个候选的 agentKey/tier/billingSource 全部落在被砍掉的中段。
  */
 export interface AgentDiscoveryResult {
+  planningRecommendation: PlanningRecommendation;
   total: number;
   offset?: number;
   limit?: number;
@@ -384,6 +439,10 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     ...(isTruncated ? { truncated: true } : {}),
     unavailableCount,
     agents: projectedAgents,
+    planningRecommendation: recommendPlanning(
+      sortedAgents, options.caller,
+      !isTruncated && scope === "all" && !hasQuery && !options.poolRestricted,
+    ),
     credentialGroups,
   };
 }

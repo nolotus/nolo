@@ -1,15 +1,11 @@
+import { createLiveImageSupportResolver } from "./liveImageSupport";
+import { fetchAntigravityAvailableModels } from "../oauth/flows/antigravity";
+import { resolveAgentImageInputSupport } from "../../ai/llm/agentCapabilities";
 import type { LocalCompactionSummaryFallback } from "../../agent-runtime/localAutoCompaction";
 import { createTuiSummaryLlmCaller } from "./tuiSummaryLlmCaller";
 import { getLocalShellLifecycle } from "../../agent-runtime/localToolPolicy";
-import { isSubtaskRun } from "../../agent-runtime/agentRunIsolation";
-import { createHostAuthorExecution } from "./hostReviewDispatch";
-import { createHash } from "node:crypto";
-import { resolve as resolveReviewWorkspace } from "node:path";
 import { resolveBuiltinSkillEntry } from "../../ai/skills/builtinSkillRegistry";
 import { buildAccountAutoReviewAuthorizationBlock } from "../../ai/skills/autoReviewSkill";
-import { createHostTaskController, readHostTask, hostTaskEventsRoot } from "./hostTaskEvents";
-import { admitHostTaskWorkspace, collectHostTaskWorkspace } from "./hostTaskWorkspace";
-import type { TaskReviewHost } from "./taskReviewTools";
 import { resolveAgentSkillConfig, type AgentSkillConfigSource } from "../../ai/tools/agentSkillConfig";
 import { extractQuotaSnapshot } from "../../ai/agent/quotaSnapshot";
 import { resolveUserSkillRuntime } from "../../ai/skills/userSkillRuntime";
@@ -870,9 +866,6 @@ async function writeSettingsSyncMarker(
 export function createCliLocalRuntimeAdapter(
   deps: CliLocalRuntimeAdapterDeps,
 ): AgentRuntimeHostAdapter & {
-  authorizeAccountTask(scope: import("./hostTaskEvents").HostTaskReference): Promise<void>;
-  installTaskReviewHost(host: TaskReviewHost): void;
-  admitAccountReviewTurn(dialogId: string, turnId: string, taskStart?: import("./autoReviewContinuation").AccountTaskStart): Promise<import("./hostTaskEvents").HostTaskReference>;
   /**
    * 本机 OS 沙盒 lease 的收尾入口（CLI 专有，非 AgentRuntimeHostAdapter 接口
    * 成员）：run 结束时由宿主调用，释放 bwrap lease。幂等；未创建沙盒时 no-op。
@@ -916,6 +909,13 @@ export function createCliLocalRuntimeAdapter(
     deps.loopbackRequest ??
     (deps.fetchImpl ? undefined : defaultLoopbackRequest);
   const userId = resolveLocalUserId(deps.env);
+  const resolveLiveImageSupport = createLiveImageSupportResolver(userId, async () => {
+    const token = await createOAuthApiKeyRefResolver({
+      migration: { enableLegacyMigration: true }, localUserId: userId,
+    })("antigravity");
+    if (!token) return {};
+    return fetchAntigravityAvailableModels(fetchImpl, token);
+  });
   const localToolBudgets = parseLocalToolBudgets(deps.env);
   const localToolUsage = new Map<string, number>();
   const buildProviderOpenAiTools =
@@ -1334,8 +1334,9 @@ export function createCliLocalRuntimeAdapter(
   const skillPolicyFingerprint = (source: AgentSkillConfigSource | null | undefined) =>
     JSON.stringify(Object.entries(resolveAgentSkillConfig(source)).sort(([a], [b]) => a.localeCompare(b)));
   // Executor closures belong to this adapter; only prepared metadata is shared.
-  let installedTaskReviewHost: TaskReviewHost | undefined;
   let reviewAgentConfig: any;
+  // Shared with executor closures; provider resolution attests the effective model.
+  let planningCaller: import("../../ai/agent/agentDiscovery").PlanningCaller = {};
   // Single canonical opt-in predicate: the account must admit the *builtin*
   // auto-review entry (slug/id aliases and agent-level `disabled` excluded).
   // Typed-tool admission and prompt injection both call this, so the model is
@@ -1354,37 +1355,8 @@ export function createCliLocalRuntimeAdapter(
         visit.meta?.skillConfig?.id === canonical.skillId,
     );
   };
-  const accountReviewScope = (dialogId: string, taskInstanceId?: string) => ({
-    taskId: `tui-local-alpha-v1-${createHash("sha256").update(JSON.stringify([userId, dialogId, resolveReviewWorkspace(workspaceRoot), "local-alpha-v1", ...(taskInstanceId ? [taskInstanceId] : [])])).digest("hex")}`,
-    dialogId, workspace: resolveReviewWorkspace(workspaceRoot), ...(taskInstanceId ? { taskInstanceId } : {}),
-  });
-  const requireAccountReview = async (scope: import("./hostTaskEvents").HostTaskReference) => {
-    if (!userId || userId === "local" || !scope.dialogId?.trim()) throw new Error("task_review_authenticated_user_missing");
-    if (scope.taskId !== accountReviewScope(scope.dialogId, scope.taskInstanceId).taskId || resolveReviewWorkspace(scope.workspace) !== resolveReviewWorkspace(workspaceRoot)) throw new Error("task_review_user_scope_mismatch");
-    const store = await getOrCreateSharedStore(deps);
-    const dialog = await store.read(`dialog-${userId}-${scope.dialogId}`);
-    // A brand-new dialog has no persisted record until saveTurn. Its id comes
-    // from the host turn, never tool args; a conflicting existing owner rejects.
-    if (dialog?.userId && dialog.userId !== userId) throw new Error("task_review_user_scope_mismatch");
-    const settings = await store.read(createUserKey.settings(userId));
-    const skills = await resolveUserSkillRuntime(reviewAgentConfig, settings && typeof settings === "object" ? settings : {});
-    if (!isCanonicalAutoReviewAdmitted(skills.visits)) throw new Error("task_review_account_optin_required");
-  };
-  const authorizedReviewHost = (): TaskReviewHost | undefined => {
-    const host = installedTaskReviewHost ?? deps.taskReviewHost;
-    if (!host) return undefined;
-    return { ...host, authorize: async () => {
-      await host.authorize();
-      await requireAccountReview(host.scope);
-      const task = readHostTask(hostTaskEventsRoot(deps.env), host.scope);
-      if (task.authorization !== "active") throw new Error(`task_review_authorization_${task.authorization}`);
-      const workspace = await collectHostTaskWorkspace(host.scope, deps.env);
-      if (workspace.status !== "ready") throw new Error(`task_review_workspace_unavailable: ${workspace.reason}`);
-    } };
-  };
   const buildCurrentToolExecutors = (agentConfig?: AgentRuntimeAgentConfig | null) =>
     buildLocalToolExecutors({
-      taskReviewHost: authorizedReviewHost(),
       workspaceRoot,
       sourceParentDialogId: deps.parentDialogId,
       env: deps.env,
@@ -1409,6 +1381,10 @@ export function createCliLocalRuntimeAdapter(
         return !deleted && typeof rec?.name === "string" && rec.name.trim()
           ? rec.name.trim()
           : undefined;
+      },
+      resolveAgentImageSupport: async (agentRef: string) => {
+        const record = await readAgentFromStore({ agentRef, store: await getOrCreateSharedStore(deps), userId });
+        return !!record && resolveAgentImageInputSupport(await resolveLiveImageSupport({ ...(record as any), hasVision: (record as any).hasVision ?? false }));
       },
       resolveAgentModel,
       dialogExistsForCurrentUser: async (dialogId: string) => {
@@ -1444,6 +1420,12 @@ export function createCliLocalRuntimeAdapter(
         ? { pastedTextStore: deps.pastedTextStore }
         : {}),
       agentKey: agentConfig?.key,
+      planningCaller: (planningCaller = {
+        agentKey: agentConfig?.key,
+        effectiveModel: agentConfig?.model,
+        runKind: deps.env.NOLO_AGENT_RUN_CHILD === "1" || (agentConfig as any)?.toolSurface?.runKind === "subtask"
+          ? "subtask" : "interactive",
+      }),
       agentSkillSource: agentConfig?.rawRecord,
       ...(agentConfig ? { resolveAgentSkillSource: async () => {
         const store = await getOrCreateSharedStore(deps);
@@ -1649,7 +1631,7 @@ export function createCliLocalRuntimeAdapter(
           runtimeToolExecutionLimits = cached.runtimeToolExecutionLimits;
           reviewAgentConfig = cached.agentConfig;
           localToolExecutors = buildCurrentToolExecutors(cached.agentConfig);
-          return cached.agentConfig;
+          return resolveLiveImageSupport(cached.agentConfig);
         }
       }
 
@@ -1785,7 +1767,8 @@ export function createCliLocalRuntimeAdapter(
           runtimeToolExecutionLimits,
         });
       }
-      return exposedAgentConfig;
+      // Keep live evidence out of the process-wide prepared metadata cache.
+      return exposedAgentConfig ? resolveLiveImageSupport(exposedAgentConfig) : exposedAgentConfig;
     },
     loadDialogHistory: async (dialogId) => {
       const loaded = await loadCliDialogHistoryWithSource({
@@ -2418,37 +2401,6 @@ export function createCliLocalRuntimeAdapter(
   // pre-admission zero-cost attempts protected by abort/sawToolEvent guards.
   return {
     ...adapterBase,
-    async admitAccountReviewTurn(dialogId: string, turnId: string, taskStart?: import("./autoReviewContinuation").AccountTaskStart) {
-      if (taskStart && (taskStart.userId !== userId || !taskStart.taskInstanceId?.trim() || !taskStart.userMessageId?.trim() || !/^[a-f0-9]{64}$/.test(taskStart.contentSha256))) throw new Error("task_review_user_turn_source_invalid");
-      if (isSubtaskRun(deps.env) || !activeAgentToolNames.some(name => ["requestTaskReview", "recordTaskReviewDecision"].includes(name))) throw new Error("task_review_outside_final_run_surface");
-      const scope = accountReviewScope(dialogId, taskStart?.taskInstanceId);
-      await requireAccountReview(scope);
-      const root = hostTaskEventsRoot(deps.env);
-      const current = readHostTask(root, scope);
-      if (current.authorization !== "unknown" && taskStart && (current.taskStart?.taskInstanceId !== taskStart.taskInstanceId || current.taskStart?.userId !== taskStart.userId || current.taskStart?.userMessageId !== taskStart.userMessageId || current.taskStart?.contentSha256 !== taskStart.contentSha256)) throw new Error("task_review_user_turn_source_mismatch");
-      if (current.authorization === "unknown") {
-        if (current.reason !== "missing") throw new Error("task_review_task_history_invalid");
-        if (!taskStart) throw new Error("task_review_explicit_task_start_required");
-        const snapshot = admitHostTaskWorkspace(scope, deps.env);
-        if (snapshot.status !== "ready") throw new Error(`task_review_workspace_unavailable: ${snapshot.reason}`);
-        createHostTaskController(root, { kind: "trusted-host", actorId: userId, sourceId: taskStart ? `account-task-start:${taskStart.userMessageId}:${taskStart.contentSha256}` : `account-auto-review-admission:${turnId}` }).append(scope, 0, { type: "admitted", role: "owner", ...(taskStart ? { taskStart } : {}) });
-      } else if (current.authorization !== "active") throw new Error(`task_review_authorization_${current.authorization}`);
-      const workspace = await collectHostTaskWorkspace(scope, deps.env);
-      if (workspace.status !== "ready") throw new Error(`task_review_workspace_unavailable: ${workspace.reason}`);
-      const host: TaskReviewHost = { scope, authorExecutionId: createHostAuthorExecution(deps.env, scope, turnId), authorize: async () => {} };
-      installedTaskReviewHost = host;
-      localToolExecutors = buildCurrentToolExecutors(reviewAgentConfig);
-      return scope;
-    },
-    async authorizeAccountTask(scope: import("./hostTaskEvents").HostTaskReference) {
-      await requireAccountReview(scope);
-      const current = readHostTask(hostTaskEventsRoot(deps.env), scope);
-      if (current.authorization !== "active") throw new Error(`task_review_authorization_${current.authorization}`);
-    },
-    installTaskReviewHost(host: TaskReviewHost) {
-      installedTaskReviewHost = host;
-      localToolExecutors = buildCurrentToolExecutors(reviewAgentConfig);
-    },
     releaseLocalSandboxWorkload,
     prepareLocalRuntimeWorkload,
     // Session override or host-owned default; headless receives the same paid admission.
@@ -2464,6 +2416,9 @@ export function createCliLocalRuntimeAdapter(
         agentConfig,
         options,
       )) as AgentRuntimeProvider;
+      if (!options?.textOnly && planningCaller.agentKey === agentConfig.key) {
+        planningCaller.effectiveModel = provider.model;
+      }
       const retryingProvider = shouldUsePlatformChatProvider(deps.env, agentConfig)
         ? withProviderStreamRetry(provider, {
             ...deps,

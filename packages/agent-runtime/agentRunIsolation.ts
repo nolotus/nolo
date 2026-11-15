@@ -50,8 +50,6 @@ export type RunIsolationEnvLike = Record<string, string | undefined>;
 export const ORCHESTRATION_TOOL_NAMES: ReadonlySet<string> = new Set([
   "startAgentRun",
   "controlAgentRun",
-  "requestTaskReview",
-  "recordTaskReviewDecision",
   "listAgents",
   "readAgent",
   "runStreamingAgent",

@@ -10,6 +10,7 @@
  *
  * 注意：本探针只证明「合成报告序列 + 16ms tick」这条机械链的性质；真实终端
  * 上报速率、事件循环抖动、渲染实际耗时在用户设备上未知，不能据此宣称真实手感。
+ * 当前探针将虚拟时钟注入速度窗口；旧版使用宿主时钟，结果不可直接比较。
  */
 import {
   createTurnHistory,
@@ -84,7 +85,7 @@ function makeOutput(rows = ROWS, columns = COLUMNS): NodeJS.WritableStream {
 }
 
 /** 单行 turn 的合成历史：contentLines 行 → maxScrollTop = contentLines - VIEWPORT。 */
-function makeHistory(turnCount: number): TurnHistory {
+export function makeHistory(turnCount: number): TurnHistory {
   const history = createTurnHistory();
   for (let i = 0; i < turnCount; i++) {
     history.turns.push({ role: "assistant", content: `line ${i}` });
@@ -99,6 +100,8 @@ type InputEvent = { at: number; direction: ScrollWheelDirection };
 type ScenarioMetrics = {
   name: string;
   reports: number;
+  /** UTF-8 bytes emitted by optional in-memory renderHistory measurement. */
+  outputBytes: number;
   /** 首条报告 → scrollTop 第一次变化的虚拟时间（"报告首次可见延迟"）。 */
   firstVisibleMs: number | null;
   /** 最后一次 scrollTop 变化 − 最后一次输入：停手后的拖尾（settle）。 */
@@ -117,16 +120,22 @@ type ScenarioMetrics = {
   settleMs: number | null;
 };
 
-function runScenario(
+export function runScenario(
   name: string,
   history: TurnHistory,
   events: InputEvent[],
-  opts: { endAt: number; onPaint?: () => void; env?: Record<string, string> },
+  opts: { endAt: number; onPaint?: () => void; env?: Record<string, string>; measureOutput?: boolean },
 ): ScenarioMetrics {
   const clock = makeClock();
   const ordered = [...events].sort((a, b) => a.at - b.at);
   const lastInputAt = ordered.length ? ordered[ordered.length - 1]!.at : 0;
   let paints = 0;
+  let outputBytes = 0;
+  const output = makeOutput();
+  output.write = ((chunk: string | Buffer) => {
+    outputBytes += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.byteLength;
+    return true;
+  }) as typeof output.write;
   let firstChangeAt: number | null = null;
   let lastChangeAt = 0;
   let lastChangeValue = history.scrollTop;
@@ -138,7 +147,7 @@ function runScenario(
 
   const animator = createScrollAnimator({
     history,
-    output: makeOutput(),
+    output,
     getInputLines: () => INPUT_LINES,
     onPaint: () => {
       paints += 1;
@@ -152,10 +161,12 @@ function runScenario(
         lastChangeValue = nowTop;
         prev = nowTop;
       }
+      if (opts.measureOutput) renderHistory(output, history, INPUT_LINES);
       opts.onPaint?.();
     },
     env: opts.env ?? {},
     tickTimer: clock.timer,
+    now: clock.now,
   });
 
   let idx = 0;
@@ -180,6 +191,7 @@ function runScenario(
   return {
     name,
     reports: ordered.length,
+    outputBytes,
     firstVisibleMs: firstChangeAt === null ? null : firstChangeAt - ordered[0]!.at,
     tailAfterLastInputMs: lastChangeAt - lastInputAt,
     tailLines: lastChangeValue - atLastInputTop, // 末次输入时欠账 = 静默后仍在推进的距离
@@ -228,6 +240,19 @@ function scenarios(): {
     { name: "burst20-then-stop", turnCount: 2000, events: burstThenStop, endAt: 3000 },
     { name: "reverse-mid-flight", turnCount: 2000, events: reverse, endAt: 3000 },
   ];
+}
+
+if (import.meta.main) {
+console.log("Clock semantics changed: velocity uses virtual time; results are not directly comparable to older host-clock baselines.");
+console.log("[report interval baseline] 20 down reports; 2000 turns; rows=10 cols=40 inputLines=2");
+console.log("CPU paint callbacks are NOT terminal display frames; bytes count renderHistory only (no composer/terminal/GPU). Tail is virtual, not wall-clock latency.");
+for (const interval of [0, 40, 160]) {
+  const m = runScenario(`20@${interval}ms`, makeHistory(2000),
+    Array.from({ length: 20 }, (_, i) => ({ at: i * interval, direction: "down" as const })),
+    { endAt: 5000, measureOutput: true });
+  console.log(JSON.stringify({ reportIntervalMs: interval, reports: m.reports,
+    displacementLines: m.totalDistance, paintCallbacks: m.paints,
+    outputBytes: m.outputBytes, virtualTailMs: m.tailAfterLastInputMs }));
 }
 
 const tuning = resolveScrollTuning({});
@@ -480,3 +505,5 @@ console.log(
   `  single 列 = 总距离/可见帧数；dense20stop 列 = 停手后仍在推进的行数（拖尾）。`,
 );
 console.log("DONE");
+
+}

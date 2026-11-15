@@ -23,9 +23,11 @@
  * ToolMessageGroup; this layer carries the ordinary continuous-tool presentation.
  */
 import { isRecord } from "core/isRecord";
+import { summarizeShellCommand } from "core/shellCommandGist";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
+import { redactSecrets, withholdIfSecretLike } from "../../../cli/tui/redactSecrets";
 import {
   projectToolExecutionLocation,
   type ToolExecutionLocation,
@@ -433,12 +435,25 @@ export function buildToolCallTarget(
       break;
     case "execShell":
     case "exec_shell":
-    case "shell":
-      target =
+    case "shell": {
+      const cmd =
         asOptionalTrimmedString(args.cmd) ??
         asOptionalTrimmedString(args.command) ??
         "";
-      return target ? truncateDetail(target, 80) : undefined;
+      if (!cmd) return undefined;
+      // Redact before basename/operand extraction so stripped prefixes
+      // (`token=abc/ghp_...`) cannot expose a bare token in the gist.
+      const redactedCmd = redactSecrets(cmd);
+      const gist = summarizeShellCommand(redactedCmd);
+      const candidate = redactSecrets(gist ? gist.summary : redactedCmd);
+      const safeTarget = withholdIfSecretLike(candidate);
+      if (!safeTarget) {
+        const fallbackVerb = gist?.action ? redactSecrets(gist.action) : "";
+        const safeVerb = fallbackVerb ? withholdIfSecretLike(fallbackVerb) : "";
+        return safeVerb || undefined;
+      }
+      return truncateDetail(safeTarget, 80);
+    }
     case "loadSkill":
       target = asOptionalTrimmedString(args.name) ?? "";
       break;

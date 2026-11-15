@@ -11,7 +11,23 @@
  * token/key/secret/password 键值对、CLI flag 值）。高熵裸字符串不做启发式
  * 打码——误伤会把错误原因打得不可读，违背本次改动的初衷。
  */
+import { findPotentialSecrets } from "../secretScan";
+
 const REDACTED = "⟨redacted⟩";
+
+const NORMAL_GIST_SECRET_PATTERNS: RegExp[] = [
+  /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/i,
+  /\bsk-(?:ant-)?(?:api)?[0-9a-zA-Z-]{10,}/,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{10,}/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+];
+
+export function withholdIfSecretLike(gist: string): string {
+  if (!gist) return "";
+  if (findPotentialSecrets(gist).length > 0) return "";
+  if (NORMAL_GIST_SECRET_PATTERNS.some((pattern) => pattern.test(gist))) return "";
+  return gist;
+}
 
 export function redactSecrets(text: string): string {
   return (
@@ -20,14 +36,16 @@ export function redactSecrets(text: string): string {
       .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{10,}/g, REDACTED)
       // Authorization: Bearer <token>（保留 Bearer，值打码）
       .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi, `$1${REDACTED}`)
+      // CLI flags start at line/whitespace boundaries, not a word boundary before --.
+      // Consume quoted values before key-value redaction can split them at spaces.
+      // Truncated quotes end at the current line; never consume later diagnostics.
+      .replace(
+        /(^|\s)((?:--[a-z0-9-]*(?:token|key|secret|password|credential)[a-z0-9-]*)(?:[^\S\r\n]*=[^\S\r\n]*|[^\S\r\n]+))(?:"(?:\\[^\r\n]|[^"\\\r\n]){8,}(?:"|(?=[\r\n]|$))|'(?:\\[^\r\n]|[^'\\\r\n]){8,}(?:'|(?=[\r\n]|$))|[^\s"']{8,})/gi,
+        `$1$2${REDACTED}`,
+      )
       // token=… / api_key: … / password: … 键值对（键保留可读，值打码）
       .replace(
         /\b((?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|token|secret|password|passwd|credential)s?\s*[=:]\s*["']?)[^\s"',;]{8,}/gi,
-        `$1${REDACTED}`,
-      )
-      // CLI flag 形态：--api-token <value> / --password <value>
-      .replace(
-        /\b((?:--[a-z-]*(?:token|key|secret|password|credential)[a-z-]*)\s+)[^\s"']{8,}/gi,
         `$1${REDACTED}`,
       )
   );

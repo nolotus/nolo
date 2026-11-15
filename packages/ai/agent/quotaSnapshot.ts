@@ -240,20 +240,10 @@ export function isSubscriptionQuotaScope(scope: string): boolean {
  * 缺 resetAt（未知）**不算**过期：语义上「不知道周期边界」与「周期已结束」
  * 不同，前者维持原有口径，后者才必须排除。
  */
-/**
- * 额度窗口的模型族。antigravity 的额度接口把窗口分成**两族**，桶名是上游给的
- * 字面量：`gemini-5h`/`gemini-7d` 与 `3p-5h`/`3p-7d`。
- *
- * `3p` 的语义有上游自述依据（2026-11-03 实测 `retrieveUserQuotaSummary` 原始响应）：
- * 该 group 的 `displayName` 是 `Claude and GPT models`，`description` 是
- * `Models within this group: Claude Opus, Claude Sonnet, GPT-OSS` —— 即 3p 是
- * **Claude/GPT 那一族**，与 Gemini 模型无关。
- *
- * 同一响应里**没有** Gemini 组（生产档只回 3p 组），因此 gemini agent 的额度上游
- * 不提供；泛用接口虽回 gemini 族，但其读数自 2026-10-22 起冻结（resetAt 已过期），
- * 不能当当前余量。展示层据此显示「无额度数据」而不是编造数字。
- */
-export type QuotaWindowFamily = "gemini" | "3p";
+/** Independent quota pools. `gemini` retains the legacy Gemini models;
+ * `3p` retains the upstream Claude/GPT summary identity. New Gemini pools
+ * must never inherit the legacy Gemini aggregate. */
+export type QuotaWindowFamily = "gemini" | "3p" | "hydrogen" | "argon";
 
 /**
  * 拆解 scope 的「模型族 + 窗口周期」。
@@ -265,25 +255,19 @@ export function parseQuotaWindowScope(scope: string): {
   family?: QuotaWindowFamily;
   period: string;
 } {
-  const matched = /^(gemini|3p)-(.+)$/.exec(scope);
+  const matched = /^(gemini|3p|hydrogen|argon)-(.+)$/.exec(scope);
   return matched
     ? { family: matched[1] as QuotaWindowFamily, period: matched[2]! }
     : { period: scope };
 }
 
-/**
- * agent 的模型 → 该看哪一族额度窗口：模型名含 gemini 的走 `gemini-*` 族，其余走
- * `3p-*` 族。只有完全拿不到 model（undefined 或空串）时才返回 undefined，表示
- * 「两族都算数」（保守退化）。
- *
- * 该映射的适用范围：带族前缀的窗口只有 antigravity 会产出，而 antigravity 在本仓
- * 库只跑 Gemini 模型（wire id 形如 `gemini-*-tiered` / `gemini-*-low`），因此
- * antigravity agent 实际恒走 gemini 族。其它 provider 的窗口无族前缀，映射对它们恒等。
- */
+/** Resolve model quota identity, independently of scheduling credentials. */
 export function resolveQuotaWindowFamily(
   model?: string | null,
 ): QuotaWindowFamily | undefined {
   if (typeof model !== "string" || !model.trim()) return undefined;
+  if (/(?:^|[/-])gemini-[^/]*hydrogen(?:-|$)/i.test(model)) return "hydrogen";
+  if (/(?:^|[/-])gemini-[^/]*argon(?:-|$)/i.test(model)) return "argon";
   return /gemini/i.test(model) ? "gemini" : "3p";
 }
 
@@ -291,7 +275,12 @@ export function resolveQuotaWindowFamily(
 export function isQuotaWindowRelevantToFamily(
   scope: string | undefined,
   family: QuotaWindowFamily | undefined,
+  source?: string,
 ): boolean {
+  // Old per-model probes folded Hydrogen/Argon into gemini-5h. The
+  // exact old source is ambiguous even with a fresh observedAt/resetAt.
+  // New probes mark their pool; summary/header windows remain compatible.
+  if (scope === "gemini-5h" && source?.endsWith(":fetchAvailableModels")) return false;
   if (typeof scope !== "string") return true;
   const scopeFamily = parseQuotaWindowScope(scope).family;
   return scopeFamily === undefined || family === undefined || scopeFamily === family;
@@ -313,7 +302,7 @@ export function selectQuotaWindowsForModel(
   return quota.windows.filter(
     (window) =>
       !isQuotaWindowExpired(window, now) &&
-      isQuotaWindowRelevantToFamily(window?.scope, family),
+      isQuotaWindowRelevantToFamily(window?.scope, family, window?.source),
   );
 }
 

@@ -2,6 +2,7 @@ import { resolveModelTier, type ModelTier } from "./dispatchSelectionPolicy";
 import { fnv1a32Hex } from "core/fnv1a32";
 import { getModelAbility, type ModelAbility } from "../llm/modelAbility";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
+import { isPlatformPaidAgentCall } from "./platformPaidCall";
 import { isOwnedAgentKey, ownedAgentKey, publicAgentKey } from "core/prefix";
 import {
   compareAgentSelection,
@@ -202,6 +203,17 @@ export interface SafeAgentSummary {
   isFavorite: boolean;
   favoritedAt: number | string | null;
   isPublic: boolean;
+  /**
+   * 本次派发是否走**平台垫付**（billingSource=platform_credits 的同一判据，
+   * 见 platformPaidCall.ts 的 isPlatformPaidAgentCall）。
+   *
+   * 存在的唯一目的：把「派它之前必须先拿到用户的扣费授权」做成数据字段，
+   * 而不是靠调用方记住一段 prose 规则。历史事故（2026-11-15）：编排者把
+   * 「收藏优先」误读为「可直接派发」，连续 7 次未经授权调用 platform_credits
+   * Agent。任何 requiresPaidApproval=true 的候选，startAgentRun 之前都必须
+   * 取得用户当次明确肯定——「收藏」「owned」「availability 正常」都不构成授权。
+   */
+  requiresPaidApproval: boolean;
   /**
    * Phase 2A economics snapshot (peak/off-peak phase + price/quota multiplier)
    * for sources with sufficient official evidence (DeepSeek API, BigModel GLM
@@ -550,6 +562,14 @@ export function toSafeAgentSummary(
     isFavorite: favStatus.isFavorite,
     favoritedAt: favStatus.favoritedAt,
     isPublic,
+    // 复用 platformPaidCall.ts 的唯一判据（该文件头明确它是「谁出钱」的真源）：
+    // 自己写 billingSource === "platform_credits" 会与 199 门槛口径分叉——
+    // 例如 apiSource==="cli" 的本地 CLI Agent 在 resolveBillingSource 里会落到
+    // platform_credits，但 isPlatformPaidAgentCall 显式短路为「非平台垫付」。
+    requiresPaidApproval: isPlatformPaidAgentCall({
+      agentConfig: record ?? undefined,
+      callerUserId: currentUserId ?? undefined,
+    }),
     ...(economics ? { economics } : {}),
     isOwned,
     isOAuth,
@@ -588,6 +608,10 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "model",
   "modelTier",
   "billingSource",
+  // 扣费授权判据：listAgents 默认走 compact 投影，缺了它模型在默认派发
+  // 流程里读不到「派它之前要先问用户」（2026-11-15 事故成因）。
+  // 与 ULTRA_COMPACT 白名单必须同时保留——两处任何一处缺失都等于该字段不存在。
+  "requiresPaidApproval",
   "availabilityStatus",
   "credentialGroup",
   "isFavorite",
@@ -666,6 +690,9 @@ export const ULTRA_COMPACT_AGENT_SUMMARY_FIELDS = [
   "model",
   "modelTier",
   "billingSource",
+  // 扣费授权判据必须随投影一起走：精简投影里没有它，模型就看不到
+  // 「派它之前要先问用户」，等于该字段不存在（2026-11-15 事故的直接成因）。
+  "requiresPaidApproval",
   "availabilityStatus",
   "credentialGroup",
   "isFavorite",

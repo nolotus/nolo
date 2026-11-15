@@ -692,7 +692,7 @@ export function formatAgentListCard(
     const model = agent.model || "—";
     const source = agent.apiSource || agent.provider || agent.cliProvider || "—";
     const key = agent.agentKey || "(agentKey unavailable)";
-    lines.push(`${star}${own} ${name}  ${model}  ${source}${includeKeys ? `  ${key}` : ""}`);
+    lines.push(`${star} ${own} ${name}  ${model}  ${source}${includeKeys ? `  ${key}` : ""}`);
     if (agent.availabilityStatus === "rate_limited" || agent.availabilityStatus === "quota_exhausted") {
       const until = typeof agent.nextAvailableAt === "number"
         ? formatLocalClockUntil(agent.nextAvailableAt, now)

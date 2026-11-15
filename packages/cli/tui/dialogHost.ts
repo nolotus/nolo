@@ -281,7 +281,7 @@ export function createDialogHost(args: {
       const mouseStateBefore = args.composer.isMouseEnabled?.() ?? true;
       const anchor: DialogAnchor = {
         inputPolicy: args.inputPolicy ?? { wheel: "modal", pageKeys: "transcript" },
-        onTranscriptScroll: (action) => { args.onTranscriptScroll?.(action); foregroundRepaint?.(); },
+        onTranscriptScroll: (action) => { args.onTranscriptScroll?.(action); },
         registerForegroundRepaint: (repaint) => { foregroundRepaint = repaint; },
         mouseEnabled: args.composer.isMouseEnabled?.() ?? true,
         session: hostedSession,

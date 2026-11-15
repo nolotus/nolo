@@ -219,6 +219,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 type: "string",
                 description: "可选。父对话 id，用于建立父子对话归属关系。默认从运行时当前激活对话获取。",
             },
+            imagePaths: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, description: "本机 PNG/JPEG/WebP/GIF 图片绝对路径，1–4 张。仅 CLI host-local 执行器支持；必须 runtimeKey=local、allowHostWrites=true。图片作为子 run 首轮视觉输入，不是路径文本；不支持跨机器自动上传，不传 URL/base64。单图编码上限 2MiB，总计 8MiB，按既有 read_image 规则缩放。" },
             runtimeKey: {
                 type: "string",
                 description:
@@ -305,6 +306,7 @@ interface StartAgentRunArgs {
      * 显式指定时该 run 只在目标位置执行；不可用一律由服务端显式报错，不静默回退。
      * 省略 = 沿用宿主默认位置。
      */
+    imagePaths?: string[];
     runtimeKey?: string;
     instaboxWorkspace?: "empty" | "snapshot";
     instaboxManifest?: string;
@@ -375,6 +377,7 @@ export async function startAgentRunFunc(
         throw new Error("startAgentRun: instabox workspace 合同目前仅由本机 CLI 执行器兑现；本服务端派发通道不支持，已拒绝（不会回落宿主）。请使用 nolo CLI 本机派发。");
     }
     const resultMode = args.resultMode ?? "full";
+    if (args.imagePaths !== undefined) throw new Error("image_backend_unsupported: imagePaths currently requires the CLI host-local executor");
     const { dispatch } = thunkApi;
 
     // A batch id is always present on the return value. The caller may supply

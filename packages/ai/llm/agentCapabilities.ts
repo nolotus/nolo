@@ -95,7 +95,7 @@ const lookupKnownModelVision = (
   return undefined;
 };
 
-const resolveCatalogImageSupport = (agent: AgentCapabilityConfig): boolean | undefined => {
+export const resolveCatalogImageSupport = (agent: AgentCapabilityConfig): boolean | undefined => {
 
   const provider = asTrimmedLowercaseString(agent.provider)
     || asTrimmedLowercaseString(agent.apiSource)
@@ -125,12 +125,27 @@ const resolveCatalogImageSupport = (agent: AgentCapabilityConfig): boolean | und
   return catalogHasVision;
 };
 
+// Runtime-only evidence: symbols cannot be supplied by persisted JSON agent records.
+// Bind to the exact model and re-check the call plan on every consumer.
+const liveImageSupport = Symbol("liveImageSupport");
+type LiveEvidence = { model: string; supported: boolean };
+export function withLiveImageSupport<T extends AgentCapabilityConfig>(agent: T, supported: boolean): T {
+  return { ...agent, [liveImageSupport]: { model: agent.model, supported } };
+}
+function readLiveImageSupport(agent: AgentCapabilityConfig): boolean | undefined {
+  const evidence = (agent as AgentCapabilityConfig & { [liveImageSupport]?: LiveEvidence })[liveImageSupport];
+  if (!evidence || evidence.model !== agent.model) return undefined;
+  const plan = resolveAgentCallPlan({ ...agent, key: "" } as Parameters<typeof resolveAgentCallPlan>[0]);
+  return plan.authMethod.kind === "oauth" && plan.authMethod.ref === "antigravity"
+    ? evidence.supported : undefined;
+}
+
 // User-input vision keeps its historical permissive fallback. Tool images do not.
 export const resolveAgentImageInputSupport = (
   agent: AgentCapabilityConfig | null | undefined,
 ): boolean => {
   if (!agent) return true;
-  return resolveCatalogImageSupport(agent) ?? agent.hasVision ?? true;
+  return resolveCatalogImageSupport(agent) ?? readLiveImageSupport(agent) ?? agent.hasVision ?? true;
 };
 
 export type ToolImageRouteKind =
@@ -165,6 +180,8 @@ export const resolveToolImagePolicy = (input: ToolImagePolicyInput): {
   }
   const catalog = resolveCatalogImageSupport(input);
   if (catalog !== undefined) return { maxImagesPerRequest, supportsToolImages: catalog, reason: "catalog" };
+  const live = readLiveImageSupport(input);
+  if (live !== undefined) return { maxImagesPerRequest, supportsToolImages: live, reason: "live-discovery" };
   if (typeof input.hasVision === "boolean") {
     return { maxImagesPerRequest, supportsToolImages: input.hasVision, reason: "agent-declaration" };
   }

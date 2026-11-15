@@ -1,9 +1,7 @@
-import type { HostTaskCompletionEvidenceProvider } from "./hostTaskBinding";
-import type { HostTaskReference } from "./hostTaskEvents";
-import type { BusinessCompletion } from "../../agent-runtime/taskExecutionContract";
 import type { ContextRefusalDiagnostics } from "../../agent-runtime/contextRefusal";
 import type { ShellApprovalSession } from "./originShellApprovalTransport";
 import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
+
 /**
  * Shared types and helpers for agent run dispatch — used by both
  * CLI-side (agentRun.ts) and connector-side (machineWsRunDispatch.ts).
@@ -193,23 +191,12 @@ export type RunAgentTurnOptions = {
    * batch from the presence of `userMessages`.
    */
   cliBatchId?: string;
-  /** Reference only. Authority is read from the host event store, never JSON supplied by the model. */
-  hostTaskRef?: HostTaskReference;
   /** Trusted explicit task lifecycle only, bound to this actual user submission.
    * Never populated from provider output, prompt parsing or runtimeContext. */
   /** Host-minted real user submission only; absent for internal wakes. */
-  accountTaskUserSource?: { messageId: string; contentSha256: string; originalText?: string; projectedContentSha256?: string };
-  accountTaskStart?: import("./autoReviewContinuation").AccountTaskStart;
-  /** Trusted host-only completion producer; never populated from account review admission or model input. */
-  hostTaskCompletionEvidenceProvider?: HostTaskCompletionEvidenceProvider;
-  /** Trusted host-selected brief acceptance plan; never hydrate from tool JSON. */
-  hostTaskAcceptancePlan?: import("./hostTaskProgressProducer").HostTaskAcceptancePlan;
-  /** TUI-produced workspace evidence, revalidated by the host; grants no review authority.
-   * Typed review additionally requires authenticated account admission in the local adapter. */
-  hostTaskWorkspaceEvidence?: import("./hostTaskWorkspace").HostTaskWorkspaceEvidence;
-  /** Trusted host typed-review dispatch only; never populated from tool JSON. */
-  hostReviewContentAcceptance?: import("./hostReviewDispatch").HostReviewContentAcceptance;
-  hostReviewDispatch?: Omit<import("./hostReviewDispatch").HostReviewDispatchContext, "authorExecutionId">;
+
+  // accountTaskStart / hostTaskWorkspaceEvidence / hostReviewContentAcceptance /
+  // hostReviewDispatch 均随 hostTask 基础设施移除（2026-11-15）。
   getProcessCausalDepth?: () => number;
   agentName: string;
   agentKey: string;
@@ -424,12 +411,6 @@ export type RunAgentTurnResult = {
     refusal?: ContextRefusalDiagnostics;
   };
   stopReason?: import("../../agent-runtime/types").AgentRuntimeResult["stopReason"];
-  /** Host-admitted scope for subsequent user turns and internal wakes. */
-  hostTaskRef?: HostTaskReference;
-  /** Explicit workspace admission failure; businessCompletion remains blocked. */
-  hostTaskWorkspaceBlocker?: string;
-  taskAuthorization?: "unknown" | "active" | "paused" | "revoked";
-  businessCompletion?: BusinessCompletion;
   exitCode: number;
   dialogId?: string;
   /**

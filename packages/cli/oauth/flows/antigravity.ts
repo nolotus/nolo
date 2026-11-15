@@ -82,6 +82,8 @@ const PROJECT_ONBOARD_MAX_ATTEMPTS = 5;
 const PROJECT_ONBOARD_INTERVAL_MS = 2_000;
 
 export type AntigravityAvailableModel = {
+  supportsImages?: boolean;
+  disabled?: boolean;
   displayName?: string;
   supportsThinking?: boolean;
   maxTokens?: number;

@@ -35,12 +35,16 @@ import {
 import { projectChatQueueStatus, type ChatQueueStatus } from "core/chat/chatQueueStatus";
 import { createTurnRequest, type InternalTurnEvent, type TurnRequest } from "core/chat/internalTurnEvent";
 import { initialChatQueueState } from "core/chat/chatQueueMachine";
-import { monotonicFactory } from "ulid";
+import { decodeTime, monotonicFactory } from "ulid";
 // Pending user messages are keyed by messageId and recovery reads them in key
 // order, so the id must be monotonic: `${Date.now()}-${randomUUID()}` randomizes
 // the order of messages submitted within the same millisecond, which reorders
 // them on restart (violating "preserve original order").
-const mintPendingMessageId = monotonicFactory();
+const mintPendingUlid = monotonicFactory();
+const mintPendingMessageId = () => {
+  const id = mintPendingUlid();
+  return `${decodeTime(id)}-000-${id}`;
+};
 
 export type RunDrainedTurn = (
   request: TurnRequest

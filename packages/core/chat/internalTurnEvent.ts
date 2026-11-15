@@ -21,6 +21,8 @@ export type AgentRunCompletionShape = {
   dialogId?: string;
   /** Local full-result path, when the runtime can read it directly. */
   resultFile?: string;
+  /** Lineage only; never inherits checks or review approval. */
+  continuedFrom?: string;
   ephemeral?: boolean;
   startedAt?: string | number;
   endedAt?: string | number;
@@ -83,18 +85,7 @@ export type BackgroundTaskCompletedTurnEvent = {
   notice?: import("../../agent-runtime/processRegistry").ProcessTerminalNotice;
 };
 
-/** Host lifecycle signal, never a user submission or a fabricated child run. */
-export type AutoReviewContinuationTurnEvent = {
-  kind: "auto-review-continuation";
-  scope: { taskId: string; taskInstanceId?: string; dialogId: string; workspace: string };
-  eventKey: string;
-  action: "continue-author" | "request-review" | "decide-review" | "commit" | "local-merge";
-  text: string;
-  displayText: string;
-};
-
 export type InternalTurnEvent =
-  | AutoReviewContinuationTurnEvent
   | UserTurnEvent
   | ChildRunCompletedTurnEvent
   | BackgroundTaskCompletedTurnEvent;
@@ -143,6 +134,7 @@ export function normalizeRunCompletionShape(
     ...(typeof record.parentDialogId === "string" ? { parentDialogId: record.parentDialogId } : {}),
     ...(typeof record.dialogId === "string" ? { dialogId: record.dialogId } : {}),
     ...(typeof record.resultFile === "string" ? { resultFile: record.resultFile } : {}),
+    ...(typeof record.continuedFrom === "string" ? { continuedFrom: record.continuedFrom } : {}),
     ...(typeof record.ephemeral === "boolean" ? { ephemeral: record.ephemeral } : {}),
     ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
     ...(record.endedAt !== undefined ? { endedAt: record.endedAt } : {}),

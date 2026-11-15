@@ -1,3 +1,4 @@
+import { validateChildImagePaths, validateChildImages } from "./childRunImages";
 import { assertDispatchSelectionAdmission } from "../../ai/agent/dispatchSelectionPolicy";
 import { parseAgentRunArgs } from "../agentRunArgs";
 import { parseUserIdFromAuthToken, resolveAuthToken, resolveServerUrl } from "../cliEnvHelpers";
@@ -18,7 +19,6 @@ import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // 返回格式与 web 端 executor 一致：{ content: JSON(rawData), metadata.displayData }，
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
-import { currentHostReviewDispatch, matchesHostReviewDispatch, consumeHostReviewDispatch, validateHostReviewDispatch, bindHostReviewRun, type HostReviewDispatchContext } from "./hostReviewDispatch";
 import { resolveAgentRunName } from "../../ai/tools/agent/agentRunName";
 import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import * as nodeFs from "node:fs";
@@ -109,7 +109,6 @@ type OutputLike = { write(chunk: string): unknown };
  */
 export type CliAgentRunToolExecutorDeps = {
   /** Host-only typed-review scope; tool arguments cannot supply this. */
-  reviewDispatchContext?: HostReviewDispatchContext;
   /** Read only the current user's dialog namespace; absence fails closed. */
   dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
@@ -143,6 +142,7 @@ export type CliAgentRunToolExecutorDeps = {
    * 解析候选 agent 的展示名（写进 run 记录，供卡片/列表显示）。
    * 调用方通常只给 agentKey 不传 agentName；缺省时卡片只能退回通用「子智能体」。
    */
+  resolveAgentImageSupport?: (agentKey: string) => Promise<boolean>;
   resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   /**
@@ -322,6 +322,8 @@ function buildRunStatusPayload(
       // 排在 2000 字 lastAssistantText 之后的键会被整段省略，模型连路径都看
       // 不到。挂在头部才能保证「结论在哪」永远可见。
       ...(reconciled.resultFile ? { resultFile: reconciled.resultFile } : {}),
+      ...(reconciled.continuedFrom ? { continuedFrom: reconciled.continuedFrom } : {}),
+      ...(isAgentRunTerminalStatus(reconciled.status) ? { resultNote: "Process terminal status is not delivery, test, review, user acceptance or integration/release approval. lastAssistantText is a preview, not a complete report; read resultFile for current scope, blockers and evidence. Runtime acceptance contains observations only; unknown stays unknown. continuedFrom is lineage, not inherited approval." } : {}),
       ...(typeof reconciled.toolCallCount === "number"
         ? { toolCallCount: reconciled.toolCallCount }
         : {}),
@@ -442,6 +444,8 @@ async function assertCredentialFanoutAllowed(
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
+    const imagePaths = validateChildImagePaths(args.imagePaths);
+    if (imagePaths.length && args.runtimeKey !== "local") throw new Error("image_backend_unsupported: imagePaths requires explicit host-local runtimeKey=local");
     const continueDialogId = normalizeContinueDialogId(args.continueDialogId);
     const continuedRecord = continueDialogId ? await deps.dialogExistsForCurrentUser?.(continueDialogId) : undefined;
     if (continueDialogId && !continuedRecord) {
@@ -606,6 +610,12 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     // 解析失败即未知档位，不拦）。续跑沿用既有身份逻辑：按生效的 agentKey 解析模型。
     let selectedModel: string | undefined;
     try { selectedModel = await deps.resolveAgentModel?.(agentKey); } catch { /* 解析不到模型 = 未知档位，不构成拒绝理由。 */ }
+    if (imagePaths.length) {
+      let imageSupport = false;
+      try { imageSupport = await deps.resolveAgentImageSupport?.(agentKey) === true; } catch { /* Unknown capability fails closed, without leaking store errors. */ }
+      if (!imageSupport) throw new Error("image_model_unsupported: child model image capability is unsupported or unknown");
+      await validateChildImages(imagePaths);
+    }
     const selectionCheck = assertDispatchSelectionAdmission({
       dimension: args.dimension,
       difficulty: args.difficulty,
@@ -669,6 +679,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // 的地方，成对不变式在 buildCliLocalRuntimeForwardArgs 内机械断言。
       ...buildCliLocalRuntimeForwardArgs(dispatch),
       ...instaboxArgs,
+      ...imagePaths.flatMap(path => ["--image", path]),
     ];
 
     // α：生产侧解析身份——显式 agentName 严格保留；省略时从 agent 配置回读；
@@ -716,13 +727,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
               .map((c: string) => c.trim())
           : undefined;
 
-    const candidateReview = deps.reviewDispatchContext ?? currentHostReviewDispatch();
-    const reviewContext = matchesHostReviewDispatch(candidateReview, call, args) ? candidateReview : undefined;
-    if (reviewContext) {
-      if (continueDialogId || args.readOnly !== true) throw new Error("Typed review requires a fresh readOnly run");
-      await validateHostReviewDispatch(reviewContext, deps.env ?? process.env, requestedCwd ?? deps.cwd ?? process.cwd());
-      consumeHostReviewDispatch(reviewContext, deps.env ?? process.env);
-    }
+    // typed review dispatch 校验已随 hostReviewDispatch 移除（2026-11-15）。
     const childPolicy = parseAgentRunArgs(rawArgs, { readTextFile: () => message });
     const { runId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
       {
@@ -760,20 +765,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
     );
 
-    if (reviewContext) {
-      try { await bindHostReviewRun(reviewContext, runId, deps.env ?? process.env); }
-      catch (error) {
-        const record = readRunRecord(runId, deps);
-        let stopped = false;
-        try { if (record) stopped = await (deps.terminateRunProcess ?? terminateRunProcess)(record, "SIGTERM", deps); } catch { /* unconfirmed cancellation is not success */ }
-        if (stopped) finalizeRunRecord(runId, { status: "killed", note: "Host review binding failed; newly created run cancelled" }, deps);
-        else {
-          const latest = readRunRecord(runId, deps);
-          if (latest) writeRunRecord({ ...latest, note: "Host review binding failed; cancellation unconfirmed" }, deps);
-        }
-        throw new Error(`Host review binding failed for ${runId}; cancellation=${stopped ? "confirmed" : "unconfirmed"}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    // hostReviewDispatch 绑定已移除（2026-11-15）：typed review 派发整体下线。
 
     // title 走卡片自己的参数，不进 label：它是显示行不是名字，进了 label 会
     // 把 key 顶掉、又让 identity 行与 title 行重复。

@@ -1,3 +1,4 @@
+import { orderDialogHistory } from "../../agent-runtime/dialogHistoryOrder";
 // packages/cli/client/cliDialogHistoryFallback.ts
 //
 // Continue-dialog history loading with a remote fallback.
@@ -436,7 +437,7 @@ function entriesToMessages(
     const message = dialogMessageRecordToAgentRuntimeMessage(entry.record);
     if (message) messages.push(message);
   }
-  return messages;
+  return orderDialogHistory(messages);
 }
 
 async function persistIncompleteState(args: {
@@ -592,7 +593,7 @@ export function analyzeRemoteDialogRecords(args: {
     entries.push({ key, messageId, record, message });
   }
 
-  const messages = entries.map((entry) => entry.message);
+  const messages = orderDialogHistory(entries.map((entry) => entry.message));
   // Tool call / result pairing: a truncated head shows up as an orphan tool
   // result, a truncated (or interrupted) tail as a tool call without its
   // result. Reuses the outbound-replay validator so the pairing rules have a

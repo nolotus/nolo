@@ -40,7 +40,26 @@ const KIND_PRIORITY: Record<MemoryItem["kind"], number> = {
   episodic: 2,
 };
 
+export type MemoryInjectionSource = "vnext" | "legacy-uncovered";
+
+/** Final retained entry lines, excluding headers/footer. No ratios for empty injection. */
+export interface MemoryInjectionObservation {
+  vnextInjectedLines: number;
+  legacyUncoveredInjectedLines: number;
+  unattributedInjectedLines: number;
+  totalInjectedLines: number;
+  empty: boolean;
+}
+
+export const emptyMemoryInjectionObservation = (): MemoryInjectionObservation => ({
+  vnextInjectedLines: 0, legacyUncoveredInjectedLines: 0,
+  unattributedInjectedLines: 0, totalInjectedLines: 0, empty: true,
+});
+
 export interface BuildMemoryOverlayOptions {
+  /** Internal provenance keyed by item identity, never inferred from rendered text/IDs. */
+  sources?: ReadonlyMap<MemoryItem, MemoryInjectionSource>;
+  injectionEmit?: (observation: MemoryInjectionObservation) => void;
   /**
    * 软上限 token 预算（粗估）。默认 DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET
    * （取值依据见该常量注释）。超出时按 kind 优先级 + 传入顺序截断。
@@ -213,6 +232,7 @@ interface OverlayLine {
   kind: MemoryItem["kind"];
   lineText: string;
   lineTokens: number;
+  source?: MemoryInjectionSource;
 }
 
 /**
@@ -234,7 +254,8 @@ interface BudgetFitResult {
  */
 const fitLinesToBudget = (
   allLines: OverlayLine[],
-  remainingBudget: number
+  remainingBudget: number,
+  onKept: (line: OverlayLine) => void
 ): BudgetFitResult => {
   let usedTokens = 0;
   const keptByKind: Record<string, string[]> = {};
@@ -254,6 +275,7 @@ const fitLinesToBudget = (
     if (candidate.lineTokens <= remaining) {
       usedTokens += candidate.lineTokens;
       pushLine(candidate.kind, candidate.lineText);
+      onKept(candidate);
       continue;
     }
     // 放不下：若剩余预算够放一个有意义的片段就截断保留，否则真丢弃
@@ -264,6 +286,7 @@ const fitLinesToBudget = (
     }
     usedTokens += estimateTokens(truncated);
     pushLine(candidate.kind, truncated);
+    onKept(candidate);
     truncatedCount += 1;
   }
   return { keptByKind, truncatedCount, droppedCount };
@@ -296,7 +319,8 @@ const EMPTY_RESIDENT_FIT: ResidentFitResult = {
  */
 const fitResidentLines = (
   lines: OverlayLine[],
-  remainingBudget: number
+  remainingBudget: number,
+  onKept: (line: OverlayLine) => void
 ): ResidentFitResult => {
   let usedTokens = 0;
   const keptLines: string[] = [];
@@ -312,6 +336,7 @@ const fitResidentLines = (
     if (candidate.lineTokens <= remaining) {
       usedTokens += candidate.lineTokens;
       keptLines.push(candidate.lineText);
+      onKept(candidate);
       continue;
     }
     const truncated = truncateLineToTokens(candidate.lineText, remaining);
@@ -321,6 +346,7 @@ const fitResidentLines = (
     }
     usedTokens += estimateTokens(truncated);
     keptLines.push(truncated);
+    onKept(candidate);
     truncatedCount += 1;
   }
   return { keptLines, truncatedCount, droppedCount };
@@ -356,7 +382,19 @@ export const buildMemoryOverlay = (
   items: MemoryItem[],
   options?: BuildMemoryOverlayOptions
 ): string | null => {
-  if (items.length === 0) return null;
+  const injection = emptyMemoryInjectionObservation();
+  const onKept = (line: OverlayLine) => {
+    injection.totalInjectedLines++;
+    injection.empty = false;
+    if (line.source === "vnext") injection.vnextInjectedLines++;
+    else if (line.source === "legacy-uncovered") injection.legacyUncoveredInjectedLines++;
+    else injection.unattributedInjectedLines++;
+  };
+  const finish = (prompt: string | null) => {
+    try { options?.injectionEmit?.(injection); } catch { /* telemetry cannot affect rendering */ }
+    return prompt;
+  };
+  if (items.length === 0) return finish(null);
 
   const maxTokens = options?.maxTokens ?? DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET;
   const perKindLimit = options?.perKindLimit ?? 3;
@@ -379,9 +417,10 @@ export const buildMemoryOverlay = (
       : fitResidentLines(
           residentItems.map((item) => {
             const lineText = `- ${isInferredMemory(item) ? "（推断）" : ""}${normalizeDisplayContent(item)}`;
-            return { kind: item.kind, lineText, lineTokens: estimateTokens(lineText) };
+            return { kind: item.kind, lineText, lineTokens: estimateTokens(lineText), source: options?.sources?.get(item) };
           }),
-          residentMaxTokens - estimateTokens(RESIDENT_SECTION_HEADER)
+          residentMaxTokens - estimateTokens(RESIDENT_SECTION_HEADER),
+          onKept
         );
 
   const byKind: Record<string, MemoryItem[]> = {
@@ -404,12 +443,12 @@ export const buildMemoryOverlay = (
       .flatMap(([kind, list]) =>
         pickWithinKind(list, perKindLimit).map((item) => {
           const lineText = `- ${isInferredMemory(item) ? "（推断）" : ""}${normalizeDisplayContent(item)}`;
-          return { kind, lineText, lineTokens: estimateTokens(lineText) };
+          return { kind, lineText, lineTokens: estimateTokens(lineText), source: options?.sources?.get(item) };
         })
       )
       .sort((a, b) => (KIND_PRIORITY[a.kind] ?? 99) - (KIND_PRIORITY[b.kind] ?? 99));
 
-    retrievalFit = fitLinesToBudget(allLines, remainingBudget);
+    retrievalFit = fitLinesToBudget(allLines, remainingBudget, onKept);
 
     // 按 kind 标题顺序组装 sections（semantic → procedural → episodic）
     const kindOrder: MemoryItem["kind"][] = ["semantic", "procedural", "episodic"];
@@ -432,12 +471,12 @@ export const buildMemoryOverlay = (
 
   if (sections.length === 0) {
     // 所有行都被预算截掉了——只返回头部（与 resident 引入前的行为一致）
-    return OVERLAY_HEADER_LINES.join("\n");
+    return finish(OVERLAY_HEADER_LINES.join("\n"));
   }
 
-  return [
+  return finish([
     ...OVERLAY_HEADER_LINES,
     ...sections,
     ...buildBudgetFooter(retrievalFit, residentFit),
-  ].join("\n");
+  ].join("\n"));
 };

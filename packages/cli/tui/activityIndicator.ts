@@ -286,7 +286,8 @@ export function createActivityIndicator(
     layout?: RunZoneLayout,
   ): string[] | null => {
     const lines: string[] = [];
-    const baseView = getView();
+    const rawView = getView();
+    const baseView = rawView ? { ...rawView, label: rawView.label.replace(/^.+? -> (working locally)(?=\s|$)/, "$1") } : null;
     if (baseView && stopping) {
       // 停止中只显示停止文案本身：它已经告诉用户「再按一次 Esc 强制停止」，
       // 再拼 `(0s) · Esc 停止回复` 就是两句互相矛盾的提示。

@@ -1,3 +1,6 @@
+import { captureNativeCompletedTurn, type NativeCaptureResult } from "./vnext/nativeCapture";
+import { isTombstoneRecord } from "database/tombstones";
+import { buildDialogKey, dialogMessageKey } from "database/dialogKey";
 import {
   captureExplicitMemoryEpisode,
   scheduleExplicitMemoryConsolidation,
@@ -33,6 +36,7 @@ export interface SavedMemorySummary {
 
 export interface CaptureCompletedMemoryTurnResult {
   savedMemories: SavedMemorySummary[];
+  nativeCapture?: NativeCaptureResult;
 }
 
 /**
@@ -65,10 +69,37 @@ export const captureCompletedMemoryTurn = async (input: {
   bestEffortMemories?: BestEffortMemoryRequest[];
   /** LLM 调用函数——用于 dialog-end 学习提取。由调用方注入。 */
   llmCall?: DialogLearningLlmCall;
+  /** Trusted server adapter opts in; source is loaded from the authoritative DB. */
+  nativeCapture?: { userMessageId?: string };
 }): Promise<CaptureCompletedMemoryTurnResult> => {
   const getDefaultDb = async () => (await import("database-engine/db")).default;
   const db = input.db ?? await getDefaultDb();
   const savedMemories: SavedMemorySummary[] = [];
+
+  if (input.nativeCapture) {
+    const invalid = (): CaptureCompletedMemoryTurnResult => ({ savedMemories: [],
+      nativeCapture: { capture: "failed", formation: "deferred", reason: "invalid_input" } });
+    const owner = input.userId;
+    const messageId = input.nativeCapture.userMessageId;
+    if (!owner || owner === "server" || !messageId || !/^[A-Za-z0-9_-]{1,128}$/.test(messageId)) return invalid();
+    try {
+      // Never accept a body-supplied owner, text or timestamp as source authority.
+      const dialog = await db.get(buildDialogKey(owner, input.dialogId));
+      const message = await db.get(dialogMessageKey(input.dialogId, messageId));
+      if (!dialog || (dialog.userId != null && dialog.userId !== owner) || dialog.id !== input.dialogId || isTombstoneRecord(dialog) ||
+          !message || message.id !== messageId || message.role !== "user" || message.userId !== owner ||
+          isTombstoneRecord(message) || typeof message.content !== "string" || typeof message.createdAt !== "string") return invalid();
+      const nativeCapture = await captureNativeCompletedTurn(db, {
+        ownerId: `user:${encodeURIComponent(owner)}`,
+        sourceRef: JSON.stringify(["dialog", input.dialogId, "message", messageId]),
+        sourceType: "completed_turn", text: message.content, occurredAt: message.createdAt,
+        agentKey: input.agentKey,
+      }, input.llmCall ? { interpret: ({ messages }) => input.llmCall!(messages[0].content, messages[1].content) } : {});
+      return { savedMemories: [], nativeCapture };
+    } catch {
+      return { savedMemories: [], nativeCapture: { capture: "failed", formation: "deferred", reason: "storage_error" } };
+    }
+  }
 
   // 0. Correction-driven confidence decay: if the user pushed back on what
   // the agent "remembered", penalize the recently activated (i.e. just

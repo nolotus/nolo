@@ -426,6 +426,7 @@ const AgentCreateApiPanel: React.FC<{
   };
   reasoningEffort: ReasoningEffort;
   setReasoningEffort: (v: ReasoningEffort) => void;
+  selectReasoningEffort: (v: ReasoningEffort) => void;
   busy: boolean;
   isSubmitting: boolean;
   canCreate: boolean;
@@ -449,6 +450,7 @@ const AgentCreateApiPanel: React.FC<{
   activePresetFields,
   reasoningEffort,
   setReasoningEffort,
+  selectReasoningEffort,
   busy,
   isSubmitting,
   canCreate,
@@ -578,7 +580,7 @@ const AgentCreateApiPanel: React.FC<{
           reasoning={modelReasoning}
           provider={activePresetFields.provider}
           value={reasoningEffort}
-          onChange={setReasoningEffort}
+          onChange={selectReasoningEffort}
           busy={busy}
         />
       </label>
@@ -641,6 +643,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
   };
   reasoningEffort: ReasoningEffort;
   setReasoningEffort: (v: ReasoningEffort) => void;
+  selectReasoningEffort: (v: ReasoningEffort) => void;
   draftRequiresDesktopOAuth: boolean;
   oauth: {
     isDesktop: boolean;
@@ -675,6 +678,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
   activePresetFields,
   reasoningEffort,
   setReasoningEffort,
+  selectReasoningEffort,
   draftRequiresDesktopOAuth,
   oauth,
   navigate,
@@ -700,7 +704,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
       reasoning={subReasoning}
       provider={activePresetFields.provider}
       value={reasoningEffort}
-      onChange={setReasoningEffort}
+      onChange={selectReasoningEffort}
       busy={busy}
     />
   );
@@ -1233,8 +1237,10 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
     setSubModel,
     subReasoningEffort,
     setSubReasoningEffort,
+    selectSubEffort,
     apiReasoningEffort,
     setApiReasoningEffort,
+    selectApiEffort,
     canCreatePlatform,
     canCreateApi,
     canCreateSubscription,
@@ -1304,6 +1310,7 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
           activePresetFields={activePresetFields}
           reasoningEffort={apiReasoningEffort}
           setReasoningEffort={setApiReasoningEffort}
+          selectReasoningEffort={selectApiEffort}
           busy={busy}
           isSubmitting={isSubmitting}
           canCreate={canCreateApi}
@@ -1334,6 +1341,7 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
           activePresetFields={activePresetFields}
           reasoningEffort={subReasoningEffort}
           setReasoningEffort={setSubReasoningEffort}
+          selectReasoningEffort={selectSubEffort}
           draftRequiresDesktopOAuth={draft.requiresDesktopOAuth}
           oauth={oauth}
           navigate={navigate}

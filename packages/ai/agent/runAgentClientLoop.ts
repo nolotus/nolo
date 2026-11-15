@@ -254,6 +254,8 @@ export async function runAgentClientLoop(
       const toolResultContent = await executeToolCall(tc, thunkApi, {
         parentMessageId,
         agentKey,
+        effectiveModel: body.model ?? agentConfig.model,
+        runKind: "interactive",
       });
       const toolExecutionMs = Date.now() - toolStartTime;
       if (typeof process !== "undefined" ? process.env?.NOLO_CACHE_OPT_DEBUG : false) {

@@ -1,6 +1,6 @@
+import type { PlanningCaller } from "../../ai/agent/agentDiscovery";
 import { registerLocalShellLifecycle } from "../../agent-runtime/localToolPolicy";
 import { withBrowserShellApproval } from "./browserShellApprovalHost";
-import { createTaskReviewExecutors, type TaskReviewHost } from "./taskReviewTools";
 import type { AgentSkillConfigSource } from "../../ai/tools/agentSkillConfig";
 import type { AgentRuntimeToolResult } from "../../agent-runtime/hostAdapter";
 import type { ShellApprovalHost } from "./originShellApprovalTransport";
@@ -222,6 +222,7 @@ export function createReadPastedTextExecutor(store: CollapsedPasteStore) {
 export function pickAgentRunResolverDeps(args: {
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
   dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
+  resolveAgentImageSupport?: (agentKey: string) => Promise<boolean>;
   resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
@@ -232,6 +233,7 @@ export function pickAgentRunResolverDeps(args: {
       ? { resolveAgentCredentialGroup: args.resolveAgentCredentialGroup }
       : {}),
     ...(args.dialogExistsForCurrentUser ? { dialogExistsForCurrentUser: args.dialogExistsForCurrentUser } : {}),
+    ...(args.resolveAgentImageSupport ? { resolveAgentImageSupport: args.resolveAgentImageSupport } : {}),
     ...(args.resolveAgentModel ? { resolveAgentModel: args.resolveAgentModel } : {}),
     ...(args.resolveAgentDisplayName
       ? { resolveAgentDisplayName: args.resolveAgentDisplayName }
@@ -244,6 +246,7 @@ export function pickAgentRunResolverDeps(args: {
 }
 
 export function buildCliWorkspaceToolExecutors(args: {
+  planningCaller?: PlanningCaller;
   env: EnvLike;
   cliEntrypoint?: string;
 }) {
@@ -251,12 +254,12 @@ export function buildCliWorkspaceToolExecutors(args: {
     cliEntrypoint: args.cliEntrypoint ?? process.argv[1] ?? "",
     env: args.env,
     metadataKind: "cliWorkspaceTool",
+    planningCaller: args.planningCaller,
   });
 }
 
 export function buildLocalToolExecutors(args: {
-  taskReviewHost?: TaskReviewHost;
-  reviewDispatchContext?: import("./hostReviewDispatch").HostReviewDispatchContext;
+  planningCaller?: PlanningCaller;
   /** Current agent policy supplied by the host, not by model tool arguments. */
   agentSkillSource?: AgentSkillConfigSource | null;
   resolveAgentSkillSource?: () => Promise<AgentSkillConfigSource | null>;
@@ -293,6 +296,7 @@ export function buildLocalToolExecutors(args: {
   resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
   /** 解析候选 agent 的展示名（调用方只给 agentKey 时回填 run 记录的 agentName）。 */
   dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
+  resolveAgentImageSupport?: (agentKey: string) => Promise<boolean>;
   resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   /** 本机 machineId（判定「绑定机就是本机」用；未知 → binding 判定 fail-closed）。 */
@@ -327,6 +331,7 @@ export function buildLocalToolExecutors(args: {
       agentKey: args.agentKey,
     }),
     ...buildCliWorkspaceToolExecutors({
+      planningCaller: args.planningCaller,
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
     }),
@@ -483,16 +488,8 @@ export function buildLocalToolExecutors(args: {
         metadata: { uiAskChoice: true },
       };
     },
-    ...createTaskReviewExecutors({
-      env: args.env,
-      host: args.taskReviewHost,
-      start: createCliStartAgentRunExecutor({
-        shellApprovalHostForAgent: args.shellApprovalHostForAgent,
-        ...pickAgentRunResolverDeps(args), env: args.env,
-        cliEntrypoint: args.cliEntrypoint, cwd: args.workspaceRoot,
-        currentAgentKey: args.agentKey,
-      }),
-    }),
+    // typed review executor（requestTaskReview / recordTaskReviewDecision）已移除；
+    // 这两个工具随之从工具面消失（2026-11-15 owner 决定放弃 typed review）。
     // agent-orchestration 能力包：startAgentRun / controlAgentRun 本地 --bg 执行器
     // （复用 ~/.nolo/runs/ 注册表，MED-1 修复）。
     startAgentRun: createCliStartAgentRunExecutor({
@@ -503,7 +500,6 @@ export function buildLocalToolExecutors(args: {
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
       cwd: args.workspaceRoot,
-      reviewDispatchContext: args.reviewDispatchContext,
       currentAgentKey: args.agentKey,
     }),
     controlAgentRun: createCliControlAgentRunExecutor({

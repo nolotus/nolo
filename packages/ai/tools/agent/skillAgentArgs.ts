@@ -1,3 +1,4 @@
+import { resolveDefaultReasoningEffort } from "ai/agent/defaultReasoningEffort";
 import type { CreateAgentToolArgs } from "./createAgentTool";
 
 export type SkillAgentMode = "creator" | "evaluator" | "creator_evaluator";
@@ -101,6 +102,6 @@ export const buildCreateSkillAgentArgs = (
     references: args.references ?? [],
     linkedSpaces: args.linkedSpaces ?? [],
     temperature: 0.3,
-    reasoning_effort: "medium",
+    reasoning_effort: resolveDefaultReasoningEffort({ provider: (args.provider ?? "").trim() || DEFAULT_PROVIDER, model: (args.model ?? "").trim() || DEFAULT_MODEL, fallback: "medium" }),
   };
 };

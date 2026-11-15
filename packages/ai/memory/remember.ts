@@ -1,6 +1,7 @@
 import { buildAgentSubjectTarget, resolveScopedMemoryTargets, type MemoryScope } from "./scope";
-import { createMemoryItem, writeMemoryItemWithIndexesToDb } from "./store";
-import { loadMemoryCandidatesFromDb } from "./query";
+import { createMemoryItem } from "./store";
+import { rememberExplicitVNext } from "./vnext/rememberExplicit";
+import { loadExplicitMemoryItems } from "./vnext/explicitItems";
 import { tokenize } from "./rank";
 import { EXPLICIT_REMEMBER_PREFIX_REGEX } from "./constants";
 import type {
@@ -274,31 +275,6 @@ export const rememberMemory = async (
       residentGates.push(residentGate);
       const residentFields = residentGate.applied ? { resident: true } : {};
 
-      // 精确查重 + 语义近邻软查重：单次 DB 加载（subject/kind 在 DB 层过滤，
-      // 避免按 owner 截断 200 条后旧条漏报）+ 单次遍历，避免重复读取与 tokenize。
-      const { existing, similarItems } = await findExistingAndSimilarMemories({
-        db,
-        target,
-        content,
-        kind,
-        agentSubjectId,
-      });
-      if (existing) {
-        const updated: MemoryItem = {
-          ...existing,
-          // 保留检索字段原值：去重命中只是"我们记住了同一件事"，
-          // 并不是这条记忆被重新检索进 overlay。touchMemoryItemsInDb
-          // 是唯一的 retrieval 记账路径。
-          confidence: Math.max(existing.confidence ?? 0, baseConfidence),
-          sourceDialogId: input.dialogId ?? existing.sourceDialogId,
-          // 去重命中时若硬门通过，把既有条目升级为常驻；门禁不过则保持原值
-          // （不因为一次非常驻请求清掉既有 resident）。
-          ...residentFields,
-        };
-        await writeMemoryItemWithIndexesToDb(db, updated);
-        return { item: updated, similarItems: [] as MemoryItem[] };
-      }
-
       const item = createMemoryItem({
         ownerType: target.ownerType,
         ownerId: target.ownerId,
@@ -324,8 +300,11 @@ export const rememberMemory = async (
         sourceDialogId: input.dialogId ?? undefined,
         ...residentFields,
       });
-      await writeMemoryItemWithIndexesToDb(db, item);
-      return { item, similarItems };
+      const { similarItems } = await findExistingAndSimilarMemories({
+        db, target, content, kind, agentSubjectId,
+      });
+      const saved = await rememberExplicitVNext(db, item);
+      return { item: saved, similarItems };
     }),
   );
 
@@ -378,8 +357,6 @@ export const rememberMemory = async (
   };
 };
 
-/** 精确查重/软查重的加载上限：DB 层已按 effective subject + kind 过滤后再截断。 */
-const DEDUPE_LOAD_LIMIT = 200;
 /** 软查重阈值：overlap coefficient（交集 / 较小集合的 token 数）。 */
 const SIMILAR_OVERLAP_THRESHOLD = 0.6;
 /** 最小 query token 数：短中文内容的 CJK 2-gram 复用率高（如"部署状态"），
@@ -392,9 +369,7 @@ const SIMILAR_CANDIDATES_LIMIT = 3;
  *
  * subject 判定与写入端 effective subject 严格一致（agentSubjectId 存在 → 匹配
  * agent subject，否则匹配 owner subject）——避免"写入 agent subject、查重按
- * owner 找"的静默失效（review BLOCK 项）。加载走 loadMemoryCandidatesFromDb，
- * DB 层先按 subject/kind 过滤再取 200 条：owner 下条目超过上限时按最新截断，
- * 更旧条目不参与查重（best-effort：近期演进条目按激活/创建排序天然靠前）。
+ * owner 找"的静默失效。候选只来自当前 owner 的新版显式 State。
  *
  * 软查重只提示、不自动合并（与精确去重的"防误合并"哲学一致）。匹配判据为
  * token overlap coefficient ≥ SIMILAR_OVERLAP_THRESHOLD——演进快照（同一事实
@@ -409,20 +384,7 @@ async function findExistingAndSimilarMemories(input: {
   /** effective agent subject id：scope=auto 且 memorySubjectId 存在时非空。 */
   agentSubjectId: string | null;
 }): Promise<{ existing: MemoryItem | null; similarItems: MemoryItem[] }> {
-  const subjectRefs = input.agentSubjectId
-    ? [{ subjectType: "agent" as const, subjectId: input.agentSubjectId }]
-    : [
-        {
-          subjectType: input.target.ownerType,
-          subjectId: input.target.ownerId,
-        },
-      ];
-  const items = await loadMemoryCandidatesFromDb(input.db, {
-    owners: [input.target],
-    subjects: subjectRefs,
-    kinds: [input.kind],
-    ownerLimit: DEDUPE_LOAD_LIMIT,
-  });
+  const items = (await loadExplicitMemoryItems(input.db, input.target)).filter((item) => item.kind === input.kind);
 
   const subjectMatches = (item: MemoryItem): boolean =>
     input.agentSubjectId

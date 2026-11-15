@@ -20,6 +20,8 @@ const KNOWN_SYNC_FAILURE_CODES = new Set([
   "invalid_grant",
   "auth_no_token",
   "token_expired",
+  "user_batch_authority_controlled",
+  "tombstone_conflict",
 ]);
 
 const SYNC_FAILURE_CODE_RE = /"(?:code|error|reason)"\s*:\s*"([A-Za-z0-9_.:-]{1,48})"/;
@@ -115,6 +117,6 @@ export async function runCliCommandWithSyncDrain(command: () => Promise<number>,
     if (scope.watchdogExit) {await scope.watchdogExit; if (commandThrew) throw commandError; return;}
     const complete = await drain(scope);
     if (commandThrew) throw commandError;
-    options.exit(code === 0 && !complete ? 1 : code);
+    await options.exit(code === 0 && !complete ? 1 : code);
   });
 }

@@ -6,6 +6,7 @@
  * state, no lazy-loading coupling.
  */
 
+import { orderDialogHistory } from "../../agent-runtime/dialogHistoryOrder";
 import type { AgentRuntimeAgentConfig, AgentRuntimeChatMessage } from "../../agent-runtime";
 import { resolveAgentRuntimeConfigFromRecord } from "../../agent-runtime";
 import {
@@ -155,5 +156,5 @@ export async function readDialogMessages(args: {
     const message = localDialogMessageRecordToRuntimeMessage(entry.record);
     if (message) messages.push({ ...message, cliMessageId: entry.messageId } as any);
   }
-  return messages;
+  return orderDialogHistory(messages);
 }

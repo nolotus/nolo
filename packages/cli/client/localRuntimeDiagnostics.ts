@@ -32,7 +32,6 @@ export type LocalCliStreamingExecutor = (
 ) => Promise<CliExecuteResult>;
 
 export type CliLocalRuntimeAdapterDeps = {
-  taskReviewHost?: import("./taskReviewTools").TaskReviewHost;
   env: EnvLike;
   db?: CliLocalRuntimeDb;
   store?: HybridRecordStore;

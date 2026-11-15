@@ -692,6 +692,29 @@ export function wrapTranscriptLineWithLayout(
     }
   }
 
+  const CJK_CLOSING_OR_SEP_REGEX = /^[，。！？；：、）》】」』]$/;
+  // Protect leading list markers (e.g. `• `, `1. `, `◈ • `) from becoming an
+  // orphan line 1 when the body starts with a long unbroken token or CJK+path
+  // phrase that overflows later on the line.
+  let listMarkerEndToken = 0;
+  {
+    let plainPrefix = "";
+    let probe = 0;
+    while (probe < tokens.length && plainPrefix.length < 24) {
+      const tok = tokens[probe]!;
+      if (tok.kind === "char") {
+        plainPrefix += tok.value;
+        if (plainPrefix.length >= 2 && !/^(?:◈ ?)?\s*(?:\d*[.)]?|[•*+-])?\s*$/.test(plainPrefix)) {
+          break;
+        }
+        if (/^(?:◈\s+)?\s*(?:\d+[.)]|[•*+-])\s+$/.test(plainPrefix)) {
+          listMarkerEndToken = probe + 1;
+        }
+      }
+      probe += 1;
+    }
+  }
+
   let plainCharIndexAtStart = 0;
   let start = 0;
   while (start < tokens.length) {
@@ -703,6 +726,11 @@ export function wrapTranscriptLineWithLayout(
     const currentPrefixWidth = isContinuation ? visibleWidth(hangingIndent) : prefixWidth;
     const indentWidth = isContinuation ? visibleWidth(hangingIndent) : 0;
     const maxSegmentWidth = Math.max(1, columns - indentWidth);
+
+    const nextContent = (from: number) => {
+      while (from < tokens.length && tokens[from]!.kind === "sgr") from += 1;
+      return tokens[from];
+    };
 
     let width = 0;
     let end = start;
@@ -716,17 +744,60 @@ export function wrapTranscriptLineWithLayout(
       if (width + token.width > maxSegmentWidth && width > 0) break;
       width += token.width;
       end += 1;
-      if ((token.value === " " || token.value === "\t") && token.charIndex >= prefixCharCount) {
-        lastBreak = end;
+      if (token.charIndex >= prefixCharCount && (isContinuation || end > listMarkerEndToken)) {
+        if (
+          token.value === " " ||
+          token.value === "\t" ||
+          CJK_CLOSING_OR_SEP_REGEX.test(token.value) ||
+          token.value === "/"
+        ) {
+          lastBreak = end;
+        }
       }
     }
 
     let segmentEnd = end;
     if (end < tokens.length && lastBreak > start) {
-      // Mid-word overflow with a space earlier in the segment: break there.
+      // Mid-word overflow (or closing CJK punctuation after a Latin/digit word)
+      // with a break opportunity earlier in the segment: break there unless the
+      // break itself is directly followed by closing CJK punctuation.
       const overflowToken = tokens[end]!;
-      if (overflowToken.kind === "char" && overflowToken.value !== " " && overflowToken.width === 1) {
+      if (
+        overflowToken.kind === "char" &&
+        overflowToken.value !== " " &&
+        (overflowToken.width === 1 || CJK_CLOSING_OR_SEP_REGEX.test(overflowToken.value)) &&
+        nextContent(lastBreak) !== overflowToken
+      ) {
         segmentEnd = lastBreak;
+      }
+    }
+    // CJK closing punctuation belongs to the preceding non-whitespace character
+    // (Han, Latin, digits, or ASCII closing paren) so `）。` never starts a
+    // continuation line alone, without stranding a leading list marker.
+    const next = nextContent(segmentEnd);
+    if (next?.kind === "char" && CJK_CLOSING_OR_SEP_REGEX.test(next.value)) {
+      const minBacktrack = isContinuation ? start : Math.max(start, listMarkerEndToken);
+      let previous = segmentEnd - 1;
+      while (previous > minBacktrack) {
+        const tok = tokens[previous]!;
+        if (tok.kind === "sgr") {
+          previous -= 1;
+          continue;
+        }
+        if (CJK_CLOSING_OR_SEP_REGEX.test(tok.value)) {
+          previous -= 1;
+          continue;
+        }
+        break;
+      }
+      const preceding = tokens[previous];
+      if (
+        previous > minBacktrack &&
+        preceding?.kind === "char" &&
+        preceding.value !== " " &&
+        preceding.value !== "\t"
+      ) {
+        segmentEnd = previous;
       }
     }
     if (segmentEnd === start) segmentEnd = start + 1;
@@ -856,7 +927,7 @@ export function buildWindowTitle(title: string): string {
   // Strip ANSI first, then replace all C0/C1 control chars (including BEL \x07
   // and ESC \x1b) with spaces so they can't prematurely terminate the OSC 0/2
   // sequence or leak raw escapes into the terminal.
-  const plain = stripAnsi(title).replace(/[\x00-\x1f\x7f]+/g, " ");
+  const plain = stripAnsi(title).replace(/[\x00-\x1f\x7f-\x9f]+/g, " ");
   let truncated = "";
   let width = 0;
   const maxCols = 80;

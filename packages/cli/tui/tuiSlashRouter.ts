@@ -1,3 +1,6 @@
+import { getProcessRegistry } from "../../agent-runtime/processRegistry";
+import { getRestartBlocker, hasRestartBlockingRuns } from "./tuiRestart";
+import { listRunRecords } from "../agentRunControl";
 // ── S5 迁移：runSubmittedLine 的 slash 命令 bus 分发已从 readlineWorkspace.ts
 // 原样迁入本模块。handleTuiInput（解析 + 路由，产出 action）仍在
 // sessionDispatch.ts 不动；本模块承接的是 readlineWorkspace 侧的「命令后执行
@@ -8,7 +11,6 @@
 // 快照），分支顺序、输出文本、错误处理路径零改动。
 // 依赖方向单向：本模块 → tuiTurnRunner / session / tuiHistory 等叶子模块；
 // 本模块禁止回指 readlineWorkspace.ts。
-import { applyAutoReviewControl } from "./autoReviewControl";
 import { loadAgentCatalog } from "./agentCatalog";
 import { resolveAgentSwitchTarget } from "./agentPicker";
 import type { CliFetchImpl } from "../cliFetch";
@@ -181,16 +183,10 @@ export async function runSubmittedSlashLine(
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../../agent-runtime/actionGate").HostConfirmDecision>,
   directUserSubmission = false,
 ): Promise<boolean> {
-  if (line.trim().split(/\s+/)[0] === "/auto-review") {
-    if (!directUserSubmission) {
-      host.emitCommandOutput("auto-review：只接受用户直接提交的控制命令；未修改授权。", line);
-      return false;
-    }
-    const result = applyAutoReviewControl(line, host.state, resolveTuiIdentityEnv(host.taskEnv, host.options.env ?? process.env));
-    host.state = result.state;
-    host.emitCommandOutput(result.output, line);
-    return false;
-  }
+  // /auto-review 命令已随续跑状态机移除（2026-11-15 owner 决定）。
+  // 这套「状态机 + 验收计划 + revision 指纹 + 磁盘 claim」在架构上
+  // 从未真正运行（~/.nolo/auto-review-continuation/ 从未生成）；
+  // 实际工作方式是 agent 自己派 review、自己判断、自己提交。
   const {
     history,
     pasteStore,
@@ -288,6 +284,16 @@ export async function runSubmittedSlashLine(
   }
 
   if (result.action?.type === "exit") {
+    if (result.action.restart) {
+      const blocker = getRestartBlocker(host.state, {
+        supported: !!options.requestRestart && typeof process.execve === "function",
+        activeProcesses: getProcessRegistry().list().some(p => p.status === "running"),
+        activeRuns: hasRestartBlockingRuns(listRunRecords({ env: options.env ?? process.env })),
+      });
+      if (blocker) { emitCommandOutput(`[nolo] ${blocker}`); return false; }
+      options.requestRestart!(host.state);
+    }
+
     // "bye" 作为退出前最后一帧的视觉确认，直接 output.write 而不进
     // history——退出后 history 立即销毁，写 local turn 没有意义。
     if (result.output) output.write(`${result.output}\n`);
@@ -344,6 +350,7 @@ export async function runSubmittedSlashLine(
       }),
     };
     history.turns.length = 0;
+    history.toolDetails = [];
     history.currentRole = null;
     history.currentContent = "";
     history.scrollTop = 0;
@@ -780,6 +787,7 @@ export async function runSubmittedSlashLine(
         });
         const restored = loadedTurns.slice(-MAX_TUI_HISTORY_TURNS);
         history.turns.length = 0;
+        history.toolDetails = [];
         history.turns.push(...restored);
         history.currentRole = null;
         history.currentContent = "";
@@ -1075,6 +1083,7 @@ export async function runSubmittedSlashLine(
     // 失败回调直接写 output。清空动作留在调用点，与下方"发送即消费"注释一起。
     const { imageUrls } = await resolveAttachmentImageUrls({
       actionImagePaths: result.action.imagePaths,
+      onResolved: turnCtx.onUserImagesPrepared,
       attachedImages: host.state.attachedImages,
       onFailure: (_path, err) =>
         output.write(`[nolo] image skipped: ${err.message}\n`),

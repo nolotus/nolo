@@ -1,3 +1,4 @@
+import { emptyMemoryInjectionObservation, type MemoryInjectionObservation, type MemoryInjectionSource } from "./overlay";
 import { touchMemoryItemsInDb } from "./storeShared";
 import { buildMemoryOverlay, DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET } from "./overlay";
 import { rankMemoryCandidates, type MemoryRankContext } from "./rank";
@@ -221,6 +222,15 @@ export interface MemoryVNextPureReadObservation {
   error?: string;
 }
 
+export interface MemoryRuntimeResultObservation extends MemoryInjectionObservation {
+  event: "memory_runtime_result";
+  configuredPure: boolean;
+  configuredPrimary: boolean;
+  branch: "no_owner" | "pure" | "primary" | "legacy";
+  outcome: "result" | "empty" | "error" | "fallback";
+  errorKind: "none" | "timeout" | "runtime_error";
+}
+
 export const resolveMemoryRuntime = async (input: {
   db: any;
   userId?: string | null;
@@ -265,32 +275,49 @@ export const resolveMemoryRuntime = async (input: {
    * called when `NOLO_MEMORY_VNEXT_PURE_READ` is on; must not throw.
    */
   pureReadEmit?: (observation: MemoryVNextPureReadObservation) => void;
+  runtimeResultEmit?: (observation: MemoryRuntimeResultObservation) => void;
 }): Promise<MemoryRuntimeResolution> => {
+  const configuredPure = isMemoryVNextPureReadEnabled();
+  const configuredPrimary = isMemoryVNextPrimaryReadEnabled();
+  let branch: MemoryRuntimeResultObservation["branch"] = "no_owner";
+  let outcome: MemoryRuntimeResultObservation["outcome"] = "error";
+  let errorKind: MemoryRuntimeResultObservation["errorKind"] = "runtime_error";
+  let fallbackKind: "none" | "timeout" | "runtime_error" = "none";
+  let injection = emptyMemoryInjectionObservation();
+  const injectionEmit = (observation: MemoryInjectionObservation) => { injection = observation; };
+  const finish = (result: MemoryRuntimeResolution): MemoryRuntimeResolution => {
+    outcome = fallbackKind === "none" ? (result.promptBlock ? "result" : "empty") : "fallback";
+    errorKind = fallbackKind;
+    return result;
+  };
+  try {
   const owners = chooseMemoryOwners({
     userId: input.userId,
     spaceId: input.spaceId,
   });
   if (owners.length === 0) {
-    return { selectedItems: [], promptBlock: null };
+    return finish({ selectedItems: [], promptBlock: null });
   }
 
   // M5-R Pure vNext Read (flag-gated by NOLO_MEMORY_VNEXT_PURE_READ=1)
   // When enabled, completely skips legacy candidate loading, ranking, decaying,
   // touch writes and synchronous promotion, running 100% on vNext State recall.
   // Opportunistic promotion is fully detached so read latency remains unaffected.
-  if (isMemoryVNextPureReadEnabled()) {
+  if (configuredPure) {
+    branch = "pure";
     const pureStartedAt = performance.now();
     let pure: { selectedItems: MemoryItem[]; promptBlock: string | null; recalledStateCount: number };
-    let pureError: unknown = null;
+    let pureFailed = false;
     try {
       pure = await resolvePureVNextRuntime({
         db: input.db,
         owners,
         userInput: input.userInput,
         maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET,
+        injectionEmit,
       });
     } catch (error) {
-      pureError = error;
+      pureFailed = true;
       pure = { selectedItems: [], promptBlock: null, recalledStateCount: 0 };
     }
     const pureLatencyMs = Math.round((performance.now() - pureStartedAt) * 10) / 10;
@@ -321,7 +348,7 @@ export const resolveMemoryRuntime = async (input: {
       }
     };
 
-    if (pureError != null) {
+    if (pureFailed) {
       emitPureRead({
         source: "none",
         itemCount: 0,
@@ -329,7 +356,7 @@ export const resolveMemoryRuntime = async (input: {
         vnextLatencyMs: pureLatencyMs,
         contextChars: 0,
         fallbackReason: "vnext_error",
-        error: pureError instanceof Error ? pureError.message : String(pureError),
+        error: "runtime_error",
       });
     } else if (pure.selectedItems.length === 0) {
       emitPureRead({
@@ -384,12 +411,12 @@ export const resolveMemoryRuntime = async (input: {
       })().catch(() => {});
     }
 
-    return {
-      selectedItems: pure.selectedItems,
-      promptBlock: pure.promptBlock,
-    };
+    const result = finish({ selectedItems: pure.selectedItems, promptBlock: pure.promptBlock });
+    if (pureFailed) { outcome = "error"; errorKind = "runtime_error"; }
+    return result;
   }
 
+  branch = "legacy";
   const policy = resolveAgentMemoryPolicy({ agentKey: input.agentKey });
   const legacyStartedAt = performance.now();
   const candidates = await loadMemoryCandidatesFromDb(input.db, {
@@ -437,17 +464,21 @@ export const resolveMemoryRuntime = async (input: {
   );
   const selected = [...residentItems, ...ranked];
   const legacyLatencyMs = Math.round((performance.now() - legacyStartedAt) * 10) / 10;
-  const renderOverlay = (items: MemoryItem[]) =>
-    items.length === 0 ? null : buildMemoryOverlay(items, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET });
-  let promptBlock = renderOverlay(selected);
+  // Without M4 selection metadata, legacy coverage is unknown. Do not add reads
+  // or claim these lines are uncovered (notably on legacy/error fallback turns).
+  const renderOverlay = (items: MemoryItem[], sources?: ReadonlyMap<MemoryItem, MemoryInjectionSource>) =>
+    buildMemoryOverlay(items, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET, sources, injectionEmit });
+  // Render only the final selection; failed primary selection uses the legacy fallback.
+  let promptBlock: string | null = configuredPrimary ? null : renderOverlay(selected);
 
   // Slice 7 primary read (flag-gated, default OFF → behavior unchanged).
   // Retrieval is still the cheap local ranker above. Authority is per item:
   // a selected item covered by a current State is rendered from that State,
   // everything else keeps its legacy text — nothing the ranker chose is lost.
-  const primaryRead = isMemoryVNextPrimaryReadEnabled();
+  const primaryRead = configuredPrimary;
   let allCoveredByVNext = false;
   if (primaryRead) {
+    branch = "primary";
     const emitPrimary = (observation: MemoryVNextPrimaryReadObservation) => {
       try {
         (input.primaryReadEmit ??
@@ -462,18 +493,19 @@ export const resolveMemoryRuntime = async (input: {
     if (selected.length === 0) {
       emitPrimary({ ...base, source: "none" });
     } else {
+      const timeoutMarker = {};
       try {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const m4 = await Promise.race([
           resolveMemoryVNextM4Selection({ db: input.db, owners, query: input.userInput, selected }),
           new Promise<never>((_, reject) => {
             timer = setTimeout(
-              () => reject(Object.assign(new Error("timeout"), { name: "TimeoutError" })),
+              () => reject(timeoutMarker),
               MEMORY_VNEXT_PRIMARY_READ_TIMEOUT_MS
             );
           }),
         ]).finally(() => clearTimeout(timer));
-        promptBlock = renderOverlay(m4.renderItems);
+        promptBlock = renderOverlay(m4.renderItems, m4.sources);
         allCoveredByVNext = m4.uncoveredLegacyCount === 0 && m4.recalledStateCount > 0;
         const source = m4.recalledStateCount > 0
           ? (m4.uncoveredLegacyCount === 0 ? "vnext" : "hybrid")
@@ -489,13 +521,15 @@ export const resolveMemoryRuntime = async (input: {
           ...(source === "legacy_fallback" ? { fallbackReason: "no_vnext_context" as const } : {}),
         });
       } catch (error) {
+        promptBlock = renderOverlay(selected);
+        fallbackKind = error === timeoutMarker ? "timeout" : "runtime_error";
         emitPrimary({
           ...base,
           source: "legacy_fallback",
           vnextLatencyMs: vnextLatency(),
           contextChars: promptBlock?.length ?? 0,
           fallbackReason: "vnext_error",
-          error: error instanceof Error ? error.name : "UnknownError",
+          error: error === timeoutMarker ? "TimeoutError" : "UnknownError",
         });
       }
     }
@@ -565,7 +599,7 @@ export const resolveMemoryRuntime = async (input: {
   }
 
   if (selected.length === 0) {
-    return { selectedItems: [], promptBlock: null };
+    return finish({ selectedItems: [], promptBlock: null });
   }
 
   // 标记 retrieval：只能证明这些记忆被注入 overlay，不代表模型使用了它们
@@ -575,8 +609,14 @@ export const resolveMemoryRuntime = async (input: {
   // 衰减与 correction 的"近期检索"判断都依赖这个信号；不记会让已覆盖条目
   // 逐渐掉出排序，反而让 vNext 失去接管的对象。
   await touchMemoryItemsInDb(input.db, selected);
-  return {
-    selectedItems: selected,
-    promptBlock,
-  };
+  return finish({ selectedItems: selected, promptBlock });
+  } finally {
+    const observation: MemoryRuntimeResultObservation = {
+      ...injection,
+      event: "memory_runtime_result", configuredPure, configuredPrimary, branch, outcome, errorKind,
+    };
+    try {
+      (input.runtimeResultEmit ?? ((event) => console.info("[memory] runtime result", event)))(observation);
+    } catch { /* observation must never affect the runtime */ }
+  }
 };

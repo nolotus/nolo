@@ -237,11 +237,7 @@ export function handleTuiInput(
       exclude: hints.map((hint) => hint.resolvedPath),
     });
     const previewLines = [
-      ...hints.map((hint) =>
-        hint.unreadable
-          ? `image path unreadable: ${hint.resolvedPath}`
-          : `found image: ${hint.resolvedPath}`,
-      ),
+      ...unreadableHints.map((hint) => `image path unreadable: ${hint.resolvedPath}`),
       ...mediaDetected.hints.map((hint) =>
         hint.unreadable
           ? `media path unreadable: ${hint.resolvedPath}`
@@ -548,6 +544,8 @@ export function handleTuiInput(
       const stoppedNames = matches.map(p => `pid ${p.pid} (${p.label})`).join(", ");
       return { nextState: state, output: t("stopLabelsDone", stoppedNames) };
     }
+    case "/restart":
+      return { nextState: state, output: "", action: { type: "exit", restart: true } };
     case "/exit":
     case "/quit":
       return { nextState: state, output: t("bye"), action: { type: "exit" } };

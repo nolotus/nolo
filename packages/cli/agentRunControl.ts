@@ -1,3 +1,4 @@
+import { getHostRuntimeExecutable, HOST_RUNTIME_CONTENT_IDENTITY, resolveExactRuntimeEntrypoint, RuntimeVersionMismatchError, AGENT_RUN_PROTOCOL, type RunStartupPhase } from "./agentRunProtocol";
 import type { SelectionCheck } from "../ai/agent/dispatchSelectionPolicy";
 import type { DispatchSpeedProvenance } from "../ai/agent/dispatchSpeedProvenance";
 import type { LocalRunAcceptance } from "./agentRunLocalWorkspace";
@@ -56,6 +57,9 @@ import type { DoDCommandResult } from "./agentRunDoD";
 export type RunStatus = "running" | "done" | "failed" | "timeout" | "killed" | "orphaned";
 
 export type RunFailureReason =
+  | "runtime_version_mismatch"
+  | "runtime_protocol_mismatch"
+  | "startup_failed"
   | "history_integrity"
   | "stalled"
   | "provider_rate_limited"
@@ -113,6 +117,8 @@ export type RunRecord = {
   exitCode?: number;
   endedAt?: string;
   /** High-level typed failure cause on terminal failure / stall / cancel. */
+  startup?: { protocol: string; phase: RunStartupPhase };
+  processExit?: { code: number | null; signal: string | null };
   failureReason?: RunFailureReason;
   /**
    * 结构化失败分类（history_integrity / rate_limited / provider_error / stalled / tool_error /
@@ -1399,6 +1405,35 @@ export function listRunRecords(deps: AgentRunControlDeps = {}): RunRecord[] {
   );
 }
 
+/** Asynchronous full registry scan for latency-sensitive callers. */
+export async function listRunRecordsAsync(deps: Pick<AgentRunControlDeps, "env" | "homedir"> = {}): Promise<RunRecord[]> {
+  const dir = resolveRunsDir(deps.env, deps.homedir);
+  let entries: string[];
+  try {
+    entries = await nodeFs.promises.readdir(dir);
+  } catch {
+    return [];
+  }
+  const records: Array<RunRecord | undefined> = new Array(entries.length);
+  let next = 0;
+  const readNext = async () => {
+    while (next < entries.length) {
+      const index = next++;
+      const entry = entries[index]!;
+      if (!entry.endsWith(".json")) continue;
+      const path = resolveRunRecordPath(entry.slice(0, -5), deps.env, deps.homedir);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          records[index] = JSON.parse(await nodeFs.promises.readFile(path, "utf8")) as RunRecord;
+          break;
+        } catch { /* Concurrent writers may temporarily expose partial JSON. */ }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(16, entries.length) }, readNext));
+  return records.filter((record): record is RunRecord => Boolean(record)).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+}
+
 export function findRunRecordByPid(
   pid: number,
   deps: AgentRunControlDeps = {}
@@ -1754,27 +1789,10 @@ export function rewriteMsgFileArg(args: string[], messagePath: string): string[]
 }
 
 function resolveValidCliEntrypoint(cliEntrypointPath?: string, fs: FsLike = nodeFs): string {
-  if (cliEntrypointPath && fs.existsSync(cliEntrypointPath)) {
-    return cliEntrypointPath;
-  }
-  const fallback = resolveCliEntrypointPath();
-  if (fs.existsSync(fallback)) {
-    return fallback;
-  }
-  // Try locating sibling or package entrypoint if fallback does not exist on disk
-  const candidates = [
-    join(dirname(fallback), "cli", "index.ts"),
-    join(dirname(fallback), "cli", "index.js"),
-    join(dirname(fallback), "..", "packages", "cli", "index.ts"),
-    join(dirname(fallback), "..", "packages", "cli", "index.js"),
-    join(dirname(fallback), "..", "index.js"),
-  ];
-  for (const cand of candidates) {
-    if (fs.existsSync(cand)) {
-      return cand;
-    }
-  }
-  return fallback;
+  const entrypoint = cliEntrypointPath ?? resolveCliEntrypointPath();
+  if (!fs.existsSync(entrypoint)) throw new RuntimeVersionMismatchError("runtime entrypoint missing");
+  // Injected test filesystems may not implement realpath; production always does.
+  return fs === nodeFs ? resolveExactRuntimeEntrypoint(entrypoint) : String(fs.realpathSync?.(entrypoint) ?? entrypoint);
 }
 
 export function buildAgentRunChildCommand(
@@ -1787,7 +1805,7 @@ export function buildAgentRunChildCommand(
   deps: AgentRunControlDeps = {}
 ): { execPath: string; childArgs: string[] } {
   const fs = deps.fs ?? nodeFs;
-  const execPath = process.execPath;
+  const execPath = getHostRuntimeExecutable();
   const commandParts = options.commandPath ?? [];
   // 子进程以 run cwd 启动并重解析参数：--msg-file 改写为 nolo runs 目录里的
   // 内容快照（不依赖调用者本地文件）；--skill 相对路径按调用者 cwd 绝对化。
@@ -1796,8 +1814,9 @@ export function buildAgentRunChildCommand(
     strippedArgs = rewriteMsgFileArg(strippedArgs, options.messagePath);
   }
   strippedArgs = absolutizeSkillArgs(strippedArgs);
-  if (isCompiledBinary() || options.cliEntrypointPath === execPath) {
-    return { execPath, childArgs: [...commandParts, ...strippedArgs] };
+  if (isCompiledBinary() || options.cliEntrypointPath === process.execPath || options.cliEntrypointPath === execPath) {
+    const fixed = resolveValidCliEntrypoint(isCompiledBinary() ? execPath : options.cliEntrypointPath ?? execPath, fs);
+    return { execPath: fixed, childArgs: [...commandParts, ...strippedArgs] };
   }
   const entrypoint = resolveValidCliEntrypoint(options.cliEntrypointPath, fs);
   if (entrypoint === execPath) {
@@ -2119,6 +2138,53 @@ function releaseUnspawnedLocalWriterClaim(runId: string, deps: AgentRunControlDe
   if (!released) throw new Error(`[local-writer-resource] release lock busy: ${runId}`);
 }
 
+/** Persist startup evidence under the same lock used by terminal arbitration. */
+export async function recordRunStartup(runId: string, phase: RunStartupPhase, deps: AgentRunControlDeps = {}): Promise<void> {
+  const attempt = () => withRunRecordLock(runId, deps, () => {
+    const record = readRunRecord(runId, deps);
+    if (!record || isRunTerminalStatus(record.status)) return true;
+    record.startup = { protocol: AGENT_RUN_PROTOCOL, phase };
+    writeRunRecord(record, deps);
+    return true;
+  }, { strict: true });
+  const deadline = Date.now() + 2000;
+  while (!attempt()) {
+    if (Date.now() >= deadline) throw new Error(`Startup evidence lock busy: ${runId}`);
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+
+/** Exit is not success: without a child result even code 0 is a failed run. */
+export async function settleBackgroundProcessExit(
+  runId: string, code: number | null, signal: string | null, deps: AgentRunControlDeps = {},
+): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (true) {
+    const settled = withRunRecordLock(runId, deps, () => {
+      const record = readRunRecord(runId, deps);
+      if (!record) return true;
+      if (isRunTerminalStatus(record.status)) {
+        record.processExit = { code, signal };
+        writeRunRecord(record, deps);
+        return true;
+      }
+      return false;
+    }, { strict: true });
+    if (settled === true) return;
+    if (settled === false) {
+      const result = transitionRunToTerminal(runId, {
+        status: signal === "SIGTERM" || signal === "SIGKILL" ? "killed" : "failed",
+        exitCode: code ?? 1, processExit: { code, signal },
+        failureReason: signal === "SIGTERM" || signal === "SIGKILL" ? "cancelled" : "startup_failed",
+        note: `Child exited without terminal result (code=${code}, signal=${signal})`,
+      }, deps);
+      if (result.kind !== "contended") return;
+    }
+    if (Date.now() >= deadline) throw new Error(`Process exit settlement lock busy: ${runId}`);
+    await (deps.sleep ?? defaultSleep)(20);
+  }
+}
+
 export async function spawnLocalBackgroundRun(
   input: {
     /** Host adapter only; not a CLI option or tool argument. */
@@ -2259,6 +2325,7 @@ export async function spawnLocalBackgroundRun(
     ...(input.evidenceScope ? { evidenceScope: input.evidenceScope } : {}),
     ...(input.dispatchSpeedProvenance ? { dispatchSpeedProvenance: input.dispatchSpeedProvenance } : {}),
     runId,
+    startup: { protocol: AGENT_RUN_PROTOCOL, phase: "spawn" },
     agentKey: input.agentKey,
     agentName: input.agentName?.trim() || shortAgentKey(input.agentKey),
     ...(title ? { title } : {}),
@@ -2298,7 +2365,8 @@ export async function spawnLocalBackgroundRun(
     ? input.rawArgs
     : [...(input.rawArgs ?? []), "--queue-file", queuePath];
 
-  const { execPath, childArgs } = buildAgentRunChildCommand(
+  let childCommand: ReturnType<typeof buildAgentRunChildCommand>;
+  try { childCommand = buildAgentRunChildCommand(
     {
       rawArgs: rawArgsWithQueue,
       commandPath: input.commandPath,
@@ -2306,10 +2374,21 @@ export async function spawnLocalBackgroundRun(
       messagePath,
     },
     deps
-  );
+  ); } catch (error) {
+    const result = await settleRunTerminalAuthoritatively(runId, {
+      status: "failed", exitCode: 1,
+      failureReason: error instanceof RuntimeVersionMismatchError ? "runtime_version_mismatch" : "startup_failed",
+      note: String(error),
+    }, resolvedDeps, (id, update, d) => transitionRunToTerminal(id, update, d));
+    if (result.kind === "contended") throw new Error(`Startup settlement lock busy: ${runId}; ${error}`);
+    throw error;
+  }
+  const { execPath, childArgs } = childCommand;
 
   const childEnv: EnvLike = {
     ...env,
+    NOLO_AGENT_RUN_PROTOCOL: AGENT_RUN_PROTOCOL,
+    NOLO_AGENT_RUN_CONTENT_IDENTITY: HOST_RUNTIME_CONTENT_IDENTITY,
     NOLO_AGENT_RUN_CHILD: "1",
     NOLO_AGENT_RUN_ID: runId,
     ...(record.writerLaunch ? { NOLO_WRITER_LAUNCH_ATTEMPT: record.writerLaunch.attemptId } : {}),
@@ -2366,25 +2445,31 @@ export async function spawnLocalBackgroundRun(
       reservation?.release("spawn_sync_failed");
       if (input.claimLocalWrites) releaseUnspawnedLocalWriterClaim(runId, resolvedDeps);
     } finally {
-      finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, resolvedDeps);
+      finalizeRunRecord(runId, { status: "failed", exitCode: 1, failureReason: error instanceof RuntimeVersionMismatchError ? "runtime_version_mismatch" : "startup_failed", note: String(error) }, resolvedDeps);
     }
     throw error;
   } finally {
     fs.closeSync?.(logFd);
   }
   proc.once?.("error", (error) => {
-    try {
-      reservation!.release("child_error");
-      // An asynchronous error (even without a PID) is not death confirmation.
-      // Retain the writer claim; the registry exposes unknown ownership for diagnosis.
-    } catch (releaseError) {
-      // Keep the failed reservation on disk; do not crash the parent from an
-      // EventEmitter callback or silently claim the budget was released.
-      finalizeRunRecord(runId, { status: "failed", exitCode: 1,
-        note: `${error}; reservation release failed: ${releaseError}` }, resolvedDeps);
-      return;
-    }
-    finalizeRunRecord(runId, { status: "failed", exitCode: 1, note: String(error) }, resolvedDeps);
+    let note = String(error);
+    try { reservation!.release("child_error"); }
+    catch (releaseError) { note += `; reservation release failed: ${releaseError}`; }
+    // An error does not prove a spawned PID dead: retain writer ownership.
+    void settleRunTerminalAuthoritatively(runId, {
+      status: "failed", exitCode: 1, failureReason: "startup_failed", note,
+    }, resolvedDeps, (id, update, d) => transitionRunToTerminal(id, update, d)).then((result) => {
+      if (result.kind === "contended") throw new Error(`Startup settlement lock busy: ${runId}`);
+    }).catch((error) => {
+      input.output?.write(`[nolo] background error settlement failed: ${error}\n`);
+    });
+  });
+  proc.once?.("exit", (code, signal) => {
+    void settleBackgroundProcessExit(runId, code, signal, resolvedDeps).catch((error) => {
+      input.output?.write(`[nolo] background exit settlement failed: ${error}\n`);
+    });
+    try { reservation!.release("child_exit"); }
+    catch (error) { input.output?.write(`[nolo] reservation release failed: ${error}\n`); }
   });
   // spawn 成功后才提示（失败没有任何东西需要用户去并发权衡）。写失败/输出通道
   // 抛错一律吞掉：这行字的价值远小于「派发已经成功了」这件事。
@@ -2621,6 +2706,7 @@ export function transitionRunToTerminal(
   update: {
     status: RunRecord["status"];
     exitCode?: number;
+    processExit?: RunRecord["processExit"];
     dialogId?: string;
     /** 本次 run 实际消耗的平台积分（run 进程自报）。 */
     credits?: number;
@@ -2657,10 +2743,16 @@ export function transitionRunToTerminal(
       record.status === "orphaned" &&
       (update.status === "done" || update.status === "failed");
     if (sharedIsAgentRunTerminalStatus(record.status) && !orphanCorrection) {
+      // Native exit observation is orthogonal to the child's authoritative result.
+      if (update.processExit) {
+        record.processExit = update.processExit;
+        writeRunRecord(record, deps);
+      }
       return { kind: "kept", record } as const;
     }
     const now = deps.now ?? (() => new Date());
     record.status = update.status;
+    if (update.processExit) record.processExit = update.processExit;
     if (typeof update.exitCode === "number") record.exitCode = update.exitCode;
     if (update.dialogId) record.dialogId = update.dialogId;
     if (typeof update.credits === "number" && Number.isFinite(update.credits)) {
@@ -2722,7 +2814,9 @@ export function transitionRunToTerminal(
     // 不把命令证据伪造成 assistant 结论。必须在 endedAt/status
     // 落定之后写，头里的状态/结束时间才与 record 一致。
     if ((typeof update.lastAssistantText === "string" && update.lastAssistantText) ||
-        update.acceptance?.checks.observations?.length) {
+        update.acceptance?.checks.observations?.length ||
+        update.failureReason === "startup_failed" || update.failureReason === "runtime_protocol_mismatch" ||
+        update.failureReason === "runtime_version_mismatch") {
       try {
         const fs = deps.fs ?? nodeFs;
         const resultFile = join(resolveRunsDir(deps.env, deps.homedir), `${runId}.result.md`);
@@ -2857,6 +2951,7 @@ export async function settleRunTerminalAuthoritatively(
   update: {
     status: RunRecord["status"];
     exitCode?: number;
+    processExit?: RunRecord["processExit"];
     dialogId?: string;
     credits?: number;
     note?: string;
