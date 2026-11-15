@@ -1,3 +1,4 @@
+import type { MemoryInjectionSource } from "../overlay";
 import type { MemoryItem } from "../types";
 import { buildLegacyMemoryEvidence, resolveLegacyMemoryPrincipal } from "./legacyMigration";
 import { currentStatesCitingEvidence, loadExistingContext } from "./lazyPromotion";
@@ -56,6 +57,7 @@ export const isMemoryVNextPrimaryReadEnabled = (
 export interface MemoryVNextM4Selection {
   /** Combined items to pass to buildMemoryOverlay. */
   renderItems: MemoryItem[];
+  sources: ReadonlyMap<MemoryItem, MemoryInjectionSource>;
   recalledStateCount: number;
   uncoveredLegacyCount: number;
   coveredSuppressedCount: number;
@@ -148,6 +150,10 @@ export const resolveMemoryVNextM4Selection = async (input: {
   const renderItems = [...recalledStates, ...uncoveredLegacy];
   return {
     renderItems,
+    sources: new Map<MemoryItem, MemoryInjectionSource>([
+      ...recalledStates.map(item => [item, "vnext"] as const),
+      ...uncoveredLegacy.map(item => [item, "legacy-uncovered"] as const),
+    ]),
     recalledStateCount: recalledStates.length,
     uncoveredLegacyCount: uncoveredLegacy.length,
     coveredSuppressedCount,

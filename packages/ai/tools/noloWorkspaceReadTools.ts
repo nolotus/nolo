@@ -771,7 +771,7 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
       }
 
       // 2. 裸 apiKeyRef / credentialRef 匹配
-      for (const ref of [record?.apiKeyRef, record?.credentialRef]) {
+      for (const ref of credKey?.includes("|quota:") ? [] : [record?.apiKeyRef, record?.credentialRef]) {
         if (typeof ref === "string" && ref.trim()) {
           const at = localCooldowns[ref.trim()];
           if (typeof at === "number" && at > now) {
@@ -781,7 +781,7 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
       }
 
       // 3. credentialGroup 匹配（仅对非他人共享的凭据组，避免跨租户误伤）
-      if (summary.credentialGroup && summary.isOwned !== false) {
+      if (summary.credentialGroup && summary.isOwned !== false && !credKey?.includes("|quota:")) {
         const at = localCooldowns[summary.credentialGroup];
         if (typeof at === "number" && at > now) {
           localDeadline = mergeAvailabilityDeadline(localDeadline, at);

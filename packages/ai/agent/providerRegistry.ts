@@ -89,11 +89,11 @@ const OPENCODE_GO_MODEL_OPTIONS: ReadonlyArray<{
   label: string;
   recommended?: boolean;
   hasVision?: boolean;
-}> = opencodeGoModels.map((m, i) => ({
+}> = opencodeGoModels.map((m) => ({
   id: m.name,
   label: m.displayName ?? m.name,
   hasVision: m.hasVision,
-  ...(i === 0 ? { recommended: true } : {}),
+  ...(m.name === "deepseek-v4.1-flash" ? { recommended: true } : {}),
 }));
 
 /**
@@ -403,6 +403,10 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
       // 非 Ultra 账号 discovery 返回 gemini-4-argon-disabled，选中后调用 404。标签明示门槛，
       // 让不具备资格的 Antigravity 用户不会误选；3.1 Pro 保留为所有档位可用的回退。
       { id: "gemini-4-argon", label: "Gemini 4 Argon（需 Ultra）", hasVision: true },
+      // Exact wire IDs observed in Antigravity discovery with supportsImages=true.
+      { id: "gemini-4-hydrogen-medium", label: "Gemini 4 Hydrogen Medium", hasVision: true },
+      { id: "claude-opus-5-5-medium", label: "Claude Opus 5.5 Medium", hasVision: true },
+      { id: "claude-sonnet-5-5-high", label: "Claude Sonnet 5.5 High", hasVision: true },
       { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro", hasVision: true },
       { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", hasVision: true },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", hasVision: true },
@@ -583,7 +587,7 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     description: "OpenCode Go 订阅（$5 首月 / $10 月，聚合 Grok/Kimi/Qwen/GLM/MiMo/MiniMax/DeepSeek）",
     provider: "opencode-go",
     baseUrl: "https://opencode.ai/zen/go/v1",
-    defaultModel: "qwen3.8-max",
+    defaultModel: "deepseek-v4.1-flash",
     modelOptions: OPENCODE_GO_MODEL_OPTIONS,
     commercialKind: "subscription",
     accessVariant: "token_plan_endpoint",
@@ -688,12 +692,12 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     description: "open-design.ai 聚合订阅（一个 Key 聚合 GPT/Claude/DeepSeek/GLM/Kimi/MiMo，OpenAI 兼容）",
     provider: "opendesign",
     baseUrl: "https://amr-link.open-design.ai/v1",
-    defaultModel: "gpt-6-luna",
+    defaultModel: "deepseek-v4.1-flash",
     modelOptions: [
-      { id: "gpt-6-luna", label: "GPT-6 Luna", hasVision: true, recommended: true },
+      { id: "gpt-6-luna", label: "GPT-6 Luna", hasVision: true },
       { id: "claude-haiku-5.5", label: "Claude Haiku 5.5", hasVision: true },
       { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
-      { id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash", hasVision: true },
+      { id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash", hasVision: true, recommended: true },
       { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
       { id: "deepseek-v4-flash-vision-exp", label: "DeepSeek V4 Flash Vision Exp", hasVision: true },
       { id: "glm-5.3-flashx", label: "GLM 5.3 FlashX", hasVision: true },

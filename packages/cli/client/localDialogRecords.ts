@@ -1,3 +1,4 @@
+import { dialogTurnUserMessageId } from "../../agent-runtime/dialogHistoryOrder";
 import { registerDialogOwner } from "database-engine/dialogOwner";
 import {
   buildAgentRuntimeDialogWritePlan,
@@ -18,7 +19,7 @@ export function buildLocalDialogWritePlan(args: {
   cwd?: string;
   titleOverride?: string;
 }) {
-  return buildAgentRuntimeDialogWritePlan({
+  const plan = buildAgentRuntimeDialogWritePlan({
     input: args.input,
     userId: args.userId,
     now: args.now,
@@ -30,6 +31,24 @@ export function buildLocalDialogWritePlan(args: {
     },
     ...(args.titleOverride ? { titleOverride: args.titleOverride } : {}),
   });
+  // Ordinary direct input has no queue receipt. Bind the existing persisted user
+  // row to the host's turn identity, not to save-time clock or text similarity.
+  const turnId = args.input.runtimeContext?.turnId;
+  const captureUserMessageIds: string[] = [];
+  if (typeof turnId === "string" && /^turn-[0-9A-HJKMNP-TV-Z]{26}$/.test(turnId)) {
+    const messages = args.input.messages.filter(message => message.role !== "system");
+    for (const [index, message] of messages.entries()) {
+      if (message.role !== "user" || (message as { cliMessageId?: string }).cliMessageId) continue;
+      const op = plan.ops[index + 1]; // plan: dialog header followed by non-system messages
+      // Keep the timestamp-prefix ordering used by dialog history scans.
+      const id = dialogTurnUserMessageId(turnId, index)!;
+      const key = `dialog-${plan.dialogId}-msg-${id}`;
+      op.key = key;
+      op.value = { ...op.value, id, dbKey: key };
+      captureUserMessageIds.push(id);
+    }
+  }
+  return { ...plan, captureUserMessageIds };
 }
 
 /** Pending user records share the existing dialog message namespace and Web receipt schema. */
@@ -128,7 +147,7 @@ export async function markCliUserBatchPhase(
   store: import("./hybridRecordStore").HybridRecordStore, dialogId: string,
   messageId: string, phase: "requested" | "completed",
   messageIds: readonly string[],
-  preparedMessages?: readonly { cliMessageId?: string; content: unknown }[],
+  preparedMessages?: readonly { cliMessageId?: string; content: unknown; cliHistoryOrder?: number }[],
 ) {
   const key = `dialog-${dialogId}-msg-${messageId}`;
   const record = await store.read(key, { remote: false });
@@ -146,6 +165,8 @@ export async function markCliUserBatchPhase(
     ops.push({ type: "put" as const, key: messageKey, value: { ...message,
       ...(prepared ? { content: prepared.content } : {}), metadata: {
       ...(message as any).metadata, queueState: "accepted",
+      cliBatchId: messageId,
+      ...(Number.isFinite(prepared?.cliHistoryOrder) ? { cliHistoryOrder: prepared!.cliHistoryOrder } : {}),
       ...(id === messageId ? { cliBatchPhase: phase, acceptedUserMessageIds: [...messageIds] } : {}),
     } } });
   }
@@ -170,6 +191,8 @@ export async function rollbackCliUserBatchPhase(
     if (!record) continue;
     const metadata = { ...(record as any).metadata };
     delete metadata.cliBatchPhase;
+    delete metadata.cliBatchId;
+    delete metadata.acceptedUserMessageIds;
     metadata.queueState = "pending";
     ops.push({ type: "put" as const, key, value: { ...record, metadata } });
   }

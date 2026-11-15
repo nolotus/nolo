@@ -1,4 +1,77 @@
 
+## 0.228.0-alpha.1 (2026-11-15)
+
+### Features
+
+* **agent:** choose cost-effective reasoning defaults by model ([c60c56e](https://github.com/nolotus/bun-nolo/commit/c60c56ec1365f0503ae9bc4f3930e6ba34016008))
+* **agent:** hand off local images to child runs ([451ebd9](https://github.com/nolotus/bun-nolo/commit/451ebd9bed5438fdea4970f6869da12e930e1572))
+* **chat:** present RN tool activities with persistent expansion choices ([5cb0be2](https://github.com/nolotus/bun-nolo/commit/5cb0be2d7ca62769a03729dfcf6c22b67fcd7214))
+* **chat:** unify readable tool activity states and safe summaries ([9bea867](https://github.com/nolotus/bun-nolo/commit/9bea86715a1214a386f8f1d2cc4ebaf3284d69f3))
+* **cli:** improve TUI readability and activity feedback ([2048cd2](https://github.com/nolotus/bun-nolo/commit/2048cd247f9113feda003e9a6159242339bbcca6))
+* **cli:** integrate idle restart with current TUI commands ([14f3bbf](https://github.com/nolotus/bun-nolo/commit/14f3bbf0fe54d40bda32bbc773b02b21be774aee))
+* **cli:** merge reviewed TUI restart integration ([a7c6f3b](https://github.com/nolotus/bun-nolo/commit/a7c6f3b7886e1ec0b66bb4ef99dd9bae7e803e8c))
+* **cli:** present grouped tool activities with visible exceptions ([2aaca1f](https://github.com/nolotus/bun-nolo/commit/2aaca1f5fa0fa3cc6c3b5130495d07cc338b6fa5))
+* **cli:** restart idle TUI while preserving dialog identity ([5314899](https://github.com/nolotus/bun-nolo/commit/5314899928049d9345f5137caba49affff3c5297))
+* **cli:** show terminal task state and opt-in attention bell ([746e106](https://github.com/nolotus/bun-nolo/commit/746e1067e2a4fbeeeab05495920b84e310211341))
+* **core:** align tool activity summaries and TUI visual hierarchy ([d91f283](https://github.com/nolotus/bun-nolo/commit/d91f283246b6fd0ad2b74d1a78fad701c2d1c12e))
+* **core:** share tool activity action and object summaries ([038afab](https://github.com/nolotus/bun-nolo/commit/038afabe014c58a11f434c5b5d644974018e299a))
+* **memory:** allow explicit archive queries in pure mode ([5893cee](https://github.com/nolotus/bun-nolo/commit/5893cee75f32ef21c0370f31830c10c9dc88fad8))
+* **memory:** bound deep recall and adaptive context inputs ([85db450](https://github.com/nolotus/bun-nolo/commit/85db4504f46e9274bd795e111be597f9f43b44c8))
+* **memory:** capture completed-turn evidence natively ([6e82324](https://github.com/nolotus/bun-nolo/commit/6e823246109ad22840d388114c202b71167ab6a8))
+* **memory:** capture persisted CLI completed turns ([e1db133](https://github.com/nolotus/bun-nolo/commit/e1db133fd69a43a38ee2ea76301be952213b2699))
+* **memory:** integrate bounded deep recall ([a5f85cc](https://github.com/nolotus/bun-nolo/commit/a5f85cc6642d0117ecd163e1c22e913d3f6d3005))
+* **memory:** integrate completed-turn capture adapters ([e0980b7](https://github.com/nolotus/bun-nolo/commit/e0980b7eb3537c6e576f97e12147f7d1caf1994e))
+* **memory:** integrate final injection attribution metrics ([c7a7ac4](https://github.com/nolotus/bun-nolo/commit/c7a7ac4792973d7aebf6fbef41f5a88e8cb5565f))
+* **memory:** integrate native capture core ([18f66fe](https://github.com/nolotus/bun-nolo/commit/18f66fee34e491ba131627a529b1dcef0a2c5c14))
+* **memory:** integrate persisted client capture sources ([814559a](https://github.com/nolotus/bun-nolo/commit/814559a699fcd468e5d0121aca02bfe28a035592))
+* **memory:** observe final injected memory line attribution ([bc88225](https://github.com/nolotus/bun-nolo/commit/bc882258ce264334ddc7b3b58dc71aa227a0fbd4))
+* **memory:** send persisted user message identity from clients ([60a3ef7](https://github.com/nolotus/bun-nolo/commit/60a3ef735fbd44c0a4c5a7483c6057c36c1819e1))
+* **memory:** wire native completed-turn capture with protocol compatibility ([968b3d5](https://github.com/nolotus/bun-nolo/commit/968b3d53c8c348d5b6bb03bbadd34b60b7b969bd))
+
+### Bug Fixes
+
+* **agent:** apply mobile-first response guidance across all entries ([bb25660](https://github.com/nolotus/bun-nolo/commit/bb25660e12d39d2cb45deaa983dea60fe3bb8c9e))
+* **agent:** clarify decision impacts and prefer simpler solutions ([4cc502e](https://github.com/nolotus/bun-nolo/commit/4cc502e8b17c23b579682c13ec6f2db4a00d2c2a))
+* **agent:** integrate continuation and completion semantics ([34903af](https://github.com/nolotus/bun-nolo/commit/34903af875dc24de78f9d79e287034ba77f8ef67))
+* **agent:** preserve continuation evidence and clarify completion semantics ([60530b7](https://github.com/nolotus/bun-nolo/commit/60530b72ca52182ceb6b85ca6cdf8b4f742f42c3))
+* **agent:** recommend DeepSeek Flash for aggregated subscriptions ([453631f](https://github.com/nolotus/bun-nolo/commit/453631f7f2ae09dc2e42524adc4966b8d98ee8e9))
+* **ai:** guard skill diagnostics in browser runtimes ([93f0970](https://github.com/nolotus/bun-nolo/commit/93f0970c098656c2339491c07b77c1c3420f5933))
+* **ai:** isolate Antigravity model quota pools and cooldowns ([daa6419](https://github.com/nolotus/bun-nolo/commit/daa6419c677f5f83952a639b8dbce9e796ae77b7))
+* **ai:** pass CLI arguments without shell interpolation ([cc32ad8](https://github.com/nolotus/bun-nolo/commit/cc32ad86e8424fa8fd23d32caaecf9a857693428))
+* **ai:** separate favorite and owned badges in listAgents card ([89cef44](https://github.com/nolotus/bun-nolo/commit/89cef4425b03b4bf81edf188d7966dc9eda56b13))
+* **chat:** synchronize sidebar width and scoped category updates ([4e7936c](https://github.com/nolotus/bun-nolo/commit/4e7936c2812038f15bd2a64c4b6b4dfb7007001a))
+* **cli:** allow compatible runtime content changes during dispatch ([6a8f0cc](https://github.com/nolotus/bun-nolo/commit/6a8f0ccf13a4e56e4f20d25c4c1e8cb0e8743d91))
+* **cli:** decode CSI-u shift-enter as multiline input ([8b8ff89](https://github.com/nolotus/bun-nolo/commit/8b8ff890822893399c97f607de8ac604bda6cb00))
+* **cli:** preserve accepted batch authority during evidence resync ([cfee47b](https://github.com/nolotus/bun-nolo/commit/cfee47b40b10a372f7d3de4288425d5fa5b49251))
+* **cli:** preserve complete machine-readable dialog exports ([a192e00](https://github.com/nolotus/bun-nolo/commit/a192e00e68c1a030f3ff91aefc92679604622ea4))
+* **cli:** preserve dialog history order across sync and compaction ([b3c75be](https://github.com/nolotus/bun-nolo/commit/b3c75bed33d2fd1602b0acd0ead8b3a6f62bec7e))
+* **cli:** redact credential flags and clipped quoted values ([df0d16b](https://github.com/nolotus/bun-nolo/commit/df0d16bc2e9e7f8950770ba9174f24fc9e12759d))
+* **cli:** remove persistent busy input shortcut hint ([18e2a8b](https://github.com/nolotus/bun-nolo/commit/18e2a8b2b07dec0e0dac72638a94395b3cec50ca))
+* **cli:** route memory_capture telemetry to diagLog instead of stdout ([c703012](https://github.com/nolotus/bun-nolo/commit/c703012b3798217bfb2a388eb96d0c410bf06790))
+* **cli:** widen wheel acceleration window for sustained reports ([5264871](https://github.com/nolotus/bun-nolo/commit/52648717e3fb0674d704c27951d5c74649bd2cc0))
+* **cli:** 将更新安装到独立版本目录并保留旧运行时 ([f4722f7](https://github.com/nolotus/bun-nolo/commit/f4722f75f2bcfac5d15d2807b342c1ec90401c7e))
+* **cli:** 明确子任务启动终态并校验运行时身份 ([3ed448f](https://github.com/nolotus/bun-nolo/commit/3ed448f65b51cdb730fbec8b49ea9b18efc2f892))
+* **cli:** 集成固定运行时入口与不可变版本更新 ([3eb882a](https://github.com/nolotus/bun-nolo/commit/3eb882a640c575a266704f0ff0d1e9e205d62907))
+* **database:** keep startup diagnostics out of SSR error and JSON streams ([0a3a236](https://github.com/nolotus/bun-nolo/commit/0a3a2368ce6fa5ef924cd0f952d12623042cfa5a))
+* **database:** reject incomplete app payload replacements ([8c372f5](https://github.com/nolotus/bun-nolo/commit/8c372f5e05c7c47eb37a82817482a5fbc5486421))
+* **memory:** align capture guidance with explicit write semantics ([79002ba](https://github.com/nolotus/bun-nolo/commit/79002ba9b6da7458927b8985ddfd014bee46a990))
+* **memory:** integrate explicit vnext memory writes ([f437d7b](https://github.com/nolotus/bun-nolo/commit/f437d7bf40776b2bd97e72536ac97435350df7ea))
+* **memory:** persist explicit memories through vnext native writes ([6ea778a](https://github.com/nolotus/bun-nolo/commit/6ea778ab6c7c7560a6d55459b5080c52a3ab33cd))
+* **memory:** retry failed completed-turn capture ([9eb1abf](https://github.com/nolotus/bun-nolo/commit/9eb1abf4e4fd324d0747630e67c5e9dab899ad66))
+* **prompt:** aggregate completion details and pass line ranges in review briefs ([ef7735e](https://github.com/nolotus/bun-nolo/commit/ef7735ee8dfeacbb8845d2681d441863a3e6ecdb))
+* **runtime:** align readFile delivery windows with provider budgets ([73c56c0](https://github.com/nolotus/bun-nolo/commit/73c56c01965e419be968210f0165888db2eb3518))
+* **tui:** allow scrolling transcript while ask_user dialog is open ([d25ff91](https://github.com/nolotus/bun-nolo/commit/d25ff914f926aac111c5cd5e1597b898c7521670))
+* **tui:** prevent orphan list bullets and wrap CJK/paths cleanly ([4962afd](https://github.com/nolotus/bun-nolo/commit/4962afd6c1a0e2bba68cf64977ee0657b0837e94))
+* **tui:** split quoted image path preceded by prose without space ([647c453](https://github.com/nolotus/bun-nolo/commit/647c453d2053ba61f13d2e3b34e05f09b2a1a670))
+* **vision:** discover Antigravity image capability at runtime ([1794900](https://github.com/nolotus/bun-nolo/commit/17949006e90c977f54efe1077cf3b3e176b73f20))
+* **web:** await table delete dispatch before unwrapping result ([b4ad640](https://github.com/nolotus/bun-nolo/commit/b4ad64054bfc1b145e38f73eeda0192d4d08bf98))
+
+### Performance Improvements
+
+* **chat:** reuse unchanged historical tool group projections ([b5ce6c2](https://github.com/nolotus/bun-nolo/commit/b5ce6c2cfa545593b8b915542436397fbd3afe5d))
+* **tui:** discover run records without blocking the event loop ([41ed0db](https://github.com/nolotus/bun-nolo/commit/41ed0db88f3bdd4a472297da0286ad7ddb14b2e4))
+
+
 ## 0.227.0-alpha.1 (2026-11-15)
 
 ### ⚠ BREAKING CHANGES

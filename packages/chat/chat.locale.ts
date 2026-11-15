@@ -377,6 +377,15 @@ export default {
         ask_user: "Ask",
         runStreamingAgent: "Handoff",
       },
+      toolActivity: {
+        unknown: "Unknown",
+        attention: {
+          failure: "Failed",
+          blocked: "Blocked",
+          permission: "Requires authorization",
+          "delete-confirmation": "Awaiting delete confirmation",
+        },
+      },
       controlActions: {
         status: "Status check",
         stop: "Stop task",
@@ -944,6 +953,15 @@ export default {
         ask_user: "提问",
         runStreamingAgent: "转交",
       },
+      toolActivity: {
+        unknown: "状态未知",
+        attention: {
+          failure: "失败",
+          blocked: "已阻塞",
+          permission: "需要授权",
+          "delete-confirmation": "等待删除确认",
+        },
+      },
       controlActions: {
         status: "状态诊断",
         stop: "停止任务",
@@ -1505,6 +1523,15 @@ export default {
         appDeploy: "部署應用",
         ask_user: "提問",
         runStreamingAgent: "轉交",
+      },
+      toolActivity: {
+        unknown: "狀態未知",
+        attention: {
+          failure: "失敗",
+          blocked: "已阻塞",
+          permission: "需要授權",
+          "delete-confirmation": "等待刪除確認",
+        },
       },
       controlActions: {
         status: "狀態診斷",
@@ -2095,6 +2122,15 @@ export default {
         ask_user: "質問",
         runStreamingAgent: "引き継ぎ",
       },
+      toolActivity: {
+        unknown: "状態不明",
+        attention: {
+          failure: "失敗",
+          blocked: "ブロック中",
+          permission: "権限が必要",
+          "delete-confirmation": "削除確認待ち",
+        },
+      },
       controlActions: {
         status: "ステータス確認",
         stop: "タスク停止",
@@ -2657,6 +2693,15 @@ export default {
         ask_user: "Fragen",
         runStreamingAgent: "Übergeben",
       },
+      toolActivity: {
+        unknown: "Unbekannt",
+        attention: {
+          failure: "Fehlgeschlagen",
+          blocked: "Blockiert",
+          permission: "Autorisierung erforderlich",
+          "delete-confirmation": "Wartet auf Löschbestätigung",
+        },
+      },
       controlActions: {
         status: "Statusprüfung",
         stop: "Aufgabe anhalten",
@@ -3207,6 +3252,15 @@ export default {
         appDeploy: "Desplegar aplicación",
         ask_user: "Preguntar",
         runStreamingAgent: "Transferir",
+      },
+      toolActivity: {
+        unknown: "Desconocido",
+        attention: {
+          failure: "Fallido",
+          blocked: "Bloqueado",
+          permission: "Requiere autorización",
+          "delete-confirmation": "Esperando confirmación de eliminación",
+        },
       },
       controlActions: {
         status: "Diagnóstico de estado",

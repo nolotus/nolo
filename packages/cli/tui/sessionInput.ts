@@ -76,6 +76,9 @@ export function applyTuiInputKey(
     return { buffer, cursorPos: curPos };
   }
   if (
+    // CSI-u / kitty: Shift+Enter press or repeat, never key release (:3).
+    // Raw input passes complete CSI tokens without populating key.shift.
+    /^\x1b\[13;2(?::[12])?u$/.test(seq) ||
     seq === "\x1b[13;2~" ||
     seq === "\x1b[27;2;13~" ||
     seq === "\x1b\r" ||
@@ -428,6 +431,7 @@ export const SLASH_COMMANDS = [
   "/tasks",
   "/stop",
   "/exit",
+  "/restart",
   "/quit",
   "/learn",
   "/transcribe",

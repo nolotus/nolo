@@ -169,3 +169,49 @@ export function groupConsecutiveToolEntries(
   flushGroup();
   return result;
 }
+
+/** Instance-scoped identity reuse; always recompute semantics before comparing. */
+export function createToolEntryGrouper() {
+  let previous = new Map<string, Extract<GroupedRenderEntry, { type: "tool-group" }>>();
+  const sameMessage = (a: any, b: any) => {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && Object.is(a[key], b[key]));
+  };
+  const sameMessages = (a: any[] | undefined, b: any[] | undefined) =>
+    a === b || (!!a && !!b && a.length === b.length && a.every((message, i) => sameMessage(message, b[i])));
+  return (entries: GroupedRenderEntry[]): GroupedRenderEntry[] => {
+    const next = new Map<string, Extract<GroupedRenderEntry, { type: "tool-group" }>>();
+    const result = groupConsecutiveToolEntries(entries).map((entry) => {
+      if (entry.type !== "tool-group") return entry;
+      const old = previous.get(entry.key);
+      const selected = old && sameMessages(old.messages, entry.messages) &&
+        sameMessages(old.activityMessages, entry.activityMessages) ? old : entry;
+      next.set(entry.key, selected);
+      return selected;
+    });
+    previous = next;
+    return result;
+  };
+}
+
+/** Preserve input identity when no stale running status needs projection. */
+export function settleToolMessages(messages: any[]): any[] {
+  if (!messages.some((message) => message?.toolPayload?.status === "running")) return messages;
+  return messages.map((message) => message?.toolPayload?.status === "running"
+    ? { ...message, toolPayload: { ...message.toolPayload, status: "success" } }
+    : message);
+}
+
+/** Each list instance retains projections only while its input arrays are reachable. */
+export function createSettledToolMessagesProjector() {
+  const cache = new WeakMap<any[], any[]>();
+  return (messages: any[]): any[] => {
+    const cached = cache.get(messages);
+    if (cached) return cached;
+    const projected = settleToolMessages(messages);
+    cache.set(messages, projected);
+    return projected;
+  };
+}

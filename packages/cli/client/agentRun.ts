@@ -1,3 +1,4 @@
+import { resolveAgentImageInputSupport } from "../../ai/llm/agentCapabilities";
 import { contextRefusalDiagnostics, describeContextRefusal } from "./contextRefusal";
 import { isHistoryIntegrityFailure } from "../../ai/tools/agent/runFailureClass";
 import { getOrCreateSharedStore } from "./localRuntimeDialog";
@@ -1856,6 +1857,9 @@ export function describeLocalRunFailure(
   if (isMissingBatchReceiptFailure(message)) {
     return `[nolo] ${describeMissingBatchReceipt()}.\n`;
   }
+  if (/\bimage_model_unsupported\b/.test(message)) {
+    return `[nolo] ${message}. ${NO_FALLBACK} Check the selected model's image capability or use a model known to support images.\n`;
+  }
   const cls = classifyLocalRunError(message);
   if (cls.kind === "history_integrity") return describeHistoryIntegrityFailure(message);
   if (cls.kind === "generic") {
@@ -2408,6 +2412,18 @@ async function executeLocalAgentTurnForCliWithAdapter(
           )
         : resolvedBaseAdapter;
     if (adapter) adapter = applyEphemeralIfRequested(options, adapter);
+    if (adapter && options.imageUrls?.length) {
+      const imageAdapter = adapter;
+      adapter = { ...imageAdapter, loadAgentConfig: async (agentRef: string) => {
+        const config = await imageAdapter.loadAgentConfig(agentRef);
+        // Preserve localLoop's LOCAL_AGENT_CONFIG_MISSING error for unresolved agents.
+        if (!config) return config;
+        if (!resolveAgentImageInputSupport({ ...config, hasVision: config.hasVision ?? false })) {
+          throw new Error("image_model_unsupported: child model image capability is unsupported or unknown");
+        }
+        return config;
+      } };
+    }
     return adapter;
   })();
   if (!baseAdapter) {
@@ -2540,6 +2556,11 @@ async function executeLocalAgentTurnForCliWithAdapter(
       ];
       try {
         const saved = await commandAdapter.saveTurn({ ...input,
+          // Receipt-backed user rows are excluded below to avoid duplicate persistence.
+          // Keep their explicit identities for post-sync native memory capture.
+          ...{ cliCaptureUserMessageIds: input.messages.filter(message => message.role === "user")
+            .map(message => (message as { cliMessageId?: string }).cliMessageId)
+            .filter((id): id is string => typeof id === "string") },
           messages: input.messages.filter(message => {
             const cliMessageId = (message as any).cliMessageId;
             if (!cliMessageId) return true;

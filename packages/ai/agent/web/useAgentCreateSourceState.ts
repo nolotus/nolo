@@ -1,3 +1,4 @@
+import { resolveDefaultReasoningEffort } from "../defaultReasoningEffort";
 // 路径: ai/agent/web/useAgentCreateSourceState.ts
 // AgentCreateSourceStep 的状态与 draft 编排（与 UI 渲染分离）。
 
@@ -219,12 +220,28 @@ export function useAgentCreateSourceState({
   const [subReasoningEffort, setSubReasoningEffort] = useState<ReasoningEffort>(
     () => {
       const f = resolveProviderPresetFields(defaultSubPresetId);
-      return f.defaultReasoningEffort;
+      return resolveDefaultReasoningEffort({ provider: f.provider, model: f.model, fallback: f.defaultReasoningEffort });
     },
   );
   // API 面板推理强度：按量计费，统一 schema 默认 medium，用户可手动调。
   const [apiReasoningEffort, setApiReasoningEffort] =
-    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+    useState<ReasoningEffort>(() => {
+      const f = resolveProviderPresetFields(defaultApiPresetId);
+      return resolveDefaultReasoningEffort({ provider: f.provider, model: f.model, fallback: DEFAULT_REASONING_EFFORT });
+    });
+  const apiEffortTouched = useRef(false);
+  const subEffortTouched = useRef(false);
+  const selectApiEffort = (value: ReasoningEffort) => { apiEffortTouched.current = true; setApiReasoningEffort(value); };
+  const selectSubEffort = (value: ReasoningEffort) => { subEffortTouched.current = true; setSubReasoningEffort(value); };
+  const changeApiModel = (value: string) => {
+    setModel(value);
+    if (!apiEffortTouched.current) setApiReasoningEffort(resolveDefaultReasoningEffort({ provider: resolveProviderPresetFields(apiPresetId).provider, model: value, fallback: DEFAULT_REASONING_EFFORT }));
+  };
+  const changeSubModel = (value: string) => {
+    setSubModel(value);
+    const f = resolveProviderPresetFields(subPresetId);
+    if (!subEffortTouched.current) setSubReasoningEffort(resolveDefaultReasoningEffort({ provider: f.provider, model: value, fallback: f.defaultReasoningEffort }));
+  };
 
   // ── CLI 面板状态 ──
   const [cliProvider, setCliProvider] = useState<CliProvider>(
@@ -372,10 +389,7 @@ export function useAgentCreateSourceState({
         presetId: "",
         // Kimi K3 (baseten upstream) defaults to high reasoning for stronger output;
         // other platform models keep the schema default (medium).
-        reasoningEffort:
-          platformModel === PLATFORM_HOSTED_KIMI_K3_MODEL
-            ? "high"
-            : DEFAULT_REASONING_EFFORT,
+        reasoningEffort: resolveDefaultReasoningEffort({ provider: "nolo", model: platformModel, fallback: platformModel === PLATFORM_HOSTED_KIMI_K3_MODEL ? "high" : DEFAULT_REASONING_EFFORT }),
         cliProvider: "",
         machineId: "",
         machineName: "",
@@ -508,7 +522,7 @@ export function useAgentCreateSourceState({
     setModel(fields.model || model);
     // metered API 统一 schema 默认；切换 preset 不强行覆盖用户手动改过的值，
     // 但首切到 manual 时回退到 medium（manual 无 registry 默认）。
-    if (id === MANUAL_PROVIDER_PRESET_ID) setApiReasoningEffort(DEFAULT_REASONING_EFFORT);
+    if (!apiEffortTouched.current) setApiReasoningEffort(resolveDefaultReasoningEffort({ provider: fields.provider, model: fields.model || model, fallback: DEFAULT_REASONING_EFFORT }));
     if (fields.clearApiKey) setApiKey("");
   };
 
@@ -520,7 +534,7 @@ export function useAgentCreateSourceState({
     setSubModel(fields.model);
     // 跨方案切换时重置推理强度为新方案的默认值；
     // 同方案内不改（用户手动改过的值保持不变）。
-    if (changed) setSubReasoningEffort(fields.defaultReasoningEffort);
+    if (changed && !subEffortTouched.current) setSubReasoningEffort(resolveDefaultReasoningEffort({ provider: fields.provider, model: fields.model, fallback: fields.defaultReasoningEffort }));
     if (fields.clearApiKey) setSubApiKey("");
   };
 
@@ -564,7 +578,7 @@ export function useAgentCreateSourceState({
     apiKey,
     setApiKey,
     model,
-    setModel,
+    setModel: changeApiModel,
     activePresetFields,
     subPresetId,
     applySubPreset,
@@ -579,11 +593,13 @@ export function useAgentCreateSourceState({
     setProviderKeyRemembered: handleProviderKeyRememberedChange,
     providerKeyRef: activePresetFields.kind === "api_key_template" ? providerCredentialRef(subPresetId) : "",
     subModel,
-    setSubModel,
+    setSubModel: changeSubModel,
     subReasoningEffort,
     setSubReasoningEffort,
+    selectSubEffort,
     apiReasoningEffort,
     setApiReasoningEffort,
+    selectApiEffort,
     canCreatePlatform,
     canCreateApi,
     canCreateSubscription,

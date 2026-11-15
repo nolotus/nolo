@@ -92,6 +92,8 @@ export type TurnHistory = {
   currentRole: TurnRole | null;
   currentContent: string;
   currentBlocks: TurnBlock[];
+  /** Uncollapsed tool rows for the on-demand /tools view. */
+  toolDetails?: string[];
   scrollTop: number;
   followBottom: boolean;
   hasMoreAbove?: boolean;
@@ -281,7 +283,10 @@ export function createTurnHistory(): TurnHistory {
   };
 }
 
+const lastFoldedRunIdentity = new WeakMap<TurnHistory, string>();
+
 export function startTurn(history: TurnHistory, role: TurnRole) {
+  lastFoldedRunIdentity.delete(history);
   if (history.currentRole !== null && history.currentContent) {
     finalizeCurrentTurn(history);
   }
@@ -314,6 +319,7 @@ function appendCurrentBlock(
 }
 
 export function finalizeCurrentTurn(history: TurnHistory) {
+  lastFoldedRunIdentity.delete(history);
   if (history.currentRole !== null) {
     history.turns.push({
       role: history.currentRole,
@@ -404,9 +410,12 @@ function applyTreeRewrite(text: string, chunk: string): string | null {
   return `${prefix}${tree}\n`;
 }
 
-function foldToolSuccessLine(text: string, chunk: string): string | null {
+function foldToolSuccessLine(text: string, chunk: string, allowReadOnlyRun = false): string | null {
   const plain = stripAnsi(chunk).replace(/\n+$/, "");
   if (!plain || plain.includes("\n")) return null;
+  // Only known read-only labels (or explicitly proven read-only Run payloads) may be deduplicated.
+  const isReadOnlyLabel = ["readFile", "exa_search", "fetchWebpage"].some((name) => plain.startsWith(`▸ ${toolLabel(name)} · `) || plain.startsWith(`▸ ${toolLabel(name)}  ✓`));
+  if (!isReadOnlyLabel && !allowReadOnlyRun) return null;
   const chunkMatch = TOOL_SUCCESS_LINE_RE.exec(plain);
   if (!chunkMatch) return null;
   const hadTrailingNewline = text.endsWith("\n");
@@ -431,7 +440,40 @@ export function applyOutputChunkToCurrentTurn(
   kind: TurnBlock["kind"] = "assistant",
 ): boolean {
   if (kind === "tool") {
+    const details = (history.toolDetails ??= []);
+    details.push(chunk.startsWith(TUI_TREE_MARKER) ? (readTreePayload(chunk).details ?? readTreePayload(chunk).fallback) : chunk);
+    // Match transcript retention rather than accumulating an unbounded log.
+    while (details.length > MAX_TUI_HISTORY_TURNS * 10) details.shift();
     if (chunk.startsWith(TUI_TREE_MARKER)) {
+      const payload = readTreePayload(chunk);
+      if (payload.appendOnly) {
+        const canFoldSameRun =
+          payload.readOnly === true &&
+          typeof payload.runIdentity === "string" &&
+          payload.runIdentity.length > 0 &&
+          lastFoldedRunIdentity.get(history) === payload.runIdentity;
+        if (canFoldSameRun) {
+          const foldedContent = foldToolSuccessLine(history.currentContent, payload.fallback, true);
+          if (foldedContent !== null) {
+            history.currentContent = foldedContent;
+            const lastBlock = history.currentBlocks.at(-1);
+            if (lastBlock?.kind === "tool") {
+              const foldedBlock = foldToolSuccessLine(lastBlock.content, payload.fallback, true);
+              if (foldedBlock !== null) lastBlock.content = foldedBlock;
+            }
+            return true;
+          }
+        }
+        if (payload.readOnly && payload.runIdentity) {
+          lastFoldedRunIdentity.set(history, payload.runIdentity);
+        } else {
+          lastFoldedRunIdentity.delete(history);
+        }
+        history.currentContent = applyTerminalOutputToText(history.currentContent, payload.fallback);
+        appendCurrentBlock(history, kind, payload.fallback);
+        return true;
+      }
+      lastFoldedRunIdentity.delete(history);
       const rewrittenTree = applyTreeRewrite(history.currentContent, chunk);
       if (rewrittenTree === null) {
         // Only the newest result is new: earlier items are already visible.
@@ -465,6 +507,7 @@ export function applyOutputChunkToCurrentTurn(
   }
   const next = applyTerminalOutputToText(history.currentContent, chunk);
   if (next === history.currentContent) return false;
+  lastFoldedRunIdentity.delete(history);
   history.currentContent = next;
   appendCurrentBlock(history, kind, chunk);
   return true;
@@ -498,12 +541,7 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
       ? themeText(line, "chrome", true)
       : line;
   });
-  // Groups breathe without adding blank rows inside their folded one-line form.
-  return styledLines.flatMap((line, index) => {
-    const current = stripAnsi(line);
-    const previous = stripAnsi(styledLines[index - 1] ?? "");
-    return /^▸ /.test(current) && /^▸ /.test(previous) ? ["", line] : [line];
-  }).join("\n");
+  return styledLines.join("\n");
 }
 
 /**

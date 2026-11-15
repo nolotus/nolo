@@ -23,9 +23,13 @@
  * ToolMessageGroup; this layer carries the ordinary continuous-tool presentation.
  */
 import { isRecord } from "core/isRecord";
+import { summarizeShellCommand } from "core/shellCommandGist";
+import { redactSecrets } from "core/redactSecrets";
+import { projectToolActivity, type AttentionEvidence } from "core/toolActivityPresentation";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
+import { withholdIfSecretLike } from "../../../cli/tui/redactSecrets";
 import {
   projectToolExecutionLocation,
   type ToolExecutionLocation,
@@ -41,13 +45,14 @@ import {
 } from "./toolDisplayName";
 
 /** I18n-aware translate with a hard fallback; mirrors createToolNameTranslator output. */
-export type ToolCallTranslate = (key: string, fallback: string) => string;
+export type ToolCallTranslate = ((key: string, fallback: string) => string) & { locale?: string };
 
 /**
  * Status union. pending/running/success/failed/cancelled are the contract;
  * `repairing` stays as a compat extension for legacy payload statuses.
  */
 export type ToolCallStatus =
+  | "unknown"
   | "pending"
   | "running"
   | "success"
@@ -116,6 +121,7 @@ export interface ToolCallPresentation {
   /** The operand: path / query / command / url / name. undefined when the tool has none. */
   target?: string;
   status: ToolCallStatus;
+  attention?: readonly AttentionEvidence[];
   /** Real wall-clock span in ms; only when both timestamps are finite and positive. */
   durationMs?: number;
   /** Extra structured facts (diff added/removed) when the message really carries them. */
@@ -150,6 +156,7 @@ const VALID_PAYLOAD_STATUSES = new Set<string>([
   "cancelled",
   "repairing",
   "success",
+  "succeeded",
 ]);
 
 /** zh action verbs per tool family (locale-independent defaults, like toolDisplayName). */
@@ -269,37 +276,82 @@ function readPayload(message: ToolCallMessageInput | undefined | null) {
   return isRecord(message?.toolPayload) ? message.toolPayload : undefined;
 }
 
+/** Error details from execution evidence, not from file contents. */
+export function readToolCallErrorMessage(message: ToolCallMessageInput | undefined | null): string | undefined {
+  const payload = readPayload(message);
+  const errorText = (value: unknown): string | undefined =>
+    asOptionalTrimmedString(value) ?? (isRecord(value)
+      ? asOptionalTrimmedString(value.message) ?? asOptionalTrimmedString(value.error)
+      : undefined);
+  const trusted = errorText(payload?.error) ?? errorText(message?.metadata?.error);
+  if (trusted) return redactSecrets(trusted);
+  const name = normalizeToolNameKey(asTrimmedString(message?.toolName));
+  if (["readFile", "read_file", "readWorkspaceFile"].includes(name)) return undefined;
+  const content = safeParseContent(message?.content);
+  const text = isRecord(content) ? errorText(content.error) : undefined;
+  return text ? redactSecrets(text) : undefined;
+}
+
 /** Same failure signals ToolMessageGroup / ToolMessageContent already use. */
 export function isToolCallFailed(message: ToolCallMessageInput | undefined | null): boolean {
   const payload = readPayload(message);
   if (payload?.status === "failed") return true;
-  if (asOptionalTrimmedString(payload?.error)) return true;
+  if (payload?.error) {
+    if (typeof payload.error === "string") {
+      if (asOptionalTrimmedString(payload.error)) return true;
+    } else if (isRecord(payload.error)) {
+      return true;
+    }
+  }
+  if (isRecord(message?.metadata) && message.metadata.error) return true;
+  const name = normalizeToolNameKey(asTrimmedString(message?.toolName));
+  // readFile rawResult is file data (including legacy unwrapped JSON), not a
+  // result envelope. Actual executor errors are carried by toolPayload.
+  if (["readFile", "read_file", "readWorkspaceFile"].includes(name)) return false;
   const parsed = safeParseContent(message?.content);
-  return isRecord(parsed) && !!asOptionalTrimmedString(parsed.error);
+  if (isRecord(parsed)) {
+    if (parsed.ok === false) return true;
+    if (asOptionalTrimmedString(parsed.error)) return true;
+  }
+  return false;
 }
 
 /**
  * Derive the row status without ever faking motion: settled payloads keep
  * their explicit status (including legacy repairing / cancelled), streaming
- * rows run, everything else is success. Spinning loaders remain an explicit
+ * rows run, everything else is unknown. Spinning loaders remain an explicit
  * no-go (see StatusIcon contract).
  */
 export function resolveToolCallStatus(
   message: ToolCallMessageInput | undefined | null
 ): ToolCallStatus {
-  const payloadStatus = asTrimmedString(readPayload(message)?.status);
+  const rawStatus = asTrimmedString(readPayload(message)?.status);
+  const isSuccessStatus = rawStatus === "success" || rawStatus === "succeeded";
   // Error evidence outranks a *claimed success* (P0.5): a settled payload can
   // claim success while payload/content carries a real error. Other explicit
   // statuses keep their own meaning — cancellation persists an
   // "aborted"-style error string that must not repaint the row as failed.
-  if (payloadStatus === "success" && isToolCallFailed(message)) {
+  if (isSuccessStatus && isToolCallFailed(message)) {
     return "failed";
   }
-  if (VALID_PAYLOAD_STATUSES.has(payloadStatus)) {
-    return payloadStatus as ToolCallStatus;
+  if (isSuccessStatus) {
+    return "success";
+  }
+  if (VALID_PAYLOAD_STATUSES.has(rawStatus)) {
+    return rawStatus as ToolCallStatus;
+  }
+  if (rawStatus) {
+    return "unknown";
   }
   if (message?.isStreaming) return "running";
   if (isToolCallFailed(message)) return "failed";
+  const name = normalizeToolNameKey(asTrimmedString(message?.toolName));
+  const content = safeParseContent(message?.content);
+  if (["readFile", "read_file", "readWorkspaceFile"].includes(name) &&
+      isRecord(content) && (content.ok === false || Boolean(content.error))) {
+    // Legacy bare JSON can be either a file body or an error envelope.
+    return "unknown";
+  }
   return "success";
 }
 
@@ -357,9 +409,10 @@ export function readToolCallActivity(
     const action = isRecord(explicit.action) ? explicit.action : undefined;
     const title = asOptionalTrimmedString(action?.title ?? explicit.title);
     if (!title) return undefined;
+    const detail = asOptionalTrimmedString(action?.detail ?? explicit.detail);
     return {
-      title: shortenActivityTitle(title),
-      detail: asOptionalTrimmedString(action?.detail ?? explicit.detail),
+      title: shortenActivityTitle(redactSecrets(title)),
+      detail: detail ? redactSecrets(detail) : undefined,
     };
   }
 
@@ -371,8 +424,8 @@ export function readToolCallActivity(
   const title = asOptionalTrimmedString(fallback.title);
   if (!title) return undefined;
   return {
-    title: shortenActivityTitle(title),
-    detail: asOptionalTrimmedString(fallback.detail),
+    title: shortenActivityTitle(redactSecrets(title)),
+    detail: fallback.detail ? redactSecrets(fallback.detail) : undefined,
   };
 }
 
@@ -433,12 +486,25 @@ export function buildToolCallTarget(
       break;
     case "execShell":
     case "exec_shell":
-    case "shell":
-      target =
+    case "shell": {
+      const cmd =
         asOptionalTrimmedString(args.cmd) ??
         asOptionalTrimmedString(args.command) ??
         "";
-      return target ? truncateDetail(target, 80) : undefined;
+      if (!cmd) return undefined;
+      // Redact before basename/operand extraction so stripped prefixes
+      // (`token=abc/ghp_...`) cannot expose a bare token in the gist.
+      const redactedCmd = redactSecrets(cmd);
+      const gist = summarizeShellCommand(redactedCmd);
+      const candidate = redactSecrets(gist ? gist.summary : redactedCmd);
+      const safeTarget = withholdIfSecretLike(candidate);
+      if (!safeTarget) {
+        const fallbackVerb = gist?.action ? redactSecrets(gist.action) : "";
+        const safeVerb = fallbackVerb ? withholdIfSecretLike(fallbackVerb) : "";
+        return safeVerb || undefined;
+      }
+      return truncateDetail(safeTarget, 80);
+    }
     case "loadSkill":
       target = asOptionalTrimmedString(args.name) ?? "";
       break;
@@ -617,21 +683,75 @@ export function resolveToolCallMode(toolName: string | undefined): ToolCallMode 
  * `translate` is optional; without it the zh defaults from
  * toolDisplayName keep labels human even in tests / SSR.
  */
+/** Shell result fields consumed by ExecShellViewer; never scan output text.
+ * Interactive permission/delete confirmations remain their existing single cards
+ * (groupToolEntries), not inferred from arbitrary JSON or keywords here. */
+export function readToolCallAttention(message: ToolCallMessageInput | undefined | null): AttentionEvidence[] {
+  const evidence: AttentionEvidence[] = [];
+  if (resolveToolCallStatus(message) === "failed") evidence.push({ kind: "failure", source: "tool-result" });
+  const name = normalizeToolNameKey(asTrimmedString(message?.toolName));
+  const result = safeParseContent(message?.content);
+  if (["execShell", "exec_shell", "shell"].includes(name) && isRecord(result)) {
+    if (result.blocked === true) evidence.push({ kind: "blocked", source: "shell-result.blocked" });
+    if (result.requireUnsafe === true) evidence.push({ kind: "permission", source: "shell-result.requireUnsafe" });
+  }
+  return evidence;
+}
+
 export function buildToolCallPresentation(
   message: ToolCallMessageInput | undefined | null,
   translate?: ToolCallTranslate
 ): ToolCallPresentation {
   const toolName = asTrimmedString(message?.toolName);
   const normalized = normalizeToolNameKey(toolName);
-  const args = readToolCallArgs(message);
+  const rawArgs = readToolCallArgs(message);
+  const args = rawArgs && Object.fromEntries(Object.entries(rawArgs).map(([key, value]) =>
+    [key, typeof value === "string" ? redactSecrets(value) : value]
+  ));
   const activity = readToolCallActivity(message, args);
   const parsedContent = safeParseContent(message?.content);
   const contentRecord = isRecord(parsedContent) ? parsedContent : undefined;
 
-  const verb = resolveToolCallVerb(toolName, normalized, translate);
-  const target = buildToolCallTarget(toolName, args);
-  const context = buildToolCallContext(toolName, args, contentRecord);
   const status = resolveToolCallStatus(message);
+  const attention = readToolCallAttention(message);
+  // Project only redacted argument strings; persisted arguments remain unchanged.
+  // No coalescing/batch inference here: the containing message group owns scope.
+  const projected = projectToolActivity({
+    key: String(toolCallKey(message)), toolName, args, state: status, attention,
+    mode: resolveToolCallMode(toolName) === "row" ? "ordinary" : resolveToolCallMode(toolName) as "interactive" | "handoff" | "artifact",
+    scopeKey: "", evidenceKey: String(toolCallKey(message)),
+  }, translate);
+  const localizedVerb = resolveToolCallVerb(toolName, normalized, translate);
+  const shell = ["execShell", "exec_shell", "shell"].includes(normalized);
+  // Projection operands can lose credential-bearing prefixes during extraction.
+  const safeObject = shell && projected.object
+    ? withholdIfSecretLike(redactSecrets(projected.object))
+    : "";
+  const safeAction = shell && projected.action
+    ? withholdIfSecretLike(redactSecrets(projected.action))
+    : "";
+  const shellCommand = shell ? asOptionalTrimmedString(args?.cmd) ?? asOptionalTrimmedString(args?.command) : undefined;
+  const gist = shellCommand ? summarizeShellCommand(shellCommand) : null;
+  const actionKeys: Record<string, string> = { "查看": "toolVerbs.readFile", "编辑": "toolVerbs.editFile", "删除": "delete" };
+  const actionKey = gist?.action ? actionKeys[gist.action] : undefined;
+  const verb = !translate && safeObject && safeAction ? safeAction
+    : translate && actionKey ? translate(actionKey, localizedVerb) : localizedVerb;
+  const rawFallback = shellCommand ? withholdIfSecretLike(redactSecrets(shellCommand)) : "";
+  const safeSummary = gist ? withholdIfSecretLike(redactSecrets(gist.summary)) : "";
+  // Never reintroduce an operand withheld after the core projection.
+  const objectWithheld = !!gist?.object && !safeObject;
+  let target: string | undefined;
+  if (translate && shell && gist) {
+    if (objectWithheld) target = undefined;
+    else if (actionKey) target = safeObject ? truncateDetail(safeObject, 80) : undefined;
+    else if (translate.locale === "zh-CN") target = safeSummary ? truncateDetail(safeSummary, 80) : undefined;
+    else target = rawFallback ? truncateDetail(rawFallback, 80) : undefined;
+  } else {
+    target = safeObject ? truncateDetail(safeObject, 80) : buildToolCallTarget(toolName, args);
+  }
+
+  const rawContext = buildToolCallContext(toolName, args, contentRecord) ?? projected.context;
+  const context = rawContext ? redactSecrets(rawContext) : undefined;
   const payload = readPayload(message);
   const startedAt = payload?.startedAt;
   const finishedAt = payload?.finishedAt;
@@ -653,30 +773,26 @@ export function buildToolCallPresentation(
   const label =
     activity?.title ||
     resolveToolDisplayName(toolName || undefined, translate);
-  const errorMessage =
-    asOptionalTrimmedString(payload?.error) ??
-    (isRecord(parsedContent)
-      ? asOptionalTrimmedString(parsedContent.error)
-      : undefined) ??
-    undefined;
+  const errorMessage = readToolCallErrorMessage(message);
 
   return {
     key: String(toolCallKey(message)),
     toolName,
-    verb,
+    verb: redactSecrets(verb),
     ...(context ? { context } : {}),
     ...(target ? { target } : {}),
     status,
+    attention,
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(meta ? { meta } : {}),
     mode,
     executionLocation,
     expandable: mode === "row",
     // Compat aliases.
-    label,
-    detail: activity?.detail || target || "",
+    label: redactSecrets(label),
+    detail: redactSecrets(activity?.detail || target || ""),
     duration: durationMs !== undefined ? formatToolDurationMs(durationMs) : null,
-    ...(errorMessage ? { errorMessage } : {}),
+    ...(errorMessage ? { errorMessage: redactSecrets(errorMessage) } : {}),
   };
 }
 
@@ -778,6 +894,6 @@ export function formatToolExecutionLocationLine(
     "在 {{device}} · {{root}} 执行"
   );
   return template
-    .replace("{{device}}", device)
-    .replace("{{root}}", projected.workspace.root);
+    .replace("{{device}}", redactSecrets(device))
+    .replace("{{root}}", redactSecrets(projected.workspace.root));
 }

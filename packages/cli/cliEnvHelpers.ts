@@ -1,3 +1,4 @@
+import { getHostRuntimeExecutable } from "./agentRunProtocol";
 import { DEFAULT_LOCAL_API_ORIGIN } from "../core/localOrigins";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
@@ -5,6 +6,7 @@ import { DEFAULT_NOLO_SERVER_URL } from "./defaultServer";
 import { NOLO_CLUSTER_SERVERS } from "../database/config";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { existsSync, realpathSync } from "node:fs";
 
 export type EnvLike = Record<string, string | undefined>;
 
@@ -190,9 +192,10 @@ export function isCompiledBinary(): boolean {
  */
 export function resolveCliEntrypointPath(fromModuleUrl = import.meta.url): string {
   if (isCompiledBinary()) {
-    return process.execPath;
+    return getHostRuntimeExecutable();
   }
-  const sourcePath = fileURLToPath(fromModuleUrl);
+  const modulePath = fileURLToPath(fromModuleUrl);
+  const sourcePath = existsSync(modulePath) ? realpathSync(modulePath) : modulePath;
   const ext = extname(sourcePath) || ".ts";
   // Source helpers and published chunks both live beside the CLI entrypoint.
   return join(dirname(sourcePath), `index${ext}`);

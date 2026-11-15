@@ -111,14 +111,6 @@
     transition: none !important;
   }
 
-  /* The context column must keep a stable width during the animation so its
-     content never re-wraps frame by frame; the clip reveal handles the rest. */
-  .MainLayout .MainLayout__sidebar--has-rail .navigation-v2-context {
-    width: calc(var(--sidebar-shell-width, 280px) - 52px);
-    min-width: calc(var(--sidebar-shell-width, 280px) - 52px);
-    flex-shrink: 0;
-  }
-
   /* 动效减弱偏好 */
   @media (prefers-reduced-motion: reduce) {
     /* 必须与上方动画规则同特异性（.MainLayout 前缀，0,2,0），否则同是
@@ -139,8 +131,8 @@
     display: flex;
     flex-direction: row;
     height: 100%;
-    width: var(--sidebar-shell-width, 280px);
-    min-width: var(--sidebar-shell-width, 280px);
+    width: 100%;
+    min-width: 0;
     overflow: hidden;
   }
 
@@ -157,7 +149,22 @@
     overflow: hidden;
   }
 
+  .MainLayout .MainLayout__sidebar--has-rail .navigation-v2-context,
   .MainLayout__sidebar--has-rail .navigation-v2-context {
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  /* The context column must keep a stable width during the animation so its
+     content never re-wraps frame by frame; the clip reveal handles the rest. */
+  .MainLayout__sidebar--has-rail.is-transitioning .navigation-v2-shell {
+    width: var(--sidebar-shell-width, 280px);
+    min-width: var(--sidebar-shell-width, 280px);
+  }
+
+  .MainLayout .MainLayout__sidebar--has-rail.is-transitioning .navigation-v2-context,
+  .MainLayout__sidebar--has-rail.is-transitioning .navigation-v2-context {
     width: calc(var(--sidebar-shell-width, 280px) - 52px);
     min-width: calc(var(--sidebar-shell-width, 280px) - 52px);
     flex-shrink: 0;

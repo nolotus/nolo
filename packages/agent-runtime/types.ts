@@ -1,5 +1,4 @@
 import type { EmptyAssistantFallbackReason } from "./emptyAssistantRepair";
-import type { BusinessCompletion } from "./taskExecutionContract";
 
 export type AgentRuntimeMode = "local" | "server";
 export type AgentRuntimeHost = "cli" | "desktop" | "web" | "server";
@@ -41,6 +40,8 @@ export interface AgentRuntimeToolCall {
 export interface AgentRuntimeChatMessage {
   /** Durable dialog message identity, when loaded from persisted history. */
   id?: string;
+  /** CLI receipt admission time; persisted separately from its stable identity. */
+  cliHistoryOrder?: number;
   role: (typeof AGENT_RUNTIME_MESSAGE_ROLES)[number];
   content: AgentRuntimeMessageContent;
   /** Internal system-prompt boundary used by explicit-cache providers. */
@@ -134,8 +135,6 @@ export type RuntimeProviderFailure = {
 export interface AgentRuntimeResult {
   /** Host loop termination, not provider finish_reason. Missing means unknown. */
   stopReason?: "done" | "pending" | "handoff" | "timeout" | "error" | "aborted";
-  /** Host-contract assessment, distinct from provider stop and process success. */
-  businessCompletion?: BusinessCompletion;
   content: string;
   model: string;
   provider?: string;

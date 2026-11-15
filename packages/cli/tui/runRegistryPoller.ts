@@ -66,7 +66,7 @@ export type RemoteTaskSnapshot = RemoteTaskCarrier & {
  */
 export type RemoteTaskSource = {
   /** 一次控制面读。同步（缓存）或 Promise 均可，Promise 由轮询器挂回调。 */
-  read(runIds: string[]): RemoteTaskSnapshot[] | Promise<RemoteTaskSnapshot[]>;
+  read(runIds: string[], options?: { strict?: boolean }): RemoteTaskSnapshot[] | Promise<RemoteTaskSnapshot[]>;
   /** 按需日志：只有显式 requestLogTail 才会被调用，tailLines 已由轮询器钳制。 */
   readLogTail?(runId: string, tailLines: number): string | undefined;
 };
@@ -86,7 +86,7 @@ export function createHttpRemoteTaskSource(
 ): RemoteTaskSource {
   const fetchFn = deps.fetchImpl ?? fetch;
   return {
-    async read(_runIds: string[]): Promise<RemoteTaskSnapshot[]> {
+    async read(runIds: string[], options?: { strict?: boolean }): Promise<RemoteTaskSnapshot[]> {
       const serverUrl = deps.getServerUrl();
       if (!serverUrl) return [];
       const authToken = deps.getAuthToken ? deps.getAuthToken() : "";
@@ -103,15 +103,25 @@ export function createHttpRemoteTaskSource(
             signal: AbortSignal.timeout(5_000),
           }
         );
-        if (!response.ok) return [];
+        if (!response.ok) {
+          if (options?.strict) throw new Error(`Remote task query failed: HTTP ${response.status}`);
+          return [];
+        }
         const payload = (await response.json()) as any;
-        if (!payload?.ok || !Array.isArray(payload?.data?.runs)) return [];
+        if (!payload?.ok || !Array.isArray(payload?.data?.runs)) {
+          if (options?.strict) throw new Error("Invalid remote task list response");
+          return [];
+        }
         const now = Date.now();
         const snapshots: RemoteTaskSnapshot[] = [];
         for (const item of payload.data.runs) {
           if (!item || !item.runId) continue;
+          if (options?.strict && !runIds.includes(item.runId)) continue;
           const remoteTask = item.remoteTask;
-          if (!remoteTask || typeof remoteTask !== "object") continue;
+          if (!remoteTask || typeof remoteTask !== "object") {
+            if (options?.strict && item.status === "running") throw new Error(`Remote run ${item.runId} is still running`);
+            continue;
+          }
           const hasEvidence =
             remoteTask.location?.status !== "unknown" ||
             remoteTask.process?.status !== undefined ||
@@ -123,7 +133,8 @@ export function createHttpRemoteTaskSource(
           });
         }
         return snapshots;
-      } catch {
+      } catch (error) {
+        if (options?.strict) throw error;
         return [];
       }
     },
@@ -138,7 +149,7 @@ export type RunRegistryPollerDeps = {
   /** 读一条 run 记录（纯文件读）。 */
   readRecord: (runId: string) => RunRecord | null | undefined;
   /** 可选：扫描本地 registry，供首轮发现尚未上板的 run。 */
-  discoverRuns?: () => RunRecord[];
+  discoverRuns?: () => RunRecord[] | Promise<RunRecord[]>;
   /** 当前对话 ID；getter 必须每次读取，以支持会话中途切换对话。 */
   getCurrentDialogId?: () => string | null;
   /** 孤儿回收：pid 没了就把记录落成终态。返回 null 表示记录不存在。 */
@@ -288,6 +299,8 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
   let holdCount = 0;
   let tickCount = 0;
   let discoveredRecords: RunRecord[] = [];
+  let discoveryInFlight = false;
+  let discoveryGeneration = 0;
   const lastEmitted = new Map<string, string>();
   const lastReconciledAt = new Map<string, number>();
   // Dock 退场后仍保留终态 tombstone，避免下一次 discovery 把它复活。
@@ -317,6 +330,7 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
   const scopedOut = new Set<string>();
 
   const stop = () => {
+    discoveryGeneration += 1;
     if (timer !== null) {
       clearIntervalFn(timer);
       timer = null;
@@ -341,9 +355,23 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
     );
     const dockedIds = new Set(dockedRuns.map((run) => run.runId));
     tickCount += 1;
-    if (deps.discoverRuns && (tickCount - 1) % DISCOVERY_EVERY_TICKS === 0) {
+    if (deps.discoverRuns && !discoveryInFlight && (tickCount - 1) % DISCOVERY_EVERY_TICKS === 0) {
       try {
-        discoveredRecords = deps.discoverRuns();
+        const result = deps.discoverRuns();
+        if (result instanceof Promise) {
+          discoveryInFlight = true;
+          const generation = discoveryGeneration;
+          result.then((records) => {
+            if (disposed || generation !== discoveryGeneration) return;
+            discoveredRecords = records;
+            // Process immediately while still marked in-flight, avoiding a second scan.
+            poll();
+          }).catch(() => {
+            // Discovery or processing can fail; retry on a later tick.
+          }).finally(() => { discoveryInFlight = false; });
+        } else {
+          discoveredRecords = result;
+        }
       } catch {
         // Discovery is optional IO; a transient registry read must not break the TUI.
       }
@@ -416,7 +444,7 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
         active.push({ runId, status: "running" } as AgentRunSnapshot);
       }
     }
-    if (active.length === 0 && holdCount === 0) {
+    if (active.length === 0 && holdCount === 0 && !discoveryInFlight) {
       stop();
       return;
     }

@@ -3,7 +3,7 @@
  *
  * 分层：
  * - BEL（\x07）是 Ghostty / Windows Terminal / Linux 终端共同理解的基础
- *   primitive，永远先写。响铃、闪动、taskbar 注意等都交给终端 emulator
+ *   primitive，仅 NOLO_TUI_BELL=1 且真实 TTY 时发出。响铃、闪动、taskbar 注意等都交给终端 emulator
  *   解释，Nolo 不决定用户最终看到/听到什么。
  * - Windows Terminal（feature detection：存在 WT_SESSION 环境变量；不是
  *   process.platform 硬编码——Windows 可跑其他终端，WSL 里的 WT 也带
@@ -72,14 +72,19 @@ export interface TerminalAttentionArgs {
 
 /**
  * 统一的注意力入口：
- * - BEL 永远发（跨平台基础协议，语义交给终端）。
+ * - 接管 BEL 默认关闭；NOLO_TUI_BELL=1 开启，声音仍由终端设置决定。
  * - input-required 且在 Windows Terminal：追加 OSC 9;4 indeterminate，让
  *   tab/taskbar 有可见状态——用户即使关掉 audible bell 也能看到。
- * - turn-completed 且在 Windows Terminal：追加 OSC 9;4 clear，防御性清掉
- *   任何残留 progress（正常情况 input-required 的 finally 已经清过）。
+ * - 普通完成不发提醒。同一个等待事件在 clear 前去重。
  */
+const waitingOutputs = new WeakSet<NodeJS.WritableStream>();
+
 export function emitTerminalAttention(args: TerminalAttentionArgs): void {
-  emitTerminalBell(args.output);
+  if ((args.output as { isTTY?: boolean }).isTTY !== true) return;
+  if (args.reason === "turn-completed") return;
+  if (waitingOutputs.has(args.output)) return;
+  waitingOutputs.add(args.output);
+  if (args.env?.NOLO_TUI_BELL === "1") emitTerminalBell(args.output);
   if (!isWindowsTerminal(args.env)) return;
   try {
     args.output.write(
@@ -97,7 +102,8 @@ export function clearTerminalAttentionProgress(args: {
   output: NodeJS.WritableStream;
   env?: NodeJS.ProcessEnv;
 }): void {
-  if (!isWindowsTerminal(args.env)) return;
+  waitingOutputs.delete(args.output);
+  if ((args.output as { isTTY?: boolean }).isTTY !== true || !isWindowsTerminal(args.env)) return;
   try {
     args.output.write(buildWindowsTerminalProgressSequence(0));
   } catch {

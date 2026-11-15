@@ -16,6 +16,7 @@ import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { toErrorMessage } from "core/errorMessage";
 import type { CliFetchImpl } from "../cliFetch";
+import type { HybridRecordStore } from "./hybridRecordStore";
 import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
 import {
   resolveRuntimeServerUrl,
@@ -31,12 +32,98 @@ import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime";
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-export function prepareRemoteDialogEvidenceRecord(key: string, value: any) {
+const RESERVED_AUTHORITY_FIELDS = [
+  "userBatchOwner",
+  "userBatchPhase",
+  "userBatchReceipt",
+  "acceptedUserBatchId",
+] as const;
+
+function hasReservedBatchAuthority(metadata: unknown): boolean {
+  if (!isRecord(metadata)) return false;
+  return Object.keys(metadata).some(key => RESERVED_AUTHORITY_FIELDS.some(field =>
+    key === field || key.startsWith(`${field}.`) ||
+    key === `metadata.${field}` || key.startsWith(`metadata.${field}.`),
+  ));
+}
+
+export function prepareRemoteDialogEvidenceRecord(
+  key: string,
+  value: any,
+  options?: { isAcceptedBatchMember?: boolean },
+) {
   const record = isRecord(value) ? { ...value } : {};
   if (key.includes("-msg-") && typeof record.type !== "string") {
     record.type = "msg";
   }
+  // CLI admission is local, not a server-minted user-batch claim. Keep the
+  // durable local queue untouched and upload only its evidence. Records carrying
+  // server authority fields still go through the server's replication guard.
+  const metadata = record.metadata;
+  if (key.includes("-msg-") && record.role === "user" && isRecord(metadata) &&
+      metadata.queueState === "accepted" &&
+      (metadata.cliBatchPhase === "requested" || metadata.cliBatchPhase === "completed" ||
+       (typeof metadata.cliBatchId === "string" && metadata.cliBatchId.length > 0) ||
+       options?.isAcceptedBatchMember === true) &&
+      !hasReservedBatchAuthority(metadata)) {
+    const { queueState: _localQueueState, ...evidenceMetadata } = metadata;
+    record.metadata = evidenceMetadata;
+  }
   return record;
+}
+
+async function collectAcceptedUserBatchMessageKeys(
+  ops: ReadonlyArray<{ type: string; key: string; value: any }>,
+  localStore?: Pick<HybridRecordStore, "iterator">,
+): Promise<Set<string>> {
+  const memberKeys = new Set<string>();
+  const collectReceipt = (op: { type: string; key: string; value: any }) => {
+    if (op.type !== "put" || !op.key.includes("-msg-")) return;
+    const record = op.value;
+    if (!isRecord(record) || record.role !== "user" || !isRecord(record.metadata)) return;
+    const metadata = record.metadata;
+    if (
+      metadata.cliBatchPhase !== "requested" &&
+      metadata.cliBatchPhase !== "completed"
+    ) {
+      return;
+    }
+    if (hasReservedBatchAuthority(record) || hasReservedBatchAuthority(metadata)) return;
+    if (!Array.isArray(metadata.acceptedUserMessageIds)) return;
+    const match = /^((?:dialog-[^]+?)-msg-)[^]+$/.exec(op.key);
+    if (!match) return;
+    const prefix = match[1];
+    for (const memberId of metadata.acceptedUserMessageIds) {
+      if (typeof memberId === "string" && memberId.length > 0) {
+        memberKeys.add(`${prefix}${memberId}`);
+      }
+    }
+  };
+  for (const op of ops) collectReceipt(op);
+  // saveTurn/replay may select only one legacy member. Its receipt is durable
+  // local context, not necessarily part of the current upload. Resolve that
+  // context without expanding the upload/capture selection or rewriting history.
+  const prefixes = new Set<string>();
+  for (const op of ops) {
+    const record = op.value;
+    if (op.type !== "put" || memberKeys.has(op.key) || record?.role !== "user" ||
+        record?.metadata?.queueState !== "accepted" || hasReservedBatchAuthority(record.metadata) ||
+        record.metadata.cliBatchPhase === "requested" || record.metadata.cliBatchPhase === "completed" ||
+        (typeof record.metadata.cliBatchId === "string" && record.metadata.cliBatchId.length > 0)) continue;
+    const prefix = typeof record.dialogId === "string"
+      ? `dialog-${record.dialogId}-msg-`
+      : /^((?:dialog-[^]+?)-msg-)[^]+$/.exec(op.key)?.[1];
+    if (prefix && op.key.startsWith(prefix)) prefixes.add(prefix);
+  }
+  if (localStore) {
+    for (const prefix of prefixes) {
+      for await (const [key, value] of localStore.iterator({ gte: prefix, lt: `${prefix}\uffff` })) {
+        // Do not trust an iterator implementation to enforce its requested range.
+        if (key.startsWith(prefix)) collectReceipt({ type: "put", key, value });
+      }
+    }
+  }
+  return memberKeys;
 }
 
 function normalizeRemoteSubjectRef(value: unknown) {
@@ -164,6 +251,7 @@ export async function postRemoteRecord(args: {
   authToken: string;
   data: any;
   fetchImpl: CliFetchImpl;
+  isAcceptedBatchMember?: boolean;
   key: string;
   serverUrl: string;
   userId: string;
@@ -180,7 +268,9 @@ export async function postRemoteRecord(args: {
       body: JSON.stringify({
         customKey: args.key,
         userId: args.userId,
-        data: prepareRemoteDialogEvidenceRecord(args.key, args.data),
+        data: prepareRemoteDialogEvidenceRecord(args.key, args.data, {
+          isAcceptedBatchMember: args.isAcceptedBatchMember,
+        }),
       }),
       signal: AbortSignal.timeout(remoteDialogSyncTimeout()),
     },
@@ -329,6 +419,8 @@ export async function syncLocalDialogEvidenceToRemote(args: {
   ops: Array<{ type: "put"; key: string; value: any }>;
   output?: { write(chunk: string): unknown };
   userId: string;
+  /** Local-only batch context for legacy member-only save/replay. Never remote fallback. */
+  localStore?: Pick<HybridRecordStore, "iterator">;
   /** 可注入 sleep，测试用于断言批间节流；生产路径用默认 setTimeout。 */
   sleep?: (ms: number) => Promise<void>;
 }) {
@@ -356,6 +448,7 @@ export async function syncLocalDialogEvidenceToRemote(args: {
   // Bounded concurrency (4) preserves the msg-then-nonMsg ordering while
   // keeping the write rate within the throttle budget. 某批失败即中止后续
   // 批次（fail-fast），由调用方 try/catch 兜底。
+  const acceptedBatchKeys = await collectAcceptedUserBatchMessageKeys(orderedOps, args.localStore);
   await runThrottledBatches(
     orderedOps.filter((op) => op.type === "put"),
     (op) =>
@@ -363,6 +456,7 @@ export async function syncLocalDialogEvidenceToRemote(args: {
         authToken,
         data: op.value,
         fetchImpl: args.fetchImpl,
+        isAcceptedBatchMember: acceptedBatchKeys.has(op.key),
         key: op.key,
         serverUrl,
         userId: args.userId,

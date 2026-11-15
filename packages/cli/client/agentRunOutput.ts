@@ -136,10 +136,6 @@ function shouldPromoteTuiNarration(text: string): boolean {
   return /(^|\n)\s*(?:#{1,3}\s|```|[-*+]\s|\d+[.)]\s)/.test(text);
 }
 
-function narrationActivityLabel(text: string): string {
-  const oneLine = stripAnsi(text).replace(/[`*_#>]/g, "").replace(/\s+/g, " ").trim();
-  return truncateThinkingHint(oneLine, 60);
-}
 
 /**
  * CLI turn output coordinator: owns the spinner, streaming text writer,
@@ -172,12 +168,8 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
    * keep their existing detailed trace contract.
    */
   const hidesRoutineTuiToolDetail = (event: LocalAgentToolEvent) => {
-    if (!assistantLabelManaged || event.toolName !== "editFile") return false;
-    if (event.type === "tool-error") return false;
-    if (readActionGate(event.metadata?.actionGate)) return false;
-    if (event.metadata?.timedOut || event.metadata?.failed || event.metadata?.error) return false;
-    if (typeof event.metadata?.exitCode === "number" && event.metadata.exitCode !== 0) return false;
-    return true;
+    // Writes, including successful edits, remain in the durable transcript.
+    return false;
   };
 
   let streamedAssistantText = false;
@@ -256,10 +248,8 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     write: (chunk) => options.output.write(chunk),
   });
 
-  // TUI-only narration gate. Short prose that is immediately followed by a
-  // tool call is operational progress, not durable transcript content. It is
-  // shown in the dock while current, then discarded when a tool starts. Final
-  // prose and strongly structured/very long prose are promoted to transcript.
+  // Buffer short streaming prose until a boundary, but preserve every original
+  // chunk in transcript order, including narration before tools and on abort.
   let pendingTuiNarration = "";
   let tuiNarrationPromoted = false;
 
@@ -270,12 +260,6 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     pendingTuiNarration = "";
     tuiNarrationPromoted = true;
     streamedAssistantText = true;
-    options.activityReporter?.(null);
-  };
-
-  const dropPendingTuiProgress = () => {
-    pendingTuiNarration = "";
-    tuiNarrationPromoted = false;
     options.activityReporter?.(null);
   };
 
@@ -296,6 +280,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       }
       printedAssistantLabel = true;
     }
+    if (assistantLabelManaged) options.activityReporter?.(t("generatingReply"));
     everStreamedAnyText = true;
 
     if (assistantLabelManaged) {
@@ -308,8 +293,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       if (shouldPromoteTuiNarration(pendingTuiNarration)) {
         flushPendingTuiNarration();
       } else {
-        const label = narrationActivityLabel(pendingTuiNarration);
-        if (label) options.activityReporter?.(label);
+        options.activityReporter?.(t("generatingReply"));
       }
       return;
     }
@@ -333,7 +317,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
 
     if (event.type === "tool-call") {
       if (assistantLabelManaged && pendingTuiNarration) {
-        dropPendingTuiProgress();
+        flushPendingTuiNarration();
       }
       renderWriter.flush();
       if (!hidesRoutineTuiToolDetail(event)) {
@@ -382,12 +366,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     /**
      * Terminal cleanup for abort/error paths that never reach `finish()`.
      *
-     * A user abort discards the transient TUI progress buffer: the user stopped
-     * on purpose and the dock already showed that text as activity. A genuine
-     * failure must not swallow prose that never got the chance to be *proven*
-     * durable (only a following tool call proves "progress"), so it promotes the
-     * pending buffer and flushes what was already promoted — otherwise a short
-     * final answer followed by a transport error disappears from the transcript.
+     * Preserve original prose on both abort and transport failure.
      */
     cancel(cleanup?: { preservePendingNarration?: boolean }) {
       if (assistantLabelManaged && cleanup?.preservePendingNarration) {
@@ -399,7 +378,8 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
           options.output.write("\n");
         }
       }
-      dropPendingTuiProgress();
+      flushPendingTuiNarration();
+      renderWriter.flush();
     },
     pushText(chunk: string) {
       writeVisibleAssistantChunk(chunk);

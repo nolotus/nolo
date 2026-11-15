@@ -1,3 +1,4 @@
+import "../../../cli/agentRunHostBootstrap";
 import { homedir } from "node:os";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";

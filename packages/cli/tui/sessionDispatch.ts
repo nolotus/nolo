@@ -544,6 +544,8 @@ export function handleTuiInput(
       const stoppedNames = matches.map(p => `pid ${p.pid} (${p.label})`).join(", ");
       return { nextState: state, output: t("stopLabelsDone", stoppedNames) };
     }
+    case "/restart":
+      return { nextState: state, output: "", action: { type: "exit", restart: true } };
     case "/exit":
     case "/quit":
       return { nextState: state, output: t("bye"), action: { type: "exit" } };

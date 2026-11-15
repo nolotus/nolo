@@ -313,6 +313,7 @@ export type TuiAction =
     }
   | {
       type: "exit";
+      restart?: boolean;
     }
   | {
       /**

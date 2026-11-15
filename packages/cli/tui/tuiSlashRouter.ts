@@ -1,3 +1,6 @@
+import { getProcessRegistry } from "../../agent-runtime/processRegistry";
+import { getRestartBlocker, hasRestartBlockingRuns } from "./tuiRestart";
+import { listRunRecords } from "../agentRunControl";
 // ── S5 迁移：runSubmittedLine 的 slash 命令 bus 分发已从 readlineWorkspace.ts
 // 原样迁入本模块。handleTuiInput（解析 + 路由，产出 action）仍在
 // sessionDispatch.ts 不动；本模块承接的是 readlineWorkspace 侧的「命令后执行
@@ -281,6 +284,16 @@ export async function runSubmittedSlashLine(
   }
 
   if (result.action?.type === "exit") {
+    if (result.action.restart) {
+      const blocker = getRestartBlocker(host.state, {
+        supported: !!options.requestRestart && typeof process.execve === "function",
+        activeProcesses: getProcessRegistry().list().some(p => p.status === "running"),
+        activeRuns: hasRestartBlockingRuns(listRunRecords({ env: options.env ?? process.env })),
+      });
+      if (blocker) { emitCommandOutput(`[nolo] ${blocker}`); return false; }
+      options.requestRestart!(host.state);
+    }
+
     // "bye" 作为退出前最后一帧的视觉确认，直接 output.write 而不进
     // history——退出后 history 立即销毁，写 local turn 没有意义。
     if (result.output) output.write(`${result.output}\n`);
@@ -337,6 +350,7 @@ export async function runSubmittedSlashLine(
       }),
     };
     history.turns.length = 0;
+    history.toolDetails = [];
     history.currentRole = null;
     history.currentContent = "";
     history.scrollTop = 0;
@@ -773,6 +787,7 @@ export async function runSubmittedSlashLine(
         });
         const restored = loadedTurns.slice(-MAX_TUI_HISTORY_TURNS);
         history.turns.length = 0;
+        history.toolDetails = [];
         history.turns.push(...restored);
         history.currentRole = null;
         history.currentContent = "";

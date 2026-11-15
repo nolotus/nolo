@@ -2,6 +2,9 @@ import type { MemoryBenchmarkTextProvider } from "./benchmark/provider";
 import { loadMemoryVNextCatalog } from "./store";
 import type { MemoryEntityVNext, MemoryStateVNext } from "./types";
 
+import { recallMemoryVNextLocal } from "./localRecall";
+import { buildBudgetedMemoryInput, resolveMemoryBudget, type MemoryBudgetTrace } from "./recallBudget";
+
 const MAX_RECALL_REFS = 6;
 
 export interface MemoryRecallResult {
@@ -15,6 +18,7 @@ export interface MemoryRecallResult {
     candidateStates: number;
     selectedRefs: number;
     elapsedMs: number;
+    budget?: MemoryBudgetTrace;
   };
 }
 
@@ -47,89 +51,79 @@ const parseSelection = (raw: string): { refs: string[]; reason: string } => {
   };
 };
 
-// Known limitation (recorded on purpose, not fixed this round): the catalog is
-// rebuilt from every Entity and State with no input budget, so it grows
-// unbounded with store scale and inflates the selector prompt (trigger: large
-// entity/state counts, see the benchmark --scale modes). Truncation or
-// prioritization needs its own design round and is intentionally not hacked in
-// here.
-
-const catalogText = (entities: MemoryEntityVNext[], states: MemoryStateVNext[]): string =>
-  JSON.stringify(
-    {
-      entities: entities.map((entity) => ({
-        id: entity.id,
-        type: entity.type,
-        name: entity.name,
-        ...(entity.subtype ? { subtype: entity.subtype } : {}),
-        ...(entity.aliases?.length ? { aliases: entity.aliases } : {}),
-      })),
-      states: states.map((state) => ({
-        id: state.id,
-        entityId: state.entityId,
-        facet: state.facet,
-        text: state.text,
-        // Retired (superseded) States stay listed as recoverable history; the
-        // boolean — not the retiredAt timestamp — enters the prompt so no
-        // timestamps reach LLM text.
-        ...(state.retiredAt ? { retired: true } : {}),
-      })),
-    },
-    null,
-    2,
-  );
-
 export const createMemoryVNextRecall = (input: {
   db: any;
   ownerId: string;
   provider: MemoryBenchmarkTextProvider;
   timeoutMs?: number;
+  maxInputTokens?: number;
 }) =>
   async (query: string): Promise<MemoryRecallResult> => {
     const startedAt = performance.now();
+    const maxTokens = resolveMemoryBudget(input.maxInputTokens);
     const { entities, states } = await loadMemoryVNextCatalog(input.db, input.ownerId);
-    if (entities.length === 0 && states.length === 0) {
+    if (!query.trim() || (entities.length === 0 && states.length === 0)) {
       return {
         query,
         refs: [],
         entities: [],
         states: [],
-        reason: "memory catalog is empty",
+        reason: query.trim() ? "memory catalog is empty" : "query is empty",
         trace: {
           candidateEntities: 0,
           candidateStates: 0,
           selectedRefs: 0,
+          budget: { maxTokens, usedTokens: 0, truncated: false,
+            offeredCandidates: 0, totalCandidates: entities.length + states.length,
+            omittedCandidates: entities.length + states.length },
           elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
         },
       };
     }
 
+    // Reuse the existing relevance gate/ranking; deep recall still permits the
+    // selector to find semantic/history matches in the deterministic remainder.
+    const hits = recallMemoryVNextLocal({ query, entities, states, limit: states.length });
+    const priority = new Set(hits.flatMap(({ state }) => [state.id, state.entityId]));
+    const rankedStates = [...hits.map(({ state }) => state),
+      ...states.filter((state) => !priority.has(state.id)).sort((a, b) => a.id.localeCompare(b.id))];
+    const rankedEntities = [...entities].sort((a, b) =>
+      Number(priority.has(b.id)) - Number(priority.has(a.id)) || a.id.localeCompare(b.id));
+    const stateRows = rankedStates.map((state) => ({
+      kind: "state", id: state.id, entityId: state.entityId, facet: state.facet,
+      text: state.text, ...(state.retiredAt ? { retired: true } : {}),
+    }));
+    const entityRows = rankedEntities.map((entity) => ({
+      kind: "entity", id: entity.id, type: entity.type, name: entity.name,
+      ...(entity.subtype ? { subtype: entity.subtype } : {}),
+      ...(entity.aliases?.length ? { aliases: entity.aliases } : {}),
+    }));
+    const request = buildBudgetedMemoryInput({
+      query, maxTokens: input.maxInputTokens,
+      rows: [...stateRows.filter((row) => priority.has(row.id)),
+        ...entityRows.filter((row) => priority.has(row.id)),
+        ...stateRows.filter((row) => !priority.has(row.id)),
+        ...entityRows.filter((row) => !priority.has(row.id))],
+      system: [
+        "Select the smallest useful set of long-lived memory entrances for the user query.",
+        'Return ONLY JSON: {"refs":["exact-id"],"reason":"short explanation"}.',
+        `Select at most ${MAX_RECALL_REFS} exact ids from the supplied catalog.`,
+        "Prefer current State ids; retired States are history entrances, not current facts.",
+        "Select an Entity when it is a useful navigation anchor.",
+        "Do not select unrelated memories merely because they are personal or interesting.",
+        "Historical questions may select a relevant entrance; deeper evidence is handled by inspect.",
+      ].join("\n"),
+    });
     const result = await input.provider.complete(
-      [
-        {
-          role: "system",
-          content: [
-            "Select the smallest useful set of long-lived memory entrances for the user query.",
-            "Return ONLY JSON: {\"refs\":[\"exact-id\"],\"reason\":\"short explanation\"}.",
-            `Select at most ${MAX_RECALL_REFS} exact ids from the supplied catalog.`,
-            "Prefer State ids when current durable understanding answers the query.",
-            "Select an Entity id when it is a useful navigation anchor and no single State is enough.",
-            "Do not select unrelated memories merely because they are personal or interesting.",
-            "Historical-detail questions may select the relevant current State/Entity as an entrance; deeper evidence is handled by inspect, not here.",
-          ].join("\n"),
-        },
-        {
-          role: "user",
-          content: `Query:\n${query}\n\nMemory catalog:\n${catalogText(entities, states)}`,
-        },
-      ],
+      request.messages,
       input.timeoutMs ? { timeoutMs: input.timeoutMs } : undefined,
     );
 
     const selected = parseSelection(result.content);
     const entityById = new Map(entities.map((entity) => [entity.id, entity]));
     const stateById = new Map(states.map((state) => [state.id, state]));
-    const validRefs = selected.refs.filter((ref) => entityById.has(ref) || stateById.has(ref));
+    const offered = new Set(request.rows.map((row) => row.id));
+    const validRefs = selected.refs.filter((ref) => offered.has(ref) && (entityById.has(ref) || stateById.has(ref)));
 
     return {
       query,
@@ -147,6 +141,7 @@ export const createMemoryVNextRecall = (input: {
         candidateEntities: entities.length,
         candidateStates: states.length,
         selectedRefs: validRefs.length,
+        budget: request.budget,
         elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
       },
     };

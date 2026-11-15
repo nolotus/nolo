@@ -57,7 +57,7 @@ import {
   extractToolCallArgs,
   formatToolRowHeaderSummary,
 } from "./toolDisplayName";
-import { isQuietDetailTool } from "./toolCallPresentation";
+import { isQuietDetailTool, isToolCallFailed, readToolCallErrorMessage, resolveToolCallStatus } from "./toolCallPresentation";
 import {
   isMediaJobPendingConfirmation,
   shouldKeepToolRowExpanded,
@@ -117,9 +117,7 @@ export const ToolMessageItem = memo(
     const isRepairableFailure =
       rawData?.code === "PREFLIGHT_FAILED" && !!rawData?.repairPlan;
     const isError =
-      (toolPayload?.status === "failed" ||
-        !!toolPayload?.error ||
-        !!rawData?.error) &&
+      isToolCallFailed(message) &&
       !isRepairableFailure &&
       !isMediaJobPendingConfirmation({ toolName, rawData, toolPayload });
     const statusStr = isStreaming
@@ -128,14 +126,13 @@ export const ToolMessageItem = memo(
         ? "repairing"
         : isError
           ? "failed"
-          : "success";
+          : isMediaJobPendingConfirmation({ toolName, rawData, toolPayload })
+            ? "pending"
+            : resolveToolCallStatus(message);
     // Astryx-style trailing duration badge; only terminal success shows it.
     const durationText = statusStr === "success" ? formatToolDuration(toolPayload) : null;
     // Failure detail for the status-dot tooltip (Astryx echoes errorMessage on the icon).
-    const errorMessageText =
-      toolPayload?.error?.message ||
-      (typeof rawData?.error === "string" ? rawData.error : rawData?.error?.message) ||
-      undefined;
+    const errorMessageText = readToolCallErrorMessage(message);
 
     const toolRunId = toolPayload?.toolRunId;
     const activeRun = useToolRunById(toolRunId ?? "");

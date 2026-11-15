@@ -1,5 +1,6 @@
 import React, { memo, useId, useState } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
+import { asOptionalTrimmedString } from "core/optionalString";
 import ToolMessageContent from "./ToolMessageContent";
 import { safeParse, StatusIcon, withLiteralClass } from "./toolMessageShared";
 import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
@@ -8,6 +9,7 @@ import type { ToolCallPresentation } from "./toolCallPresentation";
 import {
   formatToolExecutionLocationLine,
   isQuietDetailTool,
+  isToolCallFailed,
 } from "./toolCallPresentation";
 import {
   isMediaJobPendingConfirmation,
@@ -48,6 +50,46 @@ export interface ToolCallRowProps {
   onUserDisclosureChange?: (expanded: boolean) => void;
 }
 
+const ATTENTION_DEFAULT_LABELS: Record<string, string> = {
+  failure: "失败",
+  blocked: "已阻塞",
+  permission: "需要授权",
+  "delete-confirmation": "等待删除确认",
+};
+
+function resolveAttentionLabel(
+  kind: string,
+  t?: (key: string, fallback: string) => string
+): string {
+  const fallback = ATTENTION_DEFAULT_LABELS[kind] ?? kind;
+  if (typeof t !== "function") return fallback;
+  try {
+    const key = `toolActivity.attention.${kind}`;
+    const res = t(key, fallback);
+    const translated = typeof res === "string" ? asOptionalTrimmedString(res) : undefined;
+    if (!translated || translated === key) return fallback;
+    return translated;
+  } catch {
+    return fallback;
+  }
+}
+
+function resolveUnknownStatusLabel(
+  t?: (key: string, fallback: string) => string
+): string {
+  const fallback = "状态未知";
+  if (typeof t !== "function") return fallback;
+  try {
+    const key = "toolActivity.unknown";
+    const res = t(key, fallback);
+    const translated = typeof res === "string" ? asOptionalTrimmedString(res) : undefined;
+    if (!translated || translated === key) return fallback;
+    return translated;
+  } catch {
+    return fallback;
+  }
+}
+
 export const ToolCallRow = memo(
   ({
     presentation,
@@ -79,9 +121,7 @@ export const ToolCallRow = memo(
     });
     const isError =
       !isPendingConfirmation &&
-      (message?.toolPayload?.status === "failed" ||
-        !!message?.toolPayload?.error ||
-        !!rawData?.error);
+      isToolCallFailed(message);
 
     return (
       <div
@@ -111,7 +151,7 @@ export const ToolCallRow = memo(
           disabled={!presentation.expandable || undefined}
         >
           <StatusIcon
-            status={presentation.status}
+            status={presentation.status === "unknown" ? "pending" : presentation.status}
             toolName={presentation.toolName}
             errorMessage={presentation.errorMessage}
           />
@@ -123,6 +163,16 @@ export const ToolCallRow = memo(
           >
             {presentation.verb}
           </span>
+          {presentation.status === "unknown" && (
+            <span className="tool-call-attention">
+              {resolveUnknownStatusLabel(t)}
+            </span>
+          )}
+          {presentation.attention?.map(({ kind }) => (
+            <span key={kind} className="tool-call-attention" role="status">
+              {resolveAttentionLabel(kind, t)}
+            </span>
+          ))}
           {presentation.context ? (
             <span
               {...withLiteralClass(

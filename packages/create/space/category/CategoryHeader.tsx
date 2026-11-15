@@ -48,6 +48,8 @@ interface CategoryHeaderProps {
   canEdit?: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onCategoryRenamed?: (spaceId: string, categoryId: string, name: string) => void;
+  onCategoryDeleted?: (spaceId: string, categoryId: string) => void;
   handleProps?: {
     onDragStart?: (e: React.DragEvent) => void;
     onDragEnd?: (e: React.DragEvent) => void;
@@ -62,6 +64,8 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
   canEdit: propCanEdit,
   isCollapsed: propIsCollapsed,
   onToggleCollapse: propOnToggleCollapse,
+  onCategoryRenamed,
+  onCategoryDeleted,
   handleProps,
 }) => {
   const { t } = useTranslation("space");
@@ -88,15 +92,18 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
     : categoryName;
 
   const handleSaveName = useCallback(
-    (newName: string) => {
+    async (newName: string) => {
       // Re-check at submit time: props may have changed while the editor was open.
       const stillSameSpace = pendingEditSpaceId.current === spaceId;
       pendingEditSpaceId.current = null;
       if (spaceId && !isUncategorized && propCanEdit === true && stillSameSpace) {
-        dispatch(updateCategoryNameAction({ spaceId, categoryId, name: newName }));
+        const result = await dispatch(updateCategoryNameAction({ spaceId, categoryId, name: newName }));
+        if (result?.meta?.requestStatus === "fulfilled") {
+          onCategoryRenamed?.(spaceId, categoryId, newName.trim());
+        }
       }
     },
-    [dispatch, spaceId, categoryId, isUncategorized, propCanEdit]
+    [dispatch, spaceId, categoryId, isUncategorized, propCanEdit, onCategoryRenamed]
   );
 
   const { isEditing, startEditing, inputRef, inputProps } = useInlineEdit({
@@ -114,7 +121,7 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     const targetSpaceId = propSpaceId;
     // Re-validate at submit time: permission or space may have changed while the
     // confirm modal was open (account switch, revoked membership, space switched).
@@ -126,7 +133,10 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
       !isUncategorized &&
       confirmedSpaceId === targetSpaceId
     ) {
-      dispatch(deleteCategoryAction({ spaceId: targetSpaceId, categoryId }));
+      const result = await dispatch(deleteCategoryAction({ spaceId: targetSpaceId, categoryId }));
+      if (result?.meta?.requestStatus === "fulfilled") {
+        onCategoryDeleted?.(targetSpaceId, categoryId);
+      }
     }
     setIsDeleteModalOpen(false);
   };

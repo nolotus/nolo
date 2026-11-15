@@ -36,13 +36,14 @@ import format from "date-fns/format";
 import { appendFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { type EnvLike } from "./localRuntimeHelpers";
+import { resolveRuntimeAuthToken, resolveRuntimeServerUrl, type EnvLike } from "./localRuntimeHelpers";
 import {
   extractLastUserText,
   localTurnHasSubjectRefs,
 } from "./cliAgentConfigHelpers";
 import { buildLocalDialogWritePlan, buildCliBatchCompletionOp } from "./localDialogRecords";
 import { syncLocalDialogEvidenceToRemote } from "./cliRemoteDialogSync";
+import { captureCliCompletedTurn, readCliCaptureSources, type CliMemoryCaptureResult } from "./cliCompletedTurnCapture";
 import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
 import { buildDialogFallbackTitleFromUserInput } from "../../chat/dialog/dialogTitle";
 import { toErrorMessage } from "core/errorMessage";
@@ -500,6 +501,19 @@ export async function writeDialog(args: {
     cwd: args.cwd,
   });
 
+  // Re-saving this host turn must keep its source immutable (including time).
+  for (const id of plan.captureUserMessageIds) {
+    const op = plan.ops.find(op => op.value.id === id && op.value.role === "user")!;
+    const existing = await args.store.read(op.key, { remote: false });
+    if (existing) {
+      if (existing.id !== id || existing.dialogId !== plan.dialogId || existing.userId !== args.userId ||
+        existing.role !== "user" || JSON.stringify(existing.content) !== JSON.stringify(op.value.content)) {
+        throw new Error("CLI persisted turn source conflict");
+      }
+      op.value = existing;
+    }
+  }
+
   // 持久化该 dialog 上一次 provider 调用的真实 input tokens 到 dialog 记录（方案 a）。
   // 若本轮无有效调用，保留已有 dialog 记录上的历史值。
   const lastInputTokens =
@@ -556,46 +570,51 @@ export async function writeDialog(args: {
   }
 
   const hasSubjectRefs = localTurnHasSubjectRefs(args.input);
-  const isLocalUser = args.userId === "local";
-  // PERF: 暴露 remote sync promise 让测试可等待；调用方不 await（subjectRef 除外）。
-  let remoteSyncPromise: Promise<unknown> | undefined;
-  if (!isLocalUser) {
-    if (hasSubjectRefs) {
-      // subjectRef 场景保留 await + throw：task 关联的对话证据必须远端
-      // 可查，失败时让 turn 失败比静默丢证据更安全。
-      remoteSyncPromise = (async () => {
-        const syncResult = await syncLocalDialogEvidenceToRemote({
-          env: args.env,
-          fetchImpl: args.fetchImpl,
-          input: args.input,
-          ops: [...plan.ops, ...tokenOps],
-          output: args.output,
-          userId: args.userId,
-        });
-        if (!syncResult.attempted) {
-          args.output?.write(
-            "[nolo] Local dialog evidence is local-only; set NOLO_SERVER and AUTH_TOKEN to make subjectRefs remotely queryable.\n",
-          );
-        }
-      })();
-      await remoteSyncPromise;
-    } else {
-      // PERF: 非 subjectRef 场景的 remote-sync 改为 fire-and-forget。实测
-      // 每轮 1-1.9 秒网络 I/O，是后续轮次"最后一句话后等待"的主要原因。
-      // 不阻塞 turn；CLI 命令退出边界会有界 drain 本命令拥有的同步。
-      // 失败时只提示用户，不 throw。
-      remoteSyncPromise = startOwnedDialogSync(args.fetchImpl, (fetchImpl) => syncLocalDialogEvidenceToRemote({
-        env: args.env,
-        fetchImpl,
-        input: args.input,
-        ops: [...plan.ops, ...tokenOps],
-        output: args.output,
-        userId: args.userId,
-      })).catch((error) => {
-        args.output?.write(`[nolo] Remote dialog evidence sync failed; class=${classifyDialogSyncFailure(error)}; local history retained; remote sync incomplete.\n`);
-      });
+  let memoryCaptureResults: CliMemoryCaptureResult[] = [];
+  const reportCapture = (results: CliMemoryCaptureResult[]) => {
+    memoryCaptureResults = results;
+    for (const result of results) {
+      diagLog.info(`memory_capture ${result.status}: ${result.reason}`);
     }
-  }
+  };
+  // Receipt sources are already persisted; never substitute generated save-time IDs.
+  const captureSources = await readCliCaptureSources({ input: args.input,
+    dialogId: plan.dialogId, userId: args.userId, persistedUserMessageIds: plan.captureUserMessageIds,
+    read: key => args.store.read(key, { remote: false }),
+  }).catch(() => []);
+  const syncAndCapture = async (fetchImpl: CliFetchImpl) => {
+    try {
+      const syncResult = args.userId === "local" ? { attempted: false } :
+        await syncLocalDialogEvidenceToRemote({
+          env: args.env, fetchImpl, input: args.input,
+          ops: [...plan.ops, ...tokenOps, ...captureSources],
+          localStore: args.store,
+          output: args.output, userId: args.userId,
+        });
+      if (!syncResult.attempted) {
+        if (hasSubjectRefs) args.output?.write(
+          "[nolo] Local dialog evidence is local-only; set NOLO_SERVER and AUTH_TOKEN to make subjectRefs remotely queryable.\n");
+        const result = args.input.result.stopReason !== "done" || args.input.result.error
+          ? { status: "skipped" as const, reason: "turn_not_completed" }
+          : { status: "deferred" as const, reason: !resolveRuntimeServerUrl(args.env) ? "server_not_configured" :
+            args.userId === "local" || !resolveRuntimeAuthToken(args.env) ? "not_authenticated" : "remote_sync_unavailable" };
+        reportCapture([result]);
+        return;
+      }
+      reportCapture(await captureCliCompletedTurn({ input: args.input, dialogId: plan.dialogId,
+        sources: captureSources, env: args.env, fetchImpl }));
+    } catch (error) {
+      reportCapture([{ status: "deferred", reason: "remote_sync_failed" }]);
+      throw error;
+    }
+  };
+  // The exit-owned task includes capture, so CLI shutdown drains both upload and capture.
+  const remoteSyncPromise = hasSubjectRefs
+    ? syncAndCapture(args.fetchImpl)
+    : startOwnedDialogSync(args.fetchImpl, syncAndCapture).catch(error => {
+      args.output?.write(`[nolo] Remote dialog evidence sync failed; class=${classifyDialogSyncFailure(error)}; local history retained; remote sync incomplete.\n`);
+    });
+  if (hasSubjectRefs) await remoteSyncPromise;
 
   // PERF: title 后台 patch——titlePromise resolve 后读回 dialog 记录、
   // patch title + titleSource + titleUpdatedAt，再 write 回去。
@@ -639,7 +658,7 @@ export async function writeDialog(args: {
     const ms = (performance.now() - __perfT0).toFixed(1);
     diagLog.info(`perf writeDialog total (blocking): ${ms}ms`);
   }
-  return { dialogId: plan.dialogId, title: plan.title, titlePatchPromise, remoteSyncPromise };
+  return { dialogId: plan.dialogId, title: plan.title, titlePatchPromise, remoteSyncPromise, get memoryCaptureResults() { return memoryCaptureResults; } };
 }
 
 export function resolveCliDialogRecordKey(userId: string, dialogId: string): string {

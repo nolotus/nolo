@@ -62,7 +62,10 @@ export const getMemoryEntityVNext = async (
   ownerId: string,
   entityId: string
 ): Promise<MemoryEntityVNext | null> =>
-  db.get(entityKey(ownerId, entityId)).catch(() => null);
+  db.get(entityKey(ownerId, entityId)).catch((error: unknown) => {
+    if (isLevelNotFoundError(error)) return null;
+    throw error;
+  });
 
 export const listMemoryEntitiesVNext = async (
   db: any,
@@ -125,7 +128,10 @@ export const getMemoryStateVNext = async (
   ownerId: string,
   stateId: string
 ): Promise<MemoryStateVNext | null> =>
-  db.get(stateKey(ownerId, stateId)).catch(() => null);
+  db.get(stateKey(ownerId, stateId)).catch((error: unknown) => {
+    if (isLevelNotFoundError(error)) return null;
+    throw error;
+  });
 
 export const listMemoryStatesForEntityVNext = (
   db: any,
@@ -282,4 +288,20 @@ export const _appendRelationBatch = (batch: any, relation: MemoryRelationVNext):
   batch.put(key, relation);
   batch.put(relationFromIndexKey(relation.ownerId, relation.from, relation.id), { key });
   batch.put(relationToIndexKey(relation.ownerId, relation.to, relation.id), { key });
+};
+
+/** Bounded owner-only Evidence context for native formation, including no_op events.
+ * Key order, not recency; truncation is explicit. No legacy reads or mutation.
+ */
+export const loadNativeCaptureEvidenceContext = async (
+  db: any, ownerId: string, excludeId: string, limit = 40,
+): Promise<{ evidence: MemoryEvidenceVNext[]; truncated: boolean }> => {
+  const evidence: MemoryEvidenceVNext[] = [];
+  const prefix = `mem2-v-${enc(ownerId)}-`;
+  let scanned = 0;
+  for await (const [, value] of db.iterator({ ...rangeOf(prefix), reverse: false })) {
+    if (++scanned > limit) return { evidence, truncated: true };
+    if (value?.nativeCapture && value.id !== excludeId) evidence.push(value);
+  }
+  return { evidence, truncated: false };
 };

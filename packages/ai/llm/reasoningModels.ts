@@ -13,6 +13,8 @@ import {
  */
 const REASONING_MODEL_NAMES = new Set([
   "deepseek-flash",
+  "deepseek-v4-flash",
+  "deepseek-v4.1-flash",
   "deepseek-v4-pro",
   "gemini-3.7-flash",
   "gemini-3.8-flash",
@@ -55,7 +57,10 @@ export const isModelSupportReasoningEffort = (
   if (provider && provider.toLowerCase() === "openrouter") {
     return true;
   }
-  return REASONING_MODEL_NAMES.has(model);
+  const p = provider?.toLowerCase();
+  const base = model.toLowerCase().split("/").pop() ?? "";
+  const deepseekFlash = ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4.1-flash"].includes(base);
+  return REASONING_MODEL_NAMES.has(model) || (deepseekFlash && ["commandcode", "opendesign", "ollama-cloud", "lithosai"].includes(p ?? ""));
 };
 
 export const supportedReasoningModels = Array.from(REASONING_MODEL_NAMES);

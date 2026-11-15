@@ -341,8 +341,10 @@ export function tokenizePasteLine(line: string): Tokenized[] {
         continue;
       }
       if (ch === quote) {
+        const startedQuoted = rawBuf.startsWith(quote);
         quote = null;
         rawBuf += ch;
+        if (startedQuoted) push();
         continue;
       }
       rawBuf += ch;
@@ -365,6 +367,16 @@ export function tokenizePasteLine(line: string): Tokenized[] {
       continue;
     }
     if (ch === '"' || ch === "'") {
+      // Quoted path glued after prose without whitespace (e.g. `但是'/home/a.png'`):
+      // split the prose prefix so `/home/...` resolves as its own token instead of
+      // `<cwd>/但是/home/...`. Keep mid-path Windows-style quotes (`C:\a" "b.png`) intact.
+      if (
+        rawBuf.length > 0 &&
+        !/[\\/=]$/.test(rawBuf) &&
+        /^(?:\/|~[\\/]|[a-zA-Z]:[\\/]|file:\/\/|\.\.?[\\/])/i.test(line.slice(i + 1))
+      ) {
+        push();
+      }
       quote = ch;
       rawBuf += ch;
       continue;

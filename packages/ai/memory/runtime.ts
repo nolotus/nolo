@@ -1,3 +1,4 @@
+import { emptyMemoryInjectionObservation, type MemoryInjectionObservation, type MemoryInjectionSource } from "./overlay";
 import { touchMemoryItemsInDb } from "./storeShared";
 import { buildMemoryOverlay, DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET } from "./overlay";
 import { rankMemoryCandidates, type MemoryRankContext } from "./rank";
@@ -221,7 +222,7 @@ export interface MemoryVNextPureReadObservation {
   error?: string;
 }
 
-export interface MemoryRuntimeResultObservation {
+export interface MemoryRuntimeResultObservation extends MemoryInjectionObservation {
   event: "memory_runtime_result";
   configuredPure: boolean;
   configuredPrimary: boolean;
@@ -282,6 +283,8 @@ export const resolveMemoryRuntime = async (input: {
   let outcome: MemoryRuntimeResultObservation["outcome"] = "error";
   let errorKind: MemoryRuntimeResultObservation["errorKind"] = "runtime_error";
   let fallbackKind: "none" | "timeout" | "runtime_error" = "none";
+  let injection = emptyMemoryInjectionObservation();
+  const injectionEmit = (observation: MemoryInjectionObservation) => { injection = observation; };
   const finish = (result: MemoryRuntimeResolution): MemoryRuntimeResolution => {
     outcome = fallbackKind === "none" ? (result.promptBlock ? "result" : "empty") : "fallback";
     errorKind = fallbackKind;
@@ -311,6 +314,7 @@ export const resolveMemoryRuntime = async (input: {
         owners,
         userInput: input.userInput,
         maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET,
+        injectionEmit,
       });
     } catch (error) {
       pureFailed = true;
@@ -460,9 +464,12 @@ export const resolveMemoryRuntime = async (input: {
   );
   const selected = [...residentItems, ...ranked];
   const legacyLatencyMs = Math.round((performance.now() - legacyStartedAt) * 10) / 10;
-  const renderOverlay = (items: MemoryItem[]) =>
-    items.length === 0 ? null : buildMemoryOverlay(items, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET });
-  let promptBlock = renderOverlay(selected);
+  // Without M4 selection metadata, legacy coverage is unknown. Do not add reads
+  // or claim these lines are uncovered (notably on legacy/error fallback turns).
+  const renderOverlay = (items: MemoryItem[], sources?: ReadonlyMap<MemoryItem, MemoryInjectionSource>) =>
+    buildMemoryOverlay(items, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET, sources, injectionEmit });
+  // Render only the final selection; failed primary selection uses the legacy fallback.
+  let promptBlock: string | null = configuredPrimary ? null : renderOverlay(selected);
 
   // Slice 7 primary read (flag-gated, default OFF → behavior unchanged).
   // Retrieval is still the cheap local ranker above. Authority is per item:
@@ -498,7 +505,7 @@ export const resolveMemoryRuntime = async (input: {
             );
           }),
         ]).finally(() => clearTimeout(timer));
-        promptBlock = renderOverlay(m4.renderItems);
+        promptBlock = renderOverlay(m4.renderItems, m4.sources);
         allCoveredByVNext = m4.uncoveredLegacyCount === 0 && m4.recalledStateCount > 0;
         const source = m4.recalledStateCount > 0
           ? (m4.uncoveredLegacyCount === 0 ? "vnext" : "hybrid")
@@ -514,6 +521,7 @@ export const resolveMemoryRuntime = async (input: {
           ...(source === "legacy_fallback" ? { fallbackReason: "no_vnext_context" as const } : {}),
         });
       } catch (error) {
+        promptBlock = renderOverlay(selected);
         fallbackKind = error === timeoutMarker ? "timeout" : "runtime_error";
         emitPrimary({
           ...base,
@@ -604,6 +612,7 @@ export const resolveMemoryRuntime = async (input: {
   return finish({ selectedItems: selected, promptBlock });
   } finally {
     const observation: MemoryRuntimeResultObservation = {
+      ...injection,
       event: "memory_runtime_result", configuredPure, configuredPrimary, branch, outcome, errorKind,
     };
     try {

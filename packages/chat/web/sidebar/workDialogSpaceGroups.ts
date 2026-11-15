@@ -103,7 +103,11 @@ export type WorkSpaceRecord = {
 export type WorkCategoryGroup = { id: string | null; label: string; rows: WorkDialogFlatRow[] };
 
 /** Only authoritative space contents assign categories; absent/dangling links stay reachable. */
-export function groupWorkDialogsByCategory(rows: readonly WorkDialogFlatRow[], record?: WorkSpaceRecord | null): WorkCategoryGroup[] {
+export function groupWorkDialogsByCategory(
+  rows: readonly WorkDialogFlatRow[],
+  record?: WorkSpaceRecord | null,
+  options?: { dropEmpty?: boolean },
+): WorkCategoryGroup[] {
   const categories = Object.entries(record?.categories ?? {}).filter((entry): entry is [string, { name: string; order: number }] => Boolean(entry[1]?.name?.trim()));
   if (!categories.length) return [{ id: null, label: "", rows: [...rows] }];
   const links = new Map(Object.values(record?.contents ?? {}).filter(link => link && typeof link.contentKey === "string").map(link => [link!.contentKey, link!]));
@@ -114,7 +118,10 @@ export function groupWorkDialogsByCategory(rows: readonly WorkDialogFlatRow[], r
     const id = linked && known.has(linked) ? linked : null;
     buckets.set(id, [...(buckets.get(id) ?? []), row]);
   }
-  const result: WorkCategoryGroup[] = categories.sort((a, b) => a[1].order - b[1].order || a[1].name.localeCompare(b[1].name) || a[0].localeCompare(b[0])).map(([id, category]) => ({ id, label: category.name, rows: buckets.get(id) ?? [] })).filter(group => group.rows.length);
+  let result: WorkCategoryGroup[] = categories.sort((a, b) => a[1].order - b[1].order || a[1].name.localeCompare(b[1].name) || a[0].localeCompare(b[0])).map(([id, category]) => ({ id, label: category.name, rows: buckets.get(id) ?? [] }));
+  if (options?.dropEmpty) {
+    result = result.filter(group => group.rows.length > 0);
+  }
   const rest = buckets.get(null);
   if (rest?.length) result.push({ id: null, label: "", rows: rest });
   for (const group of result) group.rows.sort((a, b) => {
@@ -129,10 +136,15 @@ export function groupWorkDialogsByCategory(rows: readonly WorkDialogFlatRow[], r
   return result;
 }
 
+export interface WorkSpaceRecordCache {
+  (scope: string, spaceId: string, read: () => Promise<WorkSpaceRecord | null>): Promise<WorkSpaceRecord | null>;
+  invalidate(spaceId?: string): void;
+}
+
 /** Same session-scoped request serves names and categories; failed records expire together. */
-export function createWorkSpaceRecordCache(ttlMs = WORK_SPACE_NAME_TTL_MS) {
+export function createWorkSpaceRecordCache(ttlMs = WORK_SPACE_NAME_TTL_MS): WorkSpaceRecordCache {
   const entries = new Map<string, { at: number; value: Promise<WorkSpaceRecord | null> }>();
-  return (scope: string, spaceId: string, read: () => Promise<WorkSpaceRecord | null>): Promise<WorkSpaceRecord | null> => {
+  const cache = (scope: string, spaceId: string, read: () => Promise<WorkSpaceRecord | null>): Promise<WorkSpaceRecord | null> => {
     const key = JSON.stringify([scope, normalizeSpaceId(spaceId)]);
     const cached = entries.get(key);
     if (cached && Date.now() - cached.at < ttlMs) return cached.value;
@@ -140,7 +152,28 @@ export function createWorkSpaceRecordCache(ttlMs = WORK_SPACE_NAME_TTL_MS) {
     entries.set(key, { at: Date.now(), value });
     return value;
   };
+  cache.invalidate = (spaceId?: string) => {
+    if (!spaceId) {
+      entries.clear();
+      return;
+    }
+    const target = normalizeSpaceId(spaceId);
+    for (const key of entries.keys()) {
+      try {
+        const parsed = JSON.parse(key);
+        if (Array.isArray(parsed) && parsed[1] === target) {
+          entries.delete(key);
+        }
+      } catch {
+        entries.delete(key);
+      }
+    }
+  };
+  return cache;
 }
+
+/** Shared singleton cache across sidebar preview and space groups. */
+export const readCachedSpaceRecord = createWorkSpaceRecordCache();
 
 /** Directory membership is independent of an object's owning spaceId. A directory
  * summary is a read-only link, never proof of access to the referenced object. */

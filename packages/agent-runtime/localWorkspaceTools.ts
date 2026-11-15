@@ -1,5 +1,8 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { formatToolMessageContent } from "./providerMessageProjection";
+import { TOOL_OUTPUT_SPILL_BYTES, TOOL_OUTPUT_SPILL_LINES } from "./toolOutputSpillProjection";
+import { countLines } from "./toolSpillStore";
 import { formatImageSummary } from "./imageSummary";
 import { readLocalImage } from "./readImage";
 import { renderVisualPage, visualRendererCapability } from "./visualRenderer.node";
@@ -424,7 +427,6 @@ function readExpectedReplacementCount(args: WorkspaceFileArgs) {
  * had to be dropped. Falling back to the whole file would turn one bad
  * argument into a context blowup on large files.
  */
-const READ_FILE_SLICE_FALLBACK_LINES = 200;
 
 /**
  * `null` means "not provided", not "provided an invalid value".
@@ -562,32 +564,11 @@ function parseLinesArg(value: unknown): { slice?: ReadFileSlice; warning?: strin
   return { slice: { startLine, endLine } };
 }
 
-/**
- * Resolve which lines readFile should return, without throwing.
- *
- * A bad slice argument does not invalidate the request itself — the path is
- * still valid and the file still exists — so dropping the argument and
- * reporting it beats returning nothing. Throwing left the model with no
- * content and no way to tell what was at fault, which produced repeated blind
- * retries against the same file.
- *
- * Rejected input is dropped, never silently reinterpreted; each drop is
- * surfaced in `warnings` so the caller can correct the next call.
- */
+/** Parse the optional read range; invalid values are rejected before file access. */
 function readFileSliceArgs(args: WorkspaceFileArgs) {
-  const warnings: string[] = [];
-  const withFallback = (slice: ReadFileSlice, invalidLines: string) => {
-    warnings.push(
-      `No usable line range remained; returned the first ${READ_FILE_SLICE_FALLBACK_LINES} lines instead of the whole file.`,
-    );
-    return { ...slice, maxLines: READ_FILE_SLICE_FALLBACK_LINES, warnings, invalidLines };
-  };
-
-  if (isAbsentArg(args.lines)) return { warnings, invalidLines: undefined };
-
+  if (isAbsentArg(args.lines) || args.lines === "") return {};
   const { slice, warning } = parseLinesArg(args.lines);
-  if (warning) warnings.push(warning);
-  return slice ? { ...slice, warnings, invalidLines: undefined } : withFallback({}, describeRejectedArgValue(args.lines));
+  return slice ? { slice } : { error: clipMarkerValue(warning ?? "Invalid line range", 240) };
 }
 
 /**
@@ -1232,7 +1213,15 @@ async function readFileTool(args: {
 }): Promise<AgentRuntimeToolResult> {
   const parsed = parseWorkspaceToolArguments(args.call.arguments);
   const requestedPath = requireWorkspaceToolPath(parsed);
-  const { warnings, invalidLines, ...sliceArgs } = readFileSliceArgs(parsed);
+  const parsedSlice = readFileSliceArgs(parsed);
+  if (parsedSlice.error) {
+    return {
+      content: `[readFile] Invalid lines: ${parsedSlice.error} No file content was read. Use lines: ${LINES_ARG_SYNTAX}, or omit lines.`,
+      metadata: { status: "invalid-arguments", tool: "readFile" },
+    };
+  }
+  const sliceArgs = parsedSlice.slice ?? {};
+  const warnings: string[] = [];
   const approval = await resolveLocalWorkspaceToolApproval({
     workspaceRoot: args.workspaceRoot,
     requestedPath,
@@ -1250,44 +1239,87 @@ async function readFileTool(args: {
     content,
     ...sliceArgs,
   });
-  const truncatedRead = defensivelyTruncateReadFile({
-    content: sliced.content,
-    totalLines: sliced.totalLines,
-  });
-  // 非法 lines 参数仍返回内容（避免盲重试），但标记必须放在**内容首行**：
-  // 只写进 metadata.warnings 时它落在内容之后，模型实际读不到。
-  // 标记先于 metadata/ledger 定稿：bytes、truncated 与 retained 长度都必须描述
-  // 最终返回内容，而不是标记追加之前的正文（review R1/R2）。
-  const invalidLinesMarker = invalidLines !== undefined
-    ? `[readFile] lines=${clipMarkerValue(invalidLines)} was rejected (only ONE range: ${LINES_ARG_SYNTAX}); returned lines ${sliced.startLine}-${sliced.endLine} instead. Fix the argument before relying on this window.\n`
-    : "";
-  const finalRead = invalidLinesMarker.length > 0
-    ? defensivelyTruncateReadFile({
-        content: truncatedRead.content,
-        totalLines: sliced.totalLines,
-        limit: Math.max(1, READ_FILE_MAX_CHAR_LIMIT - invalidLinesMarker.length),
-      })
-    : truncatedRead;
-  const finalContent = invalidLinesMarker + finalRead.content;
-  // 两次截断的 flag 必须取 OR：第二次截断的输入已是第一次的产物，它看不见第一次丢掉的内容。
-  const truncatedByCharLimit = truncatedRead.truncatedByCharLimit || finalRead.truncatedByCharLimit;
-  const isTruncated = sliced.truncated || truncatedByCharLimit;
   const relativePath = normalizeWorkspaceRelativePath({
     workspaceRoot: resolve(args.workspaceRoot),
     targetPath: absolutePath,
   });
+  const cap = resolveHistoricalToolContentCap("readFile", 0);
+  const selectedLines = splitTextLines(sliced.content);
+  const makeMetadata = (body: string, endLine: number, windowed: boolean, partialLine: boolean) => ({
+    path: relativePath,
+    bytes: Buffer.byteLength(body),
+    totalBytes: Buffer.byteLength(originalContent),
+    ...(projection.projected ? {
+      projection: "run-result-observations",
+      projectedTotalBytes: Buffer.byteLength(content),
+      rawReadHint: "readFile raw:true reads original evidence; line numbers are unchanged.",
+    } : {}),
+    startLine: sliced.startLine,
+    ...(partialLine ? { partialLine: true } : { endLine }),
+    totalLines: sliced.totalLines,
+    truncated: sliced.truncated || windowed,
+    ...(windowed ? { truncatedByByteLimit: true, truncatedByCharLimit: true } : {}),
+    ...(sliceArgs.maxLines ? { maxLines: sliceArgs.maxLines } : {}),
+    ...(sliceArgs.tailLines ? { tailLines: sliceArgs.tailLines } : {}),
+    ...(activity ? { activity } : {}),
+  });
+  const fits = (body: string, endLine: number, windowed: boolean) => {
+    // Never call the spill writer while estimating a candidate.
+    if (Buffer.byteLength(body) > TOOL_OUTPUT_SPILL_BYTES || countLines(body) > TOOL_OUTPUT_SPILL_LINES) return false;
+    const metadata = makeMetadata(body, endLine, windowed, false);
+    return formatToolMessageContent({ toolName: "readFile", content: body, metadata }).length <= cap;
+  };
+  // Binary search complete-line windows. The full result is checked first so
+  // its trailing newline and non-truncated metadata are preserved.
+  let deliveredCount = selectedLines.length;
+  let finalContent = sliced.content;
+  let windowed = false;
+  if (!fits(finalContent, sliced.endLine, false)) {
+    let low = 0;
+    let high = selectedLines.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      const candidate = selectedLines.slice(0, mid).join("\n");
+      if (fits(candidate, sliced.startLine + mid - 1, true)) low = mid;
+      else high = mid - 1;
+    }
+    deliveredCount = low;
+    windowed = true;
+    finalContent = selectedLines.slice(0, deliveredCount).join("\n");
+  }
+  const oversizedLine = windowed && deliveredCount === 0;
+  if (oversizedLine) {
+    // Find a preview whose real formatted message fits, including escaped
+    // metadata and the explicit truncation marker.
+    let low = 0;
+    let high = Math.min(sliced.content.length, cap);
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      const candidate = defensivelyTruncateReadFile({ content: sliced.content, totalLines: sliced.totalLines, limit: mid }).content;
+      const metadata = makeMetadata(candidate, sliced.startLine, true, true);
+      const fitsPreview = Buffer.byteLength(candidate) <= TOOL_OUTPUT_SPILL_BYTES &&
+        countLines(candidate) <= TOOL_OUTPUT_SPILL_LINES &&
+        formatToolMessageContent({ toolName: "readFile", content: candidate, metadata }).length <= cap;
+      if (fitsPreview) low = mid;
+      else high = mid - 1;
+    }
+    finalContent = low > 0
+      ? defensivelyTruncateReadFile({ content: sliced.content, totalLines: sliced.totalLines, limit: low }).content
+      : "[readFile] Line exceeds the delivery budget; use codeSearch or another tool to inspect it.";
+  }
+  const deliveredEndLine = windowed && !oversizedLine ? sliced.startLine + deliveredCount - 1 : sliced.endLine;
+  const metadata = makeMetadata(finalContent, deliveredEndLine, windowed, oversizedLine);
 
   // Read ledger: an unchanged file whose requested range was already fully
   // delivered (and small enough to still sit intact in history) answers with
   // a short notice instead of resending content; force:true bypasses this.
-  // Truncated reads are never recorded — the model only saw part of them, so
-  // a follow-up read of the same range stays legitimate.
+  // Only complete delivered lines are recorded, including bounded windows.
   // Dedup runs only when a ledger was injected (TUI host path). The machine
   // tool-invocation route passes no ledger, so every machine readFile returns
   // real content regardless of `force`.
   const force = parsed.force === true;
   const ledger = args.readLedger;
-  const requestRange = { startLine: sliced.startLine, endLine: sliced.endLine };
+  const deliveredRange = { startLine: sliced.startLine, endLine: deliveredEndLine };
   // Raw evidence and its reading projection must never deduplicate each other.
   const fingerprint = createHash("sha1").update(originalContent)
     .update(parsed.raw === true ? "\0raw" : "\0default").digest("hex").slice(0, 20);
@@ -1296,23 +1328,24 @@ async function readFileTool(args: {
     entry = undefined;
     ledger?.delete(relativePath);
   }
-  // The !isTruncated gate belongs on the recording side only: a sliced read
-  // may still be deduped when every requested line was already delivered.
-  if (!force && entry && ledger) {
+  // Test only the window we can deliver; an oversized partial line is never deduped.
+  if (!force && entry && ledger && !oversizedLine) {
     const retainedCap = resolveHistoricalToolContentCap("readFile", 0);
     const retained = filterRetainedLedgerRecords(entry.records, retainedCap);
-    if (retained.length > 0 && isLineRangeCovered(requestRange, retained)) {
+    if (retained.length > 0 && isLineRangeCovered(deliveredRange, retained)) {
       // LRU refresh: 访问命中时移至最新，避免高频复读的文件键被过早淘汰
       ledger.delete(relativePath);
       ledger.set(relativePath, entry);
       return {
         content:
-          `[readFile] ${relativePath} lines ${requestRange.startLine}-${requestRange.endLine} were already ` +
-          "delivered earlier and the file is unchanged; not resending. Pass force:true to refetch.",
+          `[readFile] ${relativePath} lines ${deliveredRange.startLine}-${deliveredRange.endLine} were already ` +
+          "delivered earlier and the file is unchanged; not resending. Pass force:true to refetch." +
+          (windowed ? ` Continue with lines=${deliveredEndLine + 1}-.` : ""),
         metadata: {
           path: relativePath,
-          startLine: requestRange.startLine,
-          endLine: requestRange.endLine,
+          startLine: deliveredRange.startLine,
+          endLine: deliveredRange.endLine,
+          ...(windowed ? { truncated: true } : {}),
           totalLines: sliced.totalLines,
           deduped: true,
           ...(warnings.length
@@ -1323,39 +1356,15 @@ async function readFileTool(args: {
       };
     }
   }
-  const metadata = {
-    path: relativePath,
-    bytes: Buffer.byteLength(finalContent),
-    totalBytes: Buffer.byteLength(originalContent),
-    ...(projection.projected ? {
-      projection: "run-result-observations",
-      projectedTotalBytes: Buffer.byteLength(content),
-      rawReadHint: "readFile raw:true reads original evidence; line numbers are unchanged.",
-    } : {}),
-    startLine: sliced.startLine,
-    endLine: sliced.endLine,
-    totalLines: sliced.totalLines,
-    truncated: isTruncated,
-    ...(truncatedByCharLimit ? { truncatedByByteLimit: true, truncatedByCharLimit: true } : {}),
-    ...(sliceArgs.maxLines ? { maxLines: sliceArgs.maxLines } : {}),
-    ...(sliceArgs.tailLines ? { tailLines: sliceArgs.tailLines } : {}),
-    ...(warnings.length
-      ? { warnings: [...warnings, buildReadFileSliceHint(sliced.totalLines)] }
-      : {}),
-    ...(activity ? { activity } : {}),
-  };
-  if (!isTruncated && ledger) {
+  if (!oversizedLine && ledger) {
     // Record the persisted tool-message length, not the bare content length:
     // localLoop.formatToolMessageContent embeds the metadata JSON into the
     // durable message for readFile, and historical projection clips that
     // whole string. Keeping the ledger in the same units makes the retention
     // gate match exactly what history still holds.
-    const persistedChars =
-      finalContent.length +
-      "\n\n[tool metadata]\n".length +
-      JSON.stringify(metadata).length;
+    const persistedChars = formatToolMessageContent({ toolName: "readFile", content: finalContent, metadata }).length;
     const records = entry?.records ?? [];
-    records.push({ ...requestRange, chars: persistedChars });
+    records.push({ ...deliveredRange, chars: persistedChars });
     ledger.delete(relativePath);
     ledger.set(relativePath, {
       fingerprint,
@@ -1367,7 +1376,6 @@ async function readFileTool(args: {
       ledger.delete(oldestKey);
     }
   }
-  // 非法 lines 参数仍返回内容（避免盲重试），标记由上面的 finalContent 统一处理。
   return { content: finalContent, metadata };
 }
 

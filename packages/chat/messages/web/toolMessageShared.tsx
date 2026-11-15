@@ -71,7 +71,7 @@ export const StatusIcon = ({
   const isFailed = status === "failed";
   const isRepairing = status === "repairing";
   // Cancelled settles neutral-muted: neither success nor failure.
-  const isCancelled = status === "cancelled";
+  const isCancelled = status === "cancelled" || status === "unknown";
   const toneClass = isFailed
     ? "icon-error"
     : isRepairing

@@ -1,3 +1,4 @@
+import "../cli/agentRunHostBootstrap";
 // packages/desktop-runtime/entry.ts
 // 独立的单机运行时入口：启动本地 HTTP server，注册桌面运行时路由 + 静态文件托管。
 // 不依赖任何云端私有模块（auth/billing/cloud-server）。

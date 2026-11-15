@@ -103,10 +103,13 @@ export function resolveToolDisplayName(
  * Build a translate fn for react-i18next `t` that always passes defaultValue.
  * `t(key, string)` is unreliable across i18next versions.
  */
+export type ToolNameTranslator = ((key: string, fallback: string) => string) & { locale?: string };
+
 export function createToolNameTranslator(
-  t: (key: string, options?: Record<string, unknown> | string) => string
-): (key: string, fallback: string) => string {
-  return (key, fallback) => {
+  t: (key: string, options?: Record<string, unknown> | string) => string,
+  locale?: string,
+): ToolNameTranslator {
+  const translate: ToolNameTranslator = (key, fallback) => {
     try {
       const value = t(key, { defaultValue: fallback });
       return typeof value === "string" && value.trim() ? value : fallback;
@@ -114,6 +117,8 @@ export function createToolNameTranslator(
       return fallback;
     }
   };
+  translate.locale = locale;
+  return translate;
 }
 
 /** Legacy long version labels → short UI titles (also for persisted activity). */
@@ -812,10 +817,13 @@ function getMessageStatus(msg: any): ToolActivityStatus {
   const rawData = typeof msg?.content === "string"
     ? asOptionalJsonRecord(msg.content)
     : msg?.content;
+  const name = normalizeToolNameKey(msg?.toolName);
+  const isReadFile = ["readFile", "read_file", "readWorkspaceFile"].includes(name);
   const isError =
     msg?.toolPayload?.status === "failed" ||
     !!msg?.toolPayload?.error ||
-    !!rawData?.error;
+    !!msg?.metadata?.error ||
+    (!isReadFile && (!!rawData?.error || rawData?.ok === false));
   if (msg?.isStreaming || msg?.toolPayload?.status === "running") return "running";
   if (isError) return "failed";
   if (msg?.toolPayload?.status === "pending") return "pending";

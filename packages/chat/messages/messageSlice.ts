@@ -194,6 +194,7 @@ type MessageScopePayload = { dialogId?: string; dialogKey?: string; all?: boolea
 /** Thin adapter: fills `messages` from Redux so existing call sites stay stable. */
 export const captureUnderstandingFromCompletedUiTurn = async (input: {
   state: any;
+  signal?: AbortSignal;
   agentKey?: string | null;
   dialogId: string;
   dialogKey?: string;
@@ -201,7 +202,7 @@ export const captureUnderstandingFromCompletedUiTurn = async (input: {
   assistantText: string;
   toolCalls?: MessageStreamEndPayload["toolCalls"];
   messages?: Message[];
-}): Promise<void> =>
+}) =>
   captureUnderstandingFromCompletedUiTurnCore({
     ...input,
     messages:
@@ -1426,12 +1427,18 @@ export const messageSlice = createSliceWithThunks({
         // getter instead would reintroduce that race.
         captureUnderstandingFromCompletedUiTurn({
           state: getState() as any,
+          signal,
           agentKey: agentConfig?.dbKey,
           dialogId,
           dialogKey,
           spaceId: payload.spaceId,
           assistantText: textContent,
           toolCalls,
+        }).then(result => {
+          if (result.status === "failed" || (result.status === "native" &&
+              (result.capture === "failed" || result.formation === "failed" || result.formation === "deferred"))) {
+            console.warn("Understanding memory capture incomplete:", result);
+          }
         }).catch((err: unknown) =>
           console.error("Understanding memory capture failed:", err)
         );

@@ -73,7 +73,7 @@ export type ScrollAnimatorDeps = {
  *
  * 小数增益用累加器结转，总距离不因取整丢失。反向立即清空窗口与累加器。
  */
-export const VELOCITY_WINDOW_MS = 120;
+export const VELOCITY_WINDOW_MS = 160;
 export const VELOCITY_SLOW_COUNT = 3;
 export const VELOCITY_GAIN_PER_REPORT = 0.35;
 export const VELOCITY_MAX_GAIN = 6;

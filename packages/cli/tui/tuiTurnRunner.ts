@@ -144,10 +144,7 @@ import {
   resolveTerminalProgramStatusState,
 } from "../client/terminalRunStatus";
 import {
-  emitTerminalAttention,
   runWithInputRequiredAttention,
-  shouldEmitTerminalBell,
-  TURN_COMPLETION_ATTENTION_THRESHOLD_MS,
 } from "./terminalNotification";
 import {
   createHistoryOutputStream,
@@ -170,6 +167,7 @@ export type SelfUpdater = (
 
 export type WorkspaceOptions = {
   scriptDir: string;
+  requestRestart?: (state: TuiState) => void;
   env?: NodeJS.ProcessEnv;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
@@ -1351,6 +1349,7 @@ export interface AgentTurnContext {
 
   // ── 渲染与状态回调 ──
   syncWindowTitle: () => void;
+  reportTerminalStatus?: (report: Parameters<typeof emitTerminalProgramStatus>[1]) => void;
   renderHistoryToOutput: () => void;
   scheduleRender: () => void;
   flushPendingRender: () => void;
@@ -1428,7 +1427,7 @@ export async function runOneAgentTurn(
   ctx.turnEpoch += 1;
   const myEpoch = ctx.turnEpoch;
   const emitStatus = (report: Parameters<typeof emitTerminalProgramStatus>[1]) =>
-    emitTerminalProgramStatus(ctx.output, report);
+    ctx.reportTerminalStatus ? ctx.reportTerminalStatus(report) : emitTerminalProgramStatus(ctx.output, report);
   // 迟到的回调不许写回状态，判据有两条：
   // 1) 本 turn 必须仍是当前 turn：强制收尾（第二次 Esc）把屏幕交还用户后用户
   //    可能已经开了新一轮，旧 turn 的 done/error/working 会覆盖新一轮的状态。
@@ -1764,7 +1763,6 @@ export async function runOneAgentTurn(
   try {
     ctx.activeTurnAbort = new AbortController();
     ctx.activeTurnEpoch = myEpoch;
-    const turnStartedAtMs = Date.now();
     const runResult = await runAgentChat(
       ctx.options.scriptDir,
       ctx.state,
@@ -1833,7 +1831,7 @@ export async function runOneAgentTurn(
                 if (!original.messageId) throw new Error("Queued user batch requires stable message ids");
                 const { request, imageUrls } = await prepareQueuedUserRequest(ctx, original);
                 displayMessages.push({ text: request.text, imageUrls });
-                userMessages.push({ role: "user", cliMessageId: original.messageId,
+                userMessages.push({ role: "user", cliMessageId: original.messageId, cliHistoryOrder: Date.now(),
                   cliSource: original.source, cliImagePaths: original.imagePaths, cliMediaPaths: original.mediaPaths,
                   content: imageUrls.length ? [{ type: "text" as const, text: request.text },
                     ...imageUrls.map(url => ({ type: "image_url" as const, image_url: { url } }))] : request.text });
@@ -1997,30 +1995,7 @@ export async function runOneAgentTurn(
       return { ok: false, aborted: true };
     }
     const wasAborted = ctx.activeTurnAbort.signal.aborted;
-    if (runResult.businessCompletion) {
-      const completion = runResult.businessCompletion;
-      const label = { completed: "任务完成", incomplete: "任务未完整完成", blocked: "任务受阻", waiting: "等待用户验收" }[completion.status];
-      ctx.emitCommandOutput(`[auto-review] ${label}${completion.reasons.length ? `：${completion.reasons.join(", ")}` : ""}`);
-    }
     ctx.activeTurnAbort = null;
-    // turn-completed attention 只对「跑了足够久的成功长任务」响：300ms 的
-    // 普通聊天每句都响会非常烦（门槛见 TURN_COMPLETION_ATTENTION_THRESHOLD_MS）。
-    // Windows Terminal 下附带一条 OSC 9;4 clear，防御性清掉任何残留 progress。
-    if (
-      shouldEmitTerminalBell({
-        wasAborted,
-        streamInterrupted: runResult.streamInterrupted,
-        exitCode: runResult.exitCode,
-        interactive: isInteractiveInput(ctx.input),
-        durationMs: Date.now() - turnStartedAtMs,
-      })
-    ) {
-      emitTerminalAttention({
-        output: ctx.output,
-        env: ctx.effectiveEnv,
-        reason: "turn-completed",
-      });
-    }
     if (isInteractiveInput(ctx.input)) {
       finalizeCurrentTurn(ctx.history);
       ctx.flushPendingRender();
@@ -2358,7 +2333,7 @@ export async function runQueuedUserBatch(
   for (const original of requests) {
     if (!original.messageId) throw new Error("Queued user batch requires stable message ids");
     const { request, imageUrls } = await prepareQueuedUserRequest(ctx, original);
-    userMessages.push({ role: "user" as const, cliMessageId: original.messageId,
+    userMessages.push({ role: "user" as const, cliMessageId: original.messageId, cliHistoryOrder: Date.now(),
       cliSource: original.source, cliImagePaths: original.imagePaths, cliMediaPaths: original.mediaPaths,
       content: imageUrls.length ? [{ type: "text" as const, text: request.text },
         ...imageUrls.map(url => ({ type: "image_url" as const, image_url: { url } }))] : request.text });

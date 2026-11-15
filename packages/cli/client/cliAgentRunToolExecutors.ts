@@ -1,3 +1,4 @@
+import { validateChildImagePaths, validateChildImages } from "./childRunImages";
 import { assertDispatchSelectionAdmission } from "../../ai/agent/dispatchSelectionPolicy";
 import { parseAgentRunArgs } from "../agentRunArgs";
 import { parseUserIdFromAuthToken, resolveAuthToken, resolveServerUrl } from "../cliEnvHelpers";
@@ -141,6 +142,7 @@ export type CliAgentRunToolExecutorDeps = {
    * 解析候选 agent 的展示名（写进 run 记录，供卡片/列表显示）。
    * 调用方通常只给 agentKey 不传 agentName；缺省时卡片只能退回通用「子智能体」。
    */
+  resolveAgentImageSupport?: (agentKey: string) => Promise<boolean>;
   resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   /**
@@ -320,6 +322,8 @@ function buildRunStatusPayload(
       // 排在 2000 字 lastAssistantText 之后的键会被整段省略，模型连路径都看
       // 不到。挂在头部才能保证「结论在哪」永远可见。
       ...(reconciled.resultFile ? { resultFile: reconciled.resultFile } : {}),
+      ...(reconciled.continuedFrom ? { continuedFrom: reconciled.continuedFrom } : {}),
+      ...(isAgentRunTerminalStatus(reconciled.status) ? { resultNote: "Process terminal status is not delivery, test, review, user acceptance or integration/release approval. lastAssistantText is a preview, not a complete report; read resultFile for current scope, blockers and evidence. Runtime acceptance contains observations only; unknown stays unknown. continuedFrom is lineage, not inherited approval." } : {}),
       ...(typeof reconciled.toolCallCount === "number"
         ? { toolCallCount: reconciled.toolCallCount }
         : {}),
@@ -440,6 +444,8 @@ async function assertCredentialFanoutAllowed(
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
+    const imagePaths = validateChildImagePaths(args.imagePaths);
+    if (imagePaths.length && args.runtimeKey !== "local") throw new Error("image_backend_unsupported: imagePaths requires explicit host-local runtimeKey=local");
     const continueDialogId = normalizeContinueDialogId(args.continueDialogId);
     const continuedRecord = continueDialogId ? await deps.dialogExistsForCurrentUser?.(continueDialogId) : undefined;
     if (continueDialogId && !continuedRecord) {
@@ -604,6 +610,12 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     // 解析失败即未知档位，不拦）。续跑沿用既有身份逻辑：按生效的 agentKey 解析模型。
     let selectedModel: string | undefined;
     try { selectedModel = await deps.resolveAgentModel?.(agentKey); } catch { /* 解析不到模型 = 未知档位，不构成拒绝理由。 */ }
+    if (imagePaths.length) {
+      let imageSupport = false;
+      try { imageSupport = await deps.resolveAgentImageSupport?.(agentKey) === true; } catch { /* Unknown capability fails closed, without leaking store errors. */ }
+      if (!imageSupport) throw new Error("image_model_unsupported: child model image capability is unsupported or unknown");
+      await validateChildImages(imagePaths);
+    }
     const selectionCheck = assertDispatchSelectionAdmission({
       dimension: args.dimension,
       difficulty: args.difficulty,
@@ -667,6 +679,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // 的地方，成对不变式在 buildCliLocalRuntimeForwardArgs 内机械断言。
       ...buildCliLocalRuntimeForwardArgs(dispatch),
       ...instaboxArgs,
+      ...imagePaths.flatMap(path => ["--image", path]),
     ];
 
     // α：生产侧解析身份——显式 agentName 严格保留；省略时从 agent 配置回读；

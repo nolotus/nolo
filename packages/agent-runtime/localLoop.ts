@@ -1,3 +1,4 @@
+import { dialogTurnUserMessageId, orderDialogHistory } from "./dialogHistoryOrder";
 import { classifyContextRefusal, type ContextRefusalDiagnostics } from "./contextRefusal";
 /**
  * Agent 本地执行主循环（Local Execution Loop / Agent Harness Engine）。
@@ -89,7 +90,6 @@ import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
 import type { SubtaskBudgetLimits } from "./subtaskBudget";
 import { buildConsultationModeBlock } from "./consultationMode";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
-import { evaluateTaskExecutionContract, type TaskExecutionContract } from "./taskExecutionContract";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { hasImageInRuntimeMessages } from "../ai/agent/imagePreprocessing";
@@ -189,11 +189,6 @@ export type LocalAgentTurnInput = {
   runtimeContext?: Record<string, any> | null;
   /** Dispatched leaf runs receive parent-facing final-response guidance. */
   runKind?: "interactive" | "subtask";
-  /** Host-owned task snapshot only; never inferred from prompt or model text.
-   * Hosts remain responsible for authorization provenance and verified evidence.
-   * Absent => legacy behavior, without an enforced business-completion claim.
-   */
-  taskExecutionContract?: TaskExecutionContract;
   /** @deprecated Accepted for older callers only; never limits execution. */
   subtaskMaxToolCalls?: number;
   /** @deprecated Accepted for older callers only; never limits execution. */
@@ -739,11 +734,6 @@ async function persistFailedLocalTurn(args: {
   input: LocalAgentTurnInput;
 }): Promise<string | undefined> {
   const errorMessage = toErrorMessage(args.error);
-  const businessCompletion = evaluateTaskExecutionContract(args.input.taskExecutionContract, {
-    stopped: args.input.abortSignal?.aborted ||
-      (args.error instanceof Error && (args.error as Error & { code?: string }).code === LOCAL_TURN_ABORTED_CODE),
-    executionFailed: true,
-  });
   try {
     const saved = await args.adapter.saveTurn({
       agentKey: args.agentKey,
@@ -756,7 +746,6 @@ async function persistFailedLocalTurn(args: {
         toolCallCount: args.toolCallCount ?? 0,
         error: true,
         errorMessage,
-        ...(businessCompletion ? { businessCompletion } : {}),
         ...(args.usage ? { usage: args.usage } : {}),
       },
       ...(args.accountingUsage ? { accountingUsage: args.accountingUsage } : {}),
@@ -1191,13 +1180,16 @@ export async function runLocalAgentTurn(
       input.compactionSummaryFallback ?? readHostCompactionSummaryFallback(input.adapter),
     boundary: observationBoundary,
     getContextUsage: () => usageLedger.lastContextUsage(),
-    getCanonicalCompactionHistory: () => [
+    getCanonicalCompactionHistory: () => orderDialogHistory([
       ...canonicalHistory,
       ...transcript.persisted(
         sanitizedPersistedInput,
         input.persistedInputReference,
-      ),
-    ],
+      ).map(message => {
+        const receipt = (message as typeof message & { cliMessageId?: string }).cliMessageId;
+        return receipt ? { ...message, id: receipt } : message;
+      }),
+    ]),
     getWorkingPrefix: () => transcript.working().slice(0, prefixCount),
     onSelectedSummary: (summary) => { selectedSummary = summary; },
     replaceWorkingView: (next) => {
@@ -1283,6 +1275,11 @@ export async function runLocalAgentTurn(
       ...message, content: await sanitizeInbound(message.content),
     })));
     messages.splice(currentInputStart, messages.length - currentInputStart, ...sanitizedUsers);
+  }
+  if (!input.userMessages?.length && input.adapter.host === "cli") {
+    const userIndex = builtMessages.prefixCount + history.length;
+    const id = dialogTurnUserMessageId(input.runtimeContext?.turnId, 0);
+    if (id && messages[userIndex]?.role === "user") messages[userIndex] = { ...messages[userIndex], id };
   }
   const acceptToolImages = createToolImageLedger();
   const transcript = createTurnTranscript({
@@ -1393,6 +1390,7 @@ export async function runLocalAgentTurn(
               role: "user",
               content,
               ...(message.cliMessageId ? { cliMessageId: message.cliMessageId } : {}),
+              ...(Number.isFinite(message.cliHistoryOrder) ? { cliHistoryOrder: message.cliHistoryOrder } : {}),
             });
           }
           pendingInjectionCommits.push({ commit: entry.commit, rollback: entry.rollback, messages: entry.messages });
@@ -2128,19 +2126,11 @@ export async function runLocalAgentTurn(
   }
 
   result = result!;
-  // A provider-supplied field is not business evidence. Only the explicit host
-  // snapshot may produce this assessment; no contract preserves legacy output.
   result = { ...result, stopReason:
     input.abortSignal?.aborted ? "aborted" :
     result.error || result.runtimeProviderFailure || result.emptyAssistantFallbackReason ? "error" :
     stopReason,
   };
-  delete result.businessCompletion;
-  const businessCompletion = evaluateTaskExecutionContract(input.taskExecutionContract, {
-    stopped: input.abortSignal?.aborted,
-    executionFailed: result.error === true || !!result.runtimeProviderFailure || !!result.emptyAssistantFallbackReason,
-  });
-  if (businessCompletion) result.businessCompletion = businessCompletion;
   if (!skipFinalAppend) {
     // 截断类兜底/告警（length/stream）时提取 reasoning 尾部（带 marker），
     // 以 thinkContent 附加到最终 assistant 消息：web 思考折叠可读的落盘通道，

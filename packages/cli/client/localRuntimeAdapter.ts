@@ -1,3 +1,6 @@
+import { createLiveImageSupportResolver } from "./liveImageSupport";
+import { fetchAntigravityAvailableModels } from "../oauth/flows/antigravity";
+import { resolveAgentImageInputSupport } from "../../ai/llm/agentCapabilities";
 import type { LocalCompactionSummaryFallback } from "../../agent-runtime/localAutoCompaction";
 import { createTuiSummaryLlmCaller } from "./tuiSummaryLlmCaller";
 import { getLocalShellLifecycle } from "../../agent-runtime/localToolPolicy";
@@ -906,6 +909,13 @@ export function createCliLocalRuntimeAdapter(
     deps.loopbackRequest ??
     (deps.fetchImpl ? undefined : defaultLoopbackRequest);
   const userId = resolveLocalUserId(deps.env);
+  const resolveLiveImageSupport = createLiveImageSupportResolver(userId, async () => {
+    const token = await createOAuthApiKeyRefResolver({
+      migration: { enableLegacyMigration: true }, localUserId: userId,
+    })("antigravity");
+    if (!token) return {};
+    return fetchAntigravityAvailableModels(fetchImpl, token);
+  });
   const localToolBudgets = parseLocalToolBudgets(deps.env);
   const localToolUsage = new Map<string, number>();
   const buildProviderOpenAiTools =
@@ -1372,6 +1382,10 @@ export function createCliLocalRuntimeAdapter(
           ? rec.name.trim()
           : undefined;
       },
+      resolveAgentImageSupport: async (agentRef: string) => {
+        const record = await readAgentFromStore({ agentRef, store: await getOrCreateSharedStore(deps), userId });
+        return !!record && resolveAgentImageInputSupport(await resolveLiveImageSupport({ ...(record as any), hasVision: (record as any).hasVision ?? false }));
+      },
       resolveAgentModel,
       dialogExistsForCurrentUser: async (dialogId: string) => {
         const store = await getOrCreateSharedStore(deps);
@@ -1617,7 +1631,7 @@ export function createCliLocalRuntimeAdapter(
           runtimeToolExecutionLimits = cached.runtimeToolExecutionLimits;
           reviewAgentConfig = cached.agentConfig;
           localToolExecutors = buildCurrentToolExecutors(cached.agentConfig);
-          return cached.agentConfig;
+          return resolveLiveImageSupport(cached.agentConfig);
         }
       }
 
@@ -1753,7 +1767,8 @@ export function createCliLocalRuntimeAdapter(
           runtimeToolExecutionLimits,
         });
       }
-      return exposedAgentConfig;
+      // Keep live evidence out of the process-wide prepared metadata cache.
+      return exposedAgentConfig ? resolveLiveImageSupport(exposedAgentConfig) : exposedAgentConfig;
     },
     loadDialogHistory: async (dialogId) => {
       const loaded = await loadCliDialogHistoryWithSource({

@@ -84,8 +84,7 @@ export function renderComposerTokenChip(
 
 /**
  * 状态行的上下文占用 chip，两档呈现（按**可用宽度**降级，不看占用率）：
- *   宽：`ctx 42% · 84k/200k`
- *   窄：`ctx 42%`
+ *   默认：`ctx 42%`；精确 token 数保留在 `/context`。
  *
  * 口径仍走 resolveContextUsage（与 `/context` 面板的令牌行同一处）：已用 =
  * 下一轮上下文占用（provider input，未收到 usage 时用本地估算 + 轮内流式增量），
@@ -99,7 +98,7 @@ function renderStatusContextSegment(
     | "estimatedContextTokens"
     | "liveTurnEstimatedTokens"
   >,
-  compact: boolean,
+  _compact: boolean,
 ): string {
   const usage = resolveContextUsage({
     tokens: state.turnTokens,
@@ -112,8 +111,7 @@ function renderStatusContextSegment(
   }
   const pct = Math.min(100, usage.pct ?? 0);
   const pctText = pct > 0 && pct < 10 ? pct.toFixed(1) : Math.round(pct).toString();
-  if (compact) return `ctx ${pctText}%`;
-  return `ctx ${pctText}% · ${formatTokenCount(usage.used)}/${formatTokenCount(usage.contextWindow)}`;
+  return `ctx ${pctText}%`;
 }
 
 /**
@@ -138,15 +136,15 @@ export function resolveStatusLineCredits(
 // ─── Status line ────────────────────────────────────────────────────────────
 
 /**
- * 权限授权 chip：两桶独立，只列已授权的桶（两桶都授权时退化为 `⏵ auto`）。
+ * 权限授权 chip：两桶独立，只列已授权的桶（两桶都授权时显示 `⏵ 已授权`）。
  * null = 两桶都在逐次询问，不渲染任何内容。
  */
 export function renderPermissionGrantChip(state: TuiState): string | null {
   const local = state.permissionGrants?.local === true;
   const remote = state.permissionGrants?.remote === true;
-  if (local && remote) return "⏵ auto";
-  if (local) return "⏵ local";
-  if (remote) return "⏵ remote";
+  if (local && remote) return t("permissionGranted");
+  if (local) return t("permissionLocalGranted");
+  if (remote) return t("permissionRemoteGranted");
   return null;
 }
 
@@ -175,9 +173,9 @@ export function renderStatusLine(
       ? ` · ${state.modeLabel}`
       : "";
   const agentLabel = `✦ ${agentDisplayName}${modeSuffix}`;
-  const agentSegment = themeText(agentLabel, "accent", colorEnabled);
+  const agentSegment = themeText(agentLabel, "muted", colorEnabled);
 
-  const cwdSegment = themeText(`📁 ${formatCwd(state.cwd)}`, "info", colorEnabled);
+  const cwdSegment = themeText(`📁 ${formatCwd(state.cwd)}`, "muted", colorEnabled);
 
   // 标题已由终端窗口标题区（syncWindowTitle 用 dialogLabel）显示，这里不再
   // 重复渲染 dialogTitle 段，避免输入区上方出现冗余标题。
@@ -240,7 +238,7 @@ export function renderStatusLine(
   // 分支 chip 同语义——"需要留意的状态"。两桶都未授权时不渲染任何内容。
   const grantChip = renderPermissionGrantChip(state);
   if (grantChip) {
-    parts.push(themeText(grantChip, "warning", colorEnabled));
+    parts.push(themeText(grantChip, "muted", colorEnabled));
   }
 
   // Chip fill + one space of padding per side. The padding is part of the
@@ -737,6 +735,15 @@ export function renderContextPanel(
   const next = (command: string, description: string) =>
     `  ${themeText(command, "accent", colorEnabled)}${themeText(description, "muted", colorEnabled)}`;
 
+  const exactUsage = resolveContextUsage({
+    tokens: state.turnTokens,
+    fallbackContextWindow: state.contextWindow,
+    estimatedContextTokens: state.estimatedContextTokens,
+    turnEstimatedTokens: state.liveTurnEstimatedTokens,
+  });
+  const exactTokens = exactUsage.used !== undefined
+    ? ` · ${exactUsage.estimated ? "~" : ""}${exactUsage.used}/${exactUsage.contextWindow ?? "—"} tokens`
+    : "";
   const titleText = t("contextTitle");
   const heading = colorEnabled
     ? [renderDialogTitle(titleText, true)]
@@ -752,7 +759,7 @@ export function renderContextPanel(
         contextWindow: state.contextWindow,
         estimatedContextTokens: state.estimatedContextTokens,
         turnEstimatedTokens: state.liveTurnEstimatedTokens,
-      }),
+      }) + exactTokens,
     ),
     field(
       labels[2],

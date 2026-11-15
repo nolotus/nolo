@@ -1,4 +1,3 @@
-import type { BusinessCompletion } from "../../agent-runtime/taskExecutionContract";
 import type { ContextRefusalDiagnostics } from "../../agent-runtime/contextRefusal";
 import type { ShellApprovalSession } from "./originShellApprovalTransport";
 import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
@@ -412,8 +411,6 @@ export type RunAgentTurnResult = {
     refusal?: ContextRefusalDiagnostics;
   };
   stopReason?: import("../../agent-runtime/types").AgentRuntimeResult["stopReason"];
-  // hostTaskWorkspaceBlocker / taskAuthorization 已随 host task 基础设施移除（2026-11-15）。
-  businessCompletion?: BusinessCompletion;
   exitCode: number;
   dialogId?: string;
   /**

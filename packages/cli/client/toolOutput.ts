@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   isAgentRunStartFailureStatus,
   isAgentRunStatusNormal,
@@ -27,8 +28,9 @@ import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resol
 import { resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
 import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
 import { redactSecrets } from "../tui/redactSecrets";
-import { summarizeShellCommand } from "../tui/shellCommandGist";
-import { safeAskText, withholdIfSecretLike } from "../tui/askTextSanitize";
+import { summarizeShellCommand } from "../../core/shellCommandGist";
+import { projectToolActivity, canCoalesceToolActivities, type ToolActivityProjection } from "../../core/toolActivityPresentation";
+import { safeAskText, safeApprovalMultilineText, withholdIfSecretLike } from "../tui/askTextSanitize";
 import { diffLines } from "diff";
 import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
 import { agentRunCardLabels, t, toolLabel } from "../tui/i18n";
@@ -1125,7 +1127,7 @@ function formatNormalToolLine(
   event: LocalAgentToolEvent,
   pending: { toolName: string; argumentsPreview?: string } | undefined,
   colorEnabled: boolean,
-  opts?: { visibleRunIds?: () => ReadonlySet<string> },
+  opts?: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> },
 ) {
   if (event.type === "tool-call") return "";
   const toolName = event.toolName || pending?.toolName || "tool";
@@ -1162,25 +1164,18 @@ function formatNormalToolLine(
       : 80;
   const totalBudget = Math.max(1, resolveHistoryLayoutGeometry(cols).contentWidth - displayWidth("◈ "));
 
-  if (readActionGate(event.metadata?.actionGate)) {
-    const actionText = t("toolNeedsAction");
-    const prefix = `▸ ${label}  ! `;
-    const maxActionWidth = Math.max(0, totalBudget - displayWidth(prefix));
-    const fittedAction = maxActionWidth > 0 && displayWidth(actionText) > maxActionWidth
-      ? truncateByDisplayWidth(actionText, maxActionWidth)
-      : (maxActionWidth > 0 ? actionText : "");
-    return formatToolTraceLine(fitNormalLine(`▸ ${label}`, `! ${fittedAction}`, totalBudget), colorEnabled, "error");
+  if (readActionGate(event.metadata?.actionGate) || event.metadata?.permissionRequest) {
+    const gist = opts?.tuiTrees ? normalToolGist(event) : "";
+    const title = gist ? `${label} · ${gist}` : label;
+    return formatToolTraceLine(fitNormalLine(`▸ ${title}`, `! ${t("toolNeedsAction")}`, totalBudget), colorEnabled, "error");
   }
   if (event.type === "tool-error" || event.metadata?.timedOut || isFailedToolResult(event)) {
     const reason = event.metadata?.timedOut
       ? t("toolTimedOut")
       : (toolFailureReason(event) || t("toolFailed"));
-    const prefix = `▸ ${label}  ✗ `;
-    const maxReasonWidth = Math.max(0, totalBudget - displayWidth(prefix));
-    const fittedReason = maxReasonWidth > 0 && displayWidth(reason) > maxReasonWidth
-      ? truncateByDisplayWidth(reason, maxReasonWidth)
-      : (maxReasonWidth > 0 ? reason : "");
-    return formatToolTraceLine(fitNormalLine(`▸ ${label}`, `✗ ${fittedReason}`, totalBudget), colorEnabled, "error");
+    const gist = opts?.tuiTrees ? normalToolGist(event) : "";
+    const title = gist ? `${label} · ${gist}` : label;
+    return formatToolTraceLine(fitNormalLine(`▸ ${title}`, `✗ ${reason}`, totalBudget), colorEnabled, "error");
   }
   const resultSummary = normalResultSummary(event);
   const gist = [normalToolGist(event), resultSummary].filter(Boolean).join(" · ");
@@ -1332,7 +1327,7 @@ export const TUI_TREE_TOOLS = {
   Fetch: ["fetchWebpage"],
 } as const;
 export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;
-export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string; previousRow?: string };
+export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string; previousRow?: string; appendOnly?: boolean; readOnly?: boolean; runIdentity?: string; details?: string };
 
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
@@ -1340,16 +1335,24 @@ export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   consume?: (event: LocalAgentToolEvent) => void;
 };
 
+function toolDetails(event: LocalAgentToolEvent, line: string): string {
+  const command = event.metadata?.command;
+  return isRunToolName(event.toolName) && typeof command === "string"
+    ? `${line}${safeApprovalMultilineText(command)}\n`
+    : line;
+}
+
 export function createToolEventFormatter(
   colorEnabled = resolveCliColorEnabled(),
   opts: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> } = {},
 ): ToolEventFormatter {
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
-  let tree: { kind: TuiTreeKind; items: string[]; lastRow?: string } | null = null;
+  let scope = 0;
+  let tree: { kind: TuiTreeKind; items: string[]; lastRow?: string; activity: ToolActivityProjection } | null = null;
   const treeKind = (name: string): TuiTreeKind | null =>
     (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
       (TUI_TREE_TOOLS[kind] as readonly string[]).includes(name)) ?? null;
-  const treeLine = (kind: TuiTreeKind, items: string[], fallback: string) => {
+  const treeLine = (kind: TuiTreeKind, items: string[], fallback: string, details: string) => {
     const label = kind === "Run" ? toolLabel("execShell") : kind === "Read" ? toolLabel("readFile") : kind === "Fetch" ? toolLabel("fetchWebpage") : toolLabel("exa_search");
     const header = `${label} (${items.length}) · `;
     // Summary rows receive the assistant's "◈ " anchor (measured display width).
@@ -1366,6 +1369,7 @@ export function createToolEventFormatter(
       kind,
       summary,
       fallback,
+      details,
       previousRow: tree?.lastRow,
     };
     if (tree) tree.lastRow = `▸ ${summary}`;
@@ -1373,21 +1377,31 @@ export function createToolEventFormatter(
   };
 
   const formatTreeEvent = (event: LocalAgentToolEvent, call: { toolName: string; argumentsPreview?: string } | undefined): string | null => {
+    if (event.type === "tool-error") tree = null;
     if (!opts.tuiTrees || event.type !== "tool-result") return null;
-    if (isFailedToolResult(event) || event.metadata?.failed || event.metadata?.timedOut || readActionGate(event.metadata?.actionGate)) {
+    if (isFailedToolResult(event) || event.metadata?.failed || event.metadata?.timedOut || readActionGate(event.metadata?.actionGate) || event.metadata?.permissionRequest) {
       tree = null;
       return null;
     }
     const name = event.toolName || call?.toolName || "tool";
     const kind = treeKind(name);
     if (!kind) { tree = null; return null; }
+    const activity = projectToolActivity({
+      key: event.toolCallId, toolName: name, args: event.metadata,
+      state: "success", attention: [], mode: "ordinary",
+      // Formatter lifecycle/reset is the real assistant-output boundary;
+      // round comes from the execution stream, never from adjacent rows.
+      scopeKey: `assistant:${scope}`,
+      batchKey: Number.isInteger(event.round) && event.round >= 0 ? `round:${event.round}` : undefined,
+      evidenceKey: event.toolCallId,
+    });
     let item = "";
     const m = event.metadata ?? {};
     if (kind === "Run") {
-      const command = typeof m.command === "string" ? m.command : "";
-      // argumentsPreview is intentionally never promoted to a tree leaf: it is
-      // model-controlled. Only the runtime's safe command projection is used.
-      item = command ? formatRunItemCommand(command, typeof m.exitCode === "number" ? m.exitCode : undefined, Boolean(m.timedOut)) : "command";
+      item = activity.summary
+        ?? (activity.confidence === "raw-fallback"
+          ? clipCompactText(redactSecrets(activity.object ?? ""), 56, "…")
+          : [activity.action, activity.object].filter(Boolean).join(" "));
     }
     if (kind === "Read") item = formatReadItemPath(typeof m.path === "string" ? m.path : typeof m.filePath === "string" ? m.filePath : "file", m);
     if (kind === "Search") item = formatSearchItemQuery(typeof m.query === "string" ? m.query : typeof m.pattern === "string" ? m.pattern : "search", typeof m.path === "string" ? m.path : undefined);
@@ -1395,17 +1409,22 @@ export function createToolEventFormatter(
     // 折叠树叶子与单行 normal 共用 secret 出口护栏：URL/query/command 叶子
     // 携带密钥形态串时退回纯工具 label，不让 token 上屏（第二个及后续结果
     // 只走 treeLine，不经过 normalToolGist，必须在这里再包一次）。
-    item = withholdIfSecretLike(item) || toolLabel(name);
-    if (tree?.kind !== kind) tree = { kind, items: [] };
+    item = safeAskText(item) || toolLabel(name);
+    if (tree?.kind !== kind || !canCoalesceToolActivities(tree.activity, activity)) tree = { kind, items: [], activity };
     tree.items.push(item);
     // Keep the first call visible immediately; the second result replaces this
     // tail row with the complete tree in the TUI history.
     if (tree.items.length < 2) {
       const line = formatNormalToolLine(event, call, colorEnabled, opts);
       tree.lastRow = stripAnsi(line).trimEnd();
-      return line;
+      const rawCommand = typeof m.command === "string" ? m.command : "";
+      const runIdentity = kind === "Run" && activity.readOnly && rawCommand
+        ? createHash("sha256").update(rawCommand).digest("hex").slice(0, 16)
+        : undefined;
+      return `${TUI_TREE_MARKER}${JSON.stringify({ kind, summary: stripAnsi(line).trimEnd().replace(/^▸ /, ""), fallback: line, details: toolDetails(event, line), appendOnly: true, ...(runIdentity ? { readOnly: true, runIdentity } : {}) } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
     }
-    return treeLine(kind, tree.items, formatNormalToolLine(event, call, colorEnabled, opts));
+    const line = formatNormalToolLine(event, call, colorEnabled, opts);
+    return treeLine(kind, tree.items, line, toolDetails(event, line));
   };
   const format = ((event: LocalAgentToolEvent): string => {
     if (event.type === "tool-call") {
@@ -1419,9 +1438,13 @@ export function createToolEventFormatter(
     pending.delete(event.toolCallId);
     const treeOutput = formatTreeEvent(event, call);
     if (treeOutput !== null) return treeOutput;
-    return formatNormalToolLine(event, call, colorEnabled, opts);
+    const line = formatNormalToolLine(event, call, colorEnabled, opts);
+    if (opts.tuiTrees && line && isRunToolName(event.toolName)) {
+      return `${TUI_TREE_MARKER}${JSON.stringify({ kind: "Run", summary: "", fallback: line, details: toolDetails(event, line), appendOnly: true } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
+    }
+    return line;
   }) as ToolEventFormatter;
-  format.reset = () => { tree = null; };
+  format.reset = () => { tree = null; scope++; };
   format.consume = (event: LocalAgentToolEvent) => {
     if (event.type === "tool-call") {
       pending.set(event.toolCallId, {

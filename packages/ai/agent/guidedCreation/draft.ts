@@ -1,3 +1,4 @@
+import { resolveDefaultReasoningEffort } from "../defaultReasoningEffort";
 import type { FormData as AgentFormData } from "ai/agent/createAgentSchema";
 import { asTrimmedString } from "core/trimmedString";
 import { DEFAULT_ENABLED_PACKS } from "ai/tools/toolPacks";
@@ -79,7 +80,7 @@ export const buildAgentFormDataFromGuidedDraft = (
     inputPrice: 0,
     outputPrice: 0,
     whitelist: [],
-    reasoning_effort: "medium" as const,
+    reasoning_effort: resolveDefaultReasoningEffort({ provider: draft.provider, model: draft.model, fallback: "medium" }),
     ...(needsHostedShell
       ? {
           runtimeToolPolicy: {

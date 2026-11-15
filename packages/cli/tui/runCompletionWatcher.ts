@@ -89,6 +89,7 @@ export function describeRun(
   if (verbose && typeof record.exitCode === "number") {
     lines.push(`exitCode: ${record.exitCode}`);
   }
+  if (record.continuedFrom) lines.push(`continuedFrom: ${record.continuedFrom}`);
   if (record.resultFile) {
     lines.push(`resultFile: ${record.resultFile} (用 readFile 读取)`);
   } else {
@@ -205,6 +206,7 @@ function buildRunElement(
   if (typeof rawTitle === "string" && rawTitle.trim()) {
     attrs.push(`title="${escapeXmlAttribute(rawTitle.trim())}"`);
   }
+  if (record.continuedFrom) attrs.push(`continuedFrom="${escapeXmlAttribute(record.continuedFrom)}"`);
   const verbose = isFailureStatus(record.status);
   if (verbose && typeof record.exitCode === "number") {
     attrs.push(`exitCode="${record.exitCode}"`);
@@ -255,7 +257,7 @@ function renderWakeMessage(elements: string[], count: number): string {
   return [
     `<background_run_completion count="${count}">`,
     ...elements,
-    `有 resultFile 时用 readFile；本地缺失即无结论，不读日志。终态只表示 run 结束；摘要不是完整 review，验收与版本信息以完整结果中的 runtime acceptance 为准。`,
+    `有 resultFile 时用 readFile；本地缺失即无结论，不读日志。终态只表示 run 结束，不证明交付、测试、审查、用户验收或合入发布。正文是执行者报告；runtime acceptance 仅为运行时观测，unknown 保持未知。continuedFrom 仅为续跑关联，不继承旧版本 APPROVE；结合当前完整结果核对范围、阻碍与证据。`,
     `</background_run_completion>`,
   ].join("\n");
 }

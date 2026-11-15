@@ -9,6 +9,7 @@ import type {
 import {
   getMemoryEntityVNext,
   getMemoryEvidenceVNext,
+  getMemoryEvidenceVNextStrict,
   getMemoryStateVNext,
   listMemoryStatesForEntityVNext,
   _appendEntityBatch,
@@ -321,8 +322,31 @@ const applyMutationWithoutCoordination = async (
   // Phase A — validate (zero writes)
   await validateMutation(db, ownerId, mutation);
 
+  const completion = mutation.nativeCaptureCompletion;
+  if (completion) {
+    const prior = await getMemoryEvidenceVNextStrict(db, ownerId, completion.id);
+    const withoutOutcome = (ev: MemoryEvidenceVNext) => ({
+      ...ev, nativeCapture: ev.nativeCapture && { ...ev.nativeCapture, outcome: undefined },
+    });
+    if (!prior?.nativeCapture || prior.nativeCapture.outcome ||
+        completion.ownerId !== ownerId ||
+        !["applied", "no_op"].includes(completion.nativeCapture?.outcome ?? "") ||
+        (completion.nativeCapture?.outcome === "applied" &&
+          (["no_op", "ambiguous"].includes(mutation.action) || !mutation.states?.length ||
+            mutation.states.some(st => !st.evidenceIds.includes(completion.id)))) ||
+        (completion.nativeCapture?.outcome === "no_op" &&
+          (mutation.action !== "no_op" || !!(mutation.entities?.length || mutation.states?.length ||
+            mutation.relations?.length || mutation.evidence?.length || mutation.supersededStateIds?.length))) ||
+        JSON.stringify(withoutOutcome(prior)) !== JSON.stringify(withoutOutcome(completion)) ||
+        mutation.evidence?.some(ev => ev.id === completion.id)) {
+      throw new Error("invalid native capture completion");
+    }
+  }
+
   // Phase B — build one batch, write once
   const batch = db.batch();
+
+  if (completion) _appendEvidenceBatch(batch, completion);
 
   // Evidence
   for (const ev of mutation.evidence ?? []) {
@@ -378,7 +402,7 @@ const pendingByDb = new WeakMap<object, Map<string, Promise<void>>>();
 export const applyMemoryInterpreterMutation = async (
   db: any,
   ownerId: string,
-  mutation: MemoryInterpreterMutation
+  mutation: MemoryInterpreterMutation | (() => Promise<MemoryInterpreterMutation>)
 ): Promise<void> => {
   let owners = pendingByDb.get(db);
   if (!owners) {
@@ -386,7 +410,10 @@ export const applyMemoryInterpreterMutation = async (
     pendingByDb.set(db, owners);
   }
   const previous = owners.get(ownerId) ?? Promise.resolve();
-  const operation = previous.then(() => applyMutationWithoutCoordination(db, ownerId, mutation));
+  const operation = previous.then(async () => {
+    const resolved = typeof mutation === "function" ? await mutation() : mutation;
+    await applyMutationWithoutCoordination(db, ownerId, resolved);
+  });
   // A failed mutation must not poison later mutations or leave an unhandled
   // rejection on the internal queue. The caller still receives the rejection.
   const settled = operation.then(() => {}, () => {});

@@ -1,3 +1,5 @@
+import { normalizeCliRunImages } from "./client/childRunImages";
+import { RuntimeVersionMismatchError, validateAgentRunProtocol, RuntimeProtocolMismatchError } from "./agentRunProtocol";
 import { exitCliFromWatchdog } from "./client/cliExitSync";
 import { isHistoryIntegrityFailure } from "../ai/tools/agent/runFailureClass";
 import { createHash } from "node:crypto";
@@ -60,6 +62,7 @@ import {
 } from "./agentRunArgs";
 import {
   createRunActivityTracker,
+  recordRunStartup,
   reportRunProcessIdentity,
   validateLocalWriterChild,
   awaitLocalWriterChild,
@@ -293,6 +296,37 @@ async function resolveAgentBoundMachineIdFromRecord(args: {
 
 export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDeps) {
   const env = deps.env ?? process.env;
+  const runId = env.NOLO_AGENT_RUN_ID;
+  const controlDeps = { env, homedir: deps.homedir, fs: deps.fs, now: deps.now };
+  const failStartup = async (error?: unknown) => {
+    if (!runId || (readRunRecord(runId, controlDeps)?.status !== "running")) return;
+    const result = await settleRunTerminalAuthoritatively(runId, {
+      status: "failed", exitCode: 1,
+      failureReason: error instanceof RuntimeProtocolMismatchError ? "runtime_protocol_mismatch"
+        : error instanceof RuntimeVersionMismatchError ? "runtime_version_mismatch" : "startup_failed",
+      note: error ? toErrorMessage(error) : "Child initialization returned without terminal result",
+    }, controlDeps, (id, update, d) => transitionRunToTerminal(id, update, d));
+    if (result.kind === "contended") throw new Error(`Startup settlement lock busy: ${runId}`);
+  };
+  try {
+    if (runId) {
+      if (!readRunRecord(runId, controlDeps)) throw new Error("[local-writer-resource] missing child binding");
+      await recordRunStartup(runId, "initializing", controlDeps);
+      validateAgentRunProtocol(env.NOLO_AGENT_RUN_PROTOCOL);
+      // Content identity is diagnostic only; the wire protocol above governs compatibility.
+      await recordRunStartup(runId, "protocol_validated", controlDeps);
+    }
+    const code = await runAgentRunCommandImpl(args, deps);
+    if (runId) await failStartup(); // No-op if the child already published any terminal result.
+    return code;
+  } catch (error) {
+    await failStartup(error);
+    throw error;
+  }
+}
+
+async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps) {
+  const env = deps.env ?? process.env;
   // 非交互一次性运行（无注入 output）：失败行（deadline 等可操作错误）走
   // stderr，stdout 只承载回合输出，管道/脚本可安全解析（batch 3）。
   // 注入 output（TUI / 测试）保持单流行为——runLocalAgentTurnForCli 在
@@ -318,10 +352,17 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   }
 
   const rawRunner = deps.runner ?? runAgentTurn;
+  let modelPhaseRecorded = false;
   const watchdogAbort = new AbortController();
   let activeRunner: Promise<unknown> | undefined;
   const runner: typeof runAgentTurn = (options) => {
-    activeRunner = Promise.resolve().then(() => rawRunner({...options, abortSignal: watchdogAbort.signal})).then(result => {
+    activeRunner = Promise.resolve().then(async () => {
+      if (env.NOLO_AGENT_RUN_ID && !modelPhaseRecorded) {
+        await recordRunStartup(env.NOLO_AGENT_RUN_ID, "model", { env, homedir: deps.homedir, fs: deps.fs, now: deps.now });
+        modelPhaseRecorded = true;
+      }
+      return rawRunner({...options, abortSignal: watchdogAbort.signal});
+    }).then(result => {
       // A cooperative stop must not resume fallback/queue/settlement work.
       watchdogAbort.signal.throwIfAborted();
       return result;
@@ -962,6 +1003,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   const shellApprovalChild = process.connected && typeof process.send === "function"
     ? createShellApprovalChild(process) : undefined;
   try {
+  const imageUrls = await normalizeCliRunImages(parsed.imageUrls, normalizeCliImageInput);
   const buildRunOptions = (
     targetAgentKey: string,
     turnMessage: string = effectiveMessage
@@ -980,7 +1022,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     responseViewport: "unknown" as const,
     serverUrl: resolveServerUrl(env),
     message: formatTurnMessage(turnMessage),
-    imageUrls: parsed.imageUrls.map(normalizeCliImageInput),
+    imageUrls,
     scriptDir: deps.scriptDir,
     env: runEnv,
     output,
