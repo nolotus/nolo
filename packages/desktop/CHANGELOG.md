@@ -1,4 +1,16 @@
 
+## 0.238.0 (2026-11-15)
+
+### Features
+
+* **chat:** unify readable tool activity states and safe summaries ([9bea867](https://github.com/nolotus/bun-nolo/commit/9bea86715a1214a386f8f1d2cc4ebaf3284d69f3))
+
+### Bug Fixes
+
+* **ai:** guard skill diagnostics in browser runtimes ([93f0970](https://github.com/nolotus/bun-nolo/commit/93f0970c098656c2339491c07b77c1c3420f5933))
+* **chat:** synchronize sidebar width and scoped category updates ([4e7936c](https://github.com/nolotus/bun-nolo/commit/4e7936c2812038f15bd2a64c4b6b4dfb7007001a))
+
+
 ## 0.237.0 (2026-11-15)
 
 ### ⚠ BREAKING CHANGES

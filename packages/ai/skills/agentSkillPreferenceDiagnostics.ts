@@ -147,7 +147,7 @@ const seenSignatures = new Set<string>();
  * 排查时按需打开。显式注入 `sink`（测试）时不受此开关限制。
  */
 export function skillDiagnosticsEnabled(
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = typeof process === "undefined" ? {} : process.env ?? {},
 ): boolean {
   const flag = env.NOLO_SKILL_DIAGNOSTICS?.trim();
   return flag === "1" || flag === "true";
@@ -166,10 +166,14 @@ export const reportAgentSkillPreferenceDiagnostic = (
 ): boolean => {
   // 未显式注入 sink 时，受开关约束
   if (!sink && !skillDiagnosticsEnabled()) return false;
+  const stderr = typeof process === "undefined" ? undefined : process.stderr;
+  const write = sink ?? (typeof stderr?.write === "function"
+    ? (line: string) => { stderr.write(line); }
+    : undefined);
+  if (!write) return false;
   const signature = JSON.stringify(diagnostic);
   if (seenSignatures.has(signature)) return false;
   seenSignatures.add(signature);
-  const write = sink ?? ((line: string) => { process.stderr.write(line); });
   write(`${DIAGNOSTIC_PREFIX}${signature}\n`);
   return true;
 };

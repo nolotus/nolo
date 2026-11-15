@@ -5,7 +5,7 @@ import { read, selectEntities } from "database/dbSlice";
 import { addCategory } from "create/space/category/categoryActions";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { createUserKey } from "database/keys";
-import { MemberRole, SpaceData } from "app/types";
+import { MemberRole, SpaceData, ULID } from "app/types";
 import { normalizeUserId } from "core/userId";
 import { fetchSpace } from "../spaceThunks";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
@@ -191,16 +191,19 @@ export const useSpaceData = (spaceId: string) => {
  * （reduxBoundaryGuard：新 UI 必须经 domain hook/service 消费剩余域）。
  * 真正写入仍由既有 `addCategory` thunk 完成，因此 `spaceId` 仍由调用方显式传入，
  * 提交时的登录态与成员权限校验（`checkSpaceMembership`）也仍在 thunk 内执行一次。
- * 失败语义与改造前一致：thunk 被拒绝时本函数不抛出（错误仍由调用方 catch 记录）。
+ * 解包 thunk 结果，让调用方仅在写入成功后关闭输入，并能呈现保存失败。
  */
-export const useAddCategory = (): ((input: {
-  spaceId: string;
-  name: string;
-}) => Promise<void>) => {
+export const useAddCategory = (): ((input: { spaceId: string; name: string }) => Promise<{
+  spaceId: ULID;
+  updatedSpaceData: SpaceData;
+  newCategoryId: string;
+  collapsedCategories: Record<string, boolean>;
+}>) => {
   const dispatch = useAppDispatch();
   return useCallback(
-    async (input: { spaceId: string; name: string }): Promise<void> => {
-      await (dispatch as (action: any) => any)(addCategory(input) as any);
+    async (input: { spaceId: string; name: string }) => {
+      const result = await (dispatch as (action: any) => any)(addCategory(input) as any).unwrap();
+      return result;
     },
     [dispatch]
   );

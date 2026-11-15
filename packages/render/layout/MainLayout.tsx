@@ -84,7 +84,7 @@ if (typeof window !== "undefined") {
 }
 
 const MIN_WIDTH = 200;
-const MAX_WIDTH = 360;
+const MAX_WIDTH = 480;
 
 interface RightSidebarSlotItem {
   id: string;
@@ -504,6 +504,8 @@ const MainLayout: React.FC = () => {
     });
   }, []);
 
+  const currentDragWidthRef = useRef<number | null>(null);
+
   const { handlePointerDown: startResizing } = useDragResize({
     cursor: "col-resize",
     onStart: () => {
@@ -511,35 +513,44 @@ const MainLayout: React.FC = () => {
         finishSidebarTransition();
       }
       setIsResizing(true);
+      currentDragWidthRef.current = sidebarRef.current
+        ? Math.round(sidebarRef.current.getBoundingClientRect().width)
+        : sidebarWidth;
     },
     onMove: (clientX) => {
-      requestAnimationFrame(() => {
-        const rootEl = mainLayoutRef.current;
-        const domRect = rootEl?.getBoundingClientRect();
-        const rect =
-          domRect && domRect.width > 0
-            ? domRect
-            : {
-                left: 0,
-                right: typeof window !== "undefined" ? window.innerWidth : 1200,
-                width: typeof window !== "undefined" ? window.innerWidth : 1200,
-              };
-        const rawWidth = pointerXToNavigationWidth({
-          clientX,
-          containerRect: rect,
-          placement: navigationPlacement,
-        });
-        const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(rawWidth)));
-        if (sidebarRef.current) {
-          sidebarRef.current.style.width = `${newWidth}px`;
-        }
+      const rootEl = mainLayoutRef.current;
+      const domRect = rootEl?.getBoundingClientRect();
+      const rect =
+        domRect && domRect.width > 0
+          ? domRect
+          : {
+              left: 0,
+              right: typeof window !== "undefined" ? window.innerWidth : 1200,
+              width: typeof window !== "undefined" ? window.innerWidth : 1200,
+            };
+      const rawWidth = pointerXToNavigationWidth({
+        clientX,
+        containerRect: rect,
+        placement: navigationPlacement,
       });
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(rawWidth)));
+      currentDragWidthRef.current = newWidth;
+      if (sidebarRef.current) {
+        sidebarRef.current.style.width = `${newWidth}px`;
+        sidebarRef.current.style.setProperty("--sidebar-shell-width", `${newWidth}px`);
+        rootEl?.style.setProperty("--sidebar-shell-width", `${newWidth}px`);
+      }
     },
     onStop: () => {
+      const finalWidth = currentDragWidthRef.current;
+      currentDragWidthRef.current = null;
       if (sidebarRef.current) {
-        const finalWidth = parseInt(sidebarRef.current.style.width, 10);
         sidebarRef.current.style.width = "";
-        if (!isNaN(finalWidth)) {
+        sidebarRef.current.style.removeProperty("--sidebar-shell-width");
+        const rootEl = mainLayoutRef.current;
+        rootEl?.style.removeProperty("--sidebar-shell-width");
+        if (finalWidth !== null && !isNaN(finalWidth)) {
+          lastWidthRef.current = finalWidth;
           dispatch(setSidebarWidth(finalWidth));
         }
       }
@@ -754,7 +765,7 @@ const MainLayout: React.FC = () => {
                 ? undefined
                 : {
                     width: railOnly ? 52 : effectiveSidebarWidth,
-                    ["--sidebar-shell-width" as any]: `${lastWidthRef.current || 280}px`,
+                    ["--sidebar-shell-width" as any]: `${(railOnly ? lastWidthRef.current : effectiveSidebarWidth) || 280}px`,
                   }
             }
           >
@@ -768,6 +779,7 @@ const MainLayout: React.FC = () => {
             {!shouldRenderMobileLayout && !railOnly && (
               <div
                 className="MainLayout__resizeHandle"
+                data-hook="sidebar-resize-handle"
                 onPointerDown={startResizing}
               />
             )}

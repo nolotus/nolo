@@ -1,19 +1,10 @@
 /**
- * 高风险凭据形态的保守打码。
+ * packages/cli/tui/redactSecrets.ts
  *
- * 背景（2026-09-01）：run/tool 失败详情改为 normal 模式直接上屏（owner 定调
- * 「失败要知道具体的，不要一吞了之」），但 provider/CLI 的错误文本经常内嵌
- * API key（401 回显、--token 参数、Authorization 头）。错误行上屏前过一遍
- * 这里，只打码高置信形态，其余错误内容（类型、路径、errno、行号）原样保留，
- * 保证「知道具体的」与「密钥不上屏」同时成立。
- *
- * 保守取舍：只匹配可自然语言描述的凭据形态（sk-/pk- 系 key、Bearer 值、
- * token/key/secret/password 键值对、CLI flag 值）。高熵裸字符串不做启发式
- * 打码——误伤会把错误原因打得不可读，违背本次改动的初衷。
+ * 兼容 re-export：核心脱敏逻辑已下沉至 packages/core/redactSecrets.ts，
+ * 供 CLI/TUI 与 Web 模块共享单一真值实现。
  */
 import { findPotentialSecrets } from "../secretScan";
-
-const REDACTED = "⟨redacted⟩";
 
 const NORMAL_GIST_SECRET_PATTERNS: RegExp[] = [
   /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/i,
@@ -29,24 +20,4 @@ export function withholdIfSecretLike(gist: string): string {
   return gist;
 }
 
-export function redactSecrets(text: string): string {
-  return (
-    text
-      // sk- / pk- 前缀 key（OpenAI / Anthropic / Stripe 等主流 provider 形态）
-      .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{10,}/g, REDACTED)
-      // Authorization: Bearer <token>（保留 Bearer，值打码）
-      .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi, `$1${REDACTED}`)
-      // CLI flags start at line/whitespace boundaries, not a word boundary before --.
-      // Consume quoted values before key-value redaction can split them at spaces.
-      // Truncated quotes end at the current line; never consume later diagnostics.
-      .replace(
-        /(^|\s)((?:--[a-z0-9-]*(?:token|key|secret|password|credential)[a-z0-9-]*)(?:[^\S\r\n]*=[^\S\r\n]*|[^\S\r\n]+))(?:"(?:\\[^\r\n]|[^"\\\r\n]){8,}(?:"|(?=[\r\n]|$))|'(?:\\[^\r\n]|[^'\\\r\n]){8,}(?:'|(?=[\r\n]|$))|[^\s"']{8,})/gi,
-        `$1$2${REDACTED}`,
-      )
-      // token=… / api_key: … / password: … 键值对（键保留可读，值打码）
-      .replace(
-        /\b((?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|token|secret|password|passwd|credential)s?\s*[=:]\s*["']?)[^\s"',;]{8,}/gi,
-        `$1${REDACTED}`,
-      )
-  );
-}
+export { redactSecrets, REDACTED } from "../../core/redactSecrets";

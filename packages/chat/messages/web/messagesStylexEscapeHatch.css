@@ -551,3 +551,10 @@ html[data-nolo-desktop="1"] [data-hook~="messages-esc-tr-body"]::-webkit-scrollb
   padding: 0;
   justify-content: center;
 }
+
+/* Attention labels must remain visible even when the neighboring object truncates. */
+.tool-call-attention {
+  flex-shrink: 0;
+  font-size: var(--fontSize-xs, 12px);
+  color: var(--textSecondary, currentColor);
+}

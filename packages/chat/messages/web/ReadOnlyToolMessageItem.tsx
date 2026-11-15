@@ -5,6 +5,7 @@ import React, { memo, useMemo, useState } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { StatusIcon, safeParse, withLiteralClass } from "./toolMessageShared";
 import ToolMessageContent from "./ToolMessageContent";
+import { isToolCallFailed, readToolCallErrorMessage, resolveToolCallStatus } from "./toolCallPresentation";
 import {
   buildRunStreamingAgentHandoffPresentation,
   normalizeToolDisplaySummary,
@@ -36,9 +37,8 @@ export const ReadOnlyToolMessageItem = memo(({ message }: { message: any }) => {
   const { content, toolName, isStreaming, toolPayload } = message;
   const rawData = useMemo(() => safeParse(content), [content]);
 
-  const isError =
-    toolPayload?.status === "failed" || !!toolPayload?.error || !!rawData?.error;
-  const statusStr = isStreaming ? "running" : isError ? "failed" : "success";
+  const isError = isToolCallFailed(message);
+  const statusStr = isStreaming ? "running" : resolveToolCallStatus(message);
 
   const displaySummary = useMemo(() => {
     return formatToolRowHeaderSummary({
@@ -89,7 +89,7 @@ export const ReadOnlyToolMessageItem = memo(({ message }: { message: any }) => {
 
               {...withLiteralClass(`tr-icon ${statusStr}`, toolMessageStyles.icon)}
             >
-              <StatusIcon status={statusStr} toolName={toolName} />
+              <StatusIcon status={statusStr} toolName={toolName} errorMessage={readToolCallErrorMessage(message)} />
             </div>
             <span data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolMessageStyles.truncate, toolMessageStyles.summary)}>{handoff.summary}</span>
           </div>
@@ -162,7 +162,7 @@ export const ReadOnlyToolMessageItem = memo(({ message }: { message: any }) => {
 
             {...withLiteralClass(`tr-icon ${statusStr}`, toolMessageStyles.icon)}
           >
-            <StatusIcon status={statusStr} toolName={toolName} />
+            <StatusIcon status={statusStr} toolName={toolName} errorMessage={readToolCallErrorMessage(message)} />
           </div>
           <span data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolMessageStyles.truncate, toolMessageStyles.summary)}>{displaySummary}</span>
         </div>

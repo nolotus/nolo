@@ -3,7 +3,7 @@ import { matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTy
 import { resolveEffectiveSidebarType, readStoredSidebarType } from "./sidebar/sidebarTypeQuery";
 import { isAllViewDialogImageAttachment } from "./sidebar/allViewSearch";
 import { WorkDialogSpaceGroups, WorkDialogCategoryGroups } from "./WorkDialogSpaceGroups";
-import { WORK_SPACE_NAME_TTL_MS, createWorkSpaceRecordCache, projectWorkSpaceDirectories, groupWorkDialogsByCategory, type WorkSpaceRecord, groupWorkDialogsBySpace, canManageSpaceCategories, isSpaceManager, resolveRowOwnership, resolveContentRowCapability, type ContentRowCapability } from "./sidebar/workDialogSpaceGroups";
+import { WORK_SPACE_NAME_TTL_MS, readCachedSpaceRecord, projectWorkSpaceDirectories, groupWorkDialogsByCategory, type WorkSpaceRecord, groupWorkDialogsBySpace, canManageSpaceCategories, isSpaceManager, resolveRowOwnership, resolveContentRowCapability, type ContentRowCapability } from "./sidebar/workDialogSpaceGroups";
 import { useContentOwnershipEvidence } from "./sidebar/useContentOwnershipEvidence";
 import { mergeSharedHistoryItems } from "./sharedHistoryMerge";
 import { isAgentRowUnread } from "./sidebar/agentUnread";
@@ -50,7 +50,6 @@ import {
 } from "./sidebar/runningDialogAggregation";
 
 const ignoreMenuToggle = (_key: string | null): void => {};const AUTO_LOAD_MIN_INTERVAL_MS = 1000;
-const readCachedSpaceRecord = createWorkSpaceRecordCache();
 const EMPTY_ENTITIES: Record<string, any> = Object.freeze({});
 
 /** 已加载条目自带的归属身份（对话 summary 的 userId / ownerUserId）。 */
@@ -374,6 +373,36 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
   );
   const nameScope = JSON.stringify([runtime.currentUserId, runtime.currentToken, runtime.currentServer, runtime.syncServers]);
   const [resolvedRecords, setResolvedRecords] = useState<{ scope: string; records: Map<string, WorkSpaceRecord> }>();
+  const [pendingCategories, setPendingCategories] = useState<{
+    scope: string;
+    entries: Map<string, Record<string, { name: string; order: number; createdAt: number }>>;
+  }>();
+  useEffect(() => {
+    if (pendingCategories?.scope !== nameScope) return;
+    const expiries = [...pendingCategories.entries.values()].flatMap(categories =>
+      Object.values(categories).map(category => category.createdAt + WORK_SPACE_NAME_TTL_MS),
+    );
+    if (!expiries.length) return;
+    const timer = setTimeout(() => {
+      setPendingCategories(previous => {
+        if (previous?.scope !== nameScope) return previous;
+        const entries = new Map(previous.entries);
+        for (const [spaceId, categories] of entries) {
+          const remaining = Object.fromEntries(Object.entries(categories).filter(([, category]) =>
+            Date.now() - category.createdAt < WORK_SPACE_NAME_TTL_MS,
+          ));
+          if (Object.keys(remaining).length) entries.set(spaceId, remaining);
+          else entries.delete(spaceId);
+        }
+        return { scope: nameScope, entries };
+      });
+    }, Math.max(0, Math.min(...expiries) - Date.now()));
+    return () => clearTimeout(timer);
+  }, [nameScope, pendingCategories]);
+  const [recordRefreshNonce, setRecordRefreshNonce] = useState(0);
+  const triggerRecordRefresh = useCallback(() => {
+    setRecordRefreshNonce(nonce => nonce + 1);
+  }, []);
   const nameSpaceIds = JSON.stringify([...new Set([...eligibleRows.map(row => normalizeSpaceId(row.item.spaceId)), ...memberSpaces.map(space => normalizeSpaceId(space.spaceId))].filter((id): id is string => Boolean(id)))].sort());
   useEffect(() => {
     let active = true;
@@ -397,7 +426,37 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
           if (!active) return;
           setResolvedRecords(previous => {
             const records = new Map(previous?.scope === nameScope ? previous.records : []);
-            if (record) records.set(spaceId, record); else records.delete(spaceId);
+            if (record) {
+              records.set(spaceId, record);
+              // 远端权威确认后退场；未确认的有界到期（WORK_SPACE_NAME_TTL_MS）退场，绝不成为永久幽灵
+              setPendingCategories(prev => {
+                if (prev?.scope !== nameScope) return prev;
+                const spacePending = prev.entries.get(spaceId);
+                if (!spacePending) return prev;
+                const now = Date.now();
+                const remaining: Record<string, { name: string; order: number; createdAt: number }> = {};
+                let changed = false;
+                for (const [catId, catVal] of Object.entries(spacePending)) {
+                  if (record.categories?.[catId]) {
+                    changed = true;
+                  } else if (now - catVal.createdAt < WORK_SPACE_NAME_TTL_MS) {
+                    remaining[catId] = catVal;
+                  } else {
+                    changed = true;
+                  }
+                }
+                if (!changed) return prev;
+                const nextEntries = new Map(prev.entries);
+                if (Object.keys(remaining).length > 0) {
+                  nextEntries.set(spaceId, remaining);
+                } else {
+                  nextEntries.delete(spaceId);
+                }
+                return { scope: nameScope, entries: nextEntries };
+              });
+            } else {
+              records.delete(spaceId);
+            }
             return { scope: nameScope, records };
           });
         });
@@ -406,7 +465,89 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     refresh();
     const timer = setInterval(refresh, WORK_SPACE_NAME_TTL_MS);
     return () => { active = false; clearInterval(timer); };
-  }, [nameScope, nameSpaceIds, sharedEnabled, userId]);
+  }, [nameScope, nameSpaceIds, sharedEnabled, userId, recordRefreshNonce]);
+
+  const handleSpaceRecordUpdate = useCallback((
+    spaceId: string,
+    newCategoryId?: string,
+    newCategory?: { name: string; order: number },
+  ) => {
+    const id = normalizeSpaceId(spaceId);
+    if (!id) return;
+    readCachedSpaceRecord.invalidate(id);
+    if (newCategoryId && newCategory) {
+      setPendingCategories(prev => {
+        const entries = new Map(prev?.scope === nameScope ? prev.entries : []);
+        const currentPending = entries.get(id) ?? {};
+        entries.set(id, { ...currentPending, [newCategoryId]: { ...newCategory, createdAt: Date.now() } });
+        return { scope: nameScope, entries };
+      });
+    }
+    triggerRecordRefresh();
+  }, [nameScope, triggerRecordRefresh]);
+
+  const handleCategoryRenamed = useCallback((spaceId: string, categoryId: string, name: string) => {
+    const id = normalizeSpaceId(spaceId);
+    if (!id) return;
+    readCachedSpaceRecord.invalidate(id);
+    setPendingCategories(prev => {
+      if (prev?.scope !== nameScope) return prev;
+      const pending = prev.entries.get(id);
+      if (!pending?.[categoryId]) return prev;
+      const entries = new Map(prev.entries);
+      entries.set(id, { ...pending, [categoryId]: { ...pending[categoryId]!, name } });
+      return { scope: nameScope, entries };
+    });
+    setResolvedRecords(prev => {
+      if (prev?.scope !== nameScope) return prev;
+      const rec = prev.records.get(id);
+      if (!rec || !rec.categories?.[categoryId]) return prev;
+      const nextRecords = new Map(prev.records);
+      nextRecords.set(id, {
+        ...rec,
+        categories: {
+          ...rec.categories,
+          [categoryId]: { ...rec.categories[categoryId]!, name },
+        },
+      });
+      return { scope: nameScope, records: nextRecords };
+    });
+    triggerRecordRefresh();
+  }, [nameScope, triggerRecordRefresh]);
+
+  const handleCategoryDeleted = useCallback((spaceId: string, categoryId: string) => {
+    const id = normalizeSpaceId(spaceId);
+    if (!id) return;
+    readCachedSpaceRecord.invalidate(id);
+    setPendingCategories(prev => {
+      if (prev?.scope !== nameScope) return prev;
+      const spacePending = prev.entries.get(id);
+      if (!spacePending || !spacePending[categoryId]) return prev;
+      const remaining = { ...spacePending };
+      delete remaining[categoryId];
+      const nextEntries = new Map(prev.entries);
+      if (Object.keys(remaining).length > 0) {
+        nextEntries.set(id, remaining);
+      } else {
+        nextEntries.delete(id);
+      }
+      return { scope: nameScope, entries: nextEntries };
+    });
+    setResolvedRecords(prev => {
+      if (prev?.scope !== nameScope) return prev;
+      const rec = prev.records.get(id);
+      if (!rec || !rec.categories?.[categoryId]) return prev;
+      const nextRecords = new Map(prev.records);
+      const remainingCats = { ...rec.categories };
+      delete remainingCats[categoryId];
+      nextRecords.set(id, {
+        ...rec,
+        categories: remainingCats,
+      });
+      return { scope: nameScope, records: nextRecords };
+    });
+    triggerRecordRefresh();
+  }, [nameScope, triggerRecordRefresh]);
   const labels = { other: t("workspace_other", "其他空间"), unassociated: t("workspace_unassociated", "空间外") };
   const remoteRecords = sharedEnabled && resolvedRecords?.scope === nameScope ? resolvedRecords.records : undefined;
   const deviceLocalRecords = useMemo(() => {
@@ -469,8 +610,30 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     for (const [id, record] of deviceLocalRecords) {
       combined.set(id, record);
     }
+    // 仅临时覆盖本次会话创建且未到期的待同步分类，严格按 nameScope 隔离；切账号立即不参与投影
+    const activePending = pendingCategories?.scope === nameScope ? pendingCategories.entries : undefined;
+    if (activePending && activePending.size > 0) {
+      const now = Date.now();
+      for (const [id, pendingMap] of activePending) {
+        const existing = combined.get(id);
+        if (existing) {
+          const validPending: Record<string, { name: string; order: number }> = {};
+          for (const [catId, catVal] of Object.entries(pendingMap)) {
+            if (now - catVal.createdAt < WORK_SPACE_NAME_TTL_MS) {
+              validPending[catId] = { name: catVal.name, order: catVal.order };
+            }
+          }
+          if (Object.keys(validPending).length > 0) {
+            combined.set(id, {
+              ...existing,
+              categories: { ...(existing.categories ?? {}), ...validPending },
+            });
+          }
+        }
+      }
+    }
     return combined;
-  }, [remoteRecords, deviceLocalRecords]);
+  }, [remoteRecords, deviceLocalRecords, pendingCategories, nameScope]);
 
   // ── 行级权限：只用可核实证据（实际实体 owner + 空间角色）────────────────────
   // 缓存缺失（目录行不在已加载窗口）、实体 spaceId 与目录不一致、来自远端目录页，
@@ -676,11 +839,24 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
   const renderSpace = (group: (typeof spaceGroups)[number]) => {
     const record = group.spaceId ? records?.get(group.spaceId) : undefined;
     if (group.directoryUnavailable) return <><p role="status">{t("workspace_directory_unavailable", "空间目录暂不可用，保留已加载内容")}</p>{renderFlatHierarchy(group.rows)}</>;
-    const categories = groupWorkDialogsByCategory(group.rows, record);
+    const isChatOrAllFilter = typeFilter === "all" || typeFilter === "dialog" || typeFilter === "agent";
+    const dropEmpty = !isChatOrAllFilter;
+    const categories = groupWorkDialogsByCategory(group.rows, record, { dropEmpty });
     const hasCategories = Object.values(record?.categories ?? {}).some(category => category?.name?.trim());
     const canManage = canManageSpaceCategories({ spaceId: group.spaceId, userId, memberSpaces, record });
     if (!hasCategories) return renderFlatHierarchy(group.rows);
-    return <WorkDialogCategoryGroups groups={categories} spaceId={group.spaceId ?? ""} userId={userId} canEdit={canManage}>{rows => renderFlatHierarchy(rows)}</WorkDialogCategoryGroups>;
+    return (
+      <WorkDialogCategoryGroups
+        groups={categories}
+        spaceId={group.spaceId ?? ""}
+        userId={userId}
+        canEdit={canManage}
+        onCategoryRenamed={handleCategoryRenamed}
+        onCategoryDeleted={handleCategoryDeleted}
+      >
+        {rows => renderFlatHierarchy(rows)}
+      </WorkDialogCategoryGroups>
+    );
   };
 
   const activeRow = activeMenuKey ? eligibleRows.find((row) => row.key === activeMenuKey) : undefined;
@@ -740,6 +916,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
             records={records}
             homeScope={homeScope}
             onSelectHomeScope={onSelectHomeScope}
+            onSpaceRecordUpdate={handleSpaceRecordUpdate}
           >
             {renderSpace}
           </WorkDialogSpaceGroups>

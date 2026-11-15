@@ -15,6 +15,7 @@ import { useAddCategory } from "create/space/hooks/useSpaceData";
 import { AddCategoryModal } from "create/space/category/AddCategoryModal";
 import CategoryHeader from "create/space/category/CategoryHeader";
 import { UNCATEGORIZED_ID } from "create/space/constants";
+import { normalizeSpaceId } from "database-engine/spaceLinkAccess";
 import type { HomeScope } from "./homeScopeProjection";
 import {
   OTHER_SPACES_GROUP,
@@ -26,13 +27,23 @@ import {
   type WorkSpaceRecord,
 } from "./sidebar/workDialogSpaceGroups";
 
-export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], records, homeScope, onSelectHomeScope, children }: {
+export function WorkDialogSpaceGroups({
+  groups,
+  userId,
+  memberSpaces = [],
+  records,
+  homeScope,
+  onSelectHomeScope,
+  onSpaceRecordUpdate,
+  children,
+}: {
   groups: readonly WorkDialogSpaceGroup[];
   userId: string;
   memberSpaces?: readonly { spaceId: string; userId?: string; role?: string; ownerId?: string }[];
   records?: ReadonlyMap<string, WorkSpaceRecord>;
   homeScope?: HomeScope;
   onSelectHomeScope?: (scope: HomeScope) => void;
+  onSpaceRecordUpdate?: (spaceId: string, newCategoryId?: string, newCategory?: { name: string; order: number }) => void;
   children: (group: WorkDialogSpaceGroup) => React.ReactNode;
 }) {
   const navigate = useNavigate();
@@ -74,16 +85,29 @@ export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], recor
         record: records?.get(moreMenuGroup.spaceId),
       })
     : false;
+  const normalizedMemberSpaceCount = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const member of memberSpaces) {
+      const id = normalizeSpaceId(member.spaceId);
+      if (id) ids.add(id);
+    }
+    return ids.size;
+  }, [memberSpaces]);
+  const hasRenderedMemberSpace = groups.some(group => group.spaceId && group.spaceId !== OTHER_SPACES_GROUP);
   return <div aria-label={t("workspace_workspaces", "空间工作区")} data-hook="space-workspaces-scroll" tabIndex={0}
     style={{ maxHeight: "60vh", overflowY: "auto", overscrollBehavior: "contain", minHeight: 0 }}>
     {groups.map((group, index) => {
       const key = JSON.stringify(group.spaceId);
       const defaultExpanded = group.spaceId === null && homeScope?.kind === "noSpace";
-      const expanded = isWorkDialogSpaceGroupExpanded(group.spaceId, index, activePreferences[key] ?? (defaultExpanded ? true : undefined));
+      // Keep unassociated content reachable without inventing a second workspace.
+      // 仅当存在已渲染的成员空间标题行（可承载更多菜单内的「空间外」切换入口）时，才隐藏空间外独立标题条；
+      // 若单成员空间因无名称被忽略未渲染，必须保留「空间外」标题条中的可见切换入口，绝不只留不可点状态。
+      const ungrouped = group.spaceId === null && normalizedMemberSpaceCount === 1 && hasRenderedMemberSpace;
+      const expanded = ungrouped || isWorkDialogSpaceGroupExpanded(group.spaceId, index, activePreferences[key] ?? (defaultExpanded ? true : undefined));
       const record = group.spaceId ? records?.get(group.spaceId) : undefined;
       const canManage = canManageSpaceCategories({ spaceId: group.spaceId, userId, memberSpaces, record });
       return <section key={key} data-hook="work-dialog-space-group" data-space-id={group.spaceId ?? ""}>
-        <div data-hook="space-workspace-header" style={{ display: "flex", alignItems: "center", position: "sticky", top: 0, zIndex: 1, background: "var(--background)", fontSize: "var(--fontSize-lg, var(--fontSize-base))", fontWeight: 600, color: "var(--text)" }}>
+        {!ungrouped && <div data-hook="space-workspace-header" style={{ display: "flex", alignItems: "center", position: "sticky", top: 0, zIndex: 1, background: "var(--background)", fontSize: "var(--fontSize-lg, var(--fontSize-base))", fontWeight: 600, color: "var(--text)" }}>
         <button type="button" aria-expanded={expanded} onClick={() => toggle(key, expanded)}
           aria-label={t("workspace_toggle", { name: group.label, defaultValue: "折叠或展开{{name}}" })}
           style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flex: "0 0 auto", minWidth: 0, padding: "var(--space-2)", border: "none", background: "transparent", color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit", fontWeight: 600 }}>
@@ -98,7 +122,7 @@ export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], recor
               const nextScope: HomeScope = homeScope?.kind === "noSpace" ? { kind: "all" } : { kind: "noSpace" };
               onSelectHomeScope?.(nextScope);
               if (nextScope.kind === "noSpace") {
-                if (location.pathname.startsWith("/space") || location.search.includes("spaceId=")) {
+                if (location?.pathname?.startsWith("/space") || location?.search?.includes("spaceId=")) {
                   navigate(AppRoutePaths.CHAT);
                 }
               }
@@ -113,7 +137,7 @@ export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], recor
           style={{ display: "flex", alignItems: "center", padding: "var(--space-2)", border: "none", background: "transparent", color: "var(--textSecondary, var(--text))", cursor: "pointer", flexShrink: 0 }}>
           <LuEllipsis size={16} aria-hidden="true" />
         </button>}
-        </div>
+        </div>}
         {expanded && children(group)}
       </section>;
     })}
@@ -125,13 +149,22 @@ export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], recor
     >
       <Menu aria-label={t("workspace_more_menu", "空间操作")} onAction={(action) => {
         const targetSpaceId = moreMenuSpaceId;
-        const spaceBasePath = `/space/${encodeURIComponent(targetSpaceId)}`;
+        const spaceBasePath = `/space/${encodeURIComponent(targetSpaceId ?? "")}`;
         setMoreMenuSpaceId(null);
         if (action === "contents") navigate(`${spaceBasePath}/contents`);
         else if (action === "members") navigate(`${spaceBasePath}/members`);
         else if (action === "settings") navigate(`${spaceBasePath}/settings`);
         // 没有分类的空间不渲染列表底部的「新建分类」按钮，这里保留同一入口。
-        else if (action === "new-category") setActiveAddCategorySpaceId(targetSpaceId);
+        else if (action === "new-category" && targetSpaceId) setActiveAddCategorySpaceId(targetSpaceId);
+        else if (action === "no-space") {
+          const nextScope: HomeScope = homeScope?.kind === "noSpace" ? { kind: "all" } : { kind: "noSpace" };
+          onSelectHomeScope?.(nextScope);
+          if (nextScope.kind === "noSpace") {
+            if (location?.pathname?.startsWith("/space") || location?.search?.includes("spaceId=")) {
+              navigate(AppRoutePaths.CHAT);
+            }
+          }
+        }
       }}>
         <MenuItem id="contents" textValue={t("workspace_contents", "全部内容")}>
           <LuLayoutGrid size={16} aria-hidden="true" />
@@ -141,10 +174,14 @@ export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], recor
           <LuUsers size={16} aria-hidden="true" />
           <span slot="label">{t("members", "成员")}</span>
         </MenuItem>
-        <MenuItem id="settings" textValue={t("settings", "设置")}>
+        <MenuItem id="settings" textValue={t("space_settings", "空间设置")}>
           <LuSettings size={16} aria-hidden="true" />
-          <span slot="label">{t("settings", "设置")}</span>
+          <span slot="label">{t("space_settings", "空间设置")}</span>
         </MenuItem>
+        {normalizedMemberSpaceCount === 1 && <MenuItem id="no-space" textValue={t("workspace_unassociated", "空间外")}>
+          <LuFolderPlus size={16} aria-hidden="true" />
+          <span slot="label" data-hook="space-workspace-no-space">{t("workspace_unassociated", "空间外")}</span>
+        </MenuItem>}
         {moreMenuCanManage && <MenuItem id="new-category" textValue={t("create_new_category", "新建分类")}>
           <LuFolderPlus size={16} aria-hidden="true" />
           <span slot="label" data-hook="space-workspace-new-category">{t("create_new_category", "新建分类")}</span>
@@ -166,26 +203,36 @@ export function WorkDialogSpaceGroups({ groups, userId, memberSpaces = [], recor
           record: records?.get(target),
         });
         if (!allowed) {
-          setActiveAddCategorySpaceId(null);
-          return;
+          throw new Error("当前账号已无权在此空间添加分类。");
         }
-        try {
-          await addCategoryInSpace({ spaceId: target, name });
-          setActiveAddCategorySpaceId(null);
-        } catch (error) {
-          console.error("新建分类失败:", error);
+        const res = await addCategoryInSpace({ spaceId: target, name });
+        const createdCategory = res.updatedSpaceData?.categories?.[res.newCategoryId];
+        if (createdCategory) {
+          onSpaceRecordUpdate?.(target, res.newCategoryId, createdCategory);
         }
+        setPreferences(previous => ({ ...previous, [JSON.stringify(target)]: true }));
+        setActiveAddCategorySpaceId(null);
       }}
     />}
   </div>;
 }
 
 /** Per-space category folding and management with explicit spaceId and permissions. */
-export function WorkDialogCategoryGroups({ groups, spaceId, userId, canEdit = false, children }: {
+export function WorkDialogCategoryGroups({
+  groups,
+  spaceId,
+  userId,
+  canEdit = false,
+  onCategoryRenamed,
+  onCategoryDeleted,
+  children,
+}: {
   groups: readonly WorkCategoryGroup[];
   spaceId: string;
   userId: string;
   canEdit?: boolean;
+  onCategoryRenamed?: (spaceId: string, categoryId: string, name: string) => void;
+  onCategoryDeleted?: (spaceId: string, categoryId: string) => void;
   children: (rows: WorkCategoryGroup["rows"]) => React.ReactNode;
 }) {
   const { t } = useTranslation("space");
@@ -204,6 +251,8 @@ export function WorkDialogCategoryGroups({ groups, spaceId, userId, canEdit = fa
         canEdit={canEdit && !isUncategorized}
         isCollapsed={closed}
         onToggleCollapse={() => setCollapsed(previous => ({ ...previous, [key]: !closed }))}
+        onCategoryRenamed={onCategoryRenamed}
+        onCategoryDeleted={onCategoryDeleted}
       />
       {!closed && <div style={{ paddingInlineStart: "var(--space-3)" }}>{children(group.rows)}</div>}
     </section>;

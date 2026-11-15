@@ -25,7 +25,10 @@ import { extractToolCallArgs } from "./toolDisplayName";
 import {
   buildToolCallPresentation,
   formatToolGroupStatusSummary,
+  isToolCallFailed,
   resolveToolCallMode,
+  readToolCallAttention,
+  resolveToolCallStatus,
   summarizeToolCallStatuses,
 } from "./toolCallPresentation";
 
@@ -99,7 +102,7 @@ export const ToolMessageGroup = memo(
     activityMessages,
     canCollapse = false,
   }: ToolMessageGroupProps) => {
-    const { t } = useTranslation("chat");
+    const { t, i18n } = useTranslation("chat");
     const [expandedActions, setExpandedActions] = useState<Set<string>>(
       () => new Set()
     );
@@ -129,8 +132,8 @@ export const ToolMessageGroup = memo(
           // createToolNameTranslator instead of rendering "[object Object]".
           const value: unknown = t(key, options as any);
           return typeof value === "string" ? value : "";
-        }),
-      [t]
+        }, i18n.language),
+      [t, i18n.language]
     );
 
     const visibleMessages = messages;
@@ -164,11 +167,7 @@ export const ToolMessageGroup = memo(
         <ToolMessageContent
           toolName={msg.toolName}
           rawData={safeParse(msg.content)}
-          isError={
-            msg.toolPayload?.status === "failed" ||
-            !!msg.toolPayload?.error ||
-            !!safeParse(msg.content)?.error
-          }
+          isError={isToolCallFailed(msg)}
           t={t}
           openPreview={() => {}}
           navigateToPage={() => {}}
@@ -198,13 +197,18 @@ export const ToolMessageGroup = memo(
           }) &&
           (msg.toolPayload?.status === "failed" ||
             !!msg.toolPayload?.error ||
-            !!rawData?.error);
+            isToolCallFailed(msg));
         if (msg.isStreaming && !canCollapse) hasRunning = true;
         else lastSettledStatus = isError ? "failed" : "success";
       }
       if (hasRunning) return "running";
       return lastSettledStatus ?? "success";
     }, [visibleMessages, canCollapse]);
+    const attentionKinds = [...new Set(visibleMessages.flatMap((message) =>
+      readToolCallAttention(message).map((item) => item.kind)
+        .filter((kind) => kind === "blocked" || kind === "permission" || kind === "delete-confirmation")
+    ))];
+    const unsettledStatus = visibleMessages.map(resolveToolCallStatus).find((status) => status === "unknown" || status === "cancelled");
 
     const hasTimeline = timeline.phases.length > 0;
     /** Only generic placeholder phase(s) — show flat actions, no phase chrome. */
@@ -231,11 +235,12 @@ export const ToolMessageGroup = memo(
     const overallStatus = useMemo(() => {
       if (canCollapse && messageStatus !== "running") {
         if (messageStatus === "failed") return "failed";
-        return "success";
+        return unsettledStatus ?? "success";
       }
-      if (!hasTimeline) return messageStatus;
-      if (!canCollapse && timeline.phases.some((phase) => phase.status === "running"))
+      if (messageStatus === "running" || (!canCollapse && timeline.phases.some((phase) => phase.status === "running")))
         return "running";
+      if (messageStatus !== "failed" && unsettledStatus) return unsettledStatus;
+      if (!hasTimeline) return messageStatus;
       // Mixed-failure settled turn: if any phase succeeded after a failure,
       // keep the card neutral so the final answer stays dominant.
       // Also check action-level status because a single implicit phase that
@@ -252,7 +257,7 @@ export const ToolMessageGroup = memo(
         return "failed";
       if (timeline.completedPhases < timeline.totalPhases) return "pending";
       return "success";
-    }, [hasTimeline, messageStatus, timeline]);
+    }, [canCollapse, hasTimeline, messageStatus, timeline, unsettledStatus]);
 
     // Default: open while waiting for the final reply; closed for historical turns.
     const [expanded, setExpanded] = useState(() => !canCollapse);
@@ -408,9 +413,7 @@ export const ToolMessageGroup = memo(
           rawData,
           toolPayload: (action.message as any)?.toolPayload,
         }) &&
-        ((action.message as any)?.toolPayload?.status === "failed" ||
-          !!(action.message as any)?.toolPayload?.error ||
-          !!rawData?.error);
+        isToolCallFailed(action.message as any);
       return (
         <div
           key={action.id}
@@ -511,7 +514,10 @@ export const ToolMessageGroup = memo(
           <StatusIcon status={overallStatus} toolName="" />
         </div>
         {/* Single count semantic: the i18n summary owns the call count. */}
-        <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary)}>{summary}</span>
+        <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary)}>{summary}{!expanded && attentionKinds.map((kind) => {
+          const fallback = kind === "blocked" ? "已阻塞" : kind === "permission" ? "需要授权" : "等待删除确认";
+          return <React.Fragment key={kind}>{" · "}{toolNameTranslator(`toolActivity.attention.${kind}`, fallback)}</React.Fragment>;
+        })}</span>
       </div>
     );
 
