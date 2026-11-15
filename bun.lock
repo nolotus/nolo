@@ -273,7 +273,7 @@
     },
     "packages/desktop": {
       "name": "desktop",
-      "version": "0.243.0-alpha.2",
+      "version": "0.243.0-alpha.3",
       "dependencies": {
         "electrobun": "^2.0.1",
         "rcedit": "^5.0.2",

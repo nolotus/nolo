@@ -1,4 +1,11 @@
 
+## 0.243.0-alpha.3 (2026-11-15)
+
+### Bug Fixes
+
+* **release:** 更新包禁用 size-only 跳过，并收紧 artifact.file 类型校验 ([8036c1d](https://github.com/nolotus/bun-nolo/commit/8036c1d71ea6f0414a08df5dfe85da8557d73fdc))
+
+
 ## 0.243.0-alpha.2 (2026-11-15)
 
 ### Bug Fixes
