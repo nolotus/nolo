@@ -132,15 +132,40 @@ const DIAGNOSTIC_PREFIX = "[nolo.skill.diagnostics] ";
 const seenSignatures = new Set<string>();
 
 /**
+ * 诊断默认**关闭**（2026-11-15 修复）。
+ *
+ * 背景：此前这里无条件写 `process.stderr`。CLI/TUI 运行时不接管 stderr，
+ * 于是这行 JSON 会直接打在交互界面上，覆盖输入行并与上一行残影叠加
+ * （表现为 `"discardedSkills":[],"disc…` 这样的乱码片段），严重干扰使用。
+ *
+ * 诊断本身仍有价值（排查「账号记录写着 auto-review，实际 run 注入了
+ * ub-mode」这类偏好解析问题），所以不删除，改为显式开启：
+ *
+ *   NOLO_SKILL_DIAGNOSTICS=1     # 打开
+ *
+ * 与既有 `NOLO_LOCAL_RUNTIME_DEBUG` / `NOLO_DEBUG` 的约定一致：默认不打扰，
+ * 排查时按需打开。显式注入 `sink`（测试）时不受此开关限制。
+ */
+export function skillDiagnosticsEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const flag = env.NOLO_SKILL_DIAGNOSTICS?.trim();
+  return flag === "1" || flag === "true";
+}
+
+/**
  * 打印一条诊断（JSON 单行，写 stderr）。
  *
- * `sink` 可注入（测试用）；默认写 `process.stderr`——server 与 CLI 两侧都
- * 能在运行日志里看到同一份格式。
+ * `sink` 可注入（测试/显式接线用）；默认写 `process.stderr`，但**仅在
+ * `NOLO_SKILL_DIAGNOSTICS=1` 时**才写——否则直接跳过，避免污染交互界面。
+ * 返回 true 表示本次真的写出了一条（未被开关关闭、且不是重复快照）。
  */
 export const reportAgentSkillPreferenceDiagnostic = (
   diagnostic: AgentSkillPreferenceDiagnostic,
   sink?: (line: string) => void,
 ): boolean => {
+  // 未显式注入 sink 时，受开关约束
+  if (!sink && !skillDiagnosticsEnabled()) return false;
   const signature = JSON.stringify(diagnostic);
   if (seenSignatures.has(signature)) return false;
   seenSignatures.add(signature);

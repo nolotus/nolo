@@ -61,18 +61,36 @@ const findDmgSourceInChannelDir = async (channelDir: string) => {
  * 客户端自动更新后运行时会读到的同一份元数据；让 DMG 与它一致，能保证「新装」
  * 和「升级上来」两条路径的本地元数据完全相同。更新包缺失或解析不出时 fail-closed
  * ——宁可让构建失败，也不要产出一个装完不能更新的 DMG。
+ *
+ * 注意查找目录是 **artifactDir**（最终产物目录，`.app.tar.zst` 在这里），
+ * 不是 channelDir（构建目录，只有 .app 与 .dmg）。用错目录会因找不到 payload
+ * 而让 macOS 构建直接失败（2026-11-15 首次上线即踩，已修正）。
  */
 const resolveDmgVersionMetadataFromPayload = (
-  channelDir: string,
+  artifactDir: string,
+  platformPrefix: string,
 ): DmgVersionMetadata => {
-  const entries = readdirSync(channelDir);
-  const payloadName = entries.find((name) => name.endsWith(".app.tar.zst"));
-  if (!payloadName) {
+  const entries = readdirSync(artifactDir);
+  const matches = entries.filter(
+    (name) => name.startsWith(platformPrefix) && name.endsWith(".app.tar.zst"),
+  );
+  if (matches.length === 0) {
     throw new Error(
-      `[desktop] cannot build DMG version.json: no *.app.tar.zst payload in ${channelDir}`,
+      `[desktop] cannot build DMG version.json: no ${platformPrefix}*.app.tar.zst payload in ${artifactDir}`,
     );
   }
-  const payloadPath = join(channelDir, payloadName);
+  // 本地脏 artifacts/ 里可能残留多份（例如旧的 0.235.0 与本次 0.236.0）。
+  // 静默取第一个会让 DMG 注入**别的版本**的元数据，而且构建仍然「成功」——
+  // 这种错比失败更坏。CI 干净环境恒为 1 份；>1 直接失败并要求清理。
+  if (matches.length > 1) {
+    throw new Error(
+      `[desktop] ambiguous DMG version.json source: ${matches.length} payloads match ` +
+        `${platformPrefix}*.app.tar.zst in ${artifactDir} (${matches.join(", ")}); ` +
+        `clean stale artifacts before building`,
+    );
+  }
+  const payloadName = matches[0]!;
+  const payloadPath = join(artifactDir, payloadName);
 
   // 只解 version.json 一个条目：更新包几十 MB，全量解包没必要。
   const zstd = Bun.spawnSync(["zstd", "-dc", payloadPath], { stdout: "pipe" });
@@ -235,7 +253,7 @@ export const createBrandedMacosDmg = async ({
   // 必须在 ad-hoc 签名之前写入，否则签名覆盖不到新文件。
   ensureDmgVersionMetadata({
     appBundlePath: join(stagingDir, source.appBundleName),
-    expected: resolveDmgVersionMetadataFromPayload(channelDir),
+    expected: resolveDmgVersionMetadataFromPayload(artifactDir, platformPrefix),
   });
 
   // DMG 里真正被安装的是 staging 里的这份 .app 副本。ad-hoc 模式下必须对它

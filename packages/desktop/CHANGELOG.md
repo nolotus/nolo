@@ -1,4 +1,13 @@
 
+## 0.243.0-alpha.2 (2026-11-15)
+
+### Bug Fixes
+
+* **cli:** skill 诊断默认关闭，避免 JSON 盖住 TUI 输入行 ([0643eaa](https://github.com/nolotus/bun-nolo/commit/0643eaa26579b4ed13a172a029d10a3bdb8f9e80))
+* **cli:** 合并「skill 诊断默认关闭」到本地 alpha ([5f12cf0](https://github.com/nolotus/bun-nolo/commit/5f12cf03124c3ec39150f3e75c040b8140ed5c24))
+* **desktop:** DMG 元数据改从 artifactDir 取 payload，修复 macOS 构建失败 ([3ee8fd9](https://github.com/nolotus/bun-nolo/commit/3ee8fd938dd2b4ad07773514afc9e37f3a9becb7))
+
+
 ## 0.243.0-alpha.1 (2026-11-15)
 
 ### Features

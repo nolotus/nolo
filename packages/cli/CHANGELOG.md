@@ -1,4 +1,12 @@
 
+## 0.226.0-alpha.2 (2026-11-15)
+
+### Bug Fixes
+
+* **cli:** skill 诊断默认关闭，避免 JSON 盖住 TUI 输入行 ([0643eaa](https://github.com/nolotus/bun-nolo/commit/0643eaa26579b4ed13a172a029d10a3bdb8f9e80))
+* **cli:** 合并「skill 诊断默认关闭」到本地 alpha ([5f12cf0](https://github.com/nolotus/bun-nolo/commit/5f12cf03124c3ec39150f3e75c040b8140ed5c24))
+
+
 ## 0.226.0-alpha.1 (2026-11-15)
 
 ### Features
