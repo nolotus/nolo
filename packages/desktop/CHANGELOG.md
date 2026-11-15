@@ -1,4 +1,19 @@
 
+## 0.243.0-alpha.1 (2026-11-15)
+
+### Features
+
+* **cli:** TUI Run 行改用可读摘要替代整条命令 ([0668df0](https://github.com/nolotus/bun-nolo/commit/0668df0acfb84652f47db1eaa6f6e5a497baed3f))
+* **cli:** 合并「TUI Run 行可读摘要」到本地 alpha ([25fefc1](https://github.com/nolotus/bun-nolo/commit/25fefc1ea3ed59c5ed65bcfce1ec0ba090382aa9))
+
+### Bug Fixes
+
+* **cli:** 删除 child-run 完成通知的 acceptance 门 ([6cf027e](https://github.com/nolotus/bun-nolo/commit/6cf027e32a2b29d037d1125f7fee4d0211ce8ff3))
+* **cli:** 合并「删除 child-run acceptance 门」到本地 alpha ([85d10b7](https://github.com/nolotus/bun-nolo/commit/85d10b7107a07390215a806329049707a6d5599e))
+* **desktop:** DMG 补齐 Resources/version.json，修复新装后更新通道不可用 ([c0ba1dc](https://github.com/nolotus/bun-nolo/commit/c0ba1dc7bffb37c1a9b0bf81d7d46a89dadb6049))
+* **downloads:** manifest 读真源 R2，切断主站磁盘陈旧副本的回环 ([44147cd](https://github.com/nolotus/bun-nolo/commit/44147cda223c8f6331df33925a926a6094fca865))
+
+
 ## 0.242.0-alpha.1 (2026-11-14)
 
 ### Features

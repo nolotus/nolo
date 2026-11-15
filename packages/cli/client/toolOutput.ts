@@ -27,6 +27,7 @@ import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resol
 import { resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
 import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
 import { redactSecrets } from "../tui/redactSecrets";
+import { summarizeShellCommand } from "../tui/shellCommandGist";
 import { safeAskText, withholdIfSecretLike } from "../tui/askTextSanitize";
 import { diffLines } from "diff";
 import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
@@ -1028,9 +1029,22 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
   if (isRunToolName(toolName)) {
     const command = typeof metadata.command === "string" ? metadata.command : "";
     if (command) {
-      // 2026-09-02 owner 定调：Run 行改「全量安全投影」——整条命令脱敏后按
-      // 终端宽度上屏（替代旧的 24 字符 head，参数/路径在展开 Run 树里本来
-      // 可见）。密钥护栏：redactSecrets 打码 + 出口 withholdIfSecretLike 兜底。
+      // 2026-11-15 owner 定调：Run 行改「可读摘要」投影。此前是整条命令
+      // 平铺上屏（2026-09-02 的「全量安全投影」），多段 && 复合命令会占满
+      // 整行且读者必须自己解析 shell。现在默认显示意图摘要
+      // （`进入 xxx：建目录 palettes、复制 2 个文件`），需要审计原文时走
+      // 展开层（Run 树 / verbose），那里仍保留整条命令。
+      //
+      // 退化策略：summarizeShellCommand 识别不了（含破坏性动作、管道喂 shell
+      // 等危险形态）就返回 null，此时退回原文全量投影——宁可显示命令，
+      // 也不显示编造的摘要。
+      //
+      // 护栏（review M1/M5 后修正）：摘要同样要走宽度预算，否则 target 是
+      // 无 `/` 的长 token 时 baseName 原样返回，能渲染出 321 列的行；
+      // 同样要过 redactSecrets：摘要会带 target（如 `bun run` 的脚本名），
+      // 那是凭据的新出口。出口 withholdIfSecretLike 仍在。
+      const gist = summarizeShellCommand(command);
+      if (gist) return truncateByDisplayWidth(redactSecrets(gist.summary), normalRunGistMaxWidth());
       return commandFullGist(command, normalRunGistMaxWidth());
     }
   }
@@ -1045,7 +1059,11 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
   const path = typeof metadata.path === "string" ? metadata.path : "";
   if (path) return pathBasenameGist(path);
   const command = typeof metadata.command === "string" ? metadata.command : "";
-  if (command) return commandFullGist(command, normalRunGistMaxWidth());
+  if (command) {
+    const gist = summarizeShellCommand(command);
+    if (gist) return truncateByDisplayWidth(redactSecrets(gist.summary), normalRunGistMaxWidth());
+    return commandFullGist(command, normalRunGistMaxWidth());
+  }
   const query = typeof metadata.query === "string" ? metadata.query : "";
   if (query) return clipCompactText(query, 64, "…");
   return "";

@@ -86,6 +86,30 @@ export const DESKTOP_RELEASE_PUBLIC_DOWNLOAD_BASES = {
   stable: "https://nolo.chat/public/downloads",
 } as const satisfies Record<DesktopReleaseChannel, string>;
 
+/**
+ * 读 manifest 用的**真源**基址，与上面「对外的下载基址」是两件事。
+ *
+ * 为什么不复用 DESKTOP_RELEASE_PUBLIC_DOWNLOAD_BASES：那两个主机名都是主站，
+ * 而主站的 `serveLocalDesktopDownload` 优先返回**磁盘上的本地副本**。alpha 的
+ * `/public/downloads/*` 还会先 302 回 nolo.chat，于是「远端读取」实际读到的是
+ * 主站磁盘上那份陈旧残留（2026-10-31 的 0.213.0-alpha.1），读取链路成环：
+ *
+ *   alpha 远端基址 us.nolo.chat → 302 → nolo.chat → 磁盘残留（陈旧）→ 返回
+ *
+ * 结果「先读远端」这道保护完全失效，alpha 客户端与下载页永远停在旧版本，
+ * 而真源（R2）上早就是 0.242.0-alpha.1。manifest 读取只认发布器唯一写入的
+ * 对象存储，不经过任何会回落到磁盘的主机名。
+ */
+export const DESKTOP_RELEASE_MANIFEST_TRUTH_BASE =
+  "https://downloads.nolo.chat" as const;
+
+/**
+ * manifest 读取专用的真源基址：R2 根路径直接暴露对象名（无 /public/downloads 前缀）。
+ */
+export function resolveDesktopManifestTruthBase(): string {
+  return DESKTOP_RELEASE_MANIFEST_TRUTH_BASE;
+}
+
 export function resolveDesktopReleasePublicBase(
   channel: DesktopReleaseChannel,
 ): string {
@@ -95,7 +119,9 @@ export function resolveDesktopReleasePublicBase(
 export function resolveDesktopReleaseManifestRemoteUrl(
   channel: DesktopReleaseChannel,
 ): string {
-  const base = resolveDesktopReleasePublicBase(channel).replace(/\/+$/, "");
+  // 读 manifest 走真源（R2 根路径），不走 DESKTOP_RELEASE_PUBLIC_DOWNLOAD_BASES：
+  // 后者是主站主机名，其 /public/downloads/* 可能返回磁盘陈旧副本或 302 回环。
+  const base = resolveDesktopManifestTruthBase().replace(/\/+$/, "");
   const fileName = desktopReleaseManifestPublicPath(channel).split("/").pop()!;
   return `${base}/${fileName}`;
 }
@@ -103,7 +129,7 @@ export function resolveDesktopReleaseManifestRemoteUrl(
 export function resolveLegacyDesktopReleaseManifestRemoteUrl(
   channel: DesktopReleaseChannel,
 ): string {
-  const base = resolveDesktopReleasePublicBase(channel).replace(/\/+$/, "");
+  const base = resolveDesktopManifestTruthBase().replace(/\/+$/, "");
   return `${base}/${DESKTOP_RELEASE_MANIFEST_PUBLIC_PATH.split("/").pop()!}`;
 }
 

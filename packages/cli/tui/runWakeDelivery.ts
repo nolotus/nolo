@@ -6,7 +6,6 @@ import { traceChildRunWake, queueWakeFields } from "./runWakeDiagnostics";
 
 /** Workspace wake routing, extracted unchanged so pause/inbox boundaries use the real scheduler in tests. */
 export function createRunWakeHandler(deps: {
-  canConsume?: () => boolean;
   isDone: () => boolean;
   isBusy: () => boolean;
   getDialogId: () => string | null;
@@ -21,7 +20,6 @@ export function createRunWakeHandler(deps: {
   onError: (error: unknown) => void;
 }) {
   const handler = (event: InternalTurnEvent | string) => {
-    if (typeof event !== "string" && event.kind === "child-run-completed" && deps.canConsume && !deps.canConsume()) return false;
     if (deps.isDone()) { traceChildRunWake("delivery-done", event, deps.getDialogId()); return false; }
     const busy = deps.isBusy();
     const paused = deps.fixedInput.isPaused();
@@ -85,7 +83,7 @@ export function createRunWakeHandler(deps: {
   };
   return Object.assign(handler, {
     async resumeAfterInputPause() {
-      if ((deps.canConsume && !deps.canConsume()) || deps.isDone() || deps.isBusy() || deps.fixedInput.isPaused()) return;
+      if (deps.isDone() || deps.isBusy() || deps.fixedInput.isPaused()) return;
       await deps.drainQueue();
     },
   });

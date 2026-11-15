@@ -1,4 +1,3 @@
-import { canConsumeChildCompletion } from "./childRunConsumption";
 import { createRunWakeHandler, deliverChildCompletion } from "./runWakeDelivery";
 import { traceChildRunWake } from "./runWakeDiagnostics";
 import { hostTaskEventsRoot, readHostTask } from "../client/hostTaskEvents";
@@ -815,9 +814,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     getCurrentDialogId: () => state.dialogId ?? null,
     onWake: (event) => {
       traceChildRunWake("watcher-delivery", event, state.dialogId ?? null, { handlerInstalled: !!runWakeHandler, autoReviewRoute: !!currentAutoReviewTask(state, effectiveEnv) });
-      // Child result admission is independent of reconciliation's deferred wake:
-      // the latter can be cancelled by an authorization/scope change.
-      if (!canConsumeChildCompletion(state, effectiveEnv)) return false;
+      // 2026-11-15：删除 canConsumeChildCompletion 门（owner 决定）。
+      // 「子 run 跑完了」是客观事实，与 auto-review 的 acceptance 无关；
+      // 旧门在任务 paused 或 acceptance=unknown 时静默丢弃事件，导致对话
+      // 不自动接续。验收约束由 autoReviewContinuation 等分支独立把关。
       return deliverChildCompletion(event, runWakeHandler, () => {
         if (typeof event !== "string" && event.kind === "child-run-completed" && currentAutoReviewTask(state, effectiveEnv)) {
           reconcileAutoReviewWake({ kind: "review-terminal", eventKey: `runs:${event.runs.map((r) => `${r.runId}:${r.status}`).sort().join(",")}` });
@@ -2088,7 +2088,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       emitCommandOutput(t("wakeQueuedWhileStopped", String(count)));
     };
     runWakeHandler = createRunWakeHandler({
-      canConsume: () => canConsumeChildCompletion(state, effectiveEnv),
       isDone: () => done,
       isBusy: () => busy,
       getDialogId: () => state.dialogId ?? null,

@@ -1,10 +1,14 @@
 import { cp, mkdir, readdir, symlink } from "node:fs/promises";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import { buildMacosDmgInstallerTheme } from "./macos-dmg-theme";
 import { getMacosDmgInstallerCopyForBuild } from "./macos-dmg-i18n";
 import { renderMacosDmgBackgroundPng } from "./macos-dmg-background";
 import { adhocCodesignAppBundle, shouldAdhocCodesign } from "./codesign-local";
+import {
+  ensureDmgVersionMetadata,
+  type DmgVersionMetadata,
+} from "./dmg-version-metadata";
 
 const escapeAppleScript = (value: string) => value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 
@@ -47,6 +51,66 @@ const findDmgSourceInChannelDir = async (channelDir: string) => {
     appBundleName,
     appBundlePath: join(channelDir, appBundleName),
     dmgPath,
+  };
+};
+
+/**
+ * 从本渠道的更新包（`*.app.tar.zst`）里读出权威的 version.json。
+ *
+ * 为什么以更新包为源：hutch 打更新包时写入 `Resources/version.json`，那份就是
+ * 客户端自动更新后运行时会读到的同一份元数据；让 DMG 与它一致，能保证「新装」
+ * 和「升级上来」两条路径的本地元数据完全相同。更新包缺失或解析不出时 fail-closed
+ * ——宁可让构建失败，也不要产出一个装完不能更新的 DMG。
+ */
+const resolveDmgVersionMetadataFromPayload = (
+  channelDir: string,
+): DmgVersionMetadata => {
+  const entries = readdirSync(channelDir);
+  const payloadName = entries.find((name) => name.endsWith(".app.tar.zst"));
+  if (!payloadName) {
+    throw new Error(
+      `[desktop] cannot build DMG version.json: no *.app.tar.zst payload in ${channelDir}`,
+    );
+  }
+  const payloadPath = join(channelDir, payloadName);
+
+  // 只解 version.json 一个条目：更新包几十 MB，全量解包没必要。
+  const zstd = Bun.spawnSync(["zstd", "-dc", payloadPath], { stdout: "pipe" });
+  if (zstd.exitCode !== 0) {
+    throw new Error(`[desktop] failed to decompress payload: ${payloadPath}`);
+  }
+  const tar = Bun.spawnSync(["tar", "-xOf", "-", "*/Contents/Resources/version.json"], {
+    stdin: new Uint8Array(zstd.stdout),
+    stdout: "pipe",
+  });
+  if (tar.exitCode !== 0) {
+    throw new Error(
+      `[desktop] payload has no Contents/Resources/version.json: ${payloadPath}`,
+    );
+  }
+
+  let parsed: Partial<DmgVersionMetadata>;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(tar.stdout)) as Partial<DmgVersionMetadata>;
+  } catch (error) {
+    throw new Error(
+      `[desktop] payload version.json is not valid JSON (${payloadPath}): ${String(error)}`,
+    );
+  }
+
+  const pick = (key: keyof DmgVersionMetadata): string => {
+    const value = parsed[key];
+    return typeof value === "string" ? value.trim() : "";
+  };
+
+  return {
+    version: pick("version"),
+    hash: pick("hash"),
+    channel: pick("channel"),
+    baseUrl: pick("baseUrl"),
+    name: pick("name"),
+    identifier: pick("identifier"),
+    ...(pick("displayName") ? { displayName: pick("displayName") } : {}),
   };
 };
 
@@ -164,6 +228,16 @@ export const createBrandedMacosDmg = async ({
   await mkdir(stagingDir, { recursive: true });
   await mkdir(join(stagingDir, ".background"), { recursive: true });
   await cp(appBundlePath, join(stagingDir, source.appBundleName), { recursive: true });
+
+  // DMG 必须自带 Resources/version.json：electrobun 的 Updater.getLocalInfo()
+  // 只认这个文件，缺了会让全新安装的用户一装就报 "Unsupported update channel"。
+  // hutch 只在打更新包时写它；DMG 这条重打包路径不保证带上（实测 0.236.0 缺失）。
+  // 必须在 ad-hoc 签名之前写入，否则签名覆盖不到新文件。
+  ensureDmgVersionMetadata({
+    appBundlePath: join(stagingDir, source.appBundleName),
+    expected: resolveDmgVersionMetadataFromPayload(channelDir),
+  });
+
   // DMG 里真正被安装的是 staging 里的这份 .app 副本。ad-hoc 模式下必须对它
   // 再签一次：postWrap 签的是构建目录里的 .app，而这里的来源可能是 electrobun
   // 自己打的 DMG（其内 .app 是 postWrap 之前的副本），签名状态不可假定。
