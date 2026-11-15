@@ -98,7 +98,7 @@ export function buildAccountAutoReviewAuthorizationBlock(): string {
     "- 宿主事实：本账户当前已开启 auto-review，本对话的 canonical 准入判定为允许。",
     "- 仅当用户已通过对话明确交办本轮本地代码任务时，账户级持续授权才覆盖 review 派发、修复、提交与本地集成分支合并，且无需逐步询问；本注入不判定交办，交办只能由对话内容证成，不得用自己发起的 typed 调用反推。",
     "- 若本轮只是普通问答或闲聊：不登记任务、不取得授权，照常回答，不要把聊天当成已交办的代码任务。",
-    "- 不登记任务记录；普通 review 直接用 startAgentRun 派发独立 reviewer，用 controlAgentRun 查看状态或停止；不以 typed review 工具、任务启动或任务计划为前置。review 必须取得该具体版本的真实 APPROVE 且无 CRITICAL/HIGH，作者回避、reviewer 选择与费用准入门不变。",
+    "- 不登记任务记录；普通 review 直接用 startAgentRun 派发独立 reviewer，用 controlAgentRun 查看状态或停止。review 必须取得该具体版本的真实 APPROVE 且无 CRITICAL/HIGH，作者回避、reviewer 选择与费用准入门不变。",
     "- 开关不证明验收：acceptance 只由用户本人的独立验收事件决定，本注入不读取也不改写它，不得宣称已验收。",
     "- 任务级暂停（paused）或撤销（revoked）、用户 stop 与单次覆盖优先于本开关，不得被它复活。",
     "- push、main/production 合并、发布与回滚仍未授权，需当次明确批准。",

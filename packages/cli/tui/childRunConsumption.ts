@@ -14,16 +14,16 @@
  * 才允许消费。已删除——「子 run 跑完了」是客观事实，与「要不要合并/提交」
  * 是两件事；旧门在任务 paused 或 acceptance=unknown 时会静默攒住/丢弃完成
  * 事件，导致对话不自动接续（现场表现：后台任务已完成，但要按 Enter 才继续）。
- * 验收约束仍由 taskExecutionContract / autoReviewContinuation /
- * autoReviewContinuationWake 与 tuiTurnRunner 的 auto-review-continuation 分支把关。
  *
  * 已知取舍（删除后的行为边界，非缺陷）：
  * 旧门顺带拦住了 `authorization=paused` 时「起一个 provider turn」这件事。
  * 删除后，暂停状态下子 run 完成会真的起一轮，模型带工具、可以在该轮内继续
- * 动手。剩余的 paused 守卫只覆盖 auto-review-continuation 事件
- * （autoReviewContinuationWake.ts 的 authorization 判定），不覆盖这一轮里
- * 模型自主发起的写操作。owner 明确接受这个取舍：pause 的语义是「别再自动
- * 推进 review/commit 流程」，不是「冻结对话」。
+ * 动手。owner 明确接受这个取舍：pause 的语义是「别再自动推进 review/commit
+ * 流程」，不是「冻结对话」。
+ *
+ * 后续：auto-review 续跑状态机与 host task 基础设施已于 2026-11-15 整体移除，
+ * 这里不再有 continuation 分支或 paused 守卫可引用——当前行为就是「子 run
+ * 完成即接续」，无额外准入判断。
  */
 
 import type { ChildRunCompletedTurnEvent } from "core/chat/internalTurnEvent";

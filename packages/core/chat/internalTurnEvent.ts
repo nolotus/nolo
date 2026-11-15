@@ -83,18 +83,7 @@ export type BackgroundTaskCompletedTurnEvent = {
   notice?: import("../../agent-runtime/processRegistry").ProcessTerminalNotice;
 };
 
-/** Host lifecycle signal, never a user submission or a fabricated child run. */
-export type AutoReviewContinuationTurnEvent = {
-  kind: "auto-review-continuation";
-  scope: { taskId: string; taskInstanceId?: string; dialogId: string; workspace: string };
-  eventKey: string;
-  action: "continue-author" | "request-review" | "decide-review" | "commit" | "local-merge";
-  text: string;
-  displayText: string;
-};
-
 export type InternalTurnEvent =
-  | AutoReviewContinuationTurnEvent
   | UserTurnEvent
   | ChildRunCompletedTurnEvent
   | BackgroundTaskCompletedTurnEvent;

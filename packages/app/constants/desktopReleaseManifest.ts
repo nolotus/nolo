@@ -7,11 +7,6 @@ export type DesktopReleaseUpdateMeta = {
   size: number;
   version: string;
   hash: string;
-  /**
-   * 同一更新包的其它可信下载地址（主站直出时通常就是 CF 对象存储地址）。
-   * 可选的新增字段：旧客户端忽略未知字段，`url` 仍是首选源，语义不变。
-   */
-  mirrors?: string[];
 };
 
 export type DesktopReleaseArtifact = {
@@ -21,16 +16,8 @@ export type DesktopReleaseArtifact = {
   version?: string;
   buildSha?: string;
   publishedAt?: string;
-  /**
-   * 同一产物的其它可信下载地址（主站直出时通常就是 CF 对象存储地址）。
-   * 可选的新增字段：旧客户端忽略未知字段，`url` 仍是首选源，语义不变。
-   */
-  mirrors?: string[];
   updateMeta?: DesktopReleaseUpdateMeta;
 };
-
-/** mirrors 数量上限：manifest 可能来自上游存储，不信任其长度。 */
-export const MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS = 8;
 
 export type DesktopReleaseManifest = {
   schemaVersion: 1;
@@ -170,38 +157,14 @@ export function normalizeDesktopReleaseManifest(
       typeof (rawUpdateMeta as Record<string, unknown>).hash === "string"
     ) {
       const meta = rawUpdateMeta as Record<string, unknown>;
-      // mirrors 是可选扩展字段：只保留非空字符串，按上限截断，顺序保留
-      // （发布端把首选镜像写在最前）。
-      const rawMetaMirrors = meta.mirrors;
-      const metaMirrors = Array.isArray(rawMetaMirrors)
-        ? rawMetaMirrors
-            .filter(
-              (entry): entry is string =>
-                typeof entry === "string" && entry.trim() !== "",
-            )
-            .slice(0, MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS)
-        : [];
       updateMeta = {
         url: meta.url as string,
         sha256: meta.sha256 as string,
         size: meta.size as number,
         version: meta.version as string,
         hash: meta.hash as string,
-        ...(metaMirrors.length ? { mirrors: metaMirrors } : {}),
       };
     }
-
-    // mirrors 同样是可选扩展字段：只有非空字符串才算数，长度按上限截断，
-    // 顺序保留（发布端把首选镜像写在最前）。
-    const rawMirrors = (artifact as Record<string, unknown>).mirrors;
-    const mirrors = Array.isArray(rawMirrors)
-      ? rawMirrors
-          .filter(
-            (entry): entry is string =>
-              typeof entry === "string" && entry.trim() !== "",
-          )
-          .slice(0, MAX_DESKTOP_RELEASE_ARTIFACT_MIRRORS)
-      : [];
 
     artifacts[platform] = {
       url: artifact.url,
@@ -210,7 +173,6 @@ export function normalizeDesktopReleaseManifest(
       ...(typeof artifact.version === "string" ? { version: artifact.version } : {}),
       ...(typeof artifact.buildSha === "string" ? { buildSha: artifact.buildSha } : {}),
       ...(typeof artifact.publishedAt === "string" ? { publishedAt: artifact.publishedAt } : {}),
-      ...(mirrors.length ? { mirrors } : {}),
       ...(updateMeta ? { updateMeta } : {}),
     };
   }

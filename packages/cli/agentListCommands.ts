@@ -92,6 +92,17 @@ export async function runAgentListCommand(
   deps: AgentCommandDeps = {}
 ) {
   const env = deps.env ?? process.env;
+  // Only the local host bridge injects this; no tool argument/CLI flag accepts caller identity.
+  let planningCaller: import("ai/agent/agentDiscovery").PlanningCaller | undefined;
+  try {
+    const raw = JSON.parse(env.NOLO_PLANNING_CALLER ?? "null");
+    if (raw && typeof raw === "object") planningCaller = {
+      agentKey: typeof raw.agentKey === "string" ? raw.agentKey : undefined,
+      effectiveModel: typeof raw.effectiveModel === "string" ? raw.effectiveModel : undefined,
+      runKind: raw.runKind === "subtask" ? "subtask" : "interactive",
+    };
+  } catch { /* Missing/malformed host context remains unknown, never inferred from names. */ }
+
   const output = deps.output ?? process.stdout;
   const { wantJson, wantSafe, publicOnly, scope: requestedScope, idsOnly, showUnavailable, verbose, compact, limit, offset, query } = parseAgentListArgs(args);
   if (requestedScope && !["preferred", "public", "all"].includes(requestedScope)) {
@@ -424,6 +435,8 @@ export async function runAgentListCommand(
         .filter((agent) => (publicOnly ? agent.isPublic === true : true));
       const discovery = buildAgentDiscoveryResult({
         agents: safeRecords,
+        caller: planningCaller,
+        poolRestricted: Boolean(resolvedSpaceId) || serverFailures.length > 0 || source !== "global-cache",
         scope: requestedScope ?? (publicOnly ? "public" : "all"),
         query,
         showUnavailable,
@@ -439,6 +452,7 @@ export async function runAgentListCommand(
         success: true,
         userId,
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
+        planningRecommendation: discovery.planningRecommendation,
         total: discovery.total,
         ...(typeof discovery.offset === "number" ? { offset: discovery.offset } : {}),
         ...(typeof discovery.limit === "number" ? { limit: discovery.limit } : {}),

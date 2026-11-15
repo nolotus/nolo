@@ -34,7 +34,7 @@ export type TurnImageRow = {
   sourceStart: number;
   sourceEnd: number;
   prefixWidth: 0;
-  image: TurnImageRowInfo;
+  image?: TurnImageRowInfo;
 };
 
 const PLACEHOLDER_PREFIX = "[图片] ";
@@ -74,6 +74,10 @@ export function layoutImageRows(
   const rows: TurnImageRow[] = [];
   for (const image of images) {
     if (graphicsEnabled && hasUsableSize(image)) {
+      rows.push({
+        rendered: truncateAnsi(`${PLACEHOLDER_PREFIX}${sanitizeImageLabel(image.label)}`, width),
+        sourceStart: bodyEnd, sourceEnd: bodyEnd, prefixWidth: 0,
+      });
       const fit = fitImageToCells(
         { width: image.width, height: image.height },
         { maxColumns: width },

@@ -21,6 +21,7 @@ import type { DialogHost } from "./dialogHost";
  * AgentTurnContext，避免 helper ↔ tuiTurnRunner 的模块环。
  */
 export type QueuedUserAttachmentContext = {
+  onUserImagesPrepared?: (images: readonly import("./pasteImage").AttachedImage[]) => void;
   /** 直接写终端（图片读取失败的 `image skipped:` 行走这里）。 */
   readonly output: NodeJS.WritableStream;
   /** 静音裁剪选择框需要按原生键盘输入。 */
@@ -53,6 +54,7 @@ export async function prepareQueuedUserRequest(
     try {
       ({ imageUrls } = await resolveAttachmentImageUrls({
         actionImagePaths: req.imagePaths,
+        onResolved: ctx.onUserImagesPrepared,
         attachedImages: [],
         onFailure: (_path, err) =>
           ctx.output.write(`[nolo] image skipped: ${err.message}\n`),

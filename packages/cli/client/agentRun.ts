@@ -3,9 +3,6 @@ import { isHistoryIntegrityFailure } from "../../ai/tools/agent/runFailureClass"
 import { getOrCreateSharedStore } from "./localRuntimeDialog";
 import { markCliUserBatchPhase } from "./localDialogRecords";
 import { cliBatchPhaseFailure, resolveCliBatchIdentity, type CliBatchPhaseFailure } from "./cliBatchIdentity";
-import { resolve as resolveHostReviewPath } from "node:path";
-import { bindHostTask } from "./hostTaskBinding";
-import { createHostAuthorExecution, withHostReviewDispatch, settleHostReviewsForScope, matchesHostReviewDispatch, type HostReviewDispatchContext } from "./hostReviewDispatch";
 import { wrapLocalCommandWorkspaceObservation, observeLocalCommandResult, type LocalCommandObservation } from "../agentRunLocalWorkspace";
 import {
   LOCAL_AGENT_CONFIG_MISSING_CODE,
@@ -119,8 +116,6 @@ import {
   stripZeroWidthChars,
 } from "./balanceErrorPatterns";
 import { getCliLocale, t } from "../tui/i18n";
-import { hostTaskEventsRoot, readHostTask } from "./hostTaskEvents";
-import { assessHostTaskWorkspace, resolveCurrentHostTaskReference } from "./hostTaskWorkspaceAssessment";
 import type { CliLocale } from "../tui/i18n";
 
 /** Local loop is heavy; load only when a local turn actually runs. */
@@ -2456,11 +2451,6 @@ async function executeLocalAgentTurnForCliWithAdapter(
       : undefined;
   const currentDialogId = options.continueDialogId ?? ulid();
   const freshDialog = options.freshDialog ?? !options.continueDialogId;
-  // Use the same current-turn identity for review binding, completion and workspace gates.
-  options = { ...options, hostTaskRef: resolveCurrentHostTaskReference({
-    reference: options.hostTaskRef, workspace: options.localRuntimeCwd ?? process.cwd(),
-    dialogId: currentDialogId, env: options.env,
-  }) };
 
 
   // Ownership stamp for workspace tools invoked inside this turn — background
@@ -2477,76 +2467,11 @@ async function executeLocalAgentTurnForCliWithAdapter(
     getProcessCausalDepth: options.getProcessCausalDepth,
   };
 
-  // Legacy task-start/path evidence must not gate ordinary chat or tools.
-  // Only the host turn binds identity/scope; neither tool JSON nor account skill
-  // declarations can manufacture this execution binding.
-  const installReviewHost = (baseAdapter as AgentRuntimeHostAdapter & { installTaskReviewHost?: (host: import("./taskReviewTools").TaskReviewHost) => void }).installTaskReviewHost;
-  if (options.hostTaskRef && installReviewHost) {
-    const scope = structuredClone(options.hostTaskRef);
-    const authorExecutionId = createHostAuthorExecution(options.env, scope, turnId);
-    installReviewHost({ scope, authorExecutionId, authorize: async () => {
-      if (!scope.taskId?.trim() || !scope.workspace?.trim() || !scope.dialogId?.trim() ||
-          scope.dialogId !== currentDialogId || resolveHostReviewPath(scope.workspace) !== resolveHostReviewPath(options.localRuntimeCwd ?? process.cwd())) throw new Error("task_review_host_scope_mismatch");
-    } });
-  }
-
-  let reviewContext: HostReviewDispatchContext | undefined;
-  const requestedReview = options.hostReviewDispatch;
-  if (requestedReview && options.hostTaskRef &&
-      requestedReview.scope.taskId === options.hostTaskRef.taskId &&
-      requestedReview.scope.dialogId === currentDialogId &&
-      resolveHostReviewPath(requestedReview.scope.workspace) === resolveHostReviewPath(options.hostTaskRef.workspace)) {
-    reviewContext = { ...requestedReview, authorExecutionId: createHostAuthorExecution(options.env, options.hostTaskRef, turnId) };
-  }
   const commandVersionBindings = new Map<string, Pick<LocalCommandObservation, "versionBinding" | "executionWorkspace">>();
   const commandAdapter = !options.runtimeKey || options.runtimeKey === "local"
     ? wrapLocalCommandWorkspaceObservation(baseAdapter, options.localRuntimeCwd ?? process.cwd(), commandVersionBindings, undefined, options.abortSignal)
     : baseAdapter;
-  const reviewAdapter: AgentRuntimeHostAdapter = {
-    ...commandAdapter,
-    executeTool: async (call, opts) => {
-      let args: Record<string, unknown> = {};
-      try { args = typeof call.arguments === "string" ? JSON.parse(call.arguments) : call.arguments ?? {}; } catch { /* ordinary executor owns malformed args */ }
-      const matched = call.name === "startAgentRun" && matchesHostReviewDispatch(reviewContext, call, args);
-      const result = await withHostReviewDispatch(matched ? reviewContext : undefined, () => commandAdapter.executeTool(call, opts));
-      return result;
-    },
-  };
-  // Stale references on ordinary chat are not an explicit completion scope.
-  // Host-only test producer seam; no production completion producer is installed.
-  const completionEvidenceProvider = options.hostTaskRef ? options.hostTaskCompletionEvidenceProvider : undefined;
-  let hostTask = bindHostTask({
-    adapter: reviewAdapter,
-    reference: options.hostTaskRef,
-    workspace: options.localRuntimeCwd ?? process.cwd(),
-    dialogId: currentDialogId,
-    env: options.env,
-    signal: options.abortSignal,
-    completionEvidenceProvider,
-  });
-  // Workspace evidence is opt-in for an active explicit task, never a chat/startTask gate.
-  if (options.hostTaskRef && options.hostTaskWorkspaceEvidence !== undefined &&
-      readHostTask(hostTaskEventsRoot(options.env), options.hostTaskRef).authorization === "active") {
-    const blocker = await assessHostTaskWorkspace({ reference: options.hostTaskRef,
-      workspace: options.localRuntimeCwd ?? process.cwd(), dialogId: currentDialogId,
-      env: options.env, evidence: options.hostTaskWorkspaceEvidence });
-    if (blocker) {
-      options.output.write(`[auto-review] blocked: ${blocker.hostTaskWorkspaceBlocker}\n`);
-      // Save this pre-provider assessment unchanged; a completion producer cannot replace it.
-      try {
-        const saved = await reviewAdapter.saveTurn({ agentKey: options.agentKey,
-          messages: [{ role: "user", content: options.message }], continueDialogId: currentDialogId,
-          runtimeContext: runtimeContextWithOwnership,
-          result: { model: "host-workspace-assessment", content: "", error: true,
-            businessCompletion: blocker.businessCompletion } });
-        return { ...blocker, hostTaskRef: options.hostTaskRef, dialogId: saved.dialogId,
-          taskAuthorization: readHostTask(hostTaskEventsRoot(options.env), options.hostTaskRef).authorization };
-      } catch (localError) {
-        return { ...blocker, hostTaskRef: options.hostTaskRef, localError };
-      }
-    }
-  }
-  let usedReviewTool = false;
+  // adapter 链现在只有 commandAdapter（host task 包装层已移除）。
   let batchProviderStarted = false;
   let mainProviderStarted = false;
   let refusalModel = "";
@@ -2575,9 +2500,9 @@ async function executeLocalAgentTurnForCliWithAdapter(
     }
   };
   const adapter: AgentRuntimeHostAdapter = {
-    ...hostTask.adapter,
+    ...commandAdapter,
     resolveProvider: async (...args) => {
-      const provider = await hostTask.adapter.resolveProvider(...args);
+      const provider = await commandAdapter.resolveProvider(...args);
       // Summary/compaction calls are not the main request and must not consume pending input.
       const isTextOnly = Boolean(args[1]?.textOnly);
       if (!isTextOnly) refusalModel = provider.model;
@@ -2595,28 +2520,8 @@ async function executeLocalAgentTurnForCliWithAdapter(
         },
       };
     },
-    executeTool: async (call, opts) => {
-      const protectedReview = call.name === "requestTaskReview" || call.name === "recordTaskReviewDecision";
-      if (!protectedReview) return reviewAdapter.executeTool(call, opts);
-      usedReviewTool = true;
-      if (options.hostTaskRef?.taskInstanceId) {
-        const authorize = (baseAdapter as AgentRuntimeHostAdapter & { authorizeAccountTask?: (scope: import("./hostTaskEvents").HostTaskReference) => Promise<void> }).authorizeAccountTask;
-        if (!authorize) throw new Error("task_review_account_authorization_unavailable");
-        await authorize(options.hostTaskRef);
-      }
-      // A typed local task operation is the host-recognized task boundary.
-      // Ordinary chat never creates task records from account preferences.
-      if (!options.hostTaskRef && ["requestTaskReview", "recordTaskReviewDecision"].includes(call.name)) {
-        const admit = (baseAdapter as AgentRuntimeHostAdapter & { admitAccountReviewTurn?: (dialogId: string, turnId: string) => Promise<import("./hostTaskEvents").HostTaskReference> }).admitAccountReviewTurn;
-        if (!admit) throw new Error("task_review_account_admission_unavailable");
-        const reference = await admit(currentDialogId, turnId);
-        options = { ...options, hostTaskRef: reference };
-        hostTask = bindHostTask({ adapter: reviewAdapter, reference, workspace: options.localRuntimeCwd ?? process.cwd(), dialogId: currentDialogId, env: options.env, signal: options.abortSignal });
-      }
-      return hostTask.adapter.executeTool(call, opts);
-    },
+    // 工具执行直接走 ...commandAdapter 展开（无需再写一行透传）。
     saveTurn: async input => {
-      if (usedReviewTool && options.hostTaskRef) await settleHostReviewsForScope(options.hostTaskRef, options.env, options.hostReviewContentAcceptance);
       // Attach the completion evidence to the SAME store.batch as the reply save
       // (see writeDialog/cliBatchCompletion). Success persists both; a failure
       // leaves the reply unpersisted and the tail at `requested`, so recovery
@@ -2634,7 +2539,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
         ...(!input.result.error ? injectedBatches.map(batch => batch.batchId) : []),
       ];
       try {
-        const saved = await hostTask.adapter.saveTurn({ ...input,
+        const saved = await commandAdapter.saveTurn({ ...input,
           messages: input.messages.filter(message => {
             const cliMessageId = (message as any).cliMessageId;
             if (!cliMessageId) return true;
@@ -2703,7 +2608,6 @@ async function executeLocalAgentTurnForCliWithAdapter(
     const runLocalAgentTurn = await loadRunLocalAgentTurn();
     const result = await runLocalAgentTurn({
       adapter,
-      ...(hostTask.contract ? { taskExecutionContract: hostTask.contract } : {}),
       agentRef: options.agentKey,
       userLanguage: options.userLanguage ?? options.env.NOLO_LANG ?? null,
       input: buildUserInputContent(messageForLocal, options.imageUrls),
@@ -2828,8 +2732,6 @@ async function executeLocalAgentTurnForCliWithAdapter(
       mainProviderAttempted: mainProviderStarted,
       exitCode: 0,
       stopReason: result.stopReason,
-      ...hostTask.result(),
-      ...(options.hostTaskRef ? { hostTaskRef: options.hostTaskRef } : {}),
       dialogId: result.dialogId,
       ...(typeof result.content === "string" && result.content.trim()
         ? { finalText: result.content }
@@ -2896,11 +2798,9 @@ async function executeLocalAgentTurnForCliWithAdapter(
         ?.pendingToolName;
       return retainCommandObservations({
         exitCode: 0,
-        ...hostTask.result(),
-        savedTurnPersisted: turnPersisted,
+          savedTurnPersisted: turnPersisted,
         mainProviderAttempted: mainProviderStarted,
-        ...(options.hostTaskRef ? { hostTaskRef: options.hostTaskRef } : {}),
-        streamInterrupted: true,
+          streamInterrupted: true,
         ...(savedDialogId ? { dialogId: savedDialogId } : {}),
         ...(pendingToolName ? { pendingToolName } : {}),
         ...(abortedTurnCredits !== undefined ? { turnCredits: abortedTurnCredits } : {}),
@@ -2960,7 +2860,6 @@ async function executeLocalAgentTurnForCliWithAdapter(
 
     return retainCommandObservations({
       exitCode: 1,
-      ...hostTask.result(),
       localError: error,
       savedTurnPersisted: persisted,
       mainProviderAttempted: mainProviderStarted,
@@ -3078,7 +2977,6 @@ export function foldLocalResultForTui(
   const folded: RunAgentTurnResult = {
     exitCode: localResult.exitCode,
     ...projectLocalTurnFacts(localResult),
-    ...(localResult.hostTaskRef ? { hostTaskRef: localResult.hostTaskRef } : {}),
     ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
     title: localResult.title,
     ...(localResult.titlePatchPromise

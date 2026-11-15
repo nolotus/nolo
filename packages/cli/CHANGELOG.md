@@ -1,4 +1,29 @@
 
+## 0.227.0-alpha.1 (2026-11-15)
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** 移除 typed review、auto-review 续跑状态机与 host task 基础设施
+* **cli:** 合并「移除 typed review 与 host task 基础设施」到本地 alpha
+
+### Features
+
+* **agent-runtime:** 统一平台规划执行与请教规则 ([67373b9](https://github.com/nolotus/bun-nolo/commit/67373b91a87bd07410aef866dcb21fc0641652c5))
+* **agent:** 为真实候选列表提供高智能规划推荐 ([bb24f0d](https://github.com/nolotus/bun-nolo/commit/bb24f0d5800125aeb0eb0648c233364a8585f75d))
+* **cli:** 优化 TUI 工具记录排版与图片附件交互 ([98c0eb9](https://github.com/nolotus/bun-nolo/commit/98c0eb90245ca4f60f8f8ee69a8b7f9c945ac7dd))
+
+### Bug Fixes
+
+* **agent:** 缺失调用者身份时保持规划档位未知 ([d6ae2f2](https://github.com/nolotus/bun-nolo/commit/d6ae2f221c342ccc96fefbbf411f62e5d42f834d))
+* **memory:** 串行协调正式mutation并统一benchmark写入 ([2468936](https://github.com/nolotus/bun-nolo/commit/24689363824c2a99e41acdfe7329f5b3ac9bd4ba))
+* **memory:** 补齐安全运行分支结果观测 ([e3dee64](https://github.com/nolotus/bun-nolo/commit/e3dee6446dedbd09e4600b0ebfcee7d5594a8bcd))
+
+### Code Refactoring
+
+* **cli:** 合并「移除 typed review 与 host task 基础设施」到本地 alpha ([96cd5d3](https://github.com/nolotus/bun-nolo/commit/96cd5d3eb328766d8a90aae1c1b42fcdef0e5083))
+* **cli:** 移除 typed review、auto-review 续跑状态机与 host task 基础设施 ([7e98f97](https://github.com/nolotus/bun-nolo/commit/7e98f9739b1f0086fb707363206b897979b0901d))
+
+
 ## 0.226.0-alpha.2 (2026-11-15)
 
 ### Bug Fixes

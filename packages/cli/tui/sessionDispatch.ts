@@ -237,11 +237,7 @@ export function handleTuiInput(
       exclude: hints.map((hint) => hint.resolvedPath),
     });
     const previewLines = [
-      ...hints.map((hint) =>
-        hint.unreadable
-          ? `image path unreadable: ${hint.resolvedPath}`
-          : `found image: ${hint.resolvedPath}`,
-      ),
+      ...unreadableHints.map((hint) => `image path unreadable: ${hint.resolvedPath}`),
       ...mediaDetected.hints.map((hint) =>
         hint.unreadable
           ? `media path unreadable: ${hint.resolvedPath}`

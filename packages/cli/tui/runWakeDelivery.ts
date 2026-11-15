@@ -27,13 +27,8 @@ export function createRunWakeHandler(deps: {
     const fixedInput = deps.fixedInput;
     const trace = (stage: string, extra: Record<string, unknown> = {}) => traceChildRunWake(stage, event, deps.getDialogId(), { busy, paused, inboxPresent: !!turnInjectionInbox, ...queueWakeFields(deps.getQueueStatus()), ...extra });
     if (busy || paused) {
-      if (typeof event !== "string" && event.kind === "auto-review-continuation") {
-        // Preserve host event identity and execution-time authorization.
-        // Flattening it into the injection inbox would bypass runner checks.
-        const status = deps.enqueue(event);
-        trace("delivery-queue", { ...queueWakeFields(status), inboxPushResult: null });
-        return true;
-      }
+      // auto-review-continuation 的专用入队分支已移除：该事件类型随续跑
+      // 状态机下线，不再有生产者（2026-11-15）。
       // 直投当前进行中的 agent loop：唤醒不再挂进 chat 消息队列等整个 turn
       // 跑完，而是作为 user 消息在下一轮 provider 调用注入本 turn，模型当场
       // 消化。收件箱不可用（无进行中 turn / 已关闭）时才落回 chat 队列。

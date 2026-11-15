@@ -1,3 +1,4 @@
+import type { PlanningCaller } from "../ai/agent/agentDiscovery";
 /**
  * Node-only workspace tool executors.
  *
@@ -51,6 +52,7 @@ export async function runNoloWorkspaceCliTool(call: {
   name: string;
   arguments: string;
 }, args: {
+  planningCaller?: PlanningCaller;
   cliEntrypoint?: string;
   env?: Record<string, string | undefined>;
   metadataKind?: string;
@@ -75,7 +77,9 @@ export async function runNoloWorkspaceCliTool(call: {
     cmd,
     stdout: "pipe",
     stderr: "pipe",
-    env: args.env,
+    env: call.name === "listAgents"
+      ? { ...process.env, ...args.env, NOLO_PLANNING_CALLER: JSON.stringify(args.planningCaller ?? {}) }
+      : args.env,
   });
   const [stdout, stderr, exitCode] = await Promise.all([
     readNoloProcessStream(proc.stdout),
@@ -184,6 +188,7 @@ async function readDialogInProcess(
 }
 
 export function buildNoloWorkspaceCliToolExecutors(args: {
+  planningCaller?: PlanningCaller;
   cliEntrypoint?: string;
   env?: Record<string, string | undefined>;
   metadataKind?: string;

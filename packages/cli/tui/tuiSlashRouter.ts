@@ -8,7 +8,6 @@
 // 快照），分支顺序、输出文本、错误处理路径零改动。
 // 依赖方向单向：本模块 → tuiTurnRunner / session / tuiHistory 等叶子模块；
 // 本模块禁止回指 readlineWorkspace.ts。
-import { applyAutoReviewControl } from "./autoReviewControl";
 import { loadAgentCatalog } from "./agentCatalog";
 import { resolveAgentSwitchTarget } from "./agentPicker";
 import type { CliFetchImpl } from "../cliFetch";
@@ -181,16 +180,10 @@ export async function runSubmittedSlashLine(
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("../../agent-runtime/actionGate").HostConfirmDecision>,
   directUserSubmission = false,
 ): Promise<boolean> {
-  if (line.trim().split(/\s+/)[0] === "/auto-review") {
-    if (!directUserSubmission) {
-      host.emitCommandOutput("auto-review：只接受用户直接提交的控制命令；未修改授权。", line);
-      return false;
-    }
-    const result = applyAutoReviewControl(line, host.state, resolveTuiIdentityEnv(host.taskEnv, host.options.env ?? process.env));
-    host.state = result.state;
-    host.emitCommandOutput(result.output, line);
-    return false;
-  }
+  // /auto-review 命令已随续跑状态机移除（2026-11-15 owner 决定）。
+  // 这套「状态机 + 验收计划 + revision 指纹 + 磁盘 claim」在架构上
+  // 从未真正运行（~/.nolo/auto-review-continuation/ 从未生成）；
+  // 实际工作方式是 agent 自己派 review、自己判断、自己提交。
   const {
     history,
     pasteStore,
@@ -1075,6 +1068,7 @@ export async function runSubmittedSlashLine(
     // 失败回调直接写 output。清空动作留在调用点，与下方"发送即消费"注释一起。
     const { imageUrls } = await resolveAttachmentImageUrls({
       actionImagePaths: result.action.imagePaths,
+      onResolved: turnCtx.onUserImagesPrepared,
       attachedImages: host.state.attachedImages,
       onFailure: (_path, err) =>
         output.write(`[nolo] image skipped: ${err.message}\n`),

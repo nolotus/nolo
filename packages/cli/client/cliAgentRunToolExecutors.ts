@@ -18,7 +18,6 @@ import type { ShellApprovalHost } from "./originShellApprovalTransport";
 // 返回格式与 web 端 executor 一致：{ content: JSON(rawData), metadata.displayData }，
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
-import { currentHostReviewDispatch, matchesHostReviewDispatch, consumeHostReviewDispatch, validateHostReviewDispatch, bindHostReviewRun, type HostReviewDispatchContext } from "./hostReviewDispatch";
 import { resolveAgentRunName } from "../../ai/tools/agent/agentRunName";
 import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import * as nodeFs from "node:fs";
@@ -109,7 +108,6 @@ type OutputLike = { write(chunk: string): unknown };
  */
 export type CliAgentRunToolExecutorDeps = {
   /** Host-only typed-review scope; tool arguments cannot supply this. */
-  reviewDispatchContext?: HostReviewDispatchContext;
   /** Read only the current user's dialog namespace; absence fails closed. */
   dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
@@ -716,13 +714,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
               .map((c: string) => c.trim())
           : undefined;
 
-    const candidateReview = deps.reviewDispatchContext ?? currentHostReviewDispatch();
-    const reviewContext = matchesHostReviewDispatch(candidateReview, call, args) ? candidateReview : undefined;
-    if (reviewContext) {
-      if (continueDialogId || args.readOnly !== true) throw new Error("Typed review requires a fresh readOnly run");
-      await validateHostReviewDispatch(reviewContext, deps.env ?? process.env, requestedCwd ?? deps.cwd ?? process.cwd());
-      consumeHostReviewDispatch(reviewContext, deps.env ?? process.env);
-    }
+    // typed review dispatch 校验已随 hostReviewDispatch 移除（2026-11-15）。
     const childPolicy = parseAgentRunArgs(rawArgs, { readTextFile: () => message });
     const { runId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
       {
@@ -760,20 +752,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
     );
 
-    if (reviewContext) {
-      try { await bindHostReviewRun(reviewContext, runId, deps.env ?? process.env); }
-      catch (error) {
-        const record = readRunRecord(runId, deps);
-        let stopped = false;
-        try { if (record) stopped = await (deps.terminateRunProcess ?? terminateRunProcess)(record, "SIGTERM", deps); } catch { /* unconfirmed cancellation is not success */ }
-        if (stopped) finalizeRunRecord(runId, { status: "killed", note: "Host review binding failed; newly created run cancelled" }, deps);
-        else {
-          const latest = readRunRecord(runId, deps);
-          if (latest) writeRunRecord({ ...latest, note: "Host review binding failed; cancellation unconfirmed" }, deps);
-        }
-        throw new Error(`Host review binding failed for ${runId}; cancellation=${stopped ? "confirmed" : "unconfirmed"}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    // hostReviewDispatch 绑定已移除（2026-11-15）：typed review 派发整体下线。
 
     // title 走卡片自己的参数，不进 label：它是显示行不是名字，进了 label 会
     // 把 key 顶掉、又让 identity 行与 title 行重复。

@@ -8,6 +8,7 @@ import { themeText } from "./theme";
 import { boxGlyphs, resolveBoxCharset } from "./tuiAnsi";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import { stripImageTokens } from "./sessionInput";
+import { sanitizeImageLabel } from "./tuiImageLayout";
 
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const;
 export type ImageExtension = (typeof IMAGE_EXTENSIONS)[number];
@@ -603,7 +604,7 @@ export function formatComposerAttachmentLine(
   if (images.length === 0) return null;
   const head = images
     .slice(0, 2)
-    .map((img) => `📎 ${img.filename} (${formatBytes(img.sizeBytes)})`);
+    .map((img, index) => `📎 ${index + 1} · ${sanitizeImageLabel(img.filename)} (${formatBytes(img.sizeBytes)})`);
   const extra = images.length - head.length;
   return extra > 0 ? `${head.join(", ")} +${extra}` : head.join(", ");
 }
@@ -716,6 +717,8 @@ export type ResolveAttachmentImageUrlsInput = {
   attachedImages: AttachedImage[];
   /** 图片读取失败时的回调（调用方借此向 output 输出 [nolo] image skipped） */
   onFailure?: (resolvedPath: string, error: Error) => void;
+  /** Preserve filenames/order for the local message projection, never sent as paths. */
+  onResolved?: (images: readonly AttachedImage[]) => void;
 };
 
 export type ResolveAttachmentImageUrlsResult = {
@@ -733,19 +736,16 @@ export async function resolveAttachmentImageUrls({
   actionImagePaths,
   attachedImages,
   onFailure,
+  onResolved,
 }: ResolveAttachmentImageUrlsInput): Promise<ResolveAttachmentImageUrlsResult> {
-  const pathsToRead = [
-    ...(actionImagePaths ?? []),
-    ...attachedImages.map((img) => img.sourcePath),
-  ];
-  let imageUrls: string[] = [];
-  if (pathsToRead.length > 0) {
-    const readResult = await readImagePaths(pathsToRead, {
-      onFailure,
-    });
-    imageUrls = readResult.images.map((img) => img.dataUrl);
-  }
-  return { imageUrls };
+  // Staged attachments are the bytes the user confirmed, not a fresh read of a
+  // mutable/deleted clipboard temp file. Read only paths not already staged.
+  const stagedPaths = new Set(attachedImages.map(image => image.sourcePath));
+  const paths = [...new Set(actionImagePaths ?? [])].filter(path => !stagedPaths.has(path));
+  const readResult = await readImagePaths(paths, { onFailure });
+  const images = [...readResult.images, ...attachedImages];
+  onResolved?.(images);
+  return { imageUrls: images.map(image => image.dataUrl) };
 }
 export type SubmittedImagePaths = {
   /** 全部命中的图片 token（含读不到的）。 */

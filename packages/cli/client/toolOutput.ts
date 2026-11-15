@@ -63,11 +63,23 @@ function isReadToolName(name?: string): boolean {
   return name === "readFile";
 }
 
-function isFailedToolResult(event: LocalAgentToolEvent) {
-  const exitCode = event.metadata?.exitCode;
-  if (event.metadata?.actionGate) return false;
+function isFailedToolResult(event: LocalAgentToolEvent): boolean {
+  if (event.type === "tool-error") return true;
+  const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+  if (metadata.actionGate) return false;
+  const exitCode = metadata.exitCode;
   if (typeof exitCode === "number" && exitCode !== 0) return true;
-  return Boolean(event.metadata?.timedOut);
+  if (Boolean(metadata.timedOut) || Boolean(metadata.failed) || Boolean(event.metadata?.failed)) return true;
+  if (metadata.success === false) return true;
+  if (typeof metadata.error === "string" && metadata.error.trim().length > 0) return true;
+  if (typeof metadata.errorMessage === "string" && metadata.errorMessage.trim().length > 0) return true;
+
+  // 仅针对系统包装的明确失败 payload 进行结构化判断，绝不扫描用户数据文本（如 readFile 内容里的 Error: 等）
+  if (typeof event.content === "string") {
+    const trimmed = event.content.trim();
+    if (/^\[工具\s*"[^"]+"\s*执行失败:\s*[^\]]+\]$/.test(trimmed)) return true;
+  }
+  return false;
 }
 
 /**
@@ -148,9 +160,9 @@ function formatUiAskChoiceBlock(
 
   const questionText = safeAskText(parsed.question, 200);
   if (colorEnabled) {
-    lines.push(`${themeText("❓ ", "info", true)}${styleCliText(questionText, "cyan", true)}`);
+    lines.push(`${themeText("? ", "info", true)}${styleCliText(questionText, "cyan", true)}`);
   } else {
-    lines.push(`❓ ${questionText}`);
+    lines.push(`? ${questionText}`);
   }
 
   // Resolved: show what the user picked (or cancelled) instead of re-printing
@@ -807,6 +819,7 @@ function snippetLinesWithKind(
  * Clip a line to a display-width budget, appending "…" when it overflows.
  */
 function truncateByDisplayWidth(line: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
   if (displayWidth(line) <= maxWidth) return line;
   let width = 0;
   let kept = "";
@@ -1009,7 +1022,7 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
   // These fields are runtime-produced projections (not model-controlled
   // arguments), so they are safe to show in the compact TUI activity line.
   // Keep the same clipping rules as the expanded Read/Run/Fetch trees.
-  if (toolName === "readFile") {
+  if (toolName === "readFile" || toolName === "writeFile" || toolName === "editFile") {
     const path = typeof metadata.path === "string"
       ? metadata.path
       : typeof metadata.filePath === "string" ? metadata.filePath : "";
@@ -1088,6 +1101,26 @@ function formatNormalToolDuration(elapsedMs: unknown): string {
  * its path and line range, Run gets its clipped command, and Fetch gets its
  * clipped URL. Other tools retain their derived basename/head gist.
  */
+// Only runtime-owned, typed result metadata may describe an outcome. Never infer
+// business success or result counts from arbitrary command stdout.
+function normalResultSummary(event: LocalAgentToolEvent): string {
+  const m = event.metadata ?? {};
+  const count = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  if (event.toolName === "readFile" && count(m.startLine) && count(m.endLine))
+    return `${Math.max(0, m.endLine - m.startLine + 1)} lines${m.truncated ? " · truncated" : ""}`;
+  if (event.toolName === "writeFile" && count(m.bytes)) return `${m.bytes} bytes written`;
+  if (event.toolName === "editFile" && count(m.replacements)) return `${m.replacements} replacements`;
+  if (event.toolName === "searchText" && count(m.matchCount)) return `${m.matchCount} matches${m.truncated ? " · truncated" : ""}`;
+  return "";
+}
+
+// Reserve the status first, then fit every other field, including the label.
+function fitNormalLine(head: string, tail: string, budget: number): string {
+  const status = budget === 1 ? tail.trimStart().slice(0, 1) : truncateByDisplayWidth(tail.trimStart(), budget);
+  const room = Math.max(0, budget - displayWidth(status) - 2);
+  return room ? `${truncateByDisplayWidth(head, room)}  ${status}` : status;
+}
+
 function formatNormalToolLine(
   event: LocalAgentToolEvent,
   pending: { toolName: string; argumentsPreview?: string } | undefined,
@@ -1123,19 +1156,34 @@ function formatNormalToolLine(
   }
 
   const label = toolLabel(toolName);
+  const cols =
+    typeof process !== "undefined" && typeof process.stdout?.columns === "number" && process.stdout.columns > 0
+      ? process.stdout.columns
+      : 80;
+  const totalBudget = Math.max(1, resolveHistoryLayoutGeometry(cols).contentWidth - displayWidth("◈ "));
+
   if (readActionGate(event.metadata?.actionGate)) {
-    return formatToolTraceLine(`▸ ${label}  ! ${t("toolNeedsAction")}`, colorEnabled, "error");
+    const actionText = t("toolNeedsAction");
+    const prefix = `▸ ${label}  ! `;
+    const maxActionWidth = Math.max(0, totalBudget - displayWidth(prefix));
+    const fittedAction = maxActionWidth > 0 && displayWidth(actionText) > maxActionWidth
+      ? truncateByDisplayWidth(actionText, maxActionWidth)
+      : (maxActionWidth > 0 ? actionText : "");
+    return formatToolTraceLine(fitNormalLine(`▸ ${label}`, `! ${fittedAction}`, totalBudget), colorEnabled, "error");
   }
-  if (event.type === "tool-error") {
-    return formatToolTraceLine(`▸ ${label}  ✗ ${toolFailureReason(event) || t("toolFailed")}`, colorEnabled, "error");
+  if (event.type === "tool-error" || event.metadata?.timedOut || isFailedToolResult(event)) {
+    const reason = event.metadata?.timedOut
+      ? t("toolTimedOut")
+      : (toolFailureReason(event) || t("toolFailed"));
+    const prefix = `▸ ${label}  ✗ `;
+    const maxReasonWidth = Math.max(0, totalBudget - displayWidth(prefix));
+    const fittedReason = maxReasonWidth > 0 && displayWidth(reason) > maxReasonWidth
+      ? truncateByDisplayWidth(reason, maxReasonWidth)
+      : (maxReasonWidth > 0 ? reason : "");
+    return formatToolTraceLine(fitNormalLine(`▸ ${label}`, `✗ ${fittedReason}`, totalBudget), colorEnabled, "error");
   }
-  if (event.metadata?.timedOut) {
-    return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolTimedOut")}`, colorEnabled, "error");
-  }
-  if (isFailedToolResult(event)) {
-    return formatToolTraceLine(`▸ ${label}  ✗ ${toolFailureReason(event) || t("toolFailed")}`, colorEnabled, "error");
-  }
-  const gist = normalToolGist(event);
+  const resultSummary = normalResultSummary(event);
+  const gist = [normalToolGist(event), resultSummary].filter(Boolean).join(" · ");
   // editFile：gist 行追加 (+a, -r) 统计 + 多行 diff 色带块（Zed-style），
   // 让用户不打开文件也能看到改了什么。多行 chunk 天然不参与 ×N 折叠。
   const hint = editFileResultHint(event);
@@ -1143,10 +1191,21 @@ function formatNormalToolLine(
   // >500ms 的工具耗时挂成功行尾部；短操作不显示（满屏 (0s) 是噪音）。
   const durationInline = formatNormalToolDuration(event.elapsedMs);
   const tail = durationInline ? `  ✓ ${durationInline}` : "  ✓";
-  const mainLine = formatToolTraceLine(
-    gist ? `▸ ${label} · ${gist}${statsInline}${tail}` : `▸ ${label}${statsInline}${tail}`,
-    colorEnabled,
-  );
+
+  let fittedGist = gist;
+  if (gist) {
+    const prefix = `▸ ${label} · `;
+    const suffix = `${statsInline}${tail}`;
+    const prefixWidth = displayWidth(prefix);
+    const suffixWidth = displayWidth(suffix);
+    const maxGistWidth = Math.max(0, totalBudget - prefixWidth - suffixWidth);
+    if (displayWidth(gist) > maxGistWidth) {
+      fittedGist = maxGistWidth > 0 ? truncateByDisplayWidth(gist, maxGistWidth) : "";
+    }
+  }
+
+  const lineContent = fittedGist ? `▸ ${label} · ${fittedGist}${statsInline}${tail}` : `▸ ${label}${statsInline}${tail}`;
+  const mainLine = formatToolTraceLine(fitNormalLine(lineContent.slice(0, -tail.length), tail, totalBudget), colorEnabled);
   if (hint?.detail?.length) {
     const filePath = typeof event.metadata?.path === "string" ? event.metadata.path : undefined;
     return `${mainLine}${formatEditDetailBlock(hint.detail, colorEnabled, filePath)}`;
@@ -1273,7 +1332,7 @@ export const TUI_TREE_TOOLS = {
   Fetch: ["fetchWebpage"],
 } as const;
 export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;
-export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string };
+export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string; previousRow?: string };
 
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
@@ -1286,7 +1345,7 @@ export function createToolEventFormatter(
   opts: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> } = {},
 ): ToolEventFormatter {
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
-  let tree: { kind: TuiTreeKind; items: string[] } | null = null;
+  let tree: { kind: TuiTreeKind; items: string[]; lastRow?: string } | null = null;
   const treeKind = (name: string): TuiTreeKind | null =>
     (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
       (TUI_TREE_TOOLS[kind] as readonly string[]).includes(name)) ?? null;
@@ -1295,19 +1354,21 @@ export function createToolEventFormatter(
     const header = `${label} (${items.length}) · `;
     // Summary rows receive the assistant's "◈ " anchor (measured display width).
     const columns = resolveHistoryLayoutGeometry(process.stdout.columns).contentWidth - displayWidth("◈ ");
-    let shown = 1; // Even an over-wide first item must remain intact.
+    const budget = Math.max(1, columns);
+    let shown = 1;
     for (let count = 2; count <= items.length; count++) {
-      const omitted = items.length - count;
-      const suffix = omitted ? `, … +${omitted}` : "";
-      if (displayWidth(`• ${header}${items.slice(0, count).join(", ")}${suffix}  ✓`) > columns) break;
+      const suffix = count < items.length ? ", …" : "";
+      if (displayWidth(`▸ ${header}${items.slice(0, count).join(", ")}${suffix}  ✓`) > budget) break;
       shown = count;
     }
-    const omitted = items.length - shown;
+    const summary = fitNormalLine(`${header}${items.slice(0, shown).join(", ")}${shown < items.length ? ", …" : ""}`, "✓", Math.max(1, budget - 2));
     const payload: TuiTreePayload = {
       kind,
-      summary: `${header}${items.slice(0, shown).join(", ")}${omitted ? `, … +${omitted}` : ""}  ✓`,
+      summary,
       fallback,
+      previousRow: tree?.lastRow,
     };
+    if (tree) tree.lastRow = `▸ ${summary}`;
     return `${TUI_TREE_MARKER}${JSON.stringify(payload)}${TUI_TREE_END}\n`;
   };
 
@@ -1339,7 +1400,11 @@ export function createToolEventFormatter(
     tree.items.push(item);
     // Keep the first call visible immediately; the second result replaces this
     // tail row with the complete tree in the TUI history.
-    if (tree.items.length < 2) return formatNormalToolLine(event, call, colorEnabled, opts);
+    if (tree.items.length < 2) {
+      const line = formatNormalToolLine(event, call, colorEnabled, opts);
+      tree.lastRow = stripAnsi(line).trimEnd();
+      return line;
+    }
     return treeLine(kind, tree.items, formatNormalToolLine(event, call, colorEnabled, opts));
   };
   const format = ((event: LocalAgentToolEvent): string => {

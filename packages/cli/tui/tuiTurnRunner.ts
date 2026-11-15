@@ -4,12 +4,8 @@ import { traceChildRunWake, queueWakeFields } from "./runWakeDiagnostics";
 import { getOrCreateSharedStore } from "../client/localRuntimeDialog";
 import { saveCliPendingUserMessages, readCliPendingUserMessages, resolveCliUnknownBatchWithoutResend, markCliUserBatchPhase, rollbackCliUserBatchPhase } from "../client/localDialogRecords";
 import { resolveLocalUserId } from "../client/cliAgentConfigHelpers";
-import { hostTaskEventsRoot, readHostTask } from "../client/hostTaskEvents";
-import { runAutoReviewDrainedTurn, isHostAutoReviewContinuationEvent } from "./autoReviewContinuationWake";
 import { resolveTuiLearnOperatorUserId } from "./learnPrompt";
 import { randomUUID as mintTaskUserMessageId, createHash as hashTaskUserMessage } from "node:crypto";
-import { collectHostTaskWorkspace } from "../client/hostTaskWorkspace";
-import { currentAutoReviewTask } from "./autoReviewControl";
 import type { ShellApprovalSession } from "../client/originShellApprovalTransport";
 /**
  * tuiTurnRunner — TUI turn 执行与队列 drain 的独立模块（S3 迁移）。
@@ -224,7 +220,6 @@ async function runAgentChat(
     userMessages?: import("../client/agentRunTypes").RunAgentTurnOptions["userMessages"];
     /** Explicit stable queued-batch tail id; forwarded to agentRunner. */
     cliBatchId?: string;
-    accountTaskUserSource?: { messageId: string; contentSha256: string; originalText: string };
     imageUrls?: string[];
     /**
      * 本机原件路径（图片 / 音视频）→ 只产出给模型的安全附件卡（name/mime/size/kind），
@@ -554,14 +549,10 @@ async function runAgentChat(
   // 该轮派发的后台 run 无法注入 parentDialogId——adapter 通过
   // onBackgroundRunSpawned 把这些 runId 报到这里，turn 结束统一回填归属。
   const spawnedRunsMissingParent: string[] = [];
-  const taskRef = currentAutoReviewTask(state, env);
-  const taskWorkspaceEvidence = taskRef ? await collectHostTaskWorkspace(taskRef, env) : undefined;
-  // Evidence production is distinct from selecting a typed-review dispatch.
-  // Do NOT set hostReviewDispatch here: that would classify all children as review.
-  const taskEvidenceInput = taskWorkspaceEvidence ? { hostTaskWorkspaceEvidence: taskWorkspaceEvidence } : {};
-  if (taskWorkspaceEvidence?.status === "blocked") output.write(`[auto-review] blocked：${taskWorkspaceEvidence.reason}\n`);
+  // auto-review 续跑状态机已移除：不再为每个 turn 注入 host task 工作区证据
+  // 与 hostTaskRef（2026-11-15 owner 决定）。原先这两项只在
+  // currentAutoReviewTask 有值时才有内容，而那套状态机从未真正运行过。
   const result: RunAgentTurnResult = await agentRunner({
-    ...taskEvidenceInput,
     interactiveHost: true,
     agentName: effectiveAgentName,
     agentKey: effectiveAgentKey,
@@ -570,13 +561,10 @@ async function runAgentChat(
     getProcessCausalDepth: options.getProcessCausalDepth,
     continueDialogId: state.dialogId,
     freshDialog: options.freshDialog,
-    hostTaskRef: currentAutoReviewTask(state, env),
     userMessages: options.userMessages,
     ...(options.cliBatchId ? { cliBatchId: options.cliBatchId } : {}),
-    accountTaskUserSource: options.accountTaskUserSource ? {
-      ...options.accountTaskUserSource,
-      projectedContentSha256: hashTaskUserMessage("sha256").update(effectiveMessage).digest("hex"),
-    } : undefined,
+    // accountTaskUserSource 已移除：它专为 host task 证据链服务，
+    // 该链路删除后没有任何生产消费者（2026-11-15）。
     ...(state.dialogId ? { parentDialogId: state.dialogId } : {}),
     // 显式注入 TUI 真实会话身份（createInitialTuiState mint、跨轮稳定），
     // owner-required 契约不再从 parentDialogId/workspaceRoot 派生会话身份。
@@ -1324,6 +1312,7 @@ export interface AgentTurnContext {
    */
   turnInjectionInbox: TurnInjectionInbox<TurnRequest | InternalTurnEvent | string> | null;
   /** 用户 turn 已准确建档；仅宿主可附加 TUI 展示元数据。 */
+  onUserImagesPrepared?: (images: readonly import("./pasteImage").AttachedImage[]) => void;
   onUserTurnFinalized?: (turn: import("./tuiHistory").Turn, imageUrls: readonly string[]) => void;
 
   // ── 外部只读 / 动态读取字段 ──
@@ -1418,12 +1407,8 @@ export async function runOneAgentTurn(
       });
   };
   let req = createTurnRequest(inputMsg);
-  if (req.event.kind === "auto-review-continuation") {
-    const scope = currentAutoReviewTask(ctx.state, ctx.effectiveEnv);
-    if (!isHostAutoReviewContinuationEvent(req.event) || JSON.stringify(scope) !== JSON.stringify(req.event.scope)) return { ok: false, aborted: true };
-    const task = readHostTask(hostTaskEventsRoot(ctx.effectiveEnv), scope!);
-    if (task.authorization !== "active" || task.contract.acceptance === "pending" || task.contract.acceptance === "unknown") return { ok: false, aborted: true };
-  }
+  // auto-review-continuation 事件分支已随续跑状态机移除（2026-11-15）。
+  // 该事件类型不再被任何生产路径产出。
   if (req.event.kind === "child-run-completed") {
     traceChildRunWake("turn-consume", req.event, ctx.state.dialogId ?? null, queueWakeFields(ctx.chatQueueBinding?.getStatus?.()));
     const event = prepareChildRunConsumption(req.event, {
@@ -1543,7 +1528,7 @@ export async function runOneAgentTurn(
       .filter(part => part.type === "image_url").map(part => part.image_url.url),
   }));
   const batchLast = batchDisplay?.at(-1);
-  const transcriptText = batchLast ? batchLast.text : req.event.kind === "auto-review-continuation" ? req.event.displayText :
+  const transcriptText = batchLast ? batchLast.text :
     isContextualFragment
     && (req.event.kind === "child-run-completed" || req.event.kind === "background-task-completed")
       ? (req.event.displayText ?? req.event.text)
@@ -1793,13 +1778,7 @@ export async function runOneAgentTurn(
         ...((req as TuiBatchTurnRequest).cliBatchId
           ? { cliBatchId: (req as TuiBatchTurnRequest).cliBatchId }
           : {}),
-        ...(req.event.kind === "user" ? { accountTaskUserSource: {
-          ...((req as TuiBatchTurnRequest).batchUserSource ?? {
-            messageId: req.messageId ?? mintTaskUserMessageId(),
-            originalText: message,
-            contentSha256: hashTaskUserMessage("sha256").update(message).digest("hex"),
-          }),
-        } } : {}),
+        // accountTaskUserSource 已移除（host task 证据链下线，无消费者）。
         ...(imageUrls.length > 0 ? { imageUrls } : {}),
         ...(localAttachmentPaths && localAttachmentPaths.length > 0
           ? { localAttachmentPaths }
@@ -1961,12 +1940,8 @@ export async function runOneAgentTurn(
     // forcedStop：强制停止后用户可能已发起新 turn 并重置 forcedStop=false，
     // 旧 turn 靠 myEpoch === forcedStopEpoch 识别自己被强制过。
     // dialogId/turnTokens 的状态折叠仍可安全执行（纯数据，不碰 UI 锁）。
-    if (runResult.hostTaskRef) {
-      ctx.state = { ...ctx.state, autoReviewTask: {
-        userId: resolveTuiLearnOperatorUserId(ctx.effectiveEnv) ?? "local",
-        reference: runResult.hostTaskRef,
-      } };
-    }
+    // auto-review 的 autoReviewTask 状态回填已移除：续跑状态机整体下线，
+    // 不再有「本轮属于哪个 host task」这个概念需要折叠进 state。
     const wasForceStopped = ctx.forcedStopEpoch === myEpoch;
     if (wasForceStopped) {
       emitStatusIfCurrentTurn({ state: "idle" });
@@ -2251,7 +2226,6 @@ export async function runDrainedQueueTurn(
  * 获取或延迟初始化 TUI chat 队列绑定，并把 drain 执行委托给 runOneAgentTurn。
  */
 type TuiBatchTurnRequest = TurnRequest & {
-  batchUserSource?: { messageId: string; originalText: string; contentSha256: string };
   userMessages?: import("../client/agentRunTypes").RunAgentTurnOptions["userMessages"];
   /** Explicit stable tail message id; validated centrally in agentRun.ts. */
   cliBatchId?: string;
@@ -2294,7 +2268,7 @@ export function ensureChatQueueBinding(
   }
   ctx.chatQueueBindingDialogId = boundDialogId;
   const dialogId = () => boundDialogId;
-  const run = (req: TurnRequest) => runAutoReviewDrainedTurn(ctx.chatQueueBinding!, () => runDrainedQueueTurn(ctx, req, actionGateHandler, confirmDestructiveAction));
+  const run = (req: TurnRequest) => runDrainedQueueTurn(ctx, req, actionGateHandler, confirmDestructiveAction);
   ctx.chatQueueBinding = createChatQueueTuiBinding(run, {
     savePending: async (requests) => saveCliPendingUserMessages({ store: await getStore(),
       userId: resolveLocalUserId(ctx.effectiveEnv), dialogId: dialogId(),
@@ -2390,17 +2364,11 @@ export async function runQueuedUserBatch(
         ...imageUrls.map(url => ({ type: "image_url" as const, image_url: { url } }))] : request.text });
   }
   if (!canStart()) return { ok: false, aborted: true };
-  // Reuse the single-source dedupe contract with an ordered batch source.
-  // Include every ID and payload, but digest image bytes rather than copying
-  // base64 into task-source evidence. Provider userMessages remain untouched.
-  const originalText = JSON.stringify(userMessages.map(user => ({
-    ...user,
-    content: typeof user.content === "string" ? user.content : user.content.map(part =>
-      part.type === "image_url" ? { type: part.type, sha256: hashTaskUserMessage("sha256").update(part.image_url.url).digest("hex") } : part),
-  })));
-  const contentSha256 = hashTaskUserMessage("sha256").update(originalText).digest("hex");
-  const request: TuiBatchTurnRequest = { ...requests[0]!, userMessages, cliBatchId: batchId,
-    batchUserSource: { messageId: `user-batch-${contentSha256}`, originalText, contentSha256 } };
-  return runAutoReviewDrainedTurn(ctx.chatQueueBinding!, () => runTurn(ctx, request, [], actionGateHandler,
-    confirmDestructiveAction, requests.flatMap(request => [...request.imagePaths ?? [], ...request.mediaPaths ?? []])));
+  // batchUserSource（含 originalText 序列化与逐图 sha256）已移除：
+  // 它专为 host task 证据链构造，该链路删除后无任何消费者（2026-11-15）。
+  const request: TuiBatchTurnRequest = { ...requests[0]!, userMessages, cliBatchId: batchId };
+  // auto-review 的 drained-turn 包装已移除：续跑状态机下线后，队列 drain
+  // 直接执行 turn，不再需要「drain 后检查是否触发 auto-review 下一步」。
+  return runTurn(ctx, request, [], actionGateHandler,
+    confirmDestructiveAction, requests.flatMap(request => [...request.imagePaths ?? [], ...request.mediaPaths ?? []]));
 }

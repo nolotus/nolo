@@ -485,6 +485,9 @@ export type ToolExecutorContext = {
   signal?: AbortSignal;
   toolRunId?: string;
   agentKey?: string;
+  /** Executing identity supplied by the host, not tool arguments. */
+  effectiveModel?: string;
+  runKind?: "interactive" | "subtask";
   userInput?: string;
   /** 运行时注入、模型不可见，用于 slash 单轮预加载 */
   skipSkillReferencePersist?: boolean;

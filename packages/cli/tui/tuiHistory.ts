@@ -15,6 +15,7 @@ import {
   stripAnsi,
   truncateAnsi,
   visibleWidth,
+  displayWidth,
   wrapTranscriptLine,
   wrapTranscriptLineWithLayout,
   type WrappedTranscriptRow,
@@ -368,7 +369,7 @@ export function appendLocalTurn(
  * 状态。失败（✗）与待确认（!）行结尾不是 ✓，永不折叠也永不入组。
  * 纯显示层：只改写 transcript 文本，不影响持久化消息与 formatter 输出。
  */
-const TOOL_SUCCESS_LINE_RE = /^(▸ .*?)(?: ×(\d+))?(  ✓)$/;
+const TOOL_SUCCESS_LINE_RE = /^(▸ .*?)(?: ×(\d+))?(  ✓(?:\s+\d+(?:\.\d+)?(?:ms|s))?)$/;
 
 function readTreePayload(chunk: string): TuiTreePayload {
   return JSON.parse(chunk.slice(TUI_TREE_MARKER.length).replace(/\u0002\n?$/, ""));
@@ -377,7 +378,7 @@ function readTreePayload(chunk: string): TuiTreePayload {
 function applyTreeRewrite(text: string, chunk: string): string | null {
   if (!chunk.startsWith(TUI_TREE_MARKER)) return null;
   const payload = readTreePayload(chunk);
-  const tree = `• ${payload.summary}`;
+  const tree = `▸ ${payload.summary}`;
   const hadTrailingNewline = text.endsWith("\n");
   const body = hadTrailingNewline ? text.slice(0, -1) : text;
   const bodyLines = body.split("\n");
@@ -389,27 +390,37 @@ function applyTreeRewrite(text: string, chunk: string): string | null {
   const labels = TUI_TREE_TOOLS[payload.kind].map(toolLabel);
   // Success suffixes can carry timing and either historic ×N placement.
   const flatLabel = tail.match(/^▸ (.+?)(?: · .*?)?(?: ×\d+)?  ✓(?: (?:\d+(?:\.\d+)?(?:ms|s)|×\d+))*$/)?.[1];
-  const summaryLabel = tail.match(/^• (.+?) \(\d+\) · .*  ✓$/)?.[1];
-  if (!labels.includes(flatLabel ?? "") && summaryLabel !== labels[0]) return null;
+  const summaryLabel = tail.match(/^▸ (.+?) \(\d+\) · .*  ✓$/)?.[1];
+  // The formatter carries the exact prior rendered row as a replacement token.
+  // This survives arbitrary width/locale clipping without parsing its title.
+  // Legacy producers without a token retain the old display compatibility.
+  if (payload.previousRow !== undefined) {
+    // History may fold repeated identical successes by adding ×N before or
+    // after the status. Remove only that history-owned count decoration.
+    const withoutFoldCount = (row: string) => row.replace(/ ×\d+(?=  ✓|$)/g, "");
+    if (withoutFoldCount(tail) !== withoutFoldCount(payload.previousRow)) return null;
+  } else if (!labels.includes(flatLabel ?? "") && summaryLabel !== labels[0]) return null;
   const prefix = bodyLines.length < 2 ? "" : `${bodyLines.slice(0, -1).join("\n")}\n`;
   return `${prefix}${tree}\n`;
 }
 
 function foldToolSuccessLine(text: string, chunk: string): string | null {
   const plain = stripAnsi(chunk).replace(/\n+$/, "");
-  if (!plain || plain.includes("\n") || !TOOL_SUCCESS_LINE_RE.test(plain)) return null;
+  if (!plain || plain.includes("\n")) return null;
+  const chunkMatch = TOOL_SUCCESS_LINE_RE.exec(plain);
+  if (!chunkMatch) return null;
   const hadTrailingNewline = text.endsWith("\n");
   const body = hadTrailingNewline ? text.slice(0, -1) : text;
   const newlineAt = body.lastIndexOf("\n");
   const tail = newlineAt === -1 ? body : body.slice(newlineAt + 1);
   const match = TOOL_SUCCESS_LINE_RE.exec(stripAnsi(tail));
-  if (!match || `${match[1]}${match[3]}` !== plain) return null;
+  if (!match || match[1] !== chunkMatch[1]) return null;
   const count = (match[2] ? Number(match[2]) : 1) + 1;
   // ×N 插在状态符前的普通双空格之前（样式段之外），count 替换而非累加。
   const anchor = tail.lastIndexOf("  ");
   if (anchor < 0) return null;
   const head = tail.slice(0, anchor).replace(/\s×\d+$/, "");
-  const merged = `${head} ×${count}${tail.slice(anchor)}`;
+  const merged = `${head} ×${count}${chunkMatch[3]}`;
   const prefix = newlineAt === -1 ? "" : body.slice(0, newlineAt + 1);
   return `${prefix}${merged}${hadTrailingNewline ? "\n" : ""}`;
 }
@@ -433,7 +444,7 @@ export function applyOutputChunkToCurrentTurn(
       const treeContent = rewrittenTree;
       history.currentContent = treeContent;
       const lastBlock = history.currentBlocks.at(-1);
-      const treeBlock = `• ${readTreePayload(chunk).summary}\n`;
+      const treeBlock = `▸ ${readTreePayload(chunk).summary}\n`;
       if (lastBlock?.kind === "tool") lastBlock.content = applyTreeRewrite(lastBlock.content, chunk) ?? `${lastBlock.content}${treeBlock}`;
       else history.currentBlocks.push({ kind: "tool", content: treeBlock });
       return true;
@@ -487,7 +498,12 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
       ? themeText(line, "chrome", true)
       : line;
   });
-  return styledLines.join("\n");
+  // Groups breathe without adding blank rows inside their folded one-line form.
+  return styledLines.flatMap((line, index) => {
+    const current = stripAnsi(line);
+    const previous = stripAnsi(styledLines[index - 1] ?? "");
+    return /^▸ /.test(current) && /^▸ /.test(previous) ? ["", line] : [line];
+  }).join("\n");
 }
 
 /**
@@ -514,6 +530,21 @@ function fillUserBubbleRow(row: string, surfaceSeq: string, contentWidth: number
   return renderSurfaceLine({ text: row, surface: surfaceSeq, padTo: contentWidth });
 }
 
+function gutterForRole(role: TurnRole, colorEnabled: boolean) {
+  if (role === "user") {
+    const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
+    const prefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
+    const surfaceSeq = colorEnabled ? userSurfaceBackgroundSequence() : "";
+    return { prefix, prefixWidth: 3, surfaceSeq };
+  }
+  if (role === "local") {
+    const dimSeq = colorEnabled ? "\x1b[2m" : "";
+    const resetSeq = colorEnabled ? "\x1b[0m" : "";
+    return { prefix: `${dimSeq}  ${resetSeq}`, prefixWidth: 2, surfaceSeq: "" };
+  }
+  return { prefix: "", prefixWidth: 0, surfaceSeq: "" };
+}
+
 /**
  * Layout one turn into rows with exact source metadata for hit-test and selection.
  */
@@ -529,10 +560,24 @@ export function layoutTurnRows(
   const images = options?.images;
   if (!images || images.length === 0) return textRows;
   const bodyEnd = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").length;
-  return [
-    ...textRows,
-    ...layoutImageRows(images, contentWidth, options?.graphicsEnabled === true, bodyEnd),
-  ];
+  const gutter = gutterForRole(role, colorEnabled);
+  const imageContentWidth = Math.max(1, contentWidth - gutter.prefixWidth);
+  const rawImageRows = layoutImageRows(images, imageContentWidth, options?.graphicsEnabled === true, bodyEnd);
+  const imageRows: TurnLayoutRow[] = rawImageRows.map((r) => {
+    let rendered = r.rendered;
+    if (gutter.prefixWidth > 0) {
+      const styled = `${gutter.prefix}${rendered}`;
+      rendered = gutter.surfaceSeq ? fillUserBubbleRow(styled, gutter.surfaceSeq, contentWidth) : styled;
+    }
+    return {
+      rendered,
+      sourceStart: r.sourceStart,
+      sourceEnd: r.sourceEnd,
+      prefixWidth: gutter.prefixWidth,
+      image: r.image,
+    };
+  });
+  return [...textRows, ...imageRows];
 }
 
 function layoutTextRows(
@@ -685,10 +730,11 @@ function layoutTextRows(
     const prefixCharCount = anchorPrefix.length;
     const rawLineLen = rawLine.length;
     const sourceMapping = buildSourceMapping(rawLine, styledLine, prefixCharCount);
+    const listMarker = stripAnsi(styledLine).replace(/^◈ /, "").match(/^(\s*(?:\d+[.)]|[•*+-])\s+)/)?.[1];
     const lineRows = wrapTranscriptLineWithLayout(
       styledLine,
       contentWidth,
-      "",
+      listMarker ? " ".repeat(prefixWidth + displayWidth(listMarker)) : "",
       rawOffset,
       prefixWidth,
       prefixCharCount,
@@ -1230,7 +1276,10 @@ function renderTailTurnBlock(
     });
     const lines: string[] = [];
     for (const logicalLine of styledLines) {
-      lines.push(...wrapTranscriptLine(logicalLine, contentWidth));
+      const plain = stripAnsi(logicalLine);
+      const anchor = plain.startsWith("◈ ") ? 2 : 0;
+      const marker = plain.replace(/^◈ /, "").match(/^(\s*(?:\d+[.)]|[•*+-])\s+)/)?.[1] ?? "";
+      lines.push(...wrapTranscriptLine(logicalLine, contentWidth, marker ? " ".repeat(anchor + displayWidth(marker)) : ""));
     }
     return lines;
   }
@@ -1756,7 +1805,8 @@ function collectVisibleImageRows(
   out: HistoryVisibleImage[],
 ): void {
   for (let k = 0; k < layoutRows.length; k++) {
-    const info = layoutRows[k]!.image;
+    const row = layoutRows[k]!;
+    const info = row.image;
     if (!info || !info.graphics || info.index !== 0) continue;
     const start = turnStart + k;
     if (start < winStart || start + info.rows > winEnd) continue;
@@ -1766,7 +1816,7 @@ function collectVisibleImageRows(
       occurrence: `${turnIndex}:${info.key}:${info.index}`,
       key: info.key,
       row: start - winStart,
-      column: 0,
+      column: row.prefixWidth,
       columns: info.columns,
       rows: info.rows,
     });

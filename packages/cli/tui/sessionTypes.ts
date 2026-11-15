@@ -8,8 +8,7 @@ import type { PermissionGrants } from "../client/profileConfig";
 export type ThinkingDisplayMode = "show" | "hide";
 
 export type TuiState = {
-  /** Task-only control; never serialized as an account-wide permission. */
-  autoReviewTask?: { userId: string; reference: import("../client/hostTaskEvents").HostTaskReference };
+  // autoReviewTask 已移除：续跑状态机整体下线（2026-11-15）。
   agentKey: string;
   agentName: string;
   dialogId?: string;

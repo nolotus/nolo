@@ -1,3 +1,4 @@
+import type { PlanningCaller } from "../../ai/agent/agentDiscovery";
 import { registerDialogOwner } from "database-engine/dialogOwner";
 import type { LocalAgentTurnInput } from "agent-runtime/localLoop";
 import { realpathSync, statSync } from "node:fs";
@@ -680,6 +681,7 @@ function buildDesktopStartAgentRunToolExecutor(args: {
 }
 
 function buildDesktopLocalToolExecutors(args: {
+  planningCaller?: PlanningCaller;
   toolNames?: string[];
   env: DesktopAgentRuntimeEnv;
   store: DesktopAgentRuntimeRecordStore;
@@ -723,6 +725,7 @@ function buildDesktopLocalToolExecutors(args: {
       parentAgentRef: args.parentAgentRef,
     }),
     ...buildDesktopNoloWorkspaceToolExecutors({
+      planningCaller: args.planningCaller,
       env: args.env,
       store: args.store,
     }),
@@ -811,6 +814,7 @@ export const buildDesktopChromeConnectorPolicyToolNamesForTest = buildDesktopChr
 export const buildDesktopChromeConnectorToolExecutorsForTest = buildDesktopChromeConnectorToolExecutors;
 
 function buildDesktopNoloWorkspaceToolExecutors(args: {
+  planningCaller?: PlanningCaller;
   env: DesktopAgentRuntimeEnv;
   cliEntrypoint?: string;
   store?: DesktopAgentRuntimeRecordStore;
@@ -819,6 +823,7 @@ function buildDesktopNoloWorkspaceToolExecutors(args: {
     cliEntrypoint: args.cliEntrypoint ?? resolveDesktopCliEntrypoint(),
     env: args.env,
     metadataKind: "noloWorkspaceTool",
+    planningCaller: args.planningCaller,
     store: args.store,
   }) as Record<string, (call: AgentRuntimeToolCallInput) => Promise<AgentRuntimeToolResult>>;
 }
@@ -1173,7 +1178,14 @@ export function createDesktopAgentRuntimeActions(args: {
           args.runtimeContext?.allowedToolNames !== undefined ||
           args.runtimeContext?.blockedToolNames !== undefined,
       });
+      const planningCaller: PlanningCaller = {
+        agentKey: agentConfig.key ?? args.parentAgentRef,
+        effectiveModel: agentConfig.model,
+        runKind: args.env.NOLO_AGENT_RUN_CHILD === "1" || (agentConfig as any)?.toolSurface?.runKind === "subtask" || Boolean(args.runtimeContext?.parentThreadId)
+          ? "subtask" : "interactive",
+      };
       const requestExecutors = buildDesktopLocalToolExecutors({
+        planningCaller,
         toolNames: requestedToolNames,
         env: activeEnv,
         store: args.store,
@@ -1226,6 +1238,7 @@ export function createDesktopAgentRuntimeActions(args: {
           toolParametersIndex: getAgentRuntimeToolParametersIndex(),
         }) }),
       });
+      planningCaller.effectiveModel = resolvedProvider.model;
       return options?.textOnly ? { ...resolvedProvider, textOnly: true as const } : resolvedProvider;
     },
     executeTool: (call) => executeLocalToolWithPolicy({

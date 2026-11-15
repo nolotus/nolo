@@ -29,7 +29,8 @@ import {
  * Atomicity comes from LevelDB's chained batch write — "all operations will be
  * written atomically, that is, they will either all succeed or fail with no
  * partial commits" (abstract-level). We do NOT add application-level rollback,
- * CAS, locks, or retry frameworks.
+ * CAS or retry frameworks. Formal mutations on the same DB handle/owner
+ * are serialized below so validation cannot race another formal commit.
  *
  * This is the generic vNext mutation apply entry point. It is NOT the
  * deterministic legacy Evidence import seam (legacyMigrationApply.ts) and does
@@ -312,7 +313,7 @@ async function validateMutation(
  * @param ownerId  The owner principal — all records must belong to this owner
  * @param mutation The materialized interpreter output to persist
  */
-export const applyMemoryInterpreterMutation = async (
+const applyMutationWithoutCoordination = async (
   db: any,
   ownerId: string,
   mutation: MemoryInterpreterMutation
@@ -366,4 +367,33 @@ export const applyMemoryInterpreterMutation = async (
 
   // Single atomic commit
   await batch.write();
+};
+
+
+// The server passes its singleton serverDb handle. CLI projection writers do not
+// use this entry point. This coordinates formal mutations in this module only:
+// not different handles/processes, direct store puts, retirement or migration.
+const pendingByDb = new WeakMap<object, Map<string, Promise<void>>>();
+
+export const applyMemoryInterpreterMutation = async (
+  db: any,
+  ownerId: string,
+  mutation: MemoryInterpreterMutation
+): Promise<void> => {
+  let owners = pendingByDb.get(db);
+  if (!owners) {
+    owners = new Map();
+    pendingByDb.set(db, owners);
+  }
+  const previous = owners.get(ownerId) ?? Promise.resolve();
+  const operation = previous.then(() => applyMutationWithoutCoordination(db, ownerId, mutation));
+  // A failed mutation must not poison later mutations or leave an unhandled
+  // rejection on the internal queue. The caller still receives the rejection.
+  const settled = operation.then(() => {}, () => {});
+  owners.set(ownerId, settled);
+  try {
+    await operation;
+  } finally {
+    if (owners.get(ownerId) === settled) owners.delete(ownerId);
+  }
 };

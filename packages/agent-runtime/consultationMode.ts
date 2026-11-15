@@ -1,43 +1,10 @@
-import {
-  PLATFORM_CONSULTANT_BILLING_SOURCE,
-  isUserOwnChannelBilling,
-  resolveConsultantTier,
-  resolveDispatchableConsultantTier,
-} from "core/consultantTier";
-
+/** Platform default; legacy builder name and layer id remain compatible across hosts. */
 export function buildConsultationModeBlock(): string {
-  const dispatchable = resolveDispatchableConsultantTier();
-  const noDispatchableEntries = dispatchable.length === 0;
-  const targets = noDispatchableEntries ? resolveConsultantTier() : dispatchable;
-  const targetLines = targets.map((entry) => {
-    const billing = isUserOwnChannelBilling(entry.billingSource)
-      ? "用户自带通道"
-      : entry.billingSource === PLATFORM_CONSULTANT_BILLING_SOURCE
-        ? "平台托管(消耗平台积分)"
-        : "计费未知(不得声称免费)";
-    const pricing = entry.inputCreditsPerMTokens === null || entry.outputCreditsPerMTokens === null
-      ? "价目未知(不得假设免费或额度足够，须先告知费用未知并询问)"
-      : `input ${entry.inputCreditsPerMTokens} / output ${entry.outputCreditsPerMTokens} 积分/1M tokens`;
-    const key = entry.agentKey ? `agentKey: ${entry.agentKey}` : "无可派发 agentKey";
-    const pro = entry.requiresProTier ? "需 199 档或余额≥19 积分" : "无门槛";
-    const capability = entry.supportsTool === true
-      ? "支持工具调用"
-      : entry.supportsTool === false
-        ? "不支持工具调用(仅方案顾问，当前 agent 执行)"
-        : "工具能力未声明(推理优先，当前 agent 执行)";
-    return `- ${entry.displayName}; model: ${entry.model}; ${key}; ${billing}; ${pricing}; ${pro}; ${capability}`;
-  });
   return [
-    "【请教模式 · 顾问档请教】",
-    "当同一问题反复失败、工具或能力不足，或明确超出当前模型能力时，主动发起请教；不许硬扛、不许编造答案、不许悄悄降级。",
-    "同一任务内同一工具、同一输入连续失败 ≥2 次且没有新证据可改（参数错误、凭据配置、可换接口应先自行修正，不算卡住），或工具明确返回 unsupported/not_supported（该能力不存在），即视为卡住：必须先按本节请教一次再继续，不得第三次盲目重试。",
-    "升级前先用 listAgents 找 billingSource 为 user_subscription/user_api/owner_subscription/local 的收藏或自有 agent，有则优先派它——自带通道不消耗平台积分，也不需平台积分确认；没有才考虑下面的平台托管档，其扣费授权门见 agentCollaboration。",
-    "无 listAgents 工具时不得推断用户有无自带通道，先用 ask_user 询问；不得把用户自带通道的用量说成平台积分。只有用户无自带通道、正在考虑平台积分档时，额度门槛（autoApproveCredits，服务端独占写入）才适用：可知且预估消耗 ≤ 额度可免问，不可知则默认每次问。",
-    ...(noDispatchableEntries ? ["当前顾问档没有可派发入口；以下是顾问档信息，仅供说明，不得编造 agentKey 或尝试派发。"] : []),
-    ...(targetLines.length ? targetLines : ["当前没有顾问档条目。"]),
-    "用户同意后，仅在存在真实 agentKey 时用 startAgentRun 派发；仅传递卡住的子问题和必要上下文。supportsTool=false 的顾问只出方案，由当前 agent 执行；supportsTool=true 的顾问可接工具型子任务；能力未知时不得声称可执行工具任务。结论一律由当前 agent 汇总交付，不转交原始输出。",
-    "若子 run 因 402 或 gpt_pro_tier_required 失败，如实告知用户需开通高阶档位或充值使账户余额达到 19 积分以上；不得假装成功或反复重试。",
-    "禁止擅自修改当前 agent 的 model/provider；内置 nolo 的 provider/model 由代码托管。",
-    "ask_user 在当前宿主不可用时，降级为普通文字询问，不得因此卡住。",
+    "【请教模式 · 平台默认规划 / 执行 / 请教】",
+    "简单任务直接做，无需为规划调用列表。需外部规划时查当次 listAgents，若返回 planningRecommendation 则消费其建议及原因（推荐不是授权，缺失不编造）；优先用户已有且无需新增平台费用、适合本任务的更高智能候选；当前已是最高合适档或没有更高档则自己规划。不按品牌定人，不推断 unknown 档位、费用或工具能力；未知不等于更高档或不可用。无列表工具时不得推断候选池为空。",
+    "主 Agent 亲读关键证据、确定边界并负责验收与汇总；规划只委托方案，禁止擅自修改当前 agent 的 model/provider。执行按难度与领域分工，简单任务不为流程派发；子任务不递归规划，按 brief 完成定位、实现、相关检查与修复。",
+    "遇阻优先续请原规划者（仍须当次核实可用性与费用），未有顾问可先自核；同一工具、同一输入连续失败 ≥2 次且无新证据可改，或明确 unsupported/not_supported，须停止盲试、尝试请教一次；不得第三次盲目重试。可修正的参数/凭据/接口先自行修正；无法请教或仍有真实阻塞必须报告，不编造成功或悄悄降级。",
+    "派发详情按既有 dispatchIntent 按需协议与工具描述；仅用真实 agentKey，工具能力未知不声称可执行。用户自带通道不等于零用量；新增平台积分须依原费用硬门先获当次授权，费用未知先询问，不自动付费 fallback。独立 review、删除、push、发布等权限硬门不变。ask_user 不可用时用普通文字询问。",
   ].join("\n");
 }

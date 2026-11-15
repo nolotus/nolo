@@ -104,6 +104,7 @@ const buildRawDataLlmContextFallback = (
 };
 
 interface ProcessToolDataPayload {
+  effectiveModel?: string;
   toolCall: any;
   parentMessageId: string;
   toolRunId: string;
@@ -280,6 +281,8 @@ const processToolData = createAsyncThunk(
         parentMessageId,
         toolRunId,
         agentKey,
+        effectiveModel: args.effectiveModel,
+        runKind: "interactive",
         // 定档信号：这里是前台对话流式路径，来源恒为 chat；对话 id 用于数历史搜索。
         ...(args.dialogId ? { dialogId: args.dialogId } : {}),
         origin: "chat" as const,
@@ -562,6 +565,7 @@ export const handleToolCalls = createAsyncThunk(
             parentMessageId: messageId,
             toolRunId,
             agentKey: agentConfig.dbKey,
+            effectiveModel: agentConfig.model,
             dialogId,
           })
         ).unwrap();
