@@ -3,6 +3,15 @@ name: Publish CLI to npm
 on:
   workflow_dispatch:
     inputs:
+      binary_action:
+        description: "none = npm (existing behavior); validate = binary build only; publish = binary upload"
+        required: true
+        type: choice
+        default: validate
+        options:
+          - none
+          - validate
+          - publish
       dist_tag:
         description: npm dist-tag
         required: true
@@ -26,6 +35,7 @@ concurrency:
 
 jobs:
   publish:
+    if: ${{ inputs.binary_action == 'none' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -81,6 +91,60 @@ jobs:
           NOLO_CLI_PUBLISH_DIST_TAG: ${{ inputs.dist_tag }}
           NOLO_CLI_PUBLISH_NPM_PREFIX: ${{ runner.temp }}/nolo-cli-prefix
         run: bash ./scripts/ci/runCliPublishPublic.sh
+
+  binary:
+    if: ${{ inputs.binary_action == 'validate' || inputs.binary_action == 'publish' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Validate projection SHA
+        env:
+          PROJECTION_SHA: ${{ inputs.projection_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$PROJECTION_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.projection_sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - id: metadata
+        name: Validate release metadata and version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          bun scripts/release/assertProjectionReleaseMetadata.ts --component cli --expect-intent release --expect-version "$VERSION" --set-outputs channel,version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Stage CLI downloads
+        run: bun scripts/release/stageCliDownloads.ts
+      - name: Smoke test Linux tarball
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          SMOKE_DIR="$RUNNER_TEMP/cli-smoke"
+          mkdir -p "$SMOKE_DIR/home"
+          tar -xzf public/downloads/nolo-linux-x64.tar.gz -C "$SMOKE_DIR"
+          export HOME="$SMOKE_DIR/home"
+          ACTUAL_VERSION="$("$SMOKE_DIR/nolo" --version)"
+          [[ "$ACTUAL_VERSION" == "$VERSION" || "$ACTUAL_VERSION" == "nolo $VERSION" || "$ACTUAL_VERSION" == "nolo-cli-linux-x64 $VERSION" ]]
+          "$SMOKE_DIR/nolo" --help > "$SMOKE_DIR/help.txt"
+          grep -qi nolo "$SMOKE_DIR/help.txt"
+      - name: Publish CLI binary tarballs
+        if: ${{ inputs.binary_action == 'publish' }}
+        env:
+          DESKTOP_DOWNLOAD_S3_ENDPOINT: ${{ secrets.DESKTOP_DOWNLOAD_S3_ENDPOINT }}
+          DESKTOP_DOWNLOAD_S3_BUCKET: ${{ secrets.DESKTOP_DOWNLOAD_S3_BUCKET }}
+          DESKTOP_DOWNLOAD_S3_REGION: ${{ secrets.DESKTOP_DOWNLOAD_S3_REGION }}
+          DESKTOP_DOWNLOAD_S3_ACCESS_KEY_ID: ${{ secrets.DESKTOP_DOWNLOAD_S3_ACCESS_KEY_ID }}
+          DESKTOP_DOWNLOAD_S3_SECRET_ACCESS_KEY: ${{ secrets.DESKTOP_DOWNLOAD_S3_SECRET_ACCESS_KEY }}
+          DESKTOP_DOWNLOAD_PUBLIC_BASE: ${{ secrets.DESKTOP_DOWNLOAD_PUBLIC_BASE }}
+          DESKTOP_DOWNLOAD_S3_PREFIX: ${{ secrets.DESKTOP_DOWNLOAD_S3_PREFIX }}
+          NOLO_CLI_BINARY_CHANNEL: ${{ steps.metadata.outputs.channel == 'stable' && 'main' || steps.metadata.outputs.channel }}
+        run: bun scripts/release/publishCliBinary.ts
 
   npm-install-health:
     name: npm install health (${{ matrix.os }} / Node ${{ matrix.node }})
