@@ -156,6 +156,9 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
     compact: { type: "boolean", description: "Return compact projection retaining admission evidence while omitting verbose text." },
     limit: { type: "number", description: "Maximum number of agents to return for pagination." },
     offset: { type: "number", description: "Pagination offset." },
+    fragmentOffset: { type: "integer", description: "Recover an oversized candidate: start at 0, then use nextFragmentOffset, keeping offset and filters unchanged." },
+    fragmentAgentKey: stringToolParam("Exact agentKey returned by the oversized-candidate response."),
+    fragmentDigest: stringToolParam("SHA-256 digest returned by the first fragment; required for subsequent fragments."),
     space: stringToolParam("Optional space id or URL."),
   });
   add("readAgent", "Read one agent's full config by exact agentKey returned by listAgents (agent-<userId>-<id> or agent-pub-<id>); do not use the display name.", {
@@ -655,6 +658,18 @@ export function buildNoloWorkspaceCommandArgs(call: { name: string; arguments: s
           throw new Error(`Invalid offset '${offsetVal}': must be a non-negative integer.`);
         }
         cliArgs.push("--offset", String(parsed));
+      }
+      if (args.fragmentOffset !== undefined) {
+        if (!Number.isSafeInteger(args.fragmentOffset) || (args.fragmentOffset as number) < 0) throw new Error("Invalid fragmentOffset");
+        cliArgs.push("--fragment-offset", String(args.fragmentOffset));
+      }
+      if (args.fragmentAgentKey !== undefined) {
+        if (typeof args.fragmentAgentKey !== "string" || !args.fragmentAgentKey.trim()) throw new Error("Invalid fragmentAgentKey");
+        cliArgs.push("--fragment-agent-key", args.fragmentAgentKey);
+      }
+      if (args.fragmentDigest !== undefined) {
+        if (typeof args.fragmentDigest !== "string" || !/^[a-f0-9]{64}$/.test(args.fragmentDigest)) throw new Error("Invalid fragmentDigest");
+        cliArgs.push("--fragment-digest", args.fragmentDigest);
       }
       cliArgs.push("--json", "--safe");
       return cliArgs;

@@ -289,7 +289,7 @@ export function buildServerPlatformToolExecutors(args: {
     }
     const remoteItems: any[] = Array.isArray(remote?.selectedItems) ? remote.selectedItems : [];
 
-    const [{ loadMemoryVNextCatalog }, { recallMemoryVNextLocal }] = await Promise.all([
+    const [{ loadMemoryVNextCatalog, getMemoryEvidenceVNextStrict }, { recallMemoryVNextLocal }] = await Promise.all([
       import("../../ai/memory/vnext/store"),
       import("../../ai/memory/vnext/localRecall"),
     ]);
@@ -302,8 +302,11 @@ export function buildServerPlatformToolExecutors(args: {
     if (hits.length === 0) return null;
 
     const { mergeAndDedupUserData } = await import("../../database/userDataMerge");
-    const localItems = hits.map((hit: any) => {
+    const localItems = await Promise.all(hits.map(async (hit: any) => {
       const value = (hit.state.value ?? {}) as Record<string, any>;
+      const evidence = (await Promise.all((hit.state.evidenceIds ?? []).map((id: string) =>
+        getMemoryEvidenceVNextStrict(ctx.db, ctx.principal, id),
+      ))).filter((item) => item != null && item.ownerId === ctx.principal);
       return {
         id: `vnext-state-${hit.state.id}`,
         ownerType: "user",
@@ -317,10 +320,13 @@ export function buildServerPlatformToolExecutors(args: {
         lastActivatedAt: hit.state.createdAt,
         activationCount: 1,
         importance: typeof value.importance === "number" ? value.importance : 0.9,
-        confidence: typeof value.confidence === "number" ? value.confidence : 0.9,
+        ...(typeof value.confidence === "number" && Number.isFinite(value.confidence) ? { confidence: value.confidence } : {}),
+        ...(typeof value.sourceKind === "string" ? { sourceKind: value.sourceKind } : {}),
+        ...(typeof value.sourceDialogId === "string" ? { sourceDialogId: value.sourceDialogId } : {}),
+        evidence,
         sourceOrigin: "local",
       };
-    });
+    }));
 
     // mergeAndDedupUserData 第二参的契约是远端分页包装 [{ data: { data: [...] } }]
     // （见 packages/database/userDataMerge.ts 的 remoteResults.forEach(result =>
@@ -549,7 +555,18 @@ export function buildServerPlatformToolExecutors(args: {
         metadata: { serverPlatformTool: true, memoryRead: false },
       };
     }
+    if (parsed.source !== undefined && parsed.source !== "archive") {
+      return { content: JSON.stringify({ error: "Invalid memory source" }), metadata: { serverPlatformTool: true, memoryRead: false } };
+    }
+    if (parsed.source === undefined && (parsed.limit !== undefined || parsed.cursor !== undefined)) {
+      return { content: JSON.stringify({ error: "Pagination requires source archive" }), metadata: { serverPlatformTool: true, memoryRead: false } };
+    }
     const body: Record<string, unknown> = { userInput: query };
+    if (parsed.source === "archive") {
+      body.source = parsed.source;
+      if (parsed.limit !== undefined) body.limit = parsed.limit;
+      if (parsed.cursor !== undefined) body.cursor = parsed.cursor;
+    }
     if (args.agentKey) body.agentKey = args.agentKey;
     const raw = await postServer("/api/memory/query", body, {
       retryTransient: true,
@@ -557,7 +574,7 @@ export function buildServerPlatformToolExecutors(args: {
     // 本地 vNext 召回 + 远程结果合并（best-effort；本地异常时保持纯远程输出）
     let content = raw;
     try {
-      const merged = await mergeLocalMemoryIntoQuery(query, raw);
+      const merged = parsed.source === "archive" ? null : await mergeLocalMemoryIntoQuery(query, raw);
       if (merged) content = merged;
     } catch {
       /* 降级为纯远程 */

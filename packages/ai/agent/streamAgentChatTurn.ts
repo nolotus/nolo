@@ -51,7 +51,7 @@ import {
 import {
     selectCurrentServer,
 } from "app/settings/serverSelectors";
-import { filterAndCleanMessages } from "integrations/openai/filterAndCleanMessages";
+import { filterAndCleanMessages, serializeAgentRunMessages } from "integrations/openai/filterAndCleanMessages";
 import {
     getFullChatContextKeys,
     deduplicateContextKeys,
@@ -783,7 +783,7 @@ export const streamAgentChatTurnHandler = async (
                         ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
                             ? { contextBlocks }
                             : {}),
-                        messages: cleanedMessages,
+                        messages: serializeAgentRunMessages(cleanedMessages),
                         stream: true,
                         persistDialog: true,
                         continueDialogId: dialogId,
@@ -2035,7 +2035,7 @@ export const streamAgentChatTurnHandler = async (
                     ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
                         ? { contextBlocks }
                         : {}),
-                    messages: cleanedMessages,
+                    messages: serializeAgentRunMessages(cleanedMessages),
                     stream: true,
                     persistDialog: false,
                     clientDialogId: dialogId,

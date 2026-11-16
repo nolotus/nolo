@@ -337,6 +337,8 @@ export type AgentRuntimeHostAdapter = {
   ): Promise<AgentRuntimeProvider>;
   /** Optional local-first credential broker for JIT unwrap of opaque credentials. */
   credentialBroker?: import("./credentialBroker").CredentialBroker;
+  /** Invalidate cached delivery claims when compaction replaces provider history. */
+  onWorkingHistoryReplaced?(): void;
   executeTool(
     call: AgentRuntimeToolCallInput,
     opts?: {

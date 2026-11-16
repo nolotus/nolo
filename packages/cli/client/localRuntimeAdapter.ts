@@ -2078,6 +2078,9 @@ export function createCliLocalRuntimeAdapter(
         ...(ownerOriginExecution ? { ownerOriginExecution } : {}),
       });
     },
+    onWorkingHistoryReplaced: () => {
+      (localToolExecutors.readFile as typeof localToolExecutors.readFile & { resetReadLedger?: () => void } | undefined)?.resetReadLedger?.();
+    },
     executeTool: async (call, opts) => {
       const contextualCall = opts?.runtimeContext
         ? { ...call, runtimeContext: opts.runtimeContext }

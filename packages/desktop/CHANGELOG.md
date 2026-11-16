@@ -1,4 +1,19 @@
 
+## 0.245.0-alpha.2 (2026-11-16)
+
+### Bug Fixes
+
+* **agent-runtime:** balance planning scrutiny and investment checkpoints ([4ab5cda](https://github.com/nolotus/bun-nolo/commit/4ab5cda902c3d5493e7aaa18f343e63286850740))
+* **agent:** preserve complete discovery evidence with safe fragment recovery ([d8b4ced](https://github.com/nolotus/bun-nolo/commit/d8b4ced9763afd407c7f76b22b6c359b4676d6d0))
+* **agent:** scope model family preference to frontend design ([2ca14d8](https://github.com/nolotus/bun-nolo/commit/2ca14d8766540efe06ef71aa968bbe4136f07245))
+* **agy:** route Argon to available reasoning variants ([9b0d0e0](https://github.com/nolotus/bun-nolo/commit/9b0d0e06eb4c2be54cc8a7200492170c09d469ef))
+* **dev:** exclude template text from symbol gate call candidates ([f3aaf0f](https://github.com/nolotus/bun-nolo/commit/f3aaf0fdf6e0751b545d484c7bf2395b51741eed))
+* **instabox:** handle changing free runtime limits during recovery ([899885e](https://github.com/nolotus/bun-nolo/commit/899885e27d1f9760c6db6ffbc68995b028bab718))
+* **memory:** preserve recall provenance and archive query options ([7b58b2e](https://github.com/nolotus/bun-nolo/commit/7b58b2e8fbf22d93737701495a0155076a69d78f))
+* **preview:** verify owned HTTP readiness and watcher lock lifecycle ([0d145aa](https://github.com/nolotus/bun-nolo/commit/0d145aa98ad16b0ab75bafc9e4b7b86da0d91023))
+* **runtime:** preserve complete instruction reads across execution hosts ([e798721](https://github.com/nolotus/bun-nolo/commit/e798721d53e1bd2190bc4a8c45020f444c055baf))
+
+
 ## 0.245.0-alpha.1 (2026-11-15)
 
 ### Features

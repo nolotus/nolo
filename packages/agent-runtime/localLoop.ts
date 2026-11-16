@@ -1194,6 +1194,7 @@ export async function runLocalAgentTurn(
     onSelectedSummary: (summary) => { selectedSummary = summary; },
     replaceWorkingView: (next) => {
       transcript.replaceWorkingHistory(next);
+      input.adapter.onWorkingHistoryReplaced?.();
       summaryProjectedPhase = contextPhase("summary-projected", next);
     },
     contextReferenceResolver:

@@ -1,8 +1,12 @@
+import { LIST_AGENTS_OUTPUT_BUDGET } from "ai/agent/toolOutputPolicy";
 // packages/integrations/openai/filterAndCleanMessages.ts
 
 import { isRecord } from "core/isRecord";
 import { asTrimmedString } from "core/trimmedString";
 import { clipHeadAndTail } from "core/clipHeadAndTail";
+import { sanitizeToolOutputText } from "agent-runtime/toolOutputSanitizer";
+import { scrubSecrets } from "agent-runtime/secretScrubber";
+import { isCompleteInstructionOutput } from "ai/agent/toolOutputPolicy";
 import { projectUserPartForModel } from "ai/attachments/projectUserPart";
 
 export type MessagePart =
@@ -46,6 +50,18 @@ export interface InternalMessage extends Omit<Partial<OpenAIMessage>, "content">
   [key: string]: any;
 }
 
+/** Serialize only the bounded delivery attestation for Nolo's server hop.
+ * Provider-facing OpenAI messages keep it non-enumerable and never send it.
+ */
+export function serializeAgentRunMessages(messages: OpenAIMessage[]): OpenAIMessage[] {
+  return messages.map((message) => {
+    const metadata = (message as any).tool_result_metadata;
+    return message.role === "tool" && isCompleteInstructionOutput(message.name, metadata, typeof message.content === "string" ? message.content : "")
+      ? { ...message, tool_result_metadata: { projectInstruction: true } } as OpenAIMessage
+      : message;
+  });
+}
+
 export const isValidMessagePart = (part: any): part is MessagePart => {
   if (!part || typeof part !== "object") return false;
   if (part.type === "text") return typeof part.text === "string";
@@ -58,14 +74,22 @@ export const isValidMessagePart = (part: any): part is MessagePart => {
 
 const extractContent = (msg: InternalMessage): string | MessagePart[] | null => {
   if (msg.role === "tool") {
+    const budget = (msg.name ?? msg.toolName ?? msg.toolPayload?.toolName) === "listAgents"
+      ? LIST_AGENTS_OUTPUT_BUDGET : undefined;
+    const metadata = (msg as any).tool_result_metadata ?? (msg as any).metadata;
     const llmContext = asTrimmedString(msg.toolPayload?.llmContext);
-    if (llmContext) return clipHeadAndTail(llmContext, { toolCallId: extractToolCallId(msg) ?? undefined }).content;
+    if (isCompleteInstructionOutput(extractName(msg), metadata, typeof msg.content === "string" ? msg.content : "")) {
+      const safe = scrubSecrets(sanitizeToolOutputText(llmContext || String(msg.content ?? ""))).cleaned;
+      if (isCompleteInstructionOutput(extractName(msg), metadata, safe)) return safe;
+      return clipHeadAndTail(safe, { toolCallId: extractToolCallId(msg) ?? undefined }).content;
+    }
+    if (llmContext) return clipHeadAndTail(llmContext, { toolCallId: extractToolCallId(msg) ?? undefined, ...(budget ? { maxTotalBytes: budget } : {}) }).content;
 
     const summary = asTrimmedString(msg.toolPayload?.summary);
-    if (summary) return clipHeadAndTail(summary, { toolCallId: extractToolCallId(msg) ?? undefined }).content;
+    if (summary) return clipHeadAndTail(summary, { toolCallId: extractToolCallId(msg) ?? undefined, ...(budget ? { maxTotalBytes: budget } : {}) }).content;
 
-    if (typeof msg.content === "string") return clipHeadAndTail(msg.content, { toolCallId: extractToolCallId(msg) ?? undefined }).content;
-    if (msg.content != null) return clipHeadAndTail(JSON.stringify(msg.content), { toolCallId: extractToolCallId(msg) ?? undefined }).content;
+    if (typeof msg.content === "string") return clipHeadAndTail(msg.content, { toolCallId: extractToolCallId(msg) ?? undefined, ...(budget ? { maxTotalBytes: budget } : {}) }).content;
+    if (msg.content != null) return clipHeadAndTail(JSON.stringify(msg.content), { toolCallId: extractToolCallId(msg) ?? undefined, ...(budget ? { maxTotalBytes: budget } : {}) }).content;
     return null;
   }
 
@@ -198,6 +222,10 @@ const toOpenAIMessage = (rawMsg: any): OpenAIMessage | null => {
   }
 
   if (role === "tool") {
+    const metadata = (msg as any).tool_result_metadata ?? (msg as any).metadata;
+    if (isCompleteInstructionOutput(name, metadata, typeof content === "string" ? content : "")) {
+      Object.defineProperty(cleaned, "tool_result_metadata", { value: metadata, enumerable: false });
+    }
     const toolCallId = extractToolCallId(msg);
     if (toolCallId) cleaned.tool_call_id = toolCallId;
     if (!cleaned.tool_call_id) {

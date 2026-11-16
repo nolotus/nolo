@@ -8,6 +8,7 @@ import {
   resolvePaginationArgs,
   toDiscoverySafeAgentSummary,
 } from "../agent/agentDiscovery";
+import { injectSpeedContextIntoListAgentsResult } from "../agent/candidateSpeedContext";
 import {
   mergeAvailabilityDeadline,
   resolveCredentialKeyWithFallback,
@@ -648,8 +649,11 @@ export const listAgentsFunctionSchema = {
           "Optional case-insensitive search substring matching agent name, model, provider, handle, or agentKey. Use to locate specific candidates like 'opus', 'devin', or 'claude'.",
       },
       verbose: { type: "boolean", description: "Return the full safe-summary field set (prices, introduction, modelAbility, timestamps) for troubleshooting. Default false returns the compact agent-selection projection." },
-      compact: { type: "boolean", description: "Explicit compact projection mode. Retains essential agent-selection and admission evidence (agentKey, name, model, tier, billingSource, availabilityStatus, credentialGroup, tools, apiSource, credentialed, quota, economics) while omitting non-admission verbose text like introduction and modelAbility." },
+      compact: { type: "boolean", description: "Explicit compact projection mode. Responses have hasMore and nextOffset when more locally fetched candidates remain; repeat with offset=nextOffset and the same filters. truncated separately indicates an incomplete upstream pool. Oversized individual candidates return an error. Retains essential agent-selection and admission evidence (agentKey, name, model, tier, billingSource, availabilityStatus, credentialGroup, tools, apiSource, credentialed, quota, economics) while omitting non-admission verbose text like introduction and modelAbility." },
       offset: { type: "integer", description: "Optional pagination offset for agent candidates. Default 0." },
+      fragmentOffset: { type: "integer", description: "Recover an oversized candidate as JSON fragments; start at 0, then use nextFragmentOffset with the same offset, filters, fragmentAgentKey and returned fragmentDigest." },
+      fragmentAgentKey: { type: "string", description: "Exact agentKey from the oversized-candidate response." },
+      fragmentDigest: { type: "string", description: "SHA-256 digest from the first fragment; required for subsequent fragments to detect candidate changes." },
     },
   },
 } as const;
@@ -659,15 +663,20 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
   // 匿名（缺 currentUserId / currentToken）：既无法确定自有收藏，也无法认证公开目录请求。
   // 直接返回空结果，且不向公开目录发请求（默认 scope='all' 也不拉公共目录）。
   if (!runtime?.currentUserId || !runtime?.currentToken) {
+    const rawData = {
+      success: true,
+      ...buildAgentDiscoveryResult({ agents: [], upstreamTruncated: true,
+        caller: { agentKey: context?.agentKey, effectiveModel: context?.effectiveModel,
+          runKind: context?.runKind ?? (context?.origin === "agent" ? "subtask" : "interactive") },
+      }),
+    };
+    const delivered = args?.compact === true && args?.verbose !== true
+      ? JSON.parse(await injectSpeedContextIntoListAgentsResult(JSON.stringify(rawData), { compactPage: true, fragmentOffset: args?.fragmentOffset, fragmentAgentKey: args?.fragmentAgentKey, fragmentDigest: args?.fragmentDigest }))
+      : rawData;
     return {
-      rawData: {
-        success: true,
-        ...buildAgentDiscoveryResult({ agents: [], upstreamTruncated: true,
-          caller: { agentKey: context?.agentKey, effectiveModel: context?.effectiveModel,
-            runKind: context?.runKind ?? (context?.origin === "agent" ? "subtask" : "interactive") },
-        }),
-      },
+      rawData: delivered,
       displayData: formatAgentListCard([] as any),
+      ...(args?.compact === true && args?.verbose !== true ? { llmContext: JSON.stringify(delivered) } : {}),
     };
   }
   const pagination = resolvePaginationArgs({ limit: args?.limit, offset: args?.offset });
@@ -821,8 +830,7 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
     now,
   });
 
-  return {
-    rawData: {
+  const rawData = {
       success: true,
       planningRecommendation: discovery.planningRecommendation,
       total: discovery.total,
@@ -830,13 +838,20 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
       ...(typeof discovery.limit === "number" ? { limit: discovery.limit } : {}),
       ...(discovery.truncated ? { truncated: true } : {}),
       unavailableCount: discovery.unavailableCount,
+      availableCount: discovery.availableCount,
       // 顺序即序列化顺序：agents 在前（派发必需），大块说明字段在后。
       // 限流 agent 已合入 agents（带 availabilityStatus / nextAvailableAt
       // 参考标注），不再单列 unavailableAgents，避免两套真相。
       agents: discovery.agents,
       credentialGroups: discovery.credentialGroups,
-    },
-    displayData: formatAgentListCard(discovery.agents as any),
+    };
+  const delivered = args?.compact === true && args?.verbose !== true
+    ? JSON.parse(await injectSpeedContextIntoListAgentsResult(JSON.stringify(rawData), { compactPage: true, fragmentOffset: args?.fragmentOffset, fragmentAgentKey: args?.fragmentAgentKey, fragmentDigest: args?.fragmentDigest }))
+    : rawData;
+  return {
+    rawData: delivered,
+    displayData: formatAgentListCard((delivered.agents ?? []) as any),
+    ...(args?.compact === true && args?.verbose !== true ? { llmContext: JSON.stringify(delivered) } : {}),
   };
 }
 

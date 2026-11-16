@@ -308,6 +308,7 @@ export interface AgentDiscoveryResult {
   limit?: number;
   truncated?: boolean;
   unavailableCount: number;
+  availableCount: number;
   agents: (CompactSafeAgentSummary | UltraCompactSafeAgentSummary | SafeAgentSummary)[];
   credentialGroups: CredentialGroupSummary[];
 }
@@ -438,6 +439,7 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     ...(typeof limit === "number" ? { limit } : {}),
     ...(isTruncated ? { truncated: true } : {}),
     unavailableCount,
+    availableCount: sortedAgents.length,
     agents: projectedAgents,
     planningRecommendation: recommendPlanning(
       sortedAgents, options.caller,

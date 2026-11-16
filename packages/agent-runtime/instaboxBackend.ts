@@ -77,6 +77,7 @@ export type InstaboxFailureCode =
   | "instabox_lease_stopping"
   | "instabox_create_failed"
   | "instabox_create_unconfirmed"
+  | "instabox_download_failed"
   | "instabox_upload_failed"
   | "instabox_exec_failed"
   | "instabox_cleanup_pending"
@@ -84,6 +85,7 @@ export type InstaboxFailureCode =
 
 /** 对外只允许固定安全文案；detail 只放状态码/operation 态，绝不带 API key 或 header。 */
 const SAFE_MESSAGE: Record<InstaboxFailureCode, string> = {
+  instabox_download_failed: "Instabox file download failed",
   instabox_upload_failed: "Instabox file upload failed",
   instabox_recovery_failed: "Instabox recovery persistence or authority validation failed",
   instabox_recovery_unknown: "Instabox machine identity is unknown; manual reconciliation required",
@@ -135,6 +137,8 @@ export type InstaboxResponseLike = {
   status: number;
   json(): Promise<unknown>;
   redirected?: boolean;
+  headers?: { get(name: string): string | null };
+  body?: ReadableStream<Uint8Array> | null;
 };
 
 export type InstaboxFetchRequest = {
@@ -279,6 +283,7 @@ export const INSTABOX_CAPABILITIES: ExecutionBackendDescriptor["capabilities"] =
   };
 
 type LeaseEntry = {
+  ciWritableRoots?: string[];
   recovery?: InstaboxRecoveryRecord;
   machineId: string;
   ticketId: string;
@@ -635,7 +640,11 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       if (template?.id !== plan.templateId) mismatches.push("template mismatch");
       if (spec?.vcpus !== plan.vcpus || spec?.memMiB !== plan.memMiB ||
           spec?.persistentDiskGiB !== expectedSpec.persistentDiskGiB) mismatches.push("spec mismatch");
-      if (this.#billingPolicy === "free-only" && machine.maxRunMinutes !== 480) mismatches.push("maxRunMinutes mismatch");
+      // The free limit is a changing per-run observation, not the 480-minute ceiling.
+      // Require a bounded non-negative value, but do not assume the current limit is the ceiling.
+      if (this.#billingPolicy === "free-only" &&
+          (!Number.isSafeInteger(machine.maxRunMinutes) || (machine.maxRunMinutes as number) < 0 ||
+           (machine.maxRunMinutes as number) > plan.maxRunMinutes)) mismatches.push("maxRunMinutes mismatch");
       if (mismatches.length > 0) {
         const reason = mismatches.join("; ");
         this.#assertDeletionAllowed(machineId, reason);
@@ -682,6 +691,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
 
     const leaseId = `${machineId}:${ticket.ticketId}`;
     this.#leases.set(leaseId, {
+      ciWritableRoots: [...ticket.filesystem.writableRoots],
       recovery: context.record,
       machineId,
       ticketId: ticket.ticketId,
@@ -730,7 +740,7 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
     };
     const fail = () => new InstaboxBackendError("instabox_upload_failed");
     checkLease();
-    if (!input || typeof input.path !== "string" || !input.path.startsWith("/workspace/") ||
+    if (!input || typeof input.path !== "string" || !(input.path.startsWith("/workspace/") || ((entry.ciWritableRoots ?? []).some(root => root.startsWith("/data/home/nolo-ci/") && input.path.startsWith(root + "/")))) ||
         input.path.endsWith("/") || input.path.split("/").some((p, i) => i > 0 && (!p || p === "." || p === "..")) ||
         /[\\\x00-\x1f\x7f]/.test(input.path) || !(input.bytes instanceof Uint8Array) ||
         input.bytes.byteLength > INSTABOX_MAX_UPLOAD_BYTES || !input.signal ||
@@ -794,6 +804,34 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
       if (onAbort) input.signal.removeEventListener("abort", onAbort);
       controller.abort();
     }
+  }
+
+  /** Raw binary download, bounded and confined to a task-owned lease root. */
+  async downloadFile(lease: ExecutionLease, input: { path: string; maxBytes: number; signal: AbortSignal; deadlineAt: number }): Promise<Uint8Array> {
+    const entry = this.#requireEntry(lease);
+    const fail = () => new InstaboxBackendError("instabox_download_failed");
+    if (entry.releasedAt !== null || entry.stopState !== null ||
+        !Number.isSafeInteger(input.maxBytes) || input.maxBytes < 0 || input.maxBytes > INSTABOX_MAX_UPLOAD_BYTES ||
+        !(entry.ciWritableRoots ?? []).some(root => root.startsWith("/data/home/nolo-ci/") && input.path.startsWith(root + "/")) ||
+        input.path.split("/").some((p,i) => i > 0 && (!p || p === "." || p === "..")) || /[\\\x00-\x1f\x7f]/.test(input.path)) throw fail();
+    const remaining = input.deadlineAt - this.#now();
+    if (input.signal.aborted || remaining <= 0) throw fail();
+    const signal = AbortSignal.any([input.signal, AbortSignal.timeout(Math.min(remaining, 2_147_483_647))]);
+    const base = new URL(this.#baseUrl);
+    if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash) throw fail();
+    const response = await this.#fetch(`${this.#baseUrl}/machines/${encodeURIComponent(entry.machineId)}/files/content?path=${encodeURIComponent(input.path)}`, {
+      method: "GET", headers: { "X-API-Key": this.#apiKey }, signal, redirect: "error",
+    });
+    const length = response.headers?.get("Content-Length");
+    if (response.status !== 200 || response.redirected || !length || !/^\d+$/.test(length) || Number(length) > input.maxBytes ||
+        decodeURIComponent(response.headers?.get("X-Instabox-File-Path") ?? "") !== input.path || !response.body) throw fail();
+    const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let count = 0;
+    try {
+      for (;;) { signal.throwIfAborted(); const part = await reader.read(); if (part.done) break;
+        count += part.value.byteLength; if (count > input.maxBytes || count > Number(length)) throw fail(); chunks.push(part.value); }
+      if (count !== Number(length)) throw fail();
+      return Buffer.concat(chunks);
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
 
   async execute(
@@ -1202,12 +1240,13 @@ export class InstaboxBackend implements Omit<ExecutionBackend, "release"> {
         spec?.vcpus !== plan.vcpus || spec?.memMiB !== plan.memMiB ||
         spec?.persistentDiskGiB !== record.persistentDiskGiB ||
         typeof machine.free !== "boolean" ||
-        (record.billingPolicy === "free-only" && (machine.free !== true || machine.maxRunMinutes !== plan.maxRunMinutes))) {
+        (record.billingPolicy === "free-only" && machine.free !== true)) {
       throw this.#withRecovery(new InstaboxBackendError("instabox_recovery_failed"), record);
     }
     const leaseId = `${machineId}:${record.ticketId}`;
     if (this.#leases.has(leaseId)) throw this.#withRecovery(new InstaboxBackendError("instabox_lease_mismatch"), record);
     this.#leases.set(leaseId, {
+      ciWritableRoots: [],
       recovery: structuredClone(record), machineId, ticketId: record.ticketId, grantId: record.grantId,
       requestedAt: record.create.requestedAt, readyAt: this.#now(),
       createOperationId: record.createOperationId ?? "", usageBaselineRunningMs: null,

@@ -1241,6 +1241,9 @@ export function createDesktopAgentRuntimeActions(args: {
       planningCaller.effectiveModel = resolvedProvider.model;
       return options?.textOnly ? { ...resolvedProvider, textOnly: true as const } : resolvedProvider;
     },
+    onWorkingHistoryReplaced: () => {
+      (executors.readFile as typeof executors.readFile & { resetReadLedger?: () => void } | undefined)?.resetReadLedger?.();
+    },
     executeTool: (call) => executeLocalToolWithPolicy({
       // 用户面前的运行时：确认通道没接上不等于用户默许破坏性命令。
       blockDestructiveWithoutConfirmation: true,

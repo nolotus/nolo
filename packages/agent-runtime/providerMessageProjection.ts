@@ -25,6 +25,7 @@ import type { AgentExecutionContextMetrics } from "./executionObservation";
 import { sanitizeToolCallPairing } from "./toolCallPairing";
 import {
   clipToolText,
+  isCompleteInstructionOutput,
   resolveToolOutputProfile,
 } from "../ai/agent/toolOutputPolicy";
 import { spillToolOutput } from "./toolSpillStore";
@@ -332,6 +333,9 @@ export function projectToolContentForProvider(args: {
     : rawContent;
   if (typeof content !== "string") return content;
   if (isSpilledToolOutput(content)) return content;
+  // The executor identifies root instruction candidates and bounds their size.
+  // Keep the already formatted message stable on fresh and historical turns.
+  if (isCompleteInstructionOutput(args.toolName, args.metadata, content)) return content;
   const metadataText = compactToolMetadata(args.metadata);
   // Some tool formatters already append the full metadata JSON to the durable
   // content. Remove that provider-side duplicate and re-add the bounded

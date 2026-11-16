@@ -224,6 +224,9 @@ export function parseAgentListArgs(args: string[]) {
     // --verbose 拿回完整字段集排障。
     verbose: args.includes("--verbose"),
     compact: args.includes("--compact"),
+    fragmentOffset: readArgValue(args, "--fragment-offset"),
+    fragmentAgentKey: readArgValue(args, "--fragment-agent-key"),
+    fragmentDigest: readArgValue(args, "--fragment-digest"),
     limit: readArgValue(args, "--limit") ?? undefined,
     offset: readArgValue(args, "--offset") ?? undefined,
   };

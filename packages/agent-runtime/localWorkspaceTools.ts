@@ -1,6 +1,9 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { AGENTS_MD_CANDIDATES } from "./agentsMd";
 import { formatToolMessageContent } from "./providerMessageProjection";
+import { sanitizeToolOutputText } from "./toolOutputSanitizer";
+import { scrubSecrets } from "./secretScrubber";
 import { TOOL_OUTPUT_SPILL_BYTES, TOOL_OUTPUT_SPILL_LINES } from "./toolOutputSpillProjection";
 import { countLines } from "./toolSpillStore";
 import { formatImageSummary } from "./imageSummary";
@@ -25,7 +28,7 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import { asTrimmedString } from "core/trimmedString";
-import { resolveHistoricalToolContentCap } from "../ai/agent/toolOutputPolicy";
+import { PROJECT_INSTRUCTION_MAX_BYTES, PROJECT_INSTRUCTION_MAX_CHARS, resolveHistoricalToolContentCap } from "../ai/agent/toolOutputPolicy";
 import type {
   AgentRuntimeToolCallInput,
   AgentRuntimeToolResult,
@@ -182,6 +185,7 @@ export {
 
 type WorkspaceFileArgs = {
   raw?: unknown;
+  files?: unknown;
   force?: unknown;
   path?: unknown;
   file_path?: unknown;
@@ -1210,8 +1214,53 @@ async function readFileTool(args: {
   confirmExternalFileAccess?: (request: PermissionRequest) => Promise<boolean>;
   /** Session-scoped dedup ledger; created per executor map. */
   readLedger?: Map<string, LedgerEntry>;
+  batchItem?: boolean;
 }): Promise<AgentRuntimeToolResult> {
   const parsed = parseWorkspaceToolArguments(args.call.arguments);
+  if (parsed.files !== undefined && !args.batchItem) {
+    if (!Array.isArray(parsed.files) || parsed.files.length < 1 || parsed.files.length > 8 || pickFirstAlias(parsed, PATH_FIELD_ALIASES) !== undefined) {
+      return { content: "[readFile] Supply either path or files (1–8 items), not both.", metadata: { status: "invalid-arguments" } };
+    }
+    if (parsed.files.some((file) => !file || typeof file !== "object" || typeof file.path !== "string" || !file.path || file.path.length > 512 || (file.lines !== undefined && typeof file.lines !== "string"))) {
+      return { content: "[readFile] Each batch item requires a path (maximum 512 characters) and optional string lines.", metadata: { status: "invalid-arguments" } };
+    }
+    const items: Array<Record<string, unknown>> = parsed.files.map((item) => ({ path: item.path, status: "not-delivered" }));
+    const budget = resolveHistoricalToolContentCap("readFile", 0);
+    const batchStartLedger = args.readLedger ? new Map([...args.readLedger].map(([key, entry]) => [key, { ...entry, records: [...entry.records] }])) : undefined;
+    for (let i = 0; i < parsed.files.length; i++) {
+      const file = parsed.files[i];
+      if (!file || typeof file !== "object" || typeof file.path !== "string" || !file.path || (file.lines !== undefined && typeof file.lines !== "string")) {
+        items[i] = { ...items[i], status: "invalid-arguments" };
+        continue;
+      }
+      const trialLedger = args.readLedger ? new Map([...args.readLedger].map(([key, entry]) => [key, { ...entry, records: [...entry.records] }])) : undefined;
+      try {
+        const result = await readFileTool({ ...args, batchItem: true, readLedger: trialLedger, call: { ...args.call, arguments: JSON.stringify(file) } });
+        const metadata = result.metadata ?? {};
+        const candidate = { path: file.path, status: metadata.deduped ? "already-delivered" : metadata.status === "invalid-arguments" ? "invalid-arguments" : metadata.truncatedByCharLimit || metadata.partialLine ? "partial" : "complete", content: result.content, ...metadata };
+        const previous = items[i];
+        items[i] = candidate;
+        const formatted = formatToolMessageContent({ toolName: "readFile", content: JSON.stringify(items), metadata: { batch: true, items: items.map(({ path, status, startLine, endLine }) => ({ path, status, startLine, endLine })) } });
+        if (formatted.length > budget) { items[i] = previous; continue; }
+        if (args.readLedger && trialLedger) {
+          args.readLedger.clear();
+          for (const [key, value] of trialLedger) args.readLedger.set(key, value);
+        }
+      } catch {
+        items[i] = { path: file.path, status: "error" };
+      }
+    }
+    const batchContent = JSON.stringify(items);
+    const batchMetadata = { batch: true, items: items.map(({ path, status, startLine, endLine }) => ({ path, status, startLine, endLine })) };
+    if (formatToolMessageContent({ toolName: "readFile", content: batchContent, metadata: batchMetadata }).length > budget) {
+      if (args.readLedger && batchStartLedger) {
+        args.readLedger.clear();
+        for (const [key, value] of batchStartLedger) args.readLedger.set(key, value);
+      }
+      return { content: "[readFile] Batch request exceeds the shared delivery budget; no content delivered. Use fewer or shorter paths.", metadata: { status: "batch-limit-exceeded" } };
+    }
+    return { content: batchContent, metadata: batchMetadata };
+  }
   const requestedPath = requireWorkspaceToolPath(parsed);
   const parsedSlice = readFileSliceArgs(parsed);
   if (parsedSlice.error) {
@@ -1243,10 +1292,23 @@ async function readFileTool(args: {
     workspaceRoot: resolve(args.workspaceRoot),
     targetPath: absolutePath,
   });
-  const cap = resolveHistoricalToolContentCap("readFile", 0);
+  // Only the workspace-root candidates recognized by the instruction loader
+  // receive this treatment; an arbitrary matching basename is not sufficient.
+  const instructionPath = AGENTS_MD_CANDIDATES.some((name) => absolutePath === resolve(args.workspaceRoot, name));
+  const instructionLimit = PROJECT_INSTRUCTION_MAX_BYTES;
+  const instructionOversized = Buffer.byteLength(content) > instructionLimit || countLines(content) > TOOL_OUTPUT_SPILL_LINES;
+  const instruction = !args.batchItem && instructionPath && !instructionOversized;
+  if (!args.batchItem && instructionPath && instructionOversized && Object.keys(sliceArgs).length === 0) {
+    return {
+      content: `[readFile] Project instruction exceeds the delivery limit (${instructionLimit} bytes or ${TOOL_OUTPUT_SPILL_LINES} lines); no content delivered. Continue with lines="1-" to inspect the first bounded range.`,
+      metadata: { path: relativePath, status: "instruction-limit-exceeded", truncated: true, totalBytes: Buffer.byteLength(originalContent) },
+    };
+  }
+  const cap = instruction ? PROJECT_INSTRUCTION_MAX_CHARS : resolveHistoricalToolContentCap("readFile", 0);
   const selectedLines = splitTextLines(sliced.content);
   const makeMetadata = (body: string, endLine: number, windowed: boolean, partialLine: boolean) => ({
     path: relativePath,
+    ...(instruction ? { projectInstruction: true } : {}),
     bytes: Buffer.byteLength(body),
     totalBytes: Buffer.byteLength(originalContent),
     ...(projection.projected ? {
@@ -1258,6 +1320,7 @@ async function readFileTool(args: {
     ...(partialLine ? { partialLine: true } : { endLine }),
     totalLines: sliced.totalLines,
     truncated: sliced.truncated || windowed,
+    ...(scrubSecrets(sanitizeToolOutputText(body)).cleaned !== body ? { contentSanitized: true } : {}),
     ...(windowed ? { truncatedByByteLimit: true, truncatedByCharLimit: true } : {}),
     ...(sliceArgs.maxLines ? { maxLines: sliceArgs.maxLines } : {}),
     ...(sliceArgs.tailLines ? { tailLines: sliceArgs.tailLines } : {}),
@@ -1330,7 +1393,7 @@ async function readFileTool(args: {
   }
   // Test only the window we can deliver; an oversized partial line is never deduped.
   if (!force && entry && ledger && !oversizedLine) {
-    const retainedCap = resolveHistoricalToolContentCap("readFile", 0);
+    const retainedCap = instructionPath && !instructionOversized ? PROJECT_INSTRUCTION_MAX_CHARS : resolveHistoricalToolContentCap("readFile", 0);
     const retained = filterRetainedLedgerRecords(entry.records, retainedCap);
     if (retained.length > 0 && isLineRangeCovered(deliveredRange, retained)) {
       // LRU refresh: 访问命中时移至最新，避免高频复读的文件键被过早淘汰
@@ -2698,12 +2761,12 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
         images: results.flatMap((result) => result.images ?? []),
       };
     },
-    readFile: (call: AgentRuntimeToolCallInput) => readFileTool({
+    readFile: Object.assign((call: AgentRuntimeToolCallInput) => readFileTool({
       call,
       workspaceRoot: args.workspaceRoot,
       ...(readFileLedger ? { readLedger: readFileLedger } : {}),
       ...fileAccess,
-    }),
+    }), { resetReadLedger: () => readFileLedger?.clear() }),
     writeFile: (call: AgentRuntimeToolCallInput) => writeFileTool({
       call,
       workspaceRoot: args.workspaceRoot,

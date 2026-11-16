@@ -190,6 +190,7 @@ export const compressOldToolResults = (
         const projected = projectToolMessageContent({
             content,
             toolName: (msg as any).name,
+            metadata: (msg as any).tool_result_metadata,
         });
 
         if (projected === content) return msg;
