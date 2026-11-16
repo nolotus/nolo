@@ -1,4 +1,20 @@
 
+## 0.230.0-alpha.1 (2026-11-16)
+
+### Features
+
+* **auth:** define Google login and external account activation contracts ([c7cbbfd](https://github.com/nolotus/bun-nolo/commit/c7cbbfd0203593dc3ded83e639fa4f1ff7ace6d4))
+* **context:** project work-attributed summaries without splitting tool groups ([8439906](https://github.com/nolotus/bun-nolo/commit/8439906ba6315354a056b6d90b7b0c82f35d67ea))
+
+### Bug Fixes
+
+* **memory:** preserve write provenance without transferring evidence trust ([8af4092](https://github.com/nolotus/bun-nolo/commit/8af409214dfa9611233f852f56ed4a13c5822a79))
+
+### Reverts
+
+* **runtime:** remove speculative work continuity and summary attribution ([d1fa6b7](https://github.com/nolotus/bun-nolo/commit/d1fa6b75152883e62416c5301c140f1f166e050f))
+
+
 ## 0.229.0-alpha.1 (2026-11-16)
 
 ### Features

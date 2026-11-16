@@ -56,6 +56,8 @@ export interface MemoryEvidenceVNext {
   text: string;
   /** Pointer to dialog/message/file/etc. Source remains authoritative outside memory. */
   sourceRef?: string;
+  /** Declaration by the writer, not independently verified by the host. */
+  provenance?: "verified" | "stated" | "inferred";
   confidence: number;
   createdAt: string;
   /** Native source-event ledger, not an Agent partition or background job. */

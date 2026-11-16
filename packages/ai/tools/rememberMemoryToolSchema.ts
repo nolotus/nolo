@@ -31,7 +31,7 @@ export const rememberMemoryFunctionSchema = {
     "【删除权限安全边界】物理删除（deleteMemory）严格受限：仅在用户明确要求删除且在当前用户自身权限范围内时允许执行；严禁模型自行调用 deleteMemory 维护版本或归档旧条。冲突或偏好演进时优先依靠当前输入覆盖，不通过擅自删除来解决。",
     "",
     "【置信度来源】每条记忆必须标注来源（供召回时判断可信度）：",
-    "  - verified：工具/命令实测验证过（高置信度）",
+    "  - verified：调用者声明工具/命令实测过（宿主未独立验证）",
     "  - stated：用户明确陈述（中高置信度）",
     "  - inferred：模型推断/凭印象，未验证（低置信度——容易编造，优先标记存疑）",
     "调用时尽量明确来源，无法判断的保守标 inferred。",
@@ -56,6 +56,11 @@ export const rememberMemoryFunctionSchema = {
         description:
           "记忆类型。默认 episodic。只有你至少遇到过两次的可执行流程/稳定 runbook 才用 procedural，" +
           "且必须同时提供 recurrenceEvidence，否则会被降级为 episodic。单次排障实录用 episodic。",
+      },
+      provenance: {
+        type: "string",
+        enum: ["verified", "stated", "inferred"],
+        description: "来源声明：verified 为调用者声明实测，stated 为用户陈述，inferred 为推断；均不代表用户要求常驻或宿主已验证。无法判断时用 inferred。",
       },
       recurrenceEvidence: {
         type: "string",

@@ -1,13 +1,14 @@
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { callToolApi } from "./toolApiClient";
 import type { RememberMemoryScope } from "ai/memory/remember";
-import type { MemoryKind } from "ai/memory/types";
+import type { MemoryKind, MemoryProvenance } from "ai/memory/types";
 
 export interface RememberMemoryToolArgs {
   content: string;
   scope?: RememberMemoryScope;
   kind?: MemoryKind;
   recurrenceEvidence?: string;
+  provenance?: MemoryProvenance;
 }
 
 // Schema 定义在无依赖的姊妹模块里，供 CLI/desktop 本地 runtime 复用
@@ -46,6 +47,7 @@ export async function rememberMemoryFunc(
       kind,
       spaceId,
       ...(recurrenceEvidence ? { recurrenceEvidence } : {}),
+      ...(args.provenance ? { provenance: args.provenance } : {}),
     },
     { withAuth: true }
   );

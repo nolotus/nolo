@@ -321,6 +321,7 @@ export function buildServerPlatformToolExecutors(args: {
         activationCount: 1,
         importance: typeof value.importance === "number" ? value.importance : 0.9,
         ...(typeof value.confidence === "number" && Number.isFinite(value.confidence) ? { confidence: value.confidence } : {}),
+        ...(["verified", "stated", "inferred"].includes(value.provenance) ? { provenance: value.provenance } : {}),
         ...(typeof value.sourceKind === "string" ? { sourceKind: value.sourceKind } : {}),
         ...(typeof value.sourceDialogId === "string" ? { sourceDialogId: value.sourceDialogId } : {}),
         evidence,
@@ -381,6 +382,8 @@ export function buildServerPlatformToolExecutors(args: {
     createdAt: string;
     confidence: number;
     tags?: string[];
+    provenance?: string;
+    sourceKind?: string;
   }): Promise<boolean> => {
     const ctx = await localMemoryContext();
     if (!ctx) return false;
@@ -438,6 +441,8 @@ export function buildServerPlatformToolExecutors(args: {
         kind: input.kind,
         contentKey,
         origin: "cli-local",
+        ...(input.provenance ? { provenance: input.provenance } : {}),
+        ...(input.sourceKind ? { sourceKind: input.sourceKind } : {}),
         ...(input.tags?.length ? { tags: input.tags } : {}),
       },
       text: input.content,
@@ -608,6 +613,7 @@ export function buildServerPlatformToolExecutors(args: {
       source: "agent-inferred",
     };
     // procedural 的复现证据透传给服务端硬门；缺失时服务端降级 episodic。
+    if (["verified", "stated", "inferred"].includes(parsed.provenance)) body.provenance = parsed.provenance;
     if (typeof parsed.recurrenceEvidence === "string" && parsed.recurrenceEvidence.trim()) {
       body.recurrenceEvidence = parsed.recurrenceEvidence.trim();
     }
@@ -646,6 +652,8 @@ export function buildServerPlatformToolExecutors(args: {
             ? saved.createdAt
             : new Date().toISOString(),
         confidence: typeof saved?.confidence === "number" ? saved.confidence : 0.8,
+        provenance: typeof saved?.provenance === "string" ? saved.provenance : undefined,
+        sourceKind: typeof saved?.sourceKind === "string" ? saved.sourceKind : undefined,
         tags: Array.isArray(saved?.tags) ? saved.tags.map(String) : undefined,
       });
     } catch {

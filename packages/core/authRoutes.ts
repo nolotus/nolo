@@ -16,6 +16,16 @@ export const authRoutes = {
     method: "POST" as const,
     createPath: () => `${API_VERSION}/users/signup`,
   },
+  google: {
+    start: { path: `${API_VERSION}/users/google/start`, method: "POST" as const, createPath: () => `${API_VERSION}/users/google/start` },
+    callback: { path: `${API_VERSION}/users/google/callback`, method: "GET" as const, createPath: () => `${API_VERSION}/users/google/callback` },
+    complete: { path: `${API_VERSION}/users/google/complete`, method: "POST" as const, createPath: () => `${API_VERSION}/users/google/complete` },
+    bindConfirm: { path: `${API_VERSION}/users/google/bind/confirm`, method: "POST" as const, createPath: () => `${API_VERSION}/users/google/bind/confirm` },
+    binding: { path: `${API_VERSION}/users/google/binding`, method: "GET" as const, createPath: () => `${API_VERSION}/users/google/binding` },
+    sessionLogout: { path: `${API_VERSION}/users/google/session/logout`, method: "POST" as const, createPath: () => `${API_VERSION}/users/google/session/logout` },
+    sessionRevokeStart: { path: `${API_VERSION}/users/google/session-revoke/start`, method: "POST" as const, createPath: () => `${API_VERSION}/users/google/session-revoke/start` },
+    sessionRevokeConfirm: { path: `${API_VERSION}/users/google/session-revoke/confirm`, method: "POST" as const, createPath: () => `${API_VERSION}/users/google/session-revoke/confirm` },
+  },
   users: {
     cliLoginStart: {
       path: `${API_VERSION}/users/cli-login/start`,

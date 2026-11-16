@@ -18,6 +18,7 @@ export async function loadExplicitMemoryItems(db: any, owner: MemoryOwnerRef): P
       tags: v.tags as string[] | undefined,
       patternKey: v.patternKey as string | undefined,
       recurrenceEvidence: v.recurrenceEvidence as string | undefined,
+      provenance: v.provenance as MemoryItem["provenance"],
       sourceKind: v.sourceKind as MemoryItem["sourceKind"], sourceDialogId: v.sourceDialogId as string | undefined,
     }];
   });
