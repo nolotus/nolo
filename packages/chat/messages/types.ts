@@ -257,7 +257,10 @@ export interface Message {
   imageGenerationState?: ImageGenerationState;
   userId?: string;
   usage?: any;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> & {
+    /** Original user message only; validate against original text before use. */
+    workAnchors?: import("agent-runtime/workContinuity").WorkAnchorsV1;
+  };
 
   /** 结构化发送失败元数据（失败卡片与重试渲染）。 */
   errorMeta?: MessageErrorMeta;

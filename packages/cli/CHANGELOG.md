@@ -1,4 +1,11 @@
 
+## 0.229.0-alpha.1 (2026-11-16)
+
+### Features
+
+* **runtime:** define evidence-bound work continuity contracts ([da3775a](https://github.com/nolotus/bun-nolo/commit/da3775a91b39a6f9d228bd64d51cd3df8e0ad7ce))
+
+
 ## 0.228.0-alpha.2 (2026-11-16)
 
 ### Bug Fixes

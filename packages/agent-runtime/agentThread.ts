@@ -76,6 +76,8 @@ export type AgentThreadEvidence = {
 };
 
 export type AgentThreadRuntimeCheckpoint = {
+  /** Parent-owned work projection. Does not change checkpoint/run status semantics. */
+  workContinuity?: import("./workContinuity").WorkContinuityV1;
   status?: string;
   toolCallCount?: number;
   lastToolNames?: string[];
