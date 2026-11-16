@@ -1,4 +1,11 @@
 
+## 0.248.0-alpha.1 (2026-11-16)
+
+### Features
+
+* **auth:** add same-origin Google login and explicit account binding ([45f8e13](https://github.com/nolotus/bun-nolo/commit/45f8e13c4cdb9b729e996f69dc448ec9ab523004))
+
+
 ## 0.247.0-alpha.1 (2026-11-16)
 
 ### Features

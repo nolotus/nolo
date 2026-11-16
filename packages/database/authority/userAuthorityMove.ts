@@ -132,6 +132,7 @@ export const collectUserAuthorityMoveRecords = async ({
 
   for await (const [rawKey, value] of store.iterator()) {
     const dbKey = String(rawKey);
+    if (dbKey.startsWith("google-auth:")) { skippedRecordCount += 1; continue; }
     const record = toRecordObject(value);
     if (!record) {
       skippedRecordCount += 1;
@@ -182,6 +183,7 @@ export const assertUserAuthorityMoveRecordsAreMoveable = ({
     if (!normalizedDbKey) {
       throw new Error("move record dbKey is required");
     }
+    if (normalizedDbKey.startsWith("google-auth:")) throw new Error("Google authority records cannot be moved");
     const normalizedRecord = toRecordObject(record);
     if (!normalizedRecord) {
       throw new Error(`move record must be an object: ${normalizedDbKey}`);

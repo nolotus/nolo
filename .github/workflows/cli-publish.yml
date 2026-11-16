@@ -4,13 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       binary_action:
-        description: "none = npm (existing behavior); validate = binary build only; publish = binary upload"
+        description: "none = npm only; validate = binary build only; publish = binary repair; release = npm then binary"
+        required: true
         type: choice
         default: validate
         options:
           - none
           - validate
           - publish
+          - release
       dist_tag:
         description: npm dist-tag
         required: true
@@ -34,7 +36,7 @@ concurrency:
 
 jobs:
   publish:
-    if: ${{ inputs.binary_action == 'none' }}
+    if: ${{ inputs.binary_action == 'none' || inputs.binary_action == 'release' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -92,7 +94,8 @@ jobs:
         run: bash ./scripts/ci/runCliPublishPublic.sh
 
   binary:
-    if: ${{ inputs.binary_action == 'validate' || inputs.binary_action == 'publish' }}
+    needs: publish
+    if: ${{ always() && ((inputs.binary_action == 'validate' || inputs.binary_action == 'publish') && needs.publish.result == 'skipped' || inputs.binary_action == 'release' && needs.publish.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -133,7 +136,7 @@ jobs:
           "$SMOKE_DIR/nolo" --help > "$SMOKE_DIR/help.txt"
           grep -qi nolo "$SMOKE_DIR/help.txt"
       - name: Publish CLI binary tarballs
-        if: ${{ inputs.binary_action == 'publish' }}
+        if: ${{ inputs.binary_action == 'publish' || inputs.binary_action == 'release' }}
         env:
           DESKTOP_DOWNLOAD_S3_ENDPOINT: ${{ secrets.DESKTOP_DOWNLOAD_S3_ENDPOINT }}
           DESKTOP_DOWNLOAD_S3_BUCKET: ${{ secrets.DESKTOP_DOWNLOAD_S3_BUCKET }}

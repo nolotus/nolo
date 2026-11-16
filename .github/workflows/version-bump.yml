@@ -3,6 +3,9 @@ name: Version Bump
 on:
   push:
     branches: [main, alpha]
+    paths-ignore:
+      - .github/workflows/cli-publish.yml
+      - .github/workflows/version-bump.yml
   workflow_dispatch:
 
 concurrency:
@@ -53,7 +56,7 @@ jobs:
             exit "$DECISION"
           fi
 
-      - name: Dispatch CLI npm publish
+      - name: Dispatch CLI release
         if: steps.cli.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,7 +74,7 @@ jobs:
             stable) DIST_TAG=latest ;;
             *) echo "unknown CLI channel from metadata: $CLI_CHANNEL" >&2; exit 2 ;;
           esac
-          gh workflow run cli-publish.yml -f binary_action=none -f dist_tag="$DIST_TAG" -f version="$CLI_VERSION" -f projection_sha="$PROJECTION_SHA"
+          gh workflow run cli-publish.yml --ref "${{ github.ref_name }}" -f binary_action=release -f dist_tag="$DIST_TAG" -f version="$CLI_VERSION" -f projection_sha="$PROJECTION_SHA"
 
       - name: Resolve desktop release intent
         id: desktop
