@@ -34,7 +34,6 @@ import {
   resolveRuntimeAuthToken,
 } from "./localRuntimeHelpers";
 import type { CliFetchImpl } from "../cliFetch";
-import { inferCaptureIntent } from "../../ai/policy/runtimePolicy";
 import { parseNoloWorkspaceToolArguments } from "../../agent-runtime/noloWorkspaceTools";
 import {
   LOCAL_SERVER_TABLE_TOOL_NAMES,
@@ -106,12 +105,10 @@ export function buildServerPlatformToolExecutors(args: {
   };
 
   const guardExplicitTableCapture = (call: any) => {
-    if (inferCaptureIntent(String(call.userInput ?? "")) === "strong")
-      return null;
     return JSON.stringify({
       error: "knowledge_capture_requires_confirmation",
       message:
-        "当前本地运行不允许自动写入表格。只有当用户在当前请求里明确要求保存、建表、写入 table 或做成数据集时，才能继续；否则请先询问用户。",
+        "当前执行面没有可信确认重放能力；请在支持确认的界面核对具体内容和目标后保存。",
       policy: {
         capability: "knowledge_capture",
         target: "table",
@@ -289,7 +286,7 @@ export function buildServerPlatformToolExecutors(args: {
     }
     const remoteItems: any[] = Array.isArray(remote?.selectedItems) ? remote.selectedItems : [];
 
-    const [{ loadMemoryVNextCatalog }, { recallMemoryVNextLocal }] = await Promise.all([
+    const [{ loadMemoryVNextCatalog, getMemoryEvidenceVNextStrict }, { recallMemoryVNextLocal }] = await Promise.all([
       import("../../ai/memory/vnext/store"),
       import("../../ai/memory/vnext/localRecall"),
     ]);
@@ -297,13 +294,16 @@ export function buildServerPlatformToolExecutors(args: {
     const hits = recallMemoryVNextLocal({
       query,
       entities: catalog.entities,
-      states: catalog.states.filter((s: any) => !s.retiredAt && s.text.trim()),
+      states: catalog.states.filter((s: any) => !s.retiredAt && s.facet !== "work-context" && s.text.trim()),
     });
     if (hits.length === 0) return null;
 
     const { mergeAndDedupUserData } = await import("../../database/userDataMerge");
-    const localItems = hits.map((hit: any) => {
+    const localItems = await Promise.all(hits.map(async (hit: any) => {
       const value = (hit.state.value ?? {}) as Record<string, any>;
+      const evidence = (await Promise.all((hit.state.evidenceIds ?? []).map((id: string) =>
+        getMemoryEvidenceVNextStrict(ctx.db, ctx.principal, id),
+      ))).filter((item) => item != null && item.ownerId === ctx.principal);
       return {
         id: `vnext-state-${hit.state.id}`,
         ownerType: "user",
@@ -317,10 +317,14 @@ export function buildServerPlatformToolExecutors(args: {
         lastActivatedAt: hit.state.createdAt,
         activationCount: 1,
         importance: typeof value.importance === "number" ? value.importance : 0.9,
-        confidence: typeof value.confidence === "number" ? value.confidence : 0.9,
+        ...(typeof value.confidence === "number" && Number.isFinite(value.confidence) ? { confidence: value.confidence } : {}),
+        ...(["verified", "stated", "inferred"].includes(value.provenance) ? { provenance: value.provenance } : {}),
+        ...(typeof value.sourceKind === "string" ? { sourceKind: value.sourceKind } : {}),
+        ...(typeof value.sourceDialogId === "string" ? { sourceDialogId: value.sourceDialogId } : {}),
+        evidence,
         sourceOrigin: "local",
       };
-    });
+    }));
 
     // mergeAndDedupUserData 第二参的契约是远端分页包装 [{ data: { data: [...] } }]
     // （见 packages/database/userDataMerge.ts 的 remoteResults.forEach(result =>
@@ -375,6 +379,8 @@ export function buildServerPlatformToolExecutors(args: {
     createdAt: string;
     confidence: number;
     tags?: string[];
+    provenance?: string;
+    sourceKind?: string;
   }): Promise<boolean> => {
     const ctx = await localMemoryContext();
     if (!ctx) return false;
@@ -432,6 +438,8 @@ export function buildServerPlatformToolExecutors(args: {
         kind: input.kind,
         contentKey,
         origin: "cli-local",
+        ...(input.provenance ? { provenance: input.provenance } : {}),
+        ...(input.sourceKind ? { sourceKind: input.sourceKind } : {}),
         ...(input.tags?.length ? { tags: input.tags } : {}),
       },
       text: input.content,
@@ -540,8 +548,34 @@ export function buildServerPlatformToolExecutors(args: {
     return { retired, localOnlyRetired, skippedRemoteMiss };
   };
 
+  const workMemory = async (call: any, parsed: any, write: boolean) => {
+    const context = call.runtimeContext;
+    const dialogId = context?.dialogId;
+    const userMessageId = context?.userMessageId;
+    if (typeof dialogId !== "string" || (write && typeof userMessageId !== "string")) throw new Error("work memory requires host dialogId and persisted userMessageId");
+    const fields = write ? ["itemKey", "activityId", "expectedRevision", "changeId", "patch"] : ["activityId", "status", "query", "limit", "discovery"];
+    const payload = Object.fromEntries(fields.filter(k => parsed[k] !== undefined && parsed[k] !== "").map(k => [k, parsed[k]]));
+    if (parsed.storage !== undefined && parsed.storage !== "server" && parsed.storage !== "local") throw new Error("invalid work storage");
+    if (parsed.storage === "server") {
+      const content = await postServer(write ? "/api/memory/remember" : "/api/memory/query", { mode: "work", ...payload, dialogId, ...(write ? { userMessageId } : {}) });
+      return { content, metadata: { serverPlatformTool: true, memoryWrite: write, memoryRead: !write } };
+    }
+    const ctx = await localMemoryContext();
+    if (!ctx) throw new Error("local work memory unavailable");
+    const { resolveLocalUserId } = await import("./cliAgentConfigHelpers");
+    const localUserId = resolveLocalUserId(args.env);
+    const { resolveWorkContextAccess } = await import("../../ai/memory/vnext/workContextAccess");
+    const { updateWorkContext, readWorkContexts } = await import("../../ai/memory/vnext/workContext");
+    const { scope, sourceRef } = await resolveWorkContextAccess(ctx.db, localUserId, dialogId, write ? userMessageId : undefined);
+    // Local membership cannot be proven from a model-supplied space ID.
+    if (scope.spaceId) throw new Error("local work memory cannot verify space membership");
+    const result = write ? await updateWorkContext(ctx.db, scope, { ...(payload.activityId !== undefined ? { activityId: payload.activityId, expectedRevision: payload.expectedRevision } : { itemKey: payload.itemKey, originRef: sourceRef }), changeId: payload.changeId, sourceRefs: [sourceRef], patch: payload.patch } as any) : await readWorkContexts(ctx.db, scope, payload);
+    return { content: JSON.stringify({ ...result, storage: "local", notice: "Local and server stores are independent; changeId deduplication covers actual changes only." }), metadata: { serverPlatformTool: true, memoryWrite: write, memoryRead: !write } };
+  };
+
   const queryMemory = async (call: any) => {
     const parsed = parseNoloWorkspaceToolArguments(call.arguments);
+    if (parsed.mode === "work") return workMemory(call, parsed, false);
     const query = typeof parsed.query === "string" ? parsed.query.trim() : "";
     if (!query) {
       return {
@@ -549,7 +583,18 @@ export function buildServerPlatformToolExecutors(args: {
         metadata: { serverPlatformTool: true, memoryRead: false },
       };
     }
+    if (parsed.source !== undefined && parsed.source !== "archive") {
+      return { content: JSON.stringify({ error: "Invalid memory source" }), metadata: { serverPlatformTool: true, memoryRead: false } };
+    }
+    if (parsed.source === undefined && (parsed.limit !== undefined || parsed.cursor !== undefined)) {
+      return { content: JSON.stringify({ error: "Pagination requires source archive" }), metadata: { serverPlatformTool: true, memoryRead: false } };
+    }
     const body: Record<string, unknown> = { userInput: query };
+    if (parsed.source === "archive") {
+      body.source = parsed.source;
+      if (parsed.limit !== undefined) body.limit = parsed.limit;
+      if (parsed.cursor !== undefined) body.cursor = parsed.cursor;
+    }
     if (args.agentKey) body.agentKey = args.agentKey;
     const raw = await postServer("/api/memory/query", body, {
       retryTransient: true,
@@ -557,7 +602,7 @@ export function buildServerPlatformToolExecutors(args: {
     // 本地 vNext 召回 + 远程结果合并（best-effort；本地异常时保持纯远程输出）
     let content = raw;
     try {
-      const merged = await mergeLocalMemoryIntoQuery(query, raw);
+      const merged = parsed.source === "archive" ? null : await mergeLocalMemoryIntoQuery(query, raw);
       if (merged) content = merged;
     } catch {
       /* 降级为纯远程 */
@@ -574,6 +619,7 @@ export function buildServerPlatformToolExecutors(args: {
   // directive, so it gets the lower base confidence.
   const rememberMemory = async (call: any) => {
     const parsed = parseNoloWorkspaceToolArguments(call.arguments);
+    if (parsed.mode === "work") return workMemory(call, parsed, true);
     const content =
       typeof parsed.content === "string" ? parsed.content.trim() : "";
     if (!content) {
@@ -591,6 +637,7 @@ export function buildServerPlatformToolExecutors(args: {
       source: "agent-inferred",
     };
     // procedural 的复现证据透传给服务端硬门；缺失时服务端降级 episodic。
+    if (["verified", "stated", "inferred"].includes(parsed.provenance)) body.provenance = parsed.provenance;
     if (typeof parsed.recurrenceEvidence === "string" && parsed.recurrenceEvidence.trim()) {
       body.recurrenceEvidence = parsed.recurrenceEvidence.trim();
     }
@@ -629,6 +676,8 @@ export function buildServerPlatformToolExecutors(args: {
             ? saved.createdAt
             : new Date().toISOString(),
         confidence: typeof saved?.confidence === "number" ? saved.confidence : 0.8,
+        provenance: typeof saved?.provenance === "string" ? saved.provenance : undefined,
+        sourceKind: typeof saved?.sourceKind === "string" ? saved.sourceKind : undefined,
         tags: Array.isArray(saved?.tags) ? saved.tags.map(String) : undefined,
       });
     } catch {

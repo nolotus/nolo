@@ -19,6 +19,7 @@ import Button from "render/web/ui/Button";
 import { Dialog } from "render/web/ui/modal/Dialog";
 import {
   getSnapshot,
+  getGateMeta,
   resolveGate,
   subscribe,
   type DesktopActionGate,
@@ -41,8 +42,11 @@ export type DesktopActionGateDialogProps = Record<string, never>;
 
 export const DesktopActionGateDialog: React.FC = () => {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const gate = snapshot.gates[0] ?? null;
-  const error = gate ? (snapshot.errors[gate.id] ?? null) : null;
+  const gate = snapshot.gates.find(candidate => !(isSecretRequestGate(candidate) && getGateMeta(candidate.id))) ?? null;
+  return gate ? <GateDialog key={gate.id} gate={gate} error={snapshot.errors[gate.id] ?? null} /> : null;
+};
+
+const GateDialog = ({ gate, error }: { gate: DesktopActionGate; error: string | null }) => {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -68,7 +72,8 @@ export const DesktopActionGateDialog: React.FC = () => {
       }),
     );
 
-  const cancel = () =>
+  const cancel = () => {
+    setValue("");
     run(
       cancelDesktopActionGate({
         gate,
@@ -76,6 +81,7 @@ export const DesktopActionGateDialog: React.FC = () => {
         onSettled: () => setValue(""),
       }),
     );
+  };
 
   const actions = (
     <>
@@ -116,7 +122,6 @@ export const DesktopActionGateDialog: React.FC = () => {
         <input
           type="password"
           value={value}
-          autoFocus
           onChange={(event) => setValue(event.target.value)}
           style={{ width: "100%", marginTop: 8 }}
           aria-label={gate.title}

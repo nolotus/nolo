@@ -34,7 +34,8 @@ import { resolveDefaultSpawn, spawnProcess } from "../processSpawn";
 import { runConfirmDialog } from "./confirmDialog";
 import { runTaskSlashCommand, type TaskActionView } from "./taskActions";
 import { type SelectDialogItem } from "./selectDialog";
-import { createDialogHost } from "./dialogHost";
+import { createDialogHost, resolveDialogBottomRow } from "./dialogHost";
+import { createSecretInputCoordinator, runSecretInputDialog } from "./secretInputDialog";
 import {
   createInlineHostApprovalPrompt,
   type InlineHostApprovalPrompt,
@@ -257,7 +258,7 @@ import { createImageAttachmentCache } from "./tuiImageAttachments";
 import { createTuiImageRenderer } from "./tuiImageRenderer";
 import { randomInt, randomUUID } from "node:crypto";
 import { createScrollAnimator } from "./tuiScrollAnimation";
-import { resolveHistoryViewportHeight, resolveHistoryLayoutGeometry } from "./tuiLayout";
+import { getTopReservedRows, resolveHistoryViewportHeight, resolveHistoryLayoutGeometry } from "./tuiLayout";
 // S5 迁移：runSubmittedLine 的 slash 命令 bus 分发（runSubmittedSlashLine /
 // SlashDispatchHost）已迁至 ./tuiSlashRouter。依赖方向单向：
 // 本文件 → tuiSlashRouter；后者禁止回指本文件。
@@ -280,6 +281,7 @@ export {
 import {
   createFixedInput,
   createNoopFixedInput,
+  createWorkspaceInputStream,
   createRawInputDecoder,
   splitRawInput,
   enterAltScreen,
@@ -980,8 +982,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // would inject TUI bytes into the child's screen. Drop it; the resume
       // path repaints in full.
       if (isRendererSuspended(output)) return;
-      renderHistoryUnderDialog();
       fixedInput.repaint(buffer, cursorPos);
+      if (history.turns.length === 0 && history.currentRole === null) {
+        repaintBanner(0, 0, true);
+      } else {
+        renderHistoryUnderDialog();
+      }
     },
     onTranscriptScroll: (action) => {
       handleTranscriptScroll(action as ScrollAction);
@@ -1120,70 +1126,79 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 都当无更新），NOLO_CLI_NO_UPDATE_CHECK=1 可整体禁用。结果到达时若用户还
   // 停在欢迎页（未开始对话），从顶部重绘 banner 把 /update 提示带出来；已
   // 在对话中则只更新 state，不打断当前画面。
-  const repaintBanner = (frame = 0, maxFrames = 0) => {
+  let repaintingBanner = false;
+  const repaintBanner = (frame = 0, maxFrames = 0, underDialog = false) => {
+    if (repaintingBanner) return;
     if (!(output as { isTTY?: boolean }).isTTY) return;
     // modal / dialog 拥有屏幕（如 /help、confirm）时不重绘，否则会擦掉弹层。
-    if (fixedInput.isPaused()) return;
-    if (dialogHost.isKeyboardClaimed()) return; // picker / confirm 弹层持有键盘时不重绘
-    // 终端可能已 resize：重绘时实时读宽度，让 renderWelcome 重新决定是否
-    // 保留 scene，避免旧宽度下画的 banner 在新宽度 wrap 出残留。
-    const currentColumns = (output as { columns?: number }).columns ?? 80;
-    const currentRows = (output as { rows?: number }).rows ?? 24;
-    const { contentWidth: bannerContentWidth, marginLeft: bannerMarginLeft } =
-      resolveHistoryLayoutGeometry(currentColumns);
-    const welcome = renderWelcome(state, frame, maxFrames, bannerContentWidth);
-    // welcome 以换行结尾，pinned agent notice 当初紧随其后再写一段；重绘时
-    // 必须一并重写，否则清行（clearLines 含 notice 行数）会把它从屏幕上抹掉。
-    const lines = (welcome + (pinnedAgentNotice ?? "")).split("\n");
-    // 窄终端下 update hint / welcome hint 这类长行会物理换行，破坏"逻辑行数 =
-    // 物理行数"的逐行定位；写入前按列宽截断，保证每行正好占一行。
-    const bannerLeftPad = bannerMarginLeft > 0 ? " ".repeat(bannerMarginLeft) : "";
-    const safeLines = lines.map((line) =>
-      padOrTruncateToWidth(
-        `${bannerLeftPad}${line}`,
-        Math.max(1, currentColumns),
-      ),
-    );
-    const clearLines = Math.max(initialBannerLineCount, safeLines.length);
-    // 与 paintSyncedFrame 一致的 BSU/ESU + 光标隐藏包裹，避免清行与写入
-    // 之间的中间帧闪烁；composer 重绘也在同一帧内完成。
-    output.write("\x1b[?2026h\x1b[?25l");
+    if (!underDialog && fixedInput.isPaused()) return;
+    if (!underDialog && dialogHost.isKeyboardClaimed()) return; // picker / confirm 弹层持有键盘时不重绘
+    repaintingBanner = true;
     try {
-      let frame = "";
-      // 先清掉旧 banner 区域（含窄终端无 scene 的短 banner），再逐行定位写入
-      // 新 banner。注意不能只 \x1b[H 一次后拼接多行文本：清行循环会把光标停在
-      // 最后清的那行，welcome 会从那里开始画（banner 掉到屏幕中部）。
-      for (let i = 0; i < clearLines; i++) frame += `\x1b[${i + 1};1H\x1b[2K`;
-      safeLines.forEach((line, i) => {
-        frame += `\x1b[${i + 1};1H${line}`;
-      });
-      output.write(frame);
-      // 顶部 banner 区域重绘不影响底部 composer，但活动输入行的绘制状态需要
-      // 恢复，否则光标/缓冲行与终端实际内容脱节。
-      if (fixedInput.active) {
-        fixedInput.repaint(buffer, cursorPos);
-        // resize 会把 composer 整体顶高（终端行数变多，或草稿在新列宽下占更多
-        // 行），它旧占的行就落到 banner 与 composer 之间：banner 只清自己那几行、
-        // composer 的 ED 只从新 startRow 往屏幕底部清，中间这段没人认领 → 旧
-        // composer 的 ─── 规则行整条留在屏幕中部（欢迎页 resize 残影的根因）。
-        // composer 刚重绘完，startRow 已按新几何更新，此时把 banner 下方到
-        // composer 上方的残段补清（逐行 EL 2K）；DECSC/DECRC 包住清行，保证
-        // 硬件光标仍旧留在 composer（与 tuiImageRenderer 同一手法）。
-        const composerStartRow = Math.max(
-          1,
-          currentRows - fixedInput.getInputLines() + 1,
-        );
-        if (composerStartRow > clearLines + 1) {
-          let stale = "\x1b7";
-          for (let i = clearLines; i < composerStartRow - 1; i += 1) {
-            stale += `\x1b[${i + 1};1H\x1b[2K`;
+      // 终端可能已 resize：重绘时实时读宽度，让 renderWelcome 重新决定是否
+      // 保留 scene，避免旧宽度下画的 banner 在新宽度 wrap 出残留。
+      // Establish the new top reservation before positioning a resized welcome page.
+      if (fixedInput.active && getTopReservedRows(output) > 0) fixedInput.repaint(buffer, cursorPos);
+      const currentColumns = (output as { columns?: number }).columns ?? 80;
+      const currentRows = (output as { rows?: number }).rows ?? 24;
+      const { contentWidth: bannerContentWidth, marginLeft: bannerMarginLeft } =
+        resolveHistoryLayoutGeometry(currentColumns);
+      const welcome = renderWelcome(state, frame, maxFrames, bannerContentWidth);
+      // welcome 以换行结尾，pinned agent notice 当初紧随其后再写一段；重绘时
+      // 必须一并重写，否则清行（clearLines 含 notice 行数）会把它从屏幕上抹掉。
+      const lines = (welcome + (pinnedAgentNotice ?? "")).split("\n");
+      // 窄终端下 update hint / welcome hint 这类长行会物理换行，破坏"逻辑行数 =
+      // 物理行数"的逐行定位；写入前按列宽截断，保证每行正好占一行。
+      const bannerLeftPad = bannerMarginLeft > 0 ? " ".repeat(bannerMarginLeft) : "";
+      const safeLines = lines.map((line) =>
+        padOrTruncateToWidth(
+          `${bannerLeftPad}${line}`,
+          Math.max(1, currentColumns),
+        ),
+      );
+      const topRows = getTopReservedRows(output);
+      const historyBottom = Math.max(topRows, currentRows - fixedInput.getInputLines() - dialogHost.getReservedRows());
+      const clearLines = Math.min(Math.max(initialBannerLineCount, safeLines.length), historyBottom - topRows);
+      // 与 paintSyncedFrame 一致的 BSU/ESU + 光标隐藏包裹，避免清行与写入
+      // 之间的中间帧闪烁；composer 重绘也在同一帧内完成。
+      output.write("\x1b[?2026h\x1b[?25l");
+      try {
+        let frame = "";
+        // 先清掉旧 banner 区域（含窄终端无 scene 的短 banner），再逐行定位写入
+        // 新 banner。注意不能只 \x1b[H 一次后拼接多行文本：清行循环会把光标停在
+        // 最后清的那行，welcome 会从那里开始画（banner 掉到屏幕中部）。
+        for (let i = 0; i < clearLines; i++) frame += `\x1b[${i + 1 + topRows};1H\x1b[2K`;
+        safeLines.slice(0, clearLines).forEach((line, i) => {
+          frame += `\x1b[${i + 1 + topRows};1H${line}`;
+        });
+        output.write(frame);
+        // 顶部 banner 区域重绘不影响底部 composer，但活动输入行的绘制状态需要
+        // 恢复，否则光标/缓冲行与终端实际内容脱节。
+        if (fixedInput.active) {
+          fixedInput.repaint(buffer, cursorPos);
+          // resize 会把 composer 整体顶高（终端行数变多，或草稿在新列宽下占更多
+          // 行），它旧占的行就落到 banner 与 composer 之间：banner 只清自己那几行、
+          // composer 的 ED 只从新 startRow 往屏幕底部清，中间这段没人认领 → 旧
+          // composer 的 ─── 规则行整条留在屏幕中部（欢迎页 resize 残影的根因）。
+          // composer 刚重绘完，startRow 已按新几何更新，此时把 banner 下方到
+          // composer 上方的残段补清（逐行 EL 2K）；DECSC/DECRC 包住清行，保证
+          // 硬件光标仍旧留在 composer（与 tuiImageRenderer 同一手法）。
+          const composerStartRow = Math.max(
+            1,
+            currentRows - fixedInput.getInputLines() + 1,
+          );
+          if (composerStartRow > clearLines + 1) {
+            let stale = "\x1b7";
+            for (let i = topRows + clearLines; i < composerStartRow - 1 - dialogHost.getReservedRows(); i += 1) {
+              stale += `\x1b[${i + 1};1H\x1b[2K`;
+            }
+            output.write(`${stale}\x1b8`);
           }
-          output.write(`${stale}\x1b8`);
         }
+      } finally {
+        output.write("\x1b[?25h\x1b[?2026l");
       }
-    } finally {
-      output.write("\x1b[?25h\x1b[?2026l");
-    }
+    } finally { repaintingBanner = false; }
   };
   void checkForCliUpdate(state.cliVersion, state.serverUrl, {
     fetchImpl,
@@ -1265,6 +1280,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // `dialogHost.withKeyboard()` holds the claim. Hoisted above
   // runOneAgentTurn so handleInputToken (below) can read it without a
   // forward-reference.
+  const secretInputCoordinator = createSecretInputCoordinator();
   let rawActionGateTokenHandler: ((token: string) => void) | null = null;
 
   // --- 对话积分基数 seed helper（workspace 闭包顶层，attach 已有对话时用） ---
@@ -1500,7 +1516,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           command: request.command },
         signal, fullCommand: true, input: input as any, output: output as any,
         onApprove: createSnapshotGuardedApproval("remote", () => state.permissionGrants, approveRemoteShell), ...anchor,
-      }));
+      }), { signal, cancelled: () => false });
     }), () => state.permissionGrants?.remote === true);
   const sessionShellGrant = createOriginShellGrant({
     confirm: async (request) => {
@@ -1886,6 +1902,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // which stayed "" forever — so during a loop the composer kept snapping
     // back to the placeholder and hid what the user was typing (the submit
     // path still read the inner buffer, so input "worked" but was invisible).
+    let previousTopRows = getTopReservedRows(output);
     const baseFixedInput = createFixedInput(output, {
       getStatusLine: (maxWidth) => {
         // 排队的消息已经由 composer 上方的队列 UI（getQueueLines）逐条呈现，
@@ -1893,7 +1910,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         return renderStatusLine(state, maxWidth);
       },
       getActivityLines: (layout) =>
-        activityIndicator.getActivityLines(resolveCliColorEnabled(), layout),
+        activityIndicator.getBackgroundLines(resolveCliColorEnabled(), layout),
+      getTaskLines: (layout) => activityIndicator.getTaskLines(resolveCliColorEnabled(), layout),
+      getReservedRows: () => dialogHost.getReservedRows(),
       getQueueLines: () => {
         if (!chatQueueBinding) return [];
         const queueStatus = chatQueueBinding.getStatus();
@@ -1920,9 +1939,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         return line ? dimCliText(`${line} · 待发送 · /images 查看/移除`, resolveCliColorEnabled()) : null;
       },
       onInputLinesChange: () => {
-        // composer 高度变化（活动行首次出现：3→4 行）时补一次历史重绘。
-        // renderHistoryToOutput 内部有 syncingLayout 卫兵防重入。
-        renderHistoryToOutput();
+        const topRows = getTopReservedRows(output);
+        const topChanged = topRows !== previousTopRows;
+        previousTopRows = topRows;
+        if (topChanged && history.turns.length === 0 && history.currentRole === null) {
+          repaintBanner();
+        } else {
+          renderHistoryToOutput();
+        }
       },
       // /cd 路径补全候选行渲染需要当前 cwd（读 state 而非入参，保证
       // /cd 切换后立即以新 cwd 渲染，composer 不必重建）。
@@ -2005,6 +2029,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // 会话收尾：注销审批渲染器并放掉仍在等的卡片（一律按拒绝结算，避免工具调用挂死）。
       unregisterHostApprovalRenderer?.();
       unregisterHostApprovalRenderer = null;
+      secretInputCoordinator.dispose();
       hostApprovalPrompt?.dispose();
       hostApprovalPrompt = null;
       childShellApprovals.close();
@@ -2082,6 +2107,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             pauseComposer: () => fixedInput.pause(),
             resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
             resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
+            withSecretInput: (start, cancelled) => {
+              const signal = activeTurnAbort?.signal;
+              const waiting = secretInputCoordinator.enqueue(start, { signal, cancelled });
+              emitCommandOutput("需要凭据：Ctrl+G 开始安全输入（保存到本机）；等待期间可继续编辑草稿。");
+              return waiting;
+            },
+            readSecretValue: (label, session, save) => runSecretInputDialog({
+              label, input: input as NodeJS.ReadStream, output, ...session, save,
+              bottomRow: () => resolveDialogBottomRow({ output, inputLines: fixedInput.getInputLines() }),
+            }),
             onApprove: createSnapshotGuardedApproval("local", () => state.permissionGrants, approveLocalConfirms),
             onApproved: async (approvedGate) => {
               // 贴入 key 的 create：用户真实批准后由宿主**进程内**执行受限
@@ -2351,6 +2386,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             rows,
             fixedInput.getInputLines(),
             reservedRows,
+            getTopReservedRows(output),
           ),
         );
         const { contentWidth, marginLeft } = resolveHistoryLayoutGeometry(columns);
@@ -2728,6 +2764,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     let preparingImageSubmission = false;
     const handleInputToken = async (sequence: string) => {
       if (done) return;
+      if (secretInputCoordinator.isActive()) { secretInputCoordinator.handleToken(sequence); return; }
       // While a modal (any dialogHost.run()/withKeyboard() caller — confirm,
       // action gate, ask_choice, agent/dialog picker) owns the keyboard, that
       // modal's own `data` listener owns the keyboard. Drop everything else
@@ -2738,6 +2775,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         rawActionGateTokenHandler?.(sequence);
         return;
       }
+      // Only explicit Ctrl+G activates a pending secret request. All other
+      // tokens continue through the existing draft/submit/cancel paths.
+      if (secretInputCoordinator.handleToken(sequence)) return;
       // Async path reads must not allow a second Enter to start another send.
       // Modal keys still belong to the dialog above, including its confirmation.
       if (preparingImageSubmission) return;
@@ -2851,15 +2891,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             rows,
             fixedInput.getInputLines(),
             reservedRows,
+            getTopReservedRows(output),
           ),
         );
         const { contentWidth, marginLeft } = resolveHistoryLayoutGeometry(columns);
-        const screenRow = mouseEvent.y - 1;
+        const screenRow = mouseEvent.y - 1 - getTopReservedRows(output);
         const screenCol = mouseEvent.x - 1;
         const hitContentCol = screenCol - marginLeft;
         const contentCol = Math.max(0, Math.min(contentWidth, screenCol - marginLeft));
 
         if (mouseEvent.kind === "press" && mouseEvent.button === "left") {
+          // The task header rejects new selections, not drag/release cleanup.
+          if (screenRow < 0) return;
           stopAutoScroll();
           // 开始选区时冻结滚轮动画：内容不能在选中锚点底下滑走。
           scrollAnimator.cancel();
@@ -3398,10 +3441,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       hostApprovalPrompt.awaitHostApproval,
     );
     try {
-      onGraphicsData = (chunk: Buffer | string) => {
-        const filtered = graphicsRuntime!.filterInput(chunk.toString());
-        if (filtered) onData(filtered);
-      };
+      onGraphicsData = createWorkspaceInputStream((text) => graphicsRuntime!.filterInput(text), onData);
       input.on("data", onGraphicsData);
       graphicsRuntime.start();
       // Input shutdown can race an unsettled dialog/gate. Route stream end

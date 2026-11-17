@@ -19,7 +19,6 @@ import {
   loadOlderMessages,
   selectLastAssistantMessage,
   useMessagesLoadingState,
-  useLastStreamTimestamp,
 } from "chat/messages/messageSlice";
 import MessageItem from "./MessageItem";
 import { ToolMessageItem } from "./ToolMessageItem";
@@ -91,6 +90,39 @@ const DEFAULT_SCROLL_CONTAINER_SELECTOR = ".MainLayout__main";
 // 动态计算"接近底部"阈值，适配不同屏幕
 const getNearBottomThreshold = () =>
   Math.min(window.innerHeight * 0.15, 200);
+
+export function updateSentMessageSpace(scroller: HTMLElement, row: HTMLElement, spacer: HTMLElement): number {
+  const target = scroller.scrollTop + row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  const contentHeight = scroller.scrollHeight - spacer.offsetHeight;
+  spacer.style.height = `${Math.max(0, target + scroller.clientHeight - contentHeight)}px`;
+  return target;
+}
+
+type ScrollMessage = { id: string; role: string };
+export function createMessageScrollState() {
+  return { dialogId: null as string | null, initial: true, tailId: null as string | null };
+}
+export function nextMessageScroll(
+  state: ReturnType<typeof createMessageScrollState>, dialogId: string, isNew: boolean, messages: ScrollMessage[],
+): { type: "initial" | "none" } | { type: "anchor"; id: string } {
+  if (state.dialogId !== dialogId) {
+    state.dialogId = dialogId;
+    state.initial = true;
+    state.tailId = null;
+  }
+  if (state.initial && !isNew && messages.length === 0) return { type: "none" };
+  if (state.initial && !isNew) {
+    state.initial = false;
+    state.tailId = messages.at(-1)?.id ?? null;
+    return { type: "initial" };
+  }
+  state.initial = false;
+  const tailIndex = state.tailId === null ? -1 : messages.findIndex((message) => message.id === state.tailId);
+  const appended = state.tailId !== null && tailIndex < 0 ? [] : messages.slice(tailIndex + 1);
+  state.tailId = messages.at(-1)?.id ?? null;
+  const user = [...appended].reverse().find((message) => message.role === "user");
+  return user ? { type: "anchor", id: user.id } : { type: "none" };
+}
 
 interface MessagesListProps {
   dialogId: string;
@@ -220,7 +252,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
     return [optimisticUserMessage, ...messages];
   }, [messages, quickChatFirstMessageText, currentUserId, dialogId]);
   const { isLoadingOlder, hasMoreOlder } = useMessagesLoadingState(dialogId);
-  const lastStreamTimestamp = useLastStreamTimestamp(dialogId);
   // Wave11: read streaming flag from the session store index via
   // useSyncExternalStore, not useAppSelector(selectHasStreamingMessage), so
   // streaming-token mutations re-render without scanning Redux msgs.
@@ -290,8 +321,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
   const [isInitialRender, setIsInitialRender] = useState(true);
 
   const stateRef = useRef({
-    isInitialLoad: true,
-    prevMessagesLength: 0,
     isLoadingOlder: false,
     hasMoreOlder: true,
     scrollContainer: null as HTMLElement | null,
@@ -299,8 +328,9 @@ const MessagesList: React.FC<MessagesListProps> = ({
   });
   // RAF 节流 id
   const rafIdRef = useRef<number | null>(null);
-  const wasStreamingRef = useRef(false);
-  const forceFollowCurrentTurnRef = useRef(false);
+  const scrollStateRef = useRef(createMessageScrollState());
+  const spacerRef = useRef<HTMLDivElement>(null);
+  const anchoredRowRef = useRef<HTMLElement | null>(null);
 
   stateRef.current.isLoadingOlder = isLoadingOlder;
   stateRef.current.hasMoreOlder = hasMoreOlder;
@@ -372,94 +402,55 @@ const MessagesList: React.FC<MessagesListProps> = ({
     [getScroller]
   );
 
-  const scheduleStreamingFollowScroll = useCallback(() => {
-    if (rafIdRef.current) return;
-    rafIdRef.current = requestAnimationFrame(() => {
-      rafIdRef.current = null;
-      const scroller = getScroller() ?? stateRef.current.scrollContainer;
-      if (!scroller) return;
-      const distance = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-      if (distance <= 1) return;
-      if (distance < 120 || stateRef.current.isNearBottom) {
-        scroller.scrollTop = scroller.scrollHeight;
-        return;
-      }
-      scroller.scrollTop += distance * 0.35;
-    });
-  }, [getScroller]);
-
-  // 自动滚动逻辑
+  // A new user row is aligned once; subsequent reply growth never triggers a scroll.
   useLayoutEffect(() => {
     const scroller = getScroller();
     if (!scroller) return;
-
     stateRef.current.scrollContainer = scroller;
     scroller.setAttribute("data-nolo-chat-scroll-shadow", "");
     updateScrollShadowAttrs();
 
-    const prevMessagesLength = stateRef.current.prevMessagesLength;
-    const appendedMessages =
-      messages.length > prevMessagesLength
-        ? messages.slice(prevMessagesLength)
-        : [];
-    const appendedUserMessage = [...appendedMessages]
-      .reverse()
-      .find((msg) => msg.role === "user");
-
-    // 首次加载：立即滚到底部（无动画）
-    if (stateRef.current.isInitialLoad && messages.length > 0) {
+    const previousDialogId = scrollStateRef.current.dialogId;
+    const action = nextMessageScroll(scrollStateRef.current, dialogId, !!(location.state as QuickChatRouteState)?.isNew, messages);
+    if (previousDialogId !== dialogId) {
+      anchoredRowRef.current = null;
+      if (spacerRef.current) spacerRef.current.style.height = "0px";
+      setShowScrollToBottom(false);
+      setShowScrollToTop(false);
+      setIsInitialRender(true);
+    }
+    if (action.type === "initial") {
       requestAnimationFrame(() => {
+        if (scrollStateRef.current.dialogId !== dialogId) return;
         scroller.scrollTo({ top: scroller.scrollHeight, behavior: "auto" });
+        setIsInitialRender(false);
       });
-      stateRef.current.isInitialLoad = false;
-      stateRef.current.prevMessagesLength = messages.length;
-      requestAnimationFrame(() => setIsInitialRender(false));
-      return;
-    }
-
-    if (
-      wasStreamingRef.current &&
-      !hasStreamingMessage &&
-      (stateRef.current.isNearBottom || forceFollowCurrentTurnRef.current)
-    ) {
-      scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
-      forceFollowCurrentTurnRef.current = false;
-    }
-
-    // 用户自己发送新消息时，直接进入本轮跟随，直到用户手动上滑退出
-    if (appendedUserMessage) {
-      forceFollowCurrentTurnRef.current = true;
-      scrollToBottomRAF("auto");
-    } else if (messages.length > prevMessagesLength) {
-      if (stateRef.current.isNearBottom || forceFollowCurrentTurnRef.current) {
-        if (hasStreamingMessage) {
-          scheduleStreamingFollowScroll();
-        } else {
-          scrollToBottomRAF("smooth");
-        }
-      }
-    } else if (
-      (stateRef.current.isNearBottom || forceFollowCurrentTurnRef.current) &&
-      lastStreamTimestamp
-    ) {
-      // 流式输出内容更新（消息数量没变，但内容在增长）
-      if (hasStreamingMessage) {
-        scheduleStreamingFollowScroll();
-      } else {
-        scrollToBottomRAF("smooth");
+    } else if (action.type === "anchor" && spacerRef.current) {
+      setIsInitialRender(false);
+      const row = Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-scroll-user-id]") ?? [])
+        .find((element) => element.dataset.scrollUserId === String(action.id));
+      if (row) {
+        anchoredRowRef.current = row;
+        const target = updateSentMessageSpace(scroller, row, spacerRef.current);
+        scroller.scrollTo({ top: target, behavior: "auto" });
       }
     }
+  }, [dialogId, messages, getScroller, updateScrollShadowAttrs, location.state]);
 
-    wasStreamingRef.current = hasStreamingMessage;
-    stateRef.current.prevMessagesLength = messages.length;
-  }, [
-    messages,
-    lastStreamTimestamp,
-    hasStreamingMessage,
-    getScroller,
-    scrollToBottomRAF,
-    scheduleStreamingFollowScroll,
-  ]);
+  useEffect(() => {
+    const list = listRef.current?.querySelector<HTMLElement>(".chat-messages__list");
+    if (!list || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      const scroller = getScroller();
+      if (scroller && anchoredRowRef.current?.isConnected && spacerRef.current) {
+        updateSentMessageSpace(scroller, anchoredRowRef.current, spacerRef.current);
+      }
+    });
+    observer.observe(list);
+    const scroller = getScroller();
+    if (scroller) observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [getScroller, dialogId]);
 
   // 清理 rAF
   useEffect(() => {
@@ -467,21 +458,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    stateRef.current = {
-      ...stateRef.current,
-      isInitialLoad: true,
-      prevMessagesLength: 0,
-      scrollContainer: null,
-      isNearBottom: true,
-    };
-    wasStreamingRef.current = false;
-    forceFollowCurrentTurnRef.current = false;
-    setIsInitialRender(true);
-    setShowScrollToBottom(false);
-    setShowScrollToTop(false);
-  }, [dialogId]);
 
   // 加载旧消息
   const handleLoadOlder = useCallback(() => {
@@ -538,12 +514,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
       scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
 
     stateRef.current.isNearBottom = distanceFromBottom <= threshold;
-    if (
-      forceFollowCurrentTurnRef.current &&
-      distanceFromBottom > Math.max(140, threshold * 1.5)
-    ) {
-      forceFollowCurrentTurnRef.current = false;
-    }
     setShowScrollToBottom(distanceFromBottom > 100);
     setShowScrollToTop(scroller.scrollTop > 100);
     updateScrollShadowAttrs();
@@ -570,13 +540,8 @@ const MessagesList: React.FC<MessagesListProps> = ({
 
   // 回到底部按钮
   const scrollToBottom = useCallback(() => {
-    forceFollowCurrentTurnRef.current = true;
-    if (hasStreamingMessage) {
-      scheduleStreamingFollowScroll();
-    } else {
-      scrollToBottomRAF("smooth");
-    }
-  }, [hasStreamingMessage, scrollToBottomRAF, scheduleStreamingFollowScroll]);
+    scrollToBottomRAF("smooth");
+  }, [scrollToBottomRAF]);
 
   // 回到顶部按钮
   const scrollToTop = useCallback(() => {
@@ -737,6 +702,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
                     : "chat-messages__item-wrapper"
                 }
                 data-spacing={messageRowSpacing(renderEntries, entryIndex) ?? undefined}
+                data-scroll-user-id={msg.role === "user" ? String(msg.id) : undefined}
               >
                 <MessageRowErrorBoundary>
                   {isTool ? (
@@ -803,6 +769,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
         <MemorySavedIndicator dialogConfig={currentDialogConfig} />
       </div>
 
+      <div ref={spacerRef} aria-hidden="true" />
       <LoopStopBadge reason={visibleLoopStopReason} />
       <div className="scroll-buttons">
         <ScrollToTopButton

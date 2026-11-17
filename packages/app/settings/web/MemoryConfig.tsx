@@ -1,6 +1,6 @@
 // packages/app/settings/web/MemoryConfig.tsx
 //
-// 个性化设置：通用提示词 + 助手行为偏好 + 长期记忆管理。
+// 长期记忆管理；历史用户提示词不再编辑或注入。
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -12,9 +12,7 @@ import {
   LuSearch,
   LuBrain,
   LuCircleUserRound,
-  LuMessageSquareMore,
   LuSparkles,
-  LuScanSearch,
 } from "react-icons/lu";
 import { toast } from "app/utils/toast"
 import { useAppDispatch, useAppSelector } from "app/store";
@@ -22,23 +20,11 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { useToken } from "identity";
 import {
   selectCurrentServer,
-  selectUserTonePreset,
-  selectKnowledgeCaptureLevel,
-  selectSpaceContextLevel,
-  setUserTonePreset,
-  setKnowledgeCaptureLevel,
-  setSpaceContextLevel,
 } from "app/settings/settingSlice";
-import type {
-  KnowledgeCaptureLevel,
-  SpaceContextLevel,
-  TonePreset,
-} from "ai/policy/types";
 import Button from "render/web/ui/Button";
 import { Select, SelectItem } from "render/web/ui/Select";
 import { TextArea } from "render/web/form/TextArea";
 import SettingSection from "./chat-config/SettingSection";
-import { useAutoSaveGlobalPrompt } from "./chat-config/useAutoSaveGlobalPrompt";
 import { type MemoryScope } from "ai/memory/scope";
 import "./MemoryConfig.css";
 
@@ -131,11 +117,7 @@ export default function MemoryConfig() {
   const dispatch = useAppDispatch();
   const currentToken = useToken();
   const currentServer = useAppSelector(selectCurrentServer);
-  const userTonePreset = useAppSelector(selectUserTonePreset);
-  const knowledgeCaptureLevel = useAppSelector(selectKnowledgeCaptureLevel);
-  const spaceContextLevel = useAppSelector(selectSpaceContextLevel);
-  const { draftPrompt, setDraftPrompt, status: promptSaveStatus } =
-    useAutoSaveGlobalPrompt();
+
 
   const [items, setItems] = useState<MemoryItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -148,25 +130,6 @@ export default function MemoryConfig() {
   const [isAddOpen, setIsAddOpen] = useState(false);
 
   const hasFilters = kindFilter || subjectTypeFilter || searchQuery;
-
-  const promptSaveHint = (() => {
-    if (promptSaveStatus === "saving") {
-      return t("chat.globalPrompt.autoSave.saving", "正在保存…");
-    }
-    if (promptSaveStatus === "saved") {
-      return t("chat.globalPrompt.autoSave.saved", "已自动保存");
-    }
-    if (promptSaveStatus === "error") {
-      return t(
-        "chat.globalPrompt.autoSave.error",
-        "保存失败，将在你继续编辑后重试"
-      );
-    }
-    return t(
-      "chat.globalPrompt.autoSave.idle",
-      "内容会自动保存，无需手动提交"
-    );
-  })();
 
   const clearFilters = useCallback(() => {
     setKindFilter("");
@@ -299,12 +262,12 @@ export default function MemoryConfig() {
       <div className="memory-config__header">
         <div className="memory-config__header-text">
           <h1 className="page-title">
-            {t("settings.memory.title", "个性化设置")}
+            {t("settings.memory.title", "记忆")}
           </h1>
           <p className="page-description">
             {t(
               "settings.memory.description",
-              "通用提示词、助手行为偏好与长期记忆，帮助 Nolo 更懂你。"
+              "长期记忆帮助 Nolo 在互动中逐步了解你。"
             )}
           </p>
         </div>
@@ -325,158 +288,6 @@ export default function MemoryConfig() {
           />
         )}
       </div>
-
-      <SettingSection
-        title={t("chat.globalPrompt.title", "通用提示词")}
-        description={t(
-          "chat.globalPrompt.description",
-          "用于向不同的 AI 统一介绍你自己、你的偏好和沟通风格，让所有 AI 在理解你时保持一致。"
-        )}
-      >
-        <TextArea
-          icon={<LuCircleUserRound size={16} aria-hidden="true" />}
-          autoResize
-          value={draftPrompt}
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-            setDraftPrompt(e.target.value)
-          }
-          placeholder={t(
-            "chat.globalPrompt.placeholder",
-            "例如：我是一名开发者，喜欢结构清晰、条理分明的回答；代码部分请尽量使用 TypeScript，并附简短说明；当有不确定的地方请先说明假设再给出答案。"
-          )}
-        />
-        <p className="memory-config__save-hint">{promptSaveHint}</p>
-      </SettingSection>
-
-      <SettingSection
-        title={t("chat.agentBehavior.title", "Agent 自动化边界")}
-        description={t(
-          "chat.agentBehavior.description",
-          "控制默认助手的表达风格，以及它在知识沉淀和当前空间读取上的主动程度。"
-        )}
-      >
-        <div className="ChatConfigSections__stack">
-          <label className="ChatConfigSections__subSetting">
-            <span className="ChatConfigSections__subSettingHeader">
-              <span className="ChatConfigSections__subSettingLabel">
-                {t("chat.agentBehavior.tone.label", "偏好语气")}
-              </span>
-              <span className="ChatConfigSections__subSettingDescription">
-                {t(
-                  "chat.agentBehavior.tone.description",
-                  "影响助手默认怎么和你说话，不会覆盖 agent 自己的核心角色。"
-                )}
-              </span>
-            </span>
-            <div className="ChatConfigSections__inputWithIcon">
-              <LuMessageSquareMore size={16} aria-hidden="true" />
-              <Select
-                selectedKey={userTonePreset}
-                onSelectionChange={(key) => {
-                  if (key == null) return;
-                  dispatch(setUserTonePreset(String(key) as TonePreset));
-                }}
-              >
-                <SelectItem id="default" textValue={t("chat.agentBehavior.tone.default", "默认")}>
-                  {t("chat.agentBehavior.tone.default", "默认")}
-                </SelectItem>
-                <SelectItem id="direct" textValue={t("chat.agentBehavior.tone.direct", "直接")}>
-                  {t("chat.agentBehavior.tone.direct", "直接")}
-                </SelectItem>
-                <SelectItem id="pragmatic" textValue={t("chat.agentBehavior.tone.pragmatic", "务实")}>
-                  {t("chat.agentBehavior.tone.pragmatic", "务实")}
-                </SelectItem>
-                <SelectItem id="friendly" textValue={t("chat.agentBehavior.tone.friendly", "友好")}>
-                  {t("chat.agentBehavior.tone.friendly", "友好")}
-                </SelectItem>
-                <SelectItem id="professional" textValue={t("chat.agentBehavior.tone.professional", "专业")}>
-                  {t("chat.agentBehavior.tone.professional", "专业")}
-                </SelectItem>
-              </Select>
-            </div>
-          </label>
-
-          <label className="ChatConfigSections__subSetting">
-            <span className="ChatConfigSections__subSettingHeader">
-              <span className="ChatConfigSections__subSettingLabel">
-                {t("chat.agentBehavior.knowledge.label", "知识沉淀")}
-              </span>
-              <span className="ChatConfigSections__subSettingDescription">
-                {t(
-                  "chat.agentBehavior.knowledge.description",
-                  "决定助手什么时候可以把结果沉淀成文档或表格。"
-                )}
-              </span>
-            </span>
-            <div className="ChatConfigSections__inputWithIcon">
-              <LuSparkles size={16} aria-hidden="true" />
-              <Select
-                selectedKey={knowledgeCaptureLevel}
-                onSelectionChange={(key) => {
-                  if (key == null) return;
-                  const next = Number(key);
-                  if (!Number.isInteger(next) || next < 1) return;
-                  dispatch(
-                    setKnowledgeCaptureLevel(next as KnowledgeCaptureLevel)
-                  );
-                }}
-              >
-                <SelectItem id={1} textValue={t("chat.agentBehavior.knowledge.level1", "1: 不主动创建")}>
-                  {t("chat.agentBehavior.knowledge.level1", "1: 不主动创建")}
-                </SelectItem>
-                <SelectItem id={2} textValue={t("chat.agentBehavior.knowledge.level2", "2: 先问我再创建")}>
-                  {t("chat.agentBehavior.knowledge.level2", "2: 先问我再创建")}
-                </SelectItem>
-                <SelectItem id={3} textValue={t("chat.agentBehavior.knowledge.level3", "3: 回答后建议创建")}>
-                  {t("chat.agentBehavior.knowledge.level3", "3: 回答后建议创建")}
-                </SelectItem>
-                <SelectItem id={4} textValue={t("chat.agentBehavior.knowledge.level4", "4: 高价值结果可自动创建")}>
-                  {t("chat.agentBehavior.knowledge.level4", "4: 高价值结果可自动创建")}
-                </SelectItem>
-              </Select>
-            </div>
-          </label>
-
-          <label className="ChatConfigSections__subSetting">
-            <span className="ChatConfigSections__subSettingHeader">
-              <span className="ChatConfigSections__subSettingLabel">
-                {t("chat.agentBehavior.space.label", "当前空间读取")}
-              </span>
-              <span className="ChatConfigSections__subSettingDescription">
-                {t(
-                  "chat.agentBehavior.space.description",
-                  "决定助手是否以及在多大程度上自动读取当前空间内容。"
-                )}
-              </span>
-            </span>
-            <div className="ChatConfigSections__inputWithIcon">
-              <LuScanSearch size={16} aria-hidden="true" />
-              <Select
-                selectedKey={spaceContextLevel}
-                onSelectionChange={(key) => {
-                  if (key == null) return;
-                  const next = Number(key);
-                  if (!Number.isInteger(next) || next < 1) return;
-                  dispatch(setSpaceContextLevel(next as SpaceContextLevel));
-                }}
-              >
-                <SelectItem id={1} textValue={t("chat.agentBehavior.space.level1", "1: 不自动读取")}>
-                  {t("chat.agentBehavior.space.level1", "1: 不自动读取")}
-                </SelectItem>
-                <SelectItem id={2} textValue={t("chat.agentBehavior.space.level2", "2: 只看结构和标题")}>
-                  {t("chat.agentBehavior.space.level2", "2: 只看结构和标题")}
-                </SelectItem>
-                <SelectItem id={3} textValue={t("chat.agentBehavior.space.level3", "3: 轻量读取")}>
-                  {t("chat.agentBehavior.space.level3", "3: 轻量读取")}
-                </SelectItem>
-                <SelectItem id={4} textValue={t("chat.agentBehavior.space.level4", "4: 自适应读取")}>
-                  {t("chat.agentBehavior.space.level4", "4: 自适应读取")}
-                </SelectItem>
-              </Select>
-            </div>
-          </label>
-        </div>
-      </SettingSection>
 
       {!canManageMemory ? (
         <div className="memory-config__empty-state">

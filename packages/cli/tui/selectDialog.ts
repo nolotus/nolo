@@ -1,3 +1,4 @@
+import { StringDecoder } from "node:string_decoder";
 import {
   renderDialogRow,
   renderDialogTitle,
@@ -324,8 +325,12 @@ export function isCancel(sequence: string) {
   return sequence === "\u0003" || sequence === "\u001b";
 }
 
-export function createRawKeyReader(input: NodeJS.ReadStream): KeyReader {
+export function createRawKeyReader(
+  input: NodeJS.ReadStream,
+  options?: { preserveBracketedPaste?: boolean },
+): KeyReader {
   let buffer = "";
+  const utf8 = new StringDecoder("utf8");
   let closed = false;
 
   // Parse one token from the front of the buffer.
@@ -335,6 +340,36 @@ export function createRawKeyReader(input: NodeJS.ReadStream): KeyReader {
   //   - null      → the leading byte is unparseable garbage (drop it, keep going)
   const tryParseSequence = (): string | null | undefined => {
     if (!buffer) return undefined;
+    if (options?.preserveBracketedPaste) {
+      const marker = "\x1b[200~";
+      const start = buffer.indexOf(marker);
+      if (start < 0) {
+        // Emit only ordinary prefix text; a suffix may become the paste-start
+        // marker on the next data event. Never pass that suffix to the dialog
+        // before this reader can establish the protected payload boundary.
+        for (let length = Math.min(marker.length - 1, buffer.length); length > 0; length--) {
+          if (!buffer.endsWith(marker.slice(0, length))) continue;
+          if (buffer.length === length) return undefined;
+          const prefix = buffer.slice(0, -length);
+          buffer = buffer.slice(-length);
+          return prefix;
+        }
+      }
+      if (start > 0) {
+        const prefix = buffer.slice(0, start);
+        buffer = buffer.slice(start);
+        return prefix;
+      }
+      if (start === 0) {
+        // Paste payload is data, not terminal commands. Keep every byte until
+        // the complete terminator, including unknown ESC and split markers.
+        const end = buffer.indexOf("\x1b[201~", 6);
+        if (end < 0) return undefined;
+        const paste = buffer.slice(0, end + 6);
+        buffer = buffer.slice(end + 6);
+        return paste;
+      }
+    }
     if (isSubmit(buffer)) {
       const sequence = buffer;
       buffer = "";
@@ -444,7 +479,7 @@ export function createRawKeyReader(input: NodeJS.ReadStream): KeyReader {
 
   const onData = (chunk: Buffer | string) => {
     if (closed) return;
-    buffer += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    buffer += typeof chunk === "string" ? chunk : utf8.write(Buffer.from(chunk));
     clearEscTimer();
     tryDeliver();
   };
@@ -475,6 +510,8 @@ export function createRawKeyReader(input: NodeJS.ReadStream): KeyReader {
   };
 
   const onClose = () => {
+    if (closed) return;
+    buffer += utf8.end();
     closed = true;
     clearEscTimer();
     // Only drain into a pending read; if no waiter is waiting right now, leave

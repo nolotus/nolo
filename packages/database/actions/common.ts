@@ -1,3 +1,5 @@
+import { googleSessionRequestToken, isGoogleAuthoritySession } from "core/googleSessionScope";
+import { isPublicBuiltinPlatformAgentKey } from "core/builtinAgents";
 // 文件路径: database/actions/common.ts
 
 import { createClientLogger } from "core/clientLogger";
@@ -166,6 +168,7 @@ export const fetchFromServer = async (
   token?: string,
   signal?: AbortSignal
 ): Promise<any> => {
+  const requestToken = googleSessionRequestToken(token, server, isPublicBuiltinPlatformAgentKey(dbKey));
   if (signal?.aborted) {
     throw new DOMException("Aborted", "AbortError");
   }
@@ -184,9 +187,10 @@ export const fetchFromServer = async (
       `${server}${buildReadUrl(dbKey)}`,
       {
         signal: controller.signal as any,
+        ...((isGoogleAuthoritySession(token) || !token) ? { credentials: "omit" as const, redirect: "error" as const } : {}),
         headers: {
           "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }),
+          ...(requestToken && { Authorization: `Bearer ${requestToken}` }),
         },
       }
     );

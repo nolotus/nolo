@@ -5,7 +5,6 @@ import type { AgentRuntimeAgentConfig, AgentRuntimeMessageContent, AgentRuntimeT
 import { resolvePlatformAuthToken } from "agent-runtime/providerResolution";
 import { monotonicFactory } from "ulid";
 import type { DesktopAgentRuntimeActions } from "./desktopAgentRuntimeAdapter";
-import { inferCaptureIntent } from "ai/policy/runtimePolicy";
 import { parseNoloWorkspaceToolArguments } from "agent-runtime/noloWorkspaceTools";
 import type { LocalAgentTurnResult } from "agent-runtime/localLoop";
 import type { DesktopAgentRuntimeTurnInput } from "./desktopAgentRuntimeTurnService";
@@ -518,11 +517,10 @@ export function buildDesktopServerPlatformToolExecutors(args: DesktopServerPlatf
     return text;
   };
   const guardExplicitTableCapture = (call: any) => {
-    if (inferCaptureIntent(String(call.userInput ?? "")) === "strong") return null;
     return JSON.stringify({
       error: "knowledge_capture_requires_confirmation",
       message:
-        "当前桌面运行不允许自动写入表格。只有当用户在当前请求里明确要求保存、建表、写入 table 或做成数据集时，才能继续；否则请先询问用户。",
+        "当前执行面没有可信确认重放能力；请在支持确认的界面核对具体内容和目标后保存。",
       policy: {
         capability: "knowledge_capture",
         target: "table",

@@ -15,6 +15,9 @@ export type MemorySourceKind =
   | "inferred-understanding"
   | "dialog-learning";
 
+/** Caller declaration, not host verification or permission to make a memory resident. */
+export type MemoryProvenance = "verified" | "stated" | "inferred";
+
 export interface MemoryItem {
   id: string;
   ownerType: MemoryOwnerType;
@@ -45,8 +48,7 @@ export interface MemoryItem {
    * 不参与话题相关性排序。
    *
    * 写入侧有硬门（remember.ts）：仅当 subjectType=user ∧
-   * sourceKind=explicit-user-directive（source="user-directive" 或内容带
-   * EXPLICIT_REMEMBER_PREFIX_REGEX 显式前缀）∧ content ≤240 字符，三者全满足
+   * sourceKind=explicit-user-directive（source="user-directive"）∧ content ≤240 字符，三者全满足
    * 才落 resident:true；否则忽略（降级为普通条目）并在结果里说明原因。
    *
    * 装配/渲染侧（runtime.ts / overlay.ts）：resident 条目按 createdAt 新→旧
@@ -54,6 +56,7 @@ export interface MemoryItem {
    * 不占检索区 per-kind 名额（避免同一条注入两次）。
    */
   resident?: boolean;
+  provenance?: MemoryProvenance;
   sourceKind?: MemorySourceKind;
   sourceDialogId?: string;
   sourceMessageId?: string;

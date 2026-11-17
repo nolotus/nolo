@@ -19,6 +19,7 @@ import {
 } from "./vnext/lazyPromotion";
 import { isMemoryVNextPureReadEnabled } from "./vnext/pureReadGate";
 import { resolvePureVNextRuntime } from "./vnext/pureVNextRuntime";
+import { recallWorkContextBlock, type WorkContextRecallResult } from "./vnext/workContextRecall";
 import {
   isMemoryVNextPrimaryReadEnabled,
   MEMORY_VNEXT_PRIMARY_READ_TIMEOUT_MS,
@@ -231,7 +232,13 @@ export interface MemoryRuntimeResultObservation extends MemoryInjectionObservati
   errorKind: "none" | "timeout" | "runtime_error";
 }
 
-export const resolveMemoryRuntime = async (input: {
+/**
+ * 语义/常驻记忆的运行时召回（原 `resolveMemoryRuntime` 主体）。
+ *
+ * 不带工作接续块：工作接续由下方导出的 `resolveMemoryRuntime` 在语义结果之外
+ * 独立召回、独立预算地追加，两条线互不影响（语义空不等于没有工作）。
+ */
+const resolveSemanticMemoryRuntime = async (input: {
   db: any;
   userId?: string | null;
   spaceId?: string | null;
@@ -619,4 +626,77 @@ export const resolveMemoryRuntime = async (input: {
       (input.runtimeResultEmit ?? ((event) => console.info("[memory] runtime result", event)))(observation);
     } catch { /* observation must never affect the runtime */ }
   }
+};
+
+export interface MemoryRuntimeWorkContextOptions {
+  /**
+   * 宿主已授权并校验过的当前对话 id。缺失（或 `userId` 缺失）时不注入工作接续块
+   * ——没有可信作用域就不召回，不伪造 owner/dialog。
+   */
+  dialogId?: string | null;
+  /**
+   * `"scope"`（默认）= 同一 owner/space 内跨对话发现工作接续，绑定当前对话的
+   * 条目优先、受条数与 token 预算约束；`"off"` 关闭该块。
+   */
+  workContext?: "scope" | "off";
+  /** 单轮最多注入几条（默认 `WORK_CONTEXT_RECALL_LIMIT`）。 */
+  workContextLimit?: number;
+  /**
+   * 工作接续的 space 作用域：应传宿主对话记录里的 spaceId（写入侧就是按
+   * 对话记录的 spaceId 写入的）。缺省退回 `spaceId`。
+   */
+  workContextSpaceId?: string | null;
+  /** 召回观测（失败也照常回调）。不得抛错影响聊天。 */
+  workContextEmit?: (observation: WorkContextRecallResult) => void;
+}
+
+/**
+ * 运行时记忆召回 = 语义/常驻 overlay + 工作接续块。
+ *
+ * 两条线**独立**：工作接续不参与 semantic 候选排序、不占
+ * `DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET` 与 resident 预算，语义为空时它照样注入；
+ * 它的读取失败也绝不影响语义结果（失败即省略，不谎称「没有进行中的工作」）。
+ * 每轮都重新读取（不缓存），避免写入后读到旧快照。
+ */
+export const resolveMemoryRuntime = async (
+  input: Parameters<typeof resolveSemanticMemoryRuntime>[0] &
+    MemoryRuntimeWorkContextOptions,
+): Promise<MemoryRuntimeResolution> => {
+  const resolution = await resolveSemanticMemoryRuntime(input);
+  if ((input.workContext ?? "scope") === "off") return resolution;
+  if (!input.db || !input.userId || !input.dialogId) return resolution;
+
+  const trimmedUserInput = input.userInput?.trim().slice(0, 200);
+  const recall = await recallWorkContextBlock({
+    db: input.db,
+    owner: { ownerType: "user", ownerId: input.userId },
+    spaceId: input.workContextSpaceId ?? input.spaceId ?? null,
+    dialogId: input.dialogId,
+    // 本轮输入本身就是「明确相关」的最短证据：只截断，不做意图解析。
+    // 同 dialog 的近期关闭项无论是否命中都会回看；跨 dialog 的关闭项要靠它。
+    ...(trimmedUserInput ? { relatedQuery: trimmedUserInput } : {}),
+    ...(input.workContextLimit ? { limit: input.workContextLimit } : {}),
+  }).catch((error: unknown) => ({
+    status: "error" as const,
+    block: null,
+    items: [],
+    totalActive: 0,
+    hasMore: false,
+    omittedCount: 0,
+    truncated: false,
+    tokens: 0,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+  try {
+    input.workContextEmit?.(recall);
+  } catch {
+    /* 观测不得影响召回 */
+  }
+  if (!recall.block) return resolution;
+  return {
+    ...resolution,
+    promptBlock: resolution.promptBlock
+      ? `${resolution.promptBlock}\n\n${recall.block}`
+      : recall.block,
+  };
 };

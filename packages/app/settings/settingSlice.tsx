@@ -16,6 +16,7 @@ import {
 
 import { initialState } from "./settingInitialState";
 import { normalizeSettingChanges } from "./settingPersistence";
+import { normalizeUiPlugins } from "app/plugins/uiPlugins";
 import type { SettingState, SettingsWriteFailure } from "./settingTypes";
 
 // ---------------------------------------------------------------------------
@@ -34,11 +35,26 @@ const settingSlice = createSliceWithThunks({
       state,
       action: PayloadAction<Partial<SettingState>>,
     ) => {
-      Object.assign(state, normalizeSettingChanges(action.payload));
+      const normalized = normalizeSettingChanges(action.payload);
+      // Plugin values may only be published together with their session source.
+      delete normalized.uiPlugins;
+      Object.assign(state, normalized);
     },
     // 单调推进本地用户意图世代：只有 setSettings 的乐观发布走这里（hydrate 不走）。
-    _bumpLocalIntentEpoch: (state) => {
-      state.localIntentEpoch = (state.localIntentEpoch ?? 0) + 1;
+    // 同时把本次改过的键标成同一世代：排队写的取代判据只认「同键」的新意图，
+    // 否则任何无关设置（sidebarWidth / maxExecutionTime …）都会取消别人还没
+    // 发出去的写（PLUGIN-PERSIST-UNRELATED-INTENT-001）。
+    _bumpLocalIntentEpoch: (
+      state,
+      action: PayloadAction<{ keys?: readonly string[] } | undefined>,
+    ) => {
+      const next = (state.localIntentEpoch ?? 0) + 1;
+      state.localIntentEpoch = next;
+      const keys = action.payload?.keys;
+      if (!keys || keys.length === 0) return;
+      const keyEpochs = { ...(state.localIntentKeyEpochs ?? {}) };
+      for (const key of keys) keyEpochs[key] = next;
+      state.localIntentKeyEpochs = keyEpochs;
     },
     // 记录设置写失败状态。专用 reducer：`_updateSettingsState` 会走
     // normalizeSettingChanges 把该字段剥掉（防止写进云端 record）。
@@ -56,6 +72,13 @@ const settingSlice = createSliceWithThunks({
       if (typeof next !== "number" || !Number.isFinite(next)) return;
       state.autoApproveCredits = next;
       state.serverAuthorityEchoSeq = (state.serverAuthorityEchoSeq ?? 0) + 1;
+    },
+    // UI 插件启用状态的归属账号。专用 reducer：`_updateSettingsState` 会剥掉
+    // 该字段（它只活在本地，不能写进云端 record，也不能被 record 回灌）。
+    _publishUiPlugins: (state, action: PayloadAction<{ value: SettingState["uiPlugins"]; accountId: string; generation: number | undefined }>) => {
+      state.uiPlugins = normalizeUiPlugins(action.payload.value);
+      state.uiPluginsOwnerAccountId = action.payload.accountId;
+      state.uiPluginsGeneration = action.payload.generation;
     },
     addHostToCurrentServer: (state, action: PayloadAction<string>) => {
       const rawValue = action.payload;
@@ -96,6 +119,8 @@ export { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 export { updateSettingsState } from "./settingActions";
 // 写失败状态的记录 action（由 setSettings 的重试/对账路径 dispatch）
 export { recordSettingsWriteFailure } from "./settingActions";
+// Atomic UI plugin snapshot publication.
+export { publishUiPlugins } from "./settingActions";
 // 服务端权威回显 action（原子写权威值 + 推进权威回显世代）
 export { recordServerAuthorityEcho } from "./settingActions";
 // 写失败状态 selector（本轮只备好状态与选择器，UI 组件后续接入）

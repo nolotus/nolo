@@ -54,7 +54,7 @@ function hasActivitySignal(message: any): boolean {
  * 新增此类工具时：先在 ToolMessageItem 加独立分支，再把名字加进这个 Set，
  * 不需要动 ToolMessageContent / ToolMessageGroup。
  */
-const INTERACTIVE_TOOL_NAMES = new Set<string>(["ask_user", "runStreamingAgent", "show_interaction"]);
+const INTERACTIVE_TOOL_NAMES = new Set<string>(["ask_user", "runStreamingAgent", "show_interaction", "secret-request"]);
 
 function isInteractiveToolMessage(message: any): boolean {
   if (message?.role !== "tool") return false;
@@ -129,21 +129,22 @@ export function groupConsecutiveToolEntries(
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     const isTool = entry.type === "single" && entry.message?.role === "tool";
+    // Recover legacy/CLI names before the interactive-vs-group decision.
+    const toolMsg = isTool ? enrichToolMessageName(entry.message, toolCallNameById) : null;
 
     // 交互型工具（ask_user）保持 single entry，走 ToolMessageItem 的
     // AskChoicePanelWeb 渲染，不折进 tool-group（否则退化为 JSON dump）。
-    if (isTool && isInteractiveToolMessage(entry.message)) {
+    if (isTool && isInteractiveToolMessage(toolMsg)) {
       flushGroup();
       result.push({
         type: "single",
         key: toolMessageKey(entry.message),
-        message: enrichToolMessageName(entry.message, toolCallNameById),
+        message: toolMsg,
       });
       continue;
     }
 
     if (isTool) {
-      const toolMsg = enrichToolMessageName(entry.message, toolCallNameById);
       currentGroupMessages.push(toolMsg);
       if (hasActivitySignal(toolMsg)) {
         currentActivityMessages.push(toolMsg);

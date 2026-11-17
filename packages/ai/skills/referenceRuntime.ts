@@ -35,6 +35,24 @@ export type SkillGraphVisit = {
   meta?: ReturnType<typeof resolvePageSkillMetadata>;
 };
 
+/** Stable identity for an admitted Skill patch; arbitrary prose has no identity. */
+export type SkillPromptPatch = {
+  skillId: string;
+  content: string;
+};
+
+/** Deduplicate only patches whose admitted Skill identity is known. */
+export const dedupeSkillPromptPatches = (
+  patches: readonly SkillPromptPatch[],
+): SkillPromptPatch[] => {
+  const seen = new Set<string>();
+  return patches.filter(({ skillId }) => {
+    if (!skillId || seen.has(skillId)) return false;
+    seen.add(skillId);
+    return true;
+  });
+};
+
 export type SkillGraphBlockedRoot = {
   root: SkillGraphRoot;
   /** Canonical skill ids (falling back to dbKey); missing nodes retain the requested identifier. */
@@ -47,6 +65,7 @@ export type ResolvedSkillGraph = {
   recommendedTools: string[];
   recommendedSkillHints: string[];
   skillPromptPatches: string[];
+  skillPromptContributions?: SkillPromptPatch[];
   contentByKey: Map<string, SkillRuntimePageLike>;
   visits: SkillGraphVisit[];
   blockedRoots?: SkillGraphBlockedRoot[];
@@ -86,7 +105,8 @@ export const buildSkillGuidancePromptBlock = (options: {
 }): string => {
   const title = asOptionalTrimmedString(options.title) ?? "--- 技能提示 ---";
   const recommendedSkillHints = joinUniqueStrings(options.recommendedSkillHints);
-  const skillPromptPatches = joinUniqueStrings(options.skillPromptPatches);
+  // Contributions have already been admitted/deduplicated by Skill identity.
+  const skillPromptPatches = asNonEmptyStringArray(options.skillPromptPatches);
 
   if (recommendedSkillHints.length === 0 && skillPromptPatches.length === 0) {
     return "";
@@ -189,7 +209,7 @@ export async function resolveSkillGraphFromRoots(options: {
     requiredTools: new Set<string>(),
     recommendedTools: new Set<string>(),
     recommendedSkillHints: new Set<string>(),
-    skillPromptPatches: new Set<string>(),
+    skillPromptPatches: new Map<string, string>(),
     visits: [] as SkillGraphVisit[],
     visited: new Set(ancestors),
   });
@@ -203,7 +223,9 @@ export async function resolveSkillGraphFromRoots(options: {
     source.requiredTools.forEach((value) => target.requiredTools.add(value));
     source.recommendedTools.forEach((value) => target.recommendedTools.add(value));
     source.recommendedSkillHints.forEach((value) => target.recommendedSkillHints.add(value));
-    source.skillPromptPatches.forEach((value) => target.skillPromptPatches.add(value));
+    source.skillPromptPatches.forEach((value, skillId) => {
+      if (!target.skillPromptPatches.has(skillId)) target.skillPromptPatches.set(skillId, value);
+    });
     for (const visit of source.visits) {
       const key = `${visit.mode}:${visit.dbKey}`;
       if (!target.visited.has(key)) target.visits.push(visit);
@@ -263,7 +285,7 @@ export async function resolveSkillGraphFromRoots(options: {
     if (mode === "required") {
       mergedTools.forEach((toolName) => target.requiredTools.add(toolName));
       if (meta?.skillConfig?.promptPatch) {
-        target.skillPromptPatches.add(meta.skillConfig.promptPatch);
+        target.skillPromptPatches.set(canonicalIdentifier, meta.skillConfig.promptPatch);
       }
     } else {
       mergedTools.forEach((toolName) => target.recommendedTools.add(toolName));
@@ -317,7 +339,8 @@ export async function resolveSkillGraphFromRoots(options: {
     requiredTools: Array.from(contribution.requiredTools),
     recommendedTools: Array.from(contribution.recommendedTools),
     recommendedSkillHints: Array.from(contribution.recommendedSkillHints),
-    skillPromptPatches: Array.from(contribution.skillPromptPatches),
+    skillPromptPatches: Array.from(contribution.skillPromptPatches.values()),
+    skillPromptContributions: Array.from(contribution.skillPromptPatches, ([skillId, content]) => ({ skillId, content })),
     contentByKey,
     visits: contribution.visits,
     ...(strict ? { blockedRoots } : {}),

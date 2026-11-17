@@ -1,3 +1,4 @@
+import { googleSessionRequestToken, isGoogleAuthoritySession, scopeGoogleSessionServers } from "core/googleSessionScope";
 import type { SpaceData, SpaceMemberWithSpaceInfo } from "app/types";
 import { createSpaceKey, normalizeSpaceId } from "create/space/spaceKeys";
 import { fetchFromServer, getAllServers } from "database/actions/common";
@@ -25,7 +26,7 @@ const resolveSpaceRemoteServers = (state: any): string[] => {
   const syncServers = Array.isArray(state?.settings?.syncServers)
     ? state.settings.syncServers
     : undefined;
-  return getAllServers(currentServer, syncServers);
+  return scopeGoogleSessionServers(selectIdentityToken(state), currentServer, getAllServers(currentServer, syncServers));
 };
 
 export const selectSpaceRemoteAuth = (state: any): SpaceRemoteAuth => ({
@@ -63,11 +64,13 @@ async function fetchMembershipsFromServer(
   timeoutMs: number
 ): Promise<RemoteMembershipFetchResult> {
   if (!token) return { ok: false, memberships: [] };
+  googleSessionRequestToken(token, server);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${server}/rpc/getUserSpaceMemberships`, {
       method: "POST",
+      ...(isGoogleAuthoritySession(token) ? { redirect: "error" as const, credentials: "omit" as const } : {}),
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",

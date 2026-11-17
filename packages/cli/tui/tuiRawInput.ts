@@ -1,3 +1,4 @@
+import { getTopReservedRows, setTopReservedRows, resolveTopTaskEntryBudget } from "./tuiLayout";
 /**
  * TUI 固定输入区（docked composer）与 raw input 解码。
  *
@@ -20,7 +21,7 @@ import {
 import { boxGlyphs, displayWidth, fitAnsiLine, resolveBoxCharset, wrapTextToLines } from "./tuiAnsi";
 import { consumeSgrMouseSequence } from "./tuiMouse";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
-import { composerSurfaceBackgroundSequence, themeColorSequence, themeText } from "./theme";
+import { composerSurfaceBackgroundSequence, renderSurfaceLine, themeColorSequence, themeText } from "./theme";
 import { t } from "./i18n";
 import { completeSlashCandidates, completeSlashCommand } from "./sessionInput";
 import { PASTE_TOKEN_PREFIX } from "./session";
@@ -183,6 +184,8 @@ export function createNoopFixedInput(): FixedInputController {
 }
 
 type FixedInputConfig = {
+  getTaskLines?: (layout: { columns: number; rows: number; maxEntries: number }) => string[];
+  getReservedRows?: () => number;
   getStatusLine: (maxWidth?: number) => string;
   /** Optional title line rendered above the status line. */
   getTitleLine?: () => string | null;
@@ -232,10 +235,14 @@ export function createFixedInput(
   };
 
   let lastScrollBottom = -1;
+  let lastScrollTop = -1;
+  let lastTaskText = "";
   const setScrollRegion = (lines: number, force = false) => {
-    const bottom = Math.max(1, getRows() - lines);
-    if (force || lastScrollBottom !== bottom) {
-      write(`\x1b[1;${bottom}r`);
+    const bottom = Math.max(1, getRows() - lines - (config.getReservedRows?.() ?? 0));
+    const top = Math.min(bottom, getTopReservedRows(output) + 1);
+    if (force || lastScrollBottom !== bottom || lastScrollTop !== top) {
+      write(`\x1b[${top};${bottom}r`);
+      lastScrollTop = top;
       lastScrollBottom = bottom;
     }
   };
@@ -260,6 +267,7 @@ export function createFixedInput(
   let lastCursorCol = -1;
   const invalidateComposerCache = () => {
     lastScrollBottom = -1;
+    lastTaskText = "\0";
     lastRenderedText = null;
     lastStartRow = -1;
     lastCursorRow = -1;
@@ -345,8 +353,6 @@ export function createFixedInput(
     const rule = colorEnabled
       ? `\x1b[2m${themeColorSequence("chrome")}${ruleGlyph.repeat(cols)}\x1b[0m`
       : ruleGlyph.repeat(cols);
-    sections.push(rule);
-
     const titleLine = config.getTitleLine?.();
     if (titleLine) {
       sections.push(fitAnsiLine(titleLine.replace(/\r?\n/g, " "), cols));
@@ -362,6 +368,10 @@ export function createFixedInput(
       // would emit extra rows and drift the input cursor upward.
       sections.push(fitAnsiLine(line.replace(/\r?\n/g, " "), cols));
     }
+
+    // Status, activity and queued messages are not editable draft content.
+    // Keep the existing divider immediately above the draft, without adding rows.
+    sections.push(rule);
 
     // 附件条：紧贴输入提示行上方（草稿的组成部分，优先级高于队列预览）。
     // 同样折叠换行占恰好一行；超宽交给 fitAnsiLine 截断。
@@ -476,7 +486,33 @@ export function createFixedInput(
       inputLines = lines;
       linesChanged = true;
     }
+    const oldTop = getTopReservedRows(output);
+    // Budget the divider before requesting entries so tiny terminals retain history.
+    const maxEntries = resolveTopTaskEntryBudget(getRows(), inputLines, config.getReservedRows?.() ?? 0, 1);
+    // Zero-budget renders also invalidate the dock's prior visible-run projection.
+    const projectedTasks = config.getTaskLines?.({ columns: getColumns(), rows: getRows(), maxEntries }) ?? [];
+    const taskEntries = maxEntries > 0 ? projectedTasks : [];
+    const separator = boxGlyphs(resolveBoxCharset()).h.repeat(Math.max(1, getColumns() - 1));
+    const taskLines = taskEntries.length ? [...taskEntries,
+      resolveCliColorEnabled() ? themeText(separator, "chrome") : separator] : [];
+    const taskWidth = Math.max(1, getColumns() - 1);
+    const taskSurface = resolveCliColorEnabled() ? composerSurfaceBackgroundSequence() : "";
+    const topText = taskLines.map(line => renderSurfaceLine({
+      text: fitAnsiLine(line.replace(/\r?\n/g, " "), taskWidth),
+      surface: taskSurface,
+      padTo: taskWidth,
+    })).join("\n");
+    setTopReservedRows(output, taskLines.length);
+    if (oldTop !== taskLines.length) linesChanged = true;
     setScrollRegion(inputLines);
+    if (force || oldTop !== taskLines.length || topText !== lastTaskText) {
+      for (let i = 0; i < Math.max(oldTop, taskLines.length); i++) {
+        const line = topText.split("\n")[i] ?? "";
+        // Clear only former header rows; history callback repaints freed rows below.
+        if (i < getRows() - inputLines) write(`\x1b[${i + 1};1H\x1b[2K${line}`);
+      }
+      lastTaskText = topText;
+    }
     // composer 高度变化后通知外部补一次历史重绘：历史是按旧 inputLines 画的，
     // repaintAt 只重画 composer 不重画历史，活动行首次出现那帧历史最底行会被
     // 长高一行的 composer 盖住（刚提交的用户消息正好在那）。必须在
@@ -567,6 +603,7 @@ export function createFixedInput(
       enableMouse();
     },
     disable() {
+      setTopReservedRows(output, 0);
       invalidatorSet?.delete(invalidateComposerCache);
       disableMouse();
       resetScrollRegion();
@@ -694,6 +731,14 @@ function findBracketedPasteEnd(input: string, contentStart: number): number {
 
 function emitPlainRunAsTokens(run: string): string[] {
   if (run.length === 0) return [];
+  // Ctrl+G is the explicit activation boundary, not a generic paste splitter.
+  // Tabs/newlines belong to the whole unmarked paste classification below.
+  if (run.includes("\x07")) {
+    return run.split(/(\x07)/).flatMap((part, index) => {
+      if (part === "\x07") return [part];
+      return emitPlainRunAsTokens(part);
+    });
+  }
   if (shouldCollapsePaste(normalizePasteNewlines(run))) {
     return [`${PASTE_TOKEN_PREFIX}${run}`];
   }
@@ -807,6 +852,17 @@ export type RawInputDecoder = {
  */
 const MOUSE_ACTIVE_WINDOW_MS = 250;
 
+/** Decode bytes once before graphics filtering; never split UTF-8 at chunk boundaries. */
+export function createWorkspaceInputStream(filter: (text: string) => string, emit: (text: string) => void) {
+  const utf8 = new TextDecoder("utf-8", { ignoreBOM: true });
+  return (chunk: Buffer | string) => {
+    const text = typeof chunk === "string" ? chunk : utf8.decode(chunk, { stream: true });
+    if (!text) return;
+    const filtered = filter(text);
+    if (filtered) emit(filtered);
+  };
+}
+
 export function createRawInputDecoder(
   emitToken: (token: string) => void,
   options?: {
@@ -865,9 +921,7 @@ export function createRawInputDecoder(
     if (pendingBuffer.length === 0) return;
     const text = pendingBuffer;
     pendingBuffer = "";
-    for (const token of emitPlainRunAsTokens(text)) {
-      onToken(token);
-    }
+    for (const token of emitPlainRunAsTokens(text)) onToken(token);
   };
 
   const flushEscPending = (forceCompleteOpenPaste: boolean) => {
@@ -964,6 +1018,13 @@ export function createRawInputDecoder(
           pendingBuffer = "";
         }, timeoutMs);
       }
+      return;
+    }
+
+    // Control keys must not be collapsed into a pasted text payload. Bracketed
+    // paste has already been parsed above and remains atomic data.
+    if (pendingBuffer.includes("\x07")) {
+      flushPlainPending();
       return;
     }
 

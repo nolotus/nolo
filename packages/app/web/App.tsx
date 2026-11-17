@@ -1,6 +1,7 @@
+import { useAccountSession } from "identity/useAccountSession";
 // 文件路径：app/web/App.tsx
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import type { RouteObject, Location as RouterLocation } from "app/routing";
 import { useRoutes, useLocation } from "app/routing";
 import { MyToastRegion as Toaster } from "render/web/ui/Toast";
@@ -59,6 +60,31 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
   // useIdentity().userId 是 SSR-safe（mount 前返回 undefined，与 SSR 一致），
   // 避免 hydrate 首帧 userId 不匹配导致 React 丢弃 SSR DOM → 白屏。
   const { userId } = useIdentity();
+  const session = useAccountSession();
+  const runtimeOrigin =
+    typeof window !== "undefined" && typeof window.location?.origin === "string"
+      ? window.location.origin
+      : hostname;
+  const settingsSessionKey = session.transition === "idle" ? `${session.activeAccountId ?? ""}:${session.sessionGeneration}` : null;
+  const settingsHydration = useRef<{ key: string; promise: Promise<unknown> } | null>(null);
+  const hydrateSessionSettings = useCallback(() => {
+    if (isNonApiSiteHostname(hostname)) return Promise.resolve(null);
+    // All settings reads (startup, session recovery and foreground refresh)
+    // capture their server only after the existing runtime-origin bootstrap.
+    if (!isDesktopApp) {
+      dispatch(addHostToCurrentServer(runtimeOrigin));
+    }
+    if (!settingsSessionKey) return Promise.resolve(null);
+    if (settingsHydration.current?.key === settingsSessionKey) return settingsHydration.current.promise;
+    const promise = dispatch(getSettings()).unwrap().finally(() => {
+      if (settingsHydration.current?.promise === promise) settingsHydration.current = null;
+    });
+    settingsHydration.current = { key: settingsSessionKey, promise };
+    return promise;
+  }, [dispatch, settingsSessionKey, hostname, runtimeOrigin]);
+  useEffect(() => {
+    if (settingsSessionKey && session.activeAccountId) void hydrateSessionSettings().catch(error => console.error("Session settings hydration failed", error));
+  }, [settingsSessionKey, hydrateSessionSettings]);
   const initializedRef = useRef(false);
   const spaceInitUserRef = useRef<string | null>(null);
   const readyForegroundSyncUserRef = useRef<string | null>(null);
@@ -75,10 +101,7 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
   const currentSpaceId = useCurrentSpaceId();
   const foregroundSyncRef = useRef({ inFlight: false, lastStartedAt: 0 });
   const recentShareCreatedAtRef = useRef(0);
-  const runtimeOrigin =
-    typeof window !== "undefined" && typeof window.location?.origin === "string"
-      ? window.location.origin
-      : hostname;
+
 
   // ✅ 主内容：使用 backgroundLocation 渲染“背景页”
   const mainElement = useRoutes(
@@ -103,17 +126,6 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
       initializedRef.current = true;
       (async () => {
         try {
-          // 挂载后把 currentServer 纠正为运行时 origin（浏览器侧权威值）。
-          // - 正式站点（nolo.chat / us.nolo.chat）：SSR 注入值与 entry.tsx hydrate
-          //   前的覆盖值都是同一个运行时 origin，这里写入的是同一个字符串 →
-          //   immer 不产生新状态，依赖 currentServer 的 effect/selector 不会因此
-          //   重跑，也不会重新打开「先打另一台服务器」的窗口（本次优化的收益）。
-          // - 非白名单 host（localhost 开发 / 局域网 / 自建域名）：SSR 与 hydrate
-          //   首帧都保持默认（与改动前一致），由这里在挂载后纠正到运行时 origin，
-          //   避免新引入 hydration 属性不匹配与指向默认服务器的图片请求。
-          if (!isDesktopApp) {
-            dispatch(addHostToCurrentServer(runtimeOrigin));
-          }
           // Phase 2: initialization orchestration lives in the session service.
           if (!accountSession) {
             throw new Error("account session service unavailable");
@@ -155,7 +167,7 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
         // Settings failure aborts boot. Membership remote-unavailable is
         // recoverable: keep actor-local preview (no sticky default space).
         const [settingsResult, membershipResult] = await Promise.allSettled([
-          dispatch(getSettings()).unwrap(),
+          hydrateSessionSettings(),
           dispatch(fetchUserSpaceMemberships(spaceActorId)).unwrap(),
         ]);
         if (settingsResult.status === "rejected") {
@@ -185,7 +197,7 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
       }
       __initPerf?.end("space_initialization");
     })();
-  }, [dispatch, hostname, lng, userId, runtimeOrigin]);
+  }, [dispatch, hostname, lng, userId, runtimeOrigin, hydrateSessionSettings]);
 
   useEffect(() => {
     if (!userId || favoritesInitialized || !favoriteDeps?.token) return;
@@ -239,7 +251,7 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
         // Same recoverable rule as boot: only remote-unavailable membership
         // failure continues; do not stamp remote-sync cooldown on offline.
         const [settingsResult, membershipResult] = await Promise.allSettled([
-          dispatch(getSettings()).unwrap(),
+          hydrateSessionSettings(),
           dispatch(fetchUserSpaceMemberships(spaceActorId)).unwrap(),
         ]);
         if (settingsResult.status === "rejected") {
@@ -309,7 +321,7 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
       window.removeEventListener("nolo:share-created", handleShareCreated);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [dispatch, hostname, userId, currentSpaceId]);
+  }, [dispatch, hostname, userId, currentSpaceId, hydrateSessionSettings]);
 
   return (
     <>

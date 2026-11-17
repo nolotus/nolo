@@ -1,3 +1,6 @@
+import { isCompleteInstructionOutput } from "../ai/agent/toolOutputPolicy";
+import { sanitizeToolOutputText } from "./toolOutputSanitizer";
+import { scrubSecrets } from "./secretScrubber";
 /**
  * Request-scoped authoritative snapshots for desktop agent-runtime turns.
  *
@@ -474,10 +477,16 @@ function sanitizeChatMessage(value: unknown): AgentRuntimeChatMessage | null {
     asOptionalTrimmedString(value.tool_call_id) ??
     asOptionalTrimmedString(value.toolCallId);
   if (toolCallId) message.tool_call_id = toolCallId;
-  // Only retain the bounded image-history flag, never arbitrary tool metadata.
+  // Retain only bounded delivery/image facts, never arbitrary tool metadata.
   const metadata = isRecord(value.tool_result_metadata) ? value.tool_result_metadata : value.metadata;
   if (role === "tool" && (hadToolImages(value as unknown as AgentRuntimeChatMessage) || (isRecord(metadata) && metadata[TOOL_HAD_IMAGES] === true))) {
     message.tool_result_metadata = { [TOOL_HAD_IMAGES]: true };
+  }
+  const toolName = asOptionalTrimmedString(value.toolName) ?? asOptionalTrimmedString(value.name);
+  if (role === "tool" && typeof content === "string" && isCompleteInstructionOutput(toolName, metadata, content)) {
+    message.content = scrubSecrets(sanitizeToolOutputText(content)).cleaned;
+    message.toolName = toolName;
+    message.tool_result_metadata = { ...message.tool_result_metadata, projectInstruction: true };
   }
   const toolCalls = sanitizeToolCalls(value.tool_calls);
   if (toolCalls) message.tool_calls = toolCalls;

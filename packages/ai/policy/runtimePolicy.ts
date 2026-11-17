@@ -181,6 +181,9 @@ const normalizeReferenceText = (value: unknown): string => {
 export const inferCaptureIntent = (userInput: string): CaptureIntent => {
   const normalized = userInput.toLowerCase();
 
+  // A refusal must never be mistaken for permission to persist.
+  if (/(?:不要|不必|无需|别|不能|禁止|拒绝|暂不|不予|不需要|don't|do not|never|no need to)\s*.{0,20}(?:保存|存|沉淀|记住|写|创建|建立|建表|记录|导入|save|write|create|record|import)/i.test(normalized)) return "none";
+
   if (
     containsAny(normalized, [
       "保存",
@@ -344,21 +347,6 @@ export const inferAgentSpaceNeed = (agentConfig?: Agent | any): SpaceNeed => {
   return "light";
 };
 
-const resolveTonePreset = (
-  agentTone: TonePreset,
-  userTone: TonePreset,
-  mode: ToneResolutionMode,
-): TonePreset => {
-  if (mode === "agent_first") {
-    return agentTone === "default" ? userTone : agentTone;
-  }
-  if (mode === "user_first") {
-    return userTone === "default" ? agentTone : userTone;
-  }
-  if (userTone !== "default") return userTone;
-  return agentTone;
-};
-
 const maxReadCallsPerTurnByLevel = (
   level: SpaceContextLevel,
   need: SpaceNeed,
@@ -391,22 +379,6 @@ const preloadSummaryCountByLevel = (level: SpaceContextLevel): number =>
 const preloadBudgetRatioByLevel = (level: SpaceContextLevel): number =>
   ({ 1: 0, 2: 0.01, 3: 0.04, 4: 0.08 }[level]);
 
-const knowledgeCaptureLevelLabel = (level: KnowledgeCaptureLevel): string =>
-  ({
-    1: "不主动创建",
-    2: "先问再创建",
-    3: "回答后建议创建",
-    4: "高价值结果可自动创建",
-  })[level] ?? "未知级别";
-
-const spaceContextLevelLabel = (level: SpaceContextLevel): string =>
-  ({
-    1: "不自动读取",
-    2: "只看结构和标题",
-    3: "轻量读取",
-    4: "自适应读取",
-  })[level] ?? "未知级别";
-
 export const resolveRuntimePolicy = (params: {
   agentConfig?: Agent | any;
   settingsRecord?: Record<string, any> | null;
@@ -416,22 +388,16 @@ export const resolveRuntimePolicy = (params: {
   const { agentConfig, settingsRecord, userInput, dialogPolicyState } = params;
 
   const agentBasePolicy = resolveAgentBasePolicy(agentConfig);
-  const userPreferenceProfile = resolveUserPreferenceProfile(settingsRecord);
 
-  const knowledgeLevel = Math.min(
-    agentBasePolicy.knowledgeCaptureMaxLevel,
-    userPreferenceProfile.knowledgeCaptureLevel,
-  ) as KnowledgeCaptureLevel;
-  const spaceLevel = Math.min(
-    agentBasePolicy.spaceContextMaxLevel,
-    userPreferenceProfile.spaceContextLevel,
-  ) as SpaceContextLevel;
+  const knowledgeLevel: KnowledgeCaptureLevel = 2;
+  const spaceLevel: SpaceContextLevel = 3;
 
   const captureIntent = inferCaptureIntent(userInput);
   const userSpaceNeed = inferSpaceNeed(userInput);
   const agentSpaceNeed = inferAgentSpaceNeed(agentConfig);
   const spaceNeed = maxSpaceNeed(userSpaceNeed, agentSpaceNeed);
-  const explicitCaptureRequest = captureIntent === "strong";
+  // Intent is advisory, never evidence of user approval.
+  const explicitCaptureRequest = false;
   const explicitSpaceRequest = userSpaceNeed !== "none";
 
   const currentAutoCreates = Math.max(
@@ -443,24 +409,11 @@ export const resolveRuntimePolicy = (params: {
     Number(dialogPolicyState?.autoSpaceReadCount ?? 0),
   );
 
-  let knowledgeMode: KnowledgeCaptureMode = "blocked";
-  if (explicitCaptureRequest) {
-    knowledgeMode = "auto";
-  } else if (knowledgeLevel === 2) {
-    knowledgeMode = "ask";
-  } else if (knowledgeLevel === 3) {
-    knowledgeMode = "suggest";
-  } else if (knowledgeLevel >= 4 && captureIntent !== "none") {
-    knowledgeMode = "auto";
-  }
+  const knowledgeMode: KnowledgeCaptureMode = explicitCaptureRequest ? "auto" : "ask";
 
   return {
-    tonePreset: resolveTonePreset(
-      agentBasePolicy.tone?.preset ?? "default",
-      userPreferenceProfile.tone?.preset ?? "default",
-      agentBasePolicy.tone?.resolutionMode ?? "blend",
-    ),
-    toneResolutionMode: agentBasePolicy.tone?.resolutionMode ?? "blend",
+    tonePreset: "default",
+    toneResolutionMode: "blend",
     knowledgeCapture: {
       level: knowledgeLevel,
       mode: knowledgeMode,
@@ -473,11 +426,12 @@ export const resolveRuntimePolicy = (params: {
       level: spaceLevel,
       explicitRequest: explicitSpaceRequest,
       need: spaceNeed,
-      maxReadCallsPerTurn: maxReadCallsPerTurnByLevel(spaceLevel, spaceNeed),
-      maxReadCallsPerDialog: maxReadCallsPerDialogByLevel(spaceLevel, spaceNeed),
+      // This legacy field now bounds simultaneous I/O, not completed reads.
+      maxReadCallsPerTurn: 8,
+      maxReadCallsPerDialog: Number.POSITIVE_INFINITY,
       currentAutoReads,
-      preloadSummaryCount: preloadSummaryCountByLevel(spaceLevel),
-      preloadBudgetRatio: preloadBudgetRatioByLevel(spaceLevel),
+      preloadSummaryCount: 0,
+      preloadBudgetRatio: 0,
     },
     selfEvolutionMode: agentBasePolicy.selfEvolutionMode,
   };
@@ -487,17 +441,10 @@ export const buildUserPolicyContext = (
   policy: ResolvedRuntimePolicy,
 ): string => {
   const lines = [
-    `用户语气偏好：${policy.tonePreset}`,
-    `知识沉淀级别：${policy.knowledgeCapture.level}（当前模式：${policy.knowledgeCapture.mode}）`,
-    `空间上下文级别：${policy.spaceContext.level}（本轮最多自动 read ${policy.spaceContext.maxReadCallsPerTurn} 次）`,
+    "主动判断值得沉淀的结果，提出简短具体的保存建议；创建文档或表格前按现有权限边界取得用户同意。",
+    "按任务需要读取当前已授权空间的必要内容；遵守本轮不读要求，访问被拒绝时停止，不绕过权限。",
     "如果工具返回 policy limit，不要重试同一路径，应改为解释限制、先给答案或向用户确认。",
   ];
-
-  if (policy.knowledgeCapture.mode === "ask") {
-    lines.push("当前用户偏好要求：创建知识文档前先询问用户。");
-  } else if (policy.knowledgeCapture.mode === "suggest") {
-    lines.push("当前用户偏好要求：先完成回答，再建议是否沉淀成文档/表格。");
-  }
 
   return lines.join("\n");
 };
@@ -506,26 +453,9 @@ export const buildStaticUserPolicyContext = (params: {
   agentConfig?: Agent | any;
   settingsRecord?: Record<string, any> | null;
 }): string => {
-  const agentBasePolicy = resolveAgentBasePolicy(params.agentConfig);
-  const userPreferenceProfile = resolveUserPreferenceProfile(params.settingsRecord);
-  const tonePreset = resolveTonePreset(
-    agentBasePolicy.tone?.preset ?? "default",
-    userPreferenceProfile.tone?.preset ?? "default",
-    agentBasePolicy.tone?.resolutionMode ?? "blend",
-  );
-  const knowledgeLevel = Math.min(
-    agentBasePolicy.knowledgeCaptureMaxLevel,
-    userPreferenceProfile.knowledgeCaptureLevel,
-  ) as KnowledgeCaptureLevel;
-  const spaceLevel = Math.min(
-    agentBasePolicy.spaceContextMaxLevel,
-    userPreferenceProfile.spaceContextLevel,
-  ) as SpaceContextLevel;
-
   return [
-    `用户语气偏好：${tonePreset}`,
-    `知识沉淀级别：${knowledgeLevel}（${knowledgeCaptureLevelLabel(knowledgeLevel)}）`,
-    `空间上下文级别：${spaceLevel}（${spaceContextLevelLabel(spaceLevel)}）`,
+    "主动发现值得保存的结果并提出简短具体的建议；持久保存前按现有权限边界取得用户同意，已有明确授权按其范围执行。",
+    "按任务需要读取当前已授权空间的必要内容；遵守本轮不读要求，访问被拒绝时停止，不绕过权限。",
     "请尽量保留 agent 自身角色设定，同时按用户偏好调整表达和自动化程度。",
   ].join("\n");
 };

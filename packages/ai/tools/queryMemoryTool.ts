@@ -8,9 +8,17 @@ import { callToolApi } from "./toolApiClient";
 export { queryMemoryFunctionSchema } from "./queryMemoryToolSchema";
 
 export async function queryMemoryFunc(
-  args: { query: string; source?: "archive"; limit?: number; cursor?: string },
+  args: { query?: string; source?: "archive"; limit?: number; cursor?: string; mode?: "work"; storage?: "local" | "server"; activityId?: string; status?: string; discovery?: string },
   thunkApi: any,
+  context?: { dialogId?: string },
 ): Promise<{ rawData: unknown; displayData: string }> {
+  if (args.mode === "work") {
+    if (args.storage === "local") throw new Error("Web work memory only supports server storage");
+    if (!context?.dialogId) throw new Error("work memory requires a bound dialog");
+    const result: any = await callToolApi(thunkApi, "/api/memory/query", { mode: "work", dialogId: context.dialogId, query: args.query, activityId: args.activityId, status: args.status, discovery: args.discovery, limit: args.limit }, { withAuth: true });
+    if (result?.error) throw new Error(result.error.message ?? "work memory rejected");
+    return { rawData: result, displayData: JSON.stringify(result) };
+  }
   const query = String(args.query ?? "").trim();
   if (!query) throw new Error("queryMemory 需要非空 query。");
 

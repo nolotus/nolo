@@ -1,3 +1,5 @@
+import { selectIdentityToken } from "identity/selectors";
+import { scopeGoogleSessionServers } from "core/googleSessionScope";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { selectIdentityUserId, selectIdentityUser } from "identity/selectors";
@@ -82,11 +84,11 @@ export const resolveAuthorityReplicationServers = ({
     return [];
   }
 
-  return planAuthorityReadServers({
+  return scopeGoogleSessionServers(selectIdentityToken(state), currentServer, planAuthorityReadServers({
     allServers,
     authorityServer: preferredServerOrigin ?? authority.authorityServer,
     serverOrigin: authority.serverOrigin,
-  });
+  }));
 };
 
 /**
@@ -231,18 +233,18 @@ export const resolveUploadReplicationServers = ({
   });
 
   if (authority.ownerUserId || authority.authorityServer) {
-    return planAuthorityReadServers({
+    return scopeGoogleSessionServers(selectIdentityToken(state), currentServer, planAuthorityReadServers({
       allServers,
       authorityServer: authority.authorityServer,
       serverOrigin: authority.serverOrigin,
-    });
+    }));
   }
 
-  return resolveTenantReplicationServers({
+  return scopeGoogleSessionServers(selectIdentityToken(state), currentServer, resolveTenantReplicationServers({
     currentServer,
     syncServers,
     tenantId,
-  });
+  }));
 };
 
 export const scheduleExistingRecordReplication = ({

@@ -41,9 +41,9 @@ export const secretRequestFunctionSchema = {
   name: "secret-request",
   description:
     "向用户请求一个具名凭据（如 API key）。用户会在宿主面板中输入，凭据明文" +
-    "由宿主写入本机 secret store，任何值都不会回到对话中；工具结果只告知是否" +
+    "由宿主写入当前通道的凭据存储，任何值都不会回到对话中；工具结果只告知是否" +
     "已保存。调用时只传凭据名（大写+下划线）与可选说明，绝不传任何凭据值。" +
-    "结果返回后，用 `nolo secret run --with <name> -- <cmd>` 在受控通道消费。",
+    "仅在确认保存成功且当前执行环境支持时，用 `nolo secret run --with <name> -- <cmd>` 在受控通道消费。",
   parameters: {
     type: "object",
     properties: {
@@ -93,10 +93,10 @@ export function buildSecretRequestToolResult(
   // 没有 onActionGate 的宿主（服务端、无 TTY run）会把这条兜底原样交给模型，
   // 假成功会让模型直接去消费一个根本不存在的凭据。
   const fallbackContent = [
-    `需要用户向本机 secret store 提供凭据 "${args.name}"（明文不会出现在对话里）。`,
+    `需要用户向当前通道的凭据存储 提供凭据 "${args.name}"（明文不会出现在对话里）。`,
     ...(purpose ? [`用途：${purpose}`] : []),
-    "会自动弹出输入面板让用户填写，不要引导用户去终端执行命令。",
-    "凭据保存后，用 nolo secret run --with " + args.name + " -- <cmd> 在受控通道消费，不要向用户索要明文。",
+    "请使用当前通道提供的安全输入面板填写，不要引导用户去终端执行命令。",
+    "仅在确认保存成功且当前执行环境支持时，用 nolo secret run --with " + args.name + " -- <cmd> 在受控通道消费，不要向用户索要明文。",
   ].join("\n");
   return {
     content: fallbackContent,
@@ -105,7 +105,7 @@ export function buildSecretRequestToolResult(
         id: `gate-${randomGateId().slice(0, 8)}-secret-request-${args.name}`,
         kind: "input",
         title: `需要凭据 ${args.name}`,
-        body: purpose?.trim() || "请在输入框中填写该凭据，内容仅保存在本机 secret store。",
+        body: purpose?.trim() || "请在输入框中填写该凭据，内容仅保存在当前通道的凭据存储。",
         payload,
       },
       reason: "secret-request-pending-host-input",

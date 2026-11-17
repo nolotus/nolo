@@ -25,6 +25,8 @@ type Props = {
   initialQuota?: AgentQuota;
   /** 用于按模型族挑窗口（antigravity 的 gemini 族与 3p 族是两套额度）。 */
   model?: string | null;
+  /** Dialog cards consume existing snapshots only; no per-card provider probes. */
+  snapshotOnly?: boolean;
 };
 
 const WINDOW_LABELS: Array<{ match: (scope: string) => boolean; label: string }> = [
@@ -60,11 +62,19 @@ export function AgentQuotaPanel({
   authToken,
   initialQuota,
   model,
+  snapshotOnly = false,
 }: Props) {
   const [quota, setQuota] = useState<AgentQuota | undefined>(initialQuota);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
+    if (!snapshotOnly) return;
+    setQuota(initialQuota);
+    setNow(Date.now());
+  }, [agentKey, initialQuota, snapshotOnly]);
+
+  useEffect(() => {
+    if (snapshotOnly) return;
     const ctrl = new AbortController();
     (async () => {
       try {
@@ -90,7 +100,7 @@ export function AgentQuotaPanel({
       }
     })();
     return () => ctrl.abort();
-  }, [agentKey, serverOrigin, authToken]);
+  }, [agentKey, serverOrigin, authToken, snapshotOnly]);
 
   const rows = pickDisplayWindows(quota, now, model);
   // 只有「尚未到期」的复位时刻才需要走表：已过期的 resetAt 不该让定时器一直空转

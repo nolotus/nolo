@@ -9,12 +9,9 @@ export const askChoicePanelStyles = stylex.create({
     marginBottom: 12,
     marginLeft: 60,
     padding: 14,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--borderMuted, var(--borderLight))",
+    borderWidth: 0,
     borderRadius: 14,
-    backgroundColor: "var(--background)",
-    boxShadow: "0 1px 2px color-mix(in srgb, var(--text) 4%, transparent)",
+    backgroundColor: "transparent",
     "@media (max-width: 480px)": {
       maxWidth: "100%",
       marginLeft: 0,
@@ -165,9 +162,9 @@ export const askChoicePanelStyles = stylex.create({
     paddingRight: 12,
     borderWidth: 1,
     borderStyle: "solid",
-    borderColor: "var(--borderMuted, var(--borderLight))",
+    borderColor: "transparent",
     borderRadius: 11,
-    backgroundColor: "var(--background)",
+    backgroundColor: "color-mix(in srgb, var(--text) 4%, var(--background))",
     color: "var(--text)",
     textAlign: "left",
     cursor: "pointer",
@@ -293,10 +290,8 @@ export const askChoicePanelStyles = stylex.create({
     backgroundColor: "transparent",
     color: "var(--text)",
     fontSize: 13,
-    ":focus": {
-      backgroundColor: "var(--background)",
-      boxShadow: "0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent)",
-    },
+    // The row's focus-within ring is the single focus indicator.
+
     ":disabled": {
       opacity: 0.62,
     },

@@ -36,6 +36,18 @@
       "nolo-desktop": "./useIdentity.desktop.ts",
       "default": "./useIdentity.local.ts"
     },
+    "./useAccountSession": {
+      "nolo-desktop": "./useAccountSession.desktop.ts",
+      "default": "./useAccountSession.local.ts"
+    },
+    "./GoogleBinding": {
+      "nolo-desktop": "./GoogleBinding.desktop.tsx",
+      "default": "./GoogleBinding.local.tsx"
+    },
+    "./GoogleButton": {
+      "nolo-desktop": "./GoogleButton.desktop.tsx",
+      "default": "./GoogleButton.local.tsx"
+    },
     "./accountProfile": {
       "nolo-desktop": "./accountProfile.desktop.ts",
       "default": "./accountProfile.local.ts"

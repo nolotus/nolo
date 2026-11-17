@@ -38,6 +38,7 @@ export const SUPPORTED_USER_SKILL_SLUGS = [
   "coding",
   "coding-review",
   "android-adb",
+  "mihome-assistant",
   "stock-quotes",
   ...NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS,
 ] as const;

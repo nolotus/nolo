@@ -39,6 +39,10 @@ export const BUILTIN_PLATFORM_AGENT_KEYS = builtinPlatformEntries().map(
   (e) => publicAgentKey(e.id),
 );
 
+/** Exact public records only. Catalog identity matching is not anonymous-read permission. */
+export const isPublicBuiltinPlatformAgentKey = (key: string): boolean =>
+  BUILTIN_PLATFORM_AGENT_KEYS.includes(key);
+
 // Catalog ids are ULID-like and contain no hyphens; exact final-segment matching keeps key prefixes irrelevant.
 const BUILTIN_PLATFORM_AGENT_ID_SET = new Set(
   builtinPlatformEntries().map((e) => e.id),

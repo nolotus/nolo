@@ -1,3 +1,4 @@
+import { hasAssembledAgentPrompt } from "./types";
 import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { createHash } from "node:crypto";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
@@ -287,8 +288,11 @@ export function buildCodexRequestBody(
     routeKind: "codex/responses",
     legacySupportsToolImages: false,
   }));
-  const instructions = collectInstructions(rawMessages, args.agentConfig.prompt);
-  const stableInstructions = collectStablePromptPrefix(rawMessages, args.agentConfig.prompt);
+  // Local message assembly owns the prompt. Only legacy/unassembled callers need
+  // the config fallback; textual overlap is not provenance (it may be user prose).
+  const fallbackPrompt = hasAssembledAgentPrompt(rawMessages) ? undefined : args.agentConfig.prompt;
+  const instructions = collectInstructions(rawMessages, fallbackPrompt);
+  const stableInstructions = collectStablePromptPrefix(rawMessages, fallbackPrompt);
   const tools = toResponsesTools(
     Array.isArray(args.openAiBody.tools) ? (args.openAiBody.tools as any[]) : undefined,
   );

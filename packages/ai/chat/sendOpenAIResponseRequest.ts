@@ -275,7 +275,9 @@ export const sendOpenAIResponseRequest = async ({
   messageMetadata,
   quickChatPerfStartedAt,
   fallbackBodyData,
+  userMessageId,
 }: {
+  userMessageId?: string;
   bodyData: any;
   agentConfig: any;
   thunkApi: any;
@@ -579,6 +581,7 @@ export const sendOpenAIResponseRequest = async ({
         messageId,
         dialogId,
         dialogKey,
+        userMessageId,
       })
     ).unwrap();
 

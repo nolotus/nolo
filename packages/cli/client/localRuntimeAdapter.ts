@@ -1,3 +1,4 @@
+import { openMcpLocalRuntimeManagement, createMcpLocalRuntimeAdapter } from "../mcp/mcpLocalRuntimeAdapter";
 import { createLiveImageSupportResolver } from "./liveImageSupport";
 import { fetchAntigravityAvailableModels } from "../oauth/flows/antigravity";
 import { resolveAgentImageInputSupport } from "../../ai/llm/agentCapabilities";
@@ -909,6 +910,18 @@ export function createCliLocalRuntimeAdapter(
     deps.loopbackRequest ??
     (deps.fetchImpl ? undefined : defaultLoopbackRequest);
   const userId = resolveLocalUserId(deps.env);
+  const prependManualCompactHistory = async (dialogId: string, history: AgentRuntimeChatMessage[]) => {
+    const record = await (await getOrCreateSharedStore(deps)).read(`dialog-${userId}-${dialogId}`);
+    if (!Array.isArray(record?.manualCompactHistory)) return history;
+    const { dialogMessageRecordToAgentRuntimeMessage } = await import("../../agent-runtime/dialogMessageRecord");
+    const seed = record.manualCompactHistory.map((message: any) => {
+      const parsed = dialogMessageRecordToAgentRuntimeMessage(message);
+      if (!parsed) throw new Error("Invalid manual compact history");
+      return parsed;
+    });
+    return [...seed, ...history];
+  };
+
   const resolveLiveImageSupport = createLiveImageSupportResolver(userId, async () => {
     const token = await createOAuthApiKeyRefResolver({
       migration: { enableLegacyMigration: true }, localUserId: userId,
@@ -1434,6 +1447,11 @@ export function createCliLocalRuntimeAdapter(
       } } : {}),
       ...runtimeToolExecutionLimits,
     });
+  let localMcpManagement: ReturnType<typeof openMcpLocalRuntimeManagement> | undefined;
+  const getLocalMcpManagement = () => localMcpManagement ??= openMcpLocalRuntimeManagement({
+    authenticatedUserId: userId!, env: deps.env, createOAuthManager: deps.createMcpOAuthManager,
+  });
+  const localMcpSessions = new Map<AbortSignal, Map<string, Promise<ReturnType<typeof createMcpLocalRuntimeAdapter>>>>();
   let localToolExecutors = buildCurrentToolExecutors();
 
   // 凭据保管库：同一个实例既供 provider 解析密钥，也暴露给 localLoop 做输入隔离
@@ -1688,11 +1706,11 @@ export function createCliLocalRuntimeAdapter(
       const agentConfig = packAgentConfig && userPromptPatches.length
         ? {
             ...packAgentConfig,
-            prompt: [
-              packAgentConfig.prompt,
-              ...userPromptPatches.filter((patch) =>
-                !String(packAgentConfig.prompt ?? "").includes(patch)),
-            ].filter(Boolean).join("\n\n"),
+            // Patches are admitted by the account skill graph and arrive once per
+            // canonical skill identity. Keep them separate from arbitrary prompt
+            // text: substring matching cannot establish runtime contribution ownership.
+            prompt: [packAgentConfig.prompt, ...userPromptPatches]
+              .filter(Boolean).join("\n\n"),
           }
         : packAgentConfig;
       // 读取用户全局设置中的「系统内置 Skill」开关映射，传给工具展开管道，
@@ -1777,12 +1795,12 @@ export function createCliLocalRuntimeAdapter(
         env: deps.env,
         fetchImpl,
       });
-      return loaded.messages;
+      return prependManualCompactHistory(dialogId, loaded.messages);
     },
     // Source-aware variant so a cross-machine resume that could not load the
     // remote history reports `none` instead of looking like a new dialog.
-    loadDialogHistoryWithSource: async (dialogId, options) =>
-      loadCliDialogHistoryWithSource({
+    loadDialogHistoryWithSource: async (dialogId, options) => {
+      const loaded = await loadCliDialogHistoryWithSource({
         strictContinueHistory: options?.strictContinueHistory,
         freshDialog: options?.freshDialog,
         dialogId,
@@ -1792,7 +1810,12 @@ export function createCliLocalRuntimeAdapter(
         log: (message) => {
           logLocalRuntimeDiagnostic("dialog-history", { dialogId, message });
         },
-      }),
+      });
+      const messages = await prependManualCompactHistory(dialogId, loaded.messages);
+      // Seed covers only the pre-fork suffix, not this dialog's own transcript.
+      // Preserve the loader's completeness verdict even when seed is available.
+      return { ...loaded, messages };
+    },
     loadDialogSummary: async (dialogId) =>
       loadCliDialogSummary({
         store: await getOrCreateSharedStore(deps),
@@ -2078,6 +2101,9 @@ export function createCliLocalRuntimeAdapter(
         ...(ownerOriginExecution ? { ownerOriginExecution } : {}),
       });
     },
+    onWorkingHistoryReplaced: () => {
+      (localToolExecutors.readFile as typeof localToolExecutors.readFile & { resetReadLedger?: () => void } | undefined)?.resetReadLedger?.();
+    },
     executeTool: async (call, opts) => {
       const contextualCall = opts?.runtimeContext
         ? { ...call, runtimeContext: opts.runtimeContext }
@@ -2347,7 +2373,41 @@ export function createCliLocalRuntimeAdapter(
         workspaceRoot,
         execShellApproval: deps.execShellApproval,
         ...runtimeToolExecutionLimits,
-        executors: localToolExecutors,
+        executors: call.name === "listMcpConnections" || call.name === "listMcpTools" || call.name === "callMcpTool"
+          ? { ...localToolExecutors, [call.name]: async (mcpCall) => {
+              // Identity and cancellation come from the host, never JSON tool arguments.
+              const dialogId = opts?.runtimeContext?.dialogId ?? deps.parentDialogId;
+              const agentKey = planningCaller.agentKey;
+              const signal = opts?.abortSignal;
+              if (!userId || !agentKey || typeof dialogId !== "string" || !dialogId || !signal) {
+                return { content: JSON.stringify({ ok: false, error: { code: "forbidden" } }) };
+              }
+              try {
+                let entries = localMcpSessions.get(signal);
+                if (!entries) {
+                  entries = new Map(); localMcpSessions.set(signal, entries);
+                  signal.addEventListener("abort", () => {
+                    localMcpSessions.delete(signal);
+                    for (const pending of entries!.values()) void pending.then(mcp => mcp.close()).catch(() => {});
+                  }, { once: true });
+                }
+                const key = JSON.stringify([agentKey, dialogId]);
+                let pending = entries.get(key);
+                if (!pending) {
+                  pending = getLocalMcpManagement()
+                    .then(repository => createMcpLocalRuntimeAdapter({ repository,
+                      identity: { authenticatedUserId: userId, agentKey, dialogId }, signal }));
+                  entries.set(key, pending);
+                }
+                const mcp = await pending;
+                const input = JSON.parse(mcpCall.arguments);
+                const output = call.name === "listMcpConnections" ? await mcp.listMcpConnections() : call.name === "listMcpTools" ? await mcp.listMcpTools(input) : await mcp.callMcpTool(input);
+                return { content: JSON.stringify(output) };
+              } catch {
+                return { content: JSON.stringify({ ok: false, error: { code: signal.aborted ? "cancelled" : "transport_error" } }) };
+              }
+            } }
+          : localToolExecutors,
         // 沙盒分支的 gate 已经跑过（channel 未接管才会落回这里）：把
         // confirmed 传下去，避免破坏性确认在同一调用里弹第二次。
         ...(sandboxGatePassed ? { confirmed: true } : {}),

@@ -9,6 +9,7 @@ import type {
   TonePreset,
 } from "ai/policy/types";
 import type { AgentUpdateField } from "ai/policy/selfUpdateFields";
+import type { UiPlugins } from "app/plugins/uiPlugins";
 
 /**
  * 写失败后「对账」的结论：
@@ -152,6 +153,18 @@ export interface SettingState {
   systemBuiltinSkills: Record<string, boolean>;
 
   /**
+   * UI 插件启用状态（见 `app/plugins/uiPlugins`）。完整映射：每个已知插件 id
+   * 都有 `absent | disabled | enabled` 之一，缺失/非法值归一化为 `absent`。
+   * 随既有 settings record 持久化；只有 `enabled` 才注册 rail 入口、才允许直接
+   * 路由进入面板。关闭不删除本地库与凭据。
+   */
+  uiPlugins: UiPlugins;
+
+  /** Session provenance, published atomically with uiPlugins; never persisted. */
+  uiPluginsOwnerAccountId: string | null;
+  uiPluginsGeneration?: number;
+
+  /**
    * 单调递增的「本地用户意图」世代，只由 setSettings 的乐观发布推进
    * （hydrate 分支绝不推进）。getSettings 在入口记下起始值、应用前比对：
    * 远端读期间用户已改过设置 → 本次 hydrate 整体丢弃，避免同一账号内
@@ -159,6 +172,18 @@ export interface SettingState {
    * 不入设置 record（normalizeSettingChanges 会剥掉它）。
    */
   localIntentEpoch: number;
+
+  /**
+   * 每个设置键最近一次本地意图的世代（与 `localIntentEpoch` 同一次推进写入）。
+   *
+   * 只用于**排队写**的取代判据：一次写只有在同键上出现了更新的本地意图时才允许
+   * 放弃完整 payload。若沿用全局 `localIntentEpoch`，任何无关设置（侧栏宽度、
+   * 执行时长等）都会取消别人已排队还没发出去的写——插件开关因此被静默丢弃
+   * （PLUGIN-PERSIST-UNRELATED-INTENT-001）。
+   *
+   * 纯本地状态：normalizeSettingChanges 会剥掉它，永不入云端 record。
+   */
+  localIntentKeyEpochs?: Record<string, number>;
 
   /**
    * 单调递增的「服务端权威回显」世代，只由权威回显写入推进（当前只有媒体额度

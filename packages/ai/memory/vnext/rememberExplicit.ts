@@ -19,10 +19,11 @@ export async function rememberExplicitVNext(db: any, item: MemoryItem): Promise<
     const createdAt = existing?.createdAt ?? item.createdAt;
     const oldValue = existing?.value && typeof existing.value === "object"
       ? existing.value as Record<string, unknown> : {};
+    // State retains the existing max aggregation; evidence describes only this write.
     const confidence = Math.max(Number(oldValue.confidence) || 0, item.confidence ?? 0);
     const resident = oldValue.resident === true || item.resident === true;
     const evidenceId = `explicit-${digest}-${createHash("sha256").update(JSON.stringify([
-      confidence, item.sourceDialogId ?? null,
+      item.confidence, item.sourceDialogId ?? null, item.provenance ?? null,
     ])).digest("hex").slice(0, 24)}`;
     const evidence = await getMemoryEvidenceVNextStrict(db, ownerId, evidenceId);
     saved = { ...item, id: `vnext-state-${stateId}`, createdAt, confidence,
@@ -35,7 +36,8 @@ export async function rememberExplicitVNext(db: any, item: MemoryItem): Promise<
         createdAt, updatedAt: createdAt,
       }],
       evidence: evidence ? [] : [{
-        id: evidenceId, ownerId, text: item.content, confidence,
+        id: evidenceId, ownerId, text: item.content, confidence: item.confidence,
+        ...(item.provenance ? { provenance: item.provenance } : {}),
         sourceRef: item.sourceDialogId ? `dialog:${item.sourceDialogId}` : `explicit:${digest}`,
         createdAt,
       }],
@@ -44,7 +46,7 @@ export async function rememberExplicitVNext(db: any, item: MemoryItem): Promise<
         value: { ...oldValue, kind: item.kind, subjectType: item.subjectType,
           subjectId: item.subjectId, confidence, resident, visibility: item.visibility,
           tags: item.tags, importance: item.importance, patternKey: item.patternKey, recurrenceEvidence: item.recurrenceEvidence,
-          sourceKind: item.sourceKind, sourceDialogId: item.sourceDialogId },
+          provenance: item.provenance, sourceKind: item.sourceKind, sourceDialogId: item.sourceDialogId },
         evidenceIds: [...new Set([...(existing?.evidenceIds ?? []), evidenceId])],
         createdAt, updatedAt: item.createdAt,
       }],

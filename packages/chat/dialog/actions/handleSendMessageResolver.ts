@@ -1,8 +1,4 @@
 import type { AgentRuntimeOptions } from "ai/agent/types";
-import {
-  PERSONALIZATION_DIALOG_CATEGORY,
-  buildPersonalizationRuntimeOptions,
-} from "ai/policy/personalizationDialog";
 import type { Agent, DialogConfig } from "app/types";
 import {
   resolveDialogRuntimeAgentConfig,
@@ -28,9 +24,6 @@ export function resolveHandleSendMessageContext(input: {
     agentKeyToUse: resolveDialogRuntimeAgentKey(dialogConfig, targetAgentKey),
     agentConfigToUse:
       resolveDialogRuntimeAgentConfig(dialogConfig, targetAgentKey) ?? undefined,
-    effectiveRuntimeOptions:
-      dialogConfig.category === PERSONALIZATION_DIALOG_CATEGORY
-        ? buildPersonalizationRuntimeOptions(runtimeOptions ?? {})
-        : runtimeOptions,
+    effectiveRuntimeOptions: runtimeOptions,
   };
 }

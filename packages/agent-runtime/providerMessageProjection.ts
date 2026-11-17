@@ -11,6 +11,7 @@
 //    落盘（(toolName, content) 纯函数，失败 fail-open 不影响投影文本）。
 //
 // runLocalAgentTurn 主状态机不在这里；这里只有消息形状变换。
+import { AGENT_PROMPT_IN_MESSAGES } from "./types";
 import { evaluateRequestBudget } from "../ai/context/requestBudget";
 import { IMAGE_OMITTED_PLACEHOLDER } from "../ai/agent/imagePreprocessing";
 import { TOOL_HAD_IMAGES, stripToolImages } from "./toolImages";
@@ -25,6 +26,7 @@ import type { AgentExecutionContextMetrics } from "./executionObservation";
 import { sanitizeToolCallPairing } from "./toolCallPairing";
 import {
   clipToolText,
+  isCompleteInstructionOutput,
   resolveToolOutputProfile,
 } from "../ai/agent/toolOutputPolicy";
 import { spillToolOutput } from "./toolSpillStore";
@@ -332,6 +334,9 @@ export function projectToolContentForProvider(args: {
     : rawContent;
   if (typeof content !== "string") return content;
   if (isSpilledToolOutput(content)) return content;
+  // The executor identifies root instruction candidates and bounds their size.
+  // Keep the already formatted message stable on fresh and historical turns.
+  if (isCompleteInstructionOutput(args.toolName, args.metadata, content)) return content;
   const metadataText = compactToolMetadata(args.metadata);
   // Some tool formatters already append the full metadata JSON to the durable
   // content. Remove that provider-side duplicate and re-add the bounded
@@ -721,6 +726,7 @@ export function buildMessages(args: {
           role: "system" as const,
           content: stableContent,
           stable_prefix_chars: stableContent.length,
+          ...(args.prompt?.trim() ? { [AGENT_PROMPT_IN_MESSAGES]: true as const } : {}),
         }]
       : [];
     const composed = composeProviderMessages({
@@ -753,7 +759,11 @@ export function buildMessages(args: {
     .filter(Boolean)
     .join("\n\n");
   const prefix: AgentRuntimeChatMessage[] = systemContent
-    ? [{ role: "system" as const, content: systemContent }]
+    ? [{
+        role: "system" as const,
+        content: systemContent,
+        ...(args.prompt?.trim() ? { [AGENT_PROMPT_IN_MESSAGES]: true as const } : {}),
+      }]
     : [];
   const composed = composeProviderMessages({
     prefix,

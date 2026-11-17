@@ -1843,7 +1843,15 @@ const ToolMessageContent: React.FC<ToolMessageContentProps> = (props) => {
 
   return (
     <div  {...withLiteralClass("t-content-root", contentStyles.contentRoot)}>
-      {Component ? (
+      {normalizedRawData?.error === "knowledge_capture_requires_confirmation" && normalizedRawData?.preview ? (
+        <section aria-label="待确认保存内容">
+          <strong>待确认：{normalizedRawData.operation}</strong>
+          <p>目标空间：{normalizedRawData.preview.spaceId || "无空间（私人内容）"}</p>
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxWidth: "100%" }}>
+            {JSON.stringify(normalizedRawData.preview, null, 2)}
+          </pre>
+        </section>
+      ) : Component ? (
         <Component {...props} rawData={normalizedRawData} />
       ) : (
         <LazyJsonDump data={normalizedRawData} />

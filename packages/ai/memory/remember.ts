@@ -3,9 +3,9 @@ import { createMemoryItem } from "./store";
 import { rememberExplicitVNext } from "./vnext/rememberExplicit";
 import { loadExplicitMemoryItems } from "./vnext/explicitItems";
 import { tokenize } from "./rank";
-import { EXPLICIT_REMEMBER_PREFIX_REGEX } from "./constants";
 import type {
   MemoryItem,
+  MemoryProvenance,
   MemoryKind,
   MemoryOwnerType,
   MemorySubjectType,
@@ -31,6 +31,8 @@ export interface RememberMemoryInput {
    * 默认 "agent-inferred"（向后兼容：现有调用方不传 source 时保持旧行为）。
    */
   source?: RememberMemorySource;
+  /** Declared provenance, independent of user-directive authority. */
+  provenance?: MemoryProvenance;
   /**
    * procedural 的复现证据：这个流程/排障步骤此前在什么时候遇到过。
    *
@@ -55,8 +57,7 @@ export interface RememberMemoryInput {
    * 常驻偏好请求：要求这条记忆无条件进入 overlay 常驻区（不参与话题排序）。
    *
    * 硬门（全满足才生效）：effective subjectType=user ∧
-   * sourceKind=explicit-user-directive（source="user-directive" 或内容带
-   * EXPLICIT_REMEMBER_PREFIX_REGEX 显式前缀）∧ content ≤240 字符。
+   * sourceKind=explicit-user-directive（source="user-directive"）∧ content ≤240 字符。
    * 任一不满足则忽略 resident（降级为普通条目），拒绝原因见
    * result.residentIgnoredReason。
    */
@@ -158,17 +159,9 @@ const buildMemoryTags = (ownerType: MemoryOwnerType, kind: MemoryKind): string[]
  */
 export const RESIDENT_MAX_CONTENT_CHARS = 240;
 
-/**
- * 显式用户指令判定——与 sourceKind 落库共用同一表达式：
- * - source="user-directive"：调用方（capture 流程 / server 显式来源）明确标注；
- * - 内容带 EXPLICIT_REMEMBER_PREFIX_REGEX 显式前缀（「记住/请记住/以后记住/你要记住」）：
- *   用户亲口下达的祈使句，按 explicit-user-directive 处理。
- * 两处共用同一判定，避免"落库算 explicit、resident 门禁算 agent-tool"式漂移。
- */
-const isExplicitUserDirectiveWrite = (
-  source: RememberMemorySource,
-  content: string
-): boolean => source === "user-directive" || EXPLICIT_REMEMBER_PREFIX_REGEX.test(content);
+/** Only the existing directive channel confers directive authority; content is not proof. */
+const isExplicitUserDirectiveWrite = (source: RememberMemorySource): boolean =>
+  source === "user-directive";
 
 /**
  * resident 硬门：subjectType=user ∧ explicit-user-directive ∧ ≤240 字符。
@@ -194,7 +187,7 @@ const resolveResidentGate = (input: {
     return {
       applied: false,
       reason:
-        'resident 仅支持用户明确指令来源（source="user-directive"，或内容带「记住/请记住」等显式前缀）；' +
+        'resident 仅支持用户明确指令来源（source="user-directive"）；' +
         "agent 推断/工具自记的条目不能常驻。",
     };
   }
@@ -248,8 +241,8 @@ export const rememberMemory = async (
   const agentKey = input.agentKey?.trim() || null;
   const memorySubjectId = input.memorySubjectId?.trim() || agentKey;
   const source = input.source ?? "agent-inferred";
-  // sourceKind 落库与 resident 门禁共用同一显式判定（含显式前缀路径）。
-  const explicitUserDirective = isExplicitUserDirectiveWrite(source, content);
+  // sourceKind 落库与 resident 门禁共用同一显式判定。
+  const explicitUserDirective = isExplicitUserDirectiveWrite(source);
   const residentRequested = input.resident === true;
   // 每个 target 的 resident 门禁结果：把拒绝原因带回给调用方。
   const residentGates: Array<{ applied: boolean; reason?: string }> = [];
@@ -295,7 +288,8 @@ export const rememberMemory = async (
         // sourceKind 显式落库：此前全靠 getMemorySourceKind 从 patternKey 反推，
         // 导致全库 220 条 sourceKind 均为 undefined，overlay 无从区分
         // 「用户明确说的」与「agent 自己猜的」。派生函数保留给历史条目兜底。
-        // explicit 判定含显式前缀路径，与 resident 门禁共用（见 isExplicitUserDirectiveWrite）。
+        // explicit 判定与 resident 门禁共用。
+        ...(input.provenance === "verified" || input.provenance === "stated" || input.provenance === "inferred" ? { provenance: input.provenance } : {}),
         sourceKind: explicitUserDirective ? "explicit-user-directive" : "agent-tool",
         sourceDialogId: input.dialogId ?? undefined,
         ...residentFields,

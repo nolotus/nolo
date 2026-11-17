@@ -28,8 +28,10 @@ import {
 } from "app/music/musicHistoryStore";
 import {
   DESKTOP_FOLDER_SELECTION_EVENT,
-  readSelectedDesktopFolderProject,
 } from "chat/web/desktopFolderProjects";
+
+import { readMusicLibraries, readSelectedMusicLibrary, selectMusicLibrary, createMusicLibrary, MUSIC_LIBRARIES_EVENT, type MusicLibrary } from "app/music/localMusicLibraries";
+import { LocalMusicLibraryPanel } from "app/music/LocalMusicLibraryPanel";
 
 export function formatMusicTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
@@ -129,7 +131,7 @@ function getLocalFetch(): FetchLike {
 function readCurrentProjectId(): string | null {
   try {
     if (typeof localStorage === "undefined" || !localStorage) return null;
-    return readSelectedDesktopFolderProject(localStorage)?.id ?? null;
+    return readSelectedMusicLibrary(localStorage)?.id ?? null;
   } catch {
     return null;
   }
@@ -149,7 +151,7 @@ export async function searchLocal(
       tracks: [],
       total: 0,
       reason: "no-project",
-      message: "本地音乐需要绑定项目",
+      message: "请选择音乐库",
     };
   }
   try {
@@ -218,9 +220,10 @@ export async function fetchLocalStatus(
 
 export type MusicWidgetProps = {
   onClose?: () => void;
+  standalone?: boolean;
 };
 
-export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
+export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose, standalone = false }) => {
   const {
     connected,
     nickname,
@@ -244,20 +247,39 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
   // 本地库状态（按项目隔离）
   const [localStatus, setLocalStatus] = useState<LocalMusicStatusResult | null>(null);
   const [projectId, setProjectId] = useState<string | null>(() => readCurrentProjectId());
+  const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
+  const [manageLibrary, setManageLibrary] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [creatingLibrary, setCreatingLibrary] = useState(false);
+  const activeLibraryRef = useRef(projectId);
+  activeLibraryRef.current = projectId;
 
   useEffect(() => {
-    const update = () => setProjectId(readCurrentProjectId());
+    const update = () => {
+      setProjectId(readCurrentProjectId());
+      try { setLibraries(readMusicLibraries(localStorage)); }
+      catch { setLibraries([]); }
+    };
     update();
     const win = typeof window !== "undefined" ? window : null;
     win?.addEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
+    win?.addEventListener("storage", update);
+    win?.addEventListener(MUSIC_LIBRARIES_EVENT, update);
     return () => {
       win?.removeEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
+      win?.removeEventListener("storage", update);
+      win?.removeEventListener(MUSIC_LIBRARIES_EVENT, update);
     };
   }, []);
 
   // 历史按项目隔离：项目切换时切换历史作用域
   useEffect(() => {
     setHistoryProjectScope(projectId);
+    setLocalResults([]);
+    setSearching(false);
+    setHasSearched(false);
+    setSearchError(undefined);
+    setLocalStatus(null);
   }, [projectId]);
 
   const refreshLocalStatus = useCallback(async () => {
@@ -376,6 +398,7 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
 
       const [localRes, cloudRes] = await Promise.all([localPromise, cloudPromise]);
 
+      if (activeLibraryRef.current !== projectId) return;
       let hasAnySuccess = false;
       const nextLocal: any[] = [];
       const nextCloud: any[] = [];
@@ -414,11 +437,12 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
         setSearchError(foundError);
       }
     } catch (err) {
+      if (activeLibraryRef.current !== projectId) return;
       setLocalResults([]);
       setCloudResults([]);
       setSearchError(err instanceof Error ? err.message : "搜索失败，请稍后再试");
     } finally {
-      setSearching(false);
+      if (activeLibraryRef.current === projectId) setSearching(false);
     }
   }, [keyword, connected, projectId]);
 
@@ -449,7 +473,7 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
   const currentCover = getSongCover(currentSong);
 
   return (
-    <div className="music-widget-panel" data-testid="music-widget">
+    <div className={`music-widget-panel${standalone ? " music-widget-panel--standalone" : ""}`} data-testid="music-widget">
       {/* 头部 */}
       <div className="music-widget-header">
         <div className="music-widget-header__title-row">
@@ -491,9 +515,34 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
       <div className="music-widget-body">
         <div className="music-widget-connected" data-testid="music-player-panel">
           {/* 本地音乐库状态条 */}
+          <div className="music-widget-local-status">
+            <label>音乐库 <select aria-label="音乐库" value={projectId ?? ""} onChange={(event) => {
+              if (event.target.value) selectMusicLibrary(localStorage, event.target.value);
+            }}>
+              <option value="" disabled>选择音乐库</option>
+              {libraries.map((library) => <option key={library.id} value={library.id}>{library.name}</option>)}
+            </select></label>
+            <button type="button" className="music-widget-btn-refresh" aria-expanded={manageLibrary}
+              onClick={() => setManageLibrary((open) => !open)}>管理音乐库</button>
+          </div>
+          <button type="button" className="music-widget-btn-refresh" disabled={creatingLibrary} onClick={async () => {
+            setCreatingLibrary(true); setLibraryError(null);
+            try {
+              const response = await getLocalFetch()("/api/desktop/pick-folder", { method: "POST" });
+              if (!response.ok) return;
+              const result = await response.json();
+              if (!result?.path) return;
+              createMusicLibrary(localStorage, result.path);
+              setManageLibrary(true);
+            } catch (cause) { setLibraryError(cause instanceof Error ? cause.message : "创建音乐库失败"); }
+            finally { setCreatingLibrary(false); }
+          }}>选择目录创建音乐库</button>
+          {libraryError && <p role="alert">{libraryError}</p>}
+          {manageLibrary && <LocalMusicLibraryPanel key={projectId ?? "none"} project={libraries.find((library) => library.id === projectId) ?? null} />}
+
           {!projectId ? (
             <div className="music-widget-local-status" data-testid="music-local-status">
-              <span>本地音乐需要绑定项目：先在项目里选择一个文件夹</span>
+              <span>请选择音乐库后管理本地音乐</span>
             </div>
           ) : localStatus?.stats ? (
             <div className="music-widget-local-status" data-testid="music-local-status">
@@ -901,6 +950,10 @@ export const MusicWidget: React.FC<MusicWidgetProps> = ({ onClose }) => {
           font-family: inherit;
           z-index: 1000;
         }
+        .music-widget-panel.music-widget-panel--standalone {
+          width: 100%; max-width: none; max-height: none; box-shadow: none;
+        }
+        .music-widget-panel--standalone .music-widget-body { max-height: none; }
         .music-widget-header {
           display: flex;
           align-items: center;

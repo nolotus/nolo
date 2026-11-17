@@ -32,7 +32,7 @@ import {
   runProgressStalled,
 } from "./runProgressHeartbeat";
 import { t } from "./i18n";
-import { formatProcZoneLines, formatRunZoneLines, planRunZoneRows, PROC_LINGER_MAX_ROWS, procZoneFinished, remoteTaskUnsettled, resolveRunZoneMaxRows, runZoneRunRowBudget, type RemoteTaskCarrier, type RunZoneLayout, type RunZoneProc } from "./runZoneLines";
+import { RUN_ZONE_MAX_ROWS, formatBackgroundSummary, formatProcZoneLines, formatRunZoneLines, planRunZoneRows, PROC_LINGER_MAX_ROWS, procZoneFinished, remoteTaskUnsettled, resolveRunZoneMaxRows, runZoneRunRowBudget, type RemoteTaskCarrier, type RunZoneLayout, type RunZoneProc } from "./runZoneLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
@@ -47,7 +47,7 @@ export const RUN_DOCK_LINGER_MS = 5_000;
  */
 export const RUN_DOCK_STALE_MS = 5 * 60_000;
 /** 同时展开的 run 行数上限；面板吃的是 scroll region，必须有硬顶。 */
-export const RUN_DOCK_MAX_ROWS = 3;
+export const RUN_DOCK_MAX_ROWS = RUN_ZONE_MAX_ROWS;
 /** 记住多少个已退休的 runId，用来挡住对已完成 run 的持续轮询。 */
 const RETIRED_MEMORY = 64;
 
@@ -87,6 +87,8 @@ export type RunDock = {
    * 聊天层只在这条 run 确实可见时才省略 startAgentRun 启动回执。
    */
   visibleRunIds(): ReadonlySet<string>;
+  /** Compact composer projection; does not claim individual run rows are visible. */
+  getSummaryLines(colorEnabled?: boolean, layout?: RunZoneLayout): string[];
   /** 会话结束时调用：停 timer 并清空。 */
   dispose(): void;
 };
@@ -351,6 +353,7 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     if (ordered.length === 0 && activeProcs.length === 0 && lingeringProcs.length === 0) {
       return [];
     }
+    if (layout?.maxEntries === 0) return [];
     // 进程行只在此时才可能发现自己该转表：后台进程是外部 registry 拉起来的，
     // dock 不会收到它们的 update()，靠每一次重绘自检补上心跳（残留行也要转，
     // 否则它永远不会到点消失）。
@@ -360,50 +363,23 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     // 契约（沿用既有运行区语义，别改）：resolveRunZoneMaxRows 给出的是**条目**
     // 预算，条目溢出时格式化器会额外追加一行 `+N more`。所以面板的真实行高上限
     // 是 totalRows + 1，既有用例（短终端 1 条 + `+2 more` = 2 行）就是这个语义。
-    const totalRows = resolveRunZoneMaxRows(maxRows, layout?.rows);
-    const maxPanelRows = totalRows + 1;
-    // 进程行与 run 行共用这块高度预算，run 优先；活跃进程非空时给它们留一条——
-    // 这一条原本在状态行是常驻可见的，搬过来不能反而被几个并发 run 挤成不可见。
-    // 残留不参与 reserve：它们是「刚过去的事」，不该抢活跃项的位置。
+    const totalRows = layout?.maxEntries ?? Math.max(ordered.length > 0 && activeProcs.length > 0 ? 2 : 1,
+      resolveRunZoneMaxRows(maxRows, layout?.rows));
+    // One entry budget across both sources. Overflow is one shared metadata row.
+    const runSnapshots = ordered.map(entry => entry.snapshot);
     const runBudget = runZoneRunRowBudget(totalRows, activeProcs.length);
-
-    // 固定运行区（顶部，每条一行 `⚙ title · agent · 已耗时 · tools`）。单/多
-    // run 走同一个格式化器——运行区就是一张可扫的列表，不是「单条细看 / 多条
-    // 汇总」两种形态。normal 模式剥 ANSI/OSC、隐 raw error/log 的 safe 投影
-    // 由 formatRunZoneLines 内部兜底完成。
-    const runSnapshots = ordered.map((entry) => entry.snapshot);
-    lastVisibleRunIds = new Set(
-      planRunZoneRows(runSnapshots, runBudget, layout)
-        .shown.filter((snapshot) => typeof snapshot.runId === "string" && snapshot.runId.length > 0)
-        .map((snapshot) => snapshot.runId)
-    );
-    const runLines =
-      runSnapshots.length > 0
-        ? formatRunZoneLines(runSnapshots, colorEnabled, at, runBudget, layout)
-        : [];
-
-    // 剩余预算按 run 的**实际**行数扣（含它那行折叠标记），不按计划条目数扣：
-    // 少算这一步就是上一版的超行来源。
-    const remainingRows = Math.max(0, maxPanelRows - runLines.length);
-    let procLines =
-      activeProcs.length > 0 && remainingRows > 0
-        ? formatProcZoneLines(activeProcs, colorEnabled, at, remainingRows, layout)
-        : [];
-    // 两侧同时溢出时折叠标记会让总高再多一行；面板高度是硬约束（顶掉的是历史
-    // 行），所以 proc 侧的折叠标记让位——被裁的是 `还有 N 个`，不是进程事实行，
-    // 全量清单仍在 /procs 里。
-    if (procLines.length > remainingRows) {
-      procLines = procLines.slice(0, remainingRows);
-    }
-
-    // 残留：只吃活跃项剩下的行，且本身不再折叠（超过上限的已在上面 slice 掉）。
-    // 一行都剩不下来时宁可不显示——它们是补充信息，不该把活跃 run 顶掉。
-    const lingerBudget = Math.max(0, maxPanelRows - runLines.length - procLines.length);
-    const lingerShown = lingeringProcs.slice(0, Math.min(PROC_LINGER_MAX_ROWS, lingerBudget));
-    const lingerLines =
-      lingerShown.length > 0
-        ? formatProcZoneLines(lingerShown, colorEnabled, at, lingerShown.length, layout)
-        : [];
+    const shownRuns = runSnapshots.slice(0, runBudget);
+    const procBudget = Math.max(0, totalRows - shownRuns.length);
+    const shownProcs = activeProcs.slice(0, procBudget);
+    const lingerShown = lingeringProcs.slice(0, Math.min(PROC_LINGER_MAX_ROWS,
+      Math.max(0, totalRows - shownRuns.length - shownProcs.length)));
+    const formatLayout = { columns: layout?.columns };
+    lastVisibleRunIds = new Set(shownRuns.map(snapshot => snapshot.runId).filter(Boolean));
+    const runLines = formatRunZoneLines(shownRuns, colorEnabled, at, shownRuns.length, formatLayout);
+    const procLines = formatProcZoneLines(shownProcs, colorEnabled, at, shownProcs.length, formatLayout);
+    const lingerLines = formatProcZoneLines(lingerShown, colorEnabled, at, lingerShown.length, formatLayout);
+    const hidden = runSnapshots.length - shownRuns.length + activeProcs.length - shownProcs.length;
+    if (hidden > 0) lingerLines.push(`  ${t("runZoneMore", String(hidden))}`);
 
     return [...runLines, ...procLines, ...lingerLines];
   };
@@ -414,6 +390,13 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     clear,
     getRuns,
     getLines,
+    getSummaryLines: (colorEnabled = false, layout?: RunZoneLayout): string[] => {
+      // Summary does not establish or erase the detailed projection's visibility.
+      prune();
+      const procs = runningProcs();
+      if (procs.length) ensureTimer();
+      return formatBackgroundSummary(getRuns(), procs, colorEnabled, layout?.columns);
+    },
     visibleRunIds: (): ReadonlySet<string> => lastVisibleRunIds,
     dispose() {
       disposed = true;

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { toErrorMessage } from "core/errorMessage";
@@ -246,6 +247,13 @@ export async function connectCliAuthorityBroker(args: {
     close: () => runWithSelfHealing((activeClient) => activeClient.close()),
     get: (key: string) =>
       runWithSelfHealing((activeClient) => activeClient.get(key)),
+    conditionalPut: (key: string, expectedRevision: number | null, value: unknown) =>
+      runWithSelfHealing((activeClient) => {
+        if (!activeClient.conditionalPut) {
+          throw new Error("CLI authority broker does not support conditionalPut");
+        }
+        return activeClient.conditionalPut(key, expectedRevision, value);
+      }),
     put: (key: string, value: unknown) =>
       runWithSelfHealing((activeClient) => activeClient.put(key, value)),
     del: (key: string) =>
@@ -363,4 +371,35 @@ export async function getDefaultCliLocalRuntimeDb(
 ) {
   const authorityStore = await getDefaultCliLocalRuntimeAuthority(options);
   return createLegacyServerDb(authorityStore);
+}
+
+
+/** Narrow lifecycle entry for local MCP consumers: generated, never-reused IDs;
+ * no delete, explicit-ID create, or unconditional write capability is exposed.
+ * Disabling is an update with enabled:false, not deletion. Callers must not mix raw
+ * authority writes into this namespace. No storage-generation/ABA guarantee is made.
+ */
+export function createCliLocalMcpConnectionRevisionWriter(
+  authority: AuthorityStore,
+  authenticatedUserId: string,
+) {
+  if (!authenticatedUserId) throw new Error("Local MCP connection owner is required");
+  const prefix = `mcp-private:v1:${encodeURIComponent(authenticatedUserId)}:connection:`;
+  const conditionalPut = authority.conditionalPut?.bind(authority);
+  if (!conditionalPut) throw new Error("CLI authority broker does not support conditionalPut");
+  return {
+    async create(value: Record<string, unknown>) {
+      const id = randomUUID();
+      const result = await conditionalPut(prefix + id, null, { ...value, revision: 1 });
+      // A collision is never retried with the same ID or treated as successful creation.
+      return { id, ...result };
+    },
+    async update(id: string, expectedRevision: number, value: Record<string, unknown>) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ||
+          !Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= Number.MAX_SAFE_INTEGER) {
+        throw new Error("Invalid local MCP connection identity or revision");
+      }
+      return conditionalPut(prefix + id, expectedRevision, { ...value, revision: expectedRevision + 1 });
+    },
+  };
 }

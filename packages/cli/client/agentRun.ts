@@ -31,6 +31,7 @@ import { resolveCliLocalRuntimeKeyCapability } from "../../ai/tools/agent/cliLoc
 import { isAntigravityOAuthAgent } from "../../agent-runtime/antigravityOAuth";
 import { isOAuthApiKeyRef } from "../../agent-runtime/serverProxyPolicy";
 import { resolveLocalUserId } from "./cliAgentConfigHelpers";
+import { resolveInjectedTurnUserMessageId, resolvePersistedTurnUserMessageId } from "./cliTurnUserMessage";
 import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
@@ -2503,6 +2504,26 @@ async function executeLocalAgentTurnForCliWithAdapter(
     options.output.write(`[nolo] ${error instanceof Error ? error.message : String(error)}\n`);
     return { exitCode: 1, localError: error };
   }
+  // 工作记忆工具（`mode: work`）需要「本轮已持久化的用户消息 id」作为宿主事实。
+  // 只接受明确来源（批量唯一消息 id / 本轮 receipt-backed userMessages），并回读
+  // 校验确实存在于该 dialog；解析不到就不注入，工具会明确拒绝写入而不是猜来源。
+  try {
+    const persistedUserMessageId = await resolvePersistedTurnUserMessageId({
+      store: await getOrCreateSharedStore({
+        env: options.env,
+        cwd: options.localRuntimeCwd,
+        fetchImpl: options.fetchImpl,
+      }),
+      dialogId: currentDialogId,
+      batchMessageIds: batchIdentity?.messageIds,
+      userMessages: options.userMessages,
+    });
+    if (persistedUserMessageId) {
+      runtimeContextWithOwnership.userMessageId = persistedUserMessageId;
+    }
+  } catch {
+    // 解析失败不是 turn 失败：只是本轮工具写工作记忆会被拒。
+  }
   const markBatch = async (phase: "requested" | "completed") => {
     if (!batchIdentity) return;
     const store = await getOrCreateSharedStore({ env: options.env, cwd: options.localRuntimeCwd, fetchImpl: options.fetchImpl });
@@ -2670,6 +2691,14 @@ async function executeLocalAgentTurnForCliWithAdapter(
       inheritedFromDialogKey: options.inheritedFromDialogKey,
       parentDialogId: options.parentDialogId,
       runtimeContext: runtimeContextWithOwnership,
+      resolveInjectedUserMessageId: async messages => resolveInjectedTurnUserMessageId({
+        store: await getOrCreateSharedStore({
+          env: options.env, cwd: options.localRuntimeCwd, fetchImpl: options.fetchImpl,
+        }),
+        userId: resolveLocalUserId(options.env),
+        dialogId: currentDialogId,
+        userMessages: messages,
+      }),
       runKind: options.env.NOLO_AGENT_RUN_CHILD === "1" ? "subtask" : "interactive",
       // 展示能力由宿主声明（TUI=narrow），非交互 CLI/后台留空 → unknown；
       // 排版段只在能力已知时由 localLoop 注入，server 线不读该字段。

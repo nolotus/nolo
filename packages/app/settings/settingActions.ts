@@ -19,9 +19,15 @@ export const updateSettingsState = createAction<Partial<SettingState>>(
 /**
  * Advance the local user-intent generation. Dispatched only when a user settings
  * change is published locally (setSettings), so an in-flight hydrate can tell
- * that its cloud read predates newer local intent and must be discarded.
+ * that its cloud read predates newer local intent and must be discarded, and a
+ * queued cloud write can tell whether **its own keys** were replaced.
+ *
+ * `keys` = 本次意图改过的设置键；reducer 用它记录「每个键最近一次意图世代」，
+ * 取代判据按同键判定（无关键的新意图不得取消本次写）。
  */
-export const bumpLocalIntentEpoch = createAction("settings/_bumpLocalIntentEpoch");
+export const bumpLocalIntentEpoch = createAction<
+  { keys?: readonly string[] } | undefined
+>("settings/_bumpLocalIntentEpoch");
 
 /**
  * 记录（或清除，传 null）最近一次设置写云端失败的状态。由 setSettings 在
@@ -43,3 +49,6 @@ export const recordSettingsWriteFailure = createAction<SettingsWriteFailure | nu
 export const recordServerAuthorityEcho = createAction<number>(
   "settings/_recordServerAuthorityEcho",
 );
+
+/** Publish plugin values and their session provenance in one reducer action. */
+export const publishUiPlugins = createAction<{ value: SettingState["uiPlugins"]; accountId: string; generation: number | undefined }>("settings/_publishUiPlugins");

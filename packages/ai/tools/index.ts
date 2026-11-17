@@ -497,6 +497,8 @@ export type ToolExecutorContext = {
    * 缺失如实上报给端点（端点拒绝无父对话的订阅）。
    */
   dialogId?: string;
+  /** Persisted user message bound by the host to this specific turn. */
+  userMessageId?: string;
   /**
    * 定档信号（exa_search 用，契约见 docs/plans/2026-10-21-exa-3-0-sync.md §3/§10）。
    *
@@ -725,7 +727,7 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: updateUserPreferenceProfileFunc,
     description: {
       name: "updateUserPreferenceProfile",
-      description: "保存用户的语气、知识沉淀、空间读取等个性化偏好设置。",
+      description: "保存用户的全局提示词等个性化设置。",
       category: "用户设置 / 个性化",
     },
     behavior: "action",

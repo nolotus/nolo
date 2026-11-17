@@ -8,6 +8,8 @@ import {
   resolvePaginationArgs,
   toDiscoverySafeAgentSummary,
 } from "../agent/agentDiscovery";
+import { injectSpeedContextIntoListAgentsResult } from "../agent/candidateSpeedContext";
+import { isServerDispatchSpeedSource } from "../agent/dispatchSpeedProvenance";
 import {
   mergeAvailabilityDeadline,
   resolveCredentialKeyWithFallback,
@@ -629,7 +631,7 @@ export type { SafeAgentSummaryForCard };
 export const listAgentsFunctionSchema = {
   name: "listAgents",
   description:
-    "List Nolo agents available for delegation as safe summaries. Returns planningRecommendation: conditional advice only when planning is needed and the candidate is suitable; simple questions need no extra planning call. action self/delegate, reason, currentTier, optional agentKey/recommendedTier, poolComplete, requiresPaidApproval. Caller identity/model/runKind are host-owned, not tool arguments. Unknown tiers are not ranked; incomplete pools cannot establish a highest candidate. Bounded subtasks do not delegate planning. Recommendation is not authorization and never starts a run; paid channels require separate approval. By default (scope='all') returns the deduplicated union of the user's own/favorite agents and public/shared agents. scope='public' returns only public/shared agents. Public agents may consume platform credits - check each agent's billingSource before dispatching. The payload returns `credentialGroups` summarizing independent credential capacities (credentialGroup, credentialKind, agentCount, and availableAt recovery timestamps). Orchestration discipline: Never fan out parallel runs on one credential; fan out only across distinct credentialGroups. A channel verdict is valid for the current dispatch attempt only; always re-read availability before dispatching, and never reuse a failure verdict from an earlier attempt. On config_unresolved-class errors, retry once before degrading. Reserve the strongest private channels for review; execution should use cheap channels. The `agents` array carries a compact agent-selection projection per agent: runnable `agentKey` (agent-<userId>-<id> owned, agent-pub-<id> public), name, model, provider, apiSource, billingSource ('user_subscription' | 'owner_subscription' | 'user_api' | 'platform_credits' | 'local'), tools, isFavorite, isOAuth, isOwned, isPublic, credentialGroup, credentialKind. Copy `agentKey` verbatim into startAgentRun. All agents are listed, including rate-limited (429) ones: cooldown agents carry `availabilityStatus` / `availabilityReason` / `nextAvailableAt` as reference info, not a dispatch gate (quota is informational; requests are still sent and upstream results are reported as-is). `unavailableCount` reports how many agents are currently rate-limited. `showUnavailable` is deprecated and has no effect (kept for compatibility). Set `verbose: true` for full safe summary details.",
+    "List Nolo agents available for delegation as safe summaries. Returns planningRecommendation: conditional advice only when planning is needed and the candidate is suitable; simple questions need no extra planning call. action self/delegate, reason, currentTier, optional agentKey/recommendedTier, poolComplete, requiresPaidApproval. Caller identity/model/runKind are host-owned, not tool arguments. Unknown tiers are not ranked; incomplete pools cannot establish a highest candidate. Bounded subtasks do not delegate planning. Recommendation is not authorization and never starts a run; paid channels require separate approval. By default (scope='all') returns the deduplicated union of the user's own/favorite agents and public/shared agents. scope='public' returns only public/shared agents. Public agents may consume platform credits - check each agent's billingSource before dispatching. The payload returns `credentialGroups` summarizing independent credential capacities (credentialGroup, credentialKind, agentCount, and availableAt recovery timestamps). Orchestration discipline: Fan out independent runs concurrently; sharing a credential alone is not a dependency. Same-credential concurrency is normally allowed subject to server admission budgets and upstream 429 limits; reduce concurrency or switch channels when needed. Spread load across credentialGroups when useful. Unknown credentials are not assumed independent: the dispatch guard limits only same-batch concurrency among those candidates (one at a time unless allowUnknownCredential explicitly confirms the risk); unrelated channels and work remain concurrent. A channel verdict is valid for the current dispatch attempt only; always re-read availability before dispatching, and never reuse a failure verdict from an earlier attempt. On config_unresolved-class errors, retry once before degrading. Choose a channel by task capability and applicable cost authorization; higher tier alone does not require reserving it for review. The `agents` array carries a compact agent-selection projection per agent: runnable `agentKey` (agent-<userId>-<id> owned, agent-pub-<id> public), name, model, provider, apiSource, billingSource ('user_subscription' | 'owner_subscription' | 'user_api' | 'platform_credits' | 'local'), tools, isFavorite, isOAuth, isOwned, isPublic, credentialGroup, credentialKind. Copy `agentKey` verbatim into startAgentRun. All agents are listed, including rate-limited (429) ones: cooldown agents carry `availabilityStatus` / `availabilityReason` / `nextAvailableAt` as reference info, not a dispatch gate (quota is informational; requests are still sent and upstream results are reported as-is). `unavailableCount` reports how many agents are currently rate-limited. `showUnavailable` is deprecated and has no effect (kept for compatibility). Set `verbose: true` for full safe summary details.",
   parameters: {
     type: "object",
     properties: {
@@ -648,8 +650,11 @@ export const listAgentsFunctionSchema = {
           "Optional case-insensitive search substring matching agent name, model, provider, handle, or agentKey. Use to locate specific candidates like 'opus', 'devin', or 'claude'.",
       },
       verbose: { type: "boolean", description: "Return the full safe-summary field set (prices, introduction, modelAbility, timestamps) for troubleshooting. Default false returns the compact agent-selection projection." },
-      compact: { type: "boolean", description: "Explicit compact projection mode. Retains essential agent-selection and admission evidence (agentKey, name, model, tier, billingSource, availabilityStatus, credentialGroup, tools, apiSource, credentialed, quota, economics) while omitting non-admission verbose text like introduction and modelAbility." },
+      compact: { type: "boolean", description: "Explicit compact projection mode. Responses have hasMore and nextOffset when more locally fetched candidates remain; repeat with offset=nextOffset and the same filters. truncated separately indicates an incomplete upstream pool. Oversized individual candidates return an error. Retains essential agent-selection and admission evidence (agentKey, name, model, tier, billingSource, availabilityStatus, credentialGroup, tools, apiSource, credentialed, quota, economics) while omitting non-admission verbose text like introduction and modelAbility." },
       offset: { type: "integer", description: "Optional pagination offset for agent candidates. Default 0." },
+      fragmentOffset: { type: "integer", description: "Recover an oversized candidate as JSON fragments; start at 0, then use nextFragmentOffset with the same offset, filters, fragmentAgentKey and returned fragmentDigest." },
+      fragmentAgentKey: { type: "string", description: "Exact agentKey from the oversized-candidate response." },
+      fragmentDigest: { type: "string", description: "SHA-256 digest from the first fragment; required for subsequent fragments to detect candidate changes." },
     },
   },
 } as const;
@@ -659,15 +664,20 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
   // 匿名（缺 currentUserId / currentToken）：既无法确定自有收藏，也无法认证公开目录请求。
   // 直接返回空结果，且不向公开目录发请求（默认 scope='all' 也不拉公共目录）。
   if (!runtime?.currentUserId || !runtime?.currentToken) {
+    const rawData = {
+      success: true,
+      ...buildAgentDiscoveryResult({ agents: [], upstreamTruncated: true,
+        caller: { agentKey: context?.agentKey, effectiveModel: context?.effectiveModel,
+          runKind: context?.runKind ?? (context?.origin === "agent" ? "subtask" : "interactive") },
+      }),
+    };
+    const delivered = args?.compact === true && args?.verbose !== true
+      ? JSON.parse(await injectSpeedContextIntoListAgentsResult(JSON.stringify(rawData), { compactPage: true, fragmentOffset: args?.fragmentOffset, fragmentAgentKey: args?.fragmentAgentKey, fragmentDigest: args?.fragmentDigest }))
+      : rawData;
     return {
-      rawData: {
-        success: true,
-        ...buildAgentDiscoveryResult({ agents: [], upstreamTruncated: true,
-          caller: { agentKey: context?.agentKey, effectiveModel: context?.effectiveModel,
-            runKind: context?.runKind ?? (context?.origin === "agent" ? "subtask" : "interactive") },
-        }),
-      },
+      rawData: delivered,
       displayData: formatAgentListCard([] as any),
+      ...(args?.compact === true && args?.verbose !== true ? { llmContext: JSON.stringify(delivered) } : {}),
     };
   }
   const pagination = resolvePaginationArgs({ limit: args?.limit, offset: args?.offset });
@@ -821,8 +831,7 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
     now,
   });
 
-  return {
-    rawData: {
+  const rawData = {
       success: true,
       planningRecommendation: discovery.planningRecommendation,
       total: discovery.total,
@@ -830,13 +839,40 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
       ...(typeof discovery.limit === "number" ? { limit: discovery.limit } : {}),
       ...(discovery.truncated ? { truncated: true } : {}),
       unavailableCount: discovery.unavailableCount,
+      availableCount: discovery.availableCount,
       // 顺序即序列化顺序：agents 在前（派发必需），大块说明字段在后。
       // 限流 agent 已合入 agents（带 availabilityStatus / nextAvailableAt
       // 参考标注），不再单列 unavailableAgents，避免两套真相。
       agents: discovery.agents,
       credentialGroups: discovery.credentialGroups,
-    },
-    displayData: formatAgentListCard(discovery.agents as any),
+    };
+  const delivered = args?.compact === true && args?.verbose !== true
+    ? JSON.parse(await injectSpeedContextIntoListAgentsResult(JSON.stringify(rawData), {
+        compactPage: true,
+        fragmentOffset: args?.fragmentOffset,
+        fragmentAgentKey: args?.fragmentAgentKey,
+        fragmentDigest: args?.fragmentDigest,
+        userId: runtime.currentUserId,
+        // All client hosts provide their local DB through the shared thunk extra.
+        // Local token paths alone are not proof of a dispatched run.
+        db: thunkApi?.extra?.db ? {
+          iterator: (options) => thunkApi.extra.db.iterator(options),
+          isDispatchRun: async (dialogId, entryPath) => {
+            if (entryPath !== "agent-run") return false;
+            try {
+              return isServerDispatchSpeedSource(
+                await thunkApi.extra.db.get(`dialog-${runtime.currentUserId}-${dialogId}`),
+                dialogId, runtime.currentUserId,
+              );
+            } catch { return false; }
+          },
+        } : null,
+      }))
+    : rawData;
+  return {
+    rawData: delivered,
+    displayData: formatAgentListCard((delivered.agents ?? []) as any),
+    ...(args?.compact === true && args?.verbose !== true ? { llmContext: JSON.stringify(delivered) } : {}),
   };
 }
 

@@ -9,10 +9,11 @@ import {
 import { useCurrentDialogKey } from "chat/dialog/dialogRuntimeStore";
 import {
   DESKTOP_FOLDER_SELECTION_EVENT,
-  readDialogFolderPath,
-  readDialogProjectId,
-  readSelectedDesktopFolderPath,
+  resolveDialogWorkspaceFolder,
 } from "chat/web/desktopFolderProjects";
+import { useUserId } from "identity";
+import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { SPACE_WORKSPACES_CHANGED } from "chat/web/spaceWorkspaces";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 
 /** localStorage 读取面；SSR、隐私模式、配额异常都不能把顶栏弄崩。 */
@@ -30,8 +31,10 @@ function desktopStorage(): PreviewRootStorage | null {
 export interface LocalPreviewRootSources {
   /** `getIsDesktopApp()`。false 时完全走改造前的 Space 字段路径。 */
   isDesktop: boolean;
-  /** 决定优先级的对话；它的 Project 绑定优先于侧栏选中项。 */
+  /** 决定优先级的对话；它的历史 Project 绑定优先于 Space/default 目录。 */
   dialogKey?: string | null;
+  spaceId?: string | null;
+  userId?: string | null;
   /** 历史 Space 字段（网页端唯一来源）。新建/保存的 Space 已不再写它。 */
   legacySpaceBoundFolder?: string | null;
   storage?: PreviewRootStorage | null;
@@ -41,7 +44,7 @@ export interface LocalPreviewRootSources {
  * 本地预览 root 的唯一解析口径——顶栏开关的显隐和面板取 root 必须同源，
  * 否则会出现「有入口但面板是空态」（或反过来）。
  *
- * 桌面端：对话绑定的 Project 目录 → 当前选中的 Project 目录 → null（空态）。
+ * 桌面端：与发送共用对话绑定 / Space / 默认目录解析（空态）。
  *   对话绑定了 Project 但该 Project 已被删除时**不**退回选中项：绑定不能悄悄
  *   指向别的目录（见 desktopFolderProjects 的约定），此时同样是空态。
  * 网页端：只认历史 Space 字段，与改造前逐项一致（不读桌面本地 Project）。
@@ -54,11 +57,8 @@ export function resolveLocalPreviewRoot(
   const { storage } = sources;
   if (!storage) return null;
   try {
-    const dialogKey = sources.dialogKey?.trim();
-    if (dialogKey && readDialogProjectId(storage, dialogKey) !== null) {
-      return readDialogFolderPath(storage, dialogKey);
-    }
-    return readSelectedDesktopFolderPath(storage) ?? null;
+    const workspace = resolveDialogWorkspaceFolder(storage, sources.dialogKey?.trim() || "", sources.spaceId, sources.userId);
+    return workspace.missing ? null : workspace.cwd;
   } catch {
     // 存储读不出来时按「没有目录」处理，不猜一个可能不存在的路径。
     return null;
@@ -76,7 +76,7 @@ export function shouldShowLocalPreviewToggle(
   return contentKeyType === "dialog" && !!root;
 }
 
-/** 侧栏「本地项目」改动后要重新解析：开关得立刻出现/消失，而不是等下次无关重渲染。 */
+/** 历史绑定或直接工作目录改动后要重新解析：开关得立刻出现/消失，而不是等下次无关重渲染。 */
 function useDesktopFolderSelectionVersion(): number {
   const [version, setVersion] = useState(0);
   useEffect(() => {
@@ -84,9 +84,11 @@ function useDesktopFolderSelectionVersion(): number {
     const bump = () => setVersion((value) => value + 1);
     window.addEventListener(DESKTOP_FOLDER_SELECTION_EVENT, bump);
     window.addEventListener("storage", bump);
+    window.addEventListener(SPACE_WORKSPACES_CHANGED, bump);
     return () => {
       window.removeEventListener(DESKTOP_FOLDER_SELECTION_EVENT, bump);
       window.removeEventListener("storage", bump);
+      window.removeEventListener(SPACE_WORKSPACES_CHANGED, bump);
     };
   }, []);
   return version;
@@ -98,16 +100,18 @@ export function useLocalPreviewRoot(
 ): string | null {
   const isDesktop = getIsDesktopApp();
   const dialogKey = useCurrentDialogKey();
+  const spaceId = useCurrentSpaceId();
+  const userId = useUserId();
   const selectionVersion = useDesktopFolderSelectionVersion();
   return useMemo(
     () =>
       resolveLocalPreviewRoot({
         isDesktop,
-        dialogKey,
+        dialogKey, spaceId, userId,
         legacySpaceBoundFolder,
         storage: isDesktop ? desktopStorage() : null,
       }),
-    [dialogKey, isDesktop, legacySpaceBoundFolder, selectionVersion],
+    [dialogKey, spaceId, userId, isDesktop, legacySpaceBoundFolder, selectionVersion],
   );
 }
 

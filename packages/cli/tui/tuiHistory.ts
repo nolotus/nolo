@@ -36,6 +36,7 @@ import { toolLabel } from "./i18n";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
 import { TUI_TREE_MARKER, TUI_TREE_TOOLS, type TuiTreePayload } from "../client/toolOutput";
 import {
+  getTopReservedRows,
   resolveHistoryViewportHeight,
   resolveHistoryLayoutGeometry,
   type HistoryLayoutGeometry,
@@ -251,6 +252,7 @@ type HistoryFrameBuffer = {
   columns: number;
   inputLines: number;
   reservedRows?: number;
+  topReservedRows?: number;
   lines: string[];
 };
 
@@ -1886,7 +1888,7 @@ export function renderHistory(
   const columns = tty.columns ?? 80;
   const visibleHeight = Math.max(
     1,
-    resolveHistoryViewportHeight(rows, inputLines, reservedRows),
+    resolveHistoryViewportHeight(rows, inputLines, reservedRows, getTopReservedRows(output)),
   );
   const { contentWidth, marginLeft, marginRight } = resolveHistoryLayoutGeometry(columns);
   const colorEnabled = resolveCliColorEnabled();
@@ -2008,6 +2010,7 @@ export function renderHistory(
     prevBuffer.rows === rows &&
     prevBuffer.columns === columns &&
     prevBuffer.inputLines === inputLines &&
+    (prevBuffer.topReservedRows ?? 0) === getTopReservedRows(output) &&
     (prevBuffer.reservedRows ?? 0) === reservedRows &&
     prevBuffer.lines.length === visibleHeight;
   const prevLines = isGeometryCompatible ? prevBuffer.lines : undefined;
@@ -2031,7 +2034,7 @@ export function renderHistory(
       // `padded` is already padOrTruncateToWidth'd to full contentWidth, so
       // writing rowContent completely paints all columns, avoiding blank-flash
       // flicker on terminals that don't support synchronized output (DECSET 2026).
-      frame += `\x1b[${i + 1};1H${rowContent}`;
+      frame += `\x1b[${i + 1 + getTopReservedRows(output)};1H${rowContent}`;
     }
   }
 
@@ -2041,6 +2044,7 @@ export function renderHistory(
       columns,
       inputLines,
       reservedRows,
+      topReservedRows: getTopReservedRows(output),
       lines: nextLines,
     });
   }
@@ -2052,7 +2056,7 @@ export function renderHistory(
   }
 
   // 图片在文字帧之后放置；可选回调缺省时保持原行为。
-  options?.onVisibleImages?.(visibleImages, { rows: visibleHeight, columns: contentWidth });
+  options?.onVisibleImages?.(visibleImages.map(image => ({ ...image, row: image.row + getTopReservedRows(output) })), { rows: visibleHeight, columns: contentWidth });
 }
 
 export function createHistoryOutputStream(
@@ -2109,7 +2113,7 @@ export function computeScrollMetrics(
   const columns = tty.columns ?? 80;
   const visibleHeight = Math.max(
     1,
-    resolveHistoryViewportHeight(rows, inputLines, reservedRows),
+    resolveHistoryViewportHeight(rows, inputLines, reservedRows, getTopReservedRows(output)),
   );
   const { contentWidth } = resolveHistoryLayoutGeometry(columns);
   const { totalLines: finalizedLines } = buildTurnOffsets(history, contentWidth);

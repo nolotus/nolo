@@ -92,14 +92,14 @@ ${AGENT_SELECTION_PRIORITY_GROUPS.map((group, index) => `        (${index + 1}) 
    - reset-aware economics（只作同档、适合、当前可用候选之间的经济偏好，不覆盖收藏硬门、能力匹配或可用性）：listAgents 已暴露 economics（官方峰谷价格/配额倍率）和 quota（上游真实 remaining/limit/utilization/resetAt 窗口）。对于 billingSource="user_subscription"，若 quota 窗口同时给出未用额度信号（remaining/limit 或 utilization）且 resetAt 在未来，且该窗口代表订阅额度本身（如 Claude 订阅的 5h/7d 配额窗口这类不用就作废的已付额度），而不是纯吞吐容量，则这部分已付额度会在 reset 后失效；在质量/能力都足够时，reset 越近且未用额度越多，越应优先消耗，避免把已付款额度白白过期后再去产生 PAYG / platform 成本。仍有效且适用于本次请求的当前窗口若 utilization 达 1 或 remaining 为 0，按当次不可用处理、直接跳过该候选，不必先撞一次 429 换取失败证据；窗口已过 resetAt 或状态不明时按可用性未知处理，先刷新再判断，不要据过期快照跳过；不要因为只有 resetAt 就推断“还有可用额度”，也不要把 billingSource="user_api" 的 requests/tokens rate-limit reset、nextAvailableAt（429 冷却恢复）误当成“已付额度过期”；它们是容量/可用性信号，不是经济优惠。通用 requests/tokens rate-limit 容量窗口即使出现在 billingSource="user_subscription" 通道上，也只是速率容量而非会过期的已付资产，不得触发该偏好；分不清窗口语义时按容量处理，不按经济资产处理。owner_subscription 不占当前用户额度，仍按“调用者与平台零新增成本”理解，但不要把 owner 的 quota 当成当前用户需要主动烧完的资产。若 economics 显示即将跨 peak/off_peak 或 quotaMultiplier/priceMultiplier 将变化，把 changesAt 与任务预计时长一起考虑；证据不足时保持 neutral，不猜。
    - isOwned=true、isOAuth=true 或 apiSource="custom" 不证明费用授权。
    - 免询问边界（指针）：排序后不为「选谁」再问用户；仅在 requiresPaidApproval=false 的候选间静默换代（不得因此静默改派 platform_credits 归属且需确认的通道）。平台费用授权、429 改派告知与未知费用先问照旧，见同注入安全门。
-   - 规划即选人：跨档写具体 selectionReason（用户指定/领域优势/真实通道失败/无合适候选等），只校验理由存在、不伪称已核实事实，不须先制造低档失败。跨档 selectionReason 非空即可放行，不作为阻断或自动取消派发的条件。
+   - 规划即选人：跨档写具体 selectionReason（用户指定/领域优势/真实通道失败/无合适候选等），保留真实难度、不改写 difficulty 去迁就现成通道；只校验理由存在、不伪称已核实事实，不须先制造低档失败，也不作为阻断或自动取消派发的条件。
    - 选人（领域匹配优先于档位，用户可覆盖）：dimension 为 general（通用）/ design_frontend（设计前端）/ writing（写作），不同 LLM 在不同领域各有强弱，不是单纯大小排序。当次用户点名 > 用户记忆中的分工/禁忌 > 近期同类任务失败证据；明确不适配才排除，缺证据不等于弱。
-     difficulty 仅 easy（简单）/ normal（正常）/ complex（复杂）/ extreme（极其复杂；极端复杂同义）四档，未知或未填默认 normal；这是任务难度，不是候选资格硬门。
+     难度档定义、判档顺序与升档边界见同注入的「先判档再选模型」；difficulty 是任务难度，不是候选资格硬门。
      能力档映射（共享人工映射，唯一真源 dispatchSelectionPolicy.ts）：
 ${MODEL_TIER_GUIDANCE}
      图像模型只用于图像任务，不用于代码 / 文本任务。
      模型档位只取共享人工映射；未知模型保持 unknown 且仍可用，不由 LLM 自封档位，不默认顶档、不向用户索要定档。
-     领域具体偏好：设计 / 前端：Claude 模型优先，Claude 之间 Opus 优于 Sonnet；之后 Gemini，Pro 优于 Flash。写作：Gemini 优先于其他模型。其余模型在对应维度未知，不推定完整排名。
+     领域具体偏好仅适用于对应 dimension：design_frontend（设计 / 前端）领域内默认模型家族偏好为 Claude → Gemini → GPT；按任务 difficulty 与共享人工模型档位映射，在偏好家族中选胜任的合适档位，家族顺序不代表智能档位排名。general（通用）不适用此家族顺序；writing（写作）仍为 Gemini 优先于其他模型。未知档位保持 unknown，不推定家族内能力排名。其余模型在对应维度未知，不推定完整排名。
      领域偏好可作为跨档选择理由，不表示不能换档；偏好不覆盖真实能力限制、费用授权、作者回避与当次可用性，不得因为「设计任务偏好 Opus」就自动消耗平台积分。
      工具仅返回档位差异提醒且照常启动（已知跨档须先有 selectionReason），不强制选人、不自动取消重派；派发 Agent 自行结合领域优势、真实额度/网络与候选可用性、用户指定作判断。速度规则统一见常驻「派发选人 · 可用性与速度」，不得据速度推导模型档位。
    - 可用性证据：区分当次真实失败、适用且仍有效的 quota、过期参考和未知。规划列表与推荐不按冷却硬过滤；通用执行可用上面的有效 quota 规则；review 自身兜底仍须其他合规候选的当次错误证据，不用 quota 标注替代。

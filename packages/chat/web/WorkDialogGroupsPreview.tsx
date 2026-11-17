@@ -120,7 +120,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
   // 详情页 URL 归一化丢掉 sidebarType 后列表回落到 all，与 chip 的本地偏好分叉。
   const legacyDefaultTypeFilter: SidebarTypeFilterId = includeNonDialogs ? "all" : "dialog";
   const typeFilter = typeFilterProp ??
-    resolveEffectiveSidebarType(location.search, readStoredSidebarType() ?? legacyDefaultTypeFilter);
+    resolveEffectiveSidebarType(location.search, readStoredSidebarType(userId) ?? legacyDefaultTypeFilter);
   const currentSpaceId = useCurrentSpaceId();
   const runtime = useAppSelector(selectRuntimeSnapshot);
   const memberSpaces = useAllMemberSpaces();
@@ -814,7 +814,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
         </div>
       )}
       {view.sections.map((section) => (
-        <div key={section.groupId} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
+        <div key={section.key} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
           <div data-hook="work-dialog-date-header">{dateGroupLabel(section.groupId)}</div>
           {section.rows.map((entry) => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
         </div>
@@ -830,7 +830,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
         <div>正在进行</div>
         {view.runningRows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
       </div>}
-      {view.sections.map(section => <div key={section.groupId} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
+      {view.sections.map(section => <div key={section.key} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
         {section.rows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
       </div>)}
     </div>;

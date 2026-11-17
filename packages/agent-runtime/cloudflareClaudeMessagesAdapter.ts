@@ -1,3 +1,4 @@
+import { hasAssembledAgentPrompt } from "./types";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 import { mapAnthropicStopReason } from "./anthropicMessagesProvider";
 
@@ -33,7 +34,8 @@ export function buildCloudflareClaudeMessagesBody(agentConfig: AgentRuntimeAgent
   const system: string[] = [];
   const configPrompt = typeof agentConfig.prompt === "string" ? agentConfig.prompt : "";
   const messages: Json[] = [];
-  for (const raw of Array.isArray(openAiBody.messages) ? openAiBody.messages : []) {
+  const rawMessages = Array.isArray(openAiBody.messages) ? openAiBody.messages : [];
+  for (const raw of rawMessages) {
     const m = obj(raw), role = String(m.role ?? "");
     if (role === "system" || role === "developer") {
       if (typeof m.content === "string") system.push(m.content);
@@ -70,7 +72,7 @@ export function buildCloudflareClaudeMessagesBody(agentConfig: AgentRuntimeAgent
     }
     if (content.length) messages.push({ role, content });
   }
-  if (configPrompt && !system.includes(configPrompt)) system.unshift(configPrompt);
+  if (configPrompt && !hasAssembledAgentPrompt(rawMessages) && !system.includes(configPrompt)) system.unshift(configPrompt);
   const body: Json = {
     model: upstreamModelId, messages,
     max_tokens: numeric(openAiBody.max_completion_tokens ?? openAiBody.max_tokens) || numeric(agentConfig.max_tokens) || 8192,

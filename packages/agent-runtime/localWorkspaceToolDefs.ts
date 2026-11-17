@@ -67,7 +67,7 @@ function buildWorkspacePathProperty() {
 }
 
 function buildReadWorkspaceDescription() {
-  return "Read a UTF-8 text file inside the workspace. Absolute paths and ~/ are also accepted (runtime spill files can be read directly). Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).";
+  return "Read a UTF-8 text file inside the workspace. For multiple files, call readFile concurrently in the same turn. Absolute paths and ~/ are also accepted (runtime spill files can be read directly). Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).";
 }
 
 function buildReadWorkspaceParameters() {

@@ -104,6 +104,7 @@ import {
 } from "chat/web/MessageInputContextPanels";
 import { AgentDraftPanel } from "./AgentDraftPanel";
 import { ChildRunObserverPanel } from "./ChildRunObserverPanel";
+import { resolveDialogRuntimeAgentKey, resolveDialogRuntimeAgentConfig } from "./dialogAgentPolicy";
 import { DialogRelationSection } from "./DialogRelation";
 import { DialogRuntimeTargetBadge } from "./DialogRuntimeTargetBadge";
 import { resolveLatestAgentDraftSidePanelState } from "./agentDraftPanelState";
@@ -173,7 +174,9 @@ const DialogPage = ({
   const hasMounted = useHasMounted();
   const navigate = useNavigate();
   const location = useLocation();
-  const dialogId = pageKey ? extractCustomId(pageKey) : null;
+  const dialogId = pageKey
+    ? (!pageKey.includes("-msg-") ? parseDialogKey(pageKey)?.dialogId : null) ?? extractCustomId(pageKey)
+    : null;
   // An existing Dialog keeps its own folder binding, independent of sidebar selection.
   // No binding → the Space's local folder, then the desktop default workspace;
   // a bound-but-missing Project blocks instead of falling back.
@@ -1142,7 +1145,14 @@ const DialogPage = ({
           />
         )}
         {shouldShowChildRunObserver && dialogId ? (
-          <ChildRunObserverPanel parentThreadId={dialogId} />
+          <ChildRunObserverPanel
+            key={dialogId}
+            parentThreadId={dialogId}
+            messages={messages}
+            dialogKey={pageKey}
+            mainAgentKey={resolveDialogRuntimeAgentKey(currentDialogConfig)}
+            builtinAgent={resolveDialogRuntimeAgentConfig(currentDialogConfig)}
+          />
         ) : null}
         {isLiveVoicePanelOpen && liveAudioAgentKey && liveVoiceDialogId && (
           <LiveVoicePanel

@@ -1,3 +1,4 @@
+import { requireKnowledgeCaptureConfirmation, checkKnowledgeCaptureTarget } from "ai/tools/knowledgeCaptureConfirmation";
 import { createDocState } from "render/page/docStore";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import type { RootState } from "app/store";
@@ -11,6 +12,7 @@ import {
 import { buildSkillFollowupResult } from "./skillFollowup";
 
 export interface ImportSkillToolArgs {
+  __confirmedKnowledgeCapture?: unknown;
   url?: string;
   content?: string;
   title?: string;
@@ -136,13 +138,17 @@ export async function importSkillFunc(
 
   const explicitSpaceId = (args.spaceId ?? "").trim() || undefined;
   const currentSpaceId = getCurrentSpaceId() || undefined;
-  const spaceId = explicitSpaceId ?? currentSpaceId;
+  const spaceId = args.spaceId === "" ? undefined : explicitSpaceId ?? currentSpaceId;
   const categoryId = (args.categoryId ?? "").trim() || undefined;
+
+  requireKnowledgeCaptureConfirmation(args, "importSkill", { content: rawMarkdown, title: docTitle, url, spaceId: spaceId ?? "", categoryId: categoryId ?? "" }, { title: docTitle, content, spaceId: spaceId ?? "", categoryId: categoryId ?? "" });
+
+  await checkKnowledgeCaptureTarget(spaceId, thunkApi);
 
   const id = await createDocState(
     {
       title: docTitle,
-      spaceId,
+      spaceId: spaceId ?? "",
       categoryId,
       content,
     },

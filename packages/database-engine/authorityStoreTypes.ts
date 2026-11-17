@@ -28,6 +28,9 @@ export interface AuthorityBatchWriter {
   write(): Promise<void>;
 }
 
+/** Conflict never includes the current payload. null expects an absent key. */
+export type AuthorityConditionalPutResult = { status: "updated" } | { status: "conflict" };
+
 export interface AuthorityStore {
   readonly location?: string;
   readonly status?: string;
@@ -40,6 +43,16 @@ export interface AuthorityStore {
    */
   get(key: string): Promise<any>;
   get<T>(key: string): Promise<T>;
+  /** Optional capability: expectedRevision is a nonnegative safe integer; null expects absence.
+   * Replacement must be an object with revision = expectedRevision + 1 (1 for absence).
+   * Implemented by the local broker owner, not by generic get/put fallback.
+   * Compares the payload revision, not an independent storage generation: all writers of
+   * revisioned records must advance revisions, never delete/recreate a key, and never
+   * reuse an ID. This is NOT delete/recreate ABA-safe. Unconditional writes retain their
+   * original semantics and can invalidate these preconditions. A timeout is an unknown
+   * outcome, not cancellation; reload before deciding whether to retry.
+   */
+  conditionalPut?(key: string, expectedRevision: number | null, value: unknown): Promise<AuthorityConditionalPutResult>;
   put(key: string, value: unknown): Promise<void>;
   del(key: string): Promise<void>;
   batchWrite(ops: AuthorityBatchOperation[]): Promise<void>;

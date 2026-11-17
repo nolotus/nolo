@@ -104,7 +104,7 @@ export async function runAgentListCommand(
   } catch { /* Missing/malformed host context remains unknown, never inferred from names. */ }
 
   const output = deps.output ?? process.stdout;
-  const { wantJson, wantSafe, publicOnly, scope: requestedScope, idsOnly, showUnavailable, verbose, compact, limit, offset, query } = parseAgentListArgs(args);
+  const { wantJson, wantSafe, publicOnly, scope: requestedScope, idsOnly, showUnavailable, verbose, compact, limit, offset, query, fragmentOffset, fragmentAgentKey, fragmentDigest } = parseAgentListArgs(args);
   if (requestedScope && !["preferred", "public", "all"].includes(requestedScope)) {
     throw new Error(`Invalid scope '${requestedScope}'`);
   }
@@ -458,6 +458,7 @@ export async function runAgentListCommand(
         ...(typeof discovery.limit === "number" ? { limit: discovery.limit } : {}),
         ...(discovery.truncated ? { truncated: true } : {}),
         unavailableCount: discovery.unavailableCount,
+        availableCount: discovery.availableCount,
         // agents 在最前：host 截断长输出时保头保尾，派发所需的 agentKey
         // 必须落在头部；凭证分组是说明性大块，放最后。
         // 限流 agent 已合入 agents（带 availabilityStatus / nextAvailableAt
@@ -470,6 +471,8 @@ export async function runAgentListCommand(
       const cliNoloHome =
         env.NOLO_HOME?.trim() || (env.HOME?.trim() ? `${env.HOME.trim()}/.nolo` : "");
       const speedAwareListResult = await injectSpeedContextIntoListAgentsResult(listResult, {
+        compactPage: compact === true && verbose !== true,
+        fragmentOffset, fragmentAgentKey, fragmentDigest,
         db: createCliDispatchSampleDb(deps.db ?? (await getReadableCliDb(output)), userId, env),
         userId,
         ...(cliNoloHome

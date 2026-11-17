@@ -1,3 +1,16 @@
+import { sanitizeToolOutputText } from "../../agent-runtime/toolOutputSanitizer";
+import { scrubSecrets } from "../../agent-runtime/secretScrubber";
+/** Bounded executor-attested payload; safety processing precedes projection.
+ * Payload bytes are capped separately from formatted-message characters.
+ */
+export const PROJECT_INSTRUCTION_MAX_BYTES = 24 * 1024;
+export const PROJECT_INSTRUCTION_MAX_CHARS = PROJECT_INSTRUCTION_MAX_BYTES + 2048;
+export function isCompleteInstructionOutput(toolName: string | undefined, metadata: unknown, content: string): boolean {
+  return (toolName === "readFile" || toolName === "read_file" || toolName === "readWorkspaceFile") &&
+    typeof metadata === "object" && metadata !== null && (metadata as Record<string, unknown>).projectInstruction === true &&
+    content.length <= PROJECT_INSTRUCTION_MAX_CHARS;
+}
+
 export type ToolOutputProjectionProfile = {
   maxChars: number;
   headRatio: number;
@@ -19,6 +32,9 @@ export type ToolOutputProjectionProfile = {
 // `maxChars` below (single stable projection); MAX_IN_TURN_TOOL_CONTENT_CHARS is
 // retained as the default profile value.
 export const MAX_IN_TURN_TOOL_CONTENT_CHARS = 4000;
+// Dedicated, finite candidate discovery budget; never used by logs or shell.
+export const LIST_AGENTS_OUTPUT_BUDGET = 30720;
+export const LIST_AGENTS_PAGE_BUDGET = LIST_AGENTS_OUTPUT_BUDGET - 1600;
 
 export const DEFAULT_TOOL_OUTPUT_PROFILE: ToolOutputProjectionProfile = {
   maxChars: MAX_IN_TURN_TOOL_CONTENT_CHARS,
@@ -26,6 +42,7 @@ export const DEFAULT_TOOL_OUTPUT_PROFILE: ToolOutputProjectionProfile = {
 };
 
 export const TOOL_OUTPUT_PROFILES: Record<string, ToolOutputProjectionProfile> = {
+  listAgents: { maxChars: LIST_AGENTS_OUTPUT_BUDGET, headRatio: 0.5, historicalMaxChars: LIST_AGENTS_OUTPUT_BUDGET },
   readFile: { maxChars: 4800, headRatio: 0.68, historicalMaxChars: 4800 },
   read_file: { maxChars: 4800, headRatio: 0.68, historicalMaxChars: 4800 },
   readWorkspaceFile: { maxChars: 4800, headRatio: 0.68, historicalMaxChars: 4800 },
@@ -76,8 +93,10 @@ export function resolveHistoricalToolContentCap(
 export function projectToolMessageContent(input: {
   content: string;
   toolName?: string;
+  metadata?: unknown;
 }): string {
   const { content, toolName } = input;
+  if (isCompleteInstructionOutput(toolName, input.metadata, content)) return scrubSecrets(sanitizeToolOutputText(content)).cleaned;
 
   // 单一稳定预算（stable provider-visible projection）：同一条 tool 消息从第一
   // 次进入 provider transcript 起，fresh / 同 turn 更早轮 / 跨 turn 历史

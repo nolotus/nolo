@@ -51,7 +51,7 @@ import {
 import {
     selectCurrentServer,
 } from "app/settings/serverSelectors";
-import { filterAndCleanMessages } from "integrations/openai/filterAndCleanMessages";
+import { filterAndCleanMessages, serializeAgentRunMessages } from "integrations/openai/filterAndCleanMessages";
 import {
     getFullChatContextKeys,
     deduplicateContextKeys,
@@ -127,6 +127,7 @@ import { runDesktopAgentRuntimeTurnStream } from "app/utils/desktopAgentRuntimeT
 // Block 2c: submit target is picked per run kind (desktop local vs server run).
 import {
   pushGate,
+  clearGateTurn,
   targetForRunKind,
 } from "app/utils/desktopActionGateChannel";
 // never in messages/transcript/persistence.
@@ -479,6 +480,8 @@ export interface StreamAgentChatTurnArgs {
      */
     agentConfig?: Agent;
     userInput: string | any[];
+    /** Host-bound persisted user message; never derived from model arguments. */
+    userMessageId?: string;
     serverBase?: string;
     dialogKey?: string; // 可选。显式指定目标对话，不传则使用当前活跃对话。
     isStreaming?: boolean;
@@ -526,9 +529,43 @@ export const streamAgentChatTurnHandler = async (
     // Minted in the desktop-runtime branch; carried into `finally` so cleanup is
     // turn-scoped too. `null` for paths that never project a turn phase.
     let turnPhaseTurnId: string | null = null;
+    // Host-generated correlation; neither the model nor the SSE schema chooses it.
+    const secretGateTurnId = createDialogMessageKeyAndId("secret-gate").messageId;
+    const secretGateAnchors = new Set<string>();
+    const receiveActionGate = (gate: Parameters<typeof pushGate>[0], target: Parameters<typeof pushGate>[1], dialogId: string) => {
+        const secret = gate.kind === "input" && (gate.payload as any)?.action === "secret_request";
+        if (!secret || target?.kind === "local") { pushGate(gate, target); return; }
+        const { messageId, key } = createDialogMessageKeyAndId(dialogId);
+        // Safe transient anchor, available immediately, before tool_result. No gate/value persisted.
+        secretGateAnchors.add(messageId);
+        pushGate(gate, target, { dialogId, turnId: secretGateTurnId, messageId });
+        dispatch(messageStreaming({ id: messageId, dbKey: key, dialogId, role: "tool",
+            toolName: "secret-request", content: "", isStreaming: true }));
+    };
+
     const batchExecution = createUserBatchExecution(loopController.signal, () =>
         !thunkApi.signal.aborted && (!turnPhaseTurnId || !runtimeDialogKey ||
         getDialogRuntimeState(runtimeDialogKey).turnPhaseTurnId === turnPhaseTurnId));
+    // Work-memory provenance is separate from the tail ID used for images and
+    // batch requests. Resolve at start(), after admission (including initial
+    // batches), so a multi-message receipt can never masquerade as its tail.
+    const workMemoryUserMessageId = (dialogId: string, activeId?: string): string | undefined => {
+        if (!activeId) return undefined;
+        const users = selectAllMsgs(getState() as RootState, dialogId).filter(message => message.role === "user");
+        const bound = users.find(message => message.id === activeId);
+        if (!bound || bound.metadata?.queueState === "pending") return undefined;
+        const receipt = bound.metadata?.userBatchReceipt as { messageIds?: unknown } | undefined;
+        if (receipt) {
+            const ids = receipt.messageIds;
+            return Array.isArray(ids) && ids.length === 1 && ids[0] === activeId ? activeId : undefined;
+        }
+        const batchId = bound.metadata?.acceptedUserBatchId;
+        if (batchId) {
+            const batch = users.filter(message => message.metadata?.acceptedUserBatchId === batchId);
+            return batch.length === 1 && batch[0]?.id === activeId ? activeId : undefined;
+        }
+        return activeId;
+    };
     let remoteTransientMessageId: string | null = null;
     let remoteTransientMessageFinalized = false;
     let modelRequestStarted = false;
@@ -783,7 +820,7 @@ export const streamAgentChatTurnHandler = async (
                         ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
                             ? { contextBlocks }
                             : {}),
-                        messages: cleanedMessages,
+                        messages: serializeAgentRunMessages(cleanedMessages),
                         stream: true,
                         persistDialog: true,
                         continueDialogId: dialogId,
@@ -794,7 +831,7 @@ export const streamAgentChatTurnHandler = async (
                             runtime: "react",
                             entrypoint: "chat-dialog",
                             capabilities: ["streaming", "dialog-ui", "machine-bound-cli", "durable-user-batch", "client-user-prepersisted"],
-                            userMessageId: selectAdmittedMessages(selectAllMsgs(getState() as RootState, dialogId)).filter(message => message.role === "user").at(-1)?.id,
+                            ...(args.userMessageId ? { userMessageId: args.userMessageId } : {}),
                         },
                         ...((dialogConfig as any)?.spaceId ? { spaceId: (dialogConfig as any).spaceId } : {}),
                     }),
@@ -848,12 +885,13 @@ export const streamAgentChatTurnHandler = async (
                             if (payload.type === "action_gate" && payload.gate) {
                                 // Block 2c: 服务端 run 的 gate → web 提交目标
                                 //（带 Bearer token）；无 token 时通道按终态失败处理。
-                                pushGate(
+                                receiveActionGate(
                                     payload.gate,
                                     targetForRunKind("server-run", {
                                         server: currentServer,
                                         token,
                                     }),
+                                    dialogId,
                                 );
                             }
                             // 工具事件投影成 tool 卡片（assistant_tool_calls / tool_result）
@@ -1559,9 +1597,10 @@ export const streamAgentChatTurnHandler = async (
                             // message: the gate (and any resolved value) must never
                             // enter the transcript.
                             // Block 2c: desktop local runtime run → desktop submit target.
-                            pushGate(
+                            receiveActionGate(
                                 event.gate,
                                 targetForRunKind("desktop-local"),
+                                dialogId,
                             );
                         } else if (event.type === "done") {
                             streamResult = event.result;
@@ -2035,7 +2074,7 @@ export const streamAgentChatTurnHandler = async (
                     ...(Array.isArray(contextBlocks) && contextBlocks.length > 0
                         ? { contextBlocks }
                         : {}),
-                    messages: cleanedMessages,
+                    messages: serializeAgentRunMessages(cleanedMessages),
                     stream: true,
                     persistDialog: false,
                     clientDialogId: dialogId,
@@ -2123,12 +2162,13 @@ export const streamAgentChatTurnHandler = async (
                             if (payload.type === "action_gate" && payload.gate) {
                                 // Block 2c: 服务端 run 的 gate → web 提交目标
                                 //（带 Bearer token）；无 token 时通道按终态失败处理。
-                                pushGate(
+                                receiveActionGate(
                                     payload.gate,
                                     targetForRunKind("server-run", {
                                         server: explicitServerBase,
                                         token,
                                     }),
+                                    dialogId,
                                 );
                             }
                             if (payload.type === "agent_handoff") {
@@ -2259,6 +2299,7 @@ export const streamAgentChatTurnHandler = async (
             recommendedSkillTools: turnToolContext.recommendedSkillTools,
             recommendedSkillHints: turnToolContext.recommendedSkillHints,
             skillPromptPatches: turnToolContext.skillPromptPatches,
+            skillPromptContributions: turnToolContext.skillPromptContributions,
         };
 
         // --- [新增] 提取本次 Handler 启动前的稳定历史消息 ID 集合 ---
@@ -2324,7 +2365,7 @@ export const streamAgentChatTurnHandler = async (
             });
 
             let appendTempUserInput = true;
-            let activeTurnUserMessageId: string | undefined;
+            let activeTurnUserMessageId: string | undefined = args.userMessageId;
             let currentParentMessageId = parentMessageId ?? undefined;
             const storedResponsesState = currentDialog?.responsesState;
             let responsesState = selectResponsesConversationState(
@@ -2472,12 +2513,6 @@ export const streamAgentChatTurnHandler = async (
                                 isStreaming: false,
                             } as any,
                         ];
-                        activeTurnUserMessageId = tempId;
-                    } else {
-                        const lastMsg = visibleMessages[visibleMessages.length - 1];
-                        if (lastMsg && typeof lastMsg.id === "string") {
-                            activeTurnUserMessageId = lastMsg.id;
-                        }
                     }
                 }
 
@@ -2551,6 +2586,7 @@ export const streamAgentChatTurnHandler = async (
                     messageMetadata: streamingMessageMetadata,
                     quickChatPerfStartedAt,
                     fallbackBodyData,
+                    userMessageId: workMemoryUserMessageId(dialogId, activeTurnUserMessageId),
                 }), })).unwrap();
                 if (!meta || loopController.signal.aborted || thunkApi.signal.aborted) break;
                 logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-model-request-finished", {
@@ -2677,7 +2713,7 @@ export const streamAgentChatTurnHandler = async (
         });
 
         let appendTempUserInput = true;
-        let activeTurnUserMessageId: string | undefined;
+        let activeTurnUserMessageId: string | undefined = args.userMessageId;
         let currentParentMessageId = parentMessageId ?? undefined;
 
         const w = typeof globalThis !== "undefined" && (globalThis as any).window ? (globalThis as any).window : null;
@@ -2819,12 +2855,6 @@ export const streamAgentChatTurnHandler = async (
                             isStreaming: false,
                         } as any,
                     ];
-                    activeTurnUserMessageId = tempId;
-                } else {
-                    const lastMsg = visibleMessages[visibleMessages.length - 1];
-                    if (lastMsg && typeof lastMsg.id === "string") {
-                        activeTurnUserMessageId = lastMsg.id;
-                    }
                 }
             }
 
@@ -2915,6 +2945,7 @@ export const streamAgentChatTurnHandler = async (
                 messageMetadata: streamingMessageMetadata,
                 disableToolsForThisRequest,
                 quickChatPerfStartedAt,
+                userMessageId: workMemoryUserMessageId(dialogId, activeTurnUserMessageId),
                 }), })).unwrap();
                 if (!meta || loopController.signal.aborted || thunkApi.signal.aborted) break;
             logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-model-request-finished", {
@@ -3056,6 +3087,8 @@ export const streamAgentChatTurnHandler = async (
         );
     } finally {
         batchExecution.dispose();
+        clearGateTurn(secretGateTurnId);
+        for (const id of secretGateAnchors) dispatch(removeTransientMessage(id));
         clearDialogTurnPhase({ dialogKey: runtimeDialogKey ?? undefined, turnId: turnPhaseTurnId ?? undefined });
         if (loopKey && runtimeDialogKey) {
             dispatch(removeActiveController({ messageId: loopKey, dialogKey: runtimeDialogKey }));

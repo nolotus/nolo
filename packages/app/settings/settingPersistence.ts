@@ -7,6 +7,7 @@
 // 不直接 dispatch settings slice action;只产出数据。调用方(如 setSettings thunk)
 // 负责把 normalized changes 应用到 state。
 
+import { stripRetiredSettingsFields } from "database/retiredSettings";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import { createUserKey, createUserPreferenceKey } from "database/keys";
 import {
@@ -30,6 +31,7 @@ import {
 } from "./settingNormalizers";
 import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } from "ai/tools/agentCapabilities";
+import { normalizeUiPlugins } from "app/plugins/uiPlugins";
 import { normalizeEnabledPromptSkills } from "ai/skills/userPromptSkills";
 import { normalizeEnabledSkills } from "ai/skills/userSkills";
 
@@ -40,16 +42,19 @@ import { normalizeEnabledSkills } from "ai/skills/userSkills";
 export const normalizeSettingChanges = (
   changes: Partial<SettingState>,
 ): Partial<SettingState> => {
-  // Drop removed animation-picker values from historical callers before any write.
-  let normalizedChanges: Partial<SettingState> = omitKeys(changes, [
-    "preferredAnimationSet",
-    "createMenuOpenCount",
+  // Retired account fields and legacy paths never enter local state or writes.
+  let normalizedChanges: Partial<SettingState> = omitKeys(stripRetiredSettingsFields(changes), [
     // 本地意图世代只活在 redux 状态里：既不能从服务端 record 写回，也不能写云。
     "localIntentEpoch",
+    // 每个键的本地意图世代同理：纯本地判据，不入云端 record、不被远端回灌。
+    "localIntentKeyEpochs",
     // 权威回显世代同理：纯本地世代标记，不入云端 record、不被远端回灌。
     "serverAuthorityEchoSeq",
     // 写失败状态同样是纯本地 observability：绝不进入云端 settings record。
     "lastWriteFailure",
+    // uiPlugins 的归属账号同样只活在本地：不写云端、不被 record 回灌。
+    "uiPluginsOwnerAccountId",
+    "uiPluginsGeneration",
     // Retired device appearance is never accepted by Redux, including legacy callers.
     "themeName", "themeMode", "isDark", "density", "fontPreset",
   ]) as Partial<SettingState>;
@@ -115,6 +120,16 @@ export const normalizeSettingChanges = (
         normalizedChanges.systemBuiltinSkills,
         DEFAULT_SYSTEM_BUILTIN_SKILLS,
       ),
+    };
+  }
+
+  // UI 插件启用状态：写入口一律补全为完整映射，非法/缺失键归 absent。
+  // 放在这里而不是只在 hydrate 里，保证 `setSettings({ uiPlugins: { music: "enabled" } })`
+  // 落盘的也是完整映射（读回时不需要再猜缺的键代表什么）。
+  if (hasOwn(normalizedChanges, "uiPlugins")) {
+    normalizedChanges = {
+      ...normalizedChanges,
+      uiPlugins: normalizeUiPlugins(normalizedChanges.uiPlugins),
     };
   }
 
@@ -209,12 +224,10 @@ export const isLocalFirstAppearanceChange = (
 export const stripRegisterBackedFieldsFromSettingsWrite = (
   changes: Partial<SettingState>,
 ): Partial<SettingState> => {
-  return omitKeys(changes, [
+  return omitKeys(stripRetiredSettingsFields(changes), [
     "autoApproveCredits",
     "defaultSpaceId",
     "userAuthorityRegistry",
-    "preferredAnimationSet",
-    "createMenuOpenCount",
     ...LOCAL_APPEARANCE_KEY_NAMES,
   ]) as Partial<SettingState>;
 };
@@ -231,11 +244,13 @@ export const sanitizeStoredSettingsRecord = (
   }
 
   const record = settingsRecord as Record<string, unknown>;
-  const sanitizedSettings = omitKeys(record, [
+  const sanitizedSettings = omitKeys(stripRetiredSettingsFields(record), [
     "autoApproveCredits",
     "defaultSpaceId",
     "schemaVersion",
-    "preferredAnimationSet",
+    // 归属标记只活在本地；远端 record 里的同名键一律丢弃。
+    "uiPluginsOwnerAccountId",
+    "uiPluginsGeneration",
     ...LOCAL_APPEARANCE_KEY_NAMES,
   ]);
   return Object.keys(sanitizedSettings).length > 0 ? sanitizedSettings : null;
@@ -273,6 +288,10 @@ export const hydrateStoredSettings = ({
   const hydratedSettings: Record<string, unknown> = {
     ...baseSettings,
     enabledPromptSkills: resolvedEnabledPromptSkills,
+    // UI 插件启用状态**无条件**归一化：记录里没有该键（旧记录 / 另一个从未开启过
+    // 插件的账号）也必须显式回落到全 absent，否则 Redux 会保留上一个账号的启用
+    // 状态——这正是跨账号泄漏的入口。
+    uiPlugins: normalizeUiPlugins(record.uiPlugins),
     ...(hasRecordEnabledSkills
       ? { enabledSkills: normalizeEnabledSkills(record.enabledSkills) }
       : {}),
@@ -411,6 +430,12 @@ export const persistDefaultAgentRegister = async (
   getState: () => { db: { entities: Record<string, unknown> } },
   userId: string,
   value: string | null,
+  /**
+   * 发写前最后一次守卫：本函数会先 await 一次远端读，期间账号/会话代次或该键
+   * 的归属可能已经变了。返回 false 就**不写**（调用方会在 await 之后自行重核，
+   * 不会把旧值写进 register）。
+   */
+  canWrite?: () => boolean,
 ): Promise<void> => {
   const registerKey = createUserPreferenceKey.defaultAgent(userId);
   let previousRecord: Partial<UserPreferenceRegisterRecord<string>> | null =
@@ -431,6 +456,9 @@ export const persistDefaultAgentRegister = async (
   if (previousRecord && previousValue === value) {
     return;
   }
+
+  // 远端读之后的最便宜收紧：不要再把 await 前的意图写出去。
+  if (canWrite && !canWrite()) return;
 
   await dispatch(
     getSettingDbActionThunks().write({

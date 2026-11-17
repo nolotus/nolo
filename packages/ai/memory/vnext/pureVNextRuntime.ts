@@ -4,6 +4,7 @@ import { recallMemoryVNextLocal } from "./localRecall";
 import { buildMemoryOverlay, DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET } from "../overlay";
 import { RESIDENT_MAX_CONTENT_CHARS } from "../remember";
 import type { MemoryEntityVNext, MemoryStateVNext } from "./types";
+import { isWorkContextState } from "./workContext";
 
 export interface PureVNextRuntimeInput {
   db: any;
@@ -92,7 +93,12 @@ export async function resolvePureVNextRuntime(
   for (let i = 0; i < owners.length; i++) {
     const owner = owners[i];
     const catalog = catalogs[i];
-    const currentStates = catalog.states.filter((s) => !s.retiredAt && s.text.trim());
+    // 工作接续（facet = work-context）不在语义召回里出现：它由
+    // `workContextRecall` 走独立的有界块注入，混进语义候选会既绕过它自己的
+    // 预算、又被当成普通长期记忆。
+    const currentStates = catalog.states.filter(
+      (s) => !s.retiredAt && s.text.trim() && !isWorkContextState(s),
+    );
     const hits = recallMemoryVNextLocal({
       query: userInput,
       entities: catalog.entities,

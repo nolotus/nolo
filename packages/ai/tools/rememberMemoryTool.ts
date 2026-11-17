@@ -1,13 +1,23 @@
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { dialogMessageKey } from "database/dialogKey";
+import { isTombstoneRecord } from "database/tombstones";
 import { callToolApi } from "./toolApiClient";
 import type { RememberMemoryScope } from "ai/memory/remember";
-import type { MemoryKind } from "ai/memory/types";
+import type { MemoryKind, MemoryProvenance } from "ai/memory/types";
 
 export interface RememberMemoryToolArgs {
-  content: string;
+  content?: string;
+  mode?: "work";
+  storage?: "local" | "server";
+  itemKey?: string;
+  activityId?: string;
+  expectedRevision?: number;
+  changeId?: string;
+  patch?: Record<string, unknown>;
   scope?: RememberMemoryScope;
   kind?: MemoryKind;
   recurrenceEvidence?: string;
+  provenance?: MemoryProvenance;
 }
 
 // Schema 定义在无依赖的姊妹模块里，供 CLI/desktop 本地 runtime 复用
@@ -16,9 +26,25 @@ export { rememberMemoryFunctionSchema } from "./rememberMemoryToolSchema";
 
 export async function rememberMemoryFunc(
   args: RememberMemoryToolArgs,
-  thunkApi: any
+  thunkApi: any,
+  context?: { dialogId?: string; userMessageId?: string }
 ): Promise<{ rawData: unknown; displayData: string }> {
   const state = thunkApi.getState();
+  if (args.mode === "work") {
+    if (args.storage === "local") throw new Error("Web work memory only supports server storage");
+    const dialogId = context?.dialogId;
+    const messageId = context?.userMessageId;
+    if (!dialogId || !messageId) throw new Error("work memory requires a bound persisted user message");
+    const key = dialogMessageKey(dialogId, messageId);
+    const db = thunkApi.extra?.db;
+    if (!db || typeof db.get !== "function") throw new Error("work memory requires a bound persisted user message");
+    let persisted: any;
+    try { persisted = await db.get(key); } catch { throw new Error("work memory requires a bound persisted user message"); }
+    if (!persisted || persisted.dbKey !== key || persisted.id !== messageId || persisted.role !== "user" || persisted.metadata?.queueState === "pending" || isTombstoneRecord(persisted) || typeof persisted.content !== "string") throw new Error("work memory requires a bound persisted user message");
+    const result: any = await callToolApi(thunkApi, "/api/memory/remember", { mode: "work", dialogId, userMessageId: persisted.id, itemKey: args.itemKey, activityId: args.activityId, expectedRevision: args.expectedRevision, changeId: args.changeId, patch: args.patch }, { withAuth: true });
+    if (result?.error) throw new Error(result.error.message ?? "work memory rejected");
+    return { rawData: result, displayData: JSON.stringify(result) };
+  }
   const spaceId = getCurrentSpaceId() || undefined;
   const content = String(args.content ?? "").trim();
   const scope = args.scope ?? "auto";
@@ -46,6 +72,7 @@ export async function rememberMemoryFunc(
       kind,
       spaceId,
       ...(recurrenceEvidence ? { recurrenceEvidence } : {}),
+      ...(args.provenance ? { provenance: args.provenance } : {}),
     },
     { withAuth: true }
   );

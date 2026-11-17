@@ -18,6 +18,9 @@
 // decided by AGENT_SELECTION_PRIORITY_INSTRUCTIONS. Every failure path returns
 // the listAgents result unchanged; this module never throws to the caller.
 
+import { scrubSecrets } from "../../agent-runtime/secretScrubber";
+import { sanitizeToolOutputText } from "../../agent-runtime/toolOutputSanitizer";
+import { LIST_AGENTS_PAGE_BUDGET } from "./toolOutputPolicy";
 import { createTokenKey, createKey } from "database/keys";
 import {
   readSpeedSamplesProgress,
@@ -649,6 +652,10 @@ async function loadCachedSpeedSamples(
 // ── Selector-boundary injection ───────────────────────────────────────────
 
 export interface InjectSpeedContextOptions {
+  compactPage?: boolean;
+  fragmentOffset?: number | string;
+  fragmentAgentKey?: string;
+  fragmentDigest?: string;
   db?: SpeedSampleDb | null;
   userId?: string | null;
   now?: number;
@@ -680,7 +687,7 @@ export async function injectSpeedContextIntoListAgentsResult(
     const models = parsed.agents
       .map((agent: any) => agent?.model)
       .filter((model: unknown): model is string => typeof model === "string");
-    if (models.length === 0) return result;
+    if (models.length === 0 && !options.compactPage) return result;
 
     const now = options.now ?? Date.now();
     let samples: SpeedSamplesByModel = new Map();
@@ -697,9 +704,107 @@ export async function injectSpeedContextIntoListAgentsResult(
         samples = new Map();
       }
     }
+    if (options.compactPage) {
+      return await serializeCompactAgentPage(parsed, samples, snapshotAgeMs, options);
+    }
     const speedContext = buildCandidateSpeedContext(models, samples, { snapshotAgeMs });
     return speedContext ? JSON.stringify({ ...parsed, speedContext }) : result;
   } catch {
-    return result;
+    return options.compactPage
+      ? JSON.stringify({ success: false, error: "LIST_AGENTS_PAGE_SERIALIZATION_FAILED" })
+      : result;
   }
+}
+
+/** Complete candidate records only, within the dedicated listAgents output profile. */
+async function serializeCompactAgentPage(parsed: any, samples: SpeedSamplesByModel, snapshotAgeMs: number | undefined, options: InjectSpeedContextOptions): Promise<string> {
+  const maxChars = LIST_AGENTS_PAGE_BUDGET;
+  const maxBytes = LIST_AGENTS_PAGE_BUDGET;
+  const fits = (page: string) => page.length <= maxChars && new TextEncoder().encode(page).length <= maxBytes;
+  const offset = typeof parsed.offset === "number" ? parsed.offset : 0;
+  const candidates = parsed.agents as any[];
+  const availableCount = typeof parsed.availableCount === "number" ? parsed.availableCount : parsed.total;
+  const groups = Array.isArray(parsed.credentialGroups) ? parsed.credentialGroups : [];
+  if (options.fragmentOffset !== undefined) {
+    const fragmentOffset = Number(options.fragmentOffset);
+    const agentKey = candidates[0]?.agentKey;
+    if ((typeof options.fragmentOffset !== "number" && (typeof options.fragmentOffset !== "string" || !/^\d+$/.test(options.fragmentOffset))) || !Number.isSafeInteger(fragmentOffset) || fragmentOffset < 0 || typeof agentKey !== "string" || agentKey !== options.fragmentAgentKey) {
+      return JSON.stringify({ success: false, error: "LIST_AGENTS_FRAGMENT_INVALID", offset });
+    }
+    const agent = candidates[0];
+    const speedContext = buildCandidateSpeedContext(typeof agent.model === "string" ? [agent.model] : [], samples, { snapshotAgeMs });
+    // Speed observations can age or refresh between requests. Only candidate and
+    // credential evidence belong to the reassembled, digest-verified payload.
+    const payload = { agent, credentialGroups: groups.filter((group: any) => group.credentialGroup === agent.credentialGroup) };
+    let keyCollision = false;
+    const cleanText = (value: string) => scrubSecrets(sanitizeToolOutputText(value)).cleaned;
+    const sanitize = (value: unknown): unknown => {
+      if (typeof value === "string") return cleanText(value);
+      if (Array.isArray(value)) return value.map(sanitize);
+      if (value && typeof value === "object") {
+        const entries: Array<[string, unknown]> = [];
+        const keys = new Set<string>();
+        for (const [key, item] of Object.entries(value)) {
+          const cleanedKey = cleanText(key);
+          if (keys.has(cleanedKey)) keyCollision = true;
+          keys.add(cleanedKey);
+          entries.push([cleanedKey, sanitize(item)]);
+        }
+        return Object.fromEntries(entries);
+      }
+      return value;
+    };
+    const safePayload = sanitize(payload);
+    if (keyCollision) return JSON.stringify({ success: false, error: "LIST_AGENTS_SANITIZED_KEY_COLLISION", offset });
+    const serialized = JSON.stringify(safePayload);
+    const bytes = new TextEncoder().encode(serialized);
+    const hash = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+    const digest = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    if ((fragmentOffset > 0 && !options.fragmentDigest) || (options.fragmentDigest && options.fragmentDigest !== digest)) {
+      return JSON.stringify({ success: false, error: "LIST_AGENTS_FRAGMENT_CHANGED", offset });
+    }
+    if (fragmentOffset >= serialized.length) return JSON.stringify({ success: false, error: "LIST_AGENTS_FRAGMENT_INVALID", offset });
+    if (fragmentOffset > 0 && /[\uDC00-\uDFFF]/.test(serialized[fragmentOffset]) && /[\uD800-\uDBFF]/.test(serialized[fragmentOffset - 1])) return JSON.stringify({ success: false, error: "LIST_AGENTS_FRAGMENT_INVALID", offset });
+    let end = Math.min(serialized.length, fragmentOffset + 3000);
+    if (end < serialized.length && /[\uD800-\uDBFF]/.test(serialized[end - 1]) && /[\uDC00-\uDFFF]/.test(serialized[end])) end--;
+    const fragment = serialized.slice(fragmentOffset, end);
+    const result = JSON.stringify({ success: true, agentKey, offset, digest, fragment, fragmentOffset, nextFragmentOffset: end, hasMoreFragments: end < serialized.length, nextOffset: offset + 1, ...(speedContext ? { speedContext: cleanText(speedContext) } : {}) });
+    return fits(result) ? result : JSON.stringify({ success: false, error: "LIST_AGENTS_FRAGMENT_METADATA_TOO_LARGE", offset });
+  }
+
+  const makePage = (count: number) => {
+    const agents = candidates.slice(0, count);
+    const groupKeys = new Set(agents.map((agent) => agent.credentialGroup).filter(Boolean));
+    const speedContext = buildCandidateSpeedContext(agents.map((agent) => agent.model).filter((model): model is string => typeof model === "string"), samples, { snapshotAgeMs });
+    const nextOffset = offset + count;
+    const hasMore = nextOffset < availableCount;
+    return JSON.stringify({ ...parsed, offset, agents,
+      credentialGroups: groups.filter((group: any) => groupKeys.has(group.credentialGroup)),
+      hasMore, ...(hasMore ? { nextOffset } : {}),
+      ...(speedContext ? { speedContext } : {}),
+    });
+  };
+  if (!candidates.length) {
+    const empty = makePage(0);
+    if (fits(empty)) return empty;
+  } else {
+    let best: string | undefined;
+    for (let count = 1; count <= candidates.length; count++) {
+      const page = makePage(count);
+      if (!fits(page)) break;
+      best = page;
+    }
+    if (best) return best;
+  }
+  const agentKey = typeof candidates[0]?.agentKey === "string" ? candidates[0].agentKey : undefined;
+  const error = {
+    success: false,
+    error: candidates.length ? "LIST_AGENTS_CANDIDATE_TOO_LARGE" : "LIST_AGENTS_PAGE_METADATA_TOO_LARGE",
+    offset,
+    ...(agentKey ? { agentKey, recovery: { tool: "listAgents", arguments: { compact: true, offset, fragmentOffset: 0, fragmentAgentKey: agentKey },
+      note: "Repeat with the same filters and returned digest and nextFragmentOffset; concatenate fragments and parse JSON before continuing at nextOffset." } } : {}),
+    ...(candidates.length ? { nextOffset: offset + 1, truncated: parsed.truncated === true, poolComplete: parsed.planningRecommendation?.poolComplete === true, hasMore: offset + 1 < availableCount } : {}),
+  };
+  const encoded = JSON.stringify(error);
+  return fits(encoded) ? encoded : JSON.stringify({ success: false, error: "LIST_AGENTS_RECOVERY_ID_TOO_LARGE", offset });
 }

@@ -36,7 +36,7 @@ export function reviewDesktopBrowserAction(
   if (!isAllowlistedAccountUrl(url)) {
     return {
       kind: "reject",
-      reason: "url is not in the desktop account allowlist (https://nolo.chat /login, /life)",
+      reason: "url is not in the desktop account allowlist (fixed account pages or validated desktop authorization URL)",
     };
   }
   return { kind: "open-url", url };

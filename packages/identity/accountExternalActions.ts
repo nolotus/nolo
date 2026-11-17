@@ -42,7 +42,9 @@ function resolveSendToHost(): SendToHost | null {
  * Open a fixed allowlisted account page in the system browser.
  * Bridge first; a plain `window.open` (noopener) keeps the same allowlisted
  * URL usable when a desktop-edition bundle runs outside the webview. Returns
- * false only when nothing could open the page — never throws, never accepts a
+ * true means an opening request was issued, NOT that a browser opened or an
+ * account operation completed. A noopener window.open return value is not a
+ * completion receipt. Returns false on synchronous failure; never accepts a
  * non-allowlisted target.
  */
 export function openDesktopAccountPage(target: DesktopAccountTarget): boolean {
@@ -50,14 +52,18 @@ export function openDesktopAccountPage(target: DesktopAccountTarget): boolean {
   const message = buildDesktopBrowserActionMessage(url);
   if (!message) return false;
 
-  const sendToHost = resolveSendToHost();
-  if (sendToHost) {
-    sendToHost(message);
-    return true;
-  }
-  if (typeof window !== "undefined" && typeof window.open === "function") {
-    window.open(message.url, "_blank", "noopener,noreferrer");
-    return true;
+  try {
+    const sendToHost = resolveSendToHost();
+    if (sendToHost) {
+      sendToHost(message);
+      return true;
+    }
+    if (typeof window !== "undefined" && typeof window.open === "function") {
+      window.open(message.url, "_blank", "noopener,noreferrer");
+      return true;
+    }
+  } catch {
+    return false;
   }
   return false;
 }

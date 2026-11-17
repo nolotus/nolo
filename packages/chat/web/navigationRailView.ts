@@ -6,7 +6,7 @@ import { isSpaceRoutePath } from "render/layout/mainLayoutViewMode";
  * Product contract (Navigation V2 first batch):
  *   Rail    = Home / Favorites / Explore   (global, one level)
  *   Context = the current destination's content and filters
- *   Work and Projects are two *views of Home*, never two Rail entries.
+ *   Home uses the existing Work space view; the Project view is retired.
  *
  * The Rail is route-driven on purpose: a local `useState` copy of the active
  * destination drifts from the URL as soon as the user navigates (e.g. the
@@ -15,23 +15,25 @@ import { isSpaceRoutePath } from "render/layout/mainLayoutViewMode";
  */
 
 /** Primary Rail destinations. */
-export type RailView = "home" | "favorites" | "explore";
+export type RailView = "home" | "favorites" | "explore" | "music" | "calendar";
 
 /**
  * Home content views (a filter of Home, never Rail destinations).
  *
  * 「分类」(the pre-Navigation-V2 type-filtered list) is no longer a Home view:
  * its capability lives inside Work as the trailing「其他内容」groups, so the
- * top level stays Work / Projects only. Persisted/legacy `"categories"` values
+ * top level stays Work only. Persisted/legacy `"projects"` and `"categories"` values
  * are normalised to `"work"` by `resolveHomeView`.
  */
-export type HomeView = "work" | "projects";
+export type HomeView = "work";
 
 /** Route of each Rail destination. */
 export const RAIL_VIEW_PATHS: Record<RailView, string> = {
   home: "/",
   favorites: "/favorites",
   explore: "/explore",
+  music: "/music",
+  calendar: "/calendar",
 };
 
 /**
@@ -42,6 +44,8 @@ export const RAIL_VIEW_PATHS: Record<RailView, string> = {
  */
 export function resolveRailView(pathname: string | undefined | null): RailView {
   if (!pathname) return "home";
+  if (pathname === "/music") return "music";
+  if (pathname === "/calendar") return "calendar";
   if (pathname === RAIL_VIEW_PATHS.favorites) return "favorites";
   if (
     pathname === RAIL_VIEW_PATHS.explore ||
@@ -58,8 +62,7 @@ export function resolveRailView(pathname: string | undefined | null): RailView {
  * Legacy `"categories"` (and any unknown/garbage value) collapses to Work:
  * the category/type view is now part of Work's「其他内容」groups.
  */
-export function resolveHomeView(value: unknown): HomeView {
-  if (value === "projects") return "projects";
+export function resolveHomeView(_value: unknown): HomeView {
   return "work";
 }
 

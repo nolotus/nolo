@@ -10,7 +10,7 @@ import { ACCOUNT_CHAT_DISPLAY_PREFERENCE_KEYS } from "./accountChatDisplayOwner"
 import { createAsyncThunk } from "@reduxjs/toolkit";
 
 import { selectIdentityUserId } from "identity/selectors";
-import { getSessionGenerationForState } from "identity/sessionSource";
+import { getSessionGenerationForState, getSessionSnapshotForState } from "identity/sessionSource";
 import { createUserKey, createUserPreferenceKey } from "database/keys";
 import {
   USER_PREFERENCE_NAMES,
@@ -25,6 +25,7 @@ import {
 
 import {
   bumpLocalIntentEpoch,
+  publishUiPlugins,
   recordSettingsWriteFailure,
   updateSettingsState,
 } from "./settingActions";
@@ -35,6 +36,7 @@ import {
   describeSettingsWriteFailure,
   isSettingsWriteSupersededError,
   readLocalIntentEpoch,
+  readLocalIntentKeyEpoch,
   resolveSettingsWriteFailureAfterSuccess,
   SettingsWriteSupersededError,
 } from "./settingsWriteRetry";
@@ -66,6 +68,47 @@ const readServerAuthorityEchoSeq = (getState: () => unknown): number => {
 };
 
 /**
+ * 插件域意图快照：来源（归属账号 / 代次）+ 值的**对象引用**。
+ *
+ * `publishUiPlugins` 是插件域唯一的写入口，每次都原子写入这三项、并把值换成
+ * `normalizeUiPlugins` 的新对象。因此「三项全等」等价于「本次远端读期间插件域
+ * 没有被任何人写过」——用它就能把插件域与无关设置的意图隔离开：
+ * `localIntentEpoch` 仍统管用户偏好字段，但不再顺带决定插件快照能否发布。否则
+ * 新 generation 的插件 hydrate 只要与一次无关设置写入（sidebarWidth 等）重叠就会
+ * 被整体跳过，而没有任何其它路径为当前 generation 补发插件来源，selector 随后
+ * fail-closed 成 absent（PLUGIN-HYDRATE-UNRELATED-INTENT-001）。
+ *
+ * 已知取舍（同一 generation 内并发 hydrate 时「先完成者发布」）：第二次读会发现
+ * 插件域已被第一次读发布而跳过。生产入口 App.tsx 的 hydrateSessionSettings 按
+ * session key 去重（同一 key 复用同一 promise），不存在同代次并发读；若将来新增
+ * 同代次并发读入口，需在这里补更精确的来源标记，而不是放宽本判据。
+ */
+interface UiPluginIntentSnapshot {
+  value: unknown;
+  ownerAccountId: string | null;
+  generation: number | undefined;
+}
+
+const readUiPluginIntentSnapshot = (
+  getState: () => unknown,
+): UiPluginIntentSnapshot => {
+  const state = (getState() as { settings?: Partial<SettingState> })?.settings;
+  return {
+    value: state?.uiPlugins,
+    ownerAccountId: state?.uiPluginsOwnerAccountId ?? null,
+    generation: state?.uiPluginsGeneration,
+  };
+};
+
+const isSameUiPluginIntent = (
+  a: UiPluginIntentSnapshot,
+  b: UiPluginIntentSnapshot,
+): boolean =>
+  a.value === b.value &&
+  a.ownerAccountId === b.ownerAccountId &&
+  a.generation === b.generation;
+
+/**
  * Read the persisted settings record for the current user, normalize it, and
  * apply it to local state. Returns the hydrated record (or null when no user).
  */
@@ -77,7 +120,7 @@ export const getSettings = createAsyncThunk<
   { state: any }
 >("settings/getSettings", async (_, { dispatch, getState }) => {
   const userId = selectIdentityUserId(getState() as any);
-  if (!userId) return null;
+  if (!userId || (getSessionSnapshotForState(getState()) && getSessionSnapshotForState(getState())?.transition !== "idle")) return null;
   const session = getSessionGenerationForState(getState());
   const hydration = {};
   latestChatHydrations.set(getState, hydration);
@@ -88,6 +131,10 @@ export const getSettings = createAsyncThunk<
   // allowance echo) advance it. A hydrate may only overwrite
   // `autoApproveCredits` when no echo happened during the read.
   const startAuthorityEchoSeq = readServerAuthorityEchoSeq(getState);
+  // Plugin-domain intent captured with the same discipline as the two
+  // generations above, but scoped to plugins only: see
+  // `readUiPluginIntentSnapshot`.
+  const startUiPluginIntent = readUiPluginIntentSnapshot(getState);
   const settingsKey = createUserKey.settings(userId);
   const authorityHomeKey = createUserPreferenceKey.authorityHome(userId);
   const [settingsRecord, authorityHomeRecord] = await Promise.all([
@@ -100,6 +147,7 @@ export const getSettings = createAsyncThunk<
   ]);
   // A pending cloud read must not hydrate a different signed-in account.
   if (selectIdentityUserId(getState() as any) !== userId ||
+      (getSessionSnapshotForState(getState()) && getSessionSnapshotForState(getState())?.transition !== "idle") ||
       getSessionGenerationForState(getState()) !== session ||
       latestChatHydrations.get(getState) !== hydration) return null;
   const authorityHomeServer =
@@ -120,14 +168,17 @@ export const getSettings = createAsyncThunk<
     const { currentServer: _ignored, ...settingsToApply } = normalizedPayload;
     // Hydrate the account owner without allowing a stale cloud read to cross identities.
     if (selectIdentityUserId(getState() as any) !== userId ||
+      (getSessionSnapshotForState(getState()) && getSessionSnapshotForState(getState())?.transition !== "idle") ||
       getSessionGenerationForState(getState()) !== session ||
       latestChatHydrations.get(getState) !== hydration) return null;
-    // Two independent generations guard two different staleness directions:
+    // Three independent staleness guards, each scoped to what it actually protects:
     //  - 用户意图世代（localIntentEpoch）：远端读期间用户改过设置 → 丢弃本次
     //    hydrate 的**用户偏好**字段（不写 Owner、不写用户偏好）；
     //  - 权威回显世代（serverAuthorityEchoSeq）：远端读期间服务端回显过权威值
-    //    → 丢弃本次 hydrate 的 **autoApproveCredits**（不覆盖更新的回显）。
-    // 两者互不推进、互不代替。
+    //    → 丢弃本次 hydrate 的 **autoApproveCredits**（不覆盖更新的回显）；
+    //  - 插件域意图快照（uiPlugins 值 + 来源账号/代次）：只看插件域，无关设置的
+    //    写入不得挡掉插件快照（见下方 pluginIntentChanged）。
+    // 三者互不推进、互不代替。
     const intentChanged =
       readLocalIntentEpoch(getState) !== startLocalIntentEpoch;
     const echoChanged =
@@ -139,7 +190,25 @@ export const getSettings = createAsyncThunk<
       ...preferenceFields
     } = settingsToApply;
     const applied: Partial<SettingState> = {};
-    if (!intentChanged) Object.assign(applied, preferenceFields);
+    // 插件快照按**插件域**自己的意图判定，而不是全局用户意图世代：
+    // 无关设置（sidebarWidth / maxExecutionTime 等）的写入也会推进
+    // localIntentEpoch，却与插件无关。用全局世代判它会让新 generation 的插件
+    // hydrate 被一次无关写入整体挡掉，且没有其它路径为当前 generation 补发插件
+    // 来源，selector 随后 fail-closed 成 absent（插件入口消失、开关被拒绝）。
+    // 反之，本次读期间真的发生过本地插件意图（值/来源三项任一变化）时，更旧的
+    // hydrate 不得覆盖它。
+    const pluginIntentChanged = !isSameUiPluginIntent(
+      startUiPluginIntent,
+      readUiPluginIntentSnapshot(getState),
+    );
+    if (!pluginIntentChanged) {
+      dispatch(publishUiPlugins({ value: settingsToApply.uiPlugins!, accountId: userId, generation: session }));
+    }
+    // 用户偏好字段仍由全局用户意图世代统管：期间有任意本地写入 → 更旧的云端
+    // 偏好值一律丢弃（不写 Owner、不写偏好）。
+    if (!intentChanged) {
+      Object.assign(applied, preferenceFields);
+    }
     // autoApproveCredits：仅当期间没有发生权威回显才应用（回显更新 → 跳过）。
     if (!echoChanged && hasOwn(authoritative, "autoApproveCredits")) {
       applied.autoApproveCredits = authoritative.autoApproveCredits as number;
@@ -194,6 +263,7 @@ const persistSettingsChanges = createAsyncThunk<
     normalizeDefaultAgentIdSetting(currentSettings.defaultAgentId) ??
     SYSTEM_DEFAULT_AGENT_ID;
   const userId = selectIdentityUserId(getState() as any);
+  if (hasOwn(normalizedChanges, "uiPlugins") && getSessionSnapshotForState(getState())?.transition !== "idle") throw new Error("Session is transitioning.");
   if (!userId) {
     const hasAppearanceChanges = Object.keys(normalizedChanges).length > 0;
     if (hasAppearanceChanges) {
@@ -203,7 +273,7 @@ const persistSettingsChanges = createAsyncThunk<
     } else {
       throw new Error("User not found for persisting settings.");
     }
-    dispatch(bumpLocalIntentEpoch());
+    dispatch(bumpLocalIntentEpoch({ keys: Object.keys(normalizedChanges) }));
     dispatch(updateSettingsState(normalizedChanges));
     return normalizedChanges;
   }
@@ -219,40 +289,75 @@ const persistSettingsChanges = createAsyncThunk<
   if (selectIdentityUserId(getState() as any) !== userId) return {};
   const owner = getAccountChatDisplayOwner(getState);
   // Local user intent is being published now: advance the generation so any
-  // hydrate that started earlier is discarded instead of overwriting it.
-  dispatch(bumpLocalIntentEpoch());
+  // hydrate that started earlier is discarded instead of overwriting it, and
+  // stamp the keys this intent touched so a queued write is only abandoned when
+  // a *newer intent on the same keys* supersedes it (an unrelated setting edit
+  // must not cancel this write — PLUGIN-PERSIST-UNRELATED-INTENT-001).
+  const intentKeys = Object.keys(normalizedChanges);
+  dispatch(bumpLocalIntentEpoch({ keys: intentKeys }));
   // Identifies this intent for the write path: a failure may only be retried
-  // while this is still the account's newest local intent.
+  // while this is still the newest local intent *for these keys*.
   const intentEpoch = readLocalIntentEpoch(getState);
   owner.setAccount(userId);
   owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
+  if (hasOwn(persistencePlan.normalizedChanges, "uiPlugins")) {
+    dispatch(publishUiPlugins({ value: persistencePlan.normalizedChanges.uiPlugins!, accountId: userId, generation: session }));
+  }
   dispatch(updateSettingsState(omitAccountChatDisplayPreferences(persistencePlan.normalizedChanges)));
-  // Keys of the user intent (for the failure state) and of the keys that are
-  // actually pushed to the cloud settings record (for reconciliation).
-  const intentKeys = Object.keys(persistencePlan.normalizedChanges);
-  const persistedKeys = Object.keys(
-    persistencePlan.settingsPatch?.changes ?? {},
-  ).filter((key) => key !== "schemaVersion");
-  const isCurrentIntent = () =>
+  // 账号 / 会话代次守卫：与「某次意图是否仍然有效」是两件事，分开判。
+  const isSameAccountSession = () =>
+    (!getSessionSnapshotForState(getState()) ||
+      getSessionSnapshotForState(getState())?.transition === "idle") &&
     selectIdentityUserId(getState()) === userId &&
-    getSessionGenerationForState(getState()) === session &&
-    readLocalIntentEpoch(getState) === intentEpoch;
-  const performWrite = async () => {
-    // 便宜收紧（非原子）：每次真正发写之前再判一次世代 —— 首次与重试各一次。
-    // 若这次意图已被更新的本地意图取代，就不要把旧 payload 发出去；窗口从
-    // 「退避 200ms + 一次网络往返」缩到一次函数调用。最终一致性仍由同账号串行
-    // 队列保证：新意图的写排在队尾、紧接本次之后执行并覆盖服务端。
+    getSessionGenerationForState(getState()) === session;
+  // 单个键是否已被更新的本地意图取代（**按键**判定，不按键集合整体判定）。
+  const isSupersededKey = (key: string): boolean =>
+    readLocalIntentKeyEpoch(getState, key) > intentEpoch;
+  /**
+   * 本次写真正还可以发的 payload：**每次发写前按当前键 epoch 重算**。
+   *
+   * 部分重叠的正确语义：被后续意图改过的键丢弃（旧值绝不写回），仍有效的键
+   * 照常发出；只有**全部**意图键都被取代才整次放弃。否则「排入
+   * {uiPlugins, sidebarWidth:320} → 排入 {sidebarWidth:321}」会连 uiPlugins
+   * 一起丢掉，而后续 payload 并不携带它（PLUGIN-PERSIST-PARTIAL-OVERLAP-001）。
+   */
+  const resolveEffectiveWrite = () => {
+    const patchChanges = persistencePlan.settingsPatch?.changes ?? {};
+    const effectiveChanges: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(patchChanges)) {
+      if (!isSupersededKey(key)) effectiveChanges[key] = value;
+    }
+    const effectiveIntentKeys = intentKeys.filter((key) => !isSupersededKey(key));
+    const effectivePersistedKeys = Object.keys(effectiveChanges).filter(
+      (key) => key !== "schemaVersion",
+    );
+    return { effectiveChanges, effectiveIntentKeys, effectivePersistedKeys };
+  };
+  type EffectiveWrite = ReturnType<typeof resolveEffectiveWrite>;
+  const performWrite = async (): Promise<EffectiveWrite> => {
+    // 便宜收紧（非原子）：每次真正发写之前重算一次有效 payload —— 首次与重试
+    // 各一次。窗口从「退避 200ms + 一次网络往返」缩到一次函数调用。最终一致性
+    // 仍由同账号串行队列保证：新意图的写排在队尾、紧接本次之后执行。
     // 抛哨兵错误（而不是普通 Error）：被取代 ≠ 失败，调用方应正常 resolve。
-    if (!isCurrentIntent()) {
+    if (!isSameAccountSession()) {
+      throw new SettingsWriteSupersededError();
+    }
+    const effective = resolveEffectiveWrite();
+    // 全部意图键都已被更新的意图接管：本次没有还要负责的键，整次放弃。
+    if (effective.effectiveIntentKeys.length === 0) {
       throw new SettingsWriteSupersededError();
     }
     const nextDefaultAgentId =
       normalizeDefaultAgentIdSetting(
         persistencePlan.normalizedChanges.defaultAgentId,
       ) ?? null;
+    // defaultAgentId 的 register 副作用也按有效键守卫：被更新意图改过时不得把
+    // 旧值写进 register（那条意图自己的写会落新值）。守卫要传进 register 内部：
+    // 它自己还会 await 一次远端读，返回后账号/意图可能已经变了，那时才真正发写。
     if (
       hasOwn(changes, "defaultAgentId") &&
-      previousDefaultAgentId !== (nextDefaultAgentId ?? SYSTEM_DEFAULT_AGENT_ID)
+      previousDefaultAgentId !== (nextDefaultAgentId ?? SYSTEM_DEFAULT_AGENT_ID) &&
+      !isSupersededKey("defaultAgentId")
     ) {
       await persistDefaultAgentRegister(
         dispatch as unknown as (action: unknown) => {
@@ -263,29 +368,44 @@ const persistSettingsChanges = createAsyncThunk<
         },
         userId,
         nextDefaultAgentId,
+        () => isSameAccountSession() && !isSupersededKey("defaultAgentId"),
       );
     }
-    if (persistencePlan.settingsPatch) {
+    // register 的 await 之后必须重核会话并**重算**有效 payload：await 前的快照
+    // 可能已经过期（期间切了账号/代次，或同键被新意图接管）。沿用旧快照会把
+    // 失效账号的旧值写出去（SETTINGS-REGISTER-AWAIT-STALE-WRITE-001）。
+    if (!isSameAccountSession()) {
+      throw new SettingsWriteSupersededError();
+    }
+    const effectiveAfterAwait = resolveEffectiveWrite();
+    if (effectiveAfterAwait.effectiveIntentKeys.length === 0) {
+      throw new SettingsWriteSupersededError();
+    }
+    if (
+      persistencePlan.settingsPatch &&
+      Object.keys(effectiveAfterAwait.effectiveChanges).length > 0
+    ) {
       await dispatch(
         getSettingDbActionThunks().upsert({
           dbKey: persistencePlan.settingsPatch.dbKey,
-          data: persistencePlan.settingsPatch.changes,
+          data: effectiveAfterAwait.effectiveChanges,
         }),
       ).unwrap();
     }
+    return effectiveAfterAwait;
   };
   // 写成功即收敛已有的失败状态：本次覆盖了失败状态里剩下的全部键 → 清空；
   // 只覆盖一部分 → 剔除已覆盖的键（剩下的继续可见）；其它账号的状态不动。
-  const settleSettingsWriteFailureAfterSuccess = () => {
-    if (!isCurrentIntent()) return;
+  const settleSettingsWriteFailureAfterSuccess = (effective: EffectiveWrite) => {
+    if (!isSameAccountSession()) return;
     const existing = (getState() as any)?.settings
       ?.lastWriteFailure as SettingsWriteFailure | null | undefined;
     if (!existing) return;
     const next = resolveSettingsWriteFailureAfterSuccess({
       failure: existing,
       accountId: userId,
-      intentKeys,
-      persistedKeys,
+      intentKeys: effective.effectiveIntentKeys,
+      persistedKeys: effective.effectivePersistedKeys,
     });
     // 同一引用 = 跨账号状态，本次成功与它无关，不 dispatch。
     if (next === existing) return;
@@ -296,44 +416,63 @@ const persistSettingsChanges = createAsyncThunk<
   await enqueueAccountSettingsWrite(getState, userId, async () => {
     let firstFailureAt = 0;
     try {
-      await performWrite();
-      settleSettingsWriteFailureAfterSuccess();
+      const effective = await performWrite();
+      settleSettingsWriteFailureAfterSuccess(effective);
       return;
     } catch (firstError) {
       // 被更新的本地意图取代（写前复查就已放弃）：不是失败，正常 resolve。
       // 新意图自己的写正在正常进行，调用方 / UI 不该看到「保存失败」。
       if (isSettingsWriteSupersededError(firstError)) return;
       firstFailureAt = Date.now();
-      // Only retry while this intent is still the account's newest local intent.
-      // A newer edit makes the server write of this payload pointless and
-      // dangerous (it would persist a value the user already replaced).
-      // Being superseded at any of these points is a resolve, never a reject.
-      if (!isCurrentIntent()) return;
+      // 账号 / 会话代次变了：这条意图不属于任何账号，放弃重试也不留状态。
+      if (!isSameAccountSession()) return;
       await delaySettingsWriteRetry(SETTINGS_WRITE_RETRY_BACKOFF_MS);
-      if (!isCurrentIntent()) return;
       try {
-        await performWrite();
-        settleSettingsWriteFailureAfterSuccess();
+        // 重试前重算有效 payload：只保留仍未被同键新意图接管的键。
+        const effective = await performWrite();
+        settleSettingsWriteFailureAfterSuccess(effective);
         return;
       } catch (retryError) {
-        // 重试本身被世代复查拦下：同样是「被取代」，不是失败。
+        // 重试本身被世代复查拦下（全部键已被接管）：同样是「被取代」，不是失败。
         if (isSettingsWriteSupersededError(retryError)) return;
         // Retry failed too: keep the optimistic local value (never roll back a
         // newer local edit) and record a readable failure + reconciliation
         // verdict for the UI. The rejection still bubbles to the caller.
         // A newer local intent that arrived in the meantime owns the outcome:
         // do not leave a stale failure state behind for it (and do not reject).
-        if (!isCurrentIntent()) return;
+        if (!isSameAccountSession()) return;
+        // 对账键集合与真正发出的 payload 同语义：只看本次仍负责的键。
+        const effective = resolveEffectiveWrite();
+        // 期间全部键都被后续意图接管：这条意图已经没有要负责的键，
+        // 既不记失败状态也不 reject（与写前被取代同口径）。
+        if (effective.effectiveIntentKeys.length === 0) return;
         const failure = await describeSettingsWriteFailure({
           getState: getState as unknown as () => unknown,
           accountId: userId,
           intentEpoch,
-          intentKeys,
-          persistedKeys,
+          intentKeys: effective.effectiveIntentKeys,
+          persistedKeys: effective.effectivePersistedKeys,
           at: firstFailureAt,
         });
-        if (!isCurrentIntent()) return;
-        dispatch(recordSettingsWriteFailure(failure));
+        if (!isSameAccountSession()) return;
+        // 对账本身也要 await 远端：返回后必须重新按键核验。期间被新意图接管的键
+        // 不属于这条旧请求，不能把它们的过期失败告警发给用户
+        // （SETTINGS-RECONCILE-SUPERSEDED-FAILURE-001）。
+        const ownedAfterReconcile = new Set(
+          resolveEffectiveWrite().effectiveIntentKeys,
+        );
+        const ownedKeys = failure.keys.filter((key) => ownedAfterReconcile.has(key));
+        // 全部键都被接管：不记失败、不 reject（与写前被取代同口径）。
+        if (ownedKeys.length === 0) return;
+        dispatch(
+          recordSettingsWriteFailure({
+            ...failure,
+            keys: ownedKeys,
+            unresolvedKeys: failure.unresolvedKeys.filter((key) =>
+              ownedAfterReconcile.has(key),
+            ),
+          }),
+        );
         throw retryError;
       }
     }
@@ -521,3 +660,13 @@ export const setDefaultAgentId = createAsyncThunk(
     ).unwrap(),
 );
 
+
+export const setUiPluginState = createAsyncThunk<void, { id: "music" | "calendar"; value: "enabled" | "disabled"; session: ReturnType<typeof getSessionSnapshotForState> }, { state: any }>(
+  "settings/setUiPluginState", async ({ id, value, session }, { dispatch, getState }) => {
+    const current = getSessionSnapshotForState(getState());
+    if (!session || session.transition !== "idle" || current?.transition !== "idle" || current.activeAccountId !== session.activeAccountId || current.sessionGeneration !== session.sessionGeneration) throw new Error("Session changed; reopen plugin configuration.");
+    const state = getState().settings;
+    if (state.uiPluginsOwnerAccountId !== current.activeAccountId || state.uiPluginsGeneration !== current.sessionGeneration) throw new Error("Plugin settings are not hydrated for this session.");
+    await dispatch(setSettings({ uiPlugins: { ...state.uiPlugins, [id]: value } })).unwrap();
+  },
+);

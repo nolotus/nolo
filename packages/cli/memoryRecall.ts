@@ -13,8 +13,10 @@
  * 每 5 分钟一条聚合摘要，避免远端抖动刷屏。
  */
 import { resolveMemoryRuntime } from "../ai/memory/runtime";
+import { recallWorkContextBlock } from "../ai/memory/vnext/workContextRecall";
 import { isMemoryVNextShadowReadEnabled } from "../ai/memory/vnext/shadowRead";
 import { getDefaultCliLocalRuntimeDb } from "./localRuntimeDb";
+import { resolveLocalUserId } from "./client/cliAgentConfigHelpers";
 import { resolveMachineId } from "../connector-experimental/machineInfo";
 import { getLogger, normalizeError } from "./diagnostics";
 
@@ -210,6 +212,72 @@ export const resolveCliMemory = async (
       "warn",
       fingerprintFor("local-failed", error instanceof Error ? error.name : undefined),
       "local recall failed, omitting memory layer",
+      normalizeError(error),
+    );
+    return null;
+  }
+};
+
+export interface CliWorkContextRecallInput {
+  env: Record<string, string | undefined>;
+  /** 宿主已确定的对话 id（TUI: state.dialogId；一次性 run: --continue 的 dialogId）。 */
+  dialogId?: string | null;
+  spaceId?: string | null;
+  signal?: AbortSignal;
+  /** 本轮真实用户输入（只截断后作为 relatedQuery，不做意图解析）。 */
+  userInput?: string;
+  /**
+   * 测试注入用：给定 db 就跳过打开 CLI 本地 runtime db（生产调用方不传）。
+   */
+  db?: any;
+}
+
+/**
+ * 工作接续块（CLI 本地 DB 优先）。
+ *
+ * 与上面的语义召回不同：**只读本地 LevelDB，不发网络请求**。CLI 的本地运行
+ * 库里已经有本机写入的工作接续，因此这条召回不依赖登录态，也不会因为远端
+ * 抖动退化成「必须联网才有记忆」。远端语义块与本地工作接续块互不影响。
+ *
+ * 每轮调用、不缓存：写完下一轮就该看见，不能拿旧快照当最新。
+ * 读取失败返回 null（只省略该块），不影响对话。
+ */
+export const resolveCliWorkContext = async (
+  input: CliWorkContextRecallInput,
+): Promise<string | null> => {
+  const dialogId = input.dialogId ?? null;
+  if (!dialogId) return null;
+  if (input.signal?.aborted) {
+    throw input.signal.reason ?? new DOMException("Aborted", "AbortError");
+  }
+  try {
+    const localDb = input.db ?? (await getDefaultCliLocalRuntimeDb({ env: input.env }));
+    const trimmedUserInput = input.userInput?.trim().slice(0, 200);
+    const result = await recallWorkContextBlock({
+      db: localDb,
+      // owner 必须与写入侧（工具经 resolveLocalUserId 校验并写个人 owner）一致，
+      // 否则工具成功写入后这里按机器 id 去查，永远召回不到。
+      owner: { ownerType: "user", ownerId: resolveLocalUserId(input.env) },
+      spaceId: input.spaceId ?? null,
+      dialogId,
+      ...(trimmedUserInput ? { relatedQuery: trimmedUserInput } : {}),
+    });
+    if (result.status === "error") {
+      logDeduped(
+        "warn",
+        fingerprintFor("work-context-failed", result.error ? "read" : undefined),
+        "work context recall failed, omitting work context block",
+        normalizeError(result.error ?? "unknown"),
+      );
+      return null;
+    }
+    return result.block;
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    logDeduped(
+      "warn",
+      fingerprintFor("work-context-failed", error instanceof Error ? error.name : undefined),
+      "work context recall failed, omitting work context block",
       normalizeError(error),
     );
     return null;

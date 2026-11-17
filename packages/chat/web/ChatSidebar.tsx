@@ -1,7 +1,5 @@
-import { useCreateProjectNavigation } from "render/layout/createProjectNavigation";
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { NavLink, useLocation, useNavigate, useSearchParams } from "app/routing";
-import { getIsDesktopApp } from "app/utils/env";
+import { NavLink, useLocation, useSearchParams } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
   selectCurrentSpace,
@@ -30,12 +28,9 @@ import { NavigationRail } from "./NavigationRail";
 import { useSidebarToggleContext } from "render/layout/SidebarToggleContext";
 import "render/layout/sidebarContextToggle.css";
 import { ExploreCategoryNav } from "./ExploreCategoryNav";
-import { type HomeView, resolveHomeView, resolveRailView } from "./navigationRailView";
+import { resolveRailView } from "./navigationRailView";
 import NoloHeadMark from "render/web/ui/NoloHeadMark";
-import { DesktopFolderProjects } from "./DesktopFolderProjectsSection";
 import { projectHomeItems, type HomeScope } from "./homeScopeProjection";
-import { parseLocalDialogProjectBindings } from "./homeLocalProjectDialogs";
-import { selectDesktopProject, readDesktopFolderProjects, DESKTOP_DIALOG_PROJECTS_KEY, DESKTOP_FOLDER_PROJECTS_KEY } from "./desktopFolderProjects";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { SidebarPinnedBlock } from "./sidebar/SidebarPinnedBlock";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
@@ -48,8 +43,8 @@ import { selectRemoteServer } from "app/settings/settingSlice";
 
 // 侧栏类型筛选的本地偏好读取/写入真源在 sidebarTypeQuery（列表回落到同一份），
 // 这里只负责「首次默认真源」：没有偏好时用 DEFAULT_SIDEBAR_TYPE_FILTER。
-const readPreferredSidebarType = (): SidebarTypeFilterId =>
-  readStoredSidebarType() ?? DEFAULT_SIDEBAR_TYPE_FILTER;
+const readPreferredSidebarType = (userId: string | undefined): SidebarTypeFilterId =>
+  readStoredSidebarType(userId) ?? DEFAULT_SIDEBAR_TYPE_FILTER;
 
 // --- 主侧边栏组件 ---
 /**
@@ -61,10 +56,7 @@ const readPreferredSidebarType = (): SidebarTypeFilterId =>
  * 降级成 static、内容已退出有限高度链，--fixed 列却仍 overflow: hidden，超出列底的内容滚轮
  * 滚不到。三条降级规则因此写进同一个 @container（见 navigationRail.css）。
  */
-const ShellWithRail: React.FC<{ children: React.ReactNode; projectScopeId?: string | null }> = ({
-  children,
-  projectScopeId,
-}) => {
+const ShellWithRail: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { t } = useTranslation("space");
   const sidebarToggle = useSidebarToggleContext();
   const isDesktop = sidebarToggle?.isDesktop ?? false;
@@ -79,7 +71,6 @@ const ShellWithRail: React.FC<{ children: React.ReactNode; projectScopeId?: stri
       className={`navigation-v2-shell ${isOpen ? "is-expanded" : "is-collapsed"}`}
     >
       <NavigationRail
-        projectScopeId={projectScopeId}
         headerSlot={
           showToggle ? (
             <button
@@ -117,62 +108,26 @@ const ShellWithRail: React.FC<{ children: React.ReactNode; projectScopeId?: stri
 const ChatSidebar: React.FC = () => {
   const { t } = useTranslation("space");
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
-  // Work / Projects 是 Home 下的两种视图，不是 Rail 一级入口；归一化统一走 resolveHomeView。
-  const [homeViewState, setHomeViewState] = useState<HomeView>("work");
   const [homeScope, setHomeScope] = useState<HomeScope>({ kind: "all" });
-  const [scopeBindings, setScopeBindings] = useState<Record<string, unknown>>({});
   // 类型筛选真源优先级：有效 URL query > 本地偏好 > 首次默认（agent）。
   // URL 是可分享、可前进后退/刷新恢复的真源，所以 typeFilter 直接从 URL 派生，
   // 不做「URL -> state」的 effect 回写（避免把显式 URL 覆盖掉）。
   // 该值是**唯一**的有效筛选：chip 显隐与下方列表（typeFilter prop）都用它，
   // 列表不再自己从 URL 重新推导（详情页 URL 归一化会丢掉 sidebarType，重推会与 chip 不一致）。
   const [searchParams, setSearchParams] = useSearchParams();
-  const [preferredTypeFilter, setPreferredTypeFilter] = useState<SidebarTypeFilterId>(readPreferredSidebarType);
+  const identityUserId = useAppSelector(selectIdentityUserId);
+  const [preference, setPreference] = useState(() => ({ userId: identityUserId, filter: readPreferredSidebarType(identityUserId) }));
+  const preferredTypeFilter = preference.userId === identityUserId
+    ? preference.filter
+    : readPreferredSidebarType(identityUserId);
   const typeFilter = resolveEffectiveSidebarType(searchParams.toString(), preferredTypeFilter);
 
   const handleTypeFilterChange = useCallback((filter: SidebarTypeFilterId) => {
-    setPreferredTypeFilter(filter);
-    writeStoredSidebarType(filter);
+    setPreference({ userId: identityUserId, filter });
+    writeStoredSidebarType(filter, identityUserId);
     setSearchParams((prev) => applySidebarTypeToParams(prev, filter));
-  }, [setSearchParams]);
+  }, [identityUserId, setSearchParams]);
 
-  const selectProjectScope = useCallback((projectId: string | null, projectName?: string) => {
-    if (!projectId) { setHomeScope({ kind: "all" }); return; }
-    try {
-      setScopeBindings(parseLocalDialogProjectBindings(window.localStorage.getItem(DESKTOP_DIALOG_PROJECTS_KEY)));
-      setHomeScope({ kind: "project", projectId, projectName });
-      setHomeViewState("work");
-      // 进入项目筛选时清掉残留的类型筛选，否则只剩「仅含关联对话」的状态提示。
-      // 走统一的类型筛选入口：同时写本地偏好与 sidebarType URL 参数。
-      handleTypeFilterChange("all");
-    } catch { setHomeScope({ kind: "all" }); }
-  }, [handleTypeFilterChange]);
-
-  const isDesktop = getIsDesktopApp();
-  const navigate = useNavigate();
-  const showProjects = useCallback(() => setHomeViewState("projects"), []);
-  const createProjectRequest = useCreateProjectNavigation(isDesktop, showProjects);
-  const homeView = isDesktop ? resolveHomeView(homeViewState) : "work";
-  const selectHomeView = (view: HomeView) => {
-    const nextView = resolveHomeView(view);
-    setHomeViewState(nextView);
-    if (nextView === "work") {
-      selectDesktopProject(window.localStorage, null);
-      navigate("/");
-    } else if (nextView === "projects") {
-      try {
-        const storage = window.localStorage;
-        const projects = readDesktopFolderProjects(storage.getItem(DESKTOP_FOLDER_PROJECTS_KEY));
-        if (projects.length > 0) {
-          const first = projects[0];
-          selectDesktopProject(storage, first.id);
-          navigate(`/?project=${encodeURIComponent(first.id)}`);
-        }
-      } catch {
-        // 如果没有项目则不报错
-      }
-    }
-  };
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
   useEffect(() => {
     const openPalette = () => setCommandPaletteOpen(true);
@@ -199,7 +154,6 @@ const ChatSidebar: React.FC = () => {
 
 
   const { items: allContentItems } = useMyContentItems();
-  const identityUserId = useAppSelector(selectIdentityUserId);
   const runtimeSnapshot = useAppSelector(selectRuntimeSnapshot);
   const currentServer = useAppSelector(selectRemoteServer);
   const { unreadAgentKeys, unreadSummaryState } = useAgentUnreadSummaryLifecycle({
@@ -254,7 +208,6 @@ const ChatSidebar: React.FC = () => {
     if (lastScopeOwner.current === identityUserId) return;
     lastScopeOwner.current = identityUserId;
     setHomeScope({ kind: "all" });
-    setScopeBindings({});
   }, [identityUserId]);
 
   const remoteTasksGlobalEntry = useMemo(
@@ -342,31 +295,9 @@ const ChatSidebar: React.FC = () => {
   // Stable identity: the Work preview memoizes on `items`; a fresh array on every
   // render would invalidate its run-state projection on each keystroke/tick.
   const scopedWorkItems = useMemo(
-    () => projectHomeItems(allContentItems, identityUserId ?? "", homeScope, scopeBindings),
-    [allContentItems, identityUserId, homeScope, scopeBindings],
+    () => projectHomeItems(allContentItems, identityUserId ?? "", homeScope, {}),
+    [allContentItems, identityUserId, homeScope],
   );
-  useEffect(() => {
-    if (homeScope.kind !== "project") return;
-    const refresh = () => {
-      try {
-        const storage = window.localStorage;
-        const projects = JSON.parse(storage.getItem("nolo:desktop-folder-projects:v1") || "[]") as unknown;
-        if (!Array.isArray(projects) || !projects.some((project) =>
-          project && typeof project === "object" && "id" in project && project.id === homeScope.projectId)) {
-          setHomeScope({ kind: "all" });
-          return;
-        }
-        setScopeBindings(parseLocalDialogProjectBindings(storage.getItem(DESKTOP_DIALOG_PROJECTS_KEY)));
-      } catch { setHomeScope({ kind: "all" }); }
-    };
-    window.addEventListener("nolo:desktop-folder-selection", refresh);
-    window.addEventListener("storage", refresh);
-    return () => {
-      window.removeEventListener("nolo:desktop-folder-selection", refresh);
-      window.removeEventListener("storage", refresh);
-    };
-  }, [homeScope]);
-
   const isSpaceRoute = Boolean(space?.id || searchParams.get("spaceId") || location.pathname.startsWith("/space"));
   useEffect(() => {
     if (homeScope.kind !== "noSpace") return;
@@ -375,14 +306,7 @@ const ChatSidebar: React.FC = () => {
     }
   }, [homeScope.kind, railView, isSpaceRoute]);
 
-  const homeScopeIndicator = homeScope.kind === "project" ? (
-    <button type="button" className="navigation-v2-home-scope" onClick={() => selectProjectScope(null)}
-      title={t("allView.showAllProjects", "清除项目筛选，显示全部工作")}
-      aria-label={t("allView.showAllProjects", "清除项目筛选，显示全部工作")}>
-      <span>{homeScope.projectName || t("allView.projectFilterActive", "当前项目")}</span>
-      <span aria-hidden="true">×</span>
-    </button>
-  ) : homeScope.kind === "noSpace" ? (
+  const homeScopeIndicator = homeScope.kind === "noSpace" ? (
     <button type="button" className="navigation-v2-home-scope" onClick={() => setHomeScope({ kind: "all" })}
       title={t("workspace_show_all", "清除空间外筛选，显示全部工作")}
       aria-label={t("workspace_show_all", "清除空间外筛选，显示全部工作")}
@@ -391,46 +315,19 @@ const ChatSidebar: React.FC = () => {
       <span aria-hidden="true">×</span>
     </button>
   ) : null;
-  const homeViewSwitcher = isDesktop ? (
-    <div
-      role="group"
-      aria-label={t("common:homeViews", "主页视图")}
-      className="navigation-v2-home-views"
-    >
-      <button
-        type="button"
-        className="navigation-v2-home-views__item"
-        aria-pressed={homeView === "work"}
-        onClick={() => selectHomeView("work")}
-      >
-        {t("allView.work", "工作")}
-      </button>
-      <button
-        type="button"
-        className="navigation-v2-home-views__item"
-        aria-pressed={homeView === "projects"}
-        onClick={() => selectHomeView("projects")}
-      >
-        {t("allView.projects", "项目")}
-      </button>
-    </div>
-  ) : null;
-
   // Work content uses the space-group scroll container for every type.
-  const contextContentClassName = homeView === "work"
-    ? "navigation-v2-context-content ChatSidebar__work-content"
-    : "navigation-v2-context-content";
+  const contextContentClassName = "navigation-v2-context-content ChatSidebar__work-content";
 
   // Navigation V2 pilot: the Rail is route-driven, and the Context column
   // follows it. Favorites / Explore are not Home, so they must not keep
-  // rendering Home's Work/Projects content — and above all must not keep
+  // rendering Home's space content — and above all must not keep
   // rendering a stale Space scope under a non-Space destination.
   // Nothing here mutates Space, cwd or a running Agent.
-  const currentProjectScopeId = homeScope.kind === "project" ? homeScope.projectId : null;
+
 
   if (railView !== "home") {
     return (
-      <ShellWithRail projectScopeId={currentProjectScopeId}>
+      <ShellWithRail>
         <div data-hook="chat-esc-sidebar"
           data-unread-summary-status={unreadSummaryState.status}
           data-unread-summary-error={unreadSummaryState.error ?? undefined}
@@ -452,24 +349,21 @@ const ChatSidebar: React.FC = () => {
   }
 
   return (
-    <ShellWithRail projectScopeId={currentProjectScopeId}>
+    <ShellWithRail>
       <div data-hook="chat-esc-sidebar"
         data-unread-summary-status={unreadSummaryState.status}
         data-unread-summary-error={unreadSummaryState.error ?? undefined}
         {...withLiteralClass("ChatSidebar navigation-v2-context navigation-v2-context--fixed", sidebarStyles.chatSidebar)}>
         <div className="navigation-v2-context-controls">
-              {homeViewSwitcher}
-          {homeView === "work" && typeFilterShell}
-          {homeView === "work" && homeScopeIndicator}
+          {typeFilterShell}
+          {homeScopeIndicator}
         </div>
         <div className={contextContentClassName}>
-          <div style={{ display: homeView === "work" ? "contents" : "none" }}>
+          <div style={{ display: "contents" }}>
             {homeScope.kind === "all" && remoteTasksGlobalEntry}
             <WorkDialogHistory homeScope={homeScope} onSelectHomeScope={setHomeScope} items={scopedWorkItems} userId={identityUserId ?? ""} enabled={homeScope.kind !== "project"} includeNonDialogs={typeFilter !== "dialog"} typeFilter={typeFilter} unreadAgentKeys={unreadAgentKeys} />
           </div>
-          <div style={{ display: homeView === "projects" ? "contents" : "none" }}>
-            <DesktopFolderProjects createRequest={createProjectRequest} items={allContentItems} userId={identityUserId ?? ""} onSelectProjectScope={selectProjectScope} spaceId={space?.id || null} onOpenProject={(project) => navigate("/?project=" + encodeURIComponent(project.id))} />
-          </div>
+
         </div>
         {commandPalette}
       </div>

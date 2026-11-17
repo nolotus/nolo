@@ -6,6 +6,8 @@
 
 import { createSelector } from "@reduxjs/toolkit";
 import type { RootState } from "app/store";
+import { normalizeUiPlugins, type UiPlugins } from "app/plugins/uiPlugins";
+import type { AccountSessionSnapshot } from "core/accountSession";
 import { DEFAULT_USER_PREFERENCE_PROFILE } from "ai/policy/types";
 import {
   DEFAULT_AUTO_APPROVED_SELF_UPDATE_FIELDS,
@@ -226,4 +228,16 @@ export const selectSystemBuiltinSkills = createSelector(
       systemBuiltinSkills,
       DEFAULT_SYSTEM_BUILTIN_SKILLS,
     ),
+);
+
+// Identity is an explicit selector argument: Redux state can remain unchanged
+// while the owning Core transitions. React consumers subscribe to both sources.
+export const selectUiPlugins = createSelector(
+  [(state: RootState) => state.settings.uiPlugins,
+   (state: RootState) => state.settings.uiPluginsOwnerAccountId,
+   (state: RootState) => state.settings.uiPluginsGeneration,
+   (_state: RootState, session: AccountSessionSnapshot | null) => session],
+  (value, owner, generation, session): UiPlugins =>
+    session?.transition === "idle" && owner === session.activeAccountId && generation === session.sessionGeneration
+      ? normalizeUiPlugins(value) : normalizeUiPlugins(undefined),
 );

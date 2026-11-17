@@ -23,6 +23,8 @@ import {
 } from "./pluginPresentation";
 import { usePluginCardStates } from "./pluginStatus";
 import "./PluginExplore.css";
+import { UI_PLUGIN_SPECS } from "app/plugins/uiPlugins";
+import { useUiPlugins } from "app/hooks/index";
 
 const INSTABOX_ID = "instabox";
 
@@ -81,6 +83,8 @@ const PluginIntroCard: React.FC<{
 
 export const PluginExplore: React.FC = () => {
   const { t } = useTranslation();
+  // 同上：广场卡片的状态标签也只能来自当前归属账号的快照。
+  const uiPlugins = useUiPlugins();
   const currentToken = useToken();
   const configuredServer = useAppSelector(selectRemoteServer);
   const currentServer =
@@ -94,6 +98,24 @@ export const PluginExplore: React.FC = () => {
   return (
     <div className="plugin-explore" data-testid="plugin-explore">
       <div className="plugin-explore__grid">
+        <section className="plugin-card" data-testid="plugin-card-agent-capabilities">
+          <header className="plugin-card__header"><h3 className="plugin-card__title">Agent 能力</h3></header>
+          <p className="plugin-card__desc">管理 Agent 内置能力开关，沿用已有配置与生效规则。</p>
+          <Link className="plugin-config-page__empty-link" to="/plugins/agent-capabilities">配置</Link>
+        </section>
+        <section className="plugin-card" data-testid="plugin-card-data-sources">
+          <header className="plugin-card__header"><h3 className="plugin-card__title">数据源</h3></header>
+          <p className="plugin-card__desc">查看已注册数据源并配置启用偏好，保留现有权限与凭据。</p>
+          <Link className="plugin-config-page__empty-link" to="/plugins/data-sources">配置</Link>
+        </section>
+        <div className="plugin-explore__section-head"><h2 className="plugin-explore__section-title">应用插件</h2></div>
+        {UI_PLUGIN_SPECS.map(spec => <section key={spec.id} className="plugin-card" data-testid={`plugin-card-${spec.id}`}>
+          <header className="plugin-card__header"><h3 className="plugin-card__title">{spec.title}</h3></header>
+          <p className="plugin-card__desc">{spec.id === "music" ? "播放、搜索及管理本地音乐库。" : "独立日历面板占位，日程、提醒与同步尚未实现。"}</p>
+          <p>{uiPlugins[spec.id] === "enabled" ? "已开启" : uiPlugins[spec.id] === "disabled" ? "已关闭" : "尚未创建"}</p>
+          <Link className="plugin-config-page__empty-link" to={`/plugins/${spec.id}`}>{uiPlugins[spec.id] === "absent" ? "创建并开启" : "配置"}</Link>
+        </section>)}
+
         <div className="plugin-explore__section-head">
           <h2 className="plugin-explore__section-title">
             {t("explorePage.plugin.sectionSandbox", "沙盒运行时")}

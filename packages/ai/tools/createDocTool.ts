@@ -1,3 +1,4 @@
+import { requireKnowledgeCaptureConfirmation, checkKnowledgeCaptureTarget } from "ai/tools/knowledgeCaptureConfirmation";
 // 文件路径: ai/tools/createDocTool.ts
 
 import { createDocState } from "render/page/docStore";
@@ -5,6 +6,7 @@ import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import type { RootState } from "app/store";
 
 export interface CreateDocToolArgs {
+  __confirmedKnowledgeCapture?: unknown;
   title?: string;
   spaceId?: string;
   categoryId?: string;
@@ -86,20 +88,24 @@ export async function createDocFunc(
 
   const explicitSpaceId = (args.spaceId ?? "").trim() || undefined;
   const currentSpaceId = getCurrentSpaceId() || undefined;
-  const spaceId = explicitSpaceId ?? currentSpaceId;
+  const spaceId = args.spaceId === "" ? undefined : explicitSpaceId ?? currentSpaceId;
 
   const rawContent = (args.content ?? "").trim();
   const content = rawContent || undefined;
 
+  requireKnowledgeCaptureConfirmation(args, "createDoc", { title, content: content ?? "", categoryId: categoryId ?? "", spaceId: spaceId ?? "" });
+
+  await checkKnowledgeCaptureTarget(spaceId, thunkApi);
+
   try {
     console.log("[createDocTool] dispatching createDoc with:", {
       title,
-      spaceId,
+      spaceId: spaceId ?? "",
       categoryId,
       content,
     });
     const id = await createDocState(
-      { title, spaceId, categoryId, content },
+      { title, spaceId: spaceId ?? "", categoryId, content },
       { dispatch, getState }
     );
 

@@ -111,6 +111,7 @@ interface ProcessToolDataPayload {
   agentKey?: string;
   /** 当前对话 id：工具层据此数本对话历史（exa_search 定档信号，可选）。 */
   dialogId?: string;
+  userMessageId?: string;
 }
 
 export interface HandleToolCallsPayload {
@@ -120,6 +121,7 @@ export interface HandleToolCallsPayload {
   messageId: string;
   dialogId: string;
   dialogKey?: string;
+  userMessageId?: string;
 }
 
 const processToolData = createAsyncThunk(
@@ -285,6 +287,7 @@ const processToolData = createAsyncThunk(
         runKind: "interactive",
         // 定档信号：这里是前台对话流式路径，来源恒为 chat；对话 id 用于数历史搜索。
         ...(args.dialogId ? { dialogId: args.dialogId } : {}),
+        ...(args.userMessageId ? { userMessageId: args.userMessageId } : {}),
         origin: "chat" as const,
       });
 
@@ -356,10 +359,12 @@ const processToolData = createAsyncThunk(
         : undefined;
 
       if (confirmationKey) {
-        const confirmedInput = {
-          ...(executionToolArgs ?? {}),
-          [confirmationKey]: true,
-        };
+        // Knowledge saves resolve defaults before asking. Never replace their
+        // exact-operation binding with a generic boolean approval.
+        const confirmedInput = structured?.code === "knowledge_capture_requires_confirmation"
+          ? (structured?.rawData as any)?.confirmationInput
+          : { ...(executionToolArgs ?? {}), [confirmationKey]: true };
+        if (!confirmedInput) throw e;
         const summary =
           (typeof structured?.displayData === "string" &&
             structured.displayData.trim()) ||
@@ -567,6 +572,7 @@ export const handleToolCalls = createAsyncThunk(
             agentKey: agentConfig.dbKey,
             effectiveModel: agentConfig.model,
             dialogId,
+            userMessageId: args.userMessageId,
           })
         ).unwrap();
 

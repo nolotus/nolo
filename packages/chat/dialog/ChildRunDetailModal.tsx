@@ -29,9 +29,12 @@ import * as stylex from "@stylexjs/stylex";
 import { croStyles } from "./childRunObserverStyles";
 import "./dialogStylexEscapeHatch.css";
 
+export type ChildRunDetailTarget = Pick<ClientAgentThread, "threadId" | "dialogId" | "dialogKey" | "title" | "runtimeEvidence" | "queued"> & { primaryAgentKey?: string; status?: string };
+
 type ChildRunDetailModalProps = {
   isOpen: boolean;
-  thread: ClientAgentThread | null;
+  thread: ChildRunDetailTarget | null;
+  readOnly?: boolean;
   onClose: () => void;
   onThreadUpdated?: () => void;
 };
@@ -45,6 +48,7 @@ type DetailLoadState = "idle" | "loading" | "ready" | "error";
 export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
   isOpen,
   thread,
+  readOnly = false,
   onClose,
   onThreadUpdated,
 }) => {
@@ -262,7 +266,7 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
       ) : null}
 
       <div {...stylex.props(croStyles.modalFooter)}>
-        <AppendInstructionControl
+        {!readOnly ? <AppendInstructionControl
           dialogKey={resolveAppendDialogKey(thread)}
           status={dialogStatus ?? thread.status}
           queued={thread.queued}
@@ -275,7 +279,7 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
             }
             onThreadUpdated?.();
           }}
-        />
+        /> : null}
       </div>
     </Dialog>
   );

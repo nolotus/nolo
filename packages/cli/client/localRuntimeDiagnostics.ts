@@ -1,3 +1,4 @@
+import type { McpLocalOAuthManagerFactory } from "../mcp/mcpLocalRuntimeAdapter";
 import { resolveUserEnabledSkills } from "../../ai/skills/userSkills";
 import { normalizeEnabledPromptSkills } from "../../ai/skills/userPromptSkills";
 import type { AgentRuntimeToolResult } from "../../agent-runtime/hostAdapter";
@@ -32,6 +33,8 @@ export type LocalCliStreamingExecutor = (
 ) => Promise<CliExecuteResult>;
 
 export type CliLocalRuntimeAdapterDeps = {
+  /** Trusted host-only OAuth lifecycle factory, reused across dialog/run sessions. */
+  createMcpOAuthManager?: McpLocalOAuthManagerFactory;
   env: EnvLike;
   db?: CliLocalRuntimeDb;
   store?: HybridRecordStore;

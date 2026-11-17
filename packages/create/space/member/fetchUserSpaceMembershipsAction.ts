@@ -1,3 +1,4 @@
+import { googleSessionRequestToken, isGoogleAuthoritySession } from "core/googleSessionScope";
 // 文件路径: app/spaces/fetchUserSpaceMembershipsAction.ts
 
 import type { AppThunkApi } from "app/store";
@@ -146,6 +147,7 @@ const fetchRemoteContentSpaceIds = async (
   token: string | null
 ): Promise<string[]> => {
   try {
+    googleSessionRequestToken(token ?? undefined, server);
     const queryParams = new URLSearchParams({ limit: "200" });
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -159,6 +161,7 @@ const fetchRemoteContentSpaceIds = async (
       `${server}${API_ENDPOINTS.DATABASE}/query/${encodeURIComponent(userId)}?${queryParams}`,
       {
         method: "POST",
+        ...(isGoogleAuthoritySession(token) ? { redirect: "error" as const, credentials: "omit" as const } : {}),
         headers,
         body: JSON.stringify({
           type: [...CONTENT_SPACE_RECOVERY_TYPES],

@@ -292,6 +292,15 @@ export function createCliAuthorityBrokerClient(
       }
       return result.value;
     },
+    async conditionalPut(key: string, expectedRevision: number | null, value: unknown) {
+      const result = await invokeBrokerRequest(options, { type: "conditionalPut", key, expectedRevision, value });
+      if (!result || result.type !== "conditionalPut" ||
+          (result.status !== "updated" && result.status !== "conflict") ||
+          Object.keys(result).some((key) => key !== "type" && key !== "status")) {
+        throw new CliAuthorityBrokerProtocolError({ code: "BROKER_PROTOCOL_MISMATCH", message: "Invalid conditionalPut response" });
+      }
+      return { status: result.status };
+    },
     async put(key: string, value: unknown) {
       await invokeBrokerRequest(options, { type: "put", key, value });
     },

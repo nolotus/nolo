@@ -76,6 +76,7 @@ export type DesktopAgentRuntimeActions = {
     options?: AgentRuntimeProviderResolveOptions,
   ): Promise<AgentRuntimeProvider>;
   executeTool(call: AgentRuntimeToolCallInput): Promise<AgentRuntimeToolResult>;
+  onWorkingHistoryReplaced?(): void;
 };
 
 export type DesktopAgentRuntimeRecordStore = {
@@ -407,6 +408,7 @@ export function createDesktopAgentRuntimeRequestScopedActions(args: {
     },
     resolveProvider: (agentConfig, options) => args.base.resolveProvider(agentConfig, options),
     executeTool: (call) => args.base.executeTool(call),
+    onWorkingHistoryReplaced: () => args.base.onWorkingHistoryReplaced?.(),
   };
 }
 
@@ -541,6 +543,7 @@ export function createDesktopAgentRuntimeRecordStoreActions(args: {
   getWorkspaceAuthorized?: () => boolean;
   resolveProvider: DesktopAgentRuntimeActions["resolveProvider"];
   executeTool: DesktopAgentRuntimeActions["executeTool"];
+  onWorkingHistoryReplaced?: DesktopAgentRuntimeActions["onWorkingHistoryReplaced"];
 }): DesktopAgentRuntimeActions {
   const userId = resolveDesktopAgentRuntimeUserId(args.env);
   return {
@@ -559,6 +562,7 @@ export function createDesktopAgentRuntimeRecordStoreActions(args: {
     }),
     resolveProvider: args.resolveProvider,
     executeTool: args.executeTool,
+    ...(args.onWorkingHistoryReplaced ? { onWorkingHistoryReplaced: args.onWorkingHistoryReplaced } : {}),
   };
 }
 
@@ -1127,5 +1131,6 @@ export function createDesktopAgentRuntimeAdapter(args: {
       actions: args.actions,
       call,
     }),
+    onWorkingHistoryReplaced: () => args.actions.onWorkingHistoryReplaced?.(),
   };
 }

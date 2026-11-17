@@ -5,10 +5,13 @@ import { getAccountChatDisplayOwner } from "./accountChatDisplayOwner";
 // 不含任何 UI，也不做隐式状态修复；由 settingThunks.setSettings 调用。
 //
 // 规则(与 docs 中的 P1 口径一致):
-//  1. 世代守卫：每次写都带上「本次意图」的 localIntentEpoch。失败后发现 epoch
-//     已经推进 → 说明用户在此期间又改过设置，更新的意图拥有真相，
+//  1. 世代守卫：每次写都带上「本次意图」的 localIntentEpoch，并按**本次改过的键**
+//     记录该世代（localIntentKeyEpochs）。失败后发现**同键**又有了更新的意图 →
+//     说明用户已经改过这个值，更新的意图拥有真相，
 //     于是**放弃重试**（旧值绝不覆盖新编辑），也不记录失败状态
 //     （新意图自己的写会决定成功与否）。
+//     无关键的新意图（侧栏宽度、执行时长…）**不**取消本次写/重试——否则排队中的
+//     插件持久化会被无关设置静默丢弃（PLUGIN-PERSIST-UNRELATED-INTENT-001）。
 //  2. 未推进 → 短暂退避后重试一次。
 //  3. 重试仍失败 → **按账号权威服务器远端读**该账号 settings record，与当前
 //     本地值逐键比较：
@@ -74,6 +77,39 @@ export const readLocalIntentEpoch = (getState: () => unknown): number => {
     ?.settings?.localIntentEpoch;
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 };
+
+/**
+ * 某个设置键最近一次本地意图的世代。字段缺失/非数值一律读作 0（与
+ * `readLocalIntentEpoch` 同口径）。
+ */
+export const readLocalIntentKeyEpoch = (
+  getState: () => unknown,
+  key: string,
+): number => {
+  const epochs = (getState() as { settings?: { localIntentKeyEpochs?: unknown } })
+    ?.settings?.localIntentKeyEpochs;
+  if (!epochs || typeof epochs !== "object") return 0;
+  const value = (epochs as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+};
+
+/**
+ * 「某次意图是否已被更新的本地意图取代」——只按**它自己改过的键**判定。
+ *
+ * 全局 `localIntentEpoch` 判据会把「用户改了别的设置」误当成「这次写过期了」，
+ * 于是排队中的写被静默丢弃（DB 永远收不到，UI 却显示成功，
+ * PLUGIN-PERSIST-UNRELATED-INTENT-001）。反过来，同键出现更新意图时旧 payload
+ * 必须不上线（旧值绝不覆盖新编辑）。
+ *
+ * @param intentEpoch 该次意图的世代（bump 之后读到的值）
+ * @param keys        该次意图涉及的设置键
+ */
+export const isLocalIntentSupersededForKeys = (
+  getState: () => unknown,
+  intentEpoch: number,
+  keys: readonly string[],
+): boolean =>
+  keys.some((key) => readLocalIntentKeyEpoch(getState, key) > intentEpoch);
 
 /**
  * 「本次写已被更新的本地意图取代」的哨兵错误：这不是失败。写前的世代复查发现
@@ -284,8 +320,10 @@ export const describeSettingsWriteFailure = async ({
     unresolvedKeys: [...persistedKeys].sort(),
   };
 
-  // 已被更新的本地意图取代：不做任何远端比对（旧意图的差异没有决策价值）。
-  if (readLocalIntentEpoch(getState) !== intentEpoch) return base;
+  // 已被更新的**同键**本地意图取代：不做任何远端比对（旧意图的差异没有决策价值）。
+  // 无关设置的新意图不影响本次键的对账结论。
+  if (isLocalIntentSupersededForKeys(getState, intentEpoch, intentKeys))
+    return base;
 
   const remoteRecord = await readSettingsAuthorityRecord(
     createUserKey.settings(accountId),
@@ -293,8 +331,9 @@ export const describeSettingsWriteFailure = async ({
     accountId,
   );
 
-  // 读期间用户可能又改了设置：同样放弃对账结论。
-  if (readLocalIntentEpoch(getState) !== intentEpoch) return base;
+  // 读期间用户可能又改了同样的键：同样放弃对账结论。
+  if (isLocalIntentSupersededForKeys(getState, intentEpoch, intentKeys))
+    return base;
 
   const serverRecord = sanitizeStoredSettingsRecord(remoteRecord);
   if (!serverRecord) {

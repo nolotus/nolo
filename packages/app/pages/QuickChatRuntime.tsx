@@ -28,9 +28,9 @@ import * as stylex from "@stylexjs/stylex";
 import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
 import "chat/web/chatStylexEscapeHatch.css";
 import { getIsDesktopApp } from "app/utils/env";
-import { readSelectedDesktopFolderPath, DESKTOP_FOLDER_SELECTION_EVENT, resolveDialogWorkspaceFolder } from "chat/web/desktopFolderProjects";
+import { resolveDialogWorkspaceFolder } from "chat/web/desktopFolderProjects";
+import { subscribeSpaceWorkspaces } from "chat/web/spaceWorkspaces";
 import { noloAgentId } from "core/init";
-import { bindDialogToProject, readSelectedDesktopFolderProject } from "chat/web/desktopFolderProjects";
 import { asTrimmedString } from "core/trimmedString";
 import type { Agent } from "app/types";
 import { useChatInput } from "chat/hooks/useChatInput";
@@ -416,7 +416,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       return;
     }
 
-    const launchProject = getIsDesktopApp() ? readSelectedDesktopFolderProject(window.localStorage) : null;
     isStartingRef.current = true;
     setIsSending(true);
     logQuickChatPerf("start", startedAt, {
@@ -505,7 +504,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] createDialog dispatch", {
           agentMode: dialogAgentMode,
           cybots: selectedAgentId ? [effectiveAgentId] : [],
-          spaceId: launchProject?.spaceId || currentSpaceId,
+          spaceId: currentSpaceId,
           title: dialogTitle,
           ...(runtimeBinding ? { runtimeBinding } : {}),
         });
@@ -516,7 +515,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
             skipGreeting: true,
             skipAgentConfigRead: true,
             optimisticReturnBeforeWrite: true,
-            spaceId: launchProject?.spaceId || currentSpaceId,
+            spaceId: currentSpaceId,
             title: dialogTitle,
             ...(runtimeBinding ? { runtimeBinding } : {}),
           })
@@ -541,19 +540,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         notifyStartupError("createDialogFailed", error);
         QUICK_CHAT_DEBUG && console.groupEnd();
         return;
-      }
-
-      // Capture the selected Project once; later sidebar switches must not retarget this Dialog.
-      // The selection is read here as a snapshot (not from the dispatch-time locals below):
-      // referencing a later `let` in this callback throws a TDZ error that the catch swallows,
-      // which silently skipped the binding and made every reopened Dialog lose its cwd.
-      if (getIsDesktopApp() && typeof window !== "undefined") {
-        try {
-          if (launchProject) bindDialogToProject(window.localStorage, dialogKey, launchProject.id);
-        } catch (error) {
-          notifyStartupError("createDialogFailed", error);
-          return;
-        }
       }
 
       // Jump to the dialog immediately after create succeeds. Sending continues
@@ -612,7 +598,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         extraPartCount: extraParts.length,
       });
 
-      // The Project binding is persisted above; all turns use the same resolver.
+      // Preserve direct Space/default workspace resolution without selecting a Project.
       const workspace = getIsDesktopApp() && typeof window !== "undefined"
         ? resolveDialogWorkspaceFolder(window.localStorage, dialogKey, dialogSpaceId, currentUserId)
         : null;
@@ -823,29 +809,15 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     isEmptyState,
   );
   const inputPlaceholder = t(placeholderMeta.key, placeholderMeta.defaultValue);
-  const desktopCwd =
-    getIsDesktopApp() && typeof window !== "undefined"
-      ? window.__NOLO_DESKTOP_CWD__?.trim()
-      : undefined;
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(() => {
-    if (!getIsDesktopApp() || typeof window === "undefined") return null;
-    try { return readSelectedDesktopFolderPath(window.localStorage); } catch { return null; }
-  });
+  const [, refreshWorkspace] = useState(0);
   useEffect(() => {
     if (!getIsDesktopApp() || typeof window === "undefined") return;
-    const update = () => {
-      try { setSelectedFolder(readSelectedDesktopFolderPath(window.localStorage)); }
-      catch { setSelectedFolder(null); }
-    };
-    window.addEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
-    window.addEventListener("storage", update);
-    return () => {
-      window.removeEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
-      window.removeEventListener("storage", update);
-    };
+    return subscribeSpaceWorkspaces(() => refreshWorkspace((version) => version + 1));
   }, []);
-  // Display uses the same priority as the first-message runtime options.
-  const workspacePath = selectedFolder || desktopCwd;
+  // Read the same direct Space/default workspace as the first turn, with no Project selection.
+  const workspacePath = getIsDesktopApp() && typeof window !== "undefined"
+    ? resolveDialogWorkspaceFolder(window.localStorage, "", currentSpaceId, currentUserId).cwd
+    : null;
   // stylex.props() returns { className } which would clobber the handwritten
   // "quick-chat-box" hook class if spread after it; merge explicitly instead.
   const cardStyleProps = stylex.props(chatInputCardStyles.card);

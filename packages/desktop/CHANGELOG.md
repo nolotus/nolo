@@ -1,4 +1,77 @@
 
+## 0.239.0 (2026-11-17)
+
+### Features
+
+* **auth:** add Google web login with tab-bound completion ([6c45425](https://github.com/nolotus/bun-nolo/commit/6c4542505987efcc3ed151ee3c01d6efbcaf79ff))
+* **auth:** add same-origin Google login and explicit account binding ([45f8e13](https://github.com/nolotus/bun-nolo/commit/45f8e13c4cdb9b729e996f69dc448ec9ab523004))
+* **auth:** define Google login and external account activation contracts ([c7cbbfd](https://github.com/nolotus/bun-nolo/commit/c7cbbfd0203593dc3ded83e639fa4f1ff7ace6d4))
+* **auth:** support encrypted systemd Google credentials ([c954f7a](https://github.com/nolotus/bun-nolo/commit/c954f7af68993b935aa8e3c009c3cdbad2372be7))
+* **chat:** show persisted TUI subagents in a split agent panel ([1bef040](https://github.com/nolotus/bun-nolo/commit/1bef040ffa8ee41d9f3b7a579b511edc2b14139e))
+* **cli:** pin adaptive background task list to terminal top ([9e88073](https://github.com/nolotus/bun-nolo/commit/9e88073bef375bcbce3cd2578c8b3537cdea697d))
+* **context:** project work-attributed summaries without splitting tool groups ([8439906](https://github.com/nolotus/bun-nolo/commit/8439906ba6315354a056b6d90b7b0c82f35d67ea))
+* **database:** add scoped local broker conditional writes ([90f9253](https://github.com/nolotus/bun-nolo/commit/90f9253b8e22ad82c00dd4e15042e36475b49bc8))
+* **identity:** open Google account security in the browser ([23dfc3d](https://github.com/nolotus/bun-nolo/commit/23dfc3d864da822c8f29928352bb001ccb569f6c))
+* **mcp:** add local Zoho Mail OAuth and guarded MCP execution ([879c818](https://github.com/nolotus/bun-nolo/commit/879c818946c753afe2a1d964c86c9a045d59ee39))
+* **memory:** connect source-backed work context across clients ([619c0c4](https://github.com/nolotus/bun-nolo/commit/619c0c4f6845b1f79666875329814c63c914b026))
+* **memory:** retire fixed preferences and user global prompt ([ba08c51](https://github.com/nolotus/bun-nolo/commit/ba08c512997f874c4370a8d4b1c7e31a1c9a5f3d))
+* **plugins:** add opt-in music and calendar navigation and retire project entry points ([8833ef0](https://github.com/nolotus/bun-nolo/commit/8833ef0bf82073f097ac962f652b7dd376682f1a))
+* **runtime:** define evidence-bound work continuity contracts ([da3775a](https://github.com/nolotus/bun-nolo/commit/da3775a91b39a6f9d228bd64d51cd3df8e0ad7ce))
+* **secrets:** add explicit-save private credential input in TUI ([7acf65a](https://github.com/nolotus/bun-nolo/commit/7acf65ae2012492f352d564e5809ed435c7f14ad))
+* **secrets:** present credential requests inline in their conversation ([9fa8bde](https://github.com/nolotus/bun-nolo/commit/9fa8bde189a6198dae3d7e3b4ffce6586edfd11d))
+* **skills:** add MiHome guidance and strengthen Android phone workflow ([37cdbf7](https://github.com/nolotus/bun-nolo/commit/37cdbf73f2b5a025dd02928bc13dbd4d1aafa2f5))
+
+### Bug Fixes
+
+* **agent-runtime:** balance planning scrutiny and investment checkpoints ([4ab5cda](https://github.com/nolotus/bun-nolo/commit/4ab5cda902c3d5493e7aaa18f343e63286850740))
+* **agent:** accept empty fragment placeholders in normal discovery ([200358e](https://github.com/nolotus/bun-nolo/commit/200358e3179c8c73f81b13c5efe9f1507540b962))
+* **agent:** grade task difficulty before selecting delegates ([b2b4a45](https://github.com/nolotus/bun-nolo/commit/b2b4a45e1aac5b2c9966f4bf21c2a4a7d1d97494))
+* **agent:** keep speed samples outside candidate fragment integrity ([67050b6](https://github.com/nolotus/bun-nolo/commit/67050b6ccab6f9f40885bb925926021b583a9f18))
+* **agent:** preserve complete discovery evidence with safe fragment recovery ([d8b4ced](https://github.com/nolotus/bun-nolo/commit/d8b4ced9763afd407c7f76b22b6c359b4676d6d0))
+* **agent:** require real acceptance without blocking test deployment ([d650cdf](https://github.com/nolotus/bun-nolo/commit/d650cdf67afbfa633d8323d383f0fa3cc98eb88b))
+* **agent:** scope model family preference to frontend design ([2ca14d8](https://github.com/nolotus/bun-nolo/commit/2ca14d8766540efe06ef71aa968bbe4136f07245))
+* **agy:** route Argon to available reasoning variants ([9b0d0e0](https://github.com/nolotus/bun-nolo/commit/9b0d0e06eb4c2be54cc8a7200492170c09d469ef))
+* **auth:** isolate concurrent Google transaction cookies ([c5c48cc](https://github.com/nolotus/bun-nolo/commit/c5c48cc92695bf7e1b8f0c453eec990dce57d898))
+* **auth:** preserve authority availability errors across authentication ([769ce1d](https://github.com/nolotus/bun-nolo/commit/769ce1d08316b106fb99b8ccc15d5cab186ca779))
+* **auth:** scope Google session requests to browser authority ([dccf32a](https://github.com/nolotus/bun-nolo/commit/dccf32a668efc6e4094884cb86712627d52777ba))
+* **chat:** annotate sidebar section occurrence type ([67186b8](https://github.com/nolotus/bun-nolo/commit/67186b81560f531714122458ba1d0fa0f066c67c))
+* **chat:** default sidebar to all with account-scoped filters ([5151a52](https://github.com/nolotus/bun-nolo/commit/5151a5207171b675acd4cbfd511e54c933bb19b3))
+* **chat:** keep repeated sidebar date sections uniquely keyed ([042f8b0](https://github.com/nolotus/bun-nolo/commit/042f8b0ff6c9ec6a2a2996e16760dd3041ae3da5))
+* **chat:** keep web reading stable after sending messages ([b24061c](https://github.com/nolotus/bun-nolo/commit/b24061c6449928f905dd41d530a0dd2b31b1ba95))
+* **chat:** simplify choice panel borders while retaining focus ([c8026fd](https://github.com/nolotus/bun-nolo/commit/c8026fd84c52399c40e87ad031ba1741b02a283e))
+* **cli:** normalize stored tool results before manual compaction ([f3af18e](https://github.com/nolotus/bun-nolo/commit/f3af18eaec0410d1ca80b410592aef4c774d78f3))
+* **cli:** preserve durable context across manual compact forks ([123d71c](https://github.com/nolotus/bun-nolo/commit/123d71c1673c7179e148bcf169e500bb5b9bc3d3))
+* **cli:** preserve stored message identity in compaction ([136721e](https://github.com/nolotus/bun-nolo/commit/136721eef63c3b2fa318d8ddaf5e6c2645f740ed))
+* **cli:** restore unique piped image attachment receipts ([67b2356](https://github.com/nolotus/bun-nolo/commit/67b23563029d14cc387bffbc640ee132628a4091))
+* **cli:** scope restart guards to dialog and live host resources ([9f53545](https://github.com/nolotus/bun-nolo/commit/9f53545c6b36a500d1fccf533b4955b75869dbf1))
+* **cli:** 活动指示符改为 braille 转圈帧 ([1d9ee8b](https://github.com/nolotus/bun-nolo/commit/1d9ee8b6ef4dffc122f61fdbe022bf2e34acb6e1))
+* **dev:** exclude template text from symbol gate call candidates ([f3aaf0f](https://github.com/nolotus/bun-nolo/commit/f3aaf0fdf6e0751b545d484c7bf2395b51741eed))
+* **dev:** recognize scoped runtime imports in symbol checks ([37ec4f6](https://github.com/nolotus/bun-nolo/commit/37ec4f68d12e98e51d5f70644fa7354d41636f2b))
+* **dev:** scope managed processes to their worktree ([7ab5176](https://github.com/nolotus/bun-nolo/commit/7ab5176fdc832500bc1f8d7f563c57cde3945e25))
+* **instabox:** handle changing free runtime limits during recovery ([899885e](https://github.com/nolotus/bun-nolo/commit/899885e27d1f9760c6db6ffbc68995b028bab718))
+* **mcp:** accept explicitly approved Zoho Mail creation scope ([0741db8](https://github.com/nolotus/bun-nolo/commit/0741db80565ccb7084f191c34b626612f8b13cc7))
+* **mcp:** validate schemas only for explicitly allowed tools ([cf90d27](https://github.com/nolotus/bun-nolo/commit/cf90d275041af665f5e5733499f8fe5d202f5038))
+* **memory:** accept empty archive cursor for first-page queries ([e3af19f](https://github.com/nolotus/bun-nolo/commit/e3af19f9c040083debd1ec4c30ddbbc8440c14d3))
+* **memory:** preserve recall provenance and archive query options ([7b58b2e](https://github.com/nolotus/bun-nolo/commit/7b58b2e8fbf22d93737701495a0155076a69d78f))
+* **memory:** preserve write provenance without transferring evidence trust ([8af4092](https://github.com/nolotus/bun-nolo/commit/8af409214dfa9611233f852f56ed4a13c5822a79))
+* **preview:** verify owned HTTP readiness and watcher lock lifecycle ([0d145aa](https://github.com/nolotus/bun-nolo/commit/0d145aa98ad16b0ab75bafc9e4b7b86da0d91023))
+* **prompt:** preserve skill identity across sources and avoid duplicate provider prompts ([430cc94](https://github.com/nolotus/bun-nolo/commit/430cc9403b8c655135c8408f19328435faf6818c))
+* **release:** map public identity imports at projection boundary ([9936f86](https://github.com/nolotus/bun-nolo/commit/9936f86b97f5379e4863acca500d5dbe57760d4d))
+* **runtime:** expose a single path for model file reads ([9f87239](https://github.com/nolotus/bun-nolo/commit/9f87239f4de780c3b0c4aabef740093f38c4070b))
+* **runtime:** preserve complete instruction reads across execution hosts ([e798721](https://github.com/nolotus/bun-nolo/commit/e798721d53e1bd2190bc4a8c45020f444c055baf))
+* **secrets:** resume credential requests only after successful storage ([60f78fa](https://github.com/nolotus/bun-nolo/commit/60f78faa4f3bb9b3fca60bdd728a90c5c630e397))
+* **settings:** remove retired fields on normal owner settings saves ([efb64e0](https://github.com/nolotus/bun-nolo/commit/efb64e0797b6c1b9d8e1ae8b78248ac9c92a757d))
+* **settings:** rename personalization settings to memory ([a3fc202](https://github.com/nolotus/bun-nolo/commit/a3fc202b0a6ecb66d05e31991adb65310344a4a5))
+* **tui:** keep background task summary visible beside composer ([ae73fc9](https://github.com/nolotus/bun-nolo/commit/ae73fc9935b26a272d9447dbfecbd64d422613ca))
+* **tui:** restore adaptive context usage and capacity display ([bdcfa5d](https://github.com/nolotus/bun-nolo/commit/bdcfa5dafc25b5e42005967117a74d6907ad99dc))
+* **tui:** unify top task dock and separate composer draft ([2e3feed](https://github.com/nolotus/bun-nolo/commit/2e3feed28dd8e40f706530cbd16a1bdb937c3f7a))
+* **ui:** keep text button icons subordinate to labels ([123a58a](https://github.com/nolotus/bun-nolo/commit/123a58a614b3901f7c1d7bea95e174e62c654d3a))
+
+### Reverts
+
+* **runtime:** remove speculative work continuity and summary attribution ([d1fa6b7](https://github.com/nolotus/bun-nolo/commit/d1fa6b75152883e62416c5301c140f1f166e050f))
+
+
 ## 0.238.0 (2026-11-15)
 
 ### Features

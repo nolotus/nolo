@@ -1,3 +1,4 @@
+import { hasAssembledAgentPrompt } from "./types";
 import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
 import { createHash, randomUUID } from "node:crypto";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -106,6 +107,7 @@ type AntigravityCloudCodeCallArgs = {
   metadata: Record<string, unknown> | null;
   openAiBody: {
     model?: unknown;
+    reasoning_effort?: unknown;
     messages: unknown[];
     tools?: unknown[];
   };
@@ -210,7 +212,10 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
     asOptionalTrimmedString(args.openAiBody.model) ??
     asOptionalTrimmedString(args.agentConfig.model) ??
     "gemini-3.1-pro";
-  const { wireModelId: model, profile } = resolveAntigravityWireModel(logicalModel);
+  const { wireModelId: model, profile } = resolveAntigravityWireModel(
+    logicalModel,
+    asOptionalTrimmedString(args.openAiBody.reasoning_effort) ?? args.agentConfig.reasoning_effort,
+  );
 
   const rawMessages = Array.isArray(args.openAiBody.messages) ? args.openAiBody.messages : [];
   const quirks = resolveGeminiModelQuirks(model);
@@ -232,7 +237,7 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
   }
 
   const prompt = args.agentConfig.prompt?.trim();
-  if (prompt) systemTexts.unshift(prompt);
+  if (prompt && !hasAssembledAgentPrompt(rawMessages)) systemTexts.unshift(prompt);
 
   const request: Record<string, unknown> = { contents };
   if (systemTexts.length > 0) {

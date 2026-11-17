@@ -1,9 +1,12 @@
+import { resolvePageSkillMetadata } from "ai/skills/skillDocProtocol";
 import type { AppDispatch } from "app/store";
 import type { ReferenceItem } from "app/types";
 import { read } from "database/dbSlice";
-import { resolveBuiltinSkillPage } from "ai/skills/builtinSkillRegistry";
+import { resolveBuiltinSkillEntry, resolveBuiltinSkillPage } from "ai/skills/builtinSkillRegistry";
 import {
   extractRuntimePageCapabilities,
+  dedupeSkillPromptPatches,
+  type SkillPromptPatch,
   resolveSkillGraphFromRoots,
   type SkillRuntimePageLike,
 } from "ai/skills/referenceRuntime";
@@ -34,6 +37,7 @@ export type ResolvedReferenceAssets = {
   recommendedSkillTools: string[];
   recommendedSkillHints: string[];
   skillPromptPatches: string[];
+  skillPromptContributions?: SkillPromptPatch[];
   contentByKey: Map<string, any>;
 };
 
@@ -42,6 +46,7 @@ export type ResolvedContentTools = {
   recommendedSkillTools: string[];
   recommendedSkillHints: string[];
   skillPromptPatches: string[];
+  skillPromptContributions?: SkillPromptPatch[];
   contentByKey: Map<string, any>;
 };
 
@@ -111,7 +116,7 @@ dispatch: AppDispatch)
   const toolSet = new Set<string>();
   const recommendedToolSet = new Set<string>();
   const recommendedSkillHints = new Set<string>();
-  const skillPromptPatches = new Set<string>();
+  const skillPromptContributions: SkillPromptPatch[] = [];
   const normalizedReferences: ReferenceItem[] = [];
   const hardSkillKeys = new Set<string>();
   const softSkillKeys = new Set<string>();
@@ -132,7 +137,10 @@ dispatch: AppDispatch)
       recommendedSkillHints.add(hint);
     }
     for (const patch of capabilities.promptPatches) {
-      skillPromptPatches.add(patch);
+      const meta = resolvePageSkillMetadata(content);
+      const identity = meta?.skillConfig?.id ?? content?.dbKey;
+      const skillId = resolveBuiltinSkillEntry(identity)?.skillId ?? identity;
+      if (skillId) skillPromptContributions.push({ skillId, content: patch });
     }
     for (const skillKey of capabilities.hardSkillKeys) {
       hardSkillKeys.add(skillKey);
@@ -168,16 +176,15 @@ dispatch: AppDispatch)
   for (const hint of resolvedSkillLinks.recommendedSkillHints) {
     recommendedSkillHints.add(hint);
   }
-  for (const patch of resolvedSkillLinks.skillPromptPatches) {
-    skillPromptPatches.add(patch);
-  }
+  skillPromptContributions.push(...(resolvedSkillLinks.skillPromptContributions ?? []));
 
   return {
     references: normalizedReferences,
     referencedTools: Array.from(toolSet),
     recommendedSkillTools: Array.from(recommendedToolSet),
     recommendedSkillHints: Array.from(recommendedSkillHints),
-    skillPromptPatches: Array.from(skillPromptPatches),
+    skillPromptPatches: dedupeSkillPromptPatches(skillPromptContributions).map(patch => patch.content),
+    skillPromptContributions: dedupeSkillPromptPatches(skillPromptContributions),
     contentByKey
   };
 };
@@ -201,7 +208,7 @@ preloaded?: Map<string, any>)
   const toolSet = new Set<string>();
   const recommendedToolSet = new Set<string>();
   const recommendedSkillHints = new Set<string>();
-  const skillPromptPatches = new Set<string>();
+  const skillPromptContributions: SkillPromptPatch[] = [];
   const hardSkillKeys = new Set<string>();
   const softSkillKeys = new Set<string>();
 
@@ -214,7 +221,10 @@ preloaded?: Map<string, any>)
       recommendedSkillHints.add(hint);
     }
     for (const patch of capabilities.promptPatches) {
-      skillPromptPatches.add(patch);
+      const meta = resolvePageSkillMetadata(content);
+      const identity = meta?.skillConfig?.id ?? content?.dbKey;
+      const skillId = resolveBuiltinSkillEntry(identity)?.skillId ?? identity;
+      if (skillId) skillPromptContributions.push({ skillId, content: patch });
     }
     for (const skillKey of capabilities.hardSkillKeys) {
       hardSkillKeys.add(skillKey);
@@ -245,15 +255,14 @@ preloaded?: Map<string, any>)
   for (const hint of resolvedSkillLinks.recommendedSkillHints) {
     recommendedSkillHints.add(hint);
   }
-  for (const patch of resolvedSkillLinks.skillPromptPatches) {
-    skillPromptPatches.add(patch);
-  }
+  skillPromptContributions.push(...(resolvedSkillLinks.skillPromptContributions ?? []));
 
   return {
     tools: Array.from(toolSet),
     recommendedSkillTools: Array.from(recommendedToolSet),
     recommendedSkillHints: Array.from(recommendedSkillHints),
-    skillPromptPatches: Array.from(skillPromptPatches),
+    skillPromptPatches: dedupeSkillPromptPatches(skillPromptContributions).map(patch => patch.content),
+    skillPromptContributions: dedupeSkillPromptPatches(skillPromptContributions),
     contentByKey
   };
 };

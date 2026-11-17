@@ -1,3 +1,4 @@
+import { scopeGoogleSessionServers } from "core/googleSessionScope";
 import type { RootState } from "app/store";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { selectIdentityUser } from "identity/selectors";
@@ -30,11 +31,11 @@ export const getRuntimeServerContext = (
     currentServer,
     syncServers,
     userAuthorityRegistry: resolveRuntimeUserAuthorityRegistry(state),
-    remoteServers: getAllServers(
+    remoteServers: scopeGoogleSessionServers(currentToken, currentServer, getAllServers(
       currentServer,
       syncServers,
       preferredServerOrigin
-    ),
+    )),
   };
 };
 

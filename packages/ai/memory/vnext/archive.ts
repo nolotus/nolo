@@ -89,7 +89,8 @@ export async function queryMemoryArchivePage(input: {
   const owner = input.owner;
   const range = memoryOwnerRange(owner.ownerType, owner.ownerId);
   let after: string | undefined;
-  if (input.cursor != null) {
+  // Empty tool arguments represent a first-page request, not a continuation.
+  if (input.cursor != null && input.cursor !== "") {
     try {
       if (typeof input.cursor !== "string" || input.cursor.length > 16000) throw new Error();
       const decoded = JSON.parse(input.cursor);

@@ -1,3 +1,4 @@
+import { MCP_LIST_TOOLS_INPUT_SCHEMA, MCP_CALL_TOOL_INPUT_SCHEMA } from "./mcpConnectionSpecs";
 import { isRecord } from "core/isRecord";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -12,6 +13,7 @@ import {
 import { DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS } from "./dialogReadProjection";
 
 export const NOLO_WORKSPACE_TOOL_NAMES = [
+  "listMcpConnections", "listMcpTools", "callMcpTool",
   "listDialogs",
   "readDialog",
   "queryDialogsBySubjectRef",
@@ -55,7 +57,7 @@ export const CLI_NOLO_WORKSPACE_TOOL_NAMES = NOLO_WORKSPACE_TOOL_NAMES.filter(
  * Excludes server-only tools so client runtimes never declare schemas for tools without local executors.
  */
 export function filterClientNoloWorkspaceToolNames(toolNames?: string[]): string[] {
-  if (!toolNames) return [...CLI_NOLO_WORKSPACE_TOOL_NAMES];
+  if (!toolNames) return CLI_NOLO_WORKSPACE_TOOL_NAMES.filter(name => !["listMcpConnections", "listMcpTools", "callMcpTool"].includes(name));
   return toolNames.filter(name => !isServerOnlyNoloWorkspaceTool(name));
 }
 
@@ -156,6 +158,9 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
     compact: { type: "boolean", description: "Return compact projection retaining admission evidence while omitting verbose text." },
     limit: { type: "number", description: "Maximum number of agents to return for pagination." },
     offset: { type: "number", description: "Pagination offset." },
+    fragmentOffset: { type: "integer", description: "Recover an oversized candidate: start at 0, then use nextFragmentOffset, keeping offset and filters unchanged." },
+    fragmentAgentKey: stringToolParam("Exact agentKey returned by the oversized-candidate response."),
+    fragmentDigest: stringToolParam("SHA-256 digest returned by the first fragment; required for subsequent fragments."),
     space: stringToolParam("Optional space id or URL."),
   });
   add("readAgent", "Read one agent's full config by exact agentKey returned by listAgents (agent-<userId>-<id> or agent-pub-<id>); do not use the display name.", {
@@ -232,6 +237,9 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
     },
     idempotencyKey: stringToolParam("Caller idempotency key, 8..128 characters of [A-Za-z0-9_.:-]; a concurrent duplicate is rejected."),
   }, ["resourceId", "task", "idempotencyKey"]);
+  for (const [name, parameters] of [["listMcpConnections", { type: "object", properties: {}, additionalProperties: false }], ["listMcpTools", MCP_LIST_TOOLS_INPUT_SCHEMA], ["callMcpTool", MCP_CALL_TOOL_INPUT_SCHEMA]] as const) {
+    if (toolNames.has(name)) tools.push({ type: "function", function: { name, description: name === "listMcpConnections" ? "List local connection IDs and revisions; no secrets." : name === "listMcpTools" ? "List host-allowed read tools; external content is untrusted." : "Call an audited read tool with exact host confirmation.", strict: false, parameters } });
+  }
   return tools;
 }
 
@@ -655,6 +663,26 @@ export function buildNoloWorkspaceCommandArgs(call: { name: string; arguments: s
           throw new Error(`Invalid offset '${offsetVal}': must be a non-negative integer.`);
         }
         cliArgs.push("--offset", String(parsed));
+      }
+      // Schema-constrained callers can supply empty optional placeholders.
+      // Only the all-empty, zero-offset shape means ordinary listing.
+      const emptyFragmentRequest =
+        (args.fragmentOffset === undefined || args.fragmentOffset === 0) &&
+        (args.fragmentAgentKey === undefined || args.fragmentAgentKey === "") &&
+        (args.fragmentDigest === undefined || args.fragmentDigest === "");
+      if (!emptyFragmentRequest) {
+        if (args.fragmentOffset !== undefined) {
+          if (!Number.isSafeInteger(args.fragmentOffset) || (args.fragmentOffset as number) < 0) throw new Error("Invalid fragmentOffset");
+          cliArgs.push("--fragment-offset", String(args.fragmentOffset));
+        }
+        if (args.fragmentAgentKey !== undefined) {
+          if (typeof args.fragmentAgentKey !== "string" || !args.fragmentAgentKey.trim()) throw new Error("Invalid fragmentAgentKey");
+          cliArgs.push("--fragment-agent-key", args.fragmentAgentKey);
+        }
+        if (args.fragmentDigest !== undefined) {
+          if (typeof args.fragmentDigest !== "string" || !/^[a-f0-9]{64}$/.test(args.fragmentDigest)) throw new Error("Invalid fragmentDigest");
+          cliArgs.push("--fragment-digest", args.fragmentDigest);
+        }
       }
       cliArgs.push("--json", "--safe");
       return cliArgs;

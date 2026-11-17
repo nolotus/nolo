@@ -237,6 +237,10 @@ export function handleTuiInput(
       exclude: hints.map((hint) => hint.resolvedPath),
     });
     const previewLines = [
+      // Interactive submissions already stage/strip paths before dispatch and
+      // render image cards. Piped submissions keep paths and need a receipt.
+      ...[...new Set(hints.filter((hint) => !hint.unreadable).map((hint) => hint.resolvedPath))]
+        .map((path) => `found image: ${path}`),
       ...unreadableHints.map((hint) => `image path unreadable: ${hint.resolvedPath}`),
       ...mediaDetected.hints.map((hint) =>
         hint.unreadable

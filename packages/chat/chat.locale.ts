@@ -1,3 +1,5 @@
+import { childRunObserverLabels } from "./dialog/childRunObserverLabels";
+
 export default {
   en: {
     translation: {
@@ -434,6 +436,15 @@ export default {
       DialogSettings: "Dialog Settings",
       collaborativeConversation: "Collaborative conversation",
       childRunObserver: {
+        ...childRunObserverLabels["en"],
+        workingGroup: "Working",
+
+        mainAgent: "Main agent",
+        modelUnknown: "Model unknown",
+        reasoningConfigured: "Reasoning effort (configured): {{effort}}",
+        reasoningUnspecified: "Reasoning effort: not specified",
+        reasoningUnsupported: "Configured reasoning effort is not supported by this model/provider",
+
         panelAriaLabel: "Child runs",
         title: "Child runs",
         subtitleLoading: "Loading child runs…",
@@ -1010,6 +1021,15 @@ export default {
       DialogSettings: "会话设置",
       collaborativeConversation: "协作会话",
       childRunObserver: {
+        ...childRunObserverLabels["zh-CN"],
+        workingGroup: "正在执行",
+
+        mainAgent: "主 Agent",
+        modelUnknown: "模型未知",
+        reasoningConfigured: "推理强度（配置）：{{effort}}",
+        reasoningUnspecified: "推理强度：未指定",
+        reasoningUnsupported: "已配置推理强度，但此模型或提供方不支持此参数",
+
         panelAriaLabel: "子任务运行",
         title: "子任务",
         subtitleLoading: "加载子运行…",
@@ -1581,6 +1601,15 @@ export default {
       DialogSettings: "會話設定",
       collaborativeConversation: "協作會話",
       childRunObserver: {
+        ...childRunObserverLabels["zh-Hant"],
+        workingGroup: "正在執行",
+
+        mainAgent: "主 Agent",
+        modelUnknown: "模型未知",
+        reasoningConfigured: "推理強度（設定）：{{effort}}",
+        reasoningUnspecified: "推理強度：未指定",
+        reasoningUnsupported: "已設定推理強度，但此模型或供應商不支援此參數",
+
         panelAriaLabel: "子任務運行",
         title: "子任務",
         subtitleLoading: "載入子運行…",
@@ -2179,6 +2208,15 @@ export default {
       DialogSettings: "対話設定",
       collaborativeConversation: "協調会話",
       childRunObserver: {
+        ...childRunObserverLabels["ja"],
+        workingGroup: "実行中",
+
+        mainAgent: "メイン Agent",
+        modelUnknown: "モデル不明",
+        reasoningConfigured: "推論強度（設定）：{{effort}}",
+        reasoningUnspecified: "推論強度：未指定",
+        reasoningUnsupported: "設定された推論強度はこのモデルまたはプロバイダーでは非対応です",
+
         panelAriaLabel: "子タスク実行",
         title: "子タスク",
         subtitleLoading: "子実行を読み込み中…",
@@ -2750,6 +2788,15 @@ export default {
       DialogSettings: "Dialog-Einstellungen",
       collaborativeConversation: "Kollaborative Unterhaltung",
       childRunObserver: {
+        ...childRunObserverLabels["de"],
+        workingGroup: "In Bearbeitung",
+
+        mainAgent: "Haupt-Agent",
+        modelUnknown: "Modell unbekannt",
+        reasoningConfigured: "Denkaufwand (konfiguriert): {{effort}}",
+        reasoningUnspecified: "Denkaufwand: nicht angegeben",
+        reasoningUnsupported: "Der konfigurierte Denkaufwand wird von diesem Modell/Anbieter nicht unterstützt",
+
         panelAriaLabel: "Hintergrund-Subtasks",
         title: "Hintergrund-Subtasks",
         subtitleLoading: "Subtasks werden geladen…",
@@ -3310,6 +3357,15 @@ export default {
       DialogSettings: "Ajustes del diálogo",
       collaborativeConversation: "Conversación colaborativa",
       childRunObserver: {
+        ...childRunObserverLabels["es"],
+        workingGroup: "En ejecución",
+
+        mainAgent: "Agente principal",
+        modelUnknown: "Modelo desconocido",
+        reasoningConfigured: "Esfuerzo de razonamiento (configurado): {{effort}}",
+        reasoningUnspecified: "Esfuerzo de razonamiento: sin especificar",
+        reasoningUnsupported: "El esfuerzo configurado no es compatible con este modelo/proveedor",
+
         panelAriaLabel: "Subtareas en segundo plano",
         title: "Subtareas en segundo plano",
         subtitleLoading: "Cargando subtareas…",

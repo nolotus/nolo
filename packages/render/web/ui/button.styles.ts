@@ -89,9 +89,9 @@ export const buttonStyles = stylex.create({
     minWidth: 0,
   },
   // .btn-content 的 gap: inherit 按 size 展开
-  contentGapSmall: { gap: 6 },
-  contentGapMedium: { gap: 8 },
-  contentGapLarge: { gap: 10 },
+  contentGapSmall: { gap: 4 },
+  contentGapMedium: { gap: 5 },
+  contentGapLarge: { gap: 6 },
   // .btn-content--loading
   contentLoading: {
     position: "absolute",
@@ -109,6 +109,8 @@ export const buttonStyles = stylex.create({
   leadingSmall: { width: 14 },
   leadingMedium: { width: 16 },
   leadingLarge: { width: 18 },
+  // Text buttons fit the actual icon; icon-only slots retain their original width.
+  textLeading: { width: "auto" },
   // .btn-spinner-wrap（::before 的 border 简写展开为 longhand 后覆盖左/右颜色）
   spinnerWrap: {
     position: "relative",

@@ -37,6 +37,18 @@ export interface AgentRuntimeToolCall {
   extra_content?: { google: { thought_signature: string } };
 }
 
+/** Internal-only ownership marker; symbols never enter provider JSON or persisted records. */
+export const AGENT_PROMPT_IN_MESSAGES = Symbol("agent-prompt-in-messages");
+
+/** Only locally assembled system messages own the configured prompt. Never infer from prose. */
+export function hasAssembledAgentPrompt(messages: readonly unknown[]): boolean {
+  return messages.some((raw) => {
+    if (!raw || typeof raw !== "object") return false;
+    const message = raw as Record<PropertyKey, unknown>;
+    return message.role === "system" && message[AGENT_PROMPT_IN_MESSAGES] === true;
+  });
+}
+
 export interface AgentRuntimeChatMessage {
   /** Durable dialog message identity, when loaded from persisted history. */
   id?: string;
@@ -46,6 +58,8 @@ export interface AgentRuntimeChatMessage {
   content: AgentRuntimeMessageContent;
   /** Internal system-prompt boundary used by explicit-cache providers. */
   stable_prefix_chars?: number;
+  /** Internal provenance: buildMessages already included the configured agent prompt. */
+  [AGENT_PROMPT_IN_MESSAGES]?: true;
   /**
    * Provider-visible replacement for a durable message body. The complete
    * `content` remains the source of truth; local runtime history projection

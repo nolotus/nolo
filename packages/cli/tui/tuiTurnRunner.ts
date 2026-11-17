@@ -59,7 +59,7 @@ import {
   type TurnContextLayer,
 } from "../../agent-runtime/turnContext";
 import { resolvePlatformAuthToken } from "../../agent-runtime/providerResolution";
-import { resolveCliMemory } from "../memoryRecall";
+import { resolveCliMemory, resolveCliWorkContext } from "../memoryRecall";
 import { readDbRecord } from "../agentRecordHelpers";
 import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import {
@@ -484,6 +484,21 @@ async function runAgentChat(
   const memoryOverlayLayer = buildMemoryOverlayLayer({ promptBlock: memoryPromptBlock });
   const memoryUseGuidanceLayer = buildMemoryUseGuidanceLayer({ promptBlock: memoryPromptBlock });
 
+  // 工作接续块：每轮都从本地库重读（turn-scope），**不复用**
+  // `cachedMemoryOverlay`——那份缓存是语义 overlay（整个对话一次），工作接续
+  // 写进去之后下一轮就必须可见，拿旧快照注入等于让模型看到过期进度。
+  // 读取失败/无 dialogId 时返回 null，只省略本块，不影响本轮对话。
+  const workContextBlock = await resolveCliWorkContext({
+    env,
+    dialogId: state.dialogId ?? null,
+    // 本轮真实用户输入（不是缓存里的历史摘要）：跨 dialog 的近期关闭项只按它匹配。
+    userInput: effectiveMessage,
+    ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+  });
+  const workContextBlocks = workContextBlock
+    ? [{ content: workContextBlock, cacheScope: "turn" as const }]
+    : [];
+
   // 最近一次 /cd 切换通知：作为 turn-scope 上下文注入本轮，agent 与用户
   // 同时知情（与 /switch 消息「用户可见 + agent 可知」的语义对齐）。消费
   // 时机在 runOneAgentTurn 的状态折叠处（发起过真实 turn 后清空）。
@@ -539,6 +554,7 @@ async function runAgentChat(
       .filter((content) => content.length > 0)
       .map((content) => ({ content, cacheScope: "turn" as const })),
     ...renderTurnContextBlocksWithScope([memoryOverlayLayer]),
+    ...workContextBlocks,
     ...cwdNoticeBlocks,
     ...processNoticeBlocks,
     ...childRunNoticeBlocks,
@@ -1135,7 +1151,9 @@ export async function resolveActionGate(
      * Injectable so tests never need a real TTY — and so the plaintext value
      * exists only in this one call path, never in tool results or logs.
      */
-    readSecretValue?: (label: string) => Promise<string>;
+    readSecretValue?: (label: string, session?: import("./secretInputDialog").SecretTokenSession, save?: (value: string) => void) => Promise<string>;
+    /** Pending is non-modal: only explicit activation permits keyboard claim. */
+    withSecretInput?: <T>(start: (session: import("./secretInputDialog").SecretTokenSession) => Promise<T>, cancelled: () => T) => Promise<T>;
   },
 ): Promise<AgentRuntimeToolResult> {
   if (gate.kind === "confirm") {
@@ -1216,12 +1234,19 @@ export async function resolveActionGate(
     // never persist an approval bucket. The plaintext value lives only in the
     // `setSecret` argument; it never enters the tool result, transcript, or
     // logs (error copy is scrubbed before it lands in the result).
-    return deps.dialogHost.withKeyboard(async () => {
+    const readAndStore = (session?: import("./secretInputDialog").SecretTokenSession) => deps.dialogHost.withKeyboard(async () => {
       deps.pauseComposer();
       try {
+        if (session?.signal.aborted) throw new Error("secret.promptAborted");
         const label = typeof fields.prompt === "string" ? fields.prompt : secretName;
-        const value = await (deps.readSecretValue ?? defaultPromptReader)(label);
-        setSecret(secretName, value);
+        let saved = false;
+        const save = (value: string) => {
+          if (session?.signal.aborted) throw new Error("secret.promptAborted");
+          setSecret(secretName, value);
+          saved = true;
+        };
+        const value = await (deps.readSecretValue ? deps.readSecretValue(label, session, save) : defaultPromptReader(label));
+        if (!saved) save(value);
         return {
           content: `action gate completed: ${gate.title}`,
           metadata: {
@@ -1230,15 +1255,17 @@ export async function resolveActionGate(
             name: secretName,
           },
         };
-      } catch (error) {
-        const reason = scrubSecrets(
-          `secret input failed: ${String((error as Error)?.message ?? error)}`,
-        ).cleaned;
-        return buildGateCancelledResult(gate, reason);
+      } catch {
+        // Store/reader errors may contain arbitrary plaintext, including a
+        // secret that no heuristic scrubber recognizes. Never serialize them.
+        return buildGateCancelledResult(gate, "secret input cancelled or could not be saved");
       } finally {
         deps.resumeComposerFromDialog();
       }
     });
+    return deps.withSecretInput
+      ? deps.withSecretInput(readAndStore, () => buildGateCancelledResult(gate, "secret input cancelled"))
+      : readAndStore();
   }
   // handoff gate: no dialog frame, so `dialogHost.run()` doesn't apply — but
   // it still needs the same keyboard claim + drain-on-close guarantee `run()`

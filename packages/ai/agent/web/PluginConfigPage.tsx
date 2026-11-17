@@ -1,3 +1,6 @@
+import { useAccountSession } from "identity/useAccountSession";
+import { setUiPluginState } from "app/settings/settingThunks";
+import { useUiPlugins } from "app/hooks/index";
 // packages/ai/agent/web/PluginConfigPage.tsx
 //
 // 插件配置页 /plugins/:pluginId。
@@ -8,7 +11,7 @@
 // 数据逻辑自 PluginExplore 原样搬移，读写接口、AbortController/generationRef
 // 口径、CLOUD_PLUGIN_SPECS 契约均未改动。
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   LuBox,
@@ -23,8 +26,9 @@ import {
   LuCloud,
 } from "react-icons/lu";
 import { toast } from "app/utils/toast";
-import { useAppSelector } from "app/store";
+import { useAppDispatch, useAppSelector } from "app/store";
 import { useToken } from "identity";
+import { UI_PLUGIN_SPECS } from "app/plugins/uiPlugins";
 import { selectRemoteServer } from "app/settings/settingSlice";
 import { Link, useParams } from "app/routing";
 import {
@@ -1036,10 +1040,55 @@ const CloudPluginConfigSection: React.FC<{ spec: CloudPluginSpec }> = ({ spec })
 
 /* ── 页面外壳 ─────────────────────────────────────────────────────────────── */
 
+const AgentCapabilitiesConfig = lazy(() => import("app/settings/web/SystemBuiltinSkills"));
+const DataSourcesConfig = lazy(() => import("app/settings/web/DataSourcePluginsConfig"));
+
+const ExistingPluginConfig: React.FC<{ id: "agent-capabilities" | "data-sources" }> = ({ id }) => (
+  <div className="plugin-config-page" data-testid={`plugin-config-${id}`}>
+    <BackToPlazaLink />
+    <Suspense fallback={<p role="status">配置加载中…</p>}>
+      {id === "agent-capabilities" ? <AgentCapabilitiesConfig /> : <DataSourcesConfig />}
+    </Suspense>
+  </div>
+);
+
+const UiPluginConfig: React.FC<{ id: "music" | "calendar" }> = ({ id }) => {
+  const dispatch = useAppDispatch();
+  // 按归属账号校验后的快照（FULL-IDENTITY-001）：非归属身份一律全 absent，
+  // 配置页的读写都不能建立在别的账号的启用状态上。
+  const uiPlugins = useUiPlugins();
+  const session = useAccountSession();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const spec = UI_PLUGIN_SPECS.find(item => item.id === id)!;
+  const save = async () => {
+    setSaving(true); setError(null);
+    try {
+      await dispatch(setUiPluginState({ id, value: uiPlugins[id] === "enabled" ? "disabled" : "enabled", session })).unwrap();
+    } catch (cause) {
+      const detail = cause && typeof cause === "object" && "message" in cause ? String(cause.message) : "";
+      const message = detail ? `插件设置保存失败：${detail}` : "插件设置保存失败，请重试";
+      setError(message); toast.error(message);
+    } finally { setSaving(false); }
+  };
+  return <div className="plugin-config-page" data-testid={`ui-plugin-config-${id}`}>
+    <BackToPlazaLink /><header className="plugin-config-page__head"><h1 className="plugin-config-page__title">{spec.title}</h1></header>
+    <section className="plugin-card plugin-card--full">
+      <p>{id === "music" ? "开启后在侧栏进入独立音乐面板。关闭不会删除音乐库或连接凭据。" : "开启后在侧栏显示日历占位面板；日程、提醒与同步尚未实现。"}</p>
+      <p role="status">{uiPlugins[id] === "enabled" ? "已开启" : uiPlugins[id] === "disabled" ? "已关闭" : "尚未创建"}</p>
+      <button className="plugin-btn-save" type="button" disabled={saving} onClick={() => void save()}>{saving ? "保存中…" : uiPlugins[id] === "enabled" ? "关闭插件" : uiPlugins[id] === "absent" ? "创建并开启" : "开启插件"}</button>
+      {error && <p role="alert">{error}</p>}
+      {uiPlugins[id] === "enabled" && <Link to={spec.path}>进入{spec.title}</Link>}
+    </section>
+  </div>;
+};
+
 const PluginConfigPage: React.FC = () => {
   const { t } = useTranslation();
   const params = useParams<"pluginId">();
   const pluginId = params.pluginId ?? "";
+  if (pluginId === "agent-capabilities" || pluginId === "data-sources") return <ExistingPluginConfig id={pluginId} />;
+  if (pluginId === "music" || pluginId === "calendar") return <UiPluginConfig id={pluginId} />;
   const spec = CLOUD_PLUGIN_SPECS.find((item) => item.id === pluginId);
   const isInstabox = pluginId === INSTABOX_ID;
   const positioning = PLUGIN_POSITIONING[pluginId];

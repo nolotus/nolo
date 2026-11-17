@@ -31,7 +31,10 @@ import { getProcessRegistry, type ProcessRegistry } from "../../agent-runtime/pr
 import { t } from "./i18n";
 import { themeText } from "./theme";
 
-export const ACTIVITY_FRAMES = ["·", "~", "≈", "∿", "≈", "~"];
+// Braille spinner：10 帧一轮。10 帧在 narrow / wide 两种宽度约定下都被
+// displayWidth / visibleWidth 判定为 1 列（帧间宽度稳定），因此不改变活动行的
+// 宽度预算与重绘几何。
+export const ACTIVITY_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 export const ACTIVITY_FRAME_INTERVAL_MS = 150;
 /** 无可见输出超过此时长（且 turn 仍活跃）时，补一行 working fallback。 */
 export const ACTIVITY_FALLBACK_DELAY_MS = 1200;
@@ -96,8 +99,11 @@ export type ActivityIndicator = {
   getVisibleRunIds(): ReadonlySet<string>;
   /** 当前应渲染的活动行数据；explicit 优先，其次 fallback，都没有返回 null。 */
   getView(): ActivityIndicatorView | null;
-  /** 获取全套活动 Panel 渲染行（含基础活动行及贴在输入区上方的 Agent Run 状态面板）。 */
-  getActivityLines(colorEnabled?: boolean, layout?: RunZoneLayout): string[] | null;
+  /** Activity line; legacy callers may include detailed tasks. Workspace splits composer activity and screen-top tasks. */
+  getActivityLines(colorEnabled?: boolean, layout?: RunZoneLayout, includeTasks?: boolean): string[] | null;
+  getTaskLines(colorEnabled?: boolean, layout?: RunZoneLayout): string[];
+  /** Composer activity only; background runs/processes are projected by getTaskLines. */
+  getBackgroundLines(colorEnabled?: boolean, layout?: RunZoneLayout): string[] | null;
   /** Esc 即时反馈：把活动行切到「停止中」文案，frame 冻结不再动。 */
   markStopping(): void;
   /** 是否已处于停止中状态（第二次 Esc 判定用）。 */
@@ -284,6 +290,7 @@ export function createActivityIndicator(
   const getActivityLines = (
     colorEnabled = resolveCliColorEnabled(),
     layout?: RunZoneLayout,
+    includeTasks = true,
   ): string[] | null => {
     const lines: string[] = [];
     const rawView = getView();
@@ -301,21 +308,20 @@ export function createActivityIndicator(
       const elapsedStr = `${elapsed}s`;
       const stopHint = t("stopHint");
       if (!colorEnabled) {
-        lines.push(`${baseView.frame} ${baseView.label} (${elapsedStr}) · ${stopHint}`);
+        lines.push(`${baseView.frame} (${elapsedStr}) ${baseView.label} · ${stopHint}`);
       } else {
         lines.push(
           themeText(baseView.frame, "accent") +
             " " +
+            themeText(`(${elapsedStr}) `, "chrome") +
             themeText(baseView.label, "muted") +
-            themeText(` (${elapsedStr})`, "chrome") +
             themeText(` · ${stopHint}`, "chrome")
         );
       }
     }
 
-    // 运行区在 spinner 下面、紧贴分隔线：composer 自底向上长，越靠下的行越不被
-    // spinner 出现/消失推动；后台 run 活得比前台 turn 久，不该被 turn 挤上挤下。
-    lines.push(...runDock.getLines(colorEnabled, layout));
+    // Legacy callers can request a combined panel; workspace uses getTaskLines at screen top.
+    if (includeTasks) lines.push(...runDock.getLines(colorEnabled, layout));
 
     return lines.length > 0 ? lines : null;
   };
@@ -343,6 +349,10 @@ export function createActivityIndicator(
     getVisibleRunIds: (): ReadonlySet<string> => runDock.visibleRunIds(),
     getView,
     getActivityLines,
+    // Only the parent turn stays by the composer; background work lives in the top dock.
+    getBackgroundLines: (colorEnabled = resolveCliColorEnabled(), layout?: RunZoneLayout) =>
+      getActivityLines(colorEnabled, layout, false),
+    getTaskLines: (colorEnabled = resolveCliColorEnabled(), layout?: RunZoneLayout) => runDock.getLines(colorEnabled, layout),
     markStopping,
     isStopping,
     stop,

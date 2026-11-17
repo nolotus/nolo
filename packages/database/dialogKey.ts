@@ -71,3 +71,19 @@ export const dialogMessageRange = (dialogId: string) => ({
   start: createKey(DataType.DIALOG, dialogId, "msg", ""),
   end: createKey(DataType.DIALOG, dialogId, "msg", "\uffff"),
 });
+
+export type ParsedDialogMessageKey = {
+  dialogId: string;
+  messageId: string;
+};
+
+export function parseDialogMessageKey(key: string): ParsedDialogMessageKey | null {
+  if (!key.startsWith("dialog-")) return null;
+  const marker = "-msg-";
+  const markerIndex = key.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const dialogId = key.slice("dialog-".length, markerIndex);
+  const messageId = key.slice(markerIndex + marker.length);
+  if (!dialogId || !messageId) return null;
+  return { dialogId, messageId };
+}

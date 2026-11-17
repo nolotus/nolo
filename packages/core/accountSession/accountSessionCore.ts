@@ -49,7 +49,14 @@ export const isAccountIdentity = (value: unknown): value is AccountIdentity =>
 export const parseUserToken = (token: string): AccountIdentity | null => {
   if (typeof token !== "string" || !token.trim()) return null;
   const parsed = parseToken(token);
-  return isAccountIdentity(parsed) ? parsed : null;
+  if (!isAccountIdentity(parsed)) return null;
+  if ((parsed as { authKind?: unknown }).authKind === "google-session-v1") {
+    // Unverified bearer payloads are display hints, never profile or permission data.
+    const account: AccountIdentity = { userId: parsed.userId };
+    if (typeof parsed.username === "string") account.username = parsed.username;
+    return account;
+  }
+  return parsed;
 };
 
 export interface StoredTokenEntry {
@@ -295,7 +302,7 @@ export class AccountSessionCore {
     this.setSnapshot({
       ...this.snapshot,
       transition,
-    });
+    }, true);
   }
 
   /**

@@ -1,3 +1,6 @@
+import { isCompleteInstructionOutput } from "../ai/agent/toolOutputPolicy";
+import { sanitizeToolOutputText } from "../agent-runtime/toolOutputSanitizer";
+import { scrubSecrets } from "../agent-runtime/secretScrubber";
 // packages/cli/machineToolInvokeDispatch.ts
 //
 // 租户机器工具路由 — 机器侧 v1（读写文件工具）。
@@ -258,7 +261,7 @@ export type MachineToolInvokeHandlers = {
     args: unknown,
     timeoutMs?: unknown,
     agentKey?: string
-  ) => Promise<{ result?: string; error?: string }>;
+  ) => Promise<{ result?: string; error?: string; metadata?: { projectInstruction: true } }>;
 };
 
 export function createMachineToolInvokeHandlers(
@@ -298,7 +301,7 @@ export function createMachineToolInvokeHandlers(
     timeoutMs: number,
     workspaceRoot: string,
     agentKey: string | undefined
-  ): Promise<{ result?: string; error?: string }> => {
+  ): Promise<{ result?: string; error?: string; metadata?: { projectInstruction: true } }> => {
     const call: AgentRuntimeToolCallInput = {
       id: "machine-tool-invoke",
       name: toolName,
@@ -308,6 +311,15 @@ export function createMachineToolInvokeHandlers(
     // 词法 + realpath 双检 —— spill 例外（执行器内部 allowRuntimeOwnedSpill）
     // 与 symlink 逃逸都不再可达。路径提取失败（非对象 args）时跳过预检，
     // 由执行器的参数校验给出既有错误语义。
+    // Batch reads must satisfy the same lexical + realpath preflight for every item.
+    if (toolName === "readFile" && isRecord(executorArgs) && Array.isArray(executorArgs.files)) {
+      for (const item of executorArgs.files) {
+        const path = extractMachineToolRequestPath(item);
+        if (path === null) return { error: TOOL_ARGS_MALFORMED_MESSAGE };
+        const preflightError = await machinePathPreflight({ workspaceRoot, request: path });
+        if (preflightError) return { error: preflightError };
+      }
+    }
     const requestPath = extractMachineToolRequestPath(executorArgs);
     if (requestPath !== null) {
       const preflightError = await machinePathPreflight({
@@ -341,6 +353,9 @@ export function createMachineToolInvokeHandlers(
             `\n\n[... output truncated at ${TOOL_RESULT_MESSAGE_MAX_CHARS} chars ...]`,
         };
       }
+      if (isCompleteInstructionOutput(toolName, outcome.metadata, content)) {
+        return { result: scrubSecrets(sanitizeToolOutputText(content)).cleaned, metadata: { projectInstruction: true } };
+      }
       return { result: content };
     } catch (error) {
       return { error: toMessage(error) };
@@ -364,7 +379,7 @@ export function createMachineToolInvokeHandlers(
     toolArgs: unknown,
     timeoutMs?: unknown,
     agentKey?: string
-  ): Promise<{ result?: string; error?: string }> => {
+  ): Promise<{ result?: string; error?: string; metadata?: { projectInstruction: true } }> => {
     // 白名单校验先行：非白名单名（含缺失/非字符串名）在碰执行器之前拒绝。
     if (!V1_ALLOWED_TOOL_NAMES.has(toolName)) {
       return { error: TOOL_NOT_ALLOWED_MESSAGE };
@@ -410,13 +425,13 @@ export function createMachineToolInvokeHandlers(
         JSON.stringify(
           outcome.error !== undefined
             ? { type: "tool.result", requestId, error: outcome.error }
-            : { type: "tool.result", requestId, result: outcome.result ?? "" }
+            : { type: "tool.result", requestId, result: outcome.result ?? "", ...(outcome.metadata ? { metadata: outcome.metadata } : {}) }
         )
       );
       return JSON.stringify(
         outcome.error !== undefined
           ? { type: "tool.result", requestId, error: outcome.error }
-          : { type: "tool.result", requestId, result: outcome.result ?? "" }
+          : { type: "tool.result", requestId, result: outcome.result ?? "", ...(outcome.metadata ? { metadata: outcome.metadata } : {}) }
       );
     },
     invokeMachineTool,

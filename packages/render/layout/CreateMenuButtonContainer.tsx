@@ -13,7 +13,6 @@ import { useCreateMenuOpenCount, incrementCreateMenuOpenCount } from "./createMe
 import { useCreateDialog } from "chat/dialog/useCreateDialog";
 import {
   resolveActiveProjectScope,
-  extractProjectIdFromLocation,
   extractDialogKeyFromLocation,
   linkContentToProject,
 } from "chat/web/projectCreationScope";
@@ -21,7 +20,6 @@ import {
   resolveProjectCreationTarget,
   tryLinkToProject,
   projectStillExists,
-  isRequestedProjectMissing,
 } from "chat/web/projectScopedCreation";
 import {
   bindDialogToProject,
@@ -202,35 +200,15 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
    */
   const resolveCreationTarget = useCallback(
     (fallbackSpaceId?: string | null) => {
-      const project = resolveActiveProjectScope({ location, projectScopeId });
+      // Only an existing Dialog binding retains Project compatibility. Retired Home
+      // queries and sidebar preferences must never retarget ordinary Space creation.
+      const dialogKey = extractDialogKeyFromLocation(location.pathname, location.search);
+      const project = dialogKey ? resolveActiveProjectScope({ location }) : null;
       let storage: Pick<Storage, "getItem"> | null = null;
-      try {
-        storage = typeof window !== "undefined" ? window.localStorage : null;
-      } catch {
-        storage = null;
-      }
-      // 首页 query 优先；侧栏筛选仅在非全局排除、非空间、非对话路由生效。
-      // 对话路由保留 resolveActiveProjectScope 的绑定结果，不被残留 prop 覆盖。
-      const { pathname, search } = location;
-      const canUseSidebarScope = pathname !== "/favorites"
-        && pathname !== "/explore"
-        && pathname !== "/space"
-        && !pathname.startsWith("/space/")
-        && !extractDialogKeyFromLocation(pathname, search);
-      const requestedProjectId = extractProjectIdFromLocation(pathname, search)
-        ?? (canUseSidebarScope ? projectScopeId : null);
-      // 调用方明确要求在某个项目内创建，但该项目记录已经没了（项目被删除）：
-      // 提前失败，不创建任何内容，也不把内容默默落进当前 space。
-      if (isRequestedProjectMissing({ storage, projectScopeId: requestedProjectId })) {
-        toast.error(
-          t("chat:projectMissingForCreate", "项目已不存在，未创建任何内容"),
-        );
-        return null;
-      }
+      try { storage = typeof window !== "undefined" ? window.localStorage : null; } catch { /* unavailable */ }
       const target = resolveProjectCreationTarget({
         storage,
         project,
-        requestedProjectId,
         fallbackSpaceId,
       });
       if (!target.ok) {
@@ -347,7 +325,6 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
           break;
         case "new-project":
           closeMenu();
-          navigate("/?createProject=1");
           break;
         case "new-page":
           void createNewPageAndClose();
@@ -549,7 +526,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   });
 
   const isItemVisibleInRail = (id: CreateMenuItemId) => {
-    if (id === "new-project") return isDesktop;
+    if (id === "new-project") return false;
     if (id === "upload-file") return Boolean(onUploadClick);
     return true;
   };

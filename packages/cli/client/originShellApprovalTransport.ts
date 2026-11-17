@@ -42,16 +42,25 @@ function send(channel: Channel, message: object) {
   channel.send({ kind: KIND, ...message });
 }
 
+// Only connections attached in this OS process belong here. Disk run records
+// and dialog attribution cannot tell whether execve would discard a live host.
+const liveApprovalHosts = new Set<object>();
+export function hasLiveShellApprovalHosts(): boolean {
+  return liveApprovalHosts.size > 0;
+}
+
 /** Call immediately after spawn, before yielding; lifetime is the parent session AND child. */
 export function attachShellApprovalHost(channel: Channel, host: ShellApprovalHost): () => void {
   const binding = Object.freeze({ ...host.binding });
   const bridge = createOriginShellApprovalBridge({ binding, resolveWorkspace: realpathSync });
+  const connection = {};
   let closed = false;
   let count = 0;
   const active = new Set<AbortController>();
   const close = () => {
     if (closed) return;
     closed = true;
+    liveApprovalHosts.delete(connection);
     bridge.revoke();
     for (const controller of active) controller.abort();
     active.clear();
@@ -109,7 +118,8 @@ export function attachShellApprovalHost(channel: Channel, host: ShellApprovalHos
   channel.on("exit", close);
   channel.on("error", close);
   host.signal.addEventListener("abort", close, { once: true });
-  if (host.signal.aborted) close();
+  liveApprovalHosts.add(connection);
+  if (host.signal.aborted || channel.connected === false) close();
   return close;
 }
 

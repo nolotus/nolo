@@ -1,3 +1,5 @@
+import { hasLiveShellApprovalHosts } from "../client/originShellApprovalTransport";
+import { runBelongsToDialog } from "./runDialogScope";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { getRestartBlocker, hasRestartBlockingRuns } from "./tuiRestart";
 import { listRunRecords } from "../agentRunControl";
@@ -287,8 +289,13 @@ export async function runSubmittedSlashLine(
     if (result.action.restart) {
       const blocker = getRestartBlocker(host.state, {
         supported: !!options.requestRestart && typeof process.execve === "function",
-        activeProcesses: getProcessRegistry().list().some(p => p.status === "running"),
-        activeRuns: hasRestartBlockingRuns(listRunRecords({ env: options.env ?? process.env })),
+        // This registry belongs to the OS process, not the displayed dialog.
+        // Even another dialog's child still depends on this TUI to drain pipes;
+        // owner.dialogId controls notice attribution, not restart safety.
+        activeProcesses: getProcessRegistry().list().some(p => p.status === "running") ||
+          hasLiveShellApprovalHosts(),
+        activeRuns: hasRestartBlockingRuns(listRunRecords({ env: options.env ?? process.env })
+          .filter(run => runBelongsToDialog(run, host.state.dialogId))),
       });
       if (blocker) { emitCommandOutput(`[nolo] ${blocker}`); return false; }
       options.requestRestart!(host.state);

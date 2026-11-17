@@ -53,6 +53,10 @@
       "role": "release"
     },
     {
+      "path": "public/downloads/install-nolo.sh",
+      "role": "release"
+    },
+    {
       "path": ".github/workflows/desktop-build.yml",
       "role": "release"
     },
@@ -123,6 +127,22 @@
     {
       "path": "scripts/release/prepareCliPublishPackage.ts",
       "role": "release"
+    },
+    {
+      "path": "scripts/release/stageCliDownloads.ts",
+      "role": "build"
+    },
+    {
+      "path": "scripts/release/prepareCliNativePackage.ts",
+      "role": "build"
+    },
+    {
+      "path": "scripts/release/cliBinaryPublishPlan.ts",
+      "role": "build"
+    },
+    {
+      "path": "scripts/release/publishCliBinary.ts",
+      "role": "build"
     },
     {
       "path": "scripts/ci/runCliPublishPublic.sh",

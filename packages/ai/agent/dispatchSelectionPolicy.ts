@@ -53,6 +53,20 @@ const MODEL_TIERS: ReadonlyArray<{ tier: DispatchDifficulty; models: readonly st
 
 export const MODEL_TIER_GUIDANCE = MODEL_TIERS.map(({ tier, models }) => `${tier}: ${models.join("、")}`).join("\n");
 
+/**
+ * 任务难度判档（短版单一真值）。
+ *
+ * 顺序是「先判子任务 difficulty，再按该档选模型」；升档只看任务本身，不看重要度、
+ * 文件数、耗时、目录敏感度，也不因「更稳妥/更安全/独立 review」而升。
+ * - ORDER：判档顺序与不升档边界；
+ * - TIERS：四档判据与重新判档；两者都进 min / full 共用段（server 线永远只有 min）。
+ * 工具侧准入不变：仍只校验「已知跨档是否给了理由」，不推断档位、不自动换人。
+ */
+export const DIFFICULTY_GRADING_ORDER = `- **先判档再选模型**（规划复杂≠执行复杂）：先定子任务 difficulty 再选该档胜任模型；重要度、文件数、耗时、发布安全目录不升档，「更稳妥/更安全/独立 review」不是升档理由，选足够胜任的最低档，不为降档拆碎。`;
+
+export const DIFFICULTY_GRADING_TIERS = `    - 四档：easy＝根因与做法明确、局部可验；normal＝局部定位、有契约、无跨模块取舍；complex＝多根因或跨模块/跨状态，兼顾并发兼容；extreme＝架构未定或安全/完整性重大取舍。根因/接口定下后实现与复审重新判档，不继承规划档。`;
+
+
 export function resolveModelTier(model: unknown): ModelTier {
   if (typeof model !== "string") return "unknown";
   const id = model.trim().toLowerCase().split("/").at(-1)!.replace(/\s+/g, "-");
