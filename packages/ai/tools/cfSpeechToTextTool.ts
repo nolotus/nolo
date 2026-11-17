@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 // packages/ai/tools/cfSpeechToTextTool.ts
 // Cloudflare Workers AI Whisper 语音转文字工具
 // Docs: https://developers.cloudflare.com/workers-ai/models/whisper/
@@ -24,7 +25,8 @@ export const cfSpeechToTextFunctionSchema = {
 
 export async function cfSpeechToTextFunc(
   args: { audioUrl: string },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ): Promise<{ rawData: any; displayData: string }> {
   const { audioUrl } = args;
 
@@ -38,7 +40,7 @@ export async function cfSpeechToTextFunc(
     words?: Array<{ word: string; start: number; end: number }>;
     vtt?: string;
     source: string;
-  }>(thunkApi, "/api/cf-speech-to-text", { audioUrl }, { withAuth: true });
+  }>(thunkApi, "/api/cf-speech-to-text", { audioUrl, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) }, { withAuth: true });
 
   return {
     rawData: data,

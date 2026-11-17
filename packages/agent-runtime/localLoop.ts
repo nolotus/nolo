@@ -22,6 +22,8 @@ import { resolveToolExecutionContract } from "../ai/tools/toolExecutionSemantics
 import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";
 import { applyToolSurfaceConstraints } from "./runtimeToolSurface";
+import { hasMemoryTools } from "./turnContext";
+import { MEMORY_USE_GUIDANCE } from "./memoryUseGuidance";
 import type { ManagedRuntime } from "effect";
 import {
   createLocalLoopObservationBoundary,
@@ -291,6 +293,10 @@ export type LocalAgentTurnInput = {
    * 注入消息进入 `messages`，因此天然随 turnMessages 一起 saveTurn 持久化。
    */
   drainInjections?: () => LocalTurnInjection[] | Promise<LocalTurnInjection[]>;
+  /** Host-only persisted source resolution after receipt commits, before provider dispatch. */
+  resolveInjectedUserMessageId?: (
+    messages: readonly (AgentRuntimeChatMessage & { cliMessageId?: string })[],
+  ) => Promise<string | undefined>;
   /**
    * [test seam] completion-boundary 缝隙：在「no-tool result 已确定、final
    * injection drain 尚未执行」处 await 调用。生产调用方不传——行为零变化；
@@ -823,6 +829,8 @@ function combineRollbackError(primary: unknown, rollbackError: unknown): Error {
 export async function runLocalAgentTurn(
   input: LocalAgentTurnInput
 ): Promise<LocalAgentTurnResult> {
+  // Provenance changes within this loop, not in the caller's initial turn facts.
+  input = { ...input, runtimeContext: input.runtimeContext ? { ...input.runtimeContext } : undefined };
   const legacyCallbacks = {
     onLoopEvent: input.onLoopEvent,
     onToolEvent: input.onToolEvent,
@@ -1042,6 +1050,18 @@ export async function runLocalAgentTurn(
         typeof input.input === "string" ? input.input : undefined
       ),
   });
+  // 宿主自己注入过记忆使用指引吗？CLI/TUI/desktop 在本函数之前用
+  // `buildMemoryUseGuidanceLayer({ promptBlock })` 按「有 overlay 就注入」放过一份
+  // （`promptBlock` 门控那一档），这里只补它覆盖不到的缺口——空库 + 有记忆工具。
+  // 去重按同一模块导出的常量文本比对（MEMORY_USE_GUIDANCE 是唯一真值，改写文案
+  // 不会让这里失效），因此不会出现两份指引。
+  const callerScopes = normalizeContextBlockScopes(
+    input.contextBlocks,
+    input.contextBlockScopes,
+  );
+  const callerHasMemoryGuidance = callerScopes.some((scope) =>
+    scope.content.includes(MEMORY_USE_GUIDANCE),
+  );
   const guidanceScopes: ContextBlockScope[] =
     [
       ...(input.userLanguage?.trim()
@@ -1053,20 +1073,21 @@ export async function runLocalAgentTurn(
       // 注入顺序遵循 TOOL_GUIDED_SECTION_ORDER（与 buildSystemPrompt 的显式
       // layer 列表同源），禁止用 Object.values 自行定序。
       ...TOOL_GUIDED_SECTION_ORDER.map((id) => toolGuidedSections[id] ?? ""),
+      // 记忆使用指引（session-scope，进稳定前缀）：判定真值是 turnContext 的
+      // `hasMemoryTools`（有效工具面），与 web/server 的 buildSystemPrompt 同一条
+      // 规则。放在这里而不是各宿主：CLI/TUI/desktop 都经 runLocalAgentTurn 进入本
+      // 函数，一处即可覆盖三端，并补齐「空库 + 有记忆工具」这一档——此前本地宿主
+      // 只按记忆 overlay 是否为空门控，空库时模型永远不知道该怎么用记忆工具。
+      ...(hasMemoryTools(agentTools) && !callerHasMemoryGuidance
+        ? [MEMORY_USE_GUIDANCE]
+        : []),
       ...(input.runKind === "subtask" ? [LEAF_FINAL_HANDOFF_INSTRUCTIONS] : []),
     ]
       .map((content) => content.trim())
       .filter((content): content is string => content.length > 0)
       .map((content) => ({ content, cacheScope: "session" as const }));
   // Built-in scopes (identity/guidance) always come first; the caller's
-  // normalized scopes follow. normalizeContextBlockScopes reconciles
-  // input.contextBlockScopes (authoritative) with input.contextBlocks
-  // (legacy plain strings → turn-scope) so a caller that only supplies
-  // contextBlocks still gets its blocks included exactly once.
-  const callerScopes = normalizeContextBlockScopes(
-    input.contextBlocks,
-    input.contextBlockScopes,
-  );
+  // normalized scopes follow (computed above as `callerScopes`).
   // 回复准则集合经单一入口解析：行为和排版都来自同一处真值，
   // 宿主只声明能力（input.responseViewport），不自己拼准则文本。
   const responseGuidelines = resolveResponseGuidelines(
@@ -1582,6 +1603,20 @@ export async function runLocalAgentTurn(
         inFlightTransactions = pendingInjectionCommits.splice(0);
         try {
           for (const transaction of inFlightTransactions) await transaction.commit();
+          // Only receipt-backed user batches replace provenance. Internal wakes
+          // are transcript text, never a new user source. Resolve the whole
+          // admitted batch together: multiple messages must not inherit old A.
+          input.runtimeContext = { ...input.runtimeContext };
+          delete input.runtimeContext.userMessageId;
+          const admittedMessages = inFlightTransactions.flatMap(transaction => transaction.messages);
+          if (admittedMessages.length === 1 && admittedMessages[0]?.cliMessageId) {
+            try {
+              const id = await input.resolveInjectedUserMessageId?.(admittedMessages);
+              if (id === admittedMessages[0].cliMessageId) input.runtimeContext.userMessageId = id;
+            } catch {
+              // Unverifiable sources fail closed; tools report refused writes.
+            }
+          }
           if (input.abortSignal?.aborted) throw buildAbortedError();
         } catch (error) {
           // Keep the transaction list for rollback even when a commit throws:

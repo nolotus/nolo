@@ -4,6 +4,7 @@ import { buildLegacyMemoryEvidence, resolveLegacyMemoryPrincipal } from "./legac
 import { currentStatesCitingEvidence, loadExistingContext } from "./lazyPromotion";
 import { loadMemoryVNextCatalog } from "./store";
 import { recallMemoryVNextLocal, type MemoryVNextLocalRecallHit } from "./localRecall";
+import { isWorkContextState } from "./workContext";
 import { deriveStateResident } from "./pureVNextRuntime";
 import type { MemoryEntityVNext, MemoryStateVNext } from "./types";
 
@@ -116,7 +117,10 @@ export const resolveMemoryVNextM4Selection = async (input: {
     const principalId = `${owner.ownerType}:${encodeURIComponent(owner.ownerId)}`;
     const catalog = catalogs.get(principalId);
     if (!catalog) continue;
-    const currentStates = catalog.states.filter((s) => !s.retiredAt && s.text.trim());
+    // 与 pure 读同口径：工作接续不进语义召回，也不占 semantic/resident 预算。
+    const currentStates = catalog.states.filter(
+      (s) => !s.retiredAt && s.text.trim() && !isWorkContextState(s),
+    );
     const hits = recallMemoryVNextLocal({
       query,
       entities: catalog.entities,

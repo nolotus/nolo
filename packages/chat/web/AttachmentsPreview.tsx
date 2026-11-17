@@ -392,11 +392,14 @@ const MediaUploadCard: React.FC<{
       ? Math.min(100, Math.round((upload.loaded / upload.total) * 100))
       : 0;
   const isError = upload.phase === "error";
+  const indeterminate = upload.phase === "uploading" && upload.indeterminate;
   const statusText = isError
     ? t("mediaUploadFailedShort", { defaultValue: "失败" })
     : upload.phase === "creating"
       ? t("mediaJobCreating", { defaultValue: "创建任务中…" })
-      : t("mediaUploadingPercent", {
+      : indeterminate
+        ? t("uploading", { defaultValue: "上传中…" })
+        : t("mediaUploadingPercent", {
           defaultValue: "上传中 {{percent}}%",
           percent,
         });
@@ -430,12 +433,14 @@ const MediaUploadCard: React.FC<{
           aria-labelledby={nameElementId}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={upload.phase === "creating" ? 100 : percent}
+          aria-valuenow={indeterminate ? undefined : upload.phase === "creating" ? 100 : percent}
         >
-          <div
-            className="media-upload-card__bar-fill"
-            style={{ width: `${upload.phase === "creating" ? 100 : percent}%` }}
-          />
+          {!indeterminate && (
+            <div
+              className="media-upload-card__bar-fill"
+              style={{ width: `${upload.phase === "creating" ? 100 : percent}%` }}
+            />
+          )}
         </div>
       )}
       {isError && error && (

@@ -1,5 +1,7 @@
 /** Wire contract only. All responses must be served with Cache-Control: no-store. */
-export type GoogleStartRequest = { mode: "login" | "bind"; returnTo?: string };
+export type GoogleStartRequest = { mode: "login" | "bind"; returnTo?: string; tabBinding?: string };
+/** Random per-tab possession proof; POST body only, never an OAuth URL parameter. */
+export type GoogleCompleteRequest = { tabBinding?: string };
 export type GoogleStartResponse = { authorizationUrl: string };
 /** Server callback returns 303 to the fixed completion page, never credentials in the URL. */
 export type GoogleCallbackQuery = { code: string; state: string };

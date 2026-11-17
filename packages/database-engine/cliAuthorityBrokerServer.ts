@@ -3,6 +3,7 @@ import path from "node:path";
 import { createServer, type AddressInfo, type Server, type Socket } from "node:net";
 import { toErrorMessage } from "core/errorMessage";
 
+import { createCliAuthorityBrokerClient } from "./cliAuthorityBrokerClient";
 import type { AuthorityStore } from "./authorityStoreTypes";
 import {
   isLevelCorruptionError,
@@ -137,12 +138,73 @@ function createErrorResponse(error: unknown): CliAuthorityBrokerResponse {
   };
 }
 
-export async function dispatchCliAuthorityBrokerRequest(
+type OwnerQueue = { tail: Promise<unknown>; active: Set<Promise<unknown>>; closed: boolean };
+const ownerQueues = new WeakMap<AuthorityStore, OwnerQueue>();
+function ownerQueue(store: AuthorityStore): OwnerQueue {
+  let state = ownerQueues.get(store);
+  if (!state) { state = { tail: Promise.resolve(), active: new Set(), closed: false }; ownerQueues.set(store, state); }
+  return state;
+}
+
+function validConditionalPut(request: Record<string, unknown>): boolean {
+  const expected = request.expectedRevision;
+  const value = request.value;
+  return Object.keys(request).length === 4 &&
+    Object.keys(request).every((key) => ["type", "key", "expectedRevision", "value"].includes(key)) &&
+    typeof request.key === "string" && request.key.length > 0 &&
+    (expected === null || (Number.isSafeInteger(expected) && (expected as number) >= 0 && (expected as number) < Number.MAX_SAFE_INTEGER)) &&
+    typeof value === "object" && value !== null && !Array.isArray(value) &&
+    Object.hasOwn(value, "revision") &&
+    (value as { revision: unknown }).revision === (expected === null ? 1 : (expected as number) + 1);
+}
+
+// One write queue per native owner, shared by sockets, in-process dispatch and exposed writes.
+// Reads bypass the write queue; lifecycle admission tracks both reads and writes.
+// Rejected operations do not poison the tail. Admission closes before native close drains it.
+export function dispatchCliAuthorityBrokerRequest(
+  store: AuthorityStore,
+  request: CliAuthorityBrokerRequest
+): Promise<CliAuthorityBrokerResponse> {
+  const state = ownerQueue(store);
+  if (state.closed) return Promise.resolve({ ok: false, error: { code: "BROKER_CLOSING", message: "Authority broker is closing" } });
+  const isRead = request?.type === "get" || request?.type === "status" || request?.type === "iterator" || request?.type === "close";
+  const execute = () => executeCliAuthorityBrokerRequest(store, request);
+  const result = isRead ? Promise.resolve().then(execute) : state.tail.then(execute);
+  if (!isRead) state.tail = result.catch(() => undefined);
+  // Include scheduled reads, not just ones already inside native methods.
+  const settled = result.then(() => undefined, () => undefined);
+  state.active.add(settled);
+  void settled.then(() => state.active.delete(settled));
+  return result;
+}
+
+async function executeCliAuthorityBrokerRequest(
   store: AuthorityStore,
   request: CliAuthorityBrokerRequest
 ): Promise<CliAuthorityBrokerResponse> {
   try {
+    if (!request || typeof request !== "object") {
+      return { ok: false, error: { code: "BROKER_INVALID_REQUEST", message: "Invalid broker request" } };
+    }
     switch (request.type) {
+      case "conditionalPut": {
+        if (!validConditionalPut(request)) {
+          return { ok: false, error: { code: "BROKER_INVALID_REQUEST", message: "Invalid conditionalPut request" } };
+        }
+        let current: unknown;
+        try { current = await store.get(request.key); }
+        catch (error) {
+          if ((error as { code?: string })?.code !== "LEVEL_NOT_FOUND") throw error;
+        }
+        const matches = request.expectedRevision === null
+          ? current === undefined
+          : typeof current === "object" && current !== null && !Array.isArray(current) &&
+            Object.hasOwn(current, "revision") &&
+            (current as { revision: unknown }).revision === request.expectedRevision;
+        if (!matches) return { ok: true, result: { type: "conditionalPut", status: "conflict" } };
+        await store.put(request.key, request.value);
+        return { ok: true, result: { type: "conditionalPut", status: "updated" } };
+      }
       case "status":
         return { ok: true, result: { type: "status" } };
       case "open":
@@ -171,8 +233,13 @@ export async function dispatchCliAuthorityBrokerRequest(
             page: await buildIteratorPage(store, request),
           },
         };
+      default:
+        return { ok: false, error: { code: "BROKER_UNSUPPORTED_REQUEST", message: "Unsupported broker request" } };
     }
   } catch (error) {
+    if (request?.type === "conditionalPut") {
+      return { ok: false, error: { code: "BROKER_CONDITIONAL_WRITE_FAILED", message: "Conditional write failed" } };
+    }
     return createErrorResponse(error);
   }
 }
@@ -306,13 +373,23 @@ async function createBrokerHandle(
     return {
       endpoint: options.endpoint,
       listeningEndpoint,
-      authorityStore: readyStore,
+      authorityStore: {
+        ...createCliAuthorityBrokerClient({
+          endpoint: listeningEndpoint,
+          invoke: (request) => dispatchCliAuthorityBrokerRequest(readyStore, request),
+        }),
+        get location() { return readyStore.location; },
+        get status() { return readyStore.status; },
+      },
       request(request: CliAuthorityBrokerRequest) {
         return dispatchCliAuthorityBrokerRequest(readyStore, request);
       },
       async close() {
         closing ??= (async () => {
           storeReady = false;
+          const queue = ownerQueue(readyStore);
+          queue.closed = true;
+          await Promise.all(queue.active);
           for (const socket of sockets) socket.destroy();
           if (server.listening) {
             await new Promise<void>((resolve, reject) => {

@@ -28,7 +28,7 @@ export type SidebarTypeFilterId =
  * 默认真源：没有明确偏好（首次访问 / 本地存储缺失或非法）时的侧边栏类型视图。
  * SSR 与客户端 fallback 都用它，避免首屏与 hydration 后视图跳变。
  */
-export const DEFAULT_SIDEBAR_TYPE_FILTER: SidebarTypeFilterId = "agent";
+export const DEFAULT_SIDEBAR_TYPE_FILTER: SidebarTypeFilterId = "all";
 
 export const isSidebarTypeFilterId = (value: string | null | undefined): value is SidebarTypeFilterId =>
   value === "all" ||

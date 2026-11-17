@@ -10,6 +10,10 @@ import type { CommandEntry } from "./cliCommandTypes";
 
 export function getSystemInternalCommandEntries(renderHelpText: () => string): CommandEntry[] {
   return [
+    createContextCommand(["mcp", "local", "authorize"], "Authorize a local HTTP MCP connection (explicit registration only)", async (args, ctx) => {
+      const { runMcpLocalAuthorizeCommand } = await import("./mcp/mcpLocalAuthorizeCommand");
+      return runMcpLocalAuthorizeCommand(args, ctx.env);
+    }),
     createContextCommand(["dialog", "usage"], "Show dialog tokens, recorded duration and speed by basis", async (args, ctx) => {
       const { runDialogUsageCommand } = await import("./dialogUsageCommand");
       return runDialogUsageCommand(args, { env: ctx.env });

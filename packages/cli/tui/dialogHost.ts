@@ -164,9 +164,12 @@ export type DialogAnchor = {
   getReservedRows?: () => number;
 };
 
+/** Cancellation of a queued operation; active body still owns its own signal. */
+export type DialogQueueCancellation<T> = { signal: AbortSignal; cancelled: () => T };
+
 export type DialogHost = {
   /** Open a framed, anchored dialog. Owns all five concerns end to end. */
-  run<T>(body: (anchor: DialogAnchor) => Promise<T>): Promise<T>;
+  run<T>(body: (anchor: DialogAnchor) => Promise<T>, cancellation?: DialogQueueCancellation<T>): Promise<T>;
   /**
    * Claim the keyboard for a modal interaction that has no dialog frame of
    * its own — currently only the handoff-gate raw text prompt, which prints
@@ -176,7 +179,7 @@ export type DialogHost = {
    * only owns claim (#3) and drain-then-release (#4/#5), the same contract
    * `run()` uses internally, in the same order.
    */
-  withKeyboard<T>(body: () => Promise<T>): Promise<T>;
+  withKeyboard<T>(body: () => Promise<T>, cancellation?: DialogQueueCancellation<T>): Promise<T>;
   /** True while `run()` or `withKeyboard()` currently holds the keyboard. */
   isKeyboardClaimed(): boolean;
   repaint(): void;
@@ -276,51 +279,91 @@ export function createDialogHost(args: {
     keyboardClaimed = false;
   };
 
-  return {
-    async run(body) {
-      const mouseStateBefore = args.composer.isMouseEnabled?.() ?? true;
-      const anchor: DialogAnchor = {
-        inputPolicy: args.inputPolicy ?? { wheel: "modal", pageKeys: "transcript" },
-        onTranscriptScroll: (action) => { args.onTranscriptScroll?.(action); },
-        registerForegroundRepaint: (repaint) => { foregroundRepaint = repaint; },
-        mouseEnabled: args.composer.isMouseEnabled?.() ?? true,
-        session: hostedSession,
-        bottomAnchored: true,
-        bottomRow: () =>
-          resolveDialogBottomRow({
-            output: args.output,
-            inputLines: args.composer.getInputLines(),
-          }),
-        setReservedRows: (rows) => hostedSession.setReservedRows?.(rows),
-        getReservedRows: () => hostedSession.getReservedRows?.() ?? 0,
+  // One workspace keyboard owner across *all* modal types. Do not execute a
+  // queued body until its predecessor has restored the composer and drained
+  // the decoder; bodies install raw readers and must never overlap.
+  let operationRunning = false;
+  const operations: Array<() => void> = [];
+  const exclusive = <T>(body: () => Promise<T>, cancellation?: DialogQueueCancellation<T>): Promise<T> => new Promise((resolve, reject) => {
+    const abortQueued = () => {
+      const index = operations.indexOf(start);
+      if (index < 0) return;
+      operations.splice(index, 1);
+      cancellation?.signal.removeEventListener("abort", abortQueued);
+      resolve(cancellation!.cancelled());
+    };
+    const start = () => {
+      cancellation?.signal.removeEventListener("abort", abortQueued);
+      operationRunning = true;
+      const release = () => {
+        const next = operations.shift();
+        if (next) next();
+        else operationRunning = false;
       };
-      claimKeyboard();
-      // pause() flips isPaused(), which is what suppresses the transcript
-      // repaint while the dialog owns the screen. Without it a dialog opened
-      // during a streaming turn is erased by the next token.
-      args.composer.pause();
-      try {
-        return await body(anchor);
-      } finally {
-        hostedSession.setReservedRows?.(0);
-        foregroundRepaint = null;
-        resetHistoryFrameDiffCache(args.output);
-        args.composer.resumeFromDialog();
-        // resumeFromDialog restores the normal composer mode; restore the
-        // exact pre-modal preference afterwards (notably `/mouse off`).
-        if (args.composer.setMouseEnabled) {
-          args.composer.setMouseEnabled(mouseStateBefore);
+      let result: Promise<T>;
+      try { result = body(); }
+      catch (error) { release(); reject(error); return; }
+      void Promise.resolve(result).then(
+        (value) => { release(); resolve(value); },
+        (error) => { release(); reject(error); },
+      );
+    };
+    if (cancellation?.signal.aborted) { resolve(cancellation.cancelled()); return; }
+    if (operationRunning) {
+      operations.push(start);
+      cancellation?.signal.addEventListener("abort", abortQueued, { once: true });
+    } else start();
+  });
+
+  return {
+    run(body, cancellation) {
+      return exclusive(async () => {
+        const mouseStateBefore = args.composer.isMouseEnabled?.() ?? true;
+        const anchor: DialogAnchor = {
+          inputPolicy: args.inputPolicy ?? { wheel: "modal", pageKeys: "transcript" },
+          onTranscriptScroll: (action) => { args.onTranscriptScroll?.(action); },
+          registerForegroundRepaint: (repaint) => { foregroundRepaint = repaint; },
+          mouseEnabled: args.composer.isMouseEnabled?.() ?? true,
+          session: hostedSession,
+          bottomAnchored: true,
+          bottomRow: () =>
+            resolveDialogBottomRow({
+              output: args.output,
+              inputLines: args.composer.getInputLines(),
+            }),
+          setReservedRows: (rows) => hostedSession.setReservedRows?.(rows),
+          getReservedRows: () => hostedSession.getReservedRows?.() ?? 0,
+        };
+        claimKeyboard();
+        // pause() flips isPaused(), which is what suppresses the transcript
+        // repaint while the dialog owns the screen. Without it a dialog opened
+        // during a streaming turn is erased by the next token.
+        args.composer.pause();
+        try {
+          return await body(anchor);
+        } finally {
+          hostedSession.setReservedRows?.(0);
+          foregroundRepaint = null;
+          resetHistoryFrameDiffCache(args.output);
+          args.composer.resumeFromDialog();
+          // resumeFromDialog restores the normal composer mode; restore the
+          // exact pre-modal preference afterwards (notably `/mouse off`).
+          if (args.composer.setMouseEnabled) {
+            args.composer.setMouseEnabled(mouseStateBefore);
+          }
+          releaseKeyboard();
         }
-        releaseKeyboard();
-      }
+      }, cancellation);
     },
-    async withKeyboard(body) {
-      claimKeyboard();
-      try {
-        return await body();
-      } finally {
-        releaseKeyboard();
-      }
+    withKeyboard(body, cancellation) {
+      return exclusive(async () => {
+        claimKeyboard();
+        try {
+          return await body();
+        } finally {
+          releaseKeyboard();
+        }
+      }, cancellation);
     },
     isKeyboardClaimed: () => keyboardClaimed,
     repaint: () => {

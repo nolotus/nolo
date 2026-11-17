@@ -1,3 +1,4 @@
+import type { ToolRequestDialogContext } from "./toolRequestDialogId";
 // /ai/tools/ecommerceScraperTool.ts
 
 import { callApifyActor } from "./apifyActorClient";
@@ -52,7 +53,8 @@ export async function ecommerceScraperFunc(
     maxProductResults?: number;
     extraInput?: Record<string, any>;
   },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ) {
   const {
     detailsUrls,
@@ -82,5 +84,5 @@ export async function ecommerceScraperFunc(
     input,
     resultType: "datasetItems",
     displayName: "E-commerce Scraping Tool",
-  });
+  }, context);
 }

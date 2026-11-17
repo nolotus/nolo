@@ -1,3 +1,4 @@
+import type { ToolRequestDialogContext } from "./toolRequestDialogId";
 // /ai/tools/googleSearchScraperTool.ts
 // Apify Google Search Results Scraper
 // Actor: https://apify.com/apify/google-search-scraper
@@ -81,7 +82,8 @@ export async function googleSearchScraperFunc(
     includeUnfilteredResults?: boolean;
     saveHtml?: boolean;
   },
-  thunkApi: unknown
+  thunkApi: unknown,
+  context?: ToolRequestDialogContext
 ) {
   const {
     maxPagesPerQuery = 1,
@@ -135,5 +137,5 @@ export async function googleSearchScraperFunc(
     input,
     resultType: "datasetItems",
     displayName: "Google Search Scraper",
-  });
+  }, context);
 }

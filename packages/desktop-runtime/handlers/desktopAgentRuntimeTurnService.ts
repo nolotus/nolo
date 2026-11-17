@@ -100,7 +100,6 @@ import { RUN_TITLE_MAX, normalizeRunTitle } from "ai/tools/agent/runTitle";
  */
 const DESKTOP_MEMORY_OVERLAY_TIMEOUT_MS = 1_000;
 import {
-  buildSpaceContextLayer,
   buildUserGlobalPromptLayer,
   buildUserResponseLanguageLayer,
   buildMemoryOverlayLayer,
@@ -1490,10 +1489,7 @@ export async function runDesktopAgentRuntimeTurn(
       return readRemoteRecord(dbKey);
     },
   };
-  const spaceContextLayer = await buildSpaceContextLayer({
-    source: turnContextReadSource,
-    spaceId: turnSpaceId,
-  });
+  const spaceContextLayer = null; // Content is fetched on demand by authorized tools.
   const workspaceContextLayer = buildWorkspaceContextLayer({
     spaceId: turnSpaceId,
     cwd,

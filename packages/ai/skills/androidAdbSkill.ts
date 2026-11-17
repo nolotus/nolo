@@ -81,6 +81,7 @@ const BODY = `# Android ADB 设备调试与测试规范 (android-adb)
 ## 2. 来源标注与第三方参考
 
 - **官方真值**：[Android Debug Bridge (adb)](https://developer.android.com/tools/adb) 官方文档。
+- **手机控制参考**：[android-adb-control (robbin, MIT)](https://github.com/robbin/android-adb-control) —— 仅原创提炼观察、单步操作与回读方法，不复制上游全文，不安装其脚本。
 - **流程借鉴**：[android-testing-skills (skydoves)](https://github.com/skydoves/android-testing-skills) —— 本规范仅借鉴其测试与故障诊断工作流，内容为独立原创表述，不复制整文。
 - **可选参考**：[android-use (dayanruben)](https://github.com/dayanruben/android-use) —— 仅作为自动化交互思路的可选参考，**严禁自行或自动下载、安装任何第三方 CLI 或脚本**。
 
@@ -91,8 +92,10 @@ const BODY = `# Android ADB 设备调试与测试规范 (android-adb)
 1. **先验版本与可用性**：在执行任何设备动作前，先运行 \`adb version\` 或 \`adb help\` 确认命令可用。
 2. **多设备显式指定 Serial**：存在设备或多实例环境时，所有 adb 命令必须显式带上 \`-s <serial>\`，严禁发起无目标的广播式或歧义命令。
 3. **连通性超时验真**：当 \`adb devices\` 显示设备处于 \`device\` 状态后，必须使用带硬超时的命令进行实际交互验真（例如 \`timeout 5 adb -s <serial> shell echo __ready__\`），命令返回且包含标记才证明 shell 通信正常。
-4. **离线处理原则**：遇到 \`offline\` 或 \`unauthorized\` 状态时，应当引导检查物理 USB 连接线、集线器/接口接触、开发者选项以及设备端授权弹窗，**严禁反复刷授权请求或盲目升级/降级 ADB 版本**。
-5. **服务稳定性与密钥保护**：
+4. **重复探针而非单次成功**：USB 列表的 \`device\` 只说明 transport 状态，不保证 shell 可用。首次探针通过后，再连续执行数条有界只读命令（例如 shell 标记、屏幕尺寸、目标前台 Activity），核对每条退出码和输出。原生 ADB、旧版或 libusb 后端中的一次成功都不能宣称连接已修复；持续超时先记录证据，不轮换后端反复盲试。
+5. **无线调试替代路径（需用户授权）**：USB 不稳定时，可由用户在同一已授权手机开启无线调试。先查 \`adb help\` 的 pair / connect / mdns 支持，再按手机显示的端点操作。**配对端口与连接端口不同**：配对后使用无线调试主页的连接端口；不要复用临时配对端口。仅可用 \`adb mdns services\` 只读定位同一已授权手机，并与手机显示信息核对；发现不了就请用户提供端点，不盲猜网关 IP、不自动扫网、不尝试其它设备。配对码只通过受控交互输入，不拼进命令参数、不入日志或 skill；缺少安全输入通道就交用户配对。连接后仍须重复有界 shell / UI 探针，不能把发现或配对成功当作稳定可用。
+6. **离线处理原则**：遇到 \`offline\` 或 \`unauthorized\` 状态时，应当引导检查物理 USB 连接线、集线器/接口接触、开发者选项以及设备端授权弹窗，**严禁反复刷授权请求或盲目升级/降级 ADB 版本**。
+7. **服务稳定性与密钥保护**：
    - **严禁删除 ADB 密钥**：禁止删除或修改宿主上的 \`~/.android/adbkey\` 与 \`~/.android/adbkey.pub\`。
    - **严禁擅自 kill-server**：禁止自行执行 \`adb kill-server\`，避免暴力打断宿主机上其它正在进行的调试、编译或自动化进程。
 
@@ -106,7 +109,9 @@ const BODY = `# Android ADB 设备调试与测试规范 (android-adb)
 2. **定位基准与坐标新鲜性**：
    - 优先依据 \`resource-id\`、\`text\`、\`content-desc\` 等语义属性定位控件。
    - 计算得到的绝对坐标仅在**当前这一帧且界面未滚动/未变化**时有效（坐标具有瞬态新鲜性）。严禁跨屏、跨动作复用历史坐标。
-3. **Flutter / 跨平台自定义绘制降级**：
+3. **截图补足不完整语义树**：
+   - 有效 XML 也可能漏掉控件（例如米家右上角确认按钮），不是只有空树才截图。树中没有预期控件或内容与页面不符时，先用 \`screencap\` 查看当前截图；截图确认控件后才可点击，并立即重新截图或读取页面状态确认结果，不盲点历史坐标。
+4. **Flutter / 跨平台自定义绘制降级**：
    - 当遇到 Flutter、Compose 或自绘引擎导致无语义 Accessibility 节点、无法读取有效 UI 树时，**诚实使用截图（\`screencap\`）fallback 降级**，辅助视觉判断。
    - **严禁虚构控件元素**，不得在没有元素支持的情况下捏造交互能力。
 

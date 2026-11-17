@@ -1,0 +1,21 @@
+/* Button-owned escape hatch: icon is an opaque ReactNode and may render SVG
+ * through arbitrary components/fragments. StyleX cannot attach classes to these
+ * unknown descendants or express this descendant selector. Constrain only SVG
+ * inside the text-icon hook; max sizes do not enlarge smaller SVGs. Non-SVG
+ * nodes, icon-only buttons and loading have no matching rules.
+ * Cascade scope is guarded by Button.cascade.test.ts and a real browser matrix.
+ */
+.Button__textIcon--small svg {
+  max-width: 12px;
+  max-height: 12px;
+}
+
+.Button__textIcon--medium svg {
+  max-width: 13px;
+  max-height: 13px;
+}
+
+.Button__textIcon--large svg {
+  max-width: 15px;
+  max-height: 15px;
+}

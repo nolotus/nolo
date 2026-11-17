@@ -1,3 +1,4 @@
+import { dedupeSkillPromptPatches, type SkillPromptPatch } from "ai/skills/referenceRuntime";
 // packages/ai/agent/turnToolContext.ts
 
 import type { RootState, AppDispatch } from "app/store";
@@ -47,6 +48,7 @@ export type TurnToolContext = {
   recommendedSkillTools?: string[];
   recommendedSkillHints?: string[];
   skillPromptPatches?: string[];
+  skillPromptContributions?: SkillPromptPatch[];
   referenceContentCache?: Map<string, any>;
   mergedContentCache?: Map<string, any>;
 };
@@ -244,6 +246,7 @@ export async function resolveTurnToolContext(
         recommendedSkillTools: refAssets.recommendedSkillTools,
         recommendedSkillHints: refAssets.recommendedSkillHints,
         skillPromptPatches: refAssets.skillPromptPatches,
+        skillPromptContributions: refAssets.skillPromptContributions,
       };
 
       const keySets = await getFullChatContextKeys(
@@ -313,10 +316,11 @@ export async function resolveTurnToolContext(
     ...(refAssets.recommendedSkillHints ?? []),
     ...(contextToolsResult.recommendedSkillHints ?? []),
   ];
-  const skillPromptPatches = [
-    ...(refAssets.skillPromptPatches ?? []),
-    ...(contextToolsResult.skillPromptPatches ?? []),
-  ];
+  const skillPromptContributions = dedupeSkillPromptPatches([
+    ...(refAssets.skillPromptContributions ?? []),
+    ...(contextToolsResult.skillPromptContributions ?? []),
+  ]);
+  const skillPromptPatches = skillPromptContributions.map(patch => patch.content);
 
   return {
     referencedToolNames,
@@ -330,6 +334,7 @@ export async function resolveTurnToolContext(
     recommendedSkillTools,
     recommendedSkillHints,
     skillPromptPatches,
+    skillPromptContributions,
     referenceContentCache: refAssets.contentByKey,
     mergedContentCache: new Map([
       ...refAssets.contentByKey,

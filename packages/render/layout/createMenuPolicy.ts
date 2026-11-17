@@ -45,7 +45,7 @@ export function getVisibleCreateMenuItemIds(args: {
   isDesktop?: boolean;
 }): CreateMenuItemId[] {
   return CREATE_MENU_ITEM_ORDER.filter((id) => {
-    if (id === "new-project") return args.isDesktop === true;
+    if (id === "new-project") return false;
     if (id === "upload-file") {
       return isUploadMenuItemVisible(args.hasUploadHandler);
     }

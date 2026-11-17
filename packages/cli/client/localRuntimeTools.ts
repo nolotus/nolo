@@ -1,3 +1,4 @@
+import { MCP_TOOL_NAMES } from "../../agent-runtime/mcpConnectionSpecs";
 import type {
   AgentRuntimeAgentConfig,
 } from "../agentRuntimeLocal";
@@ -350,7 +351,9 @@ export function resolveCliRequestedToolNames(
   // Interactive runs unchanged. Applied at the tool-NAME layer so the
   // prepareTools cache key (built from this final list) stays coherent across
   // run kinds.
-  return filterToolNamesForRunKind(afterDisabled, isSubtask);
+  return filterToolNamesForRunKind(afterDisabled.filter(name =>
+    !(MCP_TOOL_NAMES as readonly string[]).includes(name) ||
+    (agentConfig.key === "agent-0e95801d90-gpt-6-1-sol" && Array.isArray(agentConfig.toolNames) && agentConfig.toolNames.includes(name))), isSubtask);
 }
 
 export function resolveProviderOpenAiToolBundle(
@@ -401,6 +404,7 @@ export function buildLocalPolicyToolNames(args: {
   env: EnvLike;
   buildProviderOpenAiTools?: typeof buildOpenAiTools;
 }) {
+  if (args.toolNames?.length === 0) return [];
   const schemaBuilder = args.buildProviderOpenAiTools ?? buildOpenAiTools;
   const tools = schemaBuilder({
     agentKey: args.agentKey,

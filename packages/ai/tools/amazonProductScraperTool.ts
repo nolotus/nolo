@@ -1,3 +1,4 @@
+import type { ToolRequestDialogContext } from "./toolRequestDialogId";
 // /ai/tools/amazonProductScraperTool.ts
 
 import { callApifyActor } from "./apifyActorClient";
@@ -50,7 +51,8 @@ export async function amazonProductScraperFunc(
     maxSearchPagesPerStartUrl?: number;
     extraInput?: Record<string, any>;
   },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ) {
   const {
     urls,
@@ -82,5 +84,5 @@ export async function amazonProductScraperFunc(
     input,
     resultType: "datasetItems",
     displayName: "Amazon Product Scraper",
-  });
+  }, context);
 }

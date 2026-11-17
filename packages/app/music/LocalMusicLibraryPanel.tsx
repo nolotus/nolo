@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  DESKTOP_FOLDER_SELECTION_EVENT,
-  readSelectedDesktopFolderProject,
-  type DesktopFolderProject,
-} from "chat/web/desktopFolderProjects";
+import { DESKTOP_FOLDER_SELECTION_EVENT } from "chat/web/desktopFolderProjects";
+
+import { readSelectedMusicLibrary, MUSIC_LIBRARIES_EVENT, type MusicLibrary } from "./localMusicLibraries";
 
 export interface MusicRoot {
   path: string;
@@ -52,11 +50,11 @@ function safeGetStorage(): Pick<Storage, "getItem"> | null {
   return null;
 }
 
-function readCurrentProject(): DesktopFolderProject | null {
+function readCurrentProject(): MusicLibrary | null {
   const storage = safeGetStorage();
   if (!storage) return null;
   try {
-    return readSelectedDesktopFolderProject(storage);
+    return readSelectedMusicLibrary(storage);
   } catch {
     return null;
   }
@@ -114,7 +112,7 @@ export interface LocalMusicLibraryPanelProps {
    * 受控注入当前项目；不传时从 localStorage 读取选中项目。
    * 传 null 表示未选中项目（显示绑定引导）。
    */
-  project?: DesktopFolderProject | null;
+  project?: MusicLibrary | null;
 }
 
 /**
@@ -127,7 +125,7 @@ export const LocalMusicLibraryPanel: React.FC<LocalMusicLibraryPanelProps> = ({
 }) => {
   const fetchFn = getFetch(fetchImpl);
 
-  const [internalProject, setInternalProject] = useState<DesktopFolderProject | null>(
+  const [internalProject, setInternalProject] = useState<MusicLibrary | null>(
     () => readCurrentProject(),
   );
 
@@ -136,8 +134,10 @@ export const LocalMusicLibraryPanel: React.FC<LocalMusicLibraryPanelProps> = ({
     update();
     const win = typeof window !== "undefined" ? window : null;
     win?.addEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
+    win?.addEventListener(MUSIC_LIBRARIES_EVENT, update);
     return () => {
       win?.removeEventListener(DESKTOP_FOLDER_SELECTION_EVENT, update);
+      win?.removeEventListener(MUSIC_LIBRARIES_EVENT, update);
     };
   }, []);
 
@@ -350,7 +350,7 @@ export const LocalMusicLibraryPanel: React.FC<LocalMusicLibraryPanelProps> = ({
             fontSize: "13px",
           }}
         >
-          本地音乐需要绑定项目：先在项目里选择一个文件夹
+          请选择音乐库后管理本地音乐
         </div>
       </div>
     );
@@ -456,7 +456,7 @@ export const LocalMusicLibraryPanel: React.FC<LocalMusicLibraryPanelProps> = ({
               fontSize: "13px",
             }}
           >
-            用项目文件夹作为音乐库
+            使用音乐库目录
           </button>
         )}
       </div>

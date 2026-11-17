@@ -129,6 +129,9 @@ export type ContextualTaskDisplay = {
   title: string;
   /** 次要标识（runId / childDialogId）。 */
   identifier?: string;
+  /** Original machine evidence; absent on older notice formats. */
+  runStatus?: string;
+  childDialogId?: string;
   /** 结果语义。 */
   outcome: ContextualOutcome;
   /** 结果文案（次级）。 */
@@ -324,6 +327,9 @@ function parseBackgroundRuns(text: string): ContextualTaskDisplay[] {
     tasks.push({
       title: title || agent || runId || SUBJECT_RUN.label,
       ...(runId ? { identifier: runId } : {}),
+      ...(status ? { runStatus: status } : {}),
+      ...(attrValue(attrs, "childDialogId") && attrValue(attrs, "childDialogId") !== "missing"
+        ? { childDialogId: decodeXmlAttribute(attrValue(attrs, "childDialogId")) } : {}),
       outcome,
       outcomeLabel: OUTCOME_LABEL[outcome],
       ...(duration ? { duration } : {}),

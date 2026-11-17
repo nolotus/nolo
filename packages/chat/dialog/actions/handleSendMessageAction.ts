@@ -277,6 +277,7 @@ export const handleSendMessageAction = async (
         });
 
         let effectiveRawUserInput = args.userInput;
+        let turnUserMessageId: string | undefined;
 
         // 步骤 1: 准备并持久化用户的消息（重试模式下跳过持久化）
         if (args.isRetry) {
@@ -324,12 +325,13 @@ export const handleSendMessageAction = async (
             if (selectPendingUserMessages(pendingHistory ?? []).length || pendingHistory?.some(message => message.metadata?.userBatchPhase === "admitted")) {
                 await dispatch(admitPendingUserMessages({ dialogKey: dialogConfig.dbKey, resumeUnrequested: true })).unwrap();
             }
-            await dispatch(
+            const persistedUserMessage = await dispatch(
                 prepareAndPersistUserMessage({
                     userInput: (args.userInput ?? "") as string,
                     dialogConfig,
                 })
             ).unwrap();
+            turnUserMessageId = persistedUserMessage?.id;
             logQuickChatPerfStage(args.quickChatPerfStartedAt, "handle-send-message-user-persisted", {
                 dialogKey: dialogConfig.dbKey,
             });
@@ -483,6 +485,7 @@ export const handleSendMessageAction = async (
                         agentKey: agentKeyToUse,
                         ...(agentConfigToUse ? { agentConfig: agentConfigToUse } : {}),
                         userInput: effectiveUserInput,
+                        userMessageId: turnUserMessageId,
                         dialogKey: dialogConfig.dbKey,
                         parentMessageId: undefined,
                         runtimeOptions: effectiveRuntimeOptions,

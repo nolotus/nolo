@@ -733,7 +733,9 @@ async function serializeCompactAgentPage(parsed: any, samples: SpeedSamplesByMod
     }
     const agent = candidates[0];
     const speedContext = buildCandidateSpeedContext(typeof agent.model === "string" ? [agent.model] : [], samples, { snapshotAgeMs });
-    const payload = { agent, credentialGroups: groups.filter((group: any) => group.credentialGroup === agent.credentialGroup), ...(speedContext ? { speedContext } : {}) };
+    // Speed observations can age or refresh between requests. Only candidate and
+    // credential evidence belong to the reassembled, digest-verified payload.
+    const payload = { agent, credentialGroups: groups.filter((group: any) => group.credentialGroup === agent.credentialGroup) };
     let keyCollision = false;
     const cleanText = (value: string) => scrubSecrets(sanitizeToolOutputText(value)).cleaned;
     const sanitize = (value: unknown): unknown => {
@@ -766,7 +768,7 @@ async function serializeCompactAgentPage(parsed: any, samples: SpeedSamplesByMod
     let end = Math.min(serialized.length, fragmentOffset + 3000);
     if (end < serialized.length && /[\uD800-\uDBFF]/.test(serialized[end - 1]) && /[\uDC00-\uDFFF]/.test(serialized[end])) end--;
     const fragment = serialized.slice(fragmentOffset, end);
-    const result = JSON.stringify({ success: true, agentKey, offset, digest, fragment, fragmentOffset, nextFragmentOffset: end, hasMoreFragments: end < serialized.length, nextOffset: offset + 1 });
+    const result = JSON.stringify({ success: true, agentKey, offset, digest, fragment, fragmentOffset, nextFragmentOffset: end, hasMoreFragments: end < serialized.length, nextOffset: offset + 1, ...(speedContext ? { speedContext: cleanText(speedContext) } : {}) });
     return fits(result) ? result : JSON.stringify({ success: false, error: "LIST_AGENTS_FRAGMENT_METADATA_TOO_LARGE", offset });
   }
 

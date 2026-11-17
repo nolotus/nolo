@@ -1,9 +1,6 @@
 // 文件路径: packages/app/pages/Home.tsx
 
-import { useCallback, useEffect, useState } from "react";
-import { useLocation, useNavigate } from "app/routing";
-import { selectDesktopProject } from "chat/web/desktopFolderProjects";
-import { DESKTOP_FOLDER_SELECTION_EVENT, readSelectedDesktopFolderProject } from "chat/web/desktopFolderProjects";
+import { useCallback, useState } from "react";
 
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
@@ -13,7 +10,6 @@ import { useMyContentItems } from "app/hooks/useMyContentItems";
 import HomeLanding from "./HomeLanding";
 import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
 import QuickChat from "./QuickChat";
-import ProjectHomeWorkspace from "./ProjectHomeWorkspace";
 import { getIsDesktopApp } from "app/utils/env";
 import { getIsDesktopPreview } from "app/utils/env";
 import { getIsDesktopUiPreview } from "app/utils/env";
@@ -30,32 +26,7 @@ import "./Home.css";
 
 const Home = () => {
   const hasMounted = useHasMounted();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const projectId = new URLSearchParams(location.search).get("project");
-  const [projectAgentId, setProjectAgentId] = useState("");
-  const [project, setProject] = useState<ReturnType<typeof readSelectedDesktopFolderProject>>(null);
-  useEffect(() => {
-    const sync = () => {
-      try {
-        if (!getIsDesktopApp() || !projectId) {
-          setProject(null);
-          return;
-        }
-        // Respect an explicit exit: never choose a project or seed demo records here.
-        const selected = readSelectedDesktopFolderProject(window.localStorage);
-        setProject(selected?.id === projectId ? selected : null);
-        setProjectAgentId("");
-      } catch {
-        setProject(null);
-      }
-    };
-    sync();
-    window.addEventListener(DESKTOP_FOLDER_SELECTION_EVENT, sync);
-    return () => window.removeEventListener(DESKTOP_FOLDER_SELECTION_EVENT, sync);
-  }, [projectId]);
   const isLoggedIn = useIsLoggedIn();
-  const linkedAgents = (project?.linkedContentKeys ?? []).filter((key) => key.startsWith("agent-"));
   const currentUser = useCurrentUser();
   const token = useToken();
   // Local User remains the authenticated home owner for local data/widgets.
@@ -114,32 +85,17 @@ const Home = () => {
           {showDesktopOnboarding ? (
             <DesktopAgentOnboarding onDismiss={handleDismissOnboarding} />
           ) : showAuthedHome ? (
-            project ? (
-              <ProjectHomeWorkspace
-                project={project}
-                items={myContentItems}
-                userId={currentUser?.userId || ""}
-                projectAgentId={projectAgentId}
-                onSelectProjectAgentId={setProjectAgentId}
-                onExitProject={() => {
-                  selectDesktopProject(window.localStorage, null);
-                  navigate("/");
-                  setProjectAgentId("");
-                }}
-              />
-            ) : (
-              <section {...stylex.props(homeStyles.homeBottomChatShell)}>
-                <div
-                  {...withLiteralClass(
-                    "home-primary-chat",
-                    homeStyles.homePrimaryChat,
-                    homeStyles.homePrimaryChatInShell
-                  )}
-                >
-                  <QuickChat surface="home-primary" isEmptyState={isEmptyState} />
-                </div>
-              </section>
-            )
+            <section {...stylex.props(homeStyles.homeBottomChatShell)}>
+              <div
+                {...withLiteralClass(
+                  "home-primary-chat",
+                  homeStyles.homePrimaryChat,
+                  homeStyles.homePrimaryChatInShell
+                )}
+              >
+                <QuickChat surface="home-primary" isEmptyState={isEmptyState} />
+              </div>
+            </section>
           ) : (
             <>
               {!isDesktopUi && <HomeLanding />}

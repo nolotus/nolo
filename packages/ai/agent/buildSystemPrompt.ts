@@ -243,9 +243,7 @@ export const buildSystemPromptContext = (options: {
 
   const clarifyingSection = !mainPrompt || hasAskTool ? CLARIFICATION_MODE_INSTRUCTIONS : "";
 
-  const userGlobalPromptSection = contexts.userGlobalPrompt?.trim()
-    ? `-- - 用户全局偏好-- -\n${contexts.userGlobalPrompt.trim()} `
-    : "";
+  const userGlobalPromptSection = "";
 
   const effectiveViewport = viewport ?? contexts.viewport;
   const isMobile =

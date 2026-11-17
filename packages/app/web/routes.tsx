@@ -35,6 +35,7 @@ const AgentExplore = lazy(() => import("ai/agent/web/AgentExplore"));
 const GuidedAgentCreatePage = lazy(() => import("ai/agent/web/GuidedAgentCreatePage"));
 const LocalQuickCreateAgent = lazy(() => import("app/pages/LocalQuickCreateAgent"));
 const CreatorPage = lazy(() => import("ai/agent/web/CreatorPage"));
+const UiPluginPage = lazy(() => import("app/pages/UiPluginPage"));
 const PluginConfigPage = lazy(() => import("ai/agent/web/PluginConfigPage"));
 const MyContentPage = lazy(() => import("app/pages/MyContentPage"));
 const ShareCommunityPage = lazy(() => import("app/pages/ShareCommunityPage"));
@@ -225,6 +226,8 @@ export const routes = () => [
         path: "explore",
         element: withSuspense(<AgentExplore />, "智能体广场"),
       },
+      { path: "music", element: withSuspense(<UiPluginPage id="music" />, "音乐") },
+      { path: "calendar", element: withSuspense(<UiPluginPage id="calendar" />, "日历") },
       {
         // 插件广场只做介绍，配置在独立页面（PluginConfigPage）。
         path: "plugins/:pluginId",

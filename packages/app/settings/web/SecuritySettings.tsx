@@ -1,5 +1,8 @@
+import GoogleBinding from "identity/GoogleBinding";
+import GoogleButton from "identity/GoogleButton";
 import React, { useEffect, useMemo, useState } from "react";
-import { useCurrentUser, useToken } from "identity";
+import { isCloudEdition, useCurrentUser, useToken } from "identity";
+import { BrowserAccountNotice } from "../../../identity/GoogleAccountSecurity.public";
 import { useTranslation } from "react-i18next";
 import { LuClock3 } from "react-icons/lu";
 
@@ -60,6 +63,9 @@ const SecuritySettings: React.FC = () => {
   const accountSession = useAccountSessionService();
   const currentServer = useAppSelector(selectRemoteServer);
   const currentToken = useToken();
+  const isGoogleSession = useMemo(() => {
+    try { return parseToken(currentToken || "")?.authKind === "google-session-v1"; } catch { return false; }
+  }, [currentToken]);
 
   const userId = user?.userId;
   const [securityInfo, setSecurityInfo] = useState<UserSecurityState>({
@@ -192,6 +198,8 @@ const SecuritySettings: React.FC = () => {
     <>
       <div className="user-profile-page">
         <h1 className="page-title">{t("accountSecurity.title", "账号安全")}</h1>
+        {isCloudEdition && <BrowserAccountNotice />}
+        <GoogleBinding />
         <p className="security-panel__desc">
           {t(
             "accountSecurity.panelDescription",
@@ -284,20 +292,20 @@ const SecuritySettings: React.FC = () => {
                 {t("accountSecurity.revokeTitle", "发现异常？踢掉所有其他设备")}
               </span>
               <span className="profile-item-subtext">
-                {t(
+                {isGoogleSession ? t("googleAuth.revokeDescription") : t(
                   "accountSecurity.revokeDescription",
                   "输入当前密码后，所有旧 token 会立刻失效。当前设备会自动换成新的 token，其它设备会被退出。"
                 )}
               </span>
             </div>
-            <Button
+            {isGoogleSession ? <GoogleButton mode="revoke" /> : (<Button
               variant="danger"
               size="small"
               disabled={!userId || securityLoading}
               onClick={() => setIsRevokeModalOpen(true)}
             >
               {t("accountSecurity.revokeButton", "踢掉所有其他设备")}
-            </Button>
+            </Button>)}
           </div>
         </section>
       </div>

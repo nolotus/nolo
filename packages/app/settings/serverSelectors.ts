@@ -1,3 +1,5 @@
+import { selectIdentityToken } from "identity/selectors";
+import { googleSessionServer, scopeGoogleSessionServers } from "core/googleSessionScope";
 // packages/app/settings/serverSelectors.ts
 //
 // 单一职责:服务端地址相关选择器(current server / sync servers / remote cluster),
@@ -27,14 +29,14 @@ export const selectSettings = (state: RootState): SettingState =>
   state.settings;
 
 export const selectCurrentServer = createSelector(
-  [selectSettings],
-  (settings) => resolveDesktopSafeServer(settings.currentServer),
+  [selectSettings, selectIdentityToken],
+  (settings, token) => googleSessionServer(token, settings.currentServer) ?? resolveDesktopSafeServer(settings.currentServer),
 );
 
 export const selectSyncServers = createSelector(
-  [selectSettings],
-  (settings): string[] =>
-    (settings.syncServers || []).filter(
+  [selectSettings, selectIdentityToken],
+  (settings, token): string[] =>
+    googleSessionServer(token, settings.currentServer) !== undefined ? [] : (settings.syncServers || []).filter(
       (server: string) => !getIsDesktopApp() || !isLocalServerUrl(server),
     ),
 );
@@ -43,6 +45,6 @@ export const selectRemoteServer = selectCurrentServer;
 export const selectRemoteSyncServers = selectSyncServers;
 
 export const selectRemoteServers = createSelector(
-  [selectRemoteServer, selectRemoteSyncServers],
-  (currentServer, syncServers) => getAllServers(currentServer, syncServers),
+  [selectRemoteServer, selectRemoteSyncServers, selectIdentityToken],
+  (currentServer, syncServers, token) => scopeGoogleSessionServers(token, currentServer, getAllServers(currentServer, syncServers)),
 );

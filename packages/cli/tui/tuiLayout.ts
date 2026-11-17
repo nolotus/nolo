@@ -1,7 +1,8 @@
 /**
  * Pure viewport geometry and layout reservation contract for the TUI workspace.
  *
- * Resolves the terminal screen into three vertical stacked zones (from top to bottom):
+ * Resolves the terminal screen into stacked zones (from top to bottom):
+ *   0. Fixed task projection: topReservedRows (zero without tasks).
  *   1. History Viewport: scrollable transcript pane (height = terminalRows - composerRows - foregroundReservedRows)
  *   2. Foreground Modal: reserved row region for active framed dialogs (height = foregroundReservedRows)
  *   3. Composer: fixed docked input / status area (height = composerRows)
@@ -19,6 +20,8 @@ export type TerminalLayoutInput = {
   composerRows: number;
   /** Number of screen rows reserved by an active modal dialog (>= 0). */
   foregroundReservedRows?: number;
+  /** Fixed screen-top task projection. */
+  topReservedRows?: number;
 };
 
 export type TerminalZoneBounds = {
@@ -35,6 +38,7 @@ export type TerminalLayout = {
   terminalColumns: number;
   composerRows: number;
   foregroundReservedRows: number;
+  topReservedRows: number;
   /** Height in rows of the scrollable history viewport (Math.max(0, terminalRows - composerRows - foregroundReservedRows)). */
   historyViewportHeight: number;
   /** 1-based start row of the history viewport (1 if height > 0, else 0). */
@@ -93,11 +97,12 @@ export function resolveHistoryViewportHeight(
   terminalRows: number,
   composerRows: number,
   foregroundReservedRows = 0,
+  topReservedRows = 0,
 ): number {
   const rows = Math.max(1, terminalRows > 0 ? terminalRows : DEFAULT_TERMINAL_ROWS);
   const composer = Math.max(0, composerRows);
   const reserved = Math.max(0, foregroundReservedRows);
-  return Math.max(0, rows - composer - reserved);
+  return Math.max(0, rows - composer - reserved - Math.max(0, topReservedRows));
 }
 
 /**
@@ -139,13 +144,15 @@ export function computeTerminalLayout(input: TerminalLayoutInput): TerminalLayou
     Math.min(maxReservable, input.foregroundReservedRows ?? 0),
   );
 
+  const topReservedRows = Math.max(0, Math.min(
+    terminalRows - composerRows - foregroundReservedRows, input.topReservedRows ?? 0,
+  ));
   const historyViewportHeight = Math.max(
-    0,
-    terminalRows - composerRows - foregroundReservedRows,
+    0, terminalRows - composerRows - foregroundReservedRows - topReservedRows,
   );
 
-  const historyViewportTop = historyViewportHeight > 0 ? 1 : 0;
-  const historyViewportBottom = historyViewportHeight;
+  const historyViewportTop = historyViewportHeight > 0 ? topReservedRows + 1 : 0;
+  const historyViewportBottom = historyViewportHeight > 0 ? topReservedRows + historyViewportHeight : 0;
 
   let modalBounds: TerminalZoneBounds | null = null;
   if (foregroundReservedRows > 0) {
@@ -174,10 +181,31 @@ export function computeTerminalLayout(input: TerminalLayoutInput): TerminalLayou
     terminalColumns,
     composerRows,
     foregroundReservedRows,
+    topReservedRows,
     historyViewportHeight,
     historyViewportTop,
     historyViewportBottom,
     modalBounds,
     composerBounds,
   };
+}
+
+/** Geometry only, keyed by terminal output; task state remains owned by runDock. */
+const topRowsByOutput = new WeakMap<object, number>();
+export const getTopReservedRows = (output: object): number => topRowsByOutput.get(output) ?? 0;
+export function setTopReservedRows(output: object, rows: number): void {
+  topRowsByOutput.set(output, Math.max(0, rows));
+}
+
+/** Entry budget, excluding overflow metadata. Composer/modal always take priority. */
+export function resolveTopTaskEntryBudget(rows = 24, composerRows = 4, modalRows = 0, decorationRows = 0): number {
+  const preferred = Math.max(2, preferredTopTaskEntries(rows));
+  // Preserve at least half the free area for history (and one overflow row).
+  const free = Math.max(0, rows - composerRows - modalRows - decorationRows);
+  return Math.max(0, Math.min(preferred, Math.floor(free / 2) - 1));
+}
+
+export function preferredTopTaskEntries(rows = 24): number {
+  return rows >= 40 ? Math.min(12, 7 + Math.floor((rows - 32) / 4))
+    : rows < 10 ? 1 : rows < 16 ? 2 : 7;
 }

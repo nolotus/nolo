@@ -10,7 +10,7 @@ import { ACCOUNT_CHAT_DISPLAY_PREFERENCE_KEYS } from "./accountChatDisplayOwner"
 import { createAsyncThunk } from "@reduxjs/toolkit";
 
 import { selectIdentityUserId } from "identity/selectors";
-import { getSessionGenerationForState } from "identity/sessionSource";
+import { getSessionGenerationForState, getSessionSnapshotForState } from "identity/sessionSource";
 import { createUserKey, createUserPreferenceKey } from "database/keys";
 import {
   USER_PREFERENCE_NAMES,
@@ -25,6 +25,7 @@ import {
 
 import {
   bumpLocalIntentEpoch,
+  publishUiPlugins,
   recordSettingsWriteFailure,
   updateSettingsState,
 } from "./settingActions";
@@ -66,6 +67,47 @@ const readServerAuthorityEchoSeq = (getState: () => unknown): number => {
 };
 
 /**
+ * 插件域意图快照：来源（归属账号 / 代次）+ 值的**对象引用**。
+ *
+ * `publishUiPlugins` 是插件域唯一的写入口，每次都原子写入这三项、并把值换成
+ * `normalizeUiPlugins` 的新对象。因此「三项全等」等价于「本次远端读期间插件域
+ * 没有被任何人写过」——用它就能把插件域与无关设置的意图隔离开：
+ * `localIntentEpoch` 仍统管用户偏好字段，但不再顺带决定插件快照能否发布。否则
+ * 新 generation 的插件 hydrate 只要与一次无关设置写入（sidebarWidth 等）重叠就会
+ * 被整体跳过，而没有任何其它路径为当前 generation 补发插件来源，selector 随后
+ * fail-closed 成 absent（PLUGIN-HYDRATE-UNRELATED-INTENT-001）。
+ *
+ * 已知取舍（同一 generation 内并发 hydrate 时「先完成者发布」）：第二次读会发现
+ * 插件域已被第一次读发布而跳过。生产入口 App.tsx 的 hydrateSessionSettings 按
+ * session key 去重（同一 key 复用同一 promise），不存在同代次并发读；若将来新增
+ * 同代次并发读入口，需在这里补更精确的来源标记，而不是放宽本判据。
+ */
+interface UiPluginIntentSnapshot {
+  value: unknown;
+  ownerAccountId: string | null;
+  generation: number | undefined;
+}
+
+const readUiPluginIntentSnapshot = (
+  getState: () => unknown,
+): UiPluginIntentSnapshot => {
+  const state = (getState() as { settings?: Partial<SettingState> })?.settings;
+  return {
+    value: state?.uiPlugins,
+    ownerAccountId: state?.uiPluginsOwnerAccountId ?? null,
+    generation: state?.uiPluginsGeneration,
+  };
+};
+
+const isSameUiPluginIntent = (
+  a: UiPluginIntentSnapshot,
+  b: UiPluginIntentSnapshot,
+): boolean =>
+  a.value === b.value &&
+  a.ownerAccountId === b.ownerAccountId &&
+  a.generation === b.generation;
+
+/**
  * Read the persisted settings record for the current user, normalize it, and
  * apply it to local state. Returns the hydrated record (or null when no user).
  */
@@ -77,7 +119,7 @@ export const getSettings = createAsyncThunk<
   { state: any }
 >("settings/getSettings", async (_, { dispatch, getState }) => {
   const userId = selectIdentityUserId(getState() as any);
-  if (!userId) return null;
+  if (!userId || (getSessionSnapshotForState(getState()) && getSessionSnapshotForState(getState())?.transition !== "idle")) return null;
   const session = getSessionGenerationForState(getState());
   const hydration = {};
   latestChatHydrations.set(getState, hydration);
@@ -88,6 +130,10 @@ export const getSettings = createAsyncThunk<
   // allowance echo) advance it. A hydrate may only overwrite
   // `autoApproveCredits` when no echo happened during the read.
   const startAuthorityEchoSeq = readServerAuthorityEchoSeq(getState);
+  // Plugin-domain intent captured with the same discipline as the two
+  // generations above, but scoped to plugins only: see
+  // `readUiPluginIntentSnapshot`.
+  const startUiPluginIntent = readUiPluginIntentSnapshot(getState);
   const settingsKey = createUserKey.settings(userId);
   const authorityHomeKey = createUserPreferenceKey.authorityHome(userId);
   const [settingsRecord, authorityHomeRecord] = await Promise.all([
@@ -100,6 +146,7 @@ export const getSettings = createAsyncThunk<
   ]);
   // A pending cloud read must not hydrate a different signed-in account.
   if (selectIdentityUserId(getState() as any) !== userId ||
+      (getSessionSnapshotForState(getState()) && getSessionSnapshotForState(getState())?.transition !== "idle") ||
       getSessionGenerationForState(getState()) !== session ||
       latestChatHydrations.get(getState) !== hydration) return null;
   const authorityHomeServer =
@@ -120,14 +167,17 @@ export const getSettings = createAsyncThunk<
     const { currentServer: _ignored, ...settingsToApply } = normalizedPayload;
     // Hydrate the account owner without allowing a stale cloud read to cross identities.
     if (selectIdentityUserId(getState() as any) !== userId ||
+      (getSessionSnapshotForState(getState()) && getSessionSnapshotForState(getState())?.transition !== "idle") ||
       getSessionGenerationForState(getState()) !== session ||
       latestChatHydrations.get(getState) !== hydration) return null;
-    // Two independent generations guard two different staleness directions:
+    // Three independent staleness guards, each scoped to what it actually protects:
     //  - 用户意图世代（localIntentEpoch）：远端读期间用户改过设置 → 丢弃本次
     //    hydrate 的**用户偏好**字段（不写 Owner、不写用户偏好）；
     //  - 权威回显世代（serverAuthorityEchoSeq）：远端读期间服务端回显过权威值
-    //    → 丢弃本次 hydrate 的 **autoApproveCredits**（不覆盖更新的回显）。
-    // 两者互不推进、互不代替。
+    //    → 丢弃本次 hydrate 的 **autoApproveCredits**（不覆盖更新的回显）；
+    //  - 插件域意图快照（uiPlugins 值 + 来源账号/代次）：只看插件域，无关设置的
+    //    写入不得挡掉插件快照（见下方 pluginIntentChanged）。
+    // 三者互不推进、互不代替。
     const intentChanged =
       readLocalIntentEpoch(getState) !== startLocalIntentEpoch;
     const echoChanged =
@@ -139,7 +189,25 @@ export const getSettings = createAsyncThunk<
       ...preferenceFields
     } = settingsToApply;
     const applied: Partial<SettingState> = {};
-    if (!intentChanged) Object.assign(applied, preferenceFields);
+    // 插件快照按**插件域**自己的意图判定，而不是全局用户意图世代：
+    // 无关设置（sidebarWidth / maxExecutionTime 等）的写入也会推进
+    // localIntentEpoch，却与插件无关。用全局世代判它会让新 generation 的插件
+    // hydrate 被一次无关写入整体挡掉，且没有其它路径为当前 generation 补发插件
+    // 来源，selector 随后 fail-closed 成 absent（插件入口消失、开关被拒绝）。
+    // 反之，本次读期间真的发生过本地插件意图（值/来源三项任一变化）时，更旧的
+    // hydrate 不得覆盖它。
+    const pluginIntentChanged = !isSameUiPluginIntent(
+      startUiPluginIntent,
+      readUiPluginIntentSnapshot(getState),
+    );
+    if (!pluginIntentChanged) {
+      dispatch(publishUiPlugins({ value: settingsToApply.uiPlugins!, accountId: userId, generation: session }));
+    }
+    // 用户偏好字段仍由全局用户意图世代统管：期间有任意本地写入 → 更旧的云端
+    // 偏好值一律丢弃（不写 Owner、不写偏好）。
+    if (!intentChanged) {
+      Object.assign(applied, preferenceFields);
+    }
     // autoApproveCredits：仅当期间没有发生权威回显才应用（回显更新 → 跳过）。
     if (!echoChanged && hasOwn(authoritative, "autoApproveCredits")) {
       applied.autoApproveCredits = authoritative.autoApproveCredits as number;
@@ -194,6 +262,7 @@ const persistSettingsChanges = createAsyncThunk<
     normalizeDefaultAgentIdSetting(currentSettings.defaultAgentId) ??
     SYSTEM_DEFAULT_AGENT_ID;
   const userId = selectIdentityUserId(getState() as any);
+  if (hasOwn(normalizedChanges, "uiPlugins") && getSessionSnapshotForState(getState())?.transition !== "idle") throw new Error("Session is transitioning.");
   if (!userId) {
     const hasAppearanceChanges = Object.keys(normalizedChanges).length > 0;
     if (hasAppearanceChanges) {
@@ -226,6 +295,9 @@ const persistSettingsChanges = createAsyncThunk<
   const intentEpoch = readLocalIntentEpoch(getState);
   owner.setAccount(userId);
   owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
+  if (hasOwn(persistencePlan.normalizedChanges, "uiPlugins")) {
+    dispatch(publishUiPlugins({ value: persistencePlan.normalizedChanges.uiPlugins!, accountId: userId, generation: session }));
+  }
   dispatch(updateSettingsState(omitAccountChatDisplayPreferences(persistencePlan.normalizedChanges)));
   // Keys of the user intent (for the failure state) and of the keys that are
   // actually pushed to the cloud settings record (for reconciliation).
@@ -234,6 +306,7 @@ const persistSettingsChanges = createAsyncThunk<
     persistencePlan.settingsPatch?.changes ?? {},
   ).filter((key) => key !== "schemaVersion");
   const isCurrentIntent = () =>
+    (!getSessionSnapshotForState(getState()) || getSessionSnapshotForState(getState())?.transition === "idle") &&
     selectIdentityUserId(getState()) === userId &&
     getSessionGenerationForState(getState()) === session &&
     readLocalIntentEpoch(getState) === intentEpoch;
@@ -521,3 +594,13 @@ export const setDefaultAgentId = createAsyncThunk(
     ).unwrap(),
 );
 
+
+export const setUiPluginState = createAsyncThunk<void, { id: "music" | "calendar"; value: "enabled" | "disabled"; session: ReturnType<typeof getSessionSnapshotForState> }, { state: any }>(
+  "settings/setUiPluginState", async ({ id, value, session }, { dispatch, getState }) => {
+    const current = getSessionSnapshotForState(getState());
+    if (!session || session.transition !== "idle" || current?.transition !== "idle" || current.activeAccountId !== session.activeAccountId || current.sessionGeneration !== session.sessionGeneration) throw new Error("Session changed; reopen plugin configuration.");
+    const state = getState().settings;
+    if (state.uiPluginsOwnerAccountId !== current.activeAccountId || state.uiPluginsGeneration !== current.sessionGeneration) throw new Error("Plugin settings are not hydrated for this session.");
+    await dispatch(setSettings({ uiPlugins: { ...state.uiPlugins, [id]: value } })).unwrap();
+  },
+);

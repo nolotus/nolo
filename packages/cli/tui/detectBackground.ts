@@ -74,6 +74,37 @@ export function parseOsc11Background(reply: string): { brightness: TuiBrightness
   };
 }
 
+/** Separate terminal replies from user bytes; paste contents are always literal. */
+function splitProbeInput(buffer: string): {
+  pending: string;
+  detected: DetectedTerminalBackground | null;
+} {
+  let pending = "";
+  let detected: DetectedTerminalBackground | null = null;
+  for (let i = 0; i < buffer.length;) {
+    if (buffer.startsWith("\x1b[200~", i)) {
+      const end = buffer.indexOf("\x1b[201~", i + 6);
+      const next = end === -1 ? buffer.length : end + 6;
+      pending += buffer.slice(i, next);
+      i = next;
+    } else if (buffer.startsWith("\x1b]11;", i)) {
+      // Only reply-shaped bytes belong to an incomplete OSC 11. An ordinary
+      // key that ends its RGB grammar is still user input, not a terminator.
+      const reply = buffer.slice(i).match(/^\x1b\]11;(?:rgb:)?[0-9a-f/]*(?:\x07|\x1b\\)?/i)![0];
+      const complete = /(?:\x07|\x1b\\)$/.test(reply);
+      if (complete) detected ??= parseOsc11Background(reply);
+      i += reply.length;
+    } else if (buffer.startsWith("\x1b]", i)) {
+      const reply = buffer.slice(i).match(/^\x1b\][\s\S]*?(?:\x07|\x1b\\)/)?.[0];
+      // An unfinished control prefix must not become a draft keystroke.
+      i += reply?.length ?? (buffer.length - i);
+    } else {
+      pending += buffer[i++];
+    }
+  }
+  return { pending, detected };
+}
+
 type Stdin = NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void };
 
 /**
@@ -95,6 +126,8 @@ export type DetectTerminalBackgroundArgs = {
   stdin?: Stdin;
   stdout?: NodeJS.WritableStream & { isTTY?: boolean };
   timeoutMs?: number;
+  /** Startup owns the next reader: buffer non-OSC input until it mounts. */
+  preserveInput?: boolean;
   /** Override the terminal-device check. Tests use this to drive a fake pair. */
   isTerminal?: (stream: unknown) => boolean;
   /**
@@ -144,13 +177,18 @@ async function probeTerminalBackground(
       settled = true;
       if (timer) clearTimeout(timer);
       stdin.off("data", onData);
+      if (args.preserveInput && stdin instanceof ReadStream) {
+        // Leave ordinary keystrokes in the stream for the startup reader. Do
+        // not replay a terminal reply as text, including unsupported OSCs.
+        stdin.pause();
+        const { pending } = splitProbeInput(buffer);
+        if (pending) stdin.unshift(Buffer.from(pending, "latin1"));
+      }
       // Restore raw mode to exactly what the caller had. The TUI sets raw mode
       // itself later; leaving the terminal flipped would swallow first keys.
       //
-      // Deliberately no pause() here. Pausing looks like the mirror of the
-      // resume() below, but the probe does not own the stream's flowing state:
-      // the TUI attaches its own reader immediately after, and pausing stopped
-      // input from ever reaching it — every raw-TTY test hung until timeout.
+      // Other callers do not own the next reader, so leave their flowing
+      // state alone; only startup explicitly resumes the buffered handoff.
       try {
         if (!wasRaw) stdin.setRawMode?.(false);
       } catch {
@@ -161,8 +199,8 @@ async function probeTerminalBackground(
 
     const onData = (chunk: Buffer | string) => {
       buffer += chunk.toString("latin1");
-      const parsed = parseOsc11Background(buffer);
-      if (parsed) finish(parsed);
+      const { detected } = splitProbeInput(buffer);
+      if (detected) finish(detected);
       // Guard against a terminal streaming unrelated input at us forever.
       else if (buffer.length > 256) finish(null);
     };
@@ -171,13 +209,12 @@ async function probeTerminalBackground(
       stdin.setRawMode(true);
       stdin.resume();
       stdin.on("data", onData);
+      timer = setTimeout(() => finish(null), timeoutMs);
       stdout.write(OSC11_QUERY);
     } catch {
       finish(null);
       return;
     }
-
-    timer = setTimeout(() => finish(null), timeoutMs);
   });
 }
 

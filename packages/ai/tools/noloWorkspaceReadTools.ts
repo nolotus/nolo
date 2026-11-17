@@ -9,6 +9,7 @@ import {
   toDiscoverySafeAgentSummary,
 } from "../agent/agentDiscovery";
 import { injectSpeedContextIntoListAgentsResult } from "../agent/candidateSpeedContext";
+import { isServerDispatchSpeedSource } from "../agent/dispatchSpeedProvenance";
 import {
   mergeAvailabilityDeadline,
   resolveCredentialKeyWithFallback,
@@ -630,7 +631,7 @@ export type { SafeAgentSummaryForCard };
 export const listAgentsFunctionSchema = {
   name: "listAgents",
   description:
-    "List Nolo agents available for delegation as safe summaries. Returns planningRecommendation: conditional advice only when planning is needed and the candidate is suitable; simple questions need no extra planning call. action self/delegate, reason, currentTier, optional agentKey/recommendedTier, poolComplete, requiresPaidApproval. Caller identity/model/runKind are host-owned, not tool arguments. Unknown tiers are not ranked; incomplete pools cannot establish a highest candidate. Bounded subtasks do not delegate planning. Recommendation is not authorization and never starts a run; paid channels require separate approval. By default (scope='all') returns the deduplicated union of the user's own/favorite agents and public/shared agents. scope='public' returns only public/shared agents. Public agents may consume platform credits - check each agent's billingSource before dispatching. The payload returns `credentialGroups` summarizing independent credential capacities (credentialGroup, credentialKind, agentCount, and availableAt recovery timestamps). Orchestration discipline: Never fan out parallel runs on one credential; fan out only across distinct credentialGroups. A channel verdict is valid for the current dispatch attempt only; always re-read availability before dispatching, and never reuse a failure verdict from an earlier attempt. On config_unresolved-class errors, retry once before degrading. Reserve the strongest private channels for review; execution should use cheap channels. The `agents` array carries a compact agent-selection projection per agent: runnable `agentKey` (agent-<userId>-<id> owned, agent-pub-<id> public), name, model, provider, apiSource, billingSource ('user_subscription' | 'owner_subscription' | 'user_api' | 'platform_credits' | 'local'), tools, isFavorite, isOAuth, isOwned, isPublic, credentialGroup, credentialKind. Copy `agentKey` verbatim into startAgentRun. All agents are listed, including rate-limited (429) ones: cooldown agents carry `availabilityStatus` / `availabilityReason` / `nextAvailableAt` as reference info, not a dispatch gate (quota is informational; requests are still sent and upstream results are reported as-is). `unavailableCount` reports how many agents are currently rate-limited. `showUnavailable` is deprecated and has no effect (kept for compatibility). Set `verbose: true` for full safe summary details.",
+    "List Nolo agents available for delegation as safe summaries. Returns planningRecommendation: conditional advice only when planning is needed and the candidate is suitable; simple questions need no extra planning call. action self/delegate, reason, currentTier, optional agentKey/recommendedTier, poolComplete, requiresPaidApproval. Caller identity/model/runKind are host-owned, not tool arguments. Unknown tiers are not ranked; incomplete pools cannot establish a highest candidate. Bounded subtasks do not delegate planning. Recommendation is not authorization and never starts a run; paid channels require separate approval. By default (scope='all') returns the deduplicated union of the user's own/favorite agents and public/shared agents. scope='public' returns only public/shared agents. Public agents may consume platform credits - check each agent's billingSource before dispatching. The payload returns `credentialGroups` summarizing independent credential capacities (credentialGroup, credentialKind, agentCount, and availableAt recovery timestamps). Orchestration discipline: Fan out independent runs concurrently; sharing a credential alone is not a dependency. Same-credential concurrency is normally allowed subject to server admission budgets and upstream 429 limits; reduce concurrency or switch channels when needed. Spread load across credentialGroups when useful. Unknown credentials are not assumed independent: the dispatch guard limits only same-batch concurrency among those candidates (one at a time unless allowUnknownCredential explicitly confirms the risk); unrelated channels and work remain concurrent. A channel verdict is valid for the current dispatch attempt only; always re-read availability before dispatching, and never reuse a failure verdict from an earlier attempt. On config_unresolved-class errors, retry once before degrading. Choose a channel by task capability and applicable cost authorization; higher tier alone does not require reserving it for review. The `agents` array carries a compact agent-selection projection per agent: runnable `agentKey` (agent-<userId>-<id> owned, agent-pub-<id> public), name, model, provider, apiSource, billingSource ('user_subscription' | 'owner_subscription' | 'user_api' | 'platform_credits' | 'local'), tools, isFavorite, isOAuth, isOwned, isPublic, credentialGroup, credentialKind. Copy `agentKey` verbatim into startAgentRun. All agents are listed, including rate-limited (429) ones: cooldown agents carry `availabilityStatus` / `availabilityReason` / `nextAvailableAt` as reference info, not a dispatch gate (quota is informational; requests are still sent and upstream results are reported as-is). `unavailableCount` reports how many agents are currently rate-limited. `showUnavailable` is deprecated and has no effect (kept for compatibility). Set `verbose: true` for full safe summary details.",
   parameters: {
     type: "object",
     properties: {
@@ -846,7 +847,27 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
       credentialGroups: discovery.credentialGroups,
     };
   const delivered = args?.compact === true && args?.verbose !== true
-    ? JSON.parse(await injectSpeedContextIntoListAgentsResult(JSON.stringify(rawData), { compactPage: true, fragmentOffset: args?.fragmentOffset, fragmentAgentKey: args?.fragmentAgentKey, fragmentDigest: args?.fragmentDigest }))
+    ? JSON.parse(await injectSpeedContextIntoListAgentsResult(JSON.stringify(rawData), {
+        compactPage: true,
+        fragmentOffset: args?.fragmentOffset,
+        fragmentAgentKey: args?.fragmentAgentKey,
+        fragmentDigest: args?.fragmentDigest,
+        userId: runtime.currentUserId,
+        // All client hosts provide their local DB through the shared thunk extra.
+        // Local token paths alone are not proof of a dispatched run.
+        db: thunkApi?.extra?.db ? {
+          iterator: (options) => thunkApi.extra.db.iterator(options),
+          isDispatchRun: async (dialogId, entryPath) => {
+            if (entryPath !== "agent-run") return false;
+            try {
+              return isServerDispatchSpeedSource(
+                await thunkApi.extra.db.get(`dialog-${runtime.currentUserId}-${dialogId}`),
+                dialogId, runtime.currentUserId,
+              );
+            } catch { return false; }
+          },
+        } : null,
+      }))
     : rawData;
   return {
     rawData: delivered,

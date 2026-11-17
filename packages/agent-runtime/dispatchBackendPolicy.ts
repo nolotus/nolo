@@ -1,7 +1,7 @@
 /**
  * 派发落点：执行后端硬规则（系统层固定块，四条装配线无条件注入）。
  *
- * 背景（2026-10-23 事故）：派发的子 run 默认落本机 docker 沙盒，而沙盒
+ * 背景（2026-10-23 事故，当时默认沙盒；现 CLI 未点名写型默认宿主且须确认）：沙盒
  * **不兑现宿主的 `cwd`**（见 `dockerSandboxExecutionBackend.ts:807` 的 fail-closed 段：
  * 「本后端不兑现 env / stdin / cwd」），也**不自动继承宿主凭据**；工具与网络能力
  * 取决于就绪环境（不是基础镜像的静态清单）。于是「改这个 worktree」「连上去查线上」
@@ -28,5 +28,5 @@ export const DISPATCH_BACKEND_POLICY = [
   "② 要访问线上服务器或宿主凭据 → 选**有该能力**的执行面：有宿主执行器时用 `local`，没有时用已连接的机器 `machine:<machineId>`。",
   "服务端的 run 没有宿主执行器，兑现不了调用方的本地 `cwd`：`local` 绕不过去（`local_target_unsupported`），要么走 `machine:<machineId>`，要么省略落点。",
   "沙盒的稳定边界：不兑现宿主绝对 `cwd`、不自动继承宿主凭据；工具与网络能力以就绪环境为准。",
-  "「写型派发默认落 docker 沙盒」只属于 CLI 本地派发通道这一范围；不带宿主状态与宿主凭据的独立代码改动 + 跑测试，沙盒仍是首选（隔离是保险，不是负担）。",
+  "CLI 本地派发通道：未点名的写型派发默认宿主，必须 allowHostWrites: true，未确认即拒绝，不回落 docker；只读未点名仍在宿主。docker 沙盒保留，但须显式指定 runtimeKey: docker / docker:<id>，不默认派入。",
 ].join("\n");

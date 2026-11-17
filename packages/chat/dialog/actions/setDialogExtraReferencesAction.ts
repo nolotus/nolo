@@ -7,10 +7,11 @@ import { getActiveDialogKey } from "../dialogRuntimeStore";
 export const setDialogExtraReferencesAction = async (
   extraReferences: ReferenceItem[],
   thunkApi: any,
+  dialogKey?: string,
 ) => {
   const { dispatch, getState } = thunkApi;
   const state = getState() as RootState;
-  const currentDialogKey = getActiveDialogKey();
+  const currentDialogKey = dialogKey === undefined ? getActiveDialogKey() : dialogKey;
 
   if (!currentDialogKey) {
     throw new Error("No current dialog selected");

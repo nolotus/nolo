@@ -1,3 +1,6 @@
+import { googleSessionRequestToken } from "core/googleSessionScope";
+import { isPublicBuiltinPlatformAgentKey } from "core/builtinAgents";
+import { googleSessionServer, scopeGoogleSessionServers } from "core/googleSessionScope";
 // 文件路径: database/actions/read.ts
 
 import type { DbThunkApi } from "database/thunkApiTypes";
@@ -203,6 +206,8 @@ export const readAction = async (
       userAuthorityRegistry,
     } = getRuntimeServerContext(state, preferredServerOrigin);
     const allServers = resolveAgentReadServers({ dbKey, configuredServers });
+    const fetchScopedFromServer = (server: string, key: string, token?: string, signal?: AbortSignal) =>
+      fetchFromServer(server, key, googleSessionRequestToken(token, server, isPublicBuiltinPlatformAgentKey(key)), signal);
     const isLoggedIn = !!currentToken;
     const now = Date.now();
     const localData = await fetchFromClientDb(clientDb, dbKey);
@@ -221,16 +226,17 @@ export const readAction = async (
       currentServer,
       userAuthorityRegistry,
     });
-    const authorityPlannedServers = planAuthorityReadServers({
+    let authorityPlannedServers = planAuthorityReadServers({
       allServers,
       authorityServer: preferredServerOrigin ?? authority.authorityServer,
       serverOrigin: authority.serverOrigin,
     });
+    if (!isPublicBuiltinPlatformAgentKey(dbKey)) authorityPlannedServers = scopeGoogleSessionServers(currentToken, currentServer, authorityPlannedServers);
     let { preferredServer, fallbackServers, orderedServersForLocalHit } =
       partitionReadServers({
         allServers: authorityPlannedServers,
         preferredServerOrigin:
-          preferredServerOrigin ?? authority.authorityServer,
+          googleSessionServer(currentToken, currentServer) ?? preferredServerOrigin ?? authority.authorityServer,
       });
     readRequestManager.cleanupMisses(now);
     readRequestManager.cleanupLocalHitRevalidations(now);
@@ -295,7 +301,7 @@ export const readAction = async (
         if (retryInMs === null) {
           readRequestManager.markLocalHitRevalidated(dbKey, now);
           const remotePromises = orderedServersForLocalHit.map((server) =>
-            fetchFromServer(
+            fetchScopedFromServer(
               server,
               dbKey,
               isLoggedIn ? currentToken : undefined,
@@ -328,13 +334,14 @@ export const readAction = async (
     }
 
     if (authoritativeServerOrigin) {
+      googleSessionRequestToken(currentToken, authoritativeServerOrigin, isPublicBuiltinPlatformAgentKey(dbKey));
       preferredServer = authoritativeServerOrigin;
       fallbackServers = [];
     }
 
     if (preferredServer) {
       try {
-        const preferredRemoteData = await fetchFromServer(
+        const preferredRemoteData = await fetchScopedFromServer(
           preferredServer,
           dbKey,
           isLoggedIn ? currentToken : undefined,
@@ -381,7 +388,7 @@ export const readAction = async (
 
     // 3. 将 signal 传递给所有网络请求
     const remotePromises = fallbackServers.map((server) =>
-      fetchFromServer(
+      fetchScopedFromServer(
         server,
         dbKey,
         isLoggedIn ? currentToken : undefined,

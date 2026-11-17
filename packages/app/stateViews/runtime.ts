@@ -1,3 +1,4 @@
+import { googleSessionServer, scopeGoogleSessionServers } from "core/googleSessionScope";
 import { createSelector } from "@reduxjs/toolkit";
 import type { RootState } from "app/store";
 import {
@@ -79,8 +80,8 @@ export const selectRuntimeSnapshot = createSelector(
   (currentToken, currentUserId, currentServer, syncServers, localRuntimeOrigin): RuntimeSnapshot => ({
     currentToken,
     currentUserId,
-    currentServer,
-    syncServers,
+    currentServer: googleSessionServer(currentToken, currentServer) ?? currentServer,
+    syncServers: googleSessionServer(currentToken, currentServer) === undefined ? syncServers : [],
     localRuntimeOrigin,
   })
 );
@@ -92,5 +93,5 @@ export const selectRuntimeCurrentServer = createSelector(
 
 export const selectRuntimeRemoteServers = createSelector(
   [selectRuntimeSnapshot],
-  (runtime) => getAllServers(runtime.currentServer, runtime.syncServers)
+  (runtime) => scopeGoogleSessionServers(runtime.currentToken, runtime.currentServer, getAllServers(runtime.currentServer, runtime.syncServers))
 );

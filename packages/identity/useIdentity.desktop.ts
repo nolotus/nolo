@@ -12,51 +12,15 @@
 // - Display fallback only: useCurrentUser() returns the pinned Local User when
 //   no account is active, so the Topbar shows "Local User" while the local
 //   workspace stays usable without any sign-in gate.
-import { useContext, useSyncExternalStore } from "react";
-import { ReactReduxContext } from "react-redux";
-import type {
-  AccountSessionCore,
-  AccountSessionSnapshot,
-} from "core/accountSession";
+import { useAccountSession } from "./session/accountSessionReact";
 import { identityFromSessionSnapshot } from "./sessionSource";
 import { LOCAL_USER } from "./localUser";
 import type { IdentitySnapshot, IdentityUser } from "./types";
 
 export type { IdentitySnapshot, IdentityUser };
 
-const subscribeNoop = () => () => {};
-
-const NO_CORE_SNAPSHOT: AccountSessionSnapshot = Object.freeze({
-  accounts: [],
-  activeAccountId: null,
-  activeToken: null,
-  initialized: false,
-  transition: "idle",
-});
-
-type StoreWithSessionRuntime = {
-  accountSessionRuntime?: { core?: AccountSessionCore | null } | null;
-};
-
-/** Resolve the owning Core from the react-redux store context (SSR-safe). */
-function useSessionCore(): AccountSessionCore | null {
-  const store = useContext(ReactReduxContext)?.store as
-    | StoreWithSessionRuntime
-    | undefined;
-  return store?.accountSessionRuntime?.core ?? null;
-}
-
-function useSessionSnapshot(): AccountSessionSnapshot {
-  const core = useSessionCore();
-  return useSyncExternalStore(
-    core ? core.subscribe : subscribeNoop,
-    core ? core.getSnapshot : () => NO_CORE_SNAPSHOT,
-    core ? core.getServerSnapshot : () => NO_CORE_SNAPSHOT
-  );
-}
-
 export const useIdentity = (): IdentitySnapshot => {
-  const values = identityFromSessionSnapshot(useSessionSnapshot());
+  const values = identityFromSessionSnapshot(useAccountSession());
   return {
     userId: values.userId,
     token: values.token,
@@ -67,17 +31,17 @@ export const useIdentity = (): IdentitySnapshot => {
 };
 
 export const useUserId = (): string | undefined =>
-  identityFromSessionSnapshot(useSessionSnapshot()).userId;
+  identityFromSessionSnapshot(useAccountSession()).userId;
 
 export const useToken = (): string | null | undefined =>
-  identityFromSessionSnapshot(useSessionSnapshot()).token;
+  identityFromSessionSnapshot(useAccountSession()).token;
 
 export const useIsLoggedIn = (): boolean =>
-  identityFromSessionSnapshot(useSessionSnapshot()).isLoggedIn;
+  identityFromSessionSnapshot(useAccountSession()).isLoggedIn;
 
 /** Display-level fallback: anonymous desktop renders the Local User. */
 export const useCurrentUser = (): IdentityUser | null =>
-  identityFromSessionSnapshot(useSessionSnapshot()).currentUser ?? LOCAL_USER;
+  identityFromSessionSnapshot(useAccountSession()).currentUser ?? LOCAL_USER;
 
 export const useAccounts = (): IdentityUser[] =>
-  identityFromSessionSnapshot(useSessionSnapshot()).users;
+  identityFromSessionSnapshot(useAccountSession()).users;

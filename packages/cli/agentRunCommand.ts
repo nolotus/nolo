@@ -109,7 +109,7 @@ import {
   renderTurnContextBlocksWithScope,
   type TurnContextLayer,
 } from "../agent-runtime/turnContext";
-import { resolveCliMemory } from "./memoryRecall";
+import { resolveCliMemory, resolveCliWorkContext } from "./memoryRecall";
 import { isSubtaskRun } from "../agent-runtime/agentRunIsolation";
 
 // Re-export the public surface so existing callers that import from
@@ -933,6 +933,21 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
     }
   }
 
+  // 工作接续块：只读本地库、独立于上面的远端语义块、每轮重读（不缓存）。
+  // 一次性 run 只有在 `--continue <dialogId>` 时才知道当前对话；新建对话首轮
+  // 没有可信作用域，按「不伪造 owner/dialog」跳过。
+  // 它按 turn-scope 注入（不含进 session 稳定的 memory-overlay），因为进度会变。
+  let workContextBlock: string | null = null;
+  if (!deps.memoryRecallDisabled) {
+    workContextBlock = await resolveCliWorkContext({
+      env,
+      dialogId: parsed.continueDialogId ?? null,
+      spaceId: parsed.spaceId ?? null,
+      // 本轮真实用户输入（不是历史摘要）：跨 dialog 的近期关闭项只按它匹配。
+      userInput: effectiveMessage,
+    });
+  }
+
   memoryOverlayLayer = buildMemoryOverlayLayer({ promptBlock: memoryPromptBlock });
   memoryUseGuidanceLayer = buildMemoryUseGuidanceLayer({ promptBlock: memoryPromptBlock });
 
@@ -953,6 +968,9 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
         .filter((content) => content.length > 0)
         .map((content) => ({ content, cacheScope: "turn" as const })),
       ...renderTurnContextBlocksWithScope([memoryOverlayLayer]),
+      ...(workContextBlock
+        ? [{ content: workContextBlock, cacheScope: "turn" as const }]
+        : []),
     ]),
   );
   // Legacy string-block fallback for runners that don't take scoped blocks.

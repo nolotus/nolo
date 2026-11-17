@@ -17,6 +17,7 @@
 export const DESKTOP_ACCOUNT_ALLOWLIST = {
   signIn: "https://nolo.chat/login",
   accountCenter: "https://nolo.chat/life",
+  accountSecurity: "https://nolo.chat/settings/security",
 } as const;
 
 export type DesktopAccountTarget = keyof typeof DESKTOP_ACCOUNT_ALLOWLIST;

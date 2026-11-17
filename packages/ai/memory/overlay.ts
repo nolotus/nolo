@@ -23,6 +23,12 @@ const estimateTokens = (text: string): number => {
   return Math.ceil(cjk * 1.5 + ascii / 4);
 };
 
+/**
+ * 供其它记忆注入块复用同一 token 粗估口径（如 vnext/workContextRecall 的
+ * 独立预算）。导出的是**同一个函数**，不是另写一份估算，避免两处口径漂移。
+ */
+export const estimateMemoryBlockTokens = estimateTokens;
+
 /** overlay 头部固定开销。压缩为一行——省 ~60 tokens 给记忆内容。 */
 const OVERLAY_HEADER_LINES = [
   "--- Memory (相关时参考，用户输入优先) ---",

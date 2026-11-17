@@ -140,6 +140,13 @@ import {
   buildAndroidAdbSkillPageKey,
 } from "./androidAdbSkill";
 import {
+  MIHOME_ASSISTANT_SKILL_SLUGS,
+  buildMihomeAssistantSkillId,
+  buildMihomeAssistantSkillPageKey,
+  buildMihomeAssistantSkillConfig,
+  buildMihomeAssistantSkillContentBySlug,
+} from "./mihomeAssistantSkill";
+import {
   STOCK_QUOTES_SKILL_SLUGS,
   buildStockQuotesSkillConfig,
   buildStockQuotesSkillContentBySlug,
@@ -324,6 +331,13 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildAndroidAdbSkillPageKey,
     buildConfig: buildAndroidAdbSkillConfig,
     buildContent: buildAndroidAdbSkillContentBySlug,
+  },
+  {
+    slugs: MIHOME_ASSISTANT_SKILL_SLUGS,
+    buildSkillId: buildMihomeAssistantSkillId,
+    buildPageKey: buildMihomeAssistantSkillPageKey,
+    buildConfig: buildMihomeAssistantSkillConfig,
+    buildContent: buildMihomeAssistantSkillContentBySlug,
   },
   {
     slugs: STOCK_QUOTES_SKILL_SLUGS,

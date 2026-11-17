@@ -497,6 +497,15 @@ export type ToolExecutorContext = {
    * 缺失如实上报给端点（端点拒绝无父对话的订阅）。
    */
   dialogId?: string;
+  /** Persisted user message bound by the host to this specific turn. */
+  userMessageId?: string;
+  /**
+   * 可信的完整对话键 `dialog-<owner>-<id>`（含 owner），与 dialogId 同时由运行时
+   * 注入、模型不可见。有它时记忆类工具按 owner 精确定位记录，避免不同用户同
+   * dialogId 时归属随实体枚举顺序变化。注入方拿不到完整键就不传，工具层按歧义
+   * fail-closed 处理。
+   */
+  dialogKey?: string;
   /**
    * 定档信号（exa_search 用，契约见 docs/plans/2026-10-21-exa-3-0-sync.md §3/§10）。
    *
@@ -725,7 +734,7 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: updateUserPreferenceProfileFunc,
     description: {
       name: "updateUserPreferenceProfile",
-      description: "保存用户的语气、知识沉淀、空间读取等个性化偏好设置。",
+      description: "保存用户的全局提示词等个性化设置。",
       category: "用户设置 / 个性化",
     },
     behavior: "action",

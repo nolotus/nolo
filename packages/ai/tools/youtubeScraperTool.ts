@@ -1,3 +1,4 @@
+import type { ToolRequestDialogContext } from "./toolRequestDialogId";
 // /ai/tools/youtubeScraperTool.ts
 
 import { callApifyActor } from "./apifyActorClient";
@@ -65,7 +66,8 @@ export async function youtubeScraperFunc(
     subtitlesFormat?: string;
     extraInput?: Record<string, any>;
   },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ) {
   const {
     directUrls,
@@ -112,5 +114,5 @@ export async function youtubeScraperFunc(
     input,
     resultType: "datasetItems",
     displayName: "YouTube Scraper",
-  });
+  }, context);
 }

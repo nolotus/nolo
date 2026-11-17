@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asTrimmedString } from "core/trimmedString";
 import { callToolApi } from "./toolApiClient";
@@ -185,6 +186,7 @@ export const firecrawlScrapeFunc = async (
     timeout?: number;
   },
   thunkApi: any,
+  context?: ToolRequestDialogContext,
 ): Promise<{ rawData: unknown; displayData: string; llmContext: string }> => {
   const { url, onlyMainContent = true, timeout } = input;
   const normalizedUrl = normalizeHttpUrl(url);
@@ -195,6 +197,7 @@ export const firecrawlScrapeFunc = async (
     "/api/firecrawl-scrape",
     {
       url: normalizedUrl,
+      dialogId: toolRequestDialogId(context, () => thunkApi.getState()),
       onlyMainContent,
       timeout: normalizedTimeout,
     },
@@ -254,6 +257,7 @@ export const firecrawlSearchFunc = async (
     country?: string;
   },
   thunkApi: any,
+  context?: ToolRequestDialogContext,
 ): Promise<{ rawData: unknown; displayData: string; llmContext: string }> => {
   const { query, limit = 5, includeContent = true, categories, country } = input;
   const trimmedQuery = asTrimmedString(query);
@@ -268,7 +272,7 @@ export const firecrawlSearchFunc = async (
   const data = await callToolApi<FirecrawlSearchResponse>(
     thunkApi,
     "/api/firecrawl-search",
-    { query: trimmedQuery, limit, includeContent, categories, country },
+    { query: trimmedQuery, limit, includeContent, categories, country, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) },
     { withAuth: true },
   );
 

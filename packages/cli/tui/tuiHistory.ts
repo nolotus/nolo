@@ -32,10 +32,11 @@ import {
   tuiRenderThemeFingerprint,
   userSurfaceBackgroundSequence,
 } from "./theme";
-import { toolLabel } from "./i18n";
+import { toolIcon, toolLabel } from "./i18n";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
-import { TUI_TREE_MARKER, TUI_TREE_TOOLS, type TuiTreePayload } from "../client/toolOutput";
+import { TUI_TREE_MARKER, TUI_TREE_TOOLS, toolRowDetailLine, type TuiTreePayload } from "../client/toolOutput";
 import {
+  getTopReservedRows,
   resolveHistoryViewportHeight,
   resolveHistoryLayoutGeometry,
   type HistoryLayoutGeometry,
@@ -251,6 +252,7 @@ type HistoryFrameBuffer = {
   columns: number;
   inputLines: number;
   reservedRows?: number;
+  topReservedRows?: number;
   lines: string[];
 };
 
@@ -283,10 +285,7 @@ export function createTurnHistory(): TurnHistory {
   };
 }
 
-const lastFoldedRunIdentity = new WeakMap<TurnHistory, string>();
-
 export function startTurn(history: TurnHistory, role: TurnRole) {
-  lastFoldedRunIdentity.delete(history);
   if (history.currentRole !== null && history.currentContent) {
     finalizeCurrentTurn(history);
   }
@@ -319,7 +318,6 @@ function appendCurrentBlock(
 }
 
 export function finalizeCurrentTurn(history: TurnHistory) {
-  lastFoldedRunIdentity.delete(history);
   if (history.currentRole !== null) {
     history.turns.push({
       role: history.currentRole,
@@ -366,17 +364,6 @@ export function appendLocalTurn(
   resetStreamingTurnCache();
 }
 
-/**
- * 工具行 run-length 折叠：对同一对象重复同一动作的连续成功行合并为一行 ×N。
- *
- * 判据：新 chunk 剥 ANSI 后是「单行、`  ✓` 结尾」，且当前文本尾行剥 ANSI
- * 并去掉已有 ×N 后与之全等（同 label + 同 gist）。中间夹了任何其他内容
- * （正文 / thought / 失败行 / 多行卡）尾行即不匹配，组自然断开，无需额外
- * 状态。失败（✗）与待确认（!）行结尾不是 ✓，永不折叠也永不入组。
- * 纯显示层：只改写 transcript 文本，不影响持久化消息与 formatter 输出。
- */
-const TOOL_SUCCESS_LINE_RE = /^(▸ .*?)(?: ×(\d+))?(  ✓(?:\s+\d+(?:\.\d+)?(?:ms|s))?)$/;
-
 function readTreePayload(chunk: string): TuiTreePayload {
   return JSON.parse(chunk.slice(TUI_TREE_MARKER.length).replace(/\u0002\n?$/, ""));
 }
@@ -393,45 +380,19 @@ function applyTreeRewrite(text: string, chunk: string): string | null {
   // The second result replaces exactly the immediately preceding flat row.
   // Never scan past it: a failure/action row must remain visible and break the
   // group rather than being swallowed by a later tree.
-  const labels = TUI_TREE_TOOLS[payload.kind].map(toolLabel);
-  // Success suffixes can carry timing and either historic ×N placement.
-  const flatLabel = tail.match(/^▸ (.+?)(?: · .*?)?(?: ×\d+)?  ✓(?: (?:\d+(?:\.\d+)?(?:ms|s)|×\d+))*$/)?.[1];
+  // 树头两种拼写都要认：图标 + 历史 transcript 里的本地化工具名。
+  const labels = TUI_TREE_TOOLS[payload.kind].flatMap((name) => [toolIcon(name), toolLabel(name)]);
+  // Success suffixes can carry timing.
+  const flatLabel = tail.match(/^▸ (.+?)(?: · .*?)?  ✓(?: \d+(?:\.\d+)?(?:ms|s))*$/)?.[1];
   const summaryLabel = tail.match(/^▸ (.+?) \(\d+\) · .*  ✓$/)?.[1];
   // The formatter carries the exact prior rendered row as a replacement token.
   // This survives arbitrary width/locale clipping without parsing its title.
   // Legacy producers without a token retain the old display compatibility.
   if (payload.previousRow !== undefined) {
-    // History may fold repeated identical successes by adding ×N before or
-    // after the status. Remove only that history-owned count decoration.
-    const withoutFoldCount = (row: string) => row.replace(/ ×\d+(?=  ✓|$)/g, "");
-    if (withoutFoldCount(tail) !== withoutFoldCount(payload.previousRow)) return null;
+    if (tail !== payload.previousRow) return null;
   } else if (!labels.includes(flatLabel ?? "") && summaryLabel !== labels[0]) return null;
   const prefix = bodyLines.length < 2 ? "" : `${bodyLines.slice(0, -1).join("\n")}\n`;
   return `${prefix}${tree}\n`;
-}
-
-function foldToolSuccessLine(text: string, chunk: string, allowReadOnlyRun = false): string | null {
-  const plain = stripAnsi(chunk).replace(/\n+$/, "");
-  if (!plain || plain.includes("\n")) return null;
-  // Only known read-only labels (or explicitly proven read-only Run payloads) may be deduplicated.
-  const isReadOnlyLabel = ["readFile", "exa_search", "fetchWebpage"].some((name) => plain.startsWith(`▸ ${toolLabel(name)} · `) || plain.startsWith(`▸ ${toolLabel(name)}  ✓`));
-  if (!isReadOnlyLabel && !allowReadOnlyRun) return null;
-  const chunkMatch = TOOL_SUCCESS_LINE_RE.exec(plain);
-  if (!chunkMatch) return null;
-  const hadTrailingNewline = text.endsWith("\n");
-  const body = hadTrailingNewline ? text.slice(0, -1) : text;
-  const newlineAt = body.lastIndexOf("\n");
-  const tail = newlineAt === -1 ? body : body.slice(newlineAt + 1);
-  const match = TOOL_SUCCESS_LINE_RE.exec(stripAnsi(tail));
-  if (!match || match[1] !== chunkMatch[1]) return null;
-  const count = (match[2] ? Number(match[2]) : 1) + 1;
-  // ×N 插在状态符前的普通双空格之前（样式段之外），count 替换而非累加。
-  const anchor = tail.lastIndexOf("  ");
-  if (anchor < 0) return null;
-  const head = tail.slice(0, anchor).replace(/\s×\d+$/, "");
-  const merged = `${head} ×${count}${chunkMatch[3]}`;
-  const prefix = newlineAt === -1 ? "" : body.slice(0, newlineAt + 1);
-  return `${prefix}${merged}${hadTrailingNewline ? "\n" : ""}`;
 }
 
 export function applyOutputChunkToCurrentTurn(
@@ -441,39 +402,21 @@ export function applyOutputChunkToCurrentTurn(
 ): boolean {
   if (kind === "tool") {
     const details = (history.toolDetails ??= []);
-    details.push(chunk.startsWith(TUI_TREE_MARKER) ? (readTreePayload(chunk).details ?? readTreePayload(chunk).fallback) : chunk);
+    details.push(
+      chunk.startsWith(TUI_TREE_MARKER)
+        ? (readTreePayload(chunk).details ?? readTreePayload(chunk).fallback)
+        : // 详情里把行首图标还原成双语族名（Read/读取…）：/tools 永远读得懂。
+          toolRowDetailLine(chunk),
+    );
     // Match transcript retention rather than accumulating an unbounded log.
     while (details.length > MAX_TUI_HISTORY_TURNS * 10) details.shift();
     if (chunk.startsWith(TUI_TREE_MARKER)) {
       const payload = readTreePayload(chunk);
       if (payload.appendOnly) {
-        const canFoldSameRun =
-          payload.readOnly === true &&
-          typeof payload.runIdentity === "string" &&
-          payload.runIdentity.length > 0 &&
-          lastFoldedRunIdentity.get(history) === payload.runIdentity;
-        if (canFoldSameRun) {
-          const foldedContent = foldToolSuccessLine(history.currentContent, payload.fallback, true);
-          if (foldedContent !== null) {
-            history.currentContent = foldedContent;
-            const lastBlock = history.currentBlocks.at(-1);
-            if (lastBlock?.kind === "tool") {
-              const foldedBlock = foldToolSuccessLine(lastBlock.content, payload.fallback, true);
-              if (foldedBlock !== null) lastBlock.content = foldedBlock;
-            }
-            return true;
-          }
-        }
-        if (payload.readOnly && payload.runIdentity) {
-          lastFoldedRunIdentity.set(history, payload.runIdentity);
-        } else {
-          lastFoldedRunIdentity.delete(history);
-        }
         history.currentContent = applyTerminalOutputToText(history.currentContent, payload.fallback);
         appendCurrentBlock(history, kind, payload.fallback);
         return true;
       }
-      lastFoldedRunIdentity.delete(history);
       const rewrittenTree = applyTreeRewrite(history.currentContent, chunk);
       if (rewrittenTree === null) {
         // Only the newest result is new: earlier items are already visible.
@@ -491,23 +434,9 @@ export function applyOutputChunkToCurrentTurn(
       else history.currentBlocks.push({ kind: "tool", content: treeBlock });
       return true;
     }
-    const foldedContent = foldToolSuccessLine(history.currentContent, chunk);
-    if (foldedContent !== null) {
-      history.currentContent = foldedContent;
-      const lastBlock = history.currentBlocks.at(-1);
-      // 不变量：fold 触发意味着 currentContent 尾行是工具行，而工具 chunk 只会
-      // 并入（或新建）尾部的 tool block——因此走到这里 lastBlock 必为 tool
-      // block，无需为非 tool 尾块做同步分支（blocks 当前无渲染消费方）。
-      if (lastBlock?.kind === "tool") {
-        const foldedBlock = foldToolSuccessLine(lastBlock.content, chunk);
-        if (foldedBlock !== null) lastBlock.content = foldedBlock;
-      }
-      return true;
-    }
   }
   const next = applyTerminalOutputToText(history.currentContent, chunk);
   if (next === history.currentContent) return false;
-  lastFoldedRunIdentity.delete(history);
   history.currentContent = next;
   appendCurrentBlock(history, kind, chunk);
   return true;
@@ -1886,7 +1815,7 @@ export function renderHistory(
   const columns = tty.columns ?? 80;
   const visibleHeight = Math.max(
     1,
-    resolveHistoryViewportHeight(rows, inputLines, reservedRows),
+    resolveHistoryViewportHeight(rows, inputLines, reservedRows, getTopReservedRows(output)),
   );
   const { contentWidth, marginLeft, marginRight } = resolveHistoryLayoutGeometry(columns);
   const colorEnabled = resolveCliColorEnabled();
@@ -2008,6 +1937,7 @@ export function renderHistory(
     prevBuffer.rows === rows &&
     prevBuffer.columns === columns &&
     prevBuffer.inputLines === inputLines &&
+    (prevBuffer.topReservedRows ?? 0) === getTopReservedRows(output) &&
     (prevBuffer.reservedRows ?? 0) === reservedRows &&
     prevBuffer.lines.length === visibleHeight;
   const prevLines = isGeometryCompatible ? prevBuffer.lines : undefined;
@@ -2031,7 +1961,7 @@ export function renderHistory(
       // `padded` is already padOrTruncateToWidth'd to full contentWidth, so
       // writing rowContent completely paints all columns, avoiding blank-flash
       // flicker on terminals that don't support synchronized output (DECSET 2026).
-      frame += `\x1b[${i + 1};1H${rowContent}`;
+      frame += `\x1b[${i + 1 + getTopReservedRows(output)};1H${rowContent}`;
     }
   }
 
@@ -2041,6 +1971,7 @@ export function renderHistory(
       columns,
       inputLines,
       reservedRows,
+      topReservedRows: getTopReservedRows(output),
       lines: nextLines,
     });
   }
@@ -2052,7 +1983,7 @@ export function renderHistory(
   }
 
   // 图片在文字帧之后放置；可选回调缺省时保持原行为。
-  options?.onVisibleImages?.(visibleImages, { rows: visibleHeight, columns: contentWidth });
+  options?.onVisibleImages?.(visibleImages.map(image => ({ ...image, row: image.row + getTopReservedRows(output) })), { rows: visibleHeight, columns: contentWidth });
 }
 
 export function createHistoryOutputStream(
@@ -2109,7 +2040,7 @@ export function computeScrollMetrics(
   const columns = tty.columns ?? 80;
   const visibleHeight = Math.max(
     1,
-    resolveHistoryViewportHeight(rows, inputLines, reservedRows),
+    resolveHistoryViewportHeight(rows, inputLines, reservedRows, getTopReservedRows(output)),
   );
   const { contentWidth } = resolveHistoryLayoutGeometry(columns);
   const { totalLines: finalizedLines } = buildTurnOffsets(history, contentWidth);

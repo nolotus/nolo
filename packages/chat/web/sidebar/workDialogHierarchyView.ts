@@ -42,6 +42,8 @@ export type WorkDialogTreeRow = {
 };
 
 export type WorkDialogSection = {
+  /** Unique identity for adjacent date sections, even when pinned ordering repeats a date. */
+  key: string;
   groupId: RecencyGroupId;
   rows: WorkDialogTreeRow[];
 };
@@ -75,6 +77,7 @@ export const buildWorkDialogHierarchyView = (
 
   const sections: WorkDialogSection[] = [];
   let current: WorkDialogSection | null = null;
+  const sectionOccurrences = new Map<RecencyGroupId, number>();
 
   // 展平：父行在顶层，展开时把子行按深度接在父后面（子不再另起日期分组）。
   const flatten = (
@@ -96,7 +99,9 @@ export const buildWorkDialogHierarchyView = (
     if (hierarchy.isChild(row.key)) continue;
     const groupId = resolveRecencyGroupId(row.updatedAt, now);
     if (!current || current.groupId !== groupId) {
-      current = { groupId, rows: [] };
+      const occurrence: number = sectionOccurrences.get(groupId) ?? 0;
+      sectionOccurrences.set(groupId, occurrence + 1);
+      current = { key: `${groupId}:${occurrence}`, groupId, rows: [] };
       sections.push(current);
     }
     flatten(row, false, 0, current.rows);

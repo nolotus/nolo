@@ -2,9 +2,8 @@ import { createSummaryBudget, classifySummaryError } from "../../ai/context/summ
 import { isAbortError } from "../../core/abortError";
 // packages/cli/client/compactDialog.ts
 // HTTP-only compact helper for CLI TUI (no Redux store available).
-// Compares and forks: generate a summary of the old dialog, write it back
-// to the source dialog, then create a fork that carries only lineage,
-// referenceKeys, and allowed config fields (compression state starts clean).
+// Summarize the source, then persist a self-contained fork context. Source
+// cursors never apply to the new dialog; failures leave the caller on the source.
 
 import { extractCustomId } from "core/prefix";
 import { ulid } from "ulid";
@@ -25,7 +24,8 @@ import {
 
 import { createManualCompactionSummaryCaller } from "./manualCompactionSummary";
 import { getActiveDialogAgentId } from "../../chat/dialog/dialogAgents";
-import type { LocalCompactionSummaryFallbackOptions } from "../../agent-runtime/localAutoCompaction";
+import { validateStoredSummary, type LocalCompactionSummaryFallbackOptions } from "../../agent-runtime/localAutoCompaction";
+import { dialogMessageRecordToAgentRuntimeMessage } from "../../agent-runtime/dialogMessageRecord";
 
 const DB_PATH = "/api/v1/db";
 
@@ -69,11 +69,13 @@ async function readDialogMessages(
     body: JSON.stringify({ dialogId, limit: 0 }),
   });
   if (!res.ok) {
-    console.warn(`[nolo] compact: dialog-read failed: HTTP ${res.status}`);
-    return [];
+    throw new Error(`[nolo] compact: dialog-read failed: HTTP ${res.status}`);
   }
   const data = await res.json();
-  return Array.isArray(data?.msgs) ? data.msgs : [];
+  if (!Array.isArray(data?.msgs)) throw new Error("[nolo] compact: invalid dialog history response");
+  // dialog-read bridge delegates to fetchMessages (newest first). Planning
+  // and source anchors require chronological order. Do not mutate the payload.
+  return data.msgs.slice().reverse();
 }
 
 async function patchDialog(
@@ -103,8 +105,8 @@ async function patchDialog(
 /**
  * Fields carried forward from the source dialog into the fork.
  * Conversation references (referenceKeys) and configuration are preserved,
- * while dialog-local transcript cursors and compression state
- * (summary, summarizedBeforeId, compressionCount) start clean.
+ * while dialog-local transcript cursors and compression metadata start clean.
+ * Summary and pending history are explicitly assigned after compression.
  */
 const FORKED_CARRY_FIELDS = [
   "cybots",
@@ -287,18 +289,9 @@ export interface CompactDialogOptions {
 }
 
 /**
- * Compact the current dialog:
- * 1. Read the current dialog config and messages from the server.
- * 2. Use planCompression to decide whether/how much to compress.
- * 3. If compression is needed, call the summary LLM and write the summary
- *    back to the old dialog.
- * 4. Fork the dialog, carrying only lineage (inheritedFromDialogKey/Title),
- *    referenceKeys, and allowed config fields; compression state
- *    (summary/summarizedBeforeId/compressionCount) starts clean in the fork.
- * 5. Register the new dialog in the space sidebar (best-effort).
- *
- * This mirrors the Web `compactDialogAndForkAction` semantics: "compress then
- * fork" — compression results stay dialog-local and are NOT inherited.
+ * Summarize only the authorized current dialog, then publish a self-contained
+ * fork with the summary and unsummarized suffix. Never inherit source cursors.
+ * A failed read, summary or write rejects before the caller switches dialogs.
  */
 export async function compactDialog(
   options: CompactDialogOptions
@@ -337,14 +330,38 @@ export async function compactDialog(
       return createCliLocalRuntimeAdapter({ env: { ...(options.env ?? {}), AUTH_TOKEN: options.authToken, NOLO_SERVER: options.serverUrl }, fetchImpl });
     },
   }) : undefined);
-  if (summaryLlmCaller) {
-    const allMsgs = await readDialogMessages(
+  let pendingHistory: Message[] = [];
+  if (!summaryLlmCaller) throw new Error("[nolo] compact: summary provider unavailable");
+  {
+    const ownMsgs = await readDialogMessages(
       fetchImpl,
       options.serverUrl,
       options.authToken,
       options.dialogId
     );
 
+    const allMsgs = [...(Array.isArray(current.manualCompactHistory) ? current.manualCompactHistory as Message[] : []), ...ownMsgs];
+    // Validate against the same canonical projection as runtime before trusting
+    // either the summary or its claimed coverage. Invalid summaries fail closed:
+    // the original transcript remains intact and no replacement is published.
+    const history = allMsgs.map(message => {
+      const parsed = dialogMessageRecordToAgentRuntimeMessage(message);
+      if (!parsed) throw new Error("[nolo] compact: invalid current history message");
+      return parsed;
+    });
+    if (validateStoredSummary({ history, stored: {
+      summarizedBeforeId: current.summarizedBeforeId as string | undefined,
+      sourceHash: current.sourceHash as string | undefined,
+      sourceCount: current.sourceCount as number | undefined,
+      schemaVersion: current.schemaVersion,
+    } }) === false) throw new Error("[nolo] compact: invalid stored summary; source history retained");
+    pendingHistory = allMsgs;
+    generatedSummary = typeof current.summary === "string" ? current.summary.trim() : undefined;
+    if (current.summarizedBeforeId) {
+      const anchor = allMsgs.findIndex(msg => msg.id === current.summarizedBeforeId);
+      if (anchor < 0) throw new Error("[nolo] compact: summary anchor missing from current history");
+      pendingHistory = allMsgs.slice(anchor + 1);
+    }
     if (allMsgs.length > 0) {
       const agentKey =
         Array.isArray(current.cybots) && current.cybots.length > 0
@@ -369,13 +386,19 @@ export async function compactDialog(
       if (plan.shouldCompress && plan.msgsToCompress.length > 0) {
         const previousSummary = (current.summary as string) || "";
         const request = buildBoundedCompactionRequest({
-          msgsToCompress: plan.msgsToCompress,
+          // Planning/persistence retain stored records (toolCallId); the bounded
+          // request validates runtime messages (tool_call_id). Reuse the canonical
+          // projection already validated above, without changing source coverage.
+          msgsToCompress: plan.msgsToCompress.map(message => ({
+            ...dialogMessageRecordToAgentRuntimeMessage(message)!,
+            id: message.id,
+          })),
           previousSummary,
           contextWindow: SUMMARY_CONTEXT_WINDOW,
         });
 
         if (request.status === "blocked") {
-          console.warn(`[nolo] compact: summary blocked: ${request.reason}`);
+          throw new Error(`[nolo] compact: summary blocked: ${request.reason}`);
         } else {
           options.onProgress?.("summarizing");
           const summaryBudget = createSummaryBudget({ mode: "manual", signal: options.signal });
@@ -385,7 +408,8 @@ export async function compactDialog(
               maxOutputTokens: request.outputTokenBudget,
             }));
 
-            if (newSummary && newSummary.trim()) {
+            if (!newSummary?.trim()) throw new Error("[nolo] compact: empty summary");
+            if (newSummary.trim()) {
               const compressionCount =
                 (current.compressionCount as number) || 0;
 
@@ -398,7 +422,9 @@ export async function compactDialog(
                   ? (current.referenceKeys as string[])
                   : []
               );
-              for (const msg of request.coveredMessages) {
+              // Coverage is a prefix of the plan. Read references from stored
+              // records, preserving the reference extractor's Message contract.
+              for (const msg of plan.msgsToCompress.slice(0, request.coveredMessages.length)) {
                 for (const key of extractReferenceKeysFromMessage(msg)) {
                   extractedKeys.add(key);
                 }
@@ -421,8 +447,7 @@ export async function compactDialog(
               if (options.signal?.aborted) throw new DOMException("summary aborted", "AbortError");
               if (summaryBudget.remainingMs() <= 0) throw new DOMException("Summary deadline exceeded", "TimeoutError");
               // referenceKeys participate in the fork carry (FORKED_CARRY_FIELDS);
-              // summary/summarizedBeforeId/compressionCount stay dialog-local and
-              // are deliberately NOT mirrored onto `current` for the fork.
+              // source cursor and hash remain local to the source record.
               await patchDialog(fetchImpl, options.serverUrl, options.authToken, dialogKey, {
                 summary: newSummary.trim(),
                 summarizedBeforeId: request.summarizedBeforeId,
@@ -439,6 +464,7 @@ export async function compactDialog(
 
               summaryGenerated = true;
               generatedSummary = newSummary.trim();
+              pendingHistory = allMsgs.slice(allMsgs.findIndex(msg => msg.id === request.summarizedBeforeId) + 1);
               compactedMessageCount = request.coveredMessages.length;
               // P1-8 压缩埋点
               const metrics = buildCompactionMetricsFromPlan({
@@ -464,8 +490,7 @@ export async function compactDialog(
             }
           } catch (error) {
             if (options.signal?.aborted || isAbortError(error)) throw new DOMException("summary aborted", "AbortError");
-            // Summary generation failed — continue with fork without compression.
-            console.warn("[nolo] compact: summary generation failed:", classifySummaryError(error));
+            throw new Error(`[nolo] compact: summary failed (${classifySummaryError(error).category ?? "unknown"})`, { cause: error });
           } finally { summaryBudget.dispose(); }
         }
       }
@@ -476,6 +501,11 @@ export async function compactDialog(
   if (options.signal?.aborted) throw new DOMException("summary aborted", "AbortError");
   options.onProgress?.("forking");
   const next = buildForkedDialogRecord(current, userId);
+  // Durable seed belongs to this new record, not a lineage lookup. Runtime
+  // prepends it to this dialog's own transcript on every resume. Keep all
+  // unsummarized fields (including tool pairing and structured content).
+  if (generatedSummary) next.summary = generatedSummary;
+  next.manualCompactHistory = pendingHistory;
   await writeDialogRecord(fetchImpl, options.serverUrl, options.authToken, next);
   await addDialogToSpaceIfNeeded(
     fetchImpl,

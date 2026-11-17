@@ -1,3 +1,4 @@
+import { runBelongsToDialog } from "./runDialogScope";
 /**
  * 本地 run registry 轮询器——停靠区的第二条数据来路，且这一条不经过模型。
  *
@@ -397,14 +398,7 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
     // effect on the next tick.
     const belongsToCurrentDialog = (record: RunRecord) =>
       !deps.getCurrentDialogId ||
-      (currentDialogId !== null &&
-        (record.parentDialogId === currentDialogId ||
-          // 另一个会话用 continueDialogId 往「本条对话」续写时，子 run 自己的
-          // dialogId 就是当前对话，而 parentDialogId 指的是发起方的对话。
-          // 这类 run 也必须进 dock——否则用户在 TUI 里完全看不到「另一边正在
-          // 这条对话上干活」。fresh run 的 dialogId 是瞬时 id 或 undefined，
-          // 不会误命中。
-          record.dialogId === currentDialogId));
+      runBelongsToDialog(record, currentDialogId);
     const discoveredActive = discovered.filter((record) =>
       record.runId &&
       !dockedIds.has(record.runId) &&

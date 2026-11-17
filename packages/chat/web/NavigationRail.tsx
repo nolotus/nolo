@@ -4,7 +4,7 @@ import { useIsLoggedIn } from "identity";
 const SidebarUserSection = lazy(() => import("./sidebar/SidebarUserSection"));
 import { NavLink, useLocation } from "app/routing";
 import { useTranslation } from "react-i18next";
-import { LuHouse, LuStar, LuCompass, LuSearch, LuBot, LuFileText, LuTable2, LuLayoutGrid, LuMessageSquare, LuLink } from "react-icons/lu";
+import { LuMusic, LuCalendar, LuHouse, LuStar, LuCompass, LuSearch, LuBot, LuFileText, LuTable2, LuLayoutGrid, LuMessageSquare, LuLink } from "react-icons/lu";
 import { setViewMode } from "create/space/spaceCurrentStore";
 import { useUserId } from "identity";
 import { useFavoriteAgentIds, useFavoriteContentIds, useFavoritesInitialized, useFavoritesLoading, useFavoritesSnapshotComplete } from "app/favorite/favoriteStore";
@@ -16,6 +16,8 @@ import {
   resolveRailView,
 } from "./navigationRailView";
 import "./navigationRail.css";
+import { useUiPlugins } from "app/hooks/index";
+import { UI_PLUGIN_SPECS, isUiPluginEnabled } from "app/plugins/uiPlugins";
 
 /**
  * Path part of a Rail target. App shortcuts are built with `buildAppDetailPath`
@@ -51,6 +53,7 @@ export function NavigationRail({
 } = {}): React.JSX.Element {
   const { t } = useTranslation("space");
   const isLoggedIn = useIsLoggedIn();
+  const uiPlugins = useUiPlugins();
   const location = useLocation();
   const userId = useUserId() ?? "";
   const promoted = useQuickFavorites(userId);
@@ -160,6 +163,16 @@ export function NavigationRail({
             <span className="navigation-v2-rail__label">{label}</span>
           </NavLink>
         );
+      })}
+      {UI_PLUGIN_SPECS.filter(spec => isUiPluginEnabled(uiPlugins, spec.id)).map(spec => {
+        const Icon = spec.id === "music" ? LuMusic : LuCalendar;
+        return <NavLink key={spec.id} to={spec.path} end title={spec.title} aria-label={spec.title}
+          aria-current={location.pathname === spec.path ? "page" : undefined}
+          data-active={location.pathname === spec.path ? "true" : undefined}
+          className="navigation-v2-rail__item">
+          <span className="navigation-v2-rail__icon"><Icon size={17} aria-hidden="true" /></span>
+          <span className="navigation-v2-rail__label">{spec.title}</span>
+        </NavLink>;
       })}
       {promoted.filter(item => favoriteKeys.has(item.key)).map(item => {
         const Icon = quickIcons[item.type as keyof typeof quickIcons] ?? LuLink;

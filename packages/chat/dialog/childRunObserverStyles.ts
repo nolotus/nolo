@@ -18,9 +18,39 @@ const aicSpinKeyframes = stylex.keyframes({
 });
 
 export const croStyles = stylex.create({
+  groupControls: {
+    display: "flex", gap: "4px", marginBottom: "12px",
+    padding: "3px", borderRadius: "var(--radius-sm, 8px)",
+    backgroundColor: "var(--backgroundTertiary)",
+  },
+  groupButton: {
+    flex: "1 1 0", padding: "8px 4px", fontSize: "12px",
+    borderWidth: 0, borderRadius: "var(--radius-sm, 8px)",
+    cursor: "pointer", backgroundColor: "transparent", color: "var(--textSecondary)",
+    outlineColor: "var(--primary)", outlineOffset: "2px",
+  },
+  groupButtonSelected: {
+    backgroundColor: "var(--background)", color: "var(--text)", fontWeight: 650,
+  },
+  mainAgent: {
+    padding: "16px 12px",
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--border, #d1d5db)",
+    flexShrink: 0,
+    overflowY: "auto",
+    maxHeight: "45%",
+  },
+  sectionLabel: {
+    color: "var(--textSecondary)",
+    fontSize: "11px",
+    fontWeight: 650,
+    margin: "0 0 12px",
+  },
+  childIdentity: { padding: "12px 12px 0" },
   // ── ChildRunObserverPanel ──
   panel: {
-    backgroundColor: "var(--background, #ffffff)",
+    backgroundColor: "var(--backgroundSecondary, #f8f9fb)",
     borderLeftWidth: "1px",
     borderLeftStyle: "solid",
     borderLeftColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",

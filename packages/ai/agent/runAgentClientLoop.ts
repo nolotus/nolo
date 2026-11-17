@@ -19,6 +19,7 @@ import { performFetchRequest } from "ai/chat/fetchUtils";
 import { sanitizeOutboundBody } from "ai/chat/toolCallArgumentGuard";
 import { executeToolCall } from "ai/agent/executeToolCall";
 import { extractCustomId } from "core/prefix";
+import { parseDialogKey } from "database/dialogKey";
 import { updateAgentTokens } from "./updateAgentTokens";
 import {
   recordConsecutiveToolFailure,
@@ -102,6 +103,20 @@ export async function runAgentClientLoop(
   const { agentKey, content, parentMessageId, billingDialogKey } = args;
   const { getState, dispatch } = thunkApi;
   const state = getState() as RootState;
+
+  // 本轮工具调用的执行归属：本 loop 里唯一可用的对话身份就是调用方传入的
+  // billingDialogKey（agentSlice.runAgent 原样透传），没有第二个「实际对话键」可
+  // 交叉验证。因此必须整体解析成 id —— 取最后一段会把 UUID 形态的 dialogId 截断
+  // （`…-446655440000`），让记忆工具误报未加载。完整键也一并下传：记忆工具靠它
+  // 里的 owner 精确定位记录，不同用户同 id 时不按实体枚举顺序猜。
+  const executionDialogContext = (() => {
+    if (!billingDialogKey) return {};
+    const identity = parseDialogKey(billingDialogKey);
+    return {
+      dialogKey: billingDialogKey,
+      ...(identity ? { dialogId: identity.dialogId } : {}),
+    };
+  })();
 
   // 1. 加载 Agent 配置
   const agentConfig = await dispatch(read({ dbKey: agentKey })).unwrap();
@@ -256,6 +271,9 @@ export async function runAgentClientLoop(
         agentKey,
         effectiveModel: body.model ?? agentConfig.model,
         runKind: "interactive",
+        // 执行归属：本轮的对话身份（同计费来源，见 executionDialogContext）。
+        // 记忆类工具按它定 Space / dialogId，不读界面上当前打开的对话。
+        ...executionDialogContext,
       });
       const toolExecutionMs = Date.now() - toolStartTime;
       if (typeof process !== "undefined" ? process.env?.NOLO_CACHE_OPT_DEBUG : false) {

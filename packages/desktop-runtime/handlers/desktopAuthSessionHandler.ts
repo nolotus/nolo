@@ -57,7 +57,13 @@ export async function handleDesktopAuthSessionGet(
   }
 
   const validateAuthToken = deps.validateAuthToken ?? validateDesktopProfileToken;
-  const isValidToken = await validateAuthToken(tokens[0]).catch(() => false);
+  let isValidToken: boolean;
+  try {
+    isValidToken = await validateAuthToken(tokens[0]);
+  } catch (error) {
+    if (error instanceof Response && error.status === 503) return error;
+    isValidToken = false;
+  }
   if (!isValidToken) {
     return new Response(JSON.stringify({
       ok: true,

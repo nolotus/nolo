@@ -34,7 +34,6 @@ import {
   resolveRuntimeAuthToken,
 } from "./localRuntimeHelpers";
 import type { CliFetchImpl } from "../cliFetch";
-import { inferCaptureIntent } from "../../ai/policy/runtimePolicy";
 import { parseNoloWorkspaceToolArguments } from "../../agent-runtime/noloWorkspaceTools";
 import {
   LOCAL_SERVER_TABLE_TOOL_NAMES,
@@ -106,12 +105,10 @@ export function buildServerPlatformToolExecutors(args: {
   };
 
   const guardExplicitTableCapture = (call: any) => {
-    if (inferCaptureIntent(String(call.userInput ?? "")) === "strong")
-      return null;
     return JSON.stringify({
       error: "knowledge_capture_requires_confirmation",
       message:
-        "当前本地运行不允许自动写入表格。只有当用户在当前请求里明确要求保存、建表、写入 table 或做成数据集时，才能继续；否则请先询问用户。",
+        "当前执行面没有可信确认重放能力；请在支持确认的界面核对具体内容和目标后保存。",
       policy: {
         capability: "knowledge_capture",
         target: "table",
@@ -297,7 +294,7 @@ export function buildServerPlatformToolExecutors(args: {
     const hits = recallMemoryVNextLocal({
       query,
       entities: catalog.entities,
-      states: catalog.states.filter((s: any) => !s.retiredAt && s.text.trim()),
+      states: catalog.states.filter((s: any) => !s.retiredAt && s.facet !== "work-context" && s.text.trim()),
     });
     if (hits.length === 0) return null;
 
@@ -551,8 +548,54 @@ export function buildServerPlatformToolExecutors(args: {
     return { retired, localOnlyRetired, skippedRemoteMiss };
   };
 
+  const workMemory = async (call: any, parsed: any, write: boolean) => {
+    const context = call.runtimeContext;
+    const dialogId = context?.dialogId;
+    const userMessageId = context?.userMessageId;
+    if (typeof dialogId !== "string" || (write && typeof userMessageId !== "string")) throw new Error("work memory requires host dialogId and persisted userMessageId");
+    const fields = write ? ["itemKey", "activityId", "expectedRevision", "changeId", "patch"] : ["activityId", "status", "query", "limit", "discovery"];
+    const payload = Object.fromEntries(fields.filter(k => parsed[k] !== undefined && parsed[k] !== "").map(k => [k, parsed[k]]));
+    if (parsed.storage !== undefined && parsed.storage !== "server" && parsed.storage !== "local") throw new Error("invalid work storage");
+    // 写侧回执：updateWorkContext 的冲突（revision 过期 / scope mismatch / changeId 复用）
+    // 是正常返回而不是 error，裸传 JSON 会让模型把「没写进去」当成「已记住」。
+    // 服务端与本地两条路径都用同一句话，保证 Web 与 CLI 口径一致。
+    const { formatWorkContextWriteNotice } = await import("../../ai/memory/vnext/workContextWriteNotice");
+    // 存储位置只有调用处知道：queryMemory(mode="work") 不指定 storage 时默认读本地库，
+    // 所以这里的回执必须把本次实际存储透给 formatter，否则「按建议读最新 revision」会查错库。
+    const writeResult = (result: any, priorNotice?: string, storage?: "server" | "local") => ({
+      ...result,
+      notice: [formatWorkContextWriteNotice(result, storage ? { storage } : undefined), priorNotice]
+        .filter((v): v is string => typeof v === "string" && v !== "")
+        .join("\n"),
+    });
+    const workMetadata = { serverPlatformTool: true, memoryWrite: write, memoryRead: !write };
+    if (parsed.storage === "server") {
+      const content = await postServer(write ? "/api/memory/remember" : "/api/memory/query", { mode: "work", ...payload, dialogId, ...(write ? { userMessageId } : {}) });
+      if (!write) return { content, metadata: workMetadata };
+      let served: any;
+      try { served = JSON.parse(content); } catch { return { content, metadata: workMetadata }; }
+      return { content: JSON.stringify(writeResult(served, typeof served?.notice === "string" ? served.notice : undefined, "server")), metadata: workMetadata };
+    }
+    const ctx = await localMemoryContext();
+    if (!ctx) throw new Error("local work memory unavailable");
+    const { resolveLocalUserId } = await import("./cliAgentConfigHelpers");
+    const localUserId = resolveLocalUserId(args.env);
+    const { resolveWorkContextAccess } = await import("../../ai/memory/vnext/workContextAccess");
+    const { updateWorkContext, readWorkContexts } = await import("../../ai/memory/vnext/workContext");
+    const { scope, sourceRef } = await resolveWorkContextAccess(ctx.db, localUserId, dialogId, write ? userMessageId : undefined);
+    // Local membership cannot be proven from a model-supplied space ID.
+    if (scope.spaceId) throw new Error("local work memory cannot verify space membership");
+    const result = write ? await updateWorkContext(ctx.db, scope, { ...(payload.activityId !== undefined ? { activityId: payload.activityId, expectedRevision: payload.expectedRevision } : { itemKey: payload.itemKey, originRef: sourceRef }), changeId: payload.changeId, sourceRefs: [sourceRef], patch: payload.patch } as any) : await readWorkContexts(ctx.db, scope, payload);
+    const storageNotice = "Local and server stores are independent; changeId deduplication covers actual changes only.";
+    const content = write
+      ? { ...writeResult(result, storageNotice, "local"), storage: "local" }
+      : { ...result, storage: "local", notice: storageNotice };
+    return { content: JSON.stringify(content), metadata: workMetadata };
+  };
+
   const queryMemory = async (call: any) => {
     const parsed = parseNoloWorkspaceToolArguments(call.arguments);
+    if (parsed.mode === "work") return workMemory(call, parsed, false);
     const query = typeof parsed.query === "string" ? parsed.query.trim() : "";
     if (!query) {
       return {
@@ -596,6 +639,7 @@ export function buildServerPlatformToolExecutors(args: {
   // directive, so it gets the lower base confidence.
   const rememberMemory = async (call: any) => {
     const parsed = parseNoloWorkspaceToolArguments(call.arguments);
+    if (parsed.mode === "work") return workMemory(call, parsed, true);
     const content =
       typeof parsed.content === "string" ? parsed.content.trim() : "";
     if (!content) {

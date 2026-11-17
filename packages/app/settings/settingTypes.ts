@@ -9,6 +9,7 @@ import type {
   TonePreset,
 } from "ai/policy/types";
 import type { AgentUpdateField } from "ai/policy/selfUpdateFields";
+import type { UiPlugins } from "app/plugins/uiPlugins";
 
 /**
  * 写失败后「对账」的结论：
@@ -150,6 +151,18 @@ export interface SettingState {
    * 关闭后三端运行时（Web/CLI/桌面）统一从工具面过滤掉该 skill 包的工具。
    */
   systemBuiltinSkills: Record<string, boolean>;
+
+  /**
+   * UI 插件启用状态（见 `app/plugins/uiPlugins`）。完整映射：每个已知插件 id
+   * 都有 `absent | disabled | enabled` 之一，缺失/非法值归一化为 `absent`。
+   * 随既有 settings record 持久化；只有 `enabled` 才注册 rail 入口、才允许直接
+   * 路由进入面板。关闭不删除本地库与凭据。
+   */
+  uiPlugins: UiPlugins;
+
+  /** Session provenance, published atomically with uiPlugins; never persisted. */
+  uiPluginsOwnerAccountId: string | null;
+  uiPluginsGeneration?: number;
 
   /**
    * 单调递增的「本地用户意图」世代，只由 setSettings 的乐观发布推进

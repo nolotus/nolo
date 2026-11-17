@@ -1,6 +1,8 @@
 // 文件: render/web/ui/Button.tsx
 
 import React from "react";
+import { withLiteralClass } from "../../../chat/web/withLiteralClass";
+import "./Button.css";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "app/routing";
 
@@ -121,10 +123,19 @@ const Button = ({
           ) : (
             icon && (
               <span
-                {...stylex.props(buttonStyles.leadingBase, buttonLeadingStyles[size])}
+                {...stylex.props(
+                  buttonStyles.leadingBase,
+                  buttonLeadingStyles[size],
+                  shouldRenderText && buttonStyles.textLeading,
+                )}
                 aria-hidden="true"
               >
-                <span {...stylex.props(buttonStyles.icon)}>{icon}</span>
+                <span {...withLiteralClass(
+                  shouldRenderText ? `Button__textIcon--${size}` : "",
+                  buttonStyles.icon,
+                )}>
+                  {icon}
+                </span>
               </span>
             )
           )}

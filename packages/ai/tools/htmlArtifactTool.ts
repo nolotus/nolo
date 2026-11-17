@@ -1,5 +1,7 @@
 import { callToolApi } from "./toolApiClient";
-import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
+import { resolveToolAttributionContext } from "./memoryToolContext";
+import { isDialogRecordKeyForId } from "database/dialogKey";
+import type { ToolExecutorContext } from "./index";
 import { DEFAULT_HTML_ARTIFACT_TITLE, type HtmlArtifact } from "core/htmlArtifact";
 
 export type { HtmlArtifact };
@@ -97,31 +99,32 @@ export const updateHtmlArtifactFunctionSchema = {
   },
 } as const;
 
-const resolveCurrentDialogKey = (thunkApi: any, explicitDialogKey?: string): string => {
+const resolveArtifactDialogKey = (thunkApi: any, explicitDialogKey?: string, context?: ToolExecutorContext): string => {
   if (explicitDialogKey && typeof explicitDialogKey === "string" && explicitDialogKey.trim()) {
     return explicitDialogKey.trim();
   }
-  const activeDialogKey = getActiveDialogKey();
-  if (activeDialogKey && typeof activeDialogKey === "string" && activeDialogKey.trim()) {
-    return activeDialogKey.trim();
-  }
-  const stateDialogKey = thunkApi?.getState?.()?.dialogs?.currentDialogKey;
-  if (stateDialogKey && typeof stateDialogKey === "string" && stateDialogKey.trim()) {
-    return stateDialogKey.trim();
-  }
-  throw new Error("无法确定当前对话 dialogKey，请显式提供 dialogKey。");
+  const state = thunkApi?.getState?.();
+  const { dialogId } = resolveToolAttributionContext(state, context, {
+    requireAgentKey: false, errorLabel: "无法确定 HTML artifact 归属",
+  });
+  if (context?.dialogKey?.trim()) return context.dialogKey.trim();
+  // The shared resolver has already established a unique loaded owner/id match.
+  return Object.keys(state.db.entities).find((key) =>
+    isDialogRecordKeyForId(key, dialogId) && state.db.entities[key]?.id?.trim() === dialogId
+  )!;
 };
 
 export async function createHtmlArtifactFunc(
   args: CreateHtmlArtifactArgs,
   thunkApi: any,
+  context?: ToolExecutorContext,
 ): Promise<HtmlArtifactToolResult> {
   const html = typeof args?.html === "string" ? args.html : "";
   if (!html.trim()) {
     throw new Error("createHtmlArtifact: html 内容不能为空。");
   }
 
-  const dialogKey = resolveCurrentDialogKey(thunkApi, args?.dialogKey);
+  const dialogKey = resolveArtifactDialogKey(thunkApi, args?.dialogKey, context);
   const title = typeof args?.title === "string" && args.title.trim() ? args.title.trim() : DEFAULT_HTML_ARTIFACT_TITLE;
 
   const response = await callToolApi<{ artifact: HtmlArtifact }>(

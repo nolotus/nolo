@@ -1,3 +1,5 @@
+import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { requireKnowledgeCaptureConfirmation, checkKnowledgeCaptureTarget } from "ai/tools/knowledgeCaptureConfirmation";
 // 文件: ai/tools/table/createTableTool.ts
 
 import { isRecord } from "core/isRecord";
@@ -34,6 +36,7 @@ type PublicIntakeConfigInput = {
 };
 
 type CreateTableToolArgs = {
+  __confirmedKnowledgeCapture?: unknown;
     spaceId?: string;
     title?: string;
     purpose?: string;
@@ -235,7 +238,7 @@ export async function createTableFunc(
     args: CreateTableToolArgs,
     thunkApi: any
 ): Promise<CreateTableResult> {
-    const spaceId = asOptionalTrimmedString(args?.spaceId);
+    const spaceId = args.spaceId === "" ? "" : asOptionalTrimmedString(args?.spaceId) ?? getCurrentSpaceId() ?? "";
     const title = asOptionalTrimmedString(args?.title);
     const purpose = asOptionalTrimmedString(args?.purpose);
     const description = asOptionalTrimmedString(args?.description);
@@ -311,6 +314,10 @@ export async function createTableFunc(
         columns: sanitizedColumns,
         withDefaultRows,
     };
+
+    requireKnowledgeCaptureConfirmation(args, "createTable", createArgs);
+
+  await checkKnowledgeCaptureTarget(spaceId, thunkApi);
 
     try {
         const actionResult = await thunkApi.dispatch(createTable(createArgs));

@@ -34,7 +34,9 @@ export class Spinner {
   private timer: any = null;
   private startTime = 0;
   private frameIndex = 0;
-  private frames = ["·", "~", "≈", "∿", "≈", "~"];
+  // 与 TUI 活动行同一套 braille 帧（tui/activityIndicator.ts 的 ACTIVITY_FRAMES），
+  // 保持两条指示器观感一致；每帧宽度 1 列。
+  private frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   private isTTY: boolean;
   private thinkingHint = "";
 

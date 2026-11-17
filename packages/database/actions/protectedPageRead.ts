@@ -1,3 +1,4 @@
+import { googleSessionRequestToken, googleSessionServer } from "core/googleSessionScope";
 import { createProtectedRecordSync, protectedSyncStateKey, protectedPageBaselineKey, type ProtectedSyncDb } from "./protectedRecordSync";
 import { createProtectedRecordTransport } from "./protectedRecordTransport";
 import type { ProtectedRecord } from "../protectedRecordProtocol";
@@ -54,7 +55,7 @@ export async function readProtectedPage(options: {
     if (origin && !access.servers.some(server => originOf(server) === origin)) {
       throw Error("文档归属服务器不在已配置服务器中或已移除，未发送认证信息，未转发认证信息");
     }
-    return access.token;
+    return origin ? googleSessionRequestToken(access.token, origin)! : access.token;
   };
   assertAccess();
   const sync = options.sync ?? createProtectedRecordSync({ db });
@@ -71,10 +72,7 @@ export async function readProtectedPage(options: {
             const access = options.getCurrentAccess!();
             return access.actorId === actorId && access.servers.some((server) => originOf(server) === origin);
           },
-          getToken: async () => {
-            const access = options.getCurrentAccess!();
-            return access.actorId === actorId ? access.token ?? null : null;
-          },
+          getToken: async ({ authorityServer }) => assertAccess(authorityServer),
         });
         for (let count = 0; count < state.outbox.length; count++) {
           if ((await transport.sendNext({ actorId, dbKey })).outcome !== "acked") break;
@@ -87,7 +85,12 @@ export async function readProtectedPage(options: {
       return state.workingCopy.data as ProtectedRecord;
     }
   }
-  const servers = saved ? [saved.authorityServer] : options.servers;
+  const access = options.getCurrentAccess?.() ?? options;
+  const googleAuthority = googleSessionServer(access.token);
+  const servers = saved ? [saved.authorityServer] : options.servers.filter(server =>
+    access.servers.some(candidate => originOf(candidate) === originOf(server)) &&
+    (!googleAuthority || originOf(server) === googleAuthority));
+
   for (const server of servers) {
     const origin = originOf(server);
     if (!origin) continue;

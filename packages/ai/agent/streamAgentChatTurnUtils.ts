@@ -12,16 +12,9 @@ import { selectAllMsgs } from "chat/messages/messageSlice";
 // （setViewMode Redux action 会同步写 module store，两者一致）。
 import { getViewMode, getCurrentSpaceIdRaw } from "create/space/spaceCurrentStore";
 import {
-    buildLinkedSpacesSection,
-    buildSpaceContextLayer,
     type TurnContextSource,
 } from "agent-runtime/turnContext";
 import {
-    selectAiRecentContentLimit,
-    selectGlobalPrompt,
-    selectKnowledgeCaptureLevel,
-    selectSpaceContextLevel,
-    selectUserTonePreset,
 } from "app/settings/fieldSelectors";
 import {
     getFullChatContextKeys,
@@ -29,7 +22,6 @@ import {
 } from "ai/agent/getFullChatContextKeys";
 import type { Agent, DialogConfig } from "app/types";
 import type { Contexts } from "ai/types";
-import { getModelContextWindow } from "ai/llm/getModelContextWindow";
 import { projectToolMessageContent } from "./toolOutputPolicy";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { selectIdentityUserId } from "identity/selectors";
@@ -42,14 +34,9 @@ import {
 } from "ai/llm/getPricing";
 import {
     buildStaticUserPolicyContext,
-    resolveSpaceContextPreloadPlan,
 } from "ai/policy/runtimePolicy";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asNonEmptyStringArray } from "core/stringArray";
-import {
-    PERSONALIZATION_DIALOG_CATEGORY,
-    buildPersonalizationDialogPolicyContext,
-} from "ai/policy/personalizationDialog";
 import { buildEditingContextSummary } from "./buildEditingContext";
 import { estimateTokenCount } from "ai/context/tokenUtils";
 import type { OpenAIMessage } from "integrations/openai/filterAndCleanMessages";
@@ -61,7 +48,7 @@ import {
 // force a full tools/index (all schemas + executors) load on the chat hot path.
 import { TOOL_PACKS, applyDisabledTools, expandEnabledPacks, resolveEffectiveEnabledPacks, expandEnabledPackPromptPatches, applyDefaultWebToolPacks, applySystemBuiltinSkillFilter, addDefaultSystemCapabilityTools } from "ai/tools/toolPacks";
 import { resolveAgentRecommendedSkillNames, resolveAgentRequiredPackIds } from "ai/tools/agentSkillConfig";
-import type { ResolvedSkillGraph } from "ai/skills/referenceRuntime";
+import { dedupeSkillPromptPatches, type ResolvedSkillGraph, type SkillPromptPatch } from "ai/skills/referenceRuntime";
 import { canonicalizeToolNames, prioritizeToolNames } from "ai/tools/toolNameAliases";
 import { resolveAgentImageInputSupport } from "ai/llm/agentCapabilities";
 import {
@@ -587,75 +574,17 @@ export const buildStaticContexts = async (
         fetchReferences(finalKeys.botKnowledgeContext),
     ]);
 
-    // 构建 spaceContext
-    const globalPrompt = selectGlobalPrompt(state);
-    const userTonePreset = selectUserTonePreset(state);
-    const knowledgeCaptureLevel = selectKnowledgeCaptureLevel(state);
-    const spaceContextLevel = selectSpaceContextLevel(state);
-    const userRecentLimit = selectAiRecentContentLimit(state);
-    const contextWindow = getModelContextWindow(agentConfig.model) || 128000;
-    const preloadPlan = resolveSpaceContextPreloadPlan(spaceContextLevel);
-    const dynamicLimit = Math.floor((contextWindow * preloadPlan.preloadBudgetRatio) / 150);
-    const recentLimit = preloadPlan.includeRecentContent
-        ? Math.max(3, Math.min(userRecentLimit, Math.max(3, dynamicLimit)))
-        : 0;
+    // Read workspace content on demand, not before the current request is known.
+    const spaceContext: string | null = null;
 
-    // space 真值统一为 dialog 记录的 spaceId（不再依赖 Redux currentSpace/viewMode）。
-    // 用户设置门控保留：spaceContextLevel > 1 才注入。
-    // recent contents 条数的 token 预算算法保留，算出的上限交给共享 builder。
-    // 失败可见：spaceId 存在但记录读不到时，共享 builder 输出显式失败 layer。
-    const turnContextSource = createDbSliceTurnContextSource(dispatch);
-    let spaceContext: string | null = null;
-
-    if (spaceContextLevel > 1) {
-        const spaceLayer = await buildSpaceContextLayer({
-            source: turnContextSource,
-            spaceId: dialogConfig?.spaceId,
-            recentContentLimit: recentLimit,
-        });
-        spaceContext = spaceLayer ? spaceLayer.content.trim() : null;
-    }
-
-    // 处理 linkedSpaces（保持现有输出语义：粗略上下文列表 + [无法访问] 标记）
-    const linkedSpaceIds = agentConfig.linkedSpaces || [];
-    if (linkedSpaceIds.length > 0 && spaceContextLevel > 1) {
-        const linkedSection = await buildLinkedSpacesSection({
-            source: turnContextSource,
-            linkedSpaceIds,
-        });
-        if (linkedSection) {
-            spaceContext = (spaceContext ?? "") + `\n\n${linkedSection}`;
-        }
-    }
-
-    // 当前仓库里只有 personalization 这一类“特殊流程对话”需要在普通 agent 之外
-    // 额外追加工具/策略约束，因此先按 dialog category 做最小分流。
-    // 如果未来出现多个稳定存在的流程型入口（例如 onboarding / agent-authoring / skill-authoring），
-    // 再考虑把这层升级成统一的 dialog mode 抽象。
-    const dialogPolicyContext =
-        dialogConfig?.category === PERSONALIZATION_DIALOG_CATEGORY
-            ? buildPersonalizationDialogPolicyContext()
-            : null;
+    const globalPrompt = null; // Retired account prompt; do not read historical text.
 
     return {
         botInstructionsContext: joinMapValues(botInstructionsMap),
         botKnowledgeContext: joinMapValues(botKnowledgeMap),
         spaceContext,
         userGlobalPrompt: globalPrompt,
-        userPolicyContext: [
-            buildStaticUserPolicyContext({
-                agentConfig,
-                settingsRecord: {
-                    userTonePreset,
-                    knowledgeCaptureLevel,
-                    spaceContextLevel,
-                    enableReadCurrentSpace: spaceContextLevel > 1,
-                },
-            }),
-            dialogPolicyContext,
-        ]
-            .filter(Boolean)
-            .join("\n"),
+        userPolicyContext: buildStaticUserPolicyContext({ agentConfig }),
     };
 };
 
@@ -790,7 +719,7 @@ export const mergeAgentToolsWithRuntime = (
     runtimeOptions?: AgentRuntimeOptions,
     state?: RootState,
     accountSkillRuntime?: ResolvedSkillGraph | null,
-): Agent => {
+): Agent & { runtimeBaseSkillPromptPatches: string[]; runtimeBaseSkillPromptContributions: SkillPromptPatch[]; skillPromptContributions: SkillPromptPatch[] } => {
     // Account graph traversal belongs to async callers, not synchronous tool assembly.
     // Server-prepared messages already contain account prompt contributions.
     const userSkills = agentConfig.runtimePromptAlreadyInMessages ? null : accountSkillRuntime;
@@ -850,15 +779,28 @@ export const mergeAgentToolsWithRuntime = (
             ...(userSkills?.recommendedSkillHints ?? []),
         ]),
     ];
+    // Keep the unassembled base for repeated tool merges. Account contributions
+    // are owned by the admitted graph, not by equality with arbitrary prose.
+    const runtimeBaseSkillPromptContributions: SkillPromptPatch[] =
+        (agentConfig as any).runtimeBaseSkillPromptContributions ??
+        (agentConfig as any).skillPromptContributions ?? [];
+    const runtimeBaseSkillPromptPatches: string[] =
+        (agentConfig as any).runtimeBaseSkillPromptPatches ??
+        ((agentConfig as any).skillPromptContributions !== undefined
+            ? [] : asNonEmptyStringArray((agentConfig as any).skillPromptPatches));
+    const skillPromptContributions = dedupeSkillPromptPatches([
+        ...runtimeBaseSkillPromptContributions,
+        ...(userSkills?.skillPromptContributions ?? []),
+    ]);
     const skillPromptPatches = [
-        ...new Set([
-            ...asNonEmptyStringArray((agentConfig as any).skillPromptPatches),
-            ...userSkillPromptPatches,
-            // 能力包的 promptPatch（方法论文档）与 skill reference 的 patch 走同一条
-            // 注入链（buildSkillGuidanceBlock → buildSkillGuidancePromptBlock），
-            // 让「工具 + 配套纪律」作为一个能力包整体注入 system prompt。
-            ...expandEnabledPackPromptPatches(effectiveEnabledPacks),
-        ]),
+        ...runtimeBaseSkillPromptPatches,
+        // 能力包的 promptPatch（方法论文档）与 skill reference 的 patch 走同一条
+        // 注入链（buildSkillGuidanceBlock → buildSkillGuidancePromptBlock），
+        // 让「工具 + 配套纪律」作为一个能力包整体注入 system prompt。
+        ...expandEnabledPackPromptPatches(effectiveEnabledPacks),
+        ...skillPromptContributions.map(patch => patch.content),
+        // Legacy callers with no identity metadata remain unmodified prose.
+        ...(userSkills?.skillPromptContributions === undefined ? userSkillPromptPatches : []),
     ];
     // LIGHT_WEB + FULL_BROWSER auto-injection (shared with server runtime).
     // skipWeb for inline-visual-artifact agents (pure output generators).
@@ -930,6 +872,9 @@ export const mergeAgentToolsWithRuntime = (
         recommendedSkillTools,
         recommendedSkillHints,
         skillPromptPatches,
+        runtimeBaseSkillPromptPatches,
+        runtimeBaseSkillPromptContributions,
+        skillPromptContributions,
     };
 };
 

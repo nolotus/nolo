@@ -184,6 +184,7 @@ type FinalizeContext = {
 };
 
 type ToolCallsContext = {
+    userMessageId?: string;
     dispatch: any;
     agentConfig: any;
     dialogId: string;
@@ -192,6 +193,7 @@ type ToolCallsContext = {
 };
 
 type StreamCompletionContext = {
+    userMessageId?: string;
     dispatch: any;
     dialogId: string;
     dialogKey: string;
@@ -632,6 +634,7 @@ async function processAccumulatedToolCalls(
                 messageId: ctx.messageId,
                 dialogId: ctx.dialogId,
                 dialogKey: ctx.dialogKey,
+                userMessageId: ctx.userMessageId,
             })
         )
         .unwrap();
@@ -697,6 +700,7 @@ async function handleStreamCompletion(
             dialogId: ctx.dialogId,
             dialogKey: ctx.dialogKey,
             messageId: ctx.messageId,
+            userMessageId: ctx.userMessageId,
         });
 
         let next = toolResult.state;
@@ -740,7 +744,9 @@ export const sendOpenAICompletionsRequest = async ({
     dialogKey,
     parentMessageId,
     disableToolsForThisRequest = false,
+    userMessageId,
 }: {
+    userMessageId?: string;
     bodyData: any;
     agentConfig: any;
     thunkApi: any;
@@ -937,6 +943,7 @@ export const sendOpenAICompletionsRequest = async ({
                         dialogKey: finalizeCtx.dialogKey,
                         messageId,
                         agentConfig,
+                        userMessageId,
                     },
                     finalizeCtx
                 );

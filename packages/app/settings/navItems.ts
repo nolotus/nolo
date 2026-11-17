@@ -3,7 +3,6 @@ import {
   LuBug,
   LuCode,
   LuCoins,
-  LuDatabase,
   LuDownload,
   LuGauge,
   LuKey,
@@ -12,7 +11,6 @@ import {
   LuMessageSquare,
   LuPalette,
   LuShield,
-  LuSparkles,
   LuUser,
 } from "react-icons/lu";
 import { isDesktopApp } from "app/utils/env";
@@ -68,24 +66,14 @@ export const buildSettingNavItems = (t: TranslateFn) => {
       Icon: LuKey,
     },
     {
-      path: SettingRoutePaths.SETTING_DATA_SOURCES,
-      label: String(t("settings.nav.dataSources", "数据源")),
-      Icon: LuDatabase,
-    },
-    {
       path: SettingRoutePaths.SETTING_MEMORY,
-      label: String(t("settings.nav.memory", "个性化设置")),
+      label: String(t("settings.nav.memory", "记忆")),
       Icon: LuBrain,
     },
     {
       path: SettingRoutePaths.SETTING_DEVELOPER,
       label: String(t("settings.nav.developer", "开发者")),
       Icon: LuBug,
-    },
-    {
-      path: SettingRoutePaths.SETTING_SYSTEM_SKILLS,
-      label: String(t("settings.nav.systemSkills", "Agent 能力")),
-      Icon: LuSparkles,
     },
     {
       path: SettingRoutePaths.SETTING_MACHINES,

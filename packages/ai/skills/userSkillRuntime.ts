@@ -8,6 +8,7 @@ import {
   type AgentSkillConfigSource,
 } from "ai/tools/agentSkillConfig";
 import {
+  dedupeSkillPromptPatches,
   resolveSkillGraphFromRoots,
   type ResolvedSkillGraph,
 } from "./referenceRuntime";
@@ -89,16 +90,18 @@ export async function resolveUserSkillRuntime(
   const contentByKey = new Map(
     [...graph.contentByKey].filter(([, page]) => page?.dbKey && admittedKeys.has(page.dbKey)),
   );
-  const skillPromptPatches = new Set<string>();
-  const seen = new Set<string>();
-  for (const visit of graph.visits) {
-    if (visit.mode !== "required" || seen.has(visit.dbKey)) continue;
-    seen.add(visit.dbKey);
+  const skillPromptContributions = dedupeSkillPromptPatches(graph.visits.flatMap((visit) => {
+    const entry = resolveBuiltinSkillEntry(visit.meta?.skillConfig?.id) ??
+      resolveBuiltinSkillEntry(visit.dbKey);
+    // Account roots/dependencies are only materialized from the builtin registry;
+    // retain the existing required-only contribution behavior.
+    if (visit.mode !== "required" || !entry) return [];
     const page = contentByKey.get(visit.dbKey);
-    const patch = (visit.meta?.skillConfig?.promptPatch ||
+    const content = (visit.meta?.skillConfig?.promptPatch ||
       parseSkillDocProtocol(page?.content ?? "", visit.meta).content).trim();
-    if (patch) skillPromptPatches.add(patch);
-  }
+    return content ? [{ skillId: entry.skillId, content }] : [];
+  }));
+  const skillPromptPatches = skillPromptContributions.map(({ content }) => content);
 
-  return { ...graph, contentByKey, skillPromptPatches: [...skillPromptPatches] };
+  return { ...graph, contentByKey, skillPromptPatches, skillPromptContributions };
 }

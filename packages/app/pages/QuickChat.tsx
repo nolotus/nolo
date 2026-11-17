@@ -351,31 +351,10 @@ const QuickChat: React.FC<QuickChatProps> = ({
   // 桌面客户端内部不再提示"下载桌面客户端"——那是对着已经装好的客户端说下载。
   const isDesktopApp = getIsDesktopApp();
 
-  const startPersonalization = useCallback(async () => {
-    try {
-      const { startPersonalizationDialog } = await import(
-        "ai/policy/personalizationDialog"
-      );
-      await startPersonalizationDialog({
-        dispatch,
-        navigate,
-        language: i18n.language,
-        source: "home",
-      });
-    } catch (error) {
-      console.error("Failed to start personalization dialog:", error);
-      toast.error(t("homeActions.personalizationFailed", "启动个性化设置失败"));
-    }
-  }, [dispatch, i18n.language, navigate, t]);
-
   const handleChipClick = useCallback(
     (chip: QuickChatChipAction) => {
       if (chip.action === "download") {
         navigate(AppRoutePaths.CLIENT_DOWNLOADS);
-        return;
-      }
-      if (chip.action === "personalization") {
-        void startPersonalization();
         return;
       }
       if (chip.action === "specialist") {
@@ -392,7 +371,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
       void preloadQuickChatRuntimeDependencies();
       setRuntimeActive(true);
     },
-    [navigate, startPersonalization]
+    [navigate]
   );
 
   // `/chat?launch=feedback` 等直达入口：挂载后自动以专职 agent 开一轮对话，只触发一次。
@@ -581,7 +560,6 @@ const QuickChat: React.FC<QuickChatProps> = ({
               isEmptyState={isEmptyState}
               pendingShellFiles={pendingShellFiles}
               onPendingShellFilesConsumed={handlePendingShellFilesConsumed}
-              onPersonalizationClick={isCompact ? undefined : startPersonalization}
               quickChatMode={quickChatMode}
               onModeChange={handleModeChange}
             />
@@ -756,7 +734,6 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
 
 type QuickChatChipAction =
   | { action: "prompt"; prompt: string }
-  | { action: "personalization" }
   | { action: "specialist"; agentKey: string; prompt: string }
   | { action: "download" };
 

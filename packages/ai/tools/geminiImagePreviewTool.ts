@@ -1,3 +1,5 @@
+import type { ToolExecutorContext } from "./index";
+import { resolveToolAttributionContext } from "./memoryToolContext";
 // 文件路径: ai/tools/geminiImagePreviewTool.ts
 
 import { callToolApi } from "./toolApiClient";
@@ -5,9 +7,6 @@ import { fileKey } from "database/keys";
 import { buildDatabaseFileContentUrl } from "database/fileUrl";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
-import { extractCustomId } from "core/prefix";
-import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
-import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { selectIdentityUserId } from "identity/selectors";
 
 const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-nano-banana-2.1" as const;
@@ -36,13 +35,6 @@ type GeminiImageCommonArgs = {
     aspectRatio?: string;
     imageSize?: "1K" | "2K" | "4K";
 };
-
-const selectCurrentDialogKeyFromState = (_state: any): string | null =>
-    getActiveDialogKey();
-
-// Space current-state now lives in a module store, not the Redux `space` slice.
-const selectCurrentSpaceIdFromState = (_state: any): string | null =>
-    getCurrentSpaceId();
 
 const selectUserIdFromState = (state: any): string | null => {
     const userId = selectIdentityUserId(state);
@@ -395,7 +387,8 @@ const createGeminiImageExecutor =
     (model: GeminiImageModel) =>
         async (
             args: GeminiImageCommonArgs,
-            thunkApi: any
+            thunkApi: any,
+            context?: ToolExecutorContext
         ): Promise<{ rawData: any; displayData: string; llmContext?: unknown }> => {
             const { prompt, images = [], aspectRatio, imageSize } = args;
 
@@ -405,10 +398,11 @@ const createGeminiImageExecutor =
             }
 
             const state = thunkApi.getState();
-            const currentDialogKey = selectCurrentDialogKeyFromState(state);
-            const dialogId = currentDialogKey
-                ? extractCustomId(currentDialogKey)
-                : undefined;
+            const { dialogId, spaceId } = resolveToolAttributionContext(state, context, {
+                requireAgentKey: true, errorLabel: "无法确定图像归属",
+            });
+            const userId = selectUserIdFromState(state);
+            const currentServer = selectCurrentServerFromState(state);
 
             const result = await callToolApi(
                 thunkApi,
@@ -417,10 +411,7 @@ const createGeminiImageExecutor =
                 { withAuth: true }
             );
 
-            // 将生成的图片自动加入当前 space
-            const spaceId = selectCurrentSpaceIdFromState(state);
-            const userId = selectUserIdFromState(state);
-            const currentServer = selectCurrentServerFromState(state);
+            // 复用请求发起时确定的归属，不读取当前界面。
 
             if (spaceId && userId && result?.files?.length) {
                 for (let i = 0; i < result.files.length; i++) {

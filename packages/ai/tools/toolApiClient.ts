@@ -14,7 +14,6 @@
 
 import { compactWhitespace } from "core/compactWhitespace";
 import { isRecord } from "core/isRecord";
-import { extractCustomId } from "core/prefix";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { selectIdentityToken } from "identity/selectors";
@@ -156,21 +155,6 @@ export interface CallToolApiOptions {
   signal?: AbortSignal;
 }
 
-const maybeAttachDialogId = (thunkApi: any, body: object): object => {
-  if (!isRecord(body)) return body;
-  if ("dialogId" in body) return body;
-
-  const state = thunkApi.getState();
-  const currentDialogKey = selectCurrentDialogKeyFromState(state);
-  const dialogId = currentDialogKey ? extractCustomId(currentDialogKey) : null;
-  if (!dialogId) return body;
-
-  return {
-    ...body,
-    dialogId,
-  };
-};
-
 export class ToolApiError extends Error {
   status?: number;
   code?: string;
@@ -269,7 +253,7 @@ export async function callToolApi<T = any>(
     ...(options.signal ? { signal: options.signal } : {}),
     ...(method === "GET"
       ? {}
-      : { body: JSON.stringify(maybeAttachDialogId(thunkApi, body)) }),
+      : { body: JSON.stringify(body) }),
   });
 
   const contentType = response.headers.get("content-type");

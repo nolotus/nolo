@@ -1,3 +1,4 @@
+import { googleSessionRequestToken, isGoogleAuthoritySession } from "core/googleSessionScope";
 /**
  * Phase-aware budgets for one getConvMsgs exchange, in ms.
  *
@@ -79,6 +80,7 @@ export const fetchConvMsgs = async (
   }: { dialogId: string; dialogKey?: string; limit?: number; beforeKey?: string },
   options: { signal?: AbortSignal } = {}
 ) => {
+  googleSessionRequestToken(token, server);
   const { signal: externalSignal } = options;
 
   const controller = new AbortController();
@@ -138,6 +140,7 @@ export const fetchConvMsgs = async (
   try {
     const response = await fetch(`${server}/rpc/getConvMsgs`, {
       method: "POST",
+      ...(isGoogleAuthoritySession(token) ? { redirect: "error" as const, credentials: "omit" as const } : {}),
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",

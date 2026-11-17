@@ -8,6 +8,7 @@ export type CliAuthorityBrokerRequest =
   | { type: "open" }
   | { type: "close" }
   | { type: "get"; key: string }
+  | { type: "conditionalPut"; key: string; expectedRevision: number | null; value: unknown }
   | { type: "put"; key: string; value: unknown }
   | { type: "del"; key: string }
   | { type: "batchWrite"; ops: AuthorityBatchOperation[] }
@@ -26,6 +27,7 @@ export type CliAuthorityBrokerIteratorPage = {
 
 export type CliAuthorityBrokerSuccessResponse =
   | { ok: true; result: { type: "status" | "open" | "close" | "put" | "del" | "batchWrite" } }
+  | { ok: true; result: { type: "conditionalPut"; status: "updated" | "conflict" } }
   | { ok: true; result: { type: "get"; value: unknown } }
   | { ok: true; result: { type: "iterator"; page: CliAuthorityBrokerIteratorPage } };
 

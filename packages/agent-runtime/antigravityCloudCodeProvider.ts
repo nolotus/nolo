@@ -1,3 +1,4 @@
+import { hasAssembledAgentPrompt } from "./types";
 import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
 import { createHash, randomUUID } from "node:crypto";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -236,7 +237,7 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
   }
 
   const prompt = args.agentConfig.prompt?.trim();
-  if (prompt) systemTexts.unshift(prompt);
+  if (prompt && !hasAssembledAgentPrompt(rawMessages)) systemTexts.unshift(prompt);
 
   const request: Record<string, unknown> = { contents };
   if (systemTexts.length > 0) {

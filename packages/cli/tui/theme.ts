@@ -236,6 +236,8 @@ export function supportsTruecolor(env: Record<string, string | undefined> = proc
   const explicit = (env.NOLO_TUI_TRUECOLOR ?? "").trim().toLowerCase();
   if (explicit === "1" || explicit === "true") return true;
   if (explicit === "0" || explicit === "false") return false;
+  // Windows Terminal identifies sessions without requiring COLORTERM.
+  if ((env.WT_SESSION ?? "").trim()) return true;
   if (/truecolor|24bit/i.test(env.COLORTERM ?? "")) return true;
   if (/direct|24bit/i.test(env.TERM ?? "")) return true;
   const program = (env.TERM_PROGRAM ?? "").toLowerCase();

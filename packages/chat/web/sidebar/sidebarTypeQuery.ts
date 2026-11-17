@@ -34,22 +34,25 @@ export const SIDEBAR_TYPE_PREFERENCE_STORAGE_KEY = "space-sidebar-type-filter";
 /**
  * 读本地偏好；没有有效存储值（首次访问 / 非法值 / SSR / 读写被拒）返回 null。
  * 返回 null 而不是直接给默认值：「首次默认」由各调用方决定——chip 用
- * DEFAULT_SIDEBAR_TYPE_FILTER（agent），独立渲染的列表沿用自身的历史默认。
+ * DEFAULT_SIDEBAR_TYPE_FILTER（all），独立渲染的列表沿用自身的历史默认。
  */
-export const readStoredSidebarType = (): SidebarTypeFilterId | null => {
+const preferenceKey = (userId: string): string =>
+  `${SIDEBAR_TYPE_PREFERENCE_STORAGE_KEY}:user:${encodeURIComponent(userId)}`;
+
+export const readStoredSidebarType = (userId: string | undefined): SidebarTypeFilterId | null => {
   try {
-    if (typeof window === "undefined") return null;
-    const stored = window.localStorage.getItem(SIDEBAR_TYPE_PREFERENCE_STORAGE_KEY);
+    if (typeof window === "undefined" || !userId) return null;
+    const stored = window.localStorage.getItem(preferenceKey(userId));
     return isSidebarTypeFilterId(stored) ? stored : null;
   } catch {
     return null;
   }
 };
 
-export const writeStoredSidebarType = (filter: SidebarTypeFilterId): void => {
+export const writeStoredSidebarType = (filter: SidebarTypeFilterId, userId: string | undefined): void => {
   try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(SIDEBAR_TYPE_PREFERENCE_STORAGE_KEY, filter);
+    if (typeof window === "undefined" || !userId) return;
+    window.localStorage.setItem(preferenceKey(userId), filter);
   } catch {}
 };
 
@@ -66,7 +69,7 @@ export const applySidebarTypeToParams = (
 };
 
 /**
- * 有效 URL 优先，其次本地偏好（本地偏好本身已回落为首次默认 agent）。
+ * 有效 URL 优先，其次本地偏好（本地偏好本身已回落为首次默认 all）。
  */
 export const resolveEffectiveSidebarType = (
   search: string | null | undefined,

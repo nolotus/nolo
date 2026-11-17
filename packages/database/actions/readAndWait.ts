@@ -1,3 +1,6 @@
+import { googleSessionRequestToken } from "core/googleSessionScope";
+import { isPublicBuiltinPlatformAgentKey } from "core/builtinAgents";
+import { scopeGoogleSessionServers } from "core/googleSessionScope";
 // 文件路径: database/actions/readAndWait.ts
 
 import { readProtectedPage } from "./protectedPageRead";
@@ -168,6 +171,10 @@ export const readAndWaitAction = async (
     userAuthorityRegistry,
   } = getRuntimeServerContext(state, preferredServerOrigin);
   const allServers = resolveAgentReadServers({ dbKey, configuredServers });
+  const fetchScopedFromServer = (server: string, key: string, token?: string, signal?: AbortSignal) =>
+    signal === undefined
+      ? fetchFromServer(server, key, googleSessionRequestToken(token, server, isPublicBuiltinPlatformAgentKey(key)))
+      : fetchFromServer(server, key, googleSessionRequestToken(token, server, isPublicBuiltinPlatformAgentKey(key)), signal);
   const isLoggedIn = !!currentToken;
 
   const executeReadAndWait = async (): Promise<any> => {
@@ -190,11 +197,12 @@ export const readAndWaitAction = async (
       currentServer,
       userAuthorityRegistry,
     });
-    const readServers = planAuthorityReadServers({
+    let readServers = planAuthorityReadServers({
       allServers,
       authorityServer: preferredServerOrigin ?? authority.authorityServer,
       serverOrigin: authority.serverOrigin,
     });
+    if (!isPublicBuiltinPlatformAgentKey(dbKey)) readServers = scopeGoogleSessionServers(currentToken, currentServer, readServers);
     const hasPreferredAuthorityServer =
       !!preferredServerOrigin || !!authority.authorityServer;
     const preferredAuthorityServer = hasPreferredAuthorityServer
@@ -213,7 +221,7 @@ export const readAndWaitAction = async (
 
     if (preferredAuthorityServer) {
       try {
-        const preferredRemoteData = await fetchFromServer(
+        const preferredRemoteData = await fetchScopedFromServer(
           preferredAuthorityServer,
           dbKey,
           isLoggedIn ? currentToken : undefined
@@ -232,7 +240,7 @@ export const readAndWaitAction = async (
       ? readServers.filter((server) => server !== preferredAuthorityServer)
       : readServers;
     const remotePromises = remainingReadServers.map((server) =>
-      fetchFromServer(server, dbKey, isLoggedIn ? currentToken : undefined)
+      fetchScopedFromServer(server, dbKey, isLoggedIn ? currentToken : undefined)
     );
 
     // 4. 将所有信息交给核心处理函数去做最终决策

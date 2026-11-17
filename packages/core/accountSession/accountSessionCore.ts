@@ -302,7 +302,7 @@ export class AccountSessionCore {
     this.setSnapshot({
       ...this.snapshot,
       transition,
-    });
+    }, true);
   }
 
   /**

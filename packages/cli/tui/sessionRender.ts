@@ -84,7 +84,8 @@ export function renderComposerTokenChip(
 
 /**
  * 状态行的上下文占用 chip，两档呈现（按**可用宽度**降级，不看占用率）：
- *   默认：`ctx 42%`；精确 token 数保留在 `/context`。
+ *   宽：`ctx 84k/200k`（只给已用/上限，不重复百分比）
+ *   窄：`ctx 42%`
  *
  * 口径仍走 resolveContextUsage（与 `/context` 面板的令牌行同一处）：已用 =
  * 下一轮上下文占用（provider input，未收到 usage 时用本地估算 + 轮内流式增量），
@@ -98,7 +99,7 @@ function renderStatusContextSegment(
     | "estimatedContextTokens"
     | "liveTurnEstimatedTokens"
   >,
-  _compact: boolean,
+  compact: boolean,
 ): string {
   const usage = resolveContextUsage({
     tokens: state.turnTokens,
@@ -111,7 +112,8 @@ function renderStatusContextSegment(
   }
   const pct = Math.min(100, usage.pct ?? 0);
   const pctText = pct > 0 && pct < 10 ? pct.toFixed(1) : Math.round(pct).toString();
-  return `ctx ${pctText}%`;
+  if (compact) return `ctx ${pctText}%`;
+  return `ctx ${formatTokenCount(usage.used)}/${formatTokenCount(usage.contextWindow)}`;
 }
 
 /**

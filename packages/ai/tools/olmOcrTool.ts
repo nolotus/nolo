@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 import { callToolApi } from "./toolApiClient";
 
 export const olmOcrSchema = {
@@ -20,10 +21,10 @@ export const olmOcrSchema = {
     },
 };
 
-export const olmOcrFunc = async (input: any, thunkApi: any): Promise<any> => {
+export const olmOcrFunc = async (input: any, thunkApi: any, context?: ToolRequestDialogContext): Promise<any> => {
     const { imageUrl, prompt = "识别图片中的所有文字" } = input;
 
-    const data = await callToolApi(thunkApi, "/api/olm-ocr", { imageUrl, prompt }, { withAuth: true });
+    const data = await callToolApi(thunkApi, "/api/olm-ocr", { imageUrl, prompt, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) }, { withAuth: true });
 
     return {
         summary: "OCR processing completed",

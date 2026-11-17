@@ -569,39 +569,8 @@ export interface BuildUserGlobalPromptLayerArgs {
 export const buildUserGlobalPromptLayer = async (
   args: BuildUserGlobalPromptLayerArgs,
 ): Promise<TurnContextLayer | null> => {
-  const userId = asTrimmed(args.userId);
-  if (!userId) return null;
-
-  const key = args.settingsKey
-    ? args.settingsKey(userId)
-    : `${userId}-settings`;
-
-  let settingsRecord: Record<string, unknown> | null = null;
-  let readError: string | null = null;
-  try {
-    settingsRecord = await args.source.readRecord(key);
-  } catch (error) {
-    readError = error instanceof Error ? error.message : String(error);
-  }
-
-  if (readError) {
-    return makeLayer(
-      "user-global-prompt",
-      [
-        "--- 用户全局偏好 ---",
-        `读取用户 ${userId} 的偏好设置失败（${readError}）。`,
-        "如被问及用户偏好，请如实说明当前无法读取用户设置，不要编造偏好。",
-      ].join("\n"),
-    );
-  }
-
-  const globalPrompt = asTrimmed(settingsRecord?.globalPrompt);
-  if (!globalPrompt) return null;
-
-  return makeLayer(
-    "user-global-prompt",
-    `-- - 用户全局偏好-- -\n${globalPrompt}`,
-  );
+  // Compatibility API: historical account text is retained, never injected.
+  return null;
 };
 
 // ============================================================================
@@ -656,6 +625,27 @@ export interface BuildMemoryOverlayLayerArgs {
 }
 
 /**
+ * Whether a tool surface exposes the memory tools (remember / query / delete).
+ *
+ * Single definition for the turn-context layer line. `buildSystemPrompt`
+ * (web/server assembly) applies the same rule to `agentConfig.tools`, so both
+ * lines agree once a host hands over the surface the model actually sees.
+ *
+ * Pass the *effective* surface (post pack-expansion, disabledTools and
+ * builtin-skill filtering), not the declared one: gating on declared names is
+ * how `rememberMemory` came to be described to a model whose schema never had
+ * it (see `hostAdapter.ts` on `exposedToolNames`).
+ */
+export const hasMemoryTools = (
+  toolNames?: readonly string[] | null,
+): boolean =>
+  Array.isArray(toolNames)
+    ? toolNames.some(
+        (name) => typeof name === "string" && /memory/i.test(name),
+      )
+    : false;
+
+/**
  * Memory overlay layer: the actual memory content (session-scope — loaded once
  * per dialog, reused across turns). New memories written during the dialog are
  * for future dialogs, not the current one. /new or dialog switch clears the
@@ -676,21 +666,37 @@ export const buildMemoryOverlayLayer = (
  * to weigh memory against current input. Never changes between turns, so it
  * sits in the stable prefix for LLM prefix-cache hits.
  *
- * Null when there is no memory promptBlock — the guidance only matters when
- * memory is active.
+ * Injected when the agent exposes memory tools (even with an empty memory
+ * library, i.e. no overlay promptBlock this dialog) or when an overlay is
+ * present. Neither condition flips per turn — the tool surface is fixed for the
+ * dialog and the overlay is cached per dialog — so the guidance does not move
+ * in and out of the prefix as recall results come and go. Without the
+ * tools-driven case a new account (empty library ⇒ no promptBlock) would never
+ * learn how to weigh memory, and therefore never write any: the library stays
+ * empty forever.
  *
- * 门控分歧说明（有意为之，勿"统一"掉）：server 路径（buildSystemPrompt）
- * 按 hasMemoryTools 常驻注入——因为 memory overlay 是 turn-scope、按轮变化，
- * 指引若随 overlay 翻转会反复打破前缀缓存；而本 builder 的消费方
- * （TUI/desktop/CLI）的 overlay 按 dialog 缓存、dialog 内不翻转，按
- * promptBlock 门控同样前缀稳定。若未来 TurnContextSource 能拿到 agent
- * 工具列表，再统一为 hasMemoryTools。
+ * 接线现状（勿凭本函数就认为四端已启用）：server/web 的 buildSystemPrompt 按
+ * `agentConfig.tools` 常驻注入；desktop / CLI / TUI 三条本地线在组装本层时
+ * 尚未解析出工具面（CLI/TUI: `localRuntimeAdapter.ts` 的 resolveProvider；
+ * desktop: `desktopAgentRuntimeTurnService.ts` 的 resolveProvider），因此这三端
+ * 仍只按 promptBlock 门控，`hasMemoryTools` 需等工具面前移到层组装之前再传入。
  */
+export interface BuildMemoryUseGuidanceLayerArgs
+  extends BuildMemoryOverlayLayerArgs {
+  /**
+   * Whether this agent's *effective* tool surface exposes memory tools (see
+   * `hasMemoryTools`). Hosts that have not resolved their tool surface when
+   * assembling layers leave it unset — the layer then follows the promptBlock
+   * only, exactly as before.
+   */
+  hasMemoryTools?: boolean;
+}
+
 export const buildMemoryUseGuidanceLayer = (
-  args: BuildMemoryOverlayLayerArgs,
+  args: BuildMemoryUseGuidanceLayerArgs,
 ): TurnContextLayer | null => {
   const promptBlock = asTrimmed(args.promptBlock);
-  if (!promptBlock) return null;
+  if (!promptBlock && args.hasMemoryTools !== true) return null;
   return makeLayer(
     "memory-use-guidance",
     MEMORY_USE_GUIDANCE,

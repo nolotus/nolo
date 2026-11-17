@@ -43,3 +43,6 @@ export const recordSettingsWriteFailure = createAction<SettingsWriteFailure | nu
 export const recordServerAuthorityEcho = createAction<number>(
   "settings/_recordServerAuthorityEcho",
 );
+
+/** Publish plugin values and their session provenance in one reducer action. */
+export const publishUiPlugins = createAction<{ value: SettingState["uiPlugins"]; accountId: string; generation: number | undefined }>("settings/_publishUiPlugins");

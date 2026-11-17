@@ -1,3 +1,4 @@
+import { toolRequestDialogId } from "./toolRequestDialogId";
 import { ToolDefinition } from ".";
 import { callToolApi } from "./toolApiClient";
 
@@ -21,10 +22,10 @@ export const deepseekOcrSchema = {
     },
 };
 
-export const deepseekOcrFunc: ToolDefinition["executor"] = async (input: any, thunkApi) => {
+export const deepseekOcrFunc: ToolDefinition["executor"] = async (input: any, thunkApi, context) => {
     const { imageUrl, prompt = "识别图片中的所有文字" } = input;
 
-    const data = await callToolApi(thunkApi, "/api/deepseek-ocr", { imageUrl, prompt }, { withAuth: true });
+    const data = await callToolApi(thunkApi, "/api/deepseek-ocr", { imageUrl, prompt, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) }, { withAuth: true });
 
     return {
         summary: "OCR processing completed",

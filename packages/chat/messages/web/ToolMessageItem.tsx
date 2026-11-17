@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import React, { memo, useMemo, useState, useEffect, useRef } from "react";
+import React, { memo, useMemo, useState, useEffect, useRef, useSyncExternalStore } from "react";
 import {
   LuChevronDown,
   LuChevronRight,
@@ -19,6 +19,9 @@ import { toast } from "app/utils/toast";
 import DocxPreviewDialog from "render/web/ui/modal/DocxPreviewDialog";
 import ToolMessageContent from "./ToolMessageContent";
 import ConversationInteraction from "./ConversationInteraction";
+import { inferMessageDialogIdFromDbKey } from "../messageDialogIdentity";
+import { getSnapshot as getGateSnapshot, subscribe as subscribeGates } from "app/utils/desktopActionGateChannel";
+import { SecretInputPanelWeb, hasSecretInputAnchor } from "./SecretInputPanelWeb";
 import AskChoicePanelWeb from "./AskChoicePanelWeb";
 import Editor from "create/editor/Editor";
 
@@ -112,6 +115,7 @@ export const ToolMessageItem = memo(
     const navigate = useNavigate();
 
     const { content, toolName, isStreaming, toolPayload, dbKey } = message;
+    useSyncExternalStore(subscribeGates, getGateSnapshot, getGateSnapshot);
     const rawData = useMemo(() => safeParse(content), [content]);
 
     const isRepairableFailure =
@@ -351,6 +355,11 @@ export const ToolMessageItem = memo(
     };
 
     // Inline choices persist the full card payload before the shared panel sends.
+    const secretDialogId = message.dialogId ?? inferMessageDialogIdFromDbKey(message.dbKey) ?? undefined;
+    if (toolName === "secret-request" && hasSecretInputAnchor(secretDialogId, message.id)) {
+      return readOnly ? null : <SecretInputPanelWeb dialogId={secretDialogId} messageId={message.id} />;
+    }
+
     if (toolName === "show_interaction" || rawData?.type === "show_interaction") {
       const handleInteractionResolve = async (resolution: AskChoiceResolution) => {
         const nextRawData = buildUiInteractionPersistChanges(rawData, resolution);

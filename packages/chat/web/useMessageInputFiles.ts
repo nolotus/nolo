@@ -1,3 +1,4 @@
+import { isGoogleAuthoritySession } from "core/googleSessionScope";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { TFunction } from "i18next";
@@ -205,6 +206,7 @@ export const useMessageInputFiles = (
           phase: withinLimit ? "uploading" : "error",
           loaded: 0,
           total: file.size,
+          indeterminate: isGoogleAuthoritySession(token),
           error: withinLimit
             ? undefined
             : t("mediaFileTooLarge", {
@@ -315,6 +317,7 @@ export const useMessageInputFiles = (
       processImages,
       t,
       updateMediaUpload,
+      token,
     ],
   );
 
@@ -364,6 +367,7 @@ export const useMessageInputFiles = (
             phase: item.phase,
             loaded: item.loaded,
             total: item.total,
+            indeterminate: item.indeterminate,
             size: item.size,
             remove: () => removeMediaUpload(item.trackingId),
           },
@@ -401,6 +405,7 @@ interface MediaUploadEntry {
   phase: MediaUploadPhase;
   loaded: number;
   total: number;
+  indeterminate?: boolean;
   error?: string;
 }
 
@@ -409,6 +414,7 @@ export interface PendingMediaUploadState {
   phase: MediaUploadPhase;
   loaded: number;
   total: number;
+  indeterminate?: boolean;
   size: number;
   remove: () => void;
 }

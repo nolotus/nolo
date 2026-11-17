@@ -1,3 +1,4 @@
+import { hasAssembledAgentPrompt } from "./types";
 import type { AgentRuntimeChatMessage } from "./types";
 import { randomUUID } from "node:crypto";
 
@@ -434,7 +435,7 @@ export function buildAnthropicMessagesBody(args: {
     ? args.openAiBody.messages
     : [];
   const system: JsonRecord[] = [];
-  if (args.agentConfig.prompt?.trim()) {
+  if (!hasAssembledAgentPrompt(rawMessages) && args.agentConfig.prompt?.trim()) {
     system.push({ type: "text", text: args.agentConfig.prompt.trim() });
   }
   const messages: JsonRecord[] = [];

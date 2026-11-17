@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 import { callToolApi } from "./toolApiClient";
 import {
   buildMediaToolConfirmation,
@@ -41,6 +42,7 @@ export type TranslateToolInput = {
 async function translateInternal(
   input: TranslateToolInput,
   thunkApi: any,
+  context?: ToolRequestDialogContext,
 ): Promise<any> {
   const { jobId, targetLang, confirmationToken, expectedExecutionRevision } = input ?? {};
   if (!jobId) throw new Error("translate 工具必须提供 jobId");
@@ -52,6 +54,7 @@ async function translateInternal(
   const revision = normalizeMediaConfirmExecutionRevision(expectedExecutionRevision);
   const stepBody: Record<string, unknown> = {
     step: "translate",
+    dialogId: toolRequestDialogId(context, () => thunkApi.getState()),
     // 目标语言原样透传：票据 selection 与执行参数必须同源（不回落 job.targetLang，不二次规范化）。
     targetLang,
     waitMs: 60_000,
@@ -139,8 +142,8 @@ async function translateInternal(
 }
 
 /** Model context is independent of the UI summary; never expose authorization tickets. */
-export async function translateFunc(input: TranslateToolInput, thunkApi: any): Promise<any> {
-  const result = await translateInternal(input, thunkApi);
+export async function translateFunc(input: TranslateToolInput, thunkApi: any, context?: ToolRequestDialogContext): Promise<any> {
+  const result = await translateInternal(input, thunkApi, context);
   const stepResult = result.rawData?.stepResult ?? result.rawData;
   const artifact = stepResult?.artifacts?.translate;
   const fileId = artifact?.fileId ?? stepResult?.fileId;

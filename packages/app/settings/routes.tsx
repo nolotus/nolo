@@ -15,12 +15,10 @@ const EditorConfig = lazy(() => import("./web/EditorConfig"));
 const ChatConfig = lazy(() => import("./web/ChatConfig"));
 const Productivity = lazy(() => import("./web/Productivity"));
 const SecretsConfig = lazy(() => import("./web/SecretsConfig"));
-const DataSourcePluginsConfig = lazy(() => import("./web/DataSourcePluginsConfig"));
 const MemoryConfig = lazy(() => import("./web/MemoryConfig"));
 const DesktopUpdates = lazy(() => import("./web/DesktopUpdates"));
 const DesktopMachines = lazy(() => import("./web/DesktopMachines"));
 const DeveloperConfig = lazy(() => import("./web/DeveloperConfig"));
-const SystemBuiltinSkills = lazy(() => import("./web/SystemBuiltinSkills"));
 const MediaAllowance = lazy(() => import("./web/MediaAllowance"));
 
 const SettingsFallback = <PageLoading fullHeight message="设置加载中..." />;
@@ -58,9 +56,26 @@ const LegacySettingsRedirect: React.FC = () => {
   );
 };
 
+// Redirect before mounting SettingLayout: old bookmarks must not render a
+// second settings shell around the plugin configuration page.
+const SettingsRouteEntry: React.FC = () => {
+  const location = useLocation();
+  const pathname = location.pathname.replace(/\/$/, "");
+  const target = pathname === "/settings/system-skills" ? "/plugins/agent-capabilities"
+    : pathname === "/settings/data-sources" ? "/plugins/data-sources" : null;
+  if (!target) return withSuspense(<SettingLayout />);
+  // backgroundLocation belongs to the settings overlay, not an independent
+  // plugin page. Carry other navigation context without keeping that overlay alive.
+  const state = location.state;
+  const nextState = state && typeof state === "object" && !Array.isArray(state)
+    ? Object.fromEntries(Object.entries(state).filter(([key]) => key !== "backgroundLocation"))
+    : state;
+  return <Navigate to={`${target}${location.search}${location.hash}`} replace state={nextState} />;
+};
+
 export const settingRoutes = {
   path: SettingRoutePaths.SETTING,
-  element: withSuspense(<SettingLayout />),
+  element: <SettingsRouteEntry />,
   children: [
     {
       index: true,
@@ -95,12 +110,12 @@ export const settingRoutes = {
     },
     {
       path: SettingRoutePaths.SETTING_SYSTEM_SKILLS,
-      element: withSuspense(<SystemBuiltinSkills />),
+      element: null,
     },
     { path: SettingRoutePaths.SETTING_SECRETS, element: withSuspense(<SecretsConfig />) },
     {
       path: SettingRoutePaths.SETTING_DATA_SOURCES,
-      element: withSuspense(<DataSourcePluginsConfig />),
+      element: null,
     },
     { path: SettingRoutePaths.SETTING_MEMORY, element: withSuspense(<MemoryConfig />) },
     {

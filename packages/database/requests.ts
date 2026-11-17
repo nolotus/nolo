@@ -1,3 +1,4 @@
+import { googleSessionRequestToken, isGoogleAuthoritySession } from "core/googleSessionScope";
 // database/requests.ts
 import { isAbortError } from "core/abortError";
 import { selectIdentityToken } from "identity/selectors";
@@ -44,19 +45,19 @@ export const noloRequest = async (
   state: any,
   signal?: AbortSignal
 ): Promise<Response> => {
-  const headers: Record<string, string> = (config.headers as Record<string, string>) || {
-    "Content-Type": "application/json",
-  };
+  const headers: Record<string, string> = { ...(config.headers as Record<string, string> || { "Content-Type": "application/json" }) };
   // 从绑定的 AccountSessionCore 读 token（Phase 5：state.auth 已删）
   const token = selectIdentityToken(state) ?? null;
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  const requestToken = googleSessionRequestToken(token ?? undefined, server);
+  if (requestToken) {
+    headers["Authorization"] = `Bearer ${requestToken}`;
   }
 
   return fetch(server + config.url, {
     method: config.method || "GET",
     headers,
     body: config.body,
+    ...(isGoogleAuthoritySession(token) ? { credentials: "omit" as const, redirect: "error" as const } : {}),
     signal, // 传递 AbortSignal
     ...(config.keepalive ? { keepalive: true } : {}),
   });
@@ -243,7 +244,9 @@ export const noloUploadRequest = async (
   onProgress?: UploadProgressHandler
 ): Promise<boolean> => {
   const { file, metadata, customKey, userId } = uploadConfig;
+  const googleSession = isGoogleAuthoritySession(selectIdentityToken(state));
   try {
+    googleSessionRequestToken(selectIdentityToken(state) ?? undefined, server);
     const isReactNative =
       typeof navigator !== "undefined" && (navigator as any).product === "ReactNative";
     const isRNFile = (f: any) => f && typeof f.uri === 'string' && typeof f.name === 'string' && typeof f.type === 'string';
@@ -278,7 +281,7 @@ export const noloUploadRequest = async (
       formData.append("userId", userId); // 添加用户ID（如果有）
     }
 
-    if (onProgress && typeof XMLHttpRequest !== "undefined") {
+    if (onProgress && !googleSession && typeof XMLHttpRequest !== "undefined") {
       const result = await xhrUploadRequest(
         server + `${API_ENDPOINTS.DATABASE}/upload`,
         formData,
@@ -310,6 +313,7 @@ export const noloUploadRequest = async (
         `Upload request failed for ${customKey} on ${server}: HTTP ${response.status}`
       );
     }
+    if (response.ok && googleSession && onProgress) onProgress(file.size, file.size);
     return response.ok;
   } catch (error: any) {
     if (!isAbortError(error)) {

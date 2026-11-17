@@ -1,3 +1,4 @@
+import { preferredTopTaskEntries } from "./tuiLayout";
 /**
  * 顶部固定运行区（fixed run zone）的逐行格式化。
  *
@@ -36,16 +37,16 @@ import {
   runStatusTone,
   sanitizeRunSnapshotForNormal,
 } from "./runSnapshotDisplay";
-import { t } from "./i18n";
+import { t, getCliLocale } from "./i18n";
 import { fitAnsiLine, visibleWidth } from "./tuiAnsi";
 import { themeText } from "./theme";
 import type { RemoteTaskView } from "../../core/remoteTaskView";
 
 /**
  * 运行区同时展开的 run 行数上限；多出来的折叠成 `+N more`。
- * 与 runDock 的硬顶同值——两个面板吃的是同一块 composer 预留高度。
+ * 与 runDock 共用；workspace 通过 maxEntries 传入实际顶部预算。
  */
-export const RUN_ZONE_MAX_ROWS = 3;
+export const RUN_ZONE_MAX_ROWS = 7;
 
 /**
  * 活动 agent run 的类型标记。用 🤖 取代生硬的「agent / 智能体」类型字样；
@@ -168,6 +169,11 @@ export function remoteCostIsExplicitlyUnknown(carrier?: RemoteTaskCarrier): bool
   return carrier?.remoteTask?.cost === null;
 }
 
+/** Slow, fixed-width running signal, driven by the dock's existing one-second tick. */
+function runningFrame(now: number): string {
+  return ["|", "/", "-", "\\"][Math.floor(now / 1000) % 4]!;
+}
+
 export function runZoneLeadIcon(status: string, carrier?: RemoteTaskCarrier): string {
   if (!isAgentRunTerminalStatus(status)) {
     // 远程任务失去证据时不摆「正在跑」的转轮：那是我们唯一确定不知道的事。
@@ -285,26 +291,19 @@ function runZoneFacts(
 /**
  * 终端尺寸驱动的降级（均可选；缺省 = 不降级，保持旧行为）。
  *
- * 行数（rows = 终端总高度）——运行区与 spinner/队列/composer 共用底部预留区，
- * 历史区拿剩下的，所以越矮越要收：
- *   rows < 10 → 1 条 run（+N 折叠行）；rows < 16 → 最多 2 条；否则 maxRows(3)。
- *   依据：composer 本体（分隔线 ×2 + 输入 + 状态栏）约 4-5 行，spinner 1 行，
- *   运行区最坏 3+1=4 行；24 行终端留给历史 ≥ 24-5-1-4=14 行，没问题。16 行
- *   以下最坏只剩 6 行以内，砍到 2 条（≤3 行）；10 行以下砍到 1 条（≤2 行）。
+ * 行数预算来自 tuiLayout；workspace 的 maxEntries 已扣除 composer/modal/history。
  * 宽度（columns）——耗时是用户盯的字段，永远保；顺序：先丢次要事实
  *   （从末尾：错误/当前动作/积分/tools/未分配），再截断标题/agent，
  *   时间任何宽度都不动（标题最少留 1 列 + …）。
  */
-export type RunZoneLayout = { columns?: number; rows?: number };
+export type RunZoneLayout = { columns?: number; rows?: number; maxEntries?: number };
 
 export const RUN_ZONE_COMPACT_ROWS = 16;
 export const RUN_ZONE_TINY_ROWS = 10;
 
 export function resolveRunZoneMaxRows(maxRows: number, rows?: number): number {
   if (typeof rows !== "number" || !Number.isFinite(rows)) return maxRows;
-  if (rows < RUN_ZONE_TINY_ROWS) return Math.min(maxRows, 1);
-  if (rows < RUN_ZONE_COMPACT_ROWS) return Math.min(maxRows, 2);
-  return maxRows;
+  return Math.min(maxRows, preferredTopTaskEntries(rows));
 }
 
 /**
@@ -371,10 +370,13 @@ export function formatRunZoneLines(
   // 远程证据在 sanitize 之前按位置抓住：清洗后的快照不再带这些字段，而
   // 「远端还在不在跑」正是运行区要说的那句话。
   const carriers = snapshots.map((snapshot) => snapshot as RemoteTaskCarrier);
+  const firstCompleted = shown.findIndex(snapshot => snapshot.status === "done");
   for (const [index, snapshot] of shown.entries()) {
     const carrier = carriers[index];
     const clock = remoteTaskClock(carrier, now);
-    const icon = runZoneLeadIcon(snapshot.status, carrier);
+    const identity = runZoneLeadIcon(snapshot.status, carrier);
+    const icon = snapshot.status === "running" && (!carrier?.remoteTask || remoteTaskIsActive(carrier))
+      ? `${identity} ${runningFrame(now)}` : identity;
     const label = runZoneLabel(snapshot, duplicateTitles);
     // 类型标记由前导图标承担（运行中是 🤖，终态是状态图标），标签里不再重复类型字。
     const typedLabel = label;
@@ -388,6 +390,7 @@ export function formatRunZoneLines(
     let factList = [
       ...(time && clock !== null ? [time] : []),
       // 停滞提示紧跟耗时：宽度不够被裁时，它比积分/工具名更该留在屏上。
+      ...(index === firstCompleted ? [getCliLocale() === "zh" ? "终态≠验收" : "not acceptance"] : []),
       ...(stalled ? [t("runStalled")] : []),
       ...base,
       ...remoteFacts,
@@ -406,15 +409,16 @@ export function formatRunZoneLines(
         shownLabel = fitAnsiLine(typedLabel, Math.max(1, room));
       }
     }
+    const timePart = time && clock !== null ? `${factList.shift()} · ` : "";
     const factsPart = factList.length > 0 ? ` · ${factList.join(" · ")}` : "";
 
     if (!colorEnabled) {
-      lines.push(`${icon} ${shownLabel}${factsPart}`);
+      lines.push(`${icon} ${timePart}${shownLabel}${factsPart}`);
       continue;
     }
     lines.push(
       themeText(icon, runStatusTone(snapshot.status), true) +
-        " " +
+        " " + themeText(timePart, "chrome") +
         themeText(shownLabel, "chrome", true) +
         themeText(factsPart, hasError ? "danger" : stalled ? "warning" : "chrome")
     );
@@ -526,8 +530,10 @@ export function formatProcZoneLines(
 
   const lines: string[] = [];
   for (const proc of shown) {
-    const icon = procZoneLeadIcon(proc);
     const finished = procZoneFinished(proc);
+    const identity = procZoneLeadIcon(proc);
+    const icon = !finished && (proc.status === undefined || proc.status === "running")
+      ? `${identity} ${runningFrame(now)}` : identity;
     const facts: string[] = [];
     const startedAt = proc.startedAt;
     // 残留优先用 registry 记下的真实用时；没有就退回「现在 - 拉起时刻」。
@@ -569,15 +575,16 @@ export function formatProcZoneLines(
         title = fitAnsiLine(title, Math.max(1, room));
       }
     }
+    const timePart = hasElapsed ? `${facts.shift()} · ` : "";
     const factsPart = facts.length > 0 ? ` · ${facts.join(" · ")}` : "";
 
     if (!colorEnabled) {
-      lines.push(`${icon} ${title}${factsPart}`);
+      lines.push(`${icon} ${timePart}${title}${factsPart}`);
       continue;
     }
     lines.push(
       themeText(icon, finished ? "muted" : "info", true) +
-        " " +
+        " " + themeText(timePart, "chrome") +
         themeText(title, finished ? "muted" : "chrome", true) +
         themeText(factsPart, "chrome", true)
     );
@@ -589,4 +596,62 @@ export function formatProcZoneLines(
     lines.push(colorEnabled ? themeText(`  ${more}`, "chrome") : `  ${more}`);
   }
   return lines;
+}
+
+
+/** One composer row, not individual run visibility evidence or acceptance. */
+export function formatBackgroundSummary(
+  snapshots: AgentRunSnapshot[],
+  procs: readonly RunZoneProc[],
+  colorEnabled = false,
+  columns = 80,
+): string[] {
+  if (!snapshots.length && !procs.length) return [];
+  const zh = getCliLocale() === "zh";
+  const groups = new Map<string, { count: number; name: string }>();
+  const add = (label: string, name: string) => {
+    const group = groups.get(label);
+    if (group) group.count += 1;
+    else groups.set(label, { count: 1, name });
+  };
+  for (const raw of snapshots) {
+    const snapshot = sanitizeRunSnapshotForNormal(raw);
+    const name = snapshot.title || snapshot.taskPreview || snapshot.agentName || shortRunId(snapshot.runId);
+    const remote = raw as AgentRunSnapshot & RemoteTaskCarrier;
+    if (remoteTaskUnsettled(remote)) {
+      add(zh ? "远端待确认" : "remote unsettled", name);
+    } else if (isAgentRunTerminalStatus(snapshot.status)) {
+      add(runZoneTerminalLabel(snapshot.status), name);
+    } else if (snapshot.status === "running") {
+      // inFlight only carries a tool name, not blocking/waiting evidence.
+      add(t("runZoneRunning"), name);
+    } else if (snapshot.status === "pending") {
+      add(t("runZonePending"), name);
+    } else if (snapshot.status === "cancelling") {
+      add(t("runZoneCancelling"), name);
+    } else {
+      add(zh ? "状态待确认" : "status unknown", name);
+    }
+  }
+  for (const proc of procs) {
+    const safe = sanitizeRunSnapshotForNormal({ runId: "", status: "running", logKey: "",
+      title: proc.label || proc.command || "process" });
+    add(!procZoneFinished(proc) ? t("runZoneRunning")
+      : proc.status === "killed" ? t("runZoneCancelled")
+      : (proc.exitCode ?? 0) === 0 ? t("runZoneDone") : t("runZoneFailed"), safe.title!);
+  }
+  // Pair each status with its own task before adding another group. On narrow
+  // terminals the highest-priority task name survives instead of an unrelated name.
+  const urgent = [t("runZoneFailed"), zh ? "远端待确认" : "remote unsettled",
+    zh ? "状态待确认" : "status unknown"];
+  const priority = (label: string) => urgent.includes(label) ? urgent.indexOf(label) : urgent.length;
+  const facts = [...groups].sort(([a], [b]) => priority(a) - priority(b))
+    .map(([label, group]) => `${group.count} ${label}: ${clipText(group.name, 18)}`)
+    .join(" · ");
+  const terminal = snapshots.some(s => isAgentRunTerminalStatus(s.status)) || procs.some(procZoneFinished);
+  const suffix = terminal ? (zh ? " · 终态≠验收" : " · not acceptance") : "";
+  const text = fitAnsiLine(`${zh ? "后台" : "Background"}: ${facts}${suffix}`,
+    Math.max(1, columns - 1));
+  const tone = groups.has(t("runZoneFailed")) ? "danger" : terminal ? "muted" : "warning";
+  return [colorEnabled ? themeText(text, tone) : text];
 }

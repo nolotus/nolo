@@ -67,7 +67,7 @@ function buildWorkspacePathProperty() {
 }
 
 function buildReadWorkspaceDescription() {
-  return "Read a UTF-8 text file inside the workspace. Absolute paths and ~/ are also accepted (runtime spill files can be read directly). Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).";
+  return "Read a UTF-8 text file inside the workspace. For multiple files, call readFile concurrently in the same turn. Absolute paths and ~/ are also accepted (runtime spill files can be read directly). Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).";
 }
 
 function buildReadWorkspaceParameters() {
@@ -86,13 +86,6 @@ function buildReadWorkspaceParameters() {
     type: "object",
     properties: {
       path,
-      files: {
-        type: "array",
-        minItems: 1,
-        maxItems: 8,
-        description: "Batch of files with optional individual line ranges; mutually exclusive with path. One shared output budget applies.",
-        items: { type: "object", properties: { path, lines, force }, required: ["path"], additionalProperties: false },
-      },
       lines,
       force,
       raw: {
@@ -100,6 +93,7 @@ function buildReadWorkspaceParameters() {
         description: "Read original bytes including full runtime acceptance observations in *.result.md. Default compacts only machine observations; report text and physical line numbers are unchanged.",
       },
     },
+    required: ["path"],
   };
 }
 

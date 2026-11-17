@@ -28,6 +28,14 @@ export type DesktopActionGate = {
   payload?: unknown;
 };
 
+/** Trusted stream context, never accepted from tool/model payloads. */
+export type ActionGateMeta = {
+  dialogId: string;
+  turnId: string;
+  messageId: string;
+  storage: "web" | "desktop";
+};
+
 export type DesktopGateDecision = "approve" | "cancel";
 
 export type DesktopActionGateResolveOptions = {
@@ -81,6 +89,8 @@ export const NEEDS_LOGIN_MESSAGE = "需要登录后才能处理该授权请求";
 /** Serializable snapshot handed to the UI: gates without any resolved value. */
 export type DesktopActionGateSnapshot = {
   gates: DesktopActionGate[];
+  /** Safe terminal failures linked to transient anchors; never contains gate payload/value. */
+  failures: Array<{ gateId: string; meta: ActionGateMeta; message: string }>;
   /** Last resolve error keyed by gateId, for panel display / retry. */
   errors: Record<string, string>;
 };
@@ -88,6 +98,8 @@ export type DesktopActionGateSnapshot = {
 const gates = new Map<string, DesktopActionGate>();
 // Submit target per pending gate (memory only; never part of the snapshot).
 const targets = new Map<string, ActionGateSubmitTarget>();
+const failures = new Map<string, { gateId: string; meta: ActionGateMeta; message: string }>();
+const metadata = new Map<string, ActionGateMeta>();
 const errors = new Map<string, string>();
 const listeners = new Set<DesktopActionGateListener>();
 // 缓存快照：useSyncExternalStore 要求 getSnapshot 在无变化时返回同一引用，
@@ -111,21 +123,46 @@ function notify() {
 export function pushGate(
   gate: DesktopActionGate,
   target: ActionGateSubmitTarget = { kind: "desktop" },
+  meta?: Omit<ActionGateMeta, "storage">,
 ): void {
   if (!gate || typeof gate.id !== "string" || gate.id.length === 0) return;
+  failures.delete(gate.id);
   if (target.kind === "web" && !target.token) {
+    if (meta) failures.set(gate.id, { gateId: gate.id, meta: { ...meta, storage: "web" }, message: NEEDS_LOGIN_MESSAGE });
     // 登录缺失：该 gate 直接按终态失败处理——不进入待决表（面板不会卡住），
     // 错误信息留给面板短暂显示。
     gates.delete(gate.id);
     targets.delete(gate.id);
+    metadata.delete(gate.id);
     errors.set(gate.id, NEEDS_LOGIN_MESSAGE);
     invalidateSnapshot();
     notify();
     return;
   }
+  metadata.delete(gate.id);
+  if (meta && target.kind !== "local") metadata.set(gate.id, { ...meta, storage: target.kind });
   errors.delete(gate.id);
   targets.set(gate.id, target);
   gates.set(gate.id, gate);
+  invalidateSnapshot();
+  notify();
+}
+
+export function getGateMeta(gateId: string): ActionGateMeta | undefined {
+  return metadata.get(gateId);
+}
+
+export function clearGateTurn(turnId: string): void {
+  for (const [id, failure] of failures) {
+    if (failure.meta.turnId === turnId) failures.delete(id);
+  }
+  for (const [id, meta] of metadata) {
+    if (meta.turnId !== turnId) continue;
+    gates.delete(id);
+    targets.delete(id);
+    metadata.delete(id);
+    errors.delete(id);
+  }
   invalidateSnapshot();
   notify();
 }
@@ -142,6 +179,7 @@ export function getSnapshot(): DesktopActionGateSnapshot {
   if (!cachedSnapshot) {
     cachedSnapshot = {
       gates: [...gates.values()],
+      failures: [...failures.values()],
       errors: Object.fromEntries(errors),
     };
   }
@@ -152,6 +190,8 @@ export function getSnapshot(): DesktopActionGateSnapshot {
 export function resetDesktopActionGateChannel(): void {
   gates.clear();
   targets.clear();
+  metadata.clear();
+  failures.clear();
   errors.clear();
   invalidateSnapshot();
   notify();
@@ -163,6 +203,8 @@ export async function resolveGate(
   fetchImpl: typeof fetch = fetch,
   targetOverride?: ActionGateSubmitTarget,
 ): Promise<boolean> {
+  // A terminal anchor is informational, never a pending approval or a fallback desktop POST.
+  if (failures.has(gateId)) return false;
   const target = targetOverride ?? targets.get(gateId) ?? { kind: "desktop" };
 
   if (target.kind === "local") {
@@ -174,13 +216,14 @@ export async function resolveGate(
       errors.delete(gateId);
       gates.delete(gateId);
       targets.delete(gateId);
+      metadata.delete(gateId);
       invalidateSnapshot();
       notify();
       return true;
     } catch (error) {
       errors.set(
         gateId,
-        error instanceof Error ? error.message : String(error),
+        "授权请求提交失败，请重试",
       );
       invalidateSnapshot();
       notify();
@@ -199,6 +242,7 @@ export async function resolveGate(
   const failTerminal = (message: string): boolean => {
     gates.delete(gateId);
     targets.delete(gateId);
+    metadata.delete(gateId);
     errors.set(gateId, message);
     invalidateSnapshot();
     notify();
@@ -221,10 +265,8 @@ export async function resolveGate(
         error?: unknown;
         gateId?: unknown;
       } | null;
-      const message =
-        typeof data?.error === "string"
-          ? data.error
-          : `HTTP ${response.status}: ${response.statusText}`;
+      // Never surface response bodies: upstream errors may echo submitted secrets.
+      const message = `授权请求提交失败（HTTP ${response.status}），请重试`;
       const isTerminal =
         response.status >= 400 &&
         response.status < 500 &&
@@ -236,6 +278,7 @@ export async function resolveGate(
         // 显示，不再提供重试。
         gates.delete(gateId);
         targets.delete(gateId);
+        metadata.delete(gateId);
         errors.set(gateId, message);
         invalidateSnapshot();
         notify();
@@ -248,6 +291,7 @@ export async function resolveGate(
     errors.delete(gateId);
     gates.delete(gateId);
     targets.delete(gateId);
+    metadata.delete(gateId);
     invalidateSnapshot();
     notify();
     return true;
@@ -255,7 +299,7 @@ export async function resolveGate(
     // 失败：gate 保留在内存态，错误暴露给面板重试。
     errors.set(
       gateId,
-      error instanceof Error ? error.message : String(error),
+      "授权请求提交失败，请重试",
     );
     invalidateSnapshot();
     notify();

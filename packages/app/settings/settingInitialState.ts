@@ -7,6 +7,7 @@ import { DEFAULT_SYSTEM_AGENT_CAPABILITIES } from "ai/tools/agentCapabilities";
 import { DEFAULT_AUTO_APPROVED_SELF_UPDATE_FIELDS } from "ai/policy/selfUpdateFields";
 import { SERVERS } from "database/config";
 import { isProduction } from "app/utils/env";
+import { normalizeUiPlugins } from "app/plugins/uiPlugins";
 
 import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 import { resolveCloudBootstrapServer } from "./serverBootstrap";
@@ -85,6 +86,10 @@ export const initialState: SettingState = {
       : "ctrl+backspace",
   // 系统内置 Skill 默认全开；用户可在设置页单关。目前只有 web-search。
   systemBuiltinSkills: { ...DEFAULT_SYSTEM_AGENT_CAPABILITIES },
+  // UI 插件默认全部未创建/未启用（新能力默认不启用）。
+  uiPlugins: normalizeUiPlugins(undefined),
+  // 初始无归属：没有任何账号的启用状态可继承。
+  uiPluginsOwnerAccountId: null,
 };
 
 /**
