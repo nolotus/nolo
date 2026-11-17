@@ -281,7 +281,7 @@
     },
     "packages/desktop": {
       "name": "desktop",
-      "version": "0.257.0-alpha.3",
+      "version": "0.257.0-alpha.4",
       "dependencies": {
         "electrobun": "^2.0.1",
         "rcedit": "^5.0.2",
@@ -1782,7 +1782,7 @@
 
     "color-name": ["color-name@1.1.4", "", {}, "sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA=="],
 
-    "colord": ["colord@2.13.0", "", {}, "sha512-2g8RPH6UvoD1ZXYmccAuo0zfMw4mxqzXbeToeVoMSm6na0QEDXggahcZdlTFnFdahlV3I158ipRb2AIvCcwiAQ=="],
+    "colord": ["colord@2.14.0", "", {}, "sha512-eSdMel9EBvdFxnchObp7gljRoqYQLr+zXhaxjkym7syVphw1FIhfQwgsA5Bv3jArflZPJEa1rmQtGpa7NRc7Rw=="],
 
     "colorette": ["colorette@1.4.0", "", {}, "sha512-Y2oEozpomLn7Q3HFP7dpww7AtMJplbM9lGZP6RDfHqmbeRjiwRg4n6VM6j4KLmRke85uWEI7JqF17f3pqdRA0g=="],
 
@@ -2034,7 +2034,7 @@
 
     "electrobun": ["electrobun@2.0.4", "", { "bin": { "electrobun": "bin/electrobun.cjs" } }, "sha512-xuH4sE9A9eySgOjF+9mi9WuTv+Sa05cYY6eU5A4Rkkfek2zd59kzhWvwrb9xfJN4VPL+zM4FyTvFoH8j00DLMw=="],
 
-    "electron-to-chromium": ["electron-to-chromium@1.5.487", "", {}, "sha512-qWotOhQYeYEj+DK4+Y+cfPj44qiC6ETIiWtJLfmDJydED2BJJ7loPA4SfBbbrMI6X/X3tryJgxnY9nxsO545Zw=="],
+    "electron-to-chromium": ["electron-to-chromium@1.5.488", "", {}, "sha512-Uox8y5IeRGB/uXNMNSPfWaiI5/8d/2XG125oc+f2C5JniHcoMxsbCXcVFRZnIsdrgPwZQ6/k5SbSxhBirqQPuA=="],
 
     "elkjs": ["elkjs@0.11.1", "", {}, "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg=="],
 
@@ -4044,7 +4044,7 @@
 
     "npm/@npmcli/redact": ["@npmcli/redact@5.0.0", "", { "bundled": true }, "sha512-3zcN5Q3yEmeyxXBzqB6fXPQFzYa2ROsGFSr69W0ArXIAGJqxl/aFECOVPD2kbkYPm0U/EHxFKgclK3UA9WQg5A=="],
 
-    "npm/@npmcli/run-script": ["@npmcli/run-script@11.0.0", "", { "dependencies": { "@npmcli/node-gyp": "^6.0.0", "@npmcli/package-json": "^8.0.0", "@npmcli/promise-spawn": "^10.0.0", "node-gyp": "^13.0.0", "proc-log": "^7.0.0" }, "bundled": true }, "sha512-leBRl6F5F0TvWut8m1/aZcMTUHi2vXjKeMJ/Ik1lW7Q7Yy16Dhtkklu+cEqQww1p1NeLnUNzV3+uwpzqRcy9vw=="],
+    "npm/@npmcli/run-script": ["@npmcli/run-script@11.0.1", "", { "dependencies": { "@npmcli/node-gyp": "^6.0.0", "@npmcli/package-json": "^8.0.1", "@npmcli/promise-spawn": "^10.0.0", "node-gyp": "^13.0.0", "proc-log": "^7.0.0" }, "bundled": true }, "sha512-8A6ICbU8FBUd5a1jPlCozJj5HDF3MaYUbIIM0K57QcKaZcK/9vTuYf+ME+ThzaMO5XAxhvrAQRO4zL+/fEt98A=="],
 
     "npm/@sigstore/bundle": ["@sigstore/bundle@5.0.1", "", { "dependencies": { "@sigstore/protobuf-specs": "^0.5.2" } }, "sha512-7q8DOObFzN+/eQrvL2O0cylDp95ssgBCAomQxSYfGAMO9+q4xceRbg0L3L0G2/8NyideoYCs7HuVxWKCdn/maQ=="],
 

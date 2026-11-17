@@ -20,7 +20,7 @@ jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # 绑定本次事件的确切 commit（push 触发 = 被推送的投影 commit）：
           # metadata 校验与 dispatch 传出的 projection_sha 必须同源。

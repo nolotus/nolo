@@ -131,7 +131,15 @@ ${rpmIconFilesLine}
     writeFileSync(specPath, specContent, "utf8");
 
     const rpmbuildRun = Bun.spawn(
-      ["rpmbuild", "-bb", "--define", "_topdir " + tempDir, specPath],
+      [
+        "rpmbuild",
+        "-bb",
+        "--define",
+        "_topdir " + tempDir,
+        "--define",
+        "_binary_payload w1.gzdio",
+        specPath,
+      ],
       { stdout: "inherit", stderr: "inherit" }
     );
     const rpmCode = await rpmbuildRun.exited;
@@ -268,7 +276,7 @@ fi
     const debName = `nolo-desktop_${version}_amd64.deb`;
     const debPath = join(artifactDir, debName);
     const dpkgRun = Bun.spawn(
-      ["dpkg-deb", "--build", "--root-owner-group", pkgDir, debPath],
+      ["dpkg-deb", "--build", "--root-owner-group", "-Zgzip", "-z1", pkgDir, debPath],
       { stdout: "inherit", stderr: "inherit" },
     );
     const debCode = await dpkgRun.exited;

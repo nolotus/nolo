@@ -1,4 +1,15 @@
 
+## 0.257.0-alpha.4 (2026-11-17)
+
+### Bug Fixes
+
+* **ci:** isolate frozen merge fixture, lazy-load routeStyles esbuild, and upgrade checkout@v5 ([20e8e3a](https://github.com/nolotus/bun-nolo/commit/20e8e3afda6b0fd8396733e732491c5ec7fabd6f))
+
+### Performance Improvements
+
+* **desktop:** parallelize Linux rpm/deb packaging with fast gzip payload ([9bcba22](https://github.com/nolotus/bun-nolo/commit/9bcba220c74344929a1c996f55f8338694a30f30))
+
+
 ## 0.257.0-alpha.3 (2026-11-17)
 
 ### Bug Fixes
