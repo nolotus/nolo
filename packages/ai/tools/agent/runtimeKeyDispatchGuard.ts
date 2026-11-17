@@ -182,31 +182,16 @@ export type CliLocalSpawnDispatchPlan = {
     reason:
         | "requested"
         | "requested-host-writes"
-        | "default-docker-sandbox"
+        | "default-host-writes"
         | "read-only-host";
 };
 
-/**
- * F1：`runtimeKey: "local"` 的宿主写入确认语义（派发侧唯一文案）。
- *
- * `local` 既不是「默认位置」也不是「沙盒」：它意味着子 run 直接在**宿主文件系统**
- * 上读写代码（可能完全没有隔离）。因此它必须有显式确认（调用方声明
- * `allowHostWrites: true`）——省略 / 写错 / 笔误一律不落宿主。
- * 省略 runtimeKey 时的默认位置**有且只有一个例外**：`readOnly: true` 的只读派发仍在
- * 宿主执行（`readOnly` 只移除 nolo 侧写工具，不限制进程或外部 CLI 的写能力，故不起沙盒）；其余写型派发默认进本机 docker 沙盒。未声明时本机通道**显式拒绝**（零 spawn、零 run 记录），既不回落
- * docker、也不静默落宿主。
- */
+/** 宿主写入确认：默认写型派发与显式 local 共用此拒绝文案。 */
 export const HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE =
-    "runtimeKey 'local' 意味着子 run 直接在宿主文件系统上读写代码（无隔离）：必须由调用方显式声明 " +
-    "allowHostWrites: true 才能派发。未声明时已拒绝派发（未启动任何 run）；要沙盒执行请省略 runtimeKey" +
-    "（默认本机 docker 沙盒）或显式点名 docker / docker:<id>。" +
-    // 只读派发是这条拒绝最常见的一类调用方误用（2026-11-01 实测）：它想要的
-    // 正是「在宿主上跑但不写代码」，而省略 runtimeKey 时 readOnly 本来就落宿主。
-    // 这里必须点明该路径，否则调用方会照着「要沙盒执行请省略」的指引去起一个
-    // 纯属浪费的沙盒（沙盒还兑不兑现显式 cwd）。
+    "CLI 本地写型派发默认在宿主文件系统上读写代码（无隔离）：必须由调用方显式声明 " +
+    "allowHostWrites: true 才能派发（显式 runtimeKey 'local' 同样需要）。" +
+    "未声明时已拒绝派发（未启动任何 run）；要沙盒执行请显式指定 runtimeKey: docker / docker:<id>。" +
     "只读派发（readOnly: true）不需要 runtimeKey：省略它即在宿主执行，无需 allowHostWrites。" +
-    // readOnly 只移除专用写工具，shell 仍可写文件（见 startAgentRunTool 的 readOnly
-    // 参数说明）。把这条边界写在拒绝文案里，避免被读成「readOnly 就一定隔离」。
     "注意 readOnly 不提供文件系统只读隔离（shell 仍可写），需要隔离请显式指定 docker。";
 
 /**
@@ -221,19 +206,17 @@ export const HOST_EXECUTOR_UNAVAILABLE_MESSAGE =
     "runtimeKey 'local'（在宿主文件系统上执行）在当前宿主没有可用的宿主执行器：服务端 / 浏览器 run " +
     "兑现不了它（服务端从不兑现 local，见 local_target_unsupported）。请在宿主进程内派发" +
     "（CLI 通道支持 runtimeKey=local + allowHostWrites: true），或改用已连接的机器" +
-    "（runtimeKey: machine:<machineId>），或省略 runtimeKey 落本机 docker 沙盒。";
+    "（runtimeKey: machine:<machineId>），或显式指定 runtimeKey: docker 使用沙盒。";
 
 /**
- * 派发政策（已定，2026-10-18）：
- *   1. 派发的子 run 默认落 **docker 沙盒**（本机 sbx）：不传 runtimeKey 时也默认
- *      `docker`。历史几百次「子 Agent 相对路径写进主 worktree」的事故全部发生在
- *      默认宿主路径上。
- *   2. **只读型**派发（调用方声明 readOnly）留在宿主执行：`readOnly` 移除的是 nolo 侧的
- *      专用写工具，不限制进程/外部 CLI 的写能力。沙盒能把写入限制在容器内（对宿主有
- *      额外保护），但当前策略不为只读派发起沙盒——这里只陈述策略，不附加安全论证。
- *   3. 显式 runtimeKey 一律以它为计划；不可兑现即由守卫抛错（不回落宿主）。
- *   4. 交互式 `nolo agent run`（用户自己在终端敲）不走这里：本机执行是正当用法，
- *      但必须**显式**（`--local` / `--runtime-key`），不能是「忘了传参」的默认结果。
+ * CLI 本地派发政策：
+ *   1. 未点名 runtimeKey 的写型派发默认宿主，必须 allowHostWrites: true；缺失即拒绝，
+ *      不回落 docker。计划使用既有 runtimeKey=local + --allow-host-writes 兑现确认。
+ *   2. 只读派发（readOnly）留宿主且无需写入确认；它只移除 nolo 专用写工具，
+ *      不限制进程/外部 CLI 的写能力，不提供文件系统只读隔离。
+ *   3. 显式 runtimeKey 按能力表兑现；不可兑现即抛错，不回落宿主或 docker。
+ *      显式 docker / docker:<id> 保留沙盒能力；显式 local 仍须确认宿主写入。
+ *   4. 交互式 nolo agent run 不走此派发计划。
  *   5. **显式 cwd 与沙盒后端互斥**（2026-10-23 事故）：调用方点名了一个宿主绝对
  *      cwd，而落点是沙盒 —— 沙盒不兑现宿主 cwd（仓库挂在沙盒内自己的路径），
  *      cwd 被静默替换、改动随沙盒停止一起消失，调用方却拿到「成功」。这种组合
@@ -245,8 +228,8 @@ export function resolveCliLocalSpawnDispatch(
         runtimeKey?: unknown;
         readOnly?: boolean;
         /**
-         * 调用方对「在**宿主文件系统**上写代码」的显式确认。只有
-         * `runtimeKey: "local"` 需要它（docker 沙盒 / 省略 key / 只读派发都不需要）；
+         * 调用方对「在**宿主文件系统**上写代码」的显式确认。默认写型派发及显式
+         * `runtimeKey: "local"` 都需要它（显式沙盒 / 未点名只读派发不需要）；
          * 缺失即显式拒绝，绝不回落宿主也不回落 docker。
          */
         allowHostWrites?: unknown;
@@ -272,7 +255,7 @@ export function resolveCliLocalSpawnDispatch(
 }
 
 /**
- * 决策主体的**唯一**实现（分支顺序：显式 key → 只读 → 默认沙盒）。拆出来只为让
+ * 决策主体的**唯一**实现（分支顺序：显式 key → 只读 → 默认宿主且须确认）。拆出来只为让
  * `resolveCliLocalSpawnDispatch` 在同一条返回路径上跑 cwd 断言，不产出半成品计划。
  */
 function resolvePlanForRequestedKey(
@@ -297,10 +280,13 @@ function resolvePlanForRequestedKey(
     if (readOnly === true) {
         return { target: "host", reason: "read-only-host" };
     }
+    if (allowHostWrites !== true) {
+        throw new Error(HOST_WRITES_CONFIRMATION_REQUIRED_MESSAGE);
+    }
     return {
-        runtimeKey: "docker",
-        target: "docker-sandbox",
-        reason: "default-docker-sandbox",
+        runtimeKey: "local",
+        target: "host",
+        reason: "default-host-writes",
     };
 }
 
@@ -374,7 +360,7 @@ export function assertExplicitCwdHonoredByDispatchTarget(input: {
     );
 }
 
-/** F11 不变式 3：允许完全不出现 `--runtime-key` 的两种正当理由。 */
+/** F11 不变式 3：允许完全不出现 `--runtime-key` 的正当理由（默认写型会显式转发 local）。 */
 export const CLI_LOCAL_HOST_ONLY_DISPATCH_REASONS = [
     "read-only-host",
 ] as const;

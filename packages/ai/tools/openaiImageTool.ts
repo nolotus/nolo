@@ -1,15 +1,14 @@
+import type { ToolExecutorContext } from "./index";
+import { resolveToolAttributionContext } from "./memoryToolContext";
 import { callToolApi } from "./toolApiClient";
-import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { selectIdentityUserId } from "identity/selectors";
 import { selectCurrentServer } from "app/settings/serverSelectors";
-import { selectCurrentDialogKey } from "chat/dialog/dialogSlice";
 import { addContentAction } from "create/space/content/addContentAction";
 import { ContentType } from "app/types";
 import { fileKey } from "database/keys";
 import { buildDatabaseFileContentUrl } from "database/fileUrl";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
-import { extractCustomId } from "core/prefix";
 
 // 2.6 起两条产品线共用同一代模型，只按用途分：出图走 flare（快、质量好），
 // 改图走 sunburst（官方定位：editing precision）。历史：2.5 沿用该分工；1.5 / 2 已弃用。
@@ -167,7 +166,8 @@ export const openAIGptImageEditFunctionSchema = {
 const runOpenAIImageTool = async (
   args: OpenAIImageArgs,
   thunkApi: any,
-  model: string
+  model: string,
+  context?: ToolExecutorContext
 ): Promise<{ rawData: any; displayData: string; llmContext?: string }> => {
   const trimmedPrompt = args.prompt?.trim();
   if (!trimmedPrompt) {
@@ -175,10 +175,11 @@ const runOpenAIImageTool = async (
   }
 
   const state = thunkApi.getState();
-  const currentDialogKey = selectCurrentDialogKey(state);
-  const dialogId = currentDialogKey
-    ? extractCustomId(currentDialogKey)
-    : undefined;
+  const { dialogId, spaceId } = resolveToolAttributionContext(state, context, {
+    requireAgentKey: true, errorLabel: "无法确定图像归属",
+  });
+  const userId = selectIdentityUserId(state);
+  const currentServer = selectCurrentServer(state);
 
   const result = await callToolApi(
     thunkApi,
@@ -200,10 +201,6 @@ const runOpenAIImageTool = async (
     },
     { withAuth: true }
   );
-
-  const spaceId = getCurrentSpaceId();
-  const userId = selectIdentityUserId(state);
-  const currentServer = selectCurrentServer(state);
 
   if (spaceId && userId && result?.files?.length) {
     for (let i = 0; i < result.files.length; i += 1) {
@@ -238,29 +235,34 @@ const runOpenAIImageTool = async (
 
 export const openAIGptImageGenerateFunc = async (
   args: OpenAIImageArgs,
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolExecutorContext
 ): Promise<{ rawData: any; displayData: string; llmContext?: string }> => {
   return runOpenAIImageTool(
     { ...args, operation: "generate" },
     thunkApi,
-    DEFAULT_OPENAI_IMAGE_GENERATE_MODEL
+    DEFAULT_OPENAI_IMAGE_GENERATE_MODEL,
+    context
   );
 };
 
 export const openAIGptImageEditFunc = async (
   args: OpenAIImageArgs,
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolExecutorContext
 ): Promise<{ rawData: any; displayData: string; llmContext?: string }> => {
   return runOpenAIImageTool(
     { ...args, operation: "edit" },
     thunkApi,
-    DEFAULT_OPENAI_IMAGE_EDIT_MODEL
+    DEFAULT_OPENAI_IMAGE_EDIT_MODEL,
+    context
   );
 };
 
 export const openAIGptImageFunc = async (
   args: OpenAIImageArgs,
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolExecutorContext
 ): Promise<{ rawData: any; displayData: string; llmContext?: string }> => {
-  return runOpenAIImageTool(args, thunkApi, DEFAULT_OPENAI_IMAGE_MODEL);
+  return runOpenAIImageTool(args, thunkApi, DEFAULT_OPENAI_IMAGE_MODEL, context);
 };

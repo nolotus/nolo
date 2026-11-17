@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 import { callToolApi } from "./toolApiClient";
 import {
   buildMediaToolConfirmation,
@@ -76,7 +77,9 @@ async function transcribeInternal(
   input: TranscribeToolInput,
   thunkApi: any,
   reuseNotes: ReuseNotes,
+  context?: ToolRequestDialogContext,
 ): Promise<any> {
+  const dialogId = toolRequestDialogId(context, () => thunkApi.getState());
   const { action = "transcribe", fileId, jobId, fromSec, toSec, sourceLang, sttProvider, confirmationToken, expectedExecutionRevision } = input ?? {};
   if (action === "status" && !jobId) throw new Error("status 模式必须提供已有 jobId");
   if (action === "status" && (fileId || fromSec !== undefined || toSec !== undefined || sourceLang)) throw new Error("status 模式仅接受 jobId");
@@ -107,7 +110,7 @@ async function transcribeInternal(
     if (!fileId) {
       throw new Error("transcribe 工具必须提供 fileId 或 jobId");
     }
-    const createBody: Record<string, unknown> = { fileId };
+    const createBody: Record<string, unknown> = { fileId, dialogId };
     if (fromSec !== undefined || toSec !== undefined) {
       createBody.scope = {
         ...(fromSec !== undefined ? { fromSec } : {}),
@@ -128,6 +131,7 @@ async function transcribeInternal(
   const revision = normalizeMediaConfirmExecutionRevision(expectedExecutionRevision);
   const stepBody: Record<string, unknown> = {
     step: "transcribe",
+    dialogId,
     waitMs: 60_000,
     // 仅显式指定时透传；未指定保持服务端既有默认行为（不静默选供应商、不改全局默认）。
     ...(typeof sttProvider === "string" ? { sttProvider } : {}),
@@ -246,9 +250,9 @@ function formatJobStatus(job: any, jobId: string): any {
 }
 
 /** Model context is independent of the UI summary; never expose authorization tickets. */
-export async function transcribeFunc(input: TranscribeToolInput, thunkApi: any): Promise<any> {
+export async function transcribeFunc(input: TranscribeToolInput, thunkApi: any, context?: ToolRequestDialogContext): Promise<any> {
   const reuseNotes: ReuseNotes = {};
-  const result = await transcribeInternal(input, thunkApi, reuseNotes);
+  const result = await transcribeInternal(input, thunkApi, reuseNotes, context);
   const stepResult = result.rawData?.stepResult ?? result.rawData;
   const artifact = stepResult?.artifacts?.transcribe;
   const fileId = artifact?.fileId ?? stepResult?.fileId;

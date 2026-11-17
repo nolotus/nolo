@@ -3,14 +3,14 @@ import { createSpaceKey } from "create/space/spaceKeys";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
-import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import { asTrimmedString } from "core/trimmedString";
 import { parseSkillDocProtocol } from "ai/skills/skillDocProtocol";
 import { isSkillSummaryMarker } from "ai/skills/skillSummaryMarker";
 import { setDialogExtraReferencesAction } from "chat/dialog/actions/setDialogExtraReferencesAction";
 import { selectById } from "database/dbSlice";
 import type { DialogConfig, ReferenceItem } from "app/types";
-import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
+import { resolveToolAttributionContext } from "./memoryToolContext";
+import { isDialogRecordKeyForId } from "database/dialogKey";
 import {
   listBuiltinSkills,
   resolveBuiltinSkillByName,
@@ -240,35 +240,14 @@ async function listSkillCandidates(thunkApi: any): Promise<SkillCandidate[]> {
 }
 
 /**
- * 解析当前 dialog 绑定的 agentKey（loadSkill 三态网关用）：fixed 对话取
- * cybots[0]（主 agent）。auto 对话 / 无 active dialog 返回 null——此时网关
- * 放行，宁可漏检也不可误拒存量 agent。
- */
-const resolveCurrentAgentKeyForSkillGate = (thunkApi: any): string | null => {
-  try {
-    const state = thunkApi?.getState?.();
-    if (!state) return null;
-    const currentDialogKey = getActiveDialogKey();
-    if (!currentDialogKey) return null;
-    const dialogConfig = selectById(
-      state,
-      currentDialogKey,
-    ) as DialogConfig | undefined;
-    return asTrimmedNonEmptyStringArray(dialogConfig?.cybots)[0] ?? null;
-  } catch {
-    return null;
-  }
-};
-
-/**
  * 读取当前 agent 的 skill 配置源（{ skills, enabledPacks }），供
  * isAgentSkillDisabled 判断。读不到（无 dialog agent / 无本地 db / 记录缺失）
  * 一律返回 null——网关按「缺席」放行。
  */
 const readCurrentAgentSkillSource = async (
   thunkApi: any,
+  agentKey: string,
 ): Promise<AgentSkillConfigSource | null> => {
-  const agentKey = resolveCurrentAgentKeyForSkillGate(thunkApi);
   if (!agentKey) return null;
   const db = (thunkApi?.extra as any)?.db;
   if (!db) return null;
@@ -311,6 +290,17 @@ export async function loadSkillFunc(
     : args?.name);
   if (!requestedName) throw new Error("loadSkill 需要提供 name。");
 
+  const state = thunkApi.getState();
+  const attribution = resolveToolAttributionContext(state, context, {
+    requireAgentKey: false, errorLabel: "loadSkill: 无法确定归属",
+  });
+  // The shared resolver has verified that this identity matches exactly one loaded record.
+  const dialogKey = context?.dialogKey?.trim() || Object.keys(state.db.entities).find(
+    (key) => isDialogRecordKeyForId(key, attribution.dialogId) &&
+      state.db.entities[key]?.id?.trim() === attribution.dialogId,
+  )!;
+
+
   const candidates = await listSkillCandidates(thunkApi);
   // Exact references never enter name/skillId/title alias resolution.
   let resolution: WebSkillResolution;
@@ -341,7 +331,7 @@ export async function loadSkillFunc(
   // 没配过 skills，拿不到 agent 配置也放行（不能误拒）。
   const resolvedSlug = builtinEntry?.slug ?? matched?.skillId ?? null;
   if (resolvedSlug) {
-    const agentSkillSource = await readCurrentAgentSkillSource(thunkApi);
+    const agentSkillSource = await readCurrentAgentSkillSource(thunkApi, attribution.agentKey);
     if (
       agentSkillSource &&
       isAgentSkillDisabled(agentSkillSource, resolvedSlug)
@@ -363,7 +353,7 @@ export async function loadSkillFunc(
     // 用 slug 作为引用键：稳定、与 userId 无关，且注册表认得。
     const dbKey = builtinEntry.slug;
     if (context?.skipSkillReferencePersist !== true) {
-      await persistLoadedSkillReference(thunkApi, dbKey, requestedName);
+      await persistLoadedSkillReference(thunkApi, dialogKey, dbKey, requestedName);
     }
     return {
       rawData: {
@@ -410,7 +400,7 @@ export async function loadSkillFunc(
   // 这是「agent 在对话中自主载入 coding 能力」的核心机制：普通用户对话不
   // loadSkill coding → 不挂 code 工具；一旦载入 → 本对话后续 turn 有 code 工具。
   if (context?.skipSkillReferencePersist !== true) {
-    await persistLoadedSkillReference(thunkApi, matched.dbKey, requestedName);
+    await persistLoadedSkillReference(thunkApi, dialogKey, matched.dbKey, requestedName);
   }
 
   return {
@@ -432,12 +422,12 @@ export async function loadSkillFunc(
  */
 async function persistLoadedSkillReference(
   thunkApi: any,
+  currentDialogKey: string,
   dbKey: string,
   name: string,
 ): Promise<void> {
   try {
     const state = thunkApi?.getState?.();
-    const currentDialogKey = getActiveDialogKey();
     if (!state || !currentDialogKey) return;
 
     const dialogConfig = selectById(
@@ -453,7 +443,7 @@ async function persistLoadedSkillReference(
       title: name,
       type: "instruction",
     };
-    await setDialogExtraReferencesAction([...existing, newRef], thunkApi);
+    await setDialogExtraReferencesAction([...existing, newRef], thunkApi, currentDialogKey);
   } catch {
     // best-effort: skill body already returned; tool expansion is a bonus.
   }

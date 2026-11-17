@@ -54,7 +54,7 @@ export function formatElapsedSeconds(totalSeconds: number): string {
 /**
  * Soft token chip (`context: 45% (45k/100k)`, no powerline background).
  *
- * 不再用于状态行（状态行只留 git / 积分 / ⏵ auto）：占用口径与详情由
+ * 不再用于状态行（状态行只留 git / 积分 / ✓ auto）：占用口径与详情由
  * `/context` 面板的 renderTokenStatus 呈现，这里保留同一个 resolveContextUsage
  * 口径的纯格式化函数，供面板/测试复用。
  */
@@ -89,7 +89,8 @@ export function renderComposerTokenChip(
  *
  * 口径仍走 resolveContextUsage（与 `/context` 面板的令牌行同一处）：已用 =
  * 下一轮上下文占用（provider input，未收到 usage 时用本地估算 + 轮内流式增量），
- * **不含 output**。用量或窗口任一未知时给 `ctx —` 占位——不伪造 `0%`。
+ * **不含 output**。用量或窗口任一未知时整段不渲染（不伪造 `0%`，也不留
+ * 一个读不出事实的 `ctx —` 占位）。
  */
 function renderStatusContextSegment(
   state: Pick<
@@ -107,8 +108,14 @@ function renderStatusContextSegment(
     estimatedContextTokens: state.estimatedContextTokens,
     turnEstimatedTokens: state.liveTurnEstimatedTokens,
   });
-  if (usage.used === undefined || usage.contextWindow === undefined) {
-    return "ctx —";
+  // 没有已用量时整段不显示：一个读不出事实的占位符只会白占宽度和一对分隔符。
+  // 已用有值、分母未知（自建 custom agent 首屏常见：agentKey 解析不出模型，
+  // 目录要等首轮 run 回填窗口）时**只报已用 token**，不伪造分母也不整段消失。
+  if (usage.used === undefined) {
+    return "";
+  }
+  if (usage.contextWindow === undefined) {
+    return `ctx ${formatTokenCount(usage.used)}`;
   }
   const pct = Math.min(100, usage.pct ?? 0);
   const pctText = pct > 0 && pct < 10 ? pct.toFixed(1) : Math.round(pct).toString();
@@ -138,7 +145,7 @@ export function resolveStatusLineCredits(
 // ─── Status line ────────────────────────────────────────────────────────────
 
 /**
- * 权限授权 chip：两桶独立，只列已授权的桶（两桶都授权时显示 `⏵ 已授权`）。
+ * 权限授权 chip：两桶独立，只列已授权的桶（两桶都授权时显示 `✓ 已授权`）。
  * null = 两桶都在逐次询问，不渲染任何内容。
  */
 export function renderPermissionGrantChip(state: TuiState): string | null {
@@ -177,7 +184,10 @@ export function renderStatusLine(
   const agentLabel = `✦ ${agentDisplayName}${modeSuffix}`;
   const agentSegment = themeText(agentLabel, "muted", colorEnabled);
 
-  const cwdSegment = themeText(`📁 ${formatCwd(state.cwd)}`, "muted", colorEnabled);
+  // 目录段不带图标：等宽字体里没有既单宽又无歧义的「文件夹」字形，emoji 📁 是
+  // 双宽彩色符号，会把整行拖回「一行彩色贴纸」的观感。裸路径本身可读，分支由
+  // `⑂`、agent 由 `✦` 标出，不需要再给路径配一个符号。
+  const cwdSegment = themeText(formatCwd(state.cwd), "muted", colorEnabled);
 
   // 标题已由终端窗口标题区（syncWindowTitle 用 dialogLabel）显示，这里不再
   // 重复渲染 dialogTitle 段，避免输入区上方出现冗余标题。
@@ -194,7 +204,7 @@ export function renderStatusLine(
   }
 
   // CI / 部署状态不再上状态行：远端轮询结果仍写进 state（诊断用），但状态行
-  // 只留本机可动作、一眼可判的事实（分支 + 脏 + 积分 + ⏵ auto），否则一旦远端
+  // 只留本机可动作、一眼可判的事实（分支 + 脏 + 积分 + ✓ auto），否则一旦远端
   // 不可达就是一块噪声，还挤占真正需要看的窄宽预算。
 
   // 状态行的积分 = 续聊基数（服务端历史累计）+ 本次会话本地累加。
@@ -211,8 +221,8 @@ export function renderStatusLine(
   // 共用 resolveContextUsage，不在这里另造估算。
   const contextFull = renderStatusContextSegment(state, false);
   const contextCompact = renderStatusContextSegment(state, true);
-  let contextPart = themeText(contextFull, "muted", colorEnabled);
-  parts.push(contextPart);
+  let contextPart = contextFull ? themeText(contextFull, "muted", colorEnabled) : "";
+  if (contextPart) parts.push(contextPart);
 
   const credits = resolveStatusLineCredits(state);
   const creditsSegment =
@@ -261,14 +271,14 @@ export function renderStatusLine(
   let visibleParts = parts;
   if (maxWidth && maxWidth > 0) {
     const widthOf = (segments: string[]) =>
-      displayWidth(stripAnsi(segments.join(" · "))) + padWidth;
+      displayWidth(stripAnsi(segments.filter(Boolean).join(" · "))) + padWidth;
     // 可让路段的丢弃顺序（挤宽度时从先到后）：
     //   cwd（终端标题/上下文已有）→ agent 名（默认档可省）→
     //   context chip（每秒都在动，先降级为百分比再整体让路）→
     //   积分 chip（只压缩文案，不整体丢弃；再窄退成 `⚡…`——显式承认金额
     //   细节被省略，而不是裸留 `⚡` 冒充「金额还看得见」）。
     // 后台进程计数已不在状态行（搬到 composer 上方的运行区），所以这里没有它。
-    // git 脏 / ⏵ auto / 待消费通知是必保状态，任何宽度都不让。
+    // git 脏 / ✓ auto / 待消费通知是必保状态，任何宽度都不让。
     //
     // context 的降级只看实际可用宽度，不看占用率：宽时 `ctx 42% · 84k/200k`，
     // 放不下就先退成 `ctx 42%`，仍放不下才按上面的顺序整体丢弃。
@@ -362,12 +372,12 @@ export function renderStatusLine(
       // stage that fits the *real* budget (surface padding included):
       //   counts → existence markers (`⑂*?` / `↪`) → drop git → drop notice →
       //   compact credits → `⚡…` (fee present, amount omitted) → explicit
-      //   unified overflow (`⏵…` / `…`) when even that cannot fit.
+      //   unified overflow (`✓…` / `…`) when even that cannot fit.
       // Bare `⚡` is never a stage: an icon is not a number, and dropping the fee
       // silently would read as "this turn cost nothing".
       const budget = maxWidth - padWidth;
       const autoMark = renderPermissionGrantChip(state)
-        ? themeText("⏵", "warning", colorEnabled)
+        ? themeText("✓", "warning", colorEnabled)
         : "";
       const gitCounts = state.gitStatus
         ? themeText(
@@ -430,7 +440,7 @@ export function renderStatusLine(
         (stage) => displayWidth(stripAnsi(stage.join(" "))) <= budget,
       );
       // Physically too narrow for even the markers: state the overflow instead
-      // of claiming every field is visible. Keep `⏵` glued to `…` when the real
+      // of claiming every field is visible. Keep `✓` glued to `…` when the real
       // budget allows it (2 columns), otherwise a bare `…` — both are explicit
       // "something is omitted", never a silent drop of the fee.
       const autoWidth = displayWidth(stripAnsi(autoMark));
@@ -443,7 +453,7 @@ export function renderStatusLine(
       visibleParts = fitted ? [fitted.join(" ")] : [overflowMark];
     }
   }
-  let body = visibleParts.join(sep);
+  let body = visibleParts.filter(Boolean).join(sep);
   if (maxWidth && maxWidth > 0) {
     // Final guarantee: neither the normal line nor the emergency projection may
     // exceed the budget the terminal actually gives us. This last resort is

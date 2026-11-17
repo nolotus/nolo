@@ -1,3 +1,4 @@
+import { type McpApprovalHost } from "../mcp/mcpApprovalTransport";
 import { validateChildImagePaths, validateChildImages } from "./childRunImages";
 import { assertDispatchSelectionAdmission } from "../../ai/agent/dispatchSelectionPolicy";
 import { parseAgentRunArgs } from "../agentRunArgs";
@@ -112,6 +113,7 @@ export type CliAgentRunToolExecutorDeps = {
   /** Read only the current user's dialog namespace; absence fails closed. */
   dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
+  mcpApprovalHostForAgent?: (agentKey: string) => Promise<McpApprovalHost | undefined>;
   env?: EnvLike;
   /** CLI entrypoint path（spawn 子进程重启动用）。 */
   cliEntrypoint?: string;
@@ -545,8 +547,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     //   2) 宿主能不能兑现（guard：本机只有 local 与 docker 可兑现，其它后端派发前拒绝）；
     //   3) 转发 —— 归一化后的 key 经 buildCliLocalRuntimeForwardArgs 进 rawArgs
     //      （唯一产出 `--runtime-key` 的地方，返回前跑 F11 成对不变式）。
-    // 默认落点政策见 resolveCliLocalSpawnDispatch：不传 key 的**写型**派发默认落
-    // docker 沙盒；只读派发留宿主（readOnly 只移除 nolo 侧写工具，不是进程级只读）。
+    // 默认落点政策见 resolveCliLocalSpawnDispatch：不传 key 的**写型**派发默认宿主且须 allowHostWrites: true；只读派发留宿主（readOnly 只移除 nolo 侧写工具，不是进程级只读）。
     const contextFacts = resolveRunContextFacts(continuedRecord ? (typeof continuedRecord === "object" ? continuedRecord : {}) : undefined, agentKey);
     const bindingMachineId =
       agentKey && deps.resolveAgentRuntimeBindingMachineId
@@ -582,7 +583,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     const dispatch = resolveCliLocalSpawnDispatch({
       runtimeKey: effectiveRuntimeKey,
       readOnly: args.readOnly === true,
-      // F1：runtimeKey=local 是「在宿主文件系统上改代码」，需要调用方的显式确认
+      // F1：默认写型派发及 runtimeKey=local 是「在宿主文件系统上改代码」，需要调用方的显式确认
       // （allowHostWrites: true）；缺失即派发前拒绝（零 spawn、零 run 记录）。
       allowHostWrites: args.allowHostWrites,
       // 政策第 5 条：显式宿主 cwd × 沙盒落点必须在派发前失败（沙盒不兑现宿主
@@ -675,7 +676,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       ...(args.ephemeral === true ? ["--ephemeral"] : []),
       // 只读角色安全收敛：审查类任务物理剥离写/改/删工具，遵循最小特权原则。
       ...(isReadOnlyTask ? ["--read-only"] : []),
-      // 执行后端（默认 docker 沙盒；只读派发留宿主）：唯一产出 `--runtime-key`
+      // 执行后端（默认宿主；写型须确认，沙盒须显式指定）：唯一产出 `--runtime-key`
       // 的地方，成对不变式在 buildCliLocalRuntimeForwardArgs 内机械断言。
       ...buildCliLocalRuntimeForwardArgs(dispatch),
       ...instaboxArgs,
@@ -762,7 +763,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(args.ephemeral === true ? { ephemeral: true } : {}),
         output: noopOutput,
       },
-      { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
+      { ...deps, mcpApprovalHost: deps.mcpApprovalHostForAgent ? await deps.mcpApprovalHostForAgent(agentKey) : deps.mcpApprovalHost, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
     );
 
     // hostReviewDispatch 绑定已移除（2026-11-15）：typed review 派发整体下线。
@@ -908,7 +909,7 @@ async function spawnContinuationRun(
       continuedFrom,
       output: noopOutput,
     },
-    { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
+    { ...deps, mcpApprovalHost: deps.mcpApprovalHostForAgent ? await deps.mcpApprovalHostForAgent(agentKey) : deps.mcpApprovalHost, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
   );
 
   const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);

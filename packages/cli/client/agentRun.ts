@@ -40,6 +40,7 @@ import {
   buildTurnTokenUsage,
   formatUsage,
   platformCreditsFromUsage,
+  resolveAgentContextWindow,
   shouldShowUsage,
   sumPlatformCredits,
   withTurnCredits,
@@ -274,6 +275,9 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     // 分享 OAuth agent 的 shell 会话授权（块 D）：仅 owner-required 场景生效。
     ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
     ...(options.shellApprovalSession ? { shellApprovalSession: options.shellApprovalSession } : {}),
+    ...(options.mcpConfirmation ? { mcpConfirmation: options.mcpConfirmation } : {}),
+    // A background child's approval channel belongs to the host session, not the spawning turn.
+    mcpApprovalSignal: options.mcpApprovalSignal ?? options.shellApprovalSession?.signal,
     ...(options.execShellApproval ? { execShellApproval: options.execShellApproval } : {}),
     // 运行位置展示（块 D）：TUI 消费 projectToolExecutionLocation 渲染工具实际
     // 执行设备/工作区；非 owner-required 场景 adapter 不回调。
@@ -2750,8 +2754,8 @@ async function executeLocalAgentTurnForCliWithAdapter(
       ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
       // 回合内注入（TUI 后台 run 唤醒直投）：透传给 local loop。
       ...(options.drainInjections ? { drainInjections: options.drainInjections } : {}),
-      // tool-gist-fold 后 onToolEvent 无条件挂载（不再受 traceLocalTools 开关
-      // 控制，显示模式合并为单一 gist/折叠通道）——保留 alpha 的新形态。
+      // tool-gist 化后 onToolEvent 无条件挂载（不再受 traceLocalTools 开关
+      // 控制，显示模式合并为单一 gist 通道）——保留 alpha 的新形态。
       onToolEvent: (event) => {
         const observation = observeLocalCommandResult(event, options.localRuntimeCwd ?? process.cwd());
         if (observation) commandObservations.push({ ...observation, ...commandVersionBindings.get(event.toolCallId) });
@@ -2777,6 +2781,13 @@ async function executeLocalAgentTurnForCliWithAdapter(
     );
     const turnCredits = sumPlatformCredits(result.usageRecords);
     const turnTokens = withTurnCredits(buildTurnTokenUsage(result.usage, result.model), turnCredits);
+    // 本轮**实际运行**模型的上下文窗口（auto-route 后是真正跑的那个）。
+    // provider 不回 usage 帧时 turnTokens 为 undefined，状态行 chip 的窗口就只剩
+    // 这一个来源；缺了它，自建 / custom agent（apiSource=custom，不在内置目录里）
+    // 会一直显示 `ctx —`——agentKey 查不到窗口，调用点又只有 agentKey。
+    const runContextWindow = result.model
+      ? resolveAgentContextWindow({ model: result.model })
+      : undefined;
     const turnResult: RunAgentTurnResult = {
       savedTurnPersisted: turnPersisted,
       mainProviderAttempted: mainProviderStarted,
@@ -2796,6 +2807,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
       ...(turnTokens !== undefined ? { turnTokens } : {}),
       ...(turnCredits !== undefined ? { turnCredits } : {}),
       ...(usageRecords?.length ? { usageRecords } : {}),
+      ...(runContextWindow !== undefined ? { contextWindow: runContextWindow } : {}),
     };
     // 头元数据走旁路（不改结果对象形状）：见 agentRunResultFile.ts。
     // server/serverSync 与 writeDialog 远端同步共用同一判定（见 resolveResultServerMeta）。
@@ -3028,7 +3040,7 @@ export function foldLocalResultForTui(
     exitCode: localResult.exitCode,
     ...projectLocalTurnFacts(localResult),
     ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
-    title: localResult.title,
+    ...(localResult.title !== undefined ? { title: localResult.title } : {}),
     ...(localResult.titlePatchPromise
       ? { titlePatchPromise: localResult.titlePatchPromise }
       : {}),
@@ -3061,6 +3073,12 @@ export function foldLocalResultForTui(
     ...(localResult.finalText ? { finalText: localResult.finalText } : {}),
     ...(localResult.failureSubclass
       ? { failureSubclass: localResult.failureSubclass }
+      : {}),
+    // 窗口上限必须随行：provider 不回 usage 帧（自有 API / 订阅制 CLI）时
+    // turnTokens 为 undefined，状态行 ctx chip 的窗口就只剩这一个来源；白名单
+    // 漏掉它 = 自建 custom agent 永远显示 `ctx —`（同坑位历史：turnCredits）。
+    ...(localResult.contextWindow !== undefined
+      ? { contextWindow: localResult.contextWindow }
       : {}),
   };
   // 头元数据旁路随行（见 agentRunResultFile.ts），否则 auto→local 的头会丢 model。

@@ -267,7 +267,7 @@ export function resolveLocalRunExecutionIsolationFact(args: {
     reason: "host-no-sandbox",
     note:
       "本 run 在宿主执行且**无隔离**（未走 docker 通道，也没有可用的 bwrap workload）。" +
-      "写操作直接作用于宿主工作区；派发型 run 的默认落点是本机 docker 沙盒，" +
+      "写操作直接作用于宿主工作区；CLI 未点名写型派发默认宿主且须 allowHostWrites: true，" +
       "交互式 run 可用 --runtime-key docker（或 --local 显式声明本机执行）。",
     recordedAt,
   });

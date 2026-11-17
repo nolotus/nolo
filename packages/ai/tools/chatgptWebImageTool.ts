@@ -1,16 +1,14 @@
+import type { ToolExecutorContext } from "./index";
+import { resolveToolAttributionContext } from "./memoryToolContext";
 import { callToolApi } from "./toolApiClient";
-import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { selectIdentityUserId } from "identity/selectors";
 import { selectCurrentServer } from "app/settings/serverSelectors";
-import { selectCurrentDialogConfig, selectCurrentDialogKey } from "chat/dialog/dialogSlice";
 import { addContentAction } from "create/space/content/addContentAction";
 import { ContentType } from "app/types";
 import { fileKey } from "database/keys";
 import { buildDatabaseFileContentUrl } from "database/fileUrl";
 import { asOptionalTrimmedString } from "core/optionalString";
-import { asNonEmptyStringArray } from "core/stringArray";
 import { asTrimmedString } from "core/trimmedString";
-import { extractCustomId } from "core/prefix";
 
 type ChatgptWebImageArgs = {
   prompt: string;
@@ -80,7 +78,8 @@ export const chatgptWebImageGenerateFunctionSchema = {
 
 export const chatgptWebImageGenerateFunc = async (
   args: ChatgptWebImageArgs,
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolExecutorContext
 ): Promise<{ rawData: any; displayData: string; llmContext?: string }> => {
   const trimmedPrompt = args.prompt?.trim();
   if (!trimmedPrompt) {
@@ -88,16 +87,11 @@ export const chatgptWebImageGenerateFunc = async (
   }
 
   const state = thunkApi.getState();
-  const currentDialogKey = selectCurrentDialogKey(state);
-  const dialogId = currentDialogKey
-    ? extractCustomId(currentDialogKey)
-    : undefined;
-
-  const dialogConfig = selectCurrentDialogConfig(state) as
-    | { cybots?: unknown }
-    | null
-    | undefined;
-  const agentKey = asNonEmptyStringArray(dialogConfig?.cybots)[0];
+  const { dialogId, spaceId, agentKey } = resolveToolAttributionContext(state, context, {
+    requireAgentKey: true, errorLabel: "无法确定图像归属",
+  });
+  const userId = selectIdentityUserId(state);
+  const currentServer = selectCurrentServer(state);
 
   const result = await callToolApi(
     thunkApi,
@@ -109,10 +103,6 @@ export const chatgptWebImageGenerateFunc = async (
     },
     { withAuth: true, agentKey }
   );
-
-  const spaceId = getCurrentSpaceId();
-  const userId = selectIdentityUserId(state);
-  const currentServer = selectCurrentServer(state);
 
   if (spaceId && userId && result?.files?.length) {
     for (let i = 0; i < result.files.length; i += 1) {

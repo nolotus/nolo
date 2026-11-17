@@ -723,10 +723,15 @@ async function runAgentChat(
   }
   return {
     ...result,
-    contextWindow: resolveAgentContextWindow({
-      agentKey: effectiveAgentKey,
-      agentName: effectiveAgentName,
-    }),
+    // 本轮实际运行模型解析出的窗口优先（agentRun 已按 result.model 解析，含
+    // auto-route 之后的真实模型）；agentKey 只在内置/广场目录里查得到窗口，
+    // 自建 custom agent 会落到 undefined，改成无条件覆盖会把它显式写成 undefined。
+    contextWindow:
+      result.contextWindow ??
+      resolveAgentContextWindow({
+        agentKey: effectiveAgentKey,
+        agentName: effectiveAgentName,
+      }),
     cachedMemoryOverlay: memoryPromptBlock,
   };
 }
@@ -1675,6 +1680,8 @@ export async function runOneAgentTurn(
   const requestUserChoice =
     isInteractiveInput(ctx.input) && ctx.dialogHost
       ? async (choiceReq: UserChoiceRequest): Promise<UserChoiceResult> => {
+          const signals = [choiceReq.signal, ctx.activeTurnAbort?.signal].filter((signal): signal is AbortSignal => !!signal);
+          const signal = signals.length ? AbortSignal.any(signals) : undefined;
           // ask_user 把 Agent 从自主运行切成等用户选择：立即提醒（BEL +
           // Windows Terminal indeterminate progress，无时长门槛——等待本身
           // 就值得提醒）；作答 / 取消 / 异常任何退出路径都由 finally 清掉
@@ -1690,7 +1697,7 @@ export async function runOneAgentTurn(
               try {
                 return await ctx.dialogHost!.run((anchor) =>
                   runAskChoiceDialog({
-                    request: choiceReq,
+                    request: { ...choiceReq, signal },
                     input: ctx.input as NodeJS.ReadStream,
                     output: ctx.output as NodeJS.WritableStream,
                     ...anchor,
@@ -1698,6 +1705,7 @@ export async function runOneAgentTurn(
                     // dialog; the option list is navigated with ↑↓ only.
                     inputPolicy: { ...anchor.inputPolicy, wheel: "transcript" },
                   }),
+                  signal ? { signal, cancelled: () => ({ kind: "cancelled" as const }) } : undefined,
                 );
               } catch {
                 return { kind: "cancelled" };
@@ -1988,6 +1996,12 @@ export async function runOneAgentTurn(
             }
           : {}),
         ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
+        // 与正常轮末的状态折叠同口径：强制停止后的迟到结果仍按纯数据折叠，
+        // 窗口上限一起写回——否则被强停的那一轮会把「provider 不回 usage 帧」
+        // 的 agent（自有 API / 订阅制）的窗口留在未知态，状态行停在 `ctx —`。
+        ...(runResult.contextWindow !== undefined
+          ? { contextWindow: runResult.contextWindow }
+          : {}),
         ...(runResult.turnTokens && runResult.turnTokens.input > 0
           ? (() => {
               const assistantDelta = Math.max(

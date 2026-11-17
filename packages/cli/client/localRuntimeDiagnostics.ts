@@ -124,6 +124,8 @@ export type CliLocalRuntimeAdapterDeps = {
   shellGrant?: OriginShellGrant;
   shellApprovalSession?: ShellApprovalSession;
   execShellApproval?: ExecShellApprovalAuthority;
+  mcpConfirmation?: import("../mcp/mcpApprovalTransport").McpConfirmation;
+  mcpApprovalSignal?: AbortSignal;
   /**
    * owner-required 场景的展示用身份信息（分享 agent 名 / owner / device）。
    * 仅供 shellGrant 确认对话框与运行位置展示渲染，不是授权凭证。

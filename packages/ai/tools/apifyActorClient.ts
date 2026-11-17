@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 // 文件路径: ai/tools/apifyActorClient.ts
 
 import { callToolApi } from "./toolApiClient";
@@ -17,14 +18,15 @@ export interface CallApifyActorParams {
  */
 export async function callApifyActor(
   thunkApi: any,
-  params: CallApifyActorParams
+  params: CallApifyActorParams,
+  context?: ToolRequestDialogContext
 ): Promise<{ rawData: any; displayData: string }> {
   const { actorId, input, resultType = "datasetItems", displayName } = params;
 
   const data = await callToolApi(
     thunkApi,
     "/api/apify-actor",
-    { actorId, input, resultType },
+    { actorId, input, resultType, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) },
     { withAuth: true }
   );
 

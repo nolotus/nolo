@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 // packages/ai/tools/cfBrowserTools.ts
 // Cloudflare Browser Rendering 工具：截图、Markdown、PDF、JSON 结构化提取
 // Docs: https://developers.cloudflare.com/browser-rendering/rest-api/
@@ -77,7 +78,8 @@ export async function cfScreenshotFunc(
     fullPage?: boolean;
     viewport?: { width: number; height: number };
   },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ): Promise<{ rawData: any; displayData: string }> {
   const { url, html, fullPage = false, viewport } = args;
 
@@ -92,7 +94,7 @@ export async function cfScreenshotFunc(
   }>(
     thunkApi,
     "/api/cf-screenshot",
-    { url: targetUrl, html, fullPage, viewport },
+    { url: targetUrl, html, fullPage, viewport, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) },
     { withAuth: true }
   );
 
@@ -143,7 +145,8 @@ export async function cfGetMarkdownFunc(
     html?: string;
     waitForNetworkIdle?: boolean;
   },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ): Promise<{ rawData: any; displayData: string }> {
   const { url, html, waitForNetworkIdle = false } = args;
 
@@ -157,7 +160,7 @@ export async function cfGetMarkdownFunc(
     success: boolean;
     browserMsUsed?: number;
     source: string;
-  }>(thunkApi, "/api/cf-markdown", { url: targetUrl, html, gotoOptions }, { withAuth: true });
+  }>(thunkApi, "/api/cf-markdown", { url: targetUrl, html, gotoOptions, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) }, { withAuth: true });
 
   const extractionIssue = detectExtractionIssue(data.markdown ?? "", targetUrl ?? url ?? "网页");
   if (extractionIssue) {
@@ -214,7 +217,8 @@ export async function cfGeneratePDFFunc(
     html?: string;
     pdfOptions?: { format?: string; landscape?: boolean; printBackground?: boolean };
   },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ): Promise<{ rawData: any; displayData: string }> {
   const { url, html, pdfOptions } = args;
 
@@ -227,7 +231,7 @@ export async function cfGeneratePDFFunc(
     filename: string;
     browserMsUsed?: number;
     source: string;
-  }>(thunkApi, "/api/cf-pdf", { url: targetUrl, html, pdfOptions }, { withAuth: true });
+  }>(thunkApi, "/api/cf-pdf", { url: targetUrl, html, pdfOptions, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) }, { withAuth: true });
 
   const seconds = data.browserMsUsed ? (data.browserMsUsed / 1000).toFixed(2) : "?";
 
@@ -285,7 +289,8 @@ export async function cfExtractJSONFunc(
     prompt?: string;
     response_format?: object;
   },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ): Promise<{ rawData: any; displayData: string }> {
   const { url, html, prompt, response_format } = args;
 
@@ -301,7 +306,7 @@ export async function cfExtractJSONFunc(
   }>(
     thunkApi,
     "/api/cf-json",
-    { url: targetUrl, html, prompt, response_format },
+    { url: targetUrl, html, prompt, response_format, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) },
     { withAuth: true }
   );
 

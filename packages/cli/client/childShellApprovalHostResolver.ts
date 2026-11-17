@@ -13,24 +13,28 @@ export function createChildShellApprovalHostResolver(args: {
   session: ShellApprovalSession;
 }): (agentKey: string) => Promise<ShellApprovalHost | undefined> {
   return async (agentKey) => {
-    const config = await args.readAgentConfig(agentKey);
-    // readAgentFromStore returns a runtime config; owner fields live in rawRecord.
-    const record = config?.rawRecord;
-    const ownerUserId = asOptionalTrimmedString(record?.userId)
-      ?? asOptionalTrimmedString(record?.ownerUserId);
-    if (!ownerUserId) return undefined;
-    const deviceId = asOptionalTrimmedString(await args.resolveDeviceId());
-    if (!deviceId) return undefined;
+    const binding = await resolveChildApprovalBinding({ ...args, agentKey });
+    if (!binding) return undefined;
     return {
-      binding: {
-        runId: "pending-spawn",
-        agentKey,
-        ownerUserId,
-        deviceId,
-        workspaceRoot: args.workspaceRoot,
-      },
+      binding,
       confirm: args.session.confirm,
       signal: args.session.signal,
     };
   };
+}
+
+/** Shared trusted identity projection only; does not decide or grant any tool permission. */
+export async function resolveChildApprovalBinding(args: {
+  readAgentConfig(agentKey: string): Promise<AgentRuntimeAgentConfig | null>;
+  resolveDeviceId(): Promise<unknown>; workspaceRoot: string; agentKey: string;
+}) {
+  const config = await args.readAgentConfig(args.agentKey);
+  // readAgentFromStore returns a runtime config; owner fields live in rawRecord.
+  const record = config?.rawRecord;
+  const ownerUserId = asOptionalTrimmedString(record?.userId)
+    ?? asOptionalTrimmedString(record?.ownerUserId);
+  if (!ownerUserId) return undefined;
+  const deviceId = asOptionalTrimmedString(await args.resolveDeviceId());
+  if (!deviceId) return undefined;
+  return { runId: "pending-spawn", agentKey: args.agentKey, ownerUserId, deviceId, workspaceRoot: args.workspaceRoot };
 }

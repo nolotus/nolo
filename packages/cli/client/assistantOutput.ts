@@ -4,7 +4,7 @@ import {
   resolveTuiBrightness,
   type TuiBrightness,
 } from "../tui/theme";
-import { toolLabelVariants } from "../tui/i18n";
+import { toolIcon, toolLabelVariants } from "../tui/i18n";
 import { boxGlyphs, resolveBoxCharset, stripAnsi } from "../tui/tuiAnsi";
 import { renderMermaidBlock } from "./mermaid";
 import {
@@ -312,7 +312,12 @@ function plainToolLine(line: string) {
  * toolOutput's treeKind only ever emits these four labels.
  */
 const TOOL_TREE_GROUP_LABELS = new Set(
-  ["execShell", "readFile", "fetchWebpage", "exa_search"].flatMap(toolLabelVariants),
+  ["execShell", "readFile", "fetchWebpage", "exa_search"].flatMap((name) => [
+    // 新 transcript 用紧凑图标做树头（`📄 (2) · a.ts, b.ts  ✓`）。
+    toolIcon(name),
+    // 历史 transcript 里仍是本地化工具名，改版不能把它们降级成普通 bullet。
+    ...toolLabelVariants(name),
+  ]),
 );
 
 function isKnownToolGroupLabel(label: string): boolean {
@@ -337,7 +342,6 @@ function isToolSingleLine(line: string): boolean {
  *
  * flat 行（▸ <label> · <gist>  ✓）→ "flat:<label>"；树头（• <Label> (n)）→
  * "tree:<Label>"。摘要行携带完整的 item 列表。
- * ×N 折叠后缀（"Edit ×8"）不是分组身份的一部分，比对前剥掉。
  *
  * flat 与 tree 用不同命名空间：同一工具的 flat 行与它的树块仍然是两个分组。
  */
@@ -345,12 +349,12 @@ function toolGroupKeyOf(line: string): string | null {
   const plain = plainToolLine(line);
   const flat = plain.match(TOOL_SINGLE_RE);
   if (flat) {
-    const label = (flat[1] ?? "").replace(/\s*×\d+$/, "").trim();
+    const label = (flat[1] ?? "").trim();
     return label ? `flat:${label}` : null;
   }
   const header = toolTreeHeaderMatch(plain);
   if (header) {
-    const label = (header[1] ?? "").replace(/\s*×\d+$/, "").trim();
+    const label = (header[1] ?? "").trim();
     return label ? `tree:${label}` : null;
   }
   return null;

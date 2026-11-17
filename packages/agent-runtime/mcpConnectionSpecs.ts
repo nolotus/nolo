@@ -42,7 +42,9 @@ export type McpErrorCode =
   | "invalid_input" | "unsupported_version" | "forbidden" | "not_found" | "disabled"
   | "revision_conflict" | "catalog_stale" | "placement_unavailable" | "credential_unavailable"
   | "authentication_required" | "network_denied" | "invalid_tool_arguments" | "untrusted_schema"
-  | "limit_exceeded" | "cancelled" | "timeout" | "transport_error";
+  | "limit_exceeded" | "cancelled" | "timeout" | "transport_error"
+  /** No host approval channel exists in this execution plane (e.g. headless run). Not a refusal. */
+  | "approval_unavailable";
 /** Fixed codes only: never attach provider exceptions, URLs, args, refs or arbitrary input paths. */
 export type McpResult<T> = { ok: true; value: T } | { ok: false; error: { code: McpErrorCode } };
 const failure = (code: McpErrorCode): McpResult<never> => ({ ok: false, error: { code } });

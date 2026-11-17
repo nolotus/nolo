@@ -1,3 +1,4 @@
+import type { ToolRequestDialogContext } from "./toolRequestDialogId";
 import { callApifyActor } from "./apifyActorClient";
 
 export const taobaoTmallProductScraperFunctionSchema = {
@@ -29,7 +30,8 @@ export async function taobaoTmallProductScraperFunc(
     itemId: string;
     detailDepth?: "lite" | "standard" | "full";
   },
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ) {
   const itemId = String(args.itemId ?? "").trim();
   if (!/^\d{6,}$/.test(itemId)) {
@@ -45,5 +47,5 @@ export async function taobaoTmallProductScraperFunc(
     },
     resultType: "datasetItems",
     displayName: "Taobao/Tmall Product Scraper",
-  });
+  }, context);
 }

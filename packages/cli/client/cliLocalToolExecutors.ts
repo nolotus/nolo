@@ -1,3 +1,4 @@
+import { type McpApprovalHost } from "../mcp/mcpApprovalTransport";
 import type { PlanningCaller } from "../../ai/agent/agentDiscovery";
 import { registerLocalShellLifecycle } from "../../agent-runtime/localToolPolicy";
 import { withBrowserShellApproval } from "./browserShellApprovalHost";
@@ -266,6 +267,7 @@ export function buildLocalToolExecutors(args: {
   workspaceRoot: string;
   sourceParentDialogId?: string;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
+  mcpApprovalHostForAgent?: (agentKey: string) => Promise<McpApprovalHost | undefined>;
   env: EnvLike;
   fetchImpl: CliFetchImpl;
   localToolExecutors?: Record<
@@ -494,6 +496,7 @@ export function buildLocalToolExecutors(args: {
     // （复用 ~/.nolo/runs/ 注册表，MED-1 修复）。
     startAgentRun: createCliStartAgentRunExecutor({
       shellApprovalHostForAgent: args.shellApprovalHostForAgent,
+      mcpApprovalHostForAgent: args.mcpApprovalHostForAgent,
       ...pickAgentRunResolverDeps(args),
       // α：展示名回读器——resolveAgentRunName 的读取来源（显式 agentName 优先，绝不覆盖）。
       resolveAgentName: args.resolveAgentName,
@@ -505,6 +508,7 @@ export function buildLocalToolExecutors(args: {
     controlAgentRun: createCliControlAgentRunExecutor({
       source: { parentDialogId: args.sourceParentDialogId, agentKey: args.agentKey },
       shellApprovalHostForAgent: args.shellApprovalHostForAgent,
+      mcpApprovalHostForAgent: args.mcpApprovalHostForAgent,
       cwd: args.workspaceRoot,
       cliEntrypoint: args.cliEntrypoint,
       env: args.env,

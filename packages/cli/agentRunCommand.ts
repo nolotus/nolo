@@ -4,6 +4,7 @@ import { exitCliFromWatchdog } from "./client/cliExitSync";
 import { isHistoryIntegrityFailure } from "../ai/tools/agent/runFailureClass";
 import { createHash } from "node:crypto";
 import { attachLocalCommandObservations, captureLocalRunBase, unknownLocalRunAcceptance } from "./agentRunLocalWorkspace";
+import { createMcpApprovalChild } from "./mcp/mcpApprovalTransport";
 import { createShellApprovalChild } from "./client/originShellApprovalTransport";
 // Orchestration entry for `nolo agent run` and the related run/chat
 // shorthands. Pure CLI arg parsing lives in `./agentRunArgs`; prompt
@@ -186,7 +187,7 @@ export type AgentRunCommandDeps = {
    * unset (defaults to false).
    */
   memoryRecallDisabled?: boolean;
-} & Pick<AgentRunControlDeps, "homedir" | "spawn" | "fs" | "now" | "sleep" | "generateRunId" | "shellApprovalHost">;
+} & Pick<AgentRunControlDeps, "homedir" | "spawn" | "fs" | "now" | "sleep" | "generateRunId" | "shellApprovalHost" | "mcpApprovalHost">;
 
 function resolvePositiveMs(value: unknown, fallback: number): number {
   return parsePositiveFiniteNumberOrFallback(value, fallback);
@@ -859,6 +860,7 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
         now: deps.now,
         generateRunId: deps.generateRunId,
         shellApprovalHost: deps.shellApprovalHost,
+        mcpApprovalHost: deps.mcpApprovalHost,
       }
     );
     output.write(`[nolo] runId=${runId}\n`);
@@ -1018,6 +1020,8 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
     );
 
   // IPC is inherited only by the bound spawned child; never trust env approval flags.
+  const mcpApprovalChild = process.connected && typeof process.send === "function"
+    ? createMcpApprovalChild(process) : undefined;
   const shellApprovalChild = process.connected && typeof process.send === "function"
     ? createShellApprovalChild(process) : undefined;
   try {
@@ -1026,6 +1030,8 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
     targetAgentKey: string,
     turnMessage: string = effectiveMessage
   ): RunAgentTurnOptions => ({
+    ...(mcpApprovalChild ? { mcpConfirmation: targetAgentKey === agentKey ? mcpApprovalChild.confirm : async () => "unavailable" as const,
+      mcpApprovalSignal: mcpApprovalChild.signal } : {}),
     ...(shellApprovalChild ? { execShellApproval: targetAgentKey === agentKey
       ? shellApprovalChild.authority
       : { request: async () => { throw new Error("Shell approval agent binding mismatch"); },
@@ -1409,8 +1415,9 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
     terminalStatus.fail();
     throw error;
   } finally {
+    mcpApprovalChild?.close();
     shellApprovalChild?.close();
-    if (shellApprovalChild && process.connected) process.disconnect();
+    if ((shellApprovalChild || mcpApprovalChild) && process.connected) process.disconnect();
   }
 }
 

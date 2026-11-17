@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   isAgentRunStartFailureStatus,
   isAgentRunStatusNormal,
@@ -24,16 +23,16 @@ import {
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { type AgentRunSnapshot, parseAgentRunEvent } from "./agentRunSnapshot";
 import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyles";
-import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor } from "../tui/theme";
-import { resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
-import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
+import { composerSurfaceBackgroundSequence, renderSurfaceLine, themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor } from "../tui/theme";
+import { resolveSurfacePaintWidth, resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
+import { displayWidth, stripAnsi, fitAnsiLine } from "../tui/tuiAnsi";
 import { redactSecrets } from "../tui/redactSecrets";
 import { summarizeShellCommand } from "../../core/shellCommandGist";
 import { projectToolActivity, canCoalesceToolActivities, type ToolActivityProjection } from "../../core/toolActivityPresentation";
 import { safeAskText, safeApprovalMultilineText, withholdIfSecretLike } from "../tui/askTextSanitize";
 import { diffLines } from "diff";
 import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
-import { agentRunCardLabels, t, toolLabel } from "../tui/i18n";
+import { agentRunCardLabels, t, toolFamilyLabel, toolFamilyOf, toolFamilyOfIcon, toolIcon, toolLabel } from "../tui/i18n";
 import {
   formatFetchItemUrl,
   formatReadItemPath,
@@ -237,7 +236,7 @@ function formatShowInteractionBlock(
   event: LocalAgentToolEvent,
   colorEnabled: boolean,
 ): string {
-  const label = toolLabel(event.toolName || "show_interaction");
+  const label = toolIcon(event.toolName || "show_interaction");
   let parsedPayload: any;
   if (typeof event.content === "string") {
     try {
@@ -332,10 +331,16 @@ function formatShowInteractionBlock(
 
 function formatToolTraceLine(text: string, colorEnabled: boolean, accent: "none" | "error" = "none") {
   if (!colorEnabled) return `${text}\n`;
-  if (accent === "error") {
-    return `${themeText(text, "danger", true)}\n`;
-  }
-  return `${dimCliText(text, true)}\n`;
+  const width = resolveSurfacePaintWidth(process.stdout.columns || 80);
+  const fitted = fitAnsiLine(text.replace(/\r?\n/g, " "), width);
+  const styled = accent === "error"
+    ? themeText(fitted, "danger", true)
+    : dimCliText(fitted, true);
+  return `${renderSurfaceLine({
+    text: styled,
+    surface: colorEnabled ? composerSurfaceBackgroundSequence() : "",
+    padTo: width,
+  })}\n`;
 }
 
 // safe（normal）投影通用清洗：剥 ANSI/OSC（含剪贴板写、超链接）、折叠换行。
@@ -924,20 +929,18 @@ function formatEditDetailBlock(
   const isTruecolor = supportsTruecolor(env);
   const lang: CodeLang = isTruecolor ? detectCodeLangFromPath(filePath) : "unknown";
   const brightness: TuiBrightness = resolveTuiBrightness(env);
-  // Block-level padTo so every diff line forms a rectangle of equal visible
-  // width (Zed-style band). Measured with CJK-aware displayWidth.
-  const padTo = Math.max(...lines.map((line) => displayWidth(line.text))) + 1;
+  const padTo = resolveSurfacePaintWidth(process.stdout.columns || 80);
   return lines
-    .map((line) => `  ${renderDiffLine({
+    .map((line) => renderDiffLine({
       kind: line.kind,
-      text: line.text,
+      text: fitAnsiLine(`  ${line.text}`, padTo),
       highlightedText: shouldHighlightEditLine(line, lang, isTruecolor)
-        ? buildHighlightedEditLine(line, lang, brightness, env)
+        ? fitAnsiLine(`  ${buildHighlightedEditLine(line, lang, brightness, env)}`, padTo)
         : undefined,
       padTo,
       colorEnabled: true,
       env,
-    })}\n`)
+    }) + "\n")
     .join("");
 }
 
@@ -1128,6 +1131,7 @@ function formatNormalToolLine(
   pending: { toolName: string; argumentsPreview?: string } | undefined,
   colorEnabled: boolean,
   opts?: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> },
+  omitSuccessGlyph?: (toolName: string) => boolean,
 ) {
   if (event.type === "tool-call") return "";
   const toolName = event.toolName || pending?.toolName || "tool";
@@ -1157,7 +1161,10 @@ function formatNormalToolLine(
     return formatShowInteractionBlock(event, colorEnabled);
   }
 
-  const label = toolLabel(toolName);
+  // 默认视图只留「图标 + gist」：一行一个 emoji 承担工具族语义，不再铺本地化
+  // 工具名（`▸ 读取 · src/a.ts` → `▸ 📄 · src/a.ts`）。工具名没丢：`/tools`
+  // 详情走 toolRowDetailLine 把图标换回双语族名（Read / 读取）。
+  const label = toolIcon(toolName);
   const cols =
     typeof process !== "undefined" && typeof process.stdout?.columns === "number" && process.stdout.columns > 0
       ? process.stdout.columns
@@ -1177,6 +1184,7 @@ function formatNormalToolLine(
     const title = gist ? `${label} · ${gist}` : label;
     return formatToolTraceLine(fitNormalLine(`▸ ${title}`, `✗ ${reason}`, totalBudget), colorEnabled, "error");
   }
+  const successLabel = omitSuccessGlyph?.(toolName) ? "  " : label;
   const resultSummary = normalResultSummary(event);
   const gist = [normalToolGist(event), resultSummary].filter(Boolean).join(" · ");
   // editFile：gist 行追加 (+a, -r) 统计 + 多行 diff 色带块（Zed-style），
@@ -1189,7 +1197,7 @@ function formatNormalToolLine(
 
   let fittedGist = gist;
   if (gist) {
-    const prefix = `▸ ${label} · `;
+    const prefix = `▸ ${successLabel} · `;
     const suffix = `${statsInline}${tail}`;
     const prefixWidth = displayWidth(prefix);
     const suffixWidth = displayWidth(suffix);
@@ -1199,7 +1207,7 @@ function formatNormalToolLine(
     }
   }
 
-  const lineContent = fittedGist ? `▸ ${label} · ${fittedGist}${statsInline}${tail}` : `▸ ${label}${statsInline}${tail}`;
+  const lineContent = fittedGist ? `▸ ${successLabel} · ${fittedGist}${statsInline}${tail}` : `▸ ${successLabel}${statsInline}${tail}`;
   const mainLine = formatToolTraceLine(fitNormalLine(lineContent.slice(0, -tail.length), tail, totalBudget), colorEnabled);
   if (hint?.detail?.length) {
     const filePath = typeof event.metadata?.path === "string" ? event.metadata.path : undefined;
@@ -1327,7 +1335,7 @@ export const TUI_TREE_TOOLS = {
   Fetch: ["fetchWebpage"],
 } as const;
 export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;
-export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string; previousRow?: string; appendOnly?: boolean; readOnly?: boolean; runIdentity?: string; details?: string };
+export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string; previousRow?: string; appendOnly?: boolean; details?: string };
 
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
@@ -1338,8 +1346,30 @@ export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
 function toolDetails(event: LocalAgentToolEvent, line: string): string {
   const command = event.metadata?.command;
   return isRunToolName(event.toolName) && typeof command === "string"
-    ? `${line}${safeApprovalMultilineText(command)}\n`
-    : line;
+    ? `${toolRowDetailLine(line)}${safeApprovalMultilineText(command)}\n`
+    : toolRowDetailLine(line);
+}
+
+/**
+ * 详情视图（`/tools`、展开层）把紧凑行首的图标换回可读族名：
+ * `▸ 📄 · a.ts  ✓` → `▸ Read · a.ts  ✓`（zh: `▸ 读取 · a.ts  ✓`）。
+ * 默认视图压缩成图标，详情必须仍然读得懂——压缩不删能力。
+ *
+ * 只转换规则表里已知的图标：历史 transcript 里仍是本地化工具名
+ * （`▸ 读取 · a.ts`、`▸ Read · a.ts`）或其他自由文本时原样返回，
+ * 因此本函数幂等，可以被重复调用。
+ */
+export function toolRowDetailLine(line: string): string {
+  // A blank two-column glyph slot is not a family label, even if the gist is.
+  if (/^(?:\u001b\[[0-9;]*m)*▸  /.test(line)) return line;
+  const match = /^(?:\u001b\[[0-9;]*m)*▸ (\S+)/.exec(line);
+  if (!match) return line;
+  const glyph = match[1] ?? "";
+  const family = toolFamilyOfIcon(glyph);
+  if (!family) return line;
+  const familyName = toolFamilyLabel(glyph);
+  const glyphIndex = match[0].length - glyph.length;
+  return `${line.slice(0, glyphIndex)}${familyName}${line.slice(match[0].length)}`;
 }
 
 export function createToolEventFormatter(
@@ -1348,12 +1378,13 @@ export function createToolEventFormatter(
 ): ToolEventFormatter {
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
   let scope = 0;
+  let lastFamilyId: string | undefined;
   let tree: { kind: TuiTreeKind; items: string[]; lastRow?: string; activity: ToolActivityProjection } | null = null;
   const treeKind = (name: string): TuiTreeKind | null =>
     (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
       (TUI_TREE_TOOLS[kind] as readonly string[]).includes(name)) ?? null;
   const treeLine = (kind: TuiTreeKind, items: string[], fallback: string, details: string) => {
-    const label = kind === "Run" ? toolLabel("execShell") : kind === "Read" ? toolLabel("readFile") : kind === "Fetch" ? toolLabel("fetchWebpage") : toolLabel("exa_search");
+    const label = kind === "Run" ? toolIcon("execShell") : kind === "Read" ? toolIcon("readFile") : kind === "Fetch" ? toolIcon("fetchWebpage") : toolIcon("exa_search");
     const header = `${label} (${items.length}) · `;
     // Summary rows receive the assistant's "◈ " anchor (measured display width).
     const columns = resolveHistoryLayoutGeometry(process.stdout.columns).contentWidth - displayWidth("◈ ");
@@ -1417,11 +1448,12 @@ export function createToolEventFormatter(
     if (tree.items.length < 2) {
       const line = formatNormalToolLine(event, call, colorEnabled, opts);
       tree.lastRow = stripAnsi(line).trimEnd();
-      const rawCommand = typeof m.command === "string" ? m.command : "";
-      const runIdentity = kind === "Run" && activity.readOnly && rawCommand
-        ? createHash("sha256").update(rawCommand).digest("hex").slice(0, 16)
-        : undefined;
-      return `${TUI_TREE_MARKER}${JSON.stringify({ kind, summary: stripAnsi(line).trimEnd().replace(/^▸ /, ""), fallback: line, details: toolDetails(event, line), appendOnly: true, ...(runIdentity ? { readOnly: true, runIdentity } : {}) } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
+      // Every tool call keeps its own row: transcript folding was removed
+      // because deciding "same action" from rendered text let a body line that
+      // merely quotes tool output swallow a real call. Do not reintroduce
+      // folding here or in tuiHistory without an identity that comes from the
+      // call itself, not from the text.
+      return `${TUI_TREE_MARKER}${JSON.stringify({ kind, summary: stripAnsi(line).trimEnd().replace(/^▸ /, ""), fallback: line, details: toolDetails(event, line), appendOnly: true } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
     }
     const line = formatNormalToolLine(event, call, colorEnabled, opts);
     return treeLine(kind, tree.items, line, toolDetails(event, line));
@@ -1436,15 +1468,22 @@ export function createToolEventFormatter(
     }
     const call = pending.get(event.toolCallId);
     pending.delete(event.toolCallId);
+    const previousFamilyId = lastFamilyId;
+    lastFamilyId = undefined;
     const treeOutput = formatTreeEvent(event, call);
     if (treeOutput !== null) return treeOutput;
-    const line = formatNormalToolLine(event, call, colorEnabled, opts);
+    // Tree payloads (including fallback/details) stay byte-for-byte unchanged.
+    // Only a standalone successful row can extend the event-family streak.
+    const line = formatNormalToolLine(event, call, colorEnabled, opts, opts.tuiTrees ? undefined : (name) => {
+      lastFamilyId = toolFamilyOf(name).id;
+      return previousFamilyId === lastFamilyId;
+    });
     if (opts.tuiTrees && line && isRunToolName(event.toolName)) {
       return `${TUI_TREE_MARKER}${JSON.stringify({ kind: "Run", summary: "", fallback: line, details: toolDetails(event, line), appendOnly: true } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
     }
     return line;
   }) as ToolEventFormatter;
-  format.reset = () => { tree = null; scope++; };
+  format.reset = () => { tree = null; lastFamilyId = undefined; scope++; };
   format.consume = (event: LocalAgentToolEvent) => {
     if (event.type === "tool-call") {
       pending.set(event.toolCallId, {
@@ -1455,6 +1494,7 @@ export function createToolEventFormatter(
     }
     pending.delete(event.toolCallId);
     tree = null;
+    lastFamilyId = undefined;
   };
   return format;
 }

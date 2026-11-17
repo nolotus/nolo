@@ -556,9 +556,25 @@ export function buildServerPlatformToolExecutors(args: {
     const fields = write ? ["itemKey", "activityId", "expectedRevision", "changeId", "patch"] : ["activityId", "status", "query", "limit", "discovery"];
     const payload = Object.fromEntries(fields.filter(k => parsed[k] !== undefined && parsed[k] !== "").map(k => [k, parsed[k]]));
     if (parsed.storage !== undefined && parsed.storage !== "server" && parsed.storage !== "local") throw new Error("invalid work storage");
+    // 写侧回执：updateWorkContext 的冲突（revision 过期 / scope mismatch / changeId 复用）
+    // 是正常返回而不是 error，裸传 JSON 会让模型把「没写进去」当成「已记住」。
+    // 服务端与本地两条路径都用同一句话，保证 Web 与 CLI 口径一致。
+    const { formatWorkContextWriteNotice } = await import("../../ai/memory/vnext/workContextWriteNotice");
+    // 存储位置只有调用处知道：queryMemory(mode="work") 不指定 storage 时默认读本地库，
+    // 所以这里的回执必须把本次实际存储透给 formatter，否则「按建议读最新 revision」会查错库。
+    const writeResult = (result: any, priorNotice?: string, storage?: "server" | "local") => ({
+      ...result,
+      notice: [formatWorkContextWriteNotice(result, storage ? { storage } : undefined), priorNotice]
+        .filter((v): v is string => typeof v === "string" && v !== "")
+        .join("\n"),
+    });
+    const workMetadata = { serverPlatformTool: true, memoryWrite: write, memoryRead: !write };
     if (parsed.storage === "server") {
       const content = await postServer(write ? "/api/memory/remember" : "/api/memory/query", { mode: "work", ...payload, dialogId, ...(write ? { userMessageId } : {}) });
-      return { content, metadata: { serverPlatformTool: true, memoryWrite: write, memoryRead: !write } };
+      if (!write) return { content, metadata: workMetadata };
+      let served: any;
+      try { served = JSON.parse(content); } catch { return { content, metadata: workMetadata }; }
+      return { content: JSON.stringify(writeResult(served, typeof served?.notice === "string" ? served.notice : undefined, "server")), metadata: workMetadata };
     }
     const ctx = await localMemoryContext();
     if (!ctx) throw new Error("local work memory unavailable");
@@ -570,7 +586,11 @@ export function buildServerPlatformToolExecutors(args: {
     // Local membership cannot be proven from a model-supplied space ID.
     if (scope.spaceId) throw new Error("local work memory cannot verify space membership");
     const result = write ? await updateWorkContext(ctx.db, scope, { ...(payload.activityId !== undefined ? { activityId: payload.activityId, expectedRevision: payload.expectedRevision } : { itemKey: payload.itemKey, originRef: sourceRef }), changeId: payload.changeId, sourceRefs: [sourceRef], patch: payload.patch } as any) : await readWorkContexts(ctx.db, scope, payload);
-    return { content: JSON.stringify({ ...result, storage: "local", notice: "Local and server stores are independent; changeId deduplication covers actual changes only." }), metadata: { serverPlatformTool: true, memoryWrite: write, memoryRead: !write } };
+    const storageNotice = "Local and server stores are independent; changeId deduplication covers actual changes only.";
+    const content = write
+      ? { ...writeResult(result, storageNotice, "local"), storage: "local" }
+      : { ...result, storage: "local", notice: storageNotice };
+    return { content: JSON.stringify(content), metadata: workMetadata };
   };
 
   const queryMemory = async (call: any) => {

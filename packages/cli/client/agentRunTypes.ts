@@ -239,6 +239,8 @@ export type RunAgentTurnOptions = {
   shellGrant?: OriginShellGrant;
   shellApprovalSession?: ShellApprovalSession;
   execShellApproval?: ExecShellApprovalAuthority;
+  mcpConfirmation?: import("../mcp/mcpApprovalTransport").McpConfirmation;
+  mcpApprovalSignal?: AbortSignal;
   /**
    * 工具执行位置消费者（块 D，运行位置展示）：owner-required 场景 adapter
    * 把本机 origin 投影为 ToolExecutionLocation 并回调一次。TUI 渲染

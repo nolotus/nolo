@@ -34,8 +34,12 @@ import { themeText } from "./theme";
 // Braille spinner：10 帧一轮。10 帧在 narrow / wide 两种宽度约定下都被
 // displayWidth / visibleWidth 判定为 1 列（帧间宽度稳定），因此不改变活动行的
 // 宽度预算与重绘几何。
+//
+// 80ms/帧（一轮 0.8s）：与前台 turn 的 Spinner（client/agentRunSpinner.ts）
+// 同节奏，两条指示器观感一致。曾经的 150ms（一轮 1.5s）在 subagent 运行区
+// 看起来像卡住不动（owner 反馈 2026-11-17）。
 export const ACTIVITY_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-export const ACTIVITY_FRAME_INTERVAL_MS = 150;
+export const ACTIVITY_FRAME_INTERVAL_MS = 80;
 /** 无可见输出超过此时长（且 turn 仍活跃）时，补一行 working fallback。 */
 export const ACTIVITY_FALLBACK_DELAY_MS = 1200;
 

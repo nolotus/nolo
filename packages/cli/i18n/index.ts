@@ -143,6 +143,226 @@ export function toolLabel(name: string): string {
 }
 
 /**
+ * 工具族的紧凑图标与族名（规则表）。
+ *
+ * 默认 transcript 行只留「图标 + 极短标识（gist）」：一行一个 emoji + 参数
+ * 摘要，不铺本地化工具名，也不铺全参数。图标承担「工具族」这一层语义
+ * （读 / 写 / 执行 / 插件 / 进程 / 表格…），具体是哪个工具由 gist 与 /tools
+ * 详情回答；需要文字的地方继续走 `toolLabel` / `toolFamilyLabel` 的双语标签，
+ * 两者不重复定义。
+ *
+ * 规则分两层，可审计、易加新系列：
+ *  1. `TOOL_FAMILY_OVERRIDES`：少量高频工具的精确映射，作为稳定锚点；
+ *  2. `TOOL_FAMILY_RULES`：按前缀/模式匹配整个系列（mcp* / app* / browser_* /
+ *     cf*·cloudflare* / 进程与 task / 智能体 / 表格 …），首次命中即采用。
+ * 两层都没命中才落到兜底族（🔧）。一个族一个图标、一个双语族名；不同族不
+ * 共用图标，避免「图标相同、含义不同」。
+ */
+export type ToolFamily = {
+  /** 稳定 id：规则表与测试用它做审计键。 */
+  id: string;
+  /** 语言中立的族图标。 */
+  icon: string;
+  en: string;
+  zh: string;
+};
+
+const family = (id: string, icon: string, en: string, zh: string): ToolFamily => ({ id, icon, en, zh });
+
+export const TOOL_FAMILIES = {
+  read: family("read", "📄", "Read", "读取"),
+  write: family("write", "✍️", "Write", "写入"),
+  run: family("run", "🖥️", "Run", "执行"),
+  search: family("search", "🔎", "Search", "搜索"),
+  fetch: family("fetch", "🌐", "Fetch", "抓取网页"),
+  list: family("list", "🗂️", "List", "列表"),
+  memory: family("memory", "🧠", "Memory", "记忆"),
+  agent: family("agent", "🤖", "Agent", "智能体"),
+  skill: family("skill", "🧩", "Skill", "技能"),
+  interaction: family("interaction", "💬", "Interaction", "交互"),
+  table: family("table", "📊", "Table", "表格"),
+  capture: family("capture", "📸", "Capture", "截屏"),
+  delete: family("delete", "🗑️", "Delete", "删除"),
+  mcp: family("mcp", "🔌", "Plugin", "插件"),
+  app: family("app", "📦", "App", "应用"),
+  browser: family("browser", "🖱️", "Browser", "浏览器"),
+  cloud: family("cloud", "☁️", "Cloud", "云"),
+  process: family("process", "⚙️", "Process", "进程"),
+  email: family("email", "✉️", "Email", "邮件"),
+  scrape: family("scrape", "🕷️", "Scrape", "采集"),
+  media: family("media", "🎨", "Media", "媒体"),
+  default: family("default", "🔧", "Tool", "工具"),
+} as const;
+
+/** 无映射时的兜底图标：未知工具也要有一眼可辨的类型位。 */
+export const DEFAULT_TOOL_ICON: string = TOOL_FAMILIES.default.icon;
+
+/**
+ * 第一层：高频工具的精确映射。
+ *
+ * 只钉最常用的几个，防止将来通配规则调整把它们悄悄改族；其余交给规则表。
+ */
+const TOOL_FAMILY_OVERRIDES: Record<string, ToolFamily> = {
+  readFile: TOOL_FAMILIES.read,
+  readDoc: TOOL_FAMILIES.read,
+  readDialog: TOOL_FAMILIES.read,
+  readSpace: TOOL_FAMILIES.read,
+  readPage: TOOL_FAMILIES.read,
+  readArtifact: TOOL_FAMILIES.read,
+  writeFile: TOOL_FAMILIES.write,
+  editFile: TOOL_FAMILIES.write,
+  createDoc: TOOL_FAMILIES.write,
+  updateDoc: TOOL_FAMILIES.write,
+  execShell: TOOL_FAMILIES.run,
+  exec_shell: TOOL_FAMILIES.run,
+  runCommand: TOOL_FAMILIES.run,
+  checkEnv: TOOL_FAMILIES.run,
+  cliDoctor: TOOL_FAMILIES.run,
+  cliWhoami: TOOL_FAMILIES.run,
+  configure: TOOL_FAMILIES.run,
+  fetchWebpage: TOOL_FAMILIES.fetch,
+  exa_search: TOOL_FAMILIES.search,
+  codeSearch: TOOL_FAMILIES.search,
+  globFiles: TOOL_FAMILIES.search,
+  ask_user: TOOL_FAMILIES.interaction,
+  show_interaction: TOOL_FAMILIES.interaction,
+  notifyUser: TOOL_FAMILIES.interaction,
+  captureVisualState: TOOL_FAMILIES.capture,
+  loadSkill: TOOL_FAMILIES.skill,
+  // 名字不切出已知系列词的两个注册工具（`weread*` / `toolquery`）：它们是
+  // 读书网关与工具查询，属于读取族；精确钉住以免退到兜底 🔧。
+  wereadGateway: TOOL_FAMILIES.read,
+  toolquery: TOOL_FAMILIES.read,
+};
+
+/**
+ * 第二层：系列级规则（按前缀/模式）。
+ *
+ * 顺序敏感：具体系列排在通用前缀之前（`appFileWrite` 属于应用族而不是写入族的
+ * 前缀例外；`deleteTableRow` 属于表格族而不是删除族）。加新系列只需追加一条
+ * `{ id, family, test }`，不需要逐个工具硬编码。
+ */
+/**
+ * 工具名切成小写词，供族规则做「整词」匹配：分隔符 + camelCase 词界。
+ *
+ * 规则曾用裸子串（`/mcp/i`、`/Run/`、`/(read|query)/i`），于是无关词里的字母
+ * 序列也被当成家族标记——`readDramCpuCounters` 命中 mcp（`DramCpu` 里的
+ * `mcp`）、`readRuntimeConfig` 命中 Run（`Runtime` 里的 `Run`）、`startThread`
+ * 命中 read（`Thread` 里的 `read`）。切词后只有完整词参与匹配，这类串扰不再
+ * 出现。图标只是展示，分错族的后果仅限图标不准，不影响任何行为判定。
+ */
+export function toolNameWords(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
+}
+
+type ToolFamilyRule = { id: string; family: ToolFamily; test: (name: string) => boolean };
+
+/**
+ * 词的单复数归一：`listAgents` → agents → agent、`listProcesses` → processes →
+ * process。只做词尾变化，不做子串匹配。
+ */
+const wordForms = (word: string): string[] => {
+  const forms = [word];
+  if (word.endsWith("es")) forms.push(word.slice(0, -2));
+  if (word.endsWith("s")) forms.push(word.slice(0, -1));
+  return forms;
+};
+
+/** 命中其中任意一个完整词（`listMcpTools` → list / mcp / tools）。 */
+const hasWord = (...words: string[]) => (name: string) =>
+  toolNameWords(name).some((word) => wordForms(word).some((form) => words.includes(form)));
+
+/** 首个词命中（`browser_click` → browser；`DramCpu` 不会被当作 mcp）。 */
+const startsWithWord = (...words: string[]) => (name: string) =>
+  words.includes(toolNameWords(name)[0] ?? "");
+
+export const TOOL_FAMILY_RULES: readonly ToolFamilyRule[] = [
+  // MCP 插件：listMcpConnections / listMcpTools / callMcpTool，以及带 mcp 的第三方工具名
+  { id: "mcp", family: TOOL_FAMILIES.mcp, test: hasWord("mcp") },
+  // 浏览器自动化：browser_click / browser_typeText / browser_readContent …
+  { id: "browser", family: TOOL_FAMILIES.browser, test: startsWithWord("browser") },
+  // 云服务：cfScreenshot / cfGeneratePDF / cfGetMarkdown / cloudflareCrawl，以及
+  // 下划线命名的真实云工具 cloud_probe / list_cloud_resources …
+  // `cloud` 走整词匹配（不是裸子串）：`readCloudyConfig` 这类无关词不误命中。
+  {
+    id: "cloud",
+    family: TOOL_FAMILIES.cloud,
+    test: (name) => startsWithWord("cf", "cloudflare")(name) || hasWord("cloud")(name),
+  },
+  // 应用（app* 应用文件与版本）：appFileWrite / appDeploy / appVersionRestore …
+  { id: "app", family: TOOL_FAMILIES.app, test: (name) => { const words = toolNameWords(name); return words[0] === "app" && words.length > 1; } },
+  // 表格：*Table* 与分类（createCategory / updateContentCategory …）
+  { id: "table", family: TOOL_FAMILIES.table, test: hasWord("table", "category", "categories") },
+  // 进程与本地 task：launchProcess / listProcesses / taskWait / taskStop …
+  { id: "process", family: TOOL_FAMILIES.process, test: hasWord("process", "task") },
+  // 智能体：startAgentRun / controlAgentRun / listAgents / readAgent / *AgentAutomation
+  { id: "agent", family: TOOL_FAMILIES.agent, test: hasWord("agent", "run", "completion") },
+  // 记忆：rememberMemory / queryMemory / deleteMemory
+  { id: "memory", family: TOOL_FAMILIES.memory, test: hasWord("memory") },
+  // 技能：loadSkill / evalSkill / doctorSkill / importSkill / createSkillDoc
+  { id: "skill", family: TOOL_FAMILIES.skill, test: hasWord("skill") },
+  // 邮件：email_read / email_send / email_provision_identity …
+  { id: "email", family: TOOL_FAMILIES.email, test: startsWithWord("email") },
+  // 采集器：*Scraper / firecrawl_* / *_scrape
+  { id: "scrape", family: TOOL_FAMILIES.scrape, test: (name) => { const words = toolNameWords(name); return words.at(-1) === "scraper" || words[0] === "firecrawl" || words.at(-1) === "scrape"; } },
+  // 生成媒体：*Image* / transcribe* / *SpeechToText / *ocr / *Chart
+  { id: "media", family: TOOL_FAMILIES.media, test: hasWord("image", "transcribe", "transcription", "speech", "ocr", "chart") },
+  // 删除类：deleteDialogs / deleteSpaces（表格与记忆的删除已由更具体的族先命中）
+  { id: "delete", family: TOOL_FAMILIES.delete, test: startsWithWord("delete", "remove") },
+  // 写入类：write* / edit* / apply* / create* / update* / import* / export* / convert* / translate*
+  { id: "write", family: TOOL_FAMILIES.write, test: startsWithWord("write", "edit", "apply", "create", "update", "import", "export", "convert", "translate") },
+  // 读取/查询类：read* / query*（含 wereadGateway、toolquery 这类带 query/read 的名字）
+  { id: "read", family: TOOL_FAMILIES.read, test: hasWord("read", "query") },
+  // 列表类：list*（空间、对话、用户空间）
+  { id: "list", family: TOOL_FAMILIES.list, test: startsWithWord("list") },
+  // 搜索类：search_workspace / search_all_spaces / searchDialogMessages …
+  { id: "search", family: TOOL_FAMILIES.search, test: hasWord("search") },
+  // 抓取类：fetchWebpage / surfWeather
+  { id: "fetch", family: TOOL_FAMILIES.fetch, test: startsWithWord("fetch", "surf") },
+  // 执行类：exec_shell / executeSql（shell 与本地诊断命令）
+  { id: "run", family: TOOL_FAMILIES.run, test: startsWithWord("exec", "execute", "run") },
+];
+
+/** 图标 → 族（同一图标只属于一个族）。 */
+const TOOL_FAMILY_BY_ICON: Record<string, ToolFamily> = Object.fromEntries(
+  Object.values(TOOL_FAMILIES).map((fam) => [fam.icon, fam]),
+);
+
+/** 工具名 → 族：精确映射 → 系列规则 → 兜底族。 */
+export function toolFamilyOf(name: string): ToolFamily {
+  const override = TOOL_FAMILY_OVERRIDES[name];
+  if (override) return override;
+  const rule = TOOL_FAMILY_RULES.find((candidate) => candidate.test(name));
+  return rule ? rule.family : TOOL_FAMILIES.default;
+}
+
+/** 工具的紧凑图标（语言中立），未知工具退回 🔧。 */
+export function toolIcon(name: string): string {
+  return toolFamilyOf(name).icon;
+}
+
+/** 图标对应的族；未知图标返回 null（用于「只转换已知图标」的详情层）。 */
+export function toolFamilyOfIcon(icon: string): ToolFamily | null {
+  return TOOL_FAMILY_BY_ICON[icon] ?? null;
+}
+
+/**
+ * 图标 → 工具族名的双语标签。
+ *
+ * 默认视图把本地化工具名换成了图标；`/tools` 详情和展开层要把可读文字还回来，
+ * 但一行只有一个图标、图标代表的是「族」，所以这里归还的是族名（Read / 读取、
+ * Plugin / 插件…），而不是假装知道具体是哪个同类工具。未知图标按兜底族名处理。
+ */
+export function toolFamilyLabel(icon: string): string {
+  return (TOOL_FAMILY_BY_ICON[icon] ?? TOOL_FAMILIES.default)[getCliLocale()];
+}
+
+/**
  * Localized one-line description for a registered CLI subcommand, keyed by
  * `path.join(" ")` (e.g. "auth chatgpt"). Returns null when no localized copy
  * exists so `nolo <group> --help` falls back to the registry's English

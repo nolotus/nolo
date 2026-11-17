@@ -405,11 +405,19 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
       { id: "gemini-4-argon", label: "Gemini 4 Argon（需 Ultra）", hasVision: true },
       // Exact wire IDs observed in Antigravity discovery with supportsImages=true.
       { id: "gemini-4-hydrogen-medium", label: "Gemini 4 Hydrogen Medium", hasVision: true },
+      // Discovery (2026-11-17) 确认 Carbon 存在且 supportsImages=true；逻辑 id 用裸
+      // gemini-4-carbon，effort 变体由 antigravityWireModel 折叠（裸 id 直传会 404）。
+      { id: "gemini-4-carbon", label: "Gemini 4 Carbon", hasVision: true },
       { id: "claude-opus-5-5-medium", label: "Claude Opus 5.5 Medium", hasVision: true },
       { id: "claude-sonnet-5-5-high", label: "Claude Sonnet 5.5 High", hasVision: true },
       { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro", hasVision: true },
       { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", hasVision: true },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", hasVision: true },
+      // Claude 可用 id 随 Antigravity 账号档位变化：2026-11-17 实测 Ultra 账号的
+      // discovery 只给 claude-sonnet-4-6 / claude-opus-4-6-thinking，Pro 档位此前给
+      // claude-sonnet-5-5-high / claude-opus-5-5-medium。两套都保留在目录里，
+      // 谁账号有什么就用什么；缺失的那档调用时上游回 404，不因此删掉另一档。
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", hasVision: true },
       { id: "claude-opus-4-6-thinking", label: "Claude Opus 4.6 Thinking", hasVision: true },
     ],
     cloudCodeBaseUrl: ANTIGRAVITY_CLOUD_CODE_BASE_URL,

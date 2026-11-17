@@ -310,9 +310,12 @@ export const agentStrings = {
   // --- `nolo agent run` CLI surface (packages/cli/agentRunCommand.ts) ---
   // The direct CLI entry bypasses the dispatch tool's allowHostWrites guard, so
   // this is the only thing standing between `--runtime-key=local` and host writes.
+  // 注意：本文案只在显式点名宿主执行（hostRuntimeLocal）分支触发；不要把它写成
+  // 「省略参数必定宿主且受 allowHostWrites 保护」——未经工具派的直接命令仍由
+  // runtimeMode/agent 类型决定落点（见 agentRunCommand.ts:603-615）。
   "agentRun.hostWriteGuard": {
-    en: "[nolo] runtimeKey=local executes on — and writes to — the **host filesystem**, so it needs an explicit --allow-host-writes confirmation; drop --runtime-key to run isolated instead (docker sandbox by default).\n",
-    zh: "[nolo] runtimeKey=local 会在**宿主文件系统**上执行并写入，必须显式加 --allow-host-writes 确认；要隔离执行请省略 --runtime-key（默认进 docker 沙盒）。\n",
+    en: "[nolo] runtimeKey=local runs on the host; confirm with --allow-host-writes. Write dispatches sent through the startAgentRun tool default to the host when runtimeKey is omitted and require allowHostWrites:true; a direct command without --runtime-key picks its target from runtimeMode/agent config and does not go through this check. For sandbox isolation, explicitly set --runtime-key docker or docker:<id>.\n",
+    zh: "[nolo] runtimeKey=local 会在宿主上执行，须加 --allow-host-writes 确认。经 startAgentRun 工具派的写型任务省略 runtimeKey 时默认落宿主、须 allowHostWrites:true；直接用命令时省略 --runtime-key 由 runtimeMode/agent 配置决定落点，不走本校验。要沙盒隔离，请显式指定 --runtime-key docker 或 docker:<id>。\n",
   },
   "agentRun.instaboxConfigFailed": {
     en: "[nolo] instabox config generation failed: {0}\n",

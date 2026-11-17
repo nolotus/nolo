@@ -36,8 +36,6 @@ import {
   createConnectorApprovalPort,
   getHostApprovalRenderer,
   runConnectorToolWithHostApproval,
-  type HostApprovalDecision,
-  type HostApprovalCard,
   type HostApprovalRenderer,
 } from "./hostApprovalFlow";
 
@@ -83,7 +81,7 @@ export function buildCliChromeConnectorToolExecutors(args?: {
   /** Per-target client overrides (tests); entries missing here get real per-browser endpoints. */
   clients?: Partial<Record<"chrome" | "firefox", ChromeConnectorClient>>;
   /** Explicit host approver; wins over a renderer registered through the late-bound registry. */
-  awaitHostApproval?: (card: HostApprovalCard) => Promise<HostApprovalDecision>;
+  awaitHostApproval?: HostApprovalRenderer;
 }) {
   const clientForTarget = createChromeConnectorClientResolver({
     clients: {
@@ -97,12 +95,18 @@ export function buildCliChromeConnectorToolExecutors(args?: {
   return Object.fromEntries(
     CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.map((toolName) => [
       toolName,
-      (call: AgentRuntimeToolCallInput) => {
+      (call: AgentRuntimeToolCallInput, options?: { abortSignal?: AbortSignal }) => {
         const target = approvalTargetForCall(call);
         // Both the approval ops and the retry must use the browser this call names.
         const connector = createConnectorApprovalPort(() => clientForTarget(target));
         return runConnectorToolWithHostApproval({
           call,
+          signal: options?.abortSignal,
+          // Foreground TUI turns have dialogId/turnId, not a persisted runId.
+          // Preserve runId only when supplied by a real host owner; never mint
+          // one from call.id or turnId (neither identifies a background run).
+          context: { requestId: call.id, dialogId: call.runtimeContext?.dialogId,
+            turnId: call.runtimeContext?.turnId, runId: call.runtimeContext?.runId },
           execute: (nextCall) =>
             executeChromeConnectorTool({ clientForTarget, call: nextCall }),
           connector,
@@ -115,6 +119,6 @@ export function buildCliChromeConnectorToolExecutors(args?: {
     ]),
   ) as Record<
     ChromeConnectorToolName | ChromeConnectorLegacyToolName,
-    (call: AgentRuntimeToolCallInput) => Promise<AgentRuntimeToolResult>
+    (call: AgentRuntimeToolCallInput, options?: { abortSignal?: AbortSignal }) => Promise<AgentRuntimeToolResult>
   >;
 }

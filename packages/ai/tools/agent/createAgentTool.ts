@@ -6,7 +6,7 @@ import type { Agent } from "app/types";
 import { createAgent } from "ai/agent/agentSlice";
 import { addContentToSpace } from "create/space/content/contentThunks";
 import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
-import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { resolveToolAttributionContext } from "../memoryToolContext";
 import { ContentType } from "app/types";
 import { createAgentKey, } from "database/keys";
 import type { FormData as AgentFormData } from "ai/agent/createAgentSchema";
@@ -456,6 +456,9 @@ export async function createAgentToolFunc(
     runtime?: ToolExecutorContext,
 ): Promise<{ rawData: Agent; displayData: string }> {
     const state = thunkApi.getState() as RootState;
+    const { spaceId } = resolveToolAttributionContext(state, runtime, {
+        requireAgentKey: false, errorLabel: "创建 Agent 失败：无法确定归属",
+    });
     const currentUserId = selectIdentityUserId(state);
     const currentBalance = selectIdentityUserBalance(state);
 
@@ -557,15 +560,14 @@ export async function createAgentToolFunc(
                 createAgent({
                     userId: currentUserId,
                     formData,
-                    spaceId: getCurrentSpaceId() || undefined,
+                    spaceId,
                 })
             )
             .unwrap();
         assertForkedAgentProviderConfig(agent, expectedProviderConfig);
 
         // 自动添加到当前空间侧边栏
-        const currentSpaceId = getCurrentSpaceId();
-        if (currentSpaceId) {
+        if (spaceId) {
             // 新创建的 Agent 统一使用 createAgentKey (agent- 前缀)
             const agentDbKey = agent.isPublic
                 ? createAgentKey.public(agent.id)
@@ -573,7 +575,7 @@ export async function createAgentToolFunc(
 
             try {
                 await thunkApi.dispatch((addContentToSpace as any)({
-                    spaceId: currentSpaceId,
+                    spaceId,
                     title: agent.name || "未命名智能体",
                     type: ContentType.AGENT, // 统一使用 ContentType.AGENT
                     contentKey: agentDbKey,

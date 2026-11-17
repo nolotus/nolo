@@ -1,3 +1,4 @@
+import { toolRequestDialogId } from "./toolRequestDialogId";
 import { callToolApi } from "./toolApiClient";
 
 export const exaSearchSchema = {
@@ -61,6 +62,7 @@ export type ExaSearchPlanSignals = {
   origin?: "chat" | "agent" | "automation";
   /** 当前对话 id：用于从 Redux 里数历史搜索次数。 */
   dialogId?: string;
+  dialogKey?: string;
   /** 当前这批 tool_call 所属的 assistant 消息 id。 */
   parentMessageId?: string;
 };
@@ -189,7 +191,7 @@ export const exaSearchFunc = async (
     // 契约见 docs/plans/2026-10-21-exa-3-0-sync.md 第 3 节：
     // 只发服务端认的键；intent 原样转发，没给就不带这个键（由服务端定档）。
     // useAutoprompt 已废弃，绝不转发；type/detail 不在模型 schema 内。
-    const body: Record<string, any> = { query };
+    const body: Record<string, any> = { query, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) };
     if (numResults !== undefined) body.numResults = numResults;
     if (typeof intent === "string" && intent) body.intent = intent;
     if (typeof category === "string" && category) body.category = category;

@@ -35,6 +35,11 @@ export async function executeToolCall(
      * 调用点拿不到就不传，工具层会按缺失处理（服务端跳过对应规则）。
      */
     dialogId?: string;
+    /**
+     * 本次调用所属对话的完整键（`dialog-<owner>-<id>`），与 dialogId 同源。
+     * 记忆类工具靠它确定 owner，不按 dialogId 猜。
+     */
+    dialogKey?: string;
     priorSearches?: number;
     lastResultCount?: number;
     origin?: "chat" | "agent" | "automation";
@@ -62,6 +67,8 @@ export async function executeToolCall(
       runKind: context?.runKind,
       // 定档信号透传：缺省键一律不写入，避免给工具伪造默认值。
       ...(context?.dialogId ? { dialogId: context.dialogId } : {}),
+      // 完整对话键（含 owner）：记忆类工具靠它精确定位记录，不看枚举顺序。
+      ...(context?.dialogKey ? { dialogKey: context.dialogKey } : {}),
       ...(typeof context?.priorSearches === "number"
         ? { priorSearches: context.priorSearches }
         : {}),

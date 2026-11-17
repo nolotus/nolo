@@ -500,6 +500,13 @@ export type ToolExecutorContext = {
   /** Persisted user message bound by the host to this specific turn. */
   userMessageId?: string;
   /**
+   * 可信的完整对话键 `dialog-<owner>-<id>`（含 owner），与 dialogId 同时由运行时
+   * 注入、模型不可见。有它时记忆类工具按 owner 精确定位记录，避免不同用户同
+   * dialogId 时归属随实体枚举顺序变化。注入方拿不到完整键就不传，工具层按歧义
+   * fail-closed 处理。
+   */
+  dialogKey?: string;
+  /**
    * 定档信号（exa_search 用，契约见 docs/plans/2026-10-21-exa-3-0-sync.md §3/§10）。
    *
    * 与 dialogId 同性质：运行时注入、模型不可见。**只在拿得到时出现**——缺省键

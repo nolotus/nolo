@@ -100,7 +100,7 @@ export type AutoInstaboxPlacementEvaluation = {
  * 核心契约：
  * 1) 仅当调用方未显式给 runtimeKey、未给 cwd、且 readOnly!==true 时进入自动模式，显式意图一律不覆盖；
  * 2) 自动模式先读宿主内存（复用 hostMemory.readHostMemory），可用内存低于 LOCAL_TOOL_MEMORY_BUDGET_MB 时尝试 Instabox；
- * 3) Instabox 可用条件：用户已启用自动（环境变量 NOLO_INSTABOX_AUTO=1 或 trusted deps 注入同义开关）+ 受控 run 配置可解析 + 服务端准入/就绪未明确拒绝；任一不满足保持默认 docker 沙盒并在返回文本里给出可读原因；
+ * 3) Instabox 可用条件：用户已启用自动（环境变量 NOLO_INSTABOX_AUTO=1 或 trusted deps 注入同义开关）+ 受控 run 配置可解析 + 服务端准入/就绪未明确拒绝；任一不满足保持默认宿主（写型派发仍须 allowHostWrites: true）并在返回文本里给出可读原因；
  * 4) 主循环仍在本地，只把工具/工作区放 Instabox，绝不宣称"整机离机"。
  */
 export async function evaluateAutoInstaboxPlacement(input: {
@@ -155,7 +155,7 @@ export async function evaluateAutoInstaboxPlacement(input: {
   }
 
   if (effectiveAvailableMb === null) {
-    const note = `宿主可用内存探测失败或未知（${memoryDiagnosis}）；无法判断是否低于预算（${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），保持默认本地沙盒，不自动迁移。`;
+    const note = `宿主可用内存探测失败或未知（${memoryDiagnosis}）；无法判断是否低于预算（${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），保持默认宿主（写型派发仍须 allowHostWrites: true），不自动迁移。`;
     return {
       selectedRuntimeKey: undefined,
       reason: "memory_unknown",
@@ -178,7 +178,7 @@ export async function evaluateAutoInstaboxPlacement(input: {
     (typeof process !== "undefined" && process.env?.NOLO_INSTABOX_AUTO === "1");
 
   if (!autoEnabled) {
-    const note = `宿主可用内存紧缺（${effectiveAvailableMb}MB < ${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），但未启用自动 Instabox（需设置 NOLO_INSTABOX_AUTO=1 或配置开启）；保持默认 docker 沙盒。`;
+    const note = `宿主可用内存紧缺（${effectiveAvailableMb}MB < ${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），但未启用自动 Instabox（需设置 NOLO_INSTABOX_AUTO=1 或配置开启）；保持默认宿主（写型派发仍须 allowHostWrites: true）。`;
     return {
       selectedRuntimeKey: undefined,
       reason: "auto_disabled",
@@ -194,7 +194,7 @@ export async function evaluateAutoInstaboxPlacement(input: {
     });
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    const note = `宿主可用内存紧缺（${effectiveAvailableMb}MB < ${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），尝试自动改用 Instabox 受阻：${errorMsg}；保持默认 docker 沙盒。`;
+    const note = `宿主可用内存紧缺（${effectiveAvailableMb}MB < ${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），尝试自动改用 Instabox 受阻：${errorMsg}；保持默认宿主（写型派发仍须 allowHostWrites: true）。`;
     return {
       selectedRuntimeKey: undefined,
       reason: "config_unavailable",
@@ -207,7 +207,7 @@ export async function evaluateAutoInstaboxPlacement(input: {
     try {
       const readiness = await input.checkReadiness();
       if (readiness && readiness.ready === false) {
-        const note = `宿主可用内存紧缺（${effectiveAvailableMb}MB < ${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），尝试自动改用 Instabox 但被服务端准入/就绪明确拒绝：${readiness.reason ?? "服务端未就绪"}；保持默认 docker 沙盒。`;
+        const note = `宿主可用内存紧缺（${effectiveAvailableMb}MB < ${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），尝试自动改用 Instabox 但被服务端准入/就绪明确拒绝：${readiness.reason ?? "服务端未就绪"}；保持默认宿主（写型派发仍须 allowHostWrites: true）。`;
         return {
           selectedRuntimeKey: undefined,
           reason: "readiness_rejected",
@@ -217,7 +217,7 @@ export async function evaluateAutoInstaboxPlacement(input: {
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const note = `宿主可用内存紧缺（${effectiveAvailableMb}MB < ${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），尝试自动改用 Instabox 但就绪检查抛错：${errorMsg}；保持默认 docker 沙盒。`;
+      const note = `宿主可用内存紧缺（${effectiveAvailableMb}MB < ${LOCAL_TOOL_MEMORY_BUDGET_MB}MB），尝试自动改用 Instabox 但就绪检查抛错：${errorMsg}；保持默认宿主（写型派发仍须 allowHostWrites: true）。`;
       return {
         selectedRuntimeKey: undefined,
         reason: "readiness_error",

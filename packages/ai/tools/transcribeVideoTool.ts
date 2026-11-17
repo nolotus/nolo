@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 import { callToolApi } from "./toolApiClient";
 
 export const transcribeVideoSchema = {
@@ -36,14 +37,15 @@ export type TranscribeVideoToolInput = {
 
 export async function transcribeVideoFunc(
   input: TranscribeVideoToolInput,
-  thunkApi: any
+  thunkApi: any,
+  context?: ToolRequestDialogContext
 ): Promise<any> {
   const url = typeof input?.url === "string" ? input.url.trim() : "";
   if (!url) {
     throw new Error("必须提供有效的 url");
   }
 
-  const body: Record<string, unknown> = { url };
+  const body: Record<string, unknown> = { url, dialogId: toolRequestDialogId(context, () => thunkApi.getState()) };
   if (input.p !== undefined) body.p = input.p;
   if (input.language !== undefined) body.language = input.language;
 

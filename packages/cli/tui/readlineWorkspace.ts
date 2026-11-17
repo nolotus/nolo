@@ -631,14 +631,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     output.write("\x1b[2J\x1b[H");
   }
 
-  if (startupThemeMode !== "terminal") {
-    const detected = await detectTerminalBackground({
-      stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
-      stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
-      allowSystemFallback: true,
-    });
-    if (detected) applyDetectedBackground(detected);
-  }
+  // Native mode still needs the terminal's exact canvas for subtle surfaces.
+  // Query once before mounting input, not periodically while the user types.
+  // An OS appearance preference is not evidence of the terminal's canvas.
+  const detected = await detectTerminalBackground({
+    stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
+    stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
+    allowSystemFallback: startupThemeMode !== "terminal",
+    preserveInput: true,
+  });
+  if (detected) applyDetectedBackground(detected);
 
   // Paint the welcome banner, then animate it AFTER the composer mounts.
   // The old 15-frame loop blocked composer setup for ~1.5s and rewound the
@@ -2764,31 +2766,31 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     let preparingImageSubmission = false;
     const handleInputToken = async (sequence: string) => {
       if (done) return;
-      if (secretInputCoordinator.isActive()) { secretInputCoordinator.handleToken(sequence); return; }
+      // The approval owns the DialogHost claim, but only its explicit answers
+      // belong to it. Unclaimed tokens must still edit the real composer or
+      // stop the turn, not reach a secret reader queued behind this claim.
+      const approvalOwnsKeyboard = hostApprovalPrompt?.isActive() ?? false;
+      if (approvalOwnsKeyboard && hostApprovalPrompt?.handleKey(sequence, {
+        draftEmpty: buffer.length === 0,
+        busy,
+      })) return;
+      if (!approvalOwnsKeyboard && secretInputCoordinator.isActive()) { secretInputCoordinator.handleToken(sequence); return; }
       // While a modal (any dialogHost.run()/withKeyboard() caller — confirm,
       // action gate, ask_choice, agent/dialog picker) owns the keyboard, that
       // modal's own `data` listener owns the keyboard. Drop everything else
       // so random keys do not accumulate in the composer draft buffer and
       // corrupt the next submitted line, and so Esc meant to cancel a popup
       // does not also abort the running turn.
-      if (dialogHost.isKeyboardClaimed()) {
+      if (dialogHost.isKeyboardClaimed() && !approvalOwnsKeyboard) {
         rawActionGateTokenHandler?.(sequence);
         return;
       }
       // Only explicit Ctrl+G activates a pending secret request. All other
       // tokens continue through the existing draft/submit/cancel paths.
-      if (secretInputCoordinator.handleToken(sequence)) return;
+      if (!approvalOwnsKeyboard && secretInputCoordinator.handleToken(sequence)) return;
       // Async path reads must not allow a second Enter to start another send.
       // Modal keys still belong to the dialog above, including its confirmation.
       if (preparingImageSubmission) return;
-      // 对话内审批卡：y/n/Esc 只在 composer 草稿为空时属于卡片（否则它们只是用户正在输入的字
-      // 母）；Esc 在跑轮次时仍保留「停止本轮」的含义，卡片不抢。模态（dialogHost）优先，见上。
-      if (hostApprovalPrompt?.handleKey(sequence, {
-        draftEmpty: buffer.length === 0,
-        busy,
-      })) {
-        return;
-      }
       // While an agent turn is running we let the user keep typing into the
       // docked composer (draft buffer) but ignore submit so a second turn
       // cannot race the in-flight one. The draft is preserved and shown
@@ -3432,6 +3434,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 注册为进程内的宿主审批渲染器：工具表早在本地 runtime 装配时就建好了，这里按调用延迟绑定，
     // 决定由本进程直接投递给连接器（模型既看不到也答不了）。
     hostApprovalPrompt = createInlineHostApprovalPrompt({
+      dialogHost,
       write: (text) => {
         emitCommandOutput(text.replace(/\n$/, ""));
       },
@@ -3443,6 +3446,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     try {
       onGraphicsData = createWorkspaceInputStream((text) => graphicsRuntime!.filterInput(text), onData);
       input.on("data", onGraphicsData);
+      input.resume(); // Drain keys preserved by the startup background probe.
       graphicsRuntime.start();
       // Input shutdown can race an unsettled dialog/gate. Route stream end
       // through the same idempotent teardown so terminal progress is cleared

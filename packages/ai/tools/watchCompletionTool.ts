@@ -1,3 +1,4 @@
+import { toolRequestDialogId, type ToolRequestDialogContext } from "./toolRequestDialogId";
 // packages/ai/tools/watchCompletionTool.ts
 //
 // watchCompletion 工具（watchCompletion 一期）：登记一次「业务终态订阅」后立即
@@ -9,7 +10,7 @@
 //   - userId 由服务端从用户 token 解出（端点鉴权）；
 //   - parentDialogId 由运行时注入 —— 服务端 agent run 走 handlers/agentRun 的
 //     watchCompletion 服务端工具执行器（context.dialogId）；客户端运行经
-//     callToolApi 的 maybeAttachDialogId 自动把当前对话 id 附到 body 上。
+//     执行上下文显式传 parentDialogId，绝不读取当前打开的对话。
 //
 // 工具实现即 POST /api/watch-completion，别无逻辑。
 
@@ -93,7 +94,7 @@ export function buildWatchCompletionRequestBody(args: {
 export async function watchCompletionFunc(
   rawArgs: WatchCompletionArgs,
   thunkApi: any,
-  context?: { dialogId?: string | null } & Record<string, unknown>,
+  context?: ToolRequestDialogContext & Record<string, unknown>,
 ): Promise<{ rawData: WatchCompletionResult; displayData: string }> {
   const args = normalizeArgs(rawArgs);
   const invalid = findMissingWatchCompletionArg(args);
@@ -106,7 +107,7 @@ export async function watchCompletionFunc(
     kind: args.kind!,
     ref: args.ref!,
     environment: args.environment!,
-    dialogId: typeof context?.dialogId === "string" ? context.dialogId : null,
+    dialogId: toolRequestDialogId(context, () => thunkApi.getState()),
   });
 
   try {

@@ -1,4 +1,52 @@
 
+## 0.241.1 (2026-11-17)
+
+### Bug Fixes
+
+* **cli:** exclude alpha tags from stable release gate base and omit undefined title ([13a3043](https://github.com/nolotus/bun-nolo/commit/13a30431a52864281d7bdc1ec1575c335a35a96a))
+
+
+## 0.241.0 (2026-11-17)
+
+### Features
+
+* **ci:** 给 scripts/ci 与 scripts/ops 补类型门（带基线，只拦新增） ([8a34699](https://github.com/nolotus/bun-nolo/commit/8a34699c35449418039de647bb3f7f49e9238ad9))
+
+### Bug Fixes
+
+* **auth:** prevent recursive cluster peer lookup loop and cache misses ([bf4b8d9](https://github.com/nolotus/bun-nolo/commit/bf4b8d96dae6b1e34f844a4032b5074b6196b958))
+
+
+## 0.240.0 (2026-11-17)
+
+### Features
+
+* **agent-runtime:** 支持 Antigravity Gemini 4 Carbon 的 wire 折叠与目录条目 ([1bf14ee](https://github.com/nolotus/bun-nolo/commit/1bf14ee4784a6a42ec7fc4bbd6dec18226a6605a))
+* **ai:** antigravity 目录补齐 claude-sonnet-4-6，与 5.5 两档并存 ([2273a6d](https://github.com/nolotus/bun-nolo/commit/2273a6d20416ae2982aaf5124e1aab80260b85d2))
+* **cli:** default write dispatches to the host instead of a docker sandbox ([dbd726c](https://github.com/nolotus/bun-nolo/commit/dbd726caa88ce4b16b09d9d848b6488eeb770563))
+* **cli:** show one row per tool call with a family icon ([1831021](https://github.com/nolotus/bun-nolo/commit/1831021b80f7cc0bdf391f8e840818871dd580b7))
+
+### Bug Fixes
+
+* **ai:** 自定义端点 agent 按端点反查通道视觉能力 ([c2dd109](https://github.com/nolotus/bun-nolo/commit/c2dd1092af49c215a001be7d97d37121f8c9e2ed))
+* **cli:** TUI 活动行 spinner 帧率对齐前台 80ms ([908a147](https://github.com/nolotus/bun-nolo/commit/908a147a10cfa9cc58092f65c5f5ba3af2d3ce13))
+* **cli:** TUI 背景与分割线统一铺满到 cols-1 ([106c10a](https://github.com/nolotus/bun-nolo/commit/106c10a98f68e6148fccb2bdb9cc4754b6875da0))
+* **cli:** unify host approval lifetimes and background MCP confirmation ([d12d7c1](https://github.com/nolotus/bun-nolo/commit/d12d7c145e8f6b8fd4f3b41ead5d423fc0bbedac))
+* **cli:** 修复自建 agent 状态行上下文窗口解析不出 ([3f83285](https://github.com/nolotus/bun-nolo/commit/3f83285fcf182fbc6376aa6c824819a5ab458579))
+* **cli:** 同族连续工具行省略重复族图标 ([139ff8d](https://github.com/nolotus/bun-nolo/commit/139ff8db43fdc5ccbe7dcbd2f4171ccb578580a4))
+* **cli:** 探不到终端底色时 TUI 仍有底色 ([bcb315e](https://github.com/nolotus/bun-nolo/commit/bcb315e26da7352cbeda29a040f5f5fee12e48c9))
+* **cli:** 状态行去噪并让输入区底色边缘成为边界 ([7750781](https://github.com/nolotus/bun-nolo/commit/77507813e1bb64c89ab72eca1624f505b96d7999))
+* **database:** 本地 LevelDB 路径允许覆盖，修测试污染与并发抢锁 ([f4eba4f](https://github.com/nolotus/bun-nolo/commit/f4eba4f4da55b07c1b41da238ddf3f166080882c))
+* **infra:** 基础设施 IP 收敛到单一真源，修紧急接管部署到旧机 ([28f463c](https://github.com/nolotus/bun-nolo/commit/28f463c9aa7a5b7f4185ed708be57670935e3986))
+* **memory:** bind tool attribution to execution context, not the open view ([0fa73f3](https://github.com/nolotus/bun-nolo/commit/0fa73f3fc86fa023e97f73b8b189480cf0bcbdfa))
+* **memory:** surface work memory write conflicts instead of silent success ([194fa3b](https://github.com/nolotus/bun-nolo/commit/194fa3be4de85be5a864f46b11a123eb4b654bb2))
+* **tools:** attach skills and agents to the calling dialog, not the open one ([9d80f84](https://github.com/nolotus/bun-nolo/commit/9d80f84614e8db4386572a4cf5627be17f5a847f))
+* **tools:** pin image tool attribution before the request, not after it ([e0e2a4d](https://github.com/nolotus/bun-nolo/commit/e0e2a4db089635bdd184a8ca8d5ef54423ec4bd2))
+* **tools:** resolve artifact and subtask attribution from the call, not the open dialog ([92c23c1](https://github.com/nolotus/bun-nolo/commit/92c23c1d852b7e47c631fe2f2de76f64746c0b31))
+* **tools:** resolve request attribution from the call context, never the open dialog ([6f9b8b2](https://github.com/nolotus/bun-nolo/commit/6f9b8b23379836c4351f1144943a45e609a4a99d))
+* **tui:** probe native terminal background once at startup ([9daf23d](https://github.com/nolotus/bun-nolo/commit/9daf23d6a20ee27afe5dee7baa84ccf9ae1c6509))
+
+
 ## 0.239.0 (2026-11-17)
 
 ### Features

@@ -35,10 +35,10 @@ import {
     resolveRunLabel,
     TASK_PREVIEW_MAX,
 } from "./agentRunDisplayHelpers";
-import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
+import { resolveToolAttributionContext } from "../memoryToolContext";
+import type { ToolExecutorContext } from "../index";
 import { extractCustomId } from "core/prefix";
 import { checkCredentialFanout } from "./credentialFanoutGuard";
-import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import { read, selectById } from "database/dbSlice";
 import { deriveCredentialGroup } from "ai/agent/safeAgentSummary";
 import { callToolApi } from "../toolApiClient";
@@ -239,11 +239,11 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             allowHostWrites: {
                 type: "boolean",
                 description:
-                    "可选。仅当 runtimeKey='local' 时需要显式声明：表示调用方同意子 run 直接在**宿主文件系统**上读写代码（无隔离）。" +
-                    "runtimeKey='local' 但未声明时会被显式拒绝（不回落宿主、也不悄悄改成 docker）。" +
-                    "省略 runtimeKey 时无效。注意**省略 key 时的默认位置有例外**：写型派发默认进本机 docker 沙盒；"
-                    + "只读派发（readOnly=true）当前实现仍留在宿主执行（它移除的是 nolo 侧专用写工具；"
-                    + "shell 与外部 CLI 通道仍可写文件，这不是文件系统只读隔离）。",
+                    "可选。CLI 本地通道未点名 runtimeKey 的写型派发默认宿主，及显式 runtimeKey='local' 时，" +
+                    "必须声明 allowHostWrites: true：同意子 run 直接在宿主文件系统上读写代码（无隔离）。" +
+                    "未确认即显式拒绝，不回落 docker；需要沙盒请显式指定 runtimeKey='docker' 或 'docker:<id>'。" +
+                    "只读未点名派发（readOnly=true）仍留宿主且无需写入确认；readOnly 只移除 nolo 专用写工具，" +
+                    "shell 与外部 CLI 仍可写文件，不提供文件系统只读隔离。",
             },
         },
         required: ["task", "title"],
@@ -314,9 +314,10 @@ interface StartAgentRunArgs {
     instaboxAllowRemoteRelease?: boolean;
     instaboxAllowPaid?: boolean;
     /**
-     * 显式确认「这次 run 可以在宿主文件系统上写代码」。只有 `runtimeKey: "local"`
-     * 需要它；其他位置（docker / server / machine / 云后端）与省略 runtimeKey 的
-     * 默认路径都不看这个参数。
+     * 显式确认「这次 run 可以在宿主文件系统上写代码」（无隔离）。CLI 本地通道
+     * 未点名 runtimeKey 的写型派发默认宿主，及显式 `runtimeKey: "local"` 时，
+     * 必须声明 `allowHostWrites: true`；未确认即拒绝，不回落 docker。
+     * 未点名的只读派发无需写入确认；readOnly 不提供文件系统只读隔离。
      */
     allowHostWrites?: boolean;
     /**
@@ -324,21 +325,6 @@ interface StartAgentRunArgs {
      * 本执行器（服务端后台派发）兑现不了，传了即报错，见 startAgentRunFunc。
      */
     cwd?: string;
-}
-
-export function resolveCurrentAgentKeyForStartRun(
-    thunkApi: any,
-): string | undefined {
-    try {
-        const state = thunkApi?.getState?.();
-        if (!state) return undefined;
-        const currentDialogKey = getActiveDialogKey();
-        if (!currentDialogKey) return undefined;
-        const dialogConfig = selectById(state, currentDialogKey) as any;
-        return asTrimmedNonEmptyStringArray(dialogConfig?.cybots)[0];
-    } catch {
-        return undefined;
-    }
 }
 
 /**
@@ -354,7 +340,7 @@ export function resolveCurrentAgentKeyForStartRun(
 export async function startAgentRunFunc(
     args: StartAgentRunArgs,
     thunkApi: any,
-    _context?: { parentMessageId?: string; signal?: AbortSignal; toolRunId?: string }
+    context?: ToolExecutorContext
 ): Promise<{ rawData: any; displayData: string; metadata?: Record<string, unknown> }> {
     const { agentKey, task, input, agentName, batchId, wait } = args;
     const continueDialogId = normalizeContinueDialogId(args.continueDialogId);
@@ -392,7 +378,10 @@ export async function startAgentRunFunc(
         `batch-${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}`;
 
     const rawAgentKey = typeof agentKey === "string" ? agentKey.trim() : "";
-    const currentAgentKey = resolveCurrentAgentKeyForStartRun(thunkApi);
+    const attribution = resolveToolAttributionContext(thunkApi.getState(), context, {
+        requireAgentKey: true, errorLabel: "无法确定 startAgentRun 归属",
+    });
+    const currentAgentKey = attribution.agentKey;
     const effectiveAgentKey =
         (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
             ? (currentAgentKey ?? rawAgentKey)
@@ -423,9 +412,7 @@ export async function startAgentRunFunc(
     const content = buildDelegatedTaskContent(task, input);
     const payloadMetrics = calculateDelegatedPayloadMetrics(task, input, content);
 
-    // 从入参或模块级单例取当前对话 key/id，提取 id 作为 parentDialogId 透传给服务端，
-    // 让后台子对话记录父子关系，供侧边栏折叠。无当前对话且无入参时降级不传。
-    const activeDialogKey = getActiveDialogKey();
+    // Explicit parent override retains its existing semantics; otherwise use execution attribution.
     const explicitParentDialogId =
         typeof args.parentDialogId === "string" && args.parentDialogId.trim()
             ? (args.parentDialogId.includes("-")
@@ -433,7 +420,7 @@ export async function startAgentRunFunc(
                 : args.parentDialogId.trim())
             : undefined;
     const parentDialogId =
-        explicitParentDialogId ?? (activeDialogKey ? extractCustomId(activeDialogKey) : undefined);
+        explicitParentDialogId ?? attribution.dialogId;
 
     // F1：`runtimeKey: "local"` = 在**宿主文件系统**上执行（不是 docker 副本）。
     // 方案 A：它由宿主进程内的**本地执行器**兑现（CLI 通道由
