@@ -1,4 +1,11 @@
 
+## 0.240.0-alpha.3 (2026-11-17)
+
+### Bug Fixes
+
+* **cli:** exclude alpha tags from stable release gate base and omit undefined title ([13a3043](https://github.com/nolotus/bun-nolo/commit/13a30431a52864281d7bdc1ec1575c335a35a96a))
+
+
 ## 0.240.0-alpha.2 (2026-11-17)
 
 ### Bug Fixes

@@ -3040,7 +3040,7 @@ export function foldLocalResultForTui(
     exitCode: localResult.exitCode,
     ...projectLocalTurnFacts(localResult),
     ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
-    title: localResult.title,
+    ...(localResult.title !== undefined ? { title: localResult.title } : {}),
     ...(localResult.titlePatchPromise
       ? { titlePatchPromise: localResult.titlePatchPromise }
       : {}),
