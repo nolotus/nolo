@@ -26,7 +26,7 @@ import { t } from "./i18n";
 import { completeSlashCandidates, completeSlashCommand } from "./sessionInput";
 import { PASTE_TOKEN_PREFIX } from "./session";
 import { resetHistoryFrameDiffCache } from "./tuiHistory";
-import { resolveHistoryLayoutGeometry } from "./tuiLayout";
+import { resolveSurfacePaintWidth, resolveHistoryLayoutGeometry } from "./tuiLayout";
 
 function normalizePasteNewlines(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -311,7 +311,8 @@ export function createFixedInput(
         completions = parentCompletions;
       }
     }
-    const sections: string[] = [];
+    const paintWidth = resolveSurfacePaintWidth(cols);
+    const sections: { text: string; wash: boolean }[] = [];
     if (completions.length > 0) {
       const selectedIndex = completions.findIndex(
         (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
@@ -322,7 +323,7 @@ export function createFixedInput(
         }
         return c.label;
       });
-      sections.push(fitAnsiLine(dimCliText(labels.join("  "), colorEnabled), cols));
+      sections.push({ text: fitAnsiLine(dimCliText(labels.join("  "), colorEnabled), cols), wash: false });
     }
 
     // Activity line(s) (e.g. active tool execution or sub-agent run panel)
@@ -341,7 +342,7 @@ export function createFixedInput(
         : [];
 
     for (const actLine of activityLines) {
-      sections.push(fitAnsiLine(actLine.replace(/\r?\n/g, " "), cols));
+      sections.push({ text: fitAnsiLine(actLine.replace(/\r?\n/g, " "), cols), wash: false });
     }
 
     // The composer rules follow the theme's chrome token rather than a
@@ -351,13 +352,13 @@ export function createFixedInput(
     // 下 `─` 占 2 列，`repeat(cols)` 会变成 2*cols 格把输入区撑破，故退化为 ascii `-`。
     const ruleGlyph = boxGlyphs(resolveBoxCharset()).h;
     const rule = colorEnabled
-      ? `\x1b[2m${themeColorSequence("chrome")}${ruleGlyph.repeat(cols)}\x1b[0m`
-      : ruleGlyph.repeat(cols);
+      ? `\x1b[2m${themeColorSequence("chrome")}${ruleGlyph.repeat(paintWidth)}\x1b[0m`
+      : ruleGlyph.repeat(paintWidth);
     const titleLine = config.getTitleLine?.();
     if (titleLine) {
-      sections.push(fitAnsiLine(titleLine.replace(/\r?\n/g, " "), cols));
+      sections.push({ text: fitAnsiLine(titleLine.replace(/\r?\n/g, " "), cols), wash: false });
     }
-    sections.push(fitAnsiLine(config.getStatusLine(cols), cols));
+    sections.push({ text: fitAnsiLine(config.getStatusLine(cols), cols), wash: false });
 
     // Queued follow-up preview lines sit between the status line and the input
     // prompt so the user sees the actual staged text, not just a count.
@@ -366,18 +367,18 @@ export function createFixedInput(
       // Collapse any newline so each queued entry occupies exactly one physical
       // row. headerRows counts entries, not physical rows, so an embedded "\n"
       // would emit extra rows and drift the input cursor upward.
-      sections.push(fitAnsiLine(line.replace(/\r?\n/g, " "), cols));
+      sections.push({ text: fitAnsiLine(line.replace(/\r?\n/g, " "), cols), wash: true });
     }
 
     // Status, activity and queued messages are not editable draft content.
     // Keep the existing divider immediately above the draft, without adding rows.
-    sections.push(rule);
+    sections.push({ text: rule, wash: false });
 
     // 附件条：紧贴输入提示行上方（草稿的组成部分，优先级高于队列预览）。
     // 同样折叠换行占恰好一行；超宽交给 fitAnsiLine 截断。
     const attachmentLine = config.getAttachmentLine?.() ?? null;
     if (attachmentLine) {
-      sections.push(fitAnsiLine(attachmentLine.replace(/\r?\n/g, " "), cols));
+      sections.push({ text: fitAnsiLine(attachmentLine.replace(/\r?\n/g, " "), cols), wash: true });
     }
 
     const promptRaw = t("promptLabel");
@@ -393,25 +394,23 @@ export function createFixedInput(
     // terminal 模式下返回空、固定模式下也只差几个色阶，等于没画。
     //
     // 铺满整列而不是只包住文字：输入短的时候，只包文字的底色看起来像补丁。
-    // 尾部填空格补到 cols，宽度算的是可见宽度（内容可能带 SGR），所以光标列
+    // 尾部填空格补到 paintWidth，宽度算的是可见宽度（内容可能带 SGR），所以光标列
     // 不受影响——背景序列零宽度，填充也都在内容之后。
     //
-    // `\x1b[49m` 只重置背景：这一行后面若有调用方拼接的着色文本，前景色不该
-    // 被一起清掉。truecolor 不可用 / 终端底色未知时 wash 为空，整段退化为
+    // 复用 renderSurfaceLine 在内嵌 reset 后恢复底色，行末关闭样式。
+    // truecolor 不可用 / 终端底色未知时 wash 为空，整段退化为
     // 原文（ANSI-16 没有"淡底"，实色会把文字埋掉）。
     const surface = colorEnabled ? composerSurfaceBackgroundSequence() : "";
     // 几何对齐：输入提示符 › 与正文在相同左边距 (marginLeft) 起步，右侧也按 marginRight 预留留白。
     const { marginLeft, marginRight } = resolveHistoryLayoutGeometry(cols);
     const leftPad = marginLeft > 0 ? " ".repeat(marginLeft) : "";
     // 底色铺满整列，但最后一列留白：写到最右下角会让部分终端提前折行/滚屏。
-    const paintWidth = Math.max(1, surface ? cols - 1 : cols);
-    const paintInputRow = (content: string): string => {
-      if (!surface) return content;
-      const fitted = fitAnsiLine(content, paintWidth);
-      const pad = Math.max(0, paintWidth - displayWidth(fitted));
-      return `${surface}${fitted}${" ".repeat(pad)}\x1b[49m`;
+    const paintInputRow = ({ text: content, wash }: { text: string; wash: boolean }): string => {
+      if (!wash || !surface) return content;
+      return renderSurfaceLine({ text: fitAnsiLine(content, paintWidth), surface, padTo: paintWidth });
     };
 
+    const headerRows = sections.length;
     const contentWidth = Math.max(1, paintWidth - marginLeft - promptWidth);
     const logicalLines = buffer.length === 0 ? [""] : buffer.split("\n");
 
@@ -431,7 +430,7 @@ export function createFixedInput(
 
       if (buffer.length === 0) {
         const placeholder = themeText(t("placeholder"), "chrome", colorEnabled);
-        sections.push(paintInputRow(`${prefix}${placeholder}`));
+        sections.push({ text: `${prefix}${placeholder}`, wash: true });
         cursorCol = marginLeft + promptWidth;
         cursorRow = 0;
         inputRows = 1;
@@ -445,7 +444,7 @@ export function createFixedInput(
         const rowPrefix = j === 0 ? prefix : `${leftPad}${" ".repeat(promptWidth)}`;
         const rowText = rows[j] ?? "";
         sections.push(
-          paintInputRow(`${rowPrefix}${styleCollapsedPastePlaceholders(rowText, colorEnabled)}`),
+          { text: `${rowPrefix}${styleCollapsedPastePlaceholders(rowText, colorEnabled)}`, wash: true },
         );
 
         const rowLen = rowText.length;
@@ -467,15 +466,8 @@ export function createFixedInput(
       charOffset += 1; // count newline between logical lines
     }
 
-    const text = sections.join("\n");
+    const text = sections.map(paintInputRow).join("\n");
     const lines = sections.length;
-    const headerRows =
-      (completions.length > 0 ? 1 : 0) +
-      2 +
-      (titleLine ? 1 : 0) +
-      activityLines.length +
-      queueLines.length +
-      (attachmentLine ? 1 : 0); // completion? + top rule + status + activity lines + queued preview + attachment line
     return { text, lines, cursorCol, cursorRow: headerRows + cursorRow };
   };
 
@@ -487,15 +479,13 @@ export function createFixedInput(
       linesChanged = true;
     }
     const oldTop = getTopReservedRows(output);
-    // Budget the divider before requesting entries so tiny terminals retain history.
-    const maxEntries = resolveTopTaskEntryBudget(getRows(), inputLines, config.getReservedRows?.() ?? 0, 1);
+    // Only task entries occupy the top band; no decorative row is reserved.
+    const maxEntries = resolveTopTaskEntryBudget(getRows(), inputLines, config.getReservedRows?.() ?? 0);
     // Zero-budget renders also invalidate the dock's prior visible-run projection.
     const projectedTasks = config.getTaskLines?.({ columns: getColumns(), rows: getRows(), maxEntries }) ?? [];
     const taskEntries = maxEntries > 0 ? projectedTasks : [];
-    const separator = boxGlyphs(resolveBoxCharset()).h.repeat(Math.max(1, getColumns() - 1));
-    const taskLines = taskEntries.length ? [...taskEntries,
-      resolveCliColorEnabled() ? themeText(separator, "chrome") : separator] : [];
-    const taskWidth = Math.max(1, getColumns() - 1);
+    const taskWidth = resolveSurfacePaintWidth(getColumns());
+    const taskLines = taskEntries;
     const taskSurface = resolveCliColorEnabled() ? composerSurfaceBackgroundSequence() : "";
     const topText = taskLines.map(line => renderSurfaceLine({
       text: fitAnsiLine(line.replace(/\r?\n/g, " "), taskWidth),

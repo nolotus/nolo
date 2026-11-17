@@ -24,6 +24,20 @@ import type { ChromeConnectorClient } from "../../desktop-chrome-connector/chrom
 
 /** The only two answers a host may produce. No "always allow" — one approval covers one action. */
 export type HostApprovalDecision = "allow_once" | "deny";
+/** Presentation outcomes are not permissions; only allow_once may reach the authority. */
+export type HostApprovalResult = HostApprovalDecision | "cancelled" | "expired" | "unavailable";
+/** In-process port. IPC must transmit only these owner IDs/deadline, never the signal or secrets.
+ * The transport must bind requestId to its own AbortController and revoke it on disconnect.
+ * A terminal request cannot be resumed: callers must create a new confirmation after expiry.
+ */
+export type HostApprovalContext = {
+  requestId?: string;
+  dialogId?: string;
+  turnId?: string;
+  runId?: string;
+  signal?: AbortSignal;
+  expiresAt?: number;
+};
 
 /** Hard cap on the summary the card shows (multi-line, see clipApprovalSummary). */
 export const HOST_APPROVAL_SUMMARY_LIMIT = 2_500;
@@ -322,7 +336,9 @@ export async function runConnectorToolWithHostApproval(args: {
   call: AgentRuntimeToolCallInput;
   execute(call: AgentRuntimeToolCallInput): Promise<AgentRuntimeToolResult>;
   connector: HostApprovalConnector;
-  awaitHostApproval?: (card: HostApprovalCard) => Promise<HostApprovalDecision>;
+  awaitHostApproval?: HostApprovalRenderer;
+  signal?: AbortSignal;
+  context?: HostApprovalContext;
   now?: () => number;
 }): Promise<AgentRuntimeToolResult> {
   // With a host renderer installed the answer is taken in the conversation, so the connector must
@@ -355,12 +371,22 @@ export async function runConnectorToolWithHostApproval(args: {
     return approvalFailure("USER_APPROVAL_EXPIRED", "审批已过期，动作未执行。", args.call.name);
   }
 
-  const decision = await args.awaitHostApproval(card);
-
-  if (decision === "deny") {
-    // Submit even a denial: it closes the connector-side record so the browser popup cannot be
-    // used later to unlock the very action the user just refused.
+  const signal = args.signal ?? args.context?.signal;
+  if (signal?.aborted) return approvalFailure("USER_APPROVAL_CANCELLED", "审批已取消，动作未执行。", args.call.name);
+  const decision = await args.awaitHostApproval(card, { ...args.context, requestId: card.approvalId, signal, expiresAt: card.expiresAt });
+  const ended = () => signal?.aborted ? "USER_APPROVAL_CANCELLED"
+    : card.expiresAt <= now() ? "USER_APPROVAL_EXPIRED" : undefined;
+  const failure = ended() ?? (decision === "cancelled" ? "USER_APPROVAL_CANCELLED"
+    : decision === "expired" ? "USER_APPROVAL_EXPIRED"
+    : decision === "unavailable" ? "USER_APPROVAL_UNAVAILABLE" : undefined);
+  // Revoke this exact pending record for negative or stale answers, including
+  // a late allow racing abort/expiry. Never leave a live popup able to grant it.
+  if (failure || decision !== "allow_once") {
     await args.connector.submitApprovalDecision(card.approvalId, "deny");
+  }
+  if (failure) return approvalFailure(failure, "审批已结束，动作未执行。", args.call.name);
+
+  if (decision !== "allow_once") {
     return approvalFailure("USER_APPROVAL_DENIED", "用户已拒绝", args.call.name, {
       approvalId: card.approvalId,
     });
@@ -382,6 +408,8 @@ export async function runConnectorToolWithHostApproval(args: {
       approvalId: card.approvalId,
     });
   }
+  const lateEnd = ended();
+  if (lateEnd) return approvalFailure(lateEnd, "审批已结束，动作未执行。", args.call.name);
   // Exactly one retry: `execute` here is the raw executor, so a second pending verdict is returned
   // to the model instead of triggering another approval round.
   return args.execute(withApprovalId(args.call, card.approvalId));
@@ -392,51 +420,55 @@ export async function runConnectorToolWithHostApproval(args: {
  * parallel tool calls that each hit the gate cannot stack into one unreadable blob, and the card
  * closest to expiring is the one the user answers first.
  */
-export function createHostApprovalCardQueue() {
-  type Entry = {
-    card: HostApprovalCard;
-    present(card: HostApprovalCard): Promise<HostApprovalDecision>;
-    resolve(decision: HostApprovalDecision): void;
-  };
+export function createHostApprovalCardQueue(options: {
+  now?: () => number;
+  setTimeoutImpl?: (fn: () => void, ms: number) => unknown;
+  clearTimeoutImpl?: (handle: unknown) => void;
+} = {}) {
+  const now = options.now ?? Date.now;
+  const schedule = options.setTimeoutImpl ?? ((fn, ms) => setTimeout(fn, ms));
+  const clear = options.clearTimeoutImpl ?? (handle => clearTimeout(handle as ReturnType<typeof setTimeout>));
+  type Entry = { card: HostApprovalCard; present: HostApprovalRenderer; context: HostApprovalContext;
+    resolve(result: HostApprovalResult): void; cleanup(): void; ended?: HostApprovalResult };
   const waiting: Entry[] = [];
-  let active = false;
-
+  let active: Entry | undefined;
   const drain = async () => {
     if (active) return;
-    active = true;
-    try {
-      while (waiting.length > 0) {
-        // Re-sort on every iteration: a later card may expire sooner than a queued one.
-        waiting.sort((a, b) => a.card.expiresAt - b.card.expiresAt);
-        const entry = waiting.shift()!;
-        let decision: HostApprovalDecision = "deny";
-        try {
-          decision = await entry.present(entry.card);
-        } catch {
-          decision = "deny";
-        }
-        entry.resolve(decision);
-      }
-    } finally {
-      active = false;
+    while (waiting.length) {
+      waiting.sort((a, b) => a.card.expiresAt - b.card.expiresAt);
+      const entry = waiting.shift()!;
+      active = entry;
+      let result: HostApprovalResult = "unavailable";
+      try { result = await entry.present(entry.card, entry.context); } catch { /* fail closed */ }
+      entry.cleanup();
+      active = undefined;
+      entry.resolve(entry.ended ?? result);
     }
   };
-
   return {
-    /** Resolves with the user's answer once this card reaches the head of the queue. */
-    present(
-      card: HostApprovalCard,
-      present: (card: HostApprovalCard) => Promise<HostApprovalDecision>,
-    ): Promise<HostApprovalDecision> {
-      return new Promise<HostApprovalDecision>((resolve) => {
-        waiting.push({ card, present, resolve });
-        // Start on a microtask, not synchronously: parallel tool calls hit the gate in the same tick
-        // and must be ordered by `expiresAt` before the first frame is drawn, otherwise whoever
-        // enqueued first is shown first regardless of which approval dies first.
+    present(card: HostApprovalCard, present: HostApprovalRenderer, context: HostApprovalContext = {}): Promise<HostApprovalResult> {
+      return new Promise(resolve => {
+        const lifetime = new AbortController();
+        let timer: unknown;
+        const finish = (result: HostApprovalResult) => {
+          if (entry.ended) return;
+          entry.ended = result;
+          lifetime.abort(result);
+          const index = waiting.indexOf(entry);
+          if (index >= 0) { waiting.splice(index, 1); entry.cleanup(); resolve(result); }
+        };
+        const abort = () => finish("cancelled");
+        const entry: Entry = { card, present, resolve, context: { ...context, signal: lifetime.signal },
+          cleanup() { context.signal?.removeEventListener("abort", abort); if (timer !== undefined) clear(timer); } };
+        waiting.push(entry);
+        context.signal?.addEventListener("abort", abort, { once: true });
+        const remaining = Math.min(card.expiresAt, context.expiresAt ?? Infinity) - now();
+        if (context.signal?.aborted) finish("cancelled");
+        else if (remaining <= 0) finish("expired");
+        else timer = schedule(() => finish("expired"), remaining);
         void Promise.resolve().then(drain);
       });
     },
-    /** Cards currently queued or being shown (tests/telemetry). */
     size: () => waiting.length + (active ? 1 : 0),
   };
 }
@@ -451,7 +483,8 @@ export function createHostApprovalCardQueue() {
  */
 export type HostApprovalRenderer = (
   card: HostApprovalCard,
-) => Promise<HostApprovalDecision>;
+  context?: HostApprovalContext,
+) => Promise<HostApprovalResult>;
 
 let registeredRenderer: HostApprovalRenderer | null = null;
 

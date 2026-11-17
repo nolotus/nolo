@@ -23,16 +23,16 @@ import {
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { type AgentRunSnapshot, parseAgentRunEvent } from "./agentRunSnapshot";
 import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyles";
-import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor } from "../tui/theme";
-import { resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
-import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
+import { composerSurfaceBackgroundSequence, renderSurfaceLine, themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor } from "../tui/theme";
+import { resolveSurfacePaintWidth, resolveHistoryLayoutGeometry } from "../tui/tuiLayout";
+import { displayWidth, stripAnsi, fitAnsiLine } from "../tui/tuiAnsi";
 import { redactSecrets } from "../tui/redactSecrets";
 import { summarizeShellCommand } from "../../core/shellCommandGist";
 import { projectToolActivity, canCoalesceToolActivities, type ToolActivityProjection } from "../../core/toolActivityPresentation";
 import { safeAskText, safeApprovalMultilineText, withholdIfSecretLike } from "../tui/askTextSanitize";
 import { diffLines } from "diff";
 import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
-import { agentRunCardLabels, t, toolFamilyLabel, toolFamilyOfIcon, toolIcon, toolLabel } from "../tui/i18n";
+import { agentRunCardLabels, t, toolFamilyLabel, toolFamilyOf, toolFamilyOfIcon, toolIcon, toolLabel } from "../tui/i18n";
 import {
   formatFetchItemUrl,
   formatReadItemPath,
@@ -331,10 +331,16 @@ function formatShowInteractionBlock(
 
 function formatToolTraceLine(text: string, colorEnabled: boolean, accent: "none" | "error" = "none") {
   if (!colorEnabled) return `${text}\n`;
-  if (accent === "error") {
-    return `${themeText(text, "danger", true)}\n`;
-  }
-  return `${dimCliText(text, true)}\n`;
+  const width = resolveSurfacePaintWidth(process.stdout.columns || 80);
+  const fitted = fitAnsiLine(text.replace(/\r?\n/g, " "), width);
+  const styled = accent === "error"
+    ? themeText(fitted, "danger", true)
+    : dimCliText(fitted, true);
+  return `${renderSurfaceLine({
+    text: styled,
+    surface: colorEnabled ? composerSurfaceBackgroundSequence() : "",
+    padTo: width,
+  })}\n`;
 }
 
 // safe（normal）投影通用清洗：剥 ANSI/OSC（含剪贴板写、超链接）、折叠换行。
@@ -923,20 +929,18 @@ function formatEditDetailBlock(
   const isTruecolor = supportsTruecolor(env);
   const lang: CodeLang = isTruecolor ? detectCodeLangFromPath(filePath) : "unknown";
   const brightness: TuiBrightness = resolveTuiBrightness(env);
-  // Block-level padTo so every diff line forms a rectangle of equal visible
-  // width (Zed-style band). Measured with CJK-aware displayWidth.
-  const padTo = Math.max(...lines.map((line) => displayWidth(line.text))) + 1;
+  const padTo = resolveSurfacePaintWidth(process.stdout.columns || 80);
   return lines
-    .map((line) => `  ${renderDiffLine({
+    .map((line) => renderDiffLine({
       kind: line.kind,
-      text: line.text,
+      text: fitAnsiLine(`  ${line.text}`, padTo),
       highlightedText: shouldHighlightEditLine(line, lang, isTruecolor)
-        ? buildHighlightedEditLine(line, lang, brightness, env)
+        ? fitAnsiLine(`  ${buildHighlightedEditLine(line, lang, brightness, env)}`, padTo)
         : undefined,
       padTo,
       colorEnabled: true,
       env,
-    })}\n`)
+    }) + "\n")
     .join("");
 }
 
@@ -1127,6 +1131,7 @@ function formatNormalToolLine(
   pending: { toolName: string; argumentsPreview?: string } | undefined,
   colorEnabled: boolean,
   opts?: { tuiTrees?: boolean; visibleRunIds?: () => ReadonlySet<string> },
+  omitSuccessGlyph?: (toolName: string) => boolean,
 ) {
   if (event.type === "tool-call") return "";
   const toolName = event.toolName || pending?.toolName || "tool";
@@ -1179,6 +1184,7 @@ function formatNormalToolLine(
     const title = gist ? `${label} · ${gist}` : label;
     return formatToolTraceLine(fitNormalLine(`▸ ${title}`, `✗ ${reason}`, totalBudget), colorEnabled, "error");
   }
+  const successLabel = omitSuccessGlyph?.(toolName) ? "  " : label;
   const resultSummary = normalResultSummary(event);
   const gist = [normalToolGist(event), resultSummary].filter(Boolean).join(" · ");
   // editFile：gist 行追加 (+a, -r) 统计 + 多行 diff 色带块（Zed-style），
@@ -1191,7 +1197,7 @@ function formatNormalToolLine(
 
   let fittedGist = gist;
   if (gist) {
-    const prefix = `▸ ${label} · `;
+    const prefix = `▸ ${successLabel} · `;
     const suffix = `${statsInline}${tail}`;
     const prefixWidth = displayWidth(prefix);
     const suffixWidth = displayWidth(suffix);
@@ -1201,7 +1207,7 @@ function formatNormalToolLine(
     }
   }
 
-  const lineContent = fittedGist ? `▸ ${label} · ${fittedGist}${statsInline}${tail}` : `▸ ${label}${statsInline}${tail}`;
+  const lineContent = fittedGist ? `▸ ${successLabel} · ${fittedGist}${statsInline}${tail}` : `▸ ${successLabel}${statsInline}${tail}`;
   const mainLine = formatToolTraceLine(fitNormalLine(lineContent.slice(0, -tail.length), tail, totalBudget), colorEnabled);
   if (hint?.detail?.length) {
     const filePath = typeof event.metadata?.path === "string" ? event.metadata.path : undefined;
@@ -1354,6 +1360,8 @@ function toolDetails(event: LocalAgentToolEvent, line: string): string {
  * 因此本函数幂等，可以被重复调用。
  */
 export function toolRowDetailLine(line: string): string {
+  // A blank two-column glyph slot is not a family label, even if the gist is.
+  if (/^(?:\u001b\[[0-9;]*m)*▸  /.test(line)) return line;
   const match = /^(?:\u001b\[[0-9;]*m)*▸ (\S+)/.exec(line);
   if (!match) return line;
   const glyph = match[1] ?? "";
@@ -1370,6 +1378,7 @@ export function createToolEventFormatter(
 ): ToolEventFormatter {
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
   let scope = 0;
+  let lastFamilyId: string | undefined;
   let tree: { kind: TuiTreeKind; items: string[]; lastRow?: string; activity: ToolActivityProjection } | null = null;
   const treeKind = (name: string): TuiTreeKind | null =>
     (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
@@ -1459,15 +1468,22 @@ export function createToolEventFormatter(
     }
     const call = pending.get(event.toolCallId);
     pending.delete(event.toolCallId);
+    const previousFamilyId = lastFamilyId;
+    lastFamilyId = undefined;
     const treeOutput = formatTreeEvent(event, call);
     if (treeOutput !== null) return treeOutput;
-    const line = formatNormalToolLine(event, call, colorEnabled, opts);
+    // Tree payloads (including fallback/details) stay byte-for-byte unchanged.
+    // Only a standalone successful row can extend the event-family streak.
+    const line = formatNormalToolLine(event, call, colorEnabled, opts, opts.tuiTrees ? undefined : (name) => {
+      lastFamilyId = toolFamilyOf(name).id;
+      return previousFamilyId === lastFamilyId;
+    });
     if (opts.tuiTrees && line && isRunToolName(event.toolName)) {
       return `${TUI_TREE_MARKER}${JSON.stringify({ kind: "Run", summary: "", fallback: line, details: toolDetails(event, line), appendOnly: true } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
     }
     return line;
   }) as ToolEventFormatter;
-  format.reset = () => { tree = null; scope++; };
+  format.reset = () => { tree = null; lastFamilyId = undefined; scope++; };
   format.consume = (event: LocalAgentToolEvent) => {
     if (event.type === "tool-call") {
       pending.set(event.toolCallId, {
@@ -1478,6 +1494,7 @@ export function createToolEventFormatter(
     }
     pending.delete(event.toolCallId);
     tree = null;
+    lastFamilyId = undefined;
   };
   return format;
 }

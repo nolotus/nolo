@@ -1,4 +1,38 @@
 
+## 0.240.0-alpha.2 (2026-11-17)
+
+### Bug Fixes
+
+* **auth:** prevent recursive cluster peer lookup loop and cache misses ([bf4b8d9](https://github.com/nolotus/bun-nolo/commit/bf4b8d96dae6b1e34f844a4032b5074b6196b958))
+
+
+## 0.240.0-alpha.1 (2026-11-17)
+
+### Features
+
+* **ci:** 给 scripts/ci 与 scripts/ops 补类型门（带基线，只拦新增） ([8a34699](https://github.com/nolotus/bun-nolo/commit/8a34699c35449418039de647bb3f7f49e9238ad9))
+
+
+## 0.239.0-alpha.1 (2026-11-17)
+
+### Features
+
+* **agent-runtime:** 支持 Antigravity Gemini 4 Carbon 的 wire 折叠与目录条目 ([1bf14ee](https://github.com/nolotus/bun-nolo/commit/1bf14ee4784a6a42ec7fc4bbd6dec18226a6605a))
+* **ai:** antigravity 目录补齐 claude-sonnet-4-6，与 5.5 两档并存 ([2273a6d](https://github.com/nolotus/bun-nolo/commit/2273a6d20416ae2982aaf5124e1aab80260b85d2))
+
+### Bug Fixes
+
+* **ai:** 自定义端点 agent 按端点反查通道视觉能力 ([c2dd109](https://github.com/nolotus/bun-nolo/commit/c2dd1092af49c215a001be7d97d37121f8c9e2ed))
+* **cli:** TUI 活动行 spinner 帧率对齐前台 80ms ([908a147](https://github.com/nolotus/bun-nolo/commit/908a147a10cfa9cc58092f65c5f5ba3af2d3ce13))
+* **cli:** TUI 背景与分割线统一铺满到 cols-1 ([106c10a](https://github.com/nolotus/bun-nolo/commit/106c10a98f68e6148fccb2bdb9cc4754b6875da0))
+* **cli:** unify host approval lifetimes and background MCP confirmation ([d12d7c1](https://github.com/nolotus/bun-nolo/commit/d12d7c145e8f6b8fd4f3b41ead5d423fc0bbedac))
+* **cli:** 修复自建 agent 状态行上下文窗口解析不出 ([3f83285](https://github.com/nolotus/bun-nolo/commit/3f83285fcf182fbc6376aa6c824819a5ab458579))
+* **cli:** 同族连续工具行省略重复族图标 ([139ff8d](https://github.com/nolotus/bun-nolo/commit/139ff8db43fdc5ccbe7dcbd2f4171ccb578580a4))
+* **cli:** 探不到终端底色时 TUI 仍有底色 ([bcb315e](https://github.com/nolotus/bun-nolo/commit/bcb315e26da7352cbeda29a040f5f5fee12e48c9))
+* **cli:** 状态行去噪并让输入区底色边缘成为边界 ([7750781](https://github.com/nolotus/bun-nolo/commit/77507813e1bb64c89ab72eca1624f505b96d7999))
+* **infra:** 基础设施 IP 收敛到单一真源，修紧急接管部署到旧机 ([28f463c](https://github.com/nolotus/bun-nolo/commit/28f463c9aa7a5b7f4185ed708be57670935e3986))
+
+
 ## 0.238.0-alpha.1 (2026-11-17)
 
 ### Features

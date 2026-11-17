@@ -36,6 +36,7 @@ import {
   describeSettingsWriteFailure,
   isSettingsWriteSupersededError,
   readLocalIntentEpoch,
+  readLocalIntentKeyEpoch,
   resolveSettingsWriteFailureAfterSuccess,
   SettingsWriteSupersededError,
 } from "./settingsWriteRetry";
@@ -272,7 +273,7 @@ const persistSettingsChanges = createAsyncThunk<
     } else {
       throw new Error("User not found for persisting settings.");
     }
-    dispatch(bumpLocalIntentEpoch());
+    dispatch(bumpLocalIntentEpoch({ keys: Object.keys(normalizedChanges) }));
     dispatch(updateSettingsState(normalizedChanges));
     return normalizedChanges;
   }
@@ -288,10 +289,14 @@ const persistSettingsChanges = createAsyncThunk<
   if (selectIdentityUserId(getState() as any) !== userId) return {};
   const owner = getAccountChatDisplayOwner(getState);
   // Local user intent is being published now: advance the generation so any
-  // hydrate that started earlier is discarded instead of overwriting it.
-  dispatch(bumpLocalIntentEpoch());
+  // hydrate that started earlier is discarded instead of overwriting it, and
+  // stamp the keys this intent touched so a queued write is only abandoned when
+  // a *newer intent on the same keys* supersedes it (an unrelated setting edit
+  // must not cancel this write — PLUGIN-PERSIST-UNRELATED-INTENT-001).
+  const intentKeys = Object.keys(normalizedChanges);
+  dispatch(bumpLocalIntentEpoch({ keys: intentKeys }));
   // Identifies this intent for the write path: a failure may only be retried
-  // while this is still the account's newest local intent.
+  // while this is still the newest local intent *for these keys*.
   const intentEpoch = readLocalIntentEpoch(getState);
   owner.setAccount(userId);
   owner.updateForAccount(userId, pickAccountChatDisplayPreferences(persistencePlan.normalizedChanges));
@@ -299,33 +304,60 @@ const persistSettingsChanges = createAsyncThunk<
     dispatch(publishUiPlugins({ value: persistencePlan.normalizedChanges.uiPlugins!, accountId: userId, generation: session }));
   }
   dispatch(updateSettingsState(omitAccountChatDisplayPreferences(persistencePlan.normalizedChanges)));
-  // Keys of the user intent (for the failure state) and of the keys that are
-  // actually pushed to the cloud settings record (for reconciliation).
-  const intentKeys = Object.keys(persistencePlan.normalizedChanges);
-  const persistedKeys = Object.keys(
-    persistencePlan.settingsPatch?.changes ?? {},
-  ).filter((key) => key !== "schemaVersion");
-  const isCurrentIntent = () =>
-    (!getSessionSnapshotForState(getState()) || getSessionSnapshotForState(getState())?.transition === "idle") &&
+  // 账号 / 会话代次守卫：与「某次意图是否仍然有效」是两件事，分开判。
+  const isSameAccountSession = () =>
+    (!getSessionSnapshotForState(getState()) ||
+      getSessionSnapshotForState(getState())?.transition === "idle") &&
     selectIdentityUserId(getState()) === userId &&
-    getSessionGenerationForState(getState()) === session &&
-    readLocalIntentEpoch(getState) === intentEpoch;
-  const performWrite = async () => {
-    // 便宜收紧（非原子）：每次真正发写之前再判一次世代 —— 首次与重试各一次。
-    // 若这次意图已被更新的本地意图取代，就不要把旧 payload 发出去；窗口从
-    // 「退避 200ms + 一次网络往返」缩到一次函数调用。最终一致性仍由同账号串行
-    // 队列保证：新意图的写排在队尾、紧接本次之后执行并覆盖服务端。
+    getSessionGenerationForState(getState()) === session;
+  // 单个键是否已被更新的本地意图取代（**按键**判定，不按键集合整体判定）。
+  const isSupersededKey = (key: string): boolean =>
+    readLocalIntentKeyEpoch(getState, key) > intentEpoch;
+  /**
+   * 本次写真正还可以发的 payload：**每次发写前按当前键 epoch 重算**。
+   *
+   * 部分重叠的正确语义：被后续意图改过的键丢弃（旧值绝不写回），仍有效的键
+   * 照常发出；只有**全部**意图键都被取代才整次放弃。否则「排入
+   * {uiPlugins, sidebarWidth:320} → 排入 {sidebarWidth:321}」会连 uiPlugins
+   * 一起丢掉，而后续 payload 并不携带它（PLUGIN-PERSIST-PARTIAL-OVERLAP-001）。
+   */
+  const resolveEffectiveWrite = () => {
+    const patchChanges = persistencePlan.settingsPatch?.changes ?? {};
+    const effectiveChanges: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(patchChanges)) {
+      if (!isSupersededKey(key)) effectiveChanges[key] = value;
+    }
+    const effectiveIntentKeys = intentKeys.filter((key) => !isSupersededKey(key));
+    const effectivePersistedKeys = Object.keys(effectiveChanges).filter(
+      (key) => key !== "schemaVersion",
+    );
+    return { effectiveChanges, effectiveIntentKeys, effectivePersistedKeys };
+  };
+  type EffectiveWrite = ReturnType<typeof resolveEffectiveWrite>;
+  const performWrite = async (): Promise<EffectiveWrite> => {
+    // 便宜收紧（非原子）：每次真正发写之前重算一次有效 payload —— 首次与重试
+    // 各一次。窗口从「退避 200ms + 一次网络往返」缩到一次函数调用。最终一致性
+    // 仍由同账号串行队列保证：新意图的写排在队尾、紧接本次之后执行。
     // 抛哨兵错误（而不是普通 Error）：被取代 ≠ 失败，调用方应正常 resolve。
-    if (!isCurrentIntent()) {
+    if (!isSameAccountSession()) {
+      throw new SettingsWriteSupersededError();
+    }
+    const effective = resolveEffectiveWrite();
+    // 全部意图键都已被更新的意图接管：本次没有还要负责的键，整次放弃。
+    if (effective.effectiveIntentKeys.length === 0) {
       throw new SettingsWriteSupersededError();
     }
     const nextDefaultAgentId =
       normalizeDefaultAgentIdSetting(
         persistencePlan.normalizedChanges.defaultAgentId,
       ) ?? null;
+    // defaultAgentId 的 register 副作用也按有效键守卫：被更新意图改过时不得把
+    // 旧值写进 register（那条意图自己的写会落新值）。守卫要传进 register 内部：
+    // 它自己还会 await 一次远端读，返回后账号/意图可能已经变了，那时才真正发写。
     if (
       hasOwn(changes, "defaultAgentId") &&
-      previousDefaultAgentId !== (nextDefaultAgentId ?? SYSTEM_DEFAULT_AGENT_ID)
+      previousDefaultAgentId !== (nextDefaultAgentId ?? SYSTEM_DEFAULT_AGENT_ID) &&
+      !isSupersededKey("defaultAgentId")
     ) {
       await persistDefaultAgentRegister(
         dispatch as unknown as (action: unknown) => {
@@ -336,29 +368,44 @@ const persistSettingsChanges = createAsyncThunk<
         },
         userId,
         nextDefaultAgentId,
+        () => isSameAccountSession() && !isSupersededKey("defaultAgentId"),
       );
     }
-    if (persistencePlan.settingsPatch) {
+    // register 的 await 之后必须重核会话并**重算**有效 payload：await 前的快照
+    // 可能已经过期（期间切了账号/代次，或同键被新意图接管）。沿用旧快照会把
+    // 失效账号的旧值写出去（SETTINGS-REGISTER-AWAIT-STALE-WRITE-001）。
+    if (!isSameAccountSession()) {
+      throw new SettingsWriteSupersededError();
+    }
+    const effectiveAfterAwait = resolveEffectiveWrite();
+    if (effectiveAfterAwait.effectiveIntentKeys.length === 0) {
+      throw new SettingsWriteSupersededError();
+    }
+    if (
+      persistencePlan.settingsPatch &&
+      Object.keys(effectiveAfterAwait.effectiveChanges).length > 0
+    ) {
       await dispatch(
         getSettingDbActionThunks().upsert({
           dbKey: persistencePlan.settingsPatch.dbKey,
-          data: persistencePlan.settingsPatch.changes,
+          data: effectiveAfterAwait.effectiveChanges,
         }),
       ).unwrap();
     }
+    return effectiveAfterAwait;
   };
   // 写成功即收敛已有的失败状态：本次覆盖了失败状态里剩下的全部键 → 清空；
   // 只覆盖一部分 → 剔除已覆盖的键（剩下的继续可见）；其它账号的状态不动。
-  const settleSettingsWriteFailureAfterSuccess = () => {
-    if (!isCurrentIntent()) return;
+  const settleSettingsWriteFailureAfterSuccess = (effective: EffectiveWrite) => {
+    if (!isSameAccountSession()) return;
     const existing = (getState() as any)?.settings
       ?.lastWriteFailure as SettingsWriteFailure | null | undefined;
     if (!existing) return;
     const next = resolveSettingsWriteFailureAfterSuccess({
       failure: existing,
       accountId: userId,
-      intentKeys,
-      persistedKeys,
+      intentKeys: effective.effectiveIntentKeys,
+      persistedKeys: effective.effectivePersistedKeys,
     });
     // 同一引用 = 跨账号状态，本次成功与它无关，不 dispatch。
     if (next === existing) return;
@@ -369,44 +416,63 @@ const persistSettingsChanges = createAsyncThunk<
   await enqueueAccountSettingsWrite(getState, userId, async () => {
     let firstFailureAt = 0;
     try {
-      await performWrite();
-      settleSettingsWriteFailureAfterSuccess();
+      const effective = await performWrite();
+      settleSettingsWriteFailureAfterSuccess(effective);
       return;
     } catch (firstError) {
       // 被更新的本地意图取代（写前复查就已放弃）：不是失败，正常 resolve。
       // 新意图自己的写正在正常进行，调用方 / UI 不该看到「保存失败」。
       if (isSettingsWriteSupersededError(firstError)) return;
       firstFailureAt = Date.now();
-      // Only retry while this intent is still the account's newest local intent.
-      // A newer edit makes the server write of this payload pointless and
-      // dangerous (it would persist a value the user already replaced).
-      // Being superseded at any of these points is a resolve, never a reject.
-      if (!isCurrentIntent()) return;
+      // 账号 / 会话代次变了：这条意图不属于任何账号，放弃重试也不留状态。
+      if (!isSameAccountSession()) return;
       await delaySettingsWriteRetry(SETTINGS_WRITE_RETRY_BACKOFF_MS);
-      if (!isCurrentIntent()) return;
       try {
-        await performWrite();
-        settleSettingsWriteFailureAfterSuccess();
+        // 重试前重算有效 payload：只保留仍未被同键新意图接管的键。
+        const effective = await performWrite();
+        settleSettingsWriteFailureAfterSuccess(effective);
         return;
       } catch (retryError) {
-        // 重试本身被世代复查拦下：同样是「被取代」，不是失败。
+        // 重试本身被世代复查拦下（全部键已被接管）：同样是「被取代」，不是失败。
         if (isSettingsWriteSupersededError(retryError)) return;
         // Retry failed too: keep the optimistic local value (never roll back a
         // newer local edit) and record a readable failure + reconciliation
         // verdict for the UI. The rejection still bubbles to the caller.
         // A newer local intent that arrived in the meantime owns the outcome:
         // do not leave a stale failure state behind for it (and do not reject).
-        if (!isCurrentIntent()) return;
+        if (!isSameAccountSession()) return;
+        // 对账键集合与真正发出的 payload 同语义：只看本次仍负责的键。
+        const effective = resolveEffectiveWrite();
+        // 期间全部键都被后续意图接管：这条意图已经没有要负责的键，
+        // 既不记失败状态也不 reject（与写前被取代同口径）。
+        if (effective.effectiveIntentKeys.length === 0) return;
         const failure = await describeSettingsWriteFailure({
           getState: getState as unknown as () => unknown,
           accountId: userId,
           intentEpoch,
-          intentKeys,
-          persistedKeys,
+          intentKeys: effective.effectiveIntentKeys,
+          persistedKeys: effective.effectivePersistedKeys,
           at: firstFailureAt,
         });
-        if (!isCurrentIntent()) return;
-        dispatch(recordSettingsWriteFailure(failure));
+        if (!isSameAccountSession()) return;
+        // 对账本身也要 await 远端：返回后必须重新按键核验。期间被新意图接管的键
+        // 不属于这条旧请求，不能把它们的过期失败告警发给用户
+        // （SETTINGS-RECONCILE-SUPERSEDED-FAILURE-001）。
+        const ownedAfterReconcile = new Set(
+          resolveEffectiveWrite().effectiveIntentKeys,
+        );
+        const ownedKeys = failure.keys.filter((key) => ownedAfterReconcile.has(key));
+        // 全部键都被接管：不记失败、不 reject（与写前被取代同口径）。
+        if (ownedKeys.length === 0) return;
+        dispatch(
+          recordSettingsWriteFailure({
+            ...failure,
+            keys: ownedKeys,
+            unresolvedKeys: failure.unresolvedKeys.filter((key) =>
+              ownedAfterReconcile.has(key),
+            ),
+          }),
+        );
         throw retryError;
       }
     }

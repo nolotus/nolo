@@ -621,6 +621,28 @@ export function surfaceBackgroundSequence(
   return hexToBgSgr((SURFACE_HEX[activeThemeName] ?? SURFACE_HEX.trail)[brightness]);
 }
 
+/** Shared capability/canvas gate for composer and user surface washes. */
+function resolveSurfaceWashFallback(
+  env: Record<string, string | undefined>,
+): string | null {
+  // Tier 1 trusts OSC 11 / COLORFGBG canvas evidence. Tier 2 also permits
+  // an assumed brightness explicitly chosen via NOLO_TUI_THEME or the in-TUI
+  // /theme dark|light command (activeThemeMode): the latter is the user's
+  // direct, in-session choice, so it authorizes the assumption just like env.
+  // Only when canvas evidence, an env choice, and an in-session choice are all
+  // absent do we use ANSI 100 instead of inventing an RGB canvas from OS
+  // appearance or the default dark palette. No truecolor uses ANSI 100 too.
+  if (
+    !supportsTruecolor(env) ||
+    (activeTerminalBaseHex === null &&
+      detectColorFgBgBrightness(env) === null &&
+      resolveTuiThemeMode(env) === "terminal")
+  ) {
+    return "\x1b[100m";
+  }
+  return null;
+}
+
 /**
  * Background wash for the docked composer (the input row at the bottom).
  *
@@ -640,22 +662,18 @@ export function surfaceBackgroundSequence(
  * composer already carries the accent chevron, and an accent wash there would
  * compete with the user-turn bubble that uses accent at full strength.
  *
- * Terminal-native mode still needs a trustworthy background (OSC 11 reply or
- * COLORFGBG) before painting: guessing "dark" can lay a light band across a
- * light canvas.
+ * Three tiers share the same gate with user turns: a trusted canvas (OSC 11
+ * or COLORFGBG) keeps the exact wash; an explicit dark/light mode authorizes
+ * resolveTerminalBaseHex's fallback for the same wash. Without either signal,
+ * or without truecolor, use ANSI 100 (bright black), a terminal-palette neutral
+ * band, not a guessed RGB canvas that could bury the default foreground.
  */
 export function composerSurfaceBackgroundSequence(
   env: Record<string, string | undefined> = process.env,
   brightness: TuiBrightness = resolveTuiBrightness(env),
 ): string {
-  if (!supportsTruecolor(env)) return "";
-  if (
-    resolveTuiThemeMode(env) === "terminal" &&
-    activeTerminalBaseHex === null &&
-    detectColorFgBgBrightness(env) === null
-  ) {
-    return "";
-  }
+  const fallback = resolveSurfaceWashFallback(env);
+  if (fallback !== null) return fallback;
   const base = resolveTerminalBaseHex(brightness);
   // Direction comes from the base color's own luma, not from the declared
   // brightness: a pinned `/theme dark` on a light terminal would otherwise
@@ -687,33 +705,19 @@ export function composerSurfaceBackgroundSequence(
  * selected row, so the wash drops to a low accent tint that stays visible
  * on white; the accent gutter and accent body text remain the identity cues.
  *
- * Unlike decorative chips and diff bands, this surface remains enabled in
- * terminal mode when truecolor is available and the background is known from
- * OSC 11 or COLORFGBG. Until either terminal-owned signal exists, it stays
- * off: an OS appearance preference does not prove that the terminal uses the
- * same canvas, and guessing dark can bury its default foreground on a deep
- * band. The accent gutter + bold body remain visible in that fallback.
- *
- * Returns "" without truecolor: ANSI-16 has no subtle background, and a
- * half-applied block would be worse than the gutter + bold fallback.
+ * The same three tiers as the composer apply: trusted OSC 11 / COLORFGBG
+ * canvas -> exact accent wash; explicit dark/light mode -> authorized fallback
+ * base and exact wash; no canvas signal or no truecolor -> ANSI 100. OS
+ * appearance alone is not canvas evidence: use the terminal's bright-black
+ * neutral band rather than guessing a hex that could bury its foreground.
+ * The accent gutter + bold body keep the user's identity in the neutral tier.
  */
 export function userSurfaceBackgroundSequence(
   env: Record<string, string | undefined> = process.env,
   brightness: TuiBrightness = resolveTuiBrightness(env),
 ): string {
-  if (!supportsTruecolor(env)) return "";
-  // Terminal-native mode must not paint a full-width surface until the
-  // terminal has supplied a trustworthy light/dark signal. Falling back to
-  // "dark" here can put a deep blue band behind a light terminal's default
-  // dark foreground, making the user's own message unreadable. The accent
-  // gutter + bold body remain the safe, device-independent fallback.
-  if (
-    resolveTuiThemeMode(env) === "terminal" &&
-    activeTerminalBaseHex === null &&
-    detectColorFgBgBrightness(env) === null
-  ) {
-    return "";
-  }
+  const fallback = resolveSurfaceWashFallback(env);
+  if (fallback !== null) return fallback;
   const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.trail;
   // Both brightnesses wash the accent hue into the terminal base so the
   // bubble matches the accent gutter and the (accent-colored) body text.

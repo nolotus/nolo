@@ -1,5 +1,5 @@
 import { resolveAgentCallPlan } from "../../agent-runtime/agentCallPlan";
-import { SUBSCRIPTION_OAUTH_PROVIDERS } from "../agent/providerRegistry";
+import { CUSTOM_API_KEY_TEMPLATES, SUBSCRIPTION_OAUTH_PROVIDERS } from "../agent/providerRegistry";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import {
@@ -95,6 +95,61 @@ const lookupKnownModelVision = (
   return undefined;
 };
 
+/**
+ * 自定义端点的通道反查基础设施：`provider` 没填或写成 `custom` 时，能力查表只能
+ * 拿到 `custom`，即使端点 baseUrl 与注册表里某个通道完全一致。真实受害形态：
+ * `{provider:"custom", customProviderUrl:"https://api.commandcode.ai/provider/v1",
+ *   model:"deepseek/deepseek-v4.1-flash"}` —— catalog 已登记该模型 hasVision: true，
+ * 却因为查不到通道而落成 unknown，随后被图片闸门 fail-closed 拒绝。
+ * 只按 host 相等匹配，不按 path 前缀（同一 host 下不同通道的 path 不能互相代替）。
+ */
+const endpointHost = (value: string | null | undefined): string | undefined => {
+  const raw = asOptionalTrimmedString(value);
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).host || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * 通道预设里的模型视觉声明兜底。
+ *
+ * providerRegistry 的 `modelOptions` 是下拉/编辑页展示能力的同一个真源，但它比
+ * providers.ts 的 `MODEL_MAP` 更全：`MODEL_MAP` 只收带 contextWindow 的条目
+ * （见 providers.ts 的 commandcode 一行），commandcode 等通道的部分现役模型因此
+ * 在 catalog 查不到 hasVision，落到「unknown」。
+ *
+ * 只在 `lookupKnownModelVision` 落空时兜底，不覆盖 MODEL_MAP 的既有结论。两个条件
+ * 同时成立才采信预设声明，否则宁可保持 unknown 交给上层按未知名处理：
+ *   1) 记录里的 customProviderUrl 的 host 与预设 baseUrl 的 host 相同（端点确属该通道）；
+ *   2) 记录写了具体 provider 时它必须与预设通道一致（写成 `custom`/未填则只用端点判定）。
+ * 调用方还须确认实际出站路由就是该自定义端点（`authMethod.kind === "custom-key"`），
+ * 这样「自定义 Key 走别的端点」和 CLI 记录里残留的端点都不会借用预设声明（见测试
+ * "does not inherit subscription vision declarations when using custom-key routing"
+ * 与 "CLI 路由不采信遗留端点"）。
+ */
+const lookupPresetModelVision = (
+  provider: string | null,
+  model: string,
+  customProviderUrl?: string | null,
+): boolean | undefined => {
+  if (!model) return undefined;
+  const host = endpointHost(customProviderUrl);
+  if (!host) return undefined;
+  const candidates = [model, stripEffortSuffix(model), stripPreviewSuffix(model)];
+  for (const template of CUSTOM_API_KEY_TEMPLATES) {
+    if (endpointHost(template.baseUrl) !== host) continue;
+    const templateProvider = asTrimmedLowercaseString(template.provider);
+    if (provider && provider !== "custom" && templateProvider !== provider) continue;
+    const declared = (template.modelOptions ?? [])
+      .find((option) => candidates.includes(option.id))?.hasVision;
+    if (typeof declared === "boolean") return declared;
+  }
+  return undefined;
+};
+
 export const resolveCatalogImageSupport = (agent: AgentCapabilityConfig): boolean | undefined => {
 
   const provider = asTrimmedLowercaseString(agent.provider)
@@ -120,7 +175,12 @@ export const resolveCatalogImageSupport = (agent: AgentCapabilityConfig): boolea
         ?.modelOptions.find((entry) =>
           [model, stripEffortSuffix(model), stripPreviewSuffix(model)].includes(entry.id),
         )?.hasVision
-    : lookupKnownModelVision(provider, model);
+    : lookupKnownModelVision(provider, model)
+      // 端点兜底只对「真的往这个自定义端点发请求」的路由生效。CLI 路由、平台 Key
+      // 等记录里可能残留 customProviderUrl，但它不参与实际出站，不能据此采信能力。
+      ?? (authMethod.kind === "custom-key"
+        ? lookupPresetModelVision(provider, model, agent.customProviderUrl)
+        : undefined);
 
   return catalogHasVision;
 };

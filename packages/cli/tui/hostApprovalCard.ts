@@ -7,9 +7,8 @@
  * connector through `submit_approval_decision` — the model is never asked, and cannot answer.
  *
  * Deliberate non-goals:
- *  - it does NOT take over the keyboard (no `dialogHost` claim, no composer pause): the user can keep
- *    typing while a card waits, which is why `y`/`n` are only consumed when the composer draft is
- *    empty;
+ *  - inline presentation uses the same DialogHost keyboard owner as ask/secret;
+ *    legacy standalone callers may still omit the host;
  *  - it does NOT remember anything: one card = one action, no "always allow";
  *  - styling stays minimal on purpose: one frame, no colour. Long values (and the script itself) wrap
  *    at the terminal width instead of being clipped, because the only copy of the code the user can
@@ -17,14 +16,16 @@
  */
 import type {
   HostApprovalCard,
-  HostApprovalDecision,
   HostApprovalRenderer,
+  HostApprovalResult,
+  HostApprovalContext,
 } from "../client/hostApprovalFlow";
 import {
   createHostApprovalCardQueue,
   formatApprovalRemaining,
   HOST_APPROVAL_SUMMARY_LIMIT,
 } from "../client/hostApprovalFlow";
+import type { DialogHost } from "./dialogHost";
 import { boxGlyphs, displayWidth, resolveBoxCharset } from "./tuiAnsi";
 
 const ALLOW_KEYS = new Set(["y", "Y"]);
@@ -161,7 +162,7 @@ function detailRows(
  */
 export function renderHostApprovalCardLines(
   card: HostApprovalCard,
-  opts: { now: number; columns?: number },
+  opts: { now: number; columns?: number; keyboardOwned?: boolean },
 ): string[] {
   const columns = Math.max(20, opts.columns ?? FALLBACK_COLUMNS);
   // Two columns stay free on the right: the frame row is clipped at `columns - 1`, and a wrapped row
@@ -198,7 +199,7 @@ export function renderHostApprovalCardLines(
 /** One card on screen at a time; `handleKey` routes y/n/Esc to it. */
 type ActiveCard = {
   card: HostApprovalCard;
-  finish(decision: HostApprovalDecision): void;
+  finish(decision: HostApprovalResult): void;
 };
 
 export type InlineHostApprovalPrompt = {
@@ -212,7 +213,9 @@ export type InlineHostApprovalPrompt = {
    * `busy` keeps Esc meaning "stop the running turn" — a pending card must not shadow that.
    */
   handleKey(sequence: string, context: { draftEmpty: boolean; busy: boolean }): boolean;
-  /** Drop everything: pending cards resolve to `deny` so no tool call can hang on shutdown. */
+  /** Whether this prompt currently owns input (not merely queued behind another dialog). */
+  isActive(): boolean;
+  /** Cancel pending cards so no tool call can hang on shutdown. */
   dispose(): void;
   /** Cards queued or currently displayed (tests). */
   pendingCount(): number;
@@ -220,6 +223,7 @@ export type InlineHostApprovalPrompt = {
 
 export function createInlineHostApprovalPrompt(args: {
   write(text: string): void;
+  dialogHost?: DialogHost;
   now?: () => number;
   columns?: () => number;
   /** Injectable timers so a test can drive expiry without waiting. */
@@ -233,17 +237,10 @@ export function createInlineHostApprovalPrompt(args: {
   const clearTimeoutImpl =
     args.clearTimeoutImpl ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
 
-  const queue = createHostApprovalCardQueue();
+  const queue = createHostApprovalCardQueue({ now, setTimeoutImpl, clearTimeoutImpl });
+  const shutdown = new AbortController();
   let active: ActiveCard | null = null;
-  let expiryTimer: unknown = null;
   let disposed = false;
-
-  const clearExpiryTimer = () => {
-    if (expiryTimer !== null) {
-      clearTimeoutImpl(expiryTimer);
-      expiryTimer = null;
-    }
-  };
 
   /**
    * Settle the active card exactly once.
@@ -253,11 +250,10 @@ export function createInlineHostApprovalPrompt(args: {
    * left the promise pending forever, `dispose()` could no longer see the card, and the queue behind
    * it never advanced — one broken write wedged every later approval.
    */
-  const settle = (decision: HostApprovalDecision, note: string) => {
+  const settle = (decision: HostApprovalResult, note: string) => {
     if (!active) return;
     const finishing = active;
     active = null;
-    clearExpiryTimer();
     try {
       args.write(`${note}\n`);
     } catch {
@@ -267,15 +263,20 @@ export function createInlineHostApprovalPrompt(args: {
     }
   };
 
-  const presentOne = (card: HostApprovalCard): Promise<HostApprovalDecision> =>
-    new Promise<HostApprovalDecision>((resolve) => {
-      if (disposed) {
-        resolve("deny");
+  const presentOne = (card: HostApprovalCard, context: HostApprovalContext = {}): Promise<HostApprovalResult> =>
+    new Promise<HostApprovalResult>((resolve) => {
+      if (disposed || context.signal?.aborted) {
+        resolve(disposed ? "deny" : "cancelled");
         return;
       }
-      active = { card, finish: resolve };
+      const abort = () => settle(context.signal?.reason === "expired" ? "expired" : "cancelled", "✖ approval ended — the action was not run");
+      active = { card, finish: result => {
+        context.signal?.removeEventListener("abort", abort);
+        resolve(result);
+      } };
+      context.signal?.addEventListener("abort", abort, { once: true });
       try {
-        const lines = renderHostApprovalCardLines(card, { now: now(), columns: columns() });
+        const lines = renderHostApprovalCardLines(card, { now: now(), columns: columns(), keyboardOwned: !!args.dialogHost });
         args.write(`${lines.join("\n")}\n`);
       } catch {
         // The user was never shown the action, so nothing may be approved: deny and let the queue
@@ -283,21 +284,19 @@ export function createInlineHostApprovalPrompt(args: {
         settle("deny", "⌛ approval could not be shown — the action was not run");
         return;
       }
-      const remaining = card.expiresAt - now();
-      if (remaining <= 0) {
-        // Already past its window: say so and let the flow report USER_APPROVAL_EXPIRED (it will not
-        // retry, because the submitted decision comes back rejected/expired).
-        settle("deny", "⌛ approval expired — the action was not run");
-        return;
-      }
-      expiryTimer = setTimeoutImpl(() => {
-        expiryTimer = null;
-        settle("deny", "⌛ approval expired — the action was not run");
-      }, remaining);
+
     });
 
   return {
-    awaitHostApproval: (card) => queue.present(card, presentOne),
+    awaitHostApproval: (card, context = {}) => {
+      const signal = context.signal ? AbortSignal.any([context.signal, shutdown.signal]) : shutdown.signal;
+      return queue.present(card, (next, lifetime = {}) => args.dialogHost
+        ? args.dialogHost.withKeyboard(() => presentOne(next, lifetime), {
+            signal: lifetime.signal!, cancelled: () => "cancelled" as HostApprovalResult,
+          })
+        : presentOne(next, lifetime), { ...context, signal });
+    },
+    isActive: () => active !== null,
     handleKey(sequence, context) {
       if (!active || disposed) return false;
       const keys = sequence;
@@ -310,7 +309,7 @@ export function createInlineHostApprovalPrompt(args: {
       // Esc during a running turn keeps its "stop the turn" meaning.
       if (isEscape && context.busy) return false;
       if (active.card.expiresAt <= now()) {
-        settle("deny", "⌛ approval expired — the action was not run");
+        settle("expired", "⌛ approval expired — the action was not run");
         return true;
       }
       settle(
@@ -322,7 +321,7 @@ export function createInlineHostApprovalPrompt(args: {
     dispose() {
       if (disposed) return;
       disposed = true;
-      clearExpiryTimer();
+      shutdown.abort();
       if (active) {
         const finishing = active;
         active = null;

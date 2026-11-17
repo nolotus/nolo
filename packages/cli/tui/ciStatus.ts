@@ -18,6 +18,7 @@
 //  3. **超时要短**：TUI 首屏不能被一个远端查询拖住，默认 4s，取不到就不显示。
 
 import { execFile } from "node:child_process";
+import { ALPHA_ORIGIN_IP } from "core/infraHosts";
 
 export type CiJob = {
   jobId: string;
@@ -30,9 +31,10 @@ export type CiJob = {
   failedPhase?: string;
 };
 
-// 默认 CI SSH 目标；现役宿主真源见 .agents/skills/deployment/references/server-ops.md「CI 控制面宿主」。
+// 默认 CI SSH 目标；IP 来自单一真源 `core/infraHosts.ts`（ALPHA_ORIGIN_IP —— CI 控制面
+// 与 alpha 应用同机），机器身份真源见 .agents/skills/deployment/references/server-ops.md。
 // 仍可被 NOLO_CI_SSH_HOST / NOLO_CI_RAW_HOST / NOLO_CI_SSH_USER 覆盖。
-export const DEFAULT_SSH_HOST = "root@62.83.99.45";
+export const DEFAULT_SSH_HOST = `root@${ALPHA_ORIGIN_IP}`;
 export const DEFAULT_CI_PORT = "3900";
 export type CiStatusEnv = Record<string, string | undefined>;
 

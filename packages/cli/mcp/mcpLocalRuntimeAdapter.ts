@@ -51,7 +51,7 @@ export async function installMcpLocalFromStore(args: Parameters<typeof openMcpLo
  const repository = await openMcpLocalManagement(args);
  return repository.save({ ...args.input, endpoint, ...(credential ? { credential } : {}) });
 }
-export function createMcpLocalRuntimeAdapter(args: { repository: Awaited<ReturnType<typeof openMcpLocalManagement>>; identity: { authenticatedUserId: string; agentKey: string; dialogId: string }; signal: AbortSignal }) {
+export function createMcpLocalRuntimeAdapter(args: { repository: Awaited<ReturnType<typeof openMcpLocalManagement>>; identity: { authenticatedUserId: string; agentKey: string; dialogId: string }; signal: AbortSignal; confirm?: import("./mcpApprovalTransport").McpConfirmation }) {
  const { repository, identity, signal } = args;
  const adapter = createMcpRemoteClient({ placement: { kind: "local" }, resolveDns: resolveMcpLocalHost, resolveEndpoint: repository.resolveEndpoint,
  resolveCredential: repository.resolveCredential, revalidateBeforeCall: async ctx => {
@@ -60,7 +60,7 @@ export function createMcpLocalRuntimeAdapter(args: { repository: Awaited<ReturnT
  } });
  const bridge = createMcpExecutionBridge({ identity, placement: { kind: "local" }, signal,
  load: (connectionId, expectedRevision) => repository.loadForUse({ ...identity, placement: { kind: "local" }, connectionId, expectedRevision }),
- confirm: confirmMcpOnHost, adapter });
+ confirm: args.confirm ?? confirmMcpOnHost, adapter });
  return { listMcpConnections: async () => signal.aborted ? ({ ok: false, error: { code: "cancelled" } }) : ({ ok: true, value: await repository.summary() }),
  listMcpTools: (input: unknown) => bridge.execute("listMcpTools", input), callMcpTool: (input: unknown) => bridge.execute("callMcpTool", input),
  async close() { bridge.revoke(); } };

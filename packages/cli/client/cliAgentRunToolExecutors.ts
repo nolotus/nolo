@@ -1,3 +1,4 @@
+import { type McpApprovalHost } from "../mcp/mcpApprovalTransport";
 import { validateChildImagePaths, validateChildImages } from "./childRunImages";
 import { assertDispatchSelectionAdmission } from "../../ai/agent/dispatchSelectionPolicy";
 import { parseAgentRunArgs } from "../agentRunArgs";
@@ -112,6 +113,7 @@ export type CliAgentRunToolExecutorDeps = {
   /** Read only the current user's dialog namespace; absence fails closed. */
   dialogExistsForCurrentUser?: (dialogId: string) => Promise<boolean | { primaryAgentKey?: unknown }>;
   shellApprovalHostForAgent?: (agentKey: string) => Promise<ShellApprovalHost | undefined>;
+  mcpApprovalHostForAgent?: (agentKey: string) => Promise<McpApprovalHost | undefined>;
   env?: EnvLike;
   /** CLI entrypoint path（spawn 子进程重启动用）。 */
   cliEntrypoint?: string;
@@ -761,7 +763,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(args.ephemeral === true ? { ephemeral: true } : {}),
         output: noopOutput,
       },
-      { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
+      { ...deps, mcpApprovalHost: deps.mcpApprovalHostForAgent ? await deps.mcpApprovalHostForAgent(agentKey) : deps.mcpApprovalHost, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
     );
 
     // hostReviewDispatch 绑定已移除（2026-11-15）：typed review 派发整体下线。
@@ -907,7 +909,7 @@ async function spawnContinuationRun(
       continuedFrom,
       output: noopOutput,
     },
-    { ...deps, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
+    { ...deps, mcpApprovalHost: deps.mcpApprovalHostForAgent ? await deps.mcpApprovalHostForAgent(agentKey) : deps.mcpApprovalHost, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
   );
 
   const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);

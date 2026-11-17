@@ -46,6 +46,8 @@ export const normalizeSettingChanges = (
   let normalizedChanges: Partial<SettingState> = omitKeys(stripRetiredSettingsFields(changes), [
     // 本地意图世代只活在 redux 状态里：既不能从服务端 record 写回，也不能写云。
     "localIntentEpoch",
+    // 每个键的本地意图世代同理：纯本地判据，不入云端 record、不被远端回灌。
+    "localIntentKeyEpochs",
     // 权威回显世代同理：纯本地世代标记，不入云端 record、不被远端回灌。
     "serverAuthorityEchoSeq",
     // 写失败状态同样是纯本地 observability：绝不进入云端 settings record。
@@ -428,6 +430,12 @@ export const persistDefaultAgentRegister = async (
   getState: () => { db: { entities: Record<string, unknown> } },
   userId: string,
   value: string | null,
+  /**
+   * 发写前最后一次守卫：本函数会先 await 一次远端读，期间账号/会话代次或该键
+   * 的归属可能已经变了。返回 false 就**不写**（调用方会在 await 之后自行重核，
+   * 不会把旧值写进 register）。
+   */
+  canWrite?: () => boolean,
 ): Promise<void> => {
   const registerKey = createUserPreferenceKey.defaultAgent(userId);
   let previousRecord: Partial<UserPreferenceRegisterRecord<string>> | null =
@@ -448,6 +456,9 @@ export const persistDefaultAgentRegister = async (
   if (previousRecord && previousValue === value) {
     return;
   }
+
+  // 远端读之后的最便宜收紧：不要再把 await 前的意图写出去。
+  if (canWrite && !canWrite()) return;
 
   await dispatch(
     getSettingDbActionThunks().write({

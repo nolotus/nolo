@@ -64,6 +64,11 @@ export type HistoryLayoutGeometry = {
   marginRight: number;
 };
 
+/** Safe horizontal band: reserve the terminal's final column to avoid autowrap. */
+export function resolveSurfacePaintWidth(columns: number): number {
+  return Math.max(0, columns - 1);
+}
+
 /**
  * 计算 TUI 转录历史与输入区的水平排版几何：
  * - 正常宽度 (> 40 列)：左右各留 1 列边距，滚动条保持贴死在第 columns 列
@@ -75,14 +80,14 @@ export function resolveHistoryLayoutGeometry(
   const cols = Math.max(1, (columns ?? 0) > 0 ? columns! : DEFAULT_TERMINAL_COLUMNS);
   if (cols <= TUI_MARGIN_RESPONSIVE_MIN_COLUMNS) {
     return {
-      contentWidth: Math.max(1, cols - 1),
+      contentWidth: Math.max(1, resolveSurfacePaintWidth(cols)),
       marginLeft: 0,
       marginRight: 0,
     };
   }
   const marginLeft = TUI_MARGIN_LEFT;
   const marginRight = TUI_MARGIN_RIGHT;
-  const contentWidth = Math.max(1, cols - 1 - marginLeft - marginRight);
+  const contentWidth = Math.max(1, resolveSurfacePaintWidth(cols) - marginLeft - marginRight);
   return {
     contentWidth,
     marginLeft,

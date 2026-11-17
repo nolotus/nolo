@@ -9,7 +9,7 @@ import {
   type HostApprovalConnector,
   type HostApprovalRenderer,
   type HostApprovalCard,
-  type HostApprovalDecision,
+  type HostApprovalResult,
 } from "./hostApprovalFlow";
 
 export type BrowserShellApprovalRequest = { approvalId: string; browser: "chrome" | "firefox" };
@@ -91,6 +91,7 @@ export async function createBrowserShellApprovalBridge(args: {
       let retry = false;
       await runConnectorToolWithHostApproval({
         call: current.call,
+        signal: lifetime.signal,
         execute: async () => {
           requireActive();
           if (calls++ === 0) return current.pending;
@@ -116,7 +117,7 @@ export async function createBrowserShellApprovalBridge(args: {
         },
         ...(args.awaitHostApproval ? { awaitHostApproval: async (card: HostApprovalCard) => {
           requireActive();
-          const decision = await new Promise<HostApprovalDecision>((resolve, reject) => {
+          const decision = await new Promise<HostApprovalResult>((resolve, reject) => {
             const abort = () => reject(new Error("Browser approval bridge revoked"));
             lifetime.signal.addEventListener("abort", abort, { once: true });
             Promise.resolve().then(() => {

@@ -1,3 +1,4 @@
+import { attachMcpApprovalHost, type McpApprovalHost } from "./mcp/mcpApprovalTransport";
 import { getHostRuntimeExecutable, HOST_RUNTIME_CONTENT_IDENTITY, resolveExactRuntimeEntrypoint, RuntimeVersionMismatchError, AGENT_RUN_PROTOCOL, type RunStartupPhase } from "./agentRunProtocol";
 import type { SelectionCheck } from "../ai/agent/dispatchSelectionPolicy";
 import type { DispatchSpeedProvenance } from "../ai/agent/dispatchSpeedProvenance";
@@ -298,6 +299,7 @@ export type SleepLike = (ms: number) => Promise<void>;
 export type AgentRunControlDeps = {
   /** Trusted parent closure only; binding run/agent/workspace are overwritten at spawn. */
   shellApprovalHost?: ShellApprovalHost;
+  mcpApprovalHost?: McpApprovalHost;
   env?: EnvLike;
   homedir?: () => string;
   spawn?: SpawnLike;
@@ -2438,7 +2440,7 @@ export async function spawnLocalBackgroundRun(
       cwd: spawnCwd, env: childEnv, detached: true,
       // Detached on Windows means no console; hide the one its children would create.
       windowsHide: true,
-      stdio: deps.shellApprovalHost ? ["ignore", logFd, logFd, "ipc"] : ["ignore", logFd, logFd],
+      stdio: (deps.shellApprovalHost || deps.mcpApprovalHost) ? ["ignore", logFd, logFd, "ipc"] : ["ignore", logFd, logFd],
     });
   } catch (error) {
     try {
@@ -2541,6 +2543,13 @@ export async function spawnLocalBackgroundRun(
     }
   }
 
+  if (deps.mcpApprovalHost) {
+    attachMcpApprovalHost(proc, { ...deps.mcpApprovalHost, binding: {
+      ...deps.mcpApprovalHost.binding, runId, agentKey: input.agentKey,
+      workspaceRoot: nodeFs.realpathSync(input.cwd ?? process.cwd()),
+    } });
+    proc.channel?.unref?.();
+  }
   if (deps.shellApprovalHost) {
     attachShellApprovalHost(proc, { ...deps.shellApprovalHost, binding: {
       ...deps.shellApprovalHost.binding, runId, agentKey: input.agentKey,

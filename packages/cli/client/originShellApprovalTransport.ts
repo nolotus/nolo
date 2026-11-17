@@ -1,3 +1,4 @@
+import { bindInheritedApprovalLifetime, type InheritedApprovalChannel } from "./inheritedApprovalChannel";
 import { realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
@@ -19,12 +20,7 @@ export type ShellApprovalHost = {
   signal: AbortSignal;
 };
 export type ShellApprovalSession = Pick<ShellApprovalHost, "confirm" | "signal">;
-type Channel = {
-  connected?: boolean;
-  send?: (message: any) => unknown;
-  on(event: string, listener: (...args: any[]) => void): unknown;
-  removeListener(event: string, listener: (...args: any[]) => void): unknown;
-};
+type Channel = InheritedApprovalChannel;
 const KIND = "nolo.shell-approval.v1";
 const MAX = 256;
 const TTL = 60_000;
@@ -57,6 +53,7 @@ export function attachShellApprovalHost(channel: Channel, host: ShellApprovalHos
   let closed = false;
   let count = 0;
   const active = new Set<AbortController>();
+  let unbindLifetime = () => {};
   const close = () => {
     if (closed) return;
     closed = true;
@@ -66,10 +63,7 @@ export function attachShellApprovalHost(channel: Channel, host: ShellApprovalHos
     active.clear();
     try { send(channel, { type: "revoke" }); } catch { /* already disconnected */ }
     channel.removeListener("message", receive);
-    channel.removeListener("disconnect", close);
-    channel.removeListener("exit", close);
-    channel.removeListener("error", close);
-    host.signal.removeEventListener("abort", close);
+    unbindLifetime();
   };
   const receive = (message: any) => {
     if (closed || message?.kind !== KIND) return;
@@ -114,10 +108,7 @@ export function attachShellApprovalHost(channel: Channel, host: ShellApprovalHos
     })();
   };
   channel.on("message", receive);
-  channel.on("disconnect", close);
-  channel.on("exit", close);
-  channel.on("error", close);
-  host.signal.addEventListener("abort", close, { once: true });
+  unbindLifetime = bindInheritedApprovalLifetime(channel, close, host.signal);
   liveApprovalHosts.add(connection);
   if (host.signal.aborted || channel.connected === false) close();
   return close;

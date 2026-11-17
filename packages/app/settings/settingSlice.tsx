@@ -41,8 +41,20 @@ const settingSlice = createSliceWithThunks({
       Object.assign(state, normalized);
     },
     // 单调推进本地用户意图世代：只有 setSettings 的乐观发布走这里（hydrate 不走）。
-    _bumpLocalIntentEpoch: (state) => {
-      state.localIntentEpoch = (state.localIntentEpoch ?? 0) + 1;
+    // 同时把本次改过的键标成同一世代：排队写的取代判据只认「同键」的新意图，
+    // 否则任何无关设置（sidebarWidth / maxExecutionTime …）都会取消别人还没
+    // 发出去的写（PLUGIN-PERSIST-UNRELATED-INTENT-001）。
+    _bumpLocalIntentEpoch: (
+      state,
+      action: PayloadAction<{ keys?: readonly string[] } | undefined>,
+    ) => {
+      const next = (state.localIntentEpoch ?? 0) + 1;
+      state.localIntentEpoch = next;
+      const keys = action.payload?.keys;
+      if (!keys || keys.length === 0) return;
+      const keyEpochs = { ...(state.localIntentKeyEpochs ?? {}) };
+      for (const key of keys) keyEpochs[key] = next;
+      state.localIntentKeyEpochs = keyEpochs;
     },
     // 记录设置写失败状态。专用 reducer：`_updateSettingsState` 会走
     // normalizeSettingChanges 把该字段剥掉（防止写进云端 record）。

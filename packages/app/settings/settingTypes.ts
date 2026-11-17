@@ -174,6 +174,18 @@ export interface SettingState {
   localIntentEpoch: number;
 
   /**
+   * 每个设置键最近一次本地意图的世代（与 `localIntentEpoch` 同一次推进写入）。
+   *
+   * 只用于**排队写**的取代判据：一次写只有在同键上出现了更新的本地意图时才允许
+   * 放弃完整 payload。若沿用全局 `localIntentEpoch`，任何无关设置（侧栏宽度、
+   * 执行时长等）都会取消别人已排队还没发出去的写——插件开关因此被静默丢弃
+   * （PLUGIN-PERSIST-UNRELATED-INTENT-001）。
+   *
+   * 纯本地状态：normalizeSettingChanges 会剥掉它，永不入云端 record。
+   */
+  localIntentKeyEpochs?: Record<string, number>;
+
+  /**
    * 单调递增的「服务端权威回显」世代，只由权威回显写入推进（当前只有媒体额度
    * `autoApproveCredits` 的服务端回显，见 `recordServerAuthorityEcho`）。
    *

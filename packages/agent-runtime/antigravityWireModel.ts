@@ -27,6 +27,12 @@ const WIRE_PROFILES: Readonly<Record<string, AntigravityWireProfile>> = {
   "gemini-4-argon-low": { modelEnum: "MODEL_PLACEHOLDER_M419", maxOutputTokens: 65536 },
   "gemini-4-argon-medium": { modelEnum: "MODEL_PLACEHOLDER_M418", maxOutputTokens: 65536 },
   "gemini-4-argon-high": { modelEnum: "MODEL_PLACEHOLDER_M417", maxOutputTokens: 65536 },
+  // Discovery (2026-11-17) exposes Carbon effort variants with their own enums and a
+  // 262144 output cap (Argon caps at 65536). 裸 gemini-4-carbon 不在 discovery 里，
+  // 必须折叠到 effort 变体，否则上游回 404。
+  "gemini-4-carbon-low": { modelEnum: "MODEL_PLACEHOLDER_M438", maxOutputTokens: 262144 },
+  "gemini-4-carbon-medium": { modelEnum: "MODEL_PLACEHOLDER_M437", maxOutputTokens: 262144 },
+  "gemini-4-carbon-high": { modelEnum: "MODEL_PLACEHOLDER_M427", maxOutputTokens: 262144 },
   "gemini-3.6-flash-low": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-medium": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-high": { maxOutputTokens: 65536 },
@@ -73,12 +79,15 @@ export function resolveAntigravityWireModel(logicalModelId: string, reasoningEff
     return { wireModelId, profile: WIRE_PROFILES[wireModelId] };
   }
 
-  // An explicit wire variant takes precedence over the configured default.
-  const argonVariant = /^gemini-4-argon-(low|medium|high)$/.exec(lower);
-  if (lower === "gemini-4-argon" || argonVariant) {
+  // Gemini 4 系（Argon / Carbon）：effort 变体是独立 wire 模型，逐档有独立 enum。
+  // 显式变体优先于配置的默认 effort；未指定 effort 时回落 medium。
+  const gemini4 = /^gemini-4-(argon|carbon)(?:-(low|medium|high))?$/.exec(lower);
+  if (gemini4) {
+    const family = gemini4[1] ?? "argon";
+    const explicitEffort = gemini4[2];
     const effort = reasoningEffort?.trim().toLowerCase();
-    const selected = argonVariant?.[1] ?? (effort === "low" || effort === "high" ? effort : "medium");
-    const wireModelId = `gemini-4-argon-${selected}`;
+    const selected = explicitEffort ?? (effort === "low" || effort === "high" ? effort : "medium");
+    const wireModelId = `gemini-4-${family}-${selected}`;
     return { wireModelId, profile: WIRE_PROFILES[wireModelId] };
   }
 

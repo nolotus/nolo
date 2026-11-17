@@ -1,3 +1,5 @@
+import { confirmMcpOnHost } from "../mcp/mcpHostConfirmation";
+import { getHostApprovalRenderer } from "./hostApprovalFlow";
 import { openMcpLocalRuntimeManagement, createMcpLocalRuntimeAdapter } from "../mcp/mcpLocalRuntimeAdapter";
 import { createLiveImageSupportResolver } from "./liveImageSupport";
 import { fetchAntigravityAvailableModels } from "../oauth/flows/antigravity";
@@ -177,7 +179,7 @@ import {
   resolveBuiltinLocalCliAgentConfig,
   readAgentFromStore,
 } from "./cliLocalAgentRecordReader";
-import { createChildShellApprovalHostResolver } from "./childShellApprovalHostResolver";
+import { createChildShellApprovalHostResolver, resolveChildApprovalBinding } from "./childShellApprovalHostResolver";
 import { loadCliDialogHistoryWithSource } from "./cliDialogHistoryFallback";
 import {
   shouldUseDeclaredOnlyLocalWorkspaceTools,
@@ -1407,6 +1409,21 @@ export function createCliLocalRuntimeAdapter(
       },
       resolveAgentRuntimeBindingMachineId,
       resolveLocalMachineId,
+      mcpApprovalHostForAgent: async (childAgentKey: string) => {
+        // Read the renderer at dispatch, not adapter construction; TUI registers it late.
+        // TUI's adapter factory carries the existing session object directly.
+        const approvalSignal = deps.mcpApprovalSignal ?? deps.shellApprovalSession?.signal;
+        if (!getHostApprovalRenderer() || !approvalSignal || approvalSignal.aborted) return undefined;
+        const binding = await resolveChildApprovalBinding({
+          readAgentConfig: async key => readAgentFromStore({ agentRef: key, store: await getOrCreateSharedStore(deps), userId }),
+          resolveDeviceId: async () => {
+            const { detectMachineInfo } = await import("connector-experimental/machineInfo");
+            return (await detectMachineInfo({ probeLaunchable: false }))?.machineId;
+          },
+          workspaceRoot, agentKey: childAgentKey,
+        });
+        return binding ? { binding, signal: approvalSignal, confirm: confirmMcpOnHost } : undefined;
+      },
       ...(deps.shellApprovalSession ? {
         shellApprovalHostForAgent: createChildShellApprovalHostResolver({
           readAgentConfig: async (childAgentKey) => readAgentFromStore({
@@ -2396,7 +2413,9 @@ export function createCliLocalRuntimeAdapter(
                 if (!pending) {
                   pending = getLocalMcpManagement()
                     .then(repository => createMcpLocalRuntimeAdapter({ repository,
-                      identity: { authenticatedUserId: userId, agentKey, dialogId }, signal }));
+                      identity: { authenticatedUserId: userId, agentKey, dialogId },
+                      signal: deps.mcpApprovalSignal ? AbortSignal.any([signal, deps.mcpApprovalSignal]) : signal,
+                      confirm: deps.mcpConfirmation }));
                   entries.set(key, pending);
                 }
                 const mcp = await pending;

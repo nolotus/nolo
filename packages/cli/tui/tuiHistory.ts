@@ -39,6 +39,7 @@ import {
   getTopReservedRows,
   resolveHistoryViewportHeight,
   resolveHistoryLayoutGeometry,
+  resolveSurfacePaintWidth,
   type HistoryLayoutGeometry,
 } from "./tuiLayout";
 export { resolveHistoryLayoutGeometry, type HistoryLayoutGeometry };
@@ -389,7 +390,7 @@ function applyTreeRewrite(text: string, chunk: string): string | null {
   // This survives arbitrary width/locale clipping without parsing its title.
   // Legacy producers without a token retain the old display compatibility.
   if (payload.previousRow !== undefined) {
-    if (tail !== payload.previousRow) return null;
+    if (tail.trimEnd() !== payload.previousRow) return null;
   } else if (!labels.includes(flatLabel ?? "") && summaryLabel !== labels[0]) return null;
   const prefix = bodyLines.length < 2 ? "" : `${bodyLines.slice(0, -1).join("\n")}\n`;
   return `${prefix}${tree}\n`;
@@ -443,6 +444,13 @@ export function applyOutputChunkToCurrentTurn(
 }
 
 function styleAssistantTurn(content: string, colorEnabled: boolean): string {
+  // Tool rows arrive padded for standalone output. Remove only their surface
+  // padding before history wrapping; margins are painted at the viewport edge.
+  content = content.split("\n").map(line =>
+    /\x1b\[(?:48;2;[0-9;]+|100)m/.test(line)
+      ? line.replace(/ +(?=(?:\x1b\[[0-9;]*m)*$)/, "")
+      : line,
+  ).join("\n");
   const highlighted = colorEnabled
     ? formatAssistantDisplay(content, { trimEdges: false })
     : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
@@ -1942,6 +1950,38 @@ export function renderHistory(
     prevBuffer.lines.length === visibleHeight;
   const prevLines = isGeometryCompatible ? prevBuffer.lines : undefined;
 
+  // Resolve blank seams against absolute transcript rows, not the clipped
+  // viewport. Fetch only the neighboring turns needed at a viewport edge.
+  const outsideRows = new Map<number, string[]>();
+  const transcriptRow = (row: number): string => {
+    if (row >= winStart && row < winEnd) return visibleLines[row - winStart] ?? "";
+    if (currentStart >= 0 && row >= currentStart) return currentLines[row - currentStart] ?? "";
+    const index = entries.findIndex(entry => row >= entry.startRow && row < entry.startRow + entry.lineCount);
+    if (index < 0) return ""; // semantic separator between turns
+    let lines = outsideRows.get(index);
+    if (!lines) {
+      lines = getTurnLayoutRows(history.turns[index]!, contentWidth, colorEnabled, themeFingerprint, graphicsEnabled)
+        .map(line => line.rendered);
+      outsideRows.set(index, lines);
+    }
+    return lines[row - entries[index]!.startRow] ?? "";
+  };
+  const surfaceOf = (line: string): string => colorEnabled
+    ? line.match(/\x1b\[(?:48;2;[0-9;]+|100)m/)?.[0] ?? "" : "";
+  const rowSurfaces = visibleLines.map(surfaceOf);
+  for (let start = 0; colorEnabled && start < winEnd - winStart; start++) {
+    if (stripAnsi(visibleLines[start] ?? "").trim()) continue;
+    let end = start;
+    while (end < winEnd - winStart && !stripAnsi(visibleLines[end] ?? "").trim()) end++;
+    let before = winStart + start - 1;
+    while (before >= 0 && !stripAnsi(transcriptRow(before)).trim()) before--;
+    let after = winStart + end;
+    while (after < totalLines && !stripAnsi(transcriptRow(after)).trim()) after++;
+    const preceding = before >= 0 ? surfaceOf(transcriptRow(before)) : "";
+    const following = after < totalLines ? surfaceOf(transcriptRow(after)) : "";
+    if (preceding && following) rowSurfaces.fill(preceding, start, end);
+    start = end - 1;
+  }
   let frame = "";
   const nextLines: string[] = new Array(visibleHeight);
 
@@ -1953,7 +1993,15 @@ export function renderHistory(
     const scrollbarSuffix = colorEnabled ? "\x1b[39m" : "";
     const leftPad = marginLeft > 0 ? " ".repeat(marginLeft) : "";
     const rightPad = marginRight > 0 ? " ".repeat(marginRight) : "";
-    const rowContent = `${leftPad}${padded}${rightPad}\x1b[${columns}G${scrollbarPrefix}${thumb}${scrollbarSuffix}`;
+    // Surface rows include both margins without changing text/wrap geometry.
+    // The scrollbar remains separate in the terminal's final column.
+    const surface = rowSurfaces[i] ?? "";
+    const band = renderSurfaceLine({
+      text: `${leftPad}${padded}${rightPad}`,
+      surface,
+      padTo: resolveSurfacePaintWidth(columns),
+    });
+    const rowContent = `${band}\x1b[${columns}G${scrollbarPrefix}${thumb}${scrollbarSuffix}`;
     nextLines[i] = rowContent;
 
     if (!prevLines || prevLines[i] !== rowContent) {
