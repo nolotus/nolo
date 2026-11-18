@@ -67,6 +67,8 @@ export const CLOUDFLARE_AI_MESSAGES_ENDPOINT_TEMPLATE =
   "https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1/messages";
 export const PLATFORM_HOSTED_GROK_4_6_MODEL = "grok-4.6";
 export const PLATFORM_HOSTED_GPT_6_ASTRA_MODEL = "gpt-6-astra";
+export const PLATFORM_HOSTED_GPT_6_2_ASTRA_MODEL = "gpt-6.2-astra";
+export const PLATFORM_HOSTED_GPT_6_2_SOL_MODEL = "gpt-6.2-sol";
 export const PLATFORM_HOSTED_GPT_6_LUNA_MODEL = "gpt-6-luna";
 /**
  * GPT-6 Sol：平台侧**没有**独立目录条目（CF 目录未上架该 id），仅作为
@@ -146,6 +148,8 @@ export const CLOUDFLARE_GPT_6_1_TERRA_UPSTREAM_MODEL_ID = "openai/gpt-6.1-terra"
  * OpenAI 官方 API 上游模型 ID。
  */
 export const OPENAI_GPT_6_ASTRA_UPSTREAM_MODEL_ID = "gpt-6-astra";
+export const OPENAI_GPT_6_2_ASTRA_UPSTREAM_MODEL_ID = "gpt-6.2-astra";
+export const OPENAI_GPT_6_2_SOL_UPSTREAM_MODEL_ID = "gpt-6.2-sol";
 export const OPENAI_GPT_6_LUNA_UPSTREAM_MODEL_ID = "gpt-6-luna";
 export const OPENAI_GPT_6_1_SOL_UPSTREAM_MODEL_ID = "gpt-6.1-sol";
 export const OPENAI_GPT_6_1_TERRA_UPSTREAM_MODEL_ID = "gpt-6.1-terra";
@@ -478,6 +482,22 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     usageProvider: "openai",
     keyName: "openai",
     upstreamModelId: OPENAI_GPT_6_ASTRA_UPSTREAM_MODEL_ID,
+    wire: "responses",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_GPT_6_2_ASTRA_MODEL]: {
+    endpoint: "https://api.openai.com/v1/responses",
+    usageProvider: "openai",
+    keyName: "openai",
+    upstreamModelId: OPENAI_GPT_6_2_ASTRA_UPSTREAM_MODEL_ID,
+    wire: "responses",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_GPT_6_2_SOL_MODEL]: {
+    endpoint: "https://api.openai.com/v1/responses",
+    usageProvider: "openai",
+    keyName: "openai",
+    upstreamModelId: OPENAI_GPT_6_2_SOL_UPSTREAM_MODEL_ID,
     wire: "responses",
     agentRunHosted: true,
   },

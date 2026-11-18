@@ -502,3 +502,22 @@ export type {
 } from "./ownerOriginExecution";
 export { EXECUTION_BACKEND_KINDS, buildExecutionTicket, executionBackendCanSatisfy } from "./executionBackend";
 export type { ExecutionBackend, ExecutionTicket, ExecutionLease, ExecutionRequest, ExecutionEvent, ExecutionResult, ExecutionBackendDescriptor, ExecutionBackendCapabilities, ExecutionCapabilityRealization, ExecutionClass, ExecutionReleaseReason } from "./executionBackend";
+
+export {
+  DEFAULT_SUBTASK_SOFT_BUDGET_MILESTONE_1_TOOL_CALLS,
+  DEFAULT_SUBTASK_SOFT_BUDGET_MILESTONE_2_TOOL_CALLS,
+  SUBTASK_SOFT_BUDGET_MILESTONE_1_PREFIX,
+  SUBTASK_SOFT_BUDGET_MILESTONE_2_PREFIX,
+  buildSubtaskSoftBudgetMilestone1Prompt,
+  buildSubtaskSoftBudgetMilestone2Prompt,
+  createSubtaskSoftBudgetAdvisor,
+  resolveDispatchedSubtaskBudget,
+  resolveSubtaskBudgetLimits,
+  type SoftBudgetAdvisor,
+  type SubtaskBudgetLimits,
+  type SubtaskSoftBudgetAdvisorOptions,
+  type SubtaskSoftBudgetAdvisorState,
+  type SubtaskSoftBudgetAdvisory,
+  type SubtaskSoftBudgetConfig,
+  type SubtaskSoftBudgetMilestoneLevel,
+} from "./subtaskBudget";

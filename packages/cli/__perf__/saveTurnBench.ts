@@ -23,6 +23,7 @@ import { createLegacyServerDb } from "../../database-engine/legacyServerDb";
 import { createCliHybridRecordStore } from "../client/hybridRecordStore";
 import { writeDialog } from "../client/localRuntimeDialog";
 import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
+import type { CliFetchImpl } from "../cliFetch";
 
 // ── payload 构造：模拟真实 tool-loop turn 的消息形状 ──────────────────────
 // assistant(tool_calls) → tool(tool_call_id, content, toolName) 交替，
@@ -111,12 +112,15 @@ const createId = () => `benchid_${String(++idSeq).padStart(6, "0")}`;
 let nowMs = Date.now();
 const now = () => (nowMs += 1000); // 单调递增，避免 dialogMessageKey 时间戳前缀碰撞
 
+const defaultFetch: CliFetchImpl = (input, init) => fetch(input, init);
+
 async function timeSaveTurn(args: {
   store: ReturnType<typeof createCliHybridRecordStore>;
   messages: AgentRuntimeSaveTurnInput["messages"];
   continueDialogId: string | undefined;
   agentKey: string;
   seq: number;
+  fetchImpl?: CliFetchImpl;
 }): Promise<number> {
   const input = buildSaveTurnInput(args.messages, args.continueDialogId, args.agentKey, args.seq);
   const t0 = performance.now();
@@ -127,6 +131,7 @@ async function timeSaveTurn(args: {
     now,
     createId,
     env: { NOLO_CLI_PERF: "1" }, // 启用 writeDialog 内置分相打桩（stderr）
+    fetchImpl: args.fetchImpl ?? defaultFetch,
   });
   return performance.now() - t0;
 }

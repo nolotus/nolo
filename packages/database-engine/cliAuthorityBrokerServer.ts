@@ -4,7 +4,10 @@ import { createServer, type AddressInfo, type Server, type Socket } from "node:n
 import { toErrorMessage } from "core/errorMessage";
 
 import { createCliAuthorityBrokerClient } from "./cliAuthorityBrokerClient";
-import type { AuthorityStore } from "./authorityStoreTypes";
+import type {
+  AuthorityIteratorOptions,
+  AuthorityStore,
+} from "./authorityStoreTypes";
 import {
   isLevelCorruptionError,
   recoverCorruptedLevelDb,
@@ -14,6 +17,7 @@ import {
   type LevelDbOwnershipLock,
 } from "./levelDbOwnershipLock";
 import type {
+  CliAuthorityBrokerBatchGetItem,
   CliAuthorityBrokerIteratorPage,
   CliAuthorityBrokerRequest,
   CliAuthorityBrokerResponse,
@@ -22,6 +26,7 @@ import type {
 const brokerRegistry = new Map<string, Promise<CliAuthorityBrokerServerHandle>>();
 const databaseOwners = new Map<string, string>();
 const DEFAULT_ITERATOR_LIMIT = 200;
+export const MAX_BROKER_FRAME_CHARS = 64 * 1024 * 1024;
 
 export type CliAuthorityBrokerServerOptions = {
   endpoint: string;
@@ -32,6 +37,8 @@ export type CliAuthorityBrokerServerOptions = {
   healthPath?: string;
   now?: () => number;
   transportMode?: "socket" | "inprocess";
+  /** Override maximum single-frame size (defaults to MAX_BROKER_FRAME_CHARS). */
+  maxFrameChars?: number;
 };
 
 export type CliAuthorityBrokerServerHandle = {
@@ -94,22 +101,65 @@ async function buildIteratorPage(
   store: AuthorityStore,
   request: Extract<CliAuthorityBrokerRequest, { type: "iterator" }>
 ): Promise<CliAuthorityBrokerIteratorPage> {
-  const rows: Array<[string, unknown]> = [];
-  for await (const entry of store.iterator(request.options ?? {})) {
-    rows.push(entry as [string, unknown]);
+  const base = request.options ?? {};
+  const reverse = base.reverse === true;
+  const cursor = typeof request.cursor === "string" && request.cursor.length > 0
+    ? request.cursor
+    : undefined;
+  const iterOptions: AuthorityIteratorOptions = { ...base };
+
+  if (cursor) {
+    if (reverse) {
+      // Tighten upper bound with `lt: cursor` without relaxing any existing `lte`/`lt`.
+      // Note: `level` gives `lte` precedence over `lt`, so drop `lte` whenever `cursor <= lte`.
+      if (iterOptions.lte !== undefined && iterOptions.lte < cursor) {
+        // Existing `lte` is already strictly smaller than `cursor`.
+      } else {
+        delete iterOptions.lte;
+        iterOptions.lt =
+          iterOptions.lt !== undefined && iterOptions.lt < cursor
+            ? iterOptions.lt
+            : cursor;
+      }
+    } else {
+      // Tighten lower bound with `gt: cursor` without relaxing any existing `gte`/`gt`.
+      // Note: `level` gives `gte` precedence over `gt`, so drop `gte` whenever `cursor >= gte`.
+      if (iterOptions.gte !== undefined && iterOptions.gte > cursor) {
+        // Existing `gte` is already strictly greater than `cursor`.
+      } else {
+        delete iterOptions.gte;
+        iterOptions.gt =
+          iterOptions.gt !== undefined && iterOptions.gt > cursor
+            ? iterOptions.gt
+            : cursor;
+      }
+    }
   }
 
-  const startIndex = request.cursor
-    ? rows.findIndex(([key]) => key === request.cursor) + 1
-    : 0;
-  const limit = request.limit ?? DEFAULT_ITERATOR_LIMIT;
-  const entries = rows.slice(startIndex, startIndex + limit);
-  const lastEntry = entries.at(-1) ?? null;
+  const limit = Math.max(0, Math.floor(request.limit ?? DEFAULT_ITERATOR_LIMIT));
+  const entries: Array<[string, unknown]> = [];
+  let hasMore = false;
 
+  for await (const entry of store.iterator(iterOptions)) {
+    const [key] = entry as [string, unknown];
+    if (cursor && (reverse ? key >= cursor : key <= cursor)) {
+      continue;
+    }
+    if (base.gt !== undefined && key <= base.gt) {
+      continue;
+    }
+    if (entries.length >= limit) {
+      hasMore = true;
+      break;
+    }
+    entries.push(entry as [string, unknown]);
+  }
+
+  const lastEntry = entries.at(-1) ?? null;
   return {
     entries,
     nextCursor: lastEntry ? lastEntry[0] : null,
-    done: startIndex + entries.length >= rows.length,
+    done: !hasMore,
   };
 }
 
@@ -167,7 +217,12 @@ export function dispatchCliAuthorityBrokerRequest(
 ): Promise<CliAuthorityBrokerResponse> {
   const state = ownerQueue(store);
   if (state.closed) return Promise.resolve({ ok: false, error: { code: "BROKER_CLOSING", message: "Authority broker is closing" } });
-  const isRead = request?.type === "get" || request?.type === "status" || request?.type === "iterator" || request?.type === "close";
+  const isRead =
+    request?.type === "get" ||
+    request?.type === "batchGet" ||
+    request?.type === "status" ||
+    request?.type === "iterator" ||
+    request?.type === "close";
   const execute = () => executeCliAuthorityBrokerRequest(store, request);
   const result = isRead ? Promise.resolve().then(execute) : state.tail.then(execute);
   if (!isRead) state.tail = result.catch(() => undefined);
@@ -216,6 +271,27 @@ async function executeCliAuthorityBrokerRequest(
         return { ok: true, result: { type: "close" } };
       case "get":
         return { ok: true, result: { type: "get", value: await store.get(request.key) } };
+      case "batchGet": {
+        if (!Array.isArray(request.keys) || !request.keys.every((key) => typeof key === "string")) {
+          return { ok: false, error: { code: "BROKER_INVALID_REQUEST", message: "Invalid batchGet request" } };
+        }
+        const items = await Promise.all(
+          request.keys.map(async (key): Promise<CliAuthorityBrokerBatchGetItem> => {
+            try {
+              return { ok: true, value: await store.get(key) };
+            } catch (error) {
+              const errRes = createErrorResponse(error);
+              return {
+                ok: false,
+                error: errRes.ok
+                  ? { code: "BROKER_INTERNAL_ERROR", message: "Unknown error" }
+                  : errRes.error,
+              };
+            }
+          })
+        );
+        return { ok: true, result: { type: "batchGet", items } };
+      }
       case "put":
         await store.put(request.key, request.value);
         return { ok: true, result: { type: "put" } };
@@ -323,7 +399,7 @@ async function createBrokerHandle(
       });
       return;
     }
-    bindSocketRequestHandler({ socket, store });
+    bindSocketRequestHandler({ socket, store, maxFrameChars: options.maxFrameChars });
   });
   let storeReady = false;
   try {
@@ -435,24 +511,186 @@ async function createBrokerHandle(
   }
 }
 
-function bindSocketRequestHandler(args: { socket: Socket; store: AuthorityStore }) {
+function isMultiplexedEnvelope(
+  value: unknown
+): value is { id: number | string; request: CliAuthorityBrokerRequest } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    (typeof record.id === "number" || typeof record.id === "string") &&
+    "request" in record &&
+    typeof record.request === "object" &&
+    record.request !== null &&
+    !("type" in record)
+  );
+}
+
+function firstNonWhitespaceChar(text: string): string | undefined {
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") {
+      continue;
+    }
+    return ch;
+  }
+  return undefined;
+}
+
+function bindSocketRequestHandler(args: {
+  socket: Socket;
+  store: AuthorityStore;
+  maxFrameChars?: number;
+}) {
+  const maxFrameChars = args.maxFrameChars ?? MAX_BROKER_FRAME_CHARS;
   let buffer = "";
+  let inFlight = 0;
+  let clientEnded = false;
+  let sawLegacyBareRequest = false;
+  let protocolRejected = false;
+  let currentFrameVerifiedObjectStart = false;
   args.socket.setEncoding("utf8");
-  args.socket.on("data", async (chunk) => {
-    buffer += chunk;
-    if (!buffer.includes("\n")) return;
-    const [rawRequest] = buffer.split("\n");
+  args.socket.setNoDelay?.(true);
+
+  const maybeFinishHalfOpen = () => {
+    if (clientEnded && inFlight === 0 && !args.socket.destroyed) {
+      args.socket.end();
+    }
+  };
+
+  const rejectAndDestroy = () => {
+    protocolRejected = true;
     buffer = "";
+    currentFrameVerifiedObjectStart = false;
+    if (!args.socket.destroyed) {
+      args.socket.destroy();
+    }
+  };
+
+  const handleParsedPayload = async (parsed: Record<string, unknown>) => {
+    inFlight += 1;
+    args.socket.ref?.();
+
+    if (isMultiplexedEnvelope(parsed)) {
+      let response: CliAuthorityBrokerResponse;
+      try {
+        response = await dispatchCliAuthorityBrokerRequest(args.store, parsed.request);
+      } catch (error) {
+        response = createErrorResponse(error);
+      }
+      inFlight -= 1;
+      if (!args.socket.destroyed && args.socket.writable) {
+        args.socket.write(`${JSON.stringify({ id: parsed.id, response })}\n`);
+      }
+      if (inFlight === 0 && !clientEnded) {
+        args.socket.unref?.();
+      }
+      maybeFinishHalfOpen();
+      return;
+    }
+
+    // Backwards-compatible single-request short-lived client (bare request without envelope id).
     let response: CliAuthorityBrokerResponse;
     try {
       response = await dispatchCliAuthorityBrokerRequest(
         args.store,
-        JSON.parse(rawRequest) as CliAuthorityBrokerRequest
+        parsed as CliAuthorityBrokerRequest
       );
     } catch (error) {
       response = createErrorResponse(error);
     }
-    args.socket.end(`${JSON.stringify(response)}\n`);
+    inFlight -= 1;
+    if (!args.socket.destroyed && args.socket.writable) {
+      args.socket.end(`${JSON.stringify(response)}\n`);
+    }
+  };
+
+  args.socket.on("data", (chunk) => {
+    if (protocolRejected || sawLegacyBareRequest) return;
+    const textChunk = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+
+    if (!currentFrameVerifiedObjectStart) {
+      const firstChar = firstNonWhitespaceChar(textChunk);
+      if (firstChar !== undefined) {
+        if (firstChar !== "{") {
+          rejectAndDestroy();
+          return;
+        }
+        currentFrameVerifiedObjectStart = true;
+      }
+    }
+
+    buffer += textChunk;
+
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      if (newlineIndex > maxFrameChars) {
+        rejectAndDestroy();
+        break;
+      }
+      const rawLine = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      currentFrameVerifiedObjectStart = false;
+      if (!rawLine) continue;
+
+      if (rawLine[0] !== "{") {
+        rejectAndDestroy();
+        break;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawLine);
+      } catch (error) {
+        protocolRejected = true;
+        buffer = "";
+        args.socket.pause?.();
+        if (!args.socket.destroyed && args.socket.writable) {
+          args.socket.end(`${JSON.stringify(createErrorResponse(error))}\n`, () => {
+            if (!args.socket.destroyed) args.socket.destroy();
+          });
+        } else if (!args.socket.destroyed) {
+          args.socket.destroy();
+        }
+        break;
+      }
+
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        rejectAndDestroy();
+        break;
+      }
+
+      if (!isMultiplexedEnvelope(parsed)) {
+        sawLegacyBareRequest = true;
+      }
+      void handleParsedPayload(parsed as Record<string, unknown>);
+      if (sawLegacyBareRequest) break;
+    }
+
+    if (!protocolRejected && !sawLegacyBareRequest) {
+      if (buffer.length > maxFrameChars) {
+        rejectAndDestroy();
+        return;
+      }
+      if (!currentFrameVerifiedObjectStart && buffer.length > 0) {
+        const remainingFirstChar = firstNonWhitespaceChar(buffer);
+        if (remainingFirstChar !== undefined) {
+          if (remainingFirstChar !== "{") {
+            rejectAndDestroy();
+            return;
+          }
+          currentFrameVerifiedObjectStart = true;
+        }
+      }
+    }
+  });
+
+  args.socket.on("end", () => {
+    if (protocolRejected) {
+      if (!args.socket.destroyed) args.socket.destroy();
+      return;
+    }
+    clientEnded = true;
+    maybeFinishHalfOpen();
   });
 }
 

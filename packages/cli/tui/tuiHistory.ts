@@ -13,7 +13,6 @@ import {
   buildSourceMapping,
   padOrTruncateToWidth,
   stripAnsi,
-  truncateAnsi,
   visibleWidth,
   displayWidth,
   wrapTranscriptLine,
@@ -30,7 +29,6 @@ import {
   themeColorSequence,
   themeText,
   tuiRenderThemeFingerprint,
-  userSurfaceBackgroundSequence,
 } from "./theme";
 import { toolIcon, toolLabel } from "./i18n";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
@@ -481,43 +479,18 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
   return styledLines.join("\n");
 }
 
-/**
- * Paint one already-wrapped user row as a full-width bubble row.
- *
- * The row is padded to exactly `contentWidth` *inside* the background so the
- * bubble's right edge is straight instead of ragged, then closed with a reset
- * so the tint never bleeds into the scrollbar column or the next row.
- *
- * Padding uses visibleWidth (ANSI-aware, CJK/emoji-aware), never `length`.
- * Any interior reset emitted by wrapTranscriptLine re-opens the background,
- * otherwise the tail of a styled row would drop back to the terminal base.
- */
-function fillUserBubbleRow(row: string, surfaceSeq: string, contentWidth: number): string {
-  const visible = visibleWidth(row);
-  // Guard: if the row already exceeds contentWidth (e.g. a narrow terminal
-  // where gutter+indent itself is wider than the viewport), truncate the
-  // content so the bubble never spills into the scrollbar column.
-  if (visible > contentWidth) {
-    const truncated = truncateAnsi(row, contentWidth);
-    const padAfter = Math.max(0, contentWidth - visibleWidth(truncated));
-    return `${surfaceSeq}${truncated}${" ".repeat(padAfter)}\x1b[0m`;
-  }
-  return renderSurfaceLine({ text: row, surface: surfaceSeq, padTo: contentWidth });
-}
-
 function gutterForRole(role: TurnRole, colorEnabled: boolean) {
   if (role === "user") {
     const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
     const prefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    const surfaceSeq = colorEnabled ? userSurfaceBackgroundSequence() : "";
-    return { prefix, prefixWidth: 3, surfaceSeq };
+    return { prefix, prefixWidth: 3 };
   }
   if (role === "local") {
     const dimSeq = colorEnabled ? "\x1b[2m" : "";
     const resetSeq = colorEnabled ? "\x1b[0m" : "";
-    return { prefix: `${dimSeq}  ${resetSeq}`, prefixWidth: 2, surfaceSeq: "" };
+    return { prefix: `${dimSeq}  ${resetSeq}`, prefixWidth: 2 };
   }
-  return { prefix: "", prefixWidth: 0, surfaceSeq: "" };
+  return { prefix: "", prefixWidth: 0 };
 }
 
 /**
@@ -541,8 +514,7 @@ export function layoutTurnRows(
   const imageRows: TurnLayoutRow[] = rawImageRows.map((r) => {
     let rendered = r.rendered;
     if (gutter.prefixWidth > 0) {
-      const styled = `${gutter.prefix}${rendered}`;
-      rendered = gutter.surfaceSeq ? fillUserBubbleRow(styled, gutter.surfaceSeq, contentWidth) : styled;
+      rendered = `${gutter.prefix}${rendered}`;
     }
     return {
       rendered,
@@ -569,15 +541,9 @@ function layoutTextRows(
     const firstPrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    const surfaceSeq = colorEnabled ? userSurfaceBackgroundSequence() : "";
-    // Body text: accent foreground + bold. The foreground color is the primary
-    // day/night-safe signal — it comes from the brightness-aware palette
-    // (truecolor hex, or ANSI-16 indexed fallback that follows the terminal's
-    // own theme), so it works even when the bubble surface is unavailable
-    // (no OSC 11 reply, non-truecolor). Bold is kept as the second,
-    // color-independent cue. \x1b[22m closes bold and \x1b[39m closes the
-    // foreground only, so the bubble surface (when present) survives to
-    // end-of-row.
+    // Body text: accent foreground + bold, paired with the accent ┃  gutter.
+    // No full-row surface wash or trailing-space padding so short messages stay
+    // crisp without stretching a colored bar across the terminal.
     const boldOn = colorEnabled ? "\x1b[1m" : "";
     const boldOff = colorEnabled ? "\x1b[22m" : "";
     const fgOff = colorEnabled ? "\x1b[39m" : "";
@@ -599,9 +565,8 @@ function layoutTextRows(
         prefixCharCount,
       );
       for (const r of wrappedRows) {
-        const rendered = surfaceSeq ? fillUserBubbleRow(r.rendered, surfaceSeq, contentWidth) : r.rendered;
         rows.push({
-          rendered,
+          rendered: r.rendered,
           sourceStart: r.sourceStart,
           sourceEnd: r.sourceEnd,
           prefixWidth: r.prefixWidth,
@@ -614,7 +579,7 @@ function layoutTextRows(
     }
     return rows.length > 0
       ? rows
-      : [{ rendered: surfaceSeq ? fillUserBubbleRow(firstPrefix, surfaceSeq, contentWidth) : firstPrefix, sourceStart: 0, sourceEnd: 0, prefixWidth: 3 }];
+      : [{ rendered: firstPrefix, sourceStart: 0, sourceEnd: 0, prefixWidth: 3 }];
   }
 
   if (role === "local") {
@@ -1221,7 +1186,6 @@ function renderTailTurnBlock(
 ): string[] {
   content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (role === "user") {
-    const surfaceSeq = colorEnabled ? userSurfaceBackgroundSequence() : "";
     const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
     const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
@@ -1233,10 +1197,7 @@ function renderTailTurnBlock(
     const lines: string[] = [];
     for (const rawLine of content.split("\n")) {
       const styledLine = `${multilinePrefix}${accentSeq}${boldOn}${rawLine}${boldOff}${fgOff}`;
-      const rows = wrapTranscriptLine(styledLine, contentWidth, hangingIndent);
-      lines.push(
-        ...(surfaceSeq ? rows.map((row) => fillUserBubbleRow(row, surfaceSeq, contentWidth)) : rows),
-      );
+      lines.push(...wrapTranscriptLine(styledLine, contentWidth, hangingIndent));
     }
     return lines;
   } else {

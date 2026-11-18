@@ -32,6 +32,7 @@ import {
   runProgressStalled,
 } from "./runProgressHeartbeat";
 import { t } from "./i18n";
+import { resolveHistoryLayoutGeometry } from "./tuiLayout";
 import { RUN_ZONE_MAX_ROWS, formatBackgroundSummary, formatProcZoneLines, formatRunZoneLines, planRunZoneRows, PROC_LINGER_MAX_ROWS, procZoneFinished, remoteTaskUnsettled, resolveRunZoneMaxRows, runZoneRunRowBudget, type RemoteTaskCarrier, type RunZoneLayout, type RunZoneProc } from "./runZoneLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
@@ -379,7 +380,14 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     const procLines = formatProcZoneLines(shownProcs, colorEnabled, at, shownProcs.length, formatLayout);
     const lingerLines = formatProcZoneLines(lingerShown, colorEnabled, at, lingerShown.length, formatLayout);
     const hidden = runSnapshots.length - shownRuns.length + activeProcs.length - shownProcs.length;
-    if (hidden > 0) lingerLines.push(`  ${t("runZoneMore", String(hidden))}`);
+    if (hidden > 0) {
+      const leftPad =
+        typeof layout?.columns === "number" && layout.columns > 0
+          ? " ".repeat(resolveHistoryLayoutGeometry(layout.columns).marginLeft)
+          : "";
+      const more = `${leftPad}  ${t("runZoneMore", String(hidden))}`;
+      lingerLines.push(colorEnabled ? themeText(more, "chrome") : more);
+    }
 
     return [...runLines, ...procLines, ...lingerLines];
   };
@@ -438,11 +446,11 @@ export function formatRunDockLines(
   maxRows: number = RUN_DOCK_MAX_ROWS
 ): string[] {
   // 空面板没有表头可言。getLines() 已经拦了这一路，但这个函数是导出的，
-  // 直接调用它的人不该拿到一行 `🤖 runs · `。
+  // 直接调用它的人不该拿到一行 `◈ runs · `。
   if (snapshots.length === 0) return [];
   const lines: string[] = [];
   const summary = summarize(snapshots);
-  const header = `🤖 runs · ${summary}`;
+  const header = `◈ runs · ${summary}`;
   lines.push(colorEnabled ? themeText(header, "muted", true) : header);
 
   const shown = snapshots.slice(0, Math.max(1, maxRows));

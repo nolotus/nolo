@@ -1,13 +1,38 @@
 import { StringDecoder } from "node:string_decoder";
 import {
+  renderDialogHeaderLine,
   renderDialogRow,
-  renderDialogTitle,
+  renderDialogRule,
   renderOverflowAbove,
   renderOverflowBelow,
 } from "./dialogFrame";
 import { createStandaloneDialogSession, type DialogSession } from "./dialogHost";
 import { t } from "./i18n";
+import { themeText } from "./theme";
 import { consumeSgrMouseSequence, parseScrollAction } from "./tuiScrollbar";
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function dropLastGrapheme(text: string): string {
+  if (!text) return "";
+  let lastStart = 0;
+  for (const { index } of graphemeSegmenter.segment(text)) {
+    lastStart = index;
+  }
+  return text.slice(0, lastStart);
+}
+
+export function matchSelectFilter(item: SelectDialogItem, query: string): boolean {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return true;
+  const tokens = trimmed.split(/\s+/);
+  const haystack = `${item.label}\n${item.detail ?? ""}`.toLowerCase();
+  return tokens.every((token) => haystack.includes(token));
+}
+
+function resolveSelectKeyHint(): string {
+  return t("dialogSelectHint").replace(/^[（(]|[)）]$/g, "");
+}
 
 export type SelectDialogItem = {
   label: string;
@@ -107,6 +132,14 @@ export function renderSelectDialog<T extends SelectDialogItem>(args: {
    */
   footerLines?: string[];
   maxVisible?: number;
+  /** Terminal column width for top/bottom rules and right-aligned key hint. */
+  width?: number;
+  /** True when docked immediately above the composer; skips the bottom rule. */
+  bottomAnchored?: boolean;
+  /** Active filter query shown inline in the header when non-empty. */
+  filterQuery?: string;
+  /** Show `1/N` item counter after a custom `title` when not filtering. */
+  showCount?: boolean;
 }) {
   const total = args.items.length;
   const window = computeVisibleWindow({
@@ -114,39 +147,65 @@ export function renderSelectDialog<T extends SelectDialogItem>(args: {
     total,
     maxVisible: args.maxVisible,
   });
+  const filterQuery = args.filterQuery ?? "";
+  const hasFilter = filterQuery.length > 0;
+  const filterSuffix = hasFilter
+    ? ` · ${t("dialogFilterLabel")}: ${filterQuery}▌`
+    : "";
+  const baseTitle =
+    args.title !== undefined
+      ? args.showCount && !hasFilter && total > 0
+        ? `${args.title}  ${args.selectedIndex + 1}/${total}`
+        : args.title
+      : hasFilter
+        ? t("dialogSelectLabel")
+        : `${t("dialogSelectLabel")}  ${args.selectedIndex + 1}/${total}`;
+  const titleText = `${baseTitle}${filterSuffix}`;
+  const titleAlreadyHasHint =
+    args.title !== undefined &&
+    (args.title.includes("Esc") || args.title.includes("↑↓"));
   const titleLines =
     args.titleLines ??
     [
-      renderDialogTitle(
-        args.title ??
-          `${t("dialogSelectLabel")}  ${t("dialogSelectHint")}  ${args.selectedIndex + 1}/${total}`,
-      ),
-    ];
-  // Blank line between the title block and the list gives the frame some
-  // breathing room; it counts as an anchored row like any other.
-  const lines = [...titleLines, ""];
-
-  if (window.start > 0) {
-    lines.push(renderOverflowAbove(window.start));
-  }
-
-  for (let index = window.start; index < window.end; index += 1) {
-    const item = args.items[index];
-    lines.push(
-      renderDialogRow({
-        label: item.label,
-        ...(item.detail ? { detail: item.detail } : {}),
-        focused: index === args.selectedIndex,
+      renderDialogHeaderLine({
+        title: titleText,
+        ...(titleAlreadyHasHint ? {} : { hint: resolveSelectKeyHint() }),
+        width: args.width,
       }),
-    );
-  }
+    ];
+  // Top rule separates the modal cleanly from transcript text above; blank line
+  // between the title block and the list gives the frame breathing room.
+  const lines = [renderDialogRule(args.width), ...titleLines, ""];
 
-  if (window.end < total) {
-    lines.push("", renderOverflowBelow(total - window.end));
+  if (total === 0) {
+    lines.push(themeText(`  ${t("dialogFilterNoMatches")}`, "muted"));
+  } else {
+    if (window.start > 0) {
+      lines.push(renderOverflowAbove(window.start));
+    }
+
+    for (let index = window.start; index < window.end; index += 1) {
+      const item = args.items[index];
+      lines.push(
+        renderDialogRow({
+          label: item.label,
+          ...(item.detail ? { detail: item.detail } : {}),
+          focused: index === args.selectedIndex,
+        }),
+      );
+    }
+
+    if (window.end < total) {
+      lines.push("", renderOverflowBelow(total - window.end));
+    }
   }
 
   if (args.footerLines && args.footerLines.length > 0) {
     lines.push(...args.footerLines);
+  }
+
+  if (!args.bottomAnchored) {
+    lines.push(renderDialogRule(args.width));
   }
 
   return lines.join("\n");
@@ -414,6 +473,18 @@ export function createRawKeyReader(
       // Bare ESC — wait for bounded timer to disambiguate from ESC-prefixed
       // sequences that may arrive split across chunks.
       if (buffer === "\x1b") return undefined;
+      // 2-byte ESC+printable (Meta/Alt+key, e.g. "\x1by"): keep it intact as
+      // an ESC-prefixed sequence instead of stripping ESC and leaking "y".
+      if (
+        buffer.length >= 2 &&
+        /^[\x20-\x7e]$/.test(buffer[1]!) &&
+        buffer[1] !== "[" &&
+        buffer[1] !== "O"
+      ) {
+        const alt = buffer.slice(0, 2);
+        buffer = buffer.slice(2);
+        return alt;
+      }
       // Determinately-not-mouse and not-arrow ESC garbage: drop the leading
       // byte and keep parsing. It must never surface as a closed stream.
       return null;
@@ -586,19 +657,35 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
    */
   bottomAnchored?: boolean;
   bottomRow?: number | (() => number);
+  /** Enable real-time type-to-filter over item.label and item.detail. */
+  filterable?: boolean;
+  /**
+   * Optional single-character hotkey -> item index map for immediate selection.
+   * Mutually exclusive with `filterable`: ignored when `filterable` is true.
+   */
+  hotkeys?: Readonly<Record<string, number>>;
+  /** See renderSelectDialog.showCount. */
+  showCount?: boolean;
 }): Promise<SelectDialogResult<T>> {
   const items = args.items;
   if (items.length === 0) {
     return { kind: "cancelled" };
   }
 
+  const filterable = args.filterable ?? false;
+  const hotkeys = !filterable && args.hotkeys ? args.hotkeys : undefined;
+  let filterQuery = "";
+  const indexedItems = items.map((item, index) => ({ item, index }));
+  let filteredEntries = indexedItems;
   let selectedIndex = Math.min(
     Math.max(args.initialIndex ?? 0, 0),
-    items.length - 1
+    filteredEntries.length - 1
   );
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
-  const readKey = args.readKey ?? createRawKeyReader(input);
+  const readKey =
+    args.readKey ??
+    createRawKeyReader(input, hotkeys ? { preserveBracketedPaste: true } : undefined);
   let cancelRead!: () => void;
   const cancelled = new Promise<typeof STREAM_CLOSED>((resolve) => { cancelRead = () => resolve(STREAM_CLOSED); });
   args.signal?.addEventListener("abort", cancelRead, { once: true });
@@ -614,22 +701,49 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
       typeof args.bottomRow === "function" ? args.bottomRow() : args.bottomRow ?? 0
     );
 
+  const resolveFrameWidth = () => {
+    const cols = (output as { columns?: number }).columns;
+    return typeof cols === "number" && cols > 0 ? cols : 80;
+  };
+
   const painter = createDialogFramePainter({
     output,
     render: () =>
       renderSelectDialog({
-        items,
+        items: filteredEntries.map((entry) => entry.item),
         selectedIndex,
         title: args.title,
         ...(args.titleLines ? { titleLines: args.titleLines } : {}),
         ...(args.footerLines ? { footerLines: args.footerLines } : {}),
+        ...(args.showCount ? { showCount: true } : {}),
+        ...(filterable && filterQuery ? { filterQuery } : {}),
         maxVisible: args.maxVisible,
+        width: resolveFrameWidth(),
+        bottomAnchored,
       }),
     bottomAnchored,
     resolveBottomRow,
     session,
   });
   const paint = painter.paint;
+  const applyFilter = (nextQuery: string) => {
+    if (nextQuery === filterQuery) return;
+    const focusedOriginalIndex = filteredEntries[selectedIndex]?.index;
+    filterQuery = nextQuery;
+    filteredEntries = filterQuery
+      ? indexedItems.filter(({ item }) => matchSelectFilter(item, filterQuery))
+      : indexedItems;
+    if (filteredEntries.length === 0) {
+      selectedIndex = 0;
+    } else {
+      const keptIndex =
+        focusedOriginalIndex === undefined
+          ? -1
+          : filteredEntries.findIndex((entry) => entry.index === focusedOriginalIndex);
+      selectedIndex = keptIndex >= 0 ? keptIndex : 0;
+    }
+    paint();
+  };
 
   // While anchored, the dialog owns its rows — re-paint on terminal resize so
   // the frame follows the composer to its new position. The workspace's own
@@ -657,11 +771,27 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
     }
     paint();
 
+    let inBracketedPaste = false;
     while (true) {
       const sequence = await Promise.race([readKey(), cancelled]);
       if (args.signal?.aborted) return { kind: "cancelled" };
       if (sequence === STREAM_CLOSED) {
         return { kind: "cancelled" };
+      }
+
+      if (!filterable) {
+        if (inBracketedPaste) {
+          if (sequence.includes("\x1b[201~")) {
+            inBracketedPaste = false;
+          }
+          continue;
+        }
+        if (sequence.startsWith("\x1b[200~")) {
+          if (!sequence.endsWith("\x1b[201~")) {
+            inBracketedPaste = true;
+          }
+          continue;
+        }
       }
 
       // Wheel semantics live entirely in the input policy: "transcript"
@@ -683,6 +813,7 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
         if ((args.inputPolicy?.wheel ?? "modal") === "ignore") {
           continue;
         }
+        if (filteredEntries.length === 0) continue;
         const direction: 1 | -1 = scrollAction === "wheel-up" ? -1 : 1;
         if (wheelThrottle.step(direction) === 0) continue;
         selectedIndex = Math.min(
@@ -690,7 +821,7 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
             selectedIndex + direction,
             0,
           ),
-          items.length - 1,
+          filteredEntries.length - 1,
         );
         paint();
         continue;
@@ -700,17 +831,53 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
         return { kind: "cancelled" };
       }
       if (isSubmit(sequence)) {
-        return { kind: "selected", index: selectedIndex, item: items[selectedIndex] };
+        const picked = filteredEntries[selectedIndex];
+        if (!picked) continue;
+        return { kind: "selected", index: picked.index, item: picked.item };
       }
       if (isArrowUp(sequence)) {
-        selectedIndex = selectedIndex <= 0 ? items.length - 1 : selectedIndex - 1;
+        if (filteredEntries.length === 0) continue;
+        selectedIndex = selectedIndex <= 0 ? filteredEntries.length - 1 : selectedIndex - 1;
         paint();
         continue;
       }
       if (isArrowDown(sequence)) {
-        selectedIndex = selectedIndex >= items.length - 1 ? 0 : selectedIndex + 1;
+        if (filteredEntries.length === 0) continue;
+        selectedIndex = selectedIndex >= filteredEntries.length - 1 ? 0 : selectedIndex + 1;
         paint();
         continue;
+      }
+      if (
+        hotkeys &&
+        !sequence.startsWith("\x1b") &&
+        sequence.length === 1 &&
+        Object.hasOwn(hotkeys, sequence)
+      ) {
+        const targetIndex = hotkeys[sequence];
+        const picked = targetIndex !== undefined ? indexedItems[targetIndex] : undefined;
+        if (picked) {
+          return { kind: "selected", index: picked.index, item: picked.item };
+        }
+      }
+      if (filterable) {
+        if (sequence === "\x7f" || sequence === "\b") {
+          if (filterQuery.length > 0) {
+            applyFilter(dropLastGrapheme(filterQuery));
+          }
+          continue;
+        }
+        if (sequence === "\x15") {
+          if (filterQuery.length > 0) {
+            applyFilter("");
+          }
+          continue;
+        }
+        if (!sequence.startsWith("\x1b")) {
+          const printable = sequence.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+          if (printable.length > 0) {
+            applyFilter(filterQuery + printable);
+          }
+        }
       }
     }
   } finally {

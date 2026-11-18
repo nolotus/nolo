@@ -49,6 +49,42 @@
   gap: var(--space-2);
 }
 
+.memory-view-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: var(--space-1);
+  padding: 4px;
+  border: 1px solid var(--borderLight);
+  border-radius: var(--radius-2);
+  background: var(--surfaceSecondary);
+}
+
+.memory-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--textSecondary);
+  font-size: var(--fontSize-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.memory-view-tab:hover {
+  color: var(--text);
+  background: var(--surfaceHover);
+}
+
+.memory-view-tab--active {
+  background: var(--surfacePrimary);
+  color: var(--primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
 .memory-spin {
   animation: memory-spin 1s linear infinite;
 }
@@ -319,6 +355,69 @@
   color: var(--textSecondary);
   font-size: var(--fontSize-sm);
   white-space: nowrap;
+}
+
+.memory-facet--explicit {
+  background: var(--primaryGhost);
+  color: var(--primary);
+}
+
+.memory-facet--interpreted {
+  background: var(--infoGhost, rgba(22, 119, 255, 0.1));
+  color: var(--info, #1677ff);
+}
+
+.memory-work-status {
+  padding: 2px 8px;
+  border-radius: var(--radius-1);
+  font-size: var(--fontSize-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.memory-work-status--active {
+  background: var(--successGhost, rgba(82, 196, 26, 0.1));
+  color: var(--success, #52c41a);
+}
+
+.memory-work-status--paused {
+  background: var(--warningGhost, rgba(250, 173, 20, 0.1));
+  color: var(--warning, #faad14);
+}
+
+.memory-work-status--completed {
+  background: var(--infoGhost, rgba(22, 119, 255, 0.1));
+  color: var(--info, #1677ff);
+}
+
+.memory-work-status--cancelled {
+  background: color-mix(in srgb, var(--error, #ff4d4f) 12%, transparent);
+  color: var(--error, #ff4d4f);
+}
+
+.memory-work-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  font-size: var(--fontSize-sm);
+}
+
+.memory-work-section__label {
+  color: var(--textTertiary);
+  font-weight: 500;
+}
+
+.memory-work-section__value {
+  color: var(--text);
+  line-height: var(--leading-relaxed);
+}
+
+.memory-work-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--text);
+  line-height: var(--leading-relaxed);
 }
 
 .memory-tags {

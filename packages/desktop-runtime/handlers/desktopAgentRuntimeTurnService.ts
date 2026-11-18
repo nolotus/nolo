@@ -1,6 +1,11 @@
 import type { PlanningCaller } from "../../ai/agent/agentDiscovery";
 import { registerDialogOwner } from "database-engine/dialogOwner";
 import type { LocalAgentTurnInput } from "agent-runtime/localLoop";
+import {
+  IDLE_HEAP_RELEASE_DELAY_MS,
+  createIdleHeapReleaser,
+  type IdleHeapReleaser,
+} from "agent-runtime/idleHeapRelease";
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { detectMachineInfo } from "connector-experimental/machineInfo";
@@ -1275,37 +1280,85 @@ function wrapDesktopActionsWithRequestSnapshots(
   });
 }
 
+export const DESKTOP_IDLE_HEAP_RELEASE_DELAY_MS = IDLE_HEAP_RELEASE_DELAY_MS;
+
+const defaultDesktopIdleHeapReleaser: IdleHeapReleaser = createIdleHeapReleaser({
+  delayMs: DESKTOP_IDLE_HEAP_RELEASE_DELAY_MS,
+  disableEnvVar: "NOLO_DESKTOP_IDLE_HEAP_RELEASE",
+});
+
+let desktopIdleHeapReleaser: IdleHeapReleaser = defaultDesktopIdleHeapReleaser;
+let activeDesktopTurns = 0;
+
+export function setDesktopIdleHeapReleaserForTests(
+  releaser: IdleHeapReleaser | null,
+): void {
+  desktopIdleHeapReleaser.cancel();
+  activeDesktopTurns = 0;
+  desktopIdleHeapReleaser = releaser ?? defaultDesktopIdleHeapReleaser;
+}
+
+export function getActiveDesktopTurnCountForTests(): number {
+  return activeDesktopTurns;
+}
+
+function isDesktopIdleHeapReleaseDisabled(
+  env?: DesktopAgentRuntimeEnv,
+): boolean {
+  return (
+    env?.NOLO_DESKTOP_IDLE_HEAP_RELEASE === "0" ||
+    process.env.NOLO_DESKTOP_IDLE_HEAP_RELEASE === "0"
+  );
+}
+
+function enterDesktopTurn(): void {
+  activeDesktopTurns += 1;
+  desktopIdleHeapReleaser.cancel();
+}
+
+function exitDesktopTurn(env?: DesktopAgentRuntimeEnv): void {
+  activeDesktopTurns = Math.max(0, activeDesktopTurns - 1);
+  if (activeDesktopTurns === 0 && !isDesktopIdleHeapReleaseDisabled(env)) {
+    desktopIdleHeapReleaser.schedule();
+  }
+}
+
 export async function runDesktopTextOnlyAgentRuntimeTurn(
   input: DesktopTextOnlyAgentRuntimeTurnInput
 ): Promise<LocalAgentTurnResult> {
-  const baseActions = createDesktopTextOnlyAgentRuntimeActions({
-    env: input.env,
-    store: input.store,
-    now: input.now ?? Date.now,
-    createId: input.createId ?? createDesktopAgentRuntimeDialogId,
-    fetchImpl: input.fetchImpl,
-  });
-  const actions = wrapDesktopActionsWithRequestSnapshots(baseActions, input);
-  const adapter = createDesktopAgentRuntimeAdapter({
-    env: input.env,
-    actions,
-  });
+  enterDesktopTurn();
+  try {
+    const baseActions = createDesktopTextOnlyAgentRuntimeActions({
+      env: input.env,
+      store: input.store,
+      now: input.now ?? Date.now,
+      createId: input.createId ?? createDesktopAgentRuntimeDialogId,
+      fetchImpl: input.fetchImpl,
+    });
+    const actions = wrapDesktopActionsWithRequestSnapshots(baseActions, input);
+    const adapter = createDesktopAgentRuntimeAdapter({
+      env: input.env,
+      actions,
+    });
 
-  return runLocalAgentTurn({
-    adapter,
-    agentRef: input.agentRef,
-    input: input.input,
-    userMessages: input.userMessages,
-    runtimeContext: input.runtimeContext,
-    continueDialogId: input.continueDialogId,
-    onTextDelta: input.onTextDelta,
-    onToolEvent: input.onToolEvent,
-    onReasoningDelta: input.onReasoningDelta,
-    onLoopEvent: input.onLoopEvent,
-    ...(input.onActionGate ? { onActionGate: input.onActionGate } : {}),
-    abortSignal: input.signal,
-    compactionTimeoutMs: input.compactionTimeoutMs,
-  });
+    return await runLocalAgentTurn({
+      adapter,
+      agentRef: input.agentRef,
+      input: input.input,
+      userMessages: input.userMessages,
+      runtimeContext: input.runtimeContext,
+      continueDialogId: input.continueDialogId,
+      onTextDelta: input.onTextDelta,
+      onToolEvent: input.onToolEvent,
+      onReasoningDelta: input.onReasoningDelta,
+      onLoopEvent: input.onLoopEvent,
+      ...(input.onActionGate ? { onActionGate: input.onActionGate } : {}),
+      abortSignal: input.signal,
+      compactionTimeoutMs: input.compactionTimeoutMs,
+    });
+  } finally {
+    exitDesktopTurn(input.env);
+  }
 }
 /**
  * Parent dialog dbKey for this turn. Only the caller-provided key is trusted:
@@ -1402,6 +1455,17 @@ function resolveDesktopTurnWorkspaceDirectory(rawCwd: string): string {
 }
 
 export async function runDesktopAgentRuntimeTurn(
+  input: DesktopAgentRuntimeTurnInput
+): Promise<LocalAgentTurnResult> {
+  enterDesktopTurn();
+  try {
+    return await runDesktopAgentRuntimeTurnImpl(input);
+  } finally {
+    exitDesktopTurn(input.env);
+  }
+}
+
+async function runDesktopAgentRuntimeTurnImpl(
   input: DesktopAgentRuntimeTurnInput
 ): Promise<LocalAgentTurnResult> {
   // Desktop cwd is resolved from this turn's explicit input.cwd ONLY (the local

@@ -36,8 +36,8 @@ import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { listRunRecords } from "../agentRunControl";
 import { ulid } from "ulid";
-import { formatElapsedSeconds, renderContextPanel, renderCreditsDebug, renderKnownAgents, renderTuiHelp } from "./sessionRender";
-import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
+import { renderContextPanel, renderCreditsDebug, renderCreditsSummary, renderKnownAgents, renderTuiHelp } from "./sessionRender";
+import { isLikelySlashCommand, SLASH_COMMANDS, stripImageTokens } from "./sessionInput";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import { resolveAuthGuidanceState } from "../client/authGuidance";
 import type { TuiState, TuiInputResult, ThinkingDisplayMode } from "./sessionTypes";
@@ -187,6 +187,113 @@ function formatAttachedSkillLine(skillRef: string): string {
   return `${bullet} ${label} ${name}`;
 }
 
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) => {
+    const row = new Array<number>(n + 1).fill(0);
+    row[0] = i;
+    return row;
+  });
+  for (let j = 0; j <= n; j++) dp[0]![j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let val = Math.min(
+        dp[i - 1]![j]! + 1,
+        dp[i]![j - 1]! + 1,
+        dp[i - 1]![j - 1]! + cost,
+      );
+      if (
+        i > 1 &&
+        j > 1 &&
+        a[i - 1] === b[j - 2] &&
+        a[i - 2] === b[j - 1]
+      ) {
+        val = Math.min(val, dp[i - 2]![j - 2]! + 1);
+      }
+      dp[i]![j] = val;
+    }
+  }
+  return dp[m]![n]!;
+}
+
+/**
+ * Suggest the closest known slash command for an unknown input token.
+ * Combines prefix matching and Damerau-Levenshtein edit distance (<= 3).
+ */
+export function suggestClosestSlashCommand(
+  inputCmd: string,
+  candidates: readonly string[],
+): string | null {
+  const firstToken = inputCmd.trim().split(/\s+/)[0] ?? "";
+  if (!firstToken.startsWith("/")) return null;
+  const query = firstToken.slice(1).toLowerCase();
+  if (!query) return null;
+
+  let bestPrefix: { cand: string; extra: number } | null = null;
+  let bestEdit: {
+    cand: string;
+    dist: number;
+    sameInitial: boolean;
+    lenDiff: number;
+  } | null = null;
+
+  for (const cand of candidates) {
+    const candBody = (cand.startsWith("/") ? cand.slice(1) : cand).toLowerCase();
+    if (!candBody) continue;
+    if (candBody === query) return cand;
+
+    if (query.length >= 2 && candBody.startsWith(query)) {
+      const extra = candBody.length - query.length;
+      if (!bestPrefix || extra < bestPrefix.extra) {
+        bestPrefix = { cand, extra };
+      }
+    }
+
+    const dist = editDistance(query, candBody);
+    const maxLen = Math.max(query.length, candBody.length);
+    const maxAllowed = Math.min(3, Math.floor(maxLen / 2));
+    if (dist > 0 && dist <= maxAllowed) {
+      const sameInitial = candBody[0] === query[0];
+      const lenDiff = Math.abs(candBody.length - query.length);
+      if (
+        !bestEdit ||
+        dist < bestEdit.dist ||
+        (dist === bestEdit.dist &&
+          ((sameInitial && !bestEdit.sameInitial) ||
+            (sameInitial === bestEdit.sameInitial &&
+              lenDiff < bestEdit.lenDiff)))
+      ) {
+        bestEdit = { cand, dist, sameInitial, lenDiff };
+      }
+    }
+  }
+
+  if (bestPrefix) return bestPrefix.cand;
+  return bestEdit ? bestEdit.cand : null;
+}
+
+function formatUnknownSlashCommand(cmd: string, allowSuggestion = true): string {
+  if (allowSuggestion) {
+    const suggestion = suggestClosestSlashCommand(cmd, SLASH_COMMANDS);
+    if (suggestion && suggestion !== cmd) {
+      return t("unknownCommandDidYouMean", cmd, suggestion);
+    }
+  }
+  return t("unknownCommand", cmd);
+}
+
+/**
+ * Single source of truth for `!` shell passthrough detection across
+ * dispatch, composer prompt rendering, and busy-turn submission.
+ */
+export function isShellPassthroughInput(input: string): boolean {
+  return input.trimStart().startsWith("!");
+}
+
 /**
  * `historyTurns` is optional and only /links reads it. It exists because the
  * transcript lives in the workspace-scoped TurnHistory rather than in TuiState,
@@ -204,7 +311,7 @@ export function handleTuiInput(
     return { nextState: state, output: "" };
   }
 
-  if (trimmed.startsWith("!")) {
+  if (isShellPassthroughInput(trimmed)) {
     const cmd = trimmed.slice(1).trim();
     return {
       nextState: state,
@@ -386,7 +493,6 @@ export function handleTuiInput(
     case "/logs":
       return { nextState: state, output: renderRecentDiagnostics(process.env) };
     case "/context":
-    case "/ctx":
       return { nextState: state, output: renderContextPanel(state) };
     case "/links": {
       // Output goes through the normal slash channel: the router renders it as
@@ -399,9 +505,17 @@ export function handleTuiInput(
         output: `${renderConversationLinks(extracted, t as never)}\n`,
       };
     }
-    case "/credits":
-      // 积分链路诊断：断在哪一环一眼可见（见 renderCreditsDebug 注释）。
-      return { nextState: state, output: renderCreditsDebug(state) };
+    case "/credits": {
+      const sub = asTrimmedLowercaseString(argText);
+      if (sub === "debug") {
+        // 积分链路诊断：断在哪一环一眼可见（见 renderCreditsDebug 注释）。
+        return { nextState: state, output: renderCreditsDebug(state) };
+      }
+      if (!sub) {
+        return { nextState: state, output: renderCreditsSummary(state) };
+      }
+      return { nextState: state, output: t("creditsUsage") };
+    }
     case "/runtime": {
       if (argText !== "auto" && argText !== "local" && argText !== "server") {
         return {
@@ -482,36 +596,6 @@ export function handleTuiInput(
       ];
       return { nextState: state, output: `${lines.length ? lines.join("\n") : t("tasksNone")}\n/tasks show <id> | /tasks stop <id>` };
     }
-    case "/jobs":
-    case "/procs": {
-      const registry = getProcessRegistry();
-      // User-visible background tasks only — transient foreground grace-period
-      // envelopes (pre-Phase-0 semantics) stay out of /procs; both groups below
-      // derive from the same background view.
-      const all = registry.listBackground();
-      const running = all.filter(p => p.status === "running");
-      const stopped = all.filter(p => p.status !== "running");
-      const lines: string[] = [];
-      if (running.length > 0) {
-        lines.push(t("tasksRunning", String(running.length)));
-        for (const p of running) {
-          const elapsed = formatElapsedSeconds(Math.floor((Date.now() - p.startedAt) / 1000));
-          lines.push(`  pid ${p.pid}  ${p.label}    running  ${elapsed}`);
-        }
-      }
-      if (stopped.length > 0) {
-        lines.push(t("tasksStopped", String(stopped.length)));
-        for (const p of stopped) {
-          const elapsed = formatElapsedSeconds(Math.floor((Date.now() - p.startedAt) / 1000));
-          const exitInfo = p.exitCode !== undefined ? `  exit ${p.exitCode}` : "";
-          lines.push(`  pid ${p.pid}  ${p.label}    ${p.status}${exitInfo ? ` ${exitInfo}` : ""}  ${elapsed}`);
-        }
-      }
-      if (all.length === 0) {
-        lines.push(t("tasksNone"));
-      }
-      return { nextState: state, output: lines.join("\n") };
-    }
     case "/stop": {
       const registry = getProcessRegistry();
       if (!argText) {
@@ -551,15 +635,18 @@ export function handleTuiInput(
     case "/restart":
       return { nextState: state, output: "", action: { type: "exit", restart: true } };
     case "/exit":
-    case "/quit":
       return { nextState: state, output: t("bye"), action: { type: "exit" } };
     case "/clear":
-      if (argText || !state.dialogId) {
+      if (argText) {
         return {
           nextState: state,
-          output: state.dialogId
-            ? t("clearUsage")
-            : t("clearNoDialog"),
+          output: t("clearUsage"),
+        };
+      }
+      if (!state.dialogId) {
+        return {
+          nextState: state,
+          output: t("clearNoDialog"),
         };
       }
       return {
@@ -595,7 +682,7 @@ export function handleTuiInput(
       if (argText) {
         return {
           nextState: state,
-          output: t("unknownCommand", trimmed) + renderTuiHelp(),
+          output: formatUnknownSlashCommand(trimmed, false),
         };
       }
       if (!state.dialogId) {
@@ -609,8 +696,7 @@ export function handleTuiInput(
         output: t("compactingDialog"),
         action: { type: "compact", dialogId: state.dialogId },
       };
-    case "/agent":
-    case "/switch": {
+    case "/agents": {
       if (!argText) {
         return {
           nextState: state,
@@ -623,6 +709,12 @@ export function handleTuiInput(
           nextState: state,
           output: "",
           action: { type: "list-agents" },
+        };
+      }
+      if (argText === "builtin") {
+        return {
+          nextState: state,
+          output: renderKnownAgents(),
         };
       }
       if (argText === "current" || argText === "show") {
@@ -640,11 +732,6 @@ export function handleTuiInput(
       }
       return applyAgentSwitch(state, resolvedTarget, historyTurns);
     }
-    case "/agents":
-      return {
-        nextState: state,
-        output: renderKnownAgents(),
-      };
     case "/lang": {
       const locale = parseCliLocale(argText);
       if (!locale) {
@@ -680,24 +767,6 @@ export function handleTuiInput(
         output: "",
         action: { type: "pick-dialog" },
       };
-    case "/copy": {
-      const arg = argText.trim().toLowerCase();
-      if (arg === "" || arg === "last" || arg === "latest") {
-        return {
-          nextState: state,
-          output: "",
-          action: { type: "copy-last" },
-        };
-      }
-      if (arg === "all") {
-        return {
-          nextState: state,
-          output: "",
-          action: { type: "copy-all" },
-        };
-      }
-      return { nextState: state, output: t("copyUsage") };
-    }
     case "/paste":
       // 显式读剪贴板（fallback 通道）。原生粘贴（终端 bracketed paste / Ctrl+V）
       // 才是主路径；这条命令用于终端不发 paste 事件、或用户想主动取剪贴板的场合。
@@ -945,15 +1014,10 @@ export function handleTuiInput(
         },
       };
     }
-    case "/version":
-      return {
-        nextState: state,
-        output: t("versionInfo", state.cliVersion || t("versionUnknown")),
-      };
     default:
       return {
         nextState: state,
-        output: t("unknownCommand", command) + renderTuiHelp(),
+        output: formatUnknownSlashCommand(command),
       };
   }
 }

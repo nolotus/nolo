@@ -391,6 +391,7 @@ export function createChatQueueTuiBinding(
     if (recoveryBlocked || writeError) return;
     internalResumeStopped = false;
     runtime.send({ type: "resume-drain" });
+    runtime.send({ type: "clear-drain-error" });
     await notifyTurnEnd({ ok: true, aborted: false });
   };
 

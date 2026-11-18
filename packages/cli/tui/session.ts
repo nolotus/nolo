@@ -136,8 +136,8 @@ export function handleTuiInput(
   }
 
   const result = handleBaseTuiInput(input, state, historyTurns, deps);
-  const switchMatch = trimmed.match(/^\/(?:switch|agent)\s+(.+)$/s);
-  if (switchMatch && !["list", "current", "show"].includes(switchMatch[1]!)) {
+  const switchMatch = trimmed.match(/^\/agents\s+(.+)$/s);
+  if (switchMatch && !["list", "builtin", "current", "show"].includes(switchMatch[1]!)) {
     const target = switchMatch[1]!;
     // Unknown names and unverified raw keys must resolve in the catalog before
     // any state/cache/profile changes. The base resolver accepts arbitrary keys.

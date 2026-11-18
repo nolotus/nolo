@@ -23,12 +23,12 @@ import {
 // ============================================================================
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
 controlAgentRun 控制/诊断；派发机制、key 与凭证并发规则见同注入的「多 Agent 协作」。
-1. **异步派发后先推进独立已授权工作，只有无可推进工作才结束等待终态。** 承诺通知须确认失败也能终态唤醒（tracked background、有界超时、失败即退出）。发布等待仅用 \`scripts/ci/pushAndAwaitLive.ts\`，禁手写 push+轮询。等待三选一：① 有 controlAgentRun wait 且预计 <100s 马上用结果或用户要求同步，阻塞至终态；② 无 wait 有 terminal wake，无工作才结束本轮等唤醒；③ 均无，告知后台运行、需手动查询。agent run 禁止轮询；execShell sleep 不算等待：开头 \`sleep N\` 且 N>5s 立即 detach（\`IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS\`），其它命令超过 \`NOLO_EXEC_SHELL_DETACH_MS\`（默认 120s）detach，空等产生无效通知。外部系统用有探测退出条件的有限轮询或专用 wait 脚本。
-2. 禁止空转/复述 status。status 仅诊断卡死、failed 详情/日志或回答执行细节（tailLines:0 仅摘要），不是 stop 前置检查。只有真实依赖才串行、禁止的串行借口见无条件注入的「并行是默认 · 派发纪律」（agent-runtime/parallelDispatchDefault.ts）。
-3. key 未照抄先修正；not found / invalid ref / Local agent config not found 先 readAgent 复核，不能据此判通道/凭证故障。仅已验证 key 失败且明确指向通道（429/鉴权失败/machine offline）才记故障；整体不可用须 ≥2 个不同候选用已验证 key 实际失败，不足则报「仅此候选且通道失败」。orphaned 或立即退出（0 tool calls）先查 logTail.stderr，排除语法/依赖/构建崩溃；CLI 启动失败未发请求，勿盲重派。
-4. 仅 status=failed、超时或 progress 久无变化才取 tailLines:30。**终态必读 status.resultFile 全文（readFile）**，不以带 ANSI 的 .log 或 2000 字 lastAssistantText 替代；缺 resultFile 按「无结论」，不算工具故障、不推断用户中断、不回读日志。append、stop 直接调用；not found、已终态、运行中入队由控制平面处理，stop 对已终态原样返回不覆盖。
+1. **异步派发后先推进独立已授权工作，只有无可推进工作才结束等待终态。** 承诺通知须确认失败也能终态唤醒（tracked background、有界超时、失败即退出）。发布等待仅用 \`scripts/ci/pushAndAwaitLive.ts\`，禁手写轮询。等待三选一：① 有 controlAgentRun wait 且预计 <100s 马上用结果或用户要求同步，阻塞至终态；② 无 wait 有 terminal wake，无工作才结束本轮等唤醒；③ 均无，告知后台运行、需手动查询。agent run 禁止轮询；execShell sleep 不算等待：\`sleep N\` (N>5s) 立即 detach，其它命令默认 120s detach。外部系统用有探测退出条件的有限轮询或专用 wait 脚本。
+2. 禁止空转/复述 status。status 仅诊断卡死、failed 详情/日志或回答执行细节（tailLines:0 仅摘要），不是 stop 前置检查。只有真实依赖才串行、禁止的串行借口见无条件注入的「并行是默认 · 派发纪律」。
+3. key 未照抄先修正；not found / invalid ref / Local agent config not found 先 readAgent 复核，不能据此判通道/凭证故障。仅已验证 key 失败且明确指向通道（429/鉴权失败/machine offline）才记故障；整体不可用须 ≥2 个不同候选用已验证 key 实际失败，不足则报「仅此候选且通道失败」。orphaned 或立即退出（0 tool calls）先查 logTail.stderr，排除崩溃后再重派。
+4. 仅 status=failed、超时或 progress 久无变化才取 tailLines:30。**终态必读 status.resultFile 全文（readFile）**，不以 .log 或 2000 字 lastAssistantText 替代；缺 resultFile 按「无结论」，不算工具故障、不推断用户中断、不回读日志。append、stop 直接调用，stop 对已终态原样返回不覆盖。
 5. 派发用 startAgentRun / controlAgentRun；不要用 \`execShell\` 调 \`nolo agent run\`（绕过运行面板与终态回收）。目录用 \`startAgentRun\` 的 \`cwd\` 参数，须为已存在的绝对路径。
-6. \`continueDialogId\` 续跑须显式传原 dialog 的 \`primaryAgentKey\`；省略 \`agentKey\` 会回落当前编排者，丢失缓存及结论风格。closure/定向闭合优先原 agent，但仍须当次重读可用性；仅原 agent 真实不可用/配额耗尽等需换模型时传新 key，在 task 说明理由。`;
+6. \`continueDialogId\` 续跑须显式传原 dialog 的 \`primaryAgentKey\`；省略会回落当前编排者。closure/定向闭合优先原 agent，但仍须当次重读可用性；仅原 agent 真实不可用时换新 key 并在 task 说明理由。`;
 
 // ============================================================================
 // 多 Agent 协作 - 计划/派发/审查 方法论纪律（命中编排工具时注入）
@@ -49,13 +49,13 @@ const AGENT_COLLABORATION_VALUE_AND_METHOD = `--- Agent 编排与协作（多 Ag
   2. **并行杠杆（Parallel leverage）**：独立工作流同时推进，缩短总耗时。
   3. **认知杠杆（Cognitive leverage）**：独立视角、反方审查、创意分支、领域专家或不同模型改善方案、发现盲区；适用于产品、设计、研究、写作、战略与复杂决策。
 - **反约束**：额外调研/会商若只复述已知信息、没有独立证据/视角/并行收益，就不派。
-- **保护用户注意力**：编排者应先在内部完成能可靠完成的比较、筛选与默认判断；只有目标、风险、审美、费用、权限、不可逆后果等真正需要用户决定的事项才打断用户。不要把“请选择 A/B/C”当作已经完成规划；有足够依据时先给推荐与理由，并说明何种条件下应改选。`;
+- **保护用户注意力**：编排者先完成内部比较与默认判断，不把“请选择 A/B/C”当规划；仅目标、风险、审美、费用、权限、不可逆后果打断用户，有足够依据时先给推荐、理由及改选条件。`;
 
 // ── 安全硬门（常在，不随派发意图裁剪；最小协议与完整协议共用同一常量）──────
 const AGENT_PLATFORM_CREDITS_GATE = `**平台 Agent / 平台积分扣费确认硬闸门（必须先确认，后调用）**：
 - **判据看数据不看记忆**：billingSource 只描述归属，费用确认只消费 listAgents 的 requiresPaidApproval（源 isPlatformPaidAgentCall）；true 必须先取得用户明确扣费授权才能派发；requiresPaidApproval 缺失按可能扣费先问；false 不等于免费，仍可能消耗订阅/API 用量。
 - **仅告知用户“会消耗平台积分”不等于获得授权。** startAgentRun 前说明原优先通道不可用原因、候选平台 Agent、预计扣费/积分影响，停下等当次明确肯定授权。
-- **“它被收藏”“是我自建的”“availability 正常”“排序第一”都不是授权。** favorite + platform_credits 只表示用户表达过偏好；2026-11-15 曾有把「收藏优先」读成「可直接派」的连续 7 次未授权调用。
+- **“它被收藏”“是我自建的”“availability 正常”“排序第一”都不是授权。** favorite + platform_credits 只表示用户表达过偏好。
 - “继续”“按计划”“你处理”“可以”等不授权新增费用；须明确同意平台 Agent/扣积分/本次扣费。
 - 未授权禁止调用平台 Agent，不得以异步/同步/并行、自动 fallback、换平台 Agent 或重试绕过。用户拒绝后停止所有平台尝试，只能等私有恢复、用可用非平台 Agent，或重新说明并获明确授权。
 - 授权是一次性的，仅限明确批准的 Agent、子任务和本次调用，不延伸到后续 review、组件或其他 Agent。`;
@@ -163,9 +163,21 @@ function isCommitReviewGateEnabled(): boolean {
     return true;
 }
 
+const AGENT_SUBTASK_COLLABORATION_HEADER = `--- 子任务执行与交付约束 ---
+${AGENT_EXECUTION_OWNERSHIP}`;
+
 function buildAgentCollaborationInstructions(opts?: ToolGuidedSectionsOptions): string {
-    const isFull = opts?.dispatchIntent === true;
     const gateEnabled = isCommitReviewGateEnabled();
+    if (opts?.runKind === "subtask") {
+        return [
+            AGENT_SUBTASK_COLLABORATION_HEADER,
+            AGENT_VERSION_BOUND_ACCEPTANCE,
+            AGENT_PLATFORM_CREDITS_GATE,
+            ...(gateEnabled ? [AGENT_COMMIT_REVIEW_GATE] : []),
+            AGENT_CONFIRM_BOUNDARY,
+        ].join("\n\n");
+    }
+    const isFull = opts?.dispatchIntent === true;
     const sections = isFull
         ? [
             AGENT_COLLABORATION_VALUE_AND_METHOD,
@@ -201,10 +213,7 @@ const AGENT_COLLABORATION_MIN_INSTRUCTIONS = buildAgentCollaborationInstructions
 // ============================================================================
 
 const CONVERSATION_INTERACTION_INSTRUCTIONS = `--- 对话内交互（show_interaction） ---
-“展示结构化内容 + 让用户选择”同时出现时（多方案对比要用户选一个、关键指标配合确认项），走 show_interaction，内容与选项在同一块呈现且提交后原位只读，比先给 Markdown 表格再追问更紧凑。
-- 用它：结构化对比/指标与选择同块展示；提交后用户选择原位只读。
-- 别用它：纯提问等待回答请用 ask_user；纯数据展示用 Markdown；持久工具或复杂流程交付 App。
-- 它非阻塞：不会暂停等待用户回复，也不会执行卡片动作；用户若操作，选择将作为新消息回传。不要用它代替 ask_user 等待回答。`;
+“展示结构化内容 + 让用户选择”同时出现时用 show_interaction，内容与选项在同一块呈现且提交后原位只读。纯提问等待回答请用 ask_user，纯展示用 Markdown，持久工具交付 App。非阻塞，选择将作为新消息回传，不要用它代替 ask_user 等待回答。`;
 
 // ============================================================================
 // 网页访问（有 exa_search 工具时注入）
@@ -225,9 +234,8 @@ const WEBPAGE_ACCESS_INSTRUCTIONS = `--- 网页访问能力 (Web Access) ---
 // ============================================================================
 
 const KNOWLEDGE_MANAGEMENT_INSTRUCTIONS = `--- 知识管理 ---
-- references：Agent 配置里每次对话自动注入（type=instruction 进 prompt 顶部做行为规则；type=knowledge 作参考资料；page 里的 @mention 只展开元信息（标题+dbKey），不递归展开内容）。
-- createDoc 文档按需 read：总索引页用 @[page:PAGE-xxx|标题] 指向细分页；mention 是指针，取内容必须 read({ dbKey })。读取路径：prompt/references 有 → 直接用；没有 → read 索引页找细分页 dbKey → read 细分页取完整内容。
-- 沉淀时机与落位判定：信息落位严格遵循「知识存储约定」（区分个人偏好进 memory、项目决策/真值进 repo 文档、运行时保障进代码+test；不一律 createDoc 或 updateAgent）。仅当沉淀跨 dialog 共读的平台页面级知识、且具备 createDoc 工具时按需创建；索引缺入口用 updateDoc 补 @mention。无对应工具严禁声称已创建或生效。不要把一次性内容写成知识页。`;
+- references 自动注入；page 内 @mention 是指针（只展开元信息），取内容须 read({ dbKey })：prompt/references 有 → 直接用；没有 → read 索引页再 read 细分页。
+- 沉淀遵循「知识存储约定」（偏好→memory、项目真值→repo 文档、运行时保障→代码+test，不一律 createDoc 或 updateAgent）。仅跨 dialog 共读的平台知识且有 createDoc 时创建，索引缺入口用 updateDoc 补 @mention；无工具严禁声称生效，不写一次性内容。`;
 
 // ============================================================================
 // 长期记忆（有 rememberMemory 工具时注入）
@@ -235,11 +243,11 @@ const KNOWLEDGE_MANAGEMENT_INSTRUCTIONS = `--- 知识管理 ---
 // ============================================================================
 
 const MEMORY_CAPTURE_INSTRUCTIONS = `--- 长期记忆 ---
-你可用 rememberMemory 把值得长期保留的信息写成一条 episodic memory；记录范围与 scope 分层规则详见 rememberMemory 工具 schema。
-- 拿不准是否值得记时，优先记下可复用项（长期偏好、协作约定、稳定经验），事后过滤比漏记易补救；但一次性事件流水与任务进度快照不属于可复用项，不适用此宽容规则。
-- 偏好或事实演进时，写入时用最新表述一次性说清，不要逐条累加中间态快照；但注意 rememberMemory 是写入新记录，底层不保证自动识别、合并或替代同一事实的旧记录。配额余量、限流冷却期限、部署当前态等很快过期的状态不进长期记忆，用实时查询获取当下真值。
-- 召回的记忆必须带完整历史上下文（来源/置信度/变更记录），禁止自行推理填补。
-- 物理删除仅在用户明确要求且在其权限范围内（deleteMemory），严禁模型擅自调用 deleteMemory 作为版本维护或清理手段；新旧记忆若有冲突，以当前输入和最新上下文优先，不擅自删除旧条。`;
+用 rememberMemory 记录可长期保留的 episodic memory（详见 schema）。
+- 拿不准是否值得记时，优先记下可复用项（偏好、约定、经验）；一次性流水、进度快照及易过期状态（配额、冷却、部署态）不进记忆。
+- 偏好/事实演进用最新表述写清，但 rememberMemory 是写入新记录，底层不保证自动识别、合并或替代同一事实的旧记录。
+- 召回记忆须带来源/置信度/变更记录，禁止自行推理填补。
+- 物理删除仅在用户明确要求且在权限内（deleteMemory），严禁模型擅自调用 deleteMemory 作为版本维护或清理手段；新旧冲突以当前输入为准。`;
 
 // ============================================================================
 // Agent 配置维护（有 updateSelf / updateAgent 工具时注入；两段合并为一块）
@@ -290,6 +298,11 @@ export type ToolGuidedSectionsOptions = {
      * （安全硬门逐字常在，不受影响）。
      */
     dispatchIntent?: boolean;
+    /**
+     * 运行类型：subtask（叶节点，禁止再派发孙对话）时裁剪冗长选人/会商段，
+     * 仅保留子任务执行交付、按版本验收与安全/commit 前 review 硬门。
+     */
+    runKind?: "interactive" | "subtask";
 };
 
 /**
@@ -315,13 +328,11 @@ const TOOL_ROUND_ECONOMY_INSTRUCTIONS = `--- 工具轮次经济学 ---
 // 优先级写进行为规则：GUI 授权 → 用户级等价方案 → 粘贴式降级，禁止静默绕过。
 // ============================================================================
 const PRIVILEGE_ESCALATION_INSTRUCTIONS = `--- 权限提升 ---
-命令失败且原因指向权限不足（sudo: 需要密码 / Permission denied / EACCES / Operation not permitted）时，优先把「输密码」这一步交还给用户的图形授权通道，而不是把 sudo 命令抛回给用户手抄：
-1. 桌面会话（Linux 有 DISPLAY/WAYLAND_DISPLAY）直接跑 \`pkexec <命令>\`：polkit 会在用户屏幕弹 GUI 密码框。弹之前先一句话说明要做什么、为何需要 root，避免凭空弹窗；复杂命令先写成脚本再 \`pkexec bash /tmp/xxx.sh\`。
-2. pkexec 不可用或非图形会话时按代价升序降级：
-   - 用户级等价方案先行：systemctl --user set-property、无特权配置路径、setcap、把用户加入所需组（重新登录生效）等——很多「必须 root」其实有 user 级等价物。
-   - 确实绕不开：给出一条可直接粘贴的命令（多步合并成一条），一次性说清副作用，等用户回报结果再继续；不要让用户来回跑多步、不要重复索要。
-3. Windows 用 \`Start-Process -Verb RunAs\`（UAC 弹窗）、macOS 用 \`osascript ... with administrator privileges\`，交互原则相同：弹窗前先说明、失败后不重复打扰。
-4. 禁止静默绕过：不重试同一特权命令赌运气、不用管道/环境变量喂密码给 sudo、不修改 polkit/sudoers 放宽授权。`;
+命令因权限不足（sudo: 需要密码 / Permission denied / EACCES / Operation not permitted）失败时，按以下优先级处理：
+1. 桌面会话（有 DISPLAY/WAYLAND_DISPLAY）先用 \`pkexec <命令>\` 弹 GUI 密码框（弹前一句说明原因，复杂命令写脚本后 \`pkexec bash /tmp/xxx.sh\`）。
+2. 无图形会话或 pkexec 不可用时：① 用户级等价方案先行（systemctl --user、无特权路径、setcap、加组）；② 确需 root 时给一条含副作用说明的可粘贴命令，等用户回报。
+3. Windows 用 \`Start-Process -Verb RunAs\`，macOS 用 \`osascript ... with administrator privileges\`（弹窗前说明）。
+4. 禁止静默绕过：不重试同一特权命令、不用管道/环境变量喂密码给 sudo、不修改 polkit/sudoers 放宽授权。`;
 
 const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
     {

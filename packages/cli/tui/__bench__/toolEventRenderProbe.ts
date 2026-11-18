@@ -37,7 +37,7 @@ function makeFakeOutput() {
         writes += 1;
         return true;
       },
-    },
+    } as unknown as NodeJS.WritableStream,
     stats: () => ({ bytes, writes }),
   };
 }
@@ -63,7 +63,7 @@ function seedHistory(history: TurnHistory) {
 }
 
 /** 等价 scheduleRender(33ms) 节流后的一帧 paint（paintSyncedFrame 的 render 部分）。 */
-function paintFrame(history: TurnHistory, out: { write(s: string): unknown }) {
+function paintFrame(history: TurnHistory, out: NodeJS.WritableStream) {
   renderHistory(out, history, INPUT_LINES);
 }
 

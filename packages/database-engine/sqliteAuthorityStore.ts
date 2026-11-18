@@ -133,6 +133,10 @@ export function createSqliteAuthorityStore(dbPath: string): AuthorityStore {
       const conditions: string[] = [];
       const params: string[] = [];
 
+      if (options.gt !== undefined) {
+        conditions.push("key > ?");
+        params.push(options.gt);
+      }
       if (options.gte !== undefined) {
         conditions.push("key >= ?");
         params.push(options.gte);

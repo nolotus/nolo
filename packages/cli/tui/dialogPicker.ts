@@ -243,6 +243,7 @@ export async function runDialogPicker(args: {
   const result = await runSelectDialog({
     items,
     title: `${t("historyPickerTitle")}  ${items.length}`,
+    filterable: true,
     input,
     output,
     readKey: args.readKey,

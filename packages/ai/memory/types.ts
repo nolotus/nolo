@@ -38,6 +38,16 @@ export interface MemoryItem {
   facet?: MemoryFacet;
   patternKey?: string;
   /**
+   * 可选稳定主题键（如 "code-formatter"）。
+   * 同一 (owner, subjectType, subjectId, kind, topicKey) 写入新内容时，
+   * 底层原子退役此前活跃的旧 State（retiredAt），保留完整历史与证据链。
+   */
+  topicKey?: string;
+  /**
+   * 本条演进状态在原子写入时替代（退役）的同主题旧 State ID 列表（仅作审计溯源）。
+   */
+  supersedesStateIds?: string[];
+  /**
    * procedural 专用：这个流程此前在什么时候遇到过（复现证据）。
    * 写入侧硬门要求 procedural 必须给出，缺失则降级 episodic——见 remember.ts。
    * 历史条目没有此字段（存量 procedural 均为硬门上线前写入）。

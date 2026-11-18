@@ -572,14 +572,20 @@ export function formatFinishedRunCard(
   const L = resolveLabels(opts?.labels);
   const icon = getAgentRunStatusIcon(status);
   const age = formatRunAge(opts?.timing, opts?.now);
-  const summary = [L.statusWord(status), age, formatProgressRow(opts?.toolCallCount, opts?.lastToolNames, L)]
-    .filter(Boolean)
-    .join(" · ");
-  const lines = [L.runFinished, `  ${icon} ${summary}`];
+  const progress = formatProgressRow(opts?.toolCallCount, opts?.lastToolNames, L);
   const identity = formatIdentityRow(agentName, opts?.runId, {
     title: opts?.title,
     unnamedAgent: L.unnamedAgent,
   });
+  if (status === "done" && !opts?.errorMessage?.trim()) {
+    const head = identity || L.statusWord(status);
+    const parts = [head, age, progress].filter(Boolean);
+    return `${icon} ${parts.join(" · ")}`;
+  }
+  const summary = [L.statusWord(status), age, progress]
+    .filter(Boolean)
+    .join(" · ");
+  const lines = [L.runFinished, `  ${icon} ${summary}`];
   if (identity) {
     lines.push(`  ${L.rows.agent}${identity}`);
   }

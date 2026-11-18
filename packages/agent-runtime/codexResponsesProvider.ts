@@ -75,7 +75,7 @@ export const CODEX_RESPONSES_URL =
  * the current stable codex-rs release (npm view, 2026-10-12), so bump this when
  * upstream ships newer models.
  */
-export const CODEX_CLIENT_VERSION = "0.162.1";
+export const CODEX_CLIENT_VERSION = "0.169.0";
 
 /** Official Codex login/request originator (Nolo auth flow uses the same value). */
 export const CODEX_ORIGINATOR = "codex_cli_rs";

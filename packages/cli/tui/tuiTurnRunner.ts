@@ -29,6 +29,7 @@ import { setSecret } from "core/secretsStore";
 import { defaultPromptReader } from "../secretCommands";
 import {
   runAgentTurn,
+  isAuthFailureError,
   isLocalContextCoverageFailure,
   OWNER_OAUTH_UNAVAILABLE_HINT,
   isOwnerOAuthUnavailableError,
@@ -87,6 +88,7 @@ import type { OriginShellGrant } from "../client/originShellGrant";
 import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecution";
 import type { CompactDialogResult } from "../client/compactDialog";
 import { isBalanceExhaustedError, isQuotaExhaustedError } from "../agentRunCommand";
+import { classifyFailureSubclass } from "../../ai/agent/agentAvailabilityShared";
 import { backfillRunRecordParentDialog } from "../agentRunControl";
 import type { SelfUpdateExecution } from "../updateCommands";
 import type { SpawnFn, spawnProcess } from "../processSpawn";
@@ -116,6 +118,7 @@ import { TUI_RESPONSE_VIEWPORT } from "./responseViewport";
 import type { AttachedImage } from "./pasteImage";
 import type { ClipboardImageDeps } from "./clipboardImage";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
+import { themeText } from "./theme";
 import {
   buildNoticeTasksFromRuns,
   mergeNoticeGroup,
@@ -323,7 +326,7 @@ async function runAgentChat(
       arguments: JSON.stringify(loadArgs),
     });
     if (!loadResult.metadata?.resolved) {
-      output.write(`[nolo] skill preload failed: ${loadResult.content}\n`);
+      output.write(`${themeText(`! skill preload failed: ${loadResult.content}`, "warning", resolveCliColorEnabled())}\n`);
       throw new Error(`Skill preload failed: ${loadResult.content}`);
     }
 
@@ -401,7 +404,7 @@ async function runAgentChat(
         });
         resolvedSkills.push(resolved);
       } catch (error) {
-        output.write(`[nolo] skill "${ref}" skipped: ${toErrorMessage(error)}\n`);
+        output.write(`${themeText(`! skill "${ref}" skipped: ${toErrorMessage(error)}`, "warning", resolveCliColorEnabled())}\n`);
       }
     }
     if (resolvedSkills.length > 0) {
@@ -418,7 +421,7 @@ async function runAgentChat(
           acc.filter((t) => tools.includes(t))
         );
         if (skillAllowedTools.length === 0) {
-          output.write(`[nolo] warning: attached skills declare incompatible allowed-tools; no tool restriction enforced\n`);
+          output.write(`${themeText("! warning: attached skills declare incompatible allowed-tools; no tool restriction enforced", "warning", resolveCliColorEnabled())}\n`);
         }
       }
     }
@@ -801,11 +804,11 @@ function deriveGateMeta(gate: LocalAgentActionGate) {
  */
 function writeGatePrompt(output: NodeJS.WritableStream, meta: ReturnType<typeof deriveGateMeta>): void {
   const { title, body, displayCommand, isConfirmation } = meta;
-  output.write(`\n[nolo] ${t("actionGateNeeded")}\n`);
-  output.write(`[nolo] ${title}\n`);
-  if (body) output.write(`[nolo] ${body}\n`);
+  output.write(`\n${themeText(`! ${t("actionGateNeeded")}`, "warning", resolveCliColorEnabled())}\n`);
+  output.write(`  ${title}\n`);
+  if (body) output.write(`  ${body}\n`);
   output.write(`  ${displayCommand}\n`);
-  output.write(`[nolo] ${isConfirmation ? t("actionGateConfirmHint") : t("actionGateEnterHint")}\n`);
+  output.write(`  ${isConfirmation ? t("actionGateConfirmHint") : t("actionGateEnterHint")}\n`);
 }
 
 /**
@@ -1347,6 +1350,10 @@ export interface AgentTurnContext {
 
   // ── 外部只读 / 动态读取字段 ──
   readonly sessionEnded: boolean;
+  /** 可选覆盖：child-run-completed 自动唤醒瞬态失败退避毫秒数（默认 1200ms）。 */
+  readonly wakeRetryDelayMs?: number;
+  /** 可选覆盖：child-run-completed 自动唤醒瞬态失败最大重试次数（默认 1，上限 2）。 */
+  readonly wakeMaxRetries?: number;
   /**
    * 分享 OAuth agent 的 shell 会话授权（块 D）：宿主在 runTuiWorkspace 启动时
    * 装配；owner-required 场景 adapter 在首次 execShell/launchProcess 前弹确认。
@@ -1390,6 +1397,69 @@ export interface AgentTurnContext {
   /** 把本轮平台积分累加进会话累计（undefined = 本轮无平台计费，不动累计）。 */
   accumulateSessionCredits: (credits: number | undefined) => void;
   emitCommandOutput: (text: string, command?: string) => void;
+}
+
+const DEFAULT_WAKE_RETRY_DELAY_MS = 1200;
+const DEFAULT_WAKE_MAX_RETRIES = 1;
+const MAX_WAKE_RETRY_CAP = 2;
+
+const DETERMINISTIC_FAILURE_SUBCLASSES = new Set([
+  "auth",
+  "balance",
+  "quota_5h",
+  "quota_weekly",
+  "quota_limit",
+]);
+
+function isRetryableWakeFailure(input: {
+  isChildRunWake: boolean;
+  wasAborted: boolean;
+  wasForceStopped: boolean;
+  runResult: RunAgentTurnResult;
+}): boolean {
+  if (!input.isChildRunWake) return false;
+  if (input.wasAborted || input.wasForceStopped) return false;
+  const failed = input.runResult.exitCode !== 0 || input.runResult.streamInterrupted === true;
+  if (!failed) return false;
+  if (
+    input.runResult.preflightBlocked ||
+    isLocalContextCoverageFailure(input.runResult.localError) ||
+    isInvalidGrantError(input.runResult.localError) ||
+    isAuthFailureError(input.runResult.localError) ||
+    isBalanceExhaustedError(input.runResult.localError) ||
+    isQuotaExhaustedError(input.runResult.localError) ||
+    isOwnerOAuthUnavailableError(input.runResult.localError)
+  ) {
+    return false;
+  }
+  const subclass =
+    input.runResult.failureSubclass ??
+    (input.runResult.localError ? classifyFailureSubclass(input.runResult.localError) : "unknown");
+  if (DETERMINISTIC_FAILURE_SUBCLASSES.has(subclass)) {
+    return false;
+  }
+  return true;
+}
+
+function buildWakeRetryContinuationMessage(event: ChildRunCompletedTurnEvent): string {
+  const runIds = event.runs.map((run) => run.runId).filter(Boolean);
+  const scope = runIds.length > 0 ? ` (${runIds.join(", ")})` : "";
+  return `The previous automatic background completion wake${scope} was interrupted by a transient error. Continue handling the completed background run result already recorded above without repeating it.`;
+}
+
+function waitForWakeRetryBackoff(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
@@ -1449,6 +1519,12 @@ export async function runOneAgentTurn(
     if (!event) return { ok: true, aborted: false };
     req = { ...req, text: event.text, event };
   }
+  const isChildRunWake = req.event.kind === "child-run-completed";
+  const childRunWakeEvent = isChildRunWake ? (req.event as ChildRunCompletedTurnEvent) : null;
+  const maxWakeRetries = isChildRunWake
+    ? Math.min(Math.max(0, Math.floor(ctx.wakeMaxRetries ?? DEFAULT_WAKE_MAX_RETRIES)), MAX_WAKE_RETRY_CAP)
+    : 0;
+  const wakeRetryDelayMs = Math.max(0, ctx.wakeRetryDelayMs ?? DEFAULT_WAKE_RETRY_DELAY_MS);
   const message = req.text;
   // Allocate before the first provider call so busy submissions share this turn's dialog.
   const freshDialog = !ctx.state.dialogId || ctx.pendingFreshDialogId === ctx.state.dialogId;
@@ -1617,52 +1693,55 @@ export async function runOneAgentTurn(
   // turn 开始时用共享 estimateMessagesTokens 估出新增内容并入基线，并清空上一轮的 turnTokens（避免
   // 上下文 chip 残留上一轮未包含回答的 provider input）。
   // 分支判定：只有当存在真实权威 input 且 authTurnCount 有效时才走切片分支；无真权威时必须走估算分支。
-  const previousContextUsage = { turnTokens: ctx.state.turnTokens, lastAuthorityTurnCount: ctx.state.lastAuthorityTurnCount };
-  const nextBaseline = computeBaselineContextTokens({
-    authoritativeInput: ctx.state.turnTokens?.input,
-    lastAuthorityTurnCount: ctx.state.lastAuthorityTurnCount,
-    turns: ctx.history.turns,
-    fallbackEstimate: () =>
-      estimateDefaultCliContextTokens({
-        cwd: ctx.state.cwd,
-        agentKey: ctx.state.agentKey,
-        agentName: ctx.state.agentName,
-        userLanguage: ctx.state.userLanguage,
-        responseViewport: TUI_RESPONSE_VIEWPORT,
-        messages: ctx.history.turns,
-        ...resolveAgentModelIdentity({
+  const prepareAttemptRenderAndBaseline = () => {
+    const previousContextUsage = { turnTokens: ctx.state.turnTokens, lastAuthorityTurnCount: ctx.state.lastAuthorityTurnCount };
+    const nextBaseline = computeBaselineContextTokens({
+      authoritativeInput: ctx.state.turnTokens?.input,
+      lastAuthorityTurnCount: ctx.state.lastAuthorityTurnCount,
+      turns: ctx.history.turns,
+      fallbackEstimate: () =>
+        estimateDefaultCliContextTokens({
+          cwd: ctx.state.cwd,
           agentKey: ctx.state.agentKey,
           agentName: ctx.state.agentName,
+          userLanguage: ctx.state.userLanguage,
+          responseViewport: TUI_RESPONSE_VIEWPORT,
+          messages: ctx.history.turns,
+          ...resolveAgentModelIdentity({
+            agentKey: ctx.state.agentKey,
+            agentName: ctx.state.agentName,
+          }),
         }),
-      }),
-  });
+    });
 
-  // 轮内实时积分与估算推进从 0 开始：上一轮若经异常路径退出，这里兜底清掉残留；
-  // 同时重置 turnTokens 为 undefined，由并入新增内容的基线接管展示。
-  ctx.state = {
-    ...ctx.state,
-    turnTokens: undefined,
-    estimatedContextTokens: nextBaseline,
-    liveTurnCredits: undefined,
-    liveTurnEstimatedTokens: undefined,
+    // 轮内实时积分与估算推进从 0 开始：上一轮若经异常路径退出，这里兜底清掉残留；
+    // 同时重置 turnTokens 为 undefined，由并入新增内容的基线接管展示。
+    ctx.state = {
+      ...ctx.state,
+      turnTokens: undefined,
+      estimatedContextTokens: nextBaseline,
+      liveTurnCredits: undefined,
+      liveTurnEstimatedTokens: undefined,
+    };
+
+    startTurn(ctx.history, "assistant");
+    const liveTracker = createLiveTurnTracker();
+    const agentOutput = isInteractiveInput(ctx.input)
+      ? createHistoryOutputStream(ctx.history, () => {
+          const { updated, liveTokens } = liveTracker.onStreamChunk(ctx.history.currentContent);
+          if (updated) {
+            ctx.state = {
+              ...ctx.state,
+              liveTurnEstimatedTokens: liveTokens,
+            };
+          }
+          ctx.scheduleRender();
+        }, {
+          visibleRunIds: () => ctx.activityIndicator.getVisibleRunIds?.() ?? new Set<string>(),
+        })
+      : ctx.output;
+    return { previousContextUsage, nextBaseline, agentOutput };
   };
-
-  startTurn(ctx.history, "assistant");
-  const liveTracker = createLiveTurnTracker();
-  const agentOutput = isInteractiveInput(ctx.input)
-    ? createHistoryOutputStream(ctx.history, () => {
-        const { updated, liveTokens } = liveTracker.onStreamChunk(ctx.history.currentContent);
-        if (updated) {
-          ctx.state = {
-            ...ctx.state,
-            liveTurnEstimatedTokens: liveTokens,
-          };
-        }
-        ctx.scheduleRender();
-      }, {
-        visibleRunIds: () => ctx.activityIndicator.getVisibleRunIds?.() ?? new Set<string>(),
-      })
-    : ctx.output;
   // Interactive ask_user: dock an arrow-key select dialog above the
   // composer (same dialogHost + runSelectDialog as the /agent picker) and
   // resolve the user's pick into the userMessage that continues the turn.
@@ -1727,9 +1806,7 @@ export async function runOneAgentTurn(
   const drainInjectedBatches: Array<{ batchId: string; messageIds: string[] }> = [];
   let processCausalDepth = req.event.kind === "background-task-completed" ? (req.event.processCausalDepth ?? 0) : 0;
   // 后台进程任务终态通知：组装前先快照本轮要注入的行，消费点只清掉快照里的行。
-  const injectedProcessNoticeLines = ctx.state.pendingProcessNotices
-    ? [...ctx.state.pendingProcessNotices]
-    : [];
+  let injectedProcessNoticeLines: string[] = [];
   const consumeInjectedProcessNotices = (keepAll = false): string[] => {
     if (keepAll || injectedProcessNoticeLines.length === 0) {
       return ctx.state.pendingProcessNotices ?? [];
@@ -1740,7 +1817,7 @@ export async function runOneAgentTurn(
     );
   };
   // 后台子 agent run 终态通知：组装前快照本轮要注入的条目，消费点只清掉快照里的条目。
-  const injectedChildRunNoticeItems = (ctx.state.pendingChildRunNotices ?? []).filter(r => !!r.parentDialogId && r.parentDialogId === ctx.state.dialogId);
+  let injectedChildRunNoticeItems: AgentRunCompletionShape[] = [];
   const consumeInjectedChildRunNotices = (keepAll = false): AgentRunCompletionShape[] => {
     if (keepAll || injectedChildRunNoticeItems.length === 0) {
       return ctx.state.pendingChildRunNotices ?? [];
@@ -1750,20 +1827,32 @@ export async function runOneAgentTurn(
       (r) => !injectedIds.has(r.runId),
     );
   };
+  const refreshInjectedSnapshots = () => {
+    injectedProcessNoticeLines = ctx.state.pendingProcessNotices
+      ? [...ctx.state.pendingProcessNotices]
+      : [];
+    injectedChildRunNoticeItems = (ctx.state.pendingChildRunNotices ?? []).filter(
+      (r) => !!r.parentDialogId && r.parentDialogId === ctx.state.dialogId,
+    );
+  };
+  refreshInjectedSnapshots();
   const originDialogId = ctx.state.dialogId;
-  const terminalEvents: InternalTurnEvent[] = [req.event];
-  const settleNotices = (persisted: boolean) => {
+  let terminalEvents: InternalTurnEvent[] = [req.event];
+  const settleNotices = (
+    persisted: boolean,
+    eventsToSettle: readonly InternalTurnEvent[] = terminalEvents,
+  ) => {
     const keepPending = !persisted;
     if (persisted) {
       for (const run of injectedChildRunNoticeItems) ctx.runCompletionWatcher?.markAcknowledged(run.runId);
-      for (const event of terminalEvents) {
+      for (const event of eventsToSettle) {
         if (event.kind === "child-run-completed") for (const run of event.runs) ctx.runCompletionWatcher?.markAcknowledged(run.runId);
       }
     }
-    for (const event of terminalEvents) traceChildRunWake("turn-notice-settle", event, ctx.state.dialogId ?? null, { persisted, ...queueWakeFields(ctx.chatQueueBinding?.getStatus?.()) });
+    for (const event of eventsToSettle) traceChildRunWake("turn-notice-settle", event, ctx.state.dialogId ?? null, { persisted, ...queueWakeFields(ctx.chatQueueBinding?.getStatus?.()) });
     let nextProcessNotices = consumeInjectedProcessNotices(keepPending);
     let nextChildRunNotices = consumeInjectedChildRunNotices(keepPending);
-    for (const event of terminalEvents) {
+    for (const event of eventsToSettle) {
       if (keepPending && event.kind === "background-task-completed") {
         const ownerDialogId = originDialogId ?? null;
         const noticeToStore: ProcessTerminalNotice = event.notice ?? {
@@ -1795,18 +1884,23 @@ export async function runOneAgentTurn(
     };
   };
   let turnOutcomeSettled = false;
+  let attemptMessage = message;
+  let attemptFreshDialog = freshDialog;
   try {
-    ctx.activeTurnAbort = new AbortController();
-    ctx.activeTurnEpoch = myEpoch;
-    const runResult = await runAgentChat(
-      ctx.options.scriptDir,
-      ctx.state,
-      message,
-      ctx.options.env ?? process.env,
-      agentOutput,
-      ctx.options.agentRunner,
-      {
-        freshDialog,
+    for (let wakeAttempt = 0; ; wakeAttempt++) {
+      drainInjectedBatches.length = 0;
+      const { previousContextUsage, nextBaseline, agentOutput } = prepareAttemptRenderAndBaseline();
+      ctx.activeTurnAbort = new AbortController();
+      ctx.activeTurnEpoch = myEpoch;
+      const runResult = await runAgentChat(
+        ctx.options.scriptDir,
+        ctx.state,
+        attemptMessage,
+        ctx.options.env ?? process.env,
+        agentOutput,
+        ctx.options.agentRunner,
+        {
+          freshDialog: attemptFreshDialog,
         userMessages: (req as TuiBatchTurnRequest).userMessages,
         ...((req as TuiBatchTurnRequest).cliBatchId
           ? { cliBatchId: (req as TuiBatchTurnRequest).cliBatchId }
@@ -2035,143 +2129,224 @@ export async function runOneAgentTurn(
       scheduleTitlePatchSync(runResult);
       return { ok: false, aborted: true };
     }
-    const wasAborted = ctx.activeTurnAbort.signal.aborted;
-    ctx.activeTurnAbort = null;
-    if (isInteractiveInput(ctx.input)) {
-      finalizeCurrentTurn(ctx.history);
-      ctx.flushPendingRender();
-      ctx.renderHistoryToOutput();
-      if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
-    }
-    // 终态判定与后台结算共用同一份真值（client/terminalRunStatus）：停滞/截断的
-    // run 会带着 exitCode 0 返回，只看 exitCode 会把它报成 done，而 registry 记的
-    // 是 failed。中断同理有两张面孔 —— 用户按 Esc（wasAborted）与流中途被中断
-    // （provider 报错，runResult.streamInterrupted，此时并未 abort，对话可能仍在
-    // 服务端继续）—— 两者都该报 idle；只看 wasAborted 会把后者报成 done，与
-    // 一次性 CLI 对同一个 run 的结论相反。epoch 守卫与强停那条 idle 路径不变。
-    emitStatusIfCurrentTurn({
-      state: resolveTerminalProgramStatusState({
-        exitCode: runResult.exitCode,
-        interrupted: wasAborted || runResult.streamInterrupted === true,
-        // Business completion is a task-scoped outcome, not a runtime fault: an
-        // unfinished or still-pending task must not fabricate a stalled/truncated
-        // signal (and therefore not an error terminal state). The task status is
-        // reported on its own line above; runtime faults stay with
-        // isRunResultStalledOrTruncated, which the one-shot CLI settlement shares.
-        stalledOrTruncated: isRunResultStalledOrTruncated(runResult),
-      }),
-    });
-    if (wasAborted) {
-      if (runResult.pendingToolName) {
-        // 协作式中止时工具仍在跑：localLoop 放弃等待但工具可能已在后台
-        // 完成，其结果不会进入本次对话历史。告知工具名，语气正常。
-        ctx.emitCommandOutput(t("turnStoppedToolPending", runResult.pendingToolName));
-      } else {
-        ctx.emitCommandOutput(t("turnStopped"));
+      const wasAborted = ctx.activeTurnAbort.signal.aborted;
+      ctx.activeTurnAbort = null;
+      if (isInteractiveInput(ctx.input)) {
+        finalizeCurrentTurn(ctx.history);
+        ctx.flushPendingRender();
+        ctx.renderHistoryToOutput();
+        if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
       }
-    }
-    const nextDialogKey = runResult.dialogId
-      ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
-        ? ctx.state.dialogKey
-        : ctx.state.dialogOwnerId
-          ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
-          : undefined
-      : ctx.state.dialogKey;
-    const { pendingProcessNotices: nextProcessNotices, pendingChildRunNotices: nextChildRunNotices } = settleNotices(runResult.savedTurnPersisted === true);
-    ctx.state = {
-      ...ctx.state,
-      ...(runResult.dialogId
-        ? {
-            dialogId: runResult.dialogId,
-            dialogKey: nextDialogKey,
-            dialogLabel: runResult.title || runResult.dialogId,
-            ...(runResult.title ? { dialogTitle: runResult.title } : {}),
-          }
-        : {}),
-      ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
-      ...(runResult.contextWindow
-        ? { contextWindow: runResult.contextWindow }
-        : {}),
-      // input_tokens 是累计上下文输入（含历史消息），用本轮权威 input 重置基线；无 usage 时使用对话历史消息估算兜底。
-      // 权威 input 是该次回答生成前的快照，不含最后一轮 assistant 输出；与 Web 侧对齐，用共享
-      // historyTokensBeforeLatestAssistant 将回答本身作为权威增量带入，避免权威到达瞬间 chip 少一条回答。
-      ...(runResult.turnTokens && runResult.turnTokens.input > 0
-        ? (() => {
-            const assistantDelta = Math.max(
-              0,
-              estimateMessagesTokens(ctx.history.turns) -
-                historyTokensBeforeLatestAssistant(ctx.history.turns),
-            );
-            return {
-              estimatedContextTokens: runResult.turnTokens.input + assistantDelta,
-              lastAuthorityTurnCount: resolveAuthorityTurnCount(ctx.history.turns),
-              liveTurnEstimatedTokens: assistantDelta > 0 ? assistantDelta : undefined,
-            };
-          })()
-        : previousContextUsage.turnTokens
-          ? preserveContextUsageWithoutReceipt(previousContextUsage, nextBaseline)
-          : {
-            estimatedContextTokens: estimateDefaultCliContextTokens({
-              cwd: ctx.state.cwd,
-              agentKey: ctx.state.agentKey,
-              agentName: ctx.state.agentName,
-              userLanguage: ctx.state.userLanguage,
-              responseViewport: TUI_RESPONSE_VIEWPORT,
-              messages: ctx.history.turns,
-            }),
-            lastAuthorityTurnCount: undefined,
-            liveTurnEstimatedTokens: undefined,
-          }),
-      ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-      // 切换消息/进程终态通知本轮已注入 agent 上下文（runAgentChat 已读），
-      // 消费掉，避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实
-      // turn、而非纯 child-run-completed 事件短路）时才清除。
-      pendingCwdNotice: undefined,
-      // 若本轮因 preflightBlocked 拒发（如上下文超限），主请求未送出，模型
-      // 尚未消费后台事件，通知保留在 pending 中；当主请求成功发出且未被拦截时，
-      // 才消费掉本轮注入项（settle）。若本轮直接作为 completion turn 拒发，则将事件
-      // 沉淀进 pending，供用户紧接着发起的下一个 turn 注入，防止丢失与重复重放。
-      pendingProcessNotices: nextProcessNotices,
-      pendingChildRunNotices: (nextChildRunNotices?.length ?? 0) > 0 ? nextChildRunNotices : undefined,
-    };
-    turnOutcomeSettled = true;
-    // 同上：失败 / 中断的 turn 也要计进会话累计。
-    ctx.accumulateSessionCredits(runResult.turnCredits);
-    appendTurnBillingAudit({
-      dialogId: runResult.dialogId ?? null,
-      turnCredits: runResult.turnCredits ?? null,
-      usageRecords: runResult.usageRecords,
-      // 普通中断（Esc）同样属于「账照记、轮未正常收尾」，审计行标注出来，
-      // 与 1028 行 forceStop 路径及正常完成轮区分开。
-      ...(wasAborted || runResult.streamInterrupted ? { aborted: true } : {}),
-    });
-    scheduleTitlePatchSync(runResult);
-    // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
-    // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。
-    if (!wasAborted && runResult.exitCode !== 0) {
-      if (runResult.preflightBlocked || isLocalContextCoverageFailure(runResult.localError)) {
-        ctx.emitCommandOutput(describeContextRefusal(runResult.preflightBlocked?.refusal
-          ?? contextRefusalDiagnostics(runResult.localError)));
-      } else if (isOwnerOAuthUnavailableError(runResult.localError)) {
-        ctx.emitCommandOutput(OWNER_OAUTH_UNAVAILABLE_HINT);
-      } else if (isInvalidGrantError(runResult.localError)) {
-        const provider = "claude";
-        ctx.emitCommandOutput(t("auth.grantExpiredHint", provider));
+      const nextDialogKey = runResult.dialogId
+        ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
+          ? ctx.state.dialogKey
+          : ctx.state.dialogOwnerId
+            ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
+            : undefined
+        : ctx.state.dialogKey;
+      const foldAttemptBaseState = (
+        noticeState: {
+          pendingProcessNotices?: string[];
+          pendingChildRunNotices?: AgentRunCompletionShape[];
+        },
+      ) => {
         ctx.state = {
           ...ctx.state,
-          suggestedAuthCommand: `/auth ${provider}`,
+          ...(runResult.dialogId
+            ? {
+                dialogId: runResult.dialogId,
+                dialogKey: nextDialogKey,
+                dialogLabel: runResult.title || runResult.dialogId,
+                ...(runResult.title ? { dialogTitle: runResult.title } : {}),
+              }
+            : {}),
+          ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
+          ...(runResult.contextWindow
+            ? { contextWindow: runResult.contextWindow }
+            : {}),
+          // input_tokens 是累计上下文输入（含历史消息），用本轮权威 input 重置基线；无 usage 时使用对话历史消息估算兜底。
+          // 权威 input 是该次回答生成前的快照，不含最后一轮 assistant 输出；与 Web 侧对齐，用共享
+          // historyTokensBeforeLatestAssistant 将回答本身作为权威增量带入，避免权威到达瞬间 chip 少一条回答。
+          ...(runResult.turnTokens && runResult.turnTokens.input > 0
+            ? (() => {
+                const assistantDelta = Math.max(
+                  0,
+                  estimateMessagesTokens(ctx.history.turns) -
+                    historyTokensBeforeLatestAssistant(ctx.history.turns),
+                );
+                return {
+                  estimatedContextTokens: runResult.turnTokens.input + assistantDelta,
+                  lastAuthorityTurnCount: resolveAuthorityTurnCount(ctx.history.turns),
+                  liveTurnEstimatedTokens: assistantDelta > 0 ? assistantDelta : undefined,
+                };
+              })()
+            : previousContextUsage.turnTokens
+              ? preserveContextUsageWithoutReceipt(previousContextUsage, nextBaseline)
+              : {
+                estimatedContextTokens: estimateDefaultCliContextTokens({
+                  cwd: ctx.state.cwd,
+                  agentKey: ctx.state.agentKey,
+                  agentName: ctx.state.agentName,
+                  userLanguage: ctx.state.userLanguage,
+                  responseViewport: TUI_RESPONSE_VIEWPORT,
+                  messages: ctx.history.turns,
+                }),
+                lastAuthorityTurnCount: undefined,
+                liveTurnEstimatedTokens: undefined,
+              }),
+          ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
+          // 切换消息/进程终态通知本轮已注入 agent 上下文（runAgentChat 已读），
+          // 消费掉，避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实
+          // turn、而非纯 child-run-completed 事件短路）时才清除。
+          pendingCwdNotice: undefined,
+          // 若本轮因 preflightBlocked 拒发（如上下文超限），主请求未送出，模型
+          // 尚未消费后台事件，通知保留在 pending 中；当主请求成功发出且未被拦截时，
+          // 才消费掉本轮注入项（settle）。若本轮直接作为 completion turn 拒发，则将事件
+          // 沉淀进 pending，供用户紧接着发起的下一个 turn 注入，防止丢失与重复重放。
+          pendingProcessNotices: noticeState.pendingProcessNotices,
+          pendingChildRunNotices:
+            (noticeState.pendingChildRunNotices?.length ?? 0) > 0
+              ? noticeState.pendingChildRunNotices
+              : undefined,
         };
-      } else if (isBalanceExhaustedError(runResult.localError) && runResult.dialogId) {
-        ctx.emitCommandOutput(t("balanceExhaustedHint"));
-      } else if (isQuotaExhaustedError(runResult.localError)) {
-        ctx.emitCommandOutput(t("quotaExhaustedHint"));
-      } else if (runResult.dialogId) {
-        ctx.emitCommandOutput(t("dialogPreservedHint"));
-      } else {
-        ctx.emitCommandOutput(t("dialogNotSavedHint"));
+      };
+      const recordAttemptBillingAndTitle = () => {
+        // 同上：失败 / 中断的 turn 也要计进会话累计。
+        ctx.accumulateSessionCredits(runResult.turnCredits);
+        appendTurnBillingAudit({
+          dialogId: runResult.dialogId ?? null,
+          turnCredits: runResult.turnCredits ?? null,
+          usageRecords: runResult.usageRecords,
+          // 普通中断（Esc）同样属于「账照记、轮未正常收尾」，审计行标注出来，
+          // 与 forceStop 路径及正常完成轮区分开。
+          ...(wasAborted || runResult.streamInterrupted ? { aborted: true } : {}),
+        });
+        scheduleTitlePatchSync(runResult);
+      };
+
+      if (
+        isRetryableWakeFailure({
+          isChildRunWake,
+          wasAborted,
+          wasForceStopped,
+          runResult,
+        }) &&
+        wakeAttempt < maxWakeRetries
+      ) {
+        const persisted = runResult.savedTurnPersisted === true;
+        if (persisted) {
+          foldAttemptBaseState(settleNotices(true));
+          terminalEvents = [];
+          attemptMessage = buildWakeRetryContinuationMessage(childRunWakeEvent!);
+          attemptFreshDialog = false;
+        } else {
+          const extraDrained = terminalEvents.slice(1);
+          const settledExtra =
+            extraDrained.length > 0
+              ? settleNotices(false, extraDrained)
+              : {
+                  pendingProcessNotices: ctx.state.pendingProcessNotices,
+                  pendingChildRunNotices: ctx.state.pendingChildRunNotices,
+                };
+          foldAttemptBaseState(settledExtra);
+          terminalEvents = [req.event];
+          attemptMessage = req.text;
+          attemptFreshDialog = attemptFreshDialog && !runResult.dialogId;
+        }
+        recordAttemptBillingAndTitle();
+        traceChildRunWake("wake-retry", req.event, ctx.state.dialogId ?? null, {
+          attempt: wakeAttempt + 1,
+          maxRetries: maxWakeRetries,
+          delayMs: wakeRetryDelayMs,
+          savedTurnPersisted: persisted,
+        });
+        const retryAbort = new AbortController();
+        ctx.activeTurnAbort = retryAbort;
+        ctx.activeTurnEpoch = myEpoch;
+        await waitForWakeRetryBackoff(wakeRetryDelayMs, retryAbort.signal);
+        const abortedDuringBackoff = retryAbort.signal.aborted;
+        ctx.activeTurnAbort = null;
+        if (ctx.forcedStopEpoch === myEpoch || abortedDuringBackoff || ctx.sessionEnded) {
+          emitStatusIfCurrentTurn({ state: "idle" });
+          if (abortedDuringBackoff && ctx.forcedStopEpoch !== myEpoch) {
+            ctx.emitCommandOutput(t("turnStopped"));
+          }
+          const preserved = settleNotices(false);
+          ctx.state = {
+            ...ctx.state,
+            pendingProcessNotices: preserved.pendingProcessNotices,
+            pendingChildRunNotices:
+              (preserved.pendingChildRunNotices?.length ?? 0) > 0
+                ? preserved.pendingChildRunNotices
+                : undefined,
+          };
+          turnOutcomeSettled = true;
+          return { ok: false, aborted: true };
+        }
+        refreshInjectedSnapshots();
+        continue;
       }
+
+      // 终态判定与后台结算共用同一份真值（client/terminalRunStatus）：停滞/截断的
+      // run 会带着 exitCode 0 返回，只看 exitCode 会把它报成 done，而 registry 记的
+      // 是 failed。中断同理有两张面孔 —— 用户按 Esc（wasAborted）与流中途被中断
+      // （provider 报错，runResult.streamInterrupted，此时并未 abort，对话可能仍在
+      // 服务端继续）—— 两者都该报 idle；只看 wasAborted 会把后者报成 done，与
+      // 一次性 CLI 对同一个 run 的结论相反。epoch 守卫与强停那条 idle 路径不变。
+      emitStatusIfCurrentTurn({
+        state: resolveTerminalProgramStatusState({
+          exitCode: runResult.exitCode,
+          interrupted: wasAborted || runResult.streamInterrupted === true,
+          // Business completion is a task-scoped outcome, not a runtime fault: an
+          // unfinished or still-pending task must not fabricate a stalled/truncated
+          // signal (and therefore not an error terminal state). The task status is
+          // reported on its own line above; runtime faults stay with
+          // isRunResultStalledOrTruncated, which the one-shot CLI settlement shares.
+          stalledOrTruncated: isRunResultStalledOrTruncated(runResult),
+        }),
+      });
+      if (wasAborted) {
+        if (runResult.pendingToolName) {
+          // 协作式中止时工具仍在跑：localLoop 放弃等待但工具可能已在后台
+          // 完成，其结果不会进入本次对话历史。告知工具名，语气正常。
+          ctx.emitCommandOutput(t("turnStoppedToolPending", runResult.pendingToolName));
+        } else {
+          ctx.emitCommandOutput(t("turnStopped"));
+        }
+      }
+      foldAttemptBaseState(settleNotices(runResult.savedTurnPersisted === true));
+      turnOutcomeSettled = true;
+      recordAttemptBillingAndTitle();
+      // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
+      // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。
+      if (!wasAborted && (runResult.exitCode !== 0 || runResult.streamInterrupted === true)) {
+        if (runResult.preflightBlocked || isLocalContextCoverageFailure(runResult.localError)) {
+          ctx.emitCommandOutput(describeContextRefusal(runResult.preflightBlocked?.refusal
+            ?? contextRefusalDiagnostics(runResult.localError)));
+        } else if (isOwnerOAuthUnavailableError(runResult.localError)) {
+          ctx.emitCommandOutput(OWNER_OAUTH_UNAVAILABLE_HINT);
+        } else if (isInvalidGrantError(runResult.localError)) {
+          const provider = "claude";
+          ctx.emitCommandOutput(t("auth.grantExpiredHint", provider));
+          ctx.state = {
+            ...ctx.state,
+            suggestedAuthCommand: `/auth ${provider}`,
+          };
+        } else if (isBalanceExhaustedError(runResult.localError) && runResult.dialogId) {
+          ctx.emitCommandOutput(t("balanceExhaustedHint"));
+        } else if (isQuotaExhaustedError(runResult.localError)) {
+          ctx.emitCommandOutput(t("quotaExhaustedHint"));
+        } else if (isChildRunWake) {
+          ctx.emitCommandOutput(t("wakePausedOnErrorHint"));
+        } else if (runResult.exitCode !== 0 && runResult.dialogId) {
+          ctx.emitCommandOutput(t("dialogPreservedHint"));
+        } else if (runResult.exitCode !== 0) {
+          ctx.emitCommandOutput(t("dialogNotSavedHint"));
+        }
+      }
+      const ok = !wasAborted && runResult.exitCode === 0 && runResult.streamInterrupted !== true;
+      return { ok, aborted: wasAborted };
     }
-    return { ok: !wasAborted, aborted: wasAborted };
   } catch (error) {
     if (ctx.activeTurnAbort?.signal.aborted) return { ok: false, aborted: true };
     // 迟到的异常：强停已经把屏幕交还用户并报过 idle，这条属于被丢弃的 turn，
@@ -2294,7 +2469,9 @@ export function ensureChatQueueBinding(
     resolveUnknownWithoutResend: async batchId => resolveCliUnknownBatchWithoutResend(await getStore(), boundDialogId, batchId),
     runBatch: async (requests, canStart) => runQueuedUserBatch(ctx, requests, actionGateHandler, confirmDestructiveAction, runOneAgentTurn, canStart),
   });
-  void ctx.chatQueueBinding.restorePending().catch(error => ctx.emitCommandOutput(`[nolo] pending restore failed: ${String(error)}`));
+  void ctx.chatQueueBinding.restorePending().catch(error =>
+    ctx.emitCommandOutput(themeText(`! pending restore failed: ${String(error)}`, "warning", resolveCliColorEnabled())),
+  );
   // The notify receiver lives exactly as long as this binding: it is the only
   // process allowed to admit externally delivered messages into this dialog's
   // queue, and it disappears when the dialog identity changes or the workspace
@@ -2329,11 +2506,11 @@ export function ensureChatQueueBinding(
     },
     onEvent: (event) => {
       if (event.type === "failed") {
-        ctx.emitCommandOutput(`[nolo] dialog notify failed: ${event.error}`);
+        ctx.emitCommandOutput(themeText(`! dialog notify failed: ${event.error}`, "warning", resolveCliColorEnabled()));
       } else if (event.type === "ack-write-failed") {
         // Delivery succeeded; only the receipt is missing. Say so, so this is
         // not read as a lost notification.
-        ctx.emitCommandOutput(`[nolo] dialog notify delivered, receipt not written: ${event.error}`);
+        ctx.emitCommandOutput(themeText(`! dialog notify delivered, receipt not written: ${event.error}`, "warning", resolveCliColorEnabled()));
       }
     },
   });
@@ -2341,7 +2518,11 @@ export function ensureChatQueueBinding(
   // `unsupported`/`offline` and the user with no explanation of why.
   if (!ctx.dialogNotifyReceiver.active) {
     ctx.emitCommandOutput(
-      `[nolo] dialog notify disabled for this dialog: ${ctx.dialogNotifyReceiver.reason ?? "unknown reason"}`,
+      themeText(
+        `· dialog notify disabled for this dialog: ${ctx.dialogNotifyReceiver.reason ?? "unknown reason"}`,
+        "muted",
+        resolveCliColorEnabled(),
+      ),
     );
   }
   return ctx.chatQueueBinding;

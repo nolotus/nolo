@@ -3,6 +3,7 @@ export type AuthorityBatchOperation =
   | { type: "del"; key: string };
 
 export type AuthorityIteratorOptions = {
+  gt?: string;
   gte?: string;
   lte?: string;
   lt?: string;
@@ -53,6 +54,15 @@ export interface AuthorityStore {
    * outcome, not cancellation; reload before deciding whether to retry.
    */
   conditionalPut?(key: string, expectedRevision: number | null, value: unknown): Promise<AuthorityConditionalPutResult>;
+  /** Optional batch get capability implemented by the broker client. */
+  batchGet?(
+    keys: string[]
+  ): Promise<
+    Array<
+      | { ok: true; value: unknown }
+      | { ok: false; error: { code: string; message: string; retryable?: boolean } }
+    >
+  >;
   put(key: string, value: unknown): Promise<void>;
   del(key: string): Promise<void>;
   batchWrite(ops: AuthorityBatchOperation[]): Promise<void>;

@@ -1,3 +1,4 @@
+import type { SummarySourceSegment } from "../ai/context/compactionShared";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeContextUsageRecord,
@@ -274,6 +275,7 @@ export type AgentRuntimeDialogSummary = {
    * 字段存在但值畸形（null / 非数字）同样判无效（键存在即透传，读取层不静默丢弃）。
    */
   schemaVersion?: unknown;
+  sourceSegments?: ReadonlyArray<SummarySourceSegment>;
   referenceKeys?: string[];
 };
 
@@ -364,6 +366,7 @@ export type AgentRuntimeHostAdapter = {
     sourceHash?: string;
     sourceCount?: number;
     schemaVersion?: number;
+    sourceSegments?: ReadonlyArray<SummarySourceSegment>;
     referenceKeys?: string[];
   }): Promise<void>;
   /**

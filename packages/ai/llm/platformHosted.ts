@@ -26,6 +26,8 @@ import {
   PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
   PLATFORM_HOSTED_GROK_4_6_MODEL,
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
+  PLATFORM_HOSTED_GPT_6_2_ASTRA_MODEL,
+  PLATFORM_HOSTED_GPT_6_2_SOL_MODEL,
   PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
   PLATFORM_HOSTED_GPT_6_1_SOL_MODEL,
   PLATFORM_HOSTED_GPT_6_1_TERRA_MODEL,
@@ -281,6 +283,44 @@ export const PLATFORM_HOSTED_GPT_6_ASTRA_LONG_CONTEXT_PRICE = {
   cachingRead: toPlatformCredits(2), // 16 credits（CF 官方长档 cached in）
   cachingWrite: toPlatformCredits(25), // 200 credits（CF 官方长档 cache write）
   output: toPlatformCredits(75), // 600 credits
+} as const;
+
+/**
+ * GPT-6.2 Astra（2026-11-17 发布，Global Standard）：
+ */
+export const PLATFORM_HOSTED_GPT_6_2_ASTRA_PRICE = {
+  input: toPlatformCredits(8),
+  inputCacheHit: toPlatformCredits(0.4),
+  cachingRead: toPlatformCredits(0.4),
+  cachingWrite: toPlatformCredits(10),
+  output: toPlatformCredits(40),
+} as const;
+
+export const PLATFORM_HOSTED_GPT_6_2_ASTRA_LONG_CONTEXT_PRICE = {
+  input: toPlatformCredits(16),
+  inputCacheHit: toPlatformCredits(0.8),
+  cachingRead: toPlatformCredits(0.8),
+  cachingWrite: toPlatformCredits(20),
+  output: toPlatformCredits(60),
+} as const;
+
+/**
+ * GPT-6.2 Sol（2026-11-17 发布，Global Standard）：
+ */
+export const PLATFORM_HOSTED_GPT_6_2_SOL_PRICE = {
+  input: toPlatformCredits(2),
+  inputCacheHit: toPlatformCredits(0.1),
+  cachingRead: toPlatformCredits(0.1),
+  cachingWrite: toPlatformCredits(2.5),
+  output: toPlatformCredits(10),
+} as const;
+
+export const PLATFORM_HOSTED_GPT_6_2_SOL_LONG_CONTEXT_PRICE = {
+  input: toPlatformCredits(4),
+  inputCacheHit: toPlatformCredits(0.2),
+  cachingRead: toPlatformCredits(0.2),
+  cachingWrite: toPlatformCredits(5),
+  output: toPlatformCredits(15),
 } as const;
 /**
  * 历史计费价目（gpt-5.6-sol 自 2026-10-13 起是 gpt-6.1-sol 的兼容别名）：仅供读取 /
@@ -1097,6 +1137,46 @@ export const platformHostedModels: Model[] = [
     supportsTool: false,
   },
   // GPT-6 / GPT-5.6 系：OpenAI 官方 chat.completions，平台价按短上下文价目。
+  {
+    name: PLATFORM_HOSTED_GPT_6_2_ASTRA_MODEL,
+    displayName: "GPT-6.2 Astra",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GPT_6_2_ASTRA_PRICE },
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS,
+          price: { ...PLATFORM_HOSTED_GPT_6_2_ASTRA_LONG_CONTEXT_PRICE },
+        },
+      ],
+    },
+    releasedAtMs: catalogReleasedAt(2026, 11, 17),
+    maxOutputTokens: 128_000,
+    contextWindow: 1_050_000,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_GPT_6_2_SOL_MODEL,
+    displayName: "GPT-6.2 Sol",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GPT_6_2_SOL_PRICE },
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: PLATFORM_HOSTED_GPT_LONG_CONTEXT_MIN_TOKENS,
+          price: { ...PLATFORM_HOSTED_GPT_6_2_SOL_LONG_CONTEXT_PRICE },
+        },
+      ],
+    },
+    releasedAtMs: catalogReleasedAt(2026, 11, 17),
+    maxOutputTokens: 128_000,
+    contextWindow: 1_050_000,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
   {
     name: PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
     displayName: "GPT-6 Astra",

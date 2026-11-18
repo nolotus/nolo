@@ -300,30 +300,26 @@ export function detectFileReferences(
 }
 
 type Tokenized = { raw: string; decoded: string };
+type TokenSpan = Tokenized & { start: number; end: number };
 
 /**
- * 把 paste 行切成 token,支持 shell-style 反斜杠转义。
- *
- * 兼容 iTerm2 / WezTerm 在 paste 文件路径时把空格转义成 `\ `
- * 的默认行为。如果不做这一步,中文 / 含空格的 Finder 文件名会被切碎。
- *
- * - `\ ` `\\` `\"` `\'` 都按 bash 风格解码(字面 char)
- * - `"..."` `'...'` 内的 token 不再拆分空格
- * - 引号外用空白分隔
- *
- * 返回 { raw, decoded } 配对:`raw` 保留原始(用于 stripImageTokens 在
- * 原 input 上做 regex replace),`decoded` 是 escape 解析后的字面
- * 路径(用于 existsSync / readFile)。
+ * 把 paste 行切成带源码字符偏移 [start, end) 的 token 列表，支持 shell-style
+ * 反斜杠转义与引号分组。保证 `line.slice(start, end) === raw`。
  */
-export function tokenizePasteLine(line: string): Tokenized[] {
-  const tokens: Tokenized[] = [];
+function tokenizePasteSpans(line: string): TokenSpan[] {
+  const tokens: TokenSpan[] = [];
   let rawBuf = "";
   let decBuf = "";
+  let tokenStart = 0;
   let quote: string | null = null;
 
-  const push = () => {
+  const startAt = (index: number) => {
+    if (rawBuf.length === 0) tokenStart = index;
+  };
+
+  const push = (end: number) => {
     if (rawBuf.length > 0) {
-      tokens.push({ raw: rawBuf, decoded: decBuf });
+      tokens.push({ raw: rawBuf, decoded: decBuf, start: tokenStart, end });
       rawBuf = "";
       decBuf = "";
     }
@@ -344,7 +340,7 @@ export function tokenizePasteLine(line: string): Tokenized[] {
         const startedQuoted = rawBuf.startsWith(quote);
         quote = null;
         rawBuf += ch;
-        if (startedQuoted) push();
+        if (startedQuoted) push(i + 1);
         continue;
       }
       rawBuf += ch;
@@ -354,6 +350,7 @@ export function tokenizePasteLine(line: string): Tokenized[] {
 
     // 引号外:反斜杠 + 空白 → 合并 token(iTerm2 / WezTerm paste 行为)
     if (ch === "\\" && next !== undefined && /\s/.test(next)) {
+      startAt(i);
       rawBuf += ch + next;
       decBuf += next;
       i++;
@@ -361,6 +358,7 @@ export function tokenizePasteLine(line: string): Tokenized[] {
     }
     // 引号外:双反斜杠 → 单反斜杠
     if (ch === "\\" && next === "\\") {
+      startAt(i);
       rawBuf += "\\\\";
       decBuf += "\\";
       i++;
@@ -375,21 +373,140 @@ export function tokenizePasteLine(line: string): Tokenized[] {
         !/[\\/=]$/.test(rawBuf) &&
         /^(?:\/|~[\\/]|[a-zA-Z]:[\\/]|file:\/\/|\.\.?[\\/])/i.test(line.slice(i + 1))
       ) {
-        push();
+        push(i);
       }
+      startAt(i);
       quote = ch;
       rawBuf += ch;
       continue;
     }
     if (/\s/.test(ch)) {
-      push();
+      push(i);
       continue;
     }
+    startAt(i);
     rawBuf += ch;
     decBuf += ch;
   }
-  push();
+  push(line.length);
   return tokens;
+}
+
+/**
+ * 把 paste 行切成 token,支持 shell-style 反斜杠转义。
+ *
+ * 兼容 iTerm2 / WezTerm 在 paste 文件路径时把空格转义成 `\ `
+ * 的默认行为。如果不做这一步,中文 / 含空格的 Finder 文件名会被切碎。
+ *
+ * - `\ ` `\\` `\"` `\'` 都按 bash 风格解码(字面 char)
+ * - `"..."` `'...'` 内的 token 不再拆分空格
+ * - 引号外用空白分隔
+ *
+ * 返回 { raw, decoded } 配对:`raw` 保留原始(用于 stripImageTokens 在
+ * 原 input 上做 regex replace),`decoded` 是 escape 解析后的字面
+ * 路径(用于 existsSync / readFile)。
+ */
+export function tokenizePasteLine(line: string): Tokenized[] {
+  return tokenizePasteSpans(line).map(({ raw, decoded }) => ({ raw, decoded }));
+}
+
+/**
+ * 按精确 token 边界从粘贴文本中剥离已挂载的图片路径，保留其余文本行的换行与缩进：
+ * 1. 只剥离与 `hints[i].raw` 完全相等的独立 token，不会把前缀重合的失败路径
+ *    （如 `/tmp/a.png` vs `/tmp/a.png.missing.png`）截断成残串；
+ * 2. 不调用 `compactWhitespace`：仅清除被剥离 token 紧邻的同行多余分隔空白；
+ *    若整行只剩空白则移除该行及其换行，其余文本行（含多行代码缩进与空行）原样保留。
+ */
+export function stripPastedImageTokensPreservingLayout(
+  input: string,
+  hints: readonly { raw: string }[],
+): string {
+  if (hints.length === 0 || input.length === 0) return input;
+  const targets = new Set(hints.map((h) => h.raw).filter(Boolean));
+  if (targets.size === 0) return input;
+
+  const normalized = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const removed = tokenizePasteSpans(normalized).filter((t) => targets.has(t.raw));
+  if (removed.length === 0) return normalized;
+
+  // 合并同一行内仅以水平空白分隔的连续被剥离 token，避免多图相连时残留空白。
+  const runs: Array<{ start: number; end: number }> = [];
+  for (const span of removed) {
+    const prev = runs[runs.length - 1];
+    if (prev && /^[ \t]*$/.test(normalized.slice(prev.end, span.start))) {
+      prev.end = span.end;
+    } else {
+      runs.push({ start: span.start, end: span.end });
+    }
+  }
+
+  const inlineDeletions: Array<{ start: number; end: number }> = [];
+  const fullLineBlocks: Array<{ start: number; end: number }> = [];
+
+  for (const run of runs) {
+    let leftWsStart = run.start;
+    while (
+      leftWsStart > 0 &&
+      (normalized[leftWsStart - 1] === " " || normalized[leftWsStart - 1] === "\t")
+    ) {
+      leftWsStart--;
+    }
+    let rightWsEnd = run.end;
+    while (
+      rightWsEnd < normalized.length &&
+      (normalized[rightWsEnd] === " " || normalized[rightWsEnd] === "\t")
+    ) {
+      rightWsEnd++;
+    }
+    const atLineStart = leftWsStart === 0 || normalized[leftWsStart - 1] === "\n";
+    const atLineEnd = rightWsEnd === normalized.length || normalized[rightWsEnd] === "\n";
+
+    if (atLineStart && atLineEnd) {
+      const prevBlock = fullLineBlocks[fullLineBlocks.length - 1];
+      if (prevBlock && normalized.slice(prevBlock.end, leftWsStart) === "\n") {
+        prevBlock.end = rightWsEnd;
+      } else {
+        fullLineBlocks.push({ start: leftWsStart, end: rightWsEnd });
+      }
+    } else if (atLineStart) {
+      // 行首图片 token 后仍有正文：保留正文前的行首缩进，仅移除 token 及紧随空白。
+      inlineDeletions.push({ start: run.start, end: rightWsEnd });
+    } else if (atLineEnd) {
+      // 行尾图片 token 前有正文：连同前导分隔空白与行尾空白一并移除。
+      inlineDeletions.push({ start: leftWsStart, end: rightWsEnd });
+    } else {
+      // 行中图片 token 两侧都有正文：只有当左右两侧都有空白时才删掉右侧空白，
+      // 若某一侧紧贴正文（如 `但是'/tmp/a.png' 和`）则只删 token 本身，保留唯一分隔空白。
+      const hasLeftWs = leftWsStart < run.start;
+      const hasRightWs = rightWsEnd > run.end;
+      inlineDeletions.push({
+        start: run.start,
+        end: hasLeftWs && hasRightWs ? rightWsEnd : run.end,
+      });
+    }
+  }
+
+  const deletions: Array<{ start: number; end: number }> = [...inlineDeletions];
+  for (const block of fullLineBlocks) {
+    if (block.end < normalized.length) {
+      deletions.push({ start: block.start, end: block.end + 1 });
+    } else if (block.start > 0) {
+      deletions.push({ start: block.start - 1, end: block.end });
+    } else {
+      deletions.push({ start: 0, end: normalized.length });
+    }
+  }
+
+  deletions.sort((a, b) => a.start - b.start || a.end - b.end);
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const del of deletions) {
+    if (del.start < cursor) continue;
+    if (del.start > cursor) parts.push(normalized.slice(cursor, del.start));
+    cursor = del.end;
+  }
+  if (cursor < normalized.length) parts.push(normalized.slice(cursor));
+  return parts.join("");
 }
 
 /**
@@ -604,7 +721,7 @@ export function summarizeAttachments(images: AttachedImage[]): string {
 }
 
 /**
- * Composer 附件条文本：`📎 <filename> (<size>)`，逗号分隔。
+ * Composer 附件条文本：`[#1] <filename> (<size>)`，逗号分隔。
  *
  * ≤2 张全列；更多张列前 2 张 + `+N`。超终端宽的截断由 composer 的
  * fitAnsiLine 负责（这里不做宽度计算，避免引入与终端状态耦合的逻辑）。
@@ -616,7 +733,7 @@ export function formatComposerAttachmentLine(
   if (images.length === 0) return null;
   const head = images
     .slice(0, 2)
-    .map((img, index) => `📎 ${index + 1} · ${sanitizeImageLabel(img.filename)} (${formatBytes(img.sizeBytes)})`);
+    .map((img, index) => `[#${index + 1}] ${sanitizeImageLabel(img.filename)} (${formatBytes(img.sizeBytes)})`);
   const extra = images.length - head.length;
   return extra > 0 ? `${head.join(", ")} +${extra}` : head.join(", ");
 }
@@ -727,7 +844,7 @@ export type ResolveAttachmentImageUrlsInput = {
   actionImagePaths?: string[];
   /** state 里本轮待发送的暂存附件 */
   attachedImages: AttachedImage[];
-  /** 图片读取失败时的回调（调用方借此向 output 输出 [nolo] image skipped） */
+  /** 图片读取失败时的回调（调用方借此向 output 输出 ! image skipped） */
   onFailure?: (resolvedPath: string, error: Error) => void;
   /** Preserve filenames/order for the local message projection, never sent as paths. */
   onResolved?: (images: readonly AttachedImage[]) => void;

@@ -44,14 +44,54 @@ export interface DispatchSelectionAdmission {
 }
 
 /** Single manually maintained model-tier mapping; aliases are model IDs, never agent names. */
-const MODEL_TIERS: ReadonlyArray<{ tier: DispatchDifficulty; models: readonly string[]; pattern: RegExp }> = [
-  { tier: "extreme", models: ["GPT-6 Astra", "Claude Opus 5.5"], pattern: /^(?:gpt-6-astra|claude-opus-5[.-]5)(?:$|[-@])/ },
-  { tier: "complex", models: ["GPT-6.1 Sol", "Gemini 4 Argon", "Claude Fable 5.1", "Claude Sonnet 5.5", "MiMo V2.6 Pro", "Kimi K3", "Gemini 2.5 Pro"], pattern: /^(?:gpt-6[.-]1-sol|gemini-4-argon|claude-fable-5[.-]1|claude-sonnet-5[.-]5|mimo-v2[.-]6-pro|kimi-k3|gemini-2[.-]5-pro)(?:$|[-@])/ },
-  { tier: "normal", models: ["DeepSeek Flash（各代）", "LongCat 2.5", "Gemini 3.8 Flash", "GLM 5.3 Flash"], pattern: /^(?:deepseek-(?:[a-z0-9.-]+-)?flash(?:[-@].*)?|longcat-2[.-]5|gemini-3[.-]8-flash|glm-5[.-]3-flash)(?:$|[-@])/ },
-  { tier: "easy", models: ["MiniMax M3.1 Flash", "GPT-6 Luna"], pattern: /^(?:(?:minimax-)?m3[.-]1-flash|gpt-6-luna)(?:$|[-@])/ },
+const MODEL_TIERS: ReadonlyArray<{
+  tier: DispatchDifficulty;
+  models: readonly string[];
+  pattern: RegExp;
+}> = [
+  {
+    tier: "extreme",
+    models: ["GPT-6.2 Astra", "GPT-6 Astra", "Claude Opus 5.5"],
+    pattern: /^(?:gpt-6(?:[.-]2)?-astra|claude-opus-5[.-]5)(?:$|[-@])/,
+  },
+  {
+    tier: "complex",
+    models: [
+      "GPT-6.2 Sol",
+      "GPT-6.1 Sol",
+      "Gemini 4 Carbon",
+      "Gemini 4 Argon",
+      "Claude Fable 5.1",
+      "Claude Sonnet 5.5",
+      "MiMo V2.6 Pro",
+      "Kimi K3",
+      "Gemini 2.5 Pro",
+    ],
+    pattern:
+      /^(?:gpt-6[.-](?:2|1)-sol|gemini-4-(?:carbon|argon)|claude-fable-5[.-]1|claude-sonnet-5[.-]5|mimo-v2[.-]6-pro|kimi-k3|gemini-2[.-]5-pro)(?:$|[-@])/,
+  },
+  {
+    tier: "normal",
+    models: [
+      "Gemini 4 Hydrogen",
+      "DeepSeek Flash（各代）",
+      "LongCat 2.5",
+      "Gemini 3.8 Flash",
+      "GLM 5.3 Flash",
+    ],
+    pattern:
+      /^(?:gemini-4-hydrogen|deepseek-(?:[a-z0-9.-]+-)?flash(?:[-@].*)?|longcat-2[.-]5|gemini-3[.-]8-flash|glm-5[.-]3-flash)(?:$|[-@])/,
+  },
+  {
+    tier: "easy",
+    models: ["MiniMax M3.1 Flash", "GPT-6 Luna"],
+    pattern: /^(?:(?:minimax-)?m3[.-]1-flash|gpt-6-luna)(?:$|[-@])/,
+  },
 ];
 
-export const MODEL_TIER_GUIDANCE = MODEL_TIERS.map(({ tier, models }) => `${tier}: ${models.join("、")}`).join("\n");
+export const MODEL_TIER_GUIDANCE = MODEL_TIERS.map(
+  ({ tier, models }) => `${tier}: ${models.join("、")}`,
+).join("\n");
 
 /**
  * 任务难度判档（短版单一真值）。
@@ -66,17 +106,19 @@ export const DIFFICULTY_GRADING_ORDER = `- **先判档再选模型**（规划复
 
 export const DIFFICULTY_GRADING_TIERS = `    - 四档：easy＝根因与做法明确、局部可验；normal＝局部定位、有契约、无跨模块取舍；complex＝多根因或跨模块/跨状态，兼顾并发兼容；extreme＝架构未定或安全/完整性重大取舍。根因/接口定下后实现与复审重新判档，不继承规划档。`;
 
-
 export function resolveModelTier(model: unknown): ModelTier {
   if (typeof model !== "string") return "unknown";
   const id = model.trim().toLowerCase().split("/").at(-1)!.replace(/\s+/g, "-");
   return MODEL_TIERS.find(({ pattern }) => pattern.test(id))?.tier ?? "unknown";
 }
 
-export function normalizeDispatchDifficulty(value: unknown): DispatchDifficulty {
+export function normalizeDispatchDifficulty(
+  value: unknown,
+): DispatchDifficulty {
   if (value === "easy" || value === "简单") return "easy";
   if (value === "complex" || value === "复杂") return "complex";
-  if (value === "extreme" || value === "极端复杂" || value === "极其复杂") return "extreme";
+  if (value === "extreme" || value === "极端复杂" || value === "极其复杂")
+    return "extreme";
   return "normal";
 }
 
@@ -86,17 +128,38 @@ function normalizeSelectionReason(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export function checkDispatchSelection(input: DispatchSelectionInput): SelectionCheck {
-  const dimension: DispatchDimension = input.dimension === "design_frontend" || input.dimension === "writing" ? input.dimension : "general";
+export function checkDispatchSelection(
+  input: DispatchSelectionInput,
+): SelectionCheck {
+  const dimension: DispatchDimension =
+    input.dimension === "design_frontend" || input.dimension === "writing"
+      ? input.dimension
+      : "general";
   const difficulty = normalizeDispatchDifficulty(input.difficulty);
   const modelTier = resolveModelTier(input.model);
-  const status = modelTier === "unknown" ? "unknown" : modelTier === difficulty ? "matched" : "mismatch";
+  const status =
+    modelTier === "unknown"
+      ? "unknown"
+      : modelTier === difficulty
+        ? "matched"
+        : "mismatch";
   const selectionReason = normalizeSelectionReason(input.selectionReason);
-  const message = status === "matched" ? undefined
-    : status === "unknown" ? "模型档位未知；按领域与可用性判断，不阻断，已启动勿自动重派。"
-    : selectionReason ? "档位与难度不一致；已给出跨档理由，不阻断，已启动勿自动重派。"
-    : "档位与难度不一致；跨档派发需在 selectionReason 说明理由。";
-  return { dimension, difficulty, modelTier, status, ...(message ? { message } : {}), ...(selectionReason ? { selectionReason } : {}) };
+  const message =
+    status === "matched"
+      ? undefined
+      : status === "unknown"
+        ? "模型档位未知；按领域与可用性判断，不阻断，已启动勿自动重派。"
+        : selectionReason
+          ? "档位与难度不一致；已给出跨档理由，不阻断，已启动勿自动重派。"
+          : "档位与难度不一致；跨档派发需在 selectionReason 说明理由。";
+  return {
+    dimension,
+    difficulty,
+    modelTier,
+    status,
+    ...(message ? { message } : {}),
+    ...(selectionReason ? { selectionReason } : {}),
+  };
 }
 
 /**
@@ -106,9 +169,12 @@ export function checkDispatchSelection(input: DispatchSelectionInput): Selection
  * this says nothing about user authorization, credit/permission boundaries, model
  * availability or network reachability, and it never picks or downgrades a model itself.
  */
-export function checkDispatchSelectionAdmission(input: DispatchSelectionInput): DispatchSelectionAdmission {
+export function checkDispatchSelectionAdmission(
+  input: DispatchSelectionInput,
+): DispatchSelectionAdmission {
   const check = checkDispatchSelection(input);
-  if (check.status !== "mismatch" || check.selectionReason) return { ok: true, check };
+  if (check.status !== "mismatch" || check.selectionReason)
+    return { ok: true, check };
   const error: DispatchSelectionAdmissionError = {
     code: "selection_reason_required",
     message: `跨档选择缺少 selectionReason：档位 ${check.modelTier} 与难度 ${check.difficulty} 不一致，请补充本次跨档的具体理由后再启动。`,
@@ -118,10 +184,13 @@ export function checkDispatchSelectionAdmission(input: DispatchSelectionInput): 
 }
 
 /** Throwing variant of {@link checkDispatchSelectionAdmission}; callers must not start the dispatch when it throws. */
-export function assertDispatchSelectionAdmission(input: DispatchSelectionInput): SelectionCheck {
+export function assertDispatchSelectionAdmission(
+  input: DispatchSelectionInput,
+): SelectionCheck {
   const admission = checkDispatchSelectionAdmission(input);
   // The hint travels with the message: the caller (model) must be able to
   // self-correct without guessing which field is missing.
-  if (!admission.ok && admission.error) throw new Error(`${admission.error.message} ${admission.error.hint}`);
+  if (!admission.ok && admission.error)
+    throw new Error(`${admission.error.message} ${admission.error.hint}`);
   return admission.check;
 }

@@ -10,6 +10,7 @@ import {
   SseLockDirect,
   SseLockLive,
   SseTransportLive,
+  SseWakeSignalLive,
   subscribeSharedSseEffect,
   type SubscribeSharedSseArgs,
 } from "./sharedSseEffect";
@@ -34,6 +35,7 @@ export function subscribeSharedSse(args: SubscribeSharedSseArgs): () => void {
   const liveLayer = Layer.mergeAll(
     SseClockLive,
     SseTransportLive,
+    SseWakeSignalLive,
     lockLayer,
     broadcastLayer
   );

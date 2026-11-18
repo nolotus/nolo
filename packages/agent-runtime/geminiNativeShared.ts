@@ -804,10 +804,15 @@ function sanitizeGeminiSchemaNodeInner(
             ? [...branchRequired]
             : requiredIntersection.filter((r) => branchRequired.includes(r));
       }
-      out.properties = {
+      const combinedProperties = {
         ...((out.properties as Record<string, unknown>) ?? {}),
         ...mergedProperties,
       };
+      out.properties = Object.fromEntries(
+        Object.keys(combinedProperties)
+          .sort()
+          .map((key) => [key, combinedProperties[key]]),
+      );
       if (requiredIntersection !== undefined && requiredIntersection.length > 0) {
         out.required = requiredIntersection;
       }
@@ -836,10 +841,15 @@ function sanitizeGeminiSchemaNodeInner(
       const sanitized = sanitizeGeminiSchemaNode(branch, seen);
       // 标量 allOf 不应凭空生成 properties；对象路径维持既有行为。
       if (out.type === undefined || out.type === "object" || out.properties || sanitized.properties) {
-        out.properties = {
+        const merged = {
           ...((out.properties as Record<string, unknown>) ?? {}),
           ...((sanitized.properties as Record<string, unknown>) ?? {}),
         };
+        out.properties = Object.fromEntries(
+          Object.keys(merged)
+            .sort()
+            .map((key) => [key, merged[key]]),
+        );
       }
       if (Array.isArray(sanitized.required)) {
         out.required = [
@@ -854,11 +864,10 @@ function sanitizeGeminiSchemaNodeInner(
   }
 
   if (src.properties && typeof src.properties === "object") {
+    const rawProperties = src.properties as Record<string, unknown>;
     const properties: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(
-      src.properties as Record<string, unknown>,
-    )) {
-      properties[key] = sanitizeGeminiSchemaNode(value, seen);
+    for (const key of Object.keys(rawProperties).sort()) {
+      properties[key] = sanitizeGeminiSchemaNode(rawProperties[key], seen);
     }
     out.properties = properties;
     if (typeof out.type !== "string") out.type = "object";
@@ -915,6 +924,8 @@ export function convertOpenAiToolsToGemini(
     });
   }
   if (declarations.length === 0) return undefined;
+  // 按工具名确定性排序，避免调用方拼接工具顺序抖动破坏 Gemini Implicit Caching 前缀。
+  declarations.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return [{ functionDeclarations: declarations }];
 }
 
@@ -982,8 +993,13 @@ export function applyGeminiChunk(
     typeof response.usageMetadata === "object"
   ) {
     const meta = response.usageMetadata as Record<string, unknown>;
-    const prompt =
-      typeof meta.promptTokenCount === "number" ? meta.promptTokenCount : 0;
+    const hasPromptTokenCount =
+      typeof meta.promptTokenCount === "number" &&
+      Number.isFinite(meta.promptTokenCount);
+    const hasCachedContentTokenCount =
+      typeof meta.cachedContentTokenCount === "number" &&
+      Number.isFinite(meta.cachedContentTokenCount);
+    const prompt = hasPromptTokenCount ? (meta.promptTokenCount as number) : 0;
     const candidates =
       typeof meta.candidatesTokenCount === "number"
         ? meta.candidatesTokenCount
@@ -995,12 +1011,17 @@ export function applyGeminiChunk(
     // Gemini implicit context caching: cachedContentTokenCount is a subset of
     // promptTokenCount, matching our canonical `input_tokens` = total-input
     // semantics (normalizeUsage reads cache_read_input_tokens directly).
-    const cached =
-      typeof meta.cachedContentTokenCount === "number" &&
-      Number.isFinite(meta.cachedContentTokenCount)
-        ? // cached ⊆ prompt；对畸形上游防御性钳位，避免 cache_read > input 破坏归一化与计费
-          Math.min(Math.max(0, Math.floor(meta.cachedContentTokenCount)), prompt)
-        : 0;
+    // 上游返回有效 usageMetadata（提供了 promptTokenCount 或 cachedContentTokenCount）时，
+    // 必须显式写入 cache_read_input_tokens（0 或正整数），避免下游把「真实 0 命中」
+    // 误判成 null（未知）。
+    const clampedPrompt = Math.max(0, Math.floor(prompt));
+    const cached = hasCachedContentTokenCount
+      ? // cached ⊆ prompt；对畸形上游防御性钳位，避免 cache_read > input 破坏归一化与计费
+        Math.min(
+          Math.max(0, Math.floor(meta.cachedContentTokenCount as number)),
+          clampedPrompt,
+        )
+      : 0;
     const thoughts =
       typeof meta.thoughtsTokenCount === "number"
         ? meta.thoughtsTokenCount
@@ -1012,7 +1033,9 @@ export function applyGeminiChunk(
       prompt_tokens: prompt,
       completion_tokens: candidates,
       total_tokens: total,
-      ...(cached > 0 ? { cache_read_input_tokens: cached } : {}),
+      ...(hasPromptTokenCount || hasCachedContentTokenCount
+        ? { cache_read_input_tokens: cached }
+        : {}),
       ...(thoughts !== undefined
         ? {
             completion_tokens_details: {
@@ -1229,7 +1252,9 @@ export function buildGeminiGenerateContentRequest(args: {
     },
   );
 
-  const request: Record<string, unknown> = { contents };
+  // 稳定前缀（systemInstruction / tools / toolConfig）置于逐轮增长的 contents 之前，
+  // 保持序列化 JSON 前缀对隐式上下文缓存一致。
+  const request: Record<string, unknown> = {};
 
   if (systemTexts.length > 0) {
     request.systemInstruction = {
@@ -1250,6 +1275,8 @@ export function buildGeminiGenerateContentRequest(args: {
     // （chatHandler 路径的 executeToolCall 不做 schema 校验）。
     request.toolConfig = { functionCallingConfig: { mode: "AUTO" } };
   }
+
+  request.contents = contents;
 
   const generationConfig: Record<string, unknown> = {};
   if (typeof args.maxTokens === "number" && args.maxTokens > 0) {

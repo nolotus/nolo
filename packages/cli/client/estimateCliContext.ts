@@ -19,15 +19,7 @@ import { estimateMessagesTokens } from "../../ai/context/contextOccupancy";
 import { prepareTools } from "../../ai/tools/prepareTools";
 import { expandEnabledPacks } from "../../ai/tools/toolPacks";
 import { buildIdentityBlock } from "../../agent-runtime/identityBlock";
-import { DELETE_SAFETY_RED_LINE } from "../../agent-runtime/deleteSafety";
-import { CREDENTIAL_HYGIENE_RULE } from "../../agent-runtime/credentialHygiene";
-import { PARALLEL_DISPATCH_DEFAULT_RULE } from "../../agent-runtime/parallelDispatchDefault";
-import { VERIFY_BEFORE_CONCLUDING_RULE } from "../../agent-runtime/verifyBeforeConcluding";
-import { DISPATCH_BACKEND_POLICY } from "../../agent-runtime/dispatchBackendPolicy";
-import { DISPATCH_CANDIDATE_POLICY } from "../../agent-runtime/dispatchCandidatePolicy";
-import { PLATFORM_RISK_CONTROL_RULE } from "../../agent-runtime/platformRiskControl";
-import { WORKTREE_ISOLATION_PRELUDE } from "../../agent-runtime/worktreeIsolationPrelude";
-import { buildConsultationModeBlock } from "../../agent-runtime/consultationMode";
+import { buildPlatformStaticPromptBlocks } from "../../agent-runtime/platformStaticPromptLayers";
 import {
   resolveResponseGuidelines,
   type ResponseViewport,
@@ -148,17 +140,8 @@ export function buildCliEstimateSystemText(
   );
 
   const systemParts = [
-    // 与实际装配线一致：删除安全红线是系统提示词的最顶层块。
-    DELETE_SAFETY_RED_LINE,
-    CREDENTIAL_HYGIENE_RULE,
-    VERIFY_BEFORE_CONCLUDING_RULE,
-    PARALLEL_DISPATCH_DEFAULT_RULE,
-    DISPATCH_BACKEND_POLICY,
-    DISPATCH_CANDIDATE_POLICY,
-    PLATFORM_RISK_CONTROL_RULE,
-    buildConsultationModeBlock(),
-    // Git 任务隔离：与实际装配同集合、同序（请教模式之后、身份信息之前）。
-    WORKTREE_ISOLATION_PRELUDE,
+    // 顶部固定平台层（唯一真源见 agent-runtime/platformStaticPromptLayers.ts）。
+    ...buildPlatformStaticPromptBlocks(),
     prompt,
     opts.userLanguage?.trim()
       ? buildUserResponseLanguageContext({ language: opts.userLanguage })

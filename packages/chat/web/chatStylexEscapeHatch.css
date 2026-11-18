@@ -1185,3 +1185,28 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
 .DialogPage__messages {
   padding-top: var(--space-8, 32px);
 }
+
+/* Workspace chrome yields to content; intent reveals actions. */
+@media (hover: hover) and (pointer: fine) {
+  .WorkSpaceGroup__more {
+    opacity: 0.35;
+    transition: opacity 0.18s ease;
+  }
+  .WorkSpaceGroup__header:hover .WorkSpaceGroup__more,
+  .WorkSpaceGroup__header:focus-within .WorkSpaceGroup__more,
+  .WorkSpaceGroup__more[aria-expanded="true"] {
+    opacity: 1;
+  }
+}
+.WorkSpaceGroup__categories > section > .CategoryHeader {
+  margin-inline-start: var(--sidebar-gap-x);
+  color: var(--textSecondary);
+}
+.WorkSpaceGroup__categories .CategoryHeader__name {
+  font-weight: 500;
+}
+@media (prefers-reduced-motion: reduce) {
+  .WorkSpaceGroup__more {
+    transition: none;
+  }
+}

@@ -1,9 +1,10 @@
 import type { PermissionRequest } from "../../agent-runtime/actionGate";
 import {
   renderDialogCommand,
+  renderDialogHeaderLine,
   renderDialogTitle,
 } from "./dialogFrame";
-import { t } from "./i18n";
+import { getCliLocale, t } from "./i18n";
 import { displayWidth } from "./tuiAnsi";
 import {
   runSelectDialog,
@@ -11,6 +12,12 @@ import {
   type SelectDialogItem,
 } from "./selectDialog";
 import type { DialogSession } from "./dialogHost";
+
+function resolveConfirmKeyHint(): string {
+  return getCliLocale() === "zh"
+    ? "y 允许 · n 取消 · ↑↓ · Enter"
+    : "y allow · n cancel · ↑↓ · Enter";
+}
 
 type ConfirmDialogItem = SelectDialogItem & {
   value: boolean;
@@ -149,9 +156,17 @@ export async function runConfirmDialog(args: {
       : FALLBACK_TERMINAL_WIDTH;
 
   const titleLines: string[] = [
-    renderDialogTitle(`${titleText}  ${t("dialogConfirmHint")}`),
+    renderDialogHeaderLine({
+      title: titleText,
+      hint: resolveConfirmKeyHint(),
+      width: terminalWidth,
+    }),
   ];
-  if (bodyText) titleLines.push(renderDialogTitle(bodyText));
+  if (bodyText) {
+    for (const line of bodyText.split("\n")) {
+      titleLines.push(renderDialogTitle(line));
+    }
+  }
   if (args.request.command) {
     const shown = args.fullCommand ? args.request.command : truncateCommand(args.request.command, terminalWidth);
     titleLines.push(renderDialogCommand(shown));
@@ -161,6 +176,12 @@ export async function runConfirmDialog(args: {
     items,
     signal: args.signal,
     initialIndex: rejectIndex,
+    hotkeys: {
+      y: 0,
+      Y: 0,
+      n: rejectIndex,
+      N: rejectIndex,
+    },
     titleLines,
     input,
     output,

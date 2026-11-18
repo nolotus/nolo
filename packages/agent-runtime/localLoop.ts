@@ -18,6 +18,7 @@ import { classifyContextRefusal, type ContextRefusalDiagnostics } from "./contex
  *    - 每一轮推进通过 `hostAdapter.saveTurn` 沉淀权威日志。
  */
 import { normalizeUsage } from "../ai/token/normalizeUsage";
+import { isContextOverflowText } from "../ai/chat/parseApiError";
 import { resolveToolExecutionContract } from "../ai/tools/toolExecutionSemantics";
 import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";
@@ -80,17 +81,12 @@ import { TOOL_IMAGE_NOTICES, createToolImageNotices, TOOL_HAD_IMAGES, TOOL_IMAGE
 import { createTurnUsageLedger } from "./turnUsageLedger";
 export { addOutOfBandUsage } from "./turnUsageLedger";
 import { buildIdentityBlock } from "./identityBlock";
-import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
-import { CREDENTIAL_HYGIENE_RULE } from "./credentialHygiene";
-import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
-import { WORKTREE_ISOLATION_PRELUDE } from "./worktreeIsolationPrelude";
-import { VERIFY_BEFORE_CONCLUDING_RULE } from "./verifyBeforeConcluding";
-// 派发落点：并行派发纪律的下一层，紧随其后（localLoop 无 static 作用域，session 占位）。
-import { DISPATCH_BACKEND_POLICY } from "./dispatchBackendPolicy";
-import { DISPATCH_CANDIDATE_POLICY } from "./dispatchCandidatePolicy";
-import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
-import type { SubtaskBudgetLimits } from "./subtaskBudget";
-import { buildConsultationModeBlock } from "./consultationMode";
+import { buildPlatformStaticScopedBlocks } from "./platformStaticPromptLayers";
+import {
+  createSubtaskSoftBudgetAdvisor,
+  type SubtaskBudgetLimits,
+  type SubtaskSoftBudgetConfig,
+} from "./subtaskBudget";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
@@ -191,6 +187,17 @@ export type LocalAgentTurnInput = {
   runtimeContext?: Record<string, any> | null;
   /** Dispatched leaf runs receive parent-facing final-response guidance. */
   runKind?: "interactive" | "subtask";
+  /** Explicit subtask flag (also activates subtask soft-budget convergence advisories). */
+  isSubtask?: boolean;
+  /**
+   * Optional soft-budget convergence advisory config for subtask runs.
+   * Defaults to enabled only in subtask mode (`isSubtask`, `runKind === "subtask"`,
+   * non-empty `NOLO_PARENT_DIALOG_ID`, or `NOLO_AGENT_RUN_CHILD`), and disabled via
+   * `NOLO_SUBTASK_SOFT_BUDGET=0`. Never terminates or truncates execution.
+   */
+  softBudget?: boolean | SubtaskSoftBudgetConfig;
+  /** Optional env map override for `createSubtaskSoftBudgetAdvisor`. */
+  softBudgetEnv?: Record<string, string | undefined>;
   /** @deprecated Accepted for older callers only; never limits execution. */
   subtaskMaxToolCalls?: number;
   /** @deprecated Accepted for older callers only; never limits execution. */
@@ -1049,6 +1056,7 @@ export async function runLocalAgentTurn(
       detectDispatchIntent(
         typeof input.input === "string" ? input.input : undefined
       ),
+    runKind: input.runKind,
   });
   // 宿主自己注入过记忆使用指引吗？CLI/TUI/desktop 在本函数之前用
   // `buildMemoryUseGuidanceLayer({ promptBlock })` 按「有 overlay 就注入」放过一份
@@ -1105,24 +1113,8 @@ export async function runLocalAgentTurn(
       : []),
   ];
   const mergedContextBlockScopes: ContextBlockScope[] = [
-    // 删除安全红线：系统层最高优先级约束，位于所有块之前（含身份信息块），
-    // owner 要求常驻「根本提示词」的最顶部（2026-09-26 批量误删事故）。
-    { content: DELETE_SAFETY_RED_LINE, cacheScope: "session" as const },
-    // 凭据纪律：与红线同为系统层固定块，紧随其后（四条装配线同源）。
-    { content: CREDENTIAL_HYGIENE_RULE, cacheScope: "session" as const },
-    // 并行是默认：系统层固定块，紧随红线（localLoop 无 static 作用域，用 session 占位，
-    // 「最顶」由数组首位保证——与红线同一约定）。
-    { content: VERIFY_BEFORE_CONCLUDING_RULE, cacheScope: "session" as const },
-    { content: PARALLEL_DISPATCH_DEFAULT_RULE, cacheScope: "session" as const },
-    // 派发落点：并行派发纪律的下一层（派到哪个执行后端），沿用 session 占位约定。
-    { content: DISPATCH_BACKEND_POLICY, cacheScope: "session" as const },
-    { content: DISPATCH_CANDIDATE_POLICY, cacheScope: "session" as const },
-    // 平台风控纪律：无条件系统层块，沿用 session 占位约定。
-    { content: PLATFORM_RISK_CONTROL_RULE, cacheScope: "session" as const },
-    { content: buildConsultationModeBlock(), cacheScope: "session" as const },
-    // Git 任务隔离：系统层固定前置，四条装配线同序（请教模式之后、身份信息之前；
-    // skill 配置 disabled 也注入）。
-    { content: WORKTREE_ISOLATION_PRELUDE, cacheScope: "session" as const },
+    // 顶部固定平台层（唯一真源见 platformStaticPromptLayers.ts；localLoop 无 static 作用域，session 占位）。
+    ...buildPlatformStaticScopedBlocks(),
     { content: identityBlock, cacheScope: "session" as const },
     ...guidanceScopes,
     // 回复行为准则：local 线（CLI 非交互 / 桌面 / TUI）的唯一注入边界。
@@ -1351,6 +1343,12 @@ export async function runLocalAgentTurn(
   // 供 loopError 分支在 saveTurn 时写入，避免中断时丢失已生成的部分回复。
   let partialContent = "";
   const progressGuard = createLocalLoopProgressGuard(input.progressGuardConfig);
+  const softBudgetAdvisor = createSubtaskSoftBudgetAdvisor({
+    softBudget: input.softBudget,
+    isSubtask: input.isSubtask,
+    runKind: input.runKind,
+    ...(input.softBudgetEnv ? { env: input.softBudgetEnv } : {}),
+  });
   // Deferred mid-turn injection commits. Registered at the round boundary and
   // committed only at the request boundary (immediately before the provider
   // dispatch); rolled back if the turn aborts before that point so the unsent
@@ -1535,7 +1533,7 @@ export async function runLocalAgentTurn(
         });
         imageDowngradeEmitted = true;
       }
-      const requestMessages = projectRequest(transcript.working());
+      let requestMessages = projectRequest(transcript.working());
       // Enforce the same full projected request bound after every tool round,
       // not only on history load. A failed compaction must never permit an
       // oversized request to escape to the provider.
@@ -1551,7 +1549,7 @@ export async function runLocalAgentTurn(
         }));
       }
       budgetTrimPhase = contextPhase("budget-trim", requestMessages, { droppedCount: 0 });
-      const contextMetrics: LocalAgentContextMetrics = {
+      let contextMetrics: LocalAgentContextMetrics = {
         ...preparedMessages.metrics,
         messageCount: requestMessages.length,
         contentChars: requestMessages.reduce(
@@ -1580,8 +1578,8 @@ export async function runLocalAgentTurn(
       let llmStreamActivity = 0;
 
       // 缓存遥测（fail-open）：请求侧数字/哈希在调用前计算一次，O(消息数)。
-      const callStartedAt = Date.now();
-      const requestTelemetry = buildRequestTelemetry({
+      let callStartedAt = Date.now();
+      let requestTelemetry = buildRequestTelemetry({
         // 无 dialogId 的新对话用本 turn 唯一键，避免不同新对话共用一个槽误报漂移。
         dialogKey: input.continueDialogId || newDialogTelemetryKey,
         messages: requestMessages,
@@ -1632,85 +1630,159 @@ export async function runLocalAgentTurn(
           throw error;
         }
       }
-      let providerInvoked = false;
-      try {
-      result = await runCompleteWithTimeout({
-        provider: { complete: (messages, options) => {
-          providerInvoked = true;
-          // Provider invoked: the request is dispatched and in flight with
-          // the model. The transactions belong to the completion boundary now
-          // and must not be rolled back to pending if the provider fails.
-          inFlightTransactions = [];
-          return provider.complete(messages, options);
-        } },
-        messages: requestMessages,
-        options: {
-          timeoutMs: resolveLlmRequestTimeoutMs(input),
-          // 用户取消信号穿进 provider options：providerStreamRetry 据此在
-          // 取消后跳过重试，provider 分支（如 antigravity/openai-compatible）
-          // 也可把 fetch 绑定到同一信号，实现真正的传输层取消。
-          ...(input.abortSignal ? { signal: input.abortSignal } : {}),
-          // 计费归因：续聊轮次带上 dialogId，platform proxy 才能把 token 记录
-          // 归到具体对话而不是 chat-proxy 兜底桶。新对话首轮 id 尚未分配。
-          ...(input.continueDialogId ? { dialogId: input.continueDialogId } : {}),
-          ...(shouldStreamDeltas ? { onTextDelta: (chunk: string) => {
-            llmStreamActivity += 1;
-            partialContent += chunk;
-            observationBoundary.emit({
-              kind: "text-delta",
-              chunk,
-              round,
-              atMs: Date.now(),
-            });
-          } } : {}),
-          ...(shouldStreamReasoning ? { onReasoningDelta: (chunk: string) => {
-            llmStreamActivity += 1;
-            observationBoundary.emit({
-              kind: "reasoning-delta",
-              chunk,
-              round,
-              atMs: Date.now(),
-            });
-          } } : {}),
-          ...(shouldPassToolEvents ? { onToolEvent: (event: LocalAgentToolEvent) => {
-            llmStreamActivity += 1;
-            observationBoundary.emit({
-              kind: "tool-event",
-              event,
-              round,
-              atMs: Date.now(),
-            });
-          } } : {}),
-          ...(shouldPassToolEvents ? { toolEventRound: round } : {}),
-        },
-        timeoutMs: resolveLlmRequestTimeoutMs(input),
-        activityVersion: () => llmStreamActivity,
-        round,
-        input,
-        boundary: observationBoundary,
-        context: contextMetrics,
-        providerName: agentConfig.provider,
-        model: provider.model,
-      });
-      } catch (error) {
-        if (!providerInvoked && inFlightTransactions.length > 0) {
-          // Provider was never invoked (e.g. pre-dispatch timeout, abort, or
-          // provider-init failure): roll back the in-flight transactions so the
-          // messages return to pending and are retracted from the transcript.
-          const toRollback = inFlightTransactions;
-          inFlightTransactions = [];
-          try {
-            await rollbackInjectionCommits(toRollback);
-          } catch (rbErr) {
-            error = combineRollbackError(error, rbErr);
+      const tryOverflowRescueCompaction = async (): Promise<boolean> => {
+        const beforeTokens = estimateLocalRequestInput(requestMessages);
+        const compacted = await compaction.prepareRequest((source) => {
+          const projected = composeProviderMessages({ prefix: transcript.working().slice(0, prefixCount),
+            history: source, contextReferenceResolver:
+              input.adapter.host === "cli" ? input.contextReferenceResolver : undefined });
+          return requestOverBudget(projectRequest(projected.messages));
+        }, false, availableHistoryTokens, true);
+        if (!compacted) return false;
+        const nextPrepared = prepareMessagesForProviderCall(transcript.working());
+        const nextRequestMessages = projectRequest(transcript.working());
+        const afterTokens = estimateLocalRequestInput(nextRequestMessages);
+        if (afterTokens >= beforeTokens || requestOverBudget(nextRequestMessages)) return false;
+        requestMessages = nextRequestMessages;
+        contextMetrics = {
+          ...nextPrepared.metrics,
+          messageCount: requestMessages.length,
+          contentChars: requestMessages.reduce(
+            (total, message) => total + contentCharCount(message.content),
+            0,
+          ),
+          stableContextChars: builtMessages.stableContextChars,
+          dynamicContextChars: builtMessages.dynamicContextChars,
+        };
+        callStartedAt = Date.now();
+        requestTelemetry = buildRequestTelemetry({
+          dialogKey: input.continueDialogId || newDialogTelemetryKey,
+          messages: requestMessages,
+          provenance: {
+            schemaVersion: 1, transport: provider.transport ?? "unknown",
+            phases: [historyLoadedPhase, summaryProjectedPhase, budgetTrimPhase, contextPhase("final-request", requestMessages)],
+            summary: selectedSummary,
+          },
+          toolsHash: safeToolNamesHash(agentTools),
+        });
+        resetToolImageDelivery(requestMessages.flatMap(toolImages));
+        return true;
+      };
+      let overflowRescueAttempted = false;
+      while (true) {
+        llmStreamActivity = 0;
+        partialContent = "";
+        let providerInvoked = false;
+        try {
+          result = await runCompleteWithTimeout({
+            provider: { complete: (messages, options) => {
+              providerInvoked = true;
+              // Provider invoked: the request is dispatched and in flight with
+              // the model. The transactions belong to the completion boundary now
+              // and must not be rolled back to pending if the provider fails.
+              inFlightTransactions = [];
+              return provider.complete(messages, options);
+            } },
+            messages: requestMessages,
+            options: {
+              timeoutMs: resolveLlmRequestTimeoutMs(input),
+              // 用户取消信号穿进 provider options：providerStreamRetry 据此在
+              // 取消后跳过重试，provider 分支（如 antigravity/openai-compatible）
+              // 也可把 fetch 绑定到同一信号，实现真正的传输层取消。
+              ...(input.abortSignal ? { signal: input.abortSignal } : {}),
+              // 计费归因：续聊轮次带上 dialogId，platform proxy 才能把 token 记录
+              // 归到具体对话而不是 chat-proxy 兜底桶。新对话首轮 id 尚未分配。
+              ...(input.continueDialogId ? { dialogId: input.continueDialogId } : {}),
+              ...(shouldStreamDeltas ? { onTextDelta: (chunk: string) => {
+                llmStreamActivity += 1;
+                partialContent += chunk;
+                observationBoundary.emit({
+                  kind: "text-delta",
+                  chunk,
+                  round,
+                  atMs: Date.now(),
+                });
+              } } : {}),
+              ...(shouldStreamReasoning ? { onReasoningDelta: (chunk: string) => {
+                llmStreamActivity += 1;
+                observationBoundary.emit({
+                  kind: "reasoning-delta",
+                  chunk,
+                  round,
+                  atMs: Date.now(),
+                });
+              } } : {}),
+              ...(shouldPassToolEvents ? { onToolEvent: (event: LocalAgentToolEvent) => {
+                llmStreamActivity += 1;
+                observationBoundary.emit({
+                  kind: "tool-event",
+                  event,
+                  round,
+                  atMs: Date.now(),
+                });
+              } } : {}),
+              ...(shouldPassToolEvents ? { toolEventRound: round } : {}),
+            },
+            timeoutMs: resolveLlmRequestTimeoutMs(input),
+            activityVersion: () => llmStreamActivity,
+            round,
+            input,
+            boundary: observationBoundary,
+            context: contextMetrics,
+            providerName: agentConfig.provider,
+            model: provider.model,
+          });
+        } catch (error) {
+          if (!providerInvoked && inFlightTransactions.length > 0) {
+            // Provider was never invoked (e.g. pre-dispatch timeout, abort, or
+            // provider-init failure): roll back the in-flight transactions so the
+            // messages return to pending and are retracted from the transcript.
+            const toRollback = inFlightTransactions;
+            inFlightTransactions = [];
+            try {
+              await rollbackInjectionCommits(toRollback);
+            } catch (rbErr) {
+              error = combineRollbackError(error, rbErr);
+            }
+          }
+          if (providerInvoked) usageLedger.recordProviderCall({
+            model: agentConfig.model,
+            telemetry: { ...requestTelemetry, round, endTs: Date.now(),
+              requestState: input.abortSignal?.aborted ? "cancelled" : "failed" },
+          });
+          if (
+            providerInvoked &&
+            !overflowRescueAttempted &&
+            llmStreamActivity === 0 &&
+            !input.abortSignal?.aborted &&
+            isContextOverflowText(toErrorMessage(error))
+          ) {
+            overflowRescueAttempted = true;
+            if (await tryOverflowRescueCompaction()) {
+              continue;
+            }
+          }
+          throw error;
+        }
+        if (
+          (result.error || result.runtimeProviderFailure) &&
+          !overflowRescueAttempted &&
+          llmStreamActivity === 0 &&
+          !input.abortSignal?.aborted &&
+          isContextOverflowText(result.runtimeProviderFailure?.message ?? result.errorMessage ?? "")
+        ) {
+          overflowRescueAttempted = true;
+          usageLedger.recordProviderCall({
+            usage: result.usage,
+            model: result.model ?? agentConfig.model,
+            provider: result.provider,
+            telemetry: { ...finalizeCallTelemetry(requestTelemetry, result, round, callStartedAt), requestState: "failed" },
+          });
+          if (await tryOverflowRescueCompaction()) {
+            continue;
           }
         }
-        if (providerInvoked) usageLedger.recordProviderCall({
-          model: agentConfig.model,
-          telemetry: { ...requestTelemetry, round, endTs: Date.now(),
-            requestState: input.abortSignal?.aborted ? "cancelled" : "failed" },
-        });
-        throw error;
+        break;
       }
 
       acceptToolImages.discard(requestMessages.flatMap(toolImages).filter((image) => toolImageDelivery(image) === "impossible"));
@@ -2093,6 +2165,17 @@ export async function runLocalAgentTurn(
           emptyAssistantFallbackReason: toolExecutionGuardVerdict.reason,
         };
         break;
+      }
+      // 子任务软预算收敛提醒：仅在子任务/显式启用模式下于里程碑阈值（默认 40 / 80 次工具调用）
+      // 通过 append-only transcript 追加一次性提醒；不强杀、不改写前序历史消息（保护 KV Prefix Cache）。
+      if (!input.abortSignal?.aborted) {
+        const softBudgetAdvisory = softBudgetAdvisor.observeToolCalls(toolCallCount);
+        if (softBudgetAdvisory) {
+          transcript.push({
+            role: "user",
+            content: softBudgetAdvisory.message,
+          });
+        }
       }
       // 轮内压缩主防线：工具结果灌水之后、下一轮 provider 调用之前。
       // contextUsage 在手时按真实遥测判定；缺失时每轮走估算兜底——

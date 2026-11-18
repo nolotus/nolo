@@ -24,8 +24,16 @@ import {
 
 import { createManualCompactionSummaryCaller } from "./manualCompactionSummary";
 import { getActiveDialogAgentId } from "../../chat/dialog/dialogAgents";
-import { validateStoredSummary, type LocalCompactionSummaryFallbackOptions } from "../../agent-runtime/localAutoCompaction";
+import {
+  findSummaryAnchorIndex,
+  validateStoredSummary,
+  type LocalCompactionSummaryFallbackOptions,
+} from "../../agent-runtime/localAutoCompaction";
 import { dialogMessageRecordToAgentRuntimeMessage } from "../../agent-runtime/dialogMessageRecord";
+import { orderDialogHistory } from "../../agent-runtime/dialogHistoryOrder";
+import { readDialogMessageRecords } from "./cliLocalAgentRecordReader";
+import { createCliHybridRecordStore, type HybridRecordStore } from "./hybridRecordStore";
+import { getDefaultCliLocalRuntimeDb } from "../localRuntimeDb";
 
 const DB_PATH = "/api/v1/db";
 
@@ -254,22 +262,87 @@ async function resolveContextWindow(
   fetchImpl: CliFetchImpl,
   serverUrl: string,
   authToken: string,
-  agentKey: string | undefined
+  agentKey: string | undefined,
+  localStore?: HybridRecordStore | null,
 ): Promise<number> {
   if (!agentKey) return DEFAULT_CONTEXT_WINDOW;
   try {
     const res = await fetchImpl(`${serverUrl}${DB_PATH}/read/${agentKey}`, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
-    if (!res.ok) return DEFAULT_CONTEXT_WINDOW;
-    const agent = await res.json();
-    if (agent?.model) {
-      return getModelContextWindow(agent.model) || DEFAULT_CONTEXT_WINDOW;
+    if (res.ok) {
+      const agent = await res.json();
+      if (agent?.model) {
+        return getModelContextWindow(agent.model) || DEFAULT_CONTEXT_WINDOW;
+      }
     }
   } catch {
-    // Best-effort — fall back to default.
+    // Best-effort — fall through to local store / default.
+  }
+  if (localStore) {
+    try {
+      const localAgent = await localStore.read(agentKey, { remote: false });
+      if (localAgent?.model) {
+        return getModelContextWindow(localAgent.model) || DEFAULT_CONTEXT_WINDOW;
+      }
+    } catch {
+      // Best-effort — fall back to default.
+    }
   }
   return DEFAULT_CONTEXT_WINDOW;
+}
+
+function parseRecordUpdatedAtMs(record: Record<string, unknown> | null | undefined): number {
+  const raw = record?.updatedAt;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function isUsableDialogRecord(record: unknown): record is Record<string, unknown> {
+  if (!record || typeof record !== "object") return false;
+  const rec = record as Record<string, unknown>;
+  return (
+    typeof rec.id === "string" ||
+    typeof rec.dbKey === "string" ||
+    rec.type === "dialog" ||
+    typeof rec.summary === "string" ||
+    Array.isArray(rec.manualCompactHistory)
+  );
+}
+
+function sortMessagesChronologically(messages: Message[]): Message[] {
+  const ordered = orderDialogHistory(
+    messages.map((raw, index) => {
+      const parsed = dialogMessageRecordToAgentRuntimeMessage(raw);
+      return {
+        role: parsed?.role ?? ("user" as const),
+        content: "",
+        ...(parsed?.cliHistoryOrder !== undefined ? { cliHistoryOrder: parsed.cliHistoryOrder } : {}),
+        ...(parsed?.createdAt !== undefined ? { createdAt: parsed.createdAt } : {}),
+        id: typeof raw.id === "string" ? raw.id : parsed?.id,
+        __index: index,
+      };
+    }),
+  );
+  return ordered.map((item) => messages[item.__index]!);
+}
+
+async function resolveCompactLocalStore(
+  options: CompactDialogOptions,
+  fetchImpl: CliFetchImpl,
+): Promise<HybridRecordStore | null> {
+  if (options.store) return options.store;
+  if (!options.env || options.fetchImpl) return null;
+  try {
+    const db = await getDefaultCliLocalRuntimeDb({ env: options.env });
+    return createCliHybridRecordStore({ db, env: options.env, fetchImpl });
+  } catch {
+    return null;
+  }
 }
 
 export type CompactPhase = "reading" | "summarizing" | "forking";
@@ -282,6 +355,8 @@ export interface CompactDialogOptions {
   fetchImpl?: CliFetchImpl;
   signal?: AbortSignal;
   env?: Record<string, string | undefined>;
+  /** Optional local store override (used in CLI/tests without touching disk DB). */
+  store?: HybridRecordStore;
   /** Injected LLM caller for summary generation. Production wires the platform chat proxy. */
   summaryLlmCaller?: SummaryLlmCaller;
   /** Progress phase callback (called at start of reading -> summarizing -> forking). */
@@ -308,13 +383,44 @@ export async function compactDialog(
   if (options.signal?.aborted) throw new DOMException("summary aborted", "AbortError");
   options.onProgress?.("reading");
 
+  const localStore = await resolveCompactLocalStore(options, fetchImpl);
   const dialogKey = `dialog-${userId}-${options.dialogId}`;
-  const current = await readDialogRecord(
-    fetchImpl,
-    options.serverUrl,
-    options.authToken,
-    dialogKey
-  );
+  let remoteCurrent: Record<string, unknown> | null = null;
+  let remoteReadError: unknown = null;
+  try {
+    remoteCurrent = await readDialogRecord(
+      fetchImpl,
+      options.serverUrl,
+      options.authToken,
+      dialogKey
+    );
+  } catch (error) {
+    remoteReadError = error;
+  }
+  const localCurrent = localStore
+    ? await localStore.read(dialogKey, { remote: false }).catch(() => null)
+    : null;
+  const hasUsableLocal = isUsableDialogRecord(localCurrent);
+  const hasUsableRemote = isUsableDialogRecord(remoteCurrent);
+
+  let current: Record<string, unknown>;
+  let usedLocalRecord = false;
+  if (remoteReadError) {
+    if (!hasUsableLocal) throw remoteReadError;
+    current = localCurrent as Record<string, unknown>;
+    usedLocalRecord = true;
+  } else if (hasUsableLocal) {
+    const localUpdatedMs = parseRecordUpdatedAtMs(localCurrent as Record<string, unknown>);
+    const remoteUpdatedMs = parseRecordUpdatedAtMs(remoteCurrent);
+    if (!hasUsableRemote || localUpdatedMs > remoteUpdatedMs) {
+      current = { ...(remoteCurrent ?? {}), ...(localCurrent as Record<string, unknown>) };
+      usedLocalRecord = true;
+    } else {
+      current = remoteCurrent!;
+    }
+  } else {
+    current = remoteCurrent!;
+  }
 
   // --- Compression phase ---
   let summaryGenerated = false;
@@ -333,34 +439,97 @@ export async function compactDialog(
   let pendingHistory: Message[] = [];
   if (!summaryLlmCaller) throw new Error("[nolo] compact: summary provider unavailable");
   {
-    const ownMsgs = await readDialogMessages(
-      fetchImpl,
-      options.serverUrl,
-      options.authToken,
-      options.dialogId
-    );
+    let ownMsgs: Message[] = [];
+    let remoteMsgsError: unknown = null;
+    try {
+      ownMsgs = await readDialogMessages(
+        fetchImpl,
+        options.serverUrl,
+        options.authToken,
+        options.dialogId
+      );
+    } catch (error) {
+      remoteMsgsError = error;
+    }
+
+    if (localStore) {
+      let localEntries: Awaited<ReturnType<typeof readDialogMessageRecords>> = [];
+      let localMsgsError: unknown = null;
+      try {
+        localEntries = await readDialogMessageRecords({
+          store: localStore,
+          dialogId: options.dialogId,
+        });
+      } catch (error) {
+        localMsgsError = error;
+      }
+
+      if (localMsgsError) {
+        if (remoteMsgsError || usedLocalRecord) {
+          throw localMsgsError;
+        }
+        console.warn(`[nolo] compact: failed to read local messages for ${options.dialogId}; using remote history:`, localMsgsError);
+      } else {
+        const localMsgs: Message[] = sortMessagesChronologically(
+          localEntries
+            .filter((entry) => (entry.record.metadata as any)?.queueState !== "pending" && entry.record.deleted !== true)
+            .filter((entry) => dialogMessageRecordToAgentRuntimeMessage(entry.record) !== null)
+            .map((entry) => ({
+              ...entry.record,
+              id: typeof entry.record.id === "string" && entry.record.id ? entry.record.id : entry.messageId,
+            }) as Message),
+        );
+        if (remoteMsgsError) {
+          if (!hasUsableLocal && localMsgs.length === 0) {
+            throw remoteMsgsError;
+          }
+          ownMsgs = localMsgs;
+        } else if (localMsgs.length > 0) {
+          const seenIds = new Set(ownMsgs.map((m) => m.id).filter(Boolean));
+          const missingLocal = localMsgs.filter((m) => !m.id || !seenIds.has(m.id));
+          if (missingLocal.length > 0) {
+            ownMsgs = sortMessagesChronologically([...ownMsgs, ...missingLocal]);
+          }
+        }
+      }
+    } else if (remoteMsgsError) {
+      throw remoteMsgsError;
+    }
 
     const allMsgs = [...(Array.isArray(current.manualCompactHistory) ? current.manualCompactHistory as Message[] : []), ...ownMsgs];
-    // Validate against the same canonical projection as runtime before trusting
-    // either the summary or its claimed coverage. Invalid summaries fail closed:
-    // the original transcript remains intact and no replacement is published.
     const history = allMsgs.map(message => {
       const parsed = dialogMessageRecordToAgentRuntimeMessage(message);
       if (!parsed) throw new Error("[nolo] compact: invalid current history message");
       return parsed;
     });
-    if (validateStoredSummary({ history, stored: {
+    const storedSummaryValid = validateStoredSummary({ history, stored: {
       summarizedBeforeId: current.summarizedBeforeId as string | undefined,
       sourceHash: current.sourceHash as string | undefined,
       sourceCount: current.sourceCount as number | undefined,
       schemaVersion: current.schemaVersion,
-    } }) === false) throw new Error("[nolo] compact: invalid stored summary; source history retained");
+    } });
+    let activeSummary = typeof current.summary === "string" ? current.summary.trim() : "";
+    let activeSummarizedBeforeId: string | undefined;
     pendingHistory = allMsgs;
-    generatedSummary = typeof current.summary === "string" ? current.summary.trim() : undefined;
-    if (current.summarizedBeforeId) {
-      const anchor = allMsgs.findIndex(msg => msg.id === current.summarizedBeforeId);
-      if (anchor < 0) throw new Error("[nolo] compact: summary anchor missing from current history");
-      pendingHistory = allMsgs.slice(anchor + 1);
+    if (storedSummaryValid === false) {
+      // Stored summary failed integrity/schema validation: discard it and recompute from full allMsgs.
+      activeSummary = "";
+      activeSummarizedBeforeId = undefined;
+      generatedSummary = undefined;
+    } else if (typeof current.summarizedBeforeId === "string" && current.summarizedBeforeId) {
+      const anchor = findSummaryAnchorIndex(allMsgs, current.summarizedBeforeId);
+      if (anchor < 0) {
+        // Anchor cannot be located (including legacy local-N): discard stale summary and recompute from full allMsgs.
+        activeSummary = "";
+        activeSummarizedBeforeId = undefined;
+        generatedSummary = undefined;
+      } else {
+        activeSummarizedBeforeId = allMsgs[anchor]?.id ?? current.summarizedBeforeId;
+        generatedSummary = activeSummary || undefined;
+        pendingHistory = allMsgs.slice(anchor + 1);
+      }
+    } else {
+      generatedSummary = activeSummary || undefined;
     }
     if (allMsgs.length > 0) {
       const agentKey =
@@ -371,20 +540,21 @@ export async function compactDialog(
         fetchImpl,
         options.serverUrl,
         options.authToken,
-        agentKey
+        agentKey,
+        localStore,
       );
 
       const plan = planCompression({
         allMsgs,
-        summarizedBeforeId: current.summarizedBeforeId as string | undefined,
-        summary: (current.summary as string) || "",
+        summarizedBeforeId: activeSummarizedBeforeId,
+        summary: activeSummary,
         contextWindow,
         force: true,
         reason: "manual",
       });
 
       if (plan.shouldCompress && plan.msgsToCompress.length > 0) {
-        const previousSummary = (current.summary as string) || "";
+        const previousSummary = activeSummary;
         const request = buildBoundedCompactionRequest({
           // Planning/persistence retain stored records (toolCallId); the bounded
           // request validates runtime messages (tool_call_id). Reuse the canonical
@@ -448,7 +618,7 @@ export async function compactDialog(
               if (summaryBudget.remainingMs() <= 0) throw new DOMException("Summary deadline exceeded", "TimeoutError");
               // referenceKeys participate in the fork carry (FORKED_CARRY_FIELDS);
               // source cursor and hash remain local to the source record.
-              await patchDialog(fetchImpl, options.serverUrl, options.authToken, dialogKey, {
+              const patchChanges: Record<string, unknown> = {
                 summary: newSummary.trim(),
                 summarizedBeforeId: request.summarizedBeforeId,
                 compressionCount: compressionCount + 1,
@@ -458,7 +628,26 @@ export async function compactDialog(
                   sourceCount: sourceMeta.sourceCount,
                   schemaVersion: sourceMeta.schemaVersion,
                 } : {}),
-              });
+              };
+              let remotePatchError: unknown = null;
+              try {
+                await patchDialog(fetchImpl, options.serverUrl, options.authToken, dialogKey, patchChanges);
+              } catch (error) {
+                remotePatchError = error;
+              }
+              if (localStore) {
+                await localStore.write(dialogKey, {
+                  ...current,
+                  ...patchChanges,
+                  dbKey: dialogKey,
+                  updatedAt: new Date().toISOString(),
+                });
+                if (remotePatchError) {
+                  console.warn(`[nolo] compact: remote patch failed for ${dialogKey}, persisted locally:`, remotePatchError);
+                }
+              } else if (remotePatchError) {
+                throw remotePatchError;
+              }
 
               current.referenceKeys = Array.from(extractedKeys);
 
@@ -469,7 +658,7 @@ export async function compactDialog(
               // P1-8 压缩埋点
               const metrics = buildCompactionMetricsFromPlan({
                 reason: "manual",
-                previousSummary: (current.summary as string) || "",
+                previousSummary,
                 plan: {
                   msgsToCompress: request.coveredMessages,
                   msgsToKeep: [...plan.msgsToCompress.slice(request.coveredMessages.length), ...plan.msgsToKeep],
@@ -506,7 +695,20 @@ export async function compactDialog(
   // unsummarized fields (including tool pairing and structured content).
   if (generatedSummary) next.summary = generatedSummary;
   next.manualCompactHistory = pendingHistory;
-  await writeDialogRecord(fetchImpl, options.serverUrl, options.authToken, next);
+  let remoteWriteError: unknown = null;
+  try {
+    await writeDialogRecord(fetchImpl, options.serverUrl, options.authToken, next);
+  } catch (error) {
+    remoteWriteError = error;
+  }
+  if (localStore) {
+    await localStore.write(next.dbKey, next);
+    if (remoteWriteError) {
+      console.warn(`[nolo] compact: remote fork write failed for ${next.dbKey}, persisted locally:`, remoteWriteError);
+    }
+  } else if (remoteWriteError) {
+    throw remoteWriteError;
+  }
   await addDialogToSpaceIfNeeded(
     fetchImpl,
     options.serverUrl,

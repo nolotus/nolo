@@ -32,7 +32,7 @@ async function main() {
 
   const external = externalJson ? JSON.parse(externalJson) : [];
 
-  const plugin: BunPlugin = {
+  const plugin: Bun.BunPlugin = {
     name: "node-gyp-build-shim",
     setup(build) {
       build.onResolve({ filter: /^node-gyp-build$/ }, () => ({
@@ -46,7 +46,7 @@ async function main() {
     : { outfile };
 
   const result = await Bun.build({
-    entryPoints: [entry],
+    entrypoints: [entry],
     tsconfig: tsconfig,
     compile: compileOption,
     external,

@@ -1,7 +1,7 @@
 /** Private secret buffer: never use ask_choice/composer answer state or echo input. */
 import { safeAskText } from "./askTextSanitize";
 import { createStandaloneDialogSession } from "./dialogHost";
-import { renderDialogRow } from "./dialogFrame";
+import { renderDialogRow, renderDialogRule } from "./dialogFrame";
 import {
   createDialogFramePainter,
   createRawKeyReader,
@@ -110,9 +110,11 @@ export async function runSecretInputDialog(args: {
     resolveBottomRow: args.bottomRow,
     session,
     render: () => {
-      const width = Math.max(1, ((output as NodeJS.WriteStream).columns || 80) - 1);
+      const cols = (output as NodeJS.WriteStream).columns || 80;
+      const width = Math.max(1, cols - 1);
       const mask = "•".repeat(Math.min(Array.from(value).length, Math.max(1, width - 4)));
       const lines = [
+        renderDialogRule(cols, false),
         `? ${safeAskText(args.label)}`,
         "  保存到本机现有 secret store · 不进入聊天记录",
         renderDialogRow({ label: mask || "输入凭据（已掩码）", focused: true }, false),

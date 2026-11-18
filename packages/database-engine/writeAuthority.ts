@@ -1,4 +1,5 @@
 import {
+  isMalformedAgentAutomationKey,
   parseOwnerUserIdFromDbKey,
   resolveCandidateOwnerFromKeyRemainder,
 } from "database/authority/ownerKey";
@@ -38,6 +39,23 @@ export const resolveKeyOwnerId = (
     return parts[2] || null;
   }
   if (parts[0] === "agent" && parts[1] === "threadidx" && parts.length >= 4) {
+    const candidateOwner = resolveCandidateOwnerFromKeyRemainder(
+      parts.slice(2).join("-"),
+      options.candidateOwnerUserIds
+    );
+    if (candidateOwner) return candidateOwner;
+    return parts[2] || null;
+  }
+  if (parts[0] === "agent" && parts[1] === "automation") {
+    if (isMalformedAgentAutomationKey(dbKey)) return null;
+    if (parts[2] === "owner" && parts[3] === "idx") {
+      const candidateOwner = resolveCandidateOwnerFromKeyRemainder(
+        parts.slice(4).join("-"),
+        options.candidateOwnerUserIds
+      );
+      if (candidateOwner) return candidateOwner;
+      return parts[4] || null;
+    }
     const candidateOwner = resolveCandidateOwnerFromKeyRemainder(
       parts.slice(2).join("-"),
       options.candidateOwnerUserIds
@@ -193,6 +211,14 @@ export const canWriteRecord = ({
       actionUserId,
       existingRecord: record,
     });
+
+  if (isMalformedAgentAutomationKey(dbKey)) {
+    return {
+      keyOwnerId: null,
+      recordOwnerId,
+      isAllowed: false,
+    };
+  }
 
   // admin 写 system 命名空间优先放行，不被 owner 一致性检查拦截
   if (isSystemAdminWriter) {

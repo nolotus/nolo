@@ -18,12 +18,16 @@ import {
   COLLAPSED_PASTE_PLACEHOLDER_RE,
   shouldCollapsePaste,
 } from "core/collapsedPaste";
-import { boxGlyphs, displayWidth, fitAnsiLine, resolveBoxCharset, wrapTextToLines } from "./tuiAnsi";
+import { boxGlyphs, displayWidth, fitAnsiLine, resolveBoxCharset, stripAnsi, visibleWidth, wrapTextToLines } from "./tuiAnsi";
 import { consumeSgrMouseSequence } from "./tuiMouse";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
-import { composerSurfaceBackgroundSequence, renderSurfaceLine, themeColorSequence, themeText } from "./theme";
-import { t } from "./i18n";
-import { completeSlashCandidates, completeSlashCommand } from "./sessionInput";
+import { themeColorSequence, themeText } from "./theme";
+import { getCliLocale, t } from "./i18n";
+import {
+  getCompletionMenuSelection,
+  resolveComposerCompletionMenu,
+} from "./sessionInput";
+import { isShellPassthroughInput } from "./sessionDispatch";
 import { PASTE_TOKEN_PREFIX } from "./session";
 import { resetHistoryFrameDiffCache } from "./tuiHistory";
 import { resolveSurfacePaintWidth, resolveHistoryLayoutGeometry } from "./tuiLayout";
@@ -51,6 +55,7 @@ function normalizePasteNewlines(text: string): string {
  */
 const altScreenOn = new WeakMap<NodeJS.WritableStream, boolean>();
 const altScreenInvalidators = new WeakMap<object, Set<() => void>>();
+const barCursorActive = new WeakSet<NodeJS.WritableStream>();
 
 function notifyAltScreenInvalidators(output: object) {
   const set = altScreenInvalidators.get(output);
@@ -86,6 +91,10 @@ export function enterAltScreen(output: NodeJS.WritableStream): boolean {
  */
 export function leaveAltScreen(output: NodeJS.WritableStream): boolean {
   if (!outputIsTty(output)) return false;
+  if (barCursorActive.has(output)) {
+    barCursorActive.delete(output);
+    output.write("\x1b[0 q");
+  }
   if (!altScreenOn.get(output)) return false;
   altScreenOn.set(output, false);
   resetHistoryFrameDiffCache(output);
@@ -282,12 +291,11 @@ export function createFixedInput(
   invalidatorSet.add(invalidateComposerCache);
 
   /**
-   * OMP-style composer:
-   * ──────────────────────── top rule
-   * nolo > agent · mode > 📁 path > branch
+   * Minimal line-style composer:
+   * ──────────────────────── rule
    * ❯ Type a message...
-   * ──────────────────────── bottom rule
-   * No side borders, no rainbow powerline blocks, status never wraps.
+   *   ✦ nolo · ~/path · ⑂ branch
+   * No background wash, no side borders, status line anchors the bottom edge.
    */
   const renderInputArea = (
     buffer: string,
@@ -295,43 +303,21 @@ export function createFixedInput(
   ): { text: string; lines: number; cursorCol: number; cursorRow: number } => {
     const colorEnabled = resolveCliColorEnabled();
     const cols = Math.max(1, getColumns());
+    const rows = Math.max(1, getRows());
 
-    let completions = completeSlashCandidates(buffer, config.getCwd?.());
     const cwd = config.getCwd?.();
-    if (cwd && buffer.startsWith("/cd ") && buffer.endsWith("/")) {
-      const prefix = buffer.slice("/cd ".length);
-      const trimmedSlash = prefix.slice(0, -1);
-      const lastSlash = trimmedSlash.lastIndexOf("/");
-      const parentPrefix = lastSlash >= 0 ? trimmedSlash.slice(0, lastSlash + 1) : "";
-      const parentCompletions = completeSlashCandidates(`/cd ${parentPrefix}`, cwd);
-      const parentIdx = parentCompletions.findIndex(
-        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
-      );
-      if (parentIdx >= 0 && parentCompletions.length > 1) {
-        completions = parentCompletions;
-      }
-    }
+    const completionMenu = resolveComposerCompletionMenu(buffer, cursorPos, cwd);
+    const completions = completionMenu?.candidates ?? [];
     const paintWidth = resolveSurfacePaintWidth(cols);
-    const sections: { text: string; wash: boolean }[] = [];
-    if (completions.length > 0) {
-      const selectedIndex = completions.findIndex(
-        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
-      );
-      const labels = completions.map((c, idx) => {
-        if (idx === selectedIndex && colorEnabled) {
-          return `\x1b[1;7m${c.label}\x1b[0m`;
-        }
-        return c.label;
-      });
-      sections.push({ text: fitAnsiLine(dimCliText(labels.join("  "), colorEnabled), cols), wash: false });
-    }
+    const { marginLeft } = resolveHistoryLayoutGeometry(cols);
+    const leftPad = marginLeft > 0 ? " ".repeat(marginLeft) : "";
+    const bodySections: string[] = [];
 
     // Activity line(s) (e.g. active tool execution or sub-agent run panel)
-    // sit ABOVE the top divider rule so ongoing step operations appear in the
-    // scrollback stream area, keeping the composer chrome (status, queues, prompt)
-    // cleanly bounded below the line.
+    // sit ABOVE the divider rule so ongoing step operations appear in the
+    // scrollback stream area, keeping the composer chrome cleanly below.
     const rawActivity = config.getActivityLines
-      ? config.getActivityLines({ columns: cols, rows: getRows() })
+      ? config.getActivityLines({ columns: cols, rows })
       : config.getActivityLine
         ? config.getActivityLine()
         : null;
@@ -342,10 +328,10 @@ export function createFixedInput(
         : [];
 
     for (const actLine of activityLines) {
-      sections.push({ text: fitAnsiLine(actLine.replace(/\r?\n/g, " "), cols), wash: false });
+      bodySections.push(fitAnsiLine(actLine.replace(/\r?\n/g, " "), cols));
     }
 
-    // The composer rules follow the theme's chrome token rather than a
+    // The composer rule follows the theme's chrome token rather than a
     // hardcoded bright-black, so /theme actually reaches the input area
     // instead of leaving it stuck on the terminal's default gray.
     // 字形跟 resolveBoxCharset：EA=A=wide 的终端（WT `compatibility.ambiguousWidth: wide`）
@@ -354,63 +340,41 @@ export function createFixedInput(
     const rule = colorEnabled
       ? `\x1b[2m${themeColorSequence("chrome")}${ruleGlyph.repeat(paintWidth)}\x1b[0m`
       : ruleGlyph.repeat(paintWidth);
-    const titleLine = config.getTitleLine?.();
-    if (titleLine) {
-      sections.push({ text: fitAnsiLine(titleLine.replace(/\r?\n/g, " "), cols), wash: false });
-    }
-    sections.push({ text: fitAnsiLine(config.getStatusLine(cols), cols), wash: false });
+    bodySections.push(rule);
 
-    // Queued follow-up preview lines sit between the status line and the input
-    // prompt so the user sees the actual staged text, not just a count.
+    // Queued follow-up preview lines sit between the divider rule and the input
+    // prompt so the user sees the actual staged text before the draft.
     const queueLines = config.getQueueLines?.() ?? [];
     for (const line of queueLines) {
       // Collapse any newline so each queued entry occupies exactly one physical
       // row. headerRows counts entries, not physical rows, so an embedded "\n"
       // would emit extra rows and drift the input cursor upward.
-      sections.push({ text: fitAnsiLine(line.replace(/\r?\n/g, " "), cols), wash: true });
+      bodySections.push(fitAnsiLine(line.replace(/\r?\n/g, " "), cols));
     }
-
-    // Status, activity and queued messages are not editable draft content.
-    // Keep the existing divider immediately above the draft, without adding rows.
-    sections.push({ text: rule, wash: false });
 
     // 附件条：紧贴输入提示行上方（草稿的组成部分，优先级高于队列预览）。
     // 同样折叠换行占恰好一行；超宽交给 fitAnsiLine 截断。
     const attachmentLine = config.getAttachmentLine?.() ?? null;
     if (attachmentLine) {
-      sections.push({ text: fitAnsiLine(attachmentLine.replace(/\r?\n/g, " "), cols), wash: true });
+      bodySections.push(fitAnsiLine(attachmentLine.replace(/\r?\n/g, " "), cols));
     }
 
     const promptRaw = t("promptLabel");
     const promptWidth = displayWidth(promptRaw);
+    // 与 sessionDispatch.ts (`isShellPassthroughInput`) 保持 100% 一致的 Shell 直通态判定。
+    const isShellMode = isShellPassthroughInput(buffer);
+    // Shell 直通态切为等宽琥珀色 "$ "，保持与 promptWidth 列宽严格相等以防光标跳动。
+    const activePromptRaw = isShellMode
+      ? promptWidth >= 1
+        ? "$".padEnd(promptWidth, " ")
+        : "$"
+      : promptRaw;
     // Accent-colored chevron so the input area feels active, not inert.
     const prompt = colorEnabled
-      ? `${themeColorSequence("accent")}${promptRaw}\x1b[39m`
-      : promptRaw;
+      ? `${themeColorSequence(isShellMode ? "warning" : "accent")}${activePromptRaw}\x1b[39m`
+      : activePromptRaw;
 
-    // 输入行铺一层 surface 底色，让 composer 读起来是一个区块，而不是裸在终端
-    // 画布上的几行文字。用 composer 专用的 wash（跟随终端真实底色的中性提亮/
-    // 压暗），不是状态行 chip 的 surfaceBackgroundSequence——后者在默认的
-    // terminal 模式下返回空、固定模式下也只差几个色阶，等于没画。
-    //
-    // 铺满整列而不是只包住文字：输入短的时候，只包文字的底色看起来像补丁。
-    // 尾部填空格补到 paintWidth，宽度算的是可见宽度（内容可能带 SGR），所以光标列
-    // 不受影响——背景序列零宽度，填充也都在内容之后。
-    //
-    // 复用 renderSurfaceLine 在内嵌 reset 后恢复底色，行末关闭样式。
-    // truecolor 不可用 / 终端底色未知时 wash 为空，整段退化为
-    // 原文（ANSI-16 没有"淡底"，实色会把文字埋掉）。
-    const surface = colorEnabled ? composerSurfaceBackgroundSequence() : "";
-    // 几何对齐：输入提示符 › 与正文在相同左边距 (marginLeft) 起步，右侧也按 marginRight 预留留白。
-    const { marginLeft, marginRight } = resolveHistoryLayoutGeometry(cols);
-    const leftPad = marginLeft > 0 ? " ".repeat(marginLeft) : "";
-    // 底色铺满整列，但最后一列留白：写到最右下角会让部分终端提前折行/滚屏。
-    const paintInputRow = ({ text: content, wash }: { text: string; wash: boolean }): string => {
-      if (!wash || !surface) return content;
-      return renderSurfaceLine({ text: fitAnsiLine(content, paintWidth), surface, padTo: paintWidth });
-    };
-
-    const headerRows = sections.length;
+    const bodyHeaderRows = bodySections.length;
     const contentWidth = Math.max(1, paintWidth - marginLeft - promptWidth);
     const logicalLines = buffer.length === 0 ? [""] : buffer.split("\n");
 
@@ -430,7 +394,7 @@ export function createFixedInput(
 
       if (buffer.length === 0) {
         const placeholder = themeText(t("placeholder"), "chrome", colorEnabled);
-        sections.push({ text: `${prefix}${placeholder}`, wash: true });
+        bodySections.push(fitAnsiLine(`${prefix}${placeholder}`, Math.max(1, paintWidth)));
         cursorCol = marginLeft + promptWidth;
         cursorRow = 0;
         inputRows = 1;
@@ -439,19 +403,32 @@ export function createFixedInput(
       }
 
       const wrapped = wrapTextToLines(logical, contentWidth);
-      const rows = wrapped.length > 0 ? wrapped : [""];
-      for (let j = 0; j < rows.length; j += 1) {
+      const wrappedRows = wrapped.length > 0 ? wrapped : [""];
+      for (let j = 0; j < wrappedRows.length; j += 1) {
         const rowPrefix = j === 0 ? prefix : `${leftPad}${" ".repeat(promptWidth)}`;
-        const rowText = rows[j] ?? "";
-        sections.push(
-          { text: `${rowPrefix}${styleCollapsedPastePlaceholders(rowText, colorEnabled)}`, wash: true },
+        const rowText = wrappedRows[j] ?? "";
+        const shellGhostHint =
+          isShellMode && buffer === "!" && targetPos === 1 && i === 0 && j === 0
+            ? themeText(
+                getCliLocale() === "zh"
+                  ? " 输入本机命令（直接执行，不耗 Token）"
+                  : " type a local shell command",
+                "chrome",
+                colorEnabled,
+              )
+            : "";
+        const renderedRow = `${rowPrefix}${styleCollapsedPastePlaceholders(rowText, colorEnabled)}${shellGhostHint}`;
+        bodySections.push(
+          shellGhostHint
+            ? fitAnsiLine(renderedRow, Math.max(1, paintWidth))
+            : renderedRow,
         );
 
         const rowLen = rowText.length;
         if (!cursorFound) {
           if (
             targetPos <= charOffset + rowLen ||
-            (j === rows.length - 1 && i === logicalLines.length - 1)
+            (j === wrappedRows.length - 1 && i === logicalLines.length - 1)
           ) {
             const subOffset = Math.max(0, Math.min(rowLen, targetPos - charOffset));
             const subStr = rowText.slice(0, subOffset);
@@ -466,7 +443,124 @@ export function createFixedInput(
       charOffset += 1; // count newline between logical lines
     }
 
-    const text = sections.map(paintInputRow).join("\n");
+    // Title (if any) and status line anchor the bottom edge below the draft,
+    // keeping breathing room between the input row and the terminal frame.
+    const titleLine = config.getTitleLine?.();
+    if (titleLine) {
+      bodySections.push(fitAnsiLine(titleLine.replace(/\r?\n/g, " "), cols));
+    }
+    const maxStatusLineWidth = Math.max(1, paintWidth);
+    const statusBudget = Math.max(1, paintWidth - marginLeft);
+    const shellBadgeLabel =
+      getCliLocale() === "zh" ? "$ 本地 Shell 直通" : "$ Local shell";
+    const shellBadgeFullWidth = displayWidth(` · ${shellBadgeLabel}`);
+    const effectiveStatusBudget =
+      isShellMode && statusBudget > shellBadgeFullWidth + 10
+        ? statusBudget - shellBadgeFullWidth
+        : statusBudget;
+    const rawStatus = config.getStatusLine(effectiveStatusBudget);
+    const statusLeadingSpaces = stripAnsi(rawStatus).match(/^ */)?.[0].length ?? 0;
+    const statusText =
+      rawStatus.length > 0 && leftPad && statusLeadingSpaces < marginLeft
+        ? `${leftPad.slice(0, marginLeft - statusLeadingSpaces)}${rawStatus}`
+        : rawStatus;
+    let combinedStatus = statusText;
+    if (isShellMode) {
+      const styledBadge = themeText(shellBadgeLabel, "warning", colorEnabled);
+      const styledSep =
+        rawStatus.length > 0 ? themeText(" · ", "chrome", colorEnabled) : "";
+      const badgeSuffix = `${styledSep}${styledBadge}`;
+      const badgeWidth = visibleWidth(badgeSuffix);
+      const statusWithLeftPad = rawStatus.length > 0 ? statusText : leftPad;
+      if (visibleWidth(statusWithLeftPad) + badgeWidth <= maxStatusLineWidth) {
+        combinedStatus = `${statusWithLeftPad}${badgeSuffix}`;
+      } else if (
+        rawStatus.length > 0 &&
+        maxStatusLineWidth >= badgeWidth + 10
+      ) {
+        const clippedStatus = fitAnsiLine(
+          statusText,
+          maxStatusLineWidth - badgeWidth,
+        );
+        combinedStatus = `${clippedStatus}${badgeSuffix}`;
+      } else {
+        combinedStatus = `${statusWithLeftPad}${badgeSuffix}`;
+      }
+    }
+    bodySections.push(fitAnsiLine(combinedStatus, maxStatusLineWidth));
+
+    // Clamp the vertical completion menu to the remaining screen rows above the
+    // composer body while reserving at least 1–2 rows for transcript history.
+    const reservedRows = Math.max(0, config.getReservedRows?.() ?? 0);
+    const minHistoryRows = rows >= 8 ? 2 : 1;
+    const maxMenuRows = Math.max(
+      0,
+      Math.min(6, rows - bodySections.length - reservedRows - minHistoryRows),
+    );
+    const menuSections: string[] = [];
+    if (completions.length > 0 && maxMenuRows > 0) {
+      const selectedIndex = Math.max(
+        0,
+        getCompletionMenuSelection(buffer, cursorPos, cwd, completions),
+      );
+      const hasOverflow = completions.length > maxMenuRows;
+      const itemBudget =
+        maxMenuRows === 1
+          ? 1
+          : hasOverflow
+            ? maxMenuRows - 1
+            : completions.length;
+      const startIdx = hasOverflow
+        ? Math.max(
+            0,
+            Math.min(
+              selectedIndex - Math.floor(itemBudget / 2),
+              completions.length - itemBudget,
+            ),
+          )
+        : 0;
+      const endIdx = startIdx + itemBudget;
+      const visible = completions.slice(startIdx, endIdx);
+      const maxLabelWidth = Math.min(
+        28,
+        Math.max(...visible.map((c) => displayWidth(c.label))),
+      );
+      const labelColWidth = maxLabelWidth + 2;
+
+      for (let i = 0; i < visible.length; i += 1) {
+        const item = visible[i]!;
+        const actualIdx = startIdx + i;
+        const isSelected = actualIdx === selectedIndex;
+        const marker = isSelected
+          ? themeText("❯ ", "accent", colorEnabled)
+          : "  ";
+        const label = isSelected
+          ? themeText(item.label, "accent", colorEnabled)
+          : themeText(item.label, "chrome", colorEnabled);
+        if (item.description) {
+          const gap = " ".repeat(Math.max(2, labelColWidth - displayWidth(item.label)));
+          const desc = themeText(item.description, "muted", colorEnabled);
+          menuSections.push(fitAnsiLine(`${leftPad}${marker}${label}${gap}${desc}`, cols));
+        } else {
+          menuSections.push(fitAnsiLine(`${leftPad}${marker}${label}`, cols));
+        }
+      }
+
+      if (hasOverflow && maxMenuRows > 1) {
+        const remainingBelow = completions.length - endIdx;
+        const hint =
+          startIdx > 0 && remainingBelow > 0
+            ? `↑${startIdx} · +${remainingBelow} more`
+            : remainingBelow > 0
+              ? `+${remainingBelow} more`
+              : `↑${startIdx} above`;
+        menuSections.push(fitAnsiLine(`${leftPad}  ${dimCliText(hint, colorEnabled)}`, cols));
+      }
+    }
+
+    const sections = [...menuSections, ...bodySections];
+    const headerRows = menuSections.length + bodyHeaderRows;
+    const text = sections.join("\n");
     const lines = sections.length;
     return { text, lines, cursorCol, cursorRow: headerRows + cursorRow };
   };
@@ -479,25 +573,30 @@ export function createFixedInput(
       linesChanged = true;
     }
     const oldTop = getTopReservedRows(output);
-    // Only task entries occupy the top band; no decorative row is reserved.
-    const maxEntries = resolveTopTaskEntryBudget(getRows(), inputLines, config.getReservedRows?.() ?? 0);
+    // Reserve 1 extra row for the closing top divider rule when tasks are shown.
+    const maxEntries = resolveTopTaskEntryBudget(getRows(), inputLines, config.getReservedRows?.() ?? 0, 1);
     // Zero-budget renders also invalidate the dock's prior visible-run projection.
     const projectedTasks = config.getTaskLines?.({ columns: getColumns(), rows: getRows(), maxEntries }) ?? [];
     const taskEntries = maxEntries > 0 ? projectedTasks : [];
     const taskWidth = resolveSurfacePaintWidth(getColumns());
-    const taskLines = taskEntries;
-    const taskSurface = resolveCliColorEnabled() ? composerSurfaceBackgroundSequence() : "";
-    const topText = taskLines.map(line => renderSurfaceLine({
-      text: fitAnsiLine(line.replace(/\r?\n/g, " "), taskWidth),
-      surface: taskSurface,
-      padTo: taskWidth,
-    })).join("\n");
+    const topColorEnabled = resolveCliColorEnabled();
+    const taskLines = taskEntries.map((line) =>
+      fitAnsiLine(line.replace(/\r?\n/g, " "), taskWidth),
+    );
+    if (taskEntries.length > 0) {
+      const ruleGlyph = boxGlyphs(resolveBoxCharset()).h;
+      const topRule = topColorEnabled
+        ? `\x1b[2m${themeColorSequence("chrome")}${ruleGlyph.repeat(taskWidth)}\x1b[0m`
+        : ruleGlyph.repeat(taskWidth);
+      taskLines.push(topRule);
+    }
+    const topText = taskLines.join("\n");
     setTopReservedRows(output, taskLines.length);
     if (oldTop !== taskLines.length) linesChanged = true;
     setScrollRegion(inputLines);
     if (force || oldTop !== taskLines.length || topText !== lastTaskText) {
       for (let i = 0; i < Math.max(oldTop, taskLines.length); i++) {
-        const line = topText.split("\n")[i] ?? "";
+        const line = taskLines[i] ?? "";
         // Clear only former header rows; history callback repaints freed rows below.
         if (i < getRows() - inputLines) write(`\x1b[${i + 1};1H\x1b[2K${line}`);
       }
@@ -510,8 +609,8 @@ export function createFixedInput(
     if (linesChanged) {
       config.onInputLinesChange?.(inputLines);
     }
-    const startRow = getRows() - inputLines + 1;
-    const cursorLine = startRow + cursorRow;
+    const startRow = Math.max(1, getRows() - inputLines + 1);
+    const cursorLine = Math.max(1, startRow + cursorRow);
     const targetCursorCol = cursorCol + 1;
 
     const contentChanged =
@@ -548,6 +647,18 @@ export function createFixedInput(
 
   if (!isTTY) return createNoopFixedInput();
 
+  // Steady bar cursor (DECSCUSR 6) while the input composer owns focus so a
+  // block cursor does not box the first character of the placeholder/draft;
+  // reset to terminal default (0) whenever leaving input focus.
+  const setBarCursor = () => {
+    barCursorActive.add(output);
+    write("\x1b[6 q");
+  };
+  const resetCursorStyle = () => {
+    barCursorActive.delete(output);
+    write("\x1b[0 q");
+  };
+
   return {
     active: true,
     init() {
@@ -555,6 +666,7 @@ export function createFixedInput(
       saveCursor();
       setScrollRegion(inputLines);
       enableMouse();
+      setBarCursor();
     },
     enterOutputMode(_submittedText: string) {
       // Keep the docked composer visible while the agent turn runs. The
@@ -564,6 +676,7 @@ export function createFixedInput(
     },
     exitOutputMode(buffer: string, cursorPos?: number) {
       saveCursor();
+      setBarCursor();
       repaintAt(buffer, cursorPos);
     },
     repaint(buffer: string, cursorPos?: number, force?: boolean) {
@@ -574,6 +687,7 @@ export function createFixedInput(
       invalidateComposerCache();
       disableMouse();
       resetScrollRegion();
+      resetCursorStyle();
     },
     resumeFromSubprocess() {
       paused = false;
@@ -581,6 +695,7 @@ export function createFixedInput(
       resetHistoryFrameDiffCache(output);
       setScrollRegion(inputLines);
       enableMouse();
+      setBarCursor();
       const scrollBottom = Math.max(1, getRows() - inputLines);
       write(`\x1b[${scrollBottom};1H\n`);
     },
@@ -591,12 +706,14 @@ export function createFixedInput(
       saveCursor();
       setScrollRegion(inputLines);
       enableMouse();
+      setBarCursor();
     },
     disable() {
       setTopReservedRows(output, 0);
       invalidatorSet?.delete(invalidateComposerCache);
       disableMouse();
       resetScrollRegion();
+      resetCursorStyle();
       // Leave the alternate screen last: mouse reporting and the scroll
       // region belong to the private buffer, so they must be reset while we
       // still own it. Switching back to the main screen restores the shell's
@@ -790,6 +907,18 @@ export function splitRawInputWithTail(
     }
     if (input.startsWith("\x1b\r", index)) {
       tokens.push("\x1b\r");
+      index += 2;
+      continue;
+    }
+    if (
+      input[index] === "\x1b" &&
+      (input[index + 1] === "b" ||
+        input[index + 1] === "B" ||
+        input[index + 1] === "f" ||
+        input[index + 1] === "F" ||
+        input[index + 1] === "\x7f")
+    ) {
+      tokens.push(input.slice(index, index + 2));
       index += 2;
       continue;
     }

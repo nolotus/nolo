@@ -16,6 +16,7 @@ import { getDefaultCliLocalRuntimeDb } from "../localRuntimeDb";
 import { createCliHybridRecordStore } from "../client/hybridRecordStore";
 import { writeDialog } from "../client/localRuntimeDialog";
 import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
+import type { CliFetchImpl } from "../cliFetch";
 
 function makeToolResultContent(index: number, lines: number): string {
   const parts: string[] = [];
@@ -69,10 +70,12 @@ const createId = () => `bid_${String(++idSeq).padStart(6, "0")}`;
 let nowMs = Date.now();
 const now = () => (nowMs += 1000);
 
-async function timeSaveTurn(args: { store: any; messages: any; continueDialogId?: string; seq: number }): Promise<number> {
+const defaultFetch: CliFetchImpl = (input, init) => fetch(input, init);
+
+async function timeSaveTurn(args: { store: any; messages: any; continueDialogId?: string; seq: number; fetchImpl?: CliFetchImpl }): Promise<number> {
   const store = args.store;
   const t0 = performance.now();
-  await writeDialog({ store, input: buildInput(args.messages, args.continueDialogId, args.seq), userId: "local", now, createId, env: { NOLO_CLI_PERF: "1" } });
+  await writeDialog({ store, input: buildInput(args.messages, args.continueDialogId, args.seq), userId: "local", now, createId, env: { NOLO_CLI_PERF: "1" }, fetchImpl: args.fetchImpl ?? defaultFetch });
   return performance.now() - t0;
 }
 

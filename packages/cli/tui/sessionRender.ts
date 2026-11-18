@@ -15,7 +15,7 @@ import {
   themeText,
   themeColorSequence,
   surfaceBackgroundSequence,
-  resolveTuiBrightnessSignal,
+  type TuiThemeToken,
 } from "./theme";
 import type { TuiState } from "./sessionTypes";
 
@@ -83,16 +83,18 @@ export function renderComposerTokenChip(
 }
 
 /**
- * 状态行的上下文占用 chip，两档呈现（按**可用宽度**降级，不看占用率）：
- *   宽：`ctx 84k/200k`（只给已用/上限，不重复百分比）
- *   窄：`ctx 42%`
+ * 状态行的上下文占用 chip，两档呈现（按**可用宽度**降级，不看占用率）并按占用率分级着色：
+ *   - `< 75%`：`"muted"` 淡灰（`ctx 84k/200k` / `ctx 42%`）
+ *   - `75% <= pct < 90%`：`"warning"` 琥珀色（`ctx 160k/200k` / `ctx 80%`）
+ *   - `pct >= 90%`：`"danger"` 醒目红，宽屏追加 `(/compact)`（`ctx 185k/200k (/compact)`），
+ *     窄屏降级回 `ctx 93%` 且保留 `"danger"` 着色
  *
  * 口径仍走 resolveContextUsage（与 `/context` 面板的令牌行同一处）：已用 =
  * 下一轮上下文占用（provider input，未收到 usage 时用本地估算 + 轮内流式增量），
  * **不含 output**。用量或窗口任一未知时整段不渲染（不伪造 `0%`，也不留
  * 一个读不出事实的 `ctx —` 占位）。
  */
-function renderStatusContextSegment(
+function resolveStatusContextPresentation(
   state: Pick<
     TuiState,
     | "turnTokens"
@@ -100,8 +102,7 @@ function renderStatusContextSegment(
     | "estimatedContextTokens"
     | "liveTurnEstimatedTokens"
   >,
-  compact: boolean,
-): string {
+): { full: string; compact: string; tone: TuiThemeToken } {
   const usage = resolveContextUsage({
     tokens: state.turnTokens,
     fallbackContextWindow: state.contextWindow,
@@ -112,15 +113,36 @@ function renderStatusContextSegment(
   // 已用有值、分母未知（自建 custom agent 首屏常见：agentKey 解析不出模型，
   // 目录要等首轮 run 回填窗口）时**只报已用 token**，不伪造分母也不整段消失。
   if (usage.used === undefined) {
-    return "";
+    return { full: "", compact: "", tone: "muted" };
   }
-  if (usage.contextWindow === undefined) {
-    return `ctx ${formatTokenCount(usage.used)}`;
+  if (usage.contextWindow === undefined || usage.contextWindow <= 0) {
+    const usedOnly = `ctx ${formatTokenCount(usage.used)}`;
+    return { full: usedOnly, compact: usedOnly, tone: "muted" };
   }
-  const pct = Math.min(100, usage.pct ?? 0);
+  const rawPct = usage.pct ?? (usage.used / usage.contextWindow) * 100;
+  const pct = Math.min(100, rawPct);
   const pctText = pct > 0 && pct < 10 ? pct.toFixed(1) : Math.round(pct).toString();
-  if (compact) return `ctx ${pctText}%`;
-  return `ctx ${formatTokenCount(usage.used)}/${formatTokenCount(usage.contextWindow)}`;
+  const compact = `ctx ${pctText}%`;
+  const baseFull = `ctx ${formatTokenCount(usage.used)}/${formatTokenCount(usage.contextWindow)}`;
+  if (rawPct >= 90) {
+    return {
+      full: `${baseFull} (/compact)`,
+      compact,
+      tone: "danger",
+    };
+  }
+  if (rawPct >= 75) {
+    return {
+      full: baseFull,
+      compact,
+      tone: "warning",
+    };
+  }
+  return {
+    full: baseFull,
+    compact,
+    tone: "muted",
+  };
 }
 
 /**
@@ -195,9 +217,10 @@ export function renderStatusLine(
 
   if (state.gitStatus) {
     const { branch, modified, untracked } = state.gitStatus;
-    const branchText = themeText(`⑂ ${branch}`, "warning", colorEnabled);
-    // Modified files are the actionable signal (danger); untracked is noise
-    // (muted). Keeping them different tokens preserves that hierarchy.
+    const branchText = themeText(`⑂ ${branch}`, "muted", colorEnabled);
+    // Modified files are the actionable signal (danger); clean branch and
+    // untracked files stay quiet (muted) so the status bar only lights up
+    // when there is uncommitted work.
     const modifiedText = modified > 0 ? ` ${themeText(`*${modified}`, "danger", colorEnabled)}` : "";
     const untrackedText = untracked > 0 ? ` ${themeText(`?${untracked}`, "muted", colorEnabled)}` : "";
     parts.push(`${branchText}${modifiedText}${untrackedText}`);
@@ -219,9 +242,12 @@ export function renderStatusLine(
   // `ctx 42% · 84k/200k`，窄终端只留 `ctx 42%`，再窄则整体让路。
   // 它每秒都在动，所以是第一个降级/让路的可选段；口径仍与 `/context` 面板
   // 共用 resolveContextUsage，不在这里另造估算。
-  const contextFull = renderStatusContextSegment(state, false);
-  const contextCompact = renderStatusContextSegment(state, true);
-  let contextPart = contextFull ? themeText(contextFull, "muted", colorEnabled) : "";
+  const {
+    full: contextFull,
+    compact: contextCompact,
+    tone: contextTone,
+  } = resolveStatusContextPresentation(state);
+  let contextPart = contextFull ? themeText(contextFull, contextTone, colorEnabled) : "";
   if (contextPart) parts.push(contextPart);
 
   const credits = resolveStatusLineCredits(state);
@@ -243,7 +269,13 @@ export function renderStatusLine(
   // 注：processRegistry 的 taskId 与运行区的 runId 语义不同，无需互相去重。
   const pendingProcessCount = state.pendingProcessNotices?.length ?? 0;
   if (pendingProcessCount > 0) {
-    parts.push(themeText(`↪ ${pendingProcessCount} pending`, "info", colorEnabled));
+    parts.push(
+      themeText(
+        t("statusPendingProcesses", String(pendingProcessCount)),
+        "info",
+        colorEnabled,
+      ),
+    );
   }
 
   // 权限授权标识：按桶显示（见 renderPermissionGrantChip）。warning 色与 git
@@ -285,7 +317,7 @@ export function renderStatusLine(
     if (contextFull !== contextCompact && widthOf(visibleParts) > maxWidth) {
       const contextIndex = visibleParts.indexOf(contextPart);
       if (contextIndex >= 0) {
-        contextPart = themeText(contextCompact, "muted", colorEnabled);
+        contextPart = themeText(contextCompact, contextTone, colorEnabled);
         visibleParts = visibleParts.with(contextIndex, contextPart);
       }
     }
@@ -340,7 +372,7 @@ export function renderStatusLine(
           maxWidth - othersWidth - 3 - displayWidth("⑂ ") - displayWidth(dirtyText);
         const shortBranch = truncateToWidth(branch, branchBudget);
         if (shortBranch) {
-          const branchText = themeText(`⑂ ${shortBranch}`, "warning", colorEnabled);
+          const branchText = themeText(`⑂ ${shortBranch}`, "muted", colorEnabled);
           const modifiedText =
             modified > 0 ? ` ${themeText(`*${modified}`, "danger", colorEnabled)}` : "";
           const untrackedText =
@@ -350,8 +382,15 @@ export function renderStatusLine(
             `${branchText}${modifiedText}${untrackedText}`,
           );
         } else {
-          const compactDirty = themeText(`⑂${dirtyText}`, "warning", colorEnabled);
-          visibleParts = visibleParts.with(gitIndex, compactDirty);
+          const branchIcon = themeText("⑂", "muted", colorEnabled);
+          const modifiedText =
+            modified > 0 ? ` ${themeText(`*${modified}`, "danger", colorEnabled)}` : "";
+          const untrackedText =
+            untracked > 0 ? ` ${themeText(`?${untracked}`, "muted", colorEnabled)}` : "";
+          visibleParts = visibleParts.with(
+            gitIndex,
+            `${branchIcon}${modifiedText}${untrackedText}`,
+          );
         }
       }
     }
@@ -380,27 +419,29 @@ export function renderStatusLine(
         ? themeText("✓", "warning", colorEnabled)
         : "";
       const gitCounts = state.gitStatus
-        ? themeText(
-            `⑂${
-              state.gitStatus.modified > 0 ? `*${state.gitStatus.modified}` : ""
-            }${
-              state.gitStatus.untracked > 0 ? `?${state.gitStatus.untracked}` : ""
-            }`,
-            "warning",
-            colorEnabled,
-          )
+        ? [
+            themeText("⑂", "muted", colorEnabled),
+            state.gitStatus.modified > 0
+              ? themeText(`*${state.gitStatus.modified}`, "danger", colorEnabled)
+              : "",
+            state.gitStatus.untracked > 0
+              ? themeText(`?${state.gitStatus.untracked}`, "muted", colorEnabled)
+              : "",
+          ].join("")
         : "";
       // Existence-only marker: the dirty *state* survives even when its counts
       // no longer fit. Never rendered as `*0` / `?0` — that would fabricate a
       // "clean" reading instead of admitting the detail was dropped.
       const gitMark = state.gitStatus
-        ? themeText(
-            `⑂${state.gitStatus.modified > 0 ? "*" : ""}${
-              state.gitStatus.untracked > 0 ? "?" : ""
-            }`,
-            "warning",
-            colorEnabled,
-          )
+        ? [
+            themeText("⑂", "muted", colorEnabled),
+            state.gitStatus.modified > 0
+              ? themeText("*", "danger", colorEnabled)
+              : "",
+            state.gitStatus.untracked > 0
+              ? themeText("?", "muted", colorEnabled)
+              : "",
+          ].join("")
         : "";
       // 待交给 Agent 的进程终态通知只压文案（`↪ 2 pending` → `↪2`），语义不能消失。
       const noticeFull =
@@ -489,92 +530,46 @@ export function renderStatusLine(
 
 // ─── Welcome & prompt ───────────────────────────────────────────────────────
 
-// ── Scene builders for the welcome screen ──────────────────────────────────────────────
-//
-// Vertical landscape: mountain (left) → sky (right) → ground → NOLO → waves.
-// All glyphs are common BMP (no emoji/PUA/Nerd Font).
+// ── Welcome header (minimal geometric wordmark + side-by-side meta) ──────────
 
-function buildPlainScene(isDark: boolean | null, frame: number = 0, maxFrames: number = 0): string {
-  // isDark === null means no real brightness signal (terminal-native mode):
-  // keep the sky neutral — no sun, no moon — instead of pretending it's night.
-  let skyLine: string | null = null;
-  if (isDark === true) {
-    const star1 = frame % 6 < 3 ? "✦" : "⋆";
-    const star2 = frame % 4 < 2 ? "⋆" : "·";
-    const star3 = frame % 5 < 2 ? "·" : "✦";
-    skyLine = `      ${star1}               ☾    ${star2}    ${star3}`;
-  } else if (isDark === false) {
-    skyLine = `                      ☀`;
+const WELCOME_WORDMARK = [
+  "█▄ █ ▄▀▀▄ █    ▄▀▀▄",
+  "█ ▀█ █  █ █    █  █",
+  "▀  ▀  ▀▀  ▀▀▀▀  ▀▀",
+] as const;
+
+function buildWelcomeWordmarkLines(
+  colorEnabled: boolean,
+  frame: number = 0,
+  maxFrames: number = 0,
+): [string, string, string] {
+  if (!colorEnabled) {
+    return [WELCOME_WORDMARK[0], WELCOME_WORDMARK[1], WELCOME_WORDMARK[2]];
   }
 
-  const wavePattern = "_.~^~.";
-  const longWave = wavePattern.repeat(10);
-  const offset = frame % wavePattern.length;
-  const wave = longWave.slice(offset, offset + 25);
-
-  return [
-    ...(skyLine ? [skyLine] : []),
-    "             ╱╲                     █▄ █ ▄▀▀▄ █    ▄▀▀▄",
-    "            ╱  ╲  ╱╲                █ ▀█ █  █ █    █  █",
-    "           ╱    ╲╱  ╲               ▀  ▀  ▀▀  ▀▀▀▀  ▀▀",
-    `          ╱  ♠       ╲          ${wave}`,
-    "   ▁▁▁▁▁▁╱ ♠   ♠      ╲▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁",
-  ].join("\n");
-}
-
-function buildColoredScene(isDark: boolean | null, frame: number = 0, maxFrames: number = 0): string {
-  const pk = themeColorSequence("chrome");    // mountain + ground
-  const sk = themeColorSequence("warning");   // moon / sun
-  const tr = themeColorSequence("success");   // trees
-  const wv = themeColorSequence("info");      // waves
-  const ac = themeColorSequence("accent");    // NOLO wordmark
-  const mu = themeColorSequence("muted");     // faded trailing colors
-  const r  = "\x1b[39m";
-  const b  = "\x1b[1m";
+  const ac = themeColorSequence("accent");
+  const mu = themeColorSequence("muted");
+  const r = "\x1b[39m";
+  const b = "\x1b[1m";
   const rs = "\x1b[0m";
 
-  let skyLine: string | null = null;
-  if (isDark === true) {
-    const star1 = frame % 6 < 3 ? "✦" : "⋆";
-    const star2 = frame % 4 < 2 ? "⋆" : "·";
-    const star3 = frame % 5 < 2 ? "·" : "✦";
-    skyLine = `      ${mu}${star1}${r}               ${sk}☾${r}    ${mu}${star2}${r}    ${mu}${star3}${r}`;
-  } else if (isDark === false) {
-    skyLine = `                      ${sk}☀${r}`;
-  }
-
-  const wavePattern = "_.~^~.";
-  const longWave = wavePattern.repeat(10);
-  const offset = frame % wavePattern.length;
-  const wave = longWave.slice(offset, offset + 25);
-  // Fade out the last 5 characters
-  const waveStr = `${wv}${wave.slice(0, 20)}${r}${mu}${wave.slice(20, 25)}${r}`;
-
-  const line1 = "█▄ █ ▄▀▀▄ █    ▄▀▀▄";
-  const line2 = "█ ▀█ █  █ █    █  █";
-  const line3 = "▀  ▀  ▀▀  ▀▀▀▀  ▀▀";
-  
   const sweepEndFrame = maxFrames > 3 ? maxFrames - 3 : maxFrames;
-  const sweepLen = maxFrames === 0 ? 21 : Math.min(21, Math.floor((frame / sweepEndFrame) * 21));
-  
+  const sweepLen =
+    maxFrames === 0 || sweepEndFrame <= 0
+      ? 21
+      : Math.min(21, Math.floor((frame / sweepEndFrame) * 21));
+
   const colorLine = (str: string, bold: boolean) => {
     const active = str.slice(0, sweepLen);
     const dimmed = str.slice(sweepLen);
-    return `${bold ? b : ""}${ac}${active}${r}${mu}${dimmed}${r}${bold ? rs : ""}`;
+    return `${bold ? b : ""}${active ? `${ac}${active}${r}` : ""}${dimmed ? `${mu}${dimmed}${r}` : ""}${bold ? rs : ""}`;
   };
 
-  const nolo1 = colorLine(line1, true);
-  const nolo2 = colorLine(line2, false);
-  const nolo3 = colorLine(line3, false);
-
   return [
-    ...(skyLine ? [skyLine] : []),
-    `             ${pk}╱╲${r}                     ${nolo1}`,
-    `            ${pk}╱  ╲  ╱╲${r}                ${nolo2}`,
-    `           ${pk}╱    ╲╱  ╲${r}               ${nolo3}`,
-    `          ${pk}╱${r}  ${tr}♠${r}       ${pk}╲${r}          ${waveStr}`,
-    `   ${pk}▁▁▁▁▁▁╱${r} ${tr}♠${r}   ${tr}♠${r}      ${pk}╲▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁${r}`,
-  ].join("\n");
+    colorLine(WELCOME_WORDMARK[0], true),
+    colorLine(WELCOME_WORDMARK[1], false),
+    colorLine(WELCOME_WORDMARK[2], false),
+  ];
 }
 
 export function renderWelcome(
@@ -584,34 +579,37 @@ export function renderWelcome(
   columns?: number,
 ) {
   const colorEnabled = resolveCliColorEnabled();
-  // Day/night symbols need a *real* signal. In terminal-native mode with no
-  // probe result / COLORFGBG / system preference, resolveTuiBrightnessSignal
-  // returns null and the scene keeps a neutral sky — painting a moon on a
-  // light terminal (the old behavior) inverted the scene's contrast.
-  const brightnessSignal = resolveTuiBrightnessSignal();
-  const isDark = brightnessSignal === null ? null : brightnessSignal === "dark";
-
-  let sceneArt = colorEnabled
-    ? buildColoredScene(isDark, frame, maxFrames)
-    : buildPlainScene(isDark, frame, maxFrames);
-
-  // The scene art is ~48 columns wide. On a narrower terminal its rows wrap,
-  // which looks broken and (for the old animated banner) corrupted the redraw.
-  // When we know the width and it can't hold the widest scene row, drop the
-  // scene entirely and keep just the version + hint lines, which degrade to a
-  // clean two-line welcome. `columns` is optional so pure-function callers and
-  // tests that don't pass it keep the full scene.
-  if (typeof columns === "number" && columns > 0) {
-    const widestSceneCol = sceneArt
-      .split("\n")
-      .reduce((max, line) => Math.max(max, displayWidth(stripAnsi(line))), 0);
-    if (columns < widestSceneCol) sceneArt = "";
-  }
+  const [wm1, wm2, wm3] = buildWelcomeWordmarkLines(colorEnabled, frame, maxFrames);
 
   // "nolo" 走 themeText（遵守 theme token 纪律，含正确的 reset）；版本号
   // 为空时不留双空格，也不用补丁式的 replace 修空格。
   const noloLabel = themeText("nolo", "accent", colorEnabled);
-  const versionLine = `${noloLabel}${state.cliVersion ? ` ${state.cliVersion}` : ""} | server ${state.serverUrl}`;
+  const versionMeta = state.cliVersion
+    ? `${noloLabel} ${themeText(state.cliVersion, "muted", colorEnabled)}`
+    : noloLabel;
+  const serverMeta = state.serverUrl
+    ? themeText(state.serverUrl, "muted", colorEnabled)
+    : "";
+
+  const wideHeaderLines = [
+    `${wm1}   ${versionMeta}`,
+    serverMeta ? `${wm2}   ${serverMeta}` : wm2,
+    wm3,
+  ];
+
+  // Narrow-terminal degradation: when `columns` is smaller than the widest
+  // side-by-side header row, drop the block wordmark and keep a compact single
+  // meta line so the wordmark never wraps mid-glyph.
+  const widestHeaderCol = wideHeaderLines.reduce(
+    (max, line) => Math.max(max, displayWidth(stripAnsi(line))),
+    0,
+  );
+  const useCompactHeader =
+    typeof columns === "number" && columns > 0 && columns < widestHeaderCol;
+
+  const compactHeader = state.serverUrl
+    ? `${versionMeta} ${themeText(`· ${state.serverUrl}`, "muted", colorEnabled)}`
+    : versionMeta;
 
   // 版本发布快（alpha 每次合入即发版），欢迎页在检查到新版本时补一行升级
   // 提示。无更新 / 检查不可用时 updateAvailable 为空，这一行不出现，
@@ -629,10 +627,25 @@ export function renderWelcome(
   // once from real auth sources at session start — this pure renderer never
   // re-probes credentials, so resize repaints stay consistent.
   const authGuidanceLine = state.showAuthGuidance ? t("welcomeAuthGuidance") : null;
+  const tipLine = themeText(dailyWelcomeTip(), "muted", colorEnabled);
 
-  const body = sceneArt
-    ? [sceneArt, versionLine, ...(updateLine ? [updateLine] : []), ...(authGuidanceLine ? [authGuidanceLine] : []), dailyWelcomeTip(), ""]
-    : [versionLine, ...(updateLine ? [updateLine] : []), ...(authGuidanceLine ? [authGuidanceLine] : []), dailyWelcomeTip(), ""];
+  const body = useCompactHeader
+    ? [
+        compactHeader,
+        ...(updateLine ? [updateLine] : []),
+        ...(authGuidanceLine ? [authGuidanceLine] : []),
+        tipLine,
+        "",
+      ]
+    : [
+        "",
+        ...wideHeaderLines,
+        "",
+        ...(updateLine ? [updateLine] : []),
+        ...(authGuidanceLine ? [authGuidanceLine] : []),
+        tipLine,
+        "",
+      ];
   return body.join("\n");
 }
 
@@ -705,6 +718,82 @@ export function renderCreditsDebug(
   return lines
     .map((line) => (colorEnabled ? themeText(line, "chrome") : line))
     .join("\n");
+}
+
+export function renderCreditsSummary(
+  state: TuiState,
+  colorEnabled = resolveCliColorEnabled(),
+) {
+  const labels = [
+    t("contextFieldAgent"),
+    t("creditsFieldBilling"),
+    t("contextFieldTokens"),
+  ];
+
+  let maxW = 0;
+  for (const l of labels) {
+    const w = displayWidth(l);
+    if (w > maxW) maxW = w;
+  }
+  const targetWidth = maxW >= 9 ? maxW + 1 : 9;
+
+  const padLabel = (raw: string) => {
+    const w = displayWidth(raw);
+    const padding = " ".repeat(Math.max(0, targetWidth - w));
+    return raw + padding;
+  };
+
+  const field = (rawLabel: string, value: string) =>
+    `${themeText(padLabel(rawLabel), "muted", colorEnabled)}${value}`;
+
+  const credits = resolveStatusLineCredits(state);
+  let billingValue: string;
+  if (credits !== undefined && credits > 0) {
+    const hasBase = (state.dialogCreditsBase ?? 0) > 0;
+    const hasSession =
+      (state.sessionCredits ?? 0) + (state.liveTurnCredits ?? 0) > 0;
+    const formatted = credits.toFixed(2);
+    if (hasBase && hasSession) {
+      billingValue = t("creditsPositiveCombined", formatted);
+    } else if (hasBase) {
+      billingValue = t("creditsPositiveHistory", formatted);
+    } else {
+      billingValue = t("creditsPositiveSession", formatted);
+    }
+  } else {
+    billingValue = t("creditsNone");
+  }
+
+  const exactUsage = resolveContextUsage({
+    tokens: state.turnTokens,
+    fallbackContextWindow: state.contextWindow,
+    estimatedContextTokens: state.estimatedContextTokens,
+    turnEstimatedTokens: state.liveTurnEstimatedTokens,
+  });
+  const exactTokens =
+    exactUsage.used !== undefined
+      ? ` · ${exactUsage.estimated ? "~" : ""}${exactUsage.used}/${exactUsage.contextWindow ?? "—"} tokens`
+      : "";
+  const tokenValue =
+    renderTokenStatus(state.turnTokens, {
+      contextWindow: state.contextWindow,
+      estimatedContextTokens: state.estimatedContextTokens,
+      turnEstimatedTokens: state.liveTurnEstimatedTokens,
+    }) + exactTokens;
+
+  const titleText = t("creditsTitle");
+  const heading = colorEnabled
+    ? [renderDialogTitle(titleText, true)]
+    : [titleText, boxGlyphs(resolveBoxCharset()).h.repeat(displayWidth(titleText))];
+
+  return [
+    ...heading,
+    field(labels[0]!, state.agentName),
+    field(labels[1]!, billingValue),
+    field(labels[2]!, tokenValue),
+    "",
+    themeText(t("creditsDebugTip"), "muted", colorEnabled),
+  ].join("\n");
 }
 
 export function renderContextPanel(

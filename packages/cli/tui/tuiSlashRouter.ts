@@ -53,7 +53,6 @@ import {
 import { toErrorMessage } from "core/errorMessage";
 import { getCliInstallChannel, probeCliUpdate } from "../updateCommands";
 import { t } from "./i18n";
-import { stripAnsi } from "./tuiAnsi";
 import { detectGitStatusAsync } from "./gitStatus";
 import {
   MAX_TUI_HISTORY_TURNS,
@@ -125,7 +124,6 @@ export interface SlashDispatchHost {
     state: TuiState,
     env: NodeJS.ProcessEnv | undefined,
   ) => void;
-  readonly writeClipboard: (text: string) => Promise<void>;
   /**
    * 唯一的剪贴板读取 → 界面应用流程（与 Ctrl+V / 空 bracketed paste 共用）。
    * `/paste` 命令经 action: "paste-clipboard" 回到这里执行。
@@ -143,34 +141,70 @@ export interface SlashDispatchHost {
   readonly installAltScreenRestoreHandlers: (output: NodeJS.WritableStream) => void;
 }
 
-// 最近一条 assistant 回复（/copy last 用）。原为 runTuiWorkspace 闭包函数，
-// 迁移时把唯一的闭包依赖 history 提升为参数，函数体逐行未动。
-const readLatestAssistantReply = (history: TurnHistory): string | null => {
-  const lastReply = [...history.turns]
-    .reverse()
-    .find((turn) => turn.role === "assistant")?.content;
-  const text = lastReply ? stripAnsi(lastReply).trim() : "";
-  return text || null;
-};
-// Build a full Markdown transcript of the conversation (User + Assistant),
-// including the currently streaming turn if any. Used by /copy all.
-const buildConversationMarkdown = (h: TurnHistory): string => {
-  const parts: string[] = [];
-  for (const turn of h.turns) {
-    const role = turn.role === "user" ? "User" : "Assistant";
-    const content = stripAnsi(turn.content).trim();
-    if (!content) continue;
-    parts.push(`## ${role}\n\n${content}`);
+export async function executeShellPassthroughCommand(params: {
+  command: string;
+  cwd: string;
+  env: Record<string, string | undefined>;
+  spawnRunner: typeof spawnProcess;
+  emit: (text: string) => void;
+}): Promise<void> {
+  const shellCmd = params.command.trim();
+  if (!shellCmd) {
+    params.emit("[nolo] Error: No command specified after !");
+    return;
   }
-  if (h.currentRole && h.currentContent) {
-    const role = h.currentRole === "user" ? "User" : "Assistant";
-    const content = stripAnsi(h.currentContent).trim();
-    if (content) {
-      parts.push(`## ${role}\n\n${content}`);
+  params.emit(`Executing: ${shellCmd}`);
+  try {
+    const shellInvocation =
+      process.platform === "win32"
+        ? [process.env.ComSpec || "cmd.exe", "/d", "/s", "/c", shellCmd]
+        : ["/bin/sh", "-c", shellCmd];
+    const proc = params.spawnRunner({
+      cmd: shellInvocation,
+      cwd: params.cwd,
+      env: params.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const [stdoutText, stderrText] = await Promise.all([
+      readPipeText(proc.stdout),
+      readPipeText(proc.stderr),
+    ]);
+
+    const exitCode = await proc.exited;
+
+    if (stdoutText) {
+      params.emit(`\`\`\`\n${stdoutText.trim()}\n\`\`\``);
     }
+    if (stderrText) {
+      params.emit(
+        themeText(
+          `\`\`\`\nError:\n${stderrText.trim()}\n\`\`\``,
+          "danger",
+          resolveCliColorEnabled(),
+        ),
+      );
+    }
+    if (exitCode !== 0) {
+      params.emit(
+        themeText(
+          `[nolo] Command exited with code ${exitCode}.`,
+          "warning",
+          resolveCliColorEnabled(),
+        ),
+      );
+    }
+  } catch (error) {
+    params.emit(
+      themeText(
+        `[nolo] Command execution failed: ${toErrorMessage(error)}`,
+        "danger",
+        resolveCliColorEnabled(),
+      ),
+    );
   }
-  return parts.join("\n\n");
-};
+}
 
 /**
  * 处理一条已提交输入行：经 handleTuiInput 解析出 action 后执行对应的
@@ -204,7 +238,6 @@ export async function runSubmittedSlashLine(
     seedDialogCreditsBase,
     persistExplicitAgentSwitch,
     persistAgentSelection,
-    writeClipboard,
     readAndApplyClipboard,
     bumpDraftEpoch,
     selfUpdater,
@@ -239,7 +272,7 @@ export async function runSubmittedSlashLine(
     emitCommandOutput(t("autoPersistFailed"));
   }
   const command = line.trim().split(/\s+/)[0];
-  if ((command === "/agent" || command === "/switch") && result.nextState !== previousState) {
+  if (command === "/agents" && result.nextState !== previousState) {
     // Successful explicit selection may refresh the same agent's model.
     clearCliLocalRuntimePreparedAgentCache();
     persistAgentSelection(host.state, options.env ?? process.env);
@@ -719,54 +752,6 @@ export async function runSubmittedSlashLine(
     host.fixedInput.repaint(host.buffer, host.cursorPos);
   }
 
-  if (result.action?.type === "copy-last") {
-    const text = readLatestAssistantReply(history) ?? "";
-    if (!text) {
-      emitCommandOutput(t("copyNothing"));
-    } else {
-      try {
-        await writeClipboard(text);
-        emitCommandOutput(t("copiedLastReply"));
-      } catch (error) {
-        // Headless / container shells often lack xclip/pbcopy; surface the
-        // reply text so the user can still copy it manually instead of only
-        // seeing a raw "spawn xclip ENOENT".
-        const message = toErrorMessage(error);
-        const missingClipboard =
-          /ENOENT|not found|no such file|clipboard|spawn|EPIPE|EACCES/i.test(message) ||
-          /clipboard/i.test(String(error?.constructor?.name ?? ""));
-        if (missingClipboard) {
-          emitCommandOutput(t("copyUnavailable"));
-          emitCommandOutput(text);
-        } else {
-          emitCommandOutput(`[nolo] ${t("copyFailed")}: ${message}`);
-        }
-      }
-    }
-  }
-
-  if (result.action?.type === "copy-all") {
-    const text = buildConversationMarkdown(history);
-    if (!text) {
-      emitCommandOutput(t("copyAllNothing"));
-    } else {
-      try {
-        await writeClipboard(text);
-        emitCommandOutput(t("copiedAllHistory"));
-      } catch (error) {
-        const message = toErrorMessage(error);
-        const missingClipboard =
-          /ENOENT|not found|no such file|clipboard|spawn|EPIPE|EACCES/i.test(message) ||
-          /clipboard/i.test(String(error?.constructor?.name ?? ""));
-        if (missingClipboard) {
-          emitCommandOutput(t("copyUnavailable"));
-        } else {
-          emitCommandOutput(`[nolo] ${t("copyFailed")}: ${message}`);
-        }
-      }
-    }
-  }
-
   if (result.action?.type === "paste-clipboard") {
     // `/paste` 是显式请求，复用与 Ctrl+V 完全相同的读取流程（读取逻辑不重复实现）。
     await readAndApplyClipboard("slash");
@@ -871,46 +856,13 @@ export async function runSubmittedSlashLine(
   }
 
   if (result.action?.type === "shell-command") {
-    const shellCmd = result.action.command;
-    if (!shellCmd) {
-      emitCommandOutput("[nolo] Error: No command specified after !");
-    } else {
-      emitCommandOutput(`Executing: ${shellCmd}`);
-      try {
-        const shellInvocation =
-          process.platform === "win32"
-            ? [process.env.ComSpec || "cmd.exe", "/d", "/s", "/c", shellCmd]
-            : ["/bin/sh", "-c", shellCmd];
-        const proc = spawnRunner({
-          cmd: shellInvocation,
-          cwd: host.state.cwd,
-          env: options.env ?? process.env,
-          stdout: "pipe",
-          stderr: "pipe",
-        });
-
-        const [stdoutText, stderrText] = await Promise.all([
-          readPipeText(proc.stdout),
-          readPipeText(proc.stderr),
-        ]);
-
-        const exitCode = await proc.exited;
-
-        if (stdoutText) {
-          emitCommandOutput(`\`\`\`\n${stdoutText.trim()}\n\`\`\``);
-        }
-        if (stderrText) {
-          emitCommandOutput(themeText(`\`\`\`\nError:\n${stderrText.trim()}\n\`\`\``, "danger", resolveCliColorEnabled()));
-        }
-        if (exitCode !== 0) {
-          emitCommandOutput(themeText(`[nolo] Command exited with code ${exitCode}.`, "warning", resolveCliColorEnabled()));
-        }
-      } catch (error) {
-        emitCommandOutput(
-          themeText(`[nolo] Command execution failed: ${toErrorMessage(error)}`, "danger", resolveCliColorEnabled())
-        );
-      }
-    }
+    await executeShellPassthroughCommand({
+      command: result.action.command,
+      cwd: host.state.cwd,
+      env: options.env ?? process.env,
+      spawnRunner,
+      emit: emitCommandOutput,
+    });
   }
 
   if (result.action?.type === "transcribe") {

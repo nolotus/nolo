@@ -170,28 +170,28 @@ export type ToolFamily = {
 const family = (id: string, icon: string, en: string, zh: string): ToolFamily => ({ id, icon, en, zh });
 
 export const TOOL_FAMILIES = {
-  read: family("read", "📄", "Read", "读取"),
-  write: family("write", "✍️", "Write", "写入"),
-  run: family("run", "🖥️", "Run", "执行"),
-  search: family("search", "🔎", "Search", "搜索"),
-  fetch: family("fetch", "🌐", "Fetch", "抓取网页"),
-  list: family("list", "🗂️", "List", "列表"),
-  memory: family("memory", "🧠", "Memory", "记忆"),
-  agent: family("agent", "🤖", "Agent", "智能体"),
-  skill: family("skill", "🧩", "Skill", "技能"),
-  interaction: family("interaction", "💬", "Interaction", "交互"),
-  table: family("table", "📊", "Table", "表格"),
-  capture: family("capture", "📸", "Capture", "截屏"),
-  delete: family("delete", "🗑️", "Delete", "删除"),
-  mcp: family("mcp", "🔌", "Plugin", "插件"),
-  app: family("app", "📦", "App", "应用"),
-  browser: family("browser", "🖱️", "Browser", "浏览器"),
-  cloud: family("cloud", "☁️", "Cloud", "云"),
-  process: family("process", "⚙️", "Process", "进程"),
-  email: family("email", "✉️", "Email", "邮件"),
-  scrape: family("scrape", "🕷️", "Scrape", "采集"),
-  media: family("media", "🎨", "Media", "媒体"),
-  default: family("default", "🔧", "Tool", "工具"),
+  read: family("read", "<", "Read", "读取"),
+  write: family("write", "+", "Write", "写入"),
+  run: family("run", "$", "Run", "执行"),
+  search: family("search", "?", "Search", "搜索"),
+  fetch: family("fetch", "^", "Fetch", "抓取网页"),
+  list: family("list", "=", "List", "列表"),
+  memory: family("memory", "~", "Memory", "记忆"),
+  agent: family("agent", "@", "Agent", "智能体"),
+  skill: family("skill", "*", "Skill", "技能"),
+  interaction: family("interaction", ":", "Interaction", "交互"),
+  table: family("table", "#", "Table", "表格"),
+  capture: family("capture", "|", "Capture", "截屏"),
+  delete: family("delete", "-", "Delete", "删除"),
+  mcp: family("mcp", "%", "Plugin", "插件"),
+  app: family("app", ";", "App", "应用"),
+  browser: family("browser", ">", "Browser", "浏览器"),
+  cloud: family("cloud", "/", "Cloud", "云"),
+  process: family("process", "&", "Process", "进程"),
+  email: family("email", "»", "Email", "邮件"),
+  scrape: family("scrape", "«", "Scrape", "采集"),
+  media: family("media", "∆", "Media", "媒体"),
+  default: family("default", "◊", "Tool", "工具"),
 } as const;
 
 /** 无映射时的兜底图标：未知工具也要有一眼可辨的类型位。 */
@@ -951,6 +951,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
   "dev": {
     en: "Manage the local dev environment",
     zh: "管理本地开发环境",
+  },
+  "mcp local authorize": {
+    en: "Authorize a local HTTP MCP connection (explicit registration only)",
+    zh: "授权本地 HTTP MCP 连接（仅限显式注册）",
   },
 };
 

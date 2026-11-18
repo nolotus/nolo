@@ -3,6 +3,22 @@ export const agentStrings = {
     en: "Agent switch cancelled.",
     zh: "已取消切换 agent。",
   },
+  agentPickerTitle: {
+    en: "Select agent",
+    zh: "切换智能体",
+  },
+  agentSwitchedMessage: {
+    en: "Switched to {0}. {1}",
+    zh: "· 已切换至 {0}（{1}）",
+  },
+  agentSwitchDialogKept: {
+    en: "Dialog kept: {0}",
+    zh: "保留对话 {0}",
+  },
+  agentSwitchDialogNew: {
+    en: "Dialog kept: new",
+    zh: "新对话",
+  },
   agentPickerLoading: {
     en: "Loading agents…",
     zh: "正在加载 agent 列表…",
@@ -128,8 +144,8 @@ export const agentStrings = {
     zh: "智能体：",
   },
   agentsTip: {
-    en: "Tip: run /switch for the full picker, or /switch list for your private agents too.",
-    zh: "提示：用 /switch 打开完整选择器，或 /switch list 连你的私有智能体一起列出。",
+    en: "Tip: run /agents for the full picker, or /agents list for your private agents too.",
+    zh: "提示：用 /agents 打开完整选择器，或 /agents list 连你的私有智能体一起列出。",
   },
   agentCurrent: { en: "Current agent: {0} ({1})", zh: "当前 agent：{0}（{1}）" },
   agentPinnedUnaudited: {
@@ -141,12 +157,12 @@ export const agentStrings = {
     zh: "审计日志里没有它的记录——可能已被轮转，或是别的会话写的。",
   },
   agentPinnedFromProfile: {
-    en: 'Agent "{0}" restored from {1} (saved selection). /switch nolo to go back to the default.',
-    zh: "agent“{0}”来自 {1} 里保存的选择。/switch nolo 可切回默认档。",
+    en: 'Restored "{0}" ({1}) · /agents nolo for default',
+    zh: "已恢复 {0}（{1}）· /agents nolo 切回默认",
   },
   agentUnknown: {
-    en: "I don't know agent \"{0}\" yet.\nUse /switch, /switch list, /switch minimax-m3, or a full agent key.",
-    zh: "还不认识 agent“{0}”。\n可以用 /switch、/switch list、/switch minimax-m3 或完整的 agent key 来切换。",
+    en: "I don't know agent \"{0}\" yet.\nUse /agents, /agents list, /agents minimax-m3, or a full agent key.",
+    zh: "还不认识 agent“{0}”。\n可以用 /agents、/agents list、/agents minimax-m3 或完整的 agent key 来切换。",
   },
   // Agent catalog sources
   agentSourcePlatform: {

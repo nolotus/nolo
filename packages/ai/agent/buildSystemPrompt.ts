@@ -12,18 +12,7 @@ import { wrapHistoricalSummaryWithReplayGuard } from "ai/context/staleReplayGuar
 // 必须带同一份指引，两处各存一份迟早漂移。
 import { MEMORY_USE_GUIDANCE } from "agent-runtime/memoryUseGuidance";
 import { buildIdentityBlock } from "agent-runtime/identityBlock";
-import { DELETE_SAFETY_RED_LINE } from "agent-runtime/deleteSafety";
-import { CREDENTIAL_HYGIENE_RULE } from "agent-runtime/credentialHygiene";
-// 「并行是默认」与删除红线一样属于系统层固定约束：无条件注入，不做工具门控。
-import { PARALLEL_DISPATCH_DEFAULT_RULE } from "agent-runtime/parallelDispatchDefault";
-// 派发落点是「并行是默认」的下一层（派到哪个后端执行），紧随其后注入。
-import { DISPATCH_BACKEND_POLICY } from "agent-runtime/dispatchBackendPolicy";
-import { VERIFY_BEFORE_CONCLUDING_RULE } from "agent-runtime/verifyBeforeConcluding";
-// Git 任务隔离：系统层固定前置，不受 skill 配置（含 disabled）与可发现性影响。
-import { WORKTREE_ISOLATION_PRELUDE } from "agent-runtime/worktreeIsolationPrelude";
-import { DISPATCH_CANDIDATE_POLICY } from "agent-runtime/dispatchCandidatePolicy";
-import { PLATFORM_RISK_CONTROL_RULE } from "agent-runtime/platformRiskControl";
-import { buildConsultationModeBlock } from "agent-runtime/consultationMode";
+import { buildPlatformStaticContextLayers } from "agent-runtime/platformStaticPromptLayers";
 import { buildResponseGuidelines } from "agent-runtime/responseGuidelines";
 import { buildUserResponseLanguageContext } from "agent-runtime/userResponseLanguage";
 // 工具驱动指令表（编排/协作 review 硬门等）独立成模块，localLoop 复用同一份。
@@ -289,65 +278,8 @@ export const buildSystemPromptContext = (options: {
     : "";
 
   return compileContextLayers([
-    // 删除安全红线：系统层最高优先级约束，位于所有层之前（含身份信息），
-    // owner 要求常驻「根本提示词」的最顶部（2026-09-26 批量误删事故）。
-    {
-      id: "delete-safety-red-line",
-      owner: "platform",
-      cacheScope: "static",
-      content: DELETE_SAFETY_RED_LINE,
-    },
-    // 凭据纪律：与红线同为无条件系统层块，四条装配线同源。
-    {
-      id: "credential-hygiene",
-      owner: "platform",
-      cacheScope: "static",
-      content: CREDENTIAL_HYGIENE_RULE,
-    },
-    // 先验证再下结论：一切动作的前提，紧随凭据纪律、先于并行/派发/发布规则。
-    {
-      id: "verify-before-concluding",
-      owner: "platform",
-      cacheScope: "static",
-      content: VERIFY_BEFORE_CONCLUDING_RULE,
-    },
-    // 并行是默认：系统层固定块，紧随红线（同为无条件前缀，不随工具/轮次变化）。
-    {
-      id: "parallel-dispatch-default",
-      owner: "platform",
-      cacheScope: "static",
-      content: PARALLEL_DISPATCH_DEFAULT_RULE,
-    },
-    // 派发落点：并行派发纪律的下一层（派到哪个执行后端），紧随并行块。
-    {
-      id: "dispatch-backend-policy",
-      owner: "platform",
-      cacheScope: "static",
-      content: DISPATCH_BACKEND_POLICY,
-    },
-    // 派发选人：可用性重扫与速度口径（与后端块同级，紧随其后）。
-    {
-      id: "dispatch-candidate-policy",
-      owner: "platform",
-      cacheScope: "static",
-      content: DISPATCH_CANDIDATE_POLICY,
-    },
-    // 平台风控纪律：无条件静态前缀，紧随并行派发块。
-    {
-      id: "platform-risk-control",
-      owner: "platform",
-      cacheScope: "static",
-      content: PLATFORM_RISK_CONTROL_RULE,
-    },
-    { id: "consultation-mode", owner: "platform", cacheScope: "static", content: buildConsultationModeBlock() },
-    // Git 任务隔离：仓库改动前置，系统层固定块（原 worktree-isolation skill 上移，
-    // 不受 skill 配置 disabled 影响）。排在既有平台块之后，不扰动其顺序契约。
-    {
-      id: "worktree-isolation-prelude",
-      owner: "platform",
-      cacheScope: "static",
-      content: WORKTREE_ISOLATION_PRELUDE,
-    },
+    // 顶部固定平台层（唯一真源见 agent-runtime/platformStaticPromptLayers.ts）。
+    ...buildPlatformStaticContextLayers(),
     { id: "identity", owner: "platform", cacheScope: "session", content: identitySection },
     { id: "user-response-language", owner: "platform", cacheScope: "session", content: buildUserResponseLanguageContext({ language: safeLanguage }) },
     { id: "startup-protocol", owner: "platform", cacheScope: "static", content: startupProtocol },
