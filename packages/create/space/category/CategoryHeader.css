@@ -5,12 +5,9 @@
   align-items: center;
   /* 分类名要和下方条目标题落在同一条左轨上（fallback 保留旧值）。 */
   gap: var(--sidebar-gap-x, var(--space-2));
-  padding: var(--space-1) var(--sidebar-row-pad, var(--space-2));
+  padding: 2px var(--sidebar-row-pad, var(--space-2));
   border-radius: var(--radius-xs);
-  min-height: var(
-    --sidebar-row-height,
-    var(--sidebarItemHeight, var(--control-md))
-  );
+  min-height: 28px;
   transition: background-color 0.15s ease;
   user-select: none;
   background-color: transparent;
@@ -66,19 +63,28 @@
   transition: transform 0.2s ease;
 }
 
-.CategoryHeader__collapse-btn.is-collapsed svg {
+.CategoryHeader__collapse-btn.is-collapsed:not(.is-empty) svg {
   transform: rotate(-90deg);
+}
+
+.CategoryHeader__collapse-btn.is-empty {
+  opacity: 0.6;
 }
 
 .CategoryHeader__name {
   flex: 1;
-  font-weight: 600;
-  letter-spacing: 0.005em;
-  color: var(--text);
+  font-size: var(--fontSize-xs, 12px);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--textSecondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: var(--space-1) 0;
+  padding: 2px 0;
+}
+
+.CategoryHeader--empty .CategoryHeader__name {
+  color: var(--textTertiary);
 }
 
 .CategoryHeader__name.is-draggable {

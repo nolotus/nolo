@@ -424,17 +424,24 @@ const ChatSidebar: React.FC = () => {
       >
         <div className="navigation-v2-context-controls">
           {typeFilterShell}
-          <button
-            type="button"
-            {...withLiteralClass(
-              "ChatSidebar__create-space",
-              sidebarStyles.createSpaceShortcut,
-            )}
-            onClick={() => setCreateSpaceOpen(true)}
-          >
-            <LuPlus size={16} aria-hidden="true" />
-            {t("space:workspace_create_space", "新建空间")}
-          </button>
+          <div {...stylex.props(sidebarStyles.workspaceSectionBar)}>
+            <span {...stylex.props(sidebarStyles.workspaceSectionTitle)}>
+              {t("space:workspace_workspaces", "空间工作区")}
+            </span>
+            <button
+              type="button"
+              title={t("space:workspace_create_space", "新建空间")}
+              aria-label={t("space:workspace_create_space", "新建空间")}
+              {...withLiteralClass(
+                "ChatSidebar__create-space",
+                sidebarStyles.createSpaceShortcut,
+              )}
+              onClick={() => setCreateSpaceOpen(true)}
+            >
+              <LuPlus size={14} aria-hidden="true" />
+              <span>{t("space:workspace_create_space", "新建空间")}</span>
+            </button>
+          </div>
           {isCreateSpaceOpen && (
             <Dialog
               isOpen={isCreateSpaceOpen}

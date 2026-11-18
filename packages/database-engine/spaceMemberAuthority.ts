@@ -1,8 +1,8 @@
 import * as dbModule from "./db";
 import { getAuthorityStoreCompat } from "./dbCompat";
+import { readSpaceProjection } from "./spaceStoreReader";
 
 const SPACE_MEMBER_PREFIX = "space-member-";
-const SPACE_PREFIX = "space-";
 
 export const parseSpaceMemberKey = (
   dbKey: string
@@ -26,7 +26,8 @@ export const parseSpaceMemberKey = (
 const loadSpaceRecord = async (spaceId: string): Promise<any | null> => {
   const store = getAuthorityStoreCompat(dbModule);
   try {
-    return await store.get(`${SPACE_PREFIX}${spaceId}`);
+    const projection = await readSpaceProjection(store as any, spaceId);
+    return projection.active ? projection.record : null;
   } catch {
     return null;
   }

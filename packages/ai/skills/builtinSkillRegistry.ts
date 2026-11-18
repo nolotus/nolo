@@ -25,6 +25,13 @@
  */
 
 import type { SkillDocConfig } from "./skillDocProtocol";
+import {
+  PLUGIN_CONFIGURATION_SKILL_SLUGS,
+  buildPluginConfigurationSkillId,
+  buildPluginConfigurationSkillPageKey,
+  buildPluginConfigurationSkillConfig,
+  buildPluginConfigurationSkillContent,
+} from "./pluginConfigurationSkill";
 import { CAPABILITY_PACKS } from "ai/tools/toolPacks";
 import type { SkillRuntimePageLike } from "./referenceRuntime";
 import {
@@ -233,6 +240,13 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildCodingSkillPageKey,
     buildConfig: buildCodingSkillConfig,
     buildContent: buildCodingSkillContentBySlug,
+  },
+  {
+    slugs: PLUGIN_CONFIGURATION_SKILL_SLUGS,
+    buildSkillId: buildPluginConfigurationSkillId,
+    buildPageKey: buildPluginConfigurationSkillPageKey,
+    buildConfig: buildPluginConfigurationSkillConfig,
+    buildContent: buildPluginConfigurationSkillContent,
   },
   {
     slugs: SPECIALIST_SKILL_SLUGS,

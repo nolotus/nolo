@@ -1407,6 +1407,58 @@ export function listRunRecords(deps: AgentRunControlDeps = {}): RunRecord[] {
   );
 }
 
+/**
+ * 有界读取最近 N 条 run 主记录：runId 自带 ISO 时间戳（run-YYYY-MM-DDTHH-mm-ss-sssZ-...），
+ * 按文件名倒序截取后只解析最新 limit 条，避免在海量历史 runs/ 目录下全量读盘。
+ */
+export function listRecentRunRecords(
+  deps: AgentRunControlDeps & { limit?: number } = {}
+): RunRecord[] {
+  const limit = deps.limit ?? 400;
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  const fs = deps.fs ?? nodeFs;
+  const dir = resolveRunsDir(deps.env, deps.homedir);
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const timestampedRuns: string[] = [];
+  const customRuns: string[] = [];
+  for (const entry of entries) {
+    if (
+      !entry.endsWith(".json") ||
+      entry.startsWith("acked-") ||
+      entry.startsWith("busy-ack-") ||
+      entry.endsWith(".isolation.json") ||
+      entry.includes(".result.")
+    ) {
+      continue;
+    }
+    if (entry.startsWith("run-")) {
+      timestampedRuns.push(entry);
+    } else {
+      customRuns.push(entry);
+    }
+  }
+  timestampedRuns.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  const candidates =
+    timestampedRuns.length >= limit
+      ? timestampedRuns
+      : [...timestampedRuns, ...customRuns.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))];
+  const records: RunRecord[] = [];
+  for (const entry of candidates) {
+    if (records.length >= limit) break;
+    const runId = entry.slice(0, -".json".length);
+    const record = readRunRecord(runId, deps);
+    if (record) records.push(record);
+  }
+  return records.sort(
+    (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+  );
+}
+
 /** Asynchronous full registry scan for latency-sensitive callers. */
 export async function listRunRecordsAsync(deps: Pick<AgentRunControlDeps, "env" | "homedir"> = {}): Promise<RunRecord[]> {
   const dir = resolveRunsDir(deps.env, deps.homedir);

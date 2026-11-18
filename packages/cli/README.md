@@ -132,7 +132,6 @@ nolo run "review this repository"
 nolo chat "triage the failing tests"
 nolo chat
 nolo connect
-nolo connect --watch
 nolo connect --daemon
 nolo daemon --server-url https://api.nolo.chat --machine-key sk_machine_xxx
 nolo machine status
@@ -153,10 +152,9 @@ nolo chat --agent agent-pub-01APPBUILDER00000001YAII3I --msg "你好"
 实验性机器连接器命令：
 
 ```bash
-nolo connect          # 发送一次机器心跳
-nolo connect --watch  # 通过周期性心跳保持此终端进程在线
-nolo connect --ws     # 为绑定的 agent 运行保持实时连接器 websocket
-nolo connect --daemon # 在后台静默启动 connect --ws
+nolo connect          # 为绑定的 agent 运行保持实时连接器 websocket
+nolo connect --ws     # 同 nolo connect（向后兼容标志）
+nolo connect --daemon # 在后台静默启动 connect
 nolo daemon --server-url https://api.nolo.chat --machine-key sk_machine_xxx
 nolo machine status   # 列出注册到当前配置文件的机器
 ```

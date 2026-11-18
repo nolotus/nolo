@@ -34,7 +34,7 @@ export function renderDialogRule(
   if (paintWidth <= 0) return "";
   const rule = boxGlyphs(resolveBoxCharset()).h.repeat(paintWidth);
   if (!colorEnabled) return rule;
-  return `\x1b[2m${themeColorSequence("chrome")}${rule}\x1b[0m`;
+  return `${themeColorSequence("chrome")}${rule}\x1b[0m`;
 }
 
 export function renderDialogTitle(

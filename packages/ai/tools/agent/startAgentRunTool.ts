@@ -139,6 +139,10 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     `必填。这次子任务的短标题（≤${RUN_TITLE_MAX} 字，一行，如「复审额度 diff」「Opus 本地拉取设计」）。` +
                     "会展示并随运行记录持久化，用于区分并发 run；不得为空或仅含空白。",
             },
+            workspaceIsolation: {
+                type: "string", enum: ["none", "auto"],
+                description: "可选。按副作用边界自动准备隔离工作目录（默认 'none'：调研/会商/写稿/只读审查等 0ms 原地启动无额外开销）。传 'auto' 时（仅限 CLI 本地写型任务，readOnly=true 时自动视为 'none'）：若目标目录为 Git 仓库，平台自动以多核并行检出（checkout.workers=0 + core.longpaths=true）创建独立 worktree 并挂载顶层依赖链接，省去手动建 worktree 轮次；若为非 Git 普通业务文件夹（文稿/笔记/数据目录），自动创建轻量隔离副本（优先 APFS/reflink 写时复制，超限安全拒绝），并在返回值携带 workspaceIsolation 元信息。服务端/云沙盒不支持宿主目录隔离时会显式报错，不静默忽略。",
+            },
             cwd: {
                 type: "string",
                 description:
@@ -325,6 +329,7 @@ interface StartAgentRunArgs {
      * 本执行器（服务端后台派发）兑现不了，传了即报错，见 startAgentRunFunc。
      */
     cwd?: string;
+    workspaceIsolation?: "none" | "auto";
 }
 
 /**
@@ -398,6 +403,12 @@ export async function startAgentRunFunc(
     // 文件系统由宿主决定，兑现不了这个参数。显式报错：静默忽略会让模型以为子 run
     // 已经落在目标目录，随后按错误的路径读它的产出。放在扇出注册之前——被拒的
     // 派发不该占用批次里的凭证位。
+    if (args.workspaceIsolation !== undefined && args.workspaceIsolation !== "none" && args.workspaceIsolation !== "auto") {
+        throw new Error("workspaceIsolation 必须为 none 或 auto");
+    }
+    if (args.workspaceIsolation === "auto") {
+        throw new Error("startAgentRun: workspaceIsolation:auto 只在本地 CLI 宿主执行器可用；服务端不能兑现宿主目录隔离");
+    }
     const requestedCwd = resolveStartAgentRunCwd(args.cwd);
     if (requestedCwd) {
         throw new Error(

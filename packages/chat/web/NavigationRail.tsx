@@ -13,19 +13,12 @@ import {
   type RailView,
   RAIL_VIEW_PATHS,
   needsDeferredScopeReset,
+  resolveRailSelection,
   resolveRailView,
 } from "./navigationRailView";
 import "./navigationRail.css";
 import { useUiPlugins } from "app/hooks/index";
 import { UI_PLUGIN_SPECS, isUiPluginEnabled } from "app/plugins/uiPlugins";
-
-/**
- * Path part of a Rail target. App shortcuts are built with `buildAppDetailPath`
- * / `withAppQuery` and therefore carry a `?serverOrigin=...` query string,
- * while `location.pathname` never does — comparing the raw strings made those
- * entries impossible to highlight.
- */
-const pathOf = (to: string): string => to.split(/[?#]/)[0];
 
 /**
  * Rail 导航组的渲染顺序真值（只含顺序，不含 i18n / Icon）。
@@ -68,7 +61,14 @@ export function NavigationRail({
   // 回收 effect 每轮都执行；下面两个「内容签名」是原始值，只有集合真正变化时才变。
   const favoriteSignature = [...favoriteKeys].sort().join("\u0001");
   const quickIcons = { agent: LuBot, page: LuFileText, table: LuTable2, app: LuLayoutGrid, dialog: LuMessageSquare } as const;
-  const active: RailView = resolveRailView(location.pathname);
+  const railDestination: RailView = resolveRailView(location.pathname);
+  const { activeView: active, activeQuickKey } = resolveRailSelection({
+    pathname: location.pathname,
+    railView: railDestination,
+    promoted,
+    favoriteKeys,
+    userId,
+  });
   // 从 Space 回到 Home：先让路由离开 Space，再把作用域切回 all，避免与
   // MainLayout 的 shouldForceCategoriesViewMode 在同一轮渲染里互相覆盖。
   const pendingScopeReset = useRef(false);
@@ -176,8 +176,11 @@ export function NavigationRail({
       })}
       {promoted.filter(item => favoriteKeys.has(item.key)).map(item => {
         const Icon = quickIcons[item.type as keyof typeof quickIcons] ?? LuLink;
+        const isQuickActive = activeQuickKey === item.key;
         return <NavLink key={item.key} to={item.path} className="navigation-v2-rail__item"
-          title={item.title} aria-label={item.title} aria-current={pathOf(item.path) === location.pathname ? "page" : undefined}>
+          title={item.title} aria-label={item.title}
+          aria-current={isQuickActive ? "page" : undefined}
+          data-active={isQuickActive ? "true" : undefined}>
           <span className="navigation-v2-rail__icon"><Icon size={16} aria-hidden="true" /></span>
         </NavLink>;
       })}

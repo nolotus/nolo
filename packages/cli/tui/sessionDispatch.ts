@@ -415,7 +415,9 @@ export function handleTuiInput(
         return { nextState: state, output: t("themeBrightnessSwitched", sub) };
       }
       if (sub === "auto" || sub === "terminal") {
-        setActiveBrightness(null);
+        // Explicit user choice: keeps the documented ANSI-indexed contract so
+        // the terminal owns the palette (and can re-theme painted cells).
+        setActiveBrightness(null, { explicit: true });
         return {
           nextState: state,
           output: t("themeBrightnessAuto"),

@@ -14,6 +14,7 @@ export const dockerExecutionToolNames = [
     "writeFile",
     "editFile",
     "globFiles",
+    "searchFiles",
     "grepFiles",
 ] as const;
 

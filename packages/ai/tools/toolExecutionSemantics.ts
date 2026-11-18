@@ -136,6 +136,34 @@ const serverConfirmedHandoffStep = (): ToolExecutionContract => ({
 export const TOOL_EXECUTION_CONTRACT: Readonly<
   Record<string, ToolExecutionContract>
 > = Object.freeze({
+  listPlugins: serverPureRead(false),
+  configurePlugin: serverPureRead(false),
+  diagnosePlugin: serverPureRead(false),
+  setPluginEnabled: {
+    replay: "unsafe",
+    sideEffects: "mutation",
+    locality: "server",
+    interaction: "none",
+    concurrency: "exclusive",
+    durableWebForeground: false,
+  },
+  listMcpConnections: serverPureRead(false),
+  listMcpTools: {
+    replay: "unsafe",
+    sideEffects: "observable",
+    locality: "server",
+    interaction: "none",
+    concurrency: "exclusive",
+    durableWebForeground: false,
+  },
+  callMcpTool: {
+    replay: "unsafe",
+    sideEffects: "unknown",
+    locality: "server",
+    interaction: "confirm",
+    concurrency: "exclusive",
+    durableWebForeground: false,
+  },
   // Proven durable network reads. They execute on the server but touch external
   // systems, so replay/cost semantics are intentionally not called "pure".
   exa_search: serverExternalRead("read-only"),
@@ -222,6 +250,14 @@ export const TOOL_EXECUTION_CONTRACT: Readonly<
     durableWebForeground: false,
   },
   globFiles: {
+    replay: "idempotent",
+    sideEffects: "none",
+    locality: "device",
+    interaction: "none",
+    concurrency: "safe",
+    durableWebForeground: false,
+  },
+  searchFiles: {
     replay: "idempotent",
     sideEffects: "none",
     locality: "device",

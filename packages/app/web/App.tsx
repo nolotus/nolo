@@ -1,11 +1,24 @@
 import { useAccountSession } from "identity/useAccountSession";
 // 文件路径：app/web/App.tsx
 
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { RouteObject, Location as RouterLocation } from "app/routing";
 import { useRoutes, useLocation } from "app/routing";
 import { MyToastRegion as Toaster } from "render/web/ui/Toast";
-import DesktopActionGateDialog from "app/components/DesktopActionGateDialog";
+import {
+  getSnapshot as getActionGateSnapshot,
+  subscribe as subscribeActionGate,
+} from "app/utils/desktopActionGateChannel";
+
+const DesktopActionGateDialog = lazy(() => import("app/components/DesktopActionGateDialog"));
 
 import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
 import { isCloudEdition, useIdentity } from "identity";
@@ -323,13 +336,23 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
     };
   }, [dispatch, hostname, userId, currentSpaceId, hydrateSessionSettings]);
 
+  const hasPendingActionGate = useSyncExternalStore(
+    subscribeActionGate,
+    () => getActionGateSnapshot().gates.length > 0,
+    () => false,
+  );
+
   return (
     <>
       <GlobalThemeController />
       <GlobalBaseStyles />
       <Toaster />
-      {/* Block 3b: desktop action gate panel — renders only while a gate is pending. */}
-      <DesktopActionGateDialog />
+      {/* Block 3b: action gate panel — lazy-mounted only while a gate is pending. */}
+      {hasPendingActionGate ? (
+        <Suspense fallback={null}>
+          <DesktopActionGateDialog />
+        </Suspense>
+      ) : null}
 
       {/* 背景主内容 */}
       {mainElement}

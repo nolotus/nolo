@@ -9,7 +9,6 @@
     "./capabilities": "./capabilities.ts",
     "./cliProcessEnv": "./cliProcessEnv.ts",
     "./codexBinary": "./codexBinary.ts",
-    "./heartbeatLoop": "./heartbeatLoop.ts",
     "./machineInfo": "./machineInfo.ts",
     "./protocol": "./protocol.ts"
   },
@@ -18,7 +17,6 @@
     "capabilities.ts",
     "cliProcessEnv.ts",
     "codexBinary.ts",
-    "heartbeatLoop.ts",
     "machineInfo.ts",
     "protocol.ts"
   ],

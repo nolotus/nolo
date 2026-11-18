@@ -31,7 +31,15 @@ import {
 import {
   buildLoadSkillExecutor,
   buildNoloWorkspaceCliToolExecutors,
+  type InProcessDialogStore,
 } from "../../agent-runtime/noloWorkspaceTools.node";
+import {
+  noloPositiveIntegerString,
+  noloStringArg,
+  parseNoloWorkspaceToolArguments,
+} from "../../agent-runtime/noloWorkspaceTools";
+import { loadLocalRunChildDialogIds } from "../tui/localRunChildDialogIds";
+import { resolveLocalUserId } from "./cliAgentConfigHelpers";
 import { readXPostFunc } from "../../ai/tools/readXPostTool";
 import { validateAskChoiceInput } from "../../ai/tools/uiAskChoiceTool";
 import { readXhsProfileFunc } from "../../ai/tools/readXhsProfileTool";
@@ -250,12 +258,27 @@ export function buildCliWorkspaceToolExecutors(args: {
   planningCaller?: PlanningCaller;
   env: EnvLike;
   cliEntrypoint?: string;
+  /** 惰性本地 store（与 readDialog 共用同一条注入）。 */
+  resolveDialogStore?: () => Promise<InProcessDialogStore | undefined>;
+  /** 本机 run 子对话 id 集合解析器（默认读 ~/.nolo/runs）。 */
+  resolveLocalChildDialogIds?: () => ReadonlySet<string>;
 }) {
+  const resolveDialogStore = args.resolveDialogStore;
   return buildNoloWorkspaceCliToolExecutors({
     cliEntrypoint: args.cliEntrypoint ?? process.argv[1] ?? "",
     env: args.env,
     metadataKind: "cliWorkspaceTool",
     planningCaller: args.planningCaller,
+    // 只放开 readDialog（本机独占对话）的进程内直读；listDialogs 一律保持
+    // 权威跨端合并路径——本地库只是缓存，抢答会静默漏掉 Web/手机端新对话。
+    ...(resolveDialogStore
+      ? {
+          resolveDialogStore,
+          resolveCurrentUserId: () => resolveLocalUserId(args.env),
+          resolveLocalChildDialogIds:
+            args.resolveLocalChildDialogIds ?? (() => loadLocalRunChildDialogIds({ env: args.env })),
+        }
+      : {}),
   });
 }
 
@@ -285,6 +308,13 @@ export function buildLocalToolExecutors(args: {
   pastedTextStore?: CollapsedPasteStore;
   /** CLI entrypoint path (for re-launching workspace tools). */
   cliEntrypoint?: string;
+  /**
+   * 惰性本地 store（HybridRecordStore 形态）。注入后 readDialog 对本机独占
+   * 对话走进程内直连，零子进程；其余情况（含 listDialogs）仍走 CLI 桥。
+   */
+  resolveDialogStore?: () => Promise<InProcessDialogStore | undefined>;
+  /** 本机 run 子对话 id 集合（判定「本机独占对话」用）；缺省读 ~/.nolo/runs。 */
+  resolveLocalChildDialogIds?: () => ReadonlySet<string>;
   /**
    * 解析候选 agent 的 credentialGroup（并发扇出守卫用，见
    * cliAgentRunToolExecutors.assertCredentialFanoutAllowed）。
@@ -336,6 +366,10 @@ export function buildLocalToolExecutors(args: {
       planningCaller: args.planningCaller,
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
+      ...(args.resolveDialogStore ? { resolveDialogStore: args.resolveDialogStore } : {}),
+      ...(args.resolveLocalChildDialogIds
+        ? { resolveLocalChildDialogIds: args.resolveLocalChildDialogIds }
+        : {}),
     }),
     // loadSkill resolves SKILL.md from the agent's workspace root (local-fs,
     // no `nolo` CLI subcommand), so it is wired here instead of inside

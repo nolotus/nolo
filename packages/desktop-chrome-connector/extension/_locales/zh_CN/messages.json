@@ -20,7 +20,7 @@
     "message": "未连接"
   },
   "popupDisconnectedHint": {
-    "message": "请在本机安装 Nolo 并启用连接器，然后重新打开此窗口。"
+    "message": "请打开本机 Nolo 桌面端，或在终端运行 `nolo browser install` 注册本地桥接后重新打开此窗口。"
   },
   "popupStatusError": {
     "message": "无法读取连接状态：$DETAIL$",
@@ -41,5 +41,78 @@
   },
   "popupPrivacy": {
     "message": "页面读取与操作都通过本机的 Nolo 应用进行。绝不读取 Cookie、密码或 profile 数据库。"
+  },
+  "approveTitle": {
+    "message": "Nolo 需要你确认"
+  },
+  "approveHeading": {
+    "message": "Nolo 请求对下面的目标执行：$ACTION$",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      }
+    }
+  },
+  "approveClick": {
+    "message": "点击"
+  },
+  "approveType": {
+    "message": "输入"
+  },
+  "approvePress": {
+    "message": "按键"
+  },
+  "approveSelect": {
+    "message": "选择"
+  },
+  "approveEval": {
+    "message": "执行脚本"
+  },
+  "approveUnnamed": {
+    "message": "未命名控件"
+  },
+  "approveUnknownSite": {
+    "message": "未知站点"
+  },
+  "approveSite": {
+    "message": "目标站点：$ORIGIN$",
+    "placeholders": {
+      "origin": {
+        "content": "$1"
+      }
+    }
+  },
+  "approveScriptCaption": {
+    "message": "要执行的脚本（原文，换行保留；可滚动查看）"
+  },
+  "approveScriptMissing": {
+    "message": "脚本内容缺失：请取消，回到 Nolo 重新发起"
+  },
+  "approveHint": {
+    "message": "允许只对这一次动作有效，60 秒后失效；页面内容变化后也会作废。"
+  },
+  "approveCancel": {
+    "message": "取消"
+  },
+  "approveAllow": {
+    "message": "允许一次"
+  },
+  "approveSubmitting": {
+    "message": "正在提交审批……"
+  },
+  "approveCancelled": {
+    "message": "已取消。"
+  },
+  "approveWindowFailed": {
+    "message": "无法确认窗口来源，已取消。"
+  },
+  "approveExpired": {
+    "message": "这次确认已失效（过期、已使用或来源不符），请在 Nolo 里重新发起。"
+  },
+  "approveFailed": {
+    "message": "无法联系扩展后台，这次确认未生效。"
+  },
+  "approveMissingId": {
+    "message": "缺少确认标识，请回到 Nolo 重新发起。"
   }
 }

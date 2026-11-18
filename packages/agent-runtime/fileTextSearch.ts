@@ -67,6 +67,8 @@ const pathFor = (root: string, file: string, absolute = false) => absolute ? nor
 // ───────────────────────────────────────────────────────────────────────────
 
 const COMMAND_LIMIT_HEADROOM = 1;
+const MAX_SEARCH_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_SEARCH_LINE_CHARS = 2000;
 
 async function runCommand(binary: string, args: string[], cwd: string, maxResults?: number): Promise<CommandResult> {
   // Record lines to capture before stopping the child (N+1 for the headroom).
@@ -80,7 +82,13 @@ async function runCommand(binary: string, args: string[], cwd: string, maxResult
       // flashing console window for every grep/rg search.
       const child = spawnChildProcess(binary, args, { cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
       child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
+        // Bound even grep output before a giant first record can accumulate.
+        const room = MAX_SEARCH_FILE_BYTES - stdout.length;
+        stdout += chunk.toString().slice(0, Math.max(0, room));
+        if (stdout.length >= MAX_SEARCH_FILE_BYTES && !stopped) {
+          stopped = true;
+          child.kill();
+        }
         recordCount = parseMatches(cwd, stdout).length;
         if (recordLimit > 0 && recordCount >= recordLimit && !stopped) {
           stopped = true;
@@ -132,7 +140,7 @@ function commandArgs(o: FileTextSearchOptions, binary: "rg" | "grep", target: st
   // workspaces, tmpdirs). rg >= 15 only honors .gitignore inside a real repo
   // unless --no-require-git is passed; older rg ignores the flag's absence.
   // Passing it unconditionally gives uniform gitignore parity everywhere.
-  if (binary === "rg") args.push("--no-require-git");
+  if (binary === "rg") args.push("--no-require-git", "--max-columns", String(MAX_SEARCH_LINE_CHARS), "--max-columns-preview");
   if (o.regex !== true) args.push(binary === "rg" ? "--fixed-strings" : "-F"); else if (binary === "grep") args.push("-E");
   if (o.caseSensitive === false) args.push("-i");
   if (binary === "rg") {
@@ -141,7 +149,9 @@ function commandArgs(o: FileTextSearchOptions, binary: "rg" | "grep", target: st
     // defaults. rg is the complete Git-ignore semantics source; every caller
     // glob is passed through verbatim.
     for (const x of o.exclude ?? []) args.push("--glob", `!${x}`);
-    if (o.include) args.push("--glob", o.include);
+    // Type filters narrow candidate files without overriding .gitignore or
+    // explicit negative globs (positive --glob would override both).
+    if (o.include) args.push("--type-add", `noloSearch:${o.include}`, "--type", "noloSearch");
   } else {
     // grep is only invoked when canGrepFulfillOptions(o) confirms every exclude
     // can be fulfilled via --exclude-dir and include is a safe basename pattern.
@@ -185,15 +195,23 @@ function parseMatches(root: string, output: string): RawRecord[] {
 // ───────────────────────────────────────────────────────────────────────────
 
 async function decorate(root: string, raw: RawRecord[], context: number, absolute = false): Promise<FileTextSearchMatch[]> {
-  const cache = new Map<string, string[]>(), out: FileTextSearchMatch[] = [];
+  const out: FileTextSearchMatch[] = [];
   for (const x of raw) {
-    let lines = cache.get(x.file);
-    if (!lines) {
-      try { lines = (await readFile(x.file, "utf8")).split(/\r\n|\r|\n/); } catch { continue; }
-      cache.set(x.file, lines);
+    let lines: string[] = [];
+    // No second disk read without context. Oversized files retain the bounded
+    // command preview rather than re-reading/splitting the entire file.
+    if (context > 0) {
+      try {
+        if ((await stat(x.file)).size <= MAX_SEARCH_FILE_BYTES) {
+          lines = (await readFile(x.file, "utf8")).split(/\r\n|\r|\n/);
+        }
+      } catch { /* The file may disappear between search and decoration. */ }
     }
     const i = x.line - 1;
-    out.push({ path: pathFor(root, x.file, absolute), line: x.line, text: lines[i] ?? x.text, before: lines.slice(Math.max(0, i - context), i), after: lines.slice(i + 1, i + context + 1) });
+    out.push({ path: pathFor(root, x.file, absolute), line: x.line,
+      text: (lines[i] ?? x.text).slice(0, MAX_SEARCH_LINE_CHARS),
+      before: lines.slice(Math.max(0, i - context), i).map((line) => line.slice(0, MAX_SEARCH_LINE_CHARS)),
+      after: lines.slice(i + 1, i + context + 1).map((line) => line.slice(0, MAX_SEARCH_LINE_CHARS)) });
   }
   return out;
 }
@@ -204,6 +222,10 @@ async function decorate(root: string, raw: RawRecord[], context: number, absolut
 
 function globMatch(pattern: string, value: string): boolean {
   const p = normalizePath(pattern).replace(/^!/, "");
+  // Expand brace alternatives before compiling the shared glob subset.
+  const brace = /\{([^{}]+)\}/.exec(p);
+  if (brace) return brace[1].split(",").some((part) =>
+    globMatch(p.slice(0, brace.index) + part + p.slice(brace.index + brace[0].length), value));
   let source = "";
   for (let i = 0; i < p.length; i++) {
     const c = p[i];
@@ -271,6 +293,9 @@ async function jsSearch(o: FileTextSearchOptions, targetPath: string): Promise<F
   // truncated=true WITHOUT reading any further files or lines. Without
   // maxResults the full walk is scanned and truncated stays false.
   for (const file of files) {
+    // Fallback is deliberately bounded; do not buffer giant bundles/data lines.
+    const info = await stat(file).catch(() => null);
+    if (!info || info.size > MAX_SEARCH_FILE_BYTES) continue;
     const text = await readText(file);
     if (!text || text.includes("\0")) continue;
     const lines = text.split(/\r\n|\r|\n/);
@@ -279,7 +304,7 @@ async function jsSearch(o: FileTextSearchOptions, targetPath: string): Promise<F
       const hit = matcher ? matcher.test(line) : (o.caseSensitive === false ? line.toLowerCase().includes(needle) : line.includes(needle));
       if (!hit) continue;
       if (out.length >= max) return { matches: out, totalMatches: max, truncated: true, engine: "js" };
-      out.push({ path: pathFor(o.root, file, o.absolutePaths === true), line: i + 1, text: line, before: lines.slice(Math.max(0, i - context), i), after: lines.slice(i + 1, i + context + 1) });
+      out.push({ path: pathFor(o.root, file, o.absolutePaths === true), line: i + 1, text: line.slice(0, MAX_SEARCH_LINE_CHARS), before: lines.slice(Math.max(0, i - context), i).map((line) => line.slice(0, MAX_SEARCH_LINE_CHARS)), after: lines.slice(i + 1, i + context + 1).map((line) => line.slice(0, MAX_SEARCH_LINE_CHARS)) });
     }
   }
   return { matches: out, totalMatches: out.length, truncated: false, engine: "js" };
@@ -356,6 +381,9 @@ export async function searchFileTextMatches(o: FileTextSearchOptions): Promise<F
 
   const run = o.runCommand ?? runCommand, max = o.maxResults;
   for (const entry of COMMAND_ENGINES) {
+    // rg type filters match basenames, not workspace-relative paths. Keep
+    // path globs on the exact shared JS matcher rather than weakening filters.
+    if (entry.engine === "ripgrep" && o.include && /[/\\]/.test(o.include)) continue;
     if (entry.engine === "grep" && !(await canGrepFulfillOptions(o))) continue;
     const injectedResolver = o[entry.binaryOption];
     const binary = injectedResolver ? injectedResolver() : resolveExecutableOnPath(entry.binaryName);

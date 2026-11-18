@@ -396,6 +396,11 @@ export function createChatQueueTuiBinding(
   };
 
   const notifyTurnStart = () => {
+    const wasStopped = internalResumeStopped;
+    internalResumeStopped = false;
+    if (wasStopped && !recoveryBlocked && !writeError) {
+      runtime.send({ type: "resume-drain" });
+    }
     runtime.send({ type: "turn-start" });
   };
 

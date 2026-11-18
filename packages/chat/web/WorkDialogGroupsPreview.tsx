@@ -1,9 +1,9 @@
-import { fetchAuthoritativeRemoteSpace } from "create/space/spaceAccess";
+import * as spaceAccessModule from "create/space/spaceAccess";
 import { matchesTypeFilter, type SidebarTypeFilterId } from "./sidebar/SidebarTypeFilter";
 import { resolveEffectiveSidebarType, readStoredSidebarType } from "./sidebar/sidebarTypeQuery";
 import { isAllViewDialogImageAttachment } from "./sidebar/allViewSearch";
 import { WorkDialogSpaceGroups, WorkDialogCategoryGroups } from "./WorkDialogSpaceGroups";
-import { WORK_SPACE_NAME_TTL_MS, readCachedSpaceRecord, projectWorkSpaceDirectories, groupWorkDialogsByCategory, type WorkSpaceRecord, groupWorkDialogsBySpace, canManageSpaceCategories, isSpaceManager, resolveRowOwnership, resolveContentRowCapability, type ContentRowCapability } from "./sidebar/workDialogSpaceGroups";
+import { WORK_SPACE_NAME_TTL_MS, readCachedSpaceRecord, projectWorkSpaceDirectories, collectClaimedDirectoryKeys, resolveActiveSpaceGroupId, groupWorkDialogsByCategory, areWorkSpaceRecordsEquivalent, type WorkSpaceRecord, groupWorkDialogsBySpace, canManageSpaceCategories, isSpaceManager, resolveRowOwnership, resolveContentRowCapability, type ContentRowCapability } from "./sidebar/workDialogSpaceGroups";
 import { useContentOwnershipEvidence } from "./sidebar/useContentOwnershipEvidence";
 import { mergeSharedHistoryItems } from "./sharedHistoryMerge";
 import { isAgentRowUnread } from "./sidebar/agentUnread";
@@ -409,9 +409,17 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     if (!sharedEnabled || !runtime.currentToken || !runtime.currentUserId) return;
     const authToken = runtime.currentToken;
     const servers = [...new Set([runtime.currentServer, ...runtime.syncServers].filter((server): server is string => Boolean(server)))];
-    const refresh = () => {
+    const refresh = (skipWhenHidden = false) => {
+      if (
+        skipWhenHidden &&
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
       const currentMembers = memberSpacesRef.current;
       const currentEntities = dbEntitiesRef.current;
+      const remoteSpaceIds: string[] = [];
       for (const spaceId of JSON.parse(nameSpaceIds) as string[]) {
         const member = currentMembers.find(m => normalizeSpaceId(m.spaceId) === spaceId);
         const localKey = createSpaceKey.space(spaceId);
@@ -419,52 +427,105 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
         if (isDeviceLocalOwnerId(userId) || isDeviceLocalSpaceBody(localEntity) || isDeviceLocalSpaceBody(member)) {
           continue;
         }
-        void readCachedSpaceRecord(nameScope, spaceId, async () => {
-          const record = await fetchAuthoritativeRemoteSpace({ servers, token: authToken, userId: runtime.currentUserId!, spaceId });
-          return record;
-        }).then(record => {
-          if (!active) return;
-          setResolvedRecords(previous => {
-            const records = new Map(previous?.scope === nameScope ? previous.records : []);
-            if (record) {
-              records.set(spaceId, record);
-              // 远端权威确认后退场；未确认的有界到期（WORK_SPACE_NAME_TTL_MS）退场，绝不成为永久幽灵
-              setPendingCategories(prev => {
-                if (prev?.scope !== nameScope) return prev;
-                const spacePending = prev.entries.get(spaceId);
-                if (!spacePending) return prev;
-                const now = Date.now();
-                const remaining: Record<string, { name: string; order: number; createdAt: number }> = {};
-                let changed = false;
-                for (const [catId, catVal] of Object.entries(spacePending)) {
-                  if (record.categories?.[catId]) {
-                    changed = true;
-                  } else if (now - catVal.createdAt < WORK_SPACE_NAME_TTL_MS) {
-                    remaining[catId] = catVal;
-                  } else {
-                    changed = true;
-                  }
+        remoteSpaceIds.push(spaceId);
+      }
+      if (remoteSpaceIds.length === 0) return;
+
+      void Promise.all(
+        remoteSpaceIds.map(async (spaceId) => {
+          const readRemoteDirectory =
+            spaceAccessModule.fetchAuthoritativeSpaceDirectory ??
+            spaceAccessModule.fetchAuthoritativeRemoteSpace;
+          const record = await readCachedSpaceRecord(nameScope, spaceId, async () =>
+            readRemoteDirectory({
+              servers,
+              token: authToken,
+              userId: runtime.currentUserId!,
+              spaceId,
+            }),
+          );
+          return [spaceId, record] as const;
+        }),
+      ).then((fetchedEntries) => {
+        if (!active) return;
+        setResolvedRecords((previous) => {
+          const prevSameScope = previous?.scope === nameScope;
+          const prevMap = prevSameScope ? previous.records : undefined;
+          let changed = !prevSameScope;
+          if (!changed && prevMap) {
+            for (const [spaceId, record] of fetchedEntries) {
+              const prevRec = prevMap.get(spaceId);
+              if (record) {
+                if (!prevRec || !areWorkSpaceRecordsEquivalent(prevRec, record)) {
+                  changed = true;
+                  break;
                 }
-                if (!changed) return prev;
-                const nextEntries = new Map(prev.entries);
-                if (Object.keys(remaining).length > 0) {
-                  nextEntries.set(spaceId, remaining);
-                } else {
-                  nextEntries.delete(spaceId);
-                }
-                return { scope: nameScope, entries: nextEntries };
-              });
-            } else {
-              records.delete(spaceId);
+              } else if (prevMap.has(spaceId)) {
+                changed = true;
+                break;
+              }
             }
-            return { scope: nameScope, records };
-          });
+          }
+          if (!changed && previous) return previous;
+          const records = new Map(prevMap ?? []);
+          for (const [spaceId, record] of fetchedEntries) {
+            if (record) records.set(spaceId, record);
+            else records.delete(spaceId);
+          }
+          return { scope: nameScope, records };
         });
+
+        setPendingCategories((prev) => {
+          if (!prev || prev.scope !== nameScope || prev.entries.size === 0) {
+            return prev;
+          }
+          const now = Date.now();
+          let nextEntries: Map<string, Record<string, { name: string; order: number; createdAt: number }>> | null = null;
+          for (const [spaceId, record] of fetchedEntries) {
+            if (!record) continue;
+            const spacePending = prev.entries.get(spaceId);
+            if (!spacePending) continue;
+            const remaining: Record<string, { name: string; order: number; createdAt: number }> = {};
+            let spaceChanged = false;
+            for (const [catId, catVal] of Object.entries(spacePending)) {
+              if (record.categories?.[catId]) {
+                spaceChanged = true;
+              } else if (now - catVal.createdAt < WORK_SPACE_NAME_TTL_MS) {
+                remaining[catId] = catVal;
+              } else {
+                spaceChanged = true;
+              }
+            }
+            if (spaceChanged) {
+              if (!nextEntries) nextEntries = new Map(prev.entries);
+              if (Object.keys(remaining).length > 0) {
+                nextEntries.set(spaceId, remaining);
+              } else {
+                nextEntries.delete(spaceId);
+              }
+            }
+          }
+          return nextEntries ? { scope: nameScope, entries: nextEntries } : prev;
+        });
+      });
+    };
+    refresh(false);
+    const timer = setInterval(() => refresh(true), WORK_SPACE_NAME_TTL_MS);
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        refresh(false);
       }
     };
-    refresh();
-    const timer = setInterval(refresh, WORK_SPACE_NAME_TTL_MS);
-    return () => { active = false; clearInterval(timer); };
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+    return () => {
+      active = false;
+      clearInterval(timer);
+      if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+    };
   }, [nameScope, nameSpaceIds, sharedEnabled, userId, recordRefreshNonce]);
 
   const handleSpaceRecordUpdate = useCallback((
@@ -475,6 +536,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     const id = normalizeSpaceId(spaceId);
     if (!id) return;
     readCachedSpaceRecord.invalidate(id);
+    spaceAccessModule.invalidateSpaceDirectoryScanCache?.(id);
     if (newCategoryId && newCategory) {
       setPendingCategories(prev => {
         const entries = new Map(prev?.scope === nameScope ? prev.entries : []);
@@ -490,6 +552,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     const id = normalizeSpaceId(spaceId);
     if (!id) return;
     readCachedSpaceRecord.invalidate(id);
+    spaceAccessModule.invalidateSpaceDirectoryScanCache?.(id);
     setPendingCategories(prev => {
       if (prev?.scope !== nameScope) return prev;
       const pending = prev.entries.get(id);
@@ -519,6 +582,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     const id = normalizeSpaceId(spaceId);
     if (!id) return;
     readCachedSpaceRecord.invalidate(id);
+    spaceAccessModule.invalidateSpaceDirectoryScanCache?.(id);
     setPendingCategories(prev => {
       if (prev?.scope !== nameScope) return prev;
       const spacePending = prev.entries.get(id);
@@ -548,8 +612,8 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     });
     triggerRecordRefresh();
   }, [nameScope, triggerRecordRefresh]);
-  const labels = { other: t("workspace_other", "其他空间"), unassociated: t("workspace_unassociated", "空间外") };
-  const remoteRecords = sharedEnabled && resolvedRecords?.scope === nameScope ? resolvedRecords.records : undefined;
+  const knownRemoteRecords = resolvedRecords?.scope === nameScope ? resolvedRecords.records : undefined;
+  const remoteRecords = sharedEnabled ? knownRemoteRecords : undefined;
   const deviceLocalRecords = useMemo(() => {
     const candidateIds = new Set<string>();
     for (const space of memberSpaces) {
@@ -661,6 +725,37 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     // 证据必须按账号 + 服务器分区：切账号后旧证据不能继续授权。
     scope: `${userId}@${runtime.currentServer ?? ""}`,
   });
+  const spaceManageableMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const member of memberSpaces) {
+      const id = normalizeSpaceId(member.spaceId);
+      if (!id || map.has(id)) continue;
+      map.set(
+        id,
+        isSpaceManager({
+          spaceId: id,
+          userId,
+          memberSpaces,
+          record: records?.get(id) as any,
+        }),
+      );
+    }
+    if (records) {
+      for (const [id, record] of records) {
+        if (map.has(id)) continue;
+        map.set(
+          id,
+          isSpaceManager({
+            spaceId: id,
+            userId,
+            memberSpaces,
+            record: record as any,
+          }),
+        );
+      }
+    }
+    return map;
+  }, [memberSpaces, records, userId]);
   const capabilityFor = useCallback((key: string, item: any): ContentRowCapability => {
     const rowSpaceId = normalizeSpaceId(item?.spaceId) ?? null;
     const record = rowSpaceId ? records?.get(rowSpaceId) : undefined;
@@ -678,21 +773,101 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     });
     return resolveContentRowCapability({
       ownership,
-      spaceManageable: isSpaceManager({
-        spaceId: rowSpaceId,
-        userId,
-        memberSpaces,
-        record: record as any,
-      }),
+      spaceManageable: rowSpaceId ? (spaceManageableMap.get(rowSpaceId) ?? false) : false,
     });
-  }, [dbEntities, memberSpaces, ownershipEvidence, records, userId]);
-  const recordNames = new Map([...(records ?? [])].flatMap(([id, record]) => record.name?.trim() ? [[id, record.name.trim()] as const] : []));
+  }, [dbEntities, ownershipEvidence, records, spaceManageableMap, userId]);
+  const otherLabel = t("workspace_other", "其他空间");
+  const unassociatedLabel = t("workspace_unassociated", "空间外");
+  const labels = useMemo(
+    () => ({ other: otherLabel, unassociated: unassociatedLabel }),
+    [otherLabel, unassociatedLabel],
+  );
+  const recordNames = useMemo(
+    () =>
+      new Map(
+        [...(records ?? [])].flatMap(([id, record]) =>
+          record.name?.trim() ? [[id, record.name.trim()] as const] : [],
+        ),
+      ),
+    [records],
+  );
   const directoryRows = eligibleRows as WorkDialogFlatRow[];
-  const projectGroups = (include?: (row: WorkDialogFlatRow) => boolean) => records
-    ? projectWorkSpaceDirectories(directoryRows, currentSpaceId, memberSpaces, records, labels, include)
-    : groupWorkDialogsBySpace(include ? directoryRows.filter(include) : directoryRows, currentSpaceId, memberSpaces, recordNames, labels);
-  const spaceGroups = projectGroups(row => (row.item.type === "dialog" || includeNonDialogs) && matchesTypeFilter(row.item, typeFilter) && (typeFilter === "attachment" || !isAllViewDialogImageAttachment(row.item)));
-  const showSpaceGroups = projectGroups().length > 1;
+  const claimedInNoSpace = useMemo(() => {
+    if (homeScope.kind !== "noSpace") return null;
+    if (!knownRemoteRecords && deviceLocalRecords.size === 0) return null;
+    const combined = new Map<string, WorkSpaceRecord>();
+    if (knownRemoteRecords) {
+      for (const [id, record] of knownRemoteRecords) combined.set(id, record);
+    }
+    for (const [id, record] of deviceLocalRecords) combined.set(id, record);
+    const byKey = new Map(directoryRows.map((row) => [row.key, row]));
+    return collectClaimedDirectoryKeys(memberSpaces, combined, byKey);
+  }, [homeScope.kind, knownRemoteRecords, deviceLocalRecords, directoryRows, memberSpaces]);
+  const effectiveDirectoryRows = useMemo(
+    () =>
+      claimedInNoSpace && claimedInNoSpace.size > 0
+        ? directoryRows.filter((row) => !claimedInNoSpace.has(row.key))
+        : directoryRows,
+    [directoryRows, claimedInNoSpace],
+  );
+  const spaceGroups = useMemo(() => {
+    const include = (row: WorkDialogFlatRow) =>
+      (row.item.type === "dialog" || includeNonDialogs) &&
+      matchesTypeFilter(row.item, typeFilter) &&
+      (typeFilter === "attachment" || !isAllViewDialogImageAttachment(row.item));
+    return records
+      ? projectWorkSpaceDirectories(
+          effectiveDirectoryRows,
+          currentSpaceId,
+          memberSpaces,
+          records,
+          labels,
+          include,
+        )
+      : groupWorkDialogsBySpace(
+          effectiveDirectoryRows.filter(include),
+          currentSpaceId,
+          memberSpaces,
+          recordNames,
+          labels,
+        );
+  }, [
+    records,
+    effectiveDirectoryRows,
+    currentSpaceId,
+    memberSpaces,
+    labels,
+    includeNonDialogs,
+    typeFilter,
+    recordNames,
+  ]);
+  const showSpaceGroups = useMemo(() => {
+    if (spaceGroups.length > 1) return true;
+    const allGroups = records
+      ? projectWorkSpaceDirectories(
+          directoryRows,
+          currentSpaceId,
+          memberSpaces,
+          records,
+          labels,
+        )
+      : groupWorkDialogsBySpace(
+          directoryRows,
+          currentSpaceId,
+          memberSpaces,
+          recordNames,
+          labels,
+        );
+    return allGroups.length > 1;
+  }, [
+    spaceGroups.length,
+    records,
+    directoryRows,
+    currentSpaceId,
+    memberSpaces,
+    labels,
+    recordNames,
+  ]);
 
   // 删除命令：本文件是既有 Redux 消费端，由它把 deleteDbKey thunk 与 dispatch 绑成
   // 领域命令传给 useDeleteContentEntry（该 hook 自身不依赖 Redux）。
@@ -766,14 +941,37 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     const label = t(labelKey, fallback);
     return label === labelKey ? fallback : label;
   };
+  const [preferredActiveSpace, setPreferredActiveSpace] = useState<{
+    key: string;
+    spaceId: string | null;
+  } | null>(null);
   const renderDialogRow = (
     { key, item }: WorkDialogFlatRow,
     loadedChildCount: number,
     isChildRow: boolean,
     depth: number,
+    groupSpaceKey?: string | null,
   ) => {
-    const isActive = isRoutableContentActive({ contentKey: key, type: item.type.toLowerCase(), userId, spaceId: currentSpaceId, currentPath: location.pathname });
     const rowSpaceId = item.spaceId ?? "";
+    const rowSpaceKey = groupSpaceKey !== undefined ? groupSpaceKey : normalizeSpaceId(rowSpaceId) ?? null;
+    const routeMatched = isRoutableContentActive({ contentKey: key, type: item.type.toLowerCase(), userId, spaceId: currentSpaceId, currentPath: location.pathname });
+    const activeOwnerSpaceKey =
+      routeMatched && homeScope.kind !== "project"
+        ? resolveActiveSpaceGroupId(
+            key,
+            spaceGroups,
+            currentSpaceId,
+            preferredActiveSpace?.key === key ? preferredActiveSpace.spaceId : undefined,
+          )
+        : undefined;
+    const isActive =
+      routeMatched &&
+      (activeOwnerSpaceKey === undefined || rowSpaceKey === activeOwnerSpaceKey);
+    const rememberRowActivation = (event: React.MouseEvent<HTMLDivElement>) => {
+      if ((event.target as HTMLElement | null)?.closest?.("a")) {
+        setPreferredActiveSpace({ key, spaceId: rowSpaceKey });
+      }
+    };
     const capability = capabilityFor(key, item);
     // 只读由「实际归属 + 空间角色」决定，不由 shared（缓存/目录来源）推定。
     const rowReadOnly = capability.readOnly;
@@ -786,7 +984,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     const rowKeyboardProps = getRowProps(key);
     if (item.type.toLowerCase() !== "dialog") {
       return (
-        <div key={key} role="row" {...rowKeyboardProps}>
+        <div key={key} role="row" {...rowKeyboardProps} onClickCapture={rememberRowActivation}>
           <SidebarItemRow spaceIdOverride={rowSpaceId} contentKey={key} sourceServerOrigin={"serverOrigin" in item ? item.serverOrigin : undefined} type={item.type.toLowerCase()} title={item.title || key} isActive={isActive} isMenuOpen={!rowReadOnly && activeMenuKey === key} readOnly={rowReadOnly} canDeleteContent={canDeleteOwnedContent} onToggleMenu={rowReadOnly ? ignoreMenuToggle : setActiveMenuKey} onMenuAnchorChange={rowReadOnly ? undefined : handleMenuAnchorChange} editSignal={rowReadOnly ? undefined : editRequest?.key === key ? editRequest.nonce : undefined} pinned={isPinned} pinAction={pinAction} hasUnread={item.type.toLowerCase() === "agent" ? isAgentRowUnread(unreadAgentKeys, key, userId) : undefined} />
         </div>
       );
@@ -800,6 +998,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
         role="row"
         data-hook={isChildRow ? "work-dialog-child-row" : undefined}
         {...rowKeyboardProps}
+        onClickCapture={rememberRowActivation}
       >
         <SidebarItemRow spaceIdOverride={rowSpaceId} contentKey={key} type="dialog" title={item.title || titles.get(key) || key} disableAutoRead summaryStatus={summary && "status" in summary ? summary.status : undefined} summaryUnreadAt={summary && "unreadAt" in summary ? summary.unreadAt : undefined} isActive={isActive} isMenuOpen={!rowReadOnly && activeMenuKey === key} readOnly={rowReadOnly} canDeleteContent={canDeleteOwnedContent} onToggleMenu={rowReadOnly ? ignoreMenuToggle : setActiveMenuKey} onMenuAnchorChange={rowReadOnly ? undefined : handleMenuAnchorChange} editSignal={rowReadOnly ? undefined : editRequest?.key === key ? editRequest.nonce : undefined} pinned={isPinned} pinAction={pinAction} {...(loadedChildCount > 0 ? { childCount: loadedChildCount, isChildCollapsed: !expandedDialogKeys.has(key), onToggleChildCollapse: () => toggleDialogExpanded(key) } : {})} {...(isChildRow ? { isChildRow: true } : {})} depth={Math.min(depth, 2) as 0 | 1 | 2} aggregatedRunning={aggregatedRunningKeys.has(key)} />
       </div>
@@ -821,40 +1020,118 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
       ))}
     </div>);
 
+  const flatHierarchyCache = useMemo(
+    () => new WeakMap<readonly WorkDialogFlatRow[], ReturnType<typeof buildWorkDialogHierarchyView>>(),
+    [expandedDialogKeys, runningDialogKeys],
+  );
+  const memberCategoriesBySpaceId = useMemo(() => {
+    const map = new Map<string, Record<string, { name: string; order: number }>>();
+    for (const member of memberSpaces) {
+      const id = normalizeSpaceId(member.spaceId);
+      if (id && member.categories && typeof member.categories === "object") {
+        map.set(id, member.categories);
+      }
+    }
+    return map;
+  }, [memberSpaces]);
+  const hasResolvedRemoteScope = resolvedRecords?.scope === nameScope;
+  const spaceCategoriesCache = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof groupWorkDialogsByCategory>>();
+    const dropEmpty = typeFilter !== "all";
+    for (const group of spaceGroups) {
+      if (!group.spaceId || group.directoryUnavailable) continue;
+      const fallbackCats = !hasResolvedRemoteScope
+        ? memberCategoriesBySpaceId.get(group.spaceId)
+        : undefined;
+      const record =
+        records?.get(group.spaceId) ??
+        (fallbackCats ? { categories: fallbackCats } : undefined);
+      const hasCategories = Object.values(record?.categories ?? {}).some(category => category?.name?.trim());
+      if (!hasCategories) continue;
+      const activePendingForSpace =
+        pendingCategories?.scope === nameScope
+          ? pendingCategories.entries.get(group.spaceId)
+          : undefined;
+      const keepCategoryIds = activePendingForSpace
+        ? new Set(Object.keys(activePendingForSpace))
+        : undefined;
+      map.set(
+        group.spaceId,
+        groupWorkDialogsByCategory(group.rows, record, {
+          dropEmpty,
+          keepCategoryIds,
+        }),
+      );
+    }
+    return map;
+  }, [spaceGroups, records, hasResolvedRemoteScope, memberCategoriesBySpaceId, typeFilter, pendingCategories, nameScope]);
+
   // Flat means no visible recency headings, not strict time order:
   // intentionally keep running subtrees pinned first and preserve parent/child folding.
-  const renderFlatHierarchy = (groupRows: readonly WorkDialogFlatRow[]) => {
-    const view = buildWorkDialogHierarchyView(groupRows, expandedDialogKeys, Date.now(), runningDialogKeys);
+  const renderFlatHierarchy = (
+    groupRows: readonly WorkDialogFlatRow[],
+    groupSpaceKey?: string | null,
+  ) => {
+    let view = flatHierarchyCache.get(groupRows);
+    if (!view) {
+      view = buildWorkDialogHierarchyView(groupRows, expandedDialogKeys, Date.now(), runningDialogKeys);
+      flatHierarchyCache.set(groupRows, view);
+    }
     return <div aria-label="最近活动对话">
       {view.runningRows.length > 0 && <div data-hook="work-dialog-running-group" data-group-id="running">
         <div>正在进行</div>
-        {view.runningRows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
+        {view.runningRows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth, groupSpaceKey))}
       </div>}
       {view.sections.map(section => <div key={section.key} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
-        {section.rows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
+        {section.rows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth, groupSpaceKey))}
       </div>)}
     </div>;
   };
 
   const renderSpace = (group: (typeof spaceGroups)[number]) => {
-    const record = group.spaceId ? records?.get(group.spaceId) : undefined;
-    if (group.directoryUnavailable) return <><p role="status">{t("workspace_directory_unavailable", "空间目录暂不可用，保留已加载内容")}</p>{renderFlatHierarchy(group.rows)}</>;
-    const isChatOrAllFilter = typeFilter === "all" || typeFilter === "dialog" || typeFilter === "agent";
-    const dropEmpty = !isChatOrAllFilter;
-    const categories = groupWorkDialogsByCategory(group.rows, record, { dropEmpty });
+    const groupSpaceKey = normalizeSpaceId(group.spaceId) ?? null;
+    const fallbackCats =
+      !hasResolvedRemoteScope && group.spaceId
+        ? memberCategoriesBySpaceId.get(group.spaceId)
+        : undefined;
+    const record =
+      (group.spaceId ? records?.get(group.spaceId) : undefined) ??
+      (fallbackCats ? { categories: fallbackCats } : undefined);
+    if (group.directoryUnavailable) return <><p role="status">{t("workspace_directory_unavailable", "空间目录暂不可用，保留已加载内容")}</p>{renderFlatHierarchy(group.rows, groupSpaceKey)}</>;
     const hasCategories = Object.values(record?.categories ?? {}).some(category => category?.name?.trim());
+    if (!hasCategories) return renderFlatHierarchy(group.rows, groupSpaceKey);
+    const dropEmpty = typeFilter !== "all";
+    const activePendingForSpace =
+      group.spaceId && pendingCategories?.scope === nameScope
+        ? pendingCategories.entries.get(group.spaceId)
+        : undefined;
+    const keepCategoryIds = activePendingForSpace
+      ? new Set(Object.keys(activePendingForSpace))
+      : undefined;
+    const categories =
+      (group.spaceId ? spaceCategoriesCache.get(group.spaceId) : undefined) ??
+      groupWorkDialogsByCategory(group.rows, record, { dropEmpty, keepCategoryIds });
+    // 特定类型筛选下，若所有具名分类均为空被隐去、仅剩「未分类」桶，省去多余的一层「未分类」壳直接平铺。
+    if (dropEmpty && categories.every(category => category.id === null)) {
+      return renderFlatHierarchy(group.rows, groupSpaceKey);
+    }
     const canManage = canManageSpaceCategories({ spaceId: group.spaceId, userId, memberSpaces, record });
-    if (!hasCategories) return renderFlatHierarchy(group.rows);
+    const isInsideThisSpace =
+      Boolean(group.spaceId) &&
+      normalizeSpaceId(currentSpaceId) === normalizeSpaceId(group.spaceId);
+    const allowCategoryHeaderEdit =
+      canManage &&
+      (typeFilter === "all" || isInsideThisSpace || Boolean(keepCategoryIds?.size));
     return (
       <WorkDialogCategoryGroups
         groups={categories}
         spaceId={group.spaceId ?? ""}
         userId={userId}
-        canEdit={canManage}
+        canEdit={allowCategoryHeaderEdit}
         onCategoryRenamed={handleCategoryRenamed}
         onCategoryDeleted={handleCategoryDeleted}
       >
-        {rows => renderFlatHierarchy(rows)}
+        {rows => renderFlatHierarchy(rows, groupSpaceKey)}
       </WorkDialogCategoryGroups>
     );
   };

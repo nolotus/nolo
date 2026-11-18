@@ -53,6 +53,8 @@ import {
   type TuiSelectionState,
 } from "./tuiSelection";
 
+export const PROSE_READABLE_MAX_WIDTH = 98;
+
 export type TurnRole = "user" | "assistant" | "local";
 
 export type TurnBlock = {
@@ -441,11 +443,11 @@ export function applyOutputChunkToCurrentTurn(
   return true;
 }
 
-function styleAssistantTurn(content: string, colorEnabled: boolean): string {
+function styleAssistantTurn(content: string, colorEnabled: boolean, state = assistantLayoutState()): string {
   // Tool rows arrive padded for standalone output. Remove only their surface
   // padding before history wrapping; margins are painted at the viewport edge.
   content = content.split("\n").map(line =>
-    /\x1b\[(?:48;2;[0-9;]+|100)m/.test(line)
+    /^[●▸✦✗]/.test(stripAnsi(line)) && /\x1b\[(?:48;2;[0-9;]+|100)m/.test(line)
       ? line.replace(/ +(?=(?:\x1b\[[0-9;]*m)*$)/, "")
       : line,
   ).join("\n");
@@ -453,8 +455,7 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
     ? formatAssistantDisplay(content, { trimEdges: false })
     : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
   const rawLines = highlighted.split("\n");
-  let anchored = false;
-  let inToolBlock = false;
+  let { anchored, inToolBlock } = state;
   const styledLines = rawLines.map((line) => {
     const plain = stripAnsi(line);
     if (!anchored && plain.trim().length > 0 && !plain.startsWith("[nolo]")) {
@@ -476,6 +477,7 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
       ? themeText(line, "chrome", true)
       : line;
   });
+  Object.assign(state, { anchored, inToolBlock });
   return styledLines.join("\n");
 }
 
@@ -527,12 +529,24 @@ export function layoutTurnRows(
   return [...textRows, ...imageRows];
 }
 
+type AssistantLayoutState = {
+  anchored: boolean;
+  inToolBlock: boolean;
+  fenceMarker: string | null;
+  inRenderedFence: boolean;
+};
+
+function assistantLayoutState(): AssistantLayoutState {
+  return { anchored: false, inToolBlock: false, fenceMarker: null, inRenderedFence: false };
+}
+
 function layoutTextRows(
   role: TurnRole,
   content: string,
   contentWidth: number,
   colorEnabled: boolean,
   command?: string,
+  state = assistantLayoutState(),
 ): TurnLayoutRow[] {
   content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (role === "user") {
@@ -541,9 +555,9 @@ function layoutTextRows(
     const firstPrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    // Body text: accent foreground + bold, paired with the accent ┃  gutter.
-    // No full-row surface wash or trailing-space padding so short messages stay
-    // crisp without stretching a colored bar across the terminal.
+    // Body text: clean primary terminal foreground + bold, paired with the
+    // accent ┃  gutter. Keeping prose on default foreground prevents multi-line
+    // user prompts from turning into a wall of saturated blue on dark/light canvases.
     const boldOn = colorEnabled ? "\x1b[1m" : "";
     const boldOff = colorEnabled ? "\x1b[22m" : "";
     const fgOff = colorEnabled ? "\x1b[39m" : "";
@@ -554,7 +568,7 @@ function layoutTextRows(
     for (let i = 0; i < logicalLines.length; i++) {
       const line = logicalLines[i]!;
       const prefix = i === 0 ? firstPrefix : multilinePrefix;
-      const styledLine = `${prefix}${accentSeq}${boldOn}${line}${boldOff}${fgOff}`;
+      const styledLine = `${prefix}${boldOn}${line}${boldOff}${fgOff}`;
       const prefixCharCount = prefix.length;
       const wrappedRows = wrapTranscriptLineWithLayout(
         styledLine,
@@ -632,8 +646,10 @@ function layoutTextRows(
       : [{ rendered: "", sourceStart: 0, sourceEnd: 0, prefixWidth: 2 }];
   }
 
-  // Assistant
-  const styledEntry = styleAssistantTurn(content, colorEnabled);
+  // Measure starts from the incoming block state, not the styling pass's
+  // end state (a later prose line may already have exited a tool block).
+  let { inToolBlock, fenceMarker, inRenderedFence } = state;
+  const styledEntry = styleAssistantTurn(content, colorEnabled, state);
   const styledLines = styledEntry.split("\n");
   const rawLines = content.split("\n");
   let rawIdx = 0;
@@ -671,9 +687,30 @@ function layoutTextRows(
     const rawLineLen = rawLine.length;
     const sourceMapping = buildSourceMapping(rawLine, styledLine, prefixCharCount);
     const listMarker = stripAnsi(styledLine).replace(/^◈ /, "").match(/^(\s*(?:\d+[.)]|[•*+-])\s+)/)?.[1];
+    const plain = stripAnsi(styledLine).replace(/^◈ /, "");
+    const rawPlain = stripAnsi(rawLine);
+    const marker = rawPlain.match(/^\s*(`{3,}|~{3,})/)?.[1];
+    const wasInFence = fenceMarker !== null;
+    if (marker) {
+      if (fenceMarker === null) fenceMarker = marker;
+      else if (marker[0] === fenceMarker[0] && marker.length >= fenceMarker.length) fenceMarker = null;
+    }
+    // ASCII fences have one leading corner and no further '+' junctions.
+    // Table borders (+---+---+) and ordinary '+-' prose are not fences.
+    const asciiFence = /^\+(?:-{24}|- [^+]+ -{4,})$/.test(plain);
+    const renderedOpen = /^[┌╭]─/.test(plain) || (asciiFence && !inRenderedFence);
+    const renderedClose = /^[└╰]─/.test(plain) || (asciiFence && inRenderedFence);
+    if (renderedOpen && !inRenderedFence) inRenderedFence = true;
+    if (/^[●▸✦✗]/.test(plain)) inToolBlock = true;
+    else if (plain.trim() && !/^\s/.test(plain)) inToolBlock = false;
+    const structural = wasInFence || marker !== undefined || inRenderedFence ||
+      inToolBlock || /^\s*[▎│|┃┌┐└┘├┤┬┴┼╭╮╰╯]/.test(plain) ||
+      /^\s*(?:[-─━═_*]\s*){3,}$/.test(plain);
+    const wrapWidth = structural ? contentWidth : Math.min(contentWidth, PROSE_READABLE_MAX_WIDTH);
+    if (renderedClose) inRenderedFence = false;
     const lineRows = wrapTranscriptLineWithLayout(
       styledLine,
-      contentWidth,
+      wrapWidth,
       listMarker ? " ".repeat(prefixWidth + displayWidth(listMarker)) : "",
       rawOffset,
       prefixWidth,
@@ -681,10 +718,23 @@ function layoutTextRows(
       sourceMapping,
       rawLineLen,
     );
+    // Clipboard extraction trims rendered row ends. Move prose wrap whitespace
+    // into the layout-owned joiner, so a narrower measure cannot glue words.
+    if (!structural) {
+      for (const row of lineRows) {
+        if (!row.softWrapped) continue;
+        const trailing = stripAnsi(row.rendered).match(/ +$/)?.[0] ?? "";
+        if (!trailing) continue;
+        row.rendered = row.rendered.replace(/ +(?=(?:\x1b\[[0-9;]*m)*$)/, "");
+        row.sourceMapping = row.sourceMapping?.slice(0, -trailing.length);
+        row.softWrapJoiner = trailing + (row.softWrapJoiner ?? "");
+      }
+    }
     rows.push(...lineRows);
     rawIdx += 1;
     rawOffset += rawLineLen + 1;
   }
+  Object.assign(state, { inToolBlock, fenceMarker, inRenderedFence });
   return rows.length > 0
     ? rows
     : [{ rendered: "", sourceStart: 0, sourceEnd: 0, prefixWidth: 0 }];
@@ -749,35 +799,7 @@ export function renderTurnBlock(
  * 等价校验（失配 → 本 turn 永久关闭快路径）。NOLO_TUI_RENDER_VALIDATE=1 可强制
  * 每帧校验（等价性测试用）。
  */
-type StreamingTurnCache = {
-  role: TurnRole;
-  contentWidth: number;
-  colorEnabled: boolean;
-  themeFingerprint: string;
-  /** 本 turn 的完整源文本（含 pendingTail），startsWith 增量判定与守卫扫描的基准。 */
-  fullContent: string;
-  /** content[0..completeContentLength) 的已提交渲染行：全部是完整逻辑行。 */
-  committedLines: string[];
-  /** 已提交源文本长度（截到最后一个 \n；0 = 尚无完整逻辑行）。 */
-  completeContentLength: number;
-  /** 最后一个 \n 之后的未完行源文本（"" = 干净行边界）。 */
-  pendingTail: string;
-  /** 已提交源文本的 ``` 翻转次数（奇偶 = 围栏内外状态）。 */
-  fenceFlips: number;
-  /** 已提交区域最后一个逻辑行（边界 kind/表格守卫用）。 */
-  committedLastLine: string;
-  /** 本 turn 是否允许 append-splice（校验失配后关闭）。 */
-  fastPathEnabled: boolean;
-  /** 快路径与全量渲染的一次性等价校验是否已通过。 */
-  spliceValidated: boolean;
-  /** 上次返回的行数组（内容未变时直接复用，滚动/键击重绘零渲染成本）。 */
-  lastResult: string[] | null;
-};
-
-let streamingTurnCache: StreamingTurnCache | null = null;
-
 export function resetStreamingTurnCache(): void {
-  streamingTurnCache = null;
   streamingLayoutCache = null;
 }
 
@@ -785,12 +807,12 @@ export function resetStreamingTurnCache(): void {
  * 当前流式 turn 的 layout 元数据增量缓存（选择高亮 / 复制需要每行的
  * sourceStart/sourceEnd/prefixWidth/softWrapped/softWrapJoiner）。
  *
- * 与 streamingTurnCache（渲染行）同构：把当前 turn 源文本切成「已提交完整逻辑行」+
+ * 绘制与选择共用此缓存：把当前 turn 源文本切成「已提交完整逻辑行」+
  * 「未完 tail」，已提交段按段渲染一次后不再重排，每帧只重排 pendingTail；差别在于这里
  * 保留 selection 需要的元数据，因此等价性校验逐字段对照全量 layoutTurnRows（rendered
  * 之外的 offset / prefixWidth / softWrap / sourceMapping 全部比对），不是只比纯文本。
  *
- * 安全模型沿用 streamingTurnCache：非纯追加（含 \r 重写、内容收缩）、role/宽度/配色/
+ * 安全模型：非纯追加（含 \r 重写、内容收缩）、role/宽度/配色/
  * 主题变化一律失效重建；可疑内容（fence / 数学块 / 表格 / 标题与列表呼吸 / \r / \x00）
  * 与分段拼接边界一律回退全量布局；首次 splice 另做一次逐字段等价校验（NOLO_TUI_RENDER_VALIDATE=1
  * 可强制每帧校验），失配即本 turn 永久关闭快路径、回退旧行为。只有 assistant 走增量
@@ -805,6 +827,7 @@ type StreamingLayoutCache = {
   fullContent: string;
   /** 已提交完整逻辑行的 layout 行（按段渲染一次，之后不再重排）。 */
   committedRows: TurnLayoutRow[];
+  committedState: AssistantLayoutState;
   /** 已提交源文本长度（截到最后一个 \n；0 = 尚无完整逻辑行）。 */
   completeContentLength: number;
   /** 最后一个 \n 之后的未完行源文本（"" = 干净行边界）。 */
@@ -860,43 +883,15 @@ function renderContinuationTurnRows(
   contentWidth: number,
   colorEnabled: boolean,
   sourceOffset: number,
+  state: AssistantLayoutState,
 ): TurnLayoutRow[] {
-  const normalized = source.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const styledText = colorEnabled
-    ? formatAssistantDisplay(normalized, { trimEdges: false })
-    : stripAnsi(formatAssistantDisplay(normalized, { trimEdges: false }));
-  const styledLines = styledText
-    .split("\n")
-    .map((line) =>
-      line.startsWith("[nolo]") && colorEnabled ? themeText(line, "chrome", true) : line,
-    );
-  const rawLines = normalized.split("\n");
-  // 样式行与源行数不一致（polish 插入了空行等）→ 无法给出可靠 source 映射，
-  // 交给逐字段校验判失配并回退全量。
-  const pairingSafe = rawLines.length === styledLines.length;
-  const rows: TurnLayoutRow[] = [];
-  let rawOffset = sourceOffset;
-  for (let i = 0; i < styledLines.length; i++) {
-    const rawLine = rawLines[i] ?? "";
-    const styledLine = styledLines[i]!;
-    const sourceMapping = pairingSafe
-      ? buildSourceMapping(rawLine, styledLine, 0)
-      : undefined;
-    rows.push(
-      ...wrapTranscriptLineWithLayout(
-        styledLine,
-        contentWidth,
-        "",
-        rawOffset,
-        0,
-        0,
-        sourceMapping,
-        rawLine.length,
-      ),
-    );
-    rawOffset += rawLine.length + 1;
-  }
-  return rows;
+  const rows = layoutTextRows(role, source, contentWidth, colorEnabled, undefined, state);
+  return rows.map(row => ({
+    ...row,
+    sourceStart: row.sourceStart + sourceOffset,
+    sourceEnd: row.sourceEnd + sourceOffset,
+    sourceMapping: row.sourceMapping?.map(offset => offset + sourceOffset),
+  }));
 }
 
 /** 内容/几何变化或非纯追加时的全量重建（成本回退旧行为，正确性优先）。 */
@@ -911,16 +906,17 @@ function rebuildStreamingLayoutCache(
   const lastNewline = content.lastIndexOf("\n");
   const completeContentLength = lastNewline + 1;
   const committedSource = content.slice(0, completeContentLength).slice(0, -1);
+  const committedState = assistantLayoutState();
+  const committedRows = completeContentLength === 0 ? [] :
+    layoutTextRows(role, committedSource, contentWidth, colorEnabled, undefined, committedState);
   streamingLayoutCache = {
     role,
     contentWidth,
     colorEnabled,
     themeFingerprint,
     fullContent: content,
-    committedRows:
-      completeContentLength === 0
-        ? []
-        : layoutTurnRows(role, committedSource, contentWidth, colorEnabled),
+    committedRows,
+    committedState,
     completeContentLength,
     pendingTail: lastNewline === -1 ? content : content.slice(lastNewline + 1),
     fenceFlips: countFenceFlips(content),
@@ -987,18 +983,20 @@ function computeStreamingTurnLayoutRows(
   const lastNewline = newTail.lastIndexOf("\n");
   const committedRows = [...cache.committedRows];
   let completeContentLength = cache.completeContentLength;
+  const committedState = { ...cache.committedState };
   if (lastNewline !== -1) {
     const completePart = newTail.slice(0, lastNewline + 1);
     const renderSource = completePart.slice(0, -1);
     committedRows.push(
       ...(completeContentLength === 0
-        ? layoutTurnRows(role, renderSource, contentWidth, colorEnabled)
+        ? layoutTextRows(role, renderSource, contentWidth, colorEnabled, undefined, committedState)
         : renderContinuationTurnRows(
             role,
             renderSource,
             contentWidth,
             colorEnabled,
             completeContentLength,
+            committedState,
           )),
     );
     completeContentLength += completePart.length;
@@ -1012,6 +1010,7 @@ function computeStreamingTurnLayoutRows(
       contentWidth,
       colorEnabled,
       completeContentLength,
+      { ...committedState },
     ),
   ];
 
@@ -1032,6 +1031,7 @@ function computeStreamingTurnLayoutRows(
 
   cache.fullContent = content;
   cache.committedRows = committedRows;
+  cache.committedState = committedState;
   cache.completeContentLength = completeContentLength;
   cache.pendingTail = pendingTail;
   if (lastNewline !== -1) {
@@ -1124,6 +1124,7 @@ function isPipeRowLike(line: string): boolean {
 function isSuspiciousAppend(newTail: string, fenceParityEven: boolean): boolean {
   if (!fenceParityEven) return true; // 已提交内容处于未闭合围栏内
   if (newTail.includes("\r")) return true; // 回车重写历史
+  if (newTail.includes("~~~") || /^#{1,6} /m.test(newTail)) return true;
   if (newTail.includes("```")) return true; // fence 开/闭（含 mermaid）
   if (newTail.includes("$$") || newTail.includes("\\[") || newTail.includes("\\]")) {
     return true; // 多行数学块开/闭
@@ -1157,70 +1158,7 @@ function isSuspiciousBoundary(committedLastLine: string, newTail: string): boole
 }
 
 
-function renderPrefixTurnBlock(
-  role: TurnRole,
-  content: string,
-  contentWidth: number,
-  colorEnabled: boolean,
-): string[] {
-  content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  if (role === "user") {
-    return renderTurnBlock(role, content, contentWidth, colorEnabled);
-  }
-  // Delegate styling (including the ◈ anchor on the first non-empty
-  // non-[nolo] line) to styleAssistantTurn so streaming and finalized turns
-  // cannot drift into double identity markers or orphan anchors.
-  const styledLines = styleAssistantTurn(content, colorEnabled).split("\n");
-  const lines: string[] = [];
-  for (const logicalLine of styledLines) {
-    lines.push(...wrapTranscriptLine(logicalLine, contentWidth));
-  }
-  return lines;
-}
-
-function renderTailTurnBlock(
-  role: TurnRole,
-  content: string,
-  contentWidth: number,
-  colorEnabled: boolean,
-): string[] {
-  content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  if (role === "user") {
-    const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
-    const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    // Same accent-foreground + bold body treatment as layoutTurnRows —
-    // streaming tail and finalized history must not drift apart.
-    const boldOn = colorEnabled ? "\x1b[1m" : "";
-    const boldOff = colorEnabled ? "\x1b[22m" : "";
-    const fgOff = colorEnabled ? "\x1b[39m" : "";
-    const lines: string[] = [];
-    for (const rawLine of content.split("\n")) {
-      const styledLine = `${multilinePrefix}${accentSeq}${boldOn}${rawLine}${boldOff}${fgOff}`;
-      lines.push(...wrapTranscriptLine(styledLine, contentWidth, hangingIndent));
-    }
-    return lines;
-  } else {
-    const highlighted = colorEnabled
-      ? formatAssistantDisplay(content, { trimEdges: false })
-      : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
-    const rawLines = highlighted.split("\n");
-    const styledLines = rawLines.map((line) => {
-      return line.startsWith("[nolo]") && colorEnabled
-        ? themeText(line, "chrome", true)
-        : line;
-    });
-    const lines: string[] = [];
-    for (const logicalLine of styledLines) {
-      const plain = stripAnsi(logicalLine);
-      const anchor = plain.startsWith("◈ ") ? 2 : 0;
-      const marker = plain.replace(/^◈ /, "").match(/^(\s*(?:\d+[.)]|[•*+-])\s+)/)?.[1] ?? "";
-      lines.push(...wrapTranscriptLine(logicalLine, contentWidth, marker ? " ".repeat(anchor + displayWidth(marker)) : ""));
-    }
-    return lines;
-  }
-}
-
+/** Painting and hit-testing share one incremental cache and block-state machine. */
 function getStreamingTurnLines(
   role: TurnRole,
   content: string,
@@ -1228,162 +1166,14 @@ function getStreamingTurnLines(
   colorEnabled: boolean,
   themeFingerprint: string,
 ): string[] {
-  const forceValidate = process.env.NOLO_TUI_RENDER_VALIDATE === "1";
-  let cache = streamingTurnCache;
-
-  const geometryChanged =
-    !cache ||
-    cache.role !== role ||
-    cache.contentWidth !== contentWidth ||
-    cache.colorEnabled !== colorEnabled ||
-    cache.themeFingerprint !== themeFingerprint;
-  // 非纯追加（\r 重写、内容收缩）或几何/主题变化 → 缓存失效，全量重建。
-  if (geometryChanged || !content.startsWith(cache.fullContent)) {
-    return rebuildStreamingCache(content, role, contentWidth, colorEnabled, themeFingerprint);
-  }
-
-  // 内容未变（滚动 / 键击触发的重绘）→ 复用上次结果，零渲染成本。
-  if (content === cache.fullContent && cache.lastResult) {
-    return cache.lastResult;
-  }
-
-  const suffix = content.slice(cache.fullContent.length);
-  if (suffix === "") {
-    return cache.lastResult ?? cache.committedLines;
-  }
-
-  // 全量渲染回退（守卫命中 / 校验失配）：重建 committed/pendingTail 切分。
-  // 注意：committed 渲染源一律剥掉段尾 \n（否则 split 产生幽灵空行，与
-  // 「该行后面还有内容」的全量渲染错位——旧前缀缓存正是栽在这里）。
-  const renderFull = (): string[] => {
-    const lines = renderTurnBlock(role, content, contentWidth, colorEnabled);
-    cache.fullContent = content;
-    cache.fenceFlips = countFenceFlips(content);
-    const lastNewline = content.lastIndexOf("\n");
-    cache.completeContentLength = lastNewline + 1;
-    cache.committedLines =
-      lastNewline === -1
-        ? []
-        : renderTurnBlock(role, content.slice(0, lastNewline), contentWidth, colorEnabled);
-    cache.pendingTail = content.slice(lastNewline + 1);
-    cache.committedLastLine =
-      lastNewline === -1 ? "" : lastLogicalLineOf(content.slice(0, lastNewline + 1));
-    cache.lastResult = lines;
-    return lines;
-  };
-
-  // ── 快路径守卫：命中可疑内容 → 该帧全量渲染（旧行为，正确性不变） ──────
-  const newTail = cache.pendingTail + suffix;
-  if (
-    !cache.fastPathEnabled ||
-    isSuspiciousAppend(newTail, cache.fenceFlips % 2 === 0) ||
-    isSuspiciousBoundary(cache.committedLastLine, newTail)
-  ) {
-    return renderFull();
-  }
-
-  // ── 增量 splice：committed 不重排，只渲染未完 tail（O(tail)） ───────────
-  // turn 首段（尚无完整行）用 anchor 渲染器；后续 tail 不带 ◈。
-  const tailRenderer =
-    cache.completeContentLength === 0 ? renderPrefixTurnBlock : renderTailTurnBlock;
-  const tailLines = tailRenderer(role, newTail, contentWidth, colorEnabled);
-  const composed =
-    cache.completeContentLength === 0
-      ? tailLines
-      : [...cache.committedLines, ...tailLines];
-
-  if (!cache.spliceValidated || forceValidate) {
-    // 一次性（或强制）等价校验：splice 结果必须与全量渲染逐行一致。
-    const full = renderTurnBlock(role, content, contentWidth, colorEnabled);
-    cache.spliceValidated = true;
-    if (
-      composed.length === full.length &&
-      composed.every((line, index) => line === full[index])
-    ) {
-      commitCompletedTail(cache, content, newTail, role, contentWidth, colorEnabled);
-      cache.lastResult = composed;
-      return composed;
-    }
-    // 失配 → 本 turn 关闭快路径，回退每帧全量（旧行为）。
-    cache.fastPathEnabled = false;
-    return renderFull();
-  }
-
-  commitCompletedTail(cache, content, newTail, role, contentWidth, colorEnabled);
-  cache.lastResult = composed;
-  return composed;
+  return computeStreamingTurnLayoutRows(role, content, contentWidth, colorEnabled, themeFingerprint)
+    .map(row => row.rendered);
 }
 
-/** content 最后一个逻辑行（不含行尾换行）。 */
 function lastLogicalLineOf(content: string): string {
-  const trimmed = content.replace(/\n$/, "");
+  const trimmed = content.endsWith("\n") ? content.slice(0, -1) : content;
   const idx = trimmed.lastIndexOf("\n");
   return idx === -1 ? trimmed : trimmed.slice(idx + 1);
-}
-
-/** 缓存失效（几何/主题变化、非纯追加）时的全量重建。 */
-function rebuildStreamingCache(
-  content: string,
-  role: TurnRole,
-  contentWidth: number,
-  colorEnabled: boolean,
-  themeFingerprint: string,
-): string[] {
-  const lines = renderTurnBlock(role, content, contentWidth, colorEnabled);
-  const lastNewline = content.lastIndexOf("\n");
-  streamingTurnCache = {
-    role,
-    contentWidth,
-    colorEnabled,
-    themeFingerprint,
-    fullContent: content,
-    // committed 渲染源剥掉段尾 \n（幽灵空行修正，见 renderFull 注释）。
-    committedLines:
-      lastNewline === -1
-        ? []
-        : renderTurnBlock(role, content.slice(0, lastNewline), contentWidth, colorEnabled),
-    completeContentLength: lastNewline + 1,
-    pendingTail: content.slice(lastNewline + 1),
-    fenceFlips: countFenceFlips(content),
-    committedLastLine:
-      lastNewline === -1 ? "" : lastLogicalLineOf(content.slice(0, lastNewline + 1)),
-    fastPathEnabled: true,
-    spliceValidated: false,
-    lastResult: lines,
-  };
-  return lines;
-}
-
-/**
- * 把 tail 中已完成的行（到最后一个 \n）并入 committedLines：
- * turn 首段用 anchor 渲染器（renderPrefixTurnBlock），后续段不带 ◈。
- * 未完行留在 pendingTail；fence 翻转计数增量维护。
- */
-function commitCompletedTail(
-  cache: StreamingTurnCache,
-  content: string,
-  newTail: string,
-  role: TurnRole,
-  contentWidth: number,
-  colorEnabled: boolean,
-): void {
-  const lastNewline = newTail.lastIndexOf("\n");
-  if (lastNewline !== -1) {
-    // 渲染源剥掉段尾 \n（幽灵空行修正）；\n 本身只作为行分隔符计数进
-    // completeContentLength，使 committedLines 与全量渲染逐行对齐。
-    const completePart = newTail.slice(0, lastNewline + 1);
-    const renderSource = completePart.slice(0, -1);
-    const renderer =
-      cache.completeContentLength === 0 ? renderPrefixTurnBlock : renderTailTurnBlock;
-    cache.committedLines.push(
-      ...renderer(role, renderSource, contentWidth, colorEnabled),
-    );
-    cache.completeContentLength += completePart.length;
-    cache.fenceFlips += countFenceFlips(completePart);
-    cache.committedLastLine = lastLogicalLineOf(completePart);
-    cache.pendingTail = newTail.slice(lastNewline + 1);
-  }
-  cache.fullContent = content;
 }
 
 export function getStreamingTurnLinesForTest(

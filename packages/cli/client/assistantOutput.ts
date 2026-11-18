@@ -182,32 +182,31 @@ export function highlightCodeLine(line: string, lang: CodeLang, brightness: TuiB
   const success = colorSeq("success", brightness);
   const warning = colorSeq("warning", brightness);
   const chrome = colorSeq("chrome", brightness);
-  const dim = STYLE.dim;
   const reset = STYLE.reset;
 
   const out: string[] = [];
   let cursor = 0;
   for (const region of regions) {
-    // Plain gap before this region: scan for keywords + numbers, default info.
+    // Plain gap before this region: scan for keywords + numbers, default foreground.
     if (region.start > cursor) {
-      out.push(emitPlainGap(line.slice(cursor, region.start), keywords, info, accent, warning, reset));
+      out.push(emitPlainGap(line.slice(cursor, region.start), keywords, "\x1b[39m", accent, warning, reset));
     }
     const text = line.slice(region.start, region.end);
     if (region.kind === "string") {
       out.push(`${success}${text}${reset}`);
     } else {
-      out.push(`${chrome}${dim}${text}${reset}`);
+      out.push(`${chrome}${text}${reset}`);
     }
     cursor = region.end;
   }
   // Trailing plain gap after the last region.
   if (cursor < line.length) {
-    out.push(emitPlainGap(line.slice(cursor), keywords, info, accent, warning, reset));
+    out.push(emitPlainGap(line.slice(cursor), keywords, "\x1b[39m", accent, warning, reset));
   }
   return out.join("");
 }
 
-/** Emit a plain (non-string, non-comment) gap: keywords→accent, numbers→warning, else→info. */
+/** Emit a plain (non-string, non-comment) gap: keywords→accent, numbers→warning, else→default foreground. */
 function emitPlainGap(
   text: string,
   keywords: ReadonlySet<string>,
@@ -217,7 +216,7 @@ function emitPlainGap(
   reset: string
 ): string {
   // Tokenize into word/number runs and everything else. Anything not matched
-  // stays in the info base color so the block keeps a continuous background.
+  // uses the default foreground to keep ordinary code visually quiet.
   const parts: string[] = [];
   const re = /([A-Za-z_]\w*)|(\d+(?:\.\d+)?)|([\s\S])/g;
   let last = 0;
@@ -400,7 +399,7 @@ function styleToolDetailSegments(
   if (!metaMatch) {
     return `${muted}${detail}${STYLE.reset}`;
   }
-  return `${muted}${metaMatch[1]}${STYLE.reset}${chrome}${STYLE.dim}${metaMatch[2]}${STYLE.reset}`;
+  return `${muted}${metaMatch[1]}${STYLE.reset}${chrome}${metaMatch[2]}${STYLE.reset}`;
 }
 
 function styleTuiToolLine(line: string, brightness: TuiBrightness): string | null {
@@ -413,14 +412,14 @@ function styleTuiToolLine(line: string, brightness: TuiBrightness): string | nul
   const header = toolTreeHeaderMatch(plain);
   if (header) {
     const glyph = plain.startsWith("•") ? "•" : "▸";
-    return `${chrome}${glyph}${STYLE.reset} ${STYLE.bold}${info}${header[1]}${STYLE.reset} ${chrome}${STYLE.dim}(${header[2]})${STYLE.reset} ${chrome}·${STYLE.reset} ${muted}${header[3]}${STYLE.reset}  ${statusColorSeq("✓", brightness)}✓${STYLE.reset}`;
+    return `${chrome}${glyph}${STYLE.reset} ${STYLE.bold}${muted}${header[1]}${STYLE.reset} ${chrome}(${header[2]})${STYLE.reset} ${chrome}·${STYLE.reset} ${muted}${header[3]}${STYLE.reset}  ${statusColorSeq("✓", brightness)}✓${STYLE.reset}`;
   }
 
   const single = plain.match(TOOL_SINGLE_RE);
   if (single) {
     const [, label, detail, marker, statusDetail] = single;
     const isError = marker === "✗";
-    const labelColor = isError ? danger : info;
+    const labelColor = isError ? danger : muted;
     let rendered = `${chrome}▸${STYLE.reset} ${STYLE.bold}${labelColor}${label}${STYLE.reset}`;
     if (detail) {
       rendered += ` ${chrome}·${STYLE.reset} ${styleToolDetailSegments(detail, muted, chrome)}`;
@@ -430,7 +429,7 @@ function styleTuiToolLine(line: string, brightness: TuiBrightness): string | nul
       if (isError) {
         rendered += ` ${danger}${statusDetail}${STYLE.reset}`;
       } else {
-        rendered += ` ${chrome}${STYLE.dim}${statusDetail}${STYLE.reset}`;
+        rendered += ` ${chrome}${statusDetail}${STYLE.reset}`;
       }
     }
     return rendered;
@@ -656,41 +655,37 @@ function styleRichMarkdownLine(line: string, brightness: TuiBrightness) {
     const level = heading[1].length;
     const title = heading[2];
     const styledTitle = styleInlineMarkdown(title, brightness);
-    // Monotonically decreasing visual weight:
-    //   H1 → accent + bold (strongest visual anchor)
-    //   H2 → warning + bold (warm amber, subsection headers)
-    //   H3 → info + bold (lighter, paragraph-level labels)
-    //   H4+ → muted + bold (sub-labels)
+    // Calm three-tier heading hierarchy (reserves warning amber strictly for alerts):
+    //   H1 → accent + bold (primary ocean ink anchor)
+    //   H2 → info + bold (glacier/fjord cyan-blue subsection)
+    //   H3+ → muted + bold (granite/silver mist sub-labels)
     if (level === 1) {
       return `${STYLE.bold}${colorSeq("accent", brightness)}${styledTitle}${STYLE.reset}`;
     }
     if (level === 2) {
-      return `${STYLE.bold}${colorSeq("warning", brightness)}${styledTitle}${STYLE.reset}`;
-    }
-    if (level === 3) {
       return `${STYLE.bold}${colorSeq("info", brightness)}${styledTitle}${STYLE.reset}`;
     }
     return `${STYLE.bold}${colorSeq("muted", brightness)}${styledTitle}${STYLE.reset}`;
   }
   // 状态行弱化：repo 规范强制每条回复首句是"进入 nolo-plan…"，连续多条
-  // 回复堆叠时视觉噪声大。把它降级成 chrome + dim 的弱化行，和正文拉开
-  // 层级。必须与 highlightMarkdown（tui/theme.ts）对齐，否则同一条回复
-  // 在流式与历史重绘间会出现颜色跳变。
+  // 回复堆叠时视觉噪声大。把它降级成 chrome 的弱化行，和正文拉开
+  // 层级（不叠 STYLE.dim，避免在暗色 chrome 上双重减亮）。
   if (line.startsWith("进入 nolo-plan")) {
-    return `${colorSeq("chrome", brightness)}${STYLE.dim}${line}${STYLE.reset}`;
+    return `${colorSeq("chrome", brightness)}${line}${STYLE.reset}`;
   }
-  // Blockquote: "> text" → chrome left border + dimmed styled content
+  // Blockquote: "> text" → chrome left border + crisp muted prose (avoids SGR dim washout on light terminals)
   const blockquote = line.match(/^>\s?(.*)$/);
   if (blockquote) {
     const border = colorSeq("chrome", brightness);
+    const muted = colorSeq("muted", brightness);
     const content = blockquote[1];
-    const styled = styleInlineMarkdown(content, brightness);
-    return `${border}│${STYLE.reset} ${STYLE.dim}${styled}${STYLE.reset}`;
+    const styled = styleInlineMarkdown(content, brightness).split(STYLE.reset).join(`${STYLE.reset}${muted}`);
+    return `${border}│${STYLE.reset} ${muted}${styled}${STYLE.reset}`;
   }
   // Horizontal rule: elegant 36-cell divider line with subtle chrome styling.
   // 字形跟 resolveBoxCharset（EA=A=wide 的终端下 `─` 占 2 列，36 字符会变成 72 格）。
   if (THEMATIC_BREAK_RE.test(line)) {
-    return `${colorSeq("chrome", brightness)}${STYLE.dim}${boxGlyphs(resolveBoxCharset()).h.repeat(36)}${STYLE.reset}`;
+    return `${colorSeq("chrome", brightness)}${boxGlyphs(resolveBoxCharset()).h.repeat(36)}${STYLE.reset}`;
   }
   // List bullets: primary level uses accent '•', nested lists (indent >= 2)
   // use elegant open circle '◦' in chrome for rhythmic visual depth.
@@ -740,18 +735,18 @@ const CODE_FENCE_RULE_WIDTH = 24;
 
 function renderCodeFenceOpen(rawLang: string, brightness: TuiBrightness): string {
   const { h, tl } = boxGlyphs(resolveBoxCharset());
-  const chromeDim = `${colorSeq("chrome", brightness)}${STYLE.dim}`;
+  const chrome = colorSeq("chrome", brightness);
   if (rawLang) {
     const tailLen = Math.max(4, CODE_FENCE_RULE_WIDTH - rawLang.length - 3);
-    return `${chromeDim}${tl}${h} ${rawLang} ${h.repeat(tailLen)}${STYLE.reset}`;
+    return `${chrome}${tl}${h} ${rawLang} ${h.repeat(tailLen)}${STYLE.reset}`;
   }
-  return `${chromeDim}${tl}${h.repeat(CODE_FENCE_RULE_WIDTH)}${STYLE.reset}`;
+  return `${chrome}${tl}${h.repeat(CODE_FENCE_RULE_WIDTH)}${STYLE.reset}`;
 }
 
 function renderCodeFenceClose(brightness: TuiBrightness): string {
   const { h, bl } = boxGlyphs(resolveBoxCharset());
-  const chromeDim = `${colorSeq("chrome", brightness)}${STYLE.dim}`;
-  return `${chromeDim}${bl}${h.repeat(CODE_FENCE_RULE_WIDTH)}${STYLE.reset}`;
+  const chrome = colorSeq("chrome", brightness);
+  return `${chrome}${bl}${h.repeat(CODE_FENCE_RULE_WIDTH)}${STYLE.reset}`;
 }
 
 function renderCodeFenceLine(
@@ -760,8 +755,8 @@ function renderCodeFenceLine(
   brightness: TuiBrightness
 ): string {
   const { v } = boxGlyphs(resolveBoxCharset());
-  const chromeDim = `${colorSeq("chrome", brightness)}${STYLE.dim}`;
-  return `${chromeDim}${v}${STYLE.reset} ${highlightCodeLine(line, lang, brightness)}`;
+  const chrome = colorSeq("chrome", brightness);
+  return `${chrome}${v}${STYLE.reset} ${highlightCodeLine(line, lang, brightness)}`;
 }
 
 /**

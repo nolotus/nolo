@@ -106,24 +106,33 @@ export type WorkCategoryGroup = { id: string | null; label: string; rows: WorkDi
 export function groupWorkDialogsByCategory(
   rows: readonly WorkDialogFlatRow[],
   record?: WorkSpaceRecord | null,
-  options?: { dropEmpty?: boolean },
+  options?: { dropEmpty?: boolean; keepCategoryIds?: ReadonlySet<string> },
 ): WorkCategoryGroup[] {
   const categories = Object.entries(record?.categories ?? {}).filter((entry): entry is [string, { name: string; order: number }] => Boolean(entry[1]?.name?.trim()));
   if (!categories.length) return [{ id: null, label: "", rows: [...rows] }];
   const links = new Map(Object.values(record?.contents ?? {}).filter(link => link && typeof link.contentKey === "string").map(link => [link!.contentKey, link!]));
   const known = new Set(categories.map(([id]) => id));
-  const buckets = new Map<string | null, WorkDialogFlatRow[]>();
+  const buckets = new Map<string, WorkDialogFlatRow[]>();
+  const restRows: WorkDialogFlatRow[] = [];
   for (const row of rows) {
     const linked = links.get(row.key)?.categoryId;
-    const id = linked && known.has(linked) ? linked : null;
-    buckets.set(id, [...(buckets.get(id) ?? []), row]);
+    if (linked && known.has(linked)) {
+      let bucket = buckets.get(linked);
+      if (!bucket) {
+        bucket = [];
+        buckets.set(linked, bucket);
+      }
+      bucket.push(row);
+    } else {
+      restRows.push(row);
+    }
   }
   let result: WorkCategoryGroup[] = categories.sort((a, b) => a[1].order - b[1].order || a[1].name.localeCompare(b[1].name) || a[0].localeCompare(b[0])).map(([id, category]) => ({ id, label: category.name, rows: buckets.get(id) ?? [] }));
   if (options?.dropEmpty) {
-    result = result.filter(group => group.rows.length > 0);
+    const keepIds = options.keepCategoryIds;
+    result = result.filter(group => group.rows.length > 0 || Boolean(group.id && keepIds?.has(group.id)));
   }
-  const rest = buckets.get(null);
-  if (rest?.length) result.push({ id: null, label: "", rows: rest });
+  if (restRows.length) result.push({ id: null, label: "", rows: restRows });
   for (const group of result) group.rows.sort((a, b) => {
     const orderDiff = (links.get(a.key)?.order ?? Number.MAX_SAFE_INTEGER) - (links.get(b.key)?.order ?? Number.MAX_SAFE_INTEGER);
     if (orderDiff !== 0) return orderDiff;
@@ -134,6 +143,59 @@ export function groupWorkDialogsByCategory(
     return pinDiff || b.updatedAt - a.updatedAt || a.key.localeCompare(b.key);
   });
   return result;
+}
+
+/** Structural equality check so unchanged 30s TTL background refreshes skip cloning Maps and re-rendering. */
+export function areWorkSpaceRecordsEquivalent(
+  a?: WorkSpaceRecord | null,
+  b?: WorkSpaceRecord | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.name !== b.name || a.userId !== b.userId || a.ownerId !== b.ownerId) {
+    return false;
+  }
+  const catsA = a.categories ?? {};
+  const catsB = b.categories ?? {};
+  const catKeysA = Object.keys(catsA);
+  const catKeysB = Object.keys(catsB);
+  if (catKeysA.length !== catKeysB.length) return false;
+  for (const key of catKeysA) {
+    if (!Object.prototype.hasOwnProperty.call(catsB, key)) return false;
+    const ca = catsA[key];
+    const cb = catsB[key];
+    if (ca === cb) continue;
+    if (!ca || !cb) return false;
+    if (ca.name !== cb.name || ca.order !== cb.order) return false;
+  }
+  if (Boolean(a.contents) !== Boolean(b.contents)) return false;
+  const contentsA = a.contents ?? {};
+  const contentsB = b.contents ?? {};
+  const contentKeysA = Object.keys(contentsA);
+  const contentKeysB = Object.keys(contentsB);
+  if (contentKeysA.length !== contentKeysB.length) return false;
+  for (const key of contentKeysA) {
+    if (!Object.prototype.hasOwnProperty.call(contentsB, key)) return false;
+    const ia = contentsA[key] as Record<string, unknown> | null | undefined;
+    const ib = contentsB[key] as Record<string, unknown> | null | undefined;
+    if (ia === ib) continue;
+    if (!ia || !ib) return false;
+    if (
+      ia.contentKey !== ib.contentKey ||
+      ia.categoryId !== ib.categoryId ||
+      ia.order !== ib.order ||
+      ia.title !== ib.title ||
+      ia.type !== ib.type ||
+      ia.updatedAt !== ib.updatedAt ||
+      ia.fileCategory !== ib.fileCategory ||
+      ia.deleted !== ib.deleted ||
+      ia.deletedAt !== ib.deletedAt ||
+      ia.pinned !== ib.pinned
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export interface WorkSpaceRecordCache {
@@ -175,6 +237,75 @@ export function createWorkSpaceRecordCache(ttlMs = WORK_SPACE_NAME_TTL_MS): Work
 /** Shared singleton cache across sidebar preview and space groups. */
 export const readCachedSpaceRecord = createWorkSpaceRecordCache();
 
+/**
+ * 收集已被「实际可见（有名称）的空间目录」收录的 contentKey。
+ *
+ * 「空间外」只放未归属任何可见空间的内容；一旦某条内容已被可见空间的 `contents` 收录，
+ * 就不再重复出现在「空间外」。若空间无名称（未渲染）、目录加载失败（`!record?.contents`）
+ * 或目录项为 tombstone，则不视为已收录，「空间外」继续保留兜底，不丢内容。
+ */
+export function collectClaimedDirectoryKeys(
+  memberships: readonly { spaceId: string; spaceName?: string }[],
+  records: ReadonlyMap<string, WorkSpaceRecord>,
+  byKey?: ReadonlyMap<string, WorkDialogFlatRow>,
+): Set<string> {
+  const claimed = new Set<string>();
+  for (const member of memberships) {
+    const id = normalizeSpaceId(member.spaceId);
+    if (!id) continue;
+    const record = records.get(id);
+    if (!record?.contents) continue;
+    const label = record.name?.trim() || member.spaceName?.trim();
+    if (!label) continue;
+    for (const entry of Object.values(record.contents)) {
+      if (!entry || !entry.contentKey || isTombstoneRecord(entry)) continue;
+      const cached = byKey?.get(entry.contentKey);
+      if (cached && isTombstoneRecord(cached.item)) continue;
+      const type = entry.type || cached?.item.type;
+      if (!type) continue;
+      claimed.add(entry.contentKey);
+    }
+  }
+  return claimed;
+}
+
+/**
+ * 同一 contentKey 同时被多个空间引用时，仲裁唯一获得高亮的空间分组 ID：
+ * 1. 当前作用域所在空间（`currentSpaceId`）包含该条目时优先；
+ * 2. 用户最近在该空间分组内点击激活过该条目（`preferredSpaceId`）次之；
+ * 3. 否则取排序后首个包含该条目的分组，保证侧边栏同一时刻最多高亮一行。
+ */
+export function resolveActiveSpaceGroupId(
+  contentKey: string,
+  groups: readonly Pick<WorkDialogSpaceGroup, "spaceId" | "rows">[],
+  currentSpaceId?: string | null,
+  preferredSpaceId?: string | null,
+): string | null | undefined {
+  const matchingSpaceIds: Array<string | null> = [];
+  for (const group of groups) {
+    if (group.rows.some((row) => row.key === contentKey)) {
+      matchingSpaceIds.push(normalizeSpaceId(group.spaceId) ?? null);
+    }
+  }
+  if (matchingSpaceIds.length === 0) return undefined;
+  if (matchingSpaceIds.length === 1) return matchingSpaceIds[0];
+  const normalizedCurrent = normalizeSpaceId(currentSpaceId) ?? null;
+  if (normalizedCurrent !== null && matchingSpaceIds.includes(normalizedCurrent)) {
+    return normalizedCurrent;
+  }
+  const normalizedPreferred =
+    preferredSpaceId === undefined
+      ? undefined
+      : normalizeSpaceId(preferredSpaceId) ?? null;
+  if (
+    normalizedPreferred !== undefined &&
+    matchingSpaceIds.includes(normalizedPreferred)
+  ) {
+    return normalizedPreferred;
+  }
+  return matchingSpaceIds[0];
+}
+
 /** Directory membership is independent of an object's owning spaceId. A directory
  * summary is a read-only link, never proof of access to the referenced object. */
 export function projectWorkSpaceDirectories(
@@ -184,9 +315,21 @@ export function projectWorkSpaceDirectories(
   include: (row: WorkDialogFlatRow) => boolean = () => true,
 ): WorkDialogSpaceGroup[] {
   const names = new Map([...records].flatMap(([id, record]) => record.name?.trim() ? [[id, record.name.trim()] as const] : []));
-  const fallback = groupWorkDialogsBySpace(rows.filter(include), currentSpaceId, memberships, names, labels);
-  const result = fallback.filter(group => !group.spaceId || group.spaceId === OTHER_SPACES_GROUP);
   const byKey = new Map(rows.map(row => [row.key, row]));
+  const claimedKeys = collectClaimedDirectoryKeys(memberships, records, byKey);
+  const fallback = groupWorkDialogsBySpace(rows.filter(include), currentSpaceId, memberships, names, labels);
+  const result = fallback.flatMap(group => {
+    if (!group.spaceId || group.spaceId === OTHER_SPACES_GROUP) {
+      const unclaimedRows = group.rows.filter(row => !claimedKeys.has(row.key));
+      if (unclaimedRows.length === 0) return [];
+      return [{
+        ...group,
+        rows: unclaimedRows,
+        updatedAt: Math.max(0, ...unclaimedRows.map(row => row.updatedAt)),
+      }];
+    }
+    return [];
+  });
   for (const member of memberships) {
     const id = normalizeSpaceId(member.spaceId);
     if (!id) continue;

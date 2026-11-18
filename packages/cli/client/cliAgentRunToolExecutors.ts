@@ -1,9 +1,10 @@
+import { prepareWorkspaceIsolation, rollbackWorkspaceIsolation, type WorkspaceIsolation } from "./workspaceIsolation";
 import { type McpApprovalHost } from "../mcp/mcpApprovalTransport";
 import { validateChildImagePaths, validateChildImages } from "./childRunImages";
 import { assertDispatchSelectionAdmission } from "../../ai/agent/dispatchSelectionPolicy";
 import { parseAgentRunArgs } from "../agentRunArgs";
 import { parseUserIdFromAuthToken, resolveAuthToken, resolveServerUrl } from "../cliEnvHelpers";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { normalizeContinueDialogId, resolveRunContextFacts } from "../../ai/tools/agent/continueDialogId";
 import type { ShellApprovalHost } from "./originShellApprovalTransport";
@@ -61,6 +62,7 @@ import {
   listRunRecords,
   resolveRunsDir,
   spawnLocalBackgroundRun,
+  defaultGenerateRunId,
   resolveLocalContinuation,
   localWriterRecovery,
   revokePreparedWriterLaunch,
@@ -119,6 +121,8 @@ export type CliAgentRunToolExecutorDeps = {
   cliEntrypoint?: string;
   /** run 的工作目录；缺省用 process.cwd()。 */
   cwd?: string;
+  prepareIsolation?: typeof prepareWorkspaceIsolation;
+  rollbackIsolation?: typeof rollbackWorkspaceIsolation;
   /** T todo 存储适配；缺省惰性建文件实现。 */
   todoStore?: AgentRunTodoStore;
   /** 时钟（epoch ms）；缺省 Date.now()。共享层禁止取，适配层允许。 */
@@ -558,10 +562,10 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       : undefined;
 
     let memoryPlacementNote: string | undefined;
-    let effectiveRuntimeKey = args.runtimeKey;
+    let effectiveRuntimeKey = args.workspaceIsolation === "auto" && args.readOnly !== true && !args.runtimeKey?.trim() ? "local" : args.runtimeKey;
 
     const autoPlacement = await evaluateAutoInstaboxPlacement({
-      runtimeKey: args.runtimeKey,
+      runtimeKey: effectiveRuntimeKey,
       cwd: args.cwd,
       readOnly: args.readOnly === true,
       env: deps.env,
@@ -595,6 +599,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       ...(bindingMachineId ? { bindingMachineId } : {}),
       ...(localMachineId ? { localMachineId } : {}),
     });
+    if (args.workspaceIsolation !== undefined && args.workspaceIsolation !== "none" && args.workspaceIsolation !== "auto") throw new Error("workspaceIsolation 必须为 none 或 auto");
+    if (args.workspaceIsolation === "auto" && args.readOnly !== true && dispatch.target !== "host") throw new Error("workspaceIsolation:auto 只支持本地 CLI 宿主写型任务，沙盒不能兑现宿主目录隔离");
     const task = typeof args.task === "string" ? args.task.trim() : "";
     const runTitle = normalizeRunTitle(args.title);
     if (!agentKey) throw new Error(t("agentRunTool.missingAgentKey"));
@@ -730,7 +736,21 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
 
     // typed review dispatch 校验已随 hostReviewDispatch 移除（2026-11-15）。
     const childPolicy = parseAgentRunArgs(rawArgs, { readTextFile: () => message });
-    const { runId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
+    const isolationEnabled = args.workspaceIsolation === "auto" && !isReadOnlyTask;
+    // Allocate early only when preparation needs the ID. Otherwise leave the default
+    // spawn path (including its generator and allocation timing) untouched.
+    const isolationRunId = isolationEnabled ? (deps.generateRunId ?? defaultGenerateRunId)() : undefined;
+    const baseCwd = requestedCwd ?? deps.cwd ?? process.cwd();
+    const workspaceIsolation: WorkspaceIsolation = isolationEnabled
+      ? (deps.prepareIsolation ?? prepareWorkspaceIsolation)({
+          baseCwd, runId: isolationRunId!, mode: "auto",
+          noloHome: dirname(resolveRunsDir(deps.env, deps.homedir)),
+        })
+      : { mode: args.workspaceIsolation ?? "none", kind: "none" as const, effectiveCwd: baseCwd };
+    let spawned: Awaited<ReturnType<typeof spawnLocalBackgroundRun>>;
+    try {
+      spawned = await spawnLocalBackgroundRun(
+
       {
         selectionCheck,
         ...(evidenceScope ? { evidenceScope } : {}),
@@ -750,7 +770,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         // 看到另一边在跑（dock 按 dialogId 也能匹配到这条 run）。
         ...(continueDialogId ? { dialogId: continueDialogId } : {}),
         ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
-        cwd: requestedCwd ?? deps.cwd ?? process.cwd(),
+        cwd: workspaceIsolation.effectiveCwd,
         ...(dispatch.runtimeKey === "local" && !isReadOnlyTask ? { claimLocalWrites: true } : {}),
         ...(dispatch.target === "host" ? { localExecution: {
           runtimeKey: "local" as const, hostWritesAuthorized: args.allowHostWrites === true,
@@ -763,13 +783,19 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(args.ephemeral === true ? { ephemeral: true } : {}),
         output: noopOutput,
       },
-      { ...deps, mcpApprovalHost: deps.mcpApprovalHostForAgent ? await deps.mcpApprovalHostForAgent(agentKey) : deps.mcpApprovalHost, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
+      { ...deps, ...(isolationRunId !== undefined ? { generateRunId: () => isolationRunId } : {}), mcpApprovalHost: deps.mcpApprovalHostForAgent ? await deps.mcpApprovalHostForAgent(agentKey) : deps.mcpApprovalHost, shellApprovalHost: deps.shellApprovalHostForAgent ? await deps.shellApprovalHostForAgent(agentKey) : deps.shellApprovalHost },
     );
 
     // hostReviewDispatch 绑定已移除（2026-11-15）：typed review 派发整体下线。
 
     // title 走卡片自己的参数，不进 label：它是显示行不是名字，进了 label 会
     // 把 key 顶掉、又让 identity 行与 title 行重复。
+    } catch (error) {
+      try { if (isolationEnabled) (deps.rollbackIsolation ?? rollbackWorkspaceIsolation)(workspaceIsolation); }
+      catch (cleanupError) { throw new AggregateError([error, cleanupError], `启动失败；隔离目录保留待处理: ${workspaceIsolation.root}`); }
+      throw error;
+    }
+    const { runId, batchId: resolvedBatchId } = spawned;
     const displayName = resolveRunLabel({ agentName, agentKey, runId });
     const labels = agentRunCardLabels();
     // Same reason as the server-side executor: without the task text two
@@ -819,6 +845,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         agentKey,
         status: "running",
         selectionCheck,
+        ...(args.workspaceIsolation !== undefined ? { workspaceIsolation } : {}),
         ...contextFacts,
         ...continuationEvidence,
         // batchId is always returned so the caller can later filter by it —
@@ -1169,7 +1196,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     }
 
     if (action === "append") {
-      if (["runtimeKey", "allowHostWrites", "readOnly", "allowedToolNames", "blockedToolNames", "cwd"].some(key => args[key] !== undefined)) {
+      if (["runtimeKey", "allowHostWrites", "readOnly", "allowedToolNames", "blockedToolNames", "cwd", "workspaceIsolation"].some(key => args[key] !== undefined)) {
         throw new Error("[local-continuation] scope overrides are not supported; dispatch a fresh authorized run");
       }
       const dialogKeyArg = typeof args.dialogKey === "string" ? args.dialogKey.trim() : "";

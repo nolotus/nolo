@@ -9,10 +9,6 @@ import type { CliFetchImpl } from "./cliFetch";
 import { detectMachineInfo } from "connector-experimental/machineInfo";
 import { DEFAULT_NOLO_SERVER_URL } from "./defaultServer";
 import {
-  type HeartbeatLoopOptions,
-  runHeartbeatLoop as defaultRunHeartbeatLoop,
-} from "connector-experimental/heartbeatLoop";
-import {
   buildMachinePermissionPromptBlock,
   resolveMachineRunPermissionPolicy,
 } from "../ai/agent/machineRunPermissions";
@@ -31,8 +27,6 @@ import {
   checkConnectorWorkspaceLinks,
   runMachineDaemonCommand,
 } from "./machineDaemonCommands";
-import { runMachineHeartbeatConnectCommand } from "./machineHeartbeatCommands";
-import { runMachineWatchCommand } from "./machineWatchCommands";
 import {
   handleConnectorRunMessage,
   type LocalCliExecutor,
@@ -43,8 +37,10 @@ import {
 } from "./machineToolInvokeDispatch";
 import {
   defaultConnectWebSocket,
+  runHeartbeatLoop as defaultRunHeartbeatLoop,
   runMachineWsSession,
   type ConnectorWebSocketOptions,
+  type HeartbeatLoopOptions,
 } from "./machineWsSession";
 export {
   formatMachineStatus,
@@ -340,54 +336,18 @@ function detectLaunchableMachineInfo() {
   return detectMachineInfo({ probeLaunchable: true });
 }
 
-function findTaskRowSubjectRef(runtimeContext: any) {
-  const subjectRefs = Array.isArray(runtimeContext?.subjectRefs) ? runtimeContext.subjectRefs : [];
-  for (const ref of subjectRefs) {
-    if (!isRecord(ref)) continue;
-    if (ref.kind !== "table-row") continue;
-    const id = asTrimmedString(ref.id);
-    if (id) return id;
-  }
-  return "";
-}
-
-function buildTaskEvidencePrompt(args: {
-  agentKey: string;
-  agentConfig: any;
-  runtimeContext: any;
-}) {
-  const rowDbKey = findTaskRowSubjectRef(args.runtimeContext);
-  if (!rowDbKey) return "";
-  return [
-    "--- Nolo task evidence context ---",
-    "This CLI runtime does not receive server-side function tools directly.",
-    "Use the task row subjectRef and linked dialog evidence as durable task evidence.",
-    "Run commands from the repository root. The runner already provides server URL and auth in the environment.",
-    "Release boundary: after review passes, AI/reviewer/Codex may advance alpha for verification. Do not merge, push, or release main/release unless the human owner explicitly authorizes it in the current request.",
-    "Handoff context: query dialog.subjectRefs first, then inspect dialog checkpoints, artifacts, commits, and test evidence. Treat row activityRefs/latestActivityRef as cache hints, not state truth.",
-    "Reviewer autonomy: if you are reviewing and find a concrete fix, you may directly dispatch the rework agent/dialog instead of sending the task back to PM first.",
-    "Rework evidence rule: every implementation, review, and rework dialog must preserve the same table-row subjectRef and report any child/rework dialog id it starts.",
-    `Read task row: bun packages/cli/index.ts table query --table meta-0e95801d90-01KWSK4Q4TESXQ06SW39JN2TTJ --row ${JSON.stringify(rowDbKey)} --include-activity --output json`,
-    `Query linked dialogs: bun packages/cli/index.ts dialog query --row-dbkey ${JSON.stringify(rowDbKey)} --json`,
-    "If this run already has a dialog id, exclude it from evidence queries: bun packages/cli/index.ts dialog query --row-dbkey <rowDbKey> --exclude-dialog <currentDialogId> --json",
-    "Then read exact dialog traces with: bun packages/cli/index.ts dialog read <dialogId>",
-    "Reviewers must end with exactly one line: Review decision: approved | needs_changes | blocked",
-    "Report progress, blockers, worktree, branch, commit/diff, tests, and unverified items in the dialog.",
-  ].join("\n");
-}
-
-function buildConnectorCliPrompt(agentConfig: any, userInput: string, bridgeArgs?: {
-  agentKey: string;
-  runtimeContext: any;
-}, permissionPolicy?: ReturnType<typeof resolveMachineRunPermissionPolicy>) {
+function buildConnectorCliPrompt(
+  agentConfig: any,
+  userInput: string,
+  _bridgeArgs?: {
+    agentKey: string;
+    runtimeContext: any;
+  },
+  permissionPolicy?: ReturnType<typeof resolveMachineRunPermissionPolicy>
+) {
   const policy = permissionPolicy ?? resolveMachineRunPermissionPolicy(agentConfig);
   return [
     asTrimmedString(agentConfig?.prompt),
-    bridgeArgs ? buildTaskEvidencePrompt({
-      agentKey: bridgeArgs.agentKey,
-      agentConfig,
-      runtimeContext: bridgeArgs.runtimeContext,
-    }) : "",
     buildMachinePermissionPromptBlock(policy),
     `--- User task ---\n${userInput}`,
   ].filter(Boolean).join("\n\n");
@@ -399,6 +359,13 @@ export async function runMachineConnectCommand(
 ) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
+  if (hasFlag(args, "--watch")) {
+    output.write(
+      "[nolo] `nolo connect --watch` has been removed; `nolo connect` now uses WebSocket by default.\n"
+    );
+    return 1;
+  }
+
   const authToken = resolveConnectAuthToken(args, env);
   if (!authToken) {
     writeAuthMissing(output);
@@ -430,47 +397,48 @@ export async function runMachineConnectCommand(
       timeoutMs: resolveConnectorHeartbeatTimeoutMs(env),
     });
 
-  if (hasFlag(args, "--ws")) {
-    const validateWorkspaceLinks = deps.validateWorkspaceLinks ?? (() => []);
-    if (!(await checkConnectorWorkspaceLinks(process.cwd(), output, validateWorkspaceLinks))) {
-      return 1;
-    }
-    // 单实例互斥（2026-10-27 事故）：同一台机器同时只允许一个 connector。锁用
-    // O_EXCL 原子创建，两个进程同时起只有一个能拿到；已有存活实例时直接拒绝
-    // 启动并打印它的 pid——避免两进程互相把对方的 WS 连接踢下线。
-    const instanceLock = acquireConnectorInstanceLock({
-      machineId,
-      homeDir: deps.connectorHomeDir,
-      noloHome: env.NOLO_HOME,
-      kind: "ws",
-    });
-    if (!instanceLock.ok) {
-      // pid=0 = 锁文件读不出有效 pid：要么另一个 connector 正在启动（写锁内容的窗口
-      // 里，文件还是 0 字节），要么锁文件损坏。两种情况都必须 fail-closed：拒绝启动。
-      const owner = instanceLock.pid > 0 ? `pid=${instanceLock.pid}` : "owner pid unknown";
-      output.write(
-        `[nolo] A connector for this machine is already running (${owner}). ` +
-          `Do not start two connectors at the same time — stop the running one first ` +
-          `(or check whether it is still healthy) before starting a new one.\n`
-      );
-      return 3;
-    }
-    if (instanceLock.reclaimed === "corrupt") {
-      // 接管了一个「读不出有效 pid 且已过期」的坏锁：这通常来自上一次 connector 在写
-      // 锁内容的途中崩溃。留一行日志，便于事后判断是不是反复发生。
-      output.write(
-        `[nolo] Reclaimed a corrupt connector lock (no readable pid, older than ` +
-          `${CONNECTOR_LOCK_CORRUPT_RECLAIM_SECONDS}s) — a previous connector likely ` +
-          `crashed while writing it.\n`
-      );
-    }
-    // 心跳成功才更新存活信号（给外部观察者用的 epoch 时间戳）。
-    const sendHeartbeat = withConnectorAliveSignal(sendHeartbeatBase, {
-      machineId,
-      homeDir: deps.connectorHomeDir,
-      noloHome: env.NOLO_HOME,
-    });
-    try {
+  // `--ws` kept as a backward-compatible no-op flag; `nolo connect` now always uses WebSocket.
+  void hasFlag(args, "--ws");
+  const validateWorkspaceLinks = deps.validateWorkspaceLinks ?? (() => []);
+  if (!(await checkConnectorWorkspaceLinks(process.cwd(), output, validateWorkspaceLinks))) {
+    return 1;
+  }
+  // 单实例互斥（2026-10-27 事故）：同一台机器同时只允许一个 connector。锁用
+  // O_EXCL 原子创建，两个进程同时起只有一个能拿到；已有存活实例时直接拒绝
+  // 启动并打印它的 pid——避免两进程互相把对方的 WS 连接踢下线。
+  const instanceLock = acquireConnectorInstanceLock({
+    machineId,
+    homeDir: deps.connectorHomeDir,
+    noloHome: env.NOLO_HOME,
+    kind: "ws",
+  });
+  if (!instanceLock.ok) {
+    // pid=0 = 锁文件读不出有效 pid：要么另一个 connector 正在启动（写锁内容的窗口
+    // 里，文件还是 0 字节），要么锁文件损坏。两种情况都必须 fail-closed：拒绝启动。
+    const owner = instanceLock.pid > 0 ? `pid=${instanceLock.pid}` : "owner pid unknown";
+    output.write(
+      `[nolo] A connector for this machine is already running (${owner}). ` +
+        `Do not start two connectors at the same time — stop the running one first ` +
+        `(or check whether it is still healthy) before starting a new one.\n`
+    );
+    return 3;
+  }
+  if (instanceLock.reclaimed === "corrupt") {
+    // 接管了一个「读不出有效 pid 且已过期」的坏锁：这通常来自上一次 connector 在写
+    // 锁内容的途中崩溃。留一行日志，便于事后判断是不是反复发生。
+    output.write(
+      `[nolo] Reclaimed a corrupt connector lock (no readable pid, older than ` +
+        `${CONNECTOR_LOCK_CORRUPT_RECLAIM_SECONDS}s) — a previous connector likely ` +
+        `crashed while writing it.\n`
+    );
+  }
+  // 心跳成功才更新存活信号（给外部观察者用的 epoch 时间戳）。
+  const sendHeartbeat = withConnectorAliveSignal(sendHeartbeatBase, {
+    machineId,
+    homeDir: deps.connectorHomeDir,
+    noloHome: env.NOLO_HOME,
+  });
+  try {
       const maxAttempts = deps.maxConnectorAttempts ?? Infinity;
       const sleep = deps.sleep ?? defaultSleep;
       const reconnectDelayMs = resolveConnectorReconnectDelayMs(env);
@@ -560,30 +528,13 @@ export async function runMachineConnectCommand(
       await sleepWithAbort(retryDelayMs, sleep, deps.signal);
     }
     return 0;
-    } finally {
-      instanceLock.release();
-      clearConnectorAlive({
-        machineId,
-        homeDir: deps.connectorHomeDir,
-        noloHome: env.NOLO_HOME,
-      });
-    }
-  }
-
-  if (hasFlag(args, "--watch")) {
-    return runMachineWatchCommand({
-      env,
-      output,
-      machine,
-      sendHeartbeat: sendHeartbeatBase,
-      runHeartbeatLoop: deps.runHeartbeatLoop ?? defaultRunHeartbeatLoop,
+  } finally {
+    instanceLock.release();
+    clearConnectorAlive({
+      machineId,
+      homeDir: deps.connectorHomeDir,
+      noloHome: env.NOLO_HOME,
     });
   }
-
-  return runMachineHeartbeatConnectCommand({
-    output,
-    machine,
-    sendHeartbeat: sendHeartbeatBase,
-  });
 }
 

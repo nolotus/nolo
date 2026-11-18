@@ -1,7 +1,6 @@
 import { toErrorMessage } from "core/errorMessage";
 import { parsePositiveFiniteNumberOrFallback } from "core/positiveFiniteNumberOrFallback";
 import { CORE_DRAIN_REASON } from "core/drainReason";
-import type { HeartbeatLoopOptions } from "connector-experimental/heartbeatLoop";
 import type { MachineHeartbeat } from "connector-experimental/protocol";
 import {
   clampConnectorTimerDelayMs,
@@ -9,6 +8,30 @@ import {
   isConnectorWebSocketRetryableError,
   resolveConnectorProbeTimeoutMs,
 } from "./connectorWebSocketTarget";
+
+export type HeartbeatLoopOptions = {
+  intervalMs: number;
+  sendHeartbeat: () => Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
+  signal?: AbortSignal;
+  maxBeats?: number;
+};
+
+const defaultHeartbeatSleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export async function runHeartbeatLoop(options: HeartbeatLoopOptions): Promise<void> {
+  const sleep = options.sleep ?? defaultHeartbeatSleep;
+  let beats = 0;
+
+  while (!options.signal?.aborted) {
+    await options.sendHeartbeat();
+    beats += 1;
+    if (options.maxBeats && beats >= options.maxBeats) return;
+    if (options.signal?.aborted) return;
+    await sleep(options.intervalMs);
+  }
+}
 
 type EnvLike = Record<string, string | undefined>;
 type OutputLike = { write(chunk: string): unknown };

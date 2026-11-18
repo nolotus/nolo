@@ -54,6 +54,8 @@ export const TASK_WAIT_MAX_TIMEOUT_MS = 5 * 60_000;
 export const TASK_WAIT_POLL_INTERVAL_MS = 250;
 /** Grace window between SIGTERM and the SIGKILL fallback in taskStop. */
 export const TASK_STOP_GRACE_MS = 2_000;
+/** Poll cadence while waiting for a SIGTERM'd process group to exit in taskStop. */
+export const TASK_STOP_POLL_INTERVAL_MS = 40;
 
 /** Structural view of ProcessRegistry used by the four tools (test seams). */
 export type TaskToolsRegistry = {
@@ -541,9 +543,18 @@ export async function runTaskStop(args: {
     };
   }
 
-  if (graceMs > 0) await sleep(graceMs);
+  let alive = isProcessGroupAlive(record.pgid, kill);
+  if (alive && graceMs > 0) {
+    let remaining = graceMs;
+    while (remaining > 0 && alive) {
+      const step = Math.min(TASK_STOP_POLL_INTERVAL_MS, remaining);
+      await sleep(step);
+      remaining -= step;
+      alive = isProcessGroupAlive(record.pgid, kill);
+    }
+  }
 
-  if (!isProcessGroupAlive(record.pgid, kill)) {
+  if (!alive) {
     return {
       outcome: "stopped",
       taskId,

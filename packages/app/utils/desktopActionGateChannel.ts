@@ -73,18 +73,20 @@ export function targetForRunKind(
   kind: ActionGateRunKind,
   ctx: { server?: string | null; token?: string | null } = {},
 ): ActionGateSubmitTarget {
-  if (
-    kind === "server-run" &&
-    typeof ctx.server === "string" &&
-    ctx.server.length > 0
-  ) {
-    return { kind: "web", server: ctx.server, token: ctx.token ?? null };
+  if (kind === "server-run") {
+    return {
+      kind: "web",
+      server: ctx.server?.trim() ?? "",
+      token: ctx.token ?? null,
+    };
   }
   return { kind: "desktop" };
 }
 
 /** Terminal failure message when no token is available for the web target. */
 export const NEEDS_LOGIN_MESSAGE = "需要登录后才能处理该授权请求";
+/** Terminal failure message when no server address is available for the web target. */
+export const MISSING_SERVER_MESSAGE = "未配置服务器地址，无法处理该授权请求";
 
 /** Serializable snapshot handed to the UI: gates without any resolved value. */
 export type DesktopActionGateSnapshot = {
@@ -127,14 +129,15 @@ export function pushGate(
 ): void {
   if (!gate || typeof gate.id !== "string" || gate.id.length === 0) return;
   failures.delete(gate.id);
-  if (target.kind === "web" && !target.token) {
-    if (meta) failures.set(gate.id, { gateId: gate.id, meta: { ...meta, storage: "web" }, message: NEEDS_LOGIN_MESSAGE });
-    // 登录缺失：该 gate 直接按终态失败处理——不进入待决表（面板不会卡住），
+  if (target.kind === "web" && (!target.token || !target.server.trim())) {
+    const message = !target.token ? NEEDS_LOGIN_MESSAGE : MISSING_SERVER_MESSAGE;
+    if (meta) failures.set(gate.id, { gateId: gate.id, meta: { ...meta, storage: "web" }, message });
+    // 登录或服务器地址缺失：该 gate 直接按终态失败处理——不进入待决表（面板不会卡住），
     // 错误信息留给面板短暂显示。
     gates.delete(gate.id);
     targets.delete(gate.id);
     metadata.delete(gate.id);
-    errors.set(gate.id, NEEDS_LOGIN_MESSAGE);
+    errors.set(gate.id, message);
     invalidateSnapshot();
     notify();
     return;
@@ -205,6 +208,7 @@ export async function resolveGate(
 ): Promise<boolean> {
   // A terminal anchor is informational, never a pending approval or a fallback desktop POST.
   if (failures.has(gateId)) return false;
+  if (!targetOverride && !gates.has(gateId)) return false;
   const target = targetOverride ?? targets.get(gateId) ?? { kind: "desktop" };
 
   if (target.kind === "local") {
@@ -232,8 +236,9 @@ export async function resolveGate(
   }
 
   const isWeb = target.kind === "web";
+  const trimmedServer = isWeb ? target.server.trim().replace(/\/+$/, "") : "";
   const url = isWeb
-    ? `${target.server.replace(/\/+$/, "")}/api/agent/secret-request/${encodeURIComponent(gateId)}`
+    ? `${trimmedServer}/api/agent/secret-request/${encodeURIComponent(gateId)}`
     : `/api/desktop/agent-runtime/action-gate/${encodeURIComponent(gateId)}`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   // Authorization 头只出现在 web 目标的请求上（桌面目标走同源无鉴权通道）。
@@ -248,8 +253,8 @@ export async function resolveGate(
     notify();
     return false;
   };
-  if (isWeb && !target.token) {
-    return failTerminal(NEEDS_LOGIN_MESSAGE);
+  if (isWeb && (!target.token || !trimmedServer)) {
+    return failTerminal(!target.token ? NEEDS_LOGIN_MESSAGE : MISSING_SERVER_MESSAGE);
   }
   try {
     const response = await fetchImpl(

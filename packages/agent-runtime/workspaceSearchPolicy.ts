@@ -1,0 +1,20 @@
+// Shared infrastructure/build exclusions for workspace text search, including Docker.
+export const ALWAYS_EXCLUDED_GLOBS: readonly string[] = [
+  ".git/**",
+  ".nolo/**",
+  "node_modules/**",
+  "*.tsbuildinfo",
+  "dist/**",
+  "build/**",
+  "out/**",
+  "coverage/**",
+  ".next/**",
+  ".turbo/**",
+  "public/assets/**",
+  "*.min.js",
+  "*.min.css",
+  "*.map",
+  "*.lock",
+  "bun.lockb",
+  "*.ldb",
+];

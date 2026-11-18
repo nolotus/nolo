@@ -32,7 +32,7 @@
         "echarts": "^6.1.0",
         "echarts-for-react": "^3.0.2",
         "effect": "4.1.1",
-        "electrobun": "2.0.4",
+        "electrobun": "2.0.5",
         "events": "^3.3.0",
         "fast-xml-parser": "^5.9.0",
         "i18next": "^23.11.5",
@@ -201,7 +201,7 @@
     },
     "packages/cli": {
       "name": "nolo-cli",
-      "version": "0.225.0",
+      "version": "0.226.0",
       "bin": {
         "nolo": "index.js",
       },
@@ -280,9 +280,9 @@
     },
     "packages/desktop": {
       "name": "desktop",
-      "version": "0.242.0",
+      "version": "0.243.0",
       "dependencies": {
-        "electrobun": "^2.0.1",
+        "electrobun": "2.0.5",
         "rcedit": "^5.0.2",
       },
     },
@@ -2031,7 +2031,7 @@
 
     "effect": ["effect@4.1.1", "", {}, "sha512-XYu65BrcmNqu5i7PPvP4dqL+R5ma37zIsfuSPjcn78mog+6e5PkilNg7Xo+pBpjXJYlWEIpH4j91tMrfW05CMw=="],
 
-    "electrobun": ["electrobun@2.0.4", "", { "bin": { "electrobun": "bin/electrobun.cjs" } }, "sha512-xuH4sE9A9eySgOjF+9mi9WuTv+Sa05cYY6eU5A4Rkkfek2zd59kzhWvwrb9xfJN4VPL+zM4FyTvFoH8j00DLMw=="],
+    "electrobun": ["electrobun@2.0.5", "", { "bin": { "electrobun": "bin/electrobun.cjs" } }, "sha512-/4Vp0p6LgdD7bySSblnoqM0rtcQT5uYsGeqZPhsOESeSxMGeiKsfQkBjNwMnjFI5z4StJKXfs386ay2mpif1BA=="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.489", "", {}, "sha512-1cF87WItryk9lj5wg5SLsNegUihdkcHuOfrANPpO02y/d2krm1Oc3GjA9KBwlT5o145FTa1bbjdLc7pZnvtnYQ=="],
 
@@ -2469,7 +2469,7 @@
 
     "jose": ["jose@6.2.17", "", {}, "sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg=="],
 
-    "js-base64": ["js-base64@3.9.6", "", {}, "sha512-LjkzbLtU6Lx6fjXMYGEACEB7rdtqZtxkBe9aS1ZpDNUyWgUivw3yBEIhQ37OVygJYRt+C+9e9fVT8PpFzH2Hww=="],
+    "js-base64": ["js-base64@3.9.7", "", {}, "sha512-UT2XYOCbXOXYoymbytretRDFnb6E6vYPqC1blehA/alnG6vRC0mNTQ6ijXYAPtiCG9o1FDNJXJvQtCwbChFDRQ=="],
 
     "js-cookie": ["js-cookie@3.0.8", "", {}, "sha512-yeJd4aNAdYZQjaon2bpD/Gb0B/omw7HQOsynXXcOiWVCacbBcPlgn8S/d1X6blFSaHao7ozqtW7NZW19xpCtIw=="],
 
@@ -3763,7 +3763,7 @@
 
     "@lobehub/ui/katex": ["katex@0.18.10", "", { "dependencies": { "commander": "^15.0.0" }, "bin": { "katex": "cli.js" } }, "sha512-/B6p9eY9DX7aHBfpkHdpirDTZ5QH9xTwL9y837PWuzuv41O5jFdqNQwVQEQsimY0/iVNkwBY4+4hMfhQ7d4Dbw=="],
 
-    "@lobehub/ui/lucide-react": ["lucide-react@1.74.0", "", { "peerDependencies": { "@types/react": "*", "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" }, "optionalPeers": ["@types/react"] }, "sha512-A1doIs/1fj1WnPbtIT7WRiM6Kvw5NUg+BtkoOh3Shpr4obwSDVt6WxCEcNH56EWprzuCoKle1OF0RqIkojwL1A=="],
+    "@lobehub/ui/lucide-react": ["lucide-react@1.75.0", "", { "peerDependencies": { "@types/react": "*", "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" }, "optionalPeers": ["@types/react"] }, "sha512-piesXAZIXru9d5lHBoM6cPHOBs5+QkMx+3EXwG3xWJ7qdViuz92JtYN0u9jMB6jt+2WbQrwhvJGdMwGnL3EOfA=="],
 
     "@lobehub/ui/marked": ["marked@18.2.1", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-ii4bxCTCqqwpT86XZWgJNs+ZnAIZksmLGYMViWA7PDIXYIeNo1x6cDdX3JOip9NM/cI6p8z57FxliACboTruMA=="],
 

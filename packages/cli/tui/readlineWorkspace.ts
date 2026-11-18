@@ -113,6 +113,7 @@ import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import { emitTerminalProgramStatus, type TerminalProgramStatusReport } from "../client/terminalProgramStatus";
 import { isAgentRunTerminalStatus } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import {
+  type TuiBrightness,
   themeColorSequence,
   themeText,
   resolveTuiThemeMode,
@@ -120,7 +121,7 @@ import {
   resetWorkspaceThemeState,
   applyDetectedBackground,
 } from "./theme";
-import { detectTerminalBackground } from "./detectBackground";
+import { detectTerminalBackground, OSC11_QUERY } from "./detectBackground";
 import {
   clearCollapsedPasteStore,
   createCollapsedPasteStore,
@@ -668,6 +669,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     preserveInput: true,
   });
   if (detected) applyDetectedBackground(detected);
+  let sawOsc11Reply = Boolean(detected?.hex);
 
   // Paint the welcome banner, then animate it AFTER the composer mounts.
   // The old 15-frame loop blocked composer setup for ~1.5s and rewound the
@@ -2102,7 +2104,20 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const { marginLeft } = resolveHistoryLayoutGeometry(cols);
       return marginLeft > 0 ? " ".repeat(marginLeft) : "";
     };
+    const autoThemeEnabled =
+      Boolean((output as { isTTY?: boolean }).isTTY) &&
+      (effectiveEnv.NOLO_TUI_AUTO_THEME ?? "") !== "0" &&
+      resolveCliColorEnabled();
+    let composerHasPendingInput = () => false;
+    let autoThemeTimer: ReturnType<typeof setInterval> | null = null;
+    const requestTerminalBackgroundQuery = () => {
+      if (!autoThemeEnabled || sessionEnded || done) return;
+      if (!fixedInput.active || fixedInput.isPaused() || dialogHost.isKeyboardClaimed()) return;
+      if (composerHasPendingInput()) return;
+      output.write(OSC11_QUERY);
+    };
     const baseFixedInput = createFixedInput(output, {
+      autoThemeNotifications: autoThemeEnabled,
       getStatusLine: (maxWidth) => {
         // 排队的消息已经由 composer 上方的队列 UI（getQueueLines）逐条呈现，
         // 状态栏不再重复一个「N 排队」计数——那是同一件事的第二份、更差的展示。
@@ -2183,17 +2198,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     });
     fixedInput = {
       ...baseFixedInput,
-      repaint(draft, cursorPos) {
+      repaint(draft, cursorPos, force) {
         syncWindowTitle();
-        return baseFixedInput.repaint(draft, cursorPos);
+        return baseFixedInput.repaint(draft, cursorPos, force);
       },
       resumeFromDialog() {
         baseFixedInput.resumeFromDialog();
-        setImmediate(() => { void runWakeHandler?.resumeAfterInputPause().catch(() => {}); });
+        setImmediate(() => {
+          if (sawOsc11Reply) requestTerminalBackgroundQuery();
+          void runWakeHandler?.resumeAfterInputPause().catch(() => {});
+        });
       },
       resumeFromSubprocess() {
         baseFixedInput.resumeFromSubprocess();
-        setImmediate(() => { void runWakeHandler?.resumeAfterInputPause().catch(() => {}); });
+        setImmediate(() => {
+          if (sawOsc11Reply) requestTerminalBackgroundQuery();
+          void runWakeHandler?.resumeAfterInputPause().catch(() => {});
+        });
       },
       pause() {
         clearSelection();
@@ -2201,14 +2222,31 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       },
     };
     fixedInput.init();
-    const paintFrame = (draft: string) => {
+    const paintFrame = (draft: string, forceComposer = false) => {
       output.write("\x1b[?2026h\x1b[?25l");
       try {
         renderHistoryToOutput();
-        fixedInput.repaint(draft, cursorPos);
+        fixedInput.repaint(draft, cursorPos, forceComposer);
       } finally {
         output.write("\x1b[?25h\x1b[?2026l");
       }
+    };
+    const applyLiveTerminalBackground = (bg: { brightness: TuiBrightness; hex: string }) => {
+      if (sessionEnded || done) return;
+      if (!applyDetectedBackground(bg)) return;
+      if (fixedInput.isPaused()) {
+        if (!isRendererSuspended(output)) {
+          paintSyncedModal();
+        }
+        return;
+      }
+      flushPendingRender();
+      if (history.turns.length === 0 && history.currentRole === null) {
+        repaintBanner();
+        if (fixedInput.active) fixedInput.repaint(buffer, cursorPos, true);
+        return;
+      }
+      paintFrame(buffer, true);
     };
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const performResizePaint = () => {
@@ -2267,6 +2305,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (resizeTimer !== null) {
         clearTimeout(resizeTimer);
         resizeTimer = null;
+      }
+      if (autoThemeTimer !== null) {
+        clearInterval(autoThemeTimer);
+        autoThemeTimer = null;
       }
       clearSelectionCopyFeedback();
       clearSelection();
@@ -3721,9 +3763,37 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       cursorPos = result.cursorPos ?? buffer.length;
       fixedInput.repaint(buffer, cursorPos);
     };
-    const onData = createRawInputDecoder((token) => {
-      void handleInputToken(token);
-    });
+    const rawPollMs = Number.parseInt(effectiveEnv.NOLO_TUI_AUTO_THEME_POLL_MS ?? "", 10);
+    const autoThemePollMs = Number.isFinite(rawPollMs) && rawPollMs >= 50 ? rawPollMs : 5_000;
+    const startOsc11AutoThemePoll = () => {
+      if (!autoThemeEnabled || autoThemeTimer !== null) return;
+      autoThemeTimer = setInterval(requestTerminalBackgroundQuery, autoThemePollMs);
+      autoThemeTimer.unref?.();
+    };
+    const onData = createRawInputDecoder(
+      (token) => {
+        void handleInputToken(token);
+      },
+      {
+        onOsc11Background: (bg) => {
+          sawOsc11Reply = true;
+          startOsc11AutoThemePoll();
+          applyLiveTerminalBackground(bg);
+        },
+        onColorSchemeReport: (scheme) => {
+          if (!sawOsc11Reply) {
+            applyLiveTerminalBackground({ brightness: scheme, hex: "" });
+          }
+          if (!sessionEnded && !done && fixedInput.active && !fixedInput.isPaused()) {
+            output.write(OSC11_QUERY);
+          }
+        },
+      },
+    );
+    composerHasPendingInput = () => onData.hasPendingInput();
+    if (sawOsc11Reply) {
+      startOsc11AutoThemePoll();
+    }
     graphicsRuntime = createTerminalGraphicsRuntime({
       output,
       env: effectiveEnv,

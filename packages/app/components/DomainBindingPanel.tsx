@@ -242,3 +242,5 @@ export const DomainBindingPanel: React.FC<DomainBindingPanelProps> = ({
     </div>
   );
 };
+
+export default DomainBindingPanel;

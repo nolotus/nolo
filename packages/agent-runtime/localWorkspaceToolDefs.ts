@@ -26,7 +26,7 @@ import type { OpenAiCompatibleTool } from "./capabilities";
 export type { OpenAiCompatibleTool };
 
 const WORKSPACE_TOOL_NAMES = [
-  "readFile", "read_image", "captureHostWindow", "writeFile", "editFile", "globFiles", "captureVisualState",
+  "readFile", "read_image", "captureHostWindow", "writeFile", "editFile", "globFiles", "searchFiles", "captureVisualState",
   "execShell", "launchProcess", "listProcesses",
   "taskWait", "taskStop",
   "openDesktopPreview",
@@ -440,6 +440,31 @@ export function buildWorkspaceToolDefinition(toolName: string) {
   }
   if (toolName === "editFile") {
     return buildReplaceWorkspaceTextTool();
+  }
+  if (toolName === "searchFiles") {
+    return {
+      type: "function",
+      function: {
+        name: "searchFiles",
+        description: "Search UTF-8 text files in the workspace by literal string or regex (works across code, docs, notes, and data files on Windows/macOS/Linux; respects .gitignore by default and stops early at maxResults). Prefer searchFiles over shell grep/rg/Select-String.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", minLength: 1, description: "Search text. Also accepts pattern when query is omitted (grep/rg alias compatibility)." },
+            path: buildWorkspacePathProperty(),
+            regex: { type: "boolean", description: "Default false: search for a literal string. Set true for regex." },
+            caseSensitive: { type: "boolean", description: "Default true." },
+            include: { type: "string", description: "File glob filter, e.g. *.{ts,md}." },
+            exclude: { type: "array", items: { type: "string" } },
+            contextLines: { type: "integer", minimum: 0, maximum: 5 },
+            maxResults: { type: "integer", minimum: 1, maximum: 1000, description: "Default 100; stop early after this many matches." },
+            includeIgnored: { type: "boolean", description: "Default false: respect .gitignore." },
+          },
+          required: ["query"],
+          additionalProperties: false,
+        },
+      },
+    };
   }
   if (toolName === "globFiles") {
     return buildGlobWorkspaceFilesTool();

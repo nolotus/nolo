@@ -562,11 +562,17 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
     gap: 1px;
   }
 
-  .SidebarTypeFilter-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-sidebar-type-filter-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  .SidebarTypeFilter-button:not(.is-active):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook~="chat-esc-sidebar-type-filter-button"]:not([data-active="true"]):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     width: 22px;
     height: 22px;
     min-width: 22px;
+  }
+
+  .SidebarTypeFilter-button.is-active:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook~="chat-esc-sidebar-type-filter-button"][data-active="true"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    height: 22px;
+    padding: 0 5px;
   }
 
   .AllViewSidebar__more-icon,

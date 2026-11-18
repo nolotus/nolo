@@ -34,7 +34,7 @@ import type { TableMeta } from "render/table/types";
 
 const ShareDocView = lazy(() => import("./share/ShareDocView"));
 const ShareDialogRichView = lazy(() => import("./share/ShareDialogRichView"));
-import AppSharePreview from "./share/AppSharePreview";
+const AppSharePreview = lazy(() => import("./share/AppSharePreview"));
 
 // ─────────────────────────────────────────────────────────────────────
 
@@ -554,7 +554,9 @@ const ShareImportPage: React.FC = () => {
           <ShareDialogPreview messages={dialogMessages} />
         )
       ) : shared.type === DataType.APP ? (
-        <AppSharePreview shared={shared} />
+        <Suspense fallback={<PageLoading message="正在渲染分享内容..." fullHeight={false} />}>
+          <AppSharePreview shared={shared} />
+        </Suspense>
       ) : shared.type === DataType.TABLE ? (
         <div className="ShareImportPage-table">
           <div className="ShareImportPage-tableCard">

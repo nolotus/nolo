@@ -516,6 +516,24 @@ function expectedExtensionIdFor(browser: ConnectorBrowser, chromeExtensionId: st
 }
 
 /**
+ * RPC client per build, honouring the injected overrides (tests / alternate ports). Shared by `status`
+ * and `doctor` so a diagnostic run can never dial an endpoint the status scan deliberately skipped:
+ * with a shared `requestChrome` override only `sharedOverrideTarget` is real and every other build
+ * answers with the "not probed" rejection.
+ */
+function makeRequestFor(
+  args: Pick<ChromeCommandDeps, "requestChrome" | "requestChromeFor">,
+  sharedOverrideTarget: ConnectorBrowser,
+): (browser: ConnectorBrowser) => RequestChrome {
+  return (browser) => {
+    const perBrowser = args.requestChromeFor?.(browser);
+    if (perBrowser) return perBrowser;
+    if (!args.requestChrome) return createChromeConnectorClient({ browser }).request;
+    return browser === sharedOverrideTarget ? args.requestChrome : notProbedRequest;
+  };
+}
+
+/**
  * Probes both endpoints. Never throws: an offline build is a value, not an error — the whole point of
  * reporting per browser is that one can be asleep while the other answers.
  */
@@ -743,12 +761,7 @@ export async function buildChromeConnectorStatus(
   // port — a test or an alternate-port install must never reach the user's browser, and letting one
   // stub answer both endpoints would invent a MULTIPLE_BROWSERS_AVAILABLE that nobody observed.
   const sharedOverrideTarget: ConnectorBrowser = browserTarget ?? "chrome";
-  const requestFor = (browser: ConnectorBrowser): RequestChrome => {
-    const perBrowser = args.requestChromeFor?.(browser);
-    if (perBrowser) return perBrowser;
-    if (!args.requestChrome) return createChromeConnectorClient({ browser }).request;
-    return browser === sharedOverrideTarget ? args.requestChrome : notProbedRequest;
-  };
+  const requestFor = makeRequestFor(args, sharedOverrideTarget);
   const browserStatuses = await probeBrowserStatuses({
     env,
     chromeExtensionId: expectedId,
@@ -1267,4 +1280,522 @@ export async function runChromeReloadCommand(args: string[], deps: ChromeCommand
     }
     return 1;
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * `nolo browser doctor` — the Web Store install-to-working-browser walkthrough.
+ *
+ * `status` reports facts; `doctor` walks the same facts in dependency order (manifest → token →
+ * bridge → extension handshake → a real `list_tabs` round trip) and turns the *first* broken link
+ * into recovery steps a user can follow without reading source. The last check is the only one that
+ * proves the whole path end to end: an ordinary `list_tabs` request over the same RPC the tool family
+ * uses, counting the tabs an agent could actually drive.
+ *
+ * The most common state after installing from the Chrome Web Store is "extension fine, native bridge
+ * missing" — so the checks never say "broken", they say *which* link is missing and that the
+ * extension itself is not the problem.
+ * ---------------------------------------------------------------------------------------------- */
+
+export type DoctorCheckStatus = "pass" | "warn" | "fail";
+
+export type ChromeDoctorCheckId =
+  | "native_host"
+  | "auth_token"
+  | "rpc_bridge"
+  | "extension_handshake"
+  | "tabs_roundtrip";
+
+export type ChromeDoctorCheck = {
+  id: ChromeDoctorCheckId;
+  label: string;
+  status: DoctorCheckStatus;
+  summary: string;
+};
+
+export type ChromeDoctorTabsProbe = {
+  /** False when the round trip was skipped because a prerequisite check failed. */
+  probed: boolean;
+  /** Controllable tabs the live round trip returned; null when it did not run or failed. */
+  count: number | null;
+  error?: { code: string; message: string };
+};
+
+export type ChromeConnectorDoctorReport = {
+  ok: boolean;
+  browser: ConnectorBrowser;
+  verifyCommand: string;
+  /** Ordered, dependency-first: the first non-`pass` check is what the recovery steps fix. */
+  checks: ChromeDoctorCheck[];
+  recoverySteps: string[];
+  tabs: ChromeDoctorTabsProbe;
+  /** The `status` report the checks were derived from (facts, not a second scan). */
+  status: ChromeConnectorStatusReport;
+};
+
+/** ` --browser firefox` only for Firefox: Chrome is the default of every setup command, so it stays quiet. */
+function browserFlagSuffix(browser: ConnectorBrowser): string {
+  return browser === "firefox" ? " --browser firefox" : "";
+}
+
+/** One real `list_tabs` over the live RPC — the only check that proves the whole chain, not a link. */
+async function probeTabsRoundtrip(requestChrome: RequestChrome): Promise<ChromeDoctorTabsProbe> {
+  try {
+    const result = (await requestChrome("list_tabs", {})) as { tabs?: unknown } | undefined;
+    const tabs = result?.tabs;
+    if (!Array.isArray(tabs)) {
+      return {
+        probed: true,
+        count: null,
+        error: {
+          code: "CHROME_CONNECTOR_BAD_RESPONSE",
+          message: "list_tabs returned no tabs array",
+        },
+      };
+    }
+    return { probed: true, count: tabs.length };
+  } catch (error) {
+    return {
+      probed: true,
+      count: null,
+      error: {
+        code: (error as { code?: string })?.code ?? "CHROME_CONNECTOR_ERROR",
+        message: toErrorMessage(error),
+      },
+    };
+  }
+}
+
+function buildNativeHostDoctorCheck(
+  status: ChromeConnectorStatusReport,
+  target: ConnectorBrowserStatus,
+): ChromeDoctorCheck {
+  const label = "Native Messaging host";
+  const facts = target.nativeHost;
+  if (!status.nativeHost.supported) {
+    return {
+      id: "native_host",
+      label,
+      status: "fail",
+      summary: `this platform has no supported native host install (${status.nativeHost.platformError ?? "unsupported platform"})`,
+    };
+  }
+  if (!status.connectorRoot) {
+    return {
+      id: "native_host",
+      label,
+      status: "warn",
+      summary: `cannot check: this CLI cannot see a connector checkout${
+        status.connectorRootError ? ` (${status.connectorRootError})` : ""
+      }; set NOLO_CHROME_CONNECTOR_ROOT or run the CLI from a repo checkout`,
+    };
+  }
+  if (!facts.manifestPath) {
+    return {
+      id: "native_host",
+      label,
+      status: "warn",
+      summary: `cannot check: the ${browserLabel(target.browser)} native host paths did not resolve on this platform`,
+    };
+  }
+  if (!facts.installed) {
+    return {
+      id: "native_host",
+      label,
+      status: "fail",
+      summary: `no native messaging host manifest at ${facts.manifestPath} — ${browserLabel(
+        target.browser,
+      )} has nothing to talk to (a Web Store install never creates it)`,
+    };
+  }
+  if (!facts.wrapperPathMatches || !facts.allowedOriginMatches) {
+    const problems: string[] = [];
+    if (!facts.wrapperPathMatches) problems.push("its wrapper path points at another checkout/launcher");
+    if (!facts.allowedOriginMatches) {
+      problems.push(`its allowed origins do not include extension ${target.expectedExtensionId}`);
+    }
+    return {
+      id: "native_host",
+      label,
+      status: "warn",
+      summary: `${facts.manifestPath} is installed but ${problems.join(" and ")}`,
+    };
+  }
+  return {
+    id: "native_host",
+    label,
+    status: "pass",
+    summary: `${facts.manifestPath} registered and allows extension ${target.expectedExtensionId}`,
+  };
+}
+
+function buildAuthTokenDoctorCheck(
+  status: ChromeConnectorStatusReport,
+  target: ConnectorBrowserStatus,
+): ChromeDoctorCheck {
+  const label = "RPC auth token";
+  const path = target.token.path ?? status.token.path;
+  if (!status.nativeHost.supported) {
+    return {
+      id: "auth_token",
+      label,
+      status: "warn",
+      summary: "not applicable: this platform has no supported native host install",
+    };
+  }
+  // Without a connector checkout the status report never resolves the token path (it returns early),
+  // so "absent" here means "unknown", not "missing": an installed CLI talking to a desktop-installed
+  // bridge is a healthy state. The live RPC probe — not this static file check — decides usability.
+  if (!status.connectorRoot) {
+    return {
+      id: "auth_token",
+      label,
+      status: "warn",
+      summary:
+        "cannot check: no connector checkout is visible here, so the token file was not inspected " +
+        "(the live RPC probe below is the authority — a working bridge authenticates fine)",
+    };
+  }
+  if (target.token.present) {
+    return {
+      id: "auth_token",
+      label,
+      status: "pass",
+      summary: `token present${path ? ` at ${path}` : ""}`,
+    };
+  }
+  return {
+    id: "auth_token",
+    label,
+    status: "fail",
+    summary: `no connector token${path ? ` at ${path}` : ""} — the bridge rejects unauthenticated calls`,
+  };
+}
+
+function buildRpcBridgeDoctorCheck(target: ConnectorBrowserStatus): ChromeDoctorCheck {
+  const label = "Local RPC bridge";
+  const rpc = target.rpc;
+  if (rpc.online) {
+    return {
+      id: "rpc_bridge",
+      label,
+      status: "pass",
+      summary: `answering on ${target.endpoint} (extension ${rpc.extensionId ?? "unknown"})`,
+    };
+  }
+  const code = rpc.error?.code ?? "CHROME_CONNECTOR_ERROR";
+  if (code === "UNAUTHORIZED") {
+    return {
+      id: "rpc_bridge",
+      label,
+      status: "fail",
+      summary: `something answers on ${target.endpoint} but rejects this machine's token (UNAUTHORIZED) — the token file and the running native host disagree`,
+    };
+  }
+  if (code === "CHROME_CONNECTOR_UNAVAILABLE") {
+    return {
+      id: "rpc_bridge",
+      label,
+      status: "warn",
+      summary: `nothing is listening on ${target.endpoint} — the extension's background service worker is most likely asleep, which is normal, not broken`,
+    };
+  }
+  return {
+    id: "rpc_bridge",
+    label,
+    status: "warn",
+    summary: `${code}: ${rpc.error?.message ?? "(no detail)"}`,
+  };
+}
+
+function buildHandshakeDoctorCheck(
+  target: ConnectorBrowserStatus,
+  browser: ConnectorBrowser,
+): ChromeDoctorCheck {
+  const label = "Extension handshake";
+  const rpc = target.rpc;
+  if (!rpc.online) {
+    return {
+      id: "extension_handshake",
+      label,
+      status: "warn",
+      summary: "cannot verify while the RPC bridge is offline (see rpc_bridge)",
+    };
+  }
+  // A local checkout signs the extension with its own key, so `connector_info` reports an id that is
+  // not one of the published store ids: accept it when it matches the *expected* id of this checkout
+  // (exactly what `status` does when it resolves `rpc.browser`).
+  const recognizedBrowser =
+    rpc.build ?? (rpc.extensionId === target.expectedExtensionId ? target.browser : null);
+  if (recognizedBrowser === null) {
+    return {
+      id: "extension_handshake",
+      label,
+      status: "fail",
+      summary: `the connected extension ${rpc.extensionId ?? "(unknown id)"} is not a recognized Nolo Browser Connector build`,
+    };
+  }
+  if (recognizedBrowser !== browser) {
+    return {
+      id: "extension_handshake",
+      label,
+      status: "fail",
+      summary: `the bridge answers as the ${browserLabel(recognizedBrowser)} build, not ${browserLabel(browser)}`,
+    };
+  }
+  const expected = expectedFeaturesForBrowser(browser);
+  const missing = expected.filter((feature) => !rpc.features.includes(feature));
+  const problems: string[] = [];
+  if (rpc.protocolVersion !== NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION) {
+    problems.push(
+      `protocol ${rpc.protocolVersion ?? "unknown"} (this CLI speaks ${NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION})`,
+    );
+  }
+  if (missing.length > 0) problems.push(`missing features ${missing.join(", ")}`);
+  if (problems.length > 0) {
+    return {
+      id: "extension_handshake",
+      label,
+      status: "fail",
+      summary: `${browserLabel(browser)} build ${rpc.extensionId ?? "unknown"} reports ${problems.join("; ")}`,
+    };
+  }
+  return {
+    id: "extension_handshake",
+    label,
+    status: "pass",
+    summary: `${browserLabel(browser)} build ${rpc.extensionId ?? "unknown"} speaks protocol ${
+      rpc.protocolVersion
+    } with all ${expected.length} required features`,
+  };
+}
+
+function buildDoctorRecoverySteps(args: {
+  browser: ConnectorBrowser;
+  checks: ChromeDoctorCheck[];
+  tabs: ChromeDoctorTabsProbe;
+  ok: boolean;
+  requiresExplicitBrowser: boolean;
+  rpcUnauthorized: boolean;
+}): string[] {
+  const { browser, checks, tabs, ok, requiresExplicitBrowser, rpcUnauthorized } = args;
+  const installCmd = `nolo browser install${browserFlagSuffix(browser)}`;
+  const doctorCmd = `nolo browser doctor${browserFlagSuffix(browser)}`;
+  const reloadCmd = `nolo browser reload${browserFlagSuffix(browser)}`;
+  const browserName = browserLabel(browser);
+  const statusOf = (id: ChromeDoctorCheckId) => checks.find((check) => check.id === id)?.status;
+
+  // Every browser-specific instruction follows the connected build: a Firefox user has no
+  // chrome://extensions and no Chrome Web Store (same rule `resolveStatusNextStep` follows).
+  const extensionsPage =
+    browser === "firefox" ? "about:debugging#/runtime/this-firefox" : "chrome://extensions";
+  const installHint =
+    browser === "firefox"
+      ? `If the extension is not installed yet: install Nolo Browser Connector from https://nolo.chat/downloads, or load the local extension/ directory from ${extensionsPage}.`
+      : `If the extension is not installed yet: install Nolo Browser Connector from the Chrome Web Store, or load the local extension/ directory with Developer mode in ${extensionsPage}.`;
+  const restrictedPages =
+    browser === "firefox"
+      ? "about: pages and the connector's own pages"
+      : "chrome:// pages, the Web Store and extension pages";
+  const wakeHint = `click the 「Nolo 浏览器连接器」 icon in the browser toolbar to wake the background service worker (icon hidden? open ${extensionsPage}, confirm it is enabled and click Reload)`;
+
+  if (ok) {
+    const count = tabs.count ?? 0;
+    const steps = [
+      `End-to-end ready: ${browserName} is online and the connector round trip works (${count} controllable ${
+        count === 1 ? "tab" : "tabs"
+      } detected).`,
+    ];
+    if (requiresExplicitBrowser) {
+      // The two builds share one implementation, so an unqualified op is ambiguous and would fail:
+      // never hand out a bare command that errors immediately.
+      steps.push(
+        "Both the Chrome and Firefox connectors are online, so every unqualified `nolo browser <op>` " +
+          `fails with MULTIPLE_BROWSERS_AVAILABLE — pass the browser explicitly, e.g. \`nolo browser list-tabs --browser ${browser}\`.`,
+      );
+    } else {
+      steps.push("Next: `nolo browser list-tabs` lists the tabs an agent can drive.");
+    }
+    return steps;
+  }
+
+  // Missing manifest / missing token: the state every Web Store first install starts in. Only a real
+  // `fail` lands here — a `warn` means "these files could not be inspected from here", where
+  // suggesting `nolo browser install` would be advice that cannot work.
+  if (statusOf("native_host") === "fail" || statusOf("auth_token") === "fail") {
+    const howToWake =
+      browser === "firefox"
+        ? `open ${extensionsPage} and click Reload on the connector`
+        : `open ${extensionsPage}, make sure the extension is enabled and click Reload`;
+    return [
+      `The ${browserName} extension itself is fine — it needs this machine's native bridge before it can drive your browser (the store package never includes one).`,
+      `1. Run: ${installCmd}`,
+      `2. Click the 「Nolo 浏览器连接器」 icon in the browser toolbar to wake the local bridge (icon hidden? ${howToWake}).`,
+      `3. Run: ${doctorCmd}  to verify.`,
+      installHint,
+    ];
+  }
+
+  if (statusOf("rpc_bridge") !== "pass") {
+    if (rpcUnauthorized) {
+      return [
+        "The native bridge is installed but rejects this machine's token, so nothing can talk to it.",
+        `1. Run: ${installCmd}  (rewrites the token and the manifest together).`,
+        "2. Click the 「Nolo 浏览器连接器」 icon in the browser toolbar to restart the bridge with the new token.",
+        `3. Run: ${doctorCmd}  to verify.`,
+      ];
+    }
+    return [
+      "Nothing is answering on the local bridge yet — the connector's background service worker is not awake, which is normal rather than a broken install.",
+      `If the extension is already installed: ${wakeHint}.`,
+      installHint,
+      `Then run: ${doctorCmd}  to verify.`,
+    ];
+  }
+
+  if (statusOf("extension_handshake") === "fail") {
+    return [
+      `The bridge is answering, but the running ${browserName} build is not what this CLI expects (older protocol, missing features, or another connector copy answering).`,
+      `1. Run: ${reloadCmd}  (restarts the extension worker with the files on disk).`,
+      `2. If that does not help, open ${extensionsPage} and click Reload on the Nolo Browser Connector; remove any second copy of the connector.`,
+      `3. Run: ${doctorCmd}  to verify.`,
+    ];
+  }
+
+  return [
+    `Every link up to the extension is ready, but a real tab round trip failed${
+      tabs.error ? ` (${tabs.error.code})` : ""
+    } — usually no controllable window/tab is open.`,
+    `1. Open a normal https:// page in a regular window (${restrictedPages} cannot be controlled).`,
+    "2. Click the 「Nolo 浏览器连接器」 icon once to wake the worker.",
+    `3. Run: ${doctorCmd}  to verify.`,
+  ];
+}
+
+/**
+ * Runs the ordered checks and the live round trip. Never throws for a broken connector: every failure
+ * is a `fail`/`warn` check plus recovery steps — the command exists precisely for the broken states.
+ */
+export async function buildChromeConnectorDoctorReport(
+  args: Omit<ChromeCommandDeps, "installNativeHost" | "nodePath"> & {
+    browser?: ConnectorBrowser;
+  } = {},
+): Promise<ChromeConnectorDoctorReport> {
+  const status = await buildChromeConnectorStatus(args);
+  const browser: ConnectorBrowser =
+    status.browsers.explicit ?? status.browsers.autoSelected ?? "chrome";
+  const target = status.browsers[browser];
+
+  const checks: ChromeDoctorCheck[] = [
+    buildNativeHostDoctorCheck(status, target),
+    buildAuthTokenDoctorCheck(status, target),
+    buildRpcBridgeDoctorCheck(target),
+    buildHandshakeDoctorCheck(target, browser),
+  ];
+
+  const handshakeReady =
+    checks.find((check) => check.id === "extension_handshake")?.status === "pass" && target.rpc.online;
+  let tabs: ChromeDoctorTabsProbe;
+  if (!handshakeReady) {
+    tabs = { probed: false, count: null };
+    const blocker = target.rpc.online
+      ? "the extension handshake (extension_handshake)"
+      : "the RPC bridge (rpc_bridge)";
+    checks.push({
+      id: "tabs_roundtrip",
+      label: "Tab round trip (list_tabs)",
+      status: "warn",
+      summary: `not run: ${blocker} is not ready, so no real tab round trip can be attempted yet`,
+    });
+  } else {
+    // Same endpoint resolution the status scan used: with a shared request override only the
+    // overridden build is dialable, so a test can never reach the user's real browser.
+    const requestFor = makeRequestFor(args, args.browser ?? "chrome");
+    tabs = await probeTabsRoundtrip(requestFor(browser));
+    checks.push({
+      id: "tabs_roundtrip",
+      label: "Tab round trip (list_tabs)",
+      status: tabs.error ? "fail" : "pass",
+      summary: tabs.error
+        ? `list_tabs failed (${tabs.error.code}: ${tabs.error.message})`
+        : `list_tabs returned ${tabs.count} controllable tab(s)`,
+    });
+  }
+
+  // The live chain is what "works right now" means: bridge answering, a recognized build that speaks
+  // this protocol with the required features, and a real `list_tabs` round trip. A `warn` is "could
+  // not inspect that file from here" (an installed CLI has no checkout next to it, yet the connector
+  // is fine), so only a `fail` — a real break — fails the run.
+  const liveChainOk = (["rpc_bridge", "extension_handshake", "tabs_roundtrip"] as const).every(
+    (id) => checks.find((check) => check.id === id)?.status === "pass",
+  );
+  const ok = liveChainOk && !checks.some((check) => check.status === "fail");
+
+  return {
+    ok,
+    browser,
+    verifyCommand: `nolo browser doctor${browserFlagSuffix(browser)}`,
+    checks,
+    recoverySteps: buildDoctorRecoverySteps({
+      browser,
+      checks,
+      tabs,
+      ok,
+      requiresExplicitBrowser: status.browsers.requiresExplicitBrowser,
+      rpcUnauthorized: target.rpc.error?.code === "UNAUTHORIZED",
+    }),
+    tabs,
+    status,
+  };
+}
+
+export function formatChromeConnectorDoctor(report: ChromeConnectorDoctorReport) {
+  const mark = (status: DoctorCheckStatus) =>
+    status === "pass" ? "[pass]" : status === "warn" ? "[warn]" : "[FAIL]";
+  const lines: string[] = ["Nolo Browser Connector — doctor"];
+  lines.push(`  browser          : ${browserLabel(report.browser)}`);
+  lines.push(`  endpoint         : ${report.status.browsers[report.browser].endpoint}`);
+  if (report.status.browsers.requiresExplicitBrowser) {
+    lines.push(
+      "  note             : both Chrome and Firefox connectors are online, so every unqualified " +
+        "`nolo browser <op>` fails with MULTIPLE_BROWSERS_AVAILABLE — pass --browser chrome or --browser firefox.",
+    );
+  }
+  lines.push("Checks:");
+  for (const check of report.checks) {
+    lines.push(`  ${mark(check.status)} ${check.id.padEnd(19)}: ${check.summary}`);
+  }
+  lines.push(
+    report.ok
+      ? "Result           : end-to-end ready."
+      : "Result           : not ready yet — follow the recovery steps below.",
+  );
+  lines.push("Recovery:");
+  for (const step of report.recoverySteps) lines.push(`  ${step}`);
+  lines.push(`Verify with      : ${report.verifyCommand}`);
+  return `${lines.join("\n")}\n`;
+}
+
+export async function runChromeDoctorCommand(
+  args: string[],
+  deps: Omit<ChromeCommandDeps, "installNativeHost" | "nodePath"> = {},
+) {
+  const output = deps.output ?? process.stdout;
+  const browser = readBrowserOption(args);
+  if (browser === null) {
+    output.write('[nolo] Browser connector doctor failed: --browser must be "chrome" or "firefox".\n');
+    return 1;
+  }
+  let report: ChromeConnectorDoctorReport;
+  try {
+    report = await buildChromeConnectorDoctorReport({ ...deps, ...(browser ? { browser } : {}) });
+  } catch (error) {
+    output.write(`[nolo] Browser connector doctor failed: ${toErrorMessage(error)}\n`);
+    return 1;
+  }
+  if (args.includes("--json")) {
+    output.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    output.write(formatChromeConnectorDoctor(report));
+  }
+  return report.ok ? 0 : 1;
 }
