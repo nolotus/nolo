@@ -1,5 +1,7 @@
 const CORE_PREFIXES = [
   "user:",
+  "usr:",
+  "sp:",
   "space-",
   "space-member-",
   "user-pref-",

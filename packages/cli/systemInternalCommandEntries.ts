@@ -66,7 +66,7 @@ export function getSystemInternalCommandEntries(renderHelpText: () => string): C
       const { runWhoamiCommand } = await import("./authCommands");
       return runWhoamiCommand({ args, env: ctx.env });
     }),
-    createEntrypointEnvCommand(["connect"], "Send machine heartbeats or hold a connector websocket", async (args, deps) => {
+    createEntrypointEnvCommand(["connect"], "Hold a connector websocket for this machine", async (args, deps) => {
       const { runMachineConnectCommand } = await import("./machineCommands");
       return runMachineConnectCommand(args, deps);
     }),

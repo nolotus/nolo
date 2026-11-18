@@ -43,6 +43,7 @@ export const DEFAULT_LOCAL_TOOLS = new Set([
   "writeFile",
   "editFile",
   "globFiles",
+  "searchFiles",
   "execShell",
   "launchProcess",
   "listProcesses",

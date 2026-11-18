@@ -274,13 +274,12 @@ export interface AgentRunStreamRemoteTaskEvent {
   };
 }
 
-/** action gate 帧：工具抬起的交互 gate（secret-request 等），宿主渲染面板。
- *  gate 形状与桌面/TUI 的 LocalAgentActionGate 一致（kind: "input"）。 */
+/** action gate 帧：工具抬起的交互 gate（secret-request / mcp 一次性确认等），宿主渲染面板。 */
 export interface AgentRunStreamActionGateEvent {
   type: "action_gate";
   gate: {
     id: string;
-    kind: "input";
+    kind: "input" | "confirm";
     title: string;
     body: string;
     payload: Record<string, unknown>;

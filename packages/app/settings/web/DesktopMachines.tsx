@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate } from "app/routing";
 import {
@@ -24,7 +24,8 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { asTrimmedString } from "core/trimmedString";
 import { projectMachineSummary } from "./machineStatus";
-import ExternalReaderStateCenter from "./ExternalReaderStateCenter";
+
+const ExternalReaderStateCenter = lazy(() => import("./ExternalReaderStateCenter"));
 
 type MachineSummary = {
   machineId: string;
@@ -536,7 +537,9 @@ const DesktopMachines: React.FC = () => {
         </div>
       ) : null}
 
-      <ExternalReaderStateCenter currentToken={currentToken} serverBase={externalReaderServerBase} isDesktop={isDesktop} />
+      <Suspense fallback={null}>
+        <ExternalReaderStateCenter currentToken={currentToken} serverBase={externalReaderServerBase} isDesktop={isDesktop} />
+      </Suspense>
 
       <div className="desktop-machine-connect">
         <div className="desktop-machine-connect__header">

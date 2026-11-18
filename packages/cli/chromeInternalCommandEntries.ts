@@ -74,6 +74,16 @@ function getBrowserFamilyEntries(): CommandEntry[] {
         return runChromeReloadCommand(args, deps);
       },
     ),
+    // The one command for "I installed it from the Web Store and nothing works": walks the whole
+    // chain and prints recovery steps instead of one status line per layer.
+    createEnvCommand(
+      ["browser", "doctor"],
+      "Run end-to-end Browser Connector diagnostics and print recovery steps (--browser chrome|firefox [--json])",
+      async (args, deps) => {
+        const { runChromeDoctorCommand } = await import("./chromeCommands");
+        return runChromeDoctorCommand(args, deps);
+      },
+    ),
     ...CHROME_OPS_SUBCOMMANDS.map(({ name, summary }) =>
       createArgsCommand(["browser", name], summary, async (args) => {
         const { runChromeOpsCommand } = await import("./chromeOpsCommands");

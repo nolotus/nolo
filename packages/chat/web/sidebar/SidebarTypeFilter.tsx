@@ -99,7 +99,7 @@ export const SidebarTypeFilter: React.FC<{
     ActiveIcon: IconType | null;
   }> = [
     { id: "all", label: t("all", "全部"), Icon: PiSquaresFour, ActiveIcon: PiSquaresFourFill },
-    { id: "agent", label: t("sidebarTypes.agent", "AI"), ...SIDEBAR_TYPE_ICONS.agent },
+    { id: "agent", label: t("sidebarTypes.agent", "Agent"), ...SIDEBAR_TYPE_ICONS.agent },
     { id: "dialog", label: t("sidebarTypes.dialog", "对话"), ...SIDEBAR_TYPE_ICONS.dialog },
     { id: "page", label: t("sidebarTypes.page", "页面"), ...SIDEBAR_TYPE_ICONS.page },
     { id: "table", label: t("sidebarTypes.table", "表格"), ...SIDEBAR_TYPE_ICONS.table },
@@ -127,11 +127,14 @@ export const SidebarTypeFilter: React.FC<{
               type="button"
               data-hook="chat-esc-sidebar-type-filter-button"
               data-recent-filter={id}
+              data-active={isActive ? "true" : undefined}
               aria-pressed={isActive}
               aria-label={label}
               onClick={(event) => {
                 event.stopPropagation();
-                if (!disabled) onChange(id);
+                if (!disabled) {
+                  onChange(isActive && id !== "all" ? "all" : id);
+                }
               }}
               {...withLiteralClass(
                 `SidebarTypeFilter-button${isActive ? " is-active" : ""}`,
@@ -140,6 +143,11 @@ export const SidebarTypeFilter: React.FC<{
               )}
             >
               {StateIcon ? <StateIcon size={15} aria-hidden="true" /> : <NoloHeadMark size={15} />}
+              {isActive && (
+                <span {...stylex.props(sidebarStyles.sidebarTypeFilterLabel)}>
+                  {label}
+                </span>
+              )}
             </button>
           </Tooltip>
         );

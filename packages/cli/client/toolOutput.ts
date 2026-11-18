@@ -335,10 +335,14 @@ function formatToolTraceLine(text: string, colorEnabled: boolean, accent: "none"
   const fitted = fitAnsiLine(text.replace(/\r?\n/g, " "), width);
   const styled = accent === "error"
     ? themeText(fitted, "danger", true)
-    : dimCliText(fitted, true);
+    : themeText(fitted, "muted", true);
+  const candidateSurface = composerSurfaceBackgroundSequence();
+  // Only paint a full-row trace wash when a 24-bit canvas tint is available;
+  // ANSI-16 \x1b[100m turns into a dark charcoal band on light terminals.
+  const surface = candidateSurface.startsWith("\x1b[48;2;") ? candidateSurface : "";
   return `${renderSurfaceLine({
     text: styled,
-    surface: colorEnabled ? composerSurfaceBackgroundSequence() : "",
+    surface,
     padTo: width,
   })}\n`;
 }
@@ -807,7 +811,7 @@ function prefixFor(kind: DiffLineKind): string {
  * (120 display columns) is clipped where a `.length` check would overflow.
  */
 function buildEditLine(kind: DiffLineKind, body: string, maxWidth = resolveEditSnippetMaxWidth()): EditSnippetLine {
-  return { kind, text: prefixFor(kind) + truncateByDisplayWidth(body, maxWidth) };
+  return { kind, text: prefixFor(kind) + truncateByDisplayWidth(body.replace(/\t/g, "  "), maxWidth) };
 }
 
 /** One-sided fallback: tag every line of a snippet with a single kind. */
@@ -929,8 +933,12 @@ function formatEditDetailBlock(
   const isTruecolor = supportsTruecolor(env);
   const lang: CodeLang = isTruecolor ? detectCodeLangFromPath(filePath) : "unknown";
   const brightness: TuiBrightness = resolveTuiBrightness(env);
-  const maxLineWidth = resolveSurfacePaintWidth(process.stdout.columns || 80);
-  return lines
+  // History owns outer margins; reserve the detail indent and the two-cell rail.
+  const contentWidth = resolveHistoryLayoutGeometry(process.stdout.columns || 80).contentWidth;
+  const bodyBudget = Math.max(0, contentWidth - 4);
+  const clipped = lines.map(line => ({ ...line, text: truncateByDisplayWidth(line.text, bodyBudget) }));
+  const padTo = Math.max(0, ...clipped.map(line => displayWidth(line.text)));
+  return clipped
     .map((line) => {
       const rendered = renderDiffLine({
         kind: line.kind,
@@ -939,10 +947,11 @@ function formatEditDetailBlock(
           ? buildHighlightedEditLine(line, lang, brightness, env)
           : undefined,
         gutter: true,
+        padTo,
         colorEnabled: true,
         env,
       });
-      return `${fitAnsiLine(`  ${rendered}`, maxLineWidth)}\n`;
+      return `${fitAnsiLine(`  ${rendered}`, contentWidth)}\n`;
     })
     .join("");
 }
@@ -1040,7 +1049,7 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
     const url = typeof metadata.url === "string" ? metadata.url : "";
     if (url) return formatFetchItemUrl(url);
   }
-  if (toolName === "exa_search" || toolName === "codeSearch" || toolName === "globFiles") {
+  if (toolName === "exa_search" || toolName === "codeSearch" || toolName === "globFiles" || toolName === "searchFiles") {
     const query = typeof metadata.query === "string"
       ? metadata.query
       : typeof metadata.pattern === "string" ? metadata.pattern : "";
@@ -1334,7 +1343,7 @@ export const TUI_TREE_END = "\u0002";
 export const TUI_TREE_TOOLS = {
   Run: ["execShell", "runCommand", "launchProcess"],
   Read: ["readFile"],
-  Search: ["exa_search", "globFiles", "codeSearch"],
+  Search: ["exa_search", "globFiles", "searchFiles", "codeSearch"],
   Fetch: ["fetchWebpage"],
 } as const;
 export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;

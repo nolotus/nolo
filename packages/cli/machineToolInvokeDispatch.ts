@@ -10,7 +10,7 @@ import { scrubSecrets } from "../agent-runtime/secretScrubber";
 // `{"type":"tool.result","requestId","result"| "error"}`。
 //
 // 安全模型（v1 硬边界）：
-// - 工具白名单 = { readFile, globFiles, writeFile, editFile }。
+// - 工具白名单 = { readFile, globFiles, searchFiles, writeFile, editFile }。
 //   execShell / launchProcess / captureVisualState 等执行/进程/视觉类名字不在
 //   白名单内（路由决策：正则/token 门不能当任意 shell 的边界，shell 执行面整个
 //   移出机器路由），一律回 error："tool not allowed in v1 (allowlisted
@@ -72,18 +72,19 @@ export type { MachineToolGrants } from "../agent-runtime/machineToolGrants";
  * 逐字等于白名单、且互不相交 —— 由测试 `L2 invariant` 守着；isMachineToolGranted
  * 对落在两张表之外的工具名一律失败关闭。
  */
-export const MACHINE_TOOL_INVOKE_V1_READ_ONLY_TOOL_NAMES = ["readFile", "globFiles"] as const;
+export const MACHINE_TOOL_INVOKE_V1_READ_ONLY_TOOL_NAMES = ["readFile", "globFiles", "searchFiles"] as const;
 
 const READ_ONLY_TOOL_NAME_SET = new Set<string>(MACHINE_TOOL_INVOKE_V1_READ_ONLY_TOOL_NAMES);
 
 /**
- * 白名单：两个读工具 + 两个写工具（写类另需本机 grants 复核）。
+ * 白名单：三个读工具 + 两个写工具（写类另需本机 grants 复核）。
  * execShell / launchProcess / captureVisualState 等执行/进程/视觉类工具不在
  * 名单内，一律拒绝（与 launchProcess 同等对待）。
  */
 export const MACHINE_TOOL_INVOKE_V1_TOOL_NAMES = [
   "readFile",
   "globFiles",
+  "searchFiles",
   "writeFile",
   "editFile",
 ] as const;

@@ -228,6 +228,10 @@ export function validateToolArguments(args: {
     record = parsed as Record<string, unknown>;
   }
 
+  // Scoped alias: do not turn pattern into a query alias for unrelated tools.
+  if (toolName === "searchFiles" && record.query === undefined && typeof record.pattern === "string" && record.pattern.length) {
+    record = { ...record, query: record.pattern };
+  }
   for (const field of requiredFields) {
     if (record[field] !== undefined) continue;
     if (isAliasSatisfied(record, field)) continue;

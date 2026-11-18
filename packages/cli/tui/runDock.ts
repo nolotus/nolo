@@ -33,12 +33,30 @@ import {
 } from "./runProgressHeartbeat";
 import { t } from "./i18n";
 import { resolveHistoryLayoutGeometry } from "./tuiLayout";
-import { RUN_ZONE_MAX_ROWS, formatBackgroundSummary, formatProcZoneLines, formatRunZoneLines, planRunZoneRows, PROC_LINGER_MAX_ROWS, procZoneFinished, remoteTaskUnsettled, resolveRunZoneMaxRows, runZoneRunRowBudget, type RemoteTaskCarrier, type RunZoneLayout, type RunZoneProc } from "./runZoneLines";
+import {
+  RUN_ZONE_FRAME_INTERVAL_MS,
+  RUN_ZONE_MAX_ROWS,
+  formatBackgroundSummary,
+  formatProcZoneLines,
+  formatRunZoneLines,
+  planRunZoneRows,
+  PROC_LINGER_MAX_ROWS,
+  procZoneFinished,
+  remoteTaskIsActive,
+  remoteTaskUnsettled,
+  resolveRunZoneMaxRows,
+  runZoneRunRowBudget,
+  type RemoteTaskCarrier,
+  type RunZoneLayout,
+  type RunZoneProc,
+} from "./runZoneLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
-/** 年龄每秒走一格；比 150ms 的活动帧慢，因为这里没有动画只有秒数。 */
-export const RUN_DOCK_TICK_INTERVAL_MS = 1000;
+/** 活跃 spinner 时按 80ms/帧顺滑推进，与底部活动指示器同频。 */
+export const RUN_DOCK_TICK_INTERVAL_MS = RUN_ZONE_FRAME_INTERVAL_MS;
+/** 无活跃 spinner（仅终态停留或远端失联）时的低频检查周期，避免空跑重绘。 */
+export const RUN_DOCK_IDLE_TICK_INTERVAL_MS = 1000;
 /** 终态 run 在面板上多留一会，让用户看到「结束」这一帧而不是凭空消失。 */
 export const RUN_DOCK_LINGER_MS = 5_000;
 /**
@@ -182,12 +200,40 @@ export function createRunDock(deps: RunDockDeps): RunDock {
   const retired = new Set<string>();
   let seqCounter = 0;
   let timer: unknown = null;
+  let timerMs: number | null = null;
   let disposed = false;
+  let lastIdleSignature: string | null = null;
+  let hadActiveSpinner = false;
+
+  const activeTickMs = tickIntervalMs;
+  const idleTickMs = Math.max(tickIntervalMs, RUN_DOCK_IDLE_TICK_INTERVAL_MS);
+
+  const hasActiveSpinner = (procs: readonly RunZoneProc[]): boolean => {
+    if (procs.some((proc) => !procZoneFinished(proc))) return true;
+    for (const entry of entries.values()) {
+      const carrier = entry.snapshot as RemoteTaskCarrier;
+      if (
+        entry.snapshot.status === "running" &&
+        (!carrier.remoteTask || remoteTaskIsActive(carrier))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const computeIdleSignature = (at: number, procs: readonly RunZoneProc[]): string => {
+    const ordered = orderedEntries().map((entry) => entry.snapshot);
+    const runText = formatRunZoneLines(ordered, false, at, maxRows).join("\n");
+    const procText = formatProcZoneLines(procs, false, at, maxRows).join("\n");
+    return `${runText}\n--\n${procText}`;
+  };
 
   const stopTimer = () => {
     if (timer !== null) {
       clearIntervalFn(timer);
       timer = null;
+      timerMs = null;
     }
   };
 
@@ -215,25 +261,50 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     }
     // 面板清空了就该停表——不管是谁触发的 prune。此前只有 tick() 检查这件事，
     // 于是从 getLines() 里摘掉最后一条 run 后，timer 还会空转一格。
-    // 进程行也在走秒（`已运行 3m`），所以「还有 procs」同样需要这份心跳：
+    // 进程行也在走秒，所以「还有 procs」同样需要这份心跳：
     // 只按 entries 判空会让「只有后台进程」时的时间戳冻住不动。
     if (entries.size === 0 && runningProcs().length === 0) stopTimer();
     return changed;
   };
 
-  const tick = () => {
-    prune();
-    deps.onRepaint();
-  };
-
-  const ensureTimer = () => {
+  const syncTimer = (procs: readonly RunZoneProc[] = runningProcs()) => {
     // 已销毁的实例绝不能再起表：dispose() 之后的残余重绘（会话已退出，但某个
     // 迟到的 repaint 仍可能跑进来）会读 getLines()，而 getLines 发现有 procs
-    // 就会来这里补心跳——没有这道守卫就是一条泄漏的每秒定时器。
+    // 就会来这里补心跳——没有这道守卫就是一条泄漏的定时器。
     if (disposed) return;
-    // 进程行同样需要每秒重绘（耗时在走），所以「只有后台进程、没有 run」也要转。
-    if (timer === null && (entries.size > 0 || runningProcs().length > 0)) {
-      timer = setIntervalFn(tick, tickIntervalMs);
+    if (entries.size === 0 && procs.length === 0) {
+      stopTimer();
+      return;
+    }
+    const active = hasActiveSpinner(procs);
+    hadActiveSpinner = active;
+    const targetMs = active ? activeTickMs : idleTickMs;
+    if (timer !== null && timerMs === targetMs) return;
+    stopTimer();
+    timerMs = targetMs;
+    timer = setIntervalFn(tick, targetMs);
+  };
+
+  const tick = () => {
+    const pruned = prune();
+    const procs = runningProcs();
+    syncTimer(procs);
+    if (entries.size === 0 && procs.length === 0) {
+      const hadContent = pruned || lastIdleSignature !== null || hadActiveSpinner;
+      lastIdleSignature = null;
+      hadActiveSpinner = false;
+      if (hadContent) deps.onRepaint();
+      return;
+    }
+    if (pruned || hasActiveSpinner(procs)) {
+      lastIdleSignature = null;
+      deps.onRepaint();
+      return;
+    }
+    const sig = computeIdleSignature(now(), procs);
+    if (sig !== lastIdleSignature) {
+      lastIdleSignature = sig;
+      deps.onRepaint();
     }
   };
 
@@ -286,7 +357,9 @@ export function createRunDock(deps: RunDockDeps): RunDock {
       // 每次都刷新的话 linger 永远走不完，面板会一直挂着已完成的 run。
       terminalAt: terminal ? (prev?.terminalAt ?? at) : null,
     });
-    ensureTimer();
+    const procs = runningProcs();
+    syncTimer(procs);
+    lastIdleSignature = hasActiveSpinner(procs) ? null : computeIdleSignature(at, procs);
     deps.onRepaint();
   };
 
@@ -296,7 +369,13 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     // 判停条件必须和 prune 保持一致：还有后台进程时表要继续转（进程行在走秒），
     // 否则这里停表、紧接着 onRepaint 同步调 getLines 又立刻重启一次，每摘一个
     // run 就多一轮无意义的停/启。
-    if (entries.size === 0 && runningProcs().length === 0) stopTimer();
+    const procs = runningProcs();
+    syncTimer(procs);
+    lastIdleSignature =
+      (entries.size === 0 && procs.length === 0) || hasActiveSpinner(procs)
+        ? null
+        : computeIdleSignature(now(), procs);
+    if (entries.size === 0 && procs.length === 0) hadActiveSpinner = false;
     deps.onRepaint();
   };
 
@@ -305,7 +384,13 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     if (entries.size === 0) return;
     entries.clear();
     // clear 只清 run 面板，不代表后台进程也没了：进程行还需要秒表。
-    if (runningProcs().length === 0) stopTimer();
+    const procs = runningProcs();
+    syncTimer(procs);
+    lastIdleSignature =
+      procs.length === 0 || hasActiveSpinner(procs)
+        ? null
+        : computeIdleSignature(now(), procs);
+    if (procs.length === 0) hadActiveSpinner = false;
     deps.onRepaint();
   };
 
@@ -352,15 +437,18 @@ export function createRunDock(deps: RunDockDeps): RunDock {
       })
       .slice(0, PROC_LINGER_MAX_ROWS);
     if (ordered.length === 0 && activeProcs.length === 0 && lingeringProcs.length === 0) {
+      lastIdleSignature = null;
+      hadActiveSpinner = false;
+      stopTimer();
       return [];
     }
     if (layout?.maxEntries === 0) return [];
     // 进程行只在此时才可能发现自己该转表：后台进程是外部 registry 拉起来的，
     // dock 不会收到它们的 update()，靠每一次重绘自检补上心跳（残留行也要转，
     // 否则它永远不会到点消失）。
-    if (procs.length > 0) ensureTimer();
-
     const at = now();
+    syncTimer(procs);
+    lastIdleSignature = hasActiveSpinner(procs) ? null : computeIdleSignature(at, procs);
     // 契约（沿用既有运行区语义，别改）：resolveRunZoneMaxRows 给出的是**条目**
     // 预算，条目溢出时格式化器会额外追加一行 `+N more`。所以面板的真实行高上限
     // 是 totalRows + 1，既有用例（短终端 1 条 + `+2 more` = 2 行）就是这个语义。
@@ -402,7 +490,7 @@ export function createRunDock(deps: RunDockDeps): RunDock {
       // Summary does not establish or erase the detailed projection's visibility.
       prune();
       const procs = runningProcs();
-      if (procs.length) ensureTimer();
+      syncTimer(procs);
       return formatBackgroundSummary(getRuns(), procs, colorEnabled, layout?.columns);
     },
     visibleRunIds: (): ReadonlySet<string> => lastVisibleRunIds,
@@ -410,6 +498,8 @@ export function createRunDock(deps: RunDockDeps): RunDock {
       disposed = true;
       entries.clear();
       retired.clear();
+      lastIdleSignature = null;
+      hadActiveSpinner = false;
       stopTimer();
       lastVisibleRunIds = EMPTY_VISIBLE_RUN_IDS;
     },

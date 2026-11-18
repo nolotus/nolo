@@ -18,8 +18,8 @@ export const turnStrings = {
     zh: "已停止等待。{0} 可能仍在后台完成，其结果不会计入本次对话。",
   },
   wakeQueuedWhileStopped: {
-    en: "Stopped. {0} queued background result(s) are waiting — press Enter to continue (Ctrl+S sends all at once).",
-    zh: "已停止。还有 {0} 项后台结果在队列里等着——按 Enter 继续（Ctrl+S 合并发送）。",
+    en: "Stopped. {0} queued background result(s) waiting — press Enter to merge and continue.",
+    zh: "已停止。还有 {0} 项后台结果待处理——按 Enter 合并继续。",
   },
   turnStopping: {
     en: "Stopping… press Esc again to force",

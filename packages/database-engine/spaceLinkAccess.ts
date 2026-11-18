@@ -4,18 +4,21 @@
  * Used by both record read authorization (`resourceAccess`) and OAuth
  * credential delegation (`resolveCredentialOwnerUserId`) so the two paths
  * cannot drift on membership or contents-key matching.
+ * Backed by `spaceStoreReader` to transparently dual-read `sp:`/`usr:` and legacy `space-*`.
  */
+
+import {
+  listIndexedUserMemberships,
+  normalizeSpaceIdSegment,
+  readSpaceMembershipRecord,
+  readSpaceProjection,
+  type SpaceReadableStore,
+} from "./spaceStoreReader";
 
 export const SPACE_PREFIX = "space-";
 export const SPACE_MEMBER_PREFIX = "space-member-";
 
-export type SpaceLinkStore = {
-  get: (key: string) => Promise<unknown>;
-  iterator?: (options: {
-    gte: string;
-    lte: string;
-  }) => AsyncIterable<[string, unknown]> | Iterable<[string, unknown]>;
-};
+export type SpaceLinkStore = SpaceReadableStore;
 
 export type SpaceLinkRecord = {
   dbKey?: unknown;
@@ -29,12 +32,7 @@ export type SpaceLinkRecord = {
 };
 
 export function normalizeSpaceId(spaceId?: unknown): string | null {
-  if (typeof spaceId !== "string") return null;
-  const trimmed = spaceId.trim();
-  if (!trimmed) return null;
-  return trimmed.startsWith(SPACE_PREFIX)
-    ? trimmed.slice(SPACE_PREFIX.length)
-    : trimmed;
+  return normalizeSpaceIdSegment(spaceId);
 }
 
 export function getContentKeyCandidates(
@@ -64,27 +62,38 @@ export async function hasSpaceMembership(
   if (!normalizedUserId || !normalized) return false;
 
   try {
-    const membership = await store.get(
-      `${SPACE_MEMBER_PREFIX}${normalizedUserId}-${normalized}`,
+    const membership = await readSpaceMembershipRecord(
+      store,
+      normalizedUserId,
+      normalized,
     );
-    if (membership) return true;
+    if (membership.active) {
+      const projection = await readSpaceProjection(store, normalized).catch(
+        () => null,
+      );
+      if (!projection || !projection.exists) {
+        return true;
+      }
+      if (!projection.active || !projection.record) {
+        return false;
+      }
+      if (projection.record.ownerId === normalizedUserId) return true;
+      return (
+        Array.isArray(projection.record.members) &&
+        projection.record.members.includes(normalizedUserId)
+      );
+    }
   } catch {
-    // Fall through to the space record. Some older data only has members[].
+    // Fall through to space projection.
   }
 
   try {
-    const space = (await store.get(`${SPACE_PREFIX}${normalized}`)) as
-      | SpaceLinkRecord
-      | null;
-    if (!space) return false;
-    if (
-      typeof space.ownerId === "string" &&
-      space.ownerId === normalizedUserId
-    ) {
-      return true;
-    }
+    const projection = await readSpaceProjection(store, normalized);
+    if (!projection.active || !projection.record) return false;
+    if (projection.record.ownerId === normalizedUserId) return true;
     return (
-      Array.isArray(space.members) && space.members.includes(normalizedUserId)
+      Array.isArray(projection.record.members) &&
+      projection.record.members.includes(normalizedUserId)
     );
   } catch {
     return false;
@@ -109,22 +118,15 @@ export async function findLinkedMemberSpaceId(
   const contentKeys = getContentKeyCandidates(dbKey, record);
   if (contentKeys.length === 0) return null;
 
-  const prefix = `${SPACE_MEMBER_PREFIX}${normalizedUserId}-`;
   try {
-    for await (const [, membership] of store.iterator({
-      gte: prefix,
-      lte: `${prefix}\uffff`,
-    })) {
-      const spaceId = normalizeSpaceId(
-        (membership as { spaceId?: unknown } | null)?.spaceId,
-      );
+    const memberships = await listIndexedUserMemberships(store, normalizedUserId);
+    for (const entry of memberships) {
+      const spaceId = entry.spaceId;
       if (!spaceId) continue;
-
       try {
-        const space = (await store.get(`${SPACE_PREFIX}${spaceId}`)) as
-          | SpaceLinkRecord
-          | null;
-        const contents = space?.contents;
+        const projection = await readSpaceProjection(store, spaceId);
+        if (!projection.active || !projection.record) continue;
+        const contents = projection.record.contents;
         if (!contents || typeof contents !== "object") continue;
         const map = contents as Record<string, unknown>;
         if (contentKeys.some((contentKey) => Boolean(map[contentKey]))) {

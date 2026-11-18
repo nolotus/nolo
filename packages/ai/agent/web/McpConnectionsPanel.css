@@ -1,0 +1,245 @@
+/* packages/ai/agent/web/McpConnectionsPanel.css
+ * 沿用 PluginExplore.css 的主题 CSS 变量体系（--surfaceCard / --surface / --borderSubtle /
+ * --text / --textSecondary / --primary / --danger / --radius-* / --space-*），不硬编码深浅色。
+ */
+
+.mcp-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+  width: 100%;
+  color: var(--text, #18181b);
+}
+
+.mcp-settings__intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.mcp-settings__note {
+  margin: 0;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--fillSecondary, var(--surfaceInset, #f4f4f5));
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  border-radius: var(--radius-md, 8px);
+  font-size: var(--fontSize-xs, 0.75rem);
+  line-height: var(--leading-normal, 1.5);
+  color: var(--textSecondary, #71717a);
+}
+
+.mcp-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  padding-top: var(--space-3, 12px);
+  border-top: 1px solid var(--borderSubtle, #e4e4e7);
+}
+
+.mcp-settings__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  flex-wrap: wrap;
+}
+
+.mcp-settings__subtitle {
+  margin: 0;
+  font-size: var(--fontSize-base, 1rem);
+  font-weight: 600;
+  color: var(--text, #18181b);
+}
+
+.mcp-settings__empty {
+  margin: 0;
+  font-size: var(--fontSize-sm, 0.875rem);
+  color: var(--textSecondary, #71717a);
+}
+
+.mcp-settings__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.mcp-settings__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px);
+  background: var(--fillSecondary, var(--surfaceInset, #f4f4f5));
+  border: 1px solid var(--borderSubtle, #e4e4e7);
+  border-radius: var(--radius-md, 8px);
+}
+
+.mcp-settings__item-main {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.mcp-settings__item-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2, 8px);
+  font-size: var(--fontSize-sm, 0.875rem);
+  font-weight: 600;
+  color: var(--text, #18181b);
+}
+
+.mcp-settings__item-meta,
+.mcp-settings__item-tools {
+  margin: 0;
+  font-size: var(--fontSize-xs, 0.75rem);
+  line-height: var(--leading-normal, 1.5);
+  color: var(--textSecondary, #71717a);
+}
+
+.mcp-settings__item-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2, 8px);
+}
+
+.mcp-settings__form,
+.mcp-settings__fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  min-width: 0;
+}
+
+.mcp-settings__fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.mcp-settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 6px);
+  font-size: var(--fontSize-sm, 0.875rem);
+  font-weight: 500;
+  color: var(--text, #18181b);
+}
+
+.mcp-settings__hint {
+  margin: 0;
+  font-size: var(--fontSize-xs, 0.75rem);
+  font-weight: 400;
+  line-height: var(--leading-normal, 1.45);
+  color: var(--textSecondary, #71717a);
+}
+
+.mcp-settings__textarea,
+.mcp-settings__select {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--surface, var(--surfaceCard, #ffffff));
+  border: 1px solid var(--borderSubtle, #d4d4d8);
+  border-radius: var(--radius-md, 8px);
+  color: var(--text, #18181b);
+  font-size: var(--fontSize-sm, 0.875rem);
+  font-family: inherit;
+  outline: none;
+}
+
+.mcp-settings__textarea {
+  min-height: 72px;
+  resize: vertical;
+  font-family: var(--font-mono, monospace);
+}
+
+.mcp-settings__textarea::placeholder {
+  color: var(--textTertiary, #a1a1aa);
+  font-family: var(--font-sans, inherit);
+}
+
+.mcp-settings__textarea:focus,
+.mcp-settings__select:focus {
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px var(--focusRing, rgba(37, 99, 235, 0.16));
+}
+
+.mcp-settings__check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  font-size: var(--fontSize-sm, 0.875rem);
+  color: var(--text, #18181b);
+  cursor: pointer;
+}
+
+.mcp-settings__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2, 8px);
+  flex-wrap: wrap;
+}
+
+.mcp-settings__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface, var(--surfaceCard, #ffffff));
+  color: var(--text, #18181b);
+  border: 1px solid var(--borderSubtle, #d4d4d8);
+  border-radius: var(--radius-md, 8px);
+  font-size: var(--fontSize-xs, 0.75rem);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.mcp-settings__btn:hover:not(:disabled) {
+  background: var(--fillSecondary, var(--surfaceInset, #f4f4f5));
+}
+
+.mcp-settings__btn--danger {
+  color: var(--danger, var(--error, #dc2626));
+  border-color: color-mix(in srgb, var(--danger, var(--error, #ef4444)) 35%, transparent);
+}
+
+.mcp-settings__btn--danger-confirm {
+  background: var(--danger, var(--error, #dc2626));
+  color: var(--onPrimary, #ffffff);
+  border-color: transparent;
+}
+
+.mcp-settings__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.mcp-settings :is(input, select, textarea, button, a):focus-visible {
+  outline: 2px solid var(--primary, #2563eb);
+  outline-offset: 2px;
+}
+
+.mcp-settings__status {
+  margin: 0;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  border-radius: var(--radius-md, 8px);
+  background: var(--successGhost, rgba(16, 185, 129, 0.12));
+  border: 1px solid color-mix(in srgb, var(--success, #10b981) 30%, transparent);
+  color: var(--success, #059669);
+  font-size: var(--fontSize-xs, 0.75rem);
+  line-height: var(--leading-normal, 1.5);
+}

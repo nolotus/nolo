@@ -58,6 +58,7 @@ export const TOOL_PACKS = {
     "applyLineEdits",
     "codeSearch",
     "globFiles",
+    "searchFiles",
     "execShell",
     "launchProcess",
     "listProcesses",

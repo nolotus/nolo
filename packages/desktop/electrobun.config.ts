@@ -4,12 +4,12 @@ import { DESKTOP_APP_VERSION } from "./desktopVersion";
 import { resolveMacSigningPlan } from "./scripts/macSigningPlan";
 
 /**
- * Minimum supported electrobun: 2.0.4.
+ * Minimum supported electrobun: 2.0.5.
  *
  * 2.0.2 first carried the upstream fix that makes the native websocket server
  * fall through to the next free port instead of crashing on Windows "port
- * already in use" (TCP 50000). We now require 2.0.4 because that is the
- * release we pin, build and test against: it is paired with hutch 0.28.1, it
+ * already in use" (TCP 50000). We now require 2.0.5 because that is the
+ * release we pin, build and test against: it is paired with hutch 0.28.2, it
  * ships USTAR release archives (the installer/updater extractor cannot read
  * GNU longname records), and its devkit is the one projected into
  * `.hutch/devkit`.
@@ -17,7 +17,7 @@ import { resolveMacSigningPlan } from "./scripts/macSigningPlan";
  * The npm dependency AND the `electrobun.version` pin in `hutch.config.ts`
  * must move together: the npm package version decides which Hutch release
  * the bootstrap downloads, the pin decides which devkit Hutch projects.
- * Do not lower either below 2.0.4.
+ * Do not lower either below 2.0.5.
  */
 
 /**

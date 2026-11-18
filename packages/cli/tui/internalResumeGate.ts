@@ -113,7 +113,18 @@ export function classifyInternalResumeHeadGate(
   if (!head) return "empty-queue";
   const event = head.event;
   if (!event || typeof event !== "object") return "head-not-completion";
-  if ((event as { kind?: unknown }).kind !== "child-run-completed") {
+  const kind = (event as { kind?: unknown }).kind;
+  if (kind === "background-task-completed") {
+    if (!dialogId) return "head-not-this-dialog";
+    const ownerDialogId =
+      (event as { ownerDialogId?: unknown; parentDialogId?: unknown }).ownerDialogId ??
+      (event as { parentDialogId?: unknown }).parentDialogId;
+    if (ownerDialogId !== undefined && ownerDialogId !== dialogId) {
+      return "head-not-this-dialog";
+    }
+    return null;
+  }
+  if (kind !== "child-run-completed") {
     return "head-not-completion";
   }
   const runs = (event as { runs?: unknown }).runs;

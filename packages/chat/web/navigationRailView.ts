@@ -1,4 +1,5 @@
 import { isSpaceRoutePath } from "render/layout/mainLayoutViewMode";
+import { isRoutableContentActive } from "create/space/contentKeyUtils";
 
 /**
  * Navigation V2 — primary Rail destinations and Home sub-views.
@@ -76,4 +77,57 @@ export function resolveHomeView(_value: unknown): HomeView {
 export function needsDeferredScopeReset(pathname: string | undefined | null): boolean {
   if (!pathname) return false;
   return isSpaceRoutePath(pathname);
+}
+
+export interface RailPromotedShortcut {
+  readonly key: string;
+  readonly type: string;
+  readonly path: string;
+}
+
+const pathOf = (to: string): string => to.split(/[?#]/)[0];
+
+/**
+ * Arbitrate the single highlighted entry on the primary Rail.
+ *
+ * Specificity wins: when the current route matches a valid promoted shortcut
+ * on the Rail, that shortcut owns the highlight and `home` yields (`activeView: null`),
+ * while `resolveRailView` still returns `"home"` so the secondary Context column
+ * stays on the Home workspace list without jumping.
+ */
+export function resolveRailSelection({
+  pathname,
+  railView,
+  promoted,
+  favoriteKeys,
+  userId,
+}: {
+  pathname: string | undefined | null;
+  railView?: RailView;
+  promoted: readonly RailPromotedShortcut[];
+  favoriteKeys: ReadonlySet<string>;
+  userId?: string | null;
+}): {
+  activeView: RailView | null;
+  activeQuickKey: string | null;
+} {
+  const destination = railView ?? resolveRailView(pathname);
+  if (destination !== "home" || !pathname) {
+    return { activeView: destination, activeQuickKey: null };
+  }
+  for (const item of promoted) {
+    if (!favoriteKeys.has(item.key)) continue;
+    if (
+      pathOf(item.path) === pathname ||
+      isRoutableContentActive({
+        contentKey: item.key,
+        type: item.type,
+        userId,
+        currentPath: pathname,
+      })
+    ) {
+      return { activeView: null, activeQuickKey: item.key };
+    }
+  }
+  return { activeView: destination, activeQuickKey: null };
 }

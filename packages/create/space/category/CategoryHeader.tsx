@@ -7,6 +7,7 @@ import {
   LuPencil,
   LuTrash2,
   LuChevronDown,
+  LuFolder,
 } from "react-icons/lu";
 import {
   updateCategoryName,
@@ -190,8 +191,10 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
     [canDrag, handleDragStart, handleDragEnd]
   );
 
+  const isEmpty = itemCount === 0;
   const headerClass = [
     "CategoryHeader",
+    isEmpty && "CategoryHeader--empty",
     isEditing && "CategoryHeader--editing",
     isDragging && "CategoryHeader--dragging",
     isCreateMenuOpen && "is-menu-open",
@@ -204,10 +207,10 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
       <div
         className={headerClass}
         onClick={handleSectionClick}
-        style={{ cursor: isEditing ? "default" : "pointer" }}
+        style={{ cursor: isEditing || isEmpty ? "default" : "pointer" }}
       >
         <button
-          className={`CategoryHeader__collapse-btn ${isCollapsed ? "is-collapsed" : ""}`}
+          className={`CategoryHeader__collapse-btn ${isCollapsed ? "is-collapsed" : ""} ${isEmpty ? "is-empty" : ""}`}
           onClick={(e) => {
             e.stopPropagation();
             handleToggleCollapse();
@@ -216,9 +219,12 @@ const CategoryHeader: React.FC<CategoryHeaderProps> = ({
           aria-label={isCollapsed ? t("expand") : t("collapse")}
           aria-expanded={!isCollapsed}
           type="button"
-          style={{ visibility: !itemCount ? "hidden" : "visible" }}
         >
-          <LuChevronDown size={16} aria-hidden="true" />
+          {isEmpty ? (
+            <LuFolder size={13} aria-hidden="true" />
+          ) : (
+            <LuChevronDown size={15} aria-hidden="true" />
+          )}
         </button>
 
         {isEditing ? (

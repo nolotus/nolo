@@ -199,7 +199,10 @@ export function WorkDialogSpaceGroups({
                       "WorkSpaceGroup__workSpaceLabel",
                       sidebarStyles.workSpaceLabel,
                     )}
-                    title={group.label}
+                    title={t("workspace_enter_space_chat", {
+                      name: group.label,
+                      defaultValue: "{{name}}（进入空间对话）",
+                    })}
                   >
                     {group.label}
                   </a>
@@ -229,8 +232,14 @@ export function WorkDialogSpaceGroups({
                     {...withLiteralClass(
                       "WorkSpaceGroup__workSpaceLabel",
                       sidebarStyles.workSpaceLabel,
+                      sidebarStyles.workSpaceFilterLabel,
+                      homeScope?.kind === "noSpace" &&
+                        sidebarStyles.workSpaceFilterLabelActive,
                     )}
-                    title={group.label}
+                    title={t(
+                      "workspace_filter_unassociated",
+                      "筛选仅看空间外内容",
+                    )}
                   >
                     {group.label}
                   </button>
@@ -245,7 +254,7 @@ export function WorkDialogSpaceGroups({
                     {group.label}
                   </span>
                 )}
-                {!expanded && group.rows.length > 0 && (
+                {group.rows.length > 0 && (
                   <span
                     {...withLiteralClass(
                       "WorkSpaceGroup__badge",

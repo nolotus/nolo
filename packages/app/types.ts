@@ -462,6 +462,7 @@ export interface SpaceMemberWithSpaceInfo {
   createdAt?: number | string;
   updatedAt?: number | string;
   type?: DataType;
+  categories?: Record<string, { name: string; order: number }>;
 }
 
 type MessageContentPartText = {

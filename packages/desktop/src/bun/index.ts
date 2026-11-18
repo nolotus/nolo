@@ -13,11 +13,6 @@ import {
 } from "./serverChildLifecycle";
 import { fileURLToPath } from "node:url";
 import { dlopen } from "bun:ffi";
-import { readXPostWithBridge } from "../../../../packages/integrations/x-reader/bridge/readXPostWithBridge";
-import {
-  readXhsProfileWithBridge,
-  sanitizeXhsBridgeOptions,
-} from "../../../../packages/integrations/xhs-reader/bridge/readXhsProfileWithBridge";
 import { isRecord } from "core/isRecord";
 import {
   buildDesktopUpdateShutdownStatusEntry,
@@ -52,6 +47,7 @@ import {
   DESKTOP_SECOND_INSTANCE_EXIT_CODE,
 } from "./singleInstanceLock";
 import { primeElectrobunInstallMetadata } from "./electrobunInstallMetadata";
+import { resolveDesktopWindowTitle } from "./desktopWindowTitle";
 import { migrateLegacyDesktopChannelData } from "./desktopDataDirMigration";
 
 const desktopEntrypointArgs = process.argv.slice(2);
@@ -451,6 +447,9 @@ installDesktopFileLogger();
 registerDesktopFatalDiagnostics();
 
 if (process.env.NOLO_X_READER_CHILD_REQUEST) {
+  const { readXPostWithBridge } = await import(
+    "../../../../packages/integrations/x-reader/bridge/readXPostWithBridge"
+  );
   const request = JSON.parse(
     Buffer.from(process.env.NOLO_X_READER_CHILD_REQUEST, "base64").toString("utf8"),
   );
@@ -464,6 +463,9 @@ if (process.env.NOLO_X_READER_CHILD_REQUEST) {
 }
 
 if (process.env.NOLO_XHS_READER_CHILD_REQUEST) {
+  const { readXhsProfileWithBridge, sanitizeXhsBridgeOptions } = await import(
+    "../../../../packages/integrations/xhs-reader/bridge/readXhsProfileWithBridge"
+  );
   const request = JSON.parse(
     Buffer.from(process.env.NOLO_XHS_READER_CHILD_REQUEST, "base64").toString("utf8"),
   );
@@ -1022,6 +1024,11 @@ const waitForServer = async (url: string, retries = 80, intervalMs = 250) => {
 const channel = await Updater.localInfo.channel();
 process.env.NOLO_DESKTOP_CHANNEL = channel;
 const isDev = channel === "dev";
+const desktopWindowTitle = resolveDesktopWindowTitle({
+  packagedResourcesDir: PACKAGED_RESOURCES_DIR,
+  isDev,
+  developmentVersion: process.env.NOLO_DESKTOP_APP_VERSION?.trim() || "0.0.0-dev",
+});
 if (!isDev) ensureLinuxDesktopEntry({ resourcesDir: PACKAGED_RESOURCES_DIR });
 const isHeadlessProbe = process.env.NOLO_DESKTOP_HEADLESS === "1";
 const isSmokeProbe = process.env.NOLO_DESKTOP_SMOKE_PROBE === "1";
@@ -1264,7 +1271,7 @@ if (e2eInitialPath !== "/") {
 const mainWindow = (() => {
   try {
     const created = new BrowserWindow({
-      title: "Nolo Desktop",
+      title: desktopWindowTitle,
       url: initialWindowUrl,
       frame: initialFrame,
       // Native decoration everywhere: no injected shell, and the compositor

@@ -46,10 +46,6 @@ const ALLOWED_RPC_ACTIONS = new Set([
   "mouse_click",
   "detach",
   "reload_extension",
-  "douyin_delete_one",
-  "douyin_delete_one_v2",
-  "douyin_rect_row",
-  "douyin_rect_confirm",
 ]);
 const ignoreStdinCloseForTest = process.env.NOLO_CHROME_CONNECTOR_IGNORE_STDIN_CLOSE_FOR_TEST === "1";
 const pending = new Map();

@@ -19,9 +19,10 @@ import {
   shouldCollapsePaste,
 } from "core/collapsedPaste";
 import { boxGlyphs, displayWidth, fitAnsiLine, resolveBoxCharset, stripAnsi, visibleWidth, wrapTextToLines } from "./tuiAnsi";
+import { parseColorSchemeReport, parseOsc11Background, type DetectedTerminalBackground } from "./detectBackground";
 import { consumeSgrMouseSequence } from "./tuiMouse";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
-import { themeColorSequence, themeText } from "./theme";
+import { type TuiBrightness, themeColorSequence, themeText } from "./theme";
 import { getCliLocale, t } from "./i18n";
 import {
   getCompletionMenuSelection,
@@ -56,6 +57,7 @@ function normalizePasteNewlines(text: string): string {
 const altScreenOn = new WeakMap<NodeJS.WritableStream, boolean>();
 const altScreenInvalidators = new WeakMap<object, Set<() => void>>();
 const barCursorActive = new WeakSet<NodeJS.WritableStream>();
+const colorSchemeNotifyActive = new WeakSet<NodeJS.WritableStream>();
 
 function notifyAltScreenInvalidators(output: object) {
   const set = altScreenInvalidators.get(output);
@@ -94,6 +96,10 @@ export function leaveAltScreen(output: NodeJS.WritableStream): boolean {
   if (barCursorActive.has(output)) {
     barCursorActive.delete(output);
     output.write("\x1b[0 q");
+  }
+  if (colorSchemeNotifyActive.has(output)) {
+    colorSchemeNotifyActive.delete(output);
+    output.write("\x1b[?2031l");
   }
   if (!altScreenOn.get(output)) return false;
   altScreenOn.set(output, false);
@@ -227,6 +233,11 @@ type FixedInputConfig = {
    * 目录候选渲染；缺省时仅显示命令名补全候选。
    */
   getCwd?: () => string | undefined;
+  /**
+   * Enable terminal-pushed color-scheme notifications (DECSET 2031) while the
+   * composer owns the terminal, resetting cleanly on pause / disable / exit.
+   */
+  autoThemeNotifications?: boolean;
 };
 
 export function createFixedInput(
@@ -338,7 +349,7 @@ export function createFixedInput(
     // 下 `─` 占 2 列，`repeat(cols)` 会变成 2*cols 格把输入区撑破，故退化为 ascii `-`。
     const ruleGlyph = boxGlyphs(resolveBoxCharset()).h;
     const rule = colorEnabled
-      ? `\x1b[2m${themeColorSequence("chrome")}${ruleGlyph.repeat(paintWidth)}\x1b[0m`
+      ? `${themeColorSequence("chrome")}${ruleGlyph.repeat(paintWidth)}\x1b[0m`
       : ruleGlyph.repeat(paintWidth);
     bodySections.push(rule);
 
@@ -586,7 +597,7 @@ export function createFixedInput(
     if (taskEntries.length > 0) {
       const ruleGlyph = boxGlyphs(resolveBoxCharset()).h;
       const topRule = topColorEnabled
-        ? `\x1b[2m${themeColorSequence("chrome")}${ruleGlyph.repeat(taskWidth)}\x1b[0m`
+        ? `${themeColorSequence("chrome")}${ruleGlyph.repeat(taskWidth)}\x1b[0m`
         : ruleGlyph.repeat(taskWidth);
       taskLines.push(topRule);
     }
@@ -658,6 +669,16 @@ export function createFixedInput(
     barCursorActive.delete(output);
     write("\x1b[0 q");
   };
+  const enableColorSchemeNotify = () => {
+    if (!config.autoThemeNotifications || colorSchemeNotifyActive.has(output)) return;
+    colorSchemeNotifyActive.add(output);
+    write("\x1b[?2031h");
+  };
+  const disableColorSchemeNotify = () => {
+    if (!colorSchemeNotifyActive.has(output)) return;
+    colorSchemeNotifyActive.delete(output);
+    write("\x1b[?2031l");
+  };
 
   return {
     active: true,
@@ -666,6 +687,7 @@ export function createFixedInput(
       saveCursor();
       setScrollRegion(inputLines);
       enableMouse();
+      enableColorSchemeNotify();
       setBarCursor();
     },
     enterOutputMode(_submittedText: string) {
@@ -686,6 +708,7 @@ export function createFixedInput(
       paused = true;
       invalidateComposerCache();
       disableMouse();
+      disableColorSchemeNotify();
       resetScrollRegion();
       resetCursorStyle();
     },
@@ -695,6 +718,7 @@ export function createFixedInput(
       resetHistoryFrameDiffCache(output);
       setScrollRegion(inputLines);
       enableMouse();
+      enableColorSchemeNotify();
       setBarCursor();
       const scrollBottom = Math.max(1, getRows() - inputLines);
       write(`\x1b[${scrollBottom};1H\n`);
@@ -706,12 +730,14 @@ export function createFixedInput(
       saveCursor();
       setScrollRegion(inputLines);
       enableMouse();
+      enableColorSchemeNotify();
       setBarCursor();
     },
     disable() {
       setTopReservedRows(output, 0);
       invalidatorSet?.delete(invalidateComposerCache);
       disableMouse();
+      disableColorSchemeNotify();
       resetScrollRegion();
       resetCursorStyle();
       // Leave the alternate screen last: mouse reporting and the scroll
@@ -860,9 +886,15 @@ function emitPlainRunAsTokens(run: string): string[] {
   return tokens;
 }
 
+export type SplitRawInputOptions = {
+  forceCompleteOpenPaste?: boolean;
+  onOsc11Background?: (detected: DetectedTerminalBackground) => void;
+  onColorSchemeReport?: (brightness: TuiBrightness) => void;
+};
+
 export function splitRawInputWithTail(
   input: string,
-  options?: { forceCompleteOpenPaste?: boolean },
+  options?: SplitRawInputOptions,
 ): { tokens: string[]; tail: string } {
   const tokens: string[] = [];
   for (let index = 0; index < input.length; ) {
@@ -873,6 +905,10 @@ export function splitRawInputWithTail(
     if (oscEnd !== null) {
       // Terminal OSC reply (e.g. \x1b]11;rgb:… from a background query) — skip
       // wholesale, it is not a keystroke.
+      if (options?.onOsc11Background) {
+        const bg = parseOsc11Background(input.slice(index, oscEnd));
+        if (bg) options.onOsc11Background(bg);
+      }
       index = oscEnd;
       continue;
     }
@@ -924,6 +960,12 @@ export function splitRawInputWithTail(
     }
     const csi = readCsiSequence(input, index);
     if (csi) {
+      const scheme = parseColorSchemeReport(csi);
+      if (scheme) {
+        options?.onColorSchemeReport?.(scheme);
+        index += csi.length;
+        continue;
+      }
       tokens.push(csi);
       index += csi.length;
       continue;
@@ -963,6 +1005,7 @@ export type RawInputDecoder = {
   (chunk: Buffer | string): void;
   flush(): void;
   destroy(): void;
+  hasPendingInput(): boolean;
 };
 
 /**
@@ -996,6 +1039,8 @@ export function createRawInputDecoder(
      * a real Esc keypress. Defaults to 120ms.
      */
     mouseSplitGraceMs?: number;
+    onOsc11Background?: (detected: DetectedTerminalBackground) => void;
+    onColorSchemeReport?: (brightness: TuiBrightness) => void;
   },
 ): RawInputDecoder {
   const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
@@ -1050,6 +1095,8 @@ export function createRawInputDecoder(
     pendingBuffer = "";
     const { tokens, tail } = splitRawInputWithTail(textToFlush, {
       forceCompleteOpenPaste,
+      onOsc11Background: options?.onOsc11Background,
+      onColorSchemeReport: options?.onColorSchemeReport,
     });
     for (const token of tokens) {
       onToken(token);
@@ -1091,7 +1138,10 @@ export function createRawInputDecoder(
         PASTE_START.length,
       );
       if (endPos === -1) return;
-      const { tokens, tail } = splitRawInputWithTail(pendingBuffer);
+      const { tokens, tail } = splitRawInputWithTail(pendingBuffer, {
+        onOsc11Background: options?.onOsc11Background,
+        onColorSchemeReport: options?.onColorSchemeReport,
+      });
       pendingBuffer = tail;
       for (const token of tokens) onToken(token);
       if (pendingBuffer.startsWith(PASTE_START)) return;
@@ -1099,7 +1149,10 @@ export function createRawInputDecoder(
     }
 
     if (pendingBuffer.includes("\x1b")) {
-      const { tokens, tail } = splitRawInputWithTail(pendingBuffer);
+      const { tokens, tail } = splitRawInputWithTail(pendingBuffer, {
+        onOsc11Background: options?.onOsc11Background,
+        onColorSchemeReport: options?.onColorSchemeReport,
+      });
       pendingBuffer = tail;
       for (const token of tokens) onToken(token);
       if (pendingBuffer.startsWith(PASTE_START)) return;
@@ -1179,6 +1232,7 @@ export function createRawInputDecoder(
     clearTimer();
     pendingBuffer = "";
   };
+  decodeFn.hasPendingInput = () => pendingBuffer.length > 0;
 
   return decodeFn;
 }

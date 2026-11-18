@@ -5,6 +5,10 @@ import { fetchFromServer, getAllServers } from "database/actions/common";
 import { normalizeKnownServerOrigin } from "database/config";
 import { isTombstoneRecord } from "database/tombstones";
 import { selectIdentityToken, selectIdentityUserId } from "identity/selectors";
+import {
+  clearSpaceDirectoryScanCache,
+  scanSpaceDirectoryOnServer,
+} from "./spaceDirectoryScan";
 
 export interface SpaceRemoteAuth {
   token: string | null;
@@ -75,7 +79,7 @@ async function fetchMembershipsFromServer(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, pureRead: true }),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -192,6 +196,60 @@ export const fetchAuthoritativeRemoteSpace = async ({
       }
     }
     return space;
+  }
+  return null;
+};
+
+export const invalidateSpaceDirectoryScanCache = (spaceId?: string): void => {
+  clearSpaceDirectoryScanCache(spaceId);
+};
+
+/**
+ * Incremental Space directory reader powered by `GET /api/v1/db/scan` (`sp:{spaceId}:*` + `since`).
+ * Smoothly falls back to `fetchAuthoritativeRemoteSpace` when talking to an older server without `/db/scan`,
+ * while never bypassing 401/403 authorization rejections.
+ */
+export const fetchAuthoritativeSpaceDirectory = async ({
+  servers,
+  token,
+  userId,
+  spaceId,
+}: {
+  servers: string[];
+  token: string;
+  userId: string;
+  spaceId: string;
+}): Promise<SpaceData | null> => {
+  const normalizedSpaceId = normalizeSpaceId(spaceId);
+  if (!normalizedSpaceId) return null;
+
+  let sawForbidden: string | null = null;
+  for (const server of servers) {
+    const outcome = await scanSpaceDirectoryOnServer({
+      server,
+      token,
+      userId,
+      spaceId: normalizedSpaceId,
+    });
+    if (outcome.status === "unsupported") {
+      return fetchAuthoritativeRemoteSpace({
+        servers,
+        token,
+        userId,
+        spaceId: normalizedSpaceId,
+      });
+    }
+    if (outcome.status === "forbidden") {
+      sawForbidden = outcome.message;
+      continue;
+    }
+    if (outcome.record) {
+      return outcome.record;
+    }
+  }
+
+  if (sawForbidden) {
+    throw new Error(sawForbidden);
   }
   return null;
 };

@@ -59,19 +59,39 @@ type PaletteEntry = { hex: string; ansiFallback: string };
 export type TuiThemeColors = Record<TuiThemeToken, PaletteEntry>;
 
 export const THEME_PALETTES: Record<string, Record<TuiBrightness, TuiThemeColors>> = {
+  nature: {
+    light: {
+      accent: { hex: "1A5FA4", ansiFallback: "\x1b[34m" }, // deep ocean ink (--hl-blue-text, 6.53:1 on #FFFFFF)
+      chrome: { hex: "78828E", ansiFallback: "\x1b[90m" }, // mist slate (3.90:1 on #FFFFFF — structural rules/comments recede cleanly)
+      success: { hex: "267347", ansiFallback: "\x1b[32m" }, // pine forest green (5.61:1 on #FFFFFF)
+      warning: { hex: "966014", ansiFallback: "\x1b[33m" }, // warm sand amber (5.38:1 on #FFFFFF, never muddy yellow)
+      info: { hex: "1B6F8A", ansiFallback: "\x1b[36m" }, // fjord cyan-blue (5.77:1 on #FFFFFF, distinct from accent)
+      danger: { hex: "BE3428", ansiFallback: "\x1b[31m" }, // terracotta red (5.68:1 on #FFFFFF)
+      muted: { hex: "525D6B", ansiFallback: "\x1b[90m" }, // mountain granite (6.73:1 on #FFFFFF — crisp secondary copy)
+    },
+    dark: {
+      accent: { hex: "6AA8EA", ansiFallback: "\x1b[94m" }, // moonlight ocean (--hl-blue dark, 6.89:1 on #1C1C1F)
+      chrome: { hex: "6E7683", ansiFallback: "\x1b[90m" }, // night stone (3.69:1 on #1C1C1F — clear rules/comments below muted)
+      success: { hex: "72C488", ansiFallback: "\x1b[32m" }, // alpine meadow green (8.22:1 on #1C1C1F)
+      warning: { hex: "DDA955", ansiFallback: "\x1b[33m" }, // sunset sand gold (7.98:1 on #1C1C1F)
+      info: { hex: "5EB5C8", ansiFallback: "\x1b[36m" }, // glacier stream cyan (7.36:1 on #1C1C1F)
+      danger: { hex: "E6766B", ansiFallback: "\x1b[31m" }, // warm coral clay (5.86:1 on #1C1C1F)
+      muted: { hex: "9AA3B0", ansiFallback: "\x1b[90m" }, // silver mist (6.67:1 on #1C1C1F — legible status & tool details)
+    },
+  },
   trail: {
     light: {
       accent: { hex: "2E7DB5", ansiFallback: "\x1b[34m" }, // ocean blue
       chrome: { hex: "768594", ansiFallback: "\x1b[90m" }, // slate — two steps below app placeholder A3B0BD (was 8A97A5); rules/tool markers on white need the extra notch
       success: { hex: "3F8F5C", ansiFallback: "\x1b[32m" }, // moss green
       warning: { hex: "9A6A1F", ansiFallback: "\x1b[33m" }, // deeper amber — B57F2E still read as yellow/washed on white (H2 headers like ## Plan floated); 9A6A1F raises contrast
-      info: { hex: "4A9FD4", ansiFallback: "\x1b[36m" }, // sky blue
+      info: { hex: "2376A6", ansiFallback: "\x1b[36m" }, // deepened sky blue (5.05:1 on white; 4A9FD4 was only 3.0:1)
       danger: { hex: "C45C4A", ansiFallback: "\x1b[31m" }, // reddish
       muted: { hex: "5E6A78", ansiFallback: "\x1b[90m" }, // denser slate — 687584 read too blue in dense prose (inline code/tool labels); 5E6A78 pulls blue down while staying darker than the old value
     },
     dark: {
       accent: { hex: "5BA3D9", ansiFallback: "\x1b[94m" }, // trail dark primary (was wrongly copied from catppuccin 89B4FA)
-      chrome: { hex: "6C7086", ansiFallback: "\x1b[90m" },
+      chrome: { hex: "747E91", ansiFallback: "\x1b[90m" },
       success: { hex: "5CB87A", ansiFallback: "\x1b[32m" }, // trail dark success (was A6E3A1)
       warning: { hex: "E6B35C", ansiFallback: "\x1b[33m" }, // trail dark warning (was F9E2AF)
       info: { hex: "6BB8E8", ansiFallback: "\x1b[36m" }, // trail dark info (was 94E2D5)
@@ -82,16 +102,16 @@ export const THEME_PALETTES: Record<string, Record<TuiBrightness, TuiThemeColors
   catppuccin: {
     light: {
       accent: { hex: "0969DA", ansiFallback: "\x1b[34m" },
-      chrome: { hex: "57606A", ansiFallback: "\x1b[90m" },
+      chrome: { hex: "77808B", ansiFallback: "\x1b[90m" }, // lighter than muted so structural chrome recedes below secondary text
       success: { hex: "116329", ansiFallback: "\x1b[32m" },
       warning: { hex: "9A6700", ansiFallback: "\x1b[33m" },
-      info: { hex: "0969DA", ansiFallback: "\x1b[36m" },
+      info: { hex: "0E7490", ansiFallback: "\x1b[36m" }, // distinct cyan-teal rather than duplicating accent
       danger: { hex: "CF222E", ansiFallback: "\x1b[31m" },
-      muted: { hex: "6E7781", ansiFallback: "\x1b[90m" },
+      muted: { hex: "57606A", ansiFallback: "\x1b[90m" },
     },
     dark: {
       accent: { hex: "89B4FA", ansiFallback: "\x1b[94m" }, // Catppuccin Mocha Blue
-      chrome: { hex: "6C7086", ansiFallback: "\x1b[90m" },
+      chrome: { hex: "7F849C", ansiFallback: "\x1b[90m" },
       success: { hex: "A6E3A1", ansiFallback: "\x1b[32m" },
       warning: { hex: "F9E2AF", ansiFallback: "\x1b[33m" },
       info: { hex: "89B4FA", ansiFallback: "\x1b[36m" },
@@ -181,7 +201,7 @@ export const THEME_PALETTES: Record<string, Record<TuiBrightness, TuiThemeColors
   },
 };
 
-let activeThemeName = "catppuccin";
+let activeThemeName = "nature";
 
 export function getActiveThemeName(): string {
   return activeThemeName;
@@ -201,22 +221,52 @@ let activeThemeMode: TuiThemeMode = "terminal";
 /** Last resolved/probed brightness, separate from the user's mode choice. */
 let resolvedBrightness: TuiBrightness | null = null;
 
+/**
+ * True only when the user explicitly chose terminal-native rendering (env
+ * `NOLO_TUI_THEME=terminal` or `/theme terminal` in-session) rather than the
+ * process default. An explicit choice keeps the documented ANSI-indexed
+ * contract so the terminal can re-theme already-painted cells; the default
+ * (no explicit choice) gets canvas-adaptive truecolor once a canvas is known.
+ */
+let terminalModeExplicit = false;
+
 export function getActiveThemeMode(): TuiThemeMode {
   return activeThemeMode;
 }
 
-export function setActiveThemeMode(mode: TuiThemeMode) {
+export function setActiveThemeMode(
+  mode: TuiThemeMode,
+  options?: { explicit?: boolean },
+) {
   activeThemeMode = mode;
-  if (mode === "terminal") resolvedBrightness = null;
+  if (mode === "terminal") {
+    resolvedBrightness = null;
+    // Only a user-facing choice (`/theme terminal|auto`, or the env var, which
+    // is resolved by shouldUseTruecolorTokens) counts as explicit. Startup also
+    // calls this setter with the resolved mode, so inferring "explicit" from the
+    // call itself would silently disable canvas-adaptive colors in production.
+    terminalModeExplicit = options?.explicit === true;
+  } else {
+    terminalModeExplicit = false;
+  }
 }
 
 export function getActiveBrightness(): TuiBrightness | null {
   return activeThemeMode === "terminal" ? null : activeThemeMode;
 }
 
-/** Back-compatible mode setter: null means terminal-native mode. */
-export function setActiveBrightness(brightness: TuiBrightness | null) {
-  setActiveThemeMode(brightness ?? "terminal");
+/**
+ * Back-compatible mode setter: null means terminal-native mode.
+ *
+ * `options.explicit` must be set by user-facing call sites (`/theme terminal`,
+ * `/theme auto`); startup and lifecycle resets leave it off so the default
+ * terminal mode keeps canvas-adaptive truecolor.
+ */
+export function setActiveBrightness(
+  brightness: TuiBrightness | null,
+  options?: { explicit?: boolean },
+) {
+  setActiveThemeMode(brightness ?? "terminal", options);
 }
 
 const TRUECOLOR_TERM_PROGRAMS = new Set([
@@ -228,6 +278,7 @@ const TRUECOLOR_TERM_PROGRAMS = new Set([
   "tabby",
   "rio",
   "warpterminal",
+  "ptyxis",
 ]);
 
 /**
@@ -245,6 +296,9 @@ export function supportsTruecolor(env: Record<string, string | undefined> = proc
   if (explicit === "0" || explicit === "false") return false;
   // Windows Terminal identifies sessions without requiring COLORTERM.
   if ((env.WT_SESSION ?? "").trim()) return true;
+  if ((env.PTYXIS_VERSION ?? "").trim()) return true;
+  const vteVersion = Number.parseInt((env.VTE_VERSION ?? "").trim(), 10);
+  if (Number.isFinite(vteVersion) && vteVersion >= 3600) return true;
   if (/truecolor|24bit/i.test(env.COLORTERM ?? "")) return true;
   if (/direct|24bit/i.test(env.TERM ?? "")) return true;
   const program = (env.TERM_PROGRAM ?? "").toLowerCase();
@@ -355,6 +409,172 @@ function hexToSgr(hex: string): string {
   return `\x1b[${hexToSgrParams(hex)}m`;
 }
 
+/** WCAG 2.1 sRGB relative luminance in [0, 1]. */
+export function relativeLuminanceFromHex(hex: string): number | null {
+  const channels = readHexChannels(hex.replace(/^#/, "").toUpperCase());
+  if (!channels) return null;
+  const linearize = (byte: number) => {
+    const s = byte / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * linearize(channels[0]) +
+    0.7152 * linearize(channels[1]) +
+    0.0722 * linearize(channels[2])
+  );
+}
+
+/** WCAG 2.1 contrast ratio in [1, 21], or null for malformed hex. */
+export function wcagContrastRatio(fgHex: string, bgHex: string): number | null {
+  const l1 = relativeLuminanceFromHex(fgHex);
+  const l2 = relativeLuminanceFromHex(bgHex);
+  if (l1 === null || l2 === null) return null;
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/**
+ * Poles the adaptor may blend toward. The hue-neutral pair is preferred; the
+ * pure extremes are the fallback when only they can reach the target contrast
+ * (mid-gray canvases where #0A0C10 tops out at ~4.4:1 but #000000 reaches 4.69:1).
+ */
+const POLE_LIGHT_NEUTRAL = "F7F9FC";
+const POLE_DARK_NEUTRAL = "0A0C10";
+const POLE_LIGHT_EXTREME = "FFFFFF";
+const POLE_DARK_EXTREME = "000000";
+
+function solveBlendForContrast(
+  sourceHex: string,
+  anchorHex: string,
+  canvasHex: string,
+  targetRatio: number,
+): string {  let lo = 0;
+  let hi = 1;
+  let best = sourceHex;
+  let bestErr = Math.abs((wcagContrastRatio(sourceHex, canvasHex) ?? targetRatio) - targetRatio);
+  for (let step = 0; step < 16; step++) {
+    const mid = (lo + hi) / 2;
+    const candidate = blendHex(anchorHex, sourceHex, mid);
+    const ratio = wcagContrastRatio(candidate, canvasHex) ?? targetRatio;
+    const err = Math.abs(ratio - targetRatio);
+    if (err < bestErr) {
+      bestErr = err;
+      best = candidate;
+    }
+    const anchorRatio = wcagContrastRatio(anchorHex, canvasHex) ?? targetRatio;
+    const sourceRatio = wcagContrastRatio(sourceHex, canvasHex) ?? targetRatio;
+    const increasing = anchorRatio >= sourceRatio;
+    if ((increasing && ratio < targetRatio) || (!increasing && ratio > targetRatio)) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return best;
+}
+
+/**
+ * Keep foreground tokens inside a readable contrast band on arbitrary real
+ * terminal canvases (Solarized #002B36/#FDF6E3, Tokyo Night #1A1B26/#E1E2E7,
+ * pure black #000000, GNOME #1C1C1F/#FFFFFF). Standard canvases already sit
+ * inside the band and pass through unchanged.
+ */
+export function adaptTokenHexToCanvas(
+  rawHex: string,
+  tokenKey: TuiThemeToken,
+  canvasHex: string,
+): string {
+  const normRaw = rawHex.replace(/^#/, "").toUpperCase();
+  const normCanvas = canvasHex.replace(/^#/, "").toUpperCase();
+  const canvasLum = relativeLuminanceFromHex(normCanvas);
+  const ratio = wcagContrastRatio(normRaw, normCanvas);
+  if (canvasLum === null || ratio === null) return normRaw;
+
+  if (tokenKey === "chrome") {
+    if (ratio < 3.25) return pushToContrast(normRaw, normCanvas, 3.7, 3.3);
+    if (ratio > 4.45) return solveBlendForContrast(normRaw, normCanvas, normCanvas, 3.85);
+    return normRaw;
+  }
+  if (tokenKey === "muted") {
+    // No floor degradation: secondary text wants the highest contrast the
+    // canvas allows, and it is a single token (nothing can collapse into it).
+    if (ratio < 5.2) return pushToContrast(normRaw, normCanvas, 6.1, 6.1);
+    if (ratio > 8.2) return solveBlendForContrast(normRaw, normCanvas, normCanvas, 6.6);
+    return normRaw;
+  }
+  if (ratio < 4.5) {
+    // Targets sit above their thresholds: solving at exactly 4.5 then rounding
+    // to 8-bit channels can land at 4.49.
+    return pushToContrast(normRaw, normCanvas, 4.85, 4.55);
+  }
+  return normRaw;
+}
+
+/**
+ * Poles ordered by the contrast each one can actually reach on this canvas,
+ * highest first. Hue-neutral poles come first *within the same direction* so
+ * standard canvases never get harsher pure black/white than needed; the pure
+ * extremes only win when they alone reach further (mid-gray canvases).
+ */
+function polesByReach(canvasHex: string): string[] {
+  const ranked = [
+    POLE_LIGHT_NEUTRAL,
+    POLE_DARK_NEUTRAL,
+    POLE_LIGHT_EXTREME,
+    POLE_DARK_EXTREME,
+  ].map((pole) => ({ pole, reach: wcagContrastRatio(pole, canvasHex) ?? 1 }));
+  const neutralFirst = (pole: string) =>
+    pole === POLE_LIGHT_NEUTRAL || pole === POLE_DARK_NEUTRAL ? 0 : 1;
+  ranked.sort((a, b) =>
+    a.reach !== b.reach ? b.reach - a.reach : neutralFirst(a.pole) - neutralFirst(b.pole),
+  );
+  return ranked.map((r) => r.pole);
+}
+
+/**
+ * Blend toward the strongest pole that can actually reach `target`. When no
+ * pole reaches the preferred target, retry at `floor` so tokens keep their
+ * hue separation instead of every semantic color collapsing to one pure
+ * black/white; only when even the floor is unreachable do we return the best
+ * achievable pole.
+ */
+function pushToContrast(
+  rawHex: string,
+  canvasHex: string,
+  target: number,
+  floor: number,
+): string {
+  const poles = polesByReach(canvasHex);
+  for (const pole of poles) {
+    if ((wcagContrastRatio(pole, canvasHex) ?? 1) > target) {
+      return solveBlendForContrast(rawHex, pole, canvasHex, target);
+    }
+  }
+  const best = poles[0]!;
+  if ((wcagContrastRatio(best, canvasHex) ?? 1) > floor) {
+    return solveBlendForContrast(rawHex, best, canvasHex, floor);
+  }
+  return best;
+}
+
+/**
+ * Decide between canvas-adaptive truecolor and the ANSI-16 fallback.
+ * Explicit terminal-native choices (env `NOLO_TUI_THEME=terminal` or an
+ * in-session `/theme terminal`) keep ANSI foregrounds; the untouched default
+ * uses truecolor once canvas evidence exists.
+ */
+function shouldUseTruecolorTokens(env: Record<string, string | undefined>): boolean {
+  if (!supportsTruecolor(env)) return false;
+  const explicit = (env.NOLO_TUI_THEME ?? "").trim().toLowerCase();
+  if (explicit === "terminal" || explicit === "ansi") return false;
+  if (resolveTuiThemeMode(env) !== "terminal") return true;
+  // In-session `/theme terminal` must behave exactly like the env var: ANSI
+  // indexed foregrounds, no fixed RGB, so the terminal keeps owning the palette.
+  if (terminalModeExplicit) return false;
+  return activeTerminalBaseHex !== null || detectColorFgBgBrightness(env) !== null;
+}
+
 /**
  * SGR *parameters* (no CSI wrapper) for a theme token — e.g. `'38;2;46;125;181'`
  * or `'90'`. This is the form lovely-mermaid's `AnsiTheme` consumes (its values
@@ -367,11 +587,15 @@ export function themeSgrParams(
   env: Record<string, string | undefined> = process.env,
   brightness: TuiBrightness = resolveTuiBrightness(env),
 ): string {
-  const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.trail;
+  const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.nature;
   const entry = palette[brightness][token];
-  return resolveTuiThemeMode(env) !== "terminal" && supportsTruecolor(env)
-    ? hexToSgrParams(entry.hex)
-    : entry.ansiFallback.slice(2, -1);
+  if (!shouldUseTruecolorTokens(env)) {
+    return entry.ansiFallback.slice(2, -1);
+  }
+  const effectiveHex = activeTerminalBaseHex
+    ? adaptTokenHexToCanvas(entry.hex, token, activeTerminalBaseHex)
+    : entry.hex;
+  return hexToSgrParams(effectiveHex);
 }
 
 export function themeColorSequence(
@@ -391,6 +615,7 @@ export function themeColorSequence(
  * background — enough to read as a chip, not enough to fight the text.
  */
 const SURFACE_HEX: Record<string, Record<TuiBrightness, string>> = {
+  nature: { light: "EBF0F5", dark: "262932" },
   trail: { light: "E4E8EC", dark: "313244" },
   catppuccin: { light: "E8ECF0", dark: "181825" },
   wave: { light: "E5E1D6", dark: "2A2A37" },
@@ -431,6 +656,9 @@ export function getActiveTerminalBaseHex(): string | null {
 /** Release all theme state owned by one TUI workspace lifecycle. */
 export function resetWorkspaceThemeState() {
   setActiveThemeMode("terminal");
+  // Startup/reset returns to the *default* terminal mode, which is not an
+  // explicit user choice: canvas-adaptive truecolor stays available.
+  terminalModeExplicit = false;
   setActiveTerminalBaseHex(null);
 }
 
@@ -513,24 +741,23 @@ export function diffLineSequences(
   env: Record<string, string | undefined> = process.env,
   brightness: TuiBrightness = resolveTuiBrightness(env),
 ): Record<DiffLineKind, DiffLineSequence> | null {
-  if (resolveTuiThemeMode(env) === "terminal") return null;
-  if (!supportsTruecolor(env)) return null;
+  if (resolveSurfaceWashFallback(env) !== null) return null;
 
-  const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.trail;
+  const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.nature;
   const successHex = palette[brightness].success.hex;
   const dangerHex = palette[brightness].danger.hex;
   const infoHex = palette[brightness].info.hex;
 
-  const weight = brightness === "dark" ? 0.18 : 0.12;
+  const weight = brightness === "dark" ? 0.15 : 0.10;
   const baseHex = resolveTerminalBaseHex(brightness);
 
   const addedBgHex = blendHex(successHex, baseHex, weight);
   const removedBgHex = blendHex(dangerHex, baseHex, weight);
   const hunkBgHex = blendHex(infoHex, baseHex, weight * 0.6);
 
-  const successSgr = hexToSgr(successHex);
-  const dangerSgr = hexToSgr(dangerHex);
-  const infoSgr = hexToSgr(infoHex);
+  const successSgr = themeColorSequence("success", env, brightness);
+  const dangerSgr = themeColorSequence("danger", env, brightness);
+  const infoSgr = themeColorSequence("info", env, brightness);
 
   return {
     added: {
@@ -546,12 +773,12 @@ export function diffLineSequences(
     hunk: {
       fg: infoSgr,
       bg: hexToBgSgr(hunkBgHex),
-      bar: `${infoSgr}│\x1b[39m`,
+      bar: `${infoSgr}▎\x1b[39m`,
     },
     context: {
       fg: "",
       bg: "",
-      bar: `${themeColorSequence("chrome", env, brightness)}│\x1b[39m`,
+      bar: `${themeColorSequence("chrome", env, brightness)}▎\x1b[39m`,
     },
   };
 }
@@ -593,7 +820,7 @@ export function renderDiffLine(args: {
   colorEnabled?: boolean;
   /** Optional pre-highlighted line text (with ANSI sequences) to use instead of plain fg. */
   highlightedText?: string;
-  /** Render with a slim left gutter rail (`▎`/`│` or `|`) and no background fill. */
+  /** Render a slim aligned rail with a canvas-aware, block-local wash. */
   gutter?: boolean;
   /** Optional box charset override for the gutter rail (defaults to resolveBoxCharset). */
   boxCharset?: TuiBoxCharset;
@@ -605,11 +832,7 @@ export function renderDiffLine(args: {
 
   if (gutter) {
     const charset = args.boxCharset ?? resolveBoxCharset(resolveAmbiguousWidth(undefined, env), env);
-    const railGlyph = charset === "ascii"
-      ? boxGlyphs("ascii").v
-      : kind === "added" || kind === "removed"
-        ? "▎"
-        : boxGlyphs("unicode").v;
+    const railGlyph = charset === "ascii" ? "|" : "▎";
     const railTone: TuiThemeToken =
       kind === "added"
         ? "success"
@@ -623,7 +846,12 @@ export function renderDiffLine(args: {
       kind === "context" ? text : `${themeColorSequence(railTone, env)}${text}`
     );
     const closedBody = body.endsWith("\x1b[0m") ? body : `${body}\x1b[0m`;
-    return `${rail} ${closedBody}`;
+    const seq = diffLineSequences(env)?.[kind];
+    return `${rail} ${seq?.bg ? renderSurfaceLine({
+      text: body,
+      surface: seq.bg,
+      padTo: args.padTo ?? visibleWidth(text),
+    }) : closedBody}`;
   }
 
   const seqs = diffLineSequences(env);
@@ -787,11 +1015,11 @@ export function tuiRenderThemeFingerprint(
   const mode = resolveTuiThemeMode(env);
   const colorKind = !colorEnabled
     ? "plain"
-    : mode !== "terminal" && supportsTruecolor(env)
+    : shouldUseTruecolorTokens(env)
       ? "truecolor"
       : "ansi";
   const surface = colorEnabled ? userSurfaceBackgroundSequence(env) : "";
-  return `${activeThemeName}|${mode}|${colorKind}|${surface}`;
+  return `${activeThemeName}|${mode}|${colorKind}|${resolveTuiBrightness(env)}|${activeTerminalBaseHex ?? ""}|${env.COLORFGBG ?? ""}|${surface}`;
 }
 
 /**

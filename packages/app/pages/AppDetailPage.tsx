@@ -1,6 +1,6 @@
 import "./AppDetailPage.css";
 import "./AppEditorPage.css";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "app/routing";
 import { useTranslation } from "react-i18next";
 import {
@@ -34,7 +34,6 @@ import {
 import { installInspector } from "app/appInspector/installInspector";
 import { patch } from "database/dbSlice";
 import ContentIcon from "render/contentIcon/ContentIcon";
-import ContentIconPicker from "render/contentIcon/ContentIconPicker";
 import type { ContentIcon as ContentIconValue } from "render/contentIcon/types";
 import {
   LuArrowLeft,
@@ -62,10 +61,9 @@ import { useRightSidebarOptional } from "render/layout/RightSidebarContext";
 import { useShareWorkflow, type CreateShareLink, type SharePayload, type ShareVisibility } from "render/layout/useShareWorkflow";
 import { currentWindowOrigin, runShare, type ShareDispatcher } from "render/layout/shareWorkflowCore";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
-import ShareModal, { type AppShareScope } from "render/web/ui/modal/ShareModal";
+import type { AppShareScope } from "render/web/ui/modal/ShareModal";
 import { ConfirmModal } from "render/web/ui/modal/ConfirmModal";
 import { Dialog } from "render/web/ui/modal/Dialog";
-import { DomainBindingPanel } from "app/components/DomainBindingPanel";
 import type { AppVisibility } from "app/types/appSummary";
 import {
   describeAppRuntimeFailure,
@@ -76,6 +74,10 @@ import { buildAppSharePayload } from "app/utils/appSharePayload";
 import PageObjectActions from "render/page/PageObjectActions";
 import { useSidebarToggleContext } from "render/layout/SidebarToggleContext";
 import { toast } from "app/utils/toast";
+
+const ContentIconPicker = lazy(() => import("render/contentIcon/ContentIconPicker"));
+const ShareModal = lazy(() => import("render/web/ui/modal/ShareModal"));
+const DomainBindingPanel = lazy(() => import("app/components/DomainBindingPanel"));
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -1059,11 +1061,15 @@ const AppDetailPage: React.FC = () => {
                 </div>
               )}
               <div className="AppEditorPage__iconAnchor">
-                <ContentIconPicker
-                  open={isIconPickerOpen}
-                  onClose={() => setIsIconPickerOpen(false)}
-                  onSelect={handleAppIconSelect}
-                />
+                {isIconPickerOpen ? (
+                  <Suspense fallback={null}>
+                    <ContentIconPicker
+                      open={isIconPickerOpen}
+                      onClose={() => setIsIconPickerOpen(false)}
+                      onSelect={handleAppIconSelect}
+                    />
+                  </Suspense>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1430,21 +1436,23 @@ const AppDetailPage: React.FC = () => {
         <AppVersionsFooter appId={app.appId} serverOrigin={routeServerOrigin} />
       )}
 
-      {canShare && (
-        <ShareModal
-          isOpen={isShareModalOpen}
-          onClose={() => setIsShareModalOpen(false)}
-          webLink={shareModalLink}
-          isLoading={isShareModalLoading}
-          isCommunity={shareModalVisibility === "community"}
-          initialCopied={shareModalCopied}
-          onPublishCommunity={handlePublishCommunity}
-          errorMessage={shareError}
-          onRetry={handleOpenShare}
-          itemType="app"
-          appScope={appShareScope}
-        />
-      )}
+      {canShare && isShareModalOpen ? (
+        <Suspense fallback={null}>
+          <ShareModal
+            isOpen={isShareModalOpen}
+            onClose={() => setIsShareModalOpen(false)}
+            webLink={shareModalLink}
+            isLoading={isShareModalLoading}
+            isCommunity={shareModalVisibility === "community"}
+            initialCopied={shareModalCopied}
+            onPublishCommunity={handlePublishCommunity}
+            errorMessage={shareError}
+            onRetry={handleOpenShare}
+            itemType="app"
+            appScope={appShareScope}
+          />
+        </Suspense>
+      ) : null}
 
       {/*
         管理入口（owner-only，与「分享」同一个 canShare 门控）：
@@ -1514,12 +1522,16 @@ const AppDetailPage: React.FC = () => {
             </section>
 
             <section className="AppDetailPage__manageSection">
-              <DomainBindingPanel
-                appId={app.appId}
-                onBind={handleBindDomain}
-                onUnbind={handleUnbindDomain}
-                onList={handleListDomains}
-              />
+              {manageOpen ? (
+                <Suspense fallback={null}>
+                  <DomainBindingPanel
+                    appId={app.appId}
+                    onBind={handleBindDomain}
+                    onUnbind={handleUnbindDomain}
+                    onList={handleListDomains}
+                  />
+                </Suspense>
+              ) : null}
             </section>
           </div>
         </Dialog>

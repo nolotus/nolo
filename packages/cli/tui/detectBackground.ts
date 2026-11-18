@@ -17,7 +17,17 @@ import { detectSystemBrightnessFromEnv, type TuiBrightness } from "./theme";
  */
 
 /** Query: OSC 11 ; ? BEL — "what is your background color?" */
-const OSC11_QUERY = "\x1b]11;?\x07";
+export const OSC11_QUERY = "\x1b]11;?\x07";
+
+/** DECSET 2031 unsolicited/queried DSR color-scheme report: CSI ? 997 ; 1|2 n */
+const COLOR_SCHEME_REPORT_RE = /^\x1b\[\?997;([12])n$/;
+
+/** Parse a DECSET 2031 color-scheme report (`1` = dark, `2` = light). */
+export function parseColorSchemeReport(sequence: string): TuiBrightness | null {
+  const match = sequence.match(COLOR_SCHEME_REPORT_RE);
+  if (!match) return null;
+  return match[1] === "1" ? "dark" : "light";
+}
 
 /**
  * Reply shape: `ESC ] 11 ; rgb:RRRR/GGGG/BBBB` terminated by BEL or ST (ESC \).

@@ -1,33 +1,60 @@
 // packages/app/lab/crm/crmRoutes.tsx
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { Outlet, NavLink } from "app/routing";
 import { CrmProvider, useCrm } from "./CrmContext";
-import Dashboard from "./pages/Dashboard";
-import Contacts from "./pages/Contacts";
-import Products from "./pages/Products";
-import Quotes from "./pages/Quotes";
-import Suppliers from "./pages/Suppliers";
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Contacts = lazy(() => import("./pages/Contacts"));
+const Products = lazy(() => import("./pages/Products"));
+const Quotes = lazy(() => import("./pages/Quotes"));
+const Suppliers = lazy(() => import("./pages/Suppliers"));
+
+const CrmPageFallback = () => (
+  <div style={{ padding: "40px", textAlign: "center" }}>Loading...</div>
+);
+
+const withCrmSuspense = (node: React.ReactNode) => (
+  <Suspense fallback={<CrmPageFallback />}>{node}</Suspense>
+);
 
 const Navbar = () => {
   const { resetData } = useCrm();
   return (
-    <nav style={{ padding: "0 20px", height: "50px", borderBottom: "1px solid #c5c5c5", background: "#fff", display: "flex", alignItems: "center", boxShadow: "0 2px 5px rgba(0,0,0,0.1)", justifyContent: "space-between" }}>
+    <nav
+      style={{
+        padding: "0 20px",
+        height: "50px",
+        borderBottom: "1px solid #c5c5c5",
+        background: "#fff",
+        display: "flex",
+        alignItems: "center",
+        boxShadow: "0 2px 5px rgba(0,0,0,0.1)",
+        justifyContent: "space-between",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center" }}>
-        <div style={{ marginRight: "40px", fontWeight: "bold", color: "#2c3e50", fontSize: "1.2em" }}>
+        <div
+          style={{
+            marginRight: "40px",
+            fontWeight: "bold",
+            color: "#2c3e50",
+            fontSize: "1.2em",
+          }}
+        >
           <span style={{ color: "#337ab7" }}>NOLO</span> ERP
         </div>
-        
+
         <div style={{ display: "flex", height: "100%" }}>
           {[
             { to: "/", label: "Dashboard" },
             { to: "/products", label: "Product Library" },
             { to: "/quotes", label: "Transactions" },
             { to: "/contacts", label: "Customer Center" },
-            { to: "/suppliers", label: "Vendors" }
-          ].map(link => (
-            <NavLink 
-              key={link.to} 
-              to={link.to} 
+            { to: "/suppliers", label: "Vendors" },
+          ].map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
               style={({ isActive }) => ({
                 padding: "0 15px",
                 textDecoration: "none",
@@ -38,7 +65,7 @@ const Navbar = () => {
                 fontWeight: isActive ? "bold" : "normal",
                 fontSize: "13px",
                 height: "47px",
-                transition: "all 0.2s"
+                transition: "all 0.2s",
               })}
             >
               {link.label}
@@ -47,20 +74,27 @@ const Navbar = () => {
         </div>
       </div>
 
-      <button type="button" 
+      <button
+        type="button"
         onClick={resetData}
-        style={{ 
-          background: "#fff", 
-          border: "1px solid #dc3545", 
-          color: "#dc3545", 
-          padding: "4px 12px", 
-          borderRadius: "4px", 
-          fontSize: "11px", 
+        style={{
+          background: "#fff",
+          border: "1px solid #dc3545",
+          color: "#dc3545",
+          padding: "4px 12px",
+          borderRadius: "4px",
+          fontSize: "11px",
           cursor: "pointer",
-          transition: "all 0.2s"
+          transition: "all 0.2s",
         }}
-        onMouseOver={(e) => { e.currentTarget.style.background = "#dc3545"; e.currentTarget.style.color = "#fff"; }}
-        onMouseOut={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "#dc3545"; }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.background = "#dc3545";
+          e.currentTarget.style.color = "#fff";
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.background = "#fff";
+          e.currentTarget.style.color = "#dc3545";
+        }}
       >
         Reset Database
       </button>
@@ -73,7 +107,14 @@ export const crmRoutes = [
     path: "/",
     element: (
       <CrmProvider>
-        <div style={{ fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif', color: "#333", background: "#f4f4f4", minHeight: "100vh" }}>
+        <div
+          style={{
+            fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+            color: "#333",
+            background: "#f4f4f4",
+            minHeight: "100vh",
+          }}
+        >
           <Navbar />
           <div style={{ padding: "20px" }}>
             <Outlet />
@@ -82,11 +123,11 @@ export const crmRoutes = [
       </CrmProvider>
     ),
     children: [
-      { index: true, element: <Dashboard /> },
-      { path: "contacts", element: <Contacts /> },
-      { path: "products", element: <Products /> },
-      { path: "quotes", element: <Quotes /> },
-      { path: "suppliers", element: <Suppliers /> },
+      { index: true, element: withCrmSuspense(<Dashboard />) },
+      { path: "contacts", element: withCrmSuspense(<Contacts />) },
+      { path: "products", element: withCrmSuspense(<Products />) },
+      { path: "quotes", element: withCrmSuspense(<Quotes />) },
+      { path: "suppliers", element: withCrmSuspense(<Suppliers />) },
     ],
   },
 ];

@@ -51,6 +51,8 @@ import {
   type CloudConnection,
   type SecretsMap,
 } from "./pluginStatus";
+import McpConnectionsPanel from "./McpConnectionsPanel";
+import { getMcpPresetSpec } from "../../../agent-runtime/mcpConnectionSpecs";
 import "./PluginExplore.css";
 
 const INSTABOX_ID = "instabox";
@@ -1087,8 +1089,22 @@ const PluginConfigPage: React.FC = () => {
   const { t } = useTranslation();
   const params = useParams<"pluginId">();
   const pluginId = params.pluginId ?? "";
+  const { currentToken, currentServer } = usePluginEndpoint();
   if (pluginId === "agent-capabilities" || pluginId === "data-sources") return <ExistingPluginConfig id={pluginId} />;
   if (pluginId === "music" || pluginId === "calendar") return <UiPluginConfig id={pluginId} />;
+  const mcpPreset = pluginId.startsWith("mcp-") ? getMcpPresetSpec(pluginId.slice(4)) : undefined;
+  if (pluginId === "mcp" || mcpPreset) {
+    return (
+      <div className="plugin-config-page" data-testid="plugin-config-page">
+        <BackToPlazaLink />
+        <McpConnectionsPanel
+          server={currentServer ?? ""}
+          token={currentToken}
+          presetId={mcpPreset?.id}
+        />
+      </div>
+    );
+  }
   const spec = CLOUD_PLUGIN_SPECS.find((item) => item.id === pluginId);
   const isInstabox = pluginId === INSTABOX_ID;
   const positioning = PLUGIN_POSITIONING[pluginId];

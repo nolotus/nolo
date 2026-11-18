@@ -204,9 +204,14 @@ function formatZoneStepFact(snapshot: AgentRunSnapshot): string | undefined {
   return formatToolProgressFact(snapshot);
 }
 
-/** Slow, fixed-width 1-col running signal, driven by the dock's existing one-second tick. */
+/** 顶部运行区 spinner 帧间隔（ms），与底部 activityIndicator 保持同频 80ms。 */
+export const RUN_ZONE_FRAME_INTERVAL_MS = 80;
+
+/** Fixed-width 1-col running signal, driven at 80ms cadence to match the bottom activity indicator. */
 function runningFrame(now: number): string {
-  return ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][Math.floor(now / 1000) % 10]!;
+  return ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][
+    Math.floor(now / RUN_ZONE_FRAME_INTERVAL_MS) % 10
+  ]!;
 }
 
 export function runZoneLeadIcon(status: string, carrier?: RemoteTaskCarrier): string {
@@ -464,6 +469,9 @@ export function formatRunZoneLines(
     ];
     const tailClock = time && clock !== null ? time : null;
 
+    const terminal = isAgentRunTerminalStatus(snapshot.status);
+    const formatTitle = (text: string) => (terminal ? text : `\x1b[1m${text}\x1b[22m`);
+
     if (!hLayout) {
       // 未传 layout.columns：保持干净的单行 `·` 串联，不塞左右对齐空白。
       const allFacts = [...middleFacts, ...(tailClock ? [tailClock] : [])];
@@ -472,13 +480,13 @@ export function formatRunZoneLines(
         lines.push(`${icon} ${fullLabel}${factsPart}`);
       } else {
         const coloredLabel =
-          themeText(main, "chrome", true) +
-          (agentSuffix ? themeText(agentSuffix, "muted") : "");
+          formatTitle(main) +
+          (agentSuffix ? themeText(agentSuffix, "muted", true) : "");
         lines.push(
           themeText(icon, runStatusTone(snapshot.status), true) +
             " " +
             coloredLabel +
-            themeText(factsPart, hasError ? "danger" : stalled ? "warning" : "chrome")
+            themeText(factsPart, hasError ? "danger" : stalled ? "warning" : "chrome", true)
         );
       }
       continue;
@@ -543,14 +551,14 @@ export function formatRunZoneLines(
     const shownMain = shownLabel.startsWith(main) ? main : shownLabel;
     const shownSuffix = shownLabel.startsWith(main) ? shownLabel.slice(main.length) : "";
     const coloredLabel =
-      themeText(shownMain, "chrome", true) +
-      (shownSuffix ? themeText(shownSuffix, "muted") : "");
+      formatTitle(shownMain) +
+      (shownSuffix ? themeText(shownSuffix, "muted", true) : "");
     const midStr = middleFacts.join(" · ");
     const midTone = hasError ? "danger" : stalled ? "warning" : "chrome";
     const coloredRight =
-      (midStr ? themeText(midStr, midTone) : "") +
+      (midStr ? themeText(midStr, midTone, true) : "") +
       (midStr && tailClock ? "  " : "") +
-      (tailClock ? themeText(tailClock, "chrome") : "");
+      (tailClock ? themeText(tailClock, "chrome", true) : "");
 
     const coloredBody = `${themeText(icon, runStatusTone(snapshot.status), true)} ${coloredLabel}${gap}${coloredRight}`;
     lines.push(
@@ -590,11 +598,11 @@ export type RunZoneProc = {
 };
 
 /**
- * 进程行图标：与 run 行的 `↳` 刻意不同。两批东西现在排在同一块面板里，
- * 「这行是 shell 任务还是 agent 运行」必须一眼看得出，否则用户会把
- * `npm run dev` 当成一个还在跑的子 agent。
+ * 进程行类型标记：`$`（1 列固定宽度）。
+ * 与 Subagent 行共享「第 1 列 1 字符状态符（⠋/✓/✗/⊘）+ 空格 + 内容」的网格，
+ * 既避免和主输入框提示符 `❯` 混淆，又保证运行态切到终态严格 0 列宽跳动。
  */
-export const PROC_ZONE_ICON = "❯";
+export const PROC_ZONE_ICON = "$";
 
 /** 成功退出后仍在运行区停留的时长。 */
 export const PROC_LINGER_SUCCESS_MS = 3_000;
@@ -611,9 +619,9 @@ export function procZoneFinished(proc: RunZoneProc): boolean {
 }
 
 /**
- * 进程行图标：running `❯`、成功退出 `✓`、失败退出 `✗`、被 kill `⊘`。
- *
- * 终态必须同时换图标与措辞——留着一个 `❯ … 已运行 3m` 是撒谎，它已经不在跑了。
+ * 进程行终态状态图标：成功退出 `✓`、失败退出 `✗`、被 kill `⊘`；非终态返回 `$`。
+ * 在 `formatProcZoneLines` 里非终态前导固定使用 1 列 `runningFrame(now)`，终态使用本图标，
+ * 后接 `$ <标题>`，从而保持运行态到终态严格 0 列宽跳动。
  */
 export function procZoneLeadIcon(proc: RunZoneProc): string {
   const status = proc.status ?? "running";
@@ -643,12 +651,10 @@ export function procZoneTitle(proc: RunZoneProc, maxWidth = 40): string {
 }
 
 /**
- * 渲染后台进程行：`❯ <标题> · 已运行 3m · pid 12345`（残留在跑完时变成
- * `✓ <标题> · 用时 3m` / `✗ <标题> · 用时 3m · exit 1`），每条一行，超过
- * maxRows 折叠成 `还有 N 个`（与 run 行同一句溢出文案）。
- *
- * 宽度降级沿用 run 行的取舍：时间先保、其余事实后丢、最后才截标题——「跑了
- * 多久」是判断「卡住了没有」的主证据。
+ * 渲染后台进程行：与 Subagent 行共享统一对齐网格：
+ * - 前导固定 `[1列状态符: ⠋/✓/✗/⊘] + 空格 + $ + 空格`，终态切换 0 水平跳动
+ * - 传入 `layout.columns` 时左右两端对齐：`左 [状态 $ 标题]` + `右 [pid/exit/cancelled  m:ss]`
+ * - 未传 `layout.columns` 时保持干净的 `·` 分隔单行摘要：`⠋ $ <标题> · pid 12345 · for 8s`
  */
 export function formatProcZoneLines(
   procs: readonly RunZoneProc[],
@@ -665,10 +671,13 @@ export function formatProcZoneLines(
   const lines: string[] = [];
   for (const proc of shown) {
     const finished = procZoneFinished(proc);
-    const identity = procZoneLeadIcon(proc);
-    const icon = !finished && (proc.status === undefined || proc.status === "running")
-      ? `${identity} ${runningFrame(now)}` : identity;
-    const facts: string[] = [];
+    const isFailed = finished && (proc.status === "killed" || (proc.exitCode ?? 0) !== 0);
+    const statusIcon =
+      !finished && (proc.status === undefined || proc.status === "running")
+        ? runningFrame(now)
+        : procZoneLeadIcon(proc);
+    const leadPrefix = `${statusIcon} ${PROC_ZONE_ICON} `;
+
     const startedAt = proc.startedAt;
     // 残留优先用 registry 记下的真实用时；没有就退回「现在 - 拉起时刻」。
     // 两者都没有时不输出耗时——宁缺勿编。
@@ -679,51 +688,102 @@ export function formatProcZoneLines(
         : typeof startedAt === "number" && Number.isFinite(startedAt) && startedAt > 0
           ? Math.max(0, now - startedAt)
           : null;
-    const hasElapsed = elapsedMs !== null;
-    if (elapsedMs !== null) {
-      facts.push(t(finished ? "procZoneTook" : "runZoneFor", formatDuration(elapsedMs)));
-    }
+
+    const middleFacts: string[] = [];
     if (finished) {
       // 被 kill 的没有可信 exitCode，不编一个 0 出来（图标 ⊘ 已经说明结局）。
-      if (proc.status !== "killed") {
-        facts.push(t("procZoneExit", String(proc.exitCode ?? 0)));
+      if (proc.status === "killed") {
+        middleFacts.push(t("runZoneCancelled"));
+      } else {
+        middleFacts.push(t("procZoneExit", String(proc.exitCode ?? 0)));
       }
     } else {
-      facts.push(t("procZonePid", String(proc.pid)));
+      middleFacts.push(t("procZonePid", String(proc.pid)));
     }
 
-    let title = procZoneTitle(proc);
-    if (hLayout) {
-      const contentWidth = hLayout.contentWidth;
-      const fixed = (l: string, f: string[]) =>
-        visibleWidth(`${icon} ${l}${f.length ? ` · ${f.join(" · ")}` : ""}`);
-      // 1) 从末尾丢事实。有耗时时它是 facts[0]，永远保留、其余先让路；没有耗时
-      //    （startedAt 与 durationMs 都缺）时 pid/exit 也可以让路——判据必须是
-      //    「有没有耗时」，不是「facts 当前长度」，否则弹掉一条后长度变 1，
-      //    下一轮会把耗时一起弹掉。
-      const keep = hasElapsed ? 1 : 0;
-      while (facts.length > keep && fixed(title, facts) > contentWidth) facts.pop();
-      // 2) 还放不下再截标题，事实不动。
-      if (fixed(title, facts) > contentWidth) {
-        const tail = facts.length ? ` · ${facts.join(" · ")}` : "";
-        const room = contentWidth - visibleWidth(`${icon} `) - visibleWidth(tail);
-        title = fitAnsiLine(title, Math.max(1, room));
+    const title = procZoneTitle(proc);
+    const statusTone = !finished ? "info" : isFailed ? "danger" : "success";
+    const factTone = isFailed ? "danger" : "chrome";
+    const formatTitle = (text: string) => (finished ? text : `\x1b[1m${text}\x1b[22m`);
+
+    if (!hLayout) {
+      // 未传 layout.columns：干净的单行 `·` 摘要，保持 title 在前、时间在后。
+      const timeFact =
+        elapsedMs !== null
+          ? t(finished ? "procZoneTook" : "runZoneFor", formatDuration(elapsedMs))
+          : null;
+      const allFacts = [...middleFacts, ...(timeFact ? [timeFact] : [])];
+      const factsPart = allFacts.length > 0 ? ` · ${allFacts.join(" · ")}` : "";
+      if (!colorEnabled) {
+        lines.push(`${leadPrefix}${title}${factsPart}`);
+      } else {
+        lines.push(
+          themeText(statusIcon, statusTone, true) +
+            " " +
+            themeText(PROC_ZONE_ICON, "muted", true) +
+            " " +
+            formatTitle(title) +
+            themeText(factsPart, factTone, true)
+        );
       }
-    }
-    const timePart = hasElapsed ? `${facts.shift()} · ` : "";
-    const factsPart = facts.length > 0 ? ` · ${facts.join(" · ")}` : "";
-    const leftPad = hLayout?.leftPad ?? "";
-
-    if (!colorEnabled) {
-      lines.push(`${leftPad}${icon} ${timePart}${title}${factsPart}`);
       continue;
     }
+
+    const { leftPad, contentWidth } = hLayout;
+    const tailClock = elapsedMs !== null ? formatCompactClock(elapsedMs) : null;
+    const minGap = 2;
+    const buildRight = (facts: string[], clockStr: string | null): string => {
+      const mid = facts.join(" · ");
+      if (mid && clockStr) return `${mid}  ${clockStr}`;
+      return mid || clockStr || "";
+    };
+
+    // 1) 从末尾丢次要事实（pid / exit / cancelled），紧凑时钟与标题优先保留。
+    while (
+      middleFacts.length > 0 &&
+      (() => {
+        const right = buildRight(middleFacts, tailClock);
+        const gap = right ? minGap : 0;
+        return visibleWidth(`${leadPrefix}${title}`) + gap + visibleWidth(right) > contentWidth;
+      })()
+    ) {
+      middleFacts.pop();
+    }
+
+    const rightStr = buildRight(middleFacts, tailClock);
+    const gapAllowance = rightStr ? minGap : 0;
+    const roomForTitle = contentWidth - visibleWidth(leadPrefix) - gapAllowance - visibleWidth(rightStr);
+    const shownTitle =
+      visibleWidth(title) > roomForTitle
+        ? fitAnsiLine(title, Math.max(1, roomForTitle))
+        : title;
+
+    const leftPlain = `${leadPrefix}${shownTitle}`;
+    const leftWidth = visibleWidth(leftPlain);
+    const rightWidth = visibleWidth(rightStr);
+    const gap =
+      rightStr && leftWidth + minGap + rightWidth <= contentWidth
+        ? " ".repeat(contentWidth - leftWidth - rightWidth)
+        : rightStr
+          ? "  "
+          : "";
+
+    if (!colorEnabled) {
+      const body = rightStr ? `${leftPlain}${gap}${rightStr}` : leftPlain;
+      lines.push(`${leftPad}${visibleWidth(body) > contentWidth ? fitAnsiLine(body, contentWidth) : body}`);
+      continue;
+    }
+
+    const midStr = middleFacts.join(" · ");
+    const coloredRight =
+      (midStr ? themeText(midStr, factTone, true) : "") +
+      (midStr && tailClock ? "  " : "") +
+      (tailClock ? themeText(tailClock, "chrome", true) : "");
+    const coloredBody =
+      `${themeText(statusIcon, statusTone, true)} ${themeText(PROC_ZONE_ICON, "muted", true)} ` +
+      `${formatTitle(shownTitle)}${gap}${coloredRight}`;
     lines.push(
-      leftPad +
-        themeText(icon, finished ? "muted" : "info", true) +
-        " " + themeText(timePart, "chrome") +
-        themeText(title, finished ? "muted" : "chrome", true) +
-        themeText(factsPart, "chrome", true)
+      `${leftPad}${visibleWidth(coloredBody) > contentWidth ? fitAnsiLine(coloredBody, contentWidth) : coloredBody}`
     );
   }
 

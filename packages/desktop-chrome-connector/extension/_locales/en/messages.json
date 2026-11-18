@@ -20,7 +20,7 @@
     "message": "Not connected"
   },
   "popupDisconnectedHint": {
-    "message": "Install Nolo on this computer and enable its connector, then reopen this popup."
+    "message": "Open the Nolo desktop app or run `nolo browser install` in your terminal to register the local bridge, then reopen this popup."
   },
   "popupStatusError": {
     "message": "Could not read connector status: $DETAIL$",
@@ -41,5 +41,78 @@
   },
   "popupPrivacy": {
     "message": "Page reads and actions run through the Nolo app on this computer. Cookies, passwords and profile databases are never read."
+  },
+  "approveTitle": {
+    "message": "Nolo needs your approval"
+  },
+  "approveHeading": {
+    "message": "Nolo requests permission to $ACTION$ on the target below",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      }
+    }
+  },
+  "approveClick": {
+    "message": "click"
+  },
+  "approveType": {
+    "message": "type"
+  },
+  "approvePress": {
+    "message": "press a key"
+  },
+  "approveSelect": {
+    "message": "select an option"
+  },
+  "approveEval": {
+    "message": "run a script"
+  },
+  "approveUnnamed": {
+    "message": "Unnamed control"
+  },
+  "approveUnknownSite": {
+    "message": "Unknown site"
+  },
+  "approveSite": {
+    "message": "Target site: $ORIGIN$",
+    "placeholders": {
+      "origin": {
+        "content": "$1"
+      }
+    }
+  },
+  "approveScriptCaption": {
+    "message": "Script to run (original text; scroll to inspect)"
+  },
+  "approveScriptMissing": {
+    "message": "Script content is missing. Cancel and request again in Nolo."
+  },
+  "approveHint": {
+    "message": "Permission applies to this action only, expires after 60 seconds, and is invalidated if the page changes."
+  },
+  "approveCancel": {
+    "message": "Cancel"
+  },
+  "approveAllow": {
+    "message": "Allow once"
+  },
+  "approveSubmitting": {
+    "message": "Submitting approval…"
+  },
+  "approveCancelled": {
+    "message": "Cancelled."
+  },
+  "approveWindowFailed": {
+    "message": "Cannot verify the window source. Cancelled."
+  },
+  "approveExpired": {
+    "message": "This approval is no longer valid (expired, used, or source mismatch). Request again in Nolo."
+  },
+  "approveFailed": {
+    "message": "Cannot reach the extension background. This approval did not take effect."
+  },
+  "approveMissingId": {
+    "message": "Missing approval identifier. Request again in Nolo."
   }
 }

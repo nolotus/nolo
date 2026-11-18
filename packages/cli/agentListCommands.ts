@@ -13,7 +13,7 @@ import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import { injectSpeedContextIntoListAgentsResult } from "ai/agent/candidateSpeedContext";
 
 import { isLocalDispatchSpeedSource, isServerDispatchSpeedSource } from "ai/agent/dispatchSpeedProvenance";
-import { listRunRecords } from "./agentRunControl";
+import { listRecentRunRecords } from "./agentRunControl";
 
 const createCliDispatchSampleDb = (db: any, userId: string, env: Record<string, string | undefined>) => {
   // Lazy metadata-only registry scan: no logs, messages or credential records.
@@ -22,7 +22,7 @@ const createCliDispatchSampleDb = (db: any, userId: string, env: Record<string, 
     iterator: (options: { gte?: string; lte?: string; gt?: string; limit?: number }) => db.iterator(options),
     isDispatchRun: async (dialogId: string, entryPath: string): Promise<boolean> => {
       if (entryPath === "cli-local") {
-        localDialogs ??= new Set(listRunRecords({ env }).filter(run =>
+        localDialogs ??= new Set(listRecentRunRecords({ env, limit: 400 }).filter(run =>
           typeof run.dialogId === "string" && isLocalDispatchSpeedSource(run, run.dialogId, userId),
         ).map(run => run.dialogId!));
         return localDialogs.has(dialogId);
@@ -130,45 +130,13 @@ export async function runAgentListCommand(
     return 1;
   }
 
+  const forceQuotaRefresh = args.includes("--refresh-quota");
   const fetchImpl = deps.fetchImpl ?? fetch;
   const fallbackFetchImpl = deps.fallbackFetchImpl;
   const serverUrl = resolveServerUrl(args, env);
   const serverUrls = resolveServerCandidates(args, env, serverUrl);
 
   try {
-    let agents: ListedAgent[];
-    let source: "local-cache" | "remote-cache" | "global-cache";
-    let serverFailures: Array<{ serverUrl: string; error: string }> = [];
-    try {
-      const remoteResult = await listRemoteAgentsAcrossServers({
-        authToken,
-        fallbackFetchImpl,
-        fetchImpl,
-        serverUrls,
-        userId,
-      });
-      agents = remoteResult.agents;
-      serverFailures = remoteResult.failures;
-      source = "global-cache";
-    } catch {
-      try {
-        const db = deps.db ?? await getReadableCliDb(output);
-        agents = await listLocalCachedAgents({ db, userId });
-        source = "local-cache";
-      } catch {
-        agents = await listRemoteAgents({
-          authToken,
-          fallbackFetchImpl,
-          fetchImpl,
-          serverUrl,
-          userId,
-          queryUserRecords,
-          readDbRecord,
-        });
-        source = "remote-cache";
-      }
-    }
-
     const pagination = resolvePaginationArgs({ limit, offset });
     const hasQuery = Boolean(query && typeof query === "string" && query.trim());
     const MAX_UPSTREAM_CEILING = 2000;
@@ -178,13 +146,88 @@ export async function runAgentListCommand(
         ? MAX_UPSTREAM_CEILING
         : Math.max(500, (pagination.offset ?? 0) + (pagination.limit ?? 100))
     );
+
+    const ownAgentsPromise = (async (): Promise<{
+      agents: ListedAgent[];
+      source: "local-cache" | "remote-cache" | "global-cache";
+      serverFailures: Array<{ serverUrl: string; error: string }>;
+    }> => {
+      try {
+        const remoteResult = await listRemoteAgentsAcrossServers({
+          authToken,
+          fallbackFetchImpl,
+          fetchImpl,
+          serverUrls,
+          userId,
+        });
+        return {
+          agents: remoteResult.agents,
+          serverFailures: remoteResult.failures,
+          source: "global-cache",
+        };
+      } catch {
+        try {
+          const db = deps.db ?? await getReadableCliDb(output);
+          return {
+            agents: await listLocalCachedAgents({ db, userId }),
+            serverFailures: [],
+            source: "local-cache",
+          };
+        } catch {
+          return {
+            agents: await listRemoteAgents({
+              authToken,
+              fallbackFetchImpl,
+              fetchImpl,
+              serverUrl,
+              userId,
+              queryUserRecords,
+              readDbRecord,
+            }),
+            serverFailures: [],
+            source: "remote-cache",
+          };
+        }
+      }
+    })();
+
+    const publicResultsPromise = scope !== "preferred"
+      ? Promise.all(serverUrls.map((url) => listRemotePublicAgents({
+          authToken, fetchImpl, serverUrl: url, limit: upstreamLimit, query: hasQuery ? query : undefined,
+        })))
+      : undefined;
+
+    const spaceLookup = spaceInput ? buildSpaceLookup(spaceInput) : null;
+    const spaceReadPromise = spaceLookup
+      ? readLiveDbRecordAfterTombstoneMerge({
+          authToken,
+          dbKey: spaceLookup.spaceKey,
+          fallbackFetchImpl,
+          fetchImpl,
+          serverUrls,
+        })
+      : undefined;
+
+    const favoritesPromise = wantSafe && !idsOnly
+      ? listFavoriteAgentIdsAcrossServers({
+          authToken,
+          fetchImpl,
+          serverUrls,
+        }).catch(() => ({} as Record<string, number>))
+      : undefined;
+
+    const [ownResult, publicResults, spaceRead] = await Promise.all([
+      ownAgentsPromise,
+      publicResultsPromise ?? Promise.resolve(undefined),
+      spaceReadPromise ?? Promise.resolve(undefined),
+    ]);
+
+    let { agents, source, serverFailures } = ownResult;
     let cliUpstreamTruncated = false;
     let cliUpstreamTotal: number | undefined;
+    const publicCatalogAgents = new Set<ListedAgent>();
 
-    if (scope !== "preferred") {
-      const publicResults = await Promise.all(serverUrls.map((url) => listRemotePublicAgents({
-        authToken, fetchImpl, serverUrl: url, limit: upstreamLimit, query: hasQuery ? query : undefined,
-      })));
+    if (publicResults) {
       const publicAgents = publicResults.flatMap((r) => r.agents);
       for (const r of publicResults) {
         // 目录不完整必须如实报告：上游标记截断（含 fail-open 空结果）即置位。
@@ -204,16 +247,16 @@ export async function runAgentListCommand(
         for (const agent of agents) {
           if (agent.publicKey) seenPublicKeys.add(agent.publicKey);
         }
-        agents = [
-          ...agents,
-          ...publicAgents.filter((agent) => {
-            if (!agent.publicKey) return true;
-            if (seenPublicKeys.has(agent.publicKey)) return false;
-            seenPublicKeys.add(agent.publicKey);
-            return true;
-          }),
-        ];
+        const addedPublicAgents = publicAgents.filter((agent) => {
+          if (!agent.publicKey) return true;
+          if (seenPublicKeys.has(agent.publicKey)) return false;
+          seenPublicKeys.add(agent.publicKey);
+          return true;
+        });
+        for (const agent of addedPublicAgents) publicCatalogAgents.add(agent);
+        agents = [...agents, ...addedPublicAgents];
       } else {
+        for (const agent of publicAgents) publicCatalogAgents.add(agent);
         agents = publicAgents;
       }
     }
@@ -221,16 +264,8 @@ export async function runAgentListCommand(
     agents = agents.filter((agent) => agent.privateKey.startsWith("agent-"));
     let resolvedSpaceId: string | null = null;
     let spaceContentKeys: Set<string> | null = null;
-    if (spaceInput) {
-      const { spaceId, spaceKey } = buildSpaceLookup(spaceInput);
-      resolvedSpaceId = spaceId;
-      const spaceRead = await readLiveDbRecordAfterTombstoneMerge({
-        authToken,
-        dbKey: spaceKey,
-        fallbackFetchImpl,
-        fetchImpl,
-        serverUrls,
-      });
+    if (spaceLookup && spaceRead) {
+      resolvedSpaceId = spaceLookup.spaceId;
       serverFailures = [...serverFailures, ...spaceRead.failures];
       const spaceRecord = spaceRead.record;
       const currentSpaceContentKeys = getSpaceContentKeys(spaceRecord);
@@ -241,9 +276,15 @@ export async function runAgentListCommand(
         currentSpaceContentKeys.has(agent.id)
       );
     }
-    if (source === "global-cache") {
+
+    // 来自 /rpc/getPublicAgents 的公开条目已具备 isPublic === true 与 publicRecordExists = true，
+    // 仅对自有条目核验跨服 tombstone，避免为数十条公开目录条目发 2N 次冗余 db/read。
+    const decorateTargets = source === "global-cache"
+      ? agents.filter((agent) => !publicCatalogAgents.has(agent))
+      : [];
+    if (publicOnly && decorateTargets.length > 0) {
       await decorateAgentsWithPublicStatusAcrossServers({
-        agents,
+        agents: decorateTargets,
         authToken,
         fallbackFetchImpl,
         fetchImpl,
@@ -283,17 +324,30 @@ export async function runAgentListCommand(
           (!query || !String(query).trim() || matchesAgentQuery(agent as any, query))
         )])]
       : agentsForOutput;
+    const decoratePromise = !publicOnly && decorateTargets.length > 0
+      ? decorateAgentsWithPublicStatusAcrossServers({
+          agents: decorateTargets,
+          authToken,
+          fallbackFetchImpl,
+          fetchImpl,
+          serverUrls,
+        })
+      : Promise.resolve();
     if (!idsOnly) {
-      const fresh = await refreshSubscriptionQuotas({
-        entries: refreshCandidates.map((agent) => ({
-          key: agent.privateKey,
-          ...(agent.quota ? { quota: agent.quota } : {}),
-          probeable: agent.credentialConfigured === true,
-        })),
-        env,
-        cliArgs: args,
-        fetchImpl,
-      });
+      const [, fresh] = await Promise.all([
+        decoratePromise,
+        refreshSubscriptionQuotas({
+          entries: refreshCandidates.map((agent) => ({
+            key: agent.privateKey,
+            ...(agent.quota ? { quota: agent.quota } : {}),
+            probeable: agent.credentialConfigured === true,
+          })),
+          forceRefresh: forceQuotaRefresh,
+          env,
+          cliArgs: args,
+          fetchImpl,
+        }),
+      ]);
       const now = Date.now();
       for (const agent of refreshCandidates) {
         const quota = fresh[agent.privateKey];
@@ -340,6 +394,8 @@ export async function runAgentListCommand(
         }
       }
       unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
+    } else {
+      await decoratePromise;
     }
 
     const totalCount = agentsForOutput.length;
@@ -357,11 +413,7 @@ export async function runAgentListCommand(
     }
 
     if (wantSafe) {
-      const favoritesMap = await listFavoriteAgentIdsAcrossServers({
-        authToken,
-        fetchImpl,
-        serverUrls,
-      }).catch(() => ({} as Record<string, number>));
+      const favoritesMap = await (favoritesPromise ?? Promise.resolve({} as Record<string, number>));
 
       const existingKeys = new Set<string>();
       for (const agent of agents) {
@@ -371,49 +423,54 @@ export async function runAgentListCommand(
       }
       const extraFavoriteRecords: any[] = [];
       const hydratedFavoriteAgents: ListedAgent[] = [];
+      const missingFavKeys = Object.keys(favoritesMap).filter((favKey) => !existingKeys.has(favKey));
+      const favReads = await Promise.all(
+        missingFavKeys.map(async (favKey) => {
+          try {
+            const favRead = await readLiveDbRecordAfterTombstoneMerge({
+              authToken,
+              dbKey: favKey,
+              fallbackFetchImpl,
+              fetchImpl,
+              serverUrls,
+            });
+            return { favKey, record: favRead.record };
+          } catch {
+            return { favKey, record: null };
+          }
+        }),
+      );
 
-      for (const favKey of Object.keys(favoritesMap)) {
+      for (const { favKey, record } of favReads) {
         if (existingKeys.has(favKey)) continue;
-        try {
-          const favRead = await readLiveDbRecordAfterTombstoneMerge({
-            authToken,
-            dbKey: favKey,
-            fallbackFetchImpl,
-            fetchImpl,
-            serverUrls,
-          });
-          const record = favRead.record;
-          if (!record || (record.type && record.type !== "agent")) continue;
-          const norm = normalizeListedAgent(record);
-          const candidateKeys = [record.dbKey, record.publicKey, record.id]
-            .filter((key): key is string => typeof key === "string" && key.length > 0);
-          if (
-            spaceContentKeys &&
-            !candidateKeys.some((key) => spaceContentKeys?.has(key))
-          ) {
-            continue;
-          }
-          if (norm) {
-            // 与 server 端 noloWorkspaceServerTools 收藏水化同一证明标准：读成功
-            // 即证明 favKey 可解析。public 形态由 decorateAgentsWithPublicStatus
-            // 负责，这里只钉非 public 的他人 agent（空间共享 / grant）。
-            if (!favKey.startsWith("agent-pub-")) {
-              norm.verifiedAgentKey = favKey;
-              if (typeof record.userId === "string" && record.userId) {
-                norm.ownerId = record.userId;
-              }
+        if (!record || (record.type && record.type !== "agent")) continue;
+        const norm = normalizeListedAgent(record);
+        const candidateKeys = [record.dbKey, record.publicKey, record.id]
+          .filter((key): key is string => typeof key === "string" && key.length > 0);
+        if (
+          spaceContentKeys &&
+          !candidateKeys.some((key) => spaceContentKeys?.has(key))
+        ) {
+          continue;
+        }
+        if (norm) {
+          // 与 server 端 noloWorkspaceServerTools 收藏水化同一证明标准：读成功
+          // 即证明 favKey 可解析。public 形态由 decorateAgentsWithPublicStatus
+          // 负责，这里只钉非 public 的他人 agent（空间共享 / grant）。
+          if (!favKey.startsWith("agent-pub-")) {
+            norm.verifiedAgentKey = favKey;
+            if (typeof record.userId === "string" && record.userId) {
+              norm.ownerId = record.userId;
             }
-            agents.push(norm);
-            hydratedFavoriteAgents.push(norm);
-            existingKeys.add(norm.privateKey);
-            existingKeys.add(norm.publicKey);
-            existingKeys.add(norm.id);
-          } else {
-            extraFavoriteRecords.push(record);
-            for (const key of candidateKeys) existingKeys.add(key);
           }
-        } catch {
-          // orphan favorite key, skip it.
+          agents.push(norm);
+          hydratedFavoriteAgents.push(norm);
+          existingKeys.add(norm.privateKey);
+          existingKeys.add(norm.publicKey);
+          existingKeys.add(norm.id);
+        } else {
+          extraFavoriteRecords.push(record);
+          for (const key of candidateKeys) existingKeys.add(key);
         }
       }
 

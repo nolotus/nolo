@@ -1382,6 +1382,10 @@ export function createCliLocalRuntimeAdapter(
       readXPost: deps.readXPost,
       readXhsProfile: deps.readXhsProfile,
       cliEntrypoint: CLI_ENTRYPOINT,
+      // 本地进程内直连：readDialog / listDialogs 走已在手的共享 store
+      // （local-first，未命中才远端回退），不再 spawn `nolo` 子进程 + 试探
+      // 多个 HTTP 端点；本地答不了时 executor 内部自行回退 CLI 桥。
+      resolveDialogStore: () => getOrCreateSharedStore(deps),
       resolveAgentCredentialGroup,
       resolveAgentDisplayName,
       // α：spawn 前从 agent 配置回读真实 name（resolveAgentRunName 的读取来源）。

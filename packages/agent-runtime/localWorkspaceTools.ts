@@ -122,25 +122,8 @@ const DEFAULT_LOCAL_API_ORIGIN = "http://127.0.0.1:38123";
  * Internal: only consumed by the Cursor `internalSearchWorkspace` primitive.
  * Not part of any public tool schema.
  */
-export const ALWAYS_EXCLUDED_GLOBS: readonly string[] = [
-  ".git/**",
-  ".nolo/**",
-  "node_modules/**",
-  "*.tsbuildinfo",
-  "dist/**",
-  "build/**",
-  "out/**",
-  "coverage/**",
-  ".next/**",
-  ".turbo/**",
-  "public/assets/**",
-  "*.min.js",
-  "*.min.css",
-  "*.map",
-  "*.lock",
-  "bun.lockb",
-  "*.ldb",
-];
+import { ALWAYS_EXCLUDED_GLOBS } from "./workspaceSearchPolicy";
+export { ALWAYS_EXCLUDED_GLOBS } from "./workspaceSearchPolicy";
 
 
 import {
@@ -1697,16 +1680,9 @@ function scanWorkspaceGlobFiles(args: {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Internal workspace primitives (Cursor exec bridge only)
-//
-// These are the read-only bridges the Cursor provider (`grepArgs` / `lsArgs`)
-// routes through `ctx.executeTool` → policy → executor. They are NOT exposed to
-// any model schema (not in WORKSPACE_TOOL_NAMES, no executor registration in
-// buildLocalWorkspaceOpenAiTools / TOOL_PACKS / aliases). They deliberately
-// restore the internal behavior that the legacy listFiles/searchFiles executors
-// provided (readdir+stat with trailing "/" dirs; rg → grep → JS search), which
-// globFiles (files-only) and codeSearch (not in the local executor set) cannot
-// reproduce.
+// Shared read-only workspace primitives (Cursor bridge and searchFiles).
+// Search execution, path permissions, bounded output and metadata live here;
+// public searchFiles supplies literal/default-ignore options explicitly.
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
@@ -1852,6 +1828,12 @@ async function listWorkspaceEntries(args: {
 }
 
 export interface InternalSearchWorkspaceArgs {
+  regex?: boolean;
+  include?: string;
+  exclude?: string[];
+  includeIgnored?: boolean;
+  resolveRipgrepBinary?: () => string | null;
+  resolveGrepBinary?: () => string | null;
   workspaceRoot: string;
   path?: string;
   query: string;
@@ -1892,22 +1874,25 @@ export async function internalSearchWorkspace(args: InternalSearchWorkspaceArgs)
     root: inside ? workspaceRoot : searchPath,
     target: inside ? normalizeWorkspaceRelativePath({ workspaceRoot, targetPath: searchPath }) : ".",
     query: args.query,
-    regex: true,
+    regex: args.regex ?? true,
     caseSensitive: args.caseSensitive !== false,
     contextLines: args.contextLines,
     maxResults: args.maxResults ?? 200,
-    includeIgnored: args.workspaceRoot.includes(".worktrees") || !inside,
+    includeIgnored: args.includeIgnored ?? (args.workspaceRoot.includes(".worktrees") || !inside),
     absolutePaths: !inside,
-    exclude: inside ? [...ALWAYS_EXCLUDED_GLOBS] : [],
+    exclude: [...(inside ? ALWAYS_EXCLUDED_GLOBS : []), ...(args.exclude ?? [])],
+    include: args.include,
+    resolveRipgrepBinary: args.resolveRipgrepBinary,
+    resolveGrepBinary: args.resolveGrepBinary,
   });
   const outputLines = result.matches.flatMap((match) => [
     ...match.before.map((line, index) => `${match.path}:${Math.max(1, match.line - match.before.length + index)}-${line}`),
     `${match.path}:${match.line}:${match.text}`,
     ...match.after.map((line, index) => `${match.path}:${match.line + index + 1}-${line}`),
   ]);
-  const rawContent = outputLines.join("\n");
+  const rawContent = scrubSecrets(outputLines.join("\n")).cleaned;
   const content = truncateToolOutput(rawContent, SEARCH_OUTPUT_CHAR_LIMIT);
-  const matchLines = result.matches.map((match) => `${match.path}:${match.line}:${match.text}`);
+
   return {
     content,
     metadata: {
@@ -1916,6 +1901,7 @@ export async function internalSearchWorkspace(args: InternalSearchWorkspaceArgs)
       searchedPath: inside ? normalizeWorkspaceRelativePath({ workspaceRoot, targetPath: searchPath }) : ".",
       count: outputLines.length,
       matchCount: result.totalMatches,
+      totalMatches: result.totalMatches,
       matchedFiles: Array.from(new Set(result.matches.map((match) => match.path))),
       truncated: result.truncated || content.length !== rawContent.length,
       limitedByMaxResults: result.truncated,
@@ -2703,6 +2689,36 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
       workspaceRoot: args.workspaceRoot,
       ...fileAccess,
     }),
+    searchFiles: async (call: AgentRuntimeToolCallInput) => {
+      const parsed = parseWorkspaceToolArguments(call.arguments) as unknown as Record<string, unknown>;
+      const query = parsed.query === undefined ? parsed.pattern : parsed.query;
+      if (typeof query !== "string" || !query.length) throw new Error("searchFiles requires a non-empty query.");
+      for (const key of ["regex", "caseSensitive", "includeIgnored"]) {
+        if (parsed[key] !== undefined && typeof parsed[key] !== "boolean") throw new Error(`${key} must be a boolean.`);
+      }
+      for (const key of ["path", "include"]) {
+        if (parsed[key] !== undefined && typeof parsed[key] !== "string") throw new Error(`${key} must be a string.`);
+      }
+      if (parsed.exclude !== undefined && (!Array.isArray(parsed.exclude) || !parsed.exclude.every((item) => typeof item === "string"))) throw new Error("exclude must be an array of strings.");
+      for (const [key, min, max] of [["contextLines", 0, 5], ["maxResults", 1, 1000]] as const) {
+        if (parsed[key] !== undefined && (!Number.isInteger(parsed[key]) || Number(parsed[key]) < min || Number(parsed[key]) > max)) throw new Error(`${key} must be an integer from ${min} to ${max}.`);
+      }
+      return internalSearchWorkspace({
+        workspaceRoot: args.workspaceRoot,
+        query,
+        path: parsed.path as string | undefined,
+        regex: parsed.regex === true,
+        caseSensitive: parsed.caseSensitive !== false,
+        include: parsed.include as string | undefined,
+        exclude: parsed.exclude as string[] | undefined ?? [],
+        contextLines: parsed.contextLines as number | undefined,
+        maxResults: parsed.maxResults as number | undefined ?? 100,
+        includeIgnored: parsed.includeIgnored === true,
+        confirmExternalFileAccess: args.confirmExternalFileAccess,
+        resolveRipgrepBinary: args.resolveRipgrepBinary,
+        resolveGrepBinary: args.resolveGrepBinary,
+      });
+    },
     globFiles: (call: AgentRuntimeToolCallInput) => globFilesTool({
       call,
       workspaceRoot: args.workspaceRoot,

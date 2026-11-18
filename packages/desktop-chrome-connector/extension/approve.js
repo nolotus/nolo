@@ -42,15 +42,19 @@ function parseSummary(raw) {
 }
 const summary = parseSummary(params.get("summary"));
 
+const t = (key, fallback, substitutions) => chrome?.i18n?.getMessage?.(key, substitutions) || fallback;
+document.documentElement.lang = chrome?.i18n?.getUILanguage?.() || "en";
+document.title = t("approveTitle", "Nolo needs your approval");
+
 const ACTION_LABELS = {
-  click: "点击",
-  type: "输入",
-  press: "按键",
+  click: t("approveClick", "click"),
+  type: t("approveType", "type"),
+  press: t("approvePress", "press a key"),
   // Without this the window labelled a select as "点击", which is a different action than the
   // one the user is being asked to allow.
-  set_select_value: "选择",
+  set_select_value: t("approveSelect", "select an option"),
   // Arbitrary script: the label has to name it as its own kind of action, never as a click.
-  eval_script: "执行脚本",
+  eval_script: t("approveEval", "run a script"),
 };
 
 const allowButton = document.getElementById("allow");
@@ -58,12 +62,17 @@ const denyButton = document.getElementById("deny");
 const statusLine = document.getElementById("status");
 const targetLine = document.getElementById("target-name");
 const siteLine = document.getElementById("target-site");
-const actionLabel = document.getElementById("action-label");
+const heading = document.getElementById("approval-heading");
 
-actionLabel.textContent = ACTION_LABELS[action] || ACTION_LABELS.click;
-targetLine.textContent = targetName ? `「${targetName}」` : "未命名控件";
+const actionLabel = ACTION_LABELS[action] || ACTION_LABELS.click;
+heading.textContent = t("approveHeading", `Nolo requests permission to ${actionLabel} on the target below`, [actionLabel]);
+document.getElementById("approval-hint").textContent = t("approveHint", "Permission applies to this action only, expires after 60 seconds, and is invalidated if the page changes.");
+allowButton.textContent = t("approveAllow", "Allow once");
+denyButton.textContent = t("approveCancel", "Cancel");
+targetLine.textContent = targetName ? `「${targetName}」` : t("approveUnnamed", "Unnamed control");
 const scriptCaption = document.getElementById("script-caption");
 const scriptPreview = document.getElementById("script-preview");
+scriptCaption.textContent = t("approveScriptCaption", "Script to run (original text; scroll to inspect)");
 
 /**
  * A script is shown as its own block, line for line, in a scrollable <pre>.
@@ -80,7 +89,7 @@ function renderScriptPreview() {
   if (!scriptPreview) return;
   scriptPreview.hidden = false;
   // Assigned as text, never as HTML: the script is page-adjacent data, not markup.
-  scriptPreview.textContent = text || "（脚本内容缺失：请取消，回到 Nolo 重新发起）";
+  scriptPreview.textContent = text || t("approveScriptMissing", "Script content is missing. Cancel and request again in Nolo.");
 }
 
 if (action === "eval_script") {
@@ -94,7 +103,7 @@ if (action === "eval_script") {
 // A site the user cannot name is a site the user cannot judge: say "unknown" instead of leaving
 // the line blank, so a missing origin never reads as "nothing to see here".
 if (siteLine) {
-  siteLine.textContent = targetOrigin ? `目标站点：${targetOrigin}` : "目标站点：未知站点";
+  siteLine.textContent = t("approveSite", `Target site: ${targetOrigin || "Unknown site"}`, [targetOrigin || t("approveUnknownSite", "Unknown site")]);
 }
 
 let decided = false;
@@ -124,11 +133,11 @@ async function currentWindowId() {
 async function decide(decision) {
   if (decided) return;
   lockButtons();
-  setStatus(decision === "approve" ? "已允许，正在继续……" : "已取消。");
+  setStatus(decision === "approve" ? t("approveSubmitting", "Submitting approval\u2026") : t("approveCancelled", "Cancelled."));
 
   const windowId = await currentWindowId();
   if (windowId == null) {
-    setStatus("无法确认窗口来源，已取消。");
+    setStatus(t("approveWindowFailed", "Cannot verify the window source. Cancelled."));
     return;
   }
 
@@ -141,10 +150,10 @@ async function decide(decision) {
       windowId,
     });
     if (!response?.ok) {
-      setStatus("这次确认已失效（过期、已使用或来源不符），请在 Nolo 里重新发起。");
+      setStatus(t("approveExpired", "This approval is no longer valid (expired, used, or source mismatch). Request again in Nolo."));
     }
   } catch {
-    setStatus("无法联系扩展后台，这次确认未生效。");
+    setStatus(t("approveFailed", "Cannot reach the extension background. This approval did not take effect."));
   }
 }
 
@@ -153,5 +162,5 @@ denyButton?.addEventListener("click", () => void decide("deny"));
 
 if (!approvalId || !nonce) {
   lockButtons();
-  setStatus("缺少确认标识，请回到 Nolo 重新发起。");
+  setStatus(t("approveMissingId", "Missing approval identifier. Request again in Nolo."));
 }

@@ -1,4 +1,14 @@
 import * as path from "node:path";
+import { ALWAYS_EXCLUDED_GLOBS } from "../workspaceSearchPolicy";
+import { SANDBOX_SCRUBBER_JS, SANDBOX_SEARCH_KERNEL_JS } from "./sandboxSearchKernel.generated";
+
+// Embed the canonical kernel and its dependencies as pre-bundled ESM strings
+// so installed/compiled CLI builds (both Bun and Node) need no repo files or
+// runtime Bun.Transpiler, and bundlers (bun build / esbuild) never see text-import assertions.
+function toJavascriptDataUrl(jsSource: string): string {
+    return "data:text/javascript;base64," + Buffer.from(jsSource, "utf8").toString("base64");
+}
+
 
 /** 沙盒内工作区根 = 钉住的沙盒镜像（`docker.io/oven/bun:<version>`，见
  * `dockerSandboxCloudSpec.pinnedBunSandboxImage`）的默认工作目录 `/home/bun/app`。
@@ -88,13 +98,16 @@ export function resolveSandboxPath(input: string): { ok: true; path: string } | 
     return { ok: true, path: resolved };
 }
 
-export type SandboxToolOp = "readFile" | "writeFile" | "editFile" | "glob" | "grep" | "mkdir" | "stat";
+export type SandboxToolOp = "readFile" | "writeFile" | "editFile" | "glob" | "grep" | "searchFiles" | "mkdir" | "stat";
 
 export function buildWorkspaceHelperSource(): string {
     return `import fs from "node:fs/promises";
 import path from "node:path";
 
 const ROOT = "${SANDBOX_WORKSPACE_ROOT}";
+const SEARCH_EXCLUDES = ${JSON.stringify(ALWAYS_EXCLUDED_GLOBS)};
+const SEARCH_KERNEL_URL = ${JSON.stringify(toJavascriptDataUrl(SANDBOX_SEARCH_KERNEL_JS))};
+const SCRUBBER_URL = ${JSON.stringify(toJavascriptDataUrl(SANDBOX_SCRUBBER_JS))};
 const MAX_SERIALIZED_CHARS = ${SANDBOX_OUTPUT_LIMITS.maxSerializedChars};
 const READ_HEAD_CHARS = ${SANDBOX_OUTPUT_LIMITS.readHeadChars};
 const READ_TAIL_CHARS = ${SANDBOX_OUTPUT_LIMITS.readTailChars};
@@ -322,6 +335,31 @@ async function main() {
         return emitValue(withMarker(capped.items, capped.omitted));
       }
 
+      case "searchFiles": {
+        const p = resolvePath(args.path || ROOT);
+        if (!p.ok) return console.log(JSON.stringify({ ok: false, error: p.error }));
+        const { searchFileTextMatches } = await import(SEARCH_KERNEL_URL);
+        const { scrubSecrets } = await import(SCRUBBER_URL);
+        const query = args.query === undefined ? args.pattern : args.query;
+        if (typeof query !== "string" || !query.length) throw new Error("missing_query");
+        const result = await searchFileTextMatches({ root: ROOT, target: p.path, query,
+          regex: args.regex === true, caseSensitive: args.caseSensitive !== false,
+          include: typeof args.include === "string" ? args.include : undefined,
+          exclude: [...SEARCH_EXCLUDES, ...(Array.isArray(args.exclude) ? args.exclude.filter((x) => typeof x === "string") : [])],
+          contextLines: Number.isInteger(args.contextLines) && args.contextLines >= 0 && args.contextLines <= 5 ? args.contextLines : 0,
+          maxResults: Number.isInteger(args.maxResults) && args.maxResults >= 1 && args.maxResults <= 1000 ? args.maxResults : 100,
+          includeIgnored: args.includeIgnored === true });
+        const lines = result.matches.flatMap((m) => [
+          ...m.before.map((text, i) => m.path + ":" + (m.line - m.before.length + i) + "-" + text),
+          m.path + ":" + m.line + ":" + m.text,
+          ...m.after.map((text, i) => m.path + ":" + (m.line + i + 1) + "-" + text),
+        ]);
+        const raw = scrubSecrets(lines.join(NL)).cleaned;
+        const content = raw.slice(0, ARRAY_CHAR_BUDGET);
+        return emitValue({ content, metadata: { searchEngine: result.engine, count: lines.length,
+          totalMatches: result.totalMatches, matchCount: result.totalMatches,
+          truncated: result.truncated || content.length !== raw.length, limitedByMaxResults: result.truncated } });
+      }
       case "mkdir": {
         const p = resolvePath(args.path);
         if (!p.ok) return console.log(JSON.stringify({ ok: false, error: p.error }));
@@ -414,6 +452,32 @@ export function buildToolInvocation(
                 if (!res.ok) return { ok: false, error: res.error };
                 validatedArgs.path = res.path;
             }
+            break;
+        }
+        case "searchFiles": {
+            const query = args.query === undefined ? args.pattern : args.query;
+            if (typeof query !== "string" || !query.length) return { ok: false, error: "missing_query" };
+            const res = resolveSandboxPath(typeof args.path === "string" ? args.path : ".");
+            if (!res.ok) return { ok: false, error: res.error };
+            for (const key of ["regex", "caseSensitive", "includeIgnored"]) {
+                if (args[key] !== undefined && typeof args[key] !== "boolean") return { ok: false, error: "invalid_" + key };
+            }
+            if (args.path !== undefined && typeof args.path !== "string") return { ok: false, error: "invalid_path" };
+            if (args.include !== undefined && typeof args.include !== "string") return { ok: false, error: "invalid_include" };
+            if (args.exclude !== undefined && (!Array.isArray(args.exclude) || !args.exclude.every((x) => typeof x === "string"))) return { ok: false, error: "invalid_exclude" };
+            for (const [key, min, max] of [["contextLines", 0, 5], ["maxResults", 1, 1000]] as const) {
+                if (args[key] !== undefined && (!Number.isInteger(args[key]) || Number(args[key]) < min || Number(args[key]) > max)) return { ok: false, error: "invalid_" + key };
+            }
+            op = "searchFiles";
+            validatedArgs.path = res.path;
+            validatedArgs.query = query;
+            validatedArgs.regex = args.regex === true;
+            validatedArgs.caseSensitive = args.caseSensitive !== false;
+            validatedArgs.include = args.include;
+            validatedArgs.exclude = args.exclude;
+            validatedArgs.contextLines = args.contextLines;
+            validatedArgs.maxResults = args.maxResults ?? 100;
+            validatedArgs.includeIgnored = args.includeIgnored === true;
             break;
         }
         case "grep":

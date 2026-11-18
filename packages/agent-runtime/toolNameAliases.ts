@@ -40,6 +40,11 @@ const LEGACY_TOOL_NAME_ALIASES: Record<string, string> = {
   edit: "editFile",
   write: "writeFile",
   glob: "globFiles",
+  grep: "searchFiles",
+  rg: "searchFiles",
+  grepFiles: "searchFiles",
+  grep_files: "searchFiles",
+  search_files: "searchFiles",
   // 联网搜索别名
   web_search: "exa_search",
   websearch: "exa_search",

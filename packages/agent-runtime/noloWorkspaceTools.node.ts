@@ -12,7 +12,9 @@ import type { PlanningCaller } from "../ai/agent/agentDiscovery";
  * this module. The pure argument-parsing helpers stay in `noloWorkspaceTools.ts`.
  */
 import { isAgentSkillDisabled, type AgentSkillConfigSource } from "../ai/tools/agentSkillConfig";
+import { resolveLocalUserId } from "../cli/client/cliAgentConfigHelpers";
 import { dialogMessageRange } from "../database/keys";
+import { isTombstoneRecord } from "../database/tombstones";
 import { localDialogMessageRecordToRuntimeMessage } from "../cli/client/localDialogRecords";
 import {
   BRIDGE_STREAM_MAX_CHARS,
@@ -107,11 +109,75 @@ export type InProcessDialogStore = {
   iterator?: (options: { gte: string; lte?: string; lt?: string; reverse?: boolean; limit?: number }) => AsyncIterable<[string, unknown]>;
 };
 
+/** 惰性解析本地 store：构建 executor map 时不打开 DB，也不阻塞同步签名。 */
+export type InProcessDialogStoreResolver = () => Promise<InProcessDialogStore | undefined>;
+
+export type NoloWorkspaceInProcessResult = {
+  content: string;
+  metadata?: Record<string, unknown>;
+};
+
+/**
+ * 进程内 executor。返回 `null` 的语义是「本地路径回答不了这次调用」，
+ * 调用方据此回退 CLI 桥——快路径不得因为省一次 spawn 而丢掉它自己无法
+ * 复现的能力（远端历史、Space 索引等）。
+ */
+export type NoloWorkspaceInProcessExecutor = (
+  call: { name: string; arguments: string },
+  ctx: { env?: Record<string, string | undefined> }
+) => Promise<NoloWorkspaceInProcessResult | null>;
+
+/**
+ * 本机独占对话判定：只有这类对话的本地副本可以当作权威，其它对话的本地
+ * 副本随时可能落后于 Web/App 端的写入。
+ * - 本机 run 记录里的子对话（`~/.nolo/runs/*.json` 的 dialogId 集合）；
+ * - CLI 后台 run 写入的对话（`triggerType: "cli-agent-run"`）；
+ * - 明确标注 `localRuntime` 且 `executionMode: "background"` 的对话。
+ */
+function isLocalExclusiveDialog(
+  dialogId: string,
+  meta: unknown,
+  localChildDialogIds: ReadonlySet<string> | undefined
+): boolean {
+  if (localChildDialogIds?.has(dialogId)) return true;
+  const record = meta as Record<string, unknown> | null;
+  if (!record || typeof record !== "object") return false;
+  if (record.triggerType === "cli-agent-run") return true;
+  return Boolean(record.localRuntime) && record.executionMode === "background";
+}
+
+type InProcessDialogReadOutcome =
+  | { outcome: "hit"; result: NoloWorkspaceInProcessResult }
+  | { outcome: "fallback"; reason: string };
+
+const fallback = (reason: string): InProcessDialogReadOutcome => ({ outcome: "fallback", reason });
+
+/**
+ * In-process `readDialog`. Returns `{ outcome: "fallback", reason }` when the
+ * local store cannot answer (record absent, dialog meta present but no messages
+ * locally, cross-user or cross-server request, tombstone): the caller then
+ * falls back to the CLI bridge, which owns server-side auth, remote history and
+ * multi-server reads. The reason is surfaced on the bridged result so a
+ * downgrade never looks like "the dialog simply does not exist".
+ * `store.read(dbKey)` without `remote` is local-first and only reaches the
+ * network on a local miss, so the hit path stays sub-millisecond.
+ *
+ * 身份边界（review HIGH）：本地 `HybridRecordStore` 是多账号共享的，因此
+ * - 模型传入的 `user/userId/owner` 一律不信：显式指定他人对话只能走带鉴权
+ *   的 CLI 桥，这里直接 `return null`；
+ * - `currentUserId` 只从宿主注入（或与 `resolveLocalUserId` 等价的宿主
+ *   env/JWT 解析）取，取不到就不读本地库；
+ * - 解析出的 owner 与宿主持有者不一致 → 不读。
+ */
 async function readDialogInProcess(
   call: { name: string; arguments: string },
   store: InProcessDialogStore,
-  env?: Record<string, string | undefined>
-): Promise<{ content: string; metadata?: Record<string, unknown> }> {
+  ctx: {
+    env?: Record<string, string | undefined>;
+    currentUserId?: string;
+    localChildDialogIds?: ReadonlySet<string>;
+  }
+): Promise<InProcessDialogReadOutcome> {
   const args = parseNoloWorkspaceToolArguments(call.arguments);
   const dialogInput = noloStringArg(args.dialog ?? args.dialogId ?? args.id);
   if (!dialogInput) throw new Error("readDialog requires dialog.");
@@ -121,11 +187,35 @@ async function readDialogInProcess(
     throw new Error(`readDialog mode must be "full" or "status", got "${mode}".`);
   }
 
-  const userId = noloStringArg(args.user ?? args.userId ?? args.owner) || env?.NOLO_LOCAL_USER_ID || env?.NOLO_USER_ID || "";
-  const { dbKey: dialogKey, dialogId } = resolveNoloDialogInput(dialogInput, userId);
+  // 跨账号读取必须由服务端鉴权裁决，进程内直连无从校验。
+  if (noloStringArg(args.user ?? args.userId ?? args.owner)) return fallback("explicit-user");
+  // 跨机器 server 读取（`--server`）只有 CLI 桥能做。
+  if (noloStringArg(args.server ?? args.serverBase ?? args.serverUrl)) return fallback("explicit-server");
 
-  // 读 dialog meta（本地优先，不读远端）
-  const meta = await store.read(dialogKey, { remote: false });
+  const currentUserId = ctx.currentUserId;
+  if (!currentUserId) return fallback("no-current-user");
+
+  const { dbKey: dialogKey, dialogId, ownerId } = resolveNoloDialogInput(dialogInput, currentUserId);
+  // 输入直接指向他人对话（完整 dbKey / URL 带别人的 userId）→ 不读本地库。
+  if (ownerId !== currentUserId) return fallback("foreign-owner");
+
+  // 读 dialog meta（local-first：命中即返回，未命中才走 store 的远端回退）
+  const meta = await store.read(dialogKey);
+  // 本地/远端都读不到这条 dialog → 交给 CLI 桥（它有多 server 合并与
+  // 本地库候选路径），绝不用 null meta 冒充「查到了一条空对话」。
+  if (!meta) return fallback("local-miss");
+  // 已删除（tombstone）记录不是可读对话：本地库会保留墓碑，必须跳过。
+  if (isTombstoneRecord(meta)) return fallback("tombstone");
+
+  // 本地库只是缓存，不是权威：一个在 Web/App 端继续进行的普通对话，本地
+  // meta+消息可能停在几轮之前，直接返回就会漏掉最新轮次。因此只有「本机
+  // 独占、无跨端并发写入」的对话才允许进程内直读——即本机 startAgentRun
+  // 派发的子任务对话，或 CLI 后台 run 写入的对话。其余一律交回权威路径
+  // （CLI 桥自身已有 local-db-fallback，离线可读性不受影响）。
+  if (!isLocalExclusiveDialog(dialogId, meta, ctx.localChildDialogIds)) {
+    return fallback("cross-device-sync");
+  }
+
 
   if (mode === "status") {
     const result = {
@@ -137,8 +227,11 @@ async function readDialogInProcess(
       source: "in-process",
     };
     return {
-      content: JSON.stringify(result, null, 2),
-      metadata: { noloWorkspaceTool: true, readDialog: true, inProcess: true, mode: "status" },
+      outcome: "hit",
+      result: {
+        content: JSON.stringify(result, null, 2),
+        metadata: { noloWorkspaceTool: true, readDialog: true, inProcess: true, mode: "status" },
+      },
     };
   }
 
@@ -152,15 +245,22 @@ async function readDialogInProcess(
     maxResponseChars: DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS,
     ...(limit !== undefined ? { maxMessages: limit } : {}),
   });
+  // 本地 meta 命中但本地一条消息都没有 = 典型「app/其他设备创建的对话」：
+  // 直接返回空 transcript 会静默骗过模型。`store.iterator` 缺失同理——无法
+  // 判断消息是否完整。两种情况都回退 CLI 桥，由它走远端历史/本地库候选。
+  let hasMessages = false;
   if (store.iterator) {
     const { start, end } = dialogMessageRange(dialogId);
     for await (const [, value] of store.iterator({ gte: start, lte: end })) {
       const message = localDialogMessageRecordToRuntimeMessage(value as any) ?? value;
       if (message) {
+        hasMessages = true;
         projector.addMessage(message);
       }
     }
   }
+
+  if (!hasMessages) return fallback("no-local-messages");
 
   // Agent 响应预算：in-process / server 工具 / CLI bridge 共享同一 projection
   // seam（dialogReadProjection.ts），序列化前裁剪，避免工具密集对话构建无界多副本
@@ -182,8 +282,11 @@ async function readDialogInProcess(
   });
 
   return {
-    content: built.serialized,
-    metadata: { noloWorkspaceTool: true, readDialog: true, inProcess: true },
+    outcome: "hit",
+    result: {
+      content: built.serialized,
+      metadata: { noloWorkspaceTool: true, readDialog: true, inProcess: true },
+    },
   };
 }
 
@@ -195,6 +298,18 @@ export function buildNoloWorkspaceCliToolExecutors(args: {
   processExecPath?: string;
   spawn?: NoloSpawn;
   store?: InProcessDialogStore;
+  /** 惰性本地 store：构建 map 不打开 DB；首次调用才解析。 */
+  resolveDialogStore?: InProcessDialogStoreResolver;
+  /**
+   * 宿主真实 `currentUserId`（本地库归属者）。缺省用 `resolveLocalUserId(env)`
+   * （NOLO_LOCAL_USER_ID / NOLO_USER_ID / AUTH_TOKEN 解析）。进程内对话读取
+   * 只认这个身份，绝不从模型参数推导。
+   */
+  resolveCurrentUserId?: () => string | undefined;
+  /** 本机 run 子对话 id 集合（判定「本机独占对话」用）。 */
+  resolveLocalChildDialogIds?: () => ReadonlySet<string>;
+  /** 本地优先的进程内 executor；返回 null 时回退 CLI 子进程。 */
+  inProcessExecutors?: Partial<Record<string, NoloWorkspaceInProcessExecutor>>;
 }) {
   const executors: Record<string, (call: { name: string; arguments: string }) => Promise<{
     content: string;
@@ -207,14 +322,115 @@ export function buildNoloWorkspaceCliToolExecutors(args: {
     // buildLoadSkillExecutor separately. Registering it here would route the
     // call into buildNoloWorkspaceCommandArgs, which throws "no CLI mapping".
     if (toolName === "loadSkill") continue;
-    if (toolName === "readDialog" && args.store) {
-      executors[toolName] = (call) => readDialogInProcess(call, args.store!, args.env);
+
+    const inProcess = args.inProcessExecutors?.[toolName];
+    const storeBackedRead = toolName === "readDialog" && Boolean(args.store || args.resolveDialogStore);
+    if (inProcess || storeBackedRead) {
+      executors[toolName] = createInProcessWithCliFallback(args, inProcess);
       continue;
     }
     executors[toolName] = (call) => runNoloWorkspaceCliTool(call, args);
   }
   return executors;
 }
+
+/**
+ * 本地优先 + CLI 兜底的 executor 形状。
+ *
+ * 快路径的任何「回答不了」都落到同一个出口：返回 `null`（本地 store 没有
+ * 这条记录 / 本地无消息 / 无 iterator），或抛错（DB 打开失败、记录损坏、
+ * 投影异常）。两者都回退 `runNoloWorkspaceCliTool`，因此开启快路径不会让
+ * 原本能读到的远端对话变得读不到；只是少了一次 spawn 的延迟。
+ */
+function createInProcessWithCliFallback(
+  args: {
+    cliEntrypoint?: string;
+    env?: Record<string, string | undefined>;
+    metadataKind?: string;
+    processExecPath?: string;
+    spawn?: NoloSpawn;
+    store?: InProcessDialogStore;
+    resolveDialogStore?: InProcessDialogStoreResolver;
+    resolveCurrentUserId?: () => string | undefined;
+    resolveLocalChildDialogIds?: () => ReadonlySet<string>;
+  },
+  inProcess?: NoloWorkspaceInProcessExecutor
+) {
+  return async (call: { name: string; arguments: string }) => {
+    let fallbackReason: string | undefined;
+    try {
+      if (inProcess) {
+        const result = await inProcess(call, { env: args.env });
+        if (result) return result;
+        fallbackReason = "local-miss";
+      } else {
+        const currentUserId = resolveHostCurrentUserId(args);
+        const store = await resolveInProcessDialogStore(args);
+        const outcome = store
+          ? await readDialogInProcess(call, store, {
+              env: args.env,
+              currentUserId,
+              localChildDialogIds: resolveLocalChildDialogIds(args),
+            })
+          : ({ outcome: "fallback", reason: "no-store" } as const);
+        if (outcome.outcome === "hit") return outcome.result;
+        fallbackReason = outcome.reason;
+      }
+    } catch (error) {
+      // store 打开失败 / 记录损坏 / 投影异常：降级到 CLI 桥，但把原因带到
+      // metadata 里——静默降级会让人误以为「本地就是没有这条对话」。
+      fallbackReason = error instanceof Error ? error.message : String(error);
+    }
+    const bridged = await runNoloWorkspaceCliTool(call, args);
+    return {
+      ...bridged,
+      metadata: { ...bridged.metadata, inProcessFallback: fallbackReason },
+    };
+  };
+}
+
+async function resolveInProcessDialogStore(args: {
+  store?: InProcessDialogStore;
+  resolveDialogStore?: InProcessDialogStoreResolver;
+}): Promise<InProcessDialogStore | undefined> {
+  if (args.store) return args.store;
+  if (!args.resolveDialogStore) return undefined;
+  try {
+    return await args.resolveDialogStore();
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveLocalChildDialogIds(args: {
+  resolveLocalChildDialogIds?: () => ReadonlySet<string>;
+}): ReadonlySet<string> | undefined {
+  try {
+    return args.resolveLocalChildDialogIds?.();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 宿主持有的 local userId（本地库归属者）。只认宿主注入或宿主 env/JWT，
+ * 不从模型参数推导；解析失败返回 undefined → 进程内路径直接放弃。
+ */
+function resolveHostCurrentUserId(args: {
+  env?: Record<string, string | undefined>;
+  resolveCurrentUserId?: () => string | undefined;
+}): string | undefined {
+  try {
+    const injected = args.resolveCurrentUserId?.();
+    if (injected && injected.trim()) return injected.trim();
+    if (args.resolveCurrentUserId) return undefined;
+    const derived = resolveLocalUserId(args.env ?? {});
+    return derived && derived.trim() ? derived.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 
 
 const nodeSpawnFallback: NoloSpawn = (options) => {

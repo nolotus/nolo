@@ -704,6 +704,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     en: "Reload the connector extension through the running native host",
     zh: "通过运行中的原生 host 重载连接器扩展",
   },
+  "browser doctor": {
+    en: "Run end-to-end Browser Connector diagnostics and print recovery steps (--browser chrome|firefox [--json])",
+    zh: "端到端诊断浏览器连接器并输出修复步骤（--browser chrome|firefox [--json]）",
+  },
   "browser list-tabs": {
     en: "List controllable browser tabs",
     zh: "列出可控制的浏览器标签页",
@@ -771,6 +775,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
   "chrome reload": {
     en: "Reload the connector extension through the running native host (Compatibility alias of `nolo browser reload`)",
     zh: "通过运行中的原生 host 重载连接器扩展（`nolo browser reload` 的兼容别名）",
+  },
+  "chrome doctor": {
+    en: "Run end-to-end Browser Connector diagnostics and print recovery steps (--browser chrome|firefox [--json]) (Compatibility alias of `nolo browser doctor`)",
+    zh: "端到端诊断浏览器连接器并输出修复步骤（--browser chrome|firefox [--json]）（`nolo browser doctor` 的兼容别名）",
   },
   "chrome list-tabs": {
     en: "List controllable browser tabs (Compatibility alias of `nolo browser list-tabs`)",
@@ -857,8 +865,8 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     zh: "显示当前登录状态",
   },
   "connect": {
-    en: "Send machine heartbeats or hold a connector websocket",
-    zh: "发送机器心跳或保持连接器 WebSocket",
+    en: "Hold a connector websocket for this machine",
+    zh: "为当前机器保持连接器 WebSocket",
   },
   "daemon": {
     en: "Run the connector daemon shortcut",

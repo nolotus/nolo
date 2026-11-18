@@ -5,7 +5,7 @@
  * Every string comes from `_locales` so the popup follows the browser language; the literals here are
  * only fallbacks for a missing key. The popup reads no page data and performs no actions.
  */
-const t = (key, fallback) => chrome.i18n.getMessage(key) || fallback;
+const t = (key, fallback) => chrome?.i18n?.getMessage?.(key) || fallback;
 
 const dot = document.getElementById("dot");
 const state = document.getElementById("state");
@@ -30,7 +30,7 @@ function renderDisconnected(reason) {
   state.textContent = t("popupDisconnected", "Not connected");
   hint.textContent = reason || t(
     "popupDisconnectedHint",
-    "Install Nolo on this computer and enable its connector, then reopen this popup.",
+    "Open the Nolo desktop app or run `nolo browser install` in your terminal to register the local bridge, then reopen this popup.",
   );
 }
 
@@ -48,7 +48,7 @@ async function render() {
     }
     renderDisconnected();
   } catch (error) {
-    renderDisconnected(chrome.i18n.getMessage("popupStatusError", [String(error?.message ?? error)]));
+    renderDisconnected(chrome?.i18n?.getMessage?.("popupStatusError", [String(error?.message ?? error)]) || `Could not read connection status: ${String(error?.message ?? error)}`);
   }
 }
 

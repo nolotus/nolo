@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Nolo 需要你确认</title>
+    <title>Nolo needs your approval</title>
     <style>
       :root { color-scheme: light dark; }
       body {
@@ -54,16 +54,16 @@
     </style>
   </head>
   <body>
-    <h1>Nolo 想对你<span id="action-label">点击</span>下面这个控件</h1>
+    <h1 id="approval-heading">Nolo requests permission to click on the target below</h1>
     <p class="target" id="target-name"></p>
     <p class="site" id="target-site"></p>
-    <p id="script-caption" hidden>要执行的脚本（原文，换行保留；可滚动查看）</p>
+    <p id="script-caption" hidden>Script to run (original text; scroll to inspect)</p>
     <pre id="script-preview" hidden></pre>
-    <p class="hint">允许只对这一次动作有效，60 秒后失效；页面内容变化后也会作废。</p>
+    <p class="hint" id="approval-hint">Permission applies to this action only, expires after 60 seconds, and is invalidated if the page changes.</p>
     <div id="status" role="status" aria-live="polite"></div>
     <div class="row">
-      <button type="button" id="deny">取消</button>
-      <button type="button" id="allow" class="primary">允许一次</button>
+      <button type="button" id="deny">Cancel</button>
+      <button type="button" id="allow" class="primary">Allow once</button>
     </div>
     <script src="approve.js"></script>
   </body>

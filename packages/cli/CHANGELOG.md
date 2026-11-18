@@ -1,4 +1,36 @@
 
+## 0.242.0-alpha.1 (2026-11-18)
+
+### Features
+
+* **agent-runtime:** 暴露跨平台全场景一等检索工具 searchFiles ([10b1894](https://github.com/nolotus/bun-nolo/commit/10b189407ce1b4e38149803ff3681013fccfaebf))
+* **cli:** TUI 新增 nature 日夜自适应配色并消除大面积着色噪音 ([d1ccb33](https://github.com/nolotus/bun-nolo/commit/d1ccb33a5d319bba1e7310796239e0746714b304))
+* **cli:** 升级 Zed 风格对齐 Diff、画布自适应色彩与 98 列阅读行宽 ([d7cf268](https://github.com/nolotus/bun-nolo/commit/d7cf2682211dafda97cf94acd24331b266ed47d9))
+* **cli:** 实现 startAgentRun 全业务场景跨平台按需工作区隔离 ([e13bb73](https://github.com/nolotus/bun-nolo/commit/e13bb7338d9e4fc1ee881d1ff76fe17142f12de7))
+* **cli:** 新增 nolo browser doctor 端到端诊断与商店首装恢复闭环 ([f75dcc6](https://github.com/nolotus/bun-nolo/commit/f75dcc6b838dd18f06be2851f65aafc1603ba770))
+* **cli:** 统一 TUI 顶部任务栏对齐网格与 80ms 顺滑动效 ([f582b75](https://github.com/nolotus/bun-nolo/commit/f582b759c9cc293d9d6877750f13dd6280c60c55))
+* **mcp:** close server and web MCP loop with atomic credential storage ([5a87402](https://github.com/nolotus/bun-nolo/commit/5a874026cdde27b1ec7b5097303590b69e7eb69d))
+* **sidebar:** refine type filter hierarchy and memoize space refresh ([0ce53e3](https://github.com/nolotus/bun-nolo/commit/0ce53e3e55ad58abce09fc6e6febc27e30e276ae))
+* **space:** add read-only db/scan, SpaceStoreReader dual-read, and pure-read membership categories ([05ee7d4](https://github.com/nolotus/bun-nolo/commit/05ee7d417b451213a34d196fe0b0e6efe1fe92d0))
+
+### Bug Fixes
+
+* **chat:** prevent duplicate sidebar highlights across rail shortcuts and space groups ([c7860c6](https://github.com/nolotus/bun-nolo/commit/c7860c624010c538a376b0f51278fcafdd7a58b1))
+* **ci:** handle Daytona cold-node boot and prebundle sandbox search kernel ([1fa764f](https://github.com/nolotus/bun-nolo/commit/1fa764fab33629db84ca0ef1c50297cd39fd019f))
+* **cli:** clear stale stop latch on new turn and default Enter hint to merge ([5bce55c](https://github.com/nolotus/bun-nolo/commit/5bce55c6b31c4f62d0d43b38e7bd7a4c4f5811b3))
+* **cli:** describe the browser doctor commands and declare host writes in the spawn fixture ([195e15e](https://github.com/nolotus/bun-nolo/commit/195e15e458fe5d3ffe0694b74ac0e2e8d939818a))
+* **cli:** 恢复 TUI 会话运行期终端日夜底色自动跟随 ([69b86fa](https://github.com/nolotus/bun-nolo/commit/69b86fa8352febf5d4144ad976abd263c76ad406))
+* **cli:** 恢复 TUI 默认 terminal 模式对比度并消除 chrome 双重压暗 ([a1b4c68](https://github.com/nolotus/bun-nolo/commit/a1b4c6836260ff25e9bb7535cb4332606a9abf9e)), closes [#6C7086](https://github.com/nolotus/bun-nolo/issues/6C7086) [#7F849C](https://github.com/nolotus/bun-nolo/issues/7F849C)
+* **settings:** preserve valid queued intents across unrelated edits ([f141de0](https://github.com/nolotus/bun-nolo/commit/f141de0cbdeb5fb42580f5a596b1c36eab037acd))
+
+### Performance Improvements
+
+* **agent-runtime:** 优化 taskStop 40ms 早停探活消除 2000ms 硬编码死睡 ([c80c41b](https://github.com/nolotus/bun-nolo/commit/c80c41bbe100a8415c165e6bcedd75d75e8ab7dd))
+* **cli:** 优化 listAgents 有界读取最近 runs 与并行请求及新鲜额度缓存 ([b5e959b](https://github.com/nolotus/bun-nolo/commit/b5e959b979288fa2c1a81bbd2fe92279ce52c166))
+* **cli:** 接通本机独占子任务对话 readDialog 进程内极速直连 ([9cbfb3d](https://github.com/nolotus/bun-nolo/commit/9cbfb3df166b5807b30fd99cfbf5807a1504b45f))
+* **web:** 按需懒加载首屏与弹窗重型模块减小入口预载体积 ([5352786](https://github.com/nolotus/bun-nolo/commit/53527861004ffc604f68ca06bb6d0cefad8903a1))
+
+
 ## 0.241.0-alpha.1 (2026-11-18)
 
 ### Features

@@ -4,7 +4,36 @@ import type { CredentialRef } from "./credentialBroker";
 export const MCP_CONNECTION_SCHEMA_VERSION = 1 as const;
 export const MCP_TOOL_NAMES = Object.freeze(["listMcpConnections", "listMcpTools", "callMcpTool"] as const);
 export type McpPlacement = { kind: "server" } | { kind: "local" } | { kind: "machine"; machineId: string };
-export type McpPresetId = "zoho-mail";
+export type McpPresetId = "zoho-mail" | "home-assistant";
+export type McpPresetSpec = Readonly<{
+  id: McpPresetId;
+  title: string;
+  summary: string;
+  defaultAuthKind: "none" | "bearer";
+  endpointPlaceholder: string;
+  note: string;
+}>;
+export const MCP_PRESET_SPECS: readonly McpPresetSpec[] = Object.freeze([
+  Object.freeze({
+    id: "zoho-mail",
+    title: "Zoho Mail MCP",
+    summary: "接入 Zoho 官方为你账号生成的专属 MCP HTTPS 服务地址，在受控工具白名单与确认门下读取或检索邮件。",
+    defaultAuthKind: "none",
+    endpointPlaceholder: "https://mail.zoho.com/mcp/...",
+    note: "Zoho 生成的专属 Server URL 内含访问密钥，保存时将直接加密存入受控密文库，不会以明文回显。",
+  }),
+  Object.freeze({
+    id: "home-assistant",
+    title: "Home Assistant MCP",
+    summary: "接入公网 HTTPS 可达的 Home Assistant 官方 MCP Server（如 /api/mcp），经每次调用确认后查看或控制实体。",
+    defaultAuthKind: "bearer",
+    endpointPlaceholder: "https://ha.example.com/api/mcp",
+    note: "服务端连接仅访问公网 HTTPS（自动拦截内网/私网地址），需提供长期访问令牌（Bearer Token）。",
+  }),
+]);
+export function getMcpPresetSpec(id: string | null | undefined): McpPresetSpec | undefined {
+  return MCP_PRESET_SPECS.find((spec) => spec.id === id);
+}
 export type McpAuth = { kind: "none" } | { kind: "oauth" } | { kind: "bearer"; credentialRef: CredentialRef };
 export type McpTransport = { kind: "streamable-http"; endpointRef: CredentialRef };
 /** Host-audited exact argument constraints. Every supplied argument must be listed.
@@ -25,7 +54,7 @@ export type McpConnectionWrite = {
 };
 /** Private per-account record; refs and executable details must not be returned to model/list APIs. */
 export type McpConnection = McpConnectionWrite & { id: string; ownerUserId: string; revision: number };
-export type McpConnectionSummary = Pick<McpConnection, "schemaVersion" | "id" | "label" | "enabled" | "revision" | "presetId" | "placement"> & {
+export type McpConnectionSummary = Pick<McpConnection, "schemaVersion" | "id" | "label" | "enabled" | "revision" | "presetId" | "placement" | "allowedToolNames" | "readPolicies"> & {
   transportKind: McpTransport["kind"];
   authKind: McpAuth["kind"];
   endpointConfigured: boolean;
@@ -111,12 +140,18 @@ const refSchema: ContractSchema = { ...text(128), pattern: "^[A-Za-z0-9][A-Za-z0
 const revisionSchema: ContractSchema = { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER };
 const objectSchema = (properties: Record<string, ContractSchema>, required = Object.keys(properties)): ContractSchema =>
   ({ type: "object", properties, required, additionalProperties: false });
-const placements: ContractSchema = { type: "object", required: ["kind"], properties: { kind: { const: "local" } }, additionalProperties: false };
+const placements: ContractSchema = {
+  oneOf: [
+    { type: "object", required: ["kind"], properties: { kind: { const: "local" } }, additionalProperties: false },
+    { type: "object", required: ["kind"], properties: { kind: { const: "server" } }, additionalProperties: false },
+    { type: "object", required: ["kind", "machineId"], properties: { kind: { const: "machine" }, machineId: idSchema }, additionalProperties: false },
+  ],
+};
 export const MCP_CONNECTION_WRITE_SCHEMA: ContractSchema = {
  type: "object", required: ["schemaVersion", "label", "enabled", "placement", "transport", "auth", "allowedToolNames", "readPolicies"],
  properties: {
  schemaVersion: { const: 1 }, label: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^:/\\\\\\r\\n]+$" }, enabled: { type: "boolean" },
- presetId: { enum: ["zoho-mail"] }, placement: placements,
+ presetId: { enum: ["zoho-mail", "home-assistant"] }, placement: placements,
  allowedToolNames: { type: "array", maxItems: 256, items: text(160) },
  readPolicies: { type: "array", maxItems: 256, items: { type: "object", required: ["toolName", "arguments"], properties: { toolName: text(160), arguments: { type: "object", maxProperties: 128, additionalProperties: { type: "array", maxItems: 256 } } }, additionalProperties: false } },
  transport: { type: "object", required: ["kind", "endpointRef"], properties: { kind: { const: "streamable-http" }, endpointRef: refSchema }, additionalProperties: false },
@@ -208,11 +243,169 @@ export function parseMcpListToolsInput(value: unknown): McpResult<McpListToolsIn
 export function parseMcpCallToolInput(value: unknown): McpResult<McpCallToolInput> {
   return parse<McpCallToolInput>(MCP_CALL_TOOL_INPUT_SCHEMA, value);
 }
+export const MCP_LIST_CONNECTIONS_INPUT_SCHEMA = freezeSchema(objectSchema({}, []));
+
+export type McpServerCreateInput = {
+  label: string;
+  enabled: boolean;
+  presetId?: McpPresetId;
+  allowedToolNames: string[];
+  readPolicies: McpReadPolicy[];
+  authKind: "none" | "bearer";
+  endpoint: string;
+  credential?: string;
+};
+
+export type McpServerUpdateInput = {
+  connectionId: string;
+  expectedRevision: number;
+  label: string;
+  enabled: boolean;
+  presetId?: McpPresetId;
+  allowedToolNames: string[];
+  readPolicies: McpReadPolicy[];
+  authKind: "none" | "bearer";
+  /** Omit when keeping the existing encrypted endpoint unchanged. */
+  endpoint?: string;
+  /** Omit when keeping the existing encrypted bearer token unchanged. */
+  credential?: string;
+};
+
+export type McpServerDeleteInput = {
+  expectedRevision: number;
+};
+
+function isValidHttpsEndpointUrl(raw: string): boolean {
+  if (!raw || raw.length > 16384) return false;
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password && !parsed.hash;
+  } catch {
+    return false;
+  }
+}
+
+export function parseMcpServerCreateInput(value: unknown): McpResult<McpServerCreateInput> {
+  if (!isBoundedJson(value) || !isRecord(value)) return failure("invalid_input");
+  const allowedKeys = new Set(["label", "enabled", "presetId", "allowedToolNames", "readPolicies", "authKind", "endpoint", "credential"]);
+  if (Object.keys(value).some((k) => !allowedKeys.has(k))) return failure("invalid_input");
+  if (typeof value.label !== "string" || !matches({ type: "string", minLength: 1, maxLength: 160, pattern: "^[^:/\\\\\\r\\n]+$" }, value.label.trim())) {
+    return failure("invalid_input");
+  }
+  if (typeof value.enabled !== "boolean") return failure("invalid_input");
+  if (value.presetId !== undefined && !getMcpPresetSpec(String(value.presetId))) return failure("invalid_input");
+  if (value.authKind !== "none" && value.authKind !== "bearer") return failure("invalid_input");
+  if (typeof value.endpoint !== "string" || !isValidHttpsEndpointUrl(value.endpoint.trim())) {
+    return failure("invalid_input");
+  }
+  if (value.authKind === "bearer") {
+    if (typeof value.credential !== "string" || !value.credential.trim() || value.credential.length > 16384) {
+      return failure("invalid_input");
+    }
+  } else if (value.credential !== undefined && value.credential !== "") {
+    return failure("invalid_input");
+  }
+  const allowedToolsRaw = value.allowedToolNames ?? [];
+  const readPoliciesRaw = value.readPolicies ?? [];
+  const probe = parseMcpConnectionWrite({
+    schemaVersion: 1,
+    label: value.label.trim(),
+    enabled: value.enabled,
+    ...(value.presetId ? { presetId: value.presetId as McpPresetId } : {}),
+    allowedToolNames: allowedToolsRaw,
+    readPolicies: readPoliciesRaw,
+    placement: { kind: "server" },
+    transport: { kind: "streamable-http", endpointRef: "probe-ref" },
+    auth: value.authKind === "bearer" ? { kind: "bearer", credentialRef: "probe-cred" } : { kind: "none" },
+  });
+  if (!probe.ok) return probe;
+  return {
+    ok: true,
+    value: {
+      label: probe.value.label,
+      enabled: probe.value.enabled,
+      ...(probe.value.presetId ? { presetId: probe.value.presetId } : {}),
+      allowedToolNames: probe.value.allowedToolNames,
+      readPolicies: probe.value.readPolicies,
+      authKind: value.authKind,
+      endpoint: value.endpoint.trim(),
+      ...(value.authKind === "bearer" ? { credential: (value.credential as string).trim() } : {}),
+    },
+  };
+}
+
+export function parseMcpServerUpdateInput(value: unknown): McpResult<McpServerUpdateInput> {
+  if (!isBoundedJson(value) || !isRecord(value)) return failure("invalid_input");
+  const allowedKeys = new Set(["connectionId", "expectedRevision", "label", "enabled", "presetId", "allowedToolNames", "readPolicies", "authKind", "endpoint", "credential"]);
+  if (Object.keys(value).some((k) => !allowedKeys.has(k))) return failure("invalid_input");
+  if (!matches(idSchema, value.connectionId) || !matches(revisionSchema, value.expectedRevision)) {
+    return failure("invalid_input");
+  }
+  if (typeof value.label !== "string" || !matches({ type: "string", minLength: 1, maxLength: 160, pattern: "^[^:/\\\\\\r\\n]+$" }, value.label.trim())) {
+    return failure("invalid_input");
+  }
+  if (typeof value.enabled !== "boolean") return failure("invalid_input");
+  if (value.presetId !== undefined && !getMcpPresetSpec(String(value.presetId))) return failure("invalid_input");
+  if (value.authKind !== "none" && value.authKind !== "bearer") return failure("invalid_input");
+  let nextEndpoint: string | undefined;
+  if (value.endpoint !== undefined && value.endpoint !== "") {
+    if (typeof value.endpoint !== "string" || !isValidHttpsEndpointUrl(value.endpoint.trim())) {
+      return failure("invalid_input");
+    }
+    nextEndpoint = value.endpoint.trim();
+  }
+  let nextCredential: string | undefined;
+  if (value.credential !== undefined && value.credential !== "") {
+    if (value.authKind !== "bearer" || typeof value.credential !== "string" || !value.credential.trim() || value.credential.length > 16384) {
+      return failure("invalid_input");
+    }
+    nextCredential = value.credential.trim();
+  }
+  const probe = parseMcpConnectionWrite({
+    schemaVersion: 1,
+    label: value.label.trim(),
+    enabled: value.enabled,
+    ...(value.presetId ? { presetId: value.presetId as McpPresetId } : {}),
+    allowedToolNames: value.allowedToolNames ?? [],
+    readPolicies: value.readPolicies ?? [],
+    placement: { kind: "server" },
+    transport: { kind: "streamable-http", endpointRef: "probe-ref" },
+    auth: value.authKind === "bearer" ? { kind: "bearer", credentialRef: "probe-cred" } : { kind: "none" },
+  });
+  if (!probe.ok) return probe;
+  return {
+    ok: true,
+    value: {
+      connectionId: value.connectionId as string,
+      expectedRevision: value.expectedRevision as number,
+      label: probe.value.label,
+      enabled: probe.value.enabled,
+      ...(probe.value.presetId ? { presetId: probe.value.presetId } : {}),
+      allowedToolNames: probe.value.allowedToolNames,
+      readPolicies: probe.value.readPolicies,
+      authKind: value.authKind,
+      ...(nextEndpoint !== undefined ? { endpoint: nextEndpoint } : {}),
+      ...(nextCredential !== undefined ? { credential: nextCredential } : {}),
+    },
+  };
+}
+
+export function parseMcpServerDeleteInput(value: unknown): McpResult<McpServerDeleteInput> {
+  if (!isBoundedJson(value) || !isRecord(value)) return failure("invalid_input");
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== "expectedRevision" || !matches(revisionSchema, value.expectedRevision)) {
+    return failure("invalid_input");
+  }
+  return { ok: true, value: { expectedRevision: value.expectedRevision as number } };
+}
+
 /** Public/model projection uses explicit allowlist, no object spread of private records. */
 export function toMcpConnectionSummary(connection: McpConnection): McpConnectionSummary {
   return {
     schemaVersion: 1, id: connection.id, label: connection.label, enabled: connection.enabled, revision: connection.revision,
     ...(connection.presetId ? { presetId: connection.presetId } : {}),
+    allowedToolNames: [...connection.allowedToolNames],
+    readPolicies: structuredClone(connection.readPolicies),
     placement: connection.placement.kind === "machine" ? { kind: "machine", machineId: connection.placement.machineId } : { kind: connection.placement.kind },
     transportKind: connection.transport.kind, authKind: connection.auth.kind,
     endpointConfigured: true,

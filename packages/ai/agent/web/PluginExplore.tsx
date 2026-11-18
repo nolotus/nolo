@@ -22,6 +22,7 @@ import {
   type PluginCardState,
 } from "./pluginPresentation";
 import { usePluginCardStates } from "./pluginStatus";
+import { McpPresetEntries } from "./McpConnectionsPanel";
 import "./PluginExplore.css";
 import { UI_PLUGIN_SPECS } from "app/plugins/uiPlugins";
 import { useUiPlugins } from "app/hooks/index";
@@ -115,6 +116,8 @@ export const PluginExplore: React.FC = () => {
           <p>{uiPlugins[spec.id] === "enabled" ? "已开启" : uiPlugins[spec.id] === "disabled" ? "已关闭" : "尚未创建"}</p>
           <Link className="plugin-config-page__empty-link" to={`/plugins/${spec.id}`}>{uiPlugins[spec.id] === "absent" ? "创建并开启" : "配置"}</Link>
         </section>)}
+
+        <McpPresetEntries LinkComponent={Link} />
 
         <div className="plugin-explore__section-head">
           <h2 className="plugin-explore__section-title">
