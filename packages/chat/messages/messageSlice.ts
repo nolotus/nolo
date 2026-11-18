@@ -745,14 +745,22 @@ export const messageSlice = createSliceWithThunks({
       async (args: { dialogKey: string; signal?: AbortSignal; owns?: () => boolean; execution?: UserBatchExecution; requestUserInput: UserBatchInputSnapshot; start: () => unknown }, { dispatch, getState, extra }) => {
         const dialogId = extractCustomId(args.dialogKey);
         const db = (extra as any).db;
-        const valid = () => !args.signal?.aborted && (args.owns?.() ?? true) && (args.execution?.valid() ?? true);
+        const valid = () => {
+          // A real Stop remains cancellation. Losing ownership without an abort
+          // is a failed request boundary, never a successfully completed turn.
+          if (args.signal?.aborted) return false;
+          if (!(args.owns?.() ?? true) || !(args.execution?.valid() ?? true)) {
+            args.execution?.dispose();
+            throw new Error("User batch execution ownership lost; blocked");
+          }
+          return true;
+        };
         const assertInput = (expected: UserBatchInputSnapshot, actual: UserBatchInputSnapshot, ids: string[]) => {
           try { assertUserBatchInput(expected, actual, ids); }
           catch (error) { args.execution?.dispose(); throw error; }
         };
         if (!isLocalUserBatch(args.dialogKey)) {
           if (!Array.isArray(args.requestUserInput)) throw new Error("Missing controlled user batch request input; blocked");
-          if (args.execution && !args.execution.valid()) throw new Error("User batch execution expired; blocked");
           if (!valid()) return undefined;
           const control = userBatchControl(getState(), args.dialogKey);
           // Initial sends predate queueState=pending. Publish/claim their durable
@@ -854,7 +862,15 @@ export const messageSlice = createSliceWithThunks({
         };
         if (!valid()) return undefined;
         if (rows.length) await persist("requested");
-        if (!valid()) {
+        let canStart: boolean;
+        try { canStart = valid(); }
+        catch (error) {
+          // Local-only, before provider invocation: ownership failure must not
+          // leave an unrequested batch permanently blocked as requested.
+          if (rows.length) await persist("admitted");
+          throw error;
+        }
+        if (!canStart) {
           // No provider has been invoked in this closure: rollback only the
           // phase, retaining the durable receipt and original identity/time.
           if (rows.length) await persist("admitted");

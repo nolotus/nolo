@@ -30,6 +30,7 @@ import {
   type BrowseContext,
 } from "core/browseContextStore";
 import { BROWSER_CHROME_SCRIPT } from "./browserChromeTemplates";
+import { syncInitialCefLayout } from "./desktopInitialCefLayout";
 import {
   resolveInitialWindowFrame,
   savePersistedWindowState,
@@ -1294,6 +1295,16 @@ const mainWindow = (() => {
     throw error;
   }
 })();
+// Our Linux build uses CEF. The SDK can report "native" even when the
+// packaged launcher is running CEF, so do not gate on webview.renderer.
+const adjustFrameForSave = process.platform === "linux"
+  ? syncInitialCefLayout(mainWindow, (callback) => {
+    // BrowserWindow.on uses this per-window event but has no matching off API.
+    const event = `resize-${mainWindow.id}`;
+    Electrobun.events.on(event, callback);
+    return () => { Electrobun.events.off(event, callback); };
+  })
+  : undefined;
 if (isSmokeProbe) {
   console.log("[desktop] smoke probe mode enabled");
 }
@@ -1735,10 +1746,8 @@ const shutdownDesktopAndExit = (reason: string) => {
 
 const saveMainWindowState = () => {
   try {
-    savePersistedWindowState(
-      desktopChannelDir,
-      (mainWindow as any).getFrame?.()
-    );
+    const frame = mainWindow.getFrame();
+    savePersistedWindowState(desktopChannelDir, adjustFrameForSave?.(frame) ?? frame);
   } catch (error) {
     console.warn("[desktop] failed to save window state", error);
   }

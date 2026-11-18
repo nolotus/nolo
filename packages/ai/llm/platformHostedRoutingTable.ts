@@ -14,6 +14,7 @@
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
+  PLATFORM_HOSTED_KIMI_K31_PRO_MODEL,
   PLATFORM_HOSTED_KIMI_K3_MODEL,
 } from "./kimi";
 
@@ -294,6 +295,18 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     usageProvider: "baseten",
     keyName: "baseten",
     upstreamModelId: "moonshotai/Kimi-K3",
+    wire: "chat.completions",
+    agentRunHosted: true,
+    minClientVersion: PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
+  },
+  // Kimi K3.1 Pro -> Baseten（model library 的 moonshotai/Kimi-K3.1-Pro，2026-11-18 上架）。
+  // 与 K3 同族：共用同一组 body quirk（删采样参数 + max_completion_tokens）与同一
+  // 客户端闸门常量，旧客户端本地直连同样会撞。
+  [PLATFORM_HOSTED_KIMI_K31_PRO_MODEL]: {
+    endpoint: "https://inference.baseten.co/v1/chat/completions",
+    usageProvider: "baseten",
+    keyName: "baseten",
+    upstreamModelId: "moonshotai/Kimi-K3.1-Pro",
     wire: "chat.completions",
     agentRunHosted: true,
     minClientVersion: PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
@@ -670,6 +683,38 @@ export const PLATFORM_MODEL_ALIASES: Readonly<
     since: "2026-11-01",
     reason:
       "同家族换代（owner 2026-11-01 决定）：gpt-6-sol 指向同家族最新代 gpt-6.1-sol，透明映射，按 6.1 Sol 计费。",
+  },
+  // 2026-11-18 owner 决定：平台目录收缩，旧代 transparent 映射到接替者，
+  // 上游与计费都按接替者（旧价目常量只做历史只读重放）。
+  [PLATFORM_HOSTED_KIMI_K3_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_KIMI_K31_PRO_MODEL,
+    since: "2026-11-18",
+    reason:
+      "Kimi 目录只保留 K3.1 Pro（owner 2026-11-18 决定）：kimi-k3 透明映射到 kimi-k3.1-pro，按 K3.1 Pro 计费。",
+  },
+  [PLATFORM_HOSTED_KIMI_K26_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_KIMI_K31_PRO_MODEL,
+    since: "2026-11-18",
+    reason:
+      "Kimi 目录只保留 K3.1 Pro（owner 2026-11-18 决定）：kimi-k2.6 透明映射到 kimi-k3.1-pro，按 K3.1 Pro 计费。",
+  },
+  [PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
+    since: "2026-11-18",
+    reason:
+      "Haiku 4.5 从平台目录撤下（2026-11-18）：透明映射到接替者 Haiku 5.5，按 5.5 计费。",
+  },
+  [PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_CLAUDE_FABLE_5_2_MODEL,
+    since: "2026-11-18",
+    reason:
+      "Fable 5.1 从平台目录撤下（2026-11-18）：透明映射到接替者 Fable 5.2，按 5.2 计费。",
+  },
+  [PLATFORM_HOSTED_GEMINI_25_PRO_MODEL]: {
+    aliasOf: PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL,
+    since: "2026-11-18",
+    reason:
+      "Gemini 2.5 Pro 从平台目录撤下（2026-11-18）：透明映射到 Gemini 4 Carbon，按 Carbon 计费。",
   },
 };
 

@@ -4,10 +4,10 @@
 //
 // High-confidence keyword rules only — no scores, no confidence, no weighted
 // keywords, no LLM classifier. Philosophy: resolve when certain, otherwise
-// return null. This is a prerequisite layer for future quality-evidence
-// routing (packages/ai/llm/modelQualityEvidence.ts) and must stay decoupled:
-// no evidence/selector/economics imports, no prompt text generation, pure
-// function in → domain | null out.
+// return null. The domain taxonomy is declared locally (the old
+// ai/llm/modelQualityEvidence.ts evidence chain was removed on 2026-11-18),
+// and this module must stay decoupled: no evidence/selector/economics imports,
+// no prompt text generation, pure function in → domain | null out.
 //
 // Rule semantics (checked in order):
 // - explicitDomain wins outright (stable exit for future planner/routing);
@@ -38,7 +38,22 @@
 //   only strengthen rails/design identity when the task text resolves to
 //   nothing on its own.
 
-import type { ModelQualityDomain } from "../llm/modelQualityEvidence";
+/**
+ * Task domains used to scope quality evidence.
+ *
+ * 2026-11-18：原真源 `ai/llm/modelQualityEvidence.ts`（AA/benchmark 能力证据链）已整体删除，
+ * 这里只保留「任务 → 域」映射需要的域枚举本身（它仍被进化评估链路消费）。
+ * 不在本文件重新引入任何 benchmark 分数、权重或综合分。
+ */
+export type ModelQualityDomain =
+  | "coding.general"
+  | "coding.repo"
+  | "coding.terminal"
+  | "coding.rails"
+  | "design.website"
+  | "writing.creative"
+  | "long_context"
+  | "science";
 
 /** Everything the resolver may look at. All fields optional. */
 export interface TaskQualityDomainInput {

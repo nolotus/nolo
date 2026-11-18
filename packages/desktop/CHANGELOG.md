@@ -1,4 +1,23 @@
 
+## 0.260.0-alpha.1 (2026-11-18)
+
+### Features
+
+* **agent:** /create/agent 平台模型旁新增「查看价格」入口 ([a5f1105](https://github.com/nolotus/bun-nolo/commit/a5f1105937502d1f5228b5b3d74b6550acdaf5ef))
+* **ai:** 平台模型目录换代 Kimi K3.1 Pro，五条旧代撤下并透明指向接替者 ([f0f08f7](https://github.com/nolotus/bun-nolo/commit/f0f08f710ac9d35f9fe0f82a5fdc27a455d57f09))
+
+### Bug Fixes
+
+* **app:** 删除前向服务端确认实体不存在再清理残留行 ([51f3825](https://github.com/nolotus/bun-nolo/commit/51f382523a938f3f14d41eb176d8a4637d6656c0))
+* **chat:** preserve first-send ownership and report unstarted replies ([6c5e841](https://github.com/nolotus/bun-nolo/commit/6c5e84184d659ca984206bf8ea0dd648c407756a))
+* **desktop:** 冷启动后触发一次原生 resize，修复 CEF 子窗口 2 倍尺寸 ([f434b39](https://github.com/nolotus/bun-nolo/commit/f434b39a7f4901823744df0fcec35e042bf9a041))
+* **desktop:** 升级 electrobun 到 2.0.6 ([799963e](https://github.com/nolotus/bun-nolo/commit/799963e4b085d2f3c13f2f2166ed064499a69c10))
+* **desktop:** 恢复窗口时按所属屏幕裁剪，修复超大框只显示一角 ([329852a](https://github.com/nolotus/bun-nolo/commit/329852a410fc95cea672a05ce2f385e27dad15ac))
+* **desktop:** 桌面 turn 请求带上会话 bearer，修复已登录却 AUTH_NO_TOKEN ([6499b4a](https://github.com/nolotus/bun-nolo/commit/6499b4ae6f8b450ca1bfea3671d1bc2be0a60f60))
+* **desktop:** 桌面壳按系统 locale 注入界面语言 ([4b4fa8f](https://github.com/nolotus/bun-nolo/commit/4b4fa8f96377cb5d9ca119208ebefdec793d36c7))
+* **types:** 修 scripts-dev 与 connector 的既有类型错误，typecheck:green 转绿 ([3747bb1](https://github.com/nolotus/bun-nolo/commit/3747bb196182da0b1849a451501de18668068d8d))
+
+
 ## 0.259.0-alpha.1 (2026-11-18)
 
 ### Features

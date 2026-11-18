@@ -61,10 +61,10 @@ export const PLATFORM_CONSULTANT_BILLING_SOURCE: ConsultantBillingSource =
  * 增删模型只改这一处。
  */
 export const CONSULTANT_TIER_MODEL_IDS = [
-  "anthropic/claude-fable-5-1",
+  "anthropic/claude-fable-5-2",
   "gpt-6-astra",
   "anthropic/claude-opus-5-5",
-  "kimi-k3",
+  "kimi-k3.1-pro",
   "gpt-6.1-sol",
 ] as const;
 

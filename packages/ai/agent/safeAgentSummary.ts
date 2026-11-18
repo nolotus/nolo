@@ -1,6 +1,5 @@
 import { resolveModelTier, type ModelTier } from "./dispatchSelectionPolicy";
 import { fnv1a32Hex } from "core/fnv1a32";
-import { getModelAbility, type ModelAbility } from "../llm/modelAbility";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
 import { isPlatformPaidAgentCall } from "./platformPaidCall";
 import { isOwnedAgentKey, ownedAgentKey, publicAgentKey } from "core/prefix";
@@ -199,7 +198,6 @@ export interface SafeAgentSummary {
   tools: string[];
   inputPrice: number | null;
   outputPrice: number | null;
-  modelAbility: ModelAbility | null;
   isFavorite: boolean;
   favoritedAt: number | string | null;
   isPublic: boolean;
@@ -450,7 +448,6 @@ export function toSafeAgentSummary(
       ? record.outputPrice
       : null;
 
-  const modelAbility = model ? getModelAbility(model) ?? null : null;
   const favStatus = resolveFavoriteStatus(record, options);
   const isPublic = record?.isPublic === true || record?.isPublicFlag === true || record?.publicRecordExists === true;
   const updatedAt = safeTimestamp(record?.updatedAt ?? record?.createdAt ?? record?.created);
@@ -558,7 +555,6 @@ export function toSafeAgentSummary(
     tools,
     inputPrice,
     outputPrice,
-    modelAbility,
     isFavorite: favStatus.isFavorite,
     favoritedAt: favStatus.favoritedAt,
     isPublic,
@@ -597,7 +593,7 @@ export function sortSafeAgentSummaries<T extends AgentSelectionCandidate>(agents
  * 背景（真实事故）：32 个 agent 的完整摘要约 23.9KB，被 host 按字节截成
  * 头+尾，中段条目的 agentKey 不可见，模型照抄其它条目的 ULID 格式猜了一个
  * 不存在的 key，派发 2 秒即失败。agentKey 是唯一不可推导、必须逐字复制的
- * 字段，必须保留；introduction/cliProvider/modelAbility/价格等长文本或大量
+ * 字段，必须保留；introduction/cliProvider/价格等长文本或大量
  * 为 null 的字段在截断预算里是纯噪音，默认剔除。verbose 模式拿回完整字段集。
  */
 export const COMPACT_AGENT_SUMMARY_FIELDS = [
@@ -681,7 +677,7 @@ export function toCompactAgentSummary(
  * （agentKey、name、model、billingSource、availabilityStatus、credentialGroup、
  * isFavorite、isOAuth、isOwned、isPublic、nextAvailableAt、availabilityReason、
  * tools、provider、apiSource、credentialKind、credentialed、economics、quota），
- * 同时剔除次要长文本说明与非准入元数据（如 introduction、modelAbility、greeting、prompt 等）。
+ * 同时剔除次要长文本说明与非准入元数据（如 introduction、greeting、prompt 等）。
  */
 export const ULTRA_COMPACT_AGENT_SUMMARY_FIELDS = [
   // —— 派发决策与关键准入语义（必须保留，不能宣称安全但丢证据）——

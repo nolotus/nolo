@@ -32,7 +32,7 @@
         "echarts": "^6.1.0",
         "echarts-for-react": "^3.0.2",
         "effect": "4.1.1",
-        "electrobun": "2.0.5",
+        "electrobun": "2.0.6",
         "events": "^3.3.0",
         "fast-xml-parser": "^5.9.0",
         "i18next": "^23.11.5",
@@ -201,7 +201,7 @@
     },
     "packages/cli": {
       "name": "nolo-cli",
-      "version": "0.242.0-alpha.1",
+      "version": "0.243.0-alpha.1",
       "bin": {
         "nolo": "index.js",
       },
@@ -280,9 +280,9 @@
     },
     "packages/desktop": {
       "name": "desktop",
-      "version": "0.259.0-alpha.1",
+      "version": "0.260.0-alpha.1",
       "dependencies": {
-        "electrobun": "2.0.5",
+        "electrobun": "2.0.6",
         "rcedit": "^5.0.2",
       },
     },
@@ -2031,9 +2031,9 @@
 
     "effect": ["effect@4.1.1", "", {}, "sha512-XYu65BrcmNqu5i7PPvP4dqL+R5ma37zIsfuSPjcn78mog+6e5PkilNg7Xo+pBpjXJYlWEIpH4j91tMrfW05CMw=="],
 
-    "electrobun": ["electrobun@2.0.5", "", { "bin": { "electrobun": "bin/electrobun.cjs" } }, "sha512-/4Vp0p6LgdD7bySSblnoqM0rtcQT5uYsGeqZPhsOESeSxMGeiKsfQkBjNwMnjFI5z4StJKXfs386ay2mpif1BA=="],
+    "electrobun": ["electrobun@2.0.6", "", { "bin": { "electrobun": "bin/electrobun.cjs" } }, "sha512-qt3x6Ko7F7ufM3tGCtGSpHoGPsXioIdZP/dU4Gd7o7Imzoy+c3hqi0IWaecXkJY5fE5e3gTivhmwu9iob6furA=="],
 
-    "electron-to-chromium": ["electron-to-chromium@1.5.489", "", {}, "sha512-1cF87WItryk9lj5wg5SLsNegUihdkcHuOfrANPpO02y/d2krm1Oc3GjA9KBwlT5o145FTa1bbjdLc7pZnvtnYQ=="],
+    "electron-to-chromium": ["electron-to-chromium@1.5.490", "", {}, "sha512-I0dPyEsiaYAlbGJlr0SdRRGSWk9BpOz8AIo/4f93A6bAGuN3YafmT71rpss72SA05isaAkcAOYcW0F0H48om4Q=="],
 
     "elkjs": ["elkjs@0.11.1", "", {}, "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg=="],
 

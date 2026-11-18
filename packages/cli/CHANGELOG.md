@@ -1,4 +1,20 @@
 
+## 0.243.0-alpha.1 (2026-11-18)
+
+### Features
+
+* **agent:** /create/agent 平台模型旁新增「查看价格」入口 ([a5f1105](https://github.com/nolotus/bun-nolo/commit/a5f1105937502d1f5228b5b3d74b6550acdaf5ef))
+* **ai:** 平台模型目录换代 Kimi K3.1 Pro，五条旧代撤下并透明指向接替者 ([f0f08f7](https://github.com/nolotus/bun-nolo/commit/f0f08f710ac9d35f9fe0f82a5fdc27a455d57f09))
+
+### Bug Fixes
+
+* **app:** 删除前向服务端确认实体不存在再清理残留行 ([51f3825](https://github.com/nolotus/bun-nolo/commit/51f382523a938f3f14d41eb176d8a4637d6656c0))
+* **chat:** preserve first-send ownership and report unstarted replies ([6c5e841](https://github.com/nolotus/bun-nolo/commit/6c5e84184d659ca984206bf8ea0dd648c407756a))
+* **desktop:** 升级 electrobun 到 2.0.6 ([799963e](https://github.com/nolotus/bun-nolo/commit/799963e4b085d2f3c13f2f2166ed064499a69c10))
+* **desktop:** 桌面 turn 请求带上会话 bearer，修复已登录却 AUTH_NO_TOKEN ([6499b4a](https://github.com/nolotus/bun-nolo/commit/6499b4ae6f8b450ca1bfea3671d1bc2be0a60f60))
+* **desktop:** 桌面壳按系统 locale 注入界面语言 ([4b4fa8f](https://github.com/nolotus/bun-nolo/commit/4b4fa8f96377cb5d9ca119208ebefdec793d36c7))
+
+
 ## 0.242.0-alpha.1 (2026-11-18)
 
 ### Features

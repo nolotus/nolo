@@ -1,7 +1,5 @@
 // ai/llm/types.ts
 
-import type { ModelAbility } from "./modelAbility";
-
 export interface ModelPrice {
   input: number;
   output: number;
@@ -113,9 +111,6 @@ export interface Model {
    * 未填时由消费方 fallback 判定（如模型 id 子串匹配）。
    */
   thinkingMode?: "adaptive" | "extended";
-
-  /** Optional benchmark capability metadata. */
-  ability?: ModelAbility;
 
   /**
    * 使用该模型所需的最低客户端版本（semver）——客户端版本闸门第 1 层。

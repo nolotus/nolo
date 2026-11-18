@@ -76,6 +76,7 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
     isLoadingInitial: false,
     hasLocalOwner: hasLocalForegroundOwner,
     recoveredForegroundTurn: null,
+    forRecovery: true,
   }));
 
   useEffect(() => {

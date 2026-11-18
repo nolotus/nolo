@@ -44,6 +44,14 @@ const GPT_ASTRA_RE =
 const KIMI_K3_MODELS: ReadonlySet<string> = new Set([
   "kimi-k3",
   "moonshotai/kimi-k3",
+  // 2026-11-18：K3 由 K3.1 Pro 接替（目录换成 kimi-k3.1-pro），旗舰档门槛保持一致 —
+  // 不因换代把 199 档位约束漏掉。
+  "kimi-k3.1-pro",
+  "moonshotai/kimi-k3.1-pro",
+  // 旧 K2.6 经 PLATFORM_MODEL_ALIASES 执行同一 K3.1 Pro 上游与计费：档位判定按
+  // 请求 id 直查，不带这一条就会出现「换个旧 id 绕过 premium 门槛」。
+  "kimi-k2.6",
+  "moonshotai/kimi-k2.6",
 ]);
 
 /**
@@ -89,7 +97,7 @@ export function isGptProModel(provider: unknown, model: unknown): boolean {
   return classifyPremiumModel(model) !== undefined;
 }
 
-export const GPT_PRO_BLOCKED_MESSAGE = `GPT Pro / Kimi K3 等高级模型需要先开通 ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分档位。`;
+export const GPT_PRO_BLOCKED_MESSAGE = `GPT Pro / Kimi K3.1 Pro 等高级模型需要先开通 ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分档位。`;
 
 /** 199 档位门槛 402 响应里的稳定 reason（服务端与客户端共用一处常量）。 */
 export const GPT_PRO_TIER_REQUIRED_REASON = "gpt_pro_tier_required";

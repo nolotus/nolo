@@ -1413,6 +1413,10 @@ export const streamAgentChatTurnHandler = async (
 
                 try {
                     const desktopAgentRef = agentConfig.dbKey || agentKey;
+                    // 桌面 turn 接口只从请求头 `Authorization`（或 nolo_auth_token
+                    // cookie）读身份，而 webview 从不写那个 cookie —— 不在这里显式传，
+                    // 宿主 env 就没有 AUTH_TOKEN，平台模型一律 AUTH_NO_TOKEN。
+                    const desktopTurnAuthToken = selectIdentityToken(getState() as RootState);
                     // Request-scoped authoritative snapshot: webview IndexedDB is the
                     // truth for logged-out local agents; host LevelDB must not be a
                     // second copy. Credential material stays as credentialRef only.
@@ -1450,6 +1454,7 @@ export const streamAgentChatTurnHandler = async (
                         // LLM_REQUEST_TIMEOUT 可操作文案。取 2× = 20 分钟：
                         // 只兜「runtime 完全没 deadline」的真悬挂。
                         noEventWatchdogMs: DESKTOP_SSE_NO_EVENT_WATCHDOG_MS,
+                        ...(desktopTurnAuthToken ? { authToken: desktopTurnAuthToken } : {}),
                     });
                         // Async generators are lazy: begin the first next() in
                         // the guarded closure, not after returning to the caller.
@@ -2574,10 +2579,11 @@ export const streamAgentChatTurnHandler = async (
                     dynamicMessageCount: dynamicMessages.length,
                     stableMessageCount: stableMessages.length,
                 });
-                modelRequestStarted = true;
 
                 const meta: CompletionMeta = await dispatch(runPendingUserBatchRequest({
-                    dialogKey, signal: loopController.signal, execution: batchExecution, requestUserInput, start: () => sendOpenAIResponseRequest({
+                    dialogKey, signal: loopController.signal, execution: batchExecution, requestUserInput, start: () => {
+                    modelRequestStarted = true;
+                    return sendOpenAIResponseRequest({
                     bodyData,
                     agentConfig: agentConfigForCall,
                     thunkApi,
@@ -2587,8 +2593,9 @@ export const streamAgentChatTurnHandler = async (
                     quickChatPerfStartedAt,
                     fallbackBodyData,
                     userMessageId: workMemoryUserMessageId(dialogId, activeTurnUserMessageId),
-                }), })).unwrap();
-                if (!meta || loopController.signal.aborted || thunkApi.signal.aborted) break;
+                }); }, })).unwrap();
+                if (isTurnAborted()) return { aborted: true };
+                if (!meta) throw new Error("Model request returned no result; reply did not complete");
                 logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-model-request-finished", {
                     responseApi: true,
                     hasToolCalls: meta.hasToolCalls,
@@ -2913,7 +2920,6 @@ export const streamAgentChatTurnHandler = async (
                 dynamicMessageCount: dynamicMessages.length,
                 stableMessageCount: stableMessages.length,
             });
-            modelRequestStarted = true;
 
             const disableToolsForThisRequest =
                 shouldDisableQuickChatToolsForDirectAnswer(
@@ -2936,7 +2942,9 @@ export const streamAgentChatTurnHandler = async (
             }
 
             const meta: CompletionMeta = await dispatch(runPendingUserBatchRequest({
-                    dialogKey, signal: loopController.signal, execution: batchExecution, requestUserInput, start: () => sendOpenAICompletionsRequest({
+                    dialogKey, signal: loopController.signal, execution: batchExecution, requestUserInput, start: () => {
+                    modelRequestStarted = true;
+                    return sendOpenAICompletionsRequest({
                 bodyData,
                 agentConfig: agentConfigForCall,
                 thunkApi,
@@ -2946,8 +2954,9 @@ export const streamAgentChatTurnHandler = async (
                 disableToolsForThisRequest,
                 quickChatPerfStartedAt,
                 userMessageId: workMemoryUserMessageId(dialogId, activeTurnUserMessageId),
-                }), })).unwrap();
-                if (!meta || loopController.signal.aborted || thunkApi.signal.aborted) break;
+                }); }, })).unwrap();
+                if (isTurnAborted()) return { aborted: true };
+                if (!meta) throw new Error("Model request returned no result; reply did not complete");
             logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-model-request-finished", {
                 responseApi: false,
                 hasToolCalls: meta.hasToolCalls,
@@ -3020,6 +3029,8 @@ export const streamAgentChatTurnHandler = async (
             // 否则：存在 tool_calls 且没有 handoff / pending，基于新的 history 继续下一轮
         }
 
+        if (isTurnAborted()) return { aborted: true };
+        if (!modelRequestStarted) throw new Error("Model request did not start; reply did not complete");
         return {
             usage: totalTurnUsage ?? undefined,
         };

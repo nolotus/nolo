@@ -2,8 +2,10 @@ import { getModelContextWindow } from "ai/llm/getModelContextWindow";
 import {
   isFireworksKimiModel,
   isNoloHostedProvider,
+  PLATFORM_HOSTED_KIMI_K31_PRO_MODEL,
   PLATFORM_HOSTED_KIMI_K3_MODEL,
 } from "ai/llm/kimi";
+import { resolvePlatformEffectiveModel } from "ai/llm/platformHostedRoutingTable";
 import {
   requiresBareImageUrl,
   toBareImageUrlMessages,
@@ -20,23 +22,31 @@ type NormalizeChatCompletionsBodyArgs = {
 
 /** Moonshot 开放平台旗舰模型 id（api.moonshot.cn OpenAI 兼容模式）。 */
 const MOONSHOT_KIMI_K3_MODEL = "kimi-k3";
+/** Moonshot 开放平台 K3.1 Pro 的直连 id（与平台托管 id 同形）。 */
+const MOONSHOT_KIMI_K31_PRO_MODEL = "kimi-k3.1-pro";
 
 /**
- * K3 body quirk 的触发判据（server 与本地 runtime 两条出口共用）：
- * - 用户自带 key 的 moonshot 直连；
+ * K3 家族 body quirk 的触发判据（server 与本地 runtime 两条出口共用）：
+ * - 用户自带 key 的 moonshot 直连（K3 / K3.1 Pro）；
  * - 平台托管（provider=nolo / legacy ollama-cloud，上游 Baseten）。
- * 平台托管路径传进来的 provider 是 "nolo" 而非上游 id，只认 "moonshot" 会让
- * quirk 完全不触发（server 主路径与本地直连路径同样受影响）。
+ *
+ * 平台托管侧按**别名解析后的有效模型**判定：撤下的旧 id（如 kimi-k2.6）实际执行
+ * K3.1 Pro 的上游，必须同样套用 K3 家族的 quirk（删采样参数 + max_completion_tokens），
+ * 否则出站就是「新上游 + 旧请求体」。BYOK 通道保持按原始 id 判定，不继承平台别名。
  */
 const isKimiK3ProviderModel = (provider: string, model: string): boolean => {
   const normalizedModel = asTrimmedLowercaseString(model);
+  const isFamilyId = (id: string): boolean =>
+    id === MOONSHOT_KIMI_K3_MODEL || id === MOONSHOT_KIMI_K31_PRO_MODEL;
   if (asTrimmedLowercaseString(provider) === "moonshot") {
-    return normalizedModel === MOONSHOT_KIMI_K3_MODEL;
+    return isFamilyId(normalizedModel);
   }
-  return (
-    isNoloHostedProvider(provider) &&
-    normalizedModel === PLATFORM_HOSTED_KIMI_K3_MODEL
+  if (!isNoloHostedProvider(provider)) return false;
+  if (isFamilyId(normalizedModel)) return true;
+  const effectiveModel = asTrimmedLowercaseString(
+    resolvePlatformEffectiveModel(model) ?? model,
   );
+  return isFamilyId(effectiveModel);
 };
 
 const isOllamaProviderOrEndpoint = (provider: string, endpoint?: string): boolean => {

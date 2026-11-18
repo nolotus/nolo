@@ -275,15 +275,17 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   // 平台托管通道 2026-09-15 起已是真实 DeepInfra 模型（nolo 目录），provider
   // 收敛到 nolo 命名空间；旧代 Sonnet 5 / Fable 5 只保留上面的 retired 兼容条目。
   // Gemini 文本档只上架最新一代：旧版留在广场只会分散选择、拉长列表，而
-  // 用户想要的是「最新的那个 Gemini」。旧版模型仍可保留用于兼容历史请求，
-  // （modelAbility / 定价表照旧），下架的只是广场入口。
+  // 用户想要的是「最新的那个 Gemini」。旧版模型标识、路由与定价条目仍保留用于
+  // 兼容历史请求，下架的只是广场入口。
   {
     id: "01CLDFBL51PB000000013N70D7",
     group: "public",
     lifecycle: "active",
-    name: "Claude Fable 5.1",
+    // 2026-11-18 换代：Fable 5.1 模型已从平台目录撤下，广场档改用接替者 5.2。
+    // id / presetKey 保持不变（硬 key 引用：收藏、Space contentKey 与存量记录）。
+    name: "Claude Fable 5.2",
     provider: "nolo",
-    model: "anthropic/claude-fable-5-1",
+    model: "anthropic/claude-fable-5-2",
     // 2026-09-24 广场重新上架（见上方 2026-09-24 上架注释）——上架时间真值。
     releasedAtMs: releasedAt("2026-09-24"),
   },
@@ -349,11 +351,13 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01KIMIK3PLAZ00000000CBJU3S",
     group: "public",
     lifecycle: "active",
-    name: "Kimi K3",
+    // 2026-11-18 换代：Kimi K3 模型已从平台目录撤下，广场档改用接替者 K3.1 Pro。
+    // id / deterministicId 保持不变（硬 key 引用），只换展示名与 model。
+    name: "Kimi K3.1 Pro",
     provider: "nolo",
-    model: "kimi-k3",
-    // 出处：无官方发布日的代码出处（platformHosted 目录对 kimi-k3 未填
-    // releasedAtMs；价格注释里的 2026-09-15 是 Baseten 页面核价日，不是发布日）。
+    model: "kimi-k3.1-pro",
+    // 出处：无官方发布日的代码出处（platformHosted 目录对 K3 家族未填 releasedAtMs；
+    // 价格注释里的 2026-09-15 是 Baseten 页面核价日，不是发布日）。
     // 填本次广场上架日（2026-10-20），不猜官方日期。
     releasedAtMs: releasedAt("2026-10-20"),
   },

@@ -61,6 +61,18 @@ type RunDesktopAgentRuntimeTurnArgs = {
    * Raw client messages used to build dialogHistorySnapshot when snapshot is not pre-built.
    */
   dialogMessages?: unknown[];
+  /**
+   * Webview session bearer for the desktop turn endpoint.
+   *
+   * The host reads the caller's identity from `Authorization: Bearer …` (or the
+   * `nolo_auth_token` cookie) — `desktopAgentRuntimeTurnHandler.resolveDesktopTurnRequestEnv`.
+   * The desktop webview never writes that cookie (desktopTokenManager keeps the
+   * session in localStorage only), so without this header the host env has no
+   * AUTH_TOKEN and every platform-model turn fails with AUTH_NO_TOKEN even
+   * though the UI is signed in. Header-only: never part of the JSON body
+   * (`assertDesktopAgentRuntimeTurnBodyHasNoRawSecrets`).
+   */
+  authToken?: string;
   /** User stop / dialog abort. Cancels fetch + body reader when the webview stalls. */
   signal?: AbortSignal;
   /**
@@ -181,6 +193,7 @@ export async function* runDesktopAgentRuntimeTurnStream({
   fetchImpl = fetch,
   signal,
   noEventWatchdogMs,
+  authToken,
   ...args
 }: RunDesktopAgentRuntimeTurnArgs): AsyncGenerator<DesktopStreamEvent, void, unknown> {
   try {
@@ -189,9 +202,16 @@ export async function* runDesktopAgentRuntimeTurnStream({
       return;
     }
 
+    // Destructured out of `args` above so the bearer never reaches the JSON
+    // body; the host only accepts it as a request header.
+    const trimmedAuthToken = asTrimmedString(authToken) ?? "";
+
     const response = await fetchImpl("/api/desktop/agent-runtime/turn", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(trimmedAuthToken ? { Authorization: `Bearer ${trimmedAuthToken}` } : {}),
+      },
       body: JSON.stringify(buildDesktopAgentRuntimeTurnBody(args)),
       signal,
     });

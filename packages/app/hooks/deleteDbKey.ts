@@ -18,6 +18,8 @@ import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { read, remove, selectById } from "database/dbSlice";
 import { selectIdentityUserId } from "identity/selectors";
 import { resolveDeleteOwnershipGuard } from "./deleteOwnershipGuard";
+import { probeRemoteRecordPresence } from "./deleteRemoteRecordPresence";
+import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { removeFavoriteLocally } from "app/favorite/favoriteStore";
 import { resolveDeletedFavoriteProjectionRemoval } from "app/favorite/deletedFavoriteProjection";
 import { asNonEmptyStringArray } from "core/stringArray";
@@ -299,17 +301,45 @@ export const deleteDbKey =
                             ownedRecord = null;
                         }
                     }
-                    const verdict = resolveDeleteOwnershipGuard({
+                    const actorUserId = selectIdentityUserId(state as any);
+                    let verdict = resolveDeleteOwnershipGuard({
                         ownerId:
                             ownedRecord?.userId ?? ownedRecord?.ownerId,
-                        actorUserId: selectIdentityUserId(state as any),
+                        actorUserId,
                         recordLoaded: Boolean(ownedRecord),
                     });
+                    if (verdict === "unknown" && actorUserId) {
+                        // 记录读不到 / 没有 owner 字段：本地 read 的失败无法区分「实体已经
+                        // 不存在（只剩残留投影）」和「网络失败，实体可能还在」。后者不能放行
+                        // ——remove 会先写本地 tombstone 再后台同步远端删除，服务端 403 回滚
+                        // 不了这些本地副作用。所以回到服务端要一个明确答复。
+                        const { remoteServers, currentToken } = getRuntimeServerContext(
+                            state as any,
+                            preferredServerOrigin
+                        );
+                        const presence = await probeRemoteRecordPresence({
+                            dbKey: contentKey,
+                            servers: remoteServers,
+                            token: currentToken,
+                        });
+                        if (presence.status === "present") {
+                            // 服务端还有正文：用它记录的 owner 重新复核。
+                            const remoteRecord: any = presence.record;
+                            verdict = resolveDeleteOwnershipGuard({
+                                ownerId:
+                                    remoteRecord?.userId ?? remoteRecord?.ownerId,
+                                actorUserId,
+                                recordLoaded: true,
+                            });
+                        } else if (presence.status === "absent") {
+                            // 所有探测服务器都明确说「没有这条记录」：不存在可被越权的远端
+                            // 实体，本地残留投影可以清理。
+                            verdict = "allow";
+                        }
+                    }
                     if (verdict === "deny") {
                         throw new Error("无权删除他人内容");
                     }
-                    // 严格路径：只有正证据（allow）才允许删除本体；读失败/归属未知
-                    // 一律拒绝并保持可重试，绝不因为「没查到」而放行。
                     if (verdict !== "allow") {
                         throw new Error("无法验证内容所有权，未删除（可稍后重试）");
                     }

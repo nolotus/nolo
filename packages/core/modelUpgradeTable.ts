@@ -142,6 +142,30 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
       "Fable 5.1 升级为 Fable 5.2（2026-11-15 起的平台新一代）：换代降价——官方价 $10/$50 → $8/$40 每 1M，缓存写 $12.5 → $10，缓存读 $0.25 → $0.20",
     kind: "upgrade",
   },
+  // 2026-11-18：Haiku 4.5 从平台目录撤下，存量记录升级到接替它的 Haiku 5.5
+  // （1M 上下文；目标已登记上游路由与平台价，不落零价虚拟模型）。
+  {
+    from: { provider: "nolo", model: "anthropic/claude-haiku-4-5" },
+    to: { provider: "nolo", model: "anthropic/claude-haiku-5-5" },
+    reason:
+      "Haiku 4.5 从平台目录撤下（2026-11-18，由 Haiku 5.5 接替）：升级到 Haiku 5.5 获得 1M 上下文，单价不变",
+    kind: "upgrade",
+  },
+  // 2026-11-18：Kimi 平台目录只保留 K3.1 Pro（K3 / K2.6 撤下）。K3.1 Pro 上游
+  {
+    from: { provider: "nolo", model: "kimi-k3" },
+    to: { provider: "nolo", model: "kimi-k3.1-pro" },
+    reason:
+      "Kimi K3 升级为 K3.1 Pro（2026-11-18 上架）：Baseten 官方价 $3/$15 → $2/$10 每 1M，换代降价",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "kimi-k2.6" },
+    to: { provider: "nolo", model: "kimi-k3.1-pro" },
+    reason:
+      "Kimi K2.6 从平台目录撤下（2026-11-18，owner 决定 Kimi 只保留 3.1 Pro）：升级到 K3.1 Pro",
+    kind: "upgrade",
+  },
   {
     from: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3" },
     to: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3p1-flash" },
@@ -187,6 +211,21 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
     to: { provider: "nolo", model: "gemini-4-argon" },
     reason:
       "Gemini 3.1 Pro 下线，google provider 记录统一到 nolo Gemini 4 Argon；促销期内单价 $2/$10 每 1M 与 3.1 Pro 原价 $2/$12 基本持平（输出还更便宜），2026-12-01 起涨到 $4/$20",
+  },
+  // 2026-11-18：Gemini 2.5 Pro 从平台目录撤下，存量记录统一指向 Gemini 4 Carbon。
+  // ⚠️ 换代附带规格变化：Carbon 输出上限 32K（2.5 Pro 为 64K），上下文同为 1M。
+  {
+    from: { provider: "nolo", model: "gemini-2.5-pro" },
+    to: { provider: "nolo", model: "gemini-4-carbon" },
+    reason:
+      "Gemini 2.5 Pro 从平台目录撤下（2026-11-18）：存量升级到 Gemini 4 Carbon（上下文同为 1M，输出上限由 64K 降为 32K）",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "google", model: "gemini-2.5-pro" },
+    to: { provider: "nolo", model: "gemini-4-carbon" },
+    reason:
+      "Gemini 2.5 Pro 从平台目录撤下（2026-11-18）：google provider 记录统一到 nolo Gemini 4 Carbon（上下文同为 1M，输出上限由 64K 降为 32K）",
   },
   {
     from: { provider: "nolo", model: "glm-5.2" },

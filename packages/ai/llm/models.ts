@@ -1,7 +1,6 @@
 // ai/llm/models.ts
 
 import type { Model } from "./types";
-import { getModelAbility } from "./modelAbility";
 
 // 导入所有提供商的模型数据
 import { openrouterModels } from "./openrouterModels";
@@ -37,7 +36,4 @@ export const ALL_MODELS: ModelWithProvider[] = [
   ...withProvider("cloudflare")(cloudflareModels),
   ...withProvider("gmi")(gmiModels),
   ...withProvider("zai")(zaiModels),
-].map((model) => {
-  const ability = getModelAbility(model.name);
-  return ability ? { ...model, ability } : model;
-});
+];

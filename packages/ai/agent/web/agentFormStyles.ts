@@ -342,6 +342,16 @@ export const agentFormStyles = stylex.create({
     flexDirection: "column",
     gap: "8px",
   },
+  // 「模型选择 + 查看价格」同一行：选择器占满剩余宽度，价格入口贴底对齐。
+  createSourceModelRow: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: "8px",
+  },
+  createSourceModelRowMain: {
+    flex: 1,
+    minWidth: 0,
+  },
   createSourceFieldLabel: {
     fontSize: "var(--fontSize-sm)",
     fontWeight: 600,

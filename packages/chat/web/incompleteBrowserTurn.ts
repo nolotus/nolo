@@ -3,11 +3,13 @@ export type IncompleteBrowserTurnMessage = {
   dbKey?: string;
   role?: string;
   content?: unknown;
-  metadata?: { queueState?: string; userBatchPhase?: string };
+  metadata?: { queueState?: string; userBatchPhase?: string; userBatchOwner?: string };
 };
 
 export type IncompleteBrowserTurnInput = {
   messages: IncompleteBrowserTurnMessage[];
+  /** Recovery cannot attach to a client batch that never requested a model. */
+  forRecovery?: boolean;
   isLoadingInitial: boolean;
   hasLocalOwner: boolean;
   recoveredForegroundTurn: string | null | undefined;
@@ -47,6 +49,8 @@ export function deriveIncompleteBrowserTurn(
         !["admitted", "requested"].includes(message.metadata?.userBatchPhase ?? "")) {
       return null;
     }
+    if (input.forRecovery && message.metadata?.userBatchOwner === "client" &&
+        message.metadata?.userBatchPhase === "admitted") return null;
     return message;
   }
 
