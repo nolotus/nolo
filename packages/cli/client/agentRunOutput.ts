@@ -156,9 +156,11 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   });
   const eventMode = resolveAgentEventMode(options);
   const assistantLabelManaged = options.output.assistantLabelManaged === true;
-  // TUI intentionally exposes no reasoning text or duration trace. Bare CLI
-  // keeps the legacy explicit showThinking contract for compatibility.
-  const showThinking = !assistantLabelManaged && options.showThinking !== false;
+  // Both bare CLI and TUI honor options.showThinking (NOLO_CLI_THINKING, default true).
+  // In TUI (assistantLabelManaged), thinking streams as a single-line rolling preview on
+  // activityReporter only — never writing thinkingTraceLine to the transcript (which
+  // would hijack styleAssistantTurn's ◈ first-line anchor) or driving the bare spinner.
+  const showThinking = options.showThinking !== false;
 
   /**
    * Attention-first TUI projection: successful editFile execution is machine
@@ -179,32 +181,18 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   let thinkingFirstAt: number | null = null;
   let thinkingPreview = "";
 
-  // TUI 不展示推理内容，但静默思考 30s 时用户需要知道「它在想，不是卡了」：
-  // 只上报一个不带内容的「思考中…」标签，活动行负责计时。transcript 不写任何东西。
-  let tuiThinkingReported = false;
-  const clearTuiThinkingLabel = () => {
-    if (!tuiThinkingReported) return;
-    tuiThinkingReported = false;
-    options.activityReporter?.(null);
-  };
-
   const markThinkingDelta = (chunk: string) => {
-    if (assistantLabelManaged) {
-      if (!tuiThinkingReported && !streamedAssistantText) {
-        tuiThinkingReported = true;
-        options.activityReporter?.(t("thinkingActive"));
-      }
-      return;
-    }
     if (!showThinking) return;
-    if (streamedAssistantText) return;
+    if (streamedAssistantText || (assistantLabelManaged && pendingTuiNarration)) return;
 
     if (thinkingFirstAt === null) {
       thinkingFirstAt = Date.now();
       thinkingPreview = "";
     }
     thinkingPreview = appendThinkingPreview(thinkingPreview, chunk);
-    spinner.setThinkingHint(thinkingPreview);
+    if (!assistantLabelManaged) {
+      spinner.setThinkingHint(thinkingPreview);
+    }
     reportThinkingProgress();
   };
 
@@ -218,14 +206,15 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   };
 
   const endThinkingPhase = () => {
-    clearTuiThinkingLabel();
     if (thinkingFirstAt === null) return;
     const seconds = Math.max(0, Math.round((Date.now() - thinkingFirstAt) / 1000));
     thinkingFirstAt = null;
     thinkingPreview = "";
-    spinner.stop();
+    if (!assistantLabelManaged) {
+      spinner.stop();
+    }
     options.activityReporter?.(null);
-    if (seconds >= 1) {
+    if (!assistantLabelManaged && seconds >= 1) {
       options.output.write(`${dimCliText(t("thinkingTraceLine", formatElapsed(seconds)))}\n`);
     }
   };

@@ -290,12 +290,6 @@ export type TuiAction =
       locale: "zh" | "en";
     }
   | {
-      type: "copy-last";
-    }
-  | {
-      type: "copy-all";
-    }
-  | {
       type: "set-mouse";
       enabled: boolean;
     }

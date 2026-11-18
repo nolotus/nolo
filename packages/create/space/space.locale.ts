@@ -15,6 +15,10 @@ export default {
       workspace_other: "Other spaces",
       workspace_unassociated: "Unassociated space",
       workspace_unassociated_empty: "No content outside spaces yet",
+      workspace_create_space: "New Space",
+      workspace_start_chat: "Start chat in this space",
+      workspace_more: "More space actions: {{name}}",
+      workspace_more_menu: "Space actions",
 
       // === 基础操作 ===
       create: "Create Space",
@@ -404,6 +408,10 @@ export default {
       workspace_other: "其他空间",
       workspace_unassociated: "空间外",
       workspace_unassociated_empty: "空间外还没有内容",
+      workspace_create_space: "新建空间",
+      workspace_start_chat: "在此空间发起对话",
+      workspace_more: "空间更多操作：{{name}}",
+      workspace_more_menu: "空间操作",
 
       // === 基础操作 ===
       create: "创建空间",
@@ -783,6 +791,10 @@ export default {
       workspace_other: "其他空間",
       workspace_unassociated: "空間外",
       workspace_unassociated_empty: "空間外還沒有內容",
+      workspace_create_space: "新增空間",
+      workspace_start_chat: "在此空間發起對話",
+      workspace_more: "空間更多操作：{{name}}",
+      workspace_more_menu: "空間操作",
 
       // === 基础操作 ===
       create: "創建空間",
@@ -1161,6 +1173,10 @@ export default {
       workspace_other: "その他のスペース",
       workspace_unassociated: "未関連のスペース",
       workspace_unassociated_empty: "スペース外のコンテンツはまだありません",
+      workspace_create_space: "新しいスペース",
+      workspace_start_chat: "このスペースで対話を開始",
+      workspace_more: "スペースのその他の操作：{{name}}",
+      workspace_more_menu: "スペース操作",
 
       // === 基本操作 ===
       create: "スペースを作成",
@@ -1556,6 +1572,10 @@ export default {
       workspace_other: "Andere Spaces",
       workspace_unassociated: "Nicht zugeordneter Space",
       workspace_unassociated_empty: "Noch keine Inhalte außerhalb von Spaces",
+      workspace_create_space: "Neuer Space",
+      workspace_start_chat: "Dialog in diesem Space starten",
+      workspace_more: "Weitere Space-Aktionen: {{name}}",
+      workspace_more_menu: "Space-Aktionen",
       create: "Space erstellen",
       name: "Space-Name",
       description: "Beschreibung",
@@ -1872,6 +1892,10 @@ export default {
       workspace_other: "Otros espacios",
       workspace_unassociated: "Espacio no asociado",
       workspace_unassociated_empty: "Aún no hay contenido fuera de los espacios",
+      workspace_create_space: "Nuevo espacio",
+      workspace_start_chat: "Iniciar diálogo en este espacio",
+      workspace_more: "Más acciones del espacio: {{name}}",
+      workspace_more_menu: "Acciones del espacio",
       create: "Crear espacio",
       name: "Nombre del espacio",
       description: "Descripción",

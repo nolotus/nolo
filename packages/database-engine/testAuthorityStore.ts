@@ -1,3 +1,4 @@
+import { tagLedgerLockTarget } from "core/ledgerLockTarget";
 import type {
   AuthorityBatchOperation,
   AuthorityStore,
@@ -51,7 +52,7 @@ export function createTestAuthorityStore(levelDb: LevelLikeForTests): AuthorityS
     throw new Error("Test authority backing does not support batch writes");
   };
 
-  return {
+  const store: AuthorityStore = {
     get location() {
       return levelDb.location;
     },
@@ -94,4 +95,5 @@ export function createTestAuthorityStore(levelDb: LevelLikeForTests): AuthorityS
       return levelDb.iterator(options);
     },
   };
+  return tagLedgerLockTarget(store, levelDb);
 }

@@ -320,18 +320,58 @@ validate_cli_version_alignment() {
 
 verify_published_dist_tag() {
   # npm dist-tag reads are eventually consistent right after publish/tag.
-  # Retry with backoff so CI does not fail when the package is already
-  # published but the tag view still returns the previous version briefly.
-  local version published_tag attempt max_attempts delay_s
+  # Prefer the lightweight dist-tags endpoint with cache-busting headers/query
+  # before falling back to `npm view` (which fetches the full packument and
+  # can lag behind edge caches for minutes after a publish).
+  local version published_tag fallback_tag attempt max_attempts delay_s
+  local dist_tags_base dist_tags_url auth_token dist_tags_json
+  local -a auth_args=()
   version="$(resolve_cli_version)"
   max_attempts="${NOLO_CLI_PUBLISH_TAG_VERIFY_ATTEMPTS:-180}"
   delay_s="${NOLO_CLI_PUBLISH_TAG_VERIFY_DELAY_S:-5}"
+  dist_tags_base="${NOLO_CLI_PUBLISH_DIST_TAGS_URL:-https://registry.npmjs.org/-/package/nolo-cli/dist-tags}"
+  auth_token="$(npm_auth_token)"
+  if [[ -n "$auth_token" ]]; then
+    auth_args=(-H "Authorization: Bearer ${auth_token}")
+  fi
 
   for attempt in $(seq 1 "$max_attempts"); do
-    published_tag="$(
+    published_tag=""
+    if command -v curl >/dev/null 2>&1; then
+      dist_tags_url="${dist_tags_base}?_=$(date +%s)-${attempt}-$$"
+      dist_tags_json="$(
+        curl -fsSL --max-time 10 \
+          -H "Cache-Control: no-cache" \
+          -H "Pragma: no-cache" \
+          ${auth_args[@]+"${auth_args[@]}"} \
+          "$dist_tags_url" 2>/dev/null || true
+      )"
+      if [[ -n "$dist_tags_json" ]]; then
+        published_tag="$(
+          printf '%s' "$dist_tags_json" | "$BUN_BIN" -e '
+            try {
+              const tags = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+              const key = process.argv[1];
+              if (tags && typeof tags === "object" && Object.hasOwn(tags, key) && typeof tags[key] === "string") {
+                process.stdout.write(tags[key]);
+              }
+            } catch {}
+          ' "$DIST_TAG" 2>/dev/null || true
+        )"
+      fi
+      if [[ "$published_tag" == "$version" ]]; then
+        log "verified nolo-cli@${DIST_TAG} -> ${published_tag} via dist-tags (attempt ${attempt}/${max_attempts})"
+        return 0
+      fi
+    fi
+
+    fallback_tag="$(
       NODE_AUTH_TOKEN="$(npm_auth_token)" \
         "$NPM_BIN" view "nolo-cli@${DIST_TAG}" version --registry https://registry.npmjs.org/ 2>/dev/null || true
     )"
+    if [[ -n "$fallback_tag" ]]; then
+      published_tag="$fallback_tag"
+    fi
     if [[ "$published_tag" == "$version" ]]; then
       log "verified nolo-cli@${DIST_TAG} -> ${published_tag} (attempt ${attempt}/${max_attempts})"
       return 0

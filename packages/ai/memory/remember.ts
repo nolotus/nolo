@@ -1,6 +1,6 @@
 import { buildAgentSubjectTarget, resolveScopedMemoryTargets, type MemoryScope } from "./scope";
 import { createMemoryItem } from "./store";
-import { rememberExplicitVNext } from "./vnext/rememberExplicit";
+import { normalizeTopicKey, rememberExplicitVNext } from "./vnext/rememberExplicit";
 import { loadExplicitMemoryItems } from "./vnext/explicitItems";
 import { tokenize } from "./rank";
 import type {
@@ -62,6 +62,13 @@ export interface RememberMemoryInput {
    * result.residentIgnoredReason。
    */
   resident?: boolean;
+  /**
+   * 可选稳定主题键（如 "code-formatter"）。
+   * 同一 (owner, subjectType, subjectId, kind, topicKey) 写入新内容时，
+   * 底层原子退役此前活跃的旧 State（retiredAt），保留完整历史与证据链；
+   * 未传或空串时保持独立记录行为。
+   */
+  topicKey?: string | null;
 }
 
 export interface RememberMemoryResult {
@@ -209,6 +216,7 @@ export const rememberMemory = async (
   if (!content) {
     throw new Error("rememberMemory: content is required");
   }
+  const topicKey = normalizeTopicKey(input.topicKey);
 
   const scope = input.scope ?? "auto";
   let targets: ReturnType<typeof resolveScopedMemoryTargets>;
@@ -292,13 +300,20 @@ export const rememberMemory = async (
         ...(input.provenance === "verified" || input.provenance === "stated" || input.provenance === "inferred" ? { provenance: input.provenance } : {}),
         sourceKind: explicitUserDirective ? "explicit-user-directive" : "agent-tool",
         sourceDialogId: input.dialogId ?? undefined,
+        ...(topicKey ? { topicKey } : {}),
         ...residentFields,
       });
       const { similarItems } = await findExistingAndSimilarMemories({
         db, target, content, kind, agentSubjectId,
       });
       const saved = await rememberExplicitVNext(db, item);
-      return { item: saved, similarItems };
+      const supersededItemIds = new Set(
+        (saved.supersedesStateIds ?? []).map((id) => `vnext-state-${id}`)
+      );
+      return {
+        item: saved,
+        similarItems: similarItems.filter((similar) => !supersededItemIds.has(similar.id)),
+      };
     }),
   );
 

@@ -491,9 +491,14 @@ main() {
   # Validate before switching; preserve legacy directories and prior builds.
   VERSION_TEXT=$("$EXTRACT_DIR/nolo" -v)
   case "$VERSION_TEXT" in
-    "nolo-cli "*) ;;
+    "nolo-cli "?*) VERSION=${VERSION_TEXT#nolo-cli } ;;
+    "nolo-cli-"?*" "?*) VERSION=${VERSION_TEXT#* } ;;
     *) echo "Error: invalid staged CLI version" >&2; exit 1 ;;
   esac
+  if ! printf '%s\n' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+    echo "Error: invalid staged CLI version" >&2
+    exit 1
+  fi
   LINK="$BIN_DIR/nolo.new.$$"
   if [ -d "$BIN_DIR/nolo" ] || { [ -e "$BIN_DIR/nolo" ] && [ ! -L "$BIN_DIR/nolo" ]; } || [ -e "$LINK" ] || [ -L "$LINK" ]; then
     echo "Error: unsafe install entrypoint" >&2

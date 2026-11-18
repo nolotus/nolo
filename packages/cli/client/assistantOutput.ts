@@ -728,12 +728,41 @@ function styleRichMarkdownLine(line: string, brightness: TuiBrightness) {
  * Event produced by `FenceTracker.processLine(line)`.
  */
 type FenceEvent =
-  | { kind: "open" }
+  | { kind: "open-code"; rawLang: string }
+  | { kind: "open-mermaid" }
   | { kind: "close-code" }
   | { kind: "close-mermaid"; body: string[] }
   | { kind: "mermaid-body" }
   | { kind: "code-line"; lang: CodeLang }
   | { kind: "outside" };
+
+const CODE_FENCE_RULE_WIDTH = 24;
+
+function renderCodeFenceOpen(rawLang: string, brightness: TuiBrightness): string {
+  const { h, tl } = boxGlyphs(resolveBoxCharset());
+  const chromeDim = `${colorSeq("chrome", brightness)}${STYLE.dim}`;
+  if (rawLang) {
+    const tailLen = Math.max(4, CODE_FENCE_RULE_WIDTH - rawLang.length - 3);
+    return `${chromeDim}${tl}${h} ${rawLang} ${h.repeat(tailLen)}${STYLE.reset}`;
+  }
+  return `${chromeDim}${tl}${h.repeat(CODE_FENCE_RULE_WIDTH)}${STYLE.reset}`;
+}
+
+function renderCodeFenceClose(brightness: TuiBrightness): string {
+  const { h, bl } = boxGlyphs(resolveBoxCharset());
+  const chromeDim = `${colorSeq("chrome", brightness)}${STYLE.dim}`;
+  return `${chromeDim}${bl}${h.repeat(CODE_FENCE_RULE_WIDTH)}${STYLE.reset}`;
+}
+
+function renderCodeFenceLine(
+  line: string,
+  lang: CodeLang,
+  brightness: TuiBrightness
+): string {
+  const { v } = boxGlyphs(resolveBoxCharset());
+  const chromeDim = `${colorSeq("chrome", brightness)}${STYLE.dim}`;
+  return `${chromeDim}${v}${STYLE.reset} ${highlightCodeLine(line, lang, brightness)}`;
+}
 
 /**
  * Pure state machine tracking Markdown code fences and mermaid block bodies.
@@ -774,15 +803,15 @@ class FenceTracker {
         this.fenceLang = "unknown";
         return { kind: "close-code" };
       }
-      const lang = readFenceLanguage(line);
-      this.fenceLang = normalizeCodeLang(lang);
+      const rawLang = readFenceLanguage(line);
+      this.fenceLang = normalizeCodeLang(rawLang);
       this.inFence = true;
-      if (/^mermaid$/i.test(lang)) {
+      if (/^mermaid$/i.test(rawLang)) {
         this.inMermaid = true;
         this.mermaidBody = [];
-        return { kind: "open" };
+        return { kind: "open-mermaid" };
       }
-      return { kind: "open" };
+      return { kind: "open-code", rawLang };
     }
 
     if (this.inMermaid) {
@@ -849,23 +878,26 @@ export function formatAssistantDisplay(
     const line = lines[i];
     const event = tracker.processLine(line);
     if (event.kind === "close-mermaid") {
-      // Closing mermaid fence: flush the diagram, then the fence marker.
       out.push(renderMermaidBody(event.body, brightness));
-      out.push(`${STYLE.dim}${line}${STYLE.reset}`);
       i++;
       continue;
     }
-    if (event.kind === "open" || event.kind === "close-code") {
-      out.push(`${STYLE.dim}${line}${STYLE.reset}`);
+    if (event.kind === "open-mermaid" || event.kind === "mermaid-body") {
       i++;
       continue;
     }
-    if (event.kind === "mermaid-body") {
+    if (event.kind === "open-code") {
+      out.push(renderCodeFenceOpen(event.rawLang, brightness));
+      i++;
+      continue;
+    }
+    if (event.kind === "close-code") {
+      out.push(renderCodeFenceClose(brightness));
       i++;
       continue;
     }
     if (event.kind === "code-line") {
-      out.push(highlightCodeLine(line, event.lang, brightness));
+      out.push(renderCodeFenceLine(line, event.lang, brightness));
       i++;
       continue;
     }
@@ -1090,22 +1122,34 @@ export function createRenderAwareStreamWriter(args: {
 
       const event = tracker.processLine(firstLine);
       if (event.kind === "close-mermaid") {
-        // Closing mermaid fence: render the accumulated body, then the fence.
         const diagram = renderMermaidBody(event.body, brightness);
         args.write(diagram + "\n");
-        emitBreathIfNeeded("fence");
-        args.write(`${STYLE.dim}${firstLine}${STYLE.reset}\n`);
         lastKind = "fence";
         lastLine = firstLine;
         buffer = lines.slice(1).join("\n");
         continue;
       }
-      if (event.kind === "open" || event.kind === "close-code") {
+      if (event.kind === "open-mermaid") {
+        emitBreathIfNeeded("fence", firstLine);
+        lastKind = "fence";
+        lastLine = firstLine;
+        buffer = lines.slice(1).join("\n");
+        continue;
+      }
+      if (event.kind === "open-code") {
         // Fence markers are their own kind ("fence"), so a prose line or list
         // run flush against ``` gets the same blank row polishAssistantStructure
         // inserts, while the code interior (also "fence") never breathes.
-        emitBreathIfNeeded("fence");
-        args.write(`${STYLE.dim}${firstLine}${STYLE.reset}\n`);
+        emitBreathIfNeeded("fence", firstLine);
+        args.write(`${renderCodeFenceOpen(event.rawLang, brightness)}\n`);
+        lastKind = "fence";
+        lastLine = firstLine;
+        buffer = lines.slice(1).join("\n");
+        continue;
+      }
+      if (event.kind === "close-code") {
+        emitBreathIfNeeded("fence", firstLine);
+        args.write(`${renderCodeFenceClose(brightness)}\n`);
         lastKind = "fence";
         lastLine = firstLine;
         buffer = lines.slice(1).join("\n");
@@ -1118,7 +1162,7 @@ export function createRenderAwareStreamWriter(args: {
       if (event.kind === "code-line") {
         // Line-local highlighting, matching formatAssistantDisplay. No trim,
         // no table conversion inside fences. Interior never breathes as lists.
-        args.write(`${highlightCodeLine(firstLine, event.lang, brightness)}\n`);
+        args.write(`${renderCodeFenceLine(firstLine, event.lang, brightness)}\n`);
         // 围栏内部保持 fence：闭围栏贴紧最后一行代码，不在块内插空行。
         lastKind = "fence";
         lastLine = firstLine;
@@ -1245,6 +1289,16 @@ export function createRenderAwareStreamWriter(args: {
       // (lines were consumed into tracker's mermaid buffer), but we must still render it.
       // 取舍披露：flush 视为新流开始：之后再送来的闭围栏会被按新开围栏处理
       if (tracker.isInMermaid()) {
+        if (buffer && isCodeFenceLine(buffer)) {
+          const event = tracker.processLine(buffer);
+          buffer = "";
+          if (event.kind === "close-mermaid") {
+            args.write(renderMermaidBody(event.body, brightness));
+            lastKind = "fence";
+            lastLine = "```";
+            return;
+          }
+        }
         const extra = buffer ? buffer.split("\n") : undefined;
         const unclosed = tracker.flushMermaid(extra);
         if (unclosed !== null) {
@@ -1254,8 +1308,25 @@ export function createRenderAwareStreamWriter(args: {
         return;
       }
       if (!buffer) return;
-      if (tracker.isInFence()) {
-        args.write(buffer);
+      const event = tracker.processLine(buffer);
+      if (event.kind === "open-mermaid") {
+        emitBreathIfNeeded("fence", buffer);
+        lastKind = "fence";
+        lastLine = buffer;
+      } else if (event.kind === "open-code") {
+        emitBreathIfNeeded("fence", buffer);
+        args.write(renderCodeFenceOpen(event.rawLang, brightness));
+        lastKind = "fence";
+        lastLine = buffer;
+      } else if (event.kind === "close-code") {
+        emitBreathIfNeeded("fence", buffer);
+        args.write(renderCodeFenceClose(brightness));
+        lastKind = "fence";
+        lastLine = buffer;
+      } else if (event.kind === "code-line") {
+        args.write(renderCodeFenceLine(buffer, event.lang, brightness));
+        lastKind = "fence";
+        lastLine = buffer;
       } else {
         // 收尾的未完行也要走一次与完整行相同的呼吸判定：否则末行没有结尾
         // 换行时，流式渲染会少一行整段 polish 会插的呼吸空行（既有缺口，

@@ -12,6 +12,11 @@
 // 外部依赖：resolveRuntimeServerUrl / resolveRuntimeAuthToken / remoteDialogSyncTimeout /
 // parseUserIdFromAuthToken / clipCompactText
 
+import {
+  DIALOG_AGENT_LIST_INDEX_PREFIX,
+  isTokenStatsKey,
+  TOKEN_DIALOG_INDEX_PREFIX,
+} from "database/keys";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { toErrorMessage } from "core/errorMessage";
@@ -47,14 +52,158 @@ function hasReservedBatchAuthority(metadata: unknown): boolean {
   ));
 }
 
+const LOCAL_ONLY_EVIDENCE_KEY_PREFIXES = [
+  `${TOKEN_DIALOG_INDEX_PREFIX}-`,
+  `${DIALOG_AGENT_LIST_INDEX_PREFIX}-`,
+  "idx-tokendlg-backfill-",
+  "token-charge-stats-",
+  "usage-backup-",
+] as const;
+
+export function isRemoteDialogEvidenceExcludedKey(key: string): boolean {
+  if (!key) return true;
+  if (isTokenStatsKey(key)) return true;
+  return LOCAL_ONLY_EVIDENCE_KEY_PREFIXES.some((prefix) =>
+    key.startsWith(prefix),
+  );
+}
+
+const MAX_REMOTE_ERROR_DETAIL_CHARS = 120;
+const SAFE_SHORT_ERROR_CODE_RE = /^[A-Za-z0-9_.:-]{1,48}$/;
+
+function sanitizeRemoteDiagnosticText(raw: string): string {
+  const singleLine = raw
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, " ")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!singleLine) return "";
+  return singleLine
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{6,}/gi, "Bearer [REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+)?/g, "[REDACTED]")
+    .replace(/\b(?:sk|rk|pk|nolo|tok)_[A-Za-z0-9_-]{8,}/gi, "[REDACTED]")
+    .replace(/\bvault-cred-[A-Za-z0-9_-]+/gi, "[REDACTED]");
+}
+
+function clampSingleLine(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  if (maxLen <= 3) return text.slice(0, maxLen);
+  return `${text.slice(0, maxLen - 3)}...`;
+}
+
+export function extractSafeRemoteErrorDetail(
+  status: number,
+  bodyText: string,
+): string {
+  if (status < 400 || status >= 500 || !bodyText) return "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return "";
+  }
+  if (!isRecord(parsed)) return "";
+
+  const rawCodeCandidates = [
+    parsed.code,
+    isRecord(parsed.error) ? parsed.error.code : undefined,
+    typeof parsed.error === "string" ? parsed.error : undefined,
+    parsed.reason,
+  ];
+  let code = "";
+  let fallbackMessageFromError = "";
+  for (const candidate of rawCodeCandidates) {
+    if (typeof candidate !== "string") continue;
+    const cleaned = sanitizeRemoteDiagnosticText(candidate);
+    if (!cleaned) continue;
+    if (SAFE_SHORT_ERROR_CODE_RE.test(cleaned)) {
+      code = cleaned;
+      break;
+    }
+    if (!fallbackMessageFromError) {
+      fallbackMessageFromError = cleaned;
+    }
+  }
+
+  const rawMessageCandidates = [
+    parsed.message,
+    isRecord(parsed.error) ? parsed.error.message : undefined,
+    fallbackMessageFromError,
+  ];
+  let message = "";
+  for (const candidate of rawMessageCandidates) {
+    if (typeof candidate !== "string") continue;
+    const cleaned = sanitizeRemoteDiagnosticText(candidate);
+    if (cleaned && cleaned !== code) {
+      message = cleaned;
+      break;
+    }
+  }
+
+  if (!code && !message) return "";
+
+  const payload: Record<string, string> = {};
+  if (code) payload.code = code;
+  if (message) payload.message = message;
+  let serialized = JSON.stringify(payload);
+  if (serialized.length <= MAX_REMOTE_ERROR_DETAIL_CHARS) {
+    return serialized;
+  }
+
+  if (code && message) {
+    const baseLen = JSON.stringify({ code, message: "" }).length;
+    const budget = MAX_REMOTE_ERROR_DETAIL_CHARS - baseLen;
+    if (budget >= 8) {
+      serialized = JSON.stringify({
+        code,
+        message: clampSingleLine(message, budget),
+      });
+      if (serialized.length <= MAX_REMOTE_ERROR_DETAIL_CHARS) return serialized;
+    }
+    serialized = JSON.stringify({ code });
+    return serialized.length <= MAX_REMOTE_ERROR_DETAIL_CHARS
+      ? serialized
+      : clampSingleLine(serialized, MAX_REMOTE_ERROR_DETAIL_CHARS);
+  }
+
+  if (message) {
+    const baseLen = JSON.stringify({ message: "" }).length;
+    const budget = MAX_REMOTE_ERROR_DETAIL_CHARS - baseLen;
+    return budget > 0
+      ? JSON.stringify({ message: clampSingleLine(message, budget) })
+      : "";
+  }
+
+  return clampSingleLine(serialized, MAX_REMOTE_ERROR_DETAIL_CHARS);
+}
+
 export function prepareRemoteDialogEvidenceRecord(
   key: string,
   value: any,
-  options?: { isAcceptedBatchMember?: boolean },
+  options?: { isAcceptedBatchMember?: boolean; fallbackAgentKey?: string },
 ) {
   const record = isRecord(value) ? { ...value } : {};
-  if (key.includes("-msg-") && typeof record.type !== "string") {
+  if (
+    key.includes("-msg-") &&
+    (typeof record.type !== "string" ||
+      !record.type.trim() ||
+      record.type === "message")
+  ) {
     record.type = "msg";
+  }
+  if (key.startsWith("token-") && !isTokenStatsKey(key)) {
+    if (typeof record.type !== "string" || !record.type.trim()) {
+      record.type = "token";
+    }
+    const hasAgentId =
+      typeof record.agentId === "string" && record.agentId.trim().length > 0;
+    const hasCybotId =
+      typeof record.cybotId === "string" && record.cybotId.trim().length > 0;
+    const fallbackAgent = asOptionalTrimmedString(options?.fallbackAgentKey);
+    if (!hasAgentId && !hasCybotId && fallbackAgent) {
+      record.agentId = fallbackAgent;
+      record.cybotId = fallbackAgent;
+    }
   }
   // CLI admission is local, not a server-minted user-batch claim. Keep the
   // durable local queue untouched and upload only its evidence. Records carrying
@@ -250,6 +399,7 @@ async function runThrottledBatches<T>(
 export async function postRemoteRecord(args: {
   authToken: string;
   data: any;
+  fallbackAgentKey?: string;
   fetchImpl: CliFetchImpl;
   isAcceptedBatchMember?: boolean;
   key: string;
@@ -269,6 +419,7 @@ export async function postRemoteRecord(args: {
         customKey: args.key,
         userId: args.userId,
         data: prepareRemoteDialogEvidenceRecord(args.key, args.data, {
+          fallbackAgentKey: args.fallbackAgentKey,
           isAcceptedBatchMember: args.isAcceptedBatchMember,
         }),
       }),
@@ -287,8 +438,11 @@ export async function postRemoteRecord(args: {
   );
   if (!response.ok) {
     const text = await response.text().catch(() => "");
+    const detail = extractSafeRemoteErrorDetail(response.status, text);
     throw new Error(
-      `remote dialog evidence write failed: HTTP ${response.status} ${text.slice(0, 500)}`,
+      detail
+        ? `remote dialog evidence write failed: HTTP ${response.status} ${detail}`
+        : `remote dialog evidence write failed: HTTP ${response.status}`,
     );
   }
 }
@@ -385,8 +539,11 @@ async function maybeWakeParentDialogAfterLocalSync(args: {
   });
   if (!wakeResponse.ok) {
     const text = await wakeResponse.text().catch(() => "");
+    const detail = extractSafeRemoteErrorDetail(wakeResponse.status, text);
     throw new Error(
-      `parent dialog wake failed: HTTP ${wakeResponse.status} ${text.slice(0, 500)}`,
+      detail
+        ? `parent dialog wake failed: HTTP ${wakeResponse.status} ${detail}`
+        : `parent dialog wake failed: HTTP ${wakeResponse.status}`,
     );
   }
 
@@ -426,15 +583,17 @@ export async function syncLocalDialogEvidenceToRemote(args: {
 }) {
   const serverUrl = resolveRuntimeServerUrl(args.env);
   const authToken = resolveRuntimeAuthToken(args.env);
-  if (!serverUrl || !authToken) {
+  if (!serverUrl || !authToken || args.userId === "local") {
     return { attempted: false as const };
   }
 
-  // Single pass: partition into msg ops (front) and non-msg ops (back)
+  // Single pass: partition into msg ops (front) and non-msg ops (back),
+  // skipping server-authoritative token stats and local-only index/backup keys.
   const orderedOps: Array<{ type: "put"; key: string; value: any }> = [];
   const nonMsgOps: Array<{ type: "put"; key: string; value: any }> = [];
   for (const op of args.ops) {
     if (op.type !== "put") continue;
+    if (isRemoteDialogEvidenceExcludedKey(op.key)) continue;
     if (op.key.includes("-msg-")) {
       orderedOps.push(op);
     } else {
@@ -449,12 +608,14 @@ export async function syncLocalDialogEvidenceToRemote(args: {
   // keeping the write rate within the throttle budget. 某批失败即中止后续
   // 批次（fail-fast），由调用方 try/catch 兜底。
   const acceptedBatchKeys = await collectAcceptedUserBatchMessageKeys(orderedOps, args.localStore);
+  const fallbackAgentKey = asOptionalTrimmedString(args.input?.agentKey);
   await runThrottledBatches(
     orderedOps.filter((op) => op.type === "put"),
     (op) =>
       postRemoteRecord({
         authToken,
         data: op.value,
+        fallbackAgentKey,
         fetchImpl: args.fetchImpl,
         isAcceptedBatchMember: acceptedBatchKeys.has(op.key),
         key: op.key,
@@ -464,9 +625,8 @@ export async function syncLocalDialogEvidenceToRemote(args: {
     args.sleep ? { sleep: args.sleep } : {},
   );
 
-  const childDialogOp = args.ops.find(
-    (op) => op.type === "put" && !op.key.includes("-msg-"),
-  );
+  const childDialogOp =
+    nonMsgOps.find((op) => op.key.startsWith("dialog-")) ?? nonMsgOps[0];
   const childDialogRecord =
     childDialogOp?.value && typeof childDialogOp.value === "object"
       ? childDialogOp.value

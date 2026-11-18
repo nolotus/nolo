@@ -2,9 +2,6 @@
 
 import { parseSkillDocProtocol } from "ai/skills/skillDocProtocol";
 import { toErrorMessage } from "core/errorMessage";
-import { markdownToSlate } from "create/editor/transforms/markdownToSlate";
-import { slateToRenderMarkdown } from "create/editor/transforms/slateToRenderMarkdown";
-import { extractMentionsFromSlate } from "create/editor/utils/slateUtils";
 import { readAction } from "database/actions/read";
 import { write } from "database/dbSlice";
 import type { PageData } from "render/page/types";
@@ -53,6 +50,16 @@ export async function updateDocFunc(
         if (!originalData) {
             throw new Error(`未找到 ID 为 ${id} 的页面。`);
         }
+
+        const [
+            { markdownToSlate },
+            { slateToRenderMarkdown },
+            { extractMentionsFromSlate },
+        ] = await Promise.all([
+            import("create/editor/transforms/markdownToSlate"),
+            import("create/editor/transforms/slateToRenderMarkdown"),
+            import("create/editor/utils/slateUtils"),
+        ]);
 
         const currentMarkdown =
             typeof originalData.content === "string" && originalData.content.trim()

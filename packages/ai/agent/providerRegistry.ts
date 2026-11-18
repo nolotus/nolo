@@ -364,6 +364,9 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
       // 存量 agent 记录里的旧 model id 由 OAuth 通道的家族别名表透明重定向到对应
       // 最新代（sol 系→6.1 Sol、terra 系→6.1 Terra、luna 系→6 Luna），不丢对话。
       { id: "gpt-6-astra", label: "GPT-6 Astra", hasVision: true, recommended: true },
+      // GPT-6.2 Astra / Sol（2026-11-17 发布）：与既有 6 / 6.1 并列保留，适配各账号灰度窗口。
+      { id: "gpt-6.2-astra", label: "GPT-6.2 Astra", hasVision: true },
+      { id: "gpt-6.2-sol", label: "GPT-6.2 Sol", hasVision: true },
       // GPT-6.1 Sol 已列入 Codex 订阅通道选型指南，但按账号灰度（"when available
       // to your account and client"），未开通的账号选它会 400，不影响其他选项。
       { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", hasVision: true },

@@ -25,14 +25,21 @@ export const turnStrings = {
     en: "Stopping… press Esc again to force",
     zh: "正在停止…再按一次 Esc 强制停止",
   },
+  activityThinking: {
+    en: "Thinking",
+    zh: "思考中",
+  },
   turnFailed: {
     en: "This reply failed. Queued messages are kept — press Enter to resend.",
     zh: "本次回复出错。已排队的消息仍保留，按 Enter 可重新发送。",
   },
-  // 回合结束的淡色收尾行：耗时 · 输出 token · 积分（后两段可缺省）。
-  turnSummaryOutput: {
-    en: "{0} out",
-    zh: "输出 {0}",
+  wakePausedOnErrorHint: {
+    en: "Background task wake paused due to an error — send any message to continue.",
+    zh: "后台任务唤醒因错误暂停，发送任意消息即可继续。",
+  },
+  statusPendingProcesses: {
+    en: "↪ {0} pending",
+    zh: "↪ {0} 项待汇入",
   },
   // --- Ask choice (ask_user) ------------------------------------------
   askChoiceHintMove: {

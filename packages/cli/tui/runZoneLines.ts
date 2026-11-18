@@ -1,4 +1,8 @@
-import { preferredTopTaskEntries } from "./tuiLayout";
+import {
+  preferredTopTaskEntries,
+  resolveHistoryLayoutGeometry,
+  resolveSurfacePaintWidth,
+} from "./tuiLayout";
 /**
  * 顶部固定运行区（fixed run zone）的逐行格式化。
  *
@@ -8,7 +12,7 @@ import { preferredTopTaskEntries } from "./tuiLayout";
  * 状态栏里那条 `⚙ N running` chip 只能报一个计数——它压在 `context: x%`
  * 旁边，看不出是哪个 run、跑了多久、做到哪一步。运行区把同一批活跃 run
  * 渲染成每条一行、固定在 composer 上方（banner/状态栏之间那块的顶部），
- * 每条都带「标题 · 执行者 · 已耗时 · 工具数」，一眼能扫。
+ * 每条都带「标题 · 执行者 · 步数/动作 · 计时」，一眼能扫。
  *
  * 数据仍然只走 agentRunSnapshot.ts 这一个解析器（与 transcript 卡片、run
  * detail 面板共用同一个 shape，三个界面不会对同一个 run 各说各话）。行数
@@ -21,13 +25,13 @@ import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import {
   clipText,
   formatDuration,
-  formatRunAge,
   isAgentRunTerminalStatus,
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { displayAgentName } from "./agentRunPanelLines";
 import {
   formatToolProgressFact,
+  hasToolProgress,
   runProgressStalled,
 } from "./runProgressHeartbeat";
 import {
@@ -49,10 +53,10 @@ import type { RemoteTaskView } from "../../core/remoteTaskView";
 export const RUN_ZONE_MAX_ROWS = 7;
 
 /**
- * 活动 agent run 的类型标记。用 🤖 取代生硬的「agent / 智能体」类型字样；
- * emoji 是双宽字符，行宽一律走 visibleWidth（见 tuiAnsi），截断不会把它拆半。
+ * 活动 agent run 的类型标记。用单列极简符号 ◈ 取代生硬的「agent / 智能体」
+ * 类型字样与双宽彩色 emoji，行宽固定为 1 列，终态切换零水平跳动。
  */
-export const RUN_ZONE_ICON = "🤖";
+export const RUN_ZONE_ICON = "◈";
 /**
  * 远程任务证据的载体（契约 §10.2 / M3）。
  *
@@ -169,9 +173,40 @@ export function remoteCostIsExplicitlyUnknown(carrier?: RemoteTaskCarrier): bool
   return carrier?.remoteTask?.cost === null;
 }
 
-/** Slow, fixed-width running signal, driven by the dock's existing one-second tick. */
+/** 固定格式紧凑计时：`0:09`、`1:28`、`1:02:05`，避免文字长度变动推着整行抖动。 */
+export function formatCompactClock(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSec / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (hours > 0) {
+    return `${hours}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+/** 精炼步数/动作文案：`12步`（zh）/ `12 steps`（en），纯推理 run 保留模型调用心跳。 */
+function formatZoneStepFact(snapshot: AgentRunSnapshot): string | undefined {
+  const zh = getCliLocale() === "zh";
+  const raw = snapshot.toolCallCount;
+  const toolCount =
+    typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+  if (toolCount !== undefined && toolCount > 0) {
+    return zh ? `${toolCount}步` : `${toolCount} steps`;
+  }
+  const hasLlm =
+    typeof snapshot.llmCallCount === "number" &&
+    Number.isFinite(snapshot.llmCallCount) &&
+    snapshot.llmCallCount > 0;
+  if (toolCount === 0 && !hasToolProgress(snapshot) && !hasLlm) {
+    return zh ? "0步" : "0 steps";
+  }
+  return formatToolProgressFact(snapshot);
+}
+
+/** Slow, fixed-width 1-col running signal, driven by the dock's existing one-second tick. */
 function runningFrame(now: number): string {
-  return ["|", "/", "-", "\\"][Math.floor(now / 1000) % 4]!;
+  return ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][Math.floor(now / 1000) % 10]!;
 }
 
 export function runZoneLeadIcon(status: string, carrier?: RemoteTaskCarrier): string {
@@ -191,90 +226,78 @@ export function runZoneLeadIcon(status: string, carrier?: RemoteTaskCarrier): st
   }
 }
 
-/** 终态文案：完成 / 失败 / 已取消（timeout、orphaned 归入失败）。 */
+/** 终态简写：已完成 / 失败 / 已取消（英文 done / failed / cancelled）。 */
 function runZoneTerminalLabel(status: string): string {
+  const zh = getCliLocale() === "zh";
   switch (status) {
     case "done":
-      return t("runZoneDone");
+      return zh ? "已完成" : "done";
     case "killed":
     case "cancelled":
-      return t("runZoneCancelled");
+      return zh ? "已取消" : "cancelled";
     default:
-      return t("runZoneFailed");
+      return zh ? "失败" : "failed";
   }
 }
 
 /**
- * 运行区里 run 的名字：title 优先（派单时填的短标题就是为了在这里区分并发
- * run），没有 title 退回 agent 名，两者都没有时用 runId 短码兜底——绝不输出
- * "undefined"。
- *
- * title 在时 agent 名退成次要信息（`title · agent`），并省掉短 id——标题已经
- * 承担了区分职责；没有 title 时短 id 是唯一的区分手段，必须保留。title 重复
- * 时（同名并发）短 id 也保留，否则两行长得一模一样。
+ * 运行区里 run 的主标签与可选模型后缀：
+ * - 有 `title` 时主标签是 `title`（重名附加 `#id`），模型名作为淡色后缀 ` · <name>`；
+ *   若同屏有 ≥2 条带 `title` 的任务使用同一模型，则仅首条附带模型后缀。
+ * - 无 `title` 时保留各自模型名（或 `◈`）与 `#id` 以区分并发行。
  */
-function runZoneLabel(
+function runZoneLabelParts(
   snapshot: AgentRunSnapshot,
-  duplicateTitles: ReadonlySet<string>
-): string {
-  // 运行中的行由前导 🤖 承担类型标记，标签里不再重复；终态行的前导位置是
-  // 状态图标，类型标记留在标签里（同一行里 🤖 只出现一次）。
-  const fallback = isAgentRunTerminalStatus(snapshot.status)
-    ? t("runZoneAgentType")
-    : "";
-  const name = displayAgentName(snapshot, { fallback });
+  duplicateTitles: ReadonlySet<string>,
+  omitSharedAgent: boolean
+): { main: string; agentSuffix: string } {
   const short = shortRunId(snapshot.runId);
   const idSuffix = short ? ` #${short}` : "";
   const title = snapshot.title?.trim();
   if (title) {
-    const head = `${title}${duplicateTitles.has(title) ? idSuffix : ""}`;
-    // 无真实名字时不留空的「· 」分隔符。
-    return name ? `${head} · ${name}` : head;
+    const main = `${title}${duplicateTitles.has(title) ? idSuffix : ""}`;
+    if (omitSharedAgent) return { main, agentSuffix: "" };
+    const name = displayAgentName(snapshot, { fallback: "" });
+    return { main, agentSuffix: name ? ` · ${name}` : "" };
   }
-  // 无 title：agent 名是主标识；displayAgentName 已把自动生成的内部身份折叠成
-  // 类型标记（无真实名字时为空），此时短 id 是区分多个 run 的唯一手段。
-  // 无真实名字时只剩短 id：id 自带的分隔空格要一起去掉，否则会渲染成
-  // 「🤖  #id」这样的双空格。
-  return name ? `${name}${idSuffix}` : short ? `#${short}` : "";
+  const fallback = isAgentRunTerminalStatus(snapshot.status) ? RUN_ZONE_ICON : "";
+  const name = displayAgentName(snapshot, { fallback });
+  const main = name ? `${name}${idSuffix}` : short ? `#${short}` : "";
+  return { main, agentSuffix: "" };
 }
 
 /**
- * 每条 run 的事实串：`已运行 1m23s · 12 tools · Edit 3s · ⚡0.04 · <err>`。
- *
- * - 运行中的 run 报「已耗时」（spec 明确要求时间），计时从 startedAt 算到 now；
- *   终态 run 报 `<status> <age>`（年龄冻结在 finishedAt），因为「已运行」对一条
- *   已结束的 run 语义不通——用户要看的是它跑了多久才结束。
- * - startedAt 缺失时不输出耗时（宁缺勿错：旧服务端不发这个字段）。
+ * 每条 run 的事实串：紧凑计时（`0:28`）与右侧事实列表（停滞、动作、步数、积分、错误）。
+ * startedAt 缺失时不输出计时（宁缺勿错：旧服务端不发这个字段）。
  */
 function runZoneFacts(
   snapshot: AgentRunSnapshot,
   now: number
-): { time: string | null; rest: string[]; stalled: boolean } {
+): { time: string | null; terminalLabel: string | null; rest: string[]; stalled: boolean } {
   const facts: string[] = [];
   let time: string | null = null;
+  let terminalLabel: string | null = null;
 
+  const startedAt = snapshot.startedAt;
+  const hasStart = typeof startedAt === "number" && Number.isFinite(startedAt) && startedAt > 0;
   if (isAgentRunTerminalStatus(snapshot.status)) {
-    // 用时 = finishedAt - startedAt（formatRunAge 在有 finishedAt 时冻结于它）。
-    const age = formatRunAge(snapshot, now);
-    const label = runZoneTerminalLabel(snapshot.status);
-    time = age ? `${label} · ${t("runZoneTook", age)}` : label;
-  } else {
-    const startedAt = snapshot.startedAt;
-    if (typeof startedAt === "number" && Number.isFinite(startedAt) && startedAt > 0) {
-      time = t("runZoneFor", formatDuration(Math.max(0, now - startedAt)));
+    terminalLabel = runZoneTerminalLabel(snapshot.status);
+    if (hasStart) {
+      const end =
+        typeof snapshot.finishedAt === "number" &&
+        Number.isFinite(snapshot.finishedAt) &&
+        snapshot.finishedAt > 0
+          ? snapshot.finishedAt
+          : now;
+      time = formatCompactClock(Math.max(0, end - startedAt));
     }
+  } else if (hasStart) {
+    time = formatCompactClock(Math.max(0, now - startedAt));
   }
 
   const unassigned = formatUnassignedFact(snapshot);
   if (unassigned) facts.push(unassigned);
 
-  // 工具信息存在时保持原样；工具信息为空（纯推理 run）时改用模型调用次数
-  // 当心跳——否则这条 run 在面板上只剩一个时长，看不出死活。
-  const toolFact = formatToolProgressFact(snapshot);
-  if (toolFact) facts.push(toolFact);
-  if (typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)) {
-    facts.push(formatCreditsChip(snapshot.credits, { compact: true }));
-  }
   // 「此刻在做什么」压过「最后做过什么」：前者带自己的计时，看得出卡没卡住。
   const inFlight = activeInFlight(snapshot);
   if (inFlight) {
@@ -283,9 +306,18 @@ function runZoneFacts(
     const lastTool = snapshot.lastToolNames?.[snapshot.lastToolNames.length - 1];
     if (lastTool) facts.push(clipText(lastTool, 20));
   }
+
+  // 步数/心跳（12步 / 12 steps / 3 次模型调用）
+  const stepFact = formatZoneStepFact(snapshot);
+  if (stepFact) facts.push(stepFact);
+
+  if (typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)) {
+    facts.push(formatCreditsChip(snapshot.credits, { compact: true }));
+  }
+
   if (snapshot.errorMessage) facts.push(clipText(snapshot.errorMessage, 40));
 
-  return { time, rest: facts, stalled: runProgressStalled(snapshot, now) };
+  return { time, terminalLabel, rest: facts, stalled: runProgressStalled(snapshot, now) };
 }
 
 /**
@@ -333,6 +365,21 @@ export function planRunZoneRows(
   return { shown, hidden: Math.max(0, snapshots.length - shown.length) };
 }
 
+function resolveZoneHorizontalLayout(columns?: number): {
+  leftPad: string;
+  contentWidth: number;
+} | null {
+  if (typeof columns !== "number" || !Number.isFinite(columns) || columns <= 0) return null;
+  const geom = resolveHistoryLayoutGeometry(columns);
+  const leftPad = " ".repeat(geom.marginLeft);
+  const targetTotal = Math.min(
+    columns,
+    Math.max(1, resolveSurfacePaintWidth(columns) - geom.marginRight)
+  );
+  const contentWidth = Math.max(1, targetTotal - geom.marginLeft);
+  return { leftPad, contentWidth };
+}
+
 /**
  * 渲染固定运行区：活跃 run 每条一行，超过 maxRows 折叠成 `+N more`。
  * 空列表返回 []——无 run 时运行区一行都不占。
@@ -350,8 +397,7 @@ export function formatRunZoneLines(
 ): string[] {
   if (snapshots.length === 0) return [];
   maxRows = resolveRunZoneMaxRows(maxRows, layout.rows);
-  const columns =
-    typeof layout.columns === "number" && layout.columns > 0 ? layout.columns : undefined;
+  const hLayout = resolveZoneHorizontalLayout(layout.columns);
 
   const display = snapshots.map(sanitizeRunSnapshotForNormal);
   const { shown } = planRunZoneRows(display, maxRows, layout);
@@ -366,68 +412,157 @@ export function formatRunZoneLines(
     [...titleCounts].filter(([, count]) => count > 1).map(([title]) => title)
   );
 
+  // 同模型并发去重：可见带 title 的任务里有 ≥2 条使用同一模型名时，仅首条展示
+  // ` · <agentName>`，后续同名任务省略模型名以腾出宽度给进度详情。
+  const titledAgentCounts = new Map<string, number>();
+  for (const snapshot of shown) {
+    if (!snapshot.title?.trim()) continue;
+    const name = displayAgentName(snapshot, { fallback: "" });
+    if (name) titledAgentCounts.set(name, (titledAgentCounts.get(name) ?? 0) + 1);
+  }
+  const seenSharedAgents = new Set<string>();
+
   const lines: string[] = [];
   // 远程证据在 sanitize 之前按位置抓住：清洗后的快照不再带这些字段，而
   // 「远端还在不在跑」正是运行区要说的那句话。
   const carriers = snapshots.map((snapshot) => snapshot as RemoteTaskCarrier);
-  const firstCompleted = shown.findIndex(snapshot => snapshot.status === "done");
   for (const [index, snapshot] of shown.entries()) {
     const carrier = carriers[index];
     const clock = remoteTaskClock(carrier, now);
-    const identity = runZoneLeadIcon(snapshot.status, carrier);
-    const icon = snapshot.status === "running" && (!carrier?.remoteTask || remoteTaskIsActive(carrier))
-      ? `${identity} ${runningFrame(now)}` : identity;
-    const label = runZoneLabel(snapshot, duplicateTitles);
-    // 类型标记由前导图标承担（运行中是 🤖，终态是状态图标），标签里不再重复类型字。
-    const typedLabel = label;
-    const { time, rest, stalled } = runZoneFacts(snapshot, clock ?? now);
+    // 活跃 run 前导直接用 1 列 runningFrame(now)；远程未知 ◌；终态 ✓/✗/⊘；pending 等 ◈。
+    const icon =
+      snapshot.status === "running" && (!carrier?.remoteTask || remoteTaskIsActive(carrier))
+        ? runningFrame(now)
+        : runZoneLeadIcon(snapshot.status, carrier);
+
+    const rawTitle = snapshot.title?.trim();
+    const rawAgentName = rawTitle ? displayAgentName(snapshot, { fallback: "" }) : "";
+    let omitSharedAgent = false;
+    if (rawTitle && rawAgentName && (titledAgentCounts.get(rawAgentName) ?? 0) >= 2) {
+      if (seenSharedAgents.has(rawAgentName)) {
+        omitSharedAgent = true;
+      } else {
+        seenSharedAgents.add(rawAgentName);
+      }
+    }
+
+    const { main, agentSuffix } = runZoneLabelParts(snapshot, duplicateTitles, omitSharedAgent);
+    const fullLabel = `${main}${agentSuffix}`;
+    const { time, terminalLabel, rest, stalled } = runZoneFacts(snapshot, clock ?? now);
     const remoteFacts = remoteTaskFacts(carrier, now);
     // 远端费用显式未知时不显示积分 chip——「未知」不是「0」。
     const hideCredits = remoteCostIsExplicitlyUnknown(carrier);
     const base = hideCredits ? rest.filter((fact) => !fact.startsWith("⚡")) : rest;
     const hasError = Boolean(snapshot.errorMessage);
-    // 连证据时间都没有（clock === null）时不显示耗时：宁缺勿编。
-    let factList = [
-      ...(time && clock !== null ? [time] : []),
-      // 停滞提示紧跟耗时：宽度不够被裁时，它比积分/工具名更该留在屏上。
-      ...(index === firstCompleted ? [getCliLocale() === "zh" ? "终态≠验收" : "not acceptance"] : []),
+
+    // 停滞提示与终态词排在最前；连证据时间都没有（clock === null）时不显示计时。
+    const middleFacts = [
+      ...(terminalLabel ? [terminalLabel] : []),
       ...(stalled ? [t("runStalled")] : []),
       ...base,
       ...remoteFacts,
     ];
-    let shownLabel = typedLabel;
-    if (columns !== undefined) {
-      const fixed = (l: string, f: string[]) =>
-        visibleWidth(`${icon} ${l}${f.length ? ` · ${f.join(" · ")}` : ""}`);
-      // 1) 丢次要事实（从末尾），耗时与停滞提示永远留在 factList 头部。
-      const keep = (time && clock !== null ? 1 : 0) + (stalled ? 1 : 0);
-      while (factList.length > keep && fixed(typedLabel, factList) > columns) factList.pop();
-      // 2) 还放不下：截断标题/agent，时间不动。
-      if (fixed(typedLabel, factList) > columns) {
-        const tail = factList.length ? ` · ${factList.join(" · ")}` : "";
-        const room = columns - visibleWidth(`${icon} `) - visibleWidth(tail);
-        shownLabel = fitAnsiLine(typedLabel, Math.max(1, room));
-      }
-    }
-    const timePart = time && clock !== null ? `${factList.shift()} · ` : "";
-    const factsPart = factList.length > 0 ? ` · ${factList.join(" · ")}` : "";
+    const tailClock = time && clock !== null ? time : null;
 
-    if (!colorEnabled) {
-      lines.push(`${icon} ${timePart}${shownLabel}${factsPart}`);
+    if (!hLayout) {
+      // 未传 layout.columns：保持干净的单行 `·` 串联，不塞左右对齐空白。
+      const allFacts = [...middleFacts, ...(tailClock ? [tailClock] : [])];
+      const factsPart = allFacts.length > 0 ? ` · ${allFacts.join(" · ")}` : "";
+      if (!colorEnabled) {
+        lines.push(`${icon} ${fullLabel}${factsPart}`);
+      } else {
+        const coloredLabel =
+          themeText(main, "chrome", true) +
+          (agentSuffix ? themeText(agentSuffix, "muted") : "");
+        lines.push(
+          themeText(icon, runStatusTone(snapshot.status), true) +
+            " " +
+            coloredLabel +
+            themeText(factsPart, hasError ? "danger" : stalled ? "warning" : "chrome")
+        );
+      }
       continue;
     }
+
+    const { leftPad, contentWidth } = hLayout;
+    const minGap = 2;
+    const buildRight = (facts: string[], clockStr: string | null): string => {
+      const mid = facts.join(" · ");
+      if (mid && clockStr) return `${mid}  ${clockStr}`;
+      return mid || clockStr || "";
+    };
+    const keep = (terminalLabel ? 1 : 0) + (stalled ? 1 : 0);
+    // 1) 从末尾丢次要事实，终态词、停滞提示与尾端计时优先保留。
+    while (
+      middleFacts.length > keep &&
+      (() => {
+        const right = buildRight(middleFacts, tailClock);
+        const gap = right ? minGap : 0;
+        return visibleWidth(`${icon} ${fullLabel}`) + gap + visibleWidth(right) > contentWidth;
+      })()
+    ) {
+      middleFacts.pop();
+    }
+    // 2) 若极窄下连 keep 也挤到标题不足 1 列，释放 keep 以便计时与标题可读。
+    while (
+      middleFacts.length > 0 &&
+      (() => {
+        const right = buildRight(middleFacts, tailClock);
+        const gap = right ? minGap : 0;
+        return visibleWidth(`${icon} `) + 1 + gap + visibleWidth(right) > contentWidth;
+      })()
+    ) {
+      middleFacts.pop();
+    }
+
+    const rightStr = buildRight(middleFacts, tailClock);
+    const gapAllowance = rightStr ? minGap : 0;
+    const roomForLabel =
+      contentWidth - visibleWidth(`${icon} `) - gapAllowance - visibleWidth(rightStr);
+    const shownLabel =
+      visibleWidth(fullLabel) > roomForLabel
+        ? fitAnsiLine(fullLabel, Math.max(1, roomForLabel))
+        : fullLabel;
+
+    const leftPlain = `${icon} ${shownLabel}`;
+    const leftWidth = visibleWidth(leftPlain);
+    const rightWidth = visibleWidth(rightStr);
+    const gap =
+      rightStr && leftWidth + minGap + rightWidth <= contentWidth
+        ? " ".repeat(contentWidth - leftWidth - rightWidth)
+        : rightStr
+          ? "  "
+          : "";
+
+    if (!colorEnabled) {
+      const body = rightStr ? `${leftPlain}${gap}${rightStr}` : leftPlain;
+      lines.push(`${leftPad}${visibleWidth(body) > contentWidth ? fitAnsiLine(body, contentWidth) : body}`);
+      continue;
+    }
+
+    const shownMain = shownLabel.startsWith(main) ? main : shownLabel;
+    const shownSuffix = shownLabel.startsWith(main) ? shownLabel.slice(main.length) : "";
+    const coloredLabel =
+      themeText(shownMain, "chrome", true) +
+      (shownSuffix ? themeText(shownSuffix, "muted") : "");
+    const midStr = middleFacts.join(" · ");
+    const midTone = hasError ? "danger" : stalled ? "warning" : "chrome";
+    const coloredRight =
+      (midStr ? themeText(midStr, midTone) : "") +
+      (midStr && tailClock ? "  " : "") +
+      (tailClock ? themeText(tailClock, "chrome") : "");
+
+    const coloredBody = `${themeText(icon, runStatusTone(snapshot.status), true)} ${coloredLabel}${gap}${coloredRight}`;
     lines.push(
-      themeText(icon, runStatusTone(snapshot.status), true) +
-        " " + themeText(timePart, "chrome") +
-        themeText(shownLabel, "chrome", true) +
-        themeText(factsPart, hasError ? "danger" : stalled ? "warning" : "chrome")
+      `${leftPad}${visibleWidth(coloredBody) > contentWidth ? fitAnsiLine(coloredBody, contentWidth) : coloredBody}`
     );
   }
 
   const hidden = display.length - shown.length;
   if (hidden > 0) {
     const more = t("runZoneMore", String(hidden));
-    lines.push(colorEnabled ? themeText(`  ${more}`, "chrome") : `  ${more}`);
+    const prefix = `${hLayout?.leftPad ?? ""}  `;
+    lines.push(colorEnabled ? themeText(`${prefix}${more}`, "chrome") : `${prefix}${more}`);
   }
   return lines;
 }
@@ -524,8 +659,7 @@ export function formatProcZoneLines(
 ): string[] {
   if (procs.length === 0) return [];
   maxRows = resolveRunZoneMaxRows(maxRows, layout.rows);
-  const columns =
-    typeof layout.columns === "number" && layout.columns > 0 ? layout.columns : undefined;
+  const hLayout = resolveZoneHorizontalLayout(layout.columns);
   const shown = procs.slice(0, Math.max(1, maxRows));
 
   const lines: string[] = [];
@@ -559,7 +693,8 @@ export function formatProcZoneLines(
     }
 
     let title = procZoneTitle(proc);
-    if (columns !== undefined) {
+    if (hLayout) {
+      const contentWidth = hLayout.contentWidth;
       const fixed = (l: string, f: string[]) =>
         visibleWidth(`${icon} ${l}${f.length ? ` · ${f.join(" · ")}` : ""}`);
       // 1) 从末尾丢事实。有耗时时它是 facts[0]，永远保留、其余先让路；没有耗时
@@ -567,23 +702,25 @@ export function formatProcZoneLines(
       //    「有没有耗时」，不是「facts 当前长度」，否则弹掉一条后长度变 1，
       //    下一轮会把耗时一起弹掉。
       const keep = hasElapsed ? 1 : 0;
-      while (facts.length > keep && fixed(title, facts) > columns) facts.pop();
+      while (facts.length > keep && fixed(title, facts) > contentWidth) facts.pop();
       // 2) 还放不下再截标题，事实不动。
-      if (fixed(title, facts) > columns) {
+      if (fixed(title, facts) > contentWidth) {
         const tail = facts.length ? ` · ${facts.join(" · ")}` : "";
-        const room = columns - visibleWidth(`${icon} `) - visibleWidth(tail);
+        const room = contentWidth - visibleWidth(`${icon} `) - visibleWidth(tail);
         title = fitAnsiLine(title, Math.max(1, room));
       }
     }
     const timePart = hasElapsed ? `${facts.shift()} · ` : "";
     const factsPart = facts.length > 0 ? ` · ${facts.join(" · ")}` : "";
+    const leftPad = hLayout?.leftPad ?? "";
 
     if (!colorEnabled) {
-      lines.push(`${icon} ${timePart}${title}${factsPart}`);
+      lines.push(`${leftPad}${icon} ${timePart}${title}${factsPart}`);
       continue;
     }
     lines.push(
-      themeText(icon, finished ? "muted" : "info", true) +
+      leftPad +
+        themeText(icon, finished ? "muted" : "info", true) +
         " " + themeText(timePart, "chrome") +
         themeText(title, finished ? "muted" : "chrome", true) +
         themeText(factsPart, "chrome", true)
@@ -593,7 +730,8 @@ export function formatProcZoneLines(
   const hidden = procs.length - shown.length;
   if (hidden > 0) {
     const more = t("runZoneMore", String(hidden));
-    lines.push(colorEnabled ? themeText(`  ${more}`, "chrome") : `  ${more}`);
+    const prefix = `${hLayout?.leftPad ?? ""}  `;
+    lines.push(colorEnabled ? themeText(`${prefix}${more}`, "chrome") : `${prefix}${more}`);
   }
   return lines;
 }
@@ -649,8 +787,7 @@ export function formatBackgroundSummary(
     .map(([label, group]) => `${group.count} ${label}: ${clipText(group.name, 18)}`)
     .join(" · ");
   const terminal = snapshots.some(s => isAgentRunTerminalStatus(s.status)) || procs.some(procZoneFinished);
-  const suffix = terminal ? (zh ? " · 终态≠验收" : " · not acceptance") : "";
-  const text = fitAnsiLine(`${zh ? "后台" : "Background"}: ${facts}${suffix}`,
+  const text = fitAnsiLine(`${zh ? "后台" : "Background"}: ${facts}`,
     Math.max(1, columns - 1));
   const tone = groups.has(t("runZoneFailed")) ? "danger" : terminal ? "muted" : "warning";
   return [colorEnabled ? themeText(text, tone) : text];

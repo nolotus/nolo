@@ -46,9 +46,9 @@ const GPT_6_1_SOL_CONTEXT_WINDOW = 500_000;
 // 不得改成裸 includes("gpt-6.1")，以免误伤 astra / luna。
 const GPT_6_1_SOL_PATTERN = /(^|\/)gpt-6\.1[- ]sol(?![a-z])/;
 
-// GPT-6.1 家族（Sol / Terra）：目录不可用 / 尚未播种时的兜底基线 = 500000
+// GPT-6.1 / 6.2 家族（Sol / Terra / Astra）：目录不可用 / 尚未播种时的兜底基线 = 500000
 // （2026-11-03 实测，plan=prolite；目录优先，见 codexOAuthModelCatalog.ts）。
-const GPT_6_1_PINNED_PATTERN = /(^|\/)gpt-6\.1[- ](sol|terra)(?![a-z0-9])/;
+const GPT_6_1_PINNED_PATTERN = /(^|\/)gpt-(?:6\.1[- ](sol|terra)|6\.2[- ](sol|astra))(?![a-z0-9])/;
 
 // GPT-6 / GPT-5.6 家族（Astra / Luna / Sol / Terra）：兜底基线 = 272000
 // （2026-11-03 实测，plan=prolite；目录优先）。

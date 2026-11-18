@@ -1,4 +1,66 @@
 
+## 0.242.0 (2026-11-18)
+
+### Features
+
+* **agent-runtime:** 单源化顶部平台静态层并贯通自动压缩分段指纹诊断 ([1fe5dbd](https://github.com/nolotus/bun-nolo/commit/1fe5dbd16283cd66629d012527c93a83d40b2abd))
+* **agent-runtime:** 新增子任务软预算里程碑收敛提醒且不强杀、保前缀缓存 ([bdf4b11](https://github.com/nolotus/bun-nolo/commit/bdf4b1117b4139794e6df33b948ef0d2735ea050))
+* **ai:** 补齐Gemini 4指派档位与Wire映射并接入GPT-6.2 Astra/Sol ([c5a97fd](https://github.com/nolotus/bun-nolo/commit/c5a97fd3e7ddb5690619971f592ac656ba04fefc))
+* **chat:** 重构Web侧边栏空间分组对齐样式与无Redux折叠存储 ([db60f0a](https://github.com/nolotus/bun-nolo/commit/db60f0ae18d61f7521a127fc7885b692d95459bc))
+* **ci:** 为 main-deploy 补齐 review 证据预检门并新增工作区卫生只读审计器 ([d6ab329](https://github.com/nolotus/bun-nolo/commit/d6ab329fab0dc4aea765bc34b873541dc5b87f73))
+* **cli:** Subagent 停靠区左右分栏对齐与流内完成卡瘦身 ([734f4cf](https://github.com/nolotus/bun-nolo/commit/734f4cf24ac6d1612060cbb7e60754af7ff7de36))
+* **cli:** 为 /agents 与 /history 选择器支持打字实时筛选并补齐双语标题与切换回执 ([43076e9](https://github.com/nolotus/bun-nolo/commit/43076e93fa008dd024c1455e2a5ebe6e10fe3768))
+* **cli:** 为权限确认框支持 y/n 单键秒批并保留默认停取消安全门 ([7b2e509](https://github.com/nolotus/bun-nolo/commit/7b2e509b88f6eb1f6bd6604dcacb90ad565b3d6a))
+* **cli:** 为输入框 ! 本机 Shell 直通模式增加琥珀色提示符与状态栏徽章 ([675c1a5](https://github.com/nolotus/bun-nolo/commit/675c1a5ca3b17402f59988518a97b327fd5b699a))
+* **cli:** 升级 TUI Markdown 代码块极简标头导轨并支持选区无导轨复制 ([6cff0f3](https://github.com/nolotus/bun-nolo/commit/6cff0f376ca2efa01eb8a0d338bff8d05d089eb8))
+* **cli:** 升级 TUI 欢迎页为现代极简品牌抬头并精炼提示文案 ([4f84ea9](https://github.com/nolotus/bun-nolo/commit/4f84ea9a2c12a15f3f8fb3505499177a7245478e))
+* **cli:** 升级极简线条输入框、细竖线光标与斜杠命令上下补全菜单 ([cfab269](https://github.com/nolotus/bun-nolo/commit/cfab2693fbb0083be9c1d9ff97aa66ec632b1fc3))
+* **cli:** 将 editFile 代码 Diff 改为极简左侧红绿细竖线导轨 ([00cf767](https://github.com/nolotus/bun-nolo/commit/00cf76727dc25c551627711e31dbae1161c02b07))
+* **cli:** 工具族图标去彩色 Emoji 化并支持连续只读探查跨轮折叠 ([01eb768](https://github.com/nolotus/bun-nolo/commit/01eb76820e9b0ca2822ab361e0a15db0d47ae7a1))
+* **cli:** 打通 TUI 推理模型底部活动行单行实时思考预览 ([fe4469f](https://github.com/nolotus/bun-nolo/commit/fe4469f81675c50dab0b7375f7fb5d55483f03fb))
+* **cli:** 拖入或粘贴图片即时挂载附件条并按回车直接发送 ([60a8ea9](https://github.com/nolotus/bun-nolo/commit/60a8ea9c10955adf99715c5eb0aa42d13811d676))
+* **cli:** 支持 /agents 直开选择器、未知命令模糊纠错与 /credits 人话摘要 ([5e251d6](https://github.com/nolotus/bun-nolo/commit/5e251d6a4bcf7d24741e06c8c0ab988432d8582a))
+* **cli:** 新增状态栏 ctx 爆窗分级预警并降噪干净分支与双语待汇入提示 ([3024422](https://github.com/nolotus/bun-nolo/commit/302442204b5f06bc4b4f9e54e5f8ea0fb95e7813))
+* **cli:** 新增输入框上下历史回溯、@文件模糊搜索与按词跳光标 ([43d7753](https://github.com/nolotus/bun-nolo/commit/43d77536d6d529fb0667d84c0e35dea84e54d0be))
+* **cli:** 活动行去除中英混杂并改为左边距对齐与尾部紧凑计时 ([69b0abd](https://github.com/nolotus/bun-nolo/commit/69b0abd7cd87b63407a46d19af52ed584719c463))
+* **cli:** 清理 TUI 交互日志腔并增强选区复制提示、回底浮标与窗口标题 ([b3400fd](https://github.com/nolotus/bun-nolo/commit/b3400fd192896a06c090c4bc179bf8b3a37a7d08))
+* **cli:** 移除用户已发消息全宽底色涂抹并保留竖线高亮锚点 ([c0f27bb](https://github.com/nolotus/bun-nolo/commit/c0f27bb65da75f8034d18b25b7b49bed066314e6))
+* **cli:** 统一 TUI 选择与确认弹窗极简细横线边界及双语键位右对齐 ([bd75a8c](https://github.com/nolotus/bun-nolo/commit/bd75a8c21fbd3eb84d2f19ebcdff1757265abaae))
+* **cli:** 行内代码提亮为青蓝调并升级 Markdown 超链接为紧凑可点击短链 ([ea09173](https://github.com/nolotus/bun-nolo/commit/ea091735fef89fcd929f560ff6a898ecda90844f))
+* **dev:** 接入 bun fmt 增量检查门禁并新增 tsc/tsrs 影子基准探针 ([78bbc13](https://github.com/nolotus/bun-nolo/commit/78bbc131f0d097d20a21e4398e6ee96eee71aac9))
+* **memory:** 打通 Memory vNext 全量状态与工作接续列表退休及 Web 管理页 ([7635f2b](https://github.com/nolotus/bun-nolo/commit/7635f2b2f7378d2bb374ef3d8fa8e323e49a0ffc))
+* **memory:** 支持显式记忆 topicKey 同事实演进与原子退役 ([962cb6a](https://github.com/nolotus/bun-nolo/commit/962cb6a79bfba5e7b2e437766cd1efa69f69458b))
+
+### Bug Fixes
+
+* **agent-runtime:** 修复 Gemini/Antigravity 缓存 0 命中观测失明并固定请求前缀序 ([032ac5a](https://github.com/nolotus/bun-nolo/commit/032ac5ad528e4a630e17840a29f9f52faea78ffe))
+* **agent-runtime:** 拦截孤立右闭合括号残片静默假完成并触发有界自愈 ([225d936](https://github.com/nolotus/bun-nolo/commit/225d936e4d32a1b2ca258b60bbcdf9f7ebb62b13))
+* **ai:** 解耦topicKey纯模块并用跨端sha256Hex替换rememberExplicit中的Node crypto ([a57c7d4](https://github.com/nolotus/bun-nolo/commit/a57c7d449e296761b6b29d8b87e5a738d6128cd6))
+* **app:** 修复 sharedSse 跨 TCP 分片丢帧 Bug 并补齐休眠唤醒前台追平 ([09dacfa](https://github.com/nolotus/bun-nolo/commit/09dacfa1d2102c08e356c56ea318a7b2cff4c334))
+* **ci:** isolate frozen merge fixture, lazy-load routeStyles esbuild, and upgrade checkout@v5 ([20e8e3a](https://github.com/nolotus/bun-nolo/commit/20e8e3afda6b0fd8396733e732491c5ec7fabd6f))
+* **cli:** align CLI release gate tests and non-Linux typecheck runner fallback ([56342ca](https://github.com/nolotus/bun-nolo/commit/56342cada04cea339de65c423a71c19f970b6c90))
+* **cli:** enforce global test SSH egress guard, opt-in TUI CI probe, and incident doc ([82a00c4](https://github.com/nolotus/bun-nolo/commit/82a00c477d980e8b91fc1e776eb87cf48d1b5f46))
+* **cli:** re-compress invalidated summaries and rescue 400 context overflows ([0389ab0](https://github.com/nolotus/bun-nolo/commit/0389ab0237bec831ab027b34d63ea73eb8ddf1a5))
+* **cli:** support native platform package names in self-update and block test SSH egress ([f3eaeb5](https://github.com/nolotus/bun-nolo/commit/f3eaeb5fa0782e1b33782f6049c1fb55f997754a))
+* **cli:** 修复TUI后台run唤醒遇瞬断时0ms雪崩吞队与对话自停问题 ([d5511be](https://github.com/nolotus/bun-nolo/commit/d5511be1d07026e1ec5a016bcd93a26c9b376936))
+* **cli:** 修复忙碌态提交 ! 本机命令误入聊天队列并统一判定真源 ([a0f3f2c](https://github.com/nolotus/bun-nolo/commit/a0f3f2cecb4a9b0565432d1bc526007aa5953129))
+* **cli:** 修复远端对话证据同步 http_400 并补齐脱敏错误摘要 ([34b42bb](https://github.com/nolotus/bun-nolo/commit/34b42bb00359e2a354d996435e80fec627517f58))
+* **cli:** 修复连接器 Agent 配置缓存驱逐并补齐 toolApiClient 对话归属透传 ([59d2674](https://github.com/nolotus/bun-nolo/commit/59d2674a4681e5ec47a6810bd0bb3219f3da5236))
+* **cli:** 清零非测试 TS 诊断并锁死生产文件零错误门禁 ([cf1a77c](https://github.com/nolotus/bun-nolo/commit/cf1a77cb49f4a1d10735a132effe797fc470cbd2))
+* **database-engine:** 阻断本地 Authority Broker 跨协议请求走私并产出前端拆包体检报告 ([68ed83e](https://github.com/nolotus/bun-nolo/commit/68ed83e806b3be4488c51f8c8bcd543e52594b12))
+
+### Performance Improvements
+
+* **ai:** 精炼系统提示词去事故叙事并对子任务按需裁剪编排长段 ([3f518ef](https://github.com/nolotus/bun-nolo/commit/3f518efc3c621f6dbaf4873655b213d08a67ff26))
+* **billing:** serialize per-user ledger mutations with ordered reentrant locks and safe reconciliation ([f7f5257](https://github.com/nolotus/bun-nolo/commit/f7f52576a9251bfd5f360d0e9eb4ab4858bf8c18))
+* **chat:** 为客户端 Redux 历史对话消息桶增加确定性冷桶 LRU 卸载 ([8910947](https://github.com/nolotus/bun-nolo/commit/8910947691d8729ec034d6eabdeea4ec159d6a80))
+* **database-engine:** 支持 Broker 单连接多路复用与批量读并附全仓死代码只读审计 ([76cef86](https://github.com/nolotus/bun-nolo/commit/76cef8634dd04f585715795af42ef822414409fd))
+* **database-engine:** 根治 Broker 繁忙附着失败并实现双向滚动兼容与全后端 O(limit) 翻页 ([ec085da](https://github.com/nolotus/bun-nolo/commit/ec085dad3546c3336beb60ba8335a274285ad66f))
+* **desktop:** parallelize Linux rpm/deb packaging with fast gzip payload ([9bcba22](https://github.com/nolotus/bun-nolo/commit/9bcba220c74344929a1c996f55f8338694a30f30))
+* **runtime:** 下沉 idleHeapRelease 接入 Server/Desktop 并懒加载文档工具重依赖 ([505a0e3](https://github.com/nolotus/bun-nolo/commit/505a0e3cd0b0346d6d65a41fef0e1dd38ebbf55d))
+* **server:** index scheduled automations in memory and enforce ownerAgentKey ownership ([1da0d08](https://github.com/nolotus/bun-nolo/commit/1da0d08229c1ef0d54fa6719df2b8b582353d720))
+
+
 ## 0.241.1 (2026-11-17)
 
 ### Bug Fixes

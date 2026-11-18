@@ -1339,3 +1339,244 @@ export function buildSummarySourceDiagnostics(
   }
   return rows;
 }
+
+export const MAX_SUMMARY_SOURCE_SEGMENTS = 16;
+
+export type SummarySourceSegment = {
+  start: number;
+  end: number;
+  count: number;
+  roles: string;
+  hash: string;
+};
+
+export type SummarySegmentMismatchReason =
+  | "matched"
+  | "count_changed"
+  | "anchor_missing"
+  | "segment_hash_changed"
+  | "legacy_no_segments";
+
+export type SummarySegmentDiffResult = {
+  matched: boolean;
+  reason: SummarySegmentMismatchReason;
+  firstMismatchIndex: number | null;
+  savedSegmentCount: number;
+  currentSegmentCount: number;
+  savedTotalCount: number;
+  currentTotalCount: number;
+  savedSegment: SummarySourceSegment | null;
+  currentSegment: SummarySourceSegment | null;
+};
+
+/**
+ * 生成侧与校验侧共用的有界分段指纹（最多 MAX_SUMMARY_SOURCE_SEGMENTS=16 段）。
+ * 只记录区间边界、条数、角色计数与内容寻址哈希前缀，严禁包含消息正文、原始 messageId
+ * 或工具参数明文。
+ */
+export function buildSummarySourceSegments(
+  messages: SummarySourceMessageInput[],
+  anchor?: string,
+): SummarySourceSegment[] {
+  if (!anchor) return [];
+  let end = messages.findIndex((message) => message.id === anchor);
+  if (end === -1) {
+    const legacy = /^local-(0|[1-9]\d*)$/.exec(anchor);
+    if (legacy) {
+      const index = Number(legacy[1]);
+      if (Number.isSafeInteger(index) && index < messages.length) {
+        end = index;
+      }
+    }
+  }
+  if (end < 0) return [];
+
+  const totalCount = end + 1;
+  const width = Math.max(1, Math.ceil(totalCount / MAX_SUMMARY_SOURCE_SEGMENTS));
+  const segments: SummarySourceSegment[] = [];
+
+  for (let start = 0; start < totalCount; start += width) {
+    const segEnd = Math.min(end, start + width - 1);
+    const group = messages.slice(start, segEnd + 1);
+    const roleCounts = new Map<string, number>();
+    for (const message of group) {
+      const role =
+        typeof message.role === "string" && message.role ? message.role : "unknown";
+      roleCounts.set(role, (roleCounts.get(role) ?? 0) + 1);
+    }
+    const roles = Array.from(roleCounts.entries())
+      .map(([role, count]) => `${role}:${count}`)
+      .join(",");
+    const canonical = group.map((message, offset) => ({
+      id: `local-${start + offset}`,
+      role: message.role,
+      content: message.content ?? "",
+      ...(Array.isArray(message.tool_calls) ? { tool_calls: message.tool_calls } : {}),
+    }));
+    const hash = sha256Hex(JSON.stringify(canonical)).slice(0, 16);
+    segments.push({
+      start,
+      end: segEnd,
+      count: group.length,
+      roles,
+      hash,
+    });
+  }
+
+  return segments;
+}
+
+/**
+ * 纯函数对比生成侧保存的分段指纹与校验侧重算的分段指纹，定位首个失配分段及原因。
+ * 旧记录缺 `sourceSegments`（undefined/空数组）时返回 `legacy_no_segments`，不抛错。
+ */
+export function diffSummarySourceSegments(
+  savedSegments?: ReadonlyArray<SummarySourceSegment> | null,
+  currentSegments?: ReadonlyArray<SummarySourceSegment> | null,
+): SummarySegmentDiffResult {
+  const saved = Array.isArray(savedSegments) ? savedSegments : [];
+  const current = Array.isArray(currentSegments) ? currentSegments : [];
+  const savedTotalCount = saved.reduce(
+    (sum, seg) =>
+      sum + (typeof seg?.count === "number" && Number.isFinite(seg.count) ? seg.count : 0),
+    0,
+  );
+  const currentTotalCount = current.reduce(
+    (sum, seg) =>
+      sum + (typeof seg?.count === "number" && Number.isFinite(seg.count) ? seg.count : 0),
+    0,
+  );
+
+  if (saved.length === 0) {
+    return {
+      matched: false,
+      reason: "legacy_no_segments",
+      firstMismatchIndex: null,
+      savedSegmentCount: 0,
+      currentSegmentCount: current.length,
+      savedTotalCount: 0,
+      currentTotalCount,
+      savedSegment: null,
+      currentSegment: null,
+    };
+  }
+
+  if (current.length === 0) {
+    return {
+      matched: false,
+      reason: "anchor_missing",
+      firstMismatchIndex: null,
+      savedSegmentCount: saved.length,
+      currentSegmentCount: 0,
+      savedTotalCount,
+      currentTotalCount: 0,
+      savedSegment: saved[0] ?? null,
+      currentSegment: null,
+    };
+  }
+
+  const minLen = Math.min(saved.length, current.length);
+  let firstDiff: number | null = null;
+  for (let i = 0; i < minLen; i++) {
+    const s = saved[i];
+    const c = current[i];
+    if (
+      !s ||
+      !c ||
+      s.start !== c.start ||
+      s.end !== c.end ||
+      s.count !== c.count ||
+      s.roles !== c.roles ||
+      s.hash !== c.hash
+    ) {
+      firstDiff = i;
+      break;
+    }
+  }
+
+  if (savedTotalCount !== currentTotalCount || saved.length !== current.length) {
+    const idx = firstDiff ?? minLen;
+    return {
+      matched: false,
+      reason: "count_changed",
+      firstMismatchIndex: idx,
+      savedSegmentCount: saved.length,
+      currentSegmentCount: current.length,
+      savedTotalCount,
+      currentTotalCount,
+      savedSegment: saved[idx] ?? null,
+      currentSegment: current[idx] ?? null,
+    };
+  }
+
+  if (firstDiff !== null) {
+    const s = saved[firstDiff] ?? null;
+    const c = current[firstDiff] ?? null;
+    const boundsChanged =
+      !s || !c || s.start !== c.start || s.end !== c.end || s.count !== c.count;
+    return {
+      matched: false,
+      reason: boundsChanged ? "count_changed" : "segment_hash_changed",
+      firstMismatchIndex: firstDiff,
+      savedSegmentCount: saved.length,
+      currentSegmentCount: current.length,
+      savedTotalCount,
+      currentTotalCount,
+      savedSegment: s,
+      currentSegment: c,
+    };
+  }
+
+  return {
+    matched: true,
+    reason: "matched",
+    firstMismatchIndex: null,
+    savedSegmentCount: saved.length,
+    currentSegmentCount: current.length,
+    savedTotalCount,
+    currentTotalCount,
+    savedSegment: null,
+    currentSegment: null,
+  };
+}
+
+/**
+ * 有界结构清洗：最多保留 MAX_SUMMARY_SOURCE_SEGMENTS (16) 段，仅保留合法的
+ * `{ start, end, count, roles, hash }` 白名单字段，严禁透传任意额外字段或消息正文。
+ */
+export function sanitizeSummarySourceSegments(
+  raw: unknown,
+): SummarySourceSegment[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const sanitized: SummarySourceSegment[] = [];
+  for (const item of raw.slice(0, MAX_SUMMARY_SOURCE_SEGMENTS)) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = item as Record<string, unknown>;
+    const start = candidate.start;
+    const end = candidate.end;
+    const count = candidate.count;
+    const roles = candidate.roles;
+    const hash = candidate.hash;
+    if (
+      typeof start !== "number" ||
+      !Number.isSafeInteger(start) ||
+      start < 0 ||
+      typeof end !== "number" ||
+      !Number.isSafeInteger(end) ||
+      end < start ||
+      typeof count !== "number" ||
+      !Number.isSafeInteger(count) ||
+      count < 1 ||
+      typeof roles !== "string" ||
+      roles.length === 0 ||
+      roles.length > 128 ||
+      /[\r\n\0]/.test(roles) ||
+      typeof hash !== "string" ||
+      !/^[0-9a-f]{16}$/.test(hash)
+    ) {
+      continue;
+    }
+    sanitized.push({ start, end, count, roles, hash });
+  }
+  return sanitized.length > 0 ? sanitized : undefined;
+}

@@ -239,7 +239,9 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
   const prompt = args.agentConfig.prompt?.trim();
   if (prompt && !hasAssembledAgentPrompt(rawMessages)) systemTexts.unshift(prompt);
 
-  const request: Record<string, unknown> = { contents };
+  // 稳定前缀（systemInstruction / tools / toolConfig）置于逐轮增长的 contents 之前，
+  // 且每轮随机的 labels.trajectory_id 留在末尾，保持前缀序列化稳定性。
+  const request: Record<string, unknown> = {};
   if (systemTexts.length > 0) {
     request.systemInstruction = {
       role: "user",
@@ -257,6 +259,8 @@ export function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) 
     // JSON/allowlist/policy/工具级检查，统一 schema 校验待补。
     request.toolConfig = { functionCallingConfig: { mode: "AUTO" } };
   }
+
+  request.contents = contents;
 
   const generationConfig: Record<string, unknown> = {};
   if (profile?.maxOutputTokens) {

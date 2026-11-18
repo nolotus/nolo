@@ -69,6 +69,30 @@ const GPT_6_ASTRA_LONG_CONTEXT_PRICE: ModelPrice = {
   inputCacheHit: 16,
 };
 
+const GPT_6_2_ASTRA_STANDARD_PRICE: ModelPrice = {
+  input: 64,
+  output: 320,
+  inputCacheHit: 3.2,
+};
+
+const GPT_6_2_ASTRA_LONG_CONTEXT_PRICE: ModelPrice = {
+  input: 128,
+  output: 480,
+  inputCacheHit: 6.4,
+};
+
+const GPT_6_2_SOL_STANDARD_PRICE: ModelPrice = {
+  input: 16,
+  output: 80,
+  inputCacheHit: 0.8,
+};
+
+const GPT_6_2_SOL_LONG_CONTEXT_PRICE: ModelPrice = {
+  input: 32,
+  output: 120,
+  inputCacheHit: 1.6,
+};
+
 export const openAIModels: Model[] = [
   {
     name: "gpt-5.5",
@@ -139,6 +163,44 @@ export const openAIModels: Model[] = [
     maxOutputTokens: 128_000,
     supportsReasoningEffort: true,
     price: GPT_5_6_LUNA_PRICE,
+  },
+  {
+    name: "gpt-6.2-astra",
+    displayName: "GPT-6.2 Astra",
+    endpointKey: "responses",
+    hasVision: true,
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsReasoningEffort: true,
+    price: GPT_6_2_ASTRA_STANDARD_PRICE,
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: 272_001,
+          price: GPT_6_2_ASTRA_LONG_CONTEXT_PRICE,
+        },
+      ],
+    },
+  },
+  {
+    name: "gpt-6.2-sol",
+    displayName: "GPT-6.2 Sol",
+    endpointKey: "responses",
+    hasVision: true,
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsReasoningEffort: true,
+    price: GPT_6_2_SOL_STANDARD_PRICE,
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: 272_001,
+          price: GPT_6_2_SOL_LONG_CONTEXT_PRICE,
+        },
+      ],
+    },
   },
   {
     name: "gpt-6-astra",

@@ -14,11 +14,94 @@ import { resolve } from "node:path";
 import { discoverSkills } from "../../agent-runtime/skillDiscovery";
 import { listBuiltinSkills } from "ai/skills/builtinSkillRegistry";
 import { formatSkillSlashReference } from "../../agent-runtime/skillSlashReference";
+import { getCliLocale } from "./i18n";
 import type { TuiKeyInfo, TuiInputKeyResult } from "./sessionTypes";
 
 // ─── Key handling ───────────────────────────────────────────────────────────
 
 export const PASTE_TOKEN_PREFIX = "\x00PASTE\x00";
+
+export const MAX_INPUT_HISTORY_ENTRIES = 100;
+
+export type InputHistoryState = {
+  /** Ordered oldest -> newest; bounded to MAX_INPUT_HISTORY_ENTRIES. */
+  entries: string[];
+  /**
+   * Active browse index into `entries` (`0 .. entries.length - 1`), or
+   * `null` when editing the active draft.
+   */
+  cursorIndex: number | null;
+  /**
+   * Unsent draft captured on the first Up press into history; restored when
+   * pressing Down past the newest history entry.
+   */
+  stashedDraft: string | null;
+  /** Number of leading entries in `entries` seeded from restored dialog turns. */
+  seededBaseCount?: number;
+};
+
+export function createInputHistoryState(
+  initialEntries?: readonly string[],
+): InputHistoryState {
+  const state: InputHistoryState = {
+    entries: [],
+    cursorIndex: null,
+    stashedDraft: null,
+    seededBaseCount: 0,
+  };
+  if (initialEntries) {
+    for (const entry of initialEntries) {
+      recordInputHistoryEntry(state, entry);
+    }
+  }
+  return state;
+}
+
+export function resetInputHistoryNavigation(history: InputHistoryState): void {
+  history.cursorIndex = null;
+  history.stashedDraft = null;
+}
+
+export function recordInputHistoryEntry(
+  history: InputHistoryState,
+  text: string,
+): void {
+  const normalized = text.trim();
+  if (!normalized) return;
+  if (history.entries[history.entries.length - 1] === normalized) return;
+  history.entries.push(normalized);
+  if (history.entries.length > MAX_INPUT_HISTORY_ENTRIES) {
+    const overflow = history.entries.length - MAX_INPUT_HISTORY_ENTRIES;
+    history.entries.splice(0, overflow);
+    if (history.seededBaseCount !== undefined) {
+      history.seededBaseCount = Math.max(0, history.seededBaseCount - overflow);
+    }
+  }
+}
+
+export function seedInputHistoryFromTurns(
+  history: InputHistoryState,
+  turns: readonly { role: string; content: string }[],
+): void {
+  const baseEntries: string[] = [];
+  for (const turn of turns) {
+    if (turn.role !== "user") continue;
+    const normalized = turn.content.trim();
+    if (!normalized) continue;
+    if (baseEntries[baseEntries.length - 1] === normalized) continue;
+    baseEntries.push(normalized);
+  }
+  const sessionOnly = history.entries.slice(history.seededBaseCount ?? 0);
+  const combined = [...baseEntries];
+  for (const entry of sessionOnly) {
+    if (combined[combined.length - 1] === entry) continue;
+    combined.push(entry);
+  }
+  const overflow = Math.max(0, combined.length - MAX_INPUT_HISTORY_ENTRIES);
+  history.entries = overflow > 0 ? combined.slice(overflow) : combined;
+  history.seededBaseCount = Math.max(0, baseEntries.length - overflow);
+  resetInputHistoryNavigation(history);
+}
 
 export type ApplyTuiInputKeyOptions = {
   /**
@@ -32,7 +115,311 @@ export type ApplyTuiInputKeyOptions = {
    * `/cd <部分路径>` 的目录候选展开；缺省时仅保留命令名补全。
    */
   cwd?: string;
+  /**
+   * Per-session input history stack for Up/Down recall and draft stashing.
+   */
+  inputHistory?: InputHistoryState;
 };
+
+type SlashCompletionNavState = {
+  query: string;
+  cwd?: string;
+  index: number;
+  active: boolean;
+};
+
+type AtFileCompletionNavState = {
+  key: string;
+  index: number;
+  active: boolean;
+};
+
+export type ComposerCompletionMenu =
+  | {
+      kind: "slash";
+      candidates: SlashCommandCandidate[];
+    }
+  | {
+      kind: "at-file";
+      candidates: SlashCommandCandidate[];
+      tokenStart: number;
+      tokenEnd: number;
+      query: string;
+    };
+
+let activeSlashNav: SlashCompletionNavState | null = null;
+let activeAtFileNav: AtFileCompletionNavState | null = null;
+
+const AT_FILE_CACHE_TTL_MS = 5_000;
+const MAX_AT_SCAN_FILES = 2_000;
+const MAX_AT_SCAN_DIRS = 300;
+const MAX_AT_SCAN_ENTRIES = 5_000;
+const MAX_AT_RESULTS = 20;
+const AT_SKIP_DIRS = new Set(["node_modules", "dist", ".git", ".worktrees"]);
+const atFileCache = new Map<string, { files: string[]; cachedAt: number }>();
+
+export function clearAtFileCompletionCache(): void {
+  atFileCache.clear();
+}
+
+function scanAtFilesBounded(cwd: string): string[] {
+  const root = resolve(cwd);
+  const now = Date.now();
+  const cached = atFileCache.get(root);
+  if (cached && now - cached.cachedAt < AT_FILE_CACHE_TTL_MS) {
+    return cached.files;
+  }
+
+  const files: string[] = [];
+  const queue: string[] = [""];
+  let visitedDirs = 0;
+  let inspectedEntries = 0;
+  while (
+    queue.length > 0 &&
+    files.length < MAX_AT_SCAN_FILES &&
+    visitedDirs < MAX_AT_SCAN_DIRS &&
+    inspectedEntries < MAX_AT_SCAN_ENTRIES
+  ) {
+    const relDir = queue.shift()!;
+    visitedDirs += 1;
+    const absDir = relDir ? resolve(root, relDir) : root;
+    let entries;
+    try {
+      entries = readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (files.length >= MAX_AT_SCAN_FILES || inspectedEntries >= MAX_AT_SCAN_ENTRIES) break;
+      inspectedEntries += 1;
+      const name = entry.name;
+      if (!name || name.startsWith(".") || AT_SKIP_DIRS.has(name)) continue;
+      if (entry.isSymbolicLink()) continue;
+      const relPath = relDir ? `${relDir}/${name}` : name;
+      if (entry.isDirectory()) {
+        queue.push(relPath);
+      } else if (entry.isFile()) {
+        files.push(relPath);
+      }
+    }
+  }
+
+  atFileCache.set(root, { files, cachedAt: now });
+  return files;
+}
+
+export function getAtFileTokenAtCursor(
+  buffer: string,
+  cursorPos?: number,
+): { tokenStart: number; tokenEnd: number; query: string } | null {
+  const curPos = Math.max(0, Math.min(buffer.length, cursorPos ?? buffer.length));
+  let start = curPos;
+  while (start > 0 && !/\s/.test(buffer[start - 1]!)) {
+    start -= 1;
+  }
+  if (start >= curPos || buffer[start] !== "@") return null;
+  if (start > 0 && !/\s/.test(buffer[start - 1]!)) return null;
+  const pasteSpan = findCollapsedPasteSpanAt(buffer, start);
+  if (pasteSpan && start >= pasteSpan.start && start < pasteSpan.end) return null;
+
+  let end = curPos;
+  while (end < buffer.length && !/\s/.test(buffer[end]!)) {
+    end += 1;
+  }
+  const query = buffer.slice(start + 1, curPos);
+  if (/\s/.test(query)) return null;
+  return { tokenStart: start, tokenEnd: end, query };
+}
+
+function isSubsequenceMatch(needle: string, haystack: string): boolean {
+  if (!needle) return true;
+  let ni = 0;
+  for (let hi = 0; hi < haystack.length && ni < needle.length; hi += 1) {
+    if (haystack[hi] === needle[ni]) ni += 1;
+  }
+  return ni === needle.length;
+}
+
+function scoreAtFileMatch(relPath: string, queryLower: string): number {
+  if (!queryLower) return 0;
+  const slashIdx = relPath.lastIndexOf("/");
+  const baseName = slashIdx >= 0 ? relPath.slice(slashIdx + 1) : relPath;
+  const baseLower = baseName.toLowerCase();
+  const pathLower = relPath.toLowerCase();
+
+  if (baseLower.startsWith(queryLower)) return 0;
+  if (baseLower.includes(queryLower)) return 1;
+  if (pathLower.includes(queryLower)) return 2;
+  if (queryLower.length >= 2 && isSubsequenceMatch(queryLower, baseLower)) return 3;
+  if ((queryLower.length >= 3 || queryLower.includes("/")) && isSubsequenceMatch(queryLower, pathLower)) {
+    return 4;
+  }
+  return -1;
+}
+
+export function completeAtFileCandidates(
+  query: string,
+  cwd?: string,
+): SlashCommandCandidate[] {
+  if (!cwd) return [];
+  const files = scanAtFilesBounded(cwd);
+  if (files.length === 0) return [];
+  const queryLower = query.toLowerCase();
+  if (!queryLower) {
+    return files.slice(0, MAX_AT_RESULTS).map((relPath) => ({
+      label: relPath,
+      insertText: `${relPath} `,
+      source: "path",
+    }));
+  }
+
+  const scored: { relPath: string; tier: number }[] = [];
+  for (const relPath of files) {
+    const tier = scoreAtFileMatch(relPath, queryLower);
+    if (tier >= 0) scored.push({ relPath, tier });
+  }
+  scored.sort((a, b) => {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.relPath.length !== b.relPath.length) return a.relPath.length - b.relPath.length;
+    return a.relPath.localeCompare(b.relPath);
+  });
+  return scored.slice(0, MAX_AT_RESULTS).map(({ relPath }) => ({
+    label: relPath,
+    insertText: `${relPath} `,
+    source: "path",
+  }));
+}
+
+function formatAtFileNavKey(cwd: string | undefined, tokenStart: number, query: string): string {
+  return `${cwd ?? ""}\0${tokenStart}\0${query}`;
+}
+
+function getAtFileCompletionSelection(
+  navKey: string,
+  candidates: SlashCommandCandidate[],
+): number {
+  if (candidates.length === 0) return -1;
+  if (activeAtFileNav && activeAtFileNav.active && activeAtFileNav.key === navKey) {
+    return ((activeAtFileNav.index % candidates.length) + candidates.length) % candidates.length;
+  }
+  return 0;
+}
+
+export function resolveComposerCompletionMenu(
+  buffer: string,
+  cursorPos?: number,
+  cwd?: string,
+): ComposerCompletionMenu | null {
+  const slashCandidates = resolveSlashCandidatesForMenu(buffer, cwd);
+  if (slashCandidates.length > 0) {
+    return { kind: "slash", candidates: slashCandidates };
+  }
+  const atToken = getAtFileTokenAtCursor(buffer, cursorPos);
+  if (atToken && cwd) {
+    const atCandidates = completeAtFileCandidates(atToken.query, cwd);
+    if (atCandidates.length > 0) {
+      return {
+        kind: "at-file",
+        candidates: atCandidates,
+        tokenStart: atToken.tokenStart,
+        tokenEnd: atToken.tokenEnd,
+        query: atToken.query,
+      };
+    }
+  }
+  return null;
+}
+
+export function getCompletionMenuSelection(
+  buffer: string,
+  cursorPos?: number,
+  cwd?: string,
+  candidates?: SlashCommandCandidate[],
+): number {
+  const menu = resolveComposerCompletionMenu(buffer, cursorPos, cwd);
+  if (!menu) return -1;
+  if (menu.kind === "slash") {
+    return getSlashCompletionSelection(buffer, cwd, candidates ?? menu.candidates);
+  }
+  const list = candidates ?? menu.candidates;
+  return getAtFileCompletionSelection(
+    formatAtFileNavKey(cwd, menu.tokenStart, menu.query),
+    list,
+  );
+}
+
+function applyAtFileCompletionReplacement(
+  buffer: string,
+  tokenStart: number,
+  tokenEnd: number,
+  selectedPath: string,
+): TuiInputKeyResult {
+  const hasTrailingSpace = buffer[tokenEnd] === " ";
+  const inserted = hasTrailingSpace ? selectedPath : `${selectedPath} `;
+  const nextBuf = buffer.slice(0, tokenStart) + inserted + buffer.slice(tokenEnd);
+  const nextCursorPos = tokenStart + selectedPath.length + 1;
+  return { buffer: nextBuf, cursorPos: nextCursorPos };
+}
+
+function isUpArrowSequence(seq: string, key: TuiKeyInfo): boolean {
+  return key.name === "up" || seq === "\x1b[A" || seq === "\x1bOA";
+}
+
+function isDownArrowSequence(seq: string, key: TuiKeyInfo): boolean {
+  return key.name === "down" || seq === "\x1b[B" || seq === "\x1bOB";
+}
+
+/**
+ * Resolve slash completion candidates for the current draft, including `/cd dir/`
+ * parent-directory cycling so menu rendering and Tab/arrow navigation agree.
+ */
+export function resolveSlashCandidatesForMenu(
+  buffer: string,
+  cwd?: string,
+): SlashCommandCandidate[] {
+  if (!buffer.startsWith("/") || buffer.includes("\n")) return [];
+  let candidates = completeSlashCandidates(buffer, cwd);
+  if (cwd && buffer.startsWith("/cd ") && buffer.endsWith("/")) {
+    const prefix = buffer.slice("/cd ".length);
+    const trimmedSlash = prefix.slice(0, -1);
+    const lastSlash = trimmedSlash.lastIndexOf("/");
+    const parentPrefix = lastSlash >= 0 ? trimmedSlash.slice(0, lastSlash + 1) : "";
+    const parentCandidates = completeSlashCandidates(`/cd ${parentPrefix}`, cwd);
+    const parentIdx = parentCandidates.findIndex(
+      (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
+    );
+    if (parentIdx >= 0 && parentCandidates.length > 1) {
+      candidates = parentCandidates;
+    }
+  }
+  return candidates;
+}
+
+export function getSlashCompletionSelection(
+  buffer: string,
+  cwd?: string,
+  candidates?: SlashCommandCandidate[],
+): number {
+  const list = candidates ?? resolveSlashCandidatesForMenu(buffer, cwd);
+  if (list.length === 0) return -1;
+  if (
+    activeSlashNav &&
+    activeSlashNav.active &&
+    activeSlashNav.query === buffer &&
+    activeSlashNav.cwd === cwd
+  ) {
+    return ((activeSlashNav.index % list.length) + list.length) % list.length;
+  }
+  const exactIndex = list.findIndex(
+    (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
+  );
+  return exactIndex >= 0 ? exactIndex : 0;
+}
+
+export function resetSlashCompletionSelection(): void {
+  activeSlashNav = null;
+  activeAtFileNav = null;
+}
 
 export function applyTuiInputKey(
   buffer: string,
@@ -44,6 +431,245 @@ export function applyTuiInputKey(
   const seq = sequence ?? "";
   const curPos = Math.max(0, Math.min(buffer.length, cursorPos ?? buffer.length));
   const pasteStore = options?.pasteStore;
+
+  const isUp = isUpArrowSequence(seq, key);
+  const isDown = isDownArrowSequence(seq, key);
+  if (isUp || isDown) {
+    // 1. 第一优先：单行斜杠命令补全菜单或 @ 文件模糊补全菜单导航
+    const menu = resolveComposerCompletionMenu(buffer, curPos, options?.cwd);
+    if (menu && menu.candidates.length > 0) {
+      const step = isUp ? -1 : 1;
+      if (menu.kind === "slash") {
+        activeAtFileNav = null;
+        const currentIndex = getSlashCompletionSelection(buffer, options?.cwd, menu.candidates);
+        const nextIndex = (currentIndex + step + menu.candidates.length) % menu.candidates.length;
+        activeSlashNav = {
+          query: buffer,
+          cwd: options?.cwd,
+          index: nextIndex,
+          active: true,
+        };
+      } else {
+        activeSlashNav = null;
+        const navKey = formatAtFileNavKey(options?.cwd, menu.tokenStart, menu.query);
+        const currentIndex = getAtFileCompletionSelection(navKey, menu.candidates);
+        const nextIndex = (currentIndex + step + menu.candidates.length) % menu.candidates.length;
+        activeAtFileNav = {
+          key: navKey,
+          index: nextIndex,
+          active: true,
+        };
+      }
+      return { buffer, cursorPos: curPos };
+    }
+    activeSlashNav = null;
+    activeAtFileNav = null;
+
+    // 2. 第二优先：多行草稿内部光标上下移动（仅在不在首行/末行时拦截）
+    if (buffer.includes("\n")) {
+      if (isUp) {
+        const prevNl = curPos > 0 ? buffer.lastIndexOf("\n", curPos - 1) : -1;
+        if (prevNl !== -1) {
+          const curLineStart = prevNl + 1;
+          const col = curPos - curLineStart;
+          const prevLineStart = prevNl > 0 ? buffer.lastIndexOf("\n", prevNl - 1) + 1 : 0;
+          const prevLineLen = prevNl - prevLineStart;
+          const nextCursor = snapCursorOutsidePasteChip(
+            buffer,
+            prevLineStart + Math.min(col, prevLineLen),
+          );
+          return { buffer, cursorPos: nextCursor };
+        }
+      } else {
+        const nextNl = buffer.indexOf("\n", curPos);
+        if (nextNl !== -1) {
+          const prevNl = curPos > 0 ? buffer.lastIndexOf("\n", curPos - 1) : -1;
+          const curLineStart = prevNl + 1;
+          const col = curPos - curLineStart;
+          const nextLineStart = nextNl + 1;
+          const afterNextNl = buffer.indexOf("\n", nextLineStart);
+          const nextLineEnd = afterNextNl === -1 ? buffer.length : afterNextNl;
+          const nextLineLen = nextLineEnd - nextLineStart;
+          const nextCursor = snapCursorOutsidePasteChip(
+            buffer,
+            nextLineStart + Math.min(col, nextLineLen),
+          );
+          return { buffer, cursorPos: nextCursor };
+        }
+      }
+    }
+
+    // 3. 第三优先：输入历史栈（按 ↑ 回溯更早一条并暂存当前草稿，按 ↓ 前进并还原草稿）
+    const inputHistory = options?.inputHistory;
+    if (inputHistory && inputHistory.entries.length > 0) {
+      if (isUp) {
+        if (inputHistory.cursorIndex === null) {
+          inputHistory.stashedDraft = buffer;
+          inputHistory.cursorIndex = inputHistory.entries.length - 1;
+        } else if (inputHistory.cursorIndex > 0) {
+          inputHistory.cursorIndex -= 1;
+        }
+        const entry = inputHistory.entries[inputHistory.cursorIndex]!;
+        return { buffer: entry, cursorPos: entry.length };
+      } else if (inputHistory.cursorIndex !== null) {
+        if (inputHistory.cursorIndex < inputHistory.entries.length - 1) {
+          inputHistory.cursorIndex += 1;
+          const entry = inputHistory.entries[inputHistory.cursorIndex]!;
+          return { buffer: entry, cursorPos: entry.length };
+        }
+        const restored = inputHistory.stashedDraft ?? "";
+        resetInputHistoryNavigation(inputHistory);
+        return { buffer: restored, cursorPos: restored.length };
+      }
+    }
+
+    return { buffer, cursorPos: curPos };
+  }
+
+  const res = applyNonArrowTuiInputKey(buffer, seq, key, curPos, pasteStore, options);
+  if (
+    options?.inputHistory &&
+    (res.submit !== undefined || res.abort || res.buffer !== buffer)
+  ) {
+    resetInputHistoryNavigation(options.inputHistory);
+  }
+  return res;
+}
+
+function applyNonArrowTuiInputKey(
+  buffer: string,
+  seq: string,
+  key: TuiKeyInfo,
+  curPos: number,
+  pasteStore: CollapsedPasteStore | undefined,
+  options?: ApplyTuiInputKeyOptions,
+): TuiInputKeyResult {
+
+  const navMatch =
+    activeSlashNav &&
+    activeSlashNav.active &&
+    activeSlashNav.query === buffer &&
+    activeSlashNav.cwd === options?.cwd
+      ? activeSlashNav
+      : null;
+
+  const isBackTab =
+    seq === "\x1b[Z" ||
+    key.name === "backtab" ||
+    (Boolean(key.shift) && (seq === "\t" || key.name === "tab"));
+  const isTab = !isBackTab && (seq === "\t" || key.name === "tab");
+  if (isTab || isBackTab) {
+    const isReverse = isBackTab;
+    const atToken = getAtFileTokenAtCursor(buffer, curPos);
+    const slashCandidates = resolveSlashCandidatesForMenu(buffer, options?.cwd);
+    if (slashCandidates.length === 0 && atToken && options?.cwd) {
+      const atCandidates = completeAtFileCandidates(atToken.query, options.cwd);
+      if (atCandidates.length > 0) {
+        const navKey = formatAtFileNavKey(options.cwd, atToken.tokenStart, atToken.query);
+        const idx = getAtFileCompletionSelection(navKey, atCandidates);
+        const chosen = atCandidates[idx]!;
+        activeAtFileNav = null;
+        activeSlashNav = null;
+        return applyAtFileCompletionReplacement(
+          buffer,
+          atToken.tokenStart,
+          atToken.tokenEnd,
+          chosen.label,
+        );
+      }
+    }
+    activeAtFileNav = null;
+
+    const candidates = slashCandidates;
+    if (navMatch && candidates.length > 0) {
+      const idx = ((navMatch.index % candidates.length) + candidates.length) % candidates.length;
+      const chosen = candidates[idx]!;
+      activeSlashNav = null;
+      return { buffer: chosen.insertText, cursorPos: chosen.insertText.length };
+    }
+    activeSlashNav = null;
+
+    if (candidates.length === 1) {
+      const [only] = candidates;
+      return { buffer: only.insertText, cursorPos: only.insertText.length };
+    }
+    if (candidates.length > 1) {
+      const currentIndex = candidates.findIndex(
+        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
+      );
+      if (currentIndex >= 0) {
+        const step = isReverse ? -1 : 1;
+        const nextIndex =
+          (currentIndex + step + candidates.length) % candidates.length;
+        const next = candidates[nextIndex];
+        return { buffer: next.insertText, cursorPos: next.insertText.length };
+      }
+      const common = findCommonPrefix(candidates.map((c) => c.insertText));
+      if (common.length > buffer.length) {
+        return { buffer: common, cursorPos: common.length };
+      }
+      const chosen = isReverse
+        ? candidates[candidates.length - 1]
+        : candidates[0];
+      return { buffer: chosen.insertText, cursorPos: chosen.insertText.length };
+    }
+    const completed = completeSlashPrefix(buffer) ?? buffer;
+    return { buffer: completed, cursorPos: completed.length };
+  }
+
+  if (
+    // CSI-u / kitty: Shift+Enter press or repeat, never key release (:3).
+    // Raw input passes complete CSI tokens without populating key.shift.
+    /^\x1b\[13;2(?::[12])?u$/.test(seq) ||
+    seq === "\x1b[13;2~" ||
+    seq === "\x1b[27;2;13~" ||
+    seq === "\x1b\r" ||
+    (key.shift && (key.name === "enter" || key.name === "return")) ||
+    seq === "\n" ||
+    (key.ctrl && key.name === "j")
+  ) {
+    activeSlashNav = null;
+    activeAtFileNav = null;
+    const insertAt = snapCursorOutsidePasteChip(buffer, curPos);
+    const nextBuf = buffer.slice(0, insertAt) + "\n" + buffer.slice(insertAt);
+    return { buffer: nextBuf, cursorPos: insertAt + 1 };
+  }
+
+  if (key.name === "enter" || key.name === "return" || seq === "\r") {
+    if (navMatch) {
+      const candidates = resolveSlashCandidatesForMenu(buffer, options?.cwd);
+      activeSlashNav = null;
+      activeAtFileNav = null;
+      if (candidates.length > 0) {
+        const idx = ((navMatch.index % candidates.length) + candidates.length) % candidates.length;
+        const chosen = candidates[idx]!;
+        if (chosen.insertText === "/cd " || !chosen.insertText.startsWith("/")) {
+          return { buffer: chosen.insertText, cursorPos: chosen.insertText.length };
+        }
+        return { buffer: "", cursorPos: 0, submit: chosen.insertText.trimEnd() };
+      }
+    }
+    const menu = resolveComposerCompletionMenu(buffer, curPos, options?.cwd);
+    if (menu?.kind === "at-file" && menu.candidates.length > 0) {
+      const navKey = formatAtFileNavKey(options?.cwd, menu.tokenStart, menu.query);
+      const idx = getAtFileCompletionSelection(navKey, menu.candidates);
+      const chosen = menu.candidates[idx]!;
+      activeSlashNav = null;
+      activeAtFileNav = null;
+      return applyAtFileCompletionReplacement(
+        buffer,
+        menu.tokenStart,
+        menu.tokenEnd,
+        chosen.label,
+      );
+    }
+    activeSlashNav = null;
+    activeAtFileNav = null;
+    return { buffer: "", cursorPos: 0, submit: buffer };
+  }
+
+  activeSlashNav = null;
+  activeAtFileNav = null;
 
   if (seq.startsWith(PASTE_TOKEN_PREFIX)) {
     const rawPayload = seq.slice(PASTE_TOKEN_PREFIX.length);
@@ -75,27 +701,16 @@ export function applyTuiInputKey(
   if (seq === "\u000f" || (key.ctrl && key.name === "o")) {
     return { buffer, cursorPos: curPos };
   }
-  if (
-    // CSI-u / kitty: Shift+Enter press or repeat, never key release (:3).
-    // Raw input passes complete CSI tokens without populating key.shift.
-    /^\x1b\[13;2(?::[12])?u$/.test(seq) ||
-    seq === "\x1b[13;2~" ||
-    seq === "\x1b[27;2;13~" ||
-    seq === "\x1b\r" ||
-    (key.shift && (key.name === "enter" || key.name === "return")) ||
-    seq === "\n" ||
-    (key.ctrl && key.name === "j")
-  ) {
-    const insertAt = snapCursorOutsidePasteChip(buffer, curPos);
-    const nextBuf = buffer.slice(0, insertAt) + "\n" + buffer.slice(insertAt);
-    return { buffer: nextBuf, cursorPos: insertAt + 1 };
-  }
-  if (key.name === "enter" || key.name === "return" || seq === "\r") {
-    return { buffer: "", cursorPos: 0, submit: buffer };
-  }
+  // Plain Enter and Shift+Enter newline sequences are handled above before nav checks.
 
-  // Navigation: Left / Right / Home (Ctrl+A) / End (Ctrl+E)
+  // Navigation: Word-jump (Ctrl+Left/Right, Alt+B/F), Left / Right / Home (Ctrl+A) / End (Ctrl+E)
   // Collapsed paste placeholders are atomic — arrows jump over the whole chip.
+  if (isWordLeftSequence(seq, key)) {
+    return { buffer, cursorPos: findWordStartLeft(buffer, curPos) };
+  }
+  if (isWordRightSequence(seq, key)) {
+    return { buffer, cursorPos: findWordEndRight(buffer, curPos) };
+  }
   if (isLeftArrowSequence(seq, key)) {
     const span = findCollapsedPasteSpanAt(buffer, curPos, { preferLeft: true });
     if (span && curPos > span.start && curPos <= span.end) {
@@ -188,58 +803,6 @@ export function applyTuiInputKey(
     return { buffer, cursorPos: curPos };
   }
 
-  const isBackTab =
-    seq === "\x1b[Z" ||
-    key.name === "backtab" ||
-    (Boolean(key.shift) && (seq === "\t" || key.name === "tab"));
-  const isTab = !isBackTab && (seq === "\t" || key.name === "tab");
-  if (isTab || isBackTab) {
-    const isReverse = isBackTab;
-    let candidates = completeSlashCandidates(buffer, options?.cwd);
-
-    // If buffer is a /cd path ending in slash, check if it is cycling among parent's candidates
-    if (options?.cwd && buffer.startsWith("/cd ") && buffer.endsWith("/")) {
-      const prefix = buffer.slice("/cd ".length);
-      const trimmedSlash = prefix.slice(0, -1);
-      const lastSlash = trimmedSlash.lastIndexOf("/");
-      const parentPrefix = lastSlash >= 0 ? trimmedSlash.slice(0, lastSlash + 1) : "";
-      const parentCandidates = completeSlashCandidates(`/cd ${parentPrefix}`, options.cwd);
-      const parentIdx = parentCandidates.findIndex(
-        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
-      );
-      if (parentIdx >= 0 && parentCandidates.length > 1) {
-        candidates = parentCandidates;
-      }
-    }
-
-    if (candidates.length === 1) {
-      const [only] = candidates;
-      return { buffer: only.insertText, cursorPos: only.insertText.length };
-    }
-    if (candidates.length > 1) {
-      const currentIndex = candidates.findIndex(
-        (c) => buffer === c.insertText || buffer === c.insertText.trimEnd(),
-      );
-      if (currentIndex >= 0) {
-        const step = isReverse ? -1 : 1;
-        const nextIndex =
-          (currentIndex + step + candidates.length) % candidates.length;
-        const next = candidates[nextIndex];
-        return { buffer: next.insertText, cursorPos: next.insertText.length };
-      }
-      const common = findCommonPrefix(candidates.map((c) => c.insertText));
-      if (common.length > buffer.length) {
-        return { buffer: common, cursorPos: common.length };
-      }
-      const chosen = isReverse
-        ? candidates[candidates.length - 1]
-        : candidates[0];
-      return { buffer: chosen.insertText, cursorPos: chosen.insertText.length };
-    }
-    const completed = completeSlashPrefix(buffer) ?? buffer;
-    return { buffer: completed, cursorPos: completed.length };
-  }
-
   if (!seq || key.ctrl || key.meta || seq.startsWith("\x1b")) {
     return { buffer, cursorPos: curPos };
   }
@@ -258,15 +821,45 @@ function snapCursorOutsidePasteChip(buffer: string, pos: number): number {
   return pos;
 }
 
+function isWordLeftSequence(seq: string, key: TuiKeyInfo): boolean {
+  if (key.ctrl && key.name === "left") return true;
+  if (key.meta && (key.name === "left" || key.name === "b")) return true;
+  if (
+    seq === "\x1b[1;5D" ||
+    seq === "\x1b[1;3D" ||
+    seq === "\x1b[5D" ||
+    seq === "\x1bb" ||
+    seq === "\x1bB"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isWordRightSequence(seq: string, key: TuiKeyInfo): boolean {
+  if (key.ctrl && key.name === "right") return true;
+  if (key.meta && (key.name === "right" || key.name === "f")) return true;
+  if (
+    seq === "\x1b[1;5C" ||
+    seq === "\x1b[1;3C" ||
+    seq === "\x1b[5C" ||
+    seq === "\x1bf" ||
+    seq === "\x1bF"
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function isLeftArrowSequence(seq: string, key: TuiKeyInfo): boolean {
-  if (key.name === "left") return true;
-  if (seq === "\x1b[D" || seq === "\x1b[1;2D" || seq === "\x1b[1;5D" || seq === "\x1bOD") return true;
+  if (key.name === "left" && !key.ctrl && !key.meta) return true;
+  if (seq === "\x1b[D" || seq === "\x1b[1;2D" || seq === "\x1bOD") return true;
   return false;
 }
 
 function isRightArrowSequence(seq: string, key: TuiKeyInfo): boolean {
-  if (key.name === "right") return true;
-  if (seq === "\x1b[C" || seq === "\x1b[1;2C" || seq === "\x1b[1;5C" || seq === "\x1bOC") return true;
+  if (key.name === "right" && !key.ctrl && !key.meta) return true;
+  if (seq === "\x1b[C" || seq === "\x1b[1;2C" || seq === "\x1bOC") return true;
   return false;
 }
 
@@ -361,6 +954,39 @@ function findWordStartLeft(buffer: string, curPos: number): number {
   return i;
 }
 
+/**
+ * Find the index where a right-ward word jump should land.
+ * Skips leading whitespace, then skips one word:
+ * - a single CJK char (each char is a word), or
+ * - a run of non-whitespace ASCII-ish chars.
+ * Never stops inside a collapsed paste chip — chips are atomic tokens.
+ */
+function findWordEndRight(buffer: string, curPos: number): number {
+  const len = buffer.length;
+  let i = curPos;
+  while (i < len && /\s/.test(buffer[i]!)) i++;
+  if (i >= len) return len;
+
+  const spanAtCursor = findCollapsedPasteSpanAt(buffer, i);
+  if (
+    spanAtCursor &&
+    (i === spanAtCursor.start ||
+      (i > spanAtCursor.start && i < spanAtCursor.end))
+  ) {
+    return spanAtCursor.end;
+  }
+
+  // CJK char is its own word — stop after jumping one.
+  if (CJK_CHAR.test(buffer[i]!)) return i + 1;
+  // ASCII word run — stop at whitespace, CJK, or paste-chip boundary.
+  while (i < len && !/\s/.test(buffer[i]!) && !CJK_CHAR.test(buffer[i]!)) {
+    const span = findCollapsedPasteSpanAt(buffer, i);
+    if (span && i === span.start) break;
+    i++;
+  }
+  return i;
+}
+
 function isDeleteWordSequence(seq: string, key: TuiKeyInfo): boolean {
   if (key.ctrl && key.name === "w") return true;
   // Ctrl+Backspace and Alt+Backspace both delete a word left (readline convention).
@@ -403,19 +1029,15 @@ export const SLASH_COMMANDS = [
   "/compact",
   "/theme",
   "/context",
-  "/ctx",
   "/credits",
   "/links",
   "/cd",
   "/runtime",
   "/auto",
-  "/switch",
-  "/agent",
   "/agents",
   "/history",
   "/resume",
   "/lang",
-  "/copy",
   "/paste",
   "/mouse",
   "/math",
@@ -426,16 +1048,71 @@ export const SLASH_COMMANDS = [
   "/auth",
   "/profile",
   "/update",
-  "/version",
   "/logs",
   "/tasks",
   "/stop",
   "/exit",
   "/restart",
-  "/quit",
   "/learn",
   "/transcribe",
 ] as const;
+
+export const CURATED_ROOT_SLASH_COMMANDS: readonly (typeof SLASH_COMMANDS)[number][] = [
+  "/new",
+  "/clear",
+  "/compact",
+  "/agents",
+  "/history",
+  "/cd",
+  "/context",
+  "/credits",
+  "/auto",
+  "/theme",
+  "/tasks",
+  "/login",
+  "/auth",
+  "/help",
+  "/restart",
+  "/exit",
+];
+
+export const SLASH_COMMAND_DESCRIPTIONS: Record<
+  (typeof SLASH_COMMANDS)[number],
+  { zh: string; en: string }
+> = {
+  "/help": { zh: "显示命令帮助", en: "Show command help" },
+  "/new": { zh: "开启新对话（原对话保留在 /history）", en: "Start new dialog (keeps history)" },
+  "/clear": { zh: "清空并删除当前对话的消息记录", en: "Clear & delete current dialog messages" },
+  "/compact": { zh: "压缩当前上下文并续接新对话", en: "Compact context into a new dialog" },
+  "/theme": { zh: "查看或切换界面主题", en: "Switch color theme" },
+  "/context": { zh: "查看工作区上下文与预算", en: "Show workspace context" },
+  "/credits": { zh: "查看会话计费方式与积分用量", en: "Show billing mode & credit usage" },
+  "/links": { zh: "查看对话关联页面与链接", en: "Show linked pages" },
+  "/cd": { zh: "切换工作目录", en: "Change working directory" },
+  "/runtime": { zh: "切换运行模式 (auto/local/server)", en: "Switch runtime mode" },
+  "/auto": { zh: "设置工具自动放行权限", en: "Toggle permission grants" },
+  "/agents": { zh: "搜索并切换智能体", en: "Search and switch active agent" },
+  "/history": { zh: "搜索并恢复最近对话", en: "Search and resume recent dialogs" },
+  "/resume": { zh: "按对话 ID 精确恢复对话", en: "Resume dialog by exact ID" },
+  "/lang": { zh: "切换界面语言 (zh/en)", en: "Switch language (zh/en)" },
+  "/paste": { zh: "读取剪贴板（图片/文本）", en: "Paste from clipboard" },
+  "/mouse": { zh: "开关终端鼠标模式", en: "Toggle mouse mode" },
+  "/math": { zh: "开关数学公式 Unicode 渲染", en: "Toggle math rendering" },
+  "/doc": { zh: "查看或挂载文档到工作区", en: "List or attach docs" },
+  "/skill": { zh: "查看或挂载技能", en: "List or attach skills" },
+  "/customize": { zh: "描述你想如何调教 nolo", en: "Customize nolo behavior" },
+  "/login": { zh: "登录 Nolo 平台账号", en: "Log in to Nolo account" },
+  "/auth": { zh: "配置第三方模型订阅授权 (OAuth)", en: "Configure provider OAuth subscriptions" },
+  "/profile": { zh: "查看当前配置与登录环境", en: "Show current profile" },
+  "/update": { zh: "检查并安装 CLI 更新", en: "Check for CLI updates" },
+  "/logs": { zh: "查看最近诊断日志与路径", en: "Show recent logs" },
+  "/tasks": { zh: "查看运行中的子任务与后台进程", en: "Show subagents & background processes" },
+  "/stop": { zh: "终止指定或全部后台进程", en: "Stop background processes" },
+  "/exit": { zh: "退出 CLI 交互工作区", en: "Exit CLI workspace" },
+  "/restart": { zh: "原地重启当前 CLI 会话", en: "Restart CLI session in place" },
+  "/learn": { zh: "复盘对话沉淀可复用改进", en: "Review dialog for learnings" },
+  "/transcribe": { zh: "转写音视频文件为文本", en: "Transcribe audio/video file" },
+};
 
 /**
  * Tab completion for a partial slash command. Returns the new buffer, or
@@ -496,6 +1173,17 @@ export function completeSlashCandidates(
   }
   if (trimmed.includes(" ")) return [];
 
+  const locale = getCliLocale();
+  if (trimmed === "/") {
+    if (buffer !== "/") return [];
+    return CURATED_ROOT_SLASH_COMMANDS.map((cmd) => ({
+      label: cmd,
+      insertText: `${cmd} `,
+      source: "builtin",
+      description: SLASH_COMMAND_DESCRIPTIONS[cmd]?.[locale],
+    }));
+  }
+
   const candidates: SlashCommandCandidate[] = [];
 
   for (const cmd of SLASH_COMMANDS) {
@@ -504,6 +1192,7 @@ export function completeSlashCandidates(
         label: cmd,
         insertText: `${cmd} `,
         source: "builtin",
+        description: SLASH_COMMAND_DESCRIPTIONS[cmd]?.[locale],
       });
     }
   }

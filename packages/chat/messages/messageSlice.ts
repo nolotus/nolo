@@ -87,9 +87,15 @@ import {
   setActiveMessageDialogId,
   setStreamingMessageId,
 } from "./messageSessionStore";
+import {
+  MAX_CACHED_INACTIVE_DIALOG_BUCKETS,
+  planColdMessageBucketEviction,
+  touchDialogBucketLru,
+} from "./messageBucketLru";
 
 export { buildEditedMessageContent } from "./messageEditContent";
 export { resolveMessageOwner } from "./resolveMessageOwner";
+export { MAX_CACHED_INACTIVE_DIALOG_BUCKETS } from "./messageBucketLru";
 export {
   GLOBAL_MESSAGE_DIALOG_ID,
   selectFirstStreamProcessed,
@@ -118,6 +124,8 @@ const OLDER_LOAD_LIMIT = 30;
 
 export interface MessageSliceState {
   dialogStateById: Record<string, MessageDialogState>;
+  /** Deterministic logical MRU order of non-global dialogIds (oldest first). */
+  lruOrder?: string[];
 }
 
 /** Wave10: session flash lives in messageSessionStore; only msgs remain here. */
@@ -142,6 +150,7 @@ const initialState: MessageSliceState = {
   dialogStateById: {
     [GLOBAL_MESSAGE_DIALOG_ID]: createEmptyMessageDialogState(),
   },
+  lruOrder: [],
 };
 
 // messageStreamEnd 的 payload 类型
@@ -234,7 +243,43 @@ const ensureMessageDialogState = (
   if (!state.dialogStateById[resolvedDialogId]) {
     state.dialogStateById[resolvedDialogId] = createEmptyMessageDialogState();
   }
+  state.lruOrder = touchDialogBucketLru(
+    state.lruOrder,
+    resolvedDialogId,
+    state.dialogStateById
+  );
   return state.dialogStateById[resolvedDialogId];
+};
+
+const evictColdBucketsIfNeeded = (
+  state: MessageSliceState,
+  protectedDialogId?: string | null
+) => {
+  if (!state.dialogStateById) return;
+  const evictedIds = planColdMessageBucketEviction({
+    dialogStateById: state.dialogStateById,
+    lruOrder: state.lruOrder,
+    activeDialogId: getActiveMessageDialogId(),
+    protectedDialogIds: protectedDialogId ? [protectedDialogId] : undefined,
+    maxCachedInactiveBuckets: MAX_CACHED_INACTIVE_DIALOG_BUCKETS,
+    isDialogProtected: (dialogId) => {
+      if (getHasStreamingMessage(dialogId)) return true;
+      if (getCanonicalHandoffTransientId(dialogId) !== null) return true;
+      const session = getMessageSession(dialogId);
+      return session.isLoadingInitial || session.isLoadingOlder;
+    },
+  });
+
+  if (evictedIds.length === 0) return;
+
+  const evictedSet = new Set(evictedIds);
+  for (const evictedId of evictedIds) {
+    delete state.dialogStateById[evictedId];
+    deleteMessageSession(evictedId);
+  }
+  if (state.lruOrder) {
+    state.lruOrder = state.lruOrder.filter((id) => !evictedSet.has(id));
+  }
 };
 
 const getMessageDialogState = (
@@ -390,6 +435,7 @@ export const messageSlice = createSliceWithThunks({
         state.dialogStateById = {
           [GLOBAL_MESSAGE_DIALOG_ID]: createEmptyMessageDialogState(),
         };
+        state.lruOrder = [];
         resetAllMessageSessions();
         return;
       }
@@ -400,6 +446,9 @@ export const messageSlice = createSliceWithThunks({
         action.payload?.dialogKey
       );
       delete state.dialogStateById[dialogId];
+      if (state.lruOrder) {
+        state.lruOrder = state.lruOrder.filter((id) => id !== dialogId);
+      }
       deleteMessageSession(dialogId);
 
       if (dialogId === getActiveMessageDialogId()) {
@@ -1100,6 +1149,7 @@ export const messageSlice = createSliceWithThunks({
           } else {
             setAllMessages(dialogState, action.payload);
           }
+          evictColdBucketsIfNeeded(state, dialogId);
         },
         rejected: (state, action) => {
           const dialogId = action.meta.arg.dialogId;
@@ -1472,6 +1522,7 @@ export const messageSlice = createSliceWithThunks({
           } as Message);
           // Wave11: stream ended cleanly; clear the streaming index.
           setStreamingMessageId(payload.dialogId, null);
+          evictColdBucketsIfNeeded(state, payload.dialogId);
         },
         rejected: (state, action) => {
           const arg = action.meta?.arg as MessageStreamEndPayload | undefined;

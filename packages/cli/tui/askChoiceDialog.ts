@@ -57,6 +57,7 @@ import {
   DIALOG_CURSOR,
   DIALOG_UNCHECKED,
   renderDialogRow,
+  renderDialogRule,
   renderOverflowAbove,
   renderOverflowBelow,
 } from "./dialogFrame";
@@ -225,7 +226,7 @@ export function renderAskChoiceFrame(
   const q = state.questions[state.activeIndex];
   const qs = state.questionStates[state.activeIndex];
   const actionRow = resolveAskChoiceActionRow(state);
-  const lines: string[] = [];
+  const lines: string[] = [renderDialogRule(options?.maxWidth, colorEnabled)];
   let otherCursor: AskChoiceCursor | null = null;
 
   // Tab bar (only when multiple questions)
@@ -331,6 +332,10 @@ export function renderAskChoiceFrame(
   }
 
   lines.push(renderFooter(state, actionRow, colorEnabled, { wheelScrollsTranscript: options?.wheelScrollsTranscript, maxWidth: options?.maxWidth }));
+
+  if (!options?.bottomAnchored) {
+    lines.push(renderDialogRule(options?.maxWidth, colorEnabled));
+  }
 
   return { text: lines.join("\n"), otherCursor };
 }

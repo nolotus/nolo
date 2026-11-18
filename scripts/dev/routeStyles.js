@@ -7,9 +7,16 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { getRouteStyleTransformOptions } from "./webBuildPolicy.js";
 
-const require = createRequire(import.meta.url);
-const esbuild = require("esbuild");
 const routeStyleSourceCache = new Map();
+
+let cachedEsbuild;
+const getEsbuild = () => {
+  if (!cachedEsbuild) {
+    const require = createRequire(import.meta.url);
+    cachedEsbuild = require("esbuild");
+  }
+  return cachedEsbuild;
+};
 
 /**
  * 路由级样式源文件 → 输出文件名的映射（唯一权威清单）。
@@ -123,7 +130,7 @@ export const copyRouteStyles = async ({
       ) {
         return;
       }
-      const result = await esbuild.transform(
+      const result = await getEsbuild().transform(
         sourceCss,
         getRouteStyleTransformOptions({ env })
       );

@@ -13,7 +13,13 @@ import {
   themeColorSequence,
   type TuiBrightness,
 } from "../tui/theme";
+import { normalizeHttpUrl } from "../tui/tuiUrlOpener";
 import { maskMathInLine } from "./mathText";
+import {
+  resolveCliColorEnabled,
+  resolveCliHyperlinkEnabled,
+  sanitizeHyperlinkLabel,
+} from "./terminalStyles";
 
 // ANSI style codes that don't depend on color (bold, dim, reset).
 export const STYLE = {
@@ -38,35 +44,74 @@ export function colorSeq(
 }
 
 /**
- * Render a markdown link `[text](url)` as a clickable OSC 8 hyperlink.
- * Terminals that support OSC 8 (iTerm2, Ghostty, WezTerm, Kitty, Windows
- * Terminal, etc.) let the user Ctrl/Cmd-Click to open the URL. Unsupported
- * terminals ignore the escape sequences and see plain "text (url)".
+ * Render a markdown link `[text](url)` as a clickable OSC 8 hyperlink when
+ * terminal hyperlinks are enabled (`resolveCliHyperlinkEnabled()`) and `url`
+ * is a valid `http(s)` target (`normalizeHttpUrl`, matching TUI click-to-open).
  *
- * We always emit the visible fallback "text (url)" inside the hyperlink so
- * the URL is readable even when OSC 8 is not available — the link layer is
- * purely additive.
+ * - Valid `http(s)` + hyperlinks enabled + `text.trim() !== url.trim()`:
+ *   emits a compact OSC 8 short link (`text ↗`, styled when color is enabled).
+ *   Note `NO_COLOR` disables ANSI color/underline SGR while preserving OSC 8
+ *   clickability per `resolveCliHyperlinkEnabled()`.
+ * - Valid `http(s)` + hyperlinks enabled + `text.trim() === url.trim()`:
+ *   emits OSC 8 around `text` without duplicating `(url)` or adding `↗`.
+ * - Non-`http(s)` targets (e.g. `/readme`, `./a.md`, `mailto:`) or hyperlinks
+ *   disabled (pipes / `NOLO_CLI_HYPERLINKS=0`): emits readable `${text} (${url})`
+ *   fallback (never hides an unclickable target behind `↗`).
+ * - Both `text` and `url` are sanitized against C0/DEL/ESC/BEL controls.
  */
-function renderMarkdownLink(match: string, text: string, url: string): string {
-  const visible = `${text} (${url})`;
+function renderMarkdownLink(
+  text: string,
+  url: string,
+  brightness: TuiBrightness,
+): string {
+  const safeText = sanitizeHyperlinkLabel(text);
+  const safeHttpUrl = normalizeHttpUrl(url);
+  if (safeHttpUrl === null) {
+    const safeRawUrl = sanitizeHyperlinkLabel(url);
+    return safeText.trim() === safeRawUrl.trim()
+      ? safeText
+      : `${safeText} (${safeRawUrl})`;
+  }
+
+  const sameAsUrl = safeText.trim() === safeHttpUrl.trim();
+  if (!resolveCliHyperlinkEnabled()) {
+    return sameAsUrl ? safeText : `${safeText} (${safeHttpUrl})`;
+  }
+
+  const colorEnabled = resolveCliColorEnabled();
+  if (sameAsUrl || !safeText.trim()) {
+    const label = safeText.trim() ? safeText : safeHttpUrl;
+    if (!colorEnabled) {
+      return `\x1b]8;;${safeHttpUrl}\x1b\\${label}\x1b]8;;\x1b\\`;
+    }
+    const linkColor = colorSeq("accent", brightness);
+    return `\x1b]8;;${safeHttpUrl}\x1b\\\x1b[4m${linkColor}${label}${STYLE.reset}\x1b]8;;\x1b\\`;
+  }
+
+  if (!colorEnabled) {
+    return `\x1b]8;;${safeHttpUrl}\x1b\\${safeText} ↗\x1b]8;;\x1b\\`;
+  }
+  const linkColor = colorSeq("accent", brightness);
+  const muted = colorSeq("muted", brightness);
   // OSC 8: ESC ] 8 ; params URI ST  text  ESC ] 8 ; ; ST
-  // ST (string terminator) is ESC \ — most terminals also accept BEL (\a).
-  return `\x1b]8;;${url}\x1b\\${visible}\x1b]8;;\x1b\\`;
+  // Reset SGR inside OSC 8 after text and after ` ↗` so soft-wrapping table
+  // cells cleanly clear underline/color before closing OSC 8.
+  return `\x1b]8;;${safeHttpUrl}\x1b\\\x1b[4m${linkColor}${safeText}${STYLE.reset}${muted} ↗${STYLE.reset}\x1b]8;;\x1b\\`;
 }
 
 const MARKDOWN_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 
 export function styleInlineMarkdown(line: string, brightness: TuiBrightness) {
-  // Inline code is muted, matching highlightMarkdown (tui/theme.ts). Both
-  // renderers must agree: this one styles the streamed reply, the other styles
-  // the same text once it is repainted from history — a mismatch makes the
-  // colors visibly shift under the user mid-scroll.
-  const inlineCode = colorSeq("muted", brightness);
+  // Inline code uses `info` (crisp sky/cyan across light and dark palettes) so
+  // commands, paths, and identifiers stand out cleanly from prose instead of
+  // receding into muted gray. Streamed replies and history repaints share
+  // this single renderer, so colors stay identical across scroll/redraw.
+  const inlineCode = colorSeq("info", brightness);
   const reset = STYLE.reset;
   const bold = STYLE.bold;
   const dim = STYLE.dim;
   // ZWSP 包裹的 code span：这是防御字面零宽字符（U+200B）粘贴的兜底——
-  // 若用户/上游文本里出现成对的 U+200B 包裹内容，这里还原 muted 高亮。
+  // 若用户/上游文本里出现成对的 U+200B 包裹内容，这里还原 info 高亮。
   // 注意：它不再是表格管线的产物（protectCodeSpans 已删除，markdownTable
   // 现在在 renderMarkdownTable 内先消费反引号再 pad），仅对字面 ZWSP 生效。
   const zwsCode = "\u200b";
@@ -79,7 +124,7 @@ export function styleInlineMarkdown(line: string, brightness: TuiBrightness) {
   // genuine italics. Strikethrough (~~) is independent. Without this, the
   // markers would leak into terminal output as literal asterisks/tildes.
   const styled = mathMask.maskedText
-    .replace(MARKDOWN_LINK_RE, (m, t, u) => renderMarkdownLink(m, t, u))
+    .replace(MARKDOWN_LINK_RE, (_m, t, u) => renderMarkdownLink(t, u, brightness))
     .replace(/\u200b([^\u200b\n]+)\u200b/g, (_m, inner: string) =>
       `${zwsCode}${inlineCode}${inner}${reset}${zwsCode}`
     )

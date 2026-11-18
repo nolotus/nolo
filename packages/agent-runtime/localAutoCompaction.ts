@@ -27,12 +27,26 @@ import { canonicalizeToolName } from "./toolNameAliases";
 import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   COMPACTION_SUMMARY_SCHEMA_VERSION,
+  MAX_SUMMARY_SOURCE_SEGMENTS,
   computeSummarySourceMetadata,
   buildSummarySourceDiagnostics,
+  buildSummarySourceSegments,
+  diffSummarySourceSegments,
   buildBoundedCompactionRequest,
   buildCompactionMetricsFromPlan,
   formatCompactionMetricsLog,
   type CompactionMetrics,
+  type SummarySourceSegment,
+  type SummarySegmentMismatchReason,
+  type SummarySegmentDiffResult,
+} from "../ai/context/compactionShared";
+export {
+  MAX_SUMMARY_SOURCE_SEGMENTS,
+  buildSummarySourceSegments,
+  diffSummarySourceSegments,
+  type SummarySourceSegment,
+  type SummarySegmentMismatchReason,
+  type SummarySegmentDiffResult,
 } from "../ai/context/compactionShared";
 import type {
   AgentRuntimeHostAdapter,
@@ -88,8 +102,8 @@ export function toPlanCompressionMessages(
  * 用 JSON.stringify 后的内容寻址哈希做失效检测：历史被 fork/编辑/裁剪后，
  * 切片内容变化 → 重算哈希不匹配 → 摘要判无效。
  */
-function findSummaryAnchorIndex(
-  bridged: PlanCompressionBridgeMessage[],
+export function findSummaryAnchorIndex(
+  bridged: ReadonlyArray<{ id?: string }>,
   anchorId: string,
 ): number {
   const actual = bridged.findIndex((message) => message.id === anchorId);
@@ -105,8 +119,14 @@ function findSummaryAnchorIndex(
 function logSummarySourceDiagnostics(
   phase: "saved" | "invalidated", dialogId: string,
   history: AgentRuntimeChatMessage[], anchor?: string,
+  segmentDiff?: SummarySegmentDiffResult,
 ): void {
   const sourceHash = hashSummarySourceSlice(history, anchor)?.slice(0, 16);
+  if (phase === "invalidated" && segmentDiff) {
+    console.log(`[compaction-source] ${JSON.stringify({
+      phase, dialogId, sourceHash, kind: "segment-diff", ...segmentDiff,
+    })}`);
+  }
   const rows = buildSummarySourceDiagnostics(toPlanCompressionMessages(history), anchor);
   for (const row of rows) console.log(`[compaction-source] ${JSON.stringify({
     phase, dialogId, sourceHash, ...row,
@@ -623,6 +643,7 @@ export async function maybeAutoCompactLocalHistory(args: {
     sourceHash?: string;
     sourceCount?: number;
     schemaVersion?: unknown;
+    sourceSegments?: ReadonlyArray<SummarySourceSegment>;
   } | null = null;
   try {
     stored = await adapter.loadDialogSummary(dialogId);
@@ -655,7 +676,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       reason = "schema-version-mismatch";
     } else if (
       typeof invalidStored?.summarizedBeforeId !== "string" ||
-      !bridged.some((m) => m.id === invalidStored.summarizedBeforeId)
+      findSummaryAnchorIndex(bridged, invalidStored.summarizedBeforeId) === -1
     ) {
       reason = "anchor-not-found";
     } else if (
@@ -666,6 +687,11 @@ export async function maybeAutoCompactLocalHistory(args: {
     } else {
       reason = "hash-mismatch";
     }
+    const currentSegments = buildSummarySourceSegments(bridged, invalidStored?.summarizedBeforeId);
+    const segmentDiff =
+      reason === "hash-mismatch"
+        ? diffSummarySourceSegments(invalidStored?.sourceSegments, currentSegments)
+        : undefined;
     console.warn(
       `[localLoop] invalidated dialog summary for ${dialogId} (${reason}); discarding and re-compressing`,
       // 诊断分项（**仅加日志，不改任何哈希/校验/重锚语义**）：区分「历史真被改写」
@@ -684,9 +710,16 @@ export async function maybeAutoCompactLocalHistory(args: {
           typeof invalidStored?.sourceHash === "string" && invalidStored.sourceHash
             ? invalidStored.sourceHash.slice(0, 8)
             : null,
+        ...(segmentDiff ? { segmentDiff } : {}),
       },
     );
-    logSummarySourceDiagnostics("invalidated", dialogId, history, invalidStored?.summarizedBeforeId);
+    logSummarySourceDiagnostics(
+      "invalidated",
+      dialogId,
+      history,
+      invalidStored?.summarizedBeforeId,
+      segmentDiff,
+    );
     stored = null;
   }
 
@@ -715,7 +748,7 @@ export async function maybeAutoCompactLocalHistory(args: {
   // summary source hashes, anchors and actual compaction input.
   const allMsgs = toPlanCompressionMessages(prepareHistoryForNextTurn(history, args.contextReferenceResolver));
   const maxInputItems = resolveProviderInputItemLimit({ provider: args.provider, endpoint: args.providerEndpoint });
-  const force = args.force === true || args.requestOverBudget?.(
+  const force = args.force === true || invalidSummary || args.requestOverBudget?.(
     existingSummary ? projectHistoryWithSummary({ history, summary: existingSummary, summarizedBeforeId }) : history,
   ) === true;
   const plan = planCompression({
@@ -1169,8 +1202,13 @@ export async function maybeAutoCompactLocalHistory(args: {
           ...(maxInputItems !== undefined ? { projectedItemCount } : {}) },
       };
     }
+    const bridgedHistory = toPlanCompressionMessages(history);
     const sourceMeta = await computeSummarySourceMetadata(
-      toPlanCompressionMessages(history),
+      bridgedHistory,
+      bounded.summarizedBeforeId,
+    );
+    const sourceSegments = buildSummarySourceSegments(
+      bridgedHistory,
       bounded.summarizedBeforeId,
     );
     if (Date.now() >= summaryDeadlineMs) throw Object.assign(new Error("Summary deadline exceeded"), { compactionReason: "timeout" });
@@ -1178,7 +1216,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       throw Object.assign(new Error("auto-compaction aborted"), { compactionReason: "aborted" as const });
     }
     const saveT0 = Date.now();
-    await adapter.saveDialogSummary({
+    const summarySavePayload = {
       dialogId,
       summary: newSummary,
       summarizedBeforeId: bounded.summarizedBeforeId,
@@ -1186,13 +1224,15 @@ export async function maybeAutoCompactLocalHistory(args: {
       sourceHash: sourceMeta?.sourceHash,
       sourceCount: sourceMeta?.sourceCount ?? 0,
       schemaVersion: COMPACTION_SUMMARY_SCHEMA_VERSION,
+      ...(sourceSegments.length > 0 ? { sourceSegments } : {}),
       referenceKeys: Array.from(
         new Set(
           history.slice(0, sourceMeta?.sourceCount ?? 0)
             .flatMap((message) => extractReferenceKeysFromMessage(message as any)),
         ),
       ),
-    });
+    };
+    await adapter.saveDialogSummary(summarySavePayload);
     saveElapsedMs = Date.now() - saveT0;
     logSummarySourceDiagnostics("saved", dialogId, history, bounded.summarizedBeforeId);
 
@@ -1388,7 +1428,7 @@ export type TurnCompactionController = {
   getLastCompactionOutcome(): ContextCompactionOutcome | undefined;
   /** One decision/attempt for the current request; old usage cannot veto hard admission. */
   prepareRequest(overBudget: (history: AgentRuntimeChatMessage[]) => boolean, initial: boolean,
-    availableHistoryTokens?: () => number): Promise<void>;
+    availableHistoryTokens?: () => number, force?: boolean): Promise<boolean>;
   /**
    * 失败路径补救：预算裁剪即将丢消息时强制压缩一次。applied=false 表示压不动
    * （没有可压内容 / 退避窗口 / 摘要失败），调用方保持原有拒发行为。
@@ -1546,7 +1586,8 @@ export function createTurnCompactionController(args: {
     requestOverBudget?: (history: AgentRuntimeChatMessage[]) => boolean,
     initial = false,
     availableHistoryTokens?: () => number,
-  ): Promise<void> => {
+    force = false,
+  ): Promise<boolean> => {
     lastCompactionOutcome = undefined;
     // 断点修复 2（遥测缺失即零保护）：旧实现 `if (!contextUsage) return;`
     // 与 `if (ratio < trigger) return;` 让「provider 不报 usage」的会话在
@@ -1567,9 +1608,9 @@ export function createTurnCompactionController(args: {
     // 仅无完整请求准入回调时使用旧的廉价门；它不是单轮增量上界。
     // 生产发送路径总带 requestOverBudget，每轮评估。
     // 遥测缺失（ratio undefined）必须每轮评估：估算兜底是唯一防线。
-    if (!requestOverBudget && ratio !== undefined && ratio < args.compressionTriggerRatio * 0.85 &&
+    if (!force && !requestOverBudget && ratio !== undefined && ratio < args.compressionTriggerRatio * 0.85 &&
       resolveProviderInputItemLimit({ provider: args.provider, endpoint: args.providerEndpoint }) === undefined) {
-      return;
+      return false;
     }
     try {
       const compacted = await maybeAutoCompactLocalHistory({
@@ -1589,6 +1630,7 @@ export function createTurnCompactionController(args: {
         providerEndpoint: args.providerEndpoint,
         resolveProvider: args.resolveProvider,
         contextWindow: args.contextWindow,
+        ...(force ? { force: true } : {}),
         ...(ratio !== undefined ? { realContextUsagePercent: ratio } : {}),
         abortSignal: args.abortSignal,
         timeoutMs: args.timeoutMs,
@@ -1634,11 +1676,13 @@ export function createTurnCompactionController(args: {
         args.onSelectedSummary?.(compacted.selectedSummary ?? { outcome: initial ? "absent" : "unknown" });
       }
       emitObservation(compacted);
+      return Boolean(compacted.compressed && compacted.summaryGenerated);
     } catch (error) {
       lastCompactionOutcome = { ...lastCompactionOutcome, error: classifySummaryError(error) };
       console.warn("[localLoop] in-loop auto-compaction failed:", error);
+      return false;
     }
   };
 
-  return { getLastCompactionOutcome: () => lastCompactionOutcome, runInitial, maybeCompactInLoop: () => prepareRequest(), forceCompact, prepareRequest };
+  return { getLastCompactionOutcome: () => lastCompactionOutcome, runInitial, maybeCompactInLoop: async () => { await prepareRequest(); }, forceCompact, prepareRequest };
 }

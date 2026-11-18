@@ -101,7 +101,7 @@ const OSC8_CLOSE = "\x1b\\";
  * Google's `validation_url_link_text`), so sanitize here rather than trusting
  * each caller.
  */
-function sanitizeHyperlinkLabel(label: string): string {
+export function sanitizeHyperlinkLabel(label: string): string {
   // eslint-disable-next-line no-control-regex
   return label.replace(/[\u0000-\u001f\u007f]/g, "");
 }

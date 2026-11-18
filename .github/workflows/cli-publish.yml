@@ -50,7 +50,7 @@ jobs:
             echo "::error::projection_sha must be an exact 40-hex commit SHA, got '${{ inputs.projection_sha }}'" >&2
             exit 2
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.projection_sha }}
           clean: true
@@ -106,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$PROJECTION_SHA" =~ ^[0-9a-f]{40}$ ]]
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.projection_sha }}
       - uses: oven-sh/setup-bun@v2
@@ -132,7 +132,7 @@ jobs:
           tar -xzf public/downloads/nolo-linux-x64.tar.gz -C "$SMOKE_DIR"
           export HOME="$SMOKE_DIR/home"
           ACTUAL_VERSION="$("$SMOKE_DIR/nolo" --version)"
-          [[ "$ACTUAL_VERSION" == "$VERSION" || "$ACTUAL_VERSION" == "nolo $VERSION" || "$ACTUAL_VERSION" == "nolo-cli-linux-x64 $VERSION" ]]
+          [[ "$ACTUAL_VERSION" == "$VERSION" || "$ACTUAL_VERSION" == "nolo $VERSION" || "$ACTUAL_VERSION" == "nolo-cli $VERSION" || "$ACTUAL_VERSION" == "nolo-cli-linux-x64 $VERSION" ]]
           "$SMOKE_DIR/nolo" --help > "$SMOKE_DIR/help.txt"
           grep -qi nolo "$SMOKE_DIR/help.txt"
       - name: Publish CLI binary tarballs
@@ -161,7 +161,7 @@ jobs:
           - os: windows-latest
             node: 26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # 健康检查读的 packages/cli/package.json 版本必须就是本次发布的版本：
           # 绑定同一 projection_sha，不读可能已前移的默认分支。

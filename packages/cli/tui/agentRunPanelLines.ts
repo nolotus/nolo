@@ -64,10 +64,9 @@ function formatPanelDetail(snapshot: AgentRunSnapshot): string {
 }
 
 /**
- * agent 行的类型标记：用 🤖 取代生硬的「agent / 智能体 / Sub-agent」类型字样。
- * emoji 是双宽字符，行宽计算走 visibleWidth（见 tuiAnsi）。
+ * agent 行的类型标记：用单列极简符号 ◈ 取代生硬的「agent / 智能体 / Sub-agent」类型字样与彩色 emoji。
  */
-export const AGENT_TYPE_ICON = "🤖";
+export const AGENT_TYPE_ICON = "◈";
 
 /**
  * Internal run ids are useful diagnostics but poor primary UI. Prefer a real

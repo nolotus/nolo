@@ -5,6 +5,10 @@ import type {
   AgentRuntimeChatMessage,
   AgentRuntimeSaveTurnInput,
 } from "../../agent-runtime";
+import {
+  sanitizeSummarySourceSegments,
+  type SummarySourceSegment,
+} from "../../ai/context/compactionShared";
 import type { HybridRecordStore } from "./hybridRecordStore";
 import { createCliHybridRecordStore } from "./hybridRecordStore";
 import {
@@ -502,15 +506,29 @@ export async function writeDialog(args: {
   });
 
   // Re-saving this host turn must keep its source immutable (including time).
-  for (const id of plan.captureUserMessageIds) {
-    const op = plan.ops.find(op => op.value.id === id && op.value.role === "user")!;
-    const existing = await args.store.read(op.key, { remote: false });
-    if (existing) {
-      if (existing.id !== id || existing.dialogId !== plan.dialogId || existing.userId !== args.userId ||
-        existing.role !== "user" || JSON.stringify(existing.content) !== JSON.stringify(op.value.content)) {
-        throw new Error("CLI persisted turn source conflict");
+  const prefetchedUserMessages = new Map<string, any>();
+  if (plan.captureUserMessageIds.length > 0) {
+    const captureEntries = plan.captureUserMessageIds.map((id) => ({
+      id,
+      op: plan.ops.find((op) => op.value.id === id && op.value.role === "user")!,
+    }));
+    const uniqueKeys = [...new Set(captureEntries.map((entry) => entry.op.key))];
+    const readResults = await Promise.all(
+      uniqueKeys.map(async (key) => [key, await args.store.read(key, { remote: false })] as const),
+    );
+    const existingByKey = new Map<string, any>(readResults);
+    for (const { id, op } of captureEntries) {
+      const existing = existingByKey.get(op.key);
+      if (existing) {
+        if (existing.id !== id || existing.dialogId !== plan.dialogId || existing.userId !== args.userId ||
+          existing.role !== "user" || JSON.stringify(existing.content) !== JSON.stringify(op.value.content)) {
+          throw new Error("CLI persisted turn source conflict");
+        }
+        op.value = existing;
       }
-      op.value = existing;
+      // After `args.store.batch(plan.ops)` below succeeds, `op.key` holds `op.value`
+      // (either the preserved `existing` record or the newly persisted user message).
+      prefetchedUserMessages.set(op.key, op.value);
     }
   }
 
@@ -537,9 +555,12 @@ export async function writeDialog(args: {
     dialogId: plan.dialogId, ownerId: args.userId, spaceId: args.input.spaceId, source: "cli-local",
   });
   if (args.cliBatchCompletion) {
-    for (const batchId of args.cliBatchCompletion.batchIds) {
-      plan.ops.push(await buildCliBatchCompletionOp(args.store, plan.dialogId, batchId));
-    }
+    const completionOps = await Promise.all(
+      args.cliBatchCompletion.batchIds.map((batchId) =>
+        buildCliBatchCompletionOp(args.store, plan.dialogId, batchId),
+      ),
+    );
+    plan.ops.push(...completionOps);
   }
   await args.store.batch(plan.ops);
 
@@ -580,7 +601,9 @@ export async function writeDialog(args: {
   // Receipt sources are already persisted; never substitute generated save-time IDs.
   const captureSources = await readCliCaptureSources({ input: args.input,
     dialogId: plan.dialogId, userId: args.userId, persistedUserMessageIds: plan.captureUserMessageIds,
-    read: key => args.store.read(key, { remote: false }),
+    read: key => prefetchedUserMessages.has(key)
+      ? Promise.resolve(prefetchedUserMessages.get(key))
+      : args.store.read(key, { remote: false }),
   }).catch(() => []);
   const syncAndCapture = async (fetchImpl: CliFetchImpl) => {
     try {
@@ -678,6 +701,7 @@ export async function loadCliDialogSummary(args: {
   sourceHash?: string;
   sourceCount?: number;
   schemaVersion?: unknown;
+  sourceSegments?: SummarySourceSegment[];
   referenceKeys?: string[];
 } | null> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
@@ -694,6 +718,7 @@ export async function loadCliDialogSummary(args: {
   // 键存在即透传（值为任意），由 validateStoredSummary 判无效：
   // 畸形值（null / "2" / 非数字）也必须触发失效，不能静默当成字段缺失按 v1 信任。
   const schemaVersion = (record as any).schemaVersion;
+  const sourceSegments = sanitizeSummarySourceSegments((record as any).sourceSegments);
   return {
     summary,
     ...(typeof summarizedBeforeId === "string" && summarizedBeforeId
@@ -706,6 +731,7 @@ export async function loadCliDialogSummary(args: {
       ? { sourceCount }
       : {}),
     ...("schemaVersion" in record ? { schemaVersion } : {}),
+    ...(sourceSegments ? { sourceSegments } : {}),
     ...(Array.isArray((record as any).referenceKeys)
       ? { referenceKeys: (record as any).referenceKeys.filter((key: unknown): key is string => typeof key === "string") }
       : {}),
@@ -721,6 +747,7 @@ export async function saveCliDialogSummary(args: {
   sourceHash?: string;
   sourceCount?: number;
   schemaVersion?: number;
+  sourceSegments?: ReadonlyArray<SummarySourceSegment>;
   referenceKeys?: string[];
 }): Promise<void> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
@@ -738,6 +765,7 @@ export async function saveCliDialogSummary(args: {
     typeof (existing as any).compressionCount === "number"
       ? (existing as any).compressionCount + 1
       : 1;
+  const sanitizedSourceSegments = sanitizeSummarySourceSegments(args.sourceSegments);
   await registerDialogOwner({
     store: { get: (key) => args.store.read(key, { remote: false }), put: (key, value) => args.store.write(key, value) },
     dialogId: bareId, ownerId: args.userId, source: "cli-summary",
@@ -760,6 +788,9 @@ export async function saveCliDialogSummary(args: {
       : {}),
     ...(args.schemaVersion !== undefined
       ? { schemaVersion: args.schemaVersion }
+      : {}),
+    ...(sanitizedSourceSegments !== undefined
+      ? { sourceSegments: sanitizedSourceSegments }
       : {}),
     referenceKeys: Array.from(new Set([
       ...(Array.isArray((existing as any).referenceKeys)

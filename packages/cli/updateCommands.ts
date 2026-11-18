@@ -207,7 +207,11 @@ export function readPackageInfo(): PackageInfo {
 }
 
 export function buildCliVersionText(info: PackageInfo) {
-  return `${info.name} ${info.version}`;
+  const normalizedName =
+    info.name === "nolo-cli" || info.name.startsWith("nolo-cli-")
+      ? "nolo-cli"
+      : info.name;
+  return `${normalizedName} ${info.version}`;
 }
 
 export function buildSelfUpdateCommand(serverUrl?: string | null) {
@@ -356,13 +360,14 @@ PACKAGE="$STAGING/lib/node_modules/nolo-cli"
 node -e 'const p=require(process.argv[1]); if(p.name!=="nolo-cli" || !/^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?$/.test(p.version)) process.exit(1)' "$PACKAGE/package.json"
 VERSION_TEXT=$("$PACKAGE/index.js" -v)
 case "$VERSION_TEXT" in
-  "nolo-cli "*) ;;
+  "nolo-cli "*) ACTUAL_VERSION=\${VERSION_TEXT#nolo-cli } ;;
+  "nolo-cli-"?*" "*) ACTUAL_VERSION=\${VERSION_TEXT#* } ;;
   *) echo "Error: invalid staged CLI version" >&2; exit 1 ;;
 esac
 # Fail before touching the live entry. Version is a health check, not identity:
 # every install has a unique permanent prefix, including same-version builds.
 EXPECTED=$(node -p 'require(process.argv[1]).version' "$PACKAGE/package.json")
-[ "$VERSION_TEXT" = "nolo-cli $EXPECTED" ]
+[ "$ACTUAL_VERSION" = "$EXPECTED" ]
 if [ -d "$ENTRY" ] || { [ -e "$ENTRY" ] && [ ! -L "$ENTRY" ]; }; then echo "Error: refusing non-symlink entrypoint; retain it and migrate explicitly" >&2; exit 1; fi
 LINK="$ENTRY.new.$$"
 if [ -e "$LINK" ] || [ -L "$LINK" ]; then exit 1; fi
@@ -421,6 +426,7 @@ chmod +x "$STAGING/nolo"
 VERSION_TEXT=$("$STAGING/nolo" -v)
 case "$VERSION_TEXT" in
   "nolo-cli "*) VERSION=\${VERSION_TEXT#nolo-cli } ;;
+  "nolo-cli-"?*" "*) VERSION=\${VERSION_TEXT#* } ;;
   *) VERSION=$VERSION_TEXT ;;
 esac
 CORE=\${VERSION%%[-+]*}
@@ -440,6 +446,7 @@ case "$VERSION" in
 esac
 case "$CURRENT_VERSION" in
   "nolo-cli "*) CUR_VER=\${CURRENT_VERSION#nolo-cli } ;;
+  "nolo-cli-"?*" "*) CUR_VER=\${CURRENT_VERSION#* } ;;
   *) CUR_VER=$CURRENT_VERSION ;;
 esac
 CUR_CORE=\${CUR_VER%%[-+]*}

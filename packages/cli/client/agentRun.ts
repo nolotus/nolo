@@ -1,4 +1,5 @@
 import { resolveAgentImageInputSupport } from "../../ai/llm/agentCapabilities";
+import { isContextOverflowText } from "../../ai/chat/parseApiError";
 import { contextRefusalDiagnostics, describeContextRefusal } from "./contextRefusal";
 import { isHistoryIntegrityFailure } from "../../ai/tools/agent/runFailureClass";
 import { getOrCreateSharedStore } from "./localRuntimeDialog";
@@ -219,7 +220,10 @@ export function parseContextLengthDetails(
   let max: string | undefined;
   let requested: string | undefined;
 
-  const maxMatch = message.match(/maximum context length\s+(?:is|of)\s*(\d+)/i);
+  const maxMatch =
+    message.match(/maximum context length\s+(?:is|of)\s*(\d+)/i) ??
+    message.match(/maximum number of tokens allowed(?:\s*(?:is|of))?\s*[:=]?\s*(\d+)/i) ??
+    message.match(/exceeds?\s+(?:the\s+)?(?:model(?:'s)?\s+)?maximum(?:\s+context)?\s+(?:length|limit|tokens?)\s*(?:is|of|:)?\s*(\d+)/i);
   if (maxMatch) {
     max = maxMatch[1];
   }
@@ -697,6 +701,13 @@ function looksLikeRateLimitedText(message: string): boolean {
  */
 const AUTH_TEXT_SIGNAL_RE =
   /\b401\b|unauthori[sz]ed|invalid[_\s-]?(?:api[_\s-]?key|token|credential)s?|(?:api[_\s-]?key|token|credential)s?[_\s-](?:invalid|expired|rejected|missing|not[_\s-]?found)|authentication[_\s-]?(?:error|failed|required)/i;
+
+export function isAuthFailureError(error: unknown): boolean {
+  if (!error) return false;
+  const msg = toErrorMessage(error);
+  if (!msg) return false;
+  return AUTH_TEXT_SIGNAL_RE.test(msg) || classifyLocalRunError(msg).kind === "auth";
+}
 
 /**
  * 「配额/余额耗尽」细分判据（区别于短时限流）：insufficient_quota /
@@ -1661,6 +1672,16 @@ export function formatLocalTurnFailureLine(error: unknown): string {
   if (isMissingBatchReceiptFailure(message)) {
     return `[nolo] ${describeMissingBatchReceipt()}.\n`;
   }
+  if (isContextOverflowText(message)) {
+    const details = parseContextLengthDetails(message);
+    const shownMessage =
+      details.requested && details.max
+        ? t("contextLengthExceeded", details.requested, details.max)
+        : details.max
+          ? t("contextLengthExceededLimitOnly", details.max)
+          : t("contextLengthExceededGeneric");
+    return `[nolo] ${shownMessage}\n`;
+  }
   if ((error as { code?: unknown })?.code === "LLM_REQUEST_TIMEOUT") {
     const msMatch = /after (\d+)ms/.exec(message);
     const deadline =
@@ -1792,10 +1813,19 @@ export function describeLocalRunFailure(
     });
   }
 
-  // Context length limit exceeded (HTTP 400 with "maximum context length") —
+  // Local context coverage refusal (LocalContextCoverageError) must be checked
+  // before generic context-overflow matching, because its message mentions
+  // "larger context window" and specifically directs users to retry / /compact
+  // without /new.
+  if (isLocalContextCoverageFailure(rawError ?? message)) {
+    return `[nolo] ${describeContextRefusal(contextRefusalDiagnostics(rawError))}\n`;
+  }
+
+  // Context length limit exceeded (OpenAI "maximum context length", Gemini/Antigravity
+  // "exceeds the maximum number of tokens allowed", etc.) —
   // render friendly localized guidance suggesting /compact or /new without
   // blaming local credentials or displaying "local run unavailable".
-  if (/maximum context length/i.test(message)) {
+  if (isContextOverflowText(message)) {
     const details = parseContextLengthDetails(message);
     const shownMessage =
       details.requested && details.max
@@ -1855,9 +1885,6 @@ export function describeLocalRunFailure(
 
   if (isCliBatchPhaseFailure(rawError)) {
     return describeCliBatchPhaseFailure(rawError);
-  }
-  if (isLocalContextCoverageFailure(rawError ?? message)) {
-    return `[nolo] ${describeContextRefusal(contextRefusalDiagnostics(rawError))}\n`;
   }
   if (isMissingBatchReceiptFailure(message)) {
     return `[nolo] ${describeMissingBatchReceipt()}.\n`;

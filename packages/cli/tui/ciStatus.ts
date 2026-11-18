@@ -63,10 +63,31 @@ export function buildCiStatusCommand(limit: number, env: CiStatusEnv = process.e
   return compactStatusBeforeTransport(`curl -s -m 3 "http://127.0.0.1:${resolveCiPort(env)}/status?limit=${safeLimit}"`);
 }
 
+export function isCiStatusTestOrCiEnvironment(env: CiStatusEnv = process.env): boolean {
+  return (
+    env.NODE_ENV === "test" ||
+    process.env.NODE_ENV === "test" ||
+    env.BUN_ENV === "test" ||
+    process.env.BUN_ENV === "test" ||
+    Boolean(
+      env.CI ||
+        process.env.CI ||
+        env.GITHUB_ACTIONS ||
+        process.env.GITHUB_ACTIONS,
+    )
+  );
+}
+
+function shouldBlockRealSsh(env: CiStatusEnv, execFileImpl: typeof execFile): boolean {
+  if (execFileImpl !== execFile) return false;
+  if (env.NOLO_CI_STATUS_ALLOW_SSH === "1") return false;
+  return isCiStatusTestOrCiEnvironment(env);
+}
+
 export function fetchCiStatusPayload(limit = 5, timeoutMs = 4000, env: CiStatusEnv = process.env, signal?: AbortSignal, execFileImpl: typeof execFile = execFile): Promise<unknown | undefined> {
   return fetchCiPayload(buildCiStatusCommand(limit, env), (stdout) => {
     try { return JSON.parse(stdout) as unknown; } catch { return undefined; }
-  }, timeoutMs, resolveCiSshTarget(env), signal, execFileImpl);
+  }, timeoutMs, resolveCiSshTarget(env), signal, execFileImpl, env);
 }
 
 /**
@@ -84,11 +105,7 @@ export function buildCiStatusJobCommand(jobId: string, env: CiStatusEnv = proces
 export function fetchCiStatusJobPayload(jobId: string, timeoutMs = 4000, env: CiStatusEnv = process.env, signal?: AbortSignal, execFileImpl: typeof execFile = execFile): Promise<unknown | undefined> {
   return fetchCiPayload(buildCiStatusJobCommand(jobId, env), (stdout) => {
     try { return JSON.parse(stdout) as unknown; } catch { return undefined; }
-  }, timeoutMs, resolveCiSshTarget(env), signal, execFileImpl);
-}
-
-function resolveSshTarget(): string {
-  return resolveCiSshTarget();
+  }, timeoutMs, resolveCiSshTarget(env), signal, execFileImpl, env);
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -154,8 +171,8 @@ export function parseCiStatusPayload(raw: string): CiJob[] | undefined {
   return single ? [single] : undefined;
 }
 
-export function buildRemoteCommand(limit: number): string {
-  return buildCiStatusCommand(limit);
+export function buildRemoteCommand(limit: number, env: CiStatusEnv = process.env): string {
+  return buildCiStatusCommand(limit, env);
 }
 
 /**
@@ -163,11 +180,28 @@ export function buildRemoteCommand(limit: number): string {
  *
  * @param timeoutMs 整体超时。远小于调用方（TUI 首屏）能容忍的等待。
  */
-export function fetchCiStatus(limit = 5, timeoutMs = 4000, signal?: AbortSignal): Promise<CiJob[] | undefined> {
-  return fetchCiPayload(buildRemoteCommand(limit), parseCiStatusPayload, timeoutMs, resolveSshTarget(), signal);
+export function fetchCiStatus(
+  limit = 5,
+  timeoutMs = 4000,
+  signal?: AbortSignal,
+  env: CiStatusEnv = process.env,
+  execFileImpl: typeof execFile = execFile,
+): Promise<CiJob[] | undefined> {
+  return fetchCiPayload(buildRemoteCommand(limit, env), parseCiStatusPayload, timeoutMs, resolveCiSshTarget(env), signal, execFileImpl, env);
 }
 
-function fetchCiPayload<T>(command: string, parse: (stdout: string) => T | undefined, timeoutMs: number, sshTarget: string, signal?: AbortSignal, execFileImpl: typeof execFile = execFile): Promise<T | undefined> {
+function fetchCiPayload<T>(
+  command: string,
+  parse: (stdout: string) => T | undefined,
+  timeoutMs: number,
+  sshTarget: string,
+  signal?: AbortSignal,
+  execFileImpl: typeof execFile = execFile,
+  env: CiStatusEnv = process.env,
+): Promise<T | undefined> {
+  if (shouldBlockRealSsh(env, execFileImpl)) {
+    return Promise.resolve(undefined);
+  }
   return new Promise((resolve) => {
     let settled = false;
     let guard: ReturnType<typeof setTimeout> | undefined;
@@ -223,8 +257,8 @@ export function summarizeLatest(jobs: CiJob[] | undefined): string | undefined {
 }
 
 /** Same SSH channel as status; failures stay silent and never alter process exitCode. */
-export function buildCancelCommand(jobId: string): string {
-  const port = resolveCiPort();
+export function buildCancelCommand(jobId: string, env: CiStatusEnv = process.env): string {
+  const port = resolveCiPort(env);
   const body = JSON.stringify({ jobId }).replace(/'/g, "'\\''");
   const endpoint = `http://127.0.0.1:${port}/cancel`;
   // admin token 只在 CI 宿主上读取并直接注入请求头：它不进本机环境、不进 ssh argv、
@@ -236,16 +270,22 @@ export function buildCancelCommand(jobId: string): string {
 // 取消曾是「远端 cancel + 最多 10 次终态查询」的有界过程（alphaRemote.cancelAlphaRemote，已随
 // 2026-11-02 旧 alpha 机销毁退役）。服务端现在没有远端进程可撤销，blocked alpha job 的取消会
 // 立刻返回 false；保留这个宽松的 CLI 超时只作为网络/服务端抖动的安全余量，不表示服务端还会慢。
-export function fetchCiCancel(jobId: string, timeoutMs = 120000, execFileImpl: typeof execFile = execFile): Promise<boolean | undefined> {
+export function fetchCiCancel(
+  jobId: string,
+  timeoutMs = 120000,
+  execFileImpl: typeof execFile = execFile,
+  env: CiStatusEnv = process.env,
+): Promise<boolean | undefined> {
   return fetchCiPayload(
-    buildCancelCommand(jobId),
+    buildCancelCommand(jobId, env),
     stdout => {
       const response = JSON.parse(stdout);
       return response?.ok === true && response?.cancelled === true && response?.jobId === jobId ? true : false;
     },
     timeoutMs,
-    resolveSshTarget(),
+    resolveCiSshTarget(env),
     undefined,
     execFileImpl,
+    env,
   );
 }

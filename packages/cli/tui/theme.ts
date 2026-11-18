@@ -1,5 +1,12 @@
 import { resolveCliColorEnabled } from "../client/terminalStyles";
-import { displayWidth, visibleWidth } from "./tuiAnsi";
+import {
+  boxGlyphs,
+  displayWidth,
+  resolveAmbiguousWidth,
+  resolveBoxCharset,
+  type TuiBoxCharset,
+  visibleWidth,
+} from "./tuiAnsi";
 
 /**
  * TUI color tokens mirroring the app theme system.
@@ -529,19 +536,23 @@ export function diffLineSequences(
     added: {
       fg: successSgr,
       bg: hexToBgSgr(addedBgHex),
-      bar: `${successSgr}▌\x1b[39m`,
+      bar: `${successSgr}▎\x1b[39m`,
     },
     removed: {
       fg: dangerSgr,
       bg: hexToBgSgr(removedBgHex),
-      bar: `${dangerSgr}▌\x1b[39m`,
+      bar: `${dangerSgr}▎\x1b[39m`,
     },
     hunk: {
       fg: infoSgr,
       bg: hexToBgSgr(hunkBgHex),
-      bar: " ",
+      bar: `${infoSgr}│\x1b[39m`,
     },
-    context: { fg: "", bg: "", bar: " " },
+    context: {
+      fg: "",
+      bg: "",
+      bar: `${themeColorSequence("chrome", env, brightness)}│\x1b[39m`,
+    },
   };
 }
 
@@ -582,11 +593,38 @@ export function renderDiffLine(args: {
   colorEnabled?: boolean;
   /** Optional pre-highlighted line text (with ANSI sequences) to use instead of plain fg. */
   highlightedText?: string;
+  /** Render with a slim left gutter rail (`▎`/`│` or `|`) and no background fill. */
+  gutter?: boolean;
+  /** Optional box charset override for the gutter rail (defaults to resolveBoxCharset). */
+  boxCharset?: TuiBoxCharset;
 }): string {
-  const { kind, text, highlightedText } = args;
+  const { kind, text, highlightedText, gutter } = args;
   const env = args.env ?? process.env;
   const colorEnabled = args.colorEnabled ?? resolveCliColorEnabled();
   if (!colorEnabled) return text;
+
+  if (gutter) {
+    const charset = args.boxCharset ?? resolveBoxCharset(resolveAmbiguousWidth(undefined, env), env);
+    const railGlyph = charset === "ascii"
+      ? boxGlyphs("ascii").v
+      : kind === "added" || kind === "removed"
+        ? "▎"
+        : boxGlyphs("unicode").v;
+    const railTone: TuiThemeToken =
+      kind === "added"
+        ? "success"
+        : kind === "removed"
+          ? "danger"
+          : kind === "hunk"
+            ? "info"
+            : "chrome";
+    const rail = `${themeColorSequence(railTone, env)}${railGlyph}\x1b[39m`;
+    const body = highlightedText ?? (
+      kind === "context" ? text : `${themeColorSequence(railTone, env)}${text}`
+    );
+    const closedBody = body.endsWith("\x1b[0m") ? body : `${body}\x1b[0m`;
+    return `${rail} ${closedBody}`;
+  }
 
   const seqs = diffLineSequences(env);
   if (!seqs) {

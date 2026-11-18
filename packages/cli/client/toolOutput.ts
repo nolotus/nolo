@@ -929,18 +929,21 @@ function formatEditDetailBlock(
   const isTruecolor = supportsTruecolor(env);
   const lang: CodeLang = isTruecolor ? detectCodeLangFromPath(filePath) : "unknown";
   const brightness: TuiBrightness = resolveTuiBrightness(env);
-  const padTo = resolveSurfacePaintWidth(process.stdout.columns || 80);
+  const maxLineWidth = resolveSurfacePaintWidth(process.stdout.columns || 80);
   return lines
-    .map((line) => renderDiffLine({
-      kind: line.kind,
-      text: fitAnsiLine(`  ${line.text}`, padTo),
-      highlightedText: shouldHighlightEditLine(line, lang, isTruecolor)
-        ? fitAnsiLine(`  ${buildHighlightedEditLine(line, lang, brightness, env)}`, padTo)
-        : undefined,
-      padTo,
-      colorEnabled: true,
-      env,
-    }) + "\n")
+    .map((line) => {
+      const rendered = renderDiffLine({
+        kind: line.kind,
+        text: line.text,
+        highlightedText: shouldHighlightEditLine(line, lang, isTruecolor)
+          ? buildHighlightedEditLine(line, lang, brightness, env)
+          : undefined,
+        gutter: true,
+        colorEnabled: true,
+        env,
+      });
+      return `${fitAnsiLine(`  ${rendered}`, maxLineWidth)}\n`;
+    })
     .join("");
 }
 
@@ -1037,7 +1040,7 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
     const url = typeof metadata.url === "string" ? metadata.url : "";
     if (url) return formatFetchItemUrl(url);
   }
-  if (toolName === "exa_search") {
+  if (toolName === "exa_search" || toolName === "codeSearch" || toolName === "globFiles") {
     const query = typeof metadata.query === "string"
       ? metadata.query
       : typeof metadata.pattern === "string" ? metadata.pattern : "";
@@ -1184,7 +1187,7 @@ function formatNormalToolLine(
     const title = gist ? `${label} · ${gist}` : label;
     return formatToolTraceLine(fitNormalLine(`▸ ${title}`, `✗ ${reason}`, totalBudget), colorEnabled, "error");
   }
-  const successLabel = omitSuccessGlyph?.(toolName) ? "  " : label;
+  const successLabel = omitSuccessGlyph?.(toolName) ? " ".repeat(displayWidth(label)) : label;
   const resultSummary = normalResultSummary(event);
   const gist = [normalToolGist(event), resultSummary].filter(Boolean).join(" · ");
   // editFile：gist 行追加 (+a, -r) 统计 + 多行 diff 色带块（Zed-style），
@@ -1331,7 +1334,7 @@ export const TUI_TREE_END = "\u0002";
 export const TUI_TREE_TOOLS = {
   Run: ["execShell", "runCommand", "launchProcess"],
   Read: ["readFile"],
-  Search: ["exa_search"],
+  Search: ["exa_search", "globFiles", "codeSearch"],
   Fetch: ["fetchWebpage"],
 } as const;
 export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;
@@ -1360,7 +1363,7 @@ function toolDetails(event: LocalAgentToolEvent, line: string): string {
  * 因此本函数幂等，可以被重复调用。
  */
 export function toolRowDetailLine(line: string): string {
-  // A blank two-column glyph slot is not a family label, even if the gist is.
+  // A blank icon slot (1 or 2 columns after `▸ `) is not a family label, even if the gist is.
   if (/^(?:\u001b\[[0-9;]*m)*▸  /.test(line)) return line;
   const match = /^(?:\u001b\[[0-9;]*m)*▸ (\S+)/.exec(line);
   if (!match) return line;
@@ -1379,25 +1382,54 @@ export function createToolEventFormatter(
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
   let scope = 0;
   let lastFamilyId: string | undefined;
-  let tree: { kind: TuiTreeKind; items: string[]; lastRow?: string; activity: ToolActivityProjection } | null = null;
+  let tree: {
+    counts: Record<TuiTreeKind, number>;
+    items: string[];
+    lastRow?: string;
+    activity: ToolActivityProjection;
+  } | null = null;
   const treeKind = (name: string): TuiTreeKind | null =>
     (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
       (TUI_TREE_TOOLS[kind] as readonly string[]).includes(name)) ?? null;
-  const treeLine = (kind: TuiTreeKind, items: string[], fallback: string, details: string) => {
-    const label = kind === "Run" ? toolIcon("execShell") : kind === "Read" ? toolIcon("readFile") : kind === "Fetch" ? toolIcon("fetchWebpage") : toolIcon("exa_search");
-    const header = `${label} (${items.length}) · `;
+  const treeLine = (
+    kind: TuiTreeKind,
+    counts: Record<TuiTreeKind, number>,
+    items: string[],
+    fallback: string,
+    details: string,
+  ) => {
+    const activeKinds = (Object.keys(counts) as TuiTreeKind[]).filter((k) => counts[k] > 0);
+    const isMixed = activeKinds.length > 1;
     // Summary rows receive the assistant's "◈ " anchor (measured display width).
     const columns = resolveHistoryLayoutGeometry(process.stdout.columns).contentWidth - displayWidth("◈ ");
     const budget = Math.max(1, columns);
-    let shown = 1;
-    for (let count = 2; count <= items.length; count++) {
-      const suffix = count < items.length ? ", …" : "";
-      if (displayWidth(`▸ ${header}${items.slice(0, count).join(", ")}${suffix}  ✓`) > budget) break;
-      shown = count;
+    let summary: string;
+    let payloadKind: TuiTreeKind = kind;
+    if (isMixed) {
+      const parts = [
+        counts.Read > 0 ? t("explorePartRead", String(counts.Read)) : "",
+        counts.Search > 0 ? t("explorePartSearch", String(counts.Search)) : "",
+        counts.Run > 0 ? t("explorePartRun", String(counts.Run)) : "",
+        counts.Fetch > 0 ? t("explorePartFetch", String(counts.Fetch)) : "",
+      ].filter(Boolean).join(", ");
+      const label = toolIcon("readFile");
+      summary = fitNormalLine(`${label} · ${t("exploreSummary", String(items.length), parts)}`, "✓", Math.max(1, budget - 2));
+      payloadKind = "Read";
+    } else {
+      const singleKind = activeKinds[0] ?? kind;
+      payloadKind = singleKind;
+      const label = singleKind === "Run" ? toolIcon("execShell") : singleKind === "Read" ? toolIcon("readFile") : singleKind === "Fetch" ? toolIcon("fetchWebpage") : toolIcon("exa_search");
+      const header = `${label} (${items.length}) · `;
+      let shown = 1;
+      for (let count = 2; count <= items.length; count++) {
+        const suffix = count < items.length ? ", …" : "";
+        if (displayWidth(`▸ ${header}${items.slice(0, count).join(", ")}${suffix}  ✓`) > budget) break;
+        shown = count;
+      }
+      summary = fitNormalLine(`${header}${items.slice(0, shown).join(", ")}${shown < items.length ? ", …" : ""}`, "✓", Math.max(1, budget - 2));
     }
-    const summary = fitNormalLine(`${header}${items.slice(0, shown).join(", ")}${shown < items.length ? ", …" : ""}`, "✓", Math.max(1, budget - 2));
     const payload: TuiTreePayload = {
-      kind,
+      kind: payloadKind,
       summary,
       fallback,
       details,
@@ -1421,11 +1453,21 @@ export function createToolEventFormatter(
       key: event.toolCallId, toolName: name, args: event.metadata,
       state: "success", attention: [], mode: "ordinary",
       // Formatter lifecycle/reset is the real assistant-output boundary;
-      // round comes from the execution stream, never from adjacent rows.
+      // consecutive read-only exploration folds across rounds until a
+      // non-readonly tool, error/gate, or assistant prose interrupts it.
       scopeKey: `assistant:${scope}`,
-      batchKey: Number.isInteger(event.round) && event.round >= 0 ? `round:${event.round}` : undefined,
+      batchKey: `explore:${scope}`,
       evidenceKey: event.toolCallId,
     });
+    const isReadOnlyExploration =
+      kind === "Read" ||
+      kind === "Search" ||
+      kind === "Fetch" ||
+      (kind === "Run" && activity.readOnly === true);
+    if (!isReadOnlyExploration) {
+      tree = null;
+      return null;
+    }
     let item = "";
     const m = event.metadata ?? {};
     if (kind === "Run") {
@@ -1441,7 +1483,10 @@ export function createToolEventFormatter(
     // 携带密钥形态串时退回纯工具 label，不让 token 上屏（第二个及后续结果
     // 只走 treeLine，不经过 normalToolGist，必须在这里再包一次）。
     item = safeAskText(item) || toolLabel(name);
-    if (tree?.kind !== kind || !canCoalesceToolActivities(tree.activity, activity)) tree = { kind, items: [], activity };
+    if (!tree || !canCoalesceToolActivities(tree.activity, activity)) {
+      tree = { counts: { Run: 0, Read: 0, Search: 0, Fetch: 0 }, items: [], activity };
+    }
+    tree.counts[kind] += 1;
     tree.items.push(item);
     // Keep the first call visible immediately; the second result replaces this
     // tail row with the complete tree in the TUI history.
@@ -1456,7 +1501,7 @@ export function createToolEventFormatter(
       return `${TUI_TREE_MARKER}${JSON.stringify({ kind, summary: stripAnsi(line).trimEnd().replace(/^▸ /, ""), fallback: line, details: toolDetails(event, line), appendOnly: true } satisfies TuiTreePayload)}${TUI_TREE_END}\n`;
     }
     const line = formatNormalToolLine(event, call, colorEnabled, opts);
-    return treeLine(kind, tree.items, line, toolDetails(event, line));
+    return treeLine(kind, tree.counts, tree.items, line, toolDetails(event, line));
   };
   const format = ((event: LocalAgentToolEvent): string => {
     if (event.type === "tool-call") {

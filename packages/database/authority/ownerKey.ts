@@ -52,6 +52,30 @@ export const resolveCandidateOwnerFromKeyRemainder = (
   return null;
 };
 
+export const isMalformedAgentAutomationKey = (dbKey: string): boolean => {
+  const normalized = cleanSegment(dbKey);
+  if (!normalized) return false;
+  if (
+    normalized !== "agent-automation" &&
+    !normalized.startsWith("agent-automation-")
+  ) {
+    return false;
+  }
+  const parts = normalized.split("-");
+  if (parts[2] === "owner" && parts[3] === "idx") {
+    return (
+      parts.length < 5 ||
+      !cleanSegment(parts[4]) ||
+      !cleanSegment(parts[parts.length - 1])
+    );
+  }
+  return (
+    parts.length < 4 ||
+    !cleanSegment(parts[2]) ||
+    !cleanSegment(parts[parts.length - 1])
+  );
+};
+
 export const parseOwnerUserIdFromDbKey = (
   dbKey: string,
   options: {
@@ -73,6 +97,30 @@ export const parseOwnerUserIdFromDbKey = (
       return cleanSegment(owner);
     }
     return null;
+  }
+
+  if (prefix === "agent" && parts[1] === "automation") {
+    if (isMalformedAgentAutomationKey(normalized)) return null;
+    if (parts[2] === "owner" && parts[3] === "idx") {
+      const ownerAndRest = parts.slice(4).join("-");
+      const candidateOwner = resolveCandidateOwnerFromKeyRemainder(
+        ownerAndRest,
+        options.candidateOwnerUserIds
+      );
+      if (candidateOwner) return candidateOwner;
+      const ownerUserId = cleanSegment(parts[4]);
+      if (!ownerUserId || PUBLIC_OWNER_SENTINELS.has(ownerUserId)) return null;
+      return ownerUserId;
+    }
+    const ownerAndRest = parts.slice(2).join("-");
+    const candidateOwner = resolveCandidateOwnerFromKeyRemainder(
+      ownerAndRest,
+      options.candidateOwnerUserIds
+    );
+    if (candidateOwner) return candidateOwner;
+    const ownerUserId = cleanSegment(parts[2]);
+    if (!ownerUserId || PUBLIC_OWNER_SENTINELS.has(ownerUserId)) return null;
+    return ownerUserId;
   }
 
   if (prefix === "dialog") {

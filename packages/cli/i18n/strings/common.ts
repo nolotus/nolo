@@ -8,8 +8,8 @@ export const commonStrings = {
     zh: "新对话",
   },
   startedFreshDialog: {
-    en: "Started a fresh dialog.",
-    zh: "已开始新对话。",
+    en: "Started a fresh dialog (previous dialogs are kept in /history).",
+    zh: "已开启新对话（历史对话可通过 /history 恢复）。",
   },
   persistentProcessesLeft: {
     en: "{0} persistent process(es) left running in the background.",
@@ -28,8 +28,8 @@ export const commonStrings = {
     zh: "已恢复对话",
   },
   resumeInvalidId: {
-    en: "does not look like a dialog id. Use /history to pick one.",
-    zh: "看起来不是 dialog id。用 /history 从列表里选一个。",
+    en: "does not look like a dialog id. Use /history to browse and pick one, or /resume <id> with a valid id.",
+    zh: "不是有效的 dialog id。请用 /history 从列表选择对话，或用 /resume <id> 指定有效 ID 恢复。",
   },
   dialogResumeCancelled: {
     en: "Dialog resume cancelled.",
@@ -56,8 +56,8 @@ export const commonStrings = {
     zh: "已强制停止，后台任务可能仍在收尾。",
   },
   quotaExhaustedHint: {
-    en: "This agent is temporarily unavailable (HTTP 429).\nUse /agent to switch to another agent and keep going — the dialog context is preserved.",
-    zh: "当前 agent 暂时不可用（HTTP 429）。\n可以用 /agent 切换到其他 agent 后继续，同一对话会保留上下文。",
+    en: "This agent is temporarily unavailable (HTTP 429).\nUse /agents to switch to another agent and keep going — the dialog context is preserved.",
+    zh: "当前 agent 暂时不可用（HTTP 429）。\n可以用 /agents 切换到其他 agent 后继续，同一对话会保留上下文。",
   },
   balanceExhaustedHint: {
     en: "Your message is saved in this dialog — top up, then send again or say \"continue\" to pick up where you left off.",
@@ -99,25 +99,9 @@ export const commonStrings = {
     en: "This turn did not create a dialog. Your next message will start a new conversation — restate what you need.",
     zh: "本轮没有建成对话。下一句会是新对话——请把你想做的事再说一遍。",
   },
-  copiedLastReply: {
-    en: "Copied the last reply to the clipboard.",
-    zh: "已复制最后一条回复到剪贴板。",
-  },
-  copyNothing: {
-    en: "Nothing to copy yet.",
-    zh: "还没有可复制的内容。",
-  },
   copyFailed: {
     en: "Copy failed",
     zh: "复制失败",
-  },
-  copyUnavailable: {
-    en: "Clipboard is unavailable in this environment. The last reply was printed above for manual copy.",
-    zh: "当前环境没有可用的剪贴板。最后一条回复已打印在上方，可手动复制。",
-  },
-  copyUsage: {
-    en: "Usage: /copy",
-    zh: "用法：/copy",
   },
   copiedToClipboard: {
     en: "✓ Copied to clipboard.",
@@ -131,17 +115,9 @@ export const commonStrings = {
     en: "✓ Copied the selection to the clipboard. Press Esc to stop generating.",
     zh: "✓ 已复制选区到剪贴板。按 Esc 停止生成。",
   },
-  copiedAllHistory: {
-    en: "✓ Copied the full conversation to the clipboard.",
-    zh: "✓ 已复制完整对话到剪贴板。",
-  },
-  copyAllNothing: {
-    en: "No conversation to copy yet.",
-    zh: "还没有可复制的对话内容。",
-  },
   ctrlCExitHint: {
-    en: "[hint] Press Ctrl+C again to exit | Type /copy to copy the latest reply",
-    zh: "[提示] 再按一次 Ctrl+C 退出 | 输入 /copy 可复制最新回复",
+    en: "[hint] Press Ctrl+C again to exit",
+    zh: "[提示] 再按一次 Ctrl+C 退出",
   },
   ctrlCClearedDraft: {
     en: "Draft cleared.",
@@ -186,7 +162,7 @@ export const commonStrings = {
     en: "Enter queues text · Esc stops this reply (again to force)",
     zh: "Enter 排队发送 · Esc 停止当前回复（再按强制停止）",
   },
-  noToolDetails: { en: "[nolo] No tool details in this session yet.", zh: "[nolo] 尚无工具详情。" },
+  noToolDetails: { en: "· No tool details in this session yet.", zh: "· 尚无工具详情。" },
   generatingReply: {
     en: "Generating reply…",
     zh: "生成回复…",
@@ -242,18 +218,18 @@ export const commonStrings = {
   // {0} = 上游标签（antigravity · gemini-3.8-flash-tiered；取不到回退 transport 名）
   // {1} = 清洗后的上游原文（去 details= / 传输前缀 / 结尾复位句，折叠空白，≤140 字符）
   localRunRateLimitQuota: {
-    en: "[nolo] Upstream quota exhausted ({0}): {1}",
-    zh: "[nolo] 上游额度已用尽（{0}）：{1}",
+    en: "! Upstream quota exhausted ({0}): {1}",
+    zh: "! 上游额度已用尽（{0}）：{1}",
   },
   localRunRateLimitThrottled: {
-    en: "[nolo] Upstream rate limit ({0}): {1}",
-    zh: "[nolo] 上游限流（{0}）：{1}",
+    en: "! Upstream rate limit ({0}): {1}",
+    zh: "! 上游限流（{0}）：{1}",
   },
   // 上游明确表示「服务容量饱和」（如 Codex 的 "is at capacity"）。这与账号额度
   // 无关，用「额度」措辞会让人误以为是自己配额用完了。单独一档。
   localRunRateLimitCapacity: {
-    en: "[nolo] Upstream service at capacity ({0}): {1}",
-    zh: "[nolo] 上游服务容量饱和（{0}）：{1}",
+    en: "! Upstream service at capacity ({0}): {1}",
+    zh: "! 上游服务容量饱和（{0}）：{1}",
   },
   // 第 2 行复位提示：沿用 extractRateLimitResetHint 抓到的上游原文（不换算），
   // 只作括号补充；没抓到就没有这段括号。
@@ -279,13 +255,13 @@ export const commonStrings = {
   // 时刻（仅当报文确实给了 reset_at）+ 出口。{0} = 上游标签（provider · model，
   // 取不到回退 transport 名），{1} = 清洗后的原因（或定量原因）。
   localRunBalanceExhausted: {
-    en: "[nolo] Insufficient balance, cannot continue ({0}): {1}",
-    zh: "[nolo] 余额不足，无法继续（{0}）：{1}",
+    en: "! Insufficient balance, cannot continue ({0}): {1}",
+    zh: "! 余额不足，无法继续（{0}）：{1}",
   },
   // 报文带 coding_plan_exhausted 时的措辞：计划额度与钱包余额是两笔要分别充的账。
   localRunBalanceCodingPlan: {
-    en: "[nolo] Coding Plan quota exhausted and the wallet balance is insufficient ({0}): {1}",
-    zh: "[nolo] Coding Plan 额度已用尽且钱包余额不足（{0}）：{1}",
+    en: "! Coding Plan quota exhausted and the wallet balance is insufficient ({0}): {1}",
+    zh: "! Coding Plan 额度已用尽且钱包余额不足（{0}）：{1}",
   },
   // 第 2 行：{0} = 计划额度复位时刻（本地时间）。报文没给复位时刻时整行省略。
   localRunBalanceReset: {
@@ -559,8 +535,12 @@ export const commonStrings = {
   // Command results that used to be hardcoded English. Usage lines keep the
   // command literal untouched; only the surrounding words are translated.
   unknownCommand: {
-    en: "Unknown command: {0}\n\n",
-    zh: "未知命令：{0}\n\n",
+    en: "! Unknown command {0} (Type /help for all commands)",
+    zh: "! 未知命令 {0}（输入 /help 查看全部命令）",
+  },
+  unknownCommandDidYouMean: {
+    en: "! Unknown command {0} · Did you mean {1}? (Type /help for all commands)",
+    zh: "! 未知命令 {0} · 你是不是想输入 {1}？（输入 /help 查看全部命令）",
   },
   noConversationLinks: {
     en: "No links in this conversation yet.",
@@ -584,10 +564,45 @@ export const commonStrings = {
     en: "Recent diagnostics ({0} of {1}) · full log: {2}",
     zh: "最近诊断（{0}/{1} 条）· 完整日志：{2}",
   },
+  creditsTitle: {
+    en: "Credits & usage",
+    zh: "用量与积分",
+  },
+  creditsFieldBilling: {
+    en: "billing",
+    zh: "计费",
+  },
+  creditsPositiveSession: {
+    en: "⚡ {0} credits (session total)",
+    zh: "⚡ {0} 积分（本会话累计）",
+  },
+  creditsPositiveHistory: {
+    en: "⚡ {0} credits (dialog history base)",
+    zh: "⚡ {0} 积分（对话历史基数）",
+  },
+  creditsPositiveCombined: {
+    en: "⚡ {0} credits (session total + dialog history base)",
+    zh: "⚡ {0} 积分（本会话累计 / 含对话历史基数）",
+  },
+  creditsNone: {
+    en: "No platform credits charged (own subscription / custom API does not consume platform credits, or no platform-billed model has run in this dialog yet)",
+    zh: "未产生平台积分消耗（自有订阅 / 自定义 API 不计平台积分，或本对话尚未运行平台计费模型）",
+  },
+  creditsDebugTip: {
+    en: "Type /credits debug to view billing pipeline diagnostics",
+    zh: "输入 /credits debug 查看计费链路诊断详情",
+  },
+  creditsUsage: {
+    en: "Usage: /credits | /credits debug",
+    zh: "用法：/credits | /credits debug",
+  },
   tasksRunning: { en: "Running processes ({0}):", zh: "运行中的进程（{0}）：" },
   tasksStopped: { en: "Stopped/exited ({0}):", zh: "已停止/已退出（{0}）：" },
   tasksNone: { en: "No processes.", zh: "没有运行中的进程。" },
-  stopUsage: { en: "Usage: /stop <pid|label|all>", zh: "用法：/stop <pid|label|all>" },
+  stopUsage: {
+    en: "Usage: /stop <pid|label|all> (stops background processes; use /tasks to inspect child runs and processes)",
+    zh: "用法：/stop <pid|label|all>（终止后台进程；查看子任务与进程列表请用 /tasks）",
+  },
   stopAllDone: { en: "Stopped {0} processes", zh: "已停止 {0} 个进程" },
   stopNoPid: { en: "No running process with pid {0}", zh: "没有 pid 为 {0} 的运行中进程" },
   stopPidDone: { en: "Stopped pid {0} ({1})", zh: "已停止 pid {0}（{1}）" },

@@ -37,8 +37,10 @@ export function formatAgentSwitchMessage(args: {
   name: string;
   dialogId?: string;
 }) {
-  const dialog = args.dialogId ? `Dialog kept: ${args.dialogId}` : "Dialog kept: new";
-  return `Switched to ${args.name}. ${dialog}`;
+  const dialog = args.dialogId
+    ? t("agentSwitchDialogKept", args.dialogId)
+    : t("agentSwitchDialogNew");
+  return t("agentSwitchedMessage", args.name, dialog);
 }
 
 export async function runAgentPicker(args: {
@@ -121,7 +123,9 @@ export async function runAgentPicker(args: {
   const result = await runSelectDialog({
     items,
     initialIndex,
-    title: undefined,
+    title: t("agentPickerTitle"),
+    showCount: true,
+    filterable: true,
     ...(footerLines ? { footerLines } : {}),
     input,
     output,

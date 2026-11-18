@@ -4,6 +4,7 @@ import { resolveModelReasoningCapability } from "./modelReasoningCapability";
 // API quality, cost and latency comparisons, 2026-11-15: https://artificialanalysis.ai/models
 // These are deliberately explicit IDs: model-name effort suffixes are not parameters.
 const defaults: Record<string, "medium" | "high"> = {
+  "gpt-6.2-sol": "medium", "gpt-6.2-astra": "high",
   "gpt-6.1-sol": "medium", "gpt-6.1-terra": "medium",
   "gpt-6-luna": "medium", "gpt-6-astra": "high",
   "claude-opus-5-5": "medium", "claude-sonnet-5-5": "high",

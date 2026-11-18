@@ -6,6 +6,7 @@ import { toErrorMessage } from "core/errorMessage";
 import {
   createCliAuthorityBrokerClient,
   createCliAuthorityBrokerSocketInvoker,
+  isCliAuthorityBrokerTimeoutError,
   isCliAuthorityBrokerUnavailableError,
 } from "../database-engine/cliAuthorityBrokerClient";
 import type { CliAuthorityBrokerClientOptions } from "../database-engine/cliAuthorityBrokerClient";
@@ -86,6 +87,30 @@ function resolveCliLocalRuntimeDbPath(options: ResolveCliLocalRuntimeAuthorityOp
   );
 }
 
+const DEFAULT_ATTACH_BACKOFF_MS = [100, 200, 400, 800] as const;
+const DEFAULT_ATTACH_RETRY_BUDGET_MS = 9_000;
+
+function findOwnerPid(error: unknown): number | undefined {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const pid = (current as { ownerPid?: unknown }).ownerPid;
+    if (typeof pid === "number" && Number.isInteger(pid) && pid > 0) {
+      return pid;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+function isTransientBrokerOpenError(error: unknown): boolean {
+  return (
+    isCliAuthorityBrokerUnavailableError(error) ||
+    isCliAuthorityBrokerTimeoutError(error)
+  );
+}
+
 type CliAuthorityBrokerConnectDeps = {
   createClient: (options: CliAuthorityBrokerClientOptions) => AuthorityStore;
   startBroker: (options: CliAuthorityBrokerServerOptions) => Promise<unknown>;
@@ -96,6 +121,10 @@ type CliAuthorityBrokerConnectDeps = {
    * socket 连接，传 false 跳过快速路径走原有 startBroker 流程。
    */
   useFastPath?: boolean;
+  /** Total retry/backoff budget (ms) when lock or endpoint contention indicates a live owner. */
+  attachRetryBudgetMs?: number;
+  /** Backoff steps (ms); final step repeats until budget is exhausted. */
+  attachBackoffMs?: readonly number[];
 };
 
 const defaultCliAuthorityBrokerConnectDeps: CliAuthorityBrokerConnectDeps = {
@@ -123,14 +152,36 @@ export async function connectCliAuthorityBroker(args: {
       invoke: createCliAuthorityBrokerSocketInvoker({ endpoint: args.endpoint }),
     });
 
+    const backoffSchedule = deps.attachBackoffMs?.length
+      ? deps.attachBackoffMs
+      : DEFAULT_ATTACH_BACKOFF_MS;
+    const retryBudgetMs = deps.attachRetryBudgetMs ?? DEFAULT_ATTACH_RETRY_BUDGET_MS;
+    let waitedMs = 0;
+    let backoffStep = 0;
+    let lastAttachError: unknown;
+
+    const waitBackoff = async () => {
+      if (waitedMs >= retryBudgetMs) return false;
+      const delay = backoffSchedule[Math.min(backoffStep, backoffSchedule.length - 1)]!;
+      if (waitedMs > 0 && waitedMs + delay > retryBudgetMs) return false;
+      backoffStep += 1;
+      const startedAt = Date.now();
+      await deps.sleep(delay);
+      waitedMs += Math.max(delay, Date.now() - startedAt);
+      return true;
+    };
+
     async function attachToExistingBroker(attempts: number) {
       for (let attempt = 0; attempt < attempts; attempt += 1) {
-        await deps.sleep(100);
+        if (!(await waitBackoff())) return false;
+        const probeStartedAt = Date.now();
         try {
           await client.open();
           return true;
         } catch (error) {
-          if (!isCliAuthorityBrokerUnavailableError(error)) throw error;
+          waitedMs += Date.now() - probeStartedAt;
+          if (!isTransientBrokerOpenError(error)) throw error;
+          lastAttachError = error;
         }
       }
       return false;
@@ -139,17 +190,15 @@ export async function connectCliAuthorityBroker(args: {
     // PERF: 快速路径——先尝试直接 open 连到已有 broker。如果 broker 已
     // 存在（TUI/daemon/之前的 agent run 启动的），open 会立即成功，跳过
     // startBroker 的 LevelDB open + lock 检测（实测撞锁路径 ~800ms，
-    // 直接 open ~10ms）。如果 broker 不存在，open 会快速失败
-    // (ECONNREFUSED)，然后走下面的 startBroker 正常启动路径。
+    // 直接 open ~10ms）。若 broker 不存在或因宿主事件循环瞬时繁忙超时，
+    // 落入下方的 startBroker + 锁检测/有界退避附着恢复流程。
     if (deps.useFastPath) {
       try {
         await client.open();
         return client;
       } catch (error) {
-        // H-1: 只在 broker 不可用（ECONNREFUSED / ENOENT 等）时 fallback
-        // 到 startBroker。其他 error（如 5s 超时、协议错误）直接 throw，
-        // 避免不健康的 broker 导致快速路径等 5s 后再走 fallback 又等 5s。
-        if (!isCliAuthorityBrokerUnavailableError(error)) throw error;
+        if (!isTransientBrokerOpenError(error)) throw error;
+        lastAttachError = error;
       }
     }
 
@@ -171,8 +220,7 @@ export async function connectCliAuthorityBroker(args: {
       }
 
       let lastError: unknown = error;
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        await deps.sleep(100);
+      while (await waitBackoff()) {
         try {
           await deps.startBroker({
             endpoint: args.endpoint,
@@ -191,20 +239,33 @@ export async function connectCliAuthorityBroker(args: {
             }
             continue;
           }
-          if (isCliAuthorityBrokerUnavailableError(retryError)) {
+          if (isTransientBrokerOpenError(retryError)) {
+            lastAttachError = retryError;
             continue;
           }
           throwCliAuthorityStartupError(retryError);
         }
       }
       const lastMessage = toErrorMessage(lastError);
+      const attachMessage = lastAttachError ? toErrorMessage(lastAttachError) : "";
       const portInUse = (
         lastError !== null && typeof lastError === "object" &&
         "code" in lastError && lastError.code === "EADDRINUSE"
       ) || /EADDRINUSE/i.test(lastMessage);
-      const detail = portInUse
-        ? `: EADDRINUSE (${lastMessage}). The broker endpoint is already in use; check the process using it or set NOLO_CLI_AUTHORITY_BROKER_PORT to a free port for all local CLI processes`
-        : "";
+      const ownerPid = findOwnerPid(lastError);
+      let detail = "";
+      if (portInUse) {
+        detail = `: EADDRINUSE (${lastMessage}). The broker endpoint is already in use; check the process using it or set NOLO_CLI_AUTHORITY_BROKER_PORT to a free port for all local CLI processes`;
+      } else {
+        const parts = [
+          ownerPid !== undefined ? `ownerPid=${ownerPid}` : undefined,
+          lastMessage || undefined,
+          attachMessage && attachMessage !== lastMessage ? `attach=${attachMessage}` : undefined,
+        ].filter(Boolean);
+        if (parts.length > 0) {
+          detail = `: ${parts.join("; ")}`;
+        }
+      }
       throw new Error(`CLI authority broker could not attach or take ownership for ${args.endpoint}${detail}`, {
         cause: lastError,
       });

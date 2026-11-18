@@ -10,6 +10,7 @@ import {
 } from "./tuiAnsi";
 import {
   buildLayoutRowWindow,
+  buildTurnOffsets,
   type TurnHistory,
 } from "./tuiHistory";
 
@@ -203,6 +204,65 @@ export function extractTextSliceByColumns(
   return text;
 }
 
+type CodeBlockCharset = "unicode" | "ascii";
+
+function extractPlainAfterPrefix(rendered: string, prefixWidth: number): string {
+  const tokens = tokenizeAnsiLine(rendered);
+  let col = 0;
+  let out = "";
+  for (const token of tokens) {
+    if (token.kind !== "char") continue;
+    if (col >= prefixWidth) {
+      out += token.value;
+    }
+    col += token.width;
+  }
+  return out;
+}
+
+function matchCodeBlockTopBorder(
+  plainAfterPrefix: string,
+  softWrapped: boolean,
+): CodeBlockCharset | null {
+  if (softWrapped) {
+    if (/^┌─{6,}$/.test(plainAfterPrefix) || /^┌─ [a-z0-9+#_-]+ ─*$/.test(plainAfterPrefix)) {
+      return "unicode";
+    }
+    if (/^\+-{6,}$/.test(plainAfterPrefix) || /^\+- [a-z0-9+#_-]+ -*$/.test(plainAfterPrefix)) {
+      return "ascii";
+    }
+    return null;
+  }
+  if (/^┌─{24}$/.test(plainAfterPrefix) || /^┌─ [a-z0-9+#_-]+ ─{4,}$/.test(plainAfterPrefix)) {
+    return "unicode";
+  }
+  if (/^\+-{24}$/.test(plainAfterPrefix) || /^\+- [a-z0-9+#_-]+ -{4,}$/.test(plainAfterPrefix)) {
+    return "ascii";
+  }
+  return null;
+}
+
+function isCodeBlockBottomBorder(
+  plainAfterPrefix: string,
+  charset: CodeBlockCharset,
+  softWrapped: boolean,
+): boolean {
+  if (charset === "unicode") {
+    return softWrapped ? /^└─{6,}$/.test(plainAfterPrefix) : /^└─{24}$/.test(plainAfterPrefix);
+  }
+  return softWrapped ? /^\+-{6,}$/.test(plainAfterPrefix) : /^\+-{24}$/.test(plainAfterPrefix);
+}
+
+function codeBlockGutterWidth(
+  plainAfterPrefix: string,
+  charset: CodeBlockCharset,
+): number {
+  const bar = charset === "ascii" ? "|" : "│";
+  if (plainAfterPrefix.startsWith(`${bar} `)) return 2;
+  if (plainAfterPrefix === bar) return 1;
+  return 0;
+}
+
 /**
  * 提取选区范围内的纯文本。
  */
@@ -219,19 +279,75 @@ export function extractSelectedText(
   const start = cmp < 0 ? anchor : head;
   const end = cmp < 0 ? head : anchor;
 
-  // 只物化选区覆盖到的行：离屏 turn 一行都不渲染（相交的单条超长消息仍整条物化，
-  // 后续调用靠 turn 缓存复用）。
+  // 只从包含 start.globalRow 的那一个 turn 首行开始扫描代码块状态，既能识别
+  // 跨在代码块内部的选区，又不展开离屏的早先 turn。
+  const { entries, totalLines } = buildTurnOffsets(history, contentWidth);
+  let scanStartRow = start.globalRow;
+  if (start.globalRow < totalLines) {
+    const hitEntry = entries.find(
+      (entry) => entry.startRow + entry.lineCount > start.globalRow,
+    );
+    if (hitEntry) {
+      scanStartRow = Math.min(start.globalRow, hitEntry.startRow);
+    }
+  } else {
+    scanStartRow = totalLines;
+  }
+
+  // 只物化选区（及其所属起止 turn 前缀）覆盖到的行：离屏 turn 一行都不渲染
+  // （相交的单条超长消息仍整条物化，后续调用靠 turn 缓存复用）。
   const window = buildLayoutRowWindow(
     history,
     contentWidth,
-    start.globalRow,
+    scanStartRow,
     end.globalRow + 1,
   );
-  const pieces: string[] = [];
+  const collected: Array<{
+    text: string;
+    softWrapped: boolean;
+    softWrapJoiner: string;
+  }> = [];
 
-  for (let r = start.globalRow; r <= end.globalRow; r++) {
+  let entryCursor = 0;
+  let inCodeBlock = false;
+  let codeCharset: CodeBlockCharset | null = null;
+  let prevSoftWrapped = false;
+  let skippedWrapContinuation = false;
+
+  for (let r = scanStartRow; r <= end.globalRow; r++) {
+    while (
+      entryCursor < entries.length &&
+      entries[entryCursor]!.startRow + entries[entryCursor]!.lineCount <= r
+    ) {
+      entryCursor += 1;
+    }
+
+    let isAssistantRow = false;
+    let isTurnBoundary = false;
+    if (entryCursor < entries.length && r >= entries[entryCursor]!.startRow) {
+      isAssistantRow = history.turns[entryCursor]?.role === "assistant";
+      isTurnBoundary = r === entries[entryCursor]!.startRow;
+    } else if (r >= totalLines) {
+      isAssistantRow = history.currentRole === "assistant";
+      isTurnBoundary = r === totalLines;
+    } else {
+      isTurnBoundary = true;
+    }
+
+    if (isTurnBoundary || !isAssistantRow) {
+      inCodeBlock = false;
+      codeCharset = null;
+      skippedWrapContinuation = false;
+    }
+
     const row = window.rows[r - window.baseRow];
-    if (!row) continue;
+    if (!row) {
+      prevSoftWrapped = false;
+      continue;
+    }
+
+    const isContinuation = prevSoftWrapped;
+    prevSoftWrapped = row.softWrapped === true;
 
     let lineStartCol = 0;
     let lineEndCol = Infinity;
@@ -243,20 +359,96 @@ export function extractSelectedText(
       lineEndCol = end.col;
     }
 
-    pieces.push(
-      extractTextSliceByColumns(
+    if (isAssistantRow) {
+      if (isContinuation && skippedWrapContinuation) {
+        skippedWrapContinuation = row.softWrapped === true;
+        continue;
+      }
+      skippedWrapContinuation = false;
+
+      const plainAfterPrefix = extractPlainAfterPrefix(
         row.rendered,
-        lineStartCol,
-        lineEndCol,
         row.prefixWidth,
-      ),
-    );
-    if (r < end.globalRow) {
-      pieces.push(row.softWrapped ? (row.softWrapJoiner ?? "") : "\n");
+      );
+      if (!isContinuation && !inCodeBlock) {
+        const topCharset = matchCodeBlockTopBorder(
+          plainAfterPrefix,
+          row.softWrapped === true,
+        );
+        if (topCharset) {
+          inCodeBlock = true;
+          codeCharset = topCharset;
+          skippedWrapContinuation = row.softWrapped === true;
+          continue;
+        }
+      }
+
+      if (inCodeBlock && codeCharset) {
+        if (
+          !isContinuation &&
+          isCodeBlockBottomBorder(
+            plainAfterPrefix,
+            codeCharset,
+            row.softWrapped === true,
+          )
+        ) {
+          inCodeBlock = false;
+          codeCharset = null;
+          skippedWrapContinuation = row.softWrapped === true;
+          continue;
+        }
+
+        if (r >= start.globalRow) {
+          const gutterWidth = isContinuation
+            ? 0
+            : codeBlockGutterWidth(plainAfterPrefix, codeCharset);
+          const text = extractTextSliceByColumns(
+            row.rendered,
+            lineStartCol,
+            lineEndCol,
+            row.prefixWidth + gutterWidth,
+          );
+          const trailingWrapSpaces =
+            row.softWrapped &&
+            r < end.globalRow &&
+            (row.softWrapJoiner ?? "") === "" &&
+            lineEndCol === Infinity &&
+            text.length > 0
+              ? (plainAfterPrefix.slice(gutterWidth).match(/ +$/)?.[0] ?? "")
+              : "";
+          collected.push({
+            text,
+            softWrapped: row.softWrapped === true,
+            softWrapJoiner: (row.softWrapJoiner ?? "") || trailingWrapSpaces,
+          });
+        }
+        continue;
+      }
+    }
+
+    if (r >= start.globalRow) {
+      collected.push({
+        text: extractTextSliceByColumns(
+          row.rendered,
+          lineStartCol,
+          lineEndCol,
+          row.prefixWidth,
+        ),
+        softWrapped: row.softWrapped === true,
+        softWrapJoiner: row.softWrapJoiner ?? "",
+      });
     }
   }
 
-  return pieces.join("");
+  let out = "";
+  for (let i = 0; i < collected.length; i++) {
+    const item = collected[i]!;
+    out += item.text;
+    if (i < collected.length - 1) {
+      out += item.softWrapped ? item.softWrapJoiner : "\n";
+    }
+  }
+  return out;
 }
 
 /**

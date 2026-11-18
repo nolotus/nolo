@@ -1,6 +1,10 @@
 import type { McpLocalOAuthManagerFactory } from "../mcp/mcpLocalRuntimeAdapter";
 import { resolveUserEnabledSkills } from "../../ai/skills/userSkills";
 import { normalizeEnabledPromptSkills } from "../../ai/skills/userPromptSkills";
+import {
+  resolveAgentSkillConfig,
+  type AgentSkillConfigSource,
+} from "../../ai/tools/agentSkillConfig";
 import type { AgentRuntimeToolResult } from "../../agent-runtime/hostAdapter";
 import type { ShellApprovalSession } from "./originShellApprovalTransport";
 import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilities/capability";
@@ -155,8 +159,8 @@ export type CliLocalRuntimeAdapterDeps = {
 };
 
 export type PreparedAgentRuntime = {
-  /** Canonical explicit Agent skill policy used to prepare this runtime. */
-  localAgentSkillFingerprint?: string;
+  /** Non-credential canonical Agent config fingerprint used to prepare this runtime. */
+  localAgentConfigFingerprint?: string;
   agentConfig: AgentRuntimeAgentConfig;
   activeAgentToolNames: string[];
   runtimeToolExecutionLimits: Record<string, unknown>;
@@ -226,6 +230,94 @@ export function buildPreparedAgentCacheKey(args: {
 export function clearCliLocalRuntimePreparedAgentCache() {
   preparedAgentRuntimeCache.clear();
   hybridStoreCache.clear();
+}
+
+const SCALAR_AGENT_CONFIG_FINGERPRINT_FIELDS = [
+  "apiSource",
+  "customProviderUrl",
+  "model",
+  "name",
+  "prompt",
+  "provider",
+  "revision",
+  "updatedAt",
+  "version",
+] as const;
+
+const TOOL_LIST_FINGERPRINT_FIELDS = ["toolNames", "tools"] as const;
+
+function extractFingerprintToolNames(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  for (const value of raw) {
+    const rawName =
+      typeof value === "string"
+        ? value
+        : value && typeof value === "object" && !Array.isArray(value)
+          ? typeof (value as Record<string, unknown>).name === "string"
+            ? ((value as Record<string, unknown>).name as string)
+            : (value as Record<string, unknown>).function &&
+                typeof (value as Record<string, unknown>).function === "object" &&
+                !Array.isArray((value as Record<string, unknown>).function) &&
+                typeof (
+                  (value as Record<string, unknown>).function as Record<string, unknown>
+                ).name === "string"
+              ? (
+                  (
+                    (value as Record<string, unknown>).function as Record<
+                      string,
+                      unknown
+                    >
+                  ).name as string
+                )
+              : ""
+          : "";
+    const trimmed = rawName.trim();
+    if (trimmed) seen.add(trimmed);
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Compute a deterministic, credential-free fingerprint from whitelisted Agent
+ * scalar fields, extracted tool names, and normalized skill policy. Never
+ * reads or serializes nested objects, apiKey, token, headers, secret, or the
+ * unfiltered rawRecord.
+ */
+export function buildLocalAgentConfigFingerprint(
+  source: (AgentSkillConfigSource & Record<string, unknown>) | null | undefined,
+): string {
+  const record = source && typeof source === "object" ? source : null;
+  const payload: Record<string, unknown> = {
+    skillPolicy: Object.entries(resolveAgentSkillConfig(record)).sort(([a], [b]) =>
+      a.localeCompare(b),
+    ),
+  };
+  if (record) {
+    for (const field of SCALAR_AGENT_CONFIG_FINGERPRINT_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(record, field)) continue;
+      const value = record[field];
+      if (
+        typeof value === "string" ||
+        (typeof value === "number" && Number.isFinite(value)) ||
+        typeof value === "boolean"
+      ) {
+        payload[field] = value;
+      }
+    }
+    for (const field of TOOL_LIST_FINGERPRINT_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(record, field)) continue;
+      const names = extractFingerprintToolNames(record[field]);
+      if (names !== undefined) {
+        payload[field] = names;
+      }
+    }
+  }
+  const ordered: Record<string, unknown> = {};
+  for (const key of Object.keys(payload).sort((a, b) => a.localeCompare(b))) {
+    ordered[key] = payload[key];
+  }
+  return JSON.stringify(ordered);
 }
 
 export async function defaultLocalRuntimeDb(): Promise<CliLocalRuntimeDb> {

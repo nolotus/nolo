@@ -2,8 +2,9 @@ import {
   DIALOG_CHECKED,
   DIALOG_UNCHECKED,
   renderDialogError,
+  renderDialogHeaderLine,
   renderDialogRow,
-  renderDialogTitle,
+  renderDialogRule,
   renderOverflowAbove,
   renderOverflowBelow,
 } from "./dialogFrame";
@@ -61,6 +62,10 @@ export type MultiSelectDialogResult<TValue> =
   | { kind: "submitted"; values: TValue[] }
   | { kind: "cancelled" };
 
+function resolveMultiSelectKeyHint(): string {
+  return t("dialogMultiSelectHint").replace(/^[（(]|[)）]$/g, "");
+}
+
 export function renderMultiSelectFrame<TValue>(args: {
   items: MultiSelectDialogItem<TValue>[];
   cursor: number;
@@ -68,6 +73,8 @@ export function renderMultiSelectFrame<TValue>(args: {
   title?: string;
   maxVisible?: number;
   error?: string;
+  width?: number;
+  bottomAnchored?: boolean;
 }): string {
   const total = args.items.length;
   const window = computeVisibleWindow({
@@ -75,11 +82,16 @@ export function renderMultiSelectFrame<TValue>(args: {
     total,
     maxVisible: args.maxVisible,
   });
+  const titleText =
+    args.title ??
+    `${t("dialogMultiSelectLabel")}  ${args.selectedValues.length}/${total} ${t("dialogMultiSelectSelected")}`;
   const lines = [
-    renderDialogTitle(
-      args.title ??
-        `${t("dialogMultiSelectLabel")}  ${t("dialogMultiSelectHint")}  ${args.selectedValues.length}/${total} ${t("dialogMultiSelectSelected")}`,
-    ),
+    renderDialogRule(args.width),
+    renderDialogHeaderLine({
+      title: titleText,
+      hint: resolveMultiSelectKeyHint(),
+      width: args.width,
+    }),
     "",
   ];
   if (window.start > 0) {
@@ -103,6 +115,9 @@ export function renderMultiSelectFrame<TValue>(args: {
   }
   if (args.error) {
     lines.push(renderDialogError(args.error));
+  }
+  if (!args.bottomAnchored) {
+    lines.push(renderDialogRule(args.width));
   }
   return lines.join("\n");
 }
@@ -153,6 +168,11 @@ export async function runMultiSelectDialog<TValue>(args: {
       typeof args.bottomRow === "function" ? args.bottomRow() : args.bottomRow ?? 0,
     );
 
+  const resolveFrameWidth = () => {
+    const cols = (output as { columns?: number }).columns;
+    return typeof cols === "number" && cols > 0 ? cols : 80;
+  };
+
   const painter = createDialogFramePainter({
     output,
     render: () =>
@@ -163,6 +183,8 @@ export async function runMultiSelectDialog<TValue>(args: {
         title: args.title,
         maxVisible: args.maxVisible,
         ...(error ? { error } : {}),
+        width: resolveFrameWidth(),
+        bottomAnchored,
       }),
     bottomAnchored,
     resolveBottomRow,

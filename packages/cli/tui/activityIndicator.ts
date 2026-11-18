@@ -1,5 +1,5 @@
 /**
- * TUI 活动行状态机（docked composer 上方的 "∿ label (Ns) · Esc to stop" 行）。
+ * TUI 活动行状态机（docked composer 上方的 "⠋ label · Esc to stop  0:03" 行）。
  *
  * 从 readlineWorkspace.ts 抽出，目的是把「显式活动标签 + 静默看门狗 fallback」
  * 的状态变迁变成可单测的纯逻辑。readlineWorkspace 只负责把它接到
@@ -19,6 +19,7 @@
  */
 
 import {
+  formatCompactClock,
   PROC_LINGER_FAILURE_MS,
   PROC_LINGER_SUCCESS_MS,
   type RunZoneLayout,
@@ -28,7 +29,9 @@ import { resolveCliColorEnabled } from "../client/terminalStyles";
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import { createRunDock, type RunDock } from "./runDock";
 import { getProcessRegistry, type ProcessRegistry } from "../../agent-runtime/processRegistry";
-import { t } from "./i18n";
+import { getCliLocale, t } from "./i18n";
+import { fitAnsiLine, visibleWidth } from "./tuiAnsi";
+import { resolveHistoryLayoutGeometry } from "./tuiLayout";
 import { themeText } from "./theme";
 
 // Braille spinner：10 帧一轮。10 帧在 narrow / wide 两种宽度约定下都被
@@ -56,6 +59,26 @@ function isSamePhase(prev: string, next: string): boolean {
   if (isThinkingLabel(prev) && isThinkingLabel(next)) return true;
   if (isRetryLabel(prev) && isRetryLabel(next)) return true;
   return false;
+}
+
+/**
+ * 渲染层归一化：把上游 runtime 传入的英文活动词（如 `<agent> -> working locally`、
+ * `working`、`thinking...`）转为符合当前 `getCliLocale()` 的干净短词，消除中英混杂。
+ * 不改动 `getView()` 原始值，也不匹配 `Run inspect -> working directory` 等带后缀路径标签。
+ */
+function normalizeActivityLabel(rawLabel: string): string {
+  const trimmed = rawLabel.trim();
+  if (
+    /^(?:.+?\s*->\s*)?working(?:\s+locally)?$/i.test(trimmed) ||
+    /^thinking(?:\.\.\.|…)?$/i.test(trimmed)
+  ) {
+    return t("activityThinking");
+  }
+  const thinkingPreview = trimmed.match(/^thinking:\s*(.+)$/i);
+  if (thinkingPreview && getCliLocale() === "zh") {
+    return t("thinkingActivePreview", thinkingPreview[1]!);
+  }
+  return rawLabel;
 }
 
 export type ActivityIndicatorView = {
@@ -298,30 +321,70 @@ export function createActivityIndicator(
   ): string[] | null => {
     const lines: string[] = [];
     const rawView = getView();
-    const baseView = rawView ? { ...rawView, label: rawView.label.replace(/^.+? -> (working locally)(?=\s|$)/, "$1") } : null;
-    if (baseView && stopping) {
+    const hLayout =
+      typeof layout?.columns === "number" && Number.isFinite(layout.columns) && layout.columns > 0
+        ? resolveHistoryLayoutGeometry(layout.columns)
+        : null;
+    const leftPad = hLayout && hLayout.marginLeft > 0 ? " ".repeat(hLayout.marginLeft) : "";
+    const contentWidth = hLayout?.contentWidth;
+
+    if (rawView && stopping) {
       // 停止中只显示停止文案本身：它已经告诉用户「再按一次 Esc 强制停止」，
-      // 再拼 `(0s) · Esc 停止回复` 就是两句互相矛盾的提示。
-      lines.push(
-        colorEnabled
-          ? themeText(baseView.frame, "accent") + " " + themeText(baseView.label, "muted")
-          : `${baseView.frame} ${baseView.label}`,
-      );
-    } else if (baseView) {
-      const elapsed = Math.max(0, baseView.elapsedSec);
-      const elapsedStr = `${elapsed}s`;
-      const stopHint = t("stopHint");
-      if (!colorEnabled) {
-        lines.push(`${baseView.frame} (${elapsedStr}) ${baseView.label} · ${stopHint}`);
-      } else {
-        lines.push(
-          themeText(baseView.frame, "accent") +
-            " " +
-            themeText(`(${elapsedStr}) `, "chrome") +
-            themeText(baseView.label, "muted") +
-            themeText(` · ${stopHint}`, "chrome")
-        );
+      // 再拼 `· Esc 停止回复  0:00` 就是两句互相矛盾的提示。
+      let stopLabel = rawView.label;
+      if (contentWidth !== undefined) {
+        const prefixWidth = visibleWidth(`${rawView.frame} `);
+        const roomForLabel = Math.max(1, contentWidth - prefixWidth);
+        if (visibleWidth(stopLabel) > roomForLabel) {
+          stopLabel = fitAnsiLine(stopLabel, roomForLabel);
+        }
       }
+      const lineBody = colorEnabled
+        ? `${themeText(rawView.frame, "accent")} ${themeText(stopLabel, "muted")}`
+        : `${rawView.frame} ${stopLabel}`;
+      lines.push(
+        `${leftPad}${contentWidth !== undefined && visibleWidth(lineBody) > contentWidth ? fitAnsiLine(lineBody, contentWidth) : lineBody}`,
+      );
+    } else if (rawView) {
+      let label = normalizeActivityLabel(rawView.label);
+      const clockStr = formatCompactClock(Math.max(0, rawView.elapsedSec) * 1000);
+      const stopHint = t("stopHint");
+      let showStopHint = true;
+
+      if (contentWidth !== undefined) {
+        const framePrefixWidth = visibleWidth(`${rawView.frame} `);
+        const clockSuffixWidth = visibleWidth(`  ${clockStr}`);
+        const stopSuffixWidth = visibleWidth(` · ${stopHint}`);
+        const fullWidth =
+          framePrefixWidth + visibleWidth(label) + stopSuffixWidth + clockSuffixWidth;
+        if (fullWidth > contentWidth) {
+          const roomWithStop =
+            contentWidth - framePrefixWidth - stopSuffixWidth - clockSuffixWidth;
+          // 窄屏优先保状态词与尾部计时；仅当停止提示不会把状态词挤到过短时才保留停止提示。
+          if (roomWithStop >= Math.min(visibleWidth(label), 12)) {
+            if (visibleWidth(label) > roomWithStop) {
+              label = fitAnsiLine(label, Math.max(1, roomWithStop));
+            }
+          } else {
+            showStopHint = false;
+            const roomWithoutStop = contentWidth - framePrefixWidth - clockSuffixWidth;
+            if (roomWithoutStop > 0 && visibleWidth(label) > roomWithoutStop) {
+              label = fitAnsiLine(label, Math.max(1, roomWithoutStop));
+            }
+          }
+        }
+      }
+
+      const lineBody = !colorEnabled
+        ? `${rawView.frame} ${label}${showStopHint ? ` · ${stopHint}` : ""}  ${clockStr}`
+        : themeText(rawView.frame, "accent") +
+          " " +
+          themeText(label, "muted") +
+          (showStopHint ? themeText(` · ${stopHint}`, "chrome") : "") +
+          themeText(`  ${clockStr}`, "chrome");
+      lines.push(
+        `${leftPad}${contentWidth !== undefined && visibleWidth(lineBody) > contentWidth ? fitAnsiLine(lineBody, contentWidth) : lineBody}`,
+      );
     }
 
     // Legacy callers can request a combined panel; workspace uses getTaskLines at screen top.

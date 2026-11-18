@@ -381,9 +381,71 @@ export function buildServerPlatformToolExecutors(args: {
     tags?: string[];
     provenance?: string;
     sourceKind?: string;
+    topicKey?: string;
+    scope?: string;
+    subjectType?: string;
+    subjectId?: string;
   }): Promise<boolean> => {
     const ctx = await localMemoryContext();
     if (!ctx) return false;
+    if (input.topicKey) {
+      const { normalizeTopicKey, rememberExplicitVNext } = await import(
+        "../../ai/memory/vnext/rememberExplicit"
+      );
+      const topicKey = normalizeTopicKey(input.topicKey);
+      if (topicKey) {
+        const now = input.createdAt || new Date().toISOString();
+        const kind = (["episodic", "semantic", "procedural"].includes(input.kind)
+          ? input.kind
+          : "episodic") as "episodic" | "semantic" | "procedural";
+        const validSubjectTypes = ["user", "agent", "space", "project", "system"] as const;
+        type SubjectType = (typeof validSubjectTypes)[number];
+        const hasValidSubject =
+          typeof input.subjectType === "string" &&
+          (validSubjectTypes as readonly string[]).includes(input.subjectType) &&
+          typeof input.subjectId === "string" &&
+          input.subjectId.trim().length > 0;
+        const trimmedAgentKey = args.agentKey?.trim() || "";
+        const useAgentSubject = (input.scope ?? "auto") === "auto" && Boolean(trimmedAgentKey);
+        const subjectType: SubjectType = hasValidSubject
+          ? (input.subjectType as SubjectType)
+          : useAgentSubject
+            ? "agent"
+            : "user";
+        const subjectId = hasValidSubject
+          ? input.subjectId!.trim()
+          : useAgentSubject
+            ? trimmedAgentKey
+            : ctx.userId;
+        await rememberExplicitVNext(ctx.db, {
+          id: "",
+          ownerType: "user",
+          ownerId: ctx.userId,
+          visibility: "private",
+          subjectType,
+          subjectId,
+          kind,
+          content: input.content,
+          createdAt: now,
+          lastActivatedAt: now,
+          activationCount: 0,
+          importance: kind === "procedural" ? 0.88 : 0.82,
+          confidence: input.confidence,
+          ...(input.tags?.length ? { tags: input.tags } : {}),
+          ...(input.provenance === "verified" || input.provenance === "stated" || input.provenance === "inferred"
+            ? { provenance: input.provenance }
+            : {}),
+          ...(input.sourceKind === "explicit-user-directive" ||
+          input.sourceKind === "agent-tool" ||
+          input.sourceKind === "inferred-understanding" ||
+          input.sourceKind === "dialog-learning"
+            ? { sourceKind: input.sourceKind }
+            : {}),
+          topicKey,
+        });
+        return true;
+      }
+    }
     const [{ putMemoryEntityVNext, putMemoryStateVNext, putMemoryEvidenceVNext }, { buildLegacyMemoryEvidence }] =
       await Promise.all([
         import("../../ai/memory/vnext/store"),
@@ -661,6 +723,24 @@ export function buildServerPlatformToolExecutors(args: {
     if (typeof parsed.recurrenceEvidence === "string" && parsed.recurrenceEvidence.trim()) {
       body.recurrenceEvidence = parsed.recurrenceEvidence.trim();
     }
+    if (parsed.topicKey !== undefined && parsed.topicKey !== null) {
+      if (typeof parsed.topicKey !== "string") {
+        return {
+          content: JSON.stringify({ error: "rememberMemory: topicKey must be a string" }),
+          metadata: { serverPlatformTool: true, memoryWrite: false },
+        };
+      }
+      const { normalizeTopicKey } = await import("../../ai/memory/vnext/rememberExplicit");
+      try {
+        const normalizedTopicKey = normalizeTopicKey(parsed.topicKey);
+        if (normalizedTopicKey) body.topicKey = normalizedTopicKey;
+      } catch (err: any) {
+        return {
+          content: JSON.stringify({ error: err?.message ?? "invalid topicKey" }),
+          metadata: { serverPlatformTool: true, memoryWrite: false },
+        };
+      }
+    }
     if (args.agentKey) body.agentKey = args.agentKey;
     const raw = await postServer("/api/memory/remember", body, {
       retryTransient: true,
@@ -688,6 +768,21 @@ export function buildServerPlatformToolExecutors(args: {
         /* 非 JSON 响应：退回请求参数（旧行为） */
       }
       const saved = Array.isArray(serverResult?.savedItems) ? serverResult.savedItems[0] : null;
+      const resolvedTopicKey =
+        typeof saved?.topicKey === "string"
+          ? saved.topicKey
+          : typeof body.topicKey === "string"
+            ? body.topicKey
+            : undefined;
+      const validSubjectTypes = ["user", "agent", "space", "project", "system"];
+      const savedSubjectType =
+        typeof saved?.subjectType === "string" && validSubjectTypes.includes(saved.subjectType)
+          ? saved.subjectType
+          : undefined;
+      const savedSubjectId =
+        typeof saved?.subjectId === "string" && saved.subjectId.trim()
+          ? saved.subjectId.trim()
+          : undefined;
       localSaved = await writeLocalMemory({
         content: typeof saved?.content === "string" && saved.content.trim() ? saved.content : content,
         kind: String(saved?.kind ?? serverResult?.savedKind ?? body.kind ?? "episodic"),
@@ -699,6 +794,11 @@ export function buildServerPlatformToolExecutors(args: {
         provenance: typeof saved?.provenance === "string" ? saved.provenance : undefined,
         sourceKind: typeof saved?.sourceKind === "string" ? saved.sourceKind : undefined,
         tags: Array.isArray(saved?.tags) ? saved.tags.map(String) : undefined,
+        scope: typeof body.scope === "string" ? body.scope : "auto",
+        ...(savedSubjectType && savedSubjectId
+          ? { subjectType: savedSubjectType, subjectId: savedSubjectId }
+          : {}),
+        ...(resolvedTopicKey ? { topicKey: resolvedTopicKey } : {}),
       });
     } catch {
       /* 本地写入失败不影响远程结果 */

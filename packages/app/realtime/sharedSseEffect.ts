@@ -74,6 +74,10 @@ export class SseBroadcast extends Context.Service<SseBroadcast, {
   }>;
 }>()("SseBroadcast") {}
 
+export class SseWakeSignal extends Context.Service<SseWakeSignal, {
+  readonly awaitNextWake: () => Effect.Effect<void>;
+}>()("SseWakeSignal") {}
+
 // ── Errors ──────────────────────────────────────────────────────────────────
 
 export class SseStreamError extends Data.TaggedError("SseStreamError")<{
@@ -84,6 +88,149 @@ export class SseStreamError extends Data.TaggedError("SseStreamError")<{
 }> {}
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
+
+export const MAX_SSE_LINE_BUFFER_CHARS = 4 * 1024 * 1024;
+
+export type SharedSseParseResult = {
+  events: SseEvent[];
+  lastEventId: string | null;
+};
+
+export type SharedSseStreamParser = {
+  push: (chunk: string) => SharedSseParseResult;
+  flush: () => SharedSseParseResult;
+};
+
+/**
+ * 创建带跨 chunk 行缓冲与帧级原子游标对齐的流式 SSE 解析器：
+ * - 未遇 `\n` 的半截行保留在 `lineBuffer` 等待下一 chunk 拼接；
+ * - 支持 `\r\n` 与同帧多行 `data:` 拼接；
+ * - `id:` 行的 `eventId` 暂存为 `pendingEventId`，仅当同帧 `data:` 成功解析出有效事件
+ *   （或空行帧边界到达且无未解析 `data:`）时才提交到返回的 `lastEventId`；
+ * - EOF `flush()` 仅丢弃并重置未遇空行帧终止符的残余状态，绝不派发未闭合截断帧；
+ * - 为 `lineBuffer` 设上限（默认 4MiB chars）防异常无换行流无限增长。
+ */
+export function createSharedSseStreamParser(
+  maxLineBufferChars: number = MAX_SSE_LINE_BUFFER_CHARS
+): SharedSseStreamParser {
+  let lineBuffer = "";
+  let pendingEventId: string | null = null;
+  let dataLines: string[] = [];
+  let droppingOverlongLine = false;
+
+  const dispatchFrame = (events: SseEvent[]): string | null => {
+    if (dataLines.length === 0) {
+      if (pendingEventId !== null) {
+        const committed = pendingEventId;
+        pendingEventId = null;
+        return committed;
+      }
+      return null;
+    }
+
+    const payload = dataLines.join("\n").trim();
+    dataLines = [];
+    const framePendingId = pendingEventId;
+    pendingEventId = null;
+
+    if (!payload) {
+      return framePendingId;
+    }
+
+    try {
+      const event = JSON.parse(payload);
+      if (event && typeof event.type === "string") {
+        events.push(event);
+        return typeof event._eventId === "string"
+          ? event._eventId
+          : framePendingId;
+      }
+    } catch {
+      // Malformed JSON frame: drop without advancing cursor.
+    }
+    return null;
+  };
+
+  const processLine = (
+    rawLine: string,
+    events: SseEvent[],
+    currentLastId: string | null
+  ): string | null => {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    const trimmed = line.trim();
+    if (trimmed === "") {
+      const committed = dispatchFrame(events);
+      return committed ?? currentLastId;
+    }
+    if (trimmed.startsWith(":")) {
+      return currentLastId;
+    }
+    if (trimmed.startsWith("id:")) {
+      const id = trimmed.slice(3).trim();
+      if (id) pendingEventId = id;
+      return currentLastId;
+    }
+    if (trimmed.startsWith("data:")) {
+      const colonIdx = line.indexOf("data:") + 5;
+      const rawValue = line.slice(colonIdx);
+      const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+      dataLines.push(value);
+      return currentLastId;
+    }
+    return currentLastId;
+  };
+
+  return {
+    push(chunk: string): SharedSseParseResult {
+      const events: SseEvent[] = [];
+      let lastEventId: string | null = null;
+      if (!chunk) return { events, lastEventId };
+
+      let input = chunk;
+      if (droppingOverlongLine) {
+        const nl = input.indexOf("\n");
+        if (nl === -1) return { events, lastEventId };
+        droppingOverlongLine = false;
+        input = input.slice(nl + 1);
+        if (!input) return { events, lastEventId };
+      }
+
+      lineBuffer += input;
+      let start = 0;
+      while (true) {
+        const nl = lineBuffer.indexOf("\n", start);
+        if (nl === -1) break;
+        const line = lineBuffer.slice(start, nl);
+        start = nl + 1;
+        if (line.length > maxLineBufferChars) {
+          pendingEventId = null;
+          dataLines = [];
+          continue;
+        }
+        lastEventId = processLine(line, events, lastEventId);
+      }
+
+      lineBuffer = lineBuffer.slice(start);
+      if (lineBuffer.length > maxLineBufferChars) {
+        lineBuffer = "";
+        pendingEventId = null;
+        dataLines = [];
+        droppingOverlongLine = true;
+      }
+
+      return { events, lastEventId };
+    },
+    flush(): SharedSseParseResult {
+      // EOF 时任何未收到空行帧终止符（\n\n / \r\n\r\n）的残余缓冲都属于传输途中截断的半帧：
+      // 直接丢弃并重置内部状态，绝不派发事件或提前推进 Last-Event-ID。
+      lineBuffer = "";
+      pendingEventId = null;
+      dataLines = [];
+      droppingOverlongLine = false;
+      return { events: [], lastEventId: null };
+    },
+  };
+}
 
 /**
  * 解析一个 SSE chunk，返回解析出的事件与最后见到的 event id。
@@ -181,16 +328,30 @@ const readSseOnce = (
       }
     );
 
+    const parser = createSharedSseStreamParser();
+    const emitParsed = (parsed: SharedSseParseResult) =>
+      Effect.gen(function* () {
+        if (parsed.lastEventId) yield* cursor.set(parsed.lastEventId);
+        for (const event of parsed.events) {
+          args.onEvent(event);
+          publish({ type: "event", event });
+        }
+      });
+
     const readLoop = Effect.gen(function* () {
       while (true) {
         const { done, value } = yield* abortableRead;
-        if (done) return;
+        if (done) {
+          const tail = decoder.decode();
+          if (tail) {
+            yield* emitParsed(parser.push(tail));
+          }
+          yield* emitParsed(parser.flush());
+          return;
+        }
         const chunk = decoder.decode(value, { stream: true });
-        const { events, lastEventId: chunkLastId } = parseSseChunk(chunk);
-        if (chunkLastId) yield* cursor.set(chunkLastId);
-        for (const event of events) {
-          args.onEvent(event);
-          publish({ type: "event", event });
+        if (chunk) {
+          yield* emitParsed(parser.push(chunk));
         }
       }
     });
@@ -234,9 +395,20 @@ export const readSseLoop = (
 ): Effect.Effect<"terminal" | "stream-ended", never, SseClock | SseTransport> =>
   Effect.gen(function* () {
     const clock = yield* SseClock;
+    const wakeSignalOption = yield* Effect.serviceOption(SseWakeSignal);
     const cursorService: Context.Service.Shape<typeof SseCursor> = {
       get: () => Ref.get(cursorRef),
       set: (id: string) => Ref.set(cursorRef, id),
+    };
+
+    const sleepOrWake = (ms: number): Effect.Effect<"timeout" | "woken"> => {
+      if (Option.isNone(wakeSignalOption)) {
+        return clock.sleep(ms).pipe(Effect.as("timeout" as const));
+      }
+      return Effect.race(
+        clock.sleep(ms).pipe(Effect.as("timeout" as const)),
+        wakeSignalOption.value.awaitNextWake().pipe(Effect.as("woken" as const))
+      );
     };
 
     let retryDelay = RETRY_INITIAL_MS;
@@ -252,7 +424,8 @@ export const readSseLoop = (
           // 读流错误触发重连时，下次重连都按初始退避，不沿用已增长的 backoff。
           // 非 2xx（503 等）不会进入 connected，仍走 Retry-After 增长路径。
           if (outcome.success.connected) retryDelay = RETRY_INITIAL_MS;
-          yield* clock.sleep(retryDelay);
+          const sleepOutcome = yield* sleepOrWake(retryDelay);
+          if (sleepOutcome === "woken") retryDelay = RETRY_INITIAL_MS;
           continue;
         }
         const error = outcome.failure;
@@ -266,8 +439,11 @@ export const readSseLoop = (
         // backoff。非 2xx 失败（error.connected 未设/false）仍走 Retry-After 增长。
         if (error.connected) retryDelay = RETRY_INITIAL_MS;
         const retryAfterMs = resolveRetryAfterMs(cause.headers ?? null, retryDelay);
-        yield* clock.sleep(retryAfterMs);
-        retryDelay = Math.min(retryAfterMs * 2, RETRY_MAX_MS);
+        const sleepOutcome = yield* sleepOrWake(retryAfterMs);
+        retryDelay =
+          sleepOutcome === "woken"
+            ? RETRY_INITIAL_MS
+            : Math.min(retryAfterMs * 2, RETRY_MAX_MS);
       }
     });
 
@@ -466,4 +642,53 @@ export const SseBroadcastDirect = Layer.succeed(SseBroadcast, {
       post: () => {},
       close: () => {},
     })),
+});
+
+/** 生产唤醒信号：监听 window "online" 与 document "visibilitychange" -> "visible"。
+ * 无 DOM 环境（Node/Bun/RN）下安全 no-op；fiber 退出或超时中断时自动清理监听器零泄漏。 */
+export const SseWakeSignalLive = Layer.succeed(SseWakeSignal, {
+  awaitNextWake: () =>
+    Effect.callback<void>((resume) => {
+      const win =
+        typeof window !== "undefined" &&
+        typeof window.addEventListener === "function" &&
+        typeof window.removeEventListener === "function"
+          ? window
+          : undefined;
+      const doc =
+        typeof document !== "undefined" &&
+        typeof document.addEventListener === "function" &&
+        typeof document.removeEventListener === "function"
+          ? document
+          : undefined;
+
+      if (!win && !doc) {
+        return Effect.sync(() => {});
+      }
+
+      let settled = false;
+      const cleanup = () => {
+        if (win) win.removeEventListener("online", onOnline);
+        if (doc) doc.removeEventListener("visibilitychange", onVisibilityChange);
+      };
+      const wake = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resume(Effect.void);
+      };
+      const onOnline = () => {
+        wake();
+      };
+      const onVisibilityChange = () => {
+        if (doc?.visibilityState === "visible") {
+          wake();
+        }
+      };
+
+      if (win) win.addEventListener("online", onOnline);
+      if (doc) doc.addEventListener("visibilitychange", onVisibilityChange);
+
+      return Effect.sync(cleanup);
+    }),
 });

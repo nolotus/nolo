@@ -9,7 +9,6 @@ import { createTuiSummaryLlmCaller } from "./tuiSummaryLlmCaller";
 import { getLocalShellLifecycle } from "../../agent-runtime/localToolPolicy";
 import { resolveBuiltinSkillEntry } from "../../ai/skills/builtinSkillRegistry";
 import { buildAccountAutoReviewAuthorizationBlock } from "../../ai/skills/autoReviewSkill";
-import { resolveAgentSkillConfig, type AgentSkillConfigSource } from "../../ai/tools/agentSkillConfig";
 import { extractQuotaSnapshot } from "../../ai/agent/quotaSnapshot";
 import { resolveUserSkillRuntime } from "../../ai/skills/userSkillRuntime";
 import {
@@ -304,6 +303,8 @@ import {
 } from "../../agent-runtime/codexResponsesProvider";
 import { readOAuthCredential } from "../../agent-runtime/oauthTokenStore";
 import { getDefaultCliLocalRuntimeDb } from "../localRuntimeDb";
+import { applyBuiltinAgentRuntimeOverride } from "../../agent-runtime/builtinPlatformAgentConfigs";
+import { applyPublicAgentCatalogOverride } from "../../agent-runtime/publicAgentCatalogOverride";
 import { resolveAgentRuntimeConfigFromRecord } from "./agentConfigResolver";
 import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
 import {
@@ -476,6 +477,7 @@ const { cliDir: CLI_DIR, cliEntrypoint: CLI_ENTRYPOINT } = resolveLocalRuntimePa
 export {
   normalizeRuntimeCacheCwd,
   buildPreparedAgentCacheKey,
+  buildLocalAgentConfigFingerprint,
   clearCliLocalRuntimePreparedAgentCache,
   defaultLocalRuntimeDb,
   createFallbackId,
@@ -489,6 +491,7 @@ export {
 import {
   normalizeRuntimeCacheCwd,
   buildPreparedAgentCacheKey,
+  buildLocalAgentConfigFingerprint,
   defaultLocalRuntimeDb,
   createFallbackId,
   logLocalRuntimeDiagnostic,
@@ -1344,10 +1347,6 @@ export function createCliLocalRuntimeAdapter(
   let runtimeToolExecutionLimits: ReturnType<
     typeof resolveLocalWorkspaceExecutorOptionsFromPolicy
   > = {};
-  // Only the policy fingerprint participates here: no credentials or whole-record
-  // serialization, and equivalent key ordering must preserve prepared identity.
-  const skillPolicyFingerprint = (source: AgentSkillConfigSource | null | undefined) =>
-    JSON.stringify(Object.entries(resolveAgentSkillConfig(source)).sort(([a], [b]) => a.localeCompare(b)));
   // Executor closures belong to this adapter; only prepared metadata is shared.
   let reviewAgentConfig: any;
   // Shared with executor closures; provider resolution attests the effective model.
@@ -1656,9 +1655,24 @@ export function createCliLocalRuntimeAdapter(
         const localRecord = await sharedStore.read(cached.agentConfig.key, { remote: false }).catch(() => null);
         // No fresh record: preserve the prepared snapshot, but loadSkill's local
         // policy resolver fails closed. Never fall back to a remote stale record.
+        const effectiveLocalRecord =
+          localRecord && typeof localRecord === "object"
+            ? applyBuiltinAgentRuntimeOverride(
+                agentRef,
+                resolveAgentRuntimeConfigFromRecord(
+                  cached.agentConfig.key,
+                  applyPublicAgentCatalogOverride(
+                    localRecord as Record<string, unknown>,
+                    cached.agentConfig.key,
+                  ),
+                ),
+              ).rawRecord
+            : null;
         const unchanged = !localRecord || (
-          cached.localAgentSkillFingerprint !== undefined &&
-          cached.localAgentSkillFingerprint === skillPolicyFingerprint(localRecord)
+          cached.localAgentConfigFingerprint !== undefined &&
+          effectiveLocalRecord != null &&
+          cached.localAgentConfigFingerprint ===
+            buildLocalAgentConfigFingerprint(effectiveLocalRecord)
         );
         if (!unchanged) preparedAgentRuntimeCache.delete(cacheKey);
         if (unchanged) {
@@ -1797,7 +1811,9 @@ export function createCliLocalRuntimeAdapter(
       if (exposedAgentConfig && !deps.pastedTextStore) {
         preparedAgentRuntimeCache.set(cacheKey, {
           agentConfig: exposedAgentConfig,
-          localAgentSkillFingerprint: skillPolicyFingerprint(exposedAgentConfig.rawRecord),
+          localAgentConfigFingerprint: buildLocalAgentConfigFingerprint(
+            exposedAgentConfig.rawRecord,
+          ),
           activeAgentToolNames,
           runtimeToolExecutionLimits,
         });
@@ -1849,6 +1865,9 @@ export function createCliLocalRuntimeAdapter(
         sourceHash: input.sourceHash,
         sourceCount: input.sourceCount,
         schemaVersion: input.schemaVersion,
+        ...(input.sourceSegments !== undefined
+          ? { sourceSegments: input.sourceSegments }
+          : {}),
         referenceKeys: input.referenceKeys,
       }),
     loadLastContextUsage: async (dialogId) => {

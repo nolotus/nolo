@@ -7,14 +7,19 @@
   gap: var(--sidebar-gap-x, var(--space-2));
   padding: var(--space-1) var(--sidebar-row-pad, var(--space-2));
   border-radius: var(--radius-xs);
-  min-height: var(--sidebar-row-height, var(--sidebarItemHeight, var(--control-md)));
+  min-height: var(
+    --sidebar-row-height,
+    var(--sidebarItemHeight, var(--control-md))
+  );
   transition: background-color 0.15s ease;
   user-select: none;
   background-color: transparent;
   flex-shrink: 0;
 }
 
-.CategoryHeader:not(.CategoryHeader--selection-mode):hover:not(.CategoryHeader--editing) {
+.CategoryHeader:not(.CategoryHeader--selection-mode):hover:not(
+    .CategoryHeader--editing
+  ) {
   background-color: var(--backgroundHover);
 }
 
@@ -23,7 +28,8 @@
   background-color: var(--backgroundSelected);
 }
 
-.CategoryHeader__collapse-btn, .CategoryHeader__action-btn {
+.CategoryHeader__collapse-btn,
+.CategoryHeader__action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -33,7 +39,9 @@
   color: var(--textTertiary);
   cursor: pointer;
   border-radius: var(--radius-xs);
-  transition: background-color 0.1s ease, color 0.1s ease;
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease;
   flex-shrink: 0;
 }
 
@@ -48,7 +56,8 @@
   height: var(--control-xs);
 }
 
-.CategoryHeader__collapse-btn:hover, .CategoryHeader__action-btn:hover:not(:disabled) {
+.CategoryHeader__collapse-btn:hover,
+.CategoryHeader__action-btn:hover:not(:disabled) {
   color: var(--textSecondary);
   background-color: var(--backgroundTertiary);
 }
@@ -72,8 +81,12 @@
   padding: var(--space-1) 0;
 }
 
-.CategoryHeader__name.is-draggable { cursor: grab; }
-.CategoryHeader__name.is-draggable:active { cursor: grabbing; }
+.CategoryHeader__name.is-draggable {
+  cursor: grab;
+}
+.CategoryHeader__name.is-draggable:active {
+  cursor: grabbing;
+}
 
 .CategoryHeader__actions {
   display: flex;
@@ -81,7 +94,9 @@
   align-items: center;
   opacity: 0;
   transform: translateX(4px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 .CategoryHeader:hover .CategoryHeader__actions,
@@ -112,7 +127,7 @@
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-full);
   font-size: 11px;
   font-weight: 600;
   line-height: 18px;

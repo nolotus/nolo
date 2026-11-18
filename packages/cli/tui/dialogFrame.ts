@@ -1,5 +1,7 @@
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import { surfaceBackgroundSequence, themeColorSequence, themeText } from "./theme";
+import { boxGlyphs, fitAnsiLine, resolveBoxCharset, visibleWidth } from "./tuiAnsi";
+import { resolveSurfacePaintWidth } from "./tuiLayout";
 import { t } from "./i18n";
 
 /**
@@ -19,6 +21,22 @@ export const DIALOG_CURSOR = "❯";
 export const DIALOG_CHECKED = "◉";
 export const DIALOG_UNCHECKED = "○";
 
+const DEFAULT_DIALOG_WIDTH = 80;
+const HEADER_MIN_GAP = 2;
+
+export function renderDialogRule(
+  width = DEFAULT_DIALOG_WIDTH,
+  colorEnabled = resolveCliColorEnabled(),
+): string {
+  const safeCols =
+    Number.isFinite(width) && width > 0 ? Math.floor(width) : DEFAULT_DIALOG_WIDTH;
+  const paintWidth = resolveSurfacePaintWidth(safeCols);
+  if (paintWidth <= 0) return "";
+  const rule = boxGlyphs(resolveBoxCharset()).h.repeat(paintWidth);
+  if (!colorEnabled) return rule;
+  return `\x1b[2m${themeColorSequence("chrome")}${rule}\x1b[0m`;
+}
+
 export function renderDialogTitle(
   title: string,
   colorEnabled = resolveCliColorEnabled(),
@@ -27,6 +45,51 @@ export function renderDialogTitle(
   // Accent without bold: keeps dialog titles prominent without conflicting
   // with history user turns (which uniquely pair accent + bold + ┃ gutter).
   return `${themeColorSequence("accent")}${title}\x1b[0m`;
+}
+
+/**
+ * Render the dialog header row: accent title on the left and muted key hint
+ * right-aligned when `width` is known and both fit with breathing room.
+ * On narrow screens where both do not fit within `resolveSurfacePaintWidth`,
+ * the right hint is gracefully dropped and the title is truncated so the row
+ * never wraps across terminal lines.
+ */
+export function renderDialogHeaderLine(
+  args: {
+    title: string;
+    hint?: string;
+    width?: number;
+    colorEnabled?: boolean;
+  },
+  colorEnabledArg?: boolean,
+): string {
+  const colorEnabled =
+    args.colorEnabled ?? colorEnabledArg ?? resolveCliColorEnabled();
+  const hint = args.hint?.trim() ? args.hint.trim() : undefined;
+
+  if (args.width === undefined) {
+    if (!hint) return renderDialogTitle(args.title, colorEnabled);
+    return `${renderDialogTitle(args.title, colorEnabled)}  ${themeText(hint, "muted", colorEnabled)}`;
+  }
+
+  const safeCols =
+    Number.isFinite(args.width) && args.width > 0
+      ? Math.floor(args.width)
+      : DEFAULT_DIALOG_WIDTH;
+  const budget = resolveSurfacePaintWidth(safeCols);
+  if (budget <= 0) return "";
+
+  const titleWidth = visibleWidth(args.title);
+  const hintWidth = hint ? visibleWidth(hint) : 0;
+
+  if (hint && titleWidth + HEADER_MIN_GAP + hintWidth <= budget) {
+    const gap = " ".repeat(budget - titleWidth - hintWidth);
+    return `${renderDialogTitle(args.title, colorEnabled)}${gap}${themeText(hint, "muted", colorEnabled)}`;
+  }
+
+  const fittedTitle =
+    titleWidth > budget ? fitAnsiLine(args.title, budget, "…") : args.title;
+  return renderDialogTitle(fittedTitle, colorEnabled);
 }
 
 /**

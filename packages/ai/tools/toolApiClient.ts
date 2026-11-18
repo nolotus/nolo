@@ -13,6 +13,7 @@
  */
 
 import { compactWhitespace } from "core/compactWhitespace";
+import { splitDialogKeyIdentity } from "core/dialogKeyIdentity";
 import { isRecord } from "core/isRecord";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
@@ -64,6 +65,82 @@ const selectCurrentTokenFromState = (state: any): string | null => {
 
 const selectCurrentDialogKeyFromState = (_state: any): string | null =>
   getActiveDialogKey();
+
+const CONTROL_OR_WHITESPACE_RE = /[\u0000-\u001f\u007f\s]/;
+
+const hasSuppliedDialogValue = (value: unknown): boolean =>
+  value != null && (typeof value !== "string" || value.trim().length > 0);
+
+const normalizeToolDialogId = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null;
+  const trimmed = value.trim();
+  if (!trimmed || CONTROL_OR_WHITESPACE_RE.test(trimmed)) return null;
+  if (trimmed.includes("-msg-")) return null;
+  if (trimmed.startsWith("dialog-")) {
+    const identity = splitDialogKeyIdentity(trimmed);
+    const parsedId = identity?.dialogId?.trim();
+    if (
+      !parsedId ||
+      CONTROL_OR_WHITESPACE_RE.test(parsedId) ||
+      parsedId.includes("-msg-")
+    ) {
+      return null;
+    }
+    return parsedId;
+  }
+  return trimmed;
+};
+
+/**
+ * 解析本次工具请求的对话归属 id（纯 id，不带 `dialog-<userId>-` 前缀）：
+ * 1. `options.dialogId`（调用时刻显式绑定）
+ * 2. `options.dialogKey`
+ * 3. `thunkApi` 上下文已绑定的归属（`extra.dialogId` / `extra.dialogKey` / `dialogId` / `dialogKey` / `state.dialog.currentDialogKey`）
+ * 4. 回退 `getActiveDialogKey()`
+ */
+export const resolveToolDialogId = (
+  thunkApi: any,
+  options: Pick<CallToolApiOptions, "dialogId" | "dialogKey"> = {},
+): string | null => {
+  if (hasSuppliedDialogValue(options?.dialogId)) {
+    return normalizeToolDialogId(options.dialogId);
+  }
+
+  if (hasSuppliedDialogValue(options?.dialogKey)) {
+    return normalizeToolDialogId(options.dialogKey);
+  }
+
+  if (hasSuppliedDialogValue(thunkApi?.extra?.dialogId)) {
+    return normalizeToolDialogId(thunkApi.extra.dialogId);
+  }
+
+  if (hasSuppliedDialogValue(thunkApi?.extra?.dialogKey)) {
+    return normalizeToolDialogId(thunkApi.extra.dialogKey);
+  }
+
+  if (hasSuppliedDialogValue(thunkApi?.dialogId)) {
+    return normalizeToolDialogId(thunkApi.dialogId);
+  }
+
+  if (hasSuppliedDialogValue(thunkApi?.dialogKey)) {
+    return normalizeToolDialogId(thunkApi.dialogKey);
+  }
+
+  let state: any;
+  try {
+    state =
+      typeof thunkApi?.getState === "function" ? thunkApi.getState() : undefined;
+  } catch {
+    state = undefined;
+  }
+
+  if (hasSuppliedDialogValue(state?.dialog?.currentDialogKey)) {
+    return normalizeToolDialogId(state.dialog.currentDialogKey);
+  }
+
+  return normalizeToolDialogId(selectCurrentDialogKeyFromState(state));
+};
 
 export const resolveToolBaseUrl = (currentServer?: string | null): string => {
   const _window = (globalThis as any).window;
@@ -146,6 +223,15 @@ export interface CallToolApiOptions {
   withAuth?: boolean;
   /** 生产受控 devtool 路由需要知道是哪一个 agent 在调用。 */
   agentKey?: string | null;
+  /** 调用时刻绑定的对话 id（优先于当前 UI 活跃对话，防止后台切屏串台）。 */
+  dialogId?: string | null;
+  /** 调用时刻绑定的完整 dialogKey（`dialog-<userId>-<dialogId>`）。 */
+  dialogKey?: string | null;
+  /**
+   * 仅显式开启时向未携带 `dialogId` 的 POST JSON 对象请求体补齐 `dialogId`；
+   * 默认 false，避免污染无状态接口或破坏既有严格 body 契约。
+   */
+  injectDialogId?: boolean;
   method?: "POST" | "GET";
   /**
    * 可选取消信号：原样透传给 fetch 的 init。abort 后请求真正被取消
@@ -204,10 +290,30 @@ export const buildToolRequestHeaders = (
   if (agentKey && typeof agentKey === "string" && agentKey.trim()) {
     headers["X-Nolo-Agent-Key"] = agentKey.trim();
   }
+  const dialogId = resolveToolDialogId(thunkApi, options);
+  if (dialogId) {
+    headers["X-Nolo-Dialog-Id"] = dialogId;
+  }
   if (typeof window !== "undefined" && (window as any).__NOLO_DESKTOP__) {
     headers["X-Nolo-Desktop-Tool"] = "1";
   }
   return headers;
+};
+
+const buildToolRequestBody = (
+  thunkApi: any,
+  body: object,
+  options: CallToolApiOptions,
+): object => {
+  if (!options.injectDialogId) return body;
+  if (!isRecord(body)) return body;
+  if ("dialogId" in body) return body;
+  const dialogId = resolveToolDialogId(thunkApi, options);
+  if (!dialogId) return body;
+  return {
+    ...body,
+    dialogId,
+  };
 };
 
 const buildResponsePreview = (text: string): string =>
@@ -253,7 +359,7 @@ export async function callToolApi<T = any>(
     ...(options.signal ? { signal: options.signal } : {}),
     ...(method === "GET"
       ? {}
-      : { body: JSON.stringify(body) }),
+      : { body: JSON.stringify(buildToolRequestBody(thunkApi, body, options)) }),
   });
 
   const contentType = response.headers.get("content-type");

@@ -39,6 +39,7 @@ const families: Record<string, readonly [string, string, readonly string[], bool
   readFile: ["read", "读取", ["path"], true], read_file: ["read", "读取", ["path"], true], readWorkspaceFile: ["read", "读取", ["path"], true],
   writeFile: ["write", "写入", ["path"], false], editFile: ["edit", "修改", ["path"], false],
   globFiles: ["find", "查找文件", ["pattern", "path"], true], search: ["search", "搜索", ["query", "pattern"], true],
+  codeSearch: ["search", "搜索", ["query", "pattern"], true], exa_search: ["search", "搜索", ["query", "pattern"], true],
   grep: ["search", "搜索", ["pattern", "query"], true], loadSkill: ["skill", "加载技能", ["name", "slug"], true],
 };
 const shellTools = new Set(["execShell", "exec_shell", "runCommand", "launchProcess"]);

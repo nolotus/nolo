@@ -44,6 +44,9 @@ type GroupChar = {
   col: number;
   /** false = 被软换行吃掉的空白，不属于任何可见行 */
   visible: boolean;
+  /** 若字符位于 OSC 8 超链接区间内，则记录其目标 URL 与 span ID */
+  oscUrl: string | null;
+  oscSpanId: number;
 };
 
 type LogicalLineGroup = {
@@ -53,6 +56,8 @@ type LogicalLineGroup = {
   rowEnd: number;
 };
 
+// eslint-disable-next-line no-control-regex
+const OSC8_TOKEN_REGEX = /^\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\)$/;
 const URL_PATTERN = /https?:\/\/[^\s<>"'`\\\u0000-\u001f\u007f]+/gi;
 /**
  * 句末标点：ASCII 标点/引号与中文全角句末标点（。，、！？：；）无条件剥离。
@@ -131,11 +136,28 @@ function buildLogicalLineGroup(
 
   const chars: GroupChar[] = [];
   let text = "";
+  let activeOscUrl: string | null = null;
+  let activeOscSpanId = 0;
+  let nextOscSpanId = 1;
   for (let r = rowStart; r <= rowEnd; r += 1) {
     const row = rows[r]!;
     let col = 0;
     for (const token of tokenizeAnsiLine(row.rendered)) {
-      if (token.kind !== "char") continue;
+      if (token.kind === "sgr") {
+        const oscMatch = OSC8_TOKEN_REGEX.exec(token.value);
+        if (oscMatch) {
+          const oscTarget = oscMatch[1] ?? "";
+          if (oscTarget === "") {
+            activeOscUrl = null;
+            activeOscSpanId = 0;
+          } else if (activeOscUrl !== oscTarget) {
+            activeOscUrl = oscTarget;
+            activeOscSpanId = nextOscSpanId;
+            nextOscSpanId += 1;
+          }
+        }
+        continue;
+      }
       const charStartCol = col;
       col += token.width;
       // 与 selection 同一口径：行首 [0, prefixWidth) 是布局自带的 UI 前缀
@@ -148,6 +170,8 @@ function buildLogicalLineGroup(
         globalRow: r,
         col: charStartCol,
         visible: true,
+        oscUrl: activeOscUrl,
+        oscSpanId: activeOscSpanId,
       });
       text += token.value;
     }
@@ -159,6 +183,8 @@ function buildLogicalLineGroup(
           globalRow: r,
           col: -1,
           visible: false,
+          oscUrl: activeOscUrl,
+          oscSpanId: activeOscSpanId,
         });
         text += joinerChar;
       }
@@ -169,7 +195,8 @@ function buildLogicalLineGroup(
 }
 
 /**
- * 命中判定：屏幕行（全局行号）+ 行内 cell 列落在某个完整可见 http(s) URL 内时返回该 URL。
+ * 命中判定：屏幕行（全局行号）+ 行内 cell 列落在某个完整可见 http(s) URL
+ * （明文 URL 或 OSC 8 超链接区间）内时返回该 URL。
  * 任何不确定的情况（无字符、行链缺口、非法协议、超长）都返回 null。
  */
 export function findUrlAtRowColumn(
@@ -193,6 +220,37 @@ export function findUrlAtRowColumn(
     }
   }
   if (clickIndex < 0) return null;
+
+  // 优先检查 OSC 8 超链接区间（紧凑短链 `名称 ↗` 的 URL 隐藏在 OSC 8 序列中）。
+  const clickedChar = group.chars[clickIndex]!;
+  if (clickedChar.oscUrl !== null && clickedChar.oscSpanId > 0) {
+    if (clickedChar.oscUrl.length > MAX_URL_LENGTH) return null;
+    const url = normalizeHttpUrl(clickedChar.oscUrl);
+    if (url === null) return null;
+
+    let colStart = -1;
+    let colEnd = -1;
+    for (const char of group.chars) {
+      if (
+        !char.visible ||
+        char.globalRow !== globalRow ||
+        char.oscSpanId !== clickedChar.oscSpanId
+      ) {
+        continue;
+      }
+      colStart = colStart < 0 ? char.col : Math.min(colStart, char.col);
+      colEnd = Math.max(colEnd, char.col + char.width);
+    }
+    if (colStart < 0) return null;
+    return {
+      url,
+      globalRow,
+      colStart,
+      colEnd,
+      rowStart: group.rowStart,
+      rowEnd: group.rowEnd,
+    };
+  }
 
   URL_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;

@@ -566,6 +566,7 @@ export function buildSourceMapping(rawLine: string, styledLine: string, prefixCh
     lineToParse = rawLine.slice(contentStart);
   }
 
+  const visibleBody = stripAnsi(styledLine.slice(prefixCharCount));
   const INLINE_RE = /(\[([^\]]+)\]\(([^)\s]+)\)|`([^`]+)`|\*\*(.+?)\*\*|(?<!\*)\*([^*]+?)\*(?!\*)|~~([^~]+?)~~)/g;
   const mapping: number[] = [];
   let lastIdx = 0;
@@ -579,21 +580,47 @@ export function buildSourceMapping(rawLine: string, styledLine: string, prefixCh
 
     const fullMatch = match[0];
     if (match[2] !== undefined && match[3] !== undefined) {
-      // Link [text](url) -> visible "text (url)"
+      // Link [text](url) -> deterministically match against visibleBody at current cursor.
       const linkText = match[2];
       const linkUrl = match[3];
+      // eslint-disable-next-line no-control-regex
+      const cleanText = linkText.replace(/[\u0000-\u001f\u007f]/g, "");
+      // eslint-disable-next-line no-control-regex
+      const cleanUrl = linkUrl.replace(/[\u0000-\u001f\u007f]/g, "");
+      const cursor = mapping.length;
       const textOffset = contentStart + match.index + 1;
-      for (let c = 0; c < linkText.length; c++) {
+      for (let c = 0; c < cleanText.length; c++) {
         mapping.push(textOffset + c);
       }
-      const parenOffset = textOffset + linkText.length;
-      mapping.push(parenOffset);
-      mapping.push(parenOffset + 1);
-      const urlOffset = parenOffset + 2;
-      for (let c = 0; c < linkUrl.length; c++) {
-        mapping.push(urlOffset + c);
+
+      if (visibleBody.startsWith(`${cleanText} ↗`, cursor)) {
+        const closeParenOffset = contentStart + match.index + fullMatch.length - 1;
+        mapping.push(closeParenOffset);
+        mapping.push(closeParenOffset);
+      } else if (visibleBody.startsWith(`${cleanText} (${cleanUrl})`, cursor)) {
+        const parenOffset = textOffset + linkText.length;
+        mapping.push(parenOffset);
+        mapping.push(parenOffset + 1);
+        const urlOffset = parenOffset + 2;
+        for (let c = 0; c < cleanUrl.length; c++) {
+          mapping.push(urlOffset + c);
+        }
+        mapping.push(urlOffset + linkUrl.length);
+      } else if (
+        visibleBody.startsWith(cleanText, cursor) &&
+        cleanText.trim() === cleanUrl.trim()
+      ) {
+        // Same-as-URL form: only `cleanText` is visible.
+      } else if (linkText.trim() !== linkUrl.trim()) {
+        const parenOffset = textOffset + linkText.length;
+        mapping.push(parenOffset);
+        mapping.push(parenOffset + 1);
+        const urlOffset = parenOffset + 2;
+        for (let c = 0; c < linkUrl.length; c++) {
+          mapping.push(urlOffset + c);
+        }
+        mapping.push(urlOffset + linkUrl.length);
       }
-      mapping.push(urlOffset + linkUrl.length);
     } else if (match[4] !== undefined) {
       // `code` -> visible "code"
       const codeText = match[4];

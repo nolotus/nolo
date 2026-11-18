@@ -79,18 +79,18 @@ export function newlineHint(platform: string = process.platform): string {
  */
 const WELCOME_TIPS: Record<CliLocale, string[]> = {
   en: [
-    `Tip: ${newlineHint()} for a newline; /help lists all commands.`,
-    "Tip: drag an image file into the terminal — nolo sees it. A plain path works too.",
-    "Tip: /doc attach <doc> brings a doc into this conversation's context.",
-    "Tip: /theme switches colors; terminal mode follows your terminal's day/night.",
-    "Tip: /history resumes a recent dialog; /agents lists your agents.",
+    `${newlineHint()} for newline · /help for all commands`,
+    "Drag an image into terminal to send · /images to manage",
+    "/doc attach <doc> to attach doc context",
+    "/theme to switch colors · follows terminal light/dark",
+    "/history to resume dialog · /agents to list agents",
   ],
   zh: [
-    `提示：${newlineHint()} 换行；/help 列出全部命令。`,
-    "提示：把图片文件拖进终端最省事；也能直接输入图片路径。",
-    "提示：/doc attach <doc> 把文档挂进当前对话上下文。",
-    "提示：/theme 切换配色；日夜间跟随终端主题。",
-    "提示：/history 恢复最近对话；/agents 列出你的智能体。",
+    `${newlineHint()} 换行 · /help 查看全部命令`,
+    "拖入图片即可直发 · /images 管理待发图片",
+    "/doc attach <doc> 挂载文档上下文",
+    "/theme 切换配色 · 日夜间自动跟随终端",
+    "/history 恢复最近对话 · /agents 列出智能体",
   ],
 };
 

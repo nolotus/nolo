@@ -4,6 +4,7 @@ import { createRunWakeHandler, deliverChildCompletion } from "./runWakeDelivery"
 import { traceChildRunWake } from "./runWakeDiagnostics";
 import { createShellApprovalSession } from "./shellApprovalSession";
 import { createInterface } from "node:readline";
+import { basename } from "node:path";
 import { PassThrough } from "node:stream";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable } from "node:stream";
@@ -67,6 +68,7 @@ import {
   detectSubmittedImagePaths,
   mergeAttachedImages,
   popLastAttachedImage,
+  stripPastedImageTokensPreservingLayout,
 } from "./pasteImage";
 import { detectSubmittedMediaPaths } from "./mediaAttachment";
 import {
@@ -101,6 +103,12 @@ import {
   PASTE_TOKEN_PREFIX,
   type TuiState,
 } from "./session";
+import {
+  createInputHistoryState,
+  recordInputHistoryEntry,
+  resetInputHistoryNavigation,
+  seedInputHistoryFromTurns,
+} from "./sessionInput";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import { emitTerminalProgramStatus, type TerminalProgramStatusReport } from "../client/terminalProgramStatus";
 import { isAgentRunTerminalStatus } from "../../ai/tools/agent/agentRunDisplayHelpers";
@@ -116,6 +124,7 @@ import { detectTerminalBackground } from "./detectBackground";
 import {
   clearCollapsedPasteStore,
   createCollapsedPasteStore,
+  expandCollapsedPastes,
   releaseCollapsedPasteReferences,
   replaceCollapsedPastesWithReferences,
 } from "../../core/collapsedPaste";
@@ -247,6 +256,7 @@ import { openExternalUrl } from "./tuiUrlOpener";
 import { createRawKeyReader, runSelectDialog } from "./selectDialog";
 import { sanitizeImageLabel } from "./tuiImageLayout";
 import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
+import { isShellPassthroughInput } from "./sessionDispatch";
 import { viewLocalImage } from "./tuiImageActions";
 import { getDiagnostics } from "../diagnostics";
 // S4 迁移：渲染三件套（renderHistoryToOutput / paintSyncedFrame /
@@ -263,6 +273,7 @@ import { getTopReservedRows, resolveHistoryViewportHeight, resolveHistoryLayoutG
 // SlashDispatchHost）已迁至 ./tuiSlashRouter。依赖方向单向：
 // 本文件 → tuiSlashRouter；后者禁止回指本文件。
 import {
+  executeShellPassthroughCommand,
   runSubmittedSlashLine,
   type SlashDispatchHost,
 } from "./tuiSlashRouter";
@@ -535,6 +546,16 @@ export function isClipboardImageFallbackEligible(error: unknown): boolean {
   return isTextFallbackEligibleCode(code);
 }
 
+export function shouldRefreshCiStatusOnStartup(
+  env: Record<string, string | undefined>,
+): boolean {
+  if (env.NOLO_CLI_CI_STATUS === "0") return false;
+  return (
+    env.NOLO_CLI_CI_STATUS === "1" ||
+    Boolean(env.NOLO_CI_SSH_HOST?.trim() || env.NOLO_CI_RAW_HOST?.trim())
+  );
+}
+
 async function runTuiWorkspace(options: WorkspaceOptions) {
   const startupThemeMode = resolveTuiThemeMode(
     options.env ?? process.env,
@@ -549,11 +570,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   initCliLocale(runtimeEnv);
   await accountSessionRuntime.initialize();
   let state = createInitialTuiState(runtimeEnv);
-  // 启动预热 agent 目录缓存：/agent 打开即命中（SWR，后台失败静默）。
-  prefetchAgentCatalog({ env: options.env ?? process.env });
   const input = options.input ?? defaultInput;
   const output = options.output ?? defaultOutput;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const isStartupTestEnv =
+    (runtimeEnv.NODE_ENV ?? process.env.NODE_ENV) === "test" ||
+    (runtimeEnv.BUN_ENV ?? process.env.BUN_ENV) === "test";
+  // 启动预热 agent 目录缓存：/agent 打开即命中（SWR，后台失败静默）。
+  // 测试环境下若未显式注入 mock fetchImpl，跳过远端预热以防打真实公网。
+  if (!isStartupTestEnv || options.fetchImpl) {
+    prefetchAgentCatalog({ env: options.env ?? process.env, fetchImpl });
+  }
   const spawnRunner = options.spawnRunner ?? spawnProcess;
   const writeClipboard = options.clipboardWriter
     ? async (text: string) => {
@@ -748,11 +775,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     }
     if (!titleEnabled) return;
     const phase = terminalStatus.state;
-    const suffix = phase === "blocked" ? "·需接管·Nolo"
-      : phase === "error" ? "·失败需处理·Nolo"
-      : phase === "working" || backgroundWorking ? "·工作中·Nolo" : "·Nolo";
+    const rawDialogLabel = state.dialogLabel?.trim();
+    const rawLabel =
+      !rawDialogLabel || rawDialogLabel === "new"
+        ? basename(state.cwd) || "Nolo"
+        : rawDialogLabel;
+    const label = stripAnsi(rawLabel).replace(/[\x00-\x1f\x7f-\x9f]+/g, " ");
+    const suffix = phase === "blocked" ? " · 需接管 — Nolo"
+      : phase === "error" ? " · 失败需处理 — Nolo"
+      : phase === "working" || backgroundWorking ? " · 思考中 — Nolo"
+      : label === "Nolo" ? "" : " — Nolo";
     // Reserve the status suffix before clipping untrusted dialog text.
-    const label = stripAnsi(state.dialogLabel?.trim() || "new").replace(/[\x00-\x1f\x7f-\x9f]+/g, " ");
     const currentTitle = takeDisplayWidth(label, 80 - displayWidth(suffix)).prefix + suffix;
     if (currentTitle === lastSentTitle) return;
     lastSentTitle = currentTitle;
@@ -785,6 +818,22 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // stay for the current dialog so later local turns can page them through
   // readPastedText. /new and process shutdown clear the store.
   const pasteStore = createCollapsedPasteStore();
+  // Per-session Up/Down input history stack with draft stashing.
+  const inputHistory = createInputHistoryState();
+  const NON_HISTORY_SLASH_COMMANDS = new Set([
+    "/new",
+    "/clear",
+    "/history",
+    "/resume",
+    "/exit",
+  ]);
+  const recordWorkspaceInputHistory = (rawText: string): void => {
+    const expanded = expandCollapsedPastes(rawText, pasteStore).trim();
+    if (!expanded) return;
+    const firstToken = expanded.split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (NON_HISTORY_SLASH_COMMANDS.has(firstToken)) return;
+    recordInputHistoryEntry(inputHistory, expanded);
+  };
   // Login cancellation is owned separately from the in-flight chat turn.
   const loginSession = createTuiLoginSession();
   // Cooperative stop for the in-flight agent turn (Esc while busy).
@@ -922,7 +971,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     delete runtimeEnv.NOLO_TUI_RESTART;
     delete process.env.NOLO_TUI_RESTART;
     if (state.dialogId && !state.dialogKey) {
-      output.write("[nolo] 已保留对话 ID，但缺少可验证的属主/key，无法加载历史；请登录后通过 /history 选择对话。\n");
+      output.write(`${themeText("! 已保留对话 ID，但缺少可验证的属主/key，无法加载历史；请登录后通过 /history 选择对话。", "warning", resolveCliColorEnabled())}\n`);
     }
     if (state.dialogId && state.dialogKey) {
       try {
@@ -935,9 +984,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         });
         history.turns.push(...turns);
       } catch (error) {
-        output.write(`[nolo] 已恢复对话身份，但历史显示加载失败：${String(error)}\n`);
+        output.write(`${themeText(`! 已恢复对话身份，但历史显示加载失败：${String(error)}`, "warning", resolveCliColorEnabled())}\n`);
       }
     }
+  }
+  if (history.turns.length > 0) {
+    seedInputHistoryFromTurns(inputHistory, history.turns);
   }
   const imageCache = createImageAttachmentCache();
   // FIFO per payload preserves distinct filenames even for byte-identical images.
@@ -1108,13 +1160,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     });
   };
 
-  // 部署状态：启动时异步取一次（只在交互式分支调用）。
-  // 与 gitStatus 不同，它不随 cwd 变化，所以不需要在 /cd 后重取。
+  // 部署状态：仅在显式开启时查询（NOLO_CLI_CI_STATUS=1 或配置了自定义 CI SSH 目标）。
+  // 默认不向运维机发起后台 SSH，避免沙盒/测试/普通用户环境触发出向 :22 扫描风控。
   // 失败静默：fetchCiStatus 已经保证不抛，这里再守一次 sessionEnded，
   // 避免会话结束后仍用陈旧结果重绘。
   const refreshCiStatus = (): void => {
-    if ((options.env?.NOLO_CLI_CI_STATUS ?? process.env.NOLO_CLI_CI_STATUS) === "0") return;
-    void fetchCiStatus().then((jobs) => {
+    if (!shouldRefreshCiStatusOnStartup(effectiveEnv)) return;
+    void fetchCiStatus(undefined, undefined, undefined, effectiveEnv).then((jobs) => {
       if (sessionEnded) return;
       const ciStatusLine = summarizeLatest(jobs);
       if (!ciStatusLine) return;
@@ -1202,21 +1254,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }
     } finally { repaintingBanner = false; }
   };
-  void checkForCliUpdate(state.cliVersion, state.serverUrl, {
-    fetchImpl,
-    env: options.env ?? process.env,
-  }).then((updateAvailable) => {
-    if (sessionEnded || !updateAvailable) return;
-    state = { ...state, updateAvailable };
-    // 欢迎页仍在屏幕上才重绘 banner：turns 为空且没有正在流式输出的 turn。
-    // 第一轮 turn 开始后（currentRole 非空）transcript 已接管顶部，此时只
-    // 更新 state，不打断画面。
-    if (history.turns.length === 0 && history.currentRole === null) {
-      repaintBanner();
-    } else {
-      scheduleRender();
-    }
-  });
+  if (!isStartupTestEnv || options.fetchImpl) {
+    void checkForCliUpdate(state.cliVersion, state.serverUrl, {
+      fetchImpl,
+      env: options.env ?? process.env,
+    }).then((updateAvailable) => {
+      if (sessionEnded || !updateAvailable) return;
+      state = { ...state, updateAvailable };
+      // 欢迎页仍在屏幕上才重绘 banner：turns 为空且没有正在流式输出的 turn。
+      // 第一轮 turn 开始后（currentRole 非空）transcript 已接管顶部，此时只
+      // 更新 state，不打断画面。
+      if (history.turns.length === 0 && history.currentRole === null) {
+        repaintBanner();
+      } else {
+        scheduleRender();
+      }
+    });
+  }
 
   // 欢迎屏 sweep 动画：首帧已静态画出（sweep 未点亮），此处 composer 挂载
   // 完毕后用 repaintBanner 的换行安全路径（padOrTruncateToWidth + BSU/ESU +
@@ -1260,6 +1314,38 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     selectionState.dragging = false;
     selectionState.anchor = null;
     selectionState.head = null;
+  };
+  const hasNonEmptySelection = () =>
+    selectionState.anchor !== null &&
+    selectionState.head !== null &&
+    !areSelectionPointsEqual(selectionState.anchor, selectionState.head);
+  let selectionCopyNotice: string | null = null;
+  let selectionCopyTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearSelectionCopyFeedback = () => {
+    if (selectionCopyTimer !== null) {
+      clearTimeout(selectionCopyTimer);
+      selectionCopyTimer = null;
+    }
+    selectionCopyNotice = null;
+  };
+  const showSelectionCopyFeedback = (busyCopy: boolean) => {
+    clearSelectionCopyFeedback();
+    const isZh = getCliLocale() === "zh";
+    selectionCopyNotice = busyCopy
+      ? isZh
+        ? "✓ 已复制 · 按 Esc 停止生成"
+        : "✓ Copied · Esc to stop generating"
+      : isZh
+        ? "✓ 已复制"
+        : "✓ Copied";
+    selectionCopyTimer = setTimeout(() => {
+      selectionCopyTimer = null;
+      selectionCopyNotice = null;
+      if (!sessionEnded && fixedInput.active && !fixedInput.isPaused()) {
+        fixedInput.repaint(buffer, cursorPos);
+      }
+    }, 2000);
+    selectionCopyTimer.unref?.();
   };
 
   // readLatestAssistantReply / buildConversationMarkdown（/copy last|all 取材）
@@ -1413,18 +1499,120 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   const approveRemoteShell = createPermissionGrantEnabler("remote", grantEnablerDeps);
 
   /**
+   * 粘贴纯文本到草稿（非空 bracketed paste 与剪贴板文本回退共用）。
+   * 若粘贴文本包含本地图片路径：立即读取并并入 `attachedImages`，仅剥离读取成功的路径；
+   * 失败路径保留原文并打印 `! 图片未添加: ...`；剥离后若无剩余非空白文本则不往
+   * `buffer` 插入空白，直接重绘附件条。仅在粘贴事件入口调用，不拦截逐字符手敲。
+   */
+  const applyPastedTextToDraft = async (
+    pastedText: string,
+    source: ClipboardPasteSource | "bracketed-text",
+    snapshot: { epoch: number; sessionEnded: boolean } = {
+      epoch: draftEpoch,
+      sessionEnded,
+    },
+  ): Promise<boolean> => {
+    const normalizedPasted = pastedText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const firstToken = normalizedPasted.trim().split(/\s+/)[0] ?? "";
+    const skipImageDetection =
+      buffer.trim() === "" &&
+      isLikelySlashCommand(normalizedPasted) &&
+      !/\.(?:png|jpe?g|gif|webp)$/i.test(firstToken);
+    const detected = skipImageDetection
+      ? { hints: [], imagePaths: [], unreadableHints: [], message: normalizedPasted }
+      : detectSubmittedImagePaths(normalizedPasted, state.cwd);
+
+    if (detected.hints.length > 0) {
+      const failureMessages: string[] = [];
+      const read = await readImagePaths(
+        detected.hints.map((hint) => hint.resolvedPath),
+        {
+          onFailure: (_path, error) => {
+            failureMessages.push(
+              themeText(
+                `! 图片未添加: ${sanitizeImageLabel(error.message)}`,
+                "warning",
+                resolveCliColorEnabled(),
+              ),
+            );
+          },
+        },
+      );
+      if (
+        !shouldApplyPastedResult(snapshot, { epoch: draftEpoch, sessionEnded })
+      ) {
+        if (!sessionEnded) {
+          emitCommandOutput(t("pasteStaleDropped"));
+        }
+        return false;
+      }
+      for (const msg of failureMessages) {
+        emitCommandOutput(msg);
+      }
+      if (read.images.length > 0) {
+        state = {
+          ...state,
+          attachedImages: mergeAttachedImages(state.attachedImages, read.images),
+        };
+      }
+      const succeededPaths = new Set(read.images.map((img) => img.sourcePath));
+      const succeededHints = detected.hints.filter((hint) =>
+        succeededPaths.has(hint.resolvedPath),
+      );
+      const remaining = stripPastedImageTokensPreservingLayout(
+        normalizedPasted,
+        succeededHints,
+      );
+      if (remaining.trim().length > 0) {
+        const pasteResult = applyTuiInputKey(
+          buffer,
+          `${PASTE_TOKEN_PREFIX}${remaining}`,
+          {},
+          cursorPos,
+          { pasteStore, cwd: state.cwd, inputHistory },
+        );
+        buffer = pasteResult.buffer;
+        cursorPos = pasteResult.cursorPos ?? buffer.length;
+      }
+      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+      if (source === "slash" && remaining.trim().length > 0) {
+        emitCommandOutput(t("pasteTextInserted", String(remaining.length)));
+      }
+      return true;
+    }
+
+    const pasteResult = applyTuiInputKey(
+      buffer,
+      `${PASTE_TOKEN_PREFIX}${pastedText}`,
+      {},
+      cursorPos,
+      { pasteStore, cwd: state.cwd, inputHistory },
+    );
+    buffer = pasteResult.buffer;
+    cursorPos = pasteResult.cursorPos ?? buffer.length;
+    if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+    // 显式 /paste 给出回执；Ctrl+V 与终端空括号兼容路径保持安静（用户看得见
+    // 草稿里出现的内容，不需要额外一行 chrome）。
+    if (source === "slash") {
+      emitCommandOutput(t("pasteTextInserted", String(pastedText.length)));
+    }
+    return true;
+  };
+
+  /**
    * 唯一的「剪贴板内容 → 界面」应用器。`/paste`、Ctrl+V、空 bracketed-paste
    * 三条入口都走这里，读取流程在 pasteFlow.resolveClipboardPaste 里共享。
    *
    * - image：并入待发附件（下一轮随消息发出）
-   * - text：以 PASTE token 插进草稿（保留原文空白与换行；超长自动折叠成 chip）
+   * - text：委托 applyPastedTextToDraft（含本地图片路径即时识别 + 折叠占位符）
    * - empty：打印图像读取的原始提示（含可执行下一步）
    * - error：保留真实错误（远程会话 / 过大 / 读失败 / 文本读失败），绝不静默
    */
-  const applyClipboardPasteResult = (
+  const applyClipboardPasteResult = async (
     outcome: ClipboardPasteOutcome,
     source: ClipboardPasteSource,
-  ): void => {
+    snapshot: { epoch: number; sessionEnded: boolean },
+  ): Promise<boolean> => {
     const colorEnabled = resolveCliColorEnabled();
     if (outcome.kind === "image") {
       state = {
@@ -1433,30 +1621,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       };
       // The draft attachment row is the single source of visible attachment state.
       if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-      return;
+      return true;
     }
     if (outcome.kind === "text") {
-      const pasteResult = applyTuiInputKey(
-        buffer,
-        `${PASTE_TOKEN_PREFIX}${outcome.text}`,
-        {},
-        cursorPos,
-        { pasteStore, cwd: state.cwd },
-      );
-      buffer = pasteResult.buffer;
-      cursorPos = pasteResult.cursorPos ?? buffer.length;
-      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-      // 显式 /paste 给出回执；Ctrl+V 与终端空括号兼容路径保持安静（用户看得见
-      // 草稿里出现的内容，不需要额外一行 chrome）。
-      if (source === "slash") {
-        emitCommandOutput(t("pasteTextInserted", String(outcome.text.length)));
-      }
-      return;
+      return applyPastedTextToDraft(outcome.text, source, snapshot);
     }
     emitCommandOutput(
-      themeText(`[nolo] ${outcome.message}`, "warning", colorEnabled),
+      themeText(`! ${outcome.message}`, "warning", colorEnabled),
     );
     if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+    return true;
   };
 
   /**
@@ -1481,8 +1655,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }
       return false;
     }
-    applyClipboardPasteResult(outcome, source);
-    return true;
+    return applyClipboardPasteResult(outcome, source, snapshot);
   };
 
   // The TUI chat queue binding drives drain via runOneAgentTurn. It is created
@@ -1719,7 +1892,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     seedDialogCreditsBase,
     persistExplicitAgentSwitch,
     persistAgentSelection,
-    writeClipboard,
     readAndApplyClipboard,
     bumpDraftEpoch,
     selfUpdater,
@@ -1727,7 +1899,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     installAltScreenRestoreHandlers,
   };
 
-  const manageDraftImages = async (confirmSend: boolean): Promise<boolean> => {
+  const manageDraftImages = async (): Promise<void> => {
     while (state.attachedImages.length > 0) {
       const images = state.attachedImages;
       const selected = await dialogHost.run(anchor => {
@@ -1739,12 +1911,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         }, { dispose: () => rawKey.dispose?.() });
         return runSelectDialog({
           ...anchor, input: input as NodeJS.ReadStream, output, readKey,
-          title: confirmSend ? "确认图片附件（尚未发送）" : "图片附件（尚未发送）",
-          titleLines: [confirmSend ? "确认图片附件（尚未发送）" : "图片附件（尚未发送）", ...images.map((image, index) =>
+          title: "图片附件（尚未发送）",
+          titleLines: ["图片附件（尚未发送）", ...images.map((image, index) =>
             `${index + 1} · ${sanitizeImageLabel(image.filename)} (${image.sizeBytes} B)`)],
           footerLines: ["移除仅取消附件，不删除本机文件。Esc 返回编辑。"],
           items: [
-            { label: confirmSend ? `发送 ${images.length} 张图片` : "返回编辑", action: "done", index: -1 },
+            { label: "返回编辑", action: "done", index: -1 },
             ...images.flatMap((image, index) => [
               { label: `查看 ${index + 1} · ${sanitizeImageLabel(image.filename)}`, action: "view", index },
               { label: `移除 ${index + 1} · ${sanitizeImageLabel(image.filename)}`, action: "remove", index },
@@ -1752,8 +1924,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           ],
         });
       });
-      if (selected.kind !== "selected") return false;
-      if (selected.item.action === "done") return true;
+      if (selected.kind !== "selected" || selected.item.action === "done") return;
       const image = images[selected.item.index];
       if (!image) continue;
       if (selected.item.action === "remove") {
@@ -1761,10 +1932,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         fixedInput.repaint(buffer, cursorPos);
       } else {
         const result = await viewLocalImage(image.sourcePath, effectiveEnv);
-        emitCommandOutput(`[nolo] ${result}`);
+        const isOk = result.startsWith("已交给");
+        emitCommandOutput(
+          themeText(
+            `${isOk ? "·" : "!"} ${result}`,
+            isOk ? "muted" : "warning",
+            resolveCliColorEnabled(),
+          ),
+        );
       }
     }
-    return !confirmSend;
   };
 
   const runSubmittedLine = async (
@@ -1776,7 +1953,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     directUserSubmission = false,
   ): Promise<boolean> => {
     if (line.trim() === "/tools") {
-      emitCommandOutput(history.toolDetails?.join("") || t("noToolDetails"));
+      emitCommandOutput(
+        history.toolDetails?.join("") ||
+          themeText(t("noToolDetails"), "muted", resolveCliColorEnabled()),
+      );
       return false;
     }
     if (line.trim().split(/\s+/)[0]?.toLowerCase() === "/restart") {
@@ -1789,41 +1969,41 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         try {
           await ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction).restorePending();
         } catch (error) {
-          emitCommandOutput(`[nolo] 无法确认待处理消息，不能重启：${String(error)}`);
+          emitCommandOutput(themeText(`! 无法确认待处理消息，不能重启：${String(error)}`, "warning", resolveCliColorEnabled()));
           return false;
         }
       }
       if ((chatQueueBinding && chatQueueBinding.getRecovery().status !== "ready") || chatQueueBinding?.getStatus().queueLength || chatQueueBinding?.getStatus().isRunning || chatQueueBinding?.getStatus().drainPaused ||
           activityIndicator.getAgentRuns().some(run => run.status === "running" || remoteTaskUnsettled(run as typeof run & RemoteTaskCarrier))) {
-        emitCommandOutput("[nolo] 有排队消息或后台任务，不能重启；请先处理。");
+        emitCommandOutput(themeText("! 有排队消息或后台任务，不能重启；请先处理。", "warning", resolveCliColorEnabled()));
         return false;
       }
       try {
         const remote = await remoteTasks.read(activityIndicator.getAgentRuns().map(run => run.runId), { strict: true });
         if (remote.some(run => remoteTaskUnsettled(run))) {
-          emitCommandOutput("[nolo] 远端任务仍在运行或停止未确认，不能重启。");
+          emitCommandOutput(themeText("! 远端任务仍在运行或停止未确认，不能重启。", "warning", resolveCliColorEnabled()));
           return false;
         }
       } catch (error) {
-        emitCommandOutput(`[nolo] 无法确认远端任务状态，不能重启：${String(error)}`);
+        emitCommandOutput(themeText(`! 无法确认远端任务状态，不能重启：${String(error)}`, "warning", resolveCliColorEnabled()));
         return false;
       }
     }
     if (line.trim() === "/images preview") {
       if (!imageGraphicsSupported) {
-        emitCommandOutput("[nolo] 当前终端未确认支持图片预览，保留图片名称文字。可用 /images 查看待发送附件。");
+        emitCommandOutput(themeText("· 当前终端未确认支持图片预览，保留图片名称文字。可用 /images 查看待发送附件。", "muted", resolveCliColorEnabled()));
         return false;
       }
       imagePreviewRequested = !imagePreviewRequested;
       history.graphicsEnabled = imagePreviewRequested;
       if (!imagePreviewRequested) imageRenderer?.suspend();
-      emitCommandOutput(`[nolo] 图片预览${imagePreviewRequested ? "已开启" : "已关闭"}。`);
+      emitCommandOutput(themeText(`· 图片预览${imagePreviewRequested ? "已开启" : "已关闭"}。`, "muted", resolveCliColorEnabled()));
       renderHistoryToOutput();
       return false;
     }
     if (line.trim() === "/images") {
-      if (state.attachedImages.length === 0) emitCommandOutput("[nolo] 无待发送图片。/images preview 按需切换消息图片预览（需终端能力确认）。");
-      await manageDraftImages(false);
+      if (state.attachedImages.length === 0) emitCommandOutput(themeText("· 无待发送图片。/images preview 按需切换消息图片预览（需终端能力确认）。", "muted", resolveCliColorEnabled()));
+      await manageDraftImages();
       return false;
     }
     if (line.trim().split(/\s+/)[0]?.toLowerCase() === "/pending") {
@@ -1832,7 +2012,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         if (extra.length || (action && action !== "continue-without-resend")) throw new Error("Usage: /pending [continue-without-resend <batchId>]");
         const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
         emitCommandOutput(await binding.handlePendingCommand(action ? "continue-without-resend" : "show", batchId));
-      } catch (error) { emitCommandOutput(`[nolo] ${error instanceof Error ? error.message : String(error)}`); }
+      } catch (error) { emitCommandOutput(themeText(`! ${error instanceof Error ? error.message : String(error)}`, "danger", resolveCliColorEnabled())); }
       return false;
     }
     // /shell-revoke（块 D）：空闲路径直撤——即时翻转 granted 位，不走
@@ -1857,7 +2037,19 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       );
       return false;
     }
+    const prevTurnSnapshot = history.turns.slice();
     const exit = await runSubmittedSlashLine(line, slashHost, actionGateHandler, confirmDestructiveAction, directUserSubmission);
+    const slashCmd = line.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (slashCmd === "/new" || slashCmd === "/clear") {
+      resetInputHistoryNavigation(inputHistory);
+    } else if (
+      (slashCmd === "/history" || slashCmd === "/resume") &&
+      history.turns.length > 0 &&
+      (history.turns.length !== prevTurnSnapshot.length ||
+        history.turns.some((turn, i) => turn !== prevTurnSnapshot[i]))
+    ) {
+      seedInputHistoryFromTurns(inputHistory, history.turns);
+    }
     // Rebind whenever a submitted *command* actually changed the dialog identity
     // (/compact forks a new dialog; /resume, /new, /clear and the dialog picker
     // switch it). Queued user messages are persisted under the binding's dialog
@@ -1890,7 +2082,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const recovery = binding.getRecovery();
       if (recovery.status !== "unknown") return;
       unknownReminderShown = true;
-      emitCommandOutput("[nolo] 有一条较早的回复批次结果未知，已保留但不会自动重发；你可以继续正常聊天，或运行 /pending 查看详情。");
+      emitCommandOutput(themeText("! 有一条较早的回复批次结果未知，已保留但不会自动重发；你可以继续正常聊天，或运行 /pending 查看详情。", "warning", resolveCliColorEnabled()));
     };
     let resolveDone: (() => void) | null = null;
     let graphicsRuntime: ReturnType<typeof createTerminalGraphicsRuntime> | undefined;
@@ -1905,21 +2097,54 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // back to the placeholder and hid what the user was typing (the submit
     // path still read the inner buffer, so input "worked" but was invisible).
     let previousTopRows = getTopReservedRows(output);
+    const getColumns = () => (output as { columns?: number }).columns ?? 80;
+    const getLeftPad = (cols = getColumns()) => {
+      const { marginLeft } = resolveHistoryLayoutGeometry(cols);
+      return marginLeft > 0 ? " ".repeat(marginLeft) : "";
+    };
     const baseFixedInput = createFixedInput(output, {
       getStatusLine: (maxWidth) => {
         // 排队的消息已经由 composer 上方的队列 UI（getQueueLines）逐条呈现，
         // 状态栏不再重复一个「N 排队」计数——那是同一件事的第二份、更差的展示。
+        const colorEnabled = resolveCliColorEnabled();
+        const isZh = getCliLocale() === "zh";
+        if (hasNonEmptySelection()) {
+          return themeText(
+            isZh
+              ? "已选中 · Ctrl+C 复制 · Esc 取消"
+              : "Selected · Ctrl+C copy · Esc clear",
+            "accent",
+            colorEnabled,
+          );
+        }
+        if (selectionCopyNotice) {
+          return themeText(selectionCopyNotice, "success", colorEnabled);
+        }
         return renderStatusLine(state, maxWidth);
       },
-      getActivityLines: (layout) =>
-        activityIndicator.getBackgroundLines(resolveCliColorEnabled(), layout),
+      getActivityLines: (layout) => {
+        const colorEnabled = resolveCliColorEnabled();
+        const lines = [...(activityIndicator.getBackgroundLines(colorEnabled, layout) ?? [])];
+        if (!history.followBottom && history.hasMoreBelow) {
+          const cols = layout?.columns ?? getColumns();
+          const isZh = getCliLocale() === "zh";
+          const hint = isZh
+            ? "↓ 下方有新内容 · End 回到底部"
+            : "↓ More below · End to jump to bottom";
+          lines.push(
+            `${getLeftPad(cols)}${dimCliText(themeText(hint, "muted", colorEnabled), colorEnabled)}`,
+          );
+        }
+        return lines;
+      },
       getTaskLines: (layout) => activityIndicator.getTaskLines(resolveCliColorEnabled(), layout),
       getReservedRows: () => dialogHost.getReservedRows(),
       getQueueLines: () => {
         if (!chatQueueBinding) return [];
         const queueStatus = chatQueueBinding.getStatus();
+        const leftPad = getLeftPad();
         const errorLines = queueStatus.lastDrainError
-          ? [`  ⚠ ${queueStatus.lastDrainError.replace(/\r?\n/g, " ")}`] : [];
+          ? [`${leftPad}⚠ ${queueStatus.lastDrainError.replace(/\r?\n/g, " ")}`] : [];
         const colorEnabled = resolveCliColorEnabled();
         // queuePreview is the shared projection: up to 3 entries, each already
         // truncated to 40 chars. Render each as a dim "⤷ <text>" line so the
@@ -1929,7 +2154,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // lines that headerRows doesn't count, drifting the input cursor.
         return [...errorLines, ...queueStatus.queuePreview.map((text, i) => {
             const oneLine = text.replace(/\r?\n/g, " ⏎ ");
-            return dimCliText(`  ⤷ ${i + 1}. ${oneLine}`, colorEnabled);
+            return `${leftPad}${dimCliText(`⤷ ${i + 1}. ${oneLine}`, colorEnabled)}`;
           })];
       },
       getAttachmentLine: () => {
@@ -1938,7 +2163,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // 派发层清零，/clear、/new 同样清零 → 返回 null → 行消失（高度回落
         // 走 onInputLinesChange 既有路径）。dim 以匹配 composer chrome。
         const line = formatComposerAttachmentLine(state.attachedImages);
-        return line ? dimCliText(`${line} · 待发送 · /images 查看/移除`, resolveCliColorEnabled()) : null;
+        return line
+          ? `${getLeftPad()}${dimCliText(`${line} · Backspace 移除 · /images`, resolveCliColorEnabled())}`
+          : null;
       },
       onInputLinesChange: () => {
         const topRows = getTopReservedRows(output);
@@ -2041,6 +2268,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         clearTimeout(resizeTimer);
         resizeTimer = null;
       }
+      clearSelectionCopyFeedback();
       clearSelection();
       // Session teardown is the last-resort owner of Windows Terminal progress
       // cleanup. It is intentionally best-effort and idempotent: an interaction
@@ -2306,13 +2534,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         resumeSkipNoticeKey = null;
         return;
       }
-      if (result.gate !== "resume-stopped") return;
+      if (result.gate !== "resume-stopped" && result.gate !== "drain-error") return;
       const count = chatQueueBinding?.countQueuedBackgroundResults() ?? 0;
       if (count === 0) return;
-      const key = `resume-stopped:${count}`;
+      const key = `${result.gate}:${count}`;
       if (resumeSkipNoticeKey === key) return;
       resumeSkipNoticeKey = key;
-      emitCommandOutput(t("wakeQueuedWhileStopped", String(count)));
+      emitCommandOutput(
+        result.gate === "drain-error"
+          ? t("wakePausedOnErrorHint")
+          : t("wakeQueuedWhileStopped", String(count)),
+      );
     };
     runWakeHandler = createRunWakeHandler({
       isDone: () => done,
@@ -2449,12 +2681,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }
     };
 
-    // 非空鼠标选区判定（idle/busy 两条 Ctrl+C 分支共用）。
-    const hasNonEmptySelection = () =>
-      selectionState.anchor !== null &&
-      selectionState.head !== null &&
-      !areSelectionPointsEqual(selectionState.anchor, selectionState.head);
-
     // 提取选区文本写入剪贴板、清除高亮并重绘。busy 变体改用带 Esc 提示的
     // 成功文案（生成仍在继续，Ctrl+C 已不承担停止语义，告诉用户正确的停止键）。
     const copySelectionToClipboard = async (
@@ -2479,10 +2705,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const writeStartedAt = Date.now();
           await writeClipboard(textToCopy);
           writeMs = Date.now() - writeStartedAt;
-          emitCommandOutput(t(feedbackKey));
+          showSelectionCopyFeedback(feedbackKey === "copiedSelectionBusy");
         } catch (error) {
           emitCommandOutput(
-            `[nolo] ${t("copyFailed")}: ${toErrorMessage(error)}`,
+            themeText(`! ${t("copyFailed")}: ${toErrorMessage(error)}`, "danger", resolveCliColorEnabled()),
           );
         }
       }
@@ -2534,6 +2760,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         bumpDraftEpoch();
         buffer = "";
         cursorPos = 0;
+        resetInputHistoryNavigation(inputHistory);
         if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
         emitCommandOutput(t("ctrlCClearedDraft"));
         return;
@@ -2608,7 +2835,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           delete nextGrants.remote;
           state = { ...state, permissionGrants: nextGrants };
           if (!persistPermissionGrantChanges({ remote: true }, nextGrants)) {
-            output.write(`[nolo] ${t("autoPersistFailed")}\n`);
+            output.write(`${themeText(`! ${t("autoPersistFailed")}`, "warning", resolveCliColorEnabled())}\n`);
           }
         }
         emitCommandOutput(
@@ -2704,10 +2931,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // /transcribe 要等当前回复结束再跑：转写产物挂在 pendingTranscripts
         // 上、随下一条消息发出，busy 期间执行没有意义（等回复完再发）。
         output.write(
-          `[nolo] ${t("transcribeBusyHint")}\n`,
+          `${themeText(`! ${t("transcribeBusyHint")}`, "warning", resolveCliColorEnabled())}\n`,
         );
       } else if (res.action) {
-        // `/switch` with no target (interactive picker) and `/switch
+        // `/agents` with no target (interactive picker) and `/agents
         // list` need to take over the screen, which races the in-flight
         // streaming repaint. Don't open them while busy and don't queue
         // them either: surface a one-line notice telling the user how
@@ -2715,7 +2942,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // next turn, not the in-flight one).
         output.write(
           "Model picker isn't available while a reply is running. " +
-            "Use `/switch <name>` to switch now (takes effect on the " +
+            "Use `/agents <name>` to switch now (takes effect on the " +
             "next turn), or wait for the reply to finish.\n",
         );
       } else {
@@ -2730,12 +2957,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // helper）：只写真正翻转的桶；失败用 raw output.write 追一行——streaming
         // repaint 拥有 transcript，emitCommandOutput 会与它竞争。
         if (!persistPermissionGrantChanges(grantsBefore, state.permissionGrants)) {
-          output.write(`[nolo] ${t("autoPersistFailed")}\n`);
+          output.write(`${themeText(`! ${t("autoPersistFailed")}`, "warning", resolveCliColorEnabled())}\n`);
         } else if (state.permissionGrants !== grantsBefore) {
           scheduleRender();
         }
         if (
-          busySlashCommand === "/switch" &&
+          busySlashCommand === "/agents" &&
           persistExplicitAgentSwitch(beforeAgentKey)
         ) {
           // The switch succeeded. It can't affect the in-flight turn
@@ -2764,6 +2991,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     };
 
     let preparingImageSubmission = false;
+    let pendingPasteImagePromise: Promise<void> | null = null;
     const handleInputToken = async (sequence: string) => {
       if (done) return;
       // The approval owns the DialogHost claim, but only its explicit answers
@@ -2791,6 +3019,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // Async path reads must not allow a second Enter to start another send.
       // Modal keys still belong to the dialog above, including its confirmation.
       if (preparingImageSubmission) return;
+      if (sequence !== "\u0003" && !(busy && sequence === "\x1b")) {
+        while (pendingPasteImagePromise) {
+          await pendingPasteImagePromise;
+          if (done) return;
+        }
+      }
       // While an agent turn is running we let the user keep typing into the
       // docked composer (draft buffer) but ignore submit so a second turn
       // cannot race the in-flight one. The draft is preserved and shown
@@ -2822,7 +3056,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // the drain sends them all in one provider round — no text merge.
         // Busy keeps the draft (the turn owns the screen; the draft is
         // preserved and editable once the turn ends).
-        const draftIncluded = !busy && buffer.trim() !== "";
+        const draftIncluded =
+          !busy && buffer.trim() !== "" && !isShellPassthroughInput(buffer);
         if (draftIncluded) {
           const draftImages = detectSubmittedImagePaths(buffer, state.cwd);
           const draftMedia = detectSubmittedMediaPaths(draftImages.message, state.cwd);
@@ -2839,10 +3074,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               await chatQueueBinding.submitPending(buffer);
             }
           } catch (error) {
-            emitCommandOutput(`[nolo] Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Ctrl+S`);
+            emitCommandOutput(themeText(`! Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Ctrl+S`, "danger", resolveCliColorEnabled()));
             if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
             return;
           }
+          recordWorkspaceInputHistory(buffer);
+          resetInputHistoryNavigation(inputHistory);
           bumpDraftEpoch();
           buffer = "";
           cursorPos = 0;
@@ -2906,6 +3143,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // The task header rejects new selections, not drag/release cleanup.
           if (screenRow < 0) return;
           stopAutoScroll();
+          clearSelectionCopyFeedback();
           // 开始选区时冻结滚轮动画：内容不能在选中锚点底下滑走。
           scrollAnimator.cancel();
           // Ctrl+左键：只有坐标精确落在这行**可见**的 http(s) URL 字符区间内才用
@@ -3030,6 +3268,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         return;
       }
 
+      if (sequence === "\x1b" && hasNonEmptySelection()) {
+        clearSelection();
+        paintFrame(buffer);
+        return;
+      }
+
       if (selectionState.anchor) {
         clearSelection();
       }
@@ -3083,6 +3327,19 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         await readAndApplyClipboard(isEmptyBracketedPaste ? "bracketed-empty" : "key");
         return;
       }
+      if (isPasteToken) {
+        const pastedText = sequence.slice(PASTE_TOKEN_PREFIX.length);
+        const currentPaste = applyPastedTextToDraft(pastedText, "bracketed-text")
+          .then(() => undefined)
+          .finally(() => {
+            if (pendingPasteImagePromise === currentPaste) {
+              pendingPasteImagePromise = null;
+            }
+          });
+        pendingPasteImagePromise = currentPaste;
+        await currentPaste;
+        return;
+      }
       // Backspace 撤销附件：空草稿 + 有附件时，逐个撤销（最新贴的先撤）。
       // 拦截点在普通字符处理之前；buffer 非空时完全不触发，普通退格语义
       // 不变（回执卡片仍留在 scrollback 作历史记录）。
@@ -3095,7 +3352,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         if (undo.handled && undo.removed) {
           state = { ...state, attachedImages: undo.images };
           emitCommandOutput(
-            `[nolo] ${t("attachmentRemovedHint", undo.removed.filename, String(undo.images.length))}`,
+            themeText(
+              `· ${t("attachmentRemovedHint", undo.removed.filename, String(undo.images.length))}`,
+              "muted",
+              resolveCliColorEnabled(),
+            ),
           );
           if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
           return;
@@ -3104,6 +3365,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const result = applyTuiInputKey(buffer, sequence, {}, cursorPos, {
         pasteStore,
         cwd: state.cwd,
+        inputHistory,
       });
       if (result.redraw) {
         resetHistoryFrameDiffCache(output);
@@ -3117,6 +3379,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         return;
       }
       if (result.submit !== undefined) {
+        const expandedSubmitForHistory = expandCollapsedPastes(
+          result.submit,
+          pasteStore,
+        );
         // Replace UI-only paste chips with compact model references. The full
         // body is expanded only at an HTTP/persistence boundary or on demand
         // through readPastedText, so every provider round avoids replaying it.
@@ -3131,7 +3397,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         const startsChatTurn =
           (submittedTrimmed.length > 0 || state.attachedImages.length > 0) &&
           !isLikelySlashCommand(submittedTrimmed) &&
-          !submittedTrimmed.startsWith("!");
+          !isShellPassthroughInput(submittedTrimmed);
         if (busyLock) {
           // While an agent turn is running, Enter does not start a new turn.
           // Instead, route the draft through the shared queue resolver: pure
@@ -3140,6 +3406,43 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // once the turn ends). The draft is cleared only on a successful
           // enqueue.
           const trimmedText = submittedText.trim();
+          // `!cmd` shell passthrough must NEVER enter chatQueueBinding (which
+          // drains by sending raw text to the model and burning tokens).
+          // Execute the piped subprocess locally and emit output via
+          // appendStreamSafeNotice so an active streaming assistant turn keeps
+          // its `currentRole === "assistant"` and drops zero chunks.
+          if (isShellPassthroughInput(submittedText)) {
+            releaseCollapsedPasteReferences(submittedText, pasteStore);
+            recordWorkspaceInputHistory(expandedSubmitForHistory);
+            bumpDraftEpoch();
+            buffer = "";
+            cursorPos = 0;
+            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+            const shellCmd = trimmedText.slice(1).trim();
+            await executeShellPassthroughCommand({
+              command: shellCmd,
+              cwd: state.cwd,
+              env: options.env ?? process.env,
+              spawnRunner,
+              emit: (text) => {
+                if (!text || done || sessionEnded) return;
+                if (!isInteractiveInput(input)) {
+                  output.write(`${text}\n`);
+                  return;
+                }
+                history.followBottom = true;
+                appendStreamSafeNotice(history, text, {
+                  appendLocalTurn,
+                  startTurn,
+                });
+                renderHistoryToOutput();
+                if (fixedInput.active && !fixedInput.isPaused()) {
+                  fixedInput.repaint(buffer, cursorPos);
+                }
+              },
+            });
+            return;
+          }
           // While a turn runs, a few slash commands are handled locally right
           // now instead of being queued. Queuing them is wrong: the queue
           // drains its head by feeding the raw text to the agent runner as a
@@ -3157,6 +3460,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // repaint overwrites it, which is fine for an ephemeral notice.
           const busySlashCommand = trimmedText.split(/\s+/)[0]?.toLowerCase();
           if (busySlashCommand === "/tools") {
+            recordWorkspaceInputHistory(expandedSubmitForHistory);
             printInternalEventLine(history.toolDetails?.join("") || t("noToolDetails"));
             bumpDraftEpoch();
             buffer = "";
@@ -3165,7 +3469,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             return;
           }
           if (busySlashCommand === "/restart") {
-            output.write("\n[nolo] 当前仍在执行任务，不能重启；请等待任务结束。\n");
+            output.write(`\n${themeText("! 当前仍在执行任务，不能重启；请等待任务结束。", "warning", resolveCliColorEnabled())}\n`);
             return;
           }
           if (busySlashCommand === "/stop" || busySlashCommand === "/pending") {
@@ -3174,21 +3478,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               stopActiveTurn();
             } else if (busySlashCommand === "/pending") {
               if (args.length > 0) {
-                output.write("\n[nolo] Cannot resolve pending batches while a turn is active; stop the turn first, then use /pending.\n");
+                output.write(`\n${themeText("! Cannot resolve pending batches while a turn is active; stop the turn first, then use /pending.", "warning", resolveCliColorEnabled())}\n`);
               } else {
                 const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
                 const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
                 try {
                   output.write(`\n${await binding.handlePendingCommand("show")}\n`);
                 } catch (error) {
-                  output.write(`\n[nolo] ${error instanceof Error ? error.message : String(error)}\n`);
+                  output.write(`\n${themeText(`! ${error instanceof Error ? error.message : String(error)}`, "danger", resolveCliColorEnabled())}\n`);
                 }
               }
             } else {
               // Targeted /stop retains the existing background job/PID router.
+              recordWorkspaceInputHistory(expandedSubmitForHistory);
               await handleBusyLocalSlash(submittedText, busySlashCommand);
               return;
             }
+            recordWorkspaceInputHistory(expandedSubmitForHistory);
             bumpDraftEpoch();
             buffer = "";
             cursorPos = 0;
@@ -3197,16 +3503,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           }
           const isBusyLocalSlash =
             busySlashCommand === "/context" ||
-            busySlashCommand === "/ctx" ||
             busySlashCommand === "/cd" ||
-            busySlashCommand === "/switch" ||
             busySlashCommand === "/theme" ||
             busySlashCommand === "/runtime" ||
             busySlashCommand === "/logs" ||
             busySlashCommand === "/auto" ||
             busySlashCommand === "/tasks" ||
-            busySlashCommand === "/jobs" ||
-            busySlashCommand === "/procs" ||
             busySlashCommand === "/agents" ||
             busySlashCommand === "/doc" ||
             busySlashCommand === "/skill" ||
@@ -3215,13 +3517,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/auth" ||
             busySlashCommand === "/profile" ||
             busySlashCommand === "/paste" ||
-            busySlashCommand === "/version" ||
             busySlashCommand === "/links" ||
             busySlashCommand === "/transcribe" ||
             busySlashCommand === "/shell-revoke";
           if (isBusyLocalSlash) {
             // ── S1：busy 本地 slash 处理已抽为上方 handleBusyLocalSlash 具名
             // 闭包，此处仅转发（保持原 return 语义：处理完即结束本轮 handleInputToken）。
+            recordWorkspaceInputHistory(expandedSubmitForHistory);
             await handleBusyLocalSlash(submittedText, busySlashCommand);
             return;
           }
@@ -3253,10 +3555,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               await binding.submitPending(decision.text);
             }
             } catch (error) {
-              emitCommandOutput(`[nolo] Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Enter`);
+              emitCommandOutput(themeText(`! Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Enter`, "danger", resolveCliColorEnabled()));
               if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
               return;
             }
+            recordWorkspaceInputHistory(expandedSubmitForHistory);
             bumpDraftEpoch();
             buffer = "";
             cursorPos = 0;
@@ -3266,7 +3569,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             // 绝不静默丢图。
             if (state.attachedImages.length > 0) {
               emitCommandOutput(
-                `[nolo] ${t("busyAttachmentsBlocked", String(state.attachedImages.length))}`,
+                themeText(
+                  `! ${t("busyAttachmentsBlocked", String(state.attachedImages.length))}`,
+                  "warning",
+                  resolveCliColorEnabled(),
+                ),
               );
               if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
             }
@@ -3319,20 +3626,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             const detected = detectSubmittedImagePaths(submittedText, state.cwd);
             if (detected.hints.length > 0) {
               const read = await readImagePaths(detected.hints.map(hint => hint.resolvedPath), {
-                onFailure: (_path, error) => emitCommandOutput(`[nolo] 图片未添加: ${sanitizeImageLabel(error.message)}`),
+                onFailure: (_path, error) => emitCommandOutput(themeText(`! 图片未添加: ${sanitizeImageLabel(error.message)}`, "warning", resolveCliColorEnabled())),
               });
               state = { ...state, attachedImages: mergeAttachedImages(state.attachedImages, read.images) };
               if (read.failures.length > 0) { fixedInput.repaint(buffer, cursorPos); return; }
             }
             if (state.attachedImages.length > 0) {
-              // Once staged, remove path tokens from the editor too: cancelling
-              // after Remove must not re-add that file on the next Enter.
+              // Once staged, remove path tokens from the editor too.
               if (detected.hints.length > 0) {
                 submittedText = stripImageTokens(submittedText, detected.hints);
                 buffer = stripImageTokens(buffer, detected.hints);
                 cursorPos = buffer.length;
               }
-              if (!await manageDraftImages(true)) { fixedInput.repaint(buffer, cursorPos); return; }
               submittedText ||= "请查看附件图片。";
             }
           } finally { preparingImageSubmission = false; }
@@ -3345,10 +3650,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             await chatQueueBinding.submitPending({ text: media.message, event: { kind: "user", text: media.message },
               imagePaths: images.imagePaths, mediaPaths: media.mediaPaths });
           } catch (error) {
-            emitCommandOutput(`[nolo] Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Enter`);
+            emitCommandOutput(themeText(`! Pending save failed: ${error instanceof Error ? error.message : String(error)}; draft and attachments retained; retry Enter`, "danger", resolveCliColorEnabled()));
             if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
             return;
           }
+          recordWorkspaceInputHistory(expandedSubmitForHistory);
           bumpDraftEpoch(); buffer = ""; cursorPos = 0;
           busy = true;
           try { await chatQueueBinding.resumePending(); }
@@ -3363,6 +3669,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // cannot be routed into a phantom queue and the residual queue stays
         // drainable. Idempotent no-op when the binding agrees we're idle.
         chatQueueBinding?.recoverStaleRunning();
+        recordWorkspaceInputHistory(expandedSubmitForHistory);
         busy = startsChatTurn;
         // 提交即作废旧世代：在途的剪贴板读取回来时草稿已清，结果必须丢弃，
         // 否则会把「上一行的粘贴」塞进新草稿。
@@ -3537,7 +3844,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const persistentCount = registry.list().filter((p) => p.persist && p.status === "running").length;
     registry.stopAll();
     if (persistentCount > 0) {
-      output.write(`[nolo] ${t("persistentProcessesLeft", String(persistentCount))}\n`);
+      output.write(`${themeText(`· ${t("persistentProcessesLeft", String(persistentCount))}`, "muted", resolveCliColorEnabled())}\n`);
     }
     // 非交互（readline）路径结束时不走 interactive 的 finish()，这里同样
     // 标记 session 结束，让迟到的异步回调（如更新检查）不再触发渲染写入

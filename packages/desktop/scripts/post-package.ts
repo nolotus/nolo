@@ -148,18 +148,30 @@ if (process.platform === "linux") {
   }
 }
 
-try {
-  await createLinuxRpmArtifact({ artifactDir, buildEnv });
-} catch (error) {
-  // RPM is an optional convenience artifact. A broken rpmbuild toolchain must not
-  // turn an otherwise valid Linux tar/update release into a failed release.
-  console.warn("[desktop] Optional RPM generation failed; continuing with Linux tar artifacts:", error);
-}
-try {
-  await createLinuxDebArtifact({ artifactDir, buildEnv });
-} catch (error) {
-  console.warn("[desktop] Optional DEB generation failed; continuing with Linux tar artifacts:", error);
-}
+await Promise.all([
+  (async () => {
+    try {
+      await createLinuxRpmArtifact({ artifactDir, buildEnv });
+    } catch (error) {
+      // RPM is an optional convenience artifact. A broken rpmbuild toolchain must not
+      // turn an otherwise valid Linux tar/update release into a failed release.
+      console.warn(
+        "[desktop] Optional RPM generation failed; continuing with Linux tar artifacts:",
+        error,
+      );
+    }
+  })(),
+  (async () => {
+    try {
+      await createLinuxDebArtifact({ artifactDir, buildEnv });
+    } catch (error) {
+      console.warn(
+        "[desktop] Optional DEB generation failed; continuing with Linux tar artifacts:",
+        error,
+      );
+    }
+  })(),
+]);
 
 // --- Desktop capability gate (Phase 3) --------------------------------------
 // 打包完成后立即 fail-closed 验证公开 desktop capability（edition/匿名本地/

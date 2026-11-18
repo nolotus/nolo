@@ -154,16 +154,46 @@ export function resolveEmptyAssistantFallbackMessage(
   return EMPTY_ASSISTANT_FALLBACK_MESSAGE;
 }
 
+const DEGENERATE_CLOSING_BRACKET_FRAGMENT_RE = /^[}\])]+$/;
+const MAX_DEGENERATE_FRAGMENT_CHARS = 4;
+
+/**
+ * 识别上游流/JSON 工具调用收尾抖动产生的畸形孤立右闭合符号残片（如 `}`、`}}`、`]`、`})`）。
+ *
+ * 2026-11-18 生产实证（run-2026-11-17T17-31-13-802Z-10ml2u / sl5jre）：
+ * 上游在多轮工具循环后返回 `content: "}"`、`tool_calls: []`、`finish_reason: "stop"`。
+ * 严格限定为「去空白后仅 1..4 字符，且全部由孤立右闭合括号构成（`}`/`]`/`)`）」，
+ * 不含任何字母、数字、汉字、分隔标点（`,`/`;`/`:`）或左开括号（`{`/`[`/`(`），
+ * 确保 `"0"`、`"ok"`、`"是"`、`"{}"`、`","`、`";"`、`":"` 等合法短回复零误伤。
+ */
+export function isDegenerateClosingBracketFragment(
+  text: string | null | undefined,
+): boolean {
+  if (typeof text !== "string") return false;
+  const compact = text.replace(/\s+/g, "");
+  return (
+    compact.length >= 1 &&
+    compact.length <= MAX_DEGENERATE_FRAGMENT_CHARS &&
+    DEGENERATE_CLOSING_BRACKET_FRAGMENT_RE.test(compact)
+  );
+}
+
 /** assistant 是否产生了可见输出（文本/图片）。tool_calls 由调用方单独判定。
  *  reasoning_content 不算可见输出——与服务端 loopMessageExtract.hasAssistantVisibleOutput 一致：
  *  reasoning-only 且无 tool_calls 视为空轮，走 repair/fallback，避免用户只看到空串。 */
 export function hasAssistantVisibleOutput(
   content: AgentRuntimeMessageContent,
 ): boolean {
-  if (typeof content === "string") return content.trim().length > 0;
+  if (typeof content === "string") {
+    const trimmed = content.trim();
+    return trimmed.length > 0 && !isDegenerateClosingBracketFragment(trimmed);
+  }
   if (!Array.isArray(content)) return false;
   return content.some((part) => {
-    if (part?.type === "text" && String(part.text ?? "").trim()) return true;
+    if (part?.type === "text") {
+      const text = String(part.text ?? "").trim();
+      return text.length > 0 && !isDegenerateClosingBracketFragment(text);
+    }
     if (part?.type === "image_url") {
       const url = part?.image_url?.url;
       return typeof url === "string" && url.trim().length > 0;

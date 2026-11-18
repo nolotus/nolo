@@ -120,4 +120,24 @@ export const toolStrings = {
     en: "[nolo] Tool execution location: unknown",
     zh: "[nolo] 工具执行位置：未知",
   },
+  exploreSummary: {
+    en: "Explored {0} · {1}",
+    zh: "已探查 {0} 项 · {1}",
+  },
+  explorePartRead: {
+    en: "read {0}",
+    zh: "读取 {0}",
+  },
+  explorePartSearch: {
+    en: "search {0}",
+    zh: "搜索 {0}",
+  },
+  explorePartRun: {
+    en: "cmd {0}",
+    zh: "命令 {0}",
+  },
+  explorePartFetch: {
+    en: "web {0}",
+    zh: "网页 {0}",
+  },
 } as const;
