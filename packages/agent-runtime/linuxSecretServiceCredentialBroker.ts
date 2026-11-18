@@ -29,6 +29,14 @@ export const LINUX_SECRET_SERVICE_ATTRIBUTE = "nolo-credential";
 /** `secret-tool` 在「没有匹配项」时的退出码（lookup / clear 共用）。 */
 export const SECRET_TOOL_NO_MATCH_EXIT = 1;
 
+/**
+ * `secret-tool` 用同一个退出码 1 同时表示「没有这条」和「连不上 Secret Service」。
+ * 只有 stderr 为空时才当成真未命中；D-Bus/后端故障会往 stderr 写原因，必须按
+ * 硬失败处理 —— 否则后端坏了会被误当成「库里没有」，让上层回退到旧明文副本。
+ */
+const isGenuineNoMatch = (result: SecretToolRunnerResult): boolean =>
+  result.exitCode === SECRET_TOOL_NO_MATCH_EXIT && result.stderr.trim() === "";
+
 const DEFAULT_SECRET_TOOL_BIN = "secret-tool";
 
 export type SecretToolRunnerResult = {
@@ -147,7 +155,7 @@ export function createLinuxSecretServiceCredentialBroker(
     async get(ref) {
       const safeRef = safeCredentialRef(ref);
       const result = await lookup(safeRef);
-      if (result.exitCode === SECRET_TOOL_NO_MATCH_EXIT) return null;
+      if (isGenuineNoMatch(result)) return null;
       if (result.exitCode !== 0) brokerFailure("get");
       // lookup 只打印密文本身；去掉一个结尾换行。
       const secret = result.stdout.replace(/\n$/, "");
@@ -187,7 +195,7 @@ export function createLinuxSecretServiceCredentialBroker(
         brokerFailure("delete");
       }
       // 没有匹配项视为幂等成功。
-      if (result.exitCode === 0 || result.exitCode === SECRET_TOOL_NO_MATCH_EXIT) {
+      if (result.exitCode === 0 || isGenuineNoMatch(result)) {
         return;
       }
       brokerFailure("delete");
@@ -196,7 +204,7 @@ export function createLinuxSecretServiceCredentialBroker(
     async has(ref) {
       const safeRef = safeCredentialRef(ref);
       const result = await lookup(safeRef);
-      if (result.exitCode === SECRET_TOOL_NO_MATCH_EXIT) return false;
+      if (isGenuineNoMatch(result)) return false;
       if (result.exitCode !== 0) brokerFailure("has");
       // 只判存在性：不返回、不缓存、不记录 stdout。
       return true;

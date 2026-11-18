@@ -138,7 +138,7 @@ const DialogMenu = ({
     onOpenChange={setIsActionMenuOpen}
   >
     <RacButton
-      className={`topbar__button ${isActionMenuOpen ? "is-active" : ""}`}
+      className={`topbar__button topbar__button--dialog-actions ${isActionMenuOpen ? "is-active" : ""}`}
       aria-label={t("more", "更多")}
     >
       <LuEllipsis size={ICON_SIZE} aria-hidden="true" />

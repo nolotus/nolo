@@ -85,7 +85,7 @@ import {
   type ClipboardPasteOutcome,
   type ClipboardPasteSource,
 } from "./pasteFlow";
-import { writeClipboard as writeClipboardEnhanced } from "./clipboard";
+import { readClipboardText, writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
 import { fetchCiStatus, summarizeLatest } from "./ciStatus";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
@@ -605,12 +605,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               : "unavailable"
             : "system",
         });
-  const readClipboardText =
-    options.clipboardReader ??
-    (async () => {
-      const { default: clipboard } = await import("clipboardy");
-      return await clipboard.read();
-    });
+  const readText = options.clipboardReader ?? (() => readClipboardText());
   const readImage = options.clipboardImageReader ?? readClipboardImage;
   const selfUpdater: SelfUpdater =
     options.selfUpdater ?? (async () => {
@@ -1645,7 +1640,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const snapshot = { epoch: draftEpoch, sessionEnded };
     const outcome = await resolveClipboardPaste({
       readImage: () => readImage({ env: options.env ?? process.env }),
-      readText: () => readClipboardText(),
+      readText,
     });
     if (
       !shouldApplyPastedResult(snapshot, { epoch: draftEpoch, sessionEnded })

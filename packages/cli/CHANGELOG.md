@@ -1,4 +1,13 @@
 
+## 0.243.0-alpha.2 (2026-11-18)
+
+### Bug Fixes
+
+* **cli:** 优先读取 Wayland 剪贴板的 UTF-8 文本 ([2cba312](https://github.com/nolotus/bun-nolo/commit/2cba3123d28aa66274def4a225c7583ea8e9665c))
+* **desktop:** 4K 下软化活动指示器并给对话页「更多」按钮加毛玻璃底 ([ab8259b](https://github.com/nolotus/bun-nolo/commit/ab8259bf65f732daad3c17935c4e0528fb8cec1e))
+* **desktop:** 桌面凭据链读旧文件库并统一删除语义 ([5ed5498](https://github.com/nolotus/bun-nolo/commit/5ed5498bd6984b47024d62961303ff99362dabb6))
+
+
 ## 0.243.0-alpha.1 (2026-11-18)
 
 ### Features

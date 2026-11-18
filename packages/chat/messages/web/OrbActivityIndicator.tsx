@@ -144,7 +144,9 @@ export const OrbActivityIndicator = memo(function OrbActivityIndicator({
       {...withLiteralClass(className ? `orb-activity-indicator ${className}` : "orb-activity-indicator", styles.root)}
     >
       <span
-        style={{ width: size, height: size }}
+        // StyleX 对函数值只认 var()，字面 filter 会被编译成空的 blur()，
+        // 所以这层软化用内联样式：3px 点在 4K@200% 下边缘偏硬，模糊一档。
+        style={{ width: size, height: size, filter: "blur(0.6px)" }}
         {...stylex.props(styles.glyph)}
       >
         {latticeCells.length > 0 && (

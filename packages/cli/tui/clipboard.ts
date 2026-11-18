@@ -7,6 +7,34 @@
  * OSC 52 会把用户随后在浏览器中复制的新内容覆盖成旧内容。
  */
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execClipboard = promisify(execFile);
+
+/** Read system text without preferring a potentially lossy XWayland text/plain offer. */
+export async function readClipboardText(env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  if (process.platform === "linux" && (env.WAYLAND_DISPLAY || env.XDG_SESSION_TYPE === "wayland")) {
+    for (const mime of ["text/plain;charset=utf-8", "UTF8_STRING"]) {
+      try {
+        const { stdout } = await execClipboard("wl-paste", ["--no-newline", "--type", mime], {
+          env,
+          encoding: "utf8",
+          timeout: 1500,
+          maxBuffer: 16 * 1024 * 1024,
+        });
+        return stdout;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        // A missing command or timed-out compositor won't be fixed by another MIME request.
+        if (code === "ENOENT" || (error as { killed?: boolean }).killed) break;
+      }
+    }
+  }
+  const { default: clipboard } = await import("clipboardy");
+  return clipboard.read();
+}
+
 export type ClipboardWriteTransport = "system" | "osc52" | "unavailable";
 
 export type ClipboardTarget = {

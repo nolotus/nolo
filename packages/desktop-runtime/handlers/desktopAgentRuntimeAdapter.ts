@@ -18,6 +18,7 @@ import {
   buildAgentRuntimeDialogWritePlan,
   buildAgentRuntimeAgentLookupKeys,
   createDesktopHostCredentialBroker,
+  createDesktopProviderCredentialBroker,
   dialogMessageRecordToAgentRuntimeMessage,
   executeOpenAiCompatibleChatCompletion,
   executePlatformChatCompletionWithFallback,
@@ -714,12 +715,12 @@ export async function resolveDesktopOpenAiCompatibleProvider(args: {
   agentConfig: AgentRuntimeAgentConfig;
   fetchImpl?: typeof fetch;
   tools?: Record<string, unknown>[];
-  /** Host credential broker; defaults to createDesktopHostCredentialBroker(). */
+  /** Provider credential broker; uses the desktop store mode with legacy file read fallback in system modes. */
   credentialBroker?: CredentialBroker;
 }): Promise<AgentRuntimeProvider> {
   const fetchImpl = args.fetchImpl ?? fetch;
   const credentialBroker =
-    args.credentialBroker ?? createDesktopHostCredentialBroker();
+    args.credentialBroker ?? createDesktopProviderCredentialBroker();
   const providerConfig = await resolveOpenAiCompatibleProviderConfig({
     agentConfig: args.agentConfig,
     env: args.env,
@@ -753,12 +754,12 @@ export async function resolveDesktopPlatformChatProvider(args: {
   tools?: Record<string, unknown>[];
   fallbackServers?: string[];
   requestTimeoutMs?: number;
-  /** Host credential broker; defaults to createDesktopHostCredentialBroker(). */
+  /** Provider credential broker; uses the desktop store mode with legacy file read fallback in system modes. */
   credentialBroker?: CredentialBroker;
 }): Promise<AgentRuntimeProvider> {
   const fetchImpl = args.fetchImpl ?? fetch;
   const credentialBroker =
-    args.credentialBroker ?? createDesktopHostCredentialBroker();
+    args.credentialBroker ?? createDesktopProviderCredentialBroker();
   const providerConfig = await resolvePlatformChatProviderConfig({
     agentConfig: args.agentConfig,
     env: args.env,
@@ -1038,7 +1039,7 @@ export async function resolveDesktopConfiguredProvider(args: {
       agentConfig: args.agentConfig,
       fetchImpl: args.fetchImpl ?? fetch,
       tools: args.tools ?? [],
-      ...(args.credentialBroker ? { credentialBroker: args.credentialBroker } : {}),
+      credentialBroker: args.credentialBroker ?? createDesktopProviderCredentialBroker(),
       ...(args.apiKeyRefResolver ? { apiKeyRefResolver: args.apiKeyRefResolver } : {}),
     });
     if (customNativeProvider) return customNativeProvider;

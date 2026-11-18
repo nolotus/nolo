@@ -1,6 +1,7 @@
 import {
   assertCredentialRef,
   createDesktopHostCredentialBroker,
+  createDesktopProviderCredentialBroker,
   type CredentialBroker,
 } from "agent-runtime";
 import { isRecord } from "core/isRecord";
@@ -78,10 +79,11 @@ export async function handleDesktopCredentialsPost(
     return json({ error: "invalid_ref" }, 400);
   }
 
-  // Desktop host default: darwin Keychain (+ file lazy promote); file elsewhere.
-  const broker = deps.broker ?? createDesktopHostCredentialBroker();
-
   try {
+    // Keep host reads/writes unchanged, but delete every copy a provider could read.
+    const broker = deps.broker ?? (op === "delete"
+      ? createDesktopProviderCredentialBroker({ env })
+      : createDesktopHostCredentialBroker({ env }));
     if (op === "get") {
       const secret = await broker.get(ref);
       return json({ ok: true, secret: secret ?? null });
