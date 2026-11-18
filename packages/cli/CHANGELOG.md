@@ -1,4 +1,11 @@
 
+## 0.243.0-alpha.3 (2026-11-18)
+
+### Bug Fixes
+
+* **desktop:** /rpc/* 不再落 SPA 壳，桌面不再为内嵌 runtime 打误导性 error ([7a513ac](https://github.com/nolotus/bun-nolo/commit/7a513ac39e55324956b910f9edbd784c2d17752b))
+
+
 ## 0.243.0-alpha.2 (2026-11-18)
 
 ### Bug Fixes

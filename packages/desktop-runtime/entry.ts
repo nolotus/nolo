@@ -87,6 +87,7 @@ const renderDesktopShellHtml = (language: Language): string => {
   <link rel="icon" href="/public/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="${assets.css}" />
   <script>window.__NOLO_DESKTOP__=true;</script>
+  <script>window.__NOLO_EMBEDDED_RUNTIME__=true;</script>
   <script>window.__SSR_LANG__=${serializeInlineJson(language)};</script>
   <script>window.__NOLO_ASSETS__=${serializeInlineJson({
     artifactRuntimeJs: assets.artifactRuntimeJs,
@@ -132,7 +133,10 @@ export const bootstrapServer = async (): Promise<void> => {
 
         // Unknown API routes must never fall through to the SPA document.
         // This keeps server-only developer tools unavailable in the standalone runtime.
-        if (url.pathname.startsWith("/api/")) {
+        // `/rpc/*` belongs to the platform data server, not this runtime: answering
+        // with the SPA shell made clients parse HTML as JSON and log a false
+        // "Error fetching memberships" on every desktop boot.
+        if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/rpc/")) {
           return new Response("Not Found", { status: 404 });
         }
 

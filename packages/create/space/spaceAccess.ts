@@ -61,6 +61,41 @@ export const clearMembershipFetchCache = (): void => {
 };
 const MEMBERSHIP_FETCH_CACHE_TTL_MS = 30_000;
 
+/**
+ * 只有桌面壳的内嵌运行时（`packages/desktop-runtime/entry.ts` 注入的
+ * `window.__NOLO_EMBEDDED_RUNTIME__`）才配这个标记。
+ *
+ * 不能用 `__NOLO_DESKTOP__` 代替：网页预览（`?noloDesktop=1`，见
+ * packages/web/entry.tsx）与 `NOLO_DESKTOP=1` 的 SSR 也会注入它，而那些场景的
+ * 平台服务器是**有** `/rpc/*` 的（packages/server/handleRequest），按它跳过会把
+ * 合法的同源数据服务一起丢掉。
+ */
+export type DesktopShellRuntime = {
+  isEmbeddedRuntime: boolean;
+  runtimeOrigin?: string;
+};
+
+const resolveDesktopShellRuntime = (): DesktopShellRuntime => {
+  if (typeof window === "undefined") return { isEmbeddedRuntime: false };
+  const shellWindow = window as Window & { __NOLO_EMBEDDED_RUNTIME__?: boolean };
+  return {
+    isEmbeddedRuntime: shellWindow.__NOLO_EMBEDDED_RUNTIME__ === true,
+    runtimeOrigin: shellWindow.location?.origin,
+  };
+};
+
+export const isEmbeddedRuntimeServer = (
+  server: string,
+  runtime: DesktopShellRuntime = resolveDesktopShellRuntime()
+): boolean => {
+  if (!runtime.isEmbeddedRuntime || !runtime.runtimeOrigin) return false;
+  try {
+    return new URL(server).origin === runtime.runtimeOrigin;
+  } catch {
+    return false;
+  }
+};
+
 async function fetchMembershipsFromServer(
   server: string,
   token: string | null,
@@ -108,6 +143,10 @@ export const fetchRemoteUserSpaceMemberships = (
   userId: string,
   timeoutMs = 5000
 ): Promise<RemoteMembershipFetchResult> => {
+  // 桌面壳自己的内嵌 origin 不是数据服务器：不发请求、也不写缓存/打日志。
+  if (isEmbeddedRuntimeServer(server)) {
+    return Promise.resolve({ ok: false, memberships: [] });
+  }
   const cacheKey = `${server}|${userId}`;
   const cached = membershipFetchCache.get(cacheKey);
   if (cached) return cached;
