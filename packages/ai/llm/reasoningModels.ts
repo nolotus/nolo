@@ -19,6 +19,10 @@ const REASONING_MODEL_NAMES = new Set([
   "gemini-3.7-flash",
   "gemini-3.8-flash",
   "gemini-3.6-flash",
+  // Gemini 4 Neon：Google OpenAI 兼容端点接受 reasoning_effort（官方映射表
+  // https://aistudio.google.com/docs/openai#thinking，2026-11-19 核对，
+  // xhigh 仅 gemini-4-neon / gemini-4-hydrogen 支持）。
+  "gemini-4-neon",
   // Legacy Gemini ids — 已从模型注册表下线，保留只为存量 agent 的 reasoning UI。
   "gemini-3.5-flash",
   "gemini-3-flash-preview",
@@ -38,6 +42,7 @@ const REASONING_MODEL_NAMES = new Set([
   "glm-5.3",
   "glm-5.2",
   "kimi-k3",
+  "kimi-k3.1-pro",
   // Legacy OpenAI catalog ids — still support reasoning UI for agents that
   // were never re-seeded after GPT-5.4 / GPT-5 were retired from the picker.
   "gpt-5.4",
@@ -129,13 +134,23 @@ export function clampReasoningEffort(
   const normalized = effort === "off" ? "none" : effort;
 
   const providerLower = (provider ?? "").toLowerCase();
-  if (THINKING_MECHANISM_PROVIDERS.has(providerLower)) {
+  // 模型级真值优先于 provider 级「Thinking 机制」判定：Google Gemini 默认只走
+  // thinking_config，但其 OpenAI 兼容 wire 接受 reasoning_effort 的模型（override
+  // 表里有官方文档证据，如 gemini-4-neon）必须保留该参数；无模型级证据的
+  // google / anthropic 模型维持原行为（不下发）。
+  const modelCapability = model
+    ? resolveModelReasoningCapabilityWithCache(provider, model)
+    : undefined;
+  const hasModelLevelEfforts =
+    Boolean(modelCapability?.found && modelCapability.supportsReasoning) &&
+    (modelCapability?.efforts.length ?? 0) > 0;
+  if (THINKING_MECHANISM_PROVIDERS.has(providerLower) && !hasModelLevelEfforts) {
     return undefined;
   }
 
   // 模型不支持推理强度则不下发该字段。
-  if (model) {
-    const cap = resolveModelReasoningCapabilityWithCache(provider, model);
+  if (modelCapability) {
+    const cap = modelCapability;
     if (cap.found) {
       if (!cap.supportsReasoning || cap.efforts.length === 0) {
         return undefined;

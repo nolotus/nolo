@@ -29,6 +29,7 @@ import {
   PLATFORM_HOSTED_GLM_53_FLASH_BASETEN_PRICE,
   resolvePlatformHostedRouting,
 } from "ai/llm/platformHosted";
+import { isGeminiNeonModel } from "ai/llm/geminiNeonPricing";
 
 // ==================== 接口定义 ====================
 
@@ -159,6 +160,12 @@ const scaleModelServiceTierPrice = (
   ...price,
   input: price.input * inputOutputMultiplier,
   output: price.output * inputOutputMultiplier,
+  // 缓存命中单价有两个历史字段（见 resolveModelPrice 的归一说明）：只缩放
+  // cachingWrite/cachingRead 会漏掉已归一出来的 inputCacheHit，使缓存命中仍按
+  // Standard 价收（Gemini 4 Neon Flex 1M 命中应为 0.6，漏缩放则变回 1.2）。
+  ...(typeof cacheMultiplier === "number" && typeof price.inputCacheHit === "number"
+    ? { inputCacheHit: price.inputCacheHit * cacheMultiplier }
+    : {}),
   ...(typeof cacheMultiplier === "number" && typeof price.cachingWrite === "number"
     ? { cachingWrite: price.cachingWrite * cacheMultiplier }
     : {}),
@@ -196,6 +203,15 @@ const resolveGoogleServiceTierPrice = (
     );
   }
 
+  // 显式声明了档位价的模型只认**声明过的**档位：未声明的档位说明平台没有这条线路
+  // （Gemini 4 Neon 只有同步 chat/completions 路由，官方 Batch API 是独立的异步接口，
+  // 本仓库不接），此时按 Standard 计——不能套用下面的 0.5× 兜底，否则同步请求会拿到
+  // 一个并不存在的 Batch 折扣。未声明任何档位价的模型（多数 Google 直连模型）保持
+  // 既有兜底语义不变。
+  if (model.serviceTierPriceMultipliers) {
+    return priceWithImageOutput;
+  }
+
   if (normalizedTier === "flex" || normalizedTier === "batch") {
     return scaleModelInputOutputPrice(priceWithImageOutput, 0.5);
   }
@@ -228,6 +244,20 @@ const resolveEffectiveModelPrice = ({
     return getPlatformHostedDeepSeekV4Price(model.name, nowMs);
   }
   if (provider === "google") {
+    return resolveGoogleServiceTierPrice(model, resolvedPrice, billingServiceTier);
+  }
+  // 平台托管但上游是 Google 的模型（provider 保持 nolo 作为**计费身份**，见
+  // chatProxyRouting 的 hostedPrimaryRequest）：官方 Flex / Priority 档位倍率
+  // 必须照样生效，否则托管 Flex 请求会按 Standard 全价收（Official 价目：
+  // Flex = 0.5×、Priority = 1.8×）。平台没有 Batch 线路，batch 不在此列。
+  // 只认目录**显式声明**了 serviceTierPriceMultipliers 的模型：不给未声明档位价的
+  // 其它托管 Google 模型套用 resolveGoogleServiceTierPrice 里的 0.5×/1.8× 硬编码兜底，
+  // 避免扩大改动面。
+  if (
+    provider === "nolo" &&
+    model.serviceTierPriceMultipliers &&
+    resolvePlatformHostedRouting(model.name)?.usageProvider === "google"
+  ) {
     return resolveGoogleServiceTierPrice(model, resolvedPrice, billingServiceTier);
   }
   if (provider === "runinfra" || provider === "baseten") {
@@ -687,6 +717,20 @@ const calculateBasicCost = (
     case "google":
       if (model.name.includes("gemini-3")) {
         return calculateAnthropicCost(resolvedPrice, usage, externalPrice);
+      }
+      // 隐式缓存命中折扣：声明了 cachingRead（→ resolveModelPrice 已回填
+      // inputCacheHit）的 Gemini 模型，命中量必须按缓存价而不是输入全价计。
+      // 例：gemini-4-neon 输入 24 credits/1M、命中 1.2 credits/1M——走
+      // calculateSimpleCost 会把命中部分按 24 收，高 20 倍。
+      // **只对显式登记采用这套计费口径的模型生效**：resolveModelPrice 的
+      // cachingRead→inputCacheHit 归一对所有模型都跑，若这里只判字段存在，已上架的
+      // google/gemini-2.5-pro、google/gemini-4-argon 等模型的缓存命中价会一并被改写
+      // （1M 全命中从 10 → 2.5、16 → 0.8）。既有 Google 模型继续按原口径（输入全价）计。
+      if (
+        typeof resolvedPrice.inputCacheHit === "number" &&
+        isGeminiNeonModel(model.name)
+      ) {
+        return calculateCacheBasedCost(resolvedPrice, usage, externalPrice);
       }
       return calculateSimpleCost(resolvedPrice, usage, externalPrice);
     case "openrouter": {

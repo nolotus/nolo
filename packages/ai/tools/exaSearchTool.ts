@@ -42,6 +42,12 @@ export const exaSearchSchema = {
                 items: { type: "string" },
                 description: "排除这些域名下的结果（例如 [\"pinterest.com\"]）。不填则不排除。",
             },
+            provider: {
+                type: "string",
+                enum: ["deepseek"],
+                description:
+                    "搜索引擎提供方。默认请省略——省略即走服务端既有通道（Exa→Octen）；仅当用户明确要求用 DeepSeek 搜索时才填 \"deepseek\"。选 deepseek 时不支持 category / timeRange / includeDomains / excludeDomains，这些收窄只能写进 query（如 site:、after:）。",
+            },
         },
         required: ["query"],
     },
@@ -186,6 +192,7 @@ export const exaSearchFunc = async (
         includeDomains,
         excludeDomains,
         includeContent,
+        provider,
     } = input;
 
     // 契约见 docs/plans/2026-10-21-exa-3-0-sync.md 第 3 节：
@@ -205,6 +212,11 @@ export const exaSearchFunc = async (
     // legacy 兼容：includeContent 只在调用方显式给出时透传，服务端把它映射为 detail；
     // 模型侧已不再暴露该字段，这里不会主动补默认值。
     if (typeof includeContent === "boolean") body.includeContent = includeContent;
+
+    // 显式选路：只有**缺省**（undefined / 字段不存在）才回落到默认通道。
+    // null、空串、拼错的取值都原样转发，由服务端 400 拒绝（失败关闭）——
+    // 静默丢弃会把显式选路失败变成默认 Exa/Octen 调用并正常扣费。
+    if (provider !== undefined) body.provider = provider;
 
     // 定档信号：只发拿得到的键（服务端按缺失跳过规则，见契约 §3/§10）。
     const signals = resolvePlanSignals(thunkApi, context);

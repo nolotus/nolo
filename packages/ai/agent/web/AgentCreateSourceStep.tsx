@@ -4,7 +4,7 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useNavigate } from "app/routing";
+import { useNavigate, Link } from "app/routing";
 import Button from "render/web/ui/Button";
 import { Select, SelectItem } from "render/web/ui/Select";
 import { SelectGroup, SelectGroupLabel } from "render/web/ui/Select";
@@ -325,31 +325,37 @@ const AgentCreatePlatformPanel: React.FC<{
           onChange={(e) => setPrompt(e.target.value)}
         />
       </label>
-      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-        <Select
-          className="agent-create-esc-source-select"
-          label={t("createAgent.quickCreate.modelLabel", "模型")}
-          selectedKey={platformModel}
-          isDisabled={busy}
-          placeholder={t("createAgent.quickCreate.modelPlaceholder", "选择模型")}
-          onSelectionChange={(key) =>
-            setPlatformModel(
-              key != null
-                ? String(key)
-                : PLATFORM_QUICK_CREATE_MODEL.name
-            )
-          }
-          description={t(
-            "createAgent.quickCreate.platformModelHint",
-            "平台模型 · 默认 DeepSeek V4 Flash，可更换"
-          )}
-        >
-          {platformModelOptions.map((m) => (
-            <SelectItem key={m.value} id={m.value} textValue={m.label}>
-              <ModelOptionLabel label={m.label} hasVision={m.hasVision} />
-            </SelectItem>
-          ))}
-        </Select>
+      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceModelRow)}>
+        <div {...stylex.props(afs.createSourceModelRowMain)}>
+          <Select
+            className="agent-create-esc-source-select"
+            label={t("createAgent.quickCreate.modelLabel", "模型")}
+            selectedKey={platformModel}
+            isDisabled={busy}
+            placeholder={t("createAgent.quickCreate.modelPlaceholder", "选择模型")}
+            onSelectionChange={(key) =>
+              setPlatformModel(
+                key != null
+                  ? String(key)
+                  : PLATFORM_QUICK_CREATE_MODEL.name
+              )
+            }
+            description={t(
+              "createAgent.quickCreate.platformModelHint",
+              "平台模型 · 默认 DeepSeek V4 Flash，可更换"
+            )}
+          >
+            {platformModelOptions.map((m) => (
+              <SelectItem key={m.value} id={m.value} textValue={m.label}>
+                <ModelOptionLabel label={m.label} hasVision={m.hasVision} />
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+        {/* 平台模型的积分单价随模型不同，选完就地可查，避免为看价格跳出创建流程。 */}
+        <Button as={Link} to="/pricing" variant="ghost" size="small">
+          {t("createAgent.quickCreate.viewPricing", "查看价格")}
+        </Button>
       </div>
       <AgentCreateSourceActionRow
         busy={busy}

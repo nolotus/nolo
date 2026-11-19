@@ -6,6 +6,11 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 
 /** Platform-hosted Kimi models (catalog + routing). Upstream is private. */
 export const PLATFORM_HOSTED_KIMI_K3_MODEL = "kimi-k3";
+/**
+ * Kimi K3.1 Pro（2026-11-18 上架）：接替 K3，上游 Baseten
+ * K3 / K2.6 已从目录撤下但常量与路由保留，供存量记录解析（下架 ≠ 删除）。
+ */
+export const PLATFORM_HOSTED_KIMI_K31_PRO_MODEL = "kimi-k3.1-pro";
 export const PLATFORM_HOSTED_KIMI_K26_MODEL = "kimi-k2.6";
 
 /** User-facing / catalog provider id. */
@@ -77,6 +82,7 @@ export const KIMI_PLATFORM_FALLBACK_STATUSES = [
 
 export const isOllamaCloudKimiModel = (model?: string | null): boolean =>
   model === PLATFORM_HOSTED_KIMI_K3_MODEL ||
+  model === PLATFORM_HOSTED_KIMI_K31_PRO_MODEL ||
   model === PLATFORM_HOSTED_KIMI_K26_MODEL;
 
 export const isFireworksKimiModel = (model?: string | null): boolean =>

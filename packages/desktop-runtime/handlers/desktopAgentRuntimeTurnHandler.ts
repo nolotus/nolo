@@ -12,6 +12,8 @@ import type { LocalAgentActionGate, LocalAgentLoopEvent } from "agent-runtime/lo
 import type { AgentRuntimeToolResult } from "agent-runtime/hostAdapter";
 import { randomUUID } from "node:crypto";
 import { parseToken } from "core/authToken";
+import { getCurrentProfile, getProfileTokens, loadProfileConfig } from "../../cli/client/profileConfig";
+import type { DesktopLegacyRecordSession } from "./desktopAgentRuntimeAdapter";
 const WEB_AUTH_TOKEN_COOKIE = "nolo_auth_token";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -67,6 +69,7 @@ type DesktopAgentRuntimeTurnHandlerDeps = {
   env?: DesktopAgentRuntimeEnv;
   store?: DesktopAgentRuntimeRecordStore;
   fetchImpl?: typeof fetch;
+  loadProfile?: typeof loadProfileConfig;
   runTurn?: (input: DesktopTextOnlyAgentRuntimeTurnInput) => Promise<unknown>;
   /** 注入点（测试用）；默认用进程内单例 desktopActionGateRegistry。 */
   gateRegistry?: DesktopActionGateRegistry;
@@ -108,6 +111,27 @@ function extractDesktopRequestAuthToken(req: Request) {
     .find((part) => part.startsWith(`${WEB_AUTH_TOKEN_COOKIE}=`))
     ?.slice(`${WEB_AUTH_TOKEN_COOKIE}=`.length);
   return cookieToken ? decodeURIComponent(cookieToken) : "";
+}
+
+// The request must present the same bearer as a profile that explicitly pairs it
+// with a server. Neither a host env token nor a default origin can fill a gap.
+function resolveDesktopLegacyRecordSession(
+  req: Request,
+  loadProfile: typeof loadProfileConfig,
+): DesktopLegacyRecordSession | undefined {
+  const token = /^Bearer ([^\s]+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
+  if (!token) return;
+  try {
+    const profile = loadProfile();
+    const serverUrl = getCurrentProfile(profile)?.serverUrl;
+    if (!serverUrl || !getProfileTokens(profile).includes(token)) return;
+    // loadProfileConfig upgrades official nolo.chat HTTP origins; all other origins must already be HTTPS.
+    const url = new URL(serverUrl);
+    if (url.protocol !== "https:" || url.href !== `${url.origin}/`) return;
+    return { token, serverOrigin: url.origin };
+  } catch {
+    return;
+  }
 }
 
 function resolveDesktopTurnRequestEnv(req: Request, env: DesktopAgentRuntimeEnv): DesktopAgentRuntimeEnv {
@@ -255,6 +279,9 @@ export async function handleDesktopAgentRuntimeTurnPost(
     env,
     fetchImpl: deps.fetchImpl,
   });
+  const legacyRecordSession = body.agentConfigSnapshot
+    ? resolveDesktopLegacyRecordSession(req, deps.loadProfile ?? loadProfileConfig)
+    : undefined;
   const runTurn = deps.runTurn ?? runDesktopAgentRuntimeTurn;
 
   // Turn-scoped abort: a client disconnect (webview stop / torn-down SSE) must
@@ -301,6 +328,7 @@ export async function handleDesktopAgentRuntimeTurnPost(
         try {
           const result = await runTurn({
             env,
+            ...(legacyRecordSession ? { legacyRecordSession } : {}),
             store,
             agentRef: body.agentRef,
             input: body.input,

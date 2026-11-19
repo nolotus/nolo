@@ -80,6 +80,7 @@ import {
   createDesktopAgentRuntimeRecordStoreActions,
   createDesktopAgentRuntimeRequestScopedActions,
   resolveDesktopConfiguredProvider,
+  type DesktopLegacyRecordSession,
   resolveDesktopAgentRuntimeUserId,
   DESKTOP_REMOTE_REQUEST_TIMEOUT_MS,
   type DesktopAgentRuntimeActions,
@@ -172,6 +173,7 @@ import {
 import { readDesktopAccountSettings } from "./desktopAccountSettings";
 
 type DesktopAgentRuntimeBaseTurnInput = {
+  legacyRecordSession?: DesktopLegacyRecordSession;
   env: DesktopAgentRuntimeEnv;
   store: DesktopAgentRuntimeRecordStore;
   agentRef: string;
@@ -914,6 +916,7 @@ export async function rejectDesktopTextOnlyAgentRuntimeToolCall(
 
 
 export async function resolveDesktopTextOnlyAgentRuntimeProvider(args: {
+  legacyRecordSession?: DesktopLegacyRecordSession;
   env: DesktopAgentRuntimeEnv;
   agentConfig: AgentRuntimeAgentConfig;
   fetchImpl?: typeof fetch;
@@ -921,6 +924,7 @@ export async function resolveDesktopTextOnlyAgentRuntimeProvider(args: {
 }): Promise<AgentRuntimeProvider> {
   return resolveDesktopConfiguredProvider({
     env: args.env,
+    legacyRecordSession: args.legacyRecordSession,
     agentConfig: args.agentConfig,
     fetchImpl: args.fetchImpl,
     ...(args.requestTimeoutMs ? { requestTimeoutMs: args.requestTimeoutMs } : {}),
@@ -928,6 +932,7 @@ export async function resolveDesktopTextOnlyAgentRuntimeProvider(args: {
 }
 
 export function createDesktopTextOnlyAgentRuntimeActions(args: {
+  legacyRecordSession?: DesktopLegacyRecordSession;
   env: DesktopAgentRuntimeEnv;
   store: DesktopAgentRuntimeRecordStore;
   now: () => number;
@@ -941,6 +946,7 @@ export function createDesktopTextOnlyAgentRuntimeActions(args: {
     createId: args.createId,
     resolveProvider: async (agentConfig, options) => ({ ...(await resolveDesktopTextOnlyAgentRuntimeProvider({
       env: args.env,
+      legacyRecordSession: args.legacyRecordSession,
       // text-only provider 本身不带工具，这里只需应用 prompt 覆盖（摘要不带
       // agent 人设）；覆盖只作用于本次解析副本。
       agentConfig: options?.prompt !== undefined
@@ -983,6 +989,7 @@ export function resolveDesktopEffectiveEnabledPacks(args: {
 }
 
 export function createDesktopAgentRuntimeActions(args: {
+  legacyRecordSession?: DesktopLegacyRecordSession;
   env: DesktopAgentRuntimeEnv;
   store: DesktopAgentRuntimeRecordStore;
   now: () => number;
@@ -1218,6 +1225,7 @@ export function createDesktopAgentRuntimeActions(args: {
         : agentConfig;
       const resolvedProvider = await resolveDesktopConfiguredProvider({
         env: args.env,
+        legacyRecordSession: args.legacyRecordSession,
         agentConfig: resolvedAgentConfig,
         fetchImpl: args.fetchImpl,
         requestTimeoutMs: DESKTOP_REMOTE_REQUEST_TIMEOUT_MS,
@@ -1330,6 +1338,7 @@ export async function runDesktopTextOnlyAgentRuntimeTurn(
   try {
     const baseActions = createDesktopTextOnlyAgentRuntimeActions({
       env: input.env,
+      legacyRecordSession: input.legacyRecordSession,
       store: input.store,
       now: input.now ?? Date.now,
       createId: input.createId ?? createDesktopAgentRuntimeDialogId,
@@ -1688,6 +1697,7 @@ async function runDesktopAgentRuntimeTurnImpl(
 
   const baseActions = createDesktopAgentRuntimeActions({
     env: input.env,
+    legacyRecordSession: input.legacyRecordSession,
     store: input.store,
     now: input.now ?? Date.now,
     createId: input.createId ?? createDesktopAgentRuntimeDialogId,

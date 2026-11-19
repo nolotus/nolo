@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   unlinkSync,
@@ -15,6 +16,7 @@ import {
   type CredentialRef,
 } from "./credentialBroker";
 import {
+  credentialMigrationMarkerPath,
   getLegacyCredentialPath,
   migrateLegacyCredentialFile,
   type CredentialMigrationOptions,
@@ -93,7 +95,10 @@ export function readApiKeyCredential(
   migration?: CredentialMigrationOptions,
 ): string | null {
   migrateApiKeyCredentialIfNeeded(ref, homeDir, migration);
-  const path = getApiKeyCredentialPath(ref, homeDir);
+  return readApiKeyCredentialFile(getApiKeyCredentialPath(ref, homeDir));
+}
+
+function readApiKeyCredentialFile(path: string): string | null {
   if (!existsSync(path)) return null;
   try {
     const raw = readFileSync(path, "utf8");
@@ -169,6 +174,46 @@ export function createFileCredentialBroker(
     },
     has(ref) {
       return hasApiKeyCredential(ref, homeDir, migration);
+    },
+  };
+}
+
+function unlinkCredentialFileIfPresent(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+/** Read and remove compatible file keys without migrating or writing them. */
+export function createLegacyFileCredentialBroker(
+  { legacyHomeDir = homedir() }: { legacyHomeDir?: string } = {},
+): Pick<CredentialBroker, "get" | "has" | "delete"> {
+  const legacyPathFor = (ref: CredentialRef) =>
+    getLegacyCredentialPath(join("keys", credentialRefToFileName(ref)), legacyHomeDir);
+  const get = (ref: CredentialRef): string | null => {
+    const canonicalPath = getApiKeyCredentialPath(ref);
+    if (existsSync(canonicalPath)) return readApiKeyCredentialFile(canonicalPath);
+    // A migrated (and subsequently deleted) key must not be resurrected.
+    if (existsSync(credentialMigrationMarkerPath(canonicalPath))) return null;
+    const legacyPath = legacyPathFor(ref);
+    if (!lstatSync(legacyPath, { throwIfNoEntry: false })?.isFile()) return null;
+    return readApiKeyCredentialFile(legacyPath);
+  };
+  return {
+    get,
+    has: (ref) => get(ref) !== null,
+    delete(ref) {
+      // Clear the old copy even when hidden by the canonical file or marker.
+      // The paths can be identical when NOLO_HOME is unset.
+      const canonicalPath = getApiKeyCredentialPath(ref);
+      const legacyPath = legacyPathFor(ref);
+      try {
+        unlinkCredentialFileIfPresent(canonicalPath);
+      } finally {
+        if (legacyPath !== canonicalPath) unlinkCredentialFileIfPresent(legacyPath);
+      }
     },
   };
 }

@@ -26,7 +26,6 @@ export const CATALOG_COMPOSITE_WEIGHTS = {
   freshness: 3,
   featured: 2.5,
   priceFriendliness: 1.5,
-  capability: 0.5,
 } as const;
 
 /** 新鲜度半衰期：90 天。 */
@@ -43,8 +42,6 @@ export interface CatalogSortableModel {
   releasedAtMs?: number | null;
   /** 运营置顶权重（0/1/2，越大越靠前）；缺省 0。 */
   featuredRank?: number | null;
-  /** 能力档（0..1，可由 modelAbility/tier 推导）；缺省 0.5。 */
-  capabilityScore?: number | null;
 }
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
@@ -70,12 +67,10 @@ export function catalogCompositeScore(
 ): number {
   const w = CATALOG_COMPOSITE_WEIGHTS;
   const featured = Math.min(2, Math.max(0, model.featuredRank ?? 0)) / 2;
-  const capability = clamp01(model.capabilityScore ?? 0.5);
   return (
     freshnessScore(model.releasedAtMs, nowMs) * w.freshness +
     featured * w.featured +
-    priceFriendlinessScore(model.price?.output) * w.priceFriendliness +
-    capability * w.capability
+    priceFriendlinessScore(model.price?.output) * w.priceFriendliness
   );
 }
 

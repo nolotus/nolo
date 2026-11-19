@@ -72,6 +72,18 @@ export const THINKING_MECHANISM_PROVIDERS = new Set(["anthropic", "google"]);
  * 匹配规则：prefix 越长越优先；同长度按声明顺序。
  */
 const MODEL_REASONING_OVERRIDES: ModelReasoningOverride[] = [
+  {
+    // Google 官方 OpenAI 兼容文档给出 gemini-4-neon 的 reasoning_effort 映射
+    // （minimal→low、low→low、medium→medium、high→high、xhigh→xhigh，其中
+    // xhigh 仅 gemini-4-neon 与 gemini-4-hydrogen 支持）：
+    // https://aistudio.google.com/docs/openai#thinking（2026-11-19 核对）。
+    // 只声明该模型：Google 的其它 Gemini 仍走 thinking_config，不在此列。
+    providers: ["google"],
+    prefix: "gemini-4-neon",
+    exact: true,
+    efforts: ["low", "medium", "high", "xhigh"] as ReasoningEffort[],
+    note: "Gemini 4 Neon 在 Google OpenAI 兼容端点上的 reasoning_effort 档位（官方映射表）",
+  },
   // Platform GPT models accept medium even though the nolo provider fallback
   // describes DeepSeek's narrower low/high/max scale.
   ...["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-astra"].map((prefix) => ({
@@ -239,15 +251,10 @@ export function resolveModelReasoningCapability(
   const p = (provider ?? "").toLowerCase();
   const m = (model ?? "").trim();
 
-  if (THINKING_MECHANISM_PROVIDERS.has(p)) {
-    return {
-      found: false,
-      supportsReasoning: true, // 有推理能力，只是走 Thinking 机制而非 effort
-      efforts: [],
-      source: "provider-map",
-    };
-  }
-
+  // 模型级 override 先于 provider 级「Thinking 机制」判定：Google / Anthropic 默认
+  // 走 thinking_config 而不是 reasoning_effort，但个别模型在**特定的 OpenAI 兼容
+  // wire** 上接受 reasoning_effort（如 gemini-4-neon，见 override 表 note 的官方
+  // 文档）。只有显式声明了该 provider 的 override 才生效，其余模型行为不变。
   if (m) {
     const override = matchOverride(p, m);
     if (override) {
@@ -269,6 +276,15 @@ export function resolveModelReasoningCapability(
         source: "model-override",
       };
     }
+  }
+
+  if (THINKING_MECHANISM_PROVIDERS.has(p)) {
+    return {
+      found: false,
+      supportsReasoning: true, // 有推理能力，只是走 Thinking 机制而非 effort
+      efforts: [],
+      source: "provider-map",
+    };
   }
 
   const providerEfforts = PROVIDER_REASONING_EFFORT_VALUES[p];

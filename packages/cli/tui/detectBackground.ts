@@ -128,7 +128,7 @@ type Stdin = NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void };
  * puts it in flowing mode and any bytes that arrive during the probe window are
  * consumed and discarded, so whatever attaches next silently receives nothing.
  */
-function isTerminalDevice(stream: unknown): boolean {
+export function isTerminalDevice(stream: unknown): boolean {
   return stream instanceof ReadStream;
 }
 

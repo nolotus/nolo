@@ -147,10 +147,12 @@ const ensureDialogRuntimeState = (
 /**
  * Reset per-session runtime state when a dialog is (re)initialized.
  * Resets: tokens, loopStopReason, pendingUserInputQueue.
+ * A live execution owns session state; initialization must not revoke it.
  * Preserves: activeControllers, pendingFiles, pendingRawData.
  */
 export function resetDialogRuntimeSessionState(dialogKey?: string | null): void {
   const runtime = ensureDialogRuntimeState(dialogKey);
+  if (Object.values(runtime.activeControllers).some(controller => !controller.signal.aborted)) return;
   runtime.tokens = createEmptyTokenStats();
   runtime.loopStopReason = null;
   runtime.turnPhase = null;

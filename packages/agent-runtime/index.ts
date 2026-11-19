@@ -146,7 +146,10 @@ export type {
   WindowsCredentialRunner,
   WindowsCredentialRunnerResult,
 } from "./windowsCredentialManagerBroker";
-export { createDesktopHostCredentialBroker } from "./desktopHostCredentialBroker";
+export {
+  createDesktopHostCredentialBroker,
+  createDesktopProviderCredentialBroker,
+} from "./desktopHostCredentialBroker";
 export type {
   CreateDesktopHostCredentialBrokerOptions,
   DesktopCredentialStoreMode,

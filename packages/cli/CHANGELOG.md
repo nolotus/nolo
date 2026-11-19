@@ -1,4 +1,34 @@
 
+## 0.227.0 (2026-11-19)
+
+### Features
+
+* **agent:** /create/agent 平台模型旁新增「查看价格」入口 ([a5f1105](https://github.com/nolotus/bun-nolo/commit/a5f1105937502d1f5228b5b3d74b6550acdaf5ef))
+* **ai:** 平台模型目录换代 Kimi K3.1 Pro，五条旧代撤下并透明指向接替者 ([f0f08f7](https://github.com/nolotus/bun-nolo/commit/f0f08f710ac9d35f9fe0f82a5fdc27a455d57f09))
+* **antigravity:** register verified Gemini Neon effort variants ([bc7edc2](https://github.com/nolotus/bun-nolo/commit/bc7edc205d7930892e519347de603c32f4a44d92))
+* **gemini:** add Neon hosting with consistent synchronous billing ([c339738](https://github.com/nolotus/bun-nolo/commit/c33973834942d56e6e6b7c81ac8223e31f7d440a))
+* **search:** add opt-in DeepSeek search provider ([460fcd1](https://github.com/nolotus/bun-nolo/commit/460fcd175a111a8ec13f94cd23cf81155230f983))
+
+### Bug Fixes
+
+* **agent:** require task-specific evidence for difficulty escalation ([05a0f8a](https://github.com/nolotus/bun-nolo/commit/05a0f8a34388b355bbfbbbf6cf4113db2efe7975))
+* **agent:** verify user outcomes before closing tasks ([b7d75d4](https://github.com/nolotus/bun-nolo/commit/b7d75d438ea9968ae4bca135879cc01ede140025))
+* **app:** 删除前向服务端确认实体不存在再清理残留行 ([51f3825](https://github.com/nolotus/bun-nolo/commit/51f382523a938f3f14d41eb176d8a4637d6656c0))
+* **chat:** preserve first-send ownership and report unstarted replies ([6c5e841](https://github.com/nolotus/bun-nolo/commit/6c5e84184d659ca984206bf8ea0dd648c407756a))
+* **cli:** compact historical tool calls without recorded results ([c7d50a6](https://github.com/nolotus/bun-nolo/commit/c7d50a6200a3811a8ade2c937e2319613c7b5268))
+* **cli:** 优先读取 Wayland 剪贴板的 UTF-8 文本 ([2cba312](https://github.com/nolotus/bun-nolo/commit/2cba3123d28aa66274def4a225c7583ea8e9665c))
+* **context:** compact interrupted tool batches across CLI and web ([ae3ffa8](https://github.com/nolotus/bun-nolo/commit/ae3ffa836e8d443c2b1eaeff4ad17b9ffaa63a3b))
+* **database:** 同步失败日志带上服务端稳定错误码 ([b213e6c](https://github.com/nolotus/bun-nolo/commit/b213e6c43eb7bbd194826ee2ad013cf7ee1aa118))
+* **desktop:** /rpc/* 不再落 SPA 壳，桌面不再为内嵌 runtime 打误导性 error ([7a513ac](https://github.com/nolotus/bun-nolo/commit/7a513ac39e55324956b910f9edbd784c2d17752b))
+* **desktop:** 4K 下软化活动指示器并给对话页「更多」按钮加毛玻璃底 ([ab8259b](https://github.com/nolotus/bun-nolo/commit/ab8259bf65f732daad3c17935c4e0528fb8cec1e))
+* **desktop:** 升级 electrobun 到 2.0.6 ([799963e](https://github.com/nolotus/bun-nolo/commit/799963e4b085d2f3c13f2f2166ed064499a69c10))
+* **desktop:** 桌面 turn 请求带上会话 bearer，修复已登录却 AUTH_NO_TOKEN ([6499b4a](https://github.com/nolotus/bun-nolo/commit/6499b4ae6f8b450ca1bfea3671d1bc2be0a60f60))
+* **desktop:** 桌面凭据链读旧文件库并统一删除语义 ([5ed5498](https://github.com/nolotus/bun-nolo/commit/5ed5498bd6984b47024d62961303ff99362dabb6))
+* **desktop:** 桌面壳按系统 locale 注入界面语言 ([4b4fa8f](https://github.com/nolotus/bun-nolo/commit/4b4fa8f96377cb5d9ca119208ebefdec793d36c7))
+* **openai:** scope GPT-6.2 Responses prompt layout to official routes ([7398e8d](https://github.com/nolotus/bun-nolo/commit/7398e8da3bf50341221945c7f77d367c551ac9c4))
+* **tui:** retry terminal background query after cold mount ([4273be7](https://github.com/nolotus/bun-nolo/commit/4273be7630106ffb7894da1eb352cba1363a2099))
+
+
 ## 0.226.0 (2026-11-18)
 
 ### Features

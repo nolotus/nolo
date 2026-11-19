@@ -818,6 +818,23 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   color: var(--text);
 }
 
+/* 对话页右上角的「更多」按钮（DialogMenu 的 actions 触发器）：默认透明背景下
+   与滚动文字混在一起。给它自己一层半透明毛玻璃底，让它明确成为一个可点控件。
+   注意不要用 ContentActionBar 的 --more：那个是通用对象动作条的溢出按钮，
+   对话页显式排除了它，改它等于改错地方。 */
+.topbar__button--dialog-actions {
+  background: color-mix(in srgb, var(--background) 82%, transparent);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  box-shadow: 0 1px 2px var(--shadowLight, rgba(15, 23, 42, 0.08));
+  color: var(--textSecondary);
+}
+
+.topbar__button--dialog-actions:hover {
+  background: color-mix(in srgb, var(--backgroundHover) 92%, transparent);
+  color: var(--text);
+}
+
 .topbar__button:disabled {
   opacity: 0.5;
   cursor: not-allowed;

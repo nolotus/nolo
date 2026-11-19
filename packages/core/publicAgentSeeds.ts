@@ -346,22 +346,24 @@ export const GLM_5_3_FLASH_DEF = defineAgentSeed({
   tags: ["nolo", "glm", "flash"],
 });
 
-// Claude 系 2026-09-24 广场重新上架：只上架最新一代（Fable 5.1 / Opus 5.5，
-// 真实 DeepInfra 上游、nolo 命名空间）。旧代 Sonnet 5 / Fable 5 不再有 seed——
-// 它们的广场入口以 catalog internal + retired 兼容条目收编，存量空间记录
-// （若还有）由 modelUpgradeTable / overlay 处理。
+// Claude 系 2026-09-24 广场重新上架：只上架最新一代（Opus 5.5 / Fable 5.2，
+// 真实上游、nolo 命名空间；2026-11-18 起 Fable 档由 5.1 换代为 5.2）。
+// 旧代 Sonnet 5 / Fable 5 不再有 seed——它们的广场入口以 catalog internal +
+// retired 兼容条目收编，存量空间记录（若还有）由 modelUpgradeTable / overlay 处理。
 export const CLAUDE_FABLE_5_1_DEF = defineAgentSeed({
+  // presetKey / id / deterministicId 保持不变（硬 key 引用：收藏、Space contentKey、
+  // 存量记录与 consultant 档位都按它索引）；展示名与 model 随 2026-11-18 换代升级。
   id: deterministicId("01CLDFBL51PB", "shared-space-anthropic-claude-fable-5-1"),
   presetKey: "claude-fable-5-1",
-  name: "Claude Fable 5.1",
+  name: "Claude Fable 5.2",
   provider: "nolo",
-  model: "anthropic/claude-fable-5-1",
+  model: "anthropic/claude-fable-5-2",
   isPublic: true,
   hasVision: true,
   introduction:
-    "Claude Fable 5.1 公开助手，适合复杂问答、长文分析、代码和图片理解。",
+    "Claude Fable 5.2 公开助手，适合复杂问答、长文分析、代码和图片理解。",
   greeting:
-    "你好，我是 Claude Fable 5.1。适合复杂问题、长文分析、代码和图片理解。",
+    "你好，我是 Claude Fable 5.2。适合复杂问题、长文分析、代码和图片理解。",
   prompt:
     "面对复杂任务先厘清目标和约束，再给出可靠、可执行、可复核的结果。",
   tools: [],
@@ -460,18 +462,20 @@ export const GPT_61_SOL_DEF = defineAgentSeed({
 });
 
 export const KIMI_K3_DEF = defineAgentSeed({
+  // presetKey / id 保持不变（硬 key 引用：收藏、Space contentKey、consultant 档位）；
+  // 展示名与 model 随 2026-11-18 换代升级到 K3.1 Pro。
   id: PUBLIC_KIMI_K3_AGENT_ID,
   presetKey: "kimi-k3",
-  name: "Kimi K3",
+  name: "Kimi K3.1 Pro",
   provider: "nolo",
-  model: "kimi-k3",
+  model: "kimi-k3.1-pro",
   isPublic: true,
-  // 出自平台模型目录：kimi-k3 hasVision: true、supportsTool: true、1M 上下文。
+  // 出自平台模型目录：kimi-k3.1-pro hasVision: true、supportsTool: true、1M 上下文。
   hasVision: true,
   introduction:
-    "Kimi K3 公开助手，超长上下文强推理档，适合整份文档/代码库分析、多步任务和图片理解。需开通 199 积分档位或账户保持有效余额（≥ 19 积分）。",
+    "Kimi K3.1 Pro 公开助手，超长上下文强推理档，适合整份文档/代码库分析、多步任务和图片理解。需开通 199 积分档位或账户保持有效余额（≥ 19 积分）。",
   greeting:
-    "你好，我是 Kimi K3。适合超长文档、代码库分析和多步推理；使用前请确保账户开通高阶档位或有充足可用余额。",
+    "你好，我是 Kimi K3.1 Pro。适合超长文档、代码库分析和多步推理；使用前请确保账户开通高阶档位或有充足可用余额。",
   prompt:
     "定位：超长上下文强推理档。\n" +
     "工作方式：先在海量材料里定位与问题相关的部分，再逐步收窄结论；引用材料时说明出自哪一段，不臆测未读到的内容。\n" +

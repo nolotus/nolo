@@ -23,7 +23,7 @@ import { extractReferenceKeysFromMessage } from "./extractReferenceKeys";
 import {
     COMPACTION_SUMMARY_SYSTEM_PROMPT,
     computeSummarySourceMetadata,
-    buildBoundedCompactionRequest,
+    buildHistoricalCompactionRequest,
     buildCompactionMetricsFromPlan,
     formatCompactionMetricsLog,
 } from "../../../ai/context/compactionShared";
@@ -48,6 +48,22 @@ const getMessagesForDialogFromState = (
  * readFile/writeFile/editFile 是 bun-nolo 的标准工具名，无需 canonicalize。
  */
 const identityCanonicalName = (name: string): string => name;
+
+/**
+ * Web 状态与落库记录把「工具结果属于哪条声明」存成 `toolCallId`（camelCase，
+ * 见 agent-runtime/dialogWritePlan 的写侧），而运行时消息与共享 compaction 构建器
+ * 按 `tool_call_id` 配对声明与结果。这里只做字段归一：不修改存储对象，已经是
+ * 运行时形态（或不是工具结果行）的消息原样透传。
+ */
+const toCompactionRequestMessage = (
+    msg: Message
+): Message & { tool_call_id?: string } => {
+    if (msg.role !== "tool" || typeof msg.toolCallId !== "string" || !msg.toolCallId) {
+        return msg;
+    }
+    const { toolCallId, ...rest } = msg;
+    return { ...rest, tool_call_id: toolCallId };
+};
 
 
 const summarizingDialogs = new Set<string>();
@@ -176,8 +192,10 @@ export const updateDialogSummaryAction = async (
             route.kind === "platform" ? resolveAgentContextWindow({ model: route.model, provider: "nolo" }) ?? 32_768 : Infinity,
             currentAvailable ? resolveAgentContextWindow(currentAgent!) ?? 32_768 : route.kind === "platform" ? Infinity : 32_768,
         );
-        const request = buildBoundedCompactionRequest({
-            msgsToCompress: plan.msgsToCompress,
+        const request = buildHistoricalCompactionRequest({
+            // 存储形态（toolCallId）先归一到运行时契约（tool_call_id），否则历史里
+            // 半批工具调用的声明与结果无法配对，整段摘要请求会被严格阻塞。
+            msgsToCompress: plan.msgsToCompress.map(toCompactionRequestMessage),
             previousSummary,
             contextWindow: summaryWindow,
             canonicalizeToolName: identityCanonicalName,
@@ -187,7 +205,10 @@ export const updateDialogSummaryAction = async (
             if (args.reason === "budget_rescue") throw new BudgetRescueError("no-summary-input", `bounded summary request blocked: ${request.reason}`);
             return;
         }
-        const { coveredMessages, summarizedBeforeId: newSummarizedBeforeId, promptContent, outputTokenBudget } = request;
+        // 共享构建器只对「输入的有序 1:1 全量前缀」返回覆盖（否则抛错），因此覆盖区间
+        // 可按条数映回计划里的原始记录：引用抽取与埋点必须看到存储形态的消息。
+        const coveredMessages = plan.msgsToCompress.slice(0, request.coveredMessages.length);
+        const { summarizedBeforeId: newSummarizedBeforeId, promptContent, outputTokenBudget } = request;
         const extractedKeys = new Set(dialogConfig.referenceKeys || []);
         for (const msg of coveredMessages) {
             for (const key of extractReferenceKeysFromMessage(msg)) extractedKeys.add(key);

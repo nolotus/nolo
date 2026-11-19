@@ -16,7 +16,7 @@
  */
 
 import type { CredentialBroker, CredentialRef } from "./credentialBroker";
-import { createFileCredentialBroker } from "./fileCredentialBroker";
+import { createFileCredentialBroker, createLegacyFileCredentialBroker } from "./fileCredentialBroker";
 import { createLinuxSecretServiceCredentialBroker } from "./linuxSecretServiceCredentialBroker";
 import { createMacOsKeychainCredentialBroker } from "./macOsKeychainCredentialBroker";
 import { createWindowsCredentialManagerBroker } from "./windowsCredentialManagerBroker";
@@ -50,10 +50,9 @@ export type CreateDesktopHostCredentialBrokerOptions = {
   createFileBroker?: () => CredentialBroker;
 };
 
-function resolveStoreMode(
-  platform: NodeJS.Platform,
-  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
-): DesktopCredentialStoreMode {
+function resolveStoreMode(options: CreateDesktopHostCredentialBrokerOptions): DesktopCredentialStoreMode {
+  const platform = options.platform ?? process.platform;
+  const env = options.env ?? process.env;
   const override = String(env.NOLO_DESKTOP_CREDENTIAL_STORE ?? "")
     .trim()
     .toLowerCase();
@@ -74,6 +73,26 @@ function resolveStoreMode(
   }
   // Linux host system store is opt-in until verified on real hardware.
   return "file";
+}
+
+/** Attempt cleanup of both stores even if one is unavailable. */
+async function deleteCredentialCopies(
+  ref: CredentialRef,
+  primary: Pick<CredentialBroker, "delete">,
+  legacy: Partial<Pick<CredentialBroker, "delete">>,
+): Promise<void> {
+  let failed = false;
+  try {
+    await primary.delete(ref);
+  } catch {
+    failed = true;
+  }
+  try {
+    await legacy.delete?.(ref);
+  } catch {
+    failed = true;
+  }
+  if (failed) throw new Error("credential_broker_delete_failed");
 }
 
 /**
@@ -126,23 +145,8 @@ function createMigratingSystemStoreBroker(args: {
       await primary.put(ref, secret);
     },
 
-    async delete(ref) {
-      // Attempt both stores even when one fails, so a partial backend outage
-      // cannot leave an avoidable legacy plaintext copy behind.
-      let failed = false;
-      try {
-        await primary.delete(ref);
-      } catch {
-        failed = true;
-      }
-      try {
-        await file.delete(ref);
-      } catch {
-        failed = true;
-      }
-      if (failed) {
-        throw new Error("credential_broker_delete_failed");
-      }
+    delete(ref) {
+      return deleteCredentialCopies(ref, primary, file);
     },
 
     async has(ref) {
@@ -277,7 +281,8 @@ export function createHostCredentialBrokerChain(args: {
  * 语义（每一条都被 `legacyReadFallback.test.ts` 锁定）：
  * - `get`/`has`：先严格安全区；**未命中**时才只读地查遗留 file broker，命中即返回。
  * - `put`：**只写严格安全区**，绝不在遗留文件里写明文（安全区不可用就抛给调用方）。
- * - `delete`：两处都清（最小风险：用户要求删除时不留可读副本）。
+ * - `delete`：尝试删除主库和遗留副本（若提供 legacy.delete）；任一失败都报错。
+ * - 遗留库读取异常视为未命中；主库异常不降级。
  * - 首次用到遗留凭据时通过 `notifyLegacyHit(ref)` 提示一次，按 ref 去重，不刷屏。
  *
  * 为什么需要它：切到严格 broker 后，既有 `api-key:agent-*` 凭据全在旧
@@ -285,7 +290,7 @@ export function createHostCredentialBrokerChain(args: {
  */
 export function createLegacyReadFallbackCredentialBroker(args: {
   primary: CredentialBroker;
-  legacy: CredentialBroker;
+  legacy: Pick<CredentialBroker, "get" | "has"> & Partial<Pick<CredentialBroker, "delete">>;
   notifyLegacyHit?: (ref: string) => void;
 }): CredentialBroker {
   const { primary, legacy, notifyLegacyHit } = args;
@@ -304,7 +309,12 @@ export function createLegacyReadFallbackCredentialBroker(args: {
     async get(ref) {
       const value = await primary.get(ref);
       if (value !== null && value !== undefined) return value;
-      const legacyValue = await legacy.get(ref);
+      let legacyValue: string | null;
+      try {
+        legacyValue = await legacy.get(ref);
+      } catch {
+        return null;
+      }
       if (legacyValue !== null && legacyValue !== undefined) {
         noticeOnce(ref);
         return legacyValue;
@@ -315,13 +325,17 @@ export function createLegacyReadFallbackCredentialBroker(args: {
       // 只写严格安全区：遗留明文文件永不因为新写入而出现/更新。
       await primary.put(ref, secret);
     },
-    async delete(ref) {
-      await primary.delete(ref);
-      await legacy.delete(ref);
+    delete(ref) {
+      return deleteCredentialCopies(ref, primary, legacy);
     },
     async has(ref) {
       if (await primary.has(ref)) return true;
-      const legacyHas = await legacy.has(ref);
+      let legacyHas: boolean;
+      try {
+        legacyHas = await legacy.has(ref);
+      } catch {
+        return false;
+      }
       if (legacyHas) noticeOnce(ref);
       return legacyHas;
     },
@@ -396,78 +410,74 @@ export function createStrictHostCredentialBroker(
     return createClosedCredentialBroker("credential_store_file_not_allowed");
   }
 
-  if (platform === "darwin" || override === "keychain") {
-    return (
-      options.keychainBroker ??
-      (options.createKeychainBroker ??
-        (() => createMacOsKeychainCredentialBroker()))()
-    );
-  }
-
-  if (platform === "win32" || override === "credman") {
-    return (
-      options.windowsCredentialBroker ??
-      (options.createWindowsCredentialBroker ??
-        (() => createWindowsCredentialManagerBroker()))()
-    );
-  }
-
-  if (platform === "linux" || override === "secret-service") {
-    return (
-      options.linuxSecretServiceBroker ??
-      (options.createLinuxSecretServiceBroker ??
-        (() => createLinuxSecretServiceCredentialBroker()))()
-    );
-  }
-
+  // Strict-only CLI callers keep their platform policy (no implicit file mode).
+  if (platform === "darwin" || override === "keychain") return createSystemStoreBroker("keychain", options);
+  if (platform === "win32" || override === "credman") return createSystemStoreBroker("credman", options);
+  if (platform === "linux" || override === "secret-service") return createSystemStoreBroker("secret-service", options);
   return createClosedCredentialBroker("credential_store_unsupported");
 }
 
-/**
- * Desktop host default CredentialBroker.
- * - darwin → Keychain (+ file lazy promote) unless NOLO_DESKTOP_CREDENTIAL_STORE=file
- * - win32 → Windows Credential Manager (+ file lazy promote) unless override=file
- * - other platforms → file (until a Linux system store exists)
- */
+function createSystemStoreBroker(
+  mode: Exclude<DesktopCredentialStoreMode, "file">,
+  options: CreateDesktopHostCredentialBrokerOptions,
+): CredentialBroker {
+  switch (mode) {
+    case "keychain":
+      return options.keychainBroker ?? options.createKeychainBroker?.() ?? createMacOsKeychainCredentialBroker();
+    case "credman":
+      return options.windowsCredentialBroker ?? options.createWindowsCredentialBroker?.() ?? createWindowsCredentialManagerBroker();
+    case "secret-service":
+      return options.linuxSecretServiceBroker ?? options.createLinuxSecretServiceBroker?.() ?? createLinuxSecretServiceCredentialBroker();
+  }
+}
+
+function createDesktopFileBroker(options: CreateDesktopHostCredentialBrokerOptions): CredentialBroker {
+  return options.fileBroker ?? options.createFileBroker?.() ?? createFileCredentialBroker();
+}
+
+/** Desktop host broker: native system stores with existing promotion policy, or file mode. */
 export function createDesktopHostCredentialBroker(
   options: CreateDesktopHostCredentialBrokerOptions = {},
 ): CredentialBroker {
-  const platform = options.platform ?? process.platform;
-  const env = options.env ?? process.env;
-  const mode = resolveStoreMode(platform, env);
+  const mode = resolveStoreMode(options);
+  if (mode === "file") return createDesktopFileBroker(options);
+  const primary = createSystemStoreBroker(mode, options);
+  // Secret Service host reads/writes are strict about WHERE they write, but the
+  // chain must match the provider one: a key the provider can still read from
+  // the legacy file store has to be deletable through the same RPC entry, or
+  // "delete" leaves a readable copy behind.
+  if (mode === "secret-service") return createDesktopSecretServiceFallbackBroker(primary, options);
+  return createMigratingSystemStoreBroker({ primary, file: createDesktopFileBroker(options) });
+}
 
-  const createFile =
-    options.createFileBroker ?? (() => createFileCredentialBroker());
+/**
+ * Provider lookups and credential RPC deletion share this compatibility chain.
+ *
+ * Delegates to the host broker on purpose: two independently-assembled chains is
+ * exactly how "RPC writes to one store while the provider reads another" and
+ * "delete leaves a readable legacy copy" happened before. One constructor, one
+ * mode resolution, one delete semantics.
+ */
+export function createDesktopProviderCredentialBroker(
+  options: CreateDesktopHostCredentialBrokerOptions = {},
+): CredentialBroker {
+  return createDesktopHostCredentialBroker(options);
+}
 
-  if (mode === "file") {
-    return options.fileBroker ?? createFile();
-  }
-
-  if (mode === "secret-service") {
-    // 严格模式：只用系统安全区。故意不构造 file broker —— 没有明文回退路径，
-    // 也就不会读取或改写用户既有的文件凭据。
-    const createLinux =
-      options.createLinuxSecretServiceBroker ??
-      (() => createLinuxSecretServiceCredentialBroker());
-    return options.linuxSecretServiceBroker ?? createLinux();
-  }
-
-  const file = options.fileBroker ?? createFile();
-
-  if (mode === "credman") {
-    const createWindows =
-      options.createWindowsCredentialBroker ??
-      (() => createWindowsCredentialManagerBroker());
-    const primary =
-      options.windowsCredentialBroker ?? createWindows();
-    return createMigratingSystemStoreBroker({ primary, file });
-  }
-
-  // mode === "keychain"
-  const createKeychain =
-    options.createKeychainBroker ??
-    (() => createMacOsKeychainCredentialBroker());
-  const primary = options.keychainBroker ?? createKeychain();
-
-  return createMigratingSystemStoreBroker({ primary, file });
+/**
+ * Secret Service strict store + legacy file read fallback.
+ *
+ * Reads/has fall back to the legacy file store; writes only ever reach the
+ * system store (the fallback broker never puts); delete clears BOTH so a
+ * removed credential cannot be resurrected from the old plaintext copy.
+ */
+function createDesktopSecretServiceFallbackBroker(
+  primary: CredentialBroker,
+  options: CreateDesktopHostCredentialBrokerOptions,
+): CredentialBroker {
+  // Tests may inject a file broker; production uses the legacy-aware file
+  // reader (handles the pre-migration path and the migration marker).
+  const legacy =
+    options.fileBroker ?? options.createFileBroker?.() ?? createLegacyFileCredentialBroker();
+  return createLegacyReadFallbackCredentialBroker({ primary, legacy });
 }

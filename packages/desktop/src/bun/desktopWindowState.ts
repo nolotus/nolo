@@ -95,6 +95,69 @@ const frameIsVisible = (
   return overlapWidth >= 80 && overlapHeight >= 80;
 });
 
+/**
+ * Fit a restored frame inside the current work area.
+ *
+ * `frameIsVisible` only proves "at least 80px of overlap", so a frame saved on a
+ * bigger display (or before a desktop-scale change) can be restored verbatim and
+ * end up larger than the screen: the compositor clips the window, but the
+ * webview still lays out at the oversized frame, so the user only sees the
+ * top-left corner of the UI. Measured case: 3840x2160 @200% → 1920x1080 logical
+ * work area, restored frame 2506x1664 → clipped window, corner-only rendering.
+ *
+ * Clamping to the work area keeps both the window and the webview viewport
+ * inside the screen; the next save then persists a sane frame.
+ */
+export const clampWindowFrameToWorkArea = (
+  frame: DesktopWindowFrame,
+  workArea: DesktopWorkArea
+): DesktopWindowFrame => {
+  if (!isValidWindowFrame(frame) || !isValidWindowFrame(workArea)) return frame;
+  const width = Math.min(frame.width, workArea.width);
+  const height = Math.min(frame.height, workArea.height);
+  const maxX = workArea.x + workArea.width - width;
+  const maxY = workArea.y + workArea.height - height;
+  return {
+    width,
+    height,
+    x: Math.min(Math.max(frame.x, workArea.x), maxX),
+    y: Math.min(Math.max(frame.y, workArea.y), maxY),
+  };
+};
+
+const frameOverlapArea = (
+  frame: DesktopWindowFrame,
+  area: DesktopWorkArea
+): number => {
+  const width = Math.min(frame.x + frame.width, area.x + area.width) - Math.max(frame.x, area.x);
+  const height = Math.min(frame.y + frame.height, area.y + area.height) - Math.max(frame.y, area.y);
+  return width > 0 && height > 0 ? width * height : 0;
+};
+
+/**
+ * Pick the display a restored frame belongs to: the one it overlaps most.
+ *
+ * Clamping must use that display's work area, not the primary one — otherwise a
+ * window saved on a secondary monitor gets dragged onto the primary on every
+ * launch, and the next save persists that wrong position.
+ */
+const pickWorkAreaForFrame = (
+  frame: DesktopWindowFrame,
+  workAreas: DesktopWorkArea[],
+  fallback?: DesktopWorkArea
+): DesktopWorkArea | undefined => {
+  let best: DesktopWorkArea | undefined;
+  let bestOverlap = 0;
+  for (const area of workAreas) {
+    const overlap = frameOverlapArea(frame, area);
+    if (overlap > bestOverlap) {
+      best = area;
+      bestOverlap = overlap;
+    }
+  }
+  return best ?? (isValidWindowFrame(fallback) ? fallback : undefined);
+};
+
 export const resolveInitialWindowFrame = ({
   channelDir,
   screen,
@@ -124,10 +187,14 @@ export const resolveInitialWindowFrame = ({
     persisted &&
     (workAreas.length === 0 || frameIsVisible(persisted.frame, workAreas))
   ) {
+    const targetWorkArea = pickWorkAreaForFrame(persisted.frame, workAreas, primaryWorkArea);
+    const frame = targetWorkArea
+      ? clampWindowFrameToWorkArea(persisted.frame, targetWorkArea)
+      : persisted.frame;
     console.log(
-      `[desktop] restoring window state: ${persisted.frame.width}x${persisted.frame.height} at ${persisted.frame.x},${persisted.frame.y}`
+      `[desktop] restoring window state: ${frame.width}x${frame.height} at ${frame.x},${frame.y}`
     );
-    return persisted.frame;
+    return frame;
   }
 
   const computed = computeDefaultCenteredFrame(primaryWorkArea);

@@ -18,6 +18,7 @@ import {
   buildAgentRuntimeDialogWritePlan,
   buildAgentRuntimeAgentLookupKeys,
   createDesktopHostCredentialBroker,
+  createDesktopProviderCredentialBroker,
   dialogMessageRecordToAgentRuntimeMessage,
   executeOpenAiCompatibleChatCompletion,
   executePlatformChatCompletionWithFallback,
@@ -39,6 +40,7 @@ import { fetchCodexResponsesCompletion } from "agent-runtime/codexResponsesProvi
 import type { ApiKeyRefResolver } from "agent-runtime/providerResolution";
 import { pickAgentRuntimeInferenceOptions } from "agent-runtime/agentConfigOptions";
 import { createOAuthTokenStore, type OAuthTokenStore } from "agent-runtime/oauthTokenStore";
+import { parseToken } from "core/authToken";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
@@ -59,7 +61,8 @@ import {
 import { findModelConfig } from "ai/llm/providers";
 import { CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES, CHROME_CONNECTOR_TOOL_NAMES } from "ai/tools/chromeConnectorTools";
 import { appendEnabledPackPromptPatches } from "ai/tools/toolPacks";
-import { createTokenKey, createTokenStatsKey, dialogMessageRange } from "database/keys";
+import { createAgentKey, createTokenKey, createTokenStatsKey, dialogMessageRange } from "database/keys";
+import { isTombstoneRecord } from "database/tombstones";
 import { readDesktopAccountSettings } from "./desktopAccountSettings";
 import { buildTokenDialogIndexOps } from "ai/token/tokenDialogIndex";
 import { prepareTokenUsageData } from "ai/token/prepareTokenUsageData";
@@ -714,12 +717,12 @@ export async function resolveDesktopOpenAiCompatibleProvider(args: {
   agentConfig: AgentRuntimeAgentConfig;
   fetchImpl?: typeof fetch;
   tools?: Record<string, unknown>[];
-  /** Host credential broker; defaults to createDesktopHostCredentialBroker(). */
+  /** Provider credential broker; uses the desktop store mode with legacy file read fallback in system modes. */
   credentialBroker?: CredentialBroker;
 }): Promise<AgentRuntimeProvider> {
   const fetchImpl = args.fetchImpl ?? fetch;
   const credentialBroker =
-    args.credentialBroker ?? createDesktopHostCredentialBroker();
+    args.credentialBroker ?? createDesktopProviderCredentialBroker();
   const providerConfig = await resolveOpenAiCompatibleProviderConfig({
     agentConfig: args.agentConfig,
     env: args.env,
@@ -753,12 +756,12 @@ export async function resolveDesktopPlatformChatProvider(args: {
   tools?: Record<string, unknown>[];
   fallbackServers?: string[];
   requestTimeoutMs?: number;
-  /** Host credential broker; defaults to createDesktopHostCredentialBroker(). */
+  /** Provider credential broker; uses the desktop store mode with legacy file read fallback in system modes. */
   credentialBroker?: CredentialBroker;
 }): Promise<AgentRuntimeProvider> {
   const fetchImpl = args.fetchImpl ?? fetch;
   const credentialBroker =
-    args.credentialBroker ?? createDesktopHostCredentialBroker();
+    args.credentialBroker ?? createDesktopProviderCredentialBroker();
   const providerConfig = await resolvePlatformChatProviderConfig({
     agentConfig: args.agentConfig,
     env: args.env,
@@ -791,7 +794,67 @@ export async function resolveDesktopPlatformChatProvider(args: {
   };
 }
 
+/** Legacy custom agents carried the key on the account record. The WebView snapshot
+ * deliberately strips it. Read the existing record without the hybrid store (whose
+ * remote reads can persist the record), and never merge it back into the snapshot.
+ */
+async function readDesktopLegacyCustomProviderKey(args: {
+  legacyRecordSession?: DesktopLegacyRecordSession;
+  agentConfig: AgentRuntimeAgentConfig;
+  fetchImpl: typeof fetch;
+}): Promise<string | undefined> {
+  const { agentConfig } = args;
+  const endpoint = agentConfig.customProviderUrl?.trim();
+  if (!endpoint || agentConfig.apiKey?.trim() || agentConfig.apiKeyFromAgentKey?.trim() ||
+      agentConfig.credentialRef?.trim() || agentConfig.apiKeyRef?.trim()) return;
+
+  const session = args.legacyRecordSession;
+  if (!session) return;
+  const { token: authToken, serverOrigin } = session;
+  const userId = asOptionalTrimmedString(parseToken(authToken)?.userId);
+  // The cloud authenticates the token and authorizes the read. The unverified
+  // userId only restricts which keys we will ask for; public/foreign agents are out.
+  if (!userId || userId === "pub" || userId === "local") return;
+  const keyPrefix = createAgentKey.private(userId, "");
+  if (!agentConfig.key.startsWith(keyPrefix) || agentConfig.key.length === keyPrefix.length) return;
+
+  try {
+    // With HTTP_PROXY set and NO_PROXY unset, Bun 1.4.4 sent even loopback HTTP
+    // requests to the proxy in testing. Never read an account key for HTTP.
+    if (new URL(endpoint).protocol !== "https:") return;
+    const response = await args.fetchImpl(
+      `${serverOrigin}/api/v1/db/read/${encodeURIComponent(agentConfig.key)}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${authToken}` },
+        cache: "no-store",
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok) return;
+    // The DB read route returns the record itself, not a { data } envelope.
+    const record: unknown = await response.json();
+    if (!isRecord(record) || record.dbKey !== agentConfig.key || isTombstoneRecord(record)) return;
+    const stored = resolveAgentRuntimeConfigFromRecord(agentConfig.key, record);
+    // A snapshot can name a different provider target. Do not attach the account
+    // key unless the complete endpoint and the inputs that choose wire/auth match.
+    if (stored.customProviderUrl?.trim() !== endpoint || stored.provider !== agentConfig.provider ||
+        stored.model !== agentConfig.model || stored.apiKeyHeader !== agentConfig.apiKeyHeader ||
+        stored.apiSource !== agentConfig.apiSource || stored.useServerProxy !== agentConfig.useServerProxy ||
+        (stored.cliProvider?.trim() ?? "") !== (agentConfig.cliProvider?.trim() ?? "") ||
+        stored.credentialRef?.trim() || stored.apiKeyRef?.trim()) return;
+    return stored.apiKey?.trim() || stored.apiKeyFromAgentKey?.trim() || undefined;
+  } catch {
+    // A missing/unreachable record should not break keyless custom providers.
+    return;
+  }
+}
+
+export type DesktopLegacyRecordSession = Readonly<{ token: string; serverOrigin: string }>;
+
 export async function resolveDesktopConfiguredProvider(args: {
+  legacyRecordSession?: DesktopLegacyRecordSession;
   env: DesktopAgentRuntimeEnv;
   agentConfig: AgentRuntimeAgentConfig;
   fetchImpl?: typeof fetch;
@@ -1021,6 +1084,24 @@ export async function resolveDesktopConfiguredProvider(args: {
     };
   }
 
+  if (callPlan.authMethod.kind === "custom-key" && !shouldUsePlatformChatProvider(args.env, args.agentConfig)) {
+    const fetchImpl = args.fetchImpl ?? fetch;
+    const apiKey = await readDesktopLegacyCustomProviderKey({ ...args, fetchImpl });
+    if (apiKey) {
+      const fetchWithLegacyKey = Object.assign(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        // Only guard provider chat POSTs authenticated with the recovered key. Native
+        // executors also use this fetch for image GETs with the host bearer; pass those through.
+        const headers = new Headers(init?.headers);
+        if (init?.method !== "POST" || !Array.from(headers.values()).some(value =>
+          value === apiKey || value === `Bearer ${apiKey}`)) return fetchImpl(input, init);
+        const response = await fetchImpl(input, { ...init, redirect: "error" });
+        if (response.ok) return response;
+        void response.body?.cancel().catch(() => {});
+        return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
+      }, { preconnect: fetchImpl.preconnect });
+      args = { ...args, agentConfig: { ...args.agentConfig, apiKey }, fetchImpl: fetchWithLegacyKey };
+    }
+  }
   // ── custom provider native wire（本地直连）────────────────────────────────
   // 与 CLI 三条 transport 同构的 gate：`customProviderUrl` + 模型目录
   // `nativeProtocol`（plan 已给 `custom-*` 时以 plan 为准）。这里是桌面唯一的
@@ -1038,7 +1119,7 @@ export async function resolveDesktopConfiguredProvider(args: {
       agentConfig: args.agentConfig,
       fetchImpl: args.fetchImpl ?? fetch,
       tools: args.tools ?? [],
-      ...(args.credentialBroker ? { credentialBroker: args.credentialBroker } : {}),
+      credentialBroker: args.credentialBroker ?? createDesktopProviderCredentialBroker(),
       ...(args.apiKeyRefResolver ? { apiKeyRefResolver: args.apiKeyRefResolver } : {}),
     });
     if (customNativeProvider) return customNativeProvider;

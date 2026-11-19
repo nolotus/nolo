@@ -104,7 +104,7 @@ export const MODEL_TIER_GUIDANCE = MODEL_TIERS.map(
  */
 export const DIFFICULTY_GRADING_ORDER = `- **先判档再选模型**（规划复杂≠执行复杂）：先定子任务 difficulty 再选该档胜任模型；重要度、文件数、耗时、发布安全目录不升档，「更稳妥/更安全/独立 review」不是升档理由，选足够胜任的最低档，不为降档拆碎。`;
 
-export const DIFFICULTY_GRADING_TIERS = `    - 四档：easy＝根因与做法明确、局部可验；normal＝局部定位、有契约、无跨模块取舍；complex＝多根因或跨模块/跨状态，兼顾并发兼容；extreme＝架构未定或安全/完整性重大取舍。根因/接口定下后实现与复审重新判档，不继承规划档。`;
+export const DIFFICULTY_GRADING_TIERS = `    - 四档：easy＝根因与做法明确、局部可验；normal＝按既定契约实现/验证或局部定位；complex＝多根因、跨状态或并发兼容取舍；extreme＝架构未定或安全/完整性重大取舍。升档须指出本块未决点，不按项目整体定档。实现与复审重判，不继承规划档。`;
 
 export function resolveModelTier(model: unknown): ModelTier {
   if (typeof model !== "string") return "unknown";

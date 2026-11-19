@@ -32,7 +32,7 @@ import {
   buildSummarySourceDiagnostics,
   buildSummarySourceSegments,
   diffSummarySourceSegments,
-  buildBoundedCompactionRequest,
+  buildHistoricalCompactionRequest,
   buildCompactionMetricsFromPlan,
   formatCompactionMetricsLog,
   type CompactionMetrics,
@@ -857,7 +857,7 @@ export async function maybeAutoCompactLocalHistory(args: {
   }
 
   const msgsToCompress = plan.msgsToCompress as PlanCompressionBridgeMessage[];
-  const bounded = buildBoundedCompactionRequest({
+  const bounded = buildHistoricalCompactionRequest({
     msgsToCompress,
     previousSummary: existingSummary,
     contextWindow,

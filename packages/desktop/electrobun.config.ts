@@ -4,20 +4,31 @@ import { DESKTOP_APP_VERSION } from "./desktopVersion";
 import { resolveMacSigningPlan } from "./scripts/macSigningPlan";
 
 /**
- * Minimum supported electrobun: 2.0.5.
+ * Minimum supported electrobun: 2.0.6.
  *
  * 2.0.2 first carried the upstream fix that makes the native websocket server
  * fall through to the next free port instead of crashing on Windows "port
- * already in use" (TCP 50000). We now require 2.0.5 because that is the
- * release we pin, build and test against: it is paired with hutch 0.28.2, it
- * ships USTAR release archives (the installer/updater extractor cannot read
- * GNU longname records), and its devkit is the one projected into
+ * already in use" (TCP 50000). We now require 2.0.6 because that is the
+ * release we pin, build and test against: its bootstrap pairs with hutch
+ * 0.29.0 / cottontail 0.7.3, and its devkit is the one projected into
  * `.hutch/devkit`.
+ *
+ * Release archives must stay extractor-compatible — the installer/updater
+ * extractor cannot read GNU longname records — so every upstream bump has to
+ * keep that gate green. `trim-linux-payload.ts` repacks our final Linux
+ * payload with `--format=ustar` locally; the compat gate reported below
+ * covers those final artifacts, not the upstream archive format.
+ *
+ * Measured on 2.0.6 (Linux x64, 4K@200% GNOME Wayland, CEF on XWayland):
+ * `desktop:build:alpha` completes and the payload extractor-compat gate
+ * passes for both final artifacts (tar.zst and Setup.tar.gz); the installed
+ * canary build boots to the main window (~2.2s) and the app was accepted for
+ * interactive use.
  *
  * The npm dependency AND the `electrobun.version` pin in `hutch.config.ts`
  * must move together: the npm package version decides which Hutch release
  * the bootstrap downloads, the pin decides which devkit Hutch projects.
- * Do not lower either below 2.0.5.
+ * Do not lower either below 2.0.6.
  */
 
 /**

@@ -9,10 +9,14 @@ export { isPlatformManagedProvider } from "./kimi";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { isPlatformManagedProvider } from "./kimi";
 import type { Model } from "./types";
+import {
+  GEMINI_NEON_SERVICE_TIER_MULTIPLIERS,
+  GEMINI_NEON_STANDARD_PRICE_USD,
+} from "./geminiNeonPricing";
 import type { ImageSizeKey } from "./imagePricing";
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
-  PLATFORM_HOSTED_KIMI_K3_MODEL,
+  PLATFORM_HOSTED_KIMI_K31_PRO_MODEL,
 } from "./kimi";
 import {
   PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
@@ -21,7 +25,6 @@ import {
   PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
   PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
-  PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_2_MODEL,
   PLATFORM_HOSTED_CLAUDE_SONNET_5_5_MODEL,
   PLATFORM_HOSTED_GROK_4_6_MODEL,
@@ -36,10 +39,10 @@ import {
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL,
-  PLATFORM_HOSTED_GEMINI_25_PRO_MODEL,
   PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL,
   PLATFORM_HOSTED_GEMINI_4_HYDROGEN_MODEL,
   PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL,
+  PLATFORM_HOSTED_GEMINI_4_NEON_MODEL,
   PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
@@ -130,6 +133,18 @@ export const PLATFORM_HOSTED_KIMI_K3_PRICE = {
   input: toPlatformCredits(3), // 24.0 credits
   inputCacheHit: toPlatformCredits(0.3), // 2.4 credits
   output: toPlatformCredits(15), // 120.0 credits
+} as const;
+
+/**
+ * Kimi K3.1 Pro 上游同为 Baseten（key 用 BASETEN_API_KEY，body model 重映射为
+ * https://www.baseten.co/pricing/ ，2026-11-18 抓取）× 8 = 16 / 1.6 / 80 credits。
+ * 注意 Baseten model library 单模型页（/library/kimi-k31-pro/）把 cached input
+ * calculatePrice 会把缓存读取按 input 全价收（见上方 K2.6 价格注释的同类坑）。
+ */
+export const PLATFORM_HOSTED_KIMI_K31_PRO_PRICE = {
+  input: toPlatformCredits(2), // 16.0 credits
+  inputCacheHit: toPlatformCredits(0.2), // 1.6 credits
+  output: toPlatformCredits(10), // 80.0 credits
 } as const;
 
 /**
@@ -536,6 +551,21 @@ export const PLATFORM_HOSTED_GEMINI_4_CARBON_PRICE = {
 } as const;
 
 /**
+ * Gemini 4 Neon（平台托管语义）：直连 Google 官方原生 API（gemini-4-neon，
+ * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
+ * 数字真值在 ai/llm/geminiNeonPricing.ts：Neon 同时出现在 Google 直连目录
+ * （packages/integrations/google/models.ts），两处必须报同一上游价，这里只做积分折算。
+ * 仅隐式缓存（官方明示 explicit caching 不支持），无单独缓存写入价，
+ * cachingWrite 与 cachingRead 同价。
+ */
+export const PLATFORM_HOSTED_GEMINI_4_NEON_PRICE = {
+  input: toPlatformCredits(GEMINI_NEON_STANDARD_PRICE_USD.input), // 24.0 credits
+  output: toPlatformCredits(GEMINI_NEON_STANDARD_PRICE_USD.output), // 120.0 credits
+  cachingWrite: toPlatformCredits(GEMINI_NEON_STANDARD_PRICE_USD.cache), // 1.2 credits
+  cachingRead: toPlatformCredits(GEMINI_NEON_STANDARD_PRICE_USD.cache), // 1.2 credits
+} as const;
+
+/**
  * 出图模型（平台托管语义）：记录侧 provider=nolo，实际上游分别是
  * OpenAI（gpt-image-2，key 用 OPENAI_API_KEY）与 Google 官方原生 API
  * （gemini-3.x image，key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
@@ -907,10 +937,13 @@ const catalogReleasedAt = (year: number, month: number, day: number): number =>
  */
 export const platformHostedModels: Model[] = [
   {
-    name: PLATFORM_HOSTED_KIMI_K3_MODEL,
-    displayName: "Kimi K3",
+    // Kimi K3.1 Pro（2026-11-18 上架，接替 K3）：Baseten 上游、1M 上下文。
+    // K3 / K2.6 已从**上架目录**撤下：下架 ≠ 删除，两者常量、价格与 routing
+    // 条目保留，供存量 agent/消息记录继续解析上游并计价。
+    name: PLATFORM_HOSTED_KIMI_K31_PRO_MODEL,
+    displayName: "Kimi K3.1 Pro",
     hasVision: true,
-    price: { ...PLATFORM_HOSTED_KIMI_K3_PRICE },
+    price: { ...PLATFORM_HOSTED_KIMI_K31_PRO_PRICE },
     maxOutputTokens: 262144,
     contextWindow: 1_000_000,
     supportsTool: true,
@@ -918,16 +951,8 @@ export const platformHostedModels: Model[] = [
     // 客户端版本闸门第 1 层（目录标注）：随模型列表下发，新客户端据此置灰 +
     // 提示升级。真值在 platformHostedRoutingTable（见
     // platformHosted.clientVersionGate.test.ts 的目录↔路由表对齐断言）。
+    // 与 K3 同闸门：家族共享同一组 body quirk（见 providerBodyCompatibility）。
     minClientVersion: PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
-  },
-  {
-    name: PLATFORM_HOSTED_KIMI_K26_MODEL,
-    displayName: "Kimi K2.6",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_KIMI_PRICE },
-    maxOutputTokens: 262144,
-    contextWindow: 262144,
-    supportsTool: true,
   },
   {
     name: PLATFORM_HOSTED_GLM_53_MODEL,
@@ -949,16 +974,9 @@ export const platformHostedModels: Model[] = [
     supportsTool: true,
     supportsReasoningEffort: true,
   },
-  {
-    name: PLATFORM_HOSTED_GEMINI_25_PRO_MODEL,
-    displayName: "Gemini 2.5 Pro",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_GEMINI_25_PRO_PRICE },
-    maxOutputTokens: 65536,
-    contextWindow: 1_048_576,
-    supportsTool: true,
-    supportsReasoningEffort: true,
-  },
+  // Gemini 2.5 Pro 已从**上架目录**撤下（2026-11-18）：存量记录由
+  // modelUpgradeTable 迁到 Gemini 4 Carbon；下架 ≠ 删除，价格常量与 routing 条目
+  // 保留供未迁移记录继续解析与计价。
   {
     name: PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL,
     displayName: "Gemini 4 Argon",
@@ -988,6 +1006,21 @@ export const platformHostedModels: Model[] = [
     contextWindow: 1_048_576,
     supportsTool: true,
     supportsReasoningEffort: true,
+  },
+  {
+    // 官方规格（aistudio.google.com/docs/models/gemini-4-neon，2026-11-19 核对）：
+    // 上下文 1,048,576（输入输出合计）；同步最大输出 65,536（long decode 可到 1M，
+    // 平台按同步默认值登记）；输入 Text/Image/Video/Audio/PDF，输出 Text；
+    // thinking 支持 low/medium/high/xhigh。
+    name: PLATFORM_HOSTED_GEMINI_4_NEON_MODEL,
+    displayName: "Gemini 4 Neon",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GEMINI_4_NEON_PRICE },
+    maxOutputTokens: 65536,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+    serviceTierPriceMultipliers: { ...GEMINI_NEON_SERVICE_TIER_MULTIPLIERS },
   },
   {
     name: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
@@ -1066,15 +1099,9 @@ export const platformHostedModels: Model[] = [
   // 客户端不再看到）。下架 ≠ 删除：对应的 PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE /
   // OPUS_5 / FABLE_5 价格常量与 routing 条目一律保留，供存量 agent/消息记录继续
   // 解析上游并计价，绝不因目录下架而让历史记录解析失败。
-  {
-    name: PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
-    displayName: "Claude Haiku 4.5",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE },
-    maxOutputTokens: 4092,
-    contextWindow: 200_000,
-    supportsTool: false,
-  },
+  // Claude Haiku 4.5 已从**上架目录**撤下（2026-11-18，接替者为 Haiku 5.5）：
+  // 下架 ≠ 删除，PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE 与 routing 条目保留，
+  // 供存量 agent/消息记录继续解析上游并计价。
   {
     // Claude Haiku 5.5（2026-10-18）：接替 4.5，官方 1M 上下文。
     name: PLATFORM_HOSTED_CLAUDE_HAIKU_55_MODEL,
@@ -1097,19 +1124,9 @@ export const platformHostedModels: Model[] = [
     contextWindow: 1_000_000,
     supportsTool: false,
   },
-  {
-    // Claude Fable 5.1：输出上限未获官方数据，沿用 Fable 5 条目口径（4092）。
-    name: PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
-    displayName: "Claude Fable 5.1",
-    hasVision: true,
-    price: { ...PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE },
-    // 2026-09-24：代码注释未记录 Fable 5.1 的发布日，此值按编排者指定填入
-    // （与 Opus 5.5 / Sonnet 5.5 同代）。拿到官方日期后请以官方为准替换。
-    releasedAtMs: catalogReleasedAt(2026, 9, 24),
-    maxOutputTokens: 4092,
-    contextWindow: 1_000_000,
-    supportsTool: false,
-  },
+  // Claude Fable 5.1 已从**上架目录**撤下（2026-11-18，接替者为 Fable 5.2）：
+  // 下架 ≠ 删除，PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE 与 routing 条目保留，
+  // 供存量 agent/消息记录继续解析上游并计价。
   {
     // Claude Fable 5.2：CF 官方文档规格 1M 上下文、最高 128K 输出 tokens。
     // https://developers.cloudflare.com/ai/models/anthropic/claude-fable-5.2/

@@ -8,6 +8,9 @@ import { serve, file as bunFile } from "bun";
 import { join, resolve, sep } from "node:path";
 import { readFileSync } from "node:fs";
 import { desktopRuntimeRoutes, prewarmDesktopRuntimeRoutes } from "./desktopRuntimeRoutes";
+import { resolveDesktopShellLanguage } from "./desktopShellLanguage";
+import type { Language } from "app/i18n/types";
+
 // 桌面启动时的 native host 自动安装由桌面主进程调用（packages/desktop/src/bun/index.ts），
 // 不放在 bootstrapServer 里：测试与工具链会 import 本文件，而它写的是用户真实的浏览器配置。
 export { ensureNativeHostForDetectedBrowsers } from "./handlers/desktopChromeNativeHostEnsure";
@@ -66,13 +69,16 @@ const isDesktopDev = (): boolean => process.env.NOLO_DESKTOP_CHANNEL === "dev";
 const getShellAssets = (): DesktopShellAssets =>
   isDesktopDev() ? readShellAssets() : shellAssetsCache ?? (shellAssetsCache = readShellAssets());
 
-const renderDesktopShellHtml = (): string => {
+const renderDesktopShellHtml = (language: Language): string => {
   const assets = getShellAssets();
   // 与私有仓库 render.tsx 桌面模式注入对齐：isDesktopApp 依赖 window.__NOLO_DESKTOP__，
   // artifact runtime 依赖 window.__NOLO_ASSETS__。edition 留空由客户端 bundle 自行判定，
   // 避免 conditions 不一致触发 entry.tsx 的 edition mismatch 白屏守卫。
+  // 语言必须显式注入 __SSR_LANG__：壳不做 SSR，客户端读不到它就退到
+  // navigator.language，而内嵌 CEF 默认 accept_languages 是 en-US、不跟系统
+  // locale（见 desktopShellLanguage.ts）。<html lang> 与注入值同源，避免二者打架。
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${language}">
 <head>
   <meta charset="UTF-8" />
   <title>Nolo</title>
@@ -81,6 +87,8 @@ const renderDesktopShellHtml = (): string => {
   <link rel="icon" href="/public/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="${assets.css}" />
   <script>window.__NOLO_DESKTOP__=true;</script>
+  <script>window.__NOLO_EMBEDDED_RUNTIME__=true;</script>
+  <script>window.__SSR_LANG__=${serializeInlineJson(language)};</script>
   <script>window.__NOLO_ASSETS__=${serializeInlineJson({
     artifactRuntimeJs: assets.artifactRuntimeJs,
     artifactRuntimePreloads: [],
@@ -125,7 +133,10 @@ export const bootstrapServer = async (): Promise<void> => {
 
         // Unknown API routes must never fall through to the SPA document.
         // This keeps server-only developer tools unavailable in the standalone runtime.
-        if (url.pathname.startsWith("/api/")) {
+        // `/rpc/*` belongs to the platform data server, not this runtime: answering
+        // with the SPA shell made clients parse HTML as JSON and log a false
+        // "Error fetching memberships" on every desktop boot.
+        if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/rpc/")) {
           return new Response("Not Found", { status: 404 });
         }
 
@@ -159,7 +170,12 @@ export const bootstrapServer = async (): Promise<void> => {
 
         // SPA fallback: the app is a client-rendered SPA — serve the generated
         // HTML shell for any non-file route (including "/").
-        return new Response(renderDesktopShellHtml(), {
+        const shellLanguage = resolveDesktopShellLanguage({
+          url,
+          cookieHeader: req.headers.get("cookie"),
+          acceptLanguageHeader: req.headers.get("accept-language"),
+        });
+        return new Response(renderDesktopShellHtml(shellLanguage), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
         });
       },

@@ -411,6 +411,16 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
       // Discovery (2026-11-17) 确认 Carbon 存在且 supportsImages=true；逻辑 id 用裸
       // gemini-4-carbon，effort 变体由 antigravityWireModel 折叠（裸 id 直传会 404）。
       { id: "gemini-4-carbon", label: "Gemini 4 Carbon", hasVision: true },
+      // Gemini 4 Neon（官方 2026-11-18 公告：仅 Google AI Pro / Ultra / Enterprise）：
+      // 2026-11-19 订阅档账号刷新 token 后 discovery 给出 gemini-4-neon-low/-medium/-high/-xhigh
+      // 全部 enabled（与官方 agy 模型列表同形），仍无裸 `gemini-4-neon`。四个 effort 是独立
+      // wire id，故按实测 id 原样登记（不做 effort 折叠）；标签沿用 Argon 的门槛明示，避免
+      // 无权账号把它们误当可用——free-tier discovery 只有 `gemini-4-neon-disabled`，选中即 404。
+      // hasVision 未在 discovery 证据中确认，先不声明，等实测再补。
+      { id: "gemini-4-neon-low", label: "Gemini 4 Neon Low（需 Pro/Ultra）" },
+      { id: "gemini-4-neon-medium", label: "Gemini 4 Neon Medium（需 Pro/Ultra）" },
+      { id: "gemini-4-neon-high", label: "Gemini 4 Neon High（需 Pro/Ultra）" },
+      { id: "gemini-4-neon-xhigh", label: "Gemini 4 Neon XHigh（需 Pro/Ultra）" },
       { id: "claude-opus-5-5-medium", label: "Claude Opus 5.5 Medium", hasVision: true },
       { id: "claude-sonnet-5-5-high", label: "Claude Sonnet 5.5 High", hasVision: true },
       { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro", hasVision: true },
