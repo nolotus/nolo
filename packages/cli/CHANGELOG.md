@@ -1,4 +1,15 @@
 
+## 0.249.0-alpha.1 (2026-11-19)
+
+### Features
+
+* **agent-runtime:** 系统层写入「逐个验证 ≠ 逐个实现」的串行边界 ([6f3ca19](https://github.com/nolotus/bun-nolo/commit/6f3ca190a34a4b744adac0156478faf1d9527559))
+
+### Bug Fixes
+
+* **memory:** clarify when to use work mode and goal requirements ([0abc48f](https://github.com/nolotus/bun-nolo/commit/0abc48f604d3dc4dfd6bbd2a439228fc9df93fc1))
+
+
 ## 0.248.0-alpha.2 (2026-11-19)
 
 ### Bug Fixes

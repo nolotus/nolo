@@ -40,12 +40,12 @@ export const rememberMemoryFunctionSchema = {
     type: "object",
     properties: {
       storage: { type: "string", enum: ["local", "server"], description: "CLI 工作记忆存储；默认 local。两端独立，不自动同步。" },
-      mode: { type: "string", enum: ["work"], description: "工作接续用 work；省略为普通长期记忆。状态是基于用户消息或执行证据的记录者判断，可能过时，不是验收结论、授权或任何行动权限。先查询获得 activityId 和 revision，不要求用户提供 ID。" },
+      mode: { type: "string", enum: ["work"], description: "工作接续用 work；省略为普通长期记忆。记「以后怎么取舍/我喜欢什么」这类偏好：省略 mode，直接传 content；记「这项工作做到哪、下一步是什么」：才传 mode=work，且来源 ID 由宿主提供，不能在参数里自带。状态是基于用户消息或执行证据的记录者判断，可能过时，不是验收结论、授权或任何行动权限。先查询获得 activityId 和 revision，不要求用户提供 ID。" },
       itemKey: { type: "string", description: "创建工作时的稳定项目键。" },
       activityId: { type: "string", description: "更新时传已有工作 ID。" },
       expectedRevision: { type: "integer", minimum: 1, description: "更新时传上次读取的版本。" },
       changeId: { type: "string", description: "每次不同逻辑请求使用新 ID；重试保持不变。无变化不记录去重回执。" },
-      patch: { type: "object", description: "创建默认 active；状态按来源作记录者判断，不是行动授权或验收。", properties: { goal: { type: "string" }, constraints: { type: "array", items: { type: "string" } }, openItems: { type: "array", items: { type: "string" } }, nextStep: { type: "string" }, status: { type: "string", enum: ["active", "paused", "completed", "cancelled"] } } },
+      patch: { type: "object", description: "仅 mode=work 时用。新建工作必填非空 goal；更新已有工作可省略 goal 而沿用旧值。状态按来源作记录者判断，不是行动授权或验收。", properties: { goal: { type: "string", description: "新建必填；更新可省略。传入时不得为空或纯空白，长度 ≤ 4096。" }, constraints: { type: "array", items: { type: "string" } }, openItems: { type: "array", items: { type: "string" } }, nextStep: { type: "string" }, status: { type: "string", enum: ["active", "paused", "completed", "cancelled"] } } },
       content: {
         type: "string",
         description:
