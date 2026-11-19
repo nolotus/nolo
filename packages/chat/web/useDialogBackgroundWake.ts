@@ -100,7 +100,12 @@ export function useDialogBackgroundWake({
     let terminalSeen = false;
     let isFollowing = false;
     let catchupInFlight = false;
-    let pendingCatchup = false;
+    // 待处理补读的优先级：0=无，1=节流（推断信号），2=立即（明确信号）。
+    // 合并时保留最高优先级，settle 后按「待处理信号」而不是刚结束那轮决定去留。
+    const PENDING_NONE = 0;
+    const PENDING_THROTTLE = 1;
+    const PENDING_IMMEDIATE = 2;
+    let pendingCatchup: number = PENDING_NONE;
     let throttleTimer: ReturnType<typeof setTimeout> | null = null;
     let lastReloadAt = -Infinity;
     let hiddenSince: number | null =
@@ -120,13 +125,19 @@ export function useDialogBackgroundWake({
       if (disposed || latest.current.foregroundActive || throttleTimer !== null) return;
       throttleTimer = setTimeoutFn(() => {
         throttleTimer = null;
-        if (disposed || latest.current.foregroundActive || !pendingCatchup) return;
-        triggerCatchup();
+        if (disposed || latest.current.foregroundActive) return;
+        if (pendingCatchup === PENDING_NONE) return;
+        // 定时器到期时若待处理信号已被升级为立即，按立即执行。
+        triggerCatchup(pendingCatchup === PENDING_IMMEDIATE);
       }, Math.max(0, delayMs));
     };
 
-    const runCatchup = () => {
-      pendingCatchup = false;
+    // immediate=true 用于「明确追赶信号」（重连、跟随中的 turn）：这类信号说明确实
+    // 有内容要追上，人为节流只会让用户多等。注意 in-flight 合并只限制**并发**、不限制
+    // **频率**——若每轮在途期间都收到明确事件，补读会按请求完成速度连续发起，
+    // 这一点已知并接受（读请求可被降载策略覆盖，但不能靠这里保证）。
+    const runCatchup = (immediate: boolean) => {
+      pendingCatchup = PENDING_NONE;
       clearThrottleTimer();
       lastReloadAt = latest.current.now();
       catchupInFlight = true;
@@ -135,31 +146,46 @@ export function useDialogBackgroundWake({
         .catch(() => {})
         .finally(() => {
           catchupInFlight = false;
-          if (disposed || latest.current.foregroundActive || !pendingCatchup) return;
+          if (disposed || latest.current.foregroundActive) return;
+          if (pendingCatchup === PENDING_NONE) return;
+          // 用**待处理信号**决定下一轮，而不是刚结束那轮的 immediate：
+          // 在途期间收到的明确信号不能在 settle 后被降级成节流，反之亦然。
+          if (pendingCatchup === PENDING_IMMEDIATE) {
+            runCatchup(true);
+            return;
+          }
           const remainingMs =
             latest.current.reloadThrottleMs - (latest.current.now() - lastReloadAt);
           if (remainingMs <= 0) {
-            runCatchup();
+            runCatchup(false);
           } else {
             scheduleThrottleFlush(remainingMs);
           }
         });
     };
 
-    const triggerCatchup = () => {
+    const triggerCatchup = (immediate: boolean) => {
       if (disposed || latest.current.foregroundActive) return;
       if (catchupInFlight) {
-        pendingCatchup = true;
+        // 合并时保留最高优先级：在途期间的明确信号必须能把待处理状态升到立即。
+        pendingCatchup = Math.max(
+          pendingCatchup,
+          immediate ? PENDING_IMMEDIATE : PENDING_THROTTLE,
+        );
+        return;
+      }
+      if (immediate) {
+        runCatchup(true);
         return;
       }
       const remainingMs =
         latest.current.reloadThrottleMs - (latest.current.now() - lastReloadAt);
       if (remainingMs > 0) {
-        pendingCatchup = true;
+        pendingCatchup = Math.max(pendingCatchup, PENDING_THROTTLE);
         scheduleThrottleFlush(remainingMs);
         return;
       }
-      runCatchup();
+      runCatchup(false);
     };
 
     const onVisibilityChange = () => {
@@ -174,14 +200,15 @@ export function useDialogBackgroundWake({
       if (state === "visible") {
         const currentTime = latest.current.now();
         const wasHiddenMs = hiddenSince !== null ? currentTime - hiddenSince : 0;
+        // 明确信号：跟随中的 turn、隐藏期间重连过 —— 一定有内容要追，立即补读。
+        // 仅"隐藏够久"属于推断信号，仍走 5s 节流，避免短切换放大读请求。
+        const immediateCatchup = isFollowing || sawOnlineWhileHidden;
         const shouldCatchup =
-          isFollowing ||
-          sawOnlineWhileHidden ||
-          wasHiddenMs >= latest.current.hiddenThresholdMs;
+          immediateCatchup || wasHiddenMs >= latest.current.hiddenThresholdMs;
         hiddenSince = null;
         sawOnlineWhileHidden = false;
         if (shouldCatchup) {
-          triggerCatchup();
+          triggerCatchup(immediateCatchup);
         }
       }
     };
@@ -192,7 +219,8 @@ export function useDialogBackgroundWake({
         sawOnlineWhileHidden = true;
         return;
       }
-      triggerCatchup();
+      // 网络刚恢复就是明确的追赶信号：不让用户等节流窗口。
+      triggerCatchup(true);
     };
 
     const doc = documentTarget ?? defaultDocumentTarget();
@@ -218,7 +246,7 @@ export function useDialogBackgroundWake({
           setFollowingDialog(null);
           if (terminalSeen) return;
           terminalSeen = true;
-          pendingCatchup = false;
+          pendingCatchup = PENDING_NONE;
           clearThrottleTimer();
           lastReloadAt = latest.current.now();
           // The normal dialog bootstrap/error surface remains authoritative.
@@ -233,7 +261,7 @@ export function useDialogBackgroundWake({
     });
     return () => {
       disposed = true;
-      pendingCatchup = false;
+      pendingCatchup = PENDING_NONE;
       clearThrottleTimer();
       doc?.removeEventListener("visibilitychange", onVisibilityChange);
       win?.removeEventListener("online", onOnline);

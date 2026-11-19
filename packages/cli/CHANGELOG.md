@@ -1,4 +1,11 @@
 
+## 0.244.0-alpha.3 (2026-11-19)
+
+### Bug Fixes
+
+* **chat:** 明确追赶信号绕过补读节流，推断信号仍节流 ([ddc54ea](https://github.com/nolotus/bun-nolo/commit/ddc54ea6a0cf39e96488f4116a757b220dae3fa9))
+
+
 ## 0.244.0-alpha.2 (2026-11-19)
 
 ### Bug Fixes
