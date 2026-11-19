@@ -1,4 +1,11 @@
 
+## 0.261.0-alpha.3 (2026-11-19)
+
+### Bug Fixes
+
+* **desktop:** 首帧前不再挂误导状态，三段准备改为并行 ([db434fc](https://github.com/nolotus/bun-nolo/commit/db434fc37858775bfe5c54bd31f3c8ab4a94a946))
+
+
 ## 0.261.0-alpha.2 (2026-11-19)
 
 ### Bug Fixes
