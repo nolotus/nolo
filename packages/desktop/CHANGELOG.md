@@ -1,4 +1,11 @@
 
+## 0.266.0-alpha.6 (2026-11-19)
+
+### Performance Improvements
+
+* **web:** 编排演示延迟到进入视口再挂载 ([f123b2b](https://github.com/nolotus/bun-nolo/commit/f123b2b6b4f5eec3a5b804288f2f4a99cb1243ef))
+
+
 ## 0.266.0-alpha.5 (2026-11-19)
 
 ### Bug Fixes

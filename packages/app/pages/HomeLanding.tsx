@@ -6,6 +6,7 @@ import { LuArrowUpRight, LuCheck, LuDownload, LuMinus, LuRotateCcw } from "react
 
 import WelcomeFaqAccordion from "./WelcomeFaqAccordion";
 import OrchestrationShowcase from "./OrchestrationShowcase";
+import DeferredMount from "./DeferredMount";
 import { guestHomeBandVars } from "render/layout/guestHomeTone";
 import "render/layout/naturePalette.css";
 import "render/layout/noloSerifFont.css";
@@ -174,7 +175,12 @@ const HomeLanding = () => {
             {t(`${NS}.orchestration.title`)}
           </h2>
           <p className="hl-section-lead">{t(`${NS}.orchestration.lead`)}</p>
-          <OrchestrationShowcase className="hl-orch" />
+          {/* 编排演示挂载即拉 3 套 SVG + 7 个图标并起动画；它在首屏之下，
+              进视口前不挂载。标题与 lead 仍参与 SSR；占位高度由
+              .hl-orch-deferred 按断点给出，避免挂载瞬间的布局偏移。 */}
+          <DeferredMount className="hl-orch-deferred">
+            <OrchestrationShowcase className="hl-orch" />
+          </DeferredMount>
         </div>
       </section>
 

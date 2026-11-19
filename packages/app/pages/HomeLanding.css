@@ -649,6 +649,19 @@
   }
 }
 
+/* 编排演示延迟到进入视口才挂载（见 DeferredMount）。占位高度只在未挂载时存在，
+ * 目的是让「挂载前后」的落差尽量小：桌面端演示台 300px 起 + tabs + 文案约 420px；
+ * 窄屏隐藏演示台、改用步骤卡片，明显更矮。挂载后高度交给内容自然高度。 */
+.hl-orch-deferred:empty {
+  min-height: 420px;
+}
+
+@media (max-width: 760px) {
+  .hl-orch-deferred:empty {
+    min-height: 220px;
+  }
+}
+
 /* ── Small screens ────────────────────────────────────── */
 
 @media (max-width: 760px) {
