@@ -1,4 +1,15 @@
 
+## 0.248.0-alpha.1 (2026-11-19)
+
+### Features
+
+* **render:** 游客页左上角品牌入口可点回首页 ([5e54232](https://github.com/nolotus/bun-nolo/commit/5e542324baee7433021d50b7f3a84485cc436ed1))
+
+### Bug Fixes
+
+* **home:** 去掉 landing 的 scroll-snap，滚动不再粘滞 ([dfc04fd](https://github.com/nolotus/bun-nolo/commit/dfc04fde1e7e7acc711803c492d4514ef11d9e38))
+
+
 ## 0.247.0-alpha.2 (2026-11-19)
 
 ### Bug Fixes

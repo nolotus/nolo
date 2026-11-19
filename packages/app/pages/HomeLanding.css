@@ -631,18 +631,13 @@
 /* ── Paging (owner pitches in person) ─────────────────── */
 
 /* The guest home scrolls inside .MainLayout__main, whose top edge is already
- * below the topbar, so a section's snap edge is the scroller's top edge.
- * proximity (not mandatory): ordinary scrolling is untouched, but PageDown /
- * Space / arrow keys settle on a section boundary. */
-.MainLayout--guest-home .MainLayout__main {
-  scroll-snap-type: y proximity;
-}
-
+ * below the topbar. Ordinary scrolling is deliberately free of scroll-snap:
+ * `y proximity` kept pulling a section to the scroller's top edge mid-flick and
+ * users reported the wheel / trackpad scroll felt "sticky" (owner 2026-11-24).
+ * Only `?present=1` (below) changes the layout for step-by-step paging. */
 .home-landing > section {
-  scroll-snap-align: start;
-  /* Space between the scroller's top edge (under the 56px topbar) and the
-   * section when it snaps or is deep-linked. 0 because the scroller already
-   * starts below the topbar; override if the topbar ever overlays it. */
+  /* Deep-link / scrollIntoView offset: 0 because the scroller already starts
+   * below the topbar; override if the topbar ever overlays it. */
   scroll-margin-top: var(--hl-snap-offset, 0px);
 }
 
