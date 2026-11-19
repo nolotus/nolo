@@ -1,4 +1,11 @@
 
+## 0.262.0-alpha.1 (2026-11-19)
+
+### Features
+
+* **mcp:** 新增 GitHub 官方 MCP Server 预设 ([0ae38c6](https://github.com/nolotus/bun-nolo/commit/0ae38c69f538e9c7b97c2d1903a868067ad373e7))
+
+
 ## 0.261.0-alpha.5 (2026-11-19)
 
 ### Bug Fixes
