@@ -1,70 +1,379 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Nolo needs your approval</title>
-    <style>
-      :root { color-scheme: light dark; }
-      body {
-        margin: 0;
-        height: 100vh;
-        box-sizing: border-box;
-        overflow-y: auto;
-        padding: 18px 20px;
-        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nolo needs your approval</title>
+  <style>
+    /*
+     * Tokens mirrored from Nolo's default `nature` theme:
+     *   - colors: packages/app/theme/colors.ts (nature.light / nature.dark)
+     *   - scale & focus/scrollbar: packages/app/theme/themeBootstrap.ts, theme.config.ts, theme-ui.css
+     *   - fonts: packages/web/input.css (--font-ui-system, --font-mono)
+     *   - modal & button patterns: packages/render/web/modal.css (BaseActionModal / ConfirmModal)
+     *     and packages/render/web/ui/button.styles.ts (Button primary / secondary small)
+     * The MV3 extension ships static HTML without a React/StyleX bundler, so these tokens
+     * are kept in sync with the canonical sources above.
+     */
+    :root {
+      color-scheme: light dark;
+
+      /* Typography — packages/web/input.css */
+      --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
+        "Source Han Sans SC", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code",
+        ui-monospace, Consolas, monospace;
+
+      /* Scale — packages/app/theme/theme.config.ts & themeBootstrap.ts (compact) */
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --fontSize-xs: 12px;
+      --fontSize-sm: 13px;
+      --fontSize-base: 14px;
+      --fontSize-lg: 16px;
+      --leading-normal: 1.45;
+      --leading-relaxed: 1.6;
+      --control-md: 36px;
+      --radius-xs: 10px;
+      --radius-md: 20px;
+
+      /* Palette — packages/app/theme/colors.ts (nature.light) */
+      --background: #FAF8F4;
+      --backgroundSecondary: #F6F4EF;
+      --backgroundTertiary: #EBE7DF;
+      --backgroundHover: #EBE7DF;
+      --backgroundElevated: #FFFEFB;
+      --codeBackground: #FFFEFB;
+      --text: #1F2733;
+      --textSecondary: #5B6472;
+      --textTertiary: #5F6773;
+      --textQuaternary: #8A8F96;
+      --border: #E0DFDD;
+      --borderLight: #EBE9E7;
+      --borderHover: #CACAC9;
+      --primary: #1A5FA4;
+      --textOnPrimary: #FFFEFA;
+      --warning: #8A6320;
+      --shadowHeavy: rgba(120, 90, 60, 0.16);
+      --modal-shadow:
+        0 0 0 1px var(--borderLight),
+        0 24px 48px -12px var(--shadowHeavy),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        /* Palette — packages/app/theme/colors.ts (nature.dark) */
+        --background: #1C1B20;
+        --backgroundSecondary: #25242A;
+        --backgroundTertiary: #2E2C34;
+        --backgroundHover: #2E2C34;
+        --backgroundElevated: #25242A;
+        --codeBackground: #16151A;
+        --text: #ECE6DC;
+        --textSecondary: #C9C2B6;
+        --textTertiary: #A7A197;
+        --textQuaternary: #8F8A82;
+        --border: #353337;
+        --borderLight: #2B292D;
+        --borderHover: #4A4849;
+        --primary: #6AA8EA;
+        --textOnPrimary: #1C1B20;
+        --warning: #D9B26A;
+        --shadowHeavy: rgba(0, 0, 0, 0.52);
+        --modal-shadow:
+          0 0 0 1px var(--border),
+          0 24px 48px -12px rgba(0, 0, 0, 0.4),
+          inset 0 1px 0 rgba(255, 255, 255, 0.08);
       }
-      h1 { margin: 0; font-size: 15px; font-weight: 600; }
-      p { margin: 0; }
-      .target { font-weight: 600; word-break: break-word; }
-      .site { font-size: 13px; opacity: 0.85; word-break: break-all; }
-      .hint { opacity: 0.7; font-size: 12px; }
-      #script-caption { font-size: 13px; font-weight: 600; }
-      /* A script is shown as a scrollable block, with its own line breaks: a flattened one-liner
-         let a leading comment hide the statement that actually ran. */
-      #script-preview {
-        margin: 0;
-        padding: 10px 12px;
-        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-        border-radius: 8px;
-        background: color-mix(in srgb, currentColor 6%, transparent);
-        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        flex: 1 1 auto;
-        min-height: 0;
-        max-height: 62vh;
-        overflow: auto;
-      }
-      #script-preview[hidden], #script-caption[hidden] { display: none; }
-      .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: auto; }
-      button {
-        font: inherit;
-        padding: 7px 14px;
-        border-radius: 8px;
-        border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
-        background: transparent;
-        cursor: pointer;
-      }
-      button.primary { border-color: transparent; background: #2563eb; color: #fff; font-weight: 600; }
-      button:disabled { opacity: 0.55; cursor: default; }
-      #status { font-size: 12px; opacity: 0.75; min-height: 16px; }
-    </style>
-  </head>
-  <body>
-    <h1 id="approval-heading">Nolo requests permission to click on the target below</h1>
-    <p class="target" id="target-name"></p>
-    <p class="site" id="target-site"></p>
-    <p id="script-caption" hidden>Script to run (original text; scroll to inspect)</p>
-    <pre id="script-preview" hidden></pre>
-    <p class="hint" id="approval-hint">Permission applies to this action only, expires after 60 seconds, and is invalidated if the page changes.</p>
-    <div id="status" role="status" aria-live="polite"></div>
-    <div class="row">
-      <button type="button" id="deny">Cancel</button>
-      <button type="button" id="allow" class="primary">Allow once</button>
+    }
+
+    * {
+      box-sizing: border-box;
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--textQuaternary) 64%, transparent 36%) transparent;
+    }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      min-height: 100%;
+      display: grid;
+      place-items: center;
+      padding: var(--space-5);
+      background-color: var(--background);
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: var(--fontSize-base);
+      line-height: var(--leading-normal);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── BaseActionModal / ConfirmModal (packages/render/web/modal.css) ── */
+    .action-modal-container {
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      background-color: var(--backgroundElevated);
+      border-radius: var(--radius-md);
+      box-shadow: var(--modal-shadow);
+      overflow: hidden;
+    }
+    .action-modal-header {
+      padding: var(--space-6) var(--space-6) var(--space-2);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+    .title-wrapper {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      color: var(--warning);
+    }
+    .title-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: color-mix(in srgb, currentColor 10%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent);
+      flex-shrink: 0;
+    }
+    .title-icon svg {
+      width: 16px;
+      height: 16px;
+    }
+    .modal-title {
+      margin: 0;
+      color: var(--text);
+      font-size: var(--fontSize-lg);
+      font-weight: 600;
+      line-height: var(--leading-normal);
+      letter-spacing: -0.01em;
+    }
+
+    .action-modal-body {
+      padding: var(--space-2) var(--space-6) var(--space-5);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      color: var(--textSecondary);
+      font-size: var(--fontSize-base);
+      line-height: var(--leading-relaxed);
+    }
+    p {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    /* Target — subtle inset using nature surface & mono tokens */
+    .approval-target {
+      padding: 10px var(--space-3);
+      border-radius: var(--radius-xs);
+      background: var(--backgroundSecondary);
+      border: 1px solid var(--borderLight);
+    }
+    .target-name {
+      color: var(--text);
+      font-size: var(--fontSize-sm);
+      font-weight: 500;
+      line-height: var(--leading-normal);
+    }
+    .target-site {
+      margin-top: 2px;
+      color: var(--textTertiary);
+      font-family: var(--font-mono);
+      font-size: var(--fontSize-xs);
+      line-height: var(--leading-normal);
+    }
+
+    /* Impact — ConfirmModal-message */
+    .ConfirmModal-message {
+      color: var(--textSecondary);
+      font-size: var(--fontSize-base);
+      line-height: var(--leading-relaxed);
+    }
+
+    /* Script preview — understated disclosure, collapsed by default */
+    details {
+      font-size: var(--fontSize-sm);
+    }
+    summary {
+      list-style: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 2px;
+      cursor: pointer;
+      color: var(--textTertiary);
+      font-size: var(--fontSize-xs);
+      font-weight: 500;
+      user-select: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary:hover {
+      color: var(--text);
+    }
+    .chevron {
+      width: 12px;
+      height: 12px;
+      flex: none;
+      transition: transform 0.15s ease;
+    }
+    details[open] .chevron {
+      transform: rotate(90deg);
+    }
+    pre {
+      margin: 6px 0 0;
+      padding: 10px var(--space-3);
+      max-height: min(190px, 34vh);
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: var(--codeBackground);
+      border: 1px solid var(--borderLight);
+      border-radius: var(--radius-xs);
+      color: var(--textSecondary);
+      font-family: var(--font-mono);
+      font-size: var(--fontSize-xs);
+      line-height: 1.5;
+    }
+
+    .approval-hint {
+      color: var(--textTertiary);
+      font-size: var(--fontSize-xs);
+      line-height: var(--leading-normal);
+    }
+    #status {
+      color: var(--textTertiary);
+      font-size: var(--fontSize-xs);
+      line-height: var(--leading-normal);
+    }
+    #status:empty { display: none; }
+
+    /* ── Actions & Button (packages/render/web/modal.css & button.styles.ts) ── */
+    .action-modal-actions {
+      padding: 0 var(--space-6) var(--space-6);
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: var(--space-3);
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: var(--control-md);
+      min-width: 96px;
+      padding: 0 var(--space-3);
+      font-family: inherit;
+      font-size: var(--fontSize-base);
+      font-weight: 500;
+      line-height: 1;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      user-select: none;
+      border-radius: var(--radius-xs);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+    .btn-secondary {
+      background-color: var(--backgroundSecondary);
+      color: var(--text);
+      border-color: var(--border);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background-color: var(--backgroundHover);
+      border-color: var(--borderHover);
+    }
+    .btn-secondary:active:not(:disabled) {
+      background-color: var(--backgroundTertiary);
+      box-shadow: none;
+    }
+    .btn-primary {
+      background-color: var(--primary);
+      background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.05) 100%);
+      color: var(--textOnPrimary);
+      border-color: color-mix(in srgb, var(--text) 5%, transparent);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.2),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1),
+        0 2px 4px color-mix(in srgb, var(--primary) 25%, transparent);
+    }
+    .btn-primary:hover:not(:disabled) {
+      filter: brightness(1.04);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.25),
+        0 4px 12px color-mix(in srgb, var(--primary) 35%, transparent);
+    }
+    .btn-primary:active:not(:disabled) {
+      background-image: none;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
+    }
+    .btn:disabled {
+      opacity: 0.52;
+      cursor: default;
+    }
+
+    /* Focus ring — packages/app/theme/theme-ui.css */
+    button:focus-visible,
+    summary:focus-visible,
+    pre:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+      border-radius: var(--radius-xs);
+    }
+    :focus:not(:focus-visible) {
+      outline: none;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .btn, .chevron { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="action-modal-container" aria-labelledby="approval-heading">
+    <header class="action-modal-header">
+      <div class="title-wrapper">
+        <span class="title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        </span>
+        <h1 class="modal-title" id="approval-heading">Review browser action</h1>
+      </div>
+    </header>
+    <div class="action-modal-body">
+      <div class="approval-target">
+        <p class="target-name" id="target-name"></p>
+        <p class="target-site" id="target-site"></p>
+      </div>
+      <p class="ConfirmModal-message" id="approval-impact"></p>
+      <details id="script-details" hidden>
+        <summary>
+          <svg class="chevron" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg>
+          <span id="script-caption">Script preview</span>
+        </summary>
+        <pre id="script-preview" aria-labelledby="script-caption" tabindex="0" hidden></pre>
+      </details>
+      <p class="approval-hint" id="approval-hint"></p>
+      <p id="status" role="status" aria-live="polite"></p>
     </div>
-    <script src="approve.js"></script>
-  </body>
+    <div class="action-modal-actions">
+      <button type="button" id="allow" class="btn btn-secondary">Allow once</button>
+      <button type="button" id="deny" class="btn btn-primary" autofocus>Cancel</button>
+    </div>
+  </main>
+  <script src="approve.js"></script>
+</body>
 </html>

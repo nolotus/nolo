@@ -4,16 +4,9 @@ import type { CredentialRef } from "./credentialBroker";
 export const MCP_CONNECTION_SCHEMA_VERSION = 1 as const;
 export const MCP_TOOL_NAMES = Object.freeze(["listMcpConnections", "listMcpTools", "callMcpTool"] as const);
 export type McpPlacement = { kind: "server" } | { kind: "local" } | { kind: "machine"; machineId: string };
-export type McpPresetId = "zoho-mail" | "home-assistant";
-export type McpPresetSpec = Readonly<{
-  id: McpPresetId;
-  title: string;
-  summary: string;
-  defaultAuthKind: "none" | "bearer";
-  endpointPlaceholder: string;
-  note: string;
-}>;
-export const MCP_PRESET_SPECS: readonly McpPresetSpec[] = Object.freeze([
+// 预设 id 的唯一真源是下面的 `MCP_PRESET_SPECS`：类型从表里派生，不再手写第二份名单
+// （手抄名单已两次导致"预设加了但类型/枚举没跟上"）。
+export const MCP_PRESET_SPECS = Object.freeze([
   Object.freeze({
     id: "zoho-mail",
     title: "Zoho Mail MCP",
@@ -23,6 +16,14 @@ export const MCP_PRESET_SPECS: readonly McpPresetSpec[] = Object.freeze([
     note: "Zoho 生成的专属 Server URL 内含访问密钥，保存时将直接加密存入受控密文库，不会以明文回显。",
   }),
   Object.freeze({
+    id: "zoho-calendar",
+    title: "Zoho Calendar MCP",
+    summary: "接入 Zoho 官方为你账号生成的专属 MCP HTTPS 服务地址，在受控工具白名单与确认门下查看或创建日程。",
+    defaultAuthKind: "none",
+    endpointPlaceholder: "https://calendar.zoho.com/mcp/...",
+    note: "Zoho 生成的专属 Server URL 内含访问密钥，保存时将直接加密存入受控密文库，不会以明文回显。可写操作（创建/修改日程）同样受每次调用确认门约束，实际可写范围取决于该 URL 绑定的账号权限。",
+  }),
+  Object.freeze({
     id: "home-assistant",
     title: "Home Assistant MCP",
     summary: "接入公网 HTTPS 可达的 Home Assistant 官方 MCP Server（如 /api/mcp），经每次调用确认后查看或控制实体。",
@@ -30,7 +31,27 @@ export const MCP_PRESET_SPECS: readonly McpPresetSpec[] = Object.freeze([
     endpointPlaceholder: "https://ha.example.com/api/mcp",
     note: "服务端连接仅访问公网 HTTPS（自动拦截内网/私网地址），需提供长期访问令牌（Bearer Token）。",
   }),
-]);
+  Object.freeze({
+    id: "github",
+    title: "GitHub MCP",
+    summary: "接入 GitHub 官方托管的远程 MCP Server（无需自建），可访问仓库、Issue、PR 等资源，工具调用仍受白名单与每次调用确认门约束。",
+    defaultAuthKind: "bearer",
+    endpointPlaceholder: "https://api.githubcopilot.com/mcp/",
+    note: "请填写上方提示的官方地址，并使用 GitHub 个人访问令牌（PAT）作为 Bearer Token，暂不支持 OAuth。可使用细粒度 PAT，仅授权需要访问的仓库；只读场景按需授予 Contents、Issues、Pull requests 等仓库权限的只读级别。实际权限取决于 PAT 授予的仓库范围和权限，预设不会把令牌限制为只读。令牌保存时会加密存入受控密文库，不会以明文回显。",
+  }),
+  Object.freeze({
+    id: "odoo",
+    title: "Odoo MCP（自托管）",
+    summary: "通过第三方开源连接器 erpipe-org/mcp-odoo，接入你自行部署的 Odoo MCP 服务。",
+    defaultAuthKind: "bearer",
+    endpointPlaceholder: "https://odoo-mcp.example.com/mcp",
+    note: "连接器默认只监听本机。建议在同一机器上用 HTTPS 网关转发并校验 Bearer 令牌，不直接公开连接器端口。此处填写公网 MCP 网关地址及其令牌，不是 Odoo 网页地址或 Odoo API Key。",
+  }),
+] as const);
+/** 单个预设的元素类型（从唯一真源派生，不手写字段声明）。 */
+export type McpPresetSpec = (typeof MCP_PRESET_SPECS)[number];
+/** 预设 id 的联合类型（从同一张表派生；不要另写名单）。 */
+export type McpPresetId = McpPresetSpec["id"];
 export function getMcpPresetSpec(id: string | null | undefined): McpPresetSpec | undefined {
   return MCP_PRESET_SPECS.find((spec) => spec.id === id);
 }
@@ -151,7 +172,7 @@ export const MCP_CONNECTION_WRITE_SCHEMA: ContractSchema = {
  type: "object", required: ["schemaVersion", "label", "enabled", "placement", "transport", "auth", "allowedToolNames", "readPolicies"],
  properties: {
  schemaVersion: { const: 1 }, label: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^:/\\\\\\r\\n]+$" }, enabled: { type: "boolean" },
- presetId: { enum: ["zoho-mail", "home-assistant"] }, placement: placements,
+ presetId: { enum: MCP_PRESET_SPECS.map((preset) => preset.id) }, placement: placements,
  allowedToolNames: { type: "array", maxItems: 256, items: text(160) },
  readPolicies: { type: "array", maxItems: 256, items: { type: "object", required: ["toolName", "arguments"], properties: { toolName: text(160), arguments: { type: "object", maxProperties: 128, additionalProperties: { type: "array", maxItems: 256 } } }, additionalProperties: false } },
  transport: { type: "object", required: ["kind", "endpointRef"], properties: { kind: { const: "streamable-http" }, endpointRef: refSchema }, additionalProperties: false },

@@ -33,6 +33,13 @@ export function isMarketListedSkill(slug: string | null | undefined): boolean {
   return !PLATFORM_CORE_SKILL_SLUG_SET.has(raw);
 }
 
+// 专项和兼容条目保留搜索、显式调用及已启用账号的管理入口。
+const SEARCH_FIRST_OPTIONAL_SKILLS = new Set(["caveman", "mihome-assistant", "android-adb"]);
+
+export function isOptionalSkillShownByDefault(slug: string, needsManagement: boolean): boolean {
+  return isMarketListedSkill(slug) && (needsManagement || !SEARCH_FIRST_OPTIONAL_SKILLS.has(slug));
+}
+
 export type SkillDirectoryFilter = {
   query?: string;
 };

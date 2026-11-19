@@ -3,6 +3,7 @@ import { buildSkillDocMarkdown, type SkillDocConfig } from "./skillDocProtocol";
 export const WORKFLOW_GUIDANCE_SKILL_SLUGS = [
   "response-presentation",
   "external-copywriting",
+  "website-replication-skill",
 ] as const;
 export type WorkflowGuidanceSkillSlug = (typeof WORKFLOW_GUIDANCE_SKILL_SLUGS)[number];
 
@@ -15,6 +16,47 @@ export function buildWorkflowGuidanceSkillPageKey(userId: string, slug: Workflow
 }
 
 const GUIDANCE: Record<WorkflowGuidanceSkillSlug, { title: string; description: string; body: string }> = {
+  "website-replication-skill": {
+    title: "网页复刻与原创改版",
+    description: "对照真实网页采集证据、映射版式与交互，用授权素材重做，再以桌面和手机浏览器验收。",
+    body: [
+      "# 网页复刻与原创改版",
+      "适用于获授权的旧站重建，或以公开页面为参考制作自有品牌网站。",
+      "1. 先辨明目标：旧站重建保留约定的功能；参考竞品时只提炼版式、信息顺序与交互节奏，不照搬品牌、素材、文案或源码。与用户明确哪些要保留、哪些要明显区分。",
+      "2. 用可用浏览器采集公开页面的桌面与移动证据；逐段滚动，验证懒加载和关键交互，区分实测、推断和无法验证的部分。没有浏览器时说明证据局限。",
+      "3. 将页面、模块和交互逐项映射到目标站，用自有或已获授权的素材实现。不要迁移真实表单提交、账号或第三方数据，除非另有明确授权和测试环境。",
+      "4. 在真实预览中核对桌面及手机截图、图片、导航、关键交互与横向溢出；如果要求原创，另做并排对比，确保首屏构图、视觉语言和品牌表达能明显区分。只报告实际检查通过的项目。",
+      "访问边界：不绕过登录、验证码、付费墙或访问限制；不采集凭据或会话数据，不自动下载执行上游脚本，不额外授予工具或发布权限。",
+      "",
+      "## 来源与许可",
+      "Nolo 适配版，仅吸收公开网页取证、结构映射和验收方法，不包含原项目脚本。",
+      "上游：https://github.com/leosssvip-dot/website-replication-skill/tree/6f7ee0b2335069b6786dab2d4ced5b11def79141",
+      "",
+      "```text",
+      "MIT License",
+      "",
+      "Copyright (c) 2026 Fred",
+      "",
+      "Permission is hereby granted, free of charge, to any person obtaining a copy",
+      "of this software and associated documentation files (the \"Software\"), to deal",
+      "in the Software without restriction, including without limitation the rights",
+      "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell",
+      "copies of the Software, and to permit persons to whom the Software is",
+      "furnished to do so, subject to the following conditions:",
+      "",
+      "The above copyright notice and this permission notice shall be included in all",
+      "copies or substantial portions of the Software.",
+      "",
+      "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR",
+      "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,",
+      "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE",
+      "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER",
+      "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,",
+      "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE",
+      "SOFTWARE.",
+      "```",
+    ].join("\n"),
+  },
   "response-presentation": {
     title: "回复组织与表达",
     description: "触发词：回复组织、表达、篇幅、术语解释、排版。按需加载表达指导；不预先挂载正文，不改变事实、风险与权限底线。",
@@ -27,6 +69,7 @@ const GUIDANCE: Record<WorkflowGuidanceSkillSlug, { title: string; description: 
       "- 用户本轮已表现出理解的词不重复解释，但不能仅因资料定义过就假定用户已理解；用户表示没懂、没跟上或要求换种说法时，重讲该术语不受上述限制。",
       "- 多步任务开工先一行写明终点与不做的事（做完 = …／不碰 = …），按此推进、不重复问范围；保持当前状态与下一步可见，已授权且无需新授权的下一步直接做，不等催促。仅在状态变化、从中断/后台恢复或上下文可能丢失时重述进度。",
       "- 专注主线只管沟通焦点，不是执行调度：次要问题除非阻塞正确性、安全性或当前任务，否则留到主线完成后简述。不要求把可独立并行的无依赖工作串行化，也不禁止在主线未完成时并发推进独立任务；并发与派发仍遵循平台规则。",
+      "- 用户要求极简时，优先一句给结论，仅保留会改变判断或下一步的内容。仍需交代适用条件、风险、无法确认的事实和必要操作顺序；不为了压缩改写报错、命令或指标。",
       "- 篇幅匹配问题规模：一句能答完就不套报告；方案、排查、对比按需展开。普通对话不用逐句状态标签或固定报告骨架；交付文档与固定格式任务按要求组织。",
       "- 正常收尾默认聚合同类技术明细（如测试文件数与总通过数、主结论与提交号），不平铺一长串测试文件名、`runId` 或过密反引号；出错、排查或用户记忆/当轮要求看明细时再展开。",
       "- 问题涉及行动才给下一步，不附送无关清单；任务需要多步操作、排查或执行方案时，保留完成任务所需步骤。",

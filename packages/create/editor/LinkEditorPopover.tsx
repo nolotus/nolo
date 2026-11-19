@@ -1,6 +1,7 @@
 // create/editor/LinkEditorPopover.tsx (最终完美版：使用 Floating UI & 统一图标)
 
 import React, { useRef, useEffect, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
 import { useSlate } from "slate-react";
 import { createPortal } from "react-dom";
 import { useAppSelector } from "app/store";
@@ -14,6 +15,12 @@ import {
 
 import { Portal, Menu, Button } from "./components";
 import { useWebTheme } from "app/theme/webTheme";
+import {
+  placementEnterTravel,
+  placementToTransformOrigin,
+} from "render/web/ui/triggerOrigin";
+import { triggerMotionStyles } from "render/web/ui/triggerMotion.styles";
+import { editorFloatingStyles } from "./floatingSurface.styles";
 
 // 1. [图标统一] 从 react-icons/lu 导入图标
 import { LuCheck, LuTrash2 } from "react-icons/lu";
@@ -39,7 +46,7 @@ export const LinkEditorPopover: React.FC<LinkEditorPopoverProps> = ({
   const isEditing = initialUrl !== "";
 
   // 2. 设置 @floating-ui/react Hook
-  const { x, y, strategy, refs } = useFloating({
+  const { x, y, strategy, refs, placement } = useFloating({
     placement: "top",
     whileElementsMounted: autoUpdate,
     middleware: [offset(8), flip(), shift({ padding: 8 })],
@@ -87,22 +94,27 @@ export const LinkEditorPopover: React.FC<LinkEditorPopoverProps> = ({
     return null;
   }
 
+  const travel = placementEnterTravel(placement, "top");
+
   return createPortal(
     <Menu
       ref={refs.setFloating}
-      style={{
-        position: strategy,
-        top: y ?? 0,
-        left: x ?? 0,
-        zIndex: 9999,
-        backgroundColor: theme.backgroundSecondary,
-        borderRadius: "var(--radius-md)",
-        boxShadow: `0 3px 12px ${theme.shadowMedium}`,
-        padding: "8px",
-        display: "flex",
-        gap: "8px",
-        alignItems: "center",
-      }}
+      className={
+        stylex.props(
+          editorFloatingStyles.linkPopover,
+          triggerMotionStyles.enter,
+        ).className
+      }
+      style={
+        {
+          position: strategy,
+          top: y ?? 0,
+          left: x ?? 0,
+          transformOrigin: placementToTransformOrigin(placement, "top"),
+          "--nolo-enter-x": travel.x,
+          "--nolo-enter-y": travel.y,
+        } as React.CSSProperties & Record<`--${string}`, string>
+      }
       onMouseDown={(e) => e.preventDefault()}
     >
       <input
@@ -112,16 +124,7 @@ export const LinkEditorPopover: React.FC<LinkEditorPopoverProps> = ({
         onChange={(e) => setUrl(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="粘贴或输入链接..."
-        style={{
-          background: theme.backgroundTertiary,
-          border: `1px solid ${theme.border}`,
-          color: theme.text,
-          borderRadius: "var(--radius-sm)",
-          padding: "6px 10px",
-          fontSize: "var(--fontSize-base)",
-          width: "240px",
-          outline: "none",
-        }}
+        {...stylex.props(editorFloatingStyles.linkInput)}
       />
       {/* 4. [图标统一] 使用 LuCheck 和 LuTrash2 图标 */}
       <Button

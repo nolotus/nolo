@@ -200,6 +200,8 @@ export type WorkspaceOptions = {
   clipboardImageReader?: (deps?: ClipboardImageDeps) => Promise<AttachedImage>;
   /** 外部注入的远程任务取数源（测试/特定宿主自定义取数时使用，未传入时回退默认实现） */
   remoteTasks?: RemoteTaskSource;
+  /** Test seam for Ctrl+click link opening without spawning a browser. */
+  urlOpener?: (url: string) => boolean;
 };
 
 
@@ -218,6 +220,7 @@ async function runAgentChat(
   agentRunner: typeof runAgentTurn = runAgentTurn,
   options: {
     freshDialog?: boolean;
+    internalTurn?: boolean;
     userMessages?: import("../client/agentRunTypes").RunAgentTurnOptions["userMessages"];
     /** Explicit stable queued-batch tail id; forwarded to agentRunner. */
     cliBatchId?: string;
@@ -272,6 +275,10 @@ async function runAgentChat(
      * 执行 · <status>」。非 owner 场景不回调。
      */
     onToolExecutionLocation?: (location: ToolExecutionLocation) => void;
+    /** 工具结果产生的轻量图片产物路径/元数据（不含 base64）。 */
+    onToolImageArtifacts?: (
+      artifacts: readonly import("../../agent-runtime/localLoopContract").LocalAgentToolImageArtifact[],
+    ) => void;
   } = {}
 ) {
   // 用户选中的 agent 就是要跑的 agent —— 不再做首轮自动改写，也不再按对话
@@ -578,6 +585,7 @@ async function runAgentChat(
     getProcessCausalDepth: options.getProcessCausalDepth,
     continueDialogId: state.dialogId,
     freshDialog: options.freshDialog,
+    internalTurn: options.internalTurn,
     userMessages: options.userMessages,
     ...(options.cliBatchId ? { cliBatchId: options.cliBatchId } : {}),
     // accountTaskUserSource 已移除：它专为 host task 证据链服务，
@@ -689,6 +697,7 @@ async function runAgentChat(
     // 转发 dock 订阅：runAgentTurn 的输出层靠它判断「有面板」从而抑制
     // transcript 的进展卡片；dock 本身也靠它接收模型轮询带回来的快照。
     ...(options.onAgentRunStatus ? { onAgentRunStatus: options.onAgentRunStatus } : {}),
+    ...(options.onToolImageArtifacts ? { onToolImageArtifacts: options.onToolImageArtifacts } : {}),
     ...(options.drainInjections ? { drainInjections: options.drainInjections } : {}),
     ...(options.drainInjectedBatches ? { drainInjectedBatches: options.drainInjectedBatches } : {}),
     // 轮内实时积分：llm-end 带原始 usage 时按平台计费口径逐帧折算上报。
@@ -1347,6 +1356,11 @@ export interface AgentTurnContext {
   /** 用户 turn 已准确建档；仅宿主可附加 TUI 展示元数据。 */
   onUserImagesPrepared?: (images: readonly import("./pasteImage").AttachedImage[]) => void;
   onUserTurnFinalized?: (turn: import("./tuiHistory").Turn, imageUrls: readonly string[]) => void;
+  /** assistant turn 收尾后挂载本轮工具事件产出的结构化图片产物（仅来自工具元数据，不解析回复文本）。 */
+  onAssistantTurnFinalized?: (
+    turn: import("./tuiHistory").Turn,
+    toolArtifacts: readonly import("../../agent-runtime/localLoopContract").LocalAgentToolImageArtifact[],
+  ) => Promise<void> | void;
 
   // ── 外部只读 / 动态读取字段 ──
   readonly sessionEnded: boolean;
@@ -1889,6 +1903,8 @@ export async function runOneAgentTurn(
   try {
     for (let wakeAttempt = 0; ; wakeAttempt++) {
       drainInjectedBatches.length = 0;
+      const turnToolImageArtifacts: import("../../agent-runtime/localLoopContract").LocalAgentToolImageArtifact[] = [];
+      let toolImageArtifactsDeliveredViaCallback = false;
       const { previousContextUsage, nextBaseline, agentOutput } = prepareAttemptRenderAndBaseline();
       ctx.activeTurnAbort = new AbortController();
       ctx.activeTurnEpoch = myEpoch;
@@ -1901,6 +1917,7 @@ export async function runOneAgentTurn(
         ctx.options.agentRunner,
         {
           freshDialog: attemptFreshDialog,
+          internalTurn: isInternalEvent,
         userMessages: (req as TuiBatchTurnRequest).userMessages,
         ...((req as TuiBatchTurnRequest).cliBatchId
           ? { cliBatchId: (req as TuiBatchTurnRequest).cliBatchId }
@@ -1981,6 +1998,16 @@ export async function runOneAgentTurn(
                   drainInjectedBatches.push({ batchId, messageIds });
                   // Split the live assistant at this boundary, then resume it
                   // after the original user messages (never their image bytes).
+                  if (
+                    ctx.history.currentRole === "assistant" &&
+                    (ctx.history.currentContent.length > 0 || turnToolImageArtifacts.length > 0)
+                  ) {
+                    finalizeCurrentTurn(ctx.history);
+                    const splitAssistant = ctx.history.turns[ctx.history.turns.length - 1];
+                    if (splitAssistant?.role === "assistant") {
+                      await ctx.onAssistantTurnFinalized?.(splitAssistant, turnToolImageArtifacts.splice(0));
+                    }
+                  }
                   ctx.history.followBottom = true;
                   for (const user of displayMessages) {
                     startTurn(ctx.history, "user");
@@ -2035,6 +2062,10 @@ export async function runOneAgentTurn(
         ...(ctx.onToolExecutionLocation
           ? { onToolExecutionLocation: ctx.onToolExecutionLocation }
           : {}),
+        onToolImageArtifacts: (artifacts) => {
+          toolImageArtifactsDeliveredViaCallback = true;
+          turnToolImageArtifacts.push(...artifacts);
+        },
         onAgentRunStatus: (snapshot) => {
           if (snapshot) {
             ctx.activityIndicator.updateAgentRun(snapshot);
@@ -2131,8 +2162,15 @@ export async function runOneAgentTurn(
     }
       const wasAborted = ctx.activeTurnAbort.signal.aborted;
       ctx.activeTurnAbort = null;
+      if (!toolImageArtifactsDeliveredViaCallback && runResult.toolImageArtifacts?.length) {
+        turnToolImageArtifacts.push(...runResult.toolImageArtifacts);
+      }
       if (isInteractiveInput(ctx.input)) {
         finalizeCurrentTurn(ctx.history);
+        const finalizedAssistantTurn = ctx.history.turns[ctx.history.turns.length - 1];
+        if (finalizedAssistantTurn?.role === "assistant") {
+          await ctx.onAssistantTurnFinalized?.(finalizedAssistantTurn, turnToolImageArtifacts);
+        }
         ctx.flushPendingRender();
         ctx.renderHistoryToOutput();
         if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);

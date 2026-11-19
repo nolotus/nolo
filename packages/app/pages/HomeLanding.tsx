@@ -37,7 +37,7 @@ const isPresentSearch = (search: string) => new URLSearchParams(search).get("pre
  * `?present=1` (owner pitching in person): every section is one screen and
  * arrow keys / PageUp / PageDown step section by section. Enhancement only —
  * before hydration the CSS layout already works and the browser's own
- * PageDown + scroll-snap still lands on section edges.
+ * PageDown keeps scrolling normally (there is no scroll-snap).
  */
 const usePresentKeys = (enabled: boolean, rootRef: RefObject<HTMLDivElement | null>) => {
   useEffect(() => {

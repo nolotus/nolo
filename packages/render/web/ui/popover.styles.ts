@@ -61,24 +61,26 @@ export const popoverStyles = stylex.create({
     },
   },
   // [data-placement^="bottom"]
+  // RAC 实时计算 --trigger-anchor-point（触发器在浮层坐标系中的精确像素锚点），
+  // 让 bottom start/end 或视口贴边偏移后的弹层始终从触发点缩放而非边缘中点。
   placementBottom: {
     "--origin": "translateY(calc(-1 * var(--popover-travel))) scale(0.97)",
-    transformOrigin: "top center",
+    transformOrigin: "var(--trigger-anchor-point, top center)",
   },
   // [data-placement^="top"]
   placementTop: {
     "--origin": "translateY(var(--popover-travel)) scale(0.97)",
-    transformOrigin: "bottom center",
+    transformOrigin: "var(--trigger-anchor-point, bottom center)",
   },
   // [data-placement^="right"]
   placementRight: {
     "--origin": "translateX(calc(-1 * var(--popover-travel))) scale(0.97)",
-    transformOrigin: "left center",
+    transformOrigin: "var(--trigger-anchor-point, left center)",
   },
   // [data-placement^="left"]
   placementLeft: {
     "--origin": "translateX(var(--popover-travel)) scale(0.97)",
-    transformOrigin: "right center",
+    transformOrigin: "var(--trigger-anchor-point, right center)",
   },
   // .app-popover .react-aria-OverlayArrow svg（箭头：先描边后填充，接缝消失）
   arrow: {

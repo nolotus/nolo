@@ -6,10 +6,15 @@
 // role="menu"，↑/↓ + Enter 键盘选择；菜单项选中后由调用方负责关闭。
 
 import React, { useMemo } from "react";
+import * as stylex from "@stylexjs/stylex";
 import type { IconType } from "react-icons";
 import { LuArrowDown, LuArrowUp, LuTrash2 } from "react-icons/lu";
-import { computePopupPosition } from "./popupUtils";
+import {
+    computePopupPosition,
+    computePopupTransformOrigin,
+} from "./popupUtils";
 import { useActiveItemNavigation, usePopupDismiss } from "./usePopupBehavior";
+import { triggerMotionStyles } from "../web/ui/triggerMotion.styles";
 
 export type RowContextMenuProps = {
     /** 鼠标坐标（clientX/clientY），菜单左上角锚点 */
@@ -90,6 +95,12 @@ const RowContextMenu: React.FC<RowContextMenuProps> = ({
         viewport: { width: viewportWidth, height: viewportHeight },
         mode: "point",
     });
+    const { transformOrigin, flippedUp } = computePopupTransformOrigin({
+        anchor: { top: y, left: x, width: 0, height: 0 },
+        popup: { width: MENU_WIDTH, height: estimatedMenuHeight },
+        position: { top, left },
+        mode: "point",
+    });
 
     return (
         <div
@@ -98,8 +109,22 @@ const RowContextMenu: React.FC<RowContextMenuProps> = ({
             aria-label="行操作"
             aria-activedescendant={itemId(activeIndex)}
             tabIndex={-1}
-            className="table-page__row-context-menu"
-            style={{ top, left }}
+            className={[
+                "table-page__row-context-menu",
+                stylex.props(triggerMotionStyles.enter).className,
+            ]
+                .filter(Boolean)
+                .join(" ")}
+            style={
+                {
+                    top,
+                    left,
+                    transformOrigin,
+                    "--nolo-enter-y": flippedUp
+                        ? "var(--popover-travel, 6px)"
+                        : "calc(var(--popover-travel, 6px) * -1)",
+                } as React.CSSProperties & Record<`--${string}`, string>
+            }
             onKeyDown={handleKeyDown}
         >
             {items.map((item, index) => {

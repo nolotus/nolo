@@ -3,18 +3,151 @@
  * on its own: it reports "approve" or "deny" to the worker, which re-checks the sender, the URL, the
  * nonce and the window id before the record can become `approved`.
  */
+const CONTROL_CHARS_RE = /[\x00-\x1f\x7f-\x9f]/g;
+const MULTILINE_CONTROL_CHARS_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g;
+const BIDI_CONTROL_RE = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/**
+ * Single-pass O(n) ECMA-48 escape sequence stripper.
+ *
+ * Handles 7-bit and 8-bit CSI, OSC (BEL / 7-bit ST / 8-bit ST), and DCS/SOS/PM/APC
+ * (7-bit ST / 8-bit ST), terminating safely at end-of-input on unterminated sequences
+ * without regex backtracking, while leaving ordinary bracketed text untouched.
+ */
+function stripTerminalEscapes(raw) {
+  const text = String(raw || "");
+  const len = text.length;
+  let out = "";
+  let plainStart = 0;
+  let i = 0;
+
+  const consumeCsi = (start) => {
+    let j = start;
+    while (j < len) {
+      const c = text.charCodeAt(j);
+      if (c >= 0x30 && c <= 0x3f) { j++; continue; }
+      break;
+    }
+    while (j < len) {
+      const c = text.charCodeAt(j);
+      if (c >= 0x20 && c <= 0x2f) { j++; continue; }
+      break;
+    }
+    if (j < len) {
+      const c = text.charCodeAt(j);
+      if (c >= 0x40 && c <= 0x7e) j++;
+    }
+    return j;
+  };
+
+  const consumeString = (start, allowBel) => {
+    let j = start;
+    while (j < len) {
+      const c = text.charCodeAt(j);
+      if (c === 0x9c || (allowBel && c === 0x07)) return j + 1;
+      if (c === 0x1b && j + 1 < len && text.charCodeAt(j + 1) === 0x5c) return j + 2;
+      j++;
+    }
+    return len;
+  };
+
+  while (i < len) {
+    const c = text.charCodeAt(i);
+    if (c === 0x1b) {
+      if (i > plainStart) out += text.slice(plainStart, i);
+      if (i + 1 >= len) {
+        i = len;
+        plainStart = len;
+        break;
+      }
+      const next = text.charCodeAt(i + 1);
+      if (next === 0x5b) {
+        // 7-bit CSI: ESC [
+        i = consumeCsi(i + 2);
+      } else if (next === 0x5d) {
+        // 7-bit OSC: ESC ] (terminated by BEL, ESC \, or 8-bit ST \x9c)
+        i = consumeString(i + 2, true);
+      } else if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) {
+        // 7-bit DCS (P), SOS (X), PM (^), APC (_)
+        i = consumeString(i + 2, false);
+      } else {
+        // Other nF / 2-byte ESC sequence: ESC (0x20..0x2f)* (0x30..0x7e)?
+        let j = i + 1;
+        while (j < len) {
+          const b = text.charCodeAt(j);
+          if (b >= 0x20 && b <= 0x2f) { j++; continue; }
+          break;
+        }
+        if (j < len) {
+          const b = text.charCodeAt(j);
+          if (b >= 0x30 && b <= 0x7e) j++;
+        }
+        i = j;
+      }
+      plainStart = i;
+      continue;
+    }
+
+    if (c === 0x9b) {
+      // 8-bit CSI
+      if (i > plainStart) out += text.slice(plainStart, i);
+      i = consumeCsi(i + 1);
+      plainStart = i;
+      continue;
+    }
+
+    if (c === 0x9d) {
+      // 8-bit OSC
+      if (i > plainStart) out += text.slice(plainStart, i);
+      i = consumeString(i + 1, true);
+      plainStart = i;
+      continue;
+    }
+
+    if (c === 0x90 || c === 0x98 || c === 0x9e || c === 0x9f) {
+      // 8-bit DCS (0x90), SOS (0x98), PM (0x9e), APC (0x9f)
+      if (i > plainStart) out += text.slice(plainStart, i);
+      i = consumeString(i + 1, false);
+      plainStart = i;
+      continue;
+    }
+
+    i++;
+  }
+
+  if (plainStart === 0) return text;
+  if (plainStart < len) out += text.slice(plainStart);
+  return out;
+}
+
+function sanitizeSingleLine(raw) {
+  return stripTerminalEscapes(raw)
+    .replace(/[\r\n\u2028\u2029]+/g, " ")
+    .replace(CONTROL_CHARS_RE, "")
+    .replace(BIDI_CONTROL_RE, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizeMultiline(raw) {
+  return stripTerminalEscapes(raw)
+    .replace(/\r\n?|\u2028|\u2029/g, "\n")
+    .replace(MULTILINE_CONTROL_CHARS_RE, "")
+    .replace(BIDI_CONTROL_RE, "");
+}
+
 const params = new URLSearchParams(location.search);
 const approvalId = params.get("approvalId") || "";
 const nonce = params.get("nonce") || "";
-const action = params.get("action") || "click";
-const targetName = params.get("target") || "";
+const action = params.get("action") || "";
+const targetName = sanitizeSingleLine(params.get("target"));
 /**
  * The site the action belongs to. Only an origin ever reaches this page — a full URL could carry a
  * token in its query string, and this page is shown to the user. The tab title is deliberately
  * absent: the page controls it, so it could carry a mail subject, an account name or a one-time
  * code, and it could be written to imitate a brand next to the origin.
  */
-const targetOrigin = (params.get("origin") || "").trim();
+const targetOrigin = sanitizeSingleLine(params.get("origin"));
 /**
  * What the action would change, for a select: the option it would set (`{"value":"jp","label":"Japan"}`).
  *
@@ -46,16 +179,14 @@ const t = (key, fallback, substitutions) => chrome?.i18n?.getMessage?.(key, subs
 document.documentElement.lang = chrome?.i18n?.getUILanguage?.() || "en";
 document.title = t("approveTitle", "Nolo needs your approval");
 
-const ACTION_LABELS = {
-  click: t("approveClick", "click"),
-  type: t("approveType", "type"),
-  press: t("approvePress", "press a key"),
-  // Without this the window labelled a select as "点击", which is a different action than the
-  // one the user is being asked to allow.
-  set_select_value: t("approveSelect", "select an option"),
-  // Arbitrary script: the label has to name it as its own kind of action, never as a click.
-  eval_script: t("approveEval", "run a script"),
-};
+const ACTION_LABELS = new Map([
+  ["click", t("approveClick", "Click a control")],
+  ["type", t("approveType", "Enter text")],
+  ["press", t("approvePress", "Press a key")],
+  ["set_select_value", t("approveSelect", "Select an option")],
+  ["file_upload", t("approveUpload", "Attach files")],
+  ["eval_script", t("approveEval", "Run a script")],
+]);
 
 const allowButton = document.getElementById("allow");
 const denyButton = document.getElementById("deny");
@@ -64,15 +195,21 @@ const targetLine = document.getElementById("target-name");
 const siteLine = document.getElementById("target-site");
 const heading = document.getElementById("approval-heading");
 
-const actionLabel = ACTION_LABELS[action] || ACTION_LABELS.click;
-heading.textContent = t("approveHeading", `Nolo requests permission to ${actionLabel} on the target below`, [actionLabel]);
-document.getElementById("approval-hint").textContent = t("approveHint", "Permission applies to this action only, expires after 60 seconds, and is invalidated if the page changes.");
+const actionLabel = ACTION_LABELS.get(action) || t("approveUnknownAction", "Unknown browser action");
+heading.textContent = t("approveHeading", actionLabel, [actionLabel]);
+document.getElementById("approval-impact").textContent = action === "eval_script"
+  ? t("approveEvalImpact", "May read or modify the page and cause changes outside the page.")
+  : t("approveImpact", "May modify the page or cause changes outside the page.");
+document.getElementById("approval-hint").textContent = action === "eval_script"
+  ? t("approveEvalHint", "One-time permission, valid up to 60s, bound to this script and its target document. Esc cancels.")
+  : t("approveHint", "One-time permission, valid up to 60s. Esc cancels.");
 allowButton.textContent = t("approveAllow", "Allow once");
 denyButton.textContent = t("approveCancel", "Cancel");
-targetLine.textContent = targetName ? `「${targetName}」` : t("approveUnnamed", "Unnamed control");
+targetLine.textContent = action === "eval_script" ? t("approveTargetTab", "Target tab") : targetName ? `「${targetName}」` : t("approveUnnamed", "Unnamed control");
+const scriptDetails = document.getElementById("script-details");
 const scriptCaption = document.getElementById("script-caption");
 const scriptPreview = document.getElementById("script-preview");
-scriptCaption.textContent = t("approveScriptCaption", "Script to run (original text; scroll to inspect)");
+scriptCaption.textContent = t("approveScriptCaption", "Script preview");
 
 /**
  * A script is shown as its own block, line for line, in a scrollable <pre>.
@@ -84,8 +221,8 @@ scriptCaption.textContent = t("approveScriptCaption", "Script to run (original t
  * whole script, so "this is an excerpt" is visible instead of implied.
  */
 function renderScriptPreview() {
-  const text = summary ? summary.label : "";
-  if (scriptCaption) scriptCaption.hidden = false;
+  const text = summary ? sanitizeMultiline(summary.label) : "";
+  scriptDetails.hidden = false;
   if (!scriptPreview) return;
   scriptPreview.hidden = false;
   // Assigned as text, never as HTML: the script is page-adjacent data, not markup.
@@ -98,7 +235,8 @@ if (action === "eval_script") {
 } else if (summary && summary.label) {
   // The item the action would set, right after the control it would set it on. With no summary the
   // line stays exactly as it was — a lone arrow would say nothing.
-  targetLine.textContent += `→ ${summary.label}`;
+  const optionLabel = sanitizeSingleLine(summary.label);
+  if (optionLabel) targetLine.textContent += `→ ${optionLabel}`;
 }
 // A site the user cannot name is a site the user cannot judge: say "unknown" instead of leaving
 // the line blank, so a missing origin never reads as "nothing to see here".
@@ -160,7 +298,15 @@ async function decide(decision) {
 allowButton?.addEventListener("click", () => void decide("approve"));
 denyButton?.addEventListener("click", () => void decide("deny"));
 
+document.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented || event.isComposing || event.key !== "Escape" || decided) return;
+  event.preventDefault();
+  void decide("deny");
+});
+
 if (!approvalId || !nonce) {
   lockButtons();
   setStatus(t("approveMissingId", "Missing approval identifier. Request again in Nolo."));
+} else {
+  denyButton.focus();
 }

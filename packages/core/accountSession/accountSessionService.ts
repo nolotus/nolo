@@ -1,3 +1,4 @@
+import { isExternalSessionKind } from "core/githubAuthContract";
 /**
  * AccountSessionService — the session orchestration owner (Phase 2).
  *
@@ -152,7 +153,7 @@ export class AccountSessionService {
   async acceptExternalAuthentication(result: { token: string }): Promise<void> {
     this.deps.core.beginTransition("signing-in");
     try {
-      // The Google wire payload is display-only; reject additional fields before
+      // The external session wire payload is display-only; reject additional fields before
       // the existing core parser can project them as account privileges.
       const [encoded, secret, extra] = result.token.split(".");
       let payload: unknown;
@@ -164,7 +165,7 @@ export class AccountSessionService {
       if (!secret || extra !== undefined || typeof payload !== "object" || payload === null ||
           Array.isArray(payload) || Object.keys(payload).some((key) =>
             !["authKind", "userId", "username", "exp"].includes(key)) ||
-          (payload as { authKind?: unknown }).authKind !== "google-session-v1") {
+          !isExternalSessionKind((payload as { authKind?: unknown }).authKind)) {
         throw new Error("invalid_session_token");
       }
       await this.persistAndActivate(result.token);

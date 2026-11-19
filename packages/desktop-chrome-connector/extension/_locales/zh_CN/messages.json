@@ -46,7 +46,7 @@
     "message": "Nolo 需要你确认"
   },
   "approveHeading": {
-    "message": "Nolo 请求对下面的目标执行：$ACTION$",
+    "message": "$ACTION$",
     "placeholders": {
       "action": {
         "content": "$1"
@@ -54,16 +54,16 @@
     }
   },
   "approveClick": {
-    "message": "点击"
+    "message": "点击控件"
   },
   "approveType": {
-    "message": "输入"
+    "message": "输入内容"
   },
   "approvePress": {
-    "message": "按键"
+    "message": "按下按键"
   },
   "approveSelect": {
-    "message": "选择"
+    "message": "选择选项"
   },
   "approveEval": {
     "message": "执行脚本"
@@ -83,13 +83,31 @@
     }
   },
   "approveScriptCaption": {
-    "message": "要执行的脚本（原文，换行保留；可滚动查看）"
+    "message": "脚本预览"
   },
   "approveScriptMissing": {
     "message": "脚本内容缺失：请取消，回到 Nolo 重新发起"
   },
   "approveHint": {
-    "message": "允许只对这一次动作有效，60 秒后失效；页面内容变化后也会作废。"
+    "message": "仅本次有效，最长 60 秒。按 Esc 取消。"
+  },
+  "approveEvalHint": {
+    "message": "仅本次有效，最长 60 秒，且仅适用于此脚本及其目标文档。按 Esc 取消。"
+  },
+  "approveUpload": {
+    "message": "附加文件"
+  },
+  "approveUnknownAction": {
+    "message": "未知浏览器操作"
+  },
+  "approveTargetTab": {
+    "message": "目标标签页"
+  },
+  "approveImpact": {
+    "message": "可能修改页面内容，或触发页面外的变更。"
+  },
+  "approveEvalImpact": {
+    "message": "可能读取或修改页面内容，并触发页面外的变更。"
   },
   "approveCancel": {
     "message": "取消"

@@ -1,6 +1,7 @@
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { extractConversationLinks, renderConversationLinks } from "./conversationLinks";
+import type { ConversationLinksTarget } from "./conversationLinks";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -304,7 +305,17 @@ export function handleTuiInput(
   input: string,
   state: TuiState,
   historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
-  deps?: { env?: EnvLike },
+  deps?: {
+    env?: EnvLike;
+    /**
+     * Where the caller will display command output. `/links` needs it because
+     * the copy hint it prints must match the channel: only a transcript turn
+     * (interactive history) supports Ctrl+left-click and the built-in
+     * selection copy; pipe/script output is plain stdout.
+     * Defaults to "pipe" — the answer that is never wrong.
+     */
+    linksTarget?: ConversationLinksTarget;
+  },
 ): TuiInputResult {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -504,7 +515,7 @@ export function handleTuiInput(
       const extracted = extractConversationLinks(historyTurns ?? []);
       return {
         nextState: state,
-        output: `${renderConversationLinks(extracted, t as never)}\n`,
+        output: `${renderConversationLinks(extracted, t as never, deps?.linksTarget)}\n`,
       };
     }
     case "/credits": {

@@ -20,6 +20,7 @@ import {
   tooltipStyles,
   type TooltipArrowStyle,
 } from "./tooltip.styles";
+import { resolvePlacementSide } from "./triggerOrigin";
 
 type LegacyPlacement =
   | "top"
@@ -91,21 +92,22 @@ export const Tooltip: React.FC<TooltipProps> = ({
     return <>{children}</>;
   }
 
-  // 原 CSS 仅按 data-placement 精确值给出 margin/入场位移/箭头旋转，
-  // 对角 placement 按 react-aria 的规范化首词对齐同侧行为。
-  const side = placement.split(" ")[0] as "top" | "bottom" | "left" | "right";
-  const placementStyle = {
+  const placementStyleBySide = {
     top: tooltipStyles.placementTop,
     bottom: tooltipStyles.placementBottom,
     left: tooltipStyles.placementLeft,
     right: tooltipStyles.placementRight,
-  }[side];
-  const arrowRotation: TooltipArrowStyle | null = {
+  } as const;
+  const arrowRotationBySide: Record<
+    "top" | "bottom" | "left" | "right",
+    TooltipArrowStyle | null
+  > = {
     top: null,
     bottom: tooltipStyles.arrowRotateBottom,
     left: tooltipStyles.arrowRotateLeft,
     right: tooltipStyles.arrowRotateRight,
-  }[side];
+  };
+  const fallbackSide = resolvePlacementSide(placement, "top");
 
   return (
     <AriaTooltipTrigger delay={delay}>
@@ -113,19 +115,43 @@ export const Tooltip: React.FC<TooltipProps> = ({
       <AriaTooltip
         placement={PLACEMENT_MAP[placement] as AriaTooltipProps["placement"]}
         offset={6}
-        className={stylex.props(tooltipStyles.tooltip, placementStyle).className}
+        className={(renderProps) => {
+          const resolvedSide = resolvePlacementSide(
+            renderProps.placement,
+            fallbackSide,
+          );
+          return (
+            stylex.props(
+              tooltipStyles.tooltip,
+              placementStyleBySide[resolvedSide],
+            ).className ?? ""
+          );
+        }}
       >
-        <OverlayArrow>
-          <svg
-            width={8}
-            height={8}
-            viewBox="0 0 8 8"
-            {...stylex.props(tooltipStyles.arrow, arrowRotation)}
-          >
-            <path d="M0 0 L4 4 L8 0" />
-          </svg>
-        </OverlayArrow>
-        {content}
+        {(renderProps) => {
+          const resolvedSide = resolvePlacementSide(
+            renderProps.placement,
+            fallbackSide,
+          );
+          return (
+            <>
+              <OverlayArrow>
+                <svg
+                  width={8}
+                  height={8}
+                  viewBox="0 0 8 8"
+                  {...stylex.props(
+                    tooltipStyles.arrow,
+                    arrowRotationBySide[resolvedSide],
+                  )}
+                >
+                  <path d="M0 0 L4 4 L8 0" />
+                </svg>
+              </OverlayArrow>
+              {content}
+            </>
+          );
+        }}
       </AriaTooltip>
     </AriaTooltipTrigger>
   );

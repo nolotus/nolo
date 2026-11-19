@@ -120,6 +120,9 @@ export function extractConversationLinks(
   return { links: [...seen.values()], total, hasMore: total > seen.size };
 }
 
+/** Where the caller will put the rendered list — the hint must match it. */
+export type ConversationLinksTarget = "history" | "pipe";
+
 /**
  * Render the numbered list.
  *
@@ -131,9 +134,30 @@ export function extractConversationLinks(
 export function renderConversationLinks(
   extracted: { links: ReadonlyArray<ConversationLink>; total: number },
   t: (
-    key: "noConversationLinks" | "conversationLinksShowing" | "conversationLinksCopyHint",
+    key:
+      | "noConversationLinks"
+      | "conversationLinksShowing"
+      | "conversationLinksCopyHint"
+      | "conversationLinksCopyHintPipe",
     ...args: Array<string | number>
   ) => string,
+  /**
+   * Where the caller will put this text — the hint must match the channel,
+   * otherwise it promises shortcuts that do not exist there.
+   *
+   * "history" — rendered as a transcript turn in interactive mode: those lines
+   * are in the scrollback, so Ctrl+left-click opens a visible URL and the
+   * built-in selection copy can grab it.
+   * "pipe" — pipe/script mode, no TUI at all: the text is just stdout, so it
+   * only suggests copying the URL.
+   *
+   * There is no separate "busy" channel: the workspace prints busy `/links`
+   * through the same stream-safe transcript insert as `/tools`, so the panel
+   * lands in history and the "history" hint stays true there as well.
+   *
+   * Default "pipe" because it is the claim that cannot become false.
+   */
+  target: ConversationLinksTarget = "pipe",
 ): string {
   const { links, total } = extracted;
   if (links.length === 0) return t("noConversationLinks");
@@ -146,5 +170,7 @@ export function renderConversationLinks(
   const heading = t("conversationLinksShowing", links.length, total);
   // No "/open <n>" hint: that command does not exist, and advertising it would
   // send the user straight into "Unknown command".
-  return [heading, ...lines, "", t("conversationLinksCopyHint")].join("\n");
+  const hint =
+    target === "history" ? t("conversationLinksCopyHint") : t("conversationLinksCopyHintPipe");
+  return [heading, ...lines, "", hint].join("\n");
 }

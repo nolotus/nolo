@@ -16,6 +16,18 @@ import * as stylex from "@stylexjs/stylex";
  */
 export const sidebarScrollContentPadding = "4px var(--sidebar-gutter)" as const;
 
+const portalDropdownEnter = stylex.keyframes({
+  from: {
+    opacity: 0,
+    transform:
+      "translate3d(var(--portal-dropdown-travel-x, 0px), var(--portal-dropdown-travel-y, var(--popover-travel, 6px)), 0) scale(0.96)",
+  },
+  to: {
+    opacity: 1,
+    transform: "translate3d(0, 0, 0) scale(1)",
+  },
+});
+
 export const sidebarStyles = stylex.create({
   /* ── ChatSidebar Alignment System ── */
   chatSidebar: {
@@ -1009,9 +1021,13 @@ export const sidebarStyles = stylex.create({
     boxShadow: "var(--popover-shadow)",
     opacity: 0,
     visibility: "hidden",
+    transformOrigin: "bottom center",
     transform: "translateY(var(--popover-travel)) scale(0.97)",
-    transition:
-      "opacity var(--popover-duration) var(--popover-ease), transform var(--popover-duration) var(--popover-ease), visibility var(--popover-duration)",
+    transition: {
+      default:
+        "opacity var(--popover-duration) var(--popover-ease), transform var(--popover-duration) var(--popover-ease), visibility var(--popover-duration)",
+      "@media (prefers-reduced-motion: reduce)": "opacity 0.1s linear, visibility 0.1s linear",
+    },
     zIndex: 1000,
     pointerEvents: "none",
     "@media (max-width: 768px)": {
@@ -1026,6 +1042,15 @@ export const sidebarStyles = stylex.create({
     visibility: "visible",
     transform: "translateY(0) scale(1)",
     pointerEvents: "auto",
+  },
+  sidebarUserSectionDropdownPortalEnter: {
+    animationName: {
+      default: portalDropdownEnter,
+      "@media (prefers-reduced-motion: reduce)": "none",
+    },
+    animationDuration: "var(--popover-duration, 0.18s)",
+    animationTimingFunction: "var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1))",
+    animationFillMode: "both",
   },
   sidebarUserSectionDropdownMenu: {
     minWidth: "250px",

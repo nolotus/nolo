@@ -1,5 +1,16 @@
 import * as stylex from "@stylexjs/stylex";
 
+const queuePopoverEnter = stylex.keyframes({
+  from: {
+    opacity: 0,
+    transform: "translateY(var(--popover-travel, 6px)) scale(0.96)",
+  },
+  to: {
+    opacity: 1,
+    transform: "translateY(0) scale(1)",
+  },
+});
+
 /**
  * QueueBadge.tsx 的 StyleX 样式 —— 自原 queue-badge.css 1:1 迁出（2026-08-30）。
  *
@@ -64,6 +75,14 @@ export const queueBadgeStyles = stylex.create({
     boxShadow: "0 4px 16px rgba(0, 0, 0, 0.12)",
     zIndex: 50,
     padding: "0.5rem 0",
+    transformOrigin: "bottom left",
+    animationName: {
+      default: queuePopoverEnter,
+      "@media (prefers-reduced-motion: reduce)": "none",
+    },
+    animationDuration: "var(--popover-duration, 0.18s)",
+    animationTimingFunction: "var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1))",
+    animationFillMode: "both",
   },
   popoverHeader: {
     display: "flex",

@@ -3,21 +3,20 @@
  *
  * TUI（tuiTurnRunner）、CLI（agentRunCommand）、desktop
  * （desktopAgentRuntimeTurnService）此前各手写一份：同样的
- * AGENTS.md → CLAUDE.md 回退、同样的 8KB 截断、同样的 marker。
+ * AGENTS.md → CLAUDE.md 回退、同样的预算降级、同样的 marker。
  * 手写副本必然漂移，此处收敛为单一实现。
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { buildAgentsMdLayer, buildAgentsMdLayerHeader, type TurnContextLayer } from "./turnContext";
 
 /**
- * 注入预算（字节）：正文 + 截断 marker 合计不得超过此值。
- * marker 也占预算——否则「按 8KB 截断正文再追加 marker」会让实际注入
- * 超出预算几十到几百字节。
+ * 注入预算（字节）：块头、正文和可能的截断 marker 合计不得超过此值。
+ * 16 KiB 能容纳当前仓库约 13.5 KB 的项目指令，不必让模型每轮另行读盘。
  */
-export const AGENTS_MD_MAX_BYTES = 8192;
+export const AGENTS_MD_MAX_BYTES = 16 * 1024;
 /**
  * 截断 marker 的预留字节。marker 单独占预算，正文预算因此固定
  * （MAX - RESERVE - 2），不受 marker 实际长度影响——否则「原文件字节数」
@@ -115,7 +114,7 @@ const AGENTS_MD_SUMMARY_PRIORITY_KEYWORDS: readonly string[] = [
  */
 const AGENTS_MD_SUMMARY_POINTER_INSTRUCTION =
   "用 readFile 读全文：%REL%（cwd）/ %PATH%\n" +
-  "仅索引：提交/评审门禁、worktree 隔离、测试/typecheck、文档落位、删除、push/发布前，" +
+  "仅索引（未注入全文）：提交/评审门禁、worktree 隔离、测试/typecheck、文档落位、删除、push/发布前，" +
   "**必须先 readFile 读全文再执行**。\n" +
   "路径：%REL% 相对 cwd；machine:<id>/沙盒执行面 cwd 由其决定，读不到让宿主注入或用绝对路径。";
 
@@ -376,20 +375,28 @@ const renderSummarySections = (
 };
 
 /**
- * 从工作区根目录读取 AGENTS.md（缺失时回退 CLAUDE.md），返回 canonical
- * agents-md layer（session-scope）；都不存在或不可读时返回 null。
- *
- * 超过注入预算时截断正文，并追加结构化 marker：原文件字节数、已省略字节数、
- * 完整文件绝对路径，以及「提交/评审前请读完整文件」的门禁提醒。
- * 「已省略字节数」按**实际未注入的字节**计算（原文件总字节 - 实际注入正文
- * 字节），因此行边界回退多丢的那部分也计入，不会少报。
+ * 只在宿主选定的工作区根查找候选，不遍历父目录或子目录。每轮重读，
+ * 未改动时生成同样的 session 层；工作区切换、编辑、缺失或不可读不沿用旧内容。
+ * 超预算保留索引；无法提取索引时保留带明确 marker 的正文前缀。
  */
 export function readAgentsMdLayerFromDisk(cwd: string): TurnContextLayer | null {
+  if (!cwd) return null;
+  let root: string;
+  try {
+    root = realpathSync(cwd);
+  } catch {
+    return null;
+  }
+
   for (const name of AGENTS_MD_CANDIDATES) {
     const filePath = resolve(cwd, name);
-    if (!existsSync(filePath)) continue;
     try {
-      const raw = readFileSync(filePath, "utf8");
+      // Allow in-workspace aliases (e.g. CLAUDE.md → AGENTS.md), not reads outside the binding.
+      const target = realpathSync(resolve(root, name));
+      const targetRelative = relative(root, target);
+      if (targetRelative === ".." || targetRelative.startsWith(`..${sep}`) || isAbsolute(targetRelative)) continue;
+      if (!statSync(target).isFile()) continue;
+      const raw = readFileSync(target, "utf8");
       const content = raw.trim();
       if (!content) continue;
 

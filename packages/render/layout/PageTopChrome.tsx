@@ -17,7 +17,11 @@ import CreateMenuButton from "./CreateMenuButtonContainer";
 import { DevReloadBadge } from "./DevReloadBadge";
 import { useSidebarToggleContext } from "./SidebarToggleContext";
 import { getRouteDescriptor } from "./mainLayoutViewMode";
-import { getGuestNaturePage } from "./guestNaturePages";
+import {
+  getGuestNaturePage,
+  isContentObjectPath,
+  shouldShowGuestBrandHome,
+} from "./guestNaturePages";
 
 // Space switcher 在左侧边栏里渲染（space 页），全局条删除后这里保留引用，
 // 避免误以为空间切换入口随全局条一起消失。
@@ -188,18 +192,47 @@ export const PageUserChrome: React.FC<{ floating?: boolean }> = ({
   );
 };
 
-/** 内容对象页（PageLoader 分派的 pageKey 类型）由页面头部承载右侧用户簇。 */
-const CONTENT_OBJECT_SEGMENT = /^(page|app-|agent|meta-|file|image|task|dialog)/;
+/**
+ * 游客页左上角的品牌入口：登录 / 定价 / 下载 / 法务等游客页没有页头，也没有
+ * 侧栏，不给这个入口就只能靠浏览器后退回首页。首页自身和内容对象页不渲染
+ * （后者页头自带 Home），桌面壳有原生导航也不叠加。
+ */
+export const GuestBrandHome: React.FC = () => {
+  const { t } = useTranslation();
+  const location = useLocation();
+  const isLoggedIn = useIsLoggedIn();
+  const isDesktopShell =
+    typeof document !== "undefined" &&
+    document.documentElement.dataset.noloDesktop === "1";
 
-const isContentObjectPath = (pathname: string) => {
-  const segments = pathname.split("/").filter(Boolean);
-  const last = segments[segments.length - 1] ?? "";
-  return CONTENT_OBJECT_SEGMENT.test(last);
+  if (
+    !shouldShowGuestBrandHome(location.pathname, {
+      isLoggedIn,
+      isDesktop: isDesktopShell,
+    })
+  ) {
+    return null;
+  }
+
+  return (
+    <NavLink
+      to="/"
+      end
+      className={({ isActive }) =>
+        `page-top-chrome__guest-home ${isActive ? "is-active" : ""}`.trim()
+      }
+      title={t("home", "首页")}
+      aria-label={t("home", "首页")}
+    >
+      <NoloHeadMark size={26} />
+      <span className="page-top-chrome__guest-home-brand">Nolo</span>
+    </NavLink>
+  );
 };
 
 /**
  * 非内容对象页（首页 / 登录 / 定价 / 下载 / 法务页等）没有页面头部，
- * 游客的主题·语言·登录入口由这里补上；内容对象页不重复渲染。
+ * 游客的品牌入口与主题·语言·登录入口由这里补上；内容对象页不重复渲染。
  */
 export const GuestPageChrome: React.FC = () => {
   const isLoggedIn = useIsLoggedIn();
@@ -208,5 +241,10 @@ export const GuestPageChrome: React.FC = () => {
   if (isLoggedIn) return null;
   if (isContentObjectPath(location.pathname)) return null;
 
-  return <PageUserChrome floating />;
+  return (
+    <>
+      <GuestBrandHome />
+      <PageUserChrome floating />
+    </>
+  );
 };

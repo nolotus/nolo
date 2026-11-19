@@ -16,6 +16,11 @@ export const authRoutes = {
     method: "POST" as const,
     createPath: () => `${API_VERSION}/users/signup`,
   },
+  github: {
+    start: { path: `${API_VERSION}/users/github/start`, method: "POST" as const, createPath: () => `${API_VERSION}/users/github/start` },
+    callback: { path: `${API_VERSION}/users/github/callback`, method: "GET" as const, createPath: () => `${API_VERSION}/users/github/callback` },
+    complete: { path: `${API_VERSION}/users/github/complete`, method: "POST" as const, createPath: () => `${API_VERSION}/users/github/complete` },
+  },
   google: {
     start: { path: `${API_VERSION}/users/google/start`, method: "POST" as const, createPath: () => `${API_VERSION}/users/google/start` },
     callback: { path: `${API_VERSION}/users/google/callback`, method: "GET" as const, createPath: () => `${API_VERSION}/users/google/callback` },

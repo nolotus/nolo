@@ -936,7 +936,7 @@ export async function rejectDesktopTextOnlyAgentRuntimeToolCall(
 }
 
 // AGENTS.md 读取已收敛到 agent-runtime/agentsMd 的 readAgentsMdLayerFromDisk
-//（TUI / CLI / desktop 三 host 共享同一实现，含 8KB 截断与 CLAUDE.md 回退）。
+//（TUI / CLI / desktop 三 host 共享同一实现，预算内全文、超预算降级，保留 CLAUDE.md 回退）。
 
 
 export async function resolveDesktopTextOnlyAgentRuntimeProvider(args: {
@@ -1606,7 +1606,7 @@ async function runDesktopAgentRuntimeTurnImpl(
       console.warn("[desktop-runtime] skill discovery scan failed:", scanError);
     }
     // AGENTS.md project context (session-scope for cache stability；
-    // 共享实现：agent-runtime/agentsMd，含 8KB 截断与 CLAUDE.md 回退)
+    // 共享实现：agent-runtime/agentsMd，预算内全文、超预算降级，保留 CLAUDE.md 回退)
     agentsMdLayer = readAgentsMdLayerFromDisk(cwd);
   }
 

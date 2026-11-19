@@ -32,7 +32,7 @@ import { resolveCliLocalRuntimeKeyCapability } from "../../ai/tools/agent/cliLoc
 import { isAntigravityOAuthAgent } from "../../agent-runtime/antigravityOAuth";
 import { isOAuthApiKeyRef } from "../../agent-runtime/serverProxyPolicy";
 import { resolveLocalUserId } from "./cliAgentConfigHelpers";
-import { resolveInjectedTurnUserMessageId, resolvePersistedTurnUserMessageId } from "./cliTurnUserMessage";
+import { persistDirectWorkMemorySource, resolvePersistedTurnUserMessageId } from "./cliTurnUserMessage";
 import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
@@ -2535,25 +2535,22 @@ async function executeLocalAgentTurnForCliWithAdapter(
     options.output.write(`[nolo] ${error instanceof Error ? error.message : String(error)}\n`);
     return { exitCode: 1, localError: error };
   }
-  // 工作记忆工具（`mode: work`）需要「本轮已持久化的用户消息 id」作为宿主事实。
-  // 只接受明确来源（批量唯一消息 id / 本轮 receipt-backed userMessages），并回读
-  // 校验确实存在于该 dialog；解析不到就不注入，工具会明确拒绝写入而不是猜来源。
-  try {
-    const persistedUserMessageId = await resolvePersistedTurnUserMessageId({
-      store: await getOrCreateSharedStore({
-        env: options.env,
-        cwd: options.localRuntimeCwd,
-        fetchImpl: options.fetchImpl,
-      }),
-      dialogId: currentDialogId,
-      batchMessageIds: batchIdentity?.messageIds,
-      userMessages: options.userMessages,
-    });
-    if (persistedUserMessageId) {
-      runtimeContextWithOwnership.userMessageId = persistedUserMessageId;
+  const userId = resolveLocalUserId(options.env);
+  const getTurnStore = () => getOrCreateSharedStore({
+    env: options.env, cwd: options.localRuntimeCwd, fetchImpl: options.fetchImpl,
+  });
+  const canUseWorkSource = !options.ephemeral && !options.background && !options.internalTurn
+    && options.env.NOLO_AGENT_RUN_CHILD !== "1";
+  if (canUseWorkSource && options.userMessages?.length === 1) {
+    try {
+      const id = await resolvePersistedTurnUserMessageId({
+        store: await getTurnStore(), userId, dialogId: currentDialogId,
+        batchMessageIds: batchIdentity?.messageIds, userMessages: options.userMessages,
+      });
+      if (id) runtimeContextWithOwnership.userMessageId = id;
+    } catch {
+      // Unverifiable source: the work-memory executor will refuse the write.
     }
-  } catch {
-    // 解析失败不是 turn 失败：只是本轮工具写工作记忆会被拒。
   }
   const markBatch = async (phase: "requested" | "completed") => {
     if (!batchIdentity) return;
@@ -2640,6 +2637,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
     : options.message);
 
   const commandObservations: LocalCommandObservation[] = [];
+  const collectedToolImageArtifacts: import("../../agent-runtime/localLoopContract").LocalAgentToolImageArtifact[] = [];
   const retainCommandObservations = (result: RunAgentTurnResult): RunAgentTurnResult => {
     recordRunResultHeaderMeta(result, { commandObservations });
     return result;
@@ -2722,14 +2720,20 @@ async function executeLocalAgentTurnForCliWithAdapter(
       inheritedFromDialogKey: options.inheritedFromDialogKey,
       parentDialogId: options.parentDialogId,
       runtimeContext: runtimeContextWithOwnership,
-      resolveInjectedUserMessageId: async messages => resolveInjectedTurnUserMessageId({
-        store: await getOrCreateSharedStore({
-          env: options.env, cwd: options.localRuntimeCwd, fetchImpl: options.fetchImpl,
-        }),
-        userId: resolveLocalUserId(options.env),
-        dialogId: currentDialogId,
-        userMessages: messages,
-      }),
+      ...(canUseWorkSource && !batchIdentity && !options.userMessages?.length
+        ? { prepareDirectWorkMemorySource: async (message) => persistDirectWorkMemorySource({
+            store: await getTurnStore(), userId, dialogId: currentDialogId, turnId, freshDialog,
+            input: {
+              agentKey: options.agentKey, runtimeContext: runtimeContextWithOwnership,
+              spaceId: options.spaceId, category: options.category,
+              inheritedFromDialogKey: options.inheritedFromDialogKey, parentDialogId: options.parentDialogId,
+            },
+            message,
+          }) }
+        : {}),
+      ...(!options.ephemeral ? { resolveInjectedUserMessageId: async (messages) => resolvePersistedTurnUserMessageId({
+        store: await getTurnStore(), userId, dialogId: currentDialogId, userMessages: messages,
+      }) } : {}),
       runKind: options.env.NOLO_AGENT_RUN_CHILD === "1" ? "subtask" : "interactive",
       // 展示能力由宿主声明（TUI=narrow），非交互 CLI/后台留空 → unknown；
       // 排版段只在能力已知时由 localLoop 注入，server 线不读该字段。
@@ -2786,6 +2790,14 @@ async function executeLocalAgentTurnForCliWithAdapter(
       onToolEvent: (event) => {
         const observation = observeLocalCommandResult(event, options.localRuntimeCwd ?? process.cwd());
         if (observation) commandObservations.push({ ...observation, ...commandVersionBindings.get(event.toolCallId) });
+        if (event.type === "tool-result" && event.imageArtifacts?.length) {
+          // 已被回调即时消费的产物不再累计进 turnResult，避免中途分段 + 轮末收尾重复挂载。
+          if (options.onToolImageArtifacts) {
+            options.onToolImageArtifacts(event.imageArtifacts);
+          } else {
+            collectedToolImageArtifacts.push(...event.imageArtifacts);
+          }
+        }
         turnOutput.handleToolEvent(event);
       },
       ...(!options.noStream
@@ -2835,6 +2847,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
       ...(turnCredits !== undefined ? { turnCredits } : {}),
       ...(usageRecords?.length ? { usageRecords } : {}),
       ...(runContextWindow !== undefined ? { contextWindow: runContextWindow } : {}),
+      ...(collectedToolImageArtifacts.length > 0 ? { toolImageArtifacts: collectedToolImageArtifacts } : {}),
     };
     // 头元数据走旁路（不改结果对象形状）：见 agentRunResultFile.ts。
     // server/serverSync 与 writeDialog 远端同步共用同一判定（见 resolveResultServerMeta）。

@@ -13,6 +13,7 @@
 // names for the same contentKey would 串场 / break the shared-element pair.
 
 import React, { useEffect } from "react";
+import * as stylex from "@stylexjs/stylex";
 import {
   autoUpdate,
   flip,
@@ -25,6 +26,11 @@ import {
 } from "@floating-ui/react";
 import { LuFileCode, LuCalendarClock } from "react-icons/lu";
 import { SIDEBAR_TYPE_OUTLINE_ICONS } from "render/web/ui/sidebarTypeIcons";
+import {
+  placementEnterTravel,
+  placementToTransformOrigin,
+} from "render/web/ui/triggerOrigin";
+import { triggerMotionStyles } from "render/web/ui/triggerMotion.styles";
 
 export const ICON_SIZE = 16 as const;
 
@@ -87,7 +93,7 @@ export function SidebarItemContextMenuPortal({
   onClose,
   children,
 }: SidebarItemContextMenuPortalProps) {
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context, placement } = useFloating({
     open,
     onOpenChange: (nextOpen) => {
       if (!nextOpen) onClose();
@@ -113,6 +119,8 @@ export function SidebarItemContextMenuPortal({
     return null;
   }
 
+  const travel = placementEnterTravel(placement, "right");
+
   return (
     <FloatingPortal>
       <div
@@ -120,7 +128,18 @@ export function SidebarItemContextMenuPortal({
         style={{ ...floatingStyles, zIndex: 1000 }}
         {...getFloatingProps()}
       >
-        {children}
+        <div
+          className={stylex.props(triggerMotionStyles.enter).className}
+          style={
+            {
+              transformOrigin: placementToTransformOrigin(placement, "right"),
+              "--nolo-enter-x": travel.x,
+              "--nolo-enter-y": travel.y,
+            } as React.CSSProperties & Record<`--${string}`, string>
+          }
+        >
+          {children}
+        </div>
       </div>
     </FloatingPortal>
   );

@@ -1,3 +1,4 @@
+import { workspaceChildEnv } from "./workspaceShell";
 import type { PlanningCaller } from "../ai/agent/agentDiscovery";
 /**
  * Node-only workspace tool executors.
@@ -79,9 +80,9 @@ export async function runNoloWorkspaceCliTool(call: {
     cmd,
     stdout: "pipe",
     stderr: "pipe",
-    env: call.name === "listAgents"
+    env: workspaceChildEnv(call.name === "listAgents"
       ? { ...process.env, ...args.env, NOLO_PLANNING_CALLER: JSON.stringify(args.planningCaller ?? {}) }
-      : args.env,
+      : args.env),
   });
   const [stdout, stderr, exitCode] = await Promise.all([
     readNoloProcessStream(proc.stdout),

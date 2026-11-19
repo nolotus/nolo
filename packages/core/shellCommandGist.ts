@@ -70,6 +70,7 @@ function shellWords(text: string, validationOnly = false): string[] | null {
     }
     if (ch === "'" || ch === '"') { quote = ch; started = true; continue; }
     if (validationOnly && (ch === "|" || ch === "~")) { word += ch; started = true; continue; }
+    if (ch === "?" && /^https?:\/\//i.test(word)) { word += ch; started = true; continue; }
     if (/[<> &|;(){}*?\[\]#~]/.test(ch) && !/\s/.test(ch)) return null;
     if (/\s/.test(ch)) { if (started) words.push(word); word = ""; started = false; }
     else { word += ch; started = true; }
@@ -327,6 +328,9 @@ function firstVerbToken(segment: string): { verb: string; rest: string } {
     const [, word, restAfter] = m;
     const base = word.replace(/^.*\//, "");
     if (wrappers.has(base) && restAfter.trim()) {
+      if (base === "command" && /^-(?:v|V)(?:\s|$)/.test(restAfter.trim())) {
+        return { verb: base, rest: restAfter.trim() };
+      }
       rest = restAfter.trim();
       continue;
     }
@@ -530,6 +534,113 @@ function parseNolo(rest: string): SegmentAction | null {
   return null;
 }
 
+function stripTrailingPipe(rest: string): string {
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i]!;
+    const next = rest[i + 1];
+    if (quote) {
+      if (ch === "\\" && next && quote === '"') { i++; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === "\\" && next) { i++; continue; }
+    if (ch === "|" && next !== "|" && rest[i - 1] !== "|") {
+      return rest.slice(0, i).trim();
+    }
+  }
+  return rest.trim();
+}
+
+const CURL_VALUE_FLAGS = new Set([
+  "-o", "--output", "-H", "--header", "-d", "--data", "--data-raw",
+  "--data-binary", "--data-urlencode", "--data-ascii", "-F", "--form",
+  "--form-string", "-u", "--user", "-A", "--user-agent", "-e", "--referer",
+  "-b", "--cookie", "-c", "--cookie-jar", "-x", "--proxy", "-U", "--proxy-user",
+  "-X", "--request", "-m", "--max-time", "--connect-timeout", "--retry",
+  "--retry-delay", "--retry-max-time", "-w", "--write-out", "-T", "--upload-file",
+  "-K", "--config", "--resolve", "--cacert", "--capath", "--cert", "--key",
+  "-E", "--interface", "--limit-rate", "-r", "--range", "-Y", "-y",
+  "--oauth2-bearer", "--aws-sigv4", "--connect-to", "--dns-servers",
+]);
+
+const WGET_VALUE_FLAGS = new Set([
+  "-O", "--output-document", "-P", "--directory-prefix", "--header",
+  "--user", "--password", "--http-user", "--http-password", "-U", "--user-agent",
+  "-T", "--timeout", "-t", "--tries", "-a", "--append-output", "-o", "--output-file",
+  "--post-data", "--post-file", "--load-cookies", "--save-cookies", "-e", "--execute",
+  "--referer", "--wait", "--limit-rate", "--ca-certificate", "--certificate",
+]);
+
+function extractSafeUrlTarget(rawUrl: string): { kind: "file" | "host"; target: string } | null {
+  const trimmed = rawUrl.trim();
+  // Require an explicit http(s)/ftp scheme so unmodeled flag values (e.g.
+  // dotted JWTs or API tokens after unknown flags like --oauth2-bearer) are
+  // never coerced into synthetic hostnames and surfaced in the compact summary.
+  if (!/^(?:https?|ftp):\/\//i.test(trimmed)) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (!["http:", "https:", "ftp:"].includes(parsed.protocol)) return null;
+  const hostname = parsed.hostname;
+  if (!hostname) return null;
+
+  // Never touch username/password/search/hash; inspect pathname only for a plain filename.
+  const pathname = parsed.pathname || "/";
+  if (!pathname.endsWith("/")) {
+    const rawLast = pathname.split("/").filter(Boolean).pop();
+    if (rawLast) {
+      let decoded = rawLast;
+      try { decoded = decodeURIComponent(rawLast); } catch { /* keep raw */ }
+      const looksLikeSecret =
+        decoded.includes("=") ||
+        /^(?:sk-|ghp_|gho_|ghu_|ghs_|github_pat_|AKIA|AIza|xox[baprs]-|eyJ)/i.test(decoded);
+      if (
+        !looksLikeSecret &&
+        !/[\s?#\\]/.test(decoded) &&
+        decoded.length <= 64 &&
+        /^[^/]+\.[A-Za-z0-9]{1,8}$/.test(decoded)
+      ) {
+        return { kind: "file", target: clipShortText(decoded, 32) };
+      }
+    }
+  }
+  return { kind: "host", target: clipShortText(hostname, 32) };
+}
+
+function parseCurlOrWget(verb: "curl" | "wget", rest: string): SegmentAction | null {
+  const head = stripTrailingPipe(rest);
+  const tokens = shellWords(head);
+  if (!tokens) return null;
+  const valueFlags = verb === "curl" ? CURL_VALUE_FLAGS : WGET_VALUE_FLAGS;
+  const positionals: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (tok === "--") {
+      positionals.push(...tokens.slice(i + 1));
+      break;
+    }
+    if (tok.startsWith("-")) {
+      if (!tok.includes("=") && valueFlags.has(tok)) i++;
+      continue;
+    }
+    positionals.push(tok);
+  }
+  for (const pos of positionals) {
+    const extracted = extractSafeUrlTarget(pos);
+    if (extracted) {
+      return extracted.kind === "file"
+        ? { verb: "下载", target: extracted.target, readOnly: false }
+        : { verb: "请求", target: extracted.target, readOnly: false };
+    }
+  }
+  return { verb: "下载", readOnly: false };
+}
+
 /**
  * 识别单个命令段。返回 null 表示「不认识这个命令」，
  * 整体摘要随之放弃（保持诚实的退化）。
@@ -647,7 +758,7 @@ function classifySegment(segment: string): SegmentAction | null {
     }
     case "curl":
     case "wget":
-      return { verb: "下载", readOnly: false };
+      return parseCurlOrWget(verb, rest);
     case "bun":
     case "npm":
     case "pnpm":
@@ -710,19 +821,103 @@ function classifySegment(segment: string): SegmentAction | null {
     case "wc":
     case "sort":
     case "uniq": {
-      const tokens = shellWords(rest.split(/\s+\|\s+/)[0]!);
-      let file: string | undefined;
-      if (tokens) {
-        for (let i = 0; i < tokens.length; i++) {
-          const tok = tokens[i]!;
-          if (tok === "-n" || tok === "-c") { i++; continue; }
-          if (tok.startsWith("-")) continue;
-          file = tok;
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      if (
+        verb === "sort" &&
+        tokens.some((t) => t === "-o" || (t.startsWith("-") && !t.startsWith("--") && t.includes("o")) || t === "--output" || t.startsWith("--output="))
+      ) {
+        return null;
+      }
+      const valueFlagsByCmd: Record<"head" | "tail" | "wc" | "sort" | "uniq", ReadonlySet<string>> = {
+        head: new Set(["-n", "-c", "--lines", "--bytes"]),
+        tail: new Set(["-n", "-c", "-s", "--lines", "--bytes", "--sleep-interval", "--pid"]),
+        wc: new Set(["--files0-from"]),
+        sort: new Set(["-t", "-k", "-T", "-S", "--field-separator", "--key", "--temporary-directory", "--buffer-size", "--files0-from"]),
+        uniq: new Set(["-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"]),
+      };
+      const valueFlags = valueFlagsByCmd[verb];
+      const positionals: string[] = [];
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i]!;
+        if (tok === "--") {
+          positionals.push(...tokens.slice(i + 1));
           break;
         }
+        if (tok.startsWith("-")) {
+          if (!tok.includes("=") && valueFlags.has(tok)) i++;
+          continue;
+        }
+        positionals.push(tok);
       }
+      // `uniq <input> <output>` writes to the second positional file; never fold as readOnly.
+      if (verb === "uniq" && positionals.length >= 2) return null;
+      const file = positionals[0];
       return file ? { verb: "查看", target: baseName(file), readOnly: true } : { verb: "查看输出", readOnly: true };
     }
+    case "which": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      const target = tokens.find((t) => !t.startsWith("-"));
+      return target ? { verb: "查命令", target: clipShortText(target, 24), readOnly: true } : { verb: "查命令", readOnly: true };
+    }
+    case "command": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens || tokens.length < 2) return null;
+      if (tokens[0] !== "-v" && tokens[0] !== "-V") return null;
+      const target = tokens.slice(1).find((t) => !t.startsWith("-"));
+      return target ? { verb: "查命令", target: clipShortText(target, 24), readOnly: true } : null;
+    }
+    case "file": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      // `file -C` / `--compile` writes a compiled magic file (~/.magic.mgc); never mark readOnly.
+      for (const tok of tokens) {
+        if (tok === "--") break;
+        if (tok === "--compile" || (tok.startsWith("-") && !tok.startsWith("--") && tok.includes("C"))) {
+          return null;
+        }
+      }
+      let file: string | undefined;
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i]!;
+        if (tok === "--") {
+          file = tokens[i + 1];
+          break;
+        }
+        if (["-m", "-f", "-F", "-e", "--exclude", "--magic-file"].includes(tok)) { i++; continue; }
+        if (tok.startsWith("-")) continue;
+        file = tok;
+        break;
+      }
+      return { verb: "查类型", target: file ? baseName(file) : undefined, readOnly: true };
+    }
+    case "stat": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      let file: string | undefined;
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i]!;
+        if (["-c", "--format", "--printf"].includes(tok)) { i++; continue; }
+        if (tok.startsWith("-")) continue;
+        file = tok;
+        break;
+      }
+      return { verb: "查文件信息", target: file ? baseName(file) : undefined, readOnly: true };
+    }
+    case "readlink":
+    case "realpath": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      const file = tokens.find((t) => !t.startsWith("-"));
+      return { verb: "解析路径", target: file ? baseName(file) : undefined, readOnly: true };
+    }
+    case "pwd":
+      return { verb: "查当前目录", readOnly: true };
+    case "uname":
+      return { verb: "查系统信息", readOnly: true };
+    case "whoami":
+      return { verb: "查身份", readOnly: true };
     default:
       return null;
   }

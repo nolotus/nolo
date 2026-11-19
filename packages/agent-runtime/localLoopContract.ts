@@ -9,6 +9,14 @@
 // 本文件只放跨模块共享的稳定契约类型，不放实现。localLoop 保留兼容 re-export，
 // 既有消费方（cursorProvider、index.ts、测试）无需改动。
 
+export type LocalAgentToolImageArtifact = {
+  path: string;
+  kind?: "screenshot" | "image";
+  width?: number;
+  height?: number;
+  bytes?: number;
+};
+
 export type LocalAgentToolEvent = {
   type: "tool-call" | "tool-result" | "tool-error";
   round: number;
@@ -21,4 +29,6 @@ export type LocalAgentToolEvent = {
   content?: string;
   message?: string;
   metadata?: Record<string, unknown>;
+  /** Lightweight local image artifact paths/metadata emitted by image/screenshot tools (never base64). */
+  imageArtifacts?: LocalAgentToolImageArtifact[];
 };

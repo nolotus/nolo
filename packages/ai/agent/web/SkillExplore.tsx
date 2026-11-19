@@ -39,7 +39,7 @@ import {
   getContainedSkillEntries,
   isCompositeSkill,
   isRecommendedPromptSkill,
-  isMarketListedSkill,
+  isOptionalSkillShownByDefault,
   isUserSkillToggleable,
   type SkillDependencies,
 } from "./skillExploreDirectory";
@@ -1142,21 +1142,25 @@ export const SkillExplore: React.FC = () => {
     [allSkills, query],
   );
 
-  // 可选技能区：展示全部账号级可开关 Skill。
-  // 取自 allSkills 而非 visibleSkills——被组合父项收拢的可开关子项（如 code-style）
-  // 在总览目录里被隐藏，但仍必须出现在可选区，否则用户无从启停。
+  // 可选区保留已启用技能（包括兼容与专项条目），以及默认展示的可开关条目。
+  // 取自 allSkills，以免组合父项收拢时影响账号设置。
   // 排序：推荐项在前，组内保持注册表原顺序（Array.prototype.sort 稳定）。
   const optionalSkills = useMemo(() => {
     const toggleable = allSkills.filter(
       (entry) =>
-        isUserSkillToggleable(entry.slug) && isMarketListedSkill(entry.slug),
+        isUserSkillToggleable(entry.slug) &&
+        isOptionalSkillShownByDefault(
+          entry.slug,
+          enabledSkills.includes(entry.slug) || pendingSlug === entry.slug ||
+            failedTargets[entry.slug] !== undefined || isSkillsWriteFailed,
+        ),
     );
     return [...toggleable].sort(
       (a, b) =>
         (isRecommendedPromptSkill(a.slug) ? 0 : 1) -
         (isRecommendedPromptSkill(b.slug) ? 0 : 1),
     );
-  }, [allSkills]);
+  }, [allSkills, enabledSkills, pendingSlug, failedTargets, isSkillsWriteFailed]);
 
   // 平台内置区：无搜索时只展示不可开关的条目；搜索时沿用全量检索结果
   const catalogSkills = useMemo(() => {
@@ -1373,7 +1377,7 @@ export const SkillExplore: React.FC = () => {
         )}
       </div>
 
-      {/* 可选技能区：仅在无搜索词时呈现，展示全部账号级可开关 Skill（推荐项排在前面） */}
+      {/* 可选技能区：仅在无搜索词时呈现，推荐项排在前面，兼容与专项技能可搜索 */}
       {!query && optionalSkills.length > 0 && (
         <div
           className="skill-explore__optional-section"

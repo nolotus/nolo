@@ -972,6 +972,27 @@ export default function LocalPreviewPanel() {
           display: flex;
           flex-direction: column;
           padding: 4px;
+          transform-origin: top left;
+          animation: local-preview-dropdown-enter var(--popover-duration, 0.16s)
+            var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+        }
+
+        @keyframes local-preview-dropdown-enter {
+          from {
+            opacity: 0;
+            transform: translateY(calc(var(--popover-travel, 6px) * -1)) scale(0.96);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .LocalPreview__moreMenuDropdown,
+          .LocalPreview__artifactDropdown {
+            animation: none;
+          }
         }
 
         .LocalPreview__menuItem {
@@ -1067,6 +1088,9 @@ export default function LocalPreviewPanel() {
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
           display: flex;
           flex-direction: column;
+          transform-origin: top left;
+          animation: local-preview-dropdown-enter var(--popover-duration, 0.16s)
+            var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
         }
 
         .LocalPreview__artifactDropdownHeader {

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import * as stylex from "@stylexjs/stylex";
 import { useSlate } from "slate-react";
 import { Range } from "slate";
 import { ReactEditor } from "slate-react";
@@ -14,6 +15,12 @@ import {
 import { useAppSelector } from "app/store";
 import { useWebTheme } from "app/theme/webTheme";
 import { LuFile, LuBot, LuWrench, LuLayoutGrid } from "react-icons/lu"; // Changed LuLayout to LuLayoutGrid
+import {
+    placementEnterTravel,
+    placementToTransformOrigin,
+} from "render/web/ui/triggerOrigin";
+import { triggerMotionStyles } from "render/web/ui/triggerMotion.styles";
+import { editorFloatingStyles } from "./floatingSurface.styles";
 import { Portal } from "./components";
 
 export interface MentionOption {
@@ -44,7 +51,7 @@ export const MentionList: React.FC<MentionListProps> = ({
     const editor = useSlate();
     const listRef = useRef<HTMLDivElement>(null);
 
-    const { x, y, strategy, refs, update } = useFloating({
+    const { x, y, strategy, refs, update, placement } = useFloating({
         placement: "bottom-start",
         whileElementsMounted: autoUpdate,
         middleware: [
@@ -109,23 +116,27 @@ export const MentionList: React.FC<MentionListProps> = ({
         { id: "tool", label: "Tools" },
     ];
 
+    const travel = placementEnterTravel(placement, "bottom");
+
     return createPortal(
         <div
             ref={refs.setFloating}
-            style={{
-                position: strategy,
-                top: y ?? 0,
-                left: x ?? 0,
-                zIndex: 10000,
-                backgroundColor: theme.backgroundSecondary,
-                borderRadius: "var(--radius-md)",
-                boxShadow: `0 4px 12px ${theme.shadowMedium}`,
-                display: "flex",
-                flexDirection: "column",
-                width: "280px",
-                border: `1px solid ${theme.border}`,
-                overflow: "hidden",
-            }}
+            className={
+                stylex.props(
+                    editorFloatingStyles.mentionList,
+                    triggerMotionStyles.enter,
+                ).className
+            }
+            style={
+                {
+                    position: strategy,
+                    top: y ?? 0,
+                    left: x ?? 0,
+                    transformOrigin: placementToTransformOrigin(placement, "bottom"),
+                    "--nolo-enter-x": travel.x,
+                    "--nolo-enter-y": travel.y,
+                } as React.CSSProperties & Record<`--${string}`, string>
+            }
             data-test-id="mention-list"
             onMouseDown={(e) => e.preventDefault()} // Prevent focus loss
         >

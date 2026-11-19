@@ -30,10 +30,26 @@ export async function screenshotResult(result: unknown): Promise<AgentRuntimeToo
     return {
       content: `${JSON.stringify({ ok: true, result: { ...summary, savedTo: path } })}\n${formatImageSummary({ kind: "screenshot", ...image.imageSummary })}`,
       images: image.images,
+      metadata: {
+        ok: true,
+        imageDelivered: true,
+        savedTo: path,
+        imageArtifacts: [{
+          path: image.imageSummary.path,
+          kind: "screenshot" as const,
+          width: image.imageSummary.width,
+          height: image.imageSummary.height,
+          bytes: image.imageSummary.bytes,
+        }],
+      },
     };
   } catch (error) {
     return {
       content: `${JSON.stringify({ ok: true, result: { ...summary, ...(path ? { savedTo: path } : {}) } })}\n${path ? `screenshot saved to ${path}\n` : ""}Screenshot image not delivered (未投递): ${toErrorMessage(error)}`,
+      metadata: {
+        ok: false,
+        imageDelivered: false,
+      },
     };
   }
 }

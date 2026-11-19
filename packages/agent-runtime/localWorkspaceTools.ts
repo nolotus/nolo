@@ -149,6 +149,7 @@ import {
   spawnFailedCommandResult,
   type WorkspaceExecResult,
   runWorkspaceCommand,
+  workspaceChildEnv,
 } from "./workspaceShell";
 
 export {
@@ -909,6 +910,7 @@ async function runWorkspaceCommandLimitedLines(args: {
   ];
   const proc = spawnChildProcess(command[0] ?? "", command.slice(1), {
     cwd: resolve(args.workspaceRoot),
+    env: workspaceChildEnv(),
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
     windowsHide: true,
@@ -2184,8 +2186,24 @@ async function captureVisualStateTool(args: {
         ...(captureArgs.expectText ? [`expectText: ${captureArgs.expectText}`] : []),
         formatImageSummary({ kind: "screenshot", ...image.imageSummary })].join("\n"),
       images: image.images,
-      metadata: { ...captureArgs, ...metrics, ok: true, exitCode: 0, baseUrl, script: null, args: [], compatibilityVersion: 2,
-        compatibilityNote: "Platform rendering replaces workspace scripts; script/args/stdoutTail no longer describe a subprocess. Existing page metrics and path fields are retained." },
+      metadata: {
+        ...captureArgs,
+        ...metrics,
+        ok: true,
+        exitCode: 0,
+        baseUrl,
+        script: null,
+        args: [],
+        compatibilityVersion: 2,
+        compatibilityNote: "Platform rendering replaces workspace scripts; script/args/stdoutTail no longer describe a subprocess. Existing page metrics and path fields are retained.",
+        imageArtifacts: [{
+          path: screenshotPath,
+          kind: "screenshot" as const,
+          width: image.imageSummary.width,
+          height: image.imageSummary.height,
+          bytes: image.imageSummary.bytes,
+        }],
+      },
     };
   } catch (error) {
     return { content: `captureVisualState failed: ${toErrorMessage(error)}`, metadata: { ok: false } };
@@ -2356,6 +2374,7 @@ async function launchProcessTool(args: {
   const detached = process.platform !== "win32";
   const proc = spawnChildProcess(cmdArgs[0] ?? "", cmdArgs.slice(1), {
     cwd: resolve(args.workspaceRoot),
+    env: workspaceChildEnv(),
     stdio: ["ignore", "pipe", "pipe"],
     detached,
     windowsHide: true,
@@ -2769,12 +2788,25 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
           });
           return await readLocalImage(absolutePath);
         } catch (error) {
-          throw new Error(`read_image: failed to read ${JSON.stringify(path)}: ${error instanceof Error ? error.message : String(error)}`);
+          const inner = (error instanceof Error ? error.message : String(error)).replace(/^read_image:\s*/i, "");
+          throw new Error(`read_image: failed to read ${JSON.stringify(path)}: ${inner}`);
         }
       }));
       return {
         content: results.map((result) => result.content).join("\n"),
         images: results.flatMap((result) => result.images ?? []),
+        metadata: {
+          paths: imagePaths,
+          count: imagePaths.length,
+          ...(imagePaths.length === 1 ? { path: imagePaths[0] } : {}),
+          imageArtifacts: results.map((result) => ({
+            path: result.imageSummary.path,
+            kind: "image" as const,
+            width: result.imageSummary.width,
+            height: result.imageSummary.height,
+            bytes: result.imageSummary.bytes,
+          })),
+        },
       };
     },
     readFile: Object.assign((call: AgentRuntimeToolCallInput) => readFileTool({

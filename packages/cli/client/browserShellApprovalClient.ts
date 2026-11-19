@@ -25,6 +25,16 @@ export async function requestBrowserShellAction(args: {
   if (!result) throw new Error("Browser host rejected original action");
   if (result.code !== "USER_APPROVAL_PENDING") return result;
   const decision = await send({ approvalId: result.approvalId, browser: args.browser });
-  if (decision.status !== "retry_once") return { ...result, message: "Host approval was not granted; action not executed." };
+  if (decision.status !== "retry_once") {
+    const code = typeof decision.code === "string" && decision.code ? decision.code : "USER_APPROVAL_DENIED";
+    const outcome = typeof decision.outcome === "string" && decision.outcome ? decision.outcome : "denied";
+    return {
+      ...result,
+      ok: false,
+      code,
+      outcome,
+      message: "Host approval was not granted; action not executed.",
+    };
+  }
   return args.execute(args.action, { ...payload, approvalId: result.approvalId, hostApproval: true });
 }

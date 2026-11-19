@@ -1,4 +1,37 @@
 
+## 0.228.0 (2026-11-19)
+
+### Features
+
+* **auth:** 新增 GitHub 登录（仅登录，不含绑定/撤销） ([1700c8a](https://github.com/nolotus/bun-nolo/commit/1700c8a77d753387a1dc4954c3c7562f980dbf2d))
+* **cli:** clarify TUI tool labels, read_image folding and safe shell gists ([d0ceced](https://github.com/nolotus/bun-nolo/commit/d0cecedd794970ea5da39affae59fe520844f74f))
+* **cli:** TUI 显示 agent 产出的图片产物 ([5247e3f](https://github.com/nolotus/bun-nolo/commit/5247e3f18917363cfe9e78226264e0541031ada5))
+* **mcp:** add Odoo Alpha demo and self-hosted preset ([6f9c250](https://github.com/nolotus/bun-nolo/commit/6f9c250f1c18d1a17e491b2f2e6d0ff88a9c96f0))
+* **mcp:** add self-hosted Odoo connection preset ([bc156e4](https://github.com/nolotus/bun-nolo/commit/bc156e4e01d4eafc62762b12d3c7f2f673ad2e42))
+* **mcp:** 新增 GitHub 官方 MCP Server 预设 ([0ae38c6](https://github.com/nolotus/bun-nolo/commit/0ae38c69f538e9c7b97c2d1903a868067ad373e7))
+* **mcp:** 新增 Zoho Calendar 预设，并把预设 id 收敛为单一真源 ([9887acc](https://github.com/nolotus/bun-nolo/commit/9887accc430481a0b7fb4c4afe4ce988d96079f1))
+* **render:** 游客页左上角品牌入口可点回首页 ([5e54232](https://github.com/nolotus/bun-nolo/commit/5e542324baee7433021d50b7f3a84485cc436ed1))
+* **skills:** add opt-in unslop-ui to the market ([74cbb8e](https://github.com/nolotus/bun-nolo/commit/74cbb8e67dab9eb644973082ce1b97752ba07738))
+* **skills:** add website replication guidance to the catalog ([365eacd](https://github.com/nolotus/bun-nolo/commit/365eacda18522da3904c1553aa74bf4537f7f105))
+* **skills:** consolidate overlapping marketplace entries ([6c30e53](https://github.com/nolotus/bun-nolo/commit/6c30e53dd41c176983e67f8a1e9489c1006d9899))
+
+### Bug Fixes
+
+* **ci:** handle CLI typecheck engine exit codes ([0f816e7](https://github.com/nolotus/bun-nolo/commit/0f816e762023e918a33d61060d47d8bb0b2e2652))
+* **cli:** open rendered assistant links on Ctrl-click ([736fcd3](https://github.com/nolotus/bun-nolo/commit/736fcd311c83884694073d0328113af700b17bc0))
+* **cli:** persist verified source for direct work memory writes ([e2b6c98](https://github.com/nolotus/bun-nolo/commit/e2b6c988759dcb1e55113072ff46ace90e888525))
+* **cli:** 子 run 不再被内层 nolo 命令判死 ([39ce561](https://github.com/nolotus/bun-nolo/commit/39ce561c7716ca1e99dbaf459e92ebf2c4ea4e86))
+* **cli:** 浏览器授权改用专用确认端口，视觉与文案一并收敛 ([0046afd](https://github.com/nolotus/bun-nolo/commit/0046afdd7241af0e7bb579983febe7250d84e267))
+* **home:** 去掉 landing 的 scroll-snap，滚动不再粘滞 ([dfc04fd](https://github.com/nolotus/bun-nolo/commit/dfc04fde1e7e7acc711803c492d4514ef11d9e38))
+* **runtime:** load workspace AGENTS.md by default within budget ([56ed99b](https://github.com/nolotus/bun-nolo/commit/56ed99bfb7737140c737ff2ca758f365d6f6da2d))
+* **tui:** retain links panel during streaming replies ([ad76a7c](https://github.com/nolotus/bun-nolo/commit/ad76a7c0285ad8e8787c556841dbb293a719e0ed))
+* **ui:** animate trigger-based popovers and menus from trigger origin ([f1b0ae7](https://github.com/nolotus/bun-nolo/commit/f1b0ae78a5baca01c560dc182d9f00cca0c5e868))
+
+### Performance Improvements
+
+* **typecheck:** 默认引擎切换到 tsrs，tsc 保留兜底 ([735cc94](https://github.com/nolotus/bun-nolo/commit/735cc94682b20088f561f7b94d061fdf61e21873))
+
+
 ## 0.227.2 (2026-11-19)
 
 ### Bug Fixes

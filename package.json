@@ -138,6 +138,7 @@
     "react-native-pager-view": "^7.0.0",
     "react-native-reanimated": "4.7.1",
     "react-test-renderer": "19.3.0",
+    "tsrs": "7.1.0-beta.tsrs3",
     "typescript": "^7.0.2"
   },
   "packageManager": "yarn@3.6.4"

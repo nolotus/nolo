@@ -30,6 +30,7 @@ import {
   QUICK_CHAT_FEEDBACK_LAUNCH_PATH,
 } from "app/constants/routePaths";
 import { useCurrentUser, useUserId, useAccounts } from "identity";
+import { computePortalDropdownOrigin } from "render/web/ui/triggerOrigin";
 import { cloudLazy } from "identity/cloudLazy";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { read, selectById } from "database/dbSlice";
@@ -123,6 +124,14 @@ const PortalDropdown: React.FC<{
         top: "auto" as const,
       };
 
+  const { transformOrigin, travelX, travelY } = computePortalDropdownOrigin({
+    anchorRect: { left: rect.left, right: rect.right, width: rect.width },
+    panelLeft: left,
+    panelWidth: width,
+    openDownward,
+    compact,
+  });
+
   return createPortal(
     <div
       data-hook="chat-esc-user-dropdown"
@@ -130,20 +139,26 @@ const PortalDropdown: React.FC<{
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
-      style={{
-        position: "fixed",
-        ...verticalStyle,
-        left,
-        width,
-        maxHeight,
-        overflowY: "auto",
-        overflowX: "hidden",
-        overscrollBehavior: "contain",
-      }}
+      style={
+        {
+          position: "fixed",
+          ...verticalStyle,
+          left,
+          width,
+          maxHeight,
+          overflowY: "auto",
+          overflowX: "hidden",
+          overscrollBehavior: "contain",
+          transformOrigin,
+          "--portal-dropdown-travel-x": travelX,
+          "--portal-dropdown-travel-y": travelY,
+        } as React.CSSProperties & Record<`--${string}`, string>
+      }
       {...withLiteralClass(
         `SidebarUserSection__dropdown is-open ${compact ? "SidebarUserSection__dropdown--compact " : ""}${className || ""}`,
         sidebarStyles.sidebarUserSectionDropdown,
         sidebarStyles.sidebarUserSectionDropdownOpen,
+        sidebarStyles.sidebarUserSectionDropdownPortalEnter,
         className?.includes("SidebarUserSection__dropdown--menu") &&
           sidebarStyles.sidebarUserSectionDropdownMenu
       )}

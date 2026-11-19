@@ -547,8 +547,15 @@ export const commonStrings = {
     zh: "本会话还没有出现链接。",
   },
   conversationLinksCopyHint: {
-    en: "Open one by copying its URL (Cmd/Ctrl + click, or select and copy).",
-    zh: "复制对应 URL 即可打开（Cmd/Ctrl + 点击，或选中复制）。",
+    en: "Ctrl + left-click a URL to open it in your browser. If that doesn't work, select and copy the full URL into your browser.",
+    zh: "按住 Ctrl 再左键点击地址，即可用浏览器打开。如果没反应，选中并复制完整地址，再粘贴到浏览器。",
+  },
+  // 直写输出通道（管道/脚本，以及任何不进 transcript 的瞬时输出）没有
+  // Ctrl+左键（只命中 transcript 历史可见行），也没有 TUI 内置选区复制
+  // （鼠标跟踪开着，原生拖选不保证可用），所以这里不承诺快捷键。
+  conversationLinksCopyHintPipe: {
+    en: "To open one, copy its full URL into your browser's address bar.",
+    zh: "打开方式：复制完整地址，粘贴到浏览器地址栏。",
   },
   conversationLinksShowing: {
     en: "Links in this conversation (showing first {0} of {1}):",

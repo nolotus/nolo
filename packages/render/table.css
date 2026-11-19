@@ -45,6 +45,26 @@
     border-radius: var(--btn-radius, 8px);
     background: var(--background);
     box-shadow: var(--shadow-lg, 0 16px 40px rgba(0, 0, 0, 0.16));
+    transform-origin: top right;
+    animation: table-popover-enter var(--popover-duration, 0.18s)
+      var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  }
+
+  @keyframes table-popover-enter {
+    from {
+      opacity: 0;
+      transform: translateY(calc(var(--popover-travel, 6px) * -1)) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .table-page__more-menu {
+      animation: none;
+    }
   }
 
   .table-page__share {

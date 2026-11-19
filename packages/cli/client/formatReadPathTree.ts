@@ -129,10 +129,11 @@ export type SearchTreeItemInput = {
  */
 export function formatSearchItemQuery(query: string, path?: string, customHomedir?: string): string {
   let text = (query || "").trim();
-  if (path) {
-    const formattedPath = formatHomePath(path, customHomedir);
+  const trimmedPath = (path || "").trim();
+  if (trimmedPath && trimmedPath !== "." && trimmedPath !== "./") {
+    const formattedPath = formatHomePath(trimmedPath, customHomedir);
     if (formattedPath) {
-      text = text ? `${text} in ${formattedPath}` : formattedPath;
+      text = text ? `${text} · ${formattedPath}` : formattedPath;
     }
   }
   if (!text) return "search";

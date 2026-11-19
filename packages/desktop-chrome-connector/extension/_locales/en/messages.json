@@ -46,7 +46,7 @@
     "message": "Nolo needs your approval"
   },
   "approveHeading": {
-    "message": "Nolo requests permission to $ACTION$ on the target below",
+    "message": "$ACTION$",
     "placeholders": {
       "action": {
         "content": "$1"
@@ -54,19 +54,19 @@
     }
   },
   "approveClick": {
-    "message": "click"
+    "message": "Click a control"
   },
   "approveType": {
-    "message": "type"
+    "message": "Enter text"
   },
   "approvePress": {
-    "message": "press a key"
+    "message": "Press a key"
   },
   "approveSelect": {
-    "message": "select an option"
+    "message": "Select an option"
   },
   "approveEval": {
-    "message": "run a script"
+    "message": "Run a script"
   },
   "approveUnnamed": {
     "message": "Unnamed control"
@@ -83,13 +83,31 @@
     }
   },
   "approveScriptCaption": {
-    "message": "Script to run (original text; scroll to inspect)"
+    "message": "Script preview"
   },
   "approveScriptMissing": {
     "message": "Script content is missing. Cancel and request again in Nolo."
   },
   "approveHint": {
-    "message": "Permission applies to this action only, expires after 60 seconds, and is invalidated if the page changes."
+    "message": "One-time permission, valid up to 60s. Esc cancels."
+  },
+  "approveEvalHint": {
+    "message": "One-time permission, valid up to 60s, bound to this script and its target document. Esc cancels."
+  },
+  "approveUpload": {
+    "message": "Attach files"
+  },
+  "approveUnknownAction": {
+    "message": "Unknown browser action"
+  },
+  "approveTargetTab": {
+    "message": "Target tab"
+  },
+  "approveImpact": {
+    "message": "May modify the page or cause changes outside the page."
+  },
+  "approveEvalImpact": {
+    "message": "May read or modify the page and cause changes outside the page."
   },
   "approveCancel": {
     "message": "Cancel"

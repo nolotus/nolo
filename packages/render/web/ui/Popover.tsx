@@ -17,6 +17,7 @@ import {
 } from "react-aria-components";
 
 import { popoverStyles } from "./popover.styles";
+import { resolvePlacementSide } from "./triggerOrigin";
 
 export type AppPopoverProps = PopoverProps & {
   /** Hide the overlay arrow rendered by `OverlayArrow`. */
@@ -26,13 +27,6 @@ export type AppPopoverProps = PopoverProps & {
   /** Override the cross-axis offset. */
   crossOffset?: number;
 };
-
-type PopoverSide = "top" | "bottom" | "left" | "right";
-
-function popoverSide(placement: string | null | undefined): PopoverSide {
-  // RAC placement 形如 "bottom left"；原 CSS 用 ^= 前缀匹配，取首词等价。
-  return ((placement ?? "top").split(" ")[0] as PopoverSide) ?? "top";
-}
 
 const placementStyles = {
   top: popoverStyles.placementTop,
@@ -86,7 +80,7 @@ export function Popover(props: AppPopoverProps) {
     <AriaPopover
       {...rest}
       className={(renderProps) => {
-        const side = popoverSide(renderProps.placement);
+        const side = resolvePlacementSide(renderProps.placement, "top");
         const external =
           typeof className === "function"
             ? className(renderProps)
@@ -102,7 +96,7 @@ export function Popover(props: AppPopoverProps) {
       crossOffset={crossOffset}
     >
       {(renderProps: PopoverRenderProps) => {
-        const side = popoverSide(renderProps.placement);
+        const side = resolvePlacementSide(renderProps.placement, "top");
         const body =
           typeof children === "function"
             ? children({ ...renderProps, defaultChildren: undefined })
