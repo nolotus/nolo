@@ -201,7 +201,7 @@
     },
     "packages/cli": {
       "name": "nolo-cli",
-      "version": "0.245.0-alpha.1",
+      "version": "0.246.0-alpha.1",
       "bin": {
         "nolo": "index.js",
       },
@@ -280,7 +280,7 @@
     },
     "packages/desktop": {
       "name": "desktop",
-      "version": "0.262.0-alpha.1",
+      "version": "0.263.0-alpha.1",
       "dependencies": {
         "electrobun": "2.0.6",
         "rcedit": "^5.0.2",

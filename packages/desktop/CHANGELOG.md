@@ -1,4 +1,11 @@
 
+## 0.263.0-alpha.1 (2026-11-19)
+
+### Features
+
+* **skills:** add website replication guidance to the catalog ([365eacd](https://github.com/nolotus/bun-nolo/commit/365eacda18522da3904c1553aa74bf4537f7f105))
+
+
 ## 0.262.0-alpha.1 (2026-11-19)
 
 ### Features

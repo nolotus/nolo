@@ -3,6 +3,7 @@ import { buildSkillDocMarkdown, type SkillDocConfig } from "./skillDocProtocol";
 export const WORKFLOW_GUIDANCE_SKILL_SLUGS = [
   "response-presentation",
   "external-copywriting",
+  "website-replication-skill",
 ] as const;
 export type WorkflowGuidanceSkillSlug = (typeof WORKFLOW_GUIDANCE_SKILL_SLUGS)[number];
 
@@ -15,6 +16,47 @@ export function buildWorkflowGuidanceSkillPageKey(userId: string, slug: Workflow
 }
 
 const GUIDANCE: Record<WorkflowGuidanceSkillSlug, { title: string; description: string; body: string }> = {
+  "website-replication-skill": {
+    title: "网页复刻与原创改版",
+    description: "对照真实网页采集证据、映射版式与交互，用授权素材重做，再以桌面和手机浏览器验收。",
+    body: [
+      "# 网页复刻与原创改版",
+      "适用于获授权的旧站重建，或以公开页面为参考制作自有品牌网站。",
+      "1. 先辨明目标：旧站重建保留约定的功能；参考竞品时只提炼版式、信息顺序与交互节奏，不照搬品牌、素材、文案或源码。与用户明确哪些要保留、哪些要明显区分。",
+      "2. 用可用浏览器采集公开页面的桌面与移动证据；逐段滚动，验证懒加载和关键交互，区分实测、推断和无法验证的部分。没有浏览器时说明证据局限。",
+      "3. 将页面、模块和交互逐项映射到目标站，用自有或已获授权的素材实现。不要迁移真实表单提交、账号或第三方数据，除非另有明确授权和测试环境。",
+      "4. 在真实预览中核对桌面及手机截图、图片、导航、关键交互与横向溢出；如果要求原创，另做并排对比，确保首屏构图、视觉语言和品牌表达能明显区分。只报告实际检查通过的项目。",
+      "访问边界：不绕过登录、验证码、付费墙或访问限制；不采集凭据或会话数据，不自动下载执行上游脚本，不额外授予工具或发布权限。",
+      "",
+      "## 来源与许可",
+      "Nolo 适配版，仅吸收公开网页取证、结构映射和验收方法，不包含原项目脚本。",
+      "上游：https://github.com/leosssvip-dot/website-replication-skill/tree/6f7ee0b2335069b6786dab2d4ced5b11def79141",
+      "",
+      "```text",
+      "MIT License",
+      "",
+      "Copyright (c) 2026 Fred",
+      "",
+      "Permission is hereby granted, free of charge, to any person obtaining a copy",
+      "of this software and associated documentation files (the \"Software\"), to deal",
+      "in the Software without restriction, including without limitation the rights",
+      "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell",
+      "copies of the Software, and to permit persons to whom the Software is",
+      "furnished to do so, subject to the following conditions:",
+      "",
+      "The above copyright notice and this permission notice shall be included in all",
+      "copies or substantial portions of the Software.",
+      "",
+      "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR",
+      "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,",
+      "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE",
+      "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER",
+      "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,",
+      "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE",
+      "SOFTWARE.",
+      "```",
+    ].join("\n"),
+  },
   "response-presentation": {
     title: "回复组织与表达",
     description: "触发词：回复组织、表达、篇幅、术语解释、排版。按需加载表达指导；不预先挂载正文，不改变事实、风险与权限底线。",

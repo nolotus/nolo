@@ -9,10 +9,13 @@
  */
 
 import { normalizeEnabledPromptSkills } from "./userPromptSkills";
-import { WORKFLOW_GUIDANCE_SKILL_SLUGS } from "./workflowGuidanceSkills";
+import type { WorkflowGuidanceSkillSlug } from "./workflowGuidanceSkills";
 
 /** New-account initialization only; never a fallback for missing preferences. */
-export const NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS = WORKFLOW_GUIDANCE_SKILL_SLUGS;
+export const NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS = [
+  "response-presentation",
+  "external-copywriting",
+] as const satisfies readonly WorkflowGuidanceSkillSlug[];
 
 /** Closed policy set: historical account skills retain required semantics. */
 export function isAccountOnDemandWorkflowSkill(slug: string): boolean {
