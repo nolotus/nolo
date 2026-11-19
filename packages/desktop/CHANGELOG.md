@@ -1,4 +1,11 @@
 
+## 0.266.0-alpha.7 (2026-11-19)
+
+### Performance Improvements
+
+* **web:** 访客首页只加载访客词典，进入应用前补齐整包 ([bb9c9bf](https://github.com/nolotus/bun-nolo/commit/bb9c9bfb8e51eef1f85c2fd239c5debeae915d12))
+
+
 ## 0.266.0-alpha.6 (2026-11-19)
 
 ### Performance Improvements

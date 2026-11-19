@@ -6,6 +6,8 @@ import { useHasMounted } from "app/hooks/useHasMounted";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
 
+import { ClientLocalePending, useHomeLocaleGate } from "app/i18n/clientLocaleGate";
+
 import HomeLanding from "./HomeLanding";
 import HomePaneSkeleton from "./HomePaneSkeleton";
 
@@ -42,7 +44,6 @@ const Home = () => {
   // 只决定「渲染哪套布局」；项目绑定、cwd、工具挂载等能力面仍看 isDesktopApp。
   const isDesktopUi = getIsDesktopUiPreview();
   const showAuthedHome = hasMounted && (!!currentUser || isDesktopUi);
-  const pageMeta = useStaticPageMeta(showAuthedHome ? "default" : "home");
 
   // Desktop Agent-first onboarding. Device-local durable dismiss (shared local-first key),
   // matching RN: login/signup/local paths/skip all complete onboarding. Not account-scoped
@@ -64,7 +65,10 @@ const Home = () => {
     }
   }, []);
 
+  const locale = useHomeLocaleGate(showAuthedHome || showDesktopOnboarding || isLoggedIn);
+  const pageMeta = useStaticPageMeta(locale.ready && showAuthedHome ? "default" : "home");
   usePageMeta(pageMeta);
+  if (!locale.ready) return <ClientLocalePending {...locale} />;
 
 
   return (

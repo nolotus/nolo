@@ -1,9 +1,10 @@
 // render/web/ui/LanguageSwitcher.tsx
 import * as stylex from "@stylexjs/stylex";
-import React, { memo, useCallback, useEffect, useRef, useState } from "react";
+import React, { memo, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Language } from "app/i18n/types";
-import { loadClientLanguage } from "app/i18n/clientResources";
+import { switchClientLanguage } from "app/i18n/clientResources";
+import { ClientLocaleScopeContext } from "app/i18n/clientLocaleGate";
 import {
   isSupportedLanguage,
   writeStoredLanguage,
@@ -35,6 +36,7 @@ type LanguageSwitcherProps = {
 
 const LanguageSwitcher = memo(({ iconOnly = false }: LanguageSwitcherProps) => {
   const { i18n } = useTranslation();
+  const readScope = useContext(ClientLocaleScopeContext);
 
   const currentLanguage =
     languages.find((lang) => lang.code === i18n.language) || languages[0];
@@ -43,7 +45,8 @@ const LanguageSwitcher = memo(({ iconOnly = false }: LanguageSwitcherProps) => {
     // Load the target bundle before switching: the web client only fetches the
     // boot language, so changeLanguage alone leaves the new language's keys
     // unresolved and i18next falls back to English for the whole UI.
-    const applied = await loadClientLanguage(i18n, rawLanguage);
+    const applied = await switchClientLanguage(i18n, rawLanguage, readScope ?? (() => "full"));
+    if (!applied) return;
     if (isSupportedLanguage(applied)) {
       writeStoredLanguage(applied);
     }
@@ -171,7 +174,9 @@ const LanguageSwitcher = memo(({ iconOnly = false }: LanguageSwitcherProps) => {
                 onClick={() => {
                   setOpen(false);
                   triggerRef.current?.focus();
-                  void applyLanguage(lang.code);
+                  void applyLanguage(lang.code).catch((error) => {
+                    console.warn("[i18n] Language selection failed", error);
+                  });
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowDown") {

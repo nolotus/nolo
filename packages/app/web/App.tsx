@@ -22,7 +22,9 @@ const DesktopActionGateDialog = lazy(() => import("app/components/DesktopActionG
 
 import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
 import { isCloudEdition, useIdentity } from "identity";
-import i18n from "app/i18n/client";
+import { detectSite } from "./siteConstants";
+import { getIsDesktopUiPreview } from "app/utils/env";
+import { ClientLocalePending, ClientLocaleScopeContext, clientLocaleScope, useClientLocaleGate, useClientLocaleScopeReader } from "app/i18n/clientLocaleGate";
 import { addHostToCurrentServer, getSettings } from "app/settings/settingSlice";
 import { isNonApiSiteHostname } from "app/settings/serverBootstrap";
 import {
@@ -59,7 +61,9 @@ const RECENT_SHARE_FOREGROUND_SYNC_SKIP_MS = 4000;
 
 interface AppProps {
   hostname: string;
-  lng?: string;
+  manageClientLocales?: boolean;
+  guestLocaleEligible?: boolean;
+  desktopShell?: boolean;
   initialRoutes: RouteObject[];
 }
 
@@ -67,12 +71,12 @@ type BackgroundState = {
   backgroundLocation?: RouterLocation;
 };
 
-export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
+export default function App({ hostname, manageClientLocales = false, guestLocaleEligible = detectSite(hostname) === "default", desktopShell = false, initialRoutes }: AppProps) {
   const dispatch = useAppDispatch();
   const accountSession = useAccountSessionService();
   // useIdentity().userId 是 SSR-safe（mount 前返回 undefined，与 SSR 一致），
   // 避免 hydrate 首帧 userId 不匹配导致 React 丢弃 SSR DOM → 白屏。
-  const { userId } = useIdentity();
+  const { userId, currentUser } = useIdentity();
   const session = useAccountSession();
   const runtimeOrigin =
     typeof window !== "undefined" && typeof window.location?.origin === "string"
@@ -131,7 +135,6 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
   const modalElement = useRoutes(modalRoutes, location);
 
   useEffect(() => {
-    if (lng) i18n.changeLanguage(lng);
     if (isNonApiSiteHostname(hostname)) return;
 
     // 一次性初始化 Auth
@@ -210,7 +213,7 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
       }
       __initPerf?.end("space_initialization");
     })();
-  }, [dispatch, hostname, lng, userId, runtimeOrigin, hydrateSessionSettings]);
+  }, [dispatch, hostname, userId, runtimeOrigin, hydrateSessionSettings]);
 
   useEffect(() => {
     if (!userId || favoritesInitialized || !favoriteDeps?.token) return;
@@ -342,23 +345,34 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
     () => false,
   );
 
+  const scope = clientLocaleScope({
+    pathname: location.pathname,
+    cloud: isCloudEdition,
+    defaultSite: guestLocaleEligible,
+    desktopShell: desktopShell || getIsDesktopUiPreview(),
+    signedIn: Boolean(currentUser || session.activeAccountId || session.activeToken),
+    overlay: Boolean(state?.backgroundLocation),
+    needsFullContent: hasPendingActionGate,
+  });
+  const readScope = useClientLocaleScopeReader(scope);
+  const locale = useClientLocaleGate(scope, manageClientLocales);
+
   return (
-    <>
+    <ClientLocaleScopeContext.Provider value={manageClientLocales ? readScope : null}>
       <GlobalThemeController />
       <GlobalBaseStyles />
-      <Toaster />
-      {/* Block 3b: action gate panel — lazy-mounted only while a gate is pending. */}
-      {hasPendingActionGate ? (
-        <Suspense fallback={null}>
-          <DesktopActionGateDialog />
-        </Suspense>
-      ) : null}
-
-      {/* 背景主内容 */}
-      {mainElement}
-
-      {/* 只有有 backgroundLocation 时，才叠加 settings 弹窗 */}
-      {state?.backgroundLocation && modalElement}
-    </>
+      {locale.ready ? (
+        <>
+          <Toaster />
+          {hasPendingActionGate ? (
+            <Suspense fallback={null}>
+              <DesktopActionGateDialog />
+            </Suspense>
+          ) : null}
+          {mainElement}
+          {state?.backgroundLocation && modalElement}
+        </>
+      ) : <ClientLocalePending {...locale} />}
+    </ClientLocaleScopeContext.Provider>
   );
 }

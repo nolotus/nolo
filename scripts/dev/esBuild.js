@@ -19,7 +19,7 @@ import {
   resolvePreloadBudget,
   toPublicUrl,
 } from "./staticImportClosure.js";
-import { resources as i18nResources } from "../../packages/app/i18n/i18n.config";
+import { writeClientLocaleFiles } from "./clientLocaleFiles.js";
 
 const require = createRequire(import.meta.url);
 const esbuild = require("esbuild");
@@ -46,7 +46,6 @@ function resolveBrotliQuality() {
 }
 const ASSET_BUILD_MANIFEST_DIR = "public/.asset-builds";
 const ASSET_OUTPUT_DIR = outdir;
-const CLIENT_LOCALE_OUTPUT_DIR = "public/locales";
 const PDF_WORKER_SOURCE = (() => {
   try {
     return require.resolve("pdfjs-dist/build/pdf.worker.mjs");
@@ -359,18 +358,6 @@ const precompressAssets = async (outputs) => {
 const copyPdfWorker = async () => {
   await mkdir(ASSET_OUTPUT_DIR, { recursive: true });
   await copyFile(PDF_WORKER_SOURCE, PDF_WORKER_OUTPUT);
-};
-
-const writeClientLocaleFiles = async () => {
-  await mkdir(CLIENT_LOCALE_OUTPUT_DIR, { recursive: true });
-  await Promise.all(
-    Object.entries(i18nResources).map(([language, namespaces]) =>
-      writeFile(
-        `${CLIENT_LOCALE_OUTPUT_DIR}/${encodeURIComponent(language)}.json`,
-        JSON.stringify(namespaces)
-      )
-    )
-  );
 };
 
 // -----------------------------
