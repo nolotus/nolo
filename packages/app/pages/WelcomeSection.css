@@ -170,10 +170,18 @@
 }
 
 .ws-faq-panel {
-  display: block;
-  height: var(--disclosure-panel-height);
-  transition: height var(--home-motion-duration) var(--home-motion-ease);
-  interpolate-size: allow-keywords;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--home-motion-duration) var(--home-motion-ease);
+}
+
+.ws-faq-item[data-expanded] .ws-faq-panel {
+  grid-template-rows: 1fr;
+}
+
+/* 内层必须 min-height:0 + overflow:hidden，0fr 行才会真正收起内容 */
+.ws-faq-panel-inner {
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -582,7 +590,8 @@
   }
   .ws-cards-section { margin-bottom: 64px; }
   .ws-faq-trigger { padding: 16px 16px; }
-  .ws-faq-panel { padding: 0 16px 16px; }
+  /* 内边距必须落在裁切层内部：放在 .ws-faq-panel 上会让 0fr 收起后仍留下底部空白 */
+  .ws-faq-panel p { padding: 0 16px 16px; }
   .ws-section-title { font-size: var(--type-h2); }
   .ws-section--editorial { text-align: center; }
   .ws-section--editorial .ws-faq-head { text-align: center; }

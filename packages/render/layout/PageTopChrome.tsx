@@ -13,7 +13,6 @@ import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import ThemeToggleButton from "app/theme/web/ThemeToggleButton";
 import { useIsLoggedIn } from "identity";
 import { useHasMounted } from "app/hooks/useHasMounted";
-import CreateMenuButton from "./CreateMenuButtonContainer";
 import { DevReloadBadge } from "./DevReloadBadge";
 import { useSidebarToggleContext } from "./SidebarToggleContext";
 import { getRouteDescriptor } from "./mainLayoutViewMode";
@@ -28,6 +27,8 @@ import {
 // 语言切换器带 StyleX 样式（需编译产物），懒加载避免把 StyleX 运行时拖进
 // 布局单测等无编译产物的环境。
 const LanguageSwitcher = lazy(() => import("render/web/ui/LanguageSwitcher"));
+// CreateMenuButton 只在登录态顶栏渲染；访客首页不该为它（及其 react-aria 菜单依赖）付费。
+const CreateMenuButton = lazy(() => import("./CreateMenuButtonContainer"));
 
 /** 内容对象页头部的左侧导航簇：侧边栏开关 / Home。 */
 export const PageNavChrome: React.FC = () => {
@@ -187,7 +188,9 @@ export const PageUserChrome: React.FC<{ floating?: boolean }> = ({
 
   return (
     <div className="topbar__user-area topbar__user-area--compact">
-      <CreateMenuButton variant="topbar" className="topbar__create-entry" />
+      <Suspense fallback={null}>
+        <CreateMenuButton variant="topbar" className="topbar__create-entry" />
+      </Suspense>
     </div>
   );
 };

@@ -1,4 +1,11 @@
 
+## 0.266.0-alpha.4 (2026-11-19)
+
+### Performance Improvements
+
+* **web:** 清空访客首页的 react-aria 五条静态边 ([6fc9f96](https://github.com/nolotus/bun-nolo/commit/6fc9f9613706d2f2f0d3a0ea0f862b35f87c6955))
+
+
 ## 0.266.0-alpha.3 (2026-11-19)
 
 ### Performance Improvements

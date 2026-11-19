@@ -13,15 +13,18 @@ import {
   type MySectionDefinition,
 } from "app/constants/mySections";
 import { legacySettingRoutes, settingRoutes } from "app/settings/routes";
-import ShareImportPage from "app/pages/ShareImportPage";
-import NewChatPage from "app/pages/NewChatPage";
 import NotFoundPage from "app/pages/NotFoundPage";
 import { NOT_FOUND_ROUTE_ID, PAGE_KEY_ROUTE_ID } from "app/constants/routePaths";
+import ShareImportPage from "app/pages/ShareImportPage";
 // Keep the dialog/editor/tool graph off unrelated URLs. The existing route
 // Suspense boundary is also used by streaming SSR, so matched pages still render
-// fully; Home and NewChatPage remain eager rather than delaying their first paint.
+// fully; Home remains eager rather than delaying the first paint.
 const PageLoader = lazy(() => import("render/page/PageLoader"));
 const MediaLecturePage = lazy(() => import("app/pages/MediaLecturePage"));
+// NewChatPage 原先 eager，代价是所有首页访客都要替 /new 下载 QuickChat 及其 react-aria
+// 依赖；改回 lazy（使用点已在 withSuspense 内）。
+// ShareImportPage 保持 eager：`/share/:token` 的 SSR 直出契约依赖它，且它不引 react-aria。
+const NewChatPage = lazy(() => import("app/pages/NewChatPage"));
 
 import PageLoading from "render/web/ui/PageLoading";
 import { getIsDesktopApp } from "app/utils/env";

@@ -1,6 +1,6 @@
 // 文件路径: packages/app/pages/Home.tsx
 
-import { useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
@@ -8,8 +8,12 @@ import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 
 import HomeLanding from "./HomeLanding";
-import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
-import QuickChat from "./QuickChat";
+import HomePaneSkeleton from "./HomePaneSkeleton";
+
+// QuickChat 与桌面引导只在登录态 / 桌面 UI 分支渲染，访客首页用不到它们；
+// 静态 import 会把两者及其 react-aria 依赖一并塞进访客首屏，改成按需加载。
+const QuickChat = lazy(() => import("./QuickChat"));
+const DesktopAgentOnboarding = lazy(() => import("./DesktopAgentOnboarding"));
 import { getIsDesktopApp } from "app/utils/env";
 import { getIsDesktopPreview } from "app/utils/env";
 import { getIsDesktopUiPreview } from "app/utils/env";
@@ -83,19 +87,23 @@ const Home = () => {
           )}
         >
           {showDesktopOnboarding ? (
-            <DesktopAgentOnboarding onDismiss={handleDismissOnboarding} />
+            <Suspense fallback={<HomePaneSkeleton />}>
+              <DesktopAgentOnboarding onDismiss={handleDismissOnboarding} />
+            </Suspense>
           ) : showAuthedHome ? (
-            <section {...stylex.props(homeStyles.homeBottomChatShell)}>
-              <div
-                {...withLiteralClass(
-                  "home-primary-chat",
-                  homeStyles.homePrimaryChat,
-                  homeStyles.homePrimaryChatInShell
-                )}
-              >
-                <QuickChat surface="home-primary" isEmptyState={isEmptyState} />
-              </div>
-            </section>
+            <Suspense fallback={<HomePaneSkeleton />}>
+              <section {...stylex.props(homeStyles.homeBottomChatShell)}>
+                <div
+                  {...withLiteralClass(
+                    "home-primary-chat",
+                    homeStyles.homePrimaryChat,
+                    homeStyles.homePrimaryChatInShell
+                  )}
+                >
+                  <QuickChat surface="home-primary" isEmptyState={isEmptyState} />
+                </div>
+              </section>
+            </Suspense>
           ) : (
             <>
               {!isDesktopUi && <HomeLanding />}
