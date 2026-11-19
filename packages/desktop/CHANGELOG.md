@@ -1,4 +1,14 @@
 
+## 0.244.2 (2026-11-19)
+
+### Bug Fixes
+
+* **chat:** 明确追赶信号绕过补读节流，推断信号仍节流 ([ddc54ea](https://github.com/nolotus/bun-nolo/commit/ddc54ea6a0cf39e96488f4116a757b220dae3fa9))
+* **chat:** 未完成回复提示去掉边框盒子，改成一行无边框提示 ([b205fe0](https://github.com/nolotus/bun-nolo/commit/b205fe0025839b9ccb1008e6f9018f63b1aed9cf))
+* **chat:** 未完成回复的重试先就地确认一次 ([39bb68e](https://github.com/nolotus/bun-nolo/commit/39bb68e6061b589bc35db946fa57638b200250db))
+* **desktop:** 首帧前不再挂误导状态，三段准备改为并行 ([db434fc](https://github.com/nolotus/bun-nolo/commit/db434fc37858775bfe5c54bd31f3c8ab4a94a946))
+
+
 ## 0.244.1 (2026-11-19)
 
 ### Bug Fixes

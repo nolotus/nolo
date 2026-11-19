@@ -105,6 +105,30 @@ import { RUN_TITLE_MAX, normalizeRunTitle } from "ai/tools/agent/runTitle";
  * The turn must not stall on a slow memory service.
  */
 const DESKTOP_MEMORY_OVERLAY_TIMEOUT_MS = 1_000;
+
+// 首帧前的分账埋点（measurement-only，零行为变化）。桌面 turn 在发出首个
+// SSE 帧之前有若干准备步骤，此前没有任何时间口径能区分它们，导致「首字前
+// 静默」只能靠猜。开启 NOLO_DESKTOP_TURN_TIMING=1 时，每个准备步骤落一行
+// JSONL；未开启时每个调用点只花一次布尔判断。不写任何持久化数据。
+const DESKTOP_TURN_TIMING_ENABLED =
+  typeof process !== "undefined" && process.env?.NOLO_DESKTOP_TURN_TIMING === "1";
+
+// 关闭时连起始取时都跳过（返回 0），保证埋点真的只在开启时有开销；
+// 打点本身吞掉一切异常——诊断辅助绝不能让 turn 失败（此前 memory 段的打点在
+// catch 之外，console.log 抛错会把 Promise.all 一起拒掉）。
+function desktopTurnTimingNow(): number {
+  return DESKTOP_TURN_TIMING_ENABLED ? performance.now() : 0;
+}
+
+function markDesktopTurnTiming(label: string, startedAt: number): void {
+  if (!DESKTOP_TURN_TIMING_ENABLED || startedAt === 0) return;
+  try {
+    const durationMs = Math.round(performance.now() - startedAt);
+    console.log(`[desktop-turn-timing] ${JSON.stringify({ label, durationMs })}`);
+  } catch {
+    /* observation is fail-open */
+  }
+}
 import {
   buildUserGlobalPromptLayer,
   buildUserResponseLanguageLayer,
@@ -1586,22 +1610,33 @@ async function runDesktopAgentRuntimeTurnImpl(
     agentsMdLayer = readAgentsMdLayerFromDisk(cwd);
   }
 
-  // T13 — user global prompt. userId comes from the dialog record only; when
-  // there is no dialog record (no continueDialogId / no valid dialogKey) we
-  // skip this layer rather than guessing the user from env.
-  const userGlobalPromptLayer = dialogRecord
-    ? await buildUserGlobalPromptLayer({
-        source: turnContextReadSource,
-        userId: dialogRecordUserId,
-      })
-    : null;
+  // T13/T14 三段准备彼此独立：用户全局提示、回复语言、memory overlay。
+  // 此前是全串行 —— memory overlay 的远端请求要等两个设置读取都结束才开始，
+  // 首帧前白等多一个往返（Sol 2026-11-19 分账研究的结论）。改为并行发起、
+  // 一次收齐；每段的失败语义不变（memory 仍是 fail-open，只 warn 不中断）。
+  const userGlobalPromptPromise = (async () => {
+    const startedAt = desktopTurnTimingNow();
+    const layer = dialogRecord
+      ? await buildUserGlobalPromptLayer({
+          source: turnContextReadSource,
+          userId: dialogRecordUserId,
+        })
+      : null;
+    markDesktopTurnTiming("user-global-prompt", startedAt);
+    return layer;
+  })();
 
-  const userResponseLanguageLayer = dialogRecord
-    ? await buildUserResponseLanguageLayer({
-        source: turnContextReadSource,
-        userId: dialogRecordUserId,
-      })
-    : null;
+  const userResponseLanguagePromise = (async () => {
+    const startedAt = desktopTurnTimingNow();
+    const layer = dialogRecord
+      ? await buildUserResponseLanguageLayer({
+          source: turnContextReadSource,
+          userId: dialogRecordUserId,
+        })
+      : null;
+    markDesktopTurnTiming("response-language", startedAt);
+    return layer;
+  })();
 
   // T14 — memory overlay. The host performs the network call to
   // {server}/api/memory/query (auth + server config live in env, which
@@ -1613,42 +1648,45 @@ async function runDesktopAgentRuntimeTurnImpl(
   // model simply has no memory to honor; a spurious "memory failed" block
   // would risk the model over-explaining a personalization enhancement that
   // was never guaranteed. The warn keeps the failure visible to the operator.
-  let memoryPromptBlock: string | null = null;
-  const memoryFetchImpl = input.memoryOverlayFetchImpl ?? input.fetchImpl ?? fetch;
-  const memoryServerUrl = resolveDesktopAgentRuntimeServerUrl(input.env);
-  const memoryAuthToken = resolveDesktopAgentRuntimeAuthToken(input.env);
-  if (memoryServerUrl && memoryAuthToken && asOptionalTrimmedString(input.agentRef)) {
+  const memoryOverlayPromise = (async (): Promise<string | null> => {
+    const startedAt = desktopTurnTimingNow();
+    const memoryFetchImpl = input.memoryOverlayFetchImpl ?? input.fetchImpl ?? fetch;
+    const memoryServerUrl = resolveDesktopAgentRuntimeServerUrl(input.env);
+    const memoryAuthToken = resolveDesktopAgentRuntimeAuthToken(input.env);
+    let block: string | null = null;
     try {
-      const userInputText = extractDesktopTurnInputText(input.input);
-      const memoryResponse = await memoryFetchImpl(
-        `${memoryServerUrl}/api/memory/query`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${memoryAuthToken}`,
+      if (memoryServerUrl && memoryAuthToken && asOptionalTrimmedString(input.agentRef)) {
+        const userInputText = extractDesktopTurnInputText(input.input);
+        const memoryResponse = await memoryFetchImpl(
+          `${memoryServerUrl}/api/memory/query`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${memoryAuthToken}`,
+            },
+            body: JSON.stringify({
+              agentKey: asOptionalTrimmedString(input.agentRef),
+              userInput: userInputText,
+              ...(turnSpaceId ? { spaceId: turnSpaceId } : {}),
+            }),
+            // Memory is an enhancement, not a prerequisite: an unresponsive
+            // memory service must never hold the turn open. Without this the
+            // user presses send and waits forever on a stalled socket.
+            signal: AbortSignal.timeout(DESKTOP_MEMORY_OVERLAY_TIMEOUT_MS),
           },
-          body: JSON.stringify({
-            agentKey: asOptionalTrimmedString(input.agentRef),
-            userInput: userInputText,
-            ...(turnSpaceId ? { spaceId: turnSpaceId } : {}),
-          }),
-          // Memory is an enhancement, not a prerequisite: an unresponsive
-          // memory service must never hold the turn open. Without this the
-          // user presses send and waits forever on a stalled socket.
-          signal: AbortSignal.timeout(DESKTOP_MEMORY_OVERLAY_TIMEOUT_MS),
-        },
-      );
-      if (memoryResponse.ok) {
-        const memoryPayload = (await memoryResponse.json().catch(() => null)) as
-          | { promptBlock?: unknown }
-          | null;
-        memoryPromptBlock = asOptionalTrimmedString(memoryPayload?.promptBlock) ?? null;
-      } else {
-        console.warn(
-          "[desktop-runtime] memory overlay fetch returned non-ok status:",
-          memoryResponse.status,
         );
+        if (memoryResponse.ok) {
+          const memoryPayload = (await memoryResponse.json().catch(() => null)) as
+            | { promptBlock?: unknown }
+            | null;
+          block = asOptionalTrimmedString(memoryPayload?.promptBlock) ?? null;
+        } else {
+          console.warn(
+            "[desktop-runtime] memory overlay fetch returned non-ok status:",
+            memoryResponse.status,
+          );
+        }
       }
     } catch (memoryError) {
       console.warn(
@@ -1656,7 +1694,16 @@ async function runDesktopAgentRuntimeTurnImpl(
         memoryError,
       );
     }
-  }
+    markDesktopTurnTiming("memory-overlay", startedAt);
+    return block;
+  })();
+
+  const [userGlobalPromptLayer, userResponseLanguageLayer, memoryPromptBlock] =
+    await Promise.all([
+      userGlobalPromptPromise,
+      userResponseLanguagePromise,
+      memoryOverlayPromise,
+    ]);
   const memoryOverlayLayer = buildMemoryOverlayLayer({
     promptBlock: memoryPromptBlock,
   });

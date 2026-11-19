@@ -395,6 +395,12 @@ export async function handleDesktopAgentRuntimeTurnPost(
               // frame's phase + scope; other observation kinds stay on the
               // runtime trace and are not forwarded.
               if (event.kind === "turn-phase") {
+                // `validating-context` 是每轮压缩判定的入口观测：判定可以整条跳过
+                // （无 dialogId、空历史、缺摘要方法…）时它也会发出，而跳过路径之后
+                // 没有替换它的阶段帧，桌面 UI 就会把「正在检查上下文」一直挂到首字。
+                // 只透出真实发生的工作阶段（compacting / waiting-provider），
+                // validating-context 保留在 runtime trace 上供观测，不进 UI。
+                if (event.phase === "validating-context") return;
                 enqueueEvent({
                   type: "status",
                   phase: event.phase,
