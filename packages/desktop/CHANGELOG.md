@@ -1,4 +1,15 @@
 
+## 0.265.0-alpha.2 (2026-11-19)
+
+### Bug Fixes
+
+* **web:** route foreground turn confirmations to the original server ([aa0a46c](https://github.com/nolotus/bun-nolo/commit/aa0a46c6408be63f00239b80390b5b48896dabde))
+
+### Performance Improvements
+
+* **web:** 给 SSR modulepreload 加预算上限，首屏不再预加载整个静态闭包 ([0b8de67](https://github.com/nolotus/bun-nolo/commit/0b8de674fb50fb1e18d4b7effff17b20a3b997e4))
+
+
 ## 0.265.0-alpha.1 (2026-11-19)
 
 ### Features

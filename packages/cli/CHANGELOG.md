@@ -1,4 +1,11 @@
 
+## 0.248.0-alpha.2 (2026-11-19)
+
+### Bug Fixes
+
+* **web:** route foreground turn confirmations to the original server ([aa0a46c](https://github.com/nolotus/bun-nolo/commit/aa0a46c6408be63f00239b80390b5b48896dabde))
+
+
 ## 0.248.0-alpha.1 (2026-11-19)
 
 ### Features

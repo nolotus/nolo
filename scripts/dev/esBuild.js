@@ -14,7 +14,11 @@ import { config, timestamp, publicPath, webEdition, outdir } from "./esbuild.con
 import { shouldPrecompressWebAssets } from "./webBuildPolicy";
 import { publishDevWebBuildSignal } from "./devAssetManifest.js";
 import { copyRouteStyles } from "./routeStyles.js";
-import { collectStaticImportClosure, toPublicUrl } from "./staticImportClosure.js";
+import {
+  collectStaticImportClosure,
+  resolvePreloadBudget,
+  toPublicUrl,
+} from "./staticImportClosure.js";
 import { resources as i18nResources } from "../../packages/app/i18n/i18n.config";
 
 const require = createRequire(import.meta.url);
@@ -53,6 +57,10 @@ const PDF_WORKER_SOURCE = (() => {
 const PDF_WORKER_OUTPUT = "public/assets/pdf.worker.mjs";
 const COMPRESS_MIN_BYTES = 1024;
 const COMPRESSIBLE_OUTPUT_RE = /\.(?:js|css|json|svg)$/i;
+
+// SSR modulepreload 预算（2026-11-19 线上实测）：无限制展开 entry 静态闭包会把 88–91 个
+// chunk 全部写进 <head> 的 modulepreload，首屏 800ms 内发起 95 个请求 / 605KB，FCP 2.7s
+// 而 TTFB 只有 0.7s。解析逻辑与默认值在 staticImportClosure.js（单一真值，可单测）。
 // StyleX 启用后 dev/prod 都会生成 metafile（供插件定位 CSS asset），
 // 但 meta.json 落盘不应随之下放：dev 无消费方且文件多 MB，还会覆盖生产 meta.json，
 // 因此 dev 恒跳过写盘（保持 StyleX 引入前的行为）。
@@ -116,7 +124,11 @@ const getEntryFiles = (metafile) => {
     if (path.endsWith(".js")) {
       // 示例：public/assets/entry-xxx.js → /public/assets/entry-xxx.js
       entryFiles.js = "/" + path;
-      entryFiles.entryPreloads = collectStaticImportClosure(metafile.outputs, path);
+      entryFiles.entryPreloads = collectStaticImportClosure(
+        metafile.outputs,
+        path,
+        resolvePreloadBudget()
+      );
     } else if (path.endsWith(".css")) {
       entryFiles.css = "/" + path;
     }

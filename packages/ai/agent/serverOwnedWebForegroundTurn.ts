@@ -2,6 +2,8 @@ import type { RootState } from "app/store";
 import type { Agent, DialogConfig } from "app/types";
 import { selectCurrentServer } from "app/settings/serverSelectors";
 import { getIsDesktopApp } from "app/utils/env";
+import { targetForRunKind } from "app/utils/desktopActionGateChannel";
+import { createTurnActionGateReceiver } from "./turnActionGateReceiver";
 import { selectIdentityToken, selectIdentityUserId } from "identity/selectors";
 import { extractCustomId } from "core/prefix";
 import { createDialogMessageKeyAndId } from "database/keys";
@@ -404,6 +406,9 @@ export async function runServerOwnedWebForegroundTurn(
     signal: controller.signal,
   });
 
+  const { receiveActionGate, clearActionGates } = createTurnActionGateReceiver(thunk.dispatch, transientId);
+  const actionGateTarget = targetForRunKind("server-run", { server: currentServer, token });
+
   stageLog.stage(
     "run-fetch-start",
     `endpoint=${currentServer}/api/agent/run agentKey=${args.agentKey}`,
@@ -458,6 +463,13 @@ export async function runServerOwnedWebForegroundTurn(
           return { reject: payload.message || "Agent execution failed" };
         }
 
+        if (payload?.type === "action_gate") {
+          if (!visibleFinalized && payload.gate) {
+            receiveActionGate(payload.gate, actionGateTarget, dialogId);
+          }
+          return;
+        }
+
         toolProjection.handlePayload(payload);
 
         const nextAssistantStream = applyServerOwnedAssistantStreamPayload(
@@ -480,6 +492,7 @@ export async function runServerOwnedWebForegroundTurn(
           // still ahead, so keep reading to EOF for the commit gate.
           stageLog.stage("done-frame", `executionId=${observedExecutionId}`);
           finalizeVisibleProjectionOnDone();
+          clearActionGates();
         }
       },
     });
@@ -558,6 +571,7 @@ export async function runServerOwnedWebForegroundTurn(
 
     return { serverOwned: true };
   } finally {
+    clearActionGates();
     releaseClientController();
     // A turn whose visible projection already settled at `done` keeps its
     // finished transient: the authoritative answer was received, so deleting it

@@ -123,14 +123,8 @@ import { normalizeServerOrigin } from "./serverOrigin";
 import { getIsDesktopApp } from "app/utils/env";
 import { DirectApiKeyResolutionError } from "../chat/resolveDirectRequestApiKey";
 import { runDesktopAgentRuntimeTurnStream } from "app/utils/desktopAgentRuntimeTurnClient";
-// Block 3b: desktop action gate channel — pending gates live in memory only,
-// Block 2c: submit target is picked per run kind (desktop local vs server run).
-import {
-  pushGate,
-  clearGateTurn,
-  targetForRunKind,
-} from "app/utils/desktopActionGateChannel";
-// never in messages/transcript/persistence.
+import { targetForRunKind } from "app/utils/desktopActionGateChannel";
+import { createTurnActionGateReceiver } from "./turnActionGateReceiver";
 import { prepareTools } from "../tools/prepareTools";
 
 // ── extracted pure modules ──────────────────────────────────────────────
@@ -529,19 +523,7 @@ export const streamAgentChatTurnHandler = async (
     // Minted in the desktop-runtime branch; carried into `finally` so cleanup is
     // turn-scoped too. `null` for paths that never project a turn phase.
     let turnPhaseTurnId: string | null = null;
-    // Host-generated correlation; neither the model nor the SSE schema chooses it.
-    const secretGateTurnId = createDialogMessageKeyAndId("secret-gate").messageId;
-    const secretGateAnchors = new Set<string>();
-    const receiveActionGate = (gate: Parameters<typeof pushGate>[0], target: Parameters<typeof pushGate>[1], dialogId: string) => {
-        const secret = gate.kind === "input" && (gate.payload as any)?.action === "secret_request";
-        if (!secret || target?.kind === "local") { pushGate(gate, target); return; }
-        const { messageId, key } = createDialogMessageKeyAndId(dialogId);
-        // Safe transient anchor, available immediately, before tool_result. No gate/value persisted.
-        secretGateAnchors.add(messageId);
-        pushGate(gate, target, { dialogId, turnId: secretGateTurnId, messageId });
-        dispatch(messageStreaming({ id: messageId, dbKey: key, dialogId, role: "tool",
-            toolName: "secret-request", content: "", isStreaming: true }));
-    };
+    const { receiveActionGate, clearActionGates } = createTurnActionGateReceiver(dispatch);
 
     const batchExecution = createUserBatchExecution(loopController.signal, () =>
         !thunkApi.signal.aborted && (!turnPhaseTurnId || !runtimeDialogKey ||
@@ -3098,8 +3080,7 @@ export const streamAgentChatTurnHandler = async (
         );
     } finally {
         batchExecution.dispose();
-        clearGateTurn(secretGateTurnId);
-        for (const id of secretGateAnchors) dispatch(removeTransientMessage(id));
+        clearActionGates();
         clearDialogTurnPhase({ dialogKey: runtimeDialogKey ?? undefined, turnId: turnPhaseTurnId ?? undefined });
         if (loopKey && runtimeDialogKey) {
             dispatch(removeActiveController({ messageId: loopKey, dialogKey: runtimeDialogKey }));
