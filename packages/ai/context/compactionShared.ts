@@ -391,6 +391,113 @@ const SUMMARY_USER_SHARE = 0.2;
 const DECLARATION_SPLIT_COST = 20;
 
 /**
+ * 中断批次标记：文字与同一条 prompt 的其它标记保持一致（中文），并且**只陈述本次摘要
+ * 覆盖的历史范围内**的事实——更晚的区间（保留尾部/别的客户端交错进来的行）不在断言范围内。
+ */
+function interruptedBatchMarker(declared: number, returned: number): string {
+  const scope = "[本段历史范围内";
+  return returned === 0
+    ? `${scope}，该工具批次在后续用户消息前没有记录到结果，按中断处理：声明过的调用不计为已完成。]`
+    : `${scope}，该工具批次声明了 ${declared} 个调用，只记录了 ${returned} 个结果；未记录结果的调用按中断处理，不计为已完成。]`;
+}
+
+/**
+ * 把「已被后续 user 行闭合的旧工具批次」投影成中断形态（只用于摘要请求，绝不修复历史）：
+ *
+ * - 全批无结果：去掉声明，只留标记（旧行为）。
+ * - 半批（部分结果）：保留真实已返回的结果与它们对应的声明，只去掉**未返回**的声明，
+ *   并用标记说明「声明 N 个、只记录到 M 个」。**不为缺失的调用补造结果**。
+ * - 其余形态一律原样返回，交给 `buildBoundedCompactionRequest` 严格阻塞：
+ *   尾段批次（后面没有 user 行，可能还会追加结果）、位置配对（无法证明结果属于哪条声明）、
+ *   结果 ID 越界/重复、以及未返回的声明在别处还挂着结果（跨边界配对疑点）。
+ */
+function projectInterruptedHistoricalBatches<T extends CompactionRequestMessage>(source: T[]): T[] {
+  const resultIndices = new Map<string, number[]>();
+  source.forEach((msg, index) => {
+    const resultId = msg.role === "tool" ? msg.tool_call_id : undefined;
+    if (typeof resultId !== "string" || !resultId) return;
+    const existing = resultIndices.get(resultId);
+    if (existing) existing.push(index);
+    else resultIndices.set(resultId, [index]);
+  });
+
+  return source.map((msg, index) => {
+    if (msg.role !== "assistant" || !msg.tool_calls?.length) return msg;
+    const declared = msg.tool_calls.map((call) => call?.id);
+    // 只有 ID 配对能证明「这个结果属于这条声明」；位置配对无法排除跨批次错配。
+    if (declared.some((id) => typeof id !== "string" || !id) || new Set(declared).size !== declared.length) return msg;
+    const declaredIds = declared as string[];
+    let cursor = index + 1;
+    const returned: string[] = [];
+    while (cursor < source.length && source[cursor].role === "tool") {
+      const resultId = source[cursor].tool_call_id;
+      // 无 ID / 越界 / 重复的结果行都是配对疑点。
+      if (typeof resultId !== "string" || !resultId || !declaredIds.includes(resultId) || returned.includes(resultId)) return msg;
+      returned.push(resultId);
+      cursor++;
+    }
+    // 只处理「后续已有 user 行」闭合的旧批次；尾段与仍可能追加结果的批次保持严格。
+    if (source[cursor]?.role !== "user") return msg;
+    // 完整批次交给构建器按正常配对处理。
+    if (returned.length === declaredIds.length) return msg;
+    // 无跨边界配对疑点：未返回的声明 ID 不能在别处还挂着结果（多客户端交错历史）。
+    const returnedSet = new Set(returned);
+    const ambiguous = declaredIds.some((id) => !returnedSet.has(id)
+      && (resultIndices.get(id) ?? []).some((at) => at < index + 1 || at > cursor - 1));
+    if (ambiguous) return msg;
+    const keptCalls = msg.tool_calls.filter((call) => returnedSet.has(call.id as string));
+    const { tool_calls: _declaredCalls, ...rest } = msg;
+    const text = serializeMessageContent(msg.content);
+    const marker = interruptedBatchMarker(declaredIds.length, returned.length);
+    // 只有真实已返回的调用保留声明形态：tool 行没有声明就会被构建器判定为孤立结果。
+    return {
+      ...rest,
+      ...(keptCalls.length ? { tool_calls: keptCalls } : {}),
+      content: text ? `${text}\n${marker}` : marker,
+    } as T;
+  });
+}
+
+/**
+ * Build the historical (prefix) summary request without presenting abandoned tool
+ * declarations as completed actions. This is a prompt-only, 1:1 projection of an
+ * already selected historical prefix, never a history repair.
+ */
+export function buildHistoricalCompactionRequest<T extends CompactionRequestMessage>(args: {
+  msgsToCompress: T[];
+  previousSummary: string;
+  contextWindow: number;
+  canonicalizeToolName?: (name: string) => string;
+}): BoundedCompactionRequest<T> {
+  const source = args.msgsToCompress;
+  const projected = projectInterruptedHistoricalBatches(source);
+  const bounded = buildBoundedCompactionRequest({ ...args, msgsToCompress: projected });
+  if (bounded.status !== "ready") return bounded;
+  // 覆盖行、摘要锚点与 sourceHash 全部建立在「ready 分支按 1:1 前缀覆盖整个输入」这个契约上。
+  // 这里按 id 映射回原始行，并在契约被破坏时立刻失败——否则长度相等的 slice 会静默取到错的行。
+  const sourceIndexById = new Map<string, number>();
+  source.forEach((msg, index) => {
+    if (!sourceIndexById.has(msg.id)) sourceIndexById.set(msg.id, index);
+  });
+  const coveredMessages = bounded.coveredMessages.map((msg) => {
+    const index = sourceIndexById.get(msg.id);
+    if (index === undefined) {
+      throw new Error(`historical compaction coverage returned an unknown message id: ${msg.id}`);
+    }
+    return source[index];
+  });
+  const isOrderedPrefix = !bounded.partial
+    && coveredMessages.length === source.length
+    && coveredMessages.every((msg, position) => msg === source[position]);
+  if (!isOrderedPrefix) {
+    throw new Error(
+      `historical compaction coverage is no longer an ordered 1:1 prefix of the source (covered ${coveredMessages.length} of ${source.length}, partial=${bounded.partial})`,
+    );
+  }
+  return { ...bounded, coveredMessages };
+}
+
+/**
  * Project the entire safe plan, retaining every message's role and order. Input
  * counts use the shared estimator, not the provider's tokenizer. Original
  * messages stay in history; projected message text (including user text) can be lossy.

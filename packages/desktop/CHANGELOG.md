@@ -1,4 +1,23 @@
 
+## 0.261.0-alpha.1 (2026-11-19)
+
+### Features
+
+* **antigravity:** register verified Gemini Neon effort variants ([bc7edc2](https://github.com/nolotus/bun-nolo/commit/bc7edc205d7930892e519347de603c32f4a44d92))
+* **gemini:** add Neon hosting with consistent synchronous billing ([c339738](https://github.com/nolotus/bun-nolo/commit/c33973834942d56e6e6b7c81ac8223e31f7d440a))
+* **search:** add opt-in DeepSeek search provider ([460fcd1](https://github.com/nolotus/bun-nolo/commit/460fcd175a111a8ec13f94cd23cf81155230f983))
+
+### Bug Fixes
+
+* **agent:** require task-specific evidence for difficulty escalation ([05a0f8a](https://github.com/nolotus/bun-nolo/commit/05a0f8a34388b355bbfbbbf6cf4113db2efe7975))
+* **agent:** verify user outcomes before closing tasks ([b7d75d4](https://github.com/nolotus/bun-nolo/commit/b7d75d438ea9968ae4bca135879cc01ede140025))
+* **cli:** compact historical tool calls without recorded results ([c7d50a6](https://github.com/nolotus/bun-nolo/commit/c7d50a6200a3811a8ade2c937e2319613c7b5268))
+* **context:** compact interrupted tool batches across CLI and web ([ae3ffa8](https://github.com/nolotus/bun-nolo/commit/ae3ffa836e8d443c2b1eaeff4ad17b9ffaa63a3b))
+* **desktop:** 桌面按本机登录态读取自身 agent 记录取 key，修 401 missing_api_key ([77fee03](https://github.com/nolotus/bun-nolo/commit/77fee03f8a1446c3b888ccac58f7246e82fdc9e1))
+* **openai:** scope GPT-6.2 Responses prompt layout to official routes ([7398e8d](https://github.com/nolotus/bun-nolo/commit/7398e8da3bf50341221945c7f77d367c551ac9c4))
+* **tui:** retry terminal background query after cold mount ([4273be7](https://github.com/nolotus/bun-nolo/commit/4273be7630106ffb7894da1eb352cba1363a2099))
+
+
 ## 0.260.0-alpha.4 (2026-11-19)
 
 ### Bug Fixes

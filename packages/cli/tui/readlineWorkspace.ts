@@ -121,7 +121,7 @@ import {
   resetWorkspaceThemeState,
   applyDetectedBackground,
 } from "./theme";
-import { detectTerminalBackground, OSC11_QUERY } from "./detectBackground";
+import { detectTerminalBackground, isTerminalDevice, OSC11_QUERY } from "./detectBackground";
 import {
   clearCollapsedPasteStore,
   createCollapsedPasteStore,
@@ -3827,6 +3827,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       input.once("close", finish);
       if (history.turns.length) renderHistoryToOutput();
       fixedInput.repaint(buffer, cursorPos);
+      // A cold terminal can miss the pre-mount query. Retry once with the
+      // live decoder attached; only a real reply starts the regular poll.
+      // Same admission as the probe's: stdin that merely claims isTTY (pipe,
+      // PassThrough double, wrapper stream) never receives the reply, so the
+      // query bytes would leak into that stream's input queue instead.
+      if (!sawOsc11Reply && isTerminalDevice(input)) requestTerminalBackgroundQuery();
       refreshGitStatus();
       refreshCiStatus();
       await new Promise<void>((resolve) => {

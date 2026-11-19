@@ -1,5 +1,9 @@
 import type { Model } from "ai/llm/types";
 import { DEFAULT_GOOGLE_LIVE_AUDIO_MODEL } from "ai/agent/liveAudioModel";
+import {
+  GEMINI_NEON_SERVICE_TIER_MULTIPLIERS,
+  GEMINI_NEON_STANDARD_PRICE_USD,
+} from "ai/llm/geminiNeonPricing";
 
 export const googleModels: Model[] = [
   {
@@ -122,5 +126,31 @@ export const googleModels: Model[] = [
       cachingWrite: 0.8,
       cachingRead: 0.8,
     },
+  },
+  {
+    name: "gemini-4-neon",
+    displayName: "Gemini 4 Neon",
+    provider: "google",
+    description:
+      "Gemini 4 Neon frontier model for complex software engineering, knowledge work, and science workflows.",
+    hasVision: true,
+    hasAudio: true,
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+    // 官方 Gemini API pricing (Standard tier, checked 2026-11-19):
+    // 数字真值在 ai/llm/geminiNeonPricing.ts（nolo 托管目录共用同一份，避免同一上游
+    // 价目出现两份生产真值）；× 8 = credits，与本文件其它条目同口径。
+    // Implicit caching only (explicit caching unsupported), so cachingWrite mirrors cachingRead.
+    // 档位：Flex = 0.5x、Priority = 1.8x（官方同步线路的 service_tier）。平台没有 Batch
+    // 线路（Batch API 是独立的异步接口，本仓库不接），故不登记 batch 倍率。
+    price: {
+      input: GEMINI_NEON_STANDARD_PRICE_USD.input * 8,
+      output: GEMINI_NEON_STANDARD_PRICE_USD.output * 8,
+      cachingWrite: GEMINI_NEON_STANDARD_PRICE_USD.cache * 8,
+      cachingRead: GEMINI_NEON_STANDARD_PRICE_USD.cache * 8,
+    },
+    serviceTierPriceMultipliers: { ...GEMINI_NEON_SERVICE_TIER_MULTIPLIERS },
   },
 ];

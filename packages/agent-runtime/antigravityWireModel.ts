@@ -57,6 +57,15 @@ const WIRE_PROFILES: Readonly<Record<string, AntigravityWireProfile>> = {
   // Antigravity discovery 暴露 -medium / -high 变体；尚无 modelEnum 证据时不虚构 enum，仅声明 65536 输出上限。
   "gemini-4-hydrogen-medium": { maxOutputTokens: 65536 },
   "gemini-4-hydrogen-high": { maxOutputTokens: 65536 },
+  // Gemini 4 Neon（官方 2026-11-18 发布；仅 Google AI Pro / Ultra / Enterprise）**不登记 profile**：
+  // 2026-11-19 订阅档账号强制刷新 token 后跑 fetchAvailableModels（UA `antigravity/hub/2.26.0`），
+  // 四个 effort 变体 `gemini-4-neon-low` / `-medium` / `-high` / `-xhigh` 全部 enabled，
+  // 与官方 Antigravity 模型列表同形；同一批里仍没有裸 `gemini-4-neon`，free-tier 账号
+  // 依旧只看到 `gemini-4-neon-disabled`（MODEL_PLACEHOLDER_M536，tagDescription
+  // 「currently available to paid Pro and Ultra subscribers」）。
+  // 这批 discovery 没有给出四个变体的 modelEnum，也没有给出各自的输出窗口，因此这里**不写
+  // WIRE_PROFILES**：不虚构 enum、不复用 disabled 占位符的 262144 窗口、不折叠到
+  // Hydrogen / Carbon 冒充。四个变体按 wire id 原样透传，输出上限回落 agentConfig.max_tokens。
   "gemini-3.6-flash-low": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-medium": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-high": { maxOutputTokens: 65536 },
@@ -154,6 +163,12 @@ export function resolveAntigravityWireModel(
     const wireModelId = `gemini-4-hydrogen-${selected}`;
     return { wireModelId, profile: WIRE_PROFILES[wireModelId] };
   }
+
+  // Gemini 4 Neon：四个 effort 变体是 discovery 里各自独立的 wire id（2026-11-19 订阅档账号实测
+  // enabled，见 WIRE_PROFILES 说明），这里原样透传、不带 profile —— 不虚构 enum / 输出窗口，
+  // 也不把裸 `gemini-4-neon` 折叠到某个档位：裸 id 从未出现在 discovery 里，凭空选一个默认
+  // effort 等于编造上游行为。上游对未知 id 报 404 是如实的失败，比把从未观察到的 id 发出去
+  // 或偷偷换模型更可诊断。
 
   if (lower === "gemini-3.6-flash") {
     const wireModelId = "gemini-3.6-flash-low";

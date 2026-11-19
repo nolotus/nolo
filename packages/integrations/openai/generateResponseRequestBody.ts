@@ -1,8 +1,11 @@
 // /integrations/openai/generateResponseRequestBody.ts
 import { Agent, Message } from "app/types";
-import { generatePrompt } from "ai/agent/generatePrompt";
+import { buildSystemPromptContext } from "ai/agent/generatePrompt";
 import { detectDispatchIntentFromMessages } from "ai/agent/dispatchIntent";
+import { resolvePlatformHostedRouting } from "ai/llm/platformHostedRoutingTable";
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
+import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import { OPENAI_RESPONSES_ENDPOINT } from "../../agent-runtime/platformProviderEndpoints";
 import { Contexts } from "ai/types";
 import { convertMessagesToResponsesInput } from "./responsesHelpers";
 import {
@@ -12,6 +15,25 @@ import {
 import type { ResponsesConversationState } from "../../agent-runtime/types";
 
 const DEFAULT_RESPONSES_COMPACTION_THRESHOLD = 200_000;
+
+// This is a prompt-layout rule for the public Responses wire, not a state
+// capability. Codex OAuth translates chat.completions in its own adapter.
+function usesGpt62DeveloperPrefix(agentConfig: Agent): boolean {
+  const provider = asTrimmedLowercaseString(agentConfig.provider);
+  // A custom endpoint can retain either provider label without using the public wire.
+  if (agentConfig.customProviderUrl || agentConfig.apiSource === "custom") return false;
+  let model = asTrimmedLowercaseString(agentConfig.model).replace(/^openai\//, "");
+  if (provider === "nolo") {
+    const route = resolvePlatformHostedRouting(agentConfig.model);
+    if (route?.wire !== "responses" || route.endpoint !== OPENAI_RESPONSES_ENDPOINT) {
+      return false;
+    }
+    model = route.upstreamModelId ?? model;
+  } else if (provider !== "openai") {
+    return false;
+  }
+  return /^gpt-6\.2-(astra|sol)$/.test(model);
+}
 
 function resolveResponsesCompactionThreshold(agentConfig: Agent): number {
   const configured = Number(
@@ -60,10 +82,10 @@ export function generateResponseRequestBody(
     typeof navigator !== "undefined" && navigator.language
       ? navigator.language
       : "zh-CN";
-  const state =
-    responsesState !== undefined
-      ? responsesState
-      : selectResponsesConversationState(agentConfig.responsesState, agentConfig);
+  const state = selectResponsesConversationState(
+    responsesState === undefined ? agentConfig.responsesState : responsesState,
+    agentConfig,
+  );
   const supportsServerState = supportsResponsesConversationState(agentConfig);
   const stateful = supportsServerState && state && agentConfig.store !== false ? state : null;
   const input = convertMessagesToResponsesInput(
@@ -77,19 +99,31 @@ export function generateResponseRequestBody(
   };
 
   if (prependSystemPrompt) {
-    // Responses API instructions is a single string — no cache_control
-    // breakpoints like Chat Completions.  The stable prefix (identity/persona/
-    // tools/contracts) naturally stays at the front of buildSystemPrompt's
-    // output, letting provider-side automatic prefix cache (DeepSeek/Gemini)
-    // hit across turns even when summary/time changes.
-    const promptContent = generatePrompt({
+    const compiled = buildSystemPromptContext({
       agentConfig,
       language,
       contexts,
       // 按当前用户输入检测派发意图：无意图只注入最小派发协议（安全硬门常在）。
       dispatchIntent: detectDispatchIntentFromMessages(msgs),
     });
-    body.instructions = promptContent;
+    // GPT-6.2 public Responses appends instructions after input. On full replay
+    // keep the reusable part at the front of input for prefix caching.
+    const legacyContinuation = supportsServerState && responsesState === undefined &&
+      agentConfig.previous_response_id !== undefined;
+    if (!stateful && !legacyContinuation && usesGpt62DeveloperPrefix(agentConfig)) {
+      if (compiled.stablePrefixContent) {
+        input.unshift({
+          type: "message", role: "developer",
+          content: [{ type: "input_text", text: compiled.stablePrefixContent }],
+        });
+      }
+      if (compiled.dynamicContent) body.instructions = compiled.dynamicContent;
+    } else {
+      // A response ID does not prove that the retained input has this prefix.
+      // Earlier requests may have sent it only as instructions, which do not
+      // carry forward. Keep sending it rather than dropping those directives.
+      body.instructions = compiled.content;
+    }
   }
 
   // 3. 按需添加可选字段

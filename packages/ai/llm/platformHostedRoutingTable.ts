@@ -105,6 +105,10 @@ export const PLATFORM_HOSTED_GEMINI_25_PRO_MODEL = "gemini-2.5-pro";
 export const PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL = "gemini-4-argon";
 export const PLATFORM_HOSTED_GEMINI_4_HYDROGEN_MODEL = "gemini-4-hydrogen";
 export const PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL = "gemini-4-carbon";
+// Gemini 4 Neon（2026-11 更新的 Gemini 4 代 frontier 档）：官方 model code
+// 就是 `gemini-4-neon`（aistudio.google.com/docs/models/gemini-4-neon，2026-11-19 核对），
+// 平台 id 与上游 id 同构，不需要 upstreamModelId remap。
+export const PLATFORM_HOSTED_GEMINI_4_NEON_MODEL = "gemini-4-neon";
 export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image";
 // Nano Banana 2.1（2026-10-06 GA，官方新代码默认档）：id 无 preview 后缀。
 export const PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL =
@@ -358,6 +362,17 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
   },
   // Gemini 4 Carbon -> Google official OpenAI-compatible endpoint
   [PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL]: {
+    endpoint:
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    usageProvider: "google",
+    keyName: "google",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  // Gemini 4 Neon -> Google official OpenAI-compatible endpoint
+  // 官方 OpenAI 兼容文档（aistudio.google.com/docs/openai，2026-11-19 核对）在
+  // reasoning_effort 映射表中点名 gemini-4-neon 支持 xhigh，说明该 id 走兼容端点可调用。
+  [PLATFORM_HOSTED_GEMINI_4_NEON_MODEL]: {
     endpoint:
       "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     usageProvider: "google",

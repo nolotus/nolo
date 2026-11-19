@@ -9,6 +9,10 @@ export { isPlatformManagedProvider } from "./kimi";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { isPlatformManagedProvider } from "./kimi";
 import type { Model } from "./types";
+import {
+  GEMINI_NEON_SERVICE_TIER_MULTIPLIERS,
+  GEMINI_NEON_STANDARD_PRICE_USD,
+} from "./geminiNeonPricing";
 import type { ImageSizeKey } from "./imagePricing";
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
@@ -38,6 +42,7 @@ import {
   PLATFORM_HOSTED_GEMINI_4_ARGON_MODEL,
   PLATFORM_HOSTED_GEMINI_4_HYDROGEN_MODEL,
   PLATFORM_HOSTED_GEMINI_4_CARBON_MODEL,
+  PLATFORM_HOSTED_GEMINI_4_NEON_MODEL,
   PLATFORM_HOSTED_GEMINI_NANO_BANANA_21_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
@@ -546,6 +551,21 @@ export const PLATFORM_HOSTED_GEMINI_4_CARBON_PRICE = {
 } as const;
 
 /**
+ * Gemini 4 Neon（平台托管语义）：直连 Google 官方原生 API（gemini-4-neon，
+ * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
+ * 数字真值在 ai/llm/geminiNeonPricing.ts：Neon 同时出现在 Google 直连目录
+ * （packages/integrations/google/models.ts），两处必须报同一上游价，这里只做积分折算。
+ * 仅隐式缓存（官方明示 explicit caching 不支持），无单独缓存写入价，
+ * cachingWrite 与 cachingRead 同价。
+ */
+export const PLATFORM_HOSTED_GEMINI_4_NEON_PRICE = {
+  input: toPlatformCredits(GEMINI_NEON_STANDARD_PRICE_USD.input), // 24.0 credits
+  output: toPlatformCredits(GEMINI_NEON_STANDARD_PRICE_USD.output), // 120.0 credits
+  cachingWrite: toPlatformCredits(GEMINI_NEON_STANDARD_PRICE_USD.cache), // 1.2 credits
+  cachingRead: toPlatformCredits(GEMINI_NEON_STANDARD_PRICE_USD.cache), // 1.2 credits
+} as const;
+
+/**
  * 出图模型（平台托管语义）：记录侧 provider=nolo，实际上游分别是
  * OpenAI（gpt-image-2，key 用 OPENAI_API_KEY）与 Google 官方原生 API
  * （gemini-3.x image，key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
@@ -986,6 +1006,21 @@ export const platformHostedModels: Model[] = [
     contextWindow: 1_048_576,
     supportsTool: true,
     supportsReasoningEffort: true,
+  },
+  {
+    // 官方规格（aistudio.google.com/docs/models/gemini-4-neon，2026-11-19 核对）：
+    // 上下文 1,048,576（输入输出合计）；同步最大输出 65,536（long decode 可到 1M，
+    // 平台按同步默认值登记）；输入 Text/Image/Video/Audio/PDF，输出 Text；
+    // thinking 支持 low/medium/high/xhigh。
+    name: PLATFORM_HOSTED_GEMINI_4_NEON_MODEL,
+    displayName: "Gemini 4 Neon",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GEMINI_4_NEON_PRICE },
+    maxOutputTokens: 65536,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+    serviceTierPriceMultipliers: { ...GEMINI_NEON_SERVICE_TIER_MULTIPLIERS },
   },
   {
     name: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,

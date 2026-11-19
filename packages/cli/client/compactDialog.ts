@@ -16,7 +16,7 @@ import { BUILTIN_DIALOG_LLM_FALLBACK_MODEL, BUILTIN_SUMMARY_LLM_CONFIG } from ".
 import { extractReferenceKeysFromMessage } from "../../chat/dialog/actions/extractReferenceKeys";
 import {
   computeSummarySourceMetadata,
-  buildBoundedCompactionRequest,
+  buildHistoricalCompactionRequest,
   buildCompactionMetricsFromPlan,
   formatCompactionMetricsLog,
   type SummarySourceMessageInput,
@@ -555,7 +555,7 @@ export async function compactDialog(
 
       if (plan.shouldCompress && plan.msgsToCompress.length > 0) {
         const previousSummary = activeSummary;
-        const request = buildBoundedCompactionRequest({
+        const request = buildHistoricalCompactionRequest({
           // Planning/persistence retain stored records (toolCallId); the bounded
           // request validates runtime messages (tool_call_id). Reuse the canonical
           // projection already validated above, without changing source coverage.
