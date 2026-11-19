@@ -92,11 +92,21 @@ const TopbarAppSlot: React.FC<TopbarAppSlotProps> = ({
   const handleToggleInfo = useCallback(() => {
     if (!showInfo && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
+      const panelWidth = window.innerWidth <= 768 ? 280 : 320;
+      const anchorCenterX = rect.left + rect.width / 2;
+      const clampedLeft = Math.min(
+        Math.max(8, anchorCenterX - panelWidth / 2),
+        Math.max(8, window.innerWidth - panelWidth - 8),
+      );
+      const originX = Math.min(
+        Math.max(0, anchorCenterX - clampedLeft),
+        panelWidth,
+      );
       setPanelStyle({
         position: "fixed",
         top: rect.bottom + 8,
-        left: rect.left + rect.width / 2,
-        transform: "translateX(-50%)",
+        left: clampedLeft,
+        transformOrigin: `${Math.round(originX * 100) / 100}px 0px`,
         zIndex: 1001,
         margin: 0,
       });

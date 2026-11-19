@@ -26,17 +26,21 @@ import {
   HOST_APPROVAL_SUMMARY_LIMIT,
 } from "../client/hostApprovalFlow";
 import type { DialogHost } from "./dialogHost";
-import { boxGlyphs, displayWidth, resolveBoxCharset } from "./tuiAnsi";
+import { displayWidth } from "./tuiAnsi";
+import { safeApprovalMultilineText, safeApprovalSingleLineText } from "./askTextSanitize";
+import { renderDialogRule } from "./dialogFrame";
+import { describeBrowserApproval } from "../client/browserApprovalCopy";
 
-const ALLOW_KEYS = new Set(["y", "Y"]);
-const DENY_KEYS = new Set(["n", "N"]);
+const SELECT_ALLOW = new Set(["\x1b[C", "\x1bOC"]);
+const SELECT_CANCEL = new Set(["\x1b[D", "\x1bOD"]);
+const ENTER = new Set(["\r", "\n"]);
 /** The workspace decoder emits a lone ESC as "\x1b"; a fast double press arrives as "\x1b\x1b". */
 const ESCAPE_KEYS = new Set(["\x1b", "\x1b\x1b", "\x1b[27~"]);
 
 const FALLBACK_COLUMNS = 80;
-/** Columns a field label occupies after "│": " action    ", " detail    ". */
+/** Columns a field label occupies in the card: " action    ", " detail    ". */
 const LABEL_COLUMN = 9;
-/** Everything after "│": one space + the label column. */
+/** Indent: one space + the label column. */
 const CONTENT_INDENT = LABEL_COLUMN + 1;
 /** Terminal rows the script block may occupy (head + omission note + tail). */
 const DETAIL_MAX_ROWS = 15;
@@ -105,17 +109,70 @@ export function wrapCardLine(text: string, width: number): string[] {
   return rows;
 }
 
+/**
+ * Word-aware wrapping for prose lines (title, impact, hints) so English words
+ * don't split mid-word ("E" / "xact"), while long unbroken tokens still fall
+ * back cleanly to grapheme-exact wrapping via `wrapCardLine`.
+ */
+function wrapProseLine(text: string, width: number): string[] {
+  const budget = Math.max(8, width);
+  if (displayWidth(text) <= budget) return [text];
+  const tokens = text.split(/(\s+)/);
+  const rows: string[] = [];
+  let row = "";
+  let rowWidth = 0;
+
+  const pushRow = () => {
+    if (row) {
+      rows.push(row.trimEnd());
+      row = "";
+      rowWidth = 0;
+    }
+  };
+
+  for (const token of tokens) {
+    if (!token) continue;
+    if (/^\s+$/.test(token)) {
+      if (!row) continue;
+      const spaceWidth = displayWidth(token);
+      if (rowWidth + spaceWidth <= budget) {
+        row += token;
+        rowWidth += spaceWidth;
+      } else {
+        pushRow();
+      }
+      continue;
+    }
+    const tokenWidth = displayWidth(token);
+    if (row && rowWidth + tokenWidth > budget) {
+      pushRow();
+    }
+    if (tokenWidth <= budget) {
+      row += token;
+      rowWidth += tokenWidth;
+    } else {
+      const broken = wrapCardLine(token, budget);
+      for (let i = 0; i < broken.length - 1; i++) {
+        rows.push(broken[i]);
+      }
+      row = broken[broken.length - 1];
+      rowWidth = displayWidth(row);
+    }
+  }
+  pushRow();
+  return rows.length ? rows : [""];
+}
+
 /** One connector-supplied field: the label sits on the first row, wrapped rows stay aligned. */
 function fieldRows(
   label: string,
   text: string,
   contentWidth: number,
-  glyphs: ReturnType<typeof boxGlyphs>,
 ): string[] {
   const first = ` ${label.padEnd(LABEL_COLUMN, " ")}`;
   const rest = " ".repeat(CONTENT_INDENT);
   return wrapCardLine(text, contentWidth).map(
-    (row, index) => `${glyphs.v}${index === 0 ? first : rest}${row}`,
+    (row, index) => `${index === 0 ? first : rest}${row}`,
   );
 }
 
@@ -130,14 +187,13 @@ function fieldRows(
 function detailRows(
   summary: string,
   contentWidth: number,
-  glyphs: ReturnType<typeof boxGlyphs>,
 ): string[] {
   const text = summary && summary.trim() ? summary : "(no summary)";
   const rows = text.split("\n").flatMap((line) => wrapCardLine(line, contentWidth));
   const first = ` ${"detail".padEnd(LABEL_COLUMN, " ")}`;
   const rest = " ".repeat(CONTENT_INDENT);
   const withPrefix = (row: string, index: number) =>
-    `${glyphs.v}${index === 0 ? first : rest}${row}`;
+    `${index === 0 ? first : rest}${row}`;
   if (rows.length <= DETAIL_MAX_ROWS) return rows.map(withPrefix);
 
   const omission = (hidden: number) => `…（中间 ${hidden} 行未显示，以下是脚本结尾）`;
@@ -154,51 +210,60 @@ function detailRows(
   ].map(withPrefix);
 }
 
-/**
- * The card itself. Every value is connector-supplied (`actionLabel`, `origin`, `summary`,
- * `expiresAt`); this function only lays them out. `summary` arrives already clipped to
- * `HOST_APPROVAL_SUMMARY_LIMIT` by the flow, and is wrapped — never clipped — to the terminal width,
- * so approving the card never means approving text that was cut off the screen.
- */
+/** Render connector data only after stripping terminal controls and bidi overrides. */
 export function renderHostApprovalCardLines(
   card: HostApprovalCard,
-  opts: { now: number; columns?: number; keyboardOwned?: boolean },
+  opts: { now: number; columns?: number },
 ): string[] {
   const columns = Math.max(20, opts.columns ?? FALLBACK_COLUMNS);
-  // Two columns stay free on the right: the frame row is clipped at `columns - 1`, and a wrapped row
-  // must never reach that clip or the wrapping would reintroduce the truncation it exists to remove.
-  const contentWidth = Math.max(16, columns - CONTENT_INDENT - 2);
+  const contentWidth = Math.max(1, columns - CONTENT_INDENT - 2);
   const expired = card.expiresAt <= opts.now;
-  const expiryLabel = expired
-    ? "expired — this action was not run and will not be retried"
-    : `${formatApprovalRemaining(card.expiresAt, opts.now)} left`;
-  // 框线字形跟 resolveBoxCharset：EA=A=wide 的终端下制表符占 2 列，硬编码 `│`/`─`
-  // 会让整张卡逐行右移；ascii 模式（`+ - |`）任何字体都是 1 格。
-  const glyphs = boxGlyphs(resolveBoxCharset());
+  const isMcp = card.actionLabel === "callMcpTool";
+  // Classify the original action, not a normalized approximation of an unknown action.
+  const copy = describeBrowserApproval(card.actionLabel, safeApprovalSingleLineText(card.target));
+  const detail = safeApprovalMultilineText(card.summary);
+  const heading = isMcp ? "Call a read tool (callMcpTool)" : copy.action;
+  const impact = isMcp ? "A connected service will receive the shown arguments." : copy.impact;
+  const browserParts = !isMcp
+    ? [
+        safeApprovalSingleLineText(card.browser),
+        safeApprovalSingleLineText(card.tabId) ? `tab ${safeApprovalSingleLineText(card.tabId)}` : "",
+      ].filter(Boolean)
+    : [];
+  const actionBar = " ❯ Cancel (Enter)     Allow once (→ then Enter)";
+  const actionRows = displayWidth(actionBar) <= columns - 1
+    ? [actionBar]
+    : [
+        ...wrapProseLine("❯ Cancel (Enter)", columns - 2).map((line) => ` ${line}`),
+        ...wrapProseLine("Allow once (→ then Enter)", columns - 4).map((line) => `   ${line}`),
+      ];
   const lines = [
-    `${glyphs.tl}${glyphs.h} Browser action needs your approval ${glyphs.h.repeat(13)}`,
-    ...fieldRows("action", card.actionLabel, contentWidth, glyphs),
-    ...fieldRows("site", card.origin || "(origin unknown)", contentWidth, glyphs),
-    ...detailRows(card.summary, contentWidth, glyphs),
-    ...fieldRows("expires", expiryLabel, contentWidth, glyphs),
-    // The precondition comes first so it reads before the options: with text in the composer, y/n
-    // are ordinary letters and the card cannot be answered.
-    ...fieldRows(
-      "keys",
-      expired
-        ? "disabled (expired)"
-        : "empty the input line first, then: y = allow once · n / Esc = deny",
-      contentWidth,
-      glyphs,
-    ),
-    `${glyphs.bl}${glyphs.h.repeat(50)}`,
+    renderDialogRule(columns, false),
+    ...wrapProseLine(heading, columns - 2).map((line) => ` ${line}`),
+    "",
+    ...fieldRows("target", isMcp ? safeApprovalSingleLineText(card.target) || "Unknown tool" : copy.target, contentWidth),
+    ...fieldRows(isMcp ? "scope" : "site", safeApprovalSingleLineText(card.origin) || (isMcp ? "Unknown scope" : "Unknown site"), contentWidth),
+    ...(browserParts.length ? fieldRows("browser", browserParts.join(" · "), contentWidth) : []),
+    ...wrapProseLine(impact, contentWidth).map((row, index) => `${index === 0 ? ` ${"impact".padEnd(LABEL_COLUMN, " ")}` : " ".repeat(CONTENT_INDENT)}${row}`),
+    ...(detail ? ["", ...detailRows(detail, contentWidth)] : []),
+    "",
+    ...(expired ? [
+      ...fieldRows("expired", "This action was not run and will not be retried.", contentWidth),
+      ...fieldRows("keys", "disabled", contentWidth),
+    ] : [
+      ...fieldRows("expires", `${formatApprovalRemaining(card.expiresAt, opts.now)} left`, contentWidth),
+      ...wrapProseLine("With an empty input line:", columns - 2).map((line) => ` ${line}`),
+      ...actionRows,
+    ]),
+    renderDialogRule(columns, false),
   ];
   return lines.map((line) => clipCardLine(line, columns));
 }
 
-/** One card on screen at a time; `handleKey` routes y/n/Esc to it. */
+/** One card on screen at a time; Allow requires explicit selection then Enter. */
 type ActiveCard = {
   card: HostApprovalCard;
+  allowSelected: boolean;
   finish(decision: HostApprovalResult): void;
 };
 
@@ -209,7 +274,7 @@ export type InlineHostApprovalPrompt = {
    * Called before the composer sees the key. Returns true when the key belonged to the card and must
    * not reach the draft buffer / submit path.
    *
-   * `draftEmpty` keeps normal typing intact: with text in the composer, `y`/`n` are just letters.
+   * `draftEmpty` keeps selection and confirmation out of a non-empty composer.
    * `busy` keeps Esc meaning "stop the running turn" — a pending card must not shadow that.
    */
   handleKey(sequence: string, context: { draftEmpty: boolean; busy: boolean }): boolean;
@@ -270,13 +335,13 @@ export function createInlineHostApprovalPrompt(args: {
         return;
       }
       const abort = () => settle(context.signal?.reason === "expired" ? "expired" : "cancelled", "✖ approval ended — the action was not run");
-      active = { card, finish: result => {
+      active = { card, allowSelected: false, finish: result => {
         context.signal?.removeEventListener("abort", abort);
         resolve(result);
       } };
       context.signal?.addEventListener("abort", abort, { once: true });
       try {
-        const lines = renderHostApprovalCardLines(card, { now: now(), columns: columns(), keyboardOwned: !!args.dialogHost });
+        const lines = renderHostApprovalCardLines(card, { now: now(), columns: columns() });
         args.write(`${lines.join("\n")}\n`);
       } catch {
         // The user was never shown the action, so nothing may be approved: deny and let the queue
@@ -299,19 +364,41 @@ export function createInlineHostApprovalPrompt(args: {
     isActive: () => active !== null,
     handleKey(sequence, context) {
       if (!active || disposed) return false;
-      const keys = sequence;
-      const isAllow = ALLOW_KEYS.has(keys);
-      const isDeny = DENY_KEYS.has(keys);
-      const isEscape = ESCAPE_KEYS.has(keys);
-      if (!isAllow && !isDeny && !isEscape) return false;
-      // Never steal a letter the user is typing into the composer.
-      if (!context.draftEmpty) return false;
-      // Esc during a running turn keeps its "stop the turn" meaning.
-      if (isEscape && context.busy) return false;
+      const isConfirm = ENTER.has(sequence);
+      const selectAllow = SELECT_ALLOW.has(sequence);
+      const selectCancel = SELECT_CANCEL.has(sequence);
+      const isEscape = ESCAPE_KEYS.has(sequence);
+      if (!context.draftEmpty || !(isConfirm || selectAllow || selectCancel || isEscape)) {
+        // Any intervening input disarms Allow, even if the user later clears their draft.
+        if (active.allowSelected) {
+          active.allowSelected = false;
+          try { args.write("  Cancel selected (default).\n"); } catch { /* Allow is already disarmed. */ }
+        }
+        return false;
+      }
+      if (isEscape && context.busy) {
+        active.allowSelected = false;
+        return false;
+      }
       if (active.card.expiresAt <= now()) {
         settle("expired", "⌛ approval expired — the action was not run");
         return true;
       }
+      if (selectAllow || selectCancel) {
+        if (active.allowSelected !== selectAllow) {
+          active.allowSelected = false;
+          try {
+            args.write(selectAllow
+              ? "  Allow once selected · Enter confirms · ← selects Cancel\n"
+              : "  Cancel selected · Enter cancels\n");
+            active.allowSelected = selectAllow;
+          } catch {
+            settle("deny", "✖ selection could not be shown — the action was not run");
+          }
+        }
+        return true;
+      }
+      const isAllow = isConfirm && active.allowSelected;
       settle(
         isAllow ? "allow_once" : "deny",
         isAllow ? "✔ allowed once (this action only)" : "✖ denied",

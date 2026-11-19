@@ -391,6 +391,8 @@ export type RunAgentTurnOptions = {
   activityReporter?: (label: string | null) => void;
   /** 后台子 Agent 运行状态快照更新接收者（TUI 用来在 composer 上方展示 docked 子 Agent 运行面板）。 */
   onAgentRunStatus?: (snapshot: import("../tui/activityIndicator").AgentRunStatusSnapshot | null) => void;
+  /** 工具结果产生的轻量本机图片产物路径/元数据（不含 base64）。 */
+  onToolImageArtifacts?: (artifacts: readonly import("../../agent-runtime/localLoopContract").LocalAgentToolImageArtifact[]) => void;
   /**
    * 交互式宿主（如 TUI）标记：为 true 时，preflightBlocked 类错误由宿主上层统一
    * 通过系统提示呈现，底层 runner 不向 output 流直接写入 contextPreflightBlockedHint，
@@ -477,4 +479,6 @@ export type RunAgentTurnResult = {
    * 后台 run 结算据此区分配额、限流、鉴权等失败类别。
    */
   failureSubclass?: AgentRunFailureSubclass;
+  /** 本轮图片/截屏工具产出的轻量图片产物路径/元数据（不含 base64）。 */
+  toolImageArtifacts?: import("../../agent-runtime/localLoopContract").LocalAgentToolImageArtifact[];
 };

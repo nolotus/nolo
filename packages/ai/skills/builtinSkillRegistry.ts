@@ -26,6 +26,12 @@
 
 import type { SkillDocConfig } from "./skillDocProtocol";
 import {
+  UNSLOP_UI_SKILL_ID,
+  UNSLOP_UI_SKILL_SLUG,
+  buildUnslopUiSkillConfig,
+  buildUnslopUiSkillContent,
+} from "./unslopUiSkill";
+import {
   PLUGIN_CONFIGURATION_SKILL_SLUGS,
   buildPluginConfigurationSkillId,
   buildPluginConfigurationSkillPageKey,
@@ -219,6 +225,13 @@ const OBJECT_SKILL_KINDS = Object.keys(
 ) as BuiltinObjectSkillKind[];
 
 const SOURCES: BuiltinSkillSource[] = [
+  {
+    slugs: [UNSLOP_UI_SKILL_SLUG],
+    buildSkillId: () => UNSLOP_UI_SKILL_ID,
+    buildPageKey: (userId) => `page-${userId}-${UNSLOP_UI_SKILL_ID}`,
+    buildConfig: buildUnslopUiSkillConfig,
+    buildContent: buildUnslopUiSkillContent,
+  },
   {
     slugs: WORKFLOW_GUIDANCE_SKILL_SLUGS,
     buildSkillId: buildWorkflowGuidanceSkillId,

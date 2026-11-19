@@ -13,7 +13,42 @@ import {
 } from "./hostApprovalFlow";
 
 export type BrowserShellApprovalRequest = { approvalId: string; browser: "chrome" | "firefox" };
-export type BrowserShellApprovalReply = { status: "retry_once" | "blocked" | "rejected" };
+export type BrowserShellApprovalOutcome =
+  | "allowed"
+  | "denied"
+  | "cancelled"
+  | "expired"
+  | "unavailable";
+export type BrowserShellApprovalReply = {
+  status: "retry_once" | "blocked" | "rejected";
+  outcome?: BrowserShellApprovalOutcome;
+  code?: string;
+};
+
+const VALID_HOST_APPROVAL_RESULTS = new Set<HostApprovalResult>([
+  "allow_once",
+  "deny",
+  "cancelled",
+  "expired",
+  "unavailable",
+]);
+
+function mapBlockedOutcome(code: unknown, hasRenderer: boolean): { outcome: BrowserShellApprovalOutcome; code: string } {
+  switch (code) {
+    case "USER_APPROVAL_CANCELLED":
+      return { outcome: "cancelled", code: "USER_APPROVAL_CANCELLED" };
+    case "USER_APPROVAL_EXPIRED":
+      return { outcome: "expired", code: "USER_APPROVAL_EXPIRED" };
+    case "USER_APPROVAL_UNAVAILABLE":
+      return { outcome: "unavailable", code: "USER_APPROVAL_UNAVAILABLE" };
+    case "USER_APPROVAL_DENIED":
+      return { outcome: "denied", code: "USER_APPROVAL_DENIED" };
+    default:
+      return hasRenderer
+        ? { outcome: "denied", code: typeof code === "string" && code ? code : "USER_APPROVAL_DENIED" }
+        : { outcome: "unavailable", code: "USER_APPROVAL_UNAVAILABLE" };
+  }
+}
 
 /** Per-execShell transport, not an approval credential. Never log or give it to the model. */
 export type BrowserShellApprovalTransport = { endpoint: string; capability: string };
@@ -52,10 +87,19 @@ export async function createBrowserShellApprovalBridge(args: {
   const active = () => !lifetime.signal.aborted && Date.now() < deadline;
   const requireActive = () => { if (!active()) throw new Error("Browser approval bridge revoked"); };
   const server = createServer(async (request, response) => {
-    const reply = (status: BrowserShellApprovalReply["status"], result?: unknown) => {
+    const reply = (
+      status: BrowserShellApprovalReply["status"],
+      result?: unknown,
+      extra?: Pick<BrowserShellApprovalReply, "outcome" | "code">,
+    ) => {
       if (!response.destroyed) {
         response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-        response.end(JSON.stringify({ status, ...(result === undefined ? {} : { result }) }));
+        response.end(JSON.stringify({
+          status,
+          ...(extra?.outcome ? { outcome: extra.outcome } : {}),
+          ...(extra?.code ? { code: extra.code } : {}),
+          ...(result === undefined ? {} : { result }),
+        }));
       }
     };
     const disconnect = () => { if (!response.writableEnded) void close(); };
@@ -89,7 +133,7 @@ export async function createBrowserShellApprovalBridge(args: {
       const current = binding;
       let calls = 0;
       let retry = false;
-      await runConnectorToolWithHostApproval({
+      const flowResult = await runConnectorToolWithHostApproval({
         call: current.call,
         signal: lifetime.signal,
         execute: async () => {
@@ -126,14 +170,27 @@ export async function createBrowserShellApprovalBridge(args: {
             }).then(resolve, reject).finally(() => lifetime.signal.removeEventListener("abort", abort));
           });
           requireActive();
-          // hostApprovalFlow assumes a typed renderer; fail closed for malformed external UI results.
-          if (decision !== "allow_once" && decision !== "deny") throw new Error("Invalid host decision");
+          // Preserve all typed host approval terminal states so hostApprovalFlow can revoke
+          // negative outcomes cleanly and surface distinct audit/UI codes; still fail closed
+          // for malformed external values.
+          if (!VALID_HOST_APPROVAL_RESULTS.has(decision)) throw new Error("Invalid host decision");
           return decision;
         } } : {}),
       });
-      reply(active() && retry ? "retry_once" : "blocked");
+      if (active() && retry) {
+        reply("retry_once", undefined, { outcome: "allowed" });
+      } else {
+        const metaCode = (flowResult.metadata as { code?: unknown } | undefined)?.code;
+        reply("blocked", undefined, mapBlockedOutcome(metaCode, Boolean(args.awaitHostApproval)));
+      }
     } catch {
-      reply("blocked");
+      reply(
+        "blocked",
+        undefined,
+        lifetime.signal.aborted
+          ? { outcome: "cancelled", code: "USER_APPROVAL_CANCELLED" }
+          : { outcome: "unavailable", code: "USER_APPROVAL_UNAVAILABLE" },
+      );
     }
   });
   server.requestTimeout = timeoutMs;

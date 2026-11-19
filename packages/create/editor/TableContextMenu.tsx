@@ -1,6 +1,7 @@
 // create/editor/TableContextMenu.tsx (使用 @floating-ui/react 最终修复版)
 
 import React, { useEffect, useRef, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
 import { useSlate, ReactEditor } from "slate-react";
 import { Editor } from "slate";
 import { createPortal } from "react-dom";
@@ -25,6 +26,12 @@ import {
 import { Button } from "./components";
 import { isCustomElement } from "./types";
 import {
+  placementEnterTravel,
+  placementToTransformOrigin,
+} from "render/web/ui/triggerOrigin";
+import { triggerMotionStyles } from "render/web/ui/triggerMotion.styles";
+import { editorFloatingStyles } from "./floatingSurface.styles";
+import {
   LuArrowUpFromLine,
   LuArrowDownFromLine,
   LuArrowLeftFromLine,
@@ -38,7 +45,7 @@ export const TableContextMenu: React.FC = () => {
   const editor = useSlate();
 
   // 2. 设置 useFloating hook
-  const { x, y, refs, strategy, context } = useFloating({
+  const { x, y, refs, strategy, placement } = useFloating({
     // 当元素挂载时，自动更新位置 (处理滚动、缩放等所有情况)
     whileElementsMounted: autoUpdate,
     // 初始首选位置
@@ -76,37 +83,33 @@ export const TableContextMenu: React.FC = () => {
     }
   }, [editor, editor.selection, refs]);
 
-  const buttonGroupStyle: React.CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
-    gap: "var(--space-1)",
-  };
+  const travel = placementEnterTravel(placement, "right");
 
   // 4. 将浮动UI的 props 应用到菜单元素上
   const menu = show ? (
     <div
       ref={refs.setFloating} // 设置“浮动”元素
+      className={
+        stylex.props(
+          editorFloatingStyles.tableContextMenu,
+          triggerMotionStyles.enter,
+        ).className
+      }
       onMouseDown={(e) => e.preventDefault()}
-      style={{
-        // 由 useFloating hook 提供的位置和策略
-        position: strategy,
-        top: y ?? 0,
-        left: x ?? 0,
-
-        // 其他样式
-        zIndex: 20,
-        backgroundColor: "var(--background)",
-        borderRadius: "var(--space-2)",
-        boxShadow: "0 4px 12px var(--shadowHeavy)",
-        padding: "var(--space-2)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-2)",
-        transition: "opacity 0.15s ease-in-out",
-      }}
+      style={
+        {
+          // 由 useFloating hook 提供的位置和策略
+          position: strategy,
+          top: y ?? 0,
+          left: x ?? 0,
+          transformOrigin: placementToTransformOrigin(placement, "right"),
+          "--nolo-enter-x": travel.x,
+          "--nolo-enter-y": travel.y,
+        } as React.CSSProperties & Record<`--${string}`, string>
+      }
     >
       {/* 菜单内部按钮保持不变 */}
-      <div style={buttonGroupStyle}>
+      <div {...stylex.props(editorFloatingStyles.tableButtonGroup)}>
         <Button onClick={() => insertRow(editor as ReactEditor, "above")}>
           <LuArrowUpFromLine
             size={16}
@@ -124,7 +127,7 @@ export const TableContextMenu: React.FC = () => {
           插入下方行
         </Button>
       </div>
-      <div style={buttonGroupStyle}>
+      <div {...stylex.props(editorFloatingStyles.tableButtonGroup)}>
         <Button onClick={() => insertColumn(editor as ReactEditor, "left")}>
           <LuArrowLeftFromLine
             size={16}
@@ -142,13 +145,8 @@ export const TableContextMenu: React.FC = () => {
           插入右侧列
         </Button>
       </div>
-      <div
-        style={{
-          borderTop: "1px solid var(--border)",
-          margin: "var(--space-1) 0",
-        }}
-      />
-      <div style={buttonGroupStyle}>
+      <div {...stylex.props(editorFloatingStyles.tableDivider)} />
+      <div {...stylex.props(editorFloatingStyles.tableButtonGroup)}>
         <Button onClick={() => deleteRow(editor as ReactEditor)}>
           <LuRows3
             size={16}

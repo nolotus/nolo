@@ -1,16 +1,17 @@
+import { isExternalSessionKind } from "./githubAuthContract";
 import { Base64 } from "js-base64";
 import { normalizeServerOrigin } from "./serverOrigin";
 
 /** Routing restriction only, never token verification or an authorization grant. */
 export function isGoogleAuthoritySession(token: unknown): boolean {
   if (typeof token !== "string") return false;
-  try { return JSON.parse(Base64.decode(token.split(".")[0])).authKind === "google-session-v1"; }
+  try { return isExternalSessionKind(JSON.parse(Base64.decode(token.split(".")[0])).authKind); }
   catch { return false; }
 }
 
 export function googleSessionServer(token: unknown, configuredServer?: string): string | undefined {
   if (!isGoogleAuthoritySession(token)) return undefined;
-  // Web Google login is same-origin. Persisted server preferences and replicas
+  // Web OAuth login is same-origin. Persisted server preferences and replicas
   // from password accounts must not choose where this bearer is sent.
   const origin = typeof window !== "undefined" ? window.location?.origin : undefined;
   if (typeof origin !== "string" || !/^https?:\/\//.test(origin)) return "";

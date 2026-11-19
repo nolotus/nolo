@@ -4,6 +4,41 @@ const shellChildEnvironment = new AsyncLocalStorage<Record<string, string>>();
 export function withShellChildEnvironment<T>(env: Record<string, string>, run: () => T): T {
   return shellChildEnvironment.run(env, run);
 }
+const STRIPPED_WORKSPACE_CHILD_ENV_KEYS = [
+  "NOLO_AGENT_RUN_ID",
+  "NOLO_AGENT_RUN_PROTOCOL",
+  "NOLO_AGENT_RUN_CONTENT_IDENTITY",
+  "NOLO_WRITER_LAUNCH_ATTEMPT",
+] as const;
+
+const STRIPPED_WORKSPACE_CHILD_ENV_UPPER = new Set<string>(STRIPPED_WORKSPACE_CHILD_ENV_KEYS);
+
+/** A tool process may inherit subtask policy, but never ownership of the host run. */
+export function workspaceChildEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const child = { ...env };
+  if (platform === "win32") {
+    // Windows environment variable names are case-insensitive; spreading process.env
+    // into a plain object loses its case-insensitive proxy, so filter by uppercase key.
+    // Only fold ASCII A–Z: `String.prototype.toUpperCase` applies Unicode case
+    // mapping, so a non-ASCII key (e.g. Turkish dotless i) could fold into an
+    // unrelated name and be deleted by mistake. Env keys are ASCII in practice;
+    // folding only ASCII keeps Windows' case-insensitivity without that risk.
+    const asciiUpper = (value: string) => value.replace(/[a-z]/g, (ch) => ch.toUpperCase());
+    for (const key of Object.keys(child)) {
+      if (STRIPPED_WORKSPACE_CHILD_ENV_UPPER.has(asciiUpper(key))) {
+        delete child[key];
+      }
+    }
+  } else {
+    for (const key of STRIPPED_WORKSPACE_CHILD_ENV_KEYS) {
+      delete child[key];
+    }
+  }
+  return child;
+}
 // packages/agent-runtime/workspaceShell.ts
 //
 // Neutral low-level primitives for workspace shell execution, command building,
@@ -1082,7 +1117,7 @@ export async function runWorkspaceCommand(args: {
   const spawnedAt = Date.now();
   const proc = spawnChildProcess(command[0] ?? "", command.slice(1), {
     cwd: resolve(args.workspaceRoot),
-    env: { ...process.env, ...shellChildEnvironment.getStore() },
+    env: workspaceChildEnv({ ...process.env, ...shellChildEnvironment.getStore() }),
     stdio: [
       args.stdin === undefined ? "ignore" : "pipe",
       "pipe",

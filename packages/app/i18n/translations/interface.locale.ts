@@ -3,6 +3,11 @@ import { Language } from "../types";
 export default {
   [Language.EN]: {
     translation: {
+      githubAuth: {
+        login: "Sign in with GitHub",
+        failed: "GitHub sign-in failed",
+        completing: "Finishing GitHub sign-in…",
+      },
       googleAuth: {
         "login": "Continue with Google",
         "bind": "Connect Google",
@@ -2457,6 +2462,11 @@ export default {
   },
   [Language.ZH_CN]: {
     translation: {
+      githubAuth: {
+        login: "使用 GitHub 登录",
+        failed: "GitHub 登录失败",
+        completing: "正在完成 GitHub 登录…",
+      },
       googleAuth: {
         "login": "使用 Google 登录",
         "bind": "绑定 Google",
@@ -4870,6 +4880,11 @@ export default {
   },
   [Language.ZH_HANT]: {
     translation: {
+      githubAuth: {
+        login: "使用 GitHub 登入",
+        failed: "GitHub 登入失敗",
+        completing: "正在完成 GitHub 登入…",
+      },
       googleAuth: {
         "login": "使用 Google 登入",
         "bind": "綁定 Google",
@@ -7284,6 +7299,11 @@ quickChat: {
   },
   [Language.JA]: {
     translation: {
+      githubAuth: {
+        login: "GitHub でログイン",
+        failed: "GitHub ログインに失敗しました",
+        completing: "GitHub ログインを完了しています…",
+      },
       googleAuth: {
         "login": "Google でログイン",
         "bind": "Google と連携",
@@ -9722,6 +9742,11 @@ quickChat: {
   },
   de: {
     translation: {
+      githubAuth: {
+        login: "Mit GitHub anmelden",
+        failed: "GitHub-Anmeldung fehlgeschlagen",
+        completing: "GitHub-Anmeldung wird abgeschlossen…",
+      },
       googleAuth: {
         "login": "Mit Google fortfahren",
         "bind": "Google verknüpfen",
@@ -12124,6 +12149,11 @@ quickChat: {
   },
   es: {
     translation: {
+      githubAuth: {
+        login: "Iniciar sesión con GitHub",
+        failed: "No se pudo iniciar sesión con GitHub",
+        completing: "Finalizando el inicio de sesión con GitHub…",
+      },
       googleAuth: {
         "login": "Continuar con Google",
         "bind": "Vincular Google",

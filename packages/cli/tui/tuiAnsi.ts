@@ -43,6 +43,19 @@ export function stripAnsi(text: string): string {
     .replace(ALL_ANSI_ESCAPE_REGEX, "");
 }
 
+// eslint-disable-next-line no-control-regex
+const OSC8_KEEP_SPLIT_REGEX = /(\x1b\]8;[^;\x07\x1b]*;[^\x07\x1b]*(?:\x07|\x1b\\))/g;
+// eslint-disable-next-line no-control-regex
+const OSC8_WRAPPER_TOKEN_REGEX = /^\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\)$/;
+
+/** Strip CSI/SGR/title escapes while keeping OSC 8 hyperlink wrappers intact (used for NO_COLOR + TTY hyperlinks). */
+export function stripAnsiKeepingOsc8(text: string): string {
+  return text
+    .split(OSC8_KEEP_SPLIT_REGEX)
+    .map((part, index) => (index % 2 === 1 ? part : stripAnsi(part)))
+    .join("");
+}
+
 /** SGR (color/style) sequences only: ESC [ params m. */
 // eslint-disable-next-line no-control-regex
 const SGR_SEQUENCE_REGEX = /^\x1b\[[0-9;]*m/;
@@ -505,8 +518,8 @@ export function tokenizeAnsiLine(line: string): WrapToken[] {
   let index = 0;
   while (index < line.length) {
     if (line[index] === "\x1b") {
-      // OSC 8 hyperlinks (ESC ]8;;...ST) are zero-width style tokens.
-      const osc = line.slice(index).match(/^\x1b\]8;;[^\x07\x1b]*(?:\x07|\x1b\\)/);
+      // OSC 8 hyperlinks (ESC ]8;params;URI ST) are zero-width style tokens.
+      const osc = line.slice(index).match(/^\x1b\]8;[^;\x07\x1b]*;[^\x07\x1b]*(?:\x07|\x1b\\)/);
       if (osc) {
         tokens.push({ kind: "sgr", value: osc[0], width: 0, charIndex: index });
         index += osc[0].length;
@@ -701,12 +714,19 @@ export function wrapTranscriptLineWithLayout(
   const rows: WrappedTranscriptRow[] = [];
 
   let activeStyles: string[] = [];
-  const applyStyleToken = (value: string) => {
+  let activeOsc8: string | null = null;
+  const applyStyleToken = (value: string): boolean => {
+    const oscMatch = OSC8_WRAPPER_TOKEN_REGEX.exec(value);
+    if (oscMatch) {
+      activeOsc8 = (oscMatch[1] ?? "") === "" ? null : value;
+      return false;
+    }
     if (SGR_RESET_REGEX.test(value)) {
       activeStyles = [];
     } else {
       activeStyles.push(value);
     }
+    return true;
   };
 
   // 行首守卫用的「最后一个非样式 token 下标」：提前算一次（O(T)），避免每行
@@ -749,6 +769,7 @@ export function wrapTranscriptLineWithLayout(
     // instead of emitting a visually blank row.
     if (start > lastContentTokenIndex && rows.length > 0) break;
     const openingStyles = [...activeStyles];
+    const openingOsc8 = activeOsc8;
     const isContinuation = rows.length > 0;
     const currentPrefixWidth = isContinuation ? visibleWidth(hangingIndent) : prefixWidth;
     const indentWidth = isContinuation ? visibleWidth(hangingIndent) : 0;
@@ -835,14 +856,17 @@ export function wrapTranscriptLineWithLayout(
       const token = tokens[i]!;
       segment += token.value;
       if (token.kind === "sgr") {
-        sawStyle = true;
-        applyStyleToken(token.value);
+        if (applyStyleToken(token.value)) {
+          sawStyle = true;
+        }
       }
     }
-    const prefix = openingStyles.join("");
+    const prefix = `${openingOsc8 ?? ""}${openingStyles.join("")}`;
     const needsReset =
       (sawStyle || activeStyles.length > 0) && !segment.endsWith("\x1b[0m");
-    const lineContent = `${prefix}${segment}${needsReset ? "\x1b[0m" : ""}`;
+    const needsOscClose =
+      activeOsc8 !== null && !/\x1b\]8;[^;\x07\x1b]*;(?:\x07|\x1b\\)$/.test(segment);
+    const lineContent = `${prefix}${segment}${needsReset ? "\x1b[0m" : ""}${needsOscClose ? "\x1b]8;;\x1b\\" : ""}`;
     const rowRendered = isContinuation && hangingIndent.length > 0 ? `${hangingIndent}${lineContent}` : lineContent;
 
     let segSourceStart = lineSourceStart;

@@ -47,13 +47,23 @@ export function safeAskText(value: unknown, max?: number): string {
 }
 
 
-/** Preserve code line boundaries while retaining terminal-control and secret protections. */
+const BIDI_CONTROL_REGEX = /\p{Bidi_Control}/gu;
+
+/** Single-line external approval metadata: strips ANSI, line breaks, C0/C1, bidi controls and secrets. */
+export function safeApprovalSingleLineText(value: unknown, max?: number): string {
+  return safeAskText(value, max).replace(BIDI_CONTROL_REGEX, "");
+}
+
+/** Preserve code line boundaries while retaining terminal-control, bidi and secret protections. */
 export function safeApprovalMultilineText(value: unknown): string {
   // CR, LS and PS are ECMAScript line terminators too; never collapse them into a comment.
   const lines = stripAnsi(String(value ?? "")).replace(/\r\n?|\u2028|\u2029/g, "\n").split("\n");
   return lines.map(line => {
-    // Tabs are non-executing whitespace on screen; remove remaining C0/C1 controls after ANSI.
-    const cleaned = line.replace(/\t/g, "    ").replace(C0_C1_CONTROL_REGEX, "");
+    // Tabs are non-executing whitespace on screen; remove remaining C0/C1 and bidi controls after ANSI.
+    const cleaned = line
+      .replace(/\t/g, "    ")
+      .replace(C0_C1_CONTROL_REGEX, "")
+      .replace(BIDI_CONTROL_REGEX, "");
     const redacted = redactSecrets(cleaned);
     return redacted ? withholdIfSecretLike(redacted) || ASK_SECRET_PLACEHOLDER : "";
   }).join("\n");

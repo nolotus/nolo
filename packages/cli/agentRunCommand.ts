@@ -296,22 +296,32 @@ async function resolveAgentBoundMachineIdFromRecord(args: {
 }
 
 export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDeps) {
+  if (args.includes("--help") || args.includes("-h")) {
+    writeUsage(deps.output ?? process.stdout, deps.commandPath);
+    return 0;
+  }
   const env = deps.env ?? process.env;
   const runId = env.NOLO_AGENT_RUN_ID;
   const controlDeps = { env, homedir: deps.homedir, fs: deps.fs, now: deps.now };
   const failStartup = async (error?: unknown) => {
-    if (!runId || (readRunRecord(runId, controlDeps)?.status !== "running")) return;
+    if (!runId) return;
+    const record = readRunRecord(runId, controlDeps);
+    if (record?.status !== "running" || (record.pid != null && record.pid !== process.pid)) return;
     const result = await settleRunTerminalAuthoritatively(runId, {
       status: "failed", exitCode: 1,
       failureReason: error instanceof RuntimeProtocolMismatchError ? "runtime_protocol_mismatch"
         : error instanceof RuntimeVersionMismatchError ? "runtime_version_mismatch" : "startup_failed",
       note: error ? toErrorMessage(error) : "Child initialization returned without terminal result",
-    }, controlDeps, (id, update, d) => transitionRunToTerminal(id, update, d));
+    }, controlDeps, (id, update, d, opts) => transitionRunToTerminal(id, update, d, {
+      ...(opts?.expectedPid != null ? { expectedPid: opts.expectedPid } : {}),
+    }), { expectedPid: process.pid });
     if (result.kind === "contended") throw new Error(`Startup settlement lock busy: ${runId}`);
   };
   try {
     if (runId) {
-      if (!readRunRecord(runId, controlDeps)) throw new Error("[local-writer-resource] missing child binding");
+      const record = readRunRecord(runId, controlDeps);
+      if (record?.pid != null && record.pid !== process.pid) throw new Error(`Run ${runId} belongs to PID ${record.pid}, not ${process.pid}`);
+      if (!record) throw new Error("[local-writer-resource] missing child binding");
       await recordRunStartup(runId, "initializing", controlDeps);
       validateAgentRunProtocol(env.NOLO_AGENT_RUN_PROTOCOL);
       // Content identity is diagnostic only; the wire protocol above governs compatibility.
@@ -336,10 +346,6 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
     write: (chunk: string) => process.stdout.write(chunk),
     writeErr: (chunk: string) => process.stderr.write(chunk),
   };
-  if (args.includes("--help") || args.includes("-h")) {
-    writeUsage(output, deps.commandPath);
-    return 0;
-  }
   let parsed: ParsedAgentRunArgs | null;
   try {
     parsed = parseAgentRunArgs(args, { commandPath: deps.commandPath });
@@ -524,6 +530,7 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
       { env, homedir: deps.homedir, fs: deps.fs, now: deps.now, sleep: deps.sleep },
       // Test seam: stubbed transitions keep their single-attempt semantics.
       deps.transitionRunToTerminal,
+      { expectedPid: process.pid },
     );
   };
   if (armStallWatchdog) {
@@ -904,7 +911,7 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
   let memoryUseGuidanceLayer: ReturnType<typeof buildMemoryUseGuidanceLayer> = null;
   if (!isSubtask) {
   // AGENTS.md project instructions（共享实现：agent-runtime/agentsMd，
-  // 含 8KB 截断与 CLAUDE.md 回退，三 host 同源）
+  // 预算内全文、超预算降级，保留 CLAUDE.md 回退，三 host 同源）
   const agentsMdLayer = readAgentsMdLayerFromDisk(cliCwd);
   if (agentsMdLayer) scopedLayers.push(agentsMdLayer);
   // Skill content blocks
@@ -1305,6 +1312,7 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
       dodResults = (deps.runDoDCommands ?? runDoDCommands)(
         childRecordForDoD?.dodCommands,
         childRecordForDoD?.cwd,
+        { env },
       );
     } catch (dodError) {
       console.warn(`[nolo] DoD verification failed to run for ${childRunId}:`, dodError);
@@ -1387,7 +1395,7 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
         fs: deps.fs,
         now: deps.now,
         sleep: deps.sleep,
-      }, deps.transitionRunToTerminal);
+      }, deps.transitionRunToTerminal, { expectedPid: process.pid });
     } catch (error) {
       // Settlement may have partially persisted. Do not retry or overwrite an
       // authoritative cancellation/terminal record; fail this command instead.

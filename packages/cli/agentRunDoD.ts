@@ -13,6 +13,7 @@
 // dodResults 是它多一个字段，不是又一个子系统。
 
 import { spawnSync as nodeSpawnSync } from "node:child_process";
+import { workspaceChildEnv } from "agent-runtime/workspaceShell";
 
 export type DoDCommandResult = {
   command: string;
@@ -24,6 +25,7 @@ export type DoDCommandResult = {
 export type DoDDeps = {
   spawnSync?: typeof nodeSpawnSync;
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
 };
 
 /** 单条命令的超时上限。超时算失败，不算「没跑」。 */
@@ -50,6 +52,7 @@ export function executeDoDCommand(
       shell: true,
       windowsHide: true,
       cwd: cwd || process.cwd(),
+      env: workspaceChildEnv(deps.env),
       timeout: DOD_COMMAND_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024,
       encoding: "utf8",

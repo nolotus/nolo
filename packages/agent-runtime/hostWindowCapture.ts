@@ -122,6 +122,16 @@ export function createHostWindowCapture(options: {
         return {
           ...image,
           content: `${formatImageSummary({ kind: "screenshot", ...image.imageSummary })}\n来源：宿主 portal 全屏/交互选择结果；portal 未提供应用/窗口身份，无法确认窗口名。`,
+          metadata: {
+            path: image.imageSummary.path,
+            imageArtifacts: [{
+              path: image.imageSummary.path,
+              kind: "screenshot" as const,
+              width: image.imageSummary.width,
+              height: image.imageSummary.height,
+              bytes: image.imageSummary.bytes,
+            }],
+          },
         };
       } finally {
         active--;

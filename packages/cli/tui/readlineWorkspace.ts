@@ -258,7 +258,14 @@ import { createRawKeyReader, runSelectDialog } from "./selectDialog";
 import { sanitizeImageLabel } from "./tuiImageLayout";
 import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
 import { isShellPassthroughInput } from "./sessionDispatch";
-import { viewLocalImage } from "./tuiImageActions";
+import { copyImagePath } from "./tuiImageActions";
+import {
+  buildTurnImageArtifacts,
+  collectConversationImageArtifacts,
+  formatArtifactChoiceLabel,
+  formatImageArtifactLine,
+  resolveArtifactHostLabel,
+} from "./tuiImageExtractor";
 import { getDiagnostics } from "../diagnostics";
 // S4 迁移：渲染三件套（renderHistoryToOutput / paintSyncedFrame /
 // scheduleRender）与共享节流 flushPendingRender 已迁至 ./tuiRender。
@@ -993,6 +1000,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   const preparedImages: AttachedImage[] = [];
   let imageGraphicsSupported = false;
   let imagePreviewRequested = false;
+  let nextArtifactImageIndex = 1;
+  let activeToolExecutionDeviceName: string | undefined;
   let imageRenderer: ReturnType<typeof createTuiImageRenderer> | undefined;
   const renderNamespace = randomInt(1, 0x10000);
   // 对话框把滚轮/翻页路由回转录区时的统一入口。平滑滚动推进器依赖渲染集群
@@ -1777,6 +1786,25 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       turn.images = preview.images;
       for (const fallback of preview.textFallbacks) turn.content += `\n[附件] ${fallback}`;
     },
+    onAssistantTurnFinalized: (turn, toolArtifacts) => {
+      const hostLabel = resolveArtifactHostLabel({
+        env: effectiveEnv,
+        toolExecutionDeviceName: activeToolExecutionDeviceName,
+      });
+      const artifacts = buildTurnImageArtifacts({
+        toolArtifacts,
+        cwd: state.cwd,
+        hostLabel,
+        startIndex: nextArtifactImageIndex,
+      });
+      if (artifacts.length === 0) return;
+      nextArtifactImageIndex += artifacts.length;
+      turn.imageArtifacts = turn.imageArtifacts?.length
+        ? [...turn.imageArtifacts, ...artifacts]
+        : artifacts;
+      const lines = artifacts.map((artifact) => formatImageArtifactLine(artifact)).join("\n");
+      turn.content = turn.content ? `${turn.content.replace(/\n+$/, "")}\n${lines}` : lines;
+    },
 
     get sessionEnded() { return sessionEnded; },
     // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例透传给 turn
@@ -1788,9 +1816,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // unknown 不猜——直接打印 unknown，不静默标 ready。
     onToolExecutionLocation: (location) => {
       if (location.status === "unknown") {
+        activeToolExecutionDeviceName = undefined;
         output.write(`${t("toolLocation.unknown")}\n`);
         return;
       }
+      activeToolExecutionDeviceName = location.deviceName || location.deviceId;
       output.write(
         `${t(
           "toolLocation.line",
@@ -1896,9 +1926,52 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     installAltScreenRestoreHandlers,
   };
 
+  const copyImagePathWithFeedback = async (sourcePath: string): Promise<void> => {
+    const result = await copyImagePath(sourcePath, writeClipboard);
+    emitCommandOutput(
+      themeText(
+        `${result.ok ? "·" : "!"} ${result.message}`,
+        result.ok ? "muted" : "warning",
+        resolveCliColorEnabled(),
+      ),
+    );
+  };
+
   const manageDraftImages = async (): Promise<void> => {
-    while (state.attachedImages.length > 0) {
+    while (true) {
       const images = state.attachedImages;
+      const artifacts = collectConversationImageArtifacts(history.turns);
+      if (images.length === 0 && artifacts.length === 0) return;
+      const title =
+        images.length > 0 && artifacts.length === 0 ? "图片附件（尚未发送）" : "图片管理";
+      const titleLines: string[] = [title];
+      if (images.length > 0) {
+        if (artifacts.length > 0) titleLines.push("图片附件（尚未发送）：");
+        titleLines.push(...images.map((image, index) =>
+          `${index + 1} · ${sanitizeImageLabel(image.filename)} (${image.sizeBytes} B)`));
+      }
+      if (artifacts.length > 0) {
+        titleLines.push("对话图片产物：", ...artifacts.map((item) => formatArtifactChoiceLabel(item)));
+      }
+      type ImageMenuItem =
+        | { label: string; action: "done" }
+        | { label: string; action: "copy-draft"; index: number }
+        | { label: string; action: "remove-draft"; index: number }
+        | { label: string; action: "copy-artifact"; sourcePath: string };
+      const items: ImageMenuItem[] = [
+        { label: "返回编辑", action: "done" },
+        ...images.flatMap((image, index): ImageMenuItem[] => [
+          ...(image.sourcePath
+            ? [{ label: `复制路径 ${index + 1} · ${sanitizeImageLabel(image.filename)}`, action: "copy-draft" as const, index }]
+            : []),
+          { label: `移除 ${index + 1} · ${sanitizeImageLabel(image.filename)}`, action: "remove-draft", index },
+        ]),
+        ...artifacts.map((item): ImageMenuItem => ({
+          label: `复制路径 ${formatArtifactChoiceLabel(item)}`,
+          action: "copy-artifact",
+          sourcePath: item.path,
+        })),
+      ];
       const selected = await dialogHost.run(anchor => {
         const rawKey = createRawKeyReader(input as NodeJS.ReadStream);
         // A burst of Enter is one confirmation, not an unknown compound key.
@@ -1908,35 +1981,27 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         }, { dispose: () => rawKey.dispose?.() });
         return runSelectDialog({
           ...anchor, input: input as NodeJS.ReadStream, output, readKey,
-          title: "图片附件（尚未发送）",
-          titleLines: ["图片附件（尚未发送）", ...images.map((image, index) =>
-            `${index + 1} · ${sanitizeImageLabel(image.filename)} (${image.sizeBytes} B)`)],
-          footerLines: ["移除仅取消附件，不删除本机文件。Esc 返回编辑。"],
-          items: [
-            { label: "返回编辑", action: "done", index: -1 },
-            ...images.flatMap((image, index) => [
-              { label: `查看 ${index + 1} · ${sanitizeImageLabel(image.filename)}`, action: "view", index },
-              { label: `移除 ${index + 1} · ${sanitizeImageLabel(image.filename)}`, action: "remove", index },
-            ]),
-          ],
+          title,
+          titleLines,
+          footerLines: ["移除仅取消待发送附件，不删除本机文件。Esc 返回编辑。"],
+          items,
         });
       });
       if (selected.kind !== "selected" || selected.item.action === "done") return;
-      const image = images[selected.item.index];
+      if (selected.item.action === "copy-artifact") {
+        await copyImagePathWithFeedback(selected.item.sourcePath);
+        return;
+      }
+      // 属性收窄不会带进 filter 回调（回调里 selected.item 会回落到整个联合），
+      // 所以先把索引提到常量，再在闭包里用它。
+      const selectedIndex = selected.item.index;
+      const image = images[selectedIndex];
       if (!image) continue;
-      if (selected.item.action === "remove") {
-        state = { ...state, attachedImages: images.filter((_, index) => index !== selected.item.index) };
+      if (selected.item.action === "remove-draft") {
+        state = { ...state, attachedImages: images.filter((_, index) => index !== selectedIndex) };
         fixedInput.repaint(buffer, cursorPos);
       } else {
-        const result = await viewLocalImage(image.sourcePath, effectiveEnv);
-        const isOk = result.startsWith("已交给");
-        emitCommandOutput(
-          themeText(
-            `${isOk ? "·" : "!"} ${result}`,
-            isOk ? "muted" : "warning",
-            resolveCliColorEnabled(),
-          ),
-        );
+        await copyImagePathWithFeedback(image.sourcePath);
       }
     }
   };
@@ -1998,8 +2063,24 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       renderHistoryToOutput();
       return false;
     }
+    const directImageMatch = /^\/images\s+(?:copy\s+)?(\d+)$/.exec(line.trim());
+    if (directImageMatch) {
+      const targetIndex = Number(directImageMatch[1]);
+      const target = collectConversationImageArtifacts(history.turns).find(
+        (item) => item.artifactIndex === targetIndex,
+      );
+      if (!target) {
+        emitCommandOutput(themeText(`· 未找到图片产物 #${targetIndex}。`, "muted", resolveCliColorEnabled()));
+      } else {
+        await copyImagePathWithFeedback(target.path);
+      }
+      return false;
+    }
     if (line.trim() === "/images") {
-      if (state.attachedImages.length === 0) emitCommandOutput(themeText("· 无待发送图片。/images preview 按需切换消息图片预览（需终端能力确认）。", "muted", resolveCliColorEnabled()));
+      const artifacts = collectConversationImageArtifacts(history.turns);
+      if (state.attachedImages.length === 0 && artifacts.length === 0) {
+        emitCommandOutput(themeText("· 无待发送图片。/images preview 按需切换消息图片预览（需终端能力确认）。", "muted", resolveCliColorEnabled()));
+      }
       await manageDraftImages();
       return false;
     }
@@ -2039,6 +2120,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const slashCmd = line.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
     if (slashCmd === "/new" || slashCmd === "/clear") {
       resetInputHistoryNavigation(inputHistory);
+      nextArtifactImageIndex = 1;
     } else if (
       (slashCmd === "/history" || slashCmd === "/resume") &&
       history.turns.length > 0 &&
@@ -2497,10 +2579,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // `ctx.options.env ?? process.env`），别写进 effectiveEnv——那是 run 记录
     // 读取用的快照，构造得更早，也不流向工具表。
     (options.env ?? process.env)[RUN_WAKE_CHANNEL_ENV] = "1";
-    // 内部事件（后台 run / 进程任务终态唤醒）在 transcript 上的显示：紧凑单行 +
-    // 流式安全插入。run 唤醒的 busy 分支与进程任务续跑共用这一份实现，避免两处
-    // 漂移（appendStreamSafeNotice 的理由见 turnInjectionInbox.ts）。
-    const printInternalEventLine = (
+    // 任何「turn 进行中也要留在 transcript 上」的文本都走这里：后台 run / 进程
+    // 任务终态唤醒、busy 期间的 /tools、以及 busy 期间的 /links 面板。直写
+    // output 的行只是瞬时 notice（下一次流式 repaint 就覆盖掉），既不进历史也
+    // 没有 Ctrl+左键/内置选区复制，所以需要用户读到或点开的内容必须走这条流式
+    // 安全插入路径（appendStreamSafeNotice 的理由见 turnInjectionInbox.ts）。
+    const printStreamSafeNotice = (
       displayText: string,
       lineOptions: { dim?: boolean } = {},
     ): void => {
@@ -2539,7 +2623,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           output,
           interactive: true,
           printLine: (line) => {
-            printInternalEventLine(line, { dim: false });
+            printStreamSafeNotice(line, { dim: false });
             if (fixedInput.active && !fixedInput.isPaused()) {
               fixedInput.repaint(buffer, cursorPos);
             }
@@ -2594,7 +2678,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
         return ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction).enqueue(event);
       },
-      printLine: printInternalEventLine,
+      printLine: printStreamSafeNotice,
       repaint: () => fixedInput.repaint(buffer, cursorPos),
       runIdle: runIdleTextTurn,
       drainQueue: async () => {
@@ -2899,6 +2983,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // Identity only: `effectiveEnv` is the startup snapshot, `options.env`
         // is where a `/login` in this session writes its token.
         authEnv: resolveTuiIdentityEnv(effectiveEnv, options.env ?? process.env),
+        // busy 期间的本地 slash 输出多数直写 output（streaming repaint 拥有
+        // transcript），那些行只是瞬时 notice：既不进历史，也没有 Ctrl+左键与
+        // 内置选区复制。`/links` 是例外——它的面板经 printStreamSafeNotice 进
+        // transcript，所以可以按交互模式如实承诺快捷键；非交互（没有 transcript）
+        // 仍只是一份 stdout 文本，按 pipe 措辞。
+        linksTarget:
+          busySlashCommand === "/links" && isInteractiveInput(input) ? "history" : "pipe",
       });
       if (res.action?.type === "paste-clipboard") {
         // turn 运行中也能 /paste：草稿本来就在 busy 期间保持可编辑，写入草稿安全
@@ -3014,7 +3105,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           msg = msg ? `${msg}\n${hint}` : hint;
         }
         if (msg) {
-          output.write(`${msg}\n`);
+          if (busySlashCommand === "/links") {
+            // 面板进 transcript：直写 output 的行会被下一个流式 repaint 覆盖，
+            // 用户读不完也点不了（这也是 linksTarget 敢用 "history" 措辞的前提）。
+            printStreamSafeNotice(msg.trimEnd(), { dim: false });
+            // printStreamSafeNotice 的 renderHistoryToOutput 会把硬件光标停在
+            // transcript 底部（列 1）；与 /tools、/theme 一样补一次 composer
+            // 重绘，否则光标要等下一个流片段或按键才回到输入区。
+            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+          } else {
+            output.write(`${msg}\n`);
+          }
         }
       }
       if (busySlashCommand === "/theme") {
@@ -3199,12 +3300,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               hitContentCol,
               visibleHeight,
               (url) =>
-                openExternalUrl(url, {
-                  onError: (message) =>
-                    reportTuiDiagnostic("tui-link", "warn", "ctrl-click open failed", {
-                      message,
+                options.urlOpener
+                  ? options.urlOpener(url)
+                  : openExternalUrl(url, {
+                      onError: (message) =>
+                        reportTuiDiagnostic("tui-link", "warn", "ctrl-click open failed", {
+                          message,
+                        }),
                     }),
-                }),
             )
           ) {
             clearSelection();
@@ -3498,7 +3601,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const busySlashCommand = trimmedText.split(/\s+/)[0]?.toLowerCase();
           if (busySlashCommand === "/tools") {
             recordWorkspaceInputHistory(expandedSubmitForHistory);
-            printInternalEventLine(history.toolDetails?.join("") || t("noToolDetails"));
+            printStreamSafeNotice(history.toolDetails?.join("") || t("noToolDetails"));
             bumpDraftEpoch();
             buffer = "";
             cursorPos = 0;

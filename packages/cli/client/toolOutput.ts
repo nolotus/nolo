@@ -32,9 +32,10 @@ import { projectToolActivity, canCoalesceToolActivities, type ToolActivityProjec
 import { safeAskText, safeApprovalMultilineText, withholdIfSecretLike } from "../tui/askTextSanitize";
 import { diffLines } from "diff";
 import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
-import { agentRunCardLabels, t, toolFamilyLabel, toolFamilyOf, toolFamilyOfIcon, toolIcon, toolLabel } from "../tui/i18n";
+import { agentRunCardLabels, getCliLocale, t, toolFamilyLabel, toolFamilyOf, toolFamilyOfIcon, toolIcon, toolLabel } from "../tui/i18n";
 import {
   formatFetchItemUrl,
+  formatHomePath,
   formatReadItemPath,
   formatRunItemCommand,
   formatSearchItemQuery,
@@ -1032,6 +1033,27 @@ function memoryToolGist(
   return "";
 }
 
+function formatReadImageSummary(metadata: Record<string, unknown>): string {
+  const rawPaths = Array.isArray(metadata.paths)
+    ? metadata.paths.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    : [];
+  const singlePath =
+    (typeof metadata.path === "string" && metadata.path.trim()) ||
+    (rawPaths.length === 1 ? rawPaths[0].trim() : "");
+  if (singlePath && rawPaths.length <= 1) {
+    return gistClip(redactSecrets(formatReadItemPath(singlePath, metadata)), 52);
+  }
+  if (rawPaths.length > 1) {
+    const firstRaw = rawPaths[0];
+    const first = pathBasenameGist(redactSecrets(firstRaw)) || gistClip(redactSecrets(formatHomePath(firstRaw)), 28) || "image";
+    const text = getCliLocale() === "zh"
+      ? `${first} 等 ${rawPaths.length} 张图`
+      : `${first} +${rawPaths.length - 1} more`;
+    return gistClip(redactSecrets(text), 52);
+  }
+  return "";
+}
+
 function normalToolGistRaw(event: LocalAgentToolEvent): string {
   const metadata = (event.metadata ?? {}) as Record<string, unknown>;
   const toolName = event.toolName || "";
@@ -1039,6 +1061,10 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
   // These fields are runtime-produced projections (not model-controlled
   // arguments), so they are safe to show in the compact TUI activity line.
   // Keep the same clipping rules as the expanded Read/Run/Fetch trees.
+  if (toolName === "read_image") {
+    const summary = formatReadImageSummary(metadata);
+    if (summary) return summary;
+  }
   if (toolName === "readFile" || toolName === "writeFile" || toolName === "editFile") {
     const path = typeof metadata.path === "string"
       ? metadata.path
@@ -1196,13 +1222,14 @@ function formatNormalToolLine(
     const title = gist ? `${label} · ${gist}` : label;
     return formatToolTraceLine(fitNormalLine(`▸ ${title}`, `✗ ${reason}`, totalBudget), colorEnabled, "error");
   }
-  const successLabel = omitSuccessGlyph?.(toolName) ? " ".repeat(displayWidth(label)) : label;
   const resultSummary = normalResultSummary(event);
   const gist = [normalToolGist(event), resultSummary].filter(Boolean).join(" · ");
   // editFile：gist 行追加 (+a, -r) 统计 + 多行 diff 色带块（Zed-style），
   // 让用户不打开文件也能看到改了什么。多行 chunk 天然不参与 ×N 折叠。
   const hint = editFileResultHint(event);
   const statsInline = hint?.inline ? ` ${hint.inline}` : "";
+  const canOmitLabel = Boolean(gist || statsInline);
+  const successLabel = canOmitLabel && omitSuccessGlyph?.(toolName) ? " ".repeat(displayWidth(label)) : label;
   // >500ms 的工具耗时挂成功行尾部；短操作不显示（满屏 (0s) 是噪音）。
   const durationInline = formatNormalToolDuration(event.elapsedMs);
   const tail = durationInline ? `  ✓ ${durationInline}` : "  ✓";
@@ -1342,7 +1369,7 @@ export const TUI_TREE_MARKER = "\u0001TUI_TREE\n";
 export const TUI_TREE_END = "\u0002";
 export const TUI_TREE_TOOLS = {
   Run: ["execShell", "runCommand", "launchProcess"],
-  Read: ["readFile"],
+  Read: ["readFile", "read_image"],
   Search: ["exa_search", "globFiles", "searchFiles", "codeSearch"],
   Fetch: ["fetchWebpage"],
 } as const;
@@ -1372,13 +1399,14 @@ function toolDetails(event: LocalAgentToolEvent, line: string): string {
  * 因此本函数幂等，可以被重复调用。
  */
 export function toolRowDetailLine(line: string): string {
-  // A blank icon slot (1 or 2 columns after `▸ `) is not a family label, even if the gist is.
+  // A blank icon slot (1 or 2+ columns after `▸ `) is not a family label, even if the gist is.
   if (/^(?:\u001b\[[0-9;]*m)*▸  /.test(line)) return line;
   const match = /^(?:\u001b\[[0-9;]*m)*▸ (\S+)/.exec(line);
   if (!match) return line;
   const glyph = match[1] ?? "";
   const family = toolFamilyOfIcon(glyph);
   if (!family) return line;
+  if (glyph === family.en || glyph === family.zh) return line;
   const familyName = toolFamilyLabel(glyph);
   const glyphIndex = match[0].length - glyph.length;
   return `${line.slice(0, glyphIndex)}${familyName}${line.slice(match[0].length)}`;
@@ -1485,7 +1513,13 @@ export function createToolEventFormatter(
           ? clipCompactText(redactSecrets(activity.object ?? ""), 56, "…")
           : [activity.action, activity.object].filter(Boolean).join(" "));
     }
-    if (kind === "Read") item = formatReadItemPath(typeof m.path === "string" ? m.path : typeof m.filePath === "string" ? m.filePath : "file", m);
+    if (kind === "Read") {
+      if (name === "read_image") {
+        item = formatReadImageSummary(m) || toolIcon("read_image");
+      } else {
+        item = formatReadItemPath(typeof m.path === "string" ? m.path : typeof m.filePath === "string" ? m.filePath : "file", m);
+      }
+    }
     if (kind === "Search") item = formatSearchItemQuery(typeof m.query === "string" ? m.query : typeof m.pattern === "string" ? m.pattern : "search", typeof m.path === "string" ? m.path : undefined);
     if (kind === "Fetch") item = formatFetchItemUrl(typeof m.url === "string" ? m.url : "webpage");
     // 折叠树叶子与单行 normal 共用 secret 出口护栏：URL/query/command 叶子

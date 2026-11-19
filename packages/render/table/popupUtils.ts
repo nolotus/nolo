@@ -4,6 +4,8 @@
 // - below 模式（SelectCellEditor）：锚点下方优先，装不下翻到上方，左右 clamp；
 // - point 模式（RowContextMenu）：点锚点（width/height 传 0）右下优先，越界往左/上收。
 
+import { computeRectTransformOrigin } from "../web/ui/triggerOrigin";
+
 /** 弹层与视口边缘的最小间距。 */
 export const VIEWPORT_MARGIN = 8;
 
@@ -65,3 +67,25 @@ export const computePopupPosition = ({
     : belowTop;
   return { top, left };
 };
+
+export const computePopupTransformOrigin = ({
+  anchor,
+  popup,
+  position,
+  mode,
+}: {
+  anchor: PopupAnchorRect;
+  popup: { width: number; height: number };
+  position: { top: number; left: number };
+  mode: "below" | "point";
+}): { transformOrigin: string; flippedUp: boolean } =>
+  computeRectTransformOrigin({
+    anchor,
+    popup: {
+      top: position.top,
+      left: position.left,
+      width: popup.width,
+      height: popup.height,
+    },
+    mode,
+  });

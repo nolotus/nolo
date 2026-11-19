@@ -82,6 +82,7 @@ export function t(key: CliStringKey, ...params: string[]): string {
 const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   // Local workspace tools (packages/agent-runtime/localWorkspaceTools.ts)
   readFile: { en: "Read", zh: "读取" },
+  read_image: { en: "Image", zh: "看图" },
   writeFile: { en: "Write", zh: "写入" },
   editFile: { en: "Edit", zh: "编辑" },
   codeSearch: { en: "Search", zh: "搜索" },
@@ -161,7 +162,7 @@ export function toolLabel(name: string): string {
 export type ToolFamily = {
   /** 稳定 id：规则表与测试用它做审计键。 */
   id: string;
-  /** 语言中立的族图标。 */
+  /** 历史单字符符号（仅兼容旧 transcript 还原，主行显示已改用短动作标签）。 */
   icon: string;
   en: string;
   zh: string;
@@ -172,25 +173,25 @@ const family = (id: string, icon: string, en: string, zh: string): ToolFamily =>
 export const TOOL_FAMILIES = {
   read: family("read", "<", "Read", "读取"),
   write: family("write", "+", "Write", "写入"),
-  run: family("run", "$", "Run", "执行"),
-  search: family("search", "?", "Search", "搜索"),
-  fetch: family("fetch", "^", "Fetch", "抓取网页"),
+  run: family("run", "$", "Run", "命令"),
+  search: family("search", "?", "Find", "搜索"),
+  fetch: family("fetch", "^", "Fetch", "网页"),
   list: family("list", "=", "List", "列表"),
-  memory: family("memory", "~", "Memory", "记忆"),
+  memory: family("memory", "~", "Mem", "记忆"),
   agent: family("agent", "@", "Agent", "智能体"),
   skill: family("skill", "*", "Skill", "技能"),
-  interaction: family("interaction", ":", "Interaction", "交互"),
+  interaction: family("interaction", ":", "Ask", "交互"),
   table: family("table", "#", "Table", "表格"),
-  capture: family("capture", "|", "Capture", "截屏"),
-  delete: family("delete", "-", "Delete", "删除"),
-  mcp: family("mcp", "%", "Plugin", "插件"),
+  capture: family("capture", "|", "Shot", "截屏"),
+  delete: family("delete", "-", "Del", "删除"),
+  mcp: family("mcp", "%", "MCP", "插件"),
   app: family("app", ";", "App", "应用"),
-  browser: family("browser", ">", "Browser", "浏览器"),
+  browser: family("browser", ">", "Web", "浏览器"),
   cloud: family("cloud", "/", "Cloud", "云"),
-  process: family("process", "&", "Process", "进程"),
-  email: family("email", "»", "Email", "邮件"),
+  process: family("process", "&", "Proc", "进程"),
+  email: family("email", "»", "Mail", "邮件"),
   scrape: family("scrape", "«", "Scrape", "采集"),
-  media: family("media", "∆", "Media", "媒体"),
+  media: family("media", "∆", "Image", "看图"),
   default: family("default", "◊", "Tool", "工具"),
 } as const;
 
@@ -204,6 +205,7 @@ export const DEFAULT_TOOL_ICON: string = TOOL_FAMILIES.default.icon;
  */
 const TOOL_FAMILY_OVERRIDES: Record<string, ToolFamily> = {
   readFile: TOOL_FAMILIES.read,
+  read_image: TOOL_FAMILIES.media,
   readDoc: TOOL_FAMILIES.read,
   readDialog: TOOL_FAMILIES.read,
   readSpace: TOOL_FAMILIES.read,
@@ -328,9 +330,13 @@ export const TOOL_FAMILY_RULES: readonly ToolFamilyRule[] = [
   { id: "run", family: TOOL_FAMILIES.run, test: startsWithWord("exec", "execute", "run") },
 ];
 
-/** 图标 → 族（同一图标只属于一个族）。 */
+/** 图标或标签 → 族（历史单字符符号与新中英文标签均映射回同一族）。 */
 const TOOL_FAMILY_BY_ICON: Record<string, ToolFamily> = Object.fromEntries(
-  Object.values(TOOL_FAMILIES).map((fam) => [fam.icon, fam]),
+  Object.values(TOOL_FAMILIES).flatMap((fam) => [
+    [fam.icon, fam],
+    [fam.en, fam],
+    [fam.zh, fam],
+  ]),
 );
 
 /** 工具名 → 族：精确映射 → 系列规则 → 兜底族。 */
@@ -341,22 +347,18 @@ export function toolFamilyOf(name: string): ToolFamily {
   return rule ? rule.family : TOOL_FAMILIES.default;
 }
 
-/** 工具的紧凑图标（语言中立），未知工具退回 🔧。 */
+/** 工具的紧凑动作标签（按当前 locale 展示），未知工具退回 Tool / 工具。 */
 export function toolIcon(name: string): string {
-  return toolFamilyOf(name).icon;
+  return toolFamilyOf(name)[getCliLocale()];
 }
 
-/** 图标对应的族；未知图标返回 null（用于「只转换已知图标」的详情层）。 */
+/** 图标或动作标签对应的族；未识别词返回 null（用于「只转换已知图标」的详情层）。 */
 export function toolFamilyOfIcon(icon: string): ToolFamily | null {
   return TOOL_FAMILY_BY_ICON[icon] ?? null;
 }
 
 /**
- * 图标 → 工具族名的双语标签。
- *
- * 默认视图把本地化工具名换成了图标；`/tools` 详情和展开层要把可读文字还回来，
- * 但一行只有一个图标、图标代表的是「族」，所以这里归还的是族名（Read / 读取、
- * Plugin / 插件…），而不是假装知道具体是哪个同类工具。未知图标按兜底族名处理。
+ * 图标或动作标签 → 当前 locale 的工具族名。
  */
 export function toolFamilyLabel(icon: string): string {
   return (TOOL_FAMILY_BY_ICON[icon] ?? TOOL_FAMILIES.default)[getCliLocale()];

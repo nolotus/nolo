@@ -18,8 +18,11 @@
 import { tokenizeAnsiLine } from "./tuiAnsi";
 import {
   buildHistoryLayoutRows,
+  buildTurnOffsets,
+  turnSeparatorRows,
   type TurnHistory,
   type TurnLayoutRow,
+  type TurnRole,
 } from "./tuiHistory";
 import { MAX_URL_LENGTH, normalizeHttpUrl, openExternalUrl } from "./tuiUrlOpener";
 
@@ -302,6 +305,123 @@ export function findUrlAtRowColumn(
  * 因此 `screenRow >= visibleHeight` 一律拒绝：越界判定必须相对**视口**，
  * 而不是相对 scrollTop 偏移，否则会命中当前屏幕根本看不见的历史行 URL。
  */
+const MARKDOWN_LINK_SOURCE_REGEX = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+
+function resolveOwnerTurnAtRow(
+  history: TurnHistory,
+  contentWidth: number,
+  globalRow: number,
+): { role: TurnRole; content: string } | null {
+  const { entries, totalLines } = buildTurnOffsets(history, contentWidth);
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i]!;
+    if (globalRow >= entry.startRow && globalRow < entry.startRow + entry.lineCount) {
+      const turn = history.turns[i]!;
+      return { role: turn.role, content: turn.content };
+    }
+  }
+  if (history.currentRole !== null && history.currentContent) {
+    const prevRole =
+      history.turns.length > 0 ? history.turns[history.turns.length - 1]!.role : null;
+    const currentStart = totalLines + turnSeparatorRows(prevRole, history.currentRole);
+    if (globalRow >= currentStart) {
+      return { role: history.currentRole, content: history.currentContent };
+    }
+  }
+  return null;
+}
+
+function findMarkdownUrlInTurnRow(
+  history: TurnHistory,
+  contentWidth: number,
+  rows: readonly TurnLayoutRow[],
+  globalRow: number,
+  screenCol: number,
+): string | null {
+  const row = rows[globalRow];
+  if (!row?.sourceMapping || row.sourceMapping.length === 0) return null;
+  const owner = resolveOwnerTurnAtRow(history, contentWidth, globalRow);
+  if (!owner || owner.role === "local") return null;
+
+  let col = 0;
+  let plainOffset = 0;
+  let clickedPlainOffset = -1;
+  for (const token of tokenizeAnsiLine(row.rendered)) {
+    if (token.kind === "sgr") continue;
+    const startCol = col;
+    col += token.width;
+    if (startCol < row.prefixWidth) continue;
+    if (screenCol >= startCol && screenCol < startCol + token.width) {
+      clickedPlainOffset = plainOffset;
+      break;
+    }
+    plainOffset += token.value.length;
+  }
+  if (clickedPlainOffset < 0 || clickedPlainOffset >= row.sourceMapping.length) return null;
+  const rawOffset = row.sourceMapping[clickedPlainOffset]!;
+
+  const normalized = owner.content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n");
+  let offset = 0;
+  let fenceMarker: string | null = null;
+  let targetLine: string | null = null;
+  let targetLineStart = 0;
+
+  for (const line of lines) {
+    const lineEnd = offset + line.length;
+    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
+    const wasInFence = fenceMarker !== null;
+    if (marker) {
+      if (fenceMarker === null) fenceMarker = marker;
+      else if (marker[0] === fenceMarker[0] && marker.length >= fenceMarker.length) fenceMarker = null;
+    }
+    if (rawOffset >= offset && rawOffset < lineEnd) {
+      if (owner.role === "assistant" && (wasInFence || marker !== undefined)) return null;
+      targetLine = line;
+      targetLineStart = offset;
+      break;
+    }
+    offset = lineEnd + 1;
+  }
+  if (targetLine === null) return null;
+
+  const codeSpans: Array<[number, number]> = [];
+  if (owner.role === "assistant") {
+    const codeRe = /`[^`]+`/g;
+    let codeMatch: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((codeMatch = codeRe.exec(targetLine)) !== null) {
+      codeSpans.push([
+        targetLineStart + codeMatch.index,
+        targetLineStart + codeMatch.index + codeMatch[0].length,
+      ]);
+    }
+  }
+
+  MARKDOWN_LINK_SOURCE_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  // eslint-disable-next-line no-cond-assign
+  while ((match = MARKDOWN_LINK_SOURCE_REGEX.exec(targetLine)) !== null) {
+    const absMatchStart = targetLineStart + match.index;
+    const absLabelStart = absMatchStart + 1;
+    const absLabelEnd = absLabelStart + match[1]!.length;
+    if (
+      codeSpans.some(
+        ([spanStart, spanEnd]) => absMatchStart < spanEnd && absLabelEnd > spanStart,
+      )
+    ) {
+      continue;
+    }
+    const matchesLabel =
+      (rawOffset >= absLabelStart && rawOffset < absLabelEnd) ||
+      (rawOffset === absMatchStart && normalized[rawOffset] === "[");
+    if (!matchesLabel) continue;
+    const url = normalizeHttpUrl(match[2]!);
+    if (url !== null) return url;
+  }
+  return null;
+}
+
 export function openVisibleUrlAtScreen(
   history: TurnHistory,
   contentWidth: number,
@@ -316,8 +436,14 @@ export function openVisibleUrlAtScreen(
   if (!Number.isFinite(visibleHeight) || visibleHeight <= 0) return false;
   if (screenRow >= visibleHeight) return false;
   const rows = buildHistoryLayoutRows(history, contentWidth);
-  const hit = findUrlAtRowColumn(rows, scrollTop + screenRow, screenCol);
-  if (!hit) return false;
-  openUrl(hit.url);
+  const globalRow = scrollTop + screenRow;
+  const hit = findUrlAtRowColumn(rows, globalRow, screenCol);
+  if (hit) {
+    openUrl(hit.url);
+    return true;
+  }
+  const markdownUrl = findMarkdownUrlInTurnRow(history, contentWidth, rows, globalRow, screenCol);
+  if (markdownUrl === null) return false;
+  openUrl(markdownUrl);
   return true;
 }

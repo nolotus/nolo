@@ -1,3 +1,4 @@
+import { authorityRequestErrorResponse } from "core/authAuthorityError";
 import { toErrorMessage } from "core/errorMessage";
 import { safeParse } from "valibot";
 import {
@@ -126,6 +127,8 @@ export function createApiRoute<TInput, TOutput>(
 
       return json({ ok: true, data: output.output }, 200, enableCors);
     } catch (error) {
+      const authorityResponse = authorityRequestErrorResponse(error);
+      if (authorityResponse) return authorityResponse;
       const apiError = normalizedError(error);
       return json(
         { ok: false, error: serializeApiError(apiError) },
@@ -183,6 +186,20 @@ const withCorsResponseHeaders = (
   };
 };
 
+const withAuthorityErrorHandling = (
+  handler: ApiLegacyRouteHandler
+): ApiLegacyRouteHandler => {
+  return async (req: Request) => {
+    try {
+      return await handler(req);
+    } catch (error) {
+      const authorityResponse = authorityRequestErrorResponse(error);
+      if (authorityResponse) return authorityResponse;
+      throw error;
+    }
+  };
+};
+
 export function createApiRouteFamily(
   configs: ApiLegacyRouteConfig[]
 ): Record<string, ApiRouteEntry> {
@@ -190,16 +207,18 @@ export function createApiRouteFamily(
     configs.map((config) => {
       const enableCors = config.enableCors ?? true;
       const corsHeaders = config.corsHeaders ?? CORS_HEADERS;
-      const handlers = config.wrapCorsResponses
-        ? Object.fromEntries(
-            Object.entries(config.handlers).map(([method, handler]) => [
-              method,
-              handler
-                ? withCorsResponseHeaders(handler, corsHeaders)
-                : handler,
-            ])
-          )
-        : config.handlers;
+      const handlers = Object.fromEntries(
+        Object.entries(config.handlers).map(([method, handler]) => {
+          if (!handler) return [method, handler];
+          const guarded = withAuthorityErrorHandling(handler);
+          return [
+            method,
+            config.wrapCorsResponses
+              ? withCorsResponseHeaders(guarded, corsHeaders)
+              : guarded,
+          ];
+        })
+      );
       const methods = config.allowedMethods ?? [
         ...(Object.keys(config.handlers) as ApiMethod[]),
         "OPTIONS",

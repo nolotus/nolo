@@ -43,6 +43,7 @@ export const SUPPORTED_USER_SKILL_SLUGS = [
   "android-adb",
   "mihome-assistant",
   "stock-quotes",
+  "unslop-ui",
   ...NEW_ACCOUNT_DEFAULT_WORKFLOW_SKILLS,
 ] as const;
 
@@ -59,7 +60,6 @@ const SUPPORTED_USER_SKILL_SLUG_SET: ReadonlySet<string> = new Set<string>(
 export const RECOMMENDED_USER_SKILL_SLUGS = [
   "ub-mode",
   "auto-review",
-  "stock-quotes",
 ] as const;
 
 export type RecommendedUserSkillSlug =

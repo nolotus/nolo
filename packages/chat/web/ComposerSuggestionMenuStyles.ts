@@ -1,5 +1,16 @@
 import * as stylex from "@stylexjs/stylex";
 
+const suggestionMenuEnter = stylex.keyframes({
+  from: {
+    opacity: 0,
+    transform: "translateY(var(--popover-travel, 6px)) scale(0.96)",
+  },
+  to: {
+    opacity: 1,
+    transform: "translateY(0) scale(1)",
+  },
+});
+
 export const composerSuggestionStyles = stylex.create({
   menu: {
     position: "absolute",
@@ -18,6 +29,14 @@ export const composerSuggestionStyles = stylex.create({
     borderColor: "var(--border)",
     boxShadow: "0 4px 12px var(--shadowMedium)",
     zIndex: 20,
+    transformOrigin: "bottom left",
+    animationName: {
+      default: suggestionMenuEnter,
+      "@media (prefers-reduced-motion: reduce)": "none",
+    },
+    animationDuration: "var(--popover-duration, 0.16s)",
+    animationTimingFunction: "var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1))",
+    animationFillMode: "both",
   },
   menuHeader: {
     padding: "4px 10px",

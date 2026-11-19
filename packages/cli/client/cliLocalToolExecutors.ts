@@ -57,6 +57,7 @@ import {
 } from "./cliAgentRunToolExecutors";
 import type { ChromeConnectorClient } from "../../desktop-chrome-connector/chromeConnector";
 import { buildCliChromeConnectorToolExecutors } from "./cliChromeConnectorToolExecutors";
+import type { HostApprovalRenderer } from "./hostApprovalFlow";
 
 export type ReadToolFn = (
   args: Record<string, unknown>,
@@ -340,6 +341,11 @@ export function buildLocalToolExecutors(args: {
    * Absent: a verified client is created lazily on the first chrome_* call.
    */
   chromeConnectorClient?: ChromeConnectorClient;
+  /**
+   * Dedicated host approval renderer for browser actions (connector tools + shell child bridge).
+   * Absent: reads the process-level `getHostApprovalRenderer()`; never falls back to askChoice.
+   */
+  hostApprovalRenderer?: HostApprovalRenderer;
 }) {
   const executors = {
     ...createLocalWorkspaceToolExecutors({
@@ -553,14 +559,15 @@ export function buildLocalToolExecutors(args: {
     // Nolo Browser Connector: the CLI drives the user's real Chrome through the same verified
     // client + executor as the desktop runtime (before this, every chrome_* call answered
     // "only executable in the Nolo desktop local runtime").
-    ...buildCliChromeConnectorToolExecutors(
-      args.chromeConnectorClient ? { client: args.chromeConnectorClient } : {},
-    ),
+    ...buildCliChromeConnectorToolExecutors({
+      ...(args.chromeConnectorClient ? { client: args.chromeConnectorClient } : {}),
+      ...(args.hostApprovalRenderer ? { awaitHostApproval: args.hostApprovalRenderer } : {}),
+    }),
     ...(args.localToolExecutors ?? {}),
   };
   const execShell = executors.execShell;
   const lifecycle = (run: () => Promise<AgentRuntimeToolResult>, signal?: AbortSignal) => withBrowserShellApproval({
-    requestUserChoice: args.requestUserChoice, client: args.chromeConnectorClient, signal,
+    awaitHostApproval: args.hostApprovalRenderer, client: args.chromeConnectorClient, signal,
   }, run);
   executors.execShell = (call: any, opts?: any) => lifecycle(() => execShell(call, opts), opts?.abortSignal);
   registerLocalShellLifecycle(executors.execShell, lifecycle);

@@ -868,6 +868,9 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   box-shadow: var(--popover-shadow);
   z-index: var(--z-dropdown, 1000);
   box-sizing: border-box;
+  transform-origin: top right;
+  animation: topbar-popover-enter var(--popover-duration, 0.18s)
+    var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
 .topbar__more-item {
@@ -1392,6 +1395,17 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   color: var(--primary);
 }
 
+@keyframes topbar-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--popover-travel, 6px) * -1)) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* 统一弹窗体系 - quartile.out 曲线赋予内容“生命感” */
 .topbar-dropdown {
   position: absolute; top: calc(100% + 10px); right: 0; min-width: 215px;
@@ -1400,6 +1414,7 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   backdrop-filter: blur(var(--popover-blur)) saturate(1.8); -webkit-backdrop-filter: blur(var(--popover-blur)) saturate(1.8);
   border: 1px solid var(--popover-border);
   box-shadow: var(--popover-shadow);
+  transform-origin: top right;
   opacity: 0; visibility: hidden; transform: translateY(calc(var(--popover-travel) * -1)) scale(0.97);
   transition:
     opacity var(--popover-duration) var(--popover-ease),
@@ -1410,6 +1425,21 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
 .topbar-dropdown--open,
 .topbar-dropdown[data-open] { opacity: 1; visibility: visible; transform: translateY(0) scale(1); pointer-events: auto; }
 .topbar-dropdown[data-closed] { opacity: 0; visibility: hidden; transform: translateY(calc(var(--popover-travel) * -1)) scale(0.97); pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-dropdown {
+    transition: opacity 0.1s linear, visibility 0.1s linear;
+  }
+  .topbar-dropdown,
+  .topbar-dropdown[data-closed] {
+    transform: none;
+  }
+  .topbar__more-panel,
+  .topbar__app-info-panel,
+  .topbar__app-menu {
+    animation: none;
+  }
+}
 
 /* Shell (surface, elevation, placement-aware motion) comes from `.app-popover`
  * in render/web/ui/popover.css. Only the width belongs to this surface. */
@@ -2121,6 +2151,9 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    transform-origin: top center;
+    animation: topbar-popover-enter var(--popover-duration, 0.18s)
+      var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
   }
 
   [data-theme="dark"] .topbar__app-info-panel {
@@ -2324,6 +2357,9 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   z-index: 1002;
+  transform-origin: top right;
+  animation: topbar-popover-enter var(--popover-duration, 0.18s)
+    var(--popover-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
 .topbar__app-menu-item {

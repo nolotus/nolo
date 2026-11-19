@@ -1,3 +1,4 @@
+import { GITHUB_SESSION_KIND } from "core/githubAuthContract";
 import GoogleBinding from "identity/GoogleBinding";
 import GoogleButton from "identity/GoogleButton";
 import React, { useEffect, useMemo, useState } from "react";
@@ -65,6 +66,10 @@ const SecuritySettings: React.FC = () => {
   const currentToken = useToken();
   const isGoogleSession = useMemo(() => {
     try { return parseToken(currentToken || "")?.authKind === "google-session-v1"; } catch { return false; }
+  }, [currentToken]);
+
+  const isGitHubSession = useMemo(() => {
+    try { return parseToken(currentToken || "")?.authKind === GITHUB_SESSION_KIND; } catch { return false; }
   }, [currentToken]);
 
   const userId = user?.userId;
@@ -199,7 +204,7 @@ const SecuritySettings: React.FC = () => {
       <div className="user-profile-page">
         <h1 className="page-title">{t("accountSecurity.title", "账号安全")}</h1>
         {isCloudEdition && <BrowserAccountNotice />}
-        <GoogleBinding />
+        {!isGitHubSession && <GoogleBinding />}
         <p className="security-panel__desc">
           {t(
             "accountSecurity.panelDescription",
@@ -286,7 +291,7 @@ const SecuritySettings: React.FC = () => {
             </div>
           </div>
 
-          <div className="security-action-card">
+          {!isGitHubSession && <div className="security-action-card">
             <div className="security-action-card__copy">
               <span className="profile-item-label">
                 {t("accountSecurity.revokeTitle", "发现异常？踢掉所有其他设备")}
@@ -306,7 +311,7 @@ const SecuritySettings: React.FC = () => {
             >
               {t("accountSecurity.revokeButton", "踢掉所有其他设备")}
             </Button>)}
-          </div>
+          </div>}
         </section>
       </div>
 

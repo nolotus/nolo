@@ -2193,10 +2193,14 @@ function releaseUnspawnedLocalWriterClaim(runId: string, deps: AgentRunControlDe
 }
 
 /** Persist startup evidence under the same lock used by terminal arbitration. */
+const startupPhaseOrder: Record<RunStartupPhase, number> = { spawn: 0, initializing: 1, protocol_validated: 2, model: 3 };
+
 export async function recordRunStartup(runId: string, phase: RunStartupPhase, deps: AgentRunControlDeps = {}): Promise<void> {
   const attempt = () => withRunRecordLock(runId, deps, () => {
     const record = readRunRecord(runId, deps);
     if (!record || isRunTerminalStatus(record.status)) return true;
+    if (record.pid != null && record.pid !== process.pid) return true;
+    if (record.startup && startupPhaseOrder[record.startup.phase] >= startupPhaseOrder[phase]) return true;
     record.startup = { protocol: AGENT_RUN_PROTOCOL, phase };
     writeRunRecord(record, deps);
     return true;
@@ -2787,7 +2791,7 @@ export function transitionRunToTerminal(
     cacheUsage?: CacheRunUsageSummary;
   },
   deps: AgentRunControlDeps = {},
-  options: { allowOverOrphaned?: boolean } = {},
+  options: { allowOverOrphaned?: boolean; expectedPid?: number } = {},
 ): TerminalTransitionResult {
   // Strict arbitration: a terminal transition that loses the record lock must
   // never write unlocked — the winner's durable result (e.g. done) would be
@@ -2795,6 +2799,9 @@ export function transitionRunToTerminal(
   const settled = withRunRecordLock(runId, deps, () => {
     const record = readRunRecord(runId, deps);
     if (!record) return { kind: "not_found" as const };
+    if (options.expectedPid != null && record.pid != null && record.pid !== options.expectedPid) {
+      return { kind: "kept", record } as const;
+    }
     // A terminal record is authoritative. Only child self-settlement may
     // correct orphaned, and only with a real outcome (done/failed); all other
     // terminal-to-terminal writes — orphaned → killed/timeout included — are
@@ -3029,9 +3036,13 @@ export async function settleRunTerminalAuthoritatively(
   },
   deps: AgentRunControlDeps = {},
   transition: typeof transitionRunToTerminal = transitionRunToTerminal,
+  options: { expectedPid?: number } = {},
 ): Promise<TerminalTransitionResult> {
   const attempt = (): TerminalTransitionResult | undefined =>
-    transition(runId, update, deps, { allowOverOrphaned: true });
+    transition(runId, update, deps, {
+      allowOverOrphaned: true,
+      ...(options.expectedPid != null ? { expectedPid: options.expectedPid } : {}),
+    });
   let result: TerminalTransitionResult | undefined = attempt();
   for (
     let attemptNo = 1;
@@ -3049,10 +3060,17 @@ export async function settleRunTerminalAuthoritatively(
         `outcome (exitCode/dialogId/credits/DoD) may be lost`,
     );
   } else if (result?.kind === "kept" && result.record.status !== update.status) {
-    console.warn(
-      `[nolo] run ${runId} already terminal (${result.record.status}); ` +
-        `keeping the durable outcome over intended ${update.status}`,
-    );
+    if (options.expectedPid != null && result.record.pid != null && result.record.pid !== options.expectedPid) {
+      console.warn(
+        `[nolo] run ${runId} belongs to PID ${result.record.pid}, not ${options.expectedPid}; ` +
+          `keeping the durable record (${result.record.status}) over intended ${update.status}`,
+      );
+    } else {
+      console.warn(
+        `[nolo] run ${runId} already terminal (${result.record.status}); ` +
+          `keeping the durable outcome over intended ${update.status}`,
+      );
+    }
   }
   // The test seam may return void; callers treat that as "settled by the
   // stub" — surface it as a no-op rather than crashing.

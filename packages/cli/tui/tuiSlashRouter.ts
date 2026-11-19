@@ -259,6 +259,9 @@ export async function runSubmittedSlashLine(
   const result = handleTuiInput(line, host.state, collectConversationTurns(host.history), {
     env: host.taskEnv,
     authEnv: resolveTuiIdentityEnv(host.taskEnv, host.options.env ?? process.env),
+    // 交互模式下非 chat 输出会进 transcript（emitCommandOutput → appendLocalTurn），
+    // /links 的 Ctrl+左键提示才成立；管道/脚本下同一份文本只是 stdout，不能用快捷键承诺。
+    linksTarget: isInteractiveInput(input) ? "history" : "pipe",
   });
   const previousState = host.state;
   const previousAgentKey = host.state.agentKey;

@@ -9,10 +9,15 @@
 // 这里需要直接锚定到单元格 rect 且无可见 trigger，自绘更轻。
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
 import { LuCheck, LuPlus } from "react-icons/lu";
-import { computePopupPosition } from "./popupUtils";
+import {
+    computePopupPosition,
+    computePopupTransformOrigin,
+} from "./popupUtils";
 import { isImeComposingKeyEvent } from "./keyboardUtils";
 import { useActiveItemNavigation, usePopupDismiss } from "./usePopupBehavior";
+import { triggerMotionStyles } from "../web/ui/triggerMotion.styles";
 
 export type SelectCellEditorAnchor = {
     top: number;
@@ -107,6 +112,12 @@ const SelectCellEditor: React.FC<SelectCellEditorProps> = ({
         viewport: { width: viewportWidth, height: viewportHeight },
         mode: "below",
     });
+    const { transformOrigin, flippedUp } = computePopupTransformOrigin({
+        anchor,
+        popup: { width, height: estimatedHeight },
+        position: { top, left },
+        mode: "below",
+    });
 
     // 新建选项 input：Enter 提交（空值不提交，退回按钮态）、Esc 退回按钮态、Tab 关闭弹层。
     const handleCreateKeyDown = (
@@ -151,8 +162,24 @@ const SelectCellEditor: React.FC<SelectCellEditorProps> = ({
             aria-label="选择选项"
             aria-activedescendant={itemId(activeIndex)}
             tabIndex={-1}
-            className="table-page__select-editor"
-            style={{ top, left, width, maxHeight: MAX_LIST_HEIGHT }}
+            className={[
+                "table-page__select-editor",
+                stylex.props(triggerMotionStyles.enter).className,
+            ]
+                .filter(Boolean)
+                .join(" ")}
+            style={
+                {
+                    top,
+                    left,
+                    width,
+                    maxHeight: MAX_LIST_HEIGHT,
+                    transformOrigin,
+                    "--nolo-enter-y": flippedUp
+                        ? "var(--popover-travel, 6px)"
+                        : "calc(var(--popover-travel, 6px) * -1)",
+                } as React.CSSProperties & Record<`--${string}`, string>
+            }
             onKeyDown={(event) => {
                 if (creating) return;
                 handleKeyDown(event);

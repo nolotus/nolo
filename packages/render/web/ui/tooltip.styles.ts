@@ -34,35 +34,53 @@ export const tooltipStyles = stylex.create({
     paddingInline: 10,
     // fixes FF gap
     transform: "translate3d(0, 0, 0)",
-    transition: "transform 200ms, opacity 200ms",
+    transition: {
+      default:
+        "transform 160ms var(--popover-ease, ease), opacity 160ms var(--popover-ease, ease)",
+      "@media (prefers-reduced-motion: reduce)": "opacity 0.1s linear",
+    },
     "[data-entering]": {
-      transform: "var(--origin)",
+      transform: {
+        default: "var(--origin)",
+        "@media (prefers-reduced-motion: reduce)": "none",
+      },
       opacity: 0,
     },
     "[data-exiting]": {
-      transform: "var(--origin)",
+      transform: {
+        default: "var(--origin)",
+        "@media (prefers-reduced-motion: reduce)": "none",
+      },
       opacity: 0,
+      transitionDuration: {
+        default: "var(--popover-durationExit, 0.12s)",
+        "@media (prefers-reduced-motion: reduce)": "0.1s",
+      },
     },
   },
   // [data-placement='top']
   placementTop: {
     marginBottom: 10,
-    "--origin": "translateY(4px)",
+    "--origin": "translateY(4px) scale(0.96)",
+    transformOrigin: "var(--trigger-anchor-point, bottom center)",
   },
   // [data-placement='bottom']
   placementBottom: {
     marginTop: 10,
-    "--origin": "translateY(-4px)",
+    "--origin": "translateY(-4px) scale(0.96)",
+    transformOrigin: "var(--trigger-anchor-point, top center)",
   },
   // [data-placement='left']
   placementLeft: {
     marginRight: 10,
-    "--origin": "translateX(4px)",
+    "--origin": "translateX(4px) scale(0.96)",
+    transformOrigin: "var(--trigger-anchor-point, right center)",
   },
   // [data-placement='right']
   placementRight: {
     marginLeft: 10,
-    "--origin": "translateX(-4px)",
+    "--origin": "translateX(-4px) scale(0.96)",
+    transformOrigin: "var(--trigger-anchor-point, left center)",
   },
   // .react-aria-OverlayArrow svg
   arrow: {

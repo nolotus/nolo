@@ -84,13 +84,17 @@ export type HostApprovalCard = {
   target?: string;
   /** Tab origin the action targets. Empty string when the connector could not resolve one. */
   origin: string;
+  /** Browser channel when known from the bound connector/bridge (`chrome` | `firefox`). */
+  browser?: "chrome" | "firefox";
+  /** Bound tab identifier when supplied by the connector. */
+  tabId?: string;
   /** Connector-provided summary/script, passed through as-is (see clipApprovalSummary). */
   summary: string;
   /** Epoch ms. The host refuses and auto-denies once this is in the past. */
   expiresAt: number;
 };
 
-export type PendingHostApproval = HostApprovalCard & { tabId?: string };
+export type PendingHostApproval = HostApprovalCard;
 
 /** What `submit_approval_decision` answered. `failed` = the approval was gone/expired/unknown. */
 export type SubmitApprovalDecisionOutcome =

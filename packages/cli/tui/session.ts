@@ -7,6 +7,7 @@
  */
 
 import type { TuiInputResult, TuiState } from "./sessionTypes";
+import type { ConversationLinksTarget } from "./conversationLinks";
 import { handleTuiInput as handleBaseTuiInput } from "./sessionDispatch";
 import { resolveTuiLearnReviewPrompt } from "./learnPrompt";
 import { resolveAgentContextWindow } from "../client/tokenUsage";
@@ -100,6 +101,14 @@ export function handleTuiInput(
     env?: Record<string, string | undefined>;
     /** Live env for identity resolution (the post-`/login` token lives here). */
     authEnv?: Record<string, string | undefined>;
+    /**
+     * Output channel for `/links`' copy hint: "history" when the caller renders
+     * it as a transcript turn (Ctrl+left-click and selection copy work there),
+     * "pipe" when the text is written straight to the stream. Forwarded as-is
+     * to the dispatcher; the type lives in conversationLinks so the call sites
+     * cannot drift.
+     */
+    linksTarget?: ConversationLinksTarget;
   },
 ): TuiInputResult {
   const trimmed = input.trim();

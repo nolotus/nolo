@@ -4,7 +4,7 @@ import {
   resolveTuiBrightness,
   type TuiBrightness,
 } from "../tui/theme";
-import { toolIcon, toolLabelVariants } from "../tui/i18n";
+import { toolFamilyOf, toolLabelVariants } from "../tui/i18n";
 import { boxGlyphs, resolveBoxCharset, stripAnsi } from "../tui/tuiAnsi";
 import { renderMermaidBlock } from "./mermaid";
 import {
@@ -311,12 +311,15 @@ function plainToolLine(line: string) {
  * toolOutput's treeKind only ever emits these four labels.
  */
 const TOOL_TREE_GROUP_LABELS = new Set(
-  ["execShell", "readFile", "fetchWebpage", "exa_search"].flatMap((name) => [
-    // 新 transcript 用紧凑图标做树头（`📄 (2) · a.ts, b.ts  ✓`）。
-    toolIcon(name),
-    // 历史 transcript 里仍是本地化工具名，改版不能把它们降级成普通 bullet。
-    ...toolLabelVariants(name),
-  ]),
+  ["execShell", "readFile", "fetchWebpage", "exa_search"].flatMap((name) => {
+    const fam = toolFamilyOf(name);
+    return [
+      fam.icon,
+      fam.en,
+      fam.zh,
+      ...toolLabelVariants(name),
+    ];
+  }),
 );
 
 function isKnownToolGroupLabel(label: string): boolean {

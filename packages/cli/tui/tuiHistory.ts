@@ -13,6 +13,7 @@ import {
   buildSourceMapping,
   padOrTruncateToWidth,
   stripAnsi,
+  stripAnsiKeepingOsc8,
   visibleWidth,
   displayWidth,
   wrapTranscriptLine,
@@ -30,7 +31,7 @@ import {
   themeText,
   tuiRenderThemeFingerprint,
 } from "./theme";
-import { toolIcon, toolLabel } from "./i18n";
+import { toolFamilyOf, toolLabelVariants } from "./i18n";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
 import { TUI_TREE_MARKER, TUI_TREE_TOOLS, toolRowDetailLine, type TuiTreePayload } from "../client/toolOutput";
 import {
@@ -47,7 +48,7 @@ import {
   type TurnImage,
   type TurnImageRowInfo,
 } from "./tuiImageLayout";
-import { resolveCliColorEnabled } from "../client/terminalStyles";
+import { resolveCliColorEnabled, resolveCliHyperlinkEnabled } from "../client/terminalStyles";
 import {
   applySelectionOverlay,
   type TuiSelectionState,
@@ -75,6 +76,8 @@ export type Turn = {
   command?: string;
   /** 结构化图片元数据（不含字节）；占位行追加在该轮文字行之后。 */
   images?: TurnImage[];
+  /** 显式工具图片产物元数据（仅可见性与路径复制；无 FS IO、无打开动作）。 */
+  imageArtifacts?: import("./tuiImageExtractor").TurnImageArtifact[];
 };
 
 export type TurnLayoutRow = {
@@ -381,8 +384,11 @@ function applyTreeRewrite(text: string, chunk: string): string | null {
   // The second result replaces exactly the immediately preceding flat row.
   // Never scan past it: a failure/action row must remain visible and break the
   // group rather than being swallowed by a later tree.
-  // 树头两种拼写都要认：图标 + 历史 transcript 里的本地化工具名。
-  const labels = TUI_TREE_TOOLS[payload.kind].flatMap((name) => [toolIcon(name), toolLabel(name)]);
+  // 树头两种拼写都要认：图标/标签 + 历史 transcript 里的本地化工具名。
+  const labels = TUI_TREE_TOOLS[payload.kind].flatMap((name) => {
+    const fam = toolFamilyOf(name);
+    return [fam.icon, fam.en, fam.zh, ...toolLabelVariants(name)];
+  });
   // Success suffixes can carry timing.
   const flatLabel = tail.match(/^▸ (.+?)(?: · .*?)?  ✓(?: \d+(?:\.\d+)?(?:ms|s))*$/)?.[1];
   const summaryLabel = tail.match(/^▸ (.+?) \(\d+\) · .*  ✓$/)?.[1];
@@ -453,7 +459,9 @@ function styleAssistantTurn(content: string, colorEnabled: boolean, state = assi
   ).join("\n");
   const highlighted = colorEnabled
     ? formatAssistantDisplay(content, { trimEdges: false })
-    : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
+    : resolveCliHyperlinkEnabled()
+      ? stripAnsiKeepingOsc8(formatAssistantDisplay(content, { trimEdges: false }))
+      : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
   const rawLines = highlighted.split("\n");
   let { anchored, inToolBlock } = state;
   const styledLines = rawLines.map((line) => {

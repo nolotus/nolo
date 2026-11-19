@@ -1,3 +1,4 @@
+import { isExternalSessionKind } from "core/githubAuthContract";
 import { parseToken } from "core/authToken";
 
 export type AccountIdentity = {
@@ -50,7 +51,7 @@ export const parseUserToken = (token: string): AccountIdentity | null => {
   if (typeof token !== "string" || !token.trim()) return null;
   const parsed = parseToken(token);
   if (!isAccountIdentity(parsed)) return null;
-  if ((parsed as { authKind?: unknown }).authKind === "google-session-v1") {
+  if (isExternalSessionKind((parsed as { authKind?: unknown }).authKind)) {
     // Unverified bearer payloads are display hints, never profile or permission data.
     const account: AccountIdentity = { userId: parsed.userId };
     if (typeof parsed.username === "string") account.username = parsed.username;

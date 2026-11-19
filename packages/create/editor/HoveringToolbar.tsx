@@ -1,6 +1,7 @@
 // create/editor/HoveringToolbar.tsx (使用 @floating-ui/react 最终修复版)
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
+import * as stylex from "@stylexjs/stylex";
 import { Editor, Range, Element as SlateElement, Transforms } from "slate";
 import { useFocused, useSlate, ReactEditor } from "slate-react";
 
@@ -19,6 +20,12 @@ import { isMarkActive, toggleMark } from "./mark";
 import { isCustomElement, type LinkElement } from "./types";
 import { LinkCommands } from "./utils/linkCommands";
 import { LinkEditorPopover } from "./LinkEditorPopover";
+import {
+  placementEnterTravel,
+  placementToTransformOrigin,
+} from "render/web/ui/triggerOrigin";
+import { triggerMotionStyles } from "render/web/ui/triggerMotion.styles";
+import { editorFloatingStyles } from "./floatingSurface.styles";
 
 const FORMAT_LABELS: Record<string, string> = {
   bold: "粗体",
@@ -60,7 +67,7 @@ export const HoveringToolbar = () => {
   const inFocus = useFocused();
 
   // 2. 设置 useFloating Hook
-  const { x, y, strategy, refs } = useFloating({
+  const { x, y, strategy, refs, placement } = useFloating({
     placement: "top",
     whileElementsMounted: autoUpdate,
     middleware: [offset(8), flip(), shift({ padding: 8 })],
@@ -139,24 +146,30 @@ export const HoveringToolbar = () => {
     }
   }, [editor, savedSelection, handleCloseLinkEditor]);
 
+  const travel = placementEnterTravel(placement, "top");
+
   return (
     <>
       <Portal>
         {showToolbar && (
           <Menu
             ref={refs.setFloating}
-            style={{
-              position: strategy,
-              top: y ?? 0,
-              left: x ?? 0,
-              padding: "6px 8px",
-              zIndex: 9998,
-              backgroundColor: "#222",
-              borderRadius: "6px",
-              transition: "opacity 0.2s",
-              display: "flex",
-              gap: "4px",
-            }}
+            className={
+              stylex.props(
+                editorFloatingStyles.hoveringToolbar,
+                triggerMotionStyles.enter,
+              ).className
+            }
+            style={
+              {
+                position: strategy,
+                top: y ?? 0,
+                left: x ?? 0,
+                transformOrigin: placementToTransformOrigin(placement, "top"),
+                "--nolo-enter-x": travel.x,
+                "--nolo-enter-y": travel.y,
+              } as React.CSSProperties & Record<`--${string}`, string>
+            }
             onMouseDown={(e) => e.preventDefault()}
           >
             <FormatButton format="bold" icon={LuBold} />

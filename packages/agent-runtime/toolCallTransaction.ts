@@ -16,7 +16,7 @@ import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";
 import type { LocalLoopObservationBoundary } from "./observationStream";
 import type { LocalLoopTiming } from "./loopTiming";
-import type { LocalAgentToolEvent } from "./localLoopContract";
+import type { LocalAgentToolEvent, LocalAgentToolImageArtifact } from "./localLoopContract";
 import type {
   AgentRuntimeHostAdapter,
   AgentRuntimeToolResult,
@@ -162,6 +162,110 @@ export function emitLoopEvent(
 
 function clip(value: string, max = 240) {
   return clipCompactText(value, max);
+}
+
+const IMAGE_ARTIFACT_TOOL_NAMES = new Set([
+  "read_image",
+  "captureVisualState",
+  "browser_screenshot",
+  "captureHostWindow",
+]);
+
+function sanitizeArtifactPath(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  // eslint-disable-next-line no-control-regex
+  if (!trimmed || /[\u0000-\u001f\u007f]/.test(trimmed)) return undefined;
+  if (/^(?:https?|data|javascript):/i.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+function normalizeStructuredImageArtifact(
+  raw: unknown,
+  defaultKind: "screenshot" | "image",
+): LocalAgentToolImageArtifact | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const item = raw as Record<string, unknown>;
+  const path = sanitizeArtifactPath(item.path);
+  if (!path) return undefined;
+  const kind = item.kind === "image" || item.kind === "screenshot" ? item.kind : defaultKind;
+  return {
+    path,
+    kind,
+    ...(typeof item.width === "number" && Number.isFinite(item.width) && item.width > 0
+      ? { width: item.width }
+      : {}),
+    ...(typeof item.height === "number" && Number.isFinite(item.height) && item.height > 0
+      ? { height: item.height }
+      : {}),
+    ...(typeof item.bytes === "number" && Number.isFinite(item.bytes) && item.bytes > 0
+      ? { bytes: item.bytes }
+      : {}),
+  };
+}
+
+/**
+ * 从图片/截屏类工具结果的结构化 metadata 中提取轻量图片产物元数据（仅路径与尺寸/体积，绝不带 base64）。
+ * 严格以结构化 metadata 为唯一真源：绝不正则反推 toolResult.content 文本摘要，避免文本内容改变结果。
+ */
+export function extractToolImageArtifacts(
+  toolName: string,
+  toolResult: AgentRuntimeToolResult,
+): LocalAgentToolImageArtifact[] | undefined {
+  if (!IMAGE_ARTIFACT_TOOL_NAMES.has(toolName)) return undefined;
+  const metadata = toolResult.metadata;
+  if (!metadata || typeof metadata !== "object") return undefined;
+  // Fail-closed: 显式失败/未投递/取消结果绝不产出图片产物，防止尝试过的路径被回退当成已产出文件。
+  if (
+    metadata.ok === false ||
+    metadata.imageDelivered === false ||
+    metadata.cancelled === true ||
+    metadata.failed === true
+  ) {
+    return undefined;
+  }
+
+  const defaultKind: "screenshot" | "image" =
+    toolName === "read_image" ? "image" : "screenshot";
+  const byPath = new Map<string, LocalAgentToolImageArtifact>();
+  const add = (candidate: LocalAgentToolImageArtifact) => {
+    const path = sanitizeArtifactPath(candidate.path);
+    if (!path) return;
+    const kind = candidate.kind ?? defaultKind;
+    const existing = byPath.get(path);
+    if (!existing) {
+      byPath.set(path, {
+        path,
+        kind,
+        ...(candidate.width !== undefined ? { width: candidate.width } : {}),
+        ...(candidate.height !== undefined ? { height: candidate.height } : {}),
+        ...(candidate.bytes !== undefined ? { bytes: candidate.bytes } : {}),
+      });
+      return;
+    }
+    if (existing.width === undefined && candidate.width !== undefined) existing.width = candidate.width;
+    if (existing.height === undefined && candidate.height !== undefined) existing.height = candidate.height;
+    if (existing.bytes === undefined && candidate.bytes !== undefined) existing.bytes = candidate.bytes;
+  };
+
+  if (Array.isArray(metadata.imageArtifacts)) {
+    for (const entry of metadata.imageArtifacts) {
+      const normalized = normalizeStructuredImageArtifact(entry, defaultKind);
+      if (normalized) add(normalized);
+    }
+    return byPath.size > 0 ? Array.from(byPath.values()) : undefined;
+  }
+
+  if (Array.isArray(metadata.paths)) {
+    for (const item of metadata.paths) {
+      if (typeof item === "string") add({ path: item });
+    }
+  }
+  if (typeof metadata.screenshotPath === "string") add({ path: metadata.screenshotPath });
+  if (typeof metadata.savedTo === "string") add({ path: metadata.savedTo });
+  if (typeof metadata.path === "string") add({ path: metadata.path });
+
+  return byPath.size > 0 ? Array.from(byPath.values()) : undefined;
 }
 
 /**
@@ -604,6 +708,7 @@ export async function executeToolCall(args: {
     const finishedAt = Date.now();
     const summary = summarizeToolResult(toolResult.content, toolResult.metadata);
     const safeMetadata = projectSafeToolObservationMetadata(toolResult.metadata);
+    const imageArtifacts = extractToolImageArtifacts(toolName, toolResult);
     loopTiming.mark("toolExecute", round);
     emitLoopEvent(
       boundary,
@@ -631,6 +736,7 @@ export async function executeToolCall(args: {
           ? { content: toolResult.content }
           : {}),
         metadata: toolResult.metadata,
+        ...(imageArtifacts ? { imageArtifacts } : {}),
       },
     );
   } catch (error) {

@@ -2640,6 +2640,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
     : options.message);
 
   const commandObservations: LocalCommandObservation[] = [];
+  const collectedToolImageArtifacts: import("../../agent-runtime/localLoopContract").LocalAgentToolImageArtifact[] = [];
   const retainCommandObservations = (result: RunAgentTurnResult): RunAgentTurnResult => {
     recordRunResultHeaderMeta(result, { commandObservations });
     return result;
@@ -2786,6 +2787,14 @@ async function executeLocalAgentTurnForCliWithAdapter(
       onToolEvent: (event) => {
         const observation = observeLocalCommandResult(event, options.localRuntimeCwd ?? process.cwd());
         if (observation) commandObservations.push({ ...observation, ...commandVersionBindings.get(event.toolCallId) });
+        if (event.type === "tool-result" && event.imageArtifacts?.length) {
+          // 已被回调即时消费的产物不再累计进 turnResult，避免中途分段 + 轮末收尾重复挂载。
+          if (options.onToolImageArtifacts) {
+            options.onToolImageArtifacts(event.imageArtifacts);
+          } else {
+            collectedToolImageArtifacts.push(...event.imageArtifacts);
+          }
+        }
         turnOutput.handleToolEvent(event);
       },
       ...(!options.noStream
@@ -2835,6 +2844,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
       ...(turnCredits !== undefined ? { turnCredits } : {}),
       ...(usageRecords?.length ? { usageRecords } : {}),
       ...(runContextWindow !== undefined ? { contextWindow: runContextWindow } : {}),
+      ...(collectedToolImageArtifacts.length > 0 ? { toolImageArtifacts: collectedToolImageArtifacts } : {}),
     };
     // 头元数据走旁路（不改结果对象形状）：见 agentRunResultFile.ts。
     // server/serverSync 与 writeDialog 远端同步共用同一判定（见 resolveResultServerMeta）。
