@@ -1,4 +1,11 @@
 
+## 0.261.0-alpha.5 (2026-11-19)
+
+### Bug Fixes
+
+* **chat:** 未完成回复的重试先就地确认一次 ([39bb68e](https://github.com/nolotus/bun-nolo/commit/39bb68e6061b589bc35db946fa57638b200250db))
+
+
 ## 0.261.0-alpha.4 (2026-11-19)
 
 ### Bug Fixes
