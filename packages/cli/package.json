@@ -1,6 +1,6 @@
 {
   "name": "nolo-cli",
-  "version": "0.227.0",
+  "version": "0.227.1",
   "type": "module",
   "description": "Agent-first terminal workspace for Nolo",
   "bin": {

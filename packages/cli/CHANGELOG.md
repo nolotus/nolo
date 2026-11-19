@@ -1,4 +1,11 @@
 
+## 0.227.1 (2026-11-19)
+
+### Bug Fixes
+
+* **desktop:** electrobun 依赖回到 2.0.6，并追溯登记 main 发布合并提交 ([ec8f3ba](https://github.com/nolotus/bun-nolo/commit/ec8f3bae3a7e8b50525f76332b87fbb51c923546))
+
+
 ## 0.227.0 (2026-11-19)
 
 ### Features
