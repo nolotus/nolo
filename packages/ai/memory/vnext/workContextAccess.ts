@@ -11,7 +11,7 @@ export async function resolveWorkContextAccess(db: any, userId: string, dialogId
   if (userMessageId === undefined) return { scope };
   if (typeof userMessageId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(userMessageId)) throw new Error("persisted user message required");
   const message = await db.get(dialogMessageKey(dialogId, userMessageId));
-  if (!message || message.id !== userMessageId || message.role !== "user" || message.userId !== userId || isTombstoneRecord(message) || typeof message.content !== "string" || typeof message.createdAt !== "string") throw new Error("work source forbidden");
+  if (!message || message.id !== userMessageId || (message.dialogId != null && message.dialogId !== dialogId) || message.role !== "user" || message.userId !== userId || isTombstoneRecord(message) || typeof message.content !== "string" || typeof message.createdAt !== "string") throw new Error("work source forbidden");
   return { scope, sourceRef: JSON.stringify(["dialog", dialogId, "message", userMessageId]) };
 }
 

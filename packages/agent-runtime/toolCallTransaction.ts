@@ -1,3 +1,4 @@
+import { parseNoloWorkspaceToolArguments } from "./noloWorkspaceTools";
 /**
  * 单个工具调用事务（localLoop 拆分第二批）。
  *
@@ -403,6 +404,7 @@ export async function executeToolCall(args: {
   boundary: LocalLoopObservationBoundary;
   loopTiming: LocalLoopTiming;
   userInputText: string;
+  getDirectWorkSource?: () => Promise<string | undefined>;
   runToolNames?: string[];
   /** 仅用于截断诊断留痕（provider/model/finish_reason），不影响执行。 */
   diagnosticContext?: ToolArgsDiagnosticContext;
@@ -631,14 +633,19 @@ export async function executeToolCall(args: {
       }
 
       if (!toolResult) {
+        let runtimeContext = input.runtimeContext;
+        if (args.getDirectWorkSource && !runtimeContext?.userMessageId && toolName === "rememberMemory" &&
+            parseNoloWorkspaceToolArguments(unwrappedArguments).mode === "work") {
+          const id = await args.getDirectWorkSource();
+          throwIfAborted(input);
+          if (id) runtimeContext = { ...runtimeContext, userMessageId: id };
+        }
         const executePromise = input.adapter.executeTool({
           id: toolCall.id,
           name: toolName,
           arguments: unwrappedArguments,
           ...(userInputText ? { userInput: userInputText } : {}),
-          ...(input.runtimeContext
-            ? { runtimeContext: input.runtimeContext }
-            : {}),
+          ...(runtimeContext ? { runtimeContext } : {}),
           ...(args.runToolNames
             ? { runToolNames: args.runToolNames }
             : {}),
@@ -653,9 +660,7 @@ export async function executeToolCall(args: {
               : "chat",
         }, {
           ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-          ...(input.runtimeContext
-            ? { runtimeContext: input.runtimeContext }
-            : {}),
+          ...(runtimeContext ? { runtimeContext } : {}),
         });
         const execStartedAtMs = Date.now();
         toolResult = await runAbortableToolTask(input, executePromise, toolName);

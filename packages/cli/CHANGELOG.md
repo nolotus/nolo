@@ -1,4 +1,11 @@
 
+## 0.247.0-alpha.2 (2026-11-19)
+
+### Bug Fixes
+
+* **cli:** persist verified source for direct work memory writes ([e2b6c98](https://github.com/nolotus/bun-nolo/commit/e2b6c988759dcb1e55113072ff46ace90e888525))
+
+
 ## 0.247.0-alpha.1 (2026-11-19)
 
 ### Features

@@ -220,6 +220,7 @@ async function runAgentChat(
   agentRunner: typeof runAgentTurn = runAgentTurn,
   options: {
     freshDialog?: boolean;
+    internalTurn?: boolean;
     userMessages?: import("../client/agentRunTypes").RunAgentTurnOptions["userMessages"];
     /** Explicit stable queued-batch tail id; forwarded to agentRunner. */
     cliBatchId?: string;
@@ -584,6 +585,7 @@ async function runAgentChat(
     getProcessCausalDepth: options.getProcessCausalDepth,
     continueDialogId: state.dialogId,
     freshDialog: options.freshDialog,
+    internalTurn: options.internalTurn,
     userMessages: options.userMessages,
     ...(options.cliBatchId ? { cliBatchId: options.cliBatchId } : {}),
     // accountTaskUserSource 已移除：它专为 host task 证据链服务，
@@ -1915,6 +1917,7 @@ export async function runOneAgentTurn(
         ctx.options.agentRunner,
         {
           freshDialog: attemptFreshDialog,
+          internalTurn: isInternalEvent,
         userMessages: (req as TuiBatchTurnRequest).userMessages,
         ...((req as TuiBatchTurnRequest).cliBatchId
           ? { cliBatchId: (req as TuiBatchTurnRequest).cliBatchId }

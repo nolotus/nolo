@@ -300,6 +300,8 @@ export type LocalAgentTurnInput = {
    * 注入消息进入 `messages`，因此天然随 turnMessages 一起 saveTurn 持久化。
    */
   drainInjections?: () => LocalTurnInjection[] | Promise<LocalTurnInjection[]>;
+  /** Lazily persist the original direct user input when a work-memory write needs it. */
+  prepareDirectWorkMemorySource?: (message: AgentRuntimeChatMessage) => Promise<string | undefined>;
   /** Host-only persisted source resolution after receipt commits, before provider dispatch. */
   resolveInjectedUserMessageId?: (
     messages: readonly (AgentRuntimeChatMessage & { cliMessageId?: string })[],
@@ -1303,6 +1305,29 @@ export async function runLocalAgentTurn(
     capToolMessage,
   });
 
+  let prepareDirectWorkMemorySource = !input.userMessages?.length ? input.prepareDirectWorkMemorySource : undefined;
+  const directUserMessage = prepareDirectWorkMemorySource
+    ? transcript.persisted(sanitizedPersistedInput, input.persistedInputReference)[0]
+    : undefined;
+
+  let directWorkSource: Promise<string | undefined> | undefined;
+  const getDirectWorkSource = async () => {
+    const prepare = prepareDirectWorkMemorySource;
+    if (!prepare || directUserMessage?.role !== "user") return undefined;
+    const attempt = directWorkSource ??= (async () => {
+      try {
+        const id = await prepare(directUserMessage);
+        return id && id === directUserMessage.id ? id : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    const id = await attempt;
+    // Share in-flight work. A failed waiter must not clear a newer retry.
+    if (!id && directWorkSource === attempt) directWorkSource = undefined;
+    return id;
+  };
+
   const userInputText = extractUserInputText(input.input);
   let toolCallCount = 0;
   // 兜底标记（emptyAssistantFallbackReason / emptyAssistantOutputUsable）已
@@ -1606,6 +1631,7 @@ export async function runLocalAgentTurn(
           // admitted batch together: multiple messages must not inherit old A.
           input.runtimeContext = { ...input.runtimeContext };
           delete input.runtimeContext.userMessageId;
+          prepareDirectWorkMemorySource = undefined;
           const admittedMessages = inFlightTransactions.flatMap(transaction => transaction.messages);
           if (admittedMessages.length === 1 && admittedMessages[0]?.cliMessageId) {
             try {
@@ -2015,6 +2041,7 @@ export async function runLocalAgentTurn(
         const { toolResult, toolExecMs } = await executeToolCall({
           input: executionInput,
           toolCall,
+          ...(prepareDirectWorkMemorySource ? { getDirectWorkSource } : {}),
           round,
           boundary: observationBoundary,
           loopTiming,

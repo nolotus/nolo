@@ -191,9 +191,8 @@ export type RunAgentTurnOptions = {
    * batch from the presence of `userMessages`.
    */
   cliBatchId?: string;
-  /** Trusted explicit task lifecycle only, bound to this actual user submission.
-   * Never populated from provider output, prompt parsing or runtimeContext. */
-  /** Host-minted real user submission only; absent for internal wakes. */
+  /** Host-classified internal wake, never an ordinary user submission. */
+  internalTurn?: boolean;
 
   // accountTaskStart / hostTaskWorkspaceEvidence / hostReviewContentAcceptance /
   // hostReviewDispatch 均随 hostTask 基础设施移除（2026-11-15）。

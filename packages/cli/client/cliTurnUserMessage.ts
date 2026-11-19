@@ -1,80 +1,97 @@
-/**
- * 当前 turn 的「已持久化用户消息 id」解析。
- *
- * 工作记忆工具（rememberMemory / queryMemory 的 `mode: work`）从
- * `call.runtimeContext.userMessageId` 取宿主事实，并要求它是**已经落库**的用户
- * 消息（`workContextAccess.ts` 会按 `${dialogId}-msg-${id}` 读记录并校验 role /
- * userId）。所以这里只做两件事：
- *
- * 1. 只接受**明确的**来源：批量提交必须有且仅有一个消息 id；普通 turn 只看本轮
- *    随 turn 传来的 `userMessages`（这些是 receipt-backed、已落库的行），不猜
- *    「最新一条」，也不从模型参数里取。
- * 2. 逐个**回读校验**确实存在于该 dialog 下且 role 为 user，才交给运行时。
- *
- * 任一条件不满足就返回 undefined —— 宁可不注入（工具因此拒绝写入），也不把
- * 错误来源写进记忆。
- */
+import { buildDialogKey, dialogMessageKey } from "database/dialogKey";
+import { dialogOwnerKey, registerDialogOwner } from "database-engine/dialogOwner";
+import { isTombstoneRecord } from "database/tombstones";
 import { resolveWorkContextAccess } from "../../ai/memory/vnext/workContextAccess";
+import { dialogTurnUserMessageId } from "../../agent-runtime/dialogHistoryOrder";
+import type { AgentRuntimeSaveTurnInput } from "../agentRuntimeLocal";
 import type { HybridRecordStore } from "./hybridRecordStore";
+import { buildLocalDialogWritePlan } from "./localDialogRecords";
 
-const messageKey = (dialogId: string, messageId: string) =>
-  `dialog-${dialogId}-msg-${messageId}`;
-
-export interface ResolvePersistedTurnUserMessageInput {
+interface ResolvePersistedTurnUserMessageInput {
   store: Pick<HybridRecordStore, "read">;
+  userId: string;
   dialogId: string;
-  /** 批量提交的显式消息 id（`resolveCliBatchIdentity` 的结果）。 */
-  batchMessageIds?: readonly string[] | null;
-  /** 本轮随 turn 传入的、已落库的用户消息（receipt-backed）。 */
-  userMessages?: readonly { cliMessageId?: string }[] | null;
+  batchMessageIds?: readonly string[];
+  userMessages?: readonly { cliMessageId?: string }[];
 }
 
-/** 候选 id 必须唯一；0 个或多个都视为「来源不明确」。 */
-const singleCandidate = (
-  input: ResolvePersistedTurnUserMessageInput,
-): string | null => {
-  const candidates = input.batchMessageIds?.length
-    ? input.batchMessageIds
-    : (input.userMessages ?? [])
-        .map((message) => message.cliMessageId)
-        .filter((id): id is string => typeof id === "string" && id.length > 0);
-  const unique = [...new Set(candidates)];
-  return unique.length === 1 ? unique[0]! : null;
-};
-
-export const resolvePersistedTurnUserMessageId = async (
-  input: ResolvePersistedTurnUserMessageInput,
-): Promise<string | undefined> => {
-  if (!input.dialogId) return undefined;
-  const candidate = singleCandidate(input);
-  if (!candidate) return undefined;
+/** The host chooses the candidate; the local store must prove its provenance. */
+export async function resolvePersistedTurnUserMessageId(input: ResolvePersistedTurnUserMessageInput): Promise<string | undefined> {
+  const { store, dialogId, userId, userMessages, batchMessageIds } = input;
+  if (userMessages && userMessages.length !== 1) return undefined;
+  if (batchMessageIds && batchMessageIds.length !== 1) return undefined;
+  const candidate = userMessages ? userMessages[0]?.cliMessageId : batchMessageIds?.[0];
+  if (!candidate || (batchMessageIds && batchMessageIds[0] !== candidate)) return undefined;
   try {
-    const record = (await input.store.read(messageKey(input.dialogId, candidate), {
-      remote: false,
-    })) as { id?: unknown; role?: unknown } | null;
-    if (!record || record.role !== "user" || record.id !== candidate) return undefined;
+    await resolveWorkContextAccess({ get: (key: string) => store.read(key, { remote: false }) }, userId, dialogId, candidate);
     return candidate;
   } catch {
-    // 读取失败 = 无法证明已持久化，按「不注入」处理（工具会明确拒绝写入）。
     return undefined;
   }
-};
+}
 
-/** Reuse persisted-turn parsing and work-access ownership checks for admitted receipts. */
-export async function resolveInjectedTurnUserMessageId(input: ResolvePersistedTurnUserMessageInput & {
+/** Persist exactly the same sanitized direct user row/id that saveTurn will use.
+ * This is not a completed turn, queue receipt, or sync request. */
+export async function persistDirectWorkMemorySource(args: {
+  store: HybridRecordStore;
   userId: string;
+  dialogId: string;
+  turnId: string;
+  freshDialog: boolean;
+  input: Pick<AgentRuntimeSaveTurnInput, "agentKey" | "spaceId" | "category" | "parentDialogId" | "inheritedFromDialogKey" | "runtimeContext">;
+  message: AgentRuntimeSaveTurnInput["messages"][number];
 }): Promise<string | undefined> {
-  const messages = input.userMessages;
-  if (messages?.length !== 1 || !messages[0]?.cliMessageId) return undefined;
-  const id = await resolvePersistedTurnUserMessageId(input);
-  if (!id) return undefined;
-  try {
-    await resolveWorkContextAccess(
-      { get: (key: string) => input.store.read(key, { remote: false }) },
-      input.userId, input.dialogId, id,
-    );
-    return id;
-  } catch {
+  const { store, userId, dialogId, turnId, message } = args;
+  if (!userId || userId === "server" || !/^[A-Za-z0-9_-]{1,128}$/.test(dialogId)) return undefined;
+  const id = dialogTurnUserMessageId(turnId, 0);
+  if (!id || message.role !== "user" || message.id !== id || typeof message.content !== "string") return undefined;
+  const dialogKey = buildDialogKey(userId, dialogId);
+  const messageKey = dialogMessageKey(dialogId, id);
+  const existingDialog = await store.read(dialogKey, { remote: false });
+  if (existingDialog) {
+    await resolveWorkContextAccess({ get: async () => existingDialog }, userId, dialogId);
+  } else if (!args.freshDialog) {
     return undefined;
   }
+  const existingMessage = await store.read(messageKey, { remote: false });
+  if (!existingMessage) {
+    const { ops } = buildLocalDialogWritePlan({
+      input: { ...args.input, continueDialogId: dialogId, messages: [message], result: { content: "", model: "" } },
+      userId, now: Date.now(), createId: () => dialogId, existingDialog,
+    });
+    const userOp = ops.find(op => op.key === messageKey && op.value.role === "user");
+    const dialogOp = ops.find(op => op.key === dialogKey);
+    if (!userOp || !dialogOp) return undefined;
+    // A new dialog needs its header before access can be proven. Do not set
+    // completion fields until the actual turn save, or update an existing header.
+    const { status, finishedAt, ...openDialog } = dialogOp.value;
+    if (!existingDialog) {
+      // Match pending-user writes: register before publishing the header, and
+      // never overwrite an existing owner. The helper logs failures, so read
+      // back the binding before creating a dialog for this source.
+      await registerDialogOwner({
+        store: {
+          get: key => store.read(key, { remote: false }),
+          put: (key, value) => store.batch([{ type: "put", key, value }]),
+        },
+        dialogId, ownerId: userId, spaceId: args.input.spaceId, source: "cli-work-memory-source",
+      });
+      const owner = await store.read(dialogOwnerKey(dialogId), { remote: false });
+      if (owner?.dialogId !== dialogId || owner.ownerId !== userId) return undefined;
+      // The owner registration is an await boundary. If another writer has
+      // already created a header, validate it instead of replacing it.
+      const currentDialog = await store.read(dialogKey, { remote: false });
+      if (currentDialog) {
+        await resolveWorkContextAccess({ get: async () => currentDialog }, userId, dialogId);
+        await store.batch([userOp]);
+      } else {
+        await store.batch([{ ...dialogOp, value: openDialog }, userOp]);
+      }
+    } else {
+      await store.batch([userOp]);
+    }
+  }
+  const persisted = await store.read(messageKey, { remote: false });
+  if (!persisted || isTombstoneRecord(persisted) || persisted.content !== message.content) return undefined;
+  return resolvePersistedTurnUserMessageId({ store, userId, dialogId, userMessages: [{ cliMessageId: id }] });
 }
