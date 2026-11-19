@@ -1,4 +1,11 @@
 
+## 0.260.0-alpha.4 (2026-11-19)
+
+### Bug Fixes
+
+* **database:** 同步失败日志带上服务端稳定错误码 ([b213e6c](https://github.com/nolotus/bun-nolo/commit/b213e6c43eb7bbd194826ee2ad013cf7ee1aa118))
+
+
 ## 0.260.0-alpha.3 (2026-11-18)
 
 ### Bug Fixes

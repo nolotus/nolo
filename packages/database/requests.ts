@@ -25,6 +25,89 @@ const logRequestFailure = (
   console.error(message);
 };
 
+// Allowlist protocol identifiers only: even error/code may contain private data.
+const mutationFailureIdentifiers = new Set([
+  "AUTHORITY_HOME_CONTROLLED",
+  "AUTHORITY_MISMATCH",
+  "USER_BATCH_AUTHORITY_CONTROLLED",
+  "SPACE_OWNER_AGENT_FORBIDDEN",
+  "APP_WRITE_FORBIDDEN",
+  "INCOMPLETE_APP_PAYLOAD",
+  "REVISION_CONFLICT",
+  "tombstone_conflict",
+  "INVALID_REQUEST",
+  "FORBIDDEN",
+  "TOKEN_STATS_SERVER_MANAGED",
+  "PATCH_PERMISSION_DENIED",
+  "WRITE_PERMISSION_DENIED",
+  "UNSUPPORTED_OAUTH_PROVIDER",
+  "INVALID_AGENT_SKILL_MODE",
+  "AUTOMATION_OWNER_AGENT_FORBIDDEN",
+  "PROTOCOL_UNAVAILABLE",
+  "INVALID_IF_MATCH",
+  "provider_model_mismatch",
+]);
+
+// Diagnostic reads must never delay the failure return: a slow or huge error
+// body would otherwise block the caller (and the log) indefinitely.
+const DIAGNOSTIC_READ_TIMEOUT_MS = 1200;
+const DIAGNOSTIC_MAX_BYTES = 8 * 1024;
+
+const readBoundedJson = async (response: Response): Promise<unknown> => {
+  // 这两个 helper 只返回 boolean，响应体由本次诊断独占：直接读原响应并在 finally
+  // 里取消。取消 clone 并不会关掉原分支，慢响应可能把连接留到调用结束之后。
+  const body = response.body;
+  if (!body) return null;
+  const reader = body.getReader();
+  const deadline = Date.now() + DIAGNOSTIC_READ_TIMEOUT_MS;
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    for (;;) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw new Error("diagnostic read timed out");
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("diagnostic read timed out")), remainingMs);
+      });
+      const { done, value } = await Promise.race([reader.read(), timeout]).finally(() => {
+        if (timer !== undefined) clearTimeout(timer);
+      });
+      if (done) break;
+      received += value.byteLength;
+      if (received > DIAGNOSTIC_MAX_BYTES) throw new Error("diagnostic read too large");
+      chunks.push(value);
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(merged));
+};
+
+const describeMutationFailure = async (response: Response): Promise<string> => {
+  const status = `HTTP ${response.status}`;
+  try {
+    const body = (await readBoundedJson(response)) as Record<string, unknown> | null;
+    const fields = (["error", "code", "message"] as const).flatMap((field) => {
+      const value = body?.[field];
+      return typeof value === "string" && mutationFailureIdentifiers.has(value)
+        ? [`${field}=${value}`]
+        : [];
+    });
+    return fields.length ? `${status} (${fields.join(", ")})` : status;
+  } catch {
+    // Timeout, oversize, non-JSON or a consumed body all degrade to status only.
+    return status;
+  }
+};
+
 /**
  * 通用的Nolo服务器请求函数
  * @param server 服务器地址
@@ -92,10 +175,10 @@ export const noloPatchRequest = async (
       state,
       signal
     );
-    if (!response.ok) {
+    if (!response.ok && failureLogLevel !== "silent") {
       logRequestFailure(
         failureLogLevel,
-        `PATCH request failed for ${dbKey} on ${server}: HTTP ${response.status}`
+        `PATCH request failed for ${dbKey} on ${server}: ${await describeMutationFailure(response)}`
       );
     }
     return response.ok;
@@ -139,10 +222,10 @@ export const noloWriteRequest = async (
       state,
       signal
     );
-    if (!response.ok) {
+    if (!response.ok && failureLogLevel !== "silent") {
       logRequestFailure(
         failureLogLevel,
-        `Write request failed for ${customKey} on ${server}: HTTP ${response.status}`
+        `Write request failed for ${customKey} on ${server}: ${await describeMutationFailure(response)}`
       );
     }
     return response.ok;
