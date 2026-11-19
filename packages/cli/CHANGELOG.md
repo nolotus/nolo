@@ -1,4 +1,11 @@
 
+## 0.249.0-alpha.2 (2026-11-19)
+
+### Performance Improvements
+
+* **web:** 移除访客也付费的 ChatSidebar 无条件预取 ([26475f5](https://github.com/nolotus/bun-nolo/commit/26475f5ddca12acad8d1e12ba07a325765b34dc1))
+
+
 ## 0.249.0-alpha.1 (2026-11-19)
 
 ### Features
