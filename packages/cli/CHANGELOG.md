@@ -1,4 +1,11 @@
 
+## 0.249.0-alpha.3 (2026-11-19)
+
+### Performance Improvements
+
+* **ai:** 拆出零依赖的 prompt skill 偏好层，entry 减 303KB ([d12b7ec](https://github.com/nolotus/bun-nolo/commit/d12b7ec6646e7a65994d99977dd5743e36d0084b))
+
+
 ## 0.249.0-alpha.2 (2026-11-19)
 
 ### Performance Improvements

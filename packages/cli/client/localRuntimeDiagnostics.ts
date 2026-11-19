@@ -1,6 +1,6 @@
 import type { McpLocalOAuthManagerFactory } from "../mcp/mcpLocalRuntimeAdapter";
 import { resolveUserEnabledSkills } from "../../ai/skills/userSkills";
-import { normalizeEnabledPromptSkills } from "../../ai/skills/userPromptSkills";
+import { normalizeEnabledPromptSkills } from "../../ai/skills/userPromptSkillSlugs";
 import {
   resolveAgentSkillConfig,
   type AgentSkillConfigSource,

@@ -8,7 +8,7 @@
  * - 统一解析用户启用的 Skill（resolveUserEnabledSkills）：新字段优先，显式 [] 或畸形关闭，缺失才回退 legacy。
  */
 
-import { normalizeEnabledPromptSkills } from "./userPromptSkills";
+import { normalizeEnabledPromptSkills } from "./userPromptSkillSlugs";
 import type { WorkflowGuidanceSkillSlug } from "./workflowGuidanceSkills";
 
 /** New-account initialization only; never a fallback for missing preferences. */
