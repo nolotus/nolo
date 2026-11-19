@@ -1,4 +1,11 @@
 
+## 0.244.0-alpha.2 (2026-11-19)
+
+### Bug Fixes
+
+* **chat:** 未完成回复提示去掉边框盒子，改成一行无边框提示 ([b205fe0](https://github.com/nolotus/bun-nolo/commit/b205fe0025839b9ccb1008e6f9018f63b1aed9cf))
+
+
 ## 0.244.0-alpha.1 (2026-11-19)
 
 ### Features
