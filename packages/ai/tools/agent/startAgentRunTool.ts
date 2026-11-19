@@ -599,6 +599,10 @@ export async function startAgentRunFunc(
                 ...(title ? { title } : {}),
                 payloadMetrics,
                 selectionCheck,
+                // 近场行动约束（与 workspaceShell 的 detach 回执同源）：
+                // 同类规则在静态提示词里已重复 5 处仍会被稀释，这里放到决策点旁边。
+                turnAction:
+                    "This run is tracked. Do NOT end this turn to wait if any other independent authorized work remains — invoke tools for it now. End the turn only when no independent work is left.",
             },
             displayData: formatStartRunCard(resolveRunLabel(identity), status, {
                 task: taskPreview,

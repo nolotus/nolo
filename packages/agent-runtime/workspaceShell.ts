@@ -1433,6 +1433,11 @@ export async function runWorkspaceCommand(args: {
         taskId,
         status: "running",
         ...(immediate ? { reason: "long-running-command" } : {}),
+        // 近场行动约束：这条回执正好出现在模型决定「继续还是收尾」的位置。
+        // 同类规则在静态提示词里已重复 5 处（并行块/工具描述/工具指引/回复准则），
+        // 但都沉在数万 token 之前，容易被「回执已收到、先汇报」的局部惯性盖过。
+        turnAction:
+          "This task is tracked. Do NOT end this turn to wait if any other independent authorized work remains — invoke tools for it now. End the turn only when no independent work is left.",
       }),
     };
   }

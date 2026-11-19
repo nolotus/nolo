@@ -1,4 +1,16 @@
 
+## 0.266.0-alpha.5 (2026-11-19)
+
+### Bug Fixes
+
+* **agent-runtime:** detach 回执带上近场 turnAction 指引 ([64dbe3b](https://github.com/nolotus/bun-nolo/commit/64dbe3be04dd3ee157e81969b338902ad14776ef))
+
+### Performance Improvements
+
+* **web:** 删除访客首页的 ?present=1 演讲翻页模式 ([cb65a31](https://github.com/nolotus/bun-nolo/commit/cb65a317bb71fff73483c6ca2a45df2454f065b9))
+* **web:** 登录态首页面板拆成 lazy chunk，访客不再拉内容列表 ([678710e](https://github.com/nolotus/bun-nolo/commit/678710ea68680d704465c5486b8664f32ea9b599))
+
+
 ## 0.266.0-alpha.4 (2026-11-19)
 
 ### Performance Improvements

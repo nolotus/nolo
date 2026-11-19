@@ -628,13 +628,12 @@
   text-underline-offset: 3px;
 }
 
-/* ── Paging (owner pitches in person) ─────────────────── */
+/* ── Scrolling & desktop viewport ─────────────────────── */
 
 /* The guest home scrolls inside .MainLayout__main, whose top edge is already
  * below the topbar. Ordinary scrolling is deliberately free of scroll-snap:
  * `y proximity` kept pulling a section to the scroller's top edge mid-flick and
- * users reported the wheel / trackpad scroll felt "sticky" (owner 2026-11-24).
- * Only `?present=1` (below) changes the layout for step-by-step paging. */
+ * users reported the wheel / trackpad scroll felt "sticky" (owner 2026-11-24). */
 .home-landing > section {
   /* Deep-link / scrollIntoView offset: 0 because the scroller already starts
    * below the topbar; override if the topbar ever overlays it. */
@@ -648,30 +647,6 @@
     min-height: 300px;
     overflow: hidden;
   }
-}
-
-/* ?present=1 — one section per screen, vertically centered. Ordinary visitors
- * never get this class (it is read from the URL, never linked in navigation). */
-.home-landing--present > section {
-  box-sizing: border-box;
-  min-height: calc(100svh - 56px);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  margin-top: 0;
-  padding-block: 48px;
-}
-
-.home-landing--present > section > .hl-shell {
-  margin-inline: auto;
-}
-
-.home-landing--present .hl-title {
-  margin-top: 40px;
-}
-
-.home-landing--present .hl-relay {
-  margin-top: 56px;
 }
 
 /* ── Small screens ────────────────────────────────────── */
