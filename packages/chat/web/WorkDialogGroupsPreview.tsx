@@ -1066,8 +1066,8 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     return map;
   }, [spaceGroups, records, hasResolvedRemoteScope, memberCategoriesBySpaceId, typeFilter, pendingCategories, nameScope]);
 
-  // Flat means no visible recency headings, not strict time order:
-  // intentionally keep running subtrees pinned first and preserve parent/child folding.
+  // Keep running subtrees first and preserve parent/child folding, but render
+  // ordinary history as one continuous list without invisible date sections.
   const renderFlatHierarchy = (
     groupRows: readonly WorkDialogFlatRow[],
     groupSpaceKey?: string | null,
@@ -1082,9 +1082,9 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
         <div>正在进行</div>
         {view.runningRows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth, groupSpaceKey))}
       </div>}
-      {view.sections.map(section => <div key={section.key} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
-        {section.rows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth, groupSpaceKey))}
-      </div>)}
+      {view.sections.flatMap(section => section.rows).map(entry =>
+        renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth, groupSpaceKey)
+      )}
     </div>;
   };
 

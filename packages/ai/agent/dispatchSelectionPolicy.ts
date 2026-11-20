@@ -51,8 +51,8 @@ const MODEL_TIERS: ReadonlyArray<{
 }> = [
   {
     tier: "extreme",
-    models: ["GPT-6.2 Astra", "GPT-6 Astra", "Claude Opus 5.5"],
-    pattern: /^(?:gpt-6(?:[.-]2)?-astra|claude-opus-5[.-]5)(?:$|[-@])/,
+    models: ["GPT-6.2 Astra", "GPT-6 Astra", "Claude Opus 5.5", "Gemini 4 Neon"],
+    pattern: /^(?:gpt-6(?:[.-]2)?-astra|claude-opus-5[.-]5|gemini-4-neon)(?:$|[-@])/,
   },
   {
     tier: "complex",

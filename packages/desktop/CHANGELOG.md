@@ -1,4 +1,13 @@
 
+## 0.266.0-alpha.10 (2026-11-20)
+
+### Bug Fixes
+
+* **agent:** classify Gemini 4 Neon as extreme ([aad650c](https://github.com/nolotus/bun-nolo/commit/aad650c8c43294be4267a03b268b0ffc4ecf80ec))
+* **auth:** advertise HTTPS for hosted device authorization ([8b0c3c7](https://github.com/nolotus/bun-nolo/commit/8b0c3c71d14cfc38daf38cdbf3b00e169ebea086))
+* **web:** flatten sidebar conversation history ([cbe601b](https://github.com/nolotus/bun-nolo/commit/cbe601b09487480df05a356e9e1be8cf2f86df97))
+
+
 ## 0.266.0-alpha.9 (2026-11-20)
 
 ### Bug Fixes
