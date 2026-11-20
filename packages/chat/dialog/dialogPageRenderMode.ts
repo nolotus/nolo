@@ -21,9 +21,11 @@ export type QuickChatRouteState = {
 } | null | undefined;
 
 export const getQuickChatFirstMessageText = (
-  routeState: QuickChatRouteState
+  // `useLocation().state` 的类型是 unknown（react-router 不对其做任何保证），
+  // 所以这里按 unknown 接收并在内部收窄，避免调用方被迫做宽泛断言。
+  routeState: unknown
 ) => {
-  const text = routeState?.quickChatFirstMessage?.text;
+  const text = (routeState as QuickChatRouteState)?.quickChatFirstMessage?.text;
   return asTrimmedString(text);
 };
 

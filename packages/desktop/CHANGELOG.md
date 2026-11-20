@@ -1,4 +1,11 @@
 
+## 0.266.0-alpha.9 (2026-11-20)
+
+### Bug Fixes
+
+* **web:** routeState 按 unknown 收窄，修 typecheck:ci 失败 ([4684bbd](https://github.com/nolotus/bun-nolo/commit/4684bbda8c191ce2a6ec98d3182ed13752b72cc6))
+
+
 ## 0.266.0-alpha.8 (2026-11-20)
 
 ### Performance Improvements
