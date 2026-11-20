@@ -25,6 +25,9 @@ export type McpNetworkPolicyOptions = {
   /** Trusted adapter hook, after DNS/body awaits and immediately before HTTP request.
    * Once request bytes are sent, cancellation cannot undo remote side effects. */
   beforeSend?(input: string | URL | Request, init?: RequestInit): Promise<void>;
+  /** Operator-controlled server gateway opt-in for exact saved loopback origin only.
+   * Never enable for user-supplied server MCP connections. */
+  allowOperatorLoopback?: boolean;
   maxResponseBytes?: number; maxRequestBytes?: number; timeoutMs?: number;
 };
 export interface McpNetworkPolicy {
@@ -51,7 +54,12 @@ export function createMcpNetworkPolicy(options: McpNetworkPolicyOptions): McpNet
     const url = urlOf(req ? req.url : String(input));
     const signal = AbortSignal.any([...(init?.signal ?? req?.signal ? [init?.signal ?? req!.signal] : []), AbortSignal.timeout(timeoutMs)]);
     signal?.throwIfAborted();
-    if (options.placement.kind === "server" && url.protocol !== "https:") throw new Error("network_denied");
+    const isExactOperatorLoopback = Boolean(
+      options.allowOperatorLoopback &&
+      url.origin === saved.origin &&
+      (saved.hostname === "127.0.0.1" || saved.hostname === "[::1]" || saved.hostname === "::1"),
+    );
+    if (options.placement.kind === "server" && url.protocol !== "https:" && !isExactOperatorLoopback) throw new Error("network_denied");
     const host = url.hostname.replace(/^\[|\]$/g, "");
     const addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await new Promise<McpResolvedAddress[]>((done, reject) => {
       const abort = () => reject(new Error(signal.reason?.name === "TimeoutError" ? "timeout" : "cancelled"));
@@ -63,6 +71,7 @@ export function createMcpNetworkPolicy(options: McpNetworkPolicyOptions): McpNet
     for (const entry of addresses) {
       if (entry.family !== isIP(entry.address) || !entry.family) throw new Error("network_denied");
       if (isMcpPublicAddress(entry.address)) continue;
+      if (isExactOperatorLoopback && (entry.address === "127.0.0.1" || entry.address === "::1")) continue;
       const lan = new BlockList();
       for (const [ip, bits] of [["10.0.0.0", 8], ["127.0.0.0", 8], ["172.16.0.0", 12], ["192.168.0.0", 16]] as const) lan.addSubnet(ip, bits, "ipv4");
       lan.addAddress("::1", "ipv6"); lan.addSubnet("fc00::", 7, "ipv6");

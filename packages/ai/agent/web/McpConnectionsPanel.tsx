@@ -26,6 +26,24 @@ const ERROR_MESSAGES: Record<string, string> = {
   credential_unavailable: "受控凭据存储不可用，未保存配置。",
   limit_exceeded: "提交内容超出限制，请精简配置后重试。",
   invalid_input: "配置格式不符合要求，请检查名称、HTTPS 地址、认证方式与工具白名单。",
+  network_denied: "远端地址被安全策略拒绝（服务端仅允许公网 HTTPS，拦截私网与重定向）。",
+  transport_error: "无法连接到远端 MCP 服务，请检查服务地址、HTTPS 证书或服务运行状态。",
+  timeout: "连接远端 MCP 服务超时，请稍后重试。",
+};
+
+export type DiscoveredMcpTool = {
+  name: string;
+  description?: string;
+  argumentKeys: string[];
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  schemaCompatible: boolean;
+};
+
+export type DiscoveredMcpToolsResult = {
+  connectionId: string;
+  connectionRevision: number;
+  tools: DiscoveredMcpTool[];
 };
 
 export function parseAllowedToolNames(raw: string | readonly string[] | undefined): string[] {
@@ -214,12 +232,12 @@ async function request<T>(
   path: string,
   signal: AbortSignal,
   body?: unknown,
-  method = "POST",
+  method?: string,
 ): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${server.replace(/\/+$/, "")}${API}${path}`, {
-      method: body === undefined ? "GET" : method,
+      method: method ?? (body === undefined ? "GET" : "POST"),
       headers: {
         Authorization: `Bearer ${token}`,
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -408,6 +426,22 @@ export async function deleteMcpConfiguration(input: {
   );
 }
 
+export async function discoverMcpConfigurationTools(input: {
+  server: string;
+  token: string;
+  signal: AbortSignal;
+  connectionId: string;
+}): Promise<DiscoveredMcpToolsResult> {
+  return request<DiscoveredMcpToolsResult>(
+    input.server,
+    input.token,
+    `/connections/${encodeURIComponent(input.connectionId)}/discover`,
+    input.signal,
+    undefined,
+    "POST",
+  );
+}
+
 export const McpPresetEntries: React.FC<{ LinkComponent: React.ElementType }> = ({
   LinkComponent,
 }) => (
@@ -507,6 +541,8 @@ function McpSettings({
   const [enabled, setEnabled] = useState(false);
   const [authKind, setAuthKind] = useState<"none" | "bearer">(defaultAuthKind);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [discoveredTools, setDiscoveredTools] = useState<DiscoveredMcpTool[]>([]);
+  const [discoveringId, setDiscoveringId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -528,6 +564,7 @@ function McpSettings({
   const resetFormToCreate = () => {
     clearSensitiveInputs();
     setPrevious(undefined);
+    setDiscoveredTools([]);
     setLabelValue(preset?.title ?? "");
     setAllowedToolsInput("");
     setReadPoliciesInput("");
@@ -690,6 +727,7 @@ function McpSettings({
   function handleEdit(connection: McpConnectionSummary) {
     clearSensitiveInputs();
     setConfirmDeleteId(null);
+    setDiscoveredTools([]);
     setPrevious(connection);
     setLabelValue(connection.label);
     setAllowedToolsInput(connection.allowedToolNames.join(", "));
@@ -699,6 +737,106 @@ function McpSettings({
     setError("");
     setNotice("");
     labelInputRef.current?.focus();
+  }
+
+  async function handleDiscover(connection: McpConnectionSummary) {
+    if (!token || !server || busy || loading || activeAbortRef.current) return;
+    handleEdit(connection);
+    const controller = new AbortController();
+    activeAbortRef.current = controller;
+    setBusy(true);
+    setDiscoveringId(connection.id);
+    setError("");
+    setNotice("");
+    try {
+      const discovered = await discoverMcpConfigurationTools({
+        server,
+        token,
+        signal: controller.signal,
+        connectionId: connection.id,
+      });
+      if (!aliveRef.current || controller.signal.aborted) return;
+      setDiscoveredTools(discovered.tools);
+      setNotice(
+        discovered.tools.length
+          ? `已发现 ${discovered.tools.length} 个远端工具；勾选后点「保存更新」即可生效。`
+          : "连接成功，但远端服务未返回可用工具。",
+      );
+    } catch (failure) {
+      if (aliveRef.current && !controller.signal.aborted) {
+        setError(failure instanceof Error ? failure.message : "发现远端工具失败，请检查地址与令牌。");
+      }
+    } finally {
+      if (aliveRef.current) {
+        activeAbortRef.current = null;
+        setDiscoveringId(null);
+        setBusy(false);
+      }
+    }
+  }
+
+  function toggleDiscoveredTool(tool: DiscoveredMcpTool, checked: boolean) {
+    let currentPolicies: McpReadPolicy[];
+    try {
+      currentPolicies = parseReadPoliciesInput(readPoliciesInput);
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? `${failure.message}（请先修正参数审计策略草稿，再勾选或取消工具）`
+          : "当前参数审计策略草稿格式有误，请先修正后再操作。",
+      );
+      return;
+    }
+
+    const currentAllowed = parseAllowedToolNames(allowedToolsInput);
+    const nextAllowed = checked
+      ? [...new Set([...currentAllowed, tool.name])]
+      : currentAllowed.filter((name) => name !== tool.name);
+
+    const nextPolicies = checked
+      ? currentPolicies.some((policy) => policy.toolName === tool.name)
+        ? currentPolicies
+        : [
+            ...currentPolicies,
+            {
+              toolName: tool.name,
+              arguments: Object.fromEntries(tool.argumentKeys.map((key) => [key, [] as JsonValue[]])),
+            },
+          ]
+      : currentPolicies.filter((policy) => policy.toolName !== tool.name);
+
+    setError("");
+    setAllowedToolsInput(nextAllowed.join(", "));
+    setReadPoliciesInput(formatReadPoliciesInput(nextPolicies));
+  }
+
+  function handleSelectAllCompatibleTools() {
+    let currentPolicies: McpReadPolicy[];
+    try {
+      currentPolicies = parseReadPoliciesInput(readPoliciesInput);
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? `${failure.message}（请先修正参数审计策略草稿，再补选工具）`
+          : "当前参数审计策略草稿格式有误，请先修正后再操作。",
+      );
+      return;
+    }
+
+    const compatible = discoveredTools.filter((tool) => tool.schemaCompatible);
+    const currentAllowed = parseAllowedToolNames(allowedToolsInput);
+    const nextAllowed = [...new Set([...currentAllowed, ...compatible.map((tool) => tool.name)])];
+    const existingPolicyNames = new Set(currentPolicies.map((policy) => policy.toolName));
+    const addedPolicies: McpReadPolicy[] = compatible
+      .filter((tool) => !existingPolicyNames.has(tool.name))
+      .map((tool) => ({
+        toolName: tool.name,
+        arguments: Object.fromEntries(tool.argumentKeys.map((key) => [key, [] as JsonValue[]])),
+      }));
+
+    setError("");
+    setAllowedToolsInput(nextAllowed.join(", "));
+    setReadPoliciesInput(formatReadPoliciesInput([...currentPolicies, ...addedPolicies]));
   }
 
   const endpointKeepExisting = Boolean(previous?.endpointConfigured);
@@ -790,6 +928,14 @@ function McpSettings({
                         )}
                       </div>
                       <div className="mcp-settings__item-actions">
+                        <button
+                          type="button"
+                          className="mcp-settings__btn"
+                          disabled={busy || loading || !editable}
+                          onClick={() => void handleDiscover(connection)}
+                        >
+                          {discoveringId === connection.id ? "正在发现…" : "发现工具"}
+                        </button>
                         <button
                           type="button"
                           className="mcp-settings__btn"
@@ -928,6 +1074,51 @@ function McpSettings({
                       }
                     />
                   </label>
+                )}
+
+                {discoveredTools.length > 0 && (
+                  <div className="mcp-settings__discover">
+                    <div className="mcp-settings__heading">
+                      <span className="mcp-settings__discover-title">
+                        远端工具清单（{discoveredTools.length}）
+                      </span>
+                      <button
+                        type="button"
+                        className="mcp-settings__btn"
+                        onClick={handleSelectAllCompatibleTools}
+                      >
+                        补选全部兼容工具
+                      </button>
+                    </div>
+                    <ul className="mcp-settings__discover-list">
+                      {discoveredTools.map((tool) => {
+                        const selected = parseAllowedToolNames(allowedToolsInput).includes(tool.name);
+                        return (
+                          <li key={tool.name} className="mcp-settings__discover-item">
+                            <label className="mcp-settings__check">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                disabled={!tool.schemaCompatible}
+                                onChange={(event) => toggleDiscoveredTool(tool, event.target.checked)}
+                              />
+                              <span>
+                                <strong>{tool.name}</strong>
+                                {tool.readOnlyHint === true ? "（只读）" : tool.readOnlyHint === false ? "（可写，需确认）" : ""}
+                                {!tool.schemaCompatible ? " [Schema 暂不兼容]" : ""}
+                              </span>
+                            </label>
+                            {tool.description && (
+                              <p className="mcp-settings__item-meta">{tool.description}</p>
+                            )}
+                            <p className="mcp-settings__item-meta">
+                              参数：{tool.argumentKeys.length ? tool.argumentKeys.join(", ") : "无参数"}
+                            </p>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 )}
 
                 <label className="mcp-settings__field">

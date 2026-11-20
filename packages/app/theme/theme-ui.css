@@ -407,25 +407,38 @@
 
 /* ── Theme transition (View Transitions API) ────────────────── */
 
-/* Circular reveal from the click point (--theme-vt-x/y, set by
- * useThemeModeControl). clip-path is GPU-composited; the old blurred SVG
- * mask + animated mask-size re-rasterized the full screen every frame
- * (~1s of long frames on a 1280x900 page, measured 2026-10-05). */
-::view-transition-new(root) {
-  animation: theme-reveal 450ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+/* Cross-fade instead of a circular reveal from the click point.
+ *
+ * Why cross-fade and not the circular reveal this file used to have: while the
+ * circle swept the page it raised local contrast from ~5.56 on a static page to
+ * 6.81 — a hard brightness border crossing the text, which
+ * `.agents/skills/design-taste-frontend/references/motion.md` rules out
+ * ("nothing moves across text being read"). Fading the new snapshot in keeps
+ * that number at ~5.64, i.e. no travelling edge, and 300ms matches the
+ * 240-340ms rhythm of the app's other view transitions.
+ *
+ * The circular version clipped with `clip-path: circle()` after an even
+ * earlier blurred SVG mask was dropped for re-rastering the full screen every
+ * frame (~1s of long frames on a 1280x900 page, measured 2026-10-05). That is
+ * why softening the edge was not pursued further here rather than proof that
+ * every soft-edge technique costs the same. */
+html[data-theme-vt="1"]::view-transition-new(root) {
+  animation: theme-fade-in 300ms ease both;
 }
 
-::view-transition-old(root) {
+/* The old snapshot stays underneath rather than fading out, so the canvas
+ * colour never shows through mid-transition. */
+html[data-theme-vt="1"]::view-transition-old(root) {
   animation: none;
   z-index: -1;
 }
 
-@keyframes theme-reveal {
+@keyframes theme-fade-in {
   from {
-    clip-path: circle(0 at var(--theme-vt-x, 100%) var(--theme-vt-y, 0));
+    opacity: 0;
   }
   to {
-    clip-path: circle(150vmax at var(--theme-vt-x, 100%) var(--theme-vt-y, 0));
+    opacity: 1;
   }
 }
 
@@ -442,6 +455,11 @@
   ::view-transition-old(*),
   ::view-transition-new(*) {
     animation: none !important;
+  }
+  /* Reduced motion keeps the theme cross-fade and only shortens it: motion.md
+   * asks for fewer and gentler, not none (opacity and colour stay). */
+  html[data-theme-vt="1"]::view-transition-new(root) {
+    animation: theme-fade-in 160ms ease both !important;
   }
 }
 

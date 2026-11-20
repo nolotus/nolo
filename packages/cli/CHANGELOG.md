@@ -1,4 +1,16 @@
 
+## 0.250.0-alpha.1 (2026-11-20)
+
+### Features
+
+* **mcp:** add full Odoo 19 Streamable HTTP MCP gateway, operator demo wiring, and Web tool discovery ([8fb7a2b](https://github.com/nolotus/bun-nolo/commit/8fb7a2b2194658976f53d7a1c42995a9ff04362a))
+
+### Performance Improvements
+
+* **app:** 日夜切换圆扩散改用线性半径，消除瞬间跳变的观感 ([a0b60ea](https://github.com/nolotus/bun-nolo/commit/a0b60ea2422dec6af1bf609bf982c464c8aade80))
+* **app:** 日夜切换改为整体淡入，去掉横穿文字的硬边圆扩散 ([3a4f4ea](https://github.com/nolotus/bun-nolo/commit/3a4f4ea607fab266655b9c115a36763b6200ab17))
+
+
 ## 0.249.0-alpha.10 (2026-11-20)
 
 ### Bug Fixes

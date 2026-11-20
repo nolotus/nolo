@@ -19,7 +19,7 @@ const ThemeToggleButton = ({ className = "" }: { className?: string }) => {
       className={className}
       aria-label={label}
       title={label}
-      onClick={(e) => applyThemeMode(isDark ? "light" : "dark", e.currentTarget)}
+      onClick={() => applyThemeMode(isDark ? "light" : "dark")}
     >
       {isDark ? <LuSun size={17} aria-hidden="true" /> : <LuMoon size={17} aria-hidden="true" />}
     </button>
