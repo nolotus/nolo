@@ -86,6 +86,7 @@
     "sucrase": "3.35.1",
     "electrobun": "2.0.6",
     "rcedit": "5.0.2",
+    "selfsigned": "5.5.0",
     "lovely-mermaid": "0.3.3",
     "clipboardy": "5.3.2",
     "ansi-regex": "6.3.0",

@@ -201,20 +201,25 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
     // entirely (detachMs 0 → immediate promotion through the existing
     // registry.add → promote() → terminal completion-turn path). Explicit
     // request wins over the smart-detach heuristic.
-    const background = normalized.background === true;
+    // Ephemeral web-hosted sandboxes opt out (`disableBackgroundDetach: true`)
+    // so long-running commands cannot escape timeout/abort into orphaned background jobs.
+    const background = ctx.disableBackgroundDetach === true ? false : normalized.background === true;
+    const effectiveTimeoutMs = resolveExecShellTimeoutMs(ctx.commandTimeoutMs);
 
     const executionArgs = {
       workspaceRoot,
       command: shellPlan.argv,
-      timeoutMs: resolveExecShellTimeoutMs(ctx.commandTimeoutMs),
+      timeoutMs: effectiveTimeoutMs,
       outputLimit: ctx.commandOutputLimit,
       commandPrefix: ctx.commandPrefix,
       abortSignal: ctx.abortSignal,
-      detachMs: background
-        ? 0
-        : isImmediateDetachShellCommand({ command })
+      detachMs: ctx.disableBackgroundDetach === true
+        ? Math.max((effectiveTimeoutMs ?? 30_000) + 60_000, 120_000)
+        : background
           ? 0
-          : ctx.detachMs,
+          : isImmediateDetachShellCommand({ command })
+            ? 0
+            : ctx.detachMs,
       stdin: typeof normalized.input === "string" ? normalized.input : undefined,
       label: typeof normalized.label === "string" ? normalized.label : undefined,
       // Ownership of the turn that invoked this command: an auto-detached

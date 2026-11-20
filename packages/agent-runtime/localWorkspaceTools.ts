@@ -99,6 +99,7 @@ type LocalWorkspaceToolArgs = {
   readFileNoLedger?: boolean;
   abortSignal?: AbortSignal;
   detachMs?: number;
+  disableBackgroundDetach?: boolean;
   /** Optional override for rg resolution (tests / hosts without PATH binaries). */
   resolveRipgrepBinary?: () => string | null;
   /** Optional override for grep resolution (tests / hosts without PATH binaries). */
@@ -2219,6 +2220,7 @@ async function execShellTool(args: {
   restrictToWorkspace?: boolean;
   abortSignal?: AbortSignal;
   detachMs?: number;
+  disableBackgroundDetach?: boolean;
   confirmed?: boolean;
   enableDestructiveShellGuard?: boolean;
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("./actionGate").HostConfirmDecision>;
@@ -2236,6 +2238,7 @@ async function execShellTool(args: {
       restrictToWorkspace: args.restrictToWorkspace,
       abortSignal: args.abortSignal,
       detachMs: args.detachMs,
+      disableBackgroundDetach: args.disableBackgroundDetach,
       confirmed: args.confirmed,
       enableDestructiveShellGuard: args.enableDestructiveShellGuard,
       confirmDestructiveAction: args.confirmDestructiveAction,
@@ -2849,6 +2852,7 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
       restrictToWorkspace: args.restrictShellToWorkspace,
       abortSignal: opts?.abortSignal ?? args.abortSignal,
       detachMs: opts?.detachMs ?? args.detachMs,
+      disableBackgroundDetach: args.disableBackgroundDetach,
       confirmed: opts?.confirmed,
       enableDestructiveShellGuard: opts?.enableDestructiveShellGuard,
       confirmDestructiveAction: opts?.confirmDestructiveAction,

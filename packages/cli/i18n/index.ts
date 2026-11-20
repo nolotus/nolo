@@ -212,6 +212,8 @@ const TOOL_FAMILY_OVERRIDES: Record<string, ToolFamily> = {
   readPage: TOOL_FAMILIES.read,
   readArtifact: TOOL_FAMILIES.read,
   writeFile: TOOL_FAMILIES.write,
+  materializeWorkspaceFile: TOOL_FAMILIES.write,
+  commitSandboxArtifact: TOOL_FAMILIES.write,
   editFile: TOOL_FAMILIES.write,
   createDoc: TOOL_FAMILIES.write,
   updateDoc: TOOL_FAMILIES.write,

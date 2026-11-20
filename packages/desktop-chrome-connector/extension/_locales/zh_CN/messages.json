@@ -54,7 +54,7 @@
     }
   },
   "approveClick": {
-    "message": "点击控件"
+    "message": "允许 Nolo 点击下方控件吗？"
   },
   "approveType": {
     "message": "输入内容"

@@ -335,6 +335,12 @@ import {
 } from "./deleteMemoryTool";
 import { queryMemoryFunc, queryMemoryFunctionSchema } from "./queryMemoryTool";
 import { execShellFunctionSchema, execShellFunc } from "./execShellTool";
+import {
+  materializeWorkspaceFileFunctionSchema,
+  materializeWorkspaceFileClientStub,
+  commitSandboxArtifactFunctionSchema,
+  commitSandboxArtifactClientStub,
+} from "./sandboxWorkspaceTools";
 import { checkEnvFunctionSchema, checkEnvFunc } from "./checkEnvTool";
 
 import { agentToolDefinitions } from "./agent/agentTools";
@@ -2358,6 +2364,30 @@ const baseToolDefinitions: ToolDefinition[] = [
       category: "网络与智能",
     },
     behavior: "action",
+  },
+  {
+    id: "materializeWorkspaceFile",
+    schema: materializeWorkspaceFileFunctionSchema,
+    executor: materializeWorkspaceFileClientStub,
+    description: {
+      name: "materializeWorkspaceFile",
+      description: "将已授权的 Space/用户文件物化到隔离 Sandbox 的只读 input/ 目录。",
+      category: "代码 / 文件操作",
+    },
+    behavior: "data",
+    uiGroup: "data",
+  },
+  {
+    id: "commitSandboxArtifact",
+    schema: commitSandboxArtifactFunctionSchema,
+    executor: commitSandboxArtifactClientStub,
+    description: {
+      name: "commitSandboxArtifact",
+      description: "校验 Sandbox output/ 产物并提交到持久化 Space/用户 Artifact 存储。",
+      category: "代码 / 文件操作",
+    },
+    behavior: "action",
+    uiGroup: "data",
   },
   {
     id: "checkEnv",

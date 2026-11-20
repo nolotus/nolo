@@ -4,7 +4,7 @@ import type {
 } from "./authorityStoreTypes";
 
 export type CliAuthorityBrokerRequest =
-  | { type: "status" }
+  | { type: "status"; includeLocation?: true }
   | { type: "open" }
   | { type: "close" }
   | { type: "get"; key: string }
@@ -31,7 +31,8 @@ export type CliAuthorityBrokerIteratorPage = {
 };
 
 export type CliAuthorityBrokerSuccessResponse =
-  | { ok: true; result: { type: "status" | "open" | "close" | "put" | "del" | "batchWrite" } }
+  | { ok: true; result: { type: "status"; location?: string } }
+  | { ok: true; result: { type: "open" | "close" | "put" | "del" | "batchWrite" } }
   | { ok: true; result: { type: "conditionalPut"; status: "updated" | "conflict" } }
   | { ok: true; result: { type: "get"; value: unknown } }
   | { ok: true; result: { type: "batchGet"; items: CliAuthorityBrokerBatchGetItem[] } }

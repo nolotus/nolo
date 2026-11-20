@@ -54,7 +54,7 @@
     }
   },
   "approveClick": {
-    "message": "Click a control"
+    "message": "Allow Nolo to click this control?"
   },
   "approveType": {
     "message": "Enter text"

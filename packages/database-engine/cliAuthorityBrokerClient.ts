@@ -10,6 +10,7 @@ import type {
   CliAuthorityBrokerResponse,
 } from "./cliAuthorityBrokerTypes";
 import { createConnection, type Socket } from "node:net";
+import { connect as connectTls, type SecureContextOptions } from "node:tls";
 
 const DEFAULT_ITERATOR_PAGE_SIZE = 200;
 
@@ -226,10 +227,17 @@ function isNotFoundBrokerError(error: unknown): boolean {
 
 export function createCliAuthorityBrokerSocketInvoker(options: {
   endpoint: string;
+  tls?: SecureContextOptions;
   timeoutMs?: number;
   idleTimeoutMs?: number;
 }): CliAuthorityBrokerSocketInvoker {
   const target = resolveBrokerSocketTarget(options.endpoint);
+  const connectedEvent = options.tls ? "secureConnect" : "connect";
+  const connect = (): Socket => target.kind === "unix"
+    ? createConnection(target.path)
+    : options.tls
+      ? connectTls({ host: target.host, port: target.port, servername: "localhost", ...options.tls, rejectUnauthorized: true })
+      : createConnection({ host: target.host, port: target.port });
   const timeoutMs = options.timeoutMs ?? 5000;
   const idleTimeoutMs = options.idleTimeoutMs ?? 5000;
   let nextRequestId = 1;
@@ -295,9 +303,7 @@ export function createCliAuthorityBrokerSocketInvoker(options: {
       return Promise.reject(createClosedError());
     }
     return new Promise<CliAuthorityBrokerResponse>((resolve, reject) => {
-      const socket = target.kind === "unix"
-        ? createConnection(target.path)
-        : createConnection({ host: target.host, port: target.port });
+      const socket = connect();
       let settled = false;
       let buffer = "";
       let timer: ReturnType<typeof setTimeout>;
@@ -335,7 +341,7 @@ export function createCliAuthorityBrokerSocketInvoker(options: {
       }, timeoutMs);
 
       socket.setEncoding("utf8");
-      socket.on("connect", () => {
+      socket.on(connectedEvent, () => {
         if (settled || explicitlyClosed) return;
         socket.write(`${JSON.stringify(request)}\n`);
       });
@@ -515,9 +521,7 @@ export function createCliAuthorityBrokerSocketInvoker(options: {
       return activeConn;
     }
 
-    const socket = target.kind === "unix"
-      ? createConnection(target.path)
-      : createConnection({ host: target.host, port: target.port });
+    const socket = connect();
 
     const conn: PersistentBrokerConnection = {
       socket,
@@ -533,7 +537,7 @@ export function createCliAuthorityBrokerSocketInvoker(options: {
     socket.setEncoding("utf8");
     socket.setNoDelay?.(true);
 
-    socket.on("connect", () => {
+    socket.on(connectedEvent, () => {
       if (conn.closed) return;
       conn.connected = true;
       const queued = conn.writeQueue.splice(0, conn.writeQueue.length);

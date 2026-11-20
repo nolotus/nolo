@@ -1839,6 +1839,9 @@ export function describeLocalRunFailure(
   // Local authority broker failures: unresponsive broker timeout, attach/ownership
   // contention, unreachability, or protocol errors must render actionable local
   // broker guidance without blaming local credentials/config or upstream LLM.
+  if (/CLI authority broker upgrade requires exit/i.test(message)) {
+    return `${RUN_UNAVAILABLE_PREFIX} (${stripDebugNoise(message)})\n`;
+  }
   if (
     isCliAuthorityBrokerTimeoutError(rawError) ||
     /CLI authority broker .* timed out/i.test(message)

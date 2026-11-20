@@ -2057,7 +2057,7 @@ function nativeOwner(pid: number, deps: AgentRunControlDeps): Extract<RunExecuti
 }
 
 /** Child validation is read-only and precedes all identity publication/activity writes. */
-export function validateLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}): void {
+export function validateLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}) {
   const fail = (reason = "facts"): never => { throw new Error(`[local-writer-resource] child binding unknown or mismatched: ${reason}`); };
   if (!/^[A-Za-z0-9_-]+$/.test(runId)) fail();
   const validated = withRunRecordLock(runId, deps, () => {
@@ -2079,18 +2079,22 @@ export function validateLocalWriterChild(runId: string, cwd: string, policy: Loc
     if (e?.state !== "known") return fail();
     const set = (v?: string[]) => JSON.stringify(v === undefined ? null : [...new Set(v)].sort());
     if (set(e.permissions.allowedToolNames) !== set(policy.allowedToolNames) ||
-        set(e.permissions.blockedToolNames) !== set(policy.blockedToolNames) ||
+        (!policy.readOnly && set(e.permissions.blockedToolNames) !== set(policy.blockedToolNames)) ||
         JSON.stringify(e.worktree) !== JSON.stringify(trustedLocalWorktree(real, deps))) fail("scope/worktree");
     if (!policy.readOnly && (!policy.hostWritesAuthorized || r?.localWriterClaim?.state !== "held" ||
         r.localWriterClaim.cwd !== real ||
         (e.worktree && (r.localWriterClaim.worktree?.root !== e.worktree.root || r.localWriterClaim.worktree.gitDir !== e.worktree.gitDir)))) fail();
-    return true;
+    // A source update can change read-only defaults between parent and child launches.
+    const blockedToolNames = policy.readOnly
+      ? [...new Set([...(e.permissions.blockedToolNames ?? []), ...(policy.blockedToolNames ?? [])])]
+      : policy.blockedToolNames;
+    return { blockedToolNames };
   }, { strict: true, requireDeadOwner: true });
-  if (!validated) fail("registry lock busy");
+  return validated ?? fail("registry lock busy");
 }
 
 /** Only a native-live publishing parent justifies bounded synchronization. */
-export async function awaitLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}): Promise<void> {
+export async function awaitLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}) {
   if (!/^[A-Za-z0-9_-]+$/.test(runId)) throw new Error("[local-writer-resource] child binding invalid id");
   const deadline = Date.now() + 2000;
   for (;;) {
@@ -2103,8 +2107,7 @@ export async function awaitLocalWriterChild(runId: string, cwd: string, policy: 
     const parentLive = publication && native.state === "verified" && publication.parent.startedAt === native.startedAt &&
       publication.parent.linux?.bootId === native.linux?.bootId && publication.parent.linux?.startTicks === native.linux?.startTicks;
     try {
-      validateLocalWriterChild(runId, cwd, policy, deps);
-      return;
+      return validateLocalWriterChild(runId, cwd, policy, deps);
     } catch (error) {
       const lockBusy = String(error).includes("registry lock busy");
       const pending = publication?.state === "pending" && r?.execution?.state === "known" && r.execution.owner.state === "unknown";

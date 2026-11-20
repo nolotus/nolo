@@ -55,6 +55,7 @@ export const CLI_PUBLISH_DEPENDENCY_ALLOWLIST = [
   "ulid",
   "level",
   "tweetnacl",
+  "selfsigned",
   "js-base64",
   "crypto-js",
   "js-yaml",
@@ -206,6 +207,7 @@ export async function buildPublishArtifactBundled(
     "classic-level",   // 直接依赖时也 external
     "ulid",            // UMD 初始化需 require("crypto")，不能 inline 进 ESM chunk
     "tweetnacl",       // CJS 入口 require("crypto")，inline 进 ESM chunk 会触发 Dynamic require 崩溃
+    "selfsigned",      // Its CommonJS entry loads crypto on first broker startup.
     "pino",            // pino（经 sonic-boom）在 CJS 里 require("node:os")，被 inline 进 ESM chunk 后 esbuild 的 __require shim 会抛 Dynamic require of "node:os" is not supported（Node 26 实测崩溃）
     "clipboardy",      // 虽然只被 TUI 粘贴流 await import，但它带着 CJS 依赖簇（fs/path/os/child_process…）一起 inline 后全是 __require("fs") 这类 shim 调用，一旦触发即同一类崩溃
     "crypto-js",       // UMD 里 hasBinary 分支 require("crypto")，inline 进 ESM chunk 即变成 __require("crypto") 的 Dynamic require 崩溃
@@ -243,7 +245,7 @@ export async function buildPublishArtifactBundled(
 
   const publishVersionMap = buildPublishVersionMap(sourceDir);
   const keptDeps: Record<string, string> = {};
-  for (const name of ["level", "ulid", "tweetnacl", "pino", "clipboardy", "crypto-js", "detect-libc", "sharp"]) {
+  for (const name of ["level", "ulid", "tweetnacl", "selfsigned", "pino", "clipboardy", "crypto-js", "detect-libc", "sharp"]) {
     if (!emittedExternalDeps.has(name)) continue;
     const declaredVersion = distPkg.dependencies?.[name] ?? publishVersionMap[name];
     if (declaredVersion) {

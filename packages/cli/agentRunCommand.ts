@@ -65,7 +65,6 @@ import {
   createRunActivityTracker,
   recordRunStartup,
   reportRunProcessIdentity,
-  validateLocalWriterChild,
   awaitLocalWriterChild,
   registerLocalForegroundWriter,
   finalizeRunRecord,
@@ -413,7 +412,8 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
     const implicitReadonlyHost = !parsed.runtimeKey && args.includes("--read-only") &&
       locatedExecution?.state === "known" && locatedExecution.runtimeKey === "local" && locatedExecution.permissions.readOnly;
     if (parsed.runtimeKey?.trim() !== "local" && !implicitReadonlyHost) throw new Error("[local-writer-resource] child binding runtime mismatch");
-    await awaitLocalWriterChild(childRunId!, parsed.cwd ?? process.cwd(), hostPolicy(), { env, homedir: deps.homedir, fs: deps.fs });
+    const { blockedToolNames } = await awaitLocalWriterChild(childRunId!, parsed.cwd ?? process.cwd(), hostPolicy(), { env, homedir: deps.homedir, fs: deps.fs });
+    parsed.blockedToolNames = blockedToolNames;
   }
   if (hasRegistry && parsed.runtimeKey?.trim() !== "local" && locatedExecution?.state !== "known") reportRunProcessIdentity(childRunId!, { env, homedir: deps.homedir, fs: deps.fs, now: deps.now });
   const processExit = deps.processExit ?? ((code: number) => process.exit(code));
@@ -897,7 +897,8 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
   if (hostRuntimeLocal && !parsed.background) {
     const policy = { ...hostPolicy(), ...(skillAllowedToolOverride !== undefined ? { allowedToolNames: skillAllowedToolOverride } : {}) };
     if (hasRegistry) {
-      await awaitLocalWriterChild(childRunId!, localRuntimeCwd!, policy, { env, homedir: deps.homedir, fs: deps.fs });
+      const { blockedToolNames } = await awaitLocalWriterChild(childRunId!, localRuntimeCwd!, policy, { env, homedir: deps.homedir, fs: deps.fs });
+      parsed.blockedToolNames = blockedToolNames;
     } else if (!policy.readOnly) {
       childRunId = registerLocalForegroundWriter(localRuntimeCwd!, policy, agentKey, { env, homedir: deps.homedir, fs: deps.fs, now: deps.now });
       hasRegistry = true;

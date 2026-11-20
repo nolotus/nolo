@@ -1,4 +1,23 @@
 
+## 0.251.0-alpha.1 (2026-11-20)
+
+### Features
+
+* **sandbox:** persist Space artifacts across hosted runs ([4a56584](https://github.com/nolotus/bun-nolo/commit/4a56584a4d894d23e209ad1055e1eb488d4e8c8c))
+
+### Bug Fixes
+
+* **browser:** make one-time click approval explicit ([87c7d14](https://github.com/nolotus/bun-nolo/commit/87c7d14bfe67ef05d1f30c9ddd94826eb0f2a951))
+* **ci:** make SSH egress test guard work on Windows ([9faf15a](https://github.com/nolotus/bun-nolo/commit/9faf15a14b16ffcd31f8a80a7b03a2ee14699b32))
+* **cli:** align release gates with authenticated broker and sandbox tools ([8939793](https://github.com/nolotus/bun-nolo/commit/893979388537063f1b68cd59fd027f167dc0f25b))
+* **cli:** identify legacy broker upgrade contention ([7677beb](https://github.com/nolotus/bun-nolo/commit/7677beb1279d489051cecb3463bd076158125684))
+* **cli:** preserve read-only tool restrictions across source updates ([829e30a](https://github.com/nolotus/bun-nolo/commit/829e30a208526f29d748fd28e977a95de06508f2))
+* **cli:** supervise the local authority broker independently ([c733176](https://github.com/nolotus/bun-nolo/commit/c733176b507241a1209c14b6870f5db0e2f82266))
+* **web:** advertise scoped MCP support for built-in auto turns ([f84f47e](https://github.com/nolotus/bun-nolo/commit/f84f47e60cd98b4817f785e8724f6a5bb619d686))
+* **web:** keep flat sidebar conversations at natural row height ([76383a3](https://github.com/nolotus/bun-nolo/commit/76383a31bba2a1dee2b4da428505a4677fb5be4a))
+* **web:** return foreground MCP confirmations to their originating turn ([96116c3](https://github.com/nolotus/bun-nolo/commit/96116c3a0f3708a0bf7e14dbfebb26c2eb609ddc))
+
+
 ## 0.250.0-alpha.1 (2026-11-20)
 
 ### Features
