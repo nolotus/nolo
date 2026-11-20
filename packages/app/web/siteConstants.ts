@@ -1,18 +1,14 @@
-export type SiteId = "date" | "crm" | "default";
+export type SiteId = "default";
 
 /**
  * 站点真值表：主机名 → 站点条目。
  * - `servesApi`：该主机的 origin 本身是 API server（首帧 currentServer 可以指向
- *   它）。仅 nolotus.local（crm 路由的局域网入口，旧行为就把 currentServer 指到
- *   它）为 true；
- * - 生产子域名（date.nolo.chat / crm.nolo.chat）的 origin 不是 API server。
+ *   它）。nolotus.local 是保留的局域网 API 入口。
  */
 type SiteEntry = { site: SiteId; servesApi?: boolean };
 
 const hostToSite: Readonly<Record<string, SiteEntry>> = {
-  "nolotus.local": { site: "crm", servesApi: true },
-  "date.nolo.chat": { site: "date" },
-  "crm.nolo.chat": { site: "crm" },
+  "nolotus.local": { site: "default", servesApi: true },
 };
 
 export const detectSite = (hostname: string): SiteId =>

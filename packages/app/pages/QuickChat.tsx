@@ -1,5 +1,5 @@
 // file: packages/app/pages/QuickChat.tsx
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { viewTransitionStyle, QUICK_CHAT_COMPOSER_VT_NAME } from "app/viewTransitions";
 import { TextField, TextArea } from "react-aria-components";
 import { useTranslation } from "react-i18next";
@@ -40,6 +40,8 @@ import {
   takePendingQuickChatDraft,
   type QuickChatMode,
 } from "./quickChatFlow";
+import type { QuickChatSubmission } from "./QuickChatRuntime";
+import { prewarmPageLoader } from "render/page/pageLoaderPreload";
 import { shouldDeferEnterForIme } from "app/utils/ime";
 import { useSmoothTextareaHeight } from "app/hooks/useSmoothTextareaHeight";
 import * as stylex from "@stylexjs/stylex";
@@ -118,10 +120,8 @@ export const preloadQuickChatRuntimeDependencies = () => {
     logQuickChatPreloadStage("quick-chat-preload-started");
     quickChatPreloadPromise = Promise.allSettled([
       quickChatRuntimeImport(),
-      import("render/page/PageLoader"),
       import("chat/dialog/actions/createDialogAction"),
       import("chat/dialog/actions/handleSendMessageAction"),
-      import("ai/agent/streamAgentChatTurn"),
     ]);
     void quickChatPreloadPromise.then((results) => {
       const rejectedCount = results.filter(
@@ -328,9 +328,16 @@ const QuickChat: React.FC<QuickChatProps> = ({
   const defaultAgentPreference = useAppSelector(selectDefaultAgentPreference);
   const allDbEntities = useAppSelector((state) => state.db?.entities ?? {});
   const [isRuntimeActive, setRuntimeActive] = useState(false);
+  const shellInteractedRef = useRef(false);
+  const isComposingRef = useRef(false);
+  const lastCompositionEndAtRef = useRef(0);
+  const activateRuntime = useCallback(() => {
+    void preloadQuickChatRuntimeDependencies();
+    // Keep the already mounted textarea interactive if the runtime suspends.
+    startTransition(() => setRuntimeActive(true));
+  }, []);
   const [draft, setDraft] = useState("");
-  const [autoSend, setAutoSend] = useState(false);
-  const [initialAgentId, setInitialAgentId] = useState<string | null>(null);
+  const [submission, setSubmission] = useState<QuickChatSubmission>();
   // React.lazy 缓存首个 rejected import promise：chunk 404 后必须换一个新的
   // lazy 组件实例重试，否则同一组件永远重抛同一个 rejection。
   const [runtimeComponent, setRuntimeComponent] = useState(
@@ -357,21 +364,12 @@ const QuickChat: React.FC<QuickChatProps> = ({
         navigate(AppRoutePaths.CLIENT_DOWNLOADS);
         return;
       }
-      if (chip.action === "specialist") {
-        setDraft(chip.prompt);
-        setInitialAgentId(chip.agentKey);
-        setAutoSend(true);
-        void preloadQuickChatRuntimeDependencies();
-        setRuntimeActive(true);
-        return;
-      }
       setDraft(chip.prompt);
-      setInitialAgentId(null);
-      setAutoSend(true);
-      void preloadQuickChatRuntimeDependencies();
-      setRuntimeActive(true);
+      setSubmission({ text: chip.prompt, agentId: chip.action === "specialist" ? chip.agentKey : null });
+      prewarmPageLoader();
+      activateRuntime();
     },
-    [navigate]
+    [activateRuntime, navigate]
   );
 
   // `/chat?launch=feedback` 等直达入口：挂载后自动以专职 agent 开一轮对话，只触发一次。
@@ -399,13 +397,15 @@ const QuickChat: React.FC<QuickChatProps> = ({
     if (isRuntimeActive) return;
     const cancelPreload = scheduleQuickChatRuntimeDependencyPreload("effect");
     const cancelRuntimeReady = onQuickChatRuntimeReady(() => {
-      setRuntimeActive(true);
+      // After any focus, leave the shell in place until an explicit action.
+      // A focus move into the agent picker portal must not unmount its trigger.
+      if (!shellInteractedRef.current) activateRuntime();
     });
     return () => {
       cancelPreload();
       cancelRuntimeReady();
     };
-  }, [isRuntimeActive]);
+  }, [activateRuntime, isRuntimeActive]);
 
   useEffect(() => {
     if (!defaultAgentId) return;
@@ -426,11 +426,6 @@ const QuickChat: React.FC<QuickChatProps> = ({
       });
   }, [defaultAgentId, dispatch]);
 
-  const activateRuntime = useCallback(() => {
-    void preloadQuickChatRuntimeDependencies();
-    setRuntimeActive(true);
-  }, []);
-
   // 占位 composer 选中的文件：在 runtime 挂载前一次性托管，挂载后经既有
   // handleQuickChatFileSelection 处理，避免「先点一次激活、再点一次才弹选择器」。
   const [pendingShellFiles, setPendingShellFiles] = useState<File[] | null>(
@@ -440,41 +435,46 @@ const QuickChat: React.FC<QuickChatProps> = ({
   const handleShellFilesSelected = useCallback((files: File[]) => {
     if (!files.length) return;
     setPendingShellFiles(files);
-    void preloadQuickChatRuntimeDependencies();
-    setRuntimeActive(true);
-  }, []);
+    activateRuntime();
+  }, [activateRuntime]);
 
   const handlePendingShellFilesConsumed = useCallback(() => {
     setPendingShellFiles(null);
   }, []);
 
   const handleShellChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    void preloadQuickChatRuntimeDependencies();
-    setDraft(event.target.value);
-    setRuntimeActive(true);
+    const value = event.target.value;
+    if (value.length) prewarmPageLoader();
+    setDraft(value);
   }, []);
 
-  const handleShellKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (
-        event.key === "Enter" &&
-        !event.shiftKey &&
-        !shouldDeferEnterForIme({
-          event,
-          isComposing: false,
-          lastCompositionEndAt: 0,
-        })
-      ) {
-        event.preventDefault();
-        // If the runtime is already active, do not intercept; let QuickChatRuntime handle it.
-        if (!isRuntimeActive) {
-          setAutoSend(true);
-          setRuntimeActive(true);
-        }
-      }
-    },
-    [isRuntimeActive]
-  );
+  const handleShellSubmit = useCallback((value = draft) => {
+    if (!value.trim()) return;
+    setDraft(value);
+    setSubmission({ text: value, agentId: null });
+    prewarmPageLoader();
+    activateRuntime();
+  }, [activateRuntime, draft]);
+
+  const handleShellFocus = useCallback(() => {
+    shellInteractedRef.current = true;
+    void preloadQuickChatRuntimeDependencies();
+  }, []);
+
+  const handleShellKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !shouldDeferEnterForIme({
+        event,
+        isComposing: isComposingRef.current,
+        lastCompositionEndAt: lastCompositionEndAtRef.current,
+      })
+    ) {
+      event.preventDefault();
+      handleShellSubmit(event.currentTarget.value);
+    }
+  };
 
   const resolveAgentDisplayName = useCallback(
     (agentId: string): string => {
@@ -515,60 +515,31 @@ const QuickChat: React.FC<QuickChatProps> = ({
 
   const showGreeting = !isCompact;
 
-  if (isRuntimeActive) {
-    const RuntimeComponent = runtimeComponent;
-    return (
-      <div className={wrapperClassName} data-surface={surface}>
-        {showGreeting && (
-          <h1 className="quick-chat-greeting">
-            {t("quickChat.greeting", "今天一起做什么？")}
-          </h1>
-        )}
-        {beforeComposer}
-        <QuickChatChunkErrorBoundary
-          onRetry={retryRuntimeChunk}
-          retryLabel={t("quickChat.retryLoad", "重试加载")}
-          fallback={
-            <QuickChatShell
-              draft={draft}
-              placeholder={placeholder}
-              disabled
-              isEmptyState={isEmptyState}
-              surface={surface}
-              quickChatMode={quickChatMode}
-              onModeChange={handleModeChange}
-            />
-          }
-        >
-          <Suspense fallback={
-            <QuickChatShell
-              draft={draft}
-              placeholder={placeholder}
-              disabled
-              isEmptyState={isEmptyState}
-              surface={surface}
-              quickChatMode={quickChatMode}
-              onModeChange={handleModeChange}
-            />
-          }>
-            <RuntimeComponent
-              initialText={draft}
-              initialAgentId={initialAgentId || projectAgentId}
-              surface={surface}
-              spaceId={spaceId}
-              autoSend={autoSend}
-              isEmptyState={isEmptyState}
-              pendingShellFiles={pendingShellFiles}
-              onPendingShellFilesConsumed={handlePendingShellFilesConsumed}
-              quickChatMode={quickChatMode}
-              onModeChange={handleModeChange}
-            />
-          </Suspense>
-        </QuickChatChunkErrorBoundary>
-        {!isCompact && <QuickChatChips onChipClick={handleChipClick} showDownload={!isDesktopApp} />}
-      </div>
-    );
-  }
+  const RuntimeComponent = runtimeComponent;
+  const shell = (
+    <QuickChatShell
+      autoFocus={surface === "home-primary" && !launchSpecialist}
+      draft={draft}
+      placeholder={placeholder}
+      disabled={isSendDisabled}
+      surface={surface}
+      isEmptyState={isEmptyState}
+      onFocus={handleShellFocus}
+      onVoiceActivate={activateRuntime}
+      onSubmit={handleShellSubmit}
+      onFilesSelected={handleShellFilesSelected}
+      onChange={handleShellChange}
+      onKeyDown={handleShellKeyDown}
+      onCompositionStart={() => { isComposingRef.current = true; }}
+      onCompositionEnd={() => {
+        isComposingRef.current = false;
+        lastCompositionEndAtRef.current = Date.now();
+      }}
+      onBlur={() => { isComposingRef.current = false; }}
+      quickChatMode={quickChatMode}
+      onModeChange={handleModeChange}
+    />
+  );
 
   return (
     <div className={wrapperClassName} data-surface={surface}>
@@ -578,31 +549,46 @@ const QuickChat: React.FC<QuickChatProps> = ({
         </h1>
       )}
       {beforeComposer}
-      <QuickChatShell
-        draft={draft}
-        placeholder={placeholder}
-        disabled={isSendDisabled}
-        surface={surface}
-        isEmptyState={isEmptyState}
-        onActivate={activateRuntime}
-        onFilesSelected={handleShellFilesSelected}
-        onChange={handleShellChange}
-        onKeyDown={handleShellKeyDown}
-        quickChatMode={quickChatMode}
-        onModeChange={handleModeChange}
-      />
+      <QuickChatChunkErrorBoundary
+        onRetry={retryRuntimeChunk}
+        retryLabel={t("quickChat.retryLoad", "重试加载")}
+        fallback={shell}
+      >
+        <Suspense fallback={shell}>
+          {isRuntimeActive ? (
+            <RuntimeComponent
+              initialText={draft}
+              initialAgentId={projectAgentId}
+              surface={surface}
+              spaceId={spaceId}
+              submission={submission}
+              isEmptyState={isEmptyState}
+              pendingShellFiles={pendingShellFiles}
+              onPendingShellFilesConsumed={handlePendingShellFilesConsumed}
+              quickChatMode={quickChatMode}
+              onModeChange={handleModeChange}
+            />
+          ) : shell}
+        </Suspense>
+      </QuickChatChunkErrorBoundary>
       {!isCompact && <QuickChatChips onChipClick={handleChipClick} showDownload={!isDesktopApp} />}
     </div>
   );
 };
 
 interface QuickChatShellProps {
+  autoFocus: boolean;
+  onBlur: React.FocusEventHandler<HTMLTextAreaElement>;
+  onCompositionStart: React.CompositionEventHandler<HTMLTextAreaElement>;
+  onCompositionEnd: React.CompositionEventHandler<HTMLTextAreaElement>;
+  onSubmit: () => void;
   draft: string;
   placeholder: string;
   disabled?: boolean;
   surface?: QuickChatSurface;
   isEmptyState?: boolean;
-  onActivate?: () => void;
+  onFocus: () => void;
+  onVoiceActivate: () => void;
   /**
    * 占位态选中文件后的回调。传入即渲染一个同步打开的系统文件选择器
    * （必须在用户手势内 click 真实 input，懒加载 runtime 后再程序化 click 已太晚）。
@@ -615,12 +601,18 @@ interface QuickChatShellProps {
 }
 
 const QuickChatShell: React.FC<QuickChatShellProps> = ({
+  autoFocus,
+  onBlur,
+  onCompositionStart,
+  onCompositionEnd,
+  onSubmit,
   draft,
   placeholder,
   disabled = true,
   surface = "default",
   isEmptyState = false,
-  onActivate,
+  onFocus,
+  onVoiceActivate,
   onFilesSelected,
   onChange,
   onKeyDown,
@@ -654,7 +646,7 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
   // "quick-chat-box" hook class if spread after it; merge explicitly instead.
   const cardStyleProps = stylex.props(chatInputCardStyles.card);
   return (
-    <div className="quick-chat-container" data-surface={surface} data-testid="quick-chat-shell" style={vtStyle}>
+    <div onFocus={onFocus} className="quick-chat-container" data-surface={surface} data-testid="quick-chat-shell" style={vtStyle}>
       <div
         data-hook="chat-esc-chat-input-card"
         {...cardStyleProps}
@@ -672,8 +664,10 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
             placeholder={placeholder}
             value={draft}
             rows={1}
-            readOnly={!onChange}
-            onFocus={onActivate}
+            autoFocus={autoFocus}
+            onCompositionStart={onCompositionStart}
+            onCompositionEnd={onCompositionEnd}
+            onBlur={onBlur}
             onChange={onChange}
             onKeyDown={onKeyDown}
           />
@@ -709,9 +703,7 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
               type="button"
               className={`send-button ${disabled ? "voice-mode" : "send-mode"}`}
               data-testid="quick-chat-send"
-              aria-disabled={disabled}
-              onFocus={onActivate}
-              onClick={onActivate}
+              onClick={disabled ? onVoiceActivate : onSubmit}
               aria-label="Send"
             >
               {disabled ? (

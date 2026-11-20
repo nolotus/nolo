@@ -27,15 +27,17 @@ export const normalizeClientLanguage = (rawLanguage?: string) => {
   return Language.EN;
 };
 
-const fetchLanguageResources = async (language: string, scope: ClientLocaleScope) => {
-  const version =
-    typeof window !== "undefined"
-      ? (window as Window & { __NOLO_ASSETS__?: { timestamp?: string } }).__NOLO_ASSETS__
-          ?.timestamp
-      : "";
+export const clientLocaleResourceUrl = (language: string, scope: ClientLocaleScope, version?: string) => {
   const versionQuery = version ? `?v=${encodeURIComponent(version)}` : "";
   const suffix = scope === "guest" ? ".guest.json" : ".json";
-  const response = await fetch(`/public/locales/${encodeURIComponent(language)}${suffix}${versionQuery}`, {
+  return `/public/locales/${encodeURIComponent(language)}${suffix}${versionQuery}`;
+};
+
+const fetchLanguageResources = async (language: string, scope: ClientLocaleScope) => {
+  const version = typeof window !== "undefined"
+    ? (window as Window & { __NOLO_ASSETS__?: { timestamp?: string } }).__NOLO_ASSETS__?.timestamp
+    : undefined;
+  const response = await fetch(clientLocaleResourceUrl(language, scope, version), {
     credentials: "same-origin",
   });
   if (!response.ok) {

@@ -19,7 +19,7 @@ import ShareImportPage from "app/pages/ShareImportPage";
 // Keep the dialog/editor/tool graph off unrelated URLs. The existing route
 // Suspense boundary is also used by streaming SSR, so matched pages still render
 // fully; Home remains eager rather than delaying the first paint.
-const PageLoader = lazy(() => import("render/page/PageLoader"));
+import PageLoader from "render/page/pageLoaderPreload";
 const MediaLecturePage = lazy(() => import("app/pages/MediaLecturePage"));
 // NewChatPage 原先 eager，代价是所有首页访客都要替 /new 下载 QuickChat 及其 react-aria
 // 依赖；改回 lazy（使用点已在 withSuspense 内）。

@@ -1,4 +1,12 @@
 
+## 0.249.0-alpha.8 (2026-11-20)
+
+### Performance Improvements
+
+* **web:** 打开即可打字并无缝跳转对话（修三个结构性阻塞） ([df9f34a](https://github.com/nolotus/bun-nolo/commit/df9f34a4f03904733530b8106b6fc29b98e74428))
+* **web:** 首屏提前发出 routes 与词典，压平两层请求瀑布 ([de86de2](https://github.com/nolotus/bun-nolo/commit/de86de23f7fffefdccdeab6c5180197e85c913fd))
+
+
 ## 0.249.0-alpha.7 (2026-11-19)
 
 ### Performance Improvements

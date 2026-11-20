@@ -87,6 +87,33 @@ const measureTime = async (label, action) => {
  * - public/assets/entry-xxx.css
  */
 
+const defaultRouteEntryPoint = "packages/app/web/routes.tsx";
+
+// Keep the BFS prefix, dropping empty stubs before trimming any real chunks.
+export const reserveRoutePreload = (
+  outputs, entryPreloads, routePath, { maxFiles, maxBytes }, preserveEntryBytes = false
+) => {
+  const [entry, ...staticPreloads] = entryPreloads;
+  if (!entry) return null;
+  const route = toPublicUrl(routePath);
+  const size = (href) => outputs[href.slice(1)]?.bytes ?? 0;
+  const routeBytes = size(route);
+  const entryBytes = size(entry);
+  if (maxFiles < 2 || routeBytes <= 0 || entryBytes + routeBytes > maxBytes) return null;
+
+  const candidates = staticPreloads.filter((href) => href !== route && size(href) > 0);
+  let bytes = candidates.reduce((sum, href) => sum + size(href), entryBytes + routeBytes);
+  // The public homepage must not grow its preload payload to fit its larger route.
+  const budget = preserveEntryBytes
+    ? Math.min(maxBytes, Math.max(entryBytes + routeBytes,
+        entryPreloads.reduce((sum, href) => sum + size(href), 0)))
+    : maxBytes;
+  while (bytes > budget || candidates.length + 2 > maxFiles) {
+    bytes -= size(candidates.pop());
+  }
+  return [entry, route, ...candidates];
+};
+
 const getEntryFiles = (metafile) => {
   const entryFiles = {
     js: "",
@@ -123,11 +150,16 @@ const getEntryFiles = (metafile) => {
     if (path.endsWith(".js")) {
       // 示例：public/assets/entry-xxx.js → /public/assets/entry-xxx.js
       entryFiles.js = "/" + path;
-      entryFiles.entryPreloads = collectStaticImportClosure(
-        metafile.outputs,
-        path,
-        resolvePreloadBudget()
+      const preloadBudget = resolvePreloadBudget();
+      entryFiles.entryPreloads = collectStaticImportClosure(metafile.outputs, path, preloadBudget);
+      const routePath = (output.imports || []).find(
+        ({ kind, path: importedPath }) => kind === "dynamic-import" &&
+          metafile.outputs[importedPath]?.entryPoint === defaultRouteEntryPoint
+      )?.path;
+      const preloads = routePath && reserveRoutePreload(
+        metafile.outputs, entryFiles.entryPreloads, routePath, preloadBudget, true
       );
+      entryFiles.entryPreloadsBySite = preloads ? { default: preloads } : {};
     } else if (path.endsWith(".css")) {
       entryFiles.css = "/" + path;
     }
@@ -418,6 +450,7 @@ export const runMetaBuild = async () => {
     artifactRuntimePreloads: assets.artifactRuntimePreloads,
     // 可选字段：缺失时 SSR 退回只预加载 entry 本身
     entryPreloads: assets.entryPreloads || [],
+    entryPreloadsBySite: assets.entryPreloadsBySite,
 
     // 版本 / 构建信息
     timestamp,

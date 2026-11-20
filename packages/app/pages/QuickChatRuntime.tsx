@@ -33,6 +33,7 @@ import { subscribeSpaceWorkspaces } from "chat/web/spaceWorkspaces";
 import { noloAgentId } from "core/init";
 import { asTrimmedString } from "core/trimmedString";
 import type { Agent } from "app/types";
+import { prewarmPageLoader, waitForPageLoader } from "render/page/pageLoaderPreload";
 import { useChatInput } from "chat/hooks/useChatInput";
 import { useFileDropZone } from "app/hooks/useFileDropZone";
 import { shouldDeferEnterForIme } from "app/utils/ime";
@@ -133,13 +134,18 @@ export const takePendingQuickChatFiles = (
   return pendingShellFiles;
 };
 
+export interface QuickChatSubmission {
+  text: string;
+  agentId: string | null;
+}
+
 export interface QuickChatRuntimeProps {
   initialText?: string;
   initialAgentId?: string | null;
   surface?: QuickChatRuntimeSurface;
   /** Route-authoritative Space context; when set, wins over Redux for createDialog. */
   spaceId?: string;
-  autoSend?: boolean;
+  submission?: QuickChatSubmission;
   isEmptyState?: boolean;
   /**
    * 占位 composer 交接的一次性文件：挂载后走与 FileUploadButton 完全相同的
@@ -159,7 +165,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   initialAgentId = null,
   surface = "default",
   spaceId: spaceIdProp,
-  autoSend = false,
+  submission,
   isEmptyState = false,
   pendingShellFiles = null,
   onPendingShellFilesConsumed,
@@ -220,7 +226,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   const isComposingRef = useRef(false);
   const lastCompositionEndAtRef = useRef(0);
   const isStartingRef = useRef(false);
-  const autoSendStartedRef = useRef(false);
+  const consumedSubmissionRef = useRef<QuickChatSubmission | undefined>(undefined);
   const currentUserBalanceRef = useRef(currentUserBalance);
   const balanceLoadPromiseRef = useRef<Promise<number> | null>(null);
   const initialAgentIdRef = useRef(initialAgentId);
@@ -243,7 +249,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     processImages,
     removeImage,
     clear: clearInput,
-  } = useChatInput();
+  } = useChatInput({ initialText });
 
   const {
     processingFileIds,
@@ -259,12 +265,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     token,
     pendingFiles,
   });
-
-  React.useEffect(() => {
-    if (initialText && !text) {
-      setText(initialText);
-    }
-  }, [initialText, setText, text]);
 
   React.useEffect(() => {
     if (
@@ -292,23 +292,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     }
   }, [agent]);
 
-  React.useEffect(() => {
-    if (
-      autoSend &&
-      text &&
-      !autoSendStartedRef.current &&
-      !isStartingRef.current &&
-      !isSending
-    ) {
-      autoSendStartedRef.current = true;
-      // 防御：startQuickChat 内部已 try/finally 复位 isSending，这里只吞掉
-      // 预期外 rejection 避免 unhandled rejection 噪音（例如 sendFirstMessage
-      // dispatch 同步抛错）。
-      void startQuickChatRef.current()?.catch?.((error) => {
-        console.error("[QuickChat] autoSend start failed", error);
-      });
-    }
-  }, [autoSend, text, isSending]);
 
   const {
     isDragOver,
@@ -395,7 +378,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     return balanceLoadPromiseRef.current;
   }, [accountSession, currentServer, currentUserId, token]);
 
-  const startQuickChat = useCallback(async (overrideText?: string) => {
+  const startQuickChat = useCallback(async (overrideText?: string, overrideAgentId?: string | null) => {
     const startedAt = getQuickChatPerfNow();
     const trimmedText = (overrideText ?? text).trim();
     if (
@@ -416,6 +399,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       return;
     }
 
+    if (surface === "home-primary") prewarmPageLoader();
     isStartingRef.current = true;
     setIsSending(true);
     logQuickChatPerf("start", startedAt, {
@@ -446,7 +430,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       const filesArray = Array.from(imageFiles.values());
       const hasImages = filesArray.length > 0 || pendingFiles.length > 0;
       const firstMessageText = buildQuickChatFirstMessageText(trimmedText, hasImages);
-      const specialistAgentId = initialAgentIdRef.current;
+      const specialistAgentId = overrideAgentId ?? initialAgentIdRef.current;
       // 专职直达入口优先；其次首页选中的 agent（autoAgentId）；兜底走默认 agent（内置 nolo 本体）。
       const selectedAgentId = specialistAgentId || autoAgentId;
       const resolvedAgent = selectedAgentId
@@ -548,6 +532,11 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       markRecentlyCreated(dialogKey);
       const routeState = buildQuickChatRouteState(trimmedText);
       const dialogUrl = buildDialogUrl(dialogKey, dialogSpaceId);
+      if (surface === "home-primary") {
+        // Join the tier-two import before replacing the home surface. On a
+        // failed prewarm let the route handle the import error normally.
+        await waitForPageLoader();
+      }
       logQuickChatPerf("navigate-started", startedAt, {
         dialogKey,
         dialogSpaceId,
@@ -704,6 +693,17 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     startQuickChatRef.current = startQuickChat;
   }, [startQuickChat]);
 
+  useEffect(() => {
+    if (!submission || consumedSubmissionRef.current === submission || isSending) return;
+    consumedSubmissionRef.current = submission;
+    // A chip is an explicit send, not an initializer for a new runtime. Use
+    // its payload even when this runtime already owns a different draft.
+    setText(submission.text);
+    void startQuickChat(submission.text, submission.agentId).catch((error) => {
+      console.error("[QuickChat] automatic submit failed", error);
+    });
+  }, [submission, isSending, setText, startQuickChat]);
+
   const isLiveAudioOnly = useMemo(() => {
     if (!agent) return false;
     return isLiveAudioOnlyAgent(agent as any);
@@ -758,7 +758,10 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   // 把量到的高度同步到 wrapper，并在不支持 field-sizing 的浏览器退回 px 高度。
   const { handleChange: autoResizeOnChange, wrapRef: composerWrapRef } =
     useSmoothTextareaHeight({
-      onTextChange: setText,
+      onTextChange: (value) => {
+        if (value.length) prewarmPageLoader();
+        setText(value);
+      },
       value: text,
       ref: areaRef,
     });

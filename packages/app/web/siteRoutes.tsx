@@ -9,19 +9,9 @@ export {
 } from "./siteConstants";
 
 export async function loadRoutes(
-  site: SiteId,
-  user?: any
+  _site: SiteId,
+  _user?: any
 ): Promise<RouteObject[]> {
-  if (site === "crm") {
-    const { crmRoutes } = await import("app/lab/crm/crmRoutes");
-    return crmRoutes;
-  }
-
-  if (site === "date") {
-    const { dateRoutes } = await import("app/lab/date/dateRoutes");
-    return dateRoutes;
-  }
-
   const appRoutes = await import("app/web/routes");
   return appRoutes.routes();
 }

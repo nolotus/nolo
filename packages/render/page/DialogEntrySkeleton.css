@@ -1,0 +1,26 @@
+.DialogEntrySkeleton {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  width: min(100%, 48rem);
+  height: 100%;
+  margin-inline: auto;
+  padding: 1rem;
+}
+
+.DialogEntrySkeleton-message,
+.DialogEntrySkeleton-composer {
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+}
+
+.DialogEntrySkeleton-message {
+  align-self: flex-end;
+  width: 8rem;
+  height: 2.5rem;
+}
+
+.DialogEntrySkeleton-composer {
+  height: 5rem;
+}

@@ -10,13 +10,9 @@
 // 首屏会先把一批单服务器请求打到 nolo.chat，改写后对 us.nolo.chat 重发。
 // 首帧就用运行时 origin 即可消掉这个窗口。
 //
-// 判定与旧 effect（App.tsx：`if (hostname === dateUrl || hostname === crmUrl) return;`
-// / `if (!isDesktopApp) dispatch(addHostToCurrentServer(runtimeOrigin))`）等价：
-//   - desktop shell → undefined（内嵌 origin 的回退规则在 resolveDesktopSafeServer，
-//     不许在这里截断）；
-//   - date.nolo.chat / crm.nolo.chat 子应用站点 → undefined（其 origin 不是 API
-//     server，必须继续走默认 MAIN/US）。排除列由 siteConstants.hostToSite 派生
-//     （NON_API_SITE_HOSTNAMES），本模块不再自带第二份名单；
+// 首帧和 App.tsx 挂载时使用同一套非 API 站点判断：
+//   - desktop shell → undefined（内嵌 origin 的回退规则由 resolveDesktopSafeServer 处理）；
+//   - NON_API_SITE_HOSTNAMES 中的主机 → undefined（该集合从站点表派生，目前为空）；
 //   - 其余 host（含局域网 IP / 自定义域名 / localhost 的本地开发）→ 规范化后的
 //     运行时 origin。
 // 否则返回 undefined，调用方回退到默认（生产 MAIN / 开发 US）。
@@ -87,7 +83,7 @@ const resolveHttpOrigin = (origin?: string | null): string | undefined => {
 
 /**
  * 从 hostname/origin 推 web 首帧 currentServer（客户端与 SSR 共用）。
- * - hostname 命中 date/crm → undefined（调用方保持默认）；
+ * - hostname 命中 NON_API_SITE_HOSTNAMES → undefined（调用方保持默认）；
  * - origin 必须是合法 http(s)，返回其规范化 origin（去默认端口 / 去 path /
  *   host 小写，与浏览器 window.location.origin 的序列化口径一致）；
  * - 其余（desktop、非法 origin）→ undefined。
@@ -112,8 +108,8 @@ const isTrustedSiteHostname = (hostname?: string | null): boolean =>
  * 由 App.tsx 的 mount effect dispatch(addHostToCurrentServer(runtimeOrigin))
  * 在挂载后纠正。
  *
- * 为什么必须与 SSR 同闸门：SSR 只在白名单站点注入。若客户端对任意非 date/crm/desktop
- * host 都覆盖成运行时 origin，非白名单 host 的 SSR 首帧（默认 MAIN/US）与客户端
+ * 为什么必须与 SSR 同闸门：SSR 只在白名单站点注入。若客户端对任意未被排除的
+ * Web host 都覆盖成运行时 origin，非白名单 host 的 SSR 首帧（默认 MAIN/US）与客户端
  * hydrate 首帧（运行时 origin）就不一致 → 分享类页面（ImageElement /
  * ReadOnlyMarkdownContent 把 currentServer 渲染进 URL）出现 hydration 属性不匹配，
  * 以及指向默认服务器的 pre-hydration 图片请求。

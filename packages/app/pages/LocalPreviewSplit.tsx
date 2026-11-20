@@ -11,10 +11,11 @@ import {
 import { useLocalPreviewOpen } from "app/appInspector/appInspectorStore";
 import { useDialogHtmlArtifactRecovery } from "app/appInspector/useDialogHtmlArtifactRecovery";
 import { useCurrentDialogKey } from "chat/dialog/dialogRuntimeStore";
+import WorkbenchSplit from "render/layout/WorkbenchSplit";
+import DialogEntrySkeleton from "render/page/DialogEntrySkeleton";
 import "./LocalPreviewSplit.css";
 
 const LocalPreviewPanel = lazy(() => import("./LocalPreviewPanel"));
-const WorkbenchSplit = lazy(() => import("render/layout/WorkbenchSplit"));
 
 const CHAT_MIN_SIZE = 360;
 const PREVIEW_MIN_SIZE = 320;
@@ -54,28 +55,30 @@ export default function LocalPreviewSplit({ children }: { children: React.ReactN
     <div
       className={`LocalPreviewSplit${previewOpen ? " LocalPreviewSplit--open LocalPreviewSplit--chat-narrow" : ""}`}
     >
-      <WorkbenchSplit
-        primary={<div className="LocalPreviewSplit__dialog">{children}</div>}
-        secondary={
-          <div className="LocalPreviewSplit__preview">
-            {previewOpen ? (
-              <Suspense fallback={null}>
-                <LocalPreviewPanel />
-              </Suspense>
-            ) : null}
-          </div>
-        }
-        secondaryOpen={previewOpen}
-        placement={preference.placement}
-        secondaryFraction={preference.secondaryFraction}
-        primaryMinSize={CHAT_MIN_SIZE}
-        secondaryMinSize={PREVIEW_MIN_SIZE}
-        onSecondaryFractionChange={handleFractionChange}
-        primaryLabel="对话"
-        secondaryLabel="预览"
-        activeSurface={activeSurface}
-        onActiveSurfaceChange={setActiveSurface}
-      />
+      <Suspense fallback={<DialogEntrySkeleton />}>
+        <WorkbenchSplit
+          primary={<div className="LocalPreviewSplit__dialog">{children}</div>}
+          secondary={
+            <div className="LocalPreviewSplit__preview">
+              {previewOpen ? (
+                <Suspense fallback={null}>
+                  <LocalPreviewPanel />
+                </Suspense>
+              ) : null}
+            </div>
+          }
+          secondaryOpen={previewOpen}
+          placement={preference.placement}
+          secondaryFraction={preference.secondaryFraction}
+          primaryMinSize={CHAT_MIN_SIZE}
+          secondaryMinSize={PREVIEW_MIN_SIZE}
+          onSecondaryFractionChange={handleFractionChange}
+          primaryLabel="对话"
+          secondaryLabel="预览"
+          activeSurface={activeSurface}
+          onActiveSurfaceChange={setActiveSurface}
+        />
+      </Suspense>
       {previewOpen ? (
         <button
           type="button"

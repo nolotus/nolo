@@ -12,8 +12,8 @@ import { normalizeUiPlugins } from "app/plugins/uiPlugins";
 import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 import { resolveCloudBootstrapServer } from "./serverBootstrap";
 
-// Web 首帧 currentServer 用运行时 origin（见 serverBootstrap.ts，判定与旧
-// App.tsx mount effect 等价：date/crm/desktop 除外，其余 host 都指回自己）。
+// Web 首帧 currentServer 用运行时 origin（见 serverBootstrap.ts）；
+// Desktop 与非 API 主机不使用该推导。
 // SSR 端 window 为 undefined → 这里返回 undefined，服务端 store 落到默认
 // MAIN/US；有 SSR 时该 module-load 值会被序列化下来的 preloadedState 覆盖
 // （白名单站点由 render.tsx 注入运行时 origin，非白名单站点保持默认；客户端
